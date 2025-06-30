@@ -1,103 +1,64 @@
-import Image from "next/image";
+// ✅ page.tsx
+"use client";
+import { useSearchParams } from 'next/navigation';
+import { useState } from 'react';
+import { motion } from 'framer-motion';
 
-export default function Home() {
+export default function LPPage() {
+  const searchParams = useSearchParams();
+  const refCode = searchParams.get('ref') ?? '';
+  const [nickname, setNickname] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [phone, setPhone] = useState('');
+
+  const handleSubmit = async () => {
+    const res = await fetch('/api/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        nickname,
+        email,
+        password,
+        phone_number: phone,
+        ref: refCode,
+        usertype: 'free'
+      }),
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (res.ok) {
+      window.location.href = '/thanks';
+    } else {
+      alert('登録に失敗しました');
+    }
+  };
+
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.js
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
-
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+    <main className="min-h-screen flex flex-col items-center justify-center p-8 text-center">
+      <motion.h1
+        className="text-4xl font-bold mb-4"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 1.2, ease: 'easeOut' }}
+      >
+        わたしはもうひとつのわたしを起動する
+      </motion.h1>
+      <motion.p
+        className="mb-6 text-lg"
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 1.4, ease: 'easeOut' }}
+      >
+        あなたの祈り（意図）が、ビジョンになる
+      </motion.p>
+      <p className="text-sm mb-8">※ここでいう『量子』とは量子力学そのものを指すものではなく、意図や観測を波動として扱う比喩的表現です。</p>
+      <input type="text" placeholder="ニックネーム" value={nickname} onChange={(e) => setNickname(e.target.value)} className="rounded border border-white/30 bg-white/10 backdrop-blur px-4 py-2 mb-2 w-full max-w-md focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+      <input type="email" placeholder="メールアドレス" value={email} onChange={(e) => setEmail(e.target.value)} className="rounded border border-white/30 bg-white/10 backdrop-blur px-4 py-2 mb-2 w-full max-w-md focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+      <input type="password" placeholder="パスワード" value={password} onChange={(e) => setPassword(e.target.value)} className="rounded border border-white/30 bg-white/10 backdrop-blur px-4 py-2 mb-2 w-full max-w-md focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+      <input type="tel" placeholder="SNS認証電話番号" value={phone} onChange={(e) => setPhone(e.target.value)} className="rounded border border-white/30 bg-white/10 backdrop-blur px-4 py-2 mb-4 w-full max-w-md focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+      <input type="hidden" value={refCode} />
+      <button className="relative overflow-hidden bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 px-6 py-3 rounded-full shadow-lg transition-all before:absolute before:inset-0 before:bg-white/20 before:scale-0 hover:before:scale-150 before:rounded-full before:transition-transform before:duration-500" onClick={handleSubmit}>
+        今すぐ共鳴する
+      </button>
+    </main>
   );
 }

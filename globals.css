@@ -1,0 +1,9 @@
+/* ✅ globals.css */
+@import "tailwindcss/preflight";
+@import "tailwindcss/utilities";
+
+body {
+  font-family: 'Noto Sans JP', sans-serif;
+  background-image: url('/noise-texture.png');
+  background-blend-mode: overlay;
+}
