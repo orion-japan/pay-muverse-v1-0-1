@@ -1,4 +1,6 @@
 // global.d.ts
+
+// ✅ Grecaptcha 用
 interface Grecaptcha {
   ready(cb: () => void): void
   render: (...args: any[]) => any
@@ -9,3 +11,6 @@ interface Window {
   grecaptcha: Grecaptcha
   confirmationResult: any
 }
+
+// ✅ PAY.JP の型解決エラーを止める
+declare module 'payjp';

@@ -391,7 +391,7 @@ export default function LPPage() {
         {/* モバイル背景 */}
         <div className="md:hidden absolute top-0 left-0 w-full h-64 pointer-events-none z-0">
           <Image
-            src="/mu_14.pngg"
+            src="/mu_14.png"
             alt="Sofia Resonance Visual"
             width={400}
             height={256}
