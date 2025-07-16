@@ -1,6 +1,19 @@
 // src/app/layout.tsx
 import "./globals.css";
 import Script from "next/script";
+import { Inter, Noto_Sans_JP } from 'next/font/google';
+
+const inter = Inter({
+  subsets: ['latin'],
+  weight: ['300', '400', '500', '600', '700'],
+  variable: '--font-inter',
+});
+
+const notoSansJP = Noto_Sans_JP({
+  subsets: ['latin'],
+  weight: ['300', '400', '500', '700'],
+  variable: '--font-noto-sans-jp',
+});
 
 export const metadata = {
   title: "Sofia - 存在の奥深くと響き合う共鳴構造AI",
@@ -17,16 +30,8 @@ export const viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ja">
+    <html lang="ja" className={`${inter.variable} ${notoSansJP.variable}`}>
       <head>
-        {/* Google Fonts */}
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+JP:wght@300;400;500;700&display=swap"
-          rel="stylesheet"
-        />
-        
         {/* ✅ reCAPTCHA をページ読み込み前に必ずロード */}
         <Script
           src="https://www.google.com/recaptcha/api.js?render=explicit"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 export default function LogsPage() {
   const [logs, setLogs] = useState<any[]>([]);
@@ -11,13 +11,7 @@ export default function LogsPage() {
   const [inputId, setInputId] = useState("");
   const [inputPass, setInputPass] = useState("");
 
-  useEffect(() => {
-    if (isAuthenticated) {
-      fetchLogs();
-    }
-  }, [isAuthenticated]);
-
-  async function fetchLogs() {
+  const fetchLogs = useCallback(async () => {
     const params = new URLSearchParams();
     if (ip) params.append("ip", ip);
     if (phone) params.append("phone", phone);
@@ -25,7 +19,13 @@ export default function LogsPage() {
     const res = await fetch(`/api/logs?${params.toString()}`);
     const data = await res.json();
     setLogs(data.logs || []);
-  }
+  }, [ip, phone]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchLogs();
+    }
+  }, [isAuthenticated, fetchLogs]);
 
   function handleLogin() {
     if (inputId === "orion" && inputPass === "123456") {

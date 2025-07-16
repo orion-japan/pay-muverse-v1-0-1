@@ -29,9 +29,12 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     console.log('✅ 受け取ったデータ:', body);
+    console.log('🔗 REcode確認:', body.ref); // REcodeのデバッグログ
+    console.log('🔗 REcode型:', typeof body.ref); // REcodeの型確認
+    console.log('🔗 REcode長さ:', body.ref ? body.ref.length : 0); // REcodeの長さ確認
 
     // ✅ バリデーション
-    if (!body.click_username || !body.click_email || !body.Password) {
+    if (!body.click_username || !body.click_email) {
       return NextResponse.json({ error: '必須項目が不足しています' }, { status: 400 });
     }
 
@@ -83,12 +86,13 @@ export async function POST(req: NextRequest) {
       const spreadsheetId = process.env.GOOGLE_SHEETS_ID || '1Z8UAqjRzTT8NyVVnN3twMlmyq8TzjzzcYzrfLepl890';
 
     console.log('✅ spreadsheetId:', spreadsheetId);
+    console.log('🔗 Sheets用REcode:', body.ref || ''); // Sheets用REcodeのデバッグログ
 
       // ✅ Sheets用データ
     const values = [
       [
           body.click_email || '',           // click_email
-          body.Password || '',              // Password
+          '',                              // Password (空文字)
           body.click_username || '',        // click_username
           '',                              // FullName
           user_code,                       // user_code
@@ -101,6 +105,8 @@ export async function POST(req: NextRequest) {
           body.ref || ''                   // REcode（紹介者のuser_code）
       ],
     ];
+
+    console.log('🔗 Sheets用データ全体:', values[0]); // Sheets用データ全体のデバッグログ
 
     // ✅ Sheets に追記
     await sheets.spreadsheets.values.append({
@@ -124,7 +130,7 @@ export async function POST(req: NextRequest) {
         {
           id: user_code, // user_codeをidとして使用（文字列）
         click_email: body.click_email,
-        Password: body.Password,
+        Password: '', // 空文字
           click_username: body.click_username,
           FullName: '',
           user_code: user_code,
@@ -145,11 +151,20 @@ export async function POST(req: NextRequest) {
     }
 
     console.log('✅ Supabase 保存OK:', supabaseData);
+    console.log('🔗 Supabase用REcode:', body.ref || ''); // Supabase用REcodeのデバッグログ
+    console.log('🔗 Supabase保存データ:', {
+      id: user_code,
+      click_email: body.click_email,
+      click_username: body.click_username,
+      REcode: body.ref || '',
+      Tcode: body.Tcode || ''
+    }); // Supabase保存データのデバッグログ
 
     return NextResponse.json({ 
       status: 'success',
       user_code: user_code,
-      Rcode: Rcode
+      Rcode: Rcode,
+      REcode: body.ref || '' // レスポンスにもREcodeを含める
     });
   } catch (error) {
     console.error('❌ API Error:', error);

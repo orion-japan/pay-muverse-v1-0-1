@@ -118,7 +118,6 @@ function FormSection() {
       <form
   className="
     w-full max-w-md
-    bg-white/5 backdrop-blur-lg
     border border-white/10
     rounded-3xl shadow-2xl
     px-8 py-10
@@ -137,7 +136,6 @@ function FormSection() {
       rounded-full
       border border-white/20
       bg-white/10
-      backdrop-blur-md
       text-white placeholder-white/50
       focus:outline-none focus:ring-2 focus:ring-purple-400
       transition
@@ -154,7 +152,6 @@ function FormSection() {
       rounded-full
       border border-white/20
       bg-white/10
-      backdrop-blur-md
       text-white placeholder-white/50
       focus:outline-none focus:ring-2 focus:ring-purple-400
       transition
@@ -171,7 +168,6 @@ function FormSection() {
       rounded-full
       border border-white/20
       bg-white/10
-      backdrop-blur-md
       text-white placeholder-white/50
       focus:outline-none focus:ring-2 focus:ring-purple-400
       transition
@@ -231,6 +227,7 @@ function FormSection() {
     意図や観測を波として扱う象徴です。
   </p>
 </form>
+
 
     </div>
   );
