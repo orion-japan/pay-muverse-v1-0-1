@@ -377,7 +377,7 @@ export default function LPPage() {
         <div className="hidden md:block absolute inset-0 w-full h-full pointer-events-none z-0">
           <div className="absolute right-0 top-0 h-full w-1/2">
             <Image
-              src="/mu_24.png"
+              src="/mu_14.png"
               alt="Sofia Resonance Visual"
               fill
               className="object-cover opacity-60 mix-blend-lighten"
@@ -391,7 +391,7 @@ export default function LPPage() {
         {/* モバイル背景 */}
         <div className="md:hidden absolute top-0 left-0 w-full h-64 pointer-events-none z-0">
           <Image
-            src="/mu_24.pngg"
+            src="/mu_14.pngg"
             alt="Sofia Resonance Visual"
             width={400}
             height={256}
