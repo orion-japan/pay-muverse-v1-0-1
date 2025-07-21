@@ -1,11 +1,11 @@
 'use client';
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import PlanSelectPanel from '@/components/PlanSelectPanel';
 
-export default function Page() {
+function PageInner() {
   const searchParams = useSearchParams();
   const user_code = searchParams.get('user') || '';
 
@@ -19,7 +19,6 @@ export default function Page() {
   const [showCardInput, setShowCardInput] = useState(false);
   const [userCredit, setUserCredit] = useState<number>(0);
 
-  // ユーザーデータ取得
   useEffect(() => {
     const fetchStatus = async () => {
       try {
@@ -36,7 +35,6 @@ export default function Page() {
     if (user_code) fetchStatus();
   }, [user_code]);
 
-  // カード登録フォーム初期化
   const initPayjpCard = () => {
     if (payjp || card || cardRegistered) return;
 
@@ -56,7 +54,6 @@ export default function Page() {
     document.body.appendChild(script);
   };
 
-  // カード登録処理
   const handleCardRegistration = async () => {
     setLoading(true);
     try {
@@ -82,7 +79,6 @@ export default function Page() {
     }
   };
 
-  // サブスク登録処理
   const handleSubscribe = async () => {
     setLoading(true);
     try {
@@ -185,5 +181,14 @@ export default function Page() {
         {loading ? '処理中...' : '登録して購入'}
       </button>
     </main>
+  );
+}
+
+// ✅ Suspense で分離した安全な Page コンポーネント
+export default function Page() {
+  return (
+    <Suspense fallback={<div>読み込み中...</div>}>
+      <PageInner />
+    </Suspense>
   );
 }
