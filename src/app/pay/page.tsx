@@ -1,52 +1,188 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import CheckoutButton from '../../components/CheckoutButton';
+import PlanSelectPanel from '@/components/PlanSelectPanel';
 
-export default function PayContent() {
+export default function Page() {
   const searchParams = useSearchParams();
   const user_code = searchParams.get('user') || '';
 
-  console.log('✅ PayPage user_code:', user_code);
+  const [userData, setUserData] = useState<any>(null);
+  const [payjp, setPayjp] = useState<any>(null);
+  const [card, setCard] = useState<any>(null);
+  const [cardReady, setCardReady] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [cardRegistered, setCardRegistered] = useState(false);
+  const [showCardInput, setShowCardInput] = useState(false);
+  const [userCredit, setUserCredit] = useState<number>(0);
 
-  const plans = [
-    {
-      name: 'ライトプラン（regular）',
-      price_id: 'pln_d3ebb4c720e007c1b9cc7c07780b', // ← 実際のPrice ID
-      credit: 45,
-      price: 990,
-    },
-    {
-      name: 'スタンダード（premium）',
-      price_id: 'pln_3f072ea9c5c8d922f54c8a9ce308',
-      credit: 200,
-      price: 3300,
-    },
-    {
-      name: 'プロフェッショナル（master）',
-      price_id: 'pln_d5892056b2a560f1a7276b6d1780',
-      credit: 1500,
-      price: 16500,
-    },
-  ];
+  // ユーザーデータ取得
+  useEffect(() => {
+    const fetchStatus = async () => {
+      try {
+        const res = await fetch(`/api/account-status?user=${user_code}`);
+        const json = await res.json();
+        setUserData(json);
+        setCardRegistered(json.card_registered);
+        setUserCredit(json.sofia_credit || 0);
+        console.log('✅ ユーザーデータ取得:', json);
+      } catch (err) {
+        console.error('⛔ ユーザー取得失敗:', err);
+      }
+    };
+    if (user_code) fetchStatus();
+  }, [user_code]);
+
+  // カード登録フォーム初期化
+  const initPayjpCard = () => {
+    if (payjp || card || cardRegistered) return;
+
+    const script = document.createElement('script');
+    script.src = 'https://js.pay.jp/v2/pay.js';
+    script.async = true;
+    script.onload = () => {
+      const payjpInstance = (window as any).Payjp(process.env.NEXT_PUBLIC_PAYJP_PUBLIC_KEY!);
+      setPayjp(payjpInstance);
+
+      const elements = payjpInstance.elements();
+      const cardElement = elements.create('card');
+      cardElement.mount('#card-form');
+      setCard(cardElement);
+      setCardReady(true);
+    };
+    document.body.appendChild(script);
+  };
+
+  // カード登録処理
+  const handleCardRegistration = async () => {
+    setLoading(true);
+    try {
+      const tokenRes = await payjp.createToken(card);
+      if (tokenRes.error) throw new Error(tokenRes.error.message);
+      const token = tokenRes.id;
+
+      const cardRes = await fetch('/api/pay/account/register-card', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_code, token }),
+      });
+
+      if (!cardRes.ok) throw new Error('カード登録に失敗しました');
+
+      alert('カード登録が完了しました');
+      setCardRegistered(true);
+    } catch (err: any) {
+      console.error('❌ カード登録エラー:', err);
+      alert(err.message || 'カード登録中にエラーが発生しました');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // サブスク登録処理
+  const handleSubscribe = async () => {
+    setLoading(true);
+    try {
+      if (!selectedPlan?.plan_type || !selectedPlan?.plan_price_id) {
+        alert('プランを正しく選択してください');
+        return;
+      }
+
+      const payload = {
+        user_code,
+        user_email: userData?.click_email || '',
+        plan_type: selectedPlan.plan_type,
+        plan_price_id: selectedPlan.plan_price_id,
+        subscription_id: userData?.payjp_subscription_id || '',
+        customer_id: userData?.payjp_customer_id || '',
+        charge_amount: selectedPlan.price || 0,
+        sofia_credit: selectedPlan.credit || 0,
+      };
+
+      console.log('📤 サブスク送信ペイロード:', payload);
+
+      const subscribeRes = await fetch('/api/pay/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await subscribeRes.json();
+      console.log('📦 サブスク登録レスポンス:', result);
+
+      if (result.logTrail) {
+        console.log('🪵 logTrail:', result.logTrail);
+      }
+
+      if (!subscribeRes.ok || !result.success) {
+        alert(`❌ サブスク登録に失敗しました\n${result.detail || '原因不明'}\n\n【ログ】\n${result.logTrail?.join('\n')}`);
+        return;
+      }
+
+      window.location.href = `/thanks?user=${user_code}`;
+    } catch (err: any) {
+      console.error('⨯ サブスク登録エラー:', err);
+      alert(`サブスク登録中にエラーが発生しました\n${err.message || err}`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <main className="p-6">
-      <h1 className="text-lg font-bold mb-4">プランを選んで決済</h1>
+    <main className="min-h-screen flex flex-col items-center justify-start p-6 bg-background text-foreground space-y-6">
+      <h1 className="text-xl font-bold mb-4">プランを選択してください</h1>
 
-      {plans.map((plan) => (
-        <div key={plan.price_id} className="border p-4 mb-4">
-          <h2>{plan.name}</h2>
-          <p>月額: ¥{plan.price.toLocaleString()}</p>
-          <p>付与クレジット: {plan.credit}回 / 月</p>
-          {/* ✅ CheckoutButton に必ず user_code を渡す！ */}
-          <CheckoutButton plan={{ price_id: plan.price_id }} user_code={user_code} />
-        </div>
-      ))}
+      <PlanSelectPanel
+        userCode={user_code}
+        cardRegistered={cardRegistered}
+        userCredit={userCredit}
+        onPlanSelected={(plan) => {
+          console.log('🟢 プランが選ばれました:', plan);
+          setSelectedPlan(plan);
+        }}
+      />
 
-      <p className="text-xs text-gray-500 mt-4">
-        ※ご利用には利用規約への同意が必要です。
-      </p>
+      <div className="bg-blue-50 border rounded-xl p-4 mt-6 w-full max-w-md shadow-inner">
+        <h2 className="font-semibold mb-2">カード登録</h2>
+        {cardRegistered ? (
+          <p className="text-green-600">✅ 登録済みのカードがあります</p>
+        ) : (
+          <>
+            {!showCardInput ? (
+              <button
+                onClick={() => {
+                  setShowCardInput(true);
+                  initPayjpCard();
+                }}
+                className="bg-gray-700 text-white px-4 py-2 rounded"
+              >
+                カードを登録する
+              </button>
+            ) : (
+              <>
+                <div id="card-form" className="border p-2 my-2" />
+                <button
+                  onClick={handleCardRegistration}
+                  disabled={!cardReady || loading}
+                  className="bg-blue-500 text-white px-4 py-2 rounded mt-2"
+                >
+                  {loading ? '登録中...' : 'このカードを登録'}
+                </button>
+              </>
+            )}
+          </>
+        )}
+      </div>
+
+      <button
+        className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-xl transition disabled:opacity-50 mt-4 w-full max-w-md"
+        onClick={handleSubscribe}
+        disabled={!selectedPlan || !cardRegistered || loading}
+      >
+        {loading ? '処理中...' : '登録して購入'}
+      </button>
     </main>
   );
 }

@@ -13,11 +13,11 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "preserve",
-    "baseUrl": ".",          // ✅ ルート基準は現状OK
+    "baseUrl": ".", 
     "paths": {
-      "@/*": ["src/*"],      // ✅ src配下を丸ごとエイリアス
-      "@lib/*": ["src/lib/*"],         // ✅ libの型を明示
-      "@components/*": ["src/components/*"]  // ✅ componentsにもエイリアスを追加
+      "@/*": ["src/*"],
+      "@lib/*": ["src/lib/*"],
+      "@components/*": ["src/components/*"]
     },
     "plugins": [
       {

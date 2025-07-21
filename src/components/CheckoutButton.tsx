@@ -1,34 +1,91 @@
 'use client';
 
-export default function CheckoutButton({
-  plan,
-  user_code,
-}: {
-  plan: { price_id: string };
+import { useState } from 'react';
+
+type Plan = {
+  price_id: string;
+  plan_type: string;
+  price: number;
+  credit: number;
+};
+
+type CheckoutResponse = {
+  redirect?: string;
+  warning?: string;
+  error?: string;
+  detail?: string;
+  success?: boolean;
+};
+
+type Props = {
+  plan: Plan;
   user_code: string;
-}) {
-  const handleCheckout = async () => {
-    console.log('✅ CheckoutButton user_code:', user_code);
+  hasCard: boolean;
+};
 
-    const res = await fetch('/api/create-checkout-session', {
-      method: 'POST',
-      body: JSON.stringify({ plan, user_code }),
-    });
+export default function CheckoutButton({ plan, user_code, hasCard }: Props) {
+  const [loading, setLoading] = useState(false);
 
-    const data = await res.json();
-    if (data.url) {
-      window.location.href = data.url;
-    } else {
-      alert(data.error || '決済セッションの生成に失敗しました。');
+  const handleCheckout = async (force = false) => {
+    setLoading(true);
+
+    try {
+      const res = await fetch(`/api/pay/subscribe${force ? '?force=true' : ''}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan, user_code }),
+      });
+
+      const data: CheckoutResponse = await res.json();
+
+      if (!res.ok) {
+        console.error('❌ APIエラー:', data);
+        alert(`❌ 通信エラー: ${data.error || '不明なエラー'}`);
+        return;
+      }
+
+      // 🚨 warningチェック → 最優先
+      if (data.warning) {
+        const proceed = window.confirm(`${data.warning}\n\nこのまま続行しますか？`);
+        if (proceed) {
+          console.log('⚠️ 警告後に再実行します（force=true）');
+          await handleCheckout(true); // 再実行
+        }
+        return; // 🚫 必ずここで終了（THANKSへ飛ばさない）
+      }
+
+      // ❌ エラー返却がある場合
+      if (data.error || !data.success) {
+        alert(`❌ エラー: ${data.error || data.detail || '不明なエラー'}`);
+        console.error('エラー内容:', data);
+        return;
+      }
+
+      // ✅ 成功時だけ THANKS ページへ
+      window.location.href = `/thanks?user=${user_code}`;
+    } catch (err: any) {
+      console.error('⛔ 実行時エラー:', err);
+      alert(`実行エラーが発生しました: ${err.message}`);
+    } finally {
+      setLoading(false);
     }
   };
 
+  if (!hasCard) {
+    return (
+      <p className="text-sm text-red-600 mt-4">
+        🚫 カード情報が登録されていません。まずはカードを登録してください。
+      </p>
+    );
+  }
+
   return (
     <button
-      onClick={handleCheckout}
-      className="px-4 py-2 bg-blue-600 text-white rounded"
+      onClick={() => handleCheckout()}
+      disabled={loading}
+      className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
     >
-      このプランを選択
+      {loading ? '処理中...' : 'このプランを選択'}
     </button>
   );
 }
