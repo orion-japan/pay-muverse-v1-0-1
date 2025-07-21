@@ -1,48 +1,58 @@
-// /src/app/api/supabase/register-user/route.ts
-
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import payjp from 'payjp';
 
-// ✅ Supabase 初期化（環境変数名を supabaseKey に修正）
+// ✅ Supabase初期化（supabaseKey に修正）
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.supabaseKey! // ← 修正ポイント：Vercel登録済みの変数名に一致
+  process.env.supabaseKey!  // ← Vercel の登録に合わせた環境変数名
 );
+
+// ✅ PAY.JP初期化
+const payjpClient = payjp(process.env.PAYJP_SECRET_KEY!, {
+  timeout: 8000,
+});
 
 export async function POST(req: NextRequest) {
   try {
-    const { usercode, payjpCustomerId } = await req.json();
+    const { token, user_code } = await req.json();
 
-    console.log('📨 register-user に送信された usercode:', usercode);
-    console.log('📨 register-user に送信された payjpCustomerId:', payjpCustomerId);
+    console.log('📩 register-card に送信された user_code:', user_code);
 
-    if (!usercode || !payjpCustomerId) {
-      console.warn('⚠️ 必須情報が欠落しています');
+    if (!token || !user_code) {
       return NextResponse.json(
-        { error: 'usercodeとpayjpCustomerIdは必須です' },
+        { error: 'token と user_code は必須です' },
         { status: 400 }
       );
     }
 
-    // ✅ Supabaseへpayjp_customer_idを登録
-    const { data, error } = await supabase
+    // Supabaseからユーザー取得
+    const { data: userData, error: fetchError } = await supabase
       .from('users')
-      .update({
-        payjp_customer_id: payjpCustomerId,
-      })
-      .eq('user_code', usercode)
-      .select(); // 応答として data を返すために select を使用
+      .select('payjp_customer_id')
+      .eq('user_code', user_code)
+      .single();
 
-    if (error || !data) {
-      console.error('❌ Supabase登録エラー:', error);
-      return NextResponse.json({ error: 'Supabase登録失敗' }, { status: 500 });
+    if (fetchError || !userData?.payjp_customer_id) {
+      return NextResponse.json(
+        { error: 'ユーザーまたはpayjp_customer_idが見つかりません' },
+        { status: 404 }
+      );
     }
 
-    console.log('✅ Supabaseにpayjp_customer_idを保存しました');
-    return NextResponse.json({ message: '登録成功', data });
+    const customerId = userData.payjp_customer_id;
 
+    // カード登録
+    const cardRes = await payjpClient.customers.createCard(customerId, { token });
+
+    console.log('✅ カード登録成功:', cardRes.id);
+
+    return NextResponse.json({ success: true, cardId: cardRes.id });
   } catch (err) {
-    console.error('🔥 想定外エラー:', err);
-    return NextResponse.json({ error: '内部エラーが発生しました' }, { status: 500 });
+    console.error('❌ register-card エラー:', err);
+    return NextResponse.json(
+      { error: 'カード登録に失敗しました', detail: String(err) },
+      { status: 500 }
+    );
   }
 }
