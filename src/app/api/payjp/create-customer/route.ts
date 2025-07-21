@@ -3,10 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import Payjp from 'payjp';
 import { createClient } from '@supabase/supabase-js';
 
-// ✅ Supabase初期化
+// ✅ Supabase初期化（環境変数名を supabaseKey に統一）
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.supabaseKey!
 );
 
 // ✅ PAY.JP初期化
@@ -24,19 +24,18 @@ export async function POST(req: NextRequest) {
 
     // 🔍 Supabaseからemailを取得
     const { data, error } = await supabase
-  .from('users')
-  .select('click_email')
-  .eq('user_code', usercode)
-  .single();
+      .from('users')
+      .select('click_email')
+      .eq('user_code', usercode)
+      .single();
 
-if (error || !data?.click_email) {
-  console.error('❌ Supabaseからemail取得失敗:', error);
-  return NextResponse.json({ error: 'メールアドレスの取得に失敗しました' }, { status: 500 });
-}
+    if (error || !data?.click_email) {
+      console.error('❌ Supabaseからemail取得失敗:', error);
+      return NextResponse.json({ error: 'メールアドレスの取得に失敗しました' }, { status: 500 });
+    }
 
-const email = data.click_email;
-console.log('📧 email:', email);
-
+    const email = data.click_email;
+    console.log('📧 email:', email);
 
     // 🧾 PAY.JP 顧客作成
     const customer = await payjp.customers.create({
