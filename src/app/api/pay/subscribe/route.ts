@@ -38,14 +38,14 @@ export async function POST(req: NextRequest) {
     }
     logTrail.push(`🟢 Supabaseユーザー取得成功: ${user.user_code}`);
 
-    // ✅ PAY.JP サブスクリプション作成（旧形式：plan指定）
+    // ✅ PAY.JP サブスクリプション（旧形式 plan 指定）
     if (!customer_id || !plan_price_id) {
       throw new Error("customer_id または plan_price_id が未設定です");
     }
 
     const payjpPayload = {
       customer: customer_id,
-      plan: plan_price_id, // ← PAY.JP旧形式に対応！
+      plan: plan_price_id, // ← ✅ 旧形式 (itemsではなくplan単体)
     };
 
     logTrail.push(`🧾 PAY.JP リクエスト内容: ${JSON.stringify(payjpPayload)}`);
@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
     await updateUserCreditAndType(user_code, sofia_credit, plan_type);
     logTrail.push(`🟢 Supabase credit/type を更新: ${sofia_credit} / ${plan_type}`);
 
-    // ✅ Google Sheets認証
+    // ✅ Google Sheets記録
     const auth = new google.auth.GoogleAuth({
       keyFile: path.join(process.cwd(), "sofia-sheets-writer.json"),
       scopes: ["https://www.googleapis.com/auth/spreadsheets"],
