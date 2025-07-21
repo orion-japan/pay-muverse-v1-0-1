@@ -19,19 +19,20 @@ function PageInner() {
   const [showCardInput, setShowCardInput] = useState(false);
   const [userCredit, setUserCredit] = useState<number>(0);
 
+  const fetchStatus = async () => {
+    try {
+      const res = await fetch(`/api/account-status?user=${user_code}`);
+      const json = await res.json();
+      setUserData(json);
+      setCardRegistered(json.card_registered);
+      setUserCredit(json.sofia_credit || 0);
+      console.log('✅ ユーザーデータ取得:', json);
+    } catch (err) {
+      console.error('⛔ ユーザー取得失敗:', err);
+    }
+  };
+
   useEffect(() => {
-    const fetchStatus = async () => {
-      try {
-        const res = await fetch(`/api/account-status?user=${user_code}`);
-        const json = await res.json();
-        setUserData(json);
-        setCardRegistered(json.card_registered);
-        setUserCredit(json.sofia_credit || 0);
-        console.log('✅ ユーザーデータ取得:', json);
-      } catch (err) {
-        console.error('⛔ ユーザー取得失敗:', err);
-      }
-    };
     if (user_code) fetchStatus();
   }, [user_code]);
 
@@ -70,7 +71,9 @@ function PageInner() {
       if (!cardRes.ok) throw new Error('カード登録に失敗しました');
 
       alert('カード登録が完了しました');
-      setCardRegistered(true);
+
+      // ✅ 再取得：登録後のcustomer_idを読み直す
+      await fetchStatus();
     } catch (err: any) {
       console.error('❌ カード登録エラー:', err);
       alert(err.message || 'カード登録中にエラーが発生しました');
@@ -86,6 +89,9 @@ function PageInner() {
         alert('プランを正しく選択してください');
         return;
       }
+
+      // ✅ 最新ユーザーデータを再取得
+      await fetchStatus();
 
       const payload = {
         user_code,
@@ -184,7 +190,6 @@ function PageInner() {
   );
 }
 
-// ✅ Suspense で分離した安全な Page コンポーネント
 export default function Page() {
   return (
     <Suspense fallback={<div>読み込み中...</div>}>

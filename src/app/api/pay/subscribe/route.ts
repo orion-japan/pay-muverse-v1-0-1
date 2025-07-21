@@ -28,6 +28,11 @@ export async function POST(req: NextRequest) {
 
     logTrail.push(`🟦 受信ペイロード: ${JSON.stringify(body, null, 2)}`);
 
+    // 🔍 必須パラメータ確認
+    if (!user_code || !user_email || !plan_type || !plan_price_id || !customer_id) {
+      throw new Error("必須パラメータが不足しています");
+    }
+
     const payment_date = dayjs().format("YYYY-MM-DD");
     const memo = "Web決済";
 
@@ -38,20 +43,15 @@ export async function POST(req: NextRequest) {
     }
     logTrail.push(`🟢 Supabaseユーザー取得成功: ${user.user_code}`);
 
-    // ✅ PAY.JP サブスクリプション（旧形式 plan 指定）
-    if (!customer_id || !plan_price_id) {
-      throw new Error("customer_id または plan_price_id が未設定です");
-    }
-
+    // ✅ PAY.JP サブスクリプション作成（旧形式 plan 指定）
     const payjpPayload = {
       customer: customer_id,
-      plan: plan_price_id, // ← ✅ 旧形式 (itemsではなくplan単体)
+      plan: plan_price_id,
     };
 
     logTrail.push(`🧾 PAY.JP リクエスト内容: ${JSON.stringify(payjpPayload)}`);
 
     let subscription;
-
     try {
       subscription = await payjp.subscriptions.create(payjpPayload);
     } catch (err: any) {
@@ -72,20 +72,15 @@ export async function POST(req: NextRequest) {
           logTrail.push(`⚠️ PAY.JP response.json() 取得に失敗`);
         }
 
-        logTrail.push(
-          `📛 PAY.JP ステータス: ${err.response.status} / ${err.response.statusText}`
-        );
+        logTrail.push(`📛 PAY.JP ステータス: ${err.response.status} / ${err.response.statusText}`);
       }
 
-      return NextResponse.json(
-        {
-          success: false,
-          error: "サブスク登録に失敗しました",
-          detail: "PAY.JP サブスクリプション作成エラー",
-          logTrail,
-        },
-        { status: 500 }
-      );
+      return NextResponse.json({
+        success: false,
+        error: "サブスク登録に失敗しました",
+        detail: "PAY.JP サブスクリプション作成エラー",
+        logTrail,
+      }, { status: 500 });
     }
 
     if (!subscription?.id) {
@@ -93,25 +88,15 @@ export async function POST(req: NextRequest) {
     }
 
     const subscription_id = subscription.id;
-    const last_payment_date = dayjs
-      .unix(subscription.current_period_start)
-      .format("YYYY-MM-DD");
-    const next_payment_date = dayjs
-      .unix(subscription.current_period_end)
-      .format("YYYY-MM-DD");
+    const last_payment_date = dayjs.unix(subscription.current_period_start).format("YYYY-MM-DD");
+    const next_payment_date = dayjs.unix(subscription.current_period_end).format("YYYY-MM-DD");
 
     logTrail.push(`🟢 PAY.JPサブスクリプション作成成功: ${subscription_id}`);
 
-    // ✅ Supabase更新: サブスク情報
-    await updateUserSubscriptionMeta(
-      user_code,
-      subscription_id,
-      last_payment_date,
-      next_payment_date
-    );
+    // ✅ Supabase: サブスク情報とクレジット更新
+    await updateUserSubscriptionMeta(user_code, subscription_id, last_payment_date, next_payment_date);
     logTrail.push(`🟢 Supabaseサブスク情報を更新: ${subscription_id}`);
 
-    // ✅ Supabase更新: creditとclick_type
     await updateUserCreditAndType(user_code, sofia_credit, plan_type);
     logTrail.push(`🟢 Supabase credit/type を更新: ${sofia_credit} / ${plan_type}`);
 
@@ -120,16 +105,15 @@ export async function POST(req: NextRequest) {
       keyFile: path.join(process.cwd(), "sofia-sheets-writer.json"),
       scopes: ["https://www.googleapis.com/auth/spreadsheets"],
     });
-
     const sheets = google.sheets({ version: "v4", auth });
 
     const row = [
-      user_code ?? "",
-      user_email ?? "",
-      plan_type ?? "",
+      user_code,
+      user_email,
+      plan_type,
       typeof charge_amount === "number" ? charge_amount : 0,
       typeof sofia_credit === "number" ? sofia_credit : 0,
-      customer_id ?? "",
+      customer_id,
       last_payment_date,
       next_payment_date,
       user.card_registered ?? "",
@@ -140,6 +124,8 @@ export async function POST(req: NextRequest) {
     ];
 
     const sheetId = process.env.GOOGLE_SHEET_ID!;
+    if (!sheetId) throw new Error("GOOGLE_SHEET_ID が未設定です");
+
     const writeResult = await sheets.spreadsheets.values.append({
       spreadsheetId: sheetId,
       range: "sheet2!A1",
@@ -157,14 +143,11 @@ export async function POST(req: NextRequest) {
     });
   } catch (error: any) {
     logTrail.push(`⛔ エラー: ${error.message}`);
-    return NextResponse.json(
-      {
-        success: false,
-        error: "サブスク登録に失敗しました",
-        detail: error.message,
-        logTrail,
-      },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      success: false,
+      error: "サブスク登録に失敗しました",
+      detail: error.message,
+      logTrail,
+    }, { status: 500 });
   }
 }
