@@ -3,10 +3,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// ✅ Supabase 初期化
+// ✅ Supabase 初期化（環境変数名を supabaseKey に修正）
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.supabaseKey! // ← 修正ポイント：Vercel登録済みの変数名に一致
 );
 
 export async function POST(req: NextRequest) {
@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
         payjp_customer_id: payjpCustomerId,
       })
       .eq('user_code', usercode)
-      .select(); // ← 応答として data を返すために select を追加
+      .select(); // 応答として data を返すために select を使用
 
     if (error || !data) {
       console.error('❌ Supabase登録エラー:', error);
