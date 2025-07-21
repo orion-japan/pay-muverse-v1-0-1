@@ -4,18 +4,18 @@ import payjp from 'payjp';
 import { JWT } from 'google-auth-library';
 import { google } from 'googleapis';
 
-// Supabase
+// Supabase 初期化：Vercel の環境変数と一致させる
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.supabaseKey!  // ← 修正ポイント
 );
 
-// PAY.JP
+// PAY.JP 初期化
 const payjpClient = payjp(process.env.PAYJP_SECRET_KEY!, {
   timeout: 8000,
 });
 
-// Google Sheets
+// Google Sheets 設定
 const spreadsheetId = process.env.GOOGLE_SHEETS_ID!;
 const sheetName = 'TEST_USER_001';
 
@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
   let sheetLogged = false;
 
   try {
-    // ユーザー取得
+    // ユーザー情報取得
     const { data: userData, error } = await supabase
       .from('users')
       .select('click_email, payjp_customer_id, payjp_subscription_id, sofia_credit')
@@ -41,14 +41,14 @@ export async function POST(req: NextRequest) {
     }
     console.log('✅ Supabase ユーザー取得成功:', userData);
 
-    // ⚠️ 警告返却
+    // クレジット残がある場合の警告
     if (!force && userData.sofia_credit > 0) {
       const message = `⚠️ 現在のクレジット残：${userData.sofia_credit} 回\nこのまま購入すると ${plan.credit} 回に上書きされます。`;
       console.warn('⚠️ 警告返却:', message);
       return NextResponse.json({ warning: message });
     }
 
-    // サブスクキャンセル
+    // 既存サブスクリプションのキャンセル
     if (userData.payjp_subscription_id) {
       try {
         await payjpClient.subscriptions.cancel(userData.payjp_subscription_id);
@@ -58,14 +58,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 新規作成
+    // 新しいサブスクリプション作成
     const subscription = await payjpClient.subscriptions.create({
       customer: userData.payjp_customer_id,
       plan: plan.price_id,
     });
     console.log('✅ サブスク作成:', subscription.id);
 
-    // Supabase 更新
+    // Supabase のユーザーデータ更新
     const { error: updateError } = await supabase
       .from('users')
       .update({
@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
     }
     console.log('✅ Supabase更新成功');
 
-    // Google Sheets
+    // Google Sheets にログ書き込み
     try {
       const auth = new JWT({
         email: process.env.GOOGLE_CLIENT_EMAIL!,
