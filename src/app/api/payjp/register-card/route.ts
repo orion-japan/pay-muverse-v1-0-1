@@ -8,7 +8,7 @@ export const runtime = 'nodejs';
 // ✅ Supabase 初期化
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! // ← anonではなく service role を使用
+  process.env.supabaseKey!! // ← anonではなく service role を使用
 );
 
 // ✅ PAY.JP 初期化
