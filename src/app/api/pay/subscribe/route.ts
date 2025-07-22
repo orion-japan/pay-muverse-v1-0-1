@@ -28,7 +28,6 @@ export async function POST(req: NextRequest) {
 
     logTrail.push(`🟦 受信ペイロード: ${JSON.stringify(body, null, 2)}`);
 
-    // 🔍 必須パラメータ確認
     if (!user_code || !user_email || !plan_type || !plan_price_id || !customer_id) {
       throw new Error("必須パラメータが不足しています");
     }
@@ -36,14 +35,12 @@ export async function POST(req: NextRequest) {
     const payment_date = dayjs().format("YYYY-MM-DD");
     const memo = "Web決済";
 
-    // ✅ Supabaseユーザー確認
     const user = await getUserByCode(user_code);
     if (!user) {
       throw new Error("Supabase ユーザーが見つかりません");
     }
     logTrail.push(`🟢 Supabaseユーザー取得成功: ${user.user_code}`);
 
-    // ✅ PAY.JP サブスクリプション作成（旧形式 plan 指定）
     const payjpPayload = {
       customer: customer_id,
       plan: plan_price_id,
@@ -93,14 +90,12 @@ export async function POST(req: NextRequest) {
 
     logTrail.push(`🟢 PAY.JPサブスクリプション作成成功: ${subscription_id}`);
 
-    // ✅ Supabase: サブスク情報とクレジット更新
     await updateUserSubscriptionMeta(user_code, subscription_id, last_payment_date, next_payment_date);
     logTrail.push(`🟢 Supabaseサブスク情報を更新: ${subscription_id}`);
 
     await updateUserCreditAndType(user_code, sofia_credit, plan_type);
     logTrail.push(`🟢 Supabase credit/type を更新: ${sofia_credit} / ${plan_type}`);
 
-    // ✅ Google Sheets記録
     const auth = new google.auth.GoogleAuth({
       keyFile: path.join(process.cwd(), "sofia-sheets-writer.json"),
       scopes: ["https://www.googleapis.com/auth/spreadsheets"],
