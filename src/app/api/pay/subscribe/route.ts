@@ -10,6 +10,9 @@ import {
 
 const payjp = Payjp(process.env.PAYJP_SECRET_KEY!);
 
+// undefined/null 対策
+const safe = (value: any) => (value === undefined || value === null ? "" : value);
+
 export async function POST(req: NextRequest) {
   const logTrail: string[] = [];
 
@@ -40,6 +43,7 @@ export async function POST(req: NextRequest) {
     }
     logTrail.push(`🟢 Supabaseユーザー取得成功: ${user.user_code}`);
 
+    // ✅ 旧形式に対応（plan指定）
     const payjpPayload = {
       customer: customer_id,
       plan: plan_price_id,
@@ -95,7 +99,7 @@ export async function POST(req: NextRequest) {
     await updateUserCreditAndType(user_code, sofia_credit, plan_type);
     logTrail.push(`🟢 Supabase credit/type を更新: ${sofia_credit} / ${plan_type}`);
 
-    // 🔐 認証情報を環境変数から読み込む（JSON文字列 → オブジェクト）
+    // ✅ Google Sheets 認証情報を環境変数から読み込み
     const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON!);
 
     const auth = new google.auth.JWT({
@@ -107,19 +111,19 @@ export async function POST(req: NextRequest) {
     const sheets = google.sheets({ version: "v4", auth });
 
     const row = [
-      user_code,
-      user_email,
-      plan_type,
+      safe(user_code),
+      safe(user_email),
+      safe(plan_type),
       typeof charge_amount === "number" ? charge_amount : 0,
       typeof sofia_credit === "number" ? sofia_credit : 0,
-      customer_id,
-      last_payment_date,
-      next_payment_date,
-      user.card_registered ?? "",
-      payment_date,
-      memo,
-      subscription_id,
-      plan_price_id,
+      safe(customer_id),
+      safe(last_payment_date),
+      safe(next_payment_date),
+      safe(user.card_registered),
+      safe(payment_date),
+      safe(memo),
+      safe(subscription_id),
+      safe(plan_price_id),
     ];
 
     const sheetId = process.env.GOOGLE_SHEET_ID!;
