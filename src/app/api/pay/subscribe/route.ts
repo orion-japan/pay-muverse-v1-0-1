@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import dayjs from "dayjs";
-import path from "path";
 import Payjp from "payjp";
 import {
   getUserByCode,
@@ -96,10 +95,15 @@ export async function POST(req: NextRequest) {
     await updateUserCreditAndType(user_code, sofia_credit, plan_type);
     logTrail.push(`🟢 Supabase credit/type を更新: ${sofia_credit} / ${plan_type}`);
 
-    const auth = new google.auth.GoogleAuth({
-      keyFile: path.join(process.cwd(), "sofia-sheets-writer.json"),
+    // 🔐 認証情報を環境変数から読み込む（JSON文字列 → オブジェクト）
+    const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON!);
+
+    const auth = new google.auth.JWT({
+      email: credentials.client_email,
+      key: credentials.private_key,
       scopes: ["https://www.googleapis.com/auth/spreadsheets"],
     });
+
     const sheets = google.sheets({ version: "v4", auth });
 
     const row = [
