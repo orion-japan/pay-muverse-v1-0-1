@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import dayjs from "dayjs";
 import Payjp from "payjp";
-import fs from "fs";
-import path from "path";
 import { PLAN_ID_MAP } from "@/lib/constants/planIdMap";
 import {
   getUserByCode,
@@ -30,7 +28,6 @@ export async function POST(req: NextRequest) {
 
     logTrail.push(`📥 受信Payload: ${JSON.stringify(body, null, 2)}`);
 
-    // パラメータ検証
     if (!user_code || !user_email || !plan_type || !customer_id) {
       throw new Error("必要なパラメータが不足しています");
     }
@@ -46,7 +43,6 @@ export async function POST(req: NextRequest) {
     if (!user) throw new Error("Supabase ユーザーが見つかりません");
     logTrail.push(`✅ Supabaseユーザー取得: ${user.user_code}`);
 
-    // PAY.JP 登録
     const payjpPayload = {
       customer: customer_id,
       plan: plan_price_id,
@@ -89,27 +85,39 @@ export async function POST(req: NextRequest) {
 
     logTrail.push(`✅ サブスク登録成功: ${subscription_id}`);
 
-    await updateUserSubscriptionMeta(user_code, subscription_id, last_payment_date, next_payment_date);
+    await updateUserSubscriptionMeta(
+      user_code,
+      subscription_id,
+      last_payment_date,
+      next_payment_date
+    );
     logTrail.push("✅ Supabaseサブスク情報更新完了");
 
     await updateUserCreditAndType(user_code, sofia_credit, plan_type);
     logTrail.push("✅ Supabaseクレジット更新完了");
 
-    // 🔐 Google Sheets 認証情報をファイルから読み込み
-    const keyPath = path.resolve(
-      process.cwd(),
-      "service_account",
-      "sofia-sheets-writer.json"
-    );
-    const credentials = JSON.parse(fs.readFileSync(keyPath, "utf-8"));
+    // 🔐 Google Sheets 認証（Base64から読み込み）
+    const base64Encoded = process.env.GOOGLE_SERVICE_ACCOUNT_BASE64!;
+    if (!base64Encoded) throw new Error("GOOGLE_SERVICE_ACCOUNT_BASE64 が設定されていません");
 
-    const auth = new google.auth.JWT({
-      email: credentials.client_email,
-      key: credentials.private_key,
+    let credentials;
+    try {
+      const decoded = Buffer.from(base64Encoded, "base64").toString("utf-8");
+      credentials = JSON.parse(decoded);
+    } catch (err) {
+      throw new Error("GOOGLE_SERVICE_ACCOUNT_BASE64 のデコードまたはパースに失敗しました");
+    }
+
+    const auth = new google.auth.GoogleAuth({
+      credentials,
       scopes: ["https://www.googleapis.com/auth/spreadsheets"],
     });
 
-    const sheets = google.sheets({ version: "v4", auth });
+    const authClient = await auth.getClient();
+    const sheets = google.sheets({
+      version: "v4",
+      auth: authClient as any,
+    });
 
     const row = [
       safe(user_code),
