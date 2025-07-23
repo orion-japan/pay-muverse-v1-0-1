@@ -150,6 +150,11 @@ export async function POST(req: NextRequest) {
       logTrail.push(`🧪 row[1] (user_email): ${JSON.stringify(row[1])}`);
       logTrail.push(`🧪 row[2] (plan_type): ${JSON.stringify(row[2])}`);
       logTrail.push(`🧪 row.length: ${row.length}`);
+      logTrail.push(`🟩 [DEBUG] process.env.GOOGLE_SHEET_ID: ${process.env.GOOGLE_SHEET_ID}`);
+logTrail.push(`🟩 [DEBUG] process.env.SHEETS_RANGE: ${process.env.SHEETS_RANGE}`);
+logTrail.push(`🟩 [DEBUG] 実際のrange指定: ${targetRange}`);
+logTrail.push(`🟩 [DEBUG] シート側のシート名一覧（手動で確認）: ${"Googleシート画面でコピペ"}`);
+
       
       const writeResult = await sheets.spreadsheets.values.append({
         spreadsheetId: process.env.GOOGLE_SHEET_ID!,
