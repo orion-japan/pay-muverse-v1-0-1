@@ -136,7 +136,11 @@ export async function POST(req: NextRequest) {
     ];
 
     logTrail.push("📤 Google Sheets への書き込み開始");
-
+    logTrail.push(`🧪 typeof row: ${typeof row}`);
+    logTrail.push(`🧪 row instanceof Array: ${row instanceof Array}`);
+    logTrail.push(`🧪 row.length: ${row.length}`);
+    logTrail.push(`🧪 row JSON: ${JSON.stringify(row)}`);
+    
     try {
       const targetRange = "Sheet1!A1"; // ← 必要に応じてシート名を確認してください
       logTrail.push(`📋 書き込み対象シートID: ${process.env.GOOGLE_SHEET_ID}`);
