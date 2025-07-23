@@ -146,7 +146,11 @@ export async function POST(req: NextRequest) {
       logTrail.push(`📋 書き込み対象シートID: ${process.env.GOOGLE_SHEET_ID}`);
       logTrail.push(`📋 書き込みレンジ: ${targetRange}`);
       logTrail.push(`📋 書き込みデータ: ${JSON.stringify(row)}`);
-
+      logTrail.push(`🧪 row[0] (user_code): ${JSON.stringify(row[0])}`);
+      logTrail.push(`🧪 row[1] (user_email): ${JSON.stringify(row[1])}`);
+      logTrail.push(`🧪 row[2] (plan_type): ${JSON.stringify(row[2])}`);
+      logTrail.push(`🧪 row.length: ${row.length}`);
+      
       const writeResult = await sheets.spreadsheets.values.append({
         spreadsheetId: process.env.GOOGLE_SHEET_ID!,
         range: targetRange, // ← ここに直接文字列を書かない
