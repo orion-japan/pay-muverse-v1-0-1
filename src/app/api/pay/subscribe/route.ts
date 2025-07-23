@@ -140,7 +140,7 @@ export async function POST(req: NextRequest) {
     try {
       const writeResult = await sheets.spreadsheets.values.append({
         spreadsheetId: process.env.GOOGLE_SHEET_ID!,
-        range: "sheet2", // ← 🔧 ここを修正！（以前は "sheet2!A1" だった）
+        range: "Sheet2!A1",
         valueInputOption: "USER_ENTERED",
         insertDataOption: "INSERT_ROWS", // ← 推奨（自動で次の行に追記される）
         requestBody: { values: [row] },
