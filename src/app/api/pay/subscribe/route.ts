@@ -138,14 +138,14 @@ export async function POST(req: NextRequest) {
     logTrail.push("📤 Google Sheets への書き込み開始");
 
     try {
-      const targetRange = "シート2!A1"; // ← 必要に応じてシート名を確認してください
+      const targetRange = "'シート2'!A1"; // ← 必要に応じてシート名を確認してください
       logTrail.push(`📋 書き込み対象シートID: ${process.env.GOOGLE_SHEET_ID}`);
       logTrail.push(`📋 書き込みレンジ: ${targetRange}`);
       logTrail.push(`📋 書き込みデータ: ${JSON.stringify(row)}`);
 
       const writeResult = await sheets.spreadsheets.values.append({
         spreadsheetId: process.env.GOOGLE_SHEET_ID!,
-        range: "シート2!A1",
+        range: "'シート2'!A1",
         valueInputOption: "USER_ENTERED",
         insertDataOption: "INSERT_ROWS",
         requestBody: { values: [row] },
