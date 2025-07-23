@@ -137,19 +137,26 @@ export async function POST(req: NextRequest) {
 
     logTrail.push("📤 Google Sheets への書き込み開始");
 
+    logTrail.push("📤 Google Sheets への書き込み開始");
+
     try {
       const writeResult = await sheets.spreadsheets.values.append({
         spreadsheetId: process.env.GOOGLE_SHEET_ID!,
         range: "Sheet2!A1",
         valueInputOption: "USER_ENTERED",
-        insertDataOption: "INSERT_ROWS", // ← 推奨（自動で次の行に追記される）
+        insertDataOption: "INSERT_ROWS",
         requestBody: { values: [row] },
       });
-      
-
+    
       logTrail.push(`✅ Google Sheets 書込成功: ${JSON.stringify(writeResult.data, null, 2)}`);
     } catch (sheetError: any) {
       logTrail.push(`❌ Google Sheets 書込失敗: ${sheetError.message}`);
+    
+      // Google API の詳細エラーレスポンスも追記（あれば）
+      if (sheetError.response?.data) {
+        logTrail.push(`📄 Google Sheets API 応答: ${JSON.stringify(sheetError.response.data, null, 2)}`);
+      }
+    
       return NextResponse.json(
         {
           success: false,
@@ -160,22 +167,27 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       );
     }
-
+    
     return NextResponse.json({
       success: true,
       subscription_id,
       logTrail,
     });
-  } catch (error: any) {
-    logTrail.push(`⛔ 例外発生: ${error.message}`);
-    return NextResponse.json(
-      {
-        success: false,
-        error: "内部エラーが発生しました",
-        detail: error.message,
-        logTrail,
-      },
-      { status: 500 }
-    );
-  }
-}
+    } catch (error: any) {
+      logTrail.push(`⛔ 例外発生: ${error.message}`);
+    
+      // 追加：ネットワークエラーやGoogle API未使用時も追跡可能にする
+      if (error.response?.data) {
+        logTrail.push(`📄 API 応答: ${JSON.stringify(error.response.data, null, 2)}`);
+      }
+    
+      return NextResponse.json(
+        {
+          success: false,
+          error: "内部エラーが発生しました",
+          detail: error.message,
+          logTrail,
+        },
+        { status: 500 }
+      );
+    }}
