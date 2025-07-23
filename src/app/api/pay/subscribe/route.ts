@@ -145,7 +145,7 @@ export async function POST(req: NextRequest) {
 
       const writeResult = await sheets.spreadsheets.values.append({
         spreadsheetId: process.env.GOOGLE_SHEET_ID!,
-        range: "Sheet1!A1",
+        range: targetRange, // ← ここに直接文字列を書かない
         valueInputOption: "USER_ENTERED",
         insertDataOption: "INSERT_ROWS",
         requestBody: { values: [row] },
