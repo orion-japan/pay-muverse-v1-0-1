@@ -1,4 +1,4 @@
-// ✅ src/app/api/write-payment-sheet/route.ts
+// ✅ src/app/api/write-payment-sheet/route.ts（不要？）
 
 import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';

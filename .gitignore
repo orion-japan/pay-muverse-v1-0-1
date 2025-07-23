@@ -41,6 +41,4 @@ yarn-error.log*
 next-env.d.ts
 
 # Google Cloud Service Account Key
-sofia-sheets-writer.json
-
-.vercel
+/service_account/sofia-sheets-writer.json

@@ -1,4 +1,3 @@
-// src/components/PlanSelectModal.tsx
 'use client';
 
 import React from 'react';
@@ -7,7 +6,6 @@ import { Button } from '@/components/ui/button';
 type TempPlan = {
   name: string;
   plan_type: string;
-  plan_price_id: string; // ← 修正：price_id → plan_price_id
   credit: number;
   price: number;
 };

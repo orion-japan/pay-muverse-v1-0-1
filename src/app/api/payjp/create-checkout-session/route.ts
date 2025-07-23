@@ -3,11 +3,12 @@ import { createClient } from '@supabase/supabase-js';
 import payjp from 'payjp';
 import { JWT } from 'google-auth-library';
 import { google } from 'googleapis';
+import { PLAN_ID_MAP } from '@/lib/constants/planIdMap'; // ← 追加
 
-// Supabase 初期化：Vercel の環境変数と一致させる
+// Supabase 初期化
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.supabaseKey!  // ← 修正ポイント
+  process.env.supabaseKey!
 );
 
 // PAY.JP 初期化
@@ -48,6 +49,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ warning: message });
     }
 
+    // ✅ plan_typeからpln_idを取得
+    const plan_price_id = PLAN_ID_MAP[plan.plan_type];
+    if (!plan_price_id) {
+      throw new Error(`プランIDが環境変数に定義されていません: ${plan.plan_type}`);
+    }
+
     // 既存サブスクリプションのキャンセル
     if (userData.payjp_subscription_id) {
       try {
@@ -61,11 +68,11 @@ export async function POST(req: NextRequest) {
     // 新しいサブスクリプション作成
     const subscription = await payjpClient.subscriptions.create({
       customer: userData.payjp_customer_id,
-      plan: plan.price_id,
+      plan: plan_price_id,
     });
     console.log('✅ サブスク作成:', subscription.id);
 
-    // Supabase のユーザーデータ更新
+    // Supabase 更新
     const { error: updateError } = await supabase
       .from('users')
       .update({
@@ -79,7 +86,7 @@ export async function POST(req: NextRequest) {
     }
     console.log('✅ Supabase更新成功');
 
-    // Google Sheets にログ書き込み
+    // Sheets ログ
     try {
       const auth = new JWT({
         email: process.env.GOOGLE_CLIENT_EMAIL!,
@@ -92,7 +99,7 @@ export async function POST(req: NextRequest) {
         user_code,
         userData.click_email,
         plan.plan_type,
-        plan.price_id,
+        plan_price_id,
         subscription.id,
         userData.payjp_customer_id,
         plan.price,

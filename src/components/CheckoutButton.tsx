@@ -3,7 +3,6 @@
 import { useState } from 'react';
 
 type Plan = {
-  price_id: string;
   plan_type: string;
   price: number;
   credit: number;
@@ -15,6 +14,7 @@ type CheckoutResponse = {
   error?: string;
   detail?: string;
   success?: boolean;
+  logTrail?: string[];
 };
 
 type Props = {
@@ -33,7 +33,12 @@ export default function CheckoutButton({ plan, user_code, hasCard }: Props) {
       const res = await fetch(`/api/pay/subscribe${force ? '?force=true' : ''}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan, user_code }),
+        body: JSON.stringify({
+          user_code,
+          plan_type: plan.plan_type,
+          charge_amount: plan.price,
+          sofia_credit: plan.credit,
+        }),
       });
 
       const data: CheckoutResponse = await res.json();
@@ -51,12 +56,12 @@ export default function CheckoutButton({ plan, user_code, hasCard }: Props) {
           console.log('⚠️ 警告後に再実行します（force=true）');
           await handleCheckout(true); // 再実行
         }
-        return; // 🚫 必ずここで終了（THANKSへ飛ばさない）
+        return; // 🚫 必ずここで終了
       }
 
       // ❌ エラー返却がある場合
       if (data.error || !data.success) {
-        alert(`❌ エラー: ${data.error || data.detail || '不明なエラー'}`);
+        alert(`❌ エラー: ${data.error || data.detail || '不明なエラー'}\n\n${data.logTrail?.join('\n') || ''}`);
         console.error('エラー内容:', data);
         return;
       }

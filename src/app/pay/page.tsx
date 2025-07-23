@@ -71,9 +71,7 @@ function PageInner() {
       if (!cardRes.ok) throw new Error('カード登録に失敗しました');
 
       alert('カード登録が完了しました');
-
-      // ✅ 再取得：登録後のcustomer_idを読み直す
-      await fetchStatus();
+      await fetchStatus(); // 再取得
     } catch (err: any) {
       console.error('❌ カード登録エラー:', err);
       alert(err.message || 'カード登録中にエラーが発生しました');
@@ -85,20 +83,17 @@ function PageInner() {
   const handleSubscribe = async () => {
     setLoading(true);
     try {
-      if (!selectedPlan?.plan_type || !selectedPlan?.plan_price_id) {
+      if (!selectedPlan?.plan_type) {
         alert('プランを正しく選択してください');
         return;
       }
 
-      // ✅ 最新ユーザーデータを再取得
       await fetchStatus();
 
       const payload = {
         user_code,
         user_email: userData?.click_email || '',
         plan_type: selectedPlan.plan_type,
-        plan_price_id: selectedPlan.plan_price_id,
-        subscription_id: userData?.payjp_subscription_id || '',
         customer_id: userData?.payjp_customer_id || '',
         charge_amount: selectedPlan.price || 0,
         sofia_credit: selectedPlan.credit || 0,

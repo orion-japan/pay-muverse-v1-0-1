@@ -6,7 +6,6 @@ import PlanSelectModal from './PlanSelectModal';
 type Plan = {
   name: string;
   plan_type: string;
-  plan_price_id: string; // 🔄 修正：price_id → plan_price_id
   credit: number;
   price: number;
 };
@@ -18,26 +17,23 @@ type Props = {
   userCredit: number;
 };
 
-// ✅ 提供プランの一覧（PAY.JPの plan_price_id を含む）
+// ✅ 提供プランの一覧（plan_type ベースに統一）
 const plans: Plan[] = [
   {
     name: 'ライトプラン（regular）',
     plan_type: 'regular',
-    plan_price_id: 'pln_9020ec089c869d3bc9670e928df7',
     credit: 45,
     price: 990,
   },
   {
     name: 'スタンダード（premium）',
     plan_type: 'premium',
-    plan_price_id: 'pln_37bfcc9b4a454296810b4f3272c3',
     credit: 200,
     price: 3300,
   },
   {
     name: 'プロフェッショナル（master）',
     plan_type: 'master',
-    plan_price_id: 'pln_65a3f0d674ec33b3b1e448bcd3dc',
     credit: 1500,
     price: 16500,
   },
@@ -54,7 +50,7 @@ export default function PlanSelectPanel({
   const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   const handleSelectPlan = (plan: Plan) => {
-    console.log('🟡 プラン選択:', plan.plan_type, plan.plan_price_id);
+    console.log('🟡 プラン選択:', plan.plan_type);
 
     if (userCredit === 0) {
       setSelectedPlan(plan);
@@ -85,9 +81,9 @@ export default function PlanSelectPanel({
 
       {plans.map((plan) => (
         <div
-          key={plan.plan_price_id}
+          key={plan.plan_type}
           className={`border p-4 rounded shadow bg-white transition ${
-            selectedPlan?.plan_price_id === plan.plan_price_id
+            selectedPlan?.plan_type === plan.plan_type
               ? 'border-blue-600 ring-2 ring-blue-400'
               : 'border-gray-300'
           }`}

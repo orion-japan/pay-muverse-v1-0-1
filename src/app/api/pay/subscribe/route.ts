@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import dayjs from "dayjs";
 import Payjp from "payjp";
+import fs from "fs";
+import path from "path";
+import { PLAN_ID_MAP } from "@/lib/constants/planIdMap";
 import {
   getUserByCode,
   updateUserCreditAndType,
@@ -9,8 +12,6 @@ import {
 } from "@/lib/utils/supabase";
 
 const payjp = Payjp(process.env.PAYJP_SECRET_KEY!);
-
-// undefined/null 対策
 const safe = (value: any) => (value === undefined || value === null ? "" : value);
 
 export async function POST(req: NextRequest) {
@@ -22,85 +23,85 @@ export async function POST(req: NextRequest) {
       user_code,
       user_email,
       plan_type,
-      plan_price_id,
       customer_id,
       charge_amount,
       sofia_credit,
     } = body;
 
-    logTrail.push(`🟦 受信ペイロード: ${JSON.stringify(body, null, 2)}`);
+    logTrail.push(`📥 受信Payload: ${JSON.stringify(body, null, 2)}`);
 
-    if (!user_code || !user_email || !plan_type || !plan_price_id || !customer_id) {
-      throw new Error("必須パラメータが不足しています");
+    // パラメータ検証
+    if (!user_code || !user_email || !plan_type || !customer_id) {
+      throw new Error("必要なパラメータが不足しています");
     }
 
-    const payment_date = dayjs().format("YYYY-MM-DD");
-    const memo = "Web決済";
+    const plan_price_id = PLAN_ID_MAP[plan_type];
+    if (!plan_price_id || typeof plan_price_id !== "string") {
+      throw new Error(`無効なプランタイプ: ${plan_type} → plan_idが取得できません`);
+    }
+
+    logTrail.push(`📦 PLAN_ID_MAP[${plan_type}] = ${plan_price_id}`);
 
     const user = await getUserByCode(user_code);
-    if (!user) {
-      throw new Error("Supabase ユーザーが見つかりません");
-    }
-    logTrail.push(`🟢 Supabaseユーザー取得成功: ${user.user_code}`);
+    if (!user) throw new Error("Supabase ユーザーが見つかりません");
+    logTrail.push(`✅ Supabaseユーザー取得: ${user.user_code}`);
 
-    // ✅ 旧形式に対応（plan指定）
+    // PAY.JP 登録
     const payjpPayload = {
       customer: customer_id,
       plan: plan_price_id,
     };
-
-    logTrail.push(`🧾 PAY.JP リクエスト内容: ${JSON.stringify(payjpPayload)}`);
+    logTrail.push(`➡️ PAY.JP送信: ${JSON.stringify(payjpPayload)}`);
 
     let subscription;
     try {
       subscription = await payjp.subscriptions.create(payjpPayload);
     } catch (err: any) {
-      logTrail.push(`🔥 サブスク登録エラー: ${err?.message || String(err)}`);
+      logTrail.push(`🔥 PAY.JPエラー: ${err?.message}`);
 
       if (err?.response) {
         try {
-          const text = await err.response.text?.();
-          logTrail.push(`🟥 PAY.JP レスポンス(text): ${text}`);
-        } catch {
-          logTrail.push(`⚠️ PAY.JP response.text() 取得に失敗`);
-        }
-
+          const text = await err.response.text();
+          logTrail.push(`📜 PAY.JP response.text: ${text}`);
+        } catch {}
         try {
-          const json = await err.response.json?.();
-          logTrail.push(`🟥 PAY.JP レスポンス(json): ${JSON.stringify(json)}`);
-        } catch {
-          logTrail.push(`⚠️ PAY.JP response.json() 取得に失敗`);
-        }
-
-        logTrail.push(`📛 PAY.JP ステータス: ${err.response.status} / ${err.response.statusText}`);
+          const json = await err.response.json();
+          logTrail.push(`📜 PAY.JP response.json: ${JSON.stringify(json)}`);
+        } catch {}
+        logTrail.push(`📜 PAY.JP status: ${err.response.status} / ${err.response.statusText}`);
       }
 
-      return NextResponse.json({
-        success: false,
-        error: "サブスク登録に失敗しました",
-        detail: "PAY.JP サブスクリプション作成エラー",
-        logTrail,
-      }, { status: 500 });
-    }
-
-    if (!subscription?.id) {
-      throw new Error("PAY.JP サブスクリプション作成に失敗しました");
+      return NextResponse.json(
+        {
+          success: false,
+          error: "サブスク登録に失敗しました",
+          detail: "PAY.JP サブスクリプション作成エラー",
+          logTrail,
+        },
+        { status: 500 }
+      );
     }
 
     const subscription_id = subscription.id;
     const last_payment_date = dayjs.unix(subscription.current_period_start).format("YYYY-MM-DD");
     const next_payment_date = dayjs.unix(subscription.current_period_end).format("YYYY-MM-DD");
+    const payment_date = dayjs().format("YYYY-MM-DD");
 
-    logTrail.push(`🟢 PAY.JPサブスクリプション作成成功: ${subscription_id}`);
+    logTrail.push(`✅ サブスク登録成功: ${subscription_id}`);
 
     await updateUserSubscriptionMeta(user_code, subscription_id, last_payment_date, next_payment_date);
-    logTrail.push(`🟢 Supabaseサブスク情報を更新: ${subscription_id}`);
+    logTrail.push("✅ Supabaseサブスク情報更新完了");
 
     await updateUserCreditAndType(user_code, sofia_credit, plan_type);
-    logTrail.push(`🟢 Supabase credit/type を更新: ${sofia_credit} / ${plan_type}`);
+    logTrail.push("✅ Supabaseクレジット更新完了");
 
-    // ✅ Google Sheets 認証情報を環境変数から読み込み
-    const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON!);
+    // 🔐 Google Sheets 認証情報をファイルから読み込み
+    const keyPath = path.resolve(
+      process.cwd(),
+      "service_account",
+      "sofia-sheets-writer.json"
+    );
+    const credentials = JSON.parse(fs.readFileSync(keyPath, "utf-8"));
 
     const auth = new google.auth.JWT({
       email: credentials.client_email,
@@ -121,36 +122,50 @@ export async function POST(req: NextRequest) {
       safe(next_payment_date),
       safe(user.card_registered),
       safe(payment_date),
-      safe(memo),
+      "Web決済",
       safe(subscription_id),
       safe(plan_price_id),
     ];
 
-    const sheetId = process.env.GOOGLE_SHEET_ID!;
-    if (!sheetId) throw new Error("GOOGLE_SHEET_ID が未設定です");
+    logTrail.push("📤 Google Sheets への書き込み開始");
 
-    const writeResult = await sheets.spreadsheets.values.append({
-      spreadsheetId: sheetId,
-      range: "sheet2!A1",
-      valueInputOption: "USER_ENTERED",
-      requestBody: { values: [row] },
-    });
+    try {
+      const writeResult = await sheets.spreadsheets.values.append({
+        spreadsheetId: process.env.GOOGLE_SHEET_ID!,
+        range: "sheet2!A1",
+        valueInputOption: "USER_ENTERED",
+        requestBody: { values: [row] },
+      });
 
-    logTrail.push(`🟢 Sheets書込完了`);
+      logTrail.push(`✅ Google Sheets 書込成功: ${JSON.stringify(writeResult.data, null, 2)}`);
+    } catch (sheetError: any) {
+      logTrail.push(`❌ Google Sheets 書込失敗: ${sheetError.message}`);
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Google Sheets への書き込みに失敗しました",
+          detail: sheetError.message,
+          logTrail,
+        },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
-      result: writeResult.data,
       subscription_id,
       logTrail,
     });
   } catch (error: any) {
-    logTrail.push(`⛔ エラー: ${error.message}`);
-    return NextResponse.json({
-      success: false,
-      error: "サブスク登録に失敗しました",
-      detail: error.message,
-      logTrail,
-    }, { status: 500 });
+    logTrail.push(`⛔ 例外発生: ${error.message}`);
+    return NextResponse.json(
+      {
+        success: false,
+        error: "内部エラーが発生しました",
+        detail: error.message,
+        logTrail,
+      },
+      { status: 500 }
+    );
   }
 }
