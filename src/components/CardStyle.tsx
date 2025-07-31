@@ -3,7 +3,6 @@
 import { useEffect } from 'react'
 import '@/app/globals.css';   // ✅ appフォルダ直下のglobals.cssを読み込む
 
-
 export default function CardStyle() {
   /* ------------ PAY.JP 初期化 ------------ */
   useEffect(() => {
@@ -69,8 +68,7 @@ export default function CardStyle() {
           />
         </div>
 
-        {/* ── ボタン ── */}
-        <button className="payjp-submit-btn">カードで支払う</button>
+        {/* 🚫 ❌ ここにあった “カードで支払う” ボタンは削除 */}
       </div>
     </div>
   )

@@ -108,9 +108,11 @@ export default function PlanSelectPanel({
 
       {/* ✅ カード登録モーダル */}
       <CardRegisterModal
-        isOpen={showCardModal}
-        onClose={() => setShowCardModal(false)}
-      />
+  isOpen={showCardModal}
+  onClose={() => setShowCardModal(false)}
+  userCode={userCode}   // ✅ これを追加
+/>
+
     </div>
   );
 }

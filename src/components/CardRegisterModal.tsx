@@ -1,14 +1,15 @@
 'use client';
 
 import React from 'react';
-import CardForm from './forms/CardForm';  // ✅ ここを修正！
+import CardForm from './forms/CardForm';   // ✅ ./ に変更！
 
 type Props = {
   isOpen: boolean;
   onClose: () => void;
+  userCode: string;    // ✅ userCode を必須プロップに
 };
 
-export default function CardRegisterModal({ isOpen, onClose }: Props) {
+export default function CardRegisterModal({ isOpen, onClose, userCode }: Props) {
   if (!isOpen) return null;
 
   return (
@@ -25,8 +26,8 @@ export default function CardRegisterModal({ isOpen, onClose }: Props) {
         {/* タイトル */}
         <h2 className="text-xl font-bold mb-4">💳 カードを登録する</h2>
 
-        {/* ✅ CardForm（カード登録フォーム） */}
-        <CardForm userCode="" onRegister={onClose} />
+        {/* ✅ CardForm */}
+        <CardForm userCode={userCode} onRegister={onClose} />
       </div>
     </div>
   );
