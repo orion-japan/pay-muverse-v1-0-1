@@ -296,7 +296,7 @@ div.input-box > div > iframe {
 .payjp-card-box {
   background: #fff;
   width: 100%;
-  max-width: 400px;
+  max-width: 450px;
   border-radius: 16px;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
   padding: 24px;
@@ -314,7 +314,7 @@ div.input-box > div > iframe {
 .payjp-brand-row {
   display: flex;
   justify-content: center;
-  gap: 15px;
+  gap: 20px;
   margin-bottom: 20px;
 }
 .payjp-brand-icon {
