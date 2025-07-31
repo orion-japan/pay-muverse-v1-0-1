@@ -2,7 +2,9 @@
 
 import { useEffect } from 'react';
 import './card-style.css';   // 🎨 ← ここで card-style.css を読み込む
-
+type CardFormProps = {
+  userCode: string;   // ✅ ここを追加
+};
 export default function CardForm() {
   /* ------------ PAY.JP 初期化 ------------ */
   useEffect(() => {

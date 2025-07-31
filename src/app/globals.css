@@ -314,7 +314,7 @@ div.input-box > div > iframe {
 .payjp-brand-row {
   display: flex;
   justify-content: center;
-  gap: 10px;
+  gap: 15px;
   margin-bottom: 20px;
 }
 .payjp-brand-icon {
