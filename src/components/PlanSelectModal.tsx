@@ -31,21 +31,20 @@ export default function PlanSelectModal({
     <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
       <div className="bg-white space-y-4 max-w-md w-full p-6 rounded-xl shadow-xl">
         <h2 className="text-xl font-bold text-yellow-600 text-center">
-          ⚠️ クレジット残があります
+          ⚠️ You already have remaining credits
         </h2>
         <p className="text-sm text-gray-700">
-          現在のクレジット残：<strong>{credit}</strong> 回<br />
-          このまま購入すると、新しいプラン（
-          <strong>{tempPlan.credit}</strong> 回）に
-          <strong>上書き</strong>されます。<br />
-          ※ 残っているクレジットは引き継がれません。
+          Current credits: <strong>{credit}</strong> left<br />
+          If you continue, your plan will be <strong>overwritten</strong> with a new plan of (
+          <strong>{tempPlan.credit}</strong> credits/month).<br />
+          ※ Existing credits will not be carried over.
         </p>
         <div className="flex justify-end space-x-4">
           <Button onClick={onCancel} variant="ghost">
-            キャンセル
+            Cancel
           </Button>
           <Button onClick={onConfirm} variant="destructive">
-            OK（上書きして続行）
+            OK (Overwrite & Continue)
           </Button>
         </div>
       </div>

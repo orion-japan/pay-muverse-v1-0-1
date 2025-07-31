@@ -1,47 +1,6 @@
-@import "tailwindcss";
-@import "tw-animate-css";
-
-@custom-variant dark (&:is(.dark *));
-
-:root {
-  --max-width: 1100px;
-  --border-radius: 12px;
-  --font-mono: ui-monospace, Menlo, Monaco, 'Cascadia Mono', 'Segoe UI Mono', 'Roboto Mono',
-    'Oxygen Mono', 'Ubuntu Monospace', 'Source Code Pro', 'Fira Mono', 'Droid Sans Mono',
-    'Courier New', monospace;
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-}
+/* ========================================
+ 🌍 1. 基本設定（Tailwind完全排除）
+======================================== */
 
 * {
   box-sizing: border-box;
@@ -51,179 +10,442 @@
 
 body {
   font-family: 'Inter', 'Noto Sans JP', Arial, Helvetica, sans-serif;
+  background: #f3f4f6;
+  color: #222;
+  line-height: 1.5;
   overflow-x: hidden;
 }
 
-/* 🌿 Sofia LP専用背景 */
-.sofia-background {
-  background: radial-gradient(circle at 50% 50%, #eaf6ff, #f3eafd, #fdfbff);
-  animation: sofiaRippleFlow 15s ease-in-out infinite;
-  background-size: 400% 400%;
-}
-
-@keyframes sofiaRippleFlow {
-  0%, 100% {
-    background-position: 50% 50%;
-  }
-  33% {
-    background-position: 100% 0%;
-  }
-  66% {
-    background-position: 0% 100%;
-  }
-}
-
-/* 📱 波紋背景（アプリ用） */
-.chat-background {
-  background: radial-gradient(circle at 50% 50%, #eaf6ff, #f3eafd, #fdfbff);
-  animation: rippleFlow 12s ease-in-out infinite;
-  background-size: 300% 300%;
-}
-
-@keyframes rippleFlow {
-  0%, 100% {
-    background-position: 50% 50%;
-  }
-  50% {
-    background-position: 100% 100%;
-  }
-}
-
-/* カスタムスクロールバー */
+/* 🌈 カスタムスクロールバー */
 ::-webkit-scrollbar {
   width: 8px;
 }
-
 ::-webkit-scrollbar-track {
   background: rgba(0, 0, 0, 0.1);
 }
-
 ::-webkit-scrollbar-thumb {
   background: linear-gradient(45deg, #8b5cf6, #ec4899);
   border-radius: 4px;
 }
-
 ::-webkit-scrollbar-thumb:hover {
   background: linear-gradient(45deg, #7c3aed, #db2777);
 }
 
-/* フォーカス時のアウトライン */
-*:focus {
-  outline: none;
+/* ========================================
+ 💳 2. カードUI（CardStyle.tsx 共通）
+======================================== */
+
+.page-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
 }
 
-/* アニメーション用のユーティリティ */
-@keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-10px); }
+.card-box {
+  width: 100%;
+  max-width: 420px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  padding: 24px;
+  margin-top: 20px;
 }
 
-@keyframes pulse-glow {
-  0%, 100% { opacity: 0.5; }
-  50% { opacity: 1; }
+/* タイトル */
+.title-block {
+  text-align: center;
+  margin-bottom: 20px;
+}
+.title {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 12px;
 }
 
-.animate-float {
-  animation: float 3s ease-in-out infinite;
+/* ブランドロゴ */
+.brand-row {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.brand-icon {
+  height: 28px;
+  object-fit: contain;
+  opacity: 0.9;
+  transition: transform 0.2s ease;
+}
+.brand-icon:hover {
+  transform: scale(1.05);
 }
 
-.animate-pulse-glow {
-  animation: pulse-glow 2s ease-in-out infinite;
+/* 入力フィールド */
+.form-block {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 20px;
 }
 
-/* 🌱 Sofia専用コンポーネント */
-.sofia-card {
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: var(--border-radius);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+.field-label {
+  font-size: 13px;
+  margin-bottom: 4px;
+  color: #555;
 }
 
-.sofia-text-gradient {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+/* 入力ボックス */
+.input-box {
+  position: relative;
+  width: 100%;
+  height: 48px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fafafa;
+  overflow: hidden;
+  margin-bottom: 12px;
+  box-sizing: border-box;
 }
 
-@theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
+/* 有効期限とCVCの横並び */
+.two-col {
+  display: flex;
+  gap: 10px;
 }
 
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+/* 送信ボタン */
+.submit-btn {
+  width: 100%;
+  padding: 12px;
+  background: #2563eb;
+  color: #fff;
+  font-weight: bold;
+  border-radius: 6px;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.submit-btn:hover {
+  background: #1e4fd1;
 }
 
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
-  body {
-    @apply bg-background text-foreground;
-  }
+/* ========================================
+ 🚀 3. PAY.JP iframe コントロール
+======================================== */
+
+.input-box > div {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.input-box iframe,
+div.input-box > div > iframe {
+  all: unset !important;
+  display: block !important;
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 50px !important;
+  min-height: 50px !important;
+  border: none !important;
+  background: transparent !important;
+}
+
+/* ========================================
+ 📄 4. /pay/page.tsx 用 UI
+======================================== */
+
+/* ========================================
+ 📄 4. /pay/page.tsx 用 UI
+======================================== */
+
+.pay-main {
+  
+  display: flex;
+  flex-direction: column;
+  align-items: center;      /* ✅ 横センター */
+  justify-content: center;  /* ✅ 縦センター */
+  padding: 15px 20px 0;
+  background: linear-gradient(to bottom right, #eef4ff, #ffffff);
+  font-family: 'Inter', 'Noto Sans JP', sans-serif;
+  gap: 4px;
+}
+
+
+.pay-title {
+  font-size: 28px;
+  font-weight: bold;
+  color: #222;
+  margin-bottom: 0px;
+  text-align: center;
+}
+
+/* 💳 カード登録セクション */
+.card-section {
+  background: #ffffff;
+  border-radius: 16px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+  padding: 24px;
+  width: 100%;
+  max-width: 420px;
+}
+
+.card-section-title {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: #111;
+}
+
+/* ✅ 登録済みテキスト */
+.card-registered-text {
+  text-align: center;
+  font-weight: bold;
+  color: #16a34a;
+  margin-bottom: 8px;
+}
+
+/* 💳 カード登録ボタン */
+.btn-card-register {
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  background: #374151;
+  color: #fff;
+  font-weight: bold;
+  transition: background 0.2s ease;
+  margin-top: 8px;
+}
+.btn-card-register:hover {
+  background: #1f2937;
+}
+
+/* 🏷️ 入力フォーム枠 */
+.card-input-frame {
+  border: 1px solid #ccc;
+  padding: 14px;
+  border-radius: 10px;
+  background: #f9fafb;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);
+  margin-bottom: 10px;
+}
+
+/* 🔒 SSL メッセージ */
+.ssl-text {
+  font-size: 12px;
+  color: #6b7280;
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+/* 💳 カード登録送信ボタン */
+.btn-card-submit {
+  width: 100%;
+  padding: 14px;
+  border-radius: 10px;
+  font-weight: bold;
+  color: #fff;
+  background: #2563eb;
+  transition: background 0.2s ease;
+}
+.btn-card-submit:hover {
+  background: #1e4fd1;
+}
+.btn-disabled {
+  background: #ccc !important;
+  cursor: not-allowed;
+}
+
+/* 🌱 サブスク登録ボタン */
+.btn-subscribe {
+  background: #16a34a;
+  color: white;
+  padding: 16px;
+  border-radius: 12px;
+  font-weight: bold;
+  margin-top: 24px;
+  max-width: 420px;
+  width: 100%;
+  transition: background 0.2s ease;
+  box-shadow: 0 4px 12px rgba(0, 128, 0, 0.1);
+}
+.btn-subscribe:hover {
+  background: #15803d;
+}
+.btn-subscribe:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+/* ============================
+   📱 CardStyle 決済フォーム
+============================ */
+.payjp-wrap {
+  
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f3f4f6;
+  padding: 20px;
+}
+
+.payjp-card-box {
+  background: #fff;
+  width: 100%;
+  max-width: 400px;
+  border-radius: 16px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+  padding: 24px;
+}
+
+.payjp-title {
+  font-size: 20px;
+  font-weight: bold;
+  text-align: center;
+  margin-bottom: 16px;
+  color: #222;
+}
+
+/* ロゴ横並び */
+.payjp-brand-row {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.payjp-brand-icon {
+  height: 28px;
+  object-fit: contain;
+  opacity: 0.9;
+}
+
+/* 入力フォーム */
+.payjp-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.payjp-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 4px;
+  display: block;
+}
+
+.payjp-input {
+  width: 100%;
+  height: 48px;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: #fafafa;
+  box-sizing: border-box;
+}
+
+/* 有効期限とCVC */
+.payjp-two-col {
+  display: flex;
+  gap: 12px;
+}
+
+/* 決済ボタン */
+.payjp-submit-btn {
+  width: 100%;
+  padding: 14px;
+  font-weight: bold;
+  background: #2563eb;
+  color: #fff;
+  font-size: 16px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.payjp-submit-btn:hover {
+  background: #1e4fd1;
+}
+.plan-panel {
+    background: #fff;
+    width: 100%;
+    max-width: 375px;
+    border-radius: 16px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+    padding: 24px;
+}
+
+
+.plan-title {
+  text-align: center;
+  font-size: 22px;
+  font-weight: bold;
+  margin-bottom: 20px;
+  color: #222;
+}
+
+.plan-card {
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  background: #fff;
+  transition: all 0.2s ease;
+}
+.plan-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+}
+.plan-card.selected {
+  border: 2px solid #2563eb;
+  background: #f0f7ff;
+}
+
+.plan-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.plan-header h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+}
+.selected-badge {
+  font-size: 13px;
+  color: #2563eb;
+  font-weight: bold;
+}
+
+.plan-text {
+  font-size: 15px;
+  color: #444;
+  margin-bottom: 6px;
+}
+
+.plan-btn {
+  width: 100%;
+  padding: 10px;
+  font-weight: 600;
+  border: none;
+  border-radius: 8px;
+  transition: background 0.2s ease;
+}
+.plan-btn.active {
+  background: #2563eb;
+  color: #fff;
+}
+.plan-btn.active:hover {
+  background: #1e4ed8;
+}
+.plan-btn.disabled {
+  background: #ddd;
+  color: #666;
+  cursor: not-allowed;
 }

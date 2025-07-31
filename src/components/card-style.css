@@ -1,0 +1,74 @@
+.page-wrap {
+  min-height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:#f3f4f6;
+}
+
+.card-box {
+  width:360px;
+  background:#fff;
+  border-radius:16px;
+  box-shadow:0 8px 28px rgba(0,0,0,.12);
+  border:1px solid #e5e7eb;
+  padding:5px 5px;
+}
+
+.title-block {
+  margin-bottom:48px;
+}
+.title {
+  text-align:center;
+  font:600 18px/1.4 "Segoe UI",sans-serif;
+  margin:0 0 24px;
+}
+.brand-row {
+  display:flex;
+  justify-content:center;
+  gap:16px;
+}
+.brand-icon {
+  height:28px;
+}
+
+.form-block {
+  display:flex;
+  flex-direction:column;
+  gap:36px;
+}
+.field-label {
+  font-size:14px;
+  color:#4b5563;
+  margin-bottom:8px;
+}
+
+.input-box {
+  width:100%;
+  padding:14px 16px;
+  border:1px solid #d1d5db;
+  border-radius:6px;
+  font-size:16px;
+  box-sizing:border-box;
+}
+
+.two-col {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:24px;
+}
+
+.submit-btn {
+  margin-top:5px;
+  width:100%;
+  background:#2563eb;
+  color:#fff;
+  font:600 16px/1 "Segoe UI",sans-serif;
+  padding:16px 0;
+  border:none;
+  border-radius:6px;
+  cursor:pointer;
+}
+.submit-btn:hover {
+  background:#1d4ed8;
+}

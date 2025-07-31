@@ -4,7 +4,6 @@ export const dynamic = 'force-dynamic';
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import PlanSelectPanel from '@/components/PlanSelectPanel';
-import CardStyle from '@/components/CardStyle';  // ✅ カード入力UI
 
 function PageInner() {
   const searchParams = useSearchParams();
@@ -17,10 +16,9 @@ function PageInner() {
   const [selectedPlan, setSelectedPlan] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [cardRegistered, setCardRegistered] = useState(false);
-  const [showCardForm, setShowCardForm] = useState(false); // ✅ ← フォーム表示用
+  const [showCardInput, setShowCardInput] = useState(false);
   const [userCredit, setUserCredit] = useState<number>(0);
 
-  // ✅ ユーザーデータ取得
   const fetchStatus = async () => {
     try {
       const res = await fetch(`/api/account-status?user=${user_code}`);
@@ -38,7 +36,6 @@ function PageInner() {
     if (user_code) fetchStatus();
   }, [user_code]);
 
-  // ✅ PAY.JP カード入力初期化
   const initPayjpCard = () => {
     if (payjp || card || cardRegistered) return;
 
@@ -51,14 +48,13 @@ function PageInner() {
 
       const elements = payjpInstance.elements();
       const cardElement = elements.create('card');
-      cardElement.mount('#card-form');  
+      cardElement.mount('#card-form');
       setCard(cardElement);
       setCardReady(true);
     };
     document.body.appendChild(script);
   };
 
-  // ✅ カード登録処理
   const handleCardRegistration = async () => {
     setLoading(true);
     try {
@@ -74,22 +70,21 @@ function PageInner() {
 
       if (!cardRes.ok) throw new Error('Card registration failed');
 
-      alert('カードが登録されました');
+      alert('Card registered successfully');
       await fetchStatus(); // Refresh
     } catch (err: any) {
       console.error('❌ Card registration error:', err);
-      alert(err.message || 'カード登録に失敗しました');
+      alert(err.message || 'Card registration failed');
     } finally {
       setLoading(false);
     }
   };
 
-  // ✅ サブスク登録処理
   const handleSubscribe = async () => {
     setLoading(true);
     try {
       if (!selectedPlan?.plan_type) {
-        alert('プランを選択してください');
+        alert('Please select a plan');
         return;
       }
 
@@ -115,95 +110,86 @@ function PageInner() {
       const result = await subscribeRes.json();
       console.log('📦 Subscribe response:', result);
 
+      if (result.logTrail) {
+        console.log('🪵 logTrail:', result.logTrail);
+      }
+
       if (!subscribeRes.ok || !result.success) {
-        alert(`❌ サブスク登録に失敗しました\n${result.detail || '原因不明'}`);
+        alert(`❌ Subscription failed\n${result.detail || 'Unknown error'}\n\n【Logs】\n${result.logTrail?.join('\n')}`);
         return;
       }
 
       window.location.href = `/thanks?user=${user_code}`;
     } catch (err: any) {
       console.error('⨯ Subscription error:', err);
-      alert(`サブスク登録中にエラーが発生しました:\n${err.message || err}`);
+      alert(`Error during subscription:\n${err.message || err}`);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <main className="pay-main">
-      {/* ✅ 見出し */}
-      <h1 className="pay-title">ご利用プラン</h1>
+    <main className="min-h-screen flex flex-col items-center justify-start p-6 bg-gradient-to-b from-blue-50 to-white text-foreground space-y-6">
+      <h1 className="text-2xl font-bold text-gray-900 text-center mt-4">
+        Your Subscription Plan
+      </h1>
 
-      {/* ✅ プラン選択 */}
       <PlanSelectPanel
         userCode={user_code}
         cardRegistered={cardRegistered}
         userCredit={userCredit}
-        onPlanSelected={(plan) => setSelectedPlan(plan)}
+        onPlanSelected={(plan) => {
+          console.log('🟢 Plan selected:', plan);
+          setSelectedPlan(plan);
+        }}
       />
 
-      {/* ✅ カード未登録ユーザー */}
-      {!cardRegistered && (
-        <>
-          {!showCardForm ? (
-            // ⭐ 最初は「カードを登録する」ボタンのみ
-            <div className="text-center mt-4">
+      <div className="bg-white border rounded-xl p-4 w-full max-w-md shadow-lg mt-4">
+        <h2 className="text-xl font-semibold text-gray-800 mb-2">💳 Card Registration</h2>
+        {cardRegistered ? (
+          <p className="text-green-500 font-semibold">✅ Card is registered</p>
+        ) : (
+          <>
+            {!showCardInput ? (
               <button
-                className="btn-card-register"
                 onClick={() => {
-                  setShowCardForm(true);
+                  setShowCardInput(true);
                   initPayjpCard();
                 }}
+                className="bg-gray-700 text-white px-4 py-2 rounded"
               >
-                カードを登録する
+                Register Card
               </button>
-            </div>
-          ) : (
-            // ⭐ 押したらフォームが出現
-            <div>
-              <CardStyle /> {/* ✅ 内部の「カードで支払う」ボタンは削除済み */}
-              <div className="text-center mt-4">
+            ) : (
+              <>
+                <div id="card-form" className="border p-2 my-2" />
                 <button
                   onClick={handleCardRegistration}
                   disabled={!cardReady || loading}
-                  className="btn-card-submit w-full"
+                  className="bg-blue-500 text-white px-4 py-2 rounded mt-2"
                 >
-                  {loading ? 'カード登録中…' : 'このカードを登録する'}
+                  {loading ? 'Registering...' : 'Register this card'}
                 </button>
-              </div>
-            </div>
-          )}
-        </>
-      )}
+              </>
+            )}
+          </>
+        )}
+      </div>
 
-      {/* ✅ カード登録済ユーザー */}
-      {cardRegistered && (
-        <div className="registered-card-box text-center">
-          <p className="text-gray-700">
-            💳 登録済みカード: {userData?.card_brand || 'VISA'} **** {userData?.card_last4 || '****'}
-          </p>
-        </div>
-      )}
-
-      {/* ✅ カード登録済ならプラン購入ボタン */}
-      {cardRegistered && (
-        <div className="text-center mt-4">
-          <button
-            className="btn-subscribe w-full"
-            onClick={handleSubscribe}
-            disabled={!selectedPlan || loading}
-          >
-            {loading ? '処理中…' : 'プランを購入する'}
-          </button>
-        </div>
-      )}
+      <button
+        className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-xl transition disabled:opacity-50 mt-6 w-full max-w-md"
+        onClick={handleSubscribe}
+        disabled={!selectedPlan || !cardRegistered || loading}
+      >
+        {loading ? 'Processing...' : 'Subscribe & Purchase'}
+      </button>
     </main>
   );
 }
 
 export default function Page() {
   return (
-    <Suspense fallback={<div>読み込み中...</div>}>
+    <Suspense fallback={<div>Loading...</div>}>
       <PageInner />
     </Suspense>
   );

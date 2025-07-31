@@ -1,10 +1,9 @@
-'use client';
-
 import React, { useState } from 'react';
 import PlanSelectModal from './PlanSelectModal';
 
 type Plan = {
   name: string;
+  icon: string;  // ← アイコン追加
   plan_type: string;
   credit: number;
   price: number;
@@ -17,22 +16,24 @@ type Props = {
   userCredit: number;
 };
 
-// ✅ 提供プランの一覧（plan_type ベースに統一）
 const plans: Plan[] = [
   {
-    name: 'ライトプラン（regular）',
+    name: 'Regular',
+    icon: '🌱',
     plan_type: 'regular',
     credit: 45,
     price: 990,
   },
   {
-    name: 'スタンダード（premium）',
+    name: 'Premium',
+    icon: '🌟',
     plan_type: 'premium',
     credit: 200,
     price: 3300,
   },
   {
-    name: 'プロフェッショナル（master）',
+    name: 'Master',
+    icon: '🏆',
     plan_type: 'master',
     credit: 1500,
     price: 16500,
@@ -50,8 +51,6 @@ export default function PlanSelectPanel({
   const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   const handleSelectPlan = (plan: Plan) => {
-    console.log('🟡 プラン選択:', plan.plan_type);
-
     if (userCredit === 0) {
       setSelectedPlan(plan);
       onPlanSelected(plan);
@@ -76,27 +75,34 @@ export default function PlanSelectPanel({
   };
 
   return (
-    <div className="space-y-4 max-w-md w-full bg-white p-6 rounded-xl shadow-xl">
-      <h2 className="text-2xl font-bold mb-4 text-center">プランを選んで決済</h2>
+    <div className="plan-panel">
+     
 
       {plans.map((plan) => (
         <div
           key={plan.plan_type}
-          className={`border p-4 rounded shadow bg-white transition ${
-            selectedPlan?.plan_type === plan.plan_type
-              ? 'border-blue-600 ring-2 ring-blue-400'
-              : 'border-gray-300'
-          }`}
+          className={`plan-card ${selectedPlan?.plan_type === plan.plan_type ? 'selected' : ''}`}
         >
-          <p className="font-bold">{plan.name}</p>
-          <p>月額: ¥{plan.price.toLocaleString()}</p>
-          <p>付与クレジット: {plan.credit} 回 / 月</p>
+          <div className="plan-header">
+            <h3>
+              <span className="plan-icon">{plan.icon}</span> {plan.name} プラン
+            </h3>
+            {selectedPlan?.plan_type === plan.plan_type && (
+              <span className="selected-badge">✅ 選択中</span>
+            )}
+          </div>
+
+          <p className="plan-text">💰 <span className="font-bold">料金:</span> ¥{plan.price.toLocaleString()} / 月</p>
+          <p className="plan-text">⚡ <span className="font-bold">クレジット:</span> {plan.credit} / 月</p>
+
           <button
-            className="mt-2 px-4 py-1 bg-blue-600 text-white rounded disabled:opacity-50"
+            className={`plan-btn ${cardRegistered ? 'active' : 'disabled'}`}
             onClick={() => handleSelectPlan(plan)}
             disabled={!cardRegistered}
           >
-            このプランを選択
+            {cardRegistered
+              ? `${plan.name} プランを選択`
+              : 'カードを登録してください'}
           </button>
         </div>
       ))}

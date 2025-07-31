@@ -1,8 +1,0 @@
-@import "tailwindcss/preflight";
-@import "tailwindcss/components";
-@import "tailwindcss/utilities";
-
-body {
-  font-family: 'Noto Sans JP', sans-serif;
-  background: #000; /* フォールバック背景 */
-}
