@@ -285,22 +285,30 @@ div.input-box > div > iframe {
    📱 CardStyle 決済フォーム
 ============================ */
 .payjp-wrap {
-  
+  width: 100%;
+  max-width: 420px;     /* ✅ これも上限だけ固定 */
+  margin: 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
   background: #f3f4f6;
   padding: 20px;
+  box-sizing: border-box;
 }
 
+/* ✅ 下のカード登録BOX */
 .payjp-card-box {
+  width: 100%;          /* ✅ デフォルトは100% */
+  max-width: 420px;     /* ✅ PCでは420pxを上限に */
+  margin: 0 auto;
   background: #fff;
-  width: 100%;
-  max-width: 450px;
   border-radius: 16px;
+  border: 1px solid #e5e7eb;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
   padding: 24px;
+  box-sizing: border-box;  /* ✅ 余白込みで幅計算 */
 }
+
 
 .payjp-title {
   font-size: 20px;
@@ -311,10 +319,10 @@ div.input-box > div > iframe {
 }
 
 /* ロゴ横並び */
-.payjp-brand-row {
+.brand-row {
   display: flex;
-  justify-content: center;
-  gap: 20px;
+  justify-content: space-between;  /* 🔥 均等配置 */
+  gap: 10px;
   margin-bottom: 20px;
 }
 .payjp-brand-icon {
@@ -372,12 +380,14 @@ div.input-box > div > iframe {
   background: #1e4fd1;
 }
 .plan-panel {
-    background: #fff;
-    width: 100%;
-    max-width: 375px;
-    border-radius: 16px;
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
-    padding: 24px;
+  width: 100%;
+  max-width: 420px;    /* 🔥 420pxで固定 */
+  margin: 0 auto 24px auto;
+  background: #fff;
+  padding: 20px;
+  border-radius: 16px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
 }
 
 
