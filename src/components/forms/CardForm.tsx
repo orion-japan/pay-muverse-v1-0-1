@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import './card-style.css';
+import '../card-style.css';
 
 type CardFormProps = {
   userCode: string;
