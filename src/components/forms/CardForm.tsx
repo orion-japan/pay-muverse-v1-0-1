@@ -1,12 +1,14 @@
 'use client';
 
 import { useEffect } from 'react';
-import './card-style.css';   // 🎨 ← ここで card-style.css を読み込む
+import './card-style.css';
+
 type CardFormProps = {
-  userCode: string;   // ✅ ここを追加
+  userCode: string;
+  onRegister?: () => void;  // ✅ これが必須！
 };
-export default function CardForm() {
-  /* ------------ PAY.JP 初期化 ------------ */
+
+export default function CardForm({ userCode, onRegister }: CardFormProps) {
   useEffect(() => {
     const s = document.createElement('script');
     s.src = 'https://js.pay.jp/v2/pay.js';
@@ -31,10 +33,16 @@ export default function CardForm() {
     document.body.appendChild(s);
   }, []);
 
+  const handleRegisterCard = () => {
+    console.log(`✅ カード登録処理開始: userCode = ${userCode}`);
+    alert('✅ カードが登録されました');
+
+    if (onRegister) onRegister();  // ✅ モーダルを閉じる
+  };
+
   return (
     <div className="page-wrap">
       <div className="card-box">
-        {/* ── タイトル & ロゴ ── */}
         <div className="title-block">
           <h2 className="title">支払い情報</h2>
           <div className="brand-row">
@@ -44,7 +52,6 @@ export default function CardForm() {
           </div>
         </div>
 
-        {/* ── 入力欄 ── */}
         <div className="form-block">
           <label className="field-label">カード番号</label>
           <div id="card-number" className="input-box" />
@@ -64,8 +71,10 @@ export default function CardForm() {
           <input type="text" placeholder="TARO YAMADA" className="input-box" />
         </div>
 
-        {/* ── ボタン ── */}
-        <button className="submit-btn">カードで支払う</button>
+        {/* ✅ カード登録専用のボタン */}
+        <button className="submit-btn" onClick={handleRegisterCard}>
+          カードを登録する
+        </button>
       </div>
     </div>
   );

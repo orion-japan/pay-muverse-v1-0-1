@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import PlanSelectModal from './PlanSelectModal';
+import CardRegisterModal from './CardRegisterModal'; // ✅ 新規追加
 
 type Plan = {
   name: string;
-  icon: string;  // ← アイコン追加
+  icon: string;
   plan_type: string;
   credit: number;
   price: number;
@@ -17,27 +18,9 @@ type Props = {
 };
 
 const plans: Plan[] = [
-  {
-    name: 'Regular',
-    icon: '🌱',
-    plan_type: 'regular',
-    credit: 45,
-    price: 990,
-  },
-  {
-    name: 'Premium',
-    icon: '🌟',
-    plan_type: 'premium',
-    credit: 200,
-    price: 3300,
-  },
-  {
-    name: 'Master',
-    icon: '🏆',
-    plan_type: 'master',
-    credit: 1500,
-    price: 16500,
-  },
+  { name: 'Regular', icon: '🌱', plan_type: 'regular', credit: 45, price: 990 },
+  { name: 'Premium', icon: '🌟', plan_type: 'premium', credit: 200, price: 3300 },
+  { name: 'Master', icon: '🏆', plan_type: 'master', credit: 1500, price: 16500 },
 ];
 
 export default function PlanSelectPanel({
@@ -49,6 +32,9 @@ export default function PlanSelectPanel({
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
   const [tempPlan, setTempPlan] = useState<Plan | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+
+  // ✅ 新しく追加：カード登録モーダル用
+  const [showCardModal, setShowCardModal] = useState(false);
 
   const handleSelectPlan = (plan: Plan) => {
     if (userCredit === 0) {
@@ -76,8 +62,6 @@ export default function PlanSelectPanel({
 
   return (
     <div className="plan-panel">
-     
-
       {plans.map((plan) => (
         <div
           key={plan.plan_type}
@@ -92,13 +76,19 @@ export default function PlanSelectPanel({
             )}
           </div>
 
-          <p className="plan-text">💰 <span className="font-bold">料金:</span> ¥{plan.price.toLocaleString()} / 月</p>
-          <p className="plan-text">⚡ <span className="font-bold">クレジット:</span> {plan.credit} / 月</p>
+          <p className="plan-text">
+            💰 <span className="font-bold">料金:</span> ¥{plan.price.toLocaleString()} / 月
+          </p>
+          <p className="plan-text">
+            ⚡ <span className="font-bold">クレジット:</span> {plan.credit} / 月
+          </p>
 
+          {/* ✅ カード登録が済んでない場合 → モーダルを開く */}
           <button
             className={`plan-btn ${cardRegistered ? 'active' : 'disabled'}`}
-            onClick={() => handleSelectPlan(plan)}
-            disabled={!cardRegistered}
+            onClick={() =>
+              cardRegistered ? handleSelectPlan(plan) : setShowCardModal(true)
+            }
           >
             {cardRegistered
               ? `${plan.name} プランを選択`
@@ -107,12 +97,19 @@ export default function PlanSelectPanel({
         </div>
       ))}
 
+      {/* ✅ プラン変更確認モーダル */}
       <PlanSelectModal
         visible={showConfirmModal}
         credit={userCredit}
         tempPlan={tempPlan}
         onConfirm={confirmOverwrite}
         onCancel={cancelOverwrite}
+      />
+
+      {/* ✅ カード登録モーダル */}
+      <CardRegisterModal
+        isOpen={showCardModal}
+        onClose={() => setShowCardModal(false)}
       />
     </div>
   );
