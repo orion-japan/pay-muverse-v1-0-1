@@ -3,11 +3,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import Payjp from 'payjp';
 import { createClient } from '@supabase/supabase-js';
 
+// ✅ PAY.JP 初期化（秘密鍵はサーバーサイド専用）
 const payjp = Payjp(process.env.PAYJP_SECRET_KEY!);
 
+// ✅ Supabase 初期化
+// 🚩 Serviceキーは「SUPABASE_SERVICE_ROLE_KEY」で統一（環境変数にもこれを設定）
 const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!  // ✅ 書き込み用のServiceキー
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,        // ← Public URL
+  process.env.SUPABASE_SERVICE_ROLE_KEY!        // ← Service Role Key（必須）
 );
 
 export async function POST(req: NextRequest) {
@@ -15,7 +18,7 @@ export async function POST(req: NextRequest) {
     const { userCode, token } = await req.json();
     console.log('✅ カード登録API:', { userCode, token });
 
-    // ✅ 1. PAY.JPで顧客を作成 & カード登録
+    // ✅ 1. PAY.JPで顧客作成 & カード登録
     const customer = await payjp.customers.create({
       card: token,
       description: `Muverse user: ${userCode}`
@@ -23,7 +26,7 @@ export async function POST(req: NextRequest) {
 
     console.log('✅ PAY.JP Customer作成:', customer.id);
 
-    // ✅ 2. Supabase 更新
+    // ✅ 2. Supabase の users テーブル更新
     const { error } = await supabase
       .from('users')
       .update({
@@ -35,8 +38,12 @@ export async function POST(req: NextRequest) {
     if (error) throw error;
 
     return NextResponse.json({ success: true, customerId: customer.id });
+
   } catch (err: any) {
     console.error('❌ カード登録APIエラー:', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: err.message },
+      { status: 500 }
+    );
   }
 }
