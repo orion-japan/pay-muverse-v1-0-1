@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react';
 
 type Props = {
   userCode: string;
+  onRegister?: () => void;   // ✅ これを追加（必須ではない）
 };
+
 
 export default function CardForm({ userCode }: Props) {
   const [payjp, setPayjp] = useState<any>(null);
