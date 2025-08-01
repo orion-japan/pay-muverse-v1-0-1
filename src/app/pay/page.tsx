@@ -87,60 +87,67 @@ function PageInner() {
   };
 
   // ✅ カード登録処理（nameは渡さない）
-  const handleCardRegistration = async () => {
-    setLoading(true);
-    console.log('[handleCardRegistration] START');
+  // ✅ カード登録処理
+const handleCardRegistration = async () => {
+  setLoading(true);
+  console.log('[handleCardRegistration] START');
 
-    try {
-      console.log('Checking payjp & card state:', { payjp, cardNumber, cardExpiry, cardCvc });
+  try {
+    console.log('[LOG] Checking payjp & card state:', { payjp, cardNumber, cardExpiry, cardCvc });
 
-      if (!payjp || !cardNumber) {
-        alert('カードフォームが準備できていません');
-        console.error('❌ payjp or cardNumber missing');
-        return;
-      }
-
-      console.log('Calling payjp.createToken (NO name param)...');
-
-      // ✅ name を渡さずに token 作成
-      let result = await payjp.createToken(cardNumber, {
-        three_d_secure: false
-      });
-
-      console.log('payjp.createToken result:', result);
-
-      if (result.error) {
-        console.error('❌ PAY.JP error:', result.error);
-        throw new Error(result.error.message);
-      }
-
-      const token = result.id;
-      console.log('✅ token created:', token);
-
-      // ✅ register-card API呼び出し
-      const cardRes = await fetch('/api/pay/account/register-card', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_code, token }),
-      });
-
-      console.log('📤 register-card API sent');
-
-      const json = await cardRes.json();
-      console.log('📥 register-card API response:', json);
-
-      if (!cardRes.ok) throw new Error('Card registration failed');
-
-      alert('カードが登録されました');
-      await fetchStatus();
-    } catch (err: any) {
-      console.error('[handleCardRegistration] ERROR:', err);
-      alert(err.message || 'カード登録に失敗しました');
-    } finally {
-      setLoading(false);
-      console.log('[handleCardRegistration] END');
+    if (!payjp || !cardNumber) {
+      console.error('[ERROR] payjp または cardNumber が未初期化');
+      alert('カードフォームが準備できていません');
+      return;
     }
-  };
+
+    console.log('[LOG] Calling payjp.createToken (NO name param)...');
+
+    // ✅ token作成の前後に詳細ログ
+    const result = await payjp.createToken(cardNumber, {
+      three_d_secure: false
+    });
+
+    console.log('[LOG] payjp.createToken raw result:', result);
+
+    if (result.error) {
+      console.error('[ERROR] PAY.JP がエラーを返しました:', result.error);
+      throw new Error(result.error.message);
+    }
+
+    const token = result.id;
+    console.log('[SUCCESS] token created:', token);
+
+    console.log('[LOG] register-card API に送信開始');
+
+    // ✅ register-card API呼び出し
+    const cardRes = await fetch('/api/pay/account/register-card', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_code, token }),
+    });
+
+    console.log('[LOG] register-card API response status:', cardRes.status);
+
+    const json = await cardRes.json();
+    console.log('[LOG] register-card API response JSON:', json);
+
+    if (!cardRes.ok) {
+      console.error('[ERROR] register-card API が失敗:', json);
+      throw new Error('Card registration failed');
+    }
+
+    alert('カードが登録されました');
+    await fetchStatus();
+  } catch (err: any) {
+    console.error('[handleCardRegistration] ERROR (catch):', err);
+    alert(err.message || 'カード登録に失敗しました');
+  } finally {
+    setLoading(false);
+    console.log('[handleCardRegistration] END');
+  }
+};
+
 
   // ✅ サブスク登録処理（そのまま）
   const handleSubscribe = async () => {
