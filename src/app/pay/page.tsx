@@ -96,45 +96,51 @@ function PageInner() {
   // ✅ カード登録処理（iframe完了待ち & 多重実行防止）
   const handleCardRegistration = async () => {
     console.log('[handleCardRegistration] START');
-
-    // 🔐 多重実行防止
-    if (registerCalled.current) {
-      console.log('[handleCardRegistration] すでに処理中 → return');
-      return;
-    }
-    registerCalled.current = true;
-    setLoading(true);
-
+  
     try {
       if (!cardReady) {
         alert('カードフォームが準備中です。少し待って再度押してください');
         return;
       }
-
       if (!payjp || !cardNumber) {
         alert('カードフォームが準備できていません');
         return;
       }
-
-      // ✅ 3Dセキュア対応 + タイムアウト延長
-      const result = await payjp.createToken(cardNumber, { three_d_secure: true, timeout: 60000 });
+  
+      // ✅ ここで渡すオプションを事前に定義
+      const tokenOptions = { three_d_secure: true };
+  
+      // ✅ ログに渡すデータを丸ごと出す（中身が空か/変なキーが入ってないか確認できる）
+      console.log('[LOG] createToken に渡す内容: ', {
+        cardElement: cardNumber,
+        options: tokenOptions,
+      });
+  
+      // ✅ token 作成
+      const result = await payjp.createToken(cardNumber, tokenOptions);
+  
       console.log('[LOG] createToken result:', result);
-
+  
       if (result.error) {
         console.error('[handleCardRegistration] token error:', result.error);
         alert(result.error.message);
         return;
       }
-
+  
       // ✅ API送信
+      console.log('[LOG] register-card API に送信する payload:', {
+        user_code,
+        token: result.id,
+      });
+  
       const response = await fetch('/api/pay/account/register-card', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_code, token: result.id }),
       });
-
+  
       if (!response.ok) throw new Error('カード登録 API エラー');
-
+  
       alert('カード登録が完了しました 🎉');
       await fetchStatus(); // ステータス更新
     } catch (err) {
@@ -142,10 +148,9 @@ function PageInner() {
       alert('カード登録に失敗しました');
     } finally {
       console.log('[handleCardRegistration] END');
-      setLoading(false);
-      registerCalled.current = false; // 🔓 再実行可能に戻す
     }
   };
+  
 
   // ✅ サブスク登録処理
   const handleSubscribe = async () => {
