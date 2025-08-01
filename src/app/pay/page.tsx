@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 import { Suspense, useEffect, useState, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import PlanSelectPanel from '@/components/PlanSelectPanel';
-import CardStyle from '@/components/CardStyle';  // ✅ 分割UIを使う
+import CardStyle from '@/components/CardStyle';
 
 function PageInner() {
   const searchParams = useSearchParams();
@@ -22,16 +22,13 @@ function PageInner() {
   const [showCardForm, setShowCardForm] = useState(false);
   const [userCredit, setUserCredit] = useState<number>(0);
 
-  // ✅ script多重読み込み防止用
+  // ✅ script多重読み込み防止
   const initCalled = useRef(false);
 
-  // ✅ ユーザーデータ取得
   const fetchStatus = async () => {
     try {
-      console.log('[fetchStatus] START');
       const res = await fetch(`/api/account-status?user=${user_code}`);
       const json = await res.json();
-      console.log('[fetchStatus] response:', json);
       setUserData(json);
       setCardRegistered(json.card_registered);
       setUserCredit(json.sofia_credit || 0);
@@ -46,90 +43,71 @@ function PageInner() {
 
   // ✅ PAY.JP 初期化（1回だけ）
   const initPayjpCard = () => {
-    if (initCalled.current) {
-      console.log('[initPayjpCard] すでに初期化済みなのでスキップ');
-      return;
-    }
+    if (initCalled.current) return;
     initCalled.current = true;
-
-    console.log('[initPayjpCard] START');
 
     const script = document.createElement('script');
     script.src = 'https://js.pay.jp/v2/pay.js';
     script.async = true;
     script.onload = () => {
-      console.log('✅ PAY.JP script loaded');
-
       const payjpInstance = (window as any).Payjp(process.env.NEXT_PUBLIC_PAYJP_PUBLIC_KEY!);
       setPayjp(payjpInstance);
-      console.log('✅ payjp instance created:', payjpInstance);
 
       const elements = payjpInstance.elements();
-      console.log('✅ payjp elements created:', elements);
 
-      // ✅ 分割フィールド作成（DOMに1つずつ存在する前提）
       const cn = elements.create('cardNumber');
       cn.mount('#card-number');
-      console.log('✅ cardNumber mounted');
       setCardNumber(cn);
 
       const ce = elements.create('cardExpiry');
       ce.mount('#card-expiry');
-      console.log('✅ cardExpiry mounted');
       setCardExpiry(ce);
 
       const cc = elements.create('cardCvc');
       cc.mount('#card-cvc');
-      console.log('✅ cardCvc mounted');
       setCardCvc(cc);
 
       setCardReady(true);
-      console.log('✅ PAY.JP init complete');
     };
 
     document.body.appendChild(script);
   };
 
-  // ✅ カード登録処理（iframe完了待ち）
+  // ✅ カード登録処理（3Dセキュア対応）
   const handleCardRegistration = async () => {
     console.log('[handleCardRegistration] START');
-  
+
     try {
-      console.log('▶ cardNumber', cardNumber);
-      console.log('▶ cardExpiry', cardExpiry);
-      console.log('▶ cardCvc', cardCvc);
-  
       if (!cardReady) {
         alert('カードフォームが準備中です。少し待って再度押してください');
         return;
       }
-  
+
       if (!payjp || !cardNumber) {
         alert('カードフォームが準備できていません');
         return;
       }
-  
-      // ✅ 3Dセキュア対応に変更
+
+      // ✅ 3Dセキュア有効化
       const result = await payjp.createToken(cardNumber, { three_d_secure: true });
       console.log('[LOG] createToken result:', result);
-  
+
       if (result.error) {
         console.error('[handleCardRegistration] token error:', result.error);
         alert(result.error.message);
         return;
       }
-  
-      // ✅ API送信
+
       const response = await fetch('/api/pay/account/register-card', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_code, token: result.id }),
       });
-  
+
       if (!response.ok) throw new Error('カード登録 API エラー');
-  
+
       alert('カード登録が完了しました 🎉');
-      await fetchStatus(); // ステータス更新
+      await fetchStatus();
     } catch (err) {
       console.error('[handleCardRegistration] ERROR', err);
       alert('カード登録に失敗しました');
@@ -137,9 +115,7 @@ function PageInner() {
       console.log('[handleCardRegistration] END');
     }
   };
-  
 
-  // ✅ サブスク登録処理
   const handleSubscribe = async () => {
     setLoading(true);
     try {
@@ -159,8 +135,6 @@ function PageInner() {
         sofia_credit: selectedPlan.credit || 0,
       };
 
-      console.log('📤 Subscribing payload:', payload);
-
       const subscribeRes = await fetch('/api/pay/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -168,8 +142,6 @@ function PageInner() {
       });
 
       const result = await subscribeRes.json();
-      console.log('📦 Subscribe response:', result);
-
       if (!subscribeRes.ok || !result.success) {
         alert(`❌ サブスク登録に失敗しました\n${result.detail || '原因不明'}`);
         return;
@@ -195,39 +167,35 @@ function PageInner() {
         onPlanSelected={(plan) => setSelectedPlan(plan)}
       />
 
-      {/* ✅ カード未登録 → CardStyle UIを表示 */}
+      {/* ✅ カード登録フォームは「常時 mount」 */}
+      <div style={{ display: cardRegistered ? 'none' : 'block' }}>
+        <CardStyle />
+      </div>
+
       {!cardRegistered && (
-        <>
+        <div className="text-center mt-4">
           {!showCardForm ? (
-            <div className="text-center mt-4">
-              <button
-                className="btn-card-register"
-                onClick={() => {
-                  setShowCardForm(true);
-                  initPayjpCard();
-                }}
-              >
-                カードを登録する
-              </button>
-            </div>
+            <button
+              className="btn-card-register"
+              onClick={() => {
+                setShowCardForm(true);
+                initPayjpCard();
+              }}
+            >
+              カードを登録する
+            </button>
           ) : (
-            <div>
-              <CardStyle />
-              <div className="text-center mt-4">
-                <button
-                  onClick={handleCardRegistration}
-                  disabled={!cardReady || loading}
-                  className="btn-card-submit w-full"
-                >
-                  {loading ? 'カード登録中…' : 'このカードを登録する'}
-                </button>
-              </div>
-            </div>
+            <button
+              onClick={handleCardRegistration}
+              disabled={!cardReady || loading}
+              className="btn-card-submit w-full"
+            >
+              {loading ? 'カード登録中…' : 'このカードを登録する'}
+            </button>
           )}
-        </>
+        </div>
       )}
 
-      {/* ✅ カード登録済みならプラン購入ボタン */}
       {cardRegistered && (
         <>
           <div className="registered-card-box text-center">
