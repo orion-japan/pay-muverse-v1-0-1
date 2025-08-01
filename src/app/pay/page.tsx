@@ -4,12 +4,13 @@ export const dynamic = 'force-dynamic';
 import { Suspense, useEffect, useState, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import PlanSelectPanel from '@/components/PlanSelectPanel';
-import CardStyle from '@/components/CardStyle';  // ✅ iframe mount UI
+import CardStyle from '@/components/CardStyle';  // ✅ 分割UIを使う
 
 function PageInner() {
   const searchParams = useSearchParams();
   const user_code = searchParams.get('user') || '';
 
+  // 🔽 状態管理
   const [userData, setUserData] = useState<any>(null);
   const [payjp, setPayjp] = useState<any>(null);
   const [cardNumber, setCardNumber] = useState<any>(null);
@@ -22,7 +23,10 @@ function PageInner() {
   const [showCardForm, setShowCardForm] = useState(false);
   const [userCredit, setUserCredit] = useState<number>(0);
 
+  // ✅ 初期化フラグ（script読み込みガード）
   const initCalled = useRef(false);
+  // ✅ 登録処理の多重実行ガード
+  const registerCalled = useRef(false);
 
   // ✅ ユーザーデータ取得
   const fetchStatus = async () => {
@@ -45,7 +49,10 @@ function PageInner() {
 
   // ✅ PAY.JP 初期化（1回だけ）
   const initPayjpCard = () => {
-    if (initCalled.current) return;
+    if (initCalled.current) {
+      console.log('[initPayjpCard] すでに初期化済みなのでスキップ');
+      return;
+    }
     initCalled.current = true;
 
     console.log('[initPayjpCard] START');
@@ -58,19 +65,25 @@ function PageInner() {
 
       const payjpInstance = (window as any).Payjp(process.env.NEXT_PUBLIC_PAYJP_PUBLIC_KEY!);
       setPayjp(payjpInstance);
+      console.log('✅ payjp instance created:', payjpInstance);
 
       const elements = payjpInstance.elements();
+      console.log('✅ payjp elements created:', elements);
 
+      // ✅ 分割フィールド作成（DOMに1つずつ存在する前提）
       const cn = elements.create('cardNumber');
       cn.mount('#card-number');
+      console.log('✅ cardNumber mounted');
       setCardNumber(cn);
 
       const ce = elements.create('cardExpiry');
       ce.mount('#card-expiry');
+      console.log('✅ cardExpiry mounted');
       setCardExpiry(ce);
 
       const cc = elements.create('cardCvc');
       cc.mount('#card-cvc');
+      console.log('✅ cardCvc mounted');
       setCardCvc(cc);
 
       setCardReady(true);
@@ -80,14 +93,17 @@ function PageInner() {
     document.body.appendChild(script);
   };
 
-  // ✅ 初回ロードで自動初期化（iframeを先に立ち上げる）
-  useEffect(() => {
-    initPayjpCard();
-  }, []);
-
-  // ✅ カード登録処理（3Dセキュア対応）
+  // ✅ カード登録処理（iframe完了待ち & 多重実行防止）
   const handleCardRegistration = async () => {
     console.log('[handleCardRegistration] START');
+
+    // 🔐 多重実行防止
+    if (registerCalled.current) {
+      console.log('[handleCardRegistration] すでに処理中 → return');
+      return;
+    }
+    registerCalled.current = true;
+    setLoading(true);
 
     try {
       if (!cardReady) {
@@ -100,7 +116,8 @@ function PageInner() {
         return;
       }
 
-      const result = await payjp.createToken(cardNumber, { three_d_secure: true });
+      // ✅ 3Dセキュア対応 + タイムアウト延長
+      const result = await payjp.createToken(cardNumber, { three_d_secure: true, timeout: 60000 });
       console.log('[LOG] createToken result:', result);
 
       if (result.error) {
@@ -109,6 +126,7 @@ function PageInner() {
         return;
       }
 
+      // ✅ API送信
       const response = await fetch('/api/pay/account/register-card', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -118,17 +136,20 @@ function PageInner() {
       if (!response.ok) throw new Error('カード登録 API エラー');
 
       alert('カード登録が完了しました 🎉');
-      await fetchStatus();
+      await fetchStatus(); // ステータス更新
     } catch (err) {
       console.error('[handleCardRegistration] ERROR', err);
       alert('カード登録に失敗しました');
     } finally {
       console.log('[handleCardRegistration] END');
+      setLoading(false);
+      registerCalled.current = false; // 🔓 再実行可能に戻す
     }
   };
 
   // ✅ サブスク登録処理
   const handleSubscribe = async () => {
+    if (loading) return;
     setLoading(true);
     try {
       if (!selectedPlan?.plan_type) {
@@ -183,25 +204,40 @@ function PageInner() {
         onPlanSelected={(plan) => setSelectedPlan(plan)}
       />
 
-      {/* ✅ CardStyle は mount したまま */}
-      <div style={{ display: cardRegistered ? 'none' : 'block' }}>
-        <CardStyle />
-      </div>
-
-      {/* ✅ 未登録ならカード登録ボタン */}
+      {/* ✅ カード未登録 → CardStyle UIを表示 */}
       {!cardRegistered && (
-        <div className="text-center mt-4">
-          <button
-            onClick={handleCardRegistration}
-            disabled={!cardReady || loading}
-            className="btn-card-submit w-full"
-          >
-            {loading ? 'カード登録中…' : 'このカードを登録する'}
-          </button>
-        </div>
+        <>
+          {!showCardForm ? (
+            <div className="text-center mt-4">
+              <button
+                className="btn-card-register"
+                onClick={() => {
+                  setShowCardForm(true);
+                  initPayjpCard();
+                }}
+                disabled={loading}
+              >
+                カードを登録する
+              </button>
+            </div>
+          ) : (
+            <div>
+              <CardStyle />
+              <div className="text-center mt-4">
+                <button
+                  onClick={handleCardRegistration}
+                  disabled={!cardReady || loading}
+                  className="btn-card-submit w-full"
+                >
+                  {loading ? 'カード登録中…' : 'このカードを登録する'}
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
-      {/* ✅ 登録済みならプラン購入 */}
+      {/* ✅ カード登録済みならプラン購入ボタン */}
       {cardRegistered && (
         <>
           <div className="registered-card-box text-center">
