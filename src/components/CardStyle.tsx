@@ -3,22 +3,26 @@
 import { useEffect } from 'react'
 import '@/app/globals.css'
 
-// ✅ Props型を定義
+// ✅ Props型を定義（onReady を追加）
 type Props = {
   onNameChange?: (name: string) => void;
-  cardReady?: boolean;
-  loading?: boolean;
+  onCardReady?: (ready: boolean) => void;   // ← iframe readyを親に伝える
 };
 
-export default function CardStyle({ onNameChange }: Props) {
+export default function CardStyle({ onNameChange, onCardReady }: Props) {
   useEffect(() => {
-    console.log('[CardStyle] マウント完了');
+    console.log('[CardStyle] マウント開始');
 
-    // ✅ PAY.JPスクリプト読み込み
+    // ✅ PAY.JPスクリプト多重読み込み防止
+    if (document.querySelector('script[src="https://js.pay.jp/v2/pay.js"]')) {
+      console.log('[CardStyle] すでに pay.js 読み込み済み');
+      return;
+    }
+
     const s = document.createElement('script');
     s.src = 'https://js.pay.jp/v2/pay.js';
     s.onload = () => {
-      console.log('[CardStyle] PAY.JP script loaded');
+      console.log('[CardStyle] PAY.JP script loaded ✅');
 
       const payjp = (window as any).Payjp(process.env.NEXT_PUBLIC_PAYJP_PUBLIC_KEY!);
       const elements = payjp.elements();
@@ -35,18 +39,36 @@ export default function CardStyle({ onNameChange }: Props) {
       };
 
       // ✅ 各フォーム mount
-      elements.create('cardNumber', { style }).mount('#card-number');
+      const cardNumber = elements.create('cardNumber', { style });
+      const cardExpiry = elements.create('cardExpiry', { style });
+      const cardCvc    = elements.create('cardCvc', { style });
+
+      // ---- iframe Ready イベント ----
+      cardNumber.on('ready', () => {
+        console.log('✅ cardNumber iframe 完全 ready');
+        onCardReady?.(true);  // 親に「カード入力欄 ready」を通知
+      });
+
+      cardExpiry.on('ready', () => {
+        console.log('✅ cardExpiry iframe 完全 ready');
+      });
+
+      cardCvc.on('ready', () => {
+        console.log('✅ cardCvc iframe 完全 ready');
+      });
+
+      cardNumber.mount('#card-number');
       console.log('[CardStyle] cardNumber mount 完了');
 
-      elements.create('cardExpiry', { style }).mount('#card-expiry');
+      cardExpiry.mount('#card-expiry');
       console.log('[CardStyle] cardExpiry mount 完了');
 
-      elements.create('cardCvc', { style }).mount('#card-cvc');
+      cardCvc.mount('#card-cvc');
       console.log('[CardStyle] cardCvc mount 完了');
     };
 
     document.body.appendChild(s);
-  }, []);
+  }, [onCardReady]);
 
   return (
     <div className="payjp-wrap">
@@ -87,7 +109,7 @@ export default function CardStyle({ onNameChange }: Props) {
             type="text"
             placeholder="TARO YAMADA"
             className="payjp-input"
-            onChange={(e) => onNameChange && onNameChange(e.target.value)}
+            onChange={(e) => onNameChange?.(e.target.value)}
           />
         </div>
       </div>
