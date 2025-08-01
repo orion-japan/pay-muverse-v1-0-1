@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import PlanSelectModal from './PlanSelectModal';
-import CardRegisterModal from './CardRegisterModal'; // ✅ 新規追加
 
 type Plan = {
   name: string;
@@ -106,12 +105,7 @@ export default function PlanSelectPanel({
         onCancel={cancelOverwrite}
       />
 
-      {/* ✅ カード登録モーダル */}
-      <CardRegisterModal
-  isOpen={showCardModal}
-  onClose={() => setShowCardModal(false)}
-  userCode={userCode}   // ✅ これを追加
-/>
+    
 
     </div>
   );
