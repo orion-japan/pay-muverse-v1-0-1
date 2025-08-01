@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 import { Suspense, useEffect, useState, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import PlanSelectPanel from '@/components/PlanSelectPanel';
-import CardStyle from '@/components/CardStyle';
+import CardStyle from '@/components/CardStyle';  // ✅ iframe mount UI
 
 function PageInner() {
   const searchParams = useSearchParams();
@@ -22,13 +22,15 @@ function PageInner() {
   const [showCardForm, setShowCardForm] = useState(false);
   const [userCredit, setUserCredit] = useState<number>(0);
 
-  // ✅ script多重読み込み防止
   const initCalled = useRef(false);
 
+  // ✅ ユーザーデータ取得
   const fetchStatus = async () => {
     try {
+      console.log('[fetchStatus] START');
       const res = await fetch(`/api/account-status?user=${user_code}`);
       const json = await res.json();
+      console.log('[fetchStatus] response:', json);
       setUserData(json);
       setCardRegistered(json.card_registered);
       setUserCredit(json.sofia_credit || 0);
@@ -46,10 +48,14 @@ function PageInner() {
     if (initCalled.current) return;
     initCalled.current = true;
 
+    console.log('[initPayjpCard] START');
+
     const script = document.createElement('script');
     script.src = 'https://js.pay.jp/v2/pay.js';
     script.async = true;
     script.onload = () => {
+      console.log('✅ PAY.JP script loaded');
+
       const payjpInstance = (window as any).Payjp(process.env.NEXT_PUBLIC_PAYJP_PUBLIC_KEY!);
       setPayjp(payjpInstance);
 
@@ -68,10 +74,16 @@ function PageInner() {
       setCardCvc(cc);
 
       setCardReady(true);
+      console.log('✅ PAY.JP init complete');
     };
 
     document.body.appendChild(script);
   };
+
+  // ✅ 初回ロードで自動初期化（iframeを先に立ち上げる）
+  useEffect(() => {
+    initPayjpCard();
+  }, []);
 
   // ✅ カード登録処理（3Dセキュア対応）
   const handleCardRegistration = async () => {
@@ -88,7 +100,6 @@ function PageInner() {
         return;
       }
 
-      // ✅ 3Dセキュア有効化
       const result = await payjp.createToken(cardNumber, { three_d_secure: true });
       console.log('[LOG] createToken result:', result);
 
@@ -116,6 +127,7 @@ function PageInner() {
     }
   };
 
+  // ✅ サブスク登録処理
   const handleSubscribe = async () => {
     setLoading(true);
     try {
@@ -135,6 +147,8 @@ function PageInner() {
         sofia_credit: selectedPlan.credit || 0,
       };
 
+      console.log('📤 Subscribing payload:', payload);
+
       const subscribeRes = await fetch('/api/pay/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -142,6 +156,8 @@ function PageInner() {
       });
 
       const result = await subscribeRes.json();
+      console.log('📦 Subscribe response:', result);
+
       if (!subscribeRes.ok || !result.success) {
         alert(`❌ サブスク登録に失敗しました\n${result.detail || '原因不明'}`);
         return;
@@ -167,35 +183,25 @@ function PageInner() {
         onPlanSelected={(plan) => setSelectedPlan(plan)}
       />
 
-      {/* ✅ カード登録フォームは「常時 mount」 */}
+      {/* ✅ CardStyle は mount したまま */}
       <div style={{ display: cardRegistered ? 'none' : 'block' }}>
         <CardStyle />
       </div>
 
+      {/* ✅ 未登録ならカード登録ボタン */}
       {!cardRegistered && (
         <div className="text-center mt-4">
-          {!showCardForm ? (
-            <button
-              className="btn-card-register"
-              onClick={() => {
-                setShowCardForm(true);
-                initPayjpCard();
-              }}
-            >
-              カードを登録する
-            </button>
-          ) : (
-            <button
-              onClick={handleCardRegistration}
-              disabled={!cardReady || loading}
-              className="btn-card-submit w-full"
-            >
-              {loading ? 'カード登録中…' : 'このカードを登録する'}
-            </button>
-          )}
+          <button
+            onClick={handleCardRegistration}
+            disabled={!cardReady || loading}
+            className="btn-card-submit w-full"
+          >
+            {loading ? 'カード登録中…' : 'このカードを登録する'}
+          </button>
         </div>
       )}
 
+      {/* ✅ 登録済みならプラン購入 */}
       {cardRegistered && (
         <>
           <div className="registered-card-box text-center">
