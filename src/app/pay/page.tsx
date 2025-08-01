@@ -1,7 +1,7 @@
 'use client';
 export const dynamic = 'force-dynamic';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useState, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import PlanSelectPanel from '@/components/PlanSelectPanel';
 import CardStyle from '@/components/CardStyle';  // ✅ 分割UIを使う
@@ -22,6 +22,9 @@ function PageInner() {
   const [showCardForm, setShowCardForm] = useState(false);
   const [userCredit, setUserCredit] = useState<number>(0);
 
+  // ✅ script多重読み込み防止用
+  const initCalled = useRef(false);
+
   // ✅ ユーザーデータ取得
   const fetchStatus = async () => {
     try {
@@ -41,12 +44,13 @@ function PageInner() {
     if (user_code) fetchStatus();
   }, [user_code]);
 
-  // ✅ PAY.JP 初期化（CardStyle用）
+  // ✅ PAY.JP 初期化（1回だけ）
   const initPayjpCard = () => {
-    if (payjp || cardNumber || cardRegistered) {
-      console.log('[initPayjpCard] すでに初期化済み');
+    if (initCalled.current) {
+      console.log('[initPayjpCard] すでに初期化済みなのでスキップ');
       return;
     }
+    initCalled.current = true;
 
     console.log('[initPayjpCard] START');
 
@@ -63,7 +67,7 @@ function PageInner() {
       const elements = payjpInstance.elements();
       console.log('✅ payjp elements created:', elements);
 
-      // ✅ 分割フィールド作成
+      // ✅ 分割フィールド作成（DOMに1つずつ存在する前提）
       const cn = elements.create('cardNumber');
       cn.mount('#card-number');
       console.log('✅ cardNumber mounted');
@@ -86,36 +90,44 @@ function PageInner() {
     document.body.appendChild(script);
   };
 
-  // ✅ カード登録処理（iframe 完了待ち & 詳細ログ）
+  // ✅ カード登録処理（iframe完了待ち）
   const handleCardRegistration = async () => {
     console.log('[handleCardRegistration] START');
-  
+
     try {
+      console.log('▶ cardNumber', cardNumber);
+      console.log('▶ cardExpiry', cardExpiry);
+      console.log('▶ cardCvc', cardCvc);
+
+      if (!cardReady) {
+        alert('カードフォームが準備中です。少し待って再度押してください');
+        return;
+      }
+
       if (!payjp || !cardNumber) {
         alert('カードフォームが準備できていません');
         return;
       }
-  
-      // ✅ createToken には cardNumber だけ渡す
+
+      // ✅ createToken を呼ぶ
       const result = await payjp.createToken(cardNumber);
-  
       console.log('[LOG] createToken result:', result);
-  
+
       if (result.error) {
         console.error('[handleCardRegistration] token error:', result.error);
         alert(result.error.message);
         return;
       }
-  
-      // ✅ 成功時 API に送信
+
+      // ✅ API送信
       const response = await fetch('/api/pay/account/register-card', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_code, token: result.id }),
       });
-  
+
       if (!response.ok) throw new Error('カード登録 API エラー');
-  
+
       alert('カード登録が完了しました 🎉');
       await fetchStatus(); // ステータス更新
     } catch (err) {
@@ -125,12 +137,8 @@ function PageInner() {
       console.log('[handleCardRegistration] END');
     }
   };
-  
-  
-  
-  
 
-  // ✅ サブスク登録処理（そのまま）
+  // ✅ サブスク登録処理
   const handleSubscribe = async () => {
     setLoading(true);
     try {
