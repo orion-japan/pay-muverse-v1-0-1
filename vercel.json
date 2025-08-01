@@ -1,8 +1,0 @@
-{
-  "regions": ["hnd1"],
-  "functions": {
-    "api/**/*.ts": {
-      "maxDuration": 30
-    }
-  }
-}
