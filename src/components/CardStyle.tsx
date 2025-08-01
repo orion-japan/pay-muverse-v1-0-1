@@ -3,20 +3,27 @@
 import { useEffect } from 'react'
 import '@/app/globals.css'
 
-// ✅ ここで型を追加
+// ✅ Props型を定義
 type Props = {
   onNameChange?: (name: string) => void;
+  cardReady?: boolean;
+  loading?: boolean;
 };
 
 export default function CardStyle({ onNameChange }: Props) {
   useEffect(() => {
-    const s = document.createElement('script')
-    s.src = 'https://js.pay.jp/v2/pay.js'
-    s.onload = () => {
-      const payjp = (window as any).Payjp(process.env.NEXT_PUBLIC_PAYJP_PUBLIC_KEY!)
-      const elements = payjp.elements()
+    console.log('[CardStyle] マウント完了');
 
-      // iframe内部のスタイル
+    // ✅ PAY.JPスクリプト読み込み
+    const s = document.createElement('script');
+    s.src = 'https://js.pay.jp/v2/pay.js';
+    s.onload = () => {
+      console.log('[CardStyle] PAY.JP script loaded');
+
+      const payjp = (window as any).Payjp(process.env.NEXT_PUBLIC_PAYJP_PUBLIC_KEY!);
+      const elements = payjp.elements();
+
+      // ✅ iframe 内のスタイル設定
       const style = {
         base: {
           fontSize: '16px',
@@ -25,25 +32,36 @@ export default function CardStyle({ onNameChange }: Props) {
           padding: '12px',
           '::placeholder': { color: '#9ca3af' }
         }
-      }
+      };
 
       // ✅ 各フォーム mount
-      elements.create('cardNumber', { style }).mount('#card-number')
-      elements.create('cardExpiry', { style }).mount('#card-expiry')
-      elements.create('cardCvc', { style }).mount('#card-cvc')
-    }
-    document.body.appendChild(s)
-  }, [])
+      elements.create('cardNumber', { style }).mount('#card-number');
+      console.log('[CardStyle] cardNumber mount 完了');
+
+      elements.create('cardExpiry', { style }).mount('#card-expiry');
+      console.log('[CardStyle] cardExpiry mount 完了');
+
+      elements.create('cardCvc', { style }).mount('#card-cvc');
+      console.log('[CardStyle] cardCvc mount 完了');
+    };
+
+    document.body.appendChild(s);
+  }, []);
 
   return (
     <div className="payjp-wrap">
       <div className="payjp-card-box">
-        <h2 className="payjp-title">支払い情報</h2>
+        <h2 className="payjp-title">💳 支払い情報</h2>
 
-        {/* ✅ ロゴ */}
+        {/* ✅ ロゴ行 */}
         <div className="payjp-brand-row">
           {['visa','mastercard','jcb','amex','diners'].map(b => (
-            <img key={b} src={`/${b}.png`} alt={b} className="payjp-brand-icon" />
+            <img 
+              key={b} 
+              src={`/${b}.png`}  // publicフォルダの画像を表示
+              alt={b} 
+              className="payjp-brand-icon"
+            />
           ))}
         </div>
 
@@ -64,7 +82,7 @@ export default function CardStyle({ onNameChange }: Props) {
           </div>
 
           {/* ✅ 名義入力 → 親に渡す */}
-          <label className="payjp-label">名前</label>
+          <label className="payjp-label">カード名義（半角英字）</label>
           <input
             type="text"
             placeholder="TARO YAMADA"

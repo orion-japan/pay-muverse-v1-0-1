@@ -1,34 +1,23 @@
 // src/app/api/pay/account/register-card/route.ts
+
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import Payjp from 'payjp';
-import https from 'node:https';
 
-// ✅ PAY.JP 初期化（タイムアウト120秒 / 2回リトライ / KeepAlive）
-const agent = new https.Agent({ keepAlive: true });
-
-const payjp = Payjp(process.env.PAYJP_SECRET_KEY || '', {
-  timeout: 120_000,        // デフォルト80s→120sに延長
-  maxRetries: 2,           // リトライ回数を明示
-  httpAgent: agent,
-});
+// ✅ PAY.JP初期化
+const payjp = Payjp(process.env.PAYJP_SECRET_KEY || '');
 
 export async function POST(req: Request) {
-  console.log('📩 [/register-card] API HIT');
-  const startAll = Date.now();
-
   try {
     const { user_code, token } = await req.json();
-    console.log('🟢 受信データ:', { user_code, token: token?.slice(0, 8) });
+    console.log('🟢 受信データ:', { user_code, token });
 
     // ✅ Supabaseからメールアドレス取得
-    console.time('⏱ Supabase:メール取得');
     const { data: userData, error: userError } = await supabase
       .from('users')
       .select('click_email')
       .eq('user_code', user_code)
       .single();
-    console.timeEnd('⏱ Supabase:メール取得');
 
     if (userError || !userData?.click_email) {
       console.error('❌ Supabaseからメール取得失敗:', userError);
@@ -42,16 +31,14 @@ export async function POST(req: Request) {
     console.log('📨 メール取得成功:', email);
 
     // ✅ PAY.JP 顧客作成
-    console.time('⏱ PAY.JP 顧客作成');
     const customer = await payjp.customers.create({
       email,
       card: token,
     });
-    console.timeEnd('⏱ PAY.JP 顧客作成');
+
     console.log('✅ PAY.JP顧客作成成功:', customer.id);
 
     // ✅ Supabaseに顧客IDとカード登録済みを保存
-    console.time('⏱ Supabase:顧客ID保存');
     const { error: updateError } = await supabase
       .from('users')
       .update({
@@ -59,7 +46,6 @@ export async function POST(req: Request) {
         card_registered: true,
       })
       .eq('user_code', user_code);
-    console.timeEnd('⏱ Supabase:顧客ID保存');
 
     if (updateError) {
       console.error('❌ Supabase更新エラー:', updateError.message);
@@ -70,8 +56,6 @@ export async function POST(req: Request) {
     }
 
     console.log('🟢 Supabase更新完了: payjp_customer_id 保存成功');
-
-    console.log(`⏳ API 全体処理時間: ${Date.now() - startAll}ms`);
 
     return NextResponse.json({
       success: true,
