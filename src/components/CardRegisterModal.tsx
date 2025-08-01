@@ -41,7 +41,7 @@ export default function CardRegisterModal({
       </h1>
 
       {/* ✅ CardForm へ Props をそのままバケツリレー */}
-      <CardForm userCode={userCode} onRegister={onClose} />
+      <CardForm userCode={userCode} />
     </div>
   );
 }
