@@ -1,4 +1,10 @@
 'use client';
+
+type CardFormProps = {
+  userCode: string;
+  onRegister: () => void;
+};
+
 export const dynamic = 'force-dynamic';
 
 import { Suspense, useEffect, useState } from 'react';
