@@ -12,7 +12,7 @@ function PageInner() {
 
   const [userData, setUserData] = useState<any>(null);
   const [payjp, setPayjp] = useState<any>(null);
-  const [card, setCard] = useState<any>(null);
+  const [card, setCard] = useState<any>(null);   // ✅ card は elements 全体を保持
   const [cardReady, setCardReady] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -38,51 +38,92 @@ function PageInner() {
     if (user_code) fetchStatus();
   }, [user_code]);
 
-  // ✅ PAY.JP カード入力初期化
+  // ✅ PAY.JP カード入力初期化（カードフォーム表示時にだけ実行）
   const initPayjpCard = () => {
     if (payjp || card || cardRegistered) return;
+
+    console.log('▶ PAY.JP スクリプト読み込み開始');
 
     const script = document.createElement('script');
     script.src = 'https://js.pay.jp/v2/pay.js';
     script.async = true;
     script.onload = () => {
+      console.log('✅ PAY.JP スクリプト読み込み完了');
+
       const payjpInstance = (window as any).Payjp(process.env.NEXT_PUBLIC_PAYJP_PUBLIC_KEY!);
       setPayjp(payjpInstance);
 
+      // ✅ Elements 初期化
       const elements = payjpInstance.elements();
-      const cardElement = elements.create('card');
-      cardElement.mount('#card-form');  
-      setCard(cardElement);
+
+      // ✅ cardNumber / cardExpiry / cardCvc を個別にマウント
+      const cardNumber = elements.create('cardNumber');
+      cardNumber.mount('#card-number');
+      console.log('✅ cardNumber mount 完了');
+
+      const cardExpiry = elements.create('cardExpiry');
+      cardExpiry.mount('#card-expiry');
+      console.log('✅ cardExpiry mount 完了');
+
+      const cardCvc = elements.create('cardCvc');
+      cardCvc.mount('#card-cvc');
+      console.log('✅ cardCvc mount 完了');
+
+      // ✅ elements 全体を state に格納（token 作成時に使用）
+      setCard(elements);
       setCardReady(true);
+
+      console.log('✅ PAY.JP 初期化完了');
     };
+
     document.body.appendChild(script);
   };
 
   // ✅ カード登録処理
-  const handleCardRegistration = async () => {
-    setLoading(true);
-    try {
-      const tokenRes = await payjp.createToken(card);
-      if (tokenRes.error) throw new Error(tokenRes.error.message);
-      const token = tokenRes.id;
-
-      const cardRes = await fetch('/api/pay/account/register-card', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_code, token }),
-      });
-
-      if (!cardRes.ok) throw new Error('Card registration failed');
-
-      alert('カードが登録されました');
-      await fetchStatus(); // Refresh
-    } catch (err: any) {
-      console.error('❌ Card registration error:', err);
-      alert(err.message || 'カード登録に失敗しました');
-    } finally {
-      setLoading(false);
+const handleCardRegistration = async () => {
+  setLoading(true);
+  try {
+    if (!payjp || !card) {
+      alert('❌ PAY.JP がまだ初期化されていません');
+      return;
     }
-  };
+
+    // ✅ 名前を取得
+    const nameInput = (document.querySelector<HTMLInputElement>('input[placeholder="TARO YAMADA"]')?.value) || 'NO NAME';
+
+    // ✅ cardNumber だけを取得（elements 全体ではなく）
+    const cardNumberElement = (card as any).getElement('cardNumber');
+
+    if (!cardNumberElement) {
+      throw new Error('カード番号入力欄が見つかりません');
+    }
+
+    // ✅ token 作成時に name を一緒に送る
+    const tokenRes = await payjp.createToken(cardNumberElement, { name: nameInput });
+
+    if (tokenRes.error) throw new Error(tokenRes.error.message);
+    const token = tokenRes.id;
+    console.log('✅ PAY.JP token 作成成功:', token);
+
+    // ✅ API 経由でサーバーに登録
+    const cardRes = await fetch('/api/pay/account/register-card', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_code, token }),
+    });
+
+    if (!cardRes.ok) throw new Error('Card registration failed');
+
+    alert('✅ カードが登録されました');
+    await fetchStatus(); // Refresh
+  } catch (err: any) {
+    console.error('❌ Card registration error:', err);
+    alert(err.message || 'カード登録に失敗しました');
+  } finally {
+    setLoading(false);
+  }
+};
+
 
   // ✅ サブスク登録処理
   const handleSubscribe = async () => {
@@ -161,7 +202,7 @@ function PageInner() {
           ) : (
             // ⭐ 押したらフォームが出現
             <div>
-              <CardStyle /> {/* ✅ 内部の「カードで支払う」ボタンは削除済み */}
+              <CardStyle /> {/* ✅ UIだけ表示（カードで支払うボタンは削除済み） */}
               <div className="text-center mt-4">
                 <button
                   onClick={handleCardRegistration}

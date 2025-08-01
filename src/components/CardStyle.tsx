@@ -1,69 +1,68 @@
-'use client'
+'use client';
 
-import { useEffect } from 'react'
-import '@/app/globals.css'   // ✅ appフォルダ直下のglobals.cssを読み込む
+import { useEffect, useRef } from 'react';
+import '@/app/globals.css';
 
 export default function CardStyle() {
-  /* ------------ PAY.JP 初期化 ------------ */
+  const initialized = useRef(false);
+
   useEffect(() => {
-    const s = document.createElement('script')
-    s.src = 'https://js.pay.jp/v2/pay.js'
-    s.onload = () => {
-      // ✅ DOMが確実に描画された後に mount 実行
-      setTimeout(() => {
-        const payjp = (window as any).Payjp(process.env.NEXT_PUBLIC_PAYJP_PUBLIC_KEY!)
-        const elements = payjp.elements()
+    if (initialized.current) return;   // ✅ mountの二重実行を防止
+    initialized.current = true;
 
-        // ✅ iframe 内のスタイル
-        const style = {
-          base: {
-            fontSize: '16px',
-            color: '#222',
-            letterSpacing: '0.03em',
-            padding: '12px',
-            '::placeholder': { color: '#9ca3af' }
-          }
-        }
+    console.log('✅ PAY.JP スクリプト読み込み開始');
 
-        // ✅ mount の前に DOM が存在するか確認してから実行
-        const cardNumberEl = document.getElementById('card-number')
-        if (cardNumberEl) {
-          elements.create('cardNumber', { style }).mount('#card-number')
-        } else {
-          console.warn('⚠️ #card-number が見つかりません')
-        }
+    const script = document.createElement('script');
+    script.src = 'https://js.pay.jp/v2/pay.js';
+    script.onload = () => {
+      console.log('✅ PAY.JP スクリプト読込完了');
 
-        const cardExpiryEl = document.getElementById('card-expiry')
-        if (cardExpiryEl) {
-          elements.create('cardExpiry', { style }).mount('#card-expiry')
-        } else {
-          console.warn('⚠️ #card-expiry が見つかりません')
-        }
+      const payjp = (window as any).Payjp(process.env.NEXT_PUBLIC_PAYJP_PUBLIC_KEY!);
+      const elements = payjp.elements();
 
-        const cardCvcEl = document.getElementById('card-cvc')
-        if (cardCvcEl) {
-          elements.create('cardCvc', { style }).mount('#card-cvc')
-        } else {
-          console.warn('⚠️ #card-cvc が見つかりません')
-        }
-      }, 500) // ← 0.5秒遅延で DOM が確実にある状態にする
-    }
-    document.body.appendChild(s)
-  }, [])
+      const style = {
+        base: {
+          fontSize: '16px',
+          color: '#222',
+          letterSpacing: '0.03em',
+          padding: '12px',
+          '::placeholder': { color: '#9ca3af' },
+        },
+      };
+
+      // ✅ DOMが存在するかチェックしてから mount
+      const numberEl = document.getElementById('card-number');
+      const expiryEl = document.getElementById('card-expiry');
+      const cvcEl = document.getElementById('card-cvc');
+
+      if (numberEl && expiryEl && cvcEl) {
+        elements.create('cardNumber', { style }).mount('#card-number');
+        console.log('✅ cardNumber mount 完了');
+
+        elements.create('cardExpiry', { style }).mount('#card-expiry');
+        console.log('✅ cardExpiry mount 完了');
+
+        elements.create('cardCvc', { style }).mount('#card-cvc');
+        console.log('✅ cardCvc mount 完了');
+      } else {
+        console.error('❌ mount対象のDOMが存在しません');
+      }
+    };
+
+    document.body.appendChild(script);
+  }, []);
 
   return (
     <div className="payjp-wrap">
       <div className="payjp-card-box">
-        {/* ── タイトル & ロゴ ── */}
         <h2 className="payjp-title">支払い情報</h2>
 
         <div className="payjp-brand-row">
-          {['visa','mastercard','jcb','amex','diners'].map(b => (
+          {['visa', 'mastercard', 'jcb', 'amex', 'diners'].map((b) => (
             <img key={b} src={`/${b}.png`} alt={b} className="payjp-brand-icon" />
           ))}
         </div>
 
-        {/* ── 入力欄 ── */}
         <div className="payjp-form">
           <label className="payjp-label">カード番号</label>
           <div id="card-number" className="payjp-input" />
@@ -80,16 +79,13 @@ export default function CardStyle() {
           </div>
 
           <label className="payjp-label">名前</label>
-          <input
-            type="text"
-            placeholder="TARO YAMADA"
-            className="payjp-input"
-          />
+          <input type="text" placeholder="TARO YAMADA" className="payjp-input" />
         </div>
 
-        {/* ── ボタン（PAY.JPのテスト時はUIだけ） ── */}
-        <button className="payjp-submit-btn">カードで支払う</button>
+        {/* ✅ 「カードで支払う」ボタンは削除済み */}
       </div>
     </div>
-  )
+  );
 }
+
+
