@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import PlanSelectPanel from '@/components/PlanSelectPanel';
-import CardStyle from '@/components/CardStyle';  // ✅ カード入力UI
+import CardStyle from '@/components/CardStyle';
 
 function PageInner() {
   const searchParams = useSearchParams();
@@ -12,7 +12,7 @@ function PageInner() {
 
   const [userData, setUserData] = useState<any>(null);
   const [payjp, setPayjp] = useState<any>(null);
-  const [card, setCard] = useState<any>(null);
+  const [cardElement, setCardElement] = useState<any>(null);   // ✅ ← card専用
   const [cardReady, setCardReady] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -20,20 +20,19 @@ function PageInner() {
   const [showCardForm, setShowCardForm] = useState(false);
   const [userCredit, setUserCredit] = useState<number>(0);
 
-  // ✅ カード名義（CardStyleから受け取る）
-  const [cardHolder, setCardHolder] = useState('');
-
-  // ✅ ユーザーデータ取得
+  /** ✅ ユーザーデータ取得 */
   const fetchStatus = async () => {
+    console.log('🔍 [fetchStatus] START');
     try {
       const res = await fetch(`/api/account-status?user=${user_code}`);
       const json = await res.json();
+      console.log('✅ [fetchStatus] API response:', json);
+
       setUserData(json);
       setCardRegistered(json.card_registered);
       setUserCredit(json.sofia_credit || 0);
-      console.log('✅ ユーザーデータ取得:', json);
     } catch (err) {
-      console.error('⛔ ユーザー取得失敗:', err);
+      console.error('⛔ [fetchStatus] ERROR:', err);
     }
   };
 
@@ -41,106 +40,94 @@ function PageInner() {
     if (user_code) fetchStatus();
   }, [user_code]);
 
-  // ✅ PAY.JP カード入力初期化
+  /** ✅ PAY.JP 初期化 */
   const initPayjpCard = () => {
-    if (payjp || card || cardRegistered) return;
+    console.log('▶ [initPayjpCard] START');
 
+    if (payjp || cardElement || cardRegistered) {
+      console.log('⚠️ [initPayjpCard] already initialized or card registered');
+      return;
+    }
+
+    console.log('📥 PAY.JP script loading...');
     const script = document.createElement('script');
     script.src = 'https://js.pay.jp/v2/pay.js';
     script.async = true;
+
     script.onload = () => {
+      console.log('✅ PAY.JP script loaded');
+
       const payjpInstance = (window as any).Payjp(process.env.NEXT_PUBLIC_PAYJP_PUBLIC_KEY!);
       setPayjp(payjpInstance);
+      console.log('✅ payjp instance created');
 
+      /** ✅ Elements 初期化 */
       const elements = payjpInstance.elements();
-      const cardElement = elements.create('card'); // カード情報入力欄まとめ
-      cardElement.mount('#card-form');  
-      setCard(cardElement);
+
+      /** ✅ 1つのカードElementを作成 */
+      const card = elements.create('card');
+      card.mount('#card-form');
+      console.log('✅ card element mounted');
+
+      setCardElement(card);
       setCardReady(true);
-      console.log('✅ PAY.JP 初期化完了');
+      console.log('✅ cardReady true');
     };
+
+    script.onerror = () => {
+      console.error('❌ PAY.JP script failed to load');
+    };
+
     document.body.appendChild(script);
   };
 
-  // ✅ カード登録処理（nameを含めてトークン作成）
+  /** ✅ カード登録処理 */
   const handleCardRegistration = async () => {
+    console.log('▶ [handleCardRegistration] START');
     setLoading(true);
+
     try {
-      if (!cardHolder) {
-        alert('カード名義を入力してください');
-        return;
+      if (!payjp || !cardElement) {
+        throw new Error('PAY.JP が初期化されていません');
       }
 
-      const tokenRes = await payjp.createToken(card, {
-        card: { name: cardHolder }
+      console.log('📦 Calling payjp.createToken...');
+      const result = await payjp.createToken(cardElement, {
+        name: 'TARO YAMADA', // ✅ UIから取得するならここを差し替え
       });
 
-      if (tokenRes.error) {
-        throw new Error(tokenRes.error.message);
+      console.log('📦 payjp.createToken response:', result);
+
+      if (result.error) {
+        console.error('❌ Token creation error:', result.error);
+        throw new Error(result.error.message);
       }
 
-      const token = tokenRes.id;
+      const token = result.id;
+      console.log('✅ PAY.JP token:', token);
 
+      console.log('📡 Calling /api/pay/account/register-card');
       const cardRes = await fetch('/api/pay/account/register-card', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_code, token }),
       });
 
-      if (!cardRes.ok) throw new Error('Card registration failed');
+      const json = await cardRes.json();
+      console.log('📩 register-card API response:', json);
 
-      alert('カードが登録されました');
-      await fetchStatus(); // Refresh
+      if (!cardRes.ok) {
+        throw new Error('カード登録APIに失敗しました');
+      }
+
+      alert('✅ カードが登録されました');
+      await fetchStatus();
     } catch (err: any) {
-      console.error('❌ Card registration error:', err);
+      console.error('❌ [handleCardRegistration] ERROR:', err);
       alert(err.message || 'カード登録に失敗しました');
     } finally {
       setLoading(false);
-    }
-  };
-
-  // ✅ サブスク登録処理
-  const handleSubscribe = async () => {
-    setLoading(true);
-    try {
-      if (!selectedPlan?.plan_type) {
-        alert('プランを選択してください');
-        return;
-      }
-
-      await fetchStatus();
-
-      const payload = {
-        user_code,
-        user_email: userData?.click_email || '',
-        plan_type: selectedPlan.plan_type,
-        customer_id: userData?.payjp_customer_id || '',
-        charge_amount: selectedPlan.price || 0,
-        sofia_credit: selectedPlan.credit || 0,
-      };
-
-      console.log('📤 Subscribing payload:', payload);
-
-      const subscribeRes = await fetch('/api/pay/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      const result = await subscribeRes.json();
-      console.log('📦 Subscribe response:', result);
-
-      if (!subscribeRes.ok || !result.success) {
-        alert(`❌ サブスク登録に失敗しました\n${result.detail || '原因不明'}`);
-        return;
-      }
-
-      window.location.href = `/thanks?user=${user_code}`;
-    } catch (err: any) {
-      console.error('⨯ Subscription error:', err);
-      alert(`サブスク登録中にエラーが発生しました:\n${err.message || err}`);
-    } finally {
-      setLoading(false);
+      console.log('▶ [handleCardRegistration] END');
     }
   };
 
@@ -155,7 +142,6 @@ function PageInner() {
         onPlanSelected={(plan) => setSelectedPlan(plan)}
       />
 
-      {/* ✅ カード未登録ユーザー */}
       {!cardRegistered && (
         <>
           {!showCardForm ? (
@@ -163,6 +149,7 @@ function PageInner() {
               <button
                 className="btn-card-register"
                 onClick={() => {
+                  console.log('▶ Card register button clicked');
                   setShowCardForm(true);
                   initPayjpCard();
                 }}
@@ -172,8 +159,8 @@ function PageInner() {
             </div>
           ) : (
             <div>
-              {/* ✅ CardStyleにonNameChangeを渡す */}
-              <CardStyle onNameChange={setCardHolder} />
+              {/* ✅ ここに mount */}
+              <div id="card-form" className="border p-3 rounded mb-4"></div>
               <div className="text-center mt-4">
                 <button
                   onClick={handleCardRegistration}
@@ -188,25 +175,11 @@ function PageInner() {
         </>
       )}
 
-      {/* ✅ カード登録済ユーザー */}
       {cardRegistered && (
         <div className="registered-card-box text-center">
           <p className="text-gray-700">
             💳 登録済みカード: {userData?.card_brand || 'VISA'} **** {userData?.card_last4 || '****'}
           </p>
-        </div>
-      )}
-
-      {/* ✅ カード登録済ならプラン購入ボタン */}
-      {cardRegistered && (
-        <div className="text-center mt-4">
-          <button
-            className="btn-subscribe w-full"
-            onClick={handleSubscribe}
-            disabled={!selectedPlan || loading}
-          >
-            {loading ? '処理中…' : 'プランを購入する'}
-          </button>
         </div>
       )}
     </main>
