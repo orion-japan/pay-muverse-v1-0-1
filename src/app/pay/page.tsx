@@ -103,10 +103,14 @@ const handleCardRegistration = async () => {
 
     console.log('[LOG] Calling payjp.createToken (NO name param)...');
 
-    // ✅ token作成の前後に詳細ログ
-    const result = await payjp.createToken(cardNumber, {
-      three_d_secure: false
-    });
+    // ✅ エラーハンドリング強化 (retry 1回)
+    let result = await payjp.createToken(cardNumber, { three_d_secure: false });
+    if (result.error) {
+      console.warn('[WARN] 1回目のcreateToken失敗:', result.error);
+      console.log('[LOG] 2回目のcreateTokenリトライ開始...');
+      await new Promise((r) => setTimeout(r, 500)); // 0.5秒待機
+      result = await payjp.createToken(cardNumber, { three_d_secure: false });
+    }
 
     console.log('[LOG] payjp.createToken raw result:', result);
 
@@ -120,7 +124,6 @@ const handleCardRegistration = async () => {
 
     console.log('[LOG] register-card API に送信開始');
 
-    // ✅ register-card API呼び出し
     const cardRes = await fetch('/api/pay/account/register-card', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
