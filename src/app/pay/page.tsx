@@ -93,41 +93,41 @@ function PageInner() {
   // ✅ カード登録処理（iframe完了待ち）
   const handleCardRegistration = async () => {
     console.log('[handleCardRegistration] START');
-
+  
     try {
       console.log('▶ cardNumber', cardNumber);
       console.log('▶ cardExpiry', cardExpiry);
       console.log('▶ cardCvc', cardCvc);
-
+  
       if (!cardReady) {
         alert('カードフォームが準備中です。少し待って再度押してください');
         return;
       }
-
+  
       if (!payjp || !cardNumber) {
         alert('カードフォームが準備できていません');
         return;
       }
-
-      // ✅ createToken を呼ぶ
-      const result = await payjp.createToken(cardNumber);
+  
+      // ✅ 3Dセキュア対応に変更
+      const result = await payjp.createToken(cardNumber, { three_d_secure: true });
       console.log('[LOG] createToken result:', result);
-
+  
       if (result.error) {
         console.error('[handleCardRegistration] token error:', result.error);
         alert(result.error.message);
         return;
       }
-
+  
       // ✅ API送信
       const response = await fetch('/api/pay/account/register-card', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_code, token: result.id }),
       });
-
+  
       if (!response.ok) throw new Error('カード登録 API エラー');
-
+  
       alert('カード登録が完了しました 🎉');
       await fetchStatus(); // ステータス更新
     } catch (err) {
@@ -137,6 +137,7 @@ function PageInner() {
       console.log('[handleCardRegistration] END');
     }
   };
+  
 
   // ✅ サブスク登録処理
   const handleSubscribe = async () => {
