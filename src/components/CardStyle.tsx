@@ -1,68 +1,53 @@
-'use client';
+'use client'
 
-import { useEffect, useRef } from 'react';
-import '@/app/globals.css';
+import { useEffect } from 'react'
+import '@/app/globals.css'
 
-export default function CardStyle() {
-  const initialized = useRef(false);
+// ✅ ここで型を追加
+type Props = {
+  onNameChange?: (name: string) => void;
+};
 
+export default function CardStyle({ onNameChange }: Props) {
   useEffect(() => {
-    if (initialized.current) return;   // ✅ mountの二重実行を防止
-    initialized.current = true;
+    const s = document.createElement('script')
+    s.src = 'https://js.pay.jp/v2/pay.js'
+    s.onload = () => {
+      const payjp = (window as any).Payjp(process.env.NEXT_PUBLIC_PAYJP_PUBLIC_KEY!)
+      const elements = payjp.elements()
 
-    console.log('✅ PAY.JP スクリプト読み込み開始');
-
-    const script = document.createElement('script');
-    script.src = 'https://js.pay.jp/v2/pay.js';
-    script.onload = () => {
-      console.log('✅ PAY.JP スクリプト読込完了');
-
-      const payjp = (window as any).Payjp(process.env.NEXT_PUBLIC_PAYJP_PUBLIC_KEY!);
-      const elements = payjp.elements();
-
+      // iframe内部のスタイル
       const style = {
         base: {
           fontSize: '16px',
           color: '#222',
           letterSpacing: '0.03em',
           padding: '12px',
-          '::placeholder': { color: '#9ca3af' },
-        },
-      };
-
-      // ✅ DOMが存在するかチェックしてから mount
-      const numberEl = document.getElementById('card-number');
-      const expiryEl = document.getElementById('card-expiry');
-      const cvcEl = document.getElementById('card-cvc');
-
-      if (numberEl && expiryEl && cvcEl) {
-        elements.create('cardNumber', { style }).mount('#card-number');
-        console.log('✅ cardNumber mount 完了');
-
-        elements.create('cardExpiry', { style }).mount('#card-expiry');
-        console.log('✅ cardExpiry mount 完了');
-
-        elements.create('cardCvc', { style }).mount('#card-cvc');
-        console.log('✅ cardCvc mount 完了');
-      } else {
-        console.error('❌ mount対象のDOMが存在しません');
+          '::placeholder': { color: '#9ca3af' }
+        }
       }
-    };
 
-    document.body.appendChild(script);
-  }, []);
+      // ✅ 各フォーム mount
+      elements.create('cardNumber', { style }).mount('#card-number')
+      elements.create('cardExpiry', { style }).mount('#card-expiry')
+      elements.create('cardCvc', { style }).mount('#card-cvc')
+    }
+    document.body.appendChild(s)
+  }, [])
 
   return (
     <div className="payjp-wrap">
       <div className="payjp-card-box">
         <h2 className="payjp-title">支払い情報</h2>
 
+        {/* ✅ ロゴ */}
         <div className="payjp-brand-row">
-          {['visa', 'mastercard', 'jcb', 'amex', 'diners'].map((b) => (
+          {['visa','mastercard','jcb','amex','diners'].map(b => (
             <img key={b} src={`/${b}.png`} alt={b} className="payjp-brand-icon" />
           ))}
         </div>
 
+        {/* ✅ 入力欄 */}
         <div className="payjp-form">
           <label className="payjp-label">カード番号</label>
           <div id="card-number" className="payjp-input" />
@@ -78,14 +63,16 @@ export default function CardStyle() {
             </div>
           </div>
 
+          {/* ✅ 名義入力 → 親に渡す */}
           <label className="payjp-label">名前</label>
-          <input type="text" placeholder="TARO YAMADA" className="payjp-input" />
+          <input
+            type="text"
+            placeholder="TARO YAMADA"
+            className="payjp-input"
+            onChange={(e) => onNameChange && onNameChange(e.target.value)}
+          />
         </div>
-
-        {/* ✅ 「カードで支払う」ボタンは削除済み */}
       </div>
     </div>
-  );
+  )
 }
-
-
