@@ -1,24 +1,24 @@
 'use client';
 
-type CardFormProps = {
+import React, { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import PlanSelectPanel from '@/components/PlanSelectPanel';
+import CardStyle from '@/components/CardStyle';
+
+/** ✅ Props 型をエクスポート（Modal からも型補完される） */
+export type CardFormProps = {
   userCode: string;
   onRegister: () => void;
 };
 
 export const dynamic = 'force-dynamic';
 
-import { Suspense, useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
-import PlanSelectPanel from '@/components/PlanSelectPanel';
-import CardStyle from '@/components/CardStyle';
-
-function PageInner() {
+/** ✅ CardForm 本体（React.FC） */
+const CardForm: React.FC<CardFormProps> = ({ userCode, onRegister }) => {
   const searchParams = useSearchParams();
-  const user_code = searchParams.get('user') || '';
-
   const [userData, setUserData] = useState<any>(null);
   const [payjp, setPayjp] = useState<any>(null);
-  const [cardElement, setCardElement] = useState<any>(null);   // ✅ ← card専用
+  const [cardElement, setCardElement] = useState<any>(null);
   const [cardReady, setCardReady] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -30,7 +30,7 @@ function PageInner() {
   const fetchStatus = async () => {
     console.log('🔍 [fetchStatus] START');
     try {
-      const res = await fetch(`/api/account-status?user=${user_code}`);
+      const res = await fetch(`/api/account-status?user=${userCode}`);
       const json = await res.json();
       console.log('✅ [fetchStatus] API response:', json);
 
@@ -43,8 +43,8 @@ function PageInner() {
   };
 
   useEffect(() => {
-    if (user_code) fetchStatus();
-  }, [user_code]);
+    if (userCode) fetchStatus();
+  }, [userCode]);
 
   /** ✅ PAY.JP 初期化 */
   const initPayjpCard = () => {
@@ -116,7 +116,7 @@ function PageInner() {
       const cardRes = await fetch('/api/pay/account/register-card', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_code, token }),
+        body: JSON.stringify({ user_code: userCode, token }),
       });
 
       const json = await cardRes.json();
@@ -128,6 +128,7 @@ function PageInner() {
 
       alert('✅ カードが登録されました');
       await fetchStatus();
+      onRegister(); // ✅ モーダル閉じる or 完了処理
     } catch (err: any) {
       console.error('❌ [handleCardRegistration] ERROR:', err);
       alert(err.message || 'カード登録に失敗しました');
@@ -142,7 +143,7 @@ function PageInner() {
       <h1 className="pay-title">ご利用プラン</h1>
 
       <PlanSelectPanel
-        userCode={user_code}
+        userCode={userCode}
         cardRegistered={cardRegistered}
         userCredit={userCredit}
         onPlanSelected={(plan) => setSelectedPlan(plan)}
@@ -165,7 +166,7 @@ function PageInner() {
             </div>
           ) : (
             <div>
-              {/* ✅ ここに mount */}
+              {/* ✅ カードフォームのマウント先 */}
               <div id="card-form" className="border p-3 rounded mb-4"></div>
               <div className="text-center mt-4">
                 <button
@@ -190,12 +191,6 @@ function PageInner() {
       )}
     </main>
   );
-}
+};
 
-export default function Page() {
-  return (
-    <Suspense fallback={<div>読み込み中...</div>}>
-      <PageInner />
-    </Suspense>
-  );
-}
+export default CardForm;
