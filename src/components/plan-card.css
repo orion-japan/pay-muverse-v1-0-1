@@ -1,0 +1,389 @@
+/* ✅ MuverseバージョンのプランUIデザイン */
+
+.plan-panel {
+    background: linear-gradient(135deg, #f0f6ff 0%, #e8f0ff 50%, #f5e9ff 100%);
+    padding: 24px;
+    border-radius: 20px;
+    max-width: 420px;
+    margin: 0 auto;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+  }
+  
+  .plan-title {
+    font-size: 22px;
+    font-weight: bold;
+    text-align: center;
+    margin-bottom: 20px;
+    color: #2c2c54;
+  }
+  
+  .plan-card {
+    background: #ffffff;
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 16px;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.08);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  
+  .plan-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+  }
+  
+  .plan-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  
+  .plan-icon {
+    font-size: 22px;
+    margin-right: 8px;
+  }
+  
+  .plan-name {
+    font-size: 18px;
+    font-weight: 600;
+  }
+  
+  .plan-price, .plan-credit {
+    font-size: 14px;
+    margin: 4px 0;
+  }
+  
+  /* 🎨 プラン別カラー */
+  .plan-card--regular { border-left: 5px solid #4e9eff; }
+  .plan-card--premium { border-left: 5px solid #9c6bff; }
+  .plan-card--master { border-left: 5px solid #d4af37; }
+  
+  /* 🌈 ボタンデザイン */
+  .select-button {
+    width: 100%;
+    padding: 10px;
+    margin-top: 10px;
+    border: none;
+    border-radius: 12px;
+    font-weight: bold;
+    color: white;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  
+  .select-button:hover {
+    transform: scale(1.03);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+  }
+  
+  .select-button--regular { background: #4e9eff; }
+  .select-button--premium { background: #9c6bff; }
+  .select-button--master { background: linear-gradient(45deg, #d4af37, #f1d77e); color: #4a3b00; }
+  
+  .card-info {
+    text-align: center;
+    margin-top: 20px;
+  }
+  
+  .purchase-button {
+    background: linear-gradient(135deg, #6ec6ff, #7e9cff);
+    border: none;
+    color: white;
+    font-weight: bold;
+    padding: 12px 20px;
+    border-radius: 20px;
+    margin-top: 12px;
+    cursor: pointer;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  
+  .purchase-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 14px rgba(0,0,0,0.15);
+  }
+  /* 🏆 Master プランを上品ゴールド仕様に */
+.plan-card--master {
+    border-left: 5px solid #d4af37;
+    background: linear-gradient(145deg, #fffdf5 0%, #fff8e7 100%);
+    position: relative;
+  }
+  
+  /* ✨ Master ボタン（グラデーション＋光沢） */
+  .select-button--master {
+    background: linear-gradient(45deg, #d4af37, #f9e38c);
+    color: #4a3b00;
+    font-weight: bold;
+    box-shadow: 0 3px 10px rgba(212, 175, 55, 0.4);
+    position: relative;
+    overflow: hidden;
+  }
+  
+  /* ✨ Hoverでゴールド感がさらにUP */
+  .select-button--master:hover {
+    background: linear-gradient(45deg, #f1d77e, #d4af37);
+    transform: scale(1.05);
+    box-shadow: 0 4px 12px rgba(212, 175, 55, 0.6);
+  }
+  
+  /* 🌟 光沢アニメーション */
+  .select-button--master::before {
+    content: \"\";
+    position: absolute;
+    top: 0;
+    left: -75px;
+    width: 50px;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.5);
+    transform: skewX(-20deg);
+    animation: shine 2.5s infinite;
+  }
+  
+  @keyframes shine {
+    0% { left: -75px; }
+    50% { left: 125%; }
+    100% { left: 125%; }
+  }
+  /* ✨ Master プランボタンに光沢アニメーション */
+.select-button--master {
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .select-button--master::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -75px;
+    width: 50px;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.5);
+    transform: skewX(-20deg);
+    animation: shine 2.5s infinite;
+  }
+  
+  /* 🌟 光沢の動き */
+  @keyframes shine {
+    0% { left: -75px; }
+    50% { left: 125%; }
+    100% { left: 125%; }
+  }
+  /* 💳 カード登録ボタン（下のやつ） */
+.card-register-button {
+    width: 100%;
+    padding: 14px;
+    margin-top: 20px;
+    background: linear-gradient(135deg, #444, #222);
+    color: #fff;
+    font-size: 16px;
+    font-weight: bold;
+    border: none;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  
+  /* Hover時に浮かせる */
+  .card-register-button:hover {
+    transform: scale(1.05);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.25);
+  }
+  
+  /* ✅ 無効状態（もしdisabledの場合） */
+  .card-register-button.disabled {
+    background: #bbb;
+    cursor: not-allowed;
+    box-shadow: none;
+  }
+  /* 💳 カード登録するボタン */
+  .btn-card-register {
+    width: 100%;
+    padding: 16px;
+    margin-top: 24px;
+    background: linear-gradient(135deg, #333, #111); /* 深い黒グラデーション */
+    color: #fff;
+    font-size: 18px;
+    font-weight: bold;
+    border: none;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    position: relative;
+    overflow: hidden;
+  }
+  
+  /* ✨ Hover時の立体感UP */
+  .btn-card-register:hover:not(:disabled) {
+    transform: scale(1.05);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.6);
+  }
+  
+  /* 🌟 光沢アニメーション */
+  .btn-card-register::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -75px;
+    width: 50px;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.2);
+    transform: skewX(-20deg);
+    animation: blackShine 3s infinite;
+  }
+  
+  /* ✨ 光沢が横切るアニメーション */
+  @keyframes blackShine {
+    0% { left: -75px; }
+    50% { left: 125%; }
+    100% { left: 125%; }
+  }
+
+  
+  .card-section {
+    background: linear-gradient(135deg, #ffffff, #f8f8f8);
+    border-radius: 20px;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+    padding: 28px;
+    width: 100%;
+    max-width: 420px;
+    margin: 20px auto;
+  }
+
+  .btn-card-register {
+    width: 100%;
+    padding: 18px;
+    margin-top: 20px;
+    background: linear-gradient(135deg, #222, #000); /* 深い黒 */
+    color: #fff;
+    font-size: 20px;
+    font-weight: bold;
+    border: none;
+    border-radius: 12px;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  
+  /* hover時に浮き上がる */
+  .btn-card-register:hover:not(:disabled) {
+    transform: scale(1.05);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.6);
+  }
+  
+  /* ✨ 光沢アニメーション */
+  .btn-card-register::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -75px;
+    width: 50px;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.2);
+    transform: skewX(-20deg);
+    animation: shineBlack 3s infinite;
+  }
+  
+  @keyframes shineBlack {
+    0% { left: -75px; }
+    50% { left: 125%; }
+    100% { left: 125%; }
+  }
+
+  .btn-card-submit {
+    width: 100%;
+    padding: 16px;
+    border-radius: 12px;
+    font-weight: bold;
+    color: #fff;
+    font-size: 18px;
+    background: linear-gradient(135deg, #2563eb, #1e4fd1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  
+  .btn-card-submit:hover {
+    background: linear-gradient(135deg, #1e4fd1, #133a9f);
+    transform: scale(1.03);
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.25);
+  }
+
+/* ✅ 有効期限とCVCの横幅を調整 */
+.payjp-two-col {
+    display: flex;
+    gap: 14px; /* フィールドの間隔を少し広げる */
+  }
+  
+  /* ✅ 有効期限を広めに、CVCを少し狭めに */
+  .expiry-box {
+    flex: 1.2;
+  }
+  
+  .cvc-box {
+    flex: 0.8;
+  }
+  
+  /* 💳 このカードを登録するボタン */
+  .btn-card-submit {
+    width: 100%;
+    padding: 16px;
+    border-radius: 12px;
+    font-weight: bold;
+    color: #fff;
+    font-size: 18px;
+  
+    /* ✅ 白なし、深い青〜紫の2色グラデーション */
+    background: linear-gradient(
+      135deg,
+      #5743c7 0%,
+      #5e34df 100%
+    );
+  
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    margin-top: 28px;
+    margin-bottom: 40px;
+  }
+  
+  .btn-card-submit:hover {
+    background: linear-gradient(
+      135deg,
+      #5743c7 0%,
+      #5e34df 100%
+    );
+    transform: scale(1.03);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+  }
+  
+  /* ✅ プランを購入するボタン */
+.btn-subscribe {
+    width: 100%;
+    max-width: 420px;
+    padding: 16px;
+    margin-top: 24px;
+    border-radius: 12px;
+    font-weight: bold;
+    color: #fff;
+    font-size: 18px;
+  
+    /* 🌱 深いグリーンのグラデーション */
+    background: linear-gradient(135deg, #1c7c3b 0%, #0f5e28 100%);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  
+  .btn-subscribe:hover {
+    background: linear-gradient(135deg, #166632 0%, #0c4b20 100%);
+    transform: scale(1.03);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+  }
+  
+  .btn-subscribe:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+    box-shadow: none;
+  }
+  

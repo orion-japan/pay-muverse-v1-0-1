@@ -93,15 +93,16 @@ export default function CardStyle({ onNameChange, onCardReady }: Props) {
           <div id="card-number" className="payjp-input" />
 
           <div className="payjp-two-col">
-            <div>
-              <label className="payjp-label">有効期限</label>
-              <div id="card-expiry" className="payjp-input" />
-            </div>
-            <div>
-              <label className="payjp-label">CVC番号</label>
-              <div id="card-cvc" className="payjp-input" />
-            </div>
-          </div>
+  <div className="expiry-box">
+    <label className="payjp-label">有効期限</label>
+    <div id="card-expiry" className="payjp-input" />
+  </div>
+  <div className="cvc-box">
+    <label className="payjp-label">CVC番号</label>
+    <div id="card-cvc" className="payjp-input" />
+  </div>
+</div>
+
 
           {/* ✅ 名義入力 → 親に渡す */}
           <label className="payjp-label">カード名義（半角英字）</label>
