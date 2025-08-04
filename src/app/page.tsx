@@ -39,7 +39,7 @@ export default function DashboardPage() {
     <div className="dashboard-wrapper">
       {/* ✅ 固定ヘッダー */}
       <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', zIndex: 50 }}>
-        <Header />
+        <Header onLoginClick={() => setIsLoginModalOpen(true)} />
       </div>
 
       {/* ✅ ヘッダーの下に余白を作る */}

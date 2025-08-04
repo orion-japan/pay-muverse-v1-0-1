@@ -10,7 +10,7 @@ export default function CreditPage() {
   return (
     <div style={{ width: '100%', height: '100vh', display: 'flex', flexDirection: 'column' }}>
       {/* ✅ Header を上に固定 */}
-      <Header />
+      <Header onLoginClick={() => {}} />
 
       {/* ✅ iframe は Header 以外のスペース全部 */}
       <iframe
