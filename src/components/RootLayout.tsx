@@ -4,20 +4,18 @@ import './globals.css'
 import '../styles/layout.css'
 import Footer from '../components/Footer'
 import LoginModal from '../components/LoginModal'
-import { AuthProvider } from '@/context/AuthContext'   // ✅ 追加
+import { AuthProvider } from '@/context/AuthContext'
 
 export default function RootLayout({ children }) {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
-
   const openLoginModal = () => setIsLoginModalOpen(true)
   const closeLoginModal = () => setIsLoginModalOpen(false)
 
   return (
     <html lang="ja">
       <body>
-        {/* ✅ AuthProvider で全体をラップ */}
         <AuthProvider>
-          {/* ✅ Header はここから削除。各ページに直接書く */}
+          {/* ✅ Header は削除 */}
 
           <div className="frame-container">
             <main className="main-content">
@@ -27,7 +25,6 @@ export default function RootLayout({ children }) {
 
           <Footer />
 
-          {/* ✅ ログインモーダル */}
           <LoginModal
             isOpen={isLoginModalOpen}
             onClose={closeLoginModal}

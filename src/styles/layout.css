@@ -1,0 +1,115 @@
+/* === layout.css === */
+
+/* ✅ ページ全体の基本枠 */
+body {
+  margin: 0;
+  font-family: 'Noto Sans JP', sans-serif;
+  background: #f9fafb;
+  color: #333;
+}
+
+/* ✅ レイアウト枠 */
+.frame-container {
+  display: flex;
+  min-height: calc(100vh - 110px); /* header(60px) + footer(50px) を引いた高さ */
+}
+
+/* ✅ メインコンテンツ */
+.main-content {
+  flex: 1;
+  padding: 20px;
+  background: #f9fafb;
+}
+
+/* ✅ Header全体 */
+.header {
+  height: 60px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;  /* ← 両端に配置 */
+  padding: 0 16px;
+  font-weight: bold;
+  font-size: 18px;
+  border-bottom: 1px solid #ddd;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+/* ✅ 中央タイトルをしっかり中央寄せ */
+.header-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 18px;
+}
+
+/* ✅ 左右のアイコン */
+.header-icon {
+  font-size: 24px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: none;
+  color: #333;
+}
+
+/* ✅ Footer（下） */
+.footer {
+  height: 50px;
+  background: #ffffff;
+  border-top: 1px solid #ddd;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+}
+
+/* ✅ メニュー共通スタイル */
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  text-decoration: none;
+  color: #333;
+  transition: background 0.2s ease;
+}
+
+.menu-item:hover {
+  background: #f3f4f6;
+  cursor: pointer;
+}
+/* ✅ モーダル背景 */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 999;
+}
+
+/* ✅ モーダル本体 */
+.modal-content {
+  background: #fff;
+  padding: 20px;
+  border-radius: 12px;
+  width: 300px;
+  text-align: center;
+}
+
+/* ✅ エラーメッセージ */
+.error-text {
+  color: red;
+  font-size: 14px;
+}

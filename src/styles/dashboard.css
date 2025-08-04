@@ -1,0 +1,191 @@
+/* === dashboard.css === */
+
+/* ✅ 全体 */
+.dashboard-wrapper {
+  padding: 20px;
+  margin-bottom: 80px; /* Footerかぶり防止 */
+}
+
+/* ✅ 画像セクション */
+.top-image-section {
+  width: 100%;
+  overflow-x: scroll;
+  display: flex;
+  gap: 12px;
+  scroll-snap-type: x mandatory;
+  margin-bottom: 20px;
+}
+
+.top-image {
+  width: 90%;
+  flex-shrink: 0;
+  border-radius: 12px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+  scroll-snap-align: center;
+}
+
+/* ✅ お知らせ */
+.notice-section {
+  background: #fff;
+  padding: 16px;
+  border-radius: 12px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+  margin-bottom: 20px;
+}
+
+.notice-title {
+  font-size: 18px;
+  font-weight: bold;
+  margin-bottom: 8px;
+}
+
+.notice-item {
+  font-size: 14px;
+  color: #555;
+  margin-bottom: 6px;
+}
+
+/* ✅ タイル（3列） */
+.tile-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.tile {
+  background: #fff;
+  padding: 20px;
+  border-radius: 12px;
+  text-align: center;
+  font-weight: 600;
+  text-decoration: none;
+  color: #333;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.tile:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+}
+
+.tile-icon {
+  font-size: 28px;
+  margin-bottom: 8px;
+}
+
+.tile-label {
+  font-size: 16px;
+}
+/* ✅ スライダーコンテナ */
+.slider-container {
+  width: 100%;
+  height: 180px;
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  margin-bottom: 20px;
+}
+
+/* ✅ スライダー画像 */
+.slider-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  position: absolute;
+  top: 0;
+  left: 0;
+  opacity: 0;
+  transition: opacity 1s ease-in-out;
+}
+
+/* ✅ 表示中の画像 */
+.slider-image.active {
+  opacity: 1;
+}
+/* ✅ スライダー */
+.slider-container {
+  width: 100%;
+  height: 180px;
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  margin-bottom: 20px;
+}
+
+.slider-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  position: absolute;
+  top: 0;
+  left: 0;
+  opacity: 0;
+  transition: opacity 1s ease-in-out;
+}
+
+.slider-image.active {
+  opacity: 1;
+}
+
+/* ✅ Header アイコン調整 */
+.header {
+  height: 60px;
+  background: #ffffff;
+  border-bottom: 1px solid #ddd;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+}
+
+.header-title {
+  flex: 1;
+  text-align: center;
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.header-left,
+.header-right {
+  width: 50px;
+  display: flex;
+  justify-content: center;
+}
+
+/* ✅ 無効状態のタイル */
+.tile.disabled {
+  opacity: 0.5;
+  pointer-events: auto;  /* ← alert を出すためクリックだけ残す */
+  cursor: not-allowed;
+}
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 999;
+}
+
+.modal-content {
+  background: #fff;
+  padding: 20px;
+  border-radius: 12px;
+  width: 300px;
+  text-align: center;
+}
+
+.error-text {
+  color: red;
+  font-size: 14px;
+}
+.tile.disabled {
+  opacity: 0.5;
+  pointer-events: none;   /* ← 完全に押せなくする */
+  cursor: not-allowed;
+}
