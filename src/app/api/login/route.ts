@@ -1,23 +1,35 @@
-import { supabase } from '@/lib/supabase'
+// src/app/api/login/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { supabase } from '@/lib/supabase';
 
-export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ success: false, message: 'Method not allowed' })
+export async function POST(req: NextRequest) {
+  try {
+    // ✅ JSONボディを取得
+    const { email, password } = await req.json();
+
+    // ✅ Supabase でユーザー認証確認
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('click_email', email)
+      .eq('Password', password)
+      .single();
+
+    if (error || !data) {
+      return NextResponse.json(
+        { success: false, message: 'メールまたはパスワードが間違っています' },
+        { status: 401 }
+      );
+    }
+
+    // ✅ 認証成功レスポンス
+    return NextResponse.json({ success: true, user: data }, { status: 200 });
+
+  } catch (err) {
+    console.error('❌ login API Error:', err);
+    return NextResponse.json(
+      { success: false, message: 'サーバーエラーが発生しました' },
+      { status: 500 }
+    );
   }
-
-  const { email, password } = await req.body
-
-  // ✅ Supabase 認証確認
-  const { data, error } = await supabase
-    .from('users')
-    .select('*')
-    .eq('click_email', email)
-    .eq('Password', password)
-    .single()
-
-  if (error || !data) {
-    return res.status(401).json({ success: false, message: 'メールまたはパスワードが間違っています' })
-  }
-
-  return res.status(200).json({ success: true, user: data })
 }
