@@ -8,7 +8,7 @@ export default function MuAiLayout({ children }: { children: React.ReactNode }) 
         top: 0,
         left: 0,
         width: '100vw',           // ← ビューポート全体の幅
-        height: '100vh',          // ← ビューポート全体の高さ
+        height: '100dvh',          // ← ビューポート全体の高さ
         margin: 0,
         padding: 0,
         overflow: 'hidden',       // ← スクロールなし
