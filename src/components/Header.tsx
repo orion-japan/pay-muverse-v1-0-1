@@ -1,7 +1,30 @@
 'use client'
 import Link from 'next/link'
+import { useAuth } from '@/context/AuthContext'
+import { useRouter } from 'next/navigation' // ✅ 追加
 
-export default function Header({ onLoginClick }) {
+type Props = {
+  onLoginClick: () => void
+}
+
+export default function Header({ onLoginClick }: Props) {
+  const { user, loading, logout } = useAuth()
+  const router = useRouter() // ✅ 追加
+
+  const isLoggedIn = !!user && !loading
+
+  const prevent = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!isLoggedIn) {
+      e.preventDefault()
+      onLoginClick()
+    }
+  }
+
+  const handleLogout = async () => {
+    await logout()               // ✅ Firebaseログアウト & Context初期化
+    router.push('/')             // ✅ userクエリを含まないトップページへ
+  }
+
   return (
     <header
       style={{
@@ -16,32 +39,50 @@ export default function Header({ onLoginClick }) {
         boxShadow: '0 2px 6px rgba(0,0,0,0.1)',
       }}
     >
-      {/* 左端 ホーム */}
-      <Link href="/" style={{ textDecoration: 'none', color: 'white', fontSize: '18px' }}>
+      <Link
+        href="/"
+        onClick={prevent}
+        style={{ textDecoration: 'none', color: 'white', fontSize: '18px' }}
+      >
         🏠 Home
       </Link>
 
-      {/* 中央タイトル */}
       <div style={{ fontSize: '22px', fontWeight: 'bold', textAlign: 'center', flex: 1 }}>
         Muverse
       </div>
 
-      {/* 右端 ログインボタン */}
       <div>
-        <button
-          onClick={onLoginClick} // ✅ alertを削除してpropsを呼ぶ
-          style={{
-            background: 'rgba(255,255,255,0.2)',
-            border: 'none',
-            borderRadius: '6px',
-            padding: '6px 12px',
-            color: 'white',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-          }}
-        >
-          ログイン
-        </button>
+        {isLoggedIn ? (
+          <button
+            onClick={handleLogout} // ✅ 修正
+            style={{
+              background: 'rgba(255,255,255,0.2)',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '6px 12px',
+              color: 'white',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+            }}
+          >
+            ログアウト
+          </button>
+        ) : (
+          <button
+            onClick={onLoginClick}
+            style={{
+              background: 'rgba(255,255,255,0.2)',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '6px 12px',
+              color: 'white',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+            }}
+          >
+            ログイン
+          </button>
+        )}
       </div>
     </header>
   )

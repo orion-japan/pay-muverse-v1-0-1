@@ -1,37 +1,29 @@
 'use client'
+// ❌ LoginModal 関連を削除
 import { useState } from 'react'
 import './globals.css'
 import '../styles/layout.css'
 import Footer from '../components/Footer'
-import LoginModal from '../components/LoginModal'
-import { AuthProvider } from '@/context/AuthContext'   // ✅ 追加
+// import LoginModal from '../components/LoginModal' ←削除
+import { AuthProvider } from '@/context/AuthContext'
 
-export default function RootLayout({ children }) {
-  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
+function LayoutBody({ children }: { children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="frame-container">
+        <main className="main-content">{children}</main>
+      </div>
+      <Footer />
+    </div>
+  )
+}
 
-  const openLoginModal = () => setIsLoginModalOpen(true)
-  const closeLoginModal = () => setIsLoginModalOpen(false)
-
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ja">
       <body>
-        {/* ✅ AuthProvider で全体をラップ */}
         <AuthProvider>
-          {/* ✅ Header はここから削除。各ページに直接書く */}
-
-          <div className="frame-container">
-            <main className="main-content">
-              {children}
-            </main>
-          </div>
-
-          <Footer />
-
-          {/* ✅ ログインモーダル */}
-          <LoginModal
-            isOpen={isLoginModalOpen}
-            onClose={closeLoginModal}
-          />
+          <LayoutBody>{children}</LayoutBody>
         </AuthProvider>
       </body>
     </html>

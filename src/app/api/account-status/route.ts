@@ -3,10 +3,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// Supabase 初期化（あなたが追加した環境変数に合わせて）
+// Supabase 初期化
 const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,  // 公開用URL（これは問題なし）
-  process.env.supabaseKey!                // ← 小文字に対応（Vercelで追加済み）
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
 type UserData = {
@@ -18,12 +18,12 @@ type UserData = {
   click_email: string | null;
 };
 
-export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const userCode = searchParams.get('user')?.trim();
+// ✅ POST（firebase_uid から取得）
+export async function POST(req: NextRequest) {
+  const { firebase_uid } = await req.json();
 
-  if (!userCode) {
-    return NextResponse.json({ error: 'No usercode' }, { status: 400 });
+  if (!firebase_uid) {
+    return NextResponse.json({ error: 'No firebase_uid provided' }, { status: 400 });
   }
 
   const { data, error } = await supabase
@@ -36,8 +36,8 @@ export async function GET(req: NextRequest) {
       sofia_credit,
       click_email
     `)
-    .eq('user_code', userCode)
-    .single<UserData>();
+    .eq('firebase_uid', firebase_uid)
+    .single();
 
   if (error || !data) {
     console.error('❌ Supabase error:', error);

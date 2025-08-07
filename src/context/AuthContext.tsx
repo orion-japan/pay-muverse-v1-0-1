@@ -1,65 +1,118 @@
-'use client';
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { auth } from '@/lib/firebase';
-import { onAuthStateChanged, signOut, User } from 'firebase/auth';
-import { supabase } from '@/lib/supabase';
+'use client'
 
-type AuthContextType = {
-  user: User | null;
-  userCode: string | null;    // ✅ Mu_AI などで使う
-  loading: boolean;
-  logout: () => Promise<void>;
-};
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  ReactNode,
+} from 'react'
+import {
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut,
+  User,
+} from 'firebase/auth'
+import { auth } from '@/lib/firebase'
+import { supabase } from '@/lib/supabase'
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [userCode, setUserCode] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      setUser(firebaseUser);
-      setLoading(false);
-
-      if (firebaseUser?.email) {
-        // ✅ Supabase から user_code を取得
-        const { data, error } = await supabase
-          .from('users')
-          .select('user_code')
-          .eq('click_email', firebaseUser.email)
-          .single();
-
-        if (error) {
-          console.error('❌ Supabaseから user_code 取得失敗:', error);
-          setUserCode(null);
-        } else {
-          console.log('✅ Supabase user_code:', data?.user_code);
-          setUserCode(data?.user_code || null);
-        }
-      } else {
-        setUserCode(null);
-      }
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  const logout = async () => {
-    await signOut(auth);
-    setUserCode(null);
-  };
-
-  return (
-    <AuthContext.Provider value={{ user, userCode, loading, logout }}>
-      {children}
-    </AuthContext.Provider>
-  );
+// 🔐 Context型定義
+interface AuthContextType {
+  user: User | null
+  userCode: string | null
+  loading: boolean
+  login: (email: string, password: string) => Promise<void>
+  logout: () => Promise<void>
 }
 
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) throw new Error('useAuth must be used within AuthProvider');
-  return context;
-};
+// 🧱 Context初期値
+const AuthContext = createContext<AuthContextType>({
+  user: null,
+  userCode: null,
+  loading: true,
+  login: async () => {},
+  logout: async () => {},
+})
+
+// 🌱 Provider定義
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<User | null>(null)
+  const [userCode, setUserCode] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  // ✅ Supabaseから user_code を取得する関数（firebase_uidを使用）
+  const fetchUserCode = async (uid: string) => {
+    const { data, error } = await supabase
+      .from('users')
+      .select('user_code')
+      .eq('firebase_uid', uid) // ← 修正ポイント
+      .single()
+
+    if (error || !data?.user_code) {
+      console.error('❌ user_code の取得失敗:', error)
+      return null
+    }
+    return data.user_code
+  }
+
+  // ✅ Firebaseの認証状態を常に監視
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      setLoading(true)
+      if (firebaseUser) {
+        setUser(firebaseUser)
+        const code = await fetchUserCode(firebaseUser.uid)
+        setUserCode(code)
+      } else {
+        setUser(null)
+        setUserCode(null)
+      }
+      setLoading(false)
+    })
+
+    return () => unsubscribe()
+  }, [])
+
+  // 🔐 ログイン処理（モーダル連携対応）
+  const login = async (email: string, password: string) => {
+    setLoading(true)
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, email, password)
+      const currentUser = userCredential.user
+      setUser(currentUser)
+
+      const code = await fetchUserCode(currentUser.uid)
+      setUserCode(code)
+    } catch (error) {
+      console.error('ログイン失敗:', error)
+      throw error
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // 🔐 ログアウト処理
+  const logout = async () => {
+    setLoading(true)
+    try {
+      await signOut(auth)
+      setUser(null)
+      setUserCode(null)
+    } catch (error) {
+      console.error('ログアウト失敗:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <AuthContext.Provider
+      value={{ user, userCode, loading, login, logout }}
+    >
+      {children}
+    </AuthContext.Provider>
+  )
+}
+
+// ✅ 利用フック
+export const useAuth = () => useContext(AuthContext)

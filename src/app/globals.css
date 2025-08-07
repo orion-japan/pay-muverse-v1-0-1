@@ -460,3 +460,8 @@ div.input-box > div > iframe {
   cursor: not-allowed;
 }
 
+/* dashboard.css に追加 */
+.tile.disabled {
+  opacity: 0.6;
+  cursor: pointer; /* あえて pointer にして誘導を自然に */
+}

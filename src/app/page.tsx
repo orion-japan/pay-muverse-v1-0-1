@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import '../styles/dashboard.css'
 import Header from '../components/Header'
 import LoginModal from '../components/LoginModal'
@@ -9,10 +10,10 @@ import { useAuth } from '@/context/AuthContext'
 export default function DashboardPage() {
   const images = ['/mu_24.png', '/mu_14.png']
   const [current, setCurrent] = useState(0)
-  const { user } = useAuth()
+  const { user, userCode } = useAuth() // ✅ userCode を取得
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
+  const router = useRouter()
 
-  // ✅ 4秒ごとに画像切り替え
   useEffect(() => {
     const interval = setInterval(() => {
       setCurrent((prev) => (prev + 1) % images.length)
@@ -20,7 +21,6 @@ export default function DashboardPage() {
     return () => clearInterval(interval)
   }, [])
 
-  // ✅ メニュー項目
   const menuItems = [
     { icon: '🤖', title: 'Mu_AI', link: '/mu_ai' },
     { icon: '💳', title: 'クレジット', link: '/credit' },
@@ -28,24 +28,28 @@ export default function DashboardPage() {
   ]
 
   const handleClick = (link: string) => {
-    if (!user) {
+    if (!user || !userCode) {
       setIsLoginModalOpen(true)
       return
     }
-    window.location.href = link
+
+    // ✅ userCode をクエリに付加して遷移
+    const linkWithParam = `${link}?user=${encodeURIComponent(userCode)}`
+    router.push(linkWithParam)
   }
 
   return (
-    <div className="dashboard-wrapper">
-      {/* ✅ 固定ヘッダー */}
+    <div
+      className="dashboard-wrapper"
+      onClick={() => {
+        if (!user) setIsLoginModalOpen(true)
+      }}
+    >
       <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', zIndex: 50 }}>
         <Header onLoginClick={() => setIsLoginModalOpen(true)} />
       </div>
 
-      {/* ✅ ヘッダーの下に余白を作る */}
       <div style={{ paddingTop: '65px' }}>
-
-        {/* ✅ 自動スライダー */}
         <section className="slider-container">
           {images.map((img, index) => (
             <img
@@ -57,7 +61,6 @@ export default function DashboardPage() {
           ))}
         </section>
 
-        {/* ✅ お知らせ */}
         <section className="notice-section">
           <h2 className="notice-title">📢 お知らせ</h2>
           <div className="notice-item">
@@ -68,26 +71,27 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        {/* ✅ メニューボタン */}
         <section className="tile-grid">
           {menuItems.map((item) => (
             <div
               key={item.title}
               className={`tile ${!user ? 'disabled' : ''}`}
-              onClick={() => handleClick(item.link)}
+              onClick={(e) => {
+                e.stopPropagation()
+                handleClick(item.link)
+              }}
             >
               <div className="tile-icon">{item.icon}</div>
               <div className="tile-label">{item.title}</div>
             </div>
           ))}
         </section>
-
       </div>
 
-      {/* ✅ ログインモーダル */}
       <LoginModal
         isOpen={isLoginModalOpen}
         onClose={() => setIsLoginModalOpen(false)}
+        onLoginSuccess={() => setIsLoginModalOpen(false)}
       />
     </div>
   )

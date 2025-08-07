@@ -1,4 +1,5 @@
 'use client'
+
 import Header from '../../components/Header'
 import { useAuth } from '@/context/AuthContext'
 
@@ -8,18 +9,31 @@ export default function CreditPage() {
   if (loading) return <div>読み込み中...</div>
 
   return (
-    <div style={{ width: '100%', height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {/* ✅ Header を上に固定 */}
-      <Header onLoginClick={() => {}} />
+    <div
+      style={{
+        width: '100vw',
+        height: '100vh',
+        margin: 0,
+        padding: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+      }}
+    >
+      {/* ✅ ヘッダー固定（60px） */}
+      <div style={{ height: '60px', flexShrink: 0 }}>
+        <Header onLoginClick={() => {}} />
+      </div>
 
-      {/* ✅ iframe は Header 以外のスペース全部 */}
+      {/* ✅ iframeは残り全部（Footer含めてiframe内に存在） */}
       <iframe
         src={`https://pay.muverse.jp/pay${userCode ? `?user=${userCode}` : ''}`}
         style={{
           width: '100%',
-          height: 'calc(100vh - 110px)',  // ✅ Header(50px) + Footer(60px) を引く
+          height: 'calc(100vh - 60px)',
           border: 'none',
-          flex: 1
+          display: 'block',
         }}
       />
     </div>

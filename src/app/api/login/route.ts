@@ -1,35 +1,50 @@
-// src/app/api/login/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { NextResponse } from 'next/server'
+import { adminAuth } from '@/lib/firebase-admin'
+import { createClient } from '@supabase/supabase-js'
 
-export async function POST(req: NextRequest) {
+// ✅ Supabase 初期化
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.supabaseKey!
+)
+
+export async function POST(req: Request) {
   try {
-    // ✅ JSONボディを取得
-    const { email, password } = await req.json();
+    const { idToken } = await req.json()
+    const decodedToken = await adminAuth.verifyIdToken(idToken)
 
-    // ✅ Supabase でユーザー認証確認
+    console.log('✅ Firebase 認証成功:', decodedToken)
+
+    const email = decodedToken.email
+    if (!email) throw new Error('メールアドレスが取得できません')
+
+    // ✅ Supabase から user_code を取得
     const { data, error } = await supabase
       .from('users')
-      .select('*')
+      .select('user_code')
       .eq('click_email', email)
-      .eq('Password', password)
-      .single();
+      .single()
 
-    if (error || !data) {
-      return NextResponse.json(
-        { success: false, message: 'メールまたはパスワードが間違っています' },
-        { status: 401 }
-      );
+    if (error || !data?.user_code) {
+      console.error('❌ Supabase ユーザーコード取得失敗:', error)
+      return NextResponse.json({ error: 'ユーザーコードが見つかりません' }, { status: 404 })
     }
 
-    // ✅ 認証成功レスポンス
-    return NextResponse.json({ success: true, user: data }, { status: 200 });
+    const userCode = data.user_code
 
+    // ✅ Cookie に user_code を保存
+    const res = NextResponse.json({ success: true })
+    res.cookies.set('user_code', userCode, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'strict',
+      path: '/',
+      maxAge: 60 * 60 * 24 * 7, // 1週間
+    })
+
+    return res
   } catch (err) {
-    console.error('❌ login API Error:', err);
-    return NextResponse.json(
-      { success: false, message: 'サーバーエラーが発生しました' },
-      { status: 500 }
-    );
+    console.error('❌ Firebase 認証エラー:', err)
+    return NextResponse.json({ error: '認証失敗' }, { status: 500 })
   }
 }
