@@ -4,15 +4,13 @@ export default function MuAiLayout({ children }: { children: React.ReactNode }) 
   return (
     <div
       style={{
-        position: 'fixed',        // ← 画面全体に固定
-        top: 0,
-        left: 0,
-        width: '100vw',           // ← ビューポート全体の幅
-        height: '100dvh',          // ← ビューポート全体の高さ
+        width: '100%',
+        height: '100%',
         margin: 0,
         padding: 0,
-        overflow: 'hidden',       // ← スクロールなし
-        backgroundColor: '#ffffff' // 必要に応じて背景色
+        backgroundColor: '#ffffff',
+        display: 'flex',
+        flexDirection: 'column',
       }}
     >
       {children}

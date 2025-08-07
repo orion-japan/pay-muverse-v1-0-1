@@ -29,13 +29,13 @@ export default function MuAiPage() {
   }
 
   return (
-    <div style={{ width: '100%', height: '100vh' }}>
+    <div style={{ width: '100%', height: '100%' }}>
       {url && (
         <iframe
           src={url}
           style={{
             width: '100%',
-            height: 'calc(100vh - 60px)', // ヘッダー分除外
+            height: '100%',
             border: 'none',
           }}
         />
