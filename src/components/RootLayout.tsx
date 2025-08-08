@@ -10,7 +10,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="ja">
       <body style={{ margin: 0, background: '#f9fafb' }}>
         <AuthProvider>
-          {/* ✅ ここでスマホ幅を固定 */}
+          {/* ✅ スマホ幅固定 */}
           <div
             style={{
               maxWidth: '430px',
@@ -21,17 +21,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               flexDirection: 'column'
             }}
           >
-            {/* ✅ ヘッダーもこの中に置く */}
-            <Header onLoginClick={function (): void {
-              throw new Error('Function not implemented.')
-            } } />
+            {/* ✅ ヘッダー */}
+            <Header
+              onLoginClick={function (): void {
+                throw new Error('Function not implemented.')
+              }}
+            />
 
             <div className="frame-container" style={{ flex: 1 }}>
               <main className="main-content">{children}</main>
             </div>
 
-            {/* ✅ フッターもこの中に置く */}
-            <Footer children={''} />
+            {/* ✅ フッター（children props は使わない） */}
+            <Footer />
           </div>
         </AuthProvider>
       </body>
