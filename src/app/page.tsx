@@ -89,10 +89,18 @@ export default function DashboardPage() {
       </div>
 
       <LoginModal
-        isOpen={isLoginModalOpen}
-        onClose={() => setIsLoginModalOpen(false)}
-        onLoginSuccess={() => setIsLoginModalOpen(false)}
-      />
+  isOpen={isLoginModalOpen}
+  onClose={() => {
+    console.log('🔴 LoginModal の onClose 実行');
+    setIsLoginModalOpen(false);
+  }}
+  onLoginSuccess={() => {
+    console.log('🟢 Login 成功 → モーダル閉じる');
+    setIsLoginModalOpen(false);
+  }}
+/>
+
+
     </div>
   )
 }

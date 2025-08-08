@@ -1,0 +1,103 @@
+/* モーダル背景のオーバーレイ */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: rgba(0, 0, 0, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+  }
+  
+  /* モーダル本体 */
+  .modal-box {
+    background-color: #fff;
+    width: 90%;
+    max-width: 400px;
+    padding: 24px;
+    border-radius: 12px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+    text-align: center;
+    font-family: 'Helvetica Neue', sans-serif;
+  }
+  
+  /* タイトル */
+  .modal-title {
+    font-size: 20px;
+    font-weight: bold;
+    margin-bottom: 12px;
+    color: #4b0082;
+  }
+  
+  /* 本文テキスト */
+  .modal-text {
+    font-size: 14px;
+    line-height: 1.6; /* 行間を広げる */
+    margin-bottom: 12px; /* 段落下に余白 */
+  }
+  
+  .modal-tip {
+    font-size: 13px;
+    line-height: 1.5;
+    color: #666;
+    margin-top: 8px;
+  }
+  
+  .modal-tip code {
+    background-color: #f5f5f5;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+  
+  
+  /* 成功／エラー メッセージ */
+  .modal-message {
+    font-size: 13px;
+    margin: 8px 0;
+  }
+  .modal-message.success {
+    color: green;
+  }
+  .modal-message.error {
+    color: crimson;
+  }
+  
+  /* ボタン部分 */
+  .modal-actions {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 16px;
+  }
+  
+  .modal-button {
+    flex: 1;
+    padding: 10px;
+    font-size: 14px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-weight: bold;
+    transition: background-color 0.2s ease;
+  }
+  
+  .modal-button.confirm {
+    background-color: #6a0dad;
+    color: #fff;
+  }
+  .modal-button.confirm:hover {
+    background-color: #5a00b0;
+  }
+  
+  .modal-button.cancel {
+    background-color: #e0e0e0;
+    color: #333;
+  }
+  .modal-button.cancel:hover {
+    background-color: #d5d5d5;
+  }
+  

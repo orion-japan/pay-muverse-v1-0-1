@@ -89,4 +89,24 @@
     font-weight: bold;
     cursor: pointer;
   }
+  .forgot-password-link {
+    font-size: 13px;
+    text-align: center;
+    margin: 16px 0; /* 👈 上下の余白を広めに設定 */
+  }
+  
+  .forgot-password-link span {
+    color: #5555ff;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .forgot-password-link {
+    margin: 12px 0;
+    text-align: center;
+  }
+  .forgot-password-link span {
+    cursor: pointer;
+  }
   
