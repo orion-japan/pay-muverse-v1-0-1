@@ -1,52 +1,49 @@
 body {
-    margin: 0;
-    font-family: 'Noto Sans JP', sans-serif;
-    background: #f9fafb;
-    color: #333;
-  }
-  a {
-    text-decoration: none;
-    color: inherit;
-  }
-  /* === globals.css or dashboard.css に追加 === */
+  margin: 0;
+  font-family: 'Noto Sans JP', sans-serif;
+  background: #f9fafb;
+  color: #333;
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
 
 /* ✅ ヘッダー */
 .header {
-  height: 60px;
-  background: #fff;
+  height: 50px; /* スマホ用高さ */
+  background: linear-gradient(#90dee9, #b089f9, #9a7ff9);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  padding: 0 12px;
   font-weight: bold;
-  font-size: 18px;
+  font-size: 16px;
   border-bottom: 1px solid #ddd;
   box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
 
 .header-left a {
   text-decoration: none;
-  font-size: 20px;
+  font-size: 18px;
 }
 
 .header-title {
-  font-size: 18px;
+  font-size: 16px;
 }
 
 .login-btn {
   background: #4f46e5;
   color: #fff;
   border: none;
-  padding: 6px 12px;
-  border-radius: 8px;
+  padding: 4px 10px;
+  border-radius: 6px;
   cursor: pointer;
 }
 
 /* ✅ Footer (タブバー) */
 .footer {
-  position: fixed;
-  bottom: 0;
-  left: 0;
   width: 100%;
   height: 60px;
   background: #fff;
@@ -72,14 +69,14 @@ body {
 .tile-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  padding: 20px;
+  gap: 8px;
+  padding: 12px;
 }
 
 .tile {
   background: #fff;
-  padding: 20px;
-  border-radius: 12px;
+  padding: 16px;
+  border-radius: 10px;
   text-align: center;
   font-weight: 600;
   text-decoration: none;
@@ -94,6 +91,54 @@ body {
 }
 
 .tile-icon {
-  font-size: 28px;
-  margin-bottom: 8px;
+  font-size: 24px;
+  margin-bottom: 6px;
+}
+
+/* === スマホ専用上書き === */
+@media screen and (min-width: 431px) {
+  body {
+    display: flex;
+    justify-content: center;
+  }
+  .main-content, .dashboard-wrapper {
+    max-width: 430px !important;
+    width: 100% !important;
+    margin: 0 auto !important;
+  }
+}
+
+.header {
+  height: 50px !important;
+  font-size: 16px !important;
+}
+
+.footer {
+  height: 60px !important;
+  font-size: 14px !important;
+}
+/* === 共通フレーム === */
+.app-frame {
+  max-width: 420px;       /* スマホ幅固定 */
+  margin: 0 auto;         /* 中央寄せ */
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #f9fafb;
+  box-shadow: 0 0 12px rgba(0,0,0,0.1);
+  border-left: 1px solid #ddd;
+  border-right: 1px solid #ddd;
+}
+
+/* main 部分はヘッダーとフッター分だけ余白確保 */
+.main-content {
+  flex: 1;
+  padding-top: 60px;   /* ヘッダー高さ */
+  padding-bottom: 60px;/* フッター高さ */
+}
+
+/* ヘッダー＆フッターの横幅も枠内に制限 */
+header, footer {
+  max-width: 420px;
+  margin: 0 auto;
 }

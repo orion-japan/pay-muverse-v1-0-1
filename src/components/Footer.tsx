@@ -1,4 +1,6 @@
 'use client'
+import '../styles/globals.css'   // ✅ 修正
+import '../styles/layout.css'
 import Link from 'next/link'
 
 export default function Footer() {
@@ -17,7 +19,6 @@ export default function Footer() {
         height: '60px',
       }}
     >
-      {/* ✅ Link を使用してページ遷移 */}
       <Link href="/" style={{ textDecoration: 'none', color: 'inherit' }}>
         Home
       </Link>

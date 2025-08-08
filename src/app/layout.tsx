@@ -1,17 +1,25 @@
 'use client'
-// ❌ LoginModal 関連を削除
-import { useState } from 'react'
 import './globals.css'
 import '../styles/layout.css'
 import Footer from '../components/Footer'
-// import LoginModal from '../components/LoginModal' ←削除
 import { AuthProvider } from '@/context/AuthContext'
 
 function LayoutBody({ children }: { children: React.ReactNode }) {
   return (
-    <div>
-      <div className="frame-container">
-        <main className="main-content">{children}</main>
+    <div
+      style={{
+        maxWidth: '430px',       // ✅ スマホ幅固定
+        margin: '0 auto',        // ✅ 中央寄せ
+        background: '#f9fafb',
+        minHeight: '100vh',
+        display: 'flex',
+        flexDirection: 'column'
+      }}
+    >
+      <div className="frame-container" style={{ flex: 1 }}>
+        <main className="main-content">
+          {children}
+        </main>
       </div>
       <Footer />
     </div>
@@ -21,7 +29,7 @@ function LayoutBody({ children }: { children: React.ReactNode }) {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ja">
-      <body>
+      <body style={{ margin: 0, background: '#f9fafb' }}>
         <AuthProvider>
           <LayoutBody>{children}</LayoutBody>
         </AuthProvider>

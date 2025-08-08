@@ -1,92 +1,40 @@
-// src/context/AuthContext.tsx
 'use client'
+import '../globals.css'
+import '../styles/layout.css'
+import Footer from '../components/Footer'
+import Header from '../components/Header' // ← ヘッダーを読み込み
+import { AuthProvider } from '@/context/AuthContext'
 
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  ReactNode,
-} from 'react'
-import {
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  signOut,
-  User,
-} from 'firebase/auth'
-import { auth } from '@/lib/firebase'
-
-// 🔐 Context型定義
-interface AuthContextType {
-  user: User | null
-  userCode: string | null
-  loading: boolean
-  login: (email: string, password: string) => Promise<void>
-  logout: () => Promise<void>
-}
-
-// 🧱 Context初期値
-const AuthContext = createContext<AuthContextType>({
-  user: null,
-  userCode: null,
-  loading: true,
-  login: async () => {},
-  logout: async () => {},
-})
-
-// 🌱 Provider定義
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null)
-  const [userCode, setUserCode] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  // ✅ Firebaseの認証状態を常に監視
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser)
-      setUserCode(firebaseUser?.uid ?? null) // UIDをコードとして利用
-      setLoading(false)
-    })
-
-    return () => unsubscribe()
-  }, [])
-
-  // 🔐 ログイン処理
-  const login = async (email: string, password: string) => {
-    setLoading(true)
-    try {
-      await signInWithEmailAndPassword(auth, email, password)
-      // 認証成功後は自動で onAuthStateChanged が反応
-    } catch (error) {
-      console.error('ログイン失敗:', error)
-      throw error
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // 🔐 ログアウト処理
-  const logout = async () => {
-    setLoading(true)
-    try {
-      await signOut(auth)
-      setUser(null)
-      setUserCode(null)
-    } catch (error) {
-      console.error('ログアウト失敗:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <AuthContext.Provider
-      value={{ user, userCode, loading, login, logout }}
-    >
-      {children}
-    </AuthContext.Provider>
+    <html lang="ja">
+      <body style={{ margin: 0, background: '#f9fafb' }}>
+        <AuthProvider>
+          {/* ✅ ここでスマホ幅を固定 */}
+          <div
+            style={{
+              maxWidth: '430px',
+              margin: '0 auto',
+              background: '#f9fafb',
+              minHeight: '100vh',
+              display: 'flex',
+              flexDirection: 'column'
+            }}
+          >
+            {/* ✅ ヘッダーもこの中に置く */}
+            <Header onLoginClick={function (): void {
+              throw new Error('Function not implemented.')
+            } } />
+
+            <div className="frame-container" style={{ flex: 1 }}>
+              <main className="main-content">{children}</main>
+            </div>
+
+            {/* ✅ フッターもこの中に置く */}
+            <Footer children={''} />
+          </div>
+        </AuthProvider>
+      </body>
+    </html>
   )
 }
-
-// ✅ 利用フック
-export const useAuth = () => useContext(AuthContext)

@@ -6,11 +6,25 @@ body {
   font-family: 'Noto Sans JP', sans-serif;
   background: #f9fafb;
   color: #333;
+  display: flex;
+  justify-content: center; /* PC時中央寄せ */
+}
+
+/* ✅ 全体をスマホ幅に固定する枠 */
+.page-wrapper {
+  width: 100%;
+  max-width: 430px; /* iPhone Pro基準 */
+  min-height: 100vh;
+  background: #f9fafb;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 0 15px rgba(0,0,0,0.05); /* PC時に軽く影 */
 }
 
 /* ✅ レイアウト枠 */
 .frame-container {
   display: flex;
+  flex: 1;
   min-height: calc(100vh - 110px); /* header(60px) + footer(50px) を引いた高さ */
 }
 
@@ -27,7 +41,7 @@ body {
   background: #fff;
   display: flex;
   align-items: center;
-  justify-content: space-between;  /* ← 両端に配置 */
+  justify-content: space-between;
   padding: 0 16px;
   font-weight: bold;
   font-size: 18px;
@@ -38,7 +52,6 @@ body {
   z-index: 50;
 }
 
-/* ✅ 中央タイトルをしっかり中央寄せ */
 .header-title {
   position: absolute;
   left: 50%;
@@ -46,7 +59,6 @@ body {
   font-size: 18px;
 }
 
-/* ✅ 左右のアイコン */
 .header-icon {
   font-size: 24px;
   background: none;
@@ -66,8 +78,10 @@ body {
   align-items: center;
   position: fixed;
   bottom: 0;
-  left: 0;
+  left: 50%;
+  transform: translateX(-50%);
   width: 100%;
+  max-width: 430px; /* スマホ幅に合わせる */
 }
 
 /* ✅ メニュー共通スタイル */
@@ -85,6 +99,7 @@ body {
   background: #f3f4f6;
   cursor: pointer;
 }
+
 /* ✅ モーダル背景 */
 .modal-overlay {
   position: fixed;
@@ -112,4 +127,49 @@ body {
 .error-text {
   color: red;
   font-size: 14px;
+}
+/* ✅ PCでもスマホ幅固定＆中央寄せ */
+body {
+  margin: 0;
+  font-family: 'Noto Sans JP', sans-serif;
+  background: #f9fafb;
+  color: #333;
+  display: flex;
+  justify-content: center; /* 横中央寄せ */
+}
+
+/* ✅ ページ全体のスマホ幅制限 */
+.page-wrapper {
+  width: 100%;
+  max-width: 430px; /* iPhone 14 Pro基準 */
+  min-height: 100vh;
+  background: #f9fafb;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 0 15px rgba(0,0,0,0.05); /* PC時だけ薄い影 */
+}
+
+/* Footerもスマホ幅に合わせる */
+.footer {
+  height: 50px;
+  background: #ffffff;
+  border-top: 1px solid #ddd;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 430px; /* スマホ幅固定 */
+}
+.frame-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center; /* 中央寄せ */
+  min-height: calc(100vh - 110px);
+
+  max-width: 480px;
+  margin: 0 auto;
 }
