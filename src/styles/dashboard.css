@@ -259,4 +259,168 @@
 
   z-index: -1;
 }
+/* タイルの並びを中央寄せ・等間隔にする */
+.tile-grid {
+  display: flex;              /* 既存がgridでもOK：下の指定が勝ちます */
+  flex-wrap: wrap;
+  justify-content: center;    /* ← space-between をやめて中央寄せ */
+  gap: 16px;                  /* タイル間の均等な余白 */
+  padding: 0 8px;             /* 端の張り付き防止（任意） */
+}
 
+/* タイル幅を統一して中央に配置 */
+.tile-grid .tile {
+  width: 110px;               /* 好みで 100–120px 程度 */
+  margin: 0;                  /* 余計な左右マージンをリセット */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+/* タイル全体の高さとアイコンサイズを小さく */
+.tile-grid .tile {
+  width: 100px;       /* 横幅をやや小さく */
+  height: 110px;      /* 縦幅を短くする（元が130〜150pxなら効果あり） */
+  padding: 8px;       /* 内側の余白も減らす */
+}
+
+.tile-grid .tile img {
+  width: 48px;        /* アイコンの横幅を縮小 */
+  height: 48px;       /* 高さも合わせる */
+  object-fit: contain;
+}
+
+.tile-grid .tile small {
+  font-size: 12px;    /* ラベルの文字も少し小さく */
+}
+/* タイル内のアイコン画像 */
+.tile-grid .tile .tile-icon-img {
+  width: 60px;       /* 横幅 */
+  height: 60px;      /* 高さ */
+  object-fit: contain; /* 画像比率を保持して縮小 */
+  display: block;
+  margin: 0 auto;    /* 中央寄せ */
+}
+
+/* アイコンとラベル間のスペースを微調整 */
+.tile-grid .tile .tile-label {
+  margin-top: 6px;
+  font-size: 13px;
+}
+/* === グラデーション縁取り（赤→紫） ===================== */
+.tile-grid .tile {
+  position: relative;
+  border-radius: 16px;
+
+  /* 既存の枠・背景・影を整える */
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(0,0,0,.06);
+  transition: transform .18s ease, box-shadow .18s ease;
+
+  /* グラデ枠（2層の背景で border にだけ色を通す） */
+  border: 2px solid transparent;
+  background-image:
+    linear-gradient(#fff, #fff),                             /* 中身（白） */
+    linear-gradient(135deg, #ff4d6d, #8a2be2);               /* 外周の赤→紫 */
+  background-clip: padding-box, border-box;
+  background-origin: padding-box, border-box;
+}
+
+.tile-grid .tile:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 18px rgba(0,0,0,.08);
+}
+
+.tile-grid .tile:active {
+  transform: translateY(-1px) scale(.99);
+}
+
+/* 角丸と枠を揃えるための保険（画像がはみ出さないように） */
+.tile-grid .tile .tile-icon {
+  overflow: hidden;
+  border-radius: 10px; /* 画像周りの角丸は控えめに */
+}
+
+/* アイコンとラベル（任意の微調整） */
+.tile-grid .tile .tile-icon-img { width: 56px; height: 56px; object-fit: contain; display:block; }
+.tile-grid .tile .tile-label { margin-top: 4px; font-size: 13px; font-weight: 600; color: #3f3f46; }
+/* === グラデーション縁取り（立体感あり） ===================== */
+.tile-grid .tile {
+  position: relative;
+  border-radius: 18px;
+
+  /* 背景と枠 */
+  background: #fff;
+  border: 3px solid transparent; /* ← 太さをアップ */
+  background-image:
+    linear-gradient(#fff, #fff),
+    linear-gradient(135deg, #ff4d6d, #8a2be2);
+  background-clip: padding-box, border-box;
+  background-origin: padding-box, border-box;
+
+  /* 影：内側の光沢 + 外側の浮き */
+  box-shadow:
+    inset 0 2px 4px rgba(255,255,255,0.6), /* 上側の光 */
+    inset 0 -2px 4px rgba(0,0,0,0.05),     /* 下側の影 */
+    0 4px 12px rgba(0,0,0,0.1);           /* 外側の影 */
+
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.tile-grid .tile:hover {
+  transform: translateY(-4px);
+  box-shadow:
+    inset 0 2px 4px rgba(255,255,255,0.6),
+    inset 0 -2px 4px rgba(0,0,0,0.05),
+    0 8px 20px rgba(0,0,0,0.15);
+}
+
+.tile-grid .tile:active {
+  transform: translateY(-1px) scale(0.99);
+}
+
+/* タイルボタン（大きめ + 立体感） */
+.tile-grid .tile {
+  position: relative;
+  border-radius: 18px;
+  
+  /* サイズ感アップ */
+  width: 110px;   /* ← 元より大きめに */
+  height: 110px;  /* ← 正方形で揃える */
+  padding: 12px;
+
+  /* 背景と枠 */
+  background: #fff;
+  border: 3px solid transparent;
+  background-image:
+    linear-gradient(#fff, #fff),
+    linear-gradient(135deg, #ff4d6d, #8a2be2);
+  background-clip: padding-box, border-box;
+  background-origin: padding-box, border-box;
+
+  /* 影：内側の光沢 + 外側の浮き */
+  box-shadow:
+    inset 0 2px 4px rgba(255,255,255,0.6),
+    inset 0 -2px 4px rgba(0,0,0,0.05),
+    0 4px 12px rgba(0,0,0,0.1);
+
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.tile-grid .tile:hover {
+  transform: translateY(-4px);
+  box-shadow:
+    inset 0 2px 4px rgba(255,255,255,0.6),
+    inset 0 -2px 4px rgba(0,0,0,0.05),
+    0 8px 20px rgba(0,0,0,0.15);
+}
+
+.tile-grid .tile:active {
+  transform: translateY(-1px) scale(0.99);
+}
+
+/* アイコンやテキストを中央寄せ */
+.tile-grid .tile img,
+.tile-grid .tile span {
+  display: block;
+  margin: 0 auto;
+}
