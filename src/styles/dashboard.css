@@ -189,3 +189,74 @@
   pointer-events: none;   /* ← 完全に押せなくする */
   cursor: not-allowed;
 }
+/* —— 背景：親の白を上書き（通常幅ページのみ） —— */
+.mu-main:not(.mu-main--wide),
+.mu-page:not(.mu-page--wide) {
+  background: linear-gradient(180deg, #faf7ff 0%, #ffffff 100%);
+}
+
+/* 高さを確保（タブ分の余白も） */
+.mu-page:not(.mu-page--wide) {
+  min-height: calc(100vh - 60px);
+}
+
+/* —— タイル装飾（既存より強いセレクタで上書き） —— */
+.tile-grid .tile {
+  background: #fff;
+  border-radius: 16px;
+  border: 1px solid rgba(160, 160, 220, 0.28);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+
+.tile-grid .tile:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 22px rgba(0,0,0,0.08);
+}
+
+/* アイコン画像のサイズを固定（上書きが効くようにセレクタを強める） */
+.tile-grid .tile .tile-icon-img {
+  width: 84px;
+  height: 84px;
+  object-fit: contain;
+  display: block;
+}
+
+/* ラベルの品を少しだけ */
+.tile-grid .tile .tile-label {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: #3f3f46;
+  margin-top: 6px;
+}
+
+/* ▼ グラデ縁取り（クロスブラウザ版） */
+.tile-grid .tile {
+  position: relative;
+  isolation: isolate;
+  border-radius: 16px;
+}
+
+.tile-grid .tile::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  padding: 1px; /* 縁の太さ */
+  background: linear-gradient(135deg, #e9e5ff, #ffffff 60%, #f3f0ff);
+
+  /* Safari 等 */
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+
+  /* 標準プロパティ（←これが無くて警告が出ていました） */
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+
+  z-index: -1;
+}
+

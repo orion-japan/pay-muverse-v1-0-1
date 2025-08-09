@@ -49,7 +49,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="ja">
       {/* bodyにもフラグクラスを付与してCSS側で切り替えやすく */}
-      <body className={isMuAI ? 'mu-ai' : ''} style={{ margin: 0, background: '#fff' }}>
+      <body className={isMuAI ? 'mu-ai' : ''} style={{ margin: 0 }}>
         <AuthProvider>
           <LayoutBody>{children}</LayoutBody>
         </AuthProvider>

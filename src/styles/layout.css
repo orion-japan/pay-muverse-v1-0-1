@@ -79,3 +79,92 @@ body.mu-ai header,
 body.mu-full header {
   display: none !important;
 }
+/* アプリ全体の背景（通常ページ） */
+html, body {
+  min-height: 100%;
+  background: linear-gradient(180deg, #faf7ff 0%, #ffffff 100%);
+}
+
+/* Mu系の全幅ページは従来どおり（必要なら上書き） */
+.mu-ai {
+  background: #fff; /* ここは好みで。グラデ不要なら白でOK */
+}
+.tile-grid .tile {
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.tile-grid .tile:hover { transform: translateY(-3px); }
+.tile-grid .tile:active { transform: translateY(-1px) scale(.99); }
+
+.notice-section,
+.tile-grid .tile {
+  box-shadow: 0 6px 18px rgba(17, 24, 39, 0.06); /* ほんのり深く */
+}
+
+header {
+  background: rgba(255, 255, 255, 0.3); /* 半透明 */
+  backdrop-filter: blur(8px); /* ガラス感 */
+  -webkit-backdrop-filter: blur(8px); /* Safari対応 */
+  border-bottom: 1px solid rgba(255, 255, 255, 0.18); /* 薄い境界線 */
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08); /* 少し影 */
+}
+/* === Glass Header (特徴強め) =========================== */
+header {
+  position: sticky;           /* 既存ならそのままでOK */
+  top: 0;
+  z-index: 100;
+  background: linear-gradient(
+    180deg,
+    rgba(255,255,255,0.42) 0%,
+    rgba(255,255,255,0.24) 100%
+  );
+  backdrop-filter: saturate(160%) blur(10px);
+  -webkit-backdrop-filter: saturate(160%) blur(10px); /* Safari */
+  border-bottom: 1px solid rgba(120,120,200,0.25);
+  box-shadow:
+    0 10px 24px rgba(62,37,139,0.08),   /* ふわっとした影 */
+    inset 0 1px 0 rgba(255,255,255,0.25); /* ガラス上辺のハイライト */
+  overflow: hidden;            /* ↓の装飾を切り抜くため */
+}
+
+/* 下辺に“光のアクセントライン” */
+header::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: -1px;
+  height: 2px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(139,92,246,0.35) 25%,
+    rgba(59,130,246,0.35) 50%,
+    rgba(139,92,246,0.35) 75%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
+/* うっすら“ノイズ”でガラス質感（超控えめ） */
+header::before {
+  content: "";
+  position: absolute; inset: 0;
+  background-image:
+    radial-gradient(rgba(255,255,255,0.18) 0.5px, transparent 0.6px);
+  background-size: 8px 8px;
+  opacity: .35;
+  pointer-events: none;
+}
+
+/* ヘッダー内のコンテンツを少し締める（任意） */
+header .brand,
+header nav a,
+header button {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* スクロール時に影を少し強める（任意）
+   JSで <body class="scrolled"> を付与できるなら */
+body.scrolled header {
+  box-shadow:
+    0 14px 28px rgba(62,37,139,0.10),
+    inset 0 1px 0 rgba(255,255,255,0.25);
+}

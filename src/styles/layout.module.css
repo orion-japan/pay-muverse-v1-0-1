@@ -1,0 +1,11 @@
+.header{background:rgba(255,255,255,.85);border-bottom:1px solid var(--border);backdrop-filter:saturate(180%) blur(8px);z-index:20}
+.sticky{position:sticky;top:0}
+.headerInner{height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 var(--sp-3)}
+.brand{display:flex;align-items:center;gap:var(--sp-2)}
+.topNav{display:flex;align-items:center;gap:var(--sp-3)}
+.logout{height:32px;padding:0 var(--sp-3);border:1px solid var(--border);border-radius:999px;background:#fff}
+
+.tabbar{position:fixed;left:0;right:0;bottom:0;background:rgba(255,255,255,.92);border-top:1px solid var(--border);backdrop-filter:saturate(180%) blur(8px);z-index:20}
+.tabInner{max-width:720px;margin:0 auto;padding:8px 16px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.tabLink{display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px;border-radius:12px;font-size:12px;color:#374151}
+.tabLink:hover{background:#f9fafb}

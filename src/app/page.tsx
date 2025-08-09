@@ -3,32 +3,40 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import '../styles/dashboard.css'
-import Header from '../components/Header'
 import LoginModal from '../components/LoginModal'
 import { useAuth } from '@/context/AuthContext'
 
+import { FileContentProvider } from '@/lib/content.file'
+import type { HomeContent } from '@/lib/content'
+
 export default function DashboardPage() {
-  const images = ['/mu_24.png', '/mu_14.png']
+  const [content, setContent] = useState<HomeContent | null>(null)
   const [current, setCurrent] = useState(0)
   const { user, userCode } = useAuth()
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrent((prev) => (prev + 1) % images.length)
-    }, 4000)
-    return () => clearInterval(interval)
+    FileContentProvider.getHomeContent().then(setContent)
   }, [])
 
-  // ✅ /credit -> /pay に変更
-  const menuItems = [
-    { icon: '🤖', title: 'Mu_AI',   link: '/mu_full' },
-    { icon: '💳', title: 'クレジット', link: '/pay'   },
-    { icon: '🌸', title: '共鳴会',   link: '/kyomeikai' },
+  useEffect(() => {
+    if (!content?.heroImages?.length) return
+    const interval = setInterval(() => {
+      setCurrent((prev) => (prev + 1) % content.heroImages.length)
+    }, 4000)
+    return () => clearInterval(interval)
+  }, [content])
+
+  // ✅ 並びを「Mu_AI / 共鳴会 / プラン」に変更
+  // ✅ 画像アイコンを使用（/public 直下）
+  const menuItems: { title: string; link: string; img: string; alt: string }[] = [
+    { title: 'Mu_AI',  link: '/mu_full',    img: '/mu_ai.png',   alt: 'Mu_AI' },
+    { title: '共鳴会',  link: '/kyomeikai',  img: '/kyoumai.png', alt: '共鳴会' }, // ← ファイル名指定どおり
+    { title: 'プラン',  link: '/pay',        img: '/mu_card.png', alt: 'プラン' },
   ]
 
-  // ✅ userクエリを付ける必要があるパスだけ列挙（/pay には付けない）
+  // ✅ userクエリが必要なページだけ
   const needsUserParam = new Set<string>(['/mu_ai'])
 
   const handleClick = (link: string) => {
@@ -36,12 +44,13 @@ export default function DashboardPage() {
       setIsLoginModalOpen(true)
       return
     }
-
     const linkWithParam =
       needsUserParam.has(link) ? `${link}?user=${encodeURIComponent(userCode)}` : link
-
     router.push(linkWithParam)
   }
+
+  const images = content?.heroImages ?? []
+  const notices = content?.notices ?? []
 
   return (
     <div
@@ -50,11 +59,6 @@ export default function DashboardPage() {
         if (!user) setIsLoginModalOpen(true)
       }}
     >
-      {/* ヘッダー（固定） */}
-      <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', zIndex: 50 }}>
-        <Header onLoginClick={() => setIsLoginModalOpen(true)} />
-      </div>
-
       {/* 本文 */}
       <div style={{ paddingTop: '2.5px' }}>
         <section className="slider-container">
@@ -70,12 +74,11 @@ export default function DashboardPage() {
 
         <section className="notice-section">
           <h2 className="notice-title">📢 お知らせ</h2>
-          <div className="notice-item">
-            共鳴会の開催 — 小さな気づきや成長を仲間と分かち合う場
-          </div>
-          <div className="notice-item">
-            思いを整理する習慣 — Muからの問いかけで日々の心を整える
-          </div>
+          {notices.map((n) => (
+            <div key={n.id} className="notice-item">
+              {n.text}
+            </div>
+          ))}
         </section>
 
         <section className="tile-grid">
@@ -88,24 +91,25 @@ export default function DashboardPage() {
                 handleClick(item.link)
               }}
             >
-              <div className="tile-icon">{item.icon}</div>
+              {/* 画像ボタン（Tailwindなし） */}
+              <div className="tile-icon">
+                <img
+                  src={item.img}
+                  alt={item.alt}
+                  className="tile-icon-img"
+                  draggable={false}
+                />
+              </div>
               <div className="tile-label">{item.title}</div>
             </div>
           ))}
         </section>
       </div>
 
-      {/* ログインモーダル */}
       <LoginModal
         isOpen={isLoginModalOpen}
-        onClose={() => {
-          console.log('🔴 LoginModal の onClose 実行')
-          setIsLoginModalOpen(false)
-        }}
-        onLoginSuccess={() => {
-          console.log('🟢 Login 成功 → モーダル閉じる')
-          setIsLoginModalOpen(false)
-        }}
+        onClose={() => setIsLoginModalOpen(false)}
+        onLoginSuccess={() => setIsLoginModalOpen(false)}
       />
     </div>
   )
