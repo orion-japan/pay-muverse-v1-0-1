@@ -1,5 +1,6 @@
 import React from "react";
 import Link from "next/link";
+import Image from "next/image";
 import s from "../styles/layout.module.css";
 
 type Props = { children: React.ReactNode };
@@ -10,7 +11,14 @@ export default function AppShell({ children }: Props) {
       <header className={`${s.header} ${s.sticky}`}>
         <div className={`container ${s.headerInner}`}>
           <div className={s.brand}>
-            <span>🏠</span>
+            {/* ブランドアイコンを next/image で最適化 */}
+            <Image
+              src="/mu_logo3_s.png"     // public/mu_logo3_s.png
+              alt="Muverse"
+              width={24}
+              height={24}
+              priority
+            />
             <b>Muverse</b>
           </div>
           <nav className={s.topNav}>
