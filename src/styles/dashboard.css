@@ -449,3 +449,325 @@
   .tile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .tile-grid .tile { width: 118px; height: 118px; }  /* 少しだけ広く */
 }
+/* ボタンの枠アニメーション */
+@keyframes borderGlow {
+  0% {
+    box-shadow: 0 0 4px rgba(255, 0, 128, 0.4), 0 0 8px rgba(128, 0, 255, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 8px rgba(255, 0, 128, 0.8), 0 0 16px rgba(128, 0, 255, 0.8);
+  }
+  100% {
+    box-shadow: 0 0 4px rgba(255, 0, 128, 0.4), 0 0 8px rgba(128, 0, 255, 0.4);
+  }
+}
+
+/* タイルの枠に適用 */
+.tile-grid .tile {
+  border: 2px solid transparent;
+  border-radius: 12px;
+  background: #fff;
+  background-clip: padding-box;
+  animation: borderGlow 3s ease-in-out infinite; /* ← アニメーション追加 */
+}
+/* グラデーションがゆっくり変化するアニメ */
+@keyframes gradientShift {
+  0% {
+    border-image-source: linear-gradient(45deg, #ff4d88, #8a2be2);
+  }
+  50% {
+    border-image-source: linear-gradient(45deg, #ff66aa, #6a0dad);
+  }
+  100% {
+    border-image-source: linear-gradient(45deg, #ff4d88, #8a2be2);
+  }
+}
+
+/* 共通ボタンスタイル */
+.tile-grid .tile {
+  border: 3px solid transparent;
+  border-radius: 16px;
+  background: #fff;
+  background-clip: padding-box;
+  border-image-slice: 1;
+  animation: gradientShift 6s ease-in-out infinite;
+}
+
+/* 個性のあるボタン（色やタイミングを変える） */
+.tile-grid .tile:nth-child(1) {
+  border-image-source: linear-gradient(45deg, #ff4d88, #8a2be2);
+  animation-duration: 5s;
+}
+.tile-grid .tile:nth-child(2) {
+  border-image-source: linear-gradient(45deg, #ff884d, #ff4da6);
+  animation-duration: 7s;
+  animation-delay: 1s;
+}
+.tile-grid .tile:nth-child(3) {
+  border-image-source: linear-gradient(45deg, #4da6ff, #8a2be2);
+  animation-duration: 6.5s;
+  animation-delay: 0.5s;
+}
+.button {
+  position: relative;
+  padding: 12px;
+  border-radius: 8px; /* 少し丸い角 */
+  background: white;
+  border: 3px solid transparent;
+  background-image: linear-gradient(#fff, #fff), 
+    linear-gradient(45deg, #ff4e50, #f9d423);
+  background-origin: border-box;
+  background-clip: content-box, border-box;
+  
+  /* グラデーション枠のアニメーション */
+  animation: borderGradient 5s ease infinite;
+
+  /* グラデーションと同じ色の影 */
+  box-shadow: 0 4px 12px rgba(255, 78, 80, 0.4);
+}
+
+@keyframes borderGradient {
+  0% {
+    background-image: linear-gradient(#fff, #fff), 
+      linear-gradient(45deg, #ff4e50, #f9d423);
+    box-shadow: 0 4px 12px rgba(255, 78, 80, 0.4);
+  }
+  50% {
+    background-image: linear-gradient(#fff, #fff), 
+      linear-gradient(45deg, #f9d423, #ff4e50);
+    box-shadow: 0 4px 18px rgba(249, 212, 35, 0.4);
+  }
+  100% {
+    background-image: linear-gradient(#fff, #fff), 
+      linear-gradient(45deg, #ff4e50, #f9d423);
+    box-shadow: 0 4px 12px rgba(255, 78, 80, 0.4);
+  }
+}
+
+
+/* === タイル：角少し丸 + 白中身 + 枠色で外側ぼかし === */
+.tile-grid .tile{
+  position: relative;
+  isolation: isolate;         /* 発光が中に入らない */
+  width: 112px;
+  height: 112px;
+  padding: 12px;
+  border-radius: 10px;        /* ◁ 角を少し丸く（好みで 8–12px） */
+  background:#fff;            /* 中は純白 */
+  box-shadow: 0 6px 16px rgba(0,0,0,.08);
+  transition: transform .18s ease, box-shadow .18s ease;
+  border: none;               /* 枠は疑似要素で描く */
+}
+
+/* 枠（リング）— 内側はくり抜き、線だけ残す */
+.tile-grid .tile::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  padding:2px;                /* 枠の太さ（1–3pxで調整） */
+  border-radius:12px;         /* 本体より +2px 程度 */
+  background:linear-gradient(135deg, var(--c1,#ff4d88), var(--c2,#8a2be2));
+  /* マスクでリング化（Safari対応含む） */
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events:none;
+  z-index:0;
+}
+
+/* 外側のぼかし（発光）。枠と同じ色で外にだけ広げる */
+.tile-grid .tile::after{
+  content:"";
+  position:absolute;
+  inset:-8px;                 /* ◁ 外側に広げる量（6–12pxで調整） */
+  border-radius:14px;         /* 枠より少し大きく */
+  background:linear-gradient(135deg, var(--c1,#ff4d88), var(--c2,#8a2be2));
+  filter:blur(12px);          /* ぼかし量（10–16pxで調整） */
+  opacity:.22;                /* 発光の強さ（.15–.35で調整） */
+  pointer-events:none;
+  z-index:-1;                 /* 背面へ＝中は白のまま */
+  animation:glowPulse var(--pulse,6s) ease-in-out infinite;
+  animation-delay:var(--delay,0s);
+}
+
+/* 軽い呼吸アニメ（opacityのみ＝軽量） */
+@keyframes glowPulse{ 0%,100%{opacity:.18} 50%{opacity:.32} }
+
+/* 中身 */
+.tile-grid .tile .tile-icon-img{ width:58px;height:58px;object-fit:contain;display:block;margin:0 auto;z-index:1; }
+.tile-grid .tile .tile-label{ margin-top:4px;font-size:13px;font-weight:600;color:#3f3f46;z-index:1; }
+
+/* ボタンごとの色（そのまま流用OK／好みで微調整） */
+.tile--mu     { --c1:#ff4d88; --c2:#8a2be2; --pulse:5.0s; --delay:0s;  }
+.tile--kyomei { --c1:#ff884d; --c2:#ff4da6; --pulse:6.5s; --delay:.4s; }
+.tile--plan   { --c1:#4da6ff; --c2:#8a2be2; --pulse:5.8s; --delay:.2s; }
+
+/* PCホバーの微浮き */
+.tile-grid .tile:hover{ transform:translateY(-3px); box-shadow:0 10px 24px rgba(0,0,0,.12); }
+.tile-grid .tile:active{ transform:translateY(-1px) scale(.99); }
+
+/* ユーザーが“動き少なめ”設定のときは停止 */
+@media (prefers-reduced-motion: reduce){
+  .tile-grid .tile::after{ animation:none; }
+}
+
+
+/* ===== 枠＆発光は外レイヤー、白面は内レイヤー ===== */
+
+/* 外側ボックス：枠・発光担当（中身は持たない） */
+.tile-grid .tile{
+  position: relative;
+  isolation: isolate;              /* 発光を内側に入れない */
+  width: 112px;
+  height: 112px;
+  border-radius: 10px;
+  border: none;                    /* 枠は疑似要素で描く */
+  background: transparent;         /* ← 外側は透明にする */
+  transition: transform .18s ease, box-shadow .18s ease;
+  box-shadow: 0 6px 16px rgba(0,0,0,.08);
+}
+
+/* 中身（白面＋内容） */
+.tile-grid .tile .tile-inner{
+  position: absolute;
+  inset: 2px;                      /* 枠の分だけ一回り小さく */
+  border-radius: 8px;              /* 角少し丸 */
+  background: #fff;                /* ★ 完全な白面（ここに内容を置く） */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;                      /* 枠より手前 */
+}
+
+/* 画像・ラベル */
+.tile-grid .tile .tile-icon-img{ width:58px; height:58px; object-fit:contain; display:block; }
+.tile-grid .tile .tile-label{ margin-top:4px; font-size:13px; font-weight:600; color:#3f3f46; }
+
+/* 枠（グラデのリング）— 内側はくり抜き */
+.tile-grid .tile::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  padding:2px;                     /* 枠の太さ */
+  border-radius:12px;              /* 外側の角 */
+  background:linear-gradient(135deg, var(--c1,#ff4d88), var(--c2,#8a2be2));
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude; /* リング化 */
+  pointer-events:none;
+  z-index:0;                       /* 白面(.tile-inner)の背面 */
+}
+
+/* 外側の発光（ぼかし） */
+.tile-grid .tile::after{
+  content:"";
+  position:absolute;
+  inset:-8px;                      /* 外に広げる */
+  border-radius:14px;
+  background:linear-gradient(135deg, var(--c1,#ff4d88), var(--c2,#8a2be2));
+  filter:blur(12px);
+  opacity:.22;
+  pointer-events:none;
+  z-index:-1;                      /* さらに背面（中は白のまま） */
+  animation: glowPulse var(--pulse,6s) ease-in-out infinite;
+  animation-delay: var(--delay,0s);
+}
+
+/* 軽い呼吸アニメ（軽量：opacityのみ） */
+@keyframes glowPulse{ 0%,100%{opacity:.18} 50%{opacity:.32} }
+
+/* ホバー（PC） */
+.tile-grid .tile:hover{ transform:translateY(-3px); box-shadow:0 10px 24px rgba(0,0,0,.12); }
+.tile-grid .tile:active{ transform:translateY(-1px) scale(.99); }
+
+/* 個性カラーはそのまま使えます */
+.tile--mu     { --c1:#ff4d88; --c2:#8a2be2; --pulse:5.0s; --delay:0s;  }
+.tile--kyomei { --c1:#ff884d; --c2:#ff4da6; --pulse:6.5s; --delay:.4s; }
+.tile--plan   { --c1:#4da6ff; --c2:#8a2be2; --pulse:5.8s; --delay:.2s; }
+
+/* 動きを抑える設定の人には止める */
+@media (prefers-reduced-motion: reduce){
+  .tile-grid .tile::after{ animation:none; }
+}
+
+
+/* =========================
+   タイルのマイクロインタラクション
+   ========================= */
+
+/* 調整しやすいノブ（お好みで数値だけ変えてOK） */
+:root {
+  --tile-glow-base: .22;   /* 通常時の発光の強さ */
+  --tile-glow-hover: .34;  /* ホバー時の発光の強さ */
+  --tile-glow-blur: 12px;  /* 通常時のぼかし量 */
+  --tile-glow-blur-hover: 14px; /* ホバー時のぼかし量 */
+}
+
+/* 既存の発光をノブに合わせる（ベース状態） */
+.tile-grid .tile::after {
+  opacity: var(--tile-glow-base);
+  filter: blur(var(--tile-glow-blur));
+}
+
+/* ホバーで光を少し強く＆ふわっと */
+.tile-grid .tile:hover::before { filter: brightness(1.15); }  /* 枠線を少し明るく */
+.tile-grid .tile:hover::after  {
+  opacity: var(--tile-glow-hover);
+  filter: blur(var(--tile-glow-blur-hover));
+}
+
+/* クリック/タップで一瞬フラッシュ（軽量：opacityのみ） */
+@keyframes tileTapFlash {
+  0%   { opacity: .0;   }
+  30%  { opacity: .45;  }
+  100% { opacity: .0;   }
+}
+
+/* フラッシュ用のオーバーレイを重ねる（白の光がふわっと） */
+.tile-grid .tile .tile-inner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(120% 120% at 50% 50%, rgba(255,255,255,.6), rgba(255,255,255,0) 60%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .15s ease;
+}
+
+/* :active で発動（タップ中） */
+.tile-grid .tile:active .tile-inner::after {
+  animation: tileTapFlash .28s ease-out 1;
+}
+
+/* PC ホバー時に本体も少しだけ持ち上げる（既存の hover と共存） */
+.tile-grid .tile:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 24px rgba(0,0,0,.12);
+}
+
+/* アクセシビリティ：キーボードでフォーカスした時の可視リング */
+.tile-grid .tile:focus-visible .tile-inner {
+  outline: 2px solid rgba(99,102,241,.7);  /* indigo系 */
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* タップハイライトを無効化（モバイルの濃いグレーの帯を消す） */
+.tile-grid .tile {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* “動き少なめ”設定なら強い演出を抑制 */
+@media (prefers-reduced-motion: reduce) {
+  .tile-grid .tile:hover,
+  .tile-grid .tile:active { transform: none; box-shadow: 0 6px 16px rgba(0,0,0,.08); }
+  .tile-grid .tile:hover::before { filter: none; }
+  .tile-grid .tile:hover::after  { opacity: var(--tile-glow-base); filter: blur(var(--tile-glow-blur)); }
+  .tile-grid .tile .tile-inner::after { animation: none !important; }
+}

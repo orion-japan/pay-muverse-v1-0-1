@@ -28,15 +28,15 @@ export default function DashboardPage() {
     return () => clearInterval(interval)
   }, [content])
 
-  // ✅ 並びを「Mu_AI / 共鳴会 / プラン」に変更
-  // ✅ 画像アイコンを使用（/public 直下）
+  // 並び：Mu_AI / 共鳴会 / プラン（各ボタン用の個性クラスは tileVariants で付与）
   const menuItems: { title: string; link: string; img: string; alt: string }[] = [
     { title: 'Mu_AI',  link: '/mu_full',    img: '/mu_ai.png',   alt: 'Mu_AI' },
-    { title: '共鳴会',  link: '/kyomeikai',  img: '/kyoumai.png', alt: '共鳴会' }, // ← ファイル名指定どおり
+    { title: '共鳴会',  link: '/kyomeikai',  img: '/kyoumai.png', alt: '共鳴会' },
     { title: 'プラン',  link: '/pay',        img: '/mu_card.png', alt: 'プラン' },
   ]
+  const tileVariants = ['tile--mu', 'tile--kyomei', 'tile--plan'] as const
 
-  // ✅ userクエリが必要なページだけ
+  // userクエリが必要なページだけ
   const needsUserParam = new Set<string>(['/mu_ai'])
 
   const handleClick = (link: string) => {
@@ -68,6 +68,7 @@ export default function DashboardPage() {
               src={img}
               alt={`Muverse Banner ${index}`}
               className={`slider-image ${index === current ? 'active' : ''}`}
+              draggable={false}
             />
           ))}
         </section>
@@ -82,28 +83,27 @@ export default function DashboardPage() {
         </section>
 
         <section className="tile-grid">
-          {menuItems.map((item) => (
-            <div
-              key={item.title}
-              className={`tile ${!user ? 'disabled' : ''}`}
-              onClick={(e) => {
-                e.stopPropagation()
-                handleClick(item.link)
-              }}
-            >
-              {/* 画像ボタン（Tailwindなし） */}
-              <div className="tile-icon">
-                <img
-                  src={item.img}
-                  alt={item.alt}
-                  className="tile-icon-img"
-                  draggable={false}
-                />
-              </div>
-              <div className="tile-label">{item.title}</div>
-            </div>
-          ))}
-        </section>
+  {menuItems.map((item, idx) => (
+    <div
+      key={item.title}
+      className={`tile ${tileVariants[idx]} ${!user ? 'disabled' : ''}`}
+      onClick={(e) => { e.stopPropagation(); handleClick(item.link) }}
+    >
+      {/* ★ 中身を独立レイヤーに */}
+      <div className="tile-inner">
+        <div className="tile-icon">
+          <img
+            src={item.img}
+            alt={item.alt}
+            className="tile-icon-img"
+            draggable={false}
+          />
+        </div>
+        <div className="tile-label">{item.title}</div>
+      </div>
+    </div>
+  ))}
+</section>
       </div>
 
       <LoginModal
