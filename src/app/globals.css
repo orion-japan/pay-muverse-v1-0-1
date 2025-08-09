@@ -534,3 +534,7 @@ html, body { overflow-x: hidden; }
   opacity: .9;
 }
 
+/* ページ最上部に出てくる余計な固定ヘッダーを強制非表示 */
+body > header[style] {
+  display: none !important;
+}

@@ -73,3 +73,9 @@ body.mu-ai .mu-main {
 /* 画像や iframe 下の隙間対策＋横スク抑止 */
 img, iframe { display: block; }
 html, body { overflow-x: hidden; }
+
+/* ===== Mu_AI / Mu_Full ページの二重ヘッダー除去 ===== */
+body.mu-ai header,
+body.mu-full header {
+  display: none !important;
+}
