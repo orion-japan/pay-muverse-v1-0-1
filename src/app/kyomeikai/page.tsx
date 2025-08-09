@@ -108,15 +108,23 @@ function KyomeikaiContent() {
   })()
 
   // ★ 参加ボタン押下で joinUrl を組み立てて iframe 表示
-  const handleJoin = () => {
-    if (plan === 'free') return
-    // page_url が相対パスなら同一オリジンで開く
-    const base = schedule?.page_url || 'https://muverse.jp/kyomeikai'
-    const sep = base.includes('?') ? '&' : '?'
-    const url = `${base}${sep}user=${encodeURIComponent(user)}&name=${encodeURIComponent(username)}`
-    setJoinUrl(url)
-    setShowMeeting(true)
-  }
+  // ★ 参加ボタン押下で joinUrl を組み立てて iframe 表示
+const handleJoin = () => {
+  if (plan === 'free') return
+
+  // 例: kyomeikai-20250809-abc12 など毎回違う名前にして誰でも先頭で入室＝モデレーター化
+  const d = new Date()
+  const ymd = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`
+  const rand = Math.random().toString(36).slice(2,7)
+  const room = `kyomeikai-${ymd}-${rand}`
+
+  const base = schedule?.page_url || '/kyomeikai/jitsi'
+  const url = `${base}?room=${encodeURIComponent(room)}&name=${encodeURIComponent(username || 'Guest')}`
+
+  setJoinUrl(url)
+  setShowMeeting(true)
+}
+
 
   // スケジュールカード
   const ScheduleCard = () => (
