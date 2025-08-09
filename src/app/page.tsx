@@ -56,7 +56,7 @@ export default function DashboardPage() {
       </div>
 
       {/* 本文 */}
-      <div style={{ paddingTop: '65px' }}>
+      <div style={{ paddingTop: '2.5px' }}>
         <section className="slider-container">
           {images.map((img, index) => (
             <img

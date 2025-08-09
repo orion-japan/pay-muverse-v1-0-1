@@ -533,8 +533,24 @@ html, body { overflow-x: hidden; }
   object-fit: contain !important;
   opacity: .9;
 }
+main {
+  padding-top: 0 !important;
+  margin-top: 0 !important;
+}
+.mu-main::before {
+  content: '';
+  display: block;
+  height: 20px; /* 余白の高さを調整 */
+  background:#eff6fd; /* 緑色 */
+}
 
-/* ページ最上部に出てくる余計な固定ヘッダーを強制非表示 */
-body > header[style] {
-  display: none !important;
+.dashboard-wrapper img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  margin-top: 0 !important;
+}
+.mu-page > div[style*="padding-top"] {
+  padding-top: 0 !important;
 }
