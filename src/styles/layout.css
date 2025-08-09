@@ -1,175 +1,75 @@
-/* === layout.css === */
-
-/* ✅ ページ全体の基本枠 */
-body {
-  margin: 0;
-  font-family: 'Noto Sans JP', sans-serif;
-  background: #f9fafb;
-  color: #333;
-  display: flex;
-  justify-content: center; /* PC時中央寄せ */
+/* ルート main（全ページ共通の中央カラム） */
+.mu-main{
+    width:100%;
+    max-width:var(--maxw);
+    margin:0 auto;
+    padding:60px 0;             /* header + footer 分は JS 側で調整 */
+    min-height:100vh;
+    background:var(--bg-app);
+    box-sizing:border-box;
+  }
+  
+  /* ヘッダー/フッター：外＝全幅  内＝中央幅 */
+  .mu-header-outer,.mu-footer-outer{width:100%;display:flex;justify-content:center}
+  .mu-header-inner,.mu-footer-inner{width:100%;max-width:var(--maxw);}
+  
+  /* セクション安全ラッパ（ページ先頭に置くだけで中央化） */
+  .mu-page{width:100%;max-width:var(--maxw);margin:0 auto;background:var(--bg-app)}
+  
+  /* 共通 .mu-main はスマホ幅にする実装が入っているはず */
+ 
+/* 🔥 Mu_AI の時だけ 430px 制限を解除して全幅に */
+.mu-main--wide {
+  max-width: none !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
 }
+/* src/styles/layout.css */
 
-/* ✅ 全体をスマホ幅に固定する枠 */
-.page-wrapper {
+/* 中央 430px レール（通常ページ用） */
+.mu-main {
   width: 100%;
-  max-width: 430px; /* iPhone Pro基準 */
-  min-height: 100vh;
-  background: #f9fafb;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 0 15px rgba(0,0,0,0.05); /* PC時に軽く影 */
-}
-
-/* ✅ レイアウト枠 */
-.frame-container {
-  display: flex;
-  flex: 1;
-  min-height: calc(100vh - 110px); /* header(60px) + footer(50px) を引いた高さ */
-}
-
-/* ✅ メインコンテンツ */
-.main-content {
-  flex: 1;
-  padding: 0px;
-  background: #f9fafb;
-}
-
-/* ✅ Header全体 */
-.header {
-  height: 60px;
-  background: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 16px;
-  font-weight: bold;
-  font-size: 18px;
-  border-bottom: 1px solid #ddd;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-  position: sticky;
-  top: 0;
-  z-index: 50;
-}
-
-.header-title {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 18px;
-}
-
-.header-icon {
-  font-size: 24px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  text-decoration: none;
-  color: #333;
-}
-
-/* ✅ Footer（下） */
-.footer {
-  height: 50px;
-  background: #ffffff;
-  border-top: 1px solid #ddd;
-  display: flex;
-  justify-content: space-around;
-  align-items: center;
-  position: fixed;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 100%;
-  max-width: 430px; /* スマホ幅に合わせる */
-}
-
-/* ✅ メニュー共通スタイル */
-.menu-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  text-decoration: none;
-  color: #333;
-  transition: background 0.2s ease;
-}
-
-.menu-item:hover {
-  background: #f3f4f6;
-  cursor: pointer;
-}
-
-/* ✅ モーダル背景 */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(0, 0, 0, 0.4);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 999;
-}
-
-/* ✅ モーダル本体 */
-.modal-content {
-  background: #fff;
-  padding: 20px;
-  border-radius: 12px;
-  width: 300px;
-  text-align: center;
-}
-
-/* ✅ エラーメッセージ */
-.error-text {
-  color: red;
-  font-size: 14px;
-}
-/* ✅ PCでもスマホ幅固定＆中央寄せ */
-body {
-  margin: 0;
-  font-family: 'Noto Sans JP', sans-serif;
-  background: #f9fafb;
-  color: #333;
-  display: flex;
-  justify-content: center; /* 横中央寄せ */
-}
-
-/* ✅ ページ全体のスマホ幅制限 */
-.page-wrapper {
-  width: 100%;
-  max-width: 430px; /* iPhone 14 Pro基準 */
-  min-height: 100vh;
-  background: #f9fafb;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 0 15px rgba(0,0,0,0.05); /* PC時だけ薄い影 */
-}
-
-/* Footerもスマホ幅に合わせる */
-.footer {
-  height: 50px;
-  background: #ffffff;
-  border-top: 1px solid #ddd;
-  display: flex;
-  justify-content: space-around;
-  align-items: center;
-  position: fixed;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 100%;
-  max-width: 430px; /* スマホ幅固定 */
-}
-.frame-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center; /* 中央寄せ */
-  min-height: calc(100vh - 110px);
-
-  max-width: 480px;
+  max-width: 430px;
   margin: 0 auto;
+  min-height: 100dvh;
+  background: var(--bg-app, #fff);
+  padding: 60px 0 60px; /* 上に60px（ヘッダー分）、下はフッター分 */
+  box-sizing: border-box;
 }
+
+.mu-page {
+  width: 100%;
+  max-width: 430px;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+/* Mu_AI / mu_full は全幅化して上余白を0にする */
+.mu-main--wide,
+.mu-page--wide,
+body.mu-ai .mu-main,
+body.mu-ai .mu-page {
+  max-width: none !important;
+  margin: 0 !important;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+body.mu-ai .mu-main {
+  padding-top: 0 !important;   /* ← ヘッダー分の隙間を消す */
+  padding-bottom: 60px;        /* フッター分は維持 */
+}
+
+/* 念のため、旧コンテナのクセを殺して中央寄せ/右寄り崩れを防止 */
+.page-wrapper, .frame-container, .dashboard-wrapper, .app-frame, .main-content {
+  max-width: none !important;
+  float: none !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+/* 画像や iframe 下の隙間対策＋横スク抑止 */
+img, iframe { display: block; }
+html, body { overflow-x: hidden; }

@@ -10,7 +10,7 @@ import { useAuth } from '@/context/AuthContext'
 export default function DashboardPage() {
   const images = ['/mu_24.png', '/mu_14.png']
   const [current, setCurrent] = useState(0)
-  const { user, userCode } = useAuth() // ✅ userCode を取得
+  const { user, userCode } = useAuth()
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
   const router = useRouter()
 
@@ -21,11 +21,15 @@ export default function DashboardPage() {
     return () => clearInterval(interval)
   }, [])
 
+  // ✅ /credit -> /pay に変更
   const menuItems = [
-    { icon: '🤖', title: 'Mu_AI', link: '/mu_ai' },
-    { icon: '💳', title: 'クレジット', link: '/credit' },
-    { icon: '🌸', title: '共鳴会', link: '/kyomeikai' },
+    { icon: '🤖', title: 'Mu_AI',   link: '/mu_full' },
+    { icon: '💳', title: 'クレジット', link: '/pay'   },
+    { icon: '🌸', title: '共鳴会',   link: '/kyomeikai' },
   ]
+
+  // ✅ userクエリを付ける必要があるパスだけ列挙（/pay には付けない）
+  const needsUserParam = new Set<string>(['/mu_ai'])
 
   const handleClick = (link: string) => {
     if (!user || !userCode) {
@@ -33,8 +37,9 @@ export default function DashboardPage() {
       return
     }
 
-    // ✅ userCode をクエリに付加して遷移
-    const linkWithParam = `${link}?user=${encodeURIComponent(userCode)}`
+    const linkWithParam =
+      needsUserParam.has(link) ? `${link}?user=${encodeURIComponent(userCode)}` : link
+
     router.push(linkWithParam)
   }
 
@@ -45,10 +50,12 @@ export default function DashboardPage() {
         if (!user) setIsLoginModalOpen(true)
       }}
     >
+      {/* ヘッダー（固定） */}
       <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', zIndex: 50 }}>
         <Header onLoginClick={() => setIsLoginModalOpen(true)} />
       </div>
 
+      {/* 本文 */}
       <div style={{ paddingTop: '65px' }}>
         <section className="slider-container">
           {images.map((img, index) => (
@@ -88,19 +95,18 @@ export default function DashboardPage() {
         </section>
       </div>
 
+      {/* ログインモーダル */}
       <LoginModal
-  isOpen={isLoginModalOpen}
-  onClose={() => {
-    console.log('🔴 LoginModal の onClose 実行');
-    setIsLoginModalOpen(false);
-  }}
-  onLoginSuccess={() => {
-    console.log('🟢 Login 成功 → モーダル閉じる');
-    setIsLoginModalOpen(false);
-  }}
-/>
-
-
+        isOpen={isLoginModalOpen}
+        onClose={() => {
+          console.log('🔴 LoginModal の onClose 実行')
+          setIsLoginModalOpen(false)
+        }}
+        onLoginSuccess={() => {
+          console.log('🟢 Login 成功 → モーダル閉じる')
+          setIsLoginModalOpen(false)
+        }}
+      />
     </div>
   )
 }

@@ -2,37 +2,47 @@
 import '../globals.css'
 import '../styles/layout.css'
 import Footer from '../components/Footer'
-import Header from '../components/Header' // ← ヘッダーを読み込み
+import Header from '../components/Header'
 import { AuthProvider } from '@/context/AuthContext'
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ja">
-      <body style={{ margin: 0, background: '#f9fafb' }}>
+      {/* 背景は全体白。ここで中央寄せしない */}
+      <body style={{ margin: 0, background: '#fff' }}>
         <AuthProvider>
-          {/* ✅ スマホ幅固定 */}
+          {/* ✅ スマホ幅固定（ここでだけ中央寄せ） */}
           <div
             style={{
               maxWidth: '430px',
+              width: '100%',
               margin: '0 auto',
               background: '#f9fafb',
               minHeight: '100vh',
               display: 'flex',
-              flexDirection: 'column'
+              flexDirection: 'column',
+              boxSizing: 'border-box'
             }}
           >
-            {/* ✅ ヘッダー */}
-            <Header
-              onLoginClick={function (): void {
-                throw new Error('Function not implemented.')
-              }}
-            />
+            {/* ✅ ヘッダー（ダミーで落ちないように修正） */}
+            <Header onLoginClick={() => { /* no-op */ }} />
 
-            <div className="frame-container" style={{ flex: 1 }}>
-              <main className="main-content">{children}</main>
+            {/* ✅ メイン：ヘッダー/フッター分の余白を確保 */}
+            <div className="frame-container" style={{ flex: 1, width: '100%' }}>
+              <main
+                className="main-content"
+                style={{
+                  width: '100%',
+                  paddingTop: 60,     // ヘッダー高
+                  paddingBottom: 60,  // フッター高
+                  boxSizing: 'border-box'
+                }}
+              >
+                {children}
+              </main>
             </div>
 
-            {/* ✅ フッター（children props は使わない） */}
+            {/* ✅ フッター（childrenは使わない） */}
             <Footer />
           </div>
         </AuthProvider>

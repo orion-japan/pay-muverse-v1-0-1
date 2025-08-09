@@ -85,7 +85,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: Props) {
     }
   }
 
-  // 🔹 認証メール再送信 → モーダル閉じる処理を追加
+  // 🔹 認証メール再送信 → 成功扱いで閉じる処理
   const handleResendAndClose = async () => {
     try {
       const user = auth.currentUser
@@ -101,12 +101,29 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: Props) {
       })
 
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || '送信失敗')
 
-      // 成功 → モーダルを閉じてログイン画面へ戻す
-      setShowVerifyModal(false)
-      onClose()
-      alert('✅ 認証メールを再送信しました。メールをご確認ください。')
+      // API側で success:true が返ればOK扱い
+      if (data.success) {
+        setShowVerifyModal(false)
+        onClose()
+        alert(data.message || '✅ 認証メールを送信しました。メールをご確認ください。')
+        return
+      }
+
+      // success:false でもメール送信済みの可能性がある場合はOK扱いにする
+      if (
+        data.error?.includes('送信済み') ||
+        data.error?.includes('TOO_MANY_ATTEMPTS_TRY_LATER')
+      ) {
+        setShowVerifyModal(false)
+        onClose()
+        alert('📩 認証メールはすでに送信済みです。メールをご確認ください。')
+        return
+      }
+
+      // それ以外は本当の失敗
+      throw new Error(data.error || '送信失敗')
+
     } catch (err) {
       console.error('再送信エラー:', err)
       alert('❌ 再送信に失敗しました。しばらくしてからお試しください。')

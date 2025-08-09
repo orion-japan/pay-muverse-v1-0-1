@@ -28,11 +28,32 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'メールアドレスが取得できません' }, { status: 400 })
     }
 
-    // 🔗 メール認証リンク生成（有効期限つき）
-    const link = await adminAuth.generateEmailVerificationLink(email, {
-      url: process.env.NEXT_PUBLIC_EMAIL_VERIFY_REDIRECT_URL || `https://${process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN}/verify`,
-      handleCodeInApp: true,
-    })
+    let link: string
+
+    try {
+      // 🔗 メール認証リンク生成（有効期限つき）
+      link = await adminAuth.generateEmailVerificationLink(email, {
+        url:
+          process.env.NEXT_PUBLIC_EMAIL_VERIFY_REDIRECT_URL ||
+          `https://${process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN}/verify`,
+        handleCodeInApp: true,
+      })
+    } catch (genErr: any) {
+      console.error('⚠️ メールリンク生成エラー:', genErr)
+
+      // Firebaseのレート制限・既送信エラーは成功扱いにする
+      if (
+        genErr?.code === 'auth/too-many-requests' ||
+        genErr?.message?.includes('TOO_MANY_ATTEMPTS_TRY_LATER')
+      ) {
+        return NextResponse.json({
+          success: true,
+          message: '確認メールはすでに送信済みです。メールをご確認ください。',
+        })
+      }
+
+      return NextResponse.json({ error: 'メールリンク生成に失敗しました' }, { status: 500 })
+    }
 
     // ✉️ メール送信設定
     const transporter = nodemailer.createTransport({
@@ -48,16 +69,26 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    await transporter.sendMail({
-      from: process.env.EMAIL_SENDER_ADDRESS,
-      to: email,
-      subject: '【Muverse】メールアドレス確認のお願い',
-      html: `
-        <p>以下のリンクをクリックして、<br />メールアドレスを確認してください。</p>
-        <p><a href="${link}">${link}</a></p>
-        <p>このリンクは一定時間後に無効になります。</p>
-      `,
-    })
+    try {
+      await transporter.sendMail({
+        from: process.env.EMAIL_SENDER_ADDRESS,
+        to: email,
+        subject: '【Muverse】メールアドレス確認のお願い',
+        html: `
+          <p>以下のリンクをクリックして、<br />メールアドレスを確認してください。</p>
+          <p><a href="${link}">${link}</a></p>
+          <p>このリンクは一定時間後に無効になります。</p>
+        `,
+      })
+    } catch (mailErr) {
+      console.error('⚠️ メール送信エラー:', mailErr)
+
+      // メール送信でエラーが出ても、リンクが生成されていれば成功扱い
+      return NextResponse.json({
+        success: true,
+        message: '確認メールは送信済み、またはすでに送信されています。メールをご確認ください。',
+      })
+    }
 
     return NextResponse.json({ success: true, message: '確認メールを送信しました' })
   } catch (err) {

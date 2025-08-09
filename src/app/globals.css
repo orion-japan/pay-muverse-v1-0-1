@@ -159,10 +159,6 @@ div.input-box > div > iframe {
  📄 4. /pay/page.tsx 用 UI
 ======================================== */
 
-/* ========================================
- 📄 4. /pay/page.tsx 用 UI
-======================================== */
-
 .pay-main {
   
   display: flex;
@@ -460,8 +456,81 @@ div.input-box > div > iframe {
   cursor: not-allowed;
 }
 
-/* dashboard.css に追加 */
-.tile.disabled {
-  opacity: 0.6;
-  cursor: pointer; /* あえて pointer にして誘導を自然に */
+
+/* ===== Reset & theme ===== */
+:root{
+  --maxw: 430px;
+  --bg-app: #f9fafb;
+  --bg-page: #fff;
+  --text: #333;
+  --primary: #7b4fff;
+  --shadow: 0 4px 12px rgba(0,0,0,.08);
+  --radius: 12px;
 }
+
+/* Reset */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background: var(--bg-page);
+  color: var(--text);
+  font-family: Inter,'Noto Sans JP',system-ui,sans-serif;
+  line-height:1.5;
+  /* ❌ 中央寄せはここに書かない */
+}
+
+/* Scrollbar（任意） */
+::-webkit-scrollbar{width:8px}
+::-webkit-scrollbar-thumb{border-radius:4px;background:linear-gradient(45deg,#8b5cf6,#ec4899)}
+
+/* ユーティリティ */
+.mu-inner{width:100%;max-width:var(--maxw);margin:0 auto}
+.mu-card{background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);padding:16px}
+
+/* 旧レイアウトの癖を無効化（保険） */
+.page-wrapper,.frame-container,.dashboard-wrapper,.app-frame,.main-content{
+  max-width:none!important;float:none!important;margin-left:auto!important;margin-right:auto!important;
+}
+body{display:block!important;justify-content:initial!important}
+img,iframe{display:block}
+
+/* body で中央寄せしない（右寄せの元凶を潰す） */
+body { display: block !important; justify-content: initial !important; }
+
+/* main は保険で中央 430px に */
+main { max-width: 430px !important; margin: 0 auto !important; display: block !important; }
+
+/* 旧コンテナのクセを殺す（右寄り/横並びの保険） */
+.page-wrapper, .frame-container, .dashboard-wrapper, .app-frame, .main-content {
+  max-width: none !important;
+  float: none !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+/* 画像や iframe 下の謎の隙間対策＋横スク抑止 */
+img, iframe { display: block; }
+html, body { overflow-x: hidden; }
+/* === PAY ブランドロゴの並びを強制 === */
+.payjp-brand-row,
+.brand-row {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important; /* 中央にしたければ center */
+  gap: 12px !important;
+  flex-wrap: wrap !important;
+  margin: 8px 0 12px !important;
+}
+
+/* ロゴ画像のサイズを固定 */
+.payjp-brand-row img,
+.brand-row img,
+.payjp-brand-icon,
+.brand-icon {
+  height: 28px !important;
+  width: auto !important;
+  display: block !important;
+  object-fit: contain !important;
+  opacity: .9;
+}
+
