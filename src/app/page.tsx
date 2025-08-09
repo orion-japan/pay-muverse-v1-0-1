@@ -37,7 +37,7 @@ export default function DashboardPage() {
   const tileVariants = ['tile--mu', 'tile--kyomei', 'tile--plan'] as const
 
   // userクエリが必要なページだけ
-  const needsUserParam = new Set<string>(['/mu_ai'])
+  const needsUserParam = new Set<string>(['/mu_ai', '/kyomeikai'])
 
   const handleClick = (link: string) => {
     if (!user || !userCode) {
