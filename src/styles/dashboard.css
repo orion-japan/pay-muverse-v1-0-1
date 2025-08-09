@@ -424,3 +424,28 @@
   display: block;
   margin: 0 auto;
 }
+/* ---- タイルをレスポンシブGridで安定配置 ---- */
+.tile-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)); /* 3等分 */
+  gap: 14px;               /* タイル間の余白 */
+  padding: 0 8px;          /* 端の張り付き防止 */
+  justify-items: center;   /* 各セル内で中央寄せ */
+}
+
+/* タイルの固定サイズ（大きめ） */
+.tile-grid .tile {
+  width: 112px;            /* 3列で収まるサイズに調整 */
+  height: 112px;
+  margin: 0;               /* 余計なマージンは外す（折返し防止） */
+}
+
+/* アイコン・ラベル */
+.tile-grid .tile .tile-icon-img { width: 58px; height: 58px; object-fit: contain; display:block; }
+.tile-grid .tile .tile-label { margin-top: 4px; font-size: 13px; }
+
+/* 画面が狭い端末では 2列にして窮屈さ回避（例: 幅 ≤ 380px） */
+@media (max-width: 380px) {
+  .tile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tile-grid .tile { width: 118px; height: 118px; }  /* 少しだけ広く */
+}
