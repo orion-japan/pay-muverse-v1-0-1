@@ -1,140 +1,125 @@
-// src/app/api/account-status/route.ts
+export const runtime = 'nodejs'
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { adminAuth } from '@/lib/firebase-admin'
 
-// Supabase 初期化
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+const SUPABASE_URL =
+  process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || ''
+const SERVICE_ROLE =
+  process.env.SUPABASE_SERVICE_ROLE ||
+  process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 
-type UserData = {
+if (!SUPABASE_URL || !SERVICE_ROLE) {
+  console.error('ENV CHECK account-status:', {
+    url: !!SUPABASE_URL,
+    sr: !!SERVICE_ROLE,
+    srLen:
+      (process.env.SUPABASE_SERVICE_ROLE ||
+        process.env.SUPABASE_SERVICE_ROLE_KEY ||
+        '').length,
+  })
+  throw new Error('Env missing: NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE')
+}
+const supabase = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } })
+
+type UserRow = {
   user_code: string
-  click_type: string
-  card_registered: boolean
+  click_type: string | null
+  card_registered: boolean | null
   payjp_customer_id: string | null
   sofia_credit: number | null
   click_email: string | null
   email_verified: boolean | null
+  firebase_uid?: string | null
 }
 
-// ✅ POST（Firebase IDトークン → UID or Email で Supabase 照会）
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('authorization')
-    const token = authHeader?.replace(/^Bearer\s+/i, '')
-
+    const authHeader = req.headers.get('authorization') || ''
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
     if (!token) {
-      console.error('❌ Authorization ヘッダーなし')
       return NextResponse.json({ error: '認証トークンがありません' }, { status: 401 })
     }
 
-    // Firebaseトークン検証
-    let decoded
+    let decoded: any
     try {
-      decoded = await adminAuth.verifyIdToken(token)
-      console.log('✅ Firebaseトークンデコード結果:', decoded)
-    } catch (verifyErr) {
-      console.error('❌ Firebaseトークン検証失敗:', verifyErr)
+      decoded = await adminAuth.verifyIdToken(token, true)
+    } catch {
       return NextResponse.json({ error: '無効なトークンです' }, { status: 403 })
     }
+    const firebase_uid: string = decoded.uid
+    const email: string | null = decoded.email ?? null
 
-    const firebase_uid = decoded.uid
-    const email = decoded.email
-
-    // UIDで Supabase 照会
+    // uid で検索
     let { data, error } = await supabase
       .from('users')
-      .select(`
-        user_code,
-        click_type,
-        card_registered,
-        payjp_customer_id,
-        sofia_credit,
-        click_email,
-        email_verified
-      `)
+      .select('user_code, click_type, card_registered, payjp_customer_id, sofia_credit, click_email, email_verified, firebase_uid')
       .eq('firebase_uid', firebase_uid)
-      .single()
+      .single<UserRow>()
 
-    // UIDで見つからなければ email で再検索
+    // 無ければ email で再検索 → uid 同期
     if ((!data || error) && email) {
-      console.warn('⚠️ UIDで見つからず、emailで再検索:', email)
       const retry = await supabase
         .from('users')
-        .select(`
-          user_code,
-          click_type,
-          card_registered,
-          payjp_customer_id,
-          sofia_credit,
-          click_email,
-          email_verified
-        `)
+        .select('user_code, click_type, card_registered, payjp_customer_id, sofia_credit, click_email, email_verified, firebase_uid')
         .eq('click_email', email)
-        .single()
-
-      data = retry.data
+        .single<UserRow>()
+      data = retry.data as UserRow | null
       error = retry.error
+      if (data && (!data.firebase_uid || data.firebase_uid !== firebase_uid)) {
+        await supabase.from('users').update({ firebase_uid }).eq('user_code', data.user_code)
+      }
     }
 
     if (error || !data) {
-      console.error('❌ Supabase照会失敗:', error)
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
     return NextResponse.json({
       user_code: data.user_code,
-      click_type: data.click_type,
+      click_type: data.click_type ?? '',
       card_registered: data.card_registered === true,
       payjp_customer_id: data.payjp_customer_id ?? null,
       sofia_credit: data.sofia_credit ?? 0,
       click_email: data.click_email ?? '',
       email_verified: data.email_verified === true,
     })
-  } catch (err) {
-    console.error('❌ API内部エラー:', err)
+  } catch (err: any) {
+    console.error('account-status POST error:', err?.message || err)
     return NextResponse.json({ error: '認証エラー' }, { status: 500 })
   }
 }
 
-// ✅ GET（従来通り user_code による取得）
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url)
-  const user_code = searchParams.get('user')
+  try {
+    const { searchParams } = new URL(req.url)
+    const user_code = searchParams.get('user')
+    if (!user_code) {
+      return NextResponse.json({ error: 'No user_code provided' }, { status: 400 })
+    }
 
-  if (!user_code) {
-    return NextResponse.json({ error: 'No user_code provided' }, { status: 400 })
+    const { data, error } = await supabase
+      .from('users')
+      .select('user_code, click_type, card_registered, payjp_customer_id, sofia_credit, click_email, email_verified')
+      .eq('user_code', user_code)
+      .single<UserRow>()
+
+    if (error || !data) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 })
+    }
+
+    return NextResponse.json({
+      user_code: data.user_code,
+      click_type: data.click_type ?? '',
+      card_registered: data.card_registered === true,
+      payjp_customer_id: data.payjp_customer_id ?? null,
+      sofia_credit: data.sofia_credit ?? 0,
+      click_email: data.click_email ?? '',
+      email_verified: data.email_verified === true,
+    })
+  } catch (err: any) {
+    console.error('account-status GET error:', err?.message || err)
+    return NextResponse.json({ error: 'サーバーエラー' }, { status: 500 })
   }
-
-  const { data, error } = await supabase
-    .from('users')
-    .select(`
-      user_code,
-      click_type,
-      card_registered,
-      payjp_customer_id,
-      sofia_credit,
-      click_email,
-      email_verified
-    `)
-    .eq('user_code', user_code)
-    .single()
-
-  if (error || !data) {
-    console.error('❌ Supabase error (GET):', error)
-    return NextResponse.json({ error: 'User not found' }, { status: 404 })
-  }
-
-  return NextResponse.json({
-    user_code: data.user_code,
-    click_type: data.click_type,
-    card_registered: data.card_registered === true,
-    payjp_customer_id: data.payjp_customer_id ?? null,
-    sofia_credit: data.sofia_credit ?? 0,
-    click_email: data.click_email ?? '',
-    email_verified: data.email_verified === true,
-  })
 }

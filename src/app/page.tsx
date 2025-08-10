@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import '../styles/dashboard.css'
 import LoginModal from '../components/LoginModal'
 import { useAuth } from '@/context/AuthContext'
+import AppModal from '@/components/AppModal'              // ★ 追加
 
 import { FileContentProvider } from '@/lib/content.file'
 import type { HomeContent } from '@/lib/content'
@@ -15,6 +16,10 @@ export default function DashboardPage() {
   const { user, userCode } = useAuth()
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
   const router = useRouter()
+
+  // ★ LIVEモーダル状態
+  const [liveModalOpen, setLiveModalOpen] = useState(false)
+  const [liveModalText, setLiveModalText] = useState('')
 
   useEffect(() => {
     FileContentProvider.getHomeContent().then(setContent)
@@ -28,22 +33,44 @@ export default function DashboardPage() {
     return () => clearInterval(interval)
   }, [content])
 
-  // 並び：Mu_AI / 共鳴会 / プラン（各ボタン用の個性クラスは tileVariants で付与）
+  // 並び：Mu_AI / 共鳴会 / 共鳴会 LIVE / プラン
   const menuItems: { title: string; link: string; img: string; alt: string }[] = [
-    { title: 'Mu_AI',  link: '/mu_full',    img: '/mu_ai.png',   alt: 'Mu_AI' },
-    { title: '共鳴会',  link: '/kyomeikai',  img: '/kyoumai.png', alt: '共鳴会' },
-    { title: 'プラン',  link: '/pay',        img: '/mu_card.png', alt: 'プラン' },
+    { title: 'Mu_AI',       link: '/mu_full',        img: '/mu_ai.png',    alt: 'Mu_AI' },
+    { title: '共鳴会',       link: '/kyomeikai',      img: '/kyoumai.png',  alt: '共鳴会' },
+    { title: '配信', link: '/kyomeikai/live', img: '/live.png',     alt: '共鳴会LIVE' },
+    { title: 'プラン',       link: '/pay',            img: '/mu_card.png',  alt: 'プラン' },
   ]
-  const tileVariants = ['tile--mu', 'tile--kyomei', 'tile--plan'] as const
+  const tileVariants = ['tile--mu', 'tile--kyomei', 'tile--live', 'tile--plan'] as const
 
   // userクエリが必要なページだけ
-  const needsUserParam = new Set<string>(['/mu_ai', '/kyomeikai'])
+  const needsUserParam = new Set<string>(['/mu_ai', '/kyomeikai', '/kyomeikai/live'])
 
-  const handleClick = (link: string) => {
+  const handleClick = async (link: string) => {
     if (!user || !userCode) {
       setIsLoginModalOpen(true)
       return
     }
+
+    // ★ LIVEページだけ事前チェック（alert→AppModal化）
+    if (link === '/kyomeikai/live') {
+      try {
+        const r = await fetch('/api/kyomeikai/live/status', { cache: 'no-store' })
+        const j = await r.json()
+        if (!j?.is_live) {
+          setLiveModalText('現在LIVE配信は行われていません。開始までお待ちください。')
+          setLiveModalOpen(true)
+          return
+        }
+        const url = j?.room ? `${link}?room=${encodeURIComponent(j.room)}` : link
+        router.push(url)
+        return
+      } catch {
+        setLiveModalText('配信状況を確認できませんでした。時間をおいて再度お試しください。')
+        setLiveModalOpen(true)
+        return
+      }
+    }
+
     const linkWithParam =
       needsUserParam.has(link) ? `${link}?user=${encodeURIComponent(userCode)}` : link
     router.push(linkWithParam)
@@ -83,27 +110,27 @@ export default function DashboardPage() {
         </section>
 
         <section className="tile-grid">
-  {menuItems.map((item, idx) => (
-    <div
-      key={item.title}
-      className={`tile ${tileVariants[idx]} ${!user ? 'disabled' : ''}`}
-      onClick={(e) => { e.stopPropagation(); handleClick(item.link) }}
-    >
-      {/* ★ 中身を独立レイヤーに */}
-      <div className="tile-inner">
-        <div className="tile-icon">
-          <img
-            src={item.img}
-            alt={item.alt}
-            className="tile-icon-img"
-            draggable={false}
-          />
-        </div>
-        <div className="tile-label">{item.title}</div>
-      </div>
-    </div>
-  ))}
-</section>
+          {menuItems.map((item, idx) => (
+            <div
+              key={item.title}
+              className={`tile ${tileVariants[idx]} ${!user ? 'disabled' : ''}`}
+              onClick={(e) => { e.stopPropagation(); handleClick(item.link) }}
+            >
+              {/* ★ 中身を独立レイヤーに */}
+              <div className="tile-inner">
+                <div className="tile-icon">
+                  <img
+                    src={item.img}
+                    alt={item.alt}
+                    className="tile-icon-img"
+                    draggable={false}
+                  />
+                </div>
+                <div className="tile-label">{item.title}</div>
+              </div>
+            </div>
+          ))}
+        </section>
       </div>
 
       <LoginModal
@@ -111,6 +138,16 @@ export default function DashboardPage() {
         onClose={() => setIsLoginModalOpen(false)}
         onLoginSuccess={() => setIsLoginModalOpen(false)}
       />
+
+      {/* ★ LIVE用のオリジナルモーダル */}
+      <AppModal
+        open={liveModalOpen}
+        title="共鳴会 LIVE"
+        onClose={() => setLiveModalOpen(false)}
+        primaryText="OK"
+      >
+        {liveModalText}
+      </AppModal>
     </div>
   )
 }

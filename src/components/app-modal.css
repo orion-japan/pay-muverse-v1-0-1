@@ -1,0 +1,33 @@
+.mu-modal__overlay{
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.45);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000;
+  }
+  .mu-modal__box{
+    width: min(92vw, 420px);
+    background: #fff; color:#111;
+    border-radius: 14px;
+    box-shadow: 0 15px 50px rgba(0,0,0,.22);
+    padding: 16px 16px 12px;
+  }
+  .mu-modal__title{
+    font-weight: 700; font-size: 16px; margin-bottom: 6px;
+  }
+  .mu-modal__body{
+    font-size: 14px; line-height: 1.65; color:#444; margin-bottom: 12px;
+  }
+  .mu-modal__actions{
+    display: flex; justify-content: flex-end; gap: 8px;
+  }
+  .mu-btn{
+    border: 1px solid #ddd; background: #fff; color:#333;
+    border-radius: 10px; padding: 8px 14px; font-weight: 600;
+  }
+  .mu-btn.ghost{ background:#fff; }
+  .mu-btn.primary{
+    border-color: transparent;
+    background: linear-gradient(135deg,#7c3aed,#ec4899);
+    color:#fff;
+  }
+  

@@ -43,8 +43,11 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: Props) {
       // Firebase認証サーバー登録
       const res = await fetch('/api/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,   // ← これ！
+        },
+        body: JSON.stringify({}), // ボディは空でOK（互換で残しても良い）
       })
       if (!res.ok) throw new Error('サーバー認証失敗')
 

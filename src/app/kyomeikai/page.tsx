@@ -9,7 +9,37 @@ type NextSchedule = {
   start_at: string // ISO（JST想定）
   duration_min: number
   reservation_url?: string
-  page_url?: string            // ★ 参加ページURL（/kyomeikai/jitsi など）
+  page_url?: string
+  // Zoom参加用（APIから返す）
+  meeting_number?: string | number
+  meeting_password?: string
+}
+
+/** 画面中央に小窓を開く（ブロックされたら null） */
+function openCenteredPopup(url: string, w = 520, h = 740) {
+  try {
+    const dualLeft = (window.screenLeft ?? window.screenX ?? 0) as number
+    const dualTop = (window.screenTop ?? window.screenY ?? 0) as number
+    const width =
+      (window.innerWidth ??
+        document.documentElement.clientWidth ??
+        screen.width) as number
+    const height =
+      (window.innerHeight ??
+        document.documentElement.clientHeight ??
+        screen.height) as number
+    const left = dualLeft + (width - w) / 2
+    const top = dualTop + (height - h) / 2
+
+    const win = window.open(
+      url,
+      'zoom-join',
+      `noopener,noreferrer,scrollbars=yes,resizable=yes,width=${w},height=${h},left=${left},top=${top}`
+    )
+    return win ?? null
+  } catch {
+    return null
+  }
 }
 
 function formatDateTime(iso: string) {
@@ -40,10 +70,6 @@ function KyomeikaiContent() {
   const [error, setError] = useState<string | null>(null)
 
   const [schedule, setSchedule] = useState<NextSchedule | null>(null)
-  const [showMeeting, setShowMeeting] = useState(false)       // 参加ボタンクリック後にiframe表示
-
-  // ★ 参加URL（APIの page_url を基に生成）
-  const [joinUrl, setJoinUrl] = useState<string>('')
 
   // ★ 参加可能時間のための現在時刻（1分おきに更新）
   const [now, setNow] = useState<Date>(new Date())
@@ -80,14 +106,10 @@ function KyomeikaiContent() {
           setUsername(uname)
         }
 
-        // 2) 次回スケジュール取得（Zoom直取りAPI or 代替）
+        // 2) 次回スケジュール取得
         const resNext = await fetch('/api/kyomeikai/next', { method: 'GET' })
         const nextJson = await resNext.json().catch(() => null)
-        if (!aborted) {
-          setSchedule(nextJson)
-          // デバッグ用
-          // console.log('Next schedule:', nextJson)
-        }
+        if (!aborted) setSchedule(nextJson)
       } catch (e: any) {
         if (!aborted) setError(e?.message ?? '読み込みに失敗しました')
       } finally {
@@ -107,24 +129,43 @@ function KyomeikaiContent() {
     return cur >= open && cur <= end
   })()
 
-  // ★ 参加ボタン押下で joinUrl を組み立てて iframe 表示
-  // ★ 参加ボタン押下で joinUrl を組み立てて iframe 表示
-const handleJoin = () => {
-  if (plan === 'free') return
+  // ★ Zoomをポップアップで開く + アプリ起動を試みる（フォールバック：新規タブ）
+  const handleJoin = () => {
+    if (plan === 'free' || !schedule) return
 
-  // 例: kyomeikai-20250809-abc12 など毎回違う名前にして誰でも先頭で入室＝モデレーター化
-  const d = new Date()
-  const ymd = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`
-  const rand = Math.random().toString(36).slice(2,7)
-  const room = `kyomeikai-${ymd}-${rand}`
+    const number = String(schedule.meeting_number ?? '').replace(/\D/g, '')
+    const pwd = schedule.meeting_password ?? ''
 
-  const base = schedule?.page_url || '/kyomeikai/jitsi'
-  const url = `${base}?room=${encodeURIComponent(room)}&name=${encodeURIComponent(username || 'Guest')}`
+    if (!number) {
+      alert('ミーティング番号が取得できませんでした。後ほどお試しください。')
+      return
+    }
 
-  setJoinUrl(url)
-  setShowMeeting(true)
-}
+    // Web 参加URL（まずポップアップで開く）
+    const webUrl =
+      `https://zoom.us/j/${number}` +
+      (pwd ? `?pwd=${encodeURIComponent(pwd)}` : '')
 
+    // ネイティブアプリ Deep Link（失敗してもユーザーの画面遷移はしない）
+    const appUrl =
+      `zoommtg://zoom.us/join?action=join&confno=${number}` +
+      (pwd ? `&pwd=${encodeURIComponent(pwd)}` : '')
+
+    // 1) ポップアップでWeb参加画面を開く（ブロック時は新規タブ）
+    const pop = openCenteredPopup(webUrl)
+    if (!pop) window.open(webUrl, '_blank', 'noopener,noreferrer')
+
+    // 2) 可能ならアプリ起動を試す（隠しiframeで、失敗しても画面遷移なし）
+    try {
+      const iframe = document.createElement('iframe')
+      iframe.style.display = 'none'
+      iframe.src = appUrl
+      document.body.appendChild(iframe)
+      setTimeout(() => document.body.removeChild(iframe), 1500)
+    } catch {
+      /* no-op */
+    }
+  }
 
   // スケジュールカード
   const ScheduleCard = () => (
@@ -200,17 +241,6 @@ const handleJoin = () => {
   if (checking) {
     return (
       <div className="km-fullcenter km-muted">読み込み中…</div>
-    )
-  }
-
-  if (showMeeting && plan !== 'free') {
-    // 参加ボタン後に会議を埋め込み（外部のWeb SDKページ or 既存ページをiframe表示）
-    return (
-      <iframe
-        src={joinUrl}  // ★ APIのpage_urlベース＋user/nameを付与
-        className="km-iframe"
-        allow="camera; microphone; fullscreen; clipboard-read; clipboard-write"
-      />
     )
   }
 

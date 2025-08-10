@@ -1,50 +1,53 @@
-import { NextResponse } from 'next/server'
+export const runtime = 'nodejs'
+
+import { NextRequest, NextResponse } from 'next/server'
 import { adminAuth } from '@/lib/firebase-admin'
-import { createClient } from '@supabase/supabase-js'
+import { supabaseServer } from '@/lib/supabaseServer'
+import { makeUserCode } from '@/lib/makeUserCode'
 
-// ✅ Supabase 初期化
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.supabaseKey!
-)
-
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const { idToken } = await req.json()
-    const decodedToken = await adminAuth.verifyIdToken(idToken)
+    // ヘッダー or ボディどちらでも受け付ける
+    const authz = req.headers.get('authorization') || ''
+    const headerToken = authz.startsWith('Bearer ') ? authz.slice(7) : ''
+    const body = await req.json().catch(() => ({}))
+    const token = headerToken || body?.idToken
+    if (!token) return NextResponse.json({ error: 'No token' }, { status: 401 })
 
-    console.log('✅ Firebase 認証成功:', decodedToken)
+    const decoded = await adminAuth.verifyIdToken(token, true)
+    const firebase_uid = decoded.uid
+    const email = decoded.email || null
+    const emailVerified = !!decoded.email_verified
 
-    const email = decodedToken.email
-    if (!email) throw new Error('メールアドレスが取得できません')
-
-    // ✅ Supabase から user_code を取得
-    const { data, error } = await supabase
+    // 既存チェック
+    const { data: existing, error: selErr } = await supabaseServer
       .from('users')
       .select('user_code')
-      .eq('click_email', email)
-      .single()
+      .eq('firebase_uid', firebase_uid)
+      .limit(1)
 
-    if (error || !data?.user_code) {
-      console.error('❌ Supabase ユーザーコード取得失敗:', error)
-      return NextResponse.json({ error: 'ユーザーコードが見つかりません' }, { status: 404 })
+    if (selErr) {
+      return NextResponse.json({ error: selErr.message }, { status: 500 })
     }
 
-    const userCode = data.user_code
+    // 無ければ作成
+    if (!existing || existing.length === 0) {
+      const user_code = await makeUserCode()
+      const { error: insErr } = await supabaseServer.from('users').insert([
+        { user_code, firebase_uid, click_email: email },
+      ])
+      if (insErr) {
+        return NextResponse.json({ error: insErr.message }, { status: 500 })
+      }
+      return NextResponse.json({ ok: true, created: true, user_code, email_verified: emailVerified })
+    }
 
-    // ✅ Cookie に user_code を保存
-    const res = NextResponse.json({ success: true })
-    res.cookies.set('user_code', userCode, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'strict',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 7, // 1週間
-    })
+    // 既存なら同期
+    const user_code = existing[0].user_code as string
+    await supabaseServer.from('users').update({ click_email: email }).eq('firebase_uid', firebase_uid)
 
-    return res
-  } catch (err) {
-    console.error('❌ Firebase 認証エラー:', err)
-    return NextResponse.json({ error: '認証失敗' }, { status: 500 })
+    return NextResponse.json({ ok: true, created: false, user_code, email_verified: emailVerified })
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || 'login failed' }, { status: 500 })
   }
 }

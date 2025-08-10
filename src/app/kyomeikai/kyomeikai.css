@@ -154,4 +154,23 @@
     border: none;
     display: block;
   }
-  
+ /* ===== Kyomeikai: ヘッダーかぶり対策 ===== */
+:root { --km-header-h: 56px; } /* ヘッダーの実高さに合わせて調整 */
+
+.km-header{
+  /* ここは既存のままでOK。参考：
+     position: sticky; top: 0; z-index: 20; background: #fff; height: var(--km-header-h); */
+}
+
+/* ヘッダー固定時に、下のコンテンツに余白をつける */
+.km-wrap{
+  /* iOSノッチ考慮 + ヘッダー高さ + 少し余白 */
+  padding-top: calc(env(safe-area-inset-top, 0px) + var(--km-header-h) + 8px);
+}
+.km-header{
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: #fff;
+  height: var(--km-header-h);
+}

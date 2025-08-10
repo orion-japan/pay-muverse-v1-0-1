@@ -342,7 +342,7 @@
 
 /* アイコンとラベル（任意の微調整） */
 .tile-grid .tile .tile-icon-img { width: 56px; height: 56px; object-fit: contain; display:block; }
-.tile-grid .tile .tile-label { margin-top: 4px; font-size: 13px; font-weight: 600; color: #3f3f46; }
+.tile-grid .tile .tile-label { margin-top: 3px; font-size: 13px; font-weight: 600; color: #3f3f46; }
 /* === グラデーション縁取り（立体感あり） ===================== */
 .tile-grid .tile {
   position: relative;
@@ -643,7 +643,7 @@
 }
 
 /* 画像・ラベル */
-.tile-grid .tile .tile-icon-img{ width:58px; height:58px; object-fit:contain; display:block; }
+.tile-grid .tile .tile-icon-img{ width:68px; height:68px; object-fit:contain; display:block; }
 .tile-grid .tile .tile-label{ margin-top:4px; font-size:13px; font-weight:600; color:#3f3f46; }
 
 /* 枠（グラデのリング）— 内側はくり抜き */
@@ -771,3 +771,32 @@
   .tile-grid .tile:hover::after  { opacity: var(--tile-glow-base); filter: blur(var(--tile-glow-blur)); }
   .tile-grid .tile .tile-inner::after { animation: none !important; }
 }
+.tile-grid .tile{
+  position: relative; /* 必須 */
+  width: 112px;
+  height: 112px;
+}
+
+/* アイコンの位置を自由に指定 */
+.tile-grid .tile .tile-icon-img{
+  position: absolute;
+  top: 10px;              /* ← ここを増やせばもっと下へ */
+  left: 50%;
+  transform: translateX(-50%);
+  width: 70px;
+  height: 70px;
+  object-fit: contain;
+  display: block;
+}
+
+/* ラベルは底に固定 */
+.tile-grid .tile .tile-label{
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 13px;
+  font-weight: 700;
+  color: #3f3f46;
+}
+
