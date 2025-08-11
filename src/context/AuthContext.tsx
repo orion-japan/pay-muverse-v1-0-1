@@ -14,38 +14,36 @@ import {
   User,
 } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
-// import { supabase } from '@/lib/supabase'  // ← 直接参照はやめる（RLSで詰まるため）
 
-// 🔐 Context型定義
 interface AuthContextType {
   user: User | null
   userCode: string | null
   loading: boolean
+  muSent: boolean
   login: (email: string, password: string) => Promise<void>
   logout: () => Promise<void>
+  sendMuInfo: () => Promise<void>
 }
 
-// 🧱 Context初期値
 const AuthContext = createContext<AuthContextType>({
   user: null,
   userCode: null,
   loading: true,
+  muSent: false,
   login: async () => {},
   logout: async () => {},
+  sendMuInfo: async () => {},
 })
 
-// 共通：最新IDトークン取得（失敗時はnull）
 async function getIdTokenSafe(u: User | null) {
   try {
     if (!u) return null
-    // trueで強制リフレッシュ（権限の取りこぼし防止）
     return await u.getIdToken(true)
   } catch {
     return null
   }
 }
 
-// 共通：API呼び出し（Authorization付与）
 async function callAuthedApi(path: string, idToken: string, body: any = {}) {
   const res = await fetch(path, {
     method: 'POST',
@@ -63,30 +61,25 @@ async function callAuthedApi(path: string, idToken: string, body: any = {}) {
   return json
 }
 
-// 🌱 Provider定義
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [userCode, setUserCode] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [muSent, setMuSent] = useState(false)
 
-  // ✅ サーバー経由で user_code を取得（必要なら登録も）
   const ensureAndFetchUserCode = async (firebaseUser: User): Promise<string | null> => {
     const idToken = await getIdTokenSafe(firebaseUser)
     if (!idToken) return null
 
-    // 1) ログイン（サーバー側でユーザー行をUPSERTする想定）
     try {
       await callAuthedApi('/api/login', idToken)
     } catch (e) {
-      // すでに存在している等で失敗しても、次のステップで判定するので警告のみ
       console.warn('login API warning:', e)
     }
 
-    // 2) アカウント状態取得（ここで user_code を受け取る）
     const status = await callAuthedApi('/api/account-status', idToken)
     const code = status?.user_code ?? null
 
-    // 3)（任意）メール認証の同期
     if (code && status?.email_verified === false) {
       try {
         await callAuthedApi('/api/verify-complete', idToken)
@@ -94,11 +87,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.warn('verify-complete API warning:', e)
       }
     }
-
     return code
   }
 
-  // ✅ Firebaseの認証状態を常に監視（自動ログイン/復帰）
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setLoading(true)
@@ -113,28 +104,61 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       } catch (e) {
         console.error('onAuthStateChanged flow error:', e)
-        // ユーザー情報はクリアしておく
         setUser(null)
         setUserCode(null)
       } finally {
         setLoading(false)
       }
     })
-
     return () => unsubscribe()
   }, [])
 
-  // 🔐 ログイン処理（構造維持：戻り値や引数はそのまま）
+  // 🔹 MU送信処理（ボタン押下で呼び出す）
+  const sendMuInfo = async () => {
+    // 🛑 暴走防止：必要条件を満たさなければ即 return
+    if (loading || !user || !userCode || muSent) {
+      console.log('MU送信スキップ: 条件未達')
+      return
+    }
+
+    try {
+      const r1 = await fetch('/api/get-user-info', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_code: userCode }),
+      })
+      const j1 = await r1.json()
+      if (!r1.ok) throw new Error(j1?.error || 'get-user-info failed')
+
+      const { ts, sig } = j1
+      if (!ts || !sig) throw new Error('ts/sig missing from server response')
+
+      const muApi = 'https://muverse.jp/api/get-user-info'
+      const r2 = await fetch(muApi, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_code: userCode, ts, sig }),
+      })
+
+      const j2 = await r2.json().catch(() => ({}))
+      if (!r2.ok) throw new Error(j2?.error || 'MU get-user-info 401')
+
+      console.log('MU応答:', j2)
+      setMuSent(true)
+    } catch (e) {
+      console.error('MU送信フロー失敗:', e)
+    }
+  }
+
   const login = async (email: string, password: string) => {
     setLoading(true)
     try {
       const cred = await signInWithEmailAndPassword(auth, email, password)
       const currentUser = cred.user
       setUser(currentUser)
-
-      // サーバー経由で確実に user_code を取得（未登録ならUPSERT）
       const code = await ensureAndFetchUserCode(currentUser)
       setUserCode(code)
+      setMuSent(false)
     } catch (error) {
       console.error('ログイン失敗:', error)
       throw error
@@ -143,13 +167,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  // 🔐 ログアウト処理（構造維持）
   const logout = async () => {
     setLoading(true)
     try {
       await signOut(auth)
       setUser(null)
       setUserCode(null)
+      setMuSent(false)
+      await fetch('/api/logout', { method: 'POST' })
     } catch (error) {
       console.error('ログアウト失敗:', error)
     } finally {
@@ -158,13 +183,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider
-      value={{ user, userCode, loading, login, logout }}
-    >
+    <AuthContext.Provider value={{ user, userCode, loading, muSent, login, logout, sendMuInfo }}>
       {children}
     </AuthContext.Provider>
   )
 }
 
-// ✅ 利用フック（構造維持）
 export const useAuth = () => useContext(AuthContext)
