@@ -9,6 +9,15 @@ export async function verifyFirebaseToken(req: NextRequest) {
     throw new Error('トークンがありません')
   }
 
-  const decoded = await adminAuth.verifyIdToken(token)
-  return decoded
+  try {
+    const decoded = await adminAuth.verifyIdToken(token, true) // 最新状態で検証
+    return {
+      uid: decoded.uid,
+      email: decoded.email || null,
+      emailVerified: decoded.email_verified === true,
+    }
+  } catch (err) {
+    console.error('❌ Firebaseトークン検証失敗:', err)
+    throw new Error('無効なトークンです')
+  }
 }

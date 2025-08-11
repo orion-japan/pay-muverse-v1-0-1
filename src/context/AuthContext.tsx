@@ -113,31 +113,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => unsubscribe()
   }, [])
 
-  // 🔹 MU送信処理（ボタン押下で呼び出す）
+  // 🔹 MU送信処理（Firebaseトークンで送信）
   const sendMuInfo = async () => {
-    // 🛑 暴走防止：必要条件を満たさなければ即 return
-    if (loading || !user || !userCode || muSent) {
+    if (loading || !user || muSent) {
       console.log('MU送信スキップ: 条件未達')
       return
     }
 
     try {
-      const r1 = await fetch('/api/get-user-info', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_code: userCode }),
-      })
-      const j1 = await r1.json()
-      if (!r1.ok) throw new Error(j1?.error || 'get-user-info failed')
-
-      const { ts, sig } = j1
-      if (!ts || !sig) throw new Error('ts/sig missing from server response')
+      const idToken = await getIdTokenSafe(user)
+      if (!idToken) throw new Error('idToken取得失敗')
 
       const muApi = 'https://muverse.jp/api/get-user-info'
       const r2 = await fetch(muApi, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_code: userCode, ts, sig }),
+        body: JSON.stringify({ idToken }), // ★ user_codeではなくFirebaseトークン送信
       })
 
       const j2 = await r2.json().catch(() => ({}))
@@ -190,4 +181,3 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 }
 
 export const useAuth = () => useContext(AuthContext)
-

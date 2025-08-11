@@ -1,49 +1,40 @@
 // /pages/api/call-mu-ai.ts
-
 import type { NextApiRequest, NextApiResponse } from 'next'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  console.log('[CALL_MU_AI] API開始');
+
+  if (req.method !== 'POST') {
+    console.warn('[CALL_MU_AI] ❌ Method Not Allowed');
+    return res.status(405).json({ error: 'Method Not Allowed' });
+  }
+
+  const { token } = req.body as { token?: string };
+  console.log('[CALL_MU_AI] ① 受信データ:', { hasToken: !!token });
+
+  if (!token) {
+    console.error('[CALL_MU_AI] ❌ Firebase ID token missing');
+    return res.status(400).json({ error: 'Firebase ID token required' });
+  }
+
+  const muAiApiUrl = `${(process.env.MU_AI_BASE_URL_PROD || process.env.MU_AI_BASE_URL || 'https://mu-ui-v1-0-5.vercel.app').replace(/\/$/, '')}/api/get-user-info`;
+  console.log('[CALL_MU_AI] ② MU送信先URL:', muAiApiUrl);
+
   try {
-    const { userCode, ts, sig } = req.body
+    console.log('[CALL_MU_AI] ③ MU側へ送信:', { tokenPreview: token.substring(0, 10) + '...' });
 
-    // 必須チェック（どちらか一方があればOK）
-    if (!userCode && !(ts && sig)) {
-      return res.status(400).json({ error: 'Either userCode or ts+sig is required' })
-    }
-
-    // mu_ai 側 API URL（環境変数から取得）
-    const muAiApiUrl = `${process.env.MU_AI_BASE_URL}/api/get-user-info`
-
-    // リクエストボディ作成
-    const requestBody: Record<string, any> = {}
-    if (userCode) requestBody.userCode = userCode
-    if (ts && sig) {
-      requestBody.ts = ts
-      requestBody.sig = sig
-    }
-
-    // mu_ai 側へ送信
     const response = await fetch(muAiApiUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-shared-secret': process.env.SHARED_API_SECRET || ''
-      },
-      body: JSON.stringify(requestBody)
-    })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
 
-    // エラーレスポンス処理
-    if (!response.ok) {
-      const text = await response.text()
-      return res.status(response.status).json({ error: text })
-    }
+    const data = await response.json();
+    console.log('[CALL_MU_AI] ④ MU応答受信:', { status: response.status, data });
 
-    // 成功レスポンス
-    const data = await response.json()
-    return res.status(200).json(data)
-
-  } catch (error: any) {
-    console.error('Error calling mu_ai API:', error)
-    return res.status(500).json({ error: 'Internal Server Error' })
+    return res.status(response.status).json(data);
+  } catch (error) {
+    console.error('[CALL_MU_AI] ❌ MU側通信エラー:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
   }
 }

@@ -9,6 +9,8 @@ import AppModal from '@/components/AppModal'
 import { FileContentProvider } from '@/lib/content.file'
 import type { HomeContent } from '@/lib/content'
 import { redirectToMuAi } from '../utils/redirectToMuAi' // ★ 追加
+import { auth } from '@/lib/firebase'
+
 
 export default function DashboardPage() {
   const [content, setContent] = useState<HomeContent | null>(null)
@@ -51,11 +53,45 @@ export default function DashboardPage() {
       return
     }
 
-    // ★ Mu_AI はFirebaseトークンで自動ログイン遷移
-    if (link === '/mu_full') {
-      await redirectToMuAi()
+// Mu_AI はFirebaseトークンで自動ログイン遷移
+if (link === '/mu_full') {
+  try {
+    const currentUser = auth.currentUser
+    if (!currentUser) {
+      setIsLoginModalOpen(true)
       return
     }
+
+    // Firebase IDトークン取得
+    const token = await currentUser.getIdToken()
+
+    // MU側のエンドポイントにトークン送信
+    const muBase = process.env.NEXT_PUBLIC_MU_AI_BASE_URL || 'https://mu-ui-v1-0-5.vercel.app'
+    const url = `${muBase.replace(/\/$/, '')}/api/get-user-info`
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken: token }) // ★ user_codeではなくidToken
+    })
+
+    if (!res.ok) {
+      console.error('MU側への認証リクエスト失敗')
+      return
+    }
+
+    const data = await res.json()
+    console.log('MU側ユーザー情報:', data)
+
+    // 認証成功後にページ遷移
+    router.push('/mu_full')
+  } catch (err) {
+    console.error('MU側遷移処理中にエラー:', err)
+  }
+  return
+}
+
+
 
     // LIVEページだけ事前チェック
     if (link === '/kyomeikai/live') {
