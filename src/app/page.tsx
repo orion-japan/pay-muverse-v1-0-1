@@ -51,18 +51,63 @@ export default function DashboardPage() {
       return
     }
 
-    if (link === '/mu_full') {
-      const currentUser = auth.currentUser
-      if (!currentUser) {
-        console.warn('[MU-AI] Firebase未ログイン → モーダル表示')
-        setIsLoginModalOpen(true)
-        return
-      }
-    
-      // 認証OKならそのまま遷移（残りは /mu_full 側で実行）
-      router.push('/mu_full')
-      return
-    }
+if (link === '/mu_full') {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    console.warn('[MU-AI] Firebase未ログイン → モーダル表示');
+    setIsLoginModalOpen(true);
+    return;
+  }
+
+  try {
+    const idToken = await currentUser.getIdToken(true);
+    console.log('[MU-AI] idToken 取得成功:', idToken.substring(0, 20) + '...');
+
+// ① MU 側に転送するための API を呼び出し
+const res = await fetch('/api/mu-ai/send-token', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ idToken }),
+});
+
+if (!res.ok) {
+  console.error('[MU-AI] トークン送信失敗:', await res.text());
+  return;
+}
+
+try {
+  const result = await res.json();
+  console.log('[MU-AI] send-token API 成功:', result);
+
+  // get-user-info の結果
+  if (result?.getUserInfo?.error) {
+    console.warn('[MU-AI] get-user-info エラー:', result.getUserInfo.error);
+  } else {
+    console.log('[MU-AI] get-user-info 応答:', result.getUserInfo);
+  }
+
+  // call-mu-ai の結果
+  if (result?.callMuAi?.error) {
+    console.warn('[MU-AI] call-mu-ai エラー:', result.callMuAi.error);
+  } else {
+    console.log('[MU-AI] call-mu-ai 応答:', result.callMuAi);
+  }
+} catch (err) {
+  console.error('[MU-AI] send-token API 応答JSON解析失敗:', err);
+  return;
+}
+
+
+    // ② 成功したら MU 側ページに遷移
+    router.push('/mu_full');
+    return;
+  } catch (err) {
+    console.error('[MU-AI] idToken取得または送信失敗:', err);
+    setIsLoginModalOpen(true);
+    return;
+  }
+}
+
       
     
 

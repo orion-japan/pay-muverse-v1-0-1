@@ -1,70 +1,70 @@
+// app/api/get-user-info/route.ts
 import { NextResponse } from 'next/server'
 import { adminAuth } from '@/lib/firebase-admin'
 import { supabaseServer } from '@/lib/supabaseServer'
-import crypto from 'crypto'
-
-export const runtime = 'nodejs'
-export const revalidate = 0
 
 export async function POST(req: Request) {
-  console.log('--- [PAY] /api/get-user-info START ---')
+  console.log('========== [get-user-info] API開始 ==========')
 
   try {
-    const body = await req.json().catch(() => null)
-    console.log('① 受信ボディ:', body)
+    console.log('[get-user-info] 🔍 リクエストヘッダー:', Object.fromEntries(req.headers.entries()))
 
-    const token = body?.idToken
-    if (!token) {
-      console.error('❌ idToken が未送信')
+    const body = await req.json().catch(() => ({}))
+    console.log('[get-user-info] 📥 受信ボディ:', body)
+
+    // 受信ボディ確認
+console.log('[get-user-info] 📥 受信ボディ:', body)
+
+// idToken 取得（直下 or auth.idToken）
+const idToken = body?.idToken || body?.auth?.idToken
+console.log('[get-user-info] ✅ idToken有無:', !!idToken)
+
+
+    if (!idToken) {
+      console.error('[get-user-info] ❌ idTokenが無いため処理中断')
+      console.log('========== [get-user-info] API終了 ==========')
       return NextResponse.json({ error: 'idToken is required' }, { status: 400 })
     }
 
     // Firebaseトークン検証
-    console.log('② Firebaseトークン検証開始')
-    const decoded = await adminAuth.verifyIdToken(token, true)
-    console.log('③ Firebase検証成功:', decoded)
-
+    console.log('[get-user-info] 🔍 Firebaseトークン検証開始')
+    const decoded = await adminAuth.verifyIdToken(idToken, true)
+    console.log('[get-user-info] ✅ Firebase検証OK', {
+      uid: decoded.uid,
+      email: decoded.email,
+      issuedAt: decoded.iat,
+      expiresAt: decoded.exp,
+    })
     const firebase_uid = decoded.uid
 
     // Supabaseから user_code を取得
-    console.log('④ Supabase検索開始 uid=', firebase_uid)
+    console.log('[get-user-info] 🔍 Supabaseクエリ開始 (firebase_uid=', firebase_uid, ')')
     const { data, error } = await supabaseServer
       .from('users')
-      .select('user_code, click_email, card_registered, payjp_customer_id')
+      .select('user_code')
       .eq('firebase_uid', firebase_uid)
       .maybeSingle()
 
-    console.log('⑤ Supabase結果:', { data, error })
+    console.log('[get-user-info] 📤 Supabaseレスポンス:', { data, error })
 
-    if (error) {
-      console.error('❌ Supabaseエラー', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-    if (!data) {
-      console.error('❌ ユーザー見つからず')
-      return NextResponse.json({ error: 'User not found' }, { status: 404 })
+    if (error || !data?.user_code) {
+      console.error('[get-user-info] ❌ ユーザー情報取得失敗', error)
+      console.log('========== [get-user-info] API終了 ==========')
+      return NextResponse.json({ error: 'ユーザーが見つかりません' }, { status: 404 })
     }
 
-    // ts と sig の生成
-    console.log('⑥ ts/sig生成開始')
-    const b64 = process.env.MU_SECRET_KEY_BASE64
-    if (!b64) {
-      console.error('❌ MU_SECRET_KEY_BASE64 未設定')
-      return NextResponse.json({ error: 'server misconfiguration' }, { status: 500 })
-    }
+    // login_urlを生成
+    const login_url = `https://m.muverse.jp?user_code=${data.user_code}`
+    console.log('[get-user-info] 🔗 login_url生成:', login_url)
 
-    const ts = Date.now().toString()
-    const secretKey = Buffer.from(b64, 'base64').toString('utf8')
-    const sig = crypto.createHmac('sha256', secretKey)
-      .update(`${data.user_code}${ts}`)
-      .digest('hex')
+    console.log('[get-user-info] ✅ API処理完了 正常応答返却')
+    console.log('========== [get-user-info] API終了 ==========')
 
-    console.log('⑦ ts/sig生成完了:', { ts, sig })
-
-    console.log('--- [PAY] /api/get-user-info END ---')
-    return NextResponse.json({ user: data, ts, sig }, { status: 200 })
-  } catch (e: any) {
-    console.error('❌ Server error:', e)
-    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 })
+    return NextResponse.json({ login_url })
+  } catch (err: any) {
+    console.error('[get-user-info] ❌ 例外発生', err)
+    console.log('========== [get-user-info] API異常終了 ==========')
+    return NextResponse.json({ error: err.message || 'サーバーエラー' }, { status: 500 })
   }
 }
+
