@@ -51,46 +51,21 @@ export default function DashboardPage() {
       return
     }
 
-    // Mu_AI の場合 → Firebaseトークン認証フロー後に /mu_full へ遷移
     if (link === '/mu_full') {
-      try {
-        const currentUser = auth.currentUser
-        if (!currentUser) {
-          console.warn('[MU-AI] Firebase未ログイン → モーダル表示')
-          setIsLoginModalOpen(true)
-          return
-        }
-
-        // Firebase IDトークン取得
-        const idToken = await currentUser.getIdToken(true)
-        console.log('[MU-AI] Firebase IDトークン取得:', idToken.substring(0, 10) + '...')
-
-        // 自API経由でMU側へ代理送信
-        const res = await fetch('/api/call-mu-ai', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: idToken }),
-        })
-
-        if (!res.ok) {
-          console.error('[MU-AI] 認証API失敗', await res.text())
-          return
-        }
-
-        const data = await res.json()
-        console.log('[MU-AI] 認証OK, MU応答:', data)
-
-        // /mu_full に遷移（idTokenとuser_codeをクエリに渡す）
-        router.push(
-          `/mu_full?idToken=${encodeURIComponent(idToken)}&user_code=${encodeURIComponent(
-            data.user_code || userCode || ''
-          )}`
-        )
-      } catch (err) {
-        console.error('[MU-AI] MU側認証処理エラー:', err)
+      const currentUser = auth.currentUser
+      if (!currentUser) {
+        console.warn('[MU-AI] Firebase未ログイン → モーダル表示')
+        setIsLoginModalOpen(true)
+        return
       }
+    
+      // 認証OKならそのまま遷移（残りは /mu_full 側で実行）
+      router.push('/mu_full')
       return
     }
+      
+    
+
 
     // LIVEページ事前チェック
     if (link === '/kyomeikai/live') {
