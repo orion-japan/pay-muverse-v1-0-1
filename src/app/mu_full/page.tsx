@@ -2,56 +2,54 @@
 
 import { useAuth } from '@/context/AuthContext'
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 
 const FOOTER_H = 60
-const MU_GET_INFO_API = 'https://muverse.jp/api/get-user-info' // MU 側API（Firebaseモード対応）
 
 export default function MuFullPage() {
   const { user, loading } = useAuth()
+  const params = useSearchParams()
   const [url, setUrl] = useState<string>('')
+
+  // DashboardPage から渡されたクエリ値
+  const passedIdToken = params.get('idToken')
+  const passedUserCode = params.get('user_code')
 
   useEffect(() => {
     console.log('[mu_full] loading:', loading, 'user:', user?.uid)
   }, [loading, user])
 
-  // ボタン押下でiframe用URLを構築（Firebaseモード）
-  const handleStart = async () => {
-    if (!user) return
-
-    try {
-      // Firebase ID トークン取得
-      const idToken = await user.getIdToken(true)
-
-      // MU 側にFirebaseモードで送信
-      const res = await fetch(MU_GET_INFO_API, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          version: '2025-08-11',
-          request_id:
-            typeof crypto !== 'undefined' && 'randomUUID' in crypto
-              ? crypto.randomUUID()
-              : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-          auth: {
-            mode: 'firebase',
-            idToken: idToken,
-          },
-        }),
-      })
-
-      const data = await res.json().catch(() => ({}))
-      console.log('[mu_full] MU応答:', data)
-
-      if (!res.ok || !data?.login_url) {
-        throw new Error(data?.error || 'MU 側からURLが返りません')
+  // 初期マウント時に自動で MU 側にアクセス
+  useEffect(() => {
+    const startMuAi = async () => {
+      if (!passedIdToken || !passedUserCode) {
+        console.warn('[mu_full] クエリにidTokenまたはuser_codeがありません')
+        return
       }
 
-      // MU 側から返されたログイン済みURLをiframeに設定
-      setUrl(data.login_url)
-    } catch (err) {
-      console.error('[mu_full] Firebaseモード開始失敗:', err)
+      try {
+        // MU 側 API をサーバー経由で呼び出す
+        const res = await fetch('/api/mu-get-user-info', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken: passedIdToken }),
+        })
+
+        const data = await res.json().catch(() => ({}))
+        console.log('[mu_full] MU応答:', data)
+
+        if (!res.ok || !data?.login_url) {
+          throw new Error(data?.error || 'MU 側からURLが返りません')
+        }
+
+        setUrl(data.login_url)
+      } catch (err) {
+        console.error('[mu_full] Firebaseモード開始失敗:', err)
+      }
     }
-  }
+
+    startMuAi()
+  }, [passedIdToken, passedUserCode])
 
   // ローディング中
   if (loading) {
@@ -95,20 +93,7 @@ export default function MuFullPage() {
       }}
     >
       {!url ? (
-        <button
-          onClick={handleStart}
-          style={{
-            padding: '12px 24px',
-            fontSize: '16px',
-            borderRadius: '8px',
-            background: '#4F46E5',
-            color: '#fff',
-            border: 'none',
-            cursor: 'pointer',
-          }}
-        >
-          Mu_AI を開始
-        </button>
+        <div>Mu_AI を開始中…</div>
       ) : (
         <iframe
           src={url}

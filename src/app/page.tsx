@@ -15,7 +15,6 @@ export default function DashboardPage() {
   const [current, setCurrent] = useState(0)
   const { user, userCode } = useAuth()
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
-  const [muIframeSrc, setMuIframeSrc] = useState<string | null>(null) // ← 追加
   const router = useRouter()
 
   // LIVEモーダル状態
@@ -52,7 +51,7 @@ export default function DashboardPage() {
       return
     }
 
-    // Mu_AI は Firebaseトークンで認証後、iframe表示
+    // Mu_AI の場合 → Firebaseトークン認証フロー後に /mu_full へ遷移
     if (link === '/mu_full') {
       try {
         const currentUser = auth.currentUser
@@ -66,7 +65,7 @@ export default function DashboardPage() {
         const idToken = await currentUser.getIdToken(true)
         console.log('[MU-AI] Firebase IDトークン取得:', idToken.substring(0, 10) + '...')
 
-        // 自プロジェクトAPI経由でMU側へ送信（call-mu-ai.ts）
+        // 自API経由でMU側へ代理送信
         const res = await fetch('/api/call-mu-ai', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -81,16 +80,19 @@ export default function DashboardPage() {
         const data = await res.json()
         console.log('[MU-AI] 認証OK, MU応答:', data)
 
-        // iframeでMU側表示（user_codeをパラメータで渡す）
-        const muBase = process.env.NEXT_PUBLIC_MU_AI_BASE_URL || 'https://m.muverse.jp'
-        setMuIframeSrc(`${muBase}?user=${encodeURIComponent(data.user_code || userCode || '')}`)
+        // /mu_full に遷移（idTokenとuser_codeをクエリに渡す）
+        router.push(
+          `/mu_full?idToken=${encodeURIComponent(idToken)}&user_code=${encodeURIComponent(
+            data.user_code || userCode || ''
+          )}`
+        )
       } catch (err) {
         console.error('[MU-AI] MU側認証処理エラー:', err)
       }
       return
     }
 
-    // LIVEページだけ事前チェック
+    // LIVEページ事前チェック
     if (link === '/kyomeikai/live') {
       try {
         const r = await fetch('/api/kyomeikai/live/status', { cache: 'no-store' })
@@ -175,17 +177,6 @@ export default function DashboardPage() {
             </div>
           ))}
         </section>
-
-        {/* MU iframe表示エリア */}
-        {muIframeSrc && (
-          <div style={{ marginTop: '20px' }}>
-            <iframe
-              src={muIframeSrc}
-              style={{ width: '100%', height: '80vh', border: 'none' }}
-              sandbox="allow-scripts allow-same-origin allow-forms"
-            />
-          </div>
-        )}
       </div>
 
       {/* ログインモーダル */}
