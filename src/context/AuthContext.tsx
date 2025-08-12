@@ -113,7 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => unsubscribe()
   }, [])
 
-  // 🔹 MU送信処理（Firebaseトークンで送信）
+  // 🔹 MU送信処理（Firebaseトークン → call-mu-ai.ts経由）
   const sendMuInfo = async () => {
     if (loading || !user || muSent) {
       console.log('MU送信スキップ: 条件未達')
@@ -124,15 +124,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const idToken = await getIdTokenSafe(user)
       if (!idToken) throw new Error('idToken取得失敗')
 
-      const muApi = 'https://muverse.jp/api/get-user-info'
-      const r2 = await fetch(muApi, {
+      const res = await fetch('/api/call-mu-ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken }), // ★ user_codeではなくFirebaseトークン送信
+        body: JSON.stringify({ token: idToken }),
       })
 
-      const j2 = await r2.json().catch(() => ({}))
-      if (!r2.ok) throw new Error(j2?.error || 'MU get-user-info 401')
+      const j2 = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j2?.error || 'MU認証API失敗')
 
       console.log('MU応答:', j2)
       setMuSent(true)
@@ -174,7 +173,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, userCode, loading, muSent, login, logout, sendMuInfo }}>
+    <AuthContext.Provider
+      value={{ user, userCode, loading, muSent, login, logout, sendMuInfo }}
+    >
       {children}
     </AuthContext.Provider>
   )

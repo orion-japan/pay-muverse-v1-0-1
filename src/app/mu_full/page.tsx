@@ -2,40 +2,55 @@
 
 import { useAuth } from '@/context/AuthContext'
 import { useEffect, useState } from 'react'
-import CryptoJS from 'crypto-js' // HMAC生成用（ブラウザ）
 
 const FOOTER_H = 60
-const MU_BASE = 'https://mu-ui-v1-0-5.vercel.app' // MU UI 本体
-const SHARED_SECRET = process.env.NEXT_PUBLIC_SHARED_SECRET || ''
+const MU_GET_INFO_API = 'https://muverse.jp/api/get-user-info' // MU 側API（Firebaseモード対応）
 
 export default function MuFullPage() {
-  const { userCode, loading } = useAuth()
+  const { user, loading } = useAuth()
   const [url, setUrl] = useState<string>('')
 
-  // ログ出す（どの値で作るか見えるように）
   useEffect(() => {
-    console.log('[mu_full] loading:', loading, 'userCode:', userCode)
-  }, [loading, userCode])
+    console.log('[mu_full] loading:', loading, 'user:', user?.uid)
+  }, [loading, user])
 
-  // ボタン押下でiframe用URLを構築
-  const handleStart = () => {
-    if (!userCode) return
+  // ボタン押下でiframe用URLを構築（Firebaseモード）
+  const handleStart = async () => {
+    if (!user) return
 
-    const ts = Date.now().toString()
-    const sig = CryptoJS.HmacSHA256(`${userCode}:${ts}`, SHARED_SECRET)
-      .toString(CryptoJS.enc.Hex)
+    try {
+      // Firebase ID トークン取得
+      const idToken = await user.getIdToken(true)
 
-    const next = encodeURIComponent('/')
-    const built =
-      `${MU_BASE}/auto-login` +
-      `?user=${encodeURIComponent(userCode)}` +
-      `&ts=${ts}` +
-      `&sig=${sig}` +
-      `&embed=1` +
-      `&next=${next}`
+      // MU 側にFirebaseモードで送信
+      const res = await fetch(MU_GET_INFO_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          version: '2025-08-11',
+          request_id:
+            typeof crypto !== 'undefined' && 'randomUUID' in crypto
+              ? crypto.randomUUID()
+              : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          auth: {
+            mode: 'firebase',
+            idToken: idToken,
+          },
+        }),
+      })
 
-    console.log('[mu_full] iframe URL を構築:', built)
-    setUrl(built)
+      const data = await res.json().catch(() => ({}))
+      console.log('[mu_full] MU応答:', data)
+
+      if (!res.ok || !data?.login_url) {
+        throw new Error(data?.error || 'MU 側からURLが返りません')
+      }
+
+      // MU 側から返されたログイン済みURLをiframeに設定
+      setUrl(data.login_url)
+    } catch (err) {
+      console.error('[mu_full] Firebaseモード開始失敗:', err)
+    }
   }
 
   // ローディング中
@@ -54,7 +69,7 @@ export default function MuFullPage() {
   }
 
   // 未ログイン時
-  if (!userCode) {
+  if (!user) {
     return (
       <div
         style={{
@@ -97,7 +112,12 @@ export default function MuFullPage() {
       ) : (
         <iframe
           src={url}
-          style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
+          style={{
+            width: '100%',
+            height: '100%',
+            border: 'none',
+            display: 'block',
+          }}
           allow="clipboard-write; microphone *; camera *"
         />
       )}
