@@ -32,32 +32,27 @@ export default function MuFullPage() {
         }
         console.log('[mu_full] ✅ Firebase IDトークン取得OK（長さ）:', idToken.length)
 
-        // === MU側APIに直接POST ===
-        console.log('[mu_full] 📡 MU側 /api/get-user-info 呼び出し開始')
-        const infoRes = await fetch('https://m.muverse.jp/api/get-user-info', {
+        // === MU側API（send-token経由）にPOST ===
+        console.log('[mu_full] 📡 MU側 /api/mu-ai/send-token 呼び出し開始')
+        const infoRes = await fetch('/api/mu-ai/send-token', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ idToken }),
         })
 
-        console.log('[mu_full] 📥 MU側 /api/get-user-info ステータス:', infoRes.status)
-        const rawText = await infoRes.text()
-        console.log('[mu_full] 📥 MU側 /api/get-user-info レスポンス本文(生):', rawText)
+        console.log('[mu_full] 📥 MU側 /api/mu-ai/send-token ステータス:', infoRes.status)
 
-        let infoData: any = {}
-        try {
-          infoData = JSON.parse(rawText)
-        } catch {
-          console.warn('[mu_full] ⚠️ MU側 /api/get-user-info JSONパース失敗 → 生データ使用')
-        }
+        const infoData: any = await infoRes.json().catch(() => null)
+        console.log('[mu_full] 📥 MU側 /api/mu-ai/send-token JSON:', infoData)
 
-        if (!infoRes.ok || !infoData?.login_url) {
+        const loginUrl = infoData?.callMuAi?.login_url
+        if (!infoRes.ok || !loginUrl) {
           console.error('[mu_full] ❌ MU側からログインURLが返らない', infoData)
           throw new Error(infoData?.error || 'MU側からログインURLが返りません')
         }
 
-        console.log('[mu_full] ✅ MUログインURL取得OK:', infoData.login_url)
-        setUrl(infoData.login_url)
+        console.log('[mu_full] ✅ MUログインURL取得OK:', loginUrl)
+        setUrl(loginUrl)
         console.log('[mu_full] 🎯 iframe URL セット完了')
       } catch (err: any) {
         console.error('[mu_full] ❌ MUログイン処理失敗:', err)
