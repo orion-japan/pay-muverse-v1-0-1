@@ -32,28 +32,34 @@ export default function MuFullPage() {
         }
         console.log('[mu_full] ✅ Firebase IDトークン取得OK（長さ）:', idToken.length)
 
-        // === MU側API（send-token経由）にPOST ===
-        console.log('[mu_full] 📡 MU側 /api/mu-ai/send-token 呼び出し開始')
-        const infoRes = await fetch('/api/mu-ai/send-token', {
+        // === customToken発行 ===
+        console.log('[mu_full] 📡 /api/firebase/custom-token 呼び出し開始')
+        const tokenRes = await fetch('/api/firebase/custom-token', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ idToken }),
         })
 
-        console.log('[mu_full] 📥 MU側 /api/mu-ai/send-token ステータス:', infoRes.status)
+        console.log('[mu_full] 📥 /api/firebase/custom-token ステータス:', tokenRes.status)
 
-        const infoData: any = await infoRes.json().catch(() => null)
-        console.log('[mu_full] 📥 MU側 /api/mu-ai/send-token JSON:', infoData)
-
-        const loginUrl = infoData?.callMuAi?.login_url
-        if (!infoRes.ok || !loginUrl) {
-          console.error('[mu_full] ❌ MU側からログインURLが返らない', infoData)
-          throw new Error(infoData?.error || 'MU側からログインURLが返りません')
+        if (!tokenRes.ok) {
+          const errText = await tokenRes.text()
+          console.error('[mu_full] ❌ customToken発行失敗:', errText)
+          throw new Error('customToken発行に失敗しました')
         }
 
-        console.log('[mu_full] ✅ MUログインURL取得OK:', loginUrl)
+        const { customToken } = await tokenRes.json()
+        if (!customToken) {
+          throw new Error('customTokenが返されませんでした')
+        }
+        console.log('[mu_full] ✅ customToken取得OK')
+
+        // === MU側 iframe URLにcustomTokenを付与 ===
+        const loginUrl = `https://m.muverse.jp?customToken=${encodeURIComponent(customToken)}`
+        console.log('[mu_full] ✅ MUログインURL生成OK:', loginUrl)
         setUrl(loginUrl)
         console.log('[mu_full] 🎯 iframe URL セット完了')
+
       } catch (err: any) {
         console.error('[mu_full] ❌ MUログイン処理失敗:', err)
         setError(err?.message || '不明なエラー')
