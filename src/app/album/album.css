@@ -1,0 +1,77 @@
+/* レイアウト全体 */
+.album-layout {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+  
+  /* ページコンテナ */
+  .album-page {
+    padding: 0;
+  }
+  
+  /* 検索・ソート */
+  .album-controls {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  
+  .album-controls input,
+  .album-controls select {
+    padding: 8px;
+    font-size: 14px;
+    width: 100%;
+  }
+  
+  /* 3列グリッド */
+  .album-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  
+  /* カード（AlbumCard） */
+  .album-card {
+    background-color: #fff;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  }
+  
+  .album-card img {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    display: block;
+  }
+  
+  /* レスポンシブ対応 */
+  @media (max-width: 900px) {
+    .album-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+  
+  @media (max-width: 600px) {
+    .album-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .album-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr)); /* スマホでも3列 */
+    gap: 10px;
+    justify-content: center;
+    align-items: start;
+  }
+  
+  /* モバイル用のメディアクエリは削除 or 上書き */
+  @media (max-width: 600px) {
+    .album-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr)); /* ← ここも3列維持 */
+    }
+  }
+  

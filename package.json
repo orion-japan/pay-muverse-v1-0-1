@@ -28,7 +28,8 @@
     "nodemailer": "^7.0.5",
     "payjp": "^2.3.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "tinify": "^1.8.1"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
@@ -36,6 +37,8 @@
     "@types/crypto-js": "^4.2.2",
     "@types/react": "19.1.8",
     "eslint": "^9",
-    "eslint-config-next": "15.3.4"
-  }
+    "eslint-config-next": "15.3.4",
+    "tsx": "^4.20.4"
+  },
+  "compress-images": "tsx src/compressPublicImages.ts"
 }

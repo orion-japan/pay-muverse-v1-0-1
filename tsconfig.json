@@ -25,6 +25,9 @@
       }
     ]
   },
+  "ts-node": {
+    "esm": true
+  },
   "include": [
     "next-env.d.ts",
     ".next/types/**/*.ts",
