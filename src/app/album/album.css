@@ -75,3 +75,26 @@
     }
   }
   
+  .toolbar {
+    display: flex;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+  
+  .toolbar input[type="text"] {
+    flex: 1; /* ← 残りの幅をすべて使う */
+    padding: 8px;
+    font-size: 14px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    min-width: 0; /* ← flexboxで縮小可にするため重要 */
+  }
+  
+  .toolbar select {
+    padding: 8px;
+    font-size: 14px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    white-space: nowrap;
+  }
+  

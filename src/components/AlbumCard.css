@@ -1,0 +1,129 @@
+.album-card {
+    position: relative;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+    background: #fff;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .image-wrapper {
+    position: relative;
+    width: 100%;
+  }
+  
+  .album-image {
+    width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 0;
+  }
+  
+  .image-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    color: #fff;
+    padding: 4px 8px;
+  }
+  
+  .overlay-title {
+    font-size: 14px;
+    font-weight: bold;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  
+  .edit-button-container {
+    padding: 6px 8px;
+    text-align: right;
+  }
+  
+  .edit-button {
+    font-size: 13px;
+    background: none;
+    border: none;
+    color: #666;
+    cursor: pointer;
+    padding: 2px 6px;
+  }
+  
+  .edit-button:hover {
+    color: #000;
+  }
+  
+  
+  .album-image {
+    max-width: 100%;
+    max-height: 300px;
+    object-fit: cover;
+  }
+  
+  .card-meta {
+    padding: 8px;
+  }
+  
+  .card-info {
+    font-size: 0.85rem;
+    line-height: 1.4;
+  }
+  
+  .album-card input[type='checkbox'] {
+    cursor: pointer;
+  }
+  
+  .album-card {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    overflow: hidden;
+    cursor: pointer;
+    background-color: #fff;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+    transition: box-shadow 0.2s ease;
+  }
+  
+  .album-card.q-mode {
+    box-shadow: 0 0 0 2px #ff4dd2; /* Qモード時の強調枠（任意） */
+  }
+  
+  .album-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  
+  .album-title {
+    position: absolute;
+    bottom: 0;
+    width: 100%;
+    padding: 6px;
+    font-size: 14px;
+    background: rgba(0, 0, 0, 0.5);
+    color: white;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  
+  .album-checkbox {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    width: 24px;
+    height: 24px;
+    z-index: 10;
+    transform: scale(1.4);
+    accent-color: #ff4dd2;
+    background: white;
+    border-radius: 4px;
+  }
+  

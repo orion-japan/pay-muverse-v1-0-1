@@ -3,7 +3,6 @@ import Link from 'next/link'
 
 export default function Footer() {
   return (
-    // これ自身を中央430pxで固定配置にする（外枠ラッパは不要）
     <footer
       className="app-footer"
       style={{
@@ -20,12 +19,12 @@ export default function Footer() {
         background: '#fff',
         borderTop: '1px solid #eee',
         boxShadow: '0 -1px 3px rgba(0,0,0,0.05)',
-        zIndex: 50, // 念のため
+        zIndex: 50,
       }}
     >
       <Link href="/" style={{ textDecoration: 'none', color: 'inherit' }}>Home</Link>
-      <Link href="/chat" style={{ textDecoration: 'none', color: 'inherit' }}>Chat</Link>
-      <Link href="/post" style={{ textDecoration: 'none', color: 'inherit' }}>投稿</Link>
+      <Link href="/chat" style={{ textDecoration: 'none', color: 'inherit' }}>Mu Talk</Link>
+      <Link href="/board" style={{ textDecoration: 'none', color: 'inherit' }}>ℚ Board</Link>
       <Link href="/mypage" style={{ textDecoration: 'none', color: 'inherit' }}>My Page</Link>
     </footer>
   )

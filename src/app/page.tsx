@@ -41,6 +41,7 @@ export default function DashboardPage() {
     { title: 'Mu_AI', link: '/mu_full', img: '/mu_ai.png', alt: 'Mu_AI' },
     { title: '共鳴会', link: '/kyomeikai', img: '/kyoumai.png', alt: '共鳴会' },
     { title: '配信', link: '/kyomeikai/live', img: '/live.png', alt: '共鳴会LIVE' },
+    { title: '日記', link: '/album', img: '/nikki.png', alt: '日記' },
     { title: 'Create', link: '/create', img: '/mu_create.png', alt: 'Create' },
     { title: 'プラン', link: '/pay', img: '/mu_card.png', alt: 'プラン' },
   ]

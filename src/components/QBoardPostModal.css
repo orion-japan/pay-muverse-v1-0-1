@@ -1,0 +1,228 @@
+.qboard-modal-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.3);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+  }
+  
+  .qboard-modal {
+    background: #fff;
+    padding: 24px;
+    border-radius: 8px;
+    max-width: 480px;
+    width: 90%;
+    box-shadow: 0 0 8px rgba(0, 0, 0, 0.2);
+  }
+  
+  .qboard-buttons {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 16px;
+  }
+  
+  .preview-images {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  
+  .preview-img {
+    width: 80px;
+    height: 80px;
+    object-fit: cover;
+    border-radius: 4px;
+  }
+  
+  .qboard-post-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+  
+  .qboard-post-modal-content {
+    background: #fff;
+    padding: 20px;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 500px;
+  }
+  
+  .preview-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  
+  .preview-image {
+    width: 100px;
+    height: 100px;
+    object-fit: cover;
+  }
+  
+
+  /* すべてモーダル内で完結させるためのスコープ */
+.qboard-post-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  /* iOS セーフエリア対応 */
+  padding-top: max(16px, env(safe-area-inset-top));
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  background: rgba(0, 0, 0, 0.45);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+
+.qboard-post-modal {
+  width: 100%;
+  max-width: 420px;
+  max-height: min(90vh, 640px);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+/* モーダル内部の box-sizing を安定化 */
+.qboard-post-modal *,
+.qboard-post-modal *::before,
+.qboard-post-modal *::after {
+  box-sizing: border-box;
+}
+
+.qboard-post-title {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+/* iOS のフォームでズームが起きないように16px以上にする */
+.qboard-post-modal input,
+.qboard-post-modal button,
+.qboard-post-modal label {
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+.qboard-post-alert {
+  background: #fff7e6;
+  color: #8a5200;
+  border: 1px solid #ffd699;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 6px 0 12px;
+}
+
+.qboard-post-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.qboard-post-field label {
+  display: block;
+  margin-bottom: 6px;
+  color: #333;
+  font-weight: 600;
+}
+
+.qboard-post-field input {
+  width: 100%;
+  height: 40px;
+  padding: 8px 12px;
+  border: 1px solid #d7d7d7;
+  border-radius: 10px;
+  outline: none;
+  background: #fff;
+}
+
+.qboard-post-field input:focus {
+  border-color: #7aa7ff;
+  box-shadow: 0 0 0 3px rgba(93, 135, 255, 0.2);
+}
+
+.qboard-post-meta {
+  margin-top: 8px;
+  color: #666;
+  font-size: 14px;
+}
+
+.qboard-post-error {
+  margin: 10px 0 0;
+  color: #b20000;
+  background: #ffecec;
+  border: 1px solid #ffc8c8;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+
+.qboard-post-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+.qboard-post-actions .btn {
+  appearance: none;
+  border: none;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-weight: 700;
+  cursor: pointer;
+  background: #e9e9e9;
+  color: #222;
+  transition: transform 0.03s ease, opacity 0.2s ease;
+}
+
+.qboard-post-actions .btn:active {
+  transform: translateY(1px);
+}
+
+.qboard-post-actions .btn.primary {
+  background: #6b8cff;
+  color: #fff;
+}
+
+.qboard-post-actions .btn.disabled,
+.qboard-post-actions .btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* 画面が極端に狭いときの最終防衛線 */
+@media (max-width: 360px) {
+  .qboard-post-modal {
+    max-width: 96vw;
+    padding: 12px;
+    border-radius: 14px;
+  }
+  .qboard-post-actions .btn {
+    padding: 9px 12px;
+  }
+}
