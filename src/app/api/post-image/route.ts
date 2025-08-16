@@ -16,7 +16,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const uploadedPaths: string[] = [];
+  const uploadedUrls: string[] = [];
 
   for (const file of files) {
     const timestamp = Date.now();
@@ -25,11 +25,11 @@ export async function POST(req: Request) {
     // ★ ファイル名を安全に変換（英数字・記号以外を削除）
     const safeName = file.name
       .replace(/\s+/g, '_')            // 空白をアンダースコアに
-      .replace(/[^a-zA-Z0-9_.-]/g, '') // 記号や日本語を除去
+      .replace(/[^a-zA-Z0-9_.-]/g, ''); // 記号や日本語を除去
 
     const filePath = `${userCode}/${timestamp}_${safeName}`;
 
-    const { error } = await supabaseServer.storage
+    const { error: uploadError } = await supabaseServer.storage
       .from('private-posts')
       .upload(filePath, file, {
         cacheControl: '3600',
@@ -37,17 +37,31 @@ export async function POST(req: Request) {
         contentType: file.type || `image/${fileExt}`,
       });
 
-    if (error) {
-      console.error('[post-image] ❌ アップロード失敗', filePath, error);
+    if (uploadError) {
+      console.error('[post-image] ❌ アップロード失敗', filePath, uploadError);
       return NextResponse.json(
-        { error: 'アップロード失敗', detail: error.message },
+        { error: 'アップロード失敗', detail: uploadError.message },
         { status: 500 }
       );
     }
 
-    uploadedPaths.push(filePath);
+    // ✅ public URL を取得して返す（構造は同じ `urls: []` で）
+    const { data: publicUrlData } = supabaseServer.storage
+      .from('private-posts')
+      .getPublicUrl(filePath);
+
+    if (!publicUrlData?.publicUrl) {
+      console.error('[post-image] ❌ publicUrl取得失敗', filePath);
+      return NextResponse.json(
+        { error: 'publicUrl取得失敗' },
+        { status: 500 }
+      );
+    }
+
+    uploadedUrls.push(publicUrlData.publicUrl);
     console.log('[post-image] ✅ アップロード成功:', filePath);
+    console.log('[post-image] 🌐 公開URL:', publicUrlData.publicUrl);
   }
 
-  return NextResponse.json({ urls: uploadedPaths }, { status: 200 });
+  return NextResponse.json({ urls: uploadedUrls }, { status: 200 });
 }

@@ -15,6 +15,7 @@ type Post = {
   media_urls: any[]; // string[] or { url: string }[]
   visibility?: string;
   created_at: string;
+  board_type?: string; // ✅ ← これを追加！
 };
 
 export default function QBoardPage() {
@@ -51,12 +52,14 @@ export default function QBoardPage() {
       const publicPosts = (data.posts || []).filter(
         (post: Post) =>
           post.visibility === 'public' &&
+          post.board_type === 'default' && // ✅ ← ここ！
           Array.isArray(post.media_urls) &&
           post.media_urls.every((url: any) => {
             const path = typeof url === 'string' ? url : url?.url || '';
             return !path.includes('/private-posts/');
           })
       );
+      
   
       const sorted = publicPosts.sort(
         (a, b) =>

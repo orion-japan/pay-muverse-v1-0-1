@@ -1,5 +1,3 @@
-// app/api/upload-post/route.ts
-
 import { NextResponse } from 'next/server';
 import { supabaseServer } from '@/lib/supabaseServer';
 
@@ -19,22 +17,21 @@ export async function POST(req: Request) {
       visibility,
     } = body;
 
-    // ✅ バリデーション（titleは除外）
-    if (!user_code || !media_urls || media_urls.length === 0) {
-      console.error('[upload-post] ❌ 必須データ不足');
+    // ✅ バリデーション（user_code のみ必須）
+    if (!user_code) {
+      console.error('[upload-post] ❌ user_codeが不足しています');
       return NextResponse.json(
         { error: 'Missing required fields.' },
         { status: 400 }
       );
     }
 
-    // ✅ Supabase に挿入
     const { error } = await supabaseServer.from('posts').insert({
       user_code,
-      title: title || null,              // ← titleは任意
+      title: title || null,
       category: category || 'なし',
       content: content || '',
-      media_urls,
+      media_urls: media_urls || [],
       tags: tags || [],
       visibility: visibility || 'public',
     });
