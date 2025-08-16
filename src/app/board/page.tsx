@@ -3,9 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
-import QBoardPostModal from '@/components/QBoardPostModal';
 import PostDetailModal from '@/components/PostDetailModal';
-import { copyImageToPublic } from '@/lib/copyImageToPublic';
 import './board.css';
 
 type Post = {
@@ -14,7 +12,8 @@ type Post = {
   content?: string;
   category?: string;
   tags?: string[];
-  media_urls: string[];
+  media_urls: any[]; // string[] or { url: string }[]
+  visibility?: string;
   created_at: string;
 };
 
@@ -23,101 +22,117 @@ export default function QBoardPage() {
   const router = useRouter();
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
-  const [modalOpen, setModalOpen] = useState(false);
   const [detailPost, setDetailPost] = useState<Post | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // 投稿一覧取得
   const fetchPosts = async () => {
     if (!userCode) {
       console.warn('[QBoard] user_codeが必要です');
       return;
     }
+  
+    console.log('[QBoard] user_code:', userCode);
+  
     try {
       const res = await fetch('/api/qboard-posts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_code: userCode }),
       });
+  
       if (!res.ok) {
-        console.error('[QBoard] 投稿取得失敗', res.status);
+        console.error('[QBoard] 投稿取得失敗 ステータス:', res.status);
         return;
       }
+  
       const data = await res.json();
-      const sorted = (data.posts || []).sort(
-        (a: Post, b: Post) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      console.log('[QBoard] 投稿取得成功:', data);
+  
+      const publicPosts = (data.posts || []).filter(
+        (post: Post) =>
+          post.visibility === 'public' &&
+          Array.isArray(post.media_urls) &&
+          post.media_urls.every((url: any) => {
+            const path = typeof url === 'string' ? url : url?.url || '';
+            return !path.includes('/private-posts/');
+          })
       );
+  
+      const sorted = publicPosts.sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+  
       setPosts(sorted);
-
-      // ✅ フィードを保持（戻ってきても消えない）
-      sessionStorage.setItem('qboard_posts', JSON.stringify(sorted));
     } catch (err) {
-      console.error('[QBoard] 投稿取得エラー', err);
+      console.error('[QBoard] 投稿取得失敗', err);
     } finally {
       setLoading(false);
     }
   };
+  
 
-  // 初回：sessionStorage から復元 → なければ取得
   useEffect(() => {
-    const saved = sessionStorage.getItem('qboard_posts');
-    if (saved) {
-      try {
-        const parsed: Post[] = JSON.parse(saved);
-        setPosts(parsed);
-        setLoading(false);
-      } catch {
-        // 破損時は無視して取得へ
-        fetchPosts();
-      }
-    } else {
-      fetchPosts();
-    }
+    fetchPosts();
   }, [userCode]);
 
   return (
     <div className="qboard-page">
-      <h2>Qボード 投稿一覧</h2>
+      <h2>🌐 Qボード</h2>
 
       {loading ? (
         <p>読み込み中...</p>
       ) : posts.length === 0 ? (
         <p>まだ投稿がありません。</p>
       ) : (
-        <ul className="qboard-post-list">
+        <ul className="post-list">
           {posts.map((post) => (
-            <li key={post.post_id} className="qboard-post-item">
-              {post.media_urls?.length > 0 && (
-                <img
-                  src={post.media_urls[0]}
-                  alt={post.title || '投稿画像'}
-                  className="qboard-post-image"
-                  onClick={() => setDetailPost(post)}
-                />
+            <li
+              key={post.post_id}
+              className="post-item"
+              onClick={() => setDetailPost(post)}
+            >
+              {post.title && <h3 className="post-title">{post.title}</h3>}
+
+              {post.media_urls?.map((item, i) => {
+                const url = typeof item === 'string' ? item : item?.url;
+                return (
+                  <img
+                    key={i}
+                    src={url}
+                    alt={`画像${i + 1}`}
+                    className="post-image"
+                  />
+                );
+              })}
+
+              {post.content && (
+                <p className="post-content">{post.content}</p>
               )}
-              {post.title && <h3 className="qboard-post-title">{post.title}</h3>}
+
+              {post.tags && post.tags.length > 0 && (
+                <div className="tags">
+                  {post.tags.map((tag, i) => (
+                    <span key={i} className="tag">
+                      #{tag}
+                    </span>
+                  ))}
+                </div>
+              )}
             </li>
           ))}
         </ul>
       )}
 
-      {/* Qボタン（押したらアルバムへ） */}
-      <div className="qboard-buttons">
+      {/* 📷 アルバム投稿へ */}
+      <div className="post-buttons">
         <button
-          className="qboard-button"
-          onClick={() => router.push('/album')} // ← ここだけ動作変更
+          className="post-button-red"
+          onClick={() => router.push('/album')}
         >
-          ＋ Qボード投稿
+          ＋ Qボードに投稿する
         </button>
       </div>
-
-      {/* 投稿モーダル（構造維持のため残置、必要ならmodalOpenをtrueにして使えます） */}
-      <QBoardPostModal
-        posts={posts}
-        userCode={userCode ?? ''}
-        onClose={() => setModalOpen(false)}
-        onPosted={fetchPosts}
-      />
 
       {/* 詳細モーダル */}
       {detailPost && (
@@ -127,7 +142,6 @@ export default function QBoardPage() {
         />
       )}
 
-      {/* スクロールターゲット */}
       <div ref={bottomRef} style={{ height: '1px' }} />
     </div>
   );

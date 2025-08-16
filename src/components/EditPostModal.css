@@ -227,3 +227,49 @@
     text-decoration: underline;
   }
   
+  .checkbox-group {
+    display: flex;
+    justify-content: center; /* 全体を中央に配置 */
+    align-items: center;
+    margin-top: 10px;
+    gap: 2px; /* チェックボックスとテキストの間隔 */
+  }
+  
+  .checkbox-group input[type='checkbox'] {
+    margin: 0;
+    transform: scale(1.2); /* サイズ調整（任意） */
+  }
+  
+  .checkbox-group label {
+    display: flex;
+    align-items: center;
+    font-size: 14px;
+    gap: 6px;
+  }
+  
+  .checkbox-group {
+    display: flex;
+    justify-content: center; /* 全体中央 */
+    align-items: center;
+    margin-top: 12px;
+  }
+  
+  .checkbox-group label {
+    display: flex;
+    flex-direction: column; /* 縦に並べる */
+    align-items: center;     /* 中央寄せ */
+    font-size: 14px;
+    gap: 4px;
+    text-align: center;
+  }
+  
+  .checkbox-group input[type="checkbox"] {
+    transform: scale(1.2);
+    margin-bottom: 4px;
+  }
+  
+  .checkbox-subtext {
+    font-size: 12px;
+    color: #555;
+  }
+  

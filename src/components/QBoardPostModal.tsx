@@ -29,6 +29,7 @@ export default function QBoardPostModal({
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('');
   const [tags, setTags] = useState('');
+  const [content, setContent] = useState('');
   const [mediaUrls, setMediaUrls] = useState<string[]>([]);
   const [isPosting, setIsPosting] = useState(false);
 
@@ -37,9 +38,9 @@ export default function QBoardPostModal({
     console.log('🧾 userCode:', userCode);
     console.log('🖼️ posts:', posts);
 
-    // 初期値として posts の media_urls をセット
     const initialUrls = posts.flatMap((p) => p.media_urls || []);
-    setMediaUrls(initialUrls);
+    const uniqueUrls = Array.from(new Set(initialUrls)); // ✅ 重複排除
+    setMediaUrls(uniqueUrls);
   }, [posts, userCode]);
 
   const handlePost = async () => {
@@ -57,7 +58,6 @@ export default function QBoardPostModal({
 
       const publicUrls: string[] = [];
 
-      // 画像を public-posts にコピー
       for (const url of mediaUrls) {
         console.log('📤 画像コピー開始:', url);
         try {
@@ -78,31 +78,28 @@ export default function QBoardPostModal({
         return;
       }
 
-      // タグを整形
       const tagArray = tags
         .split(',')
         .map((tag) => tag.trim())
         .filter((tag) => tag.length > 0);
 
-      console.log('📝 投稿情報をSupabaseに送信...', {
+      const postData = {
         user_code: userCode,
         title,
+        content,
         category,
         tags: tagArray,
         media_urls: publicUrls,
-      });
+        visibility: 'public',
+        layout_type: 'default',
+        board_type: 'default',
+      };
+
+      console.log('📝 投稿データ送信:', postData);
 
       const response = await fetch('/api/upload-post', {
         method: 'POST',
-        body: JSON.stringify({
-          user_code: userCode,
-          title,
-          content: '',
-          category,
-          tags: tagArray,
-          media_urls: publicUrls,
-          visibility: 'public',
-        }),
+        body: JSON.stringify(postData),
         headers: {
           'Content-Type': 'application/json',
         },
@@ -137,17 +134,36 @@ export default function QBoardPostModal({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
         />
-        <input
-          type="text"
-          placeholder="カテゴリ"
+        <select
           value={category}
           onChange={(e) => setCategory(e.target.value)}
-        />
+          className="form-select"
+        >
+          <option value="">カテゴリを選択</option>
+          <option value="投稿">投稿</option>
+          <option value="Ｑボード">Ｑボード</option>
+          <option value="思い">思い</option>
+          <option value="ビジョン">ビジョン</option>
+          <option value="報告">報告</option>
+          <option value="達成">達成</option>
+          <option value="作品">作品</option>
+          <option value="学び">学び</option>
+          <option value="告知">告知</option>
+          <option value="募集">募集</option>
+          <option value="HELP">HELP</option>
+          <option value="お知らせ">お知らせ</option>
+          <option value="その他">その他</option>
+        </select>
         <input
           type="text"
           placeholder="タグ（カンマ区切り）"
           value={tags}
           onChange={(e) => setTags(e.target.value)}
+        />
+        <textarea
+          placeholder="コメント・説明（任意）"
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
         />
 
         {mediaUrls.length > 0 && (

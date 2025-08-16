@@ -12,6 +12,7 @@ type Post = {
   content?: string;
   media_urls: any[]; // string[] または { url: string }[]
   tags?: string[];
+  visibility?: string;
   created_at: string;
 };
 
@@ -47,8 +48,14 @@ export default function CreatePage() {
       const data = await res.json();
       console.log('[投稿一覧取得成功]', data);
 
+      // ✅ visibility === 'private' のみ抽出
+      const privatePosts = (data.posts || []).filter(
+        (post: Post) => post.visibility === 'private'
+      );
+
+      // ✅ 最新順に並べ替え
       setPosts(
-        (data.posts || []).sort(
+        privatePosts.sort(
           (a, b) =>
             new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
         )
@@ -127,7 +134,7 @@ export default function CreatePage() {
         onClose={() => setModalOpen(false)}
         userCode={userCode ?? ''}
         onPostSuccess={fetchPosts}
-        scrollTargetRef={bottomRef} // ✅ スクロール先を渡す
+        scrollTargetRef={bottomRef}
       />
 
       {/* ⬇ スクロール対象 */}

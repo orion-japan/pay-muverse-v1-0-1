@@ -1,35 +1,74 @@
-.board-container {
-    padding: 1rem;
-  }
-  
-  .board-title {
-    font-size: 1.5rem;
-    margin-bottom: 1rem;
-  }
-  
-  .board-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    gap: 12px;
-  }
-  
-  .board-card {
-    position: relative;
-    overflow: hidden;
-    border-radius: 12px;
-    background-color: #f9f9f9;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.08);
-  }
-  
-  .board-image {
-    width: 100%;
-    aspect-ratio: 1/1;
-    object-fit: cover;
-  }
-  
-  .board-caption {
-    padding: 0.5rem;
-    font-size: 0.9rem;
-    text-align: center;
-  }
-  
+.qboard-page {
+  padding: 1rem;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+h2 {
+  text-align: center;
+  font-size: 1.8rem;
+  margin-bottom: 1rem;
+}
+
+.post-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.post-item {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background: #fff;
+  cursor: pointer;
+}
+
+.post-title {
+  font-size: 1.2rem;
+  font-weight: bold;
+  margin-bottom: 0.5rem;
+}
+
+.post-image {
+  width: 100%;
+  border-radius: 8px;
+  margin-bottom: 0.5rem;
+}
+
+.post-content {
+  margin-top: 0.5rem;
+}
+
+.tags {
+  margin-top: 0.5rem;
+}
+
+.tag {
+  background: #f0f0f0;
+  border-radius: 12px;
+  padding: 4px 10px;
+  margin-right: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.post-buttons {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.post-button-red {
+  background-color: #f44336;
+  color: white;
+  font-weight: bold;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.post-button-red:hover {
+  background-color: #d32f2f;
+}

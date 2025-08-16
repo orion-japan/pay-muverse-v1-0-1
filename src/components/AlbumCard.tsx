@@ -29,8 +29,6 @@ export default function AlbumCard({
   onClick,
   onEdit,
 }: AlbumCardProps) {
-  const firstImage = post.media_urls?.[0] || '';
-
   const handleEditClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     console.log('[AlbumCard] ✏️ 編集ボタンが押されました');
@@ -39,7 +37,7 @@ export default function AlbumCard({
 
   return (
     <div
-      className={`album-card ${isQMode ? 'q-mode' : ''} ${isChecked ? 'checked' : ''}`}
+      className={`album-card ${isQMode ? 'q-mode' : ''} ${isChecked ? 'checked blink' : ''}`}
       onClick={() => {
         if (isQMode) {
           console.log('[AlbumCard] ✅ Qモード画像クリック → onQSelect 実行');
@@ -50,7 +48,7 @@ export default function AlbumCard({
         }
       }}
     >
-      {/* Qモード時のチェックボックス */}
+      {/* Qモード時のチェックボックス（非表示でクリック対応） */}
       {isQMode && (
         <input
           type="checkbox"
@@ -64,18 +62,35 @@ export default function AlbumCard({
         />
       )}
 
-      {/* メイン画像 */}
-      <img
-        src={firstImage}
-        alt="Album Image"
-        className="album-image"
-        onError={(e) => {
-          console.warn('[AlbumCard] ⚠️ 画像読み込み失敗:', firstImage);
-          (e.target as HTMLImageElement).style.display = 'none';
-        }}
-      />
+      {/* 画像表示エリア：複数 → 横スライド／単数 → 通常表示 */}
+      {post.media_urls.length > 1 ? (
+        <div className="image-carousel">
+          {post.media_urls.map((url, index) => (
+            <img
+              key={index}
+              src={url}
+              alt={`Image ${index}`}
+              className="carousel-image"
+              onError={(e) => {
+                console.warn('[AlbumCard] ⚠️ 画像読み込み失敗:', url);
+                (e.target as HTMLImageElement).style.display = 'none';
+              }}
+            />
+          ))}
+        </div>
+      ) : (
+        <img
+          src={post.media_urls[0] || ''}
+          alt="Album Image"
+          className="album-image"
+          onError={(e) => {
+            console.warn('[AlbumCard] ⚠️ 画像読み込み失敗:', post.media_urls[0]);
+            (e.target as HTMLImageElement).style.display = 'none';
+          }}
+        />
+      )}
 
-      {/* 編集ボタン（onEditが指定されている場合） */}
+      {/* 編集ボタン（オプション） */}
       {onEdit && (
         <button className="edit-btn" onClick={handleEditClick}>
           ✏️

@@ -22,7 +22,6 @@ export default function PostModal({
   const [category, setCategory] = useState('');
   const [content, setContent] = useState('');
   const [tags, setTags] = useState('');
-  const [visibility, setVisibility] = useState<'public' | 'private'>('public');
   const [file, setFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -102,7 +101,8 @@ export default function PostModal({
             .split(',')
             .map((t) => t.trim())
             .filter(Boolean),
-          visibility,
+          visibility: 'private',   // ✅ 非公開
+          is_posted: true,         // ✅ 投稿済みにする
           media_urls,
         }),
       });
@@ -112,7 +112,6 @@ export default function PostModal({
       onPostSuccess();
       onClose();
 
-      // ✅ 少し待ってからスクロール（DOM更新完了を待つ）
       setTimeout(() => {
         const el = scrollTargetRef?.current;
         if (el) {
@@ -120,7 +119,7 @@ export default function PostModal({
         } else {
           console.warn('[PostModal] スクロールターゲットが見つかりません');
         }
-      }, 300); // ← 300ms 待つのが安定
+      }, 300);
     } catch (err) {
       console.error('[PostModal] ❌ 投稿失敗', err);
       alert('投稿に失敗しました');
@@ -144,20 +143,26 @@ export default function PostModal({
           onChange={(e) => setTitle(e.target.value)}
         />
 
-        <input
-          type="text"
-          className="modal-input"
-          placeholder="カテゴリ"
+        <select
           value={category}
           onChange={(e) => setCategory(e.target.value)}
-        />
-
-        <textarea
-          className="modal-input"
-          placeholder="コメントを入力..."
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-        />
+          className="form-select"
+        >
+          <option value="">カテゴリを選択</option>
+          <option value="投稿">投稿</option>
+          <option value="Ｑボード">Ｑボード</option>
+          <option value="思い">思い</option>
+          <option value="ビジョン">ビジョン</option>
+          <option value="報告">報告</option>
+          <option value="達成">達成</option>
+          <option value="作品">作品</option>
+          <option value="学び">学び</option>
+          <option value="告知">告知</option>
+          <option value="募集">募集</option>
+          <option value="HELP">HELP</option>
+          <option value="お知らせ">お知らせ</option>
+          <option value="その他">その他</option>
+        </select>
 
         <input
           type="text"
@@ -167,16 +172,12 @@ export default function PostModal({
           onChange={(e) => setTags(e.target.value)}
         />
 
-        <select
+        <textarea
           className="modal-input"
-          value={visibility}
-          onChange={(e) =>
-            setVisibility(e.target.value as 'public' | 'private')
-          }
-        >
-          <option value="public">公開</option>
-          <option value="private">非公開</option>
-        </select>
+          placeholder="コメントを入力..."
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+        />
 
         <input
           type="file"

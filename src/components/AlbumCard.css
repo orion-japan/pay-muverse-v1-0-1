@@ -127,3 +127,351 @@
     border-radius: 4px;
   }
   
+  .album-card {
+    position: relative;
+    width: 280px;
+    height: 280px;
+    border: 2px solid transparent;
+    border-radius: 10px;
+    overflow: hidden;
+    cursor: pointer;
+    margin: 10px;
+    box-shadow: 0 0 4px rgba(0, 0, 0, 0.1);
+    transition: border 0.3s, box-shadow 0.3s;
+  }
+  
+  .album-card:hover {
+    box-shadow: 0 0 12px rgba(0, 0, 0, 0.2);
+  }
+  
+  /* Qモード時の通常枠 */
+  .q-mode {
+    border: 2px solid #66ccff;
+  }
+  
+  /* チェックされたらピンク枠＋点滅 */
+  .checked {
+    border: 2px solid #ff66cc;
+  }
+  
+  .blink {
+    animation: blink-border 1s infinite;
+  }
+  
+  @keyframes blink-border {
+    0% {
+      box-shadow: 0 0 8px #ff66cc;
+    }
+    50% {
+      box-shadow: 0 0 20px #ff99dd;
+    }
+    100% {
+      box-shadow: 0 0 8px #ff66cc;
+    }
+  }
+  
+  /* 画像表示 */
+  .album-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  
+  /* タイトルを写真の上に重ねる */
+  .album-card::after {
+    content: attr(data-title);
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(0, 0, 0, 0.4);
+    color: white;
+    padding: 6px 10px;
+    font-size: 14px;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  
+  /* 編集ボタン */
+  .edit-btn {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    background: rgba(255, 255, 255, 0.8);
+    border: none;
+    border-radius: 5px;
+    padding: 4px 6px;
+    font-size: 16px;
+    cursor: pointer;
+    z-index: 2;
+  }
+  
+  /* Qモードチェックボックス */
+  .q-checkbox {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    z-index: 2;
+    width: 20px;
+    height: 20px;
+  }
+  
+  .album-card {
+    position: relative;
+    width: 100%;
+    max-width: 180px; /* 任意の最大サイズ */
+    aspect-ratio: 1 / 1; /* 正方形にする */
+    border: 2px solid transparent;
+    border-radius: 10px;
+    overflow: hidden;
+    cursor: pointer;
+    margin: 10px;
+    box-shadow: 0 0 4px rgba(0, 0, 0, 0.1);
+    transition: border 0.3s, box-shadow 0.3s;
+  }
+  
+  /* 画像をフィットさせる */
+  .album-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .album-card {
+    position: relative;
+    width: 100%;
+    max-width: 160px; /* 必要に応じて調整 */
+    aspect-ratio: 1 / 1; /* ✅ スクエア化 */
+    border: 2px solid transparent;
+    border-radius: 10px;
+    overflow: hidden;
+    cursor: pointer;
+    margin: 8px;
+    box-shadow: 0 0 4px rgba(0, 0, 0, 0.15);
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+  
+  .album-card:hover {
+    transform: scale(1.03);
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+  }
+  
+  .album-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover; /* ✅ 画像をスクエアにフィット */
+    display: block;
+  }
+  .album-card {
+    position: relative;
+    width: 100%;
+    max-width: 160px;
+    height: 160px; /* ✅ 高さを width と同じにする */
+    border-radius: 12px;
+    overflow: hidden;
+    margin: 8px;
+    box-shadow: 0 0 6px rgba(0, 0, 0, 0.15);
+    transition: transform 0.2s ease;
+    cursor: pointer;
+  }
+  
+  .album-card:hover {
+    transform: scale(1.03);
+    box-shadow: 0 0 12px rgba(0, 0, 0, 0.3);
+  }
+  
+  .album-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover; /* ✅ 中央を切り取って正方形に */
+    display: block;
+  }
+  .album-card {
+    position: relative;
+    width: 100%;
+    max-width: 160px;
+    height: 120px; /* 👈 高さを少し短めに変更 */
+    border-radius: 12px;
+    overflow: hidden;
+    margin: 8px;
+    box-shadow: 0 0 6px rgba(0, 0, 0, 0.15);
+    transition: transform 0.2s ease;
+    cursor: pointer;
+  }
+  
+  .album-card:hover {
+    transform: scale(1.03);
+    box-shadow: 0 0 12px rgba(0, 0, 0, 0.3);
+  }
+  
+  .album-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover; /* ✅ トリミングでバランス調整 */
+    display: block;
+  }
+  
+  .album-title {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 4px 6px;
+    font-size: 13px;
+    color: white;
+    background: rgba(0, 0, 0, 0.5);
+    text-align: center;
+    backdrop-filter: blur(3px);
+  }
+  
+  .image-carousel {
+    display: flex;
+    overflow-x: auto;
+    gap: 8px;
+    scroll-snap-type: x mandatory;
+    padding-bottom: 6px;
+  }
+  
+  .carousel-image {
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    scroll-snap-align: start;
+    object-fit: cover;
+    flex-shrink: 0;
+  }
+  
+  .image-carousel {
+    display: flex;
+    overflow-x: auto;
+    gap: 8px;
+    scroll-snap-type: x mandatory;
+    padding-bottom: 6px;
+  }
+  
+  .carousel-image {
+    flex-shrink: 0;
+    width: 250px; /* ← ★ 必ず横幅を固定 */
+    height: auto;
+    border-radius: 8px;
+    scroll-snap-align: start;
+    object-fit: cover;
+  }
+  
+  .image-carousel {
+    display: flex;
+    overflow-x: auto;
+    gap: 8px;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 6px;
+  }
+  
+  .image-carousel::-webkit-scrollbar {
+    display: none; /* スクロールバー非表示（オプション） */
+  }
+  
+  .carousel-image {
+    flex-shrink: 0;
+    width: 240px;
+    height: auto;
+    border-radius: 8px;
+    object-fit: cover;
+    scroll-snap-align: start;
+  }
+  .album-card {
+    position: relative;
+    width: 100%;
+    max-width: 100%;
+    border-radius: 12px;
+    overflow: hidden;
+    margin: 12px auto;
+    background-color: #fff;
+    box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
+    transition: transform 0.2s ease;
+    cursor: pointer;
+  }
+  
+  .album-card:hover {
+    transform: scale(1.02);
+  }
+  
+  /* 横スクロールカルーセル */
+  .image-carousel {
+    display: flex;
+    overflow-x: auto;
+    gap: 8px;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    padding: 6px;
+  }
+  
+  .image-carousel::-webkit-scrollbar {
+    display: none; /* オプション：スクロールバー非表示 */
+  }
+  
+  .carousel-image {
+    flex-shrink: 0;
+    width: 240px;
+    height: 160px;
+    border-radius: 10px;
+    object-fit: cover;
+    scroll-snap-align: start;
+  }
+
+  /* board.css に追加（または確認） */
+.board-layout {
+  width: 100%;
+  overflow-x: visible;
+}
+
+body {
+  overflow-x: visible;
+}
+.album-card {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 12px auto;
+  background-color: #fff;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s ease;
+  cursor: pointer;
+}
+
+.album-card:hover {
+  transform: scale(1.02);
+}
+
+/* 横スクロールカルーセル */
+.image-carousel {
+  display: flex;
+  overflow-x: auto;
+  gap: 8px;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  padding: 6px;
+}
+
+.image-carousel::-webkit-scrollbar {
+  display: none; /* オプション：スクロールバー非表示 */
+}
+
+.carousel-image {
+  flex-shrink: 0;
+  width: 240px;
+  height: 160px;
+  border-radius: 10px;
+  object-fit: cover;
+  scroll-snap-align: start;
+}
+.board-layout {
+  width: 100%;
+  overflow-x: visible;
+}

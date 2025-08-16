@@ -2,8 +2,7 @@
 import { useState } from 'react'
 import '../styles/loginmodal.css'
 import { sendPasswordResetEmail } from 'firebase/auth'
-import { auth } from '@/lib/firebase' // ✅ これが必要です
-
+import { auth } from '@/lib/firebase'; // ✅ これが必要です（authのエクスポートを確認してください）
 
 type Props = {
   isOpen: boolean

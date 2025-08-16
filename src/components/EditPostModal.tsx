@@ -9,7 +9,7 @@ type Post = {
   category?: string;
   content?: string;
   tags?: string[];
-  is_public?: boolean;
+  is_posted?: boolean;
   media_urls: string[];
   created_at: string;
 };
@@ -33,7 +33,7 @@ export default function EditPostModal({
   const [category, setCategory] = useState(post.category || '');
   const [tags, setTags] = useState(post.tags?.join(', ') || '');
   const [comment, setComment] = useState(post.content || '');
-  const [isPublic, setIsPublic] = useState(post.is_public ?? false);
+  const [isPosted, setIsPosted] = useState(post.is_posted ?? true);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -52,7 +52,7 @@ export default function EditPostModal({
         category,
         content: comment,
         tags: tags.split(',').map(tag => tag.trim()),
-        is_public: isPublic,
+        is_posted: isPosted,
       }),
     });
 
@@ -61,7 +61,7 @@ export default function EditPostModal({
     if (res.ok) {
       const updated = await res.json();
       onEditSuccess({ ...post, ...updated });
-      setTimeout(onClose, 100); // 画像肥大化対策の遅延
+      setTimeout(onClose, 100); // 遅延クローズ
     } else {
       alert('保存に失敗しました');
     }
@@ -105,15 +105,26 @@ export default function EditPostModal({
           />
         </div>
 
-        <div className="form-group">
-          <label>カテゴリー</label>
-          <input
-            type="text"
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            className="input"
-          />
-        </div>
+        <select
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          className="form-select"
+        >
+          <option value="">カテゴリを選択</option>
+          <option value="投稿">投稿</option>
+          <option value="Ｑボード">Ｑボード</option>
+          <option value="思い">思い</option>
+          <option value="ビジョン">ビジョン</option>
+          <option value="報告">報告</option>
+          <option value="達成">達成</option>
+          <option value="作品">作品</option>
+          <option value="学び">学び</option>
+          <option value="告知">告知</option>
+          <option value="募集">募集</option>
+          <option value="HELP">HELP</option>
+          <option value="お知らせ">お知らせ</option>
+          <option value="その他">その他</option>
+        </select>
 
         <div className="form-group">
           <label>タグ（カンマ区切り）</label>
@@ -139,10 +150,10 @@ export default function EditPostModal({
           <label>
             <input
               type="checkbox"
-              checked={isPublic}
-              onChange={(e) => setIsPublic(e.target.checked)}
+              checked={isPosted}
+              onChange={(e) => setIsPosted(e.target.checked)}
             />
-            公開する
+            公開する（チェック外すと下書き）
           </label>
         </div>
 
