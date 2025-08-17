@@ -1,29 +1,24 @@
 // src/app/api/get-profile/route.ts
-import { NextResponse } from 'next/server';
-import { supabaseServer } from '@/lib/supabaseServer';
+import { NextRequest, NextResponse } from "next/server";
+import { supabaseServer } from "@/lib/supabaseServer"; // ← あなたのサーバー用クライアントに合わせて
 
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const userCode = searchParams.get('code');
+  const code = searchParams.get("code");
 
-  if (!userCode) {
-    return NextResponse.json({ error: 'code is required' }, { status: 400 });
+  if (!code) {
+    return NextResponse.json({ error: "Missing user code" }, { status: 400 });
   }
 
   const { data, error } = await supabaseServer
-    .from('profiles')
-    .select('*')
-    .eq('user_code', userCode)
-    .maybeSingle();
+    .from("profiles")
+    .select("*")
+    .eq("user_code", code)
+    .single();
 
-  if (error) {
-    console.error('[get-profile] DBエラー:', error);
-    return NextResponse.json({ error: 'DB error' }, { status: 500 });
+  if (error || !data) {
+    return NextResponse.json({ error: "Profile not found" }, { status: 404 });
   }
 
-  if (!data) {
-    return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
-  }
-
-  return NextResponse.json(data);
+  return NextResponse.json(data, { status: 200 });
 }

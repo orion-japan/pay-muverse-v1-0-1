@@ -1,23 +1,136 @@
+:root {
+  /* 全体の背景グラデはそのまま */
+  --bg-start: #f7faff;
+  --bg-end: #f9f0ff;
+
+  /* ライトテーマ用カラー */
+  --card-bg: #ffffff;
+  --card-border: #e8eef7;
+  --card-shadow: 0 8px 28px rgba(22, 30, 44, .08);
+
+  --text: #22304a;
+  --muted: #6b778c;
+
+  --accent: #7e66ff;
+  --accent-2: #57c6ff;
+
+  --chip-bg: #f2f5ff;
+  --chip-border: #d8e2ff;
+  --link: #2f65d8;
+}
+
+.pageBg {
+  background: linear-gradient(180deg, var(--bg-start), var(--bg-end));
+  min-height: calc(100vh - 64px);
+  padding: 24px 12px 56px;
+  color: var(--text);
+}
+
 .container {
-  max-width: 800px;
+  width: 100%;
+  max-width: 980px;
   margin: 0 auto;
-  padding: 20px;
-  background: #fff;
-  border: 1px solid #ddd;
-  border-radius: 8px;
+  display: grid;
+  gap: 16px;
 }
 
-.title {
-  font-size: 24px;
-  font-weight: bold;
-  margin-bottom: 20px;
+/* ===== Hero（アバター＋基本情報） ===== */
+.hero {
+  display: grid;
+  grid-template-columns: 120px 1fr auto;
+  gap: 16px;
+  align-items: center;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  box-shadow: var(--card-shadow);
+  padding: 16px;
+}
+@media (max-width: 760px) {
+  .hero { grid-template-columns: 1fr; text-align: center; }
 }
 
-.profileItem {
-  margin-bottom: 8px;
-  font-size: 16px;
+.avatarWrap { width: 120px; height: 120px; }
+.avatar {
+  width: 120px; height: 120px; border-radius: 14px; object-fit: cover;
+  box-shadow: 0 6px 18px rgba(22, 30, 44, .12);
+}
+.avatarPlaceholder {
+  width: 120px; height: 120px; border-radius: 14px;
+  background: #f2f4f8; color: #9aa6b6;
+  display: grid; place-items: center;
+  box-shadow: 0 6px 18px rgba(22, 30, 44, .08);
 }
 
-.label {
-  font-weight: bold;
+
+.titleRow { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.displayName { margin: 0; font-size: 22px; letter-spacing: .3px; color: var(--text); }
+.userCode {
+  font-size: 12px; color: var(--muted);
+  background: #f6f7fb; padding: 3px 8px; border-radius: 10px;
+  border: 1px solid #ecf0f6;
 }
+
+.metaGrid {
+  margin-top: 8px;
+  display: grid; gap: 8px;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+}
+@media (max-width: 760px) {
+  .metaGrid { grid-template-columns: 1fr; }
+}
+.metaLabel { font-size: 12px; color: var(--muted); }
+.metaValue { font-size: 14px; color: var(--text); }
+
+.headAction { display: grid; place-items: center; }
+.editBtn {
+  display: inline-block; padding: 10px 16px; border-radius: 12px; color: #fff;
+  text-decoration: none;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  box-shadow: 0 6px 18px rgba(87,198,255,.35);
+  transition: transform .06s ease, box-shadow .12s ease;
+}
+.editBtn:hover { transform: translateY(-1px); box-shadow: 0 10px 26px rgba(87,198,255,.45); }
+
+/* ===== 共通カード ===== */
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  box-shadow: var(--card-shadow);
+  padding: 14px;
+}
+
+.cardHeader {
+  font-size: 13px; color: var(--muted); margin-bottom: 10px;
+  border-left: 4px solid var(--accent); padding-left: 8px; letter-spacing: .2px;
+}
+
+/* SNS / Link */
+.linksGrid {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+}
+@media (max-width: 760px) { .linksGrid { grid-template-columns: 1fr; } }
+.linksGrid a { color: var(--link); text-decoration: underline; }
+
+/* 2カラム系 */
+.splitGrid {
+  display: grid; gap: 16px;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+}
+@media (max-width: 760px) { .splitGrid { grid-template-columns: 1fr; } }
+
+/* チップ */
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.chip {
+  padding: 6px 10px; border-radius: 999px; font-size: 12px;
+  background: var(--chip-bg); border: 1px solid var(--chip-border);
+  color: #35456b;
+}
+
+/* テキスト */
+.textBlock { min-height: 32px; white-space: pre-wrap; color: var(--text); }
+.muted { color: var(--muted); }
+.icon { display: inline-block; width: 22px; text-align: center; margin-right: 4px; color: var(--muted); }
+

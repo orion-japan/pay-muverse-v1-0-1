@@ -23,8 +23,8 @@ export default function Footer() {
       }}
     >
       <Link href="/" style={{ textDecoration: 'none', color: 'inherit' }}>Home</Link>
-      <Link href="/chat" style={{ textDecoration: 'none', color: 'inherit' }}>Mu Talk</Link>
-      <Link href="/board" style={{ textDecoration: 'none', color: 'inherit' }}>ℚ Board</Link>
+      <Link href="/chat" style={{ textDecoration: 'none', color: 'inherit' }}>Talk</Link>
+      <Link href="/board" style={{ textDecoration: 'none', color: 'inherit' }}>I Board</Link>
       <Link href="/mypage" style={{ textDecoration: 'none', color: 'inherit' }}>My Page</Link>
     </footer>
   )

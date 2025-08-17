@@ -1,0 +1,262 @@
+/* =========================================================
+   UserProfile まとめCSS（整理版）
+   - 余白/幅は mypage-wrapper / mypage-container で制御
+   - カードは常に左寄せ
+   - 基本情報カードは grid で確実に左寄せ
+   - 表記ゆれ対策: .profile-basic__grid と .profile-basic_grid の両方を面倒見る
+   ========================================================= */
+
+/* ---- ページ背景 & 外枠 ---- */
+:root { --page-max: 1120px; }
+
+.mypage-wrapper {
+  min-height: 100dvh;
+  padding: 28px 14px 96px;
+  background:
+    radial-gradient(800px 420px at 85% 0%, rgba(124, 58, 237, .16), transparent 60%),
+    radial-gradient(900px 500px at 10% 20%, rgba(34, 211, 238, .14), transparent 60%),
+    var(--bg, #f6f7fb);
+  display: block;
+}
+
+/* 中央ブロック：左右余白を最小化し、幅を広めに */
+.mypage-container {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: clamp(6px, 1.8vw, 12px) clamp(6px, 1.4vw, 10px) 100px;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+/* Next.js が挟む style 付きラッパの余白を無効化 */
+.mypage-container > div[style] { padding: 0 !important; margin: 0 !important; }
+
+/* ---- プロフィールレイアウト ---- */
+.profile-container {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 8px 10px 80px;
+  box-sizing: border-box;
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: 1fr;   /* モバイル1列 */
+  gap: 16px;
+}
+@media (min-width: 720px)  { .profile-grid { grid-template-columns: 1fr 1fr; } }        /* 2列 */
+@media (min-width: 1040px) { .profile-grid { grid-template-columns: 1fr 1fr 1fr; } }    /* 3列 */
+
+/* ---- カード共通 ---- */
+.profile-card {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(255,255,255,.85);
+  border: 1px solid rgba(0,0,0,.06);
+  border-radius: 14px;
+  padding: 14px 16px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.06);
+  backdrop-filter: blur(6px);
+  text-align: left;             /* デフォで左寄せ */
+}
+.profile-card * { text-align: inherit; }  /* 子要素は継承 */
+
+/* URL・長文の折り返し */
+.profile-card,
+.profile-card * {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* リスト余白 */
+.profile-card ul,
+.profile-card ol { margin: 0; padding: 0 0 0 18px; }
+.profile-card li + li { margin-top: 4px; }
+
+/* 最終段の余白微調整 */
+.profile-grid:last-child .profile-card:last-child { margin-bottom: 8px; }
+
+/* ---- カードタイトル帯（必要ならクラス名を合わせて使用） ---- */
+.card-title {
+  font-weight: 700;
+  font-size: 15px;
+  margin: 0 0 10px;
+  color: #222;
+  position: relative;
+  padding-left: 10px;
+}
+.card-title::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 6px;
+  width: 4px; height: 12px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #8f44fd, #22d3ee);
+}
+
+/* ---- 基本情報カード（確実に左寄せ） ---- */
+
+/* 左：アバター / 右：情報 */
+.profile-basic__body {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 480px) {
+  .profile-basic__body { grid-template-columns: 1fr; }
+}
+
+/* アバター */
+.profile-avatar {
+  width: 120px;
+  height: 120px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #eef2f7;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.06);
+}
+.profile-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 右側の情報グリッド
+   表記ゆれ対策で __ / _ の両方に適用（どちらか片方しか無ければそれだけ効く） */
+.profile-basic__grid,
+.profile-basic_grid {
+  display: block;
+  text-align: left;
+}
+
+/* 1行（ラベル・値）を2カラムで */
+.profile-basic__grid .row,
+.profile-basic_grid .row {
+  display: grid !important;
+  grid-template-columns: 90px 1fr !important; /* ラベル / 値 */
+  gap: 8px !important;
+  align-items: baseline !important;
+  padding: 6px 0;
+  border-bottom: 1px dashed rgba(0,0,0,.08);
+}
+.profile-basic__grid .row:last-child,
+.profile-basic_grid .row:last-child { border-bottom: none; }
+
+/* ラベル */
+.profile-basic__grid .label,
+.profile-basic_grid .label {
+  color: #667085;
+  font-size: .92rem;
+  font-weight: 600;
+  text-align: left;
+}
+
+/* 値（確実に左寄せ） */
+.profile-basic__grid .value,
+.profile-basic_grid .value {
+  font-size: .98rem;
+  color: #222;
+  text-align: left !important;
+  justify-self: start !important;
+  align-self: start !important;
+}
+
+/* ---- バッジ ---- */
+.badges { display: flex; flex-wrap: wrap; gap: 8px; }
+.badge {
+  display: inline-block;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #f4f4ff;
+  border: 1px solid rgba(143,68,253,.18);
+  font-size: 12px;
+  color: #4c1d95;
+}
+
+/* ---- SNS / Link ---- */
+.sns-box .hint { margin: 6px 0 0; font-size: 12px; color: #6b7280; }
+.sns-link a,
+.auto-link { color: #2563eb; text-decoration: underline; }
+.auto-link:hover { opacity: .9; }
+
+/* ---- プレースホルダ ---- */
+.placeholder { color: #9ca3af; }
+
+/* ---- 仕上げ：グリッド隙間を少しだけ詰める（全体感を締める） ---- */
+.mypage-wrapper .profile-grid { gap: 12px; }
+
+
+/* 写真（アバター）だけ中央寄せにする */
+.profile-card.profile-basic .profile-basic__body .profile-avatar{
+    justify-self: center !important;  /* グリッドセル内で水平中央 */
+    align-self: start;                 /* 上寄せ（好みで center にしてもOK） */
+    display: grid;                     /* 万一の内側センタリング用 */
+    place-items: center;
+    margin: 0;                         /* 念のため余白リセット */
+  }
+  
+  /* 画像自体の収まりはそのまま */
+  .profile-card.profile-basic .profile-avatar img{
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  
+  /* スマホ幅では上に少し余白を付けたい場合（任意） */
+  @media (max-width: 480px){
+    .profile-card.profile-basic .profile-basic__body .profile-avatar{
+      margin-top: 6px;
+    }
+  }
+  
+  /* ===== タイトル行：右側にボタンを寄せる ===== */
+.profile-card__title{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .profile-card__title .title-spacer{
+    margin-left: auto;          /* 左のタイトルと右側アクションを分離 */
+  }
+  .profile-card__title .right{
+    margin-left: 8px !important; /* 既存の auto を打ち消し */
+  }
+  
+  /* ===== 修正ボタン ===== */
+  .edit-button{
+    appearance: none;
+    border: 1px solid #c9d4ff;
+    background: linear-gradient(180deg, #ffffff, #f5f8ff);
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #3b4cca;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0,0,0,.08);
+    transition: transform .15s ease, box-shadow .15s ease, background-color .2s ease;
+  }
+  .edit-button:hover{
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(0,0,0,.12);
+  }
+  .edit-button:active{
+    transform: translateY(0);
+  }
+  .edit-button .edit-icon{
+    font-size: 12px;
+    margin-right: 6px;
+  }
+  
+  /* アバターだけ中央寄せ（前回の要望のまま） */
+  .profile-card.profile-basic .profile-basic__body .profile-avatar{
+    justify-self: center !important;
+    align-self: start;
+    display: grid;
+    place-items: center;
+  }
+  

@@ -1,238 +1,148 @@
-/* mypage.css */
-
-body {
-  background: linear-gradient(#f4f7ff, #fff 100%);
-  font-family: "Noto Sans JP", sans-serif;
-  overflow-x: hidden;
-  margin: 0;
-  padding: 0;
-}
-
-
-.mypage-container {
-  width: 100%;
-  max-width: 480px;
-  background-color: #ffffff;
-  padding: 24px;
-  border-radius: 16px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}
-
-.profile-item {
-  margin-bottom: 16px;
-}
-
-.profile-label {
-  font-weight: bold;
-  margin-bottom: 4px;
-  display: block;
-}
-
-button.register-button,
-button.edit-button {
-  background-color: #d291ff;
-  color: #fff;
-  border: none;
-  padding: 10px 24px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-weight: bold;
-  font-size: 1rem;
-  margin-top: 24px;
-}
-
-button.register-button:hover,
-button.edit-button:hover {
-  background-color: #c173ff;
-}
+/* ===== 画面背景全体（角丸・影なし） ===== */
 .mypage-wrapper {
-  display: flex;
-  justify-content: center;
-  padding: 60px 20px;
-  min-height: 100vh;
-  background-color: #ffffff; /* ←背景を白に */
-}
-
-/* src/app/mypage/mypage.css */
-
-html, body {
-  background: linear-gradient(#f4f7ff, #fff 100%);
-  min-height: 100%;
-  overflow-x: hidden;
-  font-family: 'Noto Sans JP', sans-serif;
-}
-
-.mypage-wrapper {
-  display: flex;
-  justify-content: center;
-  padding: 0px;
-}
-
-
-
-.mypage-container {
-  max-width: 400px;
-  width: 100%;
-  background: white;
-  padding: 20px;
-  border-radius: 12px;
-  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.05);
-  border: 2px solid #e0e0ff;
-}
-
-.mypage-container h2 {
-  text-align: center;
-  color: #333;
-  margin-bottom: 20px;
-}
-
-.mypage-container input {
-  width: 100%;
-  padding: 10px;
-  margin-bottom: 12px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  font-size: 14px;
-}
-
-.mypage-container input[readonly] {
-  background-color: #f9f9f9;
-  color: #999;
-}
-
-.mypage-container button {
-  width: 100%;
-  padding: 12px;
-  background-color: #8c4eff;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  font-size: 16px;
-  cursor: pointer;
-  transition: background-color 0.3s ease;
-}
-
-.mypage-container button:hover {
-  background-color: #6d39cc;
-}
-
-
-/* /app/mypage/mypage.css または /app/mypage/create/mypage.css */
-
-.mypage-body {
-  display: flex;
-  justify-content: center;
-  padding: 24px 12px;
-  background: linear-gradient(135deg, #e0f0ff, #fef4ff);
-  min-height: 100vh;
-}
-
-.mypage-container {
-  width: 100%;
-  max-width: none;
-  padding: 0 16px;
-  background: #fff;
-  border: 2px solid #e0e0e0;
-  border-radius: 16px;
-  box-shadow: 0 0 8px 16px #0000001a;
-}
-
-/* 追加でこれを確認 or 追記 */
-.mypage-form {
-  width: 100%;
-  max-width: none;
-  margin: 0; /* 中央寄せ解除 */
-  padding: 16px;
-}
-
-
-
-.mypage-avatar {
-  width: 100px;
-  height: 100px;
-  object-fit: cover;
-  border-radius: 50%;
-  margin: 0 auto 16px;
+  min-height: 100dvh;
+  padding: 28px 14px 96px;
+  background:
+    radial-gradient(800px 420px at 85% 0%, rgba(124, 58, 237, .16), transparent 60%),
+    radial-gradient(900px 500px at 10% 20%, rgba(34, 211, 238, .14), transparent 60%),
+    var(--bg, #f6f7fb);
   display: block;
-  border: 2px solid #ccc;
 }
 
-.mypage-label {
-  font-weight: bold;
-  font-size: 14px;
-  margin-bottom: 4px;
-  display: block;
-  color: #444;
-}
-
-.mypage-input {
-  width: 100%;
-  padding: 10px;
-  font-size: 14px;
-  margin-bottom: 14px;
-  border-radius: 8px;
-  border: 1px solid #ccc;
-  background: #f9f9f9;
-}
-
-.mypage-textarea {
-  width: 100%;
-  min-height: 80px;
-  padding: 10px;
-  font-size: 14px;
-  margin-bottom: 14px;
-  border-radius: 8px;
-  border: 1px solid #ccc;
-  background: #f9f9f9;
-}
-
-.mypage-button {
-  background: #a46aff;
-  color: white;
-  font-size: 16px;
-  padding: 12px;
-  width: 100%;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: 0.2s;
-  margin-top: 10px;
-}
-
-.mypage-button:hover {
-  background: #8c4df2;
-}
-
-.mypage-link {
-  color: #337ab7;
-  text-decoration: underline;
+/* ===== コンテンツ中央寄せ（角丸・影なし） ===== */
+.mypage-container {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 24px 16px 100px;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 
-.mypage-section {
-  margin-bottom: 18px;
+/* .scrollable の場合も中央寄せスタイルを優先 */
+.mypage-container.scrollable {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
 }
 
+/* 不要な inline padding がある場合は打ち消す */
+.mypage-container > div[style] {
+  padding: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
 
+/* ===== 登録ボタンの装飾 ===== */
+.register-button {
+  background: linear-gradient(45deg, #8f44fd, #da58c8);
+  color: #fff;
+  border: none;
+  padding: 12px 24px;
+  font-size: 1rem;
+  font-weight: bold;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-top: 16px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
 
-.mypage-wrapper {
-  max-width: 850px; /* 👈 幅を拡張 */
-  width: 100%;
+.register-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+  opacity: 0.95;
+}
+
+/* モバイル調整（必要なら） */
+@media (max-width: 480px) {
+  .mypage-wrapper {
+    padding: 20px 12px 88px;
+  }
+
+  .register-button {
+    width: 100%;
+    text-align: center;
+  }
+}
+/* 背景（そのままでOK） */
+.mypage-wrapper{
+  min-height: 100dvh;
+  padding: 28px 14px 96px;
+  background:
+    radial-gradient(800px 420px at 85% 0%, rgba(124, 58, 237, .16), transparent 60%),
+    radial-gradient(900px 500px at 10% 20%, rgba(34, 211, 238, .14), transparent 60%),
+    var(--bg, #f6f7fb);
+  display: block;
+}
+
+/* ← ここを広めに（左右パディングを最小化 & 最大幅も拡大） */
+.mypage-container{
+  max-width: 1120px;                           /* 980 → 1120 */
   margin: 0 auto;
-}
-main {
-  padding-bottom: 100px;
+  padding: clamp(6px, 1.8vw, 12px)             /* 上 */
+           clamp(4px, 1.4vw, 10px)             /* 左右をグッと減らす */
+           100px;                               /* 下 */
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
 }
 
-.submit-button {
-  margin-bottom: 40px;
+/* 念のため既存 scrollable も同様に無効化 */
+.mypage-container.scrollable{
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
 }
+
+/* インライン style で入ってくる余白は打ち消す */
+.mypage-container > div[style]{
+  padding: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+/* ===== 強制フル幅オーバーライド（最優先で効かせる） ===== */
+:root { --page-max: 1120px; }
+
+/* 余白を最小化（外側） */
+.mypage-wrapper {
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+/* 中央ブロックを広めに＆左右余白を極小に */
 .mypage-container {
-  max-width: 700px;
-  width: 100%;
-  background: white;
-  padding: 20px;
-  border-radius: 12px;
-  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.05);
-  border: 2px solid #e0e0ff;
+  max-width: var(--page-max) !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  padding-left: 6px !important;   /* ← ここで左右余白を詰める */
+  padding-right: 6px !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+/* Next.js が差し込む “style属性付きの匿名ラッパ” を無効化 */
+.mypage-container > div[style] {
+  padding: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+/* もし更に外側に style 付き DIV が居るケースにも対応 */
+.mypage-wrapper > div[style],
+.mypage-wrapper > main > div[style] {
+  padding: 0 !important;
+}
+
+/* iPhone 横幅でもギリまで使う（微調整） */
+@media (min-width: 540px) {
+  .mypage-container { padding-left: 10px !important; padding-right: 10px !important; }
 }

@@ -1,0 +1,169 @@
+/* ThreadPage.css */
+
+.thread-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 1rem;
+  background: linear-gradient(180deg, #0d0c1d, #1f1c2c);
+  color: #fff;
+  font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
+}
+
+.thread-container h2 {
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+  color: #ffd700;
+  text-shadow: 0 0 5px #e52e71aa;
+}
+
+.thread-posts {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-bottom: 1rem;
+}
+
+.post {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 1rem;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 20px rgba(255, 255, 255, 0.05);
+  transition: all 0.2s ease;
+}
+
+.post:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.meta {
+  font-size: 0.75rem;
+  color: #aaa;
+  margin-bottom: 0.3rem;
+}
+
+.content {
+  font-size: 1rem;
+  line-height: 1.5;
+  color: #eee;
+}
+
+.post-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(12px);
+}
+
+.post-form textarea {
+  width: 100%;
+  height: 100px;
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  color: white;
+  font-size: 1rem;
+  resize: none;
+}
+
+.post-form textarea:focus {
+  outline: none;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.post-form button {
+  align-self: flex-end;
+  background: linear-gradient(90deg, #ff8a00, #e52e71);
+  color: white;
+  padding: 0.6rem 1.2rem;
+  border: none;
+  border-radius: 20px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+  box-shadow: 0 0 10px #e52e71aa;
+}
+
+.post-form button:hover {
+  transform: scale(1.05);
+}
+
+.fixed-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #1a1a2e;
+  padding: 1rem;
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.fixed-header .avatar {
+  width: 50px;
+  height: 50px;
+  border-radius: 999px;
+  object-fit: cover;
+  border: 2px solid #fff;
+}
+
+.fixed-header .header-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.fixed-header .header-info p {
+  margin: 0.3rem 0;
+  color: #eee;
+}
+
+.fixed-header .header-info small {
+  color: #aaa;
+  font-size: 0.75rem;
+}
+/* ベースは前回と同様。以下は固定ヘッダー分 */
+
+.fixed-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgba(13, 12, 29, 0.9);
+  padding: 1rem;
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(8px);
+}
+
+.fixed-header .avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  object-fit: cover;
+  border: 2px solid #fff3;
+}
+
+.fixed-header .header-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.fixed-header .header-info p {
+  margin: 0.3rem 0;
+  color: #eee;
+}
+
+.fixed-header .header-info small {
+  color: #aaa;
+  font-size: 0.75rem;
+}

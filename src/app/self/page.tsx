@@ -80,7 +80,7 @@ export default function SelfPage() {
             <div
               className="thread-card"
               key={post.post_id}
-              onClick={() => router.push(`/board/${post.post_id}`)}
+              onClick={() => router.push(`/thread/${post.post_id}`)}
             >
               {post.media_urls?.[0] && (
                 <img src={post.media_urls[0]} alt="thumb" className="thumb" />
@@ -118,3 +118,4 @@ export default function SelfPage() {
     </div>
   );
 }
+

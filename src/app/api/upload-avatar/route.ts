@@ -1,3 +1,4 @@
+// src/app/api/upload-avatar/route.ts
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
@@ -46,14 +47,39 @@ export async function POST(req: Request) {
 
     // File -> Buffer
     const ab = await (file as Blob).arrayBuffer();
-    const buffer = Buffer.from(ab);
+    let buffer = Buffer.from(ab);
+
+    // -------- リサイズ（sharp が使えれば 256x256 の PNG に統一）--------
+    let contentType: string = 'image/png';
+    try {
+      // 動的 import（無ければフォールバック）
+      const sharpMod = await import('sharp').catch(() => null);
+      if (sharpMod?.default) {
+        const sharp = sharpMod.default;
+        buffer = await sharp(buffer)
+          .rotate() // EXIFの向き補正
+          .resize(256, 256, { fit: 'cover', position: 'centre' })
+          .png({ quality: 90 })
+          .toBuffer();
+        contentType = 'image/png';
+      } else {
+        // sharp が無い環境 → 受け取った contentType を尊重（なければ png）
+        contentType = (file.type && /^image\//.test(file.type)) ? file.type : 'image/png';
+        console.warn('[upload-avatar] sharp が見つからないため、リサイズせずにアップロードします');
+      }
+    } catch (e) {
+      // 例外時もフォールバック
+      contentType = (file.type && /^image\//.test(file.type)) ? file.type : 'image/png';
+      console.warn('[upload-avatar] リサイズ処理失敗: フォールバックでそのまま保存します', e);
+    }
+    // -----------------------------------------------------------------
 
     // Storage にアップロード（Service Role なので RLS を気にしなくてOK）
     const { error: upErr } = await supabaseAdmin
       .storage.from('avatars')
       .upload(filePath, buffer, {
         upsert: true,
-        contentType: file.type || 'image/png',
+        contentType,
         cacheControl: '3600',
       });
 
@@ -62,7 +88,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: upErr.message }, { status: 400 });
     }
 
-    // profiles に保存
+    // profiles に保存（avatar_url はパスを保持）
     const { error: profErr } = await supabaseAdmin
       .from('profiles')
       .upsert({ user_code, avatar_url: filePath, updated_at: new Date().toISOString() });

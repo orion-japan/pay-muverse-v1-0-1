@@ -18,7 +18,9 @@ import { auth } from '@/lib/firebase'
 interface AuthContextType {
   user: User | null
   userCode: string | null
-  idToken: string | null // ← 追加
+  idToken: string | null
+  username: string | null        // ← 追加
+  avatarUrl: string | null       // ← 追加
   loading: boolean
   muSent: boolean
   login: (email: string, password: string) => Promise<void>
@@ -29,7 +31,9 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType>({
   user: null,
   userCode: null,
-  idToken: null, // ← 追加
+  idToken: null,
+  username: null,      // ← 追加
+  avatarUrl: null,     // ← 追加
   loading: true,
   muSent: false,
   login: async () => {},
@@ -66,7 +70,9 @@ async function callAuthedApi(path: string, idToken: string, body: any = {}) {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [userCode, setUserCode] = useState<string | null>(null)
-  const [idToken, setIdToken] = useState<string | null>(null) // ← 追加
+  const [idToken, setIdToken] = useState<string | null>(null)
+  const [username, setUsername] = useState<string | null>(null)       // ← 追加
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)     // ← 追加
   const [loading, setLoading] = useState(true)
   const [muSent, setMuSent] = useState(false)
 
@@ -74,7 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const token = await getIdTokenSafe(firebaseUser)
     if (!token) return null
 
-    setIdToken(token) // ← ログイン直後にも保持
+    setIdToken(token)
 
     try {
       await callAuthedApi('/api/login', token)
@@ -93,6 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.warn('verify-complete API warning:', e)
         }
       }
+
       return code
     } catch (e) {
       console.error('account-status取得失敗:', e)
@@ -106,20 +113,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         if (firebaseUser) {
           setUser(firebaseUser)
+
           const token = await getIdTokenSafe(firebaseUser)
-          setIdToken(token) // ← 状態更新
+          setIdToken(token)
+
           const code = await ensureAndFetchUserCode(firebaseUser)
           setUserCode(code)
+
+          // 追加: 表示名とアイコンURL（user_metadata から）
+          const name = firebaseUser.displayName || firebaseUser.email || '匿名'
+          const icon = firebaseUser.photoURL || null
+
+          setUsername(name)
+          setAvatarUrl(icon)
         } else {
           setUser(null)
           setUserCode(null)
           setIdToken(null)
+          setUsername(null)
+          setAvatarUrl(null)
         }
       } catch (e) {
         console.error('onAuthStateChanged flow error:', e)
         setUser(null)
         setUserCode(null)
         setIdToken(null)
+        setUsername(null)
+        setAvatarUrl(null)
       } finally {
         setLoading(false)
       }
@@ -127,7 +147,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => unsubscribe()
   }, [])
 
-  // MU送信処理（Firebaseトークン → call-mu-ai.ts経由）
   const sendMuInfo = async () => {
     if (loading || !user || muSent) {
       console.log('MU送信スキップ: 条件未達')
@@ -164,9 +183,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const currentUser = cred.user
       setUser(currentUser)
       const token = await getIdTokenSafe(currentUser)
-      setIdToken(token) // ← ログイン時にも保持
+      setIdToken(token)
       const code = await ensureAndFetchUserCode(currentUser)
       setUserCode(code)
+
+      // 追加
+      setUsername(currentUser.displayName || currentUser.email || '匿名')
+      setAvatarUrl(currentUser.photoURL || null)
+
       setMuSent(false)
     } catch (error) {
       console.error('ログイン失敗:', error)
@@ -183,6 +207,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null)
       setUserCode(null)
       setIdToken(null)
+      setUsername(null)
+      setAvatarUrl(null)
       setMuSent(false)
       await fetch('/api/logout', { method: 'POST' })
     } catch (error) {
@@ -194,7 +220,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, userCode, idToken, loading, muSent, login, logout, sendMuInfo }}
+      value={{
+        user,
+        userCode,
+        idToken,
+        username,     // ← 追加
+        avatarUrl,    // ← 追加
+        loading,
+        muSent,
+        login,
+        logout,
+        sendMuInfo,
+      }}
     >
       {children}
     </AuthContext.Provider>
