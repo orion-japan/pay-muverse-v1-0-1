@@ -2,12 +2,13 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// Service Role を使うので Edge より Node.js 実行が安全
+// Service Role を使うので Node.js ランタイム推奨
 export const runtime = 'nodejs';
 
-type RouteContext = { params: { userCode: string } };
-
-export async function GET(req: Request, { params }: RouteContext) {
+export async function GET(
+  req: Request,
+  { params }: { params: { userCode: string } } // ← 型は“ここで”リテラルで書く
+) {
   try {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -25,7 +26,7 @@ export async function GET(req: Request, { params }: RouteContext) {
       return NextResponse.json({ error: 'userCode required' }, { status: 400 });
     }
 
-    // リクエスト元のオリジン（プレースホルダ用に使用）
+    // フォールバック画像のオリジンを決定
     const { origin } = new URL(req.url);
     const fallback = `${origin}/avatar.png`;
 
@@ -36,47 +37,31 @@ export async function GET(req: Request, { params }: RouteContext) {
       .eq('user_code', userCode)
       .maybeSingle();
 
-    if (profErr) {
-      // 取得失敗 → プレースホルダにフォールバック
-      return NextResponse.redirect(fallback, 302);
-    }
+    if (profErr) return NextResponse.redirect(fallback, 302);
 
     const avatar = prof?.avatar_url;
-    if (!avatar) {
-      // 未設定 → プレースホルダ
-      return NextResponse.redirect(fallback, 302);
-    }
+    if (!avatar) return NextResponse.redirect(fallback, 302);
 
-    // もし avatar_url がフルURLならそのままリダイレクト
+    // すでに完全URLならそのまま
     if (/^https?:\/\//i.test(avatar)) {
       return NextResponse.redirect(avatar, 302);
     }
 
-    // それ以外はストレージ内の相対パス想定（例: "avatars/669933/icon.png" など）
-    // バケット名は 'avatars' を想定。必要なら環境変数化してください。
+    // ストレージ内の相対パス想定
     const bucket = 'avatars';
-    const filePath = avatar; // 例: "669933/icon.png" or "avatars/669933/icon.png" 等
-
-    // avatar_url に先頭バケット名が含まれているかを緩く判定
-    const path =
-      filePath.startsWith(`${bucket}/`) ? filePath.replace(`${bucket}/`, '') : filePath;
+    const path = avatar.startsWith(`${bucket}/`) ? avatar.slice(bucket.length + 1) : avatar;
 
     const { data: signed, error: signErr } = await admin.storage
       .from(bucket)
-      .createSignedUrl(path, 60); // 署名URLは60秒有効
+      .createSignedUrl(path, 60);
 
     if (signErr || !signed?.signedUrl) {
       return NextResponse.redirect(fallback, 302);
     }
 
     return NextResponse.redirect(signed.signedUrl, 302);
-  } catch (e) {
-    // 予期せぬ例外 → プレースホルダにフォールバック
-    try {
-      const { origin } = new URL(req.url);
-      return NextResponse.redirect(`${origin}/avatar.png`, 302);
-    } catch {
-      return NextResponse.json({ error: 'unexpected error' }, { status: 500 });
-    }
+  } catch {
+    const { origin } = new URL(req.url);
+    return NextResponse.redirect(`${origin}/avatar.png`, 302);
   }
 }
