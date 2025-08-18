@@ -26,6 +26,7 @@ export default function PostModal({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // 画像リサイズ
   const resizeImage = (file: File): Promise<Blob> => {
     return new Promise((resolve) => {
       const img = new Image();
@@ -55,6 +56,7 @@ export default function PostModal({
     });
   };
 
+  // 画像アップロード
   const handleImageUpload = async () => {
     if (!userCode || !file) throw new Error('画像ファイルが選択されていません');
 
@@ -78,6 +80,7 @@ export default function PostModal({
     return urls;
   };
 
+  // 投稿処理
   const handleSubmit = async () => {
     if (!userCode || !file || !title) {
       alert('必須項目（タイトル・画像）を入力してください');
@@ -89,7 +92,7 @@ export default function PostModal({
     try {
       const media_urls = await handleImageUpload();
 
-      const res = await fetch('/api/upload-post', {
+      const res = await fetch('/api/i-posts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -101,9 +104,10 @@ export default function PostModal({
             .split(',')
             .map((t) => t.trim())
             .filter(Boolean),
-          visibility: 'private',   // ✅ 非公開
-          is_posted: true,         // ✅ 投稿済みにする
+          visibility: 'private',   // ✅ 常に private 固定
+          is_posted: true,
           media_urls,
+          board_type: 'i',
         }),
       });
 
@@ -116,8 +120,6 @@ export default function PostModal({
         const el = scrollTargetRef?.current;
         if (el) {
           el.scrollIntoView({ behavior: 'smooth' });
-        } else {
-          console.warn('[PostModal] スクロールターゲットが見つかりません');
         }
       }, 300);
     } catch (err) {
@@ -150,7 +152,6 @@ export default function PostModal({
         >
           <option value="">カテゴリを選択</option>
           <option value="投稿">投稿</option>
-          <option value="Ｑボード">Ｑボード</option>
           <option value="思い">思い</option>
           <option value="ビジョン">ビジョン</option>
           <option value="報告">報告</option>

@@ -25,6 +25,7 @@ export default function CreatePage() {
 
   const bottomRef = useRef<HTMLDivElement>(null); // ✅ スクロールターゲット
 
+  // 投稿一覧取得（/api/i-posts）
   const fetchPosts = async () => {
     if (!userCode) {
       console.warn('[投稿一覧取得失敗] user_codeが必要です');
@@ -34,10 +35,8 @@ export default function CreatePage() {
     console.log('[投稿一覧] user_code:', userCode);
 
     try {
-      const res = await fetch('/api/my-posts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_code: userCode }),
+      const res = await fetch(`/api/i-posts?userCode=${encodeURIComponent(userCode)}`, {
+        method: 'GET',
       });
 
       if (!res.ok) {
@@ -49,7 +48,7 @@ export default function CreatePage() {
       console.log('[投稿一覧取得成功]', data);
 
       // ✅ visibility === 'private' のみ抽出
-      const privatePosts = (data.posts || []).filter(
+      const privatePosts = (data || []).filter(
         (post: Post) => post.visibility === 'private'
       );
 
@@ -57,7 +56,7 @@ export default function CreatePage() {
       setPosts(
         privatePosts.sort(
           (a, b) =>
-            new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         )
       );
     } catch (err) {
@@ -128,7 +127,7 @@ export default function CreatePage() {
         </button>
       </div>
 
-      {/* 投稿モーダル */}
+      {/* 投稿モーダル（/api/i-posts に保存する） */}
       <PostModal
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}

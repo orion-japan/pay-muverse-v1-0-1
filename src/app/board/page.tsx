@@ -15,7 +15,7 @@ type Post = {
   media_urls: any[]; // string[] or { url: string }[]
   visibility?: string;
   created_at: string;
-  board_type?: string; // ✅ ← これを追加！
+  board_type?: string;
 };
 
 export default function QBoardPage() {
@@ -31,41 +31,41 @@ export default function QBoardPage() {
       console.warn('[QBoard] user_codeが必要です');
       return;
     }
-  
+
     console.log('[QBoard] user_code:', userCode);
-  
+
     try {
-      const res = await fetch('/api/qboard-posts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_code: userCode }),
+      // ✅ /api/i-posts に繋ぎ替え（GET）
+      const res = await fetch(`/api/i-posts?userCode=${encodeURIComponent(userCode)}`, {
+        method: 'GET',
       });
-  
+
       if (!res.ok) {
         console.error('[QBoard] 投稿取得失敗 ステータス:', res.status);
         return;
       }
-  
+
       const data = await res.json();
       console.log('[QBoard] 投稿取得成功:', data);
-  
-      const publicPosts = (data.posts || []).filter(
+
+      // ✅ 公開用の投稿だけ抽出
+      const publicPosts = (data || []).filter(
         (post: Post) =>
           post.visibility === 'public' &&
-          post.board_type === 'default' && // ✅ ← ここ！
+          post.board_type === 'default' &&
           Array.isArray(post.media_urls) &&
           post.media_urls.every((url: any) => {
             const path = typeof url === 'string' ? url : url?.url || '';
             return !path.includes('/private-posts/');
           })
       );
-      
-  
+
+      // ✅ 新しい順に並べ替え
       const sorted = publicPosts.sort(
         (a, b) =>
           new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
-  
+
       setPosts(sorted);
     } catch (err) {
       console.error('[QBoard] 投稿取得失敗', err);
@@ -73,7 +73,6 @@ export default function QBoardPage() {
       setLoading(false);
     }
   };
-  
 
   useEffect(() => {
     fetchPosts();

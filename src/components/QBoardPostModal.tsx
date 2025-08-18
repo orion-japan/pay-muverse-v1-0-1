@@ -90,14 +90,16 @@ export default function QBoardPostModal({
         category,
         tags: tagArray,
         media_urls: publicUrls,
-        visibility: 'public',
-        layout_type: 'default',
-        board_type: 'default',
+        visibility: 'public',   // ✅ Qボードは公開固定
+        is_posted: true,        // ✅ 投稿済みにする
+        board_type: 'i',        // ✅ i領域に投稿
+        layout_type: 'default', // 将来UI切り替え用
       };
 
       console.log('📝 投稿データ送信:', postData);
 
-      const response = await fetch('/api/upload-post', {
+      // ✅ API先を /api/i-posts に修正
+      const response = await fetch('/api/i-posts', {
         method: 'POST',
         body: JSON.stringify(postData),
         headers: {

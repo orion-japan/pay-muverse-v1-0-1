@@ -1,0 +1,37 @@
+/* src/app/self/[code]/self.css */
+.self-page {
+    padding: 1rem;
+  }
+  
+  .self-page h1 {
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+  }
+  
+  .digest-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    border-bottom: 1px solid #eee;
+    cursor: pointer;
+  }
+  
+  .digest-row .avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+  }
+  
+  .friend-btn {
+    background: #6c5ce7;
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .friend-btn.remove {
+    background: #d63031;
+  }
+  

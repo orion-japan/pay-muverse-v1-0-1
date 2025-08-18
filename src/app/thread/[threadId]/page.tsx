@@ -119,7 +119,20 @@ export default function ThreadPage() {
   // 親＝配列先頭
   const parent = posts[0] || null
 
-  // 子リスト：先頭が親の重複になっているケースを除去（内容一致やid一致を見て安全に1件だけ落とす）
+  const goProfile = (targetCode?: string | null) => {
+    if (!targetCode) return;
+  
+    // ✅ 自分自身ならマイページへ
+    if (userCode && targetCode === userCode) {
+      router.push('/mypage');
+    } else {
+      // ✅ 他人なら /profile/[code]
+      router.push(`/profile/${encodeURIComponent(targetCode)}`);
+    }
+  };
+  
+
+  // 子リスト
   const children = (() => {
     const arr = posts.slice(1)
     if (!parent || arr.length === 0) return arr
@@ -128,27 +141,27 @@ export default function ThreadPage() {
       first.post_id === parent.post_id ||
       (first.content === parent.content &&
         Math.abs(new Date(first.created_at).getTime() - new Date(parent.created_at).getTime()) <
-          5 * 60 * 1000) // 5分以内＆本文一致なら重複とみなす
+          5 * 60 * 1000)
     return isDup ? arr.slice(1) : arr
   })()
 
   return (
-    // グリッド（上：ヘッダー(親)／中：スクロール(子)／下：入力）
     <div className="thread-grid">
-      {/* 親をヘッダーに固定（常時表示） */}
+      {/* 親ヘッダー */}
       <header className="thread-header">
         <button className="back-btn" onClick={() => router.back()} aria-label="戻る">
           ← 戻る
         </button>
 
+        {/* ✅ アイコン & 名前をクリックでプロフィールへ */}
         <img
           src={avatarSrcFrom(parent?.user_code)}
           alt="avatar"
           className="avatar"
           width={44}
           height={44}
-          decoding="async"
-          loading="eager"
+          onClick={() => goProfile(parent?.user_code)}
+          style={{ cursor: parent?.user_code ? 'pointer' : 'default' }}
           onError={(e) => {
             const el = e.currentTarget as HTMLImageElement
             if (el.dataset.fallbackApplied === '1') return
@@ -159,15 +172,19 @@ export default function ThreadPage() {
 
         <div className="header-info">
           <div className="header-title">
-            <strong>{parent?.click_username || parent?.user_code || 'スレッド'}</strong>
+            <strong
+              style={{ cursor: parent?.user_code ? 'pointer' : 'default' }}
+              onClick={() => goProfile(parent?.user_code)}
+            >
+              {parent?.click_username || parent?.user_code || 'スレッド'}
+            </strong>
             <small>{parent ? new Date(parent.created_at).toLocaleString('ja-JP') : ''}</small>
           </div>
-          {/* ★ 親の本文もヘッダー内に表示（2行まで） */}
           {parent?.content ? <p className="header-text">{parent.content}</p> : null}
         </div>
       </header>
 
-      {/* 子のスクロール領域（左に少し詰める） */}
+      {/* 子コメント */}
       <main className="thread-scroll" ref={listRef}>
         {loading && <div className="meta">読み込み中...</div>}
         {errMsg && <div className="meta" style={{ color: '#ff9aa2' }}>{errMsg}</div>}
@@ -181,6 +198,8 @@ export default function ThreadPage() {
                 alt="avatar"
                 width={32}
                 height={32}
+                style={{ cursor: post.user_code ? 'pointer' : 'default' }}
+                onClick={() => goProfile(post.user_code)}
                 onError={(e) => {
                   const el = e.currentTarget as HTMLImageElement
                   if (el.dataset.fallbackApplied === '1') return
@@ -189,7 +208,12 @@ export default function ThreadPage() {
                 }}
               />
               <div className="author-meta">
-                <strong>{post.click_username || post.user_code || 'unknown'}</strong>
+                <strong
+                  style={{ cursor: post.user_code ? 'pointer' : 'default' }}
+                  onClick={() => goProfile(post.user_code)}
+                >
+                  {post.click_username || post.user_code || 'unknown'}
+                </strong>
                 <span>{new Date(post.created_at).toLocaleString('ja-JP')}</span>
               </div>
             </div>
@@ -198,7 +222,7 @@ export default function ThreadPage() {
         ))}
       </main>
 
-      {/* 入力ボックス：常に最下部に固定 */}
+      {/* 入力ボックス */}
       <footer className="post-form">
         <textarea
           value={newComment}
