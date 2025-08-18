@@ -1,9 +1,8 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { registerAndSendPush } from "@/lib/pushClient";
 
-// Payload 型を拡張して id を追加
 type Payload = {
   title: string;
   body: string;
@@ -12,53 +11,69 @@ type Payload = {
 };
 
 export default function PushTestPage() {
-  const [sending, setSending] = useState(false);
-  const resolverMapRef = useRef<Map<string, () => void>>(new Map());
+  const [status, setStatus] = useState<"idle" | "sending" | "received">("idle");
+  const pendingIdRef = useRef<string | null>(null);
 
-  // 通知送信 ＆ 表示完了待ち
-  async function sendAndWaitShown(payload: Payload) {
-    const id = crypto.randomUUID(); // 一意のID生成
+  // SW からのメッセージを受け取る → 「受信しました！」を出す
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
 
-    const done = new Promise<void>((resolve) => {
-      resolverMapRef.current.set(id, resolve);
+    const onMessage = (e: MessageEvent) => {
+      const d = e.data;
+      if (!d || d.type !== "PUSH_RECEIVED") return;
 
-      // タイムアウト（10秒）
-      setTimeout(() => {
-        resolverMapRef.current.delete(id);
-        resolve();
-      }, 10000);
-    });
+      // id を付けて送っているので一致したら確定
+      if (!pendingIdRef.current || !d.id || d.id === pendingIdRef.current) {
+        setStatus("received");
+        pendingIdRef.current = null;
+      }
+    };
 
-    // push送信（idを含める）
-    await registerAndSendPush({ ...payload, id });
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    return () => navigator.serviceWorker.removeEventListener("message", onMessage);
+  }, []);
 
-    // 表示完了を待つ
-    await done;
-  }
-
+  // 送信 → 受信待ち（10秒でタイムアウトして送信中表示を解除）
   const handleClick = async () => {
+    const id = crypto.randomUUID();
+    pendingIdRef.current = id;
+    setStatus("sending");
+
+    // 10秒で自動リセット（受信が来なければ送信中を解除）
+    const tm = setTimeout(() => {
+      if (status === "sending") {
+        pendingIdRef.current = null;
+        setStatus("idle");
+        alert("受信が確認できませんでした（タイムアウト）");
+      }
+    }, 10_000);
+
     try {
-      setSending(true);
-      await sendAndWaitShown({
+      await registerAndSendPush({
+        id,                       // ★識別子を付与
         title: "通知テスト",
         body: "これはテスト通知です。",
         url: "/thanks",
       });
-      alert("通知を送信しました！");
-    } catch (err) {
-      console.error("通知送信エラー:", err);
-      alert("通知の送信に失敗しました。");
     } finally {
-      setSending(false);
+      clearTimeout(tm);
     }
   };
 
   return (
-    <div>
+    <div style={{ padding: 12 }}>
       <h1>通知テストページ</h1>
-      <button onClick={handleClick} disabled={sending}>
-        {sending ? "送信中..." : "通知を送る"}
+      <button onClick={handleClick} disabled={status === "sending"}>
+        {status === "sending" ? "送信中..." : "通知を送る"}
       </button>
+
+      <div style={{ marginTop: 12, minHeight: 28 }}>
+        {status === "received" && (
+          <span style={{ padding: "6px 8px", borderRadius: 6, background: "#e6ffed", color: "#0a6b2a" }}>
+            受信しました！
+          </span>
+        )}
+      </div>
     </div>
   );
 }

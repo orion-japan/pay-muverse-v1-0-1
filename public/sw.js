@@ -1,52 +1,41 @@
+/* public/sw.js */
 self.addEventListener("install", (event) => {
-  console.log("[sw.js] Installed");
   self.skipWaiting();
 });
-
 self.addEventListener("activate", (event) => {
-  console.log("[sw.js] Activated");
-  event.waitUntil(clients.claim());
+  event.waitUntil(self.clients.claim());
 });
 
-// Push イベント受信
+// Push 受信
 self.addEventListener("push", (event) => {
-  console.log("[sw.js] push event:", event);
-
-  if (!event.data) return;
-
-  const payload = event.data.json();
-  console.log("[sw.js] push payload:", payload);
-
-  const title = payload.title || "通知";
+  const data = event.data ? event.data.json() : {};
+  const title = data.title || "通知";
   const options = {
-    body: payload.body || "",
-    data: { url: payload.url || "/", id: payload.id },
-    icon: "/icon-192x192.png",   // 任意のアイコン
-    badge: "/badge-72x72.png",   // 任意のバッジ
+    body: data.body || "",
+    data: { id: data.id, url: data.url || "/" },
   };
 
-  event.waitUntil(
-    self.registration.showNotification(title, options)
-  );
+  event.waitUntil((async () => {
+    // 通知を表示
+    await self.registration.showNotification(title, options);
+
+    // 受信したことを、制御下のウィンドウへ送る（未制御も含む）
+    const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const c of list) {
+      c.postMessage({ type: "PUSH_RECEIVED", id: data.id || null, payload: data });
+    }
+  })());
 });
 
-// 通知クリック時
+// （任意）通知クリックでURLを開く
 self.addEventListener("notificationclick", (event) => {
-  console.log("[sw.js] notification click:", event.notification);
-
   event.notification.close();
   const url = event.notification.data?.url || "/";
-
-  event.waitUntil(
-    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
-      for (const client of clientList) {
-        if (client.url.includes(url) && "focus" in client) {
-          return client.focus();
-        }
-      }
-      if (clients.openWindow) {
-        return clients.openWindow(url);
-      }
-    })
-  );
+  event.waitUntil((async () => {
+    const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const c of list) {
+      if ("focus" in c && c.url.includes(location.origin)) return c.focus();
+    }
+    if (self.clients.openWindow) return self.clients.openWindow(url);
+  })());
 });
