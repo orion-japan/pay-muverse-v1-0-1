@@ -10,8 +10,8 @@ type Post = {
   thread_id?: string | null
   parent_board?: string | null
   // ここに後で付与する
-  click_username?: string | null
-  avatar_url?: string | null
+  click_username?: string | null   // ← profiles.name を入れる
+  avatar_url?: string | null       // ← profiles.avatar_url を入れる
 }
 
 export async function GET(req: NextRequest) {
@@ -68,42 +68,36 @@ export async function GET(req: NextRequest) {
 
     const all = [originalPost, ...replies]
 
-    // 3) users / profiles から名前とアイコンをまとめて取得
+    // 3) profiles から名前とアイコンをまとめて取得（✅ profiles.name / profiles.avatar_url を使用）
     const codes = Array.from(
       new Set(all.map(p => p?.user_code).filter(Boolean) as string[])
     )
 
-    let nameMap = new Map<string, string | null>()
-    let avatarMap = new Map<string, string | null>()
+    const nameMap = new Map<string, string | null>()
+    const avatarMap = new Map<string, string | null>()
 
     if (codes.length > 0) {
-      // users から click_username
-      const { data: usersRows } = await supabase
-        .from('users')
-        .select('user_code, click_username')
-        .in('user_code', codes)
-
-      usersRows?.forEach((u: any) => {
-        nameMap.set(u.user_code, u.click_username ?? null)
-      })
-
-      // profiles から avatar_url
-      const { data: profilesRows } = await supabase
+      const { data: profilesRows, error: pErr } = await supabase
         .from('profiles')
-        .select('user_code, avatar_url')
+        .select('user_code, name, avatar_url')
         .in('user_code', codes)
 
-      profilesRows?.forEach((p: any) => {
-        avatarMap.set(p.user_code, p.avatar_url ?? null)
-      })
+      if (pErr) {
+        console.error('[thread-posts] profiles fetch error:', pErr)
+      } else {
+        profilesRows?.forEach((p: any) => {
+          nameMap.set(p.user_code, p.name ?? null)          // ← name
+          avatarMap.set(p.user_code, p.avatar_url ?? null)  // ← avatar_url
+        })
+      }
     }
 
     const enriched: Post[] = all.map(p => ({
       ...p,
-      click_username:
-        (p.user_code && nameMap.get(p.user_code)) ?? null,
-      avatar_url:
-        (p.user_code && avatarMap.get(p.user_code)) ?? null,
+      // ✅ 表示名は profiles.name を click_username に格納して返す（構造は維持）
+      click_username: (p.user_code && nameMap.get(p.user_code)) ?? null,
+      // ✅ アイコンも profiles.avatar_url を優先
+      avatar_url: (p.user_code && avatarMap.get(p.user_code)) ?? null,
     }))
 
     return NextResponse.json(enriched)

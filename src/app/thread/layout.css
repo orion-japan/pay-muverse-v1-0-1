@@ -1,0 +1,6 @@
+/* /thread 配下の共通ラッパ。高さ確保＆背景を統一 */
+.thread-shell {
+    min-height: 100dvh;
+    background: #fff;
+  }
+  

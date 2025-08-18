@@ -1,6 +1,8 @@
+// src/components/SelfPostModal.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import './SelfPostModal.css';
 
 type SelfPostModalProps = {
@@ -9,7 +11,7 @@ type SelfPostModalProps = {
   userCode: string;
   /** Selfページから 'self' を渡す。未指定なら null 保存 */
   boardType?: string | null;
-  /** 正式コールバック名 */
+  /** 正式コールバック名（互換維持） */
   onPostSuccess?: () => void;
   /** 互換用の別名（あれば呼ぶ） */
   onPosted?: () => void;
@@ -23,12 +25,16 @@ export default function SelfPostModal({
   onPostSuccess,
   onPosted,
 }: SelfPostModalProps) {
+  const router = useRouter();
+
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [tags, setTags] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState('');
   const [isPosting, setIsPosting] = useState(false);
+  const [visibility, setVisibility] = useState<'public' | 'private' | 'friends'>('public');
+
 
   useEffect(() => {
     if (!isOpen) {
@@ -38,6 +44,7 @@ export default function SelfPostModal({
       setImageFile(null);
       setPreviewUrl('');
       setIsPosting(false);
+      setVisibility('public'); // モーダル閉じたらリセット
     }
   }, [isOpen]);
 
@@ -53,41 +60,26 @@ export default function SelfPostModal({
     if (!userCode || isPosting) return;
 
     setIsPosting(true);
-    console.log('[SelfPostModal] ▶ 投稿開始', { userCode, boardType });
-
     try {
-      // 1) 画像アップロード（任意）
+      // 0) 画像アップロード（任意）
       let uploadedUrl = '';
       if (imageFile) {
         const formData = new FormData();
         formData.append('file', imageFile);
         formData.append('userCode', userCode);
 
-        console.log('[SelfPostModal] 📤 画像アップロード開始', {
-          name: imageFile.name,
-          size: imageFile.size,
-          type: imageFile.type,
-        });
-
         const imgRes = await fetch('/api/post-image', { method: 'POST', body: formData });
-        if (!imgRes.ok) {
-          const t = await imgRes.text().catch(() => '');
-          console.error('[SelfPostModal] ❌ 画像アップロード失敗', imgRes.status, t);
-          throw new Error('画像アップロードに失敗しました');
-        }
+        if (!imgRes.ok) throw new Error('画像アップロードに失敗しました');
         const imgData = await imgRes.json();
         uploadedUrl = imgData?.url || '';
-        console.log('[SelfPostModal] ✅ 画像アップロード成功', { uploadedUrl });
       }
 
-      // 2) 投稿データ整形
-      const normalizedTags =
-        tags
-          .split(',')
-          .map((t) => t.trim())
-          .filter(Boolean);
+      // タグと board_type を正規化
+      const normalizedTags = tags
+        .split(',')
+        .map(t => t.trim())
+        .filter(Boolean);
 
-      // board_type: 未指定 or "null" or "" は null にする
       const resolvedBoardType =
         boardType === undefined ||
         boardType === null ||
@@ -96,48 +88,40 @@ export default function SelfPostModal({
           ? null
           : String(boardType).trim();
 
-      const body = {
+      // 1) 親（posts）を1件だけ作成
+      const parentBody = {
         user_code: userCode,
         title: title.trim() || null,
-        content: content.trim() || null,
+        content: (content || '').trim() || null,
         tags: normalizedTags.length ? normalizedTags : null,
         media_urls: uploadedUrl ? [uploadedUrl] : [],
-        visibility: 'public',
-        board_type: resolvedBoardType, // ← ここが重要
+        board_type: resolvedBoardType ?? 'self',
+        visibility, // ← 追加！
       };
 
-      console.log('[SelfPostModal] 📤 投稿送信', body);
-
-      // 3) Self用APIにPOST（/api/upload-post ではなく /api/self-posts）
-      const res = await fetch('/api/self-posts', {
+      const res = await fetch('/api/self/create-thread', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(parentBody),
       });
 
-      if (!res.ok) {
-        const t = await res.text().catch(() => '');
-        console.error('[SelfPostModal] ❌ 投稿失敗', res.status, t);
-        throw new Error('投稿に失敗しました');
-      }
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || '親投稿の作成に失敗しました');
 
-      const saved = await res.json();
-      console.log('[SelfPostModal] ✅ 投稿成功', {
-        post_id: saved?.post_id ?? saved?.id,
-        board_type: saved?.board_type,
-      });
+      const threadId: string =
+        json?.threadId || json?.thread_id || json?.post_id || json?.post?.post_id;
 
-      // 両方あれば両方呼ぶ（後方互換）
+      if (!threadId) throw new Error('threadId が取得できませんでした');
+
       onPostSuccess?.();
       onPosted?.();
-
       onClose();
-    } catch (err) {
-      console.error('[SelfPostModal] 💥 投稿エラー', err);
-      alert('投稿に失敗しました。コンソールログをご確認ください。');
+      router.push(`/thread/${threadId}`);
+    } catch (err: any) {
+      console.error('[SelfPostModal] 投稿エラー:', err);
+      alert(err?.message || '投稿に失敗しました。');
     } finally {
       setIsPosting(false);
-      console.log('[SelfPostModal] ■ 投稿終了');
     }
   };
 
@@ -171,6 +155,21 @@ export default function SelfPostModal({
         <input type="file" accept="image/*" onChange={handleImageChange} />
 
         {previewUrl && <img src={previewUrl} alt="preview" className="preview" />}
+
+        {/* ✅ 公開範囲セレクトボックス */}
+        <label>公開範囲:</label>
+        <select
+  value={visibility}
+  onChange={(e) =>
+    setVisibility(e.target.value as 'public' | 'private' | 'friends')
+  }
+  
+>
+  <option value="public">🌐 公開（全体に表示）</option>
+  <option value="friends">👥 友達のみ（限定表示）</option>
+  <option value="private">🔒 非公開（自分のみ）</option>
+</select>
+
 
         <div className="modal-actions">
           <button onClick={onClose}>キャンセル</button>

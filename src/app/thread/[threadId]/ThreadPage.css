@@ -1,169 +1,185 @@
-/* ThreadPage.css */
-
-.thread-container {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  padding: 1rem;
-  background: linear-gradient(180deg, #0d0c1d, #1f1c2c);
-  color: #fff;
-  font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
+/* ヘッダー（2行レイアウト：1行目=アイコン+情報、2行目=戻るボタン） */
+.thread-header {
+  display: grid;
+  grid-template-columns: 44px 1fr; /* 左=アバター / 右=テキスト */
+  grid-template-rows: auto auto;   /* 上=タイトル行 / 下=戻るボタン行 */
+  grid-template-areas:
+    "avatar info"
+    "back   info";
+  align-items: start;
+  gap: 8px 10px;
+  padding: 10px 12px;
+  background: #f6edff;
+  border-bottom: 1px solid #ead9ff;
+  box-sizing: border-box;
+  position: sticky;
+  top: 0;
+  z-index: 5;
 }
 
-.thread-container h2 {
-  font-size: 1.5rem;
-  margin-bottom: 1rem;
-  color: #ffd700;
-  text-shadow: 0 0 5px #e52e71aa;
+/* 配置 */
+.thread-header img {            /* アバター */
+  grid-area: avatar;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #eee;
 }
-
-.thread-posts {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  padding-bottom: 1rem;
+.thread-header .header-info {   /* タイトル＋日時＋親本文 */
+  grid-area: info;
+  display: grid;
+  gap: 4px;
 }
-
-.post {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
-  padding: 1rem;
-  backdrop-filter: blur(8px);
-  box-shadow: 0 4px 20px rgba(255, 255, 255, 0.05);
-  transition: all 0.2s ease;
-}
-
-.post:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.meta {
-  font-size: 0.75rem;
-  color: #aaa;
-  margin-bottom: 0.3rem;
-}
-
-.content {
-  font-size: 1rem;
-  line-height: 1.5;
-  color: #eee;
-}
-
-.post-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 1rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(12px);
-}
-
-.post-form textarea {
-  width: 100%;
-  height: 100px;
-  padding: 0.75rem 1rem;
+.thread-header .back-btn {      /* ← 戻る：2行目の左端へ */
+  grid-area: back;
+  justify-self: start;
+  align-self: center;
+  appearance: none;
+  border: none;
+  background: #fff;
+  padding: 6px 10px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.1);
-  border: none;
-  color: white;
-  font-size: 1rem;
-  resize: none;
-}
-
-.post-form textarea:focus {
-  outline: none;
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.post-form button {
-  align-self: flex-end;
-  background: linear-gradient(90deg, #ff8a00, #e52e71);
-  color: white;
-  padding: 0.6rem 1.2rem;
-  border: none;
-  border-radius: 20px;
-  font-weight: bold;
   cursor: pointer;
-  transition: transform 0.2s ease;
-  box-shadow: 0 0 10px #e52e71aa;
+  font-weight: 700;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.06);
+}
+.thread-header .back-btn:hover { filter: brightness(0.98); }
+
+/* タイトル部 */
+.header-title { display: flex; gap: 10px; align-items: baseline; }
+.header-title > strong { font-weight: 700; }
+.header-title > small { color: #888; font-size: 12px; }
+.header-text {
+  margin-top: 2px;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
-.post-form button:hover {
-  transform: scale(1.05);
+/* 子リスト：最左寄せ＆入力固定の逃げ */
+.thread-scroll {
+  overflow-y: auto;
+  padding: 8px 0 180px 0; /* 下は入力固定ぶんの逃げ */
+  box-sizing: border-box;
 }
+.post {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.06);
+  padding: 8px 10px;
+  margin: 10px 0 12px 0; /* 左0で最左寄せ */
+}
+.author-line {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.avatar.child { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; background:#eee; }
+.author-meta { display: flex; gap: 8px; align-items: baseline; }
+.author-meta > span { color: #888; font-size: 12px; }
 
-.fixed-header {
+/* 入力ボックス：画面下に固定（タブバーがあれば高さに合わせて） */
+.post-form {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 56px;  /* タブバーが無ければ 0、あればその高さに調整 */
+  z-index: 1000;
+  max-width: 480px;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 84px;
+  gap: 8px;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  background: #fff;
+  border-top: 1px solid #ececec;
+  box-shadow: 0 -4px 16px rgba(0,0,0,.06);
+  box-sizing: border-box;
+}
+.post-form textarea {
+  height: 44px;
+  resize: none;
+  padding: 8px 10px;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+.post-form button {
+  height: 44px;
+  border: none;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #8b5cf6, #7c3aed);
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+.post-form button:disabled { opacity: .5; cursor: not-allowed; }
+
+/* 親ヘッダー（1行目=戻る / 2行目=アイコン+情報） */
+.thread-header {
+  display: grid;
+  grid-template-columns: 44px 1fr;     /* 2行目の avatar / info 用 */
+  grid-template-rows: auto auto;       /* 1行目: back / 2行目: avatar+info */
+  grid-template-areas:
+    "back back"
+    "avatar info";
+  align-items: start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #f6edff;
+  border-bottom: 1px solid #ead9ff;
+  box-sizing: border-box;
   position: sticky;
   top: 0;
-  z-index: 10;
-  background: #1a1a2e;
-  padding: 1rem;
-  display: flex;
-  gap: 1rem;
-  align-items: center;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  z-index: 5;
 }
 
-.fixed-header .avatar {
-  width: 50px;
-  height: 50px;
-  border-radius: 999px;
+/* フル幅の横長戻るボタン（1行目全体） */
+.thread-header .back-btn {
+  grid-area: back;
+  justify-self: stretch;        /* ← 横幅いっぱい */
+  text-align: center;           /* テキスト中央寄せ */
+  appearance: none;
+  border: none;
+  background: #ffffff;
+  padding: 8px 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-weight: 700;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.06);
+}
+.thread-header .back-btn:hover { filter: brightness(0.98); }
+
+/* 2行目: アバター + 情報 */
+.thread-header img {
+  grid-area: avatar;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
   object-fit: cover;
-  border: 2px solid #fff;
+  background: #eee;
 }
-
-.fixed-header .header-info {
-  display: flex;
-  flex-direction: column;
+.thread-header .header-info {
+  grid-area: info;
+  display: grid;
+  gap: 4px;
 }
-
-.fixed-header .header-info p {
-  margin: 0.3rem 0;
-  color: #eee;
-}
-
-.fixed-header .header-info small {
-  color: #aaa;
-  font-size: 0.75rem;
-}
-/* ベースは前回と同様。以下は固定ヘッダー分 */
-
-.fixed-header {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: rgba(13, 12, 29, 0.9);
-  padding: 1rem;
-  display: flex;
-  gap: 1rem;
-  align-items: center;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(8px);
-}
-
-.fixed-header .avatar {
-  width: 48px;
-  height: 48px;
-  border-radius: 999px;
-  object-fit: cover;
-  border: 2px solid #fff3;
-}
-
-.fixed-header .header-info {
-  display: flex;
-  flex-direction: column;
-}
-
-.fixed-header .header-info p {
-  margin: 0.3rem 0;
-  color: #eee;
-}
-
-.fixed-header .header-info small {
-  color: #aaa;
-  font-size: 0.75rem;
+.header-title { display: flex; gap: 10px; align-items: baseline; }
+.header-title > strong { font-weight: 700; }
+.header-title > small { color: #888; font-size: 12px; }
+.header-text {
+  margin-top: 2px;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }

@@ -19,8 +19,8 @@ interface AuthContextType {
   user: User | null
   userCode: string | null
   idToken: string | null
-  username: string | null        // ← 追加
-  avatarUrl: string | null       // ← 追加
+  username: string | null // ← 追加
+  avatarUrl: string | null // ← 追加
   loading: boolean
   muSent: boolean
   login: (email: string, password: string) => Promise<void>
@@ -32,8 +32,8 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   userCode: null,
   idToken: null,
-  username: null,      // ← 追加
-  avatarUrl: null,     // ← 追加
+  username: null, // ← 追加
+  avatarUrl: null, // ← 追加
   loading: true,
   muSent: false,
   login: async () => {},
@@ -59,6 +59,7 @@ async function callAuthedApi(path: string, idToken: string, body: any = {}) {
     },
     body: JSON.stringify(body),
   })
+
   const json = await res.json().catch(() => ({}))
   if (!res.ok) {
     const msg = json?.error || `API error: ${path}`
@@ -71,15 +72,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [userCode, setUserCode] = useState<string | null>(null)
   const [idToken, setIdToken] = useState<string | null>(null)
-  const [username, setUsername] = useState<string | null>(null)       // ← 追加
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)     // ← 追加
+  const [username, setUsername] = useState<string | null>(null) // ← 追加
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null) // ← 追加
   const [loading, setLoading] = useState(true)
   const [muSent, setMuSent] = useState(false)
 
-  const ensureAndFetchUserCode = async (firebaseUser: User): Promise<string | null> => {
+  const ensureAndFetchUserCode = async (
+    firebaseUser: User
+  ): Promise<string | null> => {
     const token = await getIdTokenSafe(firebaseUser)
     if (!token) return null
-
     setIdToken(token)
 
     try {
@@ -113,7 +115,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         if (firebaseUser) {
           setUser(firebaseUser)
-
           const token = await getIdTokenSafe(firebaseUser)
           setIdToken(token)
 
@@ -123,7 +124,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // 追加: 表示名とアイコンURL（user_metadata から）
           const name = firebaseUser.displayName || firebaseUser.email || '匿名'
           const icon = firebaseUser.photoURL || null
-
           setUsername(name)
           setAvatarUrl(icon)
         } else {
@@ -144,6 +144,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false)
       }
     })
+
     return () => unsubscribe()
   }, [])
 
@@ -152,6 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log('MU送信スキップ: 条件未達')
       return
     }
+
     try {
       const token = idToken || (await getIdTokenSafe(user))
       if (!token) throw new Error('idToken取得失敗')
@@ -182,15 +184,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const cred = await signInWithEmailAndPassword(auth, email, password)
       const currentUser = cred.user
       setUser(currentUser)
+
       const token = await getIdTokenSafe(currentUser)
       setIdToken(token)
+
       const code = await ensureAndFetchUserCode(currentUser)
       setUserCode(code)
 
       // 追加
       setUsername(currentUser.displayName || currentUser.email || '匿名')
       setAvatarUrl(currentUser.photoURL || null)
-
       setMuSent(false)
     } catch (error) {
       console.error('ログイン失敗:', error)
@@ -210,6 +213,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUsername(null)
       setAvatarUrl(null)
       setMuSent(false)
+
       await fetch('/api/logout', { method: 'POST' })
     } catch (error) {
       console.error('ログアウト失敗:', error)
@@ -224,8 +228,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         userCode,
         idToken,
-        username,     // ← 追加
-        avatarUrl,    // ← 追加
+        username, // ← 追加
+        avatarUrl, // ← 追加
         loading,
         muSent,
         login,

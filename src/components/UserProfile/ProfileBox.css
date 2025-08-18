@@ -260,3 +260,30 @@
     place-items: center;
   }
   
+  /* ===== PC幅では「画像を中央の1段目、情報は2段目」レイアウトに切替 ===== */
+@media (min-width: 1024px) {
+    /* 本体を1カラムにして中央寄せ */
+    .profile-card.profile-basic .profile-basic__body{
+      grid-template-columns: 1fr !important;      /* ← 1 列に */
+      justify-items: center !important;            /* 子要素を中央に */
+    }
+  
+    /* 画像は中央に置いて、少し下に余白 */
+    .profile-card.profile-basic .profile-avatar{
+      justify-self: center !important;
+      margin-bottom: 12px;
+    }
+  
+    /* 情報ブロックは横幅を持たせつつ中央配置（中身の文字は左寄せのまま） */
+    .profile-card.profile-basic .profile-basic__grid{
+      width: min(100%, 640px);   /* 見やすい最大幅 */
+      justify-self: center;
+      text-align: left;          /* 値は左揃えのまま */
+    }
+  
+    /* ラベル/値の2カラムは維持（見やすさ重視） */
+    .profile-card.profile-basic .profile-basic__grid .row{
+      grid-template-columns: 120px 1fr !important;
+    }
+  }
+  
