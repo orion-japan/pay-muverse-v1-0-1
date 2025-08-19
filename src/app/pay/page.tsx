@@ -5,6 +5,7 @@ import { Suspense, useEffect, useState, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import PlanSelectPanel from '@/components/PlanSelectPanel';
 import CardStyle from '@/components/CardStyle';  // ✅ 分割UIを使う
+import { getAuth } from 'firebase/auth';
 
 function PageInner() {
   const searchParams = useSearchParams();
@@ -95,61 +96,66 @@ function PageInner() {
 
   // ✅ カード登録処理（iframe完了待ち & 多重実行防止）
   const handleCardRegistration = async () => {
-    console.log('[handleCardRegistration] START');
-  
+    setLoading(true);
     try {
-      if (!cardReady) {
-        alert('カードフォームが準備中です。少し待って再度押してください');
-        return;
-      }
-      if (!payjp || !cardNumber) {
-        alert('カードフォームが準備できていません');
-        return;
-      }
-  
-      // ✅ ここで渡すオプションを事前に定義
-      const tokenOptions = { three_d_secure: true };
-  
-      // ✅ ログに渡すデータを丸ごと出す（中身が空か/変なキーが入ってないか確認できる）
-      console.log('[LOG] createToken に渡す内容: ', {
-        cardElement: cardNumber,
-        options: tokenOptions,
+      // ✅ Firebase トークンから user_code を取得
+      const user = getAuth().currentUser;
+      if (!user) throw new Error('ログインしてください');
+      const idToken = await user.getIdToken(true);
+      const res = await fetch('/api/account-status', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
       });
+      const j = await res.json();
+      const resolvedCode = j?.user_code;
+      if (!resolvedCode) throw new Error('ユーザーコードが取得できません');
   
-      // ✅ token 作成
-      const result = await payjp.createToken(cardNumber, tokenOptions);
+      // ✅ createToken にタイムアウトと1回リトライを追加
+      const createTokenWithTimeout = async (ms = 15000) => {
+        return Promise.race([
+          payjp.createToken(card),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('タイムアウトしました')), ms)
+          ),
+        ]);
+      };
   
-      console.log('[LOG] createToken result:', result);
-  
-      if (result.error) {
-        console.error('[handleCardRegistration] token error:', result.error);
-        alert(result.error.message);
-        return;
+      let tokenRes;
+      try {
+        tokenRes = await createTokenWithTimeout();
+      } catch {
+        tokenRes = await createTokenWithTimeout(); // 1回リトライ
       }
   
-      // ✅ API送信
-      console.log('[LOG] register-card API に送信する payload:', {
-        user_code,
-        token: result.id,
-      });
+      if (!tokenRes?.id) throw new Error('カードトークンの取得に失敗しました');
   
-      const response = await fetch('/api/pay/account/register-card', {
+      const token = tokenRes.id;
+  
+      // ✅ バックエンドに user_code と token を送信
+      const cardRes = await fetch('/api/pay/account/register-card', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_code, token: result.id }),
+        body: JSON.stringify({ user_code: resolvedCode, token }),
       });
   
-      if (!response.ok) throw new Error('カード登録 API エラー');
+      if (!cardRes.ok) {
+        const errMsg = await cardRes.text().catch(() => '');
+        throw new Error(`カード登録失敗: ${errMsg}`);
+      }
   
-      alert('カード登録が完了しました 🎉');
-      await fetchStatus(); // ステータス更新
-    } catch (err) {
-      console.error('[handleCardRegistration] ERROR', err);
-      alert('カード登録に失敗しました');
+      alert('カード登録が完了しました');
+      await fetchStatus(); // 状態再取得
+    } catch (err: any) {
+      alert(err.message || 'カード登録に失敗しました');
+      console.error('❌ Card registration error:', err);
     } finally {
-      console.log('[handleCardRegistration] END');
+      setLoading(false);
     }
   };
+  
   
 
   // ✅ サブスク登録処理

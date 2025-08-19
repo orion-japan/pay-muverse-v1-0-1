@@ -1,115 +1,83 @@
-import { NextResponse } from 'next/server'
-import { adminAuth } from '@/lib/firebase-admin'
-import { supabaseServer } from '@/lib/supabaseServer'
+import { NextRequest, NextResponse } from 'next/server';
 
-const MU_API_URL = process.env.MU_API_URL
+const MU_API_BASE = (process.env.MU_API_BASE ?? 'https://m.muverse.jp').trim().replace(/\/+$/, '');
+const MU_TIMEOUT_MS = 12000;
+const MU_PREFIX = `${MU_API_BASE}/api`;
 
-export const runtime = 'nodejs'
-export const revalidate = 0
+async function postJson(url: string, body: any, signal: AbortSignal) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+    cache: 'no-store',
+  });
+  const text = await res.text();
+  let data: any = null;
+  try { data = text ? JSON.parse(text) : null; } catch {}
+  return { res, text, data };
+}
 
-export async function POST(req: Request) {
-  console.log('========== [call-mu-ai] API開始 ==========')
+// ★ MUの返却をフラット化して user_code を必ずトップに
+function normalizeMu(data: any) {
+  if (!data) return null;
+  const userObj = data.user ?? data; // {"user":{...}} or 直接 {...}
+  if (!userObj || !userObj.user_code) return null;
+  // フラットな形にして返す（必要なキーはご自由に）
+  return {
+    user_code: userObj.user_code,
+    click_email: userObj.click_email,
+    card_registered: userObj.card_registered,
+    payjp_customer_id: userObj.payjp_customer_id,
+    click_type: userObj.click_type,
+    sofia_credit: userObj.sofia_credit,
+    // 元データも一応保持したい場合:
+    raw: data,
+  };
+}
 
+export async function POST(req: NextRequest) {
   try {
-    console.log('[call-mu-ai] 🔍 リクエストヘッダー:', Object.fromEntries(req.headers.entries()))
-    const body = await req.json().catch(() => ({}))
-    console.log('[call-mu-ai] 📥 受信ボディ:', body)
-
-    // ★ 修正：auth.idToken も許容
-    const idToken = body?.idToken || body?.auth?.idToken
-    const payload = body?.payload || {}
-
-    console.log('[call-mu-ai] ✅ idToken有無:', !!idToken, '｜ payload:', payload)
-
-    if (!idToken) {
-      console.error('[call-mu-ai] ❌ idTokenが無いため処理中断')
-      return NextResponse.json({ error: 'idTokenが必要です' }, { status: 400 })
-    }
-    if (!MU_API_URL) {
-      console.error('[call-mu-ai] ❌ MU_API_URL未設定')
-      return NextResponse.json({ error: 'MU_API_URLが未設定です' }, { status: 500 })
+    const { token } = await req.json().catch(() => ({}));
+    if (typeof token !== 'string' || token.length < 100) {
+      return NextResponse.json({ ok: false, error: 'INVALID_TOKEN' }, { status: 400 });
     }
 
-    // Firebase検証
-    console.log('[call-mu-ai] 🔍 Firebaseトークン検証開始')
-    const decoded = await adminAuth.verifyIdToken(idToken, true)
-    console.log('[call-mu-ai] ✅ Firebase検証OK', {
-      uid: decoded.uid,
-      email: decoded.email,
-      issuedAt: decoded.iat,
-      expiresAt: decoded.exp,
-    })
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), MU_TIMEOUT_MS);
+    const url = `${MU_PREFIX}/get-user-info`;
 
-    // Supabaseで user_code 取得
-    console.log('[call-mu-ai] 🔍 Supabaseクエリ開始 (firebase_uid=', decoded.uid, ')')
-    const { data: userData, error: sbErr } = await supabaseServer
-      .from('users')
-      .select('user_code')
-      .eq('firebase_uid', decoded.uid)
-      .maybeSingle()
-    console.log('[call-mu-ai] 📤 Supabaseレスポンス:', { userData, sbErr })
+    // まずは MU が受け付ける { idToken } で送る
+    let { res, text, data } = await postJson(url, { idToken: token }, controller.signal);
+    console.log('[call-mu-ai] try#1 status:', res.status, 'url:', url, 'body:', text);
 
-    if (sbErr || !userData?.user_code) {
-      console.error('[call-mu-ai] ❌ ユーザー情報取得失敗', sbErr)
-      return NextResponse.json({ error: 'user_codeが見つかりません' }, { status: 404 })
+    // 400なら旧形式でも試す（将来互換）
+    if (res.status === 400) {
+      ({ res, text, data } = await postJson(url, { auth: { mode: 'firebase', idToken: token } }, controller.signal));
+      console.log('[call-mu-ai] try#2 status:', res.status, 'url:', url, 'body:', text);
     }
 
-    // MU側呼び出し
-    const url = `${MU_API_URL}/session/create`
-    const reqBody = { user_code: userData.user_code, payload }
-    console.log('[call-mu-ai] 📡 MU側API呼び出し開始', { url, reqBody })
+    clearTimeout(timer);
 
-    const muRes = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(reqBody),
-    })
-
-    console.log('[call-mu-ai] 📥 MUレスポンスヘッダー:', Object.fromEntries(muRes.headers.entries()))
-    const ct = muRes.headers.get('content-type') || ''
-    const raw = await muRes.text()
-    console.log('[call-mu-ai] 📥 MUレスポンスステータス:', muRes.status)
-    console.log('[call-mu-ai] 📥 MUレスポンス本文(先頭500文字):', raw.slice(0, 500))
-
-    let muData: any = null
-    try {
-      if (ct.includes('application/json') && raw) {
-        muData = JSON.parse(raw)
-        console.log('[call-mu-ai] ✅ MUレスポンスJSONパース成功')
-      } else {
-        console.warn('[call-mu-ai] ⚠️ MUレスポンスがJSONではありません')
-      }
-    } catch (e) {
-      console.error('[call-mu-ai] ❌ MUレスポンスJSONパース失敗', e)
-    }
-
-    if (!muRes.ok) {
-      console.error('[call-mu-ai] ❌ MU_APIエラー', {
-        status: muRes.status,
-        contentType: ct,
-        bodySnippet: raw.slice(0, 2000),
-      })
+    if (!res.ok) {
       return NextResponse.json(
-        {
-          error: 'MU_APIエラー',
-          status: muRes.status,
-          contentType: ct,
-          body: raw.slice(0, 2000),
-        },
+        { ok: false, error: 'MU_FORWARD_FAILED', debug: { status: res.status, url, body: text } },
         { status: 502 }
-      )
+      );
     }
 
-    console.log('[call-mu-ai] ✅ API処理完了 正常応答返却')
-    console.log('========== [call-mu-ai] API終了 ==========')
+    const mu = normalizeMu(data);
+    if (!mu) {
+      return NextResponse.json(
+        { ok: false, error: 'MU_NO_USER_CODE', mu: data, debug: { url } },
+        { status: 502 }
+      );
+    }
 
-    return NextResponse.json(
-      muData ?? { data: raw, contentType: ct },
-      { status: 200 }
-    )
-  } catch (err: any) {
-    console.error('[call-mu-ai] ❌ 例外発生', err)
-    console.log('========== [call-mu-ai] API異常終了 ==========')
-    return NextResponse.json({ error: 'サーバーエラー', details: err?.message }, { status: 500 })
+    // ここで mu.user_code がトップに来ている
+    return NextResponse.json({ ok: true, mu }, { status: 200 });
+  } catch (e: any) {
+    console.error('[call-mu-ai] unexpected error:', e?.message || e);
+    return NextResponse.json({ ok: false, error: 'INTERNAL' }, { status: 500 });
   }
 }
