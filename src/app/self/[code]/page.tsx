@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase'; // ★ anonキーのクライアント
 import './self.css';
 
 type Profile = {
@@ -15,7 +16,10 @@ type Post = {
   title?: string | null;
   content?: string | null;
   created_at: string;
+  board_type?: string | null;
 };
+
+const BOARD_TYPE = 'self';
 
 export default function SelfPage() {
   const params = useParams();
@@ -32,6 +36,9 @@ export default function SelfPage() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // 直近のイベント重複反映を抑制（post_id:timestamp などでキー化）
+  const seen = useRef<Set<string>>(new Set());
+
   /** プロフィール取得 */
   useEffect(() => {
     if (!code) return;
@@ -43,25 +50,19 @@ export default function SelfPage() {
           `/api/get-profile?code=${encodeURIComponent(code)}`,
           { signal: ac.signal, cache: 'no-store' }
         );
-        if (!res.ok) {
-          console.warn('[Self/[code]] get-profile status:', res.status);
-          return;
-        }
+        if (!res.ok) return;
         const json = await res.json();
-        // API が { profile: {...} } or 直返し のどちらでも拾う
-        const p: Profile | null =
-          json?.profile ?? (json?.user_code ? json : null);
+        const p: Profile | null = json?.profile ?? (json?.user_code ? json : null);
         if (!ac.signal.aborted && p) setProfile(p);
       } catch (e: any) {
-        if (e?.name === 'AbortError') return;
-        console.error('[Self/[code]] get-profile error:', e);
+        if (e?.name !== 'AbortError') console.error('[Self/[code]] get-profile error:', e);
       }
     })();
 
     return () => ac.abort();
   }, [code]);
 
-  /** Self 投稿取得 */
+  /** 初期の Self 投稿取得 */
   useEffect(() => {
     if (!code) return;
     const ac = new AbortController();
@@ -70,21 +71,20 @@ export default function SelfPage() {
 
     (async () => {
       try {
-        const url = `/api/self-posts?userCode=${encodeURIComponent(
-          code
-        )}&boardType=self`;
+        const url = `/api/self-posts?userCode=${encodeURIComponent(code)}&boardType=${BOARD_TYPE}`;
         const res = await fetch(url, { signal: ac.signal, cache: 'no-store' });
-        if (!res.ok) {
-          console.warn('[Self/[code]] self-posts status:', res.status);
-          return;
-        }
+        if (!res.ok) return;
         const json = await res.json();
-        // 期待フォーマット: { data: Post[] } に対応しつつ、配列直返しも許容
         const list: Post[] = Array.isArray(json) ? json : json?.data ?? [];
-        if (mounted && !ac.signal.aborted) setPosts(list);
+        if (mounted && !ac.signal.aborted) {
+          // board_type=self のみ（null を含めるなら条件を調整）
+          const filtered = list.filter(
+            (p) => !p.board_type || String(p.board_type).toLowerCase() === BOARD_TYPE
+          );
+          setPosts(filtered);
+        }
       } catch (e: any) {
-        if (e?.name === 'AbortError') return;
-        console.error('[Self/[code]] self-posts error:', e);
+        if (e?.name !== 'AbortError') console.error('[Self/[code]] self-posts error:', e);
       } finally {
         if (mounted && !ac.signal.aborted) setLoading(false);
       }
@@ -96,7 +96,61 @@ export default function SelfPage() {
     };
   }, [code]);
 
-  // code が取れないケースはホームへ退避（直接アクセスの変形防止）
+  /** ✅ Realtime 購読（INSERT/UPDATE/DELETE で即時反映） */
+  useEffect(() => {
+    if (!code) return;
+
+    const upsert = (row: any) => {
+      // 自分のページ & self 以外は無視
+      if (row?.user_code !== code) return;
+      if (row?.board_type && String(row.board_type).toLowerCase() !== BOARD_TYPE) return;
+
+      // 重複ガード（post_id + updated_at/created_at）
+      const k = `${row.post_id}:${row.updated_at ?? row.created_at ?? ''}`;
+      if (k && seen.current.has(k)) return;
+      if (k) {
+        seen.current.add(k);
+        if (seen.current.size > 500) seen.current.clear();
+      }
+
+      setPosts((prev) => {
+        const idx = prev.findIndex((p) => p.post_id === row.post_id);
+        if (idx === -1) {
+          return [{ ...row }, ...prev].sort(
+            (a, b) => +new Date(b.created_at) - +new Date(a.created_at)
+          );
+        }
+        const next = [...prev];
+        next[idx] = { ...next[idx], ...row };
+        return next;
+      });
+    };
+
+    const remove = (row: any) => {
+      if (row?.user_code !== code) return;
+      setPosts((prev) => prev.filter((p) => p.post_id !== row.post_id));
+    };
+
+    const channel = supabase
+      .channel(`posts:self:${code}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'posts', filter: `user_code=eq.${code}` },
+        (payload) => {
+          if (payload.eventType === 'DELETE') remove(payload.old);
+          else upsert(payload.new);
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') console.log('[Self/[code]] 🔔 Realtime subscribed');
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [code]);
+
+  // code が無いアクセスはホームへ
   useEffect(() => {
     if (code === null) router.replace('/');
   }, [code, router]);
@@ -124,9 +178,7 @@ export default function SelfPage() {
           />
           <div>
             <h2 style={{ margin: 0 }}>{profile.name}</h2>
-            <p style={{ fontSize: '0.9em', color: '#666', margin: 0 }}>
-              👉 プロフィールを見る
-            </p>
+            <p style={{ fontSize: '0.9em', color: '#666', margin: 0 }}>👉 プロフィールを見る</p>
           </div>
         </div>
       )}
@@ -145,9 +197,7 @@ export default function SelfPage() {
                 <strong>{p.title ?? '(本文なし)'}</strong>
               </div>
               {p.content && <p className="self-item-content">{p.content}</p>}
-              <small className="date">
-                {new Date(p.created_at).toLocaleString()}
-              </small>
+              <small className="date">{new Date(p.created_at).toLocaleString()}</small>
             </li>
           ))}
         </ul>

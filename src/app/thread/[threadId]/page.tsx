@@ -3,6 +3,7 @@
 import { useParams, useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
+import { supabase } from '@/lib/supabase' // ✅ Realtime 用に追加
 import './ThreadPage.css'
 
 type Post = {
@@ -116,12 +117,93 @@ export default function ThreadPage() {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight
   }, [posts])
 
+  // ✅ Realtime 購読（親: post_id、子: parent_post_id）
+  useEffect(() => {
+    if (!threadId) return
+
+    // 親ポストの変更
+    const upsertParent = (row: any) => {
+      setPosts((prev) => {
+        if (!prev.length) return [row]
+        // 親は配列先頭という前提を維持
+        if (prev[0]?.post_id === row.post_id) {
+          const next = [...prev]
+          next[0] = { ...next[0], ...row }
+          return next
+        }
+        // もし親がまだいない場合は先頭に差し込み
+        return [row, ...prev]
+      })
+    }
+
+    // 子ポストの変更
+    const upsertChild = (row: any) => {
+      // children は posts[1..] として保持。created_at 昇順で並べる
+      setPosts((prev) => {
+        if (!prev.length) return prev // 親未ロード時は無視（初回 fetch 後に届く想定）
+        const parent = prev[0]
+        const children = prev.slice(1)
+        const idx = children.findIndex((c) => c.post_id === row.post_id)
+        if (idx === -1) {
+          const merged = [...children, row].sort(
+            (a, b) => +new Date(a.created_at) - +new Date(b.created_at)
+          )
+          return [parent, ...merged]
+        } else {
+          const next = [...children]
+          next[idx] = { ...next[idx], ...row }
+          next.sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at))
+          return [parent, ...next]
+        }
+      })
+    }
+
+    const removeChild = (row: any) => {
+      setPosts((prev) => {
+        if (!prev.length) return prev
+        const parent = prev[0]
+        const children = prev.slice(1).filter((c) => c.post_id !== row.post_id)
+        return [parent, ...children]
+      })
+    }
+
+    const channel = supabase
+      .channel(`thread:${threadId}`)
+      // 親（post_id が一致）
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'posts', filter: `post_id=eq.${threadId}` },
+        (payload) => {
+          if (payload.eventType === 'DELETE') {
+            // 親削除の扱いは任意：ここでは一覧を空に
+            setPosts([])
+          } else {
+            upsertParent(payload.new)
+          }
+        }
+      )
+      // 子（parent_post_id が一致）
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'posts', filter: `parent_post_id=eq.${threadId}` },
+        (payload) => {
+          if (payload.eventType === 'DELETE') removeChild(payload.old)
+          else upsertChild(payload.new)
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [threadId])
+
   // 親＝配列先頭
   const parent = posts[0] || null
 
   const goProfile = (targetCode?: string | null) => {
     if (!targetCode) return;
-  
+
     // ✅ 自分自身ならマイページへ
     if (userCode && targetCode === userCode) {
       router.push('/mypage');
@@ -130,7 +212,6 @@ export default function ThreadPage() {
       router.push(`/profile/${encodeURIComponent(targetCode)}`);
     }
   };
-  
 
   // 子リスト
   const children = (() => {
