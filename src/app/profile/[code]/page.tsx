@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { getAuth } from 'firebase/auth';
 import UserProfile, { Profile } from '@/components/UserProfile/UserProfile';
@@ -13,7 +13,8 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [isMyPage, setIsMyPage] = useState(false);
   const [followStatus, setFollowStatus] = useState<'none' | 'following'>('none');
-  const [myCode, setMyCode] = useState<string | null>(null); // ★ 自分の user_code を保持
+  const [myCode, setMyCode] = useState<string | null>(null); 
+  const [clickType, setClickType] = useState<string>('free'); // ★ APIの値を保持
   const router = useRouter();
 
   // 🔹 プロフィール読み込み
@@ -42,7 +43,8 @@ export default function ProfilePage() {
         if (res.ok) {
           const j = await res.json();
           mine = j?.user_code ?? null;
-          setMyCode(mine); // ★ 保存
+          setMyCode(mine); 
+          setClickType(j?.click_type ?? 'free'); // ★ click_typeを保存
         }
 
         if (!codeStr) return;
@@ -86,7 +88,7 @@ export default function ProfilePage() {
           avatar_url,
         });
 
-        // ✅ フォロー状態チェック（他人のページのときだけ）
+        // ✅ フォロー状態チェック
         if (mine && codeStr !== mine) {
           const resFollow = await fetch(
             `/api/check-follow?target=${encodeURIComponent(codeStr)}&me=${encodeURIComponent(mine)}`,
@@ -103,20 +105,32 @@ export default function ProfilePage() {
     })();
   }, [codeStr, router]);
 
+  // 🔹 click_type → planStatus 正規化
+  const planStatus = useMemo<
+    'free' | 'regular' | 'premium' | 'master' | 'admin'
+  >(() => {
+    switch (clickType) {
+      case 'regular': return 'regular';
+      case 'premium': return 'premium';
+      case 'master': return 'master';
+      case 'admin': return 'admin';
+      default: return 'free';
+    }
+  }, [clickType]);
+
   // 🔹 フォロー処理
   const handleFollow = async () => {
     const auth = getAuth();
     const user = auth.currentUser;
     if (!user) return alert('ログインしてください');
     if (!myCode) return alert('ユーザーコード取得に失敗しました。再読み込みしてください。');
-    if (codeStr === myCode) return; // 自分には送らない
+    if (codeStr === myCode) return;
 
     const token = await user.getIdToken(true);
 
     const res = await fetch('/api/follow', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      // ★ API が期待する2つを送る
       body: JSON.stringify({ to_user_code: codeStr, from_user_code: myCode }),
     });
     if (res.ok) {
@@ -139,7 +153,6 @@ export default function ProfilePage() {
     const res = await fetch('/api/unfollow', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      // ★ こちらも同様
       body: JSON.stringify({ to_user_code: codeStr, from_user_code: myCode }),
     });
     if (res.ok) {
@@ -155,9 +168,17 @@ export default function ProfilePage() {
 
   return (
     <div className="profile-wrapper">
-      <UserProfile profile={profile} />
-
-      {/* ✅ 自分のページ以外にフォローボタン */}
+      {/* ✅ シップ制度も含めて UserProfile に渡す */}
+      <UserProfile
+        profile={profile}
+        myCode={myCode ?? undefined}
+        isMyPage={isMyPage}
+        planStatus={planStatus}
+        onOpenTalk={() => router.push(`/talk?with=${encodeURIComponent(codeStr)}`)}
+      />
+  
+      {/* 🚫 フォロー機能は一時廃止するので削除 */}
+      {/*
       {!isMyPage && (
         <div className="follow-section">
           {followStatus === 'none' && (
@@ -172,7 +193,8 @@ export default function ProfilePage() {
           )}
         </div>
       )}
-
+      */}
+  
       {/* ✅ 自分のページなら編集ボタン */}
       {isMyPage && (
         <div className="my-actions">

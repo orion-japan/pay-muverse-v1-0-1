@@ -7,7 +7,11 @@ type MaybeArray = string[] | string | null | undefined;
 
 export type Profile = {
   user_code: string;
+  /** ← 追加：users.click_username を受けられるように */
+  click_username?: string;
+  /** 既存の profiles.name（フォールバック用） */
   name?: string;
+
   birthday?: string;
   prefecture?: string;
   city?: string;
@@ -56,6 +60,9 @@ export default function MyPageEntry({ profile }: Props) {
 
   const location = [profile.prefecture, profile.city].filter(Boolean).join(' ') || '—';
 
+  // ▼ ここを変更：表示名は click_username 優先、無ければ name
+  const displayName = profile.click_username || profile.name || 'ニックネーム未設定';
+
   return (
     <div className={styles.pageBg}>
       <div className={styles.container}>
@@ -71,7 +78,7 @@ export default function MyPageEntry({ profile }: Props) {
 
           <div className={styles.headMeta}>
             <div className={styles.titleRow}>
-              <h1 className={styles.displayName}>{profile.name || 'ニックネーム未設定'}</h1>
+              <h1 className={styles.displayName}>{displayName}</h1>
               <span className={styles.userCode}>Code: {profile.user_code}</span>
             </div>
             <div className={styles.metaGrid}>

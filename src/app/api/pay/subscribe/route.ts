@@ -6,9 +6,14 @@ import crypto from "crypto";
 import { PLAN_ID_MAP } from "@/lib/constants/planIdMap";
 import {
   getUserByCode,
-  updateUserCreditAndType,
   updateUserSubscriptionMeta,
 } from "@/lib/utils/supabase";
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 const payjp = Payjp(process.env.PAYJP_SECRET_KEY!);
 const safe = (value: any) => (value === undefined || value === null ? "" : value);
@@ -108,8 +113,22 @@ export async function POST(req: NextRequest) {
     );
     logTrail.push("✅ Supabaseサブスク情報更新完了");
 
-    await updateUserCreditAndType(user_code, sofia_credit, plan_type);
-    logTrail.push("✅ Supabaseクレジット更新完了");
+    // ✅ クレジット・クリックタイプ・ステータス更新（adminは除外）
+    if (user.user_role !== "admin") {
+      const { data, error } = await supabase
+        .from("users")
+        .update({
+          sofia_credit,
+          click_type: plan_type,
+          plan_status: plan_type,
+        })
+        .eq("user_code", user_code);
+
+      if (error) throw error;
+      logTrail.push("✅ Supabase: クレジット / click_type / plan_status を更新");
+    } else {
+      logTrail.push("🔒 adminユーザーのため click_type / plan_status は変更しません");
+    }
 
     // 🔐 Google Sheets 認証
     const base64Encoded = process.env.GOOGLE_SERVICE_ACCOUNT_BASE64!;
@@ -121,9 +140,7 @@ export async function POST(req: NextRequest) {
       const decoded = Buffer.from(base64Encoded, "base64").toString("utf-8");
       credentials = JSON.parse(decoded);
     } catch (err) {
-      throw new Error(
-        "GOOGLE_SERVICE_ACCOUNT_BASE64 のデコードまたはパースに失敗しました"
-      );
+      throw new Error("GOOGLE_SERVICE_ACCOUNT_BASE64 のデコードに失敗しました");
     }
 
     const auth = new google.auth.GoogleAuth({
@@ -163,19 +180,11 @@ export async function POST(req: NextRequest) {
         insertDataOption: "INSERT_ROWS",
         requestBody: { values: [row] },
       });
-      logTrail.push(
-        `✅ Google Sheets 書込成功: ${JSON.stringify(writeResult.data, null, 2)}`
-      );
+      logTrail.push(`✅ Google Sheets 書込成功: ${JSON.stringify(writeResult.data, null, 2)}`);
     } catch (sheetError: any) {
       logTrail.push(`❌ Google Sheets 書込失敗: ${sheetError.message}`);
       if (sheetError.response?.data) {
-        logTrail.push(
-          `📄 Google Sheets API 応答: ${JSON.stringify(
-            sheetError.response.data,
-            null,
-            2
-          )}`
-        );
+        logTrail.push(`📄 Google Sheets API 応答: ${JSON.stringify(sheetError.response.data, null, 2)}`);
       }
       return NextResponse.json(
         {
@@ -190,27 +199,16 @@ export async function POST(req: NextRequest) {
 
     // 🎯 課金成功後 → ホームにリダイレクト
     const secret = process.env.MU_SHARED_ACCESS_SECRET!;
-    const homeBase = process.env.HOME_URL || "https://pay.muverse.jp"; // 将来muverse.jpにも対応
+    const homeBase = process.env.HOME_URL || "https://pay.muverse.jp";
     const { ts, sig } = generateSignedQuery(user_code, secret);
+    const redirectUrl = `${homeBase}?user_code=${encodeURIComponent(user_code)}&ts=${ts}&sig=${sig}`;
+    logTrail.push(`🔐 リダイレクト: ${redirectUrl}`);
 
-    logTrail.push(`🔐 署名パラメータ生成: ts=${ts}, sig=${sig}`);
-    logTrail.push(
-      `🏠 リダイレクト先(Home): ${homeBase}?user_code=${encodeURIComponent(
-        user_code
-      )}&ts=${ts}&sig=${sig}`
-    );
-
-    const redirectUrl = `${homeBase}?user_code=${encodeURIComponent(
-      user_code
-    )}&ts=${ts}&sig=${sig}`;
     return NextResponse.redirect(redirectUrl);
-
   } catch (error: any) {
     logTrail.push(`⛔ 例外発生: ${error.message}`);
     if (error.response?.data) {
-      logTrail.push(
-        `📄 API 応答: ${JSON.stringify(error.response.data, null, 2)}`
-      );
+      logTrail.push(`📄 API 応答: ${JSON.stringify(error.response.data, null, 2)}`);
     }
     return NextResponse.json(
       {

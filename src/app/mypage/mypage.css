@@ -146,3 +146,27 @@
 @media (min-width: 540px) {
   .mypage-container { padding-left: 10px !important; padding-right: 10px !important; }
 }
+
+.my-actions-row{
+  display:flex;
+  gap:8px;
+  margin-top:12px;
+  justify-content:flex-end;
+}
+.edit-btn,.settings-btn{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:8px 12px;
+  border:1px solid #e5e7eb;
+  border-radius:10px;
+  background:#fff;
+  text-decoration:none;
+  font-weight:600;
+  transition:background .15s, box-shadow .15s, transform .06s;
+}
+.edit-btn:hover,.settings-btn:hover{
+  background:#f7f8fb;
+  box-shadow:0 2px 10px rgba(0,0,0,.04);
+}
+.edit-btn:active,.settings-btn:active{ transform:translateY(1px); }

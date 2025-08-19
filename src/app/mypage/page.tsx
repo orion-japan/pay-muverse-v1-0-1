@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link'; // ✅ 追加
 import { getAuth, onAuthStateChanged, User } from 'firebase/auth';
 import UserProfile, { Profile } from '@/components/UserProfile/UserProfile';
 import './mypage.css';
@@ -144,13 +145,26 @@ export default function MyPage() {
       </div>
     );
   }
-  
 
-  // ✅ 余計なラッパ（padding の div）を置かず、コンテナ直下に表示
+  // ✅ 構造は維持。下部に「編集」「設定」アクションを追加
   return (
     <div className="mypage-wrapper">
       <div className="mypage-container">
         <UserProfile profile={profileState} />
+
+        {/* ▼ 追加: マイページ操作行（既存レイアウトを崩さない軽量な行） */}
+        <div className="my-actions-row">
+          <button
+            className="edit-btn"
+            onClick={() => router.push('/mypage/create')}
+          >
+            ✏️ プロフィールを編集
+          </button>
+
+          <Link href="/mypage/settings" className="settings-btn" aria-label="設定へ">
+            ⚙️ 設定
+          </Link>
+        </div>
       </div>
     </div>
   );
