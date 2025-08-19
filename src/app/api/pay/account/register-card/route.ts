@@ -1,9 +1,14 @@
 // src/app/api/pay/account/register-card/route.ts
+export const runtime = 'nodejs';        // ★ Node ランタイムで実行
+export const dynamic = 'force-dynamic'; // ★ キャッシュ無効で確実に動かす
+
+// src/app/api/pay/account/register-card/route.ts
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import Payjp from 'payjp';
 import https from 'node:https';
 import { adminAuth } from '@/lib/firebase-admin'; // 既存のadminAuthを利用
+
 
 // ✅ PAY.JP 初期化（タイムアウト120秒 / 2回リトライ / KeepAlive）
 const agent = new https.Agent({ keepAlive: true });

@@ -94,67 +94,88 @@ function PageInner() {
     document.body.appendChild(script);
   };
 
-  // ✅ カード登録処理（iframe完了待ち & 多重実行防止）
-  const handleCardRegistration = async () => {
-    setLoading(true);
+// ① タイムアウト付きトークン作成ヘルパーを「要素を引数に」変更
+const createTokenWithTimeout = async (el: any, ms = 15000) => {
+  return Promise.race([
+    payjp.createToken(el), // ← el を使う
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('タイムアウトしました')), ms)
+    ),
+  ]);
+};
+
+// ② 登録処理
+const handleCardRegistration = async () => {
+  setLoading(true);
+  try {
+    // Firebase → user_code 解決（既存のまま）
+    const user = getAuth().currentUser;
+    if (!user) throw new Error('ログインしてください');
+    const idToken = await user.getIdToken(true);
+    const res = await fetch('/api/account-status', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    const j = await res.json();
+    const resolvedCode = j?.user_code;
+    if (!resolvedCode) throw new Error('ユーザーコードが取得できません');
+
+    // ✅ PAY.JP／Elements 準備チェック
+    if (!payjp) throw new Error('PAY.JP が初期化されていません');
+    if (!cardNumber) throw new Error('カード番号フィールドが初期化されていません');
+
+    // ✅ token 作成（分割 Elements では cardNumber を渡す）
+    let tokenRes;
     try {
-      // ✅ Firebase トークンから user_code を取得
-      const user = getAuth().currentUser;
-      if (!user) throw new Error('ログインしてください');
-      const idToken = await user.getIdToken(true);
-      const res = await fetch('/api/account-status', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${idToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
-      const j = await res.json();
-      const resolvedCode = j?.user_code;
-      if (!resolvedCode) throw new Error('ユーザーコードが取得できません');
-  
-      // ✅ createToken にタイムアウトと1回リトライを追加
-      const createTokenWithTimeout = async (ms = 15000) => {
-        return Promise.race([
-          payjp.createToken(card),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('タイムアウトしました')), ms)
-          ),
-        ]);
-      };
-  
-      let tokenRes;
-      try {
-        tokenRes = await createTokenWithTimeout();
-      } catch {
-        tokenRes = await createTokenWithTimeout(); // 1回リトライ
-      }
-  
-      if (!tokenRes?.id) throw new Error('カードトークンの取得に失敗しました');
-  
-      const token = tokenRes.id;
-  
-      // ✅ バックエンドに user_code と token を送信
-      const cardRes = await fetch('/api/pay/account/register-card', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_code: resolvedCode, token }),
-      });
-  
-      if (!cardRes.ok) {
-        const errMsg = await cardRes.text().catch(() => '');
-        throw new Error(`カード登録失敗: ${errMsg}`);
-      }
-  
-      alert('カード登録が完了しました');
-      await fetchStatus(); // 状態再取得
-    } catch (err: any) {
-      alert(err.message || 'カード登録に失敗しました');
-      console.error('❌ Card registration error:', err);
-    } finally {
-      setLoading(false);
+      tokenRes = await createTokenWithTimeout(cardNumber); // ★ ここを修正
+    } catch {
+      tokenRes = await createTokenWithTimeout(cardNumber); // 1回リトライ
     }
-  };
+
+    if (!tokenRes?.id) {
+      // tokenRes?.error?.message があれば表示
+      const msg = tokenRes?.error?.message || 'カードトークンの取得に失敗しました';
+      throw new Error(msg);
+    }
+    const token = tokenRes.id;
+
+    // ✅ バックエンドへ送信
+// before
+let cardRes = await fetch('/api/pay/account/register-card', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ user_code: resolvedCode, token }),
+});
+
+// 404 なら /register-card にフォールバック
+if (cardRes.status === 404) {
+  cardRes = await fetch('/register-card', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_code: resolvedCode, token }),
+  });
+}
+
+
+
+    if (!cardRes.ok) {
+      const errMsg = await cardRes.text().catch(() => '');
+      throw new Error(`カード登録失敗: ${errMsg}`);
+    }
+
+    alert('カード登録が完了しました');
+    await fetchStatus();
+  } catch (err: any) {
+    alert(err.message || 'カード登録に失敗しました');
+    console.error('❌ Card registration error:', err);
+  } finally {
+    setLoading(false);
+  }
+};
+
   
   
 
