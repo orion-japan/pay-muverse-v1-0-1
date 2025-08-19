@@ -5,16 +5,15 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import './SelfPostModal.css';
 
+type Visibility = 'public' | 'private' | 'friends';
+
 type SelfPostModalProps = {
   isOpen: boolean;
   onClose: () => void;
   userCode: string;
-  /** Selfページから 'self' を渡す。未指定なら null 保存 */
-  boardType?: string | null;
-  /** 正式コールバック名（互換維持） */
-  onPostSuccess?: () => void;
-  /** 互換用の別名（あれば呼ぶ） */
-  onPosted?: () => void;
+  boardType?: string | null;      // 'self' 推奨
+  onPostSuccess?: () => void;     // 互換
+  onPosted?: () => void;          // 互換
 };
 
 export default function SelfPostModal({
@@ -33,9 +32,9 @@ export default function SelfPostModal({
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState('');
   const [isPosting, setIsPosting] = useState(false);
-  const [visibility, setVisibility] = useState<'public' | 'private' | 'friends'>('public');
+  const [visibility, setVisibility] = useState<Visibility>('public');
 
-
+  // モーダル開閉に合わせて初期化＆背景スクロールロック
   useEffect(() => {
     if (!isOpen) {
       setTitle('');
@@ -44,20 +43,47 @@ export default function SelfPostModal({
       setImageFile(null);
       setPreviewUrl('');
       setIsPosting(false);
-      setVisibility('public'); // モーダル閉じたらリセット
+      setVisibility('public');
+      document.body.style.overflow = '';
+      return;
     }
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = '';
+    };
   }, [isOpen]);
 
+  // ESCで閉じる
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onClose]);
+
+  // 画像プレビュー
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setImageFile(file);
-      setPreviewUrl(URL.createObjectURL(file));
-    }
+    const file = e.target.files?.[0] ?? null;
+    setImageFile(file);
   };
 
+  // プレビューURL生成/解放
+  useEffect(() => {
+    if (!imageFile) {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      setPreviewUrl('');
+      return;
+    }
+    const url = URL.createObjectURL(imageFile);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageFile]);
+
   const handlePost = async () => {
-    if (!userCode || isPosting) return;
+    if (!isOpen || !userCode || isPosting) return;
 
     setIsPosting(true);
     try {
@@ -74,11 +100,12 @@ export default function SelfPostModal({
         uploadedUrl = imgData?.url || '';
       }
 
-      // タグと board_type を正規化
-      const normalizedTags = tags
-        .split(',')
-        .map(t => t.trim())
-        .filter(Boolean);
+      // タグ・board_type 正規化
+      const normalizedTags =
+        tags
+          .split(',')
+          .map((t) => t.trim())
+          .filter(Boolean) || [];
 
       const resolvedBoardType =
         boardType === undefined ||
@@ -88,15 +115,15 @@ export default function SelfPostModal({
           ? null
           : String(boardType).trim();
 
-      // 1) 親（posts）を1件だけ作成
+      // 1) 親（posts）作成
       const parentBody = {
         user_code: userCode,
         title: title.trim() || null,
-        content: (content || '').trim() || null,
+        content: content.trim() || null,
         tags: normalizedTags.length ? normalizedTags : null,
         media_urls: uploadedUrl ? [uploadedUrl] : [],
         board_type: resolvedBoardType ?? 'self',
-        visibility, // ← 追加！
+        visibility, // public / friends / private
       };
 
       const res = await fetch('/api/self/create-thread', {
@@ -128,55 +155,73 @@ export default function SelfPostModal({
   if (!isOpen) return null;
 
   return (
-    <div className="modal-overlay">
-      <div className="modal">
-        <h2>📝 つぶやきを投稿</h2>
+    <div className="modal-overlay" onClick={onClose} aria-modal="true" role="dialog">
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <header className="modal-header">
+          <h2>📝 つぶやきを投稿</h2>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="閉じる">
+            ×
+          </button>
+        </header>
 
-        <input
-          type="text"
-          placeholder="タイトル（任意）"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-        />
+        <div className="modal-body">
+          <label className="field">
+            <span>タイトル（任意）</span>
+            <input
+              type="text"
+              placeholder="タイトル"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+          </label>
 
-        <textarea
-          placeholder="いま感じていることを..."
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-        />
+          <label className="field">
+            <span>本文</span>
+            <textarea
+              placeholder="いま感じていることを..."
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+            />
+          </label>
 
-        <input
-          type="text"
-          placeholder="タグ（カンマ区切り）"
-          value={tags}
-          onChange={(e) => setTags(e.target.value)}
-        />
+          <label className="field">
+            <span>タグ（カンマ区切り）</span>
+            <input
+              type="text"
+              placeholder="例: #今の声, #S層"
+              value={tags}
+              onChange={(e) => setTags(e.target.value)}
+            />
+          </label>
 
-        <input type="file" accept="image/*" onChange={handleImageChange} />
+          <label className="field">
+            <span>画像（任意）</span>
+            <input type="file" accept="image/*" onChange={handleImageChange} />
+          </label>
 
-        {previewUrl && <img src={previewUrl} alt="preview" className="preview" />}
+          {previewUrl && <img src={previewUrl} alt="preview" className="preview" />}
 
-        {/* ✅ 公開範囲セレクトボックス */}
-        <label>公開範囲:</label>
-        <select
-  value={visibility}
-  onChange={(e) =>
-    setVisibility(e.target.value as 'public' | 'private' | 'friends')
-  }
-  
->
-  <option value="public">🌐 公開（全体に表示）</option>
-  <option value="friends">👥 友達のみ（限定表示）</option>
-  <option value="private">🔒 非公開（自分のみ）</option>
-</select>
+          <label className="field">
+            <span>公開範囲</span>
+            <select
+              value={visibility}
+              onChange={(e) => setVisibility(e.target.value as Visibility)}
+            >
+              <option value="public">🌐 公開（全体に表示）</option>
+              <option value="friends">👥 友達のみ（限定表示）</option>
+              <option value="private">🔒 非公開（自分のみ）</option>
+            </select>
+          </label>
+        </div>
 
-
-        <div className="modal-actions">
-          <button onClick={onClose}>キャンセル</button>
-          <button onClick={handlePost} disabled={isPosting}>
+        <footer className="modal-actions">
+          <button type="button" onClick={onClose}>
+            キャンセル
+          </button>
+          <button type="button" onClick={handlePost} disabled={isPosting}>
             {isPosting ? '投稿中...' : '投稿'}
           </button>
-        </div>
+        </footer>
       </div>
     </div>
   );

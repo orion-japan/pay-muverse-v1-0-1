@@ -259,9 +259,14 @@ export default function SelfPage() {
       )}
 
       {/* 新規スレッド作成 */}
-      <button className="floating-button attn" aria-label="セルフトークを投稿">
-        +S
-      </button>
+       <button
+  type="button"
+  className="floating-button attn"
+  onClick={openPostModal}
+   aria-label="セルフトークを投稿"
+ >
+   +S
+ </button>
 
       <SelfPostModal
         isOpen={modalOpen}
