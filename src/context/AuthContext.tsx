@@ -2,96 +2,96 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import {
   onAuthStateChanged,
-  onIdTokenChanged,            // ★ 追加：トークン自動更新イベント
   getIdToken,
   setPersistence,
   browserLocalPersistence,
   User,
   signOut,
 } from 'firebase/auth';
-import { auth } from '@/lib/firebase'; // 既存の初期化を利用
+import { auth } from '@/lib/firebase'; // Firebase クライアント初期化
+import { supabase } from '@/lib/supabase'; // ✅ Supabase 追加
 
 type AuthValue = {
   loading: boolean;
   user: User | null;
   idToken: string | null;
-  logout: () => Promise<void>; // 👈 既存APIを維持
+  userCode: string | null; // ✅ 追加
+  logout: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthValue>({
   loading: true,
   user: null,
   idToken: null,
-  logout: async () => {},
+  userCode: null, // ✅ 追加
+  logout: async () => {}, // ダミー関数
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [idToken, setIdToken] = useState<string | null>(null);
+  const [userCode, setUserCode] = useState<string | null>(null); // ✅ 追加
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // 永続化（リロードで currentUser が消えにくくする）
-    setPersistence(auth, browserLocalPersistence).catch(() => { /* noop */ });
+    setPersistence(auth, browserLocalPersistence).catch(() => {});
 
-    // ① サインイン状態の変化を監視
-    const unsubAuth = onAuthStateChanged(auth, async (u) => {
+    const unsub = onAuthStateChanged(auth, async (u) => {
       try {
         setUser(u);
+
         if (u) {
-          // 初回は強制更新で確実に取得
-          const token = await getIdToken(u, /* forceRefresh */ true);
+          const token = await getIdToken(u, true);
           setIdToken(token);
+
+          // ✅ Supabase から user_code を取得
+          const { data, error } = await supabase
+            .from('users')
+            .select('user_code')
+            .eq('firebase_uid', u.uid)
+            .maybeSingle();
+
+          if (data?.user_code) {
+            setUserCode(data.user_code);
+          } else {
+            setUserCode(null);
+            console.warn('[AuthContext] user_code not found:', error?.message);
+          }
         } else {
           setIdToken(null);
+          setUserCode(null);
         }
       } catch (e) {
         console.error('[AuthContext] getIdToken error', e);
         setIdToken(null);
+        setUserCode(null);
       } finally {
         setLoading(false);
       }
     });
 
-    // ② idToken 自動更新のたびに反映（期限切れや権限変更に追従）
-    const unsubToken = onIdTokenChanged(auth, async (u) => {
-      if (!u) {
-        setIdToken(null);
-        return;
-      }
-      try {
-        const token = await getIdToken(u, /* forceRefresh */ false);
-        setIdToken(token);
-      } catch (e) {
-        console.error('[AuthContext] onIdTokenChanged error', e);
-      }
-    });
-
-    // 起動失敗のフェイルセーフ
     const failSafe = setTimeout(() => setLoading(false), 5000);
 
     return () => {
-      unsubAuth();
-      unsubToken();
+      unsub();
       clearTimeout(failSafe);
     };
   }, []);
 
-  // ログアウト
   const logout = async () => {
     try {
       await signOut(auth);
-    } catch (err) {
-      console.error('[AuthContext] logout error:', err);
-    } finally {
       setUser(null);
       setIdToken(null);
+      setUserCode(null); // ✅ ログアウト時に userCode をクリア
+    } catch (err) {
+      console.error('[AuthContext] logout error:', err);
     }
   };
 
   const value = useMemo(
-    () => ({ loading, user, idToken, logout }),
-    [loading, user, idToken]
+    () => ({ loading, user, idToken, logout, userCode }), // ✅ userCode を追加
+    [loading, user, idToken, userCode]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
