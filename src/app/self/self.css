@@ -117,7 +117,7 @@
 .digest-row .line2 {
   color:#444; font-size:13px;
   overflow:hidden; display:-webkit-box;
-  -webkit-line-clamp:2; -webkit-box-orient:vertical;
+  line-clamp:2; -webkit-line-clamp:2; -webkit-box-orient:vertical;
 }
 
 .resonants { display:flex; gap:6px; flex-wrap:wrap; margin-top:2px; }
@@ -206,6 +206,7 @@
   font-size: 1.4rem;
   font-weight: 700;
   background: linear-gradient(90deg, #a18cd1, #fbc2eb);
+  background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   display: inline-block;
@@ -398,3 +399,40 @@
   color: #222;
   transform: scale(1.05);   /* ちょっと拡大して押せそう感 */
 }
+
+/* 1段で並べる & 折り返し禁止 */
+.reaction-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;       /* ← 折り返さない */
+  white-space: nowrap;     /* ← テキストも折り返さない */
+  overflow-x: auto;        /* ← どうしても幅が足りない時は横スクロール */
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 各ボタンは縮まない・1要素として並ぶ */
+.reaction-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 9999px;
+  border: 1px solid var(--reaction-border, #e9e9ef);
+  background: var(--reaction-bg, #fff);
+  flex: 0 0 auto;          /* ← 縮小しない */
+}
+
+/* readOnly 時：クリック不可だが色は薄くしない */
+.reaction-bar.readonly {
+  pointer-events: none;    /* ← 中の全要素をクリック不可に */
+}
+.reaction-bar.readonly .reaction-btn {
+  opacity: 1 !important;   /* ← 半透明化を無効に */
+  filter: none !important;
+  cursor: default;
+}
+
+/* お好みでアイコンやカウントの見た目 */
+.reaction-btn .icon { width: 16px; height: 16px; }
+.reaction-btn .count { font-variant-numeric: tabular-nums; }

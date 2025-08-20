@@ -8,6 +8,7 @@ import ProfileActivity from './ProfileActivity';
 import ProfileFriends from './ProfileFriends';
 import ProfileShared from './ProfileShared';
 import ShipButton from '../ShipButton';
+import MyReactionsCard from "./MyReactionsCard";
 
 // プロフィール型
 export type Profile = {
@@ -32,24 +33,23 @@ export type Profile = {
 // Props 型
 type ProfileProps = {
   profile: Profile;
-  myCode?: string | null; // 自分の user_code
+  myCode?: string | null;
   isMyPage?: boolean;
-  planStatus?: 'free' | 'regular' | 'premium' | 'master' | 'admin'; // ★ プラン追加
-  onOpenTalk?: () => void; // F Talk 開始イベント
+  planStatus?: 'free' | 'regular' | 'premium' | 'master' | 'admin';
+  onOpenTalk?: () => void;
 };
 
 export default function UserProfile({
   profile,
   myCode,
   isMyPage = false,
-  planStatus = 'free', // デフォルトは free
+  planStatus = 'free',
   onOpenTalk,
 }: ProfileProps) {
   const targetUserCode = profile.user_code;
 
   return (
     <div className="profile-container">
-      {/* 1つのグリッドに全カードを並べる */}
       <div className="profile-grid-outer">
         <section className="profile-card"><ProfileBasic profile={profile} /></section>
         <section className="profile-card"><ProfileSNS profile={profile} /></section>
@@ -57,6 +57,12 @@ export default function UserProfile({
         <section className="profile-card"><ProfileActivity profile={profile} /></section>
         <section className="profile-card"><ProfileFriends profile={profile} /></section>
         <section className="profile-card"><ProfileShared profile={profile} /></section>
+
+        {/* ✅ イイネ群カード */}
+        <section className="profile-card">
+          <h2 className="profile-section-title">リアクション集計</h2>
+          <MyReactionsCard userCode={targetUserCode} />
+        </section>
 
         {/* ✅ シップ制度 */}
         <section className="profile-card">

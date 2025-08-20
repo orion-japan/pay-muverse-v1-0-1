@@ -1,54 +1,44 @@
-// /src/app/api/reactions/counts/route.ts
-import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+// /app/api/reactions/counts/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
-export async function POST(req: Request) {
+export const dynamic = 'force-dynamic';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
+const ALLOWED = ['like', 'heart', 'smile', 'wow', 'share'] as const;
+type Totals = Record<(typeof ALLOWED)[number], number>;
+const ZERO: Totals = { like: 0, heart: 0, smile: 0, wow: 0, share: 0 };
+
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const post_id = searchParams.get('post_id') || '';
+  const is_parent = (searchParams.get('is_parent') || 'false') === 'true';
+
+  if (!post_id) {
+    return NextResponse.json({ ok: false, message: 'post_id is required', totals: ZERO }, { status: 400 });
+  }
+
   try {
-    const { postIds }:{ postIds:string[] } = await req.json()
-    if (!Array.isArray(postIds) || !postIds.length) {
-      return NextResponse.json({ countsByPost:{} })
+    const totals: Totals = { ...ZERO };
+    for (const key of ALLOWED) {
+      const { count, error } = await supabase
+        .from('reactions')
+        .select('*', { head: true, count: 'exact' })
+        .eq('post_id', post_id)
+        .eq('reaction', key)
+        .eq('is_parent', is_parent);
+
+      if (error) console.warn('[counts]', key, error.message);
+      totals[key] = count ?? 0;
     }
 
-    const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
-
-    // 1) まずビューがあればそれを使う
-    const { data:fromView, error:viewErr } = await supabase
-      .from('v_post_reaction_counts')
-      .select('post_id,r_type,count')
-      .in('post_id', postIds)
-
-    let rows = fromView
-    if (viewErr || !rows) {
-      // 2) ビューが無い/エラー時はテーブルを直接集計
-      const { data, error } = await supabase
-        .from('post_reactions')
-        .select('post_id,r_type')
-        .in('post_id', postIds)
-      if (error) throw error
-      const map: Record<string, Record<string, number>> = {}
-      for (const r of data || []) {
-        const pid = (r as any).post_id as string
-        const t = (r as any).r_type as string
-        map[pid] ??= {}
-        map[pid][t] = (map[pid][t] ?? 0) + 1
-      }
-      const countsByPost: Record<string, {r_type:string;count:number}[]> = {}
-      for (const pid of postIds) {
-        countsByPost[pid] = Object.entries(map[pid] || {}).map(([rt, c]) => ({ r_type: rt, count: c as number }))
-      }
-      return NextResponse.json({ countsByPost })
-    }
-
-    const countsByPost: Record<string, {r_type:string;count:number}[]> = {}
-    for (const r of rows) {
-      const pid = (r as any).post_id as string
-      countsByPost[pid] ??= []
-      countsByPost[pid].push({ r_type: (r as any).r_type, count: (r as any).count })
-    }
-    return NextResponse.json({ countsByPost })
-  } catch (e) {
-    console.error('/api/reactions/counts error', e)
-    // 失敗時は空で返す（UIを止めない）
-    return NextResponse.json({ countsByPost:{} }, { status: 200 })
+    return NextResponse.json({ ok: true, post_id, is_parent, totals }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (e: any) {
+    console.error('[counts] UNEXPECTED', e);
+    return NextResponse.json({ ok: false, message: 'Unexpected error', totals: ZERO }, { status: 500 });
   }
 }

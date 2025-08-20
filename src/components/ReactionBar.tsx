@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
+import { getSupabaseBrowser } from '@/lib/supabase-browser';
 
 /** 使えるリアクションの種類 */
 type ReactionType = 'like' | 'heart' | 'smile' | 'wow' | 'share';
@@ -21,11 +22,8 @@ type ReactionBarProps = {
   readOnly?: boolean;
   /** 認証コンテキストではなく外部から閲覧者の userCode を渡したい場合に使用（省略可） */
   userCode?: string;
-
-
   /** 自分が既に押しているリアクション（省略可） */
   initialMyReactions?: ReactionType[];
-
   /** 反映後に親へ通知したい時のフック（省略可） */
   onChangeTotals?: (totals: Counts) => void;
 };
@@ -42,7 +40,7 @@ async function toggleReactionClient(params: {
 }) {
   const res = await fetch('/api/reactions/toggle', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' }, // ← 必須
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
   });
 
@@ -52,6 +50,14 @@ async function toggleReactionClient(params: {
     throw new Error(data?.message || `toggleReaction failed (${res.status})`);
   }
   return data as { ok: true; totals?: Counts; post_id: string };
+}
+
+/** 軽量な合計取得API */
+async function fetchCounts(postId: string, isParent: boolean): Promise<Counts> {
+  const q = new URLSearchParams({ post_id: postId, is_parent: String(isParent) });
+  const res = await fetch(`/api/reactions/counts?${q.toString()}`, { cache: 'no-store' });
+  const j = await res.json().catch(() => ({}));
+  return (j?.totals ?? {}) as Counts;
 }
 
 /* =========================================================
@@ -67,9 +73,12 @@ const ReactionBar: React.FC<ReactionBarProps> = ({
   initialMyReactions,
   onChangeTotals,
 }) => {
-  const { userCode: ctxUserCode } = useAuth(); // ← プロジェクト既存の AuthContext から取得
+  const { userCode: ctxUserCode } = useAuth();
   const effectiveUserCode = userCode ?? ctxUserCode;
   const [busyKey, setBusyKey] = useState<ReactionType | null>(null);
+
+  // Supabase クライアント（ブラウザのみ）
+  const sb = getSupabaseBrowser();
 
   // カウントのローカル状態（楽観更新）
   const [counts, setCounts] = useState<Counts>({
@@ -94,19 +103,63 @@ const ReactionBar: React.FC<ReactionBarProps> = ({
     return m;
   });
 
-  const disabled = useMemo(() => readOnly || !effectiveUserCode || !!busyKey, [readOnly, effectiveUserCode, busyKey]);
+  // クリックを許可できるか（readOnly または未ログインなら不可）
+  const canInteract = useMemo(
+    () => !readOnly && !!effectiveUserCode,
+    [readOnly, effectiveUserCode]
+  );
+
+  // 初回ロード時、初期カウントが無い場合はAPIで取得
+  const reload = useCallback(async () => {
+    try {
+      const t = await fetchCounts(postId, isParent);
+      setCounts((c) => ({ ...c, ...t }));
+      onChangeTotals?.(t);
+    } catch (e) {
+      // 失敗しても致命ではない
+      console.warn('[ReactionBar] counts reload failed:', e);
+    }
+  }, [postId, isParent, onChangeTotals]);
+
+  useEffect(() => {
+    if (!initialCounts) reload();
+    // initialCounts が与えられている場合はそのまま使う
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [postId, isParent]);
+
+  // Realtime: reactions の対象 post_id の変化を購読して自動再取得
+  useEffect(() => {
+    if (!sb || !postId) return;
+    const ch = sb
+      .channel(`rx-post-${postId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'reactions', filter: `post_id=eq.${postId}` },
+        () => reload()
+      )
+      .subscribe();
+    return () => {
+      sb.removeChannel(ch);
+    };
+  }, [sb, postId, reload]);
+
+  // グローバル“即時反映”イベント（トグル後に投げる）
+  useEffect(() => {
+    const h = (e: any) => {
+      const pid = e?.detail?.post_id;
+      if (pid === postId) reload();
+    };
+    window.addEventListener('reactions:refresh', h as EventListener);
+    return () => window.removeEventListener('reactions:refresh', h as EventListener);
+  }, [postId, reload]);
 
   const handleToggle = async (reaction: ReactionType) => {
-    if (readOnly) return;
-    if (!effectiveUserCode) {
-      alert('ログイン状態が確認できません。もう一度ログインしてください。');
-      return;
-    }
+    if (!canInteract) return;
     if (busyKey) return;
 
     setBusyKey(reaction);
 
-    // 楽観更新：押していなければ +1、押していれば -1
+    // 楽観更新
     const prevMine = mine[reaction];
     setMine((s) => ({ ...s, [reaction]: !prevMine }));
     setCounts((c) => ({
@@ -123,18 +176,24 @@ const ReactionBar: React.FC<ReactionBarProps> = ({
         user_code: effectiveUserCode!,
       });
 
-      // サーバーが totals を返す場合はそれを優先反映
       if (res?.totals) {
         setCounts((c) => ({ ...c, ...res.totals }));
         onChangeTotals?.(res.totals);
+      } else {
+        // サーバが合計を返さない場合は明示リロード
+        reload();
       }
+
+      // 即時反映イベント（他の同一postのバーも追従）
+      window.dispatchEvent(new CustomEvent('reactions:refresh', { detail: { post_id: postId } }));
     } catch (e: any) {
-      // 失敗したらロールバック
+      // ロールバック
       console.error(e);
-      setMine((s) => ({ ...s, [reaction]: prevMine }));
+      const prevMine2 = !mine[reaction]; // 直前で反転している
+      setMine((s) => ({ ...s, [reaction]: prevMine2 }));
       setCounts((c) => ({
         ...c,
-        [reaction]: Math.max(0, (c[reaction] || 0) + (prevMine ? 1 : -1)),
+        [reaction]: Math.max(0, (c[reaction] || 0) + (prevMine2 ? -1 : 1)),
       }));
       alert(`リアクションに失敗しました：${e?.message || 'Unknown Error'}`);
     } finally {
@@ -143,7 +202,6 @@ const ReactionBar: React.FC<ReactionBarProps> = ({
   };
 
   /* ---------- 表示 ---------- */
-  // ここでは絵文字を使っています。既存のアイコンコンポーネントがあれば差し替えてください
   const items: { key: ReactionType; label: string; aria: string }[] = [
     { key: 'share', aria: '共有', label: '🔁' },
     { key: 'like', aria: 'いいね', label: '👍' },
@@ -154,13 +212,18 @@ const ReactionBar: React.FC<ReactionBarProps> = ({
 
   return (
     <div
-      className="reaction-bar"
+      className={`reaction-bar${!canInteract ? ' readonly' : ''}`}
+      aria-label="Reactions"
+      // 折り返し防止 + 横スクロール許可（極小画面対策）
       style={{
         display: 'flex',
-        justifyContent: 'center', // ← 中央寄せ
+        justifyContent: 'center',
         alignItems: 'center',
         gap: 10,
-        flexWrap: 'wrap',
+        flexWrap: 'nowrap',      // ← 1段固定
+        whiteSpace: 'nowrap',
+        overflowX: 'auto',       // ← 幅不足時は横スクロール
+        WebkitOverflowScrolling: 'touch' as any,
       }}
     >
       {items.map(({ key, label, aria }) => {
@@ -172,8 +235,10 @@ const ReactionBar: React.FC<ReactionBarProps> = ({
             key={key}
             type="button"
             aria-label={`${aria}（現在 ${n}件）`}
-            onClick={() => handleToggle(key)}
-            disabled={disabled}
+            aria-disabled={!canInteract ? 'true' : 'false'} // ← 見た目はそのまま
+            onClick={canInteract ? () => handleToggle(key) : undefined}
+            // 読取専用や未ログインでは disabled を使わない（半透明化防止）
+            disabled={canInteract ? busyKey === key : false} // ← 通信中のみ disabled
             className={`reaction-button ${active ? 'is-active' : ''}`}
             style={{
               display: 'inline-flex',
@@ -183,9 +248,11 @@ const ReactionBar: React.FC<ReactionBarProps> = ({
               borderRadius: 20,
               border: '1px solid #ddd',
               background: active ? '#fff3d1' : '#ffffff',
-              cursor: disabled ? 'not-allowed' : 'pointer',
-              opacity: busyKey === key ? 0.6 : 1,
+              cursor: canInteract ? (busyKey ? 'progress' : 'pointer') : 'default',
+              opacity: busyKey === key ? 0.6 : 1, // ← 読取専用でも薄くしない
               userSelect: 'none',
+              flex: '0 0 auto', // ← 縮めず1要素扱い
+              pointerEvents: canInteract ? 'auto' : 'none', // ← クリック不可
             }}
           >
             <span style={{ fontSize: 16, lineHeight: 1 }}>{label}</span>

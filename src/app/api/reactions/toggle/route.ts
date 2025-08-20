@@ -1,3 +1,4 @@
+// /app/api/reactions/toggle/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -8,13 +9,17 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// 許可するリアクションの種類
-const ALLOWED = new Set(['like', 'heart', 'smile', 'wow', 'share']);
+const ALLOWED = ['like', 'heart', 'smile', 'wow', 'share'] as const;
+type AllowedReaction = (typeof ALLOWED)[number];
+
+// local-only debug
+const DEBUG = process.env.DEBUG_REACTIONS === '1';
+const dlog = (...a: any[]) => DEBUG && console.log('[reactions/toggle]', ...a);
 
 type Body = {
   post_id?: string;
-  reaction?: string;
-  user_code?: string;
+  reaction?: AllowedReaction | string;
+  user_code?: string;          // 押した人
   is_parent?: boolean;
   thread_id?: string | null;
 };
@@ -35,85 +40,105 @@ export async function POST(req: NextRequest) {
   }
 
   const { post_id, reaction, user_code, is_parent = false, thread_id = null } = body || {};
-
-  // バリデーション
   if (!post_id) return bad('post_id is required');
   if (!user_code) return bad('user_code is required');
   if (!reaction) return bad('reaction is required');
-  if (!ALLOWED.has(reaction)) return bad('reaction is not allowed', { reaction });
+  if (!ALLOWED.includes(reaction as AllowedReaction)) return bad('reaction is not allowed', { reaction });
 
-  console.log('[reactions/toggle] ▶ body', { post_id, reaction, user_code, is_parent, thread_id });
+  dlog('req body =', { post_id, reaction, user_code, is_parent, thread_id });
 
-  // reactions テーブル前提:
-  // columns: id(uuid) / post_id(uuid) / user_code(text) / reaction(text) / is_parent(bool) / thread_id(uuid|null) / created_at
-  // 既存に合わせてカラム名を調整してください
   try {
-    // 既に押しているか確認
-    const { data: existing, error: selErr } = await supabase
+    // 投稿者（通知の宛先）
+    const { data: post, error: postErr } = await supabase
+      .from('posts')
+      .select('user_code')
+      .eq('post_id', post_id)
+      .maybeSingle();
+    if (postErr) return NextResponse.json({ ok: false, message: postErr.message }, { status: 500 });
+
+    const target_user_code: string | null = post?.user_code ?? null;
+    if (!target_user_code) {
+      console.warn('[reactions/toggle] post.user_code is NULL for post_id', post_id);
+      return NextResponse.json({ ok: false, message: 'post has no owner (user_code is NULL)' }, { status: 500 });
+    }
+
+    // 既存チェック（列選択せずに head+count）
+    const { count, error: cntSelErr } = await supabase
       .from('reactions')
-      .select('id')
+      .select('*', { head: true, count: 'exact' })
       .eq('post_id', post_id)
       .eq('user_code', user_code)
       .eq('reaction', reaction)
-      .eq('is_parent', is_parent)
-      .maybeSingle();
-
-    if (selErr) {
-      console.error('[reactions/toggle] select error', selErr);
-      return NextResponse.json({ ok: false, message: selErr.message }, { status: 500 });
+      .eq('is_parent', is_parent);
+    if (cntSelErr) {
+      console.error('[reactions/toggle] count select error', cntSelErr);
+      return NextResponse.json({ ok: false, message: cntSelErr.message }, { status: 500 });
     }
 
-    if (existing) {
-      // 付いていれば削除（トグルOFF）
+    if ((count ?? 0) > 0) {
+      // OFF：主キー名に依存せず、複合キーで削除
       const { error: delErr } = await supabase
         .from('reactions')
         .delete()
-        .eq('id', existing.id);
-
+        .match({ post_id, user_code, reaction, is_parent });
       if (delErr) {
         console.error('[reactions/toggle] delete error', delErr);
         return NextResponse.json({ ok: false, message: delErr.message }, { status: 500 });
       }
-      console.log('[reactions/toggle] ✅ toggled OFF');
+      dlog('toggled OFF');
     } else {
-      // 無ければ追加（トグルON）
-      const insert = {
-        post_id,
-        user_code,
-        reaction,
-        is_parent,
-        thread_id,
-      };
-      const { error: insErr } = await supabase.from('reactions').insert(insert);
+      // ON
+      const insertRow = { post_id, user_code, reaction, is_parent, thread_id };
+      const { error: insErr } = await supabase.from('reactions').insert(insertRow);
       if (insErr) {
-        console.error('[reactions/toggle] insert error', insErr, insert);
+        console.error('[reactions/toggle] insert error', insErr, insertRow);
         return NextResponse.json({ ok: false, message: insErr.message }, { status: 500 });
       }
-      console.log('[reactions/toggle] ✅ toggled ON');
+      dlog('toggled ON');
+
+      // 通知（自分自身は通知しない）— 互換カラムもセット
+      if (user_code !== target_user_code) {
+        const notif: Record<string, any> = {
+          type: 'reaction',
+          ref_post_id: post_id,
+          post_id,                                 // 互換
+          ref_reaction: reaction,
+          actor_user_code: user_code,              // 行動者
+          target_user_code,                        // 受け手（投稿者）
+          recipient_user_code: target_user_code,   // 互換: NOT NULL対策
+          user_code: target_user_code,             // 互換
+          is_read: false,
+        };
+        dlog('will insert notification =', notif);
+        const { error: notifErr } = await supabase.from('notifications').insert(notif);
+        if (notifErr) console.warn('[reactions/toggle] notification insert warn:', notifErr.message);
+      }
     }
 
-    // 任意: posts.likes_count を再計算（like のみ）
+    // like の数を posts に同期（任意）
     if (reaction === 'like') {
-      const { count, error: cntErr } = await supabase
+      const { count: likeCount } = await supabase
         .from('reactions')
         .select('*', { count: 'exact', head: true })
         .eq('post_id', post_id)
         .eq('reaction', 'like')
         .eq('is_parent', is_parent);
-
-      if (!cntErr) {
-        await supabase.from('posts').update({ likes_count: count ?? 0 }).eq('post_id', post_id);
-      }
+      await supabase.from('posts').update({ likes_count: likeCount ?? 0 }).eq('post_id', post_id);
     }
 
-    // 最新カウントを返す（UI更新用）
-    const { data: totals, error: aggErr } = await supabase
-      .rpc('count_reactions_by_post', { p_post_id: post_id, p_is_parent: is_parent })
-      .select()
-      .maybeSingle();
-    // ↑ もし RPC をまだ作っていなければ、この部分は省略 or 個別に count() してください
+    // 最新カウント（UI用）
+    const totals: Record<string, number> = {};
+    for (const key of ALLOWED) {
+      const { count: c } = await supabase
+        .from('reactions')
+        .select('*', { count: 'exact', head: true })
+        .eq('post_id', post_id)
+        .eq('reaction', key)
+        .eq('is_parent', is_parent);
+      totals[key] = c ?? 0;
+    }
 
-    return NextResponse.json({ ok: true, post_id, is_parent, totals: totals ?? null });
+    return NextResponse.json({ ok: true, post_id, is_parent, totals });
   } catch (e: any) {
     console.error('[reactions/toggle] UNEXPECTED', e);
     return NextResponse.json({ ok: false, message: 'Unexpected error' }, { status: 500 });

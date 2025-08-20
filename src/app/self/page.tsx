@@ -118,6 +118,51 @@ export default function SelfPage() {
     return out
   }
 
+  /* =========================================================
+   * 反応カウント取得：単発 GET（405 を避けるため /api/reactions/counts は GET 固定）
+   * =======================================================*/
+  const fetchCountsSingle = async (postId: string): Promise<ReactionCount[] | null> => {
+    const url = `/api/reactions/counts?post_id=${encodeURIComponent(postId)}&is_parent=false`
+    const res = await fetch(url, { cache: 'no-store' })
+    if (!res.ok) return null
+    const json = await res.json().catch(() => null)
+    const totals: Record<string, number> | undefined =
+      json && (json.totals || json.counts || json.data)
+    if (!totals) return null
+    return Object.entries(totals).map(([r_type, count]) => ({ r_type, count: count ?? 0 }))
+  }
+
+  /** counts を安全に取得（405/500でも落ちず、一時バックオフ。GET 単発並列） */
+  const safeFetchCounts = async (postIds: string[]) => {
+    if (!postIds.length) {
+      setCountsMap({})
+      return
+    }
+    const now = Date.now()
+    if (now < countsErrorUntilRef.current) return // バックオフ中
+
+    try {
+      const entries = await Promise.all(
+        postIds.map(async (id) => {
+          try {
+            const arr = await fetchCountsSingle(id)
+            return [id, arr ?? []] as const
+          } catch {
+            return [id, countsMap[id] ?? []] as const
+          }
+        })
+      )
+      setCountsMap((prev) => {
+        const next = { ...prev }
+        for (const [id, arr] of entries) next[id] = arr
+        return next
+      })
+    } catch (e) {
+      console.warn('[SelfPage] counts batch error', e)
+      countsErrorUntilRef.current = now + 20_000 // 20秒バックオフ
+    }
+  }
+
   /** 一覧取得 */
   const fetchSelfPosts = async (code: string) => {
     const url = `/api/self-posts?userCode=${encodeURIComponent(code)}&boardType=${encodeURIComponent(BOARD_TYPE)}`
@@ -167,41 +212,8 @@ export default function SelfPage() {
       setStatsMap({})
     }
 
-    // --- 共鳴カウント（B案：500なら静かに諦める＆一時的に再試行停止）
+    // --- 共鳴カウント（安全取得・単発 GET 並列）
     await safeFetchCounts(filtered.map(p => p.post_id))
-  }
-
-  /** counts を安全に取得（500時は劣化 & 当面リトライしない） */
-  const safeFetchCounts = async (postIds: string[]) => {
-    if (!postIds.length) {
-      setCountsMap({})
-      return
-    }
-    const now = Date.now()
-    if (now < countsErrorUntilRef.current) return // バックオフ中
-
-    try {
-      const res = await fetch('/api/reactions/counts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ postIds }),
-      })
-      if (!res.ok) {
-        // 500系はバックオフ
-        if (res.status >= 500) {
-          countsErrorUntilRef.current = now + 60_000 // 60秒は再試行しない
-        }
-        const t = await res.text().catch(() => '')
-        console.warn('[SelfPage] counts fetch failed', res.status, t)
-        return
-      }
-      const { countsByPost } = await res.json()
-      setCountsMap(countsByPost || {})
-    } catch (e) {
-      console.warn('[SelfPage] counts error', e)
-      // ネットワーク系も軽くバックオフ
-      countsErrorUntilRef.current = now + 20_000
-    }
   }
 
   /** リアクション数：postId をキューしてバッチ再取得 */
