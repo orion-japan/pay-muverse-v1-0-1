@@ -3,13 +3,32 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import webpush from 'web-push'
 
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
 const supabase = createClient(url, serviceKey)
 
-const VAPID_PUBLIC = process.env.VAPID_PUBLIC!
-const VAPID_PRIVATE = process.env.VAPID_PRIVATE!
-webpush.setVapidDetails('mailto:no-reply@example.com', VAPID_PUBLIC, VAPID_PRIVATE)
+// --- 変更点: トップレベルで setVapidDetails しない ---
+const VAPID_PUBLIC = process.env.VAPID_PUBLIC || process.env.WEB_PUSH_PUBLIC_KEY
+const VAPID_PRIVATE = process.env.VAPID_PRIVATE || process.env.WEB_PUSH_PRIVATE_KEY
+const VAPID_CONTACT = process.env.WEB_PUSH_CONTACT || 'mailto:no-reply@example.com'
+
+// 必要なときだけ安全に設定
+let vapidReady = false
+function ensureVapid() {
+  if (vapidReady) return true
+  if (!VAPID_PUBLIC || !VAPID_PRIVATE || !VAPID_CONTACT) return false
+  try {
+    webpush.setVapidDetails(VAPID_CONTACT, VAPID_PUBLIC, VAPID_PRIVATE)
+    vapidReady = true
+    return true
+  } catch (e) {
+    console.error('[push] setVapidDetails error:', e)
+    return false
+  }
+}
 
 /**
  * 仕様:
@@ -31,10 +50,24 @@ type PushPayload = {
 
 export async function POST(req: Request) {
   try {
-    const { userCodes, payload } = (await req.json()) as { userCodes?: string[]; payload?: PushPayload }
+    // ← まず VAPID をチェック（未設定なら 501 で安全に終了）
+    if (!ensureVapid()) {
+      return NextResponse.json(
+        { ok: false, message: 'Web Push disabled: missing VAPID keys' },
+        { status: 501 }
+      )
+    }
+
+    const { userCodes, payload } = (await req.json()) as {
+      userCodes?: string[]
+      payload?: PushPayload
+    }
 
     if (!payload?.title || !payload?.body) {
-      return NextResponse.json({ ok: false, message: 'payload.title and payload.body are required' }, { status: 400 })
+      return NextResponse.json(
+        { ok: false, message: 'payload.title and payload.body are required' },
+        { status: 400 }
+      )
     }
 
     // 送信対象ユーザーの決定
@@ -43,7 +76,10 @@ export async function POST(req: Request) {
       targets = userCodes
     } else {
       // 全体送信（push_enabled のみ）
-      const { data, error } = await supabase.from('user_settings').select('user_code').eq('push_enabled', true)
+      const { data, error } = await supabase
+        .from('user_settings')
+        .select('user_code')
+        .eq('push_enabled', true)
       if (error) throw error
       targets = (data || []).map((r) => r.user_code)
     }
@@ -58,7 +94,6 @@ export async function POST(req: Request) {
       .select('user_code, endpoint, p256dh, auth, enabled')
       .in('user_code', targets)
       .eq('enabled', true)
-
     if (subErr) throw subErr
 
     // user_settings も確認（push_enabled=false のユーザーは弾く）
@@ -67,7 +102,9 @@ export async function POST(req: Request) {
       .select('user_code, push_enabled')
       .in('user_code', targets)
     if (setErr) throw setErr
-    const allowSet = new Set(settings?.filter((s) => s.push_enabled !== false).map((s) => s.user_code) || [])
+    const allowSet = new Set(
+      settings?.filter((s) => s.push_enabled !== false).map((s) => s.user_code) || []
+    )
 
     const list = (subs || []).filter((s) => allowSet.has(s.user_code))
 
@@ -91,7 +128,11 @@ export async function POST(req: Request) {
           console.warn('webpush failed:', e?.statusCode, e?.body)
           // 410/404 などは登録を削除
           if (e?.statusCode === 410 || e?.statusCode === 404) {
-            await supabase.from('push_subscriptions').delete().eq('user_code', s.user_code).eq('endpoint', s.endpoint)
+            await supabase
+              .from('push_subscriptions')
+              .delete()
+              .eq('user_code', s.user_code)
+              .eq('endpoint', s.endpoint)
           }
         }
       })
