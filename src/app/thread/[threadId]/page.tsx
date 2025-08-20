@@ -50,6 +50,18 @@ export default function ThreadPage() {
   const seenIds = useRef<Set<string>>(new Set());
 
   /* ===== Helpers ===== */
+  // ReactionBar 用に配列 -> カウントオブジェクトへ変換
+  type CountsLike = Partial<{ like: number; heart: number; smile: number; wow: number; share: number }>;
+  const toCounts = (arr?: ReactionCount[] | null): CountsLike => {
+    const out: CountsLike = {};
+    if (!arr) return out;
+    const allow = new Set(['like', 'heart', 'smile', 'wow', 'share']);
+    for (const a of arr) {
+      const k = String(a?.r_type || '').toLowerCase();
+      if (allow.has(k)) (out as any)[k] = a?.count ?? 0;
+    }
+    return out;
+  };
   // user_code → アバターURL（profiles で拾えたら優先、無ければ /api/avatar/:code）
   const avatarSrcFrom = (code?: string | null) => {
     if (!code) return DEFAULT_AVATAR;
@@ -347,11 +359,12 @@ export default function ThreadPage() {
                 postId={parent.post_id}
                 threadId={parent.thread_id ?? null}
                 isParent={true}
-                initialCounts={toInitialCounts(parent.post_id)}
-                initialMyReactions={parent.my_reactions /* 例: ['like'] */}
+                initialCounts={toCounts(toInitialCounts(parent.post_id))}
               />
             </div>
-        </header>
+          ) : null}
+        </div>
+      </header>
 
         {/* 子コメント */}
         <main className="thread-scroll" ref={listRef}>
@@ -384,17 +397,12 @@ export default function ThreadPage() {
 
             <div className="content">{post.content}</div>
             <div className="reaction-row comment">
-            <ReactionBar
-  postId={post.post_id}
-  threadId={post.thread_id ?? null}
-  isParent={isParent}
-  initialCounts={{
-    like: post.likes_count ?? 0,
-    // 必要に応じて heart/smile/wow/share を渡す
-  }}
-  initialMyReactions={post.my_reactions /* 例: ['like'] */}
-/>
-</div>
+              <ReactionBar
+                postId={post.post_id}
+                threadId={post.thread_id ?? null}
+                initialCounts={toCounts(countsMap[post.post_id])}
+              />
+            </div>
           </article>
         ))}
       </main>
