@@ -54,6 +54,19 @@ export default function SelfPage() {
     Array.isArray(v?.items) ? v.items :
     Array.isArray(v?.rows) ? v.rows : [];
 
+  // ReactionBar 用に配列をカウントオブジェクトへ変換
+  type CountsLike = Partial<{ like: number; heart: number; smile: number; wow: number; share: number }>;
+  const toCounts = (arr?: ReactionCount[] | null): CountsLike => {
+    const out: CountsLike = {};
+    if (!arr) return out;
+    const allow = new Set(['like', 'heart', 'smile', 'wow', 'share']);
+    for (const a of arr) {
+      const k = String(a?.r_type || '').toLowerCase();
+      if (allow.has(k)) (out as any)[k] = a?.count ?? 0;
+    }
+    return out;
+  };
+
   // プロフィール取得
   useEffect(() => {
     if (!code) return;
@@ -316,7 +329,7 @@ export default function SelfPage() {
                 <ReactionBar
                   postId={p.post_id}
                   userCode={viewerUserCode || ''}          // 押す人（閲覧者）
-                  initialCounts={countsMap[p.post_id] || []}
+                  initialCounts={toCounts(countsMap[p.post_id])}
                 />
               </div>
             </li>

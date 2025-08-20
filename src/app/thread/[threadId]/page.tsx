@@ -305,26 +305,7 @@ export default function ThreadPage() {
     }
   };
 
-  const toInitialCounts = (
-    pid: string
-  ): Partial<Record<'like' | 'heart' | 'smile' | 'wow' | 'share', number>> => {
-    const arr = countsMap[pid] || [];
-    const obj: Partial<
-      Record<'like' | 'heart' | 'smile' | 'wow' | 'share', number>
-    > = {};
-    for (const { r_type, count } of arr) {
-      if (
-        r_type === 'like' ||
-        r_type === 'heart' ||
-        r_type === 'smile' ||
-        r_type === 'wow' ||
-        r_type === 'share'
-      ) {
-        obj[r_type] = count;
-      }
-    }
-    return obj;
-  };
+  const toInitialCounts = (pid: string): ReactionCount[] => countsMap[pid] || [];
 
   /* ===== Render ===== */
   return (
@@ -364,14 +345,13 @@ export default function ThreadPage() {
             <div className="parent-like-box">
               <ReactionBar
                 postId={parent.post_id}
-                threadId={null}
+                threadId={parent.thread_id ?? null}
                 isParent={true}
                 initialCounts={toInitialCounts(parent.post_id)}
+                initialMyReactions={parent.my_reactions /* 例: ['like'] */}
               />
             </div>
-          ) : null}
-        </div>
-      </header>
+        </header>
 
         {/* 子コメント */}
         <main className="thread-scroll" ref={listRef}>
@@ -404,13 +384,17 @@ export default function ThreadPage() {
 
             <div className="content">{post.content}</div>
             <div className="reaction-row comment">
-              <ReactionBar
-                postId={post.post_id}
-                threadId={post.thread_id ?? null}
-                isParent={false}
-                initialCounts={toInitialCounts(post.post_id)}
-              />
-            </div>
+            <ReactionBar
+  postId={post.post_id}
+  threadId={post.thread_id ?? null}
+  isParent={isParent}
+  initialCounts={{
+    like: post.likes_count ?? 0,
+    // 必要に応じて heart/smile/wow/share を渡す
+  }}
+  initialMyReactions={post.my_reactions /* 例: ['like'] */}
+/>
+</div>
           </article>
         ))}
       </main>

@@ -15,8 +15,14 @@ type ReactionBarProps = {
   threadId?: string | null;
   /** 親ポスト用のボタン群なら true */
   isParent?: boolean;
-  /** 初期カウント（省略可） */
+  /** 初期の合計カウント（省略可） */
   initialCounts?: Counts;
+  /** 押下を無効化して数のみ表示したい場合に指定 */
+  readOnly?: boolean;
+  /** 認証コンテキストではなく外部から閲覧者の userCode を渡したい場合に使用（省略可） */
+  userCode?: string;
+
+
   /** 自分が既に押しているリアクション（省略可） */
   initialMyReactions?: ReactionType[];
 
@@ -56,10 +62,13 @@ const ReactionBar: React.FC<ReactionBarProps> = ({
   threadId = null,
   isParent = false,
   initialCounts,
+  readOnly = false,
+  userCode,
   initialMyReactions,
   onChangeTotals,
 }) => {
-  const { userCode } = useAuth(); // ← プロジェクト既存の AuthContext から取得
+  const { userCode: ctxUserCode } = useAuth(); // ← プロジェクト既存の AuthContext から取得
+  const effectiveUserCode = userCode ?? ctxUserCode;
   const [busyKey, setBusyKey] = useState<ReactionType | null>(null);
 
   // カウントのローカル状態（楽観更新）
@@ -85,10 +94,11 @@ const ReactionBar: React.FC<ReactionBarProps> = ({
     return m;
   });
 
-  const disabled = useMemo(() => !userCode || !!busyKey, [userCode, busyKey]);
+  const disabled = useMemo(() => readOnly || !effectiveUserCode || !!busyKey, [readOnly, effectiveUserCode, busyKey]);
 
   const handleToggle = async (reaction: ReactionType) => {
-    if (!userCode) {
+    if (readOnly) return;
+    if (!effectiveUserCode) {
       alert('ログイン状態が確認できません。もう一度ログインしてください。');
       return;
     }
@@ -110,7 +120,7 @@ const ReactionBar: React.FC<ReactionBarProps> = ({
         reaction,
         is_parent: isParent,
         thread_id: threadId ?? null,
-        user_code: userCode!,
+        user_code: effectiveUserCode!,
       });
 
       // サーバーが totals を返す場合はそれを優先反映

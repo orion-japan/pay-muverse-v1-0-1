@@ -105,6 +105,19 @@ export default function SelfPage() {
   const avatarSrcOf = (uc?: string | null) =>
     uc ? `/api/avatar/${encodeURIComponent(uc)}` : DEFAULT_AVATAR
 
+  /** ReactionBar 用に配列をカウントオブジェクトへ変換 */
+  type CountsLike = Partial<{ like: number; heart: number; smile: number; wow: number; share: number }>
+  const toCounts = (arr?: ReactionCount[] | null): CountsLike => {
+    const out: CountsLike = {}
+    if (!arr) return out
+    const allow = new Set(['like', 'heart', 'smile', 'wow', 'share'])
+    for (const a of arr) {
+      const k = String(a?.r_type || '').toLowerCase()
+      if (allow.has(k)) (out as any)[k] = a?.count ?? 0
+    }
+    return out
+  }
+
   /** 一覧取得 */
   const fetchSelfPosts = async (code: string) => {
     const url = `/api/self-posts?userCode=${encodeURIComponent(code)}&boardType=${encodeURIComponent(BOARD_TYPE)}`
@@ -377,7 +390,7 @@ export default function SelfPage() {
           <ReactionBar
             postId={p.post_id}
             userCode={userCode || ''}
-            initialCounts={countsMap[p.post_id] || []}
+            initialCounts={toCounts(countsMap[p.post_id])}
             readOnly={true}
           />
         </div>
