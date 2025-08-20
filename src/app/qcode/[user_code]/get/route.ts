@@ -2,8 +2,10 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// （必要なら）Node実行に固定したい場合だけ有効化
-// export const runtime = 'nodejs';
+// Node 実行を明示（Service Role を使う想定のため Edge だと不可）
+export const runtime = 'nodejs';
+// キャッシュせず都度取得したい場合
+export const dynamic = 'force-dynamic';
 
 // Supabase（サーバー権限で読む想定）
 const supabase = createClient(
@@ -14,9 +16,11 @@ const supabase = createClient(
 // GET /qcode/[user_code]/get
 export async function GET(
   _req: Request,
-  { params }: { params: { user_code: string } } // ★ ここが重要（context で受ける）
+  // ★ ここがポイント：Record<string, string | string[]> にする
+  { params }: { params: Record<string, string | string[]> }
 ) {
-  const { user_code } = params;
+  const raw = params?.user_code;
+  const user_code = Array.isArray(raw) ? raw[0] : raw;
 
   if (!user_code) {
     return NextResponse.json(
@@ -28,20 +32,12 @@ export async function GET(
   console.log('[qcode/get] ▶ user_code:', user_code);
 
   try {
-    // 取得元のテーブルは実際のスキーマに合わせて調整してください
-    // 例1: users テーブルに q_code がある場合
+    // スキーマに合わせてテーブル名を調整してください
     const { data, error } = await supabase
-      .from('users')
+      .from('users')              // 例: users テーブルに q_code がある場合
       .select('q_code')
       .eq('user_code', user_code)
       .maybeSingle();
-
-    // 例2（profiles にある場合）:
-    // const { data, error } = await supabase
-    //   .from('profiles')
-    //   .select('q_code')
-    //   .eq('user_code', user_code)
-    //   .maybeSingle();
 
     if (error) {
       console.error('[qcode/get] ❌ supabase error', error);
