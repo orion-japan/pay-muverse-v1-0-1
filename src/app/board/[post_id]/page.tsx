@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import ImageSlider from './ImageSlider';
 import CommentForm from './CommentForm';
 import CommentsSection from './CommentsSection';
+import Link from 'next/link'; // ★ 追加
 
 import './post.css';
 
@@ -83,11 +84,11 @@ export default async function BoardPostPage({
 
   return (
     <main style={{ maxWidth: 840, margin: '0 auto', padding: 16 }}>
-      {/* 🟢 戻るボタン */}
+      {/* 🟢 戻るボタン（Linkに変更） */}
       <div style={{ marginBottom: 12 }}>
-        <a href="/board" style={{ fontSize: 14, color: '#555' }}>
+        <Link href="/board" className="back-link" style={{ fontSize: 14, color: '#555' }}>
           ← Iボードに戻る
-        </a>
+        </Link>
       </div>
 
       <article>
