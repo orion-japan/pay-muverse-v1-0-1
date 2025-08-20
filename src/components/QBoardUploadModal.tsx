@@ -6,7 +6,7 @@ export function QBoardUploadModal() {
   return (
     <div className="qboard-modal">
       <div className="modal-content">
-        <h2>Qボードに投稿</h2>
+        <h2>Iボードに投稿</h2>
       </div>
     </div>
   );

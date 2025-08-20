@@ -3,4 +3,14 @@
     min-height: 100dvh;
     background: #fff;
   }
-  
+  /* スレッド画面用の薄いラッパ。ほかのページとCSSが干渉しないようにスコープを区切る */
+.thread-shell {
+  --max-width: 480px;
+  width: 100%;
+  max-width: var(--max-width);
+  margin: 0 auto;
+  position: relative;
+}
+
+/* ここ以下のレイアウトは全て thread-shell 内だけに適用 */
+.thread-shell * { box-sizing: border-box; }

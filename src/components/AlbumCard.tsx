@@ -5,8 +5,8 @@ import './AlbumCard.css';
 
 type Post = {
   post_id: string;
-  title?: string;
-  content?: string;
+  title?: string | null;
+  content?: string | null;
   media_urls: string[];
   tags?: string[];
   created_at: string;
@@ -31,68 +31,50 @@ export default function AlbumCard({
 }: AlbumCardProps) {
   const handleEditClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    console.log('[AlbumCard] ✏️ 編集ボタンが押されました');
-    if (onEdit) onEdit();
+    onEdit?.();
   };
+
+  const firstSrc = post.media_urls?.[0] || '';
 
   return (
     <div
       className={`album-card ${isQMode ? 'q-mode' : ''} ${isChecked ? 'checked blink' : ''}`}
-      onClick={() => {
-        if (isQMode) {
-          console.log('[AlbumCard] ✅ Qモード画像クリック → onQSelect 実行');
-          onQSelect();
-        } else {
-          console.log('[AlbumCard] 📸 通常モード画像クリック → onClick 実行');
-          onClick();
-        }
+      onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') onClick();
       }}
     >
-      {/* Qモード時のチェックボックス（非表示でクリック対応） */}
+      {/* Qモード時だけチェックボックスを前面に */}
       {isQMode && (
         <input
           type="checkbox"
+          className="q-checkbox"
           checked={isChecked}
           onChange={(e) => {
             e.stopPropagation();
-            console.log('[AlbumCard] ✅ チェックボックスが切り替えられました');
             onQSelect();
           }}
-          className="q-checkbox"
+          onClick={(e) => e.stopPropagation()}
+          aria-label="選択"
         />
       )}
 
-      {/* 画像表示エリア：複数 → 横スライド／単数 → 通常表示 */}
-      {post.media_urls.length > 1 ? (
-        <div className="image-carousel">
-          {post.media_urls.map((url, index) => (
-            <img
-              key={index}
-              src={url}
-              alt={`Image ${index}`}
-              className="carousel-image"
-              onError={(e) => {
-                console.warn('[AlbumCard] ⚠️ 画像読み込み失敗:', url);
-                (e.target as HTMLImageElement).style.display = 'none';
-              }}
-            />
-          ))}
-        </div>
-      ) : (
-        <img
-          src={post.media_urls[0] || ''}
-          alt="Album Image"
-          className="album-image"
-          onError={(e) => {
-            console.warn('[AlbumCard] ⚠️ 画像読み込み失敗:', post.media_urls[0]);
-            (e.target as HTMLImageElement).style.display = 'none';
-          }}
-        />
-      )}
+      {/* 画像 */}
+      <img
+        src={firstSrc}
+        alt={post.title || 'Album Image'}
+        className="album-image"
+        onError={(e) => {
+          (e.currentTarget as HTMLImageElement).style.display = 'none';
+        }}
+        draggable={false}
+      />
 
-      {/* 編集ボタン（オプション） */}
-      {onEdit && (
-        <button className="edit-btn" onClick={handleEditClick}>
+      {/* 編集ボタン（Qモード中は隠す） */}
+      {!!onEdit && !isQMode && (
+        <button className="edit-btn" onClick={handleEditClick} aria-label="編集">
           ✏️
         </button>
       )}

@@ -1,240 +1,343 @@
-'use client'
+// src/app/thread/[threadId]/page.tsx
+'use client';
 
-import { useParams, useRouter } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
-import { useAuth } from '@/context/AuthContext'
-import { supabase } from '@/lib/supabase' // ✅ Realtime 用に追加
-import './ThreadPage.css'
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/context/AuthContext';
+import ReactionBar from '@/components/ReactionBar';
+import './ThreadPage.css';
 
+/* ===== Types ===== */
 type Post = {
-  post_id: string
-  content: string
-  created_at: string
-  click_username?: string | null
-  user_code?: string | null
-  avatar_url?: string | null
-  media_urls?: string[]
-}
+  post_id: string;
+  user_code: string | null;
+  click_username?: string | null; // 表示名をここに格納
+  content?: string | null;
+  created_at: string;
+  media_urls?: string[] | null;
+  is_posted?: boolean | null;
+  thread_id?: string | null;
+};
 
-const DEFAULT_AVATAR = '/iavatar_default.png'
+type ReactionCount = { r_type: string; count: number };
 
-// self と同様：署名URLを返すAPIを通して表示
-const avatarSrcFrom = (user_code?: string | null) =>
-  user_code ? `/api/avatar/${encodeURIComponent(user_code)}` : DEFAULT_AVATAR
+/* ===== Consts ===== */
+const DEFAULT_AVATAR = '/iavatar_default.png';
 
+/* ===== Page ===== */
 export default function ThreadPage() {
-  const params = useParams()
-  const router = useRouter()
-  const { idToken, userCode } = useAuth()
+  const router = useRouter();
+  const { threadId } = useParams<{ threadId: string }>();
+  const { userCode } = useAuth();
 
-  const threadIdParam =
-    Array.isArray(params?.threadId) ? params.threadId[0] : (params?.threadId as string | undefined)
-  const threadId = typeof threadIdParam === 'string' ? threadIdParam : ''
+  const [parent, setParent] = useState<Post | null>(null);
+  const [children, setChildren] = useState<Post[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [errMsg, setErrMsg] = useState('');
+  const [newComment, setNewComment] = useState('');
 
-  const [posts, setPosts] = useState<Post[]>([])
-  const [newComment, setNewComment] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [errMsg, setErrMsg] = useState<string | null>(null)
-  const listRef = useRef<HTMLDivElement | null>(null)
+  // 反応カウント（post_id -> ReactionCount[]）
+  const [countsMap, setCountsMap] = useState<Record<string, ReactionCount[]>>({});
 
-  const fetchPosts = async () => {
-    if (!threadId) {
-      setErrMsg('スレッドIDが不正です')
-      setLoading(false)
-      return
+  // user_code -> avatar_url（profiles で拾えたものをキャッシュ）
+  const [avatarMap, setAvatarMap] = useState<Record<string, string>>({});
+
+  // リスト自動スクロール
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  // 重複挿入ガード（投稿即時追加＋Realtime二重到着を抑止）
+  const seenIds = useRef<Set<string>>(new Set());
+
+  /* ===== Helpers ===== */
+  // user_code → アバターURL（profiles で拾えたら優先、無ければ /api/avatar/:code）
+  const avatarSrcFrom = (code?: string | null) => {
+    if (!code) return DEFAULT_AVATAR;
+    // profiles で拾えたら優先（あるなら使う）
+    // if (avatarMap[code]) return avatarMap[code];
+    // 既定は /api/avatar/:code
+    return `/api/avatar/${encodeURIComponent(code)}`;
+  };
+
+  // 画像404時のフォールバック（1回だけ）
+  const onAvatarError = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const el = e.currentTarget;
+    if (el.dataset.fallbackApplied === '1') return;
+    el.dataset.fallbackApplied = '1';
+    el.src = new URL(DEFAULT_AVATAR, location.origin).toString();
+  };
+
+  const goProfile = (code?: string | null) => {
+    if (!code) return;
+    router.push(`/profile/${encodeURIComponent(code)}`);
+  };
+
+  /** profiles(name, avatar_url) から一括補完 */
+  async function hydrateFromProfiles(posts: Post[]) {
+    const set = new Set<string>();
+    for (const p of posts) {
+      if (typeof p.user_code === 'string' && p.user_code.trim()) set.add(p.user_code);
     }
-    setErrMsg(null)
-    try {
-      const res = await fetch(`/api/thread-posts?threadId=${encodeURIComponent(threadId)}`, {
-        cache: 'no-store',
-      })
-      if (!res.ok) {
-        const t = await res.text().catch(() => '')
-        setErrMsg(`取得に失敗しました (${res.status})`)
-        console.error('[ThreadPage] fetch failed:', res.status, t)
-        return
-      }
-      const data: Post[] = await res.json()
-      if (!Array.isArray(data)) {
-        setErrMsg('データ形式が不正です')
-        console.error('[ThreadPage] data not array:', data)
-        return
-      }
-      setPosts(data)
-    } catch (e) {
-      console.error('[ThreadPage] fetch exception:', e)
-      setErrMsg('取得時にエラーが発生しました')
-    } finally {
-      setLoading(false)
+    const codes = Array.from(set);
+    if (!codes.length) return posts;
+
+    const { data: profRows, error: profErr } = await supabase
+      .from('profiles')
+      .select('user_code,name,avatar_url')
+      .in('user_code', codes);
+
+    if (profErr) {
+      console.warn('[Thread] profiles fetch error', profErr);
+      return posts;
     }
+
+    const nameMap = new Map<string, string | null>();
+    const addAvatars: Record<string, string> = {};
+    (profRows || []).forEach((r: any) => {
+      nameMap.set(r.user_code, r.name ?? null);
+      if (r.avatar_url) addAvatars[r.user_code] = r.avatar_url as string;
+    });
+    setAvatarMap(prev => ({ ...prev, ...addAvatars }));
+
+    return posts.map(p =>
+      p.user_code
+        ? { ...p, click_username: nameMap.get(p.user_code) ?? p.click_username ?? p.user_code }
+        : p
+    );
   }
 
-  useEffect(() => {
-    setLoading(true)
-    fetchPosts()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadId])
-
-  const handlePost = async () => {
-    const text = newComment.trim()
-    if (!text || !threadId) return
-
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (idToken) headers.Authorization = `Bearer ${idToken}`
-
+  /** 反応カウント（API → 失敗時はpost_reactionsからフォールバック集計） */
+  async function fetchCountsBulk(ids: string[]) {
+    if (!ids.length) {
+      setCountsMap({});
+      return;
+    }
     try {
-      const res = await fetch('/api/create-thread-post', {
+      const res = await fetch('/api/reactions/counts', {
         method: 'POST',
-        headers,
-        body: JSON.stringify({
-          thread_id: threadId,
-          content: text,
-          board_type: 'self',
-          user_code: userCode ?? null,
-        }),
-      })
-      if (!res.ok) {
-        const bodyText = await res.text().catch(() => '')
-        alert(`送信に失敗しました (${res.status})`)
-        console.error('[ThreadPage] post failed', res.status, bodyText)
-        return
-      }
-      const created: Post = await res.json()
-      setNewComment('')
-      setPosts((prev) => [...prev, created])
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ postIds: ids }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      const { countsByPost } = await res.json();
+      setCountsMap(countsByPost || {});
+    } catch {
+      try {
+        const { data, error } = await supabase
+          .from('post_reactions')
+          .select('post_id,type')
+          .in('post_id', ids);
+        if (error) throw error;
 
-      requestAnimationFrame(() => {
-        if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight
-      })
-    } catch (e) {
-      console.error('[ThreadPage] post exception', e)
-      alert('送信時にエラーが発生しました。')
+        const tmp: Record<string, Record<string, number>> = {};
+        (data || []).forEach((r: any) => {
+          const pid = String(r.post_id);
+          const t = String(r.type);
+          tmp[pid] ??= {};
+          tmp[pid][t] = (tmp[pid][t] || 0) + 1;
+        });
+        const packed: Record<string, ReactionCount[]> = {};
+        Object.entries(tmp).forEach(([pid, m]) => {
+          packed[pid] = Object.entries(m).map(([r_type, count]) => ({ r_type, count }));
+        });
+        setCountsMap(packed);
+      } catch (e) {
+        console.warn('[Thread] fallback counts error', e);
+        setCountsMap({});
+      }
     }
   }
 
-  // 常に最新へスクロール
+  /* ===== Initial load ===== */
   useEffect(() => {
-    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight
-  }, [posts])
+    let mounted = true;
+    (async () => {
+      if (!threadId) return;
+      try {
+        setLoading(true);
+        setErrMsg('');
 
-  // ✅ Realtime 購読（親: post_id、子: parent_post_id）
+        // 親
+        const { data: pRow, error: pErr } = await supabase
+          .from('posts')
+          .select('post_id,user_code,content,created_at,media_urls,is_posted,thread_id')
+          .eq('post_id', threadId)
+          .single();
+        if (pErr) throw pErr;
+
+        // 子（昇順）
+        const { data: cRows, error: cErr } = await supabase
+          .from('posts')
+          .select('post_id,user_code,content,created_at,media_urls,is_posted,thread_id')
+          .eq('thread_id', threadId)
+          .order('created_at', { ascending: true });
+        if (cErr) throw cErr;
+
+        const [hydratedParent] = await hydrateFromProfiles([pRow as Post]);
+        const hydratedChildren = await hydrateFromProfiles((cRows || []) as Post[]);
+        if (!mounted) return;
+
+        setParent(hydratedParent);
+        setChildren(hydratedChildren);
+
+        const ids = [hydratedParent.post_id, ...hydratedChildren.map(p => p.post_id)];
+        await fetchCountsBulk(ids);
+      } catch (e: any) {
+        console.error('[ThreadPage] init error', e);
+        setErrMsg(e?.message || '読み込みに失敗しました');
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId]);
+
+  /* ===== Realtime ===== */
   useEffect(() => {
-    if (!threadId) return
+    if (!threadId) return;
 
-    // 親ポストの変更
-    const upsertParent = (row: any) => {
-      setPosts((prev) => {
-        if (!prev.length) return [row]
-        // 親は配列先頭という前提を維持
-        if (prev[0]?.post_id === row.post_id) {
-          const next = [...prev]
-          next[0] = { ...next[0], ...row }
-          return next
-        }
-        // もし親がまだいない場合は先頭に差し込み
-        return [row, ...prev]
-      })
-    }
-
-    // 子ポストの変更
-    const upsertChild = (row: any) => {
-      // children は posts[1..] として保持。created_at 昇順で並べる
-      setPosts((prev) => {
-        if (!prev.length) return prev // 親未ロード時は無視（初回 fetch 後に届く想定）
-        const parent = prev[0]
-        const children = prev.slice(1)
-        const idx = children.findIndex((c) => c.post_id === row.post_id)
-        if (idx === -1) {
-          const merged = [...children, row].sort(
-            (a, b) => +new Date(a.created_at) - +new Date(b.created_at)
-          )
-          return [parent, ...merged]
-        } else {
-          const next = [...children]
-          next[idx] = { ...next[idx], ...row }
-          next.sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at))
-          return [parent, ...next]
-        }
-      })
-    }
-
-    const removeChild = (row: any) => {
-      setPosts((prev) => {
-        if (!prev.length) return prev
-        const parent = prev[0]
-        const children = prev.slice(1).filter((c) => c.post_id !== row.post_id)
-        return [parent, ...children]
-      })
-    }
-
-    const channel = supabase
-      .channel(`thread:${threadId}`)
-      // 親（post_id が一致）
+    // 子投稿の変化
+    const chPosts = supabase
+      .channel(`thread_posts_${threadId}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'posts', filter: `post_id=eq.${threadId}` },
-        (payload) => {
-          if (payload.eventType === 'DELETE') {
-            // 親削除の扱いは任意：ここでは一覧を空に
-            setPosts([])
-          } else {
-            upsertParent(payload.new)
+        { event: '*', schema: 'public', table: 'posts', filter: `thread_id=eq.${threadId}` },
+        async payload => {
+          if (payload.eventType === 'INSERT') {
+            const row = payload.new as Post;
+            if (seenIds.current.has(row.post_id)) return; // 重複ガード
+            const [hydrated] = await hydrateFromProfiles([row]);
+            setChildren(prev =>
+              prev.some(p => p.post_id === row.post_id) ? prev : [...prev, hydrated]
+            );
+            seenIds.current.add(row.post_id);
+            fetchCountsBulk([row.post_id]);
+          } else if (payload.eventType === 'UPDATE') {
+            const row = payload.new as Post;
+            const [hydrated] = await hydrateFromProfiles([row]);
+            setChildren(prev => prev.map(p => (p.post_id === row.post_id ? hydrated : p)));
+          } else if (payload.eventType === 'DELETE') {
+            const row = payload.old as Post;
+            setChildren(prev => prev.filter(p => p.post_id !== (row as any).post_id));
           }
         }
       )
-      // 子（parent_post_id が一致）
+      .subscribe(() => console.log('[ThreadPage] Realtime (posts) subscribed'));
+
+    // 親のリアクション
+    const chReactParent = supabase
+      .channel(`reactions_parent_${threadId}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'posts', filter: `parent_post_id=eq.${threadId}` },
-        (payload) => {
-          if (payload.eventType === 'DELETE') removeChild(payload.old)
-          else upsertChild(payload.new)
+        { event: '*', schema: 'public', table: 'post_reactions', filter: `post_id=eq.${threadId}` },
+        async () => {
+          await fetchCountsBulk([String(threadId)]);
         }
       )
-      .subscribe()
+      .subscribe(() => console.log('[ThreadPage] Realtime (reactions parent) subscribed'));
+
+    // スレッド全体のリアクション
+    const chReactThread = supabase
+      .channel(`reactions_thread_${threadId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'post_reactions', filter: `thread_id=eq.${threadId}` },
+        async payload => {
+          const changed = (payload.new as any)?.post_id || (payload.old as any)?.post_id;
+          if (changed) await fetchCountsBulk([changed]);
+        }
+      )
+      .subscribe(() => console.log('[ThreadPage] Realtime (reactions thread) subscribed'));
 
     return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [threadId])
+      supabase.removeChannel(chPosts);
+      supabase.removeChannel(chReactParent);
+      supabase.removeChannel(chReactThread);
+    };
+  }, [threadId]);
 
-  // 親＝配列先頭
-  const parent = posts[0] || null
+  /* ===== Auto scroll to bottom on change ===== */
+  useEffect(() => {
+    if (!listRef.current) return;
+    const t = setTimeout(() => {
+      listRef.current!.scrollTop = listRef.current!.scrollHeight;
+    }, 40);
+    return () => clearTimeout(t);
+  }, [children.length]);
 
-  const goProfile = (targetCode?: string | null) => {
-    if (!targetCode) return;
+  /* ===== Qコード記録だけ（存在しなければ無視） ===== */
+  useEffect(() => {
+    if (!parent?.user_code) return;
+    fetch(`/api/qcode/${encodeURIComponent(parent.user_code)}/get`).catch(() => {});
+  }, [parent?.user_code]);
 
-    // ✅ 自分自身ならマイページへ
-    if (userCode && targetCode === userCode) {
-      router.push('/mypage');
-    } else {
-      // ✅ 他人なら /profile/[code]
-      router.push(`/profile/${encodeURIComponent(targetCode)}`);
+  /* ===== 投稿（Service Route 経由 /api/thread/comment） ===== */
+  const handlePost = async () => {
+    setErrMsg('');
+    try {
+      const text = newComment.trim();
+      if (!text || !userCode || !threadId) return;
+
+      const res = await fetch('/api/thread/comment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ threadId, userCode, content: text }),
+      });
+      if (!res.ok) {
+        const t = await res.text().catch(() => '');
+        throw new Error(`POST /api/thread/comment ${res.status} ${t}`);
+      }
+
+      const inserted = (await res.json()) as Post;
+      setNewComment('');
+
+      const [hydrated] = await hydrateFromProfiles([inserted]);
+      setChildren(prev =>
+        prev.some(p => p.post_id === inserted.post_id) ? prev : [...prev, hydrated]
+      );
+      seenIds.current.add(inserted.post_id);
+    } catch (e) {
+      console.error('[ThreadPage] handlePost error', e);
+      setErrMsg('投稿に失敗しました');
     }
   };
 
-  // 子リスト
-  const children = (() => {
-    const arr = posts.slice(1)
-    if (!parent || arr.length === 0) return arr
-    const first = arr[0]
-    const isDup =
-      first.post_id === parent.post_id ||
-      (first.content === parent.content &&
-        Math.abs(new Date(first.created_at).getTime() - new Date(parent.created_at).getTime()) <
-          5 * 60 * 1000)
-    return isDup ? arr.slice(1) : arr
-  })()
+  const toInitialCounts = (
+    pid: string
+  ): Partial<Record<'like' | 'heart' | 'smile' | 'wow' | 'share', number>> => {
+    const arr = countsMap[pid] || [];
+    const obj: Partial<
+      Record<'like' | 'heart' | 'smile' | 'wow' | 'share', number>
+    > = {};
+    for (const { r_type, count } of arr) {
+      if (
+        r_type === 'like' ||
+        r_type === 'heart' ||
+        r_type === 'smile' ||
+        r_type === 'wow' ||
+        r_type === 'share'
+      ) {
+        obj[r_type] = count;
+      }
+    }
+    return obj;
+  };
 
+  /* ===== Render ===== */
   return (
-    <div className="thread-grid">
-      {/* 親ヘッダー */}
-      <header className="thread-header">
+    <div className="thread-page">
+      {/* 上部・戻るボタン */}
+      <div className="thread-topbar">
         <button className="back-btn" onClick={() => router.back()} aria-label="戻る">
           ← 戻る
         </button>
+      </div>
 
-        {/* ✅ アイコン & 名前をクリックでプロフィールへ */}
+      {/* 親ヘッダー（親BOX内にいいね群） */}
+      <header className="thread-header">
         <img
           src={avatarSrcFrom(parent?.user_code)}
           alt="avatar"
@@ -243,14 +346,8 @@ export default function ThreadPage() {
           height={44}
           onClick={() => goProfile(parent?.user_code)}
           style={{ cursor: parent?.user_code ? 'pointer' : 'default' }}
-          onError={(e) => {
-            const el = e.currentTarget as HTMLImageElement
-            if (el.dataset.fallbackApplied === '1') return
-            el.dataset.fallbackApplied = '1'
-            el.src = DEFAULT_AVATAR
-          }}
+          onError={onAvatarError}
         />
-
         <div className="header-info">
           <div className="header-title">
             <strong
@@ -262,15 +359,26 @@ export default function ThreadPage() {
             <small>{parent ? new Date(parent.created_at).toLocaleString('ja-JP') : ''}</small>
           </div>
           {parent?.content ? <p className="header-text">{parent.content}</p> : null}
+
+          {parent?.post_id ? (
+            <div className="parent-like-box">
+              <ReactionBar
+                postId={parent.post_id}
+                threadId={null}
+                isParent={true}
+                initialCounts={toInitialCounts(parent.post_id)}
+              />
+            </div>
+          ) : null}
         </div>
       </header>
 
-      {/* 子コメント */}
-      <main className="thread-scroll" ref={listRef}>
-        {loading && <div className="meta">読み込み中...</div>}
+        {/* 子コメント */}
+        <main className="thread-scroll" ref={listRef}>
+          {loading && <div className="meta">読み込み中...</div>}
         {errMsg && <div className="meta" style={{ color: '#ff9aa2' }}>{errMsg}</div>}
 
-        {children.map((post) => (
+        {children.map(post => (
           <article key={post.post_id} className="post">
             <div className="author-line">
               <img
@@ -281,12 +389,7 @@ export default function ThreadPage() {
                 height={32}
                 style={{ cursor: post.user_code ? 'pointer' : 'default' }}
                 onClick={() => goProfile(post.user_code)}
-                onError={(e) => {
-                  const el = e.currentTarget as HTMLImageElement
-                  if (el.dataset.fallbackApplied === '1') return
-                  el.dataset.fallbackApplied = '1'
-                  el.src = DEFAULT_AVATAR
-                }}
+                onError={onAvatarError}
               />
               <div className="author-meta">
                 <strong
@@ -298,7 +401,16 @@ export default function ThreadPage() {
                 <span>{new Date(post.created_at).toLocaleString('ja-JP')}</span>
               </div>
             </div>
+
             <div className="content">{post.content}</div>
+            <div className="reaction-row comment">
+              <ReactionBar
+                postId={post.post_id}
+                threadId={post.thread_id ?? null}
+                isParent={false}
+                initialCounts={toInitialCounts(post.post_id)}
+              />
+            </div>
           </article>
         ))}
       </main>
@@ -307,7 +419,7 @@ export default function ThreadPage() {
       <footer className="post-form">
         <textarea
           value={newComment}
-          onChange={(e) => setNewComment(e.target.value)}
+          onChange={e => setNewComment(e.target.value)}
           placeholder="コメントを入力..."
         />
         <button onClick={handlePost} disabled={!newComment.trim()}>
@@ -315,5 +427,5 @@ export default function ThreadPage() {
         </button>
       </footer>
     </div>
-  )
+  );
 }

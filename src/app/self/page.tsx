@@ -1,12 +1,15 @@
+// src/app/self/page.tsx
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import SelfPostModal from '@/components/SelfPostModal'
+import ReactionBar from '@/components/ReactionBar'
 import './self.css'
 
+/* ==== 型 ==== */
 type Post = {
   post_id: string
   title?: string | null
@@ -30,9 +33,51 @@ type ThreadStat = {
   has_ai?: boolean | null
 }
 
+type ReactionCount = { r_type: string; count: number }
+
+/* ==== 定数 ==== */
 const BOARD_TYPE = 'self'
 const DEFAULT_AVATAR = '/iavatar_default.png'
 
+/* ==== かんたんトースト（アプリ内通知表示） ==== */
+function Toasts({ items, onClose }: {
+  items: Array<{ id: string; title?: string | null; body?: string | null; url?: string | null }>
+  onClose: (id: string) => void
+}) {
+  if (!items.length) return null
+  return (
+    <div style={{
+      position: 'fixed', right: 12, bottom: 12, display: 'flex',
+      flexDirection: 'column', gap: 8, zIndex: 1000
+    }}>
+      {items.slice(-3).map(n => (
+        <div key={n.id}
+          onClick={() => { if (n.url) location.assign(n.url) }}
+          style={{
+            minWidth: 260, maxWidth: 360, padding: '10px 12px',
+            borderRadius: 12, background: 'rgba(30,30,40,.92)', color: '#fff',
+            boxShadow: '0 8px 24px rgba(0,0,0,.25)', cursor: n.url ? 'pointer' : 'default'
+          }}>
+          <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 14 }}>
+            {n.title || '通知'}
+          </div>
+          {n.body && <div style={{ fontSize: 13, lineHeight: 1.4, opacity: .9 }}>{n.body}</div>}
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onClose(n.id) }}
+            aria-label="閉じる"
+            style={{
+              marginTop: 8, padding: '4px 8px', borderRadius: 8,
+              background: '#6c6cff', color: '#fff', border: 'none'
+            }}
+          >OK</button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/* ==== ページ本体 ==== */
 export default function SelfPage() {
   const { userCode } = useAuth()
   const router = useRouter()
@@ -41,25 +86,35 @@ export default function SelfPage() {
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [statsMap, setStatsMap] = useState<Record<string, ThreadStat>>({})
+  const [countsMap, setCountsMap] = useState<Record<string, ReactionCount[]>>({})
+  const [toasts, setToasts] = useState<Array<{ id: string; title?: string | null; body?: string | null; url?: string | null }>>([])
+
+  // counts 連打抑止（B案：安全劣化）
+  const countsErrorUntilRef = useRef<number>(0)             // この時刻までは counts 再試行しない
+  const countsRefreshQueue = useRef<Set<string>>(new Set()) // 再取得キュー
+  const countsRefreshTimer = useRef<any>(null)
 
   /** 配列に正規化するヘルパ */
   const toArray = (v: any): any[] =>
     Array.isArray(v) ? v :
-    Array.isArray(v?.data) ? v.data :
-    Array.isArray(v?.items) ? v.items :
-    Array.isArray(v?.rows) ? v.rows : []
+      Array.isArray(v?.data) ? v.data :
+        Array.isArray(v?.items) ? v.items :
+          Array.isArray(v?.rows) ? v.rows : []
+
+  /** アバターURL */
+  const avatarSrcOf = (uc?: string | null) =>
+    uc ? `/api/avatar/${encodeURIComponent(uc)}` : DEFAULT_AVATAR
 
   /** 一覧取得 */
   const fetchSelfPosts = async (code: string) => {
-    const url = `/api/self-posts?userCode=${encodeURIComponent(
-      code
-    )}&boardType=${encodeURIComponent(BOARD_TYPE)}`
+    const url = `/api/self-posts?userCode=${encodeURIComponent(code)}&boardType=${encodeURIComponent(BOARD_TYPE)}`
     const res = await fetch(url, { cache: 'no-store' })
     if (!res.ok) {
       const t = await res.text().catch(() => '')
       console.error('[SelfPage] ❌ fetch failed', res.status, t)
       setPosts([])
       setStatsMap({})
+      setCountsMap({})
       return
     }
 
@@ -73,30 +128,79 @@ export default function SelfPage() {
 
     setPosts(filtered)
 
+    // --- 統計（返信数など）
     try {
       const ids = filtered.map((p) => p.post_id)
       if (!ids.length) {
         setStatsMap({})
-        return
+      } else {
+        const q = ids.map((id) => `ids=${encodeURIComponent(id)}`).join('&')
+        const statRes = await fetch(`/api/thread-stats?${q}`, { cache: 'no-store' })
+        if (!statRes.ok) {
+          const t = await statRes.text().catch(() => '')
+          console.warn('[SelfPage] stats fetch failed', statRes.status, t)
+          setStatsMap({})
+        } else {
+          const arr = toArray(await statRes.json())
+          const map: Record<string, ThreadStat> = {}
+          for (const s of arr) {
+            if (s?.post_id) map[s.post_id] = s
+          }
+          setStatsMap(map)
+        }
       }
-      const q = ids.map((id) => `ids=${encodeURIComponent(id)}`).join('&')
-      const statRes = await fetch(`/api/thread-stats?${q}`, { cache: 'no-store' })
-      if (!statRes.ok) {
-        const t = await statRes.text().catch(() => '')
-        console.warn('[SelfPage] stats fetch failed', statRes.status, t)
-        setStatsMap({})
-        return
-      }
-      const arr = toArray(await statRes.json())
-      const map: Record<string, ThreadStat> = {}
-      for (const s of arr) {
-        if (s?.post_id) map[s.post_id] = s
-      }
-      setStatsMap(map)
     } catch (e) {
       console.warn('[SelfPage] stats error', e)
       setStatsMap({})
     }
+
+    // --- 共鳴カウント（B案：500なら静かに諦める＆一時的に再試行停止）
+    await safeFetchCounts(filtered.map(p => p.post_id))
+  }
+
+  /** counts を安全に取得（500時は劣化 & 当面リトライしない） */
+  const safeFetchCounts = async (postIds: string[]) => {
+    if (!postIds.length) {
+      setCountsMap({})
+      return
+    }
+    const now = Date.now()
+    if (now < countsErrorUntilRef.current) return // バックオフ中
+
+    try {
+      const res = await fetch('/api/reactions/counts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ postIds }),
+      })
+      if (!res.ok) {
+        // 500系はバックオフ
+        if (res.status >= 500) {
+          countsErrorUntilRef.current = now + 60_000 // 60秒は再試行しない
+        }
+        const t = await res.text().catch(() => '')
+        console.warn('[SelfPage] counts fetch failed', res.status, t)
+        return
+      }
+      const { countsByPost } = await res.json()
+      setCountsMap(countsByPost || {})
+    } catch (e) {
+      console.warn('[SelfPage] counts error', e)
+      // ネットワーク系も軽くバックオフ
+      countsErrorUntilRef.current = now + 20_000
+    }
+  }
+
+  /** リアクション数：postId をキューしてバッチ再取得 */
+  const enqueueCountsRefresh = (postId: string) => {
+    countsRefreshQueue.current.add(postId)
+    if (countsRefreshTimer.current) return
+    countsRefreshTimer.current = setTimeout(async () => {
+      const ids = [...countsRefreshQueue.current]
+      countsRefreshQueue.current.clear()
+      countsRefreshTimer.current = null
+      await safeFetchCounts(ids)
+    }, 500) // 500ms 以内の更新をまとめる
   }
 
   /** 初期取得 */
@@ -109,7 +213,7 @@ export default function SelfPage() {
     fetchSelfPosts(userCode).finally(() => setLoading(false))
   }, [userCode])
 
-  /** Realtime購読 */
+  /** 投稿の Realtime 購読 */
   useEffect(() => {
     if (!userCode) return
 
@@ -119,9 +223,12 @@ export default function SelfPage() {
       setPosts((prev) => {
         const idx = prev.findIndex((p) => p.post_id === row.post_id)
         if (idx === -1) {
-          return [{ ...row }, ...prev].sort(
+          const next = [{ ...row }, ...prev].sort(
             (a, b) => +new Date(b.created_at) - +new Date(a.created_at)
           )
+          // 新規が入ったら counts も取りにいく（安全取得）
+          safeFetchCounts([row.post_id])
+          return next
         }
         const next = [...prev]
         next[idx] = { ...next[idx], ...row }
@@ -131,6 +238,10 @@ export default function SelfPage() {
 
     const remove = (row: any) => {
       setPosts((prev) => prev.filter((p) => p.post_id !== row.post_id))
+      setCountsMap((m) => {
+        const { [row.post_id]: _, ...rest } = m
+        return rest
+      })
     }
 
     const channel = supabase
@@ -152,13 +263,62 @@ export default function SelfPage() {
       )
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
-          console.log('[SelfPage] 🔔 Realtime subscribed')
+          console.log('[SelfPage] 🔔 Realtime (posts) subscribed')
         }
       })
 
-    return () => {
-      supabase.removeChannel(channel)
-    }
+    return () => { supabase.removeChannel(channel) }
+  }, [userCode])
+
+  /** リアクションの Realtime 購読（counts をバッチ再取得） */
+  useEffect(() => {
+    if (!userCode) return
+
+    const channel = supabase
+      .channel(`reactions:self:${userCode}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'post_reactions' },
+        (payload) => {
+          const row = (payload.new || payload.old) as any
+          if (row?.post_id) enqueueCountsRefresh(row.post_id)
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[SelfPage] 🔔 Realtime (reactions) subscribed')
+        }
+      })
+
+    return () => { supabase.removeChannel(channel) }
+  }, [userCode])
+
+  /** アプリ内リアル通知（notifications を購読してトースト） */
+  useEffect(() => {
+    if (!userCode) return
+    const channel = supabase
+      .channel(`notif:${userCode}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT', schema: 'public', table: 'notifications',
+          filter: `recipient_user_code=eq.${userCode}`
+        },
+        (payload) => {
+          const n: any = payload.new || {}
+          const toast = { id: n.id || String(Date.now()), title: n.title, body: n.body, url: n.url }
+          setToasts((prev) => [...prev, toast])
+          // 自動クローズ
+          setTimeout(() => setToasts((prev) => prev.filter(t => t.id !== toast.id)), 6000)
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[SelfPage] 🔔 Realtime (notifications) subscribed')
+        }
+      })
+
+    return () => { supabase.removeChannel(channel) }
   }, [userCode])
 
   // ===== UIヘルパ =====
@@ -166,9 +326,6 @@ export default function SelfPage() {
     new Date(iso).toLocaleString('ja-JP', { dateStyle: 'short', timeStyle: 'short' })
 
   const ellipsis = (s: string, n = 120) => (s.length > n ? s.slice(0, n) + '…' : s)
-
-  const avatarSrcOf = (uc?: string | null) =>
-    uc ? `/api/avatar/${encodeURIComponent(uc)}` : DEFAULT_AVATAR
 
   const looksAI = (p: Post) => {
     const st = statsMap[p.post_id]
@@ -191,6 +348,7 @@ export default function SelfPage() {
           src={avatarUrl}
           alt=""
           onClick={() => p.user_code && router.push(`/self/${p.user_code}`)}
+          onError={(e) => { (e.currentTarget as HTMLImageElement).src = DEFAULT_AVATAR }}
           style={{ cursor: 'pointer' }}
         />
         <div className="oneline">
@@ -212,6 +370,16 @@ export default function SelfPage() {
           <span className="meta">{formatDate(p.created_at)}</span>
           {replyCount > 0 && <span className="pill">{replyCount}</span>}
           {looksAI(p) && <span className="pill ai">AI</span>}
+        </div>
+
+        {/* 親は「数のみ」= readOnly で表示 */}
+        <div className="reaction-row">
+          <ReactionBar
+            postId={p.post_id}
+            userCode={userCode || ''}
+            initialCounts={countsMap[p.post_id] || []}
+            readOnly={true}
+          />
         </div>
       </div>
     )
@@ -306,6 +474,12 @@ export default function SelfPage() {
           setLoading(true)
           fetchSelfPosts(userCode).finally(() => setLoading(false))
         }}
+      />
+
+      {/* アプリ内通知トースト */}
+      <Toasts
+        items={toasts}
+        onClose={(id) => setToasts((prev) => prev.filter(t => t.id !== id))}
       />
     </div>
   )

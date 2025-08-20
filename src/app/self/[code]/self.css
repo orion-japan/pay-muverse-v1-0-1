@@ -1,37 +1,134 @@
-/* src/app/self/[code]/self.css */
-.self-page {
-    padding: 1rem;
+/* ===============================
+   src/app/self/[code]/self.css
+   =============================== */
+
+/* ページ基本 */
+.self-page { padding: 1rem; }
+.self-page h1 { font-size: 1.5rem; margin-bottom: 1rem; }
+
+/* 既存: 一覧アイテムなど（必要なら残す） */
+.digest-row { display:flex; align-items:center; gap:.5rem; padding:.5rem; border-bottom:1px solid #eee; cursor:pointer; }
+.digest-row .avatar { width:36px; height:36px; border-radius:50%; }
+.friend-btn { background:#6c5ce7; color:#fff; border:none; padding:.5rem 1rem; border-radius:6px; cursor:pointer; }
+.friend-btn.remove { background:#d63031; }
+
+/* ===== Self 投稿一覧（/self/[code]）用の ReactionBar 調整 ===== */
+
+/* actions-row 自体を横並びに固定 */
+.self-page .actions-row{
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  margin-top: 6px !important;
+  /* もし inline-style で wrap が入っていても上書き */
+  flex-wrap: nowrap !important;
+}
+
+/* ReactionBar コンテナ（コンポーネント直下の div） */
+.self-page .actions-row .reaction-bar{
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  flex-wrap: nowrap !important;    /* ★ 1段固定 */
+}
+
+/* 各ボタン（button.reaction-btn） */
+.self-page .actions-row .reaction-btn{
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+
+  padding: 4px 10px !important;    /* くっきり＋押しやすく */
+  border: 1px solid #bbb !important;
+  border-radius: 16px !important;
+  background: #f0f0f8 !important;
+  color: #222 !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;  /* 中で改行させない */
+  transition: background .15s ease, border-color .15s ease, transform .12s ease !important;
+}
+
+/* アイコン・数字を横維持（どこかで span{display:block} されてても上書き） */
+.self-page .actions-row .reaction-btn span,
+.self-page .actions-row .reaction-btn .count{
+  display: inline-block !important;
+  line-height: 1 !important;
+}
+.self-page .actions-row .reaction-btn .count{
+  font-size: 12px !important;
+  color: #222 !important;
+  margin-left: 2px !important;
+}
+
+/* ホバー（PC時） */
+.self-page .actions-row .reaction-btn:hover{
+  background: #e8e8f3 !important;
+  border-color: #9fa0b8 !important;
+  transform: translateY(-1px) !important;
+}
+
+/* リストの間隔を少し詰める（任意） */
+.self-page .self-list .self-item{ padding-bottom: 10px; }
+.self-page .self-item .date{ color: #6b6b77; }
+
+/* 狭い画面でさらに凝縮 */
+@media (max-width: 430px){
+  .self-page .actions-row{ gap: 8px !important; }
+  .self-page .actions-row .reaction-bar{ gap: 6px !important; }
+  .self-page .actions-row .reaction-btn{
+    padding: 3px 8px !important;
+    gap: 5px !important;
   }
-  
-  .self-page h1 {
-    font-size: 1.5rem;
-    margin-bottom: 1rem;
-  }
-  
-  .digest-row {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem;
-    border-bottom: 1px solid #eee;
-    cursor: pointer;
-  }
-  
-  .digest-row .avatar {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-  }
-  
-  .friend-btn {
-    background: #6c5ce7;
-    color: white;
-    border: none;
-    padding: 0.5rem 1rem;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-  .friend-btn.remove {
-    background: #d63031;
-  }
-  
+}
+
+/* ===== Self個人ページ: リストの素の余白/黒点を除去 ===== */
+.self-page .self-list{
+  list-style: none;     /* 黒点(•)を消す */
+  padding-left: 0;      /* 左のインデントを消す → 左寄りに見える原因 */
+  margin: 0;
+}
+
+.self-page .self-item{
+  list-style: none;
+  padding: 10px 0;
+  border-bottom: 1px solid #eee;
+}
+
+/* タイトル行の余白調整（任意） */
+.self-page .self-item-title{ margin-bottom: 4px; }
+
+/* Reaction 行は横1段を維持（前回の指定そのまま活かす） */
+.self-page .actions-row{
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  margin-top: 6px !important;
+  flex-wrap: nowrap !important;
+}
+.self-page .actions-row .reaction-bar{
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  flex-wrap: nowrap !important;
+}
+.self-page .actions-row .reaction-btn{
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 4px 10px !important;
+  border: 1px solid #bbb !important;
+  border-radius: 16px !important;
+  background: #f0f0f8 !important;
+  color: #222 !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+}
+.self-page .actions-row .reaction-btn .count{
+  font-size: 12px !important;
+  color: #222 !important;
+  margin-left: 2px !important;
+}

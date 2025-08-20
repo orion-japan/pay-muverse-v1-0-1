@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { copyImageToPublic } from '@/lib/copyImageToPublic';
+// 必要に応じて IBoardPostModal.css にリネーム可（今は既存CSSを流用）
 import './QBoardPostModal.css';
 
 type Post = {
@@ -13,19 +14,19 @@ type Post = {
   created_at: string;
 };
 
-type QBoardPostModalProps = {
+type IBoardPostModalProps = {
   posts: Post[];
   userCode: string;
   onClose: () => void;
   onPosted?: () => void;
 };
 
-export default function QBoardPostModal({
+export default function IBoardPostModal({
   posts,
   userCode,
   onClose,
   onPosted,
-}: QBoardPostModalProps) {
+}: IBoardPostModalProps) {
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('');
   const [tags, setTags] = useState('');
@@ -34,12 +35,13 @@ export default function QBoardPostModal({
   const [isPosting, setIsPosting] = useState(false);
 
   useEffect(() => {
-    console.log('📍 QBoardPostModal 表示開始');
+    console.log('📍 IBoardPostModal 表示開始');
     console.log('🧾 userCode:', userCode);
     console.log('🖼️ posts:', posts);
 
+    // 初期プレビュー：重複排除 & 空文字除去
     const initialUrls = posts.flatMap((p) => p.media_urls || []);
-    const uniqueUrls = Array.from(new Set(initialUrls)); // ✅ 重複排除
+    const uniqueUrls = Array.from(new Set(initialUrls)).filter(Boolean);
     setMediaUrls(uniqueUrls);
   }, [posts, userCode]);
 
@@ -54,7 +56,7 @@ export default function QBoardPostModal({
       }
 
       setIsPosting(true);
-      console.log('🟡 投稿処理開始', { title, category, tags, mediaUrls });
+      console.log('🟡 Iボード投稿処理開始', { title, category, tags, mediaUrls });
 
       const publicUrls: string[] = [];
 
@@ -90,26 +92,24 @@ export default function QBoardPostModal({
         category,
         tags: tagArray,
         media_urls: publicUrls,
-        visibility: 'public',   // ✅ Qボードは公開固定
-        is_posted: true,        // ✅ 投稿済みにする
-        board_type: 'i',        // ✅ i領域に投稿
-        layout_type: 'default', // 将来UI切り替え用
+        visibility: 'public',     // 公開固定
+        is_posted: true,          // 投稿済み
+        board_type: 'iboard',     // ← Iボードに統一
+        layout_type: 'default',   // 予備
       };
 
       console.log('📝 投稿データ送信:', postData);
 
-      // ✅ API先を /api/i-posts に修正
+      // Iボード用 API
       const response = await fetch('/api/i-posts', {
         method: 'POST',
         body: JSON.stringify(postData),
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
       });
 
       const result = await response.json().catch(() => ({}));
       if (response.ok) {
-        console.log('✅ 投稿成功:', result);
+        console.log('✅ Iボード 投稿成功:', result);
         onPosted?.();
         onClose();
       } else {
@@ -121,14 +121,14 @@ export default function QBoardPostModal({
       alert('エラーが発生しました');
     } finally {
       setIsPosting(false);
-      console.log('🟢 投稿処理完了');
+      console.log('🟢 Iボード 投稿処理完了');
     }
   };
 
   return (
     <div className="qboard-modal">
       <div className="modal-content">
-        <h2>Qボードに投稿</h2>
+        <h2>Iボードに投稿</h2>
 
         <input
           type="text"
@@ -136,6 +136,7 @@ export default function QBoardPostModal({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
         />
+
         <select
           value={category}
           onChange={(e) => setCategory(e.target.value)}
@@ -143,7 +144,7 @@ export default function QBoardPostModal({
         >
           <option value="">カテゴリを選択</option>
           <option value="投稿">投稿</option>
-          <option value="Ｑボード">Ｑボード</option>
+          <option value="Iボード">Iボード</option>
           <option value="思い">思い</option>
           <option value="ビジョン">ビジョン</option>
           <option value="報告">報告</option>
@@ -156,12 +157,14 @@ export default function QBoardPostModal({
           <option value="お知らせ">お知らせ</option>
           <option value="その他">その他</option>
         </select>
+
         <input
           type="text"
           placeholder="タグ（カンマ区切り）"
           value={tags}
           onChange={(e) => setTags(e.target.value)}
         />
+
         <textarea
           placeholder="コメント・説明（任意）"
           value={content}

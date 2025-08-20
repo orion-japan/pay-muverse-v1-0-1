@@ -107,7 +107,7 @@ export default function PostModal({
           visibility: 'private',   // ✅ 常に private 固定
           is_posted: true,
           media_urls,
-          board_type: 'i',
+          board_type: 'album',
         }),
       });
 

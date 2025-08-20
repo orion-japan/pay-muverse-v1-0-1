@@ -331,3 +331,70 @@
 @media (max-width: 380px) {
   .floating-button { right: 14px; bottom: 78px; width: 60px; height: 60px; }
 }
+/* .digest-row.compact は grid: 28px 1fr なので、ReactionBar を 2 列目に固定 */
+.digest-row.compact .reaction-row{
+  grid-column: 2 / 3;       /* ★これが効きます */
+  display: flex;            /* 横並び */
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+/* Self 一覧のリアクション行を 1 行固定 & コンパクト化 */
+.digest-row.compact .reaction-row .reaction-bar{
+  display: flex;
+  flex-wrap: nowrap;       /* ← 折り返さない */
+  gap: 6px;                /* ← すこし詰める */
+  align-items: center;
+}
+
+.digest-row.compact .reaction-row .reaction-btn{
+  padding: 2px 6px;        /* ← コンパクト */
+  font-size: 12px;
+  line-height: 1;
+}
+
+.digest-row.compact .reaction-row .reaction-btn .count{
+  font-size: 11px;
+}
+
+/* OK（修正後） */
+.digest-row.compact .reaction-row .reaction-bar{
+  display: flex;
+  flex-wrap: nowrap;   /* 1段固定 */
+  gap: 6px;
+  align-items: center;
+}
+.digest-row.compact .reaction-row .reaction-btn{
+  padding:2px 6px; font-size:12px; line-height:1;
+}
+.digest-row.compact .reaction-row .reaction-btn .count{ font-size:11px; }
+
+/* 共鳴ボタン（通常時） */
+.reaction-row .reaction-btn {
+  background: #f8f8f8;     /* 少しグレー背景 */
+  color: #444;             /* 文字色を濃く */
+  border: 1px solid #ccc;  /* 枠線を追加して視認性UP */
+  border-radius: 16px;
+  font-weight: 600;        /* 太字 */
+  transition: all 0.2s ease;
+}
+
+/* アイコン（emoji）を少し大きく */
+.reaction-row .reaction-btn .icon {
+  font-size: 16px;
+}
+
+/* カウント数字もはっきり */
+.reaction-row .reaction-btn .count {
+  color: #333;
+  font-weight: 500;
+  margin-left: 4px;
+}
+
+/* ホバーで濃く（PC用） */
+.reaction-row .reaction-btn:hover {
+  background: #e0e0e0;
+  border-color: #999;
+  color: #222;
+  transform: scale(1.05);   /* ちょっと拡大して押せそう感 */
+}

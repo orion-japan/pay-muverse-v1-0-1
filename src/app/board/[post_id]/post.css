@@ -1,0 +1,40 @@
+.slider-wrap {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    gap: 8px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .slide {
+    flex: 0 0 100%;
+    scroll-snap-align: center;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #f6f6f6;
+  }
+  .slide img {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+  
+  .nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(0,0,0,0.5);
+    color: #fff;
+    cursor: pointer;
+  }
+  .nav.prev { left: 8px; }
+  .nav.next { right: 8px; }
+  
+  .post-card { cursor: default; }              /* カード自体はクリックしない */
+.title-link { color: inherit; text-decoration: none; }
+.title-link:hover { text-decoration: underline; }
+.image-link { display: block; }
+.meta-link { text-decoration: none; color: inherit; }

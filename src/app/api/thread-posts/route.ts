@@ -9,9 +9,8 @@ type Post = {
   created_at: string
   thread_id?: string | null
   parent_board?: string | null
-  // ここに後で付与する
-  click_username?: string | null   // ← profiles.name を入れる
-  avatar_url?: string | null       // ← profiles.avatar_url を入れる
+  click_username?: string | null
+  avatar_url?: string | null
 }
 
 export async function GET(req: NextRequest) {
@@ -23,22 +22,26 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // 1) 親つぶやき（is_thread を優先、なければ post_id 一致）
+    // 1) 親（is_thread を優先）
     let originalPost: Post | null = null
 
-    const { data: withFlag } = await supabase
+    const { data: withFlag, error: ofErr } = await supabase
       .from('posts')
-      .select('*')
+      .select('post_id,user_code,content,created_at,thread_id,parent_board,is_thread')
       .eq('post_id', threadId)
       .eq('is_thread', true)
       .maybeSingle()
 
+    if (ofErr) {
+      // ログだけ（is_thread が無い環境も想定）
+      console.warn('[thread-posts] is_thread check warn:', ofErr.message)
+    }
     if (withFlag) originalPost = withFlag as Post
 
     if (!originalPost) {
       const { data, error } = await supabase
         .from('posts')
-        .select('*')
+        .select('post_id,user_code,content,created_at,thread_id,parent_board')
         .eq('post_id', threadId)
         .single()
       if (error || !data) {
@@ -48,30 +51,33 @@ export async function GET(req: NextRequest) {
       originalPost = data as Post
     }
 
-    // 2) 返信（thread_id 優先、無ければ parent_board）
+    // 2) 返信（thread_id → parent_board）
     let replies: Post[] = []
     const { data: byThreadId, error: e1 } = await supabase
       .from('posts')
-      .select('*')
+      .select('post_id,user_code,content,created_at,thread_id,parent_board')
       .eq('thread_id', threadId)
       .order('created_at', { ascending: true })
+
     if (!e1 && Array.isArray(byThreadId) && byThreadId.length) {
       replies = byThreadId as Post[]
     } else {
       const { data: byParent, error: e2 } = await supabase
         .from('posts')
-        .select('*')
+        .select('post_id,user_code,content,created_at,thread_id,parent_board')
         .eq('parent_board', threadId)
         .order('created_at', { ascending: true })
       if (!e2 && Array.isArray(byParent)) replies = byParent as Post[]
     }
 
-    const all = [originalPost, ...replies]
+    // 重複除去（念のため）
+    const allMap = new Map<string, Post>()
+    allMap.set(originalPost.post_id, originalPost)
+    for (const r of replies) allMap.set(r.post_id, r)
+    const all = Array.from(allMap.values())
 
-    // 3) profiles から名前とアイコンをまとめて取得（✅ profiles.name / profiles.avatar_url を使用）
-    const codes = Array.from(
-      new Set(all.map(p => p?.user_code).filter(Boolean) as string[])
-    )
+    // 3) profiles から name / avatar_url を一括取得
+    const codes = Array.from(new Set(all.map(p => p?.user_code).filter(Boolean) as string[]))
 
     const nameMap = new Map<string, string | null>()
     const avatarMap = new Map<string, string | null>()
@@ -79,28 +85,27 @@ export async function GET(req: NextRequest) {
     if (codes.length > 0) {
       const { data: profilesRows, error: pErr } = await supabase
         .from('profiles')
-        .select('user_code, name, avatar_url')
+        .select('user_code,name,avatar_url')
         .in('user_code', codes)
 
       if (pErr) {
         console.error('[thread-posts] profiles fetch error:', pErr)
       } else {
         profilesRows?.forEach((p: any) => {
-          nameMap.set(p.user_code, p.name ?? null)          // ← name
-          avatarMap.set(p.user_code, p.avatar_url ?? null)  // ← avatar_url
+          nameMap.set(p.user_code, p.name ?? null)
+          avatarMap.set(p.user_code, p.avatar_url ?? null)
         })
       }
     }
 
     const enriched: Post[] = all.map(p => ({
       ...p,
-      // ✅ 表示名は profiles.name を click_username に格納して返す（構造は維持）
       click_username: (p.user_code && nameMap.get(p.user_code)) ?? null,
-      // ✅ アイコンも profiles.avatar_url を優先
       avatar_url: (p.user_code && avatarMap.get(p.user_code)) ?? null,
     }))
 
-    return NextResponse.json(enriched)
+    // キャッシュしない（常に新鮮）
+    return NextResponse.json(enriched, { status: 200, headers: { 'Cache-Control': 'no-store' } })
   } catch (e) {
     console.error('[thread-posts] unexpected:', e)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
