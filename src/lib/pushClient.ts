@@ -1,57 +1,62 @@
 // src/lib/pushClient.ts
-let toastInstalled = false;
+const PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? '';
 
-export async function ensurePushReady() {
-  if (typeof window === 'undefined') return;
-  if (!('serviceWorker' in navigator)) return;
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+}
 
-  // SW 登録（既に登録済みならそのまま）
+/**
+ * SW登録 → 通知権限（未決なら要求）→ Push購読 → サーバへ送信 までをまとめて実行
+ */
+export async function registerAndSendPush(
+  payload: { title: string; body?: string; url?: string; tag?: string },
+  user_code: string
+) {
+  if (!('serviceWorker' in navigator)) throw new Error('ServiceWorker not supported');
+
+  // 1) SW登録
   const reg = await navigator.serviceWorker.register('/sw.js');
 
-  // 通知権限が未決なら1回だけ要求
+  // 2) 通知権限（未決だけ要求）
   if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
     try { await Notification.requestPermission(); } catch {}
   }
 
-  // フォールバック用トーストの受信をセット
-  if (!toastInstalled) {
-    toastInstalled = true;
-    navigator.serviceWorker.addEventListener('message', (e) => {
-      const msg = e.data;
-      if (msg?.type === 'PUSH_FALLBACK') {
-        showToast(msg.title ?? 'お知らせ', msg.body ?? '', msg.url ?? '/');
-      }
+  // 3) Push購読
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) {
+    if (!PUBLIC_KEY) throw new Error('Missing NEXT_PUBLIC_VAPID_PUBLIC_KEY');
+    sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(PUBLIC_KEY),
     });
   }
 
-  return reg;
-}
+  // 4) サーバへ購読情報を保存（存在しない環境でも無視）
+  try {
+    await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        user_code,
+        subscription: sub,
+        user_agent: navigator.userAgent,
+        platform: (navigator as any).platform ?? '',
+      }),
+    });
+  } catch (_) {}
 
-// 超シンプルなページ内トースト
-function showToast(title: string, body: string, url: string) {
-  // 既存があれば消す
-  const old = document.querySelector('#mu-push-toast');
-  if (old) old.remove();
-
-  const wrap = document.createElement('div');
-  wrap.id = 'mu-push-toast';
-  wrap.style.cssText = `
-    position: fixed; right: 16px; bottom: 16px; z-index: 2147483647;
-    max-width: 320px; padding: 12px 14px; border-radius: 12px;
-    background: rgba(30,30,30,0.95); color: #fff; box-shadow: 0 6px 24px rgba(0,0,0,0.25);
-    font-family: system-ui, -apple-system, Segoe UI, Roboto, 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', sans-serif;
-    cursor: pointer;`;
-  wrap.innerHTML = `
-    <div style="font-weight:600; margin-bottom:6px; font-size:14px;">${escapeHtml(title)}</div>
-    <div style="opacity:.9; font-size:13px; line-height:1.4;">${escapeHtml(body)}</div>
-  `;
-  wrap.onclick = () => { window.location.href = url; wrap.remove(); };
-  document.body.appendChild(wrap);
-
-  // 8秒で自動消去
-  setTimeout(() => wrap.remove(), 8000);
-}
-
-function escapeHtml(s: string) {
-  return s.replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
+  // 5) 送信
+  const res = await fetch('/api/push/send', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ user_code, kind: 'ai', ...payload }),
+  });
+  if (!res.ok) throw new Error(`send failed: ${res.status}`);
+  return res.json();
 }
