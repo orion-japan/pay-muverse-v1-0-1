@@ -1,25 +1,25 @@
 // src/app/api/push/test/route.ts
 import { NextResponse } from 'next/server';
-import { getWebpush, hasVapidKeys } from '@/lib/webpush';
+import { getWebpush } from '@/lib/webpush';
 
-export const dynamic = 'force-dynamic'; // 収集フェーズでの実行を避ける
-// export const runtime = 'nodejs'; // 必要なら明示
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  // ビルド時に throw させない：キーが無ければ 200 で状態を返すだけ
-  const hasKeys = hasVapidKeys();
-
-  // 実行時にのみ初期化（トップレベル禁止）
-  const webpush = await getWebpush(); // キー無しなら null を返す仕様
-  const configured = Boolean(webpush);
+  const pub = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || '';
+  const priv = process.env.VAPID_PRIVATE_KEY || '';
+  const wp = await getWebpush();
 
   return NextResponse.json({
     ok: true,
-    hasVapidKeys: hasKeys,
-    configured,
-    note:
-      hasKeys
-        ? 'webpush is ready at runtime.'
-        : 'VAPID keys are missing. Set NEXT_PUBLIC_VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY.',
+    hasVapidKeys: Boolean(pub && priv),
+    pub_present: Boolean(pub),
+    priv_present: Boolean(priv),
+    pub_len: pub.length,
+    priv_len: priv.length,
+    configured: Boolean(wp),
+    note: (!pub || !priv)
+      ? 'One or both env vars are missing on server runtime.'
+      : 'web-push configured if configured=true',
   });
 }

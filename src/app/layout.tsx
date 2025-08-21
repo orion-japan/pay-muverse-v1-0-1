@@ -6,7 +6,7 @@ import Footer from '../components/Footer'
 import Header from '../components/Header'
 import LoginModal from '../components/LoginModal' // ← 追加（既存のモーダルを使用）
 import { AuthProvider } from '@/context/AuthContext'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 
 function LayoutBody({ children }: { children: React.ReactNode }) {
@@ -51,11 +51,24 @@ function LayoutBody({ children }: { children: React.ReactNode }) {
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  // window 直参照はやめてフックで判定（SSRでも安全）
   const pathname = usePathname()
   const isMuAI =
     pathname?.startsWith('/mu_ai') === true ||
     pathname?.startsWith('/mu_full') === true
+
+  // 🚀 Service Worker 登録処理
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker
+        .register('/sw.js')
+        .then((reg) => {
+          console.log('✅ Service Worker registered:', reg)
+        })
+        .catch((err) => {
+          console.error('❌ Service Worker registration failed:', err)
+        })
+    }
+  }, [])
 
   return (
     <html lang="ja">
@@ -69,4 +82,3 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   )
 }
-

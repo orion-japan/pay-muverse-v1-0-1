@@ -140,6 +140,28 @@ export default function SelfPostModal({
 
       if (!threadId) throw new Error('threadId が取得できませんでした');
 
+      // ★★ ここで自分宛に Push 通知（購読確認用・失敗してもUIは継続）★★
+      // kind は consents.notify_ai と連動させやすい 'ai' を利用
+      // body にはタイトル優先→本文冒頭40文字を使用
+      const previewText =
+        (title && title.trim()) ||
+        (content && content.trim().slice(0, 40)) ||
+        '新しいS Talk';
+      fetch('/api/push/send', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          user_code: userCode,
+          kind: 'ai',
+          title: 'S Talkを投稿しました',
+          body: previewText,
+          url: `/thread/${threadId}`,
+          tag: `self-post:${threadId}`,
+          renotify: false,
+        }),
+      }).catch(() => {});
+
+      // 既存の後処理
       onPostSuccess?.();
       onPosted?.();
       onClose();
