@@ -1,9 +1,10 @@
-// pushイベント（テスト用・必ず通知を出す）
+// pushイベントを必ず通知するテスト
 self.addEventListener('push', (event) => {
   console.log('[sw.js] push event received:', event);
+
   event.waitUntil(
-    self.registration.showNotification("Pushテスト", {
-      body: "Service Worker からのテスト通知です"
+    self.registration.showNotification("テスト通知", {
+      body: "これは Service Worker からのテストです"
     })
   );
 });
