@@ -23,7 +23,7 @@ Deno.serve(async (req) => {
     );
     const subs = await res.json();
     if (!Array.isArray(subs) || subs.length === 0) {
-      return new Response(JSON.stringify({ ok: false, reason: "no subscription" }), { status: 404 });
+      return new Response(JSON.stringify({ ok: false, reason: "no subscription for user_code" }), { status: 404 });
     }
 
     const payload = JSON.stringify({
@@ -33,8 +33,7 @@ Deno.serve(async (req) => {
       tag: tag ?? "muverse",
     });
 
-    // 送信（詳細なエラーを拾う）
-    const results = [];
+    const results: any[] = [];
     for (const s of subs) {
       try {
         const r = await webpush.sendNotification(
@@ -42,20 +41,20 @@ Deno.serve(async (req) => {
           payload,
           { TTL: 600 }
         );
-        results.push({ endpoint: s.endpoint, status: "fulfilled", statusCode: r.statusCode ?? 201 });
+        results.push({ endpoint: s.endpoint, status: "fulfilled", statusCode: r?.statusCode ?? 201 });
       } catch (e) {
         const statusCode = e?.statusCode ?? null;
-        const bodyText = e?.body ?? String(e?.message ?? e);
-        results.push({ endpoint: s.endpoint, status: "rejected", statusCode, error: bodyText });
+        const errBody = e?.body ? String(e.body) : String(e?.message ?? e);
+        results.push({ endpoint: s.endpoint, status: "rejected", statusCode, error: errBody });
 
-        // 410/404 は自動掃除（任意）
+        // 410/404 は自動削除（掃除）
         if (statusCode === 404 || statusCode === 410) {
           try {
             await fetch(`${SUPABASE_URL}/rest/v1/push_subscriptions?endpoint=eq.${encodeURIComponent(s.endpoint)}`, {
               method: "DELETE",
               headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
             });
-          } catch { /* ignore */ }
+          } catch {}
         }
       }
     }
