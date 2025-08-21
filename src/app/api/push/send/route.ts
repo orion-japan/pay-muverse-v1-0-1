@@ -1,19 +1,38 @@
+// src/app/api/push/send/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import webpush from 'web-push';
+
+export const dynamic = 'force-dynamic'; // 静的最適化回避
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const VAPID_PUBLIC = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!;
 const VAPID_PRIVATE = process.env.VAPID_PRIVATE_KEY!;
+const VAPID_SUBJECT = process.env.WEB_PUSH_VAPID_SUBJECT || 'mailto:notice@example.com';
 
 const supabase = createClient(supabaseUrl, serviceRoleKey);
 
-webpush.setVapidDetails(
-  'mailto:notice@example.com',
-  VAPID_PUBLIC,
-  VAPID_PRIVATE
-);
+// --- web-push を実行時にのみ初期化 ---
+let _webpush: typeof import('web-push') | null = null;
+let vapidConfigured = false;
+
+async function getWebpushSafe() {
+  if (!_webpush) {
+    const mod = await import('web-push');
+    // default が無い場合も考慮
+    const wp: any = (mod as any).default ?? (mod as any);
+    _webpush = wp as typeof import('web-push');
+  }
+  if (!vapidConfigured) {
+    if (!VAPID_PUBLIC || !VAPID_PRIVATE) {
+      console.warn('[push] VAPID keys are not set. Push sending is disabled.');
+      return null;
+    }
+    _webpush!.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC, VAPID_PRIVATE);
+    vapidConfigured = true;
+  }
+  return _webpush;
+}
 
 type Kind =
   | 'ftalk'
@@ -117,7 +136,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'no subscription' }, { status: 404 });
     }
 
-    // vibration の最終決定（リクエストで上書き可。デフォは consents.vibration !== false）
+    // vibration の最終決定
     const vibrationEnabled =
       typeof vibration !== 'undefined'
         ? vibration
@@ -136,23 +155,30 @@ export async function POST(req: NextRequest) {
       actions: Array.isArray(actions) ? actions.slice(0, 2) : undefined,
     };
 
+    // web-push 初期化
+    const webpush = await getWebpushSafe();
+    if (!webpush) {
+      return NextResponse.json(
+        { error: 'Server VAPID keys are missing. Set NEXT_PUBLIC_VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY.' },
+        { status: 500 }
+      );
+    }
+
     const results: Array<{ endpoint: string; ok: boolean; status?: number; error?: string }> = [];
 
     for (const s of subs) {
       const subscription = {
         endpoint: s.endpoint,
         keys: { p256dh: s.p256dh, auth: s.auth },
-      } as webpush.PushSubscription;
+      } as any;
 
       try {
         await webpush.sendNotification(subscription, JSON.stringify(payload));
         results.push({ endpoint: s.endpoint, ok: true });
       } catch (err: any) {
-        // ステータス取得（型の都合でany扱い）
         const status = err?.statusCode || err?.status;
         results.push({ endpoint: s.endpoint, ok: false, status, error: String(err) });
 
-        // 410/404 は購読無効なのでクリーンアップ
         if (status === 404 || status === 410) {
           await deleteSubscription(s.endpoint);
         }
