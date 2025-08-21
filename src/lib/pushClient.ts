@@ -1,73 +1,57 @@
 // src/lib/pushClient.ts
-import { urlBase64ToUint8Array } from "./utils"; // VAPID鍵変換ユーティリティを用意してください
+let toastInstalled = false;
 
-// VAPID 公開鍵（環境変数から注入するのがベスト）
-const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!;
+export async function ensurePushReady() {
+  if (typeof window === 'undefined') return;
+  if (!('serviceWorker' in navigator)) return;
 
-// API 認証キー（環境変数から注入）
-const PUSH_API_KEY = process.env.NEXT_PUBLIC_PUSH_API_KEY!;
+  // SW 登録（既に登録済みならそのまま）
+  const reg = await navigator.serviceWorker.register('/sw.js');
 
-export async function registerAndSendPush(payload?: any) {
-  console.log("[push] START registerAndSendPush");
-
-  // Service Worker 登録
-  const registration = await navigator.serviceWorker.register("/sw.js");
-  console.log("[push] SW registered:", !!registration);
-
-  // 既存 subscription を取得
-  let subscription = await registration.pushManager.getSubscription();
-
-  // 無ければ新規作成
-  if (!subscription) {
-    try {
-      subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-      });
-      console.log("[push] New subscription:", subscription);
-
-      // サーバーに保存
-      await fetch("/api/save-subscription", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(subscription),
-      });
-    } catch (err) {
-      console.error("[push] Subscription error:", err);
-      return;
-    }
-  } else {
-    console.log("[push] has subscription? true");
+  // 通知権限が未決なら1回だけ要求
+  if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+    try { await Notification.requestPermission(); } catch {}
   }
 
-  // 通知を送信する API 呼び出し（payload付き）
-  try {
-    const res = await fetch("/api/push/dispatch", {
-      method: "POST",
-      headers: { 
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${PUSH_API_KEY}`, // 🔑 認証ヘッダー追加
-      },
-      body: JSON.stringify({
-        subscriptions: [subscription],
-        payload: payload ?? {
-          title: "通知テスト",
-          body: "これは本番環境のテスト通知です",
-          url: "/thanks",
-        },
-      }),
+  // フォールバック用トーストの受信をセット
+  if (!toastInstalled) {
+    toastInstalled = true;
+    navigator.serviceWorker.addEventListener('message', (e) => {
+      const msg = e.data;
+      if (msg?.type === 'PUSH_FALLBACK') {
+        showToast(msg.title ?? 'お知らせ', msg.body ?? '', msg.url ?? '/');
+      }
     });
-
-    const text = await res.text();   // ← textで受け取る
-    let result;
-    try {
-      result = JSON.parse(text);     // JSONならparse
-    } catch {
-      result = text;                 // JSONじゃなければそのまま
-    }
-
-    console.log("[push] invoke result:", result);
-  } catch (err) {
-    console.error("[push] Dispatch error:", err);
   }
+
+  return reg;
+}
+
+// 超シンプルなページ内トースト
+function showToast(title: string, body: string, url: string) {
+  // 既存があれば消す
+  const old = document.querySelector('#mu-push-toast');
+  if (old) old.remove();
+
+  const wrap = document.createElement('div');
+  wrap.id = 'mu-push-toast';
+  wrap.style.cssText = `
+    position: fixed; right: 16px; bottom: 16px; z-index: 2147483647;
+    max-width: 320px; padding: 12px 14px; border-radius: 12px;
+    background: rgba(30,30,30,0.95); color: #fff; box-shadow: 0 6px 24px rgba(0,0,0,0.25);
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', sans-serif;
+    cursor: pointer;`;
+  wrap.innerHTML = `
+    <div style="font-weight:600; margin-bottom:6px; font-size:14px;">${escapeHtml(title)}</div>
+    <div style="opacity:.9; font-size:13px; line-height:1.4;">${escapeHtml(body)}</div>
+  `;
+  wrap.onclick = () => { window.location.href = url; wrap.remove(); };
+  document.body.appendChild(wrap);
+
+  // 8秒で自動消去
+  setTimeout(() => wrap.remove(), 8000);
+}
+
+function escapeHtml(s: string) {
+  return s.replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 }
