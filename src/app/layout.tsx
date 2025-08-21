@@ -15,6 +15,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="ja">
       <body style={{ margin: 0 }}>
         <Providers>
+          {/* LayoutClient は Client Component 側。ここに PushRegister を組み込む */}
           <LayoutClient>{children}</LayoutClient>
         </Providers>
       </body>

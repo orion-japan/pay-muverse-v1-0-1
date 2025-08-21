@@ -13,9 +13,9 @@ import { auth } from '@/lib/firebase';
 
 type AuthValue = {
   loading: boolean;
-  user: User | null;
-  idToken: string | null;
-  userCode: string | null;
+  user: User | null;        // Firebaseのユーザー情報
+  idToken: string | null;   // Firebase IDトークン
+  userCode: string | null;  // Supabase/独自のユーザーコード
   logout: () => Promise<void>;
 };
 
@@ -27,6 +27,7 @@ const AuthContext = createContext<AuthValue>({
   logout: async () => {},
 });
 
+/** user_code を API 経由で取得する */
 async function fetchUserCodeFromServer(u: User): Promise<string | null> {
   const url = '/api/resolve-usercode';
   try {
@@ -37,7 +38,7 @@ async function fetchUserCodeFromServer(u: User): Promise<string | null> {
       body: JSON.stringify({ uid: u.uid, email: u.email ?? null }),
     });
 
-    // 404 フォルバックで ② GET（新規ルート取り込み前でも拾える）
+    // 404 フォールバックで ② GET
     if (res.status === 404) {
       const qs = new URLSearchParams();
       if (u.uid) qs.set('uid', u.uid);
@@ -47,7 +48,7 @@ async function fetchUserCodeFromServer(u: User): Promise<string | null> {
 
     if (!res.ok) return null;
     const json = (await res.json()) as { user_code?: string | null; ok?: boolean };
-    if (json.ok && !('user_code' in json)) return null; // ping 応答
+    if (json.ok && !('user_code' in json)) return null; // ping応答
     return json.user_code ?? null;
   } catch (e) {
     console.error('[AuthContext] resolve-usercode API error', e);
@@ -85,7 +86,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setIdToken(null);
         }
 
-        // まず localStorage
+        // localStorage からキャッシュ利用
         const cached = typeof window !== 'undefined' ? localStorage.getItem('user_code') : null;
         if (cached) {
           console.log('[AuthContext] use localStorage user_code:', cached);
@@ -93,7 +94,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        // API で解決
+        // API から取得
         const code = await fetchUserCodeFromServer(u);
         if (code) {
           console.log('[AuthContext] user_code resolved:', code);
@@ -110,11 +111,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     const failSafe = setTimeout(() => setLoading(false), 5000);
-    return () => { unsub(); clearTimeout(failSafe); };
+    return () => {
+      unsub();
+      clearTimeout(failSafe);
+    };
   }, []);
 
   const logout = async () => {
-    try { await signOut(auth); } finally {
+    try {
+      await signOut(auth);
+    } finally {
       setUser(null);
       setIdToken(null);
       setUserCode(null);
@@ -126,6 +132,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     () => ({ loading, user, idToken, userCode, logout }),
     [loading, user, idToken, userCode]
   );
+
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

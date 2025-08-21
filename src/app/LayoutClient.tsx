@@ -5,6 +5,8 @@ import Header from '../components/Header'
 import LoginModal from '../components/LoginModal'
 import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
+import { useAuth } from '@/context/AuthContext'
+import { registerPush } from '@/utils/push'
 
 function LayoutBody({ children }: { children: React.ReactNode }) {
   const [showLogin, setShowLogin] = useState(false)
@@ -19,8 +21,10 @@ function LayoutBody({ children }: { children: React.ReactNode }) {
     <>
       {!isMuAI && <Header onLoginClick={() => setShowLogin(true)} />}
 
-      <main className={`mu-main ${isMuAI ? 'mu-main--wide' : ''}`}
-            style={{ paddingBottom: isCredit ? 0 : 60 }}>
+      <main
+        className={`mu-main ${isMuAI ? 'mu-main--wide' : ''}`}
+        style={{ paddingBottom: isCredit ? 0 : 60 }}
+      >
         <div className={`mu-page ${isMuAI ? 'mu-page--wide' : ''}`}>
           {children}
         </div>
@@ -63,11 +67,12 @@ function showToast(title: string, body: string, url: string) {
 
 export default function LayoutClient({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const { userCode } = useAuth() // 👈 ここを利用
   const isMuAI =
     pathname?.startsWith('/mu_ai') === true ||
     pathname?.startsWith('/mu_full') === true
 
-  // SW 登録＋フォールバック受信
+  // SW 登録＋フォールバック受信＋subscription 登録
   useEffect(() => {
     let onMsg: ((e: MessageEvent) => void) | null = null
     ;(async () => {
@@ -75,10 +80,22 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
       const reg = await navigator.serviceWorker.register('/sw.js')
       console.log('✅ Service Worker registered:', reg)
 
+      // 通知権限リクエスト
       if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
         try { await Notification.requestPermission() } catch {}
       }
 
+      // 👇 ログイン済みなら subscription を Supabase に登録
+      if (userCode) {
+        try {
+          const res = await registerPush(userCode)
+          console.log("✅ Push subscription registered:", res)
+        } catch (err) {
+          console.error("❌ registerPush failed:", err)
+        }
+      }
+
+      // フォールバック受信処理
       onMsg = (e: MessageEvent) => {
         const msg = e?.data
         if (msg?.type === 'PUSH_FALLBACK') {
@@ -88,8 +105,10 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
       navigator.serviceWorker.addEventListener('message', onMsg)
     })().catch((err) => console.error('❌ Service Worker setup failed:', err))
 
-    return () => { if (onMsg) navigator.serviceWorker.removeEventListener('message', onMsg) }
-  }, [])
+    return () => {
+      if (onMsg) navigator.serviceWorker.removeEventListener('message', onMsg)
+    }
+  }, [userCode]) // 👈 userCode が変わったら再登録
 
   return (
     <div className={isMuAI ? 'mu-ai' : ''}>
