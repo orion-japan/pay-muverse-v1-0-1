@@ -39,15 +39,16 @@ export default function ShipVisibilityBox({ planStatus, fallbackVisibility = 'pa
           return;
         }
         const token = await user.getIdToken(true);
+
         const res = await fetch('/api/ship-visibility', {
           headers: { Authorization: `Bearer ${token}` },
-          signal: ac.signal,
+          signal: ac.signal,               // ← 中断可能にする
+          cache: 'no-store',
         });
         if (!res.ok) {
-          // コンソールには詳細、UIには短い文
           const raw = await res.text().catch(() => '');
           // eslint-disable-next-line no-console
-          console.error('GET /api/ship-visibility failed:', raw);
+          console.warn('GET /api/ship-visibility failed:', raw);
           if (mounted) setError('現在値の取得に失敗しました。後でもう一度お試しください。');
           return;
         }
@@ -55,10 +56,17 @@ export default function ShipVisibilityBox({ planStatus, fallbackVisibility = 'pa
         if (mounted && j?.ship_visibility) {
           setVisibility(j.ship_visibility as Visibility);
         }
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error('ship-visibility load error:', e);
-        if (mounted) setError('現在値の取得に失敗しました。');
+      } catch (e: any) {
+        // AbortError は完全に無視（開発時の再実行/ページ遷移で正常に起きる）
+        const isAbort =
+          e?.name === 'AbortError' ||
+          e?.code === 'ABORT_ERR' ||
+          /aborted|abort/i.test(String(e?.message));
+        if (!isAbort) {
+          // eslint-disable-next-line no-console
+          console.warn('ship-visibility load error:', e);
+          if (mounted) setError('現在値の取得に失敗しました。');
+        }
       } finally {
         if (mounted) setLoading(false);
       }
@@ -66,7 +74,7 @@ export default function ShipVisibilityBox({ planStatus, fallbackVisibility = 'pa
 
     return () => {
       mounted = false;
-      ac.abort();
+      ac.abort(); // クリーンアップで中断
     };
   }, []);
 
@@ -104,7 +112,7 @@ export default function ShipVisibilityBox({ planStatus, fallbackVisibility = 'pa
       if (!res.ok) {
         const raw = await res.text().catch(() => '');
         // eslint-disable-next-line no-console
-        console.error('POST /api/update-ship-visibility failed:', raw);
+        console.warn('POST /api/update-ship-visibility failed:', raw);
         throw new Error('保存に失敗しました。時間をおいて再度お試しください。');
       }
     } catch (e: any) {

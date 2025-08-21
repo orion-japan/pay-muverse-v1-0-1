@@ -52,9 +52,13 @@ async function toggleReactionClient(params: {
   return data as { ok: true; totals?: Counts; post_id: string };
 }
 
-/** 軽量な合計取得API */
+/** 軽量な合計取得API（URL統一） */
 async function fetchCounts(postId: string, isParent: boolean): Promise<Counts> {
-  const q = new URLSearchParams({ post_id: postId, is_parent: String(isParent) });
+  const q = new URLSearchParams({
+    scope: 'post',
+    post_id: postId,
+    is_parent: String(isParent),
+  });
   const res = await fetch(`/api/reactions/counts?${q.toString()}`, { cache: 'no-store' });
   const j = await res.json().catch(() => ({}));
   return (j?.totals ?? {}) as Counts;
@@ -103,13 +107,34 @@ const ReactionBar: React.FC<ReactionBarProps> = ({
     return m;
   });
 
+  // props 更新に追随（これが無いと親の再計算とズレます）
+  useEffect(() => {
+    if (!initialCounts) return;
+    setCounts((prev) => ({
+      like: initialCounts.like ?? prev.like ?? 0,
+      heart: initialCounts.heart ?? prev.heart ?? 0,
+      smile: initialCounts.smile ?? prev.smile ?? 0,
+      wow: initialCounts.wow ?? prev.wow ?? 0,
+      share: initialCounts.share ?? prev.share ?? 0,
+    }));
+  }, [initialCounts?.like, initialCounts?.heart, initialCounts?.smile, initialCounts?.wow, initialCounts?.share]);
+
+  useEffect(() => {
+    if (!initialMyReactions) return;
+    const next: Record<ReactionType, boolean> = {
+      like: false, heart: false, smile: false, wow: false, share: false,
+    };
+    initialMyReactions.forEach((r) => (next[r] = true));
+    setMine(next);
+  }, [JSON.stringify(initialMyReactions || [])]);
+
   // クリックを許可できるか（readOnly または未ログインなら不可）
   const canInteract = useMemo(
     () => !readOnly && !!effectiveUserCode,
     [readOnly, effectiveUserCode]
   );
 
-  // 初回ロード時、初期カウントが無い場合はAPIで取得
+  // 初期ロード時、初期カウントが無い場合はAPIで取得
   const reload = useCallback(async () => {
     try {
       const t = await fetchCounts(postId, isParent);
@@ -134,7 +159,8 @@ const ReactionBar: React.FC<ReactionBarProps> = ({
       .channel(`rx-post-${postId}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'reactions', filter: `post_id=eq.${postId}` },
+        // ← DBが post_reactions なのでこちらを購読
+        { event: '*', schema: 'public', table: 'post_reactions', filter: `post_id=eq.${postId}` },
         () => reload()
       )
       .subscribe();
@@ -154,8 +180,7 @@ const ReactionBar: React.FC<ReactionBarProps> = ({
   }, [postId, reload]);
 
   const handleToggle = async (reaction: ReactionType) => {
-    if (!canInteract) return;
-    if (busyKey) return;
+    if (!canInteract || busyKey) return;
 
     setBusyKey(reaction);
 
@@ -173,7 +198,7 @@ const ReactionBar: React.FC<ReactionBarProps> = ({
         reaction,
         is_parent: isParent,
         thread_id: threadId ?? null,
-        user_code: effectiveUserCode!,
+        user_code: effectiveUserCode!, // 呼び出し元で未ログインは onClick 自体不許可
       });
 
       if (res?.totals) {
@@ -235,10 +260,10 @@ const ReactionBar: React.FC<ReactionBarProps> = ({
             key={key}
             type="button"
             aria-label={`${aria}（現在 ${n}件）`}
-            aria-disabled={!canInteract ? 'true' : 'false'} // ← 見た目はそのまま
+            aria-disabled={!canInteract ? 'true' : 'false'} // 見た目はそのまま
             onClick={canInteract ? () => handleToggle(key) : undefined}
             // 読取専用や未ログインでは disabled を使わない（半透明化防止）
-            disabled={canInteract ? busyKey === key : false} // ← 通信中のみ disabled
+            disabled={canInteract ? busyKey === key : false} // 通信中のみ disabled
             className={`reaction-button ${active ? 'is-active' : ''}`}
             style={{
               display: 'inline-flex',
@@ -249,10 +274,10 @@ const ReactionBar: React.FC<ReactionBarProps> = ({
               border: '1px solid #ddd',
               background: active ? '#fff3d1' : '#ffffff',
               cursor: canInteract ? (busyKey ? 'progress' : 'pointer') : 'default',
-              opacity: busyKey === key ? 0.6 : 1, // ← 読取専用でも薄くしない
+              opacity: busyKey === key ? 0.6 : 1,
               userSelect: 'none',
-              flex: '0 0 auto', // ← 縮めず1要素扱い
-              pointerEvents: canInteract ? 'auto' : 'none', // ← クリック不可
+              flex: '0 0 auto',
+              pointerEvents: canInteract ? 'auto' : 'none', // クリック不可
             }}
           >
             <span style={{ fontSize: 16, lineHeight: 1 }}>{label}</span>

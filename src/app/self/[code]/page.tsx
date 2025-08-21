@@ -67,6 +67,26 @@ export default function SelfPage() {
     return out;
   };
 
+  /** 親ポストのカウントURL（Self/[code] は常に親扱いで統一） */
+  const parentCountsUrl = (postId: string) =>
+    `/api/reactions/counts?scope=post&post_id=${encodeURIComponent(postId)}&is_parent=true`;
+
+  /** 親1件のカウント取得（GET固定） */
+  const fetchParentCountsOne = async (postId: string): Promise<ReactionCount[] | null> => {
+    const url = parentCountsUrl(postId);
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) return null;
+      const json = await res.json().catch(() => null);
+      const totals: Record<string, number> | undefined =
+        json && (json.totals || json.counts || json.data);
+      if (!totals) return null;
+      return Object.entries(totals).map(([r_type, count]) => ({ r_type, count: count ?? 0 }));
+    } catch {
+      return null;
+    }
+  };
+
   // プロフィール取得
   useEffect(() => {
     if (!code) return;
@@ -88,7 +108,7 @@ export default function SelfPage() {
     return () => ac.abort();
   }, [code]);
 
-  // 初期取得（本人の self 投稿だけ）＋ 共鳴カウント
+  // 初期取得（本人の self 投稿だけ）＋ 親カウント（GETで個別取得）
   useEffect(() => {
     if (!code) return;
     const ac = new AbortController();
@@ -111,25 +131,16 @@ export default function SelfPage() {
           );
           setPosts(onlyThisUser);
 
-          // 共鳴カウントまとめて取得
+          // 親カウント（GETで個別・並列）
           const ids = onlyThisUser.map((p) => p.post_id);
           if (ids.length) {
-            try {
-              const resCnt = await fetch('/api/reactions/counts', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ postIds: ids }),
-              });
-              if (resCnt.ok) {
-                const { countsByPost } = await resCnt.json();
-                if (mounted && !ac.signal.aborted) {
-                  setCountsMap(countsByPost || {});
-                }
-              } else {
-                setCountsMap({});
-              }
-            } catch {
-              setCountsMap({});
+            const entries = await Promise.all(
+              ids.map(async (id) => [id, await fetchParentCountsOne(id)] as const)
+            );
+            if (mounted && !ac.signal.aborted) {
+              const next: Record<string, ReactionCount[]> = {};
+              for (const [id, arr] of entries) next[id] = arr ?? [];
+              setCountsMap(next);
             }
           } else {
             setCountsMap({});
@@ -169,7 +180,7 @@ export default function SelfPage() {
           const next = [{ ...row }, ...prev].sort(
             (a, b) => +new Date(b.created_at) - +new Date(a.created_at)
           );
-          // 新規分のカウント再取得（簡便に全体）
+          // 新規分のカウント再取得（親固定URLで安全）
           refetchCounts(next);
           return next;
         }
@@ -210,7 +221,7 @@ export default function SelfPage() {
     };
   }, [code]);
 
-  // 共鳴カウント再取得
+  // 共鳴カウント再取得（親固定URLでGET・並列）
   const refetchCounts = async (list = posts) => {
     try {
       const ids = list.map((p) => p.post_id);
@@ -218,17 +229,12 @@ export default function SelfPage() {
         setCountsMap({});
         return;
       }
-      const res = await fetch('/api/reactions/counts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ postIds: ids }),
-      });
-      if (!res.ok) {
-        setCountsMap({});
-        return;
-      }
-      const { countsByPost } = await res.json();
-      setCountsMap(countsByPost || {});
+      const entries = await Promise.all(
+        ids.map(async (id) => [id, await fetchParentCountsOne(id)] as const)
+      );
+      const next: Record<string, ReactionCount[]> = {};
+      for (const [id, arr] of entries) next[id] = arr ?? [];
+      setCountsMap(next);
     } catch {
       setCountsMap({});
     }

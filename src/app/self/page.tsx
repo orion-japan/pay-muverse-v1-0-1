@@ -9,6 +9,10 @@ import SelfPostModal from '@/components/SelfPostModal'
 import ReactionBar from '@/components/ReactionBar'
 import './self.css'
 
+const DEBUG = false; // true にするとログ再開
+const dlog = (...a: any[]) => DEBUG && console.log(...a);
+
+
 /* ==== 型 ==== */
 type Post = {
   post_id: string
@@ -119,10 +123,17 @@ export default function SelfPage() {
   }
 
   /* =========================================================
-   * 反応カウント取得：単発 GET（405 を避けるため /api/reactions/counts は GET 固定）
+   * 反応カウント取得（Self一覧は“親ポスト”固定で読む）
    * =======================================================*/
+  const parentCountsUrl = (postId: string) =>
+    `/api/reactions/counts?scope=post&post_id=${encodeURIComponent(postId)}&is_parent=true`
+
+
+  
   const fetchCountsSingle = async (postId: string): Promise<ReactionCount[] | null> => {
-    const url = `/api/reactions/counts?post_id=${encodeURIComponent(postId)}&is_parent=false`
+    // ★ ここを親固定URLに統一（一覧とThread親で同一ルート）
+    const url = parentCountsUrl(postId)
+    console.log('[SelfPage] counts GET', url)
     const res = await fetch(url, { cache: 'no-store' })
     if (!res.ok) return null
     const json = await res.json().catch(() => null)
@@ -132,7 +143,7 @@ export default function SelfPage() {
     return Object.entries(totals).map(([r_type, count]) => ({ r_type, count: count ?? 0 }))
   }
 
-  /** counts を安全に取得（405/500でも落ちず、一時バックオフ。GET 単発並列） */
+  /** counts を安全に取得（GET 並列・一時バックオフ） */
   const safeFetchCounts = async (postIds: string[]) => {
     if (!postIds.length) {
       setCountsMap({})
@@ -212,7 +223,7 @@ export default function SelfPage() {
       setStatsMap({})
     }
 
-    // --- 共鳴カウント（安全取得・単発 GET 並列）
+    // --- 親カウント（安全取得・単発 GET 並列）
     await safeFetchCounts(filtered.map(p => p.post_id))
   }
 
@@ -251,7 +262,7 @@ export default function SelfPage() {
           const next = [{ ...row }, ...prev].sort(
             (a, b) => +new Date(b.created_at) - +new Date(a.created_at)
           )
-          // 新規が入ったら counts も取りにいく（安全取得）
+          // 新規が入ったら counts も取りにいく（親固定URL）
           safeFetchCounts([row.post_id])
           return next
         }
@@ -318,34 +329,6 @@ export default function SelfPage() {
     return () => { supabase.removeChannel(channel) }
   }, [userCode])
 
-  /** アプリ内リアル通知（notifications を購読してトースト） */
-  useEffect(() => {
-    if (!userCode) return
-    const channel = supabase
-      .channel(`notif:${userCode}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT', schema: 'public', table: 'notifications',
-          filter: `recipient_user_code=eq.${userCode}`
-        },
-        (payload) => {
-          const n: any = payload.new || {}
-          const toast = { id: n.id || String(Date.now()), title: n.title, body: n.body, url: n.url }
-          setToasts((prev) => [...prev, toast])
-          // 自動クローズ
-          setTimeout(() => setToasts((prev) => prev.filter(t => t.id !== toast.id)), 6000)
-        }
-      )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('[SelfPage] 🔔 Realtime (notifications) subscribed')
-        }
-      })
-
-    return () => { supabase.removeChannel(channel) }
-  }, [userCode])
-
   // ===== UIヘルパ =====
   const formatDate = (iso: string) =>
     new Date(iso).toLocaleString('ja-JP', { dateStyle: 'short', timeStyle: 'short' })
@@ -399,12 +382,13 @@ export default function SelfPage() {
 
         {/* 親は「数のみ」= readOnly で表示 */}
         <div className="reaction-row">
-          <ReactionBar
-            postId={p.post_id}
-            userCode={userCode || ''}
-            initialCounts={toCounts(countsMap[p.post_id])}
-            readOnly={true}
-          />
+        <ReactionBar
+  postId={p.post_id}
+  userCode={userCode || ''}
+  isParent={true}                       // ← これを必ず付ける
+  initialCounts={toCounts(countsMap[p.post_id])}
+  readOnly={true}
+/>
         </div>
       </div>
     )

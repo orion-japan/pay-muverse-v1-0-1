@@ -13,32 +13,91 @@ const ALLOWED = ['like', 'heart', 'smile', 'wow', 'share'] as const;
 type Totals = Record<(typeof ALLOWED)[number], number>;
 const ZERO: Totals = { like: 0, heart: 0, smile: 0, wow: 0, share: 0 };
 
-export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const post_id = searchParams.get('post_id') || '';
-  const is_parent = (searchParams.get('is_parent') || 'false') === 'true';
+function b(v: string | null, fb = false) {
+  if (v == null) return fb;
+  return v === 'true' || v === '1';
+}
 
-  if (!post_id) {
-    return NextResponse.json({ ok: false, message: 'post_id is required', totals: ZERO }, { status: 400 });
+/** 単一 post の集計（親/子を is_parent で切り替え） */
+async function getByPost(post_id: string, is_parent: boolean): Promise<Totals> {
+  const totals: Totals = { ...ZERO };
+  for (const key of ALLOWED) {
+    const { count, error } = await supabase
+      .from('reactions')
+      .select('*', { head: true, count: 'exact' })
+      .eq('post_id', post_id)
+      .eq('is_parent', is_parent)
+      .eq('reaction', key);
+    if (error) throw error;
+    totals[key] = count ?? 0;
   }
+  return totals;
+}
 
+/** スレッド全体（親＋子全 post_id 合算） */
+async function getByThread(thread_id: string): Promise<Totals> {
+  const { data: posts, error } = await supabase
+    .from('posts')
+    .select('post_id')
+    .eq('thread_id', thread_id);
+  if (error) throw error;
+
+  const ids = (posts ?? []).map(p => p.post_id);
+  if (!ids.length) return { ...ZERO };
+
+  const totals: Totals = { ...ZERO };
+  for (const key of ALLOWED) {
+    const { count, error: e2 } = await supabase
+      .from('reactions')
+      .select('*', { head: true, count: 'exact' })
+      .in('post_id', ids)
+      .eq('reaction', key);
+    if (e2) throw e2;
+    totals[key] = count ?? 0;
+  }
+  return totals;
+}
+
+export async function GET(req: NextRequest) {
   try {
-    const totals: Totals = { ...ZERO };
-    for (const key of ALLOWED) {
-      const { count, error } = await supabase
-        .from('reactions')
-        .select('*', { head: true, count: 'exact' })
-        .eq('post_id', post_id)
-        .eq('reaction', key)
-        .eq('is_parent', is_parent);
+    const sp = new URL(req.url).searchParams;
+    const scope = (sp.get('scope') || 'post') as 'post' | 'thread';
 
-      if (error) console.warn('[counts]', key, error.message);
-      totals[key] = count ?? 0;
+    if (scope === 'thread') {
+      const thread_id = sp.get('thread_id') ?? '';
+      if (!thread_id) {
+        return NextResponse.json({ ok: false, message: 'thread_id is required', totals: ZERO }, { status: 400 });
+      }
+      const totals = await getByThread(thread_id);
+      return NextResponse.json({ ok: true, scope: 'thread', thread_id, totals }, { headers: { 'Cache-Control': 'no-store' } });
     }
 
-    return NextResponse.json({ ok: true, post_id, is_parent, totals }, { headers: { 'Cache-Control': 'no-store' } });
+    const post_id = sp.get('post_id') ?? '';
+    const is_parent = b(sp.get('is_parent'), false);
+    if (!post_id) {
+      return NextResponse.json({ ok: false, message: 'post_id is required', totals: ZERO }, { status: 400 });
+    }
+
+    const totals = await getByPost(post_id, is_parent);
+    return NextResponse.json({ ok: true, scope: 'post', post_id, is_parent, totals }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (e: any) {
-    console.error('[counts] UNEXPECTED', e);
-    return NextResponse.json({ ok: false, message: 'Unexpected error', totals: ZERO }, { status: 500 });
+    console.error('[counts][GET] error', e);
+    return NextResponse.json({ ok: false, message: e?.message || 'Unexpected error', totals: ZERO }, { status: 500 });
+  }
+}
+
+// 後方互換（POST）
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json().catch(() => ({}));
+    if (body?.scope === 'thread' || body?.thread_id) {
+      const totals = await getByThread(body.thread_id);
+      return NextResponse.json({ ok: true, scope: 'thread', thread_id: body.thread_id, totals }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+    const totals = await getByPost(body.post_id, !!body.is_parent);
+    return NextResponse.json({ ok: true, scope: 'post', post_id: body.post_id, is_parent: !!body.is_parent, totals }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (e: any) {
+    console.error('[counts][POST] error', e);
+    return NextResponse.json({ ok: false, message: e?.message || 'Unexpected error', totals: ZERO }, { status: 500 });
   }
 }
