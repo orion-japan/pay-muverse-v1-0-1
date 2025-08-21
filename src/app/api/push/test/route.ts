@@ -1,54 +1,25 @@
-import { NextRequest, NextResponse } from 'next/server';
-import webpush from 'web-push';
-import { createClient } from '@supabase/supabase-js';
+// src/app/api/push/test/route.ts
+import { NextResponse } from 'next/server';
+import { getWebpush, hasVapidKeys } from '@/lib/webpush';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+export const dynamic = 'force-dynamic'; // 収集フェーズでの実行を避ける
+// export const runtime = 'nodejs'; // 必要なら明示
 
-webpush.setVapidDetails(
-  'mailto:notice@example.com',
-  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!,
-  process.env.VAPID_PRIVATE_KEY!
-);
+export async function GET() {
+  // ビルド時に throw させない：キーが無ければ 200 で状態を返すだけ
+  const hasKeys = hasVapidKeys();
 
-export async function POST(req: NextRequest) {
-  try {
-    const { user_code, title, body, url } = await req.json();
-    if (!user_code) return NextResponse.json({ error: 'user_code required' }, { status: 400 });
+  // 実行時にのみ初期化（トップレベル禁止）
+  const webpush = await getWebpush(); // キー無しなら null を返す仕様
+  const configured = Boolean(webpush);
 
-    const { data: subs, error } = await supabase
-      .from('push_subscriptions')
-      .select('endpoint, p256dh, auth')
-      .eq('user_code', user_code);
-
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    if (!subs || subs.length === 0) return NextResponse.json({ error: 'no subscription' }, { status: 404 });
-
-    const payload = {
-      title: title || 'テスト通知',
-      body: body || 'これはテストです',
-      url: url || '/', // sw.js の notificationclick で openWindow する先
-    };
-
-    const results: any[] = [];
-    for (const s of subs) {
-      try {
-        await webpush.sendNotification(
-          {
-            endpoint: s.endpoint,
-            keys: { p256dh: s.p256dh, auth: s.auth }
-          } as any,
-          JSON.stringify(payload)
-        );
-        results.push({ endpoint: s.endpoint, ok: true });
-      } catch (err: any) {
-        results.push({ endpoint: s.endpoint, ok: false, error: String(err) });
-      }
-    }
-    return NextResponse.json({ ok: true, results });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'server error' }, { status: 500 });
-  }
+  return NextResponse.json({
+    ok: true,
+    hasVapidKeys: hasKeys,
+    configured,
+    note:
+      hasKeys
+        ? 'webpush is ready at runtime.'
+        : 'VAPID keys are missing. Set NEXT_PUBLIC_VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY.',
+  });
 }
