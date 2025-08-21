@@ -1,51 +1,46 @@
-// public/sw.js
+self.addEventListener("push", (event) => {
+  console.log("[Service Worker] Push received.", event);
 
-// 即時に更新を反映させる
-self.addEventListener('install', (e) => {
-  self.skipWaiting();
-});
-self.addEventListener('activate', (e) => {
-  e.waitUntil(self.clients.claim());
-});
-
-// プッシュ通知受信
-self.addEventListener('push', (event) => {
   let data = {};
   try {
-    data = event.data ? event.data.json() : {};
+    if (event.data) {
+      data = event.data.json();
+    }
   } catch (e) {
-    console.error("Push event data parse error", e);
+    console.error("[Service Worker] Failed to parse push data", e);
   }
 
-  const title = data.title || 'Muverse';
-  const body = data.body || '';
-  const url = data.url || '/';
-  const tag = data.tag || 'muverse';
+  const title = data.title || "お知らせ";
+  const options = {
+    body: data.body || "通知が届きました",
+    icon: "/icons/icon-192x192.png", // PWAアイコンがあれば使う
+    badge: "/icons/icon-72x72.png", // 小さいアイコン
+    data: {
+      url: data.url || "/", // クリックした時に開くURL
+    },
+  };
 
   event.waitUntil(
-    self.registration.showNotification(title, {
-      body,
-      tag,
-      data: { url },
-      icon: '/pwaicon-192.png',
-      badge: '/pwaicon-192.png'
-    })
+    self.registration.showNotification(title, options)
   );
 });
 
-// 通知クリック時の遷移
-self.addEventListener('notificationclick', (event) => {
+// 通知クリック時の処理
+self.addEventListener("notificationclick", (event) => {
+  console.log("[Service Worker] Notification click received.");
   event.notification.close();
-  const url = event.notification?.data?.url || '/';
 
-  event.waitUntil((async () => {
-    const allClients = await clients.matchAll({ type: 'window', includeUncontrolled: true });
-    const targetUrl = new URL(url, self.location.origin).href;
-
-    const existing = allClients.find(c => c.url === targetUrl);
-    if (existing) {
-      return existing.focus();
-    }
-    return clients.openWindow(targetUrl);
-  })());
+  const url = event.notification.data.url || "/";
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url === url && "focus" in client) {
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow(url);
+      }
+    })
+  );
 });
