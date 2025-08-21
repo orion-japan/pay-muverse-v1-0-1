@@ -1,0 +1,18 @@
+{
+  "deno.enable": true,
+  "deno.lint": true,
+
+  // Deno 設定ファイル（下で作る deno.json）を指す
+  "deno.config": "supabase/functions/deno.json",
+
+  // Deno を有効にする対象パス（Next.js 側に影響を出さない）
+  "deno.enablePaths": ["supabase/functions"],
+  "deno.disablePaths": ["./"],
+
+  // よく使うホストの補完を許可（任意）
+  "deno.suggest.imports.hosts": {
+    "https://deno.land": true,
+    "https://esm.sh": true,
+    "npm:": true
+  }
+}
