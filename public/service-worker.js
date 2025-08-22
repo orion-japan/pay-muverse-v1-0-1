@@ -1,3 +1,4 @@
+// pushイベントを受信したとき
 self.addEventListener("push", (event) => {
   console.log("[Service Worker] Push received.", event);
 
@@ -11,9 +12,9 @@ self.addEventListener("push", (event) => {
   const title = data.title || "Muverse 通知";
   const options = {
     body: data.body || "新しい通知があります",
-    icon: data.icon || "/icon-192x192.png", // 任意のアイコン
-    badge: data.badge || "/badge-72x72.png",
-    data: { url: data.url || "/" },
+    icon: "/pwaicon192.png",   // 通知に表示されるアイコン
+    badge: "/pwaicon512.png",  // ステータスバーや小さなアイコン
+    data: { url: data.url || "/" }, // 通知クリック時に開くURL
   };
 
   event.waitUntil(
@@ -21,7 +22,7 @@ self.addEventListener("push", (event) => {
   );
 });
 
-// 通知クリック時に遷移
+// 通知クリック時の処理
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   event.waitUntil(
