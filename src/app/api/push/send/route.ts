@@ -1,4 +1,3 @@
-// src/app/api/push/send/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -142,6 +141,7 @@ export async function POST(req: NextRequest) {
         ? vibration
         : consents.vibration !== false;
 
+    // ✅ デフォルト icon / badge を追加
     const payload = {
       title,
       body: message,
@@ -149,8 +149,8 @@ export async function POST(req: NextRequest) {
       tag,
       renotify: !!renotify,
       vibration: vibrationEnabled,
-      icon: icon || undefined,
-      badge: badge || undefined,
+      icon: icon || "/pwaicon192.png",
+      badge: badge || "/pwaicon512.png",
       image: image || undefined,
       actions: Array.isArray(actions) ? actions.slice(0, 2) : undefined,
     };
