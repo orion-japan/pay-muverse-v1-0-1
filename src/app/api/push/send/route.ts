@@ -21,14 +21,16 @@ async function getWebpushSafe() {
     // default が無い場合も考慮
     const wp: any = (mod as any).default ?? (mod as any);
     _webpush = wp as typeof import('web-push');
+    console.log('[push/send] web-push module loaded');
   }
   if (!vapidConfigured) {
     if (!VAPID_PUBLIC || !VAPID_PRIVATE) {
-      console.warn('[push] VAPID keys are not set. Push sending is disabled.');
+      console.warn('[push/send] VAPID keys are not set. Push sending is disabled.');
       return null;
     }
     _webpush!.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC, VAPID_PRIVATE);
     vapidConfigured = true;
+    console.log('[push/send] VAPID configured (subject only logged):', VAPID_SUBJECT);
   }
   return _webpush;
 }
@@ -64,7 +66,11 @@ async function getConsents(user_code: string): Promise<Record<string, any>> {
     .eq('user_code', user_code)
     .maybeSingle();
 
-  if (error) throw new Error('consents fetch failed: ' + error.message);
+  if (error) {
+    console.error('[push/send] consents fetch failed:', error.message);
+    throw new Error('consents fetch failed: ' + error.message);
+  }
+  console.log('[push/send] consents loaded for user_code=', user_code);
   return (data?.consents || {}) as Record<string, any>;
 }
 
@@ -74,11 +80,16 @@ async function getSubscriptions(user_code: string) {
     .select('endpoint, p256dh, auth')
     .eq('user_code', user_code);
 
-  if (error) throw new Error('subscriptions fetch failed: ' + error.message);
+  if (error) {
+    console.error('[push/send] subscriptions fetch failed:', error.message);
+    throw new Error('subscriptions fetch failed: ' + error.message);
+  }
+  console.log('[push/send] subscriptions count=', data?.length ?? 0, 'user_code=', user_code);
   return data || [];
 }
 
 async function deleteSubscription(endpoint: string) {
+  console.warn('[push/send] deleting invalid subscription (410/404). endpoint suffix=', endpoint.slice(-24));
   await supabase.from('push_subscriptions').delete().eq('endpoint', endpoint);
 }
 
@@ -101,13 +112,16 @@ function isKindAllowed(consents: Record<string, any>, kind?: Kind) {
 
 export async function POST(req: NextRequest) {
   try {
+    const url = new URL(req.url);
+    const debug = url.searchParams.get('debug') === '1';
+
     const body = (await req.json()) as SendBody;
     const {
       user_code,
       kind = 'generic',
       title = '通知',
       body: message = '',
-      url = '/',
+      url: clickUrl = '/',
       tag,
       renotify,
       vibration,
@@ -116,6 +130,8 @@ export async function POST(req: NextRequest) {
       image,
       actions,
     } = body;
+
+    if (debug) console.log('[push/send] incoming body:', body);
 
     if (!user_code) {
       return NextResponse.json({ error: 'user_code required' }, { status: 400 });
@@ -126,12 +142,14 @@ export async function POST(req: NextRequest) {
 
     // 種別許可判定
     if (!isKindAllowed(consents, kind)) {
+      console.warn('[push/send] kind disabled by consents:', kind, 'user_code=', user_code);
       return NextResponse.json({ error: `kind "${kind}" disabled by consents` }, { status: 403 });
     }
 
     // 購読取得
     const subs = await getSubscriptions(user_code);
     if (!subs.length) {
+      console.warn('[push/send] no subscription for user_code=', user_code);
       return NextResponse.json({ error: 'no subscription' }, { status: 404 });
     }
 
@@ -141,19 +159,21 @@ export async function POST(req: NextRequest) {
         ? vibration
         : consents.vibration !== false;
 
-    // ✅ デフォルト icon / badge を追加
+    // ✅ デフォルト icon / badge を必ず付与
     const payload = {
       title,
       body: message,
-      url,
+      url: clickUrl,
       tag,
       renotify: !!renotify,
       vibration: vibrationEnabled,
-      icon: icon || "/pwaicon192.png",
-      badge: badge || "/pwaicon512.png",
+      icon: icon || '/pwaicon192.png',
+      badge: badge || '/pwaicon512.png',
       image: image || undefined,
       actions: Array.isArray(actions) ? actions.slice(0, 2) : undefined,
     };
+
+    if (debug) console.log('[push/send] payload:', payload);
 
     // web-push 初期化
     const webpush = await getWebpushSafe();
@@ -167,17 +187,21 @@ export async function POST(req: NextRequest) {
     const results: Array<{ endpoint: string; ok: boolean; status?: number; error?: string }> = [];
 
     for (const s of subs) {
+      const endpointSuffix = s.endpoint.slice(-24);
       const subscription = {
         endpoint: s.endpoint,
         keys: { p256dh: s.p256dh, auth: s.auth },
       } as any;
 
       try {
+        if (debug) console.log('[push/send] sending ->', endpointSuffix);
         await webpush.sendNotification(subscription, JSON.stringify(payload));
         results.push({ endpoint: s.endpoint, ok: true });
       } catch (err: any) {
         const status = err?.statusCode || err?.status;
-        results.push({ endpoint: s.endpoint, ok: false, status, error: String(err) });
+        const msg = String(err?.message || err);
+        console.error('[push/send] send error:', status, msg, 'endpoint suffix=', endpointSuffix);
+        results.push({ endpoint: s.endpoint, ok: false, status, error: msg });
 
         if (status === 404 || status === 410) {
           await deleteSubscription(s.endpoint);
@@ -185,8 +209,15 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ ok: true, results });
+    if (debug) console.log('[push/send] results:', results.map(r => ({ ok: r.ok, status: r.status, end: r.endpoint.slice(-24) })));
+
+    return NextResponse.json({
+      ok: true,
+      results,
+      ...(debug ? { debug: { subsCount: subs.length, payload } } : {}),
+    });
   } catch (e: any) {
+    console.error('[push/send] error:', e);
     return NextResponse.json({ error: e?.message || 'server error' }, { status: 500 });
   }
 }
