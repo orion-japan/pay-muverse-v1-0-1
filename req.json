@@ -1,1 +1,6 @@
-﻿{"user_code":"669933","title":"テスト通知（クラウド）","body":"Muverseから送信","url":"/","tag":"debug-cloud"}
+﻿{
+    "url":  "https://muverse.jp/",
+    "user_code":  "U-CKxc5NQQ",
+    "body":  "これは Android Chrome のテスト通知です",
+    "title":  "Muverse 通知テスト"
+}

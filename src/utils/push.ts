@@ -1,47 +1,39 @@
-import { supabase } from '@/lib/supabase'
+// utils/push.ts
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding)
+    .replace(/-/g, '+')
+    .replace(/_/g, '/');
 
-export async function registerPush(userCode: string) {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
 
-  // Service Worker 登録済みを待つ
-  const reg = await navigator.serviceWorker.ready
-
-  // Push Subscription を取得
-  const subscription = await reg.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
-      ? urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY)
-      : undefined,
-  })
-
-  // 👇 endpoint を取り出す
-  const endpoint = subscription.endpoint
-
-  // Supabase に保存（endpoint ユニーク制約で upsert）
-  const { data, error } = await supabase
-    .from('subscriptions')
-    .upsert(
-      {
-        user_code: userCode,
-        subscription,
-        endpoint, // 👈 新カラムに保存
-      },
-      { onConflict: 'endpoint' } // 同じデバイスなら上書き
-    )
-    .select() // 👈 保存結果を返す
-
-  if (error) {
-    console.error('❌ registerPush failed:', error)
-    throw error
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
   }
-
-  console.log('✅ Push subscription registered:', data)
-  return data
+  return outputArray;
 }
 
-function urlBase64ToUint8Array(base64String: string) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
-  const rawData = atob(base64)
-  return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)))
+export async function registerPush() {
+  if (!("serviceWorker" in navigator)) return;
+
+  // Service Worker 登録
+  const registration = await navigator.serviceWorker.register("/service-worker.js");
+
+  // Push Subscription
+  const subscription = await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(
+      process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY as string
+    ),
+  });
+
+  console.log("Push Subscription:", subscription);
+
+  // Supabase に保存するなら API 経由で送信
+  await fetch("/api/register-push", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(subscription),
+  });
 }
