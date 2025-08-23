@@ -26,7 +26,7 @@ export default function SelfPostModal({
 }: SelfPostModalProps) {
   const router = useRouter();
 
-  const [title, setTitle] = useState('');
+  // タイトルは廃止
   const [content, setContent] = useState('');
   const [tags, setTags] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -34,7 +34,7 @@ export default function SelfPostModal({
   const [isPosting, setIsPosting] = useState(false);
   const [visibility, setVisibility] = useState<Visibility>('public');
 
-  // 文字数カウント（上限は設けず、視認だけ）
+  // 文字数カウント（上限なし）
   const contentLen = useMemo(() => content.length, [content]);
 
   // textarea 自動リサイズ
@@ -43,13 +43,12 @@ export default function SelfPostModal({
     if (!taRef.current) return;
     const el = taRef.current;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 480)}px`; // 伸びすぎ防止
+    el.style.height = `${Math.min(el.scrollHeight, 480)}px`;
   }, [content, isOpen]);
 
   // モーダル開閉に合わせて初期化＆背景スクロールロック
   useEffect(() => {
     if (!isOpen) {
-      setTitle('');
       setContent('');
       setTags('');
       setImageFile(null);
@@ -91,10 +90,10 @@ export default function SelfPostModal({
     setPreviewUrl(url);
   };
 
-  // 投稿可否（どれか一つは欲しい：タイトル or 本文 or 画像）
+  // 投稿可否：本文 or 画像 のどちらか必須
   const canSubmit = useMemo(() => {
-    return !isPosting && !!userCode && (title.trim() !== '' || content.trim() !== '' || !!imageFile);
-  }, [isPosting, userCode, title, content, imageFile]);
+    return !isPosting && !!userCode && (content.trim() !== '' || !!imageFile);
+  }, [isPosting, userCode, content, imageFile]);
 
   const handlePost = async () => {
     if (!isOpen || !userCode || isPosting || !canSubmit) return;
@@ -131,10 +130,10 @@ export default function SelfPostModal({
           ? null
           : String(boardType).trim();
 
-      // 1) 親（posts）作成
+      // 1) 親（posts）作成  ※ title は常に null
       const parentBody = {
         user_code: userCode,
-        title: title.trim() || null,
+        title: null as string | null,                 // ← タイトル廃止
         content: content.trim() || null,
         tags: normalizedTags.length ? normalizedTags : null,
         media_urls: uploadedUrl ? [uploadedUrl] : [],
@@ -158,9 +157,7 @@ export default function SelfPostModal({
 
       // ★ Push 通知（失敗しても UI は継続）
       const previewText =
-        (title && title.trim()) ||
-        (content && content.trim().slice(0, 40)) ||
-        '新しい Self Talk';
+        (content && content.trim().slice(0, 40)) || '新しい Self Talk';
       fetch('/api/push/send', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -205,19 +202,10 @@ export default function SelfPostModal({
         </header>
 
         <div className="modal-body">
-          <label className="field">
-            <span>タイトル（任意）</span>
-            <input
-              type="text"
-              placeholder="タイトル"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              autoComplete="off"
-            />
-          </label>
+          {/* タイトル欄は削除 */}
 
           <label className="field">
-            <span>本文</span>
+            <span>投稿文</span>
             <textarea
               ref={taRef}
               placeholder="いまのビジョンや想いを言葉に…"
@@ -281,7 +269,7 @@ export default function SelfPostModal({
             onClick={handlePost}
             disabled={!canSubmit}
             aria-disabled={!canSubmit}
-            title={!canSubmit ? 'タイトル・本文・画像のいずれかを入力してください' : '投稿'}
+            title={!canSubmit ? '本文 か 画像 のいずれかを入力してください' : '投稿'}
           >
             {isPosting ? '投稿中…' : 'Self Talkを記録'}
           </button>

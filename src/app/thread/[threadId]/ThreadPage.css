@@ -2,23 +2,37 @@
    ThreadPage : スコープ
    すべて .thread-shell .thread-page の配下に限定
 =================================================================== */
-.thread-shell .thread-page {}
+.thread-shell .thread-page {
+  --bg-soft: #f6edff;
+  --line-soft: #ead9ff;
+  --card-bg: #fff;
+  --card-shadow: 0 1px 2px rgba(0,0,0,.06);
+  --radius: 12px;
+  --space-s: 8px;
+  --space-m: 10px;
+  --space-l: 12px;
+  --brand-grad: linear-gradient(180deg, #8b5cf6, #7c3aed);
+  --yellow-line: #f2cf67;
+  --yellow-bg: #fffaf1;
+  color: #222;
+  background: #fff;
+}
 
 /* ===================================================================
    ヘッダー（1行目=戻る / 2行目=アバター+情報）
 =================================================================== */
 .thread-shell .thread-page .thread-header {
   display: grid;
-  grid-template-columns: 44px 1fr;    /* 2行目の avatar / info 用 */
-  grid-template-rows: auto auto;      /* 1行目: back / 2行目: avatar+info */
+  grid-template-columns: 44px 1fr;     /* 2行目: avatar / info */
+  grid-template-rows: auto auto;       /* 1行目: back / 2行目: avatar+info */
   grid-template-areas:
     "back back"
     "avatar info";
   align-items: start;
   gap: 10px;
   padding: 10px 12px;
-  background: #f6edff;
-  border-bottom: 1px solid #ead9ff;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--line-soft);
   position: sticky;
   top: 0;
   z-index: 5;
@@ -27,20 +41,18 @@
 /* フル幅の戻るボタン（1行目） */
 .thread-shell .thread-page .thread-header .back-btn {
   grid-area: back;
-  justify-self: stretch;            /* 横一杯 */
+  justify-self: stretch;
   text-align: center;
   appearance: none;
   border: none;
   background: #fff;
   padding: 8px 12px;
-  border-radius: 12px;
+  border-radius: var(--radius);
   cursor: pointer;
   font-weight: 700;
   box-shadow: 0 1px 0 rgba(0,0,0,0.06);
 }
-.thread-shell .thread-page .thread-header .back-btn:hover {
-  filter: brightness(0.98);
-}
+.thread-shell .thread-page .thread-header .back-btn:hover { filter: brightness(0.98); }
 
 /* 2行目: アバター + 情報 */
 .thread-shell .thread-page .thread-header img.avatar {
@@ -48,8 +60,8 @@
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  object-fit: cover;                 /* はみ出しトリミング */
-  background: none;                  /* 背景は付けない */
+  object-fit: cover;
+  background: none;
 }
 
 .thread-shell .thread-page .thread-header .header-info {
@@ -59,7 +71,9 @@
 }
 
 .thread-shell .thread-page .header-title {
-  display: flex; gap: 10px; align-items: baseline;
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
 }
 .thread-shell .thread-page .header-title > strong { font-weight: 700; }
 .thread-shell .thread-page .header-title > small  { color: #888; font-size: 12px; }
@@ -74,38 +88,38 @@
   -webkit-box-orient: vertical;
 }
 
-/* 親のいいね群（黄色枠の内側／1行固定） */
+/* ===================================================================
+   親のリアクション（黄色枠）— Self寄せ＋中央寄せ
+=================================================================== */
 .thread-shell .thread-page .parent-like-box {
+  display: flex;
+  justify-content: center;     /* 中央寄せ */
+  align-items: center;
+  gap: 8px;
   margin-top: 8px;
   padding: 6px 8px;
-  border: 1.5px solid #f2cf67;   /* やさしい黄色 */
+  border: 1.5px solid var(--yellow-line);
   border-radius: 10px;
-  background: #fffaf1;
-  overflow: hidden;
-}
-.thread-shell .thread-page .parent-like-box > * {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: nowrap;             /* 折り返さない */
-  overflow-x: auto;              /* 溢れたら横スクロール */
+  background: var(--yellow-bg);
+  overflow-x: auto;             /* はみ出し時は横スクロール */
   scrollbar-width: thin;
 }
 
 /* ===================================================================
-   子リスト
+   子リスト領域
 =================================================================== */
 .thread-shell .thread-page .thread-scroll {
   overflow-y: auto;
-  padding: 8px 0 180px;          /* 下は入力固定ぶんの逃げ */
+  padding: 8px 0 180px;         /* 画面下の入力固定ぶんの逃げ */
 }
 
+/* 投稿カード（Self寄せ） */
 .thread-shell .thread-page .post {
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 1px 2px rgba(0,0,0,.06);
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--card-shadow);
   padding: 8px 10px;
-  margin: 10px 0 12px 0;         /* 左0で最左寄せ */
+  margin: 10px 0 12px 0;        /* 左0で最左寄せ */
 }
 
 .thread-shell .thread-page .author-line {
@@ -116,13 +130,36 @@
   margin-bottom: 4px;
 }
 
-/* 子コメントのアバター（丸・トリミング） */
+/* 子コメントのアバター */
 .thread-shell .thread-page .post .avatar.child {
   width: 32px;
   height: 32px;
   border-radius: 50%;
   object-fit: cover;
   background: none;
+}
+
+/* 本文 */
+.thread-shell .thread-page .post .content {
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ===================================================================
+   リアクションバー（親子共通で中央寄せ）
+=================================================================== */
+.thread-shell .thread-page .reaction-row,
+.thread-page .post .reaction-row,
+.reaction-bar {
+  display: flex;
+  justify-content: center;      /* 中央寄せ */
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  width: 100%;
+  margin-top: 8px;
 }
 
 /* ===================================================================
@@ -132,7 +169,7 @@
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  bottom: 56px;                  /* タブバーが無ければ 0 に */
+  bottom: 56px;                 /* タブバーが無ければ 0 に */
   z-index: 1000;
   max-width: 480px;
   width: 100%;
@@ -158,51 +195,96 @@
   height: 44px;
   border: none;
   border-radius: 10px;
-  background: linear-gradient(180deg, #8b5cf6, #7c3aed);
+  background: var(--brand-grad);
   color: #fff;
   font-weight: 700;
   cursor: pointer;
+  transition: transform .06s ease;
 }
-.thread-shell .thread-page .post-form button:disabled {
-  opacity: .5; cursor: not-allowed;
+.thread-shell .thread-page .post-form button:active { transform: translateY(1px); }
+.thread-shell .thread-page .post-form button:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ===================================================================
+   細かい調整
+=================================================================== */
+.thread-shell .thread-page .muted { color: #888; }
+.thread-shell .thread-page .sep   { height: 1px; background: #f0f0f0; margin: 8px 0; }
+
+/* iOSの横スクロールバー目立ちすぎ対策 */
+.thread-shell .thread-page .parent-like-box::-webkit-scrollbar,
+.thread-shell .thread-page .thread-scroll::-webkit-scrollbar { height: 6px; width: 6px; }
+.thread-shell .thread-page .parent-like-box::-webkit-scrollbar-thumb,
+.thread-shell .thread-page .thread-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,.15);
+  border-radius: 999px;
 }
 
+/* ===================================================================
+   モバイル微調整
+=================================================================== */
+@media (max-width: 360px) {
+  .thread-shell .thread-page .post-form {
+    grid-template-columns: 1fr 76px;
+  }
+  .thread-shell .thread-page .thread-header {
+    gap: 8px;
+    padding: 8px 10px;
+  }
+}
 
-/* 親いいね群（黄色枠）を中央寄せ */
-.thread-shell .thread-page .parent-like-box {
-  display: flex;
-  justify-content: center;   /* 中央寄せ */
-  align-items: center;
+/* --- 1) 投稿カードは block のまま（gridにしない） --- */
+.thread-shell .thread-page .post {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.06);
+  padding: 8px 10px;
+  margin: 10px 0 12px 0;
+  display: block;                 /* ← ここを block に戻す */
+}
+
+/* --- 2) ヘッダー行（アバター/右側）のみ grid で2列 --- */
+.thread-shell .thread-page .author-line {
+  display: grid;
+  grid-template-columns: 32px 1fr; /* 左=アバター / 右=名前・時間 */
   gap: 8px;
-  margin-top: 8px;
-  padding: 6px 8px;
-  border: 1.5px solid #f2cf67;
-  border-radius: 10px;
-  background: #fffaf1;
-}
-
-/* 子コメントのいいね群も中央寄せ */
-.thread-page .post .reaction-row.comment {
-  display: flex;
-  justify-content: center;   /* 中央寄せ */
   align-items: center;
-  margin-top: 8px;
-  width: 100%;
+  margin-bottom: 4px;
 }
 
-/* ReactionBar 自体も中央寄せ */
+/* アバター */
+.thread-shell .thread-page .post .avatar.child {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: none;
+}
+
+/* --- 3) 本文はアバター分だけインデントして、名前の頭と揃える --- */
+.thread-shell .thread-page .post .content {
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-left: 40px;              /* 32(avatar) + 8(gap) = 40px */
+}
+
+/* --- 4) いいね行は中央寄せ。インデントはしない --- */
+.thread-shell .thread-page .reaction-row,
 .reaction-bar {
   display: flex;
-  justify-content: center;   /* ←これを追加 */
+  justify-content: center;
   align-items: center;
   gap: 6px;
   flex-wrap: nowrap;
+  width: 100%;
+  margin-top: 8px;
 }
 
-/* 親いいね群（黄色枠）を中央寄せ */
+/* --- 5) 親の黄色枠も中央寄せ（そのまま） --- */
 .thread-shell .thread-page .parent-like-box {
   display: flex;
-  justify-content: center;   /* 中央寄せ */
+  justify-content: center;
   align-items: center;
   gap: 8px;
   margin-top: 8px;
@@ -210,7 +292,21 @@
   border: 1.5px solid #f2cf67;
   border-radius: 10px;
   background: #fffaf1;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
+/* （任意）本文が空行から始まる時に余白が詰みすぎるのを軽減 */
+.thread-shell .thread-page .post .content p:first-child { margin-top: 0; }
 
 
+/* コメント本文とリアクション群の区切り線 */
+.thread-shell .thread-page .post .content {
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-left: 40px;              /* 名前と頭揃え */
+  padding-bottom: 6px;            /* 線との間に少し余白 */
+  border-bottom: 1px solid #eee;  /* ← 区切り線 */
+}

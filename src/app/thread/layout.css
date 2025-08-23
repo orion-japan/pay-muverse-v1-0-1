@@ -1,16 +1,79 @@
-/* /thread 配下の共通ラッパ。高さ確保＆背景を統一 */
-.thread-shell {
-    min-height: 100dvh;
-    background: #fff;
-  }
-  /* スレッド画面用の薄いラッパ。ほかのページとCSSが干渉しないようにスコープを区切る */
-.thread-shell {
-  --max-width: 480px;
-  width: 100%;
-  max-width: var(--max-width);
-  margin: 0 auto;
-  position: relative;
-}
+/* =========================================================
+   /thread セグメント専用の“外枠”スコープ
+   ここから外にスタイル/レイアウトが漏れないようにする
+   ========================================================= */
 
-/* ここ以下のレイアウトは全て thread-shell 内だけに適用 */
-.thread-shell * { box-sizing: border-box; }
+   @layer thread-reset, thread-frame;
+
+   /* ---------- Reset（/thread 内だけの軽いリセット） ---------- */
+   @layer thread-reset {
+     .thread-shell {
+       position: relative;
+       isolation: isolate;          /* 他セグメントへ干渉させない */
+       contain: layout paint style; /* 子のはみ出しやスタイルの波及を遮断 */
+       min-height: 100svh;
+   
+       /* 画面中央に固定幅で配置（/self と同じ思想） */
+       display: flex;
+       justify-content: center;
+   
+       /* 横スクロールの発生を封じる */
+       overflow-x: hidden;
+       overflow-y: auto;
+   
+       /* 必要なら背景を付けてもOK（任意） */
+       background:
+         radial-gradient(1200px 800px at 50% -200px, #f3f6ff 0%, transparent 60%),
+         linear-gradient(#ffffff, #fafcff);
+     }
+   
+     /* /thread 内では確実に border-box + はみ出し防止 */
+     .thread-shell, .thread-shell * {
+       box-sizing: border-box;
+       max-width: 100%;
+     }
+   
+     /* 長い単語/URL がレイアウトを壊さないように */
+     .thread-shell :where(p, div, span, li) {
+       overflow-wrap: anywhere;
+       word-break: break-word;
+     }
+   
+     /* 画像や動画はハミ出さない */
+     .thread-shell :where(img, video, canvas, svg) {
+       max-width: 100%;
+       height: auto;
+       display: block;
+     }
+   }
+   
+   /* ---------- 固定幅のフレーム ---------- */
+   @layer thread-frame {
+     /* /self と同等のフレーム幅にしておくと遷移時の見え方が安定します */
+     .thread-shell > *:first-child {
+       width: min(100%, 430px);   /* 上限 430px（iPhoneの縦基準） */
+       max-width: 430px;
+       min-height: 100%;
+       margin: 0;
+       padding: 0 12px 72px;      /* 下はフッタ/タブぶん余白が必要なら */
+   
+       /* さらに内側でもはみ出しを抑制 */
+       contain: layout paint style;
+       container-type: inline-size; /* 必要ならコンテナクエリを使える */
+       overflow-x: clip;
+     }
+   
+     /* ReactionBar の “丸アイコン群” を中央寄せしたい場合（任意） */
+     .thread-shell :where(.reaction-row, .actions-row) {
+       display: flex;
+       justify-content: center;
+     }
+   }
+   
+   /* 安全領域（iOS Safari）に余白を足す（任意） */
+   @supports (padding-bottom: env(safe-area-inset-bottom)) {
+     .thread-shell > *:first-child {
+       padding-bottom: calc(72px + env(safe-area-inset-bottom));
+     }
+   }
+   

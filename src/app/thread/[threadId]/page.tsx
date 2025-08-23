@@ -8,9 +8,6 @@ import { useAuth } from '@/context/AuthContext';
 import ReactionBar from '@/components/ReactionBar';
 import './ThreadPage.css';
 
-
-
-
 /* ===== Types ===== */
 type Post = {
   post_id: string;
@@ -60,7 +57,8 @@ export default function ThreadPage() {
     return out;
   };
 
-  const avatarSrcFrom = (code?: string | null) => (code ? `/api/avatar/${encodeURIComponent(code)}` : DEFAULT_AVATAR);
+  const avatarSrcFrom = (code?: string | null) =>
+    (code ? `/api/avatar/${encodeURIComponent(code)}` : DEFAULT_AVATAR);
 
   const onAvatarError = (e: React.SyntheticEvent<HTMLImageElement>) => {
     const el = e.currentTarget;
@@ -72,6 +70,16 @@ export default function ThreadPage() {
   const goProfile = (code?: string | null) => {
     if (!code) return;
     router.push(`/profile/${encodeURIComponent(code)}`);
+  };
+
+  // ★ 追加：Selfページに確実に戻るヘルパー
+  const goSelf = () => {
+    // 必ず /self へ遷移（履歴戻りではなく再マウントされる）
+    router.push('/self');
+
+    // 親ユーザーの Self 詳細へ戻したい場合は下を使う：
+    // if (parent?.user_code) router.push(`/self/${encodeURIComponent(parent.user_code)}`);
+    // else router.push('/self');
   };
 
   async function hydrateFromProfiles(posts: Post[]) {
@@ -305,7 +313,7 @@ export default function ThreadPage() {
   return (
     <div className="thread-page">
       <div className="thread-topbar">
-        <button className="back-btn" onClick={() => router.back()}>← 戻る</button>
+        <button className="back-btn" onClick={goSelf}>← 戻る</button>
       </div>
 
       <header className="thread-header">

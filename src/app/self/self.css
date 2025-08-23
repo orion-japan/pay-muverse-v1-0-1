@@ -1,275 +1,541 @@
-/* =========================================================
-   Self Talk 一覧（構造そのまま3段レイアウト）
-   上：名前/日付/コメント数
-   中：アバター + 本文（3行で省略）
-   下：ReactionBar（中央）
-========================================================= */
-:root{
-  --mu-primary:#5a46e0;
-  --mu-primary-weak:#efeaff;
-  --mu-primary-border:#e4defc;
-
-  --mu-text:#222;
-  --mu-text-weak:#666;
-  --mu-muted:#8c8c8c;
-
-  --mu-border:rgba(0,0,0,0.08);
-  --mu-shadow:0 8px 22px rgba(0,0,0,0.08);
-  --mu-shadow-hover:0 12px 30px rgba(0,0,0,0.12);
-
-  --mu-radius-lg:14px;
-
-  --page-max: 920px;   /* ページ中央の最大幅 */
-  --card-max: 720px;   /* カードの最大幅（統一） */
-  --avatar: 48px;      /* アバター固定サイズ */
+/* ===== self shell: 他ページのスタイル継承を遮断 ===== */
+.self-shell {
+  isolation: isolate;           /* stacking を分離 */
+  container-type: inline-size;  /* コンテナクエリ用（将来用） */
 }
 
-/* ---------- ページ枠 ---------- */
-.self-page{
-  max-width: var(--page-max);
+/* ここから先は self ページ専用スコープ */
+.self-page {
+  max-width: 720px;
   margin: 0 auto;
-  padding: 24px 14px 96px;
-  color: var(--mu-text);
+  padding: 12px 16px 90px;
   box-sizing: border-box;
-}
-.self-page h1{ font-size:22px; font-weight:800; margin:0 0 12px; }
 
-/* ---------- リスト（中央寄せ） ---------- */
-.digest-list{
+  /* ★ 他ページから継承されがちなものを明示的に戻す */
+  text-align: left;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.5;
+  letter-spacing: normal;
+}
+
+/* 見出し */
+.self-page h1 {
+  margin: 4px 0 12px;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+/* ===== ダイジェスト ===== */
+.digest-sections {
   display: grid;
-  gap: 16px;
-  justify-items: center;
+  gap: 20px;
 }
 
-/* ---------- カード本体（3段グリッド） ---------- */
-.digest-row{
+.digest-section h2 {
+  font-size: 16px;
+  margin: 0 0 8px;
+}
+
+.digest-list {
+  display: grid;
+  gap: 10px;
+}
+
+/* 1行（カード） */
+.digest-row {
   width: 100%;
-  max-width: var(--card-max);
-  background:#fff;
-  border:1px solid var(--mu-border);
-  border-radius:var(--mu-radius-lg);
-  box-shadow:var(--mu-shadow);
-  padding:12px 14px;
-  cursor:pointer;
-
-  /* 3段構成：上/中/下。中段は 2 列（左アバター 右本文） */
-  display:grid;
-  grid-template-columns: var(--avatar) 1fr; /* 中段用：左=アバター / 右=本文 */
-  grid-template-rows: auto auto auto;       /* 上 / 中 / 下 */
-  column-gap:12px;
-  row-gap:8px;
-
-  transition: box-shadow .18s ease, transform .06s ease, border-color .18s ease;
-}
-.digest-row:hover{ box-shadow:var(--mu-shadow-hover); border-color:var(--mu-primary-border); }
-.digest-row:active{ transform: translateY(1px); }
-.digest-row.compact{} /* 互換用 */
-
-/* ---------- 中段：アバター（必ず小さく固定・左上） ---------- */
-.digest-row .avatar{
-  grid-column: 1 / 2;
-  grid-row:    2 / 3;                      /* 中段に配置 */
-  width: var(--avatar) !important;
-  height: var(--avatar) !important;
-  max-width: var(--avatar) !important;
-  max-height: var(--avatar) !important;
-  min-width: var(--avatar);
-  min-height: var(--avatar);
-  border-radius: 50%;
-  object-fit: cover;
-  border: 1px solid var(--mu-border);
-  display: block;
-  align-self: start;                        /* ← 上揃え */
-  justify-self: start;
-}
-
-/* ---------- 上段＋中段右：.oneline を2行グリッドに ---------- */
-/* 上段（行1）：著者（左）・日付（右） */
-/* 中段（行2）：本文（左）・コメント数などのピル（右） */
-.digest-row .oneline{
-  grid-column: 2 / 3;     /* 右列 */
-  grid-row:    1 / 3;     /* 上段～中段の2行をカバー */
   display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-rows: auto auto;
-  column-gap: 8px;
-  row-gap: 4px;
+  grid-template-columns: 44px 1fr; /* 左:アバター / 右:本文ブロック */
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--mu-border, #e6e6ef);
+  border-radius: var(--mu-radius-lg, 12px);
+  background: #fff;
+  box-shadow: var(--shadow, 0 2px 6px rgba(0,0,0,.04));
   align-items: start;
 }
 
-/* 著者（上段・左） */
-.digest-row .author{
-  grid-column: 1 / 2;
-  grid-row:    1 / 2;
-  font-weight: 800;
-  font-size: 14px;
-  color: #4b3bbd;
+.digest-row .avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  object-fit: cover;
+  display: block;
 }
-.digest-row .author:hover{ text-decoration: underline; }
 
-/* 日付（上段・右） */
-.digest-row .meta{
-  grid-column: 2 / 3;
-  grid-row:    1 / 2;
-  justify-self: end;
+/* 右側テキスト塊 */
+.digest-row .oneline {
+  display: flex;
+  flex-direction: column;   /* ← 縦並びに変更 */
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+
+/* 名前 */
+.digest-row .author {
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* 日時など（名前の横に寄せるならここを inline に戻す） */
+.digest-row .meta {
   font-size: 12px;
-  color: var(--mu-muted);
+  color: #777;
+  white-space: nowrap;
 }
 
-/* 本文（中段・左）— 3行で省略 */
-.digest-row .snippet{
-  grid-column: 1 / 2;
-  grid-row:    2 / 3;
-  color: var(--mu-text);
-  font-size: 15px;
-  line-height: 1.6;
+/* ピル */
+.digest-row .pill {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #f0f1ff;
+  color: #556;
+  white-space: nowrap;
+}
+.digest-row .pill.ai {
+  background: #ffeef2;
+  color: #a33;
+}
+
+/* コメント（本文 snippet）：名前の下に配置 */
+.digest-row .snippet {
+  width: 100%;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  word-break: break-word;
+  line-clamp: 3;
+  margin-top: 2px;      /* 名前との余白 */
+  font-size: 15px;
+  line-height: 1.6;
   white-space: normal;
+  word-break: break-word;
 }
 
-/* コメント数などのピル（中段・右） */
-.pill{
-  grid-column: 2 / 3;
-  grid-row:    2 / 3;
-  justify-self: end;
-  display: inline-flex;
-  align-items: center;
+/* リアクションバーは中央寄せ */
+.digest-row .reaction-row {
+  grid-column: 1 / -1;
+  display: flex;
   justify-content: center;
-  min-width: 24px;
-  height: 22px;
-  padding: 0 8px;
-  font-size: 12px;
-  border-radius: 999px;
-  background: var(--mu-primary-weak);
-  border: 1px solid var(--mu-primary-border);
-  color: var(--mu-primary);
-  font-weight: 700;
-}
-.pill.ai{ background:#111827; border-color:#111827; color:#fff; }
-
-/* 区切りドットは使わない */
-.digest-row .dot{ display:none; }
-
-/* ---------- 下段：イイネ群（中央） ---------- */
-.reaction-row{
-  grid-column: 1 / -1;   /* 全幅 */
-  grid-row:    3 / 4;    /* 下段 */
-  display:flex;
-  justify-content:center;
-  align-items:center;
-  gap:8px;
-  margin-top:6px;
-  padding-top:10px;
-  border-top:1px solid var(--mu-border);
-  min-height:44px;
-}
-.reaction-row button,
-.reaction-row .reaction-btn{
-  min-width: 36px;
-  min-height: 36px;
-  font-size: 14px;
+  margin-top: 6px;
 }
 
-/* 空/ヒント */
-.empty,.hint{ color:var(--mu-text-weak); font-size:13px; padding:8px 2px 2px; }
-
-/* 浮遊ボタン */
-.floating-button{
-  position:fixed; right:18px; bottom:24px;
-  width:58px; height:58px; line-height:58px;
-  border-radius:999px;
-  border:1px solid var(--mu-primary-border);
-  box-shadow:var(--mu-shadow);
-  background: radial-gradient(120% 120% at 20% 20%, #ffffff 0%, #f6f0ff 55%, #efe9ff 100%);
-  color: var(--mu-primary);
-  font-weight: 800; font-size: 18px;
-  text-align: center; cursor: pointer;
-}
-.floating-button:hover{ filter: brightness(.98); }
-
-/* ---------- SP ---------- */
-@media (max-width: 560px){
-  .digest-row{ padding:10px 12px; }
-  .digest-row .snippet{ font-size:14.5px; }
-}
-
-/* ===== フローティング +S ボタン ===== */
-.floating-button {
+/* フローティング +S ボタン */
+.floating-button.attn {
   position: fixed;
   right: 20px;
-  bottom: 90px;   /* ← 以前は 20〜40px くらい → 少し上に上げる */
-  width: 60px;
-  height: 60px;
-  border-radius: 50%;
-  font-size: 22px;
-  font-weight: 700;
-  background: linear-gradient(180deg, #ffdc4b, #ffc800);
-  color: #171300;
+  bottom: 84px;
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
   border: none;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  background: #ffd84d;
+  box-shadow: 0 6px 18px rgba(0,0,0,.18);
+  font-weight: 800;
   cursor: pointer;
-  transition: transform .15s ease, box-shadow .15s ease;
+}
+
+/* ===== トースト ===== */
+.self-toasts {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   z-index: 1000;
 }
-
-.floating-button:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.3);
+.self-toast {
+  min-width: 260px;
+  max-width: 360px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(30,30,40,.92);
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(0,0,0,.25);
+}
+.self-toast .ttl { font-weight: 700; margin-bottom: 4px; font-size: 14px; }
+.self-toast .body { font-size: 13px; line-height: 1.4; opacity: .9; }
+.self-toast .okbtn {
+  margin-top: 8px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: #6c6cff;
+  color: #fff;
+  border: none;
 }
 
-/* ===== Muverse風 フローティング +S ボタン ===== */
-.floating-button {
-  position: fixed;
-  right: 20px;
-  bottom: 90px;  /* フッターと被らないように調整 */
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
+/* ===== モバイル幅の微調整 ===== */
+@media (max-width: 560px) {
+  .digest-row { padding: 10px; }
+  .digest-row .oneline { gap: 4px; }
+}
+
+/* ===== self shell: 他ページのスタイル継承を遮断 ===== */
+.self-shell {
+  isolation: isolate;
+  container-type: inline-size;
+}
+
+/* ページ本体 */
+.self-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 12px 16px 90px;
+  box-sizing: border-box;
+  text-align: left;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.5;
+  letter-spacing: normal;
+}
+
+.self-page h1 {
+  margin: 4px 0 12px;
   font-size: 22px;
   font-weight: 800;
-  color: #171300;
-  border: none;
+}
+
+/* ===== ダイジェスト ===== */
+.digest-sections {
+  display: grid;
+  gap: 20px;
+}
+
+.digest-section h2 {
+  font-size: 16px;
+  margin: 0 0 8px;
+}
+
+.digest-list {
+  display: grid;
+  gap: 10px;
+}
+
+/* 1行カード */
+.digest-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--mu-border, #e6e6ef);
+  border-radius: var(--mu-radius-lg, 12px);
+  background: #fff;
+  box-shadow: var(--shadow, 0 2px 6px rgba(0,0,0,.04));
+  align-items: start;
+}
+
+.digest-row .avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  object-fit: cover;
+  display: block;
+}
+
+/* 右側のブロック */
+.digest-row .oneline {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+
+/* 名前 */
+.digest-row .author {
+  font-weight: 700;
   cursor: pointer;
-  z-index: 1000;
-
-  /* ✨ 黄金グラデーション */
-  background: linear-gradient(135deg, #ffea80, #ffc800 60%, #ff9500);
-  box-shadow:
-    0 6px 16px rgba(0, 0, 0, 0.25),
-    0 0 10px rgba(255, 200, 0, 0.6),
-    inset 0 -3px 6px rgba(0, 0, 0, 0.2);
-
-  transition: transform 0.2s ease, box-shadow 0.3s ease;
 }
 
-/* ホバーで光が強くなる */
-.floating-button:hover {
-  transform: translateY(-4px) scale(1.05);
-  box-shadow:
-    0 12px 24px rgba(0, 0, 0, 0.3),
-    0 0 14px rgba(255, 220, 80, 0.8),
-    inset 0 -3px 6px rgba(0, 0, 0, 0.25);
+/* メタ情報とピルを右寄せ */
+.digest-row .meta-pill {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;       /* ← 日付と投稿数の間隔 */
+  width: 100%;
+  font-size: 12px;
+  color: #777;
 }
 
-/* クリック時に沈む感じ */
-.floating-button:active {
-  transform: scale(0.96);
-  box-shadow:
-    0 4px 12px rgba(0, 0, 0, 0.2),
-    0 0 8px rgba(255, 200, 0, 0.7);
+.digest-row .meta {
+  white-space: nowrap;
 }
 
-/* ✨ 内側に輝きアニメーション */
-@keyframes mu-glow {
-  0% { box-shadow: 0 0 8px rgba(255, 220, 80, 0.5), 0 0 20px rgba(255, 200, 0, 0.3); }
-  50% { box-shadow: 0 0 16px rgba(255, 240, 120, 0.8), 0 0 32px rgba(255, 200, 0, 0.6); }
-  100% { box-shadow: 0 0 8px rgba(255, 220, 80, 0.5), 0 0 20px rgba(255, 200, 0, 0.3); }
+.digest-row .pill {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #f0f1ff;
+  color: #556;
+  white-space: nowrap;
+}
+.digest-row .pill.ai {
+  background: #ffeef2;
+  color: #a33;
+}
+
+/* コメント本文 */
+.digest-row .snippet {
+  width: 100%;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-clamp: 3;
+  margin-top: 2px;
+  font-size: 15px;
+  line-height: 1.6;
+  white-space: normal;
+  word-break: break-word;
+}
+
+/* リアクションバー */
+.digest-row .reaction-row {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: center;
+  margin-top: 6px;
+}
+
+/* ===== +S ボタンをかっこよく ===== */
+.floating-button.attn {
+  position: fixed;
+  right: 20px;
+  bottom: 84px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(135deg, #FFD84D, #FF9F1C);
+  color: #fff;
+  font-size: 20px;
+  font-weight: bold;
+  box-shadow: 0 6px 18px rgba(0,0,0,.25), 0 0 12px rgba(255,168,0,.6);
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.floating-button.attn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 8px 24px rgba(0,0,0,.3), 0 0 16px rgba(255,168,0,.8);
+}
+
+/* モバイル対応 */
+@media (max-width: 560px) {
+  .digest-row { padding: 10px; }
+  .digest-row .oneline { gap: 4px; }
+}
+
+/* --- DigestRow：行レイアウトを明示 --- */
+.self-shell .digest-row {
+  display: grid;
+  grid-template-columns: 44px 1fr;      /* 左アバター / 右コンテンツ */
+  grid-template-rows: auto auto auto;   /* 頭 / 本文 / リアクション */
+  gap: 8px 10px;
+}
+
+.self-shell .digest-row .avatar {
+  grid-row: 1 / span 2;  /* 1〜2行目に跨る（上＋本文） */
+  grid-column: 1;
+  width: 44px; height: 44px;
+  border-radius: 9999px;
+  object-fit: cover;
+}
+
+/* 1行目：作者（左）／日付（右） */
+.self-shell .digest-row .row.head {
+  grid-row: 1;
+  grid-column: 2;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.self-shell .digest-row .author {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.self-shell .digest-row .meta {
+  white-space: nowrap;
+  font-size: 12px;
+  color: #777;
+}
+
+/* 2行目：本文（左）／ピル（右） */
+.self-shell .digest-row .row.body {
+  grid-row: 2;
+  grid-column: 2;
+  display: grid;
+  grid-template-columns: 1fr auto; /* 本文を広く、右にピル */
+  align-items: start;
+  gap: 8px;
+  min-width: 0;
+}
+.self-shell .digest-row .snippet {
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3; /* 3行省略 */
+  overflow: hidden;
+  word-break: break-word;
+  line-height: 1.6;
+  font-size: 15px;
+}
+.self-shell .digest-row .tail-right {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* 3行目：リアクション（中央寄せ） */
+.self-shell .digest-row .reaction-row {
+  grid-row: 3;
+  grid-column: 1 / -1;   /* 全幅 */
+  display: flex;
+  justify-content: center;
+  margin-top: 2px;
+}
+
+/* =========================
+   Muverse の雰囲気：カードの淡いグラデ背景
+   ========================= */
+/* カード本体 */
+.self-shell .digest-row {
+  /* ほんのり透明な紫→青のグラデを白の上に重ねる */
+  background:
+    linear-gradient(180deg, rgba(122, 106, 255, 0.06) 0%, rgba(108, 206, 255, 0.06) 100%),
+    #ffffff;
+  border: 1px solid rgba(128, 120, 255, 0.18);
+  box-shadow:
+    0 2px 6px rgba(100, 90, 255, 0.08),
+    0 8px 24px rgba(100, 90, 255, 0.06);
+  transition: box-shadow .25s ease, transform .25s ease, border-color .25s ease;
+}
+
+/* ふわっと浮くホバー（PCだけ） */
+@media (hover: hover) and (pointer: fine) {
+  .self-shell .digest-row:hover {
+    transform: translateY(-1px);
+    border-color: rgba(108, 206, 255, 0.28);
+    box-shadow:
+      0 6px 18px rgba(100, 90, 255, 0.12),
+      0 14px 36px rgba(108, 206, 255, 0.10);
+  }
+}
+
+/* =========================
+   +S（投稿）ボタン：光るアニメーション
+   ========================= */
+.floating-button.attn {
+  position: fixed;
+  right: 20px;
+  bottom: 84px;
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  border: none;
+  /* 立体感のあるグラデ＋内側ハイライト */
+  background:
+    radial-gradient(120% 120% at 30% 20%, #fff 0%, rgba(255,255,255,.0) 55%),
+    linear-gradient(135deg, #ffd84d 0%, #ffb84d 100%);
+  color: #553700;
+  font-weight: 800;
+  box-shadow:
+    0 6px 18px rgba(0,0,0,.22),
+    0 0 0 0 rgba(255, 216, 77, 0.65); /* アニメ開始時の外側グロー */
+  z-index: 50;
+  cursor: pointer;
+  transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
+  animation: glowPulse 2.2s ease-in-out infinite;
+}
+
+/* ホバーで少し持ち上げ & グロー強め */
+@media (hover: hover) and (pointer: fine) {
+  .floating-button.attn:hover {
+    transform: translateY(-2px) scale(1.03);
+    box-shadow:
+      0 10px 24px rgba(0,0,0,.26),
+      0 0 0 12px rgba(255, 216, 77, 0.08);
+    filter: saturate(1.05);
+  }
+}
+
+/* クリック感（タップ） */
+.floating-button.attn:active {
+  transform: translateY(0) scale(0.98);
+  box-shadow:
+    0 4px 12px rgba(0,0,0,.22),
+    0 0 0 6px rgba(255, 216, 77, 0.12);
+}
+
+/* ほんのり光が呼吸するアニメ */
+@keyframes glowPulse {
+  0% {
+    box-shadow:
+      0 6px 18px rgba(0,0,0,.22),
+      0 0 0 0 rgba(255, 216, 77, 0.55);
+  }
+  50% {
+    box-shadow:
+      0 8px 22px rgba(0,0,0,.26),
+      0 0 0 12px rgba(255, 216, 77, 0.08);
+  }
+  100% {
+    box-shadow:
+      0 6px 18px rgba(0,0,0,.22),
+      0 0 0 0 rgba(255, 216, 77, 0.55);
+  }
+}
+
+/* ユーザーが“動きを減らす”設定の場合はアニメ停止 */
+@media (prefers-reduced-motion: reduce) {
+  .floating-button.attn { animation: none; }
+}
+
+
+
+/* =========================
+   著者名は普通の文字に戻す
+   投稿本文を少し目立たせる
+   ========================= */
+
+/* 名前（author）：太字 → 通常フォント */
+.self-shell .digest-row .author {
+  font-weight: 500;      /* 標準に近い太さ */
+  color: #444;           /* やや落ち着いた色 */
+}
+
+/* 投稿本文（snippet）：やや大きめ＆濃い */
+.self-shell .digest-row .snippet {
+  font-size: 16px;       /* 既存より +1px */
+  font-weight: 600;      /* ほんのり強調 */
+  color: #222;           /* 黒寄りで目立つ */
+  line-height: 1.6;
+}
+/* 著者名をさらに薄くして控えめにする */
+.self-shell .digest-row .author {
+  font-weight: 400;   /* 普通の太さ */
+  color: #999;        /* 薄めのグレー */
+  font-size: 14px;    /* 本文より少し小さめ */
 }
 
 .floating-button.attn {
-  animation: mu-glow 2.5s infinite ease-in-out;
+  animation: pulse 1.8s infinite;
+}
+
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 215, 77, 0.6); }
+  70%  { box-shadow: 0 0 15px 15px rgba(255, 215, 77, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 215, 77, 0); }
 }
