@@ -10,12 +10,16 @@ import {
   signOut,
 } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase'; // ★追加
+
+type Plan = 'free' | 'regular' | 'premium' | 'master' | 'admin';
 
 type AuthValue = {
   loading: boolean;
   user: User | null;        // Firebaseのユーザー情報
   idToken: string | null;   // Firebase IDトークン
   userCode: string | null;  // Supabase/独自のユーザーコード
+  planStatus: Plan;         // ★追加: プラン（profiles.plan_status）
   logout: () => Promise<void>;
 };
 
@@ -24,6 +28,7 @@ const AuthContext = createContext<AuthValue>({
   user: null,
   idToken: null,
   userCode: null,
+  planStatus: 'free', // ★追加: 既定は free
   logout: async () => {},
 });
 
@@ -56,10 +61,29 @@ async function fetchUserCodeFromServer(u: User): Promise<string | null> {
   }
 }
 
+/** profiles.plan_status を取得（未知/欠損は free 扱い） */
+async function fetchPlanStatus(userCode: string): Promise<Plan> {
+  try {
+    const { data, error } = await supabase
+    .from('users')
+    .select('plan_status')
+    .eq('user_code', userCode)
+    .maybeSingle();
+
+    if (error) throw error;
+    const v = String(data?.plan_status ?? 'free').toLowerCase();
+    return (['free', 'regular', 'premium', 'master', 'admin'].includes(v) ? v : 'free') as Plan;
+  } catch (e) {
+    console.warn('[AuthContext] fetchPlanStatus error', e);
+    return 'free';
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [idToken, setIdToken] = useState<string | null>(null);
   const [userCode, setUserCode] = useState<string | null>(null);
+  const [planStatus, setPlanStatus] = useState<Plan>('free'); // ★追加
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -74,6 +98,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!u) {
           setIdToken(null);
           setUserCode(null);
+          setPlanStatus('free'); // ★追加: サインアウト時は free に戻す
           if (typeof window !== 'undefined') localStorage.removeItem('user_code');
           return;
         }
@@ -117,6 +142,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // ★追加: userCode が決まったら plan_status を取得
+  useEffect(() => {
+    if (!userCode) {
+      setPlanStatus('free');
+      return;
+    }
+    let alive = true;
+    (async () => {
+      const plan = await fetchPlanStatus(userCode);
+      if (alive) setPlanStatus(plan);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [userCode]);
+
   const logout = async () => {
     try {
       await signOut(auth);
@@ -124,13 +165,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
       setIdToken(null);
       setUserCode(null);
+      setPlanStatus('free'); // ★追加
       if (typeof window !== 'undefined') localStorage.removeItem('user_code');
     }
   };
 
   const value = useMemo(
-    () => ({ loading, user, idToken, userCode, logout }),
-    [loading, user, idToken, userCode]
+    () => ({ loading, user, idToken, userCode, planStatus, logout }),
+    [loading, user, idToken, userCode, planStatus]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

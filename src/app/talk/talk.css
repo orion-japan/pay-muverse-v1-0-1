@@ -1,0 +1,188 @@
+/* スコープ */
+.talk-shell {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 16px 16px 80px;
+  }
+  
+  .talk-header h1 {
+    font-size: 20px;
+    margin: 0 0 4px;
+  }
+  
+  .talk-note {
+    margin: 0 0 12px;
+    color: #666;
+    font-size: 13px;
+  }
+  .talk-note-warn {
+    color: #b36b00;
+    margin-left: 4px;
+  }
+  
+  .talk-toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+  
+  .talk-search {
+    flex: 1;
+    height: 36px;
+    padding: 0 12px;
+    border: 1px solid #e4e4e4;
+    border-radius: 10px;
+    outline: none;
+  }
+  .talk-search:focus {
+    border-color: #caa7ff;
+    box-shadow: 0 0 0 3px rgba(140, 58, 255, 0.12);
+  }
+  
+  .upgrade-btn {
+    height: 36px;
+    padding: 0 14px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    background: linear-gradient(135deg, #ffd776, #ff9f7f);
+  }
+  
+  .talk-loading,
+  .talk-empty {
+    text-align: center;
+    color: #777;
+    padding: 32px 8px;
+  }
+  
+  /* リスト */
+  .friend-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  
+  .friend-item {
+    display: grid;
+    grid-template-columns: 48px 1fr auto;
+    align-items: center;
+    gap: 12px;
+    padding: 10px;
+    border: 1px solid #eee;
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 2px 10px rgba(100, 100, 150, 0.06);
+    transition: transform 0.05s ease, box-shadow 0.1s ease;
+    cursor: pointer;
+  }
+  .friend-item:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(100, 100, 150, 0.12);
+  }
+  .friend-item.disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    filter: grayscale(0.1);
+  }
+  
+  .friend-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid #eee;
+  }
+  
+  .friend-main {
+    display: grid;
+    gap: 4px;
+  }
+  .friend-name {
+    font-weight: 600;
+  }
+  .friend-sub {
+    color: #777;
+    font-size: 12px;
+  }
+  
+  .friend-action {
+    display: flex;
+    align-items: center;
+  }
+  
+  .chip-go,
+  .chip-disabled {
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+  }
+  .chip-go {
+    background: #efecff;
+    border: 1px solid #d9ccff;
+  }
+  .chip-disabled {
+    background: #f3f3f3;
+    border: 1px solid #e6e6e6;
+  }
+  
+  /* 合意レベルバッジ */
+  .level-badge {
+    margin-left: 6px;
+    padding: 1px 8px;
+    font-size: 11px;
+    border-radius: 999px;
+    border: 1px solid #e8e8e8;
+    background: #fafafa;
+    vertical-align: middle;
+  }
+  .lv-F { background: #eaf9ff; border-color: #caedff; }
+  .lv-R { background: #efffe9; border-color: #d3f8c8; }
+  .lv-C { background: #fff4e6; border-color: #ffe0bf; }
+  .lv-I { background: #fff0f5; border-color: #ffd6e8; }
+  
+  .dot { margin: 0 4px; }
+  .last-active { color: #999; }
+  
+  .friend-avatar {
+    background:#f3f4f6;
+    display:block;
+    border-radius:50%;
+    -webkit-backface-visibility:hidden;
+    transform: translateZ(0);
+  }
+  
+  .linklike {
+    all: unset;
+    color: #4b6bdb;
+    cursor: pointer;
+  }
+  .linklike:hover { text-decoration: underline; }
+  
+  .snippet {
+    font-size: 12px;
+    color: #666;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  
+  .unread-badge {
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
+    border-radius: 999px;
+    font-size: 12px;
+    line-height: 22px;
+    text-align: center;
+    background: #ffeff0;
+    border: 1px solid #ffd5da;
+  }
+  .unread-badge.empty {
+    visibility: hidden; /* スペースだけ確保して行のガタつきを防止 */
+  }
+  
