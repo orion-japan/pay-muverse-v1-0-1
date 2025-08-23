@@ -1,438 +1,275 @@
-.self-page {
-    padding: 1.5rem;
-    font-family: 'Segoe UI', sans-serif;
-  }
-  
-  .post-feed {
-    margin-top: 1rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-  
-  .thread-card {
-    display: flex;
-    gap: 1rem;
-    padding: 1rem;
-    border: 1px solid #e3e3e3;
-    border-radius: 12px;
-    background: #fff;
-    cursor: pointer;
-    transition: background 0.2s;
-  }
-  
-  .thread-card:hover {
-    background-color: #f9f9f9;
-  }
-  
-  .thumb {
-    width: 80px;
-    height: 80px;
-    object-fit: cover;
-    border-radius: 8px;
-  }
-  
-  .text-block {
-    flex: 1;
-  }
-  
-  .text-block h3 {
-    margin: 0;
-    font-size: 1.1rem;
-  }
-  
-  .text-block p {
-    margin: 0.4rem 0;
-    color: #333;
-    font-size: 0.95rem;
-  }
-  
-  .meta {
-    font-size: 0.8rem;
-    color: #666;
-    display: flex;
-    justify-content: space-between;
-  }
-  
-  .floating-button {
-    position: fixed;
-    bottom: 70px;
-    right: 20px;
-    background: gold;
-    color: black;
-    border: none;
-    border-radius: 50%;
-    width: 60px;
-    height: 60px;
-    font-size: 1.5rem;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
-    cursor: pointer;
-  }
-  
-  /* アバター画像の共通スタイル */
-.thread-card .author-line .avatar {
-  width: 32px;         /* 小さめなら 24px〜40px で調整OK */
-  height: 32px;
-  border-radius: 50%;  /* 丸くする */
-  object-fit: cover;   /* はみ出し防止 */
-  margin-right: 8px;
-  flex-shrink: 0;
-  display: inline-block;
-  vertical-align: middle;
+/* =========================================================
+   Self Talk 一覧（構造そのまま3段レイアウト）
+   上：名前/日付/コメント数
+   中：アバター + 本文（3行で省略）
+   下：ReactionBar（中央）
+========================================================= */
+:root{
+  --mu-primary:#5a46e0;
+  --mu-primary-weak:#efeaff;
+  --mu-primary-border:#e4defc;
+
+  --mu-text:#222;
+  --mu-text-weak:#666;
+  --mu-muted:#8c8c8c;
+
+  --mu-border:rgba(0,0,0,0.08);
+  --mu-shadow:0 8px 22px rgba(0,0,0,0.08);
+  --mu-shadow-hover:0 12px 30px rgba(0,0,0,0.12);
+
+  --mu-radius-lg:14px;
+
+  --page-max: 920px;   /* ページ中央の最大幅 */
+  --card-max: 720px;   /* カードの最大幅（統一） */
+  --avatar: 48px;      /* アバター固定サイズ */
 }
 
-/* 追記推奨: RSS風の行 */
-.digest-sections { display: grid; gap: 16px; padding: 8px 6px 24px; }
-.digest-section > h2 { margin: 4px 8px 6px; font-size: 14px; font-weight: 800; }
-.digest-list { display: grid; gap: 8px; }
+/* ---------- ページ枠 ---------- */
+.self-page{
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 24px 14px 96px;
+  color: var(--mu-text);
+  box-sizing: border-box;
+}
+.self-page h1{ font-size:22px; font-weight:800; margin:0 0 12px; }
 
-.digest-row {
+/* ---------- リスト（中央寄せ） ---------- */
+.digest-list{
   display: grid;
-  grid-template-columns: 36px 1fr;
-  gap: 10px;
-  align-items: start;
+  gap: 16px;
+  justify-items: center;
+}
+
+/* ---------- カード本体（3段グリッド） ---------- */
+.digest-row{
   width: 100%;
-  padding: 10px;
-  border-radius: 12px;
-  background: #fff;
-  border: 1px solid #eee;
-  box-shadow: 0 1px 1px rgba(0,0,0,.03);
-  cursor: pointer;
-  text-align: left;
+  max-width: var(--card-max);
+  background:#fff;
+  border:1px solid var(--mu-border);
+  border-radius:var(--mu-radius-lg);
+  box-shadow:var(--mu-shadow);
+  padding:12px 14px;
+  cursor:pointer;
+
+  /* 3段構成：上/中/下。中段は 2 列（左アバター 右本文） */
+  display:grid;
+  grid-template-columns: var(--avatar) 1fr; /* 中段用：左=アバター / 右=本文 */
+  grid-template-rows: auto auto auto;       /* 上 / 中 / 下 */
+  column-gap:12px;
+  row-gap:8px;
+
+  transition: box-shadow .18s ease, transform .06s ease, border-color .18s ease;
 }
-.digest-row:hover { background: #faf7ff; }
+.digest-row:hover{ box-shadow:var(--mu-shadow-hover); border-color:var(--mu-primary-border); }
+.digest-row:active{ transform: translateY(1px); }
+.digest-row.compact{} /* 互換用 */
 
-.digest-row .avatar {
-  width: 36px; height: 36px;
-  border-radius: 50%; object-fit: cover; background:#eee;
-}
-
-.digest-row .texts { display: grid; gap: 2px; min-width: 0; }
-.digest-row .line1 { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
-.digest-row .author { font-weight: 700; }
-.digest-row .meta { color:#888; font-size: 12px; }
-.digest-row .pill { font-size:11px; font-weight:700; color:#6b21a8; background:#f3e8ff; border:1px solid #e9d5ff; padding:2px 6px; border-radius:9999px; }
-.digest-row .pill.ai { color:#0a7; background:#e6fffa; border-color:#b2f5ea; }
-
-.digest-row .line2 {
-  color:#444; font-size:13px;
-  overflow:hidden; display:-webkit-box;
-  line-clamp:2; -webkit-line-clamp:2; -webkit-box-orient:vertical;
-}
-
-.resonants { display:flex; gap:6px; flex-wrap:wrap; margin-top:2px; }
-.resonants .tag { font-size:11px; color:#5b21b6; background:#efe9ff; padding:1px 6px; border-radius:9999px; }
-.empty, .hint { color:#888; font-size:12px; margin:6px 10px; }
-
-/* ── コンパクト1行表示 ───────────────────────────── */
-.digest-row.compact {
-  grid-template-columns: 28px 1fr;
-  gap: 8px;
-  padding: 6px 8px;
-  align-items: center;
-  border-radius: 10px;
-}
-
-.digest-row.compact .avatar {
-  width: 28px;
-  height: 28px;
+/* ---------- 中段：アバター（必ず小さく固定・左上） ---------- */
+.digest-row .avatar{
+  grid-column: 1 / 2;
+  grid-row:    2 / 3;                      /* 中段に配置 */
+  width: var(--avatar) !important;
+  height: var(--avatar) !important;
+  max-width: var(--avatar) !important;
+  max-height: var(--avatar) !important;
+  min-width: var(--avatar);
+  min-height: var(--avatar);
   border-radius: 50%;
   object-fit: cover;
-  background: #eee;
+  border: 1px solid var(--mu-border);
+  display: block;
+  align-self: start;                        /* ← 上揃え */
+  justify-self: start;
 }
 
-.digest-row.compact .oneline {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  min-width: 0;      /* ← 省略の肝 */
-}
-
-.digest-row.compact .author {
-  max-width: 32%;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-weight: 700;
-}
-
-.digest-row.compact .dot {
-  color: #aaa;
-}
-
-.digest-row.compact .snippet {
-  flex: 1;
-  min-width: 0;
-  color: #555;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.digest-row.compact .meta {
-  white-space: nowrap;
-  color: #999;
-  font-size: 11px;
-  margin-left: 6px;
-}
-
-.digest-row.compact .pill {
-  margin-left: 4px;
-  font-size: 10px;
-  font-weight: 700;
-  padding: 0 6px;
-  border-radius: 9999px;
-  color: #6b21a8;
-  background: #f3e8ff;
-  border: 1px solid #e9d5ff;
-}
-
-.digest-row.compact .pill.ai {
-  color: #0a7;
-  background: #e6fffa;
-  border-color: #b2f5ea;
-}
-
-/* 旧2行UIを隠す（残してあっても見えない） */
-.digest-row.compact .texts,
-.digest-row.compact .line1,
-.digest-row.compact .line2,
-.digest-row.compact .resonants {
-  display: none !important;
-}
-
-.self-page h1 {
-  font-family: 'Poppins', 'Noto Sans JP', sans-serif;
-  font-size: 1.4rem;
-  font-weight: 700;
-  background: linear-gradient(90deg, #a18cd1, #fbc2eb);
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  display: inline-block;
-}
-
-.thread-card {
-  display: flex;
-  align-items: center;
-  padding: 0.6rem 1rem;
-  margin: 0.4rem 0;
-  border-radius: 14px;
-  background: #fff;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-}
-
-.thread-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(0,0,0,0.08);
-}
-
-.avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: 2px solid #fbc2eb;
-  margin-right: 0.6rem;
-}
-
-.floating-button {
-  position: fixed;
-  bottom: 80px;
-  right: 20px;
-  width: 54px;
-  height: 54px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #a18cd1, #fbc2eb);
-  color: #fff;
-  font-size: 1.4rem;
-  font-weight: bold;
-  border: none;
-  box-shadow: 0 6px 14px rgba(0,0,0,0.2);
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.floating-button:hover {
-  transform: scale(1.08);
-  box-shadow: 0 8px 18px rgba(0,0,0,0.25);
-}
-
-/* —— FAB: もっと目立つ +S —— */
-.floating-button {
-  position: fixed;
-  right: 18px;
-  bottom: 84px;               /* タブ上に浮かせる */
-  z-index: 1000;
-
-  width: 64px;
-  height: 64px;
-  border-radius: 9999px;
-  border: 2px solid rgba(255,255,255,.9);
-
+/* ---------- 上段＋中段右：.oneline を2行グリッドに ---------- */
+/* 上段（行1）：著者（左）・日付（右） */
+/* 中段（行2）：本文（左）・コメント数などのピル（右） */
+.digest-row .oneline{
+  grid-column: 2 / 3;     /* 右列 */
+  grid-row:    1 / 3;     /* 上段～中段の2行をカバー */
   display: grid;
-  place-items: center;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  row-gap: 4px;
+  align-items: start;
+}
+
+/* 著者（上段・左） */
+.digest-row .author{
+  grid-column: 1 / 2;
+  grid-row:    1 / 2;
   font-weight: 800;
-  font-size: 1.2rem;
-  letter-spacing: .5px;
-  color: #fff;
-  text-shadow: 0 1px 2px rgba(0,0,0,.25);
+  font-size: 14px;
+  color: #4b3bbd;
+}
+.digest-row .author:hover{ text-decoration: underline; }
 
-  background: radial-gradient(120% 120% at 20% 20%, #ffd3f3 0%, #fbc2eb 28%, #b492ff 70%, #7a5cff 100%);
-  box-shadow:
-    0 10px 24px rgba(122, 92, 255, .35),
-    0 2px 6px rgba(0,0,0,.15);
-  backdrop-filter: blur(2px);
-
-  transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
-  cursor: pointer;
-}
-
-/* ホバー・押下・フォーカス */
-.floating-button:hover {
-  transform: translateY(-2px) scale(1.05);
-  box-shadow:
-    0 14px 28px rgba(122, 92, 255, .45),
-    0 4px 10px rgba(0,0,0,.18);
-  filter: saturate(1.1);
-}
-.floating-button:active {
-  transform: translateY(0) scale(.98);
-}
-.floating-button:focus-visible {
-  outline: none;
-  box-shadow:
-    0 0 0 4px rgba(255, 255, 255, .9),
-    0 0 0 8px rgba(186, 153, 255, .55),
-    0 12px 26px rgba(122, 92, 255, .4);
-}
-
-/* ひかり輪（常時アテンション） */
-.floating-button.attn::before {
-  content: "";
-  position: absolute;
-  inset: -10px;
-  border-radius: inherit;
-  background: radial-gradient(60% 60% at 50% 50%, rgba(251,194,235,.55), rgba(122,92,255,.35) 60%, transparent 70%);
-  filter: blur(8px);
-  z-index: -1;
-}
-
-/* ドクドク光るパルス */
-@keyframes fab-pulse {
-  0% { box-shadow: 0 0 0 0 rgba(186, 153, 255, .55); }
-  70% { box-shadow: 0 0 0 14px rgba(186, 153, 255, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(186, 153, 255, 0); }
-}
-.floating-button.attn {
-  animation: fab-pulse 2.2s ease-out infinite;
-}
-
-/* 小さめデバイスでの余白調整 */
-@media (max-width: 380px) {
-  .floating-button { right: 14px; bottom: 78px; width: 60px; height: 60px; }
-}
-/* .digest-row.compact は grid: 28px 1fr なので、ReactionBar を 2 列目に固定 */
-.digest-row.compact .reaction-row{
-  grid-column: 2 / 3;       /* ★これが効きます */
-  display: flex;            /* 横並び */
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-}
-/* Self 一覧のリアクション行を 1 行固定 & コンパクト化 */
-.digest-row.compact .reaction-row .reaction-bar{
-  display: flex;
-  flex-wrap: nowrap;       /* ← 折り返さない */
-  gap: 6px;                /* ← すこし詰める */
-  align-items: center;
-}
-
-.digest-row.compact .reaction-row .reaction-btn{
-  padding: 2px 6px;        /* ← コンパクト */
+/* 日付（上段・右） */
+.digest-row .meta{
+  grid-column: 2 / 3;
+  grid-row:    1 / 2;
+  justify-self: end;
   font-size: 12px;
-  line-height: 1;
+  color: var(--mu-muted);
 }
 
-.digest-row.compact .reaction-row .reaction-btn .count{
-  font-size: 11px;
+/* 本文（中段・左）— 3行で省略 */
+.digest-row .snippet{
+  grid-column: 1 / 2;
+  grid-row:    2 / 3;
+  color: var(--mu-text);
+  font-size: 15px;
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+  white-space: normal;
 }
 
-/* OK（修正後） */
-.digest-row.compact .reaction-row .reaction-bar{
-  display: flex;
-  flex-wrap: nowrap;   /* 1段固定 */
-  gap: 6px;
-  align-items: center;
-}
-.digest-row.compact .reaction-row .reaction-btn{
-  padding:2px 6px; font-size:12px; line-height:1;
-}
-.digest-row.compact .reaction-row .reaction-btn .count{ font-size:11px; }
-
-/* 共鳴ボタン（通常時） */
-.reaction-row .reaction-btn {
-  background: #f8f8f8;     /* 少しグレー背景 */
-  color: #444;             /* 文字色を濃く */
-  border: 1px solid #ccc;  /* 枠線を追加して視認性UP */
-  border-radius: 16px;
-  font-weight: 600;        /* 太字 */
-  transition: all 0.2s ease;
-}
-
-/* アイコン（emoji）を少し大きく */
-.reaction-row .reaction-btn .icon {
-  font-size: 16px;
-}
-
-/* カウント数字もはっきり */
-.reaction-row .reaction-btn .count {
-  color: #333;
-  font-weight: 500;
-  margin-left: 4px;
-}
-
-/* ホバーで濃く（PC用） */
-.reaction-row .reaction-btn:hover {
-  background: #e0e0e0;
-  border-color: #999;
-  color: #222;
-  transform: scale(1.05);   /* ちょっと拡大して押せそう感 */
-}
-
-/* 1段で並べる & 折り返し禁止 */
-.reaction-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: nowrap;       /* ← 折り返さない */
-  white-space: nowrap;     /* ← テキストも折り返さない */
-  overflow-x: auto;        /* ← どうしても幅が足りない時は横スクロール */
-  -webkit-overflow-scrolling: touch;
-}
-
-/* 各ボタンは縮まない・1要素として並ぶ */
-.reaction-btn {
+/* コメント数などのピル（中段・右） */
+.pill{
+  grid-column: 2 / 3;
+  grid-row:    2 / 3;
+  justify-self: end;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-radius: 9999px;
-  border: 1px solid var(--reaction-border, #e9e9ef);
-  background: var(--reaction-bg, #fff);
-  flex: 0 0 auto;          /* ← 縮小しない */
+  justify-content: center;
+  min-width: 24px;
+  height: 22px;
+  padding: 0 8px;
+  font-size: 12px;
+  border-radius: 999px;
+  background: var(--mu-primary-weak);
+  border: 1px solid var(--mu-primary-border);
+  color: var(--mu-primary);
+  font-weight: 700;
+}
+.pill.ai{ background:#111827; border-color:#111827; color:#fff; }
+
+/* 区切りドットは使わない */
+.digest-row .dot{ display:none; }
+
+/* ---------- 下段：イイネ群（中央） ---------- */
+.reaction-row{
+  grid-column: 1 / -1;   /* 全幅 */
+  grid-row:    3 / 4;    /* 下段 */
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  gap:8px;
+  margin-top:6px;
+  padding-top:10px;
+  border-top:1px solid var(--mu-border);
+  min-height:44px;
+}
+.reaction-row button,
+.reaction-row .reaction-btn{
+  min-width: 36px;
+  min-height: 36px;
+  font-size: 14px;
 }
 
-/* readOnly 時：クリック不可だが色は薄くしない */
-.reaction-bar.readonly {
-  pointer-events: none;    /* ← 中の全要素をクリック不可に */
+/* 空/ヒント */
+.empty,.hint{ color:var(--mu-text-weak); font-size:13px; padding:8px 2px 2px; }
+
+/* 浮遊ボタン */
+.floating-button{
+  position:fixed; right:18px; bottom:24px;
+  width:58px; height:58px; line-height:58px;
+  border-radius:999px;
+  border:1px solid var(--mu-primary-border);
+  box-shadow:var(--mu-shadow);
+  background: radial-gradient(120% 120% at 20% 20%, #ffffff 0%, #f6f0ff 55%, #efe9ff 100%);
+  color: var(--mu-primary);
+  font-weight: 800; font-size: 18px;
+  text-align: center; cursor: pointer;
 }
-.reaction-bar.readonly .reaction-btn {
-  opacity: 1 !important;   /* ← 半透明化を無効に */
-  filter: none !important;
-  cursor: default;
+.floating-button:hover{ filter: brightness(.98); }
+
+/* ---------- SP ---------- */
+@media (max-width: 560px){
+  .digest-row{ padding:10px 12px; }
+  .digest-row .snippet{ font-size:14.5px; }
 }
 
-/* お好みでアイコンやカウントの見た目 */
-.reaction-btn .icon { width: 16px; height: 16px; }
-.reaction-btn .count { font-variant-numeric: tabular-nums; }
+/* ===== フローティング +S ボタン ===== */
+.floating-button {
+  position: fixed;
+  right: 20px;
+  bottom: 90px;   /* ← 以前は 20〜40px くらい → 少し上に上げる */
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  font-size: 22px;
+  font-weight: 700;
+  background: linear-gradient(180deg, #ffdc4b, #ffc800);
+  color: #171300;
+  border: none;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition: transform .15s ease, box-shadow .15s ease;
+  z-index: 1000;
+}
+
+.floating-button:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.3);
+}
+
+/* ===== Muverse風 フローティング +S ボタン ===== */
+.floating-button {
+  position: fixed;
+  right: 20px;
+  bottom: 90px;  /* フッターと被らないように調整 */
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  font-size: 22px;
+  font-weight: 800;
+  color: #171300;
+  border: none;
+  cursor: pointer;
+  z-index: 1000;
+
+  /* ✨ 黄金グラデーション */
+  background: linear-gradient(135deg, #ffea80, #ffc800 60%, #ff9500);
+  box-shadow:
+    0 6px 16px rgba(0, 0, 0, 0.25),
+    0 0 10px rgba(255, 200, 0, 0.6),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.2);
+
+  transition: transform 0.2s ease, box-shadow 0.3s ease;
+}
+
+/* ホバーで光が強くなる */
+.floating-button:hover {
+  transform: translateY(-4px) scale(1.05);
+  box-shadow:
+    0 12px 24px rgba(0, 0, 0, 0.3),
+    0 0 14px rgba(255, 220, 80, 0.8),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.25);
+}
+
+/* クリック時に沈む感じ */
+.floating-button:active {
+  transform: scale(0.96);
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.2),
+    0 0 8px rgba(255, 200, 0, 0.7);
+}
+
+/* ✨ 内側に輝きアニメーション */
+@keyframes mu-glow {
+  0% { box-shadow: 0 0 8px rgba(255, 220, 80, 0.5), 0 0 20px rgba(255, 200, 0, 0.3); }
+  50% { box-shadow: 0 0 16px rgba(255, 240, 120, 0.8), 0 0 32px rgba(255, 200, 0, 0.6); }
+  100% { box-shadow: 0 0 8px rgba(255, 220, 80, 0.5), 0 0 20px rgba(255, 200, 0, 0.3); }
+}
+
+.floating-button.attn {
+  animation: mu-glow 2.5s infinite ease-in-out;
+}

@@ -1,7 +1,7 @@
 // src/components/SelfPostModal.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import './SelfPostModal.css';
 
@@ -34,6 +34,18 @@ export default function SelfPostModal({
   const [isPosting, setIsPosting] = useState(false);
   const [visibility, setVisibility] = useState<Visibility>('public');
 
+  // 文字数カウント（上限は設けず、視認だけ）
+  const contentLen = useMemo(() => content.length, [content]);
+
+  // textarea 自動リサイズ
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    if (!taRef.current) return;
+    const el = taRef.current;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 480)}px`; // 伸びすぎ防止
+  }, [content, isOpen]);
+
   // モーダル開閉に合わせて初期化＆背景スクロールロック
   useEffect(() => {
     if (!isOpen) {
@@ -41,6 +53,7 @@ export default function SelfPostModal({
       setContent('');
       setTags('');
       setImageFile(null);
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
       setPreviewUrl('');
       setIsPosting(false);
       setVisibility('public');
@@ -51,7 +64,7 @@ export default function SelfPostModal({
     return () => {
       document.body.style.overflow = '';
     };
-  }, [isOpen]);
+  }, [isOpen, previewUrl]);
 
   // ESCで閉じる
   useEffect(() => {
@@ -66,24 +79,25 @@ export default function SelfPostModal({
   // 画像プレビュー
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
-    setImageFile(file);
-  };
-
-  // プレビューURL生成/解放
-  useEffect(() => {
-    if (!imageFile) {
+    if (!file) {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
+      setImageFile(null);
       setPreviewUrl('');
       return;
     }
-    const url = URL.createObjectURL(imageFile);
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setImageFile(file);
+    const url = URL.createObjectURL(file);
     setPreviewUrl(url);
-    return () => URL.revokeObjectURL(url);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imageFile]);
+  };
+
+  // 投稿可否（どれか一つは欲しい：タイトル or 本文 or 画像）
+  const canSubmit = useMemo(() => {
+    return !isPosting && !!userCode && (title.trim() !== '' || content.trim() !== '' || !!imageFile);
+  }, [isPosting, userCode, title, content, imageFile]);
 
   const handlePost = async () => {
-    if (!isOpen || !userCode || isPosting) return;
+    if (!isOpen || !userCode || isPosting || !canSubmit) return;
 
     setIsPosting(true);
     try {
@@ -105,7 +119,9 @@ export default function SelfPostModal({
         tags
           .split(',')
           .map((t) => t.trim())
-          .filter(Boolean) || [];
+          .filter(Boolean)
+          .map((t) => (t.startsWith('#') ? t.slice(1) : t))
+          .filter((v, i, a) => a.indexOf(v) === i);
 
       const resolvedBoardType =
         boardType === undefined ||
@@ -140,20 +156,18 @@ export default function SelfPostModal({
 
       if (!threadId) throw new Error('threadId が取得できませんでした');
 
-      // ★★ ここで自分宛に Push 通知（購読確認用・失敗してもUIは継続）★★
-      // kind は consents.notify_ai と連動させやすい 'ai' を利用
-      // body にはタイトル優先→本文冒頭40文字を使用
+      // ★ Push 通知（失敗しても UI は継続）
       const previewText =
         (title && title.trim()) ||
         (content && content.trim().slice(0, 40)) ||
-        '新しいS Talk';
+        '新しい Self Talk';
       fetch('/api/push/send', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           user_code: userCode,
           kind: 'ai',
-          title: 'S Talkを投稿しました',
+          title: 'Self Talk を投稿しました',
           body: previewText,
           url: `/thread/${threadId}`,
           tag: `self-post:${threadId}`,
@@ -161,7 +175,6 @@ export default function SelfPostModal({
         }),
       }).catch(() => {});
 
-      // 既存の後処理
       onPostSuccess?.();
       onPosted?.();
       onClose();
@@ -180,8 +193,13 @@ export default function SelfPostModal({
     <div className="modal-overlay" onClick={onClose} aria-modal="true" role="dialog">
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <header className="modal-header">
-          <h2>📝 つぶやきを投稿</h2>
-          <button type="button" className="modal-close" onClick={onClose} aria-label="閉じる">
+          <h2>📝 Self Talkを投稿</h2>
+          <button
+            type="button"
+            className="modal-close"
+            onClick={onClose}
+            aria-label="閉じる"
+          >
             ×
           </button>
         </header>
@@ -194,16 +212,21 @@ export default function SelfPostModal({
               placeholder="タイトル"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
+              autoComplete="off"
             />
           </label>
 
           <label className="field">
             <span>本文</span>
             <textarea
-              placeholder="いま感じていることを..."
+              ref={taRef}
+              placeholder="いまのビジョンや想いを言葉に…"
               value={content}
               onChange={(e) => setContent(e.target.value)}
+              rows={3}
+              style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflow: 'hidden' }}
             />
+            <div className="help" aria-live="polite">{contentLen} 字</div>
           </label>
 
           <label className="field">
@@ -213,6 +236,7 @@ export default function SelfPostModal({
               placeholder="例: #今の声, #S層"
               value={tags}
               onChange={(e) => setTags(e.target.value)}
+              autoComplete="off"
             />
           </label>
 
@@ -221,7 +245,14 @@ export default function SelfPostModal({
             <input type="file" accept="image/*" onChange={handleImageChange} />
           </label>
 
-          {previewUrl && <img src={previewUrl} alt="preview" className="preview" />}
+          {previewUrl && (
+            <img
+              src={previewUrl}
+              alt="preview"
+              className="preview"
+              style={{ maxWidth: '100%', height: 'auto', borderRadius: 8 }}
+            />
+          )}
 
           <label className="field">
             <span>公開範囲</span>
@@ -237,11 +268,22 @@ export default function SelfPostModal({
         </div>
 
         <footer className="modal-actions">
-          <button type="button" onClick={onClose}>
+          <button
+            type="button"
+            className="mu-btn mu-btn--ghost"
+            onClick={onClose}
+          >
             キャンセル
           </button>
-          <button type="button" onClick={handlePost} disabled={isPosting}>
-            {isPosting ? '投稿中...' : '投稿'}
+          <button
+            type="button"
+            className="mu-btn mu-btn--primary"
+            onClick={handlePost}
+            disabled={!canSubmit}
+            aria-disabled={!canSubmit}
+            title={!canSubmit ? 'タイトル・本文・画像のいずれかを入力してください' : '投稿'}
+          >
+            {isPosting ? '投稿中…' : 'Self Talkを記録'}
           </button>
         </footer>
       </div>

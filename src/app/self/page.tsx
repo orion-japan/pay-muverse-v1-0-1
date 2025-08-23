@@ -123,28 +123,9 @@ export default function SelfPage() {
   }
 
   /* =========================================================
-   * 反応カウント取得（Self一覧は“親ポスト”固定で読む）
+   * 反応カウント取得：★ バッチ版（一覧ぶんまとめて1回）
    * =======================================================*/
-  const parentCountsUrl = (postId: string) =>
-    `/api/reactions/counts?scope=post&post_id=${encodeURIComponent(postId)}&is_parent=true`
-
-
-  
-  const fetchCountsSingle = async (postId: string): Promise<ReactionCount[] | null> => {
-    // ★ ここを親固定URLに統一（一覧とThread親で同一ルート）
-    const url = parentCountsUrl(postId)
-    console.log('[SelfPage] counts GET', url)
-    const res = await fetch(url, { cache: 'no-store' })
-    if (!res.ok) return null
-    const json = await res.json().catch(() => null)
-    const totals: Record<string, number> | undefined =
-      json && (json.totals || json.counts || json.data)
-    if (!totals) return null
-    return Object.entries(totals).map(([r_type, count]) => ({ r_type, count: count ?? 0 }))
-  }
-
-  /** counts を安全に取得（GET 並列・一時バックオフ） */
-  const safeFetchCounts = async (postIds: string[]) => {
+  const fetchCountsBatch = async (postIds: string[]) => {
     if (!postIds.length) {
       setCountsMap({})
       return
@@ -153,21 +134,28 @@ export default function SelfPage() {
     if (now < countsErrorUntilRef.current) return // バックオフ中
 
     try {
-      const entries = await Promise.all(
-        postIds.map(async (id) => {
-          try {
-            const arr = await fetchCountsSingle(id)
-            return [id, arr ?? []] as const
-          } catch {
-            return [id, countsMap[id] ?? []] as const
-          }
-        })
-      )
-      setCountsMap((prev) => {
-        const next = { ...prev }
-        for (const [id, arr] of entries) next[id] = arr
-        return next
+      const res = await fetch('/api/reactions/counts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ post_ids: postIds }),
       })
+      if (!res.ok) {
+        const t = await res.text().catch(() => '')
+        throw new Error(t || `HTTP ${res.status}`)
+      }
+      const json = await res.json()
+      const countsObj = (json && json.counts) || {}
+
+      // APIの { [postId]: { type: number } } を既存と同じ配列形式へ
+      const next: Record<string, ReactionCount[]> = {}
+      for (const pid of postIds) {
+        const entry = countsObj[pid] || {}
+        next[pid] = Object.entries(entry).map(([r_type, count]) => ({
+          r_type,
+          count: (count as number) ?? 0,
+        }))
+      }
+      setCountsMap((prev) => ({ ...prev, ...next }))
     } catch (e) {
       console.warn('[SelfPage] counts batch error', e)
       countsErrorUntilRef.current = now + 20_000 // 20秒バックオフ
@@ -223,8 +211,8 @@ export default function SelfPage() {
       setStatsMap({})
     }
 
-    // --- 親カウント（安全取得・単発 GET 並列）
-    await safeFetchCounts(filtered.map(p => p.post_id))
+    // --- 親カウント（★まとめて取得）
+    await fetchCountsBatch(filtered.map(p => p.post_id))
   }
 
   /** リアクション数：postId をキューしてバッチ再取得 */
@@ -235,7 +223,7 @@ export default function SelfPage() {
       const ids = [...countsRefreshQueue.current]
       countsRefreshQueue.current.clear()
       countsRefreshTimer.current = null
-      await safeFetchCounts(ids)
+      await fetchCountsBatch(ids) // ★ キューされた分だけバッチ再取得
     }, 500) // 500ms 以内の更新をまとめる
   }
 
@@ -262,8 +250,8 @@ export default function SelfPage() {
           const next = [{ ...row }, ...prev].sort(
             (a, b) => +new Date(b.created_at) - +new Date(a.created_at)
           )
-          // 新規が入ったら counts も取りにいく（親固定URL）
-          safeFetchCounts([row.post_id])
+          // 新規が入ったら counts も取りにいく（★バッチでも1件OK）
+          fetchCountsBatch([row.post_id])
           return next
         }
         const next = [...prev]
@@ -382,13 +370,13 @@ export default function SelfPage() {
 
         {/* 親は「数のみ」= readOnly で表示 */}
         <div className="reaction-row">
-        <ReactionBar
-  postId={p.post_id}
-  userCode={userCode || ''}
-  isParent={true}                       // ← これを必ず付ける
-  initialCounts={toCounts(countsMap[p.post_id])}
-  readOnly={true}
-/>
+          <ReactionBar
+            postId={p.post_id}
+            userCode={userCode || ''}
+            isParent={true}
+            initialCounts={toCounts(countsMap[p.post_id])}
+            readOnly={true}
+          />
         </div>
       </div>
     )
