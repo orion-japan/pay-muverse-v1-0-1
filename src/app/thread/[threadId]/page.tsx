@@ -119,35 +119,54 @@ export default function ThreadPage() {
   const childCountsUrl = (postId: string) =>
     `/api/reactions/counts?scope=post&post_id=${encodeURIComponent(postId)}&is_parent=false`;
 
+  // 1件取得（残置：新規挿入時などにのみ使用。空レスで上書きしない）
   async function fetchCountsSingle(postId: string, isParent: boolean): Promise<ReactionCount[] | null> {
     const url = isParent ? parentCountsUrl(postId) : childCountsUrl(postId);
-    console.log('[fetchCountsSingle] call', { postId, isParent, url });
     try {
-      const res = await fetch(url, { cache: 'no-store' });
+      const res = await fetch(url, { cache: 'no-store', headers: { 'x-src': 'thread-page-single' } });
       if (!res.ok) return null;
       const json = await res.json().catch(() => null);
-      console.log('[fetchCountsSingle] resp', { postId, isParent, json });
       const totals: Record<string, number> | undefined = json && (json.totals || json.counts || json.data);
       if (!totals) return null;
-      return Object.entries(totals).map(([r_type, count]) => ({ r_type, count: count ?? 0 }));
-    } catch (err) {
-      console.error('[fetchCountsSingle] error', err);
+      const arr = Object.entries(totals).map(([r_type, count]) => ({ r_type, count: Number(count) || 0 }));
+      // ★ 空配列（全0）で直近の表示を上書きしない
+      const sum = arr.reduce((s, a) => s + (a.count || 0), 0);
+      if (sum === 0) return arr; // 戻りは返すが、適用側でガード
+      return arr;
+    } catch {
       return null;
     }
   }
 
-  async function fetchCountsForParentAndChildren(parentId?: string, childIds: string[] = []) {
-    const tasks: Array<Promise<[string, ReactionCount[] | null]>> = [];
-    if (parentId) tasks.push(fetchCountsSingle(parentId, true).then(arr => [parentId, arr] as const));
-    childIds.forEach(id => tasks.push(fetchCountsSingle(id, false).then(arr => [id, arr] as const)));
-
-    const results = await Promise.all(tasks);
+  // ★ 追加：一括取得（初期だけ使う）
+  async function fetchCountsBatch(ids: string[]) {
+    if (!ids.length) return;
+    const res = await fetch('/api/reactions/counts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-src': 'thread-page-batch' },
+      cache: 'no-store',
+      body: JSON.stringify({ post_ids: ids }),
+    });
+    const j = await res.json().catch(() => ({}));
+    const counts: Record<string, Record<string, number>> = j?.counts || {};
     setCountsMap(prev => {
       const next = { ...prev };
-      for (const [id, arr] of results) next[id] = arr ?? prev[id] ?? [];
+      for (const id of ids) {
+        const totals = counts[id] || {};
+        // ★ 空レスは上書きしない
+        if (totals && Object.keys(totals).length) {
+          next[id] = Object.entries(totals).map(([r_type, count]) => ({ r_type, count: Number(count) || 0 }));
+        }
+      }
       return next;
     });
     setCountsVersion(v => v + 1);
+  }
+
+  // 互換：親+子の配列を受けてページ側での取得（内部は batch を優先）
+  async function fetchCountsForParentAndChildren(parentId?: string, childIds: string[] = []) {
+    const ids = [parentId, ...childIds].filter(Boolean) as string[];
+    await fetchCountsBatch(ids);
   }
 
   /* ===== Initial load ===== */
@@ -184,6 +203,7 @@ export default function ThreadPage() {
         setParent(hydratedParent);
         setChildren(hydratedChildren);
 
+        // ★ 初期は一括取得のみ（ReactionBar が以降の更新を担当）
         await fetchCountsForParentAndChildren(
           hydratedParent?.post_id,
           hydratedChildren.map(p => p.post_id)
@@ -217,23 +237,26 @@ export default function ThreadPage() {
             const [hydrated] = await hydrateFromProfiles([row]);
             setChildren(prev => (prev.some(p => p.post_id === row.post_id) ? prev : [...prev, hydrated]));
             seenIds.current.add(row.post_id);
+
+            // 新規子ポストは initialCounts を与えるために1回だけ取得
             const arr = await fetchCountsSingle(row.post_id, false);
-            setCountsMap(prev => ({ ...prev, [row.post_id]: arr ?? prev[row.post_id] ?? [] }));
-            setCountsVersion(v => v + 1);
+            if (arr) {
+              setCountsMap(prev => ({ ...prev, [row.post_id]: arr }));
+              setCountsVersion(v => v + 1);
+            }
           }
         }
       )
       .subscribe(() => console.log('[ThreadPage] Realtime (posts) subscribed'));
 
+    // ★ 変更：Reaction の Realtime はページ側で再取得せず、Bar へ委譲（イベントだけ通知）
     const chReactParent = supabase
       .channel(`reactions_parent_${threadId}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'reactions', filter: `post_id=eq.${threadId}` },
-        async () => {
-          const arr = await fetchCountsSingle(String(threadId), true);
-          setCountsMap(prev => ({ ...prev, [String(threadId)]: arr ?? prev[String(threadId)] ?? [] }));
-          setCountsVersion(v => v + 1);
+        { event: '*', schema: 'public', table: 'post_resonances', filter: `post_id=eq.${threadId}` },
+        () => {
+          window.dispatchEvent(new CustomEvent('reactions:refresh', { detail: { post_id: String(threadId) } }));
         }
       )
       .subscribe();
@@ -242,18 +265,11 @@ export default function ThreadPage() {
       .channel(`reactions_thread_${threadId}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'reactions', filter: `thread_id=eq.${threadId}` },
-        async payload => {
+        { event: '*', schema: 'public', table: 'post_resonances', filter: `thread_id=eq.${threadId}` },
+        (payload) => {
           const changed = (payload.new as any)?.post_id || (payload.old as any)?.post_id;
           if (!changed) return;
-          if (String(changed) === String(threadId)) {
-            const arr = await fetchCountsSingle(String(threadId), true);
-            setCountsMap(prev => ({ ...prev, [String(threadId)]: arr ?? prev[String(threadId)] ?? [] }));
-          } else {
-            const arr = await fetchCountsSingle(String(changed), false);
-            setCountsMap(prev => ({ ...prev, [String(changed)]: arr ?? prev[String(changed)] ?? [] }));
-          }
-          setCountsVersion(v => v + 1);
+          window.dispatchEvent(new CustomEvent('reactions:refresh', { detail: { post_id: String(changed) } }));
         }
       )
       .subscribe();
@@ -298,9 +314,12 @@ export default function ThreadPage() {
       setChildren(prev => (prev.some(p => p.post_id === inserted.post_id) ? prev : [...prev, hydrated]));
       seenIds.current.add(inserted.post_id);
 
+      // 新規の子ポストだけ単発取得（初期値用）
       const arr = await fetchCountsSingle(inserted.post_id, false);
-      setCountsMap(prev => ({ ...prev, [inserted.post_id]: arr ?? prev[inserted.post_id] ?? [] }));
-      setCountsVersion(v => v + 1);
+      if (arr) {
+        setCountsMap(prev => ({ ...prev, [inserted.post_id]: arr }));
+        setCountsVersion(v => v + 1);
+      }
     } catch (e) {
       console.error(e);
       setErrMsg('投稿に失敗しました');

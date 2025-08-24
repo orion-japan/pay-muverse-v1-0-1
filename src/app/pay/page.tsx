@@ -4,8 +4,50 @@ export const dynamic = 'force-dynamic';
 import { Suspense, useEffect, useState, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import PlanSelectPanel from '@/components/PlanSelectPanel';
-import CardStyle from '@/components/CardStyle';  // ✅ 分割UIを使う
+import CardStyle from '@/components/CardStyle'; // ✅ 分割UI
 import { getAuth } from 'firebase/auth';
+import dayjs from 'dayjs'; // ★ 期限判定
+
+// Pay.js v2 の型ガード（ビルド時のエラー防止）
+declare global {
+  interface Window { Payjp?: any }
+}
+
+/* 軽量モーダル（ページ内で完結） */
+function PayResultModal({
+  open,
+  title,
+  message,
+  onClose,
+}: {
+  open: boolean;
+  title: string;
+  message: string;
+  onClose: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden />
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="relative w-[92%] max-w-sm rounded-2xl bg-white p-5 shadow-xl"
+      >
+        <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+        <p className="mt-2 text-sm text-gray-700 whitespace-pre-line">{message}</p>
+        <div className="mt-4 flex justify-end">
+          <button
+            className="rounded-xl bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700"
+            onClick={onClose}
+          >
+            OK
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function PageInner() {
   const searchParams = useSearchParams();
@@ -23,29 +65,72 @@ function PageInner() {
   const [cardRegistered, setCardRegistered] = useState(false);
   const [showCardForm, setShowCardForm] = useState(false);
   const [userCredit, setUserCredit] = useState<number>(0);
+  const [expired, setExpired] = useState(false); // ★ 期限切れフラグ
 
-  // ✅ 初期化フラグ（script読み込みガード）
+  // ✅ モーダル
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalTitle, setModalTitle] = useState('');
+  const [modalMessage, setModalMessage] = useState('');
+
+  // ✅ 初期化/多重送信ガード
   const initCalled = useRef(false);
-  // ✅ 登録処理の多重実行ガード
   const registerCalled = useRef(false);
 
-  // ✅ ユーザーデータ取得
-  const fetchStatus = async () => {
+  // ✅ ユーザーデータ取得（未ログイン時は静かにスキップ）
+  const fetchStatus = async (forceAuth = false) => {
     try {
-      console.log('[fetchStatus] START');
-      const res = await fetch(`/api/account-status?user=${user_code}`);
+      let res: Response;
+
+      if (forceAuth) {
+        const user = getAuth().currentUser;
+        if (!user) {
+          // 未ログインなら何もしない（画面にエラーを出さない）
+          console.debug('[fetchStatus] skip: not logged in');
+          return;
+        }
+        const idToken = await user.getIdToken(true);
+        res = await fetch('/api/account-status', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${idToken}` },
+          cache: 'no-store',
+        });
+      } else {
+        // ★ user_code が空のときは投げない（400ノイズ防止）
+        if (!user_code) {
+          console.debug('[fetchStatus] skip: user_code empty');
+          return;
+        }
+        res = await fetch(`/api/account-status?user=${user_code}`, { cache: 'no-store' });
+      }
+
+      if (!res.ok) {
+        // 404などは初期状態として無視
+        console.warn('[fetchStatus] non-OK:', res.status);
+        return;
+      }
+
       const json = await res.json();
-      console.log('[fetchStatus] response:', json);
+      console.debug('[fetchStatus] user:', json);
       setUserData(json);
-      setCardRegistered(json.card_registered);
+      setCardRegistered(!!json.card_registered);
       setUserCredit(json.sofia_credit || 0);
+
+      // ★ 期限切れ判定（sub_next_payment が今日以前なら期限切れ）
+      const next = json?.sub_next_payment;
+      const isExpired = !!next && dayjs(next).isBefore(dayjs(), 'day');
+      setExpired(!!isExpired);
     } catch (err) {
       console.error('⛔ ユーザー取得失敗:', err);
     }
   };
 
+  // 初回：GETで軽取得 → ログインしたらPOSTで再取得
   useEffect(() => {
-    if (user_code) fetchStatus();
+    if (user_code) fetchStatus(false); // ★ 条件付き
+    const unsub = getAuth().onAuthStateChanged((u) => {
+      if (u) fetchStatus(true);
+    });
+    return () => unsub();
   }, [user_code]);
 
   // ✅ PAY.JP 初期化（1回だけ）
@@ -56,35 +141,28 @@ function PageInner() {
     }
     initCalled.current = true;
 
-    console.log('[initPayjpCard] START');
-
     const script = document.createElement('script');
     script.src = 'https://js.pay.jp/v2/pay.js';
     script.async = true;
     script.onload = () => {
-      console.log('✅ PAY.JP script loaded');
-
-      const payjpInstance = (window as any).Payjp(process.env.NEXT_PUBLIC_PAYJP_PUBLIC_KEY!);
+      const payjpInstance = (window as any).Payjp?.(process.env.NEXT_PUBLIC_PAYJP_PUBLIC_KEY!);
+      if (!payjpInstance) {
+        console.error('PAY.JP 初期化に失敗: window.Payjp が見つかりません');
+        return;
+      }
       setPayjp(payjpInstance);
-      console.log('✅ payjp instance created:', payjpInstance);
 
       const elements = payjpInstance.elements();
-      console.log('✅ payjp elements created:', elements);
-
-      // ✅ 分割フィールド作成（DOMに1つずつ存在する前提）
       const cn = elements.create('cardNumber');
       cn.mount('#card-number');
-      console.log('✅ cardNumber mounted');
       setCardNumber(cn);
 
       const ce = elements.create('cardExpiry');
       ce.mount('#card-expiry');
-      console.log('✅ cardExpiry mounted');
       setCardExpiry(ce);
 
       const cc = elements.create('cardCvc');
       cc.mount('#card-cvc');
-      console.log('✅ cardCvc mounted');
       setCardCvc(cc);
 
       setCardReady(true);
@@ -94,132 +172,174 @@ function PageInner() {
     document.body.appendChild(script);
   };
 
-// ① タイムアウト付きトークン作成ヘルパーを「要素を引数に」変更
-const createTokenWithTimeout = async (el: any, ms = 15000) => {
-  return Promise.race([
-    payjp.createToken(el), // ← el を使う
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('タイムアウトしました')), ms)
-    ),
-  ]);
-};
+  // タイムアウト付きトークン作成
+  const createTokenWithTimeout = async (el: any, ms = 15000) =>
+    Promise.race([
+      payjp.createToken(el),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('タイムアウトしました')), ms)),
+    ]);
 
-// ② 登録処理
-const handleCardRegistration = async () => {
-  setLoading(true);
-  try {
-    // Firebase → user_code 解決（既存のまま）
-    const user = getAuth().currentUser;
-    if (!user) throw new Error('ログインしてください');
-    const idToken = await user.getIdToken(true);
-    const res = await fetch('/api/account-status', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${idToken}`,
-        'Content-Type': 'application/json',
-      },
-    });
-    const j = await res.json();
-    const resolvedCode = j?.user_code;
-    if (!resolvedCode) throw new Error('ユーザーコードが取得できません');
-
-    // ✅ PAY.JP／Elements 準備チェック
-    if (!payjp) throw new Error('PAY.JP が初期化されていません');
-    if (!cardNumber) throw new Error('カード番号フィールドが初期化されていません');
-
-    // ✅ token 作成（分割 Elements では cardNumber を渡す）
-    let tokenRes;
+  // ✅ カード登録処理
+  const handleCardRegistration = async () => {
+    if (registerCalled.current || loading) return;
+    registerCalled.current = true;
+    setLoading(true);
     try {
-      tokenRes = await createTokenWithTimeout(cardNumber); // ★ ここを修正
-    } catch {
-      tokenRes = await createTokenWithTimeout(cardNumber); // 1回リトライ
+      // Firebase → user_code 解決
+      const user = getAuth().currentUser;
+      if (!user) throw new Error('ログインしてください');
+      const idToken = await user.getIdToken(true);
+      const res = await fetch('/api/account-status', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+        cache: 'no-store',
+      });
+      const j = await res.json();
+      const resolvedCode = j?.user_code;
+      if (!resolvedCode) throw new Error('ユーザーコードが取得できません');
+
+      // PAY.JP 準備
+      if (!payjp) throw new Error('PAY.JP が初期化されていません');
+      if (!cardNumber) throw new Error('カード番号フィールドが初期化されていません');
+
+      // トークン作成
+      let tokenRes;
+      try {
+        tokenRes = await createTokenWithTimeout(cardNumber);
+      } catch {
+        tokenRes = await createTokenWithTimeout(cardNumber); // 1回リトライ
+      }
+      if (!tokenRes?.id) {
+        console.error('[createToken] error payload:', tokenRes);
+        throw new Error(tokenRes?.error?.message || 'カードトークンの取得に失敗しました');
+      }
+      const token = tokenRes.id;
+      console.debug('[createToken] token:', token);
+
+      // サーバーへ送信（idToken 同梱）
+      // ★ 顧客IDは「あれば渡す」。無ければサーバー側が自動作成する。
+      const customerIdMaybe = j?.payjp_customer_id;
+
+      const cardRes = await fetch('/api/pay/account/register-card', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          user_code: resolvedCode,
+          token,                         // ← サーバー仕様に合わせて "token"
+          ...(customerIdMaybe ? { customer_id: customerIdMaybe } : {}),
+        }),
+      });
+
+      const cardJson = await cardRes.json().catch(() => ({}));
+      console.debug('[register-card] response:', cardRes.status, cardJson);
+
+      if (!cardRes.ok || !cardJson?.success) {
+        throw new Error(cardJson?.error || `カード登録失敗: ${cardRes.status}`);
+      }
+
+      // 即時UI反映→最新取り直し
+      setCardRegistered(true);
+      setModalTitle('カード登録が完了しました');
+      setModalMessage('次にプランを選んで購入できます。');
+      setModalOpen(true);
+
+      await fetchStatus(true);
+    } catch (err: any) {
+      console.error('❌ Card registration error:', err);
+      setModalTitle('カード登録に失敗しました');
+      setModalMessage(String(err?.message || err));
+      setModalOpen(true);
+    } finally {
+      setLoading(false);
+      registerCalled.current = false;
     }
+  };
 
-    if (!tokenRes?.id) {
-      // tokenRes?.error?.message があれば表示
-      const msg = tokenRes?.error?.message || 'カードトークンの取得に失敗しました';
-      throw new Error(msg);
-    }
-    const token = tokenRes.id;
-
-    // ✅ バックエンドへ送信
-// before
-let cardRes = await fetch('/api/pay/account/register-card', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ user_code: resolvedCode, token }),
-});
-
-// 404 なら /register-card にフォールバック
-if (cardRes.status === 404) {
-  cardRes = await fetch('/register-card', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user_code: resolvedCode, token }),
-  });
-}
-
-
-
-    if (!cardRes.ok) {
-      const errMsg = await cardRes.text().catch(() => '');
-      throw new Error(`カード登録失敗: ${errMsg}`);
-    }
-
-    alert('カード登録が完了しました');
-    await fetchStatus();
-  } catch (err: any) {
-    alert(err.message || 'カード登録に失敗しました');
-    console.error('❌ Card registration error:', err);
-  } finally {
-    setLoading(false);
-  }
-};
-
-  
-  
-
-  // ✅ サブスク登録処理
+  // ✅ サブスク登録処理（Firebase ID トークンを必ず付与）
   const handleSubscribe = async () => {
     if (loading) return;
     setLoading(true);
     try {
       if (!selectedPlan?.plan_type) {
-        alert('プランを選択してください');
+        setModalTitle('エラー');
+        setModalMessage('プランを選択してください');
+        setModalOpen(true);
         return;
       }
 
-      await fetchStatus();
+      // 1) Firebase から idToken 取得
+      const user = getAuth().currentUser;
+      if (!user) throw new Error('ログインしてください');
+      const idToken = await user.getIdToken(true);
 
+      // 2) 最新の user_code / payjp_customer_id / email を解決
+      const accRes = await fetch('/api/account-status', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+        cache: 'no-store',
+      });
+      if (!accRes.ok) {
+        const t = await accRes.text().catch(() => '');
+        throw new Error(`アカウント情報の取得に失敗しました: ${t || accRes.status}`);
+      }
+      const acc = await accRes.json();
+
+      const resolvedCode: string | undefined = acc?.user_code;
+      const customerId: string | undefined = acc?.payjp_customer_id;
+      const userEmail: string | undefined = acc?.click_email;
+
+      // 3) 必須チェック
+      if (!resolvedCode) throw new Error('user_code を解決できませんでした');
+      if (!customerId) throw new Error('PAY.JP の顧客IDがありません（カード登録が必要です）');
+
+      // 4) 送信ペイロード
       const payload = {
-        user_code,
-        user_email: userData?.click_email || '',
+        user_code: resolvedCode,
+        user_email: userEmail || '',
         plan_type: selectedPlan.plan_type,
-        customer_id: userData?.payjp_customer_id || '',
+        customer_id: customerId,
         charge_amount: selectedPlan.price || 0,
         sofia_credit: selectedPlan.credit || 0,
+        force_cancel_existing: true,
       };
 
-      console.log('📤 Subscribing payload:', payload);
+      console.log('[subscribe] payload:', payload);
 
+      // 5) サブスク作成（★ Authorization ヘッダを付ける）
       const subscribeRes = await fetch('/api/pay/subscribe', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,   // ★必須
+        },
         body: JSON.stringify(payload),
       });
 
-      const result = await subscribeRes.json();
-      console.log('📦 Subscribe response:', result);
+      const result = await subscribeRes.json().catch(() => ({}));
+      console.log('[subscribe] response:', subscribeRes.status, result);
 
-      if (!subscribeRes.ok || !result.success) {
-        alert(`❌ サブスク登録に失敗しました\n${result.detail || '原因不明'}`);
+      if (!subscribeRes.ok || !result?.success) {
+        const detail =
+          result?.detail ||
+          (Array.isArray(result?.missing) && result.missing.length
+            ? `欠落フィールド: ${result.missing.join(', ')}`
+            : '原因不明');
+        setModalTitle('サブスク登録に失敗しました');
+        setModalMessage(detail);
+        setModalOpen(true);
         return;
       }
 
-      window.location.href = `/thanks?user=${user_code}`;
+      // 成功
+      window.location.href = `/thanks?user=${resolvedCode}`;
     } catch (err: any) {
       console.error('⨯ Subscription error:', err);
-      alert(`サブスク登録中にエラーが発生しました:\n${err.message || err}`);
+      setModalTitle('サブスク登録エラー');
+      setModalMessage(String(err?.message || err));
+      setModalOpen(true);
     } finally {
       setLoading(false);
     }
@@ -235,6 +355,13 @@ if (cardRes.status === 404) {
         userCredit={userCredit}
         onPlanSelected={(plan) => setSelectedPlan(plan)}
       />
+
+      {/* ★ 期限切れ表示（プラン再購入の案内） */}
+      {expired && (
+        <div className="mt-3 rounded-xl bg-amber-50 border border-amber-200 p-3 text-amber-900">
+          ⚠ サブスクリプションの有効期限が切れています。プランを再購入してください。
+        </div>
+      )}
 
       {/* ✅ カード未登録 → CardStyle UIを表示 */}
       {!cardRegistered && (
@@ -284,11 +411,19 @@ if (cardRes.status === 404) {
               onClick={handleSubscribe}
               disabled={!selectedPlan || loading}
             >
-              {loading ? '処理中…' : 'プランを購入する'}
+              {loading ? '処理中…' : (expired ? 'プランを再購入する' : 'プランを購入する')}
             </button>
           </div>
         </>
       )}
+
+      {/* ✅ モーダル */}
+      <PayResultModal
+        open={modalOpen}
+        title={modalTitle}
+        message={modalMessage}
+        onClose={() => setModalOpen(false)}
+      />
     </main>
   );
 }

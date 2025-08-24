@@ -1,6 +1,7 @@
+// /src/components/ReactionBar.tsx
 'use client';
 
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { getSupabaseBrowser } from '@/lib/supabase-browser';
 
@@ -49,7 +50,13 @@ async function toggleReactionClient(params: {
     console.error('[toggleReaction] ❌', res.status, data);
     throw new Error(data?.message || `toggleReaction failed (${res.status})`);
   }
-  return data as { ok: true; totals?: Counts; post_id: string };
+  // サーバは totals または counts を返すことがあるため吸収
+  const totals =
+    (data?.totals && typeof data.totals === 'object' && data.totals) ||
+    (data?.counts && typeof data.counts === 'object' && data.counts) ||
+    (data?.data?.totals && data.data.totals) ||
+    {};
+  return { ok: true as const, totals: totals as Counts, post_id: data?.post_id ?? params.post_id };
 }
 
 /** 軽量な合計取得API（URL統一） */
@@ -61,7 +68,12 @@ async function fetchCounts(postId: string, isParent: boolean): Promise<Counts> {
   });
   const res = await fetch(`/api/reactions/counts?${q.toString()}`, { cache: 'no-store' });
   const j = await res.json().catch(() => ({}));
-  return (j?.totals ?? {}) as Counts;
+  const totals =
+    (j?.totals && typeof j.totals === 'object' && j.totals) ||
+    (j?.counts && typeof j.counts === 'object' && j.counts) ||
+    (j?.data?.totals && j.data.totals) ||
+    {};
+  return totals as Counts;
 }
 
 /* =========================================================
@@ -107,22 +119,27 @@ const ReactionBar: React.FC<ReactionBarProps> = ({
     return m;
   });
 
-  // props 更新に追随（これが無いと親の再計算とズレます）
+  // --- 初期propsの反映は「最初の一回だけ」行う（再レンダで0に戻さない） ---
+  const didInitFromProps = useRef(false);
   useEffect(() => {
-    if (!initialCounts) return;
-    setCounts((prev) => ({
-      like: initialCounts.like ?? prev.like ?? 0,
-      heart: initialCounts.heart ?? prev.heart ?? 0,
-      smile: initialCounts.smile ?? prev.smile ?? 0,
-      wow: initialCounts.wow ?? prev.wow ?? 0,
-      share: initialCounts.share ?? prev.share ?? 0,
-    }));
-  }, [initialCounts?.like, initialCounts?.heart, initialCounts?.smile, initialCounts?.wow, initialCounts?.share]);
+    if (!didInitFromProps.current) {
+      if (initialCounts) {
+        setCounts((prev) => ({ ...prev, ...initialCounts }));
+      }
+      didInitFromProps.current = true;
+    }
+    // postId が変わる場合のみ初期化を許可
+  }, [postId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // initialMyReactions は変更時に同期（従来通り）
   useEffect(() => {
     if (!initialMyReactions) return;
     const next: Record<ReactionType, boolean> = {
-      like: false, heart: false, smile: false, wow: false, share: false,
+      like: false,
+      heart: false,
+      smile: false,
+      wow: false,
+      share: false,
     };
     initialMyReactions.forEach((r) => (next[r] = true));
     setMine(next);
@@ -134,18 +151,26 @@ const ReactionBar: React.FC<ReactionBarProps> = ({
     [readOnly, effectiveUserCode]
   );
 
-  // 初期ロード時、初期カウントが無い場合はAPIで取得
+  // --- 単発リロード：多重実行抑止＋空レスで上書き禁止 ---
+  const reloadInflight = useRef(false);
   const reload = useCallback(async () => {
+    if (reloadInflight.current) return;
+    reloadInflight.current = true;
     try {
       const t = await fetchCounts(postId, isParent);
-      setCounts((c) => ({ ...c, ...t }));
-      onChangeTotals?.(t);
+      if (t && Object.keys(t).length) {
+        setCounts((c) => ({ ...c, ...t }));
+        onChangeTotals?.(t);
+      }
     } catch (e) {
       // 失敗しても致命ではない
       console.warn('[ReactionBar] counts reload failed:', e);
+    } finally {
+      reloadInflight.current = false;
     }
   }, [postId, isParent, onChangeTotals]);
 
+  // 初期ロード時、初期カウントが無い場合はAPIで取得（構造維持）
   useEffect(() => {
     if (!initialCounts) reload();
     // initialCounts が与えられている場合はそのまま使う
@@ -159,8 +184,8 @@ const ReactionBar: React.FC<ReactionBarProps> = ({
       .channel(`rx-post-${postId}`)
       .on(
         'postgres_changes',
-        // ← DBが post_reactions なのでこちらを購読
-        { event: '*', schema: 'public', table: 'post_reactions', filter: `post_id=eq.${postId}` },
+        // ← 実DBテーブル名に合わせる（post_resonances）
+        { event: '*', schema: 'public', table: 'post_resonances', filter: `post_id=eq.${postId}` },
         () => reload()
       )
       .subscribe();
@@ -201,12 +226,12 @@ const ReactionBar: React.FC<ReactionBarProps> = ({
         user_code: effectiveUserCode!, // 呼び出し元で未ログインは onClick 自体不許可
       });
 
-      if (res?.totals) {
+      if (res?.totals && Object.keys(res.totals).length) {
         setCounts((c) => ({ ...c, ...res.totals }));
         onChangeTotals?.(res.totals);
       } else {
-        // サーバが合計を返さない場合は明示リロード
-        reload();
+        // サーバが合計を返さない/空の場合は明示リロード
+        await reload();
       }
 
       // 即時反映イベント（他の同一postのバーも追従）

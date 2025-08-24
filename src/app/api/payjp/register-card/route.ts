@@ -2,69 +2,102 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import Payjp from 'payjp';
 
-// ✅ Edge関数のタイムアウト回避
 export const runtime = 'nodejs';
 
-// ✅ Supabase 初期化
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.supabaseKey!! // ← anonではなく service role を使用
+  process.env.SUPABASE_SERVICE_ROLE_KEY! // ← Service Role 必須
 );
 
-// ✅ PAY.JP 初期化
 const payjp = Payjp(process.env.PAYJP_SECRET_KEY!);
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { customer, token, usercode } = body;
 
-    console.log('🧾 [API] 受信した顧客ID:', customer);
-    console.log('💳 [API] 受信したカードトークン:', token);
-    console.log('👤 [API] 対象ユーザーコード:', usercode);
+    // フロントのキー揺れを吸収（構造は維持）
+    let customer = body.customer ?? body.customer_id ?? null;
+    const token = body.token ?? body.cardToken;
+    const usercode = body.usercode ?? body.user_code ?? body.userCode;
 
-    if (!customer || !token || !usercode) {
-      console.error('❌ customer, token, または usercode が未定義です');
-      return new NextResponse('Missing customer, token, or usercode', { status: 400 });
+    if (!token || !usercode) {
+      return new NextResponse('Missing token or usercode', { status: 400 });
     }
 
-    // ✅ PAY.JP: 顧客にカードを登録
-    console.log('🚀 PAY.JP にカード登録リクエスト送信');
-    const updateResult = await payjp.customers.update(customer, {
-      card: token,
-    });
-    console.log('✅ [PAY.JP] カード登録成功:', updateResult.id);
-
-    // ✅ Supabase: 対象ユーザーを usercode で検索
+    // Supabase: ユーザー取得
     const { data: user, error: userErr } = await supabase
       .from('users')
-      .select('*')
+      .select('user_code, email, name, payjp_customer_id, card_registered')
       .eq('user_code', usercode)
       .single();
 
     if (userErr || !user) {
-      console.error('❌ [Supabase] ユーザー取得失敗:', userErr);
       return new NextResponse('User not found in Supabase', { status: 404 });
     }
 
-    // ✅ Supabase: カード登録フラグと顧客IDを保存
+    // 顧客IDが無ければ DBの値を使う→無ければ新規作成→DB保存
+    if (!customer) {
+      if (user.payjp_customer_id) {
+        customer = user.payjp_customer_id;
+      } else {
+        const created = await payjp.customers.create({
+          email: user.email ?? undefined,
+          description: `muverse: ${user.user_code}`,
+          metadata: { user_code: user.user_code },
+        });
+        customer = created.id;
+
+        const { error: saveCusErr } = await supabase
+          .from('users')
+          .update({ payjp_customer_id: customer })
+          .eq('user_code', user.user_code);
+
+        if (saveCusErr) {
+          return new NextResponse('Failed to save customer id', { status: 500 });
+        }
+      }
+    }
+
+    // PAY.JP: 顧客にカード追加
+    const card = await payjp.customers.createCard(String(customer), { card: String(token) });
+
+    // Supabase: カード登録フラグ true（冪等OK）
     const { error: updateErr } = await supabase
       .from('users')
       .update({
         card_registered: true,
-        payjp_customer_id: customer,
+        payjp_customer_id: String(customer),
       })
       .eq('user_code', user.user_code);
 
     if (updateErr) {
-      console.error('❌ [Supabase] カード登録情報の更新失敗:', updateErr);
       return new NextResponse('Failed to update Supabase', { status: 500 });
     }
 
-    console.log('🎉 [完了] Supabaseへの登録完了');
-    return NextResponse.json({ success: true });
+    // 反映確認を返却（フロントのNetworkで確認しやすく）
+    const { data: after } = await supabase
+      .from('users')
+      .select('user_code, payjp_customer_id, card_registered')
+      .eq('user_code', user.user_code)
+      .single();
+
+    return NextResponse.json({
+      success: true,
+      customer_id: String(customer),
+      card: {
+        id: card.id,
+        brand: card.brand,
+        last4: card.last4,
+        exp_month: card.exp_month,
+        exp_year: card.exp_year,
+      },
+      user_after: after,
+    });
   } catch (err: any) {
-    console.error('🔥 [APIエラー]', err);
-    return new NextResponse('Internal Server Error', { status: 500 });
+    const isCardErr = /card|invalid|security code|insufficient/i.test(err?.message || '');
+    return new NextResponse(
+      isCardErr ? 'Payment Error' : 'Internal Server Error',
+      { status: isCardErr ? 402 : 500 }
+    );
   }
 }
