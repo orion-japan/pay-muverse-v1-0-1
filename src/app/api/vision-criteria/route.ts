@@ -1,130 +1,122 @@
-// src/app/api/vision-criteria/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '@/lib/supabase';
+import { getAuth } from 'firebase-admin/auth';
+import { initializeApp, applicationDefault } from 'firebase-admin/app';
 
-export const runtime = 'nodejs'; // Supabase/Node API 想定
+/* ==== Firebase Admin init (1本方式) ==== */
+function resolveProjectId(): string | undefined {
+  return process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || undefined;
+}
+try {
+  const projectId = resolveProjectId();
+  initializeApp({ credential: applicationDefault(), ...(projectId ? { projectId } : {}) });
+  console.log('✅ Firebase Admin initialized (vision-criteria)', projectId ? `(projectId=${projectId})` : '(no projectId)');
+} catch {
+  /* already initialized */
+}
 
-// --- Supabase 初期化 ---
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.supabaseKey!
-);
-
-/**
- * 期待するクエリ:
- *   - vision_id: string（任意。指定があれば vision_criteria から criteria を取得）
- *   - ids: comma-separated string（任意。vision_id が無い場合はこちらを使用）
- *   - status: 'done' など（任意。デフォルト 'done'）
- *
- * レスポンス:
- *   {
- *     criteria: Array<{
- *       criteria_id: string;
- *       title?: string | null;
- *       description?: string | null;
- *       weight?: number | null;
- *       done_count: number; // status一致のチェック件数
- *     }>
- *   }
- */
-export async function GET(req: NextRequest) {
+/* ==== Auth helper ==== */
+async function verifyFirebaseToken(req: NextRequest) {
+  const authHeader = req.headers.get('authorization');
+  if (!authHeader?.startsWith('Bearer ')) return null;
+  const token = authHeader.split(' ')[1];
   try {
-    const { searchParams } = new URL(req.url);
-    const visionId = searchParams.get('vision_id');
-    const status = searchParams.get('status') || 'done';
-
-    // ids の受け口（vision_id が無いときに使用）
-    const idsParam = searchParams.get('ids');
-
-    // 1) criteria の母集団を決める
-    type CriteriaRow = {
-      id: string;
-      title?: string | null;
-      description?: string | null;
-      weight?: number | null;
-    };
-
-    let criteriaRows: CriteriaRow[] = [];
-    if (visionId) {
-      // vision_id から criteria を取得（必要カラムのみ）
-      const { data, error } = await supabase
-        .from('vision_criteria')
-        .select('id, title, description, weight')
-        .eq('vision_id', visionId)
-        .order('id', { ascending: true });
-
-      if (error) throw error;
-      criteriaRows = data ?? [];
-    } else if (idsParam) {
-      // ids= "a,b,c" のように直接指定された場合
-      const ids = idsParam
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
-
-      if (ids.length) {
-        const { data, error } = await supabase
-          .from('vision_criteria')
-          .select('id, title, description, weight')
-          .in('id', ids)
-          .order('id', { ascending: true });
-
-        if (error) throw error;
-        criteriaRows = data ?? [];
-      }
-    } else {
-      // どちらも無ければ 400
-      return NextResponse.json(
-        { error: 'vision_id または ids を指定してください' },
-        { status: 400 }
-      );
-    }
-
-    const ids = criteriaRows.map((c) => c.id);
-    if (!ids.length) {
-      // 空なら空の配列返す
-      return NextResponse.json({ criteria: [] });
-    }
-
-    // 2) 旧 `.group("criteria_id")` 相当の集計
-    //    supabase-js に group は無いので、JS 側で reduce 集計する
-    type CheckRow = { criteria_id: string };
-
-    const { data: doneRows, error: doneErr } = await supabase
-      .from('vision_criteria_checks')
-      .select('criteria_id')
-      .eq('status', status)
-      .in('criteria_id', ids)
-      .returns<CheckRow[]>();
-
-    if (doneErr) throw doneErr;
-
-    const doneCountMap = new Map<string, number>();
-    for (const r of doneRows ?? []) {
-      doneCountMap.set(r.criteria_id, (doneCountMap.get(r.criteria_id) ?? 0) + 1);
-    }
-
-    // 3) レスポンス整形（元の構造を崩さない）
-    const criteria = criteriaRows.map((row) => ({
-      criteria_id: row.id,
-      title: row.title ?? null,
-      description: row.description ?? null,
-      weight: row.weight ?? null,
-      done_count: doneCountMap.get(row.id) ?? 0,
-    }));
-
-    return NextResponse.json({ criteria });
-  } catch (err: any) {
-    console.error('⨯ /api/vision-criteria GET error:', err);
-    return NextResponse.json(
-      { error: 'failed to fetch vision criteria', detail: String(err) },
-      { status: 500 }
-    );
+    const decoded = await getAuth().verifyIdToken(token);
+    return decoded; // { uid, ... }
+  } catch (e) {
+    console.error('❌ token error (criteria):', e);
+    return null;
   }
 }
 
-/**
- * 必要なら POST など他メソッドもここに追加できますが、
- * 今回のビルドエラーは GET 内の `.group("criteria_id")` を
- * JS 集計に置き換えることで解消しています。
- */
+/* ==== vision 所有者チェック：vision が本人のものか確認 ==== */
+async function assertVisionOwnedBy(uid: string, vision_id: string): Promise<boolean> {
+  // uid -> users.user_code を解決
+  const u = await supabase.from('users').select('user_code').eq('firebase_uid', uid).maybeSingle();
+  const user_code = u.data?.user_code as string | undefined;
+
+  const { data: vrow } = await supabase
+    .from('visions')
+    .select('vision_id, user_code')
+    .eq('vision_id', vision_id)
+    .maybeSingle();
+
+  if (!vrow) return false;
+  if (user_code) return vrow.user_code === user_code;
+  // users 未連携の場合は存在のみ許容
+  return true;
+}
+
+/* ==== GET /api/vision-criteria?vision_id=...&from=S ==== */
+export async function GET(req: NextRequest) {
+  const user = await verifyFirebaseToken(req);
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { searchParams } = new URL(req.url);
+  const vision_id = searchParams.get('vision_id') || '';
+  const from = (searchParams.get('from') || '') as 'S'|'F'|'R'|'C'|'I';
+  if (!vision_id || !from) return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
+
+  if (!(await assertVisionOwnedBy(user.uid, vision_id))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
+  const { data, error } = await supabase
+    .from('vision_criteria')
+    .select('*')
+    .eq('vision_id', vision_id)
+    .eq('from', from)
+    .maybeSingle();
+
+  if (error) {
+    console.error('❌ GET vision-criteria error:', error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  // なければ null を返す（フロントで「デフォルトを作成」表示）
+  return NextResponse.json(data ?? null);
+}
+
+/* ==== POST /api/vision-criteria  (作成 or 再生成) ==== */
+export async function POST(req: NextRequest) {
+  const user = await verifyFirebaseToken(req);
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const body = await req.json().catch(() => ({}));
+  const { vision_id, from, required_days = 3 } = body || {};
+  const checklist = Array.isArray(body?.checklist) ? body.checklist : [];
+  if (!vision_id || !from) return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
+
+  if (!(await assertVisionOwnedBy(user.uid, vision_id))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
+  const existing = await supabase
+    .from('vision_criteria')
+    .select('id')
+    .eq('vision_id', vision_id)
+    .eq('from', from)
+    .maybeSingle();
+
+  const now = new Date().toISOString();
+  const payload = {
+    vision_id,
+    from,
+    required_days,
+    checklist,                                   // JSONB
+    progress: { streak: 0, metRequired: false }, // 初期値
+    updated_at: now,
+    ...(existing.data ? {} : { created_at: now }),
+  };
+
+  const up = existing.data
+    ? await supabase.from('vision_criteria').update(payload).eq('id', existing.data.id).select('*').single()
+    : await supabase.from('vision_criteria').insert([payload]).select('*').single();
+
+  if (up.error) {
+    console.error('❌ POST vision-criteria error:', up.error);
+    return NextResponse.json({ error: up.error.message }, { status: 500 });
+  }
+
+  return NextResponse.json(up.data);
+}

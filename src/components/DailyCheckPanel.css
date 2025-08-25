@@ -1,0 +1,360 @@
+.daily-check-panel {
+    border: 3px solid #000;
+    border-radius: 20px;
+    background: #f7f8fa;
+    padding: 14px;
+  }
+  
+  .dcp-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .dcp-date { margin-left: 4px; color: #666; font-size: 12px; }
+  .dcp-status { font-size: 12px; color: #666; }
+  
+  .dcp-row { margin-top: 10px; }
+  
+  .dcp-check {
+    display: inline-flex;
+    align-items: center;
+    margin-right: 16px;
+    gap: 6px;
+  }
+  
+  .dcp-label { display: block; margin-bottom: 6px; font-weight: 600; }
+  .dcp-textarea {
+    width: 100%;
+    resize: vertical;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    background: #fff;
+    font-size: 14px;
+    box-sizing: border-box;
+  }
+  
+  .dcp-actions { margin-top: 12px; text-align: right; }
+  .dcp-save {
+    padding: 8px 14px;
+    border-radius: 10px;
+    border: 1px solid #d0c3ff;
+    background: linear-gradient(180deg, #eee9ff, #ded2ff);
+    cursor: pointer;
+  }
+  .dcp-save:hover { filter: brightness(0.98); }
+  
+  .dcp-progress {
+    height: 8px;
+    background: #e9e9f2;
+    border-radius: 999px;
+    overflow: hidden;
+    margin: 6px 0 10px;
+  }
+  .dcp-progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #b9a8ff, #8a6bff);
+  }
+  
+  .dcp-actions { margin-top: 12px; display: flex; gap: 8px; justify-content: flex-end; }
+  .dcp-copy {
+    padding: 8px 12px;
+    border-radius: 10px;
+    border: 1px solid #dcdcdc;
+    background: #fff;
+    cursor: pointer;
+  }
+  .dcp-save {
+    padding: 8px 14px;
+    border-radius: 10px;
+    border: 1px solid #d0c3ff;
+    background: linear-gradient(180deg, #eee9ff, #ded2ff);
+    cursor: pointer;
+  }
+  
+  .dcp-toast {
+    position: fixed;
+    right: 12px;
+    top: 12px;
+    background: #333;
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-size: 13px;
+    opacity: 0.92;
+    z-index: 1000;
+  }
+  
+  .daily-check-panel {
+    border: 3px solid #000;
+    border-radius: 20px;
+    background: #f7f8fa;
+    padding: 14px;
+  }
+  
+  .dcp-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .dcp-date { margin-left: 4px; color: #666; font-size: 12px; }
+  .dcp-status { font-size: 12px; color: #666; }
+  
+  .dcp-progress {
+    height: 8px;
+    background: #e9e9f2;
+    border-radius: 999px;
+    overflow: hidden;
+    margin: 6px 0 10px;
+  }
+  .dcp-progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #b9a8ff, #8a6bff);
+  }
+  
+  .dcp-row { margin-top: 10px; }
+  
+  .dcp-check {
+    display: inline-flex;
+    align-items: center;
+    margin-right: 16px;
+    gap: 6px;
+    font-size: 14px;
+  }
+  
+  .dcp-label { display: block; margin-bottom: 6px; font-weight: 600; }
+  .dcp-textarea {
+    width: 100%;
+    resize: vertical;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    background: #fff;
+    font-size: 14px;
+    box-sizing: border-box;
+  }
+  
+  .dcp-actions { margin-top: 12px; display: flex; gap: 8px; justify-content: flex-end; }
+  .dcp-copy {
+    padding: 8px 12px;
+    border-radius: 10px;
+    border: 1px solid #dcdcdc;
+    background: #fff;
+    cursor: pointer;
+  }
+  .dcp-save {
+    padding: 8px 14px;
+    border-radius: 10px;
+    border: 1px solid #d0c3ff;
+    background: linear-gradient(180deg, #eee9ff, #ded2ff);
+    cursor: pointer;
+  }
+  .dcp-save:hover { filter: brightness(0.98); }
+  
+  .dcp-toast {
+    position: fixed;
+    right: 12px;
+    top: 12px;
+    background: #333;
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-size: 13px;
+    opacity: 0.92;
+    z-index: 1000;
+  }
+  
+  /* Visionページ側の黒枠用（空状態） */
+  .daily-check-frame { margin-top: 16px; }
+  .daily-check-empty {
+    border: 3px solid #000; border-radius: 20px; background: #f7f8fa;
+    padding: 14px; min-height: 240px; display: flex; align-items: center; justify-content: center;
+    color: #666; font-size: 14px; text-align: center;
+  }
+  
+  .dcp-progress-num {
+    font-size: 12px;
+    color: #555;
+    margin-bottom: 6px;
+  }
+  
+  /* 履歴（直近14日） */
+  .dcp-history {
+    margin-top: 10px;
+    display: flex;
+    gap: 6px;
+    align-items: end;
+  }
+  .dcp-hitem {
+    width: 14px;
+    height: 28px;
+    border-radius: 4px;
+    background: #ececf4;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: end;
+    padding-bottom: 2px;
+  }
+  .dcp-hbar {
+    width: 100%;
+    background: #8a6bff;
+    border-radius: 4px 4px 0 0;
+  }
+  .dcp-hday {
+    font-size: 10px;
+    color: #666;
+    line-height: 1;
+    margin-top: 2px;
+  }
+  
+  /* 完了(ロック)モードの見た目 */
+.dcp-done { margin-top: 6px; }
+.dcp-done-badge {
+  display: inline-block;
+  background: #eaf7ea;
+  color: #2b7a2b;
+  border: 1px solid #bfe0bf;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+.dcp-done-block { background:#fff; border:1px solid #e7e7ee; border-radius:12px; padding:10px; }
+.dcp-done-title { margin-top:6px; font-weight:600; font-size:13px; color:#555; }
+.dcp-done-text { white-space:pre-wrap; background:#fafafa; border:1px solid #eee; border-radius:8px; padding:8px; margin-top:4px; }
+.dcp-done-list { margin:4px 0; padding-left:18px; }
+
+.daily-check-panel {
+    border: 3px solid #000;
+    border-radius: 20px;
+    background: #f7f8fa;
+    padding: 14px;
+  }
+  
+  .dcp-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .dcp-date { margin-left: 4px; color: #666; font-size: 12px; }
+  .dcp-status { font-size: 12px; color: #666; }
+  
+  .dcp-progress {
+    height: 8px;
+    background: #e9e9f2;
+    border-radius: 999px;
+    overflow: hidden;
+    margin: 6px 0 10px;
+  }
+  .dcp-progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #b9a8ff, #8a6bff);
+  }
+  .dcp-progress-num {
+    font-size: 12px;
+    color: #555;
+    margin-bottom: 6px;
+  }
+  
+  .dcp-row { margin-top: 10px; }
+  .dcp-check {
+    display: inline-flex;
+    align-items: center;
+    margin-right: 16px;
+    gap: 6px;
+    font-size: 14px;
+  }
+  
+  .dcp-label { display: block; margin-bottom: 6px; font-weight: 600; }
+  .dcp-textarea {
+    width: 100%;
+    resize: vertical;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    background: #fff;
+    font-size: 14px;
+    box-sizing: border-box;
+  }
+  
+  .dcp-actions { margin-top: 12px; display: flex; gap: 8px; justify-content: flex-end; }
+  .dcp-copy {
+    padding: 8px 12px;
+    border-radius: 10px;
+    border: 1px solid #dcdcdc;
+    background: #fff;
+    cursor: pointer;
+  }
+  .dcp-save {
+    padding: 8px 14px;
+    border-radius: 10px;
+    border: 1px solid #d0c3ff;
+    background: linear-gradient(180deg, #eee9ff, #ded2ff);
+    cursor: pointer;
+  }
+  .dcp-save:hover { filter: brightness(0.98); }
+  
+  .dcp-toast {
+    position: fixed;
+    right: 12px;
+    top: 12px;
+    background: #333;
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-size: 13px;
+    opacity: 0.92;
+    z-index: 1000;
+  }
+  
+  /* 完了(ロック)モード */
+  .dcp-done { margin-top: 6px; }
+  .dcp-done-badge {
+    display: inline-block;
+    background: #eaf7ea;
+    color: #2b7a2b;
+    border: 1px solid #bfe0bf;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    margin-bottom: 8px;
+  }
+  .dcp-done-block { background:#fff; border:1px solid #e7e7ee; border-radius:12px; padding:10px; }
+  .dcp-done-title { margin-top:6px; font-weight:600; font-size:13px; color:#555; }
+  .dcp-done-text { white-space:pre-wrap; background:#fafafa; border:1px solid #eee; border-radius:8px; padding:8px; margin-top:4px; }
+  .dcp-done-list { margin:4px 0; padding-left:18px; }
+  
+  /* 履歴（直近14日） */
+  .dcp-history {
+    margin-top: 10px;
+    display: flex;
+    gap: 6px;
+    align-items: end;
+  }
+  .dcp-hitem {
+    width: 14px;
+    height: 28px;
+    border-radius: 4px;
+    background: #ececf4;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: end;
+    padding-bottom: 2px;
+  }
+  .dcp-hbar {
+    width: 100%;
+    background: #8a6bff;
+    border-radius: 4px 4px 0 0;
+  }
+  .dcp-hday {
+    font-size: 10px;
+    color: #666;
+    line-height: 1;
+    margin-top: 2px;
+  }
+  

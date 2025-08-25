@@ -170,3 +170,71 @@
 .text-danger { color: #c0392b; }
 
   
+.vision-card.is-selected {
+    outline: 2px solid #8a6bff;
+    box-shadow: 0 0 0 3px rgba(138,107,255,0.15);
+  }
+  .vision-select {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    font-size: 12px;
+    color: #666;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .vision-select input[type="radio"] {
+    accent-color: #8a6bff;
+  }
+  
+  /* 選択強調 */
+.vision-card.is-selected {
+    outline: 2px solid #8a6bff;
+    box-shadow: 0 0 0 3px rgba(138,107,255,0.15);
+  }
+  
+  /* 「今日の対象」ラジオ */
+  .vision-select {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    font-size: 12px;
+    color: #666;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .vision-select input[type="radio"] {
+    accent-color: #8a6bff;
+  }
+  
+  /* 選択強調・ドラッグ見た目 */
+.vision-card.is-selected {
+    outline: 2px solid #8a6bff;
+    box-shadow: 0 0 0 3px rgba(138,107,255,0.15);
+  }
+  .vision-card.is-dragging {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(0,0,0,.12);
+  }
+  
+  /* StageChecklistInline のアクションは非表示運用（保険） */
+  .stagecheck-actions { display: none; }
+  /* 右上 新規ボタン */
+.vision-topbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 8px;
+  }
+  .vision-new-global {
+    padding: 8px 14px;
+    border-radius: 10px;
+    border: 1px solid #d0c3ff;
+    background: linear-gradient(180deg, #eee9ff, #ded2ff);
+    cursor: pointer;
+  }
+  
+  /* 念のため：もし残っていたら列下の＋カードを非表示 */
+  .vision-column .vision-add { display: none !important; }
+  

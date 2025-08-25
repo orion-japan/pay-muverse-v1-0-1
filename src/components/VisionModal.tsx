@@ -19,14 +19,17 @@ type VisionModalProps = {
 
 const STATUS_LIST: Status[] = ['検討中','実践中','迷走中','順調','ラストスパート','達成','破棄'];
 
-// ---- 追加: 橋渡しチェックリストのデフォルト定義 ----
+/* =========================
+   橋渡しチェック：デフォルト生成
+   ========================= */
 function nextStageOf(s: Stage): Stage | null {
   const order: Stage[] = ['S', 'F', 'R', 'C', 'I'];
   const i = order.indexOf(s);
   return i >= 0 && i < order.length - 1 ? order[i + 1] : null;
 }
+
 function defaultCriteria(from: Stage, to: Stage, vision_id: string) {
-  // 最小のデフォルト（後で編集可能）
+  // 最小のデフォルト（あとで編集可能）
   if (from === 'S' && to === 'F') {
     return [
       { vision_id, from_stage: 'S', to_stage: 'F', title: '意図メモを3つ書く', required_days: 3, required: true, order_index: 0 },
@@ -52,19 +55,29 @@ function defaultCriteria(from: Stage, to: Stage, vision_id: string) {
   }
   return [];
 }
-// /api/vision-criteria に一括投入
+
 async function seedStageCriteria(vision_id: string, from_stage: Stage, token: string) {
   const to = nextStageOf(from_stage);
   if (!to) return; // I の場合は何もしない
   const bulk = defaultCriteria(from_stage, to, vision_id);
   if (bulk.length === 0) return;
-  await fetch('/api/vision-criteria', {
+
+  const res = await fetch('/api/vision-criteria', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ bulk }),
+    body: JSON.stringify({ bulk }), // ← 仕様どおり bulk 一括投入
   });
+
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    // ここは致命ではないのでログのみ（保存自体は成功扱い）
+    console.warn('seedStageCriteria failed:', res.status, t);
+  }
 }
 
+/* =========================
+   VisionModal 本体
+   ========================= */
 export default function VisionModal({
   isOpen, defaultPhase, defaultStage, userCode, initial, onClose, onSaved,
 }: VisionModalProps) {
@@ -75,7 +88,7 @@ export default function VisionModal({
 
   const [vision, setVision] = useState<Vision>(() => ({
     phase: initial?.phase ?? defaultPhase,
-    stage: initial?.stage ?? defaultStage,
+    stage: initial?.stage ?? defaultStage, // ← 表示上はそのまま。保存時に新規は 'S' に矯正
     title: initial?.title ?? '',
     detail: initial?.detail ?? '',
     intention: initial?.intention ?? '',
@@ -140,10 +153,13 @@ export default function VisionModal({
       const isUpdate = Boolean(vision.vision_id);
       const method = isUpdate ? 'PUT' : 'POST';
 
+      // ★ 新規は必ず S で保存（UIの defaultStage に依存しない）
+      const stageForSave: Stage = isUpdate ? (vision.stage as Stage) : 'S';
+
       const payload = {
         vision_id: vision.vision_id,
         phase: vision.phase,
-        stage: vision.stage,
+        stage: stageForSave, // ← ここで矯正
         title: vision.title,
         detail: vision.detail,
         intention: vision.intention,
@@ -160,23 +176,27 @@ export default function VisionModal({
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || '保存に失敗しました');
+      const text = await res.text(); // ← エラーデバッグしやすく
+      const data = text ? JSON.parse(text).catch(() => null) : null;
 
-      // ★ 新規作成時のみ：橋渡しチェックリストのデフォルトを投入
-      if (!isUpdate && data?.vision_id && payload.stage) {
+      if (!res.ok) {
+        throw new Error((data?.error as string) || text || '保存に失敗しました');
+      }
+
+      const saved = data ?? {};
+      // ★ 新規作成時のみ：橋渡しチェックのデフォルトを投入（from = 'S'）
+      if (!isUpdate && saved?.vision_id) {
         try {
-          await seedStageCriteria(String(data.vision_id), payload.stage as Stage, token);
+          await seedStageCriteria(String(saved.vision_id), 'S', token);
         } catch (seedingErr) {
-          // ここは致命ではないのでログのみ（UIは成功扱い）
           console.warn('seedStageCriteria warning:', seedingErr);
         }
       }
 
-      onSaved?.(data);
+      onSaved?.(saved);
       onClose();
     } catch (e: any) {
-      setErrorMsg(e.message || 'エラーが発生しました');
+      setErrorMsg(e?.message || 'エラーが発生しました');
     } finally {
       setSaving(false);
     }
@@ -237,10 +257,12 @@ export default function VisionModal({
 
         <div className="vmd-footer">
           <button className="vmd-btn ghost" onClick={onClose}>キャンセル</button>
-          <button className="vmd-btn primary"
+          <button
+            className="vmd-btn primary"
             onClick={handleSave}
             disabled={saving || !authReady || !vision.title?.trim()}
-            title={!authReady ? '認証初期化中…' : undefined}>
+            title={!authReady ? '認証初期化中…' : undefined}
+          >
             {saving ? '保存中…' : '保存する'}
           </button>
         </div>
