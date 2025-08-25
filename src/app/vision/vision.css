@@ -1,3 +1,4 @@
+/* ====== レイアウト基本 ====== */
 .vision-shell {
     display: flex;
     flex-direction: column;
@@ -5,10 +6,7 @@
     padding: 16px;
   }
   
-  .vision-tabs {
-    display: flex;
-    gap: 8px;
-  }
+  .vision-tabs { display: flex; gap: 8px; }
   .vision-tabs button {
     padding: 6px 14px;
     border-radius: 8px;
@@ -22,11 +20,14 @@
     color: #fff;
   }
   
+  /* ★ 盤面は横スクロールのみ。縦は可視（D&Dの必須条件） */
   .vision-board {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(5, minmax(240px, 1fr));
     gap: 12px;
     overflow-x: auto;
+    overflow-y: visible;      /* ← 重要：縦 overflow を作らない */
+    padding-bottom: 8px;
   }
   
   .vision-column {
@@ -36,23 +37,30 @@
     display: flex;
     flex-direction: column;
     min-width: 220px;
+    overflow: visible;        /* ← 重要：縦 overflow を作らない */
   }
+  
   .vision-col-header {
     font-weight: 600;
     padding: 8px;
     border-bottom: 1px solid #ddd;
     text-align: center;
   }
+  
+  /* ★ Droppable を付ける箱。縦 overflow を作らない */
   .vision-col-body {
     flex: 1;
     padding: 8px;
     display: flex;
     flex-direction: column;
     gap: 8px;
-    overflow-y: auto;
+    overflow-y: visible;      /* ← auto/hide にしない */
+    min-height: 16px;         /* 空でもドロップ可 */
   }
   
+  /* ====== カード ====== */
   .vision-card {
+    position: relative;
     background: #fff;
     border: 1px solid #ddd;
     border-radius: 10px;
@@ -63,20 +71,16 @@
     cursor: grab;
   }
   .vision-card:active { cursor: grabbing; }
+  
   .vision-thumb {
     width: 100%;
     height: 100px;
     object-fit: cover;
     border-radius: 6px;
   }
-  .vision-title {
-    font-size: 14px;
-    font-weight: 600;
-  }
-  .vision-intent {
-    font-size: 12px;
-    color: #555;
-  }
+  
+  .vision-title { font-size: 14px; font-weight: 600; }
+  .vision-intent { font-size: 12px; color: #555; }
   .vision-status {
     font-size: 11px;
     background: #eee;
@@ -85,144 +89,85 @@
     align-self: flex-start;
   }
   
-  .vision-add {
-    border: none;
-    background: #f0f0ff;
-    padding: 6px;
-    cursor: pointer;
-    border-radius: 0 0 10px 10px;
-  }
-  .vision-add:hover {
-    background: #dcdcff;
+  /* ドラッグハンドル（タッチ掴み優先） */
+  .vision-drag-handle {
+    position: absolute; top: 6px; right: 6px;
+    border: none; background: transparent; cursor: grab;
+    font-size: 16px; line-height: 1; padding: 4px;
+    touch-action: none;       /* ← 重要（モバイルで掴み優先） */
+    -ms-touch-action: none;
   }
   
-  .vision-board {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(240px, 1fr));
-    gap: 12px;
-    overflow-x: auto;   /* 横スクロール */
-    padding-bottom: 8px;
-  }
-
-  .stage-bridge { margin-top:8px; background:#00000006; border-radius:10px; padding:8px; }
-.bridge-empty { font-size:12px; opacity:.7; }
-.bridge-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:4px; }
-.bridge-item { display:flex; align-items:center; justify-content:space-between; padding:4px 6px; background:#fff; border-radius:8px; }
-.bridge-item .title { margin-left:6px; font-size:12px; }
-.bridge-item .count { font-size:12px; opacity:.6; }
-.bridge-footer { display:flex; align-items:center; justify-content:space-between; margin-top:8px; }
-.bridge-progress { font-size:12px; opacity:.8; }
-.bridge-next { font-size:12px; padding:6px 10px; border-radius:8px; }
-
-.vision-card { position: relative; }
-.vision-drag-handle {
-  position: absolute; top: 6px; right: 6px;
-  border: none; background: transparent; cursor: grab;
-  font-size: 16px; line-height: 1; padding: 4px;
-}
-.vision-card-click { cursor: pointer; }
-.vision-card-bridge { margin-top: 8px; }
-
-
-/* --- Bridge checklist (inline) --- */
-.bridge-list { display: flex; flex-direction: column; gap: 6px; }
-.bridge-item { display: flex; align-items: center; gap: 8px; }
-
-.bridge-tick {
-  border: 1px solid #ddd;
-  background: #fff;
-  border-radius: 6px;
-  padding: 2px 8px;
-  cursor: pointer;
-  line-height: 1;
-}
-
-.bridge-body { flex: 1; }
-.bridge-title { font-size: 12px; line-height: 1.2; }
-
-.bridge-meter {
-  position: relative;
-  height: 6px;
-  border-radius: 999px;
-  background: #eee;
-  margin-top: 4px;
-}
-.bridge-bar {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 0%;
-  border-radius: 999px;
-  background: var(--accent, #7c3aed); /* 紫系 */
-}
-.bridge-text { font-size: 10px; margin-left: 6px; color: #666; }
-
-.link-like {
-  background: none;
-  border: none;
-  padding: 0;
-  text-decoration: underline;
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.text-xs { font-size: 12px; }
-.text-muted { color: #666; }
-.text-danger { color: #c0392b; }
-
+  .vision-card-click { cursor: pointer; user-select: none; -webkit-user-select: none; }
+  .vision-card-bridge { margin-top: 8px; }
   
-.vision-card.is-selected {
-    outline: 2px solid #8a6bff;
-    box-shadow: 0 0 0 3px rgba(138,107,255,0.15);
-  }
-  .vision-select {
-    position: absolute;
-    top: 6px;
-    right: 8px;
-    font-size: 12px;
-    color: #666;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .vision-select input[type="radio"] {
-    accent-color: #8a6bff;
-  }
-  
-  /* 選択強調 */
-.vision-card.is-selected {
+  .vision-card.is-selected {
     outline: 2px solid #8a6bff;
     box-shadow: 0 0 0 3px rgba(138,107,255,0.15);
   }
   
-  /* 「今日の対象」ラジオ */
-  .vision-select {
-    position: absolute;
-    top: 6px;
-    right: 8px;
-    font-size: 12px;
-    color: #666;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .vision-select input[type="radio"] {
-    accent-color: #8a6bff;
-  }
-  
-  /* 選択強調・ドラッグ見た目 */
-.vision-card.is-selected {
-    outline: 2px solid #8a6bff;
-    box-shadow: 0 0 0 3px rgba(138,107,255,0.15);
-  }
+  /* ドラッグ中の見た目（transform はライブラリに任せる→上書きしない） */
   .vision-card.is-dragging {
-    transform: translateY(-1px);
-    box-shadow: 0 6px 20px rgba(0,0,0,.12);
+    opacity: .9;
+    box-shadow: 0 8px 24px rgba(0,0,0,.18);
+    /* transform: translateY(-1px);  ← 削除：D&Dの transform を邪魔しない */
   }
   
-  /* StageChecklistInline のアクションは非表示運用（保険） */
-  .stagecheck-actions { display: none; }
-  /* 右上 新規ボタン */
-.vision-topbar {
+  /* ====== Bridge（インライン） ====== */
+  .stage-bridge { margin-top:8px; background:#00000006; border-radius:10px; padding:8px; }
+  .bridge-empty { font-size:12px; opacity:.7; }
+  .bridge-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:4px; }
+  .bridge-item { display:flex; align-items:center; justify-content:space-between; padding:4px 6px; background:#fff; border-radius:8px; }
+  .bridge-item .title { margin-left:6px; font-size:12px; }
+  .bridge-item .count { font-size:12px; opacity:.6; }
+  .bridge-footer { display:flex; align-items:center; justify-content:space-between; margin-top:8px; }
+  .bridge-progress { font-size:12px; opacity:.8; }
+  .bridge-next { font-size:12px; padding:6px 10px; border-radius:8px; }
+  
+  .bridge-list { display: flex; flex-direction: column; gap: 6px; }
+  .bridge-item { display: flex; align-items: center; gap: 8px; }
+  
+  .bridge-tick {
+    border: 1px solid #ddd;
+    background: #fff;
+    border-radius: 6px;
+    padding: 2px 8px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .bridge-body { flex: 1; }
+  .bridge-title { font-size: 12px; line-height: 1.2; }
+  .bridge-meter {
+    position: relative;
+    height: 6px;
+    border-radius: 999px;
+    background: #eee;
+    margin-top: 4px;
+  }
+  .bridge-bar {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 0%;
+    border-radius: 999px;
+    background: var(--accent, #7c3aed);
+  }
+  .bridge-text { font-size: 10px; margin-left: 6px; color: #666; }
+  
+  .link-like {
+    background: none;
+    border: none;
+    padding: 0;
+    text-decoration: underline;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  
+  .text-xs { font-size: 12px; }
+  .text-muted { color: #666; }
+  .text-danger { color: #c0392b; }
+  
+  /* ====== 上部UI（新規ボタンなど） ====== */
+  .vision-topbar {
     display: flex;
     justify-content: flex-end;
     margin-bottom: 8px;
@@ -235,47 +180,16 @@
     cursor: pointer;
   }
   
-  /* 念のため：もし残っていたら列下の＋カードを非表示 */
+  /* 列末尾の＋カードが残っていた場合は非表示 */
   .vision-column .vision-add { display: none !important; }
   
-  /* ドラッグ移動が“効かない”原因の多くは pointer/touch の干渉 */
-.vision-drag-handle {
-    cursor: grab;
-    touch-action: none;     /* ← モバイルで掴みを優先 */
-    -ms-touch-action: none;
-  }
-  .vision-card.is-dragging {
-    opacity: .85;
-    box-shadow: 0 8px 20px rgba(0,0,0,.15);
-  }
+  /* ダブル定義のクリーンアップ（重複ガード） */
+  .stagecheck-actions { display: none; }
   
-  /* Droppable内が空のときでもドロップできるように高さを確保 */
-  .vision-col-body {
-    min-height: 16px;
-  }
-  
-  /* クリックとドラッグの誤爆を軽減（任意） */
-  .vision-card .vision-card-click {
-    user-select: none;
-    -webkit-user-select: none;
-  }
-  
-  .vision-drag-handle {
-    cursor: grab;
-    touch-action: none;         /* ← モバイルでのドラッグ優先 */
-    -ms-touch-action: none;
-  }
-  
-  .vision-card.is-dragging {
-    opacity: .9;
-    box-shadow: 0 8px 24px rgba(0,0,0,.18);
-  }
-  
-  .vision-col-body { min-height: 16px; }
-  
-  .vision-card .vision-title,
-  .vision-card .vision-card-bridge {
-    user-select: none;
-    -webkit-user-select: none;
-  }
-  
+  /* vision.css に追加 */
+.vision-edit-btn{
+  position:absolute; top:6px; right:6px;
+  font-size:12px; padding:2px 6px; border-radius:8px;
+  background:#fff; border:1px solid #ddd; cursor:pointer;
+}
+.vision-card{ position:relative; }

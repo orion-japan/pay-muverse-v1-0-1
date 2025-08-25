@@ -263,18 +263,20 @@ export default function DailyCheckPanel({
   }, [history, progress, today]);
 
   /* ===== required_days 保存 ===== */
-  async function saveRequiredDays(newDays: number) {
+// 保存（回数）
+async function saveRequiredDays(newDays: number) {
     try {
       setCriteriaSaving(true);
+  
+      // ★ これを追加（または既存の取得を流用）
       const { getAuth, signInAnonymously } = await import('firebase/auth');
       const auth = getAuth();
       if (!auth.currentUser) await signInAnonymously(auth);
       const token = await auth.currentUser!.getIdToken();
-
+  
       const res = await fetch('/api/vision-criteria', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        cache: 'no-store',
         body: JSON.stringify({
           vision_id: selectedVisionId,
           from: selectedStage,
@@ -282,11 +284,26 @@ export default function DailyCheckPanel({
           checklist: [],
         }),
       });
-      const json = await res.json().catch(() => ({} as any));
+      // …以下は既存のまま…
+  
+      const json = await res.json();
       if (!res.ok) throw new Error(json?.error || 'failed');
+  
+      // ← 既存
       setCriteriaDays(json?.required_days ?? newDays);
       setCriteriaOpen(false);
       showToast('✔ 回数を更新しました');
+  
+      // ★ 追加：カード側（StageChecklistInline）へ即時反映イベントを送る
+      window.dispatchEvent(
+        new CustomEvent('vision:criteria-updated', {
+          detail: {
+            visionId: selectedVisionId,
+            from: selectedStage,
+            required_days: json?.required_days ?? newDays,
+          },
+        })
+      );
     } catch (e) {
       console.error(e);
       showToast('回数の更新に失敗しました');
@@ -294,6 +311,7 @@ export default function DailyCheckPanel({
       setCriteriaSaving(false);
     }
   }
+  
 
   /* ===== ここから JSX（構造は元のまま） ===== */
   return (

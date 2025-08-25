@@ -12,7 +12,7 @@ type Props = {
 type Criteria = {
   id: string;
   required_days: number;
-  achieved_days: number;
+  achieved_days: number;   // ← 表示用（＝APIの done_days）
 };
 
 export default function StageChecklistInline({ visionId, from, showActions = false }: Props) {
@@ -29,21 +29,27 @@ export default function StageChecklistInline({ visionId, from, showActions = fal
       if (!auth.currentUser) await signInAnonymously(auth);
       const token = await auth.currentUser!.getIdToken();
 
-      const res = await fetch(`/api/vision-criteria?vision_id=${encodeURIComponent(visionId)}&from=${from}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch(
+        `/api/vision-criteria?vision_id=${encodeURIComponent(visionId)}&from=${from}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
       if (!res.ok) {
         const t = await res.text();
         throw new Error(t || `status ${res.status}`);
       }
       const data = await res.json();
+
       if (!data) {
         setCriteria(null);
       } else {
+        // APIのdone_daysを優先、無ければ後方互換（progress?.streak等）
+        const achieved =
+          Number(data?.done_days ?? data?.achieved_days ?? data?.progress?.streak ?? 0);
+
         setCriteria({
-          id: data.id,
-          required_days: data.required_days ?? 3,
-          achieved_days: data.progress?.streak ?? 0,
+          id: data.id ?? `${visionId}:${from}`,
+          required_days: Number(data.required_days ?? 3),
+          achieved_days: achieved,
         });
       }
     } catch (e: any) {
@@ -55,6 +61,23 @@ export default function StageChecklistInline({ visionId, from, showActions = fal
   }
 
   useEffect(() => { fetchCriteria(); }, [visionId, from]);
+
+  // DailyCheckPanel で回数を保存した直後に即時反映するためのイベントフック
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const d = (e as CustomEvent).detail as {
+        visionId: string; from: Stage; required_days: number;
+      };
+      if (d?.visionId === visionId && d?.from === from) {
+        setCriteria(prev => prev
+          ? { ...prev, required_days: d.required_days }
+          : { id: `${visionId}:${from}`, required_days: d.required_days, achieved_days: 0 }
+        );
+      }
+    };
+    window.addEventListener('vision:criteria-updated', handler as EventListener);
+    return () => window.removeEventListener('vision:criteria-updated', handler as EventListener);
+  }, [visionId, from]);
 
   async function createDefault() {
     try {
