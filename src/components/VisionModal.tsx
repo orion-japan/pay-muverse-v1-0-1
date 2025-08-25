@@ -19,17 +19,13 @@ type VisionModalProps = {
 
 const STATUS_LIST: Status[] = ['検討中','実践中','迷走中','順調','ラストスパート','達成','破棄'];
 
-/* =========================
-   橋渡しチェック：デフォルト生成
-   ========================= */
+/* ==== 橋渡しチェック デフォルト ==== */
 function nextStageOf(s: Stage): Stage | null {
   const order: Stage[] = ['S', 'F', 'R', 'C', 'I'];
   const i = order.indexOf(s);
   return i >= 0 && i < order.length - 1 ? order[i + 1] : null;
 }
-
 function defaultCriteria(from: Stage, to: Stage, vision_id: string) {
-  // 最小のデフォルト（あとで編集可能）
   if (from === 'S' && to === 'F') {
     return [
       { vision_id, from_stage: 'S', to_stage: 'F', title: '意図メモを3つ書く', required_days: 3, required: true, order_index: 0 },
@@ -55,40 +51,32 @@ function defaultCriteria(from: Stage, to: Stage, vision_id: string) {
   }
   return [];
 }
-
 async function seedStageCriteria(vision_id: string, from_stage: Stage, token: string) {
   const to = nextStageOf(from_stage);
-  if (!to) return; // I の場合は何もしない
+  if (!to) return;
   const bulk = defaultCriteria(from_stage, to, vision_id);
   if (bulk.length === 0) return;
-
   const res = await fetch('/api/vision-criteria', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ bulk }), // ← 仕様どおり bulk 一括投入
+    body: JSON.stringify({ bulk }),
   });
-
   if (!res.ok) {
     const t = await res.text().catch(() => '');
-    // ここは致命ではないのでログのみ（保存自体は成功扱い）
     console.warn('seedStageCriteria failed:', res.status, t);
   }
 }
 
-/* =========================
-   VisionModal 本体
-   ========================= */
 export default function VisionModal({
   isOpen, defaultPhase, defaultStage, userCode, initial, onClose, onSaved,
 }: VisionModalProps) {
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
-  const [loggedIn, setLoggedIn] = useState(false);
 
   const [vision, setVision] = useState<Vision>(() => ({
     phase: initial?.phase ?? defaultPhase,
-    stage: initial?.stage ?? defaultStage, // ← 表示上はそのまま。保存時に新規は 'S' に矯正
+    stage: initial?.stage ?? defaultStage, // 表示上は維持。保存時に新規は 'S' に矯正
     title: initial?.title ?? '',
     detail: initial?.detail ?? '',
     intention: initial?.intention ?? '',
@@ -103,7 +91,7 @@ export default function VisionModal({
 
   useEffect(() => {
     const auth = getAuth();
-    return onAuthStateChanged(auth, (u) => { setLoggedIn(!!u); setAuthReady(true); });
+    return onAuthStateChanged(auth, () => setAuthReady(true));
   }, []);
 
   useEffect(() => {
@@ -137,12 +125,10 @@ export default function VisionModal({
   const handleSave = async () => {
     try {
       const auth = getAuth();
-      if (!auth.currentUser) {
-        await signInAnonymously(auth); // 未ログインなら匿名で
-      }
+      if (!auth.currentUser) await signInAnonymously(auth);
       const token = await auth.currentUser!.getIdToken();
 
-      if (!vision.title || !vision.title.trim()) {
+      if (!vision.title?.trim()) {
         setErrorMsg('タイトルを入力してください');
         return;
       }
@@ -152,14 +138,12 @@ export default function VisionModal({
 
       const isUpdate = Boolean(vision.vision_id);
       const method = isUpdate ? 'PUT' : 'POST';
-
-      // ★ 新規は必ず S で保存（UIの defaultStage に依存しない）
-      const stageForSave: Stage = isUpdate ? (vision.stage as Stage) : 'S';
+      const stageForSave: Stage = isUpdate ? (vision.stage as Stage) : 'S'; // ★新規は必ずS
 
       const payload = {
         vision_id: vision.vision_id,
         phase: vision.phase,
-        stage: stageForSave, // ← ここで矯正
+        stage: stageForSave,
         title: vision.title,
         detail: vision.detail,
         intention: vision.intention,
@@ -167,7 +151,7 @@ export default function VisionModal({
         status: vision.status,
         summary: vision.summary,
         iboard_post_id: vision.iboard_post_id,
-        q_code: vision.q_code, // POSTで未指定ならAPI側が自動生成
+        q_code: vision.q_code,
       };
 
       const res = await fetch('/api/visions', {
@@ -176,26 +160,23 @@ export default function VisionModal({
         body: JSON.stringify(payload),
       });
 
-      const text = await res.text(); // ← エラーデバッグしやすく
-      const data = text ? JSON.parse(text).catch(() => null) : null;
-
-      if (!res.ok) {
-        throw new Error((data?.error as string) || text || '保存に失敗しました');
+      // 応答は必ず JSON を期待（API 側もそうなっている前提）
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) {
+        const msg = (data && (data.error as string)) || `保存に失敗しました (${res.status})`;
+        throw new Error(msg);
       }
 
-      const saved = data ?? {};
-      // ★ 新規作成時のみ：橋渡しチェックのデフォルトを投入（from = 'S'）
-      if (!isUpdate && saved?.vision_id) {
-        try {
-          await seedStageCriteria(String(saved.vision_id), 'S', token);
-        } catch (seedingErr) {
-          console.warn('seedStageCriteria warning:', seedingErr);
-        }
+      // 新規の場合は種(S)の基準をデフォ投入
+      if (!isUpdate && data?.vision_id) {
+        try { await seedStageCriteria(String(data.vision_id), 'S', token); }
+        catch (e) { console.warn('seed criteria warn:', e); }
       }
 
-      onSaved?.(saved);
+      onSaved?.(data); // ページ側でS列に追加＆選択
       onClose();
     } catch (e: any) {
+      console.error('Vision save error:', e);
       setErrorMsg(e?.message || 'エラーが発生しました');
     } finally {
       setSaving(false);

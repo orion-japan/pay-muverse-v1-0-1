@@ -238,3 +238,44 @@
   /* 念のため：もし残っていたら列下の＋カードを非表示 */
   .vision-column .vision-add { display: none !important; }
   
+  /* ドラッグ移動が“効かない”原因の多くは pointer/touch の干渉 */
+.vision-drag-handle {
+    cursor: grab;
+    touch-action: none;     /* ← モバイルで掴みを優先 */
+    -ms-touch-action: none;
+  }
+  .vision-card.is-dragging {
+    opacity: .85;
+    box-shadow: 0 8px 20px rgba(0,0,0,.15);
+  }
+  
+  /* Droppable内が空のときでもドロップできるように高さを確保 */
+  .vision-col-body {
+    min-height: 16px;
+  }
+  
+  /* クリックとドラッグの誤爆を軽減（任意） */
+  .vision-card .vision-card-click {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  
+  .vision-drag-handle {
+    cursor: grab;
+    touch-action: none;         /* ← モバイルでのドラッグ優先 */
+    -ms-touch-action: none;
+  }
+  
+  .vision-card.is-dragging {
+    opacity: .9;
+    box-shadow: 0 8px 24px rgba(0,0,0,.18);
+  }
+  
+  .vision-col-body { min-height: 16px; }
+  
+  .vision-card .vision-title,
+  .vision-card .vision-card-bridge {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  

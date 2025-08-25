@@ -1,11 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import dayjs from 'dayjs';
 
 type Props = {
   userCode: string;
   selectedVisionId: string;
+  selectedStage: 'S'|'F'|'R'|'C'|'I';
+  selectedVisionTitle?: string;
   className?: string;
 };
 
@@ -16,7 +18,14 @@ type HistoryRow = {
   resonance_shared?: boolean | null;
 };
 
-export default function DailyCheckPanel({ userCode, selectedVisionId, className }: Props) {
+export default function DailyCheckPanel({
+  userCode,
+  selectedVisionId,
+  selectedStage,
+  selectedVisionTitle,
+  className
+}: Props) {
+  /* ===== 状態 ===== */
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [visionImaged, setVisionImaged] = useState(false);
@@ -26,11 +35,16 @@ export default function DailyCheckPanel({ userCode, selectedVisionId, className 
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [locked, setLocked] = useState(false);
-  const LOCK_ON_SAVE_ALWAYS = true;
-  const [history, setHistory] = useState<HistoryRow[]>([]);
 
+  const [history, setHistory] = useState<HistoryRow[]>([]);
+  const [criteriaDays, setCriteriaDays] = useState<number | null>(null);
+  const [criteriaOpen, setCriteriaOpen] = useState(false);
+  const [criteriaSaving, setCriteriaSaving] = useState(false);
+
+  /* ===== 定数 ===== */
   const today = useMemo(() => dayjs().format('YYYY-MM-DD'), []);
 
+  /* ===== 進捗 ===== */
   const progress = useMemo(() => {
     let p = 0;
     if (visionImaged) p += 25;
@@ -40,58 +54,143 @@ export default function DailyCheckPanel({ userCode, selectedVisionId, className 
     return p;
   }, [visionImaged, resonanceShared, statusText, diaryText]);
 
-  // 当日分フェッチ
-  useEffect(() => {
-    if (!userCode || !selectedVisionId) return;
-    const run = async () => {
-      setLoading(true);
-      try {
-        const url = `/api/daily-checks?user_code=${encodeURIComponent(userCode)}&vision_id=${encodeURIComponent(selectedVisionId)}&date=${today}`;
-        const res = await fetch(url);
-        const json = await res.json();
-        const d = json?.data;
-        setVisionImaged(!!d?.vision_imaged);
-        setResonanceShared(!!d?.resonance_shared);
-        setStatusText(d?.status_text ?? '');
-        setDiaryText(d?.diary_text ?? '');
-        setSavedAt(d ? dayjs(d.updated_at).format('HH:mm') : null);
-        setLocked((d?.progress ?? 0) >= 100);
-      } finally {
-        setLoading(false);
-      }
-    };
-    run();
-  }, [userCode, selectedVisionId, today]);
+  /* ===== 上書き防止フラグ =====
+     - ユーザーが編集した瞬間に dirty を立て、最終編集時刻を保持
+     - サーバーの updated_at がこれより古ければ「適用しない」 */
+  const dirtyRef = useRef(false);
+  const lastLocalAtRef = useRef<number>(0);
 
-  // 履歴フェッチ
+  function markDirty() {
+    dirtyRef.current = true;
+    lastLocalAtRef.current = Date.now();
+  }
+
+  /* ===== today フェッチ（レース防止 + デバウンス） ===== */
+  const todaySeqRef = useRef(0);
+  const todayDebounceRef = useRef<number | null>(null);
   useEffect(() => {
     if (!userCode || !selectedVisionId) return;
-    const run = async () => {
-      const url = `/api/daily-checks?history=1&days=14&user_code=${encodeURIComponent(userCode)}&vision_id=${encodeURIComponent(selectedVisionId)}`;
-      try {
-        const res = await fetch(url);
-        if (!res.ok) { setHistory([]); return; }
-        const json = await res.json();
-        setHistory(Array.isArray(json?.data) ? (json.data as HistoryRow[]) : []);
-      } catch {
-        setHistory([]);
-      }
+    if (todayDebounceRef.current) clearTimeout(todayDebounceRef.current);
+
+    todayDebounceRef.current = window.setTimeout(() => {
+      const seq = ++todaySeqRef.current;
+      const ac = new AbortController();
+
+      (async () => {
+        setLoading(true);
+        try {
+          const url = `/api/daily-checks?user_code=${encodeURIComponent(userCode)}&vision_id=${encodeURIComponent(selectedVisionId)}&date=${today}`;
+          const res = await fetch(url, { cache: 'no-store', signal: ac.signal });
+          const json = await res.json().catch(() => ({} as any));
+          if (!res.ok) throw new Error(json?.error || String(res.status));
+
+          // 最新でなければ破棄
+          if (seq !== todaySeqRef.current) return;
+
+          const d = json?.data;
+          const serverAt = d?.updated_at ? Date.parse(d.updated_at) : 0;
+
+          // ★★ ここが核心：ローカルの方が新しければサーバー値で上書きしない
+          if (dirtyRef.current && lastLocalAtRef.current > serverAt) {
+            // ただし、サーバー側が100%になっていたらロックだけは反映
+            const p = typeof d?.progress === 'number' ? d.progress : 0;
+            if (p >= 100) setLocked(true);
+          } else {
+            setVisionImaged(!!d?.vision_imaged);
+            setResonanceShared(!!d?.resonance_shared);
+            setStatusText(d?.status_text ?? '');
+            setDiaryText(d?.diary_text ?? '');
+            setSavedAt(d && d.updated_at ? dayjs(d.updated_at).format('HH:mm') : null);
+            setLocked((d?.progress ?? 0) >= 100);
+            dirtyRef.current = false;                 // サーバーと同期できたので dirty を下ろす
+            lastLocalAtRef.current = serverAt || Date.now();
+          }
+        } catch {
+          /* noop */
+        } finally {
+          setLoading(false);
+        }
+      })();
+
+      return () => ac.abort();
+    }, 140);
+
+    return () => {
+      if (todayDebounceRef.current) clearTimeout(todayDebounceRef.current);
     };
-    run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userCode, selectedVisionId]);
+
+  /* ===== history フェッチ（保存完了時にも更新） ===== */
+  const histSeqRef = useRef(0);
+  const histDebounceRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!userCode || !selectedVisionId) return;
+    if (histDebounceRef.current) clearTimeout(histDebounceRef.current);
+
+    histDebounceRef.current = window.setTimeout(() => {
+      const seq = ++histSeqRef.current;
+      const ac = new AbortController();
+
+      (async () => {
+        try {
+          const url = `/api/daily-checks?history=1&days=14&user_code=${encodeURIComponent(userCode)}&vision_id=${encodeURIComponent(selectedVisionId)}`;
+          const res = await fetch(url, { cache: 'no-store', signal: ac.signal });
+          if (!res.ok) { if (seq === histSeqRef.current) setHistory([]); return; }
+          const json = await res.json().catch(() => ({} as any));
+          if (seq !== histSeqRef.current) return;
+          setHistory(Array.isArray(json?.data) ? (json.data as HistoryRow[]) : []);
+        } catch {
+          setHistory([]);
+        }
+      })();
+
+      return () => ac.abort();
+    }, 140);
+
+    return () => {
+      if (histDebounceRef.current) clearTimeout(histDebounceRef.current);
+    };
   }, [userCode, selectedVisionId, savedAt]);
 
-  // 自動保存（1.2秒）※ロック中は発火しない
+  /* ===== ステージの required_days ===== */
+  useEffect(() => {
+    let abort = false;
+    (async () => {
+      try {
+        const { getAuth, signInAnonymously } = await import('firebase/auth');
+        const auth = getAuth();
+        if (!auth.currentUser) await signInAnonymously(auth);
+        const token = await auth.currentUser!.getIdToken();
+
+        const res = await fetch(
+          `/api/vision-criteria?vision_id=${encodeURIComponent(selectedVisionId)}&from=${selectedStage}`,
+          { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' }
+        );
+        if (!res.ok) { if (!abort) setCriteriaDays(null); return; }
+        const data = await res.json().catch(() => ({} as any));
+        if (!abort) setCriteriaDays(data?.required_days ?? null);
+      } catch {
+        if (!abort) setCriteriaDays(null);
+      }
+    })();
+    return () => { abort = true; };
+  }, [selectedVisionId, selectedStage]);
+
+  /* ===== 自動保存（1.2秒）※ロック中は発火しない ===== */
   useEffect(() => {
     if (!userCode || !selectedVisionId || locked) return;
     const t = setTimeout(() => { void save(); }, 1200);
     return () => clearTimeout(t);
   }, [visionImaged, resonanceShared, statusText, diaryText, userCode, selectedVisionId, locked]);
 
+  /* ===== UI ユーティリティ ===== */
   function showToast(msg: string) {
     setToast(msg);
     setTimeout(() => setToast(null), 1200);
   }
 
+  /* ===== 保存 ===== */
   async function save() {
     if (saving || !userCode || !selectedVisionId) return;
     setSaving(true);
@@ -99,6 +198,7 @@ export default function DailyCheckPanel({ userCode, selectedVisionId, className 
       const res = await fetch('/api/daily-checks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
         body: JSON.stringify({
           user_code: userCode,
           vision_id: selectedVisionId,
@@ -108,14 +208,26 @@ export default function DailyCheckPanel({ userCode, selectedVisionId, className 
           status_text: statusText,
           diary_text: diaryText,
           progress,
-          q_code: buildQCode({ userCode, visionId: selectedVisionId, date: today, visionImaged, resonanceShared, progress }),
+          q_code: buildQCode({
+            userCode, visionId: selectedVisionId, date: today,
+            visionImaged, resonanceShared, progress
+          }),
         }),
       });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({} as any));
       if (!res.ok) throw new Error(json?.error || 'save failed');
-      setSavedAt(dayjs(json.data.updated_at).format('HH:mm'));
+
+      const updatedAtISO: string | null = json?.data?.updated_at || null;
+      setSavedAt(updatedAtISO ? dayjs(updatedAtISO).format('HH:mm') : dayjs().format('HH:mm'));
+
+      // 保存成功 → サーバーの方が新しいので dirty を下ろす
+      dirtyRef.current = false;
+      lastLocalAtRef.current = updatedAtISO ? Date.parse(updatedAtISO) : Date.now();
+
+      // ロックは「本当に 100% のときだけ」
+      if (progress >= 100) setLocked(true);
+
       showToast('✔ 保存しました');
-      if (progress >= 0 || LOCK_ON_SAVE_ALWAYS) setLocked(true);
     } catch (e) {
       console.error(e);
       showToast('保存に失敗しました');
@@ -125,6 +237,7 @@ export default function DailyCheckPanel({ userCode, selectedVisionId, className 
   }
 
   function unlockForEdit() {
+    // 当日だけ再編集可にする想定
     if (dayjs().format('YYYY-MM-DD') === today) setLocked(false);
   }
 
@@ -134,8 +247,10 @@ export default function DailyCheckPanel({ userCode, selectedVisionId, className 
     setStatusText('');
     setDiaryText('');
     setLocked(false);
+    markDirty();
   }
 
+  /* ===== 連続日数 ===== */
   const streak = useMemo(() => {
     let s = 0;
     const map = new Map(history.map(h => [h.check_date, (h.progress ?? 0) > 0]));
@@ -147,18 +262,88 @@ export default function DailyCheckPanel({ userCode, selectedVisionId, className 
     return s;
   }, [history, progress, today]);
 
+  /* ===== required_days 保存 ===== */
+  async function saveRequiredDays(newDays: number) {
+    try {
+      setCriteriaSaving(true);
+      const { getAuth, signInAnonymously } = await import('firebase/auth');
+      const auth = getAuth();
+      if (!auth.currentUser) await signInAnonymously(auth);
+      const token = await auth.currentUser!.getIdToken();
+
+      const res = await fetch('/api/vision-criteria', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+        body: JSON.stringify({
+          vision_id: selectedVisionId,
+          from: selectedStage,
+          required_days: newDays,
+          checklist: [],
+        }),
+      });
+      const json = await res.json().catch(() => ({} as any));
+      if (!res.ok) throw new Error(json?.error || 'failed');
+      setCriteriaDays(json?.required_days ?? newDays);
+      setCriteriaOpen(false);
+      showToast('✔ 回数を更新しました');
+    } catch (e) {
+      console.error(e);
+      showToast('回数の更新に失敗しました');
+    } finally {
+      setCriteriaSaving(false);
+    }
+  }
+
+  /* ===== ここから JSX（構造は元のまま） ===== */
   return (
     <section className={`daily-check-panel ${className || ''}`}>
       <header className="dcp-head">
         <div>
           <strong>1日の実践チェック</strong>
           <span className="dcp-date">（{today}）</span>
+          {selectedVisionTitle && <span className="dcp-vision-title"> / {selectedVisionTitle}</span>}
         </div>
         <div className="dcp-status">
           {loading ? '読み込み中…' : savedAt ? `保存: ${savedAt}` : '新規'}
           {saving && ' / 保存中…'}
+          <button
+            className="dcp-criteria-btn"
+            onClick={() => setCriteriaOpen(v => !v)}
+            title="このステージで何回やるか設定"
+          >
+            回数設定
+          </button>
         </div>
       </header>
+
+      {criteriaOpen && (
+        <div className="dcp-criteria-box">
+          <div className="dcp-criteria-row">
+            <span>このステージの目安回数：</span>
+            <input
+              type="number"
+              min={0}
+              step={1}
+              defaultValue={criteriaDays ?? 3}
+              id="dcp-criteria-input"
+              className="dcp-criteria-input"
+            />
+            <button
+              className="dcp-criteria-save"
+              disabled={criteriaSaving}
+              onClick={() => {
+                const el = document.getElementById('dcp-criteria-input') as HTMLInputElement | null;
+                const v = el ? Math.max(0, Math.floor(Number(el.value || 0))) : 0;
+                void saveRequiredDays(v);
+              }}
+            >
+              {criteriaSaving ? '保存中…' : '保存'}
+            </button>
+            {criteriaDays != null && <span className="dcp-criteria-current">現在: {criteriaDays} 回</span>}
+          </div>
+        </div>
+      )}
 
       <div className="dcp-progress">
         <div className="dcp-progress-bar" style={{ width: `${progress}%` }} />
@@ -169,23 +354,43 @@ export default function DailyCheckPanel({ userCode, selectedVisionId, className 
         <>
           <div className="dcp-row">
             <label className="dcp-check">
-              <input type="checkbox" checked={visionImaged} onChange={(e) => setVisionImaged(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={visionImaged}
+                onChange={(e) => { setVisionImaged(e.target.checked); markDirty(); }}
+              />
               Vision：ビジョンについてイメージをした
             </label>
             <label className="dcp-check">
-              <input type="checkbox" checked={resonanceShared} onChange={(e) => setResonanceShared(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={resonanceShared}
+                onChange={(e) => { setResonanceShared(e.target.checked); markDirty(); }}
+              />
               共鳴：誰かに伝えた／投稿した
             </label>
           </div>
 
           <div className="dcp-row">
             <label className="dcp-label">状況・気持ち</label>
-            <textarea className="dcp-textarea" placeholder="今日の状況や気持ちを記録…" value={statusText} onChange={(e) => setStatusText(e.target.value)} rows={3} />
+            <textarea
+              className="dcp-textarea"
+              placeholder="今日の状況や気持ちを記録…"
+              value={statusText}
+              onChange={(e) => { setStatusText(e.target.value); markDirty(); }}
+              rows={3}
+            />
           </div>
 
           <div className="dcp-row">
             <label className="dcp-label">ひらめき・日記</label>
-            <textarea className="dcp-textarea" placeholder="浮かんだアイデアや出来事…" value={diaryText} onChange={(e) => setDiaryText(e.target.value)} rows={4} />
+            <textarea
+              className="dcp-textarea"
+              placeholder="浮かんだアイデアや出来事…"
+              value={diaryText}
+              onChange={(e) => { setDiaryText(e.target.value); markDirty(); }}
+              rows={4}
+            />
           </div>
 
           <div className="dcp-actions">
@@ -236,8 +441,10 @@ export default function DailyCheckPanel({ userCode, selectedVisionId, className 
   );
 }
 
+/* ===== 補助 ===== */
+
 async function copyFromYesterday(this: void) {
-  // この関数はコンポーネント内で参照されるので、上に移してもOK
+  // 必要に応じて実装
 }
 
 function buildDays(n: number) {
