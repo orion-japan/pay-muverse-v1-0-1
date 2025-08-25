@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import payjp from 'payjp';
-import { JWT } from 'google-auth-library';
+// ❌ import { JWT } from 'google-auth-library'; // ← 不要なので削除
 import { google } from 'googleapis';
 import { PLAN_ID_MAP } from '@/lib/constants/planIdMap'; // ← 追加
+
+// 重要：googleapis を使うため Node.js ランタイムを明示
+export const runtime = 'nodejs';
 
 // Supabase 初期化
 const supabase = createClient(
@@ -88,11 +91,19 @@ export async function POST(req: NextRequest) {
 
     // Sheets ログ
     try {
-      const auth = new JWT({
-        email: process.env.GOOGLE_CLIENT_EMAIL!,
-        key: process.env.GOOGLE_PRIVATE_KEY!.replace(/\\n/g, '\n'),
+      // ✅ GoogleAuth を利用（JWT 直指定はやめる）
+      const clientEmail = process.env.GOOGLE_CLIENT_EMAIL!;
+      const privateKey = process.env.GOOGLE_PRIVATE_KEY!.replace(/\\n/g, '\n');
+
+      const auth = new google.auth.GoogleAuth({
+        credentials: {
+          client_email: clientEmail,
+          private_key: privateKey,
+        },
         scopes: ['https://www.googleapis.com/auth/spreadsheets'],
       });
+
+      // GoogleAuth をそのまま渡して OK（型エラー解消）
       const sheets = google.sheets({ version: 'v4', auth });
 
       const row = [
