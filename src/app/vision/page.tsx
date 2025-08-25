@@ -262,61 +262,53 @@ export default function VisionPage() {
       <DragDropContext onDragStart={onDragStart} onDragEnd={onDragEnd}>
         <div className="vision-board">
           {STAGES.map(stage => (
-            <Droppable droppableId={stage.key} key={stage.key} direction="vertical">
-              {provided => (
-                <div className="vision-column" ref={provided.innerRef} {...provided.droppableProps}>
+            <Droppable droppableId={stage.key} key={stage.key}>
+              {(dropProvided) => (
+                <div className="vision-column">
                   <div className="vision-col-header">{stage.icon} {stage.label}</div>
-
-                  <div className="vision-col-body">
-                    {(Array.isArray(visions) ? visions : [])
+                  <div
+                    ref={dropProvided.innerRef}
+                    {...dropProvided.droppableProps}
+                    className="vision-col-body"
+                  >
+                    {visions
                       .filter(v => v.stage === stage.key)
-                      .map((v, idx) => (
-                        <Draggable draggableId={v.vision_id!} index={idx} key={v.vision_id}>
-                          {(prov, snapshot) => (
+                      .map((vision, index) => (
+                        <Draggable
+                          key={vision.vision_id}
+                          draggableId={vision.vision_id}
+                          index={index}
+                        >
+                          {(dragProvided, snapshot) => (
                             <div
-                              className={`vision-card ${snapshot.isDragging ? 'is-dragging' : ''} ${selectedVisionId === v.vision_id ? 'is-selected' : ''}`}
-                              ref={prov.innerRef}
-                              {...prov.draggableProps}
-                              /* ★ これが無いとドラッグで動かない環境があります */
-                              style={prov.draggableProps.style as React.CSSProperties}
+                              ref={dragProvided.innerRef}
+                              {...dragProvided.draggableProps}
+                              {...dragProvided.dragHandleProps}
+                              className={`vision-card ${snapshot.isDragging ? 'is-dragging' : ''} ${selectedVisionId === vision.vision_id ? 'is-selected' : ''}`}
                               onClick={() => {
-                                persistSelected(v.vision_id!);
-                                setSelectedVisionId(v.vision_id!);
+                                persistSelected(vision.vision_id);
+                                setSelectedVisionId(vision.vision_id);
                               }}
                             >
-                              {/* ドラッグハンドル */}
-                              <button
-                                className="vision-drag-handle"
-                                {...prov.dragHandleProps}    // ★ 掴む場所
-                                aria-label="ドラッグして並び替え"
-                                title="ドラッグ"
-                                onClick={(e) => e.stopPropagation()}
-                                onPointerDown={(e) => e.stopPropagation()}
-                              >
-                                ⠿
-                              </button>
+                              {/* タイトルやサムネ（必要に応じて） */}
+                              {vision.iboard_thumb && (
+                                <img src={vision.iboard_thumb as any} alt="" className="vision-thumb" />
+                              )}
+                              <div className="vision-title">{vision.title}</div>
 
-                              {/* 編集（…） */}
-                              <button
-                                className="vision-edit-kebab"
-                                onClick={(e) => { e.stopPropagation(); setEditing(v); }}
-                                aria-label="編集"
-                                title="編集"
-                              >⋯</button>
-
-                              {/* サムネ＋タイトル */}
-                              {v.iboard_thumb && <img src={v.iboard_thumb} alt="" className="vision-thumb" />}
-                              <div className="vision-title">{v.title}</div>
-
-                              {/* 下段：橋渡しチェック（クリックを親に伝播させない） */}
+                              {/* 下段：橋渡しチェック（クリック伝播を止める） */}
                               <div className="vision-card-bridge" onClick={(e) => e.stopPropagation()}>
-                                <StageChecklistInline visionId={v.vision_id!} from={v.stage} showActions={false} />
+                                <StageChecklistInline
+                                  visionId={vision.vision_id}
+                                  from={vision.stage}
+                                  showActions={false}
+                                />
                               </div>
                             </div>
                           )}
                         </Draggable>
                       ))}
-                    {provided.placeholder}
+                    {dropProvided.placeholder}
                   </div>
                 </div>
               )}
@@ -325,7 +317,7 @@ export default function VisionPage() {
         </div>
       </DragDropContext>
 
-      {/* 実践チェック（デバッグ props は渡さない） */}
+      {/* 実践チェック */}
       <div className="daily-check-frame">
         {userCode && selectedVision ? (
           <DailyCheckPanel
