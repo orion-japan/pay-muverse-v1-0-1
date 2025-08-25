@@ -2,17 +2,18 @@
 import { initializeApp, getApps, cert, type ServiceAccount } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 
+/** .env に入れた秘密鍵の改行(\n)復元＋両端の余計なダブルクォート除去 */
 function cleanupPrivateKey(v: string) {
-  // .env での改行(\n)復元＋余計な両端のダブルクォート除去
   return v.replace(/\\n/g, '\n').replace(/^\s*"|"\s*$/g, '');
 }
 
+/** 環境変数から ServiceAccount を生成（3通りの入力形式に対応） */
 function resolveCredentials(): ServiceAccount {
   // projectId は公開可なので NEXT_PUBLIC/FIREBASE のどちらでも受ける
   const projectId =
     process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || '';
 
-  // ① 推奨: 3変数直指定
+  // ① 推奨: 個別3変数（.env で直接指定）
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL || '';
   const privateKeyRaw = process.env.FIREBASE_PRIVATE_KEY || '';
   if (projectId && clientEmail && privateKeyRaw) {
@@ -60,7 +61,7 @@ function resolveCredentials(): ServiceAccount {
   );
 }
 
-// ここで一度だけ Admin を初期化
+// ---- 初期化（1回だけ）----
 if (!getApps().length) {
   const cred = resolveCredentials();
   initializeApp({ credential: cert(cred) });

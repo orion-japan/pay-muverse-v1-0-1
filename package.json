@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@hello-pangea/dnd": "^18.0.1",
     "@radix-ui/react-slot": "^1.2.3",
     "@supabase/auth-helpers-nextjs": "^0.10.0",
     "@supabase/ssr": "^0.6.1",
@@ -28,8 +29,8 @@
     "nodemailer": "^7.0.5",
     "payjp": "^2.3.0",
     "qrcode": "^1.5.4",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "tinify": "^1.8.1",
     "web-push": "^3.6.7"
   },
@@ -37,11 +38,13 @@
     "@eslint/eslintrc": "^3",
     "@types/cookie": "^0.6.0",
     "@types/crypto-js": "^4.2.2",
-    "@types/react": "19.1.8",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.7",
     "@types/web-push": "^3.6.4",
     "eslint": "^9",
     "eslint-config-next": "15.3.4",
-    "tsx": "^4.20.4"
+    "tsx": "^4.20.4",
+    "typescript": "^5.9.2"
   },
   "compress-images": "tsx src/compressPublicImages.ts"
 }

@@ -6,6 +6,8 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
 import './talk.css';
 
+const SUPABASE_PUBLIC_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+
 type Plan = 'free' | 'regular' | 'premium' | 'master' | 'admin';
 type FriendLevel = 'F' | 'R' | 'C' | 'I';
 
@@ -21,16 +23,22 @@ type FriendItem = {
 
 const threadIdOf = (me: string, friend: string) => [me, friend].sort().join('__');
 
-/** 画像URLを解決（無効なら /avatar.png） */
 function resolveAvatarUrl(url: string | null): string {
   const u = (url ?? '').trim();
   if (!u) return '/avatar.png';
-  if (u.startsWith('/')) return u;
   if (/^https?:\/\//i.test(u) || /^data:image\//i.test(u)) return u;
+
+  // Supabase Storage (avatars バケット) に対応
+  if (u.startsWith('avatars/')) {
+    const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    return `${base}/storage/v1/object/public/${u}`;
+  }
+
   return '/avatar.png';
 }
 
-/** 相互F以上の友だち（profiles.name / avatar_url を含む） */
+
+
 async function fetchMutualFriends(myCode: string): Promise<FriendItem[]> {
   const { data, error } = await supabase.rpc('get_talk_friends_from_follows', {
     p_my_code: myCode,
@@ -47,15 +55,12 @@ async function fetchMutualFriends(myCode: string): Promise<FriendItem[]> {
   }));
 }
 
-/** chats から各相手との最新メッセージ＆未読件数を取得（スキーマ：receiver_code / read_at） */
 async function hydrateThreadsMeta(
   myCode: string,
   friends: FriendItem[],
 ): Promise<Record<string, Pick<FriendItem, 'lastMessageAt' | 'lastMessageText' | 'unreadCount'>>> {
   if (!friends.length) return {};
   const threadIds = friends.map((f) => threadIdOf(myCode, f.user_code));
-
-  // thread_id 生成列がある前提（なければ DB 追加済みか確認）
   const { data, error } = await supabase
     .from('chats')
     .select('thread_id, sender_code, receiver_code, message, created_at, read_at')
@@ -68,10 +73,7 @@ async function hydrateThreadsMeta(
     return {};
   }
 
-  const map: Record<
-    string,
-    { lastAt?: string; lastText?: string; unread: number }
-  > = {};
+  const map: Record<string, { lastAt?: string; lastText?: string; unread: number }> = {};
 
   for (const row of (data ?? []) as any[]) {
     const tid: string = row.thread_id;
@@ -80,21 +82,16 @@ async function hydrateThreadsMeta(
     const ts: string | null = row.created_at ?? null;
 
     if (!map[tid]) map[tid] = { lastAt: undefined, lastText: undefined, unread: 0 };
-
-    // 最新メッセージ
     if (ts && (!map[tid].lastAt || ts > (map[tid].lastAt as string))) {
       map[tid].lastAt = ts;
       map[tid].lastText = body ?? '';
     }
-
-    // 未読（自分宛 && read_at が NULL）
     if (recipient === myCode && row.read_at == null) {
       map[tid].unread += 1;
     }
   }
 
-  const out: Record<string, Pick<FriendItem, 'lastMessageAt' | 'lastMessageText' | 'unreadCount'>> =
-    {};
+  const out: Record<string, Pick<FriendItem, 'lastMessageAt' | 'lastMessageText' | 'unreadCount'>> = {};
   for (const f of friends) {
     const tid = threadIdOf(myCode, f.user_code);
     const r = map[tid];
@@ -107,7 +104,6 @@ async function hydrateThreadsMeta(
   return out;
 }
 
-/** クリックログ（失敗しても遷移は継続） */
 async function logOpenFTalk(myCode: string, friendCode: string) {
   try {
     const { error } = await supabase.from('mu_logs').insert([
@@ -137,7 +133,6 @@ export default function TalkPage() {
 
   const blocked = planStatus === 'free';
 
-  // 友だちリスト取得＋メタ付与（最新/未読）
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -153,7 +148,7 @@ export default function TalkPage() {
         const sorted = enriched.sort((a, b) => {
           const ta = a.lastMessageAt ? Date.parse(a.lastMessageAt) : 0;
           const tb = b.lastMessageAt ? Date.parse(b.lastMessageAt) : 0;
-          if (tb !== ta) return tb - ta; // 最近の投稿が上
+          if (tb !== ta) return tb - ta;
           return (a.name ?? '').localeCompare(b.name ?? '', 'ja');
         });
         if (mounted) setFriends(sorted);
@@ -168,7 +163,6 @@ export default function TalkPage() {
     };
   }, [userCode]);
 
-  // 検索
   const filtered = useMemo(() => {
     if (!q.trim()) return friends;
     const key = q.toLowerCase();
@@ -181,7 +175,6 @@ export default function TalkPage() {
 
   const goFTalk = async (friend: FriendItem) => {
     if (!userCode) return;
-    // ログは任意（下の②参照）
     await logOpenFTalk(userCode, friend.user_code);
     const threadId = threadIdOf(userCode, friend.user_code);
     router.push(`/talk/${threadId}`);
@@ -242,7 +235,6 @@ export default function TalkPage() {
 
               <div className="friend-main">
                 <div className="friend-name">
-                  {/* 名前押しでプロフィールへ */}
                   <button
                     className="linklike"
                     onClick={() => goProfile(f)}

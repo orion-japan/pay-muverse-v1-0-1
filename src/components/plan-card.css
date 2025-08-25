@@ -386,3 +386,15 @@
     box-shadow: none;
   }
   
+  /* 上のカードとボタン行の間を空ける */
+.modal-content {
+  margin-bottom: 16px; /* お好みで 12~24px */
+}
+
+/* ボタン行の見栄えも整える場合 */
+.modal-buttons {
+  margin-top: 16px;         /* 二重で入れてもOK。片方だけでも可 */
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

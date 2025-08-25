@@ -33,7 +33,7 @@ export default function PlanSelectModal({
       isOpen={visible}
       title={
         <>
-          ⚠️ まだ利用可能なクレジットが
+          ⚠️ まだ利用可能な<br />クレジットが
           <br />
           残っています
         </>
@@ -44,12 +44,12 @@ export default function PlanSelectModal({
       cancelLabel="キャンセル"
     >
       <p className="modal-message">
-        現在のクレジット: <strong>{credit}</strong> ポイント<br />
-        このまま進むと、<strong>{tempPlan.credit}</strong> クレジット/月 の<br />新しいプランに
+        現在のクレジット: <strong>{credit}</strong><br />
+        このまま進むと、<br /><strong>{tempPlan.credit}</strong> クレジット/月 の<br />新しいプランに<br />
         <span className="highlight"> 上書き </span>されます。
       </p>
       <p className="modal-note">
-        ※ 残っているクレジットは引き継がれません。
+        ※ 残っているクレジットは<br />引き継がれません。
       </p>
     </GenericModal>
   );

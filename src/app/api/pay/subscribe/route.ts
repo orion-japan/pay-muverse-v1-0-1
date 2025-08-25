@@ -85,7 +85,17 @@ export async function POST(req: NextRequest) {
 
     // 2) Body 受取
     const body = (await req.json().catch(() => ({}))) as any;
-    const { plan_type, customer_id, charge_amount, sofia_credit, force_cancel_existing } = body ?? {};
+    const {
+      plan_type,
+      customer_id,
+      charge_amount,
+      sofia_credit,
+      tdsr_id,                 // ← 3DS 完了後の 2 回目 POST ではこれが来る
+      charge_id,               // ★ 追加：3DS完了後、charge_idでも最終化できるように受ける
+      user_email,
+      user_code: user_code_from_body,
+      force_cancel_existing
+    } = body ?? {};
 
     log(`📥 payload: ${JSON.stringify(body)}`);
 
@@ -136,149 +146,226 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    log(`✅ user loaded: ${user.user_code}`);
+    const user_code = user.user_code as string;
+    log(`✅ user loaded: ${user_code}`);
 
-    // 4) 既存サブスクのキャンセル
-    if (force_cancel_existing && user.payjp_subscription_id) {
+    /* ===========================================================
+       A) 2回目（3DS 完了後）: tdsr_id もしくは charge_id でサブスク作成へ
+       =========================================================== */
+    if (tdsr_id || charge_id) {
+      log(`🔁 finalize after 3DS: tdsr_id=${tdsr_id ?? "-"}, charge_id=${charge_id ?? "-"}`);
+
+      // （任意）3DSリクエストや与信の状態を確認してログに残すだけ
       try {
-        log(`🪓 cancel existing subscription: ${user.payjp_subscription_id}`);
-        await payjp.subscriptions.cancel(user.payjp_subscription_id);
-        await sb.from("users").update({
-          payjp_subscription_id: null,
-          last_payment_date: null,
-          next_payment_date: null,
-        }).eq("user_code", user.user_code);
-        log("✅ existing subscription canceled");
-      } catch (e: any) {
-        log(`⚠ cancel existing failed: ${e?.message}`);
+        if (tdsr_id) {
+          // @ts-ignore
+          const tdsr = await (payjp as any).tdsRequests?.retrieve?.(tdsr_id);
+          log(`ℹ️ tds_request: ${tdsr ? JSON.stringify(tdsr) : "n/a"}`);
+        } else if (charge_id) {
+          const ch = await payjp.charges.retrieve(String(charge_id));
+          log(`ℹ️ charge.status=${ch?.status}, three_d_secure_status=${(ch as any)?.three_d_secure_status ?? "n/a"}`);
+        }
+      } catch (e:any) {
+        log(`⚠ status check failed: ${e?.message || e}`);
+      }
+
+      // 既存サブスクのキャンセル
+      if (force_cancel_existing && user.payjp_subscription_id) {
+        try {
+          log(`🪓 cancel existing subscription: ${user.payjp_subscription_id}`);
+          await payjp.subscriptions.cancel(user.payjp_subscription_id);
+          await sb.from("users").update({
+            payjp_subscription_id: null,
+            last_payment_date: null,
+            next_payment_date: null,
+          }).eq("user_code", user_code);
+          log("✅ existing subscription canceled");
+        } catch (e: any) {
+          log(`⚠ cancel existing failed: ${e?.message}`);
+        }
+      }
+
+      // サブスク作成
+      let subscription: any;
+      try {
+        subscription = await payjp.subscriptions.create({ customer: String(customer_id), plan: String(plan_price_id) });
+      } catch (err: any) {
+        const nerr = normalizePayjpError(err);
+        log(`🔥 PAY.JP error (subscriptions.create): ${JSON.stringify(nerr)}`);
+        return NextResponse.json(
+          {
+            success: false,
+            error: "サブスク登録に失敗しました",
+            detail: "PAY.JP サブスクリプション作成エラー",
+            payjp: nerr,
+            logTrail,
+          },
+          { status: 500 }
+        );
+      }
+
+      const currentStart = Number(subscription?.current_period_start ?? 0);
+      const currentEnd = Number(subscription?.current_period_end ?? 0);
+      const last_payment_date = currentStart > 0 ? dayjs.unix(currentStart).format("YYYY-MM-DD") : dayjs().format("YYYY-MM-DD");
+      const next_payment_date = currentEnd > 0 ? dayjs.unix(currentEnd).format("YYYY-MM-DD") : dayjs().add(1, "month").format("YYYY-MM-DD");
+      const payment_date = dayjs().format("YYYY-MM-DD");
+      const subscription_id = String(subscription.id);
+
+      log(`✅ subscription created: ${subscription_id}`);
+
+      // DB 更新
+      const isAdmin = user.user_role === "admin";
+      const updatePayload: Record<string, any> = {
+        payjp_subscription_id: subscription_id,
+        last_payment_date,
+        next_payment_date,
+      };
+      if (!isAdmin) {
+        updatePayload.sofia_credit = typeof sofia_credit === "number" ? sofia_credit : user.sofia_credit ?? 0;
+        updatePayload.click_type = plan_type;
+        updatePayload.plan_status = plan_type;
+      }
+
+      const { data: updated, error: upErr } = await sb
+        .from("users")
+        .update(updatePayload)
+        .eq("user_code", user_code)
+        .select("user_code")
+        .maybeSingle();
+
+      if (upErr || !updated) {
+        log(`🔴 DB update error: ${upErr?.message || "0 rows updated"}`);
+        return NextResponse.json(
+          { success: false, error: "サブスクリプション情報の更新に失敗しました", logTrail },
+          { status: 500 }
+        );
+      }
+
+      log("✅ DB: subscription meta (and plan) updated");
+
+      // Sheets 追記
+      let sheets: any;
+      try {
+        const decoded = Buffer.from(mustEnv("GOOGLE_SERVICE_ACCOUNT_BASE64"), "base64").toString("utf-8");
+        const credentials = JSON.parse(decoded);
+
+        const auth = new google.auth.GoogleAuth({
+          credentials,
+          scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+        });
+        const authClient = await auth.getClient();
+        sheets = google.sheets({ version: "v4", auth: authClient as any });
+      } catch (err: any) {
+        log(`❌ GoogleAuth init failed: ${err?.message ?? err}`);
+        return NextResponse.json(
+          { success: false, error: "Google 認証初期化に失敗しました", logTrail },
+          { status: 500 }
+        );
+      }
+
+      const row = [
+        safe(user_code),
+        safe(user_email || emailFromToken),
+        safe(plan_type),
+        typeof charge_amount === "number" ? charge_amount : 0,
+        typeof sofia_credit === "number" ? sofia_credit : 0,
+        safe(customer_id),
+        safe(last_payment_date),
+        safe(next_payment_date),
+        safe(user.card_registered),
+        safe(payment_date),
+        "Web決済",
+        safe(subscription_id),
+        safe(plan_price_id),
+      ];
+
+      log("📤 Sheets append start");
+      try {
+        await sheets.spreadsheets.values.append({
+          spreadsheetId: mustEnv("GOOGLE_SHEET_ID"),
+          range: "Sheet1!A1",
+          valueInputOption: "USER_ENTERED",
+          insertDataOption: "INSERT_ROWS",
+          requestBody: { values: [row] },
+        });
+        log("✅ Sheets append succeeded");
+        return NextResponse.json({ success: true, logTrail });
+      } catch (sheetError: any) {
+        log(`❌ Sheets write failed: ${sheetError?.message}`);
+        if (sheetError?.response?.data) {
+          log(`📄 Sheets resp: ${JSON.stringify(sheetError.response.data)}`);
+        }
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Google Sheets への書き込みに失敗しました",
+            detail: sheetError?.message,
+            logTrail,
+          },
+          { status: 500 }
+        );
       }
     }
 
-    // 5) PAY.JP サブスクリプション作成
-    const payjpPayload = { customer: String(customer_id), plan: String(plan_price_id) };
-    log(`➡️ PAY.JP request: ${JSON.stringify(payjpPayload)}`);
+    /* ===========================================================
+       B) 1回目：3DS 要否判定のためのダミー与信 → 3DS 開始
+       =========================================================== */
+    const probeAmount = typeof charge_amount === "number" && charge_amount > 0 ? charge_amount : 100;
+    log(`💳 create probe charge: amount=${probeAmount}`);
 
-    let subscription: any;
+    let charge: any;
     try {
-      subscription = await payjp.subscriptions.create(payjpPayload);
-    } catch (err: any) {
+      charge = await payjp.charges.create({
+        amount: probeAmount,
+        currency: "jpy",
+        customer: String(customer_id),
+        capture: false,
+        description: `3DS probe for ${plan_type} by ${user_code}`,
+      });
+      log(`✅ charge created: ${charge?.id}`);
+    } catch (err:any) {
       const nerr = normalizePayjpError(err);
-      log(`🔥 PAY.JP error: ${JSON.stringify(nerr)}`);
-      const isCard = /card|invalid|security|insufficient/i.test(nerr.message ?? "");
+      log(`🔥 PAY.JP error (charges.create): ${JSON.stringify(nerr)}`);
       return NextResponse.json(
         {
           success: false,
-          error: "サブスク登録に失敗しました",
-          detail: "PAY.JP サブスクリプション作成エラー",
+          error: "与信の作成に失敗しました",
+          detail: "PAY.JP charges.create でエラー",
           payjp: nerr,
           logTrail,
         },
-        { status: isCard ? 402 : 500 }
-      );
-    }
-
-    const currentStart = Number(subscription?.current_period_start ?? 0);
-    const currentEnd = Number(subscription?.current_period_end ?? 0);
-    const last_payment_date = currentStart > 0 ? dayjs.unix(currentStart).format("YYYY-MM-DD") : dayjs().format("YYYY-MM-DD");
-    const next_payment_date = currentEnd > 0 ? dayjs.unix(currentEnd).format("YYYY-MM-DD") : dayjs().add(1, "month").format("YYYY-MM-DD");
-    const payment_date = dayjs().format("YYYY-MM-DD");
-    const subscription_id = String(subscription.id);
-
-    log(`✅ subscription created: ${subscription_id}`);
-
-    // 6) Supabase: ユーザー情報更新
-    const isAdmin = user.user_role === "admin";
-    const updatePayload: Record<string, any> = {
-      payjp_subscription_id: subscription_id,
-      last_payment_date,
-      next_payment_date,
-    };
-
-    if (!isAdmin) {
-      updatePayload.sofia_credit = typeof sofia_credit === "number" ? sofia_credit : user.sofia_credit ?? 0;
-      updatePayload.click_type = plan_type;
-      updatePayload.plan_status = plan_type;
-    }
-
-    const { data: updated, error: upErr } = await sb
-      .from("users")
-      .update(updatePayload)
-      .eq("user_code", user.user_code)
-      .select("user_code")
-      .maybeSingle();
-
-    if (upErr || !updated) {
-      log(`🔴 DB update error: ${upErr?.message || "0 rows updated"}`);
-      return NextResponse.json(
-        { success: false, error: "サブスクリプション情報の更新に失敗しました", logTrail },
         { status: 500 }
       );
     }
 
-    log("✅ DB: subscription meta (and plan) updated");
-
-    // 7) Google Sheets 追記
-    let sheets: any;
+    // 3DS リクエスト作成（作れなくても charge_id は返す）
+    let tdsr_id_created: string | null = null;
     try {
-      const decoded = Buffer.from(mustEnv("GOOGLE_SERVICE_ACCOUNT_BASE64"), "base64").toString("utf-8");
-      const credentials = JSON.parse(decoded);
-
-      const auth = new google.auth.GoogleAuth({
-        credentials,
-        scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-      });
-      const authClient = await auth.getClient();
-      sheets = google.sheets({ version: "v4", auth: authClient as any });
-    } catch (err: any) {
-      log(`❌ GoogleAuth init failed: ${err?.message ?? err}`);
-      return NextResponse.json(
-        { success: false, error: "Google 認証初期化に失敗しました", logTrail },
-        { status: 500 }
-      );
-    }
-
-    const row = [
-      safe(user.user_code),
-      safe(user.click_email || emailFromToken),
-      safe(plan_type),
-      typeof charge_amount === "number" ? charge_amount : 0,
-      typeof sofia_credit === "number" ? sofia_credit : 0,
-      safe(customer_id),
-      safe(last_payment_date),
-      safe(next_payment_date),
-      safe(user.card_registered),
-      safe(payment_date),
-      "Web決済",
-      safe(subscription_id),
-      safe(plan_price_id),
-    ];
-
-    log("📤 Sheets append start");
-    try {
-      await sheets.spreadsheets.values.append({
-        spreadsheetId: mustEnv("GOOGLE_SHEET_ID"),
-        range: "Sheet1!A1",
-        valueInputOption: "USER_ENTERED",
-        insertDataOption: "INSERT_ROWS",
-        requestBody: { values: [row] },
-      });
-      log("✅ Sheets append succeeded");
-      return NextResponse.json({ success: true, logTrail });
-    } catch (sheetError: any) {
-      log(`❌ Sheets write failed: ${sheetError?.message}`);
-      if (sheetError?.response?.data) {
-        log(`📄 Sheets resp: ${JSON.stringify(sheetError.response.data)}`);
+      // @ts-ignore
+      const tdsReq = await (payjp as any).tdsRequests?.create?.({ charge: charge.id });
+      if (tdsReq?.id) {
+        tdsr_id_created = tdsReq.id as string;
+        log(`✅ tds_request created: ${tdsr_id_created}`);
+      } else {
+        log("⚠ tdsRequests.create returned no id");
       }
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Google Sheets への書き込みに失敗しました",
-          detail: sheetError?.message,
-          logTrail,
-        },
-        { status: 500 }
-      );
+    } catch (e:any) {
+      log(`⚠ tdsRequests.create failed: ${e?.message || e}`);
     }
+
+    // ★ 修正: URL ドメイン&パス（/v1なし）
+    const confirmation_url = `https://pay.jp/tds/start?resource=charge&id=${charge.id}`;
+
+    // ★ 追加: charge_id を返却（フロントで openThreeDSecureDialog に使う）
+    return NextResponse.json({
+      success: false,
+      confirmation_required: true,
+      confirmation_url,
+      tdsr_id: tdsr_id_created,
+      charge_id: charge.id,   // ← これを返す
+      logTrail,
+    });
+
   } catch (error: any) {
     const msg = error?.message ?? String(error);
     log(`⛔ unhandled: ${msg}`);

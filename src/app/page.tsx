@@ -38,7 +38,10 @@ export default function DashboardPage() {
     { title: '共鳴会', link: '/kyomeikai', img: '/kyoumai.png', alt: '共鳴会' },
     { title: '配信', link: '/kyomeikai/live', img: '/live.png', alt: '共鳴会LIVE' },
     { title: 'Self', link: '/self', img: '/nikki.png', alt: 'Self' },
+    { title: 'Vision', link: '/vision', img: '/ito.png', alt: 'Vision' },
     { title: 'Create', link: '/create', img: '/mu_create.png', alt: 'Create' },
+    { title: 'm Tale', link: '/', img: '/m_tale.png', alt: 'm Tale' },
+    { title: 'iros', link: '/', img: '/ir.png', alt: 'iros' },
     { title: 'プラン', link: '/pay', img: '/mu_card.png', alt: 'プラン' },
   ];
 

@@ -8,9 +8,17 @@ import CardStyle from '@/components/CardStyle'; // ✅ 分割UI
 import { getAuth } from 'firebase/auth';
 import dayjs from 'dayjs'; // ★ 期限判定
 
-// Pay.js v2 の型ガード（ビルド時のエラー防止）
+// Pay.js v2 の型ガード
 declare global {
-  interface Window { Payjp?: any }
+  interface Window {
+    Payjp?: any;
+    __payjpInstance?: any;
+    __payjpElements?: {
+      cardNumber?: any;
+      cardExpiry?: any;
+      cardCvc?: any;
+    };
+  }
 }
 
 /* 軽量モーダル（ページ内で完結） */
@@ -84,7 +92,6 @@ function PageInner() {
       if (forceAuth) {
         const user = getAuth().currentUser;
         if (!user) {
-          // 未ログインなら何もしない（画面にエラーを出さない）
           console.debug('[fetchStatus] skip: not logged in');
           return;
         }
@@ -95,7 +102,6 @@ function PageInner() {
           cache: 'no-store',
         });
       } else {
-        // ★ user_code が空のときは投げない（400ノイズ防止）
         if (!user_code) {
           console.debug('[fetchStatus] skip: user_code empty');
           return;
@@ -104,18 +110,15 @@ function PageInner() {
       }
 
       if (!res.ok) {
-        // 404などは初期状態として無視
         console.warn('[fetchStatus] non-OK:', res.status);
         return;
       }
 
       const json = await res.json();
-      console.debug('[fetchStatus] user:', json);
       setUserData(json);
       setCardRegistered(!!json.card_registered);
       setUserCredit(json.sofia_credit || 0);
 
-      // ★ 期限切れ判定（sub_next_payment が今日以前なら期限切れ）
       const next = json?.sub_next_payment;
       const isExpired = !!next && dayjs(next).isBefore(dayjs(), 'day');
       setExpired(!!isExpired);
@@ -126,50 +129,110 @@ function PageInner() {
 
   // 初回：GETで軽取得 → ログインしたらPOSTで再取得
   useEffect(() => {
-    if (user_code) fetchStatus(false); // ★ 条件付き
+    if (user_code) fetchStatus(false);
     const unsub = getAuth().onAuthStateChanged((u) => {
       if (u) fetchStatus(true);
     });
     return () => unsub();
   }, [user_code]);
 
-  // ✅ PAY.JP 初期化（1回だけ）
-  const initPayjpCard = () => {
+  // ✅ Pay.js をロード（インスタンスはグローバル共有）
+  const ensurePayjpLoaded = () =>
+    new Promise<void>((resolve) => {
+      if (window.__payjpInstance) {
+        setPayjp(window.__payjpInstance);
+        return resolve();
+      }
+      if (window.Payjp) {
+        window.__payjpInstance = window.Payjp(process.env.NEXT_PUBLIC_PAYJP_PUBLIC_KEY!);
+        setPayjp(window.__payjpInstance);
+        return resolve();
+      }
+      const script = document.createElement('script');
+      script.src = 'https://js.pay.jp/v2/pay.js';
+      script.async = true;
+      script.onload = () => {
+        window.__payjpInstance = window.Payjp?.(process.env.NEXT_PUBLIC_PAYJP_PUBLIC_KEY!);
+        setPayjp(window.__payjpInstance);
+        resolve();
+      };
+      document.body.appendChild(script);
+    });
+
+  // ✅ PAY.JP 初期化（1回だけ・二重マウント防止）
+  const initPayjpCard = async () => {
     if (initCalled.current) {
-      console.log('[initPayjpCard] すでに初期化済みなのでスキップ');
+      console.log('[initPayjpCard] skip: already called');
       return;
     }
     initCalled.current = true;
 
-    const script = document.createElement('script');
-    script.src = 'https://js.pay.jp/v2/pay.js';
-    script.async = true;
-    script.onload = () => {
-      const payjpInstance = (window as any).Payjp?.(process.env.NEXT_PUBLIC_PAYJP_PUBLIC_KEY!);
-      if (!payjpInstance) {
-        console.error('PAY.JP 初期化に失敗: window.Payjp が見つかりません');
-        return;
-      }
-      setPayjp(payjpInstance);
+    await ensurePayjpLoaded();
+    if (!window.__payjpInstance) {
+      console.error('PAY.JP 初期化に失敗: window.Payjp が見つかりません');
+      return;
+    }
 
-      const elements = payjpInstance.elements();
-      const cn = elements.create('cardNumber');
-      cn.mount('#card-number');
-      setCardNumber(cn);
-
-      const ce = elements.create('cardExpiry');
-      ce.mount('#card-expiry');
-      setCardExpiry(ce);
-
-      const cc = elements.create('cardCvc');
-      cc.mount('#card-cvc');
-      setCardCvc(cc);
-
+    // 既に CardStyle 側で要素が作られているならそれを使う
+    if (window.__payjpElements?.cardNumber) {
+      setCardNumber(window.__payjpElements.cardNumber!);
+      setCardExpiry(window.__payjpElements.cardExpiry || null);
+      setCardCvc(window.__payjpElements.cardCvc || null);
       setCardReady(true);
-      console.log('✅ PAY.JP init complete');
+      console.log('✅ reuse elements from CardStyle');
+      return;
+    }
+
+    // すでに iframe が入っていたらこちらではマウントしない（二重マウント防止）
+    const numberHost = document.getElementById('card-number');
+    const expiryHost = document.getElementById('card-expiry');
+    const cvcHost = document.getElementById('card-cvc');
+    const alreadyMounted =
+      !!numberHost?.querySelector('iframe') ||
+      !!expiryHost?.querySelector('iframe') ||
+      !!cvcHost?.querySelector('iframe');
+
+    if (alreadyMounted) {
+      setTimeout(() => {
+        if (window.__payjpElements?.cardNumber) {
+          setCardNumber(window.__payjpElements.cardNumber!);
+          setCardExpiry(window.__payjpElements.cardExpiry || null);
+          setCardCvc(window.__payjpElements.cardCvc || null);
+          setCardReady(true);
+          console.log('✅ attached to pre-mounted elements');
+        } else {
+          console.warn('⚠ payjp elements mounted by other component but not shared.');
+        }
+      }, 300);
+      return;
+    }
+
+    // ここまで来たらまだ何も無いので、こちらで新規マウントして共有
+    const pj = window.__payjpInstance;
+    const elements = pj.elements();
+
+    const cn = elements.create('cardNumber');
+    cn.mount('#card-number');
+
+    const ce = elements.create('cardExpiry');
+    ce.mount('#card-expiry');
+
+    const cc = elements.create('cardCvc');
+    cc.mount('#card-cvc');
+
+    window.__payjpElements = {
+      ...(window.__payjpElements || {}),
+      cardNumber: cn,
+      cardExpiry: ce,
+      cardCvc: cc,
     };
 
-    document.body.appendChild(script);
+    setCardNumber(cn);
+    setCardExpiry(ce);
+    setCardCvc(cc);
+    setCardReady(true);
+
+    console.log('✅ PAY.JP init complete (mounted here)');
   };
 
   // タイムアウト付きトークン作成
@@ -179,16 +242,16 @@ function PageInner() {
       new Promise((_, reject) => setTimeout(() => reject(new Error('タイムアウトしました')), ms)),
     ]);
 
-  // ✅ カード登録処理
+  // ✅ カード登録処理（ここで3DSを実施する → Pay.jsが自動でモーダル表示）
   const handleCardRegistration = async () => {
     if (registerCalled.current || loading) return;
     registerCalled.current = true;
     setLoading(true);
     try {
-      // Firebase → user_code 解決
       const user = getAuth().currentUser;
       if (!user) throw new Error('ログインしてください');
       const idToken = await user.getIdToken(true);
+
       const res = await fetch('/api/account-status', {
         method: 'POST',
         headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
@@ -198,28 +261,26 @@ function PageInner() {
       const resolvedCode = j?.user_code;
       if (!resolvedCode) throw new Error('ユーザーコードが取得できません');
 
-      // PAY.JP 準備
-      if (!payjp) throw new Error('PAY.JP が初期化されていません');
-      if (!cardNumber) throw new Error('カード番号フィールドが初期化されていません');
+      // 共有された要素があればそれを使う
+      const el = window.__payjpElements?.cardNumber || cardNumber;
+      if (!payjp || !el) throw new Error('PAY.JP が初期化されていません');
 
-      // トークン作成
+      // ✅ ここで three_d_secure: true を付けてトークン化（Pay.jsがモーダルを開く）
+      const tokenOptions = { three_d_secure: true };
       let tokenRes;
       try {
-        tokenRes = await createTokenWithTimeout(cardNumber);
+        tokenRes = await payjp.createToken(el, tokenOptions);
       } catch {
-        tokenRes = await createTokenWithTimeout(cardNumber); // 1回リトライ
+        tokenRes = await createTokenWithTimeout(el); // 念のため再試行
       }
       if (!tokenRes?.id) {
         console.error('[createToken] error payload:', tokenRes);
         throw new Error(tokenRes?.error?.message || 'カードトークンの取得に失敗しました');
       }
       const token = tokenRes.id;
-      console.debug('[createToken] token:', token);
 
-      // サーバーへ送信（idToken 同梱）
-      // ★ 顧客IDは「あれば渡す」。無ければサーバー側が自動作成する。
+      // サーバへ保存
       const customerIdMaybe = j?.payjp_customer_id;
-
       const cardRes = await fetch('/api/pay/account/register-card', {
         method: 'POST',
         headers: {
@@ -228,21 +289,18 @@ function PageInner() {
         },
         body: JSON.stringify({
           user_code: resolvedCode,
-          token,                         // ← サーバー仕様に合わせて "token"
+          token,
           ...(customerIdMaybe ? { customer_id: customerIdMaybe } : {}),
         }),
       });
 
       const cardJson = await cardRes.json().catch(() => ({}));
-      console.debug('[register-card] response:', cardRes.status, cardJson);
-
       if (!cardRes.ok || !cardJson?.success) {
         throw new Error(cardJson?.error || `カード登録失敗: ${cardRes.status}`);
       }
 
-      // 即時UI反映→最新取り直し
       setCardRegistered(true);
-      setModalTitle('カード登録が完了しました');
+      setModalTitle('カード登録（本人認証）が完了しました');
       setModalMessage('次にプランを選んで購入できます。');
       setModalOpen(true);
 
@@ -258,7 +316,7 @@ function PageInner() {
     }
   };
 
-  // ✅ サブスク登録処理（Firebase ID トークンを必ず付与）
+  // ✅ サブスク登録処理（3DSは不要。サーバはそのまま subscriptions.create）
   const handleSubscribe = async () => {
     if (loading) return;
     setLoading(true);
@@ -270,12 +328,10 @@ function PageInner() {
         return;
       }
 
-      // 1) Firebase から idToken 取得
       const user = getAuth().currentUser;
       if (!user) throw new Error('ログインしてください');
       const idToken = await user.getIdToken(true);
 
-      // 2) 最新の user_code / payjp_customer_id / email を解決
       const accRes = await fetch('/api/account-status', {
         method: 'POST',
         headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
@@ -291,11 +347,9 @@ function PageInner() {
       const customerId: string | undefined = acc?.payjp_customer_id;
       const userEmail: string | undefined = acc?.click_email;
 
-      // 3) 必須チェック
       if (!resolvedCode) throw new Error('user_code を解決できませんでした');
       if (!customerId) throw new Error('PAY.JP の顧客IDがありません（カード登録が必要です）');
 
-      // 4) 送信ペイロード
       const payload = {
         user_code: resolvedCode,
         user_email: userEmail || '',
@@ -306,21 +360,16 @@ function PageInner() {
         force_cancel_existing: true,
       };
 
-      console.log('[subscribe] payload:', payload);
-
-      // 5) サブスク作成（★ Authorization ヘッダを付ける）
       const subscribeRes = await fetch('/api/pay/subscribe', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${idToken}`,   // ★必須
+          Authorization: `Bearer ${idToken}`,
         },
         body: JSON.stringify(payload),
       });
 
       const result = await subscribeRes.json().catch(() => ({}));
-      console.log('[subscribe] response:', subscribeRes.status, result);
-
       if (!subscribeRes.ok || !result?.success) {
         const detail =
           result?.detail ||
@@ -333,8 +382,11 @@ function PageInner() {
         return;
       }
 
-      // 成功
-      window.location.href = `/thanks?user=${resolvedCode}`;
+      // 成功（Thanks ページへのリダイレクトはしない）
+      setModalTitle('サブスク登録が完了しました');
+      setModalMessage('ご利用ありがとうございます。');
+      setModalOpen(true);
+      await fetchStatus(true);
     } catch (err: any) {
       console.error('⨯ Subscription error:', err);
       setModalTitle('サブスク登録エラー');
@@ -372,7 +424,7 @@ function PageInner() {
                 className="btn-card-register"
                 onClick={() => {
                   setShowCardForm(true);
-                  initPayjpCard();
+                  initPayjpCard(); // ← ここで初期化。CardStyleが先に初期化済みでも衝突しない
                 }}
                 disabled={loading}
               >
