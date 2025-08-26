@@ -5,6 +5,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import './board.css';
 
+// ★ コラージュ作成ページのパス（あなたの実装に合わせて変更OK）
+const COLLAGE_PATH = '/collage';
+
 // ───────────────────── 追加：軽量スライダー（CSSスクロールスナップ） ─────────────────────
 function MediaSlider({ href, urls }: { href: string; urls: string[] }) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -187,6 +190,12 @@ export default function BoardPage() {
     [visiblePosts, pageCount]
   );
 
+  // ✅ 下部アクションバー用：もっと見る可否
+  const hasMore = useMemo(
+    () => paged.length < visiblePosts.length,
+    [paged.length, visiblePosts.length]
+  );
+
   return (
     <div className="qboard-page">
       <h2>🌐 Iボード（公開フィード）</h2>
@@ -257,11 +266,7 @@ export default function BoardPage() {
                 : [];
 
               return (
-                <article
-                  key={post.post_id}
-                  className="post-item post-card"
-                  role="group"
-                >
+                <article key={post.post_id} className="post-item post-card" role="group">
                   {/* 🔗 パーマリンク（カード右上） */}
                   <div className="post-permalink">
                     <Link
@@ -316,17 +321,70 @@ export default function BoardPage() {
           {/* もっと見る */}
           {paged.length < visiblePosts.length && (
             <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12 }}>
-              <button onClick={() => setPageCount((n) => n + 1)}>もっと見る</button>
+              <button type="button" onClick={() => setPageCount((n) => n + 1)}>もっと見る</button>
             </div>
           )}
         </>
       )}
 
-      {/* 投稿動線 */}
+      {/* 投稿動線（上の赤ボタン） */}
       <div className="post-buttons">
-        <button className="post-button-red" onClick={() => router.push('/album')}>
-          ＋ Iボードに投稿する
+        <button
+          type="button"
+          className="post-button-red"
+          onClick={() => router.push(COLLAGE_PATH)}
+          aria-label="コラージュを作る"
+          title="コラージュを作る"
+        >
+          ＋ コラージュを作る
         </button>
+      </div>
+
+      {/* ✅ 下部アクションバー（sticky） */}
+      <div
+        style={{
+          position: 'sticky',
+          bottom: 0,
+          background: 'rgba(255,255,255,0.96)',
+          borderTop: '1px solid #eee',
+          padding: 12,
+          backdropFilter: 'blur(6px)',
+          marginTop: 12,
+          zIndex: 1000,
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            flexWrap: 'wrap',
+            maxWidth: 1280,
+            margin: '0 auto',
+          }}
+        >
+          <span style={{ color: '#666', fontSize: 14 }}>📎 下から操作できます</span>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {hasMore && (
+              <button type="button" onClick={() => setPageCount((n) => n + 1)}>
+                もっと見る
+              </button>
+            )}
+            <button type="button" onClick={fetchPublicPosts} aria-label="最新を読み込む">
+              最新を読み込む
+            </button>
+            <button
+              type="button"
+              className="post-button-red"
+              onClick={() => router.push(COLLAGE_PATH)}
+              aria-label="コラージュを作る"
+              title="コラージュを作る"
+            >
+              ＋ コラージュを作る
+            </button>
+          </div>
+        </div>
       </div>
 
       <div ref={bottomRef} style={{ height: '1px' }} />
