@@ -1,139 +1,169 @@
-'use client'
+'use client';
 
-import { useState } from 'react'
-import { signInWithEmailAndPassword } from 'firebase/auth'
-import { auth } from '@/lib/firebase'
-import { useRouter } from 'next/navigation'
-import ResetPasswordModal from './ResetPasswordModal'
-import EmailVerifyModal from './EmailVerifyModal'
+import { useState } from 'react';
+import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { auth } from '@/lib/firebase';
+import { useRouter } from 'next/navigation';
+import ResetPasswordModal from './ResetPasswordModal';
+import EmailVerifyModal from './EmailVerifyModal';
 
 type Props = {
-  isOpen: boolean
-  onClose: () => void
-  onLoginSuccess?: () => void
-}
+  isOpen: boolean;
+  onClose: () => void;
+  onLoginSuccess?: () => void;
+};
 
 export default function LoginModal({ isOpen, onClose, onLoginSuccess }: Props) {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-  const [showResetModal, setShowResetModal] = useState(false)
-  const [showVerifyModal, setShowVerifyModal] = useState(false)
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [showVerifyModal, setShowVerifyModal] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const router = useRouter()
+  const router = useRouter();
+
+  const hardSignOut = async () => {
+    try { await signOut(auth); } catch {}
+  };
 
   const handleLogin = async () => {
-    setError('')
+    if (loading) return;
+    setError('');
+    setLoading(true);
+
     try {
       // Firebase認証
-      const userCredential = await signInWithEmailAndPassword(auth, email, password)
-      const user = userCredential.user
+      const cred = await signInWithEmailAndPassword(auth, email, password);
+      const user = cred.user;
 
-      await user.reload() // ステータス最新化
+      await user.reload(); // ステータス最新化
 
-      // メール未認証 → 認証案内モーダル表示
+      // メール未認証 → 認証案内モーダル表示（この時点では Firebase 上はサインイン中）
       if (!user.emailVerified) {
-        setShowVerifyModal(true)
-        return
+        setShowVerifyModal(true);
+        setLoading(false);
+        return;
       }
 
-      // ✅ IDトークン取得（常に最新化）
-      const idToken = await user.getIdToken(true)
+      // 常に最新の ID トークン
+      const idToken = await user.getIdToken(true);
 
-      // Firebase認証サーバー登録
-      const res = await fetch('/api/login', {
+      // 1) /api/login
+      const loginRes = await fetch('/api/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`,   // ← これ！
+          Authorization: `Bearer ${idToken}`,
         },
-        body: JSON.stringify({}), // ボディは空でOK（互換で残しても良い）
-      })
-      if (!res.ok) throw new Error('サーバー認証失敗')
+        body: JSON.stringify({}), // 互換
+      });
 
-      // ✅ account-status に Authorization ヘッダーを付けて呼び出し
-      const userRes = await fetch('/api/account-status', {
+      if (!loginRes.ok) {
+        await hardSignOut();
+        const j = await loginRes.json().catch(() => null);
+        const code = loginRes.status;
+        throw new Error(
+          (j?.error && `${j.error}`) ||
+            (code === 401 ? '資格情報が無効です（401）' : `サーバー認証失敗（${code}）`)
+        );
+      }
+
+      // 2) /api/account-status
+      const statusRes = await fetch('/api/account-status', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`,
+          Authorization: `Bearer ${idToken}`,
         },
         body: JSON.stringify({}),
-      })
+      });
 
-      const data = await userRes.json()
-      if (!userRes.ok || !data.user_code) throw new Error('user_code取得失敗')
+      const statusJson = await statusRes.json().catch(() => ({}));
+      if (!statusRes.ok || !statusJson?.user_code) {
+        await hardSignOut();
+        const code = statusRes.status;
+        throw new Error(
+          (statusJson?.error && `${statusJson.error}`) ||
+            (code === 401 || code === 403
+              ? `アカウント情報取得拒否（${code}）`
+              : `アカウント情報取得失敗（${code}）`)
+        );
+      }
 
-      // Supabase側のemail_verifiedがfalseなら同期（安全版）
-      if (data.email_verified === false) {
+      // Supabase 側のメール認証が false なら同期（任意）
+      if (statusJson.email_verified === false) {
         const verifyRes = await fetch('/api/verify-complete', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${idToken}`,
+            Authorization: `Bearer ${idToken}`,
           },
           body: JSON.stringify({}),
-        })
+        });
         if (!verifyRes.ok) {
-          const errData = await verifyRes.json().catch(() => ({}))
-          throw new Error(errData.error || 'メール認証同期に失敗しました')
+          await hardSignOut();
+          const errData = await verifyRes.json().catch(() => ({}));
+          throw new Error(errData.error || 'メール認証状態の同期に失敗しました');
         }
       }
 
-      onLoginSuccess?.()
-      onClose()
-    } catch (err) {
-      console.error('❌ Login Error:', err)
-      setError('ログインに失敗しました。メールアドレスとパスワードを確認してください。')
+      onLoginSuccess?.();
+      onClose();
+      router.refresh();
+    } catch (err: any) {
+      console.error('❌ Login Error:', err);
+      setError(
+        typeof err?.message === 'string'
+          ? err.message
+          : 'ログインに失敗しました。メールアドレスとパスワードを確認してください。'
+      );
+    } finally {
+      setLoading(false);
     }
-  }
+  };
 
-  // 🔹 認証メール再送信 → 成功扱いで閉じる処理
+  // 認証メール再送信 → 成功扱いで閉じる
   const handleResendAndClose = async () => {
     try {
-      const user = auth.currentUser
-      if (!user) throw new Error('ユーザー情報がありません')
+      const user = auth.currentUser;
+      if (!user) throw new Error('ユーザー情報がありません');
 
-      const token = await user.getIdToken()
+      const token = await user.getIdToken();
       const res = await fetch('/api/resend-verification', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-      })
+      });
 
-      const data = await res.json()
-
-      // API側で success:true が返ればOK扱い
-      if (data.success) {
-        setShowVerifyModal(false)
-        onClose()
-        alert(data.message || '✅ 認証メールを送信しました。メールをご確認ください。')
-        return
+      const data = await res.json().catch(() => ({}));
+      if (data?.success) {
+        setShowVerifyModal(false);
+        onClose();
+        alert(data.message || '✅ 認証メールを送信しました。メールをご確認ください。');
+        return;
       }
 
-      // success:false でもメール送信済みの可能性がある場合はOK扱いにする
       if (
-        data.error?.includes('送信済み') ||
-        data.error?.includes('TOO_MANY_ATTEMPTS_TRY_LATER')
+        data?.error?.includes('送信済み') ||
+        data?.error?.includes('TOO_MANY_ATTEMPTS_TRY_LATER')
       ) {
-        setShowVerifyModal(false)
-        onClose()
-        alert('📩 認証メールはすでに送信済みです。メールをご確認ください。')
-        return
+        setShowVerifyModal(false);
+        onClose();
+        alert('📩 認証メールはすでに送信済みです。メールをご確認ください。');
+        return;
       }
 
-      // それ以外は本当の失敗
-      throw new Error(data.error || '送信失敗')
-
+      throw new Error(data?.error || '送信失敗');
     } catch (err) {
-      console.error('再送信エラー:', err)
-      alert('❌ 再送信に失敗しました。しばらくしてからお試しください。')
+      console.error('再送信エラー:', err);
+      alert('❌ 再送信に失敗しました。しばらくしてからお試しください。');
     }
-  }
+  };
 
-  if (!isOpen) return null
+  if (!isOpen) return null;
 
   return (
     <>
@@ -141,7 +171,12 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: Props) {
         <div className="modal-content">
           <h2 className="modal-title">🔐 ログイン</h2>
 
-          <form onSubmit={(e) => { e.preventDefault(); handleLogin() }}>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void handleLogin();
+            }}
+          >
             <input
               type="email"
               placeholder="メールアドレス"
@@ -149,6 +184,8 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: Props) {
               onChange={(e) => setEmail(e.target.value)}
               className="modal-input"
               required
+              disabled={loading}
+              autoComplete="email"
             />
             <input
               type="password"
@@ -157,6 +194,8 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: Props) {
               onChange={(e) => setPassword(e.target.value)}
               className="modal-input"
               required
+              disabled={loading}
+              autoComplete="current-password"
             />
 
             {error && (
@@ -172,14 +211,17 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: Props) {
             </p>
 
             <div className="modal-actions">
-              <button type="submit" className="modal-button login">ログイン</button>
+              <button type="submit" className="modal-button login" disabled={loading}>
+                {loading ? 'ログイン中…' : 'ログイン'}
+              </button>
               <button
                 type="button"
                 className="modal-button cancel"
                 onClick={() => {
-                  setShowResetModal(false)
-                  onClose()
+                  setShowResetModal(false);
+                  onClose();
                 }}
+                disabled={loading}
               >
                 キャンセル
               </button>
@@ -188,10 +230,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: Props) {
         </div>
       </div>
 
-      <ResetPasswordModal
-        isOpen={showResetModal}
-        onClose={() => setShowResetModal(false)}
-      />
+      <ResetPasswordModal isOpen={showResetModal} onClose={() => setShowResetModal(false)} />
 
       {/* 再送信時に即閉じるバージョン */}
       <EmailVerifyModal
@@ -200,5 +239,5 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: Props) {
         onResend={handleResendAndClose}
       />
     </>
-  )
+  );
 }

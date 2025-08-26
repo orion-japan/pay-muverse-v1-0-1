@@ -84,7 +84,7 @@ export default function VisionModal({
     status: (initial?.status as Status) ?? '検討中',
     summary: initial?.summary ?? '',
     iboard_post_id: initial?.iboard_post_id ?? null,
-    iboard_thumb: initial?.iboard_thumb ?? null,
+    iboard_thumb: initial?.iboard_thumb ?? null, // ← 表示用サムネ
     q_code: initial?.q_code ?? undefined,
     vision_id: initial?.vision_id,
   }));
@@ -151,6 +151,7 @@ export default function VisionModal({
         status: vision.status,
         summary: vision.summary,
         iboard_post_id: vision.iboard_post_id,
+        iboard_thumb: vision.iboard_thumb,   // ★ これを保存に含める
         q_code: vision.q_code,
       };
 

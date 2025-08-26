@@ -496,7 +496,7 @@ try {
     isOpen={true}
     defaultPhase={phase}
     defaultStage={'S'}
-    userCode={''}
+    userCode={userCode}  
     onClose={() => setOpenStage(null)}
     onSaved={(v) => { upsertLocal(v as VisionWithTS); setOpenStage(null); }}
   />
@@ -508,7 +508,7 @@ try {
     isOpen={true}
     defaultPhase={editing.phase}
     defaultStage={editing.stage}
-    userCode={''}
+    userCode={userCode}  
     initial={editing}
     onClose={() => setEditing(null)}
     onSaved={(v) => { upsertLocal(v as VisionWithTS); setEditing(null); }}
