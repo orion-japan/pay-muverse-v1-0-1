@@ -1,4 +1,3 @@
-// pay/src/app/api/user-info/route.ts
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
@@ -7,7 +6,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY! // server-only
 )
 
-// 必要なら MU ドメインだけに絞ってください
+// 必要なら MU のドメインに絞ってください（例: https://muverse.jp）
 function withCORS(json: any, status = 200) {
   return NextResponse.json(json, {
     status,
@@ -37,13 +36,12 @@ export async function POST(req: Request) {
     if (error) return withCORS({ error: error.message }, 500)
     if (!data)  return withCORS({}, 404)
 
-    // この形で返せば MU 側の取り込みが楽
     return withCORS({
       click_username: data.click_username ?? null,
-      click_type: data.click_type ?? null,
-      sofia_credit: (typeof data.sofia_credit === 'number'
-        ? data.sofia_credit
-        : Number(data.sofia_credit ?? 0)),
+      click_type:     data.click_type     ?? null,
+      sofia_credit:   (typeof data.sofia_credit === 'number'
+                        ? data.sofia_credit
+                        : Number(data.sofia_credit ?? 0)),
     })
   } catch (e: any) {
     return withCORS({ error: e?.message ?? 'unknown' }, 500)

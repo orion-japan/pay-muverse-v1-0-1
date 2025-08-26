@@ -12,13 +12,19 @@ import type { HomeContent } from '@/lib/content';
 export default function DashboardPage() {
   const [content, setContent] = useState<HomeContent | null>(null);
   const [current, setCurrent] = useState(0);
-  const { user } = useAuth(); // ★ userCode を使わない
+  const { user } = useAuth();
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const router = useRouter();
+
+  // 追加: プラン/ロール取得（master/admin 判定用）
+  const [planStatus, setPlanStatus] = useState<string | null>(null);
 
   // LIVEモーダル
   const [liveModalOpen, setLiveModalOpen] = useState(false);
   const [liveModalText, setLiveModalText] = useState('');
+
+  // 追加: アクセス拒否モーダル
+  const [denyOpen, setDenyOpen] = useState(false);
 
   useEffect(() => {
     FileContentProvider.getHomeContent().then(setContent);
@@ -32,6 +38,33 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [content]);
 
+  // 追加: user ログイン時に plan_status を取得
+  useEffect(() => {
+    let aborted = false;
+    if (!user) {
+      setPlanStatus(null);
+      return;
+    }
+    (async () => {
+      try {
+        const res = await fetch('/api/get-user-info', { cache: 'no-store' });
+        const j = await res.json().catch(() => ({} as any));
+        if (!aborted) {
+          // API のキー名ゆらぎ対策
+          const ps = j?.plan_status ?? j?.planStatus ?? null;
+          setPlanStatus(ps);
+        }
+      } catch {
+        if (!aborted) setPlanStatus(null);
+      }
+    })();
+    return () => {
+      aborted = true;
+    };
+  }, [user]);
+
+  const canAccessIros = planStatus === 'master' || planStatus === 'admin';
+
   // メニュー
   const menuItems: { title: string; link: string; img: string; alt: string }[] = [
     { title: 'Mu_AI', link: '/mu_full', img: '/mu_ai.png', alt: 'Mu_AI' },
@@ -41,28 +74,32 @@ export default function DashboardPage() {
     { title: 'Vision', link: '/vision', img: '/ito.png', alt: 'Vision' },
     { title: 'Create', link: '/create', img: '/mu_create.png', alt: 'Create' },
     { title: 'm Tale', link: '/', img: '/m_tale.png', alt: 'm Tale' },
-    { title: 'iros', link: '/', img: '/ir.png', alt: 'iros' },
+    { title: 'iros', link: '/iros', img: '/ir.png', alt: 'iros' }, // ← ここをガード
     { title: 'プラン', link: '/pay', img: '/mu_card.png', alt: 'プラン' },
   ];
 
-  // ★ userCode をURLに付けるページはもう無し（サーバ側/MU側で判定）
-  const needsUserParam = new Set<string>(); // 空集合に
+  // userCode をURLに付けるページは無し
+  const needsUserParam = new Set<string>();
 
   const handleClick = (link: string) => {
     if (!user) {
       setIsLoginModalOpen(true);
       return;
     }
+    // 追加: iros ガード
+    if (link === '/iros' && !canAccessIros) {
+      setDenyOpen(true);
+      return;
+    }
+
     if (link === '/mu_full') {
-      router.push('/mu_full'); // /mu_full 側で /api/call-mu-ai を実行
+      router.push('/mu_full');
       return;
     }
     if (link === '/kyomeikai/live') {
       checkLiveAndGo(link);
       return;
     }
-
-    // そのまま遷移（linkWithParam は使わない）
     router.push(link);
   };
 
@@ -119,23 +156,37 @@ export default function DashboardPage() {
 
         {/* タイルメニュー */}
         <section className="tile-grid">
-          {menuItems.map((item, idx) => (
-            <div
-              key={item.title}
-              className={`tile mu-card ${['tile--mu','tile--kyomei','tile--live','tile--plan','tile--create'][idx] ?? ''} ${!user ? 'disabled' : ''}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleClick(item.link);
-              }}
-            >
-              <div className="tile-inner">
-                <div className="tile-icon">
-                  <img src={item.img} alt={item.alt} className="tile-icon-img" draggable={false} />
+          {menuItems.map((item, idx) => {
+            const isIros = item.link === '/iros';
+            const disabledByAuth = !user;
+            const disabledByRole = isIros && !canAccessIros;
+            const disabled = disabledByAuth || disabledByRole;
+
+            return (
+              <div
+                key={item.title}
+                className={`tile mu-card ${['tile--mu','tile--kyomei','tile--live','tile--plan','tile--create'][idx] ?? ''} ${disabled ? 'disabled' : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (disabled) {
+                    if (disabledByAuth) setIsLoginModalOpen(true);
+                    else if (disabledByRole) setDenyOpen(true);
+                    return;
+                  }
+                  handleClick(item.link);
+                }}
+                aria-disabled={disabled}
+                title={disabledByRole ? 'この機能は master / admin 限定です' : undefined}
+              >
+                <div className="tile-inner">
+                  <div className="tile-icon">
+                    <img src={item.img} alt={item.alt} className="tile-icon-img" draggable={false} />
+                  </div>
+                  <div className="tile-label">{item.title}</div>
                 </div>
-                <div className="tile-label">{item.title}</div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </section>
       </div>
 
@@ -154,6 +205,16 @@ export default function DashboardPage() {
         primaryText="OK"
       >
         {liveModalText}
+      </AppModal>
+
+      {/* 追加: アクセス拒否モーダル */}
+      <AppModal
+        open={denyOpen}
+        title="アクセス権限が必要です"
+        onClose={() => setDenyOpen(false)}
+        primaryText="OK"
+      >
+        この機能は <b>master / admin</b> のみご利用いただけます。
       </AppModal>
     </div>
   );

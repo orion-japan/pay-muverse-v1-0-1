@@ -1,13 +1,12 @@
 // app/api/push-test/route.ts
 import { NextResponse } from 'next/server'
 
-export const runtime = 'nodejs'        // or 'edge'
-export const dynamic = 'force-dynamic' // キャッシュ回避（ログ確認しやすくする）
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 const INVOKE_URL =
   'https://hcodeoathneftqkmjyoh.supabase.co/functions/v1/sendPush'
 
-/** 共通で付ける CORS ヘッダ（必要に応じてドメイン絞ってOK） */
 function corsHeaders() {
   return {
     'Access-Control-Allow-Origin': '*',
@@ -16,12 +15,14 @@ function corsHeaders() {
   }
 }
 
-/** CORS: プリフライトへの応答 */
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: corsHeaders() })
 }
 
-/** 実処理（ブラウザからは POST で来る） */
+function looksLikeUUID(v?: string) {
+  return !!v && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v)
+}
+
 export async function POST(req: Request) {
   const startedAt = Date.now()
   try {
@@ -34,34 +35,42 @@ export async function POST(req: Request) {
       )
     }
 
-    // リクエスト JSON を受け取り（空ならデフォルト）
     const input = await req.json().catch(() => ({} as any))
-    const payload = {
-      user_code: input.user_code ?? 'U-CKxc5NQQ',
-      title:     input.title     ?? 'Muverse 通知テスト',
-      body:      input.body      ?? 'これは Android Chrome のテスト通知です',
-      url:       input.url       ?? 'https://muverse.jp/',
+    const uid: string | undefined = input.uid
+    const user_code: string | undefined = input.user_code
+
+    // Edge側の仕様: uid を優先。無ければ UUID っぽい user_code のみ許可
+    const forward: any = {
+      title:  input.title  ?? 'Muverse 通知テスト',
+      body:   input.body   ?? 'これは iPhone/Android PWA のテスト通知です',
+      url:    input.url    ?? 'https://muverse.jp/',
+      tag:    input.tag    ?? 'muverse',
+    }
+    if (uid) {
+      forward.uid = uid
+    } else if (looksLikeUUID(user_code)) {
+      forward.user_code = user_code
+    } else {
+      return NextResponse.json(
+        { ok: false, reason: 'require uid or uuid-like user_code' },
+        { status: 400, headers: corsHeaders() },
+      )
     }
 
-    // サーバーログ（Vercel/Node のログに出ます）
-    console.log('[push-test] inbound payload:', payload)
+    console.log('[push-test] inbound payload:', forward)
 
-    // Supabase Edge Function へフォワード
     const supaRes = await fetch(INVOKE_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${key}`, // Service Role はサーバー内だけで使用
+        Authorization: `Bearer ${key}`,
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(forward),
     })
 
     const text = await supaRes.text()
     const tookMs = Date.now() - startedAt
-
-    // 詳細ログ（レスポンスの status / body も記録）
     console.log('[push-test] supabase status:', supaRes.status)
-    // 返り値が長い場合もあるので一部だけ出す：必要ならそのまま text を出してOK
     console.log('[push-test] supabase body:', text)
 
     return new NextResponse(text, {

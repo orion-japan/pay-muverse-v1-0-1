@@ -554,3 +554,6 @@ main {
 .mu-page > div[style*="padding-top"] {
   padding-top: 0 !important;
 }
+
+
+.tile.disabled { opacity: .4; filter: grayscale(100%); cursor: not-allowed; }

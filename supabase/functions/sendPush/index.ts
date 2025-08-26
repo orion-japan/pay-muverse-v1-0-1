@@ -10,20 +10,39 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 
+function looksLikeUUID(v: string | undefined): boolean {
+  if (!v) return false;
+  // 簡易UUID v4 判定
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+}
+
 Deno.serve(async (req) => {
   if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
 
   try {
-    const { user_code, title, body, url, tag } = await req.json();
+    const { user_code, uid, title, body, url, tag } = await req.json();
 
-    // 購読取得
+    // 送信対象の取得: uid を最優先。無ければ user_code が UUID の場合のみ使用。
+    let query = "";
+    if (typeof uid === "string" && uid) {
+      query = `uid=eq.${encodeURIComponent(uid)}`;
+    } else if (typeof user_code === "string" && looksLikeUUID(user_code)) {
+      // user_code が UUID 型カラムでも安全
+      query = `user_code=eq.${encodeURIComponent(user_code)}`;
+    } else {
+      return new Response(
+        JSON.stringify({ ok: false, reason: "require uid or uuid-like user_code" }),
+        { status: 400 },
+      );
+    }
+
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/push_subscriptions?user_code=eq.${encodeURIComponent(user_code)}&select=endpoint,p256dh,auth`,
+      `${SUPABASE_URL}/rest/v1/push_subscriptions?${query}&select=endpoint,p256dh,auth`,
       { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } }
     );
     const subs = await res.json();
     if (!Array.isArray(subs) || subs.length === 0) {
-      return new Response(JSON.stringify({ ok: false, reason: "no subscription for user_code" }), { status: 404 });
+      return new Response(JSON.stringify({ ok: false, reason: "no subscription" }), { status: 404 });
     }
 
     const payload = JSON.stringify({
