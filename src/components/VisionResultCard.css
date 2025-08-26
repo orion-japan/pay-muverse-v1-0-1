@@ -1,0 +1,48 @@
+.vrc{display:grid;grid-template-columns:120px 1fr;gap:12px;
+    background:#fff;border:1px solid #eceaf7;border-radius:14px;overflow:hidden}
+  .vrc + .vrc{margin-top:10px}
+  
+  /* フェーズ別の縁色（うっすら） */
+  .vrc--initial{border-color:#e8ecff}
+  .vrc--mid{border-color:#ffe1f0}
+  .vrc--final{border-color:#ffe9d1}
+  
+  /* サムネ */
+  .vrc-thumb{background:#faf9ff;height:100%;min-height:92px}
+  .vrc-thumb img{display:block;width:100%;height:100%;object-fit:cover}
+  .vrc-thumb--ph{display:flex;align-items:center;justify-content:center;color:#999;font-size:12px}
+  
+  /* 本体 */
+  .vrc-body{padding:10px 12px 12px}
+  .vrc-top{display:flex;align-items:center;gap:8px}
+  .vrc-title{margin:6px 0 10px;font-size:15px;font-weight:800;color:#232338}
+  
+  /* バッジ類 */
+  .vrc-badge{padding:2px 8px;border-radius:999px;font-weight:700;border:1px solid #e3dcff;background:#efeaff;color:#6a4ee6}
+  .vrc-status--成功 .vrc-badge{background:#fff4cc;color:#8b6a00;border-color:#f1e1a3}
+  .vrc-status--中断 .vrc-badge{background:#f6ecff;color:#7a2bbd;border-color:#ead9ff}
+  .vrc-status--意図違い .vrc-badge{background:#eaf5ff;color:#2367c5;border-color:#cfe7ff}
+  
+  .vrc-q{background:#f6f7ff;border:1px solid #e6e8ff;border-radius:6px;padding:0 6px;font-size:12px}
+  .vrc-phase{margin-left:auto;color:#6a6a7e;font-size:12px}
+  
+  /* 進捗バー（自動移管までの割合） */
+  .vrc-rail{height:10px;background:#f0eff8;border-radius:999px;overflow:hidden;position:relative}
+  .vrc-rail__bar{height:100%;background:linear-gradient(90deg,#b9a6ff,#7b5cff);transition:width .6s ease}
+  
+  /* 残り日数 */
+  .vrc-note{margin:8px 0 10px;color:#5c5974;font-size:12px}
+  .vrc-note b{font-weight:800}
+  .vrc-link{border:none;background:none;padding:0;color:#6a4ee6;cursor:pointer;text-decoration:underline}
+  
+  /* アクション */
+  .vrc-actions{display:flex;gap:8px}
+  .vrc-btn{padding:8px 12px;border-radius:8px;border:1px solid #dedbea;background:#fff;font-weight:700;cursor:pointer}
+  .vrc-btn:disabled{opacity:.6;cursor:default}
+  .vrc-btn.primary{background:linear-gradient(135deg,#9b87ff,#7b5cff);color:#fff;border:none}
+  .vrc-btn.primary:hover{filter:brightness(1.05)}
+  .vrc-btn.ghost:hover{background:#f8f6ff}
+  
+  /* 期限超過（自動移管対象アラート） */
+  .vrc.is-due{box-shadow:0 0 0 3px rgba(255,196,0,.15) inset}
+  

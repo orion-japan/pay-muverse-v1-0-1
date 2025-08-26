@@ -375,29 +375,40 @@ try {
         /* transform はライブラリに任せる（直接指定しない） */
       `}</style>
 
-      {/* 右上：新規 */}
-      <div className="vision-topbar">
-        <button className="vision-new-global" onClick={() => setOpenStage('S')}>＋ 新規</button>
-      </div>
+{/* === フェーズタブ ＋ 新規＋履歴 === */}
+<div className="vision-topbar">
+  <div className="vision-tabs">
+    <button
+      className={phase === 'initial' ? 'is-active' : ''}
+      onClick={() => setPhase('initial')}
+    >
+      初期
+    </button>
 
-      {/* タブ（API と同じキーを使用） */}
-{/* タブ（Phase は initial / mid / final） */}
-<div className="vision-tabs">
-  <button
-    className={phase === 'initial' ? 'is-active' : ''}
-    onClick={() => setPhase('initial')}
-  >初期</button>
+    <button
+      className={phase === 'mid' ? 'is-active' : ''}
+      onClick={() => setPhase('mid')}
+    >
+      中期
+    </button>
 
-  <button
-    className={phase === 'mid' ? 'is-active' : ''}
-    onClick={() => setPhase('mid')}
-  >中期</button>
+    <button
+      className={phase === 'final' ? 'is-active' : ''}
+      onClick={() => setPhase('final')}
+    >
+      後期
+    </button>
+  </div>
 
-  <button
-    className={phase === 'final' ? 'is-active' : ''}
-    onClick={() => setPhase('final')}
-  >後期</button>
+  <div className="vision-actions">
+    <a className="vision-history-link" href="/vision/history">履歴を見る</a>
+    <button className="vision-new-global" onClick={() => setOpenStage('S')}>
+      ＋ 新規
+    </button>
+  </div>
 </div>
+
+
 
 
       {/* カンバン */}

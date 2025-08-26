@@ -1,80 +1,459 @@
-.vmd-backdrop {
-    position: fixed; inset: 0;
-    background: rgba(0,0,0,0.35);
-    display: flex; align-items: center; justify-content: center;
-    z-index: 1000;
-  }
-  .vmd-modal {
-    width: min(920px, 96vw);
-    max-height: 92vh;
-    background: #fff;
-    border-radius: 14px;
-    overflow: hidden;
-    display: flex; flex-direction: column;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.25);
-  }
-  .vmd-header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 14px 16px; border-bottom: 1px solid #eee;
-  }
-  .vmd-title { font-weight: 700; }
-  .vmd-close {
-    border: none; background: #eee; border-radius: 8px; padding: 6px 10px; cursor: pointer;
-  }
-  
-  .vmd-body {
-    padding: 16px; overflow: auto;
-  }
-  .vmd-label {
-    display: block; margin: 12px 0 6px; font-size: 13px; color: #333;
-  }
-  .vmd-input, .vmd-textarea, .vmd-select {
-    width: 100%; box-sizing: border-box; border: 1px solid #ddd; border-radius: 10px;
-    padding: 10px 12px; font-size: 14px; background: #fff;
-  }
-  .vmd-textarea { resize: vertical; }
-  
-  .vmd-image-block {
-    display: grid; grid-template-columns: 240px 1fr; gap: 12px; align-items: start;
-    margin: 8px 0 12px;
-  }
-  .vmd-thumb {
-    width: 100%; height: 160px; object-fit: cover; border: 1px solid #eee; border-radius: 10px;
-    background: #fafafa;
-  }
-  .vmd-thumb.placeholder {
-    display: grid; place-items: center; color: #aaa; font-size: 12px;
-  }
-  .vmd-pick { /* IboardPicker を右側に表示 */ }
-  
-  .vmd-error { margin-top: 10px; color: #c0392b; font-size: 13px; }
-  
-  .vmd-footer {
-    padding: 12px 16px; border-top: 1px solid #eee; display: flex; justify-content: flex-end; gap: 8px;
-  }
-  .vmd-btn {
-    border: 1px solid #ddd; background: #fff; padding: 10px 14px; border-radius: 10px; cursor: pointer;
-  }
-  .vmd-btn.primary {
-    background: #6b6bf5; border-color: #6b6bf5; color: #fff;
-  }
-  .vmd-btn.ghost { background: #fff; }
-  
-  /* 警告が出ていた空ルール */
-.vmd-pick { 
-    min-height: 1px;  /* 空を避けるために最低限のスタイルを追加 */
-  }
-  
-  /* vision.css */
-.vision-board{
-    display:grid;
-    grid-template-columns:repeat(5, minmax(260px, 1fr));
-    gap:12px;
-    overflow-x:auto;     /* ← 横スクロール */
-    padding-bottom:8px;
-  }
-  .vision-column{ min-height:220px; }
+/* =========================
+   VisionModal.css  (FULL)
+   ========================= */
 
-  
-  .vision-card{ transition: transform .08s ease, box-shadow .08s ease; }
-.vision-card:hover{ transform: translateY(-1px); box-shadow: 0 2px 10px rgba(0,0,0,.06); }
+/* ===== Backdrop ===== */
+.vmd-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(24, 18, 40, 0.36);
+  backdrop-filter: blur(3px);
+  display: grid;
+  place-items: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+/* ===== Modal ===== */
+.vmd-modal {
+  --radius: 16px;
+  --c-border: #e9e7f3;
+  --c-muted: #747292;
+  --c-text: #1e1d2d;
+  --c-accent: #7b5cff;
+  --shadow: 0 10px 30px rgba(29, 16, 63, 0.18);
+
+  width: min(860px, 94vw);
+  max-height: 90vh;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: #ffffff;
+  box-shadow: var(--shadow);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  animation: vmd-pop 220ms ease-out;
+
+  /* ← OS/ブラウザのダーク配色の影響を遮断 */
+  color-scheme: light;
+}
+
+@keyframes vmd-pop {
+  0% { transform: translateY(6px) scale(0.98); opacity: 0; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+/* ===== Header ===== */
+.vmd-header {
+  position: relative;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--c-border);
+  background: linear-gradient(180deg, #fbfbff 0%, #ffffff 100%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.vmd-title {
+  font-size: 16px; font-weight: 800; color: var(--c-text);
+  letter-spacing: .2px; position: relative; padding-right: 18px;
+}
+.vmd-title-sparkle {
+  position: absolute; right: 0; top: 50%;
+  width: 12px; height: 12px; transform: translateY(-50%);
+  background: conic-gradient(#ffe28a, #ffd1f3, #a7b6ff, #ffe28a);
+  border-radius: 3px; filter: blur(.2px); animation: sparkle 2.6s linear infinite;
+}
+@keyframes sparkle { 0%{transform:translateY(-50%) rotate(0);opacity:.7}50%{opacity:1}100%{transform:translateY(-50%) rotate(360deg);opacity:.7} }
+.vmd-close {
+  margin-left: auto; border: 0; background: transparent;
+  font-size: 22px; line-height: 1; color: #9a98b3; cursor: pointer; padding: 4px 6px; border-radius: 8px;
+}
+.vmd-close:hover { background: #f5f3ff; color: var(--c-accent); }
+
+/* ===== Body ===== */
+.vmd-body {
+  padding: 14px 16px;
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+}
+.vmd-label { font-size: 12px; color: #77759a; margin-top: 6px; }
+
+/* 入力系 */
+.vmd-input,
+.vmd-textarea,
+.vmd-select {
+  width: 100%;
+  background: #fff;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: var(--c-text);
+  outline: none;
+  transition: box-shadow 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.vmd-input:focus,
+.vmd-textarea:focus,
+.vmd-select:focus {
+  border-color: #cfc8ff;
+  box-shadow: 0 0 0 3px rgba(123, 92, 255, 0.16);
+}
+.vmd-textarea { resize: vertical; }
+
+/* 2カラム小セクション */
+.vmd-row { display: grid; grid-template-columns: 1fr; gap: 10px; }
+@media (min-width: 760px) { .vmd-row { grid-template-columns: 1fr 1fr; } }
+.vmd-col { display: grid; gap: 6px; }
+
+/* ===== Image Picker Area ===== */
+.vmd-image-block {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 12px;
+  align-items: start;
+}
+@media (max-width: 680px) { .vmd-image-block { grid-template-columns: 1fr; } }
+
+.vmd-preview { position: relative; }
+.vmd-thumb {
+  width: 100%; height: 160px; object-fit: cover;
+  border-radius: 12px; border: 1px solid var(--c-border);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.5);
+  background: #fafaff;
+}
+.vmd-thumb.placeholder {
+  display: grid; place-items: center;
+  background: linear-gradient(135deg, #f7f4ff 0%, #fff 40%, #f0ecff 100%);
+  color: #9b96c8; font-size: 12px;
+}
+.vmd-spark {
+  display: inline-block; padding: 6px 10px; border-radius: 999px;
+  background: #f2ecff; color: #7b5cff; border: 1px dashed #d7cffc;
+}
+.vmd-chip {
+  position: absolute; bottom: 8px; left: 8px; padding: 4px 8px; font-size: 12px;
+  color: #16a34a; background: #def7e6; border: 1px solid rgba(22,163,74,.28);
+  border-radius: 999px; box-shadow: 0 2px 6px rgba(0,0,0,.05);
+}
+.pulse-once { animation: vmd-pulse 900ms ease; }
+@keyframes vmd-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(123,92,255,.0); transform: scale(.995); }
+  35% { box-shadow: 0 0 0 6px rgba(123,92,255,.18); transform: scale(1.005); }
+  100% { box-shadow: 0 0 0 0 rgba(123,92,255,.0); transform: scale(1); }
+}
+
+.vmd-pick {
+  min-height: 180px;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  padding: 8px;
+  background: #fff;
+}
+
+/* ===== Footer ===== */
+.vmd-footer {
+  padding: 12px 16px;
+  border-top: 1px solid var(--c-border);
+  background: #fff;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.vmd-btn {
+  appearance: none; border: 1px solid var(--c-border); background: #fff;
+  color: var(--c-text); padding: 10px 14px; border-radius: 12px; font-weight: 700;
+  cursor: pointer; transition: transform 80ms ease, box-shadow 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.vmd-btn:hover { box-shadow: 0 4px 14px rgba(29, 16, 63, 0.1); }
+.vmd-btn:active { transform: translateY(1px); }
+.vmd-btn:disabled { opacity: .6; cursor: not-allowed; }
+.vmd-btn.ghost:hover { background: #faf8ff; border-color: #d9d2ff; }
+.vmd-btn.primary {
+  color: #fff; border-color: transparent;
+  background: linear-gradient(90deg, #9b87ff, #7b5cff); position: relative; overflow: hidden;
+}
+.vmd-btn.primary:hover { filter: brightness(1.05); }
+.vmd-btn.primary:active { filter: brightness(0.98); }
+.btn-gloss {
+  position: absolute; inset: 0;
+  background: linear-gradient(120deg, transparent 0%, rgba(255,255,255,.35) 35%, transparent 70%);
+  transform: translateX(-120%); transition: transform .7s ease;
+}
+.vmd-btn.primary:hover .btn-gloss { transform: translateX(0%); }
+
+/* ===== Error (Toast-like) ===== */
+.vmd-error {
+  margin-top: 6px; background: #fff3f3; color: #a31224;
+  border: 1px solid #ffd0d4; padding: 8px 10px; border-radius: 10px;
+}
+
+/* ===== Scrollbar (only inside modal body) ===== */
+.vmd-body::-webkit-scrollbar { height: 10px; width: 10px; }
+.vmd-body::-webkit-scrollbar-thumb { background: #d6d2f3; border-radius: 999px; }
+.vmd-body::-webkit-scrollbar-track { background: #f7f6ff; }
+
+/* =======================================================
+   ★ 強制オーバーライド：文字が見えない問題を確実に潰す
+   ======================================================= */
+
+/* 1) モーダル配下のフォームに“強制”で色を当てる */
+.vmd-body input,
+.vmd-body textarea,
+.vmd-body select,
+.vmd-body input[type="text"],
+.vmd-body input[type="search"],
+.vmd-body input[type="email"],
+.vmd-body input[type="url"],
+.vmd-body input[type="number"],
+.vmd-body input[type="tel"],
+.vmd-body input[type="password"] {
+  color: #1e1d2d !important;
+  -webkit-text-fill-color: #1e1d2d !important;  /* Safari/Chrome */
+  background-color: #ffffff !important;
+  text-shadow: none !important;
+  mix-blend-mode: normal !important;
+  filter: none !important;
+  opacity: 1 !important;
+  caret-color: #1e1d2d !important;
+  text-decoration: none !important;
+}
+
+/* 2) プレースホルダーを濃いめで */
+.vmd-body input::placeholder,
+.vmd-body textarea::placeholder {
+  color: #8a88a8 !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+}
+
+/* 3) WebKitのオートフィル(黄色背景)でも文字を濃く維持 */
+.vmd-body input:-webkit-autofill,
+.vmd-body textarea:-webkit-autofill,
+.vmd-body select:-webkit-autofill {
+  -webkit-text-fill-color: #1e1d2d !important;
+  box-shadow: 0 0 0 1000px #ffffff inset !important;
+  transition: background-color 5000s ease-in-out 0s !important;
+}
+
+/* 4) 右端の装飾が重なるケースに備えてパディングを少し追加 */
+.vmd-input, .vmd-textarea { padding-right: 14px !important; }
+
+
+
+/* ===== Nuke Override: モーダル内の文字が見えない問題を確実に潰す ===== */
+
+/* モーダル配下の全要素の文字色を強制 */
+.vmd-modal, .vmd-modal * {
+  color: #1e1d2d !important;
+  -webkit-text-fill-color: #1e1d2d !important; /* Safari/Chrome autofill対策 */
+  text-shadow: none !important;
+  mix-blend-mode: normal !important;
+  opacity: 1 !important;
+  filter: none !important;
+}
+
+/* 入力系は背景も真っ白を強制 */
+.vmd-modal input,
+.vmd-modal textarea,
+.vmd-modal select {
+  background: #ffffff !important;
+  border-color: #dedbea !important;
+  caret-color: #1e1d2d !important;
+}
+
+/* placeholder も濃く */
+.vmd-modal input::placeholder,
+.vmd-modal textarea::placeholder {
+  color: #7e7c9a !important;
+  opacity: 1 !important;
+}
+
+/* WebKitのオートフィル黄色を打ち消し＋文字色維持 */
+.vmd-modal input:-webkit-autofill,
+.vmd-modal textarea:-webkit-autofill,
+.vmd-modal select:-webkit-autofill {
+  -webkit-text-fill-color: #1e1d2d !important;
+  box-shadow: 0 0 0 1000px #ffffff inset !important;
+  transition: background-color 9999s ease-in-out 0s !important;
+}
+
+/* 右端になにかが重なってる場合に備えて余白足し */
+.vmd-modal .vmd-input,
+.vmd-modal .vmd-textarea { padding-right: 16px !important; }
+
+/* ====== VisionModal スタイル調整 ====== */
+
+/* 入力欄：枠を広めに、文字サイズは控えめに */
+.vmd-input,
+.vmd-textarea,
+.vmd-select {
+  width: 100%;
+  font-size: 14px;       /* 少し小さめで読みやすい */
+  line-height: 1.6;      /* 行間を広めに */
+  padding: 10px 12px;    /* 枠の内側をゆったり */
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  box-sizing: border-box;
+  color: #1e1d2d;
+  background: #fff;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.vmd-input:focus,
+.vmd-textarea:focus,
+.vmd-select:focus {
+  border-color: #7b5cff;
+  box-shadow: 0 0 0 3px rgba(123, 92, 255, 0.2);
+  outline: none;
+}
+
+/* テキストエリアは高さを広めに */
+.vmd-textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+
+/* ラベルを強調 */
+.vmd-label {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 4px;
+  color: #444;
+  display: block;
+}
+
+/* 見出し（タイトル） */
+.vmd-title {
+  font-size: 18px;
+  font-weight: bold;
+  color: #1e1d2d;
+  margin-bottom: 8px;
+}
+
+/* 保存ボタン */
+.vmd-btn.primary {
+  background: linear-gradient(135deg, #7b5cff, #a86bff);
+  color: #fff;
+  padding: 10px 18px;
+  font-size: 14px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+}
+.vmd-btn.primary:hover {
+  background: linear-gradient(135deg, #6a4ee6, #945dff);
+  transform: translateY(-1px);
+}
+
+/* キャンセルボタン */
+.vmd-btn.ghost {
+  background: #f5f5f5;
+  color: #333;
+  padding: 10px 18px;
+  font-size: 14px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.vmd-btn.ghost:hover {
+  background: #e9e9e9;
+}
+
+/* サムネ画像表示エリア */
+.vmd-thumb {
+  border-radius: 8px;
+  max-height: 120px;
+  object-fit: cover;
+}
+
+/* プレースホルダー（見やすい色） */
+.vmd-input::placeholder,
+.vmd-textarea::placeholder {
+  color: #999;
+  font-size: 13px;
+}
+
+/* =========== StageChecklistInline =========== */
+.sci-wrap{
+  --c-border:#eceaf7; --c-text:#2b2a3e; --c-sub:#7d7a97;
+  --c-ac:#7b5cff; --c-ok:#16a34a;
+  background:#fff; border:1px solid var(--c-border);
+  border-radius:12px; padding:10px; position:relative;
+}
+.sci-row{font-size:13px; color:var(--c-text)}
+.sci-err{color:#a31224}
+.sci-block{display:grid; gap:6px}
+.sci-head{display:flex; align-items:center; justify-content:space-between}
+.sci-sub{font-size:12px; color:var(--c-sub)}
+.sci-badge{
+  font-size:11px; padding:2px 8px; border-radius:999px; font-weight:700;
+  border:1px solid #e9e7ff; background:#efeaff; color:var(--c-ac);
+}
+.sci-badge.ok{ background:#def7e6; color:var(--c-ok); border-color:rgba(22,163,74,.28) }
+
+.sci-gauge{height:10px; border-radius:999px; background:#f0eff8; overflow:hidden}
+.sci-gauge__bar{height:100%; background:linear-gradient(90deg,#b9a6ff,#7b5cff)}
+
+.sci-line{font-size:12px; color:#585575; text-align:right}
+
+/* 達成演出 */
+.sci-wrap.is-reached{ border-color:var(--c-ok); box-shadow:0 6px 20px rgba(22,163,74,.12) }
+.sci-glow{position:absolute; inset:0; border-radius:12px; box-shadow:0 0 0 3px rgba(22,163,74,.22) inset; animation:sci-pop .8s ease}
+@keyframes sci-pop{0%{transform:scale(.985)}100%{transform:scale(1)}}
+.sci-confetti{position:absolute; right:10px; top:10px; width:10px; height:10px; border-radius:2px;
+  background:conic-gradient(#16a34a,#9ff0b1,#16a34a); filter:drop-shadow(0 2px 4px rgba(0,0,0,.22));
+  animation:sci-conf 1.1s ease}
+@keyframes sci-conf{0%{transform:translateY(-6px) scale(.9);opacity:0}15%{opacity:1}100%{transform:translateY(-24px) scale(1.05);opacity:0}}
+
+/* 操作ボタン */
+.sci-actions{display:flex; gap:8px; margin-top:6px}
+.sci-actions button{
+  border:1px solid #e2def9; background:#fff; padding:6px 10px; border-radius:999px; font-size:12px; cursor:pointer;
+}
+.sci-actions button:hover{ background:#f8f6ff }
+
+/* 色分け（variant） */
+.sci--seed  { --c-border:#e8ecff }
+.sci--mid   { --c-border:#ffe9f3 }
+.sci--late  { --c-border:#ffedd7 }
+.sci--success{ --c-border:#dff5e7 }
+.sci--alert { --c-border:#ffe0e0 }
+.sci--seed  .sci-gauge__bar{ background:linear-gradient(90deg,#a9c8ff,#6ea8ff)}
+.sci--mid   .sci-gauge__bar{ background:linear-gradient(90deg,#ffb4d6,#ff7db3)}
+.sci--late  .sci-gauge__bar{ background:linear-gradient(90deg,#ffc27a,#ff9952)}
+.sci--success .sci-gauge__bar{ background:linear-gradient(90deg,#61de91,#16a34a)}
+.sci--alert .sci-gauge__bar{ background:linear-gradient(90deg,#ff8d8d,#e23b3b)}
+
+
+.sci-gauge__bar {
+  height: 100%;
+  background: linear-gradient(90deg, #b9a6ff, #7b5cff);
+  border-radius: 999px;
+  transition: width 0.6s ease-in-out; /* ← アニメーション追加 */
+}
+
+/* 達成バッジにキラメキ */
+.sci-badge.ok {
+  position: relative;
+  overflow: hidden;
+}
+.sci-badge.ok::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -50%; width: 200%; height: 100%;
+  background: linear-gradient(120deg, transparent, rgba(255,255,255,.6), transparent);
+  transform: skewX(-20deg);
+  animation: shine 2.5s infinite;
+}
+@keyframes shine {
+  0% { left: -50%; }
+  100% { left: 100%; }
+}
+
+/* Hoverでふわっと浮かす */
+.sci-wrap:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 16px rgba(0,0,0,.08);
+  transition: all .3s ease;
+}
