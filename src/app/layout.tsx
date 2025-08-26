@@ -13,6 +13,15 @@ export const metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ja">
+      <head>
+        {/* VAPID をDOM/Windowへ供給（SWやクライアントから常に取得可能に） */}
+        <meta name="vapid" content={process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY} />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.__VAPID_PUBLIC_KEY__=${JSON.stringify(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || '')};`,
+          }}
+        />
+      </head>
       <body style={{ margin: 0 }}>
         <Providers>
           {/* LayoutClient は Client Component 側。ここに PushRegister を組み込む */}
@@ -22,3 +31,4 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   )
 }
+

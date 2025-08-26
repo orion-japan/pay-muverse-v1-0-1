@@ -46,8 +46,24 @@ export default function AlbumPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_code: userCode }),
       });
-      const data = await res.json();
-      if (data?.posts) setPosts(data.posts);
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => '(no body)');
+        console.error('[AlbumPage] /api/my-posts NG', res.status, text);
+        return;
+      }
+
+      const data = await res.json().catch((e) => {
+        console.error('[AlbumPage] JSON parse error:', e);
+        return null;
+      });
+
+      if (data?.posts) {
+        console.log('[AlbumPage] posts loaded:', data.posts.length);
+        setPosts(data.posts);
+      } else {
+        console.warn('[AlbumPage] no posts in response:', data);
+      }
     } catch (e) {
       console.error('[AlbumPage] fetchPosts error:', e);
     }
@@ -55,12 +71,16 @@ export default function AlbumPage() {
 
   useEffect(() => {
     fetchPosts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userCode]);
 
   const filtered = useMemo(() => {
     const list = posts
-      // board_type を考慮（null もしくは 'album' のみ表示）
-      .filter((p) => !p.board_type || p.board_type === 'album')
+      // board_type の表示対象を拡張（'album' | 'default' | 'self' | null/空 を表示）
+      .filter((p) => {
+        const bt = (p.board_type ?? '').toLowerCase();
+        return bt === '' || bt === 'album' || bt === 'default' || bt === 'self';
+      })
       .filter((p) =>
         [p.title, p.content, ...(p.tags || [])]
           .join(' ')
@@ -76,7 +96,6 @@ export default function AlbumPage() {
       });
     return list;
   }, [posts, search, sort]);
-  
 
   const toggleSelect = (postId: string) => {
     setSelectedIds((prev) => {
@@ -157,7 +176,9 @@ export default function AlbumPage() {
             setSelectedPost(null);
           }}
           onEditSuccess={(updated) => {
-            setPosts((prev) => prev.map((p) => (p.post_id === updated.post_id ? updated : p)));
+            setPosts((prev) =>
+              prev.map((p) => (p.post_id === updated.post_id ? updated : p))
+            );
           }}
           onDeleteSuccess={(deletedId) => {
             setPosts((prev) => prev.filter((p) => p.post_id !== deletedId));
@@ -175,9 +196,19 @@ export default function AlbumPage() {
           }
         }}
         style={{
-          position: 'fixed', bottom: 80, right: 20, width: 60, height: 60,
-          borderRadius: '50%', background: '#ff4dd2', color: '#fff',
-          fontSize: 28, border: 'none', boxShadow: '0 2px 8px rgba(0,0,0,0.2)', cursor: 'pointer', zIndex: 100,
+          position: 'fixed',
+          bottom: 80,
+          right: 20,
+          width: 60,
+          height: 60,
+          borderRadius: '50%',
+          background: '#ff4dd2',
+          color: '#fff',
+          fontSize: 28,
+          border: 'none',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+          cursor: 'pointer',
+          zIndex: 100,
         }}
         aria-label="Qモード/投稿"
       >
@@ -188,9 +219,18 @@ export default function AlbumPage() {
         <button
           onClick={resetQMode}
           style={{
-            position: 'fixed', bottom: 150, right: 20, width: 60, height: 36,
-            borderRadius: 12, background: '#666', color: '#fff', border: 'none',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.2)', cursor: 'pointer', zIndex: 100,
+            position: 'fixed',
+            bottom: 150,
+            right: 20,
+            width: 60,
+            height: 36,
+            borderRadius: 12,
+            background: '#666',
+            color: '#fff',
+            border: 'none',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+            cursor: 'pointer',
+            zIndex: 100,
           }}
         >
           解除

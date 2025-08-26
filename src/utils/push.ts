@@ -5,15 +5,25 @@ export async function registerPush(userCode: string) {
     throw new Error('Push not supported');
   }
 
-  const reg = (await navigator.serviceWorker.getRegistration())
-    ?? (await navigator.serviceWorker.register('/service-worker.js', { scope: '/' }));
+  const reg =
+    (await navigator.serviceWorker.getRegistration()) ??
+    (await navigator.serviceWorker.register('/service-worker.js', { scope: '/' }));
 
   const perm = await Notification.requestPermission();
   if (perm !== 'granted') throw new Error('permission denied');
 
-  const vapidPublicKey = (window as any).__VAPID_PUBLIC_KEY__ as string | undefined;
+  // ---- VAPID key: env → window → <meta> の順で取得し、どこから来たかログ ----
+  const fromEnv = (process as any)?.env?.NEXT_PUBLIC_VAPID_PUBLIC_KEY as string | undefined;
+  const fromWin = (window as any).__VAPID_PUBLIC_KEY__ as string | undefined;
+  const fromMeta = (document.querySelector('meta[name="vapid"]') as HTMLMetaElement | null)?.content;
+
+  const vapidPublicKey = fromEnv || fromWin || fromMeta || '';
+  const src = fromEnv ? 'env' : fromWin ? 'window' : fromMeta ? 'meta' : 'none';
+  console.info('[push] VAPID src =', src, 'prefix =', vapidPublicKey?.slice(0, 12));
+
   if (!vapidPublicKey) throw new Error('missing VAPID public key');
 
+  // 既存がなければ購読
   let sub = await reg.pushManager.getSubscription();
   if (!sub) {
     sub = await reg.pushManager.subscribe({

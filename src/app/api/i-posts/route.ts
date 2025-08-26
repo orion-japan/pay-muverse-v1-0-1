@@ -40,9 +40,9 @@ type PostInsert = {
   category?: string | null;
   tags?: string[] | string | null;
   media_urls: string[];
-  visibility?: 'public' | 'private';
-  board_type: string | null;
-  is_posted?: boolean;
+  visibility?: 'public' | 'private' | null;
+  board_type?: 'album' | 'iboard' | 'self' | 'default' | string | null;
+  is_posted?: boolean | null;
   layout_type?: string | null;
 };
 
@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
     const mode = searchParams.get('mode') ?? 'create'; // create: Myページ, board: 公開フィード
 
     // レガシー 'i' 指定も許容
-    const boardType = rawBoardType === 'i' ? 'iboard' : rawBoardType;
+    const bt = (rawBoardType === 'i' ? 'iboard' : rawBoardType).toLowerCase();
 
     if (mode === 'create' && !userCode) {
       return NextResponse.json({ error: 'userCode が必要です' }, { status: 400 });
@@ -81,12 +81,11 @@ export async function GET(req: NextRequest) {
     let query = admin
       .from('posts')
       .select('*')
-      .eq('board_type', boardType)
+      .eq('board_type', bt)
       .eq('is_posted', true);
 
     if (mode === 'create') {
       // Createページ: 自分の private（下書きや非公開運用ならこちら）
-      // もし Createでも公開を見せたい場合は visibility 条件を外してください。
       query = query.eq('user_code', userCode).eq('visibility', 'private');
     } else if (mode === 'board') {
       // Boardページ: 公開投稿だけ（ユーザー不要）
@@ -121,27 +120,46 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'media_urls が空です' }, { status: 400 });
     }
 
+    // 許可リストで board_type をサニタイズ
+    const allowedBoardTypes = ['album', 'iboard', 'self', 'default'] as const;
+    let board_type = (body.board_type ?? 'album').toString().toLowerCase();
+    if (!allowedBoardTypes.includes(board_type as any)) {
+      // レガシー対応: 'i' -> 'iboard'
+      if (board_type === 'i') board_type = 'iboard';
+      else board_type = 'album';
+    }
+
+    // visibility をサニタイズ
+    const allowedVis = ['public', 'private'] as const;
+    let visibility = (body.visibility ?? (board_type === 'album' ? 'private' : 'public')) as any;
+    if (!allowedVis.includes(visibility)) {
+      visibility = board_type === 'album' ? 'private' : 'public';
+    }
+
+    // is_posted 既定: true
+    const is_posted = typeof body.is_posted === 'boolean' ? body.is_posted : true;
+
+    // layout_type 既定
+    const layout_type = body.layout_type ?? 'default';
+
     // profile 情報（表示用メタ）
     const { data: profile } = await admin
       .from('profiles')
       .select('avatar_url')
       .eq('user_code', body.user_code)
-      .single();
+      .maybeSingle();
 
     const { data: user } = await admin
       .from('users')
       .select('click_username')
       .eq('user_code', body.user_code)
-      .single();
+      .maybeSingle();
 
-    // tags を正規化（string | string[] | null を string[] に）
+    // tags 正規化
     const normalizedTags: string[] = Array.isArray(body.tags)
-      ? body.tags.filter(Boolean)
+      ? body.tags.filter(Boolean) as string[]
       : typeof body.tags === 'string'
-      ? body.tags
-          .split(',')
-          .map((t) => t.trim())
-          .filter((t) => t.length > 0)
+      ? body.tags.split(',').map((t) => t.trim()).filter((t) => t.length > 0)
       : [];
 
     // Qコード卵
@@ -172,7 +190,6 @@ export async function POST(req: NextRequest) {
       },
     };
 
-    // サーバー側で Iボードの強制属性を上書き（安全）
     const insertData = {
       user_code: body.user_code,
       title: body.title ?? null,
@@ -180,21 +197,25 @@ export async function POST(req: NextRequest) {
       category: body.category ?? null,
       tags: normalizedTags,
       media_urls: body.media_urls,
-      visibility: 'public',        // 公開固定
-      is_posted: true,             // 投稿済み固定
-      board_type: 'iboard',        // ← Iボードで統一
-      layout_type: 'default',      // 予備
-      q_code: qCodeSeed,           // Qコード卵
+      visibility,          // ← クライアント/既定を尊重
+      is_posted,           // ← 既定 true
+      board_type,          // ← クライアント/既定を尊重
+      layout_type,
+      q_code: qCodeSeed,
     };
 
-    const { data, error } = await admin.from('posts').insert(insertData).select().limit(1);
+    const { data, error } = await admin
+      .from('posts')
+      .insert(insertData)
+      .select()
+      .limit(1);
 
     if (error) {
       console.error('[❌ supabase insert エラー]', error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    console.log('[✅ Iボード 投稿成功]', data);
+    console.log('[✅ 投稿成功]', data);
     return NextResponse.json(data?.[0] ?? null, { status: 201 });
   } catch (err: any) {
     console.error('[❌ 予期せぬエラー]', err);
