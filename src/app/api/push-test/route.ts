@@ -35,7 +35,7 @@ export async function POST(req: Request) {
       user_code: input.user_code ?? 'U-CKxc5NQQ',
       title:     input.title     ?? 'Muverse 通知テスト',
       body:      input.body      ?? 'これは通知のテストです',
-      url:       input.url       ?? 'https://muverse.jp/talk', // クリック先（任意で修正）
+      url:       input.url       ?? 'https://muverse.jp/',
       tag:       input.tag       ?? 'debug-test',
     };
 

@@ -5,19 +5,15 @@ export async function registerPush(userCode: string) {
     throw new Error('Push not supported');
   }
 
-  // SW 登録（既に登録済みならそのインスタンスを使う）
   const reg = (await navigator.serviceWorker.getRegistration())
     ?? (await navigator.serviceWorker.register('/service-worker.js', { scope: '/' }));
 
-  // 通知権限
   const perm = await Notification.requestPermission();
   if (perm !== 'granted') throw new Error('permission denied');
 
-  // VAPID 公開鍵（環境変数をページに埋めておく）
   const vapidPublicKey = (window as any).__VAPID_PUBLIC_KEY__ as string | undefined;
   if (!vapidPublicKey) throw new Error('missing VAPID public key');
 
-  // 既存購読があれば流用
   let sub = await reg.pushManager.getSubscription();
   if (!sub) {
     sub = await reg.pushManager.subscribe({
@@ -26,13 +22,12 @@ export async function registerPush(userCode: string) {
     });
   }
 
-  // サーバへ保存
   const body = {
     user_code: userCode,
     endpoint: sub.endpoint,
     keys: {
-      p256dh: arrayBufferToBase64(sub.getKey('p256dh')),
-      auth: arrayBufferToBase64(sub.getKey('auth')),
+      p256dh: abToB64(sub.getKey('p256dh')),
+      auth: abToB64(sub.getKey('auth')),
     },
   };
 
@@ -42,9 +37,7 @@ export async function registerPush(userCode: string) {
     body: JSON.stringify(body),
   });
 
-  if (!res.ok) {
-    throw new Error(`register-push failed: ${await res.text()}`);
-  }
+  if (!res.ok) throw new Error(`register-push failed: ${await res.text()}`);
   return true;
 }
 
@@ -56,8 +49,7 @@ function urlBase64ToUint8Array(base64String: string) {
   for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
   return outputArray;
 }
-
-function arrayBufferToBase64(buf: ArrayBuffer | null) {
+function abToB64(buf: ArrayBuffer | null) {
   if (!buf) return '';
   const bytes = new Uint8Array(buf);
   let binary = '';
