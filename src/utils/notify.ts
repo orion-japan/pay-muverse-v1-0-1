@@ -17,7 +17,7 @@ export async function notifyReply(params: {
       body: JSON.stringify({
         user_code: targetUserCode,
         kind: "rtalk",                          // consents.allow_r_talk 判定を有効に
-        title: "あなたのつぶやきに返信がありました",
+        title: "あなたのSelfTalkに返信がありました",
         body: preview.slice(0, 80),
         url,
         tag: `reply-${postId}`,                 // 同一スレは上書き

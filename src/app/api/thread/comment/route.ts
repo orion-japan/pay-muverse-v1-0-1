@@ -113,7 +113,7 @@ export async function POST(req: NextRequest) {
           [...recipients].map((to) =>
             sendPush(baseUrl, {
               to,
-              title: 'あなたのつぶやきに返信がありました',
+              title: 'あなたのSelfTalkに返信がありました',
               body: preview,
               url: `/thread/${threadId}?focus=${inserted.post_id}`,
               kind: 'rtalk',

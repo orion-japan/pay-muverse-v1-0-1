@@ -1,114 +1,196 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { registerPush } from '@/utils/push';
-import { useAuth } from '@/context/AuthContext';
+import { useEffect, useState } from 'react';
+import { getAuth } from 'firebase/auth';
 
-function isAndroidChrome() {
-  if (typeof navigator === 'undefined') return false;
-  const ua = navigator.userAgent.toLowerCase();
-  return ua.includes('android') && ua.includes('chrome') && !ua.includes('edg');
+type Plan = 'free' | 'regular' | 'premium' | 'master' | 'admin';
+type Props = { planStatus: Plan };
+
+// VAPIDキー変換
+function urlBase64ToUint8Array(base64: string) {
+  const padding = '='.repeat((4 - (base64.length % 4)) % 4);
+  const base64Safe = (base64 + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64Safe);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
 }
 
-export default function PushHelpCard() {
-  const { userCode } = useAuth();
-  const [perm, setPerm] = useState<NotificationPermission | 'unsupported'>('default');
-  const [subscribed, setSubscribed] = useState<boolean | null>(null);
-  const onAndroidChrome = useMemo(isAndroidChrome, []);
+// iPhoneでPWA起動しているか？
+function isStandalone() {
+  return matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone === true;
+}
+
+export default function NotificationSettingsBox({ planStatus }: Props) {
+  const [perm, setPerm] = useState<NotificationPermission>(
+    typeof Notification !== 'undefined' ? Notification.permission : 'default'
+  );
+  const [endpoint, setEndpoint] = useState<string>('');
+  const [platform, setPlatform] = useState<'ios' | 'android' | 'desktop'>('desktop');
+  const [busy, setBusy] = useState(false);
+  const [log, setLog] = useState<string>('');
+
+  const append = (m: string) => setLog(prev => (prev ? prev + '\n' + m : m));
 
   useEffect(() => {
-    if (typeof Notification === 'undefined') {
-      setPerm('unsupported');
-    } else {
-      setPerm(Notification.permission);
-    }
-
-    (async () => {
-      if (!('serviceWorker' in navigator)) {
-        setSubscribed(null);
-        return;
-      }
-      try {
-        const reg = await navigator.serviceWorker.getRegistration();
-        const sub = await reg?.pushManager.getSubscription();
-        setSubscribed(!!sub);
-      } catch {
-        setSubscribed(null);
-      }
-    })();
+    const ua = navigator.userAgent || '';
+    if (/iPhone|iPad|iPod/i.test(ua)) setPlatform('ios');
+    else if (/Android/i.test(ua)) setPlatform('android');
+    else setPlatform('desktop');
+    setPerm(typeof Notification !== 'undefined' ? Notification.permission : 'default');
   }, []);
 
-  const askPermission = async () => {
-    if (typeof Notification === 'undefined') return;
+  async function getSW() {
+    const reg =
+      (await navigator.serviceWorker.getRegistration()) ??
+      (await navigator.serviceWorker.register('/service-worker.js'));
+    return reg;
+  }
+
+  // 通知購読登録
+  async function enablePushOnClick() {
     try {
+      setBusy(true);
+      append('enable start');
+      if (!('serviceWorker' in navigator) || !('PushManager' in window))
+        throw new Error('このブラウザはプッシュ非対応です');
+
+      // iPhoneはPWA必須
+      if (platform === 'ios' && !isStandalone()) {
+        throw new Error('iPhoneは「ホーム画面に追加」したPWAから開いてください');
+      }
+
+      const reg = await getSW();
+      append('SW ready');
+
       const p = await Notification.requestPermission();
       setPerm(p);
-    } catch {}
-  };
+      if (p !== 'granted') throw new Error('通知が許可されませんでした');
 
-  const reSubscribe = async () => {
-    if (!userCode) return;
-    try {
-      await registerPush(userCode);
-      const reg = await navigator.serviceWorker.getRegistration();
-      const sub = await reg?.pushManager.getSubscription();
-      setSubscribed(!!sub);
-      alert('購読を再登録しました');
-    } catch (e) {
-      alert('購読の再登録に失敗しました');
-      console.error(e);
-    }
-  };
+      const vapid = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapid),
+      });
+      setEndpoint(sub.endpoint);
+      append('subscribed endpoint=' + sub.endpoint);
 
-  const sendTest = async () => {
-    if (!userCode) return;
-    try {
-      await fetch('/api/push/send', {
+      // Firebase UID
+      const auth = getAuth();
+      const user = auth.currentUser;
+      if (!user) throw new Error('ログインしてください');
+      const idToken = await user.getIdToken();
+
+      // 任意の文字列ID（DBは text に変更済み）
+      const userCode = 'U-DEBUG-001';
+
+      const res = await fetch('/api/register-push', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${idToken}`,
+          'x-mu-user-code': userCode,
+        },
+        body: JSON.stringify(sub),
+      });
+      const j = await res.json();
+      append('register-push: ' + JSON.stringify(j));
+      if (!j?.ok) throw new Error(j?.error || 'register failed');
+
+      alert('通知の準備ができました');
+    } catch (e: any) {
+      append('ERROR ' + (e?.message || e));
+      alert(e?.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // 購読やり直し
+  async function resubscribe() {
+    try {
+      setBusy(true);
+      append('resubscribe start');
+      const reg = await getSW();
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) await sub.unsubscribe();
+      append('old subscription cleared');
+      await enablePushOnClick();
+    } catch (e: any) {
+      append('ERROR ' + (e?.message || e));
+      alert(e?.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // テスト送信
+  async function sendTest() {
+    try {
+      setBusy(true);
+      append('sendTest start');
+      const uid = getAuth().currentUser?.uid;
+      if (!uid) throw new Error('先に「通知を有効にする」を押してください');
+      const res = await fetch('/api/push-test', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          user_code: userCode,
-          kind: 'rtalk',
-          title: 'テスト通知',
-          body: '通知の受信テストです',
-          url: '/',
-          tag: 'debug-to-phone',
-          renotify: true,
+          uid,
+          title: 'Muverse テスト',
+          body: platform === 'ios' ? 'iPhone PWAへ通知テスト' : '通知テスト',
+          url: '/self',
+          tag: 'muverse',
         }),
       });
-      alert('テスト通知を送信しました（OS側の表示を確認してください）');
-    } catch (e) {
-      console.error(e);
+      const text = await res.text();
+      append('push-test: ' + text);
+      alert('送信しました（数秒で表示されます）');
+    } catch (e: any) {
+      append('ERROR ' + (e?.message || e));
+      alert(e?.message || String(e));
+    } finally {
+      setBusy(false);
     }
-  };
+  }
+
+  const granted = perm === 'granted';
+  const isIOSPWA = platform === 'ios' && isStandalone();
 
   return (
-    <section style={{ border: '1px solid #eee', borderRadius: 12, padding: 16, marginTop: 16 }}>
-      <h3 style={{ margin: '0 0 8px' }}>プッシュ通知の受信設定</h3>
-      <div style={{ fontSize: 14, lineHeight: 1.6 }}>
-        <div>ブラウザ権限：<strong>{perm === 'unsupported' ? '未対応' : perm}</strong></div>
-        <div>購読状態：<strong>{subscribed === null ? '不明' : subscribed ? '購読中' : '未購読'}</strong></div>
-        {onAndroidChrome && (
-          <div style={{ marginTop: 8, opacity: .8 }}>
-            ※ Android Chrome は OS/ブラウザの仕様上、Web ページから設定画面へ直接遷移できません。下の「手順を見る」から操作してください。
+    <section style={{ border: '1px solid #eee', borderRadius: 12, padding: 16 }}>
+      <h3 style={{ marginBottom: 8 }}>通知・公開設定</h3>
+
+      <div style={{ fontSize: 13, color: '#555', marginBottom: 8 }}>
+        権限: <b>{perm}</b> / 実行環境: <b>{platform}{platform==='ios' ? (isIOSPWA ? ' (PWA)' : ' (Safari)') : ''}</b>
+        {endpoint && (
+          <div style={{ marginTop: 4, overflowWrap: 'anywhere' }}>
+            endpoint: {endpoint}
           </div>
         )}
       </div>
 
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
-        <button onClick={askPermission}>通知を許可する</button>
-        <button onClick={reSubscribe} disabled={!userCode}>購読をやり直す</button>
-        <button onClick={sendTest} disabled={!userCode}>テスト通知を送る</button>
-        <details style={{ marginTop: 8 }}>
-          <summary>手順を見る（Android Chrome）</summary>
-          <ol style={{ margin: '8px 0 0 18px' }}>
-            <li>右上の「︙」メニュー → <b>サイト設定</b> → <b>通知</b></li>
-            <li><b>www.muverse.jp</b> を <b>許可</b> にする</li>
-            <li>画面を戻って Muverse を再読み込み</li>
-          </ol>
-          <div style={{ opacity: .8, fontSize: 13 }}>※ 機種により表記が多少異なる場合があります。</div>
-        </details>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+        <button onClick={enablePushOnClick} disabled={busy}>
+          通知を有効にする
+        </button>
+        <button onClick={resubscribe} disabled={busy}>
+          購読をやり直す
+        </button>
+        <button onClick={sendTest} disabled={busy || !granted}>
+          テスト通知を送る
+        </button>
       </div>
+
+      {platform === 'ios' && !isIOSPWA && (
+        <div style={{ fontSize: 12, color: '#b35', marginBottom: 8 }}>
+          ※ iPhoneは「共有 → ホーム画面に追加」したPWAから開かないと通知は届きません
+        </div>
+      )}
+
+      <details>
+        <summary>ログ</summary>
+        <pre style={{ whiteSpace: 'pre-wrap' }}>{log || '—'}</pre>
+      </details>
     </section>
   );
 }
