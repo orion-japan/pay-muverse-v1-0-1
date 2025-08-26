@@ -16,14 +16,14 @@ export default function DashboardPage() {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const router = useRouter();
 
-  // 追加: プラン/ロール取得（master/admin 判定用）
-  const [planStatus, setPlanStatus] = useState<string | null>(null);
+  // ★ iros解放可否（master / admin 判定）
+  const [isIrosAllowed, setIsIrosAllowed] = useState(false);
 
   // LIVEモーダル
   const [liveModalOpen, setLiveModalOpen] = useState(false);
   const [liveModalText, setLiveModalText] = useState('');
 
-  // 追加: アクセス拒否モーダル
+  // アクセス拒否モーダル
   const [denyOpen, setDenyOpen] = useState(false);
 
   useEffect(() => {
@@ -38,32 +38,58 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [content]);
 
-  // 追加: user ログイン時に plan_status を取得
+  // ★ ユーザー情報を多系統から取得して master/admin を総合判定
   useEffect(() => {
     let aborted = false;
     if (!user) {
-      setPlanStatus(null);
+      setIsIrosAllowed(false);
       return;
     }
-    (async () => {
+
+    const tryFetch = async (url: string) => {
       try {
-        const res = await fetch('/api/get-user-info', { cache: 'no-store' });
-        const j = await res.json().catch(() => ({} as any));
-        if (!aborted) {
-          // API のキー名ゆらぎ対策
-          const ps = j?.plan_status ?? j?.planStatus ?? null;
-          setPlanStatus(ps);
-        }
+        const res = await fetch(url, { cache: 'no-store' });
+        if (!res.ok) return null;
+        return (await res.json()) as any;
       } catch {
-        if (!aborted) setPlanStatus(null);
+        return null;
+      }
+    };
+
+    (async () => {
+      // どれかが生きていれば拾う
+      const meta =
+        (await tryFetch('/api/get-user-info')) ||
+        (await tryFetch('/api/user-info')) ||
+        (await tryFetch('/api/resolve-user')) ||
+        {};
+
+      // 可能性のあるキーを全部ケアして小文字比較
+      const role = String(meta?.role ?? meta?.user_role ?? '').toLowerCase();
+      const clickType = String(meta?.click_type ?? meta?.clickType ?? '').toLowerCase();
+      const plan = String(meta?.plan ?? meta?.plan_status ?? meta?.planStatus ?? '').toLowerCase();
+
+      const flagAdmin =
+        Boolean(meta?.is_admin) || role === 'admin' || clickType === 'admin';
+      const flagMaster =
+        Boolean(meta?.is_master) ||
+        role === 'master' ||
+        clickType === 'master' ||
+        plan === 'master';
+
+      const allowed = flagAdmin || flagMaster;
+
+      if (!aborted) {
+        setIsIrosAllowed(allowed);
+        // デバッグしたい時だけ:
+        // console.debug('[gate]', { role, clickType, plan, flagAdmin, flagMaster, allowed, meta });
       }
     })();
+
     return () => {
       aborted = true;
     };
   }, [user]);
-
-  const canAccessIros = planStatus === 'master' || planStatus === 'admin';
 
   // メニュー
   const menuItems: { title: string; link: string; img: string; alt: string }[] = [
@@ -86,8 +112,8 @@ export default function DashboardPage() {
       setIsLoginModalOpen(true);
       return;
     }
-    // 追加: iros ガード
-    if (link === '/iros' && !canAccessIros) {
+    // ★ iros ガード（master / admin のみ通す）
+    if (link === '/iros' && !isIrosAllowed) {
       setDenyOpen(true);
       return;
     }
@@ -159,7 +185,7 @@ export default function DashboardPage() {
           {menuItems.map((item, idx) => {
             const isIros = item.link === '/iros';
             const disabledByAuth = !user;
-            const disabledByRole = isIros && !canAccessIros;
+            const disabledByRole = isIros && !isIrosAllowed;
             const disabled = disabledByAuth || disabledByRole;
 
             return (
@@ -207,7 +233,7 @@ export default function DashboardPage() {
         {liveModalText}
       </AppModal>
 
-      {/* 追加: アクセス拒否モーダル */}
+      {/* アクセス拒否モーダル */}
       <AppModal
         open={denyOpen}
         title="アクセス権限が必要です"
