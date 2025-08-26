@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
       // 4) 親作者へPush（consents.allow_r_talk と連動させるなら kind:'rtalk'）
       await sendPushTo(parentAuthor, {
         kind: 'rtalk',
-        title: 'あなたのS Talkにコメントが届きました',
+        title: 'あなたのS Talkにコメントが届いたよ',
         body: author_name ? `${author_name} さんからの返信` : '新しい返信があります',
         url: `/thread/${parent_post_id}`,
         tag: `reply:${parent_post_id}`,

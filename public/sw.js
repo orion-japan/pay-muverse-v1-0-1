@@ -12,7 +12,7 @@ self.addEventListener("push", (event) => {
 
   const title = data.title || "お知らせ";
   const options = {
-    body: data.body || "通知が届きました",
+    body: data.body || "通知きた",
     icon: "/icons/icon-192x192.png", // PWAアイコンがあれば使う
     badge: "/icons/icon-72x72.png", // 小さいアイコン
     data: {
