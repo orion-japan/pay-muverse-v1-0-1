@@ -7,6 +7,9 @@ import LoginModal from '../components/LoginModal';
 import { useAuth } from '@/context/AuthContext';
 import AppModal from '@/components/AppModal';
 import { FileContentProvider } from '@/lib/content.file';
+// 先頭の import に追加
+import { getAuth } from 'firebase/auth';
+
 import type { HomeContent } from '@/lib/content';
 
 export default function DashboardPage() {
@@ -38,58 +41,84 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [content]);
 
-  // ★ ユーザー情報を多系統から取得して master/admin を総合判定
-  useEffect(() => {
-    let aborted = false;
-    if (!user) {
-      setIsIrosAllowed(false);
-      return;
+// ★ ユーザー情報を多系統から取得して master/admin を総合判定
+useEffect(() => {
+  let aborted = false;
+
+  // 未ログインなら即座に閉じる
+  if (!user) {
+    setIsIrosAllowed(false);
+    return;
+  }
+
+  // 汎用 fetch helpers
+  const tryGET = async (url: string) => {
+    try {
+      const res = await fetch(url, { cache: 'no-store', credentials: 'same-origin' });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch { return null; }
+  };
+
+  const tryPOST = async (url: string, body: any) => {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body ?? {}),
+      });
+      if (!res.ok) return null;     // 400/401/405 は null 扱い
+      return await res.json();
+    } catch { return null; }
+  };
+
+  (async () => {
+    // 🔑 Firebase ID トークンを確実に取得（AuthContext由来でなくてもOK）
+    const auth = getAuth();
+    const idToken =
+      (await auth.currentUser?.getIdToken(true).catch(() => null)) ??
+      (await (user as any)?.getIdToken?.(true).catch(() => null)) ??
+      null;
+
+    // ローカルでは /api/resolve-user が 404 なので呼ばない
+    // まず /api/user-info を POST（このエンドポイントが 400 を返していた）
+    const metaUserInfo = await tryPOST('/api/user-info', idToken ? { idToken } : {});
+
+    // 予備：古い互換APIがあれば GET
+    const metaGetCompat = await tryGET('/api/get-user-info');
+
+    // どれか取れたもの
+    const meta: any = metaUserInfo || metaGetCompat || {};
+
+    // --- 権限判定 ---
+    const role = String(meta.role ?? meta.user_role ?? '').toLowerCase();
+    const clickType = String(meta.click_type ?? meta.clickType ?? '').toLowerCase();
+    const plan = String(meta.plan ?? meta.plan_status ?? meta.planStatus ?? '').toLowerCase();
+
+    const truthy = (v: any) => v === true || v === 1 || v === '1' || v === 'true';
+
+    const flagAdmin =
+      truthy(meta.is_admin) || role === 'admin' || clickType === 'admin' || plan === 'admin';
+
+    const flagMaster =
+      truthy(meta.is_master) || role === 'master' || clickType === 'master' || plan === 'master';
+
+    const allowed = flagAdmin || flagMaster;
+
+    if (!aborted) {
+      setIsIrosAllowed(allowed);
+      // 一時デバッグしたい時だけコメント解除：
+      // console.debug('[iros gate]', { meta, role, clickType, plan, flagAdmin, flagMaster, allowed });
     }
+  })();
 
-    const tryFetch = async (url: string) => {
-      try {
-        const res = await fetch(url, { cache: 'no-store' });
-        if (!res.ok) return null;
-        return (await res.json()) as any;
-      } catch {
-        return null;
-      }
-    };
+  return () => { aborted = true; };
+}, [user]);
 
-    (async () => {
-      // どれかが生きていれば拾う
-      const meta =
-        (await tryFetch('/api/get-user-info')) ||
-        (await tryFetch('/api/user-info')) ||
-        (await tryFetch('/api/resolve-user')) ||
-        {};
 
-      // 可能性のあるキーを全部ケアして小文字比較
-      const role = String(meta?.role ?? meta?.user_role ?? '').toLowerCase();
-      const clickType = String(meta?.click_type ?? meta?.clickType ?? '').toLowerCase();
-      const plan = String(meta?.plan ?? meta?.plan_status ?? meta?.planStatus ?? '').toLowerCase();
 
-      const flagAdmin =
-        Boolean(meta?.is_admin) || role === 'admin' || clickType === 'admin';
-      const flagMaster =
-        Boolean(meta?.is_master) ||
-        role === 'master' ||
-        clickType === 'master' ||
-        plan === 'master';
-
-      const allowed = flagAdmin || flagMaster;
-
-      if (!aborted) {
-        setIsIrosAllowed(allowed);
-        // デバッグしたい時だけ:
-        // console.debug('[gate]', { role, clickType, plan, flagAdmin, flagMaster, allowed, meta });
-      }
-    })();
-
-    return () => {
-      aborted = true;
-    };
-  }, [user]);
 
   // メニュー
   const menuItems: { title: string; link: string; img: string; alt: string }[] = [
