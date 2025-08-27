@@ -496,3 +496,84 @@
 .vmd-modal .iboard-pane .album-storage-buttons {
   display: none !important;
 }
+
+/* 動的サムネサイズ */
+.vmd-grid {
+  display: grid;
+  gap: 8px;
+  /* 幅いっぱいに並べたい場合は列定義も thumb 連動に */
+  grid-template-columns: repeat(auto-fill, minmax(var(--thumb, 100px), 1fr));
+}
+
+/* 各サムネの枠を thumb に合わせる */
+.vmd-thumb-btn {
+  width: var(--thumb, 100px);
+  height: var(--thumb, 100px);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* 画像を枠にフィットさせる */
+.vmd-thumb-btn img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* ★ プレビュー全体を小さく固定（60px 正方形） */
+.vmd-preview{
+  width: 160px;
+  height: 160px;
+  border-radius: 10px;
+  overflow: hidden;           /* 下の画像がはみ出さない = カットされる */
+  position: relative;
+  background: #f7f7f8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* プレビュー画像は常にクロップ表示 */
+.vmd-preview > .vmd-thumb{
+  width: 100%;
+  height: 100%;
+  object-fit: cover;          /* ← 余白じゃなくトリミング */
+  display: block;
+}
+
+/* 「No Image」プレースホルダも60pxで中央に */
+.vmd-thumb.placeholder,
+.vmd-preview .vmd-spark{
+  font-size: 12px;
+  color: #888;
+}
+
+/* ★ Album グリッドのサムネはスライダー値（--thumb）で可変 */
+.vmd-grid{
+  --thumb: 60px;              /* JSからも上書き済み */
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--thumb), 1fr));
+  gap: 8px;
+}
+
+.vmd-thumb-btn{
+  width: var(--thumb);
+  height: var(--thumb);
+  padding: 0;
+  border: none;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.05);
+}
+
+.vmd-thumb-btn img{
+  width: 100%;
+  height: 100%;
+  object-fit: cover;          /* ← こちらもクロップ */
+  display: block;
+}

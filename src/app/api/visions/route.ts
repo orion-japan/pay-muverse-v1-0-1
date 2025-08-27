@@ -99,7 +99,7 @@ function generateQCode(): string {
   return `Q-${code}`;
 }
 
-// ===== GET: ビジョン一覧（sort_index→created_at の順）=====
+// ===== GET: ビジョン一覧 =====
 export async function GET(req: NextRequest) {
   console.log("📥 GET /api/visions");
   const user = await verifyFirebaseToken(req);
@@ -110,7 +110,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const phase = searchParams.get("phase");
 
-  let q = supabase.from("visions").select("*").eq("user_code", user_code);
+  let q = supabase.from("visions").select("*").eq("user_code", user_code); // * に iboard_thumb が含まれる前提
   if (phase) q = q.eq("phase", phase);
 
   const { data, error } = await q
@@ -143,6 +143,7 @@ export async function POST(req: NextRequest) {
     phase,
     stage,
     iboard_post_id,
+    iboard_thumb,            // ★ 追加: 受け取る
     q_code,
     sort_index,
     order_index, // 互換受け入れ
@@ -164,6 +165,7 @@ export async function POST(req: NextRequest) {
         phase,
         stage,
         iboard_post_id,
+        iboard_thumb,        // ★ 追加: 挿入
         q_code: finalQCode,
         sort_index: Number.isFinite(sort_index)
           ? Number(sort_index)
@@ -172,7 +174,7 @@ export async function POST(req: NextRequest) {
           : 0,
       },
     ])
-    .select("*")
+    .select("*") // iboard_thumb を返す
     .single();
 
   if (error) {
@@ -192,29 +194,27 @@ export async function PUT(req: NextRequest) {
   const body = await req.json();
 
   // ---- バッチ：{ order: [{ vision_id, sort_index }] }
-// ---- バッチ更新: { order: [{ vision_id, sort_index }] }
-if (Array.isArray(body?.order)) {
-  const now = new Date().toISOString();
-  for (const r of body.order) {
-    const vision_id = String(r.vision_id);
-    const sort_index = Number(r.sort_index);
+  if (Array.isArray(body?.order)) {
+    const now = new Date().toISOString();
+    for (const r of body.order) {
+      const vision_id = String(r.vision_id);
+      const sort_index = Number(r.sort_index);
 
-    const { error } = await supabase
-      .from('visions')
-      .update({ sort_index, updated_at: now })
-      .eq('vision_id', vision_id)
-      .eq('user_code', user_code); // ← 所有者の行だけ更新
+      const { error } = await supabase
+        .from("visions")
+        .update({ sort_index, updated_at: now })
+        .eq("vision_id", vision_id)
+        .eq("user_code", user_code);
 
-    if (error) {
-      console.error('❌ PUT visions batch error (vision_id=%s):', vision_id, error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      if (error) {
+        console.error("❌ PUT visions batch error (vision_id=%s):", vision_id, error);
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
     }
+    return NextResponse.json({ ok: true, count: body.order.length });
   }
-  return NextResponse.json({ ok: true, count: body.order.length });
-}
 
-
-  // ---- 単体：{ vision_id, sort_index, stage? } 互換で order_index も受ける
+  // ---- 単体：{ vision_id, sort_index, stage?, iboard_thumb? ... }
   const vision_id = body?.vision_id;
   if (!vision_id) {
     return NextResponse.json({ error: "Missing vision_id" }, { status: 400 });
@@ -234,6 +234,7 @@ if (Array.isArray(body?.order)) {
   if (body?.status) patch.status = body.status;
   if (body?.summary !== undefined) patch.summary = body.summary;
   if (body?.iboard_post_id !== undefined) patch.iboard_post_id = body.iboard_post_id;
+  if (body?.iboard_thumb !== undefined) patch.iboard_thumb = body.iboard_thumb; // ★ 追加: 更新
   if (body?.q_code !== undefined) patch.q_code = body.q_code;
 
   const { data, error } = await supabase

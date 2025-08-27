@@ -11,6 +11,47 @@ import DailyCheckPanel from '@/components/DailyCheckPanel';
 import '@/components/DailyCheckPanel.css';
 import StageChecklistInline from '@/components/StageChecklistInline';
 
+/* ====== album:// 解決用（private-posts の署名URL） ====== */
+const ALBUM_BUCKET = 'private-posts';
+
+function useThumbUrl(raw?: string | null) {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let canceled = false;
+    (async () => {
+      if (!raw) { if (!canceled) setUrl(null); return; }
+
+      if (raw.startsWith('album://')) {
+        let path = raw.replace(/^album:\/\//, '').replace(/^\/+/, '');
+        // うっかり 'private-posts/' が入っても剥がす
+        path = path.replace(new RegExp(`^(?:${ALBUM_BUCKET}/)+`), '');
+        const { data, error } = await supabase
+          .storage
+          .from(ALBUM_BUCKET)
+          .createSignedUrl(path, 60 * 60); // 1h
+        if (canceled) return;
+        setUrl(error ? null : (data?.signedUrl ?? null));
+      } else {
+        if (!canceled) setUrl(raw); // 直URL（public-posts 等）はそのまま
+      }
+    })();
+    return () => { canceled = true; };
+  }, [raw]);
+
+  return url;
+}
+
+// ループ内でも使える薄い子コンポーネント
+function VisionThumb({ raw, className = 'vision-thumb' }:{
+  raw?: string | null;
+  className?: string;
+}) {
+  const resolved = useThumbUrl(raw);
+  if (!resolved) return <div className={`${className} ${className}--ph`}>No Image</div>;
+  return <img src={resolved} alt="" className={className} />;
+}
+
 /* ========= ログ ========= */
 const L = {
   ord: (...a: any[]) => console.log('[Order]', ...a),
@@ -45,7 +86,7 @@ function saveOrder(phase: Phase, list: VisionWithTS[]) {
     localStorage.setItem(orderKey(phase), JSON.stringify(o));
     L.ord('save', phase, o);
   } catch (e) {
-    L.ord('save error', e);
+    L.ord('save error', e as any);
   }
 }
 
@@ -213,7 +254,7 @@ export default function VisionPage() {
     try { localStorage.removeItem(LS_SELECTED); } catch {}
   }, [phase]);
 
-  /** iBoard サムネ取得 */
+  /** iBoard サムネ取得（既存の album:// は尊重し、無い時だけ iBoard から補完） */
   async function enrichThumbs(rows: VisionWithTS[]): Promise<VisionWithTS[]> {
     const ids = rows.map(r => r.iboard_post_id).filter(Boolean) as string[];
     if (ids.length === 0) return rows;
@@ -230,10 +271,13 @@ export default function VisionPage() {
       const url = Array.isArray(p.media_urls) ? p.media_urls[0] : null;
       if (url) map.set(p.post_id, url);
     }
-    return rows.map(r => ({
-      ...r,
-      iboard_thumb: r.iboard_post_id ? map.get(r.iboard_post_id) ?? null : null,
-    }));
+
+    // ★ 既存の iboard_thumb（album://... など）があればそれを優先
+    return rows.map(r => {
+      const keepAlbum = (typeof r.iboard_thumb === 'string' && r.iboard_thumb) ? r.iboard_thumb : null;
+      const fromIboard = r.iboard_post_id ? (map.get(r.iboard_post_id) ?? null) : null;
+      return { ...r, iboard_thumb: keepAlbum ?? fromIboard };
+    });
   }
 
   /* ===== D&D ===== */
@@ -284,65 +328,65 @@ export default function VisionPage() {
       return;
     }
 
-// === 別カラムへ移動（from/to 両列をバッチPUT） ===
-const movedId = String(draggableId);
-const moved = visions.find(v => String(v.vision_id) === movedId);
-if (!moved) return;
+    // === 別カラムへ移動（from/to 両列をバッチPUT） ===
+    const movedId = String(draggableId);
+    const moved = visions.find(v => String(v.vision_id) === movedId);
+    if (!moved) return;
 
-// to列の一覧（移動先に差し込み）
-const toList = visions
-  .filter(v => v.stage === toSt && String(v.vision_id) !== movedId);
-const movedUpdated = { ...moved, stage: toSt };
-toList.splice(destination.index, 0, movedUpdated);
+    // to列の一覧（移動先に差し込み）
+    const toList = visions
+      .filter(v => v.stage === toSt && String(v.vision_id) !== movedId);
+    const movedUpdated = { ...moved, stage: toSt };
+    toList.splice(destination.index, 0, movedUpdated);
 
-// from列の一覧（移動元から除外）
-const fromList = visions
-  .filter(v => v.stage === fromSt && String(v.vision_id) !== movedId);
+    // from列の一覧（移動元から除外）
+    const fromList = visions
+      .filter(v => v.stage === fromSt && String(v.vision_id) !== movedId);
 
-// sort_index 振り直し
-const toWithIndex   = toList.map((v, i) => ({ ...v, sort_index: i }));
-const fromWithIndex = fromList.map((v, i) => ({ ...v, sort_index: i }));
+    // sort_index 振り直し
+    const toWithIndex   = toList.map((v, i) => ({ ...v, sort_index: i }));
+    const fromWithIndex = fromList.map((v, i) => ({ ...v, sort_index: i }));
 
-const others = visions.filter(v => v.stage !== toSt && v.stage !== fromSt);
-const next = [...others, ...fromWithIndex, ...toWithIndex];
+    const others = visions.filter(v => v.stage !== toSt && v.stage !== fromSt);
+    const next = [...others, ...fromWithIndex, ...toWithIndex];
 
-setVisions(next);
-saveOrder(phase, next);
+    setVisions(next);
+    saveOrder(phase, next);
 
-// サーバー保存（① stage を単体PUT → ② 並びをまとめてPUT）
-try {
-  const { getAuth, signInAnonymously } = await import('firebase/auth');
-  const auth = getAuth();
-  if (!auth.currentUser) await signInAnonymously(auth);
-  const token = await auth.currentUser!.getIdToken();
-  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+    // サーバー保存（① stage を単体PUT → ② 並びをまとめてPUT）
+    try {
+      const { getAuth, signInAnonymously } = await import('firebase/auth');
+      const auth = getAuth();
+      if (!auth.currentUser) await signInAnonymously(auth);
+      const token = await auth.currentUser!.getIdToken();
+      const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 
-  // ① 移動したカードの stage を保存（これが無いと画面を戻ると元に戻ります）
-  await fetch('/api/visions', {
-    method: 'PUT',
-    headers,
-    body: JSON.stringify({
-      vision_id: movedId,
-      stage: toSt,
-    }),
-  });
+      // ① 移動したカードの stage を保存
+      await fetch('/api/visions', {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({
+          vision_id: movedId,
+          stage: toSt,
+        }),
+      });
 
-  // ② from/to 両列の sort_index をまとめて保存
-  const order = [
-    ...fromWithIndex.map(v => ({ vision_id: v.vision_id, sort_index: v.sort_index ?? 0 })),
-    ...toWithIndex  .map(v => ({ vision_id: v.vision_id, sort_index: v.sort_index ?? 0 })),
-  ];
-  await fetch('/api/visions', {
-    method: 'PUT',
-    headers,
-    body: JSON.stringify({ order }),
-  });
-} catch (e) {
-  L.api('PUT move error', e);
-  // 必要なら整合回復のために再取得を促す:
-  // setPhase(p => p);
-}
-  }
+      // ② from/to 両列の sort_index をまとめて保存
+      const order = [
+        ...fromWithIndex.map(v => ({ vision_id: v.vision_id, sort_index: v.sort_index ?? 0 })),
+        ...toWithIndex  .map(v => ({ vision_id: v.vision_id, sort_index: v.sort_index ?? 0 })),
+      ];
+      await fetch('/api/visions', {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ order }),
+      });
+    } catch (e) {
+      L.api('PUT move error', e);
+      // 必要なら整合回復のために再取得を促す:
+      // setPhase(p => p);
+    }
+  };
 
   /* 保存後の反映（新規/更新） */
   const upsertLocal = (saved: VisionWithTS) => {
@@ -375,41 +419,38 @@ try {
         /* transform はライブラリに任せる（直接指定しない） */
       `}</style>
 
-{/* === フェーズタブ ＋ 新規＋履歴 === */}
-<div className="vision-topbar">
-  <div className="vision-tabs">
-    <button
-      className={phase === 'initial' ? 'is-active' : ''}
-      onClick={() => setPhase('initial')}
-    >
-      初期
-    </button>
+      {/* === フェーズタブ ＋ 新規＋履歴 === */}
+      <div className="vision-topbar">
+        <div className="vision-tabs">
+          <button
+            className={phase === 'initial' ? 'is-active' : ''}
+            onClick={() => setPhase('initial')}
+          >
+            初期
+          </button>
 
-    <button
-      className={phase === 'mid' ? 'is-active' : ''}
-      onClick={() => setPhase('mid')}
-    >
-      中期
-    </button>
+          <button
+            className={phase === 'mid' ? 'is-active' : ''}
+            onClick={() => setPhase('mid')}
+          >
+            中期
+          </button>
 
-    <button
-      className={phase === 'final' ? 'is-active' : ''}
-      onClick={() => setPhase('final')}
-    >
-      後期
-    </button>
-  </div>
+          <button
+            className={phase === 'final' ? 'is-active' : ''}
+            onClick={() => setPhase('final')}
+          >
+            後期
+          </button>
+        </div>
 
-  <div className="vision-actions">
-    <a className="vision-history-link" href="/vision/history">履歴を見る</a>
-    <button className="vision-new-global" onClick={() => setOpenStage('S')}>
-      ＋ 新規
-    </button>
-  </div>
-</div>
-
-
-
+        <div className="vision-actions">
+          <a className="vision-history-link" href="/vision/history">履歴を見る</a>
+          <button className="vision-new-global" onClick={() => setOpenStage('S')}>
+            ＋ 新規
+          </button>
+        </div>
+      </div>
 
       {/* カンバン */}
       <DragDropContext onDragStart={onDragStart} onDragEnd={onDragEnd}>
@@ -434,98 +475,102 @@ try {
                         >
                           {(dragProvided, snapshot) => (
                             <div
-  ref={dragProvided.innerRef}
-  {...dragProvided.draggableProps}
-  {...dragProvided.dragHandleProps}
-  className={`vision-card ${snapshot.isDragging ? 'is-dragging' : ''} ${selectedVisionId === vision.vision_id ? 'is-selected' : ''}`}
-  onClick={() => {
-    persistSelected(String(vision.vision_id));
-    setSelectedVisionId(String(vision.vision_id));
-    L.sel('card', vision.vision_id);
-  }}
-  onDoubleClick={(e) => {
-    e.stopPropagation();
-    setEditing(vision); // 追加: ダブルクリックで編集モーダル
-  }}
->
-  {vision.iboard_thumb && (
-    <img src={vision.iboard_thumb as any} alt="" className="vision-thumb" />
-  )}
+                              ref={dragProvided.innerRef}
+                              {...dragProvided.draggableProps}
+                              {...dragProvided.dragHandleProps}
+                              className={`vision-card ${snapshot.isDragging ? 'is-dragging' : ''} ${selectedVisionId === vision.vision_id ? 'is-selected' : ''}`}
+                              onClick={() => {
+                                persistSelected(String(vision.vision_id));
+                                setSelectedVisionId(String(vision.vision_id));
+                                L.sel('card', vision.vision_id);
+                              }}
+                              onDoubleClick={(e) => {
+                                e.stopPropagation();
+                                setEditing(vision); // ダブルクリックで編集モーダル
+                              }}
+                            >
+                              {/* サムネ（album:// or 直URL 両対応） */}
+                              {(() => {
+                                const rawThumb =
+                                  (typeof vision.iboard_thumb === 'string' && vision.iboard_thumb) ||
+                                  (vision as any).thumbnailUrl || (vision as any).thumbnail_url || null;
+                                return <VisionThumb raw={rawThumb} className="vision-thumb" />;
+                              })()}
 
-  {/* 追加: 右上の編集ボタン（任意）。クリック伝播を止める */}
-  <button
-    className="vision-edit-btn"
-    onClick={(e) => { e.stopPropagation(); setEditing(vision); }}
-    aria-label="編集"
-  >
-    ✎
-  </button>
+                              {/* 右上の編集ボタン（任意） */}
+                              <button
+                                className="vision-edit-btn"
+                                onClick={(e) => { e.stopPropagation(); setEditing(vision); }}
+                                aria-label="編集"
+                              >
+                                ✎
+                              </button>
 
-  <div className="vision-title">{vision.title}</div>
+                              <div className="vision-title">{vision.title}</div>
 
-  {/* 橋渡しチェック（クリック伝播を止める） */}
-  <div className="vision-card-bridge" onClick={(e) => e.stopPropagation()}>
-    <StageChecklistInline
-      visionId={String(vision.vision_id)}
-      from={vision.stage}
-      showActions={false}
-      visionStatus={vision.status as any}
-    />
-  </div>
-</div>
-)}
-</Draggable>
-))}
-{dropProvided.placeholder}
-</div>
-</div>
-)}
-</Droppable>
-))}
-</div>
-</DragDropContext>
+                              {/* 橋渡しチェック（クリック伝播を止める） */}
+                              <div className="vision-card-bridge" onClick={(e) => e.stopPropagation()}>
+                                <StageChecklistInline
+                                  visionId={String(vision.vision_id)}
+                                  from={vision.stage}
+                                  showActions={false}
+                                  visionStatus={vision.status as any}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </Draggable>
+                      ))}
+                    {dropProvided.placeholder}
+                  </div>
+                </div>
+              )}
+            </Droppable>
+          ))}
+        </div>
+      </DragDropContext>
 
-{/* 実践チェック */}
-<div className="daily-check-frame">
-  {userCode && selectedVision ? (
-    <DailyCheckPanel
-      key={String(selectedVision.vision_id)}
-      userCode={userCode}
-      selectedVisionId={String(selectedVision.vision_id)}
-      selectedStage={selectedVision.stage}
-      selectedVisionTitle={selectedVision.title}
-    />
-  ) : (
-    <div className="daily-check-empty">
-      ビジョンカードを選択すると、ここに「1日の実践チェック」が表示されます。
+      {/* 実践チェック */}
+      <div className="daily-check-frame">
+        {userCode && selectedVision ? (
+          <DailyCheckPanel
+            key={String(selectedVision.vision_id)}
+            userCode={userCode}
+            selectedVisionId={String(selectedVision.vision_id)}
+            selectedStage={selectedVision.stage}
+            selectedVisionTitle={selectedVision.title}
+          />
+        ) : (
+          <div className="daily-check-empty">
+            ビジョンカードを選択すると、ここに「1日の実践チェック」が表示されます。
+          </div>
+        )}
+      </div>
+
+      {/* 新規モーダル */}
+      {openStage && (
+        <VisionModal
+          isOpen={true}
+          defaultPhase={phase}
+          defaultStage={'S'}
+          userCode={userCode}
+          onClose={() => setOpenStage(null)}
+          onSaved={(v) => { upsertLocal(v as VisionWithTS); setOpenStage(null); }}
+        />
+      )}
+
+      {/* 編集モーダル */}
+      {editing && (
+        <VisionModal
+          isOpen={true}
+          defaultPhase={editing.phase}
+          defaultStage={editing.stage}
+          userCode={userCode}
+          initial={editing}
+          onClose={() => setEditing(null)}
+          onSaved={(v) => { upsertLocal(v as VisionWithTS); setEditing(null); }}
+        />
+      )}
     </div>
-  )}
-</div>
-
-{/* 新規モーダル */}
-{openStage && (
-  <VisionModal
-    isOpen={true}
-    defaultPhase={phase}
-    defaultStage={'S'}
-    userCode={userCode}  
-    onClose={() => setOpenStage(null)}
-    onSaved={(v) => { upsertLocal(v as VisionWithTS); setOpenStage(null); }}
-  />
-)}
-
-{ /* 編集モーダル */ }
-{editing && (
-  <VisionModal
-    isOpen={true}
-    defaultPhase={editing.phase}
-    defaultStage={editing.stage}
-    userCode={userCode}  
-    initial={editing}
-    onClose={() => setEditing(null)}
-    onSaved={(v) => { upsertLocal(v as VisionWithTS); setEditing(null); }}
-  />
-)}
-</div>
-);
+  );
 }

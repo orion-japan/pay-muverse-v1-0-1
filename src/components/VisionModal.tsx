@@ -8,16 +8,14 @@ import VisionResultCard from './VisionResultCard';
 import './VisionModal.css';
 
 import type { Vision, Phase, Stage, Status } from '@/types/vision';
-
-/* ==== バケット（環境に合わせてここだけ変えればOK） ==== */
-const BUCKET_PRIVATE = 'private-posts'; // ← Album（プライベート）
-const BUCKET_PUBLIC  = 'public-posts';  // ← IBoard（公開） ※このファイルでは参照のみ
+import { resizeImage } from '@/utils/imageResize'; // ← 既存ユーティリティは無改変で使う
+import { useAuth } from '@/context/AuthContext';   // ★ 追加：数値 userCode フォールバック用
 
 type VisionModalProps = {
   isOpen: boolean;
   defaultPhase: Phase;
   defaultStage: Stage;
-  userCode: string;
+  userCode: string;          // ← 親から渡る（UIDのこともある）
   initial?: Vision | null;
   onClose: () => void;
   onSaved?: (saved: any) => void;
@@ -76,16 +74,29 @@ type PickerTab = 'album' | 'iboard' | 'upload';
 type AlbumItem = {
   name: string;
   url: string;   // 表示用（署名URL）
-  path: string;  // BUCKET_PRIVATE 内のパス
+  path: string;  // private-posts バケット内パス
   size?: number | null;
   updated_at?: string | null;
 };
 
-/** Private album 用：list + 署名URL化（バケット名を private-posts に統一） */
+// 🔸 既存 resizeImage に合わせて「Blob or { blob }」両対応の薄いアダプタ
+type ResizeRet = Blob | { blob: Blob; width?: number; height?: number; type?: string };
+async function resizeAsObject(
+  file: File,
+  opts: any
+): Promise<{ blob: Blob; width?: number; height?: number; type?: string }> {
+  const r: ResizeRet = await (resizeImage as any)(file, opts);
+  if (r instanceof Blob) return { blob: r, type: r.type };
+  return r;
+}
+
+/** Private Album 用：list + 署名URL化（※バケットは private-posts / パスは <userCode>/） */
 async function listAlbumImages(userCode: string): Promise<AlbumItem[]> {
   try {
-    const prefix = `${userCode}`;
-    const { data, error } = await supabase.storage.from(BUCKET_PRIVATE).list(prefix, {
+    const ucode = (userCode || '').trim();
+    if (!ucode) return [];
+    const prefix = `${ucode}`;
+    const { data, error } = await supabase.storage.from('private-posts').list(prefix, {
       limit: 100,
       sortBy: { column: 'updated_at', order: 'desc' },
     });
@@ -95,7 +106,7 @@ async function listAlbumImages(userCode: string): Promise<AlbumItem[]> {
     const resolved = await Promise.all(
       files.map(async (f) => {
         const path = `${prefix}/${f.name}`;
-        const { data: signed } = await supabase.storage.from(BUCKET_PRIVATE).createSignedUrl(path, 60 * 30);
+        const { data: signed } = await supabase.storage.from('private-posts').createSignedUrl(path, 60 * 30);
         return {
           name: f.name,
           url: signed?.signedUrl ?? '',
@@ -116,21 +127,58 @@ async function listAlbumImages(userCode: string): Promise<AlbumItem[]> {
 function useResolvedThumb(raw?: string | null) {
   const [url, setUrl] = useState<string | null>(null);
 
+  // バケット名はここで固定（他所でも同じ定数を使うと事故らない）
+  const ALBUM_BUCKET = 'private-posts';
+
   useEffect(() => {
     let canceled = false;
+
     (async () => {
+      // 何もなければクリア
       if (!raw) {
-        setUrl(null);
+        if (!canceled) setUrl(null);
         return;
       }
+
+      // album://<userCode>/<filename> を署名URLに解決
       if (raw.startsWith('album://')) {
-        const path = raw.replace(/^album:\/\//, '');
-        const { data, error } = await supabase.storage.from(BUCKET_PRIVATE).createSignedUrl(path, 60 * 60);
-        if (!canceled) setUrl(error ? null : data?.signedUrl ?? null);
+        try {
+          // 'album://' を外す
+          let path = raw.replace(/^album:\/\//, '');
+
+          // 先頭に余計なスラッシュが付いていたら除去
+          path = path.replace(/^\/+/, '');
+
+          // たまに path に 'private-posts/' が混入してくるケースがあるので剥がす
+          // 例: album://private-posts/669933/xxx.webp → 669933/xxx.webp に矯正
+          path = path.replace(new RegExp(`^(?:${ALBUM_BUCKET}/)+`), '');
+
+          const { data, error } = await supabase
+            .storage
+            .from(ALBUM_BUCKET)
+            .createSignedUrl(path, 60 * 60); // 1h
+
+          if (canceled) return;
+
+          if (error) {
+            console.warn('createSignedUrl error:', error, { bucket: ALBUM_BUCKET, path });
+            setUrl(null);
+          } else {
+            setUrl(data?.signedUrl ?? null);
+          }
+        } catch (e) {
+          if (!canceled) {
+            console.warn('useResolvedThumb unexpected error:', e);
+            setUrl(null);
+          }
+        }
         return;
       }
-      setUrl(raw);
+
+      // 直URL（http/https/data/blob等）はそのまま
+      if (!canceled) setUrl(raw);
     })();
+
     return () => {
       canceled = true;
     };
@@ -153,6 +201,15 @@ export default function VisionModal({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
 
+  // ★ 追加：渡ってきた userCode が UID っぽい場合は AuthContext の数値 userCode を優先
+  const { userCode: authUserCode } = useAuth();
+  const effectiveUserCode = (() => {
+    const prop = (userCode || '').trim();
+    if (/^\d+$/.test(prop)) return prop;         // すでに数値ならそのまま
+    if (authUserCode != null) return String(authUserCode).trim(); // 数値 userCode に差し替え
+    return prop;                                  // 最後の手段（空/UID）でも動かす
+  })();
+
   const [vision, setVision] = useState<Vision>(() => ({
     phase: initial?.phase ?? defaultPhase,
     stage: initial?.stage ?? defaultStage, // 表示上は維持。保存時に新規は 'S' に矯正
@@ -172,7 +229,7 @@ export default function VisionModal({
   const [pickerTab, setPickerTab] = useState<PickerTab>('album');
   const [albumLoading, setAlbumLoading] = useState(false);
   const [albumItems, setAlbumItems] = useState<AlbumItem[]>([]);
-  const [thumbSize, setThumbSize] = useState<number>(100);
+  const [thumbSize, setThumbSize] = useState<number>(50);
   const [uploading, setUploading] = useState(false);
 
   // モーダル内のプレビュー用URL（画像枠）
@@ -204,21 +261,26 @@ export default function VisionModal({
     }));
   }, [isOpen, initial]);
 
-  /* ---------------- Albumタブが開かれたら読み込み ---------------- */
+  /* ---------------- Albumタブが開かれたら読み込み（private-posts/<userCode>/） ---------------- */
   useEffect(() => {
     if (!isOpen) return;
     if (pickerTab !== 'album') return;
+    const ucode = (effectiveUserCode || '').trim();
+    if (!ucode) return; // userCode 未取得時は読まない
     let alive = true;
     (async () => {
       setAlbumLoading(true);
-      const items = await listAlbumImages(userCode);
-      if (alive) setAlbumItems(items);
-      setAlbumLoading(false);
+      try {
+        const items = await listAlbumImages(ucode);
+        if (alive) setAlbumItems(items);
+      } finally {
+        if (alive) setAlbumLoading(false);
+      }
     })();
     return () => {
       alive = false;
     };
-  }, [isOpen, pickerTab, userCode]);
+  }, [isOpen, pickerTab, effectiveUserCode]);
 
   /* ---------------- ESC / Cmd+Enter ---------------- */
   const handleKey = useCallback(
@@ -230,7 +292,7 @@ export default function VisionModal({
         if (!saving) void handleSave();
       }
     },
-    [isOpen, saving]
+    [isOpen, saving] // eslint-disable-line
   );
   useEffect(() => {
     if (!isOpen) return;
@@ -250,7 +312,7 @@ export default function VisionModal({
     setTimeout(() => el?.classList.remove('pulse-once'), 900);
   };
 
-  // IBoard から選択（公開＝public-posts） → IboardPicker 側に任せる
+  // IBoard から選択（公開：public-posts側。IboardPickerは本人投稿のみ表示前提）
   const handlePickIboard = (postId: string, thumbUrl: string) => {
     setThumbAndPulse(thumbUrl, postId);
   };
@@ -260,34 +322,43 @@ export default function VisionModal({
     setThumbAndPulse(`album://${item.path}`, null);
   };
 
-  // 画像アップロード（private-posts/userCode/ に保存 → album://path を保存）
+  // 画像アップロード（private-posts/<userCode>/ にリサイズ保存 → album://path を保存）
   const handleUploadFile = async (file: File) => {
     try {
       setUploading(true);
       setErrorMsg(null);
 
+      const ucode = (effectiveUserCode || '').trim();
+      if (!ucode) {
+        setErrorMsg('ユーザーコード取得前のためアップロードできません。しばらくしてからお試しください。');
+        return;
+      }
+
       const auth = getAuth();
       if (!auth.currentUser) await signInAnonymously(auth);
 
-      const safeName = file.name.replace(/[^\w.\-]+/g, '_');
-      const path = `${userCode}/${Date.now()}_${safeName}`;
+      // リサイズ（元の resizeImage に合わせてアダプタ経由）
+      const { blob } = await resizeAsObject(file, { max: 1600, type: 'image/webp', quality: 0.9 });
 
-      const { error: upErr } = await supabase.storage.from(BUCKET_PRIVATE).upload(path, file, {
+      const safeName = file.name.replace(/[^\w.\-]+/g, '_').replace(/\.[^.]+$/, '.webp');
+      const path = `${ucode}/${Date.now()}_${safeName}`;
+
+      const { error: upErr } = await supabase.storage.from('private-posts').upload(path, blob, {
         cacheControl: '3600',
         upsert: true,
-        contentType: file.type || 'image/*',
+        contentType: 'image/webp',
       });
       if (upErr) throw upErr;
 
       // 一覧表示用に短命URLを作っておく
-      const { data: signed } = await supabase.storage.from(BUCKET_PRIVATE).createSignedUrl(path, 60 * 30);
+      const { data: signed } = await supabase.storage.from('private-posts').createSignedUrl(path, 60 * 30);
 
       // 保存値は album://path（失効しない）
       setThumbAndPulse(`album://${path}`, null);
 
       // Albumタブの一覧を即時更新
       setAlbumItems((prev) => [
-        { name: safeName, url: signed?.signedUrl ?? '', path, size: file.size, updated_at: new Date().toISOString() },
+        { name: safeName, url: signed?.signedUrl ?? '', path, size: blob.size, updated_at: new Date().toISOString() },
         ...prev,
       ]);
 
@@ -295,7 +366,7 @@ export default function VisionModal({
       setPickerTab('album');
     } catch (e: any) {
       console.error('upload error:', e);
-      setErrorMsg(e?.message || 'アップロードに失敗しました（バケット名や権限を確認してください）');
+      setErrorMsg(e?.message || 'アップロードに失敗しました');
     } finally {
       setUploading(false);
     }
@@ -317,7 +388,7 @@ export default function VisionModal({
 
       const isUpdate = Boolean(vision.vision_id);
       const method = isUpdate ? 'PUT' : 'POST';
-      const stageForSave: Stage = isUpdate ? (vision.stage as Stage) : 'S';
+      const stageForSave: Stage = isUpdate ? (vision.stage as Stage) : 'S'; // ★新規は必ずS
 
       const payload = {
         vision_id: vision.vision_id,
@@ -329,8 +400,8 @@ export default function VisionModal({
         supplement: vision.supplement,
         status: vision.status,
         summary: vision.summary,
-        iboard_post_id: vision.iboard_post_id, // Album/Upload は null のまま
-        iboard_thumb: vision.iboard_thumb,     // album://path or 直URL
+        iboard_post_id: vision.iboard_post_id,   // Album/Uploadは null のまま
+        iboard_thumb: vision.iboard_thumb,       // album://path or 直URL
         q_code: vision.q_code,
       };
 
@@ -382,7 +453,9 @@ export default function VisionModal({
             {vision.vision_id ? 'Visionを編集' : 'Visionを作成'}
             <span className="vmd-title-sparkle" aria-hidden />
           </div>
-          <button className="vmd-close" onClick={onClose} aria-label="閉じる">×</button>
+          <button className="vmd-close" onClick={onClose} aria-label="閉じる">
+            ×
+          </button>
         </div>
 
         {/* 本文 */}
@@ -414,15 +487,44 @@ export default function VisionModal({
             <div className="vmd-pick">
               {/* タブ切替 */}
               <div className="vmd-pick-tabs" role="tablist" aria-label="画像の選択方法">
-                <button className={`vmd-tab ${pickerTab === 'album' ? 'active' : ''}`} onClick={() => setPickerTab('album')} role="tab" aria-selected={pickerTab === 'album'}>Album</button>
-                <button className={`vmd-tab ${pickerTab === 'iboard' ? 'active' : ''}`} onClick={() => setPickerTab('iboard')} role="tab" aria-selected={pickerTab === 'iboard'}>IBoard</button>
-                <button className={`vmd-tab ${pickerTab === 'upload' ? 'active' : ''}`} onClick={() => setPickerTab('upload')} role="tab" aria-selected={pickerTab === 'upload'}>アップロード</button>
+                <button
+                  className={`vmd-tab ${pickerTab === 'album' ? 'active' : ''}`}
+                  onClick={() => setPickerTab('album')}
+                  role="tab"
+                  aria-selected={pickerTab === 'album'}
+                >
+                  Album
+                </button>
+                <button
+                  className={`vmd-tab ${pickerTab === 'iboard' ? 'active' : ''}`}
+                  onClick={() => setPickerTab('iboard')}
+                  role="tab"
+                  aria-selected={pickerTab === 'iboard'}
+                >
+                  IBoard
+                </button>
+                <button
+                  className={`vmd-tab ${pickerTab === 'upload' ? 'active' : ''}`}
+                  onClick={() => setPickerTab('upload')}
+                  role="tab"
+                  aria-selected={pickerTab === 'upload'}
+                >
+                  アップロード
+                </button>
               </div>
 
-              {/* サムネサイズスライダー（共通） */}
+              {/* サムネサイズスライダー */}
               <div className="vmd-thumbsize">
                 <span className="vmd-thumbsize-label">サムネ</span>
-                <input type="range" min={60} max={160} value={thumbSize} onChange={(e) => setThumbSize(Number(e.target.value))} />
+{/* サムネサイズスライダー */}
+<input
+  type="range"
+ min={40}        // ★ 初期値50より小さい値に
+  max={160}
+ step={5}        // （任意）手触り改善
+  value={thumbSize}
+  onChange={(e) => setThumbSize(Number(e.target.value))}
+/>
                 <span className="vmd-thumbsize-val">{thumbSize}px</span>
               </div>
 
@@ -430,27 +532,29 @@ export default function VisionModal({
               <div className="vmd-pick-pane">
                 {pickerTab === 'album' && (
                   <div className="album-pane">
-                    {albumLoading ? (
+                    {!effectiveUserCode?.trim() ? (
+                      <div className="vmd-hint">ユーザーコードを取得中です…（少し待ってから再度お試しください）</div>
+                    ) : albumLoading ? (
                       <div className="vmd-hint">読み込み中…</div>
                     ) : albumItems.length === 0 ? (
                       <div className="vmd-hint">アルバムに画像がありません。右の「アップロード」から追加できます。</div>
                     ) : (
-                      <div className="vmd-grid" style={{ ['--thumb' as any]: `${thumbSize}px` }}>
-                        {albumItems.map((it) => (
-                          <button key={it.path} className="vmd-thumb-btn" onClick={() => handlePickAlbum(it)} title={it.name}>
-                            <img src={it.url} alt={it.name} />
-                          </button>
-                        ))}
-                      </div>
+<div className="vmd-grid" style={{ ['--thumb' as any]: `${thumbSize}px` }}>
+  {albumItems.map((it) => (
+    <button key={it.path} className="vmd-thumb-btn" onClick={() => handlePickAlbum(it)} title={it.name}>
+      <img src={it.url} alt={it.name} />
+    </button>
+  ))}
+</div>
+
                     )}
                   </div>
                 )}
 
                 {pickerTab === 'iboard' && (
                   <div className="iboard-pane">
-                    {/* 既存の IboardPicker（= public-posts）。内部タブはCSSで非表示にします */}
                     <IboardPicker
-                      userCode={userCode}
+                      userCode={effectiveUserCode}
                       selectedPostId={vision.iboard_post_id ?? undefined}
                       onSelect={handlePickIboard}
                       thumbSizePx={thumbSize}
@@ -474,7 +578,7 @@ export default function VisionModal({
                       {uploading && <span className="vmd-hint">アップロード中…</span>}
                     </div>
                     <div className="vmd-hint small">
-                      バケット: <code>{BUCKET_PRIVATE}</code> / フォルダ: <code>{userCode}/</code>（Private：表示は署名URL）
+                      バケット: <code>private-posts</code> / フォルダ: <code>{(effectiveUserCode || '').trim()}/</code>（Private・表示は署名URL）
                     </div>
                   </div>
                 )}
@@ -482,7 +586,7 @@ export default function VisionModal({
             </div>
           </div>
 
-          {/* プレビュー（カード） */}
+          {/* ---- プレビュー：VisionResultCard（status バッジ反映） ---- */}
           <div style={{ marginTop: 12, marginBottom: 8 }}>
             <VisionResultCard
               visionId={vision.vision_id ?? 'new'}
@@ -490,7 +594,7 @@ export default function VisionModal({
               phase={'initial' as any}
               resultStatus={'成功' as any}
               resultedAt={new Date().toISOString()}
-              userCode={userCode}
+              userCode={effectiveUserCode}
               qCode={qCodeForCard}
               thumbnailUrl={vision.iboard_thumb ?? null}
               visionStatus={vision.status as any}
@@ -499,34 +603,68 @@ export default function VisionModal({
 
           {/* 詳細群 */}
           <label className="vmd-label">詳細</label>
-          <textarea className="vmd-textarea" rows={3} value={vision.detail} onChange={(e) => handleChange('detail', e.target.value)} placeholder="どんな状態を目指す？" />
+          <textarea
+            className="vmd-textarea"
+            rows={3}
+            value={vision.detail}
+            onChange={(e) => handleChange('detail', e.target.value)}
+            placeholder="どんな状態を目指す？"
+          />
 
           <label className="vmd-label">意図メモ</label>
-          <textarea className="vmd-textarea" rows={3} value={vision.intention} onChange={(e) => handleChange('intention', e.target.value)} placeholder="なぜやりたい？" />
+          <textarea
+            className="vmd-textarea"
+            rows={3}
+            value={vision.intention}
+            onChange={(e) => handleChange('intention', e.target.value)}
+            placeholder="なぜやりたい？"
+          />
 
           <label className="vmd-label">補足</label>
-          <textarea className="vmd-textarea" rows={2} value={vision.supplement} onChange={(e) => handleChange('supplement', e.target.value)} placeholder="共有したいことや注意点" />
+          <textarea
+            className="vmd-textarea"
+            rows={2}
+            value={vision.supplement}
+            onChange={(e) => handleChange('supplement', e.target.value)}
+            placeholder="共有したいことや注意点"
+          />
 
           {/* ステータス */}
           <div className="vmd-row">
             <div className="vmd-col">
               <label className="vmd-label">ステータス</label>
-              <select className="vmd-select" value={vision.status} onChange={(e) => handleChange('status', e.target.value as Status)}>
-                {STATUS_LIST.map((s) => (<option key={s} value={s}>{s}</option>))}
+              <select
+                className="vmd-select"
+                value={vision.status}
+                onChange={(e) => handleChange('status', e.target.value as Status)}
+              >
+                {STATUS_LIST.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
 
           {/* 総評 */}
           <label className="vmd-label">総評</label>
-          <textarea className="vmd-textarea" rows={3} value={vision.summary} onChange={(e) => handleChange('summary', e.target.value)} placeholder="短くまとめ（後からでOK）" />
+          <textarea
+            className="vmd-textarea"
+            rows={3}
+            value={vision.summary}
+            onChange={(e) => handleChange('summary', e.target.value)}
+            placeholder="短くまとめ（後からでOK）"
+          />
 
           {errorMsg && <div className="vmd-error">⚠ {errorMsg}</div>}
         </div>
 
         {/* フッター */}
         <div className="vmd-footer">
-          <button className="vmd-btn ghost" onClick={onClose}>キャンセル（Esc）</button>
+          <button className="vmd-btn ghost" onClick={onClose}>
+            キャンセル（Esc）
+          </button>
           <button
             className="vmd-btn primary"
             onClick={handleSave}

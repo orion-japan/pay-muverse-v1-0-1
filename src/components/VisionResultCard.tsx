@@ -15,6 +15,7 @@ type VisionStatus =
   | '破棄';
 
 const AUTO_DAYS: Record<PhaseKey, number> = { initial: 7, mid: 14, final: 21 };
+const ALBUM_BUCKET = 'private-posts'; // ★ ここで固定
 
 export type VisionResultCardProps = {
   visionId: string;
@@ -71,17 +72,34 @@ export default function VisionResultCard({
         return;
       }
       if (thumbnailUrl.startsWith('album://')) {
-        const path = thumbnailUrl.replace(/^album:\/\//, '');
-        const { data, error } = await supabase.storage.from('album').createSignedUrl(path, 60 * 60);
-        if (!alive) return;
-        setResolvedThumb(error ? null : data?.signedUrl ?? null);
+        try {
+          // 'album://' を外し、余計な先頭スラッシュや 'private-posts/' を剥がす
+          let path = thumbnailUrl.replace(/^album:\/\//, '').replace(/^\/+/, '');
+          path = path.replace(new RegExp(`^(?:${ALBUM_BUCKET}/)+`), '');
+
+          const { data, error } = await supabase
+            .storage
+            .from(ALBUM_BUCKET)                 // ★ ← ここが 'album' だったのを修正
+            .createSignedUrl(path, 60 * 60);    // 1h
+
+          if (!alive) return;
+          if (error) {
+            console.warn('[VRC] createSignedUrl error:', { error, bucket: ALBUM_BUCKET, path });
+            setResolvedThumb(null);
+          } else {
+            setResolvedThumb(data?.signedUrl ?? null);
+          }
+        } catch (e) {
+          if (alive) {
+            console.warn('[VRC] thumb resolve error:', e);
+            setResolvedThumb(null);
+          }
+        }
       } else {
-        if (alive) setResolvedThumb(thumbnailUrl);
+        if (alive) setResolvedThumb(thumbnailUrl); // 直URL（http/https/data/blob等）はそのまま
       }
     })();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [thumbnailUrl]);
 
   // 残り日数と進捗割合（自動移管まで）
@@ -138,25 +156,15 @@ export default function VisionResultCard({
         .join(' ')}
       aria-labelledby={`vrc-title-${visionId}`}
     >
-      {/* サムネ */}
-      {resolvedThumb ? (
-        <div className="vrc-thumb">
-          <img src={resolvedThumb} alt="" />
-        </div>
-      ) : (
-        <div className="vrc-thumb vrc-thumb--ph">No Image</div>
-      )}
+
 
       {/* 本体 */}
       <div className="vrc-body">
         <div className="vrc-top">
           {/* ★ ステータスを最優先で表示。未指定なら従来の結果バッジを表示 */}
           <span className="vrc-badge" data-vs={visionStatus || undefined}>
-   {visionStatus ?? resultStatus}
- </span>
-
-          {/* ※ 以前の「追加ステータスバッジ」は削除。
-              これで一つのバッジが常に“ステータス優先”で表示されます。 */}
+            {visionStatus ?? resultStatus}
+          </span>
 
           {safeQCode && <span className="vrc-q">Q:{safeQCode}</span>}
           <span className="vrc-phase">{labelPhase(phase)}</span>

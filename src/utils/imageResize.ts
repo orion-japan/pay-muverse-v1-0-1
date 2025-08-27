@@ -40,4 +40,4 @@ export async function resizeImage(file: File, maxSize: number = 256): Promise<Bl
       reader.readAsDataURL(file);
     });
   }
-  
+ 
