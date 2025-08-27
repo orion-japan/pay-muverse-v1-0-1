@@ -23,6 +23,7 @@ type IboardPickerProps = {
   selectedPostId?: string | null;
   onSelect: (postId: string, thumbnailUrl: string) => void;
   onClose?: () => void;
+  thumbSizePx?: number;
   /** 取得上限 */
   limit?: number;
   /** Storage の公開バケット名 */
@@ -33,6 +34,7 @@ export default function IboardPicker({
   userCode,
   clickUsername,
   selectedPostId,
+  thumbSizePx,
   onSelect,
   onClose,
   limit = 200,

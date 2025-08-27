@@ -457,3 +457,42 @@
   box-shadow: 0 6px 16px rgba(0,0,0,.08);
   transition: all .3s ease;
 }
+
+
+/* アップロードボタン（タブ） */
+.vmd-tab {
+  background: #f5f3ff;
+  border: 1px solid #e0d7ff;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #5b3fc7;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+
+.vmd-tab:hover {
+  background: #ede9fe;
+  transform: translateY(-2px);
+  box-shadow: 0 3px 6px rgba(91, 63, 199, 0.2);
+}
+
+.vmd-tab.active {
+  background: linear-gradient(135deg, #a78bfa, #7c3aed);
+  color: #fff !important;
+  border: none;
+  box-shadow: 0 4px 10px rgba(124, 58, 237, 0.35);
+}
+
+
+/* VisionModal 内の IboardPicker で古いヘッダーや内部タブを隠す */
+.vmd-modal .iboard-pane .ipk-head,
+.vmd-modal .iboard-pane .ipk-tabs,
+.vmd-modal .iboard-pane .picker-top,
+.vmd-modal .iboard-pane [data-role="picker-top"],
+.vmd-modal .iboard-pane .ibp-header,
+.vmd-modal .iboard-pane .iboard-actions,
+.vmd-modal .iboard-pane .album-storage-buttons {
+  display: none !important;
+}

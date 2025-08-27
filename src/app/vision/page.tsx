@@ -469,6 +469,7 @@ try {
       visionId={String(vision.vision_id)}
       from={vision.stage}
       showActions={false}
+      visionStatus={vision.status as any}
     />
   </div>
 </div>

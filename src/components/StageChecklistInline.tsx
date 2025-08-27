@@ -9,6 +9,8 @@ type Props = {
   showActions?: boolean;        // 操作ボタンの表示
   variant?: 'seed' | 'mid' | 'late' | 'success' | 'alert'; // 色分け（任意）
   className?: string;           // 追加クラス（任意）
+  /** ← 追加：ビジョンの現在ステータスを小さく表示（任意） */
+  visionStatus?: VisionStatus | null;
 };
 
 type Criteria = {
@@ -17,12 +19,23 @@ type Criteria = {
   achieved_days: number; // APIの done_days を反映
 };
 
+/** ステータス型（任意で受け取れる） */
+type VisionStatus =
+  | '検討中'
+  | '実践中'
+  | '迷走中'
+  | '順調'
+  | 'ラストスパート'
+  | '達成'
+  | '破棄';
+
 export default function StageChecklistInline({
   visionId,
   from,
   showActions = false,
   variant = 'seed',
   className,
+  visionStatus, // ★ 追加
 }: Props) {
   const [loading, setLoading] = useState(false);
   const [criteria, setCriteria] = useState<Criteria | null>(null);
@@ -81,9 +94,9 @@ export default function StageChecklistInline({
       };
       if (d?.visionId === visionId && d?.from === from) {
         setCriteria((prev) =>
-        prev
-          ? { ...prev, required_days: d.required_days }
-          : { id: `${visionId}:${from}`, required_days: d.required_days, achieved_days: 0 }
+          prev
+            ? { ...prev, required_days: d.required_days }
+            : { id: `${visionId}:${from}`, required_days: d.required_days, achieved_days: 0 }
         );
       }
     };
@@ -145,6 +158,18 @@ export default function StageChecklistInline({
             <div className="sci-block">
               <div className="sci-head">
                 <span className="sci-sub">習慣ゲージ</span>
+
+                {/* ★ 追加：ビジョンの現在ステータス（小さなバッジ）。CSS で色付け可 */}
+                {visionStatus ? (
+                  <span
+                    className="sci-vstatus"
+                    data-vs={visionStatus}
+                    title="現在のステータス"
+                  >
+                    {visionStatus}
+                  </span>
+                ) : null}
+
                 <span className={`sci-badge ${reached ? 'ok' : 'wip'}`}>
                   {reached ? '達成' : '進行中'}
                 </span>

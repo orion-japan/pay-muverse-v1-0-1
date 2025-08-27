@@ -46,3 +46,114 @@
   /* 期限超過（自動移管対象アラート） */
   .vrc.is-due{box-shadow:0 0 0 3px rgba(255,196,0,.15) inset}
   
+  /* 例: VisionResultCard.css */
+
+.vcard-header{
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+}
+.vcard-title{ font-weight:600; font-size:15px; }
+.vcard-status{
+  color:#fff; font-size:12px; line-height:1;
+  padding:6px 8px; border-radius:999px;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.15);
+}
+.vcard-thumb{ border-radius:12px; overflow:hidden; background:#f6f6f9; }
+.vcard-thumb img{ width:100%; height:100%; display:block; object-fit:cover; }
+.vcard-thumb.placeholder{ height:160px; }
+
+
+/* 既存のバッジに準拠。必要なら調整 */
+.vrc-badge {
+  display:inline-block;
+  padding:4px 8px;
+  border-radius:999px;
+  font-size:12px;
+  line-height:1;
+  color:#fff;
+  background:#64748b; /* 既存の結果バッジ色 */
+}
+
+/* ステータス用（色は inline-style で付与） */
+.vrc-badge--vs {
+  margin-left:6px;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.15);
+}
+
+/* ===== ステータス（検討中/実践中/迷走中/順調/ラストスパート/達成/破棄）用 ===== */
+/* VisionResultCard の <span class="vrc-badge" data-vs="..."> に反応 */
+.vrc-badge[data-vs] {
+  /* バッジの基礎は既存 .vrc-badge を流用。色系だけ上書き */
+  color: #232338;
+  border-color: transparent;
+}
+
+/* 検討中:やや紫寄りの淡色 */
+.vrc-badge[data-vs="検討中"] {
+  background: #f6f7ff;
+  color: #6a4ee6;
+  border: 1px solid #e6e8ff;
+}
+
+/* 実践中:グリーン系 */
+.vrc-badge[data-vs="実践中"] {
+  background: #e7f8ef;
+  color: #1d7f4e;
+  border: 1px solid #c9f1dd;
+}
+
+/* 迷走中:アンバー系 */
+.vrc-badge[data-vs="迷走中"] {
+  background: #fff2d6;
+  color: #9a6a00;
+  border: 1px solid #ffe5ad;
+}
+
+/* 順調:ブルー系（既存の意図違い系と近いトーン） */
+.vrc-badge[data-vs="順調"] {
+  background: #eaf5ff;
+  color: #2367c5;
+  border: 1px solid #cfe7ff;
+}
+
+/* ラストスパート:パープル系 */
+.vrc-badge[data-vs="ラストスパート"] {
+  background: #f1e8ff;
+  color: #7a2bbd;
+  border: 1px solid #e5d6ff;
+}
+
+/* 達成:レッド系（やや薄め） */
+.vrc-badge[data-vs="達成"] {
+  background: #ffe5e5;
+  color: #b71c1c;
+  border: 1px solid #ffd0d0;
+}
+
+/* 破棄:グレー系 */
+.vrc-badge[data-vs="破棄"] {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+
+
+/* 例: 小さな丸いバッジ */
+.sci-vstatus{
+  margin-left: auto;            /* 右寄せにしたい場合。不要なら削除 */
+  margin-right: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid transparent;
+  line-height: 1;
+}
+
+/* 色分け（必要に応じて調整） */
+.sci-vstatus[data-vs="検討中"]{ background:#f6f7ff; color:#6a4ee6; border-color:#e6e8ff; }
+.sci-vstatus[data-vs="実践中"]{ background:#e7f8ef; color:#1d7f4e; border-color:#c9f1dd; }
+.sci-vstatus[data-vs="迷走中"]{ background:#fff2d6; color:#9a6a00; border-color:#ffe5ad; }
+.sci-vstatus[data-vs="順調"]{   background:#eaf5ff; color:#2367c5; border-color:#cfe7ff; }
+.sci-vstatus[data-vs="ラストスパート"]{ background:#f1e8ff; color:#7a2bbd; border-color:#e5d6ff; }
+.sci-vstatus[data-vs="達成"]{   background:#ffe5e5; color:#b71c1c; border-color:#ffd0d0; }
+.sci-vstatus[data-vs="破棄"]{   background:#f1f5f9; color:#475569; border-color:#e2e8f0; }

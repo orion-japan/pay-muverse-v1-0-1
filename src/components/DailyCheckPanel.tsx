@@ -316,57 +316,49 @@ async function saveRequiredDays(newDays: number) {
   /* ===== ここから JSX（構造は元のまま） ===== */
   return (
     <section className={`daily-check-panel ${className || ''}`}>
-      <header className="dcp-head">
-        <div>
-          <strong>1日の実践チェック</strong>
-          <span className="dcp-date">（{today}）</span>
-          {selectedVisionTitle && <span className="dcp-vision-title"> / {selectedVisionTitle}</span>}
-        </div>
-        <div className="dcp-status">
-          {loading ? '読み込み中…' : savedAt ? `保存: ${savedAt}` : '新規'}
-          {saving && ' / 保存中…'}
-          <button
-            className="dcp-criteria-btn"
-            onClick={() => setCriteriaOpen(v => !v)}
-            title="このステージで何回やるか設定"
-          >
-            回数設定
-          </button>
-        </div>
-      </header>
+<header className="dcp-head">
+  <div>
+    <strong>1日の実践チェック</strong>
+    <span className="dcp-date">（{today}）</span>
 
-      {criteriaOpen && (
-        <div className="dcp-criteria-box">
-          <div className="dcp-criteria-row">
-            <span>このステージの目安回数：</span>
-            <input
-              type="number"
-              min={0}
-              step={1}
-              defaultValue={criteriaDays ?? 3}
-              id="dcp-criteria-input"
-              className="dcp-criteria-input"
-            />
-            <button
-              className="dcp-criteria-save"
-              disabled={criteriaSaving}
-              onClick={() => {
-                const el = document.getElementById('dcp-criteria-input') as HTMLInputElement | null;
-                const v = el ? Math.max(0, Math.floor(Number(el.value || 0))) : 0;
-                void saveRequiredDays(v);
-              }}
-            >
-              {criteriaSaving ? '保存中…' : '保存'}
-            </button>
-            {criteriaDays != null && <span className="dcp-criteria-current">現在: {criteriaDays} 回</span>}
-          </div>
-        </div>
-      )}
-
-      <div className="dcp-progress">
-        <div className="dcp-progress-bar" style={{ width: `${progress}%` }} />
+    {selectedVisionTitle && (
+      <div className="dcp-vision-title">
+        <strong>{selectedVisionTitle}</strong>
+        {/* ステータスバッジ */}
+        <span
+          className={`dcp-status-badge ${progress >= 100 ? 'done' : progress > 0 ? 'active' : 'new'}`}
+        >
+          {progress >= 100 ? '🎉 完了！' : progress > 0 ? '実践中 💪' : '未開始 ✨'}
+        </span>
       </div>
-      <div className="dcp-progress-num">{progress}%（連続 {streak} 日）</div>
+    )}
+  </div>
+
+  <div className="dcp-status">
+    {loading ? '読み込み中…' : savedAt ? `保存: ${savedAt}` : '新規'}
+    {saving && ' / 保存中…'}
+    <button
+      className="dcp-criteria-btn"
+      onClick={() => setCriteriaOpen(v => !v)}
+      title="このステージで何回やるか設定"
+    >
+      回数設定
+    </button>
+  </div>
+</header>
+
+{/* 進捗ゲージをリッチに */}
+<div className="dcp-progress">
+  <div
+    className={`dcp-progress-bar ${progress >= 100 ? 'is-done' : ''}`}
+    style={{ width: `${progress}%` }}
+  />
+</div>
+<div className="dcp-progress-num">
+  {progress}%（連続 {streak} 日）
+  {progress >= 100 && <span className="dcp-celebrate">🎊 Great!</span>}
+</div>
+
 
       {!locked && (
         <>

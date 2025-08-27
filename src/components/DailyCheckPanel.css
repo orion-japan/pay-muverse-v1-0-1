@@ -358,3 +358,45 @@
     margin-top: 2px;
   }
   
+  .dcp-vision-title {
+    display: block;      /* 強制改行 */
+    font-weight: 700;    /* 太字 */
+    font-size: 16px;     /* 少し大きめ */
+    margin-top: 4px;     /* 日付との間に余白 */
+  }
+  
+  .dcp-status-badge {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: bold;
+    color: #fff;
+  }
+  .dcp-status-badge.new { background: #94a3b8; }      /* 未開始 */
+  .dcp-status-badge.active { background: #3b82f6; }   /* 実践中 */
+  .dcp-status-badge.done { background: #22c55e; }     /* 完了 */
+  
+  .dcp-progress-bar {
+    height: 10px;
+    border-radius: 999px;
+    background: linear-gradient(90deg,#9b87ff,#7b5cff);
+    transition: width .6s ease;
+  }
+  .dcp-progress-bar.is-done {
+    background: linear-gradient(90deg,#22c55e,#16a34a);
+    box-shadow: 0 0 10px rgba(34,197,94,0.6);
+  }
+  .dcp-celebrate {
+    margin-left: 8px;
+    color: #16a34a;
+    font-weight: bold;
+    animation: pop 0.8s ease;
+  }
+  @keyframes pop {
+    0% { transform: scale(0.5); opacity: 0; }
+    50% { transform: scale(1.2); opacity: 1; }
+    100% { transform: scale(1); }
+  }
+  

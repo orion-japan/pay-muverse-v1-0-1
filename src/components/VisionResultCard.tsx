@@ -1,9 +1,18 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { supabase } from '@/lib/supabase'; // album://（Private）用の署名URL解決で使用
 
 type PhaseKey = 'initial' | 'mid' | 'final';
 type ResultStatus = '成功' | '中断' | '意図違い';
+type VisionStatus =
+  | '検討中'
+  | '実践中'
+  | '迷走中'
+  | '順調'
+  | 'ラストスパート'
+  | '達成'
+  | '破棄';
 
 const AUTO_DAYS: Record<PhaseKey, number> = { initial: 7, mid: 14, final: 21 };
 
@@ -14,10 +23,22 @@ export type VisionResultCardProps = {
   resultStatus: ResultStatus;
   resultedAt: string;                 // ISO
   userCode: string;                   // x-user-code ヘッダ用
-  qCode?: string | null;              // バッジ表示用
-  thumbnailUrl?: string | null;       // サムネがあれば表示
+  qCode?: string | null;              // バッジ表示用（※文字列以外は描画しない）
+  thumbnailUrl?: string | null;       // サムネがあれば表示（直URL or album://path）
+  /** ← ステータス（検討中/実践中...）をカードに表示 */
+  visionStatus?: VisionStatus | null;
   onChanged?: () => void;             // 成功時のリフレッシュコールバック
   className?: string;
+};
+
+const STATUS_COLORS: Record<VisionStatus, string> = {
+  検討中: '#94a3b8',
+  実践中: '#22c55e',
+  迷走中: '#f59e0b',
+  順調: '#3b82f6',
+  'ラストスパート': '#a855f7',
+  達成: '#ef4444',
+  破棄: '#6b7280',
 };
 
 export default function VisionResultCard({
@@ -29,10 +50,39 @@ export default function VisionResultCard({
   userCode,
   qCode,
   thumbnailUrl,
+  visionStatus,
   onChanged,
   className,
 }: VisionResultCardProps) {
   const [busy, setBusy] = useState(false);
+  const [resolvedThumb, setResolvedThumb] = useState<string | null>(null);
+
+  // qCode が文字列以外の場合は描画しない（安全弁）
+  const safeQCode = useMemo<string | null>(() => {
+    return typeof qCode === 'string' ? qCode : null;
+  }, [qCode]);
+
+  // album://path → 署名URLに解決（Private album 対応）
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!thumbnailUrl) {
+        if (alive) setResolvedThumb(null);
+        return;
+      }
+      if (thumbnailUrl.startsWith('album://')) {
+        const path = thumbnailUrl.replace(/^album:\/\//, '');
+        const { data, error } = await supabase.storage.from('album').createSignedUrl(path, 60 * 60);
+        if (!alive) return;
+        setResolvedThumb(error ? null : data?.signedUrl ?? null);
+      } else {
+        if (alive) setResolvedThumb(thumbnailUrl);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [thumbnailUrl]);
 
   // 残り日数と進捗割合（自動移管まで）
   const { remainingDays, ratio, due } = useMemo(() => {
@@ -89,9 +139,9 @@ export default function VisionResultCard({
       aria-labelledby={`vrc-title-${visionId}`}
     >
       {/* サムネ */}
-      {thumbnailUrl ? (
+      {resolvedThumb ? (
         <div className="vrc-thumb">
-          <img src={thumbnailUrl} alt="" />
+          <img src={resolvedThumb} alt="" />
         </div>
       ) : (
         <div className="vrc-thumb vrc-thumb--ph">No Image</div>
@@ -100,8 +150,15 @@ export default function VisionResultCard({
       {/* 本体 */}
       <div className="vrc-body">
         <div className="vrc-top">
-          <span className="vrc-badge">{resultStatus}</span>
-          {qCode && <span className="vrc-q">Q:{qCode}</span>}
+          {/* ★ ステータスを最優先で表示。未指定なら従来の結果バッジを表示 */}
+          <span className="vrc-badge" data-vs={visionStatus || undefined}>
+   {visionStatus ?? resultStatus}
+ </span>
+
+          {/* ※ 以前の「追加ステータスバッジ」は削除。
+              これで一つのバッジが常に“ステータス優先”で表示されます。 */}
+
+          {safeQCode && <span className="vrc-q">Q:{safeQCode}</span>}
           <span className="vrc-phase">{labelPhase(phase)}</span>
         </div>
 
@@ -110,16 +167,29 @@ export default function VisionResultCard({
         </h3>
 
         {/* 自動移管までのガイドバー */}
-        <div className="vrc-rail" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(ratio*100)}>
+        <div
+          className="vrc-rail"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(ratio * 100)}
+        >
           <div className="vrc-rail__bar" style={{ width: `${ratio * 100}%` }} />
         </div>
 
         {/* 残り日数/メッセージ */}
         <div className="vrc-note">
           {due ? (
-            <span>自動移管の対象です。<button className="vrc-link" onClick={handleArchive} disabled={busy}>今すぐ履歴へ送る</button></span>
+            <span>
+              自動移管の対象です。
+              <button className="vrc-link" onClick={handleArchive} disabled={busy}>
+                今すぐ履歴へ送る
+              </button>
+            </span>
           ) : (
-            <span>残り <b>{remainingDays}</b> 日で自動で履歴へ移ります。</span>
+            <span>
+              残り <b>{remainingDays}</b> 日で自動で履歴へ移ります。
+            </span>
           )}
         </div>
 
