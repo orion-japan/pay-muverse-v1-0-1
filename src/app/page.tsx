@@ -1,14 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useRef } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
 import '../styles/dashboard.css';
 import LoginModal from '../components/LoginModal';
 import { useAuth } from '@/context/AuthContext';
 import AppModal from '@/components/AppModal';
 import { FileContentProvider } from '@/lib/content.file';
-// 先頭の import に追加
 import { getAuth } from 'firebase/auth';
+import FooterNav from '@/components/FooterNav';
 
 import type { HomeContent } from '@/lib/content';
 
@@ -18,6 +18,7 @@ export default function DashboardPage() {
   const { user } = useAuth();
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const router = useRouter();
+  const pathname = usePathname();
 
   // ★ iros解放可否（master / admin 判定）
   const [isIrosAllowed, setIsIrosAllowed] = useState(false);
@@ -28,6 +29,15 @@ export default function DashboardPage() {
 
   // アクセス拒否モーダル
   const [denyOpen, setDenyOpen] = useState(false);
+
+  // ▼ ログアウト直後だけ一度だけ自動でログインモーダルを開く
+  const prevUserRef = useRef<typeof user | null>(null);
+  useEffect(() => {
+    if (prevUserRef.current && !user && !isLoginModalOpen) {
+      setIsLoginModalOpen(true);
+    }
+    prevUserRef.current = user;
+  }, [user, isLoginModalOpen]);
 
   useEffect(() => {
     FileContentProvider.getHomeContent().then(setContent);
@@ -41,84 +51,91 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [content]);
 
-// ★ ユーザー情報を多系統から取得して master/admin を総合判定
-useEffect(() => {
-  let aborted = false;
+  // ★ ユーザー情報を多系統から取得して master/admin を総合判定
+  useEffect(() => {
+    let aborted = false;
 
-  // 未ログインなら即座に閉じる
-  if (!user) {
-    setIsIrosAllowed(false);
-    return;
-  }
-
-  // 汎用 fetch helpers
-  const tryGET = async (url: string) => {
-    try {
-      const res = await fetch(url, { cache: 'no-store', credentials: 'same-origin' });
-      if (!res.ok) return null;
-      return await res.json();
-    } catch { return null; }
-  };
-
-  const tryPOST = async (url: string, body: any) => {
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        cache: 'no-store',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body ?? {}),
-      });
-      if (!res.ok) return null;     // 400/401/405 は null 扱い
-      return await res.json();
-    } catch { return null; }
-  };
-
-  (async () => {
-    // 🔑 Firebase ID トークンを確実に取得（AuthContext由来でなくてもOK）
-    const auth = getAuth();
-    const idToken =
-      (await auth.currentUser?.getIdToken(true).catch(() => null)) ??
-      (await (user as any)?.getIdToken?.(true).catch(() => null)) ??
-      null;
-
-    // ローカルでは /api/resolve-user が 404 なので呼ばない
-    // まず /api/user-info を POST（このエンドポイントが 400 を返していた）
-    const metaUserInfo = await tryPOST('/api/user-info', idToken ? { idToken } : {});
-
-    // 予備：古い互換APIがあれば GET
-    const metaGetCompat = await tryGET('/api/get-user-info');
-
-    // どれか取れたもの
-    const meta: any = metaUserInfo || metaGetCompat || {};
-
-    // --- 権限判定 ---
-    const role = String(meta.role ?? meta.user_role ?? '').toLowerCase();
-    const clickType = String(meta.click_type ?? meta.clickType ?? '').toLowerCase();
-    const plan = String(meta.plan ?? meta.plan_status ?? meta.planStatus ?? '').toLowerCase();
-
-    const truthy = (v: any) => v === true || v === 1 || v === '1' || v === 'true';
-
-    const flagAdmin =
-      truthy(meta.is_admin) || role === 'admin' || clickType === 'admin' || plan === 'admin';
-
-    const flagMaster =
-      truthy(meta.is_master) || role === 'master' || clickType === 'master' || plan === 'master';
-
-    const allowed = flagAdmin || flagMaster;
-
-    if (!aborted) {
-      setIsIrosAllowed(allowed);
-      // 一時デバッグしたい時だけコメント解除：
-      // console.debug('[iros gate]', { meta, role, clickType, plan, flagAdmin, flagMaster, allowed });
+    if (!user) {
+      setIsIrosAllowed(false);
+      return;
     }
-  })();
 
-  return () => { aborted = true; };
-}, [user]);
+    // fetch helpers（error時は null）
+    const tryPOST = async (url: string, body: any) => {
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          cache: 'no-store',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body ?? {}),
+        });
+        if (!res.ok) return null;
+        return await res.json();
+      } catch {
+        return null;
+      }
+    };
 
+    const tryGET = async (url: string, headers?: Record<string, string>) => {
+      try {
+        const res = await fetch(url, {
+          cache: 'no-store',
+          credentials: 'same-origin',
+          headers,
+        } as RequestInit);
+        if (!res.ok) return null;
+        return await res.json();
+      } catch {
+        return null;
+      }
+    };
 
+    (async () => {
+      // 🔑 Firebase ID トークン（確実に取得）
+      const auth = getAuth();
+      const idToken =
+        (await auth.currentUser?.getIdToken(true).catch(() => null)) ??
+        (await (user as any)?.getIdToken?.(true).catch(() => null)) ??
+        null;
 
+      // ✅ 正攻法：POST で idToken を渡す（これだけで十分）
+      const metaUserInfo =
+        idToken ? await tryPOST('/api/get-user-info', { idToken }) : null;
+
+      // 予備（不要なら消してOK）：GET で Authorization or ?idToken=
+      const metaGetCompat =
+        metaUserInfo ||
+        (idToken
+          ? await tryGET('/api/get-user-info', {
+              Authorization: `Bearer ${idToken}`,
+            })
+          : await tryGET('/api/get-user-info')); // ← 本当に最後のフォールバック
+
+      const meta: any = metaUserInfo || metaGetCompat || {};
+
+      // --- 権限判定 ---
+      const role = String(meta.role ?? meta.user_role ?? '').toLowerCase();
+      const clickType = String(meta.click_type ?? meta.clickType ?? '').toLowerCase();
+      const plan = String(meta.plan ?? meta.plan_status ?? meta.planStatus ?? '').toLowerCase();
+
+      const truthy = (v: any) => v === true || v === 1 || v === '1' || v === 'true';
+
+      const flagAdmin =
+        truthy(meta.is_admin) || role === 'admin' || clickType === 'admin' || plan === 'admin';
+
+      const flagMaster =
+        truthy(meta.is_master) || role === 'master' || clickType === 'master' || plan === 'master';
+
+      const allowed = flagAdmin || flagMaster;
+
+      if (!aborted) setIsIrosAllowed(allowed);
+    })();
+
+    return () => {
+      aborted = true;
+    };
+  }, [user]);
 
   // メニュー
   const menuItems: { title: string; link: string; img: string; alt: string }[] = [
@@ -133,8 +150,18 @@ useEffect(() => {
     { title: 'プラン', link: '/pay', img: '/mu_card.png', alt: 'プラン' },
   ];
 
-  // userCode をURLに付けるページは無し
-  const needsUserParam = new Set<string>();
+  // 共鳴色（リンク毎）
+  const glowColors: Record<string, string> = {
+    '/mu_full': '#8a2be2',        // 紫
+    '/kyomeikai': '#00bfa5',      // ティール
+    '/kyomeikai/live': '#ff9800', // オレンジ
+    '/self': '#2196f3',           // ブルー
+    '/vision': '#4caf50',         // グリーン
+    '/create': '#e91e63',         // ピンク
+    '/': '#9c27b0',               // トップ
+    '/iros': '#ff5722',           // ディープオレンジ
+    '/pay': '#009688',            // エメラルド
+  };
 
   const handleClick = (link: string) => {
     if (!user) {
@@ -179,12 +206,7 @@ useEffect(() => {
   const notices = content?.notices ?? [];
 
   return (
-    <div
-      className="dashboard-wrapper"
-      onClick={() => {
-        if (!user) setIsLoginModalOpen(true);
-      }}
-    >
+    <div className="dashboard-wrapper">
       <div style={{ paddingTop: '2.5px' }}>
         {/* スライダー */}
         <section className="slider-container">
@@ -217,10 +239,21 @@ useEffect(() => {
             const disabledByRole = isIros && !isIrosAllowed;
             const disabled = disabledByAuth || disabledByRole;
 
+            // 共鳴色
+            const color = glowColors[item.link] ?? '#7b8cff';
+
+            // 現在ページ（選択）判定
+            const active =
+              item.link === '/'
+                ? pathname === '/'
+                : pathname?.startsWith(item.link);
+
             return (
               <div
                 key={item.title}
-                className={`tile mu-card ${['tile--mu','tile--kyomei','tile--live','tile--plan','tile--create'][idx] ?? ''} ${disabled ? 'disabled' : ''}`}
+                className={`tile mu-card ${disabled ? 'disabled' : ''}`}
+                data-active={active ? 'true' : 'false'}
+                style={{ ['--glow' as any]: color }}
                 onClick={(e) => {
                   e.stopPropagation();
                   if (disabled) {
@@ -271,6 +304,12 @@ useEffect(() => {
       >
         この機能は <b>master / admin</b> のみご利用いただけます。
       </AppModal>
+
+      {/* ★ フッター（未ログイン時はHome以外→ログインモーダル） */}
+      <FooterNav
+        isLoggedIn={!!user}
+        onRequireLogin={() => setIsLoginModalOpen(true)}
+      />
     </div>
   );
 }

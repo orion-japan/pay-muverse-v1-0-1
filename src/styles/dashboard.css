@@ -1,83 +1,19 @@
-/* === dashboard.css === */
+/* ================================
+   Dashboard（Muverse） compact theme
+   ================================ */
 
-/* ✅ 全体 */
+/* ---- 全体 ---- */
 .dashboard-wrapper {
   padding: 20px;
-  margin-bottom: 80px; /* Footerかぶり防止 */
+  margin-bottom: 80px; /* Footer かぶり防止 */
+  background:
+    radial-gradient(1400px 700px at 10% 8%, #f6f0ff 0%, transparent 60%),
+    radial-gradient(1200px 600px at 90% 85%, #e9f6ff 0%, transparent 60%),
+    linear-gradient(#fbf9ff, #ffffff);
+  min-height: 100vh;
 }
 
-/* ✅ 画像セクション */
-.top-image-section {
-  width: 100%;
-  overflow-x: scroll;
-  display: flex;
-  gap: 12px;
-  scroll-snap-type: x mandatory;
-  margin-bottom: 20px;
-}
-
-.top-image {
-  width: 90%;
-  flex-shrink: 0;
-  border-radius: 12px;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-  scroll-snap-align: center;
-}
-
-/* ✅ お知らせ */
-.notice-section {
-  background: #fff;
-  padding: 16px;
-  border-radius: 12px;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-  margin-bottom: 20px;
-}
-
-.notice-title {
-  font-size: 18px;
-  font-weight: bold;
-  margin-bottom: 8px;
-}
-
-.notice-item {
-  font-size: 14px;
-  color: #555;
-  margin-bottom: 6px;
-}
-
-/* ✅ タイル（3列） */
-.tile-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-}
-
-.tile {
-  background: #fff;
-  padding: 20px;
-  border-radius: 12px;
-  text-align: center;
-  font-weight: 600;
-  text-decoration: none;
-  color: #333;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.tile:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 4px 10px rgba(0,0,0,0.15);
-}
-
-.tile-icon {
-  font-size: 28px;
-  margin-bottom: 8px;
-}
-
-.tile-label {
-  font-size: 16px;
-}
-/* ✅ スライダーコンテナ */
+/* ---- スライダー ---- */
 .slider-container {
   width: 100%;
   height: 180px;
@@ -86,719 +22,249 @@
   border-radius: 12px;
   margin-bottom: 20px;
 }
-
-/* ✅ スライダー画像 */
 .slider-image {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  position: absolute;
-  top: 0;
-  left: 0;
-  opacity: 0;
-  transition: opacity 1s ease-in-out;
-}
-
-/* ✅ 表示中の画像 */
-.slider-image.active {
-  opacity: 1;
-}
-/* ✅ スライダー */
-.slider-container {
-  width: 100%;
-  height: 180px;
-  position: relative;
-  overflow: hidden;
-  border-radius: 12px;
-  margin-bottom: 20px;
-}
-
-.slider-image {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  position: absolute;
-  top: 0;
-  left: 0;
-  opacity: 0;
-  transition: opacity 1s ease-in-out;
-}
-
-.slider-image.active {
-  opacity: 1;
-}
-
-/* ✅ Header アイコン調整 */
-.header {
-  height: 60px;
-  background: #ffffff;
-  border-bottom: 1px solid #ddd;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 16px;
-}
-
-.header-title {
-  flex: 1;
-  text-align: center;
-  font-size: 18px;
-  font-weight: bold;
-}
-
-.header-left,
-.header-right {
-  width: 50px;
-  display: flex;
-  justify-content: center;
-}
-
-/* ✅ 無効状態のタイル */
-.tile.disabled {
-  opacity: 0.5;
-  pointer-events: auto;  /* ← alert を出すためクリックだけ残す */
-  cursor: not-allowed;
-}
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(0, 0, 0, 0.4);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 999;
-}
-
-.modal-content {
-  background: #fff;
-  padding: 20px;
-  border-radius: 12px;
-  width: 300px;
-  text-align: center;
-}
-
-.error-text {
-  color: red;
-  font-size: 14px;
-}
-.tile.disabled {
-  opacity: 0.5;
-  pointer-events: none;   /* ← 完全に押せなくする */
-  cursor: not-allowed;
-}
-/* —— 背景：親の白を上書き（通常幅ページのみ） —— */
-.mu-main:not(.mu-main--wide),
-.mu-page:not(.mu-page--wide) {
-  background: linear-gradient(180deg, #faf7ff 0%, #ffffff 100%);
-}
-
-/* 高さを確保（タブ分の余白も） */
-.mu-page:not(.mu-page--wide) {
-  min-height: calc(100vh - 60px);
-}
-
-/* —— タイル装飾（既存より強いセレクタで上書き） —— */
-.tile-grid .tile {
-  background: #fff;
-  border-radius: 16px;
-  border: 1px solid rgba(160, 160, 220, 0.28);
-  box-shadow: 0 4px 10px rgba(0,0,0,0.05);
-  transition: transform .18s ease, box-shadow .18s ease;
-}
-
-.tile-grid .tile:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 10px 22px rgba(0,0,0,0.08);
-}
-
-/* アイコン画像のサイズを固定（上書きが効くようにセレクタを強める） */
-.tile-grid .tile .tile-icon-img {
-  width: 84px;
-  height: 84px;
-  object-fit: contain;
-  display: block;
-}
-
-/* ラベルの品を少しだけ */
-.tile-grid .tile .tile-label {
-  font-weight: 600;
-  font-size: 0.95rem;
-  color: #3f3f46;
-  margin-top: 6px;
-}
-
-/* ▼ グラデ縁取り（クロスブラウザ版） */
-.tile-grid .tile {
-  position: relative;
-  isolation: isolate;
-  border-radius: 16px;
-}
-
-.tile-grid .tile::before {
-  content: "";
   position: absolute;
   inset: 0;
-  border-radius: 16px;
-  padding: 1px; /* 縁の太さ */
-  background: linear-gradient(135deg, #e9e5ff, #ffffff 60%, #f3f0ff);
-
-  /* Safari 等 */
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-
-  /* 標準プロパティ（←これが無くて警告が出ていました） */
-  mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  mask-composite: exclude;
-
-  z-index: -1;
+  opacity: 0;
+  transition: opacity 1s ease-in-out;
 }
-/* タイルの並びを中央寄せ・等間隔にする */
-.tile-grid {
-  display: flex;              /* 既存がgridでもOK：下の指定が勝ちます */
-  flex-wrap: wrap;
-  justify-content: center;    /* ← space-between をやめて中央寄せ */
-  gap: 16px;                  /* タイル間の均等な余白 */
-  padding: 0 8px;             /* 端の張り付き防止（任意） */
+.slider-image.active { opacity: 1; }
+
+/* ---- お知らせ（ガラス感） ---- */
+.notice-section {
+  background: rgba(255,255,255,0.85);
+  padding: 16px;
+  border-radius: 12px;
+  box-shadow: 0 6px 18px rgba(160,120,255,0.15);
+  backdrop-filter: blur(6px);
+  margin-bottom: 20px;
 }
+.notice-title { font-size: 18px; font-weight: 800; margin-bottom: 8px; }
+.notice-item  { font-size: 14px; color: #555; margin-bottom: 6px; }
 
-/* タイル幅を統一して中央に配置 */
-.tile-grid .tile {
-  width: 110px;               /* 好みで 100–120px 程度 */
-  margin: 0;                  /* 余計な左右マージンをリセット */
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-/* タイル全体の高さとアイコンサイズを小さく */
-.tile-grid .tile {
-  width: 100px;       /* 横幅をやや小さく */
-  height: 110px;      /* 縦幅を短くする（元が130〜150pxなら効果あり） */
-  padding: 8px;       /* 内側の余白も減らす */
-}
+/* ================================
+   タイル：レイアウト + 見た目 + 共鳴演出
+   ================================ */
 
-.tile-grid .tile img {
-  width: 48px;        /* アイコンの横幅を縮小 */
-  height: 48px;       /* 高さも合わせる */
-  object-fit: contain;
-}
-
-.tile-grid .tile small {
-  font-size: 12px;    /* ラベルの文字も少し小さく */
-}
-/* タイル内のアイコン画像 */
-.tile-grid .tile .tile-icon-img {
-  width: 60px;       /* 横幅 */
-  height: 60px;      /* 高さ */
-  object-fit: contain; /* 画像比率を保持して縮小 */
-  display: block;
-  margin: 0 auto;    /* 中央寄せ */
-}
-
-/* アイコンとラベル間のスペースを微調整 */
-.tile-grid .tile .tile-label {
-  margin-top: 6px;
-  font-size: 13px;
-}
-/* === グラデーション縁取り（赤→紫） ===================== */
-.tile-grid .tile {
-  position: relative;
-  border-radius: 16px;
-
-  /* 既存の枠・背景・影を整える */
-  background: #fff;
-  box-shadow: 0 4px 12px rgba(0,0,0,.06);
-  transition: transform .18s ease, box-shadow .18s ease;
-
-  /* グラデ枠（2層の背景で border にだけ色を通す） */
-  border: 2px solid transparent;
-  background-image:
-    linear-gradient(#fff, #fff),                             /* 中身（白） */
-    linear-gradient(135deg, #ff4d6d, #8a2be2);               /* 外周の赤→紫 */
-  background-clip: padding-box, border-box;
-  background-origin: padding-box, border-box;
-}
-
-.tile-grid .tile:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 8px 18px rgba(0,0,0,.08);
-}
-
-.tile-grid .tile:active {
-  transform: translateY(-1px) scale(.99);
-}
-
-/* 角丸と枠を揃えるための保険（画像がはみ出さないように） */
-.tile-grid .tile .tile-icon {
-  overflow: hidden;
-  border-radius: 10px; /* 画像周りの角丸は控えめに */
-}
-
-/* アイコンとラベル（任意の微調整） */
-.tile-grid .tile .tile-icon-img { width: 56px; height: 56px; object-fit: contain; display:block; }
-.tile-grid .tile .tile-label { margin-top: 3px; font-size: 13px; font-weight: 600; color: #3f3f46; }
-/* === グラデーション縁取り（立体感あり） ===================== */
-.tile-grid .tile {
-  position: relative;
-  border-radius: 18px;
-
-  /* 背景と枠 */
-  background: #fff;
-  border: 3px solid transparent; /* ← 太さをアップ */
-  background-image:
-    linear-gradient(#fff, #fff),
-    linear-gradient(135deg, #ff4d6d, #8a2be2);
-  background-clip: padding-box, border-box;
-  background-origin: padding-box, border-box;
-
-  /* 影：内側の光沢 + 外側の浮き */
-  box-shadow:
-    inset 0 2px 4px rgba(255,255,255,0.6), /* 上側の光 */
-    inset 0 -2px 4px rgba(0,0,0,0.05),     /* 下側の影 */
-    0 4px 12px rgba(0,0,0,0.1);           /* 外側の影 */
-
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.tile-grid .tile:hover {
-  transform: translateY(-4px);
-  box-shadow:
-    inset 0 2px 4px rgba(255,255,255,0.6),
-    inset 0 -2px 4px rgba(0,0,0,0.05),
-    0 8px 20px rgba(0,0,0,0.15);
-}
-
-.tile-grid .tile:active {
-  transform: translateY(-1px) scale(0.99);
-}
-
-/* タイルボタン（大きめ + 立体感） */
-.tile-grid .tile {
-  position: relative;
-  border-radius: 18px;
-  
-  /* サイズ感アップ */
-  width: 110px;   /* ← 元より大きめに */
-  height: 110px;  /* ← 正方形で揃える */
-  padding: 12px;
-
-  /* 背景と枠 */
-  background: #fff;
-  border: 3px solid transparent;
-  background-image:
-    linear-gradient(#fff, #fff),
-    linear-gradient(135deg, #ff4d6d, #8a2be2);
-  background-clip: padding-box, border-box;
-  background-origin: padding-box, border-box;
-
-  /* 影：内側の光沢 + 外側の浮き */
-  box-shadow:
-    inset 0 2px 4px rgba(255,255,255,0.6),
-    inset 0 -2px 4px rgba(0,0,0,0.05),
-    0 4px 12px rgba(0,0,0,0.1);
-
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.tile-grid .tile:hover {
-  transform: translateY(-4px);
-  box-shadow:
-    inset 0 2px 4px rgba(255,255,255,0.6),
-    inset 0 -2px 4px rgba(0,0,0,0.05),
-    0 8px 20px rgba(0,0,0,0.15);
-}
-
-.tile-grid .tile:active {
-  transform: translateY(-1px) scale(0.99);
-}
-
-/* アイコンやテキストを中央寄せ */
-.tile-grid .tile img,
-.tile-grid .tile span {
-  display: block;
-  margin: 0 auto;
-}
-/* ---- タイルをレスポンシブGridで安定配置 ---- */
+/* レイアウト：基本3列（中央寄せ） */
 .tile-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr)); /* 3等分 */
-  gap: 14px;               /* タイル間の余白 */
-  padding: 0 8px;          /* 端の張り付き防止 */
-  justify-items: center;   /* 各セル内で中央寄せ */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  justify-items: center;
+  gap: 14px;
+  padding: 0 8px;
 }
 
-/* タイルの固定サイズ（大きめ） */
+/* タイル：外レイヤー（枠・発光担当） */
 .tile-grid .tile {
-  width: 112px;            /* 3列で収まるサイズに調整 */
+  position: relative;
+  isolation: isolate;                /* 発光を中に入れない */
+  width: 112px;
   height: 112px;
-  margin: 0;               /* 余計なマージンは外す（折返し防止） */
+  border-radius: 12px;
+  background: transparent;           /* 中身は .tile-inner が持つ */
+  border: none;
+  box-shadow: 0 6px 16px rgba(0,0,0,.08);
+  transition: transform .18s ease, box-shadow .18s ease;
+  --glow: #7b8cff;                   /* JSから上書き可 */
+  --c1: #b389ff; --c2: #79b8ff;      /* 枠グラデのデフォルト */
+}
+
+/* タイル：内レイヤー（白の中身） */
+.tile-grid .tile .tile-inner{
+  position: absolute;
+  inset: 2px;                        /* 外枠分 */
+  border-radius: 10px;
+  background: #fff;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  z-index: 1;
+  padding: 10px;
+  transition: box-shadow .18s ease, background .18s ease;
 }
 
 /* アイコン・ラベル */
-.tile-grid .tile .tile-icon-img { width: 58px; height: 58px; object-fit: contain; display:block; }
-.tile-grid .tile .tile-label { margin-top: 4px; font-size: 13px; }
+.tile-grid .tile .tile-icon-img{ width:58px; height:58px; object-fit:contain; display:block; }
+.tile-grid .tile .tile-label   { margin-top: 6px; font-size: 13px; font-weight: 700; color:#3f3f46; }
 
-/* 画面が狭い端末では 2列にして窮屈さ回避（例: 幅 ≤ 380px） */
-@media (max-width: 380px) {
-  .tile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .tile-grid .tile { width: 118px; height: 118px; }  /* 少しだけ広く */
-}
-/* ボタンの枠アニメーション */
-@keyframes borderGlow {
-  0% {
-    box-shadow: 0 0 4px rgba(255, 0, 128, 0.4), 0 0 8px rgba(128, 0, 255, 0.4);
-  }
-  50% {
-    box-shadow: 0 0 8px rgba(255, 0, 128, 0.8), 0 0 16px rgba(128, 0, 255, 0.8);
-  }
-  100% {
-    box-shadow: 0 0 4px rgba(255, 0, 128, 0.4), 0 0 8px rgba(128, 0, 255, 0.4);
-  }
+/* 微インタラクション */
+.tile-grid .tile:hover{ transform: translateY(-3px); box-shadow: 0 10px 24px rgba(0,0,0,.12); }
+.tile-grid .tile:active{ transform: translateY(-1px) scale(.99); }
+
+/* 共鳴オーラ（淡い光）：::before */
+.tile-grid .tile::before{
+  content:"";
+  position:absolute;
+  inset:-25%;
+  background:
+    radial-gradient(60% 60% at 50% 50%,
+      color-mix(in srgb, var(--glow) 35%, transparent) 0%,
+      color-mix(in srgb, var(--glow) 18%, transparent) 45%,
+      transparent 60%);
+  filter: blur(10px);
+  opacity: 0;
+  transform: scale(.9);
+  transition: opacity .25s ease, transform .25s ease;
+  pointer-events: none;
+  z-index: 0;
 }
 
-/* タイルの枠に適用 */
-.tile-grid .tile {
-  border: 2px solid transparent;
+/* 共鳴リング（グラデ枠）：::after  ※Safari対応含む */
+.tile-grid .tile::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  padding:2px;                       /* 枠の太さ（1〜3pxで調整） */
   border-radius: 12px;
-  background: #fff;
-  background-clip: padding-box;
-  animation: borderGlow 3s ease-in-out infinite; /* ← アニメーション追加 */
-}
-/* グラデーションがゆっくり変化するアニメ */
-@keyframes gradientShift {
-  0% {
-    border-image-source: linear-gradient(45deg, #ff4d88, #8a2be2);
-  }
-  50% {
-    border-image-source: linear-gradient(45deg, #ff66aa, #6a0dad);
-  }
-  100% {
-    border-image-source: linear-gradient(45deg, #ff4d88, #8a2be2);
-  }
-}
-
-/* 共通ボタンスタイル */
-.tile-grid .tile {
-  border: 3px solid transparent;
-  border-radius: 16px;
-  background: #fff;
-  background-clip: padding-box;
-  border-image-slice: 1;
-  animation: gradientShift 6s ease-in-out infinite;
-}
-
-/* 個性のあるボタン（色やタイミングを変える） */
-.tile-grid .tile:nth-child(1) {
-  border-image-source: linear-gradient(45deg, #ff4d88, #8a2be2);
-  animation-duration: 5s;
-}
-.tile-grid .tile:nth-child(2) {
-  border-image-source: linear-gradient(45deg, #ff884d, #ff4da6);
-  animation-duration: 7s;
-  animation-delay: 1s;
-}
-.tile-grid .tile:nth-child(3) {
-  border-image-source: linear-gradient(45deg, #4da6ff, #8a2be2);
-  animation-duration: 6.5s;
-  animation-delay: 0.5s;
-}
-.button {
-  position: relative;
-  padding: 12px;
-  border-radius: 8px; /* 少し丸い角 */
-  background: white;
-  border: 3px solid transparent;
-  background-image: linear-gradient(#fff, #fff), 
-    linear-gradient(45deg, #ff4e50, #f9d423);
-  background-origin: border-box;
-  background-clip: content-box, border-box;
-  
-  /* グラデーション枠のアニメーション */
-  animation: borderGradient 5s ease infinite;
-
-  /* グラデーションと同じ色の影 */
-  box-shadow: 0 4px 12px rgba(255, 78, 80, 0.4);
-}
-
-@keyframes borderGradient {
-  0% {
-    background-image: linear-gradient(#fff, #fff), 
-      linear-gradient(45deg, #ff4e50, #f9d423);
-    box-shadow: 0 4px 12px rgba(255, 78, 80, 0.4);
-  }
-  50% {
-    background-image: linear-gradient(#fff, #fff), 
-      linear-gradient(45deg, #f9d423, #ff4e50);
-    box-shadow: 0 4px 18px rgba(249, 212, 35, 0.4);
-  }
-  100% {
-    background-image: linear-gradient(#fff, #fff), 
-      linear-gradient(45deg, #ff4e50, #f9d423);
-    box-shadow: 0 4px 12px rgba(255, 78, 80, 0.4);
-  }
-}
-
-
-/* === タイル：角少し丸 + 白中身 + 枠色で外側ぼかし === */
-.tile-grid .tile{
-  position: relative;
-  isolation: isolate;         /* 発光が中に入らない */
-  width: 112px;
-  height: 112px;
-  padding: 12px;
-  border-radius: 10px;        /* ◁ 角を少し丸く（好みで 8–12px） */
-  background:#fff;            /* 中は純白 */
-  box-shadow: 0 6px 16px rgba(0,0,0,.08);
-  transition: transform .18s ease, box-shadow .18s ease;
-  border: none;               /* 枠は疑似要素で描く */
-}
-
-/* 枠（リング）— 内側はくり抜き、線だけ残す */
-.tile-grid .tile::before{
-  content:"";
-  position:absolute;
-  inset:0;
-  padding:2px;                /* 枠の太さ（1–3pxで調整） */
-  border-radius:12px;         /* 本体より +2px 程度 */
-  background:linear-gradient(135deg, var(--c1,#ff4d88), var(--c2,#8a2be2));
-  /* マスクでリング化（Safari対応含む） */
+  background: linear-gradient(135deg, var(--c1), var(--c2));
+  /* リング化マスク */
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
   -webkit-mask:
     linear-gradient(#000 0 0) content-box,
     linear-gradient(#000 0 0);
+  mask-composite: exclude;
   -webkit-mask-composite: xor;
-          mask-composite: exclude;
-  pointer-events:none;
-  z-index:0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;                         /* デフォルト非表示 */
+  transition: opacity .2s ease;
 }
 
-/* 外側のぼかし（発光）。枠と同じ色で外にだけ広げる */
-.tile-grid .tile::after{
-  content:"";
-  position:absolute;
-  inset:-8px;                 /* ◁ 外側に広げる量（6–12pxで調整） */
-  border-radius:14px;         /* 枠より少し大きく */
-  background:linear-gradient(135deg, var(--c1,#ff4d88), var(--c2,#8a2be2));
-  filter:blur(12px);          /* ぼかし量（10–16pxで調整） */
-  opacity:.22;                /* 発光の強さ（.15–.35で調整） */
-  pointer-events:none;
-  z-index:-1;                 /* 背面へ＝中は白のまま */
-  animation:glowPulse var(--pulse,6s) ease-in-out infinite;
-  animation-delay:var(--delay,0s);
+/* 表示トリガー：hover / focus / 選択（data-active="true"） */
+.tile-grid .tile:hover:not(.disabled) .tile-inner,
+.tile-grid .tile:focus-visible:not(.disabled) .tile-inner,
+.tile-grid .tile[data-active="true"]:not(.disabled) .tile-inner{
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--glow) 68%, white) inset,
+    0 0 20px color-mix(in srgb, var(--glow) 65%, transparent),
+    0 10px 20px rgba(0,0,0,.06);
+}
+.tile-grid .tile:hover:not(.disabled)::before,
+.tile-grid .tile:focus-visible:not(.disabled)::before,
+.tile-grid .tile[data-active="true"]::before,
+.tile-grid .tile:hover:not(.disabled)::after,
+.tile-grid .tile:focus-visible:not(.disabled)::after,
+.tile-grid .tile[data-active="true"]::after{
+  opacity: .9;
+  transform: scale(1);
+  animation: mu-pulse 1.9s ease-in-out infinite;
 }
 
-/* 軽い呼吸アニメ（opacityのみ＝軽量） */
-@keyframes glowPulse{ 0%,100%{opacity:.18} 50%{opacity:.32} }
+@keyframes mu-pulse{
+  0%,100%{ filter: blur(10px); opacity:.6; }
+  50%    { filter: blur(14px); opacity:.95; }
+}
 
-/* 中身 */
-.tile-grid .tile .tile-icon-img{ width:58px;height:58px;object-fit:contain;display:block;margin:0 auto;z-index:1; }
-.tile-grid .tile .tile-label{ margin-top:4px;font-size:13px;font-weight:600;color:#3f3f46;z-index:1; }
+/* 無効タイルは光らせない */
+.tile-grid .tile.disabled { cursor: default; }
+.tile-grid .tile.disabled::before,
+.tile-grid .tile.disabled::after{ display: none; }
 
-/* ボタンごとの色（そのまま流用OK／好みで微調整） */
-.tile--mu     { --c1:#ff4d88; --c2:#8a2be2; --pulse:5.0s; --delay:0s;  }
-.tile--kyomei { --c1:#ff884d; --c2:#ff4da6; --pulse:6.5s; --delay:.4s; }
-.tile--plan   { --c1:#4da6ff; --c2:#8a2be2; --pulse:5.8s; --delay:.2s; }
-
-/* PCホバーの微浮き */
-.tile-grid .tile:hover{ transform:translateY(-3px); box-shadow:0 10px 24px rgba(0,0,0,.12); }
-.tile-grid .tile:active{ transform:translateY(-1px) scale(.99); }
-
-/* ユーザーが“動き少なめ”設定のときは停止 */
+/* 動きを抑える設定のユーザー配慮 */
 @media (prefers-reduced-motion: reduce){
-  .tile-grid .tile::after{ animation:none; }
+  .tile-grid .tile,
+  .tile-grid .tile::before,
+  .tile-grid .tile::after{ animation: none !important; transition: none !important; }
+  .tile-grid .tile:hover{ transform: none; box-shadow: 0 6px 16px rgba(0,0,0,.08); }
+}
+
+/* 画面が狭い端末（≦380px）は2列に */
+@media (max-width: 380px){
+  .tile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tile-grid .tile { width: 118px; height: 118px; }
+}
+
+/* ================================
+   モーダル／エラーテキスト
+   ================================ */
+.modal-overlay{
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex; justify-content: center; align-items: center;
+  z-index: 999;
+}
+.modal-content{
+  background:#fff; padding:20px; border-radius:12px; width:300px; text-align:center;
+}
+.error-text{ color:#e11d48; font-size:14px; }
+
+/* ================================
+   フッターの見た目（グラデ帯）
+   ================================ */
+footer{
+  background: linear-gradient(90deg, #b089f9, #9a7ff9);
+  color: #fff;
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+  box-shadow: 0 -4px 12px rgba(0,0,0,0.15);
 }
 
 
-/* ===== 枠＆発光は外レイヤー、白面は内レイヤー ===== */
-
-/* 外側ボックス：枠・発光担当（中身は持たない） */
-.tile-grid .tile{
-  position: relative;
-  isolation: isolate;              /* 発光を内側に入れない */
-  width: 112px;
-  height: 112px;
-  border-radius: 10px;
-  border: none;                    /* 枠は疑似要素で描く */
-  background: transparent;         /* ← 外側は透明にする */
-  transition: transform .18s ease, box-shadow .18s ease;
-  box-shadow: 0 6px 16px rgba(0,0,0,.08);
+/* マウスが無い環境でもタップ時にしっかり光る */
+@media (hover: none) {
+  .tile-grid .tile:active:not(.disabled) .tile-inner {
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--glow) 70%, white) inset,
+      0 0 22px color-mix(in srgb, var(--glow) 70%, transparent),
+      0 12px 22px rgba(0,0,0,.10);
+  }
+  .tile-grid .tile:active:not(.disabled)::before,
+  .tile-grid .tile:active:not(.disabled)::after {
+    opacity: .95;
+    transform: scale(1);
+    animation: mu-pulse 1.6s ease-in-out 1;
+  }
+  /* タップ中の白いフラッシュを少し強める */
+  .tile-grid .tile:active .tile-inner::after {
+    animation: tileTapFlash .26s ease-out 1;
+  }
 }
 
-/* 中身（白面＋内容） */
-.tile-grid .tile .tile-inner{
-  position: absolute;
-  inset: 2px;                      /* 枠の分だけ一回り小さく */
-  border-radius: 8px;              /* 角少し丸 */
-  background: #fff;                /* ★ 完全な白面（ここに内容を置く） */
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  z-index: 1;                      /* 枠より手前 */
-}
-
-/* 画像・ラベル */
-.tile-grid .tile .tile-icon-img{ width:68px; height:68px; object-fit:contain; display:block; }
-.tile-grid .tile .tile-label{ margin-top:4px; font-size:13px; font-weight:600; color:#3f3f46; }
-
-/* 枠（グラデのリング）— 内側はくり抜き */
-.tile-grid .tile::before{
-  content:"";
-  position:absolute;
-  inset:0;
-  padding:2px;                     /* 枠の太さ */
-  border-radius:12px;              /* 外側の角 */
-  background:linear-gradient(135deg, var(--c1,#ff4d88), var(--c2,#8a2be2));
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-          mask-composite: exclude; /* リング化 */
-  pointer-events:none;
-  z-index:0;                       /* 白面(.tile-inner)の背面 */
-}
-
-/* 外側の発光（ぼかし） */
-.tile-grid .tile::after{
-  content:"";
-  position:absolute;
-  inset:-8px;                      /* 外に広げる */
-  border-radius:14px;
-  background:linear-gradient(135deg, var(--c1,#ff4d88), var(--c2,#8a2be2));
-  filter:blur(12px);
-  opacity:.22;
-  pointer-events:none;
-  z-index:-1;                      /* さらに背面（中は白のまま） */
-  animation: glowPulse var(--pulse,6s) ease-in-out infinite;
-  animation-delay: var(--delay,0s);
-}
-
-/* 軽い呼吸アニメ（軽量：opacityのみ） */
-@keyframes glowPulse{ 0%,100%{opacity:.18} 50%{opacity:.32} }
-
-/* ホバー（PC） */
-.tile-grid .tile:hover{ transform:translateY(-3px); box-shadow:0 10px 24px rgba(0,0,0,.12); }
-.tile-grid .tile:active{ transform:translateY(-1px) scale(.99); }
-
-/* 個性カラーはそのまま使えます */
-.tile--mu     { --c1:#ff4d88; --c2:#8a2be2; --pulse:5.0s; --delay:0s;  }
-.tile--kyomei { --c1:#ff884d; --c2:#ff4da6; --pulse:6.5s; --delay:.4s; }
-.tile--plan   { --c1:#4da6ff; --c2:#8a2be2; --pulse:5.8s; --delay:.2s; }
-
-/* 動きを抑える設定の人には止める */
-@media (prefers-reduced-motion: reduce){
-  .tile-grid .tile::after{ animation:none; }
+/* ヘッダー直下の青帯を無効化 */
+main.mu-main::before {
+  content: none !important;
+  display: none !important;
+  background: transparent !important;
+  height: 0 !important;
 }
 
 
-/* =========================
-   タイルのマイクロインタラクション
-   ========================= */
-
-/* 調整しやすいノブ（お好みで数値だけ変えてOK） */
-:root {
-  --tile-glow-base: .22;   /* 通常時の発光の強さ */
-  --tile-glow-hover: .34;  /* ホバー時の発光の強さ */
-  --tile-glow-blur: 12px;  /* 通常時のぼかし量 */
-  --tile-glow-blur-hover: 14px; /* ホバー時のぼかし量 */
+/* ---- スパークル（散る粒） ---- */
+@keyframes mu-burst {
+  0%   { transform: scale(.2) rotate(0deg);   opacity: .95; filter: blur(0px);   }
+  70%  { transform: scale(1.2) rotate(25deg); opacity: .75; filter: blur(0.5px); }
+  100% { transform: scale(1.6) rotate(45deg); opacity: 0;   filter: blur(1px);   }
 }
 
-/* 既存の発光をノブに合わせる（ベース状態） */
-.tile-grid .tile::after {
-  opacity: var(--tile-glow-base);
-  filter: blur(var(--tile-glow-blur));
-}
-
-/* ホバーで光を少し強く＆ふわっと */
-.tile-grid .tile:hover::before { filter: brightness(1.15); }  /* 枠線を少し明るく */
-.tile-grid .tile:hover::after  {
-  opacity: var(--tile-glow-hover);
-  filter: blur(var(--tile-glow-blur-hover));
-}
-
-/* クリック/タップで一瞬フラッシュ（軽量：opacityのみ） */
-@keyframes tileTapFlash {
-  0%   { opacity: .0;   }
-  30%  { opacity: .45;  }
-  100% { opacity: .0;   }
-}
-
-/* フラッシュ用のオーバーレイを重ねる（白の光がふわっと） */
-.tile-grid .tile .tile-inner::after {
+/* 初期は非表示 */
+.tile-grid .tile .tile-inner::before {
   content: "";
   position: absolute;
   inset: 0;
-  border-radius: inherit;
-  background: radial-gradient(120% 120% at 50% 50%, rgba(255,255,255,.6), rgba(255,255,255,0) 60%);
-  opacity: 0;
   pointer-events: none;
-  transition: opacity .15s ease;
+  opacity: 0;
+  /* 8個の粒を box-shadow で配置（色は --c1/--c2 をブレンド） */
+  width: 6px; height: 6px; border-radius: 50%;
+  background: color-mix(in srgb, var(--c1) 60%, white);
+  left: 50%; top: 50%; transform: translate(-50%,-50%) scale(.2);
+  box-shadow:
+    -42px -10px 0 0 color-mix(in srgb, var(--c1) 80%, transparent),
+     38px -18px 0 0 color-mix(in srgb, var(--c2) 80%, transparent),
+    -30px  24px 0 0 color-mix(in srgb, var(--c2) 70%, transparent),
+     28px  22px 0 0 color-mix(in srgb, var(--c1) 70%, transparent),
+     -8px -32px 0 0 color-mix(in srgb, var(--c2) 65%, transparent),
+      6px  34px 0 0 color-mix(in srgb, var(--c1) 65%, transparent),
+     22px  -2px 0 0 color-mix(in srgb, var(--c1) 60%, transparent),
+    -20px   2px 0 0 color-mix(in srgb, var(--c2) 60%, transparent);
 }
 
-/* :active で発動（タップ中） */
-.tile-grid .tile:active .tile-inner::after {
-  animation: tileTapFlash .28s ease-out 1;
+/* PC: hover で一度だけ、モバイル: active で一度だけ */
+.tile-grid .tile:hover .tile-inner::before,
+.tile-grid .tile:active .tile-inner::before {
+  opacity: 1;
+  animation: mu-burst .6s ease-out 1;
 }
-
-/* PC ホバー時に本体も少しだけ持ち上げる（既存の hover と共存） */
-.tile-grid .tile:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 10px 24px rgba(0,0,0,.12);
-}
-
-/* アクセシビリティ：キーボードでフォーカスした時の可視リング */
-.tile-grid .tile:focus-visible .tile-inner {
-  outline: 2px solid rgba(99,102,241,.7);  /* indigo系 */
-  outline-offset: 2px;
-  border-radius: 8px;
-}
-
-/* タップハイライトを無効化（モバイルの濃いグレーの帯を消す） */
-.tile-grid .tile {
-  -webkit-tap-highlight-color: transparent;
-}
-
-/* “動き少なめ”設定なら強い演出を抑制 */
-@media (prefers-reduced-motion: reduce) {
-  .tile-grid .tile:hover,
-  .tile-grid .tile:active { transform: none; box-shadow: 0 6px 16px rgba(0,0,0,.08); }
-  .tile-grid .tile:hover::before { filter: none; }
-  .tile-grid .tile:hover::after  { opacity: var(--tile-glow-base); filter: blur(var(--tile-glow-blur)); }
-  .tile-grid .tile .tile-inner::after { animation: none !important; }
-}
-.tile-grid .tile{
-  position: relative; /* 必須 */
-  width: 112px;
-  height: 112px;
-}
-
-/* アイコンの位置を自由に指定 */
-.tile-grid .tile .tile-icon-img{
-  position: absolute;
-  top: 10px;              /* ← ここを増やせばもっと下へ */
-  left: 50%;
-  transform: translateX(-50%);
-  width: 70px;
-  height: 70px;
-  object-fit: contain;
-  display: block;
-}
-
-/* ラベルは底に固定 */
-.tile-grid .tile .tile-label{
-  position: absolute;
-  bottom: 8px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 13px;
-  font-weight: 700;
-  color: #3f3f46;
-}
-
-
-

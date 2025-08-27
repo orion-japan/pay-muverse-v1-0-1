@@ -557,3 +557,15 @@ main {
 
 
 .tile.disabled { opacity: .4; filter: grayscale(100%); cursor: not-allowed; }
+
+/* 旧: 高さ50~60px相当 → 新: 40px程度に圧縮 */
+.header,
+.navbar {
+  height: 42px;             /* 高さ低めに */
+  padding: 4px 10px;        /* 上下paddingを圧縮 */
+  font-size: 14px;          /* 文字サイズも少し小さく */
+}
+
+.header .logo {
+  height: 26px;             /* ロゴ画像も縮める */
+}

@@ -29,10 +29,10 @@ export default function Header({ onLoginClick }: Props) {
         width: '100%',
         display: 'flex',
         justifyContent: 'center',
-        boxShadow: '0 2px 6px rgba(0,0,0,0.1)',
+        boxShadow: '0 2px 6px rgba(0,0,0,0.08)', // ほんの少し軽く
       }}
     >
-      {/* 内枠：中央430pxに背景グラデを適用 */}
+      {/* 内枠：中央430pxに背景グラデを適用（コンパクト版） */}
       <div
         style={{
           width: '100%',
@@ -41,22 +41,44 @@ export default function Header({ onLoginClick }: Props) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '10px 16px',
-          height: '60px',
+          padding: '6px 10px',           // ← 10px 16px → 6px 10px
+          height: '44px',                // ← 60px → 44px
           fontWeight: 'bold',
           color: 'white',
           background: 'linear-gradient(90deg, #b089f9, #9a7ff9)',
+          borderRadius: '0 0 10px 10px', // ほんの少しだけ丸み（お好みで）
         }}
       >
         <Link
           href="/"
           onClick={prevent}
-          style={{ textDecoration: 'none', color: 'white', fontSize: '18px' }}
+          style={{
+            textDecoration: 'none',
+            color: 'white',
+            fontSize: '14px',            // ← 18px → 14px
+            fontWeight: 800,
+            padding: '4px 8px',
+            borderRadius: '8px',
+            background: 'rgba(255,255,255,0.18)',
+            lineHeight: 1,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
         >
-          🏠 Home
+          <span aria-hidden>🏠</span>
+          <span>Home</span>
         </Link>
 
-        <div style={{ fontSize: '22px', fontWeight: 'bold', textAlign: 'center' }}>
+        <div
+          style={{
+            fontSize: '16px',            // ← 22px → 16px
+            fontWeight: 900,
+            textAlign: 'center',
+            letterSpacing: '.3px',
+            lineHeight: 1,
+          }}
+        >
           Muverse
         </div>
 
@@ -65,13 +87,16 @@ export default function Header({ onLoginClick }: Props) {
             <button
               onClick={handleLogout}
               style={{
-                background: 'rgba(255,255,255,0.2)',
+                height: '28px',          // ← 34px 相当 → 28px
+                padding: '0 10px',
+                background: 'rgba(255,255,255,0.22)',
                 border: 'none',
-                borderRadius: '6px',
-                padding: '6px 12px',
+                borderRadius: '8px',     // ← 6px → 8px（視覚的に小さく見える）
                 color: 'white',
-                fontWeight: 'bold',
+                fontSize: '12px',
+                fontWeight: 800,
                 cursor: 'pointer',
+                lineHeight: 1,
               }}
             >
               ログアウト
@@ -80,13 +105,16 @@ export default function Header({ onLoginClick }: Props) {
             <button
               onClick={onLoginClick}
               style={{
-                background: 'rgba(255,255,255,0.2)',
+                height: '28px',
+                padding: '0 10px',
+                background: 'rgba(255,255,255,0.22)',
                 border: 'none',
-                borderRadius: '6px',
-                padding: '6px 12px',
+                borderRadius: '8px',
                 color: 'white',
-                fontWeight: 'bold',
+                fontSize: '12px',
+                fontWeight: 800,
                 cursor: 'pointer',
+                lineHeight: 1,
               }}
             >
               ログイン

@@ -23,11 +23,14 @@ type IboardPickerProps = {
   selectedPostId?: string | null;
   onSelect: (postId: string, thumbnailUrl: string) => void;
   onClose?: () => void;
+  /** iBoard サムネ1辺(px)。未指定なら 100 */
   thumbSizePx?: number;
   /** 取得上限 */
   limit?: number;
   /** Storage の公開バケット名 */
   bucketName?: string;
+  /** ★ 追加: スコープ（既定は 'mine' = 自分の投稿のみ）。'all' で全体表示に切替可 */
+  scope?: 'mine' | 'all';
 };
 
 export default function IboardPicker({
@@ -39,11 +42,17 @@ export default function IboardPicker({
   onClose,
   limit = 200,
   bucketName = 'public',
+  scope = 'mine', // ★ 既定で「自分の投稿のみ」
 }: IboardPickerProps) {
   // ---- UI 状態 ----
   const [tab, setTab] = useState<'iboard' | 'album'>('iboard');
-  const [thumb, setThumb] = useState(100); // サムネサイズ(px)
+  const [thumb, setThumb] = useState<number>(thumbSizePx ?? 100); // ← propを初期値に反映
   const [current, setCurrent] = useState<string | null>(selectedPostId ?? null);
+
+  // propでサイズが変わったら追従
+  useEffect(() => {
+    if (typeof thumbSizePx === 'number') setThumb(thumbSizePx);
+  }, [thumbSizePx]);
 
   // ---- データ状態 ----
   const [loading, setLoading] = useState(true);
@@ -56,14 +65,6 @@ export default function IboardPicker({
 
   const normalizeUrl = (u: any) => (typeof u === 'string' ? u : u?.url || '');
 
-  // 「自分の投稿」判定（user_code一致 or URL に /<userCode>/ を含む）
-  const isMine = (p: IboardPost) => {
-    if (!me) return false;
-    if ((p.user_code ?? '').trim() === me) return true;
-    const urls = Array.isArray(p.media_urls) ? p.media_urls : [];
-    return urls.some((raw) => normalizeUrl(raw).includes(`/${me}/`));
-  };
-
   /* =========================
       iBoard 取得
   ========================= */
@@ -74,15 +75,23 @@ export default function IboardPicker({
       setLoading(true);
       setErrorMsg(null);
       try {
-        const { data, error } = await supabase
+        // ベースクエリ
+        let q = supabase
           .from('posts')
           .select('post_id, media_urls, user_code, visibility, board_type, created_at')
           .order('created_at', { ascending: false })
           .limit(limit);
 
+        // ★ スコープが 'mine' のときは必ず「自分の投稿のみ」
+        if (scope === 'mine' && me) {
+          q = q.eq('user_code', me);
+        }
+
+        const { data, error } = await q;
         if (error) throw error;
         if (!mounted) return;
 
+        // 画像つき、かつ private-posts ではないもの
         const hasImage = (p: any) =>
           Array.isArray(p.media_urls) &&
           p.media_urls.length > 0 &&
@@ -93,8 +102,9 @@ export default function IboardPicker({
 
         const filtered = (data ?? []).filter(hasImage);
 
-        // まず「自分の」だけ
-        const mine = filtered.filter(isMine).map((p: any) => ({
+        // ★ 以前の「自分が0件なら全体からフォールバック」は廃止
+        //   => 実行カード側では“本当に自分の投稿だけ”に限定される
+        const show = filtered.map((p: any) => ({
           post_id: p.post_id as string,
           media_urls: Array.isArray(p.media_urls) ? p.media_urls : [],
           user_code: p.user_code ?? null,
@@ -102,18 +112,6 @@ export default function IboardPicker({
           board_type: p.board_type ?? null,
           created_at: p.created_at ?? null,
         }));
-
-        // 0件なら“公開画像付き投稿”を一部表示（フォールバック/デバッグ用）
-        const show = mine.length > 0
-          ? mine
-          : filtered.slice(0, 60).map((p: any) => ({
-              post_id: p.post_id as string,
-              media_urls: Array.isArray(p.media_urls) ? p.media_urls : [],
-              user_code: p.user_code ?? null,
-              visibility: p.visibility ?? null,
-              board_type: p.board_type ?? null,
-              created_at: p.created_at ?? null,
-            }));
 
         setPosts(show);
       } catch (e: any) {
@@ -123,7 +121,7 @@ export default function IboardPicker({
       }
     })();
     return () => { mounted = false; };
-  }, [tab, userCode, clickUsername, limit]);
+  }, [tab, userCode, clickUsername, limit, scope]);
 
   /* =========================
       Album(Storage) 取得
@@ -137,7 +135,7 @@ export default function IboardPicker({
       try {
         const prefixes: string[] = [];
         // userCode あり/なし の両方を走査（パス設計が揺れていても拾える）
-        const withUser = [`album/${me}/`, `iboard/${me}/`, `uploads/${me}/`];
+        const withUser = me ? [`album/${me}/`, `iboard/${me}/`, `uploads/${me}/`] : [];
         const noUser   = [`album/`, `iboard/`, `uploads/`];
         withUser.forEach((p) => prefixes.push(p));
         noUser.forEach((p) => prefixes.push(p));
@@ -168,7 +166,7 @@ export default function IboardPicker({
       }
     })();
     return () => { mounted = false; };
-  }, [tab, userCode, bucketName]);
+  }, [tab, userCode, bucketName, me]);
 
   /* =========================
       Album その場アップロード
@@ -240,7 +238,7 @@ export default function IboardPicker({
             onClick={() => setTab('iboard')}
             aria-pressed={tab === 'iboard'}
           >
-            iBoard 投稿
+            iBoard 投稿{scope === 'mine' ? '（自分のみ）' : ''}
           </button>
           <button
             className={`ibp-tab ${tab === 'album' ? 'active' : ''}`}
@@ -261,9 +259,9 @@ export default function IboardPicker({
           <label>サムネ</label>
           <input
             type="range"
-            min={64}
-            max={200}
-            step={4}
+            min={50}
+            max={160}
+            step={2}
             value={thumb}
             onChange={(e) => setThumb(Number(e.target.value))}
             aria-label="サムネサイズ"
@@ -301,7 +299,11 @@ export default function IboardPicker({
               })}
               {posts.length === 0 && (
                 <div className="ibp-empty">
-                  iBoard側で画像が見つかりませんでした。<br />
+                  {scope === 'mine'
+                    ? '自分の iBoard 画像投稿が見つかりません。'
+                    : '画像付きの iBoard 投稿が見つかりません。'
+                  }
+                  <br />
                   「Album / Storage」タブから選ぶか、右上のアップロードをご利用ください。
                 </div>
               )}
