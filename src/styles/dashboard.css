@@ -204,6 +204,7 @@ footer{
 }
 
 
+
 /* マウスが無い環境でもタップ時にしっかり光る */
 @media (hover: none) {
   .tile-grid .tile:active:not(.disabled) .tile-inner {
@@ -231,7 +232,6 @@ main.mu-main::before {
   background: transparent !important;
   height: 0 !important;
 }
-
 
 /* ---- スパークル（散る粒） ---- */
 @keyframes mu-burst {
@@ -268,3 +268,44 @@ main.mu-main::before {
   opacity: 1;
   animation: mu-burst .6s ease-out 1;
 }
+
+
+/* タイル常時の薄い枠（ベース） */
+.tile-grid .tile .tile-inner {
+  border: 1px solid rgba(123, 140, 255, 0.16);
+}
+
+/* もしタイルごとに色味を少し変えるなら（任意） */
+.tile--vision .tile-inner { border-color: rgba(77,166,255,0.22); }
+.tile--mu     .tile-inner { border-color: rgba(255,77,136,0.22); }
+.tile--kyomei .tile-inner { border-color: rgba(255,136,77,0.22); }
+.tile--plan   .tile-inner { border-color: rgba(66,165,245,0.22); }
+
+
+
+/* === 背景：24時間でゆっくり色相が回る === */
+:root{
+  /* JS から更新されるノブ */
+  --bg-h: 260;     /* 色相 (0–360) */
+  --bg-l1: 98%;    /* 上層の明度 */
+  --bg-l2: 96%;    /* 下層の明度 */
+}
+
+/* 既存の .dashboard-wrapper に上書き（または末尾に追加） */
+.dashboard-wrapper{
+  /* グラデを HSL の色相変化に追従させる */
+  background:
+    radial-gradient(1200px 600px at 30% 15%, hsl(calc(var(--bg-h) + 12) 100% var(--bg-l1) / .55), transparent 60%),
+    radial-gradient(1000px 500px at 80% 85%, hsl(calc(var(--bg-h) - 18) 100% var(--bg-l2) / .50), transparent 60%),
+    linear-gradient(to bottom,
+      hsl(var(--bg-h) 100% var(--bg-l1)),
+      hsl(calc(var(--bg-h) + 20) 100% var(--bg-l2))
+    );
+  transition: background 0.6s linear; /* 連続更新のチラつき緩和 */
+}
+
+/* 動きを抑えたいユーザー配慮（任意） */
+@media (prefers-reduced-motion: reduce){
+  .dashboard-wrapper{ transition: none; }
+}
+

@@ -7,6 +7,15 @@ import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { registerPush } from '@/utils/push'
+import { createPortal } from 'react-dom'
+
+/** Footer を <body> 直下に描画する薄いラッパー（レイアウトは従来のまま） */
+function FooterPortal({ children }: { children: React.ReactNode }) {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+  if (!mounted) return null
+  return createPortal(children, document.body)
+}
 
 function LayoutBody({ children }: { children: React.ReactNode }) {
   const [showLogin, setShowLogin] = useState(false)
@@ -21,16 +30,20 @@ function LayoutBody({ children }: { children: React.ReactNode }) {
     <>
       {!isMuAI && <Header onLoginClick={() => setShowLogin(true)} />}
 
+      {/* 下余白は CSS 変数 --footer-h を利用（isCredit= true のときだけ 0） */}
       <main
         className={`mu-main ${isMuAI ? 'mu-main--wide' : ''}`}
-        style={{ paddingBottom: isCredit ? 0 : 60 }}
+        style={{ paddingBottom: isCredit ? 0 : 'calc(var(--footer-h, 56px) + 12px)' }}
       >
-        <div className={`mu-page ${isMuAI ? 'mu-page--wide' : ''}`}>
-          {children}
-        </div>
+        <div className={`mu-page ${isMuAI ? 'mu-page--wide' : ''}`}>{children}</div>
       </main>
 
-      {!isCredit && <Footer />}
+      {/* フッターは構造を崩さず Portal で body 直下へ（位置ズレ防止） */}
+      {!isCredit && (
+        <FooterPortal>
+          <Footer />
+        </FooterPortal>
+      )}
 
       {!isMuAI && (
         <LoginModal
@@ -60,14 +73,17 @@ function showToast(title: string, body: string, url: string) {
     <div style="font-weight:600; margin-bottom:6px; font-size:14px;">${title ?? 'お知らせ'}</div>
     <div style="opacity:.9; font-size:13px; line-height:1.4;">${body ?? ''}</div>
   `
-  div.onclick = () => { window.location.href = url || '/'; div.remove() }
+  div.onclick = () => {
+    window.location.href = url || '/'
+    div.remove()
+  }
   document.body.appendChild(div)
   setTimeout(() => div.remove(), 8000)
 }
 
 export default function LayoutClient({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  const { userCode } = useAuth() // 👈 ここを利用
+  const { userCode } = useAuth()
   const isMuAI =
     pathname?.startsWith('/mu_ai') === true ||
     pathname?.startsWith('/mu_full') === true
@@ -80,22 +96,19 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
       const reg = await navigator.serviceWorker.register('/sw.js')
       console.log('✅ Service Worker registered:', reg)
 
-      // 通知権限リクエスト
       if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
         try { await Notification.requestPermission() } catch {}
       }
 
-      // 👇 ログイン済みなら subscription を Supabase に登録
       if (userCode) {
         try {
           const res = await registerPush(userCode)
-          console.log("✅ Push subscription registered:", res)
+          console.log('✅ Push subscription registered:', res)
         } catch (err) {
-          console.error("❌ registerPush failed:", err)
+          console.error('❌ registerPush failed:', err)
         }
       }
 
-      // フォールバック受信処理
       onMsg = (e: MessageEvent) => {
         const msg = e?.data
         if (msg?.type === 'PUSH_FALLBACK') {
@@ -105,10 +118,8 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
       navigator.serviceWorker.addEventListener('message', onMsg)
     })().catch((err) => console.error('❌ Service Worker setup failed:', err))
 
-    return () => {
-      if (onMsg) navigator.serviceWorker.removeEventListener('message', onMsg)
-    }
-  }, [userCode]) // 👈 userCode が変わったら再登録
+    return () => { if (onMsg) navigator.serviceWorker.removeEventListener('message', onMsg) }
+  }, [userCode])
 
   return (
     <div className={isMuAI ? 'mu-ai' : ''}>
