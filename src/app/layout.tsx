@@ -3,7 +3,7 @@
 import './globals.css'
 import '../styles/layout.css'
 import Providers from './providers'
-import LayoutClient from './LayoutClient'   // ← 大文字小文字を実ファイル名に合わせる
+import LayoutClient from './LayoutClient'   // ← 実ファイル名に合わせて
 
 export const metadata = {
   manifest: '/manifest.json',
@@ -14,7 +14,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="ja">
       <head>
-        {/* VAPID をDOM/Windowへ供給（SWやクライアントから常に取得可能に） */}
+        {/* VAPID をDOM/Windowへ供給 */}
         <meta name="vapid" content={process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY} />
         <script
           dangerouslySetInnerHTML={{
@@ -22,13 +22,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }}
         />
       </head>
-      <body style={{ margin: 0 }}>
+      <body className="mu-body">
         <Providers>
-          {/* LayoutClient は Client Component 側。ここに PushRegister を組み込む */}
+          {/* LayoutClient 内で main/ footer を構成 */}
           <LayoutClient>{children}</LayoutClient>
         </Providers>
       </body>
     </html>
   )
 }
-

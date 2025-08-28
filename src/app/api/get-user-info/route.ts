@@ -7,27 +7,20 @@ function json(status: number, body: any) {
   return NextResponse.json(body, { status });
 }
 
-/** どこに来てもOK: Authorization / POST body / GET query から idToken を抽出 */
 async function extractIdToken(req: NextRequest): Promise<string | null> {
-  // 1) Authorization: Bearer <token>
   const authz = req.headers.get('authorization') || req.headers.get('Authorization');
   if (authz?.toLowerCase().startsWith('bearer ')) {
-    const t = authz.slice(7).trim();
-    if (t) return t;
+    return authz.slice(7).trim();
   }
 
-  // 2) POST body: { idToken } or { auth: { idToken } }
   if (req.method === 'POST') {
     try {
       const body = await req.json().catch(() => ({}));
       const t = body?.idToken || body?.auth?.idToken;
       if (t && typeof t === 'string') return t;
-    } catch {
-      // ignore
-    }
+    } catch {}
   }
 
-  // 3) GET query: ?idToken=...
   const q = new URL(req.url).searchParams.get('idToken');
   if (q) return q;
 
@@ -43,10 +36,10 @@ async function handle(req: NextRequest) {
     const decoded = await adminAuth.verifyIdToken(idToken, true);
     const firebase_uid = decoded.uid;
 
-    // Supabase: users から user_code を取得
+    // Supabase: users から click_type を含めて取得
     const { data, error } = await supabaseServer
       .from('users')
-      .select('user_code')
+      .select('user_code, click_type')
       .eq('firebase_uid', firebase_uid)
       .maybeSingle();
 
@@ -54,16 +47,19 @@ async function handle(req: NextRequest) {
       return json(404, { error: 'ユーザーが見つかりません' });
     }
 
-    // 返却する login_url（用途に応じて変更可）
+    // login_url と一緒に click_type も返却
     const login_url = `https://m.muverse.jp?user_code=${data.user_code}`;
-    return json(200, { login_url });
+    return json(200, {
+      user_code: data.user_code,
+      click_type: data.click_type,
+      login_url,
+    });
   } catch (err: any) {
     console.error('[get-user-info] error:', err);
     return json(500, { error: err?.message || 'サーバーエラー' });
   }
 }
 
-// ★ GET/POST 両対応
 export async function GET(req: NextRequest) {
   return handle(req);
 }

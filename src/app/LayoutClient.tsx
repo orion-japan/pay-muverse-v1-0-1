@@ -1,51 +1,125 @@
+// src/app/LayoutClient.tsx
 'use client'
 
 import Footer from '../components/Footer'
 import Header from '../components/Header'
 import LoginModal from '../components/LoginModal'
-import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { registerPush } from '@/utils/push'
 import { createPortal } from 'react-dom'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
-/** Footer を <body> 直下に描画する薄いラッパー（レイアウトは従来のまま） */
+/* =========================
+   Portal 先のフッター高さを“確実に”取得して
+   CSS 変数（--footer-h / --footer-safe-pad）を更新するフック
+   - Portal での順序ズレ対策：まず #mu-footer-root の出現を待つ
+   - 出現後は ResizeObserver + resize で追従
+   ========================= */
+function usePortalFooterPadding(enabled: boolean) {
+  const roRef = useRef<ResizeObserver | null>(null)
+
+  // DOM 確定後に実行する
+  useLayoutEffect(() => {
+    if (!enabled) {
+      document.documentElement.style.setProperty('--footer-h', '0px')
+      document.documentElement.style.setProperty('--footer-safe-pad', '0px')
+      return
+    }
+
+    const update = () => {
+      const footerRoot = document.getElementById('mu-footer-root')
+      if (!footerRoot) return
+      const h = Math.max(0, Math.round(footerRoot.getBoundingClientRect().height || 0))
+      document.documentElement.style.setProperty('--footer-h', `${h}px`)
+      document.documentElement.style.setProperty(
+        '--footer-safe-pad',
+        `calc(${h}px + env(safe-area-inset-bottom))`
+      )
+    }
+
+    // 初回
+    update()
+
+    const footerEl = document.getElementById('mu-footer-root')
+    if (footerEl && 'ResizeObserver' in window) {
+      roRef.current = new ResizeObserver(update)
+      roRef.current.observe(footerEl)
+    }
+
+    window.addEventListener('resize', update)
+
+    return () => {
+      window.removeEventListener('resize', update)
+      if (roRef.current && footerEl) roRef.current.unobserve(footerEl)
+    }
+  }, [enabled])
+}
+
+/** Footer を <body> 直下に描画するラッパー（マウント後のみ） */
 function FooterPortal({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
   if (!mounted) return null
-  return createPortal(children, document.body)
+
+  let host = document.getElementById('mu-footer-root') as HTMLElement | null
+  if (!host) {
+    host = document.createElement('div')
+    host.id = 'mu-footer-root'
+    document.body.appendChild(host)
+  }
+  return createPortal(children, host)
 }
 
 function LayoutBody({ children }: { children: React.ReactNode }) {
   const [showLogin, setShowLogin] = useState(false)
+  const [mounted, setMounted] = useState(false)
   const pathname = usePathname()
+
+  useEffect(() => setMounted(true), [])
 
   const isCredit = pathname?.startsWith('/credit') === true
   const isMuAI =
     pathname?.startsWith('/mu_ai') === true ||
     pathname?.startsWith('/mu_full') === true
+  const isIros = pathname?.startsWith('/iros') === true // ← 追加：/iros 判定
+
+  // フッターが表示されるページだけ CSS 変数を更新
+  usePortalFooterPadding(!isCredit)
+
+  // main の padding-bottom を 1 箇所で制御
+  const mainPad = useMemo(
+    () => (isCredit ? '0' : 'var(--footer-safe-pad, 56px)'),
+    [isCredit]
+  )
 
   return (
     <>
-      {!isMuAI && <Header onLoginClick={() => setShowLogin(true)} />}
+      {/* /mu_ai, /mu_full, /iros では PAY 側ヘッダー非表示 */}
+      {!(isMuAI || isIros) && mounted && (
+        <Header onLoginClick={() => setShowLogin(true)} />
+      )}
 
-      {/* 下余白は CSS 変数 --footer-h を利用（isCredit= true のときだけ 0） */}
       <main
         className={`mu-main ${isMuAI ? 'mu-main--wide' : ''}`}
-        style={{ paddingBottom: isCredit ? 0 : 'calc(var(--footer-h, 56px) + 12px)' }}
+        style={{
+          flex: '1 1 auto',
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          paddingBottom: mainPad,
+        }}
       >
         <div className={`mu-page ${isMuAI ? 'mu-page--wide' : ''}`}>{children}</div>
       </main>
 
-      {/* フッターは構造を崩さず Portal で body 直下へ（位置ズレ防止） */}
-      {!isCredit && (
+      {!isCredit && mounted && (
         <FooterPortal>
           <Footer />
         </FooterPortal>
       )}
 
-      {!isMuAI && (
+      {/* ヘッダー由来のモーダルなので表示条件をヘッダーと揃える */}
+      {!(isMuAI || isIros) && mounted && (
         <LoginModal
           isOpen={showLogin}
           onClose={() => setShowLogin(false)}
@@ -87,8 +161,9 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
   const isMuAI =
     pathname?.startsWith('/mu_ai') === true ||
     pathname?.startsWith('/mu_full') === true
+  const isIros = pathname?.startsWith('/iros') === true // ← 追加
 
-  // SW 登録＋フォールバック受信＋subscription 登録
+  // SW 登録＋フォールバック受信＋subscription 登録（副作用のみ）
   useEffect(() => {
     let onMsg: ((e: MessageEvent) => void) | null = null
     ;(async () => {
@@ -118,11 +193,14 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
       navigator.serviceWorker.addEventListener('message', onMsg)
     })().catch((err) => console.error('❌ Service Worker setup failed:', err))
 
-    return () => { if (onMsg) navigator.serviceWorker.removeEventListener('message', onMsg) }
+    return () => {
+      if (onMsg) navigator.serviceWorker.removeEventListener('message', onMsg)
+    }
   }, [userCode])
 
   return (
-    <div className={isMuAI ? 'mu-ai' : ''}>
+    // ここは常に同じツリーを出す。微差吸収のため suppressHydrationWarning を付与
+    <div className={`app-container ${isMuAI ? 'mu-ai' : ''}`} suppressHydrationWarning>
       <LayoutBody>{children}</LayoutBody>
     </div>
   )

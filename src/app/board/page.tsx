@@ -340,52 +340,7 @@ export default function BoardPage() {
         </button>
       </div>
 
-      {/* ✅ 下部アクションバー（sticky） */}
-      <div
-        style={{
-          position: 'sticky',
-          bottom: 0,
-          background: 'rgba(255,255,255,0.96)',
-          borderTop: '1px solid #eee',
-          padding: 12,
-          backdropFilter: 'blur(6px)',
-          marginTop: 12,
-          zIndex: 1000,
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 12,
-            flexWrap: 'wrap',
-            maxWidth: 1280,
-            margin: '0 auto',
-          }}
-        >
-          <span style={{ color: '#666', fontSize: 14 }}>📎 下から操作できます</span>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {hasMore && (
-              <button type="button" onClick={() => setPageCount((n) => n + 1)}>
-                もっと見る
-              </button>
-            )}
-            <button type="button" onClick={fetchPublicPosts} aria-label="最新を読み込む">
-              最新を読み込む
-            </button>
-            <button
-              type="button"
-              className="post-button-red"
-              onClick={() => router.push(COLLAGE_PATH)}
-              aria-label="コラージュを作る"
-              title="コラージュを作る"
-            >
-              ＋ コラージュを作る
-            </button>
-          </div>
-        </div>
-      </div>
+
 
       <div ref={bottomRef} style={{ height: '1px' }} />
     </div>

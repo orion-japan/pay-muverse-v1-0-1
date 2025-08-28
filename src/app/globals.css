@@ -570,3 +570,14 @@ main {
   height: 26px;             /* ロゴ画像も縮める */
 }
 
+@font-face {
+  font-family: 'ZenMaruGothic';
+  src: url('/fonts/ZenMaruGothic-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+body {
+  font-family: 'ZenMaruGothic', system-ui, sans-serif;
+}

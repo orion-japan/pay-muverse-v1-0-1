@@ -1,0 +1,29 @@
+html, body {
+    height: 100%;
+    margin: 0;
+  }
+  
+  .app-container {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+  
+  .app-main {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 12px;
+    box-sizing: border-box;
+  }
+  
+  .app-footer {
+    flex: 0 0 auto;
+    height: var(--footer-h, 56px);
+    background: #fff;
+    border-top: 1px solid #ddd;
+  }
+  .mu-main {
+    padding-bottom: var(--footer-safe-pad, 56px) !important;
+  }
+  

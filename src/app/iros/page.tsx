@@ -1,3 +1,4 @@
+// src/app/iros/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -5,24 +6,22 @@ import { useAuth } from '@/context/AuthContext';
 
 const FOOTER_H = 60;
 
-// ↓ 既存を活かしつつ Sofia を優先
-const TENANT =
-  (process.env.NEXT_PUBLIC_TENANT ?? '').toLowerCase() ||
-  (typeof window !== 'undefined' && window.location.host.startsWith('s.') ? 'sofia' : 'mu');
+// ★ /iros は SOFIA 固定
+const TENANT: 'sofia' = 'sofia';
 
 const MU_UI_URL =
   (process.env.NEXT_PUBLIC_MU_UI_URL ?? 'https://m.muverse.jp').replace(/\/+$/, '');
 const SOFIA_UI_URL =
   (process.env.NEXT_PUBLIC_SOFIA_UI_URL ?? 'https://s.muverse.jp').replace(/\/+$/, '');
-const TARGET_UI_URL = TENANT === 'sofia' ? SOFIA_UI_URL : MU_UI_URL;
+const TARGET_UI_URL = SOFIA_UI_URL; // ← /iros は常に SOFIA をターゲット
 
-export default function MuFullPage() {
+export default function IrosPage() {
   const { user, loading } = useAuth();
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
-    const startMuAi = async () => {
+    const start = async () => {
       if (loading) return;
       if (!user) {
         setError('Firebase未ログインです');
@@ -48,26 +47,44 @@ export default function MuFullPage() {
         const loginUrl: string | undefined = json?.login_url;
         const userCode: string | undefined = json?.user_code;
 
-        if (!loginUrl) {
+        // ① ベースURLを決定（login_url 優先、なければフォールバック）
+        let base = loginUrl;
+        if (!base) {
           if (!userCode) throw new Error('署名付きURLが取得できませんでした');
-          const fallback =
+          base =
             `${TARGET_UI_URL}${TARGET_UI_URL.includes('?') ? '&' : '?'}` +
             `user=${encodeURIComponent(userCode)}`;
-          setUrl(fallback);
-        } else {
-          setUrl(loginUrl);
         }
+
+        // ② 必ず s.muverse.jp を向ける（返ってきたURLが MU でも強制上書き）
+        const u = new URL(base);
+        const sofiaHost = new URL(SOFIA_UI_URL).host;
+        u.protocol = 'https:'; // 念のため
+        u.host = sofiaHost;
+
+        // ③ iFrame用オプション（MU/SO側対応済みならヘッダー非表示）
+        u.searchParams.set('hideHeader', '1');
+
+        setUrl(u.toString());
       } catch (e: any) {
         setError(e?.message || '不明なエラー');
       }
     };
 
-    startMuAi();
+    start();
   }, [user, loading]);
 
   if (error) {
     return (
-      <div style={{ height: `calc(100dvh - ${FOOTER_H}px)`, display: 'grid', placeItems: 'center', color: 'red', fontWeight: 'bold' }}>
+      <div
+        style={{
+          height: `calc(100dvh - ${FOOTER_H}px)`,
+          display: 'grid',
+          placeItems: 'center',
+          color: 'red',
+          fontWeight: 'bold',
+        }}
+      >
         エラー: {error}
       </div>
     );
@@ -75,13 +92,18 @@ export default function MuFullPage() {
 
   if (!url) {
     return (
-      <div style={{ height: `calc(100dvh - ${FOOTER_H}px)`, display: 'grid', placeItems: 'center' }}>
-        {TENANT === 'sofia' ? 'Sofia_AI を開始中…' : 'Mu_AI を開始中…'}
+      <div
+        style={{
+          height: `calc(100dvh - ${FOOTER_H}px)`,
+          display: 'grid',
+          placeItems: 'center',
+        }}
+      >
+        Sofia_AI を開始中…
       </div>
     );
   }
 
-  // ★ ここがポイント：固定配置で full-bleed
   return (
     <div>
       <div

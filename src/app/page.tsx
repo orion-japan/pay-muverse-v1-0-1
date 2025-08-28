@@ -5,17 +5,71 @@ import { useRouter, usePathname } from 'next/navigation';
 import '../styles/dashboard.css';
 import LoginModal from '../components/LoginModal';
 import { useAuth } from '@/context/AuthContext';
-import AppModal from '@/components/AppModal';
+import AppModal from '../components/AppModal';
 import { FileContentProvider } from '@/lib/content.file';
 import { getAuth } from 'firebase/auth';
 
 import type { HomeContent } from '@/lib/content';
 
 export default function DashboardPage() {
-  // ★ このページを開いている間だけ body にクラスを付与（必要なら）
+  // ★ ページ滞在中だけ body にクラス付与
   useEffect(() => {
     document.body.classList.add('mu-dashboard');
     return () => document.body.classList.remove('mu-dashboard');
+  }, []);
+
+  /* === 背景Hue：青(200°)〜紫(300°)の範囲だけで往復 ======================
+     - 緑域（~120°）に行かないよう Hue を 200↔300 でブレス
+     - デフォ：24時間で 1 往復（行って戻る）
+     - localStorage.bgHueSpeed 往復速度倍率（例: 720 -> 24分で1往復）
+     - prefers-reduced-motion は固定 260°
+  ======================================================================== */
+  useEffect(() => {
+    const reduced =
+      typeof window !== 'undefined' &&
+      window.matchMedia &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    const minHue = 200; // 青
+    const maxHue = 300; // 紫
+
+    const speedMul = (() => {
+      try {
+        const raw = localStorage.getItem('bgHueSpeed');
+        const v = raw ? Number(raw) : 1;
+        return Number.isFinite(v) && v > 0 ? v : 1;
+      } catch {
+        return 1;
+      }
+    })();
+
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const duration = DAY_MS / speedMul; // 往復にかける時間
+
+    const setHue = (h: number) => {
+      document.documentElement.style.setProperty('--bg-h', h.toFixed(2));
+    };
+
+    if (reduced) {
+      setHue(260);
+      return;
+    }
+
+    let raf = 0;
+    const start = performance.now();
+
+    const tick = (now: number) => {
+      const elapsed = (now - start) % duration;     // 0..duration
+      const p = elapsed / duration;                  // 0..1
+      // 0→0.5: min→max, 0.5→1: max→min の三角波
+      const t = p < 0.5 ? p * 2 : (1 - p) * 2;       // 0..1..0
+      const hue = minHue + (maxHue - minHue) * t;    // 200..300..200
+      setHue(hue);
+      raf = requestAnimationFrame(tick);
+    };
+
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
   }, []);
 
   const [content, setContent] = useState<HomeContent | null>(null);
@@ -59,7 +113,7 @@ export default function DashboardPage() {
     let aborted = false;
 
     if (!user) {
-      setIsIrosAllowed(null); // 未ログインは未判定
+      setIsIrosAllowed(null);
       return;
     }
 
@@ -166,12 +220,10 @@ export default function DashboardPage() {
   };
 
   const activateLink = (link: string) => {
-    // 未ログイン → ログイン
     if (!user) {
       setIsLoginModalOpen(true);
       return;
     }
-    // iros は isIrosAllowed === false のときだけブロック
     if (link === '/iros' && isIrosAllowed === false) {
       setDenyOpen(true);
       return;
@@ -192,7 +244,7 @@ export default function DashboardPage() {
     activateLink(link);
   };
 
-  // キーボード（Enter/Space）でも起動可能に
+  // キーボード操作
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>, link: string, disabled: boolean) => {
     if (disabled) return;
     if (e.key === 'Enter' || e.key === ' ') {
@@ -221,13 +273,13 @@ export default function DashboardPage() {
   const images = content?.heroImages ?? [];
   const notices = content?.notices ?? [];
 
-  // ルート("/")のときだけ Vision を選択扱いにする
+  // ルート("/")のときだけ Vision を選択扱い
   const isHome = pathname === '/';
   const defaultActivePath = '/vision';
 
   return (
     <div className="dashboard-wrapper">
-      {/* スライダー（CSSの .slider-container / .slider-image に準拠） */}
+      {/* スライダー */}
       <section className="slider-container">
         {images.map((img, index) => (
           <img
@@ -240,7 +292,7 @@ export default function DashboardPage() {
         ))}
       </section>
 
-      {/* お知らせ（CSSの .notice-section に準拠） */}
+      {/* お知らせ */}
       <section className="notice-section">
         <h2 className="notice-title">📢 お知らせ</h2>
         {notices.map((n) => (
@@ -250,18 +302,16 @@ export default function DashboardPage() {
         ))}
       </section>
 
-      {/* タイルメニュー（CSSの .tile-grid / .tile / .tile-inner に準拠） */}
+      {/* タイルメニュー */}
       <section className="tile-grid">
         {menuItems.map((item) => {
           const isIros = item.link === '/iros';
           const disabledByAuth = !user;
-          // null（判定中）はブロックしない。false のときだけブロック
           const disabledByRole = isIros && isIrosAllowed === false;
           const disabled = disabledByAuth || disabledByRole;
 
           const color = glowColors[item.link] ?? '#7b8cff';
 
-          // 選択状態 → data-active でCSSの発光をON
           const active = isHome
             ? item.link === defaultActivePath
             : item.link === '/'
@@ -323,11 +373,11 @@ export default function DashboardPage() {
       {/* アクセス拒否モーダル */}
       <AppModal
         open={denyOpen}
-        title="アクセス権限が必要です"
+        title="irosAIにはアクセス権限が必要です"
         onClose={() => setDenyOpen(false)}
         primaryText="OK"
       >
-        この機能は <b>master / admin</b> のみご利用いただけます。
+        この機能は <b>masterPLAN</b> の方がご利用いただけます。
       </AppModal>
     </div>
   );
