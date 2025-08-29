@@ -28,11 +28,8 @@ function groupEnd() {
 
 // ★ /iros は SOFIA 固定
 const TENANT: 'sofia' = 'sofia'
-
-// （MU は未使用だが、念のため環境確認ログ用に残す）
-const MU_UI_URL = (process.env.NEXT_PUBLIC_MU_UI_URL ?? 'https://m.muverse.jp').replace(/\/+$/, '')
 const SOFIA_UI_URL = (process.env.NEXT_PUBLIC_SOFIA_UI_URL ?? 'https://s.muverse.jp').replace(/\/+$/, '')
-const TARGET_UI_URL = SOFIA_UI_URL // ← /iros は常に SOFIA をターゲット
+const TARGET_UI_URL = SOFIA_UI_URL
 
 export default function IrosPage() {
   const { user, loading } = useAuth()
@@ -47,9 +44,8 @@ export default function IrosPage() {
     group('Init')
     log('TENANT =', TENANT)
     log('ENV:', {
-      NEXT_PUBLIC_MU_UI_URL: process.env.NEXT_PUBLIC_MU_UI_URL,
       NEXT_PUBLIC_SOFIA_UI_URL: process.env.NEXT_PUBLIC_SOFIA_UI_URL,
-      resolved: { MU_UI_URL, SOFIA_UI_URL, TARGET_UI_URL },
+      resolved: { SOFIA_UI_URL, TARGET_UI_URL },
     })
     groupEnd()
   }, [])
@@ -63,7 +59,6 @@ export default function IrosPage() {
   useEffect(() => {
     const start = async () => {
       group('Start iros flow')
-
       log('Auth state:', { loading, hasUser: !!user, user: userBrief })
 
       if (loading) {
@@ -136,7 +131,7 @@ export default function IrosPage() {
         }
         log('🧭 base url (before force) =', base)
 
-        // ② 必ず s.muverse.jp を向ける（返ってきたURLが MU でも強制上書き）
+        // ② 必ず SOFIA を向ける
         let finalUrl = ''
         try {
           const u = new URL(base)
@@ -150,31 +145,13 @@ export default function IrosPage() {
 
           // ③ iFrame用オプション（必須クエリを強制付与）
           u.searchParams.set('hideHeader', '1')
-          u.searchParams.set('from', 'so') // ★ 追加：ここで from=so を確定
+          u.searchParams.set('from', 'so')
 
           finalUrl = u.toString()
           log('🎯 final iframe url =', finalUrl)
-          log('🔎 final url parts:', {
-            origin: u.origin,
-            host: u.host,
-            pathname: u.pathname,
-            search: u.search,
-          })
         } catch (e) {
-          // 失敗時は “文字列置換” で最終バリア
           log('URL parse failed for base=', base, e)
-          finalUrl = base
-            .replace('https://m.muverse.jp', 'https://s.muverse.jp')
-            .replace('http://m.muverse.jp', 'https://s.muverse.jp')
-
-          if (!/https:\/\/s\.muverse\.jp/i.test(finalUrl)) {
-            const qs = base.includes('?') ? base.slice(base.indexOf('?') + 1) : ''
-            finalUrl = `https://s.muverse.jp${qs ? `?${qs}` : ''}`
-          }
-          const sep = finalUrl.includes('?') ? '&' : '?'
-          finalUrl = `${finalUrl}${sep}hideHeader=1&from=so`
-
-          log('🎯 final iframe url (fallback) =', finalUrl)
+          finalUrl = `${SOFIA_UI_URL}?hideHeader=1&from=so`
         }
 
         setUrl(finalUrl)

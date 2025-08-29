@@ -8,12 +8,14 @@ type NextSchedule = {
   title: string
   start_at: string // ISO（JST想定）
   duration_min: number
-  reservation_url?: string
   page_url?: string
   // Zoom参加用（APIから返す）
   meeting_number?: string | number
   meeting_password?: string
 }
+
+const AINORI_FALLBACK_URL =
+  'https://us04web.zoom.us/j/77118903753?pwd=CVHyhjvmg1FJSb9fnmEhfFMZaa79Ju.1#success'
 
 /** 画面中央に小窓を開く（ブロックされたら null） */
 function openCenteredPopup(url: string, w = 520, h = 740) {
@@ -21,16 +23,11 @@ function openCenteredPopup(url: string, w = 520, h = 740) {
     const dualLeft = (window.screenLeft ?? window.screenX ?? 0) as number
     const dualTop = (window.screenTop ?? window.screenY ?? 0) as number
     const width =
-      (window.innerWidth ??
-        document.documentElement.clientWidth ??
-        screen.width) as number
+      (window.innerWidth ?? document.documentElement.clientWidth ?? screen.width) as number
     const height =
-      (window.innerHeight ??
-        document.documentElement.clientHeight ??
-        screen.height) as number
+      (window.innerHeight ?? document.documentElement.clientHeight ?? screen.height) as number
     const left = dualLeft + (width - w) / 2
     const top = dualTop + (height - h) / 2
-
     const win = window.open(
       url,
       'zoom-join',
@@ -69,12 +66,13 @@ function KyomeikaiContent() {
   const [username, setUsername] = useState<string>('')        // users.click_username
   const [error, setError] = useState<string | null>(null)
 
-  const [schedule, setSchedule] = useState<NextSchedule | null>(null)
+  const [schedule, setSchedule] = useState<NextSchedule | null>(null)            // 共鳴会
+  const [scheduleAinori, setScheduleAinori] = useState<NextSchedule | null>(null) // 愛祈
 
-  // ★ 参加可能時間のための現在時刻（1分おきに更新）
+  // ★ 参加可能時間のための現在時刻（30秒おきに更新）
   const [now, setNow] = useState<Date>(new Date())
   useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 60 * 1000)
+    const t = setInterval(() => setNow(new Date()), 30 * 1000)
     return () => clearInterval(t)
   }, [])
 
@@ -106,10 +104,17 @@ function KyomeikaiContent() {
           setUsername(uname)
         }
 
-        // 2) 次回スケジュール取得
-        const resNext = await fetch('/api/kyomeikai/next', { method: 'GET' })
+        // 2) 次回スケジュール取得（共鳴会 / 愛祈）
+        const [resNext, resAinori] = await Promise.all([
+          fetch('/api/kyomeikai/next', { method: 'GET' }),
+          fetch('/api/ainori/next', { method: 'GET' }),
+        ])
         const nextJson = await resNext.json().catch(() => null)
-        if (!aborted) setSchedule(nextJson)
+        const nextA = await resAinori.json().catch(() => null)
+        if (!aborted) {
+          setSchedule(nextJson)
+          setScheduleAinori(nextA)
+        }
       } catch (e: any) {
         if (!aborted) setError(e?.message ?? '読み込みに失敗しました')
       } finally {
@@ -119,55 +124,112 @@ function KyomeikaiContent() {
     return () => { aborted = true }
   }, [user])
 
-  // ★ 参加可能時間判定（開始5分前〜終了まで）
-  const canJoinTime = (() => {
-    if (!schedule?.start_at || !schedule?.duration_min) return true // 予定未定なら許可
-    const start = new Date(schedule.start_at).getTime()
-    const end = start + schedule.duration_min * 60 * 1000
-    const open = start - 5 * 60 * 1000
+  // ★ 出席カウント対象時間：開始の「±10分」
+  const inAttendWindow = (s: NextSchedule | null) => {
+    if (!s?.start_at) return false
+    const start = new Date(s.start_at).getTime()
+    const cur = now.getTime()
+    const windowStart = start - 10 * 60 * 1000
+    const windowEnd   = start + 10 * 60 * 1000
+    return cur >= windowStart && cur <= windowEnd
+  }
+
+  // ★ 入室可否：UI上の「参加する」活性条件
+  //   - free 以外
+  //   - 「開始10分前〜終了時刻」までは押せる（入室自体は許容）
+  const canJoinTime = (s: NextSchedule | null) => {
+    if (!s?.start_at || !s?.duration_min) return true // 予定未定なら許可
+    const start = new Date(s.start_at).getTime()
+    const end = start + s.duration_min * 60 * 1000
+    const open = start - 10 * 60 * 1000
     const cur = now.getTime()
     return cur >= open && cur <= end
-  })()
+  }
 
-  // ★ Zoomをポップアップで開く + アプリ起動を試みる（フォールバック：新規タブ）
-  const handleJoin = () => {
-    if (plan === 'free' || !schedule) return
+  // ★ Zoom起動 + 出席記録（共鳴会）
+  const handleJoinKyomeikai = async () => {
+    const s = schedule
+    if (plan === 'free' || !s) return
 
-    const number = String(schedule.meeting_number ?? '').replace(/\D/g, '')
-    const pwd = schedule.meeting_password ?? ''
+    const number = String(s.meeting_number ?? '').replace(/\D/g, '')
+    const pwd = s.meeting_password ?? ''
 
     if (!number) {
       alert('ミーティング番号が取得できませんでした。後ほどお試しください。')
       return
     }
 
-    // Web 参加URL（まずポップアップで開く）
-    const webUrl =
-      `https://zoom.us/j/${number}` +
-      (pwd ? `?pwd=${encodeURIComponent(pwd)}` : '')
+    // 出席記録（開始±10分の時のみ）
+    if (inAttendWindow(s) && user) {
+      try {
+        await fetch('/api/attendance/checkin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ event_id: 'kyomeikai', user_code: user }),
+        })
+      } catch {}
+    }
 
-    // ネイティブアプリ Deep Link（失敗してもユーザーの画面遷移はしない）
+    const webUrl =
+      `https://zoom.us/j/${number}` + (pwd ? `?pwd=${encodeURIComponent(pwd)}` : '')
     const appUrl =
       `zoommtg://zoom.us/join?action=join&confno=${number}` +
       (pwd ? `&pwd=${encodeURIComponent(pwd)}` : '')
 
-    // 1) ポップアップでWeb参加画面を開く（ブロック時は新規タブ）
     const pop = openCenteredPopup(webUrl)
     if (!pop) window.open(webUrl, '_blank', 'noopener,noreferrer')
 
-    // 2) 可能ならアプリ起動を試す（隠しiframeで、失敗しても画面遷移なし）
     try {
       const iframe = document.createElement('iframe')
       iframe.style.display = 'none'
       iframe.src = appUrl
       document.body.appendChild(iframe)
       setTimeout(() => document.body.removeChild(iframe), 1500)
-    } catch {
-      /* no-op */
+    } catch {}
+  }
+
+  // ★ Zoom起動 + 出席記録（愛祈）
+  const handleJoinAinori = async () => {
+    const s = scheduleAinori
+    if (plan === 'free' || !s) return
+
+    // 出席記録（開始±10分の時のみ）
+    if (inAttendWindow(s) && user) {
+      try {
+        await fetch('/api/attendance/checkin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ event_id: 'ainori', user_code: user }),
+        })
+      } catch {}
+    }
+
+    // ミーティング番号があればそれを、無ければ直リンク
+    const number = String(s.meeting_number ?? '').replace(/\D/g, '')
+    const pwd = s.meeting_password ?? ''
+    const webUrl = number
+      ? `https://zoom.us/j/${number}` + (pwd ? `?pwd=${encodeURIComponent(pwd)}` : '')
+      : AINORI_FALLBACK_URL
+    const appUrl = number
+      ? `zoommtg://zoom.us/join?action=join&confno=${number}` +
+        (pwd ? `&pwd=${encodeURIComponent(pwd)}` : '')
+      : ''
+
+    const pop = openCenteredPopup(webUrl)
+    if (!pop) window.open(webUrl, '_blank', 'noopener,noreferrer')
+
+    if (appUrl) {
+      try {
+        const iframe = document.createElement('iframe')
+        iframe.style.display = 'none'
+        iframe.src = appUrl
+        document.body.appendChild(iframe)
+        setTimeout(() => document.body.removeChild(iframe), 1500)
+      } catch {}
     }
   }
 
-  // スケジュールカード
+  // 共鳴会：スケジュールカード（予約ボタンなし）
   const ScheduleCard = () => (
     <div className="km-card">
       <div className="km-card-title">次回のスケジュール</div>
@@ -185,32 +247,24 @@ function KyomeikaiContent() {
             <span className="km-label">所要</span>
             <span className="km-value">{schedule.duration_min} 分</span>
           </div>
+          <div className="km-schedule-row km-attend-note">
+            出席カウント対象：<b>開始±10分</b> に「参加する」をクリック
+          </div>
         </div>
       ) : (
         <div className="km-schedule km-muted">予定は未定です。後ほどご確認ください。</div>
       )}
       <div className="km-actions">
-        {/* 予約は誰でもOK（URLがあれば） */}
-        {schedule?.reservation_url ? (
-          <a className="km-button ghost" href={schedule.reservation_url} target="_blank" rel="noreferrer">
-            予約する
-          </a>
-        ) : (
-          <button className="km-button ghost" onClick={() => router.push('/reserve')}>
-            予約する
-          </button>
-        )}
-        {/* 参加ボタン：free以外 かつ 時間内のみ有効 */}
+        {/* 参加ボタンのみ */}
         <button
-          className={`km-button primary ${(plan === 'free' || !canJoinTime) ? 'disabled' : ''}`}
-          onClick={handleJoin}
-          title={!canJoinTime ? '開始5分前から入室できます' : undefined}
+          className={`km-button primary ${(plan === 'free' || !canJoinTime(schedule)) ? 'disabled' : ''}`}
+          onClick={handleJoinKyomeikai}
+          title={!canJoinTime(schedule) ? '開始10分前から入室できます（出席カウントは開始±10分）' : undefined}
         >
           参加する
         </button>
       </div>
 
-      {/* freeの人向け案内（自動遷移はしない） */}
       {plan === 'free' && (
         <div className="km-note">
           現在のプランでは共鳴会に参加できません。
@@ -220,28 +274,70 @@ function KyomeikaiContent() {
     </div>
   )
 
-  // 説明セクション
-  const Description = () => (
+  // 愛祈：カード（予約ボタンなし、説明付き）
+  const AinoriCard = () => (
     <div className="km-card">
-      <div className="km-card-title">共鳴会とは</div>
-      <div className="km-description">
+      <div className="km-card-title">愛祈AINORI,１０００人</div>
+      {scheduleAinori ? (
+        <div className="km-schedule">
+          <div className="km-schedule-row">
+            <span className="km-label">タイトル</span>
+            <span className="km-value">{scheduleAinori.title}</span>
+          </div>
+          <div className="km-schedule-row">
+            <span className="km-label">日時</span>
+            <span className="km-value">{formatDateTime(scheduleAinori.start_at)}</span>
+          </div>
+          <div className="km-schedule-row">
+            <span className="km-label">所要</span>
+            <span className="km-value">{scheduleAinori.duration_min} 分</span>
+          </div>
+          <div className="km-schedule-row km-attend-note">
+            出席カウント対象：<b>開始±10分</b> に「参加する」をクリック
+          </div>
+        </div>
+      ) : (
+        <div className="km-schedule km-muted">予定は未定です。後ほどご確認ください。</div>
+      )}
+
+      {/* 説明 */}
+      <div className="km-description" style={{ marginTop: 12 }}>
+        <p><b>『ズーム瞑想会　(愛祈AINORI,１０００人)』のご案内</b></p>
+        <p>ー集合意識を介して日本を変えるー</p>
         <p>
-          共鳴会は、Muverseの「意図×場の共鳴」を体験するオンライン・セッションです。
-          初めての方は「予約する」から日程調整を、継続利用の方は開始時刻に「参加する」から入室できます。
+          ルート1％の法則ってご存知ですか？ アメリカで集団瞑想をする人が人口のルート1％の1,750人
+          （アメリカの人口3億人の１％＝300万人。ルート300万人＝1,750人）に達した途端、全米での殺人件数・レイプ件数・交通事故数などが著しく減少したのです。
+          その驚くべき結果が２年前に発表されています（Orme-Johnson et. Al, World Journal of Social Science, 9, 2, 2022. https://doi.org/10.5430/wjss.v9n2p1）。
+          これは集団で瞑想することにより、そのエネルギーの波動が集合意識を変容させたものと解釈できます。
         </p>
-        <ul>
-          <li>参加にはマイク／カメラの許可が必要です（ブラウザからの参加可）。</li>
-          <li>スマホ参加の場合は、通信環境の良い場所でご利用ください。</li>
-          <li>開始5分前までに入室をおすすめします。</li>
-        </ul>
+        <p>
+          日本でのルート1％は１,０００人となります（日本の人口１億人の１％＝１00万人。ルート１００万人＝１,０００人）。
+          日本の現状や未来に不満や不安を感じつつも、一人では何もできないと諦めておられる方も多いことでしょう。
+          一人一人は無力でも、１,０００人が集まって同じ時間に瞑想することで、閉塞した日本を変革させることができるのです。
+        </p>
       </div>
+
+      <div className="km-actions">
+        <button
+          className={`km-button primary ${(plan === 'free' || !canJoinTime(scheduleAinori)) ? 'disabled' : ''}`}
+          onClick={handleJoinAinori}
+          title={!canJoinTime(scheduleAinori) ? '開始10分前から入室できます（出席カウントは開始±10分）' : undefined}
+        >
+          参加する
+        </button>
+      </div>
+
+      {plan === 'free' && (
+        <div className="km-note">
+          現在のプランでは参加できません。
+          <button className="km-linklike" onClick={() => router.push('/pay')}>プランを見る</button>
+        </div>
+      )}
     </div>
   )
 
   if (checking) {
-    return (
-      <div className="km-fullcenter km-muted">読み込み中…</div>
-    )
+    return <div className="km-fullcenter km-muted">読み込み中…</div>
   }
 
   return (
@@ -252,8 +348,10 @@ function KyomeikaiContent() {
       </header>
 
       <main className="km-main">
+        {/* 共鳴会（既存のまま／予約ボタンのみ削除） */}
         <ScheduleCard />
-        <Description />
+        {/* ↓ 追加：愛祈AINORI,１０００人 */}
+        <AinoriCard />
       </main>
     </div>
   )

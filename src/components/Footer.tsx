@@ -31,7 +31,6 @@ export default function Footer() {
   const { user } = useAuth()
   const isLoggedIn = !!user
 
-  // Portal ホスト
   useEffect(() => {
     let el = document.getElementById('mu-footer-root') as HTMLDivElement | null
     if (!el) {
@@ -42,7 +41,6 @@ export default function Footer() {
     setHost(el)
   }, [])
 
-  // 自力でも高さを供給（フック側と二重にして“確実”に）
   useEffect(() => {
     const setPad = (h: number) => {
       const px = Math.max(0, Math.round(h || 0))
@@ -66,11 +64,13 @@ export default function Footer() {
     }
   }, [host])
 
+  // ✅ 並び順: Home ｜ Talk ｜ I Board ｜ Plan ｜ My Page
   const items: Item[] = useMemo(
     () => [
       { label: 'Home', href: '/', icon: <span>🏠</span> },
       { label: 'Talk', href: '/talk', icon: <span>💬</span> },
       { label: 'I Board', href: '/board', icon: <span>🧩</span> },
+      { label: 'Plan', href: '/pay', icon: <span>💳</span> },    // ← 追加
       { label: 'My Page', href: '/mypage', icon: <span>👤</span> },
     ],
     []
@@ -101,7 +101,7 @@ export default function Footer() {
         width: 'calc(100% - 24px)',
         maxWidth: 560,
         display: 'grid',
-        gridTemplateColumns: 'repeat(4, 1fr)',
+        gridTemplateColumns: 'repeat(5, 1fr)', // ← 5分割に変更
         gap: 8,
         padding: '6px 8px',
         borderRadius: 12,

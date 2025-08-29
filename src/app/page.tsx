@@ -187,14 +187,14 @@ export default function DashboardPage() {
   // メニュー
   const menuItems: { title: string; link: string; img: string; alt: string }[] = [
     { title: 'Mu_AI', link: '/mu_full', img: '/mu_ai.png', alt: 'Mu_AI' },
-    { title: '共鳴会', link: '/kyomeikai', img: '/kyoumai.png', alt: '共鳴会' },
+    { title: 'Event', link: '/kyomeikai', img: '/kyoumai.png', alt: 'Event' },
     { title: '配信', link: '/kyomeikai/live', img: '/live.png', alt: '共鳴会LIVE' },
     { title: 'Self', link: '/self', img: '/nikki.png', alt: 'Self' },
     { title: 'Vision', link: '/vision', img: '/ito.png', alt: 'Vision' },
     { title: 'Create', link: '/create', img: '/mu_create.png', alt: 'Create' },
     { title: 'm Tale', link: '/', img: '/m_tale.png', alt: 'm Tale' },
-    { title: 'iros', link: '/iros', img: '/ir.png', alt: 'iros' }, // ガード対象
-    { title: 'プラン', link: '/pay', img: '/mu_card.png', alt: 'プラン' },
+    { title: 'm Shot', link: '/', img: '/shot.png', alt: 'm Shot' }, // ガード対象
+    { title: 'iros', link: '/iros', img: '/ir.png', alt: 'iros' },
   ];
 
   // 共鳴色
