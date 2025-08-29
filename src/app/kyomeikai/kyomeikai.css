@@ -174,3 +174,130 @@
   background: #fff;
   height: var(--km-header-h);
 }
+
+/* 共鳴会・愛祈の画像共通 */
+.km-image-wrap {
+  display: flex;
+  justify-content: center;  /* 横中央 */
+  margin: 12px 0;
+}
+
+.km-image {
+  max-width: 80%;   /* 画面幅の80%まで縮小 */
+  height: auto;     /* 縦横比維持 */
+  border-radius: 12px; /* 角を丸める（任意） */
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1); /* 軽い影（任意） */
+}
+
+/* ページ全体のラップ */
+.km-wrap {
+  max-width: 800px;       /* コンテンツ幅の上限 */
+  margin: 0 auto;         /* 横中央寄せ */
+  padding: 12px 8px;      /* ← 上下左右の余白を縮小（デフォルト大きすぎる場合はここ） */
+  background: #fff;       /* 必要なら背景白 */
+  border-radius: 8px;     /* 角を軽く丸める（任意） */
+}
+
+.km-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px;
+  margin: 16px 0;               /* 上下の間隔 */
+  box-shadow: 0 2px 6px rgba(0,0,0,0.05); /* 軽い影 */
+}
+
+/* カードとカードの間に細いアクセントライン */
+.km-card + .km-card {
+  border-top: 3px solid #e0d4ff; /* 薄いパープル系ライン */
+  padding-top: 20px;             /* 線の分だけ余白追加 */
+}
+
+.km-actions {
+  display: flex;
+  justify-content: flex-end; /* ボタンを右端へ */
+  margin-top: 12px;
+}
+
+
+.km-subtitle {
+  font-size: 14px;
+  color: #666;
+  margin: 6px 0 8px;
+}
+
+.km-cal {
+  padding: 12px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+  margin-bottom: 16px;
+}
+.km-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+.km-cal-cell {
+  position: relative;
+  min-height: 44px;
+  border-radius: 8px;
+  background: #faf8ff;
+  padding: 6px;
+  font-size: 12px;
+}
+.km-cal-head {
+  text-align: center;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.km-cal-dow {
+  text-align: center;
+  font-weight: 600;
+  color: #666;
+  margin-bottom: 6px;
+}
+.km-cal-date {
+  font-weight: 600;
+}
+.km-cal-badges {
+  margin-top: 4px;
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.km-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #eee;
+}
+.km-badge.kyomeikai { background: #c9e4ff; } /* 水色：共鳴会 */
+.km-badge.ainori    { background: #ffd3ea; } /* ピンク：瞑想会 */
+.km-cal-holiday { background: #fff3f3 !important; } /* 祝日背景 */
+.km-cal-out { opacity: 0.35; } /* 前後月の薄表示（必要なら） */
+
+
+.km-cal {
+  padding: 12px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+  margin-bottom: 16px;
+}
+
+.km-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+
+.km-cal-cell {
+  min-height: 44px;
+  border-radius: 8px;
+  padding: 4px;
+  background: #faf8ff;
+}
+
+.km-badge.kyomeikai { background: #c9e4ff; } /* 共鳴会＝水色 */
+.km-badge.ainori    { background: #ffd3ea; } /* 瞑想会＝ピンク */
+.km-cal-holiday     { background: #fff3f3 !important; } /* 祝日＝薄赤 */

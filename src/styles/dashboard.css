@@ -309,22 +309,3 @@ main.mu-main::before {
   .dashboard-wrapper{ transition: none; }
 }
 
-/* メニューキャラクターアイコンを一括拡大 */
-.tile-icon-img {
-  width: 80px !important;   /* 好きなサイズに変更 */
-  height: 75px !important;
-}
-.tile-icon-img {
-  width: 80px !important;
-  height: 75px !important;
-}
-
-.tile-inner {
-  width: 110px;   /* 横幅も広げる */
-  height: 110px;  /* 高さも揃える */
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-}
-
