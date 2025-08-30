@@ -36,7 +36,7 @@ export default function Footer() {
   // ★ ここを固定。まず見た目を出す（APIは後で）
   const [counts] = useState<Record<ItemId, number>>({
     home: 0,
-    talk: 5,     // ← 未読5件を固定表示
+    talk: 0,     // ← 未読5件を固定表示
     board: 0,
     pay: 0,
     mypage: 0,
