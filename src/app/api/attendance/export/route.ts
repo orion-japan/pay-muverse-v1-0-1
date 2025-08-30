@@ -1,53 +1,41 @@
-import { NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabaseAdmin'
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-export const runtime = 'nodejs'
-export const dynamic = 'force-dynamic'
+import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
-function toCSV(rows: Array<any>) {
-  if (!rows.length) return 'date,event_id,title\n'
-  const cols = ['date','event_id','title']
-  const lines = [cols.join(',')]
-  for (const r of rows) {
-    lines.push([
-      r.date ?? '',
-      r.event_id ?? '',
-      (r.title ?? '').replace(/"/g, '""')
-    ].map(v => `"${String(v)}"`).join(','))
-  }
-  return lines.join('\n')
-}
-
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url)
-    const from = searchParams.get('from') || ''
-    const to = searchParams.get('to') || ''
-    const user_code = searchParams.get('user_code') || ''
-
-    if (!from || !to || !user_code) {
-      return new NextResponse('from,to,user_code required', { status: 400 })
+    const { searchParams } = new URL(req.url);
+    const user_code = searchParams.get('user_code') || '';
+    const from = searchParams.get('from');
+    const to = searchParams.get('to');
+    if (!user_code || !from || !to) {
+      return new NextResponse('MISSING_PARAMS', { status: 400 });
     }
 
-    const { data, error } = await supabaseAdmin
-      .from('attendance')
-      .select('date,event_id,title')
-      .gte('date', from)
-      .lte('date', to)
-      .eq('user_code', user_code)
-      .order('date', { ascending: true })
+    const { data, error } = await supabaseAdmin.rpc('attendance_history', {
+      p_user_code: user_code,
+      p_from: from,
+      p_to: to,
+    });
+    if (error) throw error;
 
-    if (error) throw error
+    const rows: Array<{ date: string; event_id: string }> = Array.isArray(data) ? data : [];
+    const header = 'date,event_id';
+    const body = rows.map(r => `${r.date},${r.event_id}`).join('\n');
+    const csv = `${header}\n${body}\n`;
 
-    const csv = toCSV(data ?? [])
     return new NextResponse(csv, {
       status: 200,
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',
-        'Content-Disposition': `attachment; filename="attendance_${from}_${to}.csv"`,
+        'Content-Disposition': `attachment; filename="attendance_${user_code}_${from}_${to}.csv"`,
+        'Cache-Control': 'no-store',
       },
-    })
+    });
   } catch (e: any) {
-    return new NextResponse(e?.message ?? 'export failed', { status: 500 })
+    console.error('[attendance/export]', e);
+    return new NextResponse('INTERNAL', { status: 500 });
   }
 }

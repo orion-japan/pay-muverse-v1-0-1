@@ -1,3 +1,4 @@
+// app/api/pay/subscribe/route.ts
 export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
@@ -42,7 +43,6 @@ function normalizePayjpError(err: any) {
     status: err?.status ?? err?.response?.status ?? null,
   };
   try {
-    // payjp-node は response.body に JSON 文字列を持つことがある
     const raw = err?.response?.body;
     if (raw) {
       try {
@@ -113,8 +113,8 @@ export async function POST(req: NextRequest) {
       customer_id,
       charge_amount,
       sofia_credit,
-      tdsr_id, // 3DS 後の 2回目 POST（顧客カード 3DS の場合など）
-      charge_id, // 3DS 後の 2回目 POST（Charge 3DS の場合）
+      tdsr_id,
+      charge_id,
       user_email,
       user_code: user_code_from_body,
       force_cancel_existing,
@@ -204,7 +204,7 @@ export async function POST(req: NextRequest) {
         log(`⚠ status check failed: ${e?.message || e}`);
       }
 
-      // --- 既存サブスクを必ずキャンセル ---
+      // --- 既存サブスクを必ずキャンセル（期限前でも即時） ---
       if (force_cancel_existing) {
         try {
           const existing = await payjp.subscriptions.list({
@@ -252,7 +252,6 @@ export async function POST(req: NextRequest) {
         const nerr = normalizePayjpError(err);
         log(`🔥 PAY.JP error (subscriptions.create): ${JSON.stringify(nerr)}`);
 
-        // 既に加入済みは成功相当：既存を拾う
         if (isAlreadySubscribedPayload(nerr)) {
           try {
             const listed = await payjp.subscriptions.list({
@@ -284,6 +283,16 @@ export async function POST(req: NextRequest) {
             },
             { status: 500 }
           );
+        }
+      }
+
+      // --- probe 与信をクリーニング（あれば） ---
+      if (charge_id) {
+        try {
+          await payjp.charges.expire(String(charge_id));
+          log("🧹 probe charge expired");
+        } catch (e: any) {
+          log(`⚠ expire probe failed: ${e?.message || e}`);
         }
       }
 
@@ -410,7 +419,7 @@ export async function POST(req: NextRequest) {
         currency: "jpy",
         customer: String(customer_id),
         capture: false,
-        three_d_secure: true, // 3DS を要求
+        three_d_secure: true,
         description: `3DS probe for ${planKey} by ${user_code_from_body || "unknown"}`,
       });
       log(`✅ charge created: ${charge?.id}`);
@@ -429,7 +438,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // SDK iframe では charge_id を渡せば起動できるが、後方互換のため tds_request も生成試行
+    // SDK では ch_xxx を渡せば起動できる。後方互換で tds_request も生成試行
     let tdsr_id_created: string | null = null;
     try {
       if ((payjp as any).tdsRequests?.create) {

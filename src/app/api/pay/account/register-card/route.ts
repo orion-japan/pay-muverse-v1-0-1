@@ -1,4 +1,4 @@
-// src/app/api/pay/account/register-card/route.ts
+// app/api/pay/account/register-card/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -8,7 +8,6 @@ import Payjp from 'payjp';
 import https from 'node:https';
 import { adminAuth } from '@/lib/firebase-admin';
 
-/** ========= Env / Client ========= */
 function mustEnv(name: string) {
   const v = process.env[name];
   if (!v) throw new Error(`Missing env: ${name}`);
@@ -25,215 +24,156 @@ const payjp = Payjp(mustEnv('PAYJP_SECRET_KEY'), {
   httpAgent: agent,
 });
 
-/** ========= Helpers ========= */
-function jsonOk(obj: any, status = 200) {
-  return NextResponse.json(obj, { status });
-}
-function jsonErr(obj: any, status = 500) {
-  return NextResponse.json({ success: false, ...obj }, { status });
-}
-function short(str: string | null | undefined, left = 8) {
-  if (!str) return '(none)';
-  return str.length > left ? `${str.slice(0, left)}…` : str;
-}
+function json(obj: any, status = 200) { return NextResponse.json(obj, { status }); }
+function err(obj: any, status = 500) { return NextResponse.json({ success: false, ...obj }, { status }); }
+const short = (s?: string, n = 8) => (s ? (s.length > n ? s.slice(0, n) + '…' : s) : '(none)');
+const isCus = (v?: string | null) => !!v && /^cus_[a-z0-9]+/i.test(v);
 
-/** ========= POST: register card ========= */
 export async function POST(req: Request) {
-  const t0 = Date.now();
   const logTrail: string[] = [];
-  logTrail.push('📩 [/account/register-card] HIT');
-
   try {
-    // 1) 入力
-    const authHeader = req.headers.get('authorization') || '';
-    let idToken: string | null = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
-
+    const auth = req.headers.get('authorization') || '';
+    let idToken: string | null = auth.startsWith('Bearer ') ? auth.slice(7) : null;
     const body = (await req.json().catch(() => ({}))) as any;
-    if (!idToken && body?.idToken) idToken = body.idToken; // 保険
+    if (!idToken && body?.idToken) idToken = body.idToken;
 
-    // フロントのキー揺れ吸収
-    const token: string | undefined = body?.token ?? body?.cardToken;
+    // フロントの命名ゆれ対策
+    const token: string | undefined = body?.token ?? body?.cardToken ?? body?.token_id ?? body?.cardTokenId;
     const userCodeFromBody: string | undefined = body?.user_code ?? body?.userCode;
 
-    logTrail.push(
-      `🟢 受信: user_code=${userCodeFromBody ?? '(auto)'}, token=${short(token)}, hasIdToken=${!!idToken}`
-    );
+    if (!token) return err({ error: 'card token がありません', logTrail }, 400);
+    if (!idToken) return err({ error: 'missing_id_token', logTrail }, 401);
 
-    if (!token) return jsonErr({ error: 'card token がありません', logTrail }, 400);
-    if (!idToken) return jsonErr({ error: 'missing_id_token', logTrail }, 401);
+    const dec = await adminAuth.verifyIdToken(idToken, true).catch((e) => {
+      throw new Error('invalid_id_token: ' + (e?.message || e));
+    });
+    const uid = dec?.uid as string;
+    const email = (dec?.email as string | undefined) || (body?.email as string | undefined);
+    logTrail.push(`✅ Firebase uid=${uid} email=${email || '-'}`);
 
-    // 2) Firebase 検証
-    let firebase_uid: string | null = null;
-    let emailFromToken: string | null = null;
-    try {
-      const decoded: any = await adminAuth.verifyIdToken(idToken, true);
-      firebase_uid = decoded?.uid ?? null;
-      emailFromToken = decoded?.email ?? null;
-      logTrail.push(`✅ Firebase verified: uid=${firebase_uid}, email=${emailFromToken}`);
-    } catch (e: any) {
-      logTrail.push(`❌ invalid_id_token: ${e?.message || e}`);
-      return jsonErr({ error: 'invalid_id_token', detail: String(e?.message || e), logTrail }, 401);
-    }
-
-    // 3) ユーザー特定（優先順：body.user_code → firebase_uid → click_email）
+    // ユーザー特定
     let user_code: string | null = null;
     let click_email: string | null = null;
-    let payjp_customer_id: string | null = null;
+    let customerId: string | null = null;
 
-    // 3-0) user_code 明示
     if (userCodeFromBody) {
-      const { data, error } = await sb
-        .from('users')
+      const r = await sb.from('users')
         .select('user_code, click_email, payjp_customer_id, firebase_uid')
-        .eq('user_code', userCodeFromBody)
-        .maybeSingle();
-
-      if (error) logTrail.push(`⚠ user_code lookup error: ${error.message}`);
-      if (data) {
-        user_code = data.user_code;
-        click_email = data.click_email ?? emailFromToken ?? null;
-        payjp_customer_id = data.payjp_customer_id;
-
-        // 認可チェック：既に firebase_uid/click_email があり不一致なら拒否
-        const uidOk = data.firebase_uid ? data.firebase_uid === firebase_uid : true;
-        const mailOk = data.click_email ? data.click_email === emailFromToken : true;
-        if (!uidOk || !mailOk) {
-          logTrail.push('⛔ forbidden_mismatch: uid/email mismatch');
-          return jsonErr({ error: 'forbidden_mismatch', logTrail }, 403);
-        }
-
-        // 不足あれば同期
-        const updates: Record<string, any> = {};
-        if (!data.firebase_uid && firebase_uid) updates.firebase_uid = firebase_uid;
-        if (!data.click_email && emailFromToken) {
-          updates.click_email = emailFromToken;
-          click_email = emailFromToken;
-        }
-        if (Object.keys(updates).length) {
-          await sb.from('users').update(updates).eq('user_code', data.user_code);
-          logTrail.push('↺ user row synced (firebase_uid / click_email)');
+        .eq('user_code', userCodeFromBody).maybeSingle();
+      if (r.data) {
+        user_code = r.data.user_code;
+        click_email = r.data.click_email ?? email ?? null;
+        customerId = r.data.payjp_customer_id ?? null;
+        if (!r.data.firebase_uid && uid) {
+          await sb.from('users').update({ firebase_uid: uid }).eq('user_code', r.data.user_code);
         }
       }
     }
-
-    // 3-1) uid
-    if (!user_code && firebase_uid) {
-      const { data, error } = await sb
-        .from('users')
+    if (!user_code) {
+      const r = await sb.from('users')
         .select('user_code, click_email, payjp_customer_id')
-        .eq('firebase_uid', firebase_uid)
-        .maybeSingle();
+        .eq('firebase_uid', uid).maybeSingle();
+      if (r.data) {
+        user_code = r.data.user_code;
+        click_email = r.data.click_email ?? email ?? null;
+        customerId = r.data.payjp_customer_id ?? null;
+      }
+    }
+    if (!user_code && email) {
+      const r = await sb.from('users')
+        .select('user_code, click_email, payjp_customer_id')
+        .eq('click_email', email).maybeSingle();
+      if (r.data) {
+        user_code = r.data.user_code;
+        click_email = r.data.click_email ?? email ?? null;
+        customerId = r.data.payjp_customer_id ?? null;
+      }
+    }
+    if (!user_code) return err({ error: 'user_not_found', logTrail }, 404);
 
-      if (error) logTrail.push(`⚠ uid lookup error: ${error.message}`);
-      if (data) {
-        user_code = data.user_code;
-        click_email = data.click_email ?? emailFromToken ?? null;
-        payjp_customer_id = data.payjp_customer_id;
-
-        if (!data.click_email && emailFromToken) {
-          await sb.from('users').update({ click_email: emailFromToken }).eq('user_code', data.user_code);
-          logTrail.push('↺ user row synced (click_email)');
-        }
+    // 既存 cus_ の検証（鍵違い/削除済みの 404 を踏んだら作り直す）
+    if (customerId && !isCus(customerId)) {
+      logTrail.push(`⚠ DB payjp_customer_id は cus_ ではありません: ${short(customerId, 12)} → 無効化`);
+      customerId = null;
+    }
+    if (isCus(customerId)) {
+      try {
+        const c = await payjp.customers.retrieve(customerId!);
+        logTrail.push(`🔁 reuse customer ${short(c.id, 12)}`);
+        // メタデータはここで補完しておく（後方検索用）
+        try {
+          await payjp.customers.update(c.id, { metadata: { user_code } });
+        } catch {}
+      } catch (e: any) {
+        const msg = e?.response?.body || e?.message || String(e);
+        logTrail.push(`⚠ existing customer retrieve failed → 再作成へ: ${short(String(msg), 64)}`);
+        customerId = null;
       }
     }
 
-    // 3-2) email
-    if (!user_code && emailFromToken) {
-      const { data, error } = await sb
-        .from('users')
-        .select('user_code, click_email, payjp_customer_id, firebase_uid')
-        .eq('click_email', emailFromToken)
-        .maybeSingle();
-
-      if (error) logTrail.push(`⚠ email lookup error: ${error.message}`);
-      if (data) {
-        user_code = data.user_code;
-        click_email = data.click_email ?? emailFromToken;
-        payjp_customer_id = data.payjp_customer_id;
-
-        if (firebase_uid && data.firebase_uid !== firebase_uid) {
-          await sb.from('users').update({ firebase_uid }).eq('user_code', data.user_code);
-          logTrail.push('↺ user row synced (firebase_uid)');
-        }
-      }
-    }
-
-    if (!user_code || !click_email) {
-      logTrail.push(`❌ user_not_found (user_code=${user_code}, email=${click_email})`);
-      return jsonErr({ error: 'user_not_found', logTrail }, 404);
-    }
-
-    // 4) PAY.JP: 顧客作成 or カード差し替え
-    let customerId = payjp_customer_id;
-
+    // 顧客作成/更新
     if (!customerId) {
-      logTrail.push('🛠 creating new PAY.JP customer with card…');
-      const t = Date.now();
-      const customer = await payjp.customers.create({
-        email: click_email,
-        card: token, // 同時登録
+      const c = await payjp.customers.create({
+        email: click_email || undefined,
+        card: token,                              // ← 作成時にカードも登録（default_card になる）
         metadata: { user_code },
+        description: `app user ${user_code}`,
       });
-      customerId = customer.id;
-      logTrail.push(`✅ PAY.JP customer.create ok (${Date.now() - t}ms): ${customerId}`);
-
-      // 5-a) Supabase 反映（存在する列だけ）
-      const { data: after, error: upErr } = await sb
-        .from('users')
-        .update({
-          payjp_customer_id: customerId,
-          card_registered: true,
-        })
-        .eq('user_code', user_code)
-        .select('user_code, payjp_customer_id, card_registered')
-        .single();
-
-      if (upErr || !after) {
-        logTrail.push(`❌ Supabase update failed (create): ${upErr?.message || 'no row'}`);
-        // 失敗時は 500 で返す
-        return jsonErr({ error: 'db_update_failed', detail: upErr?.message || 'no row', logTrail }, 500);
-      }
-
-      logTrail.push(`📦 DB after(create): ${JSON.stringify(after)}`);
-      logTrail.push(`⏳ total: ${Date.now() - t0}ms`);
-      return jsonOk({ success: true, customer_id: customerId, user_code, logTrail }, 200);
+      customerId = c.id;
+      logTrail.push(`🆕 customer created: ${short(customerId, 12)}`);
     } else {
-      logTrail.push(`🛠 updating existing PAY.JP customer (${customerId}) card…`);
-      const t = Date.now();
-      await payjp.customers.update(customerId, { card: token });
-      logTrail.push(`✅ PAY.JP customers.update ok (${Date.now() - t}ms)`);
-
-      // 5-b) Supabase 反映（存在する列だけ）
-      const { data: after2, error: upErr2 } = await sb
-        .from('users')
-        .update({
-          // 念のため customer_id も揃えておく（空だったケースの補完）
-          payjp_customer_id: customerId,
-          card_registered: true,
-        })
-        .eq('user_code', user_code)
-        .select('user_code, payjp_customer_id, card_registered')
-        .single();
-
-      if (upErr2 || !after2) {
-        logTrail.push(`❌ Supabase update failed (update): ${upErr2?.message || 'no row'}`);
-        return jsonErr({ error: 'db_update_failed', detail: upErr2?.message || 'no row', logTrail }, 500);
-      }
-
-      logTrail.push(`📦 DB after(update): ${JSON.stringify(after2)}`);
-      logTrail.push(`⏳ total: ${Date.now() - t0}ms`);
-      return jsonOk({ success: true, customer_id: customerId, user_code, logTrail }, 200);
+      // 既存顧客にカード追加（default を更新）
+      await payjp.customers.update(customerId, {
+        card: token,
+        email: click_email || undefined,          // 足りてなければ合わせて更新
+        metadata: { user_code },                  // メタデータも補完
+      });
+      logTrail.push(`➕ card attached to ${short(customerId, 12)}`);
     }
-  } catch (err: any) {
-    const msg = err?.message || String(err);
-    logTrail.push(`🔥 unhandled: ${msg}`);
-    // PAY.JP のカード系エラーは 402 に寄せる
-    const isCardErr = /card|invalid|security code|insufficient|cvc/i.test(msg);
-    return jsonErr({ error: isCardErr ? 'payment_error' : 'internal_error', detail: msg, logTrail }, isCardErr ? 402 : 500);
+
+    // デフォルトカード情報（brand/last4, ついでに default_card_id も保存）
+    let card_brand: string | null = null;
+    let card_last4: string | null = null;
+    let default_card_id: string | null = null;
+    try {
+      const c = await payjp.customers.retrieve(customerId);
+      const def = (c as any)?.default_card as string | undefined;
+      if (def) {
+        default_card_id = def;
+        // ❗ 正式SDK: customers.cards.retrieve(customerId, def)
+        const card = await (payjp as any).customers.cards.retrieve(customerId, def);
+        card_brand = (card as any)?.brand || null;
+        card_last4 = (card as any)?.last4 || null;
+      }
+    } catch (e: any) {
+      logTrail.push(`ℹ default card fetch skipped: ${short(e?.message || String(e), 64)}`);
+    }
+
+    const { error: upErr } = await sb.from('users').update({
+      payjp_customer_id: customerId,
+      card_registered: true,
+      ...(default_card_id ? { payjp_default_card_id: default_card_id } : {}),
+      ...(card_brand ? { card_brand } : {}),
+      ...(card_last4 ? { card_last4 } : {}),
+    }).eq('user_code', user_code);
+    if (upErr) return err({ error: 'db_update_failed', detail: upErr.message, logTrail }, 500);
+
+    return json({
+      success: true,
+      customer_id: customerId,
+      user_code,
+      default_card_id: default_card_id,
+      card_brand,
+      card_last4,
+      logTrail,
+    }, 200);
+  } catch (e: any) {
+    const msg = e?.message || String(e);
+    const isCardErr = /card|invalid|security code|insufficient|cvc|3d|three[-\s]?d/i.test(msg);
+    return err({ error: isCardErr ? 'payment_error' : 'internal_error', detail: msg, logTrail }, isCardErr ? 402 : 500);
   }
 }
 
-/** 明示的に GET は 405 を返す（誤アクセス検知用にログ） */
 export async function GET() {
-  return jsonErr({ error: 'Method Not Allowed (POST only)' }, 405);
+  return err({ error: 'Method Not Allowed (POST only)' }, 405);
 }

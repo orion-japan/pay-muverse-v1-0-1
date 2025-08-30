@@ -581,3 +581,144 @@ main {
 body {
   font-family: 'ZenMaruGothic', system-ui, sans-serif;
 }
+
+.pay-main{ padding-bottom: var(--footer-safe-pad) !important; }
+
+
+/* ---- 下端が隠れないための安全余白 ---- */
+:root{
+  /* 実際のタブ/フッターの高さに合わせて調整（例: 64px） */
+  --footer-height: 64px;
+  /* セーフエリア込みの下余白 */
+  --footer-safe-pad: calc(var(--footer-height) + env(safe-area-inset-bottom, 0px));
+}
+/* 古い iOS Safari 向けフォールバック */
+@supports (padding-bottom: constant(safe-area-inset-bottom)) {
+  :root{
+    --footer-safe-pad: calc(var(--footer-height) + constant(safe-area-inset-bottom));
+  }
+}
+
+/* 必要なら */
+html, body { height: 100%; }
+
+/* ★ コンテンツに常時「下余白」を強制付与（確実に勝つために !important） */
+.pay-main{
+  padding-bottom: var(--footer-safe-pad) !important;
+  box-sizing: border-box;
+}
+
+
+/* 解約ボタン（赤系） */
+.btn-cancel {
+  display: block;
+  width: 100%;
+  padding: 12px 0;
+  margin-top: 8px;
+
+  font-size: 14px;
+  font-weight: bold;
+  color: #fff;
+  background-color: #dc3545;
+  border: 1px solid #b52a36;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background-color 0.2s, transform 0.1s;
+}
+.btn-cancel:hover:not(:disabled) {
+  background-color: #c82333;
+}
+.btn-cancel:active:not(:disabled) {
+  background-color: #a71d2a;
+  transform: scale(0.98);
+}
+.btn-cancel:disabled {
+  background-color: #f5b5bb;
+  border-color: #e19a9f;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* カード削除ボタン（グレー系） */
+.btn-remove-card {
+  display: block;
+  width: 100%;
+  padding: 12px 0;
+  margin-top: 8px;
+
+  font-size: 14px;
+  font-weight: bold;
+  color: #333;
+  background-color: #f0f2f5;
+  border: 1px solid #cfd4da;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background-color 0.2s, transform 0.1s;
+}
+.btn-remove-card:hover:not(:disabled) {
+  background-color: #e6e9ee;
+}
+.btn-remove-card:active:not(:disabled) {
+  background-color: #dde1e7;
+  transform: scale(0.98);
+}
+.btn-remove-card:disabled {
+  color: #9aa0a6;
+  background-color: #f6f7f9;
+  border-color: #e6e9ee;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* ===== 同期ボタン ===== */
+.btn-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .625rem .875rem;
+  border-radius: .75rem;
+  font-size: .875rem;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(180deg, #6366f1 0%, #4f46e5 100%);
+  box-shadow: 0 6px 20px rgba(79,70,229,.22);
+  transition: transform .06s ease, filter .2s ease, box-shadow .2s ease, background .2s ease;
+  will-change: transform;
+}
+.btn-sync:hover { filter: brightness(1.03); box-shadow: 0 8px 24px rgba(79,70,229,.28); }
+.btn-sync:active { transform: translateY(1px); }
+.btn-sync:disabled { opacity: .6; cursor: not-allowed; box-shadow: none; }
+
+/* カード登録ボタンの下に余白（履歴と詰まない） */
+.pay-main .card-register-area {
+  margin: 20px 0 28px;           /* 上20 / 下28 */
+  text-align: center;
+}
+
+/* 履歴セクションの上下余白（上を広め、下も少し空ける） */
+.pay-main .history-section {
+  margin-top: 36px !important;   /* ← 黒ボタンと十分離す */
+  margin-bottom: 20px !important;/* ← 下の操作ボタンとも離す */
+}
+
+/* 下3ボタン（解約/削除/プランチェック）の等間隔 */
+.pay-main .bottom-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;                     /* ← ボタン間の隙間を一括で管理 */
+  margin-top: 24px;              /* 履歴との間 */
+  text-align: center;
+}
+
+/* 任意：ボタン幅を揃える（見た目が締まります） */
+.pay-main .bottom-buttons button,
+.pay-main .card-register-area .btn-card-submit {
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
+}
+
+/* 任意：details の summary も少し高さを持たせる */
+.pay-main .history-acc__summary {
+  padding: 10px 12px;
+}
