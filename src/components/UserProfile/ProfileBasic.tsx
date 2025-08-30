@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import type { Profile } from './index';
+import type { Profile } from '@/components/UserProfile';
 
 type Props = {
   profile: Profile;

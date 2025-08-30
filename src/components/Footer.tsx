@@ -7,6 +7,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 
 const FALLBACK_H = 56
+
 type ItemId = 'home' | 'talk' | 'board' | 'pay' | 'mypage'
 type Item = { id: ItemId; label: string; href: string; icon?: React.ReactNode }
 
@@ -24,6 +25,13 @@ function toast(msg: string) {
   setTimeout(() => div.remove(), 2200)
 }
 
+// クエリ ?debug_footer_badge=数字 で上書き（SSR安全）
+const getDebugBadge = (): number => {
+  if (typeof window === 'undefined') return 0
+  const v = new URLSearchParams(window.location.search).get('debug_footer_badge')
+  return v ? Math.max(0, Number(v) || 0) : 0
+}
+
 export default function Footer() {
   const [host, setHost] = useState<HTMLElement | null>(null)
   const [mounted, setMounted] = useState(false)
@@ -33,17 +41,21 @@ export default function Footer() {
   const { user } = useAuth()
   const isLoggedIn = !!user
 
-  // ★ ここを固定。まず見た目を出す（APIは後で）
-  const [counts] = useState<Record<ItemId, number>>({
+  // 未読数（必要に応じて key を増やせます）
+  const [counts, setCounts] = useState<Record<ItemId, number>>({
     home: 0,
-    talk: 0,     // ← 未読5件を固定表示
+    talk: 0,
     board: 0,
     pay: 0,
     mypage: 0,
   })
 
+  // 一度だけ評価（URL変化で更新したい場合は依存に pathname を入れる）
+  const debugBadge = useMemo(getDebugBadge, [])
+
   useEffect(() => setMounted(true), [])
 
+  // ポータル先（なければ作成）
   useEffect(() => {
     try {
       let el = document.getElementById('mu-footer-root') as HTMLDivElement | null
@@ -58,6 +70,7 @@ export default function Footer() {
     }
   }, [])
 
+  // フッター高さを CSS 変数に反映
   useEffect(() => {
     const setPad = (h: number) => {
       const px = Math.max(0, Math.round(h || 0))
@@ -78,13 +91,14 @@ export default function Footer() {
     }
   }, [host, mounted])
 
+  // ナビ項目
   const items: Item[] = useMemo(
     () => [
-      { id: 'home', label: 'Home', href: '/', icon: <span>🏠</span> },
-      { id: 'talk', label: 'Talk', href: '/talk', icon: <span>💬</span> },
-      { id: 'board', label: 'I Board', href: '/board', icon: <span>🧩</span> },
-      { id: 'pay', label: 'Plan', href: '/pay', icon: <span>💳</span> },
-      { id: 'mypage', label: 'My Page', href: '/mypage', icon: <span>👤</span> },
+      { id: 'home',   label: 'Home',   href: '/',       icon: <span>🏠</span> },
+      { id: 'talk',   label: 'Talk',   href: '/talk',   icon: <span>💬</span> },
+      { id: 'board',  label: 'I Board',href: '/board',  icon: <span>🧩</span> },
+      { id: 'pay',    label: 'Plan',   href: '/pay',    icon: <span>💳</span> },
+      { id: 'mypage', label: 'My Page',href: '/mypage', icon: <span>👤</span> },
     ],
     []
   )
@@ -99,6 +113,91 @@ export default function Footer() {
     e.preventDefault()
     if (pathname !== it.href) router.push(it.href)
   }
+
+  // --- 未読数取得（Talk の例） ---
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setCounts((c) => ({ ...c, talk: 0 }))
+      return
+    }
+
+    let timer: number | undefined
+
+    const load = async () => {
+      try {
+        const { getAuth } = await import('firebase/auth')
+        const auth = getAuth()
+        const idToken = await auth.currentUser?.getIdToken().catch(() => null)
+
+        // 1. 第一候補: /api/talk/unread-count
+        let unread = 0
+        let tried = false
+
+        try {
+          tried = true
+          const res = await fetch('/api/talk/unread-count', {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+            },
+          })
+          if (res.ok) {
+            const data = (await res.json().catch(() => null)) as { unread?: number } | null
+            unread = Math.max(0, data?.unread ?? 0)
+            console.log('[Footer] unread-count OK:', unread)
+          } else {
+            console.warn('[Footer] unread-count NG status=', res.status)
+          }
+        } catch (e) {
+          console.warn('[Footer] unread-count fetch error', e)
+        }
+
+        // 2. フォールバック: /api/talk/meta （もし存在すれば）
+        if (tried && unread === 0) {
+          try {
+            const res2 = await fetch('/api/talk/meta', {
+              method: 'GET',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+              },
+            })
+            if (res2.ok) {
+              const meta = (await res2.json().catch(() => null)) as any
+              const cand =
+                typeof meta?.unread === 'number'
+                  ? meta.unread
+                  : typeof meta?.talkUnread === 'number'
+                  ? meta.talkUnread
+                  : 0
+              if (cand > 0) {
+                unread = cand
+                console.log('[Footer] talk/meta fallback unread:', unread)
+              }
+            }
+          } catch (e) {
+            /* noop */
+          }
+        }
+
+        setCounts((c) => (c.talk !== unread ? { ...c, talk: unread } : c))
+      } catch (e) {
+        console.warn('[Footer] unread-count unexpected error', e)
+        setCounts((c) => ({ ...c, talk: 0 }))
+      }
+    }
+
+    load()
+    timer = window.setInterval(load, 20000) // 20秒ごと更新
+    const onVis = () => { if (document.visibilityState === 'visible') load() }
+    document.addEventListener('visibilitychange', onVis)
+
+    return () => {
+      if (timer) clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVis)
+    }
+  }, [isLoggedIn])
 
   if (!mounted) return null
 
@@ -129,8 +228,11 @@ export default function Footer() {
       {items.map((it) => {
         const active = pathname === it.href || (it.href !== '/' && pathname?.startsWith(it.href))
         const disabled = !isLoggedIn && it.href !== '/'
-        const badge = counts[it.id] ?? 0
-        const showBadge = isLoggedIn && badge > 0
+        const base = counts[it.id] ?? 0
+        // debug が指定されていれば Talk を上書き
+        const badge = it.id === 'talk' && debugBadge > 0 ? debugBadge : base
+        // デバッグ時はログインしてなくても表示／本番は isLoggedIn 必須
+        const showBadge = (isLoggedIn && badge > 0) || (it.id === 'talk' && debugBadge > 0)
 
         return (
           <a
@@ -200,5 +302,6 @@ export default function Footer() {
     </nav>
   )
 
+  // ポータル先があればポータル、なければ通常描画
   return host ? createPortal(Nav, host) : Nav
 }
