@@ -1,7 +1,5 @@
-// src/components/UserProfile/index.ts
-export { default } from './UserProfile';
-export type { Profile } from './types';
+// すべてここ経由で型を import できるようにする
+export type { Profile, ResonanceLog } from './types';
 
-// （必要なら他のサブコンポーネントもここで再エクスポート可）
-// export { default as ProfileBasic } from './ProfileBasic';
-// ...
+// 既存のコンポーネント再エクスポート（必要に応じて）
+export { default as UserProfile } from './UserProfile';

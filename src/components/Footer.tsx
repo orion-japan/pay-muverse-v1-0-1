@@ -1,4 +1,3 @@
-// src/components/Footer.tsx
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -25,7 +24,6 @@ function toast(msg: string) {
   setTimeout(() => div.remove(), 2200)
 }
 
-// 小さなユーティリティ：安全にJSON取得
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T | null> {
   try {
     const ac = new AbortController()
@@ -41,13 +39,14 @@ async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T | null> 
 
 export default function Footer() {
   const [host, setHost] = useState<HTMLElement | null>(null)
+  const [mounted, setMounted] = useState(false)
   const navRef = useRef<HTMLElement | null>(null)
   const router = useRouter()
   const pathname = usePathname()
   const { user } = useAuth()
   const isLoggedIn = !!user
 
-  // ====== 未読数（必要に応じてキーを追加可能） ======
+  // --- 未読数 ---
   const [counts, setCounts] = useState<Record<ItemId, number>>({
     home: 0,
     talk: 0,
@@ -56,16 +55,25 @@ export default function Footer() {
     mypage: 0,
   })
 
+  // マウント判定（SSR→CSRのちらつき防止）
+  useEffect(() => setMounted(true), [])
+
+  // ポータル先（失敗しても描画は継続）
   useEffect(() => {
-    let el = document.getElementById('mu-footer-root') as HTMLDivElement | null
-    if (!el) {
-      el = document.createElement('div')
-      el.id = 'mu-footer-root'
-      document.body.appendChild(el)
+    try {
+      let el = document.getElementById('mu-footer-root') as HTMLDivElement | null
+      if (!el) {
+        el = document.createElement('div')
+        el.id = 'mu-footer-root'
+        document.body.appendChild(el)
+      }
+      setHost(el)
+    } catch {
+      setHost(null)
     }
-    setHost(el)
   }, [])
 
+  // 高さをCSS変数に反映
   useEffect(() => {
     const setPad = (h: number) => {
       const px = Math.max(0, Math.round(h || 0))
@@ -84,9 +92,9 @@ export default function Footer() {
       ro?.disconnect()
       window.removeEventListener('resize', update)
     }
-  }, [host])
+  }, [host, mounted])
 
-  // ✅ 並び順: Home ｜ Talk ｜ I Board ｜ Plan ｜ My Page
+  // メニュー
   const items: Item[] = useMemo(
     () => [
       { id: 'home', label: 'Home', href: '/', icon: <span>🏠</span> },
@@ -109,48 +117,61 @@ export default function Footer() {
     if (pathname !== it.href) router.push(it.href)
   }
 
-  // ====== 未読数の取得ロジック（Talkの例） ======
-  useEffect(() => {
-    if (!isLoggedIn) {
+// 置き換え：未読数取得（Talkの例）
+useEffect(() => {
+  if (!isLoggedIn) {
+    setCounts((c) => ({ ...c, talk: 0 }))
+    return
+  }
+
+  let timer: number | undefined
+
+  const load = async () => {
+    // ★ Firebase のIDトークンを付与
+    const { getAuth } = await import('firebase/auth')
+    const auth = getAuth()
+    const idToken = await auth.currentUser?.getIdToken().catch(() => null)
+
+    const res = await fetch('/api/talk/unread-count', {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+      },
+    })
+
+    // デバッグしやすく
+    if (!res.ok) {
+      console.warn('[Footer] unread-count NG', res.status)
       setCounts((c) => ({ ...c, talk: 0 }))
       return
     }
 
-    let timer: number | undefined
+    const data = (await res.json().catch(() => null)) as { unread?: number } | null
+    const unread = Math.max(0, data?.unread ?? 0)
+    setCounts((c) => (c.talk !== unread ? { ...c, talk: unread } : c))
+  }
 
-    const load = async () => {
-      // 例：/api/talk/unread-count が { unread: number } を返す想定
-      // 既存に /api/talk/meta がある場合はそれを流用して unread を取り出す形にしてOK
-      const data = await fetchJSON<{ unread: number }>('/api/talk/unread-count', {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      })
+  const start = () => {
+    load()                // 初回
+    timer = window.setInterval(load, 20000) // 20秒ごと
+  }
+  const onVis = () => {
+    if (document.visibilityState === 'visible') load()
+  }
 
-      const unread = Math.max(0, data?.unread ?? 0)
-      setCounts((c) => (c.talk !== unread ? { ...c, talk: unread } : c))
-    }
+  start()
+  document.addEventListener('visibilitychange', onVis)
+  return () => {
+    if (timer) clearInterval(timer)
+    document.removeEventListener('visibilitychange', onVis)
+  }
+}, [isLoggedIn])
 
-    const start = () => {
-      load() // 初回
-      timer = window.setInterval(load, 20000) // 20秒ごとに更新
-    }
 
-    const onVis = () => {
-      if (document.visibilityState === 'visible') load()
-    }
+  if (!mounted) return null
 
-    start()
-    document.addEventListener('visibilitychange', onVis)
-
-    return () => {
-      if (timer) clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVis)
-    }
-  }, [isLoggedIn])
-
-  if (!host) return null
-
-  return createPortal(
+  const Nav = (
     <nav
       ref={navRef}
       aria-label="primary"
@@ -170,7 +191,7 @@ export default function Footer() {
         backdropFilter: 'blur(10px)',
         WebkitBackdropFilter: 'blur(10px)',
         boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-        zIndex: 50,
+        zIndex: 1000, // ← 念のため強め
         paddingBottom: 'max(6px, env(safe-area-inset-bottom))',
       }}
     >
@@ -204,8 +225,6 @@ export default function Footer() {
           >
             <div style={{ fontSize: 15, lineHeight: 1, position: 'relative' }}>
               {it.icon}
-
-              {/* 未読バッジ */}
               {showBadge && (
                 <span
                   aria-label="unread count"
@@ -217,7 +236,7 @@ export default function Footer() {
                     height: 18,
                     padding: '0 5px',
                     borderRadius: 999,
-                    background: '#ff3b30', // iOS風レッド
+                    background: '#ff3b30',
                     color: '#fff',
                     fontSize: 11,
                     fontWeight: 800,
@@ -230,11 +249,7 @@ export default function Footer() {
                 </span>
               )}
             </div>
-
-            <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.2 }}>
-              {it.label}
-            </div>
-
+            <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.2 }}>{it.label}</div>
             {active && (
               <span
                 aria-hidden
@@ -252,7 +267,9 @@ export default function Footer() {
           </a>
         )
       })}
-    </nav>,
-    host
+    </nav>
   )
+
+  // ポータル先があればポータル、なければそのまま描画（必ず表示される）
+  return host ? createPortal(Nav, host) : Nav
 }

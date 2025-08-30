@@ -7,8 +7,7 @@ import Link from 'next/link';
 import { getAuth, onAuthStateChanged, User } from 'firebase/auth';
 
 // ✅ コンポーネントと型を同じバレルから import して“型の二重化”を防ぐ
-import UserProfile, { type Profile } from '@/components/UserProfile';
-
+import { UserProfile, type Profile } from '@/components/UserProfile'
 import './mypage.css';
 
 export default function MyPage() {
