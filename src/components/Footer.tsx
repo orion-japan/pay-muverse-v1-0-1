@@ -25,7 +25,7 @@ function toast(msg: string) {
   setTimeout(() => div.remove(), 2200)
 }
 
-// クエリ ?debug_footer_badge=数字 で上書き（SSR安全）
+// ?debug_footer_badge=数字 で Talk のバッジを上書き
 const getDebugBadge = (): number => {
   if (typeof window === 'undefined') return 0
   const v = new URLSearchParams(window.location.search).get('debug_footer_badge')
@@ -50,12 +50,11 @@ export default function Footer() {
     mypage: 0,
   })
 
-  // 一度だけ評価（URL変化で更新したい場合は依存に pathname を入れる）
   const debugBadge = useMemo(getDebugBadge, [])
 
   useEffect(() => setMounted(true), [])
 
-  // ポータル先（なければ作成）
+  // ポータル先（なければ作る）
   useEffect(() => {
     try {
       let el = document.getElementById('mu-footer-root') as HTMLDivElement | null
@@ -70,7 +69,7 @@ export default function Footer() {
     }
   }, [])
 
-  // フッター高さを CSS 変数に反映
+  // 高さを CSS 変数へ
   useEffect(() => {
     const setPad = (h: number) => {
       const px = Math.max(0, Math.round(h || 0))
@@ -91,7 +90,7 @@ export default function Footer() {
     }
   }, [host, mounted])
 
-  // ナビ項目
+  // ナビ
   const items: Item[] = useMemo(
     () => [
       { id: 'home',   label: 'Home',   href: '/',       icon: <span>🏠</span> },
@@ -114,8 +113,14 @@ export default function Footer() {
     if (pathname !== it.href) router.push(it.href)
   }
 
-  // --- 未読数取得（Talk の例） ---
+  // --- 未読数取得（Talk） ---
   useEffect(() => {
+    // デバッグ上書き有効時は API を読まず固定表示
+    if (debugBadge > 0) {
+      setCounts((c) => ({ ...c, talk: debugBadge }))
+      return
+    }
+
     if (!isLoggedIn) {
       setCounts((c) => ({ ...c, talk: 0 }))
       return
@@ -125,79 +130,49 @@ export default function Footer() {
 
     const load = async () => {
       try {
-        const { getAuth } = await import('firebase/auth')
-        const auth = getAuth()
-        const idToken = await auth.currentUser?.getIdToken().catch(() => null)
-
-        // 1. 第一候補: /api/talk/unread-count
-        let unread = 0
-        let tried = false
-
+        // Firebase の ID トークン（無ければ Authorization ヘッダなしで呼ぶ）
+        let idToken: string | null = null
         try {
-          tried = true
-          const res = await fetch('/api/talk/unread-count', {
-            method: 'GET',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
-            },
-          })
-          if (res.ok) {
-            const data = (await res.json().catch(() => null)) as { unread?: number } | null
-            unread = Math.max(0, data?.unread ?? 0)
-            console.log('[Footer] unread-count OK:', unread)
-          } else {
-            console.warn('[Footer] unread-count NG status=', res.status)
-          }
-        } catch (e) {
-          console.warn('[Footer] unread-count fetch error', e)
+          const { getAuth } = await import('firebase/auth')
+          const auth = getAuth()
+          idToken = await auth.currentUser?.getIdToken().catch(() => null)
+        } catch {
+          // firebase/auth を使っていない場合でも動くように握り潰す
         }
 
-        // 2. フォールバック: /api/talk/meta （もし存在すれば）
-        if (tried && unread === 0) {
-          try {
-            const res2 = await fetch('/api/talk/meta', {
-              method: 'GET',
-              headers: {
-                'Content-Type': 'application/json',
-                ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
-              },
-            })
-            if (res2.ok) {
-              const meta = (await res2.json().catch(() => null)) as any
-              const cand =
-                typeof meta?.unread === 'number'
-                  ? meta.unread
-                  : typeof meta?.talkUnread === 'number'
-                  ? meta.talkUnread
-                  : 0
-              if (cand > 0) {
-                unread = cand
-                console.log('[Footer] talk/meta fallback unread:', unread)
-              }
-            }
-          } catch (e) {
-            /* noop */
-          }
+        const res = await fetch('/api/talk/unread-count', {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+          },
+        })
+
+        if (!res.ok) {
+          console.warn('[Footer] unread-count NG', res.status)
+          setCounts((c) => ({ ...c, talk: 0 }))
+          return
         }
 
+        const data = (await res.json().catch(() => null)) as { unread?: number } | null
+        const unread = Math.max(0, data?.unread ?? 0)
+        console.log('[Footer] unread-count OK:', unread)
         setCounts((c) => (c.talk !== unread ? { ...c, talk: unread } : c))
       } catch (e) {
-        console.warn('[Footer] unread-count unexpected error', e)
+        console.warn('[Footer] unread-count error', e)
         setCounts((c) => ({ ...c, talk: 0 }))
       }
     }
 
     load()
-    timer = window.setInterval(load, 20000) // 20秒ごと更新
+    timer = window.setInterval(load, 20000)
     const onVis = () => { if (document.visibilityState === 'visible') load() }
     document.addEventListener('visibilitychange', onVis)
-
     return () => {
       if (timer) clearInterval(timer)
       document.removeEventListener('visibilitychange', onVis)
     }
-  }, [isLoggedIn])
+  }, [isLoggedIn, debugBadge])
 
   if (!mounted) return null
 
@@ -229,10 +204,8 @@ export default function Footer() {
         const active = pathname === it.href || (it.href !== '/' && pathname?.startsWith(it.href))
         const disabled = !isLoggedIn && it.href !== '/'
         const base = counts[it.id] ?? 0
-        // debug が指定されていれば Talk を上書き
         const badge = it.id === 'talk' && debugBadge > 0 ? debugBadge : base
-        // デバッグ時はログインしてなくても表示／本番は isLoggedIn 必須
-        const showBadge = (isLoggedIn && badge > 0) || (it.id === 'talk' && debugBadge > 0)
+        const showBadge = badge > 0 // ← デバッグや未ログインでも見えるように
 
         return (
           <a
@@ -302,6 +275,5 @@ export default function Footer() {
     </nav>
   )
 
-  // ポータル先があればポータル、なければ通常描画
   return host ? createPortal(Nav, host) : Nav
 }
