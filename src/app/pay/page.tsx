@@ -580,40 +580,62 @@ function PageInner() {
     }
   };
 
-  /* ---------- 追加：同期（PAY.JPと整合） ---------- */
-  const handleSyncNow = async () => {
-    if (syncing) return;
-    setSyncing(true);
-    try {
-      const idToken = await getIdTokenWithTimeout();
-      const res = await fetchWithTimeout('/api/account/refresh', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-        body: JSON.stringify({}), // AuthorizationヘッダだけでもOK
-      });
-      const j = await res.json().catch(() => ({}));
-      log('refresh result', { status: res.status, payload: j });
+/* ---------- 追加：同期（PAY.JPと整合） ---------- */
+const handleSyncNow = async () => {
+  if (syncing) return;
+  setSyncing(true);
+  try {
+    const idToken = await getIdTokenWithTimeout();
 
-      if (!res.ok) {
-        throw new Error(j?.error || `同期に失敗しました: ${res.status}`);
-      }
+    // ★ パスを /api/pay/account/refresh に修正
+    const res = await fetchWithTimeout('/api/pay/account/refresh', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({}),
+    });
 
-      const changed = !!j?.changed;
-      setModalTitle('PAY.JPと整合チェック');
-      setModalMessage(changed
-        ? '最新の契約状態に更新しました。'
-        : '変更はありませんでした（最新の状態です）。');
-      setModalOpen(true);
+    const j = await res.json().catch(() => ({} as any));
+    log('refresh result', { status: res.status, payload: j });
 
-      await fetchStatus(true);
-    } catch (e: any) {
-      setModalTitle('同期エラー');
-      setModalMessage(String(e?.message || e));
-      setModalOpen(true);
-    } finally {
-      setSyncing(false);
+    if (!res.ok) {
+      throw new Error(j?.error || `同期に失敗しました: ${res.status}`);
     }
-  };
+
+    // サーバ実装どちらにも耐える: {changed:true} or {ok:true, plan_status...}
+    const changed =
+      j?.changed ??
+      (j?.ok ? true : false);
+
+    // 画面ステートも更新（返っていれば反映）
+    setUserData((prev: any) => ({
+      ...(prev || {}),
+      plan_status: j?.plan_status ?? prev?.plan_status,
+      plan_valid_until: j?.next_payment_date ?? prev?.plan_valid_until,
+      last_payment_date: j?.last_payment_date ?? prev?.last_payment_date,
+    }));
+
+    setModalTitle('PAY.JPと整合チェック');
+    setModalMessage(
+      changed
+        ? '最新の契約状態に更新しました。'
+        : '変更はありませんでした（最新の状態です）。'
+    );
+    setModalOpen(true);
+
+    await fetchStatus(true);
+  } catch (e: any) {
+    setModalTitle('同期エラー');
+    setModalMessage(String(e?.message || e));
+    setModalOpen(true);
+  } finally {
+    setSyncing(false);
+  }
+};
+
+
 /* ---------- UI ---------- */
 return (
   <main className="pay-main">
@@ -627,7 +649,10 @@ return (
             {/* ← (click_type: …) は非表示にしました */}
           </div>
           <div className="text-sm text-gray-800 mt-1">
-            <b>有効期限</b>：{userData?.plan_valid_until ? dayjs(userData.plan_valid_until).format('YYYY/MM/DD HH:mm') : '―'}
+            <b>有効期限</b>：
+            {userData?.plan_valid_until
+              ? dayjs(userData.plan_valid_until).format('YYYY/MM/DD HH:mm')
+              : '―'}
           </div>
           <div className="text-sm text-gray-800 mt-1">
             <b>クレジット残</b>：{userCredit}
@@ -641,7 +666,10 @@ return (
       userCode={user_code}
       cardRegistered={cardRegistered}
       userCredit={userCredit}
-      onPlanSelected={(plan) => { log('onPlanSelected', plan); setSelectedPlan(plan); }}
+      onPlanSelected={(plan) => {
+        log('onPlanSelected', plan);
+        setSelectedPlan(plan);
+      }}
     />
 
     {expired && (
@@ -656,7 +684,11 @@ return (
           <div className="text-center mt-4">
             <button
               className="btn-card-register"
-              onClick={() => { log('open card form'); setShowCardForm(true); initPayjpCard(); }}
+              onClick={() => {
+                log('open card form');
+                setShowCardForm(true);
+                initPayjpCard();
+              }}
               disabled={loading}
             >
               カードを登録する
@@ -665,12 +697,15 @@ return (
         ) : (
           <div>
             <CardStyle />
-            <div className="text-center mt-4 mb-6">   {/* ← mb-6 を追加 */}
-  <button onClick={handleCardRegistration} disabled={!cardReady || loading} className="btn-card-submit w-full">
-    {loading ? 'カード登録中…' : 'このカードを登録する'}
-  </button>
-</div>
-
+            <div className="text-center mt-4 mb-6">
+              <button
+                onClick={handleCardRegistration}
+                disabled={!cardReady || loading}
+                className="btn-card-submit w-full"
+              >
+                {loading ? 'カード登録中…' : 'このカードを登録する'}
+              </button>
+            </div>
           </div>
         )}
       </>
@@ -679,99 +714,115 @@ return (
     {cardRegistered && (
       <>
         <div className="registered-card-box text-center">
-          <p className="text-gray-700">💳 登録済みカード: {userData?.card_brand || 'VISA'} **** {userData?.card_last4 || '****'}</p>
+          <p className="text-gray-700">
+            💳 登録済みカード: {userData?.card_brand || 'VISA'} ****{' '}
+            {userData?.card_last4 || '****'}
+          </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 mt-4">
-          <button className="btn-subscribe w-full" onClick={handleSubscribe} disabled={!selectedPlan || loading}>
-            {loading ? '処理中…' : expired ? 'プランを再購入する' : 'プランを購入する'}
+        {/* 購入ボタンのボックス（CSSで余白管理） */}
+        <div className="subscribe-box">
+          <button
+            className="btn-subscribe w-full"
+            onClick={handleSubscribe}
+            disabled={!selectedPlan || loading}
+          >
+            {loading
+              ? '処理中…'
+              : expired
+              ? 'プランを再購入する'
+              : 'プランを購入する'}
           </button>
         </div>
       </>
     )}
 
-    <section className="mt-1010">
-      <details className="history-acc" open={false}>
-        <summary className="history-acc__summary">
-          <span className="history-acc__title">プラン履歴</span>
-          <span className="history-acc__count">{history.length} 件</span>
-          <svg className="history-acc__chev" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M7 10l5 5 5-5" />
-          </svg>
-        </summary>
+    {/* 履歴セクション（CSSで余白管理） */}
+{/* 履歴セクション（余白は CSS の .history-section で管理） */}
+<section className="history-section">
+  <details className="history-acc" open={false}>
+    <summary className="history-acc__summary">
+      <span className="history-acc__title">プラン履歴</span>
+      <span className="history-acc__count">{history.length} 件</span>
+      <svg className="history-acc__chev" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M7 10l5 5 5-5" />
+      </svg>
+    </summary>
 
-        {history.length === 0 ? (
-  <p className="history-empty">履歴はまだありません。</p>
-) : (
-  <ul className="history-list">
-    {history.map((h, i) => (
-      <li key={i} className="history-item">
-        <div className="history-row">
-          <div className="history-when">
-            <b>{dayjs(h.started_at).format('YYYY/MM/DD HH:mm')}</b>
-            {h.ended_at
-              ? ` 〜 ${dayjs(h.ended_at).format('YYYY/MM/DD HH:mm')}`
-              : ' 〜 現在'}
-          </div>
-          <div className="history-what">
-            {h.from_plan_status || 'none'} → <b>{h.to_plan_status}</b>
-            <span className="history-click">
-              （click: {h.from_click_type || 'none'} → {h.to_click_type}）
-            </span>
-          </div>
-          {(h.reason || h.source) && (
-            <div className="history-meta">
-              reason: {h.reason || '-'} / source: {h.source || '-'}
+    {history.length === 0 ? (
+      <p className="history-empty">履歴はまだありません。</p>
+    ) : (
+      <ul className="history-list">
+        {history.map((h, i) => (
+          <li key={i} className="history-item">
+            <div className="history-row">
+              {/* 開始〜終了日時 */}
+              <div className="history-when">
+                <b>{dayjs(h.started_at).format('YYYY/MM/DD HH:mm')}</b>
+                {h.ended_at
+                  ? ` 〜 ${dayjs(h.ended_at).format('YYYY/MM/DD HH:mm')}`
+                  : ' 〜 現在'}
+              </div>
+
+              {/* プランの変更 */}
+              <div className="history-what">
+                {h.from_plan_status || '未設定'} → <b>{h.to_plan_status}</b>
+              </div>
+
+              {/* 理由やソースがある場合だけ表示 */}
+              {(h.reason || h.source) && (
+                <div className="history-meta">
+                  reason: {h.reason || '-'} / source: {h.source || '-'}
+                </div>
+              )}
             </div>
-          )}
-        </div>
-      </li>
-    ))}
-  </ul>
-)}
-
-</details>
+          </li>
+        ))}
+      </ul>
+    )}
+  </details>
 </section>
 
-{/* ▼ ボタン群をまとめてラップして隙間を統一 */}
-<div className="mt-6 space-y-6 text-center">
-  <button
-    className="btn-cancel w-full"
-    onClick={handleCancelSubscription}
-    disabled={loading}
-  >
-    プランを解約する
-  </button>
 
-  <button
-    className="btn-remove-card w-full"
-    onClick={handleRemoveCard}
-    disabled={loading}
-  >
-    カードを削除する
-  </button>
+    {/* ▼ 下部ボタン群（CSSでgap管理） */}
+    <div className="bottom-buttons">
+      <button
+        className="btn-cancel"
+        onClick={handleCancelSubscription}
+        disabled={loading}
+      >
+        プランを解約する
+      </button>
 
-  <button
-    className="btn-sync w-full"
-    onClick={handleSyncNow}
-    disabled={syncing}
-    title="最新の契約状態を取得して反映します"
-  >
-    {syncing ? '同期中…' : 'プランチェック'}
-  </button>
-</div>
+      <button
+        className="btn-remove-card"
+        onClick={handleRemoveCard}
+        disabled={loading}
+      >
+        カードを削除する
+      </button>
 
-<PayResultModal
-  open={modalOpen}
-  title={modalTitle}
-  message={modalMessage}
-  onClose={() => setModalOpen(false)}
-/>
-</main>
+      <button
+        className="btn-sync"
+        onClick={handleSyncNow}
+        disabled={syncing}
+        title="最新の契約状態を取得して反映します"
+      >
+        {syncing ? '同期中…' : 'プランチェック'}
+      </button>
+    </div>
+
+    <PayResultModal
+      open={modalOpen}
+      title={modalTitle}
+      message={modalMessage}
+      onClose={() => setModalOpen(false)}
+    />
+  </main>
 );
 }
 
-/* ==== ここから下を丸ごとこの通りに ==== */
+/* ==== ここから下はそのまま ==== */
 function PayPage() {
   return (
     <Suspense fallback={<div>読み込み中...</div>}>

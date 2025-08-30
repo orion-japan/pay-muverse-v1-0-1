@@ -1,27 +1,32 @@
-// src/components/PushHelpCard.tsx
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { registerPush } from '@/utils/push';
 import { useAuth } from '@/context/AuthContext';
+import './PushHelpCard.css';
 
 function isAndroidChrome() {
   if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent.toLowerCase();
   return ua.includes('android') && ua.includes('chrome') && !ua.includes('edg');
 }
+function isIPhoneSafari() {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent.toLowerCase();
+  // iPhone / iPad / iPod かつ Safari（Chrome for iOS は "CriOS"）
+  return /iphone|ipad|ipod/.test(ua) && ua.includes('safari') && !ua.includes('crios');
+}
 
 export default function PushHelpCard() {
   const { userCode } = useAuth();
   const [perm, setPerm] = useState<NotificationPermission | 'unsupported'>('default');
   const [subscribed, setSubscribed] = useState<boolean | null>(null);
+
   const onAndroidChrome = useMemo(isAndroidChrome, []);
+  const oniPhoneSafari = useMemo(isIPhoneSafari, []);
 
   useEffect(() => {
-    if (typeof Notification === 'undefined') {
-      setPerm('unsupported');
-    } else {
-      setPerm(Notification.permission);
-    }
+    if (typeof Notification === 'undefined') setPerm('unsupported');
+    else setPerm(Notification.permission);
 
     (async () => {
       if (!('serviceWorker' in navigator)) { setSubscribed(null); return; }
@@ -80,32 +85,47 @@ export default function PushHelpCard() {
   };
 
   return (
-    <section style={{border:'1px solid #eee', borderRadius:12, padding:16, marginTop:16}}>
-      <h3 style={{margin:'0 0 8px'}}>プッシュ通知の受信設定</h3>
-      <div style={{fontSize:14, lineHeight:1.6}}>
+    <section className="push-card">
+      <h3 className="push-title">プッシュ通知の受信設定</h3>
+
+      <div className="push-status">
         <div>ブラウザ権限：<strong>{perm === 'unsupported' ? '未対応' : perm}</strong></div>
         <div>購読状態：<strong>{subscribed === null ? '不明' : subscribed ? '購読中' : '未購読'}</strong></div>
-        {onAndroidChrome && (
-          <div style={{marginTop:8, opacity:.8}}>
-            ※ Android Chrome は OS/ブラウザの仕様上、Web ページから設定画面へ直接遷移できません。下の「手順を見る」から操作してください。
-          </div>
-        )}
+        <div className="hint">※ ボタンはログイン中のあなた（user_code: {userCode ?? '—'}）への通知を再登録／送信します。</div>
       </div>
 
-      <div style={{display:'flex', gap:8, flexWrap:'wrap', marginTop:12}}>
-        <button onClick={askPermission}>通知を許可する</button>
-        <button onClick={reSubscribe} disabled={!userCode}>購読をやり直す</button>
-        <button onClick={sendTest} disabled={!userCode}>テスト通知を送る</button>
-        <details style={{marginTop:8}}>
-          <summary>手順を見る（Android Chrome）</summary>
-          <ol style={{margin:'8px 0 0 18px'}}>
-            <li>右上の「︙」メニュー → <b>サイト設定</b> → <b>通知</b></li>
-            <li><b>www.muverse.jp</b> を <b>許可</b> にする</li>
-            <li>画面を戻って Muverse を再読み込み</li>
-          </ol>
-          <div style={{opacity:.8, fontSize:13}}>※ 機種により表記が多少異なる場合があります。</div>
-        </details>
+      <div className="push-buttons">
+        <button className="push-btn" onClick={askPermission}>通知を許可する</button>
+        <button className="push-btn" onClick={reSubscribe} disabled={!userCode}>購読をやり直す</button>
+        <button className="push-btn" onClick={sendTest} disabled={!userCode}>テスト通知を送る</button>
       </div>
+
+      {/* どの端末でも両方表示。自分の端末にはバッジを付ける */}
+      <details className="push-help" open={onAndroidChrome}>
+        <summary>
+          手順を見る（Android Chrome）
+          {onAndroidChrome && <span className="badge">あなたの端末</span>}
+        </summary>
+        <ol>
+          <li>右上の「︙」メニュー → <b>サイト設定</b> → <b>通知</b></li>
+          <li><b>www.muverse.jp</b> を <b>許可</b> にする</li>
+          <li>画面を戻って Muverse を再読み込み</li>
+        </ol>
+      </details>
+
+      <details className="push-help" open={oniPhoneSafari}>
+        <summary>
+          手順を見る（iPhone Safari）
+          {oniPhoneSafari && <span className="badge">あなたの端末</span>}
+        </summary>
+        <ol>
+          <li>iPhoneの <b>設定アプリ</b> を開く</li>
+          <li><b>通知</b> → 下へスクロールして <b>Safari</b> を選択</li>
+          <li><b>通知を許可</b> をオンにする</li>
+          <li>Safariで <b>www.muverse.jp</b> を開き、サイトからの通知を許可</li>
+        </ol>
+        <div className="hint">※ iOS 16.4 以降が必要です。</div>
+      </details>
     </section>
   );
 }

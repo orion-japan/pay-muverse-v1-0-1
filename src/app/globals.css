@@ -722,3 +722,149 @@ html, body { height: 100%; }
 .pay-main .history-acc__summary {
   padding: 10px 12px;
 }
+
+
+/* ===============================
+   プラン履歴セクション
+=============================== */
+.history-section {
+  margin-top: 24px;
+}
+
+.history-acc {
+  display: block;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: #fafafa;
+  padding: 8px 12px;
+}
+
+.history-acc__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 14px;
+  list-style: none;
+}
+
+.history-acc__summary::-webkit-details-marker {
+  display: none; /* デフォルトの三角マーカーを消す */
+}
+
+.history-acc__title {
+  color: #333;
+}
+
+.history-acc__count {
+  font-size: 12px;
+  color: #666;
+  margin-left: 8px;
+}
+
+.history-acc__chev {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: #555;
+  stroke-width: 2;
+  margin-left: auto;
+  transition: transform 0.2s;
+}
+
+details[open] .history-acc__chev {
+  transform: rotate(180deg);
+}
+
+/* 履歴セクション全体 */
+.history-section {
+  margin-top: 32px;
+}
+
+/* アコーディオンのヘッダー */
+.history-acc__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, #f9fafb, #f0f4f9);
+  font-weight: 600;
+  color: #333;
+  user-select: none;
+}
+
+.history-acc__title {
+  font-size: 15px;
+}
+
+.history-acc__count {
+  font-size: 13px;
+  color: #666;
+  margin-left: 6px;
+}
+
+.history-acc__chev {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: #666;
+  stroke-width: 2;
+  margin-left: auto;
+  transition: transform 0.3s;
+}
+
+details[open] .history-acc__chev {
+  transform: rotate(180deg);
+}
+
+/* 履歴リスト */
+.history-list {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 4px 12px 4px;
+}
+
+/* 履歴アイテムをカード風に */
+.history-item {
+  list-style: none;
+  background: #fff;
+  border-radius: 10px;
+  padding: 14px 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  border: 1px solid #e5e7eb;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.history-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+/* 行の中身 */
+.history-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.history-when {
+  font-size: 14px;
+  color: #444;
+  font-weight: bold;
+}
+
+.history-what {
+  font-size: 14px;
+  color: #333;
+}
+
+.history-meta {
+  font-size: 12px;
+  color: #777;
+  margin-top: 4px;
+}

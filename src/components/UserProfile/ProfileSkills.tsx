@@ -1,39 +1,43 @@
-import type { Profile } from './UserProfile';
+'use client';
+import React from 'react';
+import type { Profile } from './index';
+import './ProfileBox.css';
 
-type Props = { profile: Profile };
+type Props = {
+  profile: Profile;
+  editable?: boolean;
+  onChange?: (patch: Partial<Profile>) => void;
+  asCard?: boolean; // ← 追加
+};
 
-const toArray = (v?: string[] | string | null) =>
-  Array.isArray(v)
-    ? v
-    : (typeof v === 'string'
-        ? v.split(/[、,，\s]+/).map(s => s.trim()).filter(Boolean)
-        : []);
+const toCsv = (v?: string[] | string | null) =>
+  Array.isArray(v) ? v.join(', ') : (v || '');
+const toArr = (s: string) => s.split(',').map(x=>x.trim()).filter(Boolean);
 
-export default function ProfileSkills({ profile }: Props) {
-  const skills = toArray(profile.skills);
-  const interests = toArray(profile.interests);
+export default function ProfileSkills({ profile: P, editable, onChange, asCard }: Props) {
+  const arrayField = (k: keyof Profile, ph: string) =>
+    editable ? (
+      <input className="mu-input"
+        value={toCsv(P[k] as any)}
+        placeholder={ph}
+        onChange={(e) => onChange?.({ [k]: toArr(e.target.value) })}
+      />
+    ) : (
+      <div className="plain">{toCsv(P[k] as any) || '—'}</div>
+    );
+
+  const Wrapper: any = asCard ? 'div' : React.Fragment;
+  const wrapProps = asCard ? { className: 'mu-card' } : {};
 
   return (
-    <section className="profile-section">
-      <div className="profile-card">
-        <header className="card-header">
-          <h2 className="card-title">スキル・興味</h2>
-        </header>
-
-        <div className="pill-group">
-          <div className="pill-title">スキル</div>
-          <div className="pill-wrap">
-            {skills.length ? skills.map((s, i) => <span className="pill" key={i}>#{s}</span>) : <span className="muted">—</span>}
-          </div>
-        </div>
-
-        <div className="pill-group">
-          <div className="pill-title">興味</div>
-          <div className="pill-wrap">
-            {interests.length ? interests.map((s, i) => <span className="pill" key={i}>#{s}</span>) : <span className="muted">—</span>}
-          </div>
-        </div>
+    <Wrapper {...wrapProps}>
+      <h3>スキル / 興味 / 言語</h3>
+      <div className="grid-3">
+        <label>skills（,区切り）{arrayField('skills','design, nextjs, supabase')}</label>
+        <label>interests（,区切り）{arrayField('interests','ai, resonance, art')}</label>
+        <label>languages（,区切り）{arrayField('languages','ja, en')}</label>
       </div>
-    </section>
+      <label>activity_area（,区切り）{arrayField('activity_area','tokyo, yokohama')}</label>
+    </Wrapper>
   );
 }

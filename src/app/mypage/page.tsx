@@ -2,9 +2,11 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link'; // ✅ 追加
+import Link from 'next/link';
 import { getAuth, onAuthStateChanged, User } from 'firebase/auth';
-import UserProfile, { Profile } from '@/components/UserProfile/UserProfile';
+import UserProfile from '@components/UserProfile/UserProfile';
+import type { Profile } from '@components/UserProfile';
+
 import './mypage.css';
 
 export default function MyPage() {
@@ -28,29 +30,12 @@ export default function MyPage() {
       try {
         const token = await user.getIdToken(true);
 
-        // 1) 推奨: /api/account-status から user_code を取得
+        // user_code 取得
         let user_code: string | null = null;
-        try {
-          const r = await fetch('/api/account-status', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({}),
-          });
-          if (r.ok) {
-            const j = await r.json();
-            user_code = j?.user_code ?? null;
-          }
-        } catch {
-          /* noop */
-        }
-
-        // 2) フォールバック: /api/get-current-user
-        if (!user_code) {
+        const endpoints = ['/api/account-status', '/api/get-current-user'];
+        for (const ep of endpoints) {
           try {
-            const r = await fetch('/api/get-current-user', {
+            const r = await fetch(ep, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -60,11 +45,12 @@ export default function MyPage() {
             });
             if (r.ok) {
               const j = await r.json();
-              user_code = j?.user_code ?? null;
+              if (j?.user_code) {
+                user_code = j.user_code;
+                break;
+              }
             }
-          } catch {
-            /* noop */
-          }
+          } catch { /* noop */ }
         }
 
         if (!user_code) {
@@ -72,7 +58,7 @@ export default function MyPage() {
           return;
         }
 
-        // 3) プロフィール取得
+        // プロフィール取得
         const rp = await fetch(`/api/get-profile?code=${encodeURIComponent(user_code)}`);
         if (!rp.ok) {
           if (mounted) setProfileState(null);
@@ -80,14 +66,13 @@ export default function MyPage() {
         }
         const p = await rp.json();
 
-        // 4) avatar_url がストレージキーならフルURL化
+        // avatar_url のフルURL化
         const base = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/+$/, '');
         let avatar_url: string | null = p?.avatar_url ?? null;
         if (avatar_url && base && !/^https?:\/\//i.test(avatar_url)) {
           avatar_url = `${base}/storage/v1/object/public/avatars/${avatar_url}`;
         }
 
-        // 5) UserProfile 用に整形
         const toDisplay = (v: string[] | string | null | undefined) =>
           Array.isArray(v) ? v : v ?? '';
 
@@ -108,6 +93,7 @@ export default function MyPage() {
           activity_area: toDisplay(p?.activity_area),
           languages: toDisplay(p?.languages),
           avatar_url,
+          REcode: p?.REcode ?? '', // ← ここで取り込み
         };
 
         if (mounted) setProfileState(profileForUI);
@@ -130,38 +116,38 @@ export default function MyPage() {
     );
   }
 
-  // 未登録時
   if (!profileState) {
     return (
       <div style={{ padding: 24 }}>
         <h1>マイページ</h1>
         <p>プロフィールが登録されていません</p>
-        <button
-          className="register-button"
-          onClick={() => router.push('/mypage/create')}
-        >
+        <button className="register-button" onClick={() => router.push('/mypage/create')}>
           🚀 登録する
         </button>
       </div>
     );
   }
 
-  // ✅ 構造は維持。下部に「編集」「設定」アクションを追加
   return (
     <div className="mypage-wrapper">
       <div className="mypage-container">
-        <UserProfile profile={profileState} />
+        {/* ▼ 見出し（右側に REcode 表示） */}
+        <section className="profile-card" style={{ marginTop: 8 }}>
+          <div className="page-head">
+            <h1 className="page-title">マイページ</h1>
+            <div className="page-sub">{profileState.REcode || '—'}</div>
+          </div>
+        </section>
 
-        {/* ▼ 追加: マイページ操作行（既存レイアウトを崩さない軽量な行） */}
+        {/* プロフィール本体（自分ページなので isMyPage を渡す） */}
+        <UserProfile profile={profileState} isMyPage />
+
+        {/* 操作ボタン */}
         <div className="my-actions-row">
-          <button
-            className="edit-btn"
-            onClick={() => router.push('/mypage/create')}
-          >
+          <button className="edit-btn" onClick={() => router.push('/mypage/create')}>
             ✏️ プロフィールを編集
           </button>
-
-          <Link href="/mypage/settings" className="settings-btn" aria-label="設定へ">
+          <Link href="/mypage/settings" className="settings-btn">
             ⚙️ 設定
           </Link>
         </div>

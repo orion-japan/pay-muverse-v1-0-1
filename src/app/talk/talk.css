@@ -151,9 +151,14 @@
     background:#f3f4f6;
     display:block;
     border-radius:50%;
-    -webkit-backface-visibility:hidden;
-    transform: translateZ(0);
-  }
+
+    /* 標準とベンダープリフィックス両方書く */
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+
+    transform: translateZ(0); /* Safari/GPU描画対策 */
+}
+
   
   .linklike {
     all: unset;
@@ -186,3 +191,34 @@
     visibility: hidden; /* スペースだけ確保して行のガタつきを防止 */
   }
   
+  
+  .unread-total{
+    margin-left:auto;
+    font-size:12px;
+    font-weight:700;
+    padding:4px 8px;
+    border-radius:9999px;
+    background:#fff5f5;
+    border:1px solid #fecaca;
+    box-shadow:0 6px 16px rgba(255,100,100,.08);
+  }
+  
+  /* 未読合計と更新ボタン行の整列 */
+.talk-headrow{
+  display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+}
+
+/* 既に追加済みの .unread-total はそのままでOK */
+
+.refresh-btn{
+  margin-left:auto;
+  height:28px;
+  padding:0 10px;
+  border-radius:10px;
+  border:1px solid rgba(120,120,180,.18);
+  background:#fff;
+  font-size:12px; font-weight:700;
+  box-shadow:0 6px 16px rgba(90,120,255,.08);
+}
+.refresh-btn:disabled{ opacity:.6; cursor:not-allowed; }
+.updated-at{ font-size:11px; color:#6b7280; }

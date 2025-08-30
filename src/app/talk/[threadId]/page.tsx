@@ -29,12 +29,17 @@ const DEBUG = true;
 const dlog = (...a: any[]) => DEBUG && console.log('[FTalk]', ...a);
 
 /* ========== ユーティリティ ========== */
+/** 見本方式：完全URL/dataURL/Storage相対/avatarsキー/ファイル名だけ すべて解決 */
 const getAvatar = (url: string | null | undefined) => {
+  const base = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '');
   const u = (url ?? '').trim();
   if (!u) return '/avatar.png';
-  if (u.startsWith('/') || /^https?:\/\//i.test(u) || /^data:image\//i.test(u)) return u;
-  return '/avatar.png';
+  if (/^https?:\/\//i.test(u) || /^data:image\//i.test(u)) return u;                   // 既に完全URL
+  if (u.startsWith('/storage/v1/object/public/')) return `${base}${u}`;                 // Storage相対
+  if (u.startsWith('avatars/')) return `${base}/storage/v1/object/public/${u}`;         // avatarsキー
+  return `${base}/storage/v1/object/public/avatars/${u}`;                               // ファイル名のみ
 };
+
 const rowKey = (r: ChatRow) =>
   r.id || r.chat_id || `${r.thread_id}:${r.sender_code}:${r.created_at}`;
 const rowText = (r: ChatRow) => (r.message ?? r.body ?? '') as string;
@@ -345,11 +350,25 @@ export default function PairTalkPage() {
           &larr;
         </button>
         <div className="title">
-          <img src={getAvatar(peer?.avatar_url)} alt="" className="mini" />
+          <img
+            src={getAvatar(peer?.avatar_url)}
+            alt=""
+            className="mini"
+            onError={(e) => {
+              if (e.currentTarget.src !== '/avatar.png') e.currentTarget.src = '/avatar.png';
+            }}
+          />
           <span className="name">{peer?.name ?? peerCode}</span>
         </div>
         <div className="me-mini">
-          <img src={getAvatar(me?.avatar_url)} alt="" className="mini" />
+          <img
+            src={getAvatar(me?.avatar_url)}
+            alt=""
+            className="mini"
+            onError={(e) => {
+              if (e.currentTarget.src !== '/avatar.png') e.currentTarget.src = '/avatar.png';
+            }}
+          />
         </div>
         <button
           className="qr"
@@ -377,12 +396,13 @@ export default function PairTalkPage() {
                       className="avatar you"
                       src={getAvatar(peer?.avatar_url)}
                       alt=""
+                      onError={(e) => {
+                        if (e.currentTarget.src !== '/avatar.png') e.currentTarget.src = '/avatar.png';
+                      }}
                     />
                   )}
                   <div
-                    className={`bubble ${pending ? 'pending' : ''} ${
-                      error ? 'error' : ''
-                    }`}
+                    className={`bubble ${pending ? 'pending' : ''} ${error ? 'error' : ''}`}
                   >
                     {!mine && <div className="who">{peer?.name ?? peerCode}</div>}
                     <div className="text">{rowText(m)}</div>
@@ -401,6 +421,9 @@ export default function PairTalkPage() {
                       className="avatar me"
                       src={getAvatar(me?.avatar_url)}
                       alt=""
+                      onError={(e) => {
+                        if (e.currentTarget.src !== '/avatar.png') e.currentTarget.src = '/avatar.png';
+                      }}
                     />
                   )}
                 </div>

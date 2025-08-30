@@ -84,37 +84,27 @@ export default function MyReactionsCard({ userCode }: { userCode?: string | null
     [userCode]
   );
 
-  // 初回：userCode が確定するまで待つ。未確定時は localStorage を試す。
   useEffect(() => {
-    if (userCode) {
-      load(userCode);
-      return;
-    }
+    if (userCode) { load(userCode); return; }
     try {
       const lc = localStorage.getItem('user_code');
       if (lc) load(lc);
     } catch {}
   }, [userCode, load]);
 
-  // Realtime（反応が入ったら再取得）
   useEffect(() => {
     if (!sb) return;
-    const u = userCode || (() => {
-      try { return localStorage.getItem('user_code') || ''; } catch { return ''; }
-    })();
+    const u = userCode || (() => { try { return localStorage.getItem('user_code') || ''; } catch { return ''; } })();
     if (!u) return;
 
     const chan = sb
       .channel(`rx-summary-${u}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'reactions' }, () => {
-        load(u);
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reactions' }, () => load(u))
       .subscribe();
 
     return () => { sb.removeChannel(chan); };
   }, [userCode, load]);
 
-  // 任意：外部から明示リロードを受け付け（トグル後に発火させてもOK）
   useEffect(() => {
     const h = () => {
       const u = userCode || (() => { try { return localStorage.getItem('user_code') || ''; } catch { return ''; } })();
@@ -129,27 +119,88 @@ export default function MyReactionsCard({ userCode }: { userCode?: string | null
   const totals = data?.totals ?? { received: 0, given: 0 };
 
   return (
-    <section className="profile-card">
-      <h2 className="profile-section-title" style={{ marginTop: 0, marginBottom: 8 }}>
-        リアクション集計
-      </h2>
+    <>
+      {/* ヘッダー（表題は親で出すのでサブ情報のみ） */}
+      <div className="rx-head">
+        <div className="rx-sub">最新の集計</div>
+        <button className="mu-ghost-btn" onClick={() => load()} aria-label="再読み込み">再読み込み</button>
+      </div>
 
-      {loading && <div>読み込み中…</div>}
-      {!loading && err && <div style={{ color: '#c00', fontSize: 12, marginBottom: 8 }}>{err}</div>}
+      {loading && <div className="mu-muted">読み込み中…</div>}
+      {!loading && err && <div className="rx-error">{err}</div>}
 
       {!loading && (
-        <div className="space-y-2">
-          <div><strong>受け取り合計</strong>: {totals.received}</div>
-          <div>👍 {received.like}　❤️ {received.heart}　😊 {received.smile}　😮 {received.wow}　🔁 {received.share}</div>
-          <hr className="my-2" />
-          <div><strong>自分が押した</strong>: {totals.given}</div>
-          <div>👍 {given.like}　❤️ {given.heart}　😊 {given.smile}　😮 {given.wow}　🔁 {given.share}</div>
+        <div className="rx-grid">
+          {/* 受取 */}
+          <div className="rx-card">
+            <div className="rx-title">受け取った</div>
+            <div className="rx-total">{totals.received}</div>
+            <ul className="rx-list">
+  <li><span className="rx-emoji">👍</span><span className="rx-label">いいね</span><span className="rx-val">{received.like}</span></li>
+  <li><span className="rx-emoji">❤️</span><span className="rx-label">ハート</span><span className="rx-val">{received.heart}</span></li>
+  <li><span className="rx-emoji">😊</span><span className="rx-label">スマイル</span><span className="rx-val">{received.smile}</span></li>
+  <li><span className="rx-emoji">😮</span><span className="rx-label">ワオ</span><span className="rx-val">{received.wow}</span></li>
+  <li><span className="rx-emoji">🔁</span><span className="rx-label">共鳴</span><span className="rx-val">{received.share}</span></li>
+</ul>
+          </div>
 
-          <button className="btn btn-sm mt-2" onClick={() => load()}>
-            再読み込み
-          </button>
+          {/* 送付（自分が押した） */}
+          <div className="rx-card">
+            <div className="rx-title">自分が押した</div>
+            <div className="rx-total">{totals.given}</div>
+            <ul className="rx-list">
+              <li><span className="rx-emoji">👍</span><span className="rx-label">Like</span><span className="rx-val">{given.like}</span></li>
+              <li><span className="rx-emoji">❤️</span><span className="rx-label">Heart</span><span className="rx-val">{given.heart}</span></li>
+              <li><span className="rx-emoji">😊</span><span className="rx-label">Smile</span><span className="rx-val">{given.smile}</span></li>
+              <li><span className="rx-emoji">😮</span><span className="rx-label">Wow</span><span className="rx-val">{given.wow}</span></li>
+              <li><span className="rx-emoji">🔁</span><span className="rx-label">Resonance</span><span className="rx-val">{given.share}</span></li>
+            </ul>
+          </div>
         </div>
       )}
-    </section>
+
+      <style jsx>{`
+        .rx-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+        .rx-sub{ font-size:12px; color:#6b7280; }
+        .mu-ghost-btn{
+          padding:4px 8px; font-size:12px; border-radius:8px;
+          border:1px solid rgba(120,120,180,.2); background:rgba(255,255,255,.6);
+        }
+        .rx-error{ color:#c00; font-size:12px; margin-bottom:8px; }
+
+        .rx-grid{
+          display:grid; gap:10px;
+          grid-template-columns:1fr 1fr;
+        }
+        @media(max-width:520px){ .rx-grid{ grid-template-columns:1fr; } }
+
+        .rx-card{
+          background:rgba(255,255,255,.85);
+          border:1px solid rgba(120,120,180,.14);
+          border-radius:12px;
+          padding:10px 12px;
+          box-shadow:0 10px 24px rgba(90,120,255,.08);
+          backdrop-filter: blur(6px);
+        }
+        .rx-title{ font-size:13px; color:#111827; opacity:.85; }
+        .rx-total{
+          font-size:22px; font-weight:800; margin:4px 0 8px;
+          letter-spacing:.2px;
+        }
+        .rx-list{ list-style:none; padding:0; margin:0; display:grid; gap:6px; }
+        .rx-list li{
+          display:grid; grid-template-columns:20px 1fr auto; align-items:center;
+          font-size:14px;
+        }
+        .rx-emoji{ width:20px; text-align:center; }
+        .rx-label{ color:#374151; }
+        .rx-val{
+          font-weight:700; padding:2px 8px; border-radius:9999px;
+          background:#f3f4f6; border:1px solid #e5e7eb; min-width:2.5rem; text-align:right;
+        }
+
+        .mu-muted{ color:#6b7280; font-size:13px; }
+      `}</style>
+    </>
   );
 }
