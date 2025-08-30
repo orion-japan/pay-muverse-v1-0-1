@@ -63,32 +63,35 @@ async function hydrateThreadsMeta(
   if (!friends.length) return {};
   const threadIds = friends.map((f) => threadIdOf(myCode, f.user_code));
 
-  // --- 未読行をそのまま取得 → JSで集計（送信者が自分以外 = 自分宛）---
-  const { data: unreadRows, error: unreadErr } = await supabase
+  // --- 未読件数を thread_id ごとに集計（receiver_code 前提） ---
+  const { data: unreadAgg, error: unreadErr } = await supabase
     .from('chats')
-    .select('thread_id, sender_code, read_at')      // 集計しない
+    .select('thread_id, count:count(*)')           // 自動で thread_id で GROUP BY
     .in('thread_id', threadIds)
-    .neq('sender_code', myCode)                     // ★ 送信者が自分以外
-    .is('read_at', null);                           // 未読のみ
+    .eq('receiver_code', myCode)                   // ★ 自分宛のみ
+    .is('read_at', null);                          // ★ 未読のみ
 
-  if (unreadErr) console.warn('[Talk] unread rows error:', unreadErr.message);
-
-  const unreadMap = new Map<string, number>();
-  for (const r of (unreadRows ?? []) as any[]) {
-    const tid = String(r.thread_id);
-    unreadMap.set(tid, (unreadMap.get(tid) ?? 0) + 1);
+  if (unreadErr) {
+    console.warn('[Talk] unread aggregate error:', unreadErr.message);
   }
 
-  // --- 最新メッセ（従来どおり）---
+  const unreadMap = new Map<string, number>();
+  for (const r of (unreadAgg ?? []) as any[]) {
+    unreadMap.set(String(r.thread_id), Number(r.count) || 0);
+  }
+
+  // --- 最新メッセージ（全体降順 → 各スレッドの先頭が最新） ---
   const { data: rows, error: rowsErr } = await supabase
     .from('chats')
     .select('thread_id, message, body, created_at')
     .in('thread_id', threadIds)
     .order('created_at', { ascending: false });
 
-  if (rowsErr) console.warn('[Talk] chats meta fetch error:', rowsErr.message);
+  if (rowsErr) {
+    console.warn('[Talk] chats meta fetch error:', rowsErr.message);
+  }
 
-  const latestMap: Record<string, { at?: string; text?: string }> = {};
+  const latestMap: Record<string, { at?: string | null; text?: string | null }> = {};
   for (const row of (rows ?? []) as any[]) {
     const tid = String(row.thread_id);
     if (!latestMap[tid]) {
@@ -99,7 +102,7 @@ async function hydrateThreadsMeta(
     }
   }
 
-  // --- friends に合わせて整形 ---
+  // --- friends の user_code をキーに整形して返す ---
   const out: Record<string, Pick<FriendItem,'lastMessageAt'|'lastMessageText'|'unreadCount'>> = {};
   for (const f of friends) {
     const tid = threadIdOf(myCode, f.user_code);
@@ -110,7 +113,7 @@ async function hydrateThreadsMeta(
     };
   }
 
-  // デバッグ（必要なら残す）
+  // 必要なら一時デバッグ
   console.table(friends.map((f) => ({
     user_code: f.user_code,
     thread_id: threadIdOf(myCode, f.user_code),

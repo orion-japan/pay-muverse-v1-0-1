@@ -3,8 +3,28 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { getAuth } from 'firebase/auth';
-import UserProfile, { Profile } from '@/components/UserProfile/UserProfile';
+import UserProfile from '@/components/UserProfile/UserProfile'; // ← 名前付きを削除
 import './profile.css';
+
+/** このページ内部で使うプロフィール型（UserProfile 側の実装に寄せて必要項目だけ） */
+type Profile = {
+  user_code: string;
+  name: string;
+  birthday: string;
+  prefecture: string;
+  city: string;
+  x_handle: string;
+  instagram: string;
+  facebook: string;
+  linkedin: string;
+  youtube: string;
+  website_url: string;
+  interests: string[] | string;
+  skills: string[] | string;
+  activity_area: string[] | string;
+  languages: string[] | string;
+  avatar_url: string | null;
+};
 
 export default function ProfilePage() {
   const { code } = useParams(); // /profile/[code]
@@ -13,7 +33,7 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [isMyPage, setIsMyPage] = useState(false);
   const [followStatus, setFollowStatus] = useState<'none' | 'following'>('none');
-  const [myCode, setMyCode] = useState<string | null>(null); 
+  const [myCode, setMyCode] = useState<string | null>(null);
   const [clickType, setClickType] = useState<string>('free'); // ★ APIの値を保持
   const router = useRouter();
 
@@ -43,7 +63,7 @@ export default function ProfilePage() {
         if (res.ok) {
           const j = await res.json();
           mine = j?.user_code ?? null;
-          setMyCode(mine); 
+          setMyCode(mine);
           setClickType(j?.click_type ?? 'free'); // ★ click_typeを保存
         }
 
@@ -176,9 +196,8 @@ export default function ProfilePage() {
         planStatus={planStatus}
         onOpenTalk={() => router.push(`/talk?with=${encodeURIComponent(codeStr)}`)}
       />
-  
-      {/* 🚫 フォロー機能は一時廃止するので削除 */}
-      {/*
+
+      {/* 🚫 フォロー機能は一時廃止するので削除
       {!isMyPage && (
         <div className="follow-section">
           {followStatus === 'none' && (
@@ -192,9 +211,8 @@ export default function ProfilePage() {
             </button>
           )}
         </div>
-      )}
-      */}
-  
+      )} */}
+
       {/* ✅ 自分のページなら編集ボタン */}
       {isMyPage && (
         <div className="my-actions">
