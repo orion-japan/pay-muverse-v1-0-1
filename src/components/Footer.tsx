@@ -1,3 +1,4 @@
+// src/components/Footer.tsx
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -6,7 +7,6 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 
 const FALLBACK_H = 56
-
 type ItemId = 'home' | 'talk' | 'board' | 'pay' | 'mypage'
 type Item = { id: ItemId; label: string; href: string; icon?: React.ReactNode }
 
@@ -24,19 +24,6 @@ function toast(msg: string) {
   setTimeout(() => div.remove(), 2200)
 }
 
-async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T | null> {
-  try {
-    const ac = new AbortController()
-    const t = setTimeout(() => ac.abort(), 8000)
-    const res = await fetch(url, { ...init, signal: ac.signal })
-    clearTimeout(t)
-    if (!res.ok) return null
-    return (await res.json()) as T
-  } catch {
-    return null
-  }
-}
-
 export default function Footer() {
   const [host, setHost] = useState<HTMLElement | null>(null)
   const [mounted, setMounted] = useState(false)
@@ -46,19 +33,17 @@ export default function Footer() {
   const { user } = useAuth()
   const isLoggedIn = !!user
 
-  // --- 未読数 ---
-  const [counts, setCounts] = useState<Record<ItemId, number>>({
+  // ★ ここを固定。まず見た目を出す（APIは後で）
+  const [counts] = useState<Record<ItemId, number>>({
     home: 0,
-    talk: 0,
+    talk: 5,     // ← 未読5件を固定表示
     board: 0,
     pay: 0,
     mypage: 0,
   })
 
-  // マウント判定（SSR→CSRのちらつき防止）
   useEffect(() => setMounted(true), [])
 
-  // ポータル先（失敗しても描画は継続）
   useEffect(() => {
     try {
       let el = document.getElementById('mu-footer-root') as HTMLDivElement | null
@@ -73,7 +58,6 @@ export default function Footer() {
     }
   }, [])
 
-  // 高さをCSS変数に反映
   useEffect(() => {
     const setPad = (h: number) => {
       const px = Math.max(0, Math.round(h || 0))
@@ -94,7 +78,6 @@ export default function Footer() {
     }
   }, [host, mounted])
 
-  // メニュー
   const items: Item[] = useMemo(
     () => [
       { id: 'home', label: 'Home', href: '/', icon: <span>🏠</span> },
@@ -116,58 +99,6 @@ export default function Footer() {
     e.preventDefault()
     if (pathname !== it.href) router.push(it.href)
   }
-
-// 置き換え：未読数取得（Talkの例）
-useEffect(() => {
-  if (!isLoggedIn) {
-    setCounts((c) => ({ ...c, talk: 0 }))
-    return
-  }
-
-  let timer: number | undefined
-
-  const load = async () => {
-    // ★ Firebase のIDトークンを付与
-    const { getAuth } = await import('firebase/auth')
-    const auth = getAuth()
-    const idToken = await auth.currentUser?.getIdToken().catch(() => null)
-
-    const res = await fetch('/api/talk/unread-count', {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
-      },
-    })
-
-    // デバッグしやすく
-    if (!res.ok) {
-      console.warn('[Footer] unread-count NG', res.status)
-      setCounts((c) => ({ ...c, talk: 0 }))
-      return
-    }
-
-    const data = (await res.json().catch(() => null)) as { unread?: number } | null
-    const unread = Math.max(0, data?.unread ?? 0)
-    setCounts((c) => (c.talk !== unread ? { ...c, talk: unread } : c))
-  }
-
-  const start = () => {
-    load()                // 初回
-    timer = window.setInterval(load, 20000) // 20秒ごと
-  }
-  const onVis = () => {
-    if (document.visibilityState === 'visible') load()
-  }
-
-  start()
-  document.addEventListener('visibilitychange', onVis)
-  return () => {
-    if (timer) clearInterval(timer)
-    document.removeEventListener('visibilitychange', onVis)
-  }
-}, [isLoggedIn])
-
 
   if (!mounted) return null
 
@@ -191,13 +122,12 @@ useEffect(() => {
         backdropFilter: 'blur(10px)',
         WebkitBackdropFilter: 'blur(10px)',
         boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-        zIndex: 1000, // ← 念のため強め
+        zIndex: 1000,
         paddingBottom: 'max(6px, env(safe-area-inset-bottom))',
       }}
     >
       {items.map((it) => {
-        const active =
-          pathname === it.href || (it.href !== '/' && pathname?.startsWith(it.href))
+        const active = pathname === it.href || (it.href !== '/' && pathname?.startsWith(it.href))
         const disabled = !isLoggedIn && it.href !== '/'
         const badge = counts[it.id] ?? 0
         const showBadge = isLoggedIn && badge > 0
@@ -270,6 +200,5 @@ useEffect(() => {
     </nav>
   )
 
-  // ポータル先があればポータル、なければそのまま描画（必ず表示される）
   return host ? createPortal(Nav, host) : Nav
 }
