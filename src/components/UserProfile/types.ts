@@ -1,7 +1,7 @@
 // src/components/UserProfile/types.ts
 export type Profile = {
     user_code: string;
-    name: string;                  // ← 必須に統一（食い違いの原因だったので固定）
+    name: string;
     birthday: string;
     prefecture: string;
     city: string;
