@@ -1,3 +1,4 @@
+// app/api/talk/meta/route.ts
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -15,7 +16,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'bad request' }, { status: 400 });
     }
 
-    // --- 最新メッセージ（降順で1件目を採用） ---
+    // 最新メッセージ
     const { data: latestRows, error: latestErr } = await admin
       .from('chats')
       .select('thread_id, message, created_at')
@@ -27,14 +28,11 @@ export async function POST(req: Request) {
     for (const r of latestRows ?? []) {
       const tid = String((r as any).thread_id);
       if (!latestMap[tid]) {
-        latestMap[tid] = {
-          at: (r as any).created_at ?? null,
-          text: (r as any).message ?? '',
-        };
+        latestMap[tid] = { at: (r as any).created_at ?? null, text: (r as any).message ?? '' };
       }
     }
 
-    // --- 未読：行を取得して JS でカウント（確実方式） ---
+    // 未読をJSでカウント
     const { data: unreadRows, error: unreadErr } = await admin
       .from('chats')
       .select('thread_id')
@@ -49,11 +47,7 @@ export async function POST(req: Request) {
       unreadMap.set(tid, (unreadMap.get(tid) ?? 0) + 1);
     }
 
-    // --- 返却 ---
-    const result: Record<
-      string,
-      { lastMessageAt: string | null; lastMessageText: string | null; unreadCount: number }
-    > = {};
+    const result: Record<string, { lastMessageAt: string | null; lastMessageText: string | null; unreadCount: number }> = {};
     for (const tid of threadIds) {
       result[tid] = {
         lastMessageAt: latestMap[tid]?.at ?? null,
@@ -61,9 +55,10 @@ export async function POST(req: Request) {
         unreadCount: unreadMap.get(tid) ?? 0,
       };
     }
+
     return NextResponse.json({ metaByThreadId: result });
   } catch (e: any) {
+    // ここでエラー内容を返して診断しやすく
     return NextResponse.json({ error: String(e?.message || e) }, { status: 500 });
   }
 }
-

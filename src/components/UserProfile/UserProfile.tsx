@@ -10,10 +10,7 @@ import ProfileFriends from './ProfileFriends';
 import ProfileResonance from '../ProfileResonance';
 import ShipButton from '../ShipButton';
 import MyReactionsCard from './MyReactionsCard';
-
-// Profile 型は単一ソース（types.ts）から読み込み＆再エクスポート
-import type { Profile } from './types';
-export type { Profile } from './types';
+import type { Profile } from './types'; // ✅ 単一の型定義に統一
 
 type ProfileProps = {
   profile: Profile;

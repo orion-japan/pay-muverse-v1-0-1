@@ -16,5 +16,8 @@ export type Profile = {
     activity_area: string[] | string;
     languages: string[] | string;
     avatar_url: string | null;
+  
+    // ✅ 追加（オプショナル）
+    REcode?: string;
   };
   

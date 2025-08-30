@@ -7,7 +7,9 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 
 const FALLBACK_H = 56
-type Item = { label: string; href: string; icon?: React.ReactNode }
+
+type ItemId = 'home' | 'talk' | 'board' | 'pay' | 'mypage'
+type Item = { id: ItemId; label: string; href: string; icon?: React.ReactNode }
 
 function toast(msg: string) {
   const id = 'mu-footer-toast'
@@ -23,6 +25,20 @@ function toast(msg: string) {
   setTimeout(() => div.remove(), 2200)
 }
 
+// 小さなユーティリティ：安全にJSON取得
+async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T | null> {
+  try {
+    const ac = new AbortController()
+    const t = setTimeout(() => ac.abort(), 8000)
+    const res = await fetch(url, { ...init, signal: ac.signal })
+    clearTimeout(t)
+    if (!res.ok) return null
+    return (await res.json()) as T
+  } catch {
+    return null
+  }
+}
+
 export default function Footer() {
   const [host, setHost] = useState<HTMLElement | null>(null)
   const navRef = useRef<HTMLElement | null>(null)
@@ -30,6 +46,15 @@ export default function Footer() {
   const pathname = usePathname()
   const { user } = useAuth()
   const isLoggedIn = !!user
+
+  // ====== 未読数（必要に応じてキーを追加可能） ======
+  const [counts, setCounts] = useState<Record<ItemId, number>>({
+    home: 0,
+    talk: 0,
+    board: 0,
+    pay: 0,
+    mypage: 0,
+  })
 
   useEffect(() => {
     let el = document.getElementById('mu-footer-root') as HTMLDivElement | null
@@ -45,10 +70,7 @@ export default function Footer() {
     const setPad = (h: number) => {
       const px = Math.max(0, Math.round(h || 0))
       document.documentElement.style.setProperty('--footer-h', `${px}px`)
-      document.documentElement.style.setProperty(
-        '--footer-safe-pad',
-        `calc(${px}px + env(safe-area-inset-bottom))`
-      )
+      document.documentElement.style.setProperty('--footer-safe-pad', `calc(${px}px + env(safe-area-inset-bottom))`)
     }
     setPad(FALLBACK_H)
     const el = navRef.current
@@ -67,11 +89,11 @@ export default function Footer() {
   // ✅ 並び順: Home ｜ Talk ｜ I Board ｜ Plan ｜ My Page
   const items: Item[] = useMemo(
     () => [
-      { label: 'Home', href: '/', icon: <span>🏠</span> },
-      { label: 'Talk', href: '/talk', icon: <span>💬</span> },
-      { label: 'I Board', href: '/board', icon: <span>🧩</span> },
-      { label: 'Plan', href: '/pay', icon: <span>💳</span> },    // ← 追加
-      { label: 'My Page', href: '/mypage', icon: <span>👤</span> },
+      { id: 'home', label: 'Home', href: '/', icon: <span>🏠</span> },
+      { id: 'talk', label: 'Talk', href: '/talk', icon: <span>💬</span> },
+      { id: 'board', label: 'I Board', href: '/board', icon: <span>🧩</span> },
+      { id: 'pay', label: 'Plan', href: '/pay', icon: <span>💳</span> },
+      { id: 'mypage', label: 'My Page', href: '/mypage', icon: <span>👤</span> },
     ],
     []
   )
@@ -87,6 +109,45 @@ export default function Footer() {
     if (pathname !== it.href) router.push(it.href)
   }
 
+  // ====== 未読数の取得ロジック（Talkの例） ======
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setCounts((c) => ({ ...c, talk: 0 }))
+      return
+    }
+
+    let timer: number | undefined
+
+    const load = async () => {
+      // 例：/api/talk/unread-count が { unread: number } を返す想定
+      // 既存に /api/talk/meta がある場合はそれを流用して unread を取り出す形にしてOK
+      const data = await fetchJSON<{ unread: number }>('/api/talk/unread-count', {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      })
+
+      const unread = Math.max(0, data?.unread ?? 0)
+      setCounts((c) => (c.talk !== unread ? { ...c, talk: unread } : c))
+    }
+
+    const start = () => {
+      load() // 初回
+      timer = window.setInterval(load, 20000) // 20秒ごとに更新
+    }
+
+    const onVis = () => {
+      if (document.visibilityState === 'visible') load()
+    }
+
+    start()
+    document.addEventListener('visibilitychange', onVis)
+
+    return () => {
+      if (timer) clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVis)
+    }
+  }, [isLoggedIn])
+
   if (!host) return null
 
   return createPortal(
@@ -101,7 +162,7 @@ export default function Footer() {
         width: 'calc(100% - 24px)',
         maxWidth: 560,
         display: 'grid',
-        gridTemplateColumns: 'repeat(5, 1fr)', // ← 5分割に変更
+        gridTemplateColumns: 'repeat(5, 1fr)',
         gap: 8,
         padding: '6px 8px',
         borderRadius: 12,
@@ -115,9 +176,11 @@ export default function Footer() {
     >
       {items.map((it) => {
         const active =
-          pathname === it.href ||
-          (it.href !== '/' && pathname?.startsWith(it.href))
+          pathname === it.href || (it.href !== '/' && pathname?.startsWith(it.href))
         const disabled = !isLoggedIn && it.href !== '/'
+        const badge = counts[it.id] ?? 0
+        const showBadge = isLoggedIn && badge > 0
+
         return (
           <a
             key={it.href}
@@ -139,10 +202,39 @@ export default function Footer() {
               transition: 'transform .12s ease, background .12s ease, color .12s ease',
             }}
           >
-            <div style={{ fontSize: 15, lineHeight: 1 }}>{it.icon}</div>
+            <div style={{ fontSize: 15, lineHeight: 1, position: 'relative' }}>
+              {it.icon}
+
+              {/* 未読バッジ */}
+              {showBadge && (
+                <span
+                  aria-label="unread count"
+                  style={{
+                    position: 'absolute',
+                    top: -6,
+                    right: -10,
+                    minWidth: 18,
+                    height: 18,
+                    padding: '0 5px',
+                    borderRadius: 999,
+                    background: '#ff3b30', // iOS風レッド
+                    color: '#fff',
+                    fontSize: 11,
+                    fontWeight: 800,
+                    lineHeight: '18px',
+                    textAlign: 'center',
+                    boxShadow: '0 2px 6px rgba(0,0,0,.18)',
+                  }}
+                >
+                  {badge > 99 ? '99+' : badge}
+                </span>
+              )}
+            </div>
+
             <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.2 }}>
               {it.label}
             </div>
+
             {active && (
               <span
                 aria-hidden

@@ -1,11 +1,13 @@
+// src/app/mypage/page.tsx
 'use client';
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { getAuth, onAuthStateChanged, User } from 'firebase/auth';
-import UserProfile from '@components/UserProfile/UserProfile';
-import type { Profile } from '@components/UserProfile';
+
+// ✅ コンポーネントと型を同じバレルから import して“型の二重化”を防ぐ
+import UserProfile, { type Profile } from '@/components/UserProfile';
 
 import './mypage.css';
 
@@ -50,7 +52,9 @@ export default function MyPage() {
                 break;
               }
             }
-          } catch { /* noop */ }
+          } catch {
+            /* noop */
+          }
         }
 
         if (!user_code) {
@@ -93,7 +97,8 @@ export default function MyPage() {
           activity_area: toDisplay(p?.activity_area),
           languages: toDisplay(p?.languages),
           avatar_url,
-          REcode: p?.REcode ?? '', // ← ここで取り込み
+          // ✅ types.ts で optional にしているので型エラーにならない
+          REcode: p?.REcode ?? '',
         };
 
         if (mounted) setProfileState(profileForUI);
