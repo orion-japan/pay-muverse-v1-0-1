@@ -26,17 +26,9 @@ function resolveAvatarUrl(raw: string | null): string {
   const base = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '');
   const u = (raw ?? '').trim();
   if (!u) return '/avatar.png';
-
-  // すでに完全URL or dataURL
   if (/^https?:\/\//i.test(u) || /^data:image\//i.test(u)) return u;
-
-  // /storage/v1/object/public/... で始まる相対
   if (u.startsWith('/storage/v1/object/public/')) return `${base}${u}`;
-
-  // avatars/xxx などのキー（バケット名を含む）
   if (u.startsWith('avatars/')) return `${base}/storage/v1/object/public/${u}`;
-
-  // ファイル名だけが入っているケース（見本に合わせて avatars バケットに寄せる）
   return `${base}/storage/v1/object/public/avatars/${u}`;
 }
 
@@ -56,82 +48,38 @@ async function fetchMutualFriends(myCode: string): Promise<FriendItem[]> {
   }));
 }
 
+/** サーバーAPI経由で最新&未読メタを取得（RLSの影響を受けない） */
 async function hydrateThreadsMeta(
   myCode: string,
   friends: FriendItem[],
-): Promise<Record<string, Pick<FriendItem,'lastMessageAt'|'lastMessageText'|'unreadCount'>>> {
+): Promise<Record<string, Pick<FriendItem, 'lastMessageAt' | 'lastMessageText' | 'unreadCount'>>> {
   if (!friends.length) return {};
   const threadIds = friends.map((f) => threadIdOf(myCode, f.user_code));
-
-  // --- 最新メッセ（全体降順→各スレッドの先頭が最新） ---
-  const { data: latestRows, error: latestErr } = await supabase
-    .from('chats')
-    .select('thread_id, message, body, created_at')
-    .in('thread_id', threadIds)
-    .order('created_at', { ascending: false });
-
-  if (latestErr) console.warn('[Talk] latest error:', latestErr.message);
-
-  const latestMap: Record<string, { at?: string|null; text?: string|null }> = {};
-  for (const r of (latestRows ?? []) as any[]) {
-    const tid = String(r.thread_id);
-    if (!latestMap[tid]) {
-      latestMap[tid] = {
-        at: r.created_at ?? null,
-        text: (r.message ?? r.body ?? '') as string,
-      };
-    }
+  const res = await fetch('/api/talk/meta', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ myCode, threadIds }),
+  });
+  if (!res.ok) {
+    console.warn('[Talk] meta api error:', await res.text());
+    return {};
   }
+  const { metaByThreadId } = (await res.json()) as {
+    metaByThreadId: Record<string, { lastMessageAt: string | null; lastMessageText: string | null; unreadCount: number }>;
+  };
 
-  // --- 未読（まず receiver_code、ダメなら sender!=自分 で fallback） ---
-  let unreadRows: any[] | null = null;
-
-  const try1 = await supabase
-    .from('chats')
-    .select('thread_id')
-    .in('thread_id', threadIds)
-    .eq('receiver_code', myCode)
-    .is('read_at', null);
-  if (!try1.error) unreadRows = try1.data ?? [];
-
-  if ((unreadRows?.length ?? 0) === 0) {
-    const try2 = await supabase
-      .from('chats')
-      .select('thread_id, sender_code') // RLS で receiver_code が見えない環境向け
-      .in('thread_id', threadIds)
-      .neq('sender_code', myCode)
-      .is('read_at', null);
-    if (!try2.error && try2.data) unreadRows = try2.data;
-  }
-
-  const unreadMap = new Map<string, number>();
-  for (const r of (unreadRows ?? []) as any[]) {
-    const tid = String(r.thread_id);
-    unreadMap.set(tid, (unreadMap.get(tid) ?? 0) + 1);
-  }
-
-  // --- friends に合わせて整形（user_code キー） ---
-  const out: Record<string, Pick<FriendItem,'lastMessageAt'|'lastMessageText'|'unreadCount'>> = {};
+  const out: Record<string, Pick<FriendItem, 'lastMessageAt' | 'lastMessageText' | 'unreadCount'>> = {};
   for (const f of friends) {
     const tid = threadIdOf(myCode, f.user_code);
+    const m = metaByThreadId[tid] || {};
     out[f.user_code] = {
-      lastMessageAt: latestMap[tid]?.at ?? null,
-      lastMessageText: latestMap[tid]?.text ?? null,
-      unreadCount: unreadMap.get(tid) ?? 0,
+      lastMessageAt: (m as any).lastMessageAt ?? null,
+      lastMessageText: (m as any).lastMessageText ?? null,
+      unreadCount: Number((m as any).unreadCount ?? 0),
     };
   }
-
-  // デバッグ（必要なら残してOK）
-  console.table(friends.map((f) => ({
-    user_code: f.user_code,
-    thread_id: threadIdOf(myCode, f.user_code),
-    unread: out[f.user_code]?.unreadCount ?? 0,
-    lastAt: out[f.user_code]?.lastMessageAt ?? null,
-  })));
-
   return out;
 }
-
 
 async function logOpenFTalk(myCode: string, friendCode: string) {
   try {
@@ -174,7 +122,7 @@ export default function TalkPage() {
       }
       const list = await fetchMutualFriends(userCode);
       const meta = await hydrateThreadsMeta(userCode, list);
-  
+
       const enrichedList = list.map((f) => {
         const m = (meta as any)[f.user_code] || {};
         return {
@@ -184,17 +132,18 @@ export default function TalkPage() {
           unreadCount: Number(m.unreadCount ?? 0),
         } as FriendItem;
       });
-  
+
+      // 並び順：最新メッセージが上 → 未読多い順 → 名前
       const sortedList = enrichedList.sort((a, b) => {
         const ta = a.lastMessageAt ? Date.parse(a.lastMessageAt) : 0;
         const tb = b.lastMessageAt ? Date.parse(b.lastMessageAt) : 0;
-        if (tb !== ta) return tb - ta;                     // ★ 最新が上
+        if (tb !== ta) return tb - ta;
         const ua = Number(a.unreadCount ?? 0);
         const ub = Number(b.unreadCount ?? 0);
-        if (ub !== ua) return ub - ua;                     // 次に未読多い順
+        if (ub !== ua) return ub - ua;
         return (a.name ?? '').localeCompare(b.name ?? '', 'ja');
       });
-  
+
       setFriends(sortedList);
       setLastUpdated(new Date());
     } catch (e) {
@@ -203,22 +152,65 @@ export default function TalkPage() {
       setLoading(false);
     }
   };
-  
 
+  // 初回ロード
   useEffect(() => {
     let mounted = true;
     (async () => {
       if (!mounted) return;
       await loadFriends();
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [userCode]); // userCode変化時に再読込
 
+  // 更新ボタン
   const handleRefresh = async () => {
     setRefreshing(true);
     await loadFriends();
     setRefreshing(false);
   };
+
+  // 受信・既読更新をリアルタイム反映（INSERT/UPDATE）
+  useEffect(() => {
+    if (!userCode) return;
+
+    const onChange = (payload: any) => {
+      const r = (payload?.new ?? {}) as {
+        thread_id?: string;
+        sender_code?: string;
+        receiver_code?: string | null;
+      };
+      const tid = String(r.thread_id || '');
+      if (
+        tid &&
+        (tid.includes(userCode) ||
+          r.sender_code === userCode ||
+          r.receiver_code === userCode)
+      ) {
+        handleRefresh();
+      }
+    };
+
+    const channel = supabase
+      .channel('talk-list')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'chats' },
+        onChange,
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'chats' },
+        onChange,
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [userCode]); // handleRefresh は同スコープ参照でOK
 
   const filtered = useMemo(() => {
     if (!q.trim()) return friends;
@@ -243,7 +235,7 @@ export default function TalkPage() {
     router.push(`/talk/${threadId}`);
   };
 
-  // 画像クリック → 投稿一覧（必要に応じて差し替え）
+  // 画像クリック → 投稿一覧
   const goPosts = (friend: FriendItem) => {
     router.push(`/album?user=${encodeURIComponent(friend.user_code)}`);
   };
@@ -256,12 +248,14 @@ export default function TalkPage() {
     <div className="talk-shell">
       <header className="talk-header">
         <h1>Talk</h1>
-        <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
-          <p className="talk-note" style={{ margin:0 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <p className="talk-note" style={{ margin: 0 }}>
             両想い（<b>F以上</b>）の友達だけが表示されます。
             {blocked && (
               <span className="talk-note-warn">
-                {' '}<br/>現在プラン: free（閲覧のみ・開始はアップグレード後に可能）
+                {' '}
+                <br />
+                現在プラン: free（閲覧のみ・開始はアップグレード後に可能）
               </span>
             )}
           </p>

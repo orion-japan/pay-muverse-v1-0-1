@@ -11,28 +11,9 @@ import ProfileResonance from '../ProfileResonance';
 import ShipButton from '../ShipButton';
 import MyReactionsCard from './MyReactionsCard';
 
-// ❌ ここがエラー原因
-// import type { Profile } from './index';
-
-// ✅ このファイル内で Profile 型を定義し、そのまま export
-export type Profile = {
-  user_code: string;
-  name: string;
-  birthday: string;
-  prefecture: string;
-  city: string;
-  x_handle: string;
-  instagram: string;
-  facebook: string;
-  linkedin: string;
-  youtube: string;
-  website_url: string;
-  interests: string[] | string;
-  skills: string[] | string;
-  activity_area: string[] | string;
-  languages: string[] | string;
-  avatar_url: string | null;
-};
+// Profile 型は単一ソース（types.ts）から読み込み＆再エクスポート
+import type { Profile } from './types';
+export type { Profile } from './types';
 
 type ProfileProps = {
   profile: Profile;
