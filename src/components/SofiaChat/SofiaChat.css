@@ -1,0 +1,180 @@
+/* =========================================
+   Sofia Light Resonance Theme
+   - 黒背景は廃止
+   - 翡翠グリーン × 青白 × 淡金をベース
+   - 履歴リスト・吹き出しを明確に視認可能に
+   ========================================= */
+
+   .sofia-wrap{
+    --bg-top:#f8fbff;       /* 淡い青白 */
+    --bg-mid:#fafffc;       /* 緑寄り白 */
+    --bg-bottom:#ffffff;    /* 白 */
+    --line:#dfe8ef;
+  
+    --text:#1b2c28;
+    --muted:#607872;
+  
+    --sofia:#3cc7a6;        /* 翡翠グリーン */
+    --sofia-light:#d8f7ef;
+    --sofia-deep:#2a7363;
+    --blue:#64b6ff;         /* 補助青 */
+    --gold:#d9c97c;         /* 淡金 */
+  
+    --shadow-sm:0 3px 8px rgba(0,0,0,.05);
+    --shadow-md:0 8px 20px rgba(0,0,0,.08);
+  
+    color:var(--text);
+    background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg-mid) 50%, var(--bg-bottom) 100%);
+    min-height:100%;
+    display:flex; flex-direction:column;
+  }
+  
+  /* ---- Header ---- */
+  .sofia-header{
+    border-bottom:1px solid var(--line);
+    padding:14px 20px;
+    display:flex; justify-content:space-between; align-items:center;
+    background:rgba(255,255,255,.8);
+    backdrop-filter: blur(6px);
+  }
+  .sofia-head-title{ display:flex; gap:12px; align-items:center; }
+  .sofia-logo{
+    width:40px; height:40px; border-radius:10px; background:#fff; border:1px solid var(--line);
+    display:grid; place-items:center; font-size:20px; box-shadow:var(--shadow-sm);
+  }
+  .title{ font-weight:700; }
+  .subtitle{ font-size:12px; color:var(--muted); }
+  
+  /* ---- Mode Pills ---- */
+  .pill{ display:flex; gap:4px; padding:4px; border:1px solid var(--line); border-radius:999px; background:#fff; }
+  .pill-btn{ padding:6px 12px; border:none; background:transparent; cursor:pointer; border-radius:999px; }
+  .pill-btn.active{ background:var(--sofia-light); color:#124136; font-weight:600; }
+  
+  /* ---- Card ---- */
+  .card-wrap{ padding:16px 20px; display:grid; gap:12px; }
+  .card{
+    background:#fff; border:1px solid var(--sofia); border-radius:14px; padding:14px;
+    box-shadow:var(--shadow-sm);
+  }
+  .card-title{ color:var(--sofia-deep); font-weight:700; margin-bottom:8px; }
+  .card-grid{ display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+  .card-grid .wide{ grid-column:1 / -1; }
+  .card label{ font-size:12px; color:var(--gold); }
+  .card p{ margin:0; line-height:1.6; }
+  
+  /* ---- Code/User Bar ---- */
+  .bar{ display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:12px 20px; }
+  .bar-group label{ font-size:12px; color:var(--muted); margin-bottom:4px; display:block; }
+  .inp,.sel{
+    width:100%; border:1px solid var(--line); border-radius:8px;
+    padding:8px 10px; background:#fff; color:var(--text); box-shadow:var(--shadow-sm);
+  }
+  
+  /* ---- Chat List ---- */
+  .chat-list{
+    flex:1; overflow:auto; padding:16px 20px;
+    display:flex; flex-direction:column; gap:12px;
+  }
+  
+  /* Bubble */
+  .bubble-row{ display:flex; gap:10px; }
+  .bubble-row.right{ flex-direction:row-reverse; }
+  
+  .avatar{ width:34px; height:34px; border-radius:8px; background:#fff; border:1px solid var(--line);
+    display:grid; place-items:center; font-size:16px; }
+  
+  .bubble{
+    max-width:80%; border-radius:12px; padding:10px 12px;
+    background:#fff; border:1px solid var(--line); box-shadow:var(--shadow-sm);
+    line-height:1.6;
+  }
+  .bubble-name{ font-size:12px; color:var(--muted); margin-bottom:4px; }
+  
+  /* User bubble */
+  .bubble-row.right .bubble{
+    background:var(--sofia-light); border-color:var(--sofia); color:var(--text);
+  }
+  .bubble-row.right .bubble-name{ color:var(--sofia-deep); }
+  
+  /* Sofia bubble */
+  .bubble-row.left .bubble{ border-left:4px solid var(--sofia); }
+  .bubble-row.left .bubble-name{ color:var(--sofia-deep); font-weight:600; }
+  
+  /* ---- Composer ---- */
+  .composer{
+    border-top:1px solid var(--line); padding:12px 20px; background:rgba(255,255,255,.9);
+    display:flex; flex-direction:column; gap:8px;
+  }
+  .composer textarea{
+    width:100%; min-height:72px; border:1px solid var(--line); border-radius:10px;
+    padding:10px; resize:vertical; background:#fff; color:var(--text);
+  }
+  .composer-actions{ display:flex; justify-content:flex-end; gap:8px; }
+  .btn{ background:var(--sofia); color:#fff; border:none; border-radius:8px; padding:8px 14px; cursor:pointer; }
+  .btn.ghost{ background:#fff; color:var(--text); border:1px solid var(--line); }
+  .btn:disabled{ opacity:.5; cursor:not-allowed; }
+  
+  /* ---- Typing ---- */
+  .typing{ display:flex; gap:4px; margin-left:44px; }
+  .dot{ width:8px; height:8px; border-radius:50%; background:var(--sofia); opacity:.7;
+    animation:blink 1.2s infinite ease-in-out; }
+  .dot:nth-child(2){ animation-delay:.2s; }
+  .dot:nth-child(3){ animation-delay:.4s; }
+  @keyframes blink{ 0%,80%,100%{transform:scale(.6);opacity:.4} 40%{transform:scale(1);opacity:1} }
+  
+  /* ---- Conversation List ---- */
+  .list-panel{ padding:12px 20px; }
+  .list-title{ font-weight:700; margin-bottom:6px; color:var(--sofia-deep); }
+  .conv-list{ list-style:none; padding:0; margin:0; display:grid; gap:8px; }
+  .conv-item{
+    background:#fff; border:1px solid var(--line); border-radius:10px; padding:10px;
+    cursor:pointer; box-shadow:var(--shadow-sm); transition:.1s;
+  }
+  .conv-item:hover{ transform:translateY(-1px); box-shadow:var(--shadow-md); }
+  .conv-item.active{ border-color:var(--sofia); box-shadow:0 0 0 2px rgba(60,199,166,.2); }
+  .conv-code{ font-weight:700; color:#124136; }
+  .conv-preview{ font-size:13px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .conv-time{ font-size:11px; color:#9aa9a4; }
+  .conv-empty{ border:1px dashed var(--line); padding:10px; text-align:center; color:#9aa9a4; }
+
+
+  .conv-item{
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:12px;
+    cursor:pointer;
+    box-shadow:var(--shadow-sm);
+    transition: all .15s ease;
+    text-align:left;
+  }
+  
+  .conv-item:hover{
+    background: var(--sofia-light);
+    border-color: var(--sofia);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+  }
+  
+  .conv-item.active{
+    background: var(--sofia-light);
+    border-color: var(--sofia);
+    box-shadow: 0 0 0 2px rgba(60,199,166,.25);
+  }
+  .bubble-row {
+    display: flex;
+    gap: 10px;
+    padding: 0 8px;          /* ← 画面端に余白を少しだけ */
+  }
+  
+  .bubble {
+    flex: 1;                 /* ← 幅を親に合わせる */
+    max-width: 100%;         /* ← 80% 制限を外す */
+    border-radius: 12px;
+    padding: 10px 12px;
+    background: #fff;
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow-sm);
+    line-height: 1.6;
+  }
+  

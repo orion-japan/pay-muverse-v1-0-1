@@ -18,7 +18,9 @@ if (!SUPABASE_URL || !SERVICE_ROLE) {
   throw new Error('Env missing: NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE');
 }
 
-const supabase = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
+const supabase = createClient(SUPABASE_URL, SERVICE_ROLE, {
+  auth: { persistSession: false },
+});
 
 /* =========================
    型
@@ -89,6 +91,7 @@ async function getUserSingle(where: { col: string; val: string }) {
   let r = (await q) as { data: UserRow | null; error: any };
   if (!r.error) return r;
 
+  // 列差異の救済（レガシー）
   const msg = String(r.error?.message || r.error || '');
   if (/column|card_brand|card_last4/i.test(msg)) {
     const r2 = (await supabase
@@ -140,10 +143,15 @@ async function loadHistory(user_code: string) {
   }
 }
 
+/* =========================
+   レスポンス整形（click_type を必ず返す）
+========================= */
 function toResp(d: UserRow, history: any[] = []) {
+  const plan = (d.plan_status ?? d.click_type ?? 'free') as string;
   return {
     user_code: d.user_code,
-    plan_status: d.plan_status ?? d.click_type ?? 'free',
+    plan_status: plan,
+    click_type: d.click_type ?? plan, // ★ 常に同梱（旧UIでも確実に動く）
     plan_valid_until: d.next_payment_date ?? null,
     last_payment_date: d.last_payment_date ?? null,
     card_registered: d.card_registered === true,
@@ -174,7 +182,7 @@ async function generateUserCode(): Promise<string> {
 }
 
 /* =========================
-   Token 抽出 & 検証（暫定止血版）
+   Token 抽出 & 検証（止血版）
 ========================= */
 function pickToken(req: NextRequest) {
   const authHeader = req.headers.get('authorization') || '';
@@ -185,14 +193,12 @@ function pickToken(req: NextRequest) {
 }
 
 async function verifyIdTokenSoft(token: string) {
-  // まず「通常検証」で通す
   try {
+    // 厳格チェック（revoke等）は一旦外す：不安定要因を避ける
     const decoded = await adminAuth.verifyIdToken(token);
     return decoded;
   } catch (e: any) {
-    // 明らかな期限切れ・形式不正は即失敗
     if (e?.code && /expired|argument|invalid/i.test(e.code)) throw e;
-    // リフレッシュ直後の撤回扱い等は厳格チェックを外して再試行済みなので、そのまま失敗
     throw e;
   }
 }
@@ -201,7 +207,6 @@ async function verifyIdTokenSoft(token: string) {
    Handlers
 ========================= */
 export async function OPTIONS() {
-  // CORS プリフライト想定（必要なら許可ヘッダを追加）
   return new NextResponse(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
 }
 
@@ -215,7 +220,7 @@ export async function POST(req: NextRequest) {
       decoded = await verifyIdTokenSoft(token);
     } catch (e: any) {
       console.error('[AUTH] verify failed:', e?.code || e?.message || e);
-      // クライアント側で getIdToken(true) を促すための明示コード
+      // クライアントで getIdToken(true) を促すフラグ
       return json({ error: '無効なトークンです', needRefresh: true }, { status: 403 });
     }
 

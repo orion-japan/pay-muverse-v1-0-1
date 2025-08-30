@@ -13,12 +13,16 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "preserve",
-    "baseUrl": ".", 
+
+    /* ====== ここ重要 ====== */
+    "baseUrl": "src",
     "paths": {
-      "@/*": ["src/*"],
-      "@lib/*": ["src/lib/*"],
-      "@components/*": ["src/components/*"]
+      "@/*": ["*"],
+      "@lib/*": ["lib/*"],
+      "@components/*": ["components/*"]
     },
+    /* ===================== */
+
     "plugins": [
       {
         "name": "next"
