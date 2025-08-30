@@ -1,5 +1,4 @@
-import type { Profile } from './UserProfile';
-
+import type { Profile } from './types'; 
 type Props = { profile: Profile };
 
 const toArray = (v?: string[] | string | null) =>
