@@ -63,46 +63,54 @@ async function hydrateThreadsMeta(
   if (!friends.length) return {};
   const threadIds = friends.map((f) => threadIdOf(myCode, f.user_code));
 
-  // --- 未読件数を thread_id ごとに集計（receiver_code 前提） ---
-  const { data: unreadAgg, error: unreadErr } = await supabase
-    .from('chats')
-    .select('thread_id, count:count(*)')           // 自動で thread_id で GROUP BY
-    .in('thread_id', threadIds)
-    .eq('receiver_code', myCode)                   // ★ 自分宛のみ
-    .is('read_at', null);                          // ★ 未読のみ
-
-  if (unreadErr) {
-    console.warn('[Talk] unread aggregate error:', unreadErr.message);
-  }
-
-  const unreadMap = new Map<string, number>();
-  for (const r of (unreadAgg ?? []) as any[]) {
-    unreadMap.set(String(r.thread_id), Number(r.count) || 0);
-  }
-
-  // --- 最新メッセージ（全体降順 → 各スレッドの先頭が最新） ---
-  const { data: rows, error: rowsErr } = await supabase
+  // --- 最新メッセ（全体降順→各スレッドの先頭が最新） ---
+  const { data: latestRows, error: latestErr } = await supabase
     .from('chats')
     .select('thread_id, message, body, created_at')
     .in('thread_id', threadIds)
     .order('created_at', { ascending: false });
 
-  if (rowsErr) {
-    console.warn('[Talk] chats meta fetch error:', rowsErr.message);
-  }
+  if (latestErr) console.warn('[Talk] latest error:', latestErr.message);
 
-  const latestMap: Record<string, { at?: string | null; text?: string | null }> = {};
-  for (const row of (rows ?? []) as any[]) {
-    const tid = String(row.thread_id);
+  const latestMap: Record<string, { at?: string|null; text?: string|null }> = {};
+  for (const r of (latestRows ?? []) as any[]) {
+    const tid = String(r.thread_id);
     if (!latestMap[tid]) {
       latestMap[tid] = {
-        at: row.created_at ?? null,
-        text: (row.message ?? row.body ?? '') as string,
+        at: r.created_at ?? null,
+        text: (r.message ?? r.body ?? '') as string,
       };
     }
   }
 
-  // --- friends の user_code をキーに整形して返す ---
+  // --- 未読（まず receiver_code、ダメなら sender!=自分 で fallback） ---
+  let unreadRows: any[] | null = null;
+
+  const try1 = await supabase
+    .from('chats')
+    .select('thread_id')
+    .in('thread_id', threadIds)
+    .eq('receiver_code', myCode)
+    .is('read_at', null);
+  if (!try1.error) unreadRows = try1.data ?? [];
+
+  if ((unreadRows?.length ?? 0) === 0) {
+    const try2 = await supabase
+      .from('chats')
+      .select('thread_id, sender_code') // RLS で receiver_code が見えない環境向け
+      .in('thread_id', threadIds)
+      .neq('sender_code', myCode)
+      .is('read_at', null);
+    if (!try2.error && try2.data) unreadRows = try2.data;
+  }
+
+  const unreadMap = new Map<string, number>();
+  for (const r of (unreadRows ?? []) as any[]) {
+    const tid = String(r.thread_id);
+    unreadMap.set(tid, (unreadMap.get(tid) ?? 0) + 1);
+  }
+
+  // --- friends に合わせて整形（user_code キー） ---
   const out: Record<string, Pick<FriendItem,'lastMessageAt'|'lastMessageText'|'unreadCount'>> = {};
   for (const f of friends) {
     const tid = threadIdOf(myCode, f.user_code);
@@ -113,11 +121,12 @@ async function hydrateThreadsMeta(
     };
   }
 
-  // 必要なら一時デバッグ
+  // デバッグ（必要なら残してOK）
   console.table(friends.map((f) => ({
     user_code: f.user_code,
     thread_id: threadIdOf(myCode, f.user_code),
     unread: out[f.user_code]?.unreadCount ?? 0,
+    lastAt: out[f.user_code]?.lastMessageAt ?? null,
   })));
 
   return out;
@@ -165,7 +174,7 @@ export default function TalkPage() {
       }
       const list = await fetchMutualFriends(userCode);
       const meta = await hydrateThreadsMeta(userCode, list);
-
+  
       const enrichedList = list.map((f) => {
         const m = (meta as any)[f.user_code] || {};
         return {
@@ -175,18 +184,17 @@ export default function TalkPage() {
           unreadCount: Number(m.unreadCount ?? 0),
         } as FriendItem;
       });
-
-      // 未読ありを先頭 → その中で最新降順 → 残りも最新降順 → 最後に名前
+  
       const sortedList = enrichedList.sort((a, b) => {
-        const ua = (a.unreadCount ?? 0) > 0 ? 1 : 0;
-        const ub = (b.unreadCount ?? 0) > 0 ? 1 : 0;
-        if (ub !== ua) return ub - ua;
         const ta = a.lastMessageAt ? Date.parse(a.lastMessageAt) : 0;
         const tb = b.lastMessageAt ? Date.parse(b.lastMessageAt) : 0;
-        if (tb !== ta) return tb - ta;
+        if (tb !== ta) return tb - ta;                     // ★ 最新が上
+        const ua = Number(a.unreadCount ?? 0);
+        const ub = Number(b.unreadCount ?? 0);
+        if (ub !== ua) return ub - ua;                     // 次に未読多い順
         return (a.name ?? '').localeCompare(b.name ?? '', 'ja');
       });
-
+  
       setFriends(sortedList);
       setLastUpdated(new Date());
     } catch (e) {
@@ -195,6 +203,7 @@ export default function TalkPage() {
       setLoading(false);
     }
   };
+  
 
   useEffect(() => {
     let mounted = true;
