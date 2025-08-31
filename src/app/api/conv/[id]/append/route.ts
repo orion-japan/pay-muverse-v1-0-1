@@ -1,4 +1,3 @@
-// src/app/api/conv/[id]/append/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +13,7 @@ export async function POST(req: Request, { params }: any) {
     body = undefined;
   }
 
-  // ここに元の append 処理を戻す
+  // ← ここに既存の append 処理を戻してください
   // await appendConversation(id, body);
 
   return NextResponse.json({ ok: true, id });
