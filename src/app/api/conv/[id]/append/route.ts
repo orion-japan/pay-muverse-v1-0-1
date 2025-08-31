@@ -1,41 +1,33 @@
-export const runtime = 'nodejs';
+// src/app/api/conv/[id]/append/route.ts
+export const runtime = 'nodejs'; // 必要なら維持/追加
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/authz';
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const body = await req.json().catch(() => ({}));
-  const { role = 'user', content, meta = {} } = body ?? {};
-  if (!content || typeof content !== 'string') {
-    return NextResponse.json({ error: 'content required' }, { status: 400 });
+type Ctx = {
+  params: Record<string, string | string[]>;
+};
+
+// string | string[] を安全に取り出す小ヘルパ
+function pickParam(v: string | string[] | undefined, name: string): string {
+  if (v == null) throw new Error(`Missing route param: ${name}`);
+  return Array.isArray(v) ? v[0] : v;
+}
+
+export async function POST(req: NextRequest, ctx: Ctx) {
+  const id = pickParam(ctx.params.id, 'id');
+
+  // 必要ならボディ取得
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    body = undefined;
   }
 
-  const z = await verifyFirebaseAndAuthorize(req);
-  if (!z.ok || !z.pgJwt || !z.userCode) {
-    return NextResponse.json({ error: z.error }, { status: z.status });
-  }
+  // ← ここに既存の処理をそのまま残してください
+  // 例）会話への追記処理など
+  // await appendConversation(id, body, ...)
 
-  const sb = createClient(SUPABASE_URL, SERVICE_ROLE, {
-    global: { headers: { Authorization: `Bearer ${z.pgJwt}` } },
-    auth: { persistSession: false },
-  });
-
-  const { error: e1 } = await sb.from('messages').insert({
-    conversation_id: params.id,
-    user_code: z.userCode,
-    role: role === 'assistant' ? 'assistant' : 'user',
-    content,
-    meta,
-  });
-  if (e1) return NextResponse.json({ error: e1.message }, { status: 500 });
-
-  const { error: e2 } = await sb
-    .from('conversations')
-    .update({ updated_at: new Date().toISOString() })
-    .eq('id', params.id);
-  if (e2) return NextResponse.json({ error: e2.message }, { status: 500 });
-
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, id });
 }

@@ -18,8 +18,7 @@ export function applyVars(text: string, vars: Vars) {
     const [rawName, fallback] = String(key).split("|");
     const name = rawName?.trim();
     const v = vars[name as keyof Vars];
-    const out =
-      v === undefined || v === null ? (fallback ?? "") : String(v);
+    const out = v === undefined || v === null ? (fallback ?? "") : String(v);
     return out.trim();
   });
 }

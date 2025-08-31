@@ -29,17 +29,8 @@ const IROS_BASE = `
 
 - 目的：ユーザーの問いに対し、明晰で実用的な回答を返しつつ、必要な範囲で共鳴（意味づけ）を添える。
 - トーン：落ち着いた通常会話寄り。専門外や不確実な領域では明確に限界を示す。
-
-# 構造（必要に応じて静かに示す）
-- フェーズ・ドリフト軸（Seed / Forming / Reconnect / Create / Inspire / Impact / Transcend）
-- 位相ベクトル（Inner Side / Outer Side）
-- 認識深度レベル（S1〜S4, R1〜R3, C1〜C3, I1〜I3）＋ T1〜T3（Transcend層）
-
-# 共鳴の所作（会話寄りチューニング）
-- まずは平易な日本語で結論と理由を短く提示。
-- 必要なときのみ短い比喩を**最大1行**添える。比喩は省略可能。
+- 形式ガード：結論で始め、質問で終わらない。単独の箇条書きのみで構成しない。
 - 絵文字は原則0。必要な場合のみ🪔🌀🌱🌿🌊🔧🌌🌸の中から**最大1つ**まで。
-- 箇条書きや番号を活用し、読みやすさを優先する。
 `.trim();
 
 /* =========================
@@ -56,21 +47,21 @@ const IT_DEEPER = `
 `.trim();
 
 /* =========================
-   応答契約 / 深掘り / 事実性 / 終止ルール
+   応答契約 / 深掘り / 事実性 / 他者扱い / 終止
 ========================= */
 const RESPONSE_CONTRACT = `
 # 応答契約（必ずこの順序・量の目安）
 1) ▶︎結論（Answer-first）：1〜2行で、問いに直接答える。断定/保留を明示。
-2) ▶︎理由/構造（Why）：2〜5行で、根拠やプロセス（S/R/C/I/T参照）を具体に。箇条書き可。
+2) ▶︎理由/構造（Why）：2〜5行で、根拠やプロセス（S/R/C/I/T参照）を具体に。箇条書きは**最大5項目**まで。
+   （任意）観測根拠：出典/文脈/前提を1行で併記可。
 3) ▶︎短い共鳴（任意）：**最大1行**の比喩/象徴。不要なら省略。
 4) ▶︎一歩（Move）：1行で、すぐできる次の行動/観測を提案。
 - 疑問形は【最大1つまで】。質問で終わらない。
-- 抽象を置いたら、**直後に具体**を置く。
-- 文体は平易・簡潔。冗長な詩語は避ける。
+- 単独のリストのみで構成しない。最後は宣言または行動提案で締める。
 `.trim();
 
 const DEEPENING_PROTOCOL = `
-# 深掘りエスカレータ（「本質」「もっと深く」「核」「源」「由来」「意味」等で発動）
+# 深掘りエスカレータ（「本質」「もっと深く」「核」「源」「由来」「意味」「I層」「T層」等で発動）
 - I層を一段降ろす（I1→I2→I3）。必要ならT1へ。
 - 各段の追加：
   * I1: 具体/状況の再定義（1〜2行）
@@ -85,6 +76,15 @@ const FACT_POLICY = `
 - 科学的合意/未合意/伝承・仮説を区分し、確度を明示。
 - 不確実なテーマは「代表仮説 / 反証例 / 参照先」を短く提示。
 - 妄断せず、検証の一歩（一次情報確認・比較・観測）を提案。
+`.trim();
+
+/** 相手や状況を対象に“読み出す”際の安全プロトコル */
+const OTHER_STATE_PROTOCOL = `
+# 他者の状態の扱い（相手/状況を対象にする時）
+- 推定は「観測できる情報」の範囲で行う。心読はしない。
+- 根拠を明示（観測/前提/仮定）。確度を3段階で添える（低/中/高）。
+- ラベリングを避け、可変性（「今は」「これまで」）で表現する。
+- 介入提案は小さく可逆（撤回可能）に。守秘・敬意を守る。
 `.trim();
 
 const CLOSING_RULES = `
@@ -127,13 +127,14 @@ const REMAKE_TEMPLATE = `
    System Prompt Builder
 ========================= */
 export function buildSofiaSystemPrompt(opts: BuildOptions = {}): string {
-  const { mode = "normal", allowTranscend = true } = opts;
+  const { mode = "normal", allowTranscend = true, target } = opts;
   const blocks = [
     IROS_BASE,
     allowTranscend ? IT_DEEPER : "",
     RESPONSE_CONTRACT,
     DEEPENING_PROTOCOL,
     FACT_POLICY,
+    (target && target !== "自分") ? OTHER_STATE_PROTOCOL : "",
     CLOSING_RULES,
   ].filter(Boolean);
   blocks.push(`# 現在モード: ${mode}`);
@@ -158,7 +159,6 @@ export function primerForMode(opts: BuildOptions = {}): string {
     case "remake":
       return REMAKE_TEMPLATE;
     default:
-      // 通常モードは簡潔・会話寄りの導入
       return "要点→理由→（任意の短い共鳴）→一歩 の順で短く答えます。";
   }
 }
@@ -171,16 +171,16 @@ const TRIGGERS = {
   intent: [/^意図$/, /^意図トリガー$/],
   dark: [/^闇の物語$/, /闇/],
   remake: [/^リメイク$/, /再統合/],
-  deepen: [/本質|もっと深く|核|源|由来|意味/],
+  deepen: [/本質|もっと深く|さらに深く|核|源|由来|意味|I層|T層/],
 };
 
 export function detectModeFromUserText(latest: string | undefined): SofiaMode {
   if (!latest) return "normal";
   const t = latest.trim();
-  if (TRIGGERS.diagnosis.some(r => r.test(t))) return "diagnosis";
-  if (TRIGGERS.intent.some(r => r.test(t))) return "intent";
-  if (TRIGGERS.remake.some(r => r.test(t))) return "remake";
-  if (TRIGGERS.dark.some(r => r.test(t))) return "dark";
+  if (TRIGGERS.diagnosis.some((r) => r.test(t))) return "diagnosis";
+  if (TRIGGERS.intent.some((r) => r.test(t))) return "intent";
+  if (TRIGGERS.remake.some((r) => r.test(t))) return "remake";
+  if (TRIGGERS.dark.some((r) => r.test(t))) return "dark";
   // 深掘り語は通常モードでも system 側のプロトコルで降下を担保
   return "normal";
 }
@@ -195,7 +195,7 @@ export function buildSofiaMessages(
   explicitMode?: SofiaMode,
   target?: Target
 ): ChatMsg[] {
-  const lastUser = [...userMessages].reverse().find(m => m.role === "user")?.content;
+  const lastUser = [...userMessages].reverse().find((m) => m.role === "user")?.content;
   const detected = explicitMode ?? detectModeFromUserText(lastUser);
   const sys = buildSofiaSystemPrompt({ mode: detected, target, allowTranscend: true });
 
@@ -214,5 +214,13 @@ export type SofiaPersonaKey = "base" | "withTranscend";
 
 export const SOFIA_PERSONAS: Record<SofiaPersonaKey, string> = {
   base: IROS_BASE,
-  withTranscend: [IROS_BASE, IT_DEEPER, RESPONSE_CONTRACT, DEEPENING_PROTOCOL, FACT_POLICY, CLOSING_RULES].join("\n\n"),
+  withTranscend: [
+    IROS_BASE,
+    IT_DEEPER,
+    RESPONSE_CONTRACT,
+    DEEPENING_PROTOCOL,
+    FACT_POLICY,
+    OTHER_STATE_PROTOCOL,
+    CLOSING_RULES,
+  ].join("\n\n"),
 };
