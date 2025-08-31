@@ -7,8 +7,9 @@ import rehypeHighlight from 'rehype-highlight';
 
 export type MsgRole = 'user' | 'assistant';
 
+/** 安全な外部リンクレンダラ */
 function LinkRenderer(
-  props: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href?: string }
+  props: React.ComponentPropsWithoutRef<'a'> & { href?: string }
 ) {
   const { href = '#', children, ...rest } = props;
   return (
@@ -18,7 +19,10 @@ function LinkRenderer(
   );
 }
 
-export function MessageBubble({ role, text }: { role: MsgRole; text: string }) {
+type BubbleProps = { role: MsgRole; text: string };
+
+/** メッセージの吹き出し（Markdown+GFM+ハイライト対応） */
+export function MessageBubble({ role, text }: BubbleProps) {
   const isUser = role === 'user';
 
   return (
@@ -39,6 +43,7 @@ export function MessageBubble({ role, text }: { role: MsgRole; text: string }) {
           boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
           lineHeight: 1.65,
           overflow: 'hidden',
+          wordBreak: 'break-word',
         }}
       >
         <ReactMarkdown
@@ -47,7 +52,7 @@ export function MessageBubble({ role, text }: { role: MsgRole; text: string }) {
           components={{
             a: LinkRenderer,
             code(props) {
-              // 型の差異を吸収
+              // rehype-highlightの型差異を吸収
               const { inline, className, children, ...rest } = props as any;
               if (inline) {
                 return (
@@ -183,3 +188,5 @@ export function MessageBubble({ role, text }: { role: MsgRole; text: string }) {
     </div>
   );
 }
+
+export default MessageBubble; // デフォルト輸出も用意（import MessageBubble from '...' が使える）```

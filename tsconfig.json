@@ -15,7 +15,7 @@
     "jsx": "preserve",
 
     /* ====== ここ重要 ====== */
-    "baseUrl": "src",
+    "baseUrl": "./src",
     "paths": {
       "@/*": ["*"],
       "@lib/*": ["lib/*"],
