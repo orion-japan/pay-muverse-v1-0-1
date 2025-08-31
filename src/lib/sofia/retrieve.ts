@@ -12,16 +12,20 @@ function sb() {
   return createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false } });
 }
 
-export type RetrievedItem = {
-  id: string;
-  title: string | null;
-  content: string;
-  qcodes?: string[];      // ← あると有利（スコアに使う）
-  layers?: string[];      // ← あると有利（I/Tボーナス）
-  tags?: string[] | null; // 任意
-};
+/* ---------------------------
+   軽量シード付き乱数 (Xorshift32)
+---------------------------- */
+function makeRng(seed: number) {
+  let x = seed >>> 0 || 88675123;
+  return () => {
+    x ^= x << 13;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    return ((x >>> 0) / 0xffffffff); // 0..1
+  };
+}
 
-type CandidateRow = {
+export type RetrievedItem = {
   id: string;
   title: string | null;
   content: string;
@@ -30,7 +34,11 @@ type CandidateRow = {
   tags?: string[] | null;
 };
 
-/** 小さな前処理（ひらがな・全角は必要なら別途） */
+type CandidateRow = RetrievedItem;
+
+/* ---------------------------
+   共鳴スコア関数群
+---------------------------- */
 function tokenizeJa(s: string): string[] {
   return (s || "")
     .toLowerCase()
@@ -40,109 +48,140 @@ function tokenizeJa(s: string): string[] {
     .slice(0, 40);
 }
 
-/** Qコード共鳴スコア: ユーザーの Q 分布 × 文書の Q タグの内積っぽい加点 */
 function scoreByQResonance(userQ: { code: string; score: number }[], docQ: string[] = []) {
   if (!userQ.length || !docQ.length) return 0;
   let s = 0;
-  for (const uq of userQ) {
-    if (docQ.includes(uq.code)) s += uq.score;              // 完全一致を素直に加点
-    // “近縁Q”のゆるボーナスを入れたい場合はここで近接表を噛ませる
-  }
-  return s; // 最大: Σ userQ.score
-}
-
-/** 層ボーナス（I/T が噛み合うと少し上げる） */
-function scoreByLayerBonus(userLayers: { layer: string; score: number }[], docLayers: string[] = []) {
-  if (!userLayers.length || !docLayers.length) return 0;
-  let s = 0;
-  for (const ul of userLayers) {
-    if (docLayers.includes(ul.layer)) s += 0.3 * ul.score;  // 小さめのボーナス
-    // I系とT系の“親和表”を用意して近接加点してもOK
-  }
+  for (const uq of userQ) if (docQ.includes(uq.code)) s += uq.score;
   return s;
 }
 
-/** キーワードの素朴な共鳴（ユーザー発話の語と本文の出現で加点・上限あり） */
+function scoreByLayerBonus(userLayers: { layer: string; score: number }[], docLayers: string[] = []) {
+  if (!userLayers.length || !docLayers.length) return 0;
+  let s = 0;
+  for (const ul of userLayers) if (docLayers.includes(ul.layer)) s += 0.3 * ul.score;
+  return s;
+}
+
 function scoreByKeywordResonance(userTokens: string[], content: string) {
   if (!userTokens.length || !content) return 0;
-  const MAX = 0.7; // 取りすぎ防止
+  const MAX = 0.7;
   const c = content.toLowerCase();
   let hit = 0;
   for (const t of userTokens) {
     if (t.length < 2) continue;
     if (c.includes(t)) hit++;
   }
-  return Math.min(MAX, hit * 0.05); // 20語ヒットで上限到達
+  return Math.min(MAX, hit * 0.05);
 }
 
-/** 総合スコア */
-function resonanceScore(params: {
-  userQ: { code: string; score: number }[];
-  userLayers: { layer: string; score: number }[];
-  userTokens: string[];
-  doc: CandidateRow;
-}) {
-  const { userQ, userLayers, userTokens, doc } = params;
+function resonanceScore(
+  userQ: { code: string; score: number }[],
+  userLayers: { layer: string; score: number }[],
+  userTokens: string[],
+  doc: CandidateRow
+) {
   const q = scoreByQResonance(userQ, doc.qcodes || []);
   const l = scoreByLayerBonus(userLayers, doc.layers || []);
   const k = scoreByKeywordResonance(userTokens, doc.content || "");
-  // 重みは好みに合わせて調整
   return q * 1.0 + l * 1.0 + k * 1.0;
 }
 
+/* ---------------------------
+   共鳴ベース + 確率的ランク付け
+---------------------------- */
 /**
- * Qコード共鳴ベースのナレッジ検索
- * - DBはタグ一致で候補取得（広めに）
- * - 並び替えはアプリ側の「共鳴スコア」で
+ * @param epsilon   ランダム探索率 (例: 0.3 = 30%)
+ * @param noiseAmp  ノイズ振幅 (例: 0.15)
+ * @param seed      会話ごとの乱数シード
  */
 export async function retrieveKnowledge(
   analysis: Analysis,
   limit = 4,
-  userLastUtterance?: string
+  userLastUtterance?: string,
+  opts?: { epsilon?: number; noiseAmp?: number; seed?: number }
 ): Promise<RetrievedItem[]> {
+  const { epsilon = 0.3, noiseAmp = 0.15, seed = Date.now() } = opts ?? {};
+  const rng = makeRng(seed);
+
   const s = sb();
   const qset = analysis.qcodes.map(q => q.code);
   const lset = analysis.layers.map(l => l.layer);
 
-  // 1) 候補を広めに取得（Q or 層 いずれか合致）
+  // 候補: Qコードまたは層が一致するレコード
   const orParts = [
-    qset.length ? `qcodes && '{${qset.join(",")}}'` : "",  // ← overlap（配列の積が非空）
+    qset.length ? `qcodes && '{${qset.join(",")}}'` : "",
     lset.length ? `layers && '{${lset.join(",")}}'` : "",
   ].filter(Boolean);
 
-  // どちらも無ければ全体から数十件だけ拾う（保険）
   const base = s.from("sofia_knowledge")
     .select("id, title, content, qcodes, layers, tags")
     .limit(80);
 
-  const query = orParts.length ? base.or(orParts.join(",")) : base;
-
-  const { data, error } = await query;
+  const { data, error } = orParts.length ? await base.or(orParts.join(",")) : await base;
   if (error) {
-    console.warn("[retrieveKnowledge] skip:", error.message);
+    console.warn("[retrieveKnowledge] error:", error.message);
     return [];
   }
+  const rows = (data ?? []) as CandidateRow[];
 
-  const userTokens = tokenizeJa(userLastUtterance || analysis.keywords?.join(" ") || "");
+  // 共鳴スコア算出
+  const tokens = tokenizeJa(userLastUtterance || analysis.keywords?.join(" ") || "");
   const userQ = analysis.qcodes || [];
-  const userLayers = analysis.layers || [];
+  const userL = analysis.layers || [];
 
-  // 2) 共鳴スコアで並べ替え
-  const ranked = (data as CandidateRow[]).map(doc => {
-    const score = resonanceScore({ userQ, userLayers, userTokens, doc });
-    return { doc, score };
-  }).sort((a, b) => b.score - a.score);
+  const scored = rows.map(doc => {
+    const base = resonanceScore(userQ, userL, tokens, doc);
+    const noisy = base + (rng() * 2 - 1) * noiseAmp; // ±noiseAmp
+    return { doc, base, noisy };
+  });
 
-  // 3) 上位を返す（スコア0は弾く）
-  return ranked
-    .filter(r => r.score > 0)
-    .slice(0, limit)
-    .map(({ doc }) => ({
-      id: String(doc.id),
-      title: doc.title ?? null,
-      content: doc.content ?? "",
-      qcodes: doc.qcodes,
-      layers: doc.layers,
-      tags: doc.tags ?? null,
-    }));
+  // スコア + ノイズでソート
+  const sorted = scored.sort((a, b) => b.noisy - a.noisy);
+
+  // ε-greedy: 一部はランダム、残りはスコア上位
+  const picked: RetrievedItem[] = [];
+  for (const row of sorted) {
+    const doExplore = rng() < epsilon;
+    if (doExplore && rows.length) {
+      const randDoc = rows[Math.floor(rng() * rows.length)];
+      if (!picked.find(p => p.id === String(randDoc.id))) {
+        picked.push({
+          id: String(randDoc.id),
+          title: randDoc.title ?? null,
+          content: randDoc.content ?? "",
+          qcodes: randDoc.qcodes,
+          layers: randDoc.layers,
+          tags: randDoc.tags ?? null,
+        });
+      }
+    } else {
+      const d = row.doc;
+      if (!picked.find(p => p.id === String(d.id))) {
+        picked.push({
+          id: String(d.id),
+          title: d.title ?? null,
+          content: d.content ?? "",
+          qcodes: d.qcodes,
+          layers: d.layers,
+          tags: d.tags ?? null,
+        });
+      }
+    }
+    if (picked.length >= limit) break;
+  }
+
+  // 万一全てスコア0なら完全ランダム保険
+  if (!picked.length && rows.length) {
+    const r = rows[Math.floor(rng() * rows.length)];
+    picked.push({
+      id: String(r.id),
+      title: r.title ?? null,
+      content: r.content ?? "",
+      qcodes: r.qcodes,
+      layers: r.layers,
+      tags: r.tags ?? null,
+    });
+  }
+
+  return picked.slice(0, limit);
 }

@@ -1,0 +1,120 @@
+/* ===== Meta Panel (colorful) ===== */
+.meta-panel {
+    border-top: 1px solid var(--line, #e5e7eb);
+    background: linear-gradient(180deg, #ffffff, #fbfdfc);
+    padding: 14px 16px;
+    font-size: 13px;
+    color: #2b3330;
+  }
+  
+  .meta-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 800;
+    color: var(--sofia-deep, #185a4c);
+    margin-bottom: 10px;
+  }
+  .meta-title .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--sofia, #3cc7a6);
+    box-shadow: 0 0 0 3px rgba(60,199,166,.18);
+  }
+  
+  /* 各ブロックはカード風 */
+  .meta-block {
+    background: #fff;
+    border: 1px solid var(--line, #e5e7eb);
+    border-left: 4px solid var(--sofia, #3cc7a6);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    box-shadow: 0 4px 10px rgba(0,0,0,.04);
+  }
+  
+  .meta-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--muted, #5f726d);
+    margin-bottom: 6px;
+    letter-spacing: .02em;
+  }
+  .meta-label .badge {
+    font-size: 11px;
+    color: #124136;
+    background: var(--sofia-light, #d8f7ef);
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(60,199,166,.35);
+  }
+  
+  /* リスト行 */
+  .meta-list {
+    list-style: none;
+    margin: 0; padding: 0;
+    display: grid;
+    gap: 6px;
+  }
+  
+  .meta-item {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  
+  /* カラーチップ */
+  .meta-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    border-radius: 8px;
+    font-weight: 600;
+    border: 1px solid rgba(60,199,166,.35);
+    background: var(--sofia-light, #d8f7ef);
+    color: #124136;
+  }
+  .meta-chip.blue {
+    border-color: rgba(100,182,255,.4);
+    background: #ecf6ff;
+    color: #13324d;
+  }
+  .meta-chip.gold {
+    border-color: rgba(217,201,124,.55);
+    background: #fffae8;
+    color: #5a4e1c;
+  }
+  .meta-chip.gray {
+    border-color: #e5e7eb;
+    background: #f8fafb;
+    color: #374151;
+  }
+  
+  .meta-score {
+    font-size: 12px;
+    color: #94a3b8;
+  }
+  
+  /* key-value 表示 */
+  .meta-kv {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 12px;
+    font-size: 12px;
+  }
+  .meta-kv b {
+    color: var(--sofia-deep, #185a4c);
+  }
+  
+  /* 小さなアイコン風丸 */
+  .k-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--sofia, #3cc7a6);
+  }
+  .k-dot.blue { background: #64b6ff; }
+  .k-dot.gold { background: #d9c97c; }
+  

@@ -2,6 +2,8 @@
 // src/components/SofiaChat.tsx
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { MetaPanel } from "@/components/SofiaChat/MetaPanel";
+import type { MetaData } from "@/components/SofiaChat/MetaPanel";
 
 type MsgRole = 'user' | 'assistant';
 export type UiMsg = { role: MsgRole; content: string; _key?: string };
@@ -63,6 +65,7 @@ export function SofiaChat() {
   const [loading, setLoading] = useState(false);
   const [initLoaded, setInitLoaded] = useState(false);
   const [mode, setMode] = useState<'normal' | 'diagnosis' | 'meaning' | 'intent' | 'dark' | 'remake'>('normal');
+  const [meta, setMeta] = useState<MetaData | null>(null); // ✅ MetaPanel 用
 
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -114,6 +117,7 @@ export function SofiaChat() {
   useEffect(() => {
     if (!initLoaded) return;
     loadMessages(userCode, convCode);
+    setMeta(null); // ✅ 会話切替時はMetaをリセット（任意）
   }, [convCode, initLoaded, loadMessages, userCode]);
 
   // 新規
@@ -121,6 +125,7 @@ export function SofiaChat() {
     const code = `Q${Date.now()}`;
     setConvCode(code);
     setMessages([]);
+    setMeta(null); // ✅ 新規でもMetaリセット
   }, []);
 
   const canSend = useMemo(() => input.trim().length > 0 && !loading, [input, loading]);
@@ -149,9 +154,14 @@ export function SofiaChat() {
       });
       const json = await rs.json();
 
+      // 返信
       const reply = json?.reply ?? '';
       if (reply) setMessages(ensureUiKeys([...next, { role: 'assistant', content: reply }]));
 
+      // ✅ meta 反映
+      if (json?.meta) setMeta(json.meta as MetaData);
+
+      // 会話コード更新
       if (json?.conversation_code && json.conversation_code !== convCode) {
         setConvCode(json.conversation_code);
       }
@@ -178,59 +188,79 @@ export function SofiaChat() {
         height: '85vh',
         maxWidth: 640,
         margin: '0 auto',
-        padding: '8px 12px',
+        padding: '6px 10px',
         boxSizing: 'border-box',
         display: 'flex',
         flexDirection: 'column',
-        gap: 8,
+        gap: 6,
       }}
     >
-      {/* ヘッダー（固定高さ） */}
-      <div
-        style={{
-          flex: '0 0 auto',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 8,
-        }}
-      >
-        <div style={{ fontWeight: 700 }}>Sofia Chat</div>
+{/* ヘッダー（1段レイアウト） */}
+<div
+  style={{
+    flex: '0 0 auto',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
+    padding: '4px 6px',
+    borderBottom: '1px solid #e5e7eb',
+    background: '#fafafa',
+    borderRadius: 8,
+    whiteSpace: 'nowrap',
+  }}
+>
+  <div style={{ fontWeight: 600, fontSize: 14, flexShrink: 0 }}>Sofia Chat</div>
 
-        <div style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap' }}>
-          <div>
-            <div style={{ fontSize: 12, opacity: 0.6 }}>会話コード</div>
-            <select value={convCode} onChange={(e) => setConvCode(e.target.value)} style={{ width: 220, padding: '6px 8px' }}>
-              {convs.map((c) => (
-                <option key={c.conversation_code} value={c.conversation_code}>
-                  {c.conversation_code}
-                </option>
-              ))}
-              {convCode && !convs.some((c) => c.conversation_code === convCode) ? (
-                <option key={convCode} value={convCode}>
-                  {convCode}
-                </option>
-              ) : null}
-            </select>
-          </div>
+  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flex: 1, justifyContent: 'flex-end' }}>
+    <select
+      value={convCode}
+      onChange={(e) => setConvCode(e.target.value)}
+      style={{ minWidth: 140, maxWidth: 180, padding: '4px 6px', fontSize: 13, height: 28 }}
+    >
+      {convs.map((c) => (
+        <option key={c.conversation_code} value={c.conversation_code}>
+          {c.conversation_code}
+        </option>
+      ))}
+      {convCode && !convs.some((c) => c.conversation_code === convCode) ? (
+        <option key={convCode} value={convCode}>
+          {convCode}
+        </option>
+      ) : null}
+    </select>
 
-          <div>
-            <div style={{ fontSize: 12, opacity: 0.6 }}>モード</div>
-            <select value={mode} onChange={(e) => setMode(e.target.value as any)} style={{ width: 120, padding: '6px 8px' }}>
-              <option value="normal">通常</option>
-              <option value="diagnosis">診断</option>
-              <option value="meaning">意味付け</option>
-              <option value="intent">意図</option>
-              <option value="dark">闇の物語</option>
-              <option value="remake">リメイク</option>
-            </select>
-          </div>
+    <select
+      value={mode}
+      onChange={(e) => setMode(e.target.value as any)}
+      style={{ width: 100, padding: '4px 6px', fontSize: 13, height: 28 }}
+    >
+      <option value="normal">通常</option>
+      <option value="diagnosis">診断</option>
+      <option value="meaning">意味</option>
+      <option value="intent">意図</option>
+      <option value="dark">闇</option>
+      <option value="remake">再統合</option>
+    </select>
 
-          <button onClick={handleNewConversation} style={{ padding: '6px 10px' }}>
-            新規生成
-          </button>
-        </div>
-      </div>
+    <button
+      onClick={handleNewConversation}
+      title="新規会話を作成"
+      style={{
+        padding: '2px 6px',
+        height: 28,
+        fontSize: 14,
+        border: '1px solid #e5e7eb',
+        borderRadius: 6,
+        background: '#fff',
+        cursor: 'pointer',
+      }}
+    >
+      ＋
+    </button>
+  </div>
+</div>
+
 
       {/* メッセージエリア（伸縮・スクロール） */}
       <div
@@ -263,7 +293,7 @@ export function SofiaChat() {
           gap: 8,
           alignItems: 'flex-end',
           borderTop: '1px solid #e5e7eb',
-          paddingTop: 8,
+          paddingTop: 6,
         }}
       >
         <textarea
@@ -271,7 +301,7 @@ export function SofiaChat() {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}
           rows={2}
-          placeholder="メッセージを入力…（Enterで送信 / Shift+Enterで改行）"
+          placeholder="メッセージ入力…"
           style={{
             flex: 1,
             padding: 10,
@@ -285,13 +315,13 @@ export function SofiaChat() {
           onClick={handleSend}
           disabled={!canSend}
           style={{
-            padding: '10px 14px',
+            padding: '8px 12px',
             borderRadius: 10,
             border: '1px solid #2563eb',
             background: canSend ? '#3b82f6' : '#93c5fd',
             color: '#fff',
             cursor: canSend ? 'pointer' : 'not-allowed',
-            height: 42,
+            height: 38,
           }}
         >
           送信
@@ -299,6 +329,9 @@ export function SofiaChat() {
       </div>
 
       {loading && <div style={{ fontSize: 12, opacity: 0.7 }}>送信中…</div>}
+
+      {/* ✅ 共鳴メタ情報の可視化（画面下部） */}
+      <MetaPanel meta={meta ?? {}} />
     </div>
   );
 }
