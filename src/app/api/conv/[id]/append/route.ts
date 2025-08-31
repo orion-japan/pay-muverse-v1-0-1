@@ -1,32 +1,26 @@
 // src/app/api/conv/[id]/append/route.ts
-export const runtime = 'nodejs'; // 必要なら維持/追加
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-import { NextRequest, NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
 
-type Ctx = {
-  params: Record<string, string | string[]>;
-};
+// Next.js 15 では context.params は Promise です
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params; // ← Promise から展開
 
-// string | string[] を安全に取り出す小ヘルパ
-function pickParam(v: string | string[] | undefined, name: string): string {
-  if (v == null) throw new Error(`Missing route param: ${name}`);
-  return Array.isArray(v) ? v[0] : v;
-}
-
-export async function POST(req: NextRequest, ctx: Ctx) {
-  const id = pickParam(ctx.params.id, 'id');
-
-  // 必要ならボディ取得
-  let body: unknown;
+  // ボディは任意（元の処理をここに戻してください）
+  let body: unknown = undefined;
   try {
     body = await req.json();
   } catch {
-    body = undefined;
+    // JSONなしでもOKにする
   }
 
-  // ← ここに既存の処理をそのまま残してください
-  // 例）会話への追記処理など
+  // ここに既存の append 処理を貼り戻し
   // await appendConversation(id, body, ...)
 
   return NextResponse.json({ ok: true, id });
