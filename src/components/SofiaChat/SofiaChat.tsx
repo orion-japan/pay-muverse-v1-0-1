@@ -9,7 +9,7 @@ import React, {
   useLayoutEffect,
 } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { fetchWithIdToken } from '@/lib/fetchWithIdToken';
+  import { fetchWithIdToken } from '@/lib/fetchWithIdToken';
 import '@/components/SofiaChat/SofiaChat.css';
 import './ChatInput.css';
 
@@ -93,36 +93,34 @@ export default function SofiaChat() {
 
   const canUse = useMemo(() => !!userCode && !authLoading, [userCode, authLoading]);
 
-  /* ===== 高さを CSS 変数へ反映 ===== */
+  /* ===== 高さを CSS 変数(:root)へ反映 ===== */
   const composeRef = useRef<HTMLDivElement>(null);
   const metaDockRef = useRef<HTMLDivElement>(null);
 
+  // 入力バーの高さ -> --compose-height（:root）
   useLayoutEffect(() => {
-    const c = composeRef.current;
-    if (c) {
-      const apply = () => {
-        const h = c.offsetHeight || 0;
-        document.body.style.setProperty('--compose-height', `${h}px`);
-      };
-      apply();
-      const ro = new ResizeObserver(apply);
-      ro.observe(c);
-      return () => ro.disconnect();
-    }
+    const el = composeRef.current;
+    if (!el) return;
+    const set = () => {
+      document.documentElement.style.setProperty('--compose-height', `${el.offsetHeight}px`);
+    };
+    set();
+    const ro = new ResizeObserver(set);
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
 
+  // Metaドックの高さ -> --meta-height（:root）
   useLayoutEffect(() => {
     const m = metaDockRef.current;
-    if (m) {
-      const apply = () => {
-        const h = m.offsetHeight || 0;
-        document.body.style.setProperty('--meta-height', `${h}px`);
-      };
-      apply();
-      const ro = new ResizeObserver(apply);
-      ro.observe(m);
-      return () => ro.disconnect();
-    }
+    if (!m) return;
+    const apply = () => {
+      document.documentElement.style.setProperty('--meta-height', `${m.offsetHeight || 0}px`);
+    };
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(m);
+    return () => ro.disconnect();
   }, []);
 
   /* ===== 会話一覧 ===== */
@@ -135,7 +133,9 @@ export default function SofiaChat() {
 
       const items = (js.items ?? []).map((row) => ({
         id: row.conversation_code,
-        title: row.title ?? (row.updated_at ? `会話 (${new Date(row.updated_at).toLocaleString()})` : '新しい会話'),
+        title:
+          row.title ??
+          (row.updated_at ? `会話 (${new Date(row.updated_at).toLocaleString()})` : '新しい会話'),
         updated_at: row.updated_at ?? null,
       })) as ConvListItem[];
 
@@ -151,7 +151,9 @@ export default function SofiaChat() {
     if (!userCode || !convId) return;
     try {
       const r = await fetchWithIdToken(
-        `/api/sofia?user_code=${encodeURIComponent(userCode)}&conversation_code=${encodeURIComponent(convId)}`
+        `/api/sofia?user_code=${encodeURIComponent(userCode)}&conversation_code=${encodeURIComponent(
+          convId
+        )}`
       );
       if (!r.ok) throw new Error(`messages ${r.status}`);
       const js: SofiaGetMessages = await r.json().catch(() => ({}));
@@ -182,7 +184,7 @@ export default function SofiaChat() {
     if (!text || !userCode) return {};
 
     const optimistic: Message = {
-      id: (globalThis.crypto?.randomUUID?.() ?? `tmp-${Date.now()}`),
+      id: globalThis.crypto?.randomUUID?.() ?? `tmp-${Date.now()}`,
       role: 'user',
       content: text,
       created_at: new Date().toISOString(),
@@ -207,7 +209,7 @@ export default function SofiaChat() {
         setMessages((prev) => [
           ...prev,
           {
-            id: (globalThis.crypto?.randomUUID?.() ?? `a-${Date.now()}`),
+            id: globalThis.crypto?.randomUUID?.() ?? `a-${Date.now()}`,
             role: 'assistant',
             content: js.reply as string,
             created_at: new Date().toISOString(),
@@ -222,7 +224,7 @@ export default function SofiaChat() {
       setMessages((prev) => [
         ...prev,
         {
-          id: (globalThis.crypto?.randomUUID?.() ?? `e-${Date.now()}`),
+          id: globalThis.crypto?.randomUUID?.() ?? `e-${Date.now()}`,
           role: 'assistant',
           content: '（通信に失敗しました。時間をおいて再度お試しください）',
         },
@@ -278,6 +280,9 @@ export default function SofiaChat() {
       <div className="sof-compose-dock" ref={composeRef}>
         <ChatInput onSend={handleSend} onPreview={() => {}} onCancelPreview={() => {}} />
       </div>
+
+      {/* 入力BOX〜画面下を白で覆う“下敷き”（入力欄の上でメッセージを確実に隠す） */}
+      <div className="sof-underlay" aria-hidden />
 
       <div className="sof-footer-spacer" />
     </>

@@ -7,8 +7,8 @@
 
 /* 変数（必要なら値だけ変えてOK） */
 :root{
-  --sof-shell-w:   min(960px, calc(100vw - 24px));  /* 入力バーの横幅（中央寄せ） */
-  --sof-thread-w:  min(780px, calc(100vw - 48px));  /* 吹き出し列の横幅（本文の細い帯） */
+    --sof-shell-w:   min(1200px, calc(100vw - 48px)); /* 入力バーの上限も少し広めに */
+    --sof-thread-w:  clamp(780px, calc(100vw - 96px), 1360px);
   --compose-h:     64px;                            /* 入力バーの基準高さ（固定想定） */
   --footer-safe-pad: 0px;                           /* 下部ナビの高さ（レイアウト側で上書き可） */
 }

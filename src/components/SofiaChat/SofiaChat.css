@@ -1,19 +1,28 @@
 /* =========================================================
    SofiaChat – perfect pinning (header / meta / input)
+   - PCでは中央レーンに揃えて広めに
+   - ヘッダー(.sof-header-fixed)は既存レイアウトを維持
    ========================================================= */
 
 /* ---- Tokens ---- */
 :root{
-  --sof-shell-w: min(960px, calc(100vw - 24px)); /* 共通幅 */
-  --sof-thread-w: min(780px, calc(100vw - 48px));/* スレッド幅 */
+  /* 中央レーン幅：画面に応じて広がり、上限で止まる */
+  --lane-max: 1360px;                     /* 本文/ヘッダーの上限幅（お好みで 1200〜1600） */
+  --gutter: 24px;                         /* 左右余白 */
+  --lane: clamp(960px, calc(100vw - var(--gutter)*2), var(--lane-max));
 
-  --sof-header-h: 56px;                          /* Header 高さ */
+  /* 入力バー/メタは少し絞る（必要なら lane と同じでもOK） */
+  --shell-max: 1200px;
+  --shell: min(var(--lane), var(--shell-max));
 
-  --footer-safe-pad: var(--footer-h, 60px);      /* PAY フッター高（LayoutClient が上書き） */
-  --compose-height: 64px;                         /* 入力の実高（JSで上書き） */
-  --meta-height: 48px;                            /* Meta の実高（だいたい / 小さめでOK） */
+  /* Header 高さなど */
+  --sof-header-h: 56px;
+  --footer-safe-pad: var(--footer-h, 60px);
+  --compose-height: 64px;
+  --meta-height: 48px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 
+  /* Colors */
   --sof-border: 1px solid #e6e6e6;
   --sof-bg: #fff;
   --sof-bg-page: #f7f8fb;
@@ -30,46 +39,69 @@
   background: var(--sof-bg-page);
 }
 .sofia-page-main{ flex: 1 1 auto; overflow-y: auto; }
-.sofia-page-wrap{
-  width: var(--sof-shell-w);
-  margin: 0 auto;
-  padding-top: calc(var(--sof-header-h) + 12px); /* Header 分の逃げ */
-}
+.sofia-page-wrap{ width: var(--lane); margin: 0 auto; padding-top: calc(var(--sof-header-h) + 12px); }
 
-/* 共通で中央寄せしたい箱 */
-.sof-header-slot,
-.sof-meta-dock,
-.sof-compose-dock,
-.sofia-page-wrap{
-  width: var(--sof-shell-w);
-  margin-left: auto;
-  margin-right: auto;
+/* mu-main / mu-page をフル幅に（上流の max-width を殺す） */
+main.mu-main,
+.mu-page,
+.sofia-container{
+  width: 100% !important;
+  max-width: none !important;
+  flex: 1 1 0% !important;
+  min-width: 0 !important;
+  align-self: stretch !important;
+}
+.sofia-container > [style*="max-width"]{
+  max-width: none !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
 
 /* =========================================================
-   HEADER: 中身は触らず“入れ物”だけ固定
+   HEADER
+   - 既存の .sof-header-fixed を保持（要求どおり変更しない）
    ========================================================= */
-.sof-header-slot{
-  position: sticky;   /* スクロールしても上に残る */
-  top: 0;
-  z-index: 40;        /* meta(50) / input(60) より下でOK */
+.sof-header-fixed {
+  position: fixed;
+  top: 0; left: 0; right: 0;
   height: var(--sof-header-h);
-  display: flex;      /* 子(Header)を縦中央に */
+  z-index: 100;
+
+  display: flex;
+  justify-content: center;
   align-items: center;
-  padding: 0 0;       /* Header 自体の余白に任せる */
-  background: linear-gradient(180deg,#fafafa,#ffffff);
+
+  background: linear-gradient(180deg, #fafafa 0%, #ffffff 100%);
   border-bottom: 1px solid #e5e7eb;
   box-shadow: 0 2px 8px rgba(0,0,0,.06);
 }
+/* 内側の Header コンポーネント */
+.sof-header-fixed > .sof-header{
+  width: var(--lane);
+  margin: 0 auto;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  height: 100%; padding: 0 12px;
+}
+.sof-header__title{ flex: 1; text-align: center; font-size: 16px; font-weight: 700; color: #111827; }
+.sof-header .sof-btn{
+  font-size: 14px; font-weight: 600; padding: 6px 12px; border-radius: 8px;
+  border: 1px solid #d1d5db; background:#fff; color:#374151;
+  cursor: pointer; transition: background .15s, color .15s, border-color .15s;
+}
+.sof-header .sof-btn:hover{ background:#f3f4f6; }
+.sof-header .sof-btn.primary{ background:#6b8cff; border-color:#6b8cff; color:#fff; }
+.sof-header .sof-btn.primary:hover{ background:#4f6de6; }
 
-/* Header の中身（ボタン・タイトル）は一切指定しない
-   → これでボタンや文字のズレが起きません */
+/* 本文側はヘッダー分の余白を確保 */
+.sofia-page-wrap{ padding-top: calc(var(--sof-header-h) + 12px); }
 
 /* =========================================================
    MESSAGE LIST
    ========================================================= */
 .sof-msgs{
-  width: var(--sof-thread-w);
+  width: 100%;
+  max-width: var(--lane);
   margin: 0 auto;
 
   display: flex;
@@ -86,7 +118,7 @@
 
 .sof-empty{ color:#94a3b8; text-align:center; padding:24px 8px; font-size:14px; }
 
-/* バブル */
+/* バブル（左右寄せは従来のまま保持） */
 .sof-bubble{
   max-width: 86%;
   padding: 10px 14px;
@@ -116,14 +148,24 @@
 }
 .sof-bubble__role{ font-size:11px; letter-spacing:.02em; color:#94a3b8; }
 .sof-bubble.is-user .sof-bubble__role{ color:rgba(255,255,255,.8); }
-.sof-bubble__text{ white-space: pre-wrap; }
 
+/* 縦1文字になる事故を防止（保険） */
+.sof-bubble__text{
+  writing-mode: horizontal-tb !important;
+  text-orientation: mixed !important;
+  white-space: normal !important;
+  word-break: break-word !important;
+  overflow-wrap: anywhere !important;
+}
+
+/* 画像グリッド */
 .sof-bubble__imgs{ display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr)); gap:6px; }
 .sof-bubble__imgs img{
   width:100%; height:96px; object-fit:cover; border-radius:10px;
   border:1px solid #e5e7eb; background:#fff;
 }
 
+/* モバイルは吹き出しを少し広げる */
 @media (max-width: 480px){
   .sof-bubble{ max-width: 92%; }
 }
@@ -133,10 +175,12 @@
    ========================================================= */
 .sof-meta-dock{
   position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: var(--footer-safe-pad);    /* ← フッターのすぐ上 */
+  left: 50%; transform: translateX(-50%);
+  bottom: var(--footer-safe-pad);
   z-index: 50;
+
+  width: 100%;
+  max-width: var(--shell);
 
   padding: 8px 12px 6px;
   background: rgba(255,255,255,.95);
@@ -153,20 +197,19 @@
   border: 1px solid #e5e7eb !important;
   box-shadow: none !important;
 }
-.sof-meta-dock .meta-label{
-  border-left: none !important;
-  color: #667085;
-}
+.sof-meta-dock .meta-label{ border-left: none !important; color: #667085; }
 
 /* =========================================================
    INPUT – Meta のさらに上
    ========================================================= */
 .sof-compose-dock{
   position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: calc(var(--footer-safe-pad) + var(--meta-height)); /* ← Meta 分だけ持ち上げ */
+  left: 50%; transform: translateX(-50%);
+  bottom: calc(var(--footer-safe-pad) + var(--meta-height));
   z-index: 60;
+
+  width: 100%;
+  max-width: var(--shell);
 
   background: rgba(255,255,255,0.95);
   -webkit-backdrop-filter: blur(6px);
@@ -176,19 +219,9 @@
   padding: 8px 12px calc(8px + var(--safe-bottom));
 }
 
-/* さらに保険で“物理スペーサ”を使う場合（任意） */
+/* 物理スペーサ（保険） */
 .sof-footer-spacer{
   height: calc(var(--footer-safe-pad) + var(--meta-height) + var(--compose-height) + 24px);
-}
-
-@media (max-width: 640px){
-  :root{
-    --sof-shell-w: calc(100vw - 12px);
-    --sof-thread-w: calc(100vw - 24px);
-  }
-  .sof-footer-spacer{
-    height: calc(var(--footer-safe-pad) + var(--meta-height) + var(--compose-height) + 36px);
-  }
 }
 
 /* =========================================================
@@ -200,169 +233,158 @@ body.mu-body .mu-main:after{
   display: none !important;
 }
 
+/* =========================================================
+   小さめ画面向けの調整
+   ========================================================= */
+@media (max-width: 640px){
+  :root{
+    --lane: calc(100vw - 24px);
+    --shell: calc(100vw - 24px);
+  }
+  .sof-footer-spacer{
+    height: calc(var(--footer-safe-pad) + var(--meta-height) + var(--compose-height) + 36px);
+  }
+}
+
+/* =========================================================
+   PC向けの見やすさ微調整
+   ========================================================= */
+@media (min-width: 1024px){
+  /* 吹き出しを少し広めに（好みで 75〜90%） */
+  .sof-bubble{ max-width: 80%; }
+}
+
+
+/* ===== sof-center を使った中央レーン強制（PCのみ） ===== */
 :root{
-  --sof-shell-w: min(960px, calc(100vw - 24px));
-  --sof-thread-w: min(780px, calc(100vw - 48px));
-  --sof-header-h: 56px;
-
-  --footer-safe-pad: var(--footer-h, 60px);
-  --compose-height: 64px;
-  --meta-height: 48px;
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
-
-  --sof-border: 1px solid #e6e6e6;
-  --sof-bg: #fff;
-  --sof-bg-page: #f7f8fb;
-  --sof-shadow-top: 0 -2px 10px rgba(0,0,0,.06);
+  --lane-max: 1360px;   /* 本文/ヘッダの上限幅（好みで 1200〜1600） */
+  --shell-max: 1200px;  /* 入力バー/メタの上限幅 */
+  --gutter: 24px;       /* 左右余白 */
 }
 
-/* Layout */
-.sofia-container{ min-height:100dvh; display:flex; flex-direction:column; background:var(--sof-bg-page); }
-.sofia-page-main{ flex:1 1 auto; overflow-y:auto; }
-.sofia-page-wrap{ width:var(--sof-shell-w); margin:0 auto; padding-top:calc(var(--sof-header-h) + 12px); }
+@media (min-width: 1024px){
+  /* sof-center 自体を“必ずフル幅”の3カラムグリッドに */
+  .sof-center{
+    width: 100%;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 1fr minmax(960px, var(--lane-max)) 1fr;
+    align-items: start;
+  }
 
-.sof-header-slot,.sof-meta-dock,.sof-compose-dock,.sofia-page-wrap{
-  width:var(--sof-shell-w); margin-left:auto; margin-right:auto;
+  /* sof-center の直下にぶら下がる要素は中央カラムに載せる */
+  .sof-center > *{
+    grid-column: 2;
+  }
+
+  /* 本文レーン：中央に固定。幅はグリッドに任せる */
+  .sof-center .sof-msgs{
+    grid-column: 2;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding-inline: var(--gutter);
+    box-sizing: border-box;
+    align-items: stretch !important; /* 左右寄せ(ユーザー右/アシ左)は維持 */
+  }
+
+  /* ページ内ラッパも中央に */
+  .sof-center .sofia-page-wrap{
+    grid-column: 2;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding-inline: var(--gutter);
+    box-sizing: border-box;
+  }
+
+  /* 固定UI（Meta/入力）は translateX で中央へ、幅は shell に制限 */
+  .sof-meta-dock,
+  .sof-compose-dock{
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    width: 100% !important;
+    max-width: var(--shell-max) !important;
+  }
+
+  /* ヘッダーの中身も中央レーン幅に合わせる（ヘッダー自体はそのまま固定） */
+  .sof-header-fixed > .sof-header{
+    width: min(var(--lane-max), calc(100vw - var(--gutter)*2));
+    margin: 0 auto;
+  }
+
+  /* 文字が縦1列に潰れる事故の保険（役割ラベル + 本文） */
+  .sof-bubble__role,
+  .sof-bubble__text{
+    writing-mode: horizontal-tb !important;
+    white-space: normal !important;
+    word-break: break-word !important;
+    overflow-wrap: anywhere !important;
+  }
 }
 
-/* Header（中身に触らない） */
-.sof-header-slot{
-  position: sticky; top: 0; z-index: 40;
-  height: var(--sof-header-h);
-  display:flex; align-items:center;
-  background: linear-gradient(180deg,#fafafa,#ffffff);
-  border-bottom: 1px solid #e5e7eb;
-  box-shadow: 0 2px 8px rgba(0,0,0,.06);
-}
-
-/* Message list */
-.sof-msgs{
-  width:var(--sof-thread-w); margin:0 auto;
-  display:flex; flex-direction:column; gap:10px;
-  padding:8px 12px;
-  padding-bottom: calc(var(--footer-safe-pad) + var(--meta-height) + var(--compose-height) + 24px);
-  align-items:stretch; text-align:initial;
-}
-.sof-empty{ color:#94a3b8; text-align:center; padding:24px 8px; font-size:14px; }
-
-.sof-bubble{
-  max-width:86%; padding:10px 14px; border-radius:16px; line-height:1.6; font-size:14px;
-  word-break:break-word; background:#fff; border:1px solid #e5e7eb; box-shadow:0 1px 2px rgba(0,0,0,.04);
-  align-self:flex-start; margin-left:0; margin-right:auto;
-}
-.sof-bubble.is-user{
-  align-self:flex-end; margin-left:0; margin-right:0;
-  background:#6b8cff; color:#fff; border-color:#6b8cff; border-bottom-right-radius:4px;
-}
-.sof-bubble.is-assistant{
-  align-self:flex-start; margin-left:0; margin-right:auto;
-  background:#f8fafc; color:#111827; border-color:#e5e7eb; border-bottom-left-radius:4px;
-}
-.sof-bubble__role{ font-size:11px; letter-spacing:.02em; color:#94a3b8; }
-.sof-bubble.is-user .sof-bubble__role{ color:rgba(255,255,255,.8); }
-.sof-bubble__text{ white-space: pre-wrap; }
-.sof-bubble__imgs{ display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr)); gap:6px; }
-.sof-bubble__imgs img{ width:100%; height:96px; object-fit:cover; border-radius:10px; border:1px solid #e5e7eb; background:#fff; }
-
-@media (max-width:480px){ .sof-bubble{ max-width:92%; } }
-
-/* Meta（ある時だけ白カード・固定） */
-.sof-meta-dock{
-  position: fixed; left:50%; transform:translateX(-50%);
-  bottom: var(--footer-safe-pad); z-index:50;
-  padding:8px 12px 6px; background:rgba(255,255,255,.95);
-  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
-  border-top: var(--sof-border); box-shadow: var(--sof-shadow-top);
-}
-.sof-meta-dock .meta-panel{ background:#fff !important; border:1px solid #e5e7eb !important; box-shadow:none !important; }
-.sof-meta-dock .meta-label{ border-left:none !important; color:#667085; }
-
-/* Input（Meta のさらに上） */
-.sof-compose-dock{
-  position: fixed; left:50%; transform:translateX(-50%);
-  bottom: calc(var(--footer-safe-pad) + var(--meta-height)); z-index:60;
-  background:rgba(255,255,255,.95); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
-  border-top: var(--sof-border); box-shadow: var(--sof-shadow-top);
-  padding: 8px 12px calc(8px + var(--safe-bottom));
-}
-
-/* 物理スペーサ（保険） */
-.sof-footer-spacer{ height: calc(var(--footer-safe-pad) + var(--meta-height) + var(--compose-height) + 24px); }
-
-@media (max-width:640px){
-  :root{ --sof-shell-w: calc(100vw - 12px); --sof-thread-w: calc(100vw - 24px); }
-  .sof-footer-spacer{ height: calc(var(--footer-safe-pad) + var(--meta-height) + var(--compose-height) + 36px); }
-}
-
-/* mu-main の縦色線などを無効化 */
-body.mu-body .mu-main:before,
-body.mu-body .mu-main:after{ content:none !important; display:none !important; }
-
-
-/* ===== SofiaChat Header 固定レイアウト ===== */
-.sof-header-fixed {
+/* ====== 入力バー直上フェード ====== */
+/* 中央レーン幅に合わせつつ、確実に画面下部で機能する固定オーバーレイ */
+.sof-fader{
   position: fixed;
-  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(100%, var(--lane));
+  /* 入力UIの“上端”と一致させる：footer + meta + compose */
+  bottom: calc(var(--footer-safe-pad) + var(--meta-height) + var(--compose-height));
+  height: 40px; /* フェードの厚みはお好みで 28〜48px 程度 */
+  background: linear-gradient(
+    to bottom,
+    rgba(247,248,251,0) 0%,
+    var(--sof-bg-page) 80%,
+    var(--sof-bg-page) 100%
+  );
+  pointer-events: none;
+  z-index: 55; /* メッセージより上、入力(.sof-compose-dock=60)より下 */
+}
+
+
+.sof-underlay{
+  position: fixed;
   left: 0;
   right: 0;
-
-  height: var(--sof-header-h);
-  z-index: 100;
-
-  display: flex;
-  justify-content: center;   /* 中央にボックスを置く */
-  align-items: center;
-
-  background: linear-gradient(180deg, #fafafa 0%, #ffffff 100%);
-  border-bottom: 1px solid #e5e7eb;
-  box-shadow: 0 2px 8px rgba(0,0,0,.06);
+  bottom: 0;
+  height: calc(var(--footer-safe-pad) + var(--meta-height) + var(--compose-height) + env(safe-area-inset-bottom, 0px));
+  background: #fff;                 /* ページ下地に合わせて必要なら var(--sof-bg-page) */
+  z-index: 58;                      /* メッセージより上、入力(.sof-compose-dock=60)より下 */
+  pointer-events: none;
+}
+.sof-underlay::before{              /* ぼかし縁(任意) */
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: -12px;
+  height: 12px;
+  background: linear-gradient(to bottom, rgba(0,0,0,.06), rgba(0,0,0,0));
+  pointer-events: none;
 }
 
-/* 内側の Header コンポーネントを共通幅に制御 */
-.sof-header-fixed > .sof-header {
-  width: var(--sof-shell-w);
-  margin: 0 auto;
 
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-
-  height: 100%;
-  padding: 0 12px;
+.sof-underlay {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: calc(
+    var(--footer-safe-pad) +
+    var(--meta-height) +
+    var(--compose-height) +
+    env(safe-area-inset-bottom, 0px)
+  );
+  background: #fff;
+  z-index: 58;  /* ← Meta(59)より下に */
+  pointer-events: none;
 }
 
-/* タイトル */
-.sof-header__title {
-  flex: 1;
-  text-align: center;
-  font-size: 16px;
-  font-weight: 700;
-  color: #111827;
+.sof-meta-dock {
+  z-index: 59;  /* ← Compose(60)より下、Underlayより上 */
 }
 
-/* ボタン */
-.sof-header .sof-btn {
-  font-size: 14px;
-  font-weight: 600;
-  padding: 6px 12px;
-  border-radius: 8px;
-  border: 1px solid #d1d5db;
-  background: #ffffff;
-  color: #374151;
-  cursor: pointer;
-  transition: background .15s, color .15s, border-color .15s;
-}
-.sof-header .sof-btn:hover { background: #f3f4f6; }
-.sof-header .sof-btn.primary {
-  background: #6b8cff;
-  border-color: #6b8cff;
-  color: #fff;
-}
-.sof-header .sof-btn.primary:hover { background: #4f6de6; }
-
-/* 本文側はヘッダー分の余白を確保 */
-.sofia-page-wrap {
-  padding-top: calc(var(--sof-header-h) + 12px);
+.sof-compose-dock {
+  box-shadow: 0 -2px 8px rgba(0,0,0,.08);
 }
 
