@@ -1,365 +1,289 @@
+// src/components/SofiaChat/SofiaChat.tsx
 'use client';
 
 import React, {
-  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
+  useLayoutEffect,
 } from 'react';
+import { useAuth } from '@/context/AuthContext';
+import { fetchWithIdToken } from '@/lib/fetchWithIdToken';
+import '@/components/SofiaChat/SofiaChat.css';
+import './ChatInput.css';
 
-import { useAuth, authedFetch } from '@/context/AuthContext';
+import SidebarMobile from './SidebarMobile';
+import Header from './header';
+import MessageList from './MessageList';
+import ChatInput from './ChatInput';
+
 import { MetaPanel, type MetaData } from '@/components/SofiaChat/MetaPanel';
-import MessageBubble from "@/lib/sofia/MessageBubble";
 
-
-type MsgRole = 'user' | 'assistant';
-export type UiMsg = { role: MsgRole; content: string; _key?: string };
-
-type ConversationItem = {
-  conversation_code: string;
-  title?: string | null;
-  updated_at?: string | null;
-  last_text?: string | null;
+/* ========= types ========= */
+type Role = 'user' | 'assistant';
+export type Message = {
+  id: string;
+  role: Role;
+  content: string;
+  created_at?: string;
+  isPreview?: boolean;
 };
 
-function ensureUiKeys(arr: UiMsg[]): UiMsg[] {
-  return arr.map((m, i) => {
-    if (!m._key) {
-      const uid =
-        typeof crypto !== 'undefined' && 'randomUUID' in crypto
-          ? (crypto as any).randomUUID()
-          : `${Date.now()}-${i}-${Math.random().toString(36).slice(2)}`;
-      m._key = uid;
-    }
-    return m;
-  });
-}
-function stripUiKeys(arr: UiMsg[]) {
-  return arr.map(({ role, content }) => ({ role, content }));
-}
+type ConvListItem = {
+  id: string;
+  title: string;
+  updated_at?: string | null;
+};
 
-export function SofiaChat() {
+type SofiaGetList = {
+  items?: {
+    conversation_code: string;
+    title?: string | null;
+    updated_at?: string | null;
+    messages?: { role: Role; content: string }[];
+  }[];
+};
+type SofiaGetMessages = { messages?: { role: Role; content: string }[] };
+
+type SofiaPostRes = {
+  conversation_code?: string;
+  reply?: string;
+  meta?: any;
+};
+
+/* ========= utils ========= */
+const normalizeMeta = (m: any): MetaData | null => {
+  if (!m) return null;
+  const asArray = (v: any) => (Array.isArray(v) ? v : v ? [v] : []);
+  return {
+    qcodes: asArray(m.qcodes).map((q: any) =>
+      typeof q === 'string'
+        ? { code: q }
+        : { code: String(q?.code ?? q), score: typeof q?.score === 'number' ? q.score : undefined }
+    ),
+    layers: asArray(m.layers).map((l: any) =>
+      typeof l === 'string'
+        ? { layer: l }
+        : { layer: String(l?.layer ?? l), score: typeof l?.score === 'number' ? l.score : undefined }
+    ),
+    used_knowledge: asArray(m.used_knowledge).map((k: any) => ({
+      id: String(k?.id ?? `${k?.key ?? 'K'}-${Math.random().toString(36).slice(2, 7)}`),
+      key: String(k?.key ?? 'K'),
+      title: (k?.title ?? null) as string | null,
+    })),
+    stochastic: m.stochastic ?? null,
+  };
+};
+
+export default function SofiaChat() {
   const { loading: authLoading, userCode } = useAuth();
 
-  const [convCode, setConvCode] = useState<string>('');
-  const [convs, setConvs] = useState<ConversationItem[]>([]);
-  const [messages, setMessages] = useState<UiMsg[]>([]);
-  const [input, setInput] = useState('');
-  const [sending, setSending] = useState(false);
-  const [initLoaded, setInitLoaded] = useState(false);
-  const [mode, setMode] = useState<
-    'normal' | 'diagnosis' | 'meaning' | 'intent' | 'dark' | 'remake'
-  >('normal');
-
-  // 返信メタ(サーバ側で返すならここに入れる想定。現状はダミー維持可)
+  /* ========= states ========= */
+  const [conversations, setConversations] = useState<ConvListItem[]>([]);
+  const [conversationId, setConversationId] = useState<string | undefined>(undefined);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [meta, setMeta] = useState<MetaData | null>(null);
 
-  const listRef = useRef<HTMLDivElement>(null);
-  const scrollToBottom = useCallback(() => {
-    const el = listRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, []);
-  useEffect(scrollToBottom, [messages, scrollToBottom]);
-
-  // ===== 会話一覧 =====
-  const loadConversations = useCallback(
-    async (uc: string) => {
-      const url = `/api/sofia?user_code=${encodeURIComponent(uc)}`;
-      const rs = await authedFetch(url, { method: 'GET', cache: 'no-store' });
-      const json = await rs.json();
-      const items: ConversationItem[] = Array.isArray(json?.items)
-        ? json.items
-        : [];
-      setConvs(items);
-      return items;
-    },
-    []
-  );
-
-  // ===== メッセージ取得 =====
-  const loadMessages = useCallback(
-    async (uc: string, cc: string) => {
-      if (!cc) {
-        setMessages([]);
-        return;
-      }
-      const url = `/api/sofia?user_code=${encodeURIComponent(
-        uc
-      )}&conversation_code=${encodeURIComponent(cc)}`;
-      const rs = await authedFetch(url, { method: 'GET', cache: 'no-store' });
-      const json = await rs.json();
-      const msgs: UiMsg[] = Array.isArray(json?.messages)
-        ? json.messages.map((m: any) => ({
-            role: m.role,
-            content: m.content,
-            _key: m._key,
-          }))
-        : [];
-      setMessages(ensureUiKeys(msgs));
-      // サーバが meta を返すようにしたらここで setMeta(json.meta)
-    },
-    []
-  );
-
-  // ===== 初期ロード =====
+  const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (authLoading) return;
-    if (!userCode) return; // 未ログイン
+    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
-    (async () => {
-      const items = await loadConversations(userCode);
-      const first = items?.[0]?.conversation_code ?? '';
-      setConvCode(first);
-      if (first) await loadMessages(userCode, first);
-      setInitLoaded(true);
-    })();
-  }, [authLoading, userCode, loadConversations, loadMessages]);
+  const canUse = useMemo(() => !!userCode && !authLoading, [userCode, authLoading]);
 
-  // ===== 会話切り替え =====
-  useEffect(() => {
-    if (!initLoaded || !userCode) return;
-    loadMessages(userCode, convCode);
-  }, [convCode, initLoaded, loadMessages, userCode]);
+  /* ===== 高さを CSS 変数へ反映 ===== */
+  const composeRef = useRef<HTMLDivElement>(null);
+  const metaDockRef = useRef<HTMLDivElement>(null);
 
-  // ===== 新規作成 =====
-  const handleNewConversation = useCallback(() => {
-    const code = `Q${Date.now()}`;
-    setConvCode(code);
-    setMessages([]);
-  }, []);
-
-  const canSend = useMemo(
-    () => input.trim().length > 0 && !sending && !!userCode,
-    [input, sending, userCode]
-  );
-
-  // ===== 送信 =====
-  const handleSend = useCallback(async () => {
-    if (!canSend || !userCode) return;
-    setSending(true);
-
-    const userMsg: UiMsg = { role: 'user', content: input };
-    const next = ensureUiKeys([...messages, userMsg]);
-    setMessages(next);
-    setInput('');
-
-    try {
-      const body = {
-        user_code: userCode, // ← 認証から取得
-        conversation_code: convCode || `Q${Date.now()}`,
-        mode,
-        messages: stripUiKeys(next),
+  useLayoutEffect(() => {
+    const c = composeRef.current;
+    if (c) {
+      const apply = () => {
+        const h = c.offsetHeight || 0;
+        document.body.style.setProperty('--compose-height', `${h}px`);
       };
-
-      const rs = await authedFetch('/api/sofia', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const json = await rs.json();
-
-      // 返信本文
-      const reply = json?.reply ?? '';
-      if (reply) {
-        setMessages(
-          ensureUiKeys([...next, { role: 'assistant', content: reply }])
-        );
-      }
-      // 会話コード（新規時に確定）
-      if (json?.conversation_code && json.conversation_code !== convCode) {
-        setConvCode(json.conversation_code);
-      }
-      // メタ（サーバが返す運用にしたらここで格納）
-      if (json?.meta) setMeta(json.meta as MetaData);
-
-      // 一覧更新
-      loadConversations(userCode).catch(() => void 0);
-    } catch (e) {
-      setMessages(
-        ensureUiKeys([
-          ...next,
-          {
-            role: 'assistant',
-            content: '（通信に失敗しました…もう一度お試しください）',
-          },
-        ])
-      );
-    } finally {
-      setSending(false);
+      apply();
+      const ro = new ResizeObserver(apply);
+      ro.observe(c);
+      return () => ro.disconnect();
     }
-  }, [canSend, convCode, loadConversations, messages, userCode, input, mode]);
+  }, []);
 
-  // Enter 送信（Shift+Enter は改行）
-  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      if (canSend) handleSend();
+  useLayoutEffect(() => {
+    const m = metaDockRef.current;
+    if (m) {
+      const apply = () => {
+        const h = m.offsetHeight || 0;
+        document.body.style.setProperty('--meta-height', `${h}px`);
+      };
+      apply();
+      const ro = new ResizeObserver(apply);
+      ro.observe(m);
+      return () => ro.disconnect();
+    }
+  }, []);
+
+  /* ===== 会話一覧 ===== */
+  const fetchConversations = async () => {
+    if (!userCode) return;
+    try {
+      const r = await fetchWithIdToken(`/api/sofia?user_code=${encodeURIComponent(userCode)}`);
+      if (!r.ok) throw new Error(`list ${r.status}`);
+      const js: SofiaGetList = await r.json().catch(() => ({}));
+
+      const items = (js.items ?? []).map((row) => ({
+        id: row.conversation_code,
+        title: row.title ?? (row.updated_at ? `会話 (${new Date(row.updated_at).toLocaleString()})` : '新しい会話'),
+        updated_at: row.updated_at ?? null,
+      })) as ConvListItem[];
+
+      setConversations(items);
+      if (!conversationId && items[0]?.id) setConversationId(items[0].id);
+    } catch (e) {
+      console.error('[SofiaChat] fetchConversations error:', e);
     }
   };
 
-  // ===== UI =====
-  if (authLoading) {
-    return <div style={{ padding: 16 }}>読み込み中…</div>;
-  }
-  if (!userCode) {
-    return (
-      <div style={{ padding: 16 }}>
-        ログインが必要です。サインイン後にチャットを開始できます。
-      </div>
-    );
-  }
+  /* ===== メッセージ ===== */
+  const fetchMessages = async (convId: string) => {
+    if (!userCode || !convId) return;
+    try {
+      const r = await fetchWithIdToken(
+        `/api/sofia?user_code=${encodeURIComponent(userCode)}&conversation_code=${encodeURIComponent(convId)}`
+      );
+      if (!r.ok) throw new Error(`messages ${r.status}`);
+      const js: SofiaGetMessages = await r.json().catch(() => ({}));
+      const rows = (js.messages ?? []).map((m, i) => ({
+        id: `${i}-${m.role}-${m.content.slice(0, 8)}`,
+        role: m.role,
+        content: m.content,
+      })) as Message[];
+      setMessages(rows);
+    } catch (e) {
+      console.error('[SofiaChat] fetchMessages error:', e);
+    }
+  };
 
+  useEffect(() => {
+    if (!canUse) return;
+    fetchConversations();
+  }, [canUse, userCode]);
+
+  useEffect(() => {
+    if (!canUse || !conversationId) return;
+    fetchMessages(conversationId);
+  }, [canUse, conversationId]);
+
+  /* ===== 送信 ===== */
+  const handleSend = async (input: string, _files?: File[] | null) => {
+    const text = (input ?? '').trim();
+    if (!text || !userCode) return {};
+
+    const optimistic: Message = {
+      id: (globalThis.crypto?.randomUUID?.() ?? `tmp-${Date.now()}`),
+      role: 'user',
+      content: text,
+      created_at: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, optimistic]);
+
+    try {
+      const msgsForApi = [...messages, optimistic].map((m) => ({ role: m.role, content: m.content }));
+      const body = {
+        user_code: userCode,
+        conversation_code: conversationId ?? '',
+        mode: 'normal',
+        messages: msgsForApi,
+      };
+      const r = await fetchWithIdToken('/api/sofia', { method: 'POST', body: JSON.stringify(body) });
+      const js: SofiaPostRes = await r.json().catch(() => ({}));
+
+      if (js.conversation_code && js.conversation_code !== conversationId) {
+        setConversationId(js.conversation_code);
+      }
+      if (js.reply) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: (globalThis.crypto?.randomUUID?.() ?? `a-${Date.now()}`),
+            role: 'assistant',
+            content: js.reply as string,
+            created_at: new Date().toISOString(),
+          },
+        ]);
+      }
+      if (js.meta) setMeta(normalizeMeta(js.meta));
+
+      fetchConversations();
+    } catch (e) {
+      console.error('[SofiaChat] send error:', e);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: (globalThis.crypto?.randomUUID?.() ?? `e-${Date.now()}`),
+          role: 'assistant',
+          content: '（通信に失敗しました。時間をおいて再度お試しください）',
+        },
+      ]);
+    }
+    return {};
+  };
+
+  /* ===== その他 ===== */
+  const handleNewChat = () => {
+    setConversationId(undefined);
+    setMessages([]);
+  };
+
+  const handleSelectConversation = (id: string) => {
+    setConversationId(id);
+    setIsMobileMenuOpen(false);
+  };
+
+  /* ========= guard ========= */
+  if (authLoading) return <div style={styles.center}>読み込み中…</div>;
+  if (!userCode) return <div style={styles.center}>ログインが必要です</div>;
+
+  /* ========= render ========= */
   return (
-    <div
-      style={{
-        height: '85vh',
-        maxWidth: 640,
-        margin: '0 auto',
-        padding: '8px 12px',
-        boxSizing: 'border-box',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-      }}
-    >
-{/* ヘッダー（固定高さ・1段に収める） */}
-<div
-  style={{
-    flex: '0 0 auto',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 6,
-    padding: '4px 6px',          // ← 高さを薄くする
-    fontSize: 13,                // ← 全体のフォント少し小さめ
-  }}
->
-  <div style={{ fontWeight: 600 }}>iros Chat</div>
-
-  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'nowrap' }}>
-    <div style={{ display: 'flex', flexDirection: 'column', fontSize: 11 }}>
-      <span style={{ opacity: 0.6 }}>会話コード</span>
-      <select
-        value={convCode}
-        onChange={(e) => setConvCode(e.target.value)}
-        style={{ width: 160, padding: '2px 4px', fontSize: 12 }}
-      >
-        {convs.map((c) => (
-          <option key={c.conversation_code} value={c.conversation_code}>
-            {c.conversation_code}
-          </option>
-        ))}
-      </select>
-    </div>
-
-    <div style={{ display: 'flex', flexDirection: 'column', fontSize: 11 }}>
-      <span style={{ opacity: 0.6 }}>モード</span>
-      <select
-        value={mode}
-        onChange={(e) => setMode(e.target.value as any)}
-        style={{ width: 100, padding: '2px 4px', fontSize: 12 }}
-      >
-        <option value="normal">通常</option>
-        <option value="diagnosis">診断</option>
-        <option value="meaning">意味付け</option>
-        <option value="intent">意図</option>
-        <option value="dark">闇の物語</option>
-        <option value="remake">リメイク</option>
-      </select>
-    </div>
-
-    <button
-      onClick={handleNewConversation}
-      style={{
-        padding: '4px 6px',
-        fontSize: 12,
-        border: '1px solid #ccc',
-        borderRadius: 6,
-        background: '#f3f4f6',
-      }}
-    >
-      新規
-    </button>
-  </div>
-</div>
-
-
-      {/* メッセージエリア */}
-      <div
-        ref={listRef}
-        style={{
-          flex: '1 1 auto',
-          minHeight: 0,
-          overflowY: 'auto',
-          padding: 12,
-          background: 'linear-gradient(#f9fafb, #f3f4f6)',
-          border: '1px solid #e5e7eb',
-          borderRadius: 12,
-        }}
-      >
-        {messages.map((m, i) => (
-          <MessageBubble
-            key={m._key || `${i}-${m.role}`}
-            role={m.role}
-            text={m.content}
-          />
-        ))}
-        {!messages.length && (
-          <div
-            style={{ opacity: 0.6, fontSize: 13, textAlign: 'center', paddingTop: 24 }}
-          >
-            ここに会話が表示されます
-          </div>
-        )}
-      </div>
-
-      {/* 入力バー */}
-      <div
-        style={{
-          flex: '0 0 auto',
-          display: 'flex',
-          gap: 8,
-          alignItems: 'flex-end',
-          borderTop: '1px solid #e5e7eb',
-          paddingTop: 8,
-        }}
-      >
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={onKeyDown}
-          rows={2}
-          placeholder="メッセージ入力…"
-          style={{
-            flex: 1,
-            padding: 10,
-            borderRadius: 10,
-            border: '1px solid #e5e7eb',
-            resize: 'none',
-            maxHeight: 160,
-          }}
+    <>
+      <div className="sof-header-fixed">
+        <Header
+          title="会話履歴"
+          isMobile
+          onShowSideBar={() => setIsMobileMenuOpen(true)}
+          onCreateNewChat={handleNewChat}
         />
-        <button
-          onClick={handleSend}
-          disabled={!canSend}
-          style={{
-            padding: '10px 14px',
-            borderRadius: 10,
-            border: '1px solid #2563eb',
-            background: canSend ? '#3b82f6' : '#93c5fd',
-            color: '#fff',
-            cursor: canSend ? 'pointer' : 'not-allowed',
-            height: 42,
-          }}
-        >
-          送信
-        </button>
       </div>
 
-      {/* 共鳴メタの表示（サーバが返す場合に活用） */}
-      <MetaPanel meta={meta ?? {}} />
-    </div>
+      <SidebarMobile
+        isOpen={isMobileMenuOpen}
+        onClose={() => setIsMobileMenuOpen(false)}
+        conversations={conversations}
+        onSelect={handleSelectConversation}
+        onDelete={() => {}}
+        onRename={() => {}}
+        userInfo={{ id: userCode, name: userCode, userType: 'member', credits: 0 }}
+      />
+
+      <MessageList messages={messages} />
+      <div ref={endRef} />
+
+      <div className="sof-meta-dock" ref={metaDockRef}>
+        <MetaPanel meta={meta} />
+      </div>
+
+      <div className="sof-compose-dock" ref={composeRef}>
+        <ChatInput onSend={handleSend} onPreview={() => {}} onCancelPreview={() => {}} />
+      </div>
+
+      <div className="sof-footer-spacer" />
+    </>
   );
 }
+
+const styles: Record<string, React.CSSProperties> = {
+  center: { display: 'grid', placeItems: 'center', minHeight: '60vh' },
+};

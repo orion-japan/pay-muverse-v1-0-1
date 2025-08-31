@@ -13,13 +13,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 /* =========================
    Portal 先のフッター高さを“確実に”取得して
    CSS 変数（--footer-h / --footer-safe-pad）を更新するフック
-   - Portal での順序ズレ対策：まず #mu-footer-root の出現を待つ
-   - 出現後は ResizeObserver + resize で追従
    ========================= */
 function usePortalFooterPadding(enabled: boolean) {
   const roRef = useRef<ResizeObserver | null>(null)
 
-  // DOM 確定後に実行する
   useLayoutEffect(() => {
     if (!enabled) {
       document.documentElement.style.setProperty('--footer-h', '0px')
@@ -46,7 +43,6 @@ function usePortalFooterPadding(enabled: boolean) {
       roRef.current = new ResizeObserver(update)
       roRef.current.observe(footerEl)
     }
-
     window.addEventListener('resize', update)
 
     return () => {
@@ -82,12 +78,13 @@ function LayoutBody({ children }: { children: React.ReactNode }) {
   const isMuAI =
     pathname?.startsWith('/mu_ai') === true ||
     pathname?.startsWith('/mu_full') === true
-  const isIros = pathname?.startsWith('/iros') === true // ← 追加：/iros 判定
+  const isIros = pathname?.startsWith('/iros') === true
+  const isSofia = pathname?.startsWith('/sofia') === true
 
-  // フッターが表示されるページだけ CSS 変数を更新
+  // ★ /credit 以外はフッターの高さを測って CSS 変数を更新（/sofia も含める）
   usePortalFooterPadding(!isCredit)
 
-  // main の padding-bottom を 1 箇所で制御
+  // main の padding-bottom（/credit だけ 0、/sofia でもフッター高さぶん確保）
   const mainPad = useMemo(
     () => (isCredit ? '0' : 'var(--footer-safe-pad, 56px)'),
     [isCredit]
@@ -95,8 +92,8 @@ function LayoutBody({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      {/* /mu_ai, /mu_full, /iros では PAY 側ヘッダー非表示 */}
-      {!(isMuAI || isIros) && mounted && (
+      {/* /mu_ai, /mu_full, /iros, /sofia では PAY 側ヘッダー非表示 */}
+      {!(isMuAI || isIros || isSofia) && mounted && (
         <Header onLoginClick={() => setShowLogin(true)} />
       )}
 
@@ -112,14 +109,15 @@ function LayoutBody({ children }: { children: React.ReactNode }) {
         <div className={`mu-page ${isMuAI ? 'mu-page--wide' : ''}`}>{children}</div>
       </main>
 
+      {/* ★ /credit 以外はフッターを表示（/sofia も表示） */}
       {!isCredit && mounted && (
         <FooterPortal>
           <Footer />
         </FooterPortal>
       )}
 
-      {/* ヘッダー由来のモーダルなので表示条件をヘッダーと揃える */}
-      {!(isMuAI || isIros) && mounted && (
+      {/* ヘッダー由来のモーダル → ヘッダーを出さないページでは非表示（/sofia も非表示） */}
+      {!(isMuAI || isIros || isSofia) && mounted && (
         <LoginModal
           isOpen={showLogin}
           onClose={() => setShowLogin(false)}
@@ -161,7 +159,8 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
   const isMuAI =
     pathname?.startsWith('/mu_ai') === true ||
     pathname?.startsWith('/mu_full') === true
-  const isIros = pathname?.startsWith('/iros') === true // ← 追加
+  const isIros = pathname?.startsWith('/iros') === true
+  const isSofia = pathname?.startsWith('/sofia') === true
 
   // SW 登録＋フォールバック受信＋subscription 登録（副作用のみ）
   useEffect(() => {
@@ -199,7 +198,6 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
   }, [userCode])
 
   return (
-    // ここは常に同じツリーを出す。微差吸収のため suppressHydrationWarning を付与
     <div className={`app-container ${isMuAI ? 'mu-ai' : ''}`} suppressHydrationWarning>
       <LayoutBody>{children}</LayoutBody>
     </div>

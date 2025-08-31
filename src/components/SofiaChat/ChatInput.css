@@ -1,0 +1,213 @@
+/* =========================================================
+   Sofia Chat — 入力バー + 吹き出し + Meta（1ファイルに統合）
+   - .sof-compose: フッター直上に固定
+   - .sof-meta-sticky: 入力バー直上に追従
+   - .sof-msgs: 下余白を計算して“隠れ”を防止（重複定義を統合）
+   ========================================================= */
+
+/* 変数（必要なら値だけ変えてOK） */
+:root{
+  --sof-shell-w:   min(960px, calc(100vw - 24px));  /* 入力バーの横幅（中央寄せ） */
+  --sof-thread-w:  min(780px, calc(100vw - 48px));  /* 吹き出し列の横幅（本文の細い帯） */
+  --compose-h:     64px;                            /* 入力バーの基準高さ（固定想定） */
+  --footer-safe-pad: 0px;                           /* 下部ナビの高さ（レイアウト側で上書き可） */
+}
+
+/* ======== ChatInput をフッター直上へ固定（GPT風） ======== */
+.sof-compose{
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: var(--footer-safe-pad, 0px);
+  width: var(--sof-shell-w);
+  min-height: var(--compose-h);
+
+  display: grid;
+  grid-template-columns: 1fr auto auto auto; /* 入力 / 画像 / クリア / 送信（順序はHTMLに準拠） */
+  gap: 10px;
+  padding: 14px 16px;
+
+  background: #fff;
+  border-top: 1px solid #e5e7eb;
+  box-shadow: 0 -2px 10px rgba(0,0,0,.06);
+  z-index: 60;
+}
+
+/* 入力欄（大きめ・丸み） */
+.sof-input{
+  width: 100%;
+  height: 48px;
+  padding: 12px 16px;
+  border: 1px solid #d1d5db;
+  border-radius: 18px;
+  background: #fff;
+  font-size: 15px;
+  line-height: 1.5;
+  outline: none;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,.06);
+}
+.sof-input:focus{
+  border-color: #6b8cff;
+  box-shadow: 0 0 0 2px rgba(107,140,255,.15);
+}
+
+/* ボタン類（共通） */
+.sof-btn{
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  transition: background .15s, transform .08s, color .15s, border-color .15s;
+}
+.sof-btn:hover{ background:#f3f4f6; }
+.sof-btn:active{ transform: scale(.98); }
+.sof-btn.primary{
+  background:#6b8cff;
+  border-color:#6b8cff;
+  color:#fff;
+}
+.sof-btn.primary:hover{ background:#4f6de6; }
+
+/* ファイル入力（ボタン風） */
+.sof-file{
+  align-self: center;
+  height: 40px;
+  font-size: 13px;
+  color: #374151;
+  border-radius: 12px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  padding: 6px 10px;
+}
+.sof-file:hover{ background:#f3f4f6; }
+.sof-file::file-selector-button{
+  margin-right: 10px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 10px;
+  background: #e5e7eb;
+  color: #111827;
+  cursor: pointer;
+}
+.sof-file:hover::file-selector-button{ background:#dfe3e8; }
+
+/* モバイル最適化：ボタンを縦積み／セーフエリア考慮 */
+@media (max-width: 520px){
+  .sof-compose{
+    width: min(600px, calc(100vw - 16px));
+    grid-template-columns: 1fr auto; /* 入力 + 送信 */
+    grid-template-rows: auto auto;   /* 画像/クリアは2段目 */
+    gap: 8px;
+    padding: 12px;
+    --compose-h: 60px;
+  }
+  .sof-file{ grid-column: 1 / 2; }
+  .sof-compose .sof-btn:not(.primary){ grid-column: 2 / 3; }
+}
+@supports (padding: max(0px)){
+  .sof-compose{ padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+}
+
+/* ======== Meta（Resonance インジケータ）— 入力バーの直上で追従 ======== */
+.sof-meta-sticky{
+  position: sticky;
+  bottom: calc(var(--footer-safe-pad, 0px) + var(--compose-h, 64px));
+  z-index: 50;                 /* 入力バー(60)の一段下でOK */
+  width: var(--sof-shell-w);
+  margin: 0 auto;
+  padding: 8px 0;
+}
+
+/* ======== メッセージ一覧：入力バーに隠れないよう下余白を確保 ======== */
+.sof-msgs{
+  width: var(--sof-thread-w);
+  margin: 0 auto;
+
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  /* ここで“下余白”を一元管理（以前の上書きバグを解消） */
+  padding-top: 8px;
+  padding-bottom: calc(var(--compose-h, 64px) + var(--footer-safe-pad, 0px) + 24px);
+
+  align-items: stretch;   /* 子要素の align-self が素直に効く */
+  text-align: initial;    /* どこかの center 指定を打ち消し */
+}
+
+/* ======== 吹き出し ======== */
+
+/* 共通 */
+.sof-msgs .sof-bubble{
+  max-width: 86%;
+  padding: 10px 14px;
+  border-radius: 16px;
+  line-height: 1.6;
+  font-size: 14px;
+  word-break: break-word;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04);
+
+  /* デフォルトは左寄せ */
+  align-self: flex-start;
+  margin-left: 0;
+  margin-right: auto;
+}
+
+/* ユーザー（右寄せ） */
+.sof-msgs .sof-bubble.is-user{
+  align-self: flex-end;
+  margin-left: 0;
+  margin-right: 0;
+
+  background: #6b8cff;
+  color: #ffffff;
+  border-color: #6b8cff;
+  border-bottom-right-radius: 4px;
+}
+
+/* アシスタント（左寄せ） */
+.sof-msgs .sof-bubble.is-assistant{
+  align-self: flex-start;
+  margin-left: 0;
+  margin-right: auto;
+
+  background: #f8fafc;
+  color: #111827;
+  border-color: #e5e7eb;
+  border-bottom-left-radius: 4px;
+}
+
+/* 役割ラベル & 本文（任意） */
+.sof-bubble__role{
+  font-size: 11px;
+  letter-spacing: .02em;
+  color: #94a3b8;
+}
+.sof-bubble.is-user .sof-bubble__role{ color: rgba(255,255,255,.8); }
+.sof-bubble__text{ white-space: pre-wrap; }
+
+/* 添付画像（任意） */
+.sof-bubble__imgs{
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px,1fr));
+  gap: 6px;
+}
+.sof-bubble__imgs img{
+  width: 100%;
+  height: 96px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+}
+
+/* スマホは少し広げる */
+@media (max-width: 480px){
+  .sof-msgs .sof-bubble{ max-width: 92%; }
+}

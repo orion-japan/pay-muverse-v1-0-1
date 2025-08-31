@@ -1,180 +1,369 @@
-/* =========================================
-   Sofia Light Resonance Theme
-   - 黒背景は廃止
-   - 翡翠グリーン × 青白 × 淡金をベース
-   - 履歴リスト・吹き出しを明確に視認可能に
-   ========================================= */
+/* =========================================================
+   SofiaChat – perfect pinning (header / meta / input)
+   ========================================================= */
 
-   .sofia-wrap{
-    --bg-top:#f8fbff;       /* 淡い青白 */
-    --bg-mid:#fafffc;       /* 緑寄り白 */
-    --bg-bottom:#ffffff;    /* 白 */
-    --line:#dfe8ef;
-  
-    --text:#1b2c28;
-    --muted:#607872;
-  
-    --sofia:#3cc7a6;        /* 翡翠グリーン */
-    --sofia-light:#d8f7ef;
-    --sofia-deep:#2a7363;
-    --blue:#64b6ff;         /* 補助青 */
-    --gold:#d9c97c;         /* 淡金 */
-  
-    --shadow-sm:0 3px 8px rgba(0,0,0,.05);
-    --shadow-md:0 8px 20px rgba(0,0,0,.08);
-  
-    color:var(--text);
-    background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg-mid) 50%, var(--bg-bottom) 100%);
-    min-height:100%;
-    display:flex; flex-direction:column;
+/* ---- Tokens ---- */
+:root{
+  --sof-shell-w: min(960px, calc(100vw - 24px)); /* 共通幅 */
+  --sof-thread-w: min(780px, calc(100vw - 48px));/* スレッド幅 */
+
+  --sof-header-h: 56px;                          /* Header 高さ */
+
+  --footer-safe-pad: var(--footer-h, 60px);      /* PAY フッター高（LayoutClient が上書き） */
+  --compose-height: 64px;                         /* 入力の実高（JSで上書き） */
+  --meta-height: 48px;                            /* Meta の実高（だいたい / 小さめでOK） */
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  --sof-border: 1px solid #e6e6e6;
+  --sof-bg: #fff;
+  --sof-bg-page: #f7f8fb;
+  --sof-shadow-top: 0 -2px 10px rgba(0,0,0,.06);
+}
+
+/* =========================================================
+   Scaffold
+   ========================================================= */
+.sofia-container{
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--sof-bg-page);
+}
+.sofia-page-main{ flex: 1 1 auto; overflow-y: auto; }
+.sofia-page-wrap{
+  width: var(--sof-shell-w);
+  margin: 0 auto;
+  padding-top: calc(var(--sof-header-h) + 12px); /* Header 分の逃げ */
+}
+
+/* 共通で中央寄せしたい箱 */
+.sof-header-slot,
+.sof-meta-dock,
+.sof-compose-dock,
+.sofia-page-wrap{
+  width: var(--sof-shell-w);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* =========================================================
+   HEADER: 中身は触らず“入れ物”だけ固定
+   ========================================================= */
+.sof-header-slot{
+  position: sticky;   /* スクロールしても上に残る */
+  top: 0;
+  z-index: 40;        /* meta(50) / input(60) より下でOK */
+  height: var(--sof-header-h);
+  display: flex;      /* 子(Header)を縦中央に */
+  align-items: center;
+  padding: 0 0;       /* Header 自体の余白に任せる */
+  background: linear-gradient(180deg,#fafafa,#ffffff);
+  border-bottom: 1px solid #e5e7eb;
+  box-shadow: 0 2px 8px rgba(0,0,0,.06);
+}
+
+/* Header の中身（ボタン・タイトル）は一切指定しない
+   → これでボタンや文字のズレが起きません */
+
+/* =========================================================
+   MESSAGE LIST
+   ========================================================= */
+.sof-msgs{
+  width: var(--sof-thread-w);
+  margin: 0 auto;
+
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  padding: 8px 12px;
+  /* 下側は固定 UI(footer + meta + input) に被らないよう余白を確保 */
+  padding-bottom: calc(var(--footer-safe-pad) + var(--meta-height) + var(--compose-height) + 24px);
+
+  align-items: stretch;
+  text-align: initial;
+}
+
+.sof-empty{ color:#94a3b8; text-align:center; padding:24px 8px; font-size:14px; }
+
+/* バブル */
+.sof-bubble{
+  max-width: 86%;
+  padding: 10px 14px;
+  border-radius: 16px;
+  line-height: 1.6;
+  font-size: 14px;
+  word-break: break-word;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04);
+
+  align-self: flex-start;
+  margin-left: 0;
+  margin-right: auto;
+}
+.sof-bubble.is-user{
+  align-self: flex-end;
+  margin-left: 0; margin-right: 0;
+  background: #6b8cff; color:#fff; border-color:#6b8cff;
+  border-bottom-right-radius: 4px;
+}
+.sof-bubble.is-assistant{
+  align-self: flex-start;
+  margin-left: 0; margin-right: auto;
+  background: #f8fafc; color:#111827; border-color:#e5e7eb;
+  border-bottom-left-radius: 4px;
+}
+.sof-bubble__role{ font-size:11px; letter-spacing:.02em; color:#94a3b8; }
+.sof-bubble.is-user .sof-bubble__role{ color:rgba(255,255,255,.8); }
+.sof-bubble__text{ white-space: pre-wrap; }
+
+.sof-bubble__imgs{ display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr)); gap:6px; }
+.sof-bubble__imgs img{
+  width:100%; height:96px; object-fit:cover; border-radius:10px;
+  border:1px solid #e5e7eb; background:#fff;
+}
+
+@media (max-width: 480px){
+  .sof-bubble{ max-width: 92%; }
+}
+
+/* =========================================================
+   META (indicator) – フッター直上（中身があるときだけ）
+   ========================================================= */
+.sof-meta-dock{
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: var(--footer-safe-pad);    /* ← フッターのすぐ上 */
+  z-index: 50;
+
+  padding: 8px 12px 6px;
+  background: rgba(255,255,255,.95);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+
+  border-top: var(--sof-border);
+  box-shadow: var(--sof-shadow-top);
+}
+
+/* MetaPanel 側の強制上書き（“緑の帯”などの癖を消す） */
+.sof-meta-dock .meta-panel{
+  background: #fff !important;
+  border: 1px solid #e5e7eb !important;
+  box-shadow: none !important;
+}
+.sof-meta-dock .meta-label{
+  border-left: none !important;
+  color: #667085;
+}
+
+/* =========================================================
+   INPUT – Meta のさらに上
+   ========================================================= */
+.sof-compose-dock{
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--footer-safe-pad) + var(--meta-height)); /* ← Meta 分だけ持ち上げ */
+  z-index: 60;
+
+  background: rgba(255,255,255,0.95);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  border-top: var(--sof-border);
+  box-shadow: var(--sof-shadow-top);
+  padding: 8px 12px calc(8px + var(--safe-bottom));
+}
+
+/* さらに保険で“物理スペーサ”を使う場合（任意） */
+.sof-footer-spacer{
+  height: calc(var(--footer-safe-pad) + var(--meta-height) + var(--compose-height) + 24px);
+}
+
+@media (max-width: 640px){
+  :root{
+    --sof-shell-w: calc(100vw - 12px);
+    --sof-thread-w: calc(100vw - 24px);
   }
-  
-  /* ---- Header ---- */
-  .sofia-header{
-    border-bottom:1px solid var(--line);
-    padding:14px 20px;
-    display:flex; justify-content:space-between; align-items:center;
-    background:rgba(255,255,255,.8);
-    backdrop-filter: blur(6px);
+  .sof-footer-spacer{
+    height: calc(var(--footer-safe-pad) + var(--meta-height) + var(--compose-height) + 36px);
   }
-  .sofia-head-title{ display:flex; gap:12px; align-items:center; }
-  .sofia-logo{
-    width:40px; height:40px; border-radius:10px; background:#fff; border:1px solid var(--line);
-    display:grid; place-items:center; font-size:20px; box-shadow:var(--shadow-sm);
-  }
-  .title{ font-weight:700; }
-  .subtitle{ font-size:12px; color:var(--muted); }
-  
-  /* ---- Mode Pills ---- */
-  .pill{ display:flex; gap:4px; padding:4px; border:1px solid var(--line); border-radius:999px; background:#fff; }
-  .pill-btn{ padding:6px 12px; border:none; background:transparent; cursor:pointer; border-radius:999px; }
-  .pill-btn.active{ background:var(--sofia-light); color:#124136; font-weight:600; }
-  
-  /* ---- Card ---- */
-  .card-wrap{ padding:16px 20px; display:grid; gap:12px; }
-  .card{
-    background:#fff; border:1px solid var(--sofia); border-radius:14px; padding:14px;
-    box-shadow:var(--shadow-sm);
-  }
-  .card-title{ color:var(--sofia-deep); font-weight:700; margin-bottom:8px; }
-  .card-grid{ display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
-  .card-grid .wide{ grid-column:1 / -1; }
-  .card label{ font-size:12px; color:var(--gold); }
-  .card p{ margin:0; line-height:1.6; }
-  
-  /* ---- Code/User Bar ---- */
-  .bar{ display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:12px 20px; }
-  .bar-group label{ font-size:12px; color:var(--muted); margin-bottom:4px; display:block; }
-  .inp,.sel{
-    width:100%; border:1px solid var(--line); border-radius:8px;
-    padding:8px 10px; background:#fff; color:var(--text); box-shadow:var(--shadow-sm);
-  }
-  
-  /* ---- Chat List ---- */
-  .chat-list{
-    flex:1; overflow:auto; padding:16px 20px;
-    display:flex; flex-direction:column; gap:12px;
-  }
-  
-  /* Bubble */
-  .bubble-row{ display:flex; gap:10px; }
-  .bubble-row.right{ flex-direction:row-reverse; }
-  
-  .avatar{ width:34px; height:34px; border-radius:8px; background:#fff; border:1px solid var(--line);
-    display:grid; place-items:center; font-size:16px; }
-  
-  .bubble{
-    max-width:80%; border-radius:12px; padding:10px 12px;
-    background:#fff; border:1px solid var(--line); box-shadow:var(--shadow-sm);
-    line-height:1.6;
-  }
-  .bubble-name{ font-size:12px; color:var(--muted); margin-bottom:4px; }
-  
-  /* User bubble */
-  .bubble-row.right .bubble{
-    background:var(--sofia-light); border-color:var(--sofia); color:var(--text);
-  }
-  .bubble-row.right .bubble-name{ color:var(--sofia-deep); }
-  
-  /* Sofia bubble */
-  .bubble-row.left .bubble{ border-left:4px solid var(--sofia); }
-  .bubble-row.left .bubble-name{ color:var(--sofia-deep); font-weight:600; }
-  
-  /* ---- Composer ---- */
-  .composer{
-    border-top:1px solid var(--line); padding:12px 20px; background:rgba(255,255,255,.9);
-    display:flex; flex-direction:column; gap:8px;
-  }
-  .composer textarea{
-    width:100%; min-height:72px; border:1px solid var(--line); border-radius:10px;
-    padding:10px; resize:vertical; background:#fff; color:var(--text);
-  }
-  .composer-actions{ display:flex; justify-content:flex-end; gap:8px; }
-  .btn{ background:var(--sofia); color:#fff; border:none; border-radius:8px; padding:8px 14px; cursor:pointer; }
-  .btn.ghost{ background:#fff; color:var(--text); border:1px solid var(--line); }
-  .btn:disabled{ opacity:.5; cursor:not-allowed; }
-  
-  /* ---- Typing ---- */
-  .typing{ display:flex; gap:4px; margin-left:44px; }
-  .dot{ width:8px; height:8px; border-radius:50%; background:var(--sofia); opacity:.7;
-    animation:blink 1.2s infinite ease-in-out; }
-  .dot:nth-child(2){ animation-delay:.2s; }
-  .dot:nth-child(3){ animation-delay:.4s; }
-  @keyframes blink{ 0%,80%,100%{transform:scale(.6);opacity:.4} 40%{transform:scale(1);opacity:1} }
-  
-  /* ---- Conversation List ---- */
-  .list-panel{ padding:12px 20px; }
-  .list-title{ font-weight:700; margin-bottom:6px; color:var(--sofia-deep); }
-  .conv-list{ list-style:none; padding:0; margin:0; display:grid; gap:8px; }
-  .conv-item{
-    background:#fff; border:1px solid var(--line); border-radius:10px; padding:10px;
-    cursor:pointer; box-shadow:var(--shadow-sm); transition:.1s;
-  }
-  .conv-item:hover{ transform:translateY(-1px); box-shadow:var(--shadow-md); }
-  .conv-item.active{ border-color:var(--sofia); box-shadow:0 0 0 2px rgba(60,199,166,.2); }
-  .conv-code{ font-weight:700; color:#124136; }
-  .conv-preview{ font-size:13px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .conv-time{ font-size:11px; color:#9aa9a4; }
-  .conv-empty{ border:1px dashed var(--line); padding:10px; text-align:center; color:#9aa9a4; }
+}
+
+/* =========================================================
+   mu-main の変な装飾を殺す（縦の色線など）
+   ========================================================= */
+body.mu-body .mu-main:before,
+body.mu-body .mu-main:after{
+  content: none !important;
+  display: none !important;
+}
+
+:root{
+  --sof-shell-w: min(960px, calc(100vw - 24px));
+  --sof-thread-w: min(780px, calc(100vw - 48px));
+  --sof-header-h: 56px;
+
+  --footer-safe-pad: var(--footer-h, 60px);
+  --compose-height: 64px;
+  --meta-height: 48px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  --sof-border: 1px solid #e6e6e6;
+  --sof-bg: #fff;
+  --sof-bg-page: #f7f8fb;
+  --sof-shadow-top: 0 -2px 10px rgba(0,0,0,.06);
+}
+
+/* Layout */
+.sofia-container{ min-height:100dvh; display:flex; flex-direction:column; background:var(--sof-bg-page); }
+.sofia-page-main{ flex:1 1 auto; overflow-y:auto; }
+.sofia-page-wrap{ width:var(--sof-shell-w); margin:0 auto; padding-top:calc(var(--sof-header-h) + 12px); }
+
+.sof-header-slot,.sof-meta-dock,.sof-compose-dock,.sofia-page-wrap{
+  width:var(--sof-shell-w); margin-left:auto; margin-right:auto;
+}
+
+/* Header（中身に触らない） */
+.sof-header-slot{
+  position: sticky; top: 0; z-index: 40;
+  height: var(--sof-header-h);
+  display:flex; align-items:center;
+  background: linear-gradient(180deg,#fafafa,#ffffff);
+  border-bottom: 1px solid #e5e7eb;
+  box-shadow: 0 2px 8px rgba(0,0,0,.06);
+}
+
+/* Message list */
+.sof-msgs{
+  width:var(--sof-thread-w); margin:0 auto;
+  display:flex; flex-direction:column; gap:10px;
+  padding:8px 12px;
+  padding-bottom: calc(var(--footer-safe-pad) + var(--meta-height) + var(--compose-height) + 24px);
+  align-items:stretch; text-align:initial;
+}
+.sof-empty{ color:#94a3b8; text-align:center; padding:24px 8px; font-size:14px; }
+
+.sof-bubble{
+  max-width:86%; padding:10px 14px; border-radius:16px; line-height:1.6; font-size:14px;
+  word-break:break-word; background:#fff; border:1px solid #e5e7eb; box-shadow:0 1px 2px rgba(0,0,0,.04);
+  align-self:flex-start; margin-left:0; margin-right:auto;
+}
+.sof-bubble.is-user{
+  align-self:flex-end; margin-left:0; margin-right:0;
+  background:#6b8cff; color:#fff; border-color:#6b8cff; border-bottom-right-radius:4px;
+}
+.sof-bubble.is-assistant{
+  align-self:flex-start; margin-left:0; margin-right:auto;
+  background:#f8fafc; color:#111827; border-color:#e5e7eb; border-bottom-left-radius:4px;
+}
+.sof-bubble__role{ font-size:11px; letter-spacing:.02em; color:#94a3b8; }
+.sof-bubble.is-user .sof-bubble__role{ color:rgba(255,255,255,.8); }
+.sof-bubble__text{ white-space: pre-wrap; }
+.sof-bubble__imgs{ display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr)); gap:6px; }
+.sof-bubble__imgs img{ width:100%; height:96px; object-fit:cover; border-radius:10px; border:1px solid #e5e7eb; background:#fff; }
+
+@media (max-width:480px){ .sof-bubble{ max-width:92%; } }
+
+/* Meta（ある時だけ白カード・固定） */
+.sof-meta-dock{
+  position: fixed; left:50%; transform:translateX(-50%);
+  bottom: var(--footer-safe-pad); z-index:50;
+  padding:8px 12px 6px; background:rgba(255,255,255,.95);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  border-top: var(--sof-border); box-shadow: var(--sof-shadow-top);
+}
+.sof-meta-dock .meta-panel{ background:#fff !important; border:1px solid #e5e7eb !important; box-shadow:none !important; }
+.sof-meta-dock .meta-label{ border-left:none !important; color:#667085; }
+
+/* Input（Meta のさらに上） */
+.sof-compose-dock{
+  position: fixed; left:50%; transform:translateX(-50%);
+  bottom: calc(var(--footer-safe-pad) + var(--meta-height)); z-index:60;
+  background:rgba(255,255,255,.95); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  border-top: var(--sof-border); box-shadow: var(--sof-shadow-top);
+  padding: 8px 12px calc(8px + var(--safe-bottom));
+}
+
+/* 物理スペーサ（保険） */
+.sof-footer-spacer{ height: calc(var(--footer-safe-pad) + var(--meta-height) + var(--compose-height) + 24px); }
+
+@media (max-width:640px){
+  :root{ --sof-shell-w: calc(100vw - 12px); --sof-thread-w: calc(100vw - 24px); }
+  .sof-footer-spacer{ height: calc(var(--footer-safe-pad) + var(--meta-height) + var(--compose-height) + 36px); }
+}
+
+/* mu-main の縦色線などを無効化 */
+body.mu-body .mu-main:before,
+body.mu-body .mu-main:after{ content:none !important; display:none !important; }
 
 
-  .conv-item{
-    background:#fff;
-    border:1px solid var(--line);
-    border-radius:10px;
-    padding:12px;
-    cursor:pointer;
-    box-shadow:var(--shadow-sm);
-    transition: all .15s ease;
-    text-align:left;
-  }
-  
-  .conv-item:hover{
-    background: var(--sofia-light);
-    border-color: var(--sofia);
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-md);
-  }
-  
-  .conv-item.active{
-    background: var(--sofia-light);
-    border-color: var(--sofia);
-    box-shadow: 0 0 0 2px rgba(60,199,166,.25);
-  }
-  .bubble-row {
-    display: flex;
-    gap: 10px;
-    padding: 0 8px;          /* ← 画面端に余白を少しだけ */
-  }
-  
-  .bubble {
-    flex: 1;                 /* ← 幅を親に合わせる */
-    max-width: 100%;         /* ← 80% 制限を外す */
-    border-radius: 12px;
-    padding: 10px 12px;
-    background: #fff;
-    border: 1px solid var(--line);
-    box-shadow: var(--shadow-sm);
-    line-height: 1.6;
-  }
-  
+/* ===== SofiaChat Header 固定レイアウト ===== */
+.sof-header-fixed {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+
+  height: var(--sof-header-h);
+  z-index: 100;
+
+  display: flex;
+  justify-content: center;   /* 中央にボックスを置く */
+  align-items: center;
+
+  background: linear-gradient(180deg, #fafafa 0%, #ffffff 100%);
+  border-bottom: 1px solid #e5e7eb;
+  box-shadow: 0 2px 8px rgba(0,0,0,.06);
+}
+
+/* 内側の Header コンポーネントを共通幅に制御 */
+.sof-header-fixed > .sof-header {
+  width: var(--sof-shell-w);
+  margin: 0 auto;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+
+  height: 100%;
+  padding: 0 12px;
+}
+
+/* タイトル */
+.sof-header__title {
+  flex: 1;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+}
+
+/* ボタン */
+.sof-header .sof-btn {
+  font-size: 14px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #374151;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.sof-header .sof-btn:hover { background: #f3f4f6; }
+.sof-header .sof-btn.primary {
+  background: #6b8cff;
+  border-color: #6b8cff;
+  color: #fff;
+}
+.sof-header .sof-btn.primary:hover { background: #4f6de6; }
+
+/* 本文側はヘッダー分の余白を確保 */
+.sofia-page-wrap {
+  padding-top: calc(var(--sof-header-h) + 12px);
+}
+
+

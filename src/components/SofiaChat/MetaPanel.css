@@ -1,120 +1,153 @@
-/* ===== Meta Panel (colorful) ===== */
-.meta-panel {
-    border-top: 1px solid var(--line, #e5e7eb);
-    background: linear-gradient(180deg, #ffffff, #fbfdfc);
-    padding: 14px 16px;
-    font-size: 13px;
-    color: #2b3330;
-  }
-  
-  .meta-title {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 14px;
-    font-weight: 800;
-    color: var(--sofia-deep, #185a4c);
-    margin-bottom: 10px;
-  }
-  .meta-title .dot {
-    width: 10px; height: 10px; border-radius: 50%;
-    background: var(--sofia, #3cc7a6);
-    box-shadow: 0 0 0 3px rgba(60,199,166,.18);
-  }
-  
-  /* 各ブロックはカード風 */
-  .meta-block {
-    background: #fff;
-    border: 1px solid var(--line, #e5e7eb);
-    border-left: 4px solid var(--sofia, #3cc7a6);
-    border-radius: 10px;
-    padding: 10px 12px;
-    margin-bottom: 10px;
-    box-shadow: 0 4px 10px rgba(0,0,0,.04);
-  }
-  
-  .meta-label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--muted, #5f726d);
-    margin-bottom: 6px;
-    letter-spacing: .02em;
-  }
-  .meta-label .badge {
-    font-size: 11px;
-    color: #124136;
-    background: var(--sofia-light, #d8f7ef);
-    padding: 2px 8px;
-    border-radius: 999px;
-    border: 1px solid rgba(60,199,166,.35);
-  }
-  
-  /* リスト行 */
-  .meta-list {
-    list-style: none;
-    margin: 0; padding: 0;
-    display: grid;
-    gap: 6px;
-  }
-  
-  .meta-item {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-  }
-  
-  /* カラーチップ */
-  .meta-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 3px 8px;
-    border-radius: 8px;
-    font-weight: 600;
-    border: 1px solid rgba(60,199,166,.35);
-    background: var(--sofia-light, #d8f7ef);
-    color: #124136;
-  }
-  .meta-chip.blue {
-    border-color: rgba(100,182,255,.4);
-    background: #ecf6ff;
-    color: #13324d;
-  }
-  .meta-chip.gold {
-    border-color: rgba(217,201,124,.55);
-    background: #fffae8;
-    color: #5a4e1c;
-  }
-  .meta-chip.gray {
-    border-color: #e5e7eb;
-    background: #f8fafb;
-    color: #374151;
-  }
-  
-  .meta-score {
-    font-size: 12px;
-    color: #94a3b8;
-  }
-  
-  /* key-value 表示 */
-  .meta-kv {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 6px 12px;
-    font-size: 12px;
-  }
-  .meta-kv b {
-    color: var(--sofia-deep, #185a4c);
-  }
-  
-  /* 小さなアイコン風丸 */
-  .k-dot {
-    width: 8px; height: 8px; border-radius: 50%;
-    background: var(--sofia, #3cc7a6);
-  }
-  .k-dot.blue { background: #64b6ff; }
-  .k-dot.gold { background: #d9c97c; }
-  
+/* =========================================================
+   Meta Panel – Sofia 用（ドックにも馴染むフラット版）
+   - 既存 JSX の class 名はそのまま
+   - 左の緑ボーダーや強いシャドウを撤去
+   - sof-meta-dock（下部固定）内ではコンパクト表示
+   ========================================================= */
+
+/* カラートークン（必要に応じて上書き） */
+:root{
+  --meta-line: #e5e7eb;
+  --meta-fg: #2b3330;
+  --meta-muted: #5f726d;
+  --meta-accent: #3cc7a6;
+  --meta-accent-deep: #185a4c;
+  --meta-accent-light: #d8f7ef;
+}
+
+/* パネル外枠 */
+.meta-panel{
+  border: 1px solid var(--meta-line);
+  background: #fff;
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--meta-fg);
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.04);
+}
+
+/* タイトル行 */
+.meta-title{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--meta-accent-deep);
+  margin-bottom: 8px;
+}
+.meta-title .dot{
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--meta-accent);
+  box-shadow: 0 0 0 3px rgba(60,199,166,.18);
+}
+
+/* 各ブロック（カード） */
+.meta-block{
+  background: #fff;
+  border: 1px solid var(--meta-line);
+  /* 旧スタイルの “左の緑ボーダー” を廃止 */
+  border-left: none;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.04);
+}
+
+/* ラベル */
+.meta-label{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--meta-muted);
+  margin-bottom: 6px;
+  letter-spacing: .02em;
+}
+.meta-label .badge{
+  font-size: 11px;
+  color: var(--meta-accent-deep);
+  background: var(--meta-accent-light);
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(60,199,166,.35);
+}
+
+/* リスト・行 */
+.meta-list{
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.meta-item{
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+/* カラーチップ */
+.meta-chip{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  font-weight: 600;
+  border: 1px solid rgba(60,199,166,.35);
+  background: var(--meta-accent-light);
+  color: var(--meta-accent-deep);
+}
+.meta-chip.blue{
+  border-color: rgba(100,182,255,.4);
+  background: #ecf6ff;
+  color: #13324d;
+}
+.meta-chip.gold{
+  border-color: rgba(217,201,124,.55);
+  background: #fffae8;
+  color: #5a4e1c;
+}
+.meta-chip.gray{
+  border-color: #e5e7eb;
+  background: #f8fafb;
+  color: #374151;
+}
+
+/* スコア/注釈 */
+.meta-score{
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+/* key-value */
+.meta-kv{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+  font-size: 12px;
+}
+.meta-kv b{ color: var(--meta-accent-deep); }
+
+/* 小さな丸 */
+.k-dot{ width: 8px; height: 8px; border-radius: 50%; background: var(--meta-accent); }
+.k-dot.blue{ background:#64b6ff; }
+.k-dot.gold{ background:#d9c97c; }
+
+/* =========================================================
+   sof-meta-dock（下部固定）の中にある時はコンパクトに
+   ========================================================= */
+.sof-meta-dock .meta-panel{
+  border: 1px solid var(--meta-line);
+  background: rgba(255,255,255,.98);
+  box-shadow: none;            /* ドックでは影を弱める */
+  padding: 10px 12px;
+}
+.sof-meta-dock .meta-title{ margin-bottom: 6px; font-weight: 700; }
+.sof-meta-dock .meta-block{
+  margin-bottom: 8px;
+  border-left: none;           /* 念のため再度打ち消し */
+  box-shadow: none;
+}
