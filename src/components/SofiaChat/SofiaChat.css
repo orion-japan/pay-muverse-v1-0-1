@@ -388,3 +388,50 @@ body.mu-body .mu-main:after{
   box-shadow: 0 -2px 8px rgba(0,0,0,.08);
 }
 
+
+/* src/components/SofiaChat/SofiaChat.css の末尾などに追記（任意）*/
+.sofia-container {
+  background:
+    radial-gradient(1200px 600px at 50% -200px, rgba(107,140,255,.06), transparent 70%),
+    radial-gradient(900px 500px at 10% 110%, rgba(34,197,94,.04), transparent 60%),
+    #f7f8fb;
+}
+
+/* ========= SOFIA_CONFIG（env）→ CSS 反映オーバーライド ========= */
+
+/* アシスタント吹き出し：文字サイズ・行間・字間・横幅 */
+.sof-bubble.is-assistant{
+  font-size: var(--sofia-assist-fs, 15px);
+  line-height: var(--sofia-assist-lh, 1.85);
+  letter-spacing: var(--sofia-assist-ls, 0.01em);
+  max-width: var(--sofia-bubble-maxw, 78%);
+  /* 見た目（色・枠・角・影）も env で差し替え可 */
+  background: var(--sofia-a-bg, #f8fafc);
+  border: var(--sofia-a-border, 1px solid #e5e7eb);
+  border-radius: var(--sofia-a-radius, 16px);
+  box-shadow: var(--sofia-a-shadow, 0 1px 2px rgba(0,0,0,.04));
+}
+
+/* 段落・リストの余白 */
+.sof-bubble.is-assistant .sof-bubble__text p,
+.sof-bubble.is-assistant .sof-bubble__text li{
+  margin: var(--sofia-p-margin, 6px) 0;
+}
+
+/* 引用の色味 */
+.sof-bubble.is-assistant .sof-bubble__text blockquote{
+  border-left: 4px solid var(--sofia-bq-border, #cbd5e1);
+  background: var(--sofia-bq-bg, #f1f5f9);
+  padding: 8px 10px;
+  border-radius: 6px;
+  color: #475569;
+}
+
+/* ユーザー吹き出しの色系も env で制御 */
+.sof-bubble.is-user{
+  background: var(--sofia-user-bg, #6b8cff);
+  color: var(--sofia-user-fg, #fff);
+  border-color: var(--sofia-user-border, #6b8cff);
+  border-radius: var(--sofia-user-radius, 14px);
+}
+

@@ -9,15 +9,17 @@ import React, {
   useLayoutEffect,
 } from 'react';
 import { useAuth } from '@/context/AuthContext';
-  import { fetchWithIdToken } from '@/lib/fetchWithIdToken';
+import { fetchWithIdToken } from '@/lib/fetchWithIdToken';
+import { SOFIA_CONFIG } from '@/lib/sofia/config';
+
 import '@/components/SofiaChat/SofiaChat.css';
 import './ChatInput.css';
+import './SofiaResonance.css';
 
 import SidebarMobile from './SidebarMobile';
 import Header from './header';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
-
 import { MetaPanel, type MetaData } from '@/components/SofiaChat/MetaPanel';
 
 /* ========= types ========= */
@@ -93,16 +95,93 @@ export default function SofiaChat() {
 
   const canUse = useMemo(() => !!userCode && !authLoading, [userCode, authLoading]);
 
-  /* ===== 高さを CSS 変数(:root)へ反映 ===== */
+  /* ==== UI用CSS変数（env → CSS） ==== */
+  useEffect(() => {
+    const ui = SOFIA_CONFIG.ui;
+    const r = document.documentElement;
+    const set = (k: string, v?: string | number) => {
+      if (v === undefined || v === null) return;
+      r.style.setProperty(k, String(v));
+    };
+    set('--sofia-assist-fs', `${ui.assistantFontSize}px`);
+    set('--sofia-assist-lh', ui.assistantLineHeight);
+    set('--sofia-assist-ls', `${ui.assistantLetterSpacing}em`);
+    set('--sofia-p-margin', `${ui.paragraphMargin}px`);
+
+    set('--sofia-bubble-maxw', `${ui.bubbleMaxWidthPct}%`);
+    set('--sofia-a-border', ui.assistantBorder);
+    set('--sofia-a-radius', `${ui.assistantRadius}px`);
+    set('--sofia-a-shadow', ui.assistantShadow);
+    set('--sofia-a-bg', ui.assistantBg);
+    set('--sofia-bq-border', ui.blockquoteTintBorder);
+    set('--sofia-bq-bg', ui.blockquoteTintBg);
+
+    set('--sofia-user-bg', ui.userBg);
+    set('--sofia-user-fg', ui.userFg);
+    set('--sofia-user-border', ui.userBorder);
+    set('--sofia-user-radius', `${ui.userRadius}px`);
+  }, []);
+
+  /* ==== プレゼン用 Hotfix（吹き出し見た目） ==== */
+  useEffect(() => {
+    const css = `
+    :where(.sofia-container) .sof-msgs .sof-bubble{
+      border: none !important;
+      background:
+        radial-gradient(130% 160% at 0% -40%, rgba(203,213,225,.28), transparent 60%),
+        linear-gradient(180deg, #ffffff 0%, #f6f9ff 100%) !important;
+      box-shadow:
+        0 1px 0 rgba(255,255,255,.65) inset,
+        0 8px 24px rgba(2,6,23,.10) !important;
+      border-radius: var(--sofia-a-radius, 16px) !important;
+    }
+    :where(.sofia-container) .sof-msgs .sof-bubble.is-assistant{
+      border-bottom-left-radius: 6px !important;
+      color: #0f172a !important;
+    }
+    :where(.sofia-container) .sof-msgs .sof-bubble.is-user{
+      color: #fff !important;
+      text-shadow: 0 1px 0 rgba(0,0,0,.08);
+      border: none !important;
+      background:
+        linear-gradient(180deg, #8aa0ff 0%, #6b8cff 60%, #5979ee 100%) !important;
+      box-shadow:
+        0 1px 0 rgba(255,255,255,.25) inset,
+        0 10px 24px rgba(107,140,255,.22) !important;
+      border-bottom-right-radius: 6px !important;
+    }
+    .sof-underlay{ background: transparent !important; box-shadow:none !important; }
+    `;
+    let el = document.getElementById('sofia-hotfix') as HTMLStyleElement | null;
+    if (!el) {
+      el = document.createElement('style');
+      el.id = 'sofia-hotfix';
+      document.head.appendChild(el);
+    }
+    el.textContent = css;
+  }, []);
+
+  /* ==== 「送信中」オーバーレイを強制オフ ==== */
+  useEffect(() => {
+    let el = document.getElementById('sofia-hide-overlay') as HTMLStyleElement | null;
+    if (!el) {
+      el = document.createElement('style');
+      el.id = 'sofia-hide-overlay';
+      document.head.appendChild(el);
+    }
+    el.textContent = `.sof-overlay{ display:none !important; }`;
+    return () => { /* 残置でOK（HMR対策） */ };
+  }, []);
+
+  /* ===== 高さを CSS 変数へ反映（Compose / Meta） ===== */
   const composeRef = useRef<HTMLDivElement>(null);
   const metaDockRef = useRef<HTMLDivElement>(null);
 
-  // 入力バーの高さ -> --compose-height（:root）
   useLayoutEffect(() => {
     const el = composeRef.current;
     if (!el) return;
     const set = () => {
-      document.documentElement.style.setProperty('--compose-height', `${el.offsetHeight}px`);
+      document.documentElement.style.setProperty('--sof-compose-h', `${el.offsetHeight}px`);
     };
     set();
     const ro = new ResizeObserver(set);
@@ -110,17 +189,18 @@ export default function SofiaChat() {
     return () => ro.disconnect();
   }, []);
 
-  // Metaドックの高さ -> --meta-height（:root）
   useLayoutEffect(() => {
     const m = metaDockRef.current;
-    if (!m) return;
-    const apply = () => {
-      document.documentElement.style.setProperty('--meta-height', `${m.offsetHeight || 0}px`);
-    };
-    apply();
-    const ro = new ResizeObserver(apply);
-    ro.observe(m);
-    return () => ro.disconnect();
+    if (m) {
+      const apply = () => {
+        const h = m.offsetHeight || 0;
+        document.body.style.setProperty('--meta-height', `${h}px`);
+      };
+      apply();
+      const ro = new ResizeObserver(apply);
+      ro.observe(m);
+      return () => ro.disconnect();
+    }
   }, []);
 
   /* ===== 会話一覧 ===== */
@@ -133,9 +213,7 @@ export default function SofiaChat() {
 
       const items = (js.items ?? []).map((row) => ({
         id: row.conversation_code,
-        title:
-          row.title ??
-          (row.updated_at ? `会話 (${new Date(row.updated_at).toLocaleString()})` : '新しい会話'),
+        title: row.title ?? (row.updated_at ? `会話 (${new Date(row.updated_at).toLocaleString()})` : '新しい会話'),
         updated_at: row.updated_at ?? null,
       })) as ConvListItem[];
 
@@ -151,9 +229,7 @@ export default function SofiaChat() {
     if (!userCode || !convId) return;
     try {
       const r = await fetchWithIdToken(
-        `/api/sofia?user_code=${encodeURIComponent(userCode)}&conversation_code=${encodeURIComponent(
-          convId
-        )}`
+        `/api/sofia?user_code=${encodeURIComponent(userCode)}&conversation_code=${encodeURIComponent(convId)}`
       );
       if (!r.ok) throw new Error(`messages ${r.status}`);
       const js: SofiaGetMessages = await r.json().catch(() => ({}));
@@ -184,7 +260,7 @@ export default function SofiaChat() {
     if (!text || !userCode) return {};
 
     const optimistic: Message = {
-      id: globalThis.crypto?.randomUUID?.() ?? `tmp-${Date.now()}`,
+      id: (globalThis.crypto?.randomUUID?.() ?? `tmp-${Date.now()}`),
       role: 'user',
       content: text,
       created_at: new Date().toISOString(),
@@ -197,10 +273,16 @@ export default function SofiaChat() {
         user_code: userCode,
         conversation_code: conversationId ?? '',
         mode: 'normal',
+        vars: { debug: true, client: 'web' }, // ← buildSofiaSystemPrompt でサーバログを出すため
         messages: msgsForApi,
       };
+
+      console.log('[SofiaChat] POST /api/sofia body:', body);
+
       const r = await fetchWithIdToken('/api/sofia', { method: 'POST', body: JSON.stringify(body) });
       const js: SofiaPostRes = await r.json().catch(() => ({}));
+
+      console.log('[SofiaChat] POST /api/sofia resp:', js);
 
       if (js.conversation_code && js.conversation_code !== conversationId) {
         setConversationId(js.conversation_code);
@@ -209,7 +291,7 @@ export default function SofiaChat() {
         setMessages((prev) => [
           ...prev,
           {
-            id: globalThis.crypto?.randomUUID?.() ?? `a-${Date.now()}`,
+            id: (globalThis.crypto?.randomUUID?.() ?? `a-${Date.now()}`),
             role: 'assistant',
             content: js.reply as string,
             created_at: new Date().toISOString(),
@@ -224,7 +306,7 @@ export default function SofiaChat() {
       setMessages((prev) => [
         ...prev,
         {
-          id: globalThis.crypto?.randomUUID?.() ?? `e-${Date.now()}`,
+          id: (globalThis.crypto?.randomUUID?.() ?? `e-${Date.now()}`),
           role: 'assistant',
           content: '（通信に失敗しました。時間をおいて再度お試しください）',
         },
@@ -250,7 +332,7 @@ export default function SofiaChat() {
 
   /* ========= render ========= */
   return (
-    <>
+    <div className="sofia-container sof-center">
       <div className="sof-header-fixed">
         <Header
           title="会話履歴"
@@ -259,6 +341,12 @@ export default function SofiaChat() {
           onCreateNewChat={handleNewChat}
         />
       </div>
+
+      <div
+        className="sof-top-spacer"
+        style={{ height: 'calc(var(--sof-header-h, 56px) + 12px)' }}
+        aria-hidden
+      />
 
       <SidebarMobile
         isOpen={isMobileMenuOpen}
@@ -281,11 +369,11 @@ export default function SofiaChat() {
         <ChatInput onSend={handleSend} onPreview={() => {}} onCancelPreview={() => {}} />
       </div>
 
-      {/* 入力BOX〜画面下を白で覆う“下敷き”（入力欄の上でメッセージを確実に隠す） */}
+      {/* 下部の白い土台（ガード板）— スタイルはテーマ側で制御 */}
       <div className="sof-underlay" aria-hidden />
 
       <div className="sof-footer-spacer" />
-    </>
+    </div>
   );
 }
 

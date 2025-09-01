@@ -1,3 +1,4 @@
+// src/app/api/sofia/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -6,9 +7,32 @@ import { createClient } from '@supabase/supabase-js';
 import { buildSofiaSystemPrompt } from '@/lib/sofia/buildSystemPrompt';
 import { retrieveKnowledge } from '@/lib/sofia/retrieve';
 import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/authz';
+import { SOFIA_CONFIG } from '@/lib/sofia/config';
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const CHAT_URL = 'https://api.openai.com/v1/chat/completions';
+
+/* =========================
+   設定ラッパ（型安全にフォールバック）
+========================= */
+const CFG: any = SOFIA_CONFIG ?? {};
+const CFG_OPENAI = CFG.openai ?? {};
+const CFG_RETR = CFG.retrieve ?? {};
+
+const DEFAULT_TEMP: number =
+  typeof CFG_OPENAI.temperature === 'number' ? CFG_OPENAI.temperature : 0.8;
+
+const DEFAULT_MAXTOKENS: number | undefined =
+  typeof CFG_OPENAI.maxTokens === 'number' ? CFG_OPENAI.maxTokens : undefined;
+
+const RETRIEVE_LIMIT: number =
+  typeof CFG_RETR.limit === 'number' ? CFG_RETR.limit : 4;
+
+const RETRIEVE_EPS: number =
+  typeof CFG_RETR.epsilon === 'number' ? CFG_RETR.epsilon : 0.3;
+
+const RETRIEVE_NOISE: number =
+  typeof CFG_RETR.noiseAmp === 'number' ? CFG_RETR.noiseAmp : 0.15;
 
 /* =========================
    型・ユーティリティ
@@ -56,21 +80,24 @@ function sbService() {
 function ensureArray<T = any>(v: any): T[] { return Array.isArray(v) ? v : []; }
 function sanitizeBody(raw: any) {
   const allowModels = new Set(['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini']);
-  const safe = {
+  return {
     conversation_code: typeof raw?.conversation_code === 'string' ? raw.conversation_code : '',
     mode: ['normal','diagnosis','meaning','intent','dark','remake'].includes(raw?.mode) ? raw.mode : 'normal',
     promptKey: raw?.promptKey ?? 'base',
     vars: typeof raw?.vars === 'object' && raw?.vars ? raw.vars : {},
-    messages: ensureArray<Msg>(raw?.messages).slice(-50), // 直近50件に制限
+    messages: ensureArray<Msg>(raw?.messages).slice(-50),
     model: allowModels.has(raw?.model) ? raw.model : 'gpt-4o',
-    temperature: typeof raw?.temperature === 'number' ? Math.min(Math.max(raw.temperature, 0), 1) : 0.8,
-    max_tokens: typeof raw?.max_tokens === 'number' ? raw.max_tokens : undefined,
+    temperature: typeof raw?.temperature === 'number'
+      ? Math.min(Math.max(raw.temperature, 0), 1)
+      : DEFAULT_TEMP,
+    max_tokens: typeof raw?.max_tokens === 'number'
+      ? raw.max_tokens
+      : DEFAULT_MAXTOKENS,
     top_p: typeof raw?.top_p === 'number' ? raw.top_p : undefined,
     frequency_penalty: typeof raw?.frequency_penalty === 'number' ? raw.frequency_penalty : undefined,
     presence_penalty: typeof raw?.presence_penalty === 'number' ? raw.presence_penalty : undefined,
     response_format: raw?.response_format ?? undefined,
   };
-  return safe;
 }
 
 /* =========================
@@ -103,7 +130,7 @@ async function callOpenAI(payload: any) {
       return { ok: true as const, data };
     } catch (e) {
       lastErr = e;
-      await new Promise(res => setTimeout(res, 300 * attempt)); // 短い指数バックオフ
+      await new Promise(res => setTimeout(res, 300 * attempt));
     }
   }
   return { ok: false as const, status: 499, detail: String(lastErr ?? 'unknown') };
@@ -112,17 +139,12 @@ async function callOpenAI(payload: any) {
 /* ====== CORS ====== */
 export async function OPTIONS() { return json({ ok: true }); }
 
-/* ====== GET ======
- * 1) /api/sofia                         -> health（無認証OK）
- * 2) /api/sofia?user_code=...           -> 会話一覧（要認証）
- * 3) /api/sofia?user_code=...&conversation_code=... -> 会話メッセージ（要認証）
- */
+/* ====== GET ====== */
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const qUser = searchParams.get('user_code') || '';
   const conversation_code = searchParams.get('conversation_code') || '';
 
-  // --- ヘルスチェックは無認証で返す ---
   if (!qUser) {
     return json({
       ok: true,
@@ -132,16 +154,13 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // --- ここから要認証 ---
   const z = await verifyFirebaseAndAuthorize(req);
   if (!z.ok) return json({ error: z.error }, z.status);
-  // ※ master/admin限定を外したい場合は次行をコメントアウト
   if (!z.allowed) return json({ error: 'forbidden' }, 403);
   const userCode = z.userCode!;
 
   const sb = sbService();
 
-  // 会話一覧
   if (!conversation_code) {
     const { data, error } = await sb
       .from('sofia_conversations')
@@ -162,7 +181,6 @@ export async function GET(req: NextRequest) {
     return json({ items });
   }
 
-  // 会話メッセージ
   const { data, error } = await sb
     .from('sofia_conversations')
     .select('messages')
@@ -176,22 +194,17 @@ export async function GET(req: NextRequest) {
   return json({ messages });
 }
 
-/* ====== POST ======
- * body: {
- *   conversation_code?, mode, promptKey, vars, messages: Msg[], model?, temperature? ...
- * }
- */
+/* ====== POST ====== */
 export async function POST(req: NextRequest) {
   try {
     if (!OPENAI_API_KEY) return bad('Env OPENAI_API_KEY is missing', 500);
 
     const z = await verifyFirebaseAndAuthorize(req);
     if (!z.ok) return json({ error: z.error }, z.status);
-    // ※ master/admin限定を外したい場合は次行をコメントアウト
     if (!z.allowed) return json({ error: 'forbidden' }, 403);
     const userCode = z.userCode!;
 
-    // 入力の軽バリデーション＆制限
+    // ---- 受信 & 正規化
     const safe = sanitizeBody((await req.json().catch(() => ({}))) || {});
     const {
       conversation_code: inCode,
@@ -206,20 +219,47 @@ export async function POST(req: NextRequest) {
 
     const conversation_code = inCode || newConvCode();
 
-    // System プロンプト
-    const system = buildSofiaSystemPrompt({ promptKey, mode, vars, includeGuard: true });
+    // ===== System Prompt 構築（ここが確実に呼ばれる）=====
+    console.time('[SofiaAPI] buildSystemPrompt');
+    const system = buildSofiaSystemPrompt({
+      promptKey,
+      mode,
+      vars,
+      includeGuard: true,
+      enforceResonance: true,
+    });
+    console.timeEnd('[SofiaAPI] buildSystemPrompt');
+    console.log('[SofiaAPI] system prompt summary:', {
+      promptKey,
+      mode,
+      length: system.length,
+      head: system.slice(0, 180).replace(/\n/g, ' ⏎ ') + (system.length > 180 ? '…' : ''),
+    });
 
-    // ナレッジ取得（確率的）
+    // ---- 検索リトリーブ
     const lastUser = getLastUserText(messages);
     const seed = Math.abs(
       [...`${userCode}:${conversation_code}`].reduce((a, c) => ((a << 5) - a + c.charCodeAt(0)) | 0, 0)
     );
     const analysis = (vars as any).analysis || { qcodes: [], layers: [], keywords: [] };
-    const epsilon = 0.3;
-    const noiseAmp = 0.15;
-    const kb = await retrieveKnowledge(analysis, 4, lastUser, { epsilon, noiseAmp, seed });
 
-    // OpenAI呼び出し
+    console.time('[SofiaAPI] retrieveKnowledge');
+    const kb = await retrieveKnowledge(analysis, RETRIEVE_LIMIT, lastUser, {
+      epsilon: RETRIEVE_EPS,
+      noiseAmp: RETRIEVE_NOISE,
+      seed,
+    });
+    console.timeEnd('[SofiaAPI] retrieveKnowledge');
+    console.log('[SofiaAPI] retrieve summary:', {
+      lastUser: (lastUser || '').slice(0, 60),
+      limit: RETRIEVE_LIMIT,
+      epsilon: RETRIEVE_EPS,
+      noiseAmp: RETRIEVE_NOISE,
+      seed,
+      hits: Array.isArray(kb) ? kb.length : 0,
+    });
+
+    // ---- OpenAI 呼び出し
     const payload: any = {
       model,
       messages: [{ role: 'system', content: system }, ...(messages as Msg[])],
@@ -231,14 +271,27 @@ export async function POST(req: NextRequest) {
     if (typeof presence_penalty === 'number') payload.presence_penalty = presence_penalty;
     if (response_format) payload.response_format = response_format;
 
+    console.log('[SofiaAPI] openai payload summary:', {
+      model,
+      temperature,
+      max_tokens: payload.max_tokens ?? null,
+      top_p: payload.top_p ?? null,
+      msgs_in: payload.messages?.length ?? 0,
+    });
+
+    console.time('[SofiaAPI] openai.chat');
     const result = await callOpenAI(payload);
+    console.timeEnd('[SofiaAPI] openai.chat');
+
     if (!result.ok) {
+      console.warn('[SofiaAPI] upstream error:', result.status, result.detail);
       return json({ error: 'Upstream error', status: result.status, detail: result.detail }, result.status);
     }
 
     const data = result.data;
     const reply: string = data?.choices?.[0]?.message?.content ?? '';
 
+    // ---- 会話の保存
     const merged: Msg[] = Array.isArray(messages) ? [...messages] : [];
     if (reply) merged.push({ role: 'assistant', content: reply });
 
@@ -256,14 +309,16 @@ export async function POST(req: NextRequest) {
     );
     if (upErr) console.error('[sofia_conversations upsert]', upErr);
 
+    // ---- 応答
     return json({
       conversation_code,
       reply,
       meta: {
         qcodes: analysis.qcodes,
         layers: analysis.layers,
-        used_knowledge: kb.map((k: any, i: number) => ({ id: k.id, key: `K${i + 1}`, title: k.title })),
-        stochastic: { epsilon, noiseAmp, seed },
+        used_knowledge: (Array.isArray(kb) ? kb : []).map((k: any, i: number) => ({ id: k.id, key: `K${i + 1}`, title: k.title })),
+        stochastic: { epsilon: RETRIEVE_EPS, noiseAmp: RETRIEVE_NOISE, seed },
+        ...(mode === 'diagnosis' ? { systemPreview: system } : {}),
       },
     });
   } catch (e: any) {

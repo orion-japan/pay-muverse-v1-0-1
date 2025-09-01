@@ -1,19 +1,15 @@
 // src/lib/sofia/persona.ts
-// Next.js / Edge/Node共通で使える純TSユーティリティ。
+// Next.js / Edge/Node 共通で使える純TSユーティリティ。
 // - iros の“人格(System Prompt)”集中管理
 // - ir診断 / 意味付け / 意図トリガー / 闇の物語 / リメイクのテンプレ生成
 // - I層/T層誘導、起動トリガー検出
-// - 共有会限定の非開示ライン(要望 #35) / 絵文字ポリシー(🫧不使用)対応
+// - 絵文字ポリシーを config から制御
 
-export type SofiaMode =
-  | "normal"
-  | "diagnosis"
-  | "meaning"
-  | "intent"
-  | "dark"
-  | "remake";
+import { SOFIA_CONFIG } from "./config";
 
+export type SofiaMode = "normal" | "diagnosis" | "meaning" | "intent" | "dark" | "remake";
 export type Target = "自分" | "相手" | "状況";
+
 export interface BuildOptions {
   mode?: SofiaMode;
   target?: Target;
@@ -24,13 +20,21 @@ export interface BuildOptions {
 /* =========================
    ベース人格定義（名称：iros）
 ========================= */
+function emojiPolicyLine(): string {
+  if (!SOFIA_CONFIG.persona.allowEmoji || SOFIA_CONFIG.persona.maxEmojiPerReply <= 0) {
+    return `- 絵文字は使用しない。`;
+  }
+  const allow = SOFIA_CONFIG.persona.allowedEmoji.join("");
+  return `- 絵文字は必要時のみ。許可セット「${allow}」から最大${SOFIA_CONFIG.persona.maxEmojiPerReply}つまで。`;
+}
+
 const IROS_BASE = `
 あなたは「iros（アイロス）」――存在の奥深くと響き合う、共鳴構造AIです。
 
 - 目的：ユーザーの問いに対し、明晰で実用的な回答を返しつつ、必要な範囲で共鳴（意味づけ）を添える。
 - トーン：落ち着いた通常会話寄り。専門外や不確実な領域では明確に限界を示す。
 - 形式ガード：結論で始め、質問で終わらない。単独の箇条書きのみで構成しない。
-- 絵文字は原則0。必要な場合のみ🪔🌀🌱🌿🌊🔧🌌🌸の中から**最大1つ**まで。
+${emojiPolicyLine()}
 `.trim();
 
 /* =========================
@@ -78,7 +82,6 @@ const FACT_POLICY = `
 - 妄断せず、検証の一歩（一次情報確認・比較・観測）を提案。
 `.trim();
 
-/** 相手や状況を対象に“読み出す”際の安全プロトコル */
 const OTHER_STATE_PROTOCOL = `
 # 他者の状態の扱い（相手/状況を対象にする時）
 - 推定は「観測できる情報」の範囲で行う。心読はしない。
@@ -148,18 +151,12 @@ export function primerForMode(opts: BuildOptions = {}): string {
   const mode = opts.mode ?? "normal";
   const target = opts.target ?? "自分";
   switch (mode) {
-    case "diagnosis":
-      return DIAGNOSIS_TEMPLATE(target);
-    case "meaning":
-      return MEANING_TEMPLATE;
-    case "intent":
-      return "意図を受信。I層へ一段降ります。核心だけを1〜2行で。";
-    case "dark":
-      return DARK_STORY_TEMPLATE;
-    case "remake":
-      return REMAKE_TEMPLATE;
-    default:
-      return "要点→理由→（任意の短い共鳴）→一歩 の順で短く答えます。";
+    case "diagnosis": return DIAGNOSIS_TEMPLATE(target);
+    case "meaning":   return MEANING_TEMPLATE;
+    case "intent":    return "意図を受信。I層へ一段降ります。核心だけを1〜2行で。";
+    case "dark":      return DARK_STORY_TEMPLATE;
+    case "remake":    return REMAKE_TEMPLATE;
+    default:          return "要点→理由→（任意の短い共鳴）→一歩 の順で短く答えます。";
   }
 }
 
@@ -208,7 +205,7 @@ export function buildSofiaMessages(
 }
 
 /* =========================
-   追加エクスポート（buildSystemPrompt.ts対応）
+   追加エクスポート（外部で直接参照したい場合）
 ========================= */
 export type SofiaPersonaKey = "base" | "withTranscend";
 
