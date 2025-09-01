@@ -1,4 +1,6 @@
+// src/components/AlbumButtonAndModal.tsx
 'use client';
+
 import { useState } from 'react';
 import AlbumModal from '@/components/AlbumModal';
 
@@ -6,23 +8,32 @@ export default function AlbumButtonAndModal() {
   const [open, setOpen] = useState(false);
 
   return (
-    <>
+    <div style={{ display: 'inline-block' }}>
       <button
+        type="button"
         onClick={() => setOpen(true)}
-        style={{ padding: '10px 14px', borderRadius: 10, border: '1px solid #ccc', background: '#fff', cursor: 'pointer' }}
-      >アルバムを開く</button>
+        style={{
+          padding: '10px 16px',
+          borderRadius: 10,
+          border: '1px solid #e5e7eb',
+          background: '#fff',
+          cursor: 'pointer',
+        }}
+      >
+        アルバムから追加
+      </button>
 
       <AlbumModal
         open={open}
-        title="アルバム"
         onClose={() => setOpen(false)}
-        onSubmit={() => { /* 保存処理 */ setOpen(false); }}
+        onConfirm={() => {
+          // 選択結果の処理を実装してください
+          setOpen(false);
+        }}
       >
-        {/* ここに画像グリッドやプレビューUIを配置 */}
-        <div style={{ height: 280, border: '1px dashed #ddd', borderRadius: 8, display: 'grid', placeItems: 'center' }}>
-          プレビュー or 画像一覧
-        </div>
+        {/* ここに AlbumPicker などを後で挿し込めます */}
+        <p style={{ margin: 0 }}>アルバム一覧をここに配置（後で実装）。</p>
       </AlbumModal>
-    </>
+    </div>
   );
 }
