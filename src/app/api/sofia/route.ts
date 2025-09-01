@@ -9,6 +9,14 @@ import { retrieveKnowledge } from '@/lib/sofia/retrieve';
 import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/authz';
 import { SOFIA_CONFIG } from '@/lib/sofia/config';
 
+// ★ 追加：状態推定ユーティリティ（Inner/Outer・自己肯定率・関係性質・次Q）
+import {
+  inferPhase,
+  estimateSelfAcceptance,
+  relationQualityFrom,
+  nextQFrom,
+} from '@/lib/sofia/analyze';
+
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 
@@ -98,6 +106,38 @@ function sanitizeBody(raw: any) {
     presence_penalty: typeof raw?.presence_penalty === 'number' ? raw.presence_penalty : undefined,
     response_format: raw?.response_format ?? undefined,
   };
+}
+
+/* ===== ▼ 追加：ir診断トリガー検出（観測対象ラベル抽出） ===== */
+function detectDiagnosisTarget(text: string) {
+  const t = (text || '').trim();
+
+  // 既存: ir/IR/ｉｒ
+  const m1 = t.match(/^(?:ir\s*診断|ir|IR|ｉｒ)(?:[:：\s]+)?(.+)?$/);
+  if (m1?.[1]?.trim()) return m1[1].trim();
+
+  // 追加: 「◯◯を見て/観て」「◯◯の状態」「◯◯を診断」「◯◯の様子」
+  const m2 = t.match(/(.+?)(?:を?見て|を?観て|の状態|の様子|を診断)/);
+  if (m2?.[1]?.trim()) return m2[1].trim();
+
+  return null;
+}
+
+/* ===== ▼ 追加：インジケータ/ペルソナ派生 ===== */
+function deriveIndicators(userText: string, phase: 'Inner'|'Outer', selfBand: 'lt20'|'20_40'|'40_70'|'70_90'|'gt90', relationLabel: 'harmony'|'discord') {
+  const g = Number(((estimateSelfAcceptance(userText).score ?? 50) / 100).toFixed(2));
+  const stochastic = relationLabel === 'discord' || selfBand === 'lt20' || selfBand === '20_40';
+  const baseNoise = relationLabel === 'discord' ? 0.35 : 0.15;
+  const noiseAmp = Number((baseNoise + (phase === 'Outer' ? 0.05 : 0)).toFixed(2));
+  const seed = Math.abs(((userText?.length ?? 0) * 2654435761 + (Date.now() & 0xffff)));
+  return { g, stochastic, noiseAmp, seed };
+}
+function derivePersonaTone(phase: 'Inner'|'Outer', selfBand: string, relationLabel: 'harmony'|'discord') {
+  // 語りの“人格”傾向（Systemへヒントとして渡す）
+  if (phase === 'Inner' && (selfBand === 'lt20' || selfBand === '20_40')) return 'compassion_calm';     // やわらかく、静けさ重視
+  if (phase === 'Outer' && relationLabel === 'discord')                return 'mediator_grounded';      // 仲裁・合意形成寄り
+  if (selfBand === '70_90' || selfBand === 'gt90')                     return 'co_creator_clear';       // 共創・明晰
+  return 'gentle_guide'; // 中庸
 }
 
 /* =========================
@@ -206,7 +246,7 @@ export async function POST(req: NextRequest) {
 
     // ---- 受信 & 正規化
     const safe = sanitizeBody((await req.json().catch(() => ({}))) || {});
-    const {
+    let {
       conversation_code: inCode,
       mode,
       promptKey,
@@ -219,12 +259,41 @@ export async function POST(req: NextRequest) {
 
     const conversation_code = inCode || newConvCode();
 
-    // ===== System Prompt 構築（ここが確実に呼ばれる）=====
+    /* ===== ▼ 追加：最後のユーザー発話から ir診断 を自動検出し、診断モードを強制 ===== */
+    const lastUserMsg = getLastUserText(messages);
+    const detectedTarget = lastUserMsg ? detectDiagnosisTarget(lastUserMsg) : null;
+    if (detectedTarget) {
+      console.log('[SofiaAPI] diagnosis trigger detected:', detectedTarget);
+      mode = 'diagnosis';
+      vars = { ...(vars || {}), diagnosisTarget: detectedTarget };
+    }
+
+    // ★ 解析由来ステート（位相/肯定率/関係性/次Q）→ インジケータ & ペルソナ
+    const phase = inferPhase(lastUserMsg || '');
+    const self = estimateSelfAcceptance(lastUserMsg || '');
+    const relation = relationQualityFrom(phase, self.band);
+    const currentQ = (vars as any)?.analysis?.qcodes?.[0]?.code ?? null;
+    const nextQ = currentQ ? nextQFrom(currentQ, phase) : null;
+
+    const indicators = deriveIndicators(lastUserMsg || '', phase, self.band, relation.label);
+    const personaTone = derivePersonaTone(phase, self.band, relation.label);
+
+    // ===== System Prompt 構築（varsへ“人格ヒント/状態”を注入）=====
     console.time('[SofiaAPI] buildSystemPrompt');
     const system = buildSofiaSystemPrompt({
       promptKey,
       mode,
-      vars,
+      vars: {
+        ...(vars || {}),
+        resonanceState: {
+          phase,
+          selfAcceptance: self,
+          relation,
+          nextQ,
+          currentQ,
+        },
+        personaTone, // ← UI/文体の傾きをテンプレ側に渡す（テンプレ側は存在しなくてもOK）
+      },
       includeGuard: true,
       enforceResonance: true,
     });
@@ -237,25 +306,24 @@ export async function POST(req: NextRequest) {
     });
 
     // ---- 検索リトリーブ
-    const lastUser = getLastUserText(messages);
-    const seed = Math.abs(
+    const seedForRetr = Math.abs(
       [...`${userCode}:${conversation_code}`].reduce((a, c) => ((a << 5) - a + c.charCodeAt(0)) | 0, 0)
     );
-    const analysis = (vars as any).analysis || { qcodes: [], layers: [], keywords: [] };
+    const analysis = (vars as any)?.analysis || { qcodes: [], layers: [], keywords: [] };
 
     console.time('[SofiaAPI] retrieveKnowledge');
-    const kb = await retrieveKnowledge(analysis, RETRIEVE_LIMIT, lastUser, {
+    const kb = await retrieveKnowledge(analysis, RETRIEVE_LIMIT, lastUserMsg, {
       epsilon: RETRIEVE_EPS,
       noiseAmp: RETRIEVE_NOISE,
-      seed,
+      seed: seedForRetr,
     });
     console.timeEnd('[SofiaAPI] retrieveKnowledge');
     console.log('[SofiaAPI] retrieve summary:', {
-      lastUser: (lastUser || '').slice(0, 60),
+      lastUser: (lastUserMsg || '').slice(0, 60),
       limit: RETRIEVE_LIMIT,
       epsilon: RETRIEVE_EPS,
       noiseAmp: RETRIEVE_NOISE,
-      seed,
+      seed: seedForRetr,
       hits: Array.isArray(kb) ? kb.length : 0,
     });
 
@@ -291,12 +359,47 @@ export async function POST(req: NextRequest) {
     const data = result.data;
     const reply: string = data?.choices?.[0]?.message?.content ?? '';
 
-    // ---- 会話の保存
+    // ---- 会話の保存（messages）
     const merged: Msg[] = Array.isArray(messages) ? [...messages] : [];
     if (reply) merged.push({ role: 'assistant', content: reply });
 
     const sb = sbService();
     const title = makeTitleFromMessages(merged);
+
+    // ★ 会話の流れが読めるように：トレースをメタに残す
+    const dialogue_trace = [
+      { step: 'detect_mode',    data: { detectedTarget, mode } },
+      { step: 'state_infer',    data: { phase, self, relation, currentQ, nextQ } },
+      { step: 'indicators',     data: indicators },
+      { step: 'retrieve',       data: { hits: (Array.isArray(kb) ? kb.length : 0), epsilon: RETRIEVE_EPS, noiseAmp: RETRIEVE_NOISE, seed: seedForRetr } },
+      { step: 'build_system',   data: { promptKey, personaTone, length: system.length } },
+      { step: 'openai_reply',   data: { model, temperature, hasReply: !!reply } },
+    ];
+
+    // ★ 返却・保存用メタ（フロント既存表示の互換を維持）
+    const metaPacked: any = {
+      // 既存インジケータ互換（トップレベル）
+      stochastic: indicators.stochastic,
+      g: indicators.g,
+      seed: indicators.seed,
+      noiseAmp: indicators.noiseAmp,
+
+      // 解析状態
+      phase,
+      selfAcceptance: self,
+      relation,
+      nextQ,
+      currentQ,
+
+      // 参考（UIに出さなくてもOK）
+      used_knowledge: (Array.isArray(kb) ? kb : []).map((k: any, i: number) => ({ id: k.id, key: `K${i + 1}`, title: k.title })),
+      personaTone,
+      dialogue_trace,
+      stochastic_params: { epsilon: RETRIEVE_EPS, retrNoise: RETRIEVE_NOISE, retrSeed: seedForRetr },
+      ...(mode === 'diagnosis' ? { diagnosisTarget: detectedTarget ?? null } : {}),
+    };
+
+    // ★ 会話スレッド本体に upsert
     const { error: upErr } = await sb.from('sofia_conversations').upsert(
       {
         user_code: userCode,
@@ -304,22 +407,34 @@ export async function POST(req: NextRequest) {
         title: title ?? null,
         messages: merged,
         updated_at: new Date().toISOString(),
-      },
+        // ★ last_meta が存在する環境では保存される（無ければDBが拒否→握りつぶし）
+        last_meta: metaPacked as any,
+      } as any,
       { onConflict: 'user_code,conversation_code' }
     );
-    if (upErr) console.error('[sofia_conversations upsert]', upErr);
+    if (upErr) console.warn('[sofia_conversations upsert]', upErr?.message || upErr);
+
+    // ★ 1ターンごとのログ（存在すれば書く）
+    try {
+      const turn_index = merged.filter(m => m.role === 'assistant').length; // 1始まり相当
+      await sb.from('sofia_turns').insert({
+        user_code: userCode,
+        conversation_code,
+        turn_index,
+        user_text: lastUserMsg ?? '',
+        assistant_text: reply ?? '',
+        meta: metaPacked,
+        created_at: new Date().toISOString(),
+      } as any);
+    } catch (e) {
+      console.warn('[sofia_turns insert] skipped:', String((e as any)?.message ?? e));
+    }
 
     // ---- 応答
     return json({
       conversation_code,
       reply,
-      meta: {
-        qcodes: analysis.qcodes,
-        layers: analysis.layers,
-        used_knowledge: (Array.isArray(kb) ? kb : []).map((k: any, i: number) => ({ id: k.id, key: `K${i + 1}`, title: k.title })),
-        stochastic: { epsilon: RETRIEVE_EPS, noiseAmp: RETRIEVE_NOISE, seed },
-        ...(mode === 'diagnosis' ? { systemPreview: system } : {}),
-      },
+      meta: metaPacked,
     });
   } catch (e: any) {
     console.error('[Sofia API] Error:', e);

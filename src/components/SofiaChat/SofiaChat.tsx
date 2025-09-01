@@ -20,7 +20,7 @@ import SidebarMobile from './SidebarMobile';
 import Header from './header';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
-import { MetaPanel, type MetaData } from '@/components/SofiaChat/MetaPanel';
+import type { MetaData } from '@/components/SofiaChat/MetaPanel';  // ← 型だけ残す
 
 /* ========= types ========= */
 type Role = 'user' | 'assistant';
@@ -58,24 +58,50 @@ type SofiaPostRes = {
 const normalizeMeta = (m: any): MetaData | null => {
   if (!m) return null;
   const asArray = (v: any) => (Array.isArray(v) ? v : v ? [v] : []);
-  return {
-    qcodes: asArray(m.qcodes).map((q: any) =>
-      typeof q === 'string'
-        ? { code: q }
-        : { code: String(q?.code ?? q), score: typeof q?.score === 'number' ? q.score : undefined }
-    ),
-    layers: asArray(m.layers).map((l: any) =>
-      typeof l === 'string'
-        ? { layer: l }
-        : { layer: String(l?.layer ?? l), score: typeof l?.score === 'number' ? l.score : undefined }
-    ),
-    used_knowledge: asArray(m.used_knowledge).map((k: any) => ({
-      id: String(k?.id ?? `${k?.key ?? 'K'}-${Math.random().toString(36).slice(2, 7)}`),
-      key: String(k?.key ?? 'K'),
-      title: (k?.title ?? null) as string | null,
-    })),
-    stochastic: m.stochastic ?? null,
+
+  const qcodes = asArray(m.qcodes).map((q: any) =>
+    typeof q === 'string'
+      ? { code: q }
+      : { code: String(q?.code ?? q), score: typeof q?.score === 'number' ? q.score : undefined }
+  );
+  const layers = asArray(m.layers).map((l: any) =>
+    typeof l === 'string'
+      ? { layer: l }
+      : { layer: String(l?.layer ?? l), score: typeof l?.score === 'number' ? l.score : undefined }
+  );
+  const used_knowledge = asArray(m.used_knowledge).map((k: any) => ({
+    id: String(k?.id ?? `${k?.key ?? 'K'}-${Math.random().toString(36).slice(2, 7)}`),
+    key: String(k?.key ?? 'K'),
+    title: (k?.title ?? null) as string | null,
+  }));
+
+  const indicator = {
+    on: typeof m.stochastic === 'boolean' ? m.stochastic : Boolean(m?.stochastic?.on),
+    g: typeof m.g === 'number' ? m.g : m?.stochastic?.g ?? null,
+    seed: typeof m.seed === 'number' ? m.seed : m?.stochastic?.seed ?? null,
+    noiseAmp: typeof m.noiseAmp === 'number' ? m.noiseAmp : m?.stochastic?.noiseAmp ?? null,
+    epsilon: m?.stochastic_params?.epsilon ?? null,
+    retrNoise: m?.stochastic_params?.retrNoise ?? null,
+    retrSeed: m?.stochastic_params?.retrSeed ?? null,
   };
+
+  const resonance = {
+    phase: m.phase ?? null,
+    selfAcceptance: m.selfAcceptance ?? null,
+    relation: m.relation ?? null,
+    nextQ: m.nextQ ?? null,
+    currentQ: m.currentQ ?? null,
+  };
+
+  const dialogue_trace = Array.isArray(m.dialogue_trace) ? m.dialogue_trace : null;
+
+  return {
+    qcodes,
+    layers,
+    used_knowledge,
+    stochastic: indicator, // ← ここにまとめて渡せばOK
+  };
+  
 };
 
 export default function SofiaChat() {
@@ -122,7 +148,7 @@ export default function SofiaChat() {
     set('--sofia-user-radius', `${ui.userRadius}px`);
   }, []);
 
-  /* ==== プレゼン用 Hotfix（吹き出し見た目） ==== */
+  /* ==== プレゼン用 Hotfix ==== */
   useEffect(() => {
     const css = `
     :where(.sofia-container) .sof-msgs .sof-bubble{
@@ -170,13 +196,10 @@ export default function SofiaChat() {
       document.head.appendChild(el);
     }
     el.textContent = `.sof-overlay{ display:none !important; }`;
-    return () => { /* 残置でOK（HMR対策） */ };
   }, []);
 
-  /* ===== 高さを CSS 変数へ反映（Compose / Meta） ===== */
+  /* ===== 高さ反映（Composeのみ残す） ===== */
   const composeRef = useRef<HTMLDivElement>(null);
-  const metaDockRef = useRef<HTMLDivElement>(null);
-
   useLayoutEffect(() => {
     const el = composeRef.current;
     if (!el) return;
@@ -189,18 +212,9 @@ export default function SofiaChat() {
     return () => ro.disconnect();
   }, []);
 
-  useLayoutEffect(() => {
-    const m = metaDockRef.current;
-    if (m) {
-      const apply = () => {
-        const h = m.offsetHeight || 0;
-        document.body.style.setProperty('--meta-height', `${h}px`);
-      };
-      apply();
-      const ro = new ResizeObserver(apply);
-      ro.observe(m);
-      return () => ro.disconnect();
-    }
+  useEffect(() => {
+    // MetaPanelを撤去したので高さは常に0に固定
+    document.body.style.setProperty('--meta-height', `0px`);
   }, []);
 
   /* ===== 会話一覧 ===== */
@@ -273,16 +287,12 @@ export default function SofiaChat() {
         user_code: userCode,
         conversation_code: conversationId ?? '',
         mode: 'normal',
-        vars: { debug: true, client: 'web' }, // ← buildSofiaSystemPrompt でサーバログを出すため
+        vars: { debug: true, client: 'web' },
         messages: msgsForApi,
       };
 
-      console.log('[SofiaChat] POST /api/sofia body:', body);
-
       const r = await fetchWithIdToken('/api/sofia', { method: 'POST', body: JSON.stringify(body) });
       const js: SofiaPostRes = await r.json().catch(() => ({}));
-
-      console.log('[SofiaChat] POST /api/sofia resp:', js);
 
       if (js.conversation_code && js.conversation_code !== conversationId) {
         setConversationId(js.conversation_code);
@@ -298,7 +308,11 @@ export default function SofiaChat() {
           },
         ]);
       }
-      if (js.meta) setMeta(normalizeMeta(js.meta));
+
+      if (js.meta) {
+        const m = normalizeMeta(js.meta);
+        setMeta(m);
+      }
 
       fetchConversations();
     } catch (e) {
@@ -319,6 +333,7 @@ export default function SofiaChat() {
   const handleNewChat = () => {
     setConversationId(undefined);
     setMessages([]);
+    setMeta(null);
   };
 
   const handleSelectConversation = (id: string) => {
@@ -356,20 +371,18 @@ export default function SofiaChat() {
         onDelete={() => {}}
         onRename={() => {}}
         userInfo={{ id: userCode, name: userCode, userType: 'member', credits: 0 }}
+        meta={meta}
       />
 
       <MessageList messages={messages} />
       <div ref={endRef} />
 
-      <div className="sof-meta-dock" ref={metaDockRef}>
-        <MetaPanel meta={meta} />
-      </div>
+      {/* MetaPanel は削除済み */}
 
       <div className="sof-compose-dock" ref={composeRef}>
         <ChatInput onSend={handleSend} onPreview={() => {}} onCancelPreview={() => {}} />
       </div>
 
-      {/* 下部の白い土台（ガード板）— スタイルはテーマ側で制御 */}
       <div className="sof-underlay" aria-hidden />
 
       <div className="sof-footer-spacer" />

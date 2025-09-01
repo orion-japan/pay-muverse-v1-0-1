@@ -435,3 +435,37 @@ body.mu-body .mu-main:after{
   border-radius: var(--sofia-user-radius, 14px);
 }
 
+/* MetaPanel.css */
+.meta-panel {
+  position: relative;   /* fixedやabsoluteは避ける */
+  margin-bottom: 80px;  /* ← 入力ボックス高さぶん余白を確保 */
+  padding: 12px;
+}
+
+/* SofiaChat.css */
+.sof-compose-dock {
+  position: sticky;
+  bottom: env(safe-area-inset-bottom, 0);
+  z-index: 1000;           /* ← これを十分高く */
+  background: #fff;        /* 透け防止 */
+  box-shadow: 0 -6px 18px rgba(0,0,0,.06);
+}
+
+/* SofiaChat.css */
+.sof-meta-dock {
+  position: relative;      /* ← fixed や sticky にしない */
+  z-index: 0;              /* 入力欄より下 */
+}
+
+/* MetaPanel.css */
+.meta-panel {
+  position: relative;      /* 念のため明示 */
+  z-index: 0;
+  margin-bottom: calc(var(--sof-compose-h, 96px) + 12px);
+  /* ↑ 入力欄の高さ分だけ下に余白を確保（SofiaChat.tsxで --sof-compose-h を設定済み） */
+}
+
+/* SofiaChat.css */
+.sof-msgs {
+  padding-bottom: calc(var(--sof-compose-h, 96px) + 24px);
+}

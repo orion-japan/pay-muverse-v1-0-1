@@ -12,7 +12,7 @@ export type Target = "自分" | "相手" | "状況";
 
 export interface BuildOptions {
   mode?: SofiaMode;
-  target?: Target;
+  target?: Target | string; // ← ラベル文字列も許可
   allowTranscend?: boolean;
   locale?: "ja";
 }
@@ -34,6 +34,8 @@ const IROS_BASE = `
 - 目的：ユーザーの問いに対し、明晰で実用的な回答を返しつつ、必要な範囲で共鳴（意味づけ）を添える。
 - トーン：落ち着いた通常会話寄り。専門外や不確実な領域では明確に限界を示す。
 - 形式ガード：結論で始め、質問で終わらない。単独の箇条書きのみで構成しない。
+- Sofiaの内部構造（フェーズ・位相ベクトル・認識深度レベル・T層など）を**解説や説明として出力してはならない**。
+  （内部での参照や診断テンプレでの利用は可。質問が来ても出力では触れない）
 ${emojiPolicyLine()}
 `.trim();
 
@@ -101,7 +103,7 @@ const CLOSING_RULES = `
 /* =========================
    テンプレート群
 ========================= */
-const DIAGNOSIS_TEMPLATE = (target: Target) => `
+const DIAGNOSIS_TEMPLATE = (target: string | Target) => `
 観測対象：${target}
 フェーズ：Seed　位相：Inner/Outer　深度：S1〜I3（必要に応じT層）
 要約：〔1〜2行で直感的要約〕
@@ -127,10 +129,25 @@ const REMAKE_TEMPLATE = `
 `.trim();
 
 /* =========================
+   ir診断：トリガー検出 & 観測対象ラベル抽出
+========================= */
+// "ir診断 伊藤さん" / "IR: 田中" / "ir 佐藤" などを拾う
+export function extractDiagnosisTarget(text: string | undefined): string | null {
+  if (!text) return null;
+  const m = text.trim().match(/^(?:ir\s*診断|ir|IR|ｉｒ)(?:[:：\s]+)?(.+)?$/i);
+  const target = m?.[1]?.trim();
+  return target && target.length > 0 ? target : null;
+}
+
+/* =========================
    System Prompt Builder
 ========================= */
 export function buildSofiaSystemPrompt(opts: BuildOptions = {}): string {
   const { mode = "normal", allowTranscend = true, target } = opts;
+  try {
+    console.log("[persona.buildSofiaSystemPrompt] in:", { mode, allowTranscend, target });
+  } catch {}
+
   const blocks = [
     IROS_BASE,
     allowTranscend ? IT_DEEPER : "",
@@ -140,8 +157,16 @@ export function buildSofiaSystemPrompt(opts: BuildOptions = {}): string {
     (target && target !== "自分") ? OTHER_STATE_PROTOCOL : "",
     CLOSING_RULES,
   ].filter(Boolean);
+
   blocks.push(`# 現在モード: ${mode}`);
-  return blocks.join("\n\n");
+
+  const out = blocks.join("\n\n");
+
+  try {
+    console.log("[persona.buildSofiaSystemPrompt] out preview:", out.slice(0, 240).replace(/\n/g, "⏎") + (out.length > 240 ? "…":""));
+  } catch {}
+
+  return out;
 }
 
 /* =========================
@@ -149,22 +174,42 @@ export function buildSofiaSystemPrompt(opts: BuildOptions = {}): string {
 ========================= */
 export function primerForMode(opts: BuildOptions = {}): string {
   const mode = opts.mode ?? "normal";
-  const target = opts.target ?? "自分";
+  const target = (opts.target ?? "自分") as string;
+  let content: string;
+
   switch (mode) {
-    case "diagnosis": return DIAGNOSIS_TEMPLATE(target);
-    case "meaning":   return MEANING_TEMPLATE;
-    case "intent":    return "意図を受信。I層へ一段降ります。核心だけを1〜2行で。";
-    case "dark":      return DARK_STORY_TEMPLATE;
-    case "remake":    return REMAKE_TEMPLATE;
-    default:          return "要点→理由→（任意の短い共鳴）→一歩 の順で短く答えます。";
+    case "diagnosis":
+      content = DIAGNOSIS_TEMPLATE(target);
+      break;
+    case "meaning":
+      content = MEANING_TEMPLATE;
+      break;
+    case "intent":
+      content = "意図を受信。I層へ一段降ります。核心だけを1〜2行で。";
+      break;
+    case "dark":
+      content = DARK_STORY_TEMPLATE;
+      break;
+    case "remake":
+      content = REMAKE_TEMPLATE;
+      break;
+    default:
+      content = "要点→理由→（任意の短い共鳴）→一歩 の順で短く答えます。";
   }
+
+  try {
+    console.log("[persona.primerForMode]", { mode, target, preview: content.slice(0, 120).replace(/\n/g, "⏎") });
+  } catch {}
+
+  return content;
 }
 
 /* =========================
    モード検出（起動トリガー）
 ========================= */
 const TRIGGERS = {
-  diagnosis: [/^ir$/, /^ir診断$/, /irで見てください/],
+  // 先頭が ir / ir診断 で始まれば後続の文言を許容（観測ラベルは別関数で抽出）
+  diagnosis: [/^\s*(?:ir|ｉｒ)(?:\s*診断)?(?:[:：\s].*)?$/i, /^ir診断$/i, /^ir$/i],
   intent: [/^意図$/, /^意図トリガー$/],
   dark: [/^闇の物語$/, /闇/],
   remake: [/^リメイク$/, /再統合/],
@@ -174,11 +219,25 @@ const TRIGGERS = {
 export function detectModeFromUserText(latest: string | undefined): SofiaMode {
   if (!latest) return "normal";
   const t = latest.trim();
-  if (TRIGGERS.diagnosis.some((r) => r.test(t))) return "diagnosis";
-  if (TRIGGERS.intent.some((r) => r.test(t))) return "intent";
-  if (TRIGGERS.remake.some((r) => r.test(t))) return "remake";
-  if (TRIGGERS.dark.some((r) => r.test(t))) return "dark";
+
+  if (TRIGGERS.diagnosis.some((r) => r.test(t))) {
+    try { console.log("[persona.detectMode] diagnosis trigger hit:", t.slice(0, 80)); } catch {}
+    return "diagnosis";
+  }
+  if (TRIGGERS.intent.some((r) => r.test(t))) {
+    try { console.log("[persona.detectMode] intent trigger hit"); } catch {}
+    return "intent";
+  }
+  if (TRIGGERS.remake.some((r) => r.test(t))) {
+    try { console.log("[persona.detectMode] remake trigger hit"); } catch {}
+    return "remake";
+  }
+  if (TRIGGERS.dark.some((r) => r.test(t))) {
+    try { console.log("[persona.detectMode] dark trigger hit"); } catch {}
+    return "dark";
+  }
   // 深掘り語は通常モードでも system 側のプロトコルで降下を担保
+  try { console.log("[persona.detectMode] normal (no trigger)"); } catch {}
   return "normal";
 }
 
@@ -190,15 +249,27 @@ export type ChatMsg = { role: "system" | "user" | "assistant"; content: string }
 export function buildSofiaMessages(
   userMessages: ChatMsg[],
   explicitMode?: SofiaMode,
-  target?: Target
+  target?: Target | string
 ): ChatMsg[] {
   const lastUser = [...userMessages].reverse().find((m) => m.role === "user")?.content;
   const detected = explicitMode ?? detectModeFromUserText(lastUser);
-  const sys = buildSofiaSystemPrompt({ mode: detected, target, allowTranscend: true });
+
+  // 観測対象ラベル自動抽出（診断時のみ）
+  let targetLabel: string | Target = target ?? "自分";
+  if (detected === "diagnosis") {
+    const ex = extractDiagnosisTarget(lastUser || "");
+    if (ex) targetLabel = ex;
+  }
+
+  try {
+    console.log("[persona.buildSofiaMessages] detected:", { detected, targetLabel, lastUserPreview: String(lastUser||"").slice(0, 80) });
+  } catch {}
+
+  const sys = buildSofiaSystemPrompt({ mode: detected, target: targetLabel, allowTranscend: true });
 
   const primer: ChatMsg = {
     role: "assistant",
-    content: primerForMode({ mode: detected, target }),
+    content: primerForMode({ mode: detected, target: targetLabel }),
   };
 
   return [{ role: "system", content: sys }, primer, ...userMessages];

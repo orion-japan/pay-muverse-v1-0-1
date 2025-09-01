@@ -92,3 +92,42 @@
     .sof-drawer{ width: 92vw; }
   }
   
+
+  /* ユーザー情報 */
+.sof-user {
+  margin: 8px 12px 12px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid rgba(15,23,42,.08);
+  border-radius: 12px;
+}
+.sof-user__row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 6px 0;
+  font: inherit;
+  cursor: pointer;
+}
+.sof-user__row + .sof-user__row { border-top: 1px dashed rgba(15,23,42,.08); }
+
+/* Meta 折りたたみ */
+.sof-meta-fold {
+  margin: 12px;
+  border: 1px solid rgba(15,23,42,.08);
+  border-radius: 12px;
+  background: #fff;
+}
+.sof-meta-fold__toggle {
+  width: 100%;
+  display: flex; align-items: center; gap: 8px;
+  justify-content: center;
+  padding: 10px 8px;
+  border: none; background: #fff; border-bottom: 1px solid rgba(15,23,42,.06);
+  border-top-left-radius: 12px; border-top-right-radius: 12px;
+  cursor: pointer;
+}
+.sof-meta-fold__body { max-height: 0; overflow: hidden; transition: max-height .25s ease; }
+.sof-meta-fold__body.open { max-height: 60vh; overflow: auto; padding: 8px; }
