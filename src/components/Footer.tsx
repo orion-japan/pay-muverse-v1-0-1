@@ -1,10 +1,10 @@
-// src/components/Footer.tsx
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
 const FALLBACK_H = 56
 
@@ -25,8 +25,19 @@ function toast(msg: string) {
   setTimeout(() => div.remove(), 2200)
 }
 
-// ?debug_footer_badge=数字 で Talk のバッジを上書き
-const getDebugBadge = (): number => {
+// ブラウザ用 Supabase（シングルトン）
+function getSb(): SupabaseClient | null {
+  if (typeof window === 'undefined') return null
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  if (!url || !key) return null
+  const g = window as any
+  if (!g.__sb_footer) g.__sb_footer = createClient(url, key)
+  return g.__sb_footer as SupabaseClient
+}
+
+// ?debug_footer_badge=数字 で Talk バッジを強制
+const getDebugBadge = () => {
   if (typeof window === 'undefined') return 0
   const v = new URLSearchParams(window.location.search).get('debug_footer_badge')
   return v ? Math.max(0, Number(v) || 0) : 0
@@ -38,23 +49,18 @@ export default function Footer() {
   const navRef = useRef<HTMLElement | null>(null)
   const router = useRouter()
   const pathname = usePathname()
-  const { user } = useAuth()
+  const { user, userCode } = useAuth()
   const isLoggedIn = !!user
 
-  // 未読数（必要に応じて key を増やせます）
   const [counts, setCounts] = useState<Record<ItemId, number>>({
-    home: 0,
-    talk: 0,
-    board: 0,
-    pay: 0,
-    mypage: 0,
+    home: 0, talk: 0, board: 0, pay: 0, mypage: 0,
   })
 
-  const debugBadge = useMemo(getDebugBadge, [])
+  const debugBadge = useMemo(() => (process.env.NODE_ENV === 'development' ? getDebugBadge() : 0), [])
 
   useEffect(() => setMounted(true), [])
 
-  // ポータル先（なければ作る）
+  // ポータル先
   useEffect(() => {
     try {
       let el = document.getElementById('mu-footer-root') as HTMLDivElement | null
@@ -69,7 +75,7 @@ export default function Footer() {
     }
   }, [])
 
-  // 高さを CSS 変数へ
+  // 高さ → CSS 変数
   useEffect(() => {
     const setPad = (h: number) => {
       const px = Math.max(0, Math.round(h || 0))
@@ -84,23 +90,17 @@ export default function Footer() {
     const ro = 'ResizeObserver' in window ? new ResizeObserver(update) : null
     ro?.observe(el)
     window.addEventListener('resize', update)
-    return () => {
-      ro?.disconnect()
-      window.removeEventListener('resize', update)
-    }
+    return () => { ro?.disconnect(); window.removeEventListener('resize', update) }
   }, [host, mounted])
 
   // ナビ
-  const items: Item[] = useMemo(
-    () => [
-      { id: 'home',   label: 'Home',   href: '/',       icon: <span>🏠</span> },
-      { id: 'talk',   label: 'Talk',   href: '/talk',   icon: <span>💬</span> },
-      { id: 'board',  label: 'I Board',href: '/board',  icon: <span>🧩</span> },
-      { id: 'pay',    label: 'Plan',   href: '/pay',    icon: <span>💳</span> },
-      { id: 'mypage', label: 'My Page',href: '/mypage', icon: <span>👤</span> },
-    ],
-    []
-  )
+  const items: Item[] = useMemo(() => [
+    { id: 'home',   label: 'Home',    href: '/',       icon: <span>🏠</span> },
+    { id: 'talk',   label: 'Talk',    href: '/talk',   icon: <span>💬</span> },
+    { id: 'board',  label: 'I Board', href: '/board',  icon: <span>🧩</span> },
+    { id: 'pay',    label: 'Plan',    href: '/pay',    icon: <span>💳</span> },
+    { id: 'mypage', label: 'My Page', href: '/mypage', icon: <span>👤</span> },
+  ], [])
 
   const onClick = (it: Item) => (e: React.MouseEvent) => {
     const isHome = it.href === '/'
@@ -113,32 +113,26 @@ export default function Footer() {
     if (pathname !== it.href) router.push(it.href)
   }
 
-  // --- 未読数取得（Talk） ---
+  // ===== 未読取得 + 即時反映ハンドラ =====
   useEffect(() => {
-    // デバッグ上書き有効時は API を読まず固定表示
-    if (debugBadge > 0) {
-      setCounts((c) => ({ ...c, talk: debugBadge }))
-      return
-    }
-
-    if (!isLoggedIn) {
-      setCounts((c) => ({ ...c, talk: 0 }))
-      return
-    }
+    if (debugBadge > 0) { setCounts(c => ({ ...c, talk: debugBadge })); return }
+    if (!isLoggedIn)   { setCounts(c => ({ ...c, talk: 0 }));        return }
 
     let timer: number | undefined
+    const sb = getSb()
+    const cleanups: Array<() => void> = []
+
+    const setTalk = (n: number) => setCounts(c => (c.talk !== n ? { ...c, talk: n } : c))
 
     const load = async () => {
       try {
-        // Firebase の ID トークン（無ければ Authorization ヘッダなしで呼ぶ）
+        // Firebase ID トークン
         let idToken: string | null = null
         try {
           const { getAuth } = await import('firebase/auth')
           const auth = getAuth()
           idToken = await auth.currentUser?.getIdToken().catch(() => null)
-        } catch {
-          // firebase/auth を使っていない場合でも動くように握り潰す
-        }
+        } catch {}
 
         const res = await fetch('/api/talk/unread-count', {
           method: 'GET',
@@ -146,33 +140,90 @@ export default function Footer() {
             'Content-Type': 'application/json',
             ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
           },
+          cache: 'no-store',
         })
-
-        if (!res.ok) {
-          console.warn('[Footer] unread-count NG', res.status)
-          setCounts((c) => ({ ...c, talk: 0 }))
-          return
-        }
-
-        const data = (await res.json().catch(() => null)) as { unread?: number } | null
-        const unread = Math.max(0, data?.unread ?? 0)
-        console.log('[Footer] unread-count OK:', unread)
-        setCounts((c) => (c.talk !== unread ? { ...c, talk: unread } : c))
-      } catch (e) {
-        console.warn('[Footer] unread-count error', e)
-        setCounts((c) => ({ ...c, talk: 0 }))
+        if (!res.ok) { setTalk(0); return }
+        const j = (await res.json().catch(() => null)) as { unread?: number } | null
+        setTalk(Math.max(0, Number(j?.unread ?? 0)))
+      } catch {
+        setTalk(0)
       }
     }
 
+    // 初回・可視時・定期
     load()
     timer = window.setInterval(load, 20000)
     const onVis = () => { if (document.visibilityState === 'visible') load() }
     document.addEventListener('visibilitychange', onVis)
-    return () => {
-      if (timer) clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVis)
+    cleanups.push(() => document.removeEventListener('visibilitychange', onVis))
+    cleanups.push(() => timer && clearInterval(timer))
+
+    // Talk 画面が計算した合計を即反映（ページ間連携）
+    const onBadge = (e: CustomEvent<{ total?: number }>) => {
+      const n = Math.max(0, Number(e.detail?.total ?? 0))
+      setTalk(n)
     }
-  }, [isLoggedIn, debugBadge])
+    window.addEventListener('talk:badge', onBadge as unknown as EventListener)
+    cleanups.push(() => window.removeEventListener('talk:badge', onBadge as unknown as EventListener))
+
+    // localStorage 経由でも即反映（例：Talk で setItem）
+    const onStorage = (ev: StorageEvent) => {
+      if (ev.key === 'mu_talk_total_unread') {
+        const n = Math.max(0, Number(ev.newValue ?? 0))
+        setTalk(n)
+      }
+    }
+    window.addEventListener('storage', onStorage)
+    cleanups.push(() => window.removeEventListener('storage', onStorage))
+
+    // Service Worker → postMessage({type:'talk:updated'})
+    const onUpdated = () => load()
+    window.addEventListener('talk:updated', onUpdated)
+    cleanups.push(() => window.removeEventListener('talk:updated', onUpdated))
+    if (navigator?.serviceWorker) {
+      const swHandler = (e: MessageEvent) => { if ((e.data as any)?.type === 'talk:updated') load() }
+      navigator.serviceWorker.addEventListener('message', swHandler as any)
+      cleanups.push(() => navigator.serviceWorker.removeEventListener('message', swHandler as any))
+    }
+
+    // Supabase Realtime（あなたのスキーマ版）
+    // 1) 新着メッセージ → messages INSERT
+    if (sb) {
+      const ch1 = sb
+        .channel(`rt-messages-footer`)
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'messages' },
+          (payload) => {
+            // 自分の発言なら未読ではないのでスキップ
+            if (payload.new && userCode && payload.new['user_code'] === userCode) return
+            // 相手の新着 → 最新を取り直す
+            load()
+          }
+        )
+        .subscribe()
+      cleanups.push(() => sb.removeChannel(ch1))
+
+      // 2) 既読付与 → mu_conversation_logs UPDATE（last_read_at 変化）
+      const ch2 = sb
+        .channel(`rt-logs-footer`)
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'mu_conversation_logs' },
+          (payload) => {
+            if (!userCode) return
+            // 自分のログ更新のみ拾う
+            if (payload.new && payload.new['user_code'] === userCode) {
+              load()
+            }
+          }
+        )
+        .subscribe()
+      cleanups.push(() => sb.removeChannel(ch2))
+    }
+
+    return () => { cleanups.forEach(fn => fn()) }
+  }, [isLoggedIn, debugBadge, userCode])
 
   if (!mounted) return null
 
@@ -205,7 +256,7 @@ export default function Footer() {
         const disabled = !isLoggedIn && it.href !== '/'
         const base = counts[it.id] ?? 0
         const badge = it.id === 'talk' && debugBadge > 0 ? debugBadge : base
-        const showBadge = badge > 0 // ← デバッグや未ログインでも見えるように
+        const showBadge = badge > 0
 
         return (
           <a

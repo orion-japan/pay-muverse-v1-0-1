@@ -1,35 +1,4 @@
 // app/api/talk/unread-count/route.ts
-import { NextResponse } from 'next/server'
-
-// CORS/プリフライト（同一オリジンなら厳密には不要だが、405回避のため実装）
-export function OPTIONS() {
-  return new Response(null, {
-    status: 204,
-    headers: {
-      'Access-Control-Allow-Methods': 'GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-      'Access-Control-Allow-Origin': '*', // 内部だけなら外してOK
-    },
-  })
-}
-
-// 最初は固定値でOK（UI確認用）。あとで DB 集計に差し替え。
-export async function GET() {
-  // 例：固定で5件
-  const unread = 5
-
-  return NextResponse.json(
-    { unread },
-    {
-      status: 200,
-      headers: {
-        'Cache-Control': 'no-store',
-      },
-    }
-  )
-}
-
-/* --- 参考：DB 集計に差し替えるときの雛形 ---
 import { NextRequest, NextResponse } from 'next/server'
 import { adminAuth } from '@/lib/firebase-admin'
 import { createClient } from '@supabase/supabase-js'
@@ -39,25 +8,48 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
+// uid -> user_code 解決
+async function uidToUserCode(uid: string) {
+  // firebase_uid 優先
+  const a = await supabase.from('users').select('user_code').eq('firebase_uid', uid).maybeSingle()
+  if (a.data?.user_code) return a.data.user_code as string
+  // 旧 uid フィールド fallback
+  const b = await supabase.from('users').select('user_code').eq('uid', uid).maybeSingle()
+  return (b.data?.user_code ?? null) as string | null
+}
+
+// CORS
+export function OPTIONS() {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+      'Access-Control-Allow-Origin': '*',
+    },
+  })
+}
+
 export async function GET(req: NextRequest) {
   try {
     const authz = req.headers.get('authorization') || ''
-    const token = authz.toLowerCase().startsWith('bearer ') ? authz.slice(7).trim() : null
-    const decoded = token ? await adminAuth.verifyIdToken(token).catch(() => null) : null
-    if (!decoded) return NextResponse.json({ unread: 0 }, { status: 200 })
+    const token = authz.toLowerCase().startsWith('bearer ') ? authz.slice(7).trim() : ''
+    if (!token) return NextResponse.json({ unread: 0 }, { status: 200, headers: { 'Cache-Control': 'no-store' } })
 
-    const userCode = decoded.uid // ← 実装に合わせてユーザー識別子を取得
+    const decoded = await adminAuth.verifyIdToken(token).catch(() => null)
+    if (!decoded) return NextResponse.json({ unread: 0 }, { status: 200, headers: { 'Cache-Control': 'no-store' } })
 
-    const { count, error } = await supabase
-      .from('messages')
-      .select('*', { head: true, count: 'exact' })
-      .eq('to_user_code', userCode)
-      .is('read_at', null)
+    const me = await uidToUserCode(decoded.uid)
+    if (!me) return NextResponse.json({ unread: 0 }, { status: 200, headers: { 'Cache-Control': 'no-store' } })
 
-    if (error) return NextResponse.json({ unread: 0 }, { status: 200 })
-    return NextResponse.json({ unread: count ?? 0 }, { status: 200 })
-  } catch (e) {
-    return NextResponse.json({ unread: 0 }, { status: 200 })
+    const { data, error } = await supabase.rpc('unread_total_sum_v3', { me })
+    if (error) {
+      console.warn('[unread-count] rpc error', error)
+      return NextResponse.json({ unread: 0 }, { status: 200, headers: { 'Cache-Control': 'no-store' } })
+    }
+
+    return NextResponse.json({ unread: Number(data ?? 0) }, { status: 200, headers: { 'Cache-Control': 'no-store' } })
+  } catch {
+    return NextResponse.json({ unread: 0 }, { status: 200, headers: { 'Cache-Control': 'no-store' } })
   }
 }
---- */
