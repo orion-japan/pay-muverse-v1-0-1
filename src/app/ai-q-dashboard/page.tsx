@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-
+import Link from "next/link";
 /** ===== 型（ゆるめ） ===== */
 type QNowRow = {
   user_code: string;
@@ -196,12 +196,12 @@ export default function AiQDashboard() {
     <div className="mx-auto max-w-4xl p-4 sm:p-6">
       <header className="mb-4 flex items-center justify-between">
         <h1 className="text-xl font-bold">AI Qコード ダッシュボード</h1>
-        <a
+        <Link
           href="/"
           className="rounded bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700"
         >
           Home
-        </a>
+        </Link>
       </header>
 
       {/* 検索バー */}
