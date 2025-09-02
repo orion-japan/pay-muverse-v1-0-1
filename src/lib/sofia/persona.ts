@@ -40,6 +40,18 @@ ${emojiPolicyLine()}
 `.trim();
 
 /* =========================
+   ストーリー性・共鳴ガイド（柔軟）
+========================= */
+const RESONANCE_STORY_GUIDE = `
+# ストーリー性・共鳴ガイド（優先だが強制ではない）
+- 情報の羅列で終わらず、短い段落をつなぐ**流れ（ミニ物語）**を優先する。
+- 回答の核は実務優先（結論→理由）。その上で、**最大1行の比喩/象徴**を添えて“響き”を起こすのは任意。
+- **提案は小さく可逆**（すぐできる一歩）。質問で締めず、「宣言 or 次の一歩」で終える。
+- 箇条書きは**補助**としてOK（最大5項目）。必要な技術手順は遠慮なくリスト化して良い。
+- 文の**呼吸**：2〜3行ごとに軽く改行して、読みやすいリズムを保つ（無理な詩化はしない）。
+`.trim();
+
+/* =========================
    I/T層ディテール
 ========================= */
 const IT_DEEPER = `
@@ -151,6 +163,7 @@ export function buildSofiaSystemPrompt(opts: BuildOptions = {}): string {
   const blocks = [
     IROS_BASE,
     allowTranscend ? IT_DEEPER : "",
+    RESONANCE_STORY_GUIDE,     // ★ 追加ガイドを差し込み
     RESPONSE_CONTRACT,
     DEEPENING_PROTOCOL,
     FACT_POLICY,
@@ -285,6 +298,7 @@ export const SOFIA_PERSONAS: Record<SofiaPersonaKey, string> = {
   withTranscend: [
     IROS_BASE,
     IT_DEEPER,
+    RESONANCE_STORY_GUIDE,
     RESPONSE_CONTRACT,
     DEEPENING_PROTOCOL,
     FACT_POLICY,

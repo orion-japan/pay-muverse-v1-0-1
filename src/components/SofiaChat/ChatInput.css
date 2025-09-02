@@ -1,50 +1,179 @@
-/* ======== 吹き出し（レイアウトだけ保持） ======== */
+/* ===== Compose bar（フッター直上 / 常時表示） ===== */
+.sof-compose{
+  position: sticky;
+  bottom: 0;
+  z-index: 50;
+  background: #fff;
+  border-top: 1px solid #e6e7eb;
+  padding: 10px 12px;
+}
 
-/* 共通：配置・サイズ・タイポは env 変数を尊重 */
-.sof-msgs .sof-bubble{
-  max-width: var(--sofia-bubble-maxw, 86%);
-  padding: 10px 14px;
-  border-radius: var(--sofia-a-radius, 16px);
-  line-height: var(--sofia-assist-lh, 1.85);
-  font-size: var(--sofia-assist-fs, 15px);
-  word-break: break-word;
+/* 横並び：テキストエリア + 送信ボタン */
+.sof-inputWrap{
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: 100%;
+}
 
-  /* デフォルトは左寄せ */
-  align-self: flex-start;
-  margin-left: 0;
-  margin-right: auto;
+/* テキストエリア（4行） */
+.sof-textarea{
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 4.8em;          /* 4行相当の最低高さ（フォント差分のため少し余裕） */
+  max-height: 40vh;           /* 長文でも画面を占有しすぎないように */
+  resize: vertical;           /* 必要なら手動で伸縮可能 */
+  line-height: 1.4;
+  font-size: 14px;
+  padding: 10px 12px;
+  border: 1px solid #d9dbe1;
+  border-radius: 10px;
+  outline: none;
+  background: #fff;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.03);
+}
 
-  /* ✨ 見た目(色/枠/影)はテーマに任せる：ここでは指定しない */
-  background: none;
+.sof-textarea:focus{
+  border-color: #9bb7ff;
+  box-shadow: 0 0 0 3px rgba(47,128,237,0.12);
+}
+
+/* 送信ボタン（入力欄の“横”に配置） */
+.sof-sendBtn{
+  flex: 0 0 auto;
+  height: 40px;
+  min-width: 86px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 10px;
+  background: #2f80ed;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sof-sendBtn:disabled{
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.sof-sendBtn:hover:not(:disabled){
+  filter: brightness(0.95);
+}
+
+/* モバイルで潰れないように */
+@media (max-width: 520px){
+  .sof-sendBtn{
+    min-width: 72px;
+  }
+}
+/* 送信ボタン（より目立たせる） */
+.sof-sendBtn {
+  flex: 0 0 auto;
+  height: 44px;
+  width: 44px;
   border: none;
+  border-radius: 50%;              /* ← 丸型 */
+  background: linear-gradient(135deg, #2f80ed, #56ccf2);
+  color: #fff;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s ease, filter 0.15s ease;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+}
+
+.sof-sendBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #bbb;
   box-shadow: none;
 }
 
-/* ユーザー（右寄せだけ保持） */
-.sof-msgs .sof-bubble.is-user{
-  align-self: flex-end;
-  margin-left: 0;
-  margin-right: 0;
-  /* 見た目はテーマ側が上書き */
+.sof-sendBtn:hover:not(:disabled) {
+  filter: brightness(1.05);
+  transform: scale(1.05);
 }
 
-/* アシスタント（左寄せだけ保持） */
-.sof-msgs .sof-bubble.is-assistant{
-  align-self: flex-start;
-  margin-left: 0;
-  margin-right: auto;
-  /* 見た目はテーマ側が上書き */
+/* アイコン */
+.sof-sendIcon {
+  font-size: 18px;
+  transform: translateY(-1px) rotate(10deg);
 }
 
-/* 役割ラベル & 本文：タイポだけ持つ（色はテーマへ） */
-.sof-bubble__role{
-  font-size: 11px;
-  letter-spacing: .02em;
-  margin-bottom: 2px;
-  color: inherit; /* テーマが決める */
-}
-.sof-bubble__text{
-  white-space: pre-wrap;
+/* ===== Compose bar（フッター直上） ===== */
+.sof-compose{
+  position: sticky;
+  bottom: 0;
+  z-index: 50;
+  background: #fff;
+  border-top: 1px solid #e6e7eb;
+  padding: 10px 12px;
 }
 
+/* 横並び：テキストエリア + 送信ボタン（重ならない） */
+.sof-inputWrap{
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  max-width: 100%;
+}
 
+/* テキストエリア（最小4行・自動リサイズ） */
+.sof-textarea{
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 4.8em;                  /* 4行相当 */
+  max-height: 40vh;
+  resize: none;                       /* 自動リサイズに任せる */
+  line-height: 1.5;
+  font-size: 14px;
+  padding: 10px 12px;
+  border: 1px solid #d9dbe1;
+  border-radius: 12px;
+  outline: none;
+  background: #fff;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.03);
+}
+
+.sof-textarea:focus{
+  border-color: #9bb7ff;
+  box-shadow: 0 0 0 3px rgba(47,128,237,0.12);
+}
+
+/* 送信ボタンを必ず丸い紙飛行機に */
+.sof-compose .sof-inputWrap [data-sof-send].sof-sendBtn {
+  all: unset;                           /* 既存のglobal .btn等をリセット */
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 44px;
+  width: 44px;
+  border-radius: 50% !important;        /* 丸を強制 */
+  background: linear-gradient(135deg, #2f80ed, #56ccf2) !important;
+  color: #fff !important;
+  cursor: pointer;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+  transition: transform .15s ease, filter .15s ease, box-shadow .15s ease;
+}
+
+.sof-compose .sof-inputWrap [data-sof-send].sof-sendBtn:disabled {
+  background: #bfc7d4 !important;
+  color: #fff !important;
+  box-shadow: none !important;
+  cursor: not-allowed;
+  opacity: .8;
+}
+
+.sof-compose .sof-inputWrap [data-sof-send].sof-sendBtn:hover:not(:disabled){
+  filter: brightness(1.06);
+  transform: translateY(-1px) scale(1.03);
+}
+
+.sof-sendIcon{
+  font-size: 18px;
+  transform: translateY(-1px) rotate(10deg);
+}

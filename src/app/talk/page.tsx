@@ -1,315 +1,384 @@
-// src/components/Footer.tsx
-'use client'
+'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
-import { usePathname, useRouter } from 'next/navigation'
-import { useAuth } from '@/context/AuthContext'
-import { createClient, SupabaseClient } from '@supabase/supabase-js'
+import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/context/AuthContext';
+import './talk.css';
 
-const FALLBACK_H = 56
-type ItemId = 'home' | 'talk' | 'board' | 'pay' | 'mypage'
-type Item = { id: ItemId; label: string; href: string; icon?: React.ReactNode }
+type Plan = 'free' | 'regular' | 'premium' | 'master' | 'admin';
+type FriendLevel = 'F' | 'R' | 'C' | 'I';
 
-function toast(msg: string) {
-  const id = 'mu-footer-toast'
-  document.getElementById(id)?.remove()
-  const div = document.createElement('div')
-  div.id = id
-  div.style.cssText =
-    'position:fixed;left:50%;bottom:calc(12px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:2147483647;' +
-    'background:rgba(30,30,30,.92);color:#fff;padding:10px 12px;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);' +
-    'font:600 12px/1.2 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans JP",sans-serif'
-  div.textContent = msg
-  document.body.appendChild(div)
-  setTimeout(() => div.remove(), 2200)
+type FriendItem = {
+  user_code: string;
+  name: string | null;
+  avatar_url: string | null;
+  level: FriendLevel;
+  lastMessageAt?: string | null;
+  lastMessageText?: string | null;
+  unreadCount?: number;
+};
+
+const threadIdOf = (me: string, friend: string) => [me, friend].sort().join('__');
+
+/** 見本方式に合わせたアバターURL解決 */
+function resolveAvatarUrl(raw: string | null): string {
+  const base = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '');
+  const u = (raw ?? '').trim();
+  if (!u) return '/avatar.png';
+  if (/^https?:\/\//i.test(u) || /^data:image\//i.test(u)) return u;
+  if (u.startsWith('/storage/v1/object/public/')) return `${base}${u}`;
+  if (u.startsWith('avatars/')) return `${base}/storage/v1/object/public/${u}`;
+  return `${base}/storage/v1/object/public/avatars/${u}`;
 }
 
-// Supabase シングルトン
-function getSb(): SupabaseClient | null {
-  if (typeof window === 'undefined') return null
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  if (!url || !key) return null
-  const g = window as any
-  if (!g.__sb_footer) g.__sb_footer = createClient(url, key)
-  return g.__sb_footer as SupabaseClient
-}
-
-// デバッグ用バッジ (?debug_footer_badge=数字)
-const getDebugBadge = () => {
-  if (typeof window === 'undefined') return 0
-  const v = new URLSearchParams(window.location.search).get('debug_footer_badge')
-  return v ? Math.max(0, Number(v) || 0) : 0
-}
-
-export default function Footer() {
-  const [host, setHost] = useState<HTMLElement | null>(null)
-  const [mounted, setMounted] = useState(false)
-  const navRef = useRef<HTMLElement | null>(null)
-  const router = useRouter()
-  const pathname = usePathname()
-  const { user, userCode } = useAuth()
-  const isLoggedIn = !!user
-
-  const [counts, setCounts] = useState<Record<ItemId, number>>({
-    home: 0, talk: 0, board: 0, pay: 0, mypage: 0,
-  })
-
-  const debugBadge = useMemo(
-    () => (process.env.NODE_ENV === 'development' ? getDebugBadge() : 0),
-    []
-  )
-
-  useEffect(() => setMounted(true), [])
-
-  // ポータル先
-  useEffect(() => {
-    let el = document.getElementById('mu-footer-root') as HTMLDivElement | null
-    if (!el) {
-      el = document.createElement('div')
-      el.id = 'mu-footer-root'
-      document.body.appendChild(el)
-    }
-    setHost(el)
-  }, [])
-
-  // 高さを CSS 変数に
-  useEffect(() => {
-    const setPad = (h: number) => {
-      const px = Math.max(0, Math.round(h || 0))
-      document.documentElement.style.setProperty('--footer-h', `${px}px`)
-      document.documentElement.style.setProperty('--footer-safe-pad', `calc(${px}px + env(safe-area-inset-bottom))`)
-    }
-    setPad(FALLBACK_H)
-    const el = navRef.current
-    if (!el) return
-    const update = () => setPad(el.getBoundingClientRect().height)
-    update()
-    const ro = 'ResizeObserver' in window ? new ResizeObserver(update) : null
-    ro?.observe(el)
-    window.addEventListener('resize', update)
-    return () => { ro?.disconnect(); window.removeEventListener('resize', update) }
-  }, [host, mounted])
-
-  const items: Item[] = useMemo(() => [
-    { id: 'home',   label: 'Home',    href: '/',       icon: <span>🏠</span> },
-    { id: 'talk',   label: 'Talk',    href: '/talk',   icon: <span>💬</span> },
-    { id: 'board',  label: 'I Board', href: '/board',  icon: <span>🧩</span> },
-    { id: 'pay',    label: 'Plan',    href: '/pay',    icon: <span>💳</span> },
-    { id: 'mypage', label: 'My Page', href: '/mypage', icon: <span>👤</span> },
-  ], [])
-
-  const onClick = (it: Item) => (e: React.MouseEvent) => {
-    const isHome = it.href === '/'
-    if (!isLoggedIn && !isHome) {
-      e.preventDefault()
-      toast('この機能はログインが必要です')
-      return
-    }
-    e.preventDefault()
-    if (pathname !== it.href) router.push(it.href)
+async function fetchMutualFriends(myCode: string): Promise<FriendItem[]> {
+  const { data, error } = await supabase.rpc('get_talk_friends_from_follows', {
+    p_my_code: myCode,
+  });
+  if (error) {
+    console.error('[Talk] get_talk_friends_from_follows error:', error);
+    return [];
   }
+  return (data ?? []).map((r: any) => ({
+    user_code: r.friend_code as string,
+    name: (r.name as string) ?? null,
+    avatar_url: (r.avatar_url as string) ?? null,
+    level: (r.level as FriendLevel) ?? 'F',
+  }));
+}
 
-  // ===== 未読バッジ =====
+/** サーバーAPI経由で最新&未読メタを取得（RLSの影響を受けない） */
+async function hydrateThreadsMeta(
+  myCode: string,
+  friends: FriendItem[],
+): Promise<Record<string, Pick<FriendItem, 'lastMessageAt' | 'lastMessageText' | 'unreadCount'>>> {
+  if (!friends.length) return {};
+  const threadIds = friends.map((f) => threadIdOf(myCode, f.user_code));
+  const res = await fetch('/api/talk/meta', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ myCode, threadIds }),
+  });
+  if (!res.ok) {
+    console.warn('[Talk] meta api error:', await res.text());
+    return {};
+  }
+  const { metaByThreadId } = (await res.json()) as {
+    metaByThreadId: Record<string, { lastMessageAt: string | null; lastMessageText: string | null; unreadCount: number }>;
+  };
+
+  const out: Record<string, Pick<FriendItem, 'lastMessageAt' | 'lastMessageText' | 'unreadCount'>> = {};
+  for (const f of friends) {
+    const tid = threadIdOf(myCode, f.user_code);
+    const m = metaByThreadId[tid] || {};
+    out[f.user_code] = {
+      lastMessageAt: (m as any).lastMessageAt ?? null,
+      lastMessageText: (m as any).lastMessageText ?? null,
+      unreadCount: Number((m as any).unreadCount ?? 0),
+    };
+  }
+  return out;
+}
+
+async function logOpenFTalk(myCode: string, friendCode: string) {
+  try {
+    const { error } = await supabase.from('mu_logs').insert([
+      {
+        user_code: myCode,
+        action: 'open_ttalk',
+        target_code: friendCode,
+        source: 'talk_list',
+        created_at: new Date().toISOString(),
+      },
+    ]);
+    if (error) console.warn('[Talk] logOpenFTalk insert error:', error.message);
+  } catch (e) {
+    console.warn('[Talk] logOpenFTalk failed:', e);
+  }
+}
+
+export default function TalkPage() {
+  const router = useRouter();
+  const auth: any = useAuth();
+  const userCode: string | null = auth?.userCode ?? null;
+  const planStatus: Plan = (auth?.planStatus as Plan) ?? 'free';
+
+  const [loading, setLoading] = useState(true);
+  const [friends, setFriends] = useState<FriendItem[]>([]);
+  const [q, setQ] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  const blocked = planStatus === 'free';
+
+  // 初回 & 更新ボタン共通
+  const loadFriends = async () => {
+    setLoading(true);
+    try {
+      if (!userCode) {
+        setFriends([]);
+        return;
+      }
+      const list = await fetchMutualFriends(userCode);
+      const meta = await hydrateThreadsMeta(userCode, list);
+
+      const enrichedList = list.map((f) => {
+        const m = (meta as any)[f.user_code] || {};
+        return {
+          ...f,
+          lastMessageAt: m.lastMessageAt ?? null,
+          lastMessageText: m.lastMessageText ?? null,
+          unreadCount: Number(m.unreadCount ?? 0),
+        } as FriendItem;
+      });
+
+      // 並び順：最新メッセージが上 → 未読多い順 → 名前
+      const sortedList = enrichedList.sort((a, b) => {
+        const ta = a.lastMessageAt ? Date.parse(a.lastMessageAt) : 0;
+        const tb = b.lastMessageAt ? Date.parse(b.lastMessageAt) : 0;
+        if (tb !== ta) return tb - ta;
+        const ua = Number(a.unreadCount ?? 0);
+        const ub = Number(b.unreadCount ?? 0);
+        if (ub !== ua) return ub - ua;
+        return (a.name ?? '').localeCompare(b.name ?? '', 'ja');
+      });
+
+      setFriends(sortedList);
+      setLastUpdated(new Date());
+    } catch (e) {
+      console.error('[Talk] fetch error:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 初回ロード
   useEffect(() => {
-    if (debugBadge > 0) { setCounts(c => ({ ...c, talk: debugBadge })); return }
-    if (!isLoggedIn)   { setCounts(c => ({ ...c, talk: 0 }));        return }
+    let mounted = true;
+    (async () => {
+      if (!mounted) return;
+      await loadFriends();
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [userCode]); // userCode変化時に再読込
 
-    let timer: number | undefined
-    const sb = getSb()
-    const cleanups: Array<() => void> = []
+  // 更新ボタン
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await loadFriends();
+    setRefreshing(false);
+  };
 
-    const setTalk = (n: number) => setCounts(c => (c.talk !== n ? { ...c, talk: n } : c))
+  // 受信・既読更新をリアルタイム反映（INSERT/UPDATE）
+  useEffect(() => {
+    if (!userCode) return;
 
-    const load = async () => {
-      try {
-        let idToken: string | null = null
-        try {
-          const { getAuth } = await import('firebase/auth')
-          const auth = getAuth()
-          idToken = await auth.currentUser?.getIdToken().catch(() => null)
-        } catch {}
-
-        const res = await fetch('/api/talk/unread-count', {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
-          },
-          cache: 'no-store',
-        })
-        if (!res.ok) { setTalk(0); return }
-        const j = (await res.json().catch(() => null)) as { unread?: number } | null
-        setTalk(Math.max(0, Number(j?.unread ?? 0)))
-      } catch {
-        setTalk(0)
+    const onChange = (payload: any) => {
+      const r = (payload?.new ?? {}) as {
+        thread_id?: string;
+        sender_code?: string;
+        receiver_code?: string | null;
+      };
+      const tid = String(r.thread_id || '');
+      if (
+        tid &&
+        (tid.includes(userCode) ||
+          r.sender_code === userCode ||
+          r.receiver_code === userCode)
+      ) {
+        handleRefresh();
       }
-    }
+    };
 
-    // 初回・定期・再表示
-    load()
-    timer = window.setInterval(load, 20000)
-    const onVis = () => { if (document.visibilityState === 'visible') load() }
-    document.addEventListener('visibilitychange', onVis)
-    cleanups.push(() => document.removeEventListener('visibilitychange', onVis))
-    cleanups.push(() => timer && clearInterval(timer))
+    const channel = supabase
+      .channel('talk-list')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'chats' },
+        onChange,
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'chats' },
+        onChange,
+      )
+      .subscribe();
 
-    // ページ間イベント
-    const onBadge = (e: CustomEvent<{ total?: number }>) => {
-      setTalk(Math.max(0, Number(e.detail?.total ?? 0)))
-    }
-    window.addEventListener('talk:badge', onBadge as unknown as EventListener)
-    cleanups.push(() => window.removeEventListener('talk:badge', onBadge as unknown as EventListener))
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [userCode]); // handleRefresh は同スコープ参照でOK
 
-    // localStorage 経由
-    const onStorage = (ev: StorageEvent) => {
-      if (ev.key === 'mu_talk_total_unread') {
-        setTalk(Math.max(0, Number(ev.newValue ?? 0)))
-      }
-    }
-    window.addEventListener('storage', onStorage)
-    cleanups.push(() => window.removeEventListener('storage', onStorage))
+  const filtered = useMemo(() => {
+    if (!q.trim()) return friends;
+    const key = q.toLowerCase();
+    return friends.filter(
+      (f) =>
+        f.user_code.toLowerCase().includes(key) ||
+        (f.name ?? '').toLowerCase().includes(key),
+    );
+  }, [q, friends]);
 
-    // Service Worker
-    const onUpdated = () => load()
-    window.addEventListener('talk:updated', onUpdated)
-    cleanups.push(() => window.removeEventListener('talk:updated', onUpdated))
-    if (navigator?.serviceWorker) {
-      const swHandler = (e: MessageEvent) => { if ((e.data as any)?.type === 'talk:updated') load() }
-      navigator.serviceWorker.addEventListener('message', swHandler as any)
-      cleanups.push(() => navigator.serviceWorker.removeEventListener('message', swHandler as any))
-    }
+  // 未読合計（ヘッダー表示）
+  const totalUnread = useMemo(
+    () => friends.reduce((sum, f) => sum + Number(f.unreadCount ?? 0), 0),
+    [friends],
+  );
 
-    // Realtime
-    if (sb) {
-      const ch1 = sb.channel(`rt-chats-footer`)
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'chats' },
-          (payload) => {
-            if (userCode && payload.new && payload.new['user_code'] === userCode) return
-            load()
-          }
-        )
-        .subscribe()
-      cleanups.push(() => sb.removeChannel(ch1))
+  const goFTalk = async (friend: FriendItem) => {
+    if (!userCode) return;
+    await logOpenFTalk(userCode, friend.user_code);
+    const threadId = threadIdOf(userCode, friend.user_code);
+    router.push(`/talk/${threadId}`);
+  };
 
-      const ch2 = sb.channel(`rt-reads-footer`)
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'conversation_reads' },
-          (payload) => {
-            if (payload.new && payload.new['user_code'] === userCode) load()
-          }
-        )
-        .subscribe()
-      cleanups.push(() => sb.removeChannel(ch2))
-    }
+  // 画像クリック → 投稿一覧
+  const goPosts = (friend: FriendItem) => {
+    router.push(`/album?user=${encodeURIComponent(friend.user_code)}`);
+  };
 
-    return () => { cleanups.forEach(fn => fn()) }
-  }, [isLoggedIn, debugBadge, userCode])
+  const goProfile = (friend: FriendItem) => {
+    router.push(`/profile/${encodeURIComponent(friend.user_code)}`);
+  };
 
-  if (!mounted) return null
-
-  const Nav = (
-    <nav
-      ref={navRef}
-      aria-label="primary"
-      style={{
-        position: 'fixed',
-        left: '50%',
-        bottom: '12px',
-        transform: 'translateX(-50%)',
-        width: 'calc(100% - 24px)',
-        maxWidth: 560,
-        display: 'grid',
-        gridTemplateColumns: 'repeat(5, 1fr)',
-        gap: 8,
-        padding: '6px 8px',
-        borderRadius: 12,
-        background: 'rgba(255,255,255,0.82)',
-        backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
-        boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-        zIndex: 1000,
-        paddingBottom: 'max(6px, env(safe-area-inset-bottom))',
-      }}
-    >
-      {items.map((it) => {
-        const active = pathname === it.href || (it.href !== '/' && pathname?.startsWith(it.href))
-        const disabled = !isLoggedIn && it.href !== '/'
-        const base = counts[it.id] ?? 0
-        const badge = it.id === 'talk' && debugBadge > 0 ? debugBadge : base
-        const showBadge = badge > 0
-
-        return (
-          <a
-            key={it.href}
-            href={it.href}
-            role="button"
-            aria-current={active ? 'page' : undefined}
-            aria-disabled={disabled || undefined}
-            onClick={onClick(it)}
-            style={{
-              position: 'relative',
-              display: 'grid',
-              placeItems: 'center',
-              gap: 2,
-              textDecoration: 'none',
-              borderRadius: 12,
-              padding: '4px 2px',
-              color: disabled ? '#999' : active ? '#4b5cff' : '#333',
-              filter: disabled ? 'grayscale(0.2)' : undefined,
-              transition: 'transform .12s ease, background .12s ease, color .12s ease',
-            }}
-          >
-            <div style={{ fontSize: 15, lineHeight: 1, position: 'relative' }}>
-              {it.icon}
-              {showBadge && (
-                <span
-                  aria-label="unread count"
-                  style={{
-                    position: 'absolute',
-                    top: -6,
-                    right: -10,
-                    minWidth: 18,
-                    height: 18,
-                    padding: '0 5px',
-                    borderRadius: 999,
-                    background: '#ff3b30',
-                    color: '#fff',
-                    fontSize: 11,
-                    fontWeight: 800,
-                    lineHeight: '18px',
-                    textAlign: 'center',
-                    boxShadow: '0 2px 6px rgba(0,0,0,.18)',
-                  }}
-                >
-                  {badge > 99 ? '99+' : badge}
-                </span>
-              )}
-            </div>
-            <div style={{ fontSize: 10.5, fontWeight: 600 }}>{it.label}</div>
-            {active && (
-              <span
-                aria-hidden
-                style={{
-                  position: 'absolute',
-                  bottom: 6,
-                  width: 22,
-                  height: 4,
-                  background: 'currentColor',
-                  borderRadius: 999,
-                  opacity: 0.85,
-                }}
-              />
+  return (
+    <div className="talk-shell">
+      <header className="talk-header">
+        <h1>Talk</h1>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <p className="talk-note" style={{ margin: 0 }}>
+            両想い（<b>F以上</b>）の友達だけが表示されます。
+            {blocked && (
+              <span className="talk-note-warn">
+                {' '}
+                <br />
+                現在プラン: free（閲覧のみ・開始はアップグレード後に可能）
+              </span>
             )}
-          </a>
-        )
-      })}
-    </nav>
-  )
+          </p>
+          {totalUnread > 0 && (
+            <span className="unread-total" aria-label={`未読 ${totalUnread} 件`}>
+              未読 {totalUnread > 999 ? '999+' : totalUnread} 件
+            </span>
+          )}
+          {/* 更新ボタンと最終更新 */}
+          <button
+            className="refresh-btn"
+            onClick={handleRefresh}
+            disabled={loading || refreshing}
+            title="未読・一覧を更新"
+          >
+            {refreshing || loading ? '更新中…' : '更新'}
+          </button>
+          {lastUpdated && (
+            <span className="updated-at" title={lastUpdated.toLocaleString()}>
+              {lastUpdated.toLocaleTimeString()}
+            </span>
+          )}
+        </div>
+        <div className="talk-toolbar">
+          <input
+            className="talk-search"
+            placeholder="友達を検索（名前 / ユーザーコード）"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          {blocked && (
+            <button className="upgrade-btn" onClick={() => router.push('/pay')}>
+              プランをアップグレード
+            </button>
+          )}
+        </div>
+      </header>
 
-  return host ? createPortal(Nav, host) : Nav
+      {loading ? (
+        <div className="talk-loading">読み込み中...</div>
+      ) : filtered.length === 0 ? (
+        <div className="talk-empty">
+          現在、両想いが <b>S</b> 止まり、または相互フォローになっていません。<br />
+          <b>TTalk は Regular（F）以上</b> の関係から利用できます。
+        </div>
+      ) : (
+        <ul className="friend-list">
+          {filtered.map((f) => (
+            <li key={f.user_code} className="friend-item">
+              <img
+                className="friend-avatar"
+                src={resolveAvatarUrl(f.avatar_url)}
+                alt={f.name || f.user_code}
+                width={48}
+                height={48}
+                loading="lazy"
+                decoding="async"
+                referrerPolicy="no-referrer"
+                onClick={() => goPosts(f)}
+                onError={(e) => {
+                  const el = e.currentTarget;
+                  if (el.src !== '/avatar.png') el.src = '/avatar.png';
+                }}
+                role="button"
+                tabIndex={0}
+                title="このユーザーの投稿を見る"
+                style={{ cursor: 'pointer' }}
+              />
+
+              <div className="friend-main">
+                <div className="friend-name">
+                  <button
+                    className="linklike"
+                    onClick={() => goProfile(f)}
+                    title="プロフィールを見る"
+                  >
+                    {f.name || '(名前未設定)'}
+                  </button>{' '}
+                  <span className={`level-badge lv-${f.level}`}>{f.level}</span>
+                </div>
+
+                <div className="friend-sub">
+                  @{f.user_code}
+                  {f.lastMessageAt && (
+                    <>
+                      <span className="dot">・</span>
+                      <span className="last-active">
+                        {new Date(f.lastMessageAt).toLocaleString()}
+                      </span>
+                    </>
+                  )}
+                </div>
+
+                {f.lastMessageText && (
+                  <div className="snippet" title={f.lastMessageText}>
+                    {f.lastMessageText}
+                  </div>
+                )}
+              </div>
+
+              <div
+                className="friend-action"
+                style={{ display: 'flex', gap: 8, alignItems: 'center' }}
+              >
+                {Number(f.unreadCount ?? 0) > 0 ? (
+                  <span
+                    className="unread-badge"
+                    aria-label={`${Number(f.unreadCount ?? 0)}件の未読`}
+                  >
+                    {Number(f.unreadCount) > 99 ? '99+' : Number(f.unreadCount)}
+                  </span>
+                ) : (
+                  <span className="unread-badge empty" aria-hidden="true" />
+                )}
+
+                <button className="chip-go" onClick={() => goFTalk(f)}>
+                  FTalk
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }

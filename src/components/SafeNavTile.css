@@ -1,0 +1,44 @@
+/* 例: src/components/SafeNavTile.css */
+.locked {
+    pointer-events: none;                 /* 物理クリック不可 */
+    filter: grayscale(1) brightness(1.1);
+    opacity: .55;
+    position: relative;
+  }
+  .locked::after {                        /* ホワイトアウト膜 */
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: #fff;
+    opacity: .35;
+    border-radius: inherit;
+  }
+  /* src/components/SafeNavTile.css */
+.locked{
+    pointer-events:none;
+    filter:grayscale(1) brightness(1.1);
+    opacity:.55;
+    position:relative;
+  }
+  .locked::after{
+    content:'';
+    position:absolute; inset:0;
+    background:#fff; opacity:.35;
+    border-radius:inherit;
+  }
+  /* src/components/SafeNavTile.css */
+.locked {
+    pointer-events: none;                 /* 完全に押せない */
+    filter: grayscale(1) brightness(1.1); /* 白っぽく */
+    opacity: .55;
+    position: relative;
+  }
+  .locked::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: #fff;
+    opacity: .35;
+    border-radius: inherit;
+  }
+  

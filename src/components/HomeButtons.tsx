@@ -1,30 +1,29 @@
 'use client';
 import { useAuth } from '@/context/AuthContext';
+import SafeNavTile from '@/components/SafeNavTile';
 
 export default function HomeButtons({ openLoginModal }: { openLoginModal: () => void }) {
-  const { user } = useAuth();
+  const { user, planStatus, loading: authLoading, ...rest } = useAuth() as any;
+  const clickType = rest.clickType ?? rest.click_type ?? null;
 
-  const handleClick = (name: string) => {
-    if (!user) {
-      // ✅ 未ログインならモーダルを開く
-      openLoginModal();
-      return;
-    }
-    console.log(`${name} ページに移動`);
-    // ここに router.push(`/somepage`) など遷移処理を追加してもOK
-  };
+  // 認証読み込み中は必ず false（瞬間クリック封じ）
+  const isSofiaAllowed =
+    !authLoading &&
+    !!user &&
+    ((planStatus === 'master' || planStatus === 'admin') ||
+     (clickType === 'master' || clickType === 'admin'));
 
   return (
-    <div className="flex gap-4 mt-4">
-      <button onClick={() => handleClick('Mu_AI')} disabled={!user} className="btn">
-        Mu_AI
-      </button>
-      <button onClick={() => handleClick('クレジット')} disabled={!user} className="btn">
-        クレジット
-      </button>
-      <button onClick={() => handleClick('共鳴会')} disabled={!user} className="btn">
-        共鳴会
-      </button>
+    <div className="tiles-wrap">
+      {/* …他タイル… */}
+      <SafeNavTile
+        allowed={isSofiaAllowed}
+        href="/sofia"
+        className="btn"             // 既存の見た目クラスはそのまま
+        onBlockedClick={() => { if (!user) openLoginModal(); }}
+      >
+        Sofia
+      </SafeNavTile>
     </div>
   );
 }

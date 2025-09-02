@@ -868,3 +868,6 @@ details[open] .history-acc__chev {
   color: #777;
   margin-top: 4px;
 }
+
+/* Footer が計測して入れる CSS 変数を確実に反映 */
+body { padding-bottom: var(--footer-safe-pad); }

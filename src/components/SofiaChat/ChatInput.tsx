@@ -1,135 +1,112 @@
-// src/components/SofiaChat/ChatInput.tsx
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import './ChatInput.css';
 
 type Props = {
-  onSend: (text: string, files?: File[] | null) => Promise<any> | any;
-  onPreview: () => void;
-  onCancelPreview: () => void;
+  onSend: (text: string) => Promise<void> | void;
+  disabled?: boolean;
+  placeholder?: string;
+  /** 複数チャットがある場合にドラフト保存キーを分けたいとき */
+  draftKey?: string;
 };
 
-export default function ChatInput({ onSend }: Props) {
-  const [text, setText] = useState('');
-  const [files, setFiles] = useState<File[]>([]);
-  const [sending, setSending] = useState(false);
+const DEFAULT_DRAFT_KEY = 'sofia_chat_draft';
 
-  const fileRef = useRef<HTMLInputElement | null>(null);
+export default function ChatInput({
+  onSend,
+  disabled = false,
+  placeholder = 'メッセージを入力（Shift+Enterで改行）',
+  draftKey = DEFAULT_DRAFT_KEY,
+}: Props) {
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+  const [isComposing, setIsComposing] = useState(false); // ← IME中フラグ
   const taRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // ====== Auto-resize (min 3 rows, max 10 rows 相当) ======
-  const MIN_ROWS = 3;
-  const MAX_ROWS = 10;
+  // ---- draft 復元（文字が消える対策）----
+  useEffect(() => {
+    const saved = typeof window !== 'undefined' ? window.localStorage.getItem(draftKey) : '';
+    if (saved) setText(saved);
+  }, [draftKey]);
 
-  const autosize = useCallback(() => {
+  // 保存
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(draftKey, text);
+    }
+  }, [text, draftKey]);
+
+  // 自動リサイズ（最小4行）
+  const autoSize = useCallback(() => {
     const ta = taRef.current;
     if (!ta) return;
-    // 現在の高さリセット → scrollHeight を測る
     ta.style.height = 'auto';
-
-    // 実際の line-height を取得
-    const cs = window.getComputedStyle(ta);
-    const line = parseFloat(cs.lineHeight || '22') || 22;
-
-    const minH = MIN_ROWS * line;
-    const maxH = MAX_ROWS * line;
-
-    // コンテンツに合わせて拡張（上限は maxH）
-    const nextH = Math.min(Math.max(ta.scrollHeight, minH), maxH);
-    ta.style.height = `${nextH}px`;
-
-    // これ以上増やせない場合はスクロールで対応
-    ta.style.overflowY = nextH >= maxH ? 'auto' : 'hidden';
+    ta.style.height = Math.min(ta.scrollHeight, window.innerHeight * 0.4) + 'px';
   }, []);
+  useEffect(() => { autoSize(); }, [text, autoSize]);
 
-  useEffect(() => {
-    autosize(); // 初期表示時（空でも最小3行の高さに）
-  }, [autosize]);
+  // Enter送信 / Shift+Enter改行 / IME中は送信しない
+  const onKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
+        e.preventDefault();
+        handleSend();
+      }
+    },
+    [isComposing] // eslint-disable-line
+  );
 
-  useEffect(() => {
-    autosize(); // 入力のたびに高さ更新
-  }, [text, autosize]);
-
-  // ====== 添付ファイル ======
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = Array.from(e.target.files || []);
-    setFiles(f);
-    console.log('[SofiaUI] files selected:', f.map((x) => x.name));
-  };
-
-  // ====== 送信 ======
-  const doSend = useCallback(async () => {
-    const payload = text.trim();
-    if (!payload || sending) return;
-    console.log('[SofiaUI] send click:', { len: payload.length, files: files.length });
-
-    // 1) 先に即クリア（UI体験優先）
-    setText('');
+  const handleSend = useCallback(async () => {
+    const value = text.trim();
+    if (!value || sending || disabled) return;
     setSending(true);
-
     try {
-      await onSend(payload, files.length ? files : null);
-      // 成功時：添付もクリア
-      setFiles([]);
-      if (fileRef.current) fileRef.current.value = '';
-    } catch (e) {
-      console.error('[SofiaUI] onSend error:', e);
-      // 失敗時にテキストを戻したい場合は以下を有効化：
-      // setText(payload);
+      await onSend(value);
+      setText('');
+      // 送信成功後はドラフトもクリア
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem(draftKey);
+      }
+      taRef.current?.focus();
     } finally {
       setSending(false);
-      // 送信後も高さをリセットして最小サイズに戻す
-      requestAnimationFrame(() => autosize());
     }
-  }, [text, files, sending, onSend, autosize]);
+  }, [text, onSend, sending, disabled, draftKey]);
 
-  // ====== キー操作：Enter=送信 / Shift+Enter=改行 ======
-  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      if (!sending) void doSend();
-    }
-  };
+  // 初回フォーカス
+  useEffect(() => {
+    taRef.current?.focus();
+  }, []);
 
   return (
-    <div className="sof-compose">
-      <textarea
-        ref={taRef}
-        className="sof-input"
-        placeholder="メッセージを入力…"
-        value={text}
-        onChange={(e) => setText(e.target.value)} // 改行付きペーストも保持される
-        onKeyDown={onKeyDown}
-        disabled={sending}
-        aria-label="チャット入力"
-        // rows は 1 にして高さは JS で制御（最小3行相当まで拡張）
-        rows={1}
-        style={{
-          resize: 'none',    // ユーザー手動リサイズは無効
-          overflowY: 'hidden', // 上限到達時に autosize() 側で auto に切り替え
-        }}
-      />
+    <div className="sof-compose" aria-label="メッセージ入力エリア">
+      <div className="sof-inputWrap">
+        <textarea
+          ref={taRef}
+          className="sof-textarea"
+          rows={4}
+          placeholder={placeholder}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKeyDown}
+          onInput={autoSize}
+          onCompositionStart={() => setIsComposing(true)}
+          onCompositionEnd={() => setIsComposing(false)}
+          disabled={disabled || sending}
+          aria-label="メッセージ本文"
+        />
+<button
+  data-sof-send                         // ★ ユニーク属性
+  className="sof-sendBtn"
+  onClick={handleSend}
+  disabled={!text.trim() || sending || disabled}
+  aria-label="送信" title="送信（Enter）"
+>
+  <span className="sof-sendIcon" aria-hidden>✈</span>
+</button>
 
-      <input
-        ref={fileRef}
-        className="sof-file"
-        type="file"
-        multiple
-        onChange={handleFileChange}
-        disabled={sending}
-        aria-label="ファイルを選択"
-      />
-
-      <button
-        className={`sof-btn${sending ? '' : ' primary'}`}
-        onClick={() => void doSend()}
-        disabled={sending || !text.trim()}
-        aria-busy={sending}
-        aria-label="送信"
-        style={{ minWidth: 64 }}
-      >
-        {sending ? '送信中…' : '送信'}
-      </button>
+      </div>
     </div>
   );
 }

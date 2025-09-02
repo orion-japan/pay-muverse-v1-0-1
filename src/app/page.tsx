@@ -194,7 +194,7 @@ export default function DashboardPage() {
     { title: 'Create', link: '/create', img: '/mu_create.png', alt: 'Create' },
     { title: 'm Tale', link: '/', img: '/m_tale.png', alt: 'm Tale' },
     { title: 'm Shot', link: '/', img: '/shot.png', alt: 'm Shot' }, // ガード対象
-    { title: 'iros', link: '/sofia', img: '/ir.png', alt: 'iros' },
+    { title: 'iros', link: '/iros', img: '/ir.png', alt: 'iros' },
   ];
 
   // 共鳴色

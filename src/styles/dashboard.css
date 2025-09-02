@@ -309,3 +309,18 @@ main.mu-main::before {
   .dashboard-wrapper{ transition: none; }
 }
 
+.tile-disabled {
+  pointer-events: none; /* クリック完全禁止 */
+  filter: grayscale(1) brightness(1.1);
+  opacity: .55;
+  position: relative;
+}
+
+.tile-disabled::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  opacity: .35;
+  border-radius: inherit;
+}
