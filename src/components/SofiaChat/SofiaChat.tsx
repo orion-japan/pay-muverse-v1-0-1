@@ -101,7 +101,6 @@ const normalizeMeta = (m: any): MetaData | null => {
     used_knowledge,
     stochastic: indicator, // ← ここにまとめて渡せばOK
   };
-  
 };
 
 export default function SofiaChat() {
@@ -269,9 +268,9 @@ export default function SofiaChat() {
   }, [canUse, conversationId]);
 
   /* ===== 送信 ===== */
-  const handleSend = async (input: string, _files?: File[] | null) => {
+  const handleSend = async (input: string, _files: File[] | null = null): Promise<void> => {
     const text = (input ?? '').trim();
-    if (!text || !userCode) return {};
+    if (!text || !userCode) return;
 
     const optimistic: Message = {
       id: (globalThis.crypto?.randomUUID?.() ?? `tmp-${Date.now()}`),
@@ -326,7 +325,7 @@ export default function SofiaChat() {
         },
       ]);
     }
-    return {};
+    // ← ここで何も返さない（void）
   };
 
   /* ===== その他 ===== */
@@ -380,8 +379,8 @@ export default function SofiaChat() {
       {/* MetaPanel は削除済み */}
 
       <div className="sof-compose-dock" ref={composeRef}>
-        <ChatInput onSend={handleSend} onPreview={() => {}} onCancelPreview={() => {}} />
-      </div>
+  <ChatInput onSend={(text) => handleSend(text, null)} />
+</div>
 
       <div className="sof-underlay" aria-hidden />
 
