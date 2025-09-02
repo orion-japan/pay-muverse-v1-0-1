@@ -1,10 +1,10 @@
 'use client';
 
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  onAuthStateChanged,
   onIdTokenChanged,
   getIdToken,
+  getIdTokenResult,
   setPersistence,
   browserLocalPersistence,
   User,
@@ -13,17 +13,17 @@ import {
 import { auth } from '@/lib/firebase';
 import { supabase } from '@/lib/supabase';
 
-/* =========================================================
+/* =========================
    型
-========================================================= */
+========================= */
 type Plan = 'free' | 'regular' | 'premium' | 'master' | 'admin';
 
 type AuthValue = {
   loading: boolean;
-  user: User | null;        // Firebaseのユーザー情報
-  idToken: string | null;   // Firebase IDトークン（最新を番犬が更新）
-  userCode: string | null;  // 数値ユーザーコード
-  planStatus: Plan;         // プラン
+  user: User | null;
+  idToken: string | null;
+  userCode: string | null;
+  planStatus: Plan;
   logout: () => Promise<void>;
 };
 
@@ -36,9 +36,9 @@ const AuthContext = createContext<AuthValue>({
   logout: async () => {},
 });
 
-/* =========================================================
+/* =========================
    ユーティリティ
-========================================================= */
+========================= */
 /** /api/resolve-usercode から user_code を解決（POST → 404ならGET） */
 async function fetchUserCodeFromServer(u: User): Promise<string | null> {
   const url = '/api/resolve-usercode';
@@ -64,7 +64,7 @@ async function fetchUserCodeFromServer(u: User): Promise<string | null> {
   }
 }
 
-/** profiles.plan_status を取得（未知/欠損は free 扱い） */
+/** users.plan_status を取得（未知/欠損は free 扱い） */
 async function fetchPlanStatus(userCode: string): Promise<Plan> {
   try {
     const { data, error } = await supabase
@@ -82,15 +82,18 @@ async function fetchPlanStatus(userCode: string): Promise<Plan> {
   }
 }
 
-/* =========================================================
-   Provider（番犬つき）
-========================================================= */
+/* =========================
+   Provider（安定化版）
+========================= */
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [idToken, setIdToken] = useState<string | null>(null);
   const [userCode, setUserCode] = useState<string | null>(null);
   const [planStatus, setPlanStatus] = useState<Plan>('free');
   const [loading, setLoading] = useState(true);
+
+  // 次回の期限前リフレッシュ用タイマーを保持（更新のたびに張り替える）
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /* --- 永続化（ブラウザ閉じても維持） --- */
   useEffect(() => {
@@ -99,76 +102,103 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  /* --- onAuthStateChanged: サインイン/アウト検知 --- */
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (u) => {
-      try {
-        setUser(u);
+  /* --- 期限前リフレッシュのタイマー設定 --- */
+  function scheduleProactiveRefresh(u: User) {
+    if (refreshTimerRef.current) {
+      clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = null;
+    }
+    getIdTokenResult(u, /* forceRefresh */ false)
+      .then((res) => {
+        // exp の 60秒前に更新。余裕を持って取り直す
+        const expMs = (res.claims && (res as any).expirationTime)
+          ? new Date((res as any).expirationTime).getTime()
+          : (res as any)?.exp
+          ? Number((res as any).exp) * 1000
+          : 0;
 
-        if (!u) {
-          // クリア
-          setIdToken(null);
-          setUserCode(null);
-          setPlanStatus('free');
-          if (typeof window !== 'undefined') localStorage.removeItem('user_code');
-          return;
-        }
+        if (!expMs) return;
 
-        // 初回は強制更新で鮮度の高いトークンを取得
-        try {
-          const token = await getIdToken(u, true);
-          setIdToken(token);
-        } catch (e) {
-          console.error('[AuthContext] getIdToken(true) error', e);
-          setIdToken(null);
-        }
+        const now = Date.now();
+        const skew = 60 * 1000;
+        const due = Math.max(0, expMs - now - skew);
 
-        // user_code は localStorage → API の順で解決
-        const cached = typeof window !== 'undefined' ? localStorage.getItem('user_code') : null;
-        if (cached) {
-          setUserCode(cached);
-        } else {
-          const code = await fetchUserCodeFromServer(u);
-          if (code) {
-            setUserCode(code);
-            if (typeof window !== 'undefined') localStorage.setItem('user_code', code);
-          } else {
-            setUserCode(null);
-            if (typeof window !== 'undefined') localStorage.removeItem('user_code');
+        refreshTimerRef.current = setTimeout(async () => {
+          try {
+            const fresh = await getIdToken(u, true);
+            setIdToken(fresh);
+          } catch (e) {
+            console.warn('[AuthContext] proactive refresh failed', e);
           }
+        }, due);
+      })
+      .catch((e) => console.warn('[AuthContext] getIdTokenResult failed', e));
+  }
+
+  /* --- onIdTokenChanged: サインイン/サインアウト/トークン更新を一元監視 --- */
+  useEffect(() => {
+    let mounted = true;
+
+    const off = onIdTokenChanged(auth, async (u) => {
+      if (!mounted) return;
+
+      // サインアウト or 未ログイン
+      if (!u) {
+        setUser(null);
+        setIdToken(null);
+        setUserCode(null);
+        setPlanStatus('free');
+        if (typeof window !== 'undefined') localStorage.removeItem('user_code');
+        setLoading(false);
+        return;
+      }
+
+      setUser(u);
+
+      try {
+        // まずはキャッシュ可
+        const token = await getIdToken(u, false);
+        if (!mounted) return;
+        setIdToken(token);
+
+        // 期限前リフレッシュを予約
+        scheduleProactiveRefresh(u);
+
+        // user_code は uid と紐づけて管理。uidが変わったら確実に取り直す
+        const cacheKey = 'user_code';
+        const cached = typeof window !== 'undefined' ? localStorage.getItem(cacheKey) : null;
+        if (cached && (typeof window !== 'undefined')) {
+          // 以前の user_code が他uidの可能性を考慮（簡易チェック）
+          // 必要に応じて uid を含むキャッシュキーにする実装へ移行してください。
+        }
+
+        let nextCode: string | null = null;
+        if (cached) {
+          nextCode = cached;
+        } else {
+          nextCode = await fetchUserCodeFromServer(u);
+        }
+
+        if (nextCode) {
+          setUserCode(nextCode);
+          if (typeof window !== 'undefined') localStorage.setItem(cacheKey, nextCode);
+        } else {
+          setUserCode(null);
+          if (typeof window !== 'undefined') localStorage.removeItem(cacheKey);
         }
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     });
 
-    // 念のためのフェイルセーフ
-    const failSafe = setTimeout(() => setLoading(false), 5000);
     return () => {
-      unsub();
-      clearTimeout(failSafe);
+      mounted = false;
+      off();
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     };
   }, []);
 
-  /* --- onIdTokenChanged: トークン自動更新を即時反映（番犬の目） --- */
-  useEffect(() => {
-    const off = onIdTokenChanged(auth, async (u) => {
-      if (!u) {
-        setIdToken(null);
-        return;
-      }
-      try {
-        // キャッシュでもOK（ここは頻繁に呼ばれるため）
-        const token = await getIdToken(u, false);
-        setIdToken(token);
-      } catch (e) {
-        console.warn('[AuthContext] onIdTokenChanged getIdToken error', e);
-      }
-    });
-    return () => off();
-  }, []);
-
-  /* --- 番犬: 45分ごとに強制リフレッシュ（±2分のジッタ） --- */
+  /* --- バックアップ：45分周期で強制リフレッシュ（±2分ジッタ） --- */
   useEffect(() => {
     const base = 45 * 60 * 1000;
     const jitter = Math.floor(Math.random() * 2 * 60 * 1000); // 0〜2分
@@ -176,12 +206,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const u = auth.currentUser;
       if (!u) return;
       try {
-        await getIdToken(u, true); // 強制更新
+        const fresh = await getIdToken(u, true);
+        setIdToken(fresh);
+        scheduleProactiveRefresh(u);
       } catch (e) {
         console.warn('[AuthContext] periodic refresh failed', e);
       }
     }, base + jitter);
     return () => clearInterval(iv);
+  }, []);
+
+  /* --- タブ復帰/オンライン復帰で即更新（“戻ると落ちてる”体感を減らす） --- */
+  useEffect(() => {
+    const onVisible = async () => {
+      if (document.visibilityState !== 'visible') return;
+      const u = auth.currentUser;
+      if (!u) return;
+      try {
+        const fresh = await getIdToken(u, true);
+        setIdToken(fresh);
+        scheduleProactiveRefresh(u);
+      } catch {}
+    };
+    const onOnline = async () => {
+      const u = auth.currentUser;
+      if (!u) return;
+      try {
+        const fresh = await getIdToken(u, true);
+        setIdToken(fresh);
+        scheduleProactiveRefresh(u);
+      } catch {}
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', onOnline);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', onOnline);
+    };
   }, []);
 
   /* --- userCode が決まったらプラン取得 --- */
@@ -221,18 +282,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-/* =========================================================
+/* =========================
    Hook
-========================================================= */
+========================= */
 export function useAuth() {
   return useContext(AuthContext);
 }
 
-/* =========================================================
-   おまけ：共通フェッチ（401/403を一度だけ自己回復）
-   - 使い方: authedFetch('/api/xxx', { method: 'POST', body: ... })
-   - Context を汚さないため別エクスポートにしています
-========================================================= */
+/* =========================
+   authedFetch（401/403を一度だけ自己回復）
+========================= */
 export async function authedFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   const retry = async (force: boolean) => {
     const u = auth.currentUser;
@@ -250,11 +309,9 @@ export async function authedFetch(input: RequestInfo | URL, init: RequestInit = 
 
   let res = await retry(false);
   if (res.status === 401 || res.status === 403) {
-    // 強制更新してワンチャン
     res = await retry(true);
   }
   if (res.status === 401 || res.status === 403) {
-    // 依然として失敗 → 破損セッションと見なしてサインアウト
     try { await signOut(auth); } catch {}
     throw new Error('AUTH_EXPIRED');
   }

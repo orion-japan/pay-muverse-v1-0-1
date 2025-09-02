@@ -26,8 +26,10 @@ const globalForSupabase = globalThis as unknown as {
 
 export const supabaseAdmin: SupabaseClient =
   globalForSupabase.__supabaseAdmin ??
-  createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!, {
     auth: { persistSession: false },
+    // （任意）明示的に public スキーマを使う場合は以下を残す
+    db: { schema: 'public' },
   });
 
 if (!globalForSupabase.__supabaseAdmin) {

@@ -8,8 +8,8 @@ import { buildSofiaSystemPrompt } from '@/lib/sofia/buildSystemPrompt';
 import { retrieveKnowledge } from '@/lib/sofia/retrieve';
 import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/authz';
 import { SOFIA_CONFIG } from '@/lib/sofia/config';
-
-// ★ 追加：状態推定ユーティリティ（Inner/Outer・自己肯定率・関係性質・次Q）
+import { recordQFromSofia } from "@/lib/recordQ";
+// ★ 追加：状態推定ユーティリティ
 import {
   inferPhase,
   estimateSelfAcceptance,
@@ -27,6 +27,7 @@ const CFG: any = SOFIA_CONFIG ?? {};
 const CFG_OPENAI = CFG.openai ?? {};
 const CFG_RETR = CFG.retrieve ?? {};
 
+// デフォルト値
 const DEFAULT_TEMP: number =
   typeof CFG_OPENAI.temperature === 'number' ? CFG_OPENAI.temperature : 0.8;
 
@@ -36,11 +37,15 @@ const DEFAULT_MAXTOKENS: number | undefined =
 const RETRIEVE_LIMIT: number =
   typeof CFG_RETR.limit === 'number' ? CFG_RETR.limit : 4;
 
+// ★ env値のフォールバックを明示（env → config.retrieve → デフォルト）
 const RETRIEVE_EPS: number =
-  typeof CFG_RETR.epsilon === 'number' ? CFG_RETR.epsilon : 0.3;
+  Number(process.env.SOFIA_EPSILON ?? CFG_RETR.epsilon ?? 0.3);
 
 const RETRIEVE_NOISE: number =
-  typeof CFG_RETR.noiseAmp === 'number' ? CFG_RETR.noiseAmp : 0.15;
+  Number(process.env.SOFIA_NOISEAMP ?? CFG_RETR.noiseAmp ?? 0.15);
+
+const RETRIEVE_DEEPEN: number =
+  Number(process.env.SOFIA_DEEPEN_MULT ?? CFG_RETR.deepenMultiplier ?? CFG_RETR.deepenMult ?? 1.4);
 
 /* =========================
    型・ユーティリティ
@@ -49,8 +54,13 @@ type Msg = { role: 'system' | 'user' | 'assistant'; content: string };
 const newConvCode = () => `Q${Date.now()}`;
 
 function json(data: any, init?: number | ResponseInit) {
-  const status = typeof init === 'number' ? init : (init as ResponseInit | undefined)?.['status'] ?? 200;
-  const headers = new Headers(typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers);
+  const status =
+    typeof init === 'number'
+      ? init
+      : (init as ResponseInit | undefined)?.['status'] ?? 200;
+  const headers = new Headers(
+    typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers,
+  );
   headers.set('Content-Type', 'application/json; charset=utf-8');
   headers.set('Access-Control-Allow-Origin', '*');
   headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -59,7 +69,13 @@ function json(data: any, init?: number | ResponseInit) {
 }
 const bad = (msg: string, code = 400) => json({ error: msg }, code);
 
-function safeParseJson(text: string) { try { return JSON.parse(text); } catch { return null; } }
+function safeParseJson(text: string) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
 function getLastText(messages: Msg[] | null | undefined) {
   if (!messages?.length) return null;
   const last = messages[messages.length - 1];
@@ -76,7 +92,7 @@ function getLastUserText(messages: Msg[] | null | undefined) {
   return '';
 }
 function makeTitleFromMessages(msgs: Msg[]): string | null {
-  const firstUser = msgs.find(m => m.role === 'user')?.content?.trim();
+  const firstUser = msgs.find((m) => m.role === 'user')?.content?.trim();
   if (!firstUser) return null;
   const t = firstUser.replace(/\s+/g, ' ').slice(0, 20);
   return t.length ? t : null;
@@ -85,59 +101,77 @@ function sbService() {
   if (!SUPABASE_URL || !SERVICE_ROLE) throw new Error('Supabase env is missing');
   return createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 }
-function ensureArray<T = any>(v: any): T[] { return Array.isArray(v) ? v : []; }
+function ensureArray<T = any>(v: any): T[] {
+  return Array.isArray(v) ? v : [];
+}
 function sanitizeBody(raw: any) {
   const allowModels = new Set(['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini']);
   return {
-    conversation_code: typeof raw?.conversation_code === 'string' ? raw.conversation_code : '',
-    mode: ['normal','diagnosis','meaning','intent','dark','remake'].includes(raw?.mode) ? raw.mode : 'normal',
+    conversation_code:
+      typeof raw?.conversation_code === 'string' ? raw.conversation_code : '',
+    mode: ['normal', 'diagnosis', 'meaning', 'intent', 'dark', 'remake'].includes(raw?.mode)
+      ? raw.mode
+      : 'normal',
     promptKey: raw?.promptKey ?? 'base',
     vars: typeof raw?.vars === 'object' && raw?.vars ? raw.vars : {},
     messages: ensureArray<Msg>(raw?.messages).slice(-50),
     model: allowModels.has(raw?.model) ? raw.model : 'gpt-4o',
-    temperature: typeof raw?.temperature === 'number'
-      ? Math.min(Math.max(raw.temperature, 0), 1)
-      : DEFAULT_TEMP,
-    max_tokens: typeof raw?.max_tokens === 'number'
-      ? raw.max_tokens
-      : DEFAULT_MAXTOKENS,
+    temperature:
+      typeof raw?.temperature === 'number'
+        ? Math.min(Math.max(raw.temperature, 0), 1)
+        : DEFAULT_TEMP,
+    max_tokens:
+      typeof raw?.max_tokens === 'number' ? raw.max_tokens : DEFAULT_MAXTOKENS,
     top_p: typeof raw?.top_p === 'number' ? raw.top_p : undefined,
-    frequency_penalty: typeof raw?.frequency_penalty === 'number' ? raw.frequency_penalty : undefined,
-    presence_penalty: typeof raw?.presence_penalty === 'number' ? raw.presence_penalty : undefined,
+    frequency_penalty:
+      typeof raw?.frequency_penalty === 'number' ? raw.frequency_penalty : undefined,
+    presence_penalty:
+      typeof raw?.presence_penalty === 'number' ? raw.presence_penalty : undefined,
     response_format: raw?.response_format ?? undefined,
+
+    // 受け取っても使わない（サーバーは env 固定運用）
+    cfg: typeof raw?.cfg === 'object' && raw?.cfg ? raw.cfg : undefined,
   };
 }
 
-/* ===== ▼ 追加：ir診断トリガー検出（観測対象ラベル抽出） ===== */
+/* ===== ▼ ir診断トリガー検出 ===== */
 function detectDiagnosisTarget(text: string) {
   const t = (text || '').trim();
-
-  // 既存: ir/IR/ｉｒ
   const m1 = t.match(/^(?:ir\s*診断|ir|IR|ｉｒ)(?:[:：\s]+)?(.+)?$/);
   if (m1?.[1]?.trim()) return m1[1].trim();
-
-  // 追加: 「◯◯を見て/観て」「◯◯の状態」「◯◯を診断」「◯◯の様子」
   const m2 = t.match(/(.+?)(?:を?見て|を?観て|の状態|の様子|を診断)/);
   if (m2?.[1]?.trim()) return m2[1].trim();
-
   return null;
 }
 
-/* ===== ▼ 追加：インジケータ/ペルソナ派生 ===== */
-function deriveIndicators(userText: string, phase: 'Inner'|'Outer', selfBand: 'lt20'|'20_40'|'40_70'|'70_90'|'gt90', relationLabel: 'harmony'|'discord') {
+/* ===== ▼ インジケータ/ペルソナ派生 ===== */
+function deriveIndicators(
+  userText: string,
+  phase: 'Inner' | 'Outer',
+  selfBand: 'lt20' | '20_40' | '40_70' | '70_90' | 'gt90',
+  relationLabel: 'harmony' | 'discord',
+) {
   const g = Number(((estimateSelfAcceptance(userText).score ?? 50) / 100).toFixed(2));
-  const stochastic = relationLabel === 'discord' || selfBand === 'lt20' || selfBand === '20_40';
+  const stochastic =
+    relationLabel === 'discord' || selfBand === 'lt20' || selfBand === '20_40';
   const baseNoise = relationLabel === 'discord' ? 0.35 : 0.15;
   const noiseAmp = Number((baseNoise + (phase === 'Outer' ? 0.05 : 0)).toFixed(2));
-  const seed = Math.abs(((userText?.length ?? 0) * 2654435761 + (Date.now() & 0xffff)));
+  const seed = Math.abs(
+    ((userText?.length ?? 0) * 2654435761 + (Date.now() & 0xffff)),
+  );
   return { g, stochastic, noiseAmp, seed };
 }
-function derivePersonaTone(phase: 'Inner'|'Outer', selfBand: string, relationLabel: 'harmony'|'discord') {
-  // 語りの“人格”傾向（Systemへヒントとして渡す）
-  if (phase === 'Inner' && (selfBand === 'lt20' || selfBand === '20_40')) return 'compassion_calm';     // やわらかく、静けさ重視
-  if (phase === 'Outer' && relationLabel === 'discord')                return 'mediator_grounded';      // 仲裁・合意形成寄り
-  if (selfBand === '70_90' || selfBand === 'gt90')                     return 'co_creator_clear';       // 共創・明晰
-  return 'gentle_guide'; // 中庸
+function derivePersonaTone(
+  phase: 'Inner' | 'Outer',
+  selfBand: string,
+  relationLabel: 'harmony' | 'discord',
+) {
+  if (phase === 'Inner' && (selfBand === 'lt20' || selfBand === '20_40'))
+    return 'compassion_calm';
+  if (phase === 'Outer' && relationLabel === 'discord')
+    return 'mediator_grounded';
+  if (selfBand === '70_90' || selfBand === 'gt90') return 'co_creator_clear';
+  return 'gentle_guide';
 }
 
 /* =========================
@@ -255,7 +289,33 @@ export async function POST(req: NextRequest) {
       model,
       temperature,
       max_tokens, top_p, frequency_penalty, presence_penalty, response_format,
+      // cfg は受け取っても使わない（env固定運用）
     } = safe;
+
+    // ★ 生成側チューニングは env を唯一のソースにする（env → cfg.retrieve → デフォルト）
+    const EPS = Number(process.env.SOFIA_EPSILON ?? CFG_RETR.epsilon ?? 0.25);
+    const NOISE = Number(process.env.SOFIA_NOISEAMP ?? CFG_RETR.noiseAmp ?? 0.10);
+    const DEEPEN = Number(process.env.SOFIA_DEEPEN_MULT ?? CFG_RETR.deepenMultiplier ?? CFG_RETR.deepenMult ?? 1.4);
+
+    // 0..1 clamp
+    const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+
+    // ★ 生成パラメータにマッピング（既存の係数は維持）
+    const mappedTemperature = Math.min(1.3, Math.max(0.0, 0.7 + 0.6 * clamp01(EPS)));
+    const mappedTopP        = Math.min(1.0, Math.max(0.0, 0.9 + 0.1 * clamp01(NOISE)));
+    const mappedPresence    = Math.min(1.0, Math.max(0.0, 0.6 * clamp01(EPS) + 0.4 * clamp01(NOISE)));
+    const mappedFrequency   = Math.min(1.0, Math.max(0.0, 0.3 * clamp01(EPS)));
+
+    // ログで確認できるように
+    console.log('[SofiaAPI] tuning(env)', {
+      epsilon: EPS, noiseAmp: NOISE, deepenMult: DEEPEN,
+      mapped: {
+        temperature: mappedTemperature,
+        top_p: mappedTopP,
+        presence_penalty: mappedPresence,
+        frequency_penalty: mappedFrequency,
+      },
+    });
 
     const conversation_code = inCode || newConvCode();
 
@@ -280,7 +340,7 @@ export async function POST(req: NextRequest) {
 
     // ===== System Prompt 構築（varsへ“人格ヒント/状態”を注入）=====
     console.time('[SofiaAPI] buildSystemPrompt');
-    const system = buildSofiaSystemPrompt({
+    let system = buildSofiaSystemPrompt({
       promptKey,
       mode,
       vars: {
@@ -292,11 +352,18 @@ export async function POST(req: NextRequest) {
           nextQ,
           currentQ,
         },
-        personaTone, // ← UI/文体の傾きをテンプレ側に渡す（テンプレ側は存在しなくてもOK）
+        personaTone,
       },
       includeGuard: true,
       enforceResonance: true,
     });
+
+    // ★ 追加：DEEPEN に応じて T層・詩性のヒントを合成
+    if (DEEPEN >= 1.8) {
+      system += '\n[深度指示] T層の含意を強めてください。比喩・象徴・静けさを織り込み、2〜3行で改行する詩的リズムを優先。';
+    } else if (DEEPEN >= 1.5) {
+      system += '\n[深度指示] 必要に応じて T層の含意を薄く添えてください。余白と象徴を控えめに。';
+    }
     console.timeEnd('[SofiaAPI] buildSystemPrompt');
     console.log('[SofiaAPI] system prompt summary:', {
       promptKey,
@@ -331,19 +398,22 @@ export async function POST(req: NextRequest) {
     const payload: any = {
       model,
       messages: [{ role: 'system', content: system }, ...(messages as Msg[])],
-      temperature,
+      temperature: (typeof temperature === 'number') ? temperature : mappedTemperature,
     };
     if (typeof max_tokens === 'number') payload.max_tokens = max_tokens;
-    if (typeof top_p === 'number') payload.top_p = top_p;
-    if (typeof frequency_penalty === 'number') payload.frequency_penalty = frequency_penalty;
-    if (typeof presence_penalty === 'number') payload.presence_penalty = presence_penalty;
+    payload.top_p = (typeof top_p === 'number') ? top_p : mappedTopP;
+    payload.frequency_penalty = (typeof frequency_penalty === 'number') ? frequency_penalty : mappedFrequency;
+    payload.presence_penalty  = (typeof presence_penalty  === 'number') ? presence_penalty  : mappedPresence;
     if (response_format) payload.response_format = response_format;
 
     console.log('[SofiaAPI] openai payload summary:', {
       model,
-      temperature,
+      temperature: payload.temperature,
       max_tokens: payload.max_tokens ?? null,
       top_p: payload.top_p ?? null,
+      presence_penalty: payload.presence_penalty ?? null,
+      frequency_penalty: payload.frequency_penalty ?? null,
+      cfg: { epsilon: EPS, noiseAmp: NOISE, deepenMult: DEEPEN },
       msgs_in: payload.messages?.length ?? 0,
     });
 
@@ -372,26 +442,30 @@ export async function POST(req: NextRequest) {
       { step: 'state_infer',    data: { phase, self, relation, currentQ, nextQ } },
       { step: 'indicators',     data: indicators },
       { step: 'retrieve',       data: { hits: (Array.isArray(kb) ? kb.length : 0), epsilon: RETRIEVE_EPS, noiseAmp: RETRIEVE_NOISE, seed: seedForRetr } },
-      { step: 'build_system',   data: { promptKey, personaTone, length: system.length } },
-      { step: 'openai_reply',   data: { model, temperature, hasReply: !!reply } },
+      { step: 'build_system',   data: { promptKey, personaTone, length: system.length, deepenMult: DEEPEN } },
+      { step: 'openai_reply',   data: {
+          model,
+          temperature: payload.temperature,
+          top_p: payload.top_p,
+          presence_penalty: payload.presence_penalty,
+          frequency_penalty: payload.frequency_penalty,
+          hasReply: !!reply
+        } },
     ];
 
     // ★ 返却・保存用メタ（フロント既存表示の互換を維持）
     const metaPacked: any = {
-      // 既存インジケータ互換（トップレベル）
       stochastic: indicators.stochastic,
       g: indicators.g,
       seed: indicators.seed,
       noiseAmp: indicators.noiseAmp,
 
-      // 解析状態
       phase,
       selfAcceptance: self,
       relation,
       nextQ,
       currentQ,
 
-      // 参考（UIに出さなくてもOK）
       used_knowledge: (Array.isArray(kb) ? kb : []).map((k: any, i: number) => ({ id: k.id, key: `K${i + 1}`, title: k.title })),
       personaTone,
       dialogue_trace,
@@ -407,7 +481,6 @@ export async function POST(req: NextRequest) {
         title: title ?? null,
         messages: merged,
         updated_at: new Date().toISOString(),
-        // ★ last_meta が存在する環境では保存される（無ければDBが拒否→握りつぶし）
         last_meta: metaPacked as any,
       } as any,
       { onConflict: 'user_code,conversation_code' }
@@ -416,7 +489,7 @@ export async function POST(req: NextRequest) {
 
     // ★ 1ターンごとのログ（存在すれば書く）
     try {
-      const turn_index = merged.filter(m => m.role === 'assistant').length; // 1始まり相当
+      const turn_index = merged.filter(m => m.role === 'assistant').length;
       await sb.from('sofia_turns').insert({
         user_code: userCode,
         conversation_code,
@@ -430,6 +503,48 @@ export async function POST(req: NextRequest) {
       console.warn('[sofia_turns insert] skipped:', String((e as any)?.message ?? e));
     }
 
+    // ▼ Qコードログ書き込み（AI由来）
+    try {
+      // Q の決め方：currentQ → nextQ → 既定（Q2）
+      const q = (metaPacked.currentQ ?? metaPacked.nextQ ?? "Q2") as "Q1"|"Q2"|"Q3"|"Q4"|"Q5";
+
+      // Stage の決め方：
+      // 1) vars.analysis.qcodes[0].stage にあれば最優先
+      // 2) 深度パラメータやモードから簡易推定（診断：S2 / 高深度：S3 / それ以外：S1）
+      const stageHint = (vars as any)?.analysis?.qcodes?.[0]?.stage;
+      const stage = (
+        stageHint === "S1" || stageHint === "S2" || stageHint === "S3"
+          ? stageHint
+          : (DEEPEN >= 1.8 ? "S3" : (mode === "diagnosis" ? "S2" : "S1"))
+      ) as "S1"|"S2"|"S3";
+
+      await recordQFromSofia({
+        user_code: userCode,
+        conversation_code,
+        intent: mode === "diagnosis" ? "diagnosis" : "normal",
+        q,
+        stage,
+        // 任意メタ（監査や可視化で便利）
+        extra: {
+          model,
+          personaTone,
+          phase,
+          selfBand: self.band,
+          relation: relation.label,
+          detectedTarget,
+        },
+        // 使わないなら null でOK（テーブルが NULL 可になっている前提）
+        post_id: null,
+        owner_user_code: userCode,
+        actor_user_code: userCode,
+        emotion: null,
+        level: null,
+      });
+    } catch (e) {
+      console.warn("[q_code_logs insert] skipped:", String((e as any)?.message ?? e));
+    }
+
+    
     // ---- 応答
     return json({
       conversation_code,

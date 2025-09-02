@@ -3,6 +3,7 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import rehypeHighlight from 'rehype-highlight';
 import { SOFIA_CONFIG } from './config';
 
@@ -25,15 +26,18 @@ type BubbleProps = { role: MsgRole; text: string };
 export function MessageBubble({ role, text }: BubbleProps) {
   const isUser = role === 'user';
 
-  // デバッグ：現在の UI 設定（必ず出す）
+  // 現在の UI 設定（デバッグ出力）
   // eslint-disable-next-line no-console
   console.debug('[SofiaUI] config(ui)=', SOFIA_CONFIG.ui);
 
   // env → 数値・長さに整形
-  const fsPx = `${SOFIA_CONFIG.ui.assistantFontSize}px`;
-  const lhNum = Number(SOFIA_CONFIG.ui.assistantLineHeight || 1.85);
-  const lsEm = `${SOFIA_CONFIG.ui.assistantLetterSpacing}em`;
-  const paraMg = `${SOFIA_CONFIG.ui.paragraphMargin ?? 6}px`;
+  const fsPx = `${SOFIA_CONFIG.ui.assistantFontSize}px`;               // 例: 16
+  const lhNum = Number(SOFIA_CONFIG.ui.assistantLineHeight || 2.2);     // 例: 2.5
+  const lsEm = `${SOFIA_CONFIG.ui.assistantLetterSpacing}em`;           // 例: 0.03em
+  const paraMgPx = Number(SOFIA_CONFIG.ui.paragraphMargin ?? 12);       // 例: 12(px)
+  const paraMg = `${paraMgPx}px`;
+  // 単一改行(<br/>)に入れる“ちょい余白”（必要なら env に出してOK）
+  const softBreakHeightPx = 15;
 
   /** 吹き出しの枠スタイル */
   const bubbleStyle: React.CSSProperties = {
@@ -44,32 +48,33 @@ export function MessageBubble({ role, text }: BubbleProps) {
     padding: '10px 12px',
     background: isUser
       ? (SOFIA_CONFIG.ui.userBg || '#e6f3ff')
-      : (SOFIA_CONFIG.ui.assistantBg || '#fff'),
+      : (SOFIA_CONFIG.ui.assistantBg || '#ffffff'),
     color: isUser ? (SOFIA_CONFIG.ui.userFg || '#111827') : undefined,
     border: isUser
       ? `1px solid ${SOFIA_CONFIG.ui.userBorder || '#e5e7eb'}`
       : (SOFIA_CONFIG.ui.assistantBorder || '1px solid #e5e7eb'),
-    boxShadow: isUser ? undefined : (SOFIA_CONFIG.ui.assistantShadow || '0 1px 2px rgba(0,0,0,0.05)'),
-    overflow: 'hidden',
+    boxShadow: isUser ? undefined : (SOFIA_CONFIG.ui.assistantShadow || '0 1px 2px rgba(0,0,0,.06)'),
+    overflow: 'hidden',                 // ← マージン潰れ防止
     wordBreak: 'break-word',
   };
 
-  /** 吹き出し内のコンテンツ全体に直指定（←これで負けにくい） */
+  /** 吹き出し内のラッパ（ここに直指定して“勝たせる”） */
   const contentStyle: React.CSSProperties = !isUser
     ? {
+        display: 'flow-root',           // ← マージン潰れ対策
         fontSize: fsPx,
         lineHeight: lhNum as any,
         letterSpacing: lsEm,
-        fontFamily:
-          'system-ui, -apple-system, "Segoe UI", "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Meiryo", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif',
-        whiteSpace: 'pre-wrap',
+        whiteSpace: 'pre-wrap',         // ← 改行を生かす
         wordBreak: 'break-word',
         overflowWrap: 'anywhere',
+        fontFamily:
+          'system-ui, -apple-system, "Segoe UI", "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Meiryo", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif',
       }
     : {};
 
-  /** パラグラフ用（アシスタントのみ） */
-  const assistantTextStyle: React.CSSProperties = !isUser
+  /** 段落・本文要素の共通スタイル（アシスタントのみ） */
+  const blockTextStyle: React.CSSProperties = !isUser
     ? {
         fontSize: fsPx,
         lineHeight: lhNum as any,
@@ -89,11 +94,13 @@ export function MessageBubble({ role, text }: BubbleProps) {
       <div style={bubbleStyle}>
         <div style={contentStyle}>
           <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
+            // 単一改行を <br/> にする
+            remarkPlugins={[remarkGfm, remarkBreaks]}
             rehypePlugins={[rehypeHighlight]}
             components={{
               a: LinkRenderer,
 
+              // 1行コード
               code(props) {
                 const { inline, className, children, ...rest } = props as any;
                 if (inline) {
@@ -113,6 +120,7 @@ export function MessageBubble({ role, text }: BubbleProps) {
                     </code>
                   );
                 }
+                // フェンスコード
                 return (
                   <code className={className} {...rest}>
                     {children}
@@ -131,6 +139,7 @@ export function MessageBubble({ role, text }: BubbleProps) {
                       borderRadius: 10,
                       overflowX: 'auto',
                       border: '1px solid #111827',
+                      margin: `${paraMg} 0`,
                     }}
                     {...rest}
                   >
@@ -139,9 +148,14 @@ export function MessageBubble({ role, text }: BubbleProps) {
                 );
               },
 
+              // ← ここが効く：単一改行 <br/> を“高さを持つ”要素にして余白を作る
+              br() {
+                return <span style={{ display: 'block', height: softBreakHeightPx }} />;
+              },
+
               table({ children }) {
                 return (
-                  <div style={{ overflowX: 'auto' }}>
+                  <div style={{ overflowX: 'auto', margin: `${paraMg} 0` }}>
                     <table
                       style={{
                         width: '100%',
@@ -187,9 +201,7 @@ export function MessageBubble({ role, text }: BubbleProps) {
                       borderRadius: 6,
                       color: '#475569',
                       fontStyle: 'italic',
-                      fontSize: fsPx,
-                      lineHeight: lhNum as any,
-                      letterSpacing: lsEm,
+                      ...blockTextStyle,
                     }}
                   >
                     {children}
@@ -203,9 +215,7 @@ export function MessageBubble({ role, text }: BubbleProps) {
                     style={{
                       paddingInlineStart: 22,
                       margin: `${paraMg} 0`,
-                      fontSize: fsPx,
-                      lineHeight: lhNum as any,
-                      letterSpacing: lsEm,
+                      ...blockTextStyle,
                     }}
                   >
                     {children}
@@ -219,9 +229,7 @@ export function MessageBubble({ role, text }: BubbleProps) {
                     style={{
                       paddingInlineStart: 22,
                       margin: `${paraMg} 0`,
-                      fontSize: fsPx,
-                      lineHeight: lhNum as any,
-                      letterSpacing: lsEm,
+                      ...blockTextStyle,
                     }}
                   >
                     {children}
@@ -229,27 +237,35 @@ export function MessageBubble({ role, text }: BubbleProps) {
                 );
               },
 
+              li({ children }) {
+                return (
+                  <li style={{ margin: '4px 0' }}>
+                    {children}
+                  </li>
+                );
+              },
+
               p({ children }) {
-                return <p style={assistantTextStyle}>{children}</p>;
+                return <p style={blockTextStyle}>{children}</p>;
               },
 
               h1({ children }) {
                 return (
-                  <h1 style={{ fontSize: 20, fontWeight: 700, margin: '8px 0' }}>
+                  <h1 style={{ fontSize: 20, fontWeight: 700, margin: `${paraMg} 0` }}>
                     {children}
                   </h1>
                 );
               },
               h2({ children }) {
                 return (
-                  <h2 style={{ fontSize: 18, fontWeight: 700, margin: '8px 0' }}>
+                  <h2 style={{ fontSize: 18, fontWeight: 700, margin: `${paraMg} 0` }}>
                     {children}
                   </h2>
                 );
               },
               h3({ children }) {
                 return (
-                  <h3 style={{ fontSize: 16, fontWeight: 700, margin: '8px 0' }}>
+                  <h3 style={{ fontSize: 16, fontWeight: 700, margin: `${paraMg} 0` }}>
                     {children}
                   </h3>
                 );
