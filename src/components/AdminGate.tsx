@@ -18,16 +18,11 @@ export default function AdminGate({ children }: { children: React.ReactNode }) {
         const role = String(j.role ?? j.user_role ?? '').toLowerCase();
         const plan = String(j.plan ?? j.plan_status ?? '').toLowerCase();
         const isAdmin =
-          j.is_admin === true ||
-          role === 'admin' ||
-          plan === 'admin' ||
-          j.is_master === true ||
-          role === 'master' ||
-          plan === 'master';
+          j.is_admin === true || j.is_master === true ||
+          role === 'admin' || role === 'master' ||
+          plan === 'admin' || plan === 'master';
         if (!gone) setOk(isAdmin);
-      } catch {
-        if (!gone) setOk(false);
-      }
+      } catch { if (!gone) setOk(false); }
     })();
     return () => { gone = true; };
   }, [user]);

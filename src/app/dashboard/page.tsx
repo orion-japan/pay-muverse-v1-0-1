@@ -1,26 +1,29 @@
-'use client'
+// src/app/dashboard/page.tsx
+'use client';
+import Link from 'next/link';
+import AdminGate from '@/components/AdminGate';
 
-import { useEffect } from 'react'
-import { useAuth } from '@/context/AuthContext'
-import { registerPush } from '@/utils/push'
-
-export default function DashboardPage() {
-  const { userCode } = useAuth()
-
-  useEffect(() => {
-    if (userCode) {
-      registerPush(userCode).then((res) => {
-        console.log("Push登録結果:", res)
-      }).catch((err) => {
-        console.error("❌ Push登録失敗:", err)
-      })
-    }
-  }, [userCode])
-
+export default function AdminHome() {
+  const cards = [
+    { href:'/logs', title:'Logs', desc:'ログメニュー（テレメトリ・登録ログ）' },
+    { href:'/ai-q-dashboard', title:'AI Q Dashboard', desc:'AI処理のメトリクス（雛形）' },
+    { href:'/qcode', title:'QCode 管理', desc:'ユーザーコードと権限（雛形）' },
+  ];
   return (
-    <div>
-      <h1>📱 ダッシュボード</h1>
-      <p>Push通知の登録状況は Console に出ます。</p>
-    </div>
-  )
+    <AdminGate>
+      <div style={{padding:16}}>
+        <h1 style={{fontSize:22,fontWeight:700,marginBottom:12}}>Admin Dashboard</h1>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:12}}>
+          {cards.map(c=>(
+            <Link key={c.href} href={c.href} style={{
+              display:'block', padding:'14px', border:'1px solid #e5e5e5', borderRadius:12, textDecoration:'none', color:'#111'
+            }}>
+              <div style={{fontWeight:700, marginBottom:6}}>{c.title}</div>
+              <div style={{color:'#666', fontSize:13}}>{c.desc}</div>
+            </Link>
+          ))}
+        </div>
+      </div>
+    </AdminGate>
+  );
 }

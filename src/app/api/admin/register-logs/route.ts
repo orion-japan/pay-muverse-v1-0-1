@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
     const lim = Math.min(Math.max(Number(limit), 50), 2000);
 
     let q = sb
-      .from('register_logs')               // ← あなたの登録ログテーブル名
+      .from('register_logs') // ← あなたのテーブル名に合わせる
       .select('id, ip_address, phone_number, referral_code, created_at')
       .order('created_at', { ascending: false })
       .limit(lim);
@@ -25,7 +25,6 @@ export async function POST(req: NextRequest) {
 
     const { data, error } = await q;
     if (error) return NextResponse.json({ ok:false, error:error.message }, { status: 500 });
-
     return NextResponse.json({ ok:true, rows:data });
   } catch (e:any) {
     return NextResponse.json({ ok:false, error: e?.message || 'error' }, { status: 500 });
