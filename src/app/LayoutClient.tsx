@@ -9,6 +9,7 @@ import { useAuth } from '@/context/AuthContext'
 import { registerPush } from '@/utils/push'
 import { createPortal } from 'react-dom'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { ensureSessionId, startHeartbeat, stopHeartbeat, wireOnlineOffline, tracePage } from '@/lib/telemetry'  // ★ 追加
 
 /* =========================
    Portal 先のフッター高さを“確実に”取得して
@@ -161,6 +162,24 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
     pathname?.startsWith('/mu_full') === true
   const isIros = pathname?.startsWith('/iros') === true
   const isSofia = pathname?.startsWith('/sofia') === true
+
+  // ★ 監視記録（テレメトリ）起動：セッション生成・HB・オンライン監視
+  useEffect(() => {
+    ensureSessionId()
+    const unbind = wireOnlineOffline()
+    startHeartbeat(30000, { first_path: pathname })
+    return () => {
+      unbind?.()
+      stopHeartbeat()
+    }
+    // 初回だけ
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ★ ページ遷移のトレース
+  useEffect(() => {
+    tracePage(pathname || '/')
+  }, [pathname])
 
   // SW 登録＋フォールバック受信＋subscription 登録（副作用のみ）
   useEffect(() => {

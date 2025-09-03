@@ -19,7 +19,55 @@ function LinkRenderer(
   );
 }
 
-export default function MessageList({ messages }: { messages: Message[] }) {
+/* ====== 追加: 現在のユーザー情報 ====== */
+type CurrentUser = {
+  id: string;
+  name: string;
+  userType: string;
+  credits: number;
+  avatarUrl?: string | null;
+};
+
+/* ====== 追加: Supabase相対パスも解決するアバターURL整形 ====== */
+const SUPABASE_BASE = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '');
+function resolveAvatarUrl(src?: string | null): string {
+  const u = (src ?? '').trim();
+  if (!u) return '/avatar.png';
+  if (/^https?:\/\//i.test(u) || /^data:image\//i.test(u)) return u;
+  if (u.startsWith('/storage/v1/object/public/')) return `${SUPABASE_BASE}${u}`;
+  if (u.startsWith('avatars/')) return `${SUPABASE_BASE}/storage/v1/object/public/${u}`;
+  return `${SUPABASE_BASE}/storage/v1/object/public/avatars/${u}`;
+}
+
+/** 画像が落ちた時は 1 回だけ /avatar.png にフォールバック */
+const Avatar: React.FC<{ src?: string | null; alt: string; size?: number }> = ({
+  src,
+  alt,
+  size = 18,
+}) => {
+  const finalSrc = resolveAvatarUrl(src);
+  const [url, setUrl] = React.useState(finalSrc);
+  return (
+    <img
+      src={url}
+      alt={alt}
+      width={size}
+      height={size}
+      style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', display: 'block' }}
+      onError={() => {
+        if (url !== '/avatar.png') setUrl('/avatar.png');
+      }}
+    />
+  );
+};
+
+export default function MessageList({
+  messages,
+  currentUser,
+}: {
+  messages: Message[];
+  currentUser?: CurrentUser;
+}) {
   return (
     <div className="sof-msgs">
       {messages.length === 0 ? (
@@ -43,10 +91,40 @@ export default function MessageList({ messages }: { messages: Message[] }) {
                 }
               : {};
 
-            // 役割ラベルはそのまま
-            const roleEl = <div className="sof-bubble__role">{m.role}</div>;
+            // ✅ ラベル: assistant→左寄せのまま / user→右寄せにする（吹き出しの右側）
+            const roleStyle: React.CSSProperties = isAssistant
+              ? { display: 'flex', alignItems: 'center', gap: 6 }
+              : {
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  justifyContent: 'flex-end', // ← 右寄せ
+                  textAlign: 'right',
+                };
 
-            // Markdownコンポーネント（アシスタントのみ段落余白など適用）
+            const roleEl = (
+              <div className="sof-bubble__role" style={roleStyle}>
+                {isAssistant ? (
+                  <>
+                    <img
+                      src="/ir.png"
+                      alt="iros"
+                      width={18}
+                      height={18}
+                      style={{ width: 18, height: 18, borderRadius: '50%', objectFit: 'cover' }}
+                    />
+                    <span>iros</span>
+                  </>
+                ) : (
+                  <>
+                    <Avatar src={currentUser?.avatarUrl} alt={currentUser?.name || 'user'} />
+                    <span>{currentUser?.name ?? currentUser?.id ?? 'user'}</span>
+                  </>
+                )}
+              </div>
+            );
+
+            // Markdown（アシスタントのみ段落余白など適用）
             const mdComponents =
               isAssistant
                 ? {
@@ -192,20 +270,23 @@ export default function MessageList({ messages }: { messages: Message[] }) {
                   }
                 : { a: LinkRenderer }; // ユーザーは最小限
 
+            const uploaded = (m as any)?.uploaded_image_urls;
+
             return (
               <div
                 key={m.id}
                 className={`sof-bubble ${isAssistant ? 'is-assistant' : 'is-user'}`}
                 style={bubbleStyle}
               >
-                {m.uploaded_image_urls?.length ? (
+                {Array.isArray(uploaded) && uploaded.length ? (
                   <div className="sof-bubble__imgs">
-                    {m.uploaded_image_urls.map((u: string, i: number) => (
+                    {uploaded.map((u: string, i: number) => (
                       <img key={i} src={u} alt="" />
                     ))}
                   </div>
                 ) : null}
 
+                {/* ラベル（アシスタントは左、ユーザーは右寄せ） */}
                 {roleEl}
 
                 <div className="sof-bubble__text">
@@ -221,7 +302,7 @@ export default function MessageList({ messages }: { messages: Message[] }) {
             );
           })}
 
-          {/* 入力バーの直上で下→上に薄くなるフェード（※1個だけ） */}
+          {/* 入力バー直上フェード */}
           <div className="sof-fader" aria-hidden />
         </>
       )}

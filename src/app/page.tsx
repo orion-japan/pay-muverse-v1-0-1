@@ -1,4 +1,4 @@
-'use client';
+'use client'; 
 
 import { useState, useEffect, useRef, KeyboardEvent } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
@@ -108,7 +108,7 @@ export default function DashboardPage() {
     return () => clearInterval(id);
   }, [content]);
 
-  // ★ master/admin 総合判定
+  // ★ master/admin 総合判定（401対策：常にBearer送信 + 401時リトライ）
   useEffect(() => {
     let aborted = false;
 
@@ -117,66 +117,69 @@ export default function DashboardPage() {
       return;
     }
 
-    const tryPOST = async (url: string, body: any) => {
+    const getFreshIdToken = async () => {
       try {
-        const res = await fetch(url, {
-          method: 'POST',
-          cache: 'no-store',
-          credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body ?? {}),
-        });
-        if (!res.ok) return null;
-        return await res.json();
+        const auth = getAuth();
+        // 強制リフレッシュで常に新鮮なトークンを取得
+        const tok =
+          (await auth.currentUser?.getIdToken(true).catch(() => null)) ??
+          (await (user as any)?.getIdToken?.(true).catch(() => null)) ??
+          null;
+        return tok;
       } catch {
         return null;
       }
     };
 
-    const tryGET = async (url: string, headers?: Record<string, string>) => {
-      try {
-        const res = await fetch(url, {
-          cache: 'no-store',
-          credentials: 'same-origin',
-          headers,
-        } as RequestInit);
-        if (!res.ok) return null;
-        return await res.json();
-      } catch {
-        return null;
-      }
+    const fetchUserMeta = async (idToken: string) => {
+      const res = await fetch('/api/get-user-info', {
+        method: 'GET',
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      if (res.status === 401) throw new Error('unauthorized');
+      if (!res.ok) throw new Error('fetch-error');
+      return res.json();
     };
 
     (async () => {
-      const auth = getAuth();
-      const idToken =
-        (await auth.currentUser?.getIdToken(true).catch(() => null)) ??
-        (await (user as any)?.getIdToken?.(true).catch(() => null)) ??
-        null;
+      try {
+        let idToken = await getFreshIdToken();
+        if (!idToken) throw new Error('no-token');
 
-      const metaUserInfo = idToken ? await tryPOST('/api/get-user-info', { idToken }) : null;
-      const metaGetCompat =
-        metaUserInfo ||
-        (idToken
-          ? await tryGET('/api/get-user-info', { Authorization: `Bearer ${idToken}` })
-          : await tryGET('/api/get-user-info'));
+        let meta: any;
+        try {
+          meta = await fetchUserMeta(idToken);
+        } catch (e: any) {
+          // 401などは一度だけトークン再取得して再試行
+          if (e?.message === 'unauthorized') {
+            idToken = await getFreshIdToken();
+            if (!idToken) throw new Error('no-token-2');
+            meta = await fetchUserMeta(idToken);
+          } else {
+            throw e;
+          }
+        }
 
-      const meta: any = metaUserInfo || metaGetCompat || {};
+        if (aborted) return;
 
-      const role = String(meta.role ?? meta.user_role ?? '').toLowerCase();
-      const clickType = String(meta.click_type ?? meta.clickType ?? '').toLowerCase();
-      const plan = String(meta.plan ?? meta.plan_status ?? meta.planStatus ?? '').toLowerCase();
+        const role = String(meta.role ?? meta.user_role ?? '').toLowerCase();
+        const clickType = String(meta.click_type ?? meta.clickType ?? '').toLowerCase();
+        const plan = String(meta.plan ?? meta.plan_status ?? meta.planStatus ?? '').toLowerCase();
 
-      const truthy = (v: any) => v === true || v === 1 || v === '1' || v === 'true';
+        const truthy = (v: any) => v === true || v === 1 || v === '1' || v === 'true';
 
-      const flagAdmin =
-        truthy(meta.is_admin) || role === 'admin' || clickType === 'admin' || plan === 'admin';
-      const flagMaster =
-        truthy(meta.is_master) || role === 'master' || clickType === 'master' || plan === 'master';
+        const flagAdmin =
+          truthy(meta.is_admin) || role === 'admin' || clickType === 'admin' || plan === 'admin';
+        const flagMaster =
+          truthy(meta.is_master) || role === 'master' || clickType === 'master' || plan === 'master';
 
-      const allowed = flagAdmin || flagMaster;
-
-      if (!aborted) setIsIrosAllowed(allowed);
+        const allowed = flagAdmin || flagMaster;
+        setIsIrosAllowed(allowed);
+      } catch {
+        if (!aborted) setIsIrosAllowed(false); // 取得失敗時は閉じておく
+      }
     })();
 
     return () => {
@@ -194,7 +197,7 @@ export default function DashboardPage() {
     { title: 'Create', link: '/create', img: '/mu_create.png', alt: 'Create' },
     { title: 'm Tale', link: '/', img: '/m_tale.png', alt: 'm Tale' },
     { title: 'm Shot', link: '/', img: '/shot.png', alt: 'm Shot' }, // ガード対象
-    { title: 'iros', link: '/iros', img: '/ir.png', alt: 'iros' },
+    { title: 'iros', link: '/iros', img: '/ir2.png', alt: 'iros' },
   ];
 
   // 共鳴色

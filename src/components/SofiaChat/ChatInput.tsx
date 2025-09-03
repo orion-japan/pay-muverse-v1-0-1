@@ -25,6 +25,9 @@ type Props = {
 
   /** 添付の総容量上限（MB, 既定: 25MB） */
   maxTotalSizeMB?: number;
+
+  /** 親がAI返答後に変更して渡すと、入力欄へフォーカスが戻る（任意・追加） */
+  focusToken?: unknown;
 };
 
 const DEFAULT_DRAFT_KEY = 'sofia_chat_draft';
@@ -38,6 +41,7 @@ export default function ChatInput({
   accept = 'image/*,video/*,audio/*,.pdf,.txt,.md,.doc,.docx,.ppt,.pptx,.xls,.xlsx',
   maxFiles = 5,
   maxTotalSizeMB = 25,
+  focusToken,
 }: Props) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -157,6 +161,18 @@ export default function ChatInput({
     if ((disabled || sending) || (!value && !hasFiles)) return;
     if (overMaxFiles || overMaxSize) return;
 
+    // ---- ① 送信と同時にUIを即時クリア（見た目で残さない）----
+    setText('');
+    setFiles([]);
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem(draftKey);
+      }
+    } catch {
+      /* no-op */
+    }
+    taRef.current?.focus(); // 送信直後も入力を続けられる
+
     setSending(true);
     try {
       if (onSendWithFiles) {
@@ -165,18 +181,6 @@ export default function ChatInput({
         // 既存互換: onSend(text) のみ
         await onSend(value);
       }
-
-      // 成功時はクリア
-      setText('');
-      setFiles([]);
-      try {
-        if (typeof window !== 'undefined') {
-          window.localStorage.removeItem(draftKey);
-        }
-      } catch {
-        /* no-op */
-      }
-      taRef.current?.focus();
     } finally {
       setSending(false);
     }
@@ -197,13 +201,25 @@ export default function ChatInput({
     taRef.current?.focus();
   }, []);
 
+  // ---- ② 親からのAI返答完了合図でフォーカス復帰（focusToken が変わったら）----
+  useEffect(() => {
+    if (focusToken !== undefined) {
+      taRef.current?.focus();
+    }
+  }, [focusToken]);
+
   const removeFileAt = (idx: number) => {
     setFiles((prev) => prev.filter((_, i) => i !== idx));
   };
 
   const openPicker = () => fileRef.current?.click();
 
-  const canSend = !disabled && !sending && (!!text.trim() || files.length > 0) && !overMaxFiles && !overMaxSize;
+  const canSend =
+    !disabled &&
+    !sending &&
+    (!!text.trim() || files.length > 0) &&
+    !overMaxFiles &&
+    !overMaxSize;
 
   return (
     <div

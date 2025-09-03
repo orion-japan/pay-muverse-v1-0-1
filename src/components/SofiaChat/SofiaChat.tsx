@@ -7,6 +7,7 @@ import React, {
   useRef,
   useState,
   useLayoutEffect,
+  useCallback,
 } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { fetchWithIdToken } from '@/lib/fetchWithIdToken';
@@ -20,7 +21,7 @@ import SidebarMobile from './SidebarMobile';
 import Header from './header';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
-import type { MetaData } from '@/components/SofiaChat/MetaPanel';  // ← 型だけ残す
+import type { MetaData } from '@/components/SofiaChat/MetaPanel';
 
 /* ========= types ========= */
 type Role = 'user' | 'assistant';
@@ -30,6 +31,8 @@ export type Message = {
   content: string;
   created_at?: string;
   isPreview?: boolean;
+  // uploaded_image_urls は既存実装で使われることがあるので any セーフティで受ける
+  // uploaded_image_urls?: string[];
 };
 
 type ConvListItem = {
@@ -85,26 +88,11 @@ const normalizeMeta = (m: any): MetaData | null => {
     retrSeed: m?.stochastic_params?.retrSeed ?? null,
   };
 
-  const resonance = {
-    phase: m.phase ?? null,
-    selfAcceptance: m.selfAcceptance ?? null,
-    relation: m.relation ?? null,
-    nextQ: m.nextQ ?? null,
-    currentQ: m.currentQ ?? null,
-  };
-
-  const dialogue_trace = Array.isArray(m.dialogue_trace) ? m.dialogue_trace : null;
-
-  return {
-    qcodes,
-    layers,
-    used_knowledge,
-    stochastic: indicator, // ← ここにまとめて渡せばOK
-  };
+  return { qcodes, layers, used_knowledge, stochastic: indicator };
 };
 
 export default function SofiaChat() {
-  const { loading: authLoading, userCode } = useAuth();
+  const { loading: authLoading, userCode, planStatus } = useAuth();
 
   /* ========= states ========= */
   const [conversations, setConversations] = useState<ConvListItem[]>([]);
@@ -112,6 +100,15 @@ export default function SofiaChat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [meta, setMeta] = useState<MetaData | null>(null);
+
+  // ✅ Sidebar/MessageList 表示用：ユーザーの実値
+  const [uiUser, setUiUser] = useState<{
+    id: string;
+    name: string;
+    userType: string;
+    credits: number;
+    avatarUrl?: string | null;
+  } | null>(null);
 
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -132,7 +129,6 @@ export default function SofiaChat() {
     set('--sofia-assist-lh', ui.assistantLineHeight);
     set('--sofia-assist-ls', `${ui.assistantLetterSpacing}em`);
     set('--sofia-p-margin', `${ui.paragraphMargin}px`);
-
     set('--sofia-bubble-maxw', `${ui.bubbleMaxWidthPct}%`);
     set('--sofia-a-border', ui.assistantBorder);
     set('--sofia-a-radius', `${ui.assistantRadius}px`);
@@ -140,7 +136,6 @@ export default function SofiaChat() {
     set('--sofia-a-bg', ui.assistantBg);
     set('--sofia-bq-border', ui.blockquoteTintBorder);
     set('--sofia-bq-bg', ui.blockquoteTintBg);
-
     set('--sofia-user-bg', ui.userBg);
     set('--sofia-user-fg', ui.userFg);
     set('--sofia-user-border', ui.userBorder);
@@ -155,9 +150,7 @@ export default function SofiaChat() {
       background:
         radial-gradient(130% 160% at 0% -40%, rgba(203,213,225,.28), transparent 60%),
         linear-gradient(180deg, #ffffff 0%, #f6f9ff 100%) !important;
-      box-shadow:
-        0 1px 0 rgba(255,255,255,.65) inset,
-        0 8px 24px rgba(2,6,23,.10) !important;
+      box-shadow: 0 1px 0 rgba(255,255,255,.65) inset, 0 8px 24px rgba(2,6,23,.10) !important;
       border-radius: var(--sofia-a-radius, 16px) !important;
     }
     :where(.sofia-container) .sof-msgs .sof-bubble.is-assistant{
@@ -168,11 +161,8 @@ export default function SofiaChat() {
       color: #fff !important;
       text-shadow: 0 1px 0 rgba(0,0,0,.08);
       border: none !important;
-      background:
-        linear-gradient(180deg, #8aa0ff 0%, #6b8cff 60%, #5979ee 100%) !important;
-      box-shadow:
-        0 1px 0 rgba(255,255,255,.25) inset,
-        0 10px 24px rgba(107,140,255,.22) !important;
+      background: linear-gradient(180deg, #8aa0ff 0%, #6b8cff 60%, #5979ee 100%) !important;
+      box-shadow: 0 1px 0 rgba(255,255,255,.25) inset, 0 10px 24px rgba(107,140,255,.22) !important;
       border-bottom-right-radius: 6px !important;
     }
     .sof-underlay{ background: transparent !important; box-shadow:none !important; }
@@ -212,7 +202,6 @@ export default function SofiaChat() {
   }, []);
 
   useEffect(() => {
-    // MetaPanelを撤去したので高さは常に0に固定
     document.body.style.setProperty('--meta-height', `0px`);
   }, []);
 
@@ -226,7 +215,9 @@ export default function SofiaChat() {
 
       const items = (js.items ?? []).map((row) => ({
         id: row.conversation_code,
-        title: row.title ?? (row.updated_at ? `会話 (${new Date(row.updated_at).toLocaleString()})` : '新しい会話'),
+        title:
+          row.title ??
+          (row.updated_at ? `会話 (${new Date(row.updated_at).toLocaleString()})` : '新しい会話'),
         updated_at: row.updated_at ?? null,
       })) as ConvListItem[];
 
@@ -242,7 +233,9 @@ export default function SofiaChat() {
     if (!userCode || !convId) return;
     try {
       const r = await fetchWithIdToken(
-        `/api/sofia?user_code=${encodeURIComponent(userCode)}&conversation_code=${encodeURIComponent(convId)}`
+        `/api/sofia?user_code=${encodeURIComponent(userCode)}&conversation_code=${encodeURIComponent(
+          convId
+        )}`
       );
       if (!r.ok) throw new Error(`messages ${r.status}`);
       const js: SofiaGetMessages = await r.json().catch(() => ({}));
@@ -325,7 +318,6 @@ export default function SofiaChat() {
         },
       ]);
     }
-    // ← ここで何も返さない（void）
   };
 
   /* ===== その他 ===== */
@@ -340,6 +332,122 @@ export default function SofiaChat() {
     setIsMobileMenuOpen(false);
   };
 
+  /* ===== サイドバー：リネーム / 削除 (API接続) ===== */
+  const handleRename = useCallback(async (id: string, newTitle: string) => {
+    try {
+      const r = await fetchWithIdToken(`/api/conv/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: newTitle }),
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        alert(j?.error ?? 'リネームに失敗しました');
+        return;
+      }
+      setConversations((xs) => xs.map((x) => (x.id === id ? { ...x, title: newTitle } : x)));
+    } catch (e) {
+      console.error('[SofiaChat] rename error:', e);
+      alert('リネームに失敗しました');
+    }
+  }, []);
+
+  const handleDelete = useCallback(
+    async (id: string) => {
+      if (!confirm('この会話を削除します。よろしいですか？')) return;
+      try {
+        const r = await fetchWithIdToken(`/api/conv/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}));
+          alert(j?.error ?? '削除に失敗しました');
+          return;
+        }
+        setConversations((xs) => xs.filter((x) => x.id !== id));
+        if (conversationId === id) handleNewChat();
+      } catch (e) {
+        console.error('[SofiaChat] delete error:', e);
+        alert('削除に失敗しました');
+      }
+    },
+    [conversationId]
+  );
+
+  /* ===== Name/Type/Credits クリック（受け取り→トースト） ===== */
+  useEffect(() => {
+    const showToast = (msg: string) => {
+      const id = 'sof-toast';
+      document.getElementById(id)?.remove();
+      const el = document.createElement('div');
+      el.id = id;
+      el.style.cssText =
+        'position:fixed;left:50%;bottom:calc(14px + env(safe-area-inset-bottom));transform:translateX(-50%);' +
+        'background:rgba(0,0,0,.78);color:#fff;padding:8px 12px;border-radius:10px;font-size:13px;' +
+        'z-index:2147483647;box-shadow:0 6px 16px rgba(0,0,0,.18)';
+      el.textContent = msg;
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 1800);
+    };
+
+    const onName = (e: Event) => {
+      const d = (e as CustomEvent).detail ?? {};
+      showToast(`Username: ${d.name ?? d.id ?? ''}`);
+    };
+    const onType = (e: Event) => {
+      const d = (e as CustomEvent).detail ?? {};
+      showToast(`Type: ${d.userType ?? ''}`);
+    };
+    const onCredit = (e: Event) => {
+      const d = (e as CustomEvent).detail ?? {};
+      showToast(`Credits: ${d.credits ?? 0}`);
+    };
+
+    window.addEventListener('click_username', onName as EventListener);
+    window.addEventListener('click_type', onType as EventListener);
+    window.addEventListener('sofia_credit', onCredit as EventListener);
+
+    return () => {
+      window.removeEventListener('click_username', onName as EventListener);
+      window.removeEventListener('click_type', onType as EventListener);
+      window.removeEventListener('sofia_credit', onCredit as EventListener);
+    };
+  }, []);
+
+  /* ===== 実ユーザー情報の取得（get-user-info） ===== */
+  useEffect(() => {
+    if (!userCode) return;
+    (async () => {
+      try {
+        const r = await fetchWithIdToken('/api/get-user-info', { cache: 'no-store' });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok) {
+          setUiUser({
+            id: j.user_code ?? userCode,
+            name: j.click_username ?? j.user_code ?? userCode,
+            userType: String(j.click_type ?? 'free'),
+            credits: Number(j.sofia_credit ?? 0) || 0,
+            avatarUrl: j.avatar_url ?? '/avatar.png', // ← フォールバック統一
+          });
+        } else {
+          setUiUser({
+            id: userCode,
+            name: userCode,
+            userType: 'free',
+            credits: 0,
+            avatarUrl: '/avatar.png',
+          });
+        }
+      } catch {
+        setUiUser({
+          id: userCode,
+          name: userCode,
+          userType: 'free',
+          credits: 0,
+          avatarUrl: '/avatar.png',
+        });
+      }
+    })();
+  }, [userCode]);
+
   /* ========= guard ========= */
   if (authLoading) return <div style={styles.center}>読み込み中…</div>;
   if (!userCode) return <div style={styles.center}>ログインが必要です</div>;
@@ -349,41 +457,43 @@ export default function SofiaChat() {
     <div className="sofia-container sof-center">
       <div className="sof-header-fixed">
         <Header
-          title="会話履歴"
+          title="iros_AI"
           isMobile
           onShowSideBar={() => setIsMobileMenuOpen(true)}
           onCreateNewChat={handleNewChat}
         />
       </div>
 
-      <div
-        className="sof-top-spacer"
-        style={{ height: 'calc(var(--sof-header-h, 56px) + 12px)' }}
-        aria-hidden
-      />
+      <div className="sof-top-spacer" style={{ height: 'calc(var(--sof-header-h, 56px) + 12px)' }} aria-hidden />
 
       <SidebarMobile
         isOpen={isMobileMenuOpen}
         onClose={() => setIsMobileMenuOpen(false)}
         conversations={conversations}
         onSelect={handleSelectConversation}
-        onDelete={() => {}}
-        onRename={() => {}}
-        userInfo={{ id: userCode, name: userCode, userType: 'member', credits: 0 }}
+        onDelete={handleDelete}
+        onRename={handleRename}
+        userInfo={
+          uiUser ?? {
+            id: userCode,
+            name: userCode,
+            userType: 'free',
+            credits: 0,
+          }
+        }
         meta={meta}
       />
 
-      <MessageList messages={messages} />
+      {/* ✅ ユーザー表示用に currentUser を渡す */}
+      <MessageList messages={messages} currentUser={uiUser ?? undefined} />
+
       <div ref={endRef} />
 
-      {/* MetaPanel は削除済み */}
-
       <div className="sof-compose-dock" ref={composeRef}>
-  <ChatInput onSend={(text) => handleSend(text, null)} />
-</div>
+        <ChatInput onSend={(text) => handleSend(text, null)} />
+      </div>
 
       <div className="sof-underlay" aria-hidden />
-
       <div className="sof-footer-spacer" />
     </div>
   );

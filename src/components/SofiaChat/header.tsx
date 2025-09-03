@@ -15,7 +15,7 @@ export default function Header({
   return (
     <header className="sof-header">
       <button className="sof-btn" onClick={onShowSideBar}>メニュー</button>
-      <h1 className="sof-header__title">{title}</h1>
+      <h1 className="sof-header__title">iros_AI</h1>
       <button className="sof-btn primary" onClick={onCreateNewChat}>新規</button>
     </header>
   );
