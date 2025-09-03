@@ -278,3 +278,4 @@ export function buildSofiaMessages(
    Export
 ========================= */
 export const SOFIA_PERSONAS = { freeflow: IROS_FREEFLOW };
+export type SofiaPersonaKey = keyof typeof SOFIA_PERSONAS;

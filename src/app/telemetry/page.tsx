@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 
-type Search = { hours?: string; kind?: string; path?: string; limit?: string; };
+type Search = { hours?: string; kind?: string; path?: string; limit?: string };
 
 async function fetchEvents(searchParams: Search) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -31,53 +31,177 @@ async function fetchEvents(searchParams: Search) {
   return { rows: data ?? [], hours, limit, kind, path };
 }
 
-export default async function TelemetryPage({ searchParams }: { searchParams: Search }) {
-  const { rows, hours, limit, kind, path } = await fetchEvents(searchParams);
+export default async function TelemetryPage({
+  searchParams,
+}: {
+  searchParams: Promise<Search>;
+}) {
+  const sp = await searchParams;
+  const { rows, hours, limit, kind, path } = await fetchEvents(sp);
 
   return (
     <div style={{ padding: 16 }}>
-      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 12 }}>Telemetry / Events</h1>
+      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 12 }}>
+        Telemetry / Events
+      </h1>
 
-      <form action="/telemetry" method="get" style={{display:'grid',gap:8,gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',alignItems:'end',marginBottom:12}}>
-        <label style={{display:'grid',gap:4}}><span>Hours</span>
-          <input type="number" name="hours" defaultValue={hours} min={1} max={168} style={inStyle}/>
+      <form
+        action="/telemetry"
+        method="get"
+        style={{
+          display: 'grid',
+          gap: 8,
+          gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))',
+          alignItems: 'end',
+          marginBottom: 12,
+        }}
+      >
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span>Hours</span>
+          <input
+            type="number"
+            name="hours"
+            defaultValue={hours}
+            min={1}
+            max={168}
+            style={inStyle}
+          />
         </label>
-        <label style={{display:'grid',gap:4}}><span>Kind</span>
-          <input name="kind" defaultValue={kind} placeholder="api / page / ..." style={inStyle}/>
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span>Kind</span>
+          <input
+            name="kind"
+            defaultValue={kind}
+            placeholder="api / page / ..."
+            style={inStyle}
+          />
         </label>
-        <label style={{display:'grid',gap:4}}><span>Path contains</span>
-          <input name="path" defaultValue={path} placeholder="/api/get-user-info" style={inStyle}/>
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span>Path contains</span>
+          <input
+            name="path"
+            defaultValue={path}
+            placeholder="/api/get-user-info"
+            style={inStyle}
+          />
         </label>
-        <label style={{display:'grid',gap:4}}><span>Limit</span>
-          <input type="number" name="limit" defaultValue={limit} min={50} max={1000} step={50} style={inStyle}/>
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span>Limit</span>
+          <input
+            type="number"
+            name="limit"
+            defaultValue={limit}
+            min={50}
+            max={1000}
+            step={50}
+            style={inStyle}
+          />
         </label>
-        <button type="submit" style={btnPrimary}>Apply</button>
+        <button type="submit" style={btnPrimary}>
+          Apply
+        </button>
       </form>
 
       <div style={{ marginBottom: 8, color: '#666' }}>
         Showing <b>{rows.length}</b> events (last <b>{hours}</b>h)
       </div>
 
-      <div style={{overflowX:'auto', border:'1px solid #eee', borderRadius:12}}>
-        <table style={{width:'100%', borderCollapse:'separate', borderSpacing:0, fontSize:13}}>
-          <thead style={{background:'#fafafa'}}>
-            <tr>{['time','kind','status','lat(ms)','path','uid','user_code','ua','session'].map((h,i)=>(
-              <th key={i} style={{textAlign:i<=3?'center':'left', padding:'10px 12px', borderBottom:'1px solid #eee', position:'sticky', top:0, background:'#fafafa'}}>{h}</th>
-            ))}</tr>
+      <div
+        style={{
+          overflowX: 'auto',
+          border: '1px solid #eee',
+          borderRadius: 12,
+        }}
+      >
+        <table
+          style={{
+            width: '100%',
+            borderCollapse: 'separate',
+            borderSpacing: 0,
+            fontSize: 13,
+          }}
+        >
+          <thead style={{ background: '#fafafa' }}>
+            <tr>
+              {[
+                'time',
+                'kind',
+                'status',
+                'lat(ms)',
+                'path',
+                'uid',
+                'user_code',
+                'ua',
+                'session',
+              ].map((h, i) => (
+                <th
+                  key={i}
+                  style={{
+                    textAlign: i <= 3 ? 'center' : 'left',
+                    padding: '10px 12px',
+                    borderBottom: '1px solid #eee',
+                    position: 'sticky',
+                    top: 0,
+                    background: '#fafafa',
+                  }}
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
           </thead>
           <tbody>
-            {rows.length===0 && <tr><td colSpan={9} style={{padding:24,textAlign:'center',color:'#888'}}>No events yet.</td></tr>}
-            {rows.map((r:any)=>(
+            {rows.length === 0 && (
+              <tr>
+                <td
+                  colSpan={9}
+                  style={{
+                    padding: 24,
+                    textAlign: 'center',
+                    color: '#888',
+                  }}
+                >
+                  No events yet.
+                </td>
+              </tr>
+            )}
+            {rows.map((r: any) => (
               <tr key={r.id}>
                 <td style={td}>{new Date(r.created_at).toLocaleString()}</td>
                 <td style={td}>{r.kind}</td>
-                <td style={{...td,textAlign:'center'}}>{r.status ?? ''}</td>
-                <td style={{...td,textAlign:'center'}}>{r.latency_ms ?? ''}</td>
-                <td style={{...td,maxWidth:420,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{r.path ?? ''}</td>
+                <td style={{ ...td, textAlign: 'center' }}>
+                  {r.status ?? ''}
+                </td>
+                <td style={{ ...td, textAlign: 'center' }}>
+                  {r.latency_ms ?? ''}
+                </td>
+                <td
+                  style={{
+                    ...td,
+                    maxWidth: 420,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {r.path ?? ''}
+                </td>
                 <td style={td}>{r.telemetry_session?.uid ?? ''}</td>
                 <td style={td}>{r.telemetry_session?.user_code ?? ''}</td>
-                <td style={{...td,maxWidth:460,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{r.telemetry_session?.ua ?? ''}</td>
-                <td style={{...td,fontFamily:'monospace'}}>{r.session_id}</td>
+                <td
+                  style={{
+                    ...td,
+                    maxWidth: 460,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {r.telemetry_session?.ua ?? ''}
+                </td>
+                <td style={{ ...td, fontFamily: 'monospace' }}>
+                  {r.session_id}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -86,6 +210,22 @@ export default async function TelemetryPage({ searchParams }: { searchParams: Se
     </div>
   );
 }
-const inStyle: React.CSSProperties = { padding:8, borderRadius:8, border:'1px solid #ccc' };
-const btnPrimary: React.CSSProperties = { padding:'10px 14px', borderRadius:10, border:'1px solid #999', background:'#111', color:'#fff', fontWeight:600 };
-const td: React.CSSProperties = { padding:'8px 12px', borderBottom:'1px solid #f0f0f0', verticalAlign:'top' };
+
+const inStyle: React.CSSProperties = {
+  padding: 8,
+  borderRadius: 8,
+  border: '1px solid #ccc',
+};
+const btnPrimary: React.CSSProperties = {
+  padding: '10px 14px',
+  borderRadius: 10,
+  border: '1px solid #999',
+  background: '#111',
+  color: '#fff',
+  fontWeight: 600,
+};
+const td: React.CSSProperties = {
+  padding: '8px 12px',
+  borderBottom: '1px solid #f0f0f0',
+  verticalAlign: 'top',
+};
