@@ -1,74 +1,91 @@
-let _sessionId: string | null = null;
+// src/lib/telemetry.ts
+// 収集API: /api/telemetry/collect へ送るだけの最小実装
 
-export function ensureSessionId(): string {
-  if (_sessionId) return _sessionId;
-  _sessionId = sessionStorage.getItem('telemetry_session_id') || crypto.randomUUID();
-  sessionStorage.setItem('telemetry_session_id', _sessionId);
-  return _sessionId;
-}
-
-type Ev = {
-  kind: string;
-  path?: string;
-  status?: number;
-  latency_ms?: number;
-  note?: string;
-  meta?: Record<string, any>;
-  created_at?: string;
-};
-
-export function sendTelemetry(events: Ev[] | Ev, opts?: {
-  uid?: string|null;
-  user_code?: string|null;
-  app_ver?: string|null;
-  useBeacon?: boolean;    // 既定 true
-}) {
-  try {
-    const session_id = ensureSessionId();
-    const payload = {
-      session_id,
-      uid: opts?.uid ?? null,
-      user_code: opts?.user_code ?? null,
-      ua: navigator.userAgent,
-      app_ver: opts?.app_ver ?? null,
-      events: Array.isArray(events) ? events : [events],
-    };
-    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
-    const url = '/api/trace';
-
-    // 離脱時も送れるよう sendBeacon 優先
-    if (opts?.useBeacon !== false && 'sendBeacon' in navigator) {
-      navigator.sendBeacon(url, blob);
-    } else {
-      fetch(url, { method: 'POST', body: blob, keepalive: true });
-    }
-  } catch {
-    /* no-op */
-  }
-}
-
-// 心拍（ハートビート）
-let hbTimer: any = null;
-export function startHeartbeat(intervalMs = 30000, baseMeta?: Record<string, any>) {
-  stopHeartbeat();
-  const tick = () => {
-    sendTelemetry({ kind: 'heartbeat', note: 'alive', meta: baseMeta });
-    hbTimer = setTimeout(tick, intervalMs);
+export type TLog = {
+    kind?: 'api' | 'page' | 'auth' | 'online';
+    path?: string;
+    status?: number | null;
+    latency_ms?: number | null;
+    note?: string;
+    uid?: string | null;
+    user_code?: string | null;
   };
-  tick();
-}
-export function stopHeartbeat() { if (hbTimer) clearTimeout(hbTimer); hbTimer = null; }
-
-// オンライン/オフライン
-export function wireOnlineOffline() {
-  const on = () => sendTelemetry({ kind: 'online' });
-  const off = () => sendTelemetry({ kind: 'offline' });
-  window.addEventListener('online', on);
-  window.addEventListener('offline', off);
-  return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
-}
-
-// ページ表示
-export function tracePage(path: string) {
-  sendTelemetry({ kind: 'page', path });
-}
+  
+  export function tlog(p: TLog) {
+    try {
+      const payload = JSON.stringify(p || {});
+      if (navigator.sendBeacon) {
+        const blob = new Blob([payload], { type: 'application/json' });
+        navigator.sendBeacon('/api/telemetry/collect', blob);
+      } else {
+        fetch('/api/telemetry/collect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload,
+          keepalive: true,
+        }).catch(() => {});
+      }
+    } catch {}
+  }
+  
+  /** セッションIDをローカルに確保（存在しなければ生成） */
+  export function ensureSessionId(key = 'telemetry_session_id'): string {
+    let id = '';
+    try {
+      id = localStorage.getItem(key) || '';
+      if (!id) {
+        id = (crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`);
+        localStorage.setItem(key, id);
+        // 参考: セッション開始をイベントにも一応残す
+        tlog({ kind: 'online', path: 'session_start', note: id });
+      }
+    } catch {
+      // localStorage 不可でもビルドは通す
+      id = (crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`);
+    }
+    return id;
+  }
+  
+  /** online/offline の変化を監視して記録（解除関数を返す） */
+  export function wireOnlineOffline() {
+    const on = () => tlog({ kind: 'online', path: 'online', note: 'online' });
+    const off = () => tlog({ kind: 'online', path: 'offline', note: 'offline' });
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => {
+      window.removeEventListener('online', on);
+      window.removeEventListener('offline', off);
+    };
+  }
+  
+  /** ハートビート（一定間隔で生存記録） */
+  declare global {
+    interface Window { __mu_hb?: number }
+  }
+  export function startHeartbeat(ms = 60_000) {
+    stopHeartbeat();
+    window.__mu_hb = window.setInterval(() => {
+      tlog({
+        kind: 'online',
+        path: 'heartbeat',
+        note: navigator.onLine ? 'online' : 'offline',
+      });
+    }, Math.max(5_000, ms)); // 最小5秒
+  }
+  export function stopHeartbeat() {
+    if (window.__mu_hb) {
+      clearInterval(window.__mu_hb);
+      window.__mu_hb = undefined;
+    }
+  }
+  
+  /** ページ表示の痕跡を軽く残す（計測が無くてもOK） */
+  export function tracePage(path?: string, note?: string) {
+    try {
+      const p = path || location.pathname;
+      tlog({ kind: 'page', path: p, note });
+    } catch {
+      // 何もしない
+    }
+  }
+  

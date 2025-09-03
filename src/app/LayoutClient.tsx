@@ -9,7 +9,14 @@ import { useAuth } from '@/context/AuthContext'
 import { registerPush } from '@/utils/push'
 import { createPortal } from 'react-dom'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ensureSessionId, startHeartbeat, stopHeartbeat, wireOnlineOffline, tracePage } from '@/lib/telemetry'  // ★ 追加
+import {
+  ensureSessionId,
+  startHeartbeat,
+  stopHeartbeat,
+  wireOnlineOffline,
+  tracePage,
+  tlog, // ★ 追加
+} from '@/lib/telemetry'
 
 /* =========================
    Portal 先のフッター高さを“確実に”取得して
@@ -167,7 +174,17 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
   useEffect(() => {
     ensureSessionId()
     const unbind = wireOnlineOffline()
-    startHeartbeat(30000, { first_path: pathname })
+
+    // ← 初回に一度だけ、どのパスから始まったかを明示ログ
+    tlog({
+      kind: 'online',
+      path: 'heartbeat_start',
+      note: JSON.stringify({ first_path: pathname }),
+    })
+
+    // HB は 1引数だけでOK（第2引数は使わない）
+    startHeartbeat(30000)
+
     return () => {
       unbind?.()
       stopHeartbeat()

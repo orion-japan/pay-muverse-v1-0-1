@@ -23,91 +23,80 @@ export default function Header({ onLoginClick }: Props) {
   }
 
   return (
-    // 外枠：全幅・固定配置（背景はここで付与し、透けないように不透明）
+    // 外枠：全幅・中央寄せ（背景は付けない）
     <header
       style={{
-        position: 'sticky',
-        top: 0,
-        zIndex: 1000,
         width: '100%',
         display: 'flex',
         justifyContent: 'center',
-        boxShadow: '0 2px 6px rgba(0,0,0,0.08)',
-        background: 'linear-gradient(90deg, #b089f9 0%, #9a7ff9 100%)', // ← 不透明
+        boxShadow: '0 2px 6px rgba(0,0,0,0.08)', // ほんの少し軽く
       }}
     >
-      {/* 内枠：左右に目一杯（両端に配置） */}
+      {/* 内枠：中央430pxに背景グラデを適用（コンパクト版） */}
       <div
         style={{
           width: '100%',
-          maxWidth: '100%',           // ← 430px 制限を解除して左右いっぱい
+          maxWidth: '430px',
           margin: '0 auto',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between', // ← 両端
-          padding: '6px 10px',
-          height: '44px',
+          justifyContent: 'space-between',
+          padding: '6px 10px',           // ← 10px 16px → 6px 10px
+          height: '44px',                // ← 60px → 44px
           fontWeight: 'bold',
-          color: '#fff',
-          // 背景は外枠に移したのでここでは付けない／透けない
-          borderRadius: 0,
+          color: 'white',
+          background: 'linear-gradient(90deg, #b089f9, #9a7ff9)',
+          borderRadius: '0 0 10px 10px', // ほんの少しだけ丸み（お好みで）
         }}
       >
-        {/* 左端 */}
         <Link
           href="/"
           onClick={prevent}
           style={{
             textDecoration: 'none',
-            color: '#6b5dff',                // 白背景に映える色
-            fontSize: '14px',
+            color: 'white',
+            fontSize: '14px',            // ← 18px → 14px
             fontWeight: 800,
-            padding: '6px 10px',
-            borderRadius: 8,
-            background: '#ffffff',           // ← 不透明（透け防止）
+            padding: '4px 8px',
+            borderRadius: '8px',
+            background: 'rgba(255,255,255,0.18)',
             lineHeight: 1,
             display: 'inline-flex',
             alignItems: 'center',
-            gap: 6,
-            boxShadow: '0 1px 0 rgba(0,0,0,.04)',
+            gap: '6px',
           }}
         >
           <span aria-hidden>🏠</span>
           <span>Home</span>
         </Link>
 
-        {/* 中央タイトル */}
         <div
           style={{
-            fontSize: '16px',
+            fontSize: '16px',            // ← 22px → 16px
             fontWeight: 900,
             textAlign: 'center',
             letterSpacing: '.3px',
             lineHeight: 1,
-            color: '#fff',
-            userSelect: 'none',
           }}
         >
           Muverse
         </div>
 
-        {/* 右端 */}
         <div>
           {isLoggedIn ? (
             <button
               onClick={handleLogout}
               style={{
-                height: 28,
-                padding: '0 12px',
-                background: '#ffffff',        // ← 不透明（透け防止）
+                height: '28px',          // ← 34px 相当 → 28px
+                padding: '0 10px',
+                background: 'rgba(255,255,255,0.22)',
                 border: 'none',
-                borderRadius: 8,
-                color: '#6b5dff',
-                fontSize: 12,
+                borderRadius: '8px',     // ← 6px → 8px（視覚的に小さく見える）
+                color: 'white',
+                fontSize: '12px',
                 fontWeight: 800,
                 cursor: 'pointer',
                 lineHeight: 1,
-                boxShadow: '0 1px 0 rgba(0,0,0,.04)',
               }}
             >
               ログアウト
@@ -116,17 +105,16 @@ export default function Header({ onLoginClick }: Props) {
             <button
               onClick={onLoginClick}
               style={{
-                height: 28,
-                padding: '0 12px',
-                background: '#ffffff',        // ← 不透明（透け防止）
+                height: '28px',
+                padding: '0 10px',
+                background: 'rgba(255,255,255,0.22)',
                 border: 'none',
-                borderRadius: 8,
-                color: '#6b5dff',
-                fontSize: 12,
+                borderRadius: '8px',
+                color: 'white',
+                fontSize: '12px',
                 fontWeight: 800,
                 cursor: 'pointer',
                 lineHeight: 1,
-                boxShadow: '0 1px 0 rgba(0,0,0,.04)',
               }}
             >
               ログイン
