@@ -27,6 +27,8 @@ const supabase = createClient(SUPABASE_URL, SERVICE_ROLE, {
 ========================= */
 type UserRow = {
   user_code: string;
+  /** ★ 追加：アプリID（ref に使う） */
+  app_code?: string | null;
   click_type: string | null;
   plan_status?: string | null;
   next_payment_date?: string | null;
@@ -46,6 +48,8 @@ type UserRow = {
 
 const SELECT_FIELDS_NEW = [
   'user_code',
+  /** ★ 追加 */
+  'app_code',
   'click_type',
   'plan_status',
   'next_payment_date',
@@ -62,6 +66,8 @@ const SELECT_FIELDS_NEW = [
 
 const SELECT_FIELDS_LEGACY = [
   'user_code',
+  /** ★ 追加（古い列構成でも app_code を拾えるように） */
+  'app_code',
   'click_type',
   'plan_status',
   'next_payment_date',
@@ -150,8 +156,10 @@ function toResp(d: UserRow, history: any[] = []) {
   const plan = (d.plan_status ?? d.click_type ?? 'free') as string;
   return {
     user_code: d.user_code,
+    /** ★ 追加：フロントが ref に使います */
+    app_code: d.app_code ?? null,
     plan_status: plan,
-    click_type: d.click_type ?? plan, // ★ 常に同梱（旧UIでも確実に動く）
+    click_type: d.click_type ?? plan,
     plan_valid_until: d.next_payment_date ?? null,
     last_payment_date: d.last_payment_date ?? null,
     card_registered: d.card_registered === true,
