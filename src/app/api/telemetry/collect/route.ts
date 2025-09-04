@@ -1,36 +1,49 @@
 // src/app/api/telemetry/collect/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-export const runtime = 'edge';
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function POST(req: NextRequest) {
+import { NextResponse } from 'next/server';
+// 任意: 将来ログしたくなったら↓を使う
+// import { supabaseAdmin } from '@/lib/supabaseAdmin';
+// import { adminAuth } from '@/lib/firebase-admin';
+
+const TELEMETRY_ENABLED = process.env.TELEMETRY_ENABLED === '1'; // 環境変数でON/OFF
+
+export async function POST(req: Request) {
   try {
-    const body = await req.json().catch(() => ({} as any));
-    const {
-      kind = 'page',
-      path = '',
-      status = null,
-      latency_ms = null,
-      note = '',
-      uid = null,
-      user_code = null,
-    } = body || {};
+    // すぐ静かにしたい場合は完全ノーオペ
+    if (!TELEMETRY_ENABLED) {
+      return new NextResponse(null, { status: 204 }); // No Content
+    }
 
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY!; // ← Server-only
-    const sb = createClient(url, key, { auth: { persistSession: false } });
-
+    // --- ここから先は将来ONにした時用の安全実装例 ---
     const ua = req.headers.get('user-agent') || '';
+    const body = await req.json().catch(() => ({}));
+    const { name, path, meta } = body || {};
 
-    const { error } = await sb.from('telemetry_event').insert([{
-      kind, path, status, latency_ms, note, uid, user_code, ua,
-    }]);
+    // 認証が必要ならここで検証（任意）
+    // const authHeader = req.headers.get('authorization');
+    // const idToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    // const decoded = idToken ? await adminAuth.verifyIdToken(idToken).catch(() => null) : null;
+    // const uid = decoded?.uid ?? null;
 
-    if (error) return NextResponse.json({ ok:false, error:error.message }, { status:500 });
-    return NextResponse.json({ ok:true });
-  } catch (e:any) {
-    return NextResponse.json({ ok:false, error: e?.message || 'error' }, { status:500 });
+    // DBに書く場合の雛形（存在しなくても例外で落ちないように）
+    // try {
+    //   await supabaseAdmin.from('telemetry_event').insert({
+    //     name: name ?? null,
+    //     path: path ?? null,
+    //     ua,
+    //     // uid,
+    //     meta: meta ?? null,
+    //   });
+    // } catch (e) {
+    //   // ログに残すだけで成功扱いにする
+    //   console.warn('[telemetry] insert skipped:', e);
+    // }
+
+    return new NextResponse(null, { status: 204 });
+  } catch {
+    // 何があってもエラーを表に出さない
+    return new NextResponse(null, { status: 204 });
   }
 }

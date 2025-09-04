@@ -1,5 +1,11 @@
 // src/lib/firebase-admin.ts
-import { initializeApp, getApps, cert, applicationDefault, type ServiceAccount } from 'firebase-admin/app';
+import {
+  initializeApp,
+  getApps,
+  cert,
+  applicationDefault,
+  type ServiceAccount,
+} from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 
 /** .env に入れた秘密鍵の改行(\n)復元＋両端の余計なダブルクォート除去 */
@@ -11,7 +17,9 @@ function cleanupPrivateKey(v: string) {
 function resolveCredentials(): ServiceAccount | null {
   // projectId は公開可なので NEXT_PUBLIC/FIREBASE のどちらでも受ける
   const projectId =
-    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || '';
+    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
+    process.env.FIREBASE_PROJECT_ID ||
+    '';
 
   // ① 推奨: 個別3変数（.env で直接指定）
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL || '';
@@ -54,22 +62,22 @@ function resolveCredentials(): ServiceAccount | null {
     }
   }
 
-  // 何もなければ null（applicationDefault にフォールバックさせる）
+  // 何もなければ null（applicationDefault にフォールバック）
   return null;
 }
 
-// ---- 初期化（1回だけ）----
+/* ---- 初期化（1回だけ） ---- */
 if (!getApps().length) {
   const cred = resolveCredentials();
   if (cred) {
     initializeApp({ credential: cert(cred) });
     console.log('[firebase-admin] initialized with ServiceAccount');
   } else {
-    // gcloud auth application-default login を使っている場合はこちらで通る
+    // gcloud auth application-default login などの ADC を利用
     initializeApp({ credential: applicationDefault() });
     console.log('[firebase-admin] initialized with applicationDefault()');
   }
 }
 
-// 以降はどこから import しても同じインスタンス
+/** 以降はどこから import しても同じインスタンス */
 export const adminAuth = getAuth();
