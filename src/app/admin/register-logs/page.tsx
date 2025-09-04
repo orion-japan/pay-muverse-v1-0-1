@@ -1,5 +1,8 @@
-// src/components/AdminGate.tsx
-'use client';
-export default function AdminGate({ children }: { children: React.ReactNode }) {
-  return <>{children}</>; // ← 何もチェックしない（暫定）
+export default function RegisterLogsPage() {
+  return (
+    <main style={{ padding: 16 }}>
+      <h1>Register Logs</h1>
+      {/* TODO: ログ一覧をここに描画 */}
+    </main>
+  );
 }
