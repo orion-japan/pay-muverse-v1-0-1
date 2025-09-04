@@ -7,8 +7,8 @@ import Link from 'next/link';
 import { getAuth, onAuthStateChanged, User } from 'firebase/auth';
 import QRCode from 'qrcode';
 
-// ✅ コンポーネントと型を同じバレルから import して“型の二重化”を防ぐ
-import { UserProfile, type Profile } from '@/components/UserProfile'
+// ✅ コンポーネントと型を同じバレルから import（型の二重化を防止）
+import { UserProfile, type Profile } from '@/components/UserProfile';
 import './mypage.css';
 
 export default function MyPage() {
@@ -22,7 +22,7 @@ export default function MyPage() {
   const [inviteMsg, setInviteMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  // ▼ 追加：個別コピー表示用 & QR 用
+  // ▼ 個別コピー表示用 & QR 用
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const qrCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -107,7 +107,6 @@ export default function MyPage() {
           activity_area: toDisplay(p?.activity_area),
           languages: toDisplay(p?.languages),
           avatar_url,
-          // ✅ types.ts で optional にしているので型エラーにならない
           REcode: p?.REcode ?? '',
         };
 
@@ -119,7 +118,7 @@ export default function MyPage() {
           const r = await fetch('/api/my/invite-info', {
             method: 'GET',
             headers: {
-              Authorization: `Bearer ${token}`, // サーバ側で解決する実装の場合
+              Authorization: `Bearer ${token}`,
             },
           });
           const j = await r.json();
@@ -162,7 +161,7 @@ export default function MyPage() {
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
-  // ▼ リンクコピー（ショートハンド）
+  // ▼ リンクコピー
   const copyInviteLink = async () => {
     if (!inviteLink) return;
     await copyText(inviteLink);
@@ -206,10 +205,11 @@ export default function MyPage() {
     );
   }
 
-  // ▼ inviteLink から rcode/mcode/group を抽出（個別コピー用）
-  const rcode = inviteLink ? new URL(inviteLink).searchParams.get('rcode') || '' : '';
-  const mcode = inviteLink ? new URL(inviteLink).searchParams.get('mcode') || '' : '';
-  const group = inviteLink ? new URL(inviteLink).searchParams.get('group') || '' : '';
+  // ▼ inviteLink から ref/rcode/mcode/eve を抽出（個別コピー用）
+  const refParam  = inviteLink ? new URL(inviteLink).searchParams.get('ref')   || '' : '';
+  const rcode     = inviteLink ? new URL(inviteLink).searchParams.get('rcode') || '' : '';
+  const mcode     = inviteLink ? new URL(inviteLink).searchParams.get('mcode') || '' : '';
+  const eve       = inviteLink ? new URL(inviteLink).searchParams.get('eve')   || '' : '';
 
   return (
     <div className="mypage-wrapper">
@@ -225,7 +225,7 @@ export default function MyPage() {
         {/* プロフィール本体（自分ページなので isMyPage を渡す） */}
         <UserProfile profile={profileState} isMyPage />
 
-        {/* ▼ 👇 招待ブロックを「1段上げ」= 編集/設定ボタンの“上”に配置 */}
+        {/* ▼ 招待ブロック（編集/設定ボタンの上） */}
         <section className="profile-card" style={{ marginTop: 12 }}>
           <h2 className="section-title" style={{ margin: '0 0 8px' }}>招待</h2>
 
@@ -266,17 +266,17 @@ export default function MyPage() {
                   )}
                 </div>
                 <p style={{ margin: 0, fontSize: 11, color: '#6b7280' }}>
-                  ※ LINE公式LIFFの「トーク選択」UIが必要なら後で切替可能です（LIFF Target Picker）。
+                  ※ 必要に応じて LIFF の「トーク選択」UIへ切替可能です。
                 </p>
               </div>
 
               {/* 2) コード群（押しやすいチップ + 個別コピー） */}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 {[
-                  { label: 'ref', value: profileState.user_code },
-                  { label: 'rcode', value: rcode },
-                  { label: 'mcode', value: mcode },
-                  { label: 'group', value: group },
+                  { label: 'ref',   value: refParam      }, // ← 修正：user_code ではなく URL の ref
+                  { label: 'rcode', value: rcode         },
+                  { label: 'mcode', value: mcode         },
+                  { label: 'eve',   value: eve           }, // あれば表示
                 ]
                   .filter((x) => x.value)
                   .map((x) => (
