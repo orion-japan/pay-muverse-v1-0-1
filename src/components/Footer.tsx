@@ -266,6 +266,24 @@ useEffect(() => {
 
   if (!mounted) return null
 
+  const Bg = (
+    <div
+      aria-hidden
+      style={{
+        position: 'fixed',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        /* navの高さ + 外側の余白(12px*2=24px) + セーフエリア */
+        height: `calc(var(--footer-h, ${FALLBACK_H}px) + 24px + env(safe-area-inset-bottom))`,
+        background: '#fff',                  // ← 完全な白板
+        boxShadow: '0 -1px 0 #e5e7eb',       // 上端の薄い境界線（任意）
+        zIndex: 999,                         // コンテンツより上、Nav(1000)より下
+        pointerEvents: 'none',               // 背面板はクリックを透過
+      }}
+    />
+  );
+
   const Nav = (
     <nav
       ref={navRef}
@@ -282,12 +300,12 @@ useEffect(() => {
         gap: 8,
         padding: '6px 8px',
         borderRadius: 12,
-        background: 'rgba(255,255,255,0.82)',
-        backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
+        background: '#fff',                  // ← 不透明の白
+        /* ぼかしはオフにして完全不透過 */
         boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
         zIndex: 1000,
         paddingBottom: 'max(6px, env(safe-area-inset-bottom))',
+        borderTop: '1px solid #e5e7eb',      // 視認性向上（任意）
       }}
     >
       {items.map((it) => {
@@ -363,7 +381,8 @@ useEffect(() => {
         )
       })}
     </nav>
-  )
+  );
+
 
   return host ? createPortal(Nav, host) : Nav
 }

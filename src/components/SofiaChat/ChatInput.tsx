@@ -5,28 +5,14 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import './ChatInput.css';
 
 type Props = {
-  /** 既存互換: テキストのみ送信 */
   onSend: (text: string) => Promise<void> | void;
-
-  /** 新規: テキスト + ファイル送信（これを渡すとこちらが優先） */
   onSendWithFiles?: (text: string, files?: File[] | null) => Promise<void> | void;
-
   disabled?: boolean;
   placeholder?: string;
-
-  /** 複数チャットがある場合にドラフト保存キーを分けたいとき */
   draftKey?: string;
-
-  /** <input type="file" accept="..."> の accept（既定: 画像/動画/音声/一般ファイル） */
   accept?: string;
-
-  /** 同時添付の最大枚数（既定: 5） */
   maxFiles?: number;
-
-  /** 添付の総容量上限（MB, 既定: 25MB） */
   maxTotalSizeMB?: number;
-
-  /** 親がAI返答後に変更して渡すと、入力欄へフォーカスが戻る（任意・追加） */
   focusToken?: unknown;
 };
 
@@ -45,75 +31,57 @@ export default function ChatInput({
 }: Props) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
-  const [isComposing, setIsComposing] = useState(false); // IME中フラグ
+  const [isComposing, setIsComposing] = useState(false);
   const [dragOver, setDragOver] = useState(false);
 
   const [files, setFiles] = useState<File[]>([]);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
-  // ---- draft 復元（文字が消える対策）----
   useEffect(() => {
     try {
       const saved = typeof window !== 'undefined' ? window.localStorage.getItem(draftKey) : '';
       if (saved) setText(saved);
-    } catch {
-      /* no-op */
-    }
+    } catch {}
   }, [draftKey]);
 
-  // 保存（テキストのみ保存。添付ファイルは保存しない）
   useEffect(() => {
     try {
       if (typeof window !== 'undefined') {
         window.localStorage.setItem(draftKey, text);
       }
-    } catch {
-      /* no-op */
-    }
+    } catch {}
   }, [text, draftKey]);
 
-  // 自動リサイズ（最小4行）
   const autoSize = useCallback(() => {
     const ta = taRef.current;
     if (!ta) return;
     ta.style.height = 'auto';
     ta.style.height = Math.min(ta.scrollHeight, window.innerHeight * 0.4) + 'px';
   }, []);
-  useEffect(() => {
-    autoSize();
-  }, [text, autoSize]);
+  useEffect(() => { autoSize(); }, [text, autoSize]);
 
-  // ファイル合計サイズ（MB）
   const totalSizeMB = files.reduce((sum, f) => sum + f.size, 0) / (1024 * 1024);
   const overMaxFiles = files.length > maxFiles;
   const overMaxSize = totalSizeMB > maxTotalSizeMB;
 
-  // 添付を追加
-  const appendFiles = useCallback(
-    (add: FileList | File[] | null | undefined) => {
-      if (!add) return;
-      const next = [...files];
-      for (const f of Array.from(add)) {
-        next.push(f);
-        if (next.length >= maxFiles) break;
-      }
-      setFiles(next);
-    },
-    [files, maxFiles]
-  );
+  const appendFiles = useCallback((add: FileList | File[] | null | undefined) => {
+    if (!add) return;
+    const next = [...files];
+    for (const f of Array.from(add)) {
+      next.push(f);
+      if (next.length >= maxFiles) break;
+    }
+    setFiles(next);
+  }, [files, maxFiles]);
 
-  // ドラッグ&ドロップ
-  const onDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setDragOver(false);
-      if (disabled || sending) return;
-      appendFiles(e.dataTransfer?.files);
-    },
-    [appendFiles, disabled, sending]
-  );
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    if (disabled || sending) return;
+    appendFiles(e.dataTransfer?.files);
+  }, [appendFiles, disabled, sending]);
 
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -125,7 +93,6 @@ export default function ChatInput({
     setDragOver(false);
   }, []);
 
-  // 画像のペースト（クリップボード）
   const onPaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData?.items;
     if (!items) return;
@@ -137,89 +104,57 @@ export default function ChatInput({
       }
     }
     if (pasted.length) {
-      e.preventDefault(); // テキスト化の挿入を防ぐ（必要に応じて外してください）
+      e.preventDefault();
       appendFiles(pasted);
     }
   }, [appendFiles]);
 
-  // Enter送信 / Shift+Enter改行 / IME中は送信しない
-  const onKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
-        e.preventDefault();
-        handleSend();
-      }
-    },
-    [isComposing] // eslint-disable-line
-  );
+  const onKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
+      e.preventDefault();
+      handleSend();
+    }
+  }, [isComposing]); // eslint-disable-line
 
-  // 送信
   const handleSend = useCallback(async () => {
     const value = text.trim();
     const hasFiles = files.length > 0;
-
     if ((disabled || sending) || (!value && !hasFiles)) return;
     if (overMaxFiles || overMaxSize) return;
 
-    // ---- ① 送信と同時にUIを即時クリア（見た目で残さない）----
     setText('');
     setFiles([]);
-    try {
-      if (typeof window !== 'undefined') {
-        window.localStorage.removeItem(draftKey);
-      }
-    } catch {
-      /* no-op */
-    }
-    taRef.current?.focus(); // 送信直後も入力を続けられる
+    try { if (typeof window !== 'undefined') window.localStorage.removeItem(draftKey); } catch {}
+    taRef.current?.focus();
 
     setSending(true);
     try {
       if (onSendWithFiles) {
         await onSendWithFiles(value, hasFiles ? files : null);
       } else {
-        // 既存互換: onSend(text) のみ
         await onSend(value);
       }
     } finally {
       setSending(false);
     }
-  }, [
-    text,
-    files,
-    disabled,
-    sending,
-    overMaxFiles,
-    overMaxSize,
-    onSendWithFiles,
-    onSend,
-    draftKey,
-  ]);
+  }, [text, files, disabled, sending, overMaxFiles, overMaxSize, onSendWithFiles, onSend, draftKey]);
 
-  // 初回フォーカス
-  useEffect(() => {
-    taRef.current?.focus();
-  }, []);
+  useEffect(() => { taRef.current?.focus(); }, []);
+  useEffect(() => { if (focusToken !== undefined) taRef.current?.focus(); }, [focusToken]);
 
-  // ---- ② 親からのAI返答完了合図でフォーカス復帰（focusToken が変わったら）----
-  useEffect(() => {
-    if (focusToken !== undefined) {
-      taRef.current?.focus();
-    }
-  }, [focusToken]);
-
-  const removeFileAt = (idx: number) => {
-    setFiles((prev) => prev.filter((_, i) => i !== idx));
-  };
-
+  const removeFileAt = (idx: number) => setFiles((prev) => prev.filter((_, i) => i !== idx));
   const openPicker = () => fileRef.current?.click();
 
+  // ir診断：入力欄にセットするだけ（送信しない）
+  const insertIRDiagnosis = useCallback(() => {
+    setText('ir診断');
+    requestAnimationFrame(() => taRef.current?.focus());
+  }, []);
+
   const canSend =
-    !disabled &&
-    !sending &&
+    !disabled && !sending &&
     (!!text.trim() || files.length > 0) &&
-    !overMaxFiles &&
-    !overMaxSize;
+    !overMaxFiles && !overMaxSize;
 
   return (
     <div
@@ -247,7 +182,6 @@ export default function ChatInput({
           aria-label="メッセージ本文"
         />
 
-        {/* 添付ファイル表示（簡易チップ） */}
         {files.length > 0 && (
           <div className="sof-fileChips" aria-live="polite">
             {files.map((f, i) => (
@@ -267,7 +201,6 @@ export default function ChatInput({
           </div>
         )}
 
-        {/* 制限超過メッセージ */}
         {(overMaxFiles || overMaxSize) && (
           <div className="sof-attachWarn" role="alert">
             {overMaxFiles && <div>添付は最大 {maxFiles} 個までです。</div>}
@@ -275,7 +208,7 @@ export default function ChatInput({
           </div>
         )}
 
-        {/* 添付ボタン + 送信ボタン */}
+        {/* アクション（縦並び、添付ボタンは非表示維持） */}
         <div className="sof-actions">
           <input
             ref={fileRef}
@@ -292,21 +225,34 @@ export default function ChatInput({
             disabled={disabled || sending || files.length >= maxFiles}
             aria-label="ファイルを添付"
             title="ファイルを添付"
+            style={{ display: 'none' }}
           >
             📎
           </button>
 
           <button
-            data-sof-send
-            className="sof-sendBtn"
-            onClick={handleSend}
-            disabled={!canSend}
-            aria-label="送信"
-            title="送信（Enter）"
-          >
-            <span className="sof-sendIcon" aria-hidden>✈</span>
-          </button>
-        </div>
+    type="button"
+    className="sof-actionBtn sof-actionBtn--ir"   // ← 追加
+    onClick={insertIRDiagnosis}
+    disabled={disabled || sending}
+    aria-label="ir診断を入力欄に挿入"
+    title="ir診断を入力に挿入"
+  >
+    ir診断
+  </button>
+
+  {/* 下：送信（←クラスを追加して色付け） */}
+  <button
+    data-sof-send
+    className="sof-actionBtn sof-actionBtn--send"  // ← 追加
+    onClick={handleSend}
+    disabled={!canSend}
+    aria-label="送信"
+    title="送信（Enter）"
+  >
+    送信
+  </button>
+</div>
       </div>
     </div>
   );

@@ -871,3 +871,68 @@ details[open] .history-acc__chev {
 
 /* Footer が計測して入れる CSS 変数を確実に反映 */
 body { padding-bottom: var(--footer-safe-pad); }
+
+/* ===== アクセントの共通色（デフォルト：青→紫） ===== */
+:root,
+.sof-container {
+  --accent-start: #5cc0ff;   /* 左色 */
+  --accent-end:   #b347ff;   /* 右色 */
+  --accent-height: 3px;      /* ラインの太さ */
+  --accent-inset:  10px;     /* 左右の内側オフセット（吹き出しの丸みに合わせて調整） */
+  --accent-glow:  0 0 10px rgba(131, 92, 255, .35); /* うっすら発光 */
+}
+
+/* 例：Mu テーマ（色替え） */
+.sof-container[data-chat-theme="mu"] {
+  --accent-start: #06b6d4;   /* シアン */
+  --accent-end:   #3b82f6;   /* ブルー */
+  --accent-glow:  0 0 10px rgba(59,130,246,.30);
+}
+
+/* 他テーマの例 */
+.sof-container[data-chat-theme="alt"] {
+  --accent-start: #ff7a18;   /* オレンジ */
+  --accent-end:   #af002d;   /* ピンク寄り赤 */
+  --accent-glow:  0 0 10px rgba(255,122,24,.30);
+}
+
+/* ===== 吹き出し上辺の“未来ライン” ===== */
+.sof-bubble {
+  position: relative;          /* ::before を載せる土台 */
+}
+
+/* 両方の吹き出しに出す */
+.sof-bubble::before {
+  content: "";
+  position: absolute;
+  top: -1px;                   /* 0〜-1pxで微調整。被るなら 0 に */
+  left: var(--accent-inset);
+  right: var(--accent-inset);
+  height: var(--accent-height);
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-start), var(--accent-end));
+  box-shadow: var(--accent-glow);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* アシスタントだけに付けたい場合は ↑ を削除して、下を有効化して使ってください。
+.sof-bubble.is-assistant::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: var(--accent-inset);
+  right: var(--accent-inset);
+  height: var(--accent-height);
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-start), var(--accent-end));
+  box-shadow: var(--accent-glow);
+  pointer-events: none;
+  z-index: 1;
+}
+*/
+
+/* ユーザー吹き出しの上ラインだけ非表示にする */
+.sof-bubble.is-user::before {
+  content: none !important;
+}
