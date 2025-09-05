@@ -1,0 +1,121 @@
+/* src/app/admin/credits/page.css */
+.credit-root {
+    padding: 20px;
+    max-width: 980px;
+    margin: 0 auto;
+  }
+  
+  .credit-title {
+    font-size: 22px;
+    font-weight: 700;
+    margin: 6px 0 16px;
+  }
+  
+  .credit-card {
+    border: 1px solid #e4e7ee;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(0,0,0,.03);
+  }
+  
+  .row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  
+  .row.two .col { flex: 1; min-width: 240px; }
+  
+  .label {
+    min-width: 140px;
+    color: #394260;
+    font-size: 13px;
+  }
+  
+  .input {
+    flex: 1;
+    min-width: 260px;
+    border: 1px solid #cfd6e6;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 14px;
+    outline: none;
+  }
+  .input:focus { border-color: #7a9cff; box-shadow: 0 0 0 3px rgba(122,156,255,.15); }
+  
+  .actions { justify-content: space-between; }
+  
+  .btn {
+    padding: 10px 16px;
+    border-radius: 10px;
+    border: 1px solid #0b57d0;
+    background: #0b57d0;
+    color: #fff;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .btn:disabled { opacity: .6; cursor: not-allowed; }
+  .btn.ghost {
+    background: #fff;
+    color: #0b57d0;
+  }
+  
+  .balance { font-size: 14px; color: #26324a; }
+  
+  .message {
+    background: #f4f7ff;
+    border: 1px solid #dfe7ff;
+    color: #1b3a8a;
+    padding: 8px 10px;
+    border-radius: 8px;
+  }
+  
+  .table-wrap { overflow-x: auto; }
+  .table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .table th, .table td {
+    border-bottom: 1px solid #eef1f6;
+    padding: 10px 8px;
+    text-align: left;
+  }
+  .table thead th { font-weight: 700; color: #344054; background: #fafbff; }
+  .muted { color: #7d8699; text-align: center; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 12px; }
+  
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+  .tag.authorized { color: #7a5800; background: #fff6db; border: 1px solid #ffe7a0; }
+  .tag.captured { color: #0b5e27; background: #e7f7ec; border: 1px solid #bfe7c8; }
+  .tag.voided { color: #6b1c1c; background: #fdecec; border: 1px solid #f7bcbc; }
+  
+  .credit-root { padding: 20px; max-width: 980px; margin: 0 auto; }
+.credit-title { font-size: 22px; font-weight: 700; margin: 6px 0 16px; }
+.credit-card { border: 1px solid #e4e7ee; border-radius: 12px; padding: 16px; margin-bottom: 16px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.03); }
+.row { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+.row.two .col { flex: 1; min-width: 240px; }
+.row.gap { gap: 8px; align-items: center; }
+.row.space { justify-content: space-between; align-items: center; }
+.info { gap: 32px; }
+.label { min-width: 120px; color: #394260; font-size: 13px; }
+.input { flex: 1; min-width: 260px; border: 1px solid #cfd6e6; border-radius: 8px; padding: 10px 12px; font-size: 14px; outline: none; }
+.input:focus { border-color: #7a9cff; box-shadow: 0 0 0 3px rgba(122,156,255,.15); }
+.input.grow { flex: 1; min-width: 320px; }
+.actions { justify-content: space-between; }
+.btn { padding: 10px 16px; border-radius: 10px; border: 1px solid #0b57d0; background: #0b57d0; color: #fff; font-weight: 600; cursor: pointer; }
+.btn:disabled { opacity: .6; cursor: not-allowed; }
+.btn.ghost { background: #fff; color: #0b57d0; }
+.btn.danger { background: #b3261e; border-color: #b3261e; }
+.balance { font-size: 16px; font-weight: 700; }
+.muted { color: #7d8699; }
+.message { background: #f4f7ff; border: 1px solid #dfe7ff; color: #1b3a8a; padding: 8px 10px; border-radius: 8px; }
+.table-wrap { overflow-x: auto; }
+.table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.table th, .table td { border-bottom: 1px solid #eef1f6; padding: 10px 8px; text-align: left; }
+.table thead th { font-weight: 700; color: #344054; background: #fafbff; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 12px; }
+.small { font-size: 12px; }
+.pos { color: #0b5e27; }
+.neg { color: #8b0000; }
+.chip { border: 1px solid #cfd6e6; background: #fff; border-radius: 999px; padding: 6px 10px; font-size: 12px; cursor: pointer; }

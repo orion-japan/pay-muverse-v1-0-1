@@ -4,6 +4,7 @@ import './globals.css'
 import '../styles/layout.css'
 import Providers from './providers'
 import LayoutClient from './LayoutClient'   // ← 実ファイル名に合わせて
+import TelemetryBoot from '@/components/TelemetryBoot' // ★ 追加：クライアント常駐ロガー
 
 export const metadata = {
   manifest: '/manifest.json',
@@ -26,6 +27,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Providers>
           {/* LayoutClient 内で main/ footer を構成 */}
           <LayoutClient>{children}</LayoutClient>
+
+          {/* ★ 追加：全ページでページ遷移/online/offline/Auth落ちを記録（UIには影響なし） */}
+          <TelemetryBoot />
         </Providers>
       </body>
     </html>

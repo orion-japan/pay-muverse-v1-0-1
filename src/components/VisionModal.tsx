@@ -1,3 +1,4 @@
+// src/components/VisionModal.tsx
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
@@ -8,14 +9,14 @@ import VisionResultCard from './VisionResultCard';
 import './VisionModal.css';
 
 import type { Vision, Phase, Stage, Status } from '@/types/vision';
-import { resizeImage } from '@/utils/imageResize'; // ← 既存ユーティリティは無改変で使う
-import { useAuth } from '@/context/AuthContext';   // ★ 追加：数値 userCode フォールバック用
+import { resizeImage } from '@/utils/imageResize';
+import { useAuth } from '@/context/AuthContext';
 
 type VisionModalProps = {
   isOpen: boolean;
   defaultPhase: Phase;
   defaultStage: Stage;
-  userCode: string;          // ← 親から渡る（UIDのこともある）
+  userCode: string;
   initial?: Vision | null;
   onClose: () => void;
   onSaved?: (saved: any) => void;
@@ -23,7 +24,7 @@ type VisionModalProps = {
 
 const STATUS_LIST: Status[] = ['検討中', '実践中', '迷走中', '順調', 'ラストスパート', '達成', '破棄'];
 
-/* ==== 橋渡しチェック デフォルト ==== */
+/* ==== 橋渡しチェック ==== */
 function nextStageOf(s: Stage): Stage | null {
   const order: Stage[] = ['S', 'F', 'R', 'C', 'I'];
   const i = order.indexOf(s);
@@ -53,16 +54,22 @@ function defaultCriteria(from: Stage, to: Stage, vision_id: string) {
   }
   return [];
 }
+
+/** ✅ 修正：API が期待する形（vision_id / from / required_days / checklist）で送る */
 async function seedStageCriteria(vision_id: string, from_stage: Stage, token: string) {
   const to = nextStageOf(from_stage);
   if (!to) return;
-  const bulk = defaultCriteria(from_stage, to, vision_id);
-  if (bulk.length === 0) return;
+  const checklist = defaultCriteria(from_stage, to, vision_id);
+  if (checklist.length === 0) return;
+
+  const required_days = Math.max(...checklist.map((c) => c.required_days ?? 0), 0);
+
   const res = await fetch('/api/vision-criteria', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ bulk }),
+    body: JSON.stringify({ vision_id, from: from_stage, required_days, checklist }),
   });
+
   if (!res.ok) {
     const t = await res.text().catch(() => '');
     console.warn('seedStageCriteria failed:', res.status, t);
@@ -79,7 +86,7 @@ type AlbumItem = {
   updated_at?: string | null;
 };
 
-// 🔸 既存 resizeImage に合わせて「Blob or { blob }」両対応の薄いアダプタ
+// 既存 resizeImage に合わせて「Blob or { blob }」両対応
 type ResizeRet = Blob | { blob: Blob; width?: number; height?: number; type?: string };
 async function resizeAsObject(
   file: File,
@@ -90,7 +97,7 @@ async function resizeAsObject(
   return r;
 }
 
-/** Private Album 用：list + 署名URL化（※バケットは private-posts / パスは <userCode>/） */
+/** Private Album：list + 署名URL化（private-posts/<userCode>/） */
 async function listAlbumImages(userCode: string): Promise<AlbumItem[]> {
   try {
     const ucode = (userCode || '').trim();
@@ -123,43 +130,25 @@ async function listAlbumImages(userCode: string): Promise<AlbumItem[]> {
   }
 }
 
-/** album://path または 直URL をプレビュー用に解決（モーダル内画像プレビューで使用） */
+/** album://path または直URLをプレビュー用に解決 */
 function useResolvedThumb(raw?: string | null) {
   const [url, setUrl] = useState<string | null>(null);
-
-  // バケット名はここで固定（他所でも同じ定数を使うと事故らない）
   const ALBUM_BUCKET = 'private-posts';
 
   useEffect(() => {
     let canceled = false;
 
     (async () => {
-      // 何もなければクリア
       if (!raw) {
         if (!canceled) setUrl(null);
         return;
       }
-
-      // album://<userCode>/<filename> を署名URLに解決
       if (raw.startsWith('album://')) {
         try {
-          // 'album://' を外す
-          let path = raw.replace(/^album:\/\//, '');
-
-          // 先頭に余計なスラッシュが付いていたら除去
-          path = path.replace(/^\/+/, '');
-
-          // たまに path に 'private-posts/' が混入してくるケースがあるので剥がす
-          // 例: album://private-posts/669933/xxx.webp → 669933/xxx.webp に矯正
+          let path = raw.replace(/^album:\/\//, '').replace(/^\/+/, '');
           path = path.replace(new RegExp(`^(?:${ALBUM_BUCKET}/)+`), '');
-
-          const { data, error } = await supabase
-            .storage
-            .from(ALBUM_BUCKET)
-            .createSignedUrl(path, 60 * 60); // 1h
-
+          const { data, error } = await supabase.storage.from(ALBUM_BUCKET).createSignedUrl(path, 60 * 60);
           if (canceled) return;
-
           if (error) {
             console.warn('createSignedUrl error:', error, { bucket: ALBUM_BUCKET, path });
             setUrl(null);
@@ -174,8 +163,6 @@ function useResolvedThumb(raw?: string | null) {
         }
         return;
       }
-
-      // 直URL（http/https/data/blob等）はそのまま
       if (!canceled) setUrl(raw);
     })();
 
@@ -201,18 +188,18 @@ export default function VisionModal({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
 
-  // ★ 追加：渡ってきた userCode が UID っぽい場合は AuthContext の数値 userCode を優先
+  // 渡ってきた userCode が UID っぽい場合は AuthContext の数値 userCode を優先
   const { userCode: authUserCode } = useAuth();
   const effectiveUserCode = (() => {
     const prop = (userCode || '').trim();
-    if (/^\d+$/.test(prop)) return prop;         // すでに数値ならそのまま
-    if (authUserCode != null) return String(authUserCode).trim(); // 数値 userCode に差し替え
-    return prop;                                  // 最後の手段（空/UID）でも動かす
+    if (/^\d+$/.test(prop)) return prop;
+    if (authUserCode != null) return String(authUserCode).trim();
+    return prop;
   })();
 
   const [vision, setVision] = useState<Vision>(() => ({
     phase: initial?.phase ?? defaultPhase,
-    stage: initial?.stage ?? defaultStage, // 表示上は維持。保存時に新規は 'S' に矯正
+    stage: initial?.stage ?? defaultStage,
     title: initial?.title ?? '',
     detail: initial?.detail ?? '',
     intention: initial?.intention ?? '',
@@ -220,7 +207,7 @@ export default function VisionModal({
     status: (initial?.status as Status) ?? '検討中',
     summary: initial?.summary ?? '',
     iboard_post_id: initial?.iboard_post_id ?? null,
-    iboard_thumb: initial?.iboard_thumb ?? null, // album://path or 直URL
+    iboard_thumb: initial?.iboard_thumb ?? null,
     q_code: initial?.q_code ?? undefined,
     vision_id: initial?.vision_id,
   }));
@@ -232,16 +219,16 @@ export default function VisionModal({
   const [thumbSize, setThumbSize] = useState<number>(50);
   const [uploading, setUploading] = useState(false);
 
-  // モーダル内のプレビュー用URL（画像枠）
+  // プレビューURL
   const resolvedThumb = useResolvedThumb(vision.iboard_thumb ?? null);
 
-  /* ---------------- Auth 初期化 ---------------- */
+  /* Auth 初期化 */
   useEffect(() => {
     const auth = getAuth();
     return onAuthStateChanged(auth, () => setAuthReady(true));
   }, []);
 
-  /* ---------------- 初期値反映 ---------------- */
+  /* 初期値反映 */
   useEffect(() => {
     if (!isOpen || !initial) return;
     setVision((v) => ({
@@ -261,12 +248,12 @@ export default function VisionModal({
     }));
   }, [isOpen, initial]);
 
-  /* ---------------- Albumタブが開かれたら読み込み（private-posts/<userCode>/） ---------------- */
+  /* Album 読み込み（private-posts/<userCode>/） */
   useEffect(() => {
     if (!isOpen) return;
     if (pickerTab !== 'album') return;
     const ucode = (effectiveUserCode || '').trim();
-    if (!ucode) return; // userCode 未取得時は読まない
+    if (!ucode) return;
     let alive = true;
     (async () => {
       setAlbumLoading(true);
@@ -282,7 +269,7 @@ export default function VisionModal({
     };
   }, [isOpen, pickerTab, effectiveUserCode]);
 
-  /* ---------------- ESC / Cmd+Enter ---------------- */
+  /* ESC / Cmd+Enter */
   const handleKey = useCallback(
     (e: KeyboardEvent) => {
       if (!isOpen) return;
@@ -304,7 +291,7 @@ export default function VisionModal({
 
   const handleChange = (k: keyof Vision, val: any) => setVision((prev) => ({ ...prev, [k]: val }));
 
-  // 共通：サムネを反映＋アニメ
+  // サムネ反映
   const setThumbAndPulse = (thumbRaw: string | null, postId: string | null = null) => {
     setVision((prev) => ({ ...prev, iboard_post_id: postId, iboard_thumb: thumbRaw }));
     const el = document.querySelector('.vmd-thumb');
@@ -312,17 +299,17 @@ export default function VisionModal({
     setTimeout(() => el?.classList.remove('pulse-once'), 900);
   };
 
-  // IBoard から選択（公開：public-posts側。IboardPickerは本人投稿のみ表示前提）
+  // IBoard 選択
   const handlePickIboard = (postId: string, thumbUrl: string) => {
     setThumbAndPulse(thumbUrl, postId);
   };
 
-  // Album の画像を選択（保存値は album://path）
+  // Album 選択（保存値は album://path）
   const handlePickAlbum = (item: AlbumItem) => {
     setThumbAndPulse(`album://${item.path}`, null);
   };
 
-  // 画像アップロード（private-posts/<userCode>/ にリサイズ保存 → album://path を保存）
+  // アップロード（private-posts/<userCode>/）
   const handleUploadFile = async (file: File) => {
     try {
       setUploading(true);
@@ -337,8 +324,7 @@ export default function VisionModal({
       const auth = getAuth();
       if (!auth.currentUser) await signInAnonymously(auth);
 
-      // リサイズ（元の resizeImage に合わせてアダプタ経由）
-      const { blob } = await resizeAsObject(file, { max: 1600, type: 'image/webp', quality: 0.9 });
+      const blob = await resizeImage(file, { max: 1600, type: 'image/webp', quality: 0.9, square: false });
 
       const safeName = file.name.replace(/[^\w.\-]+/g, '_').replace(/\.[^.]+$/, '.webp');
       const path = `${ucode}/${Date.now()}_${safeName}`;
@@ -350,19 +336,13 @@ export default function VisionModal({
       });
       if (upErr) throw upErr;
 
-      // 一覧表示用に短命URLを作っておく
       const { data: signed } = await supabase.storage.from('private-posts').createSignedUrl(path, 60 * 30);
 
-      // 保存値は album://path（失効しない）
       setThumbAndPulse(`album://${path}`, null);
-
-      // Albumタブの一覧を即時更新
       setAlbumItems((prev) => [
         { name: safeName, url: signed?.signedUrl ?? '', path, size: blob.size, updated_at: new Date().toISOString() },
         ...prev,
       ]);
-
-      // 視覚的に分かりやすく album タブへ戻す
       setPickerTab('album');
     } catch (e: any) {
       console.error('upload error:', e);
@@ -388,7 +368,7 @@ export default function VisionModal({
 
       const isUpdate = Boolean(vision.vision_id);
       const method = isUpdate ? 'PUT' : 'POST';
-      const stageForSave: Stage = isUpdate ? (vision.stage as Stage) : 'S'; // ★新規は必ずS
+      const stageForSave: Stage = isUpdate ? (vision.stage as Stage) : 'S'; // 新規は必ずS
 
       const payload = {
         vision_id: vision.vision_id,
@@ -400,8 +380,8 @@ export default function VisionModal({
         supplement: vision.supplement,
         status: vision.status,
         summary: vision.summary,
-        iboard_post_id: vision.iboard_post_id,   // Album/Uploadは null のまま
-        iboard_thumb: vision.iboard_thumb,       // album://path or 直URL
+        iboard_post_id: vision.iboard_post_id,
+        iboard_thumb: vision.iboard_thumb, // album://path or 直URL
         q_code: vision.q_code,
       };
 
@@ -417,6 +397,7 @@ export default function VisionModal({
         throw new Error(msg);
       }
 
+      // ✅ 新規作成時のみ S→F の基準を初期投入
       if (!isUpdate && data?.vision_id) {
         try {
           await seedStageCriteria(String(data.vision_id), 'S', token);
@@ -435,7 +416,7 @@ export default function VisionModal({
     }
   };
 
-  /* ===== q_code を文字列に正規化（カードに渡す直前で） ===== */
+  // q_code を文字列に正規化（カードへ渡す直前）
   const qCodeForCard =
     typeof vision.q_code === 'string'
       ? vision.q_code
@@ -443,7 +424,7 @@ export default function VisionModal({
       ? (vision.q_code as any).code
       : null;
 
-  /* ==================== レンダリング ==================== */
+  /* ==================== UI ==================== */
   return (
     <div className="vmd-backdrop" role="dialog" aria-modal="true">
       <div className="vmd-modal">
@@ -516,15 +497,14 @@ export default function VisionModal({
               {/* サムネサイズスライダー */}
               <div className="vmd-thumbsize">
                 <span className="vmd-thumbsize-label">サムネ</span>
-{/* サムネサイズスライダー */}
-<input
-  type="range"
- min={40}        // ★ 初期値50より小さい値に
-  max={160}
- step={5}        // （任意）手触り改善
-  value={thumbSize}
-  onChange={(e) => setThumbSize(Number(e.target.value))}
-/>
+                <input
+                  type="range"
+                  min={40}
+                  max={160}
+                  step={5}
+                  value={thumbSize}
+                  onChange={(e) => setThumbSize(Number(e.target.value))}
+                />
                 <span className="vmd-thumbsize-val">{thumbSize}px</span>
               </div>
 
@@ -539,14 +519,13 @@ export default function VisionModal({
                     ) : albumItems.length === 0 ? (
                       <div className="vmd-hint">アルバムに画像がありません。右の「アップロード」から追加できます。</div>
                     ) : (
-<div className="vmd-grid" style={{ ['--thumb' as any]: `${thumbSize}px` }}>
-  {albumItems.map((it) => (
-    <button key={it.path} className="vmd-thumb-btn" onClick={() => handlePickAlbum(it)} title={it.name}>
-      <img src={it.url} alt={it.name} />
-    </button>
-  ))}
-</div>
-
+                      <div className="vmd-grid" style={{ ['--thumb' as any]: `${thumbSize}px` }}>
+                        {albumItems.map((it) => (
+                          <button key={it.path} className="vmd-thumb-btn" onClick={() => handlePickAlbum(it)} title={it.name}>
+                            <img src={it.url} alt={it.name} />
+                          </button>
+                        ))}
+                      </div>
                     )}
                   </div>
                 )}
@@ -586,7 +565,7 @@ export default function VisionModal({
             </div>
           </div>
 
-          {/* ---- プレビュー：VisionResultCard（status バッジ反映） ---- */}
+          {/* プレビュー：VisionResultCard */}
           <div style={{ marginTop: 12, marginBottom: 8 }}>
             <VisionResultCard
               visionId={vision.vision_id ?? 'new'}

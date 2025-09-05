@@ -1,0 +1,20 @@
+.sum-root { padding:20px; max-width:1100px; margin:0 auto; }
+.sum-title { font-size:22px; font-weight:700; margin:6px 0 16px; }
+.sum-card { border:1px solid #e4e7ee; border-radius:12px; padding:16px; margin-bottom:16px; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.03); }
+.row { display:flex; gap:12px; align-items:center; margin-bottom:12px; flex-wrap:wrap; }
+.row.space { justify-content:space-between; }
+.label { min-width:120px; color:#394260; font-size:13px; }
+.input { min-width:200px; border:1px solid #cfd6e6; border-radius:8px; padding:10px 12px; font-size:14px; outline:none; }
+.input:focus { border-color:#7a9cff; box-shadow:0 0 0 3px rgba(122,156,255,.15); }
+.btn { padding:10px 16px; border-radius:10px; border:1px solid #0b57d0; background:#0b57d0; color:#fff; font-weight:600; cursor:pointer; }
+.btn.ghost { background:#fff; color:#0b57d0; }
+.btn.danger { background:#b3261e; border-color:#b3261e; }
+.message { background:#f4f7ff; border:1px solid #dfe7ff; color:#1b3a8a; padding:8px 10px; border-radius:8px; }
+.table-wrap { overflow-x:auto; }
+.table { width:100%; border-collapse:collapse; font-size:14px; }
+.table th, .table td { border-bottom:1px solid #eef1f6; padding:10px 8px; text-align:left; }
+.table thead th { font-weight:700; color:#344054; background:#fafbff; }
+.muted { color:#7d8699; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size:12px; }
+.clickable { cursor:pointer; }
+.drawer { position:relative; }

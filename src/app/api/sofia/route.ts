@@ -4,12 +4,14 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+
 import { buildSofiaSystemPrompt } from '@/lib/sofia/buildSystemPrompt';
 import { retrieveKnowledge } from '@/lib/sofia/retrieve';
 import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/authz';
 import { SOFIA_CONFIG } from '@/lib/sofia/config';
-import { recordQFromSofia } from "@/lib/recordQ";
-// ★ 追加：状態推定ユーティリティ
+import { recordQFromSofia } from '@/lib/recordQ';
+
+// 追加：状態推定ユーティリティ
 import {
   inferPhase,
   estimateSelfAcceptance,
@@ -51,6 +53,33 @@ const RETRIEVE_DEEPEN: number =
    型・ユーティリティ
 ========================= */
 type Msg = { role: 'system' | 'user' | 'assistant'; content: string };
+type SofiaMode = 'normal' | 'diagnosis' | 'meaning' | 'intent' | 'dark' | 'remake';
+
+// ▼ サーバ側で一元管理する AI カタログ（UI も GET で取得可）
+type AICatalogItem = {
+  id: string;              // 表示用ID（UIのセレクタ値）
+  label: string;           // ユーザー向け表示
+  model: string;           // OpenAIに投げる model 名
+  costPerTurn: number;     // 1ターン消費クレジット
+  maxTokens?: number;      // UIヒント
+  notes?: string;          // UI説明
+};
+const AI_CATALOG: ReadonlyArray<AICatalogItem> = [
+  { id: 'gpt-4o',      label: 'GPT-4o',       model: 'gpt-4o',      costPerTurn: 2, maxTokens: 4096, notes: '多機能・高品質' },
+  { id: 'gpt-4o-mini', label: 'GPT-4o mini', model: 'gpt-4o-mini', costPerTurn: 1, maxTokens: 4096, notes: '軽量・低コスト' },
+  { id: 'gpt-4.1',     label: 'GPT-4.1',     model: 'gpt-4.1',     costPerTurn: 3, maxTokens: 8192, notes: '高精度' },
+  { id: 'gpt-4.1-mini',label: 'GPT-4.1 mini',model: 'gpt-4.1-mini',costPerTurn: 2, maxTokens: 8192, notes: '4.1の軽量版' },
+];
+
+// model → コスト/正規化情報の解決（未登録は既定=1）
+function resolveAIByModel(modelIn?: string) {
+  const m = (modelIn || '').trim();
+  const hit = AI_CATALOG.find(x => x.model === m || x.id === m);
+  if (hit) return hit;
+  // 未登録モデルのフォールバック（将来追加分にも寛容）
+  return { id: m || 'gpt-4o', label: m || 'GPT-4o', model: m || 'gpt-4o', costPerTurn: 1 } as AICatalogItem;
+}
+
 const newConvCode = () => `Q${Date.now()}`;
 
 function json(data: any, init?: number | ResponseInit) {
@@ -70,11 +99,7 @@ function json(data: any, init?: number | ResponseInit) {
 const bad = (msg: string, code = 400) => json({ error: msg }, code);
 
 function safeParseJson(text: string) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
+  try { return JSON.parse(text); } catch { return null; }
 }
 function getLastText(messages: Msg[] | null | undefined) {
   if (!messages?.length) return null;
@@ -101,21 +126,21 @@ function sbService() {
   if (!SUPABASE_URL || !SERVICE_ROLE) throw new Error('Supabase env is missing');
   return createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 }
-function ensureArray<T = any>(v: any): T[] {
-  return Array.isArray(v) ? v : [];
-}
+function ensureArray<T = any>(v: any): T[] { return Array.isArray(v) ? v : []; }
 function sanitizeBody(raw: any) {
-  const allowModels = new Set(['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini']);
+  // カタログに無い model も受け入れ可能（resolveAIByModelがフォールバック）
+  const allowModels = new Set(AI_CATALOG.map(x => x.model).concat(AI_CATALOG.map(x => x.id)));
+  const modelRaw = typeof raw?.model === 'string' ? raw.model : 'gpt-4o';
   return {
     conversation_code:
       typeof raw?.conversation_code === 'string' ? raw.conversation_code : '',
-    mode: ['normal', 'diagnosis', 'meaning', 'intent', 'dark', 'remake'].includes(raw?.mode)
-      ? raw.mode
-      : 'normal',
+    mode: (['normal','diagnosis','meaning','intent','dark','remake'] as SofiaMode[])
+      .includes(raw?.mode) ? raw.mode : 'normal',
     promptKey: raw?.promptKey ?? 'base',
     vars: typeof raw?.vars === 'object' && raw?.vars ? raw.vars : {},
     messages: ensureArray<Msg>(raw?.messages).slice(-50),
-    model: allowModels.has(raw?.model) ? raw.model : 'gpt-4o',
+    // 未登録なら安全フォールバック
+    model: allowModels.has(modelRaw) ? modelRaw : 'gpt-4o',
     temperature:
       typeof raw?.temperature === 'number'
         ? Math.min(Math.max(raw.temperature, 0), 1)
@@ -128,8 +153,6 @@ function sanitizeBody(raw: any) {
     presence_penalty:
       typeof raw?.presence_penalty === 'number' ? raw.presence_penalty : undefined,
     response_format: raw?.response_format ?? undefined,
-
-    // 受け取っても使わない（サーバーは env 固定運用）
     cfg: typeof raw?.cfg === 'object' && raw?.cfg ? raw.cfg : undefined,
   };
 }
@@ -156,9 +179,7 @@ function deriveIndicators(
     relationLabel === 'discord' || selfBand === 'lt20' || selfBand === '20_40';
   const baseNoise = relationLabel === 'discord' ? 0.35 : 0.15;
   const noiseAmp = Number((baseNoise + (phase === 'Outer' ? 0.05 : 0)).toFixed(2));
-  const seed = Math.abs(
-    ((userText?.length ?? 0) * 2654435761 + (Date.now() & 0xffff)),
-  );
+  const seed = Math.abs(((userText?.length ?? 0) * 2654435761 + (Date.now() & 0xffff)));
   return { g, stochastic, noiseAmp, seed };
 }
 function derivePersonaTone(
@@ -166,10 +187,8 @@ function derivePersonaTone(
   selfBand: string,
   relationLabel: 'harmony' | 'discord',
 ) {
-  if (phase === 'Inner' && (selfBand === 'lt20' || selfBand === '20_40'))
-    return 'compassion_calm';
-  if (phase === 'Outer' && relationLabel === 'discord')
-    return 'mediator_grounded';
+  if (phase === 'Inner' && (selfBand === 'lt20' || selfBand === '20_40')) return 'compassion_calm';
+  if (phase === 'Outer' && relationLabel === 'discord') return 'mediator_grounded';
   if (selfBand === '70_90' || selfBand === 'gt90') return 'co_creator_clear';
   return 'gentle_guide';
 }
@@ -181,11 +200,8 @@ const FETCH_TIMEOUT_MS = 25_000;
 async function fetchWithTimeout(url: string, init: RequestInit, ms = FETCH_TIMEOUT_MS) {
   const ctrl = new AbortController();
   const id = setTimeout(() => ctrl.abort('timeout'), ms);
-  try {
-    return await fetch(url, { ...init, signal: ctrl.signal });
-  } finally {
-    clearTimeout(id);
-  }
+  try { return await fetch(url, { ...init, signal: ctrl.signal }); }
+  finally { clearTimeout(id); }
 }
 async function callOpenAI(payload: any) {
   let lastErr: any;
@@ -210,6 +226,48 @@ async function callOpenAI(payload: any) {
   return { ok: false as const, status: 499, detail: String(lastErr ?? 'unknown') };
 }
 
+/* =========================
+   クレジット RPC ラッパー（関数名/引数名の差異を吸収）
+========================= */
+async function authorizeCredit(userCode: string, amount: number, reason: string) {
+  const supa = sbService();
+  // 優先: authorize_credit_by_user_code(amount, reason, user_code)
+  const tryList: Array<{fn: string; args: Record<string, any>}> = [
+    { fn: 'authorize_credit_by_user_code', args: { amount, reason, user_code: userCode } },
+    // 互換: authorize_credit(p_user_code, p_amount, p_reason)
+    { fn: 'authorize_credit', args: { p_user_code: userCode, p_amount: amount, p_reason: reason } },
+  ];
+  let lastErr: any = null;
+  for (const t of tryList) {
+    try {
+      const { data, error } = await supa.rpc(t.fn, t.args);
+      if (!error && data) return String(data);
+      lastErr = error;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  const msg = String(lastErr?.message ?? lastErr ?? 'authorize_failed');
+  if (msg.includes('insufficient_credit')) {
+    return { error: 'insufficient_credit' } as const;
+  }
+  return { error: 'authorize_failed', detail: msg } as const;
+}
+
+async function voidCreditByKey(key: string) {
+  const supa = sbService();
+  // 優先: void_credit_by_key(key) / 互換: void_credit_by_key(p_key)
+  try {
+    const { error } = await supa.rpc('void_credit_by_key', { key });
+    if (!error) return true;
+  } catch {}
+  try {
+    const { error } = await supa.rpc('void_credit_by_key', { p_key: key });
+    if (!error) return true;
+  } catch {}
+  return false;
+}
+
 /* ====== CORS ====== */
 export async function OPTIONS() { return json({ ok: true }); }
 
@@ -219,13 +277,14 @@ export async function GET(req: NextRequest) {
   const qUser = searchParams.get('user_code') || '';
   const conversation_code = searchParams.get('conversation_code') || '';
 
+  // ▼ UI用：カタログ返却
+  if (searchParams.get('catalog') === '1') {
+    return json({ catalog: AI_CATALOG.map(({ id, label, model, costPerTurn, maxTokens, notes }) =>
+      ({ id, label, model, costPerTurn, maxTokens, notes })) });
+  }
+
   if (!qUser) {
-    return json({
-      ok: true,
-      service: 'Sofia API',
-      time: new Date().toISOString(),
-      model_hint: 'gpt-4o',
-    });
+    return json({ ok: true, service: 'Sofia API', time: new Date().toISOString(), model_hint: 'gpt-4o' });
   }
 
   const z = await verifyFirebaseAndAuthorize(req);
@@ -289,46 +348,34 @@ export async function POST(req: NextRequest) {
       model,
       temperature,
       max_tokens, top_p, frequency_penalty, presence_penalty, response_format,
-      // cfg は受け取っても使わない（env固定運用）
     } = safe;
 
-    // ★ 生成側チューニングは env を唯一のソースにする（env → cfg.retrieve → デフォルト）
+    // ▼ モデルからコスト決定（柔軟に差し替え可）
+    const ai = resolveAIByModel(model);
+    const AMOUNT = ai.costPerTurn;
+
+    // ★ 生成側チューニングは env を唯一のソースにする
     const EPS = Number(process.env.SOFIA_EPSILON ?? CFG_RETR.epsilon ?? 0.25);
     const NOISE = Number(process.env.SOFIA_NOISEAMP ?? CFG_RETR.noiseAmp ?? 0.10);
     const DEEPEN = Number(process.env.SOFIA_DEEPEN_MULT ?? CFG_RETR.deepenMultiplier ?? CFG_RETR.deepenMult ?? 1.4);
 
-    // 0..1 clamp
     const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
-
-    // ★ 生成パラメータにマッピング（既存の係数は維持）
     const mappedTemperature = Math.min(1.3, Math.max(0.0, 0.7 + 0.6 * clamp01(EPS)));
     const mappedTopP        = Math.min(1.0, Math.max(0.0, 0.9 + 0.1 * clamp01(NOISE)));
     const mappedPresence    = Math.min(1.0, Math.max(0.0, 0.6 * clamp01(EPS) + 0.4 * clamp01(NOISE)));
     const mappedFrequency   = Math.min(1.0, Math.max(0.0, 0.3 * clamp01(EPS)));
 
-    // ログで確認できるように
-    console.log('[SofiaAPI] tuning(env)', {
-      epsilon: EPS, noiseAmp: NOISE, deepenMult: DEEPEN,
-      mapped: {
-        temperature: mappedTemperature,
-        top_p: mappedTopP,
-        presence_penalty: mappedPresence,
-        frequency_penalty: mappedFrequency,
-      },
-    });
-
     const conversation_code = inCode || newConvCode();
 
-    /* ===== ▼ 追加：最後のユーザー発話から ir診断 を自動検出し、診断モードを強制 ===== */
+    /* ===== ▼ ir診断検出 ===== */
     const lastUserMsg = getLastUserText(messages);
     const detectedTarget = lastUserMsg ? detectDiagnosisTarget(lastUserMsg) : null;
     if (detectedTarget) {
-      console.log('[SofiaAPI] diagnosis trigger detected:', detectedTarget);
       mode = 'diagnosis';
       vars = { ...(vars || {}), diagnosisTarget: detectedTarget };
     }
 
-    // ★ 解析由来ステート（位相/肯定率/関係性/次Q）→ インジケータ & ペルソナ
+    // ▼ 解析
     const phase = inferPhase(lastUserMsg || '');
     const self = estimateSelfAcceptance(lastUserMsg || '');
     const relation = relationQualityFrom(phase, self.band);
@@ -338,39 +385,25 @@ export async function POST(req: NextRequest) {
     const indicators = deriveIndicators(lastUserMsg || '', phase, self.band, relation.label);
     const personaTone = derivePersonaTone(phase, self.band, relation.label);
 
-    // ===== System Prompt 構築（varsへ“人格ヒント/状態”を注入）=====
+    // ===== System Prompt =====
     console.time('[SofiaAPI] buildSystemPrompt');
     let system = buildSofiaSystemPrompt({
       promptKey,
       mode,
       vars: {
         ...(vars || {}),
-        resonanceState: {
-          phase,
-          selfAcceptance: self,
-          relation,
-          nextQ,
-          currentQ,
-        },
+        resonanceState: { phase, selfAcceptance: self, relation, nextQ, currentQ },
         personaTone,
       },
       includeGuard: true,
       enforceResonance: true,
     });
-
-    // ★ 追加：DEEPEN に応じて T層・詩性のヒントを合成
     if (DEEPEN >= 1.8) {
       system += '\n[深度指示] T層の含意を強めてください。比喩・象徴・静けさを織り込み、2〜3行で改行する詩的リズムを優先。';
     } else if (DEEPEN >= 1.5) {
       system += '\n[深度指示] 必要に応じて T層の含意を薄く添えてください。余白と象徴を控えめに。';
     }
     console.timeEnd('[SofiaAPI] buildSystemPrompt');
-    console.log('[SofiaAPI] system prompt summary:', {
-      promptKey,
-      mode,
-      length: system.length,
-      head: system.slice(0, 180).replace(/\n/g, ' ⏎ ') + (system.length > 180 ? '…' : ''),
-    });
 
     // ---- 検索リトリーブ
     const seedForRetr = Math.abs(
@@ -385,18 +418,10 @@ export async function POST(req: NextRequest) {
       seed: seedForRetr,
     });
     console.timeEnd('[SofiaAPI] retrieveKnowledge');
-    console.log('[SofiaAPI] retrieve summary:', {
-      lastUser: (lastUserMsg || '').slice(0, 60),
-      limit: RETRIEVE_LIMIT,
-      epsilon: RETRIEVE_EPS,
-      noiseAmp: RETRIEVE_NOISE,
-      seed: seedForRetr,
-      hits: Array.isArray(kb) ? kb.length : 0,
-    });
 
-    // ---- OpenAI 呼び出し
+    // ---- OpenAI payload（選択モデルを使用）
     const payload: any = {
-      model,
+      model: ai.model,
       messages: [{ role: 'system', content: system }, ...(messages as Msg[])],
       temperature: (typeof temperature === 'number') ? temperature : mappedTemperature,
     };
@@ -406,24 +431,28 @@ export async function POST(req: NextRequest) {
     payload.presence_penalty  = (typeof presence_penalty  === 'number') ? presence_penalty  : mappedPresence;
     if (response_format) payload.response_format = response_format;
 
-    console.log('[SofiaAPI] openai payload summary:', {
-      model,
-      temperature: payload.temperature,
-      max_tokens: payload.max_tokens ?? null,
-      top_p: payload.top_p ?? null,
-      presence_penalty: payload.presence_penalty ?? null,
-      frequency_penalty: payload.frequency_penalty ?? null,
-      cfg: { epsilon: EPS, noiseAmp: NOISE, deepenMult: DEEPEN },
-      msgs_in: payload.messages?.length ?? 0,
-    });
+    // ================
+// ▼ クレジット承認（3引数ラッパーに一本化）
+    // ================
+    const auth = await authorizeCredit(userCode, AMOUNT, `${ai.id}_chat_turn`);
+    if (typeof auth === 'object' && 'error' in auth) {
+      if (auth.error === 'insufficient_credit') return json({ error: 'insufficient_credit' }, 402);
+      return json({ error: 'authorize_failed', detail: (auth as any).detail ?? 'unknown' }, 500);
+    }
+    const authKey = String(auth);
 
+    // ---- OpenAI 呼び出し
     console.time('[SofiaAPI] openai.chat');
     const result = await callOpenAI(payload);
     console.timeEnd('[SofiaAPI] openai.chat');
 
     if (!result.ok) {
-      console.warn('[SofiaAPI] upstream error:', result.status, result.detail);
-      return json({ error: 'Upstream error', status: result.status, detail: result.detail }, result.status);
+      // 失敗 → 返金（void by key）
+      await voidCreditByKey(authKey);
+      return json(
+        { error: 'Upstream error', status: result.status, detail: result.detail },
+        result.status,
+      );
     }
 
     const data = result.data;
@@ -436,15 +465,14 @@ export async function POST(req: NextRequest) {
     const sb = sbService();
     const title = makeTitleFromMessages(merged);
 
-    // ★ 会話の流れが読めるように：トレースをメタに残す
+    // ★ トレースをメタに残す
     const dialogue_trace = [
-      { step: 'detect_mode',    data: { detectedTarget, mode } },
-      { step: 'state_infer',    data: { phase, self, relation, currentQ, nextQ } },
-      { step: 'indicators',     data: indicators },
-      { step: 'retrieve',       data: { hits: (Array.isArray(kb) ? kb.length : 0), epsilon: RETRIEVE_EPS, noiseAmp: RETRIEVE_NOISE, seed: seedForRetr } },
-      { step: 'build_system',   data: { promptKey, personaTone, length: system.length, deepenMult: DEEPEN } },
-      { step: 'openai_reply',   data: {
-          model,
+      { step: 'detect_mode',  data: { detectedTarget, mode } },
+      { step: 'state_infer',  data: { phase, self, relation, currentQ, nextQ } },
+      { step: 'indicators',   data: indicators },
+      { step: 'retrieve',     data: { hits: (Array.isArray(kb) ? kb.length : 0), epsilon: RETRIEVE_EPS, noiseAmp: RETRIEVE_NOISE, seed: seedForRetr } },
+      { step: 'openai_reply', data: {
+          model: ai.model,
           temperature: payload.temperature,
           top_p: payload.top_p,
           presence_penalty: payload.presence_penalty,
@@ -453,7 +481,6 @@ export async function POST(req: NextRequest) {
         } },
     ];
 
-    // ★ 返却・保存用メタ（フロント既存表示の互換を維持）
     const metaPacked: any = {
       stochastic: indicators.stochastic,
       g: indicators.g,
@@ -471,6 +498,8 @@ export async function POST(req: NextRequest) {
       dialogue_trace,
       stochastic_params: { epsilon: RETRIEVE_EPS, retrNoise: RETRIEVE_NOISE, retrSeed: seedForRetr },
       ...(mode === 'diagnosis' ? { diagnosisTarget: detectedTarget ?? null } : {}),
+      credit_auth_key: authKey,
+      charge: { model: ai.model, aiId: ai.id, amount: AMOUNT },
     };
 
     // ★ 会話スレッド本体に upsert
@@ -505,12 +534,7 @@ export async function POST(req: NextRequest) {
 
     // ▼ Qコードログ書き込み（AI由来）
     try {
-      // Q の決め方：currentQ → nextQ → 既定（Q2）
       const q = (metaPacked.currentQ ?? metaPacked.nextQ ?? "Q2") as "Q1"|"Q2"|"Q3"|"Q4"|"Q5";
-
-      // Stage の決め方：
-      // 1) vars.analysis.qcodes[0].stage にあれば最優先
-      // 2) 深度パラメータやモードから簡易推定（診断：S2 / 高深度：S3 / それ以外：S1）
       const stageHint = (vars as any)?.analysis?.qcodes?.[0]?.stage;
       const stage = (
         stageHint === "S1" || stageHint === "S2" || stageHint === "S3"
@@ -524,16 +548,14 @@ export async function POST(req: NextRequest) {
         intent: mode === "diagnosis" ? "diagnosis" : "normal",
         q,
         stage,
-        // 任意メタ（監査や可視化で便利）
         extra: {
-          model,
+          model: ai.model,
           personaTone,
           phase,
           selfBand: self.band,
           relation: relation.label,
           detectedTarget,
         },
-        // 使わないなら null でOK（テーブルが NULL 可になっている前提）
         post_id: null,
         owner_user_code: userCode,
         actor_user_code: userCode,
@@ -544,12 +566,20 @@ export async function POST(req: NextRequest) {
       console.warn("[q_code_logs insert] skipped:", String((e as any)?.message ?? e));
     }
 
-    
-    // ---- 応答
+    // 最新残高も返す（UI更新用）
+    const { data: me } = await sb
+      .from('users')
+      .select('credit_balance')
+      .eq('user_code', userCode)
+      .single();
+
+    // ---- 応答（UIは credit_balance と charge を見て即時更新）
     return json({
       conversation_code,
       reply,
       meta: metaPacked,
+      credit_balance: me?.credit_balance ?? null,
+      charge: { model: ai.model, aiId: ai.id, amount: AMOUNT },
     });
   } catch (e: any) {
     console.error('[Sofia API] Error:', e);

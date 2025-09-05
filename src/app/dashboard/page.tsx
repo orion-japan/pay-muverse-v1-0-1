@@ -11,6 +11,7 @@ export default function AdminHome() {
     { href:'/admin/leaders', title:'リーダー管理', desc:'リーダー昇格とティア履歴の管理' },
     { href:'/admin/promotions', title:'プロモーション設定', desc:'クレジット倍増・期限付きイベントの設定' }, // ★ 追加
     { href:'/admin/events', title:'イベント管理', desc:'イベント用グループ作成＋招待発行' },
+    { href:'/admin/credits', title:'クレジット調整', desc:'返金/プロモ付与/履歴' },
 
   ];
 
