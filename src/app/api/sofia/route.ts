@@ -11,7 +11,7 @@ import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/au
 import { SOFIA_CONFIG } from '@/lib/sofia/config';
 import { recordQFromSofia } from '@/lib/recordQ';
 
-// 追加：状態推定ユーティリティ
+// 状態推定ユーティリティ
 import {
   inferPhase,
   estimateSelfAcceptance,
@@ -19,33 +19,30 @@ import {
   nextQFrom,
 } from '@/lib/sofia/analyze';
 
+// Q→色エネルギー
+import { mapQToColor } from '@/lib/sofia/qcolor';
+
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 
 /* =========================
-   設定ラッパ（型安全にフォールバック）
+   設定ラッパ
 ========================= */
 const CFG: any = SOFIA_CONFIG ?? {};
 const CFG_OPENAI = CFG.openai ?? {};
 const CFG_RETR = CFG.retrieve ?? {};
 
-// デフォルト値
 const DEFAULT_TEMP: number =
   typeof CFG_OPENAI.temperature === 'number' ? CFG_OPENAI.temperature : 0.8;
-
 const DEFAULT_MAXTOKENS: number | undefined =
   typeof CFG_OPENAI.maxTokens === 'number' ? CFG_OPENAI.maxTokens : undefined;
-
 const RETRIEVE_LIMIT: number =
   typeof CFG_RETR.limit === 'number' ? CFG_RETR.limit : 4;
 
-// ★ env値のフォールバックを明示（env → config.retrieve → デフォルト）
 const RETRIEVE_EPS: number =
   Number(process.env.SOFIA_EPSILON ?? CFG_RETR.epsilon ?? 0.3);
-
 const RETRIEVE_NOISE: number =
   Number(process.env.SOFIA_NOISEAMP ?? CFG_RETR.noiseAmp ?? 0.15);
-
 const RETRIEVE_DEEPEN: number =
   Number(process.env.SOFIA_DEEPEN_MULT ?? CFG_RETR.deepenMultiplier ?? CFG_RETR.deepenMult ?? 1.4);
 
@@ -55,15 +52,15 @@ const RETRIEVE_DEEPEN: number =
 type Msg = { role: 'system' | 'user' | 'assistant'; content: string };
 type SofiaMode = 'normal' | 'diagnosis' | 'meaning' | 'intent' | 'dark' | 'remake';
 
-// ▼ サーバ側で一元管理する AI カタログ（UI も GET で取得可）
 type AICatalogItem = {
-  id: string;              // 表示用ID（UIのセレクタ値）
-  label: string;           // ユーザー向け表示
-  model: string;           // OpenAIに投げる model 名
-  costPerTurn: number;     // 1ターン消費クレジット
-  maxTokens?: number;      // UIヒント
-  notes?: string;          // UI説明
+  id: string;
+  label: string;
+  model: string;
+  costPerTurn: number;
+  maxTokens?: number;
+  notes?: string;
 };
+
 const AI_CATALOG: ReadonlyArray<AICatalogItem> = [
   { id: 'gpt-4o',      label: 'GPT-4o',       model: 'gpt-4o',      costPerTurn: 2, maxTokens: 4096, notes: '多機能・高品質' },
   { id: 'gpt-4o-mini', label: 'GPT-4o mini', model: 'gpt-4o-mini', costPerTurn: 1, maxTokens: 4096, notes: '軽量・低コスト' },
@@ -71,12 +68,10 @@ const AI_CATALOG: ReadonlyArray<AICatalogItem> = [
   { id: 'gpt-4.1-mini',label: 'GPT-4.1 mini',model: 'gpt-4.1-mini',costPerTurn: 2, maxTokens: 8192, notes: '4.1の軽量版' },
 ];
 
-// model → コスト/正規化情報の解決（未登録は既定=1）
 function resolveAIByModel(modelIn?: string) {
   const m = (modelIn || '').trim();
   const hit = AI_CATALOG.find(x => x.model === m || x.id === m);
   if (hit) return hit;
-  // 未登録モデルのフォールバック（将来追加分にも寛容）
   return { id: m || 'gpt-4o', label: m || 'GPT-4o', model: m || 'gpt-4o', costPerTurn: 1 } as AICatalogItem;
 }
 
@@ -98,9 +93,7 @@ function json(data: any, init?: number | ResponseInit) {
 }
 const bad = (msg: string, code = 400) => json({ error: msg }, code);
 
-function safeParseJson(text: string) {
-  try { return JSON.parse(text); } catch { return null; }
-}
+function safeParseJson(text: string) { try { return JSON.parse(text); } catch { return null; } }
 function getLastText(messages: Msg[] | null | undefined) {
   if (!messages?.length) return null;
   const last = messages[messages.length - 1];
@@ -127,24 +120,28 @@ function sbService() {
   return createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 }
 function ensureArray<T = any>(v: any): T[] { return Array.isArray(v) ? v : []; }
+
 function sanitizeBody(raw: any) {
-  // カタログに無い model も受け入れ可能（resolveAIByModelがフォールバック）
   const allowModels = new Set(AI_CATALOG.map(x => x.model).concat(AI_CATALOG.map(x => x.id)));
   const modelRaw = typeof raw?.model === 'string' ? raw.model : 'gpt-4o';
   return {
     conversation_code:
       typeof raw?.conversation_code === 'string' ? raw.conversation_code : '',
-    mode: (['normal','diagnosis','meaning','intent','dark','remake'] as SofiaMode[])
-      .includes(raw?.mode) ? raw.mode : 'normal',
+    // 親子＆紐づけ（※Sofiaでは master_id 入力は最終的に無視して conversation_code を親に固定）
+    master_id: typeof raw?.master_id === 'string' ? raw.master_id : '',
+    sub_id: typeof raw?.sub_id === 'string' ? raw.sub_id : '',
+    thread_id: typeof raw?.thread_id === 'string' ? raw.thread_id : null,
+    board_id: typeof raw?.board_id === 'string' ? raw.board_id : null,
+    source_type: typeof raw?.source_type === 'string' ? raw.source_type : 'chat',
+
+    mode: (['normal','diagnosis','meaning','intent','dark','remake'] as SofiaMode[]).includes(raw?.mode) ? raw.mode : 'normal',
     promptKey: raw?.promptKey ?? 'base',
     vars: typeof raw?.vars === 'object' && raw?.vars ? raw.vars : {},
     messages: ensureArray<Msg>(raw?.messages).slice(-50),
-    // 未登録なら安全フォールバック
+
     model: allowModels.has(modelRaw) ? modelRaw : 'gpt-4o',
     temperature:
-      typeof raw?.temperature === 'number'
-        ? Math.min(Math.max(raw.temperature, 0), 1)
-        : DEFAULT_TEMP,
+      typeof raw?.temperature === 'number' ? Math.min(Math.max(raw.temperature, 0), 1) : DEFAULT_TEMP,
     max_tokens:
       typeof raw?.max_tokens === 'number' ? raw.max_tokens : DEFAULT_MAXTOKENS,
     top_p: typeof raw?.top_p === 'number' ? raw.top_p : undefined,
@@ -157,7 +154,7 @@ function sanitizeBody(raw: any) {
   };
 }
 
-/* ===== ▼ ir診断トリガー検出 ===== */
+/* ===== ir診断トリガー検出 ===== */
 function detectDiagnosisTarget(text: string) {
   const t = (text || '').trim();
   const m1 = t.match(/^(?:ir\s*診断|ir|IR|ｉｒ)(?:[:：\s]+)?(.+)?$/);
@@ -167,7 +164,7 @@ function detectDiagnosisTarget(text: string) {
   return null;
 }
 
-/* ===== ▼ インジケータ/ペルソナ派生 ===== */
+/* ===== インジケータ/ペルソナ ===== */
 function deriveIndicators(
   userText: string,
   phase: 'Inner' | 'Outer',
@@ -194,7 +191,7 @@ function derivePersonaTone(
 }
 
 /* =========================
-   フェッチ制御（タイムアウト＆簡易リトライ）
+   フェッチ制御
 ========================= */
 const FETCH_TIMEOUT_MS = 25_000;
 async function fetchWithTimeout(url: string, init: RequestInit, ms = FETCH_TIMEOUT_MS) {
@@ -227,45 +224,53 @@ async function callOpenAI(payload: any) {
 }
 
 /* =========================
-   クレジット RPC ラッパー（関数名/引数名の差異を吸収）
+   クレジット RPC（確定版）
 ========================= */
 async function authorizeCredit(userCode: string, amount: number, reason: string) {
   const supa = sbService();
-  // 優先: authorize_credit_by_user_code(amount, reason, user_code)
-  const tryList: Array<{fn: string; args: Record<string, any>}> = [
-    { fn: 'authorize_credit_by_user_code', args: { amount, reason, user_code: userCode } },
-    // 互換: authorize_credit(p_user_code, p_amount, p_reason)
-    { fn: 'authorize_credit', args: { p_user_code: userCode, p_amount: amount, p_reason: reason } },
-  ];
-  let lastErr: any = null;
-  for (const t of tryList) {
-    try {
-      const { data, error } = await supa.rpc(t.fn, t.args);
-      if (!error && data) return String(data);
-      lastErr = error;
-    } catch (e) {
-      lastErr = e;
+  const amt = Number(Number(amount).toFixed(2)); // numeric に合わせて丸め
+
+  const { data, error } = await supa.rpc('authorize_credit_by_user_code', {
+    p_amount: amt,          // numeric
+    p_reason: reason,       // text
+    p_user_code: userCode,  // text
+  });
+
+  if (error) {
+    const msg = String(error.message ?? error);
+    if (msg.includes('insufficient_credit')) {
+      return { error: 'insufficient_credit' } as const;
     }
+    return { error: 'authorize_failed', detail: msg } as const;
   }
-  const msg = String(lastErr?.message ?? lastErr ?? 'authorize_failed');
-  if (msg.includes('insufficient_credit')) {
-    return { error: 'insufficient_credit' } as const;
-  }
-  return { error: 'authorize_failed', detail: msg } as const;
+  return String(data); // 承認キー
 }
 
+/* =========================
+   返金（void）確定版
+========================= */
 async function voidCreditByKey(key: string) {
   const supa = sbService();
-  // 優先: void_credit_by_key(key) / 互換: void_credit_by_key(p_key)
-  try {
-    const { error } = await supa.rpc('void_credit_by_key', { key });
-    if (!error) return true;
-  } catch {}
-  try {
-    const { error } = await supa.rpc('void_credit_by_key', { p_key: key });
-    if (!error) return true;
-  } catch {}
-  return false;
+  const { error } = await supa.rpc('void_credit_by_key', { key }); // 引数は text
+  return !error;
+}
+
+/* =========================
+   クレジット残高の軽警告（読むだけ）
+========================= */
+async function getBalanceWarning(userCode: string, expected: number) {
+  const sb = sbService();
+  const { data, error } = await sb
+    .from('users')
+    .select('sofia_credit')
+    .eq('user_code', userCode)
+    .single();
+  if (error) return null;
+  const bal = Number(data?.sofia_credit ?? 0);
+  const after = bal - expected;
+  if (after < 0) return 'NO_BALANCE' as const;
+  if (after < 1) return 'LOW_BALANCE' as const;
+  return null;
 }
 
 /* ====== CORS ====== */
@@ -277,7 +282,7 @@ export async function GET(req: NextRequest) {
   const qUser = searchParams.get('user_code') || '';
   const conversation_code = searchParams.get('conversation_code') || '';
 
-  // ▼ UI用：カタログ返却
+  // UI用：カタログ
   if (searchParams.get('catalog') === '1') {
     return json({ catalog: AI_CATALOG.map(({ id, label, model, costPerTurn, maxTokens, notes }) =>
       ({ id, label, model, costPerTurn, maxTokens, notes })) });
@@ -337,10 +342,13 @@ export async function POST(req: NextRequest) {
     if (!z.allowed) return json({ error: 'forbidden' }, 403);
     const userCode = z.userCode!;
 
-    // ---- 受信 & 正規化
+    // 受信 & 正規化
     const safe = sanitizeBody((await req.json().catch(() => ({}))) || {});
     let {
       conversation_code: inCode,
+      /* master_id: inMaster, ← 外部入力は無視して強制で固定 */
+      sub_id: inSub,
+      thread_id, board_id, source_type,
       mode,
       promptKey,
       vars,
@@ -348,13 +356,13 @@ export async function POST(req: NextRequest) {
       model,
       temperature,
       max_tokens, top_p, frequency_penalty, presence_penalty, response_format,
-    } = safe;
+    } = safe as any;
 
-    // ▼ モデルからコスト決定（柔軟に差し替え可）
+    // モデル→コスト
     const ai = resolveAIByModel(model);
     const AMOUNT = ai.costPerTurn;
 
-    // ★ 生成側チューニングは env を唯一のソースにする
+    // 生成側チューニング（env優先）
     const EPS = Number(process.env.SOFIA_EPSILON ?? CFG_RETR.epsilon ?? 0.25);
     const NOISE = Number(process.env.SOFIA_NOISEAMP ?? CFG_RETR.noiseAmp ?? 0.10);
     const DEEPEN = Number(process.env.SOFIA_DEEPEN_MULT ?? CFG_RETR.deepenMultiplier ?? CFG_RETR.deepenMult ?? 1.4);
@@ -365,9 +373,12 @@ export async function POST(req: NextRequest) {
     const mappedPresence    = Math.min(1.0, Math.max(0.0, 0.6 * clamp01(EPS) + 0.4 * clamp01(NOISE)));
     const mappedFrequency   = Math.min(1.0, Math.max(0.0, 0.3 * clamp01(EPS)));
 
+    // 親子ID確定（★ Sofia は master_id を常に conversation_code に固定）
     const conversation_code = inCode || newConvCode();
+    const master_id = conversation_code; // ← ここがポイント（外からの master_id は受け付けない）
+    const sub_id = inSub || `S${Date.now().toString(36)}`;
 
-    /* ===== ▼ ir診断検出 ===== */
+    /* ir診断検出 */
     const lastUserMsg = getLastUserText(messages);
     const detectedTarget = lastUserMsg ? detectDiagnosisTarget(lastUserMsg) : null;
     if (detectedTarget) {
@@ -375,7 +386,7 @@ export async function POST(req: NextRequest) {
       vars = { ...(vars || {}), diagnosisTarget: detectedTarget };
     }
 
-    // ▼ 解析
+    // 解析
     const phase = inferPhase(lastUserMsg || '');
     const self = estimateSelfAcceptance(lastUserMsg || '');
     const relation = relationQualityFrom(phase, self.band);
@@ -385,7 +396,7 @@ export async function POST(req: NextRequest) {
     const indicators = deriveIndicators(lastUserMsg || '', phase, self.band, relation.label);
     const personaTone = derivePersonaTone(phase, self.band, relation.label);
 
-    // ===== System Prompt =====
+    // System Prompt
     console.time('[SofiaAPI] buildSystemPrompt');
     let system = buildSofiaSystemPrompt({
       promptKey,
@@ -398,6 +409,15 @@ export async function POST(req: NextRequest) {
       includeGuard: true,
       enforceResonance: true,
     });
+
+    const STYLE_RULES = `
+## Color Energy Rules
+- 感情・心理の傾向は色で表現する：Blue / Red / Black / Green / Yellow を基本に、必要に応じて Purple / Brown / Silver / White / Teal / Magenta 等の混色も可。
+- 次の語は出力に含めない：木 / 火 / 土 / 金 / 水 / 五行（および moku/hi/tsuchi/kin/mizu）。
+- 確定ラベリングは避け、「いまは◯◯寄り」「◯◯の色味が少し強い」のように柔らかく示す。
+`;
+    system += '\n' + STYLE_RULES;
+
     if (DEEPEN >= 1.8) {
       system += '\n[深度指示] T層の含意を強めてください。比喩・象徴・静けさを織り込み、2〜3行で改行する詩的リズムを優先。';
     } else if (DEEPEN >= 1.5) {
@@ -405,7 +425,7 @@ export async function POST(req: NextRequest) {
     }
     console.timeEnd('[SofiaAPI] buildSystemPrompt');
 
-    // ---- 検索リトリーブ
+    // 検索リトリーブ
     const seedForRetr = Math.abs(
       [...`${userCode}:${conversation_code}`].reduce((a, c) => ((a << 5) - a + c.charCodeAt(0)) | 0, 0)
     );
@@ -419,7 +439,7 @@ export async function POST(req: NextRequest) {
     });
     console.timeEnd('[SofiaAPI] retrieveKnowledge');
 
-    // ---- OpenAI payload（選択モデルを使用）
+    // OpenAI payload
     const payload: any = {
       model: ai.model,
       messages: [{ role: 'system', content: system }, ...(messages as Msg[])],
@@ -431,9 +451,20 @@ export async function POST(req: NextRequest) {
     payload.presence_penalty  = (typeof presence_penalty  === 'number') ? presence_penalty  : mappedPresence;
     if (response_format) payload.response_format = response_format;
 
-    // ================
-// ▼ クレジット承認（3引数ラッパーに一本化）
-    // ================
+    // 事前警告（読むだけ）
+    const warning = await getBalanceWarning(userCode, AMOUNT);
+    if (warning === 'NO_BALANCE') {
+      return json({
+        error: 'insufficient_credit',
+        warning,
+        master_id,
+        sub_id,
+        conversation_id: master_id,
+        conversation_code,
+      }, 402);
+    }
+
+    // クレジット承認
     const auth = await authorizeCredit(userCode, AMOUNT, `${ai.id}_chat_turn`);
     if (typeof auth === 'object' && 'error' in auth) {
       if (auth.error === 'insufficient_credit') return json({ error: 'insufficient_credit' }, 402);
@@ -441,14 +472,13 @@ export async function POST(req: NextRequest) {
     }
     const authKey = String(auth);
 
-    // ---- OpenAI 呼び出し
+    // OpenAI 呼び出し
     console.time('[SofiaAPI] openai.chat');
     const result = await callOpenAI(payload);
     console.timeEnd('[SofiaAPI] openai.chat');
 
     if (!result.ok) {
-      // 失敗 → 返金（void by key）
-      await voidCreditByKey(authKey);
+      await voidCreditByKey(authKey); // 失敗→返金
       return json(
         { error: 'Upstream error', status: result.status, detail: result.detail },
         result.status,
@@ -458,14 +488,13 @@ export async function POST(req: NextRequest) {
     const data = result.data;
     const reply: string = data?.choices?.[0]?.message?.content ?? '';
 
-    // ---- 会話の保存（messages）
+    // 会話保存
     const merged: Msg[] = Array.isArray(messages) ? [...messages] : [];
     if (reply) merged.push({ role: 'assistant', content: reply });
 
     const sb = sbService();
     const title = makeTitleFromMessages(merged);
 
-    // ★ トレースをメタに残す
     const dialogue_trace = [
       { step: 'detect_mode',  data: { detectedTarget, mode } },
       { step: 'state_infer',  data: { phase, self, relation, currentQ, nextQ } },
@@ -497,12 +526,18 @@ export async function POST(req: NextRequest) {
       personaTone,
       dialogue_trace,
       stochastic_params: { epsilon: RETRIEVE_EPS, retrNoise: RETRIEVE_NOISE, retrSeed: seedForRetr },
-      ...(mode === 'diagnosis' ? { diagnosisTarget: detectedTarget ?? null } : {}),
       credit_auth_key: authKey,
       charge: { model: ai.model, aiId: ai.id, amount: AMOUNT },
+
+      // 紐づけ
+      master_id,                 // ← Sofiaは常に自分の会話を親にする
+      sub_id,
+      thread_id: thread_id ?? null,
+      board_id: board_id ?? null,
+      source_type: source_type ?? 'chat',
     };
 
-    // ★ 会話スレッド本体に upsert
+    // 会話スレッド upsert
     const { error: upErr } = await sb.from('sofia_conversations').upsert(
       {
         user_code: userCode,
@@ -516,7 +551,7 @@ export async function POST(req: NextRequest) {
     );
     if (upErr) console.warn('[sofia_conversations upsert]', upErr?.message || upErr);
 
-    // ★ 1ターンごとのログ（存在すれば書く）
+    // ターンログ（あれば）
     try {
       const turn_index = merged.filter(m => m.role === 'assistant').length;
       await sb.from('sofia_turns').insert({
@@ -532,22 +567,24 @@ export async function POST(req: NextRequest) {
       console.warn('[sofia_turns insert] skipped:', String((e as any)?.message ?? e));
     }
 
-    // ▼ Qコードログ書き込み（AI由来）
+    // Qコードログ（AI由来）
     try {
-      const q = (metaPacked.currentQ ?? metaPacked.nextQ ?? "Q2") as "Q1"|"Q2"|"Q3"|"Q4"|"Q5";
+      const qFinal = (metaPacked.currentQ ?? metaPacked.nextQ ?? 'Q2') as 'Q1'|'Q2'|'Q3'|'Q4'|'Q5';
       const stageHint = (vars as any)?.analysis?.qcodes?.[0]?.stage;
-      const stage = (
-        stageHint === "S1" || stageHint === "S2" || stageHint === "S3"
+      const stageFinal = (
+        stageHint === 'S1' || stageHint === 'S2' || stageHint === 'S3'
           ? stageHint
-          : (DEEPEN >= 1.8 ? "S3" : (mode === "diagnosis" ? "S2" : "S1"))
-      ) as "S1"|"S2"|"S3";
+          : (DEEPEN >= 1.8 ? 'S3' : (mode === 'diagnosis' ? 'S2' : 'S1'))
+      ) as 'S1'|'S2'|'S3';
+
+      const qc = mapQToColor(qFinal);
 
       await recordQFromSofia({
         user_code: userCode,
         conversation_code,
-        intent: mode === "diagnosis" ? "diagnosis" : "normal",
-        q,
-        stage,
+        intent: mode === 'diagnosis' ? 'diagnosis' : 'normal',
+        q: qFinal,
+        stage: stageFinal,
         extra: {
           model: ai.model,
           personaTone,
@@ -555,6 +592,7 @@ export async function POST(req: NextRequest) {
           selfBand: self.band,
           relation: relation.label,
           detectedTarget,
+          q_color: qc || null,
         },
         post_id: null,
         owner_user_code: userCode,
@@ -562,25 +600,47 @@ export async function POST(req: NextRequest) {
         emotion: null,
         level: null,
       });
+
+      metaPacked.currentQ = qFinal;
     } catch (e) {
-      console.warn("[q_code_logs insert] skipped:", String((e as any)?.message ?? e));
+      console.warn('[q_code_logs insert] skipped:', String((e as any)?.message ?? e));
     }
 
-    // 最新残高も返す（UI更新用）
-    const { data: me } = await sb
+    // 応答用Q/Stage
+    const qOut = (metaPacked.currentQ ?? metaPacked.nextQ ?? 'Q2') as 'Q1'|'Q2'|'Q3'|'Q4'|'Q5';
+    const stageOut = ((vars as any)?.analysis?.qcodes?.[0]?.stage
+      ?? (RETRIEVE_DEEPEN >= 1.8 ? 'S3' : (mode === 'diagnosis' ? 'S2' : 'S1'))) as 'S1'|'S2'|'S3';
+    const qColor = mapQToColor(qOut);
+
+    // 残高
+    const { data: balanceRow } = await sb
       .from('users')
-      .select('credit_balance')
+      .select('sofia_credit')
       .eq('user_code', userCode)
       .single();
 
-    // ---- 応答（UIは credit_balance と charge を見て即時更新）
+    const credit_balance =
+      balanceRow && balanceRow.sofia_credit != null
+        ? Number(balanceRow.sofia_credit)
+        : null;
+
+    // 応答（★ master_id は常に Sofia の会話ID）
     return json({
-      conversation_code,
+      conversation_code,                 // Sofiaの会話コード
       reply,
       meta: metaPacked,
-      credit_balance: me?.credit_balance ?? null,
+      credit_balance,
       charge: { model: ai.model, aiId: ai.id, amount: AMOUNT },
+      q: { code: qOut, stage: stageOut, color: qColor },
+
+      // UI互換（常にSofiaのIDに固定）
+      master_id,                         // 親（= conversation_code）
+      sub_id,                            // 子
+      conversation_id: master_id,        // 互換フィールド
+      agent: 'sofia',                    // 明示
+      warning,                           // 'LOW_BALANCE'ならここに入る
     });
+
   } catch (e: any) {
     console.error('[Sofia API] Error:', e);
     return json({ error: 'Unhandled error', detail: String(e?.message ?? e) }, 500);

@@ -936,3 +936,148 @@ body { padding-bottom: var(--footer-safe-pad); }
 .sof-bubble.is-user::before {
   content: none !important;
 }
+
+
+/* =========================
+   基本トーン（お好みで調整可）
+========================= */
+:root,
+.sof-container {
+  /* ユーザー吹き出し（青グラデ） */
+  --user-start: #4da3ff;
+  --user-end:   #7a5dff;
+  --user-text:  #ffffff;
+
+  /* AI吹き出し（白～薄青・枠/影） */
+  --ai-bg1: #ffffff;
+  --ai-bg2: #f7fbff;
+  --ai-border: rgba(90, 140, 220, 0.25);
+  --ai-shadow: 0 6px 22px rgba(15, 35, 80, 0.10);
+
+  /* AIアイコンの光輪 */
+  --ai-aura1: #51e1cf; /* ターコイズ */
+  --ai-aura2: #4fc3ff; /* シアン寄り */
+}
+
+/* =========================
+   吹き出し差別化
+========================= */
+.sof-container .msg--user .bubble {
+  background: linear-gradient(135deg, var(--user-start), var(--user-end));
+  color: var(--user-text);
+  border: none;
+  box-shadow: 0 6px 16px rgba(76, 84, 190, 0.22);
+  border-radius: 14px 14px 6px 14px; /* 左下だけ少し尖らせて向きの違いを出す */
+}
+.sof-container .msg--user .bubble a { color: #fff; text-decoration: underline; }
+
+/* AIは白系＋薄い枠＆柔らかい影 */
+.sof-container .msg--ai .bubble {
+  position: relative;
+  background: linear-gradient(180deg, var(--ai-bg1), var(--ai-bg2));
+  border: 1px solid var(--ai-border);
+  box-shadow: var(--ai-shadow);
+  border-radius: 14px 14px 14px 6px; /* 右下だけ少し尖らせる */
+  color: #0e1a2d;
+}
+
+/* （任意）AI吹き出しに細いアクセントライン */
+.sof-container .msg--ai .bubble::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 10px;
+  width: 3px;
+  height: calc(100% - 20px);
+  border-radius: 3px;
+  background: linear-gradient(180deg, #6bf0dd, #6bb9ff);
+  box-shadow: 0 0 10px rgba(80, 190, 240, 0.35);
+}
+
+/* =========================
+   AIアイコンを“丸＋光”に
+========================= */
+.sof-container .msg--ai .avatar {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  overflow: visible;            /* 光輪を見せるため */
+  background: radial-gradient(circle at 35% 35%, #eefefd, #e7f6ff 60%, #d9efff 100%);
+  box-shadow: 0 0 0 2px #fff;   /* 白い縁取りで浮かせる */
+}
+.sof-container .msg--ai .avatar img { border-radius: 999px; display: block; width: 100%; height: 100%; object-fit: cover; }
+
+/* 光のオーラ（にじむリング） */
+.sof-container .msg--ai .avatar::before {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border-radius: inherit;
+  background: radial-gradient(circle, var(--ai-aura1) 0%, var(--ai-aura2) 45%, transparent 60%);
+  filter: blur(12px);
+  opacity: .55;
+  pointer-events: none;
+}
+
+/* =========================
+   “AIが応答中”インジケーター
+   - 既に「返信中の仮バブル」を出している場合は
+     .msg--ai.pending があれば自動で表示
+   - そうでない場合は、コンテナに data-typing="ai" を付ければ表示
+========================= */
+.sof-container .typing-badge {
+  position: sticky;     /* スクロール中も下辺に追随 */
+  bottom: 8px;
+  margin-left: auto;    /* 右寄せの小さなピル */
+  display: none;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(13, 22, 45, 0.75);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 2px 10px rgba(10, 20, 40, .25);
+  z-index: 2;
+}
+
+/* 条件1: 返信中の仮メッセージがある（JS不要、DOMに .msg--ai.pending が出ていればOK） */
+.sof-container:has(.message-list .msg--ai.pending) .typing-badge { display: inline-flex; }
+/* 条件2: ルートに data-typing="ai" を付与した場合（状態管理しているなら1行で制御可） */
+.sof-container[data-typing="ai"] .typing-badge { display: inline-flex; }
+
+/* 3点ドット（CSSのみ） */
+.sof-container .typing-badge .dots { display: inline-flex; gap: 4px; }
+.sof-container .typing-badge .dot {
+  width: 4px; height: 4px; border-radius: 50%;
+  background: currentColor;
+  opacity: .25; transform: translateY(0);
+  animation: typingBlink 1.2s infinite;
+}
+.sof-container .typing-badge .dot:nth-child(2) { animation-delay: .15s; }
+.sof-container .typing-badge .dot:nth-child(3) { animation-delay: .30s; }
+
+@keyframes typingBlink {
+  0%, 80%, 100% { opacity: .25; transform: translateY(0); }
+  40%          { opacity: 1;   transform: translateY(-2px); }
+}
+
+/* =========================
+   細かい調整（行間・余白）
+========================= */
+.sof-container .bubble { line-height: 1.65; }
+.sof-container .msg--user .bubble,
+.sof-container .msg--ai .bubble { padding: 12px 14px; }
+
+.sof-container .msg--ai .avatar::before {
+  content: "";
+  position: absolute;
+  inset: -10px; /* 光を広めに */
+  border-radius: inherit;
+  background: radial-gradient(circle, #6bf0dd 0%, #4fc3ff 40%, transparent 70%);
+  filter: blur(16px);  /* もっとにじませる */
+  opacity: .75;        /* 光量を強める */
+  pointer-events: none;
+}

@@ -7,8 +7,8 @@ export default function SofiaPage() {
     <main className="mu-main">
       {/* 幅や余白は CSS の .sofia-page-wrap 側で管理 */}
       <div className="sofia-page-wrap">
-        {/* ★ Iros 固定 */}
-        <SofiaChat agent="iros" />
+        {/* ★ Mu 固定（SofiaChat 側でデフォルト 'mu'。prop未対応でもOK） */}
+        <SofiaChat agent="mu" />
       </div>
     </main>
   );

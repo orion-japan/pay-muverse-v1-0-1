@@ -34,6 +34,8 @@ export type AuthzResult = {
   userCode: string | null;
   role: 'master' | 'admin' | 'other';
   error?: string;
+  // ★ 追加: 既存ルート互換用（normalizeAuthz が拾う）
+  user?: { uid: string; user_code: string } | null;
 };
 
 /* ===== PostgREST 用 JWT =====
@@ -45,7 +47,7 @@ function signPostgresJwt(claims: { user_code: string; firebase_uid?: string }) {
     user_code: claims.user_code,   // RLSで使う
     firebase_uid: claims.firebase_uid ?? null,
     exp: Math.floor(Date.now() / 1000) + 15 * 60,
-  };
+  } as const;
   return jwt.sign(payload, POSTGREST_JWT, { algorithm: 'HS256' });
 }
 
@@ -60,15 +62,15 @@ export async function verifyFirebaseAndAuthorize(input: NextRequest | string): P
     idToken = authz.startsWith('Bearer ') ? authz.slice(7) : null;
   }
   if (!idToken) {
-    return { ok: false, allowed: false, status: 401, pgJwt: null, userCode: null, role: 'other', error: 'Missing Firebase ID token' };
+    return { ok: false, allowed: false, status: 401, pgJwt: null, userCode: null, role: 'other', error: 'Missing Firebase ID token', user: null };
   }
 
   try {
-    // 2) Firebase 検証
-    const decoded = await adminAuth.verifyIdToken(idToken);
+    // 2) Firebase 検証（revocation考慮: true）
+    const decoded = await adminAuth.verifyIdToken(idToken, true);
     const firebaseUid = decoded.uid;
 
-    // 3) users から user_code / 権限取得
+    // 3) users から user_code / 権限取得（Service Role）
     const adminSb = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
     const { data: u, error } = await adminSb
       .from('users')
@@ -77,23 +79,63 @@ export async function verifyFirebaseAndAuthorize(input: NextRequest | string): P
       .maybeSingle();
     if (error) throw error;
     if (!u?.user_code) {
-      return { ok: false, allowed: false, status: 401, pgJwt: null, userCode: null, role: 'other', error: 'user_code not found' };
+      return { ok: false, allowed: false, status: 401, pgJwt: null, userCode: null, role: 'other', error: 'user_code not found', user: null };
     }
 
     const role: 'master' | 'admin' | 'other' =
       (u.click_type === 'master' || u.plan_status === 'master') ? 'master' :
       (u.click_type === 'admin'  || u.plan_status === 'admin')  ? 'admin'  : 'other';
 
-    if (role === 'other') {
-      return { ok: false, allowed: false, status: 403, pgJwt: null, userCode: u.user_code, role, error: 'not authorized' };
-    }
+    // ★ 仕様変更ポイント：ここでは 403 にせず、常に allowed=true / status=200 を返す
+    //   - ルート側で role を見てアクセス制御したい場合に備え、role は保持
+    //   - これにより一般ユーザー（other）でも /api/q/unified などの参照APIは通せる
 
-    // 4) PostgREST 用 JWT（★ sub=user_code）
     const pgJwt = signPostgresJwt({ user_code: u.user_code, firebase_uid: firebaseUid });
 
-    return { ok: true, allowed: true, status: 200, pgJwt, userCode: u.user_code, role };
+    return {
+      ok: true,
+      allowed: true,
+      status: 200,
+      pgJwt,
+      userCode: u.user_code,
+      role,
+      user: { uid: firebaseUid, user_code: u.user_code },
+    };
   } catch (e: any) {
     console.error('[authz] error:', e);
-    return { ok: false, allowed: false, status: 401, pgJwt: null, userCode: null, role: 'other', error: e?.message || 'Auth failed' };
+    return { ok: false, allowed: false, status: 401, pgJwt: null, userCode: null, role: 'other', error: e?.message || 'Auth failed', user: null };
   }
+}
+
+// ===== 既存互換：型 & 正規化ヘルパ =====
+export type AuthedUser = { uid: string; user_code: string };
+
+// いろんな形で返ってきても吸収する正規化ヘルパ
+export function normalizeAuthz(result: any): { user: AuthedUser | null; error: string | null } {
+  // パターンA: { ok: true, user } | { ok: false, error: '...' }
+  if (typeof result?.ok === 'boolean') {
+    if (result.ok) {
+      // 優先: 明示 user
+      if (result.user && result.user.user_code) return { user: result.user as AuthedUser, error: null };
+      // 互換: userCode → user に変換
+      if (result.userCode) return { user: { uid: 'unknown', user_code: String(result.userCode) }, error: null };
+      // 互換: user_code（スネークケース）も許容
+      if (result.user_code) return { user: { uid: 'unknown', user_code: String(result.user_code) }, error: null };
+      // ここまで来たら user 情報不足
+      return { user: null, error: 'Authorized but no user info' };
+    }
+    return { user: null, error: String(result.error ?? 'Unauthorized') };
+  }
+
+  // パターンB: { user, error? }
+  if (result?.user) return { user: result.user as AuthedUser, error: null };
+  if (result?.error) return { user: null, error: String(result.error) };
+
+  // パターンC: user を直接返す
+  if (result && typeof result === 'object' && ('user_code' in result || 'userCode' in result)) {
+    const code = (result as any).user_code ?? (result as any).userCode;
+    return { user: { uid: 'unknown', user_code: String(code) }, error: null };
+  }
+
+  return { user: null, error: 'Unauthorized' };
 }

@@ -22,7 +22,7 @@ import Header from './header';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
 import type { MetaData } from '@/components/SofiaChat/MetaPanel';
-
+import Image from 'next/image';
 /* ========= types ========= */
 type Role = 'user' | 'assistant';
 export type Message = {
@@ -31,7 +31,6 @@ export type Message = {
   content: string;
   created_at?: string;
   isPreview?: boolean;
-  // uploaded_image_urls は既存実装で使われることがあるので any セーフティで受ける
   // uploaded_image_urls?: string[];
 };
 
@@ -61,7 +60,6 @@ type SofiaPostRes = {
 const normalizeMeta = (m: any): MetaData | null => {
   if (!m) return null;
   const asArray = (v: any) => (Array.isArray(v) ? v : v ? [v] : []);
-
   const qcodes = asArray(m.qcodes).map((q: any) =>
     typeof q === 'string'
       ? { code: q }
@@ -77,7 +75,6 @@ const normalizeMeta = (m: any): MetaData | null => {
     key: String(k?.key ?? 'K'),
     title: (k?.title ?? null) as string | null,
   }));
-
   const indicator = {
     on: typeof m.stochastic === 'boolean' ? m.stochastic : Boolean(m?.stochastic?.on),
     g: typeof m.g === 'number' ? m.g : m?.stochastic?.g ?? null,
@@ -87,11 +84,13 @@ const normalizeMeta = (m: any): MetaData | null => {
     retrNoise: m?.stochastic_params?.retrNoise ?? null,
     retrSeed: m?.stochastic_params?.retrSeed ?? null,
   };
-
   return { qcodes, layers, used_knowledge, stochastic: indicator };
 };
 
-export default function SofiaChat() {
+/* ========= ここだけ追加 ========= */
+type SofiaChatProps = { agent?: 'mu' | 'iros' };
+
+export default function SofiaChat({ agent = 'mu' }: SofiaChatProps) {
   const { loading: authLoading, userCode, planStatus } = useAuth();
 
   /* ========= states ========= */
@@ -160,7 +159,7 @@ export default function SofiaChat() {
     :where(.sofia-container) .sof-msgs .sof-bubble.is-user{
       color: #fff !important;
       text-shadow: 0 1px 0 rgba(0,0,0,.08);
-      border: none !important;
+      border: none !重要;
       background: linear-gradient(180deg, #8aa0ff 0%, #6b8cff 60%, #5979ee 100%) !important;
       box-shadow: 0 1px 0 rgba(255,255,255,.25) inset, 0 10px 24px rgba(107,140,255,.22) !important;
       border-bottom-right-radius: 6px !important;
@@ -260,66 +259,100 @@ export default function SofiaChat() {
     fetchMessages(conversationId);
   }, [canUse, conversationId]);
 
-  /* ===== 送信 ===== */
-  const handleSend = async (input: string, _files: File[] | null = null): Promise<void> => {
-    const text = (input ?? '').trim();
-    if (!text || !userCode) return;
 
-    const optimistic: Message = {
-      id: (globalThis.crypto?.randomUUID?.() ?? `tmp-${Date.now()}`),
-      role: 'user',
-      content: text,
-      created_at: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, optimistic]);
+  const endpointFor = (agent: 'mu' | 'iros') =>
+    agent === 'mu' ? '/api/agent/muai' : '/api/sofia';
 
-    try {
-      const msgsForApi = [...messages, optimistic].map((m) => ({ role: m.role, content: m.content }));
-      const body = {
-        user_code: userCode,
+  /* ===== 送信（mu/iros 切替） ===== */
+/* ===== 送信（mu/iros 切替） ===== */
+const handleSend = async (input: string, _files: File[] | null = null): Promise<void> => {
+  const text = (input ?? '').trim();
+  if (!text || !userCode) return;
+
+  const optimistic: Message = { id: crypto.randomUUID?.() ?? `tmp-${Date.now()}`, role:'user', content:text, created_at:new Date().toISOString() };
+  setMessages((prev) => [...prev, optimistic]);
+
+  try {
+    const url = endpointFor(agent);
+    let body: any;
+
+    if (agent === 'mu') {
+      // MU は1発話ずつ。親=conversationId, 子=sub_id を毎回発行
+      const subId = crypto.randomUUID?.() ?? `sub-${Date.now()}`;
+      body = {
+        message: text,
+        master_id: conversationId ?? undefined,
+        sub_id: subId,
+        thread_id: null,
+        board_id: null,
+        source_type: 'chat',
+      };
+    } else {
+      // Sofia/Iros は履歴バルク
+      body = {
         conversation_code: conversationId ?? '',
         mode: 'normal',
-        vars: { debug: true, client: 'web' },
-        messages: msgsForApi,
+        messages: [
+          ...messages.map((m) => ({ role: m.role, content: m.content })),
+          { role: 'user', content: text },
+        ],
       };
+    }
 
-      const r = await fetchWithIdToken('/api/sofia', { method: 'POST', body: JSON.stringify(body) });
-      const js: SofiaPostRes = await r.json().catch(() => ({}));
+    const r = await fetchWithIdToken(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const js: any = await r.json().catch(() => ({}));
 
-      if (js.conversation_code && js.conversation_code !== conversationId) {
-        setConversationId(js.conversation_code);
-      }
-      if (js.reply) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: (globalThis.crypto?.randomUUID?.() ?? `a-${Date.now()}`),
-            role: 'assistant',
-            content: js.reply as string,
-            created_at: new Date().toISOString(),
-          },
-        ]);
-      }
+    // 会話ID更新（MU は conversation_id、Sofia/Iros は conversation_code）
+    const nextConvId = agent === 'mu' ? (js.conversation_id ?? body.master_id) : js.conversation_code;
+    if (nextConvId && nextConvId !== conversationId) {
+      setConversationId(nextConvId);
+      setConversations((prev) =>
+        prev.some((x) => x.id === nextConvId)
+          ? prev
+          : [{ id: nextConvId, title: agent === 'mu' ? 'Mu 会話' : (agent === 'iros' ? 'Iros 会話' : 'Sofia 会話'), updated_at: new Date().toISOString() }, ...prev]
+      );
+    }
 
-      if (js.meta) {
-        const m = normalizeMeta(js.meta);
-        setMeta(m);
-      }
-
-      fetchConversations();
-    } catch (e) {
-      console.error('[SofiaChat] send error:', e);
+    if (typeof js.reply === 'string') {
       setMessages((prev) => [
         ...prev,
         {
-          id: (globalThis.crypto?.randomUUID?.() ?? `e-${Date.now()}`),
+          id: crypto.randomUUID?.() ?? `a-${Date.now()}`,
           role: 'assistant',
-          content: '（通信に失敗しました。時間をおいて再度お試しください）',
-        },
+          content: js.reply,
+          created_at: new Date().toISOString(),
+          agent: agent === 'mu' ? 'Mu' : (agent === 'iros' ? 'Iros' : 'Sofia'),
+          ...(js?.meta ? { meta: js.meta } : {}),
+        } as any,
       ]);
     }
-  };
 
+    if (js.meta) {
+      const m = normalizeMeta(js.meta);
+      if (m) setMeta(m);
+    }
+
+    if (typeof js.credit_balance === 'number') {
+      window.dispatchEvent(new CustomEvent('sofia_credit', { detail: { credits: js.credit_balance } }));
+      if (js.credit_balance < 1) {
+        window.dispatchEvent(new CustomEvent('toast', { detail: { kind: 'warn', msg: '残りクレジットが少なくなっています。' } }));
+      }
+    }
+
+    if (!r.ok && (r.status === 402 || js?.error === 'insufficient_credit')) {
+      window.dispatchEvent(new CustomEvent('toast', { detail: { kind: 'warn', msg: '残高が不足しています。チャージをご確認ください。' } }));
+    }
+  } catch (e) {
+    console.error('[SofiaChat] send error:', e);
+    setMessages((prev) => [...prev, { id: crypto.randomUUID?.() ?? `e-${Date.now()}`, role:'assistant', content:'（通信に失敗しました。時間をおいて再度お試しください）' }]);
+  }
+};
+
+  
   /* ===== その他 ===== */
   const handleNewChat = () => {
     setConversationId(undefined);
@@ -425,7 +458,7 @@ export default function SofiaChat() {
             name: j.click_username ?? j.user_code ?? userCode,
             userType: String(j.click_type ?? 'free'),
             credits: Number(j.sofia_credit ?? 0) || 0,
-            avatarUrl: j.avatar_url ?? '/avatar.png', // ← フォールバック統一
+            avatarUrl: j.avatar_url ?? '/avatar.png',
           });
         } else {
           setUiUser({
@@ -449,54 +482,70 @@ export default function SofiaChat() {
   }, [userCode]);
 
   /* ========= guard ========= */
-  if (authLoading) return <div style={styles.center}>読み込み中…</div>;
-  if (!userCode) return <div style={styles.center}>ログインが必要です</div>;
-
-  /* ========= render ========= */
-  return (
-    <div className="sofia-container sof-center">
-      <div className="sof-header-fixed">
-        <Header
-          title="iros_AI"
-          isMobile
-          onShowSideBar={() => setIsMobileMenuOpen(true)}
-          onCreateNewChat={handleNewChat}
-        />
-      </div>
-
-      <div className="sof-top-spacer" style={{ height: 'calc(var(--sof-header-h, 56px) + 12px)' }} aria-hidden />
-
-      <SidebarMobile
-        isOpen={isMobileMenuOpen}
-        onClose={() => setIsMobileMenuOpen(false)}
-        conversations={conversations}
-        onSelect={handleSelectConversation}
-        onDelete={handleDelete}
-        onRename={handleRename}
-        userInfo={
-          uiUser ?? {
-            id: userCode,
-            name: userCode,
-            userType: 'free',
-            credits: 0,
-          }
-        }
-        meta={meta}
+/* ========= render ========= */
+return (
+  <div className="sofia-container sof-center">
+    {/* ✅ ヘッダーは常に表示しておく */}
+    <div className="sof-header-fixed">
+      <Header
+        agent={agent} // ← agentを渡すだけでOK
+        isMobile
+        onShowSideBar={() => setIsMobileMenuOpen(true)}
+        onCreateNewChat={handleNewChat}
       />
-
-      {/* ✅ ユーザー表示用に currentUser を渡す */}
-      <MessageList messages={messages} currentUser={uiUser ?? undefined} />
-
-      <div ref={endRef} />
-
-      <div className="sof-compose-dock" ref={composeRef}>
-        <ChatInput onSend={(text) => handleSend(text, null)} />
-      </div>
-
-      <div className="sof-underlay" aria-hidden />
-      <div className="sof-footer-spacer" />
     </div>
-  );
+
+    <div
+      className="sof-top-spacer"
+      style={{ height: 'calc(var(--sof-header-h, 56px) + 12px)' }}
+      aria-hidden
+    />
+
+    {/* ✅ 本文だけ状態で切替 */}
+    {authLoading ? (
+      <div style={styles.center}>読み込み中…</div>
+    ) : !userCode ? (
+      <div style={styles.center}>ログインが必要です</div>
+    ) : (
+      <>
+        <SidebarMobile
+          isOpen={isMobileMenuOpen}
+          onClose={() => setIsMobileMenuOpen(false)}
+          conversations={conversations}
+          onSelect={handleSelectConversation}
+          onDelete={handleDelete}
+          onRename={handleRename}
+          userInfo={
+            uiUser ?? {
+              id: userCode,
+              name: userCode,
+              userType: 'free',
+              credits: 0,
+            }
+          }
+          meta={meta}
+        />
+
+        {/* ✅ currentUser と agent を渡す */}
+        <MessageList
+          messages={messages}
+          currentUser={uiUser ?? undefined}
+          agent={agent}
+        />
+
+        <div ref={endRef} />
+
+        <div className="sof-compose-dock" ref={composeRef}>
+          <ChatInput onSend={(text) => handleSend(text, null)} />
+        </div>
+      </>
+    )}
+
+    <div className="sof-underlay" aria-hidden />
+    <div className="sof-footer-spacer" />
+  </div>
+);
+
 }
 
 const styles: Record<string, React.CSSProperties> = {

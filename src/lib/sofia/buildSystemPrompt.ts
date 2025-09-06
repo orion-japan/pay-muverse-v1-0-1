@@ -159,6 +159,14 @@ export function buildSofiaSystemPrompt(opts: BuildPromptOptions = {}): string {
       `)
       : '';
 
+  // ★ 追加：色エネルギーによる表現ルール（五行ワードを禁止）
+  const colorEnergyRules = dedent(`
+    ## Color Energy Rules
+    - 感情・心理の傾向は**色**で表現する：Blue / Red / Black / Green / Yellow を基本に、必要に応じて Purple / Brown / Silver / White / Teal / Magenta などの混色を使ってよい。
+    - 次の語は**出力に含めない**：木 / 火 / 土 / 金 / 水 / 五行（およびそれらのローマ字: moku/hi/tsuchi/kin/mizu）。
+    - 確定ラベリングを避け、「いまは◯◯寄り」「◯◯の色味が少し強い」のように**柔らかく**示す。
+  `);
+
   // 最終合成
   const finalSystem = dedent(`
     ${base}
@@ -166,6 +174,8 @@ export function buildSofiaSystemPrompt(opts: BuildPromptOptions = {}): string {
     ${configNote}
 
     ${resonance}
+
+    ${colorEnergyRules}
 
     ${toneNote}
 
