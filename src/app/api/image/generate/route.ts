@@ -41,7 +41,13 @@ export async function POST(req: NextRequest) {
     const { model, size, cost, reason } = CONFIG[agent as "mu" | "iros"];
 
     // クレジット消費
-    await reserveAndSpendCredit(user_code, cost, reason, { model, size });
+    await reserveAndSpendCredit({
+      user_code,
+      amount: cost,
+      reason,
+      meta: { model, size }
+    });
+    
 
     // 画像生成（URL が返る）
 // 画像生成（URL か b64_json が返る）

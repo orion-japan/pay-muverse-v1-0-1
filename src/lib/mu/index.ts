@@ -3,7 +3,10 @@
 
 export { buildMuSystemPrompt } from "./buildSystemPrompt";
 export { MU_AGENT, MU_UI_TEXT, MU_CONFIG_VERSION } from "./config";
-export { MuCredits, getMuTextCredit, getMuImageCredit } from "./credits";
+
+// 型は export type、値は通常の export に分離
+export type { MuCredits } from "./credits";
+export { getMuTextCredit, getMuImageCredit } from "./credits";
 
 // ★ Mu 返信生成
 export { generateMuReply } from "./generate";
