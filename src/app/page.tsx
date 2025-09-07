@@ -195,11 +195,11 @@ export default function DashboardPage() {
     { title: 'Self', link: '/self', img: '/nikki.png', alt: 'Self' },
     { title: 'Vision', link: '/vision', img: '/ito.png', alt: 'Vision' },
     { title: 'Create', link: '/create', img: '/mu_create.png', alt: 'Create' },
-    { title: 'm Tale', link: '/', img: '/m_tale.png', alt: 'm Tale' },
+    { title: 'm Talk', link: '/mtalk', img: '/m_tale.png', alt: 'm Talk' },
     { title: 'm Shot', link: '/', img: '/shot.png', alt: 'm Shot' }, // ガード対象
     { title: 'iros', link: '/iros', img: '/ir2.png', alt: 'iros' },
   ];
-
+<a href="/chat?agent=iros" style={{zIndex: 1000, pointerEvents: 'auto'}}>Open iros</a>
   // 共鳴色
   const glowColors: Record<string, string> = {
     '/mu_full': '#8a2be2',

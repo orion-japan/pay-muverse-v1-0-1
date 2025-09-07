@@ -9,6 +9,7 @@ import React, {
   useLayoutEffect,
   useCallback,
 } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { fetchWithIdToken } from '@/lib/fetchWithIdToken';
 import { SOFIA_CONFIG } from '@/lib/sofia/config';
@@ -25,14 +26,16 @@ import type { MetaData } from '@/components/SofiaChat/MetaPanel';
 import Image from 'next/image';
 
 /* ========= types ========= */
-type Role = 'user' | 'assistant';
+type Role = 'user' | 'assistant' | 'system';
 export type Message = {
   id: string;
   role: Role;
   content: string;
   created_at?: string;
   isPreview?: boolean;
-  // uploaded_image_urls?: string[];
+  meta?: any;
+  free?: boolean;   // 課金対象外（mTalk共有用）
+  agent?: string;   // 表示用
 };
 
 type ConvListItem = {
@@ -53,6 +56,7 @@ type SofiaGetMessages = { messages?: { role: Role; content: string }[] };
 
 type SofiaPostRes = {
   conversation_code?: string;
+  conversation_id?: string;
   reply?: string;
   meta?: any;
 };
@@ -88,13 +92,20 @@ const normalizeMeta = (m: any): MetaData | null => {
   return { qcodes, layers, used_knowledge, stochastic: indicator };
 };
 
-/* ========= ここだけ追加（正規化） ========= */
+/* ========= props / helpers ========= */
 type SofiaChatProps = { agent?: string };
 const normalizeAgent = (a?: string): 'mu' | 'iros' =>
   a && /^mu\b/i.test(a) ? 'mu' : 'iros';
 
 export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
-  const agentK = normalizeAgent(agentProp);
+  const params = useSearchParams();
+  const urlAgent = (params?.get('agent') as 'mu' | 'iros' | null) ?? null;
+  const urlCid = params?.get('cid') ?? undefined;
+  const urlFrom = params?.get('from') ?? undefined;
+  const urlSummary = params?.get('summary_hint') ?? undefined;
+
+  // URL の agent があれば優先して正規化
+  const agentK = normalizeAgent(urlAgent ?? agentProp);
 
   const { loading: authLoading, userCode, planStatus } = useAuth();
 
@@ -114,7 +125,7 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
     avatarUrl?: string | null;
   } | null>(null);
 
-  // ========= 追加: agentごとに会話ID/メッセージを分離保持 =========
+  // ========= agentごとに会話ID/メッセージを分離保持 =========
   const convIdByAgent = useRef<Record<'mu' | 'iros', string | undefined>>({
     mu: undefined,
     iros: undefined,
@@ -134,7 +145,6 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
     },
     []
   );
-  // agent切替時に、そのagentの状態を表示へ反映
   useEffect(() => {
     loadAgentStateToView(agentK);
   }, [agentK, loadAgentStateToView]);
@@ -189,7 +199,7 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
     :where(.sofia-container) .sof-msgs .sof-bubble.is-user{
       color: #fff !important;
       text-shadow: 0 1px 0 rgba(0,0,0,.08);
-      border: none !重要;
+      border: none !important;
       background: linear-gradient(180deg, #8aa0ff 0%, #6b8cff 60%, #5979ee 100%) !important;
       box-shadow: 0 1px 0 rgba(255,255,255,.25) inset, 0 10px 24px rgba(107,140,255,.22) !important;
       border-bottom-right-radius: 6px !important;
@@ -216,7 +226,7 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
     el.textContent = `.sof-overlay{ display:none !important; }`;
   }, []);
 
-  /* ===== 高さ反映（Composeのみ残す） ===== */
+  /* ===== Compose の高さ反映 ===== */
   const composeRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const el = composeRef.current;
@@ -234,31 +244,81 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
     document.body.style.setProperty('--meta-height', `0px`);
   }, []);
 
+  /* ======== mTalk 要約の遅延注入（重要） ======== */
+  // 1回だけ履歴取得後に先頭へ差し込むための一時置き場
+  const mtalkSeedRef = useRef<string | null>(null);
+
+  // 履歴配列へ mTalk共有を先頭追加するヘルパー
+  const injectMtalkSeed = useCallback((rows: Message[], convId?: string): Message[] => {
+    const seed = mtalkSeedRef.current;
+    if (!seed) return rows;
+    if (rows.length && (rows[0] as any)?.meta?.from === 'mtalk') return rows; // 重複防止
+    const sysMsg: Message = {
+      id: `mtalk-seed-${convId || Date.now()}`,
+      role: 'system',
+      content: `【mTalkからの共有】\n${seed}`,
+      created_at: new Date().toISOString(),
+      meta: { from: 'mtalk' },
+      free: true,
+    };
+    mtalkSeedRef.current = null; // 1回で使い切る
+    return [sysMsg, ...rows];
+  }, []);
+
+  // mTalkからの遷移なら seed を ref に保持（ここでは挿入しない）
+  useEffect(() => {
+    if (urlFrom !== 'mtalk') return;
+
+    // URL の会話IDを反映
+    if (urlCid) {
+      convIdByAgent.current[agentK] = urlCid;
+      setConversationId(urlCid);
+    }
+
+    // まず sessionStorage の全文を読む → なければ URL の短縮版
+    let seed = '';
+    if (typeof window !== 'undefined' && urlCid) {
+      const ss = sessionStorage.getItem(`mtalk:seed:${urlCid}`);
+      if (ss) seed = ss;
+    }
+    if (!seed && urlSummary) {
+      seed = decodeURIComponent(urlSummary);
+    }
+
+    if (seed && typeof window !== 'undefined' && urlCid) {
+      try { sessionStorage.removeItem(`mtalk:seed:${urlCid}`); } catch {}
+    }
+
+    if (seed) mtalkSeedRef.current = seed;
+  }, [agentK, urlFrom, urlCid, urlSummary]);
+
   /* ===== 会話一覧 ===== */
   const fetchConversations = async () => {
     if (!userCode) return;
     try {
       if (agentK === 'mu') {
-        // ✅ Mu の一覧APIを叩く
+        // Mu の一覧API
         const r =
           (await fetchWithIdToken('/api/mu/list').catch(() => null)) ||
           (await fetchWithIdToken('/api/agent/muai/list').catch(() => null)); // 後方互換
         if (!r || !r.ok) throw new Error(`mu list ${r?.status ?? 'noresp'}`);
         const js: any = await r.json().catch(() => ({}));
-        const items = ((js.items ?? []) as any[]).map((x) => ({
-          id: String(x.id ?? x.master_id ?? ''),
-          title: String(x.title ?? 'Mu 会話'),
-          updated_at: x.updated_at ?? null,
-        })).filter(x => x.id);
+        const items = ((js.items ?? []) as any[])
+          .map((x) => ({
+            id: String(x.id ?? x.master_id ?? ''),
+            title: String(x.title ?? 'Mu 会話'),
+            updated_at: x.updated_at ?? null,
+          }))
+          .filter((x) => x.id);
         setConversations(items);
 
-        // 既に保存されている Mu の会話IDがあれば UI にだけ反映（自動選択しない）
+        // 保存されている Mu の会話IDがあれば UI にだけ反映（自動選択しない）
         const currentMu = convIdByAgent.current.mu;
         if (currentMu) setConversationId(currentMu);
         return;
       }
 
-      // ✅ Iros（既存の /api/sofia を使用）
+      // Iros（/api/sofia）
       const r = await fetchWithIdToken(`/api/sofia?user_code=${encodeURIComponent(userCode)}`);
       if (!r.ok) throw new Error(`list ${r.status}`);
       const js: SofiaGetList = await r.json().catch(() => ({}));
@@ -273,7 +333,7 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
 
       setConversations(items);
 
-      // Iros は自動選択の従来挙動を維持
+      // Iros は従来通りの自動選択
       const currentIros = convIdByAgent.current.iros;
       if (!currentIros && items[0]?.id) {
         convIdByAgent.current.iros = items[0].id;
@@ -286,53 +346,55 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
     }
   };
 
-/* ===== メッセージ ===== */
-const fetchMessages = async (convId: string) => {
-  if (!userCode || !convId) return;
-  try {
-    if (agentK === 'mu') {
-      // ✅ Mu の履歴取得APIを叩く
-      const r = await fetchWithIdToken(`/api/mu/turns?conv_id=${encodeURIComponent(convId)}`);
-      if (!r.ok) throw new Error(`mu turns ${r.status}`);
-      const js: any = await r.json().catch(() => ({}));
+  /* ===== メッセージ ===== */
+  const fetchMessages = async (convId: string) => {
+    if (!userCode || !convId) return;
+    try {
+      if (agentK === 'mu') {
+        // Mu の履歴取得API
+        const r = await fetchWithIdToken(`/api/mu/turns?conv_id=${encodeURIComponent(convId)}`);
+        if (!r.ok) throw new Error(`mu turns ${r.status}`);
+        const js: any = await r.json().catch(() => ({}));
 
-      const rows = (js.items ?? []).map((m: any) => ({
-        id: m.id,
-        role: m.role,
+        const rows = (js.items ?? []).map((m: any) => ({
+          id: m.id,
+          role: (m.role as Role) ?? 'assistant',
+          content: m.content,
+          created_at: m.created_at,
+        })) as Message[];
+
+        const withSeed = injectMtalkSeed(rows, convId);
+        setMessages(withSeed);
+        saveViewStateToAgent(agentK, conversationId, withSeed);
+        return;
+      }
+
+      // Iros の履歴取得
+      const r = await fetchWithIdToken(
+        `/api/sofia?user_code=${encodeURIComponent(userCode)}&conversation_code=${encodeURIComponent(
+          convId
+        )}`
+      );
+      if (!r.ok) throw new Error(`messages ${r.status}`);
+      const js: SofiaGetMessages = await r.json().catch(() => ({}));
+      const rows = (js.messages ?? []).map((m, i) => ({
+        id: `${i}-${m.role}-${m.content.slice(0, 8)}`,
+        role: (m.role as Role) ?? 'assistant',
         content: m.content,
-        created_at: m.created_at,
       })) as Message[];
 
-      setMessages(rows);
-      saveViewStateToAgent(agentK, conversationId, rows);
-      return;
+      setMessages((prev) => {
+        const map = new Map<string, Message>(prev.map((m) => [m.id, m]));
+        for (const m of rows) map.set(m.id, m);
+        const merged = Array.from(map.values());
+        const withSeed = injectMtalkSeed(merged, convId);
+        saveViewStateToAgent(agentK, conversationId, withSeed);
+        return withSeed;
+      });
+    } catch (e) {
+      console.error('[SofiaChat] fetchMessages error:', e);
     }
-
-    // ✅ Iros の場合（従来どおり）
-    const r = await fetchWithIdToken(
-      `/api/sofia?user_code=${encodeURIComponent(userCode)}&conversation_code=${encodeURIComponent(
-        convId
-      )}`
-    );
-    if (!r.ok) throw new Error(`messages ${r.status}`);
-    const js: SofiaGetMessages = await r.json().catch(() => ({}));
-    const rows = (js.messages ?? []).map((m, i) => ({
-      id: `${i}-${m.role}-${m.content.slice(0, 8)}`,
-      role: m.role,
-      content: m.content,
-    })) as Message[];
-    setMessages((prev) => {
-      const map = new Map<string, Message>(prev.map((m) => [m.id, m]));
-      for (const m of rows) map.set(m.id, m);
-      const merged = Array.from(map.values());
-      saveViewStateToAgent(agentK, conversationId, merged);
-      return merged;
-    });
-  } catch (e) {
-    console.error('[SofiaChat] fetchMessages error:', e);
-  }
-};
-
+  };
 
   useEffect(() => {
     if (!canUse) return;
@@ -359,7 +421,6 @@ const fetchMessages = async (convId: string) => {
     };
     setMessages((prev) => {
       const next = [...prev, optimistic];
-      // ★ 現在の agent の裏ストアにも保存
       saveViewStateToAgent(agentK, conversationId, next);
       return next;
     });
@@ -380,7 +441,7 @@ const fetchMessages = async (convId: string) => {
           source_type: 'chat',
         };
       } else {
-        // Sofia/Iros は履歴バルク
+        // Iros は履歴バルク
         body = {
           conversation_code: conversationId ?? '',
           mode: 'normal',
@@ -396,13 +457,13 @@ const fetchMessages = async (convId: string) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const js: any = await r.json().catch(() => ({}));
+      const js: SofiaPostRes & any = await r.json().catch(() => ({}));
 
       // 会話ID更新（MU は conversation_id、Iros は conversation_code）
-      const nextConvId = agentK === 'mu' ? js.conversation_id ?? body.master_id : js.conversation_code;
+      const nextConvId =
+        agentK === 'mu' ? js.conversation_id ?? body.master_id : js.conversation_code;
       if (nextConvId && nextConvId !== conversationId) {
         setConversationId(nextConvId);
-        // ★ 現在の agent の会話IDを更新
         saveViewStateToAgent(agentK, nextConvId, undefined);
         setConversations((prev) =>
           prev.some((x) => x.id === nextConvId)
@@ -431,7 +492,6 @@ const fetchMessages = async (convId: string) => {
               ...(js?.meta ? { meta: js.meta } : {}),
             } as any,
           ];
-          // ★ 現在の agent の裏ストアにも保存
           saveViewStateToAgent(agentK, conversationId, next);
           return next;
         });
@@ -475,9 +535,26 @@ const fetchMessages = async (convId: string) => {
     }
   };
 
+  /* ===== mTalk要約を初回入力として自動送信（1回だけ） ===== */
+  const autoAskedRef = useRef(false);
+  useEffect(() => {
+    if (urlFrom !== 'mtalk' || autoAskedRef.current) return;
+    const hasSeed = messages.some((m) => m.meta?.from === 'mtalk');
+    const hasAssistantReply = messages.some((m) => m.role === 'assistant' && !m.meta?.from);
+    if (hasSeed && !hasAssistantReply) {
+      autoAskedRef.current = true;
+      // トーンは agent で切替（Mu=実用600字 / Iros=深掘り800字以上）
+      handleSend(
+        agentK === 'mu'
+          ? '上のmTalk要約を前提に、実用寄り600字前後でお願いします。'
+          : '上のmTalk要約を前提に、800字以上で「未消化の闇＝根っこにある恐れ・意味づけ」を丁寧に言語化するマインドトーク寄りの鑑定を書いてください。1) 反復している自動思考の台本を具体的な台詞で再現（例：「今日は何もできなかった→やはり私は価値がない」）。2) その台本が生まれた背景仮説（幼少期の評価軸、比較癖、見捨てられ不安等）と、身体感覚の連動（胸部の締めつけ、喉のつかえ等）。3) 思考と自分の〈距離をとる〉手順（命名→観察→3呼吸→再選択）。4) 反復停止のための“儀式”を提案（夜1分のセルフトーク書き換え／RAIN／内なるパーツへの一言など）。5) 同じ型で再発する出来事の例を2–3件挙げ、「このパターンを解ければマインドトークは静まる」まで導いてください。最後に、今夜できる1つの小さな実験で締めてください。'
+      );
+      
+    }
+  }, [messages, urlFrom, agentK]);
+
   /* ===== その他 ===== */
   const handleNewChat = () => {
-    // ★ 現在の agent だけリセット
     convIdByAgent.current[agentK] = undefined;
     msgsByAgent.current[agentK] = [];
     setConversationId(undefined);
@@ -486,13 +563,12 @@ const fetchMessages = async (convId: string) => {
   };
 
   const handleSelectConversation = (id: string) => {
-    // ★ 現在の agent にのみ紐付け
     convIdByAgent.current[agentK] = id;
     setConversationId(id);
     setIsMobileMenuOpen(false);
   };
 
-  /* ===== サイドバー：リネーム / 削除 (API接続) ===== */
+  /* ===== サイドバー：リネーム / 削除 ===== */
   const handleRename = useCallback(async (id: string, newTitle: string) => {
     try {
       const r = await fetchWithIdToken(`/api/conv/${encodeURIComponent(id)}`, {
@@ -611,10 +687,10 @@ const fetchMessages = async (convId: string) => {
   /* ========= render ========= */
   return (
     <div className="sofia-container sof-center">
-      {/* ✅ ヘッダーは常に表示しておく */}
+      {/* ヘッダー */}
       <div className="sof-header-fixed">
         <Header
-          agent={agentK} // ← 正規化済みの agent を渡す
+          agent={agentK}
           isMobile
           onShowSideBar={() => setIsMobileMenuOpen(true)}
           onCreateNewChat={handleNewChat}
@@ -627,7 +703,7 @@ const fetchMessages = async (convId: string) => {
         aria-hidden
       />
 
-      {/* ✅ 本文だけ状態で切替 */}
+      {/* 本文 */}
       {authLoading ? (
         <div style={styles.center}>読み込み中…</div>
       ) : !userCode ? (
@@ -652,7 +728,6 @@ const fetchMessages = async (convId: string) => {
             meta={meta}
           />
 
-          {/* ✅ currentUser と agent を渡す */}
           <MessageList
             messages={messages}
             currentUser={uiUser ?? undefined}

@@ -1,0 +1,142 @@
+/* ダーク基調 */
+.mtalk-root {
+    --bg: #0b1437;
+    --panel: #111a3f;
+    --panel2: #132151;
+    --text: #e8ecff;
+    --sub: #b8c0e8;
+    --accent: #7c8cff;
+    --danger: #ff6b88;
+    --ok: #61d6a7;
+  
+    min-height: 100vh;
+    background: radial-gradient(1200px 600px at 20% -10%, #1a255a 0%, #0b1437 60%) no-repeat,
+      var(--bg);
+    color: var(--text);
+    padding: 16px;
+  }
+  
+  .mtalk-intro {
+    background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    padding: 16px 18px;
+    margin-bottom: 14px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  }
+  .mtalk-intro h1 {
+    margin: 0 0 8px;
+    font-size: 20px;
+    letter-spacing: 0.3px;
+  }
+  .mtalk-intro .lead {
+    margin: 0;
+    color: var(--sub);
+    line-height: 1.6;
+  }
+  
+  .mtalk-agent {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .mtalk-agent .label { color: var(--sub); }
+  .mtalk-agent .radio { display: inline-flex; align-items: center; gap: 6px; }
+  
+  .mtalk-input {
+    background: var(--panel);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 14px;
+    padding: 12px;
+  }
+  .mtalk-input textarea {
+    width: 100%;
+    resize: vertical;
+    background: var(--panel2);
+    color: var(--text);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    padding: 12px;
+    line-height: 1.6;
+    outline: none;
+  }
+  .mtalk-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 10px;
+  }
+  button.primary, button.secondary {
+    appearance: none;
+    border: 0;
+    border-radius: 10px;
+    padding: 10px 14px;
+    cursor: pointer;
+    color: #fff;
+  }
+  button.primary { background: linear-gradient(90deg, #6c7bff, #8c6cff); }
+  button.primary:disabled { opacity: .6; cursor: not-allowed; }
+  button.secondary { background: #2a3370; border: 1px solid rgba(255,255,255,0.1); }
+  
+  .warn { color: #ffd37c; }
+  .error {
+    margin-top: 8px;
+    color: var(--danger);
+    font-size: 14px;
+  }
+  
+  .mtalk-result {
+    margin-top: 14px;
+  }
+  .placeholder {
+    opacity: 0.6;
+    padding: 16px;
+    border: 1px dashed rgba(255,255,255,0.15);
+    border-radius: 12px;
+  }
+  
+  .report-card {
+    background: var(--panel);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 14px;
+    padding: 12px;
+  }
+  .report-card .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    color: var(--sub);
+    margin-bottom: 8px;
+  }
+  .pill {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 999px;
+    padding: 2px 8px;
+  }
+  .q-badge {
+    border-radius: 8px;
+    padding: 4px 8px;
+    color: #000;
+    font-weight: 700;
+  }
+  .q-badge.q1 { background: #d3e3ff; }  /* 金/秩序 */
+  .q-badge.q2 { background: #ffd3d3; }  /* 木/怒り */
+  .q-badge.q3 { background: #fff0c8; }  /* 土/不安 */
+  .q-badge.q4 { background: #d2f0ff; }  /* 水/恐怖 */
+  .q-badge.q5 { background: #ffe0f5; }  /* 火/情熱 */
+  
+  .reply {
+    white-space: pre-wrap;
+    line-height: 1.7;
+    background: var(--panel2);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px;
+    padding: 12px;
+    color: var(--text);
+    margin: 0 0 10px;
+  }
+  .report-actions { display: flex; justify-content: flex-end; }
+  

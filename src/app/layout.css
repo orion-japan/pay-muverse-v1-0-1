@@ -27,3 +27,9 @@ html, body {
     padding-bottom: var(--footer-safe-pad, 56px) !important;
   }
   
+  /* layout.css など共通スタイルに追記 */
+.page-container {
+  max-width: 480px;       /* スマホ幅に固定 */
+  margin: 0 auto;         /* 中央寄せ */
+  width: 100%;            /* 横スクロール防止 */
+}
