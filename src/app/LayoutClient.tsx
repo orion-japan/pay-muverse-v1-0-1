@@ -18,6 +18,9 @@ import {
   tlog, // ★ 追加
 } from '@/lib/telemetry'
 
+// ★ 追加: Resonance Context（Q/Phase の共有）
+import { ResonanceProvider, useResonance } from '@/state/resonance/ResonanceContext'
+
 /* =========================
    Portal 先のフッター高さを“確実に”取得して
    CSS 変数（--footer-h / --footer-safe-pad）を更新するフック
@@ -161,6 +164,20 @@ function showToast(title: string, body: string, url: string) {
   setTimeout(() => div.remove(), 8000)
 }
 
+/* ★ 追加：Auth→ResonanceContext へ userCode を流し込むだけの小コンポーネント */
+function BootstrapResonanceUser() {
+  const { userCode } = useAuth()
+  const { state, actions } = useResonance()
+  useEffect(() => {
+    if (userCode && state.userCode !== userCode) {
+      actions.setUserCode(userCode)
+      // 起動時に一度サーバ同期（UIは止めない）
+      actions.syncFromServer().catch(() => {})
+    }
+  }, [userCode, state.userCode, actions])
+  return null
+}
+
 export default function LayoutClient({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const { userCode } = useAuth()
@@ -233,9 +250,13 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
     }
   }, [userCode])
 
+  // ★ ここだけ Provider を巻く（構造はそのまま）
   return (
-    <div className={`app-container ${isMuAI ? 'mu-ai' : ''}`} suppressHydrationWarning>
-      <LayoutBody>{children}</LayoutBody>
-    </div>
+    <ResonanceProvider>
+      <BootstrapResonanceUser />
+      <div className={`app-container ${isMuAI ? 'mu-ai' : ''}`} suppressHydrationWarning>
+        <LayoutBody>{children}</LayoutBody>
+      </div>
+    </ResonanceProvider>
   )
 }
