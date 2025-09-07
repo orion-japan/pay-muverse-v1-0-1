@@ -198,11 +198,25 @@ export async function POST(req: NextRequest) {
     });
 
     const replyText: string = String(mu?.reply ?? '');
-    const q_code: string | null = mu?.q_code ?? null;
-    const depth_stage: string | null = mu?.depth_stage ?? null;
-    const confidence: number | null =
-      typeof mu?.confidence === 'number' ? mu.confidence : null;
 
+    const q_code: string | null =
+      (mu as any)?.q_code ??
+      (mu as any)?.current_q ??
+      (mu as any)?.meta?.currentQ ??
+      (mu as any)?.meta?.current_q ??
+      null;
+    
+    const depth_stage: string | null =
+      (mu as any)?.depth_stage ??
+      (mu as any)?.meta?.depthStage ??
+      null;
+    
+    const confidence: number | null =
+      typeof (mu as any)?.confidence === 'number'
+        ? (mu as any).confidence
+        : typeof (mu as any)?.meta?.relation?.confidence === 'number'
+          ? (mu as any).meta.relation.confidence
+          : null;
     if (!replyText) {
       await voidCreditByKey(authKey);
       await recordMuTextTurn({
