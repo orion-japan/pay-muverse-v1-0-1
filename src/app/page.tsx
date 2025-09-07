@@ -189,7 +189,7 @@ export default function DashboardPage() {
 
   // メニュー
   const menuItems: { title: string; link: string; img: string; alt: string }[] = [
-    { title: 'Mu_AI', link: '/mu_full', img: '/mu_ai.png', alt: 'Mu_AI' },
+    { title: 'Mu_AI', link: '/chat', img: '/mu_ai.png', alt: 'Mu_AI' },
     { title: 'Event', link: '/kyomeikai', img: '/kyoumai.png', alt: 'Event' },
     { title: '配信', link: '/kyomeikai/live', img: '/live.png', alt: '共鳴会LIVE' },
     { title: 'Self', link: '/self', img: '/nikki.png', alt: 'Self' },
