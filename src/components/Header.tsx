@@ -22,6 +22,16 @@ export default function Header({ onLoginClick }: Props) {
     router.push('/')
   }
 
+  // ★ 追加：再読み込み（フルリロード）
+  const handleReload = () => {
+    // 完全リロード（状態をすべて捨てる）
+    if (typeof window !== 'undefined') {
+      window.location.reload()
+    }
+    // もし状態は維持してデータだけ更新したい場合は下を使用
+    // router.refresh()
+  }
+
   return (
     // 外枠：全幅・中央寄せ（背景は付けない）
     <header
@@ -82,7 +92,28 @@ export default function Header({ onLoginClick }: Props) {
           Muverse
         </div>
 
-        <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          {/* ★ 追加：再読み込みボタン */}
+          <button
+            onClick={handleReload}
+            aria-label="再読み込み"
+            title="再読み込み"
+            style={{
+              height: '28px',
+              padding: '0 10px',
+              background: 'rgba(255,255,255,0.22)',
+              border: 'none',
+              borderRadius: '8px',
+              color: 'white',
+              fontSize: '12px',
+              fontWeight: 800,
+              cursor: 'pointer',
+              lineHeight: 1,
+            }}
+          >
+            🔄
+          </button>
+
           {isLoggedIn ? (
             <button
               onClick={handleLogout}
