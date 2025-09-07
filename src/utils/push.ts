@@ -1,4 +1,6 @@
 // /src/utils/push.ts
+import { authedFetch } from '@/context/AuthContext';
+
 export async function registerPush(userCode: string) {
   if (typeof window === 'undefined') return;
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
@@ -7,10 +9,15 @@ export async function registerPush(userCode: string) {
 
   const reg =
     (await navigator.serviceWorker.getRegistration()) ??
-    (await navigator.serviceWorker.register('/service-worker.js', { scope: '/' }));
+    (await navigator.serviceWorker.register('/sw.js', { scope: '/' })); // ← 統一
 
-  const perm = await Notification.requestPermission();
-  if (perm !== 'granted') throw new Error('permission denied');
+  // Permission は default のときだけ問い合わせ（既存 granted/denied は尊重）
+  if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') throw new Error('permission denied');
+  } else if (typeof Notification !== 'undefined' && Notification.permission !== 'granted') {
+    throw new Error('permission denied');
+  }
 
   // ---- VAPID key: env → window → <meta> の順で取得し、どこから来たかログ ----
   const fromEnv = (process as any)?.env?.NEXT_PUBLIC_VAPID_PUBLIC_KEY as string | undefined;
@@ -41,7 +48,8 @@ export async function registerPush(userCode: string) {
     },
   };
 
-  const res = await fetch('/api/register-push', {
+  // ★ 認証付き fetch に統一（401/403 自己回復）
+  const res = await authedFetch('/api/register-push', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

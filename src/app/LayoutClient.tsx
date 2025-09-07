@@ -180,7 +180,7 @@ function BootstrapResonanceUser() {
 
 export default function LayoutClient({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  const { userCode } = useAuth()
+  const { userCode, idToken, loading } = useAuth() // ★ idToken/loading を受け取る
   const isMuAI =
     pathname?.startsWith('/mu_ai') === true ||
     pathname?.startsWith('/mu_full') === true
@@ -220,6 +220,10 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
     let onMsg: ((e: MessageEvent) => void) | null = null
     ;(async () => {
       if (!('serviceWorker' in navigator)) return
+
+      // ★ 認証が確定していなければ何もしない（401防止）
+      if (loading || !userCode || !idToken) return
+
       const reg = await navigator.serviceWorker.register('/sw.js')
       console.log('✅ Service Worker registered:', reg)
 
@@ -248,7 +252,7 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
     return () => {
       if (onMsg) navigator.serviceWorker.removeEventListener('message', onMsg)
     }
-  }, [userCode])
+  }, [userCode, idToken, loading]) // ★ 依存を拡張
 
   // ★ ここだけ Provider を巻く（構造はそのまま）
   return (

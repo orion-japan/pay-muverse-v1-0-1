@@ -1,22 +1,50 @@
 // src/lib/mu/buildSystemPrompt.ts
-// Mu のシステムプロンプトを構築して返すヘルパー。
-// ・環境変数でクレジット値を差し替え可能（MU_CREDIT_PER_TURN / MU_CHAT_CREDIT_COST）
-// ・プロンプト本文はCounselor寄り／深掘り抑制仕様
-// ・Q/Phase は裏で反映（数値や名称はユーザーに見せない）
-// ・アプリ案内をランダムで短文提示
+// Mu のシステムプロンプトを Sofia風に合成（persona + mode + vars）
+// ※自由度を高めたライト版：規則は最小限、雰囲気重視
 
-export type MuPromptConfig = {
-  creditPerTurn?: number; // テキスト1往復あたりのクレジット（既定: 0.5）
-  imageCredit?: number;   // 画像1枚あたりのクレジット（既定: 3）
-  promptOverride?: string; // 必要なら本文を丸ごと差し替え
-};
+import { MU_PERSONAS, MuPersonaKey } from "./persona";
+import { MU_CONFIG } from "./config";
 
-export const MU_PROMPT_VERSION = "mu.v1.0.0";
+export type MuMode = "normal" | "intent" | "remake" | "diagnosis";
+export type MuTone =
+  | "compassion_calm"
+  | "mediator_grounded"
+  | "co_creator_clear"
+  | "gentle_guide"
+  | "default";
 
-/** 複数キーのうち最初に見つかった数値を返す */
+export interface BuildMuPromptOptions {
+  personaKey?: MuPersonaKey;
+  mode?: MuMode;
+  vars?: Record<string, any>;
+  includeGuard?: boolean;     // 既定: true
+  enforceResonance?: boolean; // 既定: true
+  tone?: MuTone;
+  creditPerTurn?: number;
+  imageCredit?: number;
+  promptOverride?: string;    // 最優先で全文差し替え
+}
+
+export const MU_PROMPT_VERSION = "mu.v2.1.0";
+
+/* utils */
+const dedent = (s: string) =>
+  s.replace(/^\n?/, "").replace(/\n[ \t]+/g, "\n").trim();
+
+/** ${var|fallback} 形式の変数展開（未使用でも安全に素通し） */
+function applyVars(text: string, vars: Record<string, any>) {
+  return String(text ?? "").replace(/\$\{([^}]+)\}/g, (_, key) => {
+    const [raw, fallback] = String(key).split("|");
+    const name = (raw ?? "").trim();
+    const v = vars?.[name];
+    return (v === undefined || v === null ? (fallback ?? "") : String(v)).trim();
+  });
+}
+
+/** 既定値をenvで上書き（Edge/Node両対応で安全に参照） */
 function envNumAny(def: number, ...names: string[]): number {
   for (const n of names) {
-    const raw = process.env[n];
+    const raw = (process as any)?.env?.[n];
     if (raw != null) {
       const v = Number(raw);
       if (Number.isFinite(v)) return v;
@@ -24,71 +52,157 @@ function envNumAny(def: number, ...names: string[]): number {
   }
   return def;
 }
-
-/** 既定値（環境変数で上書き可能） */
-export const MU_DEFAULTS = {
-  creditPerTurn: envNumAny(0.5, "MU_CREDIT_PER_TURN", "MU_CHAT_CREDIT_COST"),
-  imageCredit:   envNumAny(3,   "MU_IMAGE_CREDIT", "MU_IMAGE_CREDIT_COST"),
+const DEFAULT_CREDITS = {
+  text: envNumAny(0.5, "MU_CREDIT_PER_TURN", "MU_CHAT_CREDIT_COST"),
+  image: envNumAny(3, "MU_IMAGE_CREDIT", "MU_IMAGE_CREDIT_COST"),
 };
 
-/** Mu のシステムプロンプト本文を返す */
-export function buildMuSystemPrompt(cfg: MuPromptConfig = {}): string {
-  const creditPerTurn = cfg.creditPerTurn ?? MU_DEFAULTS.creditPerTurn;
-  const imageCredit = cfg.imageCredit ?? MU_DEFAULTS.imageCredit;
+export function buildMuSystemPrompt(opts: BuildMuPromptOptions = {}): string {
+  const {
+    personaKey = "base",
+    mode = "normal",
+    vars = {},
+    includeGuard = true,
+    enforceResonance = true,
+    tone = "default",
+    creditPerTurn = DEFAULT_CREDITS.text,
+    imageCredit = DEFAULT_CREDITS.image,
+    promptOverride,
+  } = opts;
 
-  // 環境変数に直接プロンプトを入れたい場合は MU_SYSTEM_PROMPT を利用
-  const envOverride = process.env.MU_SYSTEM_PROMPT;
-  if (cfg.promptOverride) return cfg.promptOverride;
-  if (envOverride && envOverride.trim().length > 0) return envOverride;
+  // 1) 明示オーバーライド／環境変数オーバーライド
+  if (promptOverride && promptOverride.trim()) return promptOverride;
+  const envOverride = (process as any)?.env?.MU_SYSTEM_PROMPT as string | undefined;
+  if (envOverride && envOverride.trim()) return envOverride;
 
-  const prompt = `
-あなたは **Mu**。軽快な会話でユーザーの意図を素早く特定し、合意した目標に対して短い行動提案を返します。
-I/T層の深掘りは控えめ（最大1〜2手）。セラピー/診断の断定はしない。法律・医療・投資は一般情報＋専門家への案内にとどめる。
-画像は生成のみ（OCRは使わない）。
+  // 2) Persona（vars 展開に対応）
+  const personaRaw = MU_PERSONAS[personaKey] ?? MU_PERSONAS.base ?? "";
+  const personaText = applyVars(personaRaw, { mode, ...vars });
 
-【会話スタイル】
-- フレンドリーでテンポよく。文章は短く区切る。
-- 1ターンに質問は最大1つ。
-- 選択肢提示（A/B/その他）を多用。
-- Counselor 的に寄り添い、必要に応じて短く復唱する（理解の提示）。
-- Qコード／Phase は裏で参照してトーンと長さを微調整（数値や名称はユーザーに見せない）。
+  // 3) 共鳴スタイル（ライト）
+  const resonance = !enforceResonance
+    ? ""
+    : dedent(`
+      ## Style
+      - Mu は**軽やかな伴走者**。説明は短く、余白を大切にする。
+      - 2〜3文で段落を分け、言葉に**間**をつくる。比喩は**少しだけ**。
+      - 同じ導入句を**続けて使わない**。固定の型に寄りすぎない。
+      - 他人格名は出さない（Mu として一貫）。名乗りは必要時のみ簡潔に。
+      - 必要なら絵文字を**控えめに**使う（最大1つ目安）。
+    `);
 
-【意図抽出ルール】
-- タスク種別（質問/作成/決定/相談）を内心でタグ付け→最短の一文で確認。
-- 目的・制約・期待物（体裁/締切/長さ）に不足があれば1点だけ質問。
-- 合意後は「次アクション」を3行以内・箇条書き1〜3個で提示。
-- 会話が一段落/間ができたときは、ときどき短い整理や一行サマリを差し込む（ランダム、出しすぎない）。
+  // 4) Color Energy（五行語は使わない）
+  const colorEnergy = dedent(`
+    ## Color
+    - 心理のニュアンスは**色**でやわらかく示唆してよい：Blue / Red / Black / Green / Yellow（必要に応じて混色）。
+    - 次の語は出さない：木 / 火 / 土 / 金 / 水 / 五行（moku/hi/tsuchi/kin/mizu）。
+    - 断定せず「◯◯寄り」「◯◯が少し強い」程度に。
+  `);
 
-【ツール利用ポリシー（Mu運用）】
-- 画像生成の提案文：
-  「画像にしますか？（${imageCredit}クレジット）—OKなら “画像にして” と返答してください。」
-- OK受領後の確認：
-  「スタイル（写実/シンプル/手描き風）どれにします？」（未指定はシンプル）
-- 実行後の報告：
-  「できました。アルバムに保存しました。」＋プレビュー1行
-- クレジットは自発案内を控えめ。質問されたら回答（テキスト1往復＝${creditPerTurn}クレジット、画像1枚＝${imageCredit}クレジット）。
+  // 5) Tone（ライト）
+  const toneNote = dedent(`
+    ## Tone
+    - 先に要点を**ひと呼吸分**で示し、続けて補足や提案を添える。
+    - ${
+      tone === "compassion_calm"
+        ? "やわらかさと安心感を優先。"
+        : tone === "mediator_grounded"
+        ? "落ち着いて合意を形にする。"
+        : tone === "co_creator_clear"
+        ? "明快に具体策へ。"
+        : tone === "gentle_guide"
+        ? "丁寧に方向をそっと示す。"
+        : "共感と明晰さのバランスを保つ。"
+    }
+    - 不確実さは**仮説**として扱い、押し付けない。
+  `);
 
-【アプリ案内（必要時のみ／クッション不要・短文・時々ランダム）】
-- 🌱Self：気づき/ポジティブなつぶやき
-- 📖Vision：日記/振り返り（大切なのは習慣）
-- 🎨Create：ビジョンに合う画像をAIで作って保存
-- 🌐IBoard：創造の世界（ここが舞台）
-- 📅Event：習慣と学び（参加チェックを勧める）
-- 💭mTalk：モヤモヤ解消の場
+  // 6) Guardrails（最小限）
+  const guard = !includeGuard
+    ? ""
+    : dedent(`
+      ## Guard
+      - 医療/法務/投資は一般情報に留め、必要なら専門家を案内。
+      - 危険/違法/個人特定は避ける。不確実な事実は「推測/仮説」と明示。
+      - 内部実装の詳細な解説はしない（示唆レベルは可）。
+    `);
 
-【品質ガード】
-- 理由は1つだけ／注意点は最大2つまで。
-- 未成年配慮・個人特定回避。日本語は「ですます」に統一。
+  // 7) Mode（簡素）
+  const modeHints = dedent(`
+    ## Mode
+    - normal: 自然に応答。
+    - intent: 何を知りたい/したいか**短く確認**。不足があれば**1問だけ**。
+    - remake: 文体を保ちつつ整える/圧縮する。
+    - diagnosis: 難所とヒントを**短く**。押し付けない。
+  `);
 
-【出力フォーマット指針（状態遷移）】
-- 状態は3つ：意図確認中 → 合意済み → 完了
-  - 意図確認中：要点1行＋A/B/その他
-  - 合意済：次アクション（1〜3個）
-  - 完了：結果＋次の一歩（任意1個）
+  // 8) Tools（簡素）
+  const tools = dedent(`
+    ## Tools
+    - 画像提案は**必要そうなら軽く一言**：
+      「画像にしますか？（${imageCredit}クレジット）—OKなら『画像にして』とどうぞ」
+    - 実行時の確認：
+      「スタイルは（写実／シンプル／手描き風）でよろしいですか？」（未指定はシンプル）
+    - 完了報告：
+      「できました。アルバムに保存しました。」＋一行プレビュー
+    - クレジットは聞かれたら：テキスト=${creditPerTurn}／画像=${imageCredit}
+  `);
 
-以上を一貫して守り、テンポよく合意形成→短い行動に落とし込みます。
-(Mu prompt version: ${MU_PROMPT_VERSION})
-  `.trim();
+  // 9) 出力（強制しない／“次の一歩”は任意）
+  const format = dedent(`
+    ## Output
+    - フェーズ感：意図確認中 → 合意済み → 完了（**厳密な表記は不要**）
+    - 意図確認中：要点を短く握る。聞くとしても**1つ**。
+    - 合意済み：必要なら**次の一歩**を提案（1〜3個／任意）。
+    - 完了：結果を短くまとめる。**締めの一行は任意**（余白を残してよい）。
+    - アプリ案内は**挿し色**として時々だけ。連続は避ける。
+  `);
 
-  return prompt;
+  // 10) UI/emoji（メモ）
+  const { ui, persona: p } = MU_CONFIG;
+  const uiNote = dedent(`
+    ## UI/Persona Config (note)
+    - line-height(UI): ${ui.assistantLineHeight}
+    - paragraph margin(UI): ${ui.paragraphMargin}px
+    - emoji: ${p.allowEmoji ? `allow (max ${p.maxEmojiPerReply})` : "disallow"}
+    - emoji candidates: ${p.allowEmoji ? (p.allowedEmoji.join(" ") || "(none)") : "(disabled)"}
+  `);
+
+  const final = dedent(`
+    ${personaText}
+
+    ${resonance}
+
+    ${colorEnergy}
+
+    ${toneNote}
+
+    ${guard}
+
+    ${modeHints}
+
+    ${tools}
+
+    ${format}
+
+    ${uiNote}
+
+    (Mu prompt version: ${MU_PROMPT_VERSION})
+  `);
+
+  return final;
+}
+
+// 旧引数互換（維持）
+export type MuPromptConfig = {
+  creditPerTurn?: number;
+  imageCredit?: number;
+  promptOverride?: string;
+};
+export function buildMuSystemPromptLegacy(cfg: MuPromptConfig = {}) {
+  return buildMuSystemPrompt({
+    creditPerTurn: cfg.creditPerTurn,
+    imageCredit: cfg.imageCredit,
+    promptOverride: cfg.promptOverride,
+  });
 }

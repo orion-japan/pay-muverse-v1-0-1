@@ -10,6 +10,20 @@ import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/au
 import { generateMuReply } from '@/lib/mu';
 import { recordMuTextTurn } from '@/lib/mu';
 
+// ★ プロンプト可視化用（既存）
+import { buildMuSystemPrompt, MU_PROMPT_VERSION } from '@/lib/mu/buildSystemPrompt';
+import { MU_CONFIG } from '@/lib/mu/config';
+
+// ★ Sofia互換: Q→色
+import { mapQToColor } from '@/lib/sofia/qcolor';
+
+// ★ Sofia由来の軽量状態推定（返却メタ用だけに利用）
+import {
+  inferPhase,
+  estimateSelfAcceptance,
+  relationQualityFrom,
+} from '@/lib/sofia/analyze';
+
 const COST_PER_TURN = 0.5; // Mu は1往復 0.5 クレジット
 
 /* ========= 共通ユーティリティ ========= */
@@ -176,6 +190,22 @@ export async function POST(req: NextRequest) {
     const master_id = ensureMuMasterId(inMaster ?? inConv);
     const sub_id = (typeof inSub === 'string' && inSub.trim()) ? inSub.trim() : newMuSubId();
 
+    // 可視化用（generateMuReply の引数は維持）
+    const sys = buildMuSystemPrompt({
+      personaKey: 'base',
+      mode: 'normal',
+      tone: 'compassion_calm',
+    });
+    const promptMeta = {
+      mu_prompt_version: MU_PROMPT_VERSION,
+      mu_persona: 'base',
+      mu_mode: 'normal',
+      mu_tone: 'compassion_calm',
+      mu_config_version: MU_CONFIG.version,
+      mu_prompt_hash: String(sys).slice(0, 24),
+    };
+
+    // クレジット承認
     const auth = await authorizeCredit(userCode, COST_PER_TURN, 'mu_chat_turn');
     if (auth && typeof auth === 'object' && 'error' in auth) {
       if (auth.error === 'insufficient_credit') {
@@ -188,6 +218,7 @@ export async function POST(req: NextRequest) {
     }
     const authKey = String(auth);
 
+    // 返信生成
     const mu = await generateMuReply(message, {
       user_code: userCode,
       master_id,
@@ -199,6 +230,7 @@ export async function POST(req: NextRequest) {
 
     const replyText: string = String(mu?.reply ?? '');
 
+    // 可能なら Mu からの q 情報を拾う
     const q_code: string | null =
       (mu as any)?.q_code ??
       (mu as any)?.current_q ??
@@ -217,6 +249,102 @@ export async function POST(req: NextRequest) {
         : typeof (mu as any)?.meta?.relation?.confidence === 'number'
           ? (mu as any).meta.relation.confidence
           : null;
+
+    // --- Mu 返却メタ用の軽量状態推定（Sofia 互換の項目名）
+    const lastUserText = typeof message === 'string' ? message : '';
+    const mu_phase = inferPhase(lastUserText || '');
+    const mu_self  = estimateSelfAcceptance(lastUserText || '');
+    const mu_relation = relationQualityFrom(mu_phase, mu_self.band);
+
+    // ★ フォールバック（Mu が q_code/depth_stage を返さない場合、既存ビューから推定）
+    let fb_code: string | null = null;
+    let fb_stage: string | null = null;
+
+    if (!q_code && !depth_stage) {
+      try {
+        const sb = sbService();
+
+        // 第一候補: v_user_q_unified2
+        let qv = await sb
+          .from('v_user_q_unified2')
+          .select('current_q, depth_stage')
+          .eq('user_code', userCode)
+          .single();
+
+        // 次候補: v_user_q_unified
+        if (qv.error || !qv.data) {
+          qv = await sb
+            .from('v_user_q_unified')
+            .select('current_q, depth_stage')
+            .eq('user_code', userCode)
+            .single();
+        }
+
+        // さらに保険: v_user_q_latest2
+        if (qv.error || !qv.data) {
+          const qv2 = await sb
+            .from('v_user_q_latest2')
+            .select('current_q, depth_stage')
+            .eq('user_code', userCode)
+            .single();
+          if (!qv2.error && qv2.data) qv = qv2;
+        }
+
+        if (!qv.error && qv.data) {
+          fb_code = (qv.data as any)?.current_q ?? null;
+          fb_stage = (qv.data as any)?.depth_stage ?? null;
+        }
+
+        // 追加：ヒントビュー v_user_q_hint2（current_q が取れない時の補助）
+        if (!fb_code && !fb_stage) {
+          const hv = await sb
+            .from('v_user_q_hint2')
+            .select('q_hint')
+            .eq('user_code', userCode)
+            .single();
+          if (!hv.error && hv.data) {
+            fb_code = (hv.data as any)?.q_hint ?? null; // Q1〜Q5 想定
+          }
+        }
+
+        // 追加：最終保険 q_code_logs の最新
+        if (!fb_code && !fb_stage) {
+          const lg = await sb
+            .from('q_code_logs')
+            .select('current_q, depth_stage')
+            .eq('user_code', userCode)
+            .order('ts', { ascending: false })
+            .limit(1);
+
+          if (!lg.error && Array.isArray(lg.data) && lg.data.length > 0) {
+            const last = lg.data[0] as any;
+            fb_code = last?.current_q ?? null;
+            fb_stage = last?.depth_stage ?? null;
+          }
+        }
+      } catch {}
+    }
+
+    // ★ 最終値を確定（Sofia互換カラー算出を含む）
+    let final_code2 = (q_code ?? fb_code ?? null) as 'Q1'|'Q2'|'Q3'|'Q4'|'Q5' | null;
+    let final_stage2 = (depth_stage ?? fb_stage ?? null) as 'S1'|'S2'|'S3' | null;
+
+    // ---- 最終手当て（DBにも無い場合の軽推定）：selfAcceptance.band を目安に補完
+    if (!final_code2) {
+      const band = (typeof mu_self?.band === 'string' ? mu_self.band : '40_70') as
+        | 'lt20' | '20_40' | '40_70' | '70_90' | 'gt90';
+
+      if (band === 'lt20' || band === '20_40')      final_code2 = 'Q1';
+      else if (band === '40_70')                    final_code2 = 'Q2';
+      else /* '70_90' | 'gt90' */                   final_code2 = 'Q3';
+    }
+    if (!final_stage2) {
+      // 深掘りなしのデフォルト段（安全に S1 固定）
+      final_stage2 = 'S1';
+    }
+
+    const q_color = final_code2 ? mapQToColor(final_code2) : null;
+
     if (!replyText) {
       await voidCreditByKey(authKey);
       await recordMuTextTurn({
@@ -225,7 +353,7 @@ export async function POST(req: NextRequest) {
         chargeOnFailure: false,
         conversation_id: master_id,
         message_id: sub_id,
-        meta: { reason: 'generation_failed', authKey, thread_id: thread_id ?? null, board_id: board_id ?? null },
+        meta: { reason: 'generation_failed', authKey, thread_id: thread_id ?? null, board_id: board_id ?? null, ...promptMeta },
       });
       return json({ error: 'generation_failed' }, 502);
     }
@@ -237,13 +365,19 @@ export async function POST(req: NextRequest) {
       conversation_id: master_id,
       message_id: sub_id,
       meta: {
-        q_code,
-        depth_stage,
+        q_code: final_code2,
+        depth_stage: final_stage2,
         confidence,
-        charge: { amount: COST_PER_TURN, authKey },
+        // --- Mu 状態推定（Sofia 互換の項目名で格納）
+        phase: mu_phase,
+        selfAcceptance: mu_self,
+        relation: mu_relation,
+
+        charge: { amount: COST_PER_TURN, aiId: 'mu', model: 'gpt-4.1-mini' },
         source_type: source_type ?? 'chat',
         thread_id: thread_id ?? null,
         board_id: board_id ?? null,
+        ...promptMeta,
       },
     });
 
@@ -252,7 +386,6 @@ export async function POST(req: NextRequest) {
       const sb = sbService();
       const nowIso = new Date().toISOString();
 
-      // タイトル = 最初のユーザーメッセージ20文字以内
       const title =
         body.message && body.message.trim()
           ? body.message.trim().slice(0, 20)
@@ -300,7 +433,7 @@ export async function POST(req: NextRequest) {
         conv_id: master_id,     // text（MU-...）
         role: 'user',           // chat_role enum
         content: String(message ?? ''),
-        meta: { source: 'mu', kind: 'user' },
+        meta: { source: 'mu', kind: 'user', ...promptMeta },
         used_credits: null,
         source_app: 'mu',
         sub_id: sub_id,         // 同一 sub_id を付ける
@@ -312,7 +445,7 @@ export async function POST(req: NextRequest) {
         conv_id: master_id,
         role: 'assistant',
         content: replyText,
-        meta: { model: 'gpt-4.1-mini' },
+        meta: { model: 'gpt-4.1-mini', ...promptMeta },
         used_credits: COST_PER_TURN,
         source_app: 'mu',
         sub_id: sub_id,
@@ -333,6 +466,7 @@ export async function POST(req: NextRequest) {
     const credit_balance =
       balanceRow && balanceRow.sofia_credit != null ? Number(balanceRow.sofia_credit) : null;
 
+    // ★ 返信（最小改修：q.color を含める / 互換）
     return json({
       agent: 'Mu',
       reply: replyText,
@@ -340,19 +474,33 @@ export async function POST(req: NextRequest) {
         agent: 'Mu',
         source_type: source_type ?? 'chat',
         confidence,
-        charge: { amount: COST_PER_TURN, aiId: 'mu' },
+        // --- Mu 状態推定（Sofia 互換の項目名で返却）
+        phase: mu_phase,
+        selfAcceptance: mu_self,
+        relation: mu_relation,
+
+        charge: { amount: COST_PER_TURN, aiId: 'mu', model: 'gpt-4.1-mini' },
         master_id,
         sub_id,
         thread_id: thread_id ?? null,
         board_id: board_id ?? null,
+        ...promptMeta,
       },
-      q: q_code || depth_stage ? { code: q_code ?? null, stage: depth_stage ?? null } : null,
+      q: final_code2 || final_stage2
+        ? {
+            code: final_code2,
+            stage: final_stage2,
+            color: q_color
+              ? { base: q_color.base, mix: q_color.mix, hex: q_color.hex }
+              : null,
+          }
+        : null,
       credit_balance,
-      charge: { amount: COST_PER_TURN, aiId: 'mu' },
+      charge: { amount: COST_PER_TURN, aiId: 'mu', model: 'gpt-4.1-mini' },
       master_id,
       sub_id,
       conversation_id: master_id,
-      title: body.message?.trim()?.slice(0, 20) ?? 'Mu 会話', // 一覧用に返却
+      title: body.message?.trim()?.slice(0, 20) ?? 'Mu 会話',
     });
   } catch (e: any) {
     console.error('[MuAI API] Error:', e);
