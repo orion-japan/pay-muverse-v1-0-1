@@ -41,6 +41,7 @@ function newMuMasterId() {
 }
 function ensureMuMasterId(input?: string | null) {
   const s = (input ?? '').trim();
+  // 既存が MU 以外（Q- や数字など）なら MU を新規発行して“会話を完全分離”
   return s && /^MU[-_]/i.test(s) ? s : newMuMasterId();
 }
 function newMuSubId() {
@@ -73,7 +74,7 @@ function pickAuthKey(data: any): string | null {
   return null;
 }
 
-/* ========= クレジット RPC（理由フォールバック内蔵・堅牢版） ========= */
+/* ========= クレジット RPC ========= */
 type AuthResult =
   | string
   | { error: 'insufficient_credit' }
@@ -83,10 +84,9 @@ async function authorizeCredit(userCode: string, amount: number, reason: string)
   const supa = sbService();
   const amt = Number(Number(amount).toFixed(2));
 
-  // できるだけ広くヒットさせる（先頭が最優先）
   const reasons = Array.from(
     new Set([
-      reason, // 'mu_chat_turn'
+      reason,
       'mu_text_turn',
       'mu_turn',
       'mu',
@@ -121,7 +121,6 @@ async function authorizeCredit(userCode: string, amount: number, reason: string)
     if (key) return key;
   }
 
-  // どれも key が返らない → 残高を確認
   try {
     const { data: row } = await supa
       .from('users')
@@ -130,17 +129,14 @@ async function authorizeCredit(userCode: string, amount: number, reason: string)
       .single();
     const bal = Number(row?.sofia_credit ?? 0);
     if (bal < amt) return { error: 'insufficient_credit' } as const;
-  } catch {
-    // 読み取り失敗は無視
-  }
+  } catch {}
 
   return { error: 'authorize_failed', detail: lastDetail, tried: reasons } as const;
 }
 
-/* 返金（void）フォールバック付き */
+/* 返金（void） */
 async function voidCreditByKey(key: string) {
   const supa = sbService();
-  // p_key 版 → key 版の順に試す（環境差吸収）
   try {
     const { error } = await supa.rpc('void_credit_by_key', { p_key: key });
     if (!error) return true;
@@ -166,21 +162,20 @@ export async function POST(req: NextRequest) {
     const userCode = z.userCode!;
 
     const body = await req.json().catch(() => ({}));
-    // 受け取りはするが、Mu 専用IDに正規化して混在を防止
     const {
       message,
       master_id: inMaster,
+      conversation_id: inConv, // 古いクライアント互換
       sub_id: inSub,
       thread_id,
       board_id,
       source_type,
     } = body || {};
-
-    // ★ Mu専用の master_id / sub_id を強制（Sofia 等のIDが来ても新規発行）
-    const master_id = ensureMuMasterId(inMaster);
+    
+    // master_id 優先、なければ conversation_id、それでも無ければ新規
+    const master_id = ensureMuMasterId(inMaster ?? inConv);
     const sub_id = (typeof inSub === 'string' && inSub.trim()) ? inSub.trim() : newMuSubId();
 
-    // ▼ クレジット承認
     const auth = await authorizeCredit(userCode, COST_PER_TURN, 'mu_chat_turn');
     if (auth && typeof auth === 'object' && 'error' in auth) {
       if (auth.error === 'insufficient_credit') {
@@ -193,10 +188,9 @@ export async function POST(req: NextRequest) {
     }
     const authKey = String(auth);
 
-    // ▼ Mu 生成
     const mu = await generateMuReply(message, {
       user_code: userCode,
-      master_id,                       // ← Mu専用IDで固定
+      master_id,
       sub_id,
       thread_id: thread_id ?? null,
       board_id: board_id ?? null,
@@ -217,17 +211,12 @@ export async function POST(req: NextRequest) {
         chargeOnFailure: false,
         conversation_id: master_id,
         message_id: sub_id,
-        meta: {
-          reason: 'generation_failed',
-          authKey,
-          thread_id: thread_id ?? null,
-          board_id: board_id ?? null,
-        },
+        meta: { reason: 'generation_failed', authKey, thread_id: thread_id ?? null, board_id: board_id ?? null },
       });
       return json({ error: 'generation_failed' }, 502);
     }
 
-    // 成功ログ
+    // 監査用（既存の lightweight ログ）
     await recordMuTextTurn({
       user_code: userCode,
       status: 'success',
@@ -244,7 +233,82 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // 最新残高を返す
+    /* ===== 会話ヘッダ & 一覧用ログ ===== */
+    try {
+      const sb = sbService();
+      const nowIso = new Date().toISOString();
+
+      // タイトル = 最初のユーザーメッセージ20文字以内
+      const title =
+        body.message && body.message.trim()
+          ? body.message.trim().slice(0, 20)
+          : 'Mu 会話';
+
+      // mu_conversations に upsert（タイトル/時刻更新）
+      const upConv = await sb
+        .from('mu_conversations')
+        .upsert(
+          {
+            id: master_id,            // text（MU-...）
+            user_code: userCode,
+            title,
+            origin_app: 'mu',
+            updated_at: nowIso,
+            last_turn_at: nowIso,
+          },
+          { onConflict: 'id' }
+        );
+      if (upConv.error) console.error('[muai] upsert mu_conversations error:', upConv.error);
+
+      // 旧一覧テーブルの互換ログ（存在する環境向け）
+      const upLog = await sb
+        .from('mu_conversation_logs')
+        .upsert(
+          {
+            user_code: userCode,
+            master_id,
+            conversation_id: null,
+            updated_at: nowIso,
+          },
+          { onConflict: 'user_code,master_id' }
+        );
+      if (upLog.error) console.error('[muai] upsert mu_conversation_logs error:', upLog.error);
+    } catch (e) {
+      console.error('[muai] upsert conversation thrown:', e);
+    }
+
+    /* ===== 永続メッセージ保存（mu_turns に user/assistant 2行） ===== */
+    try {
+      const sb = sbService();
+
+      // 1) ユーザー発話
+      const insUser = await sb.from('mu_turns').insert({
+        conv_id: master_id,     // text（MU-...）
+        role: 'user',           // chat_role enum
+        content: String(message ?? ''),
+        meta: { source: 'mu', kind: 'user' },
+        used_credits: null,
+        source_app: 'mu',
+        sub_id: sub_id,         // 同一 sub_id を付ける
+      });
+      if (insUser.error) console.error('[muai] insert mu_turns (user) error:', insUser.error);
+
+      // 2) アシスタント発話
+      const insAssist = await sb.from('mu_turns').insert({
+        conv_id: master_id,
+        role: 'assistant',
+        content: replyText,
+        meta: { model: 'gpt-4.1-mini' },
+        used_credits: COST_PER_TURN,
+        source_app: 'mu',
+        sub_id: sub_id,
+      });
+      if (insAssist.error) console.error('[muai] insert mu_turns (assistant) error:', insAssist.error);
+    } catch (e) {
+      console.error('[muai] insert mu_turns thrown:', e);
+    }
+
+    // 残高取得
     const sb = sbService();
     const { data: balanceRow } = await sb
       .from('users')
@@ -255,18 +319,26 @@ export async function POST(req: NextRequest) {
     const credit_balance =
       balanceRow && balanceRow.sofia_credit != null ? Number(balanceRow.sofia_credit) : null;
 
-    // ★ Mu 専用の master_id / sub_id を必ず返す。UI 側で agent ラベルも明示。
     return json({
-      agent: 'mu',
+      agent: 'Mu',
       reply: replyText,
-      q_code,
-      depth_stage,
-      confidence,
+      meta: {
+        agent: 'Mu',
+        source_type: source_type ?? 'chat',
+        confidence,
+        charge: { amount: COST_PER_TURN, aiId: 'mu' },
+        master_id,
+        sub_id,
+        thread_id: thread_id ?? null,
+        board_id: board_id ?? null,
+      },
+      q: q_code || depth_stage ? { code: q_code ?? null, stage: depth_stage ?? null } : null,
       credit_balance,
       charge: { amount: COST_PER_TURN, aiId: 'mu' },
-      master_id,                 // Mu専用 親ID
-      sub_id,                    // 子ID
-      conversation_id: master_id // 互換用
+      master_id,
+      sub_id,
+      conversation_id: master_id,
+      title: body.message?.trim()?.slice(0, 20) ?? 'Mu 会話', // 一覧用に返却
     });
   } catch (e: any) {
     console.error('[MuAI API] Error:', e);

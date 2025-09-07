@@ -62,10 +62,10 @@ type AICatalogItem = {
 };
 
 const AI_CATALOG: ReadonlyArray<AICatalogItem> = [
-  { id: 'gpt-4o',      label: 'GPT-4o',       model: 'gpt-4o',      costPerTurn: 2, maxTokens: 4096, notes: '多機能・高品質' },
-  { id: 'gpt-4o-mini', label: 'GPT-4o mini', model: 'gpt-4o-mini', costPerTurn: 1, maxTokens: 4096, notes: '軽量・低コスト' },
-  { id: 'gpt-4.1',     label: 'GPT-4.1',     model: 'gpt-4.1',     costPerTurn: 3, maxTokens: 8192, notes: '高精度' },
-  { id: 'gpt-4.1-mini',label: 'GPT-4.1 mini',model: 'gpt-4.1-mini',costPerTurn: 2, maxTokens: 8192, notes: '4.1の軽量版' },
+  { id: 'gpt-4o',      label: 'GPT-4o',       model: 'gpt-4o',      costPerTurn: 1,   maxTokens: 4096, notes: '多機能・高品質' },
+  { id: 'gpt-4o-mini', label: 'GPT-4o mini', model: 'gpt-4o-mini', costPerTurn: 0.5, maxTokens: 4096, notes: '軽量・低コスト' },
+  { id: 'gpt-4.1',     label: 'GPT-4.1',     model: 'gpt-4.1',     costPerTurn: 1,   maxTokens: 8192, notes: '高精度' },
+  { id: 'gpt-4.1-mini',label: 'GPT-4.1 mini',model: 'gpt-4.1-mini',costPerTurn: 0.5, maxTokens: 8192, notes: '4.1の軽量版' },
 ];
 
 function resolveAIByModel(modelIn?: string) {

@@ -5,7 +5,7 @@
 
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useMemo, useRef, useState, useEffect } from "react";
 import { MU_AGENT, MU_UI_TEXT, MU_BRIDGE_TEXT, MU_STATES } from "@/lib/mu/config";
 import { buildImageBridgeText } from "@/lib/qcode/bridgeImage";
 
@@ -14,10 +14,13 @@ export type ChatMessage = {
   role: "user" | "assistant" | "system";
   content: string;
   at?: string;
+  // サーバから付与されうる緩いメタ（型拡張は any で読む）
+  // agent?: "Mu" | "Iros" | "mu" | "iros";
+  // conversation_id?: string; master_id?: string; convId?: string;
 };
 
 export type MuChatProps = {
-  conversationId?: string;
+  conversationId?: string; // ★ 与えられたら、その会話にスコープ
   messages: ChatMessage[];
   isLoading?: boolean;
   onSend: (input: { text: string; meta?: Record<string, unknown> }) => Promise<void> | void;
@@ -29,6 +32,7 @@ export type MuChatProps = {
 
 export default function MuChat(props: MuChatProps) {
   const {
+    conversationId,
     messages,
     isLoading,
     onSend,
@@ -43,6 +47,52 @@ export default function MuChat(props: MuChatProps) {
 
   const headerTitle = useMemo(() => `${MU_UI_TEXT.AGENT_DISPLAY_NAME}`, []);
   const stateText = useMemo(() => MU_STATES[stateLabel] ?? MU_STATES.INTENT_CHECKING, [stateLabel]);
+
+  // ==== Mu 以外のメッセージ混入を除外 + 会話IDスコープ + 粘着表示 ====
+  const filtered = useMemo(() => {
+    const convKeys = ["conversation_id", "master_id", "convId", "conversationId"];
+
+    const sameConv = (m: any) => {
+      if (!conversationId) return true; // 会話ID指定がなければ許可
+      for (const k of convKeys) {
+        const v = m?.[k];
+        if (typeof v === "string" && v.trim() && v.trim() === conversationId) return true;
+      }
+      return false;
+    };
+
+    const isMuAgent = (m: any) => {
+      const a = (m?.agent ?? "").toString().toLowerCase();
+      // agent が無い場合は後方互換で許可、ある場合は 'mu' のみ許可
+      return !a || a === "mu";
+    };
+
+    const list = (messages ?? []).filter((m: any) => {
+      // 会話IDが指定されている場合はスコープ外を除外
+      if (!sameConv(m)) return false;
+
+      if (m.role === "assistant" || m.role === "system") {
+        // Mu 専用：Mu 以外(Iros等)は表示しない（大小文字差は無視）
+        return isMuAgent(m);
+      }
+      // user は常に許可
+      return true;
+    });
+
+    // id 重複の排除
+    const map = new Map<string, ChatMessage>();
+    for (const m of list) map.set(m.id, m);
+    return Array.from(map.values());
+  }, [messages, conversationId]);
+
+  // 一時的に空が来ても直前の非空を保持（“一瞬表示→消える”を防ぐ）
+  const lastNonEmptyRef = useRef<ChatMessage[]>([]);
+  useEffect(() => {
+    if (filtered.length > 0) lastNonEmptyRef.current = filtered;
+  }, [filtered]);
+
+  const displayMessages = filtered.length > 0 ? filtered : lastNonEmptyRef.current;
+  // ==== 追加ここまで ====
 
   const handleSend = async () => {
     const text = draft.trim();
@@ -72,7 +122,7 @@ export default function MuChat(props: MuChatProps) {
       </div>
 
       <div style={styles.body} aria-live="polite">
-        {messages.map((m) => (
+        {displayMessages.map((m) => (
           <MessageBubble key={m.id} role={m.role} content={m.content} />
         ))}
 
