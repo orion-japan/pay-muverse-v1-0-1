@@ -8,6 +8,9 @@ import EditPostModal from '@/components/EditPostModal';
 import QBoardPostModal from '@/components/QBoardPostModal';
 import './album.css';
 
+// ★ 追加：コラージュ側と同じアルバム取得ロジックを利用
+import { supabase } from '@/lib/supabase';
+
 type Post = {
   post_id: string;
   title?: string | null;
@@ -17,6 +20,48 @@ type Post = {
   created_at: string;
   board_type?: string | null; // ← これを追加
 };
+
+// ★ 追加：private-posts からアルバム一覧（署名URL）を取得
+type AlbumItem = {
+  name: string;
+  url: string;    // 表示用（署名URL）
+  path: string;   // private-posts/<userCode>/<file>
+  size?: number | null;
+  updated_at?: string | null;
+};
+const ALBUM_BUCKET = 'private-posts';
+
+async function listAlbumImages(userCode: string): Promise<AlbumItem[]> {
+  try {
+    const ucode = (userCode || '').trim();
+    if (!ucode) return [];
+    const prefix = `${ucode}`;
+    const { data, error } = await supabase.storage.from(ALBUM_BUCKET).list(prefix, {
+      limit: 200,
+      sortBy: { column: 'updated_at', order: 'desc' },
+    });
+    if (error) throw error;
+
+    const files = (data || []).filter((f) => !f.name.startsWith('.') && !f.name.endsWith('/'));
+    const resolved = await Promise.all(
+      files.map(async (f) => {
+        const path = `${prefix}/${f.name}`;
+        const { data: signed } = await supabase.storage.from(ALBUM_BUCKET).createSignedUrl(path, 60 * 30);
+        return {
+          name: f.name,
+          url: signed?.signedUrl ?? '',
+          path,
+          size: (f as any)?.metadata?.size ?? null,
+          updated_at: (f as any)?.updated_at ?? null,
+        };
+      })
+    );
+    return resolved;
+  } catch (e) {
+    console.warn('[AlbumPage] listAlbumImages error:', e);
+    return [];
+  }
+}
 
 export default function AlbumPage() {
   const { userCode } = useAuth();
@@ -41,29 +86,45 @@ export default function AlbumPage() {
   const fetchPosts = async () => {
     if (!userCode) return;
     try {
+      // 1) 既存の自分の投稿
       const res = await fetch('/api/my-posts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_code: userCode }),
       });
 
+      let apiPosts: Post[] = [];
       if (!res.ok) {
         const text = await res.text().catch(() => '(no body)');
         console.error('[AlbumPage] /api/my-posts NG', res.status, text);
-        return;
-      }
-
-      const data = await res.json().catch((e) => {
-        console.error('[AlbumPage] JSON parse error:', e);
-        return null;
-      });
-
-      if (data?.posts) {
-        console.log('[AlbumPage] posts loaded:', data.posts.length);
-        setPosts(data.posts);
       } else {
-        console.warn('[AlbumPage] no posts in response:', data);
+        const data = await res.json().catch((e) => {
+          console.error('[AlbumPage] JSON parse error:', e);
+          return null;
+        });
+        apiPosts = Array.isArray(data?.posts) ? (data!.posts as Post[]) : [];
+        console.log('[AlbumPage] posts loaded:', apiPosts.length);
       }
+
+      // 2) コラージュと同じ：private-posts/<userCode>/ からアルバム画像
+      const albumItems = await listAlbumImages(String(userCode));
+      const albumPosts: Post[] = albumItems.map((it) => ({
+        post_id: `album://${it.path}`,                // 一意キーとして path を利用
+        title: it.name || null,
+        content: null,
+        media_urls: it.url ? [it.url] : [],
+        tags: [],
+        created_at: it.updated_at ?? new Date().toISOString(),
+        board_type: 'album',                           // ← ここで 'album' を明示
+      }));
+
+      // 3) マージ（重複 post_id は API 側を優先）
+      const mergedMap = new Map<string, Post>();
+      for (const p of albumPosts) mergedMap.set(p.post_id, p);
+      for (const p of apiPosts) mergedMap.set(p.post_id, p);
+
+      const merged = Array.from(mergedMap.values());
+      setPosts(merged);
     } catch (e) {
       console.error('[AlbumPage] fetchPosts error:', e);
     }
@@ -88,10 +149,8 @@ export default function AlbumPage() {
           .includes(search.toLowerCase())
       )
       .sort((a, b) => {
-        if (sort === 'new')
-          return +new Date(b.created_at) - +new Date(a.created_at);
-        if (sort === 'old')
-          return +new Date(a.created_at) - +new Date(b.created_at);
+        if (sort === 'new') return +new Date(b.created_at) - +new Date(a.created_at);
+        if (sort === 'old') return +new Date(a.created_at) - +new Date(b.created_at);
         return (a.title || '').localeCompare(b.title || '');
       });
     return list;

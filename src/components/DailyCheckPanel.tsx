@@ -1,3 +1,4 @@
+// src/components/DailyCheckPanel.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -41,6 +42,9 @@ export default function DailyCheckPanel({
   const [criteriaOpen, setCriteriaOpen] = useState(false);
   const [criteriaSaving, setCriteriaSaving] = useState(false);
 
+  /* ▼ 追加：編集用のローカル値（回数ステッパー） */
+  const [criteriaLocal, setCriteriaLocal] = useState<number>(7);
+
   /* ===== 定数 ===== */
   const today = useMemo(() => dayjs().format('YYYY-MM-DD'), []);
 
@@ -54,9 +58,7 @@ export default function DailyCheckPanel({
     return p;
   }, [visionImaged, resonanceShared, statusText, diaryText]);
 
-  /* ===== 上書き防止フラグ =====
-     - ユーザーが編集した瞬間に dirty を立て、最終編集時刻を保持
-     - サーバーの updated_at がこれより古ければ「適用しない」 */
+  /* ===== 上書き防止フラグ ===== */
   const dirtyRef = useRef(false);
   const lastLocalAtRef = useRef<number>(0);
 
@@ -65,7 +67,7 @@ export default function DailyCheckPanel({
     lastLocalAtRef.current = Date.now();
   }
 
-  /* ===== today フェッチ（レース防止 + デバウンス） ===== */
+  /* ===== today フェッチ ===== */
   const todaySeqRef = useRef(0);
   const todayDebounceRef = useRef<number | null>(null);
   useEffect(() => {
@@ -84,15 +86,12 @@ export default function DailyCheckPanel({
           const json = await res.json().catch(() => ({} as any));
           if (!res.ok) throw new Error(json?.error || String(res.status));
 
-          // 最新でなければ破棄
           if (seq !== todaySeqRef.current) return;
 
           const d = json?.data;
           const serverAt = d?.updated_at ? Date.parse(d.updated_at) : 0;
 
-          // ★★ ここが核心：ローカルの方が新しければサーバー値で上書きしない
           if (dirtyRef.current && lastLocalAtRef.current > serverAt) {
-            // ただし、サーバー側が100%になっていたらロックだけは反映
             const p = typeof d?.progress === 'number' ? d.progress : 0;
             if (p >= 100) setLocked(true);
           } else {
@@ -102,7 +101,7 @@ export default function DailyCheckPanel({
             setDiaryText(d?.diary_text ?? '');
             setSavedAt(d && d.updated_at ? dayjs(d.updated_at).format('HH:mm') : null);
             setLocked((d?.progress ?? 0) >= 100);
-            dirtyRef.current = false;                 // サーバーと同期できたので dirty を下ろす
+            dirtyRef.current = false;
             lastLocalAtRef.current = serverAt || Date.now();
           }
         } catch {
@@ -121,7 +120,7 @@ export default function DailyCheckPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userCode, selectedVisionId]);
 
-  /* ===== history フェッチ（保存完了時にも更新） ===== */
+  /* ===== history フェッチ ===== */
   const histSeqRef = useRef(0);
   const histDebounceRef = useRef<number | null>(null);
   useEffect(() => {
@@ -169,9 +168,16 @@ export default function DailyCheckPanel({
         );
         if (!res.ok) { if (!abort) setCriteriaDays(null); return; }
         const data = await res.json().catch(() => ({} as any));
-        if (!abort) setCriteriaDays(data?.required_days ?? null);
+        if (!abort) {
+          const days = Number(data?.required_days ?? 7);
+          setCriteriaDays(Number.isFinite(days) ? days : 7);
+          setCriteriaLocal(Number.isFinite(days) ? days : 7); // ← 編集枠にも反映
+        }
       } catch {
-        if (!abort) setCriteriaDays(null);
+        if (!abort) {
+          setCriteriaDays(null);
+          setCriteriaLocal(7);
+        }
       }
     })();
     return () => { abort = true; };
@@ -220,11 +226,9 @@ export default function DailyCheckPanel({
       const updatedAtISO: string | null = json?.data?.updated_at || null;
       setSavedAt(updatedAtISO ? dayjs(updatedAtISO).format('HH:mm') : dayjs().format('HH:mm'));
 
-      // 保存成功 → サーバーの方が新しいので dirty を下ろす
       dirtyRef.current = false;
       lastLocalAtRef.current = updatedAtISO ? Date.parse(updatedAtISO) : Date.now();
 
-      // ロックは「本当に 100% のときだけ」
       if (progress >= 100) setLocked(true);
 
       showToast('✔ 保存しました');
@@ -237,7 +241,6 @@ export default function DailyCheckPanel({
   }
 
   function unlockForEdit() {
-    // 当日だけ再編集可にする想定
     if (dayjs().format('YYYY-MM-DD') === today) setLocked(false);
   }
 
@@ -263,17 +266,15 @@ export default function DailyCheckPanel({
   }, [history, progress, today]);
 
   /* ===== required_days 保存 ===== */
-// 保存（回数）
-async function saveRequiredDays(newDays: number) {
+  async function saveRequiredDays(newDays: number) {
     try {
       setCriteriaSaving(true);
-  
-      // ★ これを追加（または既存の取得を流用）
+
       const { getAuth, signInAnonymously } = await import('firebase/auth');
       const auth = getAuth();
       if (!auth.currentUser) await signInAnonymously(auth);
       const token = await auth.currentUser!.getIdToken();
-  
+
       const res = await fetch('/api/vision-criteria', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -284,24 +285,20 @@ async function saveRequiredDays(newDays: number) {
           checklist: [],
         }),
       });
-      // …以下は既存のまま…
-  
-      const json = await res.json();
+
+      const json = await res.json().catch(() => ({} as any));
       if (!res.ok) throw new Error(json?.error || 'failed');
-  
-      // ← 既存
-      setCriteriaDays(json?.required_days ?? newDays);
+
+      const updated = Number(json?.required_days ?? newDays);
+      setCriteriaDays(updated);
+      setCriteriaLocal(updated);
       setCriteriaOpen(false);
       showToast('✔ 回数を更新しました');
-  
-      // ★ 追加：カード側（StageChecklistInline）へ即時反映イベントを送る
+
+      // 即時反映イベント（他のUIが購読していれば更新されます）
       window.dispatchEvent(
         new CustomEvent('vision:criteria-updated', {
-          detail: {
-            visionId: selectedVisionId,
-            from: selectedStage,
-            required_days: json?.required_days ?? newDays,
-          },
+          detail: { visionId: selectedVisionId, from: selectedStage, required_days: updated },
         })
       );
     } catch (e) {
@@ -311,54 +308,103 @@ async function saveRequiredDays(newDays: number) {
       setCriteriaSaving(false);
     }
   }
-  
+
+  /* ▼ 追加：criteriaOpen が開いたタイミングでローカル値を初期化 */
+  useEffect(() => {
+    if (criteriaOpen) {
+      const base = Number(criteriaDays ?? 7);
+      setCriteriaLocal(Number.isFinite(base) ? base : 7);
+    }
+  }, [criteriaOpen, criteriaDays]);
 
   /* ===== ここから JSX（構造は元のまま） ===== */
   return (
     <section className={`daily-check-panel ${className || ''}`}>
-<header className="dcp-head">
-  <div>
-    <strong>1日の実践チェック</strong>
-    <span className="dcp-date">（{today}）</span>
+      <header className="dcp-head">
+        <div>
+          <strong>1日の実践チェック</strong>
+          <span className="dcp-date">（{today}）</span>
 
-    {selectedVisionTitle && (
-      <div className="dcp-vision-title">
-        <strong>{selectedVisionTitle}</strong>
-        {/* ステータスバッジ */}
-        <span
-          className={`dcp-status-badge ${progress >= 100 ? 'done' : progress > 0 ? 'active' : 'new'}`}
-        >
-          {progress >= 100 ? '🎉 完了！' : progress > 0 ? '実践中 💪' : '未開始 ✨'}
-        </span>
+          {selectedVisionTitle && (
+            <div className="dcp-vision-title">
+              <strong>{selectedVisionTitle}</strong>
+              {/* ステータスバッジ */}
+              <span
+                className={`dcp-status-badge ${progress >= 100 ? 'done' : progress > 0 ? 'active' : 'new'}`}
+              >
+                {progress >= 100 ? '🎉 完了！' : progress > 0 ? '実践中 💪' : '未開始 ✨'}
+              </span>
+            </div>
+          )}
+        </div>
+
+        <div className="dcp-status">
+          {loading ? '読み込み中…' : savedAt ? `保存: ${savedAt}` : '新規'}
+          {saving && ' / 保存中…'}
+          <button
+            className="dcp-criteria-btn"
+            onClick={() => setCriteriaOpen(v => !v)}
+            title="このステージで何回やるか設定"
+          >
+            回数設定
+          </button>
+        </div>
+      </header>
+
+      {/* ▼ 追加：インラインの回数設定パネル（最小改修） */}
+      {criteriaOpen && (
+        <div className="dcp-criteria-pop" role="dialog" aria-label="回数設定">
+          <div className="dcp-crit-row">
+            <span className="dcp-crit-label">必要回数</span>
+            <div className="dcp-stepper">
+              <button
+                type="button"
+                onClick={() => setCriteriaLocal(v => Math.max(1, v - 1))}
+                disabled={criteriaSaving || criteriaLocal <= 1}
+                aria-label="減らす"
+              >−</button>
+              <input
+                type="number"
+                min={1}
+                max={60}
+                value={criteriaLocal}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (Number.isFinite(n)) setCriteriaLocal(Math.max(1, Math.min(60, n)));
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); void saveRequiredDays(criteriaLocal); }
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setCriteriaLocal(v => Math.min(60, v + 1))}
+                disabled={criteriaSaving || criteriaLocal >= 60}
+                aria-label="増やす"
+              >＋</button>
+            </div>
+          </div>
+
+          <div className="dcp-crit-actions">
+            <button className="dcp-crit-cancel" onClick={() => setCriteriaOpen(false)} disabled={criteriaSaving}>キャンセル</button>
+            <button className="dcp-crit-save" onClick={() => void saveRequiredDays(criteriaLocal)} disabled={criteriaSaving}>
+              {criteriaSaving ? '保存中…' : '保存'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 進捗ゲージ */}
+      <div className="dcp-progress">
+        <div
+          className={`dcp-progress-bar ${progress >= 100 ? 'is-done' : ''}`}
+          style={{ width: `${progress}%` }}
+        />
       </div>
-    )}
-  </div>
-
-  <div className="dcp-status">
-    {loading ? '読み込み中…' : savedAt ? `保存: ${savedAt}` : '新規'}
-    {saving && ' / 保存中…'}
-    <button
-      className="dcp-criteria-btn"
-      onClick={() => setCriteriaOpen(v => !v)}
-      title="このステージで何回やるか設定"
-    >
-      回数設定
-    </button>
-  </div>
-</header>
-
-{/* 進捗ゲージをリッチに */}
-<div className="dcp-progress">
-  <div
-    className={`dcp-progress-bar ${progress >= 100 ? 'is-done' : ''}`}
-    style={{ width: `${progress}%` }}
-  />
-</div>
-<div className="dcp-progress-num">
-  {progress}%（連続 {streak} 日）
-  {progress >= 100 && <span className="dcp-celebrate">🎊 Great!</span>}
-</div>
-
+      <div className="dcp-progress-num">
+        {progress}%（連続 {streak} 日）
+        {progress >= 100 && <span className="dcp-celebrate">🎊 Great!</span>}
+      </div>
 
       {!locked && (
         <>
@@ -404,7 +450,8 @@ async function saveRequiredDays(newDays: number) {
           </div>
 
           <div className="dcp-actions">
-            <button className="dcp-copy" onClick={copyFromYesterday}>昨日コピー</button>
+            {/* ▼ 「昨日コピー」ボタンは撤去（最小改修：描画しない） */}
+            <span className="dcp-actions-spacer" />
             <button className="dcp-save" onClick={save}>保存</button>
           </div>
         </>
@@ -452,10 +499,6 @@ async function saveRequiredDays(newDays: number) {
 }
 
 /* ===== 補助 ===== */
-
-async function copyFromYesterday(this: void) {
-  // 必要に応じて実装
-}
 
 function buildDays(n: number) {
   const arr: string[] = [];

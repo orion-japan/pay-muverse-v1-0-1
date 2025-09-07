@@ -1,3 +1,4 @@
+// src/components/VisionResultCard.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -79,7 +80,7 @@ export default function VisionResultCard({
 
           const { data, error } = await supabase
             .storage
-            .from(ALBUM_BUCKET)                 // ★ ← ここが 'album' だったのを修正
+            .from(ALBUM_BUCKET)                 // ★ ← album バケットを固定
             .createSignedUrl(path, 60 * 60);    // 1h
 
           if (!alive) return;
@@ -102,11 +103,14 @@ export default function VisionResultCard({
     return () => { alive = false; };
   }, [thumbnailUrl]);
 
-  // 残り日数と進捗割合（自動移管まで）
+  // 残り日数と進捗割合（自動移管まで） — resultedAt が不正でも NaN を出さない
   const { remainingDays, ratio, due } = useMemo(() => {
     const limit = AUTO_DAYS[phase] ?? 7;
-    const base = new Date(resultedAt).getTime();
-    const elapsedMs = Date.now() - base;
+    const baseMs = new Date(resultedAt).getTime();
+    if (!Number.isFinite(baseMs)) {
+      return { remainingDays: limit, ratio: 0, due: false };
+    }
+    const elapsedMs = Date.now() - baseMs;
     const totalMs = limit * 24 * 60 * 60 * 1000;
     const leftMs = Math.max(0, totalMs - elapsedMs);
     const remaining = Math.ceil(leftMs / (1000 * 60 * 60 * 24));
@@ -125,11 +129,14 @@ export default function VisionResultCard({
         },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(text || `HTTP ${res.status}`);
+      }
       onChanged?.();
-    } catch (e) {
+    } catch (e: any) {
       console.error('[VisionResultCard] request failed:', e);
-      alert('処理に失敗しました');
+      alert(`処理に失敗しました: ${e?.message || e}`);
     } finally {
       setBusy(false);
     }
@@ -156,7 +163,12 @@ export default function VisionResultCard({
         .join(' ')}
       aria-labelledby={`vrc-title-${visionId}`}
     >
-
+      {/* サムネ（必要なら表示） */}
+      {resolvedThumb && (
+        <div className="vrc-thumb">
+          <img src={resolvedThumb} alt="" />
+        </div>
+      )}
 
       {/* 本体 */}
       <div className="vrc-body">
@@ -180,9 +192,9 @@ export default function VisionResultCard({
           role="progressbar"
           aria-valuemin={0}
           aria-valuemax={100}
-          aria-valuenow={Math.round(ratio * 100)}
+          aria-valuenow={Math.round((Number.isFinite(ratio) ? ratio : 0) * 100)}
         >
-          <div className="vrc-rail__bar" style={{ width: `${ratio * 100}%` }} />
+          <div className="vrc-rail__bar" style={{ width: `${(Number.isFinite(ratio) ? ratio : 0) * 100}%` }} />
         </div>
 
         {/* 残り日数/メッセージ */}

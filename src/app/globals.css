@@ -1081,3 +1081,26 @@ body { padding-bottom: var(--footer-safe-pad); }
   opacity: .75;        /* 光量を強める */
   pointer-events: none;
 }
+
+
+/* ========== Safe Area Utilities ========== */
+
+/* 下方向に余白を確保 */
+.pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom), 16px);
+}
+
+/* 上方向に余白を確保（ノッチ対応用） */
+.pt-safe {
+  padding-top: max(env(safe-area-inset-top), 16px);
+}
+
+/* 左方向に余白を確保（横向き対応用） */
+.pl-safe {
+  padding-left: max(env(safe-area-inset-left), 16px);
+}
+
+/* 右方向に余白を確保（横向き対応用） */
+.pr-safe {
+  padding-right: max(env(safe-area-inset-right), 16px);
+}

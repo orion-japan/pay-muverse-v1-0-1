@@ -194,13 +194,13 @@ export async function POST(req: NextRequest) {
     const sys = buildMuSystemPrompt({
       personaKey: 'base',
       mode: 'normal',
-      tone: 'compassion_calm',
+      tone: 'gentle_guide',
     });
     const promptMeta = {
       mu_prompt_version: MU_PROMPT_VERSION,
       mu_persona: 'base',
       mu_mode: 'normal',
-      mu_tone: 'compassion_calm',
+      mu_tone: 'gentle_guide',
       mu_config_version: MU_CONFIG.version,
       mu_prompt_hash: String(sys).slice(0, 24),
     };
