@@ -33,3 +33,28 @@ html, body {
   margin: 0 auto;         /* 中央寄せ */
   width: 100%;            /* 横スクロール防止 */
 }
+
+/* styles/layout.css 等 */
+.mobile-frame {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.mobile-viewport {
+  width: 100%;
+  max-width: 480px;   /* スマホ風に固定 */
+  min-width: 320px;   /* 予防線 */
+  margin: 0 auto;
+}
+
+/* 背景系がタップを奪わないように */
+.mobile-frame .bg-canvas,
+.mobile-frame .hero-cover {
+  pointer-events: none;
+}
+
+/* ほかの幅指定に勝てるよう保険（iPadで有効） */
+@media (min-width: 768px) {
+  .mobile-viewport { max-width: 480px !important; }
+}
