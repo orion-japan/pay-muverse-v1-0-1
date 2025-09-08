@@ -40,15 +40,20 @@ export type SofiaConfig = {
 };
 
 /* --------------------------
-   env ユーティリティ
+   env ユーティリティ（安全版）
 -------------------------- */
 
-/** 最初に見つかった非空の env を返す */
+/** 最初に見つかった非空の env を返す（SSR/CSR両対応） */
 const pick = (...keys: (string | undefined)[]) => {
-  for (const k of keys) {
-    if (!k) continue;
-    const v = process.env[k];
-    if (typeof v === 'string' && v.trim() !== '') return v;
+  try {
+    for (const k of keys) {
+      if (!k) continue;
+      // Next.js ではクライアントでも process.env はビルド時埋め込み（undefined guard だけ置く）
+      const v = (typeof process !== 'undefined' ? (process as any).env?.[k] : undefined);
+      if (typeof v === 'string' && v.trim() !== '') return v;
+    }
+  } catch {
+    /* noop */
   }
   return undefined;
 };
@@ -85,28 +90,11 @@ const envBool = (def: boolean, ...keys: string[]) => {
 };
 
 /* --------------------------
-   デバッグ（必要なら残す）
+   デバッグ（UI でのみ軽く）
 -------------------------- */
-if (typeof window !== 'undefined') {
-  // eslint-disable-next-line no-console
-  console.log('[SofiaConfig/env]', {
-    FS: process.env.NEXT_PUBLIC_SOFIA_ASSIST_FONTSIZE,
-    LH: process.env.NEXT_PUBLIC_SOFIA_ASSIST_LH,
-    LS: process.env.NEXT_PUBLIC_SOFIA_ASSIST_LS,
-    USER_BG: process.env.NEXT_PUBLIC_SOFIA_USER_BG,
-    USER_FG: process.env.NEXT_PUBLIC_SOFIA_USER_FG,
-    USER_BORDER: process.env.NEXT_PUBLIC_SOFIA_USER_BORDER,
-    USER_RADIUS: process.env.NEXT_PUBLIC_SOFIA_USER_RADIUS,
-    P_MARGIN: process.env.NEXT_PUBLIC_SOFIA_P_MARGIN,
-    A_BG: process.env.NEXT_PUBLIC_SOFIA_ASSIST_BG,
-    A_BORDER: process.env.NEXT_PUBLIC_SOFIA_ASSIST_BORDER,
-    A_RADIUS: process.env.NEXT_PUBLIC_SOFIA_ASSIST_RADIUS,
-    A_SHADOW: process.env.NEXT_PUBLIC_SOFIA_ASSIST_SHADOW,
-    BUBBLE_MAXW: process.env.NEXT_PUBLIC_SOFIA_BUBBLE_MAXW,
-    BQ_BORDER: process.env.NEXT_PUBLIC_SOFIA_BQ_TINT_BORDER,
-    BQ_BG: process.env.NEXT_PUBLIC_SOFIA_BQ_TINT_BG,
-  });
-}
+const canLogClient =
+  typeof window !== 'undefined' &&
+  (typeof process === 'undefined' || (process as any).env?.NODE_ENV !== 'production');
 
 /* --------------------------
    本体設定（構造は維持）
@@ -168,7 +156,26 @@ export const SOFIA_CONFIG: SofiaConfig = {
   },
 };
 
-// 最終構成のダンプ（開発中のみ）
-/* eslint-disable no-console */
-console.log('[SofiaConfig]', SOFIA_CONFIG);
-/* eslint-enable no-console */
+// クライアント開発時のみ、環境値のダンプを控えめに
+if (canLogClient) {
+  // eslint-disable-next-line no-console
+  console.log('[SofiaConfig/env]', {
+    FS: (typeof process !== 'undefined' ? (process as any).env?.NEXT_PUBLIC_SOFIA_ASSIST_FONTSIZE : undefined),
+    LH: (typeof process !== 'undefined' ? (process as any).env?.NEXT_PUBLIC_SOFIA_ASSIST_LH : undefined),
+    LS: (typeof process !== 'undefined' ? (process as any).env?.NEXT_PUBLIC_SOFIA_ASSIST_LS : undefined),
+    USER_BG: (typeof process !== 'undefined' ? (process as any).env?.NEXT_PUBLIC_SOFIA_USER_BG : undefined),
+    USER_FG: (typeof process !== 'undefined' ? (process as any).env?.NEXT_PUBLIC_SOFIA_USER_FG : undefined),
+    USER_BORDER: (typeof process !== 'undefined' ? (process as any).env?.NEXT_PUBLIC_SOFIA_USER_BORDER : undefined),
+    USER_RADIUS: (typeof process !== 'undefined' ? (process as any).env?.NEXT_PUBLIC_SOFIA_USER_RADIUS : undefined),
+    P_MARGIN: (typeof process !== 'undefined' ? (process as any).env?.NEXT_PUBLIC_SOFIA_P_MARGIN : undefined),
+    A_BG: (typeof process !== 'undefined' ? (process as any).env?.NEXT_PUBLIC_SOFIA_ASSIST_BG : undefined),
+    A_BORDER: (typeof process !== 'undefined' ? (process as any).env?.NEXT_PUBLIC_SOFIA_ASSIST_BORDER : undefined),
+    A_RADIUS: (typeof process !== 'undefined' ? (process as any).env?.NEXT_PUBLIC_SOFIA_ASSIST_RADIUS : undefined),
+    A_SHADOW: (typeof process !== 'undefined' ? (process as any).env?.NEXT_PUBLIC_SOFIA_ASSIST_SHADOW : undefined),
+    BUBBLE_MAXW: (typeof process !== 'undefined' ? (process as any).env?.NEXT_PUBLIC_SOFIA_BUBBLE_MAXW : undefined),
+    BQ_BORDER: (typeof process !== 'undefined' ? (process as any).env?.NEXT_PUBLIC_SOFIA_BQ_TINT_BORDER : undefined),
+    BQ_BG: (typeof process !== 'undefined' ? (process as any).env?.NEXT_PUBLIC_SOFIA_BQ_TINT_BG : undefined),
+  });
+  // eslint-disable-next-line no-console
+  console.log('[SofiaConfig]', SOFIA_CONFIG);
+}

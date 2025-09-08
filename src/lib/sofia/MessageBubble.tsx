@@ -24,6 +24,47 @@ function LinkRenderer(
 
 type BubbleProps = { role: MsgRole; text: string };
 
+/* =========================
+   Dark Story stage parser
+   先頭が 「【stage:dark】/【stage:remake】/【stage:integration】」
+   の段落を抽出。無ければ空配列。
+========================= */
+type StageKey = 'dark' | 'remake' | 'integration';
+type StageBlock = { stage: StageKey; content: string };
+
+const STAGE_LABEL: Record<StageKey, string> = {
+  dark: '闇の物語',
+  remake: 'リメイク',
+  integration: '再統合',
+};
+
+function parseDarkStages(src: string): StageBlock[] {
+  if (!src) return [];
+  // 改行基準で段落を安全に取る
+  const lines = src.split(/\r?\n/);
+  const out: StageBlock[] = [];
+  let cur: StageBlock | null = null;
+
+  const head = /^【\s*stage\s*:\s*(dark|remake|integration)\s*】\s*$/i;
+
+  for (const raw of lines) {
+    const m = raw.match(head);
+    if (m) {
+      // 新しいステージ開始
+      if (cur) out.push({ ...cur, content: cur.content.trim() });
+      cur = { stage: m[1].toLowerCase() as StageKey, content: '' };
+      continue;
+    }
+    if (cur) {
+      cur.content += (cur.content ? '\n' : '') + raw;
+    }
+  }
+  if (cur) out.push({ ...cur, content: cur.content.trim() });
+
+  // 3段がそろっている、または1–2段でも stage が存在すれば採用
+  return out.length > 0 ? out : [];
+}
+
 export function MessageBubble({ role, text }: BubbleProps) {
   const isUser = role === 'user';
 
@@ -78,6 +119,9 @@ export function MessageBubble({ role, text }: BubbleProps) {
   const remarkList: PluggableList = [remarkGfm, remarkBreaks];
   const rehypeList: PluggableList = [rehypeHighlight];
 
+  // ここで stage を検出（なければ通常 Markdown）
+  const stages = parseDarkStages(text);
+
   return (
     <div
       style={{
@@ -88,185 +132,271 @@ export function MessageBubble({ role, text }: BubbleProps) {
     >
       <div style={bubbleStyle}>
         <div style={contentStyle}>
-          {/* ReactMarkdown には className を付けず、外側に付与して型エラー回避 */}
-          <div className="markdown">
-            <ReactMarkdown
-              remarkPlugins={remarkList}      // 単一改行 → <br/>
-              rehypePlugins={rehypeList}
-              components={{
-                a: LinkRenderer,
+          {/* stage あり → 三層カード表示、なし → Markdown */}
+          {stages.length > 0 ? (
+            <div>
+              {stages.map((s, idx) => (
+                <div
+                  key={`${s.stage}-${idx}`}
+                  style={{
+                    border: '1px solid #e5e7eb',
+                    borderRadius: 10,
+                    padding: '10px 12px',
+                    margin: idx === 0 ? `0 0 ${paraMgPx}px` : `${paraMgPx}px 0 0`,
+                    background:
+                      s.stage === 'dark'
+                        ? '#f8fafc'
+                        : s.stage === 'remake'
+                        ? '#f9fef8'
+                        : '#fffef7',
+                  }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 700, opacity: 0.7, marginBottom: 6 }}>
+                    {`【${STAGE_LABEL[s.stage]}】`}
+                  </div>
+                  <ReactMarkdown
+                    remarkPlugins={remarkList}
+                    rehypePlugins={rehypeList}
+                    components={{
+                      a: LinkRenderer,
+                      br() {
+                        return <span style={{ display: 'block', height: softBreakHeightPx }} />;
+                      },
+                      p({ children }) {
+                        return <p style={blockTextStyle}>{children}</p>;
+                      },
+                      code(props) {
+                        const { inline, className, children, ...rest } = props as any;
+                        if (inline) {
+                          return (
+                            <code
+                              style={{
+                                background: '#f3f4f6',
+                                padding: '2px 6px',
+                                borderRadius: 6,
+                                fontFamily:
+                                  'ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace',
+                                fontSize: '0.95em',
+                              }}
+                              {...rest}
+                            >
+                              {children}
+                            </code>
+                          );
+                        }
+                        return (
+                          <code className={className} {...rest}>
+                            {children}
+                          </code>
+                        );
+                      },
+                      pre(props) {
+                        const { children, ...rest } = props as any;
+                        return (
+                          <pre
+                            style={{
+                              background: '#0b1020',
+                              color: 'white',
+                              padding: '12px 14px',
+                              borderRadius: 10,
+                              overflowX: 'auto',
+                              border: '1px solid #111827',
+                              margin: `${paraMgPx}px 0`,
+                            }}
+                            {...rest}
+                          >
+                            {children}
+                          </pre>
+                        );
+                      },
+                    }}
+                  >
+                    {s.content}
+                  </ReactMarkdown>
+                </div>
+              ))}
+            </div>
+          ) : (
+            // 既存：通常の Markdown レンダリング
+            <div className="markdown">
+              <ReactMarkdown
+                remarkPlugins={remarkList}      // 単一改行 → <br/>
+                rehypePlugins={rehypeList}
+                components={{
+                  a: LinkRenderer,
 
-                // インラインコード
-                code(props) {
-                  const { inline, className, children, ...rest } = props as any;
-                  if (inline) {
+                  // インラインコード
+                  code(props) {
+                    const { inline, className, children, ...rest } = props as any;
+                    if (inline) {
+                      return (
+                        <code
+                          style={{
+                            background: '#f3f4f6',
+                            padding: '2px 6px',
+                            borderRadius: 6,
+                            fontFamily:
+                              'ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace',
+                            fontSize: '0.95em',
+                          }}
+                          {...rest}
+                        >
+                          {children}
+                        </code>
+                      );
+                    }
+                    // フェンスコード
                     return (
-                      <code
+                      <code className={className} {...rest}>
+                        {children}
+                      </code>
+                    );
+                  },
+
+                  pre(props) {
+                    const { children, ...rest } = props as any;
+                    return (
+                      <pre
                         style={{
-                          background: '#f3f4f6',
-                          padding: '2px 6px',
-                          borderRadius: 6,
-                          fontFamily:
-                            'ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace',
-                          fontSize: '0.95em',
+                          background: '#0b1020',
+                          color: 'white',
+                          padding: '12px 14px',
+                          borderRadius: 10,
+                          overflowX: 'auto',
+                          border: '1px solid #111827',
+                          margin: `${paraMgPx}px 0`,
                         }}
                         {...rest}
                       >
                         {children}
-                      </code>
+                      </pre>
                     );
-                  }
-                  // フェンスコード
-                  return (
-                    <code className={className} {...rest}>
-                      {children}
-                    </code>
-                  );
-                },
+                  },
 
-                pre(props) {
-                  const { children, ...rest } = props as any;
-                  return (
-                    <pre
-                      style={{
-                        background: '#0b1020',
-                        color: 'white',
-                        padding: '12px 14px',
-                        borderRadius: 10,
-                        overflowX: 'auto',
-                        border: '1px solid #111827',
-                        margin: `${paraMgPx}px 0`,
-                      }}
-                      {...rest}
-                    >
-                      {children}
-                    </pre>
-                  );
-                },
+                  // 単一改行 <br/> を“高さを持つ”要素にして余白を作る
+                  br() {
+                    return <span style={{ display: 'block', height: softBreakHeightPx }} />;
+                  },
 
-                // 単一改行 <br/> を“高さを持つ”要素にして余白を作る
-                br() {
-                  return <span style={{ display: 'block', height: softBreakHeightPx }} />;
-                },
-
-                table({ children }) {
-                  return (
-                    <div style={{ overflowX: 'auto', margin: `${paraMgPx}px 0` }}>
-                      <table
+                  table({ children }) {
+                    return (
+                      <div style={{ overflowX: 'auto', margin: `${paraMgPx}px 0` }}>
+                        <table
+                          style={{
+                            width: '100%',
+                            borderCollapse: 'collapse',
+                            fontSize: 14,
+                          }}
+                        >
+                          {children}
+                        </table>
+                      </div>
+                    );
+                  },
+                  th({ children }) {
+                    return (
+                      <th
                         style={{
-                          width: '100%',
-                          borderCollapse: 'collapse',
-                          fontSize: 14,
+                          textAlign: 'left',
+                          borderBottom: '1px solid #e5e7eb',
+                          padding: '6px 8px',
+                          background: '#f9fafb',
                         }}
                       >
                         {children}
-                      </table>
-                    </div>
-                  );
-                },
-                th({ children }) {
-                  return (
-                    <th
-                      style={{
-                        textAlign: 'left',
-                        borderBottom: '1px solid #e5e7eb',
-                        padding: '6px 8px',
-                        background: '#f9fafb',
-                      }}
-                    >
-                      {children}
-                    </th>
-                  );
-                },
-                td({ children }) {
-                  return (
-                    <td style={{ borderBottom: '1px solid #f1f5f9', padding: '6px 8px' }}>
-                      {children}
-                    </td>
-                  );
-                },
+                      </th>
+                    );
+                  },
+                  td({ children }) {
+                    return (
+                      <td style={{ borderBottom: '1px solid #f1f5f9', padding: '6px 8px' }}>
+                        {children}
+                      </td>
+                    );
+                  },
 
-                blockquote({ children }) {
-                  return (
-                    <blockquote
-                      style={{
-                        borderLeft: `4px solid ${SOFIA_CONFIG.ui.blockquoteTintBorder || '#cbd5e1'}`,
-                        background: SOFIA_CONFIG.ui.blockquoteTintBg || '#f1f5f9',
-                        margin: `${paraMgPx}px 0`,
-                        padding: '8px 10px',
-                        borderRadius: 6,
-                        color: '#475569',
-                        fontStyle: 'italic',
-                        ...blockTextStyle,
-                      }}
-                    >
-                      {children}
-                    </blockquote>
-                  );
-                },
+                  blockquote({ children }) {
+                    return (
+                      <blockquote
+                        style={{
+                          borderLeft: `4px solid ${SOFIA_CONFIG.ui.blockquoteTintBorder || '#cbd5e1'}`,
+                          background: SOFIA_CONFIG.ui.blockquoteTintBg || '#f1f5f9',
+                          margin: `${paraMgPx}px 0`,
+                          padding: '8px 10px',
+                          borderRadius: 6,
+                          color: '#475569',
+                          fontStyle: 'italic',
+                          ...blockTextStyle,
+                        }}
+                      >
+                        {children}
+                      </blockquote>
+                    );
+                  },
 
-                ul({ children }) {
-                  return (
-                    <ul
-                      style={{
-                        paddingInlineStart: 22,
-                        margin: `${paraMgPx}px 0`,
-                        ...blockTextStyle,
-                      }}
-                    >
-                      {children}
-                    </ul>
-                  );
-                },
+                  ul({ children }) {
+                    return (
+                      <ul
+                        style={{
+                          paddingInlineStart: 22,
+                          margin: `${paraMgPx}px 0`,
+                          ...blockTextStyle,
+                        }}
+                      >
+                        {children}
+                      </ul>
+                    );
+                  },
 
-                ol({ children }) {
-                  return (
-                    <ol
-                      style={{
-                        paddingInlineStart: 22,
-                        margin: `${paraMgPx}px 0`,
-                        ...blockTextStyle,
-                      }}
-                    >
-                      {children}
-                    </ol>
-                  );
-                },
+                  ol({ children }) {
+                    return (
+                      <ol
+                        style={{
+                          paddingInlineStart: 22,
+                          margin: `${paraMgPx}px 0`,
+                          ...blockTextStyle,
+                        }}
+                      >
+                        {children}
+                      </ol>
+                    );
+                  },
 
-                li({ children }) {
-                  return <li style={{ margin: '4px 0' }}>{children}</li>;
-                },
+                  li({ children }) {
+                    return <li style={{ margin: '4px 0' }}>{children}</li>;
+                  },
 
-                p({ children }) {
-                  return <p style={blockTextStyle}>{children}</p>;
-                },
+                  p({ children }) {
+                    return <p style={blockTextStyle}>{children}</p>;
+                  },
 
-                h1({ children }) {
-                  return (
-                    <h1 style={{ fontSize: 20, fontWeight: 700, margin: `${paraMgPx}px 0` }}>
-                      {children}
-                    </h1>
-                  );
-                },
-                h2({ children }) {
-                  return (
-                    <h2 style={{ fontSize: 18, fontWeight: 700, margin: `${paraMgPx}px 0` }}>
-                      {children}
-                    </h2>
-                  );
-                },
-                h3({ children }) {
-                  return (
-                    <h3 style={{ fontSize: 16, fontWeight: 700, margin: `${paraMgPx}px 0` }}>
-                      {children}
-                    </h3>
-                  );
-                },
-              }}
-            >
-              {text}
-            </ReactMarkdown>
-          </div>
+                  h1({ children }) {
+                    return (
+                      <h1 style={{ fontSize: 20, fontWeight: 700, margin: `${paraMgPx}px 0` }}>
+                        {children}
+                      </h1>
+                    );
+                  },
+                  h2({ children }) {
+                    return (
+                      <h2 style={{ fontSize: 18, fontWeight: 700, margin: `${paraMgPx}px 0` }}>
+                        {children}
+                      </h2>
+                    );
+                  },
+                  h3({ children }) {
+                    return (
+                      <h3 style={{ fontSize: 16, fontWeight: 700, margin: `${paraMgPx}px 0` }}>
+                        {children}
+                      </h3>
+                    );
+                  },
+                }}
+              >
+                {text}
+              </ReactMarkdown>
+            </div>
+          )}
         </div>
       </div>
     </div>

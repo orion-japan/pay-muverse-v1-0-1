@@ -2,6 +2,7 @@
 // Mu 用の統合コンフィグ（Sofia風ビルダーが参照する MU_CONFIG を提供）
 // - env の参照はランタイム依存せず安全に評価
 // - 型不一致を明示的に収束
+// - 既存プロジェクトの env 名称差異にフォールバック対応
 
 function getEnv(name: string): string | undefined {
   try {
@@ -12,36 +13,63 @@ function getEnv(name: string): string | undefined {
     return undefined;
   }
 }
-function envNumber(name: string, fallback: number): number {
-  const raw = getEnv(name);
+
+/** 複数キーを優先順で探索して最初の値を返す */
+function getEnvMulti(...names: string[]): string | undefined {
+  for (const n of names) {
+    const v = getEnv(n);
+    if (typeof v === 'string' && v.trim() !== '') return v;
+  }
+  return undefined;
+}
+
+function envNumberMulti(fallback: number, ...names: string[]): number {
+  const raw = getEnvMulti(...names);
   const n = raw != null ? Number(raw) : NaN;
   return Number.isFinite(n) ? (n as number) : fallback;
 }
-function envImageSize(
-  name: string,
-  fallback: '1024x1024' | '768x768'
+
+function envImageSizeMulti(
+  fallback: '1024x1024' | '768x768',
+  ...names: string[]
 ): '1024x1024' | '768x768' {
-  const raw = getEnv(name);
+  const raw = (getEnvMulti(...names) || '').trim();
   return raw === '768x768' ? '768x768' : '1024x1024';
 }
-function envString(name: string, fallback: string): string {
-  const raw = getEnv(name);
+
+function envStringMulti(fallback: string, ...names: string[]): string {
+  const raw = getEnvMulti(...names);
   return typeof raw === 'string' && raw.length > 0 ? raw : fallback;
+}
+
+/* 追加：ログ詳細の環境値を安全に収束させる（フォールバック付き） */
+function envLogDetailMulti(
+  fallback: 'off' | 'lite',
+  ...names: string[]
+): 'off' | 'lite' {
+  const raw = (getEnvMulti(...names) || '').toLowerCase();
+  return raw === 'off' ? 'off' : raw === 'lite' ? 'lite' : fallback;
 }
 
 export const MU_CONFIG_VERSION = 'mu.config.v1.0.0';
 
-/** クレジット・画像ポリシー */
+/** クレジット・画像ポリシー
+ *  互換env:
+ *   - TEXT: MU_CREDIT_PER_TURN ←→ MU_CHAT_CREDIT_COST
+ *   - IMAGE: MU_IMAGE_CREDIT ←→ MU_IMAGE_CREDIT_COST
+ */
 export const MU_CREDITS = {
-  TEXT_PER_TURN: envNumber('MU_CREDIT_PER_TURN', 0.5),
-  IMAGE_PER_GEN: envNumber('MU_IMAGE_CREDIT', 3),
+  TEXT_PER_TURN: envNumberMulti(0.5, 'MU_CREDIT_PER_TURN', 'MU_CHAT_CREDIT_COST'),
+  IMAGE_PER_GEN: envNumberMulti(3, 'MU_IMAGE_CREDIT', 'MU_IMAGE_CREDIT_COST'),
 };
 
 export const MU_IMAGE = {
-  DEFAULT_SIZE: envImageSize('MU_IMAGE_SIZE', '1024x1024'),
-  MODEL_PRIMARY: envString('MU_IMAGE_MODEL_PRIMARY', 'gpt-image-1'),
-  MODEL_FALLBACK: envString('MU_IMAGE_MODEL_FALLBACK', 'dall-e-3'),
-  API_PATH: envString('MU_IMAGE_API_PATH', '/api/image/generate'),
+  // 互換: MU_IMAGE_SIZE
+  DEFAULT_SIZE: envImageSizeMulti('1024x1024', 'MU_IMAGE_SIZE'),
+  // 互換: MU_IMAGE_MODEL ←→ MU_IMAGE_MODEL_PRIMARY
+  MODEL_PRIMARY: envStringMulti('gpt-image-1', 'MU_IMAGE_MODEL_PRIMARY', 'MU_IMAGE_MODEL'),
+  MODEL_FALLBACK: envStringMulti('dall-e-3', 'MU_IMAGE_MODEL_FALLBACK'),
+  API_PATH: envStringMulti('/api/image/generate', 'MU_IMAGE_API_PATH'),
 } as const;
 
 /** ブリッジ・定型句 */
@@ -124,6 +152,16 @@ export const MU_OUTPUT_LIMITS = {
   BULLET_MAX: 3,
 } as const;
 
+/* 追加：ログ設定（dialogue_trace_lite 向け）
+ * 互換env:
+ *  - MU_LOG_DETAIL （'lite' 推奨）
+ *  - MU_TRACE_RETENTION_DAYS
+ */
+export const MU_LOGGING = {
+  logDetail: envLogDetailMulti('lite', 'MU_LOG_DETAIL'),
+  traceRetentionDays: envNumberMulti(90, 'MU_TRACE_RETENTION_DAYS'),
+} as const;
+
 /** まとめて扱う統合コンフィグ（ビルダーが参照） */
 export const MU_CONFIG = {
   persona: {
@@ -147,4 +185,14 @@ export const MU_CONFIG = {
   qLink: MU_Q_LINK,
   agent: MU_AGENT,
   outputLimits: MU_OUTPUT_LIMITS,
+  logging: MU_LOGGING,
 } as const;
+
+// （任意）起動時に現在値を一度だけログ出力して読込確認
+// eslint-disable-next-line no-console
+console.log('[MU_CONFIG]', {
+  version: MU_CONFIG.version,
+  credits: MU_CONFIG.credits,
+  image: MU_CONFIG.image,
+  logging: MU_CONFIG.logging,
+});

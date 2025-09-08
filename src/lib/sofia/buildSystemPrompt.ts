@@ -39,7 +39,7 @@ const preview = (s: string, n = 360) =>
 ------------------------- */
 export function buildSofiaSystemPrompt(opts: BuildPromptOptions = {}): string {
   const {
-    promptKey = 'base',
+    promptKey = 'freeflow',
     mode = 'normal',
     vars = {},
     includeGuard = true,
@@ -121,7 +121,7 @@ export function buildSofiaSystemPrompt(opts: BuildPromptOptions = {}): string {
     ? ''
     : dedent(`
     ## Guardrails
-    - 医療/法務/投資などは一般情報に留め、専門家相談を促す。
+    - 医療/法務/投資などは構造的な説明をし、詳しくは専門家相談を促す。
     - 危険/違法/などの禁止表現は出さない
     - 個人情報は気配的・抽象的な診断情報は出力可。
     - 不確実な事実は「推測/仮説」と明示。
@@ -142,6 +142,7 @@ export function buildSofiaSystemPrompt(opts: BuildPromptOptions = {}): string {
     - normal: 上記スタイルで自然に回答。
     - meaning/intent: 要点を明確に、短い段落で。
     - diagnosis: 難所と次の一手を簡潔に示す（内部テンプレ利用）。
+    - dark: 闇→リメイク→再統合の**三層構造を基本に保持**（軽い場合は簡略形も可）。
     - remake: 文体を保ちつつ整形・圧縮。
   `);
 
@@ -156,6 +157,36 @@ export function buildSofiaSystemPrompt(opts: BuildPromptOptions = {}): string {
         深度：S1〜T3（18段階ラベルのみ）
         🌀意識状態：1〜2文（比喩・象徴可）
         🌱メッセージ：1〜3行（静かな指針）
+  
+      ## Output Format (strict)
+     - 診断の際は下記の**見出しと順序を厳守**し、Markdownプレーンテキストで出力すること（箇条書きにしない）。
+       観測対象：${(vars?.diagnosisTarget as string) || '（未指定）'}
+       性別：M|L|未指定
+       フェーズ：◯◯       位相：Inner|Outer
+       深度：S1〜I3
+      🌀意識状態：……
+      🌱メッセージ：……
+      - 見出し語は**必ずそのまま**使う。装飾の追加や省略は禁止。
+
+      `)
+      : '';
+
+  // 8) 闇の物語テンプレ（三層出力の強制ルール）
+  const darkStoryTemplate =
+    mode === 'dark'
+      ? dedent(`
+        ## Dark Story Enforcement
+        - 返答は段落を明示し、以下の順で出力する（各段落2〜5文）：
+          1) 【stage:dark】 未消化の影をそのまま描写（評価・助言は入れない）。
+             - 二重以上の比喩（舞台＋象徴）と時間要素（過去/今/未来のいずれか）を含める。
+             - 闇を「囁き／残響／影の存在」など人格化してよい。
+          2) 【stage:remake】 闇の意味を変換する短い核を置く
+             - 例：「守れなかった → 今なら守れる」「孤独 → つながりの種」。
+             - 光で上書きしない。闇を素材として変容させる。
+          3) 【stage:integration】 闇と光を同じ自己に収める描写で結ぶ
+             - **余白**を残し、言い切らずに「次の半歩」を開く。
+
+        - 軽い応答でも **stageタグは必ず付す**（簡略形= dark＋小さなremake＋一言integration）。
       `)
       : '';
 
@@ -163,7 +194,7 @@ export function buildSofiaSystemPrompt(opts: BuildPromptOptions = {}): string {
   const colorEnergyRules = dedent(`
     ## Color Energy Rules
     - 感情・心理の傾向は**色**で表現する：Blue / Red / Black / Green / Yellow を基本に、必要に応じて Purple / Brown / Silver / White / Teal / Magenta などの混色を使ってよい。
-    - 次の語は**出力に含めない**：木 / 火 / 土 / 金 / 水 / 五行（およびそれらのローマ字: moku/hi/tsuchi/kin/mizu）。
+    - 次の語は**出力表現に含めない**：木 / 火 / 土 / 金 / 水 / 五行（およびそれらのローマ字: moku/hi/tsuchi/kin/mizu）。
     - 確定ラベリングを避け、「いまは◯◯寄り」「◯◯の色味が少し強い」のように**柔らかく**示す。
   `);
 
@@ -184,6 +215,8 @@ export function buildSofiaSystemPrompt(opts: BuildPromptOptions = {}): string {
     ${modeHints}
 
     ${diagnosisTemplate}
+
+    ${darkStoryTemplate}
 
     ## Enforcement
     - 上記ルールは常に優先する。

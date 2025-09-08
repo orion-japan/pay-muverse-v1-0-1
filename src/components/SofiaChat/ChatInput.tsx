@@ -38,9 +38,13 @@ export default function ChatInput({
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
+  // ★ 二重送信ロック（React18 StrictModeや多重イベント対策）
+  const sendLockRef = useRef(false);
+
   useEffect(() => {
     try {
-      const saved = typeof window !== 'undefined' ? window.localStorage.getItem(draftKey) : '';
+      const saved =
+        typeof window !== 'undefined' ? window.localStorage.getItem(draftKey) : '';
       if (saved) setText(saved);
     } catch {}
   }, [draftKey]);
@@ -59,29 +63,37 @@ export default function ChatInput({
     ta.style.height = 'auto';
     ta.style.height = Math.min(ta.scrollHeight, window.innerHeight * 0.4) + 'px';
   }, []);
-  useEffect(() => { autoSize(); }, [text, autoSize]);
+  useEffect(() => {
+    autoSize();
+  }, [text, autoSize]);
 
   const totalSizeMB = files.reduce((sum, f) => sum + f.size, 0) / (1024 * 1024);
   const overMaxFiles = files.length > maxFiles;
   const overMaxSize = totalSizeMB > maxTotalSizeMB;
 
-  const appendFiles = useCallback((add: FileList | File[] | null | undefined) => {
-    if (!add) return;
-    const next = [...files];
-    for (const f of Array.from(add)) {
-      next.push(f);
-      if (next.length >= maxFiles) break;
-    }
-    setFiles(next);
-  }, [files, maxFiles]);
+  const appendFiles = useCallback(
+    (add: FileList | File[] | null | undefined) => {
+      if (!add) return;
+      const next = [...files];
+      for (const f of Array.from(add)) {
+        next.push(f);
+        if (next.length >= maxFiles) break;
+      }
+      setFiles(next);
+    },
+    [files, maxFiles],
+  );
 
-  const onDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOver(false);
-    if (disabled || sending) return;
-    appendFiles(e.dataTransfer?.files);
-  }, [appendFiles, disabled, sending]);
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOver(false);
+      if (disabled || sending) return;
+      appendFiles(e.dataTransfer?.files);
+    },
+    [appendFiles, disabled, sending],
+  );
 
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -93,42 +105,48 @@ export default function ChatInput({
     setDragOver(false);
   }, []);
 
-  const onPaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    const pasted: File[] = [];
-    for (const it of items) {
-      if (it.kind === 'file') {
-        const file = it.getAsFile();
-        if (file) pasted.push(file);
+  const onPaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      if (disabled || sending) return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      const pasted: File[] = [];
+      for (const it of items) {
+        if (it.kind === 'file') {
+          const file = it.getAsFile();
+          if (file) pasted.push(file);
+        }
       }
-    }
-    if (pasted.length) {
-      e.preventDefault();
-      appendFiles(pasted);
-    }
-  }, [appendFiles]);
-
-  const onKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
-      e.preventDefault();
-      handleSend();
-    }
-  }, [isComposing]); // eslint-disable-line
+      if (pasted.length) {
+        e.preventDefault();
+        appendFiles(pasted);
+      }
+    },
+    [appendFiles, disabled, sending],
+  );
 
   const handleSend = useCallback(async () => {
     const value = text.trim();
     const hasFiles = files.length > 0;
-    if ((disabled || sending) || (!value && !hasFiles)) return;
+
+    // ★ 入口ガード（状態＋ロック）
+    if (disabled || sending || sendLockRef.current) return;
+    if (!value && !hasFiles) return;
     if (overMaxFiles || overMaxSize) return;
 
-    setText('');
-    setFiles([]);
-    try { if (typeof window !== 'undefined') window.localStorage.removeItem(draftKey); } catch {}
-    taRef.current?.focus();
-
+    // ★ 以降はこの送信ルーチンを占有
+    sendLockRef.current = true;
     setSending(true);
+
     try {
+      // 先にUIをクリア（楽観的）：ここでの再入防止はsendLockRefが担保
+      setText('');
+      setFiles([]);
+      try {
+        if (typeof window !== 'undefined') window.localStorage.removeItem(draftKey);
+      } catch {}
+      taRef.current?.focus();
+
       if (onSendWithFiles) {
         await onSendWithFiles(value, hasFiles ? files : null);
       } else {
@@ -136,13 +154,42 @@ export default function ChatInput({
       }
     } finally {
       setSending(false);
+      sendLockRef.current = false; // ★ ロック解除
     }
-  }, [text, files, disabled, sending, overMaxFiles, overMaxSize, onSendWithFiles, onSend, draftKey]);
+  }, [
+    text,
+    files,
+    disabled,
+    sending,
+    overMaxFiles,
+    overMaxSize,
+    onSendWithFiles,
+    onSend,
+    draftKey,
+  ]);
 
-  useEffect(() => { taRef.current?.focus(); }, []);
-  useEffect(() => { if (focusToken !== undefined) taRef.current?.focus(); }, [focusToken]);
+  const onKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
+        e.preventDefault();
+        // ★ ここでもロックを尊重（押しっぱなし連打・重複呼び出し防止）
+        if (!sendLockRef.current) {
+          void handleSend();
+        }
+      }
+    },
+    [isComposing, handleSend],
+  ); // eslint-disable-line
 
-  const removeFileAt = (idx: number) => setFiles((prev) => prev.filter((_, i) => i !== idx));
+  useEffect(() => {
+    taRef.current?.focus();
+  }, []);
+  useEffect(() => {
+    if (focusToken !== undefined) taRef.current?.focus();
+  }, [focusToken]);
+
+  const removeFileAt = (idx: number) =>
+    setFiles((prev) => prev.filter((_, i) => i !== idx));
   const openPicker = () => fileRef.current?.click();
 
   // ir診断：入力欄にセットするだけ（送信しない）
@@ -152,9 +199,11 @@ export default function ChatInput({
   }, []);
 
   const canSend =
-    !disabled && !sending &&
+    !disabled &&
+    !sending &&
     (!!text.trim() || files.length > 0) &&
-    !overMaxFiles && !overMaxSize;
+    !overMaxFiles &&
+    !overMaxSize;
 
   return (
     <div
@@ -185,7 +234,11 @@ export default function ChatInput({
         {files.length > 0 && (
           <div className="sof-fileChips" aria-live="polite">
             {files.map((f, i) => (
-              <div key={i} className="sof-fileChip" title={`${f.name} (${(f.size/1024/1024).toFixed(2)}MB)`}>
+              <div
+                key={i}
+                className="sof-fileChip"
+                title={`${f.name} (${(f.size / 1024 / 1024).toFixed(2)}MB)`}
+              >
                 <span className="sof-fileName">{f.name}</span>
                 <button
                   type="button"
@@ -231,28 +284,31 @@ export default function ChatInput({
           </button>
 
           <button
-    type="button"
-    className="sof-actionBtn sof-actionBtn--ir"   // ← 追加
-    onClick={insertIRDiagnosis}
-    disabled={disabled || sending}
-    aria-label="ir診断を入力欄に挿入"
-    title="ir診断を入力に挿入"
-  >
-    ir診断
-  </button>
+            type="button"
+            className="sof-actionBtn sof-actionBtn--ir" /* ← 追加済み */
+            onClick={insertIRDiagnosis}
+            disabled={disabled || sending}
+            aria-label="ir診断を入力欄に挿入"
+            title="ir診断を入力に挿入"
+          >
+            ir診断
+          </button>
 
-  {/* 下：送信（←クラスを追加して色付け） */}
-  <button
-    data-sof-send
-    className="sof-actionBtn sof-actionBtn--send"  // ← 追加
-    onClick={handleSend}
-    disabled={!canSend}
-    aria-label="送信"
-    title="送信（Enter）"
-  >
-    送信
-  </button>
-</div>
+          {/* 下：送信 */}
+          <button
+            data-sof-send
+            type="button"
+            className="sof-actionBtn sof-actionBtn--send" /* ← 追加済み */
+            onClick={() => {
+              if (!sendLockRef.current) void handleSend();
+            }}
+            disabled={!canSend}
+            aria-label="送信"
+            title="送信（Enter）"
+          >
+            送信
+          </button>
+        </div>
       </div>
     </div>
   );
