@@ -310,3 +310,123 @@
   padding-bottom: 6px;            /* 線との間に少し余白 */
   border-bottom: 1px solid #eee;  /* ← 区切り線 */
 }
+
+/* ====== 下部タブバーの高さ（実寸に合わせて調整） ====== */
+:root { --tabbar-h: 72px; }  /* 64〜80px など、環境に合わせて */
+
+.thread-page {
+  position: relative;
+  min-height: 100dvh;
+}
+
+/* ---------- 戻るボタン ----------- */
+.back-btn {
+  --bd: rgba(0,0,0,.08);
+  --glow: rgba(132,94,247,.18);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--bd);
+  background: linear-gradient(180deg, #fff, #f7f4ff);
+  box-shadow: 0 1px 2px rgba(0,0,0,.06);
+  font-weight: 600;
+  color: #5b4b8a;
+  cursor: pointer;
+  transition: box-shadow .15s ease, transform .05s ease, border-color .2s;
+  user-select: none;
+}
+.back-btn:hover {
+  box-shadow: 0 0 0 3px var(--glow);
+  border-color: rgba(132,94,247,.35);
+}
+.back-btn:active { transform: translateY(1px); }
+
+/* トップバー（戻るボタンを収める行） */
+.thread-topbar {
+  padding: 8px 12px;
+}
+
+/* ---------- スクロール領域（下に余白を確保） ---------- */
+.thread-scroll {
+  /* 既存の指定があれば併存でOK */
+  padding-bottom: calc(var(--tabbar-h) + 100px + env(safe-area-inset-bottom));
+  /* コメント入力が固定で重ならないように、少し大きめに確保 */
+}
+
+
+:root { --tabbar-h: 72px; } /* 下ナビ高さに合わせて調整 */
+
+.thread-scroll{
+  padding-bottom: calc(var(--tabbar-h) + 120px + env(safe-area-inset-bottom));
+}
+
+/* ← body 直下に出るので確実に画面基準で固定される */
+#comment-dock.post-form{
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 8px);
+  width: min(900px, 100% - 24px);
+  z-index: 1000;
+
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  background: #fff;
+  border: 1px solid rgba(0,0,0,.08);
+  border-radius: 14px;
+  padding: 10px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.08);
+}
+
+#comment-dock.post-form textarea{
+  flex: 1 1 auto;
+  min-height: 36px;
+  max-height: 96px;
+  padding: 8px 10px;
+  border: 1px solid rgba(0,0,0,.06);
+  border-radius: 10px;
+  resize: none;
+  outline: none;
+}
+
+#comment-dock.post-form button{
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 0;
+  background: #b197fc;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.delete-btn{
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 12px;
+  border: 1px solid #e3a5ad;
+  color: #c62828;
+  background: #fff5f6;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.delete-btn:hover{ background: #ffecee; }
+
+
+.thread-header .header-info { position: relative; }
+.thread-header .delete-btn{
+  position: absolute;
+  right: 8px;
+  top: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  border: 1px solid #e3a5ad;
+  color: #c62828;
+  background: #fff;
+  border-radius: 999px;
+  cursor: pointer;
+  opacity: .9;
+}
+.thread-header .delete-btn:hover { background: #fff5f6; opacity: 1; }

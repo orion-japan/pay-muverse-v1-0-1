@@ -285,66 +285,84 @@ export default function SelfPage() {
     return false
   }
 
-  const DigestRow = ({ p }: { p: Post }) => {
-    const author = p.profiles?.name ?? p.click_username ?? p.user_code ?? 'unknown'
-    const snippet = (p.content || '').trim()
-    const replyCount = statsMap[p.post_id]?.reply_count ?? 0
-    const avatarUrl = avatarSrcOf(p.user_code)
-  
-    return (
-      <div className="digest-row compact">
-        {/* 左の丸アイコン */}
-        <img
-          className="avatar"
-          src={avatarUrl}
-          alt=""
-          onClick={() => p.user_code && router.push(`/self/${p.user_code}`)}
-          onError={(e) => { (e.currentTarget as HTMLImageElement).src = DEFAULT_AVATAR }}
+// 置き換え：DigestRow
+const DigestRow = ({ p }: { p: Post }) => {
+  const author = p.profiles?.name ?? p.click_username ?? p.user_code ?? 'unknown'
+  const snippet = (p.content || '').trim()
+  const replyCount = statsMap[p.post_id]?.reply_count ?? 0
+  const avatarUrl = avatarSrcOf(p.user_code)
+
+  const goDetail = () => router.push(`/thread/${p.post_id}`)
+
+  return (
+    <div
+      className="digest-row compact"
+      role="link"
+      tabIndex={0}
+      onClick={goDetail}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          goDetail()
+        }
+      }}
+      title={snippet}
+    >
+      {/* 左の丸アイコン（→ プロフィールへ、親クリックは止める） */}
+      <img
+        className="avatar"
+        src={avatarUrl}
+        alt=""
+        onClick={(e) => {
+          e.stopPropagation()
+          if (p.user_code) router.push(`/self/${p.user_code}`)
+        }}
+        onError={(e) => { (e.currentTarget as HTMLImageElement).src = DEFAULT_AVATAR }}
+        style={{ cursor: 'pointer' }}
+      />
+
+      {/* 1行目：作者（左）／日付（右） */}
+      <div className="row head">
+        <strong
+          className="author"
+          onClick={(e) => {
+            e.stopPropagation()
+            if (p.user_code) router.push(`/profile/${p.user_code}`)
+          }}
           style={{ cursor: 'pointer' }}
-        />
-  
-        {/* 1行目：作者（左）／日付（右） */}
-        <div className="row head">
-          <strong
-            className="author"
-            onClick={() => p.user_code && router.push(`/profile/${p.user_code}`)}
-            style={{ cursor: 'pointer' }}
-          >
-            {author}
-          </strong>
-          <span className="meta">{formatDate(p.created_at)}</span>
-        </div>
-  
-        {/* 2行目：本文（左）／返信数ピル等（右） */}
-        <div className="row body">
-          <span
-            className="snippet"
-            onClick={() => router.push(`/thread/${p.post_id}`)}
-            style={{ cursor: 'pointer' }}
-            title={snippet}
-          >
-            {snippet || '（本文なし）'}
-          </span>
-  
-          <div className="tail-right">
-            {replyCount > 0 && <span className="pill">{replyCount}</span>}
-            {looksAI(p) && <span className="pill ai">AI</span>}
-          </div>
-        </div>
-  
-        {/* 3行目：リアクション（中央） */}
-        <div className="reaction-row">
-          <ReactionBar
-            postId={p.post_id}
-            userCode={userCode || ''}
-            isParent={true}
-            initialCounts={toCounts(countsMap[p.post_id])}
-            readOnly={true}
-          />
+        >
+          {author}
+        </strong>
+        <span className="meta">{formatDate(p.created_at)}</span>
+      </div>
+
+      {/* 2行目：本文（左）／返信数ピル等（右） */}
+      <div className="row body">
+        <span className="snippet">{snippet || '（本文なし）'}</span>
+        <div className="tail-right">
+          {replyCount > 0 && <span className="pill">{replyCount}</span>}
+          {looksAI(p) && <span className="pill ai">AI</span>}
         </div>
       </div>
-    )
-  }
+
+      {/* 3行目：リアクション（→ 親クリックは止める） */}
+      <div
+        className="reaction-row"
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <ReactionBar
+          postId={p.post_id}
+          userCode={userCode || ''}
+          isParent={true}
+          initialCounts={toCounts(countsMap[p.post_id])}
+          readOnly={true}
+        />
+      </div>
+    </div>
+  )
+}
+
   
   
 
@@ -370,7 +388,7 @@ export default function SelfPage() {
     // ★ self-shell で周辺スタイルを遮断
     <div className="self-shell">
       <div className="self-page">
-        <h1>🧠 Self Talk</h1>
+        <h1> Self Talk</h1>
 
         {loading ? (
           <p>読み込み中...</p>

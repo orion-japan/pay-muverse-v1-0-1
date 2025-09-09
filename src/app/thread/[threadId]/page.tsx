@@ -7,6 +7,12 @@ import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/context/AuthContext';
 import ReactionBar from '@/components/ReactionBar';
 import './ThreadPage.css';
+import CommentDockPortal from '@/components/CommentDockPortal';
+import CommentsSection from '@/components/CommentsSection';
+import { getAuth } from 'firebase/auth';
+
+
+
 
 /* ===== Types ===== */
 type Post = {
@@ -138,6 +144,7 @@ export default function ThreadPage() {
     }
   }
 
+  
   // ★ 追加：一括取得（初期だけ使う）
   async function fetchCountsBatch(ids: string[]) {
     if (!ids.length) return;
@@ -327,7 +334,42 @@ export default function ThreadPage() {
   };
 
   const toInitialCounts = (pid: string): ReactionCount[] => countsMap[pid] || [];
+  const canDeleteParent =
+  !!userCode && !!parent?.user_code && parent.user_code === userCode;
 
+  async function deletePost(postId: string, cascade: boolean) {
+    if (!confirm(cascade
+        ? '親ポストを削除します。子ポストとコメントも消えます。よろしいですか？'
+        : 'このポストを削除します。よろしいですか？')) return;
+  
+    try {
+      const u = getAuth().currentUser;
+      if (!u) throw new Error('ログインが必要です');
+      const token = await u.getIdToken(true);
+  
+      const res = await fetch('/api/thread/comment/delete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // ★ これが無いと 401 になります
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ target: 'post', id: postId, cascade }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j?.ok) throw new Error(j?.error || '削除に失敗しました');
+  
+      if (cascade) {
+        goSelf();               // 親を消したら一覧へ
+      } else {
+        setChildren(prev => prev.filter(p => p.post_id !== postId)); // 子は画面から除去
+        setCountsMap(prev => { const n = { ...prev }; delete n[postId]; return n; });
+      }
+    } catch (e: any) {
+      alert(e?.message || '削除に失敗しました');
+    }
+  }
+  
   /* ===== Render ===== */
   return (
     <div className="thread-page">
@@ -336,77 +378,117 @@ export default function ThreadPage() {
       </div>
 
       <header className="thread-header">
-        <img
-          src={avatarSrcFrom(parent?.user_code)}
-          alt="avatar"
-          className="avatar"
-          width={44}
-          height={44}
-          onClick={() => goProfile(parent?.user_code)}
-          onError={onAvatarError}
-        />
-        <div className="header-info">
-          <div className="header-title">
-            <strong onClick={() => goProfile(parent?.user_code)}>
-              {parent?.click_username || parent?.user_code || 'スレッド'}
-            </strong>
-            <small>{parent ? new Date(parent.created_at).toLocaleString('ja-JP') : ''}</small>
-          </div>
-          {parent?.content && <p className="header-text">{parent.content}</p>}
-          {parent?.post_id && (
-            <ReactionBar
-              key={`parent-${parent.post_id}-${countsVersion}`}
-              postId={parent.post_id}
-              threadId={parent.thread_id ?? null}
-              isParent={true}
-              initialCounts={toCounts(toInitialCounts(parent.post_id))}
-            />
-          )}
-        </div>
-      </header>
+  <img
+    src={avatarSrcFrom(parent?.user_code)}
+    alt="avatar"
+    className="avatar"
+    width={44}
+    height={44}
+    onClick={() => goProfile(parent?.user_code)}
+    onError={onAvatarError}
+  />
+
+  <div className="header-info">
+    {/* 親が自分の投稿なら削除（右上に配置） */}
+    {canDeleteParent && parent?.post_id && (
+      <button
+        className="delete-btn"
+        onClick={() => deletePost(parent.post_id, true /* cascade */)}
+        aria-label="親ポストを削除"
+      >
+        削除
+      </button>
+    )}
+
+    <div className="header-title">
+      <strong onClick={() => goProfile(parent?.user_code)}>
+        {parent?.click_username || parent?.user_code || 'スレッド'}
+      </strong>
+      <small>{parent ? new Date(parent.created_at).toLocaleString('ja-JP') : ''}</small>
+    </div>
+
+    {parent?.content && <p className="header-text">{parent.content}</p>}
+
+    {parent?.post_id && (
+      <ReactionBar
+        key={`parent-${parent.post_id}-${countsVersion}`}
+        postId={parent.post_id}
+        threadId={parent.thread_id ?? null}
+        isParent={true}
+        initialCounts={toCounts(toInitialCounts(parent.post_id))}
+      />
+    )}
+  </div>
+</header>
+
 
       <main className="thread-scroll" ref={listRef}>
-        {loading && <div className="meta">読み込み中...</div>}
-        {errMsg && <div className="meta" style={{ color: '#ff9aa2' }}>{errMsg}</div>}
-        {children.map(post => (
-          <article key={post.post_id} className="post">
-            <div className="author-line">
-              <img
-                className="avatar child"
-                src={avatarSrcFrom(post.user_code)}
-                alt="avatar"
-                width={32}
-                height={32}
-                onClick={() => goProfile(post.user_code)}
-                onError={onAvatarError}
-              />
-              <div className="author-meta">
-                <strong onClick={() => goProfile(post.user_code)}>
-                  {post.click_username || post.user_code || 'unknown'}
-                </strong>
-                <span>{new Date(post.created_at).toLocaleString('ja-JP')}</span>
-              </div>
-            </div>
-            <div className="content">{post.content}</div>
-            <ReactionBar
-              key={`child-${post.post_id}-${countsVersion}`}
-              postId={post.post_id}
-              threadId={post.thread_id ?? null}
-              isParent={false}
-              initialCounts={toCounts(countsMap[post.post_id])}
-            />
-          </article>
-        ))}
-      </main>
-
-      <footer className="post-form">
-        <textarea
-          value={newComment}
-          onChange={e => setNewComment(e.target.value)}
-          placeholder="コメントを入力..."
+  {loading && <div className="meta">読み込み中...</div>}
+  {errMsg && <div className="meta" style={{ color: '#ff9aa2' }}>{errMsg}</div>}
+  {children.map(post => (
+    <article key={post.post_id} className="post">
+      <div className="author-line">
+        <img
+          className="avatar child"
+          src={avatarSrcFrom(post.user_code)}
+          alt="avatar"
+          width={32}
+          height={32}
+          onClick={() => goProfile(post.user_code)}
+          onError={onAvatarError}
         />
-        <button onClick={handlePost} disabled={!newComment.trim()}>送信</button>
-      </footer>
+        <div className="author-meta">
+  <strong onClick={() => goProfile(post.user_code)}>
+    {post.click_username || post.user_code || 'unknown'}
+  </strong>
+  <span>{new Date(post.created_at).toLocaleString('ja-JP')}</span>
+
+  {/* ▼ ここを追加：子が自分の投稿なら削除 */}
+  {!!userCode && post.user_code === userCode && (
+    <button
+      className="delete-btn"
+      onClick={() => deletePost(post.post_id, false /* 単体 */)}
+    >
+      削除
+    </button>
+  )}
+          <strong onClick={() => goProfile(post.user_code)}>
+            {post.click_username || post.user_code || 'unknown'}
+          </strong>
+          <span>{new Date(post.created_at).toLocaleString('ja-JP')}</span>
+        </div>
+      </div>
+      <div className="content">{post.content}</div>
+      <ReactionBar
+        key={`child-${post.post_id}-${countsVersion}`}
+        postId={post.post_id}
+        threadId={post.thread_id ?? null}
+        isParent={false}
+        initialCounts={toCounts(countsMap[post.post_id])}
+      />
+      {/* ← 子には何も追加しない */}
+    </article>
+  ))}
+</main>
+
+
+{parent?.post_id && (
+  <section className="thread-comments">
+    <CommentsSection postId={parent.post_id} me={userCode ?? null} />
+  </section>
+)}
+
+<CommentDockPortal>
+  <div id="comment-dock" className="post-form">
+    <textarea
+      value={newComment}
+      onChange={e => setNewComment(e.target.value)}
+      placeholder="コメントを入力..."
+    />
+    <button onClick={handlePost} disabled={!newComment.trim()}>送信</button>
+  </div>
+</CommentDockPortal>
+
     </div>
   );
 }

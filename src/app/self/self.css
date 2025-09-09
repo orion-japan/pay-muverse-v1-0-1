@@ -539,3 +539,15 @@
   70%  { box-shadow: 0 0 15px 15px rgba(255, 215, 77, 0); }
   100% { box-shadow: 0 0 0 0 rgba(255, 215, 77, 0); }
 }
+
+
+/* self.css に追記 */
+.digest-row.compact { cursor: pointer; transition: box-shadow .15s ease, transform .05s ease; }
+.digest-row.compact:hover { box-shadow: 0 0 0 2px rgba(132,94,247,.18); }
+.digest-row.compact:active { transform: translateY(1px); }
+.digest-row.compact:focus { outline: 2px solid #845ef7; outline-offset: 2px; }
+
+/* 内側要素は通常カーソルでOK */
+.digest-row.compact .avatar,
+.digest-row.compact .author,
+.digest-row.compact .reaction-row { cursor: default; }
