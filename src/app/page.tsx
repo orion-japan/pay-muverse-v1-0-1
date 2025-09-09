@@ -200,7 +200,8 @@ export default function DashboardPage() {
     { title: 'iros', link: '/iros', img: '/ir2.png', alt: 'iros' },
   ];
 <a href="/chat?agent=iros" style={{zIndex: 1000, pointerEvents: 'auto'}}>Open iros</a>
-  // 共鳴色
+
+// 共鳴色
   const glowColors: Record<string, string> = {
     '/mu_full': '#8a2be2',
     '/kyomeikai': '#00bfa5',

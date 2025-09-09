@@ -98,3 +98,71 @@
     white-space: nowrap;
   }
   
+  :root{
+    --footer-max-w: 520px;                 /* PCのフッター幅 */
+    --bottom-nav-h: 72px;                  /* 画面下のナビの高さ */
+    --action-bar-h: 56px;                  /* ボタン高さ */
+  }
+  
+  /* ===== 下部バー：固定配置（常に画面下） ===== */
+  .album-action-bar{
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px)); /* フッターの上 */
+    width: 100vw;                            /* ビューポート基準 */
+    z-index: 120;                            /* フッターより前に出したいなら > フッター */
+    pointer-events: none;                    /* 内側だけクリック可にするため */
+  }
+  
+  /* 内側：PCはフッター幅、SPは全幅。2ボタンを常に50%ずつ */
+  .album-action-inner{
+    width: min(100%, var(--footer-max-w));
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    padding: 8px 12px;
+    box-sizing: border-box;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 6px rgba(0,0,0,.08);
+    pointer-events: auto;                    /* ここはクリックOK */
+  }
+  
+  /* ボタン共通 */
+  .action-btn{
+    min-width: 0;
+    height: var(--action-bar-h);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 12px;
+    font-size: 16px;
+    color: #fff;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .action-btn.collage{ background:#ff5e57; }
+  .action-btn.iboard { background:#7c3aed; }
+  
+  /* スマホは全幅に拡げ、角丸/影を少し弱める */
+  @media (max-width: 768px){
+    .album-action-inner{
+      width: 100vw;
+      border-radius: 0;
+      box-shadow: none;
+    }
+    .action-btn{
+      height: 54px;
+      font-size: 15px;
+      border-radius: 10px;
+    }
+  }
+  
+  /* 一番下のカードが隠れないように余白を確保 */
+  .album-bottom-spacer{
+    height: calc(var(--bottom-nav-h) + var(--action-bar-h) + 16px + env(safe-area-inset-bottom, 0px));
+  }
+  

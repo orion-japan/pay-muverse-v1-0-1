@@ -132,7 +132,7 @@ export default function IboardCollageMaker({
   const [bgTransparent, setBgTransparent] = useState<boolean>(false);
   const [format, setFormat] = useState<ExportFormat>("png");
   const [quality, setQuality] = useState<number>(0.92);
-  const [target, setTarget] = useState<ExportTarget>("download");
+  const [target, setTarget] = useState<ExportTarget>("album");
   const [fileName, setFileName] = useState<string>(() => makeDefaultName());
   const [msg, setMsg] = useState<string | null>(null);
   const [rendering, setRendering] = useState<boolean>(false);
@@ -405,19 +405,45 @@ export default function IboardCollageMaker({
           </div>
 
           {/* 保存先＆ファイル名 */}
-          <div style={styles.row}>
-            <label style={styles.label}>保存先</label>
-            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <input type="radio" name="target" value="download" checked={target === "download"} onChange={() => setTarget("download")} />
-                端末にダウンロード
-              </label>
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <input type="radio" name="target" value="album" checked={target === "album"} onChange={() => setTarget("album")} />
-                Album に保存（private-posts/{String(userCode || "").trim() || "?"}/）
-              </label>
-            </div>
-          </div>
+{/* 保存先＆ファイル名 */}
+{/* 保存先＆ファイル名 */}
+<div style={styles.row}>
+  <label style={styles.label}>保存先</label>
+
+  {/* ← 並びを“アルバム → ダウンロード”に */}
+  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+    <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <input
+        type="radio"
+        name="target"
+        value="album"
+        checked={target === "album"}
+        onChange={() => setTarget("album")}
+      />
+      アルバムに保存
+
+    </label>
+
+    <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <input
+        type="radio"
+        name="target"
+        value="download"
+        checked={target === "download"}
+        onChange={() => setTarget("download")}
+      />
+      端末にダウンロード
+    </label>
+  </div>
+
+  {target === "album" && (
+    <div style={{ marginTop: 2, fontSize: 12, color: "#666" }}>
+      ※ 反映まで数秒かかることがあります。
+    </div>
+  )}
+</div>
+
+
 
           <div style={styles.row}>
             <label style={styles.label}>ファイル名</label>
@@ -468,11 +494,20 @@ export default function IboardCollageMaker({
         }}
       />
 
-      <style>{`
-        .iboard-cm__panel::-webkit-scrollbar { width: 10px; height: 10px; }
-        .iboard-cm__panel::-webkit-scrollbar-thumb { background: #d0d0d0; border-radius: 8px; }
-        .iboard-cm__panel::-webkit-scrollbar-track { background: transparent; }
-      `}</style>
+<style>{`
+  .iboard-cm__panel::-webkit-scrollbar { width: 10px; height: 10px; }
+  .iboard-cm__panel::-webkit-scrollbar-thumb { background: #d0d0d0; border-radius: 8px; }
+  .iboard-cm__panel::-webkit-scrollbar-track { background: transparent; }
+
+  /* 📱 モバイル幅では1カラムに切り替え */
+  @media (max-width: 860px) {
+    .cm-wrap { display: block !important; }
+    .cm-left { position: static !important; max-height: none !important; }
+    .cm-right { margin-top: 16px !important; }
+    body { overflow-x: hidden; } /* 横スクロール防止 */
+  }
+`}</style>
+
     </div>
   );
 }

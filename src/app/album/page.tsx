@@ -171,6 +171,15 @@ export default function AlbumPage() {
     setIsQModalOpen(false);
   };
 
+  // ===== 追加: iボード作成（+I）と同じ挙動を共通関数化 =====
+  const handleIBoardCreate = () => {
+    if (!isQMode) {
+      setIsQMode(true);            // まず選択モードへ
+    } else if (selectedIds.size > 0) {
+      setIsQModalOpen(true);       // 選択済みなら投稿へ
+    }
+  };
+
   return (
     <div className="album-page">
       <h2>あなたのアルバム</h2>
@@ -245,15 +254,18 @@ export default function AlbumPage() {
         />
       )}
 
-      {/* Qボタン */}
+<div className="album-action-bar">
+  <div className="album-action-inner">
+  <a href="/collage" className="action-btn collage">＋ コラージュ作成</a>
+    <button onClick={handleIBoardCreate} className="action-btn iboard">＋ iボード作成</button>
+  </div>
+</div>
+<div className="album-bottom-spacer" />
+
+
+      {/* 既存のフローティング +I ボタンは残しつつ非表示化（構造保持・導線は下部バーに集約） */}
       <button
-        onClick={() => {
-          if (!isQMode) {
-            setIsQMode(true);
-          } else if (selectedIds.size > 0) {
-            setIsQModalOpen(true);
-          }
-        }}
+        onClick={handleIBoardCreate}
         style={{
           position: 'fixed',
           bottom: 80,
@@ -268,6 +280,7 @@ export default function AlbumPage() {
           boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
           cursor: 'pointer',
           zIndex: 100,
+          display: 'none', // ← 導線を下部バーに統一
         }}
         aria-label="Qモード/投稿"
       >
@@ -279,7 +292,7 @@ export default function AlbumPage() {
           onClick={resetQMode}
           style={{
             position: 'fixed',
-            bottom: 150,
+            bottom: 80 + 54, // アクションバー＋マージンの上
             right: 20,
             width: 60,
             height: 36,
@@ -289,7 +302,7 @@ export default function AlbumPage() {
             border: 'none',
             boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
             cursor: 'pointer',
-            zIndex: 100,
+            zIndex: 120,
           }}
         >
           解除

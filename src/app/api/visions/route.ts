@@ -1,9 +1,10 @@
 // src/app/api/visions/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabase as publicSb } from "@/lib/supabase";
+import { createClient } from "@supabase/supabase-js";             // ★ 追加
 import { getAuth } from "firebase-admin/auth";
 import { initializeApp, applicationDefault } from "firebase-admin/app";
-import { logEvent } from "@/server/telemetry"; // ★ 追加
+import { logEvent } from "@/server/telemetry"; // ★ 既存
 
 /** env から projectId を解決 */
 function resolveProjectId(): string | undefined {
@@ -13,6 +14,13 @@ function resolveProjectId(): string | undefined {
     undefined
   );
 }
+
+// ★ API内はService Roleクライアントを使用（RLSで弾かない）
+const adminSb = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  { auth: { persistSession: false } }
+);
 
 // Firebase Admin 初期化
 try {
@@ -43,7 +51,8 @@ async function verifyFirebaseToken(req: NextRequest) {
 
 /** Firebase UID → users.user_code を解決 */
 async function resolveUserCode(firebaseUid: string): Promise<string> {
-  const found = await supabase
+  // ★ Service Roleで検索
+  const found = await adminSb
     .from("users")
     .select("user_code")
     .eq("firebase_uid", firebaseUid)
@@ -53,7 +62,7 @@ async function resolveUserCode(firebaseUid: string): Promise<string> {
   const genCode = () => String(Math.floor(100000 + Math.random() * 900000));
   let user_code = genCode();
   for (let i = 0; i < 5; i++) {
-    const dupe = await supabase
+    const dupe = await adminSb
       .from("users")
       .select("user_code")
       .eq("user_code", user_code)
@@ -62,7 +71,7 @@ async function resolveUserCode(firebaseUid: string): Promise<string> {
     user_code = genCode();
   }
 
-  const inserted = await supabase
+  const inserted = await adminSb
     .from("users")
     .insert([{ user_code, firebase_uid: firebaseUid }])
     .select("user_code")
@@ -105,7 +114,8 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const phase = searchParams.get("phase");
 
-    let q = supabase.from("visions").select("*").eq("user_code", user_code);
+    // ★ 読み出しは public クライアントでもOK（そのまま）
+    let q = publicSb.from("visions").select("*").eq("user_code", user_code);
     if (phase) q = q.eq("phase", phase);
 
     const { data, error } = await q
@@ -155,7 +165,8 @@ export async function POST(req: NextRequest) {
 
     const finalQCode = q_code || { code: generateQCode(), generated: true };
 
-    const { data, error } = await supabase
+    // ★ 追加はService Roleで
+    const { data, error } = await adminSb
       .from("visions")
       .insert([
         {
@@ -206,10 +217,11 @@ export async function PUT(req: NextRequest) {
     const user_code = await resolveUserCode(user.uid);
     const body = await req.json();
 
+    // === 並び替え一括更新（同一列 or 複数列） ===
     if (Array.isArray(body?.order)) {
       const now = new Date().toISOString();
       for (const r of body.order) {
-        const { error } = await supabase
+        const { error } = await adminSb
           .from("visions")
           .update({ sort_index: Number(r.sort_index), updated_at: now })
           .eq("vision_id", String(r.vision_id))
@@ -220,6 +232,7 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ ok: true, count: body.order.length });
     }
 
+    // === 単体更新（列移動/タイトルなど） ===
     const vision_id = body?.vision_id;
     if (!vision_id) throw new Error("Missing vision_id");
 
@@ -227,12 +240,16 @@ export async function PUT(req: NextRequest) {
     if (body?.title) patch.title = body.title;
     if (body?.detail !== undefined) patch.detail = body.detail;
     if (body?.iboard_thumb !== undefined) patch.iboard_thumb = body.iboard_thumb;
-    // …他のフィールドも同様
 
-    const { data, error } = await supabase
+    // ★ 列移動・フェーズ移動・直接の並び更新に対応
+    if (typeof body?.stage === "string") patch.stage = body.stage;        // 'S'|'F'|'R'|'C'|'I'
+    if (typeof body?.phase === "string") patch.phase = body.phase;        // 'initial'|'mid'|'final'
+    if (Number.isFinite(body?.sort_index)) patch.sort_index = Number(body.sort_index);
+
+    const { data, error } = await adminSb
       .from("visions")
       .update(patch)
-      .eq("vision_id", vision_id)
+      .eq("vision_id", String(vision_id))
       .eq("user_code", user_code)
       .select("*")
       .single();
@@ -264,10 +281,10 @@ export async function DELETE(req: NextRequest) {
     const vision_id = searchParams.get("id");
     if (!vision_id) throw new Error("Missing vision_id");
 
-    const { error } = await supabase
+    const { error } = await adminSb
       .from("visions")
       .delete()
-      .eq("vision_id", vision_id)
+      .eq("vision_id", String(vision_id))
       .eq("user_code", user_code);
 
     if (error) throw error;

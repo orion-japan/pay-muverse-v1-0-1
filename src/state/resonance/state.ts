@@ -70,14 +70,50 @@ export function saveToStorage(state: ResonanceState) {
 // ====== サーバ同期（/api/q/unified）======
 // 既存APIのレスポンス例：
 // { ok:true, data:{ user_code, current_q, depth_stage, updated_at, q_hint, confidence, last_at } }
+
+// ★ 追加：IDトークン取得（Firebase優先・Supabaseをフォールバック）
+async function getAuthToken(): Promise<string | null> {
+  try {
+    if (typeof window === 'undefined') return null;
+
+    // Firebase Auth
+    const { getAuth } = await import('firebase/auth');
+    const auth = getAuth();
+    const user = auth.currentUser;
+    if (user) {
+      return await user.getIdToken(true);
+    }
+  } catch {
+    // noop
+  }
+
+  // Supabase セッションがある場合のフォールバック
+  try {
+    const { supabase } = await import('@/lib/supabase');
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchUnifiedQ(userCode: string) {
+  const token = await getAuthToken();
+
   const res = await fetch(`/api/q/unified?user_code=${encodeURIComponent(userCode)}`, {
     method: 'GET',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}), // ← ここが重要
+    },
     cache: 'no-store',
   });
-  if (!res.ok) throw new Error('fetchUnifiedQ failed');
-  const json = await res.json();
+
+  const json = await res.json().catch(() => null);
+  if (!res.ok) {
+    const msg = (json && (json.error || json.message)) || `fetchUnifiedQ failed (${res.status})`;
+    throw new Error(msg);
+  }
   return json?.data ?? null;
 }
 

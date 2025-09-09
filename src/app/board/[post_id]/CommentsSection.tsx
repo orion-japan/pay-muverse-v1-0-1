@@ -1,28 +1,27 @@
-'use client';
-
-import { useEffect, useRef } from 'react';
+'use client'
+import { useEffect, useRef } from 'react'
 
 export type Comment = {
-  comment_id: string;
-  created_at: string;
-  content: string;
-  user_code?: string | null;
-};
+  comment_id: string
+  created_at: string
+  content: string
+  user_code?: string | null
+}
 
 export default function CommentsSection({
   comments,
   focusOnMount,
 }: {
-  comments: Comment[];
-  focusOnMount?: boolean;
+  comments: Comment[]
+  focusOnMount?: boolean
 }) {
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (focusOnMount && ref.current) {
-      ref.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      ref.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }
-  }, [focusOnMount]);
+  }, [focusOnMount])
 
   return (
     <section ref={ref} style={{ marginTop: 24 }}>
@@ -42,6 +41,7 @@ export default function CommentsSection({
           ))}
         </ul>
       )}
+      <div id="comments-bottom" />
     </section>
-  );
+  )
 }

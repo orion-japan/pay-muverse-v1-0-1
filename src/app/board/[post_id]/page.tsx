@@ -64,12 +64,11 @@ export default async function BoardPostPage({
 
   if (!post) return <main style={{ padding: 16 }}>投稿が見つかりませんでした。</main>;
 
-  // コメント一覧
+  // 🟣 コメント一覧（テーブル名と列に合わせる）
   const { data: comments } = await supabaseServer
-    .from('comments') // ←テーブル名に合わせる
-    .select('*')
+    .from('post_comments')
+    .select('comment_id, post_id, user_code, content, created_at')
     .eq('post_id', post_id)
-    .eq('visibility', 'public')
     .order('created_at', { ascending: true });
 
   const imgs: string[] = Array.isArray(post.media_urls)

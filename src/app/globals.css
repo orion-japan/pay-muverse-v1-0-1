@@ -1104,3 +1104,8 @@ body { padding-bottom: var(--footer-safe-pad); }
 .pr-safe {
   padding-right: max(env(safe-area-inset-right), 16px);
 }
+
+/* どこか共通CSS（:root でもOK）にデフォルト値を用意 */
+:root {
+  --footer-max-w: 520px; /* フッターの最大幅（デフォルト） */
+}
