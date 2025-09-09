@@ -1,3 +1,4 @@
+// src/app/api/thread/comment/[comment_id]/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -12,10 +13,17 @@ function json(data: any, init?: number | ResponseInit) {
   return new NextResponse(JSON.stringify(data), { status, headers });
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { comment_id: string } }) {
+export async function DELETE(
+  req: NextRequest,
+  // ✅ params を Promise として受ける
+  context: { params: Promise<{ comment_id: string }> }
+) {
   try {
+    // まず await で取り出す
+    const { comment_id } = await context.params;
+
     // 1) 認証
-    const auth = await verifyFirebaseAndAuthorize(req); // ← user_code を返す想定
+    const auth = await verifyFirebaseAndAuthorize(req);
     const user_code = auth.userCode;
     if (!user_code) return json({ ok: false, error: 'unauthorized' }, 401);
 
@@ -26,7 +34,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { comment_i
     const { data: cmt, error: getErr } = await supabase
       .from('comments')
       .select('comment_id, user_code, post_id, is_deleted')
-      .eq('comment_id', params.comment_id)
+      .eq('comment_id', comment_id)
       .single();
 
     if (getErr?.code === 'PGRST116') return json({ ok: false, error: 'not_found' }, 404);
@@ -36,11 +44,10 @@ export async function DELETE(req: NextRequest, { params }: { params: { comment_i
     if (cmt.user_code !== user_code) return json({ ok: false, error: 'forbidden' }, 403);
     if (cmt.is_deleted) return json({ ok: true, already: true }, 200);
 
-    // 4) ソフトデリート & posts.comments_count の調整（0未満にならないように）
+    // 4) ソフトデリート & posts.comments_count の調整
     const { error: upErr } = await supabase.rpc('soft_delete_comment_and_decrement', {
-      p_comment_id: params.comment_id,
+      p_comment_id: comment_id,
     });
-
     if (upErr) return json({ ok: false, error: upErr.message }, 500);
 
     return json({ ok: true });

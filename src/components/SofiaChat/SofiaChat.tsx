@@ -93,13 +93,18 @@ const normalizeMeta = (m: any): MetaData | null => {
 };
 
 /* ========= props / helpers ========= */
+type Agent = 'mu' | 'iros' | 'mirra';
 type SofiaChatProps = { agent?: string };
-const normalizeAgent = (a?: string): 'mu' | 'iros' =>
-  a && /^mu\b/i.test(a) ? 'mu' : 'iros';
+const normalizeAgent = (a?: string): Agent => {
+  const s = (a ?? '').toLowerCase();
+  if (s.startsWith('mu')) return 'mu';
+  if (s.startsWith('mirra') || s === 'm' || s === 'mr') return 'mirra';
+  return 'iros';
+};
 
 export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
   const params = useSearchParams();
-  const urlAgent = (params?.get('agent') as 'mu' | 'iros' | null) ?? null;
+  const urlAgent = (params?.get('agent') as Agent | null) ?? null;
   const urlCid = params?.get('cid') ?? undefined;
   const urlFrom = params?.get('from') ?? undefined;
   const urlSummary = params?.get('summary_hint') ?? undefined;
@@ -126,20 +131,22 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
   } | null>(null);
 
   // ========= agentごとに会話ID/メッセージを分離保持 =========
-  const convIdByAgent = useRef<Record<'mu' | 'iros', string | undefined>>({
+  const convIdByAgent = useRef<Record<Agent, string | undefined>>({
     mu: undefined,
     iros: undefined,
+    mirra: undefined,
   });
-  const msgsByAgent = useRef<Record<'mu' | 'iros', Message[]>>({
+  const msgsByAgent = useRef<Record<Agent, Message[]>>({
     mu: [],
     iros: [],
+    mirra: [],
   });
-  const loadAgentStateToView = useCallback((a: 'mu' | 'iros') => {
+  const loadAgentStateToView = useCallback((a: Agent) => {
     setConversationId(convIdByAgent.current[a]);
     setMessages(msgsByAgent.current[a] ?? []);
   }, []);
   const saveViewStateToAgent = useCallback(
-    (a: 'mu' | 'iros', id?: string, msgs?: Message[]) => {
+    (a: Agent, id?: string, msgs?: Message[]) => {
       if (id !== undefined) convIdByAgent.current[a] = id;
       if (msgs !== undefined) msgsByAgent.current[a] = msgs;
     },
@@ -318,6 +325,16 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
         return;
       }
 
+      if (agentK === 'mirra') {
+        // mirra は一覧APIを持たない。ダミーIDを用意して固定
+        setConversations([]);
+        if (!convIdByAgent.current.mirra) {
+          convIdByAgent.current.mirra = `mirra-${userCode}`;
+        }
+        setConversationId(convIdByAgent.current.mirra);
+        return;
+      }
+
       // Iros（/api/sofia）
       const r = await fetchWithIdToken(`/api/sofia?user_code=${encodeURIComponent(userCode)}`);
       if (!r.ok) throw new Error(`list ${r.status}`);
@@ -369,6 +386,12 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
         return;
       }
 
+      if (agentK === 'mirra') {
+        // mirra は履歴APIなし：保持済みの state を表示
+        setMessages(msgsByAgent.current.mirra ?? []);
+        return;
+      }
+
       // Iros の履歴取得
       const r = await fetchWithIdToken(
         `/api/sofia?user_code=${encodeURIComponent(userCode)}&conversation_code=${encodeURIComponent(
@@ -406,9 +429,10 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
     fetchMessages(conversationId);
   }, [canUse, conversationId, agentK]);
 
-  const endpointFor = (a: 'mu' | 'iros') => (a === 'mu' ? '/api/agent/muai' : '/api/sofia');
+  const endpointFor = (a: Agent) =>
+    a === 'mu' ? '/api/agent/muai' : a === 'mirra' ? '/api/talk/mirra' : '/api/sofia';
 
-  /* ===== 送信（mu/iros 切替） ===== */
+  /* ===== 送信（mu/iros/mirra 切替） ===== */
   const handleSend = async (input: string, _files: File[] | null = null): Promise<void> => {
     const text = (input ?? '').trim();
     if (!text || !userCode) return;
@@ -440,6 +464,12 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
           board_id: null,
           source_type: 'chat',
         };
+      } else if (agentK === 'mirra') {
+        // mirra は Talk互換（thread_id を会話IDとして引き継ぐ）
+        body = {
+          text,
+          thread_id: conversationId ?? `mirra-${userCode}`,
+        };
       } else {
         // Iros は履歴バルク
         body = {
@@ -459,9 +489,13 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
       });
       const js: SofiaPostRes & any = await r.json().catch(() => ({}));
 
-      // 会話ID更新（MU は conversation_id、Iros は conversation_code）
+      // 会話ID更新（MU/Iros は返却、mirra は据え置き or 既定）
       const nextConvId =
-        agentK === 'mu' ? js.conversation_id ?? body.master_id : js.conversation_code;
+        agentK === 'mu'
+          ? js.conversation_id ?? body.master_id
+          : agentK === 'iros'
+          ? js.conversation_code
+          : (conversationId ?? `mirra-${userCode}`);
       if (nextConvId && nextConvId !== conversationId) {
         setConversationId(nextConvId);
         saveViewStateToAgent(agentK, nextConvId, undefined);
@@ -471,7 +505,8 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
             : [
                 {
                   id: nextConvId,
-                  title: agentK === 'mu' ? 'Mu 会話' : 'Iros 会話',
+                  title:
+                    agentK === 'mu' ? 'Mu 会話' : agentK === 'mirra' ? 'mirra 会話' : 'Iros 会話',
                   updated_at: new Date().toISOString(),
                 },
                 ...prev,
@@ -488,7 +523,7 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
               role: 'assistant',
               content: js.reply,
               created_at: new Date().toISOString(),
-              agent: agentK === 'mu' ? 'Mu' : 'Iros',
+              agent: agentK === 'mu' ? 'Mu' : agentK === 'mirra' ? 'mirra' : 'Iros',
               ...(js?.meta ? { meta: js.meta } : {}),
             } as any,
           ];
@@ -543,13 +578,12 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
     const hasAssistantReply = messages.some((m) => m.role === 'assistant' && !m.meta?.from);
     if (hasSeed && !hasAssistantReply) {
       autoAskedRef.current = true;
-      // トーンは agent で切替（Mu=実用600字 / Iros=深掘り800字以上）
+      // トーンは agent で切替（Mu=実用600字 / それ以外=深掘り800字以上）
       handleSend(
         agentK === 'mu'
           ? '上のmTalk要約を前提に、実用寄り600字前後でお願いします。'
           : '上のmTalk要約を前提に、800字以上で「未消化の闇＝根っこにある恐れ・意味づけ」を丁寧に言語化するマインドトーク寄りの鑑定を書いてください。1) 反復している自動思考の台本を具体的な台詞で再現（例：「今日は何もできなかった→やはり私は価値がない」）。2) その台本が生まれた背景仮説（幼少期の評価軸、比較癖、見捨てられ不安等）と、身体感覚の連動（胸部の締めつけ、喉のつかえ等）。3) 思考と自分の〈距離をとる〉手順（命名→観察→3呼吸→再選択）。4) 反復停止のための“儀式”を提案（夜1分のセルフトーク書き換え／RAIN／内なるパーツへの一言など）。5) 同じ型で再発する出来事の例を2–3件挙げ、「このパターンを解ければマインドトークは静まる」まで導いてください。最後に、今夜できる1つの小さな実験で締めてください。'
       );
-      
     }
   }, [messages, urlFrom, agentK]);
 

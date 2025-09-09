@@ -65,20 +65,22 @@ const Avatar: React.FC<{ src?: string | null; alt: string; size?: number }> = ({
 function getAgentBadge(
   m: any,
   isAssistant: boolean,
-  agent?: 'mu' | 'iros'
-): 'MuAI' | 'Iros' | 'mTalk' | 'sShot' | null {
+  agent?: 'mu' | 'iros' | 'mirra'
+): 'MuAI' | 'Iros' | 'Mirra' | 'mTalk' | 'sShot' | null {
   if (!isAssistant) return null;
 
   // ✅ ページ側で指定された agent を優先
   if (agent === 'iros') return 'Iros';
   if (agent === 'mu') return 'MuAI';
+  if (agent === 'mirra') return 'Mirra';
 
   // fallback: メッセージ側の meta などから判定
   const a = m.agent || m?.meta?.agent;
-  if (a === 'Iros' || a === 'MuAI' || a === 'mTalk' || a === 'sShot') return a;
+  if (a === 'Iros' || a === 'MuAI' || a === 'Mirra' || a === 'mTalk' || a === 'sShot') return a;
 
   const mode = m?.meta?.mode;
   if (mode === 'iros') return 'Iros';
+  if (mode === 'mirra') return 'Mirra';
   if (mode === 'mtalk') return 'mTalk';
   if (mode === 'sshot') return 'sShot';
 
@@ -92,7 +94,7 @@ export default function MessageList({
 }: {
   messages: Message[];
   currentUser?: CurrentUser;
-  agent?: 'mu' | 'iros';
+  agent?: 'mu' | 'iros' | 'mirra';
 }) {
   return (
     <div className="sof-msgs">
@@ -135,6 +137,8 @@ export default function MessageList({
             const iconSrc =
               badge === 'Iros'
                 ? '/ir.png'
+                : badge === 'Mirra'
+                ? '/mirra.png'
                 : badge === 'mTalk'
                 ? '/mtalk.png'
                 : badge === 'sShot'

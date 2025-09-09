@@ -87,6 +87,12 @@ export default function PairTalkPage() {
   const lastAtRef = useRef<string | null>(null);
   const mountedRef = useRef(false);
 
+  // --- mirra 関連（UIはフッターの外で表示：ヘッダー未変更） ---
+  const [showMirra, setShowMirra] = useState(false);
+  const [mirraText, setMirraText] = useState('');
+  const [mirraReply, setMirraReply] = useState<string | null>(null);
+  const [mirraPending, setMirraPending] = useState(false);
+
   const autoResizeAndSet = (v: string) => {
     setText(v);
     const ta = taRef.current;
@@ -340,6 +346,36 @@ export default function PairTalkPage() {
     }
   };
 
+  // === mirra送信（このthread_idを引き継ぎ） ===
+  const sendToMirra = async () => {
+    if (!mirraText.trim() || mirraPending) return;
+    setMirraPending(true);
+    setMirraReply(null);
+    try {
+      const res = await fetch('/api/agent/mirra', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: mirraText.trim(), thread_id: threadId }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const json = await res.json();
+      setMirraReply(json?.reply ?? '');
+      setMirraText('');
+      setTimeout(scrollToBottom, 50);
+    } catch (e) {
+      console.error('[FTalk] mirra error:', e);
+      alert('mirra の応答に失敗しました');
+    } finally {
+      setMirraPending(false);
+    }
+  };
+
+  // ?agent=mirra で自動オープン（任意）
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get('agent') === 'mirra') setShowMirra(true);
+  }, []);
+
   const isMe = (r: ChatRow) => r.sender_code === myCode;
 
   /* ---- UI ---- */
@@ -452,6 +488,121 @@ export default function PairTalkPage() {
           送信
         </button>
       </footer>
+
+      {/* ==== ここから下はヘッダーに触れずに追加するUI ==== */}
+      {/* 右下の浮遊ボタン（mirra起動） */}
+      <button
+        className="mirra-fab"
+        onClick={() => setShowMirra((v) => !v)}
+        aria-label="mirraに相談"
+        title="mirraに相談"
+        style={{
+          position: 'fixed',
+          right: 16,
+          bottom: 88,
+          zIndex: 40,
+          borderRadius: 9999,
+          border: '1px solid #e0e0e0',
+          padding: '10px 14px',
+          background: '#fff',
+          boxShadow: '0 8px 20px rgba(0,0,0,0.15)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}
+      >
+        <img src="/mirra.png" alt="" width={20} height={20} />
+        <span>mirraに相談</span>
+      </button>
+
+      {/* mirra 相談パネル（スレッドIDを引き継いでPOST） */}
+      {showMirra && (
+        <div
+          className="mirra-panel"
+          role="dialog"
+          aria-label="mirra相談"
+          style={{
+            position: 'fixed',
+            right: 16,
+            bottom: 152,
+            width: 'min(520px, 92vw)',
+            background: 'rgba(255,255,255,0.96)',
+            border: '1px solid #e0e0e0',
+            borderRadius: 12,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+            zIndex: 41,
+            padding: 12,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <img src="/mirra.png" alt="mirra" width={20} height={20} />
+              <strong>mirra（マインドトーク）</strong>
+            </div>
+            <button
+              onClick={() => setShowMirra(false)}
+              aria-label="閉じる"
+              style={{ background: 'none', border: 0, fontSize: 18, cursor: 'pointer' }}
+            >
+              ×
+            </button>
+          </div>
+
+          <div style={{ marginTop: 8 }}>
+            <textarea
+              value={mirraText}
+              onChange={(e) => setMirraText(e.target.value)}
+              placeholder="いま頭の中で回っている言葉を、そのまま置いてください（このスレッドIDのままmirraに相談します）"
+              rows={3}
+              style={{
+                width: '100%',
+                resize: 'vertical',
+                minHeight: 72,
+                padding: 8,
+                border: '1px solid #ddd',
+                borderRadius: 8,
+                outline: 'none',
+              }}
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
+              <button
+                onClick={sendToMirra}
+                disabled={!mirraText.trim() || mirraPending}
+                style={{
+                  padding: '6px 12px',
+                  border: '1px solid #f0a64b',
+                  background: '#ffd9a6',
+                  borderRadius: 6,
+                  cursor: mirraText.trim() && !mirraPending ? 'pointer' : 'default',
+                }}
+              >
+                {mirraPending ? '送信中…' : 'mirraに送る'}
+              </button>
+              <small style={{ opacity: 0.7 }}>
+                ※ この相談は <code>thread_id</code> を付けて mirra に引き継がれ、ログはAI側に保存されます（相手には届きません）。
+              </small>
+            </div>
+          </div>
+
+          {mirraReply && (
+            <pre
+              aria-live="polite"
+              style={{
+                marginTop: 8,
+                padding: 10,
+                background: '#fffaf2',
+                border: '1px solid #ffe2b5',
+                borderRadius: 8,
+                maxHeight: '40vh',
+                overflow: 'auto',
+                whiteSpace: 'pre-wrap',
+              }}
+            >
+{mirraReply}
+            </pre>
+          )}
+        </div>
+      )}
     </div>
   );
 }
