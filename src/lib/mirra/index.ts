@@ -1,5 +1,3 @@
-// src/lib/mirra/index.ts
-export * from './config';
-export * from './buildSystemPrompt';
-export * from './generate';
-export * from './qcode';
+// lib/mirra/index.ts
+export { generateMirraReply } from './generate';
+export { inferQCode } from './qcode';

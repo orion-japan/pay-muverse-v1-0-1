@@ -193,11 +193,11 @@ export default function DashboardPage() {
     { title: 'Event', link: '/kyomeikai', img: '/kyoumai.png', alt: 'Event' },
     { title: '配信', link: '/kyomeikai/live', img: '/live.png', alt: '共鳴会LIVE' },
     { title: 'Self', link: '/self', img: '/nikki.png', alt: 'Self' },
-    { title: 'Vision', link: '/vision', img: '/ito.png', alt: 'Vision' },
+    { title: 'R Vision', link: '/vision', img: '/ito.png', alt: 'R Vision' },
     { title: 'Create', link: '/create', img: '/mu_create.png', alt: 'Create' },
-    { title: 'm Talk', link: '/mtalk', img: '/mira.png', alt: 'm Talk' },
-    { title: 'm Shot', link: '/', img: '/shot.png', alt: 'm Shot' }, // ガード対象
-    { title: 'iros', link: '/iros', img: '/ir2.png', alt: 'iros' },
+    { title: 'm Talk', link: '/mtalk', img: '/mirra.png', alt: 'm Talk' },
+    { title: 'F Shot', link: '/', img: '/shot.png', alt: 'F Shot' }, // ガード対象
+    { title: 'iros_AI', link: '/iros', img: '/ir2.png', alt: 'iros_AI' },
   ];
 <a href="/chat?agent=iros" style={{zIndex: 1000, pointerEvents: 'auto'}}>Open iros</a>
 

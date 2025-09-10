@@ -430,3 +430,64 @@
   opacity: .9;
 }
 .thread-header .delete-btn:hover { background: #fff5f6; opacity: 1; }
+
+
+
+/* 行レイアウトの土台 */
+.author-line { display: flex; gap: 8px; }
+
+/* 左右に分ける親 */
+.author-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;     /* ← 幅を持たせる */
+  min-width: 0;       /* ← 右ブロックが押し出されないように */
+}
+
+/* 右寄せの決め手 */
+.meta-right {
+  margin-left: auto;          /* ← これで右端へ */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;        /* 折り返さない */
+}
+
+/* 親ヘッダも同じ思想 */
+.header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.header-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+/* 見た目の微調整 */
+.author-meta .time,
+.header-right .time {
+  opacity: .7;
+  font-size: 12px;
+}
+.post .content {
+  margin: 6px 0 10px;
+  line-height: 1.6;
+}
+
+/* コメント本文をさらに太くする */
+.post .content strong {
+  font-weight: 800;     /* 通常のboldよりさらに太字 */
+  color: #222;          /* 読みやすい濃い色（任意） */
+  font-size: 15px;      /* 少し大きめにするなら追加 */
+}
+.header-text strong {
+  font-weight: 800;
+  color: #222;
+}
+
+

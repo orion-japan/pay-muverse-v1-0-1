@@ -3,14 +3,19 @@
 import './globals.css'
 import '../styles/layout.css'
 import Providers from './providers'
-import LayoutClient from './LayoutClient'   // ← 実ファイル名に合わせて
-import TelemetryBoot from '@/components/TelemetryBoot' // ★ クライアント常駐ロガー
-import AuthExpose from './_auth-expose'     // ★ 追加：Firebaseトークンをwindowへ公開
+import LayoutClient from './LayoutClient'
+import TelemetryBoot from '@/components/TelemetryBoot'
+import AuthExpose from './_auth-expose'
 
 export const metadata = {
   manifest: '/manifest.json',
-  themeColor: '#0b1437',
-}
+  themeColor: '#0b1437',              // ← そのまま
+  icons: {                            // ← ここだけ追加
+    icon: '/mira.png',
+    shortcut: '/mira.png',
+    apple: '/mira.png',
+  },
+};
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -26,13 +31,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className="mu-body">
         <Providers>
-          {/* LayoutClient 内で main/footer を構成 */}
           <LayoutClient>{children}</LayoutClient>
-
-          {/* 全ページでページ遷移/online/offline/Auth落ちを記録 */}
           <TelemetryBoot />
-
-          {/* ★ 追加：ログイン状態を拾って ID_TOKEN を取れるように公開 */}
           <AuthExpose />
         </Providers>
       </body>
