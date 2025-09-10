@@ -16,7 +16,7 @@ export async function generateMirraReply(
   const input = (userText ?? '').trim() || '（入力が短いときは、呼吸の整え方を短く案内してください）';
 
   if (process.env.OPENAI_API_KEY) {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+
     const OpenAI = require('openai').default;
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
