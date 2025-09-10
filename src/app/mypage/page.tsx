@@ -1,18 +1,17 @@
 // src/app/mypage/page.tsx
 'use client';
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { getAuth, onAuthStateChanged, User } from 'firebase/auth';
+import { getAuth, onAuthStateChanged, type User } from 'firebase/auth';
 import QRCode from 'qrcode';
 
 import { UserProfile, type Profile } from '@/components/UserProfile';
+import getIdToken from '@/lib/getIdToken';
 import './mypage.css';
 
-/** ------------------------------
- * 共通: 値の安全取得ヘルパ
- * ------------------------------ */
+/** 共通: 値の安全取得 */
 function pickString(obj: any, ...keys: string[]): string | null {
   for (const k of keys) {
     const v = obj?.[k];
@@ -33,15 +32,7 @@ export default function MyPage() {
   const [linkMsg, setLinkMsg] = useState<string | null>(null);
   const qrCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  /** -----------------------------------------
-   * app_code 解決ロジック（フロント側の最終防衛線）
-   * 優先順:
-   *   1) /api/my/invite-info の返却
-   *   2) /api/account-status の返却
-   *   3) /api/get-current-user の返却
-   *   4) /api/get-profile?code=xxxxx の返却（フィールド名が REcode / app_code などの場合を吸収）
-   * 見つからなければ null を返す
-   * ----------------------------------------- */
+  // app_code の解決（既存ロジックは流用）
   const resolveAppCode = async (token: string, user_code: string): Promise<string | null> => {
     try {
       // 1) invite-info
@@ -49,57 +40,46 @@ export default function MyPage() {
         const r = await fetch('/api/my/invite-info', {
           method: 'GET',
           headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
         });
         const j = await r.json().catch(() => ({}));
-        console.log('[invite-info]', j);
         const ac = pickString(j, 'app_code', 'appCode', 'appcode');
         if (ac) return ac;
       }
-
       // 2) account-status
       {
         const r = await fetch('/api/account-status', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({}),
+          cache: 'no-store',
         });
         const j = await r.json().catch(() => ({}));
-        console.log('[account-status]', j);
         const ac = pickString(j, 'app_code', 'appCode', 'appcode');
         if (ac) return ac;
       }
-
       // 3) get-current-user
       {
         const r = await fetch('/api/get-current-user', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({}),
+          cache: 'no-store',
         });
         const j = await r.json().catch(() => ({}));
-        console.log('[get-current-user]', j);
         const ac = pickString(j, 'app_code', 'appCode', 'appcode');
         if (ac) return ac;
       }
-
-      // 4) get-profile (列名違いの吸収: REcode / app_code など)
+      // 4) get-profile（互換吸収）
       {
-        const r = await fetch(`/api/get-profile?code=${encodeURIComponent(user_code)}`);
+        const r = await fetch(`/api/get-profile?code=${encodeURIComponent(user_code)}`, {
+          cache: 'no-store',
+        });
         const j = await r.json().catch(() => ({}));
-        console.log('[get-profile]', j);
-        // プロファイルに app_code を置いている or REcode を app_code として使うケースを吸収
         const ac = pickString(j, 'app_code', 'appCode', 'appcode', 'REcode', 'recode', 're_code');
         if (ac) return ac;
       }
-    } catch (e) {
-      console.warn('[resolveAppCode] error', e);
-    }
+    } catch {}
     return null;
   };
 
@@ -117,99 +97,92 @@ export default function MyPage() {
       }
 
       try {
-        const token = await user.getIdToken(true);
+        // ここからは **/api/mypage/me** を一次ソースに統一
+        const idToken = await getIdToken();
 
-        // user_code（プロフィール用）
-        let user_code: string | null = null;
-        const endpoints = ['/api/account-status', '/api/get-current-user'];
-        for (const ep of endpoints) {
-          try {
-            const r = await fetch(ep, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify({}),
-            });
-            if (r.ok) {
-              const j = await r.json();
-              if (j?.user_code) {
-                user_code = j.user_code;
-                break;
-              }
-            }
-          } catch {}
-        }
-
-        if (!user_code) {
-          if (mounted) setProfileState(null);
+        const r = await fetch('/api/mypage/me', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${idToken}` },
+          cache: 'no-store', // 最新を常に取得
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !j?.me) {
+          setProfileState(null);
+          setLoading(false);
           return;
         }
 
-        // プロフィール取得（表示用）
-        const rp = await fetch(`/api/get-profile?code=${encodeURIComponent(user_code)}`);
-        if (!rp.ok) {
-          if (mounted) setProfileState(null);
-          return;
-        }
-        const p = await rp.json();
+        const me = j.me as any; // v_mypage_user の 1 行
+        const user_code: string = j.user_code || me.user_code;
 
-        const base = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/+$/, '');
-        let avatar_url: string | null = p?.avatar_url ?? null;
+        // アバターURLのフル化（キーで来た場合）
+        const base = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '');
+        let avatar_url: string | null = me?.avatar_url ?? null;
         if (avatar_url && base && !/^https?:\/\//i.test(avatar_url)) {
           avatar_url = `${base}/storage/v1/object/public/avatars/${avatar_url}`;
         }
 
+        // Array/CSV ゆらぎ吸収
         const toDisplay = (v: string[] | string | null | undefined) =>
           Array.isArray(v) ? v : v ?? '';
 
         const profileForUI: Profile = {
           user_code,
-          name: p?.name ?? '',
-          birthday: p?.birthday ?? '',
-          prefecture: p?.prefecture ?? '',
-          city: p?.city ?? '',
-          x_handle: p?.x_handle ?? '',
-          instagram: p?.instagram ?? '',
-          facebook: p?.facebook ?? '',
-          linkedin: p?.linkedin ?? '',
-          youtube: p?.youtube ?? '',
-          website_url: p?.website_url ?? '',
-          interests: toDisplay(p?.interests),
-          skills: toDisplay(p?.skills),
-          activity_area: toDisplay(p?.activity_area),
-          languages: toDisplay(p?.languages),
+          // 表示名は v_mypage_user.name（= coalesce(click_username, profiles.name)）
+          name: me?.name ?? '',
+
+          // ← ここが重要：**profiles 由来の編集項目をすべて含める**
+          headline: me?.headline ?? '',
+          organization: me?.organization ?? '',
+          position: me?.position ?? '',
+          bio: me?.bio ?? '',
+          mission: me?.mission ?? '',
+          looking_for: me?.looking_for ?? '',
+
+          birthday: me?.birthday ?? '',
+          prefecture: me?.prefecture ?? '',
+          city: me?.city ?? '',
+
+          x_handle: me?.x_handle ?? '',
+          instagram: me?.instagram ?? '',
+          facebook: me?.facebook ?? '',
+          linkedin: me?.linkedin ?? '',
+          youtube: me?.youtube ?? '',
+          website_url: me?.website_url ?? '',
+
+          interests: toDisplay(me?.interests),
+          skills: toDisplay(me?.skills),
+          activity_area: toDisplay(me?.activity_area),
+          languages: toDisplay(me?.languages),
+
           avatar_url,
-          REcode: p?.REcode ?? '',
+          // 招待コード等（表示のみ）
+          REcode: me?.REcode ?? '',
         };
 
         if (mounted) setProfileState(profileForUI);
 
-        // 参加用URL生成
+        // 参加用URLの生成（既存ロジック維持）
         setLinkLoading(true);
         try {
-          // ---- app_code を確実に解決 ----
-          const appCode = await resolveAppCode(token, user_code);
-          if (!appCode) {
-            throw new Error('app_code が取得できませんでした。');
-          }
+          const appCode = await resolveAppCode(idToken, user_code);
+          if (!appCode) throw new Error('app_code が取得できませんでした。');
 
-          // rcode / mcode / eve は /api/my/invite-info を一次ソースに
           let rcode = '', mcode = '', eve = '';
           try {
-            const r = await fetch('/api/my/invite-info', {
+            const ri = await fetch('/api/my/invite-info', {
               method: 'GET',
-              headers: { Authorization: `Bearer ${token}` },
+              headers: { Authorization: `Bearer ${idToken}` },
+              cache: 'no-store',
             });
-            const j = await r.json().catch(() => ({}));
-            rcode = pickString(j, 'rcode') ?? '';
-            mcode = pickString(j, 'mcode') ?? '';
-            eve   = pickString(j, 'eve', 'code') ?? '';
+            const ji = await ri.json().catch(() => ({}));
+            rcode = pickString(ji, 'rcode') ?? '';
+            mcode = pickString(ji, 'mcode') ?? '';
+            eve   = pickString(ji, 'eve', 'code') ?? '';
           } catch {}
 
           const params = new URLSearchParams();
-          params.set('ref', appCode);     // 必須
+          params.set('ref', appCode);
           if (rcode) params.set('rcode', rcode);
           if (mcode) params.set('mcode', mcode);
           if (eve)   params.set('eve', eve);
@@ -217,13 +190,12 @@ export default function MyPage() {
           const finalLink = `https://join.muverse.jp/register?${params.toString()}`;
           if (mounted) setJoinLink(finalLink);
         } catch (e: any) {
-          console.warn('[join-link error]', e);
           if (mounted) setLinkMsg(`URL生成エラー: ${e?.message || e}`);
         } finally {
           if (mounted) setLinkLoading(false);
         }
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     });
 
@@ -285,7 +257,7 @@ export default function MyPage() {
         <section className="profile-card" style={{ marginTop: 8 }}>
           <div className="page-head">
             <h1 className="page-title">マイページ</h1>
-            <div className="page-sub">{profileState.REcode || '—'}</div>
+            <div className="page-sub">{(profileState as any).REcode || '—'}</div>
           </div>
         </section>
 
@@ -296,9 +268,7 @@ export default function MyPage() {
           <h2 className="section-title" style={{ margin: '0 0 8px' }}>参加用URL</h2>
 
           {linkLoading && <p style={{ margin: 0 }}>URL を準備中...</p>}
-          {!linkLoading && linkMsg && (
-            <p style={{ color: '#b91c1c', margin: 0 }}>{linkMsg}</p>
-          )}
+          {!linkLoading && linkMsg && <p style={{ color: '#b91c1c', margin: 0 }}>{linkMsg}</p>}
 
           {!linkLoading && joinLink && (
             <div style={{ display: 'grid', gap: 10 }}>
@@ -316,9 +286,7 @@ export default function MyPage() {
                   {joinLink}
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button className="settings-btn" onClick={shareViaLINE}>
-                    💚 LINEで共有
-                  </button>
+                  <button className="settings-btn" onClick={shareViaLINE}>💚 LINEで共有</button>
                   <button
                     className="settings-btn"
                     onClick={async () => { if (joinLink) await navigator.clipboard.writeText(joinLink); }}
@@ -332,23 +300,14 @@ export default function MyPage() {
               </div>
 
               {/* QRのみ */}
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'auto 1fr',
-                  gap: 12,
-                  alignItems: 'center',
-                }}
-              >
+              <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 12, alignItems: 'center' }}>
                 <canvas ref={qrCanvasRef} style={{ width: 160, height: 160 }} />
                 <div style={{ display: 'grid', gap: 8 }}>
                   <div style={{ fontSize: 12, color: '#6b7280' }}>
                     イベントや対面案内では、このQRを見せるだけでOKです。
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    <button className="settings-btn" onClick={downloadQR}>
-                      ⬇️ QRを保存（PNG）
-                    </button>
+                    <button className="settings-btn" onClick={downloadQR}>⬇️ QRを保存（PNG）</button>
                   </div>
                 </div>
               </div>
@@ -360,9 +319,7 @@ export default function MyPage() {
           <button className="edit-btn" onClick={() => router.push('/mypage/create')}>
             ✏️ プロフィールを編集
           </button>
-          <Link href="/mypage/settings" className="settings-btn">
-            ⚙️ 設定
-          </Link>
+          <Link href="/mypage/settings" className="settings-btn">⚙️ 設定</Link>
         </div>
       </div>
     </div>

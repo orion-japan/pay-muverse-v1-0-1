@@ -3,8 +3,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth } from '@/lib/firebase-admin';
 import { createClient } from '@supabase/supabase-js';
+import { adminAuth } from '@/lib/firebase-admin';
 
 function mustEnv(name: string) {
   const v = process.env[name];
@@ -14,6 +14,24 @@ function mustEnv(name: string) {
 
 const SUPABASE_URL = mustEnv('NEXT_PUBLIC_SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = mustEnv('SUPABASE_SERVICE_ROLE_KEY');
+
+// 文字列/配列ゆらぎを配列に正規化
+function normArr(v: unknown): string[] {
+  if (Array.isArray(v)) return v.map(String).map((s) => s.trim()).filter(Boolean);
+  if (typeof v === 'string')
+    return v
+      .split(/[、,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  return [];
+}
+
+// 空文字は null に、文字列は trim
+function normStrOrNull(v: unknown): string | null {
+  if (typeof v !== 'string') return v == null ? null : String(v);
+  const s = v.trim();
+  return s === '' ? null : s;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -25,57 +43,37 @@ export async function POST(req: NextRequest) {
     if (!token) return NextResponse.json({ error: 'missing token' }, { status: 401 });
 
     const decoded = await adminAuth.verifyIdToken(token).catch(() => null);
-    if (!decoded?.uid) {
-      return NextResponse.json({ error: 'invalid token' }, { status: 401 });
-    }
+    if (!decoded?.uid) return NextResponse.json({ error: 'invalid token' }, { status: 401 });
 
+    // ---- Supabase(Admin) ----
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // ---- Resolve user_code (prefer firebase_uid) ----
+    // ---- Resolve user_code (firebase_uid -> click_email) ----
     let user_code: string | null = null;
 
-    // 1) firebase_uid で検索
-    const { data: byFirebase, error: e1 } = await supabase
-      .from('users')
-      .select('user_code')
-      .eq('firebase_uid', decoded.uid)
-      .maybeSingle();
+    // a) firebase_uid
+    {
+      const { data, error } = await supabase
+        .from('users')
+        .select('user_code')
+        .eq('firebase_uid', decoded.uid)
+        .maybeSingle();
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      if (data?.user_code) user_code = data.user_code;
+    }
 
-    if (e1) return NextResponse.json({ error: e1.message }, { status: 500 });
-    if (byFirebase?.user_code) user_code = byFirebase.user_code;
-
-    // 2) 見つからなければ、メールで照合（任意）
+    // b) email fallback
     if (!user_code && decoded.email) {
-      const { data: byEmail, error: e2 } = await supabase
+      const { data, error } = await supabase
         .from('users')
         .select('user_code')
         .eq('click_email', decoded.email)
         .maybeSingle();
-      if (e2) return NextResponse.json({ error: e2.message }, { status: 500 });
-
-      if (byEmail?.user_code) {
-        user_code = byEmail.user_code;
-        // このタイミングで firebase_uid を埋める（移行）
-        await supabase
-          .from('users')
-          .update({ firebase_uid: decoded.uid })
-          .eq('user_code', user_code);
-      }
-    }
-
-    // 3) さらに保険：もし supabase_uid(uuid) を使っていた履歴があるなら一応試す（失敗しても無視）
-    if (!user_code) {
-      const { data: bySupabaseUid } = await supabase
-        .from('users')
-        .select('user_code')
-        .eq('supabase_uid', decoded.uid as any) // 型が違うので通常はヒットしない
-        .maybeSingle();
-      if (bySupabaseUid?.user_code) {
-        user_code = bySupabaseUid.user_code;
-        await supabase
-          .from('users')
-          .update({ firebase_uid: decoded.uid })
-          .eq('user_code', user_code);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      if (data?.user_code) {
+        user_code = data.user_code;
+        // 移行：firebase_uid を埋める
+        await supabase.from('users').update({ firebase_uid: decoded.uid }).eq('user_code', user_code);
       }
     }
 
@@ -86,32 +84,37 @@ export async function POST(req: NextRequest) {
     // ---- Body ----
     const body = await req.json().catch(() => ({} as any));
 
-    // ---- users: editable fields ----
+    // ==========================================
+    // users 側：編集可能なフィールドだけ
+    // （Rcode/REcode/その他コードはここでは更新しない）
+    // ==========================================
     const usersPatch: Record<string, any> = {};
-    for (const k of [
-      'click_email',
-      'click_username',
-      'headline',
-      'mission',
-      'looking_for',
-      'position',
-      'organization',
-      'name', // users側で管理するなら
-    ]) {
-      if (Object.prototype.hasOwnProperty.call(body, k)) usersPatch[k] = body[k];
+
+    // click_email は NOT NULL 想定なので空は送らない
+    if (Object.prototype.hasOwnProperty.call(body, 'click_email')) {
+      const ce = typeof body.click_email === 'string' ? body.click_email.trim() : body.click_email;
+      if (ce) usersPatch.click_email = ce;
     }
+
+    // 表示名（ニックネーム）/電話番号は任意
+    for (const k of ['click_username', 'phone_number'] as const) {
+      if (Object.prototype.hasOwnProperty.call(body, k)) {
+        usersPatch[k] = normStrOrNull(body[k]);
+      }
+    }
+
     if (Object.keys(usersPatch).length) {
-      const { error } = await supabase
-        .from('users')
-        .update(usersPatch)
-        .eq('user_code', user_code);
+      const { error } = await supabase.from('users').update(usersPatch).eq('user_code', user_code);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // ---- profiles: editable fields ----
+    // ==========================================
+    // profiles 側：プロフィール項目を upsert（無ければ作成）
+    // ==========================================
     const profilesPatch: Record<string, any> = {};
-    for (const k of [
+    const profKeys = [
       'bio',
+      'birthday',
       'prefecture',
       'city',
       'x_handle',
@@ -120,28 +123,41 @@ export async function POST(req: NextRequest) {
       'linkedin',
       'youtube',
       'website_url',
-      'interests',
-      'skills',
-      'activity_area',
-      'languages',
-      'profile_link',
       'visibility',
-      'avatar_url',
-      'birthday',
-      'name',         // profiles側にあるなら
+      'profile_link',
       'headline',
       'mission',
       'looking_for',
       'organization',
       'position',
-    ]) {
-      if (Object.prototype.hasOwnProperty.call(body, k)) profilesPatch[k] = body[k];
+      'avatar_url',
+      'interests',
+      'skills',
+      'activity_area',
+      'languages',
+      'name', // プロフィール側に残っている場合の互換（優先は click_username）
+    ] as const;
+
+    for (const k of profKeys) {
+      if (!Object.prototype.hasOwnProperty.call(body, k)) continue;
+
+      if (['interests', 'skills', 'activity_area', 'languages'].includes(k)) {
+        profilesPatch[k] = normArr(body[k]);
+      } else if (k === 'birthday') {
+        // YYYY-MM-DD 文字列 or null を許容
+        const v = body[k];
+        profilesPatch[k] = v ? String(v) : null;
+      } else {
+        profilesPatch[k] = normStrOrNull(body[k]);
+      }
     }
+
     if (Object.keys(profilesPatch).length) {
+      // user_code を必ず含めて upsert
+      const row = { user_code, ...profilesPatch };
       const { error } = await supabase
         .from('profiles')
-        .update(profilesPatch)
-        .eq('user_code', user_code);
+        .upsert(row, { onConflict: 'user_code' });
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     }
 

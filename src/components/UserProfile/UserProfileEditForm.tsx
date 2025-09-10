@@ -156,11 +156,11 @@ export default function UserProfileEditForm() {
         <div className="grid-2">
           <label>
             ニックネーム（必須）
-            <input type="text" maxLength={40} {...field('name')} placeholder="例：こうじ" />
+            <input type="text" maxLength={40} {...field('name')} placeholder="例：taro" />
           </label>
           <label>
             ひとこと肩書き（headline）
-            <input type="text" maxLength={80} {...field('headline')} placeholder="例：共鳴OSデザイナー" />
+            <input type="text" maxLength={80} {...field('headline')} placeholder="例：しあわせ伝道師" />
           </label>
           <label>
             所属（organization）
@@ -184,7 +184,7 @@ export default function UserProfileEditForm() {
         </div>
         <label>
           自己紹介（bio）
-          <textarea rows={5} {...field('bio')} placeholder="あなたの意図や活動を書いてください。" />
+          <textarea rows={5} {...field('bio')} placeholder="あなたの意図や活動など。" />
         </label>
         <div className="grid-2">
           <label>

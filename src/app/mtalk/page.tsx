@@ -44,10 +44,10 @@ export default function MTalkPage() {
     if (!userCode) return;
     (async () => {
       try {
-        const r = await fetchWithIdToken('/api/talk/history?agent=mirra', { cache: 'no-store' });
+        // 固定の mirra 用エンドポイント
+        const r = await fetchWithIdToken('/api/talk/mirra/history', { cache: 'no-store' });
         const j = await r.json().catch(() => ({}));
-        if (r.ok && Array.isArray(j.items)) setHistory(j.items);
-        else setHistory([]);
+        setHistory(Array.isArray(j?.items) ? (j.items as ThreadItem[]) : []);
       } catch {
         setHistory([]);
       }
@@ -72,6 +72,7 @@ export default function MTalkPage() {
         }),
       });
 
+      // （以降は既存の処理のままでOK）
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         if (res.status === 402 || j?.error === 'insufficient_balance') {
@@ -151,7 +152,7 @@ export default function MTalkPage() {
           <div className="mh-list">
             {history.map((h) => (
               <button
-                key={h.id}
+                key={h.id || `${h.title}-${h.updated_at ?? ''}`} // 安定した key
                 className="mh-item"
                 onClick={() =>
                   router.push(`/mtalk/${h.id}?agent=mirra&from=history&cid=${h.id}`)

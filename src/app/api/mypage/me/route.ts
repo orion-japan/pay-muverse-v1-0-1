@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
       if (!error && data?.user_code) user_code = data.user_code;
     }
 
-    // (b) メールで一致
+    // (b) メールで一致（見つかったら firebase_uid を埋める）
     if (!user_code && email) {
       const { data, error } = await supabase
         .from('users')
@@ -56,7 +56,10 @@ export async function POST(req: NextRequest) {
         .eq('click_email', email)
         .maybeSingle();
 
-      if (!error && data?.user_code) user_code = data.user_code;
+      if (!error && data?.user_code) {
+        user_code = data.user_code;
+        await supabase.from('users').update({ firebase_uid: uid }).eq('user_code', user_code);
+      }
     }
 
     if (!user_code) {
@@ -66,7 +69,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 5) v_mypage_user ビューから自分の編集用データ取得
+    // 5) v_mypage_user ビューから編集用データ取得
     const { data: me, error: e2 } = await supabase
       .from('v_mypage_user')
       .select('*')
@@ -77,16 +80,35 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: e2.message }, { status: 500 });
     }
 
+    // 5.1) users から click_username を取得してレスポンスに統合
+    let click_username: string | null = null;
+    {
+      const { data } = await supabase
+        .from('users')
+        .select('click_username')
+        .eq('user_code', user_code)
+        .maybeSingle();
+      click_username = data?.click_username ?? null;
+    }
+
     // 6) avatar_url のフルURL化（キーで保存されているケースに対応）
     const BASE = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '');
     let avatar_url: string | null = (me as any)?.avatar_url ?? null;
     if (avatar_url && !/^https?:\/\//i.test(avatar_url)) {
-      avatar_url = `${BASE}/storage/v1/object/public/avatars/${avatar_url}`;
+      const key = avatar_url.startsWith('avatars/') ? avatar_url.slice('avatars/'.length) : avatar_url;
+      avatar_url = `${BASE}/storage/v1/object/public/avatars/${key}`;
     }
 
-    const meOut = { ...(me as any), avatar_url };
+    const meOut = { ...(me as any), click_username, avatar_url };
 
-    return NextResponse.json({ ok: true, me: meOut, user_code }, { status: 200 });
+    // 7) no-store でキャッシュ無効化
+    return new NextResponse(JSON.stringify({ ok: true, me: meOut, user_code }), {
+      status: 200,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'cache-control': 'no-store',
+      },
+    });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'unknown' }, { status: 500 });
   }
