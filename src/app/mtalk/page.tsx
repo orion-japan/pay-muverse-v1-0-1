@@ -18,7 +18,21 @@ type Report = {
   created_at: string;
 };
 
-type ThreadItem = { id: string; title: string; updated_at?: string | null };
+// API から返ってくる履歴アイテム（柔軟に受けるため any 併用）
+type ThreadItem = {
+  id?: string;
+  thread_id?: string;
+  conversation_id?: string;
+  cid?: string;
+  conv_id?: string;
+  report_id?: string;
+  title?: string;
+  subject?: string;
+  name?: string;
+  summary?: string;
+  updated_at?: string | null;
+  created_at?: string | null;
+};
 
 export default function MTalkPage() {
   const router = useRouter();
@@ -33,9 +47,49 @@ export default function MTalkPage() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [latestReport, setLatestReport] = useState<Report | null>(null);
 
-  // ★ mirra の会話履歴（上部に表示）
+  // ★ mirra の会話履歴
   const [history, setHistory] = useState<ThreadItem[]>([]);
-  const hasHistory = history.length > 0;
+
+  // ▼ 履歴を安全化（id正規化・欠落排除・重複除去・ラベル整形）
+  const historySafe = useMemo(() => {
+    const src = Array.isArray(history) ? history : [];
+
+    const norm = src.map((h, idx) => {
+      const idRaw =
+        h?.id ??
+        h?.thread_id ??
+        h?.conversation_id ??
+        h?.cid ??
+        h?.conv_id ??
+        h?.report_id ??
+        `row-${idx}`;
+
+      const id = typeof idRaw === 'string' ? idRaw.trim() : String(idRaw).trim();
+
+      const titleRaw = h?.title ?? h?.subject ?? h?.name ?? h?.summary ?? '';
+      const title = String(titleRaw || '').trim() || '（無題）';
+
+      const dateRaw = h?.updated_at ?? h?.created_at ?? null;
+      const when = dateRaw ? new Date(dateRaw).toLocaleString() : '';
+
+      return { id, label: when ? `${title}（${when}）` : title };
+    });
+
+    // id が空は捨てる
+    const cleaned = norm.filter((x) => x.id && x.id.length > 0);
+
+    // 同一id除外
+    const seen = new Set<string>();
+    const uniq = cleaned.filter((x) => {
+      if (seen.has(x.id)) return false;
+      seen.add(x.id);
+      return true;
+    });
+
+    return uniq;
+  }, [history]);
+
+  const hasHistory = historySafe.length > 0;
 
   const canSubmit = useMemo(() => !loading && input.trim().length > 0, [loading, input]);
 
@@ -44,7 +98,6 @@ export default function MTalkPage() {
     if (!userCode) return;
     (async () => {
       try {
-        // 固定の mirra 用エンドポイント
         const r = await fetchWithIdToken('/api/talk/mirra/history', { cache: 'no-store' });
         const j = await r.json().catch(() => ({}));
         setHistory(Array.isArray(j?.items) ? (j.items as ThreadItem[]) : []);
@@ -66,13 +119,12 @@ export default function MTalkPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          agent,           // mirra / iros
+          agent,
           texts: lines,
           session_id: sessionId,
         }),
       });
 
-      // （以降は既存の処理のままでOK）
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         if (res.status === 402 || j?.error === 'insufficient_balance') {
@@ -105,13 +157,12 @@ export default function MTalkPage() {
     }
   }
 
-  // チャットへは「過去相談者のみ」入場可：履歴から入る方式に限定
   async function consult(reportId: string) {
     if (!hasHistory) {
-      setErrorMsg('mirra の相談チャットは、過去に相談したことがある方のみご利用いただけます。上の履歴からお入りください。');
+      setErrorMsg('mirra の相談チャットは、過去に相談したことがある方のみご利用いただけます。');
       return;
     }
-
+  
     try {
       const res = await fetchWithIdToken('/api/agent/mtalk/consult', {
         method: 'POST',
@@ -119,26 +170,47 @@ export default function MTalkPage() {
         body: JSON.stringify({ report_id: reportId }),
       });
       const j = await res.json();
-
-      if (j?.ok && j.redirect) {
-        if (j.summary_hint && j.conversation_id) {
-          try {
-            sessionStorage.setItem(`mtalk:seed:${j.conversation_id}`, j.summary_hint);
-          } catch {}
-        }
-        const short = encodeURIComponent(String(j.summary_hint || '').slice(0, 220));
-        const redirectUrl = j.redirect.includes('summary_hint=')
-          ? j.redirect
-          : `${j.redirect}&summary_hint=${short}`;
-
-        router.push(redirectUrl);
-      } else {
+  
+      if (!(j?.ok)) {
         setErrorMsg(j?.error || '相談の起動に失敗しました。');
+        return;
       }
+  
+      // --- ここから新UIへのリダイレクト統一 ---
+      // 1) なるべく conversation_id を採用、無ければ j.redirect 末尾から推定
+      const hintedCid =
+        (j.conversation_id && String(j.conversation_id)) ||
+        (() => {
+          try {
+            const p = new URL(j.redirect, location.origin).pathname.split('/').filter(Boolean);
+            return p[p.length - 1] || '';
+          } catch {
+            return '';
+          }
+        })();
+  
+      // 2) seed を sessionStorage に保存（Sofia 側が読む）
+      if (j.summary_hint && hintedCid) {
+        try { sessionStorage.setItem(`mtalk:seed:${hintedCid}`, j.summary_hint); } catch {}
+      }
+  
+      // 3) 旧UI (/talk/...) を新UI (/mtalk/...) に正規化しつつ、必須クエリを付与
+      const basePath = `/mtalk/${encodeURIComponent(hintedCid)}`;
+      const url = new URL(basePath, location.origin);
+      url.searchParams.set('agent', 'mirra');
+      url.searchParams.set('from', 'mtalk');
+      url.searchParams.set('cid', hintedCid);
+      if (j.summary_hint) {
+        url.searchParams.set('summary_hint', String(j.summary_hint).slice(0, 220));
+      }
+  
+      router.push(url.pathname + url.search);
+      // --- ここまで ---
     } catch {
       setErrorMsg('通信エラーが発生しました。');
     }
   }
+  
 
   return (
     <main className="mtalk-root">
@@ -149,23 +221,21 @@ export default function MTalkPage() {
           {!hasHistory && <em className="mh-empty">（まだ相談履歴がありません）</em>}
         </div>
         {hasHistory && (
-          <div className="mh-list">
-            {history.map((h) => (
-              <button
-                key={h.id || `${h.title}-${h.updated_at ?? ''}`} // 安定した key
-                className="mh-item"
-                onClick={() =>
-                  router.push(`/mtalk/${h.id}?agent=mirra&from=history&cid=${h.id}`)
-                }
-                title={h.title}
-              >
-                <div className="mh-title-line">{h.title}</div>
-                <div className="mh-date">
-                  {h.updated_at ? new Date(h.updated_at).toLocaleString() : ''}
-                </div>
-              </button>
+          <select
+            className="mh-dropdown"
+            defaultValue=""
+            onChange={(e) => {
+              const val = e.target.value;
+              if (val) {
+                router.push(`/mtalk/${val}?agent=mirra&from=history&cid=${val}`);
+              }
+            }}
+          >
+            <option value="" disabled>履歴を選択してください</option>
+            {historySafe.map((h) => (
+              <option key={h.id} value={h.id}>{h.label}</option>
             ))}
-          </div>
+          </select>
         )}
       </section>
 
@@ -181,23 +251,11 @@ export default function MTalkPage() {
         <div className="mtalk-agent">
           <span className="label">鑑定エージェント：</span>
           <label className="radio">
-            <input
-              type="radio"
-              name="agent"
-              value="mirra"
-              checked={agent === 'mirra'}
-              onChange={() => setAgent('mirra')}
-            />
+            <input type="radio" name="agent" value="mirra" checked={agent === 'mirra'} onChange={() => setAgent('mirra')} />
             <span>mirra（初回 2 クレジット）</span>
           </label>
           <label className="radio">
-            <input
-              type="radio"
-              name="agent"
-              value="iros"
-              checked={agent === 'iros'}
-              onChange={() => setAgent('iros')}
-            />
+            <input type="radio" name="agent" value="iros" checked={agent === 'iros'} onChange={() => setAgent('iros')} />
             <span>iros（初回 5 クレジット）</span>
           </label>
         </div>
@@ -206,7 +264,7 @@ export default function MTalkPage() {
       <section className="mtalk-input">
         <textarea
           rows={8}
-          placeholder="日頃のマインドトークを、いくつか改行で入力してください（例：どうせ間に合わない／また失敗する気がする など）"
+          placeholder="日頃のマインドトークを入力してください"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           disabled={loading}
@@ -216,7 +274,6 @@ export default function MTalkPage() {
             {loading ? '解析中…' : `解析する（${agent === 'iros' ? 5 : 2}クレジット）`}
           </button>
 
-          {/* ★ チャット入場は履歴からのみ。ここでは「相談する」ボタンを履歴がある人にだけ出す */}
           {latestReport && hasHistory && (
             <button className="secondary" onClick={() => consult(latestReport.id)}>
               この問題に取り組みますか？（相談する）
@@ -231,16 +288,13 @@ export default function MTalkPage() {
         {latestReport ? (
           <article className="report-card">
             <div className="meta">
-              <span className={`q-badge ${latestReport.q_emotion.toLowerCase()}`}>
-                {latestReport.q_emotion}
-              </span>
+              <span className={`q-badge ${latestReport.q_emotion.toLowerCase()}`}>{latestReport.q_emotion}</span>
               <span className="pill">位相：{latestReport.phase}</span>
               <span className="pill">深度：{latestReport.depth_stage}</span>
               <time>{new Date(latestReport.created_at).toLocaleString()}</time>
             </div>
             <pre className="reply">{latestReport.reply_text}</pre>
 
-            {/* 二重導線だが、上の仕様にあわせ履歴がある人だけ表示 */}
             {hasHistory && (
               <div className="report-actions">
                 <button className="secondary" onClick={() => consult(latestReport.id)}>

@@ -19,7 +19,6 @@ export async function fetchWithIdToken(url: string, init: RequestInit = {}) {
   const auth = getAuth();
   const user = auth.currentUser;
 
-  // 1st try: 通常取得（期限切れなら内部で更新される）
   let idToken = await getToken(false);
 
   const headers = new Headers(init.headers || {});
@@ -32,9 +31,8 @@ export async function fetchWithIdToken(url: string, init: RequestInit = {}) {
   let res: Response;
 
   try {
-    res = await fetch(url, { ...init, headers, credentials: 'same-origin' });
+    res = await fetch(url, { ...init, headers });
   } catch (e) {
-    // ネットワーク系エラーも計測だけしてそのまま投げる
     tlog({
       kind: 'api',
       path: url,
@@ -47,7 +45,6 @@ export async function fetchWithIdToken(url: string, init: RequestInit = {}) {
     throw e;
   }
 
-  // 認可系で失敗したら 1 回だけ強制リフレッシュして再試行
   if ((res.status === 401 || res.status === 403) && user) {
     tlog({
       kind: 'api',
@@ -59,7 +56,7 @@ export async function fetchWithIdToken(url: string, init: RequestInit = {}) {
       user_code: (user as any)?.user_code ?? null,
     });
 
-    const fresh = await getToken(true); // ← 強制更新
+    const fresh = await getToken(true);
     if (fresh && fresh !== idToken) {
       const retryHeaders = new Headers(init.headers || {});
       retryHeaders.set('Authorization', `Bearer ${fresh}`);
@@ -68,18 +65,14 @@ export async function fetchWithIdToken(url: string, init: RequestInit = {}) {
       }
 
       const t1 = performance.now();
-      const retried = await fetch(url, {
-        ...init,
-        headers: retryHeaders,
-        credentials: 'same-origin',
-      });
+      const retried = await fetch(url, { ...init, headers: retryHeaders });
 
       tlog({
         kind: 'api',
         path: url,
         status: retried.status,
         latency_ms: Math.round(performance.now() - t1),
-        note: 'retry after token refresh',
+        note: 'auth retry with fresh token',
         uid: user.uid,
         user_code: (user as any)?.user_code ?? null,
       });
@@ -88,7 +81,6 @@ export async function fetchWithIdToken(url: string, init: RequestInit = {}) {
     }
   }
 
-  // 初回結果を返す
   if (res.status === 401 || res.status === 403) {
     tlog({
       kind: 'api',

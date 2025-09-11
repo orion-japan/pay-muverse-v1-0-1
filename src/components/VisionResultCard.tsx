@@ -57,6 +57,7 @@ export default function VisionResultCard({
   className,
 }: VisionResultCardProps) {
   const [busy, setBusy] = useState(false);
+  const [hidden, setHidden] = useState(false); // ★ 追加：成功時に自分を隠す
   const [resolvedThumb, setResolvedThumb] = useState<string | null>(null);
 
   // qCode が文字列以外の場合は描画しない（安全弁）
@@ -133,6 +134,16 @@ export default function VisionResultCard({
         const text = await res.text().catch(() => '');
         throw new Error(text || `HTTP ${res.status}`);
       }
+
+      // ★ 成功時の共通処理
+      if (url.endsWith('/archive')) {
+        // 1) 自分自身を即時非表示（楽観的）
+        setHidden(true);
+        // 2) 他の画面へも通知（VisionPage などが購読していれば即消える）
+        try { localStorage.setItem(`vision.hidden.${visionId}`, '1'); } catch {}
+        window.dispatchEvent(new CustomEvent('vision:archived', { detail: { visionId } }));
+      }
+
       onChanged?.();
     } catch (e: any) {
       console.error('[VisionResultCard] request failed:', e);
@@ -149,6 +160,9 @@ export default function VisionResultCard({
   // 手動で履歴へ
   const handleArchive = () =>
     post('/api/visions/archive', { vision_id: visionId });
+
+  // ★ 非表示フラグが立っていたら描画しない
+  if (hidden) return null;
 
   return (
     <article

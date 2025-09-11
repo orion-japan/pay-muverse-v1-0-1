@@ -1,13 +1,11 @@
-// src/components/SofiaChat/SidebarMobile.tsx
 'use client';
 
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { X, Trash, Edit, ChevronDown, ChevronUp } from 'lucide-react';
 import './SidebarMobile.css';
 
-// ★ 追加：MetaPanel
 import { MetaPanel, type MetaData } from '@/components/SofiaChat/MetaPanel';
 
 interface UserInfo {
@@ -20,6 +18,8 @@ interface Conversation {
   id: string;
   title: string;
 }
+type MirraHistoryItem = any;
+
 interface SidebarMobileProps {
   conversations: Conversation[];
   onSelect: (id: string) => void;
@@ -28,8 +28,10 @@ interface SidebarMobileProps {
   isOpen: boolean;
   onClose: () => void;
   userInfo: UserInfo | null;
-  // ★ 追加：メタを受け取って表示
   meta?: MetaData | null;
+  mirraHistory?: MirraHistoryItem[] | null;
+  /** ★ 追加：現在のエージェント（mirra のときだけ履歴を会話一覧として表示） */
+  agent?: 'mu' | 'iros' | 'mirra';
 }
 
 const SidebarMobile: React.FC<SidebarMobileProps> = ({
@@ -41,7 +43,11 @@ const SidebarMobile: React.FC<SidebarMobileProps> = ({
   onClose,
   userInfo,
   meta,
+  mirraHistory,
+  agent,
 }) => {
+  const router = useRouter();
+
   // ===== Portal host =====
   const portalRef = React.useRef<Element | null>(null);
   if (typeof window !== 'undefined' && !portalRef.current) {
@@ -89,13 +95,39 @@ const SidebarMobile: React.FC<SidebarMobileProps> = ({
     (first as HTMLElement | null)?.focus?.();
   }, [isOpen]);
 
-  // ★ 追加：Meta 折りたたみ
+  // ★ Meta 折りたたみ
   const [metaOpen, setMetaOpen] = React.useState<boolean>(false);
 
-  // ★ 追加：クリックイベント dispatch
+  // ★ クリックイベント dispatch（既存のトースト用）
   const dispatch = (name: string, detail?: any) => {
     try { window.dispatchEvent(new CustomEvent(name, { detail })); } catch {}
   };
+
+  // ★ mirra 履歴を「会話一覧」形式に正規化
+  const mirraAsConversations: Conversation[] = React.useMemo(() => {
+    if (agent !== 'mirra') return [];
+    const src = Array.isArray(mirraHistory) ? mirraHistory : [];
+    const norm = src.map((h: any, idx: number) => {
+      const idRaw =
+        h?.id ?? h?.thread_id ?? h?.conversation_id ?? h?.cid ?? h?.conv_id ?? h?.report_id ?? `row-${idx}`;
+      const id = typeof idRaw === 'string' ? idRaw.trim() : String(idRaw).trim();
+
+      const tRaw = h?.title ?? h?.subject ?? h?.name ?? h?.summary ?? '';
+      const titleBase = String(tRaw || '').trim() || '（無題）';
+      const whenRaw = h?.updated_at ?? h?.created_at ?? null;
+      const when = whenRaw ? new Date(whenRaw).toLocaleString() : '';
+      const title = when ? `${titleBase}（${when}）` : titleBase;
+
+      return { id, title };
+    }).filter((x) => x.id);
+
+    // 重複排除
+    const seen = new Set<string>();
+    return norm.filter((x) => (seen.has(x.id) ? false : (seen.add(x.id), true)));
+  }, [agent, mirraHistory]);
+
+  // ★ 一覧に出すデータを決定（mirra は mirra 履歴、他は従来の conversations）
+  const listForUI: Conversation[] = agent === 'mirra' ? mirraAsConversations : conversations;
 
   if (!isOpen || !portalRef.current) return null;
 
@@ -132,32 +164,44 @@ const SidebarMobile: React.FC<SidebarMobileProps> = ({
           </div>
         )}
 
-        {/* セッション一覧 */}
+        {/* 会話一覧（mirra も同じスタイルで表示） */}
         <ul className="sof-list">
-          {conversations.map((conv) => (
+          {listForUI.map((conv) => (
             <li key={conv.id} className="sof-list__item">
               <button
                 className="sof-list__title"
-                onClick={() => { onSelect(conv.id); onClose(); }}
+                onClick={() => {
+                  if (agent === 'mirra') {
+                    // mirra は /mtalk/:id に遷移
+                    router.push(`/mtalk/${conv.id}?agent=mirra&from=sidebar&cid=${conv.id}`);
+                  } else {
+                    onSelect(conv.id);
+                  }
+                  onClose();
+                }}
                 title={conv.title || '無題のセッション'}
               >
                 {conv.title || '無題のセッション'}
               </button>
-              <div className="sof-list__ops">
-                <button
-                  className="sof-iconbtn"
-                  onClick={() => {
-                    const t = prompt('新しいタイトルを入力してください', conv.title);
-                    if (t) onRename(conv.id, t);
-                  }}
-                  title="Rename"
-                >
-                  <Edit size={16} />
-                </button>
-                <button className="sof-iconbtn danger" onClick={() => onDelete(conv.id)} title="Delete">
-                  <Trash size={16} />
-                </button>
-              </div>
+
+              {/* mirra にはリネーム/削除APIが無い想定なのでボタン非表示 */}
+              {agent !== 'mirra' && (
+                <div className="sof-list__ops">
+                  <button
+                    className="sof-iconbtn"
+                    onClick={() => {
+                      const t = prompt('新しいタイトルを入力してください', conv.title);
+                      if (t) onRename(conv.id, t);
+                    }}
+                    title="Rename"
+                  >
+                    <Edit size={16} />
+                  </button>
+                  <button className="sof-iconbtn danger" onClick={() => onDelete(conv.id)} title="Delete">
+                    <Trash size={16} />
+                  </button>
+                </div>
+              )}
             </li>
           ))}
         </ul>

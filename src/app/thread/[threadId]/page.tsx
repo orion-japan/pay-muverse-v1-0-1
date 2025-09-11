@@ -10,6 +10,7 @@ import './ThreadPage.css';
 import CommentDockPortal from '@/components/CommentDockPortal';
 import CommentsSection from '@/components/CommentsSection';
 import { getAuth } from 'firebase/auth';
+import { formatJST } from '@/lib/formatDate'; // ★ 追加：共通JSTフォーマッタ
 
 /* ===== Types ===== */
 type Post = {
@@ -27,16 +28,8 @@ type ReactionCount = { r_type: string; count: number };
 /* ===== Consts ===== */
 const DEFAULT_AVATAR = '/iavatar_default.png';
 
-/* ===== JST 共通フォーマッタ ===== */
-const formatJST = (d: string | number | Date) =>
-  new Date(d).toLocaleString('ja-JP', {
-    timeZone: 'Asia/Tokyo',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+// ★ ここにあったローカルの formatJST 定義は削除してください
+// （以降のコード中の `formatJST(...)` 呼び出しはそのままでOK）
 
 /* ===== Page ===== */
 export default function ThreadPage() {

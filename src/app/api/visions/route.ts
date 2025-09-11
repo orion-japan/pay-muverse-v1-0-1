@@ -1,10 +1,14 @@
 // src/app/api/visions/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { supabase as publicSb } from "@/lib/supabase";
-import { createClient } from "@supabase/supabase-js";             // ★ 追加
+import { createClient } from "@supabase/supabase-js";
 import { getAuth } from "firebase-admin/auth";
 import { initializeApp, applicationDefault } from "firebase-admin/app";
-import { logEvent } from "@/server/telemetry"; // ★ 既存
+import { logEvent } from "@/server/telemetry";
+
+/* --- 追加: ルートは常に動的 & キャッシュ無効 --- */
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 /** env から projectId を解決 */
 function resolveProjectId(): string | undefined {
@@ -106,29 +110,50 @@ export async function GET(req: NextRequest) {
   const user = await verifyFirebaseToken(req);
   if (!user) {
     await logEvent({ kind: "api", path, status: 401, latency_ms: Date.now() - t0, note: "Unauthorized", ua, session_id: sid });
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
   }
 
   try {
     const user_code = await resolveUserCode(user.uid);
     const { searchParams } = new URL(req.url);
     const phase = searchParams.get("phase");
+    const includeHistory =
+      searchParams.get("include_history") === "1" ||
+      searchParams.get("includeHistory") === "1";
+
+    // ログ: リクエスト内容
+    console.log("📥 [visions GET req]", { user_code, phase, includeHistory });
 
     // ★ 読み出しは public クライアントでもOK（そのまま）
     let q = publicSb.from("visions").select("*").eq("user_code", user_code);
     if (phase) q = q.eq("phase", phase);
 
-    const { data, error } = await q
-      .order("sort_index", { ascending: true, nullsFirst: true })
-      .order("created_at", { ascending: true });
+    if (!includeHistory) {
+      q = q
+        .is("moved_to_history_at", null)
+        .order("sort_index", { ascending: true, nullsFirst: true })
+        .order("created_at", { ascending: true });
+    } else {
+      q = q
+        .order("moved_to_history_at", { ascending: false, nullsFirst: false })
+        .order("updated_at", { ascending: false });
+    }
 
+    const { data, error } = await q;
     if (error) throw error;
 
+    // ログ: 結果
+    console.log("📤 [visions GET res]", {
+      count: data?.length,
+      first: data?.[0],
+    });
+
     await logEvent({ kind: "api", path, status: 200, latency_ms: Date.now() - t0, ua, session_id: sid });
-    return NextResponse.json({ ok: true, data });
+    return NextResponse.json({ ok: true, data }, { headers: { "Cache-Control": "no-store" } });
   } catch (e: any) {
+    console.error("❌ [visions GET error]", e);
     await logEvent({ kind: "api", path, status: 500, latency_ms: Date.now() - t0, note: e?.message ?? String(e), ua, session_id: sid });
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+    return NextResponse.json({ error: "Server error" }, { status: 500, headers: { "Cache-Control": "no-store" } });
   }
 }
 
@@ -140,7 +165,7 @@ export async function POST(req: NextRequest) {
   const user = await verifyFirebaseToken(req);
   if (!user) {
     await logEvent({ kind: "api", path, status: 401, latency_ms: Date.now() - t0, note: "Unauthorized", ua, session_id: sid });
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
   }
 
   try {
@@ -165,7 +190,8 @@ export async function POST(req: NextRequest) {
 
     const finalQCode = q_code || { code: generateQCode(), generated: true };
 
-    // ★ 追加はService Roleで
+    console.log("📥 [visions POST req]", { user_code, title, status, phase });
+
     const { data, error } = await adminSb
       .from("visions")
       .insert([
@@ -194,11 +220,14 @@ export async function POST(req: NextRequest) {
 
     if (error) throw error;
 
+    console.log("📤 [visions POST res]", data);
+
     await logEvent({ kind: "api", path, status: 200, latency_ms: Date.now() - t0, ua, session_id: sid });
-    return NextResponse.json({ ok: true, ...data });
+    return NextResponse.json({ ok: true, ...data }, { headers: { "Cache-Control": "no-store" } });
   } catch (e: any) {
+    console.error("❌ [visions POST error]", e);
     await logEvent({ kind: "api", path, status: 500, latency_ms: Date.now() - t0, note: e?.message ?? String(e), ua, session_id: sid });
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+    return NextResponse.json({ error: "Server error" }, { status: 500, headers: { "Cache-Control": "no-store" } });
   }
 }
 
@@ -210,15 +239,16 @@ export async function PUT(req: NextRequest) {
   const user = await verifyFirebaseToken(req);
   if (!user) {
     await logEvent({ kind: "api", path, status: 401, latency_ms: Date.now() - t0, note: "Unauthorized", ua, session_id: sid });
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
   }
 
   try {
     const user_code = await resolveUserCode(user.uid);
     const body = await req.json();
 
-    // === 並び替え一括更新（同一列 or 複数列） ===
+    // 並び替え一括更新
     if (Array.isArray(body?.order)) {
+      console.log("📥 [visions PUT order req]", body.order);
       const now = new Date().toISOString();
       for (const r of body.order) {
         const { error } = await adminSb
@@ -228,11 +258,12 @@ export async function PUT(req: NextRequest) {
           .eq("user_code", user_code);
         if (error) throw error;
       }
+      console.log("📤 [visions PUT order res] ok");
       await logEvent({ kind: "api", path, status: 200, latency_ms: Date.now() - t0, ua, session_id: sid });
-      return NextResponse.json({ ok: true, count: body.order.length });
+      return NextResponse.json({ ok: true, count: body.order.length }, { headers: { "Cache-Control": "no-store" } });
     }
 
-    // === 単体更新（列移動/タイトルなど） ===
+    // 単体更新
     const vision_id = body?.vision_id;
     if (!vision_id) throw new Error("Missing vision_id");
 
@@ -240,11 +271,11 @@ export async function PUT(req: NextRequest) {
     if (body?.title) patch.title = body.title;
     if (body?.detail !== undefined) patch.detail = body.detail;
     if (body?.iboard_thumb !== undefined) patch.iboard_thumb = body.iboard_thumb;
-
-    // ★ 列移動・フェーズ移動・直接の並び更新に対応
-    if (typeof body?.stage === "string") patch.stage = body.stage;        // 'S'|'F'|'R'|'C'|'I'
-    if (typeof body?.phase === "string") patch.phase = body.phase;        // 'initial'|'mid'|'final'
+    if (typeof body?.stage === "string") patch.stage = body.stage;
+    if (typeof body?.phase === "string") patch.phase = body.phase;
     if (Number.isFinite(body?.sort_index)) patch.sort_index = Number(body.sort_index);
+
+    console.log("📥 [visions PUT req]", { vision_id, patch });
 
     const { data, error } = await adminSb
       .from("visions")
@@ -256,11 +287,14 @@ export async function PUT(req: NextRequest) {
 
     if (error) throw error;
 
+    console.log("📤 [visions PUT res]", data);
+
     await logEvent({ kind: "api", path, status: 200, latency_ms: Date.now() - t0, ua, session_id: sid });
-    return NextResponse.json({ ok: true, ...data });
+    return NextResponse.json({ ok: true, ...data }, { headers: { "Cache-Control": "no-store" } });
   } catch (e: any) {
+    console.error("❌ [visions PUT error]", e);
     await logEvent({ kind: "api", path, status: 500, latency_ms: Date.now() - t0, note: e?.message ?? String(e), ua, session_id: sid });
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+    return NextResponse.json({ error: "Server error" }, { status: 500, headers: { "Cache-Control": "no-store" } });
   }
 }
 
@@ -272,7 +306,7 @@ export async function DELETE(req: NextRequest) {
   const user = await verifyFirebaseToken(req);
   if (!user) {
     await logEvent({ kind: "api", path, status: 401, latency_ms: Date.now() - t0, note: "Unauthorized", ua, session_id: sid });
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
   }
 
   try {
@@ -280,6 +314,8 @@ export async function DELETE(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const vision_id = searchParams.get("id");
     if (!vision_id) throw new Error("Missing vision_id");
+
+    console.log("📥 [visions DELETE req]", { vision_id, user_code });
 
     const { error } = await adminSb
       .from("visions")
@@ -289,10 +325,14 @@ export async function DELETE(req: NextRequest) {
 
     if (error) throw error;
 
+    console.log("📤 [visions DELETE res] ok");
+
     await logEvent({ kind: "api", path, status: 200, latency_ms: Date.now() - t0, ua, session_id: sid });
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
   } catch (e: any) {
+    console.error("❌ [visions DELETE error]", e);
     await logEvent({ kind: "api", path, status: 500, latency_ms: Date.now() - t0, note: e?.message ?? String(e), ua, session_id: sid });
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+    return NextResponse.json({ error: "Server error" }, { status: 500, headers: { "Cache-Control": "no-store" } });
   }
 }
+

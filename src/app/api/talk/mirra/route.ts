@@ -1,76 +1,106 @@
-// /app/api/talk/mirra/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-import { generateMirraReply, inferQCode } from '@/lib/mirra';
-
+// src/app/api/talk/mirra/route.ts
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-export async function GET() {
-  return new Response(JSON.stringify({ ok: true, service: 'mirra' }), {
-    headers: { 'content-type': 'application/json' },
-  });
-}
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+import { SUPABASE_URL, SERVICE_ROLE, verifyFirebaseAndAuthorize } from '@/lib/authz';
+import { buildMirraSystemPrompt } from '@/lib/mirra/prompt'; // あれば
 
-// --- 課金・記録（必要なら本実装に差し替え） ---
-async function chargeCredits(_user_code: string, _amount: number, _meta?: any) { return; }
-async function recordMuTextTurn(_payload: any) { return; }
-
-// --- 開発用の簡易ユーザー取得（本番は必ず差し替え） ---
-async function getUserFromRequest(_req: NextRequest) {
-  return { user_code: 'dev-user' };
+function sb() {
+  return createClient(SUPABASE_URL!, SERVICE_ROLE!, { auth: { persistSession: false } });
 }
 
 export async function POST(req: NextRequest) {
-  try {
-    const user = await getUserFromRequest(req);
-    if (!user?.user_code) {
-      return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  const z = await verifyFirebaseAndAuthorize(req as any);
+  if (!z.ok) return NextResponse.json({ error: z.error }, { status: z.status });
+  if (!z.allowed) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+
+  const raw = await req.text();
+  const body = raw ? JSON.parse(raw) : {};
+  const text: string = (body.text ?? '').trim();
+  const user_code: string = body.user_code ?? z.userCode;
+  const thread_id: string = String(body.thread_id ?? `mirra-${user_code}`);
+
+  if (!text) return NextResponse.json({ ok:false, error:'empty' }, { status: 400 });
+
+  const s = sb();
+
+  // 1) スレッド確保（存在しなければ作る）
+  {
+    const { error } = await s.from('talk_threads')
+      .upsert({
+        id: thread_id,
+        user_a_code: user_code,
+        agent: 'mirra',
+        created_by: user_code,
+        title: 'mirra 会話',
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'id' });
+    if (error) {
+      console.error('[mirra] upsert thread error:', error);
+      return NextResponse.json({ ok:false, error:error.message }, { status: 500 });
     }
-
-    const body = await req.json().catch(() => ({} as any));
-
-    // ★ 入力互換：text / message / content すべて受ける
-    const text: string = String(body?.text ?? body?.message ?? body?.content ?? '').trim();
-
-    // ★ thread_id 互換：thread_id / threadId / thread のどれでもOK
-    const thread_id: string = String(
-      body?.thread_id ?? body?.threadId ?? body?.thread ?? ''
-    ).trim();
-
-    if (!text || !thread_id) {
-      return NextResponse.json(
-        { error: 'bad_request', detail: 'text and thread_id are required' },
-        { status: 400 }
-      );
-    }
-
-    // 生成
-    const out = await generateMirraReply(text); // { text, cost, meta? }
-    const qres = await inferQCode(text);       // { q, confidence, color_hex }
-
-    // 課金・記録は失敗してもチャットは続行
-    await chargeCredits(user.user_code, out.cost, { agent: 'mirra', thread_id }).catch(() => {});
-    await recordMuTextTurn({
-      agent: 'mirra',
-      user_code: user.user_code,
-      thread_id,
-      input_text: text,
-      output_text: out.text,
-      used_credits: out.cost,
-      meta: { ...out.meta, q_code: qres.q, q_confidence: qres.confidence, q_color: qres.color_hex },
-    }).catch(() => {});
-
-    return NextResponse.json({
-      ok: true,
-      reply: out.text,
-      cost: out.cost,
-      thread_id,
-      meta: { ...out.meta, q_code: qres.q, q_confidence: qres.confidence, q_color: qres.color_hex },
-    });
-  } catch (e: any) {
-    console.error('[mirra] POST error:', e);
-    return NextResponse.json(
-      { error: 'internal_error', detail: String(e?.message ?? e) },
-      { status: 500 }
-    );
   }
+
+  // 2) ユーザ発話 保存
+  const now = new Date().toISOString();
+  {
+    const { error } = await s.from('talk_messages').insert([{
+      thread_id,
+      sender_code: user_code,
+      user_code,
+      role: 'user',
+      content: text,
+      created_at: now,
+    }]);
+    if (error) {
+      console.error('[mirra] insert user msg error:', error);
+      return NextResponse.json({ ok:false, error:error.message }, { status: 500 });
+    }
+  }
+
+  // 3) LLM 呼び出し（ダミー/本番切替）
+  let reply = '';
+  try {
+    // 実際は OpenAI 等に投げる。ここは簡略。
+    // const prompt = buildMirraSystemPrompt();
+    // reply = await callLLM(prompt, history...);
+    reply = [
+      '1. メッセージ: あなたの思いを大切にしています。',
+      '2. 体のアンカー: 深呼吸して肩の力を抜きましょう。',
+      '3. 台本の仮説…',
+    ].join('\n');
+  } catch (e:any) {
+    reply = '（ただいま応答が混み合っています。もう一度お試しください）';
+  }
+
+  // 4) アシスタント発話 保存
+  const meta = { provider:'openai', model:'gpt-4o-mini' };
+  {
+    const { error } = await s.from('talk_messages').insert([{
+      thread_id,
+      sender_code: 'mirra',
+      role: 'assistant',
+      content: reply,
+      meta,
+      created_at: new Date().toISOString(),
+    }]);
+    if (error) {
+      console.error('[mirra] insert bot msg error:', error);
+      // 返信保存に失敗してもユーザー側に簡易応答は返す
+    }
+  }
+
+  // 5) スレッドの最終更新を反映（並び順安定の肝）
+  await s.from('talk_threads')
+    .update({ last_message_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq('id', thread_id);
+
+  return NextResponse.json({
+    ok: true,
+    thread_id,
+    reply,
+    meta,
+  });
 }

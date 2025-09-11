@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
 
     // 1) posts 取得（userCode では絞らない）
     const { data: posts, error: postErr } = await supabase
-      .from('posts')
+      .from('v_posts_jst')
       .select(
         [
           'post_id',

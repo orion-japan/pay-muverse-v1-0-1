@@ -282,3 +282,92 @@
   background: #f6f4ff;
   color: #4328b0;
 }
+
+
+.dcp-actions {
+  display: flex;
+  justify-content: space-between; /* 横並びで左右に配置 */
+  gap: 8px;                       /* ボタン間に余白 */
+}
+
+.dcp-actions button {
+  flex: 1;                        /* ボタン幅を均等に */
+  padding: 10px 0;                /* 高さを揃える */
+  font-size: 14px;
+  border-radius: 6px;
+  white-space: nowrap;            /* 改行しないで横書き */
+}
+
+.dcp-actions .dcp-criteria-btn {
+  background-color: #f0f0f0;
+  border: 1px solid #ccc;
+}
+
+.dcp-actions .dcp-secondary {
+  background-color: #fff4f4;
+  border: 1px solid #ffaaaa;
+  color: #cc0000;
+}
+
+/* ボタン＋回数設定のラッパー */
+.dcp-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px; /* ボタンとの間隔 */
+  margin-top: 12px;
+}
+
+/* 履歴に送るボタン */
+button.dcp-secondary {
+  flex: 1;
+  background: #ffe5e5;
+  border: 1px solid #ffaaaa;
+  color: #d33;
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+button.dcp-secondary:hover {
+  background: #ffcccc;
+}
+
+/* 回数設定エリア */
+.dcp-criteria-btn {
+  flex: 1;
+  background: #f5f7fa;
+  border: 1px solid #ccc;
+  color: #333;
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: center;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.dcp-criteria-btn:hover {
+  background: #e8ebf0;
+}
+/* ===== 保存時間と回数ボタン周りの調整 ===== */
+
+/* 保存ボタンと回数ボタンのラッパー */
+.dcp-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;           /* ← ボタン同士の余白 */
+  margin-top: 8px;     /* ← 保存時間との余白 */
+}
+
+/* 回数ボタン（小さめに） */
+.dcp-actions .dcp-criteria-btn {
+  font-size: 12px;      /* 文字を小さく */
+  padding: 4px 10px;    /* ボタンの余白も縮小 */
+  min-width: 60px;      /* 幅の下限を小さめに */
+  height: 28px;         /* 高さも小さめ */
+  border-radius: 6px;
+}

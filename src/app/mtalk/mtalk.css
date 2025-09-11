@@ -156,3 +156,103 @@
 .mtalk-history .mh-item:hover { background: rgba(15,23,42,.5); }
 .mtalk-history .mh-title-line { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:600; }
 .mtalk-history .mh-date { opacity:.7; font-size:12px; margin-top:2px; }
+
+
+/* ====== History dropdown ====== */
+.mtalk-history {
+  margin: 8px 0 14px;
+}
+
+.mh-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  color: #cfd9ff;
+  margin-bottom: 6px;
+}
+
+.mh-empty {
+  font-weight: 400;
+  opacity: .7;
+}
+
+/* 見た目をフルカスタム */
+.mh-dropdown {
+  --bg: #0e1735;          /* 面の色 */
+  --edge: #2a3a66;        /* 枠線 */
+  --edge-hover: #5f77ff;  /* hover/focusの枠 */
+  --text: #eaf0ff;        /* 文字色 */
+  --hint: #8fa2d9;        /* プレースホルダー色 */
+
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  max-width: 100%;
+  height: 44px;
+  padding: 0 2.75rem 0 0.875rem; /* 右にアイコン分の余白 */
+  border-radius: 12px;
+  border: 1px solid var(--edge);
+  background:
+    /* 右側のグラデ影 */
+    linear-gradient(180deg, rgba(255,255,255,.06), rgba(0,0,0,.12)) padding-box,
+    var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 44px;
+  outline: none;
+  box-shadow:
+    0 8px 24px rgba(15, 23, 42, .25),
+    inset 0 1px 0 rgba(255,255,255,.06);
+  transition: border-color .2s ease, box-shadow .2s ease, transform .08s ease;
+
+  /* ▼ 右側▼アイコン（SVG） */
+  background-image:
+    url("data:image/svg+xml;utf8,\
+      <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23cfd9ff'>\
+        <path d='M7 9l5 6 5-6z'/>\
+      </svg>");
+  background-repeat: no-repeat;
+  background-size: 18px 18px;
+  background-position: right .75rem center;
+}
+
+.mh-dropdown:hover {
+  border-color: var(--edge-hover);
+  box-shadow:
+    0 10px 28px rgba(34, 54, 120, .35),
+    0 0 0 2px rgba(95, 119, 255, .18) inset;
+}
+
+.mh-dropdown:focus-visible {
+  border-color: var(--edge-hover);
+  box-shadow:
+    0 12px 32px rgba(34, 54, 120, .45),
+    0 0 0 3px rgba(95, 119, 255, .28) inset;
+  transform: translateY(-1px);
+}
+
+/* disabled / placeholder風（value="" の option を選択時） */
+.mh-dropdown:has(option[value=""]:checked) {
+  color: var(--hint);
+}
+
+/* Windows/Edge 既定の▼を消す */
+.mh-dropdown::-ms-expand { display: none; }
+
+/* ドロップダウン内の項目の色（ダークに） */
+.mh-dropdown option {
+  background: #0c1430;
+  color: #eaf0ff;
+}
+
+/* 狭い端末での密度を少し上げる */
+@media (max-width: 420px) {
+  .mh-dropdown { height: 42px; line-height: 42px; }
+}
+
+/* 低モーション環境 */
+@media (prefers-reduced-motion: reduce) {
+  .mh-dropdown { transition: none; }
+}

@@ -68,7 +68,15 @@ const STAGES: { key: Stage; label: string; icon: string }[] = [
   { key: 'I', label: '結果',   icon: '🌌' },
 ];
 
-type VisionWithTS = Vision & { created_at?: string | null; updated_at?: string | null };
+type VisionWithTS = Vision & {
+  created_at?: string | null;
+  updated_at?: string | null;
+  archived_at?: string | null;
+  moved_to_history_at?: string | null;
+  sort_index?: number | null;
+  iboard_thumb?: string | null;
+  iboard_post_id?: string | null;
+};
 
 /** localStorage keys */
 const LS_SELECTED = 'vision.selected';
@@ -150,6 +158,13 @@ export default function VisionPage() {
   const loadSeqRef = useRef(0);
 
   const [dragging, setDragging] = useState(false);
+
+  /** ←★ 追加: 押した直後にカードを隠すためのセット */
+  const [pendingHide, setPendingHide] = useState<Set<string>>(new Set());
+
+  /** ←★ 追加: アクティブ判定（履歴/アーカイブ済みを除外） */
+  const isActiveVision = (v: VisionWithTS) =>
+    !v.archived_at && !v.moved_to_history_at;
 
   /** 既存選択の復元 */
   useEffect(() => {
@@ -388,24 +403,47 @@ export default function VisionPage() {
     }
   };
 
-  /* 保存後の反映（新規/更新） */
-  const upsertLocal = (saved: VisionWithTS) => {
-    const normalized = { ...saved, vision_id: String(saved.vision_id) };
-    setVisions(prev => {
-      const i = prev.findIndex(x => x.vision_id === normalized.vision_id);
-      const next = [...prev];
-      if (i >= 0) next[i] = normalized;
-      else next.push(normalized);
-      saveOrder(phase, next); // 新規時も保存順反映
-      return next;
-    });
-    try { localStorage.setItem(LS_SELECTED, normalized.vision_id!); } catch {}
-    setSelectedVisionId(normalized.vision_id!);
-  };
+/* 保存後の反映（新規/更新）— 並びルールを適用して即時反映 */
+const upsertLocal = (saved: VisionWithTS) => {
+  const normalized: VisionWithTS = { ...saved, vision_id: String(saved.vision_id) };
+
+  setVisions(prev => {
+    const i = prev.findIndex(x => String(x.vision_id) === normalized.vision_id);
+    const next = [...prev];
+
+    if (i >= 0) {
+      // 既存を置き換え（ステージ変更もここで反映）
+      next[i] = normalized;
+    } else {
+      // 新規は一旦末尾に追加
+      next.push(normalized);
+    }
+
+    // ★ 既存の保存順（localStorage）を尊重して並び直す
+    const applied = applyOrderByStage(phase, next);
+
+    // ★ 並びも保存（次回リロード時に同じ順序で出せるように）
+    saveOrder(phase, applied);
+
+    return applied;
+  });
+
+  // 選択を更新＆永続化
+  try { localStorage.setItem(LS_SELECTED, String(normalized.vision_id)); } catch {}
+  setSelectedVisionId(String(normalized.vision_id));
+};
+
 
   /* 選択の永続化 */
   function persistSelected(id: string | null) {
     try { id ? localStorage.setItem(LS_SELECTED, id) : localStorage.removeItem(LS_SELECTED); } catch {}
+  }
+
+  /** ←★ 追加: 履歴移動後の即時反映（楽観的隠し＋確定除去） */
+  function handleArchived(vid: string) {
+    setPendingHide(prev => new Set(prev).add(String(vid)));
+    setVisions(prev => prev.filter(v => String(v.vision_id) !== String(vid)));
+    setSelectedVisionId(null);
   }
 
   return (
@@ -466,7 +504,11 @@ export default function VisionPage() {
                     className="vision-col-body"
                   >
                     {visions
-                      .filter(v => v.stage === stage.key)
+                      .filter(v =>
+                        v.stage === stage.key &&
+                        isActiveVision(v) &&                        // ←★ 履歴/アーカイブ除外
+                        !pendingHide.has(String(v.vision_id))       // ←★ 押した瞬間に非表示
+                      )
                       .map((vision, index) => (
                         <Draggable
                           key={String(vision.vision_id)}
@@ -539,6 +581,8 @@ export default function VisionPage() {
             selectedVisionId={String(selectedVision.vision_id)}
             selectedStage={selectedVision.stage}
             selectedVisionTitle={selectedVision.title}
+            // ★ 履歴へ移動完了時に即非表示
+            onArchived={(vid: string) => handleArchived(vid)}
           />
         ) : (
           <div className="daily-check-empty">

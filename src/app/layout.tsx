@@ -9,8 +9,8 @@ import AuthExpose from './_auth-expose'
 
 export const metadata = {
   manifest: '/manifest.json',
-  themeColor: '#0b1437',              // ← そのまま
-  icons: {                            // ← ここだけ追加
+  themeColor: '#0b1437',
+  icons: {
     icon: '/mira.png',
     shortcut: '/mira.png',
     apple: '/mira.png',
@@ -25,10 +25,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="vapid" content={process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY} />
         <script
           dangerouslySetInnerHTML={{
-            __html: `window.__VAPID_PUBLIC_KEY__=${JSON.stringify(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || '')};`,
+            __html: `window.__VAPID_PUBLIC_KEY__=${JSON.stringify(
+              process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || ''
+            )};`,
           }}
         />
       </head>
+
       <body className="mu-body">
         <Providers>
           <LayoutClient>{children}</LayoutClient>
@@ -37,5 +40,5 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </Providers>
       </body>
     </html>
-  )
+  );
 }

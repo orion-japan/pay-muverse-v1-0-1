@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import SelfPostModal from '@/components/SelfPostModal'
 import ReactionBar from '@/components/ReactionBar'
+import { formatJST } from '@/lib/formatDate' // ★ 追加：JST統一フォーマッタ
 import './self.css'
 
 const DEBUG = false
@@ -275,7 +276,7 @@ export default function SelfPage() {
   }, [userCode])
 
   /* ===== UI ヘルパ ===== */
-  const formatDate = (iso: string) => new Date(iso).toLocaleString('ja-JP', { dateStyle: 'short', timeStyle: 'short' })
+  const formatDate = (iso: string) => formatJST(iso) // ★ 置き換え：JST固定・YYYY/MM/DD HH:mm
   const ellipsis = (s: string, n = 120) => (s.length > n ? s.slice(0, n) + '…' : s)
   const looksAI = (p: Post) => {
     const st = statsMap[p.post_id]
@@ -362,9 +363,6 @@ const DigestRow = ({ p }: { p: Post }) => {
     </div>
   )
 }
-
-  
-  
 
   const recent = useMemo(() => [...posts].sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at)), [posts])
 

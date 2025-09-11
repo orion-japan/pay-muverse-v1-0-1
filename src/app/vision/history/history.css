@@ -24,3 +24,46 @@
 .vh-title{margin:6px 0 8px;font-size:15px;font-weight:800;color:#232338}
 .vh-links{display:flex;gap:10px;margin-bottom:6px}
 .vh-actions a{margin-right:10px}
+
+
+.vh-actions { display:flex; gap:.5rem; }
+.vh-btn { padding:.4rem .7rem; border-radius:.5rem; border:1px solid #cbd5e1; background:#fff; }
+.vh-btn:hover { background:#f8fafc; }
+.vh-btn:disabled { opacity:.5; cursor:not-allowed; }
+.vh-btn.danger { border-color:#fecaca; color:#b91c1c; }
+.vh-btn.danger:hover { background:#fff1f2; }
+
+/* history.css */
+
+.vh-badge, .vh-phase {
+    writing-mode: horizontal-tb;   /* ← 横書き */
+    text-orientation: mixed;
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    background: #f0f0f0;
+    color: #333;
+    margin-right: 6px;  /* 横に並んだときの間隔 */
+  }
+
+  .vh-card {
+    display: flex;             /* 横並び */
+    align-items: center;       /* 中央寄せ */
+    width: 100%;               /* 親の幅いっぱい */
+    max-width: 800px;          /* 横長に */
+    margin: 0 auto 12px;       /* 中央寄せ＋下余白 */
+    padding: 12px;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    background: #fff;
+  }
+
+  .vh-thumb {
+    flex: 0 0 120px;   /* サムネイル固定幅 */
+    margin-right: 12px;
+  }
+  .vh-body {
+    flex: 1;           /* 本文が残り幅を取る */
+  }
+  

@@ -379,10 +379,10 @@ export default function SofiaChatShell({ agent, title }: Props) {
     if (agent !== 'mu') return messages;
     const map = new Map<string, Message>();
     for (const m of messages) {
-      const roleAny = (m as any).role as string; // 安全参照
+      const roleAny = (m as any).role as string;
       if (roleAny === 'assistant' || roleAny === 'system') {
         const a = (m as any)?.agent;
-        if (a && a !== 'Mu') continue; // Mu 以外は除外
+        if (a && a !== 'Mu') continue;
       }
       map.set(m.id, m);
     }
@@ -416,17 +416,24 @@ export default function SofiaChatShell({ agent, title }: Props) {
       ) : (
         <>
           <SidebarMobile
+            agent={agent} // ← 追加：Sidebar にも agent を渡す
             isOpen={isMobileMenuOpen}
             onClose={() => setIsMobileMenuOpen(false)}
             conversations={conversations}
-            onSelect={id => setConversationId(id)}
+            onSelect={(id: string) => setConversationId(id)}
             onDelete={handleDelete}
             onRename={handleRename}
             userInfo={uiUser ?? { id: userCode, name: userCode, userType: 'free', credits: 0 }}
             meta={meta}
+            /* mirraHistory は Shell では不要 */
           />
 
-          <MessageList messages={filteredMessages} currentUser={uiUser ?? undefined} />
+          <MessageList
+            messages={filteredMessages}
+            currentUser={uiUser ?? undefined}
+            agent={agent} // ← 追加：見た目/挙動を本体と統一
+            {...(true ? {} : {})} // '...' が必要です lint fix
+          />
           <div ref={endRef} />
 
           <div className="sof-compose-dock" ref={composeRef}>

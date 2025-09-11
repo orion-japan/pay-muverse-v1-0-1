@@ -3,6 +3,9 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import dayjs from 'dayjs';
+import { formatJST, formatJSTDate, formatJST_HM } from '@/lib/formatDate';
+import { fetchWithIdToken } from '@/lib/fetchWithIdToken';
+import { useRouter } from 'next/navigation';
 
 type Props = {
   userCode: string;
@@ -10,6 +13,7 @@ type Props = {
   selectedStage: 'S'|'F'|'R'|'C'|'I';
   selectedVisionTitle?: string;
   className?: string;
+  onArchived?: (visionId: string) => void; // ★ 追加
 };
 
 type HistoryRow = {
@@ -24,11 +28,13 @@ export default function DailyCheckPanel({
   selectedVisionId,
   selectedStage,
   selectedVisionTitle,
-  className
+  className,
+  onArchived,  // ★ 受け取る
 }: Props) {
   /* ===== 状態 ===== */
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [archiving, setArchiving] = useState(false); // ★ 追加：履歴送信の多重防止
   const [visionImaged, setVisionImaged] = useState(false);
   const [resonanceShared, setResonanceShared] = useState(false);
   const [statusText, setStatusText] = useState('');
@@ -46,7 +52,7 @@ export default function DailyCheckPanel({
   const [criteriaLocal, setCriteriaLocal] = useState<number>(7);
 
   /* ===== 定数 ===== */
-  const today = useMemo(() => dayjs().format('YYYY-MM-DD'), []);
+  const today = useMemo(() => formatJSTDate(new Date()), []);
 
   /* ===== 進捗 ===== */
   const progress = useMemo(() => {
@@ -57,6 +63,8 @@ export default function DailyCheckPanel({
     if (diaryText.trim()) p += 25;
     return p;
   }, [visionImaged, resonanceShared, statusText, diaryText]);
+
+  const router = useRouter();
 
   /* ===== 上書き防止フラグ ===== */
   const dirtyRef = useRef(false);
@@ -99,7 +107,7 @@ export default function DailyCheckPanel({
             setResonanceShared(!!d?.resonance_shared);
             setStatusText(d?.status_text ?? '');
             setDiaryText(d?.diary_text ?? '');
-            setSavedAt(d && d.updated_at ? dayjs(d.updated_at).format('HH:mm') : null);
+            setSavedAt(d && d.updated_at ? formatJST_HM(d.updated_at) : null);
             setLocked((d?.progress ?? 0) >= 100);
             dirtyRef.current = false;
             lastLocalAtRef.current = serverAt || Date.now();
@@ -157,21 +165,16 @@ export default function DailyCheckPanel({
     let abort = false;
     (async () => {
       try {
-        const { getAuth, signInAnonymously } = await import('firebase/auth');
-        const auth = getAuth();
-        if (!auth.currentUser) await signInAnonymously(auth);
-        const token = await auth.currentUser!.getIdToken();
-
-        const res = await fetch(
+        const res = await fetchWithIdToken(
           `/api/vision-criteria?vision_id=${encodeURIComponent(selectedVisionId)}&from=${selectedStage}`,
-          { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' }
+          { cache: 'no-store' }
         );
         if (!res.ok) { if (!abort) setCriteriaDays(null); return; }
         const data = await res.json().catch(() => ({} as any));
         if (!abort) {
           const days = Number(data?.required_days ?? 7);
           setCriteriaDays(Number.isFinite(days) ? days : 7);
-          setCriteriaLocal(Number.isFinite(days) ? days : 7); // ← 編集枠にも反映
+          setCriteriaLocal(Number.isFinite(days) ? days : 7);
         }
       } catch {
         if (!abort) {
@@ -224,7 +227,7 @@ export default function DailyCheckPanel({
       if (!res.ok) throw new Error(json?.error || 'save failed');
 
       const updatedAtISO: string | null = json?.data?.updated_at || null;
-      setSavedAt(updatedAtISO ? dayjs(updatedAtISO).format('HH:mm') : dayjs().format('HH:mm'));
+      setSavedAt(updatedAtISO ? formatJST_HM(updatedAtISO) : formatJST_HM(new Date()));
 
       dirtyRef.current = false;
       lastLocalAtRef.current = updatedAtISO ? Date.parse(updatedAtISO) : Date.now();
@@ -270,14 +273,9 @@ export default function DailyCheckPanel({
     try {
       setCriteriaSaving(true);
 
-      const { getAuth, signInAnonymously } = await import('firebase/auth');
-      const auth = getAuth();
-      if (!auth.currentUser) await signInAnonymously(auth);
-      const token = await auth.currentUser!.getIdToken();
-
-      const res = await fetch('/api/vision-criteria', {
+      const res = await fetchWithIdToken('/api/vision-criteria', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           vision_id: selectedVisionId,
           from: selectedStage,
@@ -317,6 +315,42 @@ export default function DailyCheckPanel({
     }
   }, [criteriaOpen, criteriaDays]);
 
+  /* ===== 新規追加：問題履歴へ送る ===== */
+  async function handleSendToHistory() {
+    if (!selectedVisionId || archiving) return;
+    if (!confirm('このVisionを「問題履歴」に送ります。よろしいですか？')) return;
+
+    try {
+      setArchiving(true);
+      const res = await fetchWithIdToken('/api/visions/archive', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-code': userCode, // ← ここが UID でも OK になる
+        },
+        body: JSON.stringify({ vision_id: selectedVisionId }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j?.error || String(res.status));
+
+      showToast('✔ 問題履歴に送りました');
+
+      // ★ 親へ知らせて、その場で一覧から消す（VisionPage が即時除去）
+      onArchived?.(selectedVisionId);
+
+      // オプション：他のタブ連携が必要ならイベントも投げる
+      window.dispatchEvent(new CustomEvent('vision:archived', { detail: { visionId: selectedVisionId } }));
+
+      // 画面再読み込みは不要。必要な場合のみ↓を使う
+      // try { router.refresh(); } catch {}
+    } catch (e) {
+      console.error('❌ handleSendToHistory error', e);
+      alert('履歴への送信に失敗しました');
+    } finally {
+      setArchiving(false);
+    }
+  }
+
   /* ===== ここから JSX（構造は元のまま） ===== */
   return (
     <section className={`daily-check-panel ${className || ''}`}>
@@ -351,7 +385,7 @@ export default function DailyCheckPanel({
         </div>
       </header>
 
-      {/* ▼ 追加：インラインの回数設定パネル（最小改修） */}
+      {/* ▼ インラインの回数設定パネル */}
       {criteriaOpen && (
         <div className="dcp-criteria-pop" role="dialog" aria-label="回数設定">
           <div className="dcp-crit-row">
@@ -450,9 +484,12 @@ export default function DailyCheckPanel({
           </div>
 
           <div className="dcp-actions">
-            {/* ▼ 「昨日コピー」ボタンは撤去（最小改修：描画しない） */}
+            {/* ▼ 新規追加：問題履歴へ */}
+            <button className="dcp-secondary" onClick={handleSendToHistory} disabled={archiving}>
+              {archiving ? '送信中…' : '履歴に送る'}
+            </button>
             <span className="dcp-actions-spacer" />
-            <button className="dcp-save" onClick={save}>保存</button>
+            <button className="dcp-save" onClick={save} disabled={saving}>保存</button>
           </div>
         </>
       )}

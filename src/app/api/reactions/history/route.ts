@@ -34,7 +34,8 @@ export async function GET(req: NextRequest) {
       const { data: rows, error } = await q.in(
         'post_id',
         (
-          await supabase.from('posts').select('post_id').eq('user_code', user_code)
+          await supabase.from('v_posts_jst').select('post_id').eq('user_code', user_code)
+
         ).data?.map((r) => r.post_id) || ['00000000-0000-0000-0000-000000000000'] // 空防止
       );
       if (error) throw error;

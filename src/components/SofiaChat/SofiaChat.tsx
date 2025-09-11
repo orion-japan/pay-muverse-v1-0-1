@@ -130,6 +130,9 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
     avatarUrl?: string | null;
   } | null>(null);
 
+  // ★ mirra の相談履歴（Sidebar 表示用）
+  const [mirraHistory, setMirraHistory] = useState<any[] | null>(null);
+
   // ========= agentごとに会話ID/メッセージを分離保持 =========
   const convIdByAgent = useRef<Record<Agent, string | undefined>>({
     mu: undefined,
@@ -332,6 +335,15 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
           convIdByAgent.current.mirra = `mirra-${userCode}`;
         }
         setConversationId(convIdByAgent.current.mirra);
+
+        // ★ mirra の履歴をサイドバー用に取得
+        try {
+          const r = await fetchWithIdToken('/api/talk/mirra/history', { cache: 'no-store' });
+          const j = await r.json().catch(() => ({}));
+          setMirraHistory(Array.isArray(j?.items) ? j.items : []);
+        } catch {
+          setMirraHistory([]);
+        }
         return;
       }
 
@@ -363,6 +375,66 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
     }
   };
 
+
+  /* ===== メッセージ履歴 ===== */
+  
+  // --- mirra: 履歴取得（候補エンドポイントを順次トライ） ---
+  const fetchMirraHistory = async (threadId: string): Promise<Message[]> => {
+    const candidates = [
+      { url: `/api/talk/mirra/history?thread_id=${encodeURIComponent(threadId)}` },
+      { url: `/api/agent/mtalk/history?thread_id=${encodeURIComponent(threadId)}` },
+      { url: `/api/talk/history?thread_id=${encodeURIComponent(threadId)}` },
+    ];
+  
+    for (const { url } of candidates) {
+      try {
+        const r = await fetchWithIdToken(url, { cache: 'no-store' });
+        if (!r.ok) continue;
+        const j: any = await r.json().catch(() => ({}));
+  
+        const rows: any[] = Array.isArray(j?.items)
+          ? j.items
+          : Array.isArray(j?.messages)
+          ? j.messages
+          : Array.isArray(j?.logs)
+          ? j.logs
+          : [];
+  
+        if (!rows.length) continue;
+  
+        return rows.map((m: any, i: number) => {
+          const roleRaw =
+            m?.role ??
+            m?.sender ??
+            (m?.is_user ? 'user' : m?.is_assistant ? 'assistant' : undefined);
+  
+          const role: Role =
+            roleRaw === 'user' || roleRaw === 'assistant' || roleRaw === 'system'
+              ? roleRaw
+              : (m?.is_user ? 'user' : 'assistant');
+  
+          const content =
+            m?.content ?? m?.text ?? m?.reply ?? m?.reply_text ?? m?.message ?? '';
+  
+          const created_at = m?.created_at ?? m?.updated_at ?? null;
+  
+          return {
+            id: String(
+              m?.id ?? m?.turn_id ?? m?.msg_id ?? `${i}-${role}-${String(content).slice(0, 8)}`
+            ),
+            role,
+            content: String(content ?? ''),
+            created_at: created_at ? String(created_at) : undefined,
+          };
+        });
+      } catch {
+        /* 次候補へ */
+      }
+    }
+    return [];
+  };
+
+
   /* ===== メッセージ ===== */
   const fetchMessages = async (convId: string) => {
     if (!userCode || !convId) return;
@@ -372,26 +444,28 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
         const r = await fetchWithIdToken(`/api/mu/turns?conv_id=${encodeURIComponent(convId)}`);
         if (!r.ok) throw new Error(`mu turns ${r.status}`);
         const js: any = await r.json().catch(() => ({}));
-
+  
         const rows = (js.items ?? []).map((m: any) => ({
           id: m.id,
           role: (m.role as Role) ?? 'assistant',
           content: m.content,
           created_at: m.created_at,
         })) as Message[];
-
+  
         const withSeed = injectMtalkSeed(rows, convId);
         setMessages(withSeed);
         saveViewStateToAgent(agentK, conversationId, withSeed);
         return;
       }
-
+  
       if (agentK === 'mirra') {
-        // mirra は履歴APIなし：保持済みの state を表示
-        setMessages(msgsByAgent.current.mirra ?? []);
+        // mirra: サーバ履歴をフェッチ
+        const rows = await fetchMirraHistory(convId);
+        setMessages(rows);
+        saveViewStateToAgent('mirra', convId, rows);
         return;
       }
-
+  
       // Iros の履歴取得
       const r = await fetchWithIdToken(
         `/api/sofia?user_code=${encodeURIComponent(userCode)}&conversation_code=${encodeURIComponent(
@@ -405,7 +479,7 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
         role: (m.role as Role) ?? 'assistant',
         content: m.content,
       })) as Message[];
-
+  
       setMessages((prev) => {
         const map = new Map<string, Message>(prev.map((m) => [m.id, m]));
         for (const m of rows) map.set(m.id, m);
@@ -418,197 +492,211 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
       console.error('[SofiaChat] fetchMessages error:', e);
     }
   };
-
+  
   useEffect(() => {
     if (!canUse) return;
     fetchConversations();
   }, [canUse, userCode, agentK]);
-
+  
   useEffect(() => {
     if (!canUse || !conversationId) return;
     fetchMessages(conversationId);
   }, [canUse, conversationId, agentK]);
-
-// --- ここから差し替え ---
-
-const endpointFor = (a: Agent) => {
-  // mirra は実装差異に備えて第一候補/第二候補を使い分ける
-  if (a === 'mu') return '/api/agent/muai';
-  if (a === 'mirra') return '/api/talk/mirra'; // ←標準
-  return '/api/sofia';
-};
-
-/* ===== 送信（mu / iros / mirra 切替） ===== */
-const handleSend = async (input: string, _files: File[] | null = null): Promise<void> => {
-  const text = (input ?? '').trim();
-  if (!text || !userCode) return;
-
-  // mirra は thread_id が必要なので、未確定ならここで確定しておく
-  if (agentK === 'mirra' && !conversationId) {
-    const seedId = `mirra-${userCode}`;
-    setConversationId(seedId);
-    saveViewStateToAgent('mirra', seedId, undefined);
-  }
-
-  const optimistic: Message = {
-    id: crypto.randomUUID?.() ?? `tmp-${Date.now()}`,
-    role: 'user',
-    content: text,
-    created_at: new Date().toISOString(),
+  
+  // --- endpoint util ---
+  const endpointFor = (a: Agent) => {
+    if (a === 'mu') return '/api/agent/muai';
+    if (a === 'mirra') return '/api/talk/mirra';
+    return '/api/sofia';
   };
-  setMessages((prev) => {
-    const next = [...prev, optimistic];
-    saveViewStateToAgent(agentK, conversationId ?? undefined, next);
-    return next;
-  });
-
-  try {
-    let url = endpointFor(agentK);
-    let body: any;
-
-    if (agentK === 'mu') {
-      const subId = crypto.randomUUID?.() ?? `sub-${Date.now()}`;
-      body = {
-        message: text,
-        master_id: conversationId ?? undefined,
-        sub_id: subId,
-        thread_id: null,
-        board_id: null,
-        source_type: 'chat',
-      };
-    } else if (agentK === 'mirra') {
-      // ★ 重要：実装差異に備え、threadId と thread_id の両方を送る
-      const tid = (conversationId ?? `mirra-${userCode}`);
-      body = {
-        text,
-        threadId: tid,
-        thread_id: tid,
-      };
-    } else {
-      body = {
-        conversation_code: conversationId ?? '',
-        mode: 'normal',
-        messages: [
-          ...messages.map((m) => ({ role: m.role, content: m.content })),
-          { role: 'user', content: text },
-        ],
-      };
+  
+  const mirraEndpoints = (tid: string, text: string, code: string) => [
+    { url: '/api/talk/mirra', body: { text, thread_id: tid, user_code: code } },
+    { url: '/api/agent/mtalk/talk', body: { text, thread_id: tid, user_code: code } },
+    { url: '/api/agent/mtalk/message', body: { text, thread_id: tid, user_code: code } },
+    { url: '/api/talk', body: { text, threadId: tid, thread_id: tid, user_code: code } },
+  ];
+  
+  /* ===== 送信（mu / iros / mirra 切替） ===== */
+  const handleSend = async (input: string, _files: File[] | null = null): Promise<void> => {
+    const text = (input ?? '').trim();
+    if (!text || !userCode) return;
+  
+    // mirra は thread_id が必要
+    if (agentK === 'mirra' && !conversationId) {
+      const seedId = `mirra-${userCode}`;
+      setConversationId(seedId);
+      saveViewStateToAgent('mirra', seedId, undefined);
     }
-
-    // 送信
-    let r = await fetchWithIdToken(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+  
+    const optimistic: Message = {
+      id: crypto.randomUUID?.() ?? `tmp-${Date.now()}`,
+      role: 'user',
+      content: text,
+      created_at: new Date().toISOString(),
+    };
+    setMessages((prev) => {
+      const next = [...prev, optimistic];
+      saveViewStateToAgent(agentK, conversationId ?? undefined, next);
+      return next;
     });
-
-    // mirra の旧ルート互換（/api/talk にフォールバック）
-    if (agentK === 'mirra' && (!r || r.status === 404)) {
-      url = '/api/talk';
-      r = await fetchWithIdToken(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-    }
-
-    // JSON でないレスポンスにも耐性を持たせる
-    let js: any = {};
-    try { js = await r.json(); } catch {
-      // テキストなら拾っておく（サーバが文字列のみ返す系）
-      try {
-        const t = await r.text();
-        if (t && !js.reply) js.reply = t;
-      } catch {}
-    }
-
-    // 会話ID更新
-    const nextConvId =
-      agentK === 'mu'
-        ? (js.conversation_id ?? body.master_id)
-        : agentK === 'iros'
-        ? js.conversation_code
-        : (conversationId ?? body.thread_id ?? body.threadId ?? `mirra-${userCode}`);
-
-    if (nextConvId && nextConvId !== conversationId) {
-      setConversationId(nextConvId);
-      saveViewStateToAgent(agentK, nextConvId, undefined);
-      setConversations((prev) =>
-        prev.some((x) => x.id === nextConvId)
-          ? prev
-          : [
-              {
-                id: nextConvId,
-                title: agentK === 'mu' ? 'Mu 会話' : agentK === 'mirra' ? 'mirra 会話' : 'Iros 会話',
-                updated_at: new Date().toISOString(),
-              },
-              ...prev,
-            ]
-      );
-    }
-
-    // 返信追加
-    const replyText =
-      typeof js?.reply === 'string'
-        ? js.reply
-        : (typeof js === 'string' ? js : undefined);
-
-    if (replyText) {
-      setMessages((prev) => {
-        const next = [
-          ...prev,
-          {
-            id: crypto.randomUUID?.() ?? `a-${Date.now()}`,
-            role: 'assistant',
-            content: replyText,
-            created_at: new Date().toISOString(),
-            agent: agentK,
-            ...(js?.meta ? { meta: js.meta } : {}),
-          } as any,
-        ];
-        saveViewStateToAgent(agentK, nextConvId ?? conversationId, next);
-        return next;
-      });
-    }
-
-    // メタ更新（あれば）
-    if (js?.meta) {
-      const m = normalizeMeta(js.meta);
-      if (m) setMeta(m);
-    }
-
-    // クレジット警告（あれば）
-    if (typeof js?.credit_balance === 'number') {
-      window.dispatchEvent(new CustomEvent('sofia_credit', { detail: { credits: js.credit_balance } }));
-      if (js.credit_balance < 1) {
-        window.dispatchEvent(new CustomEvent('toast', { detail: { kind: 'warn', msg: '残りクレジットが少なくなっています。' } }));
+  
+    try {
+      let r: Response | null = null;
+      let js: any = null;
+      let nextConvId = conversationId;
+  
+      // === 送信ブロック ===
+      if (agentK === 'mirra') {
+        const tid = conversationId ?? `mirra-${userCode}`;
+        const candidates = mirraEndpoints(tid, text, userCode);
+        for (const { url, body } of candidates) {
+          try {
+            r = await fetchWithIdToken(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-user-code': userCode },
+              body: JSON.stringify(body),
+            });
+          } catch {
+            r = null;
+          }
+          if (!r || r.status === 401 || r.status === 404) continue;
+  
+          js = {};
+          try { js = await r.json(); } catch {
+            try { const t = await r.text(); if (t) js = { reply: t }; } catch {}
+          }
+          nextConvId = nextConvId ?? tid;
+          break;
+        }
+        if (!r || r.status === 401 || r.status === 404) {
+          window.dispatchEvent(new CustomEvent('toast', { detail: { kind: 'warn', msg: 'mirra送信に失敗しました（認証/エンドポイント不一致）。' } }));
+          return;
+        }
+      } else if (agentK === 'mu') {
+        const subId = crypto.randomUUID?.() ?? `sub-${Date.now()}`;
+        r = await fetchWithIdToken(endpointFor('mu'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: text,
+            master_id: conversationId ?? undefined,
+            sub_id: subId,
+            thread_id: null,
+            board_id: null,
+            source_type: 'chat',
+          }),
+        });
+        js = {};
+        try { js = await r.json(); } catch { try { js = { reply: await r.text() }; } catch {} }
+        nextConvId = js?.conversation_id ?? conversationId;
+      } else {
+        r = await fetchWithIdToken(endpointFor('iros'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            conversation_code: conversationId ?? '',
+            mode: 'normal',
+            messages: [
+              ...messages.map((m) => ({ role: m.role, content: m.content })),
+              { role: 'user', content: text },
+            ],
+          }),
+        });
+        js = {};
+        try { js = await r.json(); } catch { try { js = { reply: await r.text() }; } catch {} }
+        nextConvId = js?.conversation_code ?? conversationId;
       }
+  
+      // === 共通処理 ===
+      if (agentK === 'mirra') {
+        const tid = conversationId ?? `mirra-${userCode}`;
+        nextConvId = js?.conversation_id || js?.thread_id || js?.threadId || nextConvId || tid;
+      }
+  
+      if (nextConvId && nextConvId !== conversationId) {
+        setConversationId(nextConvId);
+        saveViewStateToAgent(agentK, nextConvId, undefined);
+        setConversations((prev) =>
+          prev.some((x) => x.id === nextConvId)
+            ? prev
+            : [
+                {
+                  id: nextConvId,
+                  title: agentK === 'mu' ? 'Mu 会話' : agentK === 'mirra' ? 'mirra 会話' : 'Iros 会話',
+                  updated_at: new Date().toISOString(),
+                },
+                ...prev,
+              ]
+        );
+      }
+  
+      // 返信テキスト
+      let replyText =
+        typeof js?.reply === 'string'
+          ? js.reply
+          : typeof js?.reply_text === 'string'
+          ? js.reply_text
+          : typeof js?.message === 'string'
+          ? js.message
+          : typeof js === 'string'
+          ? js
+          : '';
+  
+      // mirra: 空レスなら履歴を再フェッチ
+      if (agentK === 'mirra') {
+        const tid = nextConvId ?? conversationId;
+        if (!replyText && tid) {
+          const rows = await fetchMirraHistory(tid);
+          if (rows.length) {
+            setMessages(rows);
+            saveViewStateToAgent('mirra', tid, rows);
+          }
+        }
+      }
+  
+      if (replyText) {
+        setMessages((prev) => {
+          const next = [
+            ...prev,
+            {
+              id: crypto.randomUUID?.() ?? `a-${Date.now()}`,
+              role: 'assistant',
+              content: replyText,
+              created_at: new Date().toISOString(),
+              agent: agentK,
+              ...(js?.meta ? { meta: js.meta } : {}),
+            } as any,
+          ];
+          saveViewStateToAgent(agentK, nextConvId ?? conversationId, next);
+          return next;
+        });
+      }
+  
+      if (js?.meta) {
+        const m = normalizeMeta(js.meta);
+        if (m) setMeta(m);
+      }
+  
+      if (typeof js?.credit_balance === 'number') {
+        try {
+          window.dispatchEvent(new CustomEvent('sofia_credit', { detail: { credits: js.credit_balance } }));
+        } catch {}
+      }
+    } catch (e) {
+      console.error('[SofiaChat] send error:', e);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID?.() ?? `e-${Date.now()}`,
+          role: 'assistant',
+          content: '（通信に失敗しました。時間をおいて再度お試しください）',
+        },
+      ]);
     }
+  };
 
-    // 決済系エラー
-    if (!r.ok && (r.status === 402 || js?.error === 'insufficient_credit')) {
-      window.dispatchEvent(new CustomEvent('toast', { detail: { kind: 'warn', msg: '残高が不足しています。チャージをご確認ください。' } }));
-    }
-
-    // バリデーション 400 の見える化
-    if (!r.ok && r.status === 400) {
-      const msg = js?.error || 'bad request';
-      window.dispatchEvent(new CustomEvent('toast', { detail: { kind: 'warn', msg: `送信エラー: ${msg}` } }));
-    }
-  } catch (e) {
-    console.error('[SofiaChat] send error:', e);
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: crypto.randomUUID?.() ?? `e-${Date.now()}`,
-        role: 'assistant',
-        content: '（通信に失敗しました。時間をおいて再度お試しください）',
-      },
-    ]);
-  }
-};
-// --- ここまで差し替え ---
-
+  // --- ここまで差し替え ---
 
   /* ===== mTalk要約を初回入力として自動送信（1回だけ） ===== */
   const autoAskedRef = useRef(false);
@@ -785,10 +873,14 @@ const handleSend = async (input: string, _files: File[] | null = null): Promise<
       ) : (
         <>
           <SidebarMobile
+            agent={agentK}
             isOpen={isMobileMenuOpen}
             onClose={() => setIsMobileMenuOpen(false)}
             conversations={conversations}
-            onSelect={handleSelectConversation}
+            onSelect={(id) => {
+              handleSelectConversation?.(id);
+              setIsMobileMenuOpen(false);
+            }}
             onDelete={handleDelete}
             onRename={handleRename}
             userInfo={
@@ -800,6 +892,8 @@ const handleSend = async (input: string, _files: File[] | null = null): Promise<
               }
             }
             meta={meta}
+            // ← mirra の履歴を渡す（他エージェントでは未指定）
+            mirraHistory={agentK === 'mirra' ? mirraHistory ?? [] : undefined}
           />
 
           <MessageList
