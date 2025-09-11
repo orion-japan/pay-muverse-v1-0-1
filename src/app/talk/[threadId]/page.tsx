@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
 import './thread.css';
-
+import { getAuth } from 'firebase/auth';
 /* ========== 型 ========== */
 type ChatRow = {
   id?: string;
@@ -42,7 +42,8 @@ const getAvatar = (url: string | null | undefined) => {
 
 const rowKey = (r: ChatRow) =>
   r.id || r.chat_id || `${r.thread_id}:${r.sender_code}:${r.created_at}`;
-const rowText = (r: ChatRow) => (r.message ?? r.body ?? '') as string;
+const rowText = (r: ChatRow) =>
+  (r.message ?? r.body ?? (r as any).content ?? '') as string;
 
 const normalizeThreadId = (a?: string, b?: string) =>
   [a ?? '', b ?? ''].sort((x, y) => x.localeCompare(y)).join('__');
@@ -182,15 +183,22 @@ export default function PairTalkPage() {
   };
 
   /* ---- 既読化 ---- */
+  
+
   const markRead = async (why: string) => {
     if (!threadId || !myCode) return;
     try {
+      const user = getAuth().currentUser;
+      const idToken = await user?.getIdToken();
+  
       await fetch('/api/talk/mark-read', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+        },
         body: JSON.stringify({
           thread_id: threadId,
-          user_code: myCode,
           until: lastAtRef.current ?? new Date().toISOString(),
         }),
       });
@@ -199,6 +207,8 @@ export default function PairTalkPage() {
       console.warn('[FTalk] read mark error:', e);
     }
   };
+ 
+
 
   /* ---- 初期ロード ---- */
   useEffect(() => {
@@ -266,24 +276,8 @@ export default function PairTalkPage() {
     if (!text.trim() || !myCode || !peerCode || sendingRef.current) return;
     const body = text.trim();
     setText('');
-    if (taRef.current) {
-      taRef.current.style.height = 'auto';
-      taRef.current.focus();
-    }
-
-    const temp: ChatRow = {
-      chat_id: `tmp-${Date.now()}`,
-      thread_id: threadId,
-      sender_code: myCode,
-      receiver_code: peerCode,
-      body,
-      created_at: new Date().toISOString(),
-      read_at: null,
-      _pending: true,
-    };
-    setMsgs((prev) => [...prev, temp]);
-    scrollToBottom();
-
+    if (taRef.current) taRef.current.style.height = 'auto';
+  
     sendingRef.current = true;
     try {
       const res = await fetch('/api/talk/messages', {
@@ -298,22 +292,19 @@ export default function PairTalkPage() {
         }),
       });
       if (!res.ok) throw new Error(await res.text());
+  
+      // 送信後にまとめて取得
       await fetchMessages('after-send', lastAtRef.current);
       await markRead('after-send');
       dlog('send ok');
     } catch (e) {
       console.error('[FTalk] send failed:', e);
-      setMsgs((prev) =>
-        prev.map((m) =>
-          m.chat_id === temp.chat_id ? { ...m, _pending: false, _error: true } : m
-        )
-      );
     } finally {
       sendingRef.current = false;
       scrollToBottom();
     }
   };
-
+  
   /* ---- 再送 ---- */
   const retrySend = async (m: ChatRow) => {
     if (!m._error) return;

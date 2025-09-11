@@ -1,65 +1,84 @@
 // /app/api/talk/mark-read/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth } from '@/lib/firebase-admin';
-import { createClient } from '@supabase/supabase-js';
+import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
+import { adminAuth } from '@/lib/firebase-admin'
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
+const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY!
+
+const sb = createClient(SUPABASE_URL, SERVICE_ROLE, {
+  auth: { persistSession: false },
+})
+
+async function uidToUserCode(uid: string): Promise<string | null> {
+  const { data } = await sb
+    .from('users')
+    .select('user_code')
+    .eq('firebase_uid', uid)
+    .maybeSingle()
+  return data?.user_code ?? null
+}
 
 export async function POST(req: NextRequest) {
   try {
-    // どのキーでも受ける（conversation_id / thread_id / threadId）
-    const body = await req.json().catch(() => ({} as any));
-    const convId: string | undefined =
-      body?.conversation_id ?? body?.thread_id ?? body?.threadId ?? undefined;
+    const body = await req.json().catch(() => ({} as any))
+    const thread_id: string | undefined =
+      body?.thread_id ?? body?.conversation_id ?? body?.threadId ?? undefined
 
-    // ID 無しは 400 → 監視ループが止まらないように 200 で返したい場合は下の return に差し替え
-    if (!convId) {
-      // return NextResponse.json({ ok: true, conversation_id: null }, { status: 200 });
-      return NextResponse.json({ error: 'bad request' }, { status: 400 });
+    if (!thread_id) {
+      return NextResponse.json({ error: 'bad request' }, { status: 400 })
     }
 
-    // ソフト認証：Authorization があれば検証、無ければスキップして 200 を返す
-    const authz = req.headers.get('authorization') || '';
+    // ---- Firebase ID トークン検証 ----
+    const authz = req.headers.get('authorization') || ''
     const token = authz.toLowerCase().startsWith('bearer ')
       ? authz.slice(7).trim()
-      : '';
-    let user_code: string | null = null;
+      : ''
 
+    let user_code: string | null = null
     if (token) {
-      const decoded = await adminAuth.verifyIdToken(token).catch(() => null);
-      if (decoded) {
-        const { data: userRow, error: uerr } = await supabase
-          .from('users')
-          .select('user_code')
-          .eq('uid', decoded.uid)
-          .maybeSingle();
-        if (uerr) throw uerr;
-        user_code = userRow?.user_code ?? null;
+      const decoded = await adminAuth.verifyIdToken(token).catch(() => null)
+      if (decoded?.uid) {
+        user_code = await uidToUserCode(decoded.uid)
       }
     }
 
-    // 認証が通ったときだけ DB を更新（通らなくても 200 を返す）
+    let last_read_at: string | null = null
+
     if (user_code) {
-      const { error } = await supabase.rpc('mark_read', {
-        p_conversation_id: convId,
-        me: user_code,
-      });
-      if (error) {
-        // DB 失敗はログのみ、応答は 200 維持（ポーリングを止めない）
-        console.warn('[Talk][mark-read] rpc error:', error);
-      }
+      const untilIso =
+        typeof body?.until === 'string'
+          ? new Date(body.until).toISOString()
+          : new Date().toISOString()
+      last_read_at = untilIso
+
+      // ---- upsert ----
+      await sb.from('talk_reads').upsert(
+        { thread_id, user_code, last_read_at: untilIso },
+        { onConflict: 'thread_id,user_code', ignoreDuplicates: false }
+      )
+
+      // ---- conditional update ----
+      await sb
+        .from('talk_reads')
+        .update({ last_read_at: untilIso })
+        .eq('thread_id', thread_id)
+        .eq('user_code', user_code)
+        .lt('last_read_at', untilIso)
     }
 
-    return NextResponse.json({ ok: true, conversation_id: convId }, { status: 200 });
+    return NextResponse.json(
+      { ok: true, thread_id, last_read_at },
+      { status: 200, headers: { 'Cache-Control': 'no-store' } }
+    )
   } catch (e: any) {
-    console.error('[Talk][mark-read]', e);
-    // 例外でも監視を止めない方針にするなら 200 にしてもOK
-    return NextResponse.json({ error: e?.message || 'unexpected' }, { status: 500 });
+    console.error('[Talk][mark-read] fatal', e)
+    return NextResponse.json(
+      { error: e?.message ?? 'unexpected' },
+      { status: 500 }
+    )
   }
 }
