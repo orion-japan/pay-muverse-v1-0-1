@@ -5,6 +5,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { fetchWithIdToken } from '@/lib/fetchWithIdToken';
+import { useUnread } from '@/store/useUnread';   // ★追加
 import './mtalk.css';
 
 type Agent = 'mirra' | 'iros';
@@ -32,11 +33,13 @@ type ThreadItem = {
   summary?: string;
   updated_at?: string | null;
   created_at?: string | null;
+  unread_count?: number | null;   // ★追加: 未読数フィールド（存在すれば利用）
 };
 
 export default function MTalkPage() {
   const router = useRouter();
   const { userCode } = useAuth();
+  const setTalkUnread = useUnread((s) => s.setTalkUnread); // ★追加
 
   const [agent, setAgent] = useState<Agent>('mirra');
   const [input, setInput] = useState('');
@@ -98,14 +101,20 @@ export default function MTalkPage() {
     if (!userCode) return;
     (async () => {
       try {
-        const r = await fetchWithIdToken('/api/talk/mirra/history', { cache: 'no-store' });
+        const r = await fetchWithIdToken('/api/mtalk/mirra/history', { cache: 'no-store' });
         const j = await r.json().catch(() => ({}));
-        setHistory(Array.isArray(j?.items) ? (j.items as ThreadItem[]) : []);
+        const items = Array.isArray(j?.items) ? (j.items as ThreadItem[]) : [];
+        setHistory(items);
+
+        // ★ 未読合計をストアにコピー
+        const totalUnread = items.reduce((acc, it) => acc + (it.unread_count ?? 0), 0);
+        setTalkUnread(totalUnread);
       } catch {
         setHistory([]);
+        setTalkUnread(0); // ★失敗時は0
       }
     })();
-  }, [userCode]);
+  }, [userCode, setTalkUnread]);
 
   async function analyze() {
     if (!canSubmit) return;
@@ -177,7 +186,6 @@ export default function MTalkPage() {
       }
   
       // --- ここから新UIへのリダイレクト統一 ---
-      // 1) なるべく conversation_id を採用、無ければ j.redirect 末尾から推定
       const hintedCid =
         (j.conversation_id && String(j.conversation_id)) ||
         (() => {
@@ -189,12 +197,10 @@ export default function MTalkPage() {
           }
         })();
   
-      // 2) seed を sessionStorage に保存（Sofia 側が読む）
       if (j.summary_hint && hintedCid) {
         try { sessionStorage.setItem(`mtalk:seed:${hintedCid}`, j.summary_hint); } catch {}
       }
   
-      // 3) 旧UI (/talk/...) を新UI (/mtalk/...) に正規化しつつ、必須クエリを付与
       const basePath = `/mtalk/${encodeURIComponent(hintedCid)}`;
       const url = new URL(basePath, location.origin);
       url.searchParams.set('agent', 'mirra');
@@ -205,7 +211,6 @@ export default function MTalkPage() {
       }
   
       router.push(url.pathname + url.search);
-      // --- ここまで ---
     } catch {
       setErrorMsg('通信エラーが発生しました。');
     }

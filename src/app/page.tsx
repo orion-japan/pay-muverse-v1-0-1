@@ -18,12 +18,7 @@ export default function DashboardPage() {
     return () => document.body.classList.remove('mu-dashboard');
   }, []);
 
-  /* === 背景Hue：青(200°)〜紫(300°)の範囲だけで往復 ======================
-     - 緑域（~120°）に行かないよう Hue を 200↔300 でブレス
-     - デフォ：24時間で 1 往復（行って戻る）
-     - localStorage.bgHueSpeed 往復速度倍率（例: 720 -> 24分で1往復）
-     - prefers-reduced-motion は固定 260°
-  ======================================================================== */
+  /* === 背景Hue：青(200°)〜紫(300°)の範囲だけで往復 ====================== */
   useEffect(() => {
     const reduced =
       typeof window !== 'undefined' &&
@@ -81,6 +76,24 @@ export default function DashboardPage() {
 
   // iros 解放可否（master / admin 判定）: tri-state（null=判定中）
   const [isIrosAllowed, setIsIrosAllowed] = useState<boolean | null>(null);
+
+  // ★ 追加：リロード直後 3 秒ロック（iros専用）
+  const [irosReloadLock, setIrosReloadLock] = useState<boolean>(false);
+  useEffect(() => {
+    let isReload = false;
+    try {
+      const nav = (performance.getEntriesByType?.('navigation') as PerformanceNavigationTiming[])?.[0];
+      isReload = nav?.type === 'reload';
+      // 旧APIフォールバック
+      // @ts-ignore
+      if (!isReload && performance.navigation?.type === 1) isReload = true;
+    } catch {}
+    if (isReload) {
+      setIrosReloadLock(true);
+      const t = setTimeout(() => setIrosReloadLock(false), 3000); // ← 3秒
+      return () => clearTimeout(t);
+    }
+  }, []);
 
   // LIVE/拒否モーダル
   const [liveModalOpen, setLiveModalOpen] = useState(false);
@@ -199,9 +212,11 @@ export default function DashboardPage() {
     { title: 'F Shot', link: '/', img: '/shot.png', alt: 'F Shot' }, // ガード対象
     { title: 'iros_AI', link: '/iros', img: '/ir2.png', alt: 'iros_AI' },
   ];
-<a href="/chat?agent=iros" style={{zIndex: 1000, pointerEvents: 'auto'}}>Open iros</a>
 
-// 共鳴色
+  // ※危険な直リンクは削除（ガードを素通りします）
+  // <a href="/chat?agent=iros" ...>Open iros</a>
+
+  // 共鳴色
   const glowColors: Record<string, string> = {
     '/mu_full': '#8a2be2',
     '/kyomeikai': '#00bfa5',
@@ -228,9 +243,18 @@ export default function DashboardPage() {
       setIsLoginModalOpen(true);
       return;
     }
-    if (link === '/iros' && isIrosAllowed === false) {
-      setDenyOpen(true);
-      return;
+    // ★ iros は 3秒ロック or 権限NG のときは遷移させない
+    if (link === '/iros') {
+      if (irosReloadLock) {
+        // ロック中の案内（必要ならトースト等に変更）
+        setLiveModalText('リロード直後は 3 秒間、iros_AI は利用できません。しばらくお待ちください。');
+        setLiveModalOpen(true);
+        return;
+      }
+      if (isIrosAllowed === false) {
+        setDenyOpen(true);
+        return;
+      }
     }
 
     if (link === '/mu_full') {
@@ -312,7 +336,10 @@ export default function DashboardPage() {
           const isIros = item.link === '/iros';
           const disabledByAuth = !user;
           const disabledByRole = isIros && isIrosAllowed === false;
-          const disabled = disabledByAuth || disabledByRole;
+          // ★ 追加：リロード直後3秒ロック（iros のみ）
+          const disabledByReload = isIros && irosReloadLock;
+
+          const disabled = disabledByAuth || disabledByRole || disabledByReload;
 
           const color = glowColors[item.link] ?? '#7b8cff';
 
@@ -332,6 +359,10 @@ export default function DashboardPage() {
                 e.stopPropagation();
                 if (disabled) {
                   if (disabledByAuth) setIsLoginModalOpen(true);
+                  else if (disabledByReload) {
+                    setLiveModalText('リロード直後は 3 秒間、iros_AI は利用できません。しばらくお待ちください。');
+                    setLiveModalOpen(true);
+                  }
                   else if (disabledByRole) setDenyOpen(true);
                   return;
                 }
@@ -341,7 +372,13 @@ export default function DashboardPage() {
               role="button"
               tabIndex={disabled ? -1 : 0}
               aria-disabled={disabled}
-              title={disabledByRole ? 'この機能は master / admin 限定です' : undefined}
+              title={
+                disabledByReload
+                  ? 'リロード直後は 3 秒間は利用できません'
+                  : disabledByRole
+                  ? 'この機能は master / admin 限定です'
+                  : undefined
+              }
             >
               <div
                 className="tile-inner"

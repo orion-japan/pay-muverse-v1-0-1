@@ -30,6 +30,31 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             )};`,
           }}
         />
+        {/* ▼ クリック無効化ガード（data-guard-lock="1" を持つ要素配下の操作を捕捉して無効化） */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){
+  function withinLocked(el){
+    while (el && el !== document){
+      if (el.getAttribute && el.getAttribute('data-guard-lock') === '1') return true;
+      el = el.parentElement;
+    }
+    return false;
+  }
+  var types = ['click','pointerdown','mousedown','touchstart','keydown'];
+  for (var i=0;i<types.length;i++){
+    document.addEventListener(types[i], function(e){
+      if (e.type==='keydown' && e.key!=='Enter' && e.key!==' ') return;
+      if (withinLocked(e.target)){
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+      }
+    }, true); // capture段階で停止（Reactの水和前でも有効）
+  }
+})();`,
+          }}
+        />
       </head>
 
       <body className="mu-body">

@@ -1,3 +1,4 @@
+// src/app/vision/page.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -159,12 +160,15 @@ export default function VisionPage() {
 
   const [dragging, setDragging] = useState(false);
 
-  /** ←★ 追加: 押した直後にカードを隠すためのセット */
+  /** 押した直後にカードを隠すためのセット */
   const [pendingHide, setPendingHide] = useState<Set<string>>(new Set());
 
-  /** ←★ 追加: アクティブ判定（履歴/アーカイブ済みを除外） */
+  /** アクティブ判定（履歴/アーカイブ済みを除外） */
   const isActiveVision = (v: VisionWithTS) =>
     !v.archived_at && !v.moved_to_history_at;
+
+  /** 匿名サインインを一度だけ走らせるためのロック */
+  const signInOnceRef = useRef<Promise<void> | null>(null);
 
   /** 既存選択の復元 */
   useEffect(() => {
@@ -186,13 +190,38 @@ export default function VisionPage() {
       const { getAuth, onAuthStateChanged, signInAnonymously } = await import('firebase/auth');
       const auth = getAuth();
 
+      // 重複呼び出しを防いで匿名サインインを一度だけ
+      const ensureSignedIn = async () => {
+        if (auth.currentUser) return;
+        if (!signInOnceRef.current) {
+          signInOnceRef.current = (async () => {
+            await signInAnonymously(auth);
+          })().catch((e) => {
+            // 失敗したら次回再トライできるように解除
+            signInOnceRef.current = null;
+            throw e;
+          });
+        }
+        await signInOnceRef.current;
+      };
+
       const load = async (user: any) => {
         const seq = ++loadSeqRef.current;
         try {
+          // 未ログインなら匿名サインイン
           if (!user) {
-            await signInAnonymously(auth);
-            user = auth.currentUser;
+            try {
+              await ensureSignedIn();
+              user = auth.currentUser;
+            } catch (e) {
+              if (seq !== loadSeqRef.current) return;
+              setVisions([]);
+              setUserCode('');
+              L.api('signInAnonymously failed', e);
+              return;
+            }
           }
+
           if (!user) {
             if (seq !== loadSeqRef.current) return;
             setVisions([]);
@@ -287,7 +316,7 @@ export default function VisionPage() {
       if (url) map.set(p.post_id, url);
     }
 
-    // ★ 既存の iboard_thumb（album://... など）があればそれを優先
+    // 既存の iboard_thumb（album://... など）があればそれを優先
     return rows.map(r => {
       const keepAlbum = (typeof r.iboard_thumb === 'string' && r.iboard_thumb) ? r.iboard_thumb : null;
       const fromIboard = r.iboard_post_id ? (map.get(r.iboard_post_id) ?? null) : null;
@@ -316,7 +345,6 @@ export default function VisionPage() {
 
     // === 同一カラム内の並べ替え（バッチで sort_index 保存） ===
     if (fromSt === toSt) {
-      // 次状態を先に計算
       const same = visions.filter(v => v.stage === fromSt);
       const reordered = reorder(same, source.index, destination.index)
         .map((v, i) => ({ ...v, sort_index: i }));
@@ -348,17 +376,14 @@ export default function VisionPage() {
     const moved = visions.find(v => String(v.vision_id) === movedId);
     if (!moved) return;
 
-    // to列の一覧（移動先に差し込み）
     const toList = visions
       .filter(v => v.stage === toSt && String(v.vision_id) !== movedId);
     const movedUpdated = { ...moved, stage: toSt };
     toList.splice(destination.index, 0, movedUpdated);
 
-    // from列の一覧（移動元から除外）
     const fromList = visions
       .filter(v => v.stage === fromSt && String(v.vision_id) !== movedId);
 
-    // sort_index 振り直し
     const toWithIndex   = toList.map((v, i) => ({ ...v, sort_index: i }));
     const fromWithIndex = fromList.map((v, i) => ({ ...v, sort_index: i }));
 
@@ -380,10 +405,7 @@ export default function VisionPage() {
       await fetch('/api/visions', {
         method: 'PUT',
         headers,
-        body: JSON.stringify({
-          vision_id: movedId,
-          stage: toSt,
-        }),
+        body: JSON.stringify({ vision_id: movedId, stage: toSt }),
       });
 
       // ② from/to 両列の sort_index をまとめて保存
@@ -398,48 +420,38 @@ export default function VisionPage() {
       });
     } catch (e) {
       L.api('PUT move error', e);
-      // 必要なら整合回復のために再取得を促す:
-      // setPhase(p => p);
     }
   };
 
-/* 保存後の反映（新規/更新）— 並びルールを適用して即時反映 */
-const upsertLocal = (saved: VisionWithTS) => {
-  const normalized: VisionWithTS = { ...saved, vision_id: String(saved.vision_id) };
+  /* 保存後の反映（新規/更新）— 並びルールを適用して即時反映 */
+  const upsertLocal = (saved: VisionWithTS) => {
+    const normalized: VisionWithTS = { ...saved, vision_id: String(saved.vision_id) };
 
-  setVisions(prev => {
-    const i = prev.findIndex(x => String(x.vision_id) === normalized.vision_id);
-    const next = [...prev];
+    setVisions(prev => {
+      const i = prev.findIndex(x => String(x.vision_id) === normalized.vision_id);
+      const next = [...prev];
 
-    if (i >= 0) {
-      // 既存を置き換え（ステージ変更もここで反映）
-      next[i] = normalized;
-    } else {
-      // 新規は一旦末尾に追加
-      next.push(normalized);
-    }
+      if (i >= 0) {
+        next[i] = normalized;
+      } else {
+        next.push(normalized);
+      }
 
-    // ★ 既存の保存順（localStorage）を尊重して並び直す
-    const applied = applyOrderByStage(phase, next);
+      const applied = applyOrderByStage(phase, next);
+      saveOrder(phase, applied);
+      return applied;
+    });
 
-    // ★ 並びも保存（次回リロード時に同じ順序で出せるように）
-    saveOrder(phase, applied);
-
-    return applied;
-  });
-
-  // 選択を更新＆永続化
-  try { localStorage.setItem(LS_SELECTED, String(normalized.vision_id)); } catch {}
-  setSelectedVisionId(String(normalized.vision_id));
-};
-
+    try { localStorage.setItem(LS_SELECTED, String(normalized.vision_id)); } catch {}
+    setSelectedVisionId(String(normalized.vision_id));
+  };
 
   /* 選択の永続化 */
   function persistSelected(id: string | null) {
     try { id ? localStorage.setItem(LS_SELECTED, id) : localStorage.removeItem(LS_SELECTED); } catch {}
   }
 
-  /** ←★ 追加: 履歴移動後の即時反映（楽観的隠し＋確定除去） */
+  /** 履歴移動後の即時反映（楽観的隠し＋確定除去） */
   function handleArchived(vid: string) {
     setPendingHide(prev => new Set(prev).add(String(vid)));
     setVisions(prev => prev.filter(v => String(v.vision_id) !== String(vid)));
@@ -450,43 +462,22 @@ const upsertLocal = (saved: VisionWithTS) => {
     <div className="vision-shell">
       {/* DnD保険: CSSの衝突を最小限で抑止（必要な時だけ有効に） */}
       <style>{`
-        /* PDF推奨の保険: 縦スクロールコンテナのネストを避ける */ 
         .vision-board{overflow-y:visible!important}
         .vision-column{overflow:visible!important}
         .vision-col-body{overflow-y:visible!important;min-height:16px}
-        /* transform はライブラリに任せる（直接指定しない） */
       `}</style>
 
       {/* === フェーズタブ ＋ 新規＋履歴 === */}
       <div className="vision-topbar">
         <div className="vision-tabs">
-          <button
-            className={phase === 'initial' ? 'is-active' : ''}
-            onClick={() => setPhase('initial')}
-          >
-            初期
-          </button>
-
-          <button
-            className={phase === 'mid' ? 'is-active' : ''}
-            onClick={() => setPhase('mid')}
-          >
-            中期
-          </button>
-
-          <button
-            className={phase === 'final' ? 'is-active' : ''}
-            onClick={() => setPhase('final')}
-          >
-            後期
-          </button>
+          <button className={phase === 'initial' ? 'is-active' : ''} onClick={() => setPhase('initial')}>初期</button>
+          <button className={phase === 'mid' ? 'is-active' : ''} onClick={() => setPhase('mid')}>中期</button>
+          <button className={phase === 'final' ? 'is-active' : ''} onClick={() => setPhase('final')}>後期</button>
         </div>
 
         <div className="vision-actions">
           <a className="vision-history-link" href="/vision/history">履歴を見る</a>
-          <button className="vision-new-global" onClick={() => setOpenStage('S')}>
-            ＋ 新規
-          </button>
+          <button className="vision-new-global" onClick={() => setOpenStage('S')}>＋ 新規</button>
         </div>
       </div>
 
@@ -506,8 +497,8 @@ const upsertLocal = (saved: VisionWithTS) => {
                     {visions
                       .filter(v =>
                         v.stage === stage.key &&
-                        isActiveVision(v) &&                        // ←★ 履歴/アーカイブ除外
-                        !pendingHide.has(String(v.vision_id))       // ←★ 押した瞬間に非表示
+                        isActiveVision(v) &&
+                        !pendingHide.has(String(v.vision_id))
                       )
                       .map((vision, index) => (
                         <Draggable
@@ -581,7 +572,6 @@ const upsertLocal = (saved: VisionWithTS) => {
             selectedVisionId={String(selectedVision.vision_id)}
             selectedStage={selectedVision.stage}
             selectedVisionTitle={selectedVision.title}
-            // ★ 履歴へ移動完了時に即非表示
             onArchived={(vid: string) => handleArchived(vid)}
           />
         ) : (
@@ -589,6 +579,15 @@ const upsertLocal = (saved: VisionWithTS) => {
             ビジョンカードを選択すると、ここに「1日の実践チェック」が表示されます。
           </div>
         )}
+      </div>
+
+      {/* ★ 一番下に履歴ボタン */}
+      <div className="vision-footer">
+        <a className="btn-hope" href="/practice/diary" aria-label="日々の実践の実績を見る">
+          <span className="btn-hope__icon" aria-hidden>🏆</span>
+          <span className="btn-hope__label">日々の実績を見る</span>
+          <span className="btn-hope__chevron" aria-hidden>➜</span>
+        </a>
       </div>
 
       {/* 新規モーダル */}

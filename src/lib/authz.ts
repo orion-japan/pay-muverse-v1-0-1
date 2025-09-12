@@ -34,6 +34,8 @@ export type AuthzResult = {
   userCode: string | null;
   role: 'master' | 'admin' | 'other';
   error?: string;
+  // 追加：呼び出し側で z.uid を参照できるように（型エラー回避）
+  uid: string | null;
   // 互換用（normalizeAuthz が拾う）
   user?: { uid: string; user_code: string } | null;
 };
@@ -65,7 +67,7 @@ export async function verifyFirebaseAndAuthorize(input: NextRequest | string): P
     return {
       ok: false, allowed: false, status: 401,
       pgJwt: null, userCode: null, role: 'other',
-      error: 'Missing Firebase ID token', user: null
+      error: 'Missing Firebase ID token', user: null, uid: null
     };
   }
 
@@ -89,7 +91,7 @@ export async function verifyFirebaseAndAuthorize(input: NextRequest | string): P
       return {
         ok: false, allowed: false, status: 401,
         pgJwt: null, userCode: null, role: 'other',
-        error: 'user_code not found', user: null
+        error: 'user_code not found', user: null, uid: null
       };
     }
 
@@ -109,13 +111,14 @@ export async function verifyFirebaseAndAuthorize(input: NextRequest | string): P
       userCode: u.user_code,
       role,
       user: { uid: firebaseUid, user_code: u.user_code },
+      uid: firebaseUid,
     };
   } catch (e: any) {
     console.error('[authz] error:', e);
     return {
       ok: false, allowed: false, status: 401,
       pgJwt: null, userCode: null, role: 'other',
-      error: e?.message || 'Auth failed', user: null
+      error: e?.message || 'Auth failed', user: null, uid: null
     };
   }
 }

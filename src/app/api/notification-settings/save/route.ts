@@ -1,6 +1,7 @@
 // src/app/api/notification-settings/save/route.ts
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { verifyFirebaseAndAuthorize } from '@/lib/authz';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -64,7 +65,7 @@ function sanitizeIncoming(input: Record<string, any>): Partial<Record<ConsentKey
 
 // --- handler -----------------------------------------------------------
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     let body: any;
     try {
@@ -73,22 +74,28 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'invalid json' }, { status: 400 });
     }
 
-    // user identification: prefer user_code, else uid
-    const user_code: string | undefined =
-      typeof body.user_code === 'string' && body.user_code.trim()
-        ? body.user_code.trim()
-        : undefined;
+    // --- user identification ---
+    let targetUserCode: string | undefined;
 
-    const uid: string | undefined =
-      typeof body.uid === 'string' && body.uid.trim() ? body.uid.trim() : undefined;
-
-    if (!user_code && !uid) {
-      return NextResponse.json({ error: 'uid or user_code required' }, { status: 400 });
+    // 1. user_code が body にあれば最優先
+    if (typeof body.user_code === 'string' && body.user_code.trim()) {
+      targetUserCode = body.user_code.trim();
     }
 
-    const targetUserCode = user_code ?? (await uidToUserCode(uid!));
+    // 2. なければ Authorization ヘッダの Firebase ID Token を検証
+    if (!targetUserCode) {
+      const z = await verifyFirebaseAndAuthorize(req);
+      if (!z.ok || !z.uid) {
+        return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+      }
+      targetUserCode = await uidToUserCode(z.uid);
+    }
 
-    // payload may be {consents:{...}} or keys at top-level
+    if (!targetUserCode) {
+      return NextResponse.json({ error: 'user not resolved' }, { status: 400 });
+    }
+
+    // --- sanitize payload ---
     const rawConsents: Record<string, any> =
       typeof body.consents === 'object' && body.consents
         ? body.consents
@@ -100,7 +107,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'no consent fields' }, { status: 400 });
     }
 
-    // read current consents
+    // --- merge & save ---
     const { data: prof, error: selErr } = await supabase
       .from('profiles')
       .select('consents')

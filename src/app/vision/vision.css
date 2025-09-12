@@ -371,3 +371,69 @@ button.dcp-secondary:hover {
   height: 28px;         /* 高さも小さめ */
   border-radius: 6px;
 }
+
+
+.vision-footer{
+  display:flex;
+  justify-content:flex-end;    /* 右端に寄せる */
+  padding: 16px 14px 22px;
+}
+
+/* 希望ボタン */
+.btn-hope{
+  --g1:#ffb86b;   /* sunrise orange */
+  --g2:#ff8bd1;   /* rosy pink   */
+  --g3:#8aa8ff;   /* soft blue   */
+
+  display:inline-flex;
+  align-items:center;
+  gap:10px;
+
+  padding:10px 16px;
+  border-radius:9999px;
+
+  color:#fff;
+  text-decoration:none;
+  font-weight:600;
+  letter-spacing:.02em;
+
+  background: linear-gradient(135deg, var(--g1), var(--g2), var(--g3));
+  background-size: 200% 200%;
+  box-shadow:
+    0 6px 18px rgba(255, 140, 180, .35),
+    0 2px 6px rgba(0,0,0,.08);
+
+  transition: transform .15s ease, box-shadow .2s ease, background-position 1.2s ease;
+}
+
+/* アクセシビリティ（キーボードフォーカス） */
+.btn-hope:focus-visible{
+  outline: none;
+  box-shadow:
+    0 0 0 3px rgba(255,255,255,.9),
+    0 0 0 6px rgba(255, 140, 180, .55);
+}
+
+/* ふわっと前向きな動き */
+.btn-hope:hover{
+  transform: translateY(-1px);
+  background-position: 100% 0%;
+  box-shadow:
+    0 10px 22px rgba(255, 140, 180, .40),
+    0 4px 12px rgba(0,0,0,.10);
+}
+.btn-hope:active{ transform: translateY(0); }
+
+/* 低速端末・設定に配慮 */
+@media (prefers-reduced-motion: reduce){
+  .btn-hope{ transition: none; background-size: auto; }
+  .btn-hope:hover{ transform:none; }
+}
+
+.btn-hope__icon{ font-size:18px; line-height:1; }
+.btn-hope__label{ font-size:14px; }
+.btn-hope__chevron{
+  font-size:14px; opacity:.9;
+  transform: translateX(0); transition: transform .15s ease;
+}
+.btn-hope:hover .btn-hope__chevron{ transform: translateX(2px); }

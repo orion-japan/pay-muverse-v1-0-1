@@ -1,5 +1,7 @@
+// src/app/api/notification-settings/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { verifyFirebaseAndAuthorize } from '@/lib/authz';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -9,19 +11,13 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// uid -> user_code（強化版）
-// - まず users(firebase_uid) を見る
-// - 見つからなければ users(uid) → profiles(uid) → public_users(uid) を順にフォールバック
+// uid → user_code
 async function uidToUserCode(uid: string) {
-  // ヒント（任意）：ヘッダで直接 user_code を渡されたら最優先で使う
-  // （テストや一時運用で便利。不要ならこの2行を削除してOK）
-  // const hinted = headers().get('x-user-code'); if (hinted) return hinted;
-
   const candidates: Array<{ table: string; codeCol: string; uidCol: string }> = [
-    { table: 'users',         codeCol: 'user_code', uidCol: 'firebase_uid' },
-    { table: 'users',         codeCol: 'user_code', uidCol: 'uid' },
-    { table: 'profiles',      codeCol: 'user_code', uidCol: 'uid' },
-    { table: 'public_users',  codeCol: 'user_code', uidCol: 'uid' },
+    { table: 'users',        codeCol: 'user_code', uidCol: 'firebase_uid' },
+    { table: 'users',        codeCol: 'user_code', uidCol: 'uid' },
+    { table: 'profiles',     codeCol: 'user_code', uidCol: 'uid' },
+    { table: 'public_users', codeCol: 'user_code', uidCol: 'uid' },
   ];
 
   for (const c of candidates) {
@@ -40,14 +36,16 @@ async function uidToUserCode(uid: string) {
 
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const uid = searchParams.get('uid');
-    if (!uid) {
-      return NextResponse.json({ error: 'uid required' }, { status: 400 });
+    // 1. Firebase ID Token 検証
+    const z = await verifyFirebaseAndAuthorize(req);
+    if (!z.ok || !z.uid) {
+      return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
     }
 
-    const user_code = await uidToUserCode(uid);
+    // 2. uid → user_code
+    const user_code = z.userCode ?? (await uidToUserCode(z.uid));
 
+    // 3. consents 取得
     const { data, error } = await supabase
       .from('profiles')
       .select('consents')
@@ -55,14 +53,16 @@ export async function GET(req: NextRequest) {
       .maybeSingle();
 
     if (error) {
-      // profiles が無い/権限が無い場合は空を返す（500にしない）
+      // profiles が無い/権限エラー → 空を返す
       return NextResponse.json({}, { headers: { 'Cache-Control': 'no-store' } });
     }
 
-    // consents が null/未設定でも空オブジェクトを返す
-    const consents = (data?.consents && typeof data.consents === 'object') ? data.consents : {};
+    const consents =
+      data?.consents && typeof data.consents === 'object' ? data.consents : {};
+
     return NextResponse.json(consents, { headers: { 'Cache-Control': 'no-store' } });
   } catch (e: any) {
+    console.error('[notification-settings] error:', e);
     return NextResponse.json(
       { error: e?.message ?? 'server error' },
       { status: 500, headers: { 'Cache-Control': 'no-store' } }

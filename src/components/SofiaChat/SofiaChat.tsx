@@ -338,7 +338,7 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
 
         // ★ mirra の履歴をサイドバー用に取得
         try {
-          const r = await fetchWithIdToken('/api/talk/mirra/history', { cache: 'no-store' });
+          const r = await fetchWithIdToken('/api/mtalk/mirra/history', { cache: 'no-store' });
           const j = await r.json().catch(() => ({}));
           setMirraHistory(Array.isArray(j?.items) ? j.items : []);
         } catch {
@@ -381,7 +381,7 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
   // --- mirra: 履歴取得（候補エンドポイントを順次トライ） ---
   const fetchMirraHistory = async (threadId: string): Promise<Message[]> => {
     const candidates = [
-      { url: `/api/talk/mirra/history?thread_id=${encodeURIComponent(threadId)}` },
+      { url: `/api/mtalk/mirra/history?thread_id=${encodeURIComponent(threadId)}` },
       { url: `/api/agent/mtalk/history?thread_id=${encodeURIComponent(threadId)}` },
       { url: `/api/talk/history?thread_id=${encodeURIComponent(threadId)}` },
     ];
@@ -506,12 +506,12 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
   // --- endpoint util ---
   const endpointFor = (a: Agent) => {
     if (a === 'mu') return '/api/agent/muai';
-    if (a === 'mirra') return '/api/talk/mirra';
+    if (a === 'mirra') return '/api/mtalk/mirra';
     return '/api/sofia';
   };
   
   const mirraEndpoints = (tid: string, text: string, code: string) => [
-    { url: '/api/talk/mirra', body: { text, thread_id: tid, user_code: code } },
+    { url: '/api/mtalk/mirra', body: { text, thread_id: tid, user_code: code } },
     { url: '/api/agent/mtalk/talk', body: { text, thread_id: tid, user_code: code } },
     { url: '/api/agent/mtalk/message', body: { text, thread_id: tid, user_code: code } },
     { url: '/api/talk', body: { text, threadId: tid, thread_id: tid, user_code: code } },

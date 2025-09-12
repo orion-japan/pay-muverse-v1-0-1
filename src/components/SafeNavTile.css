@@ -42,3 +42,46 @@
     border-radius: inherit;
   }
   
+  .wrap {
+    position: relative;
+    display: inline-block; /* 必要に応じて block に */
+  }
+  
+  /* 透明オーバーレイ：ここで全イベントを capture して止める */
+  .blocker {
+    position: absolute;
+    inset: 0;
+    pointer-events: auto; /* ← これが肝：イベントを必ず拾う */
+    background: transparent;
+    z-index: 10;
+  }
+  
+  /* 実際のタイルボタン */
+  .tile {
+    position: relative;
+    z-index: 0;
+    width: 100%;
+    height: 100%;
+  }
+  
+  /* 視覚的にロック表現 */
+  .locked {
+    opacity: 0.55;
+    filter: grayscale(1) brightness(1.05);
+    cursor: not-allowed;
+  }
+  .locked::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: #fff;
+    opacity: 0.22;
+    border-radius: inherit;
+    pointer-events: none;
+  }
+
+  
+  /* SafeNavTile.module.css */
+.wrap { position: relative; display: inline-block; }
+.tile { position: relative; }
+.locked { opacity: .55; filter: grayscale(1) brightness(1.05); cursor: not-allowed; }

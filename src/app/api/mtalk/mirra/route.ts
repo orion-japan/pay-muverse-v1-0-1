@@ -1,4 +1,4 @@
-// src/app/api/talk/mirra/route.ts
+// src/app/api/mtalk/mirra/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
