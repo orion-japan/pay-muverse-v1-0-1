@@ -6,6 +6,26 @@ import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth } from '@/lib/firebase-admin';
 import { createClient } from '@supabase/supabase-js';
 
+/* ===== types（ゆるめ。存在しない項目は undefined でOK）===== */
+type ProfileRow = {
+  avatar_url?: string | null;
+  birthday?: string | null;
+  prefecture?: string | null;
+  city?: string | null;
+  instagram?: string | null;
+  twitter?: string | null;
+  facebook?: string | null;
+  linkedin?: string | null;
+  youtube?: string | null;
+  interests?: string[] | null;
+  skills?: string[] | null;
+  activity_area?: string | null;
+  languages?: string[] | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  // 将来追加してもここは壊れません
+};
+
 function mustEnv(name: string) {
   const v = process.env[name];
   if (!v) throw new Error(`Missing env: ${name}`);
@@ -32,7 +52,9 @@ export async function POST(req: NextRequest) {
     const email = decoded.email || '';
 
     // 3) Supabase admin client
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false },
+    });
 
     // 4) user_code 解決（firebase_uid -> click_email の順にフォールバック）
     let user_code: string | null = null;
@@ -44,8 +66,7 @@ export async function POST(req: NextRequest) {
         .select('user_code')
         .eq('firebase_uid', uid)
         .maybeSingle();
-
-      if (!error && data?.user_code) user_code = data.user_code;
+      if (!error && data?.user_code) user_code = data.user_code as string;
     }
 
     // (b) メールで一致（見つかったら firebase_uid を埋める）
@@ -57,7 +78,8 @@ export async function POST(req: NextRequest) {
         .maybeSingle();
 
       if (!error && data?.user_code) {
-        user_code = data.user_code;
+        user_code = data.user_code as string;
+        // ベストエフォートで紐付け
         await supabase.from('users').update({ firebase_uid: uid }).eq('user_code', user_code);
       }
     }
@@ -69,18 +91,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 5) v_mypage_user ビューから編集用データ取得
-    const { data: me, error: e2 } = await supabase
-      .from('v_mypage_user')
-      .select('*')
-      .eq('user_code', user_code)
-      .single();
-
-    if (e2) {
-      return NextResponse.json({ error: e2.message }, { status: 500 });
-    }
-
-    // 5.1) users から click_username を取得してレスポンスに統合
+    // ====== 5) 直読み：users / profiles から組み立て ======
+    // 5.0) users から click_username
     let click_username: string | null = null;
     {
       const { data } = await supabase
@@ -88,18 +100,40 @@ export async function POST(req: NextRequest) {
         .select('click_username')
         .eq('user_code', user_code)
         .maybeSingle();
-      click_username = data?.click_username ?? null;
+      click_username = (data?.click_username ?? null) as string | null;
     }
 
-    // 6) avatar_url のフルURL化（キーで保存されているケースに対応）
+    // 5.1) profiles は * で取得（存在しないカラムで落ちないようにする）
+    const { data: profileData, error: eProfile } = await supabase
+      .from('profiles')
+      .select('*') // ← ここをワイルドカードに
+      .eq('user_code', user_code)
+      .maybeSingle();
+
+    if (eProfile && (eProfile as any).code !== 'PGRST116') {
+      // PGRST116 = 0件（maybeSingle想定）。それ以外だけ500扱い
+      return NextResponse.json({ error: eProfile.message }, { status: 500 });
+    }
+
+    const profile: ProfileRow | null = (profileData as any as ProfileRow) ?? null;
+
+    // 6) avatar_url のフルURL化
     const BASE = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '');
-    let avatar_url: string | null = (me as any)?.avatar_url ?? null;
+    let avatar_url: string | null = profile?.avatar_url ?? null;
     if (avatar_url && !/^https?:\/\//i.test(avatar_url)) {
-      const key = avatar_url.startsWith('avatars/') ? avatar_url.slice('avatars/'.length) : avatar_url;
+      const key = avatar_url.startsWith('avatars/')
+        ? avatar_url.slice('avatars/'.length)
+        : avatar_url;
       avatar_url = `${BASE}/storage/v1/object/public/avatars/${key}`;
     }
 
-    const meOut = { ...(me as any), click_username, avatar_url };
+    // 既存レスポンス構造を維持
+    const meOut: Record<string, any> = {
+      ...(profile ?? {}),
+      click_username,
+      avatar_url,
+      user_code,
+    };
 
     // 7) no-store でキャッシュ無効化
     return new NextResponse(JSON.stringify({ ok: true, me: meOut, user_code }), {
