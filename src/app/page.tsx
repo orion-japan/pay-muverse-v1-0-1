@@ -208,7 +208,7 @@ export default function DashboardPage() {
     { title: 'Self', link: '/self', img: '/nikki.png', alt: 'Self' },
     { title: 'R Vision', link: '/vision', img: '/ito.png', alt: 'R Vision' },
     { title: 'Create', link: '/create', img: '/mu_create.png', alt: 'Create' },
-    { title: 'm Talk', link: '/mtalk', img: '/mirra.png', alt: 'm Talk' },
+    { title: 'm Talk', link: '/', img: '/mirra.png', alt: 'm Talk' },
     { title: 'F Shot', link: '/', img: '/shot.png', alt: 'F Shot' }, // ガード対象
     { title: 'iros_AI', link: '/iros', img: '/ir2.png', alt: 'iros_AI' },
   ];
