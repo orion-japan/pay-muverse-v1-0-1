@@ -534,6 +534,7 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
       role: 'user',
       content: text,
       created_at: new Date().toISOString(),
+      isPreview: true,
     };
     setMessages((prev) => {
       const next = [...prev, optimistic];
