@@ -139,7 +139,7 @@ export default function ChatInput({
     setSending(true);
 
     try {
-      // 先にUIをクリア（楽観的）：ここでの再入防止はsendLockRefが担保
+      // 先にUIをクリア（楽観的）
       setText('');
       setFiles([]);
       try {
@@ -172,7 +172,6 @@ export default function ChatInput({
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
         e.preventDefault();
-        // ★ ここでもロックを尊重（押しっぱなし連打・重複呼び出し防止）
         if (!sendLockRef.current) {
           void handleSend();
         }
@@ -191,12 +190,6 @@ export default function ChatInput({
   const removeFileAt = (idx: number) =>
     setFiles((prev) => prev.filter((_, i) => i !== idx));
   const openPicker = () => fileRef.current?.click();
-
-  // ir診断：入力欄にセットするだけ（送信しない）
-  const insertIRDiagnosis = useCallback(() => {
-    setText('ir診断');
-    requestAnimationFrame(() => taRef.current?.focus());
-  }, []);
 
   const canSend =
     !disabled &&
@@ -283,22 +276,11 @@ export default function ChatInput({
             📎
           </button>
 
-          <button
-            type="button"
-            className="sof-actionBtn sof-actionBtn--ir" /* ← 追加済み */
-            onClick={insertIRDiagnosis}
-            disabled={disabled || sending}
-            aria-label="ir診断を入力欄に挿入"
-            title="ir診断を入力に挿入"
-          >
-            ir診断
-          </button>
-
-          {/* 下：送信 */}
+          {/* 送信 */}
           <button
             data-sof-send
             type="button"
-            className="sof-actionBtn sof-actionBtn--send" /* ← 追加済み */
+            className="sof-actionBtn sof-actionBtn--send"
             onClick={() => {
               if (!sendLockRef.current) void handleSend();
             }}
