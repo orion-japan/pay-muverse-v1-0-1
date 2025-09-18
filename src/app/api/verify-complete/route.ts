@@ -4,13 +4,32 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { adminAuth } from '@/lib/firebase-admin'
 
-// ✅ Supabase初期化（Service Role使用）
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
-)
+// ✅ ビルド時実行を避ける（プリレンダー無効化）
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
+// ✅ サーバ用Supabaseクライアントを「実行時」に作る & 環境変数フォールバック
+function getSupabaseServer() {
+  const url =
+    process.env.SUPABASE_URL ??
+    process.env.NEXT_PUBLIC_SUPABASE_URL
+
+  const key =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ?? // 本命（Vercelに入っている）
+    process.env.supabaseKey ??               // 互換（小文字を残している場合）
+    process.env.SUPABASE_ANON_KEY ??         // 最後の保険
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+  if (!url || !key) {
+    throw new Error('Supabase URL/Key are missing (server). Check env vars.')
+  }
+
+  return createClient(url, key, { auth: { persistSession: false } })
+}
 
 export async function POST(req: NextRequest) {
+  const supabase = getSupabaseServer()  // ← ここで初期化（モジュールトップで実行しない）
+
   try {
     // 🔹 Authorization ヘッダーから ID トークン取得
     const authHeader = req.headers.get('authorization')
