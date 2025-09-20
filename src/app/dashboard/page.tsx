@@ -6,6 +6,7 @@ export default function AdminHome() {
   const cards = [
     { href:'/logs', title:'Logs', desc:'ログメニュー（テレメトリ・登録ログ）' },
     { href:'/ops/mu-logs', title:'Mu Logs', desc:'MuAI 会話記録（ユーザーごと・会話IDごとに閲覧）' }, // ★ 追加
+    { href:'/ops/sofia-logs', title:'iros Logs', desc:'irosAI 会話記録（ユーザーごと・会話IDごとに閲覧）' }, 
     { href:'/ai-q-dashboard', title:'AI Q Dashboard', desc:'AI処理のメトリクス（雛形）' },
     { href:'/qcode', title:'QCode 管理', desc:'ユーザーコードと権限（雛形）' },
     { href:'/admin/delete-user', title:'ユーザー削除', desc:'Firebase + Supabase のユーザー削除（管理者用）' },

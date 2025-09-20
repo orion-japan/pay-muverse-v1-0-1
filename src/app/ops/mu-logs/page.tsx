@@ -41,7 +41,14 @@ type Turn = {
   created_at: string | null;
 };
 
-/** ===== API 呼び出し（既存の fetchWithIdToken があれば差し替え可） ===== */
+type UserItem = {
+  user_code: string;
+  name: string;
+  conversations: number;
+  last_turn_at: string | null;
+};
+
+/** ===== API 呼び出し ===== */
 async function callApi(url: string) {
   const res = await fetch(url, {
     credentials: 'same-origin',
@@ -55,7 +62,6 @@ async function callApi(url: string) {
 
 /** ===== ページ本体 ===== */
 export default function MuLogsPage() {
-  // このページだけ PC 幅にするための body フラグ
   useEffect(() => {
     document.body.classList.add('mu-logs-desktop');
     return () => document.body.classList.remove('mu-logs-desktop');
@@ -65,15 +71,27 @@ export default function MuLogsPage() {
   const [convId, setConvId] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const [users, setUsers] = useState<UserItem[]>([]);
   const [conversations, setConversations] = useState<Conversation[] | null>(null);
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
   const [turns, setTurns] = useState<Turn[] | null>(null);
 
-  // user_code 入力から 400ms 後に会話一覧を自動取得（ドロップダウン用）
+  // --- ユーザー一覧をロード ---
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await callApi('/api/mu-logs/users');
+        setUsers(data.users ?? []);
+      } catch {
+        setUsers([]);
+      }
+    })();
+  }, []);
+
+  // user_code が選ばれたら会話一覧ロード
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-
     if (!userCode.trim()) {
       setConversations(null);
       setConvId('');
@@ -82,10 +100,7 @@ export default function MuLogsPage() {
 
     debounceRef.current = setTimeout(async () => {
       try {
-        const params = new URLSearchParams({
-          user_code: userCode.trim(),
-          page_size: '200',
-        });
+        const params = new URLSearchParams({ user_code: userCode.trim(), page_size: '200' });
         const data = await callApi(`/api/mu-logs?${params.toString()}`);
         setConversations(data.conversations ?? []);
         if (convId && !(data.conversations ?? []).some((c: Conversation) => c.id === convId)) {
@@ -99,10 +114,9 @@ export default function MuLogsPage() {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userCode]);
 
-  // convId が選ばれたら詳細をロード
+  // convId が選ばれたら詳細ロード
   useEffect(() => {
     (async () => {
       if (!convId.trim()) {
@@ -126,7 +140,7 @@ export default function MuLogsPage() {
     })();
   }, [convId]);
 
-  // CSV 生成
+  // CSV
   const csvForTurns = useMemo(() => {
     if (!detail || !turns?.length) return '';
     const header = [
@@ -171,12 +185,15 @@ export default function MuLogsPage() {
 
       <section className="muLogs__search muLogs__search--3col">
         <div className="field">
-          <label>User Code</label>
-          <input
-            value={userCode}
-            onChange={(e) => setUserCode(e.target.value)}
-            placeholder="例: 669933 / U-XXXXXX"
-          />
+          <label>User</label>
+          <select value={userCode} onChange={(e) => setUserCode(e.target.value)}>
+  <option value="">ユーザーを選択…</option>
+  {users.map((u) => (
+    <option key={u.user_code} value={u.user_code}>
+      {u.name || u.user_code}｜{u.conversations}件
+    </option>
+  ))}
+</select>
         </div>
 
         <div className="field">
@@ -319,4 +336,3 @@ export default function MuLogsPage() {
     </div>
   );
 }
-
