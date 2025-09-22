@@ -1,0 +1,2 @@
+"when","method","url","status","message","body"
+"2025/09/22 9:53:20","GET","https://hcodeoathneftqkmjyoh.supabase.co/rest/v1/=*&limit=1000&offset=0","406","???? ??????????????: (406) ????","{""code"":""PGRST106"",""details"":null,""hint"":null,""message"":""The schema must be one of the following: public, graphql_public""}"

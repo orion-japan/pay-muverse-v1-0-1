@@ -69,6 +69,13 @@ function openCenteredPopup(url: string, w = 520, h = 740) {
   }
 }
 
+/** URLにクエリを1つ付与（基底URL対応） */
+function withParam(url: string, key: string, value: string) {
+  const u = new URL(url, typeof window !== 'undefined' ? window.location.origin : 'https://zoom.us');
+  u.searchParams.set(key, value);
+  return u.toString();
+}
+
 /** 単日祝日判定：/api/jp-holiday → 失敗時 /api/jp-holidays?date=YYYY-MM-DD */
 async function fetchIsJPHoliday(dateIso: string): Promise<boolean> {
   const d = new Date(dateIso);
@@ -123,7 +130,7 @@ function MonthCalendar({ user_code, refreshKey }: { user_code: string; refreshKe
       .then((r) => r.json())
       .then((j) => {
         const map: Record<string, string> = {};
-        for (const it of j?.items ?? []) map[it.date] = it.name;
+        for (const it of (j?.items ?? [])) map[it.date] = it.name;
         setHolidays(map);
       })
       .catch(() => setHolidays({}));
@@ -152,7 +159,7 @@ function MonthCalendar({ user_code, refreshKey }: { user_code: string; refreshKe
     <div className="km-card km-cal">
       <div className="km-card-title">Event参加カレンダー</div>
 
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center,', marginBottom: 8 }}>
         <button
           className="km-button"
           onClick={() => {
@@ -236,12 +243,15 @@ function KyomeikaiContent() {
   const user = (userFromQuery || userCodeFromCtx || '').trim();
 
   const [checking, setChecking] = useState(true);
-  const [plan, setPlan] = useState<string>(''); // users.click_type
+  const [plan, setPlan] = useState<string>(''); // users.click_type（互換維持のため残置）
   const [username, setUsername] = useState<string>(''); // users.click_username
   const [error, setError] = useState<string | null>(null);
 
   const [schedule, setSchedule] = useState<NextSchedule | null>(null); // 共鳴会
   const [scheduleAinori, setScheduleAinori] = useState<NextSchedule | null>(null); // 愛祈
+
+  // ★ 追加：クレジット残高
+  const [creditBalance, setCreditBalance] = useState<number>(0);
 
   // 時刻（30秒毎更新）
   const [now, setNow] = useState<Date>(new Date());
@@ -279,6 +289,7 @@ function KyomeikaiContent() {
         if (!user) {
           setPlan('free');
           setUsername('');
+          setCreditBalance(0);
         } else {
           const resUser = await fetch('/api/user-info', {
             method: 'POST',
@@ -289,6 +300,23 @@ function KyomeikaiContent() {
           if (aborted) return;
           setPlan((userJson?.click_type || '').toString().trim().toLowerCase() || 'free');
           setUsername((userJson?.click_username || '').toString());
+
+          // ★ 追加：クレジット残を取得（200が返れば数値化、失敗は0）
+          try {
+            const resCredit = await fetch('/api/credits/balance', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ user_code: user }),
+            });
+            let balanceNum = 0;
+            if (resCredit.ok) {
+              const cj = await resCredit.json().catch(() => ({} as any));
+              balanceNum = Number(cj?.balance ?? 0);
+            }
+            if (!aborted) setCreditBalance(isFinite(balanceNum) ? balanceNum : 0);
+          } catch {
+            if (!aborted) setCreditBalance(0);
+          }
         }
 
         const [resNext, resAinori] = await Promise.all([
@@ -322,17 +350,18 @@ function KyomeikaiContent() {
     return cur >= start - 10 * 60 * 1000 && cur <= start + 10 * 60 * 1000;
   };
 
-  // 共鳴会の入室可否（開始10分前〜終了まで）
-  const canJoinTime = (s: NextSchedule | null) => {
-    if (!s?.start_at || !s?.duration_min) return false;
-    const d = parseStartAtJST(s.start_at);
-    if (!d) return false;
-    const start = d.getTime();
-    const end = start + s.duration_min * 60 * 1000;
-    const open = start - 10 * 60 * 1000;
-    const cur = now.getTime();
-    return cur >= open && cur <= end;
-  };
+// 共鳴会の入室可否（開始10分前〜終了まで）
+const canJoinTime = (s: NextSchedule | null) => {
+  if (!s?.start_at || !s?.duration_min) return false;
+  const d = parseStartAtJST(s.start_at);
+  if (!d) return false;
+  const start = d.getTime();
+  const end = start + s.duration_min * 60 * 1000;
+  const open = start - 10 * 60 * 1000;
+  const cur = now.getTime();
+  return cur >= open && cur <= end;
+};
+
 
   // 愛祈（平日 05:50〜06:30）
   const canJoinAinoriFixed = () => {
@@ -384,6 +413,31 @@ function KyomeikaiContent() {
     URL.revokeObjectURL(url);
   };
 
+  /** Zoom URL（pwd + uname付与）を構築 */
+  function buildZoomUrls(s: NextSchedule, displayName: string) {
+    // page_url があるならそれを優先（pwd等が既に埋め込まれている想定）
+    if (s.page_url) {
+      const web = withParam(s.page_url, 'uname', displayName); // 生の displayName を渡す
+      const app =
+        'zoommtg://zoom.us/join?confno=' +
+        (s.meeting_number ?? '') +
+        (s.meeting_password ? `&pwd=${encodeURIComponent(s.meeting_password)}` : '') +
+        `&uname=${encodeURIComponent(displayName)}`;
+      return { webUrl: web, appUrl: app };
+    }
+
+    // meeting_number + password から生成
+    const number = String(s.meeting_number ?? '').replace(/\D/g, '');
+    const pwd = s.meeting_password ?? '';
+    const baseWeb = `https://zoom.us/j/${number}` + (pwd ? `?pwd=${encodeURIComponent(pwd)}` : '');
+    const webUrl = withParam(baseWeb, 'uname', displayName); // 生の displayName
+    const appUrl =
+      `zoommtg://zoom.us/join?action=join&confno=${number}` +
+      (pwd ? `&pwd=${encodeURIComponent(pwd)}` : '') +
+      `&uname=${encodeURIComponent(displayName)}`;
+    return { webUrl, appUrl };
+  }
+
   // Zoom起動 + 出席記録（共鳴会）
   const handleJoinKyomeikai = async () => {
     const s = schedule;
@@ -391,19 +445,12 @@ function KyomeikaiContent() {
       alert('ログインしてください。');
       return;
     }
-    if (plan === 'free') {
-      alert('現在のプランでは共鳴会に参加できません。（free 以外で参加可）');
-      return;
-    }
     if (!s) {
       alert('スケジュールが取得できませんでした。後ほどお試しください。');
       return;
     }
-
-    const number = String(s.meeting_number ?? '').replace(/\D/g, '');
-    const pwd = s.meeting_password ?? '';
-    if (!number) {
-      alert('ミーティング番号が取得できませんでした。後ほどお試しください。');
+    if (creditBalance <= 0) {
+      alert('クレジット残高がありません。チャージまたはプランをご確認ください。');
       return;
     }
 
@@ -415,7 +462,6 @@ function KyomeikaiContent() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ event_id: 'kyomeikai', user_code: user }),
         });
-        // 成功時、履歴とカレンダーを即更新
         if (r.ok) {
           loadHistory();
           setRefreshKey((k) => k + 1);
@@ -423,10 +469,10 @@ function KyomeikaiContent() {
       } catch {}
     }
 
-    const webUrl = `https://zoom.us/j/${number}` + (pwd ? `?pwd=${encodeURIComponent(pwd)}` : '');
-    const appUrl =
-      `zoommtg://zoom.us/join?action=join&confno=${number}` +
-      (pwd ? `&pwd=${encodeURIComponent(pwd)}` : '');
+    // 参加名：users.click_username（なければ user_code）
+    const displayName = (username || user).trim();
+    const { webUrl, appUrl } = buildZoomUrls(s, displayName);
+
     const pop = openCenteredPopup(webUrl);
     if (!pop) window.open(webUrl, '_blank', 'noopener,noreferrer');
     try {
@@ -505,7 +551,7 @@ function KyomeikaiContent() {
 
       <div className="km-actions">
         <button
-          className={`km-button primary ${plan === 'free' || !canJoinTime(schedule) ? 'disabled' : ''}`}
+          className={`km-button primary ${(!canJoinTime(schedule) || creditBalance <= 0) ? 'disabled' : ''}`}
           onClick={handleJoinKyomeikai}
           title={!canJoinTime(schedule) ? '開始10分前から入室できます（出席カウントは開始±10分）' : undefined}
           type="button"
@@ -514,11 +560,11 @@ function KyomeikaiContent() {
         </button>
       </div>
 
-      {plan === 'free' && (
+      {creditBalance <= 0 && (
         <div className="km-note">
-          現在のプランでは共鳴会に参加できません。（<b>free以外参加OK</b>）
+          クレジット残高がありません。　
           <button className="km-linklike" onClick={() => router.push('/pay')}>
-            プランを見る
+            チャージ・プランを見る
           </button>
         </div>
       )}

@@ -23,9 +23,7 @@ import Header from './header';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
 import type { MetaData } from '@/components/SofiaChat/MetaPanel';
-import Image from 'next/image';
 
-/* ========= types ========= */
 type Role = 'user' | 'assistant' | 'system';
 export type Message = {
   id: string;
@@ -61,7 +59,6 @@ type SofiaPostRes = {
   meta?: any;
 };
 
-/* ========= utils ========= */
 const normalizeMeta = (m: any): MetaData | null => {
   if (!m) return null;
   const asArray = (v: any) => (Array.isArray(v) ? v : v ? [v] : []);
@@ -92,7 +89,6 @@ const normalizeMeta = (m: any): MetaData | null => {
   return { qcodes, layers, used_knowledge, stochastic: indicator };
 };
 
-/* ========= props / helpers ========= */
 type Agent = 'mu' | 'iros' | 'mirra';
 type SofiaChatProps = { agent?: string };
 const normalizeAgent = (a?: string): Agent => {
@@ -109,19 +105,15 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
   const urlFrom = params?.get('from') ?? undefined;
   const urlSummary = params?.get('summary_hint') ?? undefined;
 
-  // URL の agent があれば優先して正規化
   const agentK = normalizeAgent(urlAgent ?? agentProp);
+  const { loading: authLoading, userCode } = useAuth();
 
-  const { loading: authLoading, userCode, planStatus } = useAuth();
-
-  /* ========= states ========= */
   const [conversations, setConversations] = useState<ConvListItem[]>([]);
   const [conversationId, setConversationId] = useState<string | undefined>(undefined);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [meta, setMeta] = useState<MetaData | null>(null);
 
-  // ✅ Sidebar/MessageList 表示用：ユーザーの実値
   const [uiUser, setUiUser] = useState<{
     id: string;
     name: string;
@@ -130,10 +122,8 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
     avatarUrl?: string | null;
   } | null>(null);
 
-  // ★ mirra の相談履歴（Sidebar 表示用）
   const [mirraHistory, setMirraHistory] = useState<any[] | null>(null);
 
-  // ========= agentごとに会話ID/メッセージを分離保持 =========
   const convIdByAgent = useRef<Record<Agent, string | undefined>>({
     mu: undefined,
     iros: undefined,
@@ -166,7 +156,7 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
 
   const canUse = useMemo(() => !!userCode && !authLoading, [userCode, authLoading]);
 
-  /* ==== UI用CSS変数（env → CSS） ==== */
+  // ==== UI env → CSS
   useEffect(() => {
     const ui = SOFIA_CONFIG.ui;
     const r = document.documentElement;
@@ -191,7 +181,7 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
     set('--sofia-user-radius', `${ui.userRadius}px`);
   }, []);
 
-  /* ==== プレゼン用 Hotfix ==== */
+  // 見た目のホットフィックス
   useEffect(() => {
     const css = `
     :where(.sofia-container) .sof-msgs .sof-bubble{
@@ -211,7 +201,7 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
       text-shadow: 0 1px 0 rgba(0,0,0,.08);
       border: none !important;
       background: linear-gradient(180deg, #8aa0ff 0%, #6b8cff 60%, #5979ee 100%) !important;
-      box-shadow: 0 1px 0 rgba(255,255,255,.25) inset, 0 10px 24px rgba(107,140,255,.22) !important;
+      box-shadow: 0 1px 0 rgba(107,140,255,.22) !important;
       border-bottom-right-radius: 6px !important;
     }
     .sof-underlay{ background: transparent !important; box-shadow:none !important; }
@@ -225,7 +215,7 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
     el.textContent = css;
   }, []);
 
-  /* ==== 「送信中」オーバーレイを強制オフ ==== */
+  // 送信中オーバーレイ抑止
   useEffect(() => {
     let el = document.getElementById('sofia-hide-overlay') as HTMLStyleElement | null;
     if (!el) {
@@ -236,7 +226,7 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
     el.textContent = `.sof-overlay{ display:none !important; }`;
   }, []);
 
-  /* ===== Compose の高さ反映 ===== */
+  // Compose高さ → CSS変数
   const composeRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const el = composeRef.current;
@@ -254,15 +244,12 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
     document.body.style.setProperty('--meta-height', `0px`);
   }, []);
 
-  /* ======== mTalk 要約の遅延注入（重要） ======== */
-  // 1回だけ履歴取得後に先頭へ差し込むための一時置き場
+  // ======== mTalk 要約の遅延注入
   const mtalkSeedRef = useRef<string | null>(null);
-
-  // 履歴配列へ mTalk共有を先頭追加するヘルパー
   const injectMtalkSeed = useCallback((rows: Message[], convId?: string): Message[] => {
     const seed = mtalkSeedRef.current;
     if (!seed) return rows;
-    if (rows.length && (rows[0] as any)?.meta?.from === 'mtalk') return rows; // 重複防止
+    if (rows.length && (rows[0] as any)?.meta?.from === 'mtalk') return rows;
     const sysMsg: Message = {
       id: `mtalk-seed-${convId || Date.now()}`,
       role: 'system',
@@ -271,168 +258,108 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
       meta: { from: 'mtalk' },
       free: true,
     };
-    mtalkSeedRef.current = null; // 1回で使い切る
+    mtalkSeedRef.current = null;
     return [sysMsg, ...rows];
   }, []);
 
-  // mTalkからの遷移なら seed を ref に保持（ここでは挿入しない）
+  // mTalkからの遷移なら seed を保持
   useEffect(() => {
     if (urlFrom !== 'mtalk') return;
 
-    // URL の会話IDを反映
     if (urlCid) {
       convIdByAgent.current[agentK] = urlCid;
       setConversationId(urlCid);
     }
 
-    // まず sessionStorage の全文を読む → なければ URL の短縮版
     let seed = '';
     if (typeof window !== 'undefined' && urlCid) {
       const ss = sessionStorage.getItem(`mtalk:seed:${urlCid}`);
       if (ss) seed = ss;
     }
-    if (!seed && urlSummary) {
-      seed = decodeURIComponent(urlSummary);
-    }
-
+    if (!seed && urlSummary) seed = decodeURIComponent(urlSummary);
     if (seed && typeof window !== 'undefined' && urlCid) {
       try { sessionStorage.removeItem(`mtalk:seed:${urlCid}`); } catch {}
     }
-
     if (seed) mtalkSeedRef.current = seed;
   }, [agentK, urlFrom, urlCid, urlSummary]);
 
   /* ===== 会話一覧 ===== */
-  const fetchConversations = async () => {
-    if (!userCode) return;
+// ← そのまま上は触らずに…
+
+const fetchConversations = async () => {
+  if (!userCode) return;
+
+  // --- Mu ---------------------------------------------------------
+  if (agentK === 'mu') {
+    const r =
+      (await fetchWithIdToken('/api/mu/list').catch(() => null)) ||
+      (await fetchWithIdToken('/api/agent/muai/list').catch(() => null)); // 後方互換
+    if (!r || !r.ok) throw new Error(`mu list ${r?.status ?? 'noresp'}`);
+
+    const js: any = await r.json().catch(() => ({}));
+    const muItems: ConvListItem[] = ((js.items ?? []) as any[])
+      .map((x) => ({
+        id: String(x.id ?? x.master_id ?? ''),
+        title: String(x.title ?? 'Mu 会話'),
+        updated_at: x.updated_at ?? null,
+      }))
+      .filter((x) => x.id);
+
+    setConversations(muItems);
+
+    // 保存されている Mu の会話IDがあれば UI にだけ反映（自動選択しない）
+    const currentMu = convIdByAgent.current.mu;
+    if (currentMu) setConversationId(currentMu);
+    return;
+  }
+
+  // --- mirra ------------------------------------------------------
+  if (agentK === 'mirra') {
+    // mirra は会話一覧を持たない（固定ID）／履歴は別APIでサイドバー表示用に取得
+    setConversations([]);
+
+    if (!convIdByAgent.current.mirra) {
+      convIdByAgent.current.mirra = `mirra-${userCode}`;
+    }
+    setConversationId(convIdByAgent.current.mirra);
+
+    // 参考: 分析履歴（conversations 相当）
     try {
-      if (agentK === 'mu') {
-        // Mu の一覧API
-        const r =
-          (await fetchWithIdToken('/api/mu/list').catch(() => null)) ||
-          (await fetchWithIdToken('/api/agent/muai/list').catch(() => null)); // 後方互換
-        if (!r || !r.ok) throw new Error(`mu list ${r?.status ?? 'noresp'}`);
-        const js: any = await r.json().catch(() => ({}));
-        const items = ((js.items ?? []) as any[])
-          .map((x) => ({
-            id: String(x.id ?? x.master_id ?? ''),
-            title: String(x.title ?? 'Mu 会話'),
-            updated_at: x.updated_at ?? null,
-          }))
-          .filter((x) => x.id);
-        setConversations(items);
-
-        // 保存されている Mu の会話IDがあれば UI にだけ反映（自動選択しない）
-        const currentMu = convIdByAgent.current.mu;
-        if (currentMu) setConversationId(currentMu);
-        return;
-      }
-
-      if (agentK === 'mirra') {
-        // mirra は一覧APIを持たない。ダミーIDを用意して固定
-        setConversations([]);
-        if (!convIdByAgent.current.mirra) {
-          convIdByAgent.current.mirra = `mirra-${userCode}`;
-        }
-        setConversationId(convIdByAgent.current.mirra);
-
-        // ★ mirra の履歴をサイドバー用に取得
-        try {
-          const r = await fetchWithIdToken('/api/mtalk/mirra/history', { cache: 'no-store' });
-          const j = await r.json().catch(() => ({}));
-          setMirraHistory(Array.isArray(j?.items) ? j.items : []);
-        } catch {
-          setMirraHistory([]);
-        }
-        return;
-      }
-
-      // Iros（/api/sofia）
-      const r = await fetchWithIdToken(`/api/sofia?user_code=${encodeURIComponent(userCode)}`);
-      if (!r.ok) throw new Error(`list ${r.status}`);
-      const js: SofiaGetList = await r.json().catch(() => ({}));
-
-      const items = (js.items ?? []).map((row) => ({
-        id: row.conversation_code,
-        title:
-          row.title ??
-          (row.updated_at ? `会話 (${new Date(row.updated_at).toLocaleString()})` : '新しい会話'),
-        updated_at: row.updated_at ?? null,
-      })) as ConvListItem[];
-
-      setConversations(items);
-
-      // Iros は従来通りの自動選択
-      const currentIros = convIdByAgent.current.iros;
-      if (!currentIros && items[0]?.id) {
-        convIdByAgent.current.iros = items[0].id;
-        setConversationId(items[0].id);
-      } else if (currentIros) {
-        setConversationId(currentIros);
-      }
-    } catch (e) {
-      console.error('[SofiaChat] fetchConversations error:', e);
+      const r2 = await fetchWithIdToken('/api/agent/mtalk/conversations', { cache: 'no-store' });
+      const j2 = await r2.json().catch(() => ({}));
+      setMirraHistory(Array.isArray(j2?.items) ? j2.items : []);
+    } catch {
+      setMirraHistory([]);
     }
-  };
+    return;
+  }
 
+  // --- Iros -------------------------------------------------------
+  const r = await fetchWithIdToken(
+    `/api/sofia?user_code=${encodeURIComponent(userCode)}`
+  );
+  if (!r.ok) throw new Error(`list ${r.status}`);
 
-  /* ===== メッセージ履歴 ===== */
-  
-  // --- mirra: 履歴取得（候補エンドポイントを順次トライ） ---
-  const fetchMirraHistory = async (threadId: string): Promise<Message[]> => {
-    const candidates = [
-      { url: `/api/mtalk/mirra/history?thread_id=${encodeURIComponent(threadId)}` },
-      { url: `/api/agent/mtalk/history?thread_id=${encodeURIComponent(threadId)}` },
-      { url: `/api/talk/history?thread_id=${encodeURIComponent(threadId)}` },
-    ];
-  
-    for (const { url } of candidates) {
-      try {
-        const r = await fetchWithIdToken(url, { cache: 'no-store' });
-        if (!r.ok) continue;
-        const j: any = await r.json().catch(() => ({}));
-  
-        const rows: any[] = Array.isArray(j?.items)
-          ? j.items
-          : Array.isArray(j?.messages)
-          ? j.messages
-          : Array.isArray(j?.logs)
-          ? j.logs
-          : [];
-  
-        if (!rows.length) continue;
-  
-        return rows.map((m: any, i: number) => {
-          const roleRaw =
-            m?.role ??
-            m?.sender ??
-            (m?.is_user ? 'user' : m?.is_assistant ? 'assistant' : undefined);
-  
-          const role: Role =
-            roleRaw === 'user' || roleRaw === 'assistant' || roleRaw === 'system'
-              ? roleRaw
-              : (m?.is_user ? 'user' : 'assistant');
-  
-          const content =
-            m?.content ?? m?.text ?? m?.reply ?? m?.reply_text ?? m?.message ?? '';
-  
-          const created_at = m?.created_at ?? m?.updated_at ?? null;
-  
-          return {
-            id: String(
-              m?.id ?? m?.turn_id ?? m?.msg_id ?? `${i}-${role}-${String(content).slice(0, 8)}`
-            ),
-            role,
-            content: String(content ?? ''),
-            created_at: created_at ? String(created_at) : undefined,
-          };
-        });
-      } catch {
-        /* 次候補へ */
-      }
-    }
-    return [];
-  };
+  const js: SofiaGetList = await r.json().catch(() => ({}));
+  const irosItems: ConvListItem[] = (js.items ?? []).map((row) => ({
+    id: row.conversation_code,
+    title:
+      row.title ??
+      (row.updated_at ? `会話 (${new Date(row.updated_at).toLocaleString()})` : '新しい会話'),
+    updated_at: row.updated_at ?? null,
+  }));
+
+  setConversations(irosItems);
+
+  // Iros は従来通りの自動選択
+  const currentIros = convIdByAgent.current.iros;
+  if (!currentIros && irosItems[0]?.id) {
+    convIdByAgent.current.iros = irosItems[0].id;
+    setConversationId(irosItems[0].id);
+  } else if (currentIros) {
+    setConversationId(currentIros);
+  }
+};
 
 
   /* ===== メッセージ ===== */
@@ -440,33 +367,54 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
     if (!userCode || !convId) return;
     try {
       if (agentK === 'mu') {
-        // Mu の履歴取得API
         const r = await fetchWithIdToken(`/api/mu/turns?conv_id=${encodeURIComponent(convId)}`);
         if (!r.ok) throw new Error(`mu turns ${r.status}`);
         const js: any = await r.json().catch(() => ({}));
-  
         const rows = (js.items ?? []).map((m: any) => ({
           id: m.id,
           role: (m.role as Role) ?? 'assistant',
           content: m.content,
           created_at: m.created_at,
         })) as Message[];
-  
         const withSeed = injectMtalkSeed(rows, convId);
         setMessages(withSeed);
         saveViewStateToAgent(agentK, conversationId, withSeed);
         return;
       }
-  
+
       if (agentK === 'mirra') {
-        // mirra: サーバ履歴をフェッチ
-        const rows = await fetchMirraHistory(convId);
-        setMessages(rows);
-        saveViewStateToAgent('mirra', convId, rows);
+        // 新: messages API（messages or items どちらでも受ける）
+        const r = await fetchWithIdToken(
+          `/api/agent/mtalk/messages?conversation_id=${encodeURIComponent(convId)}`,
+          { cache: 'no-store' }
+        );
+        if (!r.ok) throw new Error(`mirra messages ${r.status}`);
+        const j: any = await r.json().catch(() => ({}));
+
+        const raw = Array.isArray(j?.messages)
+          ? j.messages
+          : Array.isArray(j?.items)
+          ? j.items
+          : [];
+
+        const rows: Message[] = raw.map((m: any, i: number) => ({
+          id: String(m.id ?? `${i}-${m.role}-${String(m.content ?? '').slice(0, 8)}`),
+          role: (m.role as Role) ?? 'assistant',
+          content: String(m.content ?? ''),
+          created_at: m.created_at ?? undefined,
+          meta: m.meta ?? undefined,
+        }));
+
+        // ★ mTalk seed（要約）を先頭に注入（初回のみ）
+        const withSeed = injectMtalkSeed(rows, convId);
+
+        setMessages(withSeed);
+        saveViewStateToAgent('mirra', convId, withSeed);
         return;
       }
-  
-      // Iros の履歴取得
+
+
+      // Iros
       const r = await fetchWithIdToken(
         `/api/sofia?user_code=${encodeURIComponent(userCode)}&conversation_code=${encodeURIComponent(
           convId
@@ -479,7 +427,7 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
         role: (m.role as Role) ?? 'assistant',
         content: m.content,
       })) as Message[];
-  
+
       setMessages((prev) => {
         const map = new Map<string, Message>(prev.map((m) => [m.id, m]));
         for (const m of rows) map.set(m.id, m);
@@ -492,43 +440,42 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
       console.error('[SofiaChat] fetchMessages error:', e);
     }
   };
-  
+
   useEffect(() => {
     if (!canUse) return;
     fetchConversations();
   }, [canUse, userCode, agentK]);
-  
+
   useEffect(() => {
     if (!canUse || !conversationId) return;
     fetchMessages(conversationId);
   }, [canUse, conversationId, agentK]);
-  
+
   // --- endpoint util ---
   const endpointFor = (a: Agent) => {
     if (a === 'mu') return '/api/agent/muai';
-    if (a === 'mirra') return '/api/mtalk/mirra';
+    if (a === 'mirra') return '/api/agent/mtalk';
     return '/api/sofia';
   };
-  
+
   const mirraEndpoints = (tid: string, text: string, code: string) => [
-    { url: '/api/mtalk/mirra', body: { text, thread_id: tid, user_code: code } },
-    { url: '/api/agent/mtalk/talk', body: { text, thread_id: tid, user_code: code } },
-    { url: '/api/agent/mtalk/message', body: { text, thread_id: tid, user_code: code } },
-    { url: '/api/talk', body: { text, threadId: tid, thread_id: tid, user_code: code } },
+    { url: '/api/agent/mtalk',         body: { text, thread_id: tid, user_code: code } }, // 公式
+    { url: '/api/mtalk/mirra',         body: { text, thread_id: tid, user_code: code } }, // 旧
+    { url: '/api/agent/mtalk/message', body: { text, thread_id: tid, user_code: code } }, // 互換
+    { url: '/api/talk',                body: { text, threadId: tid, thread_id: tid, user_code: code } }, // 最後のフォールバック
   ];
-  
+
   /* ===== 送信（mu / iros / mirra 切替） ===== */
   const handleSend = async (input: string, _files: File[] | null = null): Promise<void> => {
     const text = (input ?? '').trim();
     if (!text || !userCode) return;
-  
-    // mirra は thread_id が必要
+
     if (agentK === 'mirra' && !conversationId) {
       const seedId = `mirra-${userCode}`;
       setConversationId(seedId);
       saveViewStateToAgent('mirra', seedId, undefined);
     }
-  
+
     const optimistic: Message = {
       id: crypto.randomUUID?.() ?? `tmp-${Date.now()}`,
       role: 'user',
@@ -541,13 +488,12 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
       saveViewStateToAgent(agentK, conversationId ?? undefined, next);
       return next;
     });
-  
+
     try {
       let r: Response | null = null;
       let js: any = null;
       let nextConvId = conversationId;
-  
-      // === 送信ブロック ===
+
       if (agentK === 'mirra') {
         const tid = conversationId ?? `mirra-${userCode}`;
         const candidates = mirraEndpoints(tid, text, userCode);
@@ -562,7 +508,7 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
             r = null;
           }
           if (!r || r.status === 401 || r.status === 404) continue;
-  
+
           js = {};
           try { js = await r.json(); } catch {
             try { const t = await r.text(); if (t) js = { reply: t }; } catch {}
@@ -608,13 +554,13 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
         try { js = await r.json(); } catch { try { js = { reply: await r.text() }; } catch {} }
         nextConvId = js?.conversation_code ?? conversationId;
       }
-  
-      // === 共通処理 ===
+
+      // 共通
       if (agentK === 'mirra') {
         const tid = conversationId ?? `mirra-${userCode}`;
         nextConvId = js?.conversation_id || js?.thread_id || js?.threadId || nextConvId || tid;
       }
-  
+
       if (nextConvId && nextConvId !== conversationId) {
         setConversationId(nextConvId);
         saveViewStateToAgent(agentK, nextConvId, undefined);
@@ -631,8 +577,7 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
               ]
         );
       }
-  
-      // 返信テキスト
+
       let replyText =
         typeof js?.reply === 'string'
           ? js.reply
@@ -643,19 +588,41 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
           : typeof js === 'string'
           ? js
           : '';
-  
-      // mirra: 空レスなら履歴を再フェッチ
-      if (agentK === 'mirra') {
-        const tid = nextConvId ?? conversationId;
-        if (!replyText && tid) {
-          const rows = await fetchMirraHistory(tid);
-          if (rows.length) {
-            setMessages(rows);
-            saveViewStateToAgent('mirra', tid, rows);
+
+          if (agentK === 'mirra') {
+            const tid = nextConvId ?? conversationId;
+            if (!replyText && tid) {
+              // 応答が空でもサーバ側が保存していれば、再取得で反映
+              const r2 = await fetchWithIdToken(
+                `/api/agent/mtalk/messages?conversation_id=${encodeURIComponent(tid)}`,
+                { cache: 'no-store' }
+              );
+              const j2: any = await r2.json().catch(() => ({}));
+    
+              const raw2 = Array.isArray(j2?.messages)
+                ? j2.messages
+                : Array.isArray(j2?.items)
+                ? j2.items
+                : [];
+    
+              const rows2: Message[] = raw2.map((m: any, i: number) => ({
+                id: String(m.id ?? `${i}-${m.role}-${String(m.content ?? '').slice(0, 8)}`),
+                role: (m.role as Role) ?? 'assistant',
+                content: String(m.content ?? ''),
+                created_at: m.created_at ?? undefined,
+                meta: m.meta ?? undefined,
+              }));
+    
+              const withSeed2 = injectMtalkSeed(rows2, tid);
+    
+              if (withSeed2.length) {
+                setMessages(withSeed2);
+                saveViewStateToAgent('mirra', tid, withSeed2);
+              }
+            }
           }
-        }
-      }
-  
+    
+
       if (replyText) {
         setMessages((prev) => {
           const next = [
@@ -673,12 +640,12 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
           return next;
         });
       }
-  
+
       if (js?.meta) {
         const m = normalizeMeta(js.meta);
         if (m) setMeta(m);
       }
-  
+
       if (typeof js?.credit_balance === 'number') {
         try {
           window.dispatchEvent(new CustomEvent('sofia_credit', { detail: { credits: js.credit_balance } }));
@@ -697,9 +664,7 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
     }
   };
 
-  // --- ここまで差し替え ---
-
-  /* ===== mTalk要約を初回入力として自動送信（1回だけ） ===== */
+  // mTalk要約を初回入力として自動送信（1回だけ）
   const autoAskedRef = useRef(false);
   useEffect(() => {
     if (urlFrom !== 'mtalk' || autoAskedRef.current) return;
@@ -707,7 +672,7 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
     const hasAssistantReply = messages.some((m) => m.role === 'assistant' && !m.meta?.from);
     if (hasSeed && !hasAssistantReply) {
       autoAskedRef.current = true;
-      // トーンは agent で切替（Mu=実用600字 / それ以外=深掘り800字以上）
+      // トーンは agent で切替
       handleSend(
         agentK === 'mu'
           ? '上のmTalk要約を前提に、実用寄り600字前後でお願いします。'
@@ -716,7 +681,6 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
     }
   }, [messages, urlFrom, agentK]);
 
-  /* ===== その他 ===== */
   const handleNewChat = () => {
     convIdByAgent.current[agentK] = undefined;
     msgsByAgent.current[agentK] = [];
@@ -731,47 +695,95 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
     setIsMobileMenuOpen(false);
   };
 
-  /* ===== サイドバー：リネーム / 削除 ===== */
-  const handleRename = useCallback(async (id: string, newTitle: string) => {
+  const handleDelete = async (id: string) => {
+    if (!userCode || !id) return;
+    
     try {
-      const r = await fetchWithIdToken(`/api/conv/${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: newTitle }),
-      });
-      if (!r.ok) {
-        const j = await r.json().catch(() => ({}));
-        alert(j?.error ?? 'リネームに失敗しました');
-        return;
+      if (agentK === 'mu') {
+        // Mu会話の削除APIを呼び出し
+        await fetchWithIdToken(`/api/mu/delete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ conversation_id: id }),
+        });
+      } else if (agentK === 'mirra') {
+        // mirra会話の削除APIを呼び出し
+        await fetchWithIdToken(`/api/agent/mtalk/conversations/${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+        });
+      } else {
+        // Iros会話の削除APIを呼び出し
+        await fetchWithIdToken(`/api/sofia/delete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ conversation_code: id }),
+        });
       }
-      setConversations((xs) => xs.map((x) => (x.id === id ? { ...x, title: newTitle } : x)));
+
+      // ローカル状態を更新
+      setConversations(prev => prev.filter(conv => conv.id !== id));
+      
+      // 削除された会話が現在選択中の会話の場合、新しい会話を選択
+      if (id === conversationId) {
+        const remaining = conversations.filter(conv => conv.id !== id);
+        if (remaining.length > 0) {
+          handleSelectConversation(remaining[0].id);
+        } else {
+          handleNewChat();
+        }
+      }
+    } catch (e) {
+      console.error('[SofiaChat] delete error:', e);
+      window.dispatchEvent(new CustomEvent('toast', { 
+        detail: { kind: 'error', msg: '会話の削除に失敗しました' } 
+      }));
+    }
+  };
+
+  const handleRename = async (id: string, newTitle: string) => {
+    if (!userCode || !id || !newTitle.trim()) return;
+    
+    try {
+      if (agentK === 'mu') {
+        // Mu会話のリネームAPIを呼び出し
+        await fetchWithIdToken(`/api/mu/rename`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ conversation_id: id, title: newTitle.trim() }),
+        });
+      } else if (agentK === 'mirra') {
+        // mirra会話のリネームAPIを呼び出し
+        await fetchWithIdToken(`/api/agent/mtalk/conversations/${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: newTitle.trim() }),
+        });
+      } else {
+        // Iros会話のリネームAPIを呼び出し
+        await fetchWithIdToken(`/api/sofia/rename`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ conversation_code: id, title: newTitle.trim() }),
+        });
+      }
+
+      // ローカル状態を更新
+      setConversations(prev => 
+        prev.map(conv => 
+          conv.id === id 
+            ? { ...conv, title: newTitle.trim() }
+            : conv
+        )
+      );
     } catch (e) {
       console.error('[SofiaChat] rename error:', e);
-      alert('リネームに失敗しました');
+      window.dispatchEvent(new CustomEvent('toast', { 
+        detail: { kind: 'error', msg: '会話のリネームに失敗しました' } 
+      }));
     }
-  }, []);
+  };
 
-  const handleDelete = useCallback(
-    async (id: string) => {
-      if (!confirm('この会話を削除します。よろしいですか？')) return;
-      try {
-        const r = await fetchWithIdToken(`/api/conv/${encodeURIComponent(id)}`, { method: 'DELETE' });
-        if (!r.ok) {
-          const j = await r.json().catch(() => ({}));
-          alert(j?.error ?? '削除に失敗しました');
-          return;
-        }
-        setConversations((xs) => xs.filter((x) => x.id !== id));
-        if (conversationId === id) handleNewChat();
-      } catch (e) {
-        console.error('[SofiaChat] delete error:', e);
-        alert('削除に失敗しました');
-      }
-    },
-    [conversationId]
-  );
-
-  /* ===== Name/Type/Credits クリック（受け取り→トースト） ===== */
+  // Name/Type/Credits クリック（受け取り→トースト）
   useEffect(() => {
     const showToast = (msg: string) => {
       const id = 'sof-toast';
@@ -811,7 +823,7 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
     };
   }, []);
 
-  /* ===== 実ユーザー情報の取得（get-user-info） ===== */
+  // 実ユーザー情報（get-user-info）
   useEffect(() => {
     if (!userCode) return;
     (async () => {
@@ -827,30 +839,16 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
             avatarUrl: j.avatar_url ?? '/avatar.png',
           });
         } else {
-          setUiUser({
-            id: userCode,
-            name: userCode,
-            userType: 'free',
-            credits: 0,
-            avatarUrl: '/avatar.png',
-          });
+          setUiUser({ id: userCode, name: userCode, userType: 'free', credits: 0, avatarUrl: '/avatar.png' });
         }
       } catch {
-        setUiUser({
-          id: userCode,
-          name: userCode,
-          userType: 'free',
-          credits: 0,
-          avatarUrl: '/avatar.png',
-        });
+        setUiUser({ id: userCode, name: userCode, userType: 'free', credits: 0, avatarUrl: '/avatar.png' });
       }
     })();
   }, [userCode]);
 
-  /* ========= render ========= */
   return (
     <div className="sofia-container sof-center">
-      {/* ヘッダー */}
       <div className="sof-header-fixed">
         <Header
           agent={agentK}
@@ -860,13 +858,8 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
         />
       </div>
 
-      <div
-        className="sof-top-spacer"
-        style={{ height: 'calc(var(--sof-header-h, 56px) + 12px)' }}
-        aria-hidden
-      />
+      <div className="sof-top-spacer" style={{ height: 'calc(var(--sof-header-h, 56px) + 12px)' }} aria-hidden />
 
-      {/* 本文 */}
       {authLoading ? (
         <div style={styles.center}>読み込み中…</div>
       ) : !userCode ? (
@@ -885,23 +878,13 @@ export default function SofiaChat({ agent: agentProp = 'mu' }: SofiaChatProps) {
             onDelete={handleDelete}
             onRename={handleRename}
             userInfo={
-              uiUser ?? {
-                id: userCode,
-                name: userCode,
-                userType: 'free',
-                credits: 0,
-              }
+              uiUser ?? { id: userCode, name: userCode, userType: 'free', credits: 0 }
             }
             meta={meta}
-            // ← mirra の履歴を渡す（他エージェントでは未指定）
             mirraHistory={agentK === 'mirra' ? mirraHistory ?? [] : undefined}
           />
 
-          <MessageList
-            messages={messages}
-            currentUser={uiUser ?? undefined}
-            agent={agentK}
-          />
+          <MessageList messages={messages} currentUser={uiUser ?? undefined} agent={agentK} />
 
           <div ref={endRef} />
 

@@ -1,3 +1,4 @@
+// src/app/api/agent/mtalk/analyze/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -33,21 +34,33 @@ type Body = {
 
 /* ====== credits ====== */
 async function getBalance(supabase: any, user_code: string): Promise<number> {
+  console.log('[getBalance] start', { user_code });
   const { data: u, error: uErr } = await supabase
     .from('users')
     .select('sofia_credit')
     .eq('user_code', user_code)
     .maybeSingle();
-  if (!uErr && u && typeof u.sofia_credit === 'number') return Number(u.sofia_credit);
+
+  if (!uErr && u && typeof u.sofia_credit === 'number') {
+    console.log('[getBalance] from users.sofia_credit', { val: u.sofia_credit });
+    return Number(u.sofia_credit);
+  }
 
   const { data, error } = await supabase
     .from('credits_ledger')
     .select('amount')
     .eq('user_code', user_code);
+
   if (error) throw error;
-  return (data ?? []).reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
+  const sum = (data ?? []).reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
+  console.log('[getBalance] from credits_ledger sum', { sum });
+  return sum;
 }
 
+/**
+ * 課金は基本 RPC のみを使用（SECURITY DEFINER 関数）。
+ * ※ 関数が存在しない 42883 の時だけ明示的にエラーを投げる（RLS 直叩きはしない）
+ */
 async function chargeCredits(
   supabase: any,
   user_code: string,
@@ -55,47 +68,45 @@ async function chargeCredits(
   reason: string,
   meta?: Record<string, any>,
 ): Promise<number> {
-  try {
-    const { data: rpc, error: rpcErr } = await supabase.rpc('fn_charge_credits', {
-      p_user_code: user_code,
-      p_cost: cost,
-      p_reason: reason,
-      p_meta: meta ?? null,
-    });
-    if (!rpcErr && typeof rpc === 'number') return Number(rpc);
-  } catch {}
+  console.log('[mtalk/analyze] chargeCredits', { cost, reason });
 
-  const { data: u, error: uErr } = await supabase
-    .from('users')
-    .select('sofia_credit')
-    .eq('user_code', user_code)
-    .maybeSingle();
-  if (uErr) throw uErr;
+  // 6 引数版を明示してオーバーロード衝突を回避
+  console.log('[chargeCredits] try rpc fn_charge_credits with', {
+    p_user_code: user_code,
+    p_cost: cost,
+    p_reason: reason,
+    p_meta: meta ? '[jsonb]' : null,
+    p_ref_conversation_id: null,
+    p_ref_sub_id: null,
+  });
 
-  const current = Number(u?.sofia_credit ?? 0);
-  if (current < cost) {
-    const err: any = new Error('insufficient_balance');
-    err.code = 'insufficient_balance';
-    throw err;
+  const { data: rpc, error: rpcErr } = await supabase.rpc('fn_charge_credits', {
+    p_user_code: user_code,
+    p_cost: cost,
+    p_reason: reason,
+    p_meta: meta ?? null,
+    p_ref_conversation_id: null,
+    p_ref_sub_id: null,
+  });
+
+  console.log('[chargeCredits] rpc result', { rpc, rpcErr: rpcErr?.message ?? null });
+
+  if (rpcErr) {
+    // 42883 = function not found（環境未適用）。それ以外は関数内エラー。
+    if ((rpcErr as any).code === '42883') {
+      console.error('[chargeCredits] function not found (42883)');
+    } else {
+      console.error('[chargeCredits] rpc threw', rpcErr.message || rpcErr);
+    }
+    throw rpcErr;
   }
 
-  const { data: upd, error: updErr } = await supabase
-    .from('users')
-    .update({ sofia_credit: current - cost })
-    .eq('user_code', user_code)
-    .select('sofia_credit')
-    .single();
-  if (updErr) throw updErr;
+  // 関数が残高を返す形なら利用。未返却なら null/undefined が来ることもあるので
+  // その場合は呼び出し側で残高再取得などに切り替える。
+  if (typeof rpc === 'number') return Number(rpc);
 
-  const { error: ledErr } = await supabase.from('credits_ledger').insert({
-    user_code,
-    amount: -cost,
-    reason,
-    meta: meta ?? null,
-  });
-  if (ledErr) throw ledErr;
-
-  return Number(upd.sofia_credit);
+  console.warn('[chargeCredits] rpc returned no numeric balance; returning NaN to trigger fallback read');
+  return NaN;
 }
 
 /* ====== heuristics ====== */
@@ -246,14 +257,43 @@ async function ensureConversationAndSeed(
 /* ====== main ====== */
 export async function POST(req: NextRequest) {
   try {
+    // ---- 環境ログ（鍵はマスク表示） ----
+    const envUsed = {
+      HAS_SUPABASE_URL: !!process.env.NEXT_PUBLIC_SUPABASE_URL || !!process.env.SUPABASE_URL,
+      USED_URL: SUPABASE_URL,
+      HAS_SR: !!process.env.SUPABASE_SERVICE_ROLE || !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      SR_SRC: process.env.SUPABASE_SERVICE_ROLE ? 'SUPABASE_SERVICE_ROLE' :
+              (process.env.SUPABASE_SERVICE_ROLE_KEY ? 'SUPABASE_SERVICE_ROLE_KEY' : 'N/A'),
+      HAS_JWT: !!process.env.SUPABASE_JWT_SECRET,
+    };
+    const mask = (s: string) =>
+      !s ? '(empty)' : `${s.slice(0, 6)}...${s.slice(-6)} (len=${s.length})`;
+
+    console.log('[mtalk/analyze] ENV CHECK', {
+      url: SUPABASE_URL,
+      serviceRoleMasked: mask(SERVICE_ROLE || ''),
+      vars: envUsed,
+    });
+
+    // ---- 認証 ----
     const auth = await verifyFirebaseAndAuthorize(req);
     if (!auth?.ok) return json({ ok: false, error: 'unauthorized' }, 401);
 
     const user_code = (auth as any).userCode ?? (auth as any).user_code ?? null;
     if (!user_code) return json({ ok: false, error: 'no_user_code' }, 401);
 
+    console.log('[mtalk/analyze] creating supabase client with SERVICE_ROLE');
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
 
+    // 最小 ping
+    try {
+      const ping = await supabase.from('users').select('user_code').limit(1);
+      console.log('[mtalk/analyze] users ping ok?', { error: ping.error?.message ?? null });
+    } catch (e: any) {
+      console.error('[mtalk/analyze] users ping threw', e?.message || e);
+    }
+
+    // ---- 入力 ----
     const body = (await req.json()) as Body;
     const agent = body.agent;
     const texts = (body.texts || []).map(String).map((s) => s.trim()).filter(Boolean);
@@ -265,10 +305,13 @@ export async function POST(req: NextRequest) {
 
     const cost = agent === 'iros' ? 5 : 2;
 
+    // ---- 残高確認 ----
+    console.log('[mtalk/analyze] getBalance start', { user_code });
     const balance = await getBalance(supabase, user_code);
+    console.log('[mtalk/analyze] getBalance done', { balance });
     if (balance < cost) return json({ ok: false, error: 'insufficient_balance', balance }, 402);
 
-    // セッション作成（mtalk_sessions.agent は mirra|iros）
+    // ---- セッション作成 ----
     let session_id = body.session_id || null;
     if (!session_id) {
       const { data: sessIns, error: sessErr } = await supabase
@@ -276,10 +319,14 @@ export async function POST(req: NextRequest) {
         .insert({ user_code, agent })
         .select('id')
         .single();
-      if (sessErr) throw sessErr;
+      if (sessErr) {
+        console.error('[mtalk/analyze] insert mtalk_sessions error', sessErr);
+        throw sessErr;
+      }
       session_id = sessIns.id as string;
     }
 
+    // ---- LLM 処理 ----
     const joined = texts.join('\n').slice(0, 2000);
 
     const fb = fallbackPhaseAndDepth(joined);
@@ -293,11 +340,20 @@ export async function POST(req: NextRequest) {
 
     const reply_text = await llmMakeReport(agent, joined, q_emotion, phase, depth_stage);
 
-    const balance_after = await chargeCredits(supabase, user_code, cost, 'mtalk_analyze', {
+    // ---- 課金（RPC）----
+    console.log('[mtalk/analyze] chargeCredits', { cost, reason: 'mtalk_analyze' });
+    const balance_after_rpc = await chargeCredits(supabase, user_code, cost, 'mtalk_analyze', {
       agent,
       session_id,
     });
+    console.log('[mtalk/analyze] chargeCredits done', { balance_after_rpc });
 
+    // 必要に応じて残高再読（関数が数値を返さない場合に備えて）
+    const balance_after = Number.isFinite(balance_after_rpc)
+      ? Number(balance_after_rpc)
+      : await getBalance(supabase, user_code);
+
+    // ---- レポート保存 ----
     const { data: repIns, error: repErr } = await supabase
       .from('mtalk_reports')
       .insert({
@@ -313,9 +369,12 @@ export async function POST(req: NextRequest) {
       })
       .select('id, created_at, conversation_id')
       .single();
-    if (repErr) throw repErr;
+    if (repErr) {
+      console.error('[mtalk/analyze] insert mtalk_reports error', repErr);
+      throw repErr;
+    }
 
-    // conversations.owner_uid を users.supabase_uid から取得
+    // ---- conversations へシード保存 ----
     const owner_uid = await getOwnerUidByUserCode(supabase, user_code);
 
     const title = `mTalk: ${texts[0]?.slice(0, 48) || '最初のマインドトーク'}`;
@@ -334,7 +393,10 @@ export async function POST(req: NextRequest) {
         .from('mtalk_reports')
         .update({ conversation_id })
         .eq('id', repIns.id);
-      if (updErr) throw updErr;
+      if (updErr) {
+        console.error('[mtalk/analyze] update mtalk_reports.conversation_id error', updErr);
+        throw updErr;
+      }
     }
 
     return json({
@@ -358,7 +420,6 @@ export async function POST(req: NextRequest) {
       return json({ ok: false, error: 'insufficient_balance' }, 402);
     }
     if (msg.includes('owner_uid_not_found_or_not_uuid')) {
-      // users.supabase_uid が未設定 or 不正（uuid でない）
       return json({ ok: false, error: 'owner_uid_not_found' }, 500);
     }
     return json({ ok: false, error: 'internal_error', detail: msg }, 500);

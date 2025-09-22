@@ -1,0 +1,190 @@
+﻿**********************
+Windows PowerShell トランスクリプト開始
+開始時刻: 20250922095630
+ユーザー名: DESKTOP-5LI4ASS\tongr
+RunAs ユーザー: DESKTOP-5LI4ASS\tongr
+構成名: 
+コンピューター: DESKTOP-5LI4ASS (Microsoft Windows NT 10.0.19045.0)
+ホスト アプリケーション: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -noexit -command try { . "c:\Users\tongr\AppData\Local\Programs\cursor\resources\app\out\vs\workbench\contrib\terminal\common\scripts\shellIntegration.ps1" } catch {}
+プロセス ID: 15624
+PSVersion: 5.1.19041.6328
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.19041.6328
+BuildVersion: 10.0.19041.6328
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+]633;A]633;P;Cwd=C:\x5cUsers\x5ctongr\x5cpay_muversev1.1.1PS C:\Users\tongr\pay_muversev1.1.1> ]633;B
+]633;A]633;P;Cwd=C:\x5cUsers\x5ctongr\x5cpay_muversev1.1.1PS C:\Users\tongr\pay_muversev1.1.1> ]633;B
+PS># ===== ヘルパ =====
+]633;A]633;P;Cwd=C:\x5cUsers\x5ctongr\x5cpay_muversev1.1.1PS C:\Users\tongr\pay_muversev1.1.1> ]633;B
+PS>[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+]633;A]633;P;Cwd=C:\x5cUsers\x5ctongr\x5cpay_muversev1.1.1PS C:\Users\tongr\pay_muversev1.1.1> ]633;B
+PS>function New-AuthHeader { param([string]$Token) @{ Authorization="Bearer $Token"; Accept="application/json" } }
+]633;A]633;P;Cwd=C:\x5cUsers\x5ctongr\x5cpay_muversev1.1.1PS C:\Users\tongr\pay_muversev1.1.1> ]633;B
+]633;A]633;P;Cwd=C:\x5cUsers\x5ctongr\x5cpay_muversev1.1.1PS C:\Users\tongr\pay_muversev1.1.1> ]633;B
+PS>function Invoke-Logged {
+ステートメント ブロックまたは型定義に終わりの '}' が存在しません。
+>> function Invoke-Logged {
+  param(
+    [ValidateSet('GET','POST','PATCH','DELETE','HEAD')][string]$Method = 'GET',
+    [Parameter(Mandatory=$true)][string]$Url,
+    [hashtable]$Headers,
+    [string]$ContentType,
+    $Body
+  )
+  Write-Host "→ $Method $Url"
+  Add-Content -Path $LogFile -Value ("`n=== REQUEST ===`n{0} {1}`nHeaders:`n{2}`nBody:`n{3}`n" -f `
+    $Method, $Url, ($Headers | ConvertTo-Json -Depth 6), $(if($Body){$Body}else{'(none)'}))
+ステートメント ブロックまたは型定義に終わりの '}' が存在しません。
+>> function Invoke-Logged {
+  param(
+    [ValidateSet('GET','POST','PATCH','DELETE','HEAD')][string]$Method = 'GET',
+    [Parameter(Mandatory=$true)][string]$Url,
+    [hashtable]$Headers,
+    [string]$ContentType,
+    $Body
+  )
+  Write-Host "→ $Method $Url"
+  Add-Content -Path $LogFile -Value ("`n=== REQUEST ===`n{0} {1}`nHeaders:`n{2}`nBody:`n{3}`n" -f `
+    $Method, $Url, ($Headers | ConvertTo-Json -Depth 6), $(if($Body){$Body}else{'(none)'}))
+  try {
+    $resp = if($Body){
+      Invoke-WebRequest -Uri $Url -Method $Method -Headers $Headers -ContentType $ContentType -Body $Body -ErrorAction Stop
+    } else {
+      Invoke-WebRequest -Uri $Url -Method $Method -Headers $Headers -ErrorAction Stop
+    }
+    $text  = $resp.Content
+    $obj   = $null; try { $obj = $text | ConvertFrom-Json } catch {}
+    Add-Content -Path $LogFile -Value ("--- RESPONSE {0} ---`nStatus: {1}`nHeaders:`n{2}`nBody(sample):`n{3}`n" -f `
+      $Url, $resp.StatusCode, ($resp.Headers | Out-String), $(if($text){$text.Substring(0,[Math]::Min(4000,$text.Length))}else{'(empty)'}))
+    return @{ ok=$true; status=$resp.StatusCode; headers=$resp.Headers; text=$text; json=$obj }
+  } catch {
+    $we = $_.Exception
+    $status = if($we.Response){ [int]$we.Response.StatusCode } else { -1 }
+    $errBody = $null
+    if($we.Response -and $we.Response.GetResponseStream){
+      $reader = New-Object System.IO.StreamReader($we.Response.GetResponseStream())
+      $errBody = $reader.ReadToEnd()
+    }
+    Add-Content -Path $LogFile -Value ("--- ERROR {0} ---`nStatus: {1}`nMessage: {2}`nBody:`n{3}`n" -f $Url,$status,$we.Message,$errBody)
+    [pscustomobject]@{ when=(Get-Date); method=$Method; url=$Url; status=$status; message=$we.Message; body=$errBody } |
+      Export-Csv -NoTypeInformation -Append -Path $CsvErr
+    if($StopOnError){ throw }
+    return @{ ok=$false; status=$status; error=$we; body=$errBody }
+  }
+}
+]633;A]633;P;Cwd=C:\x5cUsers\x5ctongr\x5cpay_muversev1.1.1PS C:\Users\tongr\pay_muversev1.1.1> ]633;B
+PS># ===== 1) Supabase 取得（Accept-Profile: users） =====
+]633;A]633;P;Cwd=C:\x5cUsers\x5ctongr\x5cpay_muversev1.1.1PS C:\Users\tongr\pay_muversev1.1.1> ]633;B
+PS>$hSupa = @{
+ハッシュ リテラルが不完全です。
+>> $hSupa = @{
+  apikey           = $SUPABASE_KEY
+  Authorization    = "Bearer $SUPABASE_KEY"
+  Accept           = "application/json"
+  "Accept-Profile" = $SCHEMA
+}
+]633;A]633;P;Cwd=C:\x5cUsers\x5ctongr\x5cpay_muversev1.1.1PS C:\Users\tongr\pay_muversev1.1.1> ]633;B
+PS># スモーク: まず1件（406/404 切り分け）
+]633;A]633;P;Cwd=C:\x5cUsers\x5ctongr\x5cpay_muversev1.1.1PS C:\Users\tongr\pay_muversev1.1.1> ]633;B
+PS>$smoke = Invoke-Logged -Method GET -Url "$SUPABASE_URL/rest/v1/$TABLE?select=*&limit=1" -Headers $hSupa
+→ GET https://hcodeoathneftqkmjyoh.supabase.co/rest/v1/=*&limit=1
+Add-Content : 別のプロセスで使用されているため、プロセスはファイル 'C:\Users\tongr\pay_muversev1.1.1\sync-logs_20250922-095630\run.log' にアクセスできません
+。
+発生場所 行:10 文字:3
++   Add-Content -Path $LogFile -Value ("`n=== REQUEST ===`n{0} {1}`nHea ...
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (C:\Users\tongr\...-095630\run.log:String) [Add-Content], IOException
+    + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Commands.AddContentCommand
+Add-Content : 別のプロセスで使用されているため、プロセスはファイル 'C:\Users\tongr\pay_muversev1.1.1\sync-logs_
+20250922-095630\run.log' にアクセスできません。
+発生場所 行:10 文字:3
++   Add-Content -Path $LogFile -Value ("`n=== REQUEST ===`n{0} {1}`nHea ...
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (C:\Users\tongr\...-095630\run.log:String) [Add-Content], IOExceptio
+   n
+    + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Commands.AddContentCommand
+
+PS>終了エラー(Invoke-WebRequest): "リモート サーバーがエラーを返しました: (406) 受容不可"
+Add-Content : 別のプロセスで使用されているため、プロセスはファイル 'C:\Users\tongr\pay_muversev1.1.1\sync-logs_20250922-095630\run.log' にアクセスできません
+。
+発生場所 行:31 文字:5
++     Add-Content -Path $LogFile -Value ("--- ERROR {0} ---`nStatus: {1 ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (C:\Users\tongr\...-095630\run.log:String) [Add-Content], IOException
+    + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Commands.AddContentCommand
+Add-Content : 別のプロセスで使用されているため、プロセスはファイル 'C:\Users\tongr\pay_muversev1.1.1\sync-logs_
+20250922-095630\run.log' にアクセスできません。
+発生場所 行:31 文字:5
++     Add-Content -Path $LogFile -Value ("--- ERROR {0} ---`nStatus: {1 ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (C:\Users\tongr\...-095630\run.log:String) [Add-Content], IOExceptio
+   n
+    + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Commands.AddContentCommand
+
+]633;A]633;P;Cwd=C:\x5cUsers\x5ctongr\x5cpay_muversev1.1.1PS C:\Users\tongr\pay_muversev1.1.1> ]633;B
+PS>if(-not $smoke.ok){
+ステートメント ブロックまたは型定義に終わりの '}' が存在しません。
+>> if(-not $smoke.ok){
+  if($smoke.status -eq 406){ Write-Warning "406: Accept/Accept-Profile を確認（スキーマ=users）。" }
+  if($smoke.status -eq 404){ Write-Warning "404: テーブル名/スキーマ or 権限（RLS）を確認。" }
+  if($transcribing){ try{ Stop-Transcript | Out-Null }catch{} }
+  return
+}
+警告: 406: Accept/Accept-Profile を確認（スキーマ=users）。
+**********************
+Windows PowerShell トランスクリプト終了
+終了時刻: 20250922095631
+**********************
+
+=== REQUEST ===
+GET https://hcodeoathneftqkmjyoh.supabase.co/rest/v1/=*&limit=1000&offset=0
+Headers:
+{
+    "Authorization":  "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imhjb2Rlb2F0aG5lZnRxa21qeW9oIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MTI0NjkzNiwiZXhwIjoyMDY2ODIyOTM2fQ.2fu9pYBLH9mUOttgu9Zv1xsTdJ4UFwL7cIadSxPs-YI",
+    "apikey":  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imhjb2Rlb2F0aG5lZnRxa21qeW9oIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MTI0NjkzNiwiZXhwIjoyMDY2ODIyOTM2fQ.2fu9pYBLH9mUOttgu9Zv1xsTdJ4UFwL7cIadSxPs-YI",
+    "Accept-Profile":  "users",
+    "Accept":  "application/json"
+}
+Body:
+(none)
+
+--- ERROR https://hcodeoathneftqkmjyoh.supabase.co/rest/v1/=*&limit=1000&offset=0 ---
+Status: 406
+Message: リモート サーバーがエラーを返しました: (406) 受容不可
+Body:
+{"code":"PGRST106","details":null,"hint":null,"message":"The schema must be one of the following: public, graphql_public"}
+
+
+=== REQUEST ===
+POST https://mu.sun-verse.com/oauth/v2/token
+Headers:
+
+Body:
+grant_type=client_credentials&client_id=1_68mw8zz003cwkc4gksos0sc4csowo4ws88kcogoc08ckg4wgok&client_secret=t5py1befobkkgwcgo8c4k4ccgkkosgkk0s80008wcck8wosgc
+
+--- RESPONSE https://mu.sun-verse.com/oauth/v2/token ---
+Status: 200
+Headers:
+
+Key               Value                        
+---               -----                        
+Transfer-Encoding chunked                      
+Connection        keep-alive                   
+Pragma            no-cache                     
+Vary              Range,Accept-Encoding        
+Accept-Ranges     none                         
+Cache-Control     no-store, private            
+Content-Type      application/json             
+Date              Mon, 22 Sep 2025 00:56:33 GMT
+Server            Apache                       
+X-Powered-By      PHP/8.3.25                   
+
+
+
+Body(sample):
+{"access_token":"MzAyN2I1NGQ3Y2U2ZWU3YjdjMDU4OWY5NjNlYTQ1YTA5MTJhOWYzOTg2NmQ0NjVkOTQwNDA0N2M5OTkwMGZkNg","expires_in":3600,"token_type":"bearer","scope":null}
+

@@ -1,11 +1,10 @@
-// src/app/mtalk/page.tsx
 'use client';
 
 import React, { useMemo, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { fetchWithIdToken } from '@/lib/fetchWithIdToken';
-import { useUnread } from '@/store/useUnread';   // ★追加
+import { useUnread } from '@/store/useUnread';
 import './mtalk.css';
 
 type Agent = 'mirra' | 'iros';
@@ -19,7 +18,6 @@ type Report = {
   created_at: string;
 };
 
-// API から返ってくる履歴アイテム（柔軟に受けるため any 併用）
 type ThreadItem = {
   id?: string;
   thread_id?: string;
@@ -33,13 +31,13 @@ type ThreadItem = {
   summary?: string;
   updated_at?: string | null;
   created_at?: string | null;
-  unread_count?: number | null;   // ★追加: 未読数フィールド（存在すれば利用）
+  unread_count?: number | null;
 };
 
 export default function MTalkPage() {
   const router = useRouter();
   const { userCode } = useAuth();
-  const setTalkUnread = useUnread((s) => s.setTalkUnread); // ★追加
+  const setTalkUnread = useUnread((s) => s.setTalkUnread);
 
   const [agent, setAgent] = useState<Agent>('mirra');
   const [input, setInput] = useState('');
@@ -50,13 +48,10 @@ export default function MTalkPage() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [latestReport, setLatestReport] = useState<Report | null>(null);
 
-  // ★ mirra の会話履歴
   const [history, setHistory] = useState<ThreadItem[]>([]);
 
-  // ▼ 履歴を安全化（id正規化・欠落排除・重複除去・ラベル整形）
   const historySafe = useMemo(() => {
     const src = Array.isArray(history) ? history : [];
-
     const norm = src.map((h, idx) => {
       const idRaw =
         h?.id ??
@@ -66,29 +61,20 @@ export default function MTalkPage() {
         h?.conv_id ??
         h?.report_id ??
         `row-${idx}`;
-
       const id = typeof idRaw === 'string' ? idRaw.trim() : String(idRaw).trim();
-
       const titleRaw = h?.title ?? h?.subject ?? h?.name ?? h?.summary ?? '';
       const title = String(titleRaw || '').trim() || '（無題）';
-
       const dateRaw = h?.updated_at ?? h?.created_at ?? null;
       const when = dateRaw ? new Date(dateRaw).toLocaleString() : '';
-
       return { id, label: when ? `${title}（${when}）` : title };
     });
-
-    // id が空は捨てる
     const cleaned = norm.filter((x) => x.id && x.id.length > 0);
-
-    // 同一id除外
     const seen = new Set<string>();
     const uniq = cleaned.filter((x) => {
       if (seen.has(x.id)) return false;
       seen.add(x.id);
       return true;
     });
-
     return uniq;
   }, [history]);
 
@@ -101,17 +87,15 @@ export default function MTalkPage() {
     if (!userCode) return;
     (async () => {
       try {
-        const r = await fetchWithIdToken('/api/mtalk/mirra/history', { cache: 'no-store' });
+        const r = await fetchWithIdToken('/api/agent/mtalk/conversations', { cache: 'no-store' });
         const j = await r.json().catch(() => ({}));
         const items = Array.isArray(j?.items) ? (j.items as ThreadItem[]) : [];
         setHistory(items);
-
-        // ★ 未読合計をストアにコピー
         const totalUnread = items.reduce((acc, it) => acc + (it.unread_count ?? 0), 0);
         setTalkUnread(totalUnread);
       } catch {
         setHistory([]);
-        setTalkUnread(0); // ★失敗時は0
+        setTalkUnread(0);
       }
     })();
   }, [userCode, setTalkUnread]);
@@ -123,7 +107,6 @@ export default function MTalkPage() {
 
     try {
       const lines = input.split('\n').map(s => s.trim()).filter(Boolean);
-
       const res = await fetchWithIdToken('/api/agent/mtalk/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -166,56 +149,48 @@ export default function MTalkPage() {
     }
   }
 
+  // ★ 相談開始：問題/回答をAPIに渡し、チャットへ遷移
   async function consult(reportId: string) {
-    if (!hasHistory) {
-      setErrorMsg('mirra の相談チャットは、過去に相談したことがある方のみご利用いただけます。');
-      return;
-    }
-  
     try {
       const res = await fetchWithIdToken('/api/agent/mtalk/consult', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ report_id: reportId }),
+        body: JSON.stringify({
+          report_id: reportId,
+          problem_text: input?.trim() || '（mTalk）この相談の“問題”テキスト',
+          answer_text: latestReport?.reply_text || '（mTalk）この相談の“回答”テキスト',
+          title: 'mTalkからの相談',
+        }),
       });
       const j = await res.json();
-  
+
       if (!(j?.ok)) {
         setErrorMsg(j?.error || '相談の起動に失敗しました。');
         return;
       }
-  
-      // --- ここから新UIへのリダイレクト統一 ---
-      const hintedCid =
-        (j.conversation_id && String(j.conversation_id)) ||
-        (() => {
-          try {
-            const p = new URL(j.redirect, location.origin).pathname.split('/').filter(Boolean);
-            return p[p.length - 1] || '';
-          } catch {
-            return '';
-          }
-        })();
-  
-      if (j.summary_hint && hintedCid) {
-        try { sessionStorage.setItem(`mtalk:seed:${hintedCid}`, j.summary_hint); } catch {}
-      }
-  
-      const basePath = `/mtalk/${encodeURIComponent(hintedCid)}`;
-      const url = new URL(basePath, location.origin);
+
+      // 保険：サーバで挿入できなかった場合でも描画できるよう seed を保存
+      try {
+        const cid = String(j.conversation_id || '').trim();
+        if (Array.isArray(j.seed_messages) && j.seed_messages.length) {
+          sessionStorage.setItem(`mtalk:seed:${cid}`, JSON.stringify(j.seed_messages));
+        }
+        if (j.summary_hint) {
+          sessionStorage.setItem(`mtalk:seed_hint:${cid}`, String(j.summary_hint).slice(0, 220));
+        }
+      } catch {}
+
+      const hintedCid = String(j.conversation_id || '').trim();
+      const url = new URL(`/mtalk/${encodeURIComponent(hintedCid)}`, location.origin);
       url.searchParams.set('agent', 'mirra');
       url.searchParams.set('from', 'mtalk');
       url.searchParams.set('cid', hintedCid);
-      if (j.summary_hint) {
-        url.searchParams.set('summary_hint', String(j.summary_hint).slice(0, 220));
-      }
-  
+      if (j.summary_hint) url.searchParams.set('summary_hint', String(j.summary_hint).slice(0, 220));
       router.push(url.pathname + url.search);
     } catch {
       setErrorMsg('通信エラーが発生しました。');
     }
   }
-  
 
   return (
     <main className="mtalk-root">
@@ -244,7 +219,7 @@ export default function MTalkPage() {
         )}
       </section>
 
-      {/* ====== 既存の説明 & 入力 ====== */}
+      {/* ====== 説明 & 入力 ====== */}
       <header className="mtalk-intro">
         <h1>mTalk — マインドトーク</h1>
         <p className="lead">
@@ -279,13 +254,16 @@ export default function MTalkPage() {
             {loading ? '解析中…' : `解析する（${agent === 'iros' ? 5 : 2}クレジット）`}
           </button>
 
-          {latestReport && hasHistory && (
+          {/* 初回でも常に表示（latestReport がある時） */}
+          {latestReport && (
             <button className="secondary" onClick={() => consult(latestReport.id)}>
               この問題に取り組みますか？（相談する）
             </button>
           )}
+
           {!userCode && <span className="warn">※ ログインが必要です</span>}
         </div>
+
         {errorMsg && <div className="error">{errorMsg}</div>}
       </section>
 
