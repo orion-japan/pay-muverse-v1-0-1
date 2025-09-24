@@ -1109,3 +1109,54 @@ body { padding-bottom: var(--footer-safe-pad); }
 :root {
   --footer-max-w: 520px; /* フッターの最大幅（デフォルト） */
 }
+
+
+/* チャット画面配下では main / .mu-inner の固定幅を解除 */
+.sofia-container main,
+.sofia-container .mu-inner {
+  max-width: none !important;
+  width: 100% !important;
+}
+
+
+/* 9個のボタンを包むラッパ */
+.appGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)); /* 常に3列 */
+  gap: 12px;                /* お好みで */
+  box-sizing: border-box;
+}
+
+/* 各カード（ボタン） */
+.appTile {
+  width: 100%;
+  aspect-ratio: 1 / 1;      /* 常に正方形（不要なら削除） */
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: clamp(8px, 1.6vw, 12px);
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;             /* これ大事：縮小を許可 */
+}
+
+/* アイコンやテキストがはみ出さないように */
+.appTile img, .appTile svg {
+  max-width: 64%;
+  height: auto;
+}
+
+.appTileLabel {
+  margin-top: 6px;
+  font-size: clamp(10px, 2.8vw, 12px);
+  line-height: 1.2;
+  text-align: center;
+  word-break: keep-all;
+}
+
+/* 既存の “小画面は2列” メディアクエリを上書きしたい場合の保険 */
+@media (max-width: 9999px) {
+  .appGrid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+}

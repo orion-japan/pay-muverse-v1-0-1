@@ -16,10 +16,34 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE);
 const SELECT_COLS =
   'id,user_code,vision_id,check_date,vision_imaged,resonance_shared,status_text,diary_text,progress,q_code,is_final,created_at,updated_at';
 
-/** ---- GET: 今日分 or 履歴 ----
- *  /api/daily-checks?user_code=...&vision_id=...&date=YYYY-MM-DD
- *  /api/daily-checks?history=1&days=14&user_code=...&vision_id=...
- */
+/* ===== JST utilities ===== */
+function todayJstYmd(): string {
+  const s = new Intl.DateTimeFormat('ja-JP', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+  const [y, m, d] = s.split('/');
+  return `${y}-${m}-${d}`;
+}
+function toJstYmd(d: Date): string {
+  const s = new Intl.DateTimeFormat('ja-JP', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
+  const [y, m, dd] = s.split('/');
+  return `${y}-${m}-${dd}`;
+}
+function jstYmdDaysAgo(daysAgo: number): string {
+  const nowJst = Date.now() + 9 * 60 * 60 * 1000;
+  const dayMs = 24 * 60 * 60 * 1000;
+  return toJstYmd(new Date(nowJst - daysAgo * dayMs));
+}
+
+/* ===== GET ===== */
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
@@ -28,21 +52,15 @@ export async function GET(req: NextRequest) {
     const user_code = url.searchParams.get('user_code') || '';
     const vision_id = url.searchParams.get('vision_id') || '';
     if (!user_code || !vision_id) {
-      return NextResponse.json(
-        { error: 'missing user_code or vision_id' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'missing user_code or vision_id' }, { status: 400 });
     }
 
     if (isHistory) {
-      const days = Math.max(1, Math.min(60, Number(url.searchParams.get('days') || 14)));
-      // 直近 days 日（本日含む）を返す
-      const today = new Date();
-      const from = new Date(today);
-      from.setDate(today.getDate() - (days - 1));
+      const daysParam = Number(url.searchParams.get('days') || 14);
+      const days = Number.isFinite(daysParam) ? Math.max(1, Math.min(60, Math.floor(daysParam))) : 14;
 
-      const fromStr = from.toISOString().slice(0, 10); // YYYY-MM-DD
-      const toStr = today.toISOString().slice(0, 10);
+      const toStr = todayJstYmd();
+      const fromStr = jstYmdDaysAgo(days - 1);
 
       const { data, error } = await supabase
         .from('daily_checks')
@@ -54,20 +72,11 @@ export async function GET(req: NextRequest) {
         .order('check_date', { ascending: true });
 
       if (error) throw error;
-
-      return NextResponse.json({
-        data: data ?? [],
-      });
+      return NextResponse.json({ data: data ?? [] });
     }
 
-    // 今日分（date 指定）を返す：最新更新を1件
-    const date = url.searchParams.get('date');
-    if (!date) {
-      return NextResponse.json(
-        { error: 'missing date' },
-        { status: 400 }
-      );
-    }
+    // today (JST) fallback
+    const date = url.searchParams.get('date') || todayJstYmd();
 
     const { data, error } = await supabase
       .from('daily_checks')
@@ -79,33 +88,21 @@ export async function GET(req: NextRequest) {
       .limit(1)
       .maybeSingle();
 
-    if (error && error.code !== 'PGRST116') throw error;
-
-    return NextResponse.json({
-      data: data ?? null,
-    });
+    if (error && (error as any).code !== 'PGRST116') throw error;
+    return NextResponse.json({ data: data ?? null });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'internal error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message || 'internal error' }, { status: 500 });
   }
 }
 
-/** ---- POST: 保存（自動保存/手動保存とも is_final=false 固定） ----
- * body: {
- *   user_code, vision_id, date(YYYY-MM-DD),
- *   vision_imaged, resonance_shared, status_text, diary_text,
- *   progress, q_code
- * }
- */
+/* ===== POST ===== */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const {
       user_code,
       vision_id,
-      date, // check_date
+      date, // optional JST 'YYYY-MM-DD'
       vision_imaged = false,
       resonance_shared = false,
       status_text = null,
@@ -114,37 +111,36 @@ export async function POST(req: NextRequest) {
       q_code = null,
     } = body || {};
 
-    if (!user_code || !vision_id || !date) {
-      return NextResponse.json(
-        { error: 'missing user_code, vision_id or date' },
-        { status: 400 }
-      );
+    if (!user_code || !vision_id) {
+      return NextResponse.json({ error: 'missing user_code or vision_id' }, { status: 400 });
     }
 
-    // 既存行があれば更新、無ければ作成（当日1件ルール）
+    const check_date: string = date || todayJstYmd();
+
     const { data: existing, error: e1 } = await supabase
       .from('daily_checks')
       .select('id')
       .eq('user_code', user_code)
       .eq('vision_id', vision_id)
-      .eq('check_date', date)
+      .eq('check_date', check_date)
       .order('updated_at', { ascending: false })
       .limit(1);
 
     if (e1) throw e1;
 
+    const nowIso = new Date().toISOString();
     const payload = {
       user_code,
       vision_id,
-      check_date: date,
+      check_date,
       vision_imaged,
       resonance_shared,
       status_text,
       diary_text,
       progress,
       q_code,
-      is_final: false, // ★ 固定
-      updated_at: new Date().toISOString(),
+      is_final: false,
+      updated_at: nowIso,
     };
 
     let saved: any = null;
@@ -162,7 +158,7 @@ export async function POST(req: NextRequest) {
     } else {
       const { data, error } = await supabase
         .from('daily_checks')
-        .insert({ ...payload, created_at: new Date().toISOString() })
+        .insert({ ...payload, created_at: nowIso })
         .select(SELECT_COLS)
         .maybeSingle();
       if (error) throw error;
@@ -171,9 +167,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, data: saved });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'internal error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message || 'internal error' }, { status: 500 });
   }
 }

@@ -40,9 +40,16 @@ export async function GET() {
     const j = await r.json()
     const meetings: any[] = j?.meetings ?? []
 
-    // タイトルに「共鳴会」を含むものを優先、なければ先頭
-    const cand = meetings.filter(m => (m.topic || '').includes('共鳴会'))
-    const next = cand[0] || meetings[0]
+    // ---- ここがポイント：最も近い未来を必ず選ぶ ----
+    const now = Date.now()
+    const toTs = (m: any) => new Date(m?.start_time ?? 0).getTime()
+    const isFuture = (m: any) => toTs(m) > now
+    const sortByStartAsc = (a: any, b: any) => toTs(a) - toTs(b)
+
+    // 「共鳴会」を優先しつつ、未来の中で一番近いものを選択
+    const kyomeiFuture = meetings.filter(m => (m.topic || '').includes('共鳴会')).filter(isFuture).sort(sortByStartAsc)
+    const anyFuture = meetings.filter(isFuture).sort(sortByStartAsc)
+    const next = kyomeiFuture[0] || anyFuture[0]
 
     if (!next) {
       const resp = NextResponse.json(null)
@@ -51,19 +58,20 @@ export async function GET() {
     }
 
     // Zoomのレスポンス項目例:
-    // id:number, start_time:ISO, duration:number, password?:string, join_url:string
+    // id:number, start_time:ISO(UTC/Z), duration:number, password?:string, join_url:string
     const payload = {
       title: next.topic,
-      start_at: new Date(next.start_time).toISOString(),
+      // ← Z付きISOをそのまま返す（フロントでJST表示に変換される）
+      start_at: next.start_time,
       duration_min: Number(next.duration ?? 60),
       reservation_url: '',
 
-      // ← これをフロントが使います
-      meeting_number: String(next.id ?? ''),           // 例: "81735650518"
-      meeting_password: String(next.password ?? ''),   // ない場合は空
+      // フロントが使う情報
+      meeting_number: String(next.id ?? ''),         // 例: "81735650518"
+      meeting_password: String(next.password ?? ''), // ない場合は空
 
-      // 将来Jitsiや別ページに切替える場合のために残しておく
-      page_url: '', // 今回は使わない
+      // 予備フィールド
+      page_url: '',
     }
 
     const resp = NextResponse.json(payload)

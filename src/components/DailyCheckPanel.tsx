@@ -4,7 +4,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import dayjs from 'dayjs';
 import { formatJSTDate, formatJST_HM } from '@/lib/formatDate';
-import { fetchWithIdToken } from '@/lib/fetchWithIdToken';
 import { useRouter } from 'next/navigation';
 
 type Props = {
@@ -34,7 +33,6 @@ export default function DailyCheckPanel({
   /* ===== 状態 ===== */
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [archiving, setArchiving] = useState(false);
   const [visionImaged, setVisionImaged] = useState(false);
   const [resonanceShared, setResonanceShared] = useState(false);
   const [statusText, setStatusText] = useState('');
@@ -44,12 +42,18 @@ export default function DailyCheckPanel({
   const [locked, setLocked] = useState(false);
 
   const [history, setHistory] = useState<HistoryRow[]>([]);
-  const [criteriaDays, setCriteriaDays] = useState<number | null>(null);
-  const [criteriaOpen, setCriteriaOpen] = useState(false);
-  const [criteriaSaving, setCriteriaSaving] = useState(false);
-  const [criteriaLocal, setCriteriaLocal] = useState<number>(7);
 
-  const today = useMemo(() => formatJSTDate(new Date()), []);
+  // JSTの“今日”
+  const [today, setToday] = useState(() => formatJSTDate(new Date()));
+  useEffect(() => {
+    const now = new Date();
+    const nowMsJst = now.getTime() + 9 * 60 * 60 * 1000;
+    const dayMs = 24 * 60 * 60 * 1000;
+    const nextMidnightJst = Math.ceil(nowMsJst / dayMs) * dayMs;
+    const delay = Math.max(0, nextMidnightJst - nowMsJst) + 250;
+    const t = setTimeout(() => setToday(formatJSTDate(new Date())), delay);
+    return () => clearTimeout(t);
+  }, [today]);
 
   /* ===== 進捗 ===== */
   const progress = useMemo(() => {
@@ -71,9 +75,9 @@ export default function DailyCheckPanel({
     lastLocalAtRef.current = Date.now();
   }
 
-  /* ===== today フェッチ ===== */
+  /* ===== 今日の行フェッチ ===== */
   useEffect(() => {
-    if (!userCode || !selectedVisionId) return;
+    if (!userCode || !selectedVisionId || !today) return;
     const ac = new AbortController();
 
     (async () => {
@@ -88,11 +92,10 @@ export default function DailyCheckPanel({
 
         const d = json?.data;
         const serverAt = d?.updated_at ? Date.parse(d.updated_at) : 0;
+        const serverDate: string | null = d?.check_date ?? null;
+        const isTodaysRow = serverDate === today;
 
-        if (dirtyRef.current && lastLocalAtRef.current > serverAt) {
-          const p = typeof d?.progress === 'number' ? d.progress : 0;
-          if (p >= 100) setLocked(true);
-        } else {
+        if (isTodaysRow) {
           setVisionImaged(!!d?.vision_imaged);
           setResonanceShared(!!d?.resonance_shared);
           setStatusText(d?.status_text ?? '');
@@ -101,6 +104,16 @@ export default function DailyCheckPanel({
           setLocked((d?.progress ?? 0) >= 100);
           dirtyRef.current = false;
           lastLocalAtRef.current = serverAt || Date.now();
+        } else {
+          // 今日の行がなければクリア
+          setVisionImaged(false);
+          setResonanceShared(false);
+          setStatusText('');
+          setDiaryText('');
+          setSavedAt(null);
+          setLocked(false);
+          dirtyRef.current = false;
+          lastLocalAtRef.current = Date.now();
         }
       } catch {
         /* noop */
@@ -123,10 +136,6 @@ export default function DailyCheckPanel({
           userCode
         )}&vision_id=${encodeURIComponent(selectedVisionId)}`;
         const res = await fetch(url, { cache: 'no-store', signal: ac.signal });
-        if (!res.ok) {
-          setHistory([]);
-          return;
-        }
         const json = await res.json().catch(() => ({} as any));
         setHistory(
           Array.isArray(json?.data) ? (json.data as HistoryRow[]) : []
@@ -137,21 +146,12 @@ export default function DailyCheckPanel({
     })();
 
     return () => ac.abort();
-  }, [userCode, selectedVisionId, savedAt]);
-
-  /* ===== 自動保存（1.2秒） ===== */
-  useEffect(() => {
-    if (!userCode || !selectedVisionId || locked) return;
-    if (!dirtyRef.current) return;
-    const t = setTimeout(() => {
-      void save();
-    }, 1200);
-    return () => clearTimeout(t);
-  }, [visionImaged, resonanceShared, statusText, diaryText, userCode, selectedVisionId, locked]);
+  }, [userCode, selectedVisionId, savedAt, today]);
 
   /* ===== 保存 ===== */
   async function save() {
     if (saving || !userCode || !selectedVisionId) return;
+    if (!dirtyRef.current) return; // 未変更なら保存しない
     setSaving(true);
     try {
       const res = await fetch('/api/daily-checks', {
@@ -175,18 +175,14 @@ export default function DailyCheckPanel({
             resonanceShared,
             progress,
           }),
-          is_final: false, // 自動保存・手動保存ともに false 固定
+          is_final: false,
         }),
       });
       const json = await res.json().catch(() => ({} as any));
       if (!res.ok) throw new Error(json?.error || 'save failed');
 
       const updatedAtISO: string | null = json?.data?.updated_at || null;
-      setSavedAt(
-        updatedAtISO
-          ? formatJST_HM(updatedAtISO)
-          : formatJST_HM(new Date())
-      );
+      setSavedAt(updatedAtISO ? formatJST_HM(updatedAtISO) : null);
 
       dirtyRef.current = false;
       lastLocalAtRef.current = updatedAtISO
@@ -212,15 +208,6 @@ export default function DailyCheckPanel({
 
   function unlockForEdit() {
     if (dayjs().format('YYYY-MM-DD') === today) setLocked(false);
-  }
-
-  function clearInputs() {
-    setVisionImaged(false);
-    setResonanceShared(false);
-    setStatusText('');
-    setDiaryText('');
-    setLocked(false);
-    markDirty();
   }
 
   /* ===== Qコード生成 ===== */
@@ -274,12 +261,6 @@ export default function DailyCheckPanel({
         <div className="dcp-status">
           {loading ? '読み込み中…' : savedAt ? `保存: ${savedAt}` : '新規'}
           {saving && ' / 保存中…'}
-          <button
-            className="dcp-criteria-btn"
-            onClick={() => setCriteriaOpen((v) => !v)}
-          >
-            回数設定
-          </button>
         </div>
       </header>
 
@@ -344,11 +325,22 @@ export default function DailyCheckPanel({
           </div>
 
           <div className="dcp-actions">
-            <button className="dcp-save" onClick={save} disabled={saving}>
+            <button
+              className="dcp-save"
+              onClick={save}
+              disabled={saving || !dirtyRef.current}
+            >
               保存
             </button>
           </div>
         </>
+      )}
+
+      {locked && (
+        <div className="dcp-locked">
+          今日の分は完了済みです。必要なら{' '}
+          <button onClick={unlockForEdit}>編集を再開</button>
+        </div>
       )}
 
       {toast && <div className="dcp-toast">{toast}</div>}

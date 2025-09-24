@@ -17,6 +17,7 @@ interface UserInfo {
 interface Conversation {
   id: string;
   title: string;
+  updated_at?: string | null;
 }
 type MirraHistoryItem = any;
 
@@ -30,7 +31,6 @@ interface SidebarMobileProps {
   userInfo: UserInfo | null;
   meta?: MetaData | null;
   mirraHistory?: MirraHistoryItem[] | null;
-  /** ★ 追加：現在のエージェント（mirra のときだけ履歴を会話一覧として表示） */
   agent?: 'mu' | 'iros' | 'mirra';
 }
 
@@ -62,7 +62,7 @@ const SidebarMobile: React.FC<SidebarMobileProps> = ({
     portalRef.current = host;
   }
 
-  // ===== Lock body scroll (+ iOS touchmove) =====
+  // ===== Lock body scroll =====
   React.useEffect(() => {
     const prev = document.body.style.overflow;
     const prevent = (e: TouchEvent) => e.preventDefault();
@@ -76,7 +76,7 @@ const SidebarMobile: React.FC<SidebarMobileProps> = ({
     };
   }, [isOpen]);
 
-  // ===== Esc で閉じる =====
+  // ===== Esc close =====
   React.useEffect(() => {
     if (!isOpen) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -84,26 +84,25 @@ const SidebarMobile: React.FC<SidebarMobileProps> = ({
     return () => window.removeEventListener('keydown', onKey);
   }, [isOpen, onClose]);
 
-  // ===== ルート変更で閉じる =====
+  // ===== Close on route change =====
   const pathname = usePathname();
   React.useEffect(() => { if (isOpen) onClose(); /* eslint-disable-next-line */ }, [pathname]);
 
-  // ===== 初期フォーカス =====
+  // ===== initial focus =====
   React.useEffect(() => {
     if (!isOpen) return;
     const first = document.getElementById('sof-sidebar-mobile');
     (first as HTMLElement | null)?.focus?.();
   }, [isOpen]);
 
-  // ★ Meta 折りたたみ
   const [metaOpen, setMetaOpen] = React.useState<boolean>(false);
 
-  // ★ クリックイベント dispatch（既存のトースト用）
+  // toast dispatch
   const dispatch = (name: string, detail?: any) => {
     try { window.dispatchEvent(new CustomEvent(name, { detail })); } catch {}
   };
 
-  // ★ mirra 履歴を「会話一覧」形式に正規化
+  // mirra history → conversation list normalize
   const mirraAsConversations: Conversation[] = React.useMemo(() => {
     if (agent !== 'mirra') return [];
     const src = Array.isArray(mirraHistory) ? mirraHistory : [];
@@ -118,16 +117,14 @@ const SidebarMobile: React.FC<SidebarMobileProps> = ({
       const when = whenRaw ? new Date(whenRaw).toLocaleString() : '';
       const title = when ? `${titleBase}（${when}）` : titleBase;
 
-      return { id, title };
+      return { id, title, updated_at: whenRaw ?? null };
     }).filter((x) => x.id);
 
-    // 重複排除
     const seen = new Set<string>();
     return norm.filter((x) => (seen.has(x.id) ? false : (seen.add(x.id), true)));
   }, [agent, mirraHistory]);
 
-  // ★ 一覧に出すデータを決定（mirra は mirra 履歴、他は従来の conversations）
-  const listForUI: Conversation[] = agent === 'mirra' ? mirraAsConversations : conversations;
+  const listForUI: Conversation[] = agent === 'mirra' ? mirraAsConversations.length ? mirraAsConversations : conversations : conversations;
 
   if (!isOpen || !portalRef.current) return null;
 
@@ -139,7 +136,7 @@ const SidebarMobile: React.FC<SidebarMobileProps> = ({
       aria-modal="true"
       aria-label="セッション一覧"
     >
-      <div className={`sof-dim ${isOpen ? 'show' : ''}`} onClick={onClose} />
+      <div className="sof-dim show" onClick={onClose} />
 
       <aside className={`sof-drawer ${isOpen ? 'is-open' : ''}`} onClick={(e) => e.stopPropagation()}>
         <div className="sof-drawer__head">
@@ -149,7 +146,7 @@ const SidebarMobile: React.FC<SidebarMobileProps> = ({
           </button>
         </div>
 
-        {/* ユーザー情報ボックス */}
+        {/* user box */}
         {userInfo && (
           <div className="sof-user">
             <button className="sof-user__row" onClick={() => dispatch('click_username', { id: userInfo.id, name: userInfo.name })}>
@@ -164,7 +161,7 @@ const SidebarMobile: React.FC<SidebarMobileProps> = ({
           </div>
         )}
 
-        {/* 会話一覧（mirra も同じスタイルで表示） */}
+        {/* list */}
         <ul className="sof-list">
           {listForUI.map((conv) => (
             <li key={conv.id} className="sof-list__item">
@@ -172,7 +169,6 @@ const SidebarMobile: React.FC<SidebarMobileProps> = ({
                 className="sof-list__title"
                 onClick={() => {
                   if (agent === 'mirra') {
-                    // mirra は /mtalk/:id に遷移
                     router.push(`/mtalk/${conv.id}?agent=mirra&from=sidebar&cid=${conv.id}`);
                   } else {
                     onSelect(conv.id);
@@ -184,29 +180,27 @@ const SidebarMobile: React.FC<SidebarMobileProps> = ({
                 {conv.title || '無題のセッション'}
               </button>
 
-              {/* mirra にはリネーム/削除APIが無い想定なのでボタン非表示 */}
-              {agent !== 'mirra' && (
-                <div className="sof-list__ops">
-                  <button
-                    className="sof-iconbtn"
-                    onClick={() => {
-                      const t = prompt('新しいタイトルを入力してください', conv.title);
-                      if (t) onRename(conv.id, t);
-                    }}
-                    title="Rename"
-                  >
-                    <Edit size={16} />
-                  </button>
-                  <button className="sof-iconbtn danger" onClick={() => onDelete(conv.id)} title="Delete">
-                    <Trash size={16} />
-                  </button>
-                </div>
-              )}
+              {/* ← ここを「常に」表示（mirra も可） */}
+              <div className="sof-list__ops">
+                <button
+                  className="sof-iconbtn"
+                  onClick={() => {
+                    const t = prompt('新しいタイトルを入力してください', conv.title);
+                    if (t && t.trim()) onRename(conv.id, t.trim());
+                  }}
+                  title="Rename"
+                >
+                  <Edit size={16} />
+                </button>
+                <button className="sof-iconbtn danger" onClick={() => onDelete(conv.id)} title="Delete">
+                  <Trash size={16} />
+                </button>
+              </div>
             </li>
           ))}
         </ul>
 
-        {/* ====== 下部：Resonance Meta（折りたたみ） ====== */}
+        {/* Meta fold */}
         <div className="sof-meta-fold">
           <button className="sof-meta-fold__toggle" onClick={() => setMetaOpen((v) => !v)}>
             {metaOpen ? <ChevronDown size={16} /> : <ChevronUp size={16} />} Resonance Meta

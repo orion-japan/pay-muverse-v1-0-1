@@ -38,9 +38,10 @@ export default function ChatInput({
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
-  // ★ 二重送信ロック（React18 StrictModeや多重イベント対策）
+  // 二重送信ロック
   const sendLockRef = useRef(false);
 
+  // 下書きロード
   useEffect(() => {
     try {
       const saved =
@@ -49,6 +50,7 @@ export default function ChatInput({
     } catch {}
   }, [draftKey]);
 
+  // 下書き保存
   useEffect(() => {
     try {
       if (typeof window !== 'undefined') {
@@ -57,15 +59,23 @@ export default function ChatInput({
     } catch {}
   }, [text, draftKey]);
 
+  // 自動リサイズ（初期は3行：min 66px、上限は160px）
   const autoSize = useCallback(() => {
     const ta = taRef.current;
     if (!ta) return;
-    ta.style.height = 'auto';
-    ta.style.height = Math.min(ta.scrollHeight, window.innerHeight * 0.4) + 'px';
+    requestAnimationFrame(() => {
+      ta.style.height = 'auto';
+      const minH = 66; // ← 3行相当
+      const maxH = Math.min(180, Math.floor(window.innerHeight * 0.35));
+      const next = Math.max(minH, Math.min(ta.scrollHeight, maxH));
+      ta.style.height = next + 'px';
+    });
   }, []);
-  useEffect(() => {
-    autoSize();
-  }, [text, autoSize]);
+
+  // テキスト変化・初回マウント・添付の出現で高さ調整
+  useEffect(() => { autoSize(); }, [text, autoSize]);
+  useEffect(() => { autoSize(); }, []);                 // mount
+  useEffect(() => { autoSize(); }, [files.length]);     // 添付ありで高さが増えるケース
 
   const totalSizeMB = files.reduce((sum, f) => sum + f.size, 0) / (1024 * 1024);
   const overMaxFiles = files.length > maxFiles;
@@ -129,17 +139,17 @@ export default function ChatInput({
     const value = text.trim();
     const hasFiles = files.length > 0;
 
-    // ★ 入口ガード（状態＋ロック）
+    // 入口ガード
     if (disabled || sending || sendLockRef.current) return;
     if (!value && !hasFiles) return;
     if (overMaxFiles || overMaxSize) return;
 
-    // ★ 以降はこの送信ルーチンを占有
+    // 占有
     sendLockRef.current = true;
     setSending(true);
 
     try {
-      // 先にUIをクリア（楽観的）
+      // UI 先行クリア
       setText('');
       setFiles([]);
       try {
@@ -154,7 +164,8 @@ export default function ChatInput({
       }
     } finally {
       setSending(false);
-      sendLockRef.current = false; // ★ ロック解除
+      sendLockRef.current = false;
+      if (taRef.current) taRef.current.style.height = '42px'; // リセット
     }
   }, [
     text,
@@ -178,8 +189,9 @@ export default function ChatInput({
       }
     },
     [isComposing, handleSend],
-  ); // eslint-disable-line
+  );
 
+  // フォーカス管理
   useEffect(() => {
     taRef.current?.focus();
   }, []);
@@ -198,7 +210,18 @@ export default function ChatInput({
     !overMaxFiles &&
     !overMaxSize;
 
+  // ★ 追加：Q&Aを開く（構造は変えず、内部で遷移）
+  const openQA = () => {
+    if (typeof window !== 'undefined') {
+      window.location.assign('/knowledge'); // モーダル化する場合はここを差し替え
+    }
+  };
+
   return (
+    /**
+     * ここは「中身のみ」。固定や z-index 管理は親 .sof-compose-dock が担当。
+     * （SofiaChatShell 側で <div className="sof-compose-dock"><ChatInput/></div> 前提）
+     */
     <div
       className="sof-compose"
       aria-label="メッセージ入力エリア"
@@ -211,7 +234,7 @@ export default function ChatInput({
         <textarea
           ref={taRef}
           className="sof-textarea"
-          rows={4}
+          rows={1}
           placeholder={placeholder}
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -254,7 +277,7 @@ export default function ChatInput({
           </div>
         )}
 
-        {/* アクション（縦並び、添付ボタンは非表示維持） */}
+        {/* アクション（縦並び） */}
         <div className="sof-actions">
           <input
             ref={fileRef}
@@ -276,7 +299,18 @@ export default function ChatInput({
             📎
           </button>
 
-          {/* 送信 */}
+          {/* ▼▼ 追加：送信ボタンの“上”にQ&Aボタン ▼▼ */}
+          <button
+            type="button"
+            className="sof-actionBtn sof-actionBtn--qa"
+            onClick={openQA}
+            aria-label="Q&Aを開く"
+            title="Q&Aを開く"
+          >
+            Q＆A
+          </button>
+          {/* ▲▲ 追加ここまで ▲▲ */}
+
           <button
             data-sof-send
             type="button"

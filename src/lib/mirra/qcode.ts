@@ -1,3 +1,4 @@
+// lib/mirra/qcode.ts
 import OpenAI from 'openai';
 
 export type QCode = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
@@ -27,9 +28,15 @@ function heuristic(text: string): { q: QCode; score: number } {
   return { q: best, score };
 }
 
-export async function inferQCode(userText: string) {
+export async function inferQCode(userText: string): Promise<QResult> {
   const h = heuristic(userText);
-  if (h.score >= 2) return { q: h.q, confidence: Math.min(0.6 + 0.1*h.score, 0.9), color_hex: simpleQColor[h.q] };
+  if (h.score >= 2) {
+    return {
+      q: h.q,
+      confidence: Math.min(0.6 + 0.1 * h.score, 0.9),
+      color_hex: simpleQColor[h.q],
+    };
+  }
 
   try {
     const prompt = `
@@ -44,16 +51,26 @@ export async function inferQCode(userText: string) {
 `.trim();
 
     const r = await client.chat.completions.create({
-      model: 'gpt-4.1-mini',
+      model: 'gpt-4o-mini',
       temperature: 0,
-      messages: [{ role: 'system', content: 'You are a concise classifier.' },
-                 { role: 'user', content: prompt + `\n\nテキスト:\n${userText}` }],
+      messages: [
+        { role: 'system', content: 'You are a concise classifier.' },
+        { role: 'user', content: prompt + `\n\nテキスト:\n${userText}` },
+      ],
       response_format: { type: 'json_object' } as any,
     });
+
     const raw = r.choices?.[0]?.message?.content ?? '{}';
     const parsed = JSON.parse(raw) as { q?: string; confidence?: number; hint?: string };
+
     const q = (['Q1','Q2','Q3','Q4','Q5'].includes(parsed.q || '') ? parsed.q : 'Q3') as QCode;
-    return { q, confidence: Math.max(0.5, Math.min(0.99, parsed.confidence ?? 0.6)), hint: parsed.hint, color_hex: simpleQColor[q] };
+
+    return {
+      q,
+      confidence: Math.max(0.5, Math.min(0.99, parsed.confidence ?? 0.6)),
+      hint: parsed.hint,
+      color_hex: simpleQColor[q],
+    };
   } catch {
     return { q: 'Q3', confidence: 0.5, color_hex: simpleQColor['Q3'] };
   }

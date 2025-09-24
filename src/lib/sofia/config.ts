@@ -158,7 +158,6 @@ export const SOFIA_CONFIG: SofiaConfig = {
 
 // クライアント開発時のみ、環境値のダンプを控えめに
 if (canLogClient) {
-  // eslint-disable-next-line no-console
   console.log('[SofiaConfig/env]', {
     FS: (typeof process !== 'undefined' ? (process as any).env?.NEXT_PUBLIC_SOFIA_ASSIST_FONTSIZE : undefined),
     LH: (typeof process !== 'undefined' ? (process as any).env?.NEXT_PUBLIC_SOFIA_ASSIST_LH : undefined),
@@ -176,6 +175,5 @@ if (canLogClient) {
     BQ_BORDER: (typeof process !== 'undefined' ? (process as any).env?.NEXT_PUBLIC_SOFIA_BQ_TINT_BORDER : undefined),
     BQ_BG: (typeof process !== 'undefined' ? (process as any).env?.NEXT_PUBLIC_SOFIA_BQ_TINT_BG : undefined),
   });
-  // eslint-disable-next-line no-console
   console.log('[SofiaConfig]', SOFIA_CONFIG);
 }

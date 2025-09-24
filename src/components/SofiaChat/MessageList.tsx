@@ -2,12 +2,14 @@
 'use client';
 
 import React from 'react';
-import type { Message } from 'types';
+import type { Message } from './types';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
+import AvatarImg from '@/components/AvatarImg';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
-/** 安全な外部リンクレンダラ */
+/** 外部リンクを安全に開く */
 function LinkRenderer(
   props: React.ComponentPropsWithoutRef<'a'> & { href?: string }
 ) {
@@ -19,49 +21,15 @@ function LinkRenderer(
   );
 }
 
-/* ====== 追加: 現在のユーザー情報 ====== */
 type CurrentUser = {
-  id: string;
+  id: string;                 // ← user_code を想定（UUIDでも可）
   name: string;
   userType: string;
   credits: number;
-  avatarUrl?: string | null;
+  avatarUrl?: string | null;  // ← 空でもOK（フォールバックで埋める）
 };
 
-/* ====== 追加: Supabase相対パスも解決するアバターURL整形 ====== */
-const SUPABASE_BASE = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '');
-function resolveAvatarUrl(src?: string | null): string {
-  const u = (src ?? '').trim();
-  if (!u) return '/avatar.png';
-  if (/^https?:\/\//i.test(u) || /^data:image\//i.test(u)) return u;
-  if (u.startsWith('/storage/v1/object/public/')) return `${SUPABASE_BASE}${u}`;
-  if (u.startsWith('avatars/')) return `${SUPABASE_BASE}/storage/v1/object/public/${u}`;
-  return `${SUPABASE_BASE}/storage/v1/object/public/avatars/${u}`;
-}
-
-/** 画像が落ちた時は 1 回だけ /avatar.png にフォールバック */
-const Avatar: React.FC<{ src?: string | null; alt: string; size?: number }> = ({
-  src,
-  alt,
-  size = 18,
-}) => {
-  const finalSrc = resolveAvatarUrl(src);
-  const [url, setUrl] = React.useState(finalSrc);
-  return (
-    <img
-      src={url}
-      alt={alt}
-      width={size}
-      height={size}
-      style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', display: 'block' }}
-      onError={() => {
-        if (url !== '/avatar.png') setUrl('/avatar.png');
-      }}
-    />
-  );
-};
-
-/* ====== エージェントバッジ判定 ====== */
+/* ===== バッジ判定（Iros と同等の振る舞い） ===== */
 function getAgentBadge(
   m: any,
   isAssistant: boolean,
@@ -69,12 +37,12 @@ function getAgentBadge(
 ): 'MuAI' | 'Iros' | 'Mirra' | 'mTalk' | 'sShot' | null {
   if (!isAssistant) return null;
 
-  // ✅ ページ側で指定された agent を優先
+  // ページ側指定を優先
   if (agent === 'iros') return 'Iros';
   if (agent === 'mu') return 'MuAI';
   if (agent === 'mirra') return 'Mirra';
 
-  // fallback: メッセージ側の meta などから判定
+  // メッセージ内メタのフォールバック
   const a = m.agent || m?.meta?.agent;
   if (a === 'Iros' || a === 'MuAI' || a === 'Mirra' || a === 'mTalk' || a === 'sShot') return a;
 
@@ -96,6 +64,49 @@ export default function MessageList({
   currentUser?: CurrentUser;
   agent?: 'mu' | 'iros' | 'mirra';
 }) {
+  // ▼ currentUser.avatarUrl が空でも profiles から補完
+  const supabase = React.useMemo(() => createClientComponentClient(), []);
+  const [resolvedAvatar, setResolvedAvatar] = React.useState<string | null | undefined>(
+    currentUser?.avatarUrl
+  );
+  const [resolvedName, setResolvedName] = React.useState<string | undefined>(currentUser?.name);
+
+  React.useEffect(() => {
+    let alive = true;
+
+    async function fillFromProfiles() {
+      // すでに渡されていれば何もしない
+      if (currentUser?.avatarUrl) return;
+
+      // user_code 等を currentUser.id で受け取っている想定
+      if (!currentUser?.id) return;
+
+      // profiles に user_code がある前提。UUIDで紐づけなら eq('user_id', …) に変更。
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('name, avatar_url')
+        .eq('user_code', currentUser.id)
+        .single();
+
+      if (!alive) return;
+
+      if (!error && data) {
+        setResolvedAvatar(data.avatar_url ?? null);
+        if (data.name && !resolvedName) setResolvedName(data.name);
+      }
+    }
+
+    setResolvedAvatar(currentUser?.avatarUrl ?? null);
+    setResolvedName(currentUser?.name);
+
+    fillFromProfiles();
+
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supabase, currentUser?.id, currentUser?.avatarUrl]);
+
   return (
     <div className="sof-msgs">
       {messages.length === 0 ? (
@@ -104,17 +115,18 @@ export default function MessageList({
         <>
           {messages.map((m) => {
             const isAssistant = m.role !== 'user';
-
-            // ===== バッジ判定 =====
             const badge = getAgentBadge(m, isAssistant, agent);
 
-            // アシスタントの吹き出しに env 由来の CSS 変数を直接適用
+            // 色など差分用のクラス（mu→is-muai）
+            const agentClass =
+              isAssistant && agent ? `is-${agent === 'mu' ? 'muai' : agent}` : '';
+
+            // アシスタントの吹き出し装飾（Iros と同じ変数適用）
             const bubbleStyle: React.CSSProperties = isAssistant
               ? {
                   fontSize: 'var(--sofia-assist-fs, 15px)',
                   lineHeight: 'var(--sofia-assist-lh, 1.85)' as any,
                   letterSpacing: 'var(--sofia-assist-ls, 0.01em)',
-                  maxWidth: 'var(--sofia-bubble-maxw, 78%)',
                   background: 'var(--sofia-a-bg, #f8fafc)',
                   border: 'var(--sofia-a-border, 1px solid #e5e7eb)',
                   borderRadius: 'var(--sofia-a-radius, 16px)',
@@ -122,20 +134,8 @@ export default function MessageList({
                 }
               : {};
 
-            // ラベル: assistant→左寄せ / user→右寄せ
-            const roleStyle: React.CSSProperties = isAssistant
-              ? { display: 'flex', alignItems: 'center', gap: 6 }
-              : {
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  justifyContent: 'flex-end',
-                  textAlign: 'right',
-                };
-
-            // ===== アイコン判定 =====
             const iconSrc =
-              badge === 'Iros'
+              (badge === 'Iros'
                 ? '/ir.png'
                 : badge === 'Mirra'
                 ? '/mirra.png'
@@ -143,32 +143,9 @@ export default function MessageList({
                 ? '/mtalk.png'
                 : badge === 'sShot'
                 ? '/sshot.png'
-                : '/mu_ai.png';
+                : '/mu_ai.png') + '?v=3';
 
-            // ラベル要素
-            const roleEl = (
-              <div className="sof-bubble__role" style={roleStyle}>
-                {isAssistant ? (
-                  <>
-                    <img
-                      src={iconSrc}
-                      alt={badge ?? 'assistant'}
-                      width={18}
-                      height={18}
-                      style={{ width: 18, height: 18, borderRadius: '50%', objectFit: 'cover' }}
-                    />
-                    <span>{badge ?? 'assistant'}</span>
-                  </>
-                ) : (
-                  <>
-                    <Avatar src={currentUser?.avatarUrl} alt={currentUser?.name || 'user'} />
-                    <span>{currentUser?.name ?? currentUser?.id ?? 'user'}</span>
-                  </>
-                )}
-              </div>
-            );
-
-            // Markdown コンポーネント群（元の詳細版を維持）
+            // Markdown レンダラ（Iros と同じトーン）
             const mdComponents =
               isAssistant
                 ? {
@@ -255,7 +232,11 @@ export default function MessageList({
                           </code>
                         );
                       }
-                      return <code className={className} {...rest}>{children}</code>;
+                      return (
+                        <code className={className} {...rest}>
+                          {children}
+                        </code>
+                      );
                     },
                     pre(props: any) {
                       const { children, ...rest } = props;
@@ -325,25 +306,91 @@ export default function MessageList({
               | 'ratelimited'
               | undefined;
 
+            /* ========= 縦並びレイアウト（avatar 上 / bubble 下） ========= */
             return (
               <div
                 key={m.id}
-                className={`sof-bubble ${isAssistant ? 'is-assistant' : 'is-user'}`}
-                style={bubbleStyle}
+                className={`sof-msg ${isAssistant ? 'is-assistant' : 'is-user'} ${agentClass}`}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: isAssistant ? 'flex-start' : 'flex-end',
+                  gap: 6,
+                  width: '100%',
+                }}
               >
-                {Array.isArray(uploaded) && uploaded.length ? (
-                  <div className="sof-bubble__imgs">
-                    {uploaded.map((u: string, i: number) => (
-                      <img key={i} src={u} alt="" />
-                    ))}
+                {/* アバター（上段） */}
+                <div className="avatar" style={{ alignSelf: isAssistant ? 'flex-start' : 'flex-end' }}>
+                  {isAssistant ? (
+                    <img
+                      src={iconSrc}
+                      alt={badge ?? 'assistant'}
+                      width={32}
+                      height={32}
+                      style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover', display: 'block' }}
+                    />
+                  ) : (
+                    <AvatarImg
+                      src={resolvedAvatar /* ← 補完後のURL/キー */}
+                      alt={resolvedName || currentUser?.name || 'user'}
+                      size={32}
+                      versionKey={currentUser?.id}
+                    />
+                  )}
+                </div>
+
+                {/* 吹き出し（下段・横幅をCSSで拡げられるクラス） */}
+                <div
+                  className={`bubble sof-bubble-custom ${isAssistant ? 'is-assistant' : 'is-user'}`}
+                  style={{
+                    ...bubbleStyle,
+                    alignSelf: isAssistant ? 'flex-start' : 'flex-end',
+                  }}
+                >
+                  {/* 画像プレビュー */}
+                  {Array.isArray(uploaded) && uploaded.length ? (
+                    <div className="sof-bubble__imgs">
+                      {uploaded.map((u: string, i: number) => (
+                        <img key={i} src={u} alt="" />
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {/* ラベル（名前） */}
+                  <div
+                    className="sof-bubble__role"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      ...(isAssistant ? {} : { justifyContent: 'flex-end', textAlign: 'right' }),
+                    }}
+                  >
+                    {isAssistant ? (
+                      <>
+                        <img
+                          src={iconSrc}
+                          alt={badge ?? 'assistant'}
+                          width={32}
+                          height={32}
+                          style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover' }}
+                        />
+                        <span>{badge ?? 'assistant'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <AvatarImg
+                          src={resolvedAvatar}
+                          alt={resolvedName || currentUser?.name || 'user'}
+                          size={32}
+                          versionKey={currentUser?.id}
+                        />
+                        <span>{resolvedName ?? currentUser?.name ?? currentUser?.id ?? 'user'}</span>
+                      </>
+                    )}
                   </div>
-                ) : null}
 
-                {/* ラベル */}
-                {roleEl}
-
-                <div className="sof-bubble__text">
-                  {/* バッジ（アシスタント時のみ表示） */}
+                  {/* バッジ（AIのみ） */}
                   {isAssistant && badge && (
                     <div
                       className="sof-badge"
@@ -362,14 +409,18 @@ export default function MessageList({
                     </div>
                   )}
 
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    rehypePlugins={[rehypeHighlight]}
-                    components={mdComponents as any}
-                  >
-                    {m.content}
-                  </ReactMarkdown>
+                  {/* 本文 */}
+                  <div className="msgBody">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      rehypePlugins={[rehypeHighlight]}
+                      components={mdComponents as any}
+                    >
+                      {m.content}
+                    </ReactMarkdown>
+                  </div>
 
+                  {/* メタ情報 */}
                   {(usedCredits || qCode || status) && (
                     <div
                       className="sof-meta"
@@ -381,6 +432,7 @@ export default function MessageList({
                         gap: 10,
                         alignItems: 'center',
                         flexWrap: 'wrap',
+                        ...(isAssistant ? {} : { justifyContent: 'flex-end' }),
                       }}
                     >
                       {typeof usedCredits === 'number' && <span>used {usedCredits}C</span>}
