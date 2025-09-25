@@ -256,3 +256,12 @@
 @media (prefers-reduced-motion: reduce) {
   .mh-dropdown { transition: none; }
 }
+
+
+.mtalk-root {
+  padding-top: 12px; /* ヘッダーが必ず見えるよう余白 */
+}
+
+.mtalk-intro {
+  margin-bottom: 16px;
+}

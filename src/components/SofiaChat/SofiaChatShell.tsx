@@ -1,4 +1,6 @@
+// src/components/SofiaChat/SofiaChatShell.tsx
 'use client';
+
 import React, {
   useCallback,
   useEffect,
@@ -27,7 +29,7 @@ import {
 } from './agentClients';
 import { useMtalkSeed } from './hooks/useMtalkSeed';
 
-// ✅ 型追加
+/* ===== types ===== */
 type CurrentUser = {
   id: string;
   name: string;
@@ -35,8 +37,64 @@ type CurrentUser = {
   credits: number;
   avatarUrl?: string | null;
 };
-
 type Props = { agent?: string };
+
+/* ===== duplicate/over-fetch guards & utils ===== */
+const fetchedOnceByConv = new Set<string>(); // 会話IDごとに初回フェッチだけ通す
+const norm = (s?: string) => (s || '').replace(/\s+/g, ' ').trim();
+
+/** mTalkの共有テキスト（末尾の「mTalkからの共有…」等）を隠す */
+function isMtalkShareHint(m: Message): boolean {
+  const c = norm(m.content).toLowerCase();
+  if (!c) return false;
+  if (c.startsWith('mtalkからの共有')) return true;
+  if (c.startsWith('【mtalkからの共有】')) return true;
+  const origin = (m as any).origin as string | undefined;
+  if (origin && origin.startsWith('mtalk_')) return true;
+  const src = (m as any)?.meta?.source as string | undefined;
+  const seedReply = !!(m as any)?.meta?.seed_reply;
+  if (src === 'mtalk' && seedReply) return true;
+  return false;
+}
+const notShare = (m: Message) => !isMtalkShareHint(m);
+
+/** ほぼ同一の user/assistant 発話をマージ（seed 付き優先） */
+function dedupeMessages(arr: Message[]): Message[] {
+  type Key = string;
+  const byKey = new Map<Key, Message>();
+
+  for (const m of arr) {
+    const kBase = `${m.role}|${norm(m.content)}`;
+    const prev = byKey.get(kBase);
+    if (!prev) {
+      byKey.set(kBase, m);
+      continue;
+    }
+    const t1 = new Date(prev.created_at || 0).getTime();
+    const t2 = new Date(m.created_at || 0).getTime();
+    const close = Math.abs(t2 - t1) <= 10_000;
+
+    const isSeedPrev = !!(prev as any)?.meta?.seed || !!(prev as any)?.meta?.seed_reply;
+    const isSeedCurr = !!(m as any)?.meta?.seed || !!(m as any)?.meta?.seed_reply;
+
+    if (isSeedCurr && !isSeedPrev) {
+      byKey.set(kBase, m);
+      continue;
+    }
+    if (isSeedPrev && !isSeedCurr) continue;
+
+    if (close) {
+      byKey.set(kBase, t2 >= t1 ? m : prev);
+    } else {
+      byKey.set(`${kBase}|${t2}`, m);
+    }
+  }
+
+  return Array.from(byKey.values()).sort(
+    (a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime()
+  );
+}
+/* ============================================== */
 
 export default function SofiaChatShell({ agent: agentProp = 'mu' }: Props) {
   const sp = useSearchParams();
@@ -50,50 +108,98 @@ export default function SofiaChatShell({ agent: agentProp = 'mu' }: Props) {
   const { inject: injectMtalkSeed } = useMtalkSeed(urlFrom, urlCid, urlSummary);
 
   const [conversations, setConversations] = useState<ConvListItem[]>([]);
-  const [conversationId, setConversationId] = useState<string | undefined>(
-    undefined
-  );
+  const [conversationId, setConversationId] = useState<string | undefined>(undefined);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [meta, setMeta] = useState<MetaData | null>(null);
 
-  // ✅ ユーザー情報
   const [uiUser, setUiUser] = useState<CurrentUser | undefined>(undefined);
 
-  const canUse = useMemo(
-    () => !!userCode && !authLoading,
-    [userCode, authLoading]
-  );
+  const canUse = useMemo(() => !!userCode && !authLoading, [userCode, authLoading]);
 
-  // ✅ ユーザー情報を取得
+  // === サイドバー表示用に user を整形（null なら非表示） ===
+  const menuUser = useMemo(() => {
+    if (!uiUser) return null;
+    return {
+      id: uiUser.id,
+      name: uiUser.name || 'user',
+      userType: uiUser.userType ?? 'member',
+      credits: typeof uiUser.credits === 'number' ? uiUser.credits : 0,
+    };
+  }, [uiUser]);
+
+  // ユーザー情報（まず /api/userinfo?user_code=... → 失敗時に /api/me → フォールバック）
   useEffect(() => {
     if (!userCode) return;
 
+    const fallback = () =>
+      setUiUser({
+        id: userCode,
+        name: 'user',
+        userType: 'member',
+        credits: 0,
+        avatarUrl: null,
+      });
+
+    let cancelled = false;
+
     (async () => {
       try {
-        const res = await fetch('/api/me', { cache: 'no-store' });
-        const d = res.ok ? await res.json() : null;
-
-        setUiUser({
-          id: d?.id ?? userCode,
-          name: d?.name ?? d?.display_name ?? 'user',
-          userType: d?.user_type ?? 'member',
-          credits: typeof d?.credits === 'number' ? d.credits : 0,
-          avatarUrl: d?.avatar_url ?? d?.photoURL ?? null,
-        });
+        // 1) 推奨: サーバー側(Service Role)で users を参照するAPI
+        const r1 = await fetch(
+          `/api/userinfo?user_code=${encodeURIComponent(userCode)}`,
+          { cache: 'no-store' }
+        );
+        if (r1.ok) {
+          const d = await r1.json();
+          if (cancelled) return;
+          setUiUser({
+            id: d?.id ?? userCode,
+            name: d?.name ?? 'user',
+            userType: d?.user_type ?? 'member',
+            credits: Number(d?.sofia_credit ?? d?.credits ?? 0),
+            avatarUrl: d?.avatar_url ?? d?.photoURL ?? null,
+          });
+          return;
+        }
+        // 2) フォールバック: 既存の /api/me
+        const r2 = await fetch('/api/me', { cache: 'no-store' });
+        if (r2.ok) {
+          const d = await r2.json();
+          if (cancelled) return;
+          setUiUser({
+            id: d?.id ?? userCode,
+            name: d?.name ?? d?.display_name ?? 'user',
+            userType: d?.user_type ?? 'member',
+            credits: Number(d?.sofia_credit ?? d?.credits ?? 0),
+            avatarUrl: d?.avatar_url ?? d?.photoURL ?? null,
+          });
+          return;
+        }
+        if (!cancelled) fallback();
       } catch {
-        setUiUser({
-          id: userCode,
-          name: 'user',
-          userType: 'member',
-          credits: 0,
-          avatarUrl: null,
-        });
+        if (!cancelled) fallback();
       }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [userCode]);
 
-  // UI vars
+  // クレジットのライブ反映（sofia_credit カスタムイベント）
+  useEffect(() => {
+    const onCredit = (e: Event) => {
+      const { credits } = (e as CustomEvent).detail ?? {};
+      if (typeof credits === 'number') {
+        setUiUser((u) => (u ? { ...u, credits } : u));
+      }
+    };
+    window.addEventListener('sofia_credit', onCredit as EventListener);
+    return () => window.removeEventListener('sofia_credit', onCredit as EventListener);
+  }, []);
+
+  // UI スタイル設定
   useEffect(() => {
     const ui = SOFIA_CONFIG.ui;
     const r = document.documentElement;
@@ -118,16 +224,13 @@ export default function SofiaChatShell({ agent: agentProp = 'mu' }: Props) {
     set('--sofia-user-radius', `${ui.userRadius}px`);
   }, []);
 
-  // Compose 高さ → CSS 変数
-  const composeRef = useRef<HTMLDivElement>(null);
+  // Compose 高さを CSS 変数に反映
+  const composeRef = useRef<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
     const el = composeRef.current;
     if (!el) return;
     const set = () =>
-      document.documentElement.style.setProperty(
-        '--sof-compose-h',
-        `${el.offsetHeight}px`
-      );
+      document.documentElement.style.setProperty('--sof-compose-h', `${el.offsetHeight}px`);
     set();
     const ro = new ResizeObserver(set);
     ro.observe(el);
@@ -139,27 +242,34 @@ export default function SofiaChatShell({ agent: agentProp = 'mu' }: Props) {
     if (!userCode) return;
     const items = await listConversations(agentK, userCode, urlCid);
     setConversations(items);
-    const prefer =
-      (urlCid && items.find((i) => i.id === urlCid)?.id) || items[0]?.id;
+    const prefer = (urlCid && items.find((i) => i.id === urlCid)?.id) || items[0]?.id;
     if (prefer) setConversationId(prefer);
   }, [agentK, userCode, urlCid]);
 
-  // メッセージ取得
+  // メッセージ取得（会話IDごと初回のみ + 共有メッセージ除去 + 重複除去）
   const doFetchMessages = useCallback(
     async (cid: string) => {
       if (!userCode || !cid) return;
+      if (fetchedOnceByConv.has(cid)) return;
+      fetchedOnceByConv.add(cid);
+
       const rows = await fetchMessages(agentK, userCode, cid);
-      setMessages(injectMtalkSeed(rows, cid));
+      const seeded = injectMtalkSeed(rows, cid).filter(notShare);
+      setMessages(dedupeMessages(seeded));
     },
     [agentK, userCode, injectMtalkSeed]
   );
 
   // 初期ロード
   useEffect(() => {
-    if (canUse) doList();
+    if (!canUse) return;
+    doList();
   }, [canUse, doList]);
+
   useEffect(() => {
-    if (canUse && conversationId) doFetchMessages(conversationId);
+    if (canUse && conversationId) {
+      doFetchMessages(conversationId);
+    }
   }, [canUse, conversationId, doFetchMessages]);
 
   // 送信
@@ -186,24 +296,41 @@ export default function SofiaChatShell({ agent: agentProp = 'mu' }: Props) {
         text,
       });
       const nextConvId = res.conversationId ?? conversationId;
-      if (nextConvId && nextConvId !== conversationId)
-        setConversationId(nextConvId);
+      if (nextConvId && nextConvId !== conversationId) setConversationId(nextConvId);
 
       if (res.rows && res.rows.length) {
-        setMessages(injectMtalkSeed(res.rows, nextConvId));
+        setMessages((prev) => {
+          const merged: Message[] = [
+            ...prev.filter((m) => !res.rows.some((r) => r.id && r.id === m.id)),
+            ...res.rows,
+          ].filter(notShare);
+
+          const hasSeed = res.rows.some((r) => r.meta?.seed || r.meta?.seed_reply);
+          const maybeSeeded =
+            agentK === 'mirra' && !hasSeed ? injectMtalkSeed(merged, nextConvId) : merged;
+          return dedupeMessages(maybeSeeded);
+        });
       } else if (res.replyText) {
-        setMessages((prev) => [
-          ...prev,
-          {
+        setMessages((prev) => {
+          // 1) 新規メッセージを明示的に Message 型にする
+          const reply: Message = {
             id: crypto.randomUUID?.() ?? `a-${Date.now()}`,
             role: 'assistant',
             content: res.replyText,
             created_at: new Date().toISOString(),
             agent: agentK,
-            ...(res.meta ? { meta: res.meta } : {}),
-          },
-        ]);
+            ...(res.meta ? { meta: res.meta as any } : {}),
+          };
+
+          // 2) prev との結合も Message[] として固定
+          const arr: Message[] = [...prev, reply];
+
+          // 3) mTalk 共有文を除外 → 重複除去
+          const cleaned: Message[] = arr.filter(notShare as (m: Message) => boolean);
+          return dedupeMessages(cleaned);
+        });
       }
+
       if (typeof res.credit === 'number') {
         try {
           window.dispatchEvent(
@@ -215,7 +342,7 @@ export default function SofiaChatShell({ agent: agentProp = 'mu' }: Props) {
     [agentK, userCode, conversationId, messages, injectMtalkSeed]
   );
 
-  // 削除/改名
+  // 削除 / 改名
   const handleDelete = useCallback(
     async (id: string) => {
       await deleteConversation(agentK, id);
@@ -261,15 +388,11 @@ export default function SofiaChatShell({ agent: agentProp = 'mu' }: Props) {
       />
 
       {authLoading ? (
-        <div
-          style={{ display: 'grid', placeItems: 'center', minHeight: '60vh' }}
-        >
+        <div style={{ display: 'grid', placeItems: 'center', minHeight: '60vh' }}>
           読み込み中…
         </div>
       ) : !userCode ? (
-        <div
-          style={{ display: 'grid', placeItems: 'center', minHeight: '60vh' }}
-        >
+        <div style={{ display: 'grid', placeItems: 'center', minHeight: '60vh' }}>
           ログインが必要です
         </div>
       ) : (
@@ -285,12 +408,11 @@ export default function SofiaChatShell({ agent: agentProp = 'mu' }: Props) {
             }}
             onDelete={handleDelete}
             onRename={handleRename}
-            userInfo={null as any}
+            userInfo={menuUser}
             meta={meta as any}
             mirraHistory={agentK === 'mirra' ? conversations : (undefined as any)}
           />
 
-          {/* ✅ currentUser を渡す */}
           <MessageList messages={messages} currentUser={uiUser} agent={agentK} />
 
           <div className="sof-compose-dock" ref={composeRef}>

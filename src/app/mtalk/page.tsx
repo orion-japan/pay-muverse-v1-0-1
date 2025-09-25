@@ -1,10 +1,13 @@
+// src/app/mtalk/page.tsx
 'use client';
 
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { fetchWithIdToken } from '@/lib/fetchWithIdToken';
 import { useUnread } from '@/store/useUnread';
+import Header from '@/components/Header'; // Muverse共通ヘッダー
 import './mtalk.css';
 
 type Agent = 'mirra' | 'iros';
@@ -50,6 +53,41 @@ export default function MTalkPage() {
 
   const [history, setHistory] = useState<ThreadItem[]>([]);
 
+  // ===== ヘッダーを body 直下へ出すためのポータル先 =====
+  const [portalHost, setPortalHost] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let host = document.getElementById('global-header-root') as HTMLElement | null;
+    let created = false;
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'global-header-root';
+      host.style.position = 'relative';
+      host.style.zIndex = '2147483647';
+      document.body.appendChild(host);
+      created = true;
+    }
+    // 既に他ページが入れていた場合の二重化防止（子要素をクリア）
+    try {
+      while (host.firstChild) host.removeChild(host.firstChild);
+    } catch {}
+    setPortalHost(host);
+    return () => {
+      // 自分が作った場合のみ掃除
+      if (created && host?.parentNode) {
+        try {
+          host.parentNode.removeChild(host);
+        } catch {}
+      } else {
+        // 作ってない場合は中身だけ片付ける
+        try {
+          while (host?.firstChild) host.removeChild(host.firstChild);
+        } catch {}
+      }
+    };
+  }, []);
+  // ================================================
+
   const historySafe = useMemo(() => {
     const src = Array.isArray(history) ? history : [];
     const norm = src.map((h, idx) => {
@@ -79,8 +117,15 @@ export default function MTalkPage() {
   }, [history]);
 
   const hasHistory = historySafe.length > 0;
-
   const canSubmit = useMemo(() => !loading && input.trim().length > 0, [loading, input]);
+
+  // ===== ヘッダーの「ログイン」押下時の挙動 =====
+  const handleLoginClick = useCallback(() => {
+    try {
+      window.dispatchEvent(new CustomEvent('open_login_modal'));
+    } catch {}
+    router.push('/login');
+  }, [router]);
 
   // 履歴取得（mirra 限定）
   useEffect(() => {
@@ -106,7 +151,7 @@ export default function MTalkPage() {
     setErrorMsg(null);
 
     try {
-      const lines = input.split('\n').map(s => s.trim()).filter(Boolean);
+      const lines = input.split('\n').map((s) => s.trim()).filter(Boolean);
       const res = await fetchWithIdToken('/api/agent/mtalk/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -149,7 +194,7 @@ export default function MTalkPage() {
     }
   }
 
-  // ★ 相談開始：問題/回答をAPIに渡し、チャットへ遷移
+  // 相談開始 → チャットへ遷移
   async function consult(reportId: string) {
     try {
       const res = await fetchWithIdToken('/api/agent/mtalk/consult', {
@@ -169,7 +214,7 @@ export default function MTalkPage() {
         return;
       }
 
-      // 保険：サーバで挿入できなかった場合でも描画できるよう seed を保存
+      // 保険：seed 保存
       try {
         const cid = String(j.conversation_id || '').trim();
         if (Array.isArray(j.seed_messages) && j.seed_messages.length) {
@@ -193,103 +238,142 @@ export default function MTalkPage() {
   }
 
   return (
-    <main className="mtalk-root">
-      {/* ====== 履歴バー（上部） ====== */}
-      <section className="mtalk-history">
-        <div className="mh-title">
-          <span>過去の mirra 相談</span>
-          {!hasHistory && <em className="mh-empty">（まだ相談履歴がありません）</em>}
-        </div>
-        {hasHistory && (
-          <select
-            className="mh-dropdown"
-            defaultValue=""
-            onChange={(e) => {
-              const val = e.target.value;
-              if (val) {
-                router.push(`/mtalk/${val}?agent=mirra&from=history&cid=${val}`);
-              }
+    <>
+      {/* ====== Muverse 共通ヘッダー（/mtalk だけ、body直下にポータル） ====== */}
+      {portalHost &&
+        createPortal(
+          <div
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              zIndex: 2147483646,
+              background: '#fff',
             }}
           >
-            <option value="" disabled>履歴を選択してください</option>
-            {historySafe.map((h) => (
-              <option key={h.id} value={h.id}>{h.label}</option>
-            ))}
-          </select>
+            <Header onLoginClick={handleLoginClick} />
+          </div>,
+          portalHost
         )}
-      </section>
 
-      {/* ====== 説明 & 入力 ====== */}
-      <header className="mtalk-intro">
-        <h1>mTalk — マインドトーク</h1>
-        <p className="lead">
-          多くの人は、無意識のセルフトークに導かれて、できない理由を賢く語る罠に入ります。
-          <br />
-          <b>mTalk は、その声を見える化し、意図へ戻す入口。</b> ここで整えれば、マインドトークは静かになります。
-        </p>
+      <main className="mtalk-root">
+        {/* ====== 履歴バー（上部） ====== */}
+        <section className="mtalk-history">
+          <div className="mh-title">
+            <span>過去の mirra 相談</span>
+            {!hasHistory && <em className="mh-empty">（まだ相談履歴がありません）</em>}
+          </div>
+          {hasHistory && (
+            <select
+              className="mh-dropdown"
+              defaultValue=""
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val) {
+                  router.push(`/mtalk/${val}?agent=mirra&from=history&cid=${val}`);
+                }
+              }}
+            >
+              <option value="" disabled>
+                履歴を選択してください
+              </option>
+              {historySafe.map((h) => (
+                <option key={h.id} value={h.id}>
+                  {h.label}
+                </option>
+              ))}
+            </select>
+          )}
+        </section>
+
+        {/* ====== ヘッダー文章（ヒーロー文） ====== */}
+        <section className="mtalk-intro">
+          <h1>mTalk — マインドトーク</h1>
+          <p className="lead">
+            多くの人は、無意識のセルフトークに導かれて、できない理由を賢く語る罠に入ります。
+            <br />
+            <b>mTalk は、その声を見える化し、意図へ戻す入口。</b> ここで整えれば、マインドトークは静かになります。
+          </p>
 
         <div className="mtalk-agent">
-          <span className="label">鑑定エージェント：</span>
-          <label className="radio">
-            <input type="radio" name="agent" value="mirra" checked={agent === 'mirra'} onChange={() => setAgent('mirra')} />
-            <span>mirra（初回 2 クレジット）</span>
-          </label>
-          <label className="radio">
-            <input type="radio" name="agent" value="iros" checked={agent === 'iros'} onChange={() => setAgent('iros')} />
-            <span>iros（初回 5 クレジット）</span>
-          </label>
-        </div>
-      </header>
+            <span className="label">鑑定エージェント：</span>
+            <label className="radio">
+              <input
+                type="radio"
+                name="agent"
+                value="mirra"
+                checked={agent === 'mirra'}
+                onChange={() => setAgent('mirra')}
+              />
+              <span>mirra（初回 2 クレジット）</span>
+            </label>
+            <label className="radio">
+              <input
+                type="radio"
+                name="agent"
+                value="iros"
+                checked={agent === 'iros'}
+                onChange={() => setAgent('iros')}
+              />
+              <span>iros（初回 5 クレジット）</span>
+            </label>
+          </div>
+        </section>
 
-      <section className="mtalk-input">
-        <textarea
-          rows={8}
-          placeholder="日頃のマインドトークを入力してください"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          disabled={loading}
-        />
-        <div className="mtalk-actions">
-          <button className="primary" disabled={!canSubmit} onClick={analyze}>
-            {loading ? '解析中…' : `解析する（${agent === 'iros' ? 5 : 2}クレジット）`}
-          </button>
-
-          {/* 初回でも常に表示（latestReport がある時） */}
-          {latestReport && (
-            <button className="secondary" onClick={() => consult(latestReport.id)}>
-              この問題に取り組みますか？（相談する）
+        {/* ====== 入力 ====== */}
+        <section className="mtalk-input">
+          <textarea
+            rows={8}
+            placeholder="日頃のマインドトークを入力してください"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            disabled={loading}
+          />
+          <div className="mtalk-actions">
+            <button className="primary" disabled={!canSubmit} onClick={analyze}>
+              {loading ? '解析中…' : `解析する（${agent === 'iros' ? 5 : 2}クレジット）`}
             </button>
-          )}
 
-          {!userCode && <span className="warn">※ ログインが必要です</span>}
-        </div>
-
-        {errorMsg && <div className="error">{errorMsg}</div>}
-      </section>
-
-      <section className="mtalk-result">
-        {latestReport ? (
-          <article className="report-card">
-            <div className="meta">
-              <span className={`q-badge ${latestReport.q_emotion.toLowerCase()}`}>{latestReport.q_emotion}</span>
-              <span className="pill">位相：{latestReport.phase}</span>
-              <span className="pill">深度：{latestReport.depth_stage}</span>
-              <time>{new Date(latestReport.created_at).toLocaleString()}</time>
-            </div>
-            <pre className="reply">{latestReport.reply_text}</pre>
-
-            {hasHistory && (
-              <div className="report-actions">
-                <button className="secondary" onClick={() => consult(latestReport.id)}>
-                  この問題に取り組みますか？（相談する）
-                </button>
-              </div>
+            {latestReport && (
+              <button className="secondary" onClick={() => consult(latestReport.id)}>
+                この問題に取り組みますか？（相談する）
+              </button>
             )}
-          </article>
-        ) : (
-          <div className="placeholder">解析結果はここに表示され、保存されます。</div>
-        )}
-      </section>
-    </main>
+
+            {!userCode && <span className="warn">※ ログインが必要です</span>}
+          </div>
+
+          {errorMsg && <div className="error">{errorMsg}</div>}
+        </section>
+
+        {/* ====== 結果 ====== */}
+        <section className="mtalk-result">
+          {latestReport ? (
+            <article className="report-card">
+              <div className="meta">
+                <span className={`q-badge ${latestReport.q_emotion.toLowerCase()}`}>
+                  {latestReport.q_emotion}
+                </span>
+                <span className="pill">位相：{latestReport.phase}</span>
+                <span className="pill">深度：{latestReport.depth_stage}</span>
+                <time>{new Date(latestReport.created_at).toLocaleString()}</time>
+              </div>
+              <pre className="reply">{latestReport.reply_text}</pre>
+
+              {hasHistory && (
+                <div className="report-actions">
+                  <button className="secondary" onClick={() => consult(latestReport.id)}>
+                    この問題に取り組みますか？（相談する）
+                  </button>
+                </div>
+              )}
+            </article>
+          ) : (
+            <div className="placeholder">解析結果はここに表示され、保存されます。</div>
+          )}
+        </section>
+      </main>
+    </>
   );
 }

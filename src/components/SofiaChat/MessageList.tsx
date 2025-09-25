@@ -107,8 +107,24 @@ export default function MessageList({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase, currentUser?.id, currentUser?.avatarUrl]);
 
+  /* ======== 自動スクロール（開いた瞬間＆新着時） ======== */
+  const listRef = React.useRef<HTMLDivElement | null>(null);
+  const bottomRef = React.useRef<HTMLDivElement | null>(null);
+  const firstRender = React.useRef(true);
+
+  const scrollToBottom = React.useCallback((behavior: ScrollBehavior = 'auto') => {
+    // bottom sentinel の方が画像読み込み遅延にも強い
+    bottomRef.current?.scrollIntoView({ behavior, block: 'end' });
+  }, []);
+
+  // 初回＆messages変化時に最下部へ
+  React.useEffect(() => {
+    scrollToBottom(firstRender.current ? 'auto' : 'smooth');
+    firstRender.current = false;
+  }, [messages, scrollToBottom]);
+
   return (
-    <div className="sof-msgs">
+    <div className="sof-msgs" ref={listRef}>
       {messages.length === 0 ? (
         <div className="sof-empty">ここに会話が表示されます</div>
       ) : (
@@ -454,6 +470,9 @@ export default function MessageList({
               </div>
             );
           })}
+
+          {/* 自動スクロールの目印 */}
+          <div ref={bottomRef} />
 
           {/* 入力バー直上フェード */}
           <div className="sof-fader" aria-hidden />

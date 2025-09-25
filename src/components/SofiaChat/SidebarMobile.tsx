@@ -47,7 +47,7 @@ const SidebarMobile: React.FC<SidebarMobileProps> = ({
   agent,
 }) => {
   const router = useRouter();
-
+  console.log('[SidebarMobile] userInfo =', userInfo);
   // ===== Portal host =====
   const portalRef = React.useRef<Element | null>(null);
   if (typeof window !== 'undefined' && !portalRef.current) {
@@ -146,20 +146,41 @@ const SidebarMobile: React.FC<SidebarMobileProps> = ({
           </button>
         </div>
 
-        {/* user box */}
-        {userInfo && (
-          <div className="sof-user">
-            <button className="sof-user__row" onClick={() => dispatch('click_username', { id: userInfo.id, name: userInfo.name })}>
-              🌱 <b>Name:</b>&nbsp;<span>{userInfo.name}</span>
-            </button>
-            <button className="sof-user__row" onClick={() => dispatch('click_type', { userType: userInfo.userType })}>
-              🌱 <b>Type:</b>&nbsp;<span>{userInfo.userType}</span>
-            </button>
-            <button className="sof-user__row" onClick={() => dispatch('sofia_credit', { credits: userInfo.credits })}>
-              🌱 <b>Credits:</b>&nbsp;<span>{userInfo.credits}</span>
-            </button>
-          </div>
-        )}
+{/* user box */}
+{userInfo && (
+  <div className="sof-user">
+    {/* Name: users.click_username */}
+    <button
+      className="sof-user__row"
+      onClick={() => dispatch('click_username', { id: userInfo.id, name: userInfo.name })}
+      title="source: users.click_username"
+      data-source="users.click_username"
+    >
+      🌱 <b>Name:</b>&nbsp;<span>{userInfo.name}</span>
+    </button>
+
+    {/* Type: users.click_type */}
+    <button
+      className="sof-user__row"
+      onClick={() => dispatch('click_type', { userType: userInfo.userType })}
+      title="source: users.click_type"
+      data-source="users.click_type"
+    >
+      🌱 <b>Type:</b>&nbsp;<span>{userInfo.userType}</span>
+    </button>
+
+    {/* Credits: users.sofia_credit */}
+    <button
+      className="sof-user__row"
+      onClick={() => dispatch('sofia_credit', { credits: userInfo.credits })}
+      title="source: users.sofia_credit"
+      data-source="users.sofia_credit"
+    >
+      🌱 <b>Credits:</b>&nbsp;<span>{userInfo.credits}</span>
+    </button>
+  </div>
+)}
+
 
         {/* list */}
         <ul className="sof-list">

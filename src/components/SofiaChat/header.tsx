@@ -2,6 +2,7 @@
 
 import React from 'react';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation'; // ★ 追加
 
 export type Agent = 'mu' | 'iros' | 'mirra';
 
@@ -22,6 +23,8 @@ export default function Header({
   onRefresh,
   icon,
 }: HeaderProps) {
+  const router = useRouter(); // ★ 追加
+
   const title =
     agent === 'iros' ? 'iros_AI' : agent === 'mirra' ? 'mirra_AI' : 'mu_AI';
 
@@ -46,6 +49,15 @@ export default function Header({
   const handleRefresh = () => {
     if (onRefresh) onRefresh();
     else if (typeof window !== 'undefined') window.location.reload();
+  };
+
+  // ★ 追加: mirra のときだけ /mtalk に遷移。その他は従来の onCreateNewChat
+  const handleNewChat = () => {
+    if (agent === 'mirra') {
+      router.push('/mtalk');
+      return;
+    }
+    onCreateNewChat?.();
   };
 
   return (
@@ -130,7 +142,7 @@ export default function Header({
         </button>
         {onCreateNewChat && (
           <button
-            onClick={onCreateNewChat}
+            onClick={handleNewChat}
             className="sof-btn sof-btn-accent"
             aria-label="新規チャット"
             title="新規"
@@ -249,10 +261,6 @@ export default function Header({
           .sof-btn {
             padding: 6px 9px;
             font-size: 13px;
-
-
-
-            
           }
         }
       `}</style>

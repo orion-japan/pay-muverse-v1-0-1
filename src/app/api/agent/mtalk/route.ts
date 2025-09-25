@@ -1,10 +1,12 @@
+// src/app/api/agent/mtalk/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { SUPABASE_URL, SERVICE_ROLE, verifyFirebaseAndAuthorize } from '@/lib/authz';
-import { buildSystemPrompt as buildMirraSystemPrompt } from '@/lib/mirra/buildSystemPrompt';
+import { generateMirraReply } from '@/lib/mirra/generate'; // ★ ここがカギ：generate.ts を使う
+// （buildSystemPrompt は generate.ts 内で使われるのでここでは不要）
 
 function json(data: any, init?: number | ResponseInit) {
   const status = typeof init === 'number' ? init : (init as ResponseInit | undefined)?.['status'] ?? 200;
@@ -15,120 +17,144 @@ function json(data: any, init?: number | ResponseInit) {
 
 export async function POST(req: NextRequest) {
   try {
-    // 認証
-    const z = await verifyFirebaseAndAuthorize(req as any);
-    if (!z?.ok) return json({ ok:false, error:z?.error || 'unauthorized' }, z?.status || 401);
-    if (!z.allowed) return json({ ok:false, error:'forbidden' }, 403);
+    // ---- 認証 ----
+    const auth = await verifyFirebaseAndAuthorize(req as any);
+    if (!auth?.ok) return json({ ok: false, error: auth?.error || 'unauthorized' }, auth?.status || 401);
+    if (!auth.allowed) return json({ ok: false, error: 'forbidden' }, 403);
 
-    // 入力
-    const body = await req.json().catch(() => ({}));
-    const text: string = String(body.text ?? body.message ?? '').trim();
-    if (!text) return json({ ok:false, error:'empty' }, 400);
+// ---- 入力 ----
+const body = await req.json().catch(() => ({}));
+const text: string = String(body.text ?? body.message ?? '').trim();
+if (!text) return json({ ok: false, error: 'empty' }, 400);
 
-    const user_code: string = body.user_code ?? z.userCode;
-    const conversation_id: string = String(body.thread_id ?? body.conversation_id ?? `mirra-${user_code}`);
+// 👇 修正版
+const user_code: string | null =
+  (body.user_code as string | undefined) ??
+  auth.userCode ??
+  auth.user?.user_code ??
+  null;
 
-    const s = createClient(SUPABASE_URL!, SERVICE_ROLE!, { auth: { persistSession: false } });
+if (!user_code) return json({ ok: false, error: 'no_user_code' }, 401);
 
-    // スレッド upsert（タイトルは1回で十分）
+const conversation_id: string = String(
+  body.thread_id ?? body.conversation_id ?? `mirra-${user_code}`
+);
+
+const supa = createClient(SUPABASE_URL!, SERVICE_ROLE!, {
+  auth: { persistSession: false },
+});
+
+    // ---- スレッド upsert（存在しなければ作る）----
     {
-      const { error } = await s.from('talk_threads').upsert({
-        id: conversation_id,
-        user_a_code: user_code,
-        agent: 'mirra',
-        created_by: user_code,
-        title: 'mirra 会話',
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'id' });
+      const { error } = await supa.from('talk_threads').upsert(
+        {
+          id: conversation_id,
+          user_a_code: user_code,
+          agent: 'mirra',
+          created_by: user_code,
+          title: 'mirra 会話',
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'id' }
+      );
       if (error) {
         console.error('[mtalk] upsert thread error:', error);
-        return json({ ok:false, error:error.message }, 500);
+        // ここで落とさず続行（メッセージ記録はできるため）
       }
     }
 
-    const now = new Date().toISOString();
+    const nowISO = new Date().toISOString();
 
-    // ユーザー発話 保存
+    // ---- ユーザー発話を保存（talk_messages）----
     {
-      const { error } = await s.from('talk_messages').insert([{
-        thread_id: conversation_id,    // ★ ここが読み出し側と一致する鍵
-        sender_code: user_code,
-        user_code,
-        role: 'user',
-        content: text,
-        created_at: now,
-      }]);
+      const { error } = await supa.from('talk_messages').insert([
+        {
+          thread_id: conversation_id, // 既存UIが読むキー
+          sender_code: user_code,
+          user_code,
+          role: 'user',
+          content: text,
+          created_at: nowISO,
+        },
+      ]);
       if (error) {
         console.error('[mtalk] insert user msg error:', error);
-        return json({ ok:false, error:error.message }, 500);
+        return json({ ok: false, error: error.message }, 500);
       }
     }
 
-    // 履歴（system込みで40件）
-    const sys = (typeof buildMirraSystemPrompt === 'function')
-      ? buildMirraSystemPrompt()
-      : 'You are Mirra, a gentle “mind-talk” assistant. Reply in Japanese with 3 bullets: (1) message, (2) body anchor, (3) next small action.';
-
-    const { data: hist, error: hErr } = await s
+    // ---- 直近の履歴を取得（last assistant を anti-repeat へ）----
+    const { data: hist, error: hErr } = await supa
       .from('talk_messages')
       .select('role, content, created_at')
       .eq('thread_id', conversation_id)
       .order('created_at', { ascending: true })
-      .limit(40);
-    if (hErr) console.warn('[mtalk] history warn:', hErr?.message);
+      .limit(60);
+    if (hErr) console.warn('[mtalk] history warn:', hErr.message);
 
-    const messagesForLLM: Array<{role:'system'|'user'|'assistant', content:string}> = [
-      { role: 'system', content: sys },
-      ...(hist ?? []).map(m => ({ role: m.role as any, content: String(m.content ?? '') })),
-    ];
+    const lastAssistantReply =
+      [...(hist ?? [])].reverse().find((m) => String(m.role) === 'assistant')?.content ?? null;
 
-    // LLM 呼び出し
-    let reply = '';
-    let meta: any = { provider:'openai', model:'gpt-4o-mini' };
+    // ---- seed（mTalkの黒カード起点）候補を収集 ----
+    // 1) その会話に紐づいた最新レポート
+    let seed: string | null = null;
     try {
-      const key = process.env.OPENAI_API_KEY;
-      if (!key) throw new Error('OPENAI_API_KEY missing');
+      const { data: rep } = await supa
+        .from('mtalk_reports')
+        .select('reply_text')
+        .eq('conversation_id', conversation_id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (rep?.reply_text) seed = String(rep.reply_text);
+    } catch {}
 
-      const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-        body: JSON.stringify({ model: 'gpt-4o-mini', messages: messagesForLLM, temperature: 0.7 }),
-      });
-      if (!resp.ok) throw new Error(`openai ${resp.status}`);
-      const js = await resp.json();
-      reply = js?.choices?.[0]?.message?.content?.trim() || '';
-    } catch (e:any) {
-      console.warn('[mtalk] LLM fallback:', e?.message);
-      reply = [
-        `1. メッセージ: 受け取りました。「${text.slice(0, 60)}」について一緒に整えます。`,
-        '2. 体のアンカー: 深呼吸を3回。吐く息を長めにして肩の力を抜きます。',
-        '3. 次の一歩: いま一番気になる1点を短く送ってください。',
-      ].join('\n');
-      meta = { provider:'local-fallback' };
+    // 2) conversations.messages の先頭2つ（consultで入れた problem/answer）をフォールバックで連結
+    if (!seed) {
+      try {
+        const { data: conv } = await supa
+          .from('conversations')
+          .select('messages')
+          .eq('id', conversation_id)
+          .maybeSingle();
+        const arr = Array.isArray((conv as any)?.messages) ? ((conv as any).messages as any[]) : [];
+        if (arr.length >= 2) {
+          const u = (arr.find((m) => m.role === 'user')?.content || '').toString();
+          const a = (arr.find((m) => m.role === 'assistant')?.content || '').toString();
+          const joined = [u, a].filter(Boolean).join('\n');
+          if (joined) seed = joined.slice(0, 600);
+        }
+      } catch {}
     }
 
-    // アシスタント発話 保存
+    // ---- mirra 応答生成：ここから generate.ts を必ず通す ----
+    const out = await generateMirraReply(text, seed, lastAssistantReply, 'consult');
+
+    // ---- 応答を保存（talk_messages）----
     {
-      const { error } = await s.from('talk_messages').insert([{
-        thread_id: conversation_id,
-        sender_code: 'mirra',
-        role: 'assistant',
-        content: reply,
-        meta,
-        created_at: new Date().toISOString(),
-      }]);
+      const { error } = await supa.from('talk_messages').insert([
+        {
+          thread_id: conversation_id,
+          sender_code: 'mirra',
+          role: 'assistant',
+          content: out.text,
+          meta: out.meta,
+          created_at: new Date().toISOString(),
+        },
+      ]);
       if (error) console.error('[mtalk] insert assistant msg error:', error);
     }
 
-    // スレッド最終更新
-    await s.from('talk_threads')
+    // ---- スレッド更新 ----
+    await supa
+      .from('talk_threads')
       .update({ last_message_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq('id', conversation_id);
 
-    // クレジット 1 消費（fn_charge_credits が無ければスキップ）
+    // ---- クレジット消費（存在しない環境はスキップ）----
     let balance_after: number | null = null;
     try {
-      const { data: rpc, error: rpcErr } = await s.rpc('fn_charge_credits', {
+      const { error: rpcErr } = await supa.rpc('fn_charge_credits', {
         p_user_code: user_code,
         p_cost: 1,
         p_reason: 'mirra_chat_turn',
@@ -137,8 +163,8 @@ export async function POST(req: NextRequest) {
         p_ref_sub_id: null,
       });
       if (rpcErr) {
-        // 旧ファンクション名にフォールバック（存在すれば）
-        const { error: altErr } = await s.rpc('credit_capture', {
+        // 旧名 fallback
+        const { error: altErr } = await supa.rpc('credit_capture', {
           p_user_code: user_code,
           p_amount: 1,
           p_reason: 'mirra_chat_turn',
@@ -149,8 +175,12 @@ export async function POST(req: NextRequest) {
         });
         if (altErr) console.warn('[mtalk] credit rpc warn:', altErr.message);
       }
-      // 残高取得
-      const { data: u, error: uErr } = await s.from('users').select('sofia_credit').eq('user_code', user_code).maybeSingle();
+      // 残高
+      const { data: u, error: uErr } = await supa
+        .from('users')
+        .select('sofia_credit')
+        .eq('user_code', user_code)
+        .maybeSingle();
       if (!uErr && u && typeof u.sofia_credit === 'number') balance_after = Number(u.sofia_credit);
     } catch (e) {
       console.warn('[mtalk] credit charge skipped:', (e as any)?.message || e);
@@ -162,13 +192,13 @@ export async function POST(req: NextRequest) {
       agent: 'mirra',
       conversation_id,
       thread_id: conversation_id,
-      reply,
-      meta,
+      reply: out.text,
+      meta: out.meta,
       credit_balance: balance_after,
-      used_fallback: meta?.provider === 'local-fallback',
+      used_fallback: out.meta?.provider === 'fallback',
     });
-  } catch (e:any) {
+  } catch (e: any) {
     console.error('[mtalk] error', e);
-    return json({ ok:false, error:'internal_error', detail:String(e?.message || e) }, 500);
+    return json({ ok: false, error: 'internal_error', detail: String(e?.message || e) }, 500);
   }
 }

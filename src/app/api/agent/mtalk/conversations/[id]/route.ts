@@ -16,27 +16,70 @@ function json(data: any, init?: number | ResponseInit) {
   return new NextResponse(JSON.stringify(data), { status, headers });
 }
 
-/** 所有者チェック：conversations.user_code が一致するか */
+/** 内部ユーティリティ：対象の種別を判定（'conversations' | 'mirra' | 'none'） */
+async function detectKind(
+  supabase: any,
+  conversation_id: string,
+): Promise<'conversations' | 'mirra' | 'none'> {
+  // 1) 標準 conversations
+  {
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('id')
+      .eq('id', conversation_id)
+      .maybeSingle();
+    if (!error && data?.id) return 'conversations';
+  }
+  // 2) mirra セッション
+  {
+    const { data, error } = await supabase
+      .from('mtalk_sessions')
+      .select('id')
+      .eq('id', conversation_id)
+      .maybeSingle();
+    if (!error && data?.id) return 'mirra';
+  }
+  return 'none';
+}
+
+/** 所有者チェック：conversations or mtalk_sessions の user_code が一致するか */
 async function assertOwned(
   supabase: any,
   conversation_id: string,
   user_code: string,
 ): Promise<void> {
-  const { data, error } = await supabase
-    .from('conversations')
-    .select('id, user_code')
-    .eq('id', conversation_id)
-    .maybeSingle();
+  // conversations を見る
+  {
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('id, user_code')
+      .eq('id', conversation_id)
+      .maybeSingle();
 
-  if (error) throw error;
-  if (!data) throw new Error('not_found');
-  if (data.user_code !== user_code) throw new Error('forbidden');
+    if (error) throw error;
+    if (data) {
+      if (data.user_code !== user_code) throw new Error('forbidden');
+      return;
+    }
+  }
+  // 無ければ mirra セッションを確認
+  {
+    const { data, error } = await supabase
+      .from('mtalk_sessions')
+      .select('id, user_code')
+      .eq('id', conversation_id)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) throw new Error('not_found');
+    if (data.user_code !== user_code) throw new Error('forbidden');
+  }
 }
 
 /** PATCH: タイトル変更 */
 export async function PATCH(
   req: NextRequest,
-  ctx: { params: Promise<{ id: string }> } // ← Promise に変更
+  ctx: { params: Promise<{ id: string }> } // ← Promise に変更（元の構造を維持）
 ) {
   try {
     const auth = await verifyFirebaseAndAuthorize(req);
@@ -50,18 +93,48 @@ export async function PATCH(
     if (!title) return json({ ok: false, error: 'title_required' }, 400);
 
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
+
+    // 所有確認（conversations か mirra かはここでは不問）
     await assertOwned(supabase, id, user_code);
 
-    const { data, error } = await supabase
-      .from('conversations')
-      .update({ title })
-      .eq('id', id)
-      .select('id, title, updated_at')
-      .single();
+    // どちらのテーブルか判定
+    const kind = await detectKind(supabase, id);
 
-    if (error) throw error;
+    if (kind === 'conversations') {
+      // 従来どおり conversations を更新
+      const { data, error } = await supabase
+        .from('conversations')
+        .update({ title })
+        .eq('id', id)
+        .select('id, title, updated_at')
+        .single();
+      if (error) throw error;
+      return json({ ok: true, conversation: data });
+    }
 
-    return json({ ok: true, conversation: data });
+    if (kind === 'mirra') {
+      // mirra の場合はオーバーライド表に upsert（タイトル上書き）
+      const { error } = await supabase
+        .from('mtalk_overrides')
+        .upsert({
+          session_id: id,
+          user_code,
+          title,
+          archived: false,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('session_id', id);
+      if (error) throw error;
+
+      // レスポンスの形は会話更新と似せる
+      return json({
+        ok: true,
+        conversation: { id, title, updated_at: new Date().toISOString() },
+      });
+    }
+
+    // ここに来るなら対象なし
+    return json({ ok: false, error: 'not_found' }, 404);
   } catch (err: any) {
     const msg = String(err?.message || err);
     if (msg === 'not_found') return json({ ok: false, error: 'not_found' }, 404);
@@ -71,10 +144,10 @@ export async function PATCH(
   }
 }
 
-/** DELETE: 会話削除（ハード削除。必要ならソフト削除に変更可） */
+/** DELETE: 会話削除（conversations はハード、mirra は論理削除） */
 export async function DELETE(
   req: NextRequest,
-  ctx: { params: Promise<{ id: string }> } // ← Promise に変更
+  ctx: { params: Promise<{ id: string }> } // ← Promise に変更（元の構造を維持）
 ) {
   try {
     const auth = await verifyFirebaseAndAuthorize(req);
@@ -84,14 +157,34 @@ export async function DELETE(
 
     const { id } = await ctx.params; // ← await で取り出す
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
+
     await assertOwned(supabase, id, user_code);
 
-    // 付随テーブルの扱いはスキーマに合わせて必要なら先に削除
-    // 例: talk_messages / messages など会話に紐づく行がある場合は FK の ON DELETE CASCADE 推奨
-    const { error } = await supabase.from('conversations').delete().eq('id', id);
-    if (error) throw error;
+    const kind = await detectKind(supabase, id);
 
-    return json({ ok: true });
+    if (kind === 'conversations') {
+      // 従来どおり物理削除（関連テーブルはFKのON DELETE CASCADE前提）
+      const { error } = await supabase.from('conversations').delete().eq('id', id);
+      if (error) throw error;
+      return json({ ok: true });
+    }
+
+    if (kind === 'mirra') {
+      // mirra はアーカイブ（非表示）にする
+      const { error } = await supabase
+        .from('mtalk_overrides')
+        .upsert({
+          session_id: id,
+          user_code,
+          archived: true,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('session_id', id);
+      if (error) throw error;
+      return json({ ok: true });
+    }
+
+    return json({ ok: false, error: 'not_found' }, 404);
   } catch (err: any) {
     const msg = String(err?.message || err);
     if (msg === 'not_found') return json({ ok: false, error: 'not_found' }, 404);

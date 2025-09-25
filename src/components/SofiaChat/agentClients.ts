@@ -26,8 +26,22 @@ export async function listConversations(agent: Agent, userCode: string, urlCid?:
   }
 
   if (agent === 'mirra') {
-    const r = await fetchWithIdToken('/api/agent/mtalk/conversations', { cache: 'no-store' });
-    if (!r.ok) throw new Error(`mirra list ${r.status}`);
+    // ★ 変更点：自動リメイク（最新 input/reply + override/archived 反映）済みの履歴APIを使用
+    //    失敗時のフォールバックとして従来の conversations API も試行
+    let r = await fetchWithIdToken('/api/agent/mtalk/history?agent=mirra', { cache: 'no-store' }).catch(() => null as any);
+    if (r && r.ok) {
+      const j: any = await r.json().catch(() => ({}));
+      return (j.items ?? [])
+        .map((it: any) => ({
+          id: String(it.conversation_id ?? it.id ?? ''),
+          title: String(it.title ?? 'mirra 会話'),
+          updated_at: it.updated_at ?? null,
+        }))
+        .filter((x: any) => x.id);
+    }
+    // フォールバック（旧エンドポイント）
+    r = await fetchWithIdToken('/api/agent/mtalk/conversations', { cache: 'no-store' }).catch(() => null as any);
+    if (!r || !r.ok) throw new Error(`mirra list ${r?.status ?? 'noresp'}`);
     const j: any = await r.json().catch(() => ({}));
     return (j.items ?? [])
       .map((x: any) => ({
