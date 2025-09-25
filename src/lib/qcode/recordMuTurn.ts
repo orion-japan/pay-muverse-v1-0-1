@@ -1,15 +1,16 @@
-// src/lib/qcode/recordMuTurn.ts
 // Mu のテキスト1往復のクレジット消費を計上（失敗時は既定0課金）
 
 import { muCreditPolicy, muQTag, type MuQTags } from "./muPolicy";
+import { MU_Q_LINK } from "@/lib/mu/config";
 
 export type MuTurnStatus = "success" | "fail";
+export type IntentTag = (typeof MU_Q_LINK.INTENT_TAGS)[number];
 
 export type RecordMuTextTurnParams = {
   user_code: string;
   status: MuTurnStatus;
   chargeOnFailure?: boolean;
-  intentTag?: (typeof import("@/lib/mu/config").MU_Q_LINK.INTENT_TAGS)[number];
+  intentTag?: IntentTag;
   conversation_id?: string;
   message_id?: string;
   meta?: Record<string, unknown>;

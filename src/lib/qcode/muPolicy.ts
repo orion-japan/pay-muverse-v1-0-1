@@ -1,4 +1,3 @@
-// src/lib/qcode/muPolicy.ts
 // Mu 用の Qコード／クレジット消費ポリシー定義（型を厳密化）
 
 import { MU_CREDITS, MU_Q_LINK } from "@/lib/mu/config";
@@ -33,11 +32,11 @@ export function estimateMuCredits(kind: MuCreditType): number {
 }
 
 /** Qコード連動タグ付け（ログ用） */
-export function muQTag(kind: MuCreditType): MuQTags {
+export function muQTag(kind: MuCreditType) {
   return {
     source_type:
       kind === "textTurn" ? MU_Q_LINK.SOURCE_TYPE_TEXT : MU_Q_LINK.SOURCE_TYPE_IMAGE,
     credit_schema: muCreditPolicy[kind].schema,
-    agent: "mu",
+    agent: "mu" as const,
   };
 }

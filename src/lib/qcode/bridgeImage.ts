@@ -1,12 +1,14 @@
-// src/lib/qcode/bridgeImage.ts
 // Mu 画像生成ブリッジ：定型文の提供とクレジット見積・記録用ペイロード生成
 
-import { MU_BRIDGE_TEXT } from "@/lib/mu/config";
+import { MU_BRIDGE_TEXT, MU_Q_LINK } from "@/lib/mu/config";
 import { muCreditPolicy, muQTag, type MuQTags } from "./muPolicy";
 
 export type ImageStyle = "写実" | "シンプル" | "手描き風";
 export type ImageBridgePhase = "suggest" | "confirmStyle" | "done";
 export type ImageGenStatus = "success" | "fail";
+
+// MU_Q_LINK.INTENT_TAGS の要素型を安全に参照
+export type IntentTag = (typeof MU_Q_LINK.INTENT_TAGS)[number];
 
 export type BuildBridgeTextParams =
   | { phase: "suggest"; costOverride?: number }
@@ -46,7 +48,7 @@ export type RecordMuImageGenParams = {
   // ログ付帯情報
   conversation_id?: string;
   message_id?: string;
-  intentTag?: (typeof import("@/lib/mu/config").MU_Q_LINK.INTENT_TAGS)[number];
+  intentTag?: IntentTag;
   style?: ImageStyle;
   prompt_summary?: string;
   meta?: Record<string, unknown>;

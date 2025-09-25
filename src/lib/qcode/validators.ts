@@ -1,4 +1,3 @@
-// src/lib/qcode/validators.ts
 // Mu 用のセーフティ／バリデーション文言とチェック関数
 
 import { MU_SAFETY, MU_TONE_RULES } from "@/lib/mu/config";
