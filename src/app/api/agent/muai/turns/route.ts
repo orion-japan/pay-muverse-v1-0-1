@@ -1,8 +1,9 @@
-// src/app/api/mu/turns/route.ts
+// src/app/api/agent/muai/turns/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 import { createClient } from '@supabase/supabase-js';
 import {
   verifyFirebaseAndAuthorize,
@@ -22,11 +23,12 @@ export async function GET(req: Request) {
   if (!z.ok) return NextResponse.json({ error: z.error }, { status: z.status });
   if (!z.allowed) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
-  // conv_id をクエリから取得
+  // conv_id を Cookie またはクエリから取得
+  const store = await cookies();
   const url = new URL(req.url);
-  const convId = url.searchParams.get('conv_id');
+  const convId = store.get('conv_id')?.value ?? url.searchParams.get('conv_id');
   if (!convId) {
-    return NextResponse.json({ error: 'missing conv_id' }, { status: 400 });
+    return NextResponse.json({ error: 'missing conversation id' }, { status: 400 });
   }
 
   const s = sb();
