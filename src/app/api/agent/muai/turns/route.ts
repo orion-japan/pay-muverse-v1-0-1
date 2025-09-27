@@ -3,6 +3,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 import { createClient } from '@supabase/supabase-js';
 import {
   verifyFirebaseAndAuthorize,
@@ -24,7 +25,20 @@ export async function GET(req: Request) {
 
   // conv_id をクエリから取得
   const url = new URL(req.url);
-  const convId = url.searchParams.get('conv_id');
+  let convId = url.searchParams.get('conv_id');
+
+  if (!convId) {
+    try {
+      const cookieStore = await cookies();
+      convId =
+        cookieStore.get('muai:conv_id')?.value ??
+        cookieStore.get('mu:conv_id')?.value ??
+        undefined;
+    } catch (cookieError) {
+      console.warn('[mu.turns] cookies() access failed:', cookieError);
+    }
+  }
+
   if (!convId) {
     return NextResponse.json({ error: 'missing conv_id' }, { status: 400 });
   }
