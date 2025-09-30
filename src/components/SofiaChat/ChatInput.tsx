@@ -89,6 +89,7 @@ export default function ChatInput({
         next.push(f);
         if (next.length >= maxFiles) break;
       }
+      console.info('[ChatInput] appendFiles count=', Array.from(add ?? []).length, '→ total=', next.length);
       setFiles(next);
     },
     [files, maxFiles],
@@ -100,6 +101,7 @@ export default function ChatInput({
       e.stopPropagation();
       setDragOver(false);
       if (disabled || sending) return;
+      console.info('[ChatInput] drop files');
       appendFiles(e.dataTransfer?.files);
     },
     [appendFiles, disabled, sending],
@@ -129,19 +131,21 @@ export default function ChatInput({
       }
       if (pasted.length) {
         e.preventDefault();
+        console.info('[ChatInput] paste files count=', pasted.length);
         appendFiles(pasted);
       }
     },
     [appendFiles, disabled, sending],
   );
 
-  const handleSend = useCallback(async () => {
-    const value = text.trim();
+  // ★ 修正：allowEmpty/overrideText を追加（既存呼び出しはそのまま動作）
+  const handleSend = useCallback(async (opts?: { allowEmpty?: boolean; overrideText?: string }) => {
+    const value = (opts?.overrideText ?? text).trim();
     const hasFiles = files.length > 0;
 
     // 入口ガード
     if (disabled || sending || sendLockRef.current) return;
-    if (!value && !hasFiles) return;
+    if (!opts?.allowEmpty && !value && !hasFiles) return;
     if (overMaxFiles || overMaxSize) return;
 
     // 占有
@@ -157,15 +161,23 @@ export default function ChatInput({
       } catch {}
       taRef.current?.focus();
 
+      console.info('[ChatInput] send start text.len=', value.length, 'files=', hasFiles ? files.length : 0);
       if (onSendWithFiles) {
         await onSendWithFiles(value, hasFiles ? files : null);
       } else {
         await onSend(value);
       }
+      console.info('[ChatInput] send done');
+    } catch (e) {
+      console.error('[ChatInput] send error:', e);
     } finally {
       setSending(false);
       sendLockRef.current = false;
-      if (taRef.current) taRef.current.style.height = '42px'; // リセット
+      // 最小高(66px)に戻してから再計算
+      if (taRef.current) {
+        taRef.current.style.height = '66px';
+        autoSize();
+      }
     }
   }, [
     text,
@@ -177,6 +189,7 @@ export default function ChatInput({
     onSendWithFiles,
     onSend,
     draftKey,
+    autoSize,
   ]);
 
   const onKeyDown = useCallback(
@@ -210,12 +223,29 @@ export default function ChatInput({
     !overMaxFiles &&
     !overMaxSize;
 
-  // ★ 追加：Q&Aを開く（構造は変えず、内部で遷移）
-  const openQA = () => {
+// ★ Q&Aボタン：ユーザー発言を保存せずに /api/mu/summary へ遷移
+const openQA = () => {
+  console.info('[ChatInput] open Q&A');
+
+  // 入力欄と下書きをクリア
+  setText('');
+  setFiles([]);
+  try {
     if (typeof window !== 'undefined') {
-      window.location.assign('/knowledge'); // モーダル化する場合はここを差し替え
+      window.localStorage.removeItem(draftKey);
     }
-  };
+  } catch {}
+
+  // Q総評APIへ直行（scope/daysは必要に応じて調整可能）
+  const params = new URLSearchParams();
+  params.set('scope', 'qcode');
+  params.set('days', '30');
+
+  if (typeof window !== 'undefined') {
+    window.location.assign(`/api/mu/summary?${params.toString()}`);
+  }
+};
+
 
   return (
     /**

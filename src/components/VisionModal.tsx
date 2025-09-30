@@ -11,6 +11,7 @@ import './VisionModal.css';
 import type { Vision, Phase, Stage, Status } from '@/types/vision';
 import { resizeImage } from '@/utils/imageResize';
 import { useAuth } from '@/context/AuthContext';
+import SafeImage from '@/components/common/SafeImage'; // ★ 追加
 
 type VisionModalProps = {
   isOpen: boolean;
@@ -455,7 +456,7 @@ export default function VisionModal({
             <div className="vmd-preview">
               {resolvedThumb ? (
                 <>
-                  <img src={resolvedThumb} alt="" className="vmd-thumb" />
+                  <SafeImage src={resolvedThumb} alt="" aspectRatio="1/1" className="vmd-thumb" />
                   <span className="vmd-chip">選択済み</span>
                 </>
               ) : (
@@ -521,8 +522,14 @@ export default function VisionModal({
                     ) : (
                       <div className="vmd-grid" style={{ ['--thumb' as any]: `${thumbSize}px` }}>
                         {albumItems.map((it) => (
-                          <button key={it.path} className="vmd-thumb-btn" onClick={() => handlePickAlbum(it)} title={it.name}>
-                            <img src={it.url} alt={it.name} />
+                          <button
+                            key={it.path}
+                            className="vmd-thumb-btn"
+                            onClick={() => handlePickAlbum(it)}
+                            title={it.name}
+                          >
+                            {/* ★ it.url（署名URL）を使う */}
+                            <SafeImage src={it.url} alt="" aspectRatio="1/1" className="vision-thumb" />
                           </button>
                         ))}
                       </div>

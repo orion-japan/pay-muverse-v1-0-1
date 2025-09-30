@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { getAuth } from 'firebase/auth';
+import SafeImage from '@/components/common/SafeImage';
 
 type SummaryRow = { pair: string; cnt: number };
 type DetailRow = {
@@ -115,9 +116,20 @@ export default function ProfileFriends({ profile, routes }: Props) {
               return (
                 <li key={m.user_code} className="shipmate-item">
                   {/* 画像 → 投稿一覧へ */}
-                  <Link href={toPosts(m.user_code)} className="shipmate-left" aria-label={`${displayName} の投稿一覧`}>
+                  <Link
+                    href={toPosts(m.user_code)}
+                    className="shipmate-left"
+                    aria-label={`${displayName} の投稿一覧`}
+                  >
                     {avatar
-                      ? <img className="shipmate-avatar" src={avatar} alt="" />
+                      ? (
+                        <SafeImage
+                          src={avatar}
+                          alt={displayName}
+                          aspectRatio="1/1"
+                          className="shipmate-avatar"
+                        />
+                      )
                       : <div className="shipmate-avatar placeholder" />}
                   </Link>
 

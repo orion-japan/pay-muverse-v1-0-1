@@ -139,6 +139,70 @@ function applyOrderByStage(phase: Phase, rows: VisionWithTS[]) {
   return next;
 }
 
+/* === 追加：Qコード評価（Vision→q_code_logs）ボタン === */
+function QuickEvaluateButton({
+  userCode,
+  visionId,
+}: {
+  userCode: string;
+  visionId: string;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [last, setLast] = useState<{ when: string; summary: string } | null>(null);
+
+  const run = async () => {
+    if (!userCode || !visionId) {
+      alert('ユーザーとビジョンを選択してください');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch('/api/qcode/vision/check/evaluate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_code: userCode,
+          seed_id: visionId, // seed_id=visionId として評価（JST今日）
+        }),
+      });
+      const j = await res.json();
+      if (!res.ok || !j.ok) throw new Error(j?.error || '評価に失敗しました');
+      setLast({ when: j.when, summary: j.summary }); // ex: "評価: Q1（継続中）"
+    } catch (e: any) {
+      alert(e?.message ?? '評価に失敗しました');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+      <button
+        type="button"
+        onClick={run}
+        disabled={loading}
+        style={{
+          padding: '10px 14px',
+          borderRadius: 10,
+          border: '1px solid #e5e7eb',
+          background: loading ? '#e5e7eb' : '#111827',
+          color: '#fff',
+          cursor: loading ? 'default' : 'pointer',
+          boxShadow: '0 2px 6px rgba(0,0,0,.08)',
+        }}
+      >
+        {loading ? '評価中…' : '今日のチェックを評価（Qコード保存）'}
+      </button>
+      {last && (
+        <div style={{ fontSize: 12, color: '#374151' }}>
+          <div>{last.when}</div>
+          <div>{last.summary}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function VisionPage() {
   // フェーズは API と一致するキーで
   const [phase, setPhase] = useState<Phase>('initial');
@@ -566,14 +630,18 @@ export default function VisionPage() {
       {/* 実践チェック */}
       <div className="daily-check-frame">
         {userCode && selectedVision ? (
-          <DailyCheckPanel
-            key={String(selectedVision.vision_id)}
-            userCode={userCode}
-            selectedVisionId={String(selectedVision.vision_id)}
-            selectedStage={selectedVision.stage}
-            selectedVisionTitle={selectedVision.title}
-            onArchived={(vid: string) => handleArchived(vid)}
-          />
+          <>
+            <DailyCheckPanel
+              key={String(selectedVision.vision_id)}
+              userCode={userCode}
+              selectedVisionId={String(selectedVision.vision_id)}
+              selectedStage={selectedVision.stage}
+              selectedVisionTitle={selectedVision.title}
+              onArchived={(vid: string) => handleArchived(vid)}
+            />
+            {/* ★ 追加：完了後に押すだけでQコード評価＆保存 */}
+            <QuickEvaluateButton userCode={userCode} visionId={String(selectedVision.vision_id)} />
+          </>
         ) : (
           <div className="daily-check-empty">
             ビジョンカードを選択すると、ここに「1日の実践チェック」が表示されます。

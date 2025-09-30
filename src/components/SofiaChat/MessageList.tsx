@@ -78,10 +78,8 @@ export default function MessageList({
       // すでに渡されていれば何もしない
       if (currentUser?.avatarUrl) return;
 
-      // user_code 等を currentUser.id で受け取っている想定
       if (!currentUser?.id) return;
 
-      // profiles に user_code がある前提。UUIDで紐づけなら eq('user_id', …) に変更。
       const { data, error } = await supabase
         .from('profiles')
         .select('name, avatar_url')
@@ -113,23 +111,30 @@ export default function MessageList({
   const firstRender = React.useRef(true);
 
   const scrollToBottom = React.useCallback((behavior: ScrollBehavior = 'auto') => {
-    // bottom sentinel の方が画像読み込み遅延にも強い
     bottomRef.current?.scrollIntoView({ behavior, block: 'end' });
   }, []);
 
-  // 初回＆messages変化時に最下部へ
   React.useEffect(() => {
     scrollToBottom(firstRender.current ? 'auto' : 'smooth');
     firstRender.current = false;
   }, [messages, scrollToBottom]);
 
+  /* ======== 表示フィルタ ========
+   * ・ユーザー発話は隠さない（Q総評の質問が消えないように）
+   * ・meta.hidden === true のみ明示的に非表示
+   */
+  const visibleMessages = React.useMemo(
+    () => (messages ?? []).filter((m) => (m as any)?.meta?.hidden !== true),
+    [messages]
+  );
+
   return (
     <div className="sof-msgs" ref={listRef}>
-      {messages.length === 0 ? (
+      {visibleMessages.length === 0 ? (
         <div className="sof-empty">ここに会話が表示されます</div>
       ) : (
         <>
-          {messages.map((m) => {
+          {visibleMessages.map((m) => {
             const isAssistant = m.role !== 'user';
             const badge = getAgentBadge(m, isAssistant, agent);
 
@@ -137,7 +142,7 @@ export default function MessageList({
             const agentClass =
               isAssistant && agent ? `is-${agent === 'mu' ? 'muai' : agent}` : '';
 
-            // アシスタントの吹き出し装飾（Iros と同じ変数適用）
+            // アシスタントの吹き出し装飾
             const bubbleStyle: React.CSSProperties = isAssistant
               ? {
                   fontSize: 'var(--sofia-assist-fs, 15px)',
@@ -161,7 +166,7 @@ export default function MessageList({
                 ? '/sshot.png'
                 : '/mu_ai.png') + '?v=3';
 
-            // Markdown レンダラ（Iros と同じトーン）
+            // Markdown レンダラ
             const mdComponents =
               isAssistant
                 ? {
@@ -322,7 +327,6 @@ export default function MessageList({
               | 'ratelimited'
               | undefined;
 
-            /* ========= 縦並びレイアウト（avatar 上 / bubble 下） ========= */
             return (
               <div
                 key={m.id}
@@ -335,7 +339,7 @@ export default function MessageList({
                   width: '100%',
                 }}
               >
-                {/* アバター（上段） */}
+                {/* アバター */}
                 <div className="avatar" style={{ alignSelf: isAssistant ? 'flex-start' : 'flex-end' }}>
                   {isAssistant ? (
                     <img
@@ -347,7 +351,7 @@ export default function MessageList({
                     />
                   ) : (
                     <AvatarImg
-                      src={resolvedAvatar /* ← 補完後のURL/キー */}
+                      src={resolvedAvatar}
                       alt={resolvedName || currentUser?.name || 'user'}
                       size={32}
                       versionKey={currentUser?.id}
@@ -355,7 +359,7 @@ export default function MessageList({
                   )}
                 </div>
 
-                {/* 吹き出し（下段・横幅をCSSで拡げられるクラス） */}
+                {/* 吹き出し */}
                 <div
                   className={`bubble sof-bubble-custom ${isAssistant ? 'is-assistant' : 'is-user'}`}
                   style={{

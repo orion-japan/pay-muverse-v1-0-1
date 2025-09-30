@@ -1,0 +1,235 @@
+/* ===== Event 基本レイアウト ===== */
+:root {
+    --card-bg: #ffffff;
+    --card-br: 12px;
+    --card-shadow: 0 6px 20px rgba(0,0,0,0.06);
+    --brand: #7c5cff;          /* タブ色 */
+    --brand-weak: #ede8ff;
+    --text: #222;
+    --muted: #6b7280;
+    --link: #2563eb;
+    --border: #e9e9ef;
+    --surface: #f7f7fb;
+  }
+  
+  .km-root {
+    background: var(--surface);
+    min-height: 100dvh;
+    color: var(--text);
+  }
+  
+  .km-wrap {
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 16px;
+  }
+  
+  /* ===== ヘッダー／タブ ===== */
+  .km-link {
+    color: var(--brand);
+    text-decoration: none;
+    padding: 8px 10px;
+    border-radius: 10px;
+    transition: background .15s ease, color .15s ease;
+  }
+  .km-link:hover {
+    background: var(--brand-weak);
+  }
+  
+  /* タブの並び（layout.tsx の header>nav 用） */
+  .km-tabs {
+    display: flex;
+    gap: 8px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px;
+    box-shadow: 0 1px 8px rgba(0,0,0,.04);
+  }
+  .km-tab {
+    font-size: 14px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    color: #444;
+    text-decoration: none;
+    transition: background .15s ease, color .15s ease, transform .05s ease;
+  }
+  .km-tab:hover { background: #f2f2ff; }
+  .km-tab.is-active {
+    background: var(--brand);
+    color: #fff;
+  }
+  
+  /* ===== カード ===== */
+  .km-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--card-br);
+    box-shadow: var(--card-shadow);
+    padding: 14px 16px;
+    margin: 16px 0;
+  }
+  
+  .km-card-title {
+    font-weight: 700;
+    font-size: 16px;
+    margin-bottom: 8px;
+  }
+  
+  .km-subtitle {
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: -2px;
+    margin-bottom: 10px;
+  }
+  
+  /* リストリンク */
+  .km-card a {
+    color: var(--link);
+    text-decoration: underline;
+  }
+  .km-card a:hover { opacity: .85; }
+  
+  /* ===== ユーティリティ ===== */
+  .km-fullcenter {
+    min-height: 40dvh;
+    display: grid;
+    place-items: center;
+    color: var(--muted);
+  }
+  
+  .km-user {
+    margin-left: auto;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  
+  /* スモール端末 */
+  @media (max-width: 560px) {
+    .km-wrap { padding: 12px; }
+    .km-tab { padding: 7px 10px; font-size: 13px; }
+  }
+  /* ===== ハブのボタングリッド ===== */
+.km-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+  }
+  
+  .km-btncard {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 16px 12px;
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    background: #fff;
+    box-shadow: var(--card-shadow);
+    text-decoration: none;
+    color: var(--text);
+    transition: transform .06s ease, box-shadow .15s ease, border-color .15s ease;
+  }
+  .km-btncard:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 28px rgba(0,0,0,.07);
+    border-color: #dad8ff;
+  }
+  .km-btncard:active { transform: translateY(0); }
+  
+  .km-btn-ico {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    background: var(--brand-weak);
+    font-weight: 700;
+    font-size: 14px;
+  }
+  .km-btn-title {
+    font-weight: 700;
+  }
+  .km-btn-sub {
+    font-size: 11px;
+    color: var(--muted);
+  }
+  
+  /* ハブ説明カードの余白 */
+  .km-hub-desc { margin-bottom: 8px; }
+  
+  /* レスポンシブ */
+  @media (max-width: 820px) {
+    .km-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  
+
+  /* ===== 横長カード（リスト） ===== */
+.km-hlist {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 12px;
+  }
+  
+  /* 1枚 */
+  .km-hcard {
+    display: grid;
+    grid-template-columns: 88px 1fr auto; /* サムネ / 本文 / 右側 */
+    align-items: center;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: var(--card-shadow);
+    text-decoration: none;
+    color: var(--text);
+    transition: transform .06s ease, box-shadow .15s ease, border-color .15s ease;
+  }
+  .km-hcard:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 28px rgba(0,0,0,.07);
+    border-color: #dad8ff;
+  }
+  
+  /* 左：サムネ（あとで画像差し替え予定） */
+  .km-hthumb {
+    width: 88px;
+    height: 56px;
+    border-radius: 10px;
+    background: linear-gradient(180deg, #f6f6ff, #eef2ff);
+    border: 1px solid #e6e8ff;
+    display: grid;
+    place-items: center;
+    font-size: 20px;
+  }
+  
+  /* 中央：テキスト */
+  .km-hbody {
+    display: grid;
+    gap: 4px;
+  }
+  .km-htitle {
+    font-weight: 700;
+  }
+  .km-hdesc {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  
+  /* 右：矢印 */
+  .km-hcta {
+    color: var(--brand);
+    font-weight: 700;
+    font-size: 13px;
+  }
+  
+  /* モバイル */
+  @media (max-width: 560px) {
+    .km-hcard { grid-template-columns: 72px 1fr auto; }
+    .km-hthumb { width:72px; height:48px; font-size:18px; }
+  }
+  

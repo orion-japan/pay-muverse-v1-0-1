@@ -3,6 +3,7 @@
 
 import React, { useMemo } from 'react';
 import type { Profile } from '@/components/UserProfile';
+import SafeImage from '@/components/common/SafeImage';
 
 type Props = {
   profile: Profile;
@@ -21,14 +22,21 @@ export default function ProfileBasic({ profile, editable, onChange }: Props) {
     return `${base}/storage/v1/object/public/avatars/${v}`;
   }, [profile?.avatar_url, base]);
 
-  const set = (k: keyof Profile) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-    onChange?.({ [k]: e.target.value } as Partial<Profile>);
+  const set =
+    (k: keyof Profile) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      onChange?.({ [k]: e.target.value } as Partial<Profile>);
 
   return (
     <div className="profile-basic">
       <div className="basic-head">
         <div className="avatar-wrap">
-          <img src={avatar} alt="avatar" className="avatar" />
+          <SafeImage
+            src={avatar}
+            alt={profile?.name ?? 'avatar'}
+            aspectRatio="1/1"
+            className="profile-avatar"
+          />
         </div>
         <div className="name-block">
           {editable ? (

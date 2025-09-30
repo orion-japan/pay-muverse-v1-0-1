@@ -65,6 +65,63 @@ export default function KnowledgeClient() {
     }
   }
 
+  // ナレッジを根拠に Mu へ質問
+  async function askMuWithItem(item: Item) {
+    const question = window.prompt('Mu に聞きたい内容を入力してください（このナレッジを根拠に回答します）');
+    if (!question) return;
+
+    setLoading(true);
+    try {
+      const body = {
+        text: question,                       // ユーザー入力（LLMへ渡す本文）
+        title: `KB: ${item.title}`,          // 会話名は短めに
+        reuse_key: `kb:${item.title}`,       // 同じ題名なら会話を再利用
+        mode: 'analysis',
+        meta: { from: 'knowledge', kb_title: item.title },
+        kb: {
+          title: item.title,                 // 参照したナレッジのタイトル
+          content: item.content,             // ★本文（必須）
+          query: q ?? ''                     // 任意（検索語や補足）
+        }
+      };
+
+      const r = await fetch('/api/agent/muai/reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      const data = await r.json();
+      if (!r.ok) {
+        console.error('reply api error:', data);
+        alert('送信に失敗しました。時間をおいて再度お試しください。');
+        return;
+      }
+
+      // 成功時はその会話を開く
+      if (data?.conversationId) {
+        router.push(`/chat?open=${encodeURIComponent(data.conversationId)}`);
+      } else {
+        alert('送信は完了しましたが会話IDの取得に失敗しました。Chat を開いてご確認ください。');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('送信に失敗しました。時間をおいて再度お試しください。');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // 引用テキストをコピー
+  function copyCitation(item: Item) {
+    const snippet = item.content.replace(/\s+/g, ' ').slice(0, 240);
+    const text = `【参考】${item.title}\n${snippet}${item.content.length > 240 ? '…' : ''}`;
+    navigator.clipboard?.writeText(text).then(
+      () => alert('引用をコピーしました'),
+      () => alert('コピーに失敗しました')
+    );
+  }
+
   return (
     <div className={`${styles.container} ${tocOpen ? styles.isDrawerOpen : ''}`}>
       {/* ヘッダー */}
@@ -73,11 +130,11 @@ export default function KnowledgeClient() {
           <button className={styles.backBtn} onClick={() => router.back()} aria-label="戻る">
             ← 戻る
           </button>
-          <h1 className={styles.title}>Q&amp;A ナレッジ</h1>
+        <h1 className={styles.title}>Q&amp;A ナレッジ</h1>
           <span className={styles.badgeFree}>無料</span>
         </div>
 
-        {/* ハンバーガー（常時表示でも可） */}
+        {/* ハンバーガー */}
         <button
           className={styles.menuBtn}
           aria-label="目次を開く"
@@ -124,11 +181,22 @@ export default function KnowledgeClient() {
         {/* 回答エリア */}
         <main className={styles.answer}>
           {loading && <p className={styles.muted}>読み込み中…</p>}
-          {!loading && selected && <AnswerCard item={selected} />}
+          {!loading && selected && (
+            <AnswerCard
+              item={selected}
+              onAskMu={() => askMuWithItem(selected)}
+              onCopy={() => copyCitation(selected)}
+            />
+          )}
           {!loading && !selected && items.length > 0 && (
             <div className={styles.cardList}>
               {items.map((it, i) => (
-                <AnswerCard key={`${it.title}-${i}`} item={it} />
+                <AnswerCard
+                  key={`${it.title}-${i}`}
+                  item={it}
+                  onAskMu={() => askMuWithItem(it)}
+                  onCopy={() => copyCitation(it)}
+                />
               ))}
             </div>
           )}
@@ -184,11 +252,30 @@ export default function KnowledgeClient() {
   );
 }
 
-function AnswerCard({ item }: { item: Item }) {
+function AnswerCard({
+  item,
+  onAskMu,
+  onCopy,
+}: {
+  item: Item;
+  onAskMu?: () => void;
+  onCopy?: () => void;
+}) {
   return (
     <div className={styles.card}>
       <div className={styles.cardTitle}>{item.title}</div>
       <p className={styles.cardText}>{item.content}</p>
+
+      {/* アクション（Muへ／引用コピー） */}
+      <div className={styles.cardActions}>
+        <button className={styles.cardLink} onClick={onAskMu}>
+          Muで続き質問
+        </button>
+        <button className={styles.cardLink} onClick={onCopy}>
+          引用をコピー
+        </button>
+      </div>
+
       {Array.isArray(item.actions) && item.actions.length > 0 && (
         <div className={styles.cardActions}>
           {item.actions.map((a, i) => (

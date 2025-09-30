@@ -6,9 +6,8 @@ import ProfileBasic from './ProfileBasic';
 import ProfileSNS from './ProfileSNS';
 import ProfileSkills from './ProfileSkills';
 import './ProfileBox.css';
-
+import SafeImage from '@/components/common/SafeImage';
 import getIdToken from '@/lib/getIdToken';
-import { supabase } from '@/lib/supabase';
 import { resizeImage } from '@/utils/imageResize';
 
 // --- Types ---
@@ -119,11 +118,11 @@ export default function UserProfileEditor() {
     try {
       // 1) リサイズ（webp 推奨）
       const blob: Blob = await resizeImage(file, { max: 512, type: 'image/webp', quality: 0.9 });
-  
+
       // 2) 自前APIへ FormData で送信（サーバーが Service Role で保存）
       const fd = new FormData();
       fd.append('file', blob, 'avatar.webp');
-  
+
       const idToken = await getIdToken();
       const r = await fetch('/api/mypage/upload-avatar', {
         method: 'POST',
@@ -132,7 +131,7 @@ export default function UserProfileEditor() {
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j?.error || 'アップロードに失敗しました');
-  
+
       // 3) 返ってきたキーで UI を更新
       patch({ avatar_url: j.path as string });
       setMsg('アバターを更新しました ✅');
@@ -143,7 +142,6 @@ export default function UserProfileEditor() {
       e.target.value = '';
     }
   }
-  
 
   // 保存（テキスト等）
   async function handleSave() {
@@ -230,9 +228,8 @@ export default function UserProfileEditor() {
       <section className="profile-card">
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <div style={{ width: 96, height: 96, borderRadius: '50%', overflow: 'hidden', background: '#eee' }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
             {avatarUrl ? (
-              <img src={avatarUrl} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              <SafeImage src={avatarUrl} alt="avatar" aspectRatio="1/1" className="avatar-preview" />
             ) : (
               <div style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center', color: '#888' }}>
                 No Image

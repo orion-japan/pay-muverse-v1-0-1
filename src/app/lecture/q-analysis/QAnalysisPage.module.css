@@ -1,0 +1,377 @@
+/* ページ全体の中央寄せと余白 */
+.wrap {
+    width: min(100%, 1040px);
+    margin: 0 auto;
+    padding: clamp(12px, 4vw, 24px);
+    font-family: "Zen Maru Gothic", sans-serif;
+    box-sizing: border-box;
+  }
+  
+  /* 見出し */
+  .title { font-size: 1.8rem; font-weight: 700; margin-bottom: 8px; }
+  .intro { color: #555; margin-bottom: 20px; }
+  
+  /* フィルタ行（横幅が狭いと折り返す） */
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    margin: 12px 0 4px;
+  }
+  .segment {
+    display: inline-flex;
+    border: 1px solid #d9dbe1;
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .segment > button {
+    padding: 6px 10px;
+    border: 0;
+    background: #fff;
+    cursor: pointer;
+  }
+  .segment > button + button { border-left: 1px solid #d9dbe1; }
+  .segment > button.on { background: #eef2ff; font-weight: 600; }
+  
+  /* セクション共通 */
+  .section { margin-top: 32px; }
+  
+  /* 凡例（小アイコン表示用） */
+  .legend {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 6px 0 8px;
+    color: #5a6a7a;
+    font-size: 12px;
+  }
+  
+  /* 日別エリア：幅に応じて1→2カラム */
+  .dayRow {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  @media (min-width: 860px) {
+    .dayRow { grid-template-columns: 1fr 1fr; }
+  }
+  .dayCol {
+    background: #fff;
+    border: 1px solid #e8ecf3;
+    border-radius: 12px;
+    padding: 12px;
+    min-width: 0; /* はみ出し防止 */
+  }
+  
+  /* ====== ドーナツ＋分布リスト：常に“縦並び” ====== */
+  .pieRow {
+    display: grid;
+    grid-template-columns: 1fr;  /* 1カラム固定（PCでも縦並び） */
+    gap: 20px;
+  }
+  
+  /* ドーナツカード */
+  .pieCol {
+    background: #fff;
+    border: 1px solid #e8ecf3;
+    border-radius: 12px;
+    padding: 12px;
+    min-width: 0;
+    min-height: 320px;
+    /* カード幅を少し絞って中央に */
+    max-width: 560px;
+    margin: 0 auto;
+    overflow: hidden;
+  }
+  
+  /* 凡例カード（ドーナツの“下”に来る） */
+  .pieColRight {
+    background: #fff;
+    border: 1px solid #e8ecf3;
+    border-radius: 12px;
+    padding: 12px;
+    min-width: 0;
+    max-width: 560px;
+    margin: 0 auto;       /* ドーナツと同じ幅＆中央寄せ */
+    overflow: hidden;
+  }
+  
+  /* 分布リスト */
+  .qList { list-style: none; padding: 0; margin: 0; }
+  .qItem {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 0;
+    border-bottom: 1px solid #eee;
+  }
+  .qLabel {
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    white-space: nowrap;      /* 1文字折り防止 */
+  }
+  .qCount { color: #444; white-space: nowrap; }
+  .total { padding-top: 8px; font-weight: 700; }
+  
+  /* 色スウォッチ */
+  .swatch {
+    width: 12px; height: 12px;
+    border-radius: 3px;
+    border: 1px solid #cdd3de;
+    display: inline-block;
+  }
+  
+  /* ログ一覧 */
+  .logList { list-style: none; padding: 0; margin: 0; }
+  .logItem {
+    padding: 4px 0;
+    border-bottom: 1px dashed #ccc;
+    font-size: 0.9rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .logDate { font-weight: 500; }
+  .logQ { font-weight: 700; }
+  .logStage { color: #555; }
+  .logIntent { color: #777; }
+  
+  /* 空表示 */
+  .empty {
+    padding: 12px;
+    border: 1px dashed #cfd6e2;
+    border-radius: 10px;
+    background: #fafbfe;
+    color: #54606f;
+  }
+
+  /* ==== Q解析：ドーナツ横の表（小画面のはみ出し防止） ==== */
+
+/* ドーナツと表の並びをグリッド化して、狭い幅では縦並びに */
+.pieRow{
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 12px;
+    align-items: start;
+  }
+  @media (max-width: 520px){
+    .pieRow{ grid-template-columns: 1fr; }
+  }
+  
+  /* コンテナ側で幅制約を緩めつつ、内部要素のはみ出しだけ抑止 */
+  .pieCol, .pieColRight{
+    min-width: 0;           /* ← 子要素のはみ出しを許さないために重要 */
+  }
+  .pieCol > *, .pieColRight > *{
+    max-width: 100%;
+  }
+  
+  /* 一覧本体 */
+  .qList{
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  
+  /* 1行の左右でラベル/数値を分ける。狭い幅でも縮めて収める */
+  .qItem{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;           /* ← テキストのellipsis有効化の下地 */
+  }
+  
+  /* ラベル側：省略記号で収める */
+  .qLabel{
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .qLabel span{
+    font-size: 12px;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis; /* ← 長文でもはみ出さず「…」に */
+  }
+  
+  /* 数値側：はみ出さない・見やすい桁揃え */
+  .qCount{
+    font-size: 12px;
+    line-height: 1.2;
+    flex-shrink: 0;         /* ← 右側は縮み過ぎない */
+    white-space: nowrap;    /* ← 折り返さず1行で */
+    font-variant-numeric: tabular-nums; /* ← 桁が揃って読みやすい */
+    letter-spacing: .02em;
+  }
+  
+  /* 合計行も少し詰める */
+  .total{
+    font-size: 12px;
+  }
+  
+  /* カラースウォッチを小さめに（行高も安定） */
+  .swatch{
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    flex: 0 0 12px;
+  }
+  
+  /* セクション全体で偶発的なはみ出しを遮断 */
+  .section{ overflow: hidden; }
+  
+
+/* ==== ドーナツと一覧を上下に固定 ==== */
+.pieRow{
+    display: flex;
+    flex-direction: column;   /* ← いつでも縦並び */
+    gap: 12px;
+    align-items: center;       /* ドーナツを中央に */
+  }
+  
+  /* ドーナツ側：中央寄せ＆はみ出し防止 */
+  .pieCol{
+    width: 100%;
+    max-width: 520px;          /* お好みで 440–560px 程度 */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-width: 0;
+  }
+  
+  /* 一覧側：横幅いっぱいに見やすく */
+  .pieColRight{
+    width: 100%;
+    max-width: 720px;          /* 一覧は少し広めでもOK */
+    min-width: 0;
+    margin-inline: auto;
+  }
+  
+/* ── ドーナツ用（上下配置のまま、サイズは控えめ） */
+.pieRow{ display:flex; flex-direction:column; gap:12px; align-items:center; }
+.pieRow .pieCol{
+  width:100%;
+  max-width:520px;           /* ドーナツはこの上限で中央寄せ */
+  display:flex; justify-content:center; align-items:center; min-width:0;
+}
+.pieColRight{ width:100%; max-width:720px; min-width:0; margin-inline:auto; }
+
+/* ── タイムライン用（タイムラインの .pieCol は単独で直下にある） */
+.section > .pieCol{
+  width:100%;
+  max-width: 1040px;         /* ★ PCで広く見せる。お好みで 880〜1200px */
+  margin-inline:auto;
+  display:flex; justify-content:center; align-items:center; min-width:0;
+}
+.section > .pieCol > *{
+  width:100%;                /* TimelineField を親幅いっぱいに */
+}
+
+@media (max-width: 900px){
+  .section > .pieCol{ max-width: 640px; }  /* モバイル/小画面は控えめに */
+}
+
+/* 表の詰め（前に入れた調整はそのまま活かす） */
+.qItem{ display:flex; justify-content:space-between; align-items:center; gap:8px; min-width:0; }
+.qLabel{ display:flex; align-items:center; gap:6px; min-width:0; overflow:hidden; }
+.qLabel span{ font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.qCount{ font-size:12px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.swatch{ width:12px; height:12px; border-radius:3px; flex:0 0 12px; }
+
+
+.logPanel {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fafafa;
+  padding: 4px 8px;
+  margin-top: 8px;
+}
+
+.logSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 4px;
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none; /* 一部ブラウザ用 */
+}
+
+.logSummary::-webkit-details-marker { display: none; } /* 既定の三角を消す */
+
+.logCount {
+  min-width: 28px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 9999px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #c7d2fe;
+}
+
+/* 中身 */
+.logList {
+  margin: 8px 0 4px;
+  padding-left: 16px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.logItem {
+  font-size: 14px;
+  padding: 4px 0;
+  border-bottom: 1px dotted #e5e7eb;
+}
+
+.logItem:last-child { border-bottom: none; }
+
+
+.backBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+
+  padding: 6px 12px;
+  margin: 8px 0;
+
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+
+  background-color: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+
+.backBtn:hover {
+  background-color: #e9e9e9;
+  border-color: #ccc;
+}
+
+.backBtn:active {
+  background-color: #ddd;
+  transform: translateY(1px);
+}
+
+.backBtn:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(100, 150, 250, 0.5);
+}

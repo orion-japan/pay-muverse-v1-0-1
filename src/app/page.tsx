@@ -203,8 +203,8 @@ export default function DashboardPage() {
   // メニュー
   const menuItems: { title: string; link: string; img: string; alt: string }[] = [
     { title: 'Mu_AI', link: '/chat', img: '/mu_ai.png', alt: 'Mu_AI' },
-    { title: 'Event', link: '/kyomeikai', img: '/kyoumai.png', alt: 'Event' },
-    { title: '配信', link: '/kyomeikai/live', img: '/live.png', alt: '共鳴会LIVE' },
+    { title: 'Event', link: '/event', img: '/kyoumai.png', alt: 'Event' },
+    { title: 'Lecture', link: '/lecture', img: '/lecture.png', alt: 'Lecture' },
     { title: 'Self', link: '/self', img: '/nikki.png', alt: 'Self' },
     { title: 'R Vision', link: '/vision', img: '/ito.png', alt: 'R Vision' },
     { title: 'Create', link: '/create', img: '/mu_create.png', alt: 'Create' },

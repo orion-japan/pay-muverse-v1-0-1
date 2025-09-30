@@ -37,11 +37,14 @@ type CurrentUser = {
   credits: number;
   avatarUrl?: string | null;
 };
-type Props = { agent?: string };
+type Props = { agent?: string; open?: string };
 
 /* ===== duplicate/over-fetch guards & utils ===== */
 const fetchedOnceByConv = new Set<string>(); // 会話IDごとに初回フェッチだけ通す
 const norm = (s?: string) => (s || '').replace(/\s+/g, ' ').trim();
+
+// localStorage key（エージェント別に保管）
+const lastConvKey = (agent: Agent) => `sofia:lastConv:${agent}`;
 
 /** mTalkの共有テキスト（末尾の「mTalkからの共有…」等）を隠す */
 function isMtalkShareHint(m: Message): boolean {
@@ -96,7 +99,7 @@ function dedupeMessages(arr: Message[]): Message[] {
 }
 /* ============================================== */
 
-export default function SofiaChatShell({ agent: agentProp = 'mu' }: Props) {
+export default function SofiaChatShell({ agent: agentProp = 'mu', open }: Props) {
   const sp = useSearchParams();
   const urlAgent = (sp?.get('agent') as Agent | null) ?? null;
   const urlCid = sp?.get('cid') ?? undefined;
@@ -117,6 +120,23 @@ export default function SofiaChatShell({ agent: agentProp = 'mu' }: Props) {
 
   const canUse = useMemo(() => !!userCode && !authLoading, [userCode, authLoading]);
 
+  // === open パラメータの解釈（menu/new/cid:xxx/UUID） ===
+  const openTarget = useMemo(() => {
+    if (!open) return { type: null as null, cid: undefined as string | undefined };
+
+    if (open === 'menu') return { type: 'menu' as const, cid: undefined };
+    if (open === 'new') return { type: 'new' as const, cid: undefined };
+    if (open.startsWith('cid:')) {
+      const cid = open.slice(4);
+      return { type: 'cid' as const, cid: cid || undefined };
+    }
+    const isUUID =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(open);
+    if (isUUID) return { type: 'cid' as const, cid: open };
+
+    return { type: null as null, cid: undefined };
+  }, [open]);
+
   // === サイドバー表示用に user を整形（null なら非表示） ===
   const menuUser = useMemo(() => {
     if (!uiUser) return null;
@@ -128,7 +148,7 @@ export default function SofiaChatShell({ agent: agentProp = 'mu' }: Props) {
     };
   }, [uiUser]);
 
-  // ユーザー情報（まず /api/userinfo?user_code=... → 失敗時に /api/me → フォールバック）
+  // ユーザー情報
   useEffect(() => {
     if (!userCode) return;
 
@@ -145,7 +165,6 @@ export default function SofiaChatShell({ agent: agentProp = 'mu' }: Props) {
 
     (async () => {
       try {
-        // 1) 推奨: サーバー側(Service Role)で users を参照するAPI
         const r1 = await fetch(
           `/api/userinfo?user_code=${encodeURIComponent(userCode)}`,
           { cache: 'no-store' }
@@ -162,7 +181,6 @@ export default function SofiaChatShell({ agent: agentProp = 'mu' }: Props) {
           });
           return;
         }
-        // 2) フォールバック: 既存の /api/me
         const r2 = await fetch('/api/me', { cache: 'no-store' });
         if (r2.ok) {
           const d = await r2.json();
@@ -187,7 +205,7 @@ export default function SofiaChatShell({ agent: agentProp = 'mu' }: Props) {
     };
   }, [userCode]);
 
-  // クレジットのライブ反映（sofia_credit カスタムイベント）
+  // クレジットのライブ反映
   useEffect(() => {
     const onCredit = (e: Event) => {
       const { credits } = (e as CustomEvent).detail ?? {};
@@ -241,16 +259,38 @@ export default function SofiaChatShell({ agent: agentProp = 'mu' }: Props) {
   const doList = useCallback(async () => {
     if (!userCode) return;
     const items = await listConversations(agentK, userCode, urlCid);
-    setConversations(items);
-    const prefer = (urlCid && items.find((i) => i.id === urlCid)?.id) || items[0]?.id;
-    if (prefer) setConversationId(prefer);
-  }, [agentK, userCode, urlCid]);
 
-  // メッセージ取得（会話IDごと初回のみ + 共有メッセージ除去 + 重複除去）
+    // updated_at の降順に（万一サーバ未ソートでも直近が先頭）
+    const sorted = [...items].sort((a, b) => {
+      const ta = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+      const tb = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+      return tb - ta;
+    });
+    setConversations(sorted);
+
+    // 優先順位：openTarget.cid > urlCid > localStorage last > 先頭
+    const stored = (typeof window !== 'undefined'
+      ? window.localStorage.getItem(lastConvKey(agentK)) || undefined
+      : undefined) as string | undefined;
+
+    const prefer =
+      (openTarget.type === 'cid' && openTarget.cid && sorted.find(i => i.id === openTarget.cid)?.id) ||
+      (urlCid && sorted.find(i => i.id === urlCid)?.id) ||
+      (stored && sorted.find(i => i.id === stored)?.id) ||
+      sorted[0]?.id;
+
+    if (prefer) {
+      setConversationId(prefer);
+      try { window.localStorage.setItem(lastConvKey(agentK), prefer); } catch {}
+    }
+  }, [agentK, userCode, urlCid, openTarget]);
+
+  // メッセージ取得（force でガード無視も可能）
   const doFetchMessages = useCallback(
-    async (cid: string) => {
+    async (cid: string, opts?: { force?: boolean }) => {
       if (!userCode || !cid) return;
-      if (fetchedOnceByConv.has(cid)) return;
+      if (opts?.force) fetchedOnceByConv.delete(cid);
+      if (!opts?.force && fetchedOnceByConv.has(cid)) return;
       fetchedOnceByConv.add(cid);
 
       const rows = await fetchMessages(agentK, userCode, cid);
@@ -268,9 +308,34 @@ export default function SofiaChatShell({ agent: agentProp = 'mu' }: Props) {
 
   useEffect(() => {
     if (canUse && conversationId) {
+      // 直近会話を保存
+      try {
+        window.localStorage.setItem(lastConvKey(agentK), conversationId);
+      } catch {}
       doFetchMessages(conversationId);
     }
-  }, [canUse, conversationId, doFetchMessages]);
+  }, [canUse, conversationId, doFetchMessages, agentK]);
+
+  // open の即時反映
+  useEffect(() => {
+    if (!canUse) return;
+
+    if (openTarget.type === 'menu') {
+      setIsMobileMenuOpen(true);
+      return;
+    }
+    if (openTarget.type === 'new') {
+      setConversationId(undefined);
+      setMessages([]);
+      setMeta(null);
+      try { window.localStorage.removeItem(lastConvKey(agentK)); } catch {}
+      return;
+    }
+    if (openTarget.type === 'cid' && openTarget.cid) {
+      setConversationId(openTarget.cid);
+      doFetchMessages(openTarget.cid, { force: true });
+    }
+  }, [canUse, openTarget, doFetchMessages, agentK]);
 
   // 送信
   const handleSend = useCallback(
@@ -295,42 +360,59 @@ export default function SofiaChatShell({ agent: agentProp = 'mu' }: Props) {
         messagesSoFar: messages,
         text,
       });
+
+      try { console.info('[handleSend] sendText result:', res); } catch {}
+
       const nextConvId = res.conversationId ?? conversationId;
-      if (nextConvId && nextConvId !== conversationId) setConversationId(nextConvId);
-
-      if (res.rows && res.rows.length) {
-        setMessages((prev) => {
-          const merged: Message[] = [
-            ...prev.filter((m) => !res.rows.some((r) => r.id && r.id === m.id)),
-            ...res.rows,
-          ].filter(notShare);
-
-          const hasSeed = res.rows.some((r) => r.meta?.seed || r.meta?.seed_reply);
-          const maybeSeeded =
-            agentK === 'mirra' && !hasSeed ? injectMtalkSeed(merged, nextConvId) : merged;
-          return dedupeMessages(maybeSeeded);
-        });
-      } else if (res.replyText) {
-        setMessages((prev) => {
-          // 1) 新規メッセージを明示的に Message 型にする
-          const reply: Message = {
-            id: crypto.randomUUID?.() ?? `a-${Date.now()}`,
-            role: 'assistant',
-            content: res.replyText,
-            created_at: new Date().toISOString(),
-            agent: agentK,
-            ...(res.meta ? { meta: res.meta as any } : {}),
-          };
-
-          // 2) prev との結合も Message[] として固定
-          const arr: Message[] = [...prev, reply];
-
-          // 3) mTalk 共有文を除外 → 重複除去
-          const cleaned: Message[] = arr.filter(notShare as (m: Message) => boolean);
-          return dedupeMessages(cleaned);
-        });
+      if (nextConvId && nextConvId !== conversationId) {
+        setConversationId(nextConvId);
+        try { window.localStorage.setItem(lastConvKey(agentK), nextConvId); } catch {}
       }
 
+      // 1) rows 優先（空配列なら何もしない）
+      if (Array.isArray(res.rows) && res.rows.length > 0) {
+        setMessages((prev) => {
+          const merged: Message[] = [
+            ...prev.filter((m) => !res.rows!.some((r) => r.id && r.id === m.id)),
+            ...res.rows!,
+          ].filter(notShare);
+
+          const hasSeed = res.rows!.some((r) => r.meta?.seed || r.meta?.seed_reply);
+          const maybeSeeded =
+            agentK === 'mirra' && !hasSeed ? injectMtalkSeed(merged, nextConvId!) : merged;
+
+          return dedupeMessages(maybeSeeded);
+        });
+      } else {
+        // 2) replyText があれば追加
+        const replyTextSafe =
+          typeof res.replyText === 'number'
+            ? String(res.replyText)
+            : typeof res.replyText === 'string'
+            ? res.replyText
+            : '';
+
+        if (replyTextSafe && replyTextSafe.trim() !== '') {
+          setMessages((prev) => {
+            const reply: Message = {
+              id: crypto.randomUUID?.() ?? `a-${Date.now()}`,
+              role: 'assistant',
+              content: replyTextSafe,
+              created_at: new Date().toISOString(),
+              agent: agentK,
+              ...(res.meta ? { meta: res.meta as any } : {}),
+            };
+            const arr: Message[] = [...prev, reply];
+            const cleaned: Message[] = arr.filter(notShare as (m: Message) => boolean);
+            return dedupeMessages(cleaned);
+          });
+        } else if (nextConvId) {
+          // 3) rows も replyText も無い → 保存済み想定で強制再取得
+          await doFetchMessages(nextConvId, { force: true });
+        }
+      }
+
+      // 4) クレジット更新イベント
       if (typeof res.credit === 'number') {
         try {
           window.dispatchEvent(
@@ -339,22 +421,51 @@ export default function SofiaChatShell({ agent: agentProp = 'mu' }: Props) {
         } catch {}
       }
     },
-    [agentK, userCode, conversationId, messages, injectMtalkSeed]
+    [agentK, userCode, conversationId, messages, injectMtalkSeed, doFetchMessages]
   );
 
   // 削除 / 改名
   const handleDelete = useCallback(
     async (id: string) => {
-      await deleteConversation(agentK, id);
-      setConversations((prev) => prev.filter((c) => c.id !== id));
-      if (id === conversationId) {
-        const rest = conversations.filter((c) => c.id !== id);
-        setConversationId(rest[0]?.id);
-        if (!rest[0]) setMessages([]);
+      const key = lastConvKey(agentK);
+  
+      // 1) 正攻法の削除（agentClients が master/uuid を判定）
+      try {
+        await deleteConversation(agentK, id);
+      } catch (e) {
+        console.warn('[delete] failed:', e);
+        // 失敗してもUIをサーバー真実と再同期する
+      }
+  
+      // 2) サーバーの最新一覧で同期
+      let rows: ConvListItem[] = [];
+      try {
+        rows = await listConversations(agentK, String(userCode || ''));
+      } catch (e) {
+        console.warn('[delete] list after delete failed:', e);
+      }
+      rows.sort((a, b) => {
+        const ta = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+        const tb = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+        return tb - ta;
+      });
+      setConversations(rows);
+  
+      // 3) 選択と localStorage を調整
+      const stillExists = rows.some((c) => c.id === conversationId);
+      const next = stillExists ? conversationId : rows.find((c) => c.id !== id)?.id;
+      setConversationId(next);
+      if (next) {
+        try { window.localStorage.setItem(key, next); } catch {}
+        await doFetchMessages(next, { force: true });
+      } else {
+        setMessages([]);
+        try { window.localStorage.removeItem(key); } catch {}
       }
     },
-    [agentK, conversationId, conversations]
+    [agentK, conversationId, userCode, doFetchMessages]
   );
+  
 
   const handleRename = useCallback(
     async (id: string, title: string) => {
@@ -377,6 +488,7 @@ export default function SofiaChatShell({ agent: agentProp = 'mu' }: Props) {
             setConversationId(undefined);
             setMessages([]);
             setMeta(null);
+            try { window.localStorage.removeItem(lastConvKey(agentK)); } catch {}
           }}
         />
       </div>
@@ -405,6 +517,7 @@ export default function SofiaChatShell({ agent: agentProp = 'mu' }: Props) {
             onSelect={(id) => {
               setConversationId(id);
               setIsMobileMenuOpen(false);
+              try { window.localStorage.setItem(lastConvKey(agentK), id); } catch {}
             }}
             onDelete={handleDelete}
             onRename={handleRename}

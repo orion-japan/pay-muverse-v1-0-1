@@ -1,158 +1,141 @@
-// src/app/api/qcode/log/route.ts
-import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { buildQCode } from "@/lib/qcodes"; // ← ブリッジ: src/lib/qcode.ts が qcodes.ts を再エクスポート
+// app/api/qcode/log/route.ts
+import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 
-type IncomingBody = {
-  user_code: string;
+type Q = 'Q1'|'Q2'|'Q3'|'Q4'|'Q5';
+type QCode = { currentQ: Q; depthStage?: string } & Record<string, any>;
 
-  // 任意メタ
-  source_type?: string | null;   // 例: "sofia" | "mu" | "habit"
-  source_id?: string | null;     // 例: 会話ID/投稿ID など
-  intent?: string | null;        // 例: "diagnosis" | "habit_tick"
-  emotion?: string | null;
-  level?: string | null;
+/* ===== 日付ヘルパー（JSTで“日付だけ”扱う） ===== */
+const JST_OFFSET_MIN = 9 * 60;
 
-  // どちらかでOK（q+stage か q_code）
-  q?: string | null;             // 例: "Q3"
-  stage?: string | null;         // 例: "S2"
-  q_code?: any;                  // 直接 JSON を渡す場合
+/** 'YYYY-MM-DD' → Date（ローカル日付をUTCの 00:00 として扱う） */
+function parseYmd(ymd: string): Date {
+  const [y, m, d] = ymd.split('-').map(Number);
+  // 月は0始まり
+  return new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
+}
+/** Date → 'YYYY-MM-DD'（JST基準で日付だけ） */
+function toJstYmd(d: Date): string {
+  // d はUTC基準。JSTでの“日付”を算出
+  const ms = d.getTime() + JST_OFFSET_MIN * 60_000;
+  const j = new Date(ms);
+  const y = j.getUTCFullYear();
+  const m = String(j.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(j.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+/** 日数加減（UTC基準） */
+function addDaysUTC(d: Date, n: number): Date {
+  const x = new Date(d.getTime());
+  x.setUTCDate(x.getUTCDate() + n);
+  return x;
+}
+/** 包含区間の“日数” */
+function inclusiveDays(a: Date, b: Date): number {
+  const MS = 86_400_000;
+  return Math.floor((b.getTime() - a.getTime()) / MS) + 1;
+}
 
-  // 追加フィールド（テーブル仕様に応じて）
-  post_id?: string | null;       // NOT NULL の場合は必須で渡す
-  owner_user_code?: string | null;
-  actor_user_code?: string | null;
-  extra?: any;                   // 任意メタ
-};
+/* ================================================= */
 
-export async function POST(req: NextRequest) {
-  try {
-    const body = (await req.json()) as IncomingBody;
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const user_code = searchParams.get('user_code') ?? undefined;
+  const intent = searchParams.get('intent') ?? undefined; // 'all' | 'manual' | 'auto' など
+  const days = Number(searchParams.get('days') ?? '30');
+  const limit = Math.min(Number(searchParams.get('limit') ?? '500'), 2000);
+  const fromQ = searchParams.get('from'); // 'YYYY-MM-DD'
+  const toQ   = searchParams.get('to');   // 'YYYY-MM-DD'
 
-    const {
-      user_code,
-      source_type = "sofia",
-      source_id = null,
-      intent = null,
-      emotion = null,
-      level = null,
-      q = null,
-      stage = null,
-      q_code = null,
-      post_id = null,
-      owner_user_code = null,
-      actor_user_code = null,
-      extra = null,
-    } = body ?? ({} as IncomingBody);
+  // ★ cookies() はコールバックで渡す（Nextの同期API警告を回避）
+  const supabase = createRouteHandlerClient({ cookies: () => cookies() });
 
-    if (!user_code) {
-      return NextResponse.json({ error: "user_code is required" }, { status: 400 });
-    }
+  // 期間の決定（JSTで“日付だけ”）
+  const today = new Date();               // 現在UTC
+  const endDate = toQ ? parseYmd(toQ.replace(/\//g, '-')) : parseYmd(toJstYmd(today));
+  // days 指定時は「包含で days 日」になるよう start = end - (days-1)
+  const startDate = fromQ
+    ? parseYmd(fromQ.replace(/\//g, '-'))
+    : addDaysUTC(endDate, -Math.max(1, isFinite(days) ? days : 30) + 1);
 
-    // ===== q_code を正規化 =====
-    // ① 既に q_code（JSON）が渡っていれば、表記ゆれを吸収して正規化
-    // ② なければ q + stage から組み立て
-    let normalized_q_code: {
-      current_q: "Q1" | "Q2" | "Q3" | "Q4" | "Q5";
-      depth_stage: string;
-      intent?: string | null;
-      ts_at?: string;
-      meta?: any;
-    } | null = null;
+  const fromStr = toJstYmd(startDate);
+  const toStr   = toJstYmd(endDate);
+  const daysSpan = inclusiveDays(startDate, endDate);
 
-    if (q_code) {
-      // camel/snake/別名の吸収
-      const current_q =
-        q_code.current_q ?? q_code.currentQ ?? q_code.q ?? null;
-      const depth_stage =
-        q_code.depth_stage ?? q_code.depthStage ?? q_code.stage ?? null;
+  // クエリ（for_date は DATE 型を想定。inclusive で gte/lte）
+  let q = supabase
+    .from('q_code_logs')
+    .select('for_date,user_code,q_code,intent,extra', { count: 'exact' })
+    .gte('for_date', fromStr)
+    .lte('for_date', toStr)
+    .order('for_date', { ascending: false })
+    .limit(limit);
 
-      if (!current_q || !depth_stage) {
-        return NextResponse.json(
-          { error: "invalid q_code: current_q/depth_stage are required" },
-          { status: 400 }
-        );
-      }
+  if (user_code) q = q.eq('user_code', user_code);
+  if (intent && intent !== 'all') q = q.eq('intent', intent);
 
-      normalized_q_code = {
-        current_q,
-        depth_stage,
-        intent: q_code.intent ?? intent ?? null,
-        ts_at: q_code.ts_at ?? new Date().toISOString(),
-        meta: q_code.meta ?? extra ?? null,
-      };
-    } else {
-      // q と stage から生成（hint/depth_stage で渡す）
-      if (!q || !stage) {
-        return NextResponse.json(
-          { error: "q and stage are required (or pass q_code JSON)" },
-          { status: 400 }
-        );
-      }
-      const built = buildQCode({
-        hint: q,
-        depth_stage: stage,
-        intent,
-        ts_at: new Date().toISOString(),
-      });
-
-      normalized_q_code = {
-        current_q: built.current_q,
-        depth_stage: (built as any).depth_stage, // buildQCode 仕様に合わせる
-        intent: built.intent ?? intent ?? null,
-        ts_at: built.ts_at,
-        meta: extra ?? null,
-      };
-    }
-
-    // 念のため最終バリデーション
-    if (!normalized_q_code?.current_q || !normalized_q_code?.depth_stage) {
-      return NextResponse.json(
-        { error: "q_code normalization failed" },
-        { status: 400 }
-      );
-    }
-
-    // ===== 挿入ペイロード作成 =====
-    const insertPayload: Record<string, any> = {
-      user_code,
-      source_type,
-      source_id,
-      intent,
-      emotion,
-      level,
-      q_code: normalized_q_code,
-      owner_user_code,
-      actor_user_code,
-      extra,
-    };
-
-    // post_id が null で NOT NULL 制約があるテーブルなら、ここで弾く or ダミー値を入れる
-    if (post_id !== null && post_id !== undefined) {
-      insertPayload.post_id = post_id;
-    }
-
-    // ===== Supabase へ挿入 =====
-    const { data, error } = await supabaseAdmin
-      .from("q_code_logs") // ← テーブル名は運用に合わせて
-      .insert([insertPayload])
-      .select("id, created_at")
-      .limit(1);
-
-    if (error) {
-      console.error("[q_code_logs.insert] error:", error);
-      return NextResponse.json(
-        { ok: false, error: error.message },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ ok: true, inserted: data?.[0] ?? null });
-  } catch (e: any) {
-    console.error("[q_code_logs] fatal:", e);
+  const { data, error, count } = await q;
+  if (error) {
     return NextResponse.json(
-      { ok: false, error: e?.message ?? "unknown" },
-      { status: 500 }
+      { ok: false, error: error.message },
+      { status: 400 }
     );
   }
+
+  // currentQ を持つレコードのみ返す（古いデータ互換）
+  const items = (data ?? []).filter(r => r?.q_code?.currentQ);
+
+  return NextResponse.json({
+    ok: true,
+    range: { from: fromStr, to: toStr, days: daysSpan, total_rows: count ?? items.length },
+    items,
+  });
+}
+
+export async function POST(req: Request) {
+  const supabase = createRouteHandlerClient({ cookies: () => cookies() });
+  const body = await req.json().catch(() => ({}));
+
+  const { user_code, q, stage, q_code, intent, seed_id, for_date, extra } = body ?? {};
+
+  let qc: QCode | null = null;
+  if (q_code && typeof q_code === 'object') qc = q_code;
+  else if (q && stage) qc = { currentQ: q, depthStage: stage };
+
+  if (!user_code || !qc?.currentQ) {
+    return NextResponse.json(
+      { ok: false, error: 'user_code と q_code(currentQ) は必須です' },
+      { status: 400 }
+    );
+  }
+
+  // for_date は 'YYYY-MM-DD' 前提。未指定なら“今日(JST)”の日付文字列。
+  const forDateStr =
+    typeof for_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(for_date)
+      ? for_date
+      : toJstYmd(new Date());
+
+  const payload = {
+    user_code,
+    q_code: qc,
+    intent: intent ?? 'manual',
+    seed_id: seed_id ?? null,
+    for_date: forDateStr,
+    extra: extra ?? null,
+  };
+
+  const { data, error } = await supabase
+    .from('q_code_logs')
+    .insert(payload)
+    .select()
+    .single();
+
+  if (error) {
+    return NextResponse.json(
+      { ok: false, error: error.message },
+      { status: 400 }
+    );
+  }
+  return NextResponse.json({ ok: true, item: data });
 }

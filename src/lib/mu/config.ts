@@ -189,7 +189,6 @@ export const MU_CONFIG = {
 } as const;
 
 // （任意）起動時に現在値を一度だけログ出力して読込確認
-// eslint-disable-next-line no-console
 console.log('[MU_CONFIG]', {
   version: MU_CONFIG.version,
   credits: MU_CONFIG.credits,

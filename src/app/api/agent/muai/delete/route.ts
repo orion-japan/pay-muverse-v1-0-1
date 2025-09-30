@@ -5,48 +5,67 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/authz';
 
-function json(data: any, init?: number | ResponseInit) {
-  const status = typeof init === 'number' ? init : (init as ResponseInit | undefined)?.['status'] ?? 200;
-  const headers = new Headers(typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers);
-  headers.set('Content-Type', 'application/json; charset=utf-8');
-  return new NextResponse(JSON.stringify(data), { status, headers });
+const json = (data: any, init?: number | ResponseInit) =>
+  new NextResponse(JSON.stringify(data), {
+    status: typeof init === 'number' ? init : (init as ResponseInit | undefined)?.['status'] ?? 200,
+    headers: { 'content-type': 'application/json; charset=utf-8' },
+  });
+
+type AnyBody = { conversation_id?: string; conv_id?: string; id?: string } | string | undefined;
+
+function pickConvId(body: AnyBody, url: URL): string | undefined {
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body) as AnyBody; } catch {}
+  }
+  const b = (body as any) ?? {};
+  return (
+    b.conversation_id ||
+    b.conv_id ||
+    b.id ||
+    url.searchParams.get('conversation_id') ||
+    url.searchParams.get('conv_id') ||
+    url.searchParams.get('id') ||
+    undefined
+  );
 }
 
-type Body = { conversation_id?: string };
-
-export async function DELETE(req: NextRequest) {
+async function handler(req: NextRequest) {
   try {
     const auth = await verifyFirebaseAndAuthorize(req);
     if (!auth?.ok) return json({ ok: false, error: 'unauthorized' }, 401);
-    const user_code = (auth as any).userCode ?? (auth as any).user_code ?? null;
+    const user_code = (auth as any).userCode ?? (auth as any).user_code;
     if (!user_code) return json({ ok: false, error: 'no_user_code' }, 401);
 
-    // body or query どちらでも受けられるように
-    const body = (await req.json().catch(() => ({}))) as Body;
     const url = new URL(req.url);
-    const id = body.conversation_id ?? url.searchParams.get('conversation_id') ?? undefined;
-    if (!id) return json({ ok: false, error: 'bad_request' }, 400);
+    const raw = await req.text().catch(() => '');
+    const convId = pickConvId(raw, url);
 
-    const supabase = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
+    console.info('[mu/delete] received', { convId, query: url.search, raw });
 
-    // ここもスキーマに合わせて削除 or 論理削除
-    const { error } = await supabase
-      .from('conversations')
-      .delete()
-      .eq('id', id)
-      .eq('user_code', user_code);
+    if (!convId || !String(convId).trim()) return json({ ok: false, error: 'bad_request' }, 400);
 
-    if (error) {
-      console.error('[mu/delete] delete error:', error);
-      return json({ ok: false, error: 'delete_failed' }, 500);
+    const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
+
+    // mu_turns -> conv_id(text) / user_code(text)
+    const t = await db.from('mu_turns').delete().eq('user_code', user_code).eq('conv_id', convId);
+    if (t.error) {
+      console.error('[mu/delete] delete turns error:', t.error);
+      return json({ ok: false, error: 'delete_turns_failed' }, 500);
     }
 
-    return json({ ok: true, id });
+    // mu_conversations -> id(text) / user_code(text)
+    const c = await db.from('mu_conversations').delete().eq('user_code', user_code).eq('id', convId);
+    if (c.error) {
+      console.error('[mu/delete] delete conversation error:', c.error);
+      return json({ ok: false, error: 'delete_conv_failed' }, 500);
+    }
+
+    return json({ ok: true, id: convId });
   } catch (e: any) {
-    console.error('[mu/delete] error', e);
+    console.error('[mu/delete] fatal', e);
     return json({ ok: false, error: 'internal_error', detail: String(e?.message || e) }, 500);
   }
 }
 
-// 互換: POST でも受ける（クライアントが POST を投げている場合用）
-export const POST = DELETE;
+export const POST = handler;
+export const DELETE = handler;

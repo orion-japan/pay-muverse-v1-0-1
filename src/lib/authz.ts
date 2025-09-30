@@ -34,11 +34,27 @@ export type AuthzResult = {
   userCode: string | null;
   role: 'master' | 'admin' | 'other';
   error?: string;
-  // 追加：呼び出し側で z.uid を参照できるように（型エラー回避）
-  uid: string | null;
-  // 互換用（normalizeAuthz が拾う）
+  uid: string | null;          // 追加（利用側の互換のため）
   user?: { uid: string; user_code: string } | null;
 };
+
+/* ===== ログ補助 ===== */
+const NS = '[authz]';
+const rid = () => (globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2));
+const log = (id: string, ...a: any[]) => console.log(NS, id, ...a);
+const warn = (id: string, ...a: any[]) => console.warn(NS, id, ...a);
+const err = (id: string, ...a: any[]) => console.error(NS, id, ...a);
+
+/* ===== Cookie ユーティリティ ===== */
+function parseCookies(header: string | null) {
+  const out: Record<string, string> = {};
+  if (!header) return out;
+  header.split(';').forEach((p) => {
+    const [k, ...v] = p.trim().split('=');
+    out[k] = decodeURIComponent(v.join('=') || '');
+  });
+  return out;
+}
 
 /* ===== PostgREST 用 JWT =====
    ※ sub は UUID である必要はなく、RLSで参照する「user_code」を入れる */
@@ -53,41 +69,76 @@ function signPostgresJwt(claims: { user_code: string; firebase_uid?: string }) {
   return jwt.sign(payload, POSTGREST_JWT, { algorithm: 'HS256' });
 }
 
-/* ===== 本体（NextRequest でも string でも受ける）===== */
-export async function verifyFirebaseAndAuthorize(input: NextRequest | string): Promise<AuthzResult> {
-  // 1) ID トークン取得
-  let idToken: string | null = null;
+/* ===== 本体：Bearer or Cookie どちらでもOK =====
+   - input: NextRequest | Request | string(Bearerトークン直渡し)
+*/
+export async function verifyFirebaseAndAuthorize(
+  input: NextRequest | Request | string
+): Promise<AuthzResult> {
+  const id = rid();
+  const t0 = Date.now();
+  const path =
+    typeof input === 'string'
+      ? 'bearer:string'
+      : (input as any)?.url ?? 'unknown';
+  log(id, 'start', { path });
+
+  let bearerToken: string | null = null;
+  let sessionCookie: string | null = null;
+
   if (typeof input === 'string') {
-    idToken = input || null;
+    bearerToken = input || null;
   } else {
-    const authz = input.headers.get('authorization') || input.headers.get('Authorization') || '';
-    idToken = authz.startsWith('Bearer ') ? authz.slice(7).trim() : null;
+    const authz =
+      input.headers.get('authorization') ||
+      input.headers.get('Authorization') ||
+      '';
+    bearerToken = authz.startsWith('Bearer ') ? authz.slice(7).trim() : null;
+
+    // Cookie も見る（__session = Firebase Session Cookie）
+    const cookies = parseCookies(input.headers.get('cookie'));
+    sessionCookie = cookies.__session || null;
   }
-  if (!idToken) {
+
+  if (!bearerToken && !sessionCookie) {
+    warn(id, 'no credentials');
     return {
       ok: false, allowed: false, status: 401,
       pgJwt: null, userCode: null, role: 'other',
-      error: 'Missing Firebase ID token', user: null, uid: null
+      error: 'Missing credentials (Bearer or __session cookie)', user: null, uid: null
     };
   }
 
   try {
-    // 2) Firebase 検証（revocation=true）
-    const decoded = await adminAuth.verifyIdToken(idToken, true);
-    const firebaseUid = decoded.uid;
+    // 1) Firebase 検証（Bearer優先。無ければ SessionCookie）
+    let firebaseUid: string;
+    console.time(`${NS} ${id} verify firebase`);
+    if (bearerToken) {
+      const dec = await adminAuth.verifyIdToken(bearerToken, true);
+      firebaseUid = dec.uid;
+    } else {
+      const dec = await adminAuth.verifySessionCookie(sessionCookie!, true);
+      firebaseUid = dec.uid;
+    }
+    console.timeEnd(`${NS} ${id} verify firebase`);
 
-    // 3) users から user_code / 権限取得（Service Role）
-    const adminSb = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
+    // 2) users から user_code / 権限取得（Service Role）
+    const adminSb = createClient(SUPABASE_URL, SERVICE_ROLE, {
+      auth: { persistSession: false },
+    });
 
-    // スキーマに合わせて eq のカラムは必要なら 'uid' に変更してください
+    console.time(`${NS} ${id} fetch user`);
+    // ※ ご利用のスキーマに合わせて 'firebase_uid' を変更してください
     const { data: u, error } = await adminSb
       .from('users')
       .select('user_code, click_type, plan_status')
       .eq('firebase_uid', firebaseUid)
       .maybeSingle();
+    console.timeEnd(`${NS} ${id} fetch user`);
 
     if (error) throw error;
     if (!u?.user_code) {
+      warn(id, 'user_code not found', { uid: firebaseUid });
       return {
         ok: false, allowed: false, status: 401,
         pgJwt: null, userCode: null, role: 'other',
@@ -99,10 +150,12 @@ export async function verifyFirebaseAndAuthorize(input: NextRequest | string): P
       (u.click_type === 'master' || u.plan_status === 'master') ? 'master' :
       (u.click_type === 'admin'  || u.plan_status === 'admin')  ? 'admin'  : 'other';
 
-    // 4) PostgREST/JWT（RLSで使う）
+    // 3) PostgREST/JWT（RLSで使う）
     const pgJwt = signPostgresJwt({ user_code: u.user_code, firebase_uid: firebaseUid });
 
-    // 仕様：ここでは常に allowed=true / status=200（ルート側で role を見て制御）
+    const ms = Date.now() - t0;
+    log(id, 'ok', { user: u.user_code, role, ms });
+
     return {
       ok: true,
       allowed: true,
@@ -114,7 +167,8 @@ export async function verifyFirebaseAndAuthorize(input: NextRequest | string): P
       uid: firebaseUid,
     };
   } catch (e: any) {
-    console.error('[authz] error:', e);
+    const ms = Date.now() - t0;
+    err(id, 'error', { message: e?.message, ms });
     return {
       ok: false, allowed: false, status: 401,
       pgJwt: null, userCode: null, role: 'other',
@@ -123,7 +177,7 @@ export async function verifyFirebaseAndAuthorize(input: NextRequest | string): P
   }
 }
 
-// ===== 既存互換：型 & 正規化ヘルパ =====
+/* ===== 既存互換：型 & 正規化ヘルパ ===== */
 export type AuthedUser = { uid: string; user_code: string };
 
 export function normalizeAuthz(result: any): { user: AuthedUser | null; error: string | null } {

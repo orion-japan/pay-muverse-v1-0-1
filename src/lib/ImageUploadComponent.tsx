@@ -1,48 +1,49 @@
 'use client';
 
-import React, { useState } from 'react';
-import { uploadAvatar } from '@/lib/uploadAvatar';
-import { updateUserAvatarUrl } from '@/lib/updateUserAvatarUrl';
+import { useState, ChangeEvent } from 'react';
+import SafeImage from '@/components/common/SafeImage';
 
-export default function ImageUploadComponent() {
+type Props = {
+  /** 受け取った File をアップロードする関数（任意） */
+  onUpload?: (file: File) => Promise<void> | void;
+  className?: string;
+};
+
+export default function ImageUploadComponent({ onUpload, className }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string>('');
   const [uploading, setUploading] = useState(false);
-  const [message, setMessage] = useState('');
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0] || null;
-    setFile(selectedFile);
-    if (selectedFile) {
-      setPreviewUrl(URL.createObjectURL(selectedFile));
-    }
-  };
+  function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0] ?? null;
+    setFile(f);
+    setPreviewUrl(f ? URL.createObjectURL(f) : '');
+  }
 
-  const handleUpload = async () => {
-    if (!file) return;
+  async function handleUpload() {
+    if (!file || !onUpload) return;
     setUploading(true);
-    setMessage('');
-
     try {
-      const filePath = await uploadAvatar(file);
-      const publicUrl = await updateUserAvatarUrl(filePath);
-      setMessage('✅ アップロード成功！');
-      setPreviewUrl(publicUrl); // 確認用に表示
-    } catch (err: any) {
-      setMessage(`❌ エラー: ${err.message}`);
+      await onUpload(file);
     } finally {
       setUploading(false);
     }
-  };
+  }
 
   return (
-    <div>
+    <div className={className}>
       <input type="file" onChange={handleFileChange} accept="image/*" />
-      {previewUrl && <img src={previewUrl} alt="プレビュー" width={150} />}
-      <button onClick={handleUpload} disabled={uploading}>
+      {previewUrl && (
+        <SafeImage
+          src={previewUrl}
+          alt="preview"
+          aspectRatio="1/1"
+          className="upload-preview"
+        />
+      )}
+      <button onClick={handleUpload} disabled={uploading || !file}>
         {uploading ? 'アップロード中…' : 'アップロード'}
       </button>
-      {message && <p>{message}</p>}
     </div>
   );
 }

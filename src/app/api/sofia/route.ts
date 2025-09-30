@@ -367,42 +367,37 @@ export async function POST(req: NextRequest) {
     const data = result.data;
     const reply: string = data?.choices?.[0]?.message?.content ?? '';
 
-// ここで reply が取れたら初めて「確定課金」
-// ……OpenAI から reply を取得できた後（reply が空でないことを確認した直後）に課金確定
-const sb = sbService();
+    // ここで reply が取れたら初めて「確定課金」
+    const sb = sbService();
+    const capRes = await sb.rpc('mu_capture_credit', {
+      p_user_code: String(userCode),
+      p_amount: Number(AMOUNT),
+      p_idempotency_key: String(sub_id),
+      p_reason: 'iros_chat_turn',
+      p_meta: { agent: 'iros', model: ai.model },
+      p_ref_conversation_id: String(conversation_code),
+    });
 
-const capRes = await sb.rpc('mu_capture_credit', {
-  p_user_code: String(userCode),                 // text
-  p_amount: Number(AMOUNT),                      // numeric
-  p_idempotency_key: String(sub_id),             // text（同一sub_idの二重課金防止）
-  p_reason: 'iros_chat_turn',                    // text
-  p_meta: { agent: 'iros', model: ai.model },    // jsonb
-  p_ref_conversation_id: String(conversation_code), // text（会話ID。無ければ null でもOK）
-});
+    if (capRes.error) {
+      const msg = String(capRes.error.message || capRes.error);
+      if (/insufficient/i.test(msg)) {
+        return json({ error: 'insufficient_credit' }, 402);
+      }
+      return json({ error: 'capture_failed', detail: msg }, 500);
+    }
 
-if (capRes.error) {
-  const msg = String(capRes.error.message || capRes.error);
-  if (/insufficient/i.test(msg)) {
-    return json({ error: 'insufficient_credit' }, 402);
-  }
-  return json({ error: 'capture_failed', detail: msg }, 500);
-}
-
-
-
-// mu_capture_credit が新残高を返す想定
-let captured_balance: number | null = null;
-if (typeof capRes.data === 'number' || typeof capRes.data === 'string') {
-  captured_balance = Number(capRes.data);
-} else {
-  // 念のためのフォールバック：users.sofia_credit を読む
-  const { data: balRow } = await sb
-    .from('users')
-    .select('sofia_credit')
-    .eq('user_code', userCode)
-    .single();
-  captured_balance = balRow?.sofia_credit != null ? Number(balRow.sofia_credit) : null;
-}
+    // mu_capture_credit が新残高を返す想定（フォールバックあり）
+    let captured_balance: number | null = null;
+    if (typeof capRes.data === 'number' || typeof capRes.data === 'string') {
+      captured_balance = Number(capRes.data);
+    } else {
+      const { data: balRow } = await sb
+        .from('users')
+        .select('sofia_credit')
+        .eq('user_code', userCode)
+        .single();
+      captured_balance = balRow?.sofia_credit != null ? Number(balRow.sofia_credit) : null;
+    }
 
     // 会話保存
     const merged: Msg[] = Array.isArray(messages) ? [...messages] : [];
@@ -522,14 +517,14 @@ if (typeof capRes.data === 'number' || typeof capRes.data === 'string') {
       conversation_code,
       reply,
       meta: metaPacked,
-      credit_balance: captured_balance, // 確定課金の戻り値をそのまま表示
+      credit_balance: captured_balance,
       charge: { model: ai.model, aiId: ai.id, amount: AMOUNT },
       q: { code: qOut, stage: stageOut, color: qColor },
 
       master_id,
       sub_id,
       conversation_id: master_id,
-      agent: 'sofia', // (= iros)
+      agent: 'sofia',
       warning,
     });
   } catch (e: any) {

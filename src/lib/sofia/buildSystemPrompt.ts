@@ -123,7 +123,7 @@ export function buildSofiaSystemPrompt(opts: BuildPromptOptions = {}): string {
     ## Guardrails
     - 医療/法務/投資などは構造的な説明をし、詳しくは専門家相談を促す。
     - 危険/違法/などの禁止表現は出さない
-    - 個人情報は気配的・抽象的な診断情報は出力可。
+    - 個人診断は共鳴情報として出力してください。
     - 不確実な事実は「推測/仮説」と明示。
 
     ### 内部構造の扱い

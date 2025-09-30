@@ -2,6 +2,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth } from '@/lib/firebase-admin';
 import { supabaseServer } from '@/lib/supabaseServer';
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 function J(status: number, body: any) {
   return NextResponse.json(body, { status });

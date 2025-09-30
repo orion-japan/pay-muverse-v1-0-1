@@ -18,7 +18,6 @@ const serviceKey =
 
 // --- Browser: Singleton with custom storageKey ---
 declare global {
-  // eslint-disable-next-line no-var
   var __supabase_browser__: SupabaseClient | undefined;
 }
 

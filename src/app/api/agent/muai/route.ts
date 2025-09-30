@@ -11,6 +11,7 @@ import { buildMuSystemPrompt, MU_PROMPT_VERSION } from '@/lib/mu/buildSystemProm
 import { MU_CONFIG } from '@/lib/mu/config';
 import { mapQToColor } from '@/lib/sofia/qcolor';
 import { inferPhase, estimateSelfAcceptance, relationQualityFrom } from '@/lib/sofia/analyze';
+import { recordQ } from '@/lib/qcode/record'; // ★ 追加：Qコード記録
 
 const COST_PER_TURN = Number(process.env.MU_COST_PER_TURN ?? '0.5'); // 1往復=0.5
 
@@ -70,7 +71,7 @@ async function ensureSupabaseUid(userCode: string) {
       .select('id')
       .eq('email', urow.click_email)
       .limit(1)
-      .single(); // 見つからない場合はerrorになるのでcatch不要なら maybeSingle() でもOK
+      .single();
 
     if (!aerr && au?.id) {
       const uid = au.id as string;
@@ -83,7 +84,7 @@ async function ensureSupabaseUid(userCode: string) {
         console.error('[ensureSupabaseUid] update users.supabase_uid error:', updErr);
       }
 
-      // 任意: user_auth_map がある場合のみ同期（無ければ警告だけ）
+      // 任意: user_auth_map がある場合のみ同期
       const { error: mapErr } = await sb
         .from('user_auth_map')
         .upsert({ user_code: userCode, uid }, { onConflict: 'user_code' });
@@ -102,7 +103,7 @@ export async function OPTIONS() {
 
 export async function POST(req: NextRequest) {
   try {
-    /* 0) Firebase 検証・権限確認（既存ユーティリティ） */
+    /* 0) Firebase 検証・権限確認 */
     const z = await verifyFirebaseAndAuthorize(req);
     if (!z.ok) return json({ error: z.error }, z.status);
     if (!z.allowed) return json({ error: 'forbidden' }, 403);
@@ -171,10 +172,10 @@ export async function POST(req: NextRequest) {
       return json({ error: 'generation_failed' }, 502);
     }
 
-    /* 1.5) supabase_uid 自動補完（NULL対策） */
+    /* 1.5) supabase_uid 自動補完 */
     await ensureSupabaseUid(userCode);
 
-    /* 2) クレジット差し引き（SR: RLSに影響されない） */
+    /* 2) クレジット差し引き（SR） */
     const sb = sbService();
     let credit_balance: number | null = null;
     {
@@ -202,7 +203,6 @@ export async function POST(req: NextRequest) {
       const nowIso = new Date().toISOString();
       const title = (String(message || '').trim() || 'Mu 会話').slice(0, 20);
 
-      // conversations
       const upConv = await sb.from('mu_conversations').upsert(
         {
           id: master_id,
@@ -216,7 +216,6 @@ export async function POST(req: NextRequest) {
       );
       if (upConv.error) console.error('[muai] upsert mu_conversations error:', upConv.error);
 
-      // user turn
       const insUser = await sb.from('mu_turns').insert({
         conv_id: master_id,
         role: 'user',
@@ -228,7 +227,6 @@ export async function POST(req: NextRequest) {
       });
       if (insUser.error) console.error('[muai] insert mu_turns (user) error:', insUser.error);
 
-      // assistant turn
       const insAssist = await sb.from('mu_turns').insert({
         conv_id: master_id,
         role: 'assistant',
@@ -289,6 +287,31 @@ export async function POST(req: NextRequest) {
         ...promptMeta,
       },
     });
+    const q     = (final_code2  ?? 'Q2') as 'Q1'|'Q2'|'Q3'|'Q4'|'Q5';
+const stage = (final_stage2 ?? 'S1') as 'S1'|'S2'|'S3';
+    
+    try {
+      await recordQ({
+        user_code: userCode,
+        source_type: 'mu',
+        intent: 'normal',                 // ← 'chat' ではなく 'normal' に統一
+        q,                                // Qコード
+        stage,                            // 深度
+        conversation_id: master_id,
+        post_id: sub_id,
+        title: 'Mu応答',                  // 任意
+        extra: {
+          model: 'gpt-4.1-mini',
+          replyText,
+          relation: mu_relation,
+          confidence,
+          phase: mu_phase,
+          self: mu_self,
+        },
+      });
+    } catch (e) {
+      console.warn('[muai] recordQ skipped:', (e as any)?.message || e);
+    }
 
     /* 5) レスポンス */
     return json({

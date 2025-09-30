@@ -63,19 +63,32 @@ function stripRemakeSteps(s: string) {
 }
 
 // --- リズム強化（1〜2文ごとに改行を入れる） ---
+// ・「、」が多すぎて一文が長い場合でも 40〜55 文字で節を切る
+// ・句点（。！？）の直後で改行
 function enforceRhythm(s: string) {
-  return s.replace(/([^。！？!?]{15,40}[。！？!?])/g, '$1\n');
+  // 句点ベースの改行
+  let out = s.replace(/([。！？!?])(\s*)/g, (_m, p1) => `${p1}\n`);
+  // 長文の中間折り（読点が連なるケース）
+  out = out.replace(/([^。\n]{40,55})(、)/g, '$1$2\n');
+  // 連続改行の抑制
+  return out.replace(/\n{3,}/g, '\n\n');
 }
 
-// --- 段落強制（4文ごとに段落を分割） ---
+// --- 段落強制（2〜3文ごとに段落を分割） ---
 function enforceParagraphs(s: string) {
-  const sentences = s.split(/(?<=。)/);
+  const lines = s.split(/\n/).map(v => v.trim()).filter(Boolean);
+  const sentences = lines.join(' ').split(/(?<=[。！？!?])\s*/).filter(Boolean);
   const out: string[] = [];
+  let bucket: string[] = [];
   for (let i = 0; i < sentences.length; i++) {
-    out.push(sentences[i].trim());
-    if ((i + 1) % 4 === 0) out.push('\n');
+    bucket.push(sentences[i]);
+    const isBreak = bucket.length >= 3 || i === sentences.length - 1;
+    if (isBreak) {
+      out.push(bucket.join(' '));
+      bucket = [];
+    }
   }
-  return out.join('').replace(/\n\s*\n/g, '\n\n');
+  return out.join('\n\n');
 }
 
 // --- 箇条書きの正規化 ---
@@ -84,6 +97,9 @@ function normalizeListHeads(s: string) {
 }
 
 function sanitizeOutput(s: string) {
+  // 余計な空白正規化
+  s = s.replace(/[ \t\u3000]+/g, ' ').replace(/\s+\n/g, '\n').trim();
+
   s = enforceRhythm(s);
   s = enforceParagraphs(s);
   s = normalizeListHeads(s);
@@ -91,6 +107,7 @@ function sanitizeOutput(s: string) {
   const paragraphs = s.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
   const lines = paragraphs.flatMap(p => p.split(/\r?\n/));
   let out = clampBullets(lines).join('\n\n').replace(/\n{3,}/g, '\n\n');
+
   out = stripRemakeSteps(out);
   out = limitEmojis(out);
   out = mustEndWithQuestion(out);
@@ -150,7 +167,6 @@ function buildAnalysis(
   self: { score: number; band: SelfBand },
   relation: { label: RelationLabel; confidence: number }
 ) {
-  // ざっくり要約（先頭80文字＋Qコードの意味付け）
   const head = input.replace(/\s+/g, ' ').slice(0, 80);
   const qMap: Record<string, string> = {
     Q1: '秩序や境界がテーマ',
@@ -161,7 +177,6 @@ function buildAnalysis(
   };
   const summary = `${head}${head.length === 80 ? '…' : ''}（${q && qMap[q] ? qMap[q] : '内省フェーズ'}）`;
 
-  // 背景仮説（ヒューリスティック）
   let background = '自己期待と現実のギャップによるストレス反応が考えられます。';
   if (q === 'Q1') background = '境界や手順への配慮が満たされず、苛立ちや詰まり感が生じている可能性。';
   if (q === 'Q2') background = '成長/裁量を妨げられた感覚が怒りとして表面化している可能性。';
@@ -169,7 +184,6 @@ function buildAnalysis(
   if (q === 'Q4') background = '威圧/圧の記憶が再燃し、身体の萎縮が思考を狭めている可能性。';
   if (q === 'Q5') background = '意欲の火種が見えづらく、空虚を埋める行動に流れやすい可能性。';
 
-  // ヒント集（reply の骨格を反映）
   const tips = [
     '事実/解釈/願いを3行で分ける',
     '20〜60秒のミニ実験（呼吸・姿勢・1行メモ）',
@@ -177,7 +191,6 @@ function buildAnalysis(
     '終わったら気分を1〜5で自己評価'
   ];
 
-  // 合言葉
   const keyword =
     q === 'Q2' ? '境界が守られると怒りは方向性に変わる' :
     q === 'Q3' ? '小さな安定が次の一歩を呼ぶ' :
@@ -205,7 +218,7 @@ export async function generateMirraReply(
   seed?: string | null,
   lastAssistantReply?: string | null,
   mode: 'analyze' | 'consult' = 'consult',
-  conversationId?: string | null, // ★ 追加：UIの会話IDをそのまま master_id に入れる
+  conversationId?: string | null,
 ): Promise<GenOut> {
   const sys = buildSystemPrompt({ seed, mode });
   const antiRepeat = avoidRepeatHint(lastAssistantReply || undefined);
@@ -257,30 +270,37 @@ export async function generateMirraReply(
     const OpenAI = require('openai').default;
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-    // ★ reply は短く（Iros 構成に合わせる）
+    // ★ スタイル強化：短段落・改行・最後は問い
     const formatRule = [
       '出力ルール:',
-      '・全体 160〜260字を目安に、1〜2段落。',
-      '・段落の間は1行空ける。1〜2文ごとに改行して余白を作る。',
+      ...(qMeta?.q || /具体|方法|手順|対処|解決/.test(input)
+        ? [
+            '・全体 300〜460字（最低300字以上）。',
+            '・2〜3段落。1〜2文ごとに改行して余白を作る。',
+            '・A/Bの小さな対処は“提案”として提示（命令しない／30〜60秒で安全にできる）。',
+            '・最後は「どっちが気楽？」で締める。',
+          ]
+        : [
+            '・全体 280〜420字（最低260字以上）。',
+            '・2〜3段落。1〜2文ごとに改行して余白を作る。',
+            '・一般論で埋めない。状況/場所/身体感覚の具体例を1つ入れる（例: 通勤中/胸のつかえ）。',
+            '・身体アンカー or 20〜60秒の小さな実験を必ず1つ入れる（連続同一は不可）。',
+            '・最後は短い問いで締める。',
+          ]),
       '・絵文字は1〜2個まで🙂✨（多用しない）。',
-      '・身体アンカー or 20〜60秒の小さな実験を必ず1つ入れる。',
-      '・必要なときだけ箇条書き（最大2点）。最後は短い問いで終える。',
       '・mirra はリメイク手順を提示しない（必要時は master/iros を静かに案内）。',
-      '・禁止：同一アンカーの連発（「机の角をなぞる」など特定フレーズの連続使用は禁止）。',
+      '・禁止：同一アンカー/同一結句の連発、テンプレの羅列。',
     ].join('\n');
 
-    const structureHint = [
-      '今回の骨格ヒント（順番例）:',
-      skeleton,
-    ].join('\n');
+    const structureHint = ['今回の骨格ヒント（順番例）:', skeleton].join('\n');
 
     const res = await openai.chat.completions.create({
       model: MIRRA_MODEL,
-      temperature: Math.min(1.0, Math.max(0.1, Number(MIRRA_TEMPERATURE ?? 0.6), 0.45)),
+      temperature: Math.max(0.45, Math.min(1.0, Number(MIRRA_TEMPERATURE ?? 0.7))),
       top_p: 0.9,
       presence_penalty: 0.6,
       frequency_penalty: 0.7,
-      max_tokens: 300,
+      max_tokens: 420,
       messages: [
         { role: 'system', content: sys },
         { role: 'system', content: formatRule },
@@ -291,7 +311,7 @@ export async function generateMirraReply(
     });
 
     const raw = res.choices?.[0]?.message?.content?.trim() || variantFallback(input);
-    const reply = sanitizeOutput(raw); // ← ここが短い会話文
+    const reply = sanitizeOutput(raw);
 
     const analysis = buildAnalysis(input, reply, qMeta?.q ?? null, phase, self, relation);
 
@@ -299,7 +319,6 @@ export async function generateMirraReply(
     const outTok = res.usage?.completion_tokens ?? 0;
     const cost = inTok * Number(MIRRA_PRICE_IN ?? 0) + outTok * Number(MIRRA_PRICE_OUT ?? 0);
 
-    // --- iros 風 meta を構築（analysis に詳細） ---
     const meta = {
       stochastic: false,
       g: 0.5,
@@ -321,7 +340,7 @@ export async function generateMirraReply(
           step: 'openai_reply',
           data: {
             model: MIRRA_MODEL,
-            temperature: Number(MIRRA_TEMPERATURE ?? 0.6),
+            temperature: Number(MIRRA_TEMPERATURE ?? 0.7),
             top_p: 0.9,
             presence_penalty: 0.6,
             frequency_penalty: 0.7,
@@ -331,12 +350,12 @@ export async function generateMirraReply(
       ],
       stochastic_params: { epsilon, retrNoise: noiseAmp, retrSeed },
       charge: { model: MIRRA_MODEL, aiId: MIRRA_MODEL, amount: 1 },
-      master_id: conversationId || `mirra_${(nSeed >>> 8).toString(36)}`, // ★ Iros同様にIDを短く
+      master_id: conversationId || `mirra_${(nSeed >>> 8).toString(36)}`,
       sub_id: `mirra_${(nSeed >>> 4).toString(36)}`,
       thread_id: conversationId || null,
       board_id: null,
       source_type: 'chat',
-      analysis // ★ 詳細はここに集約
+      analysis
     };
 
     return { text: reply, cost, meta };

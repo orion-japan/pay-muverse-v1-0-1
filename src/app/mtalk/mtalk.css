@@ -265,3 +265,41 @@
 .mtalk-intro {
   margin-bottom: 16px;
 }
+
+
+
+/* 返信テキストのルート（.reply がバブル内のテキストラッパ想定） */
+.reply {
+  /* 改行・空白をそのまま描画 */
+  white-space: pre-wrap;
+  word-break: break-word;        /* 長単語で折返し */
+  overflow-wrap: anywhere;
+
+  /* 読みやすさ（1行の長さを制御） */
+  max-width: 64ch;               /* 60〜70桁が読みやすい */
+
+  /* 既存 <p> が参照している CSS 変数を上書き */
+  --sofia-assist-fs: 15.5px;     /* 文字サイズ */
+  --sofia-assist-lh: 1.9;        /* 行間 */
+  --sofia-assist-ls: 0.02em;     /* 字間 */
+  --sofia-assist-m: 8px;         /* 段落の上下マージン */
+
+  /* ダーク面に映えるトーンはそのまま流用 */
+  background: var(--panel2);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  padding: 12px;
+  color: var(--text);
+  margin: 0 0 10px;
+}
+
+/* 段落ごとの余白をきれいに */
+.reply p {
+  margin: var(--sofia-assist-m, 8px) 0;
+}
+.reply p:first-child { margin-top: 0; }
+.reply p:last-child  { margin-bottom: 0; }
+
+/* 箇条書きの詰まり改善（任意） */
+.reply li { margin: 0.25em 0; }
+

@@ -148,6 +148,44 @@ export default function DailyCheckPanel({
     return () => ac.abort();
   }, [userCode, selectedVisionId, savedAt, today]);
 
+  /* ===== 補助: JSON POST(エラー握りつぶしのfire&forget) ===== */
+  async function postJson(url: string, body: any) {
+    try {
+      await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify(body),
+      });
+    } catch {
+      // fire & forget（ログだけ必要ならここでconsole.warnしてもOK）
+    }
+  }
+
+  /* ===== 解析/Qコード発火（完了時のみ） ===== */
+  async function triggerEvaluateAndQCode() {
+    const payload = {
+      user_code: userCode,
+      vision_id: selectedVisionId,
+      date: today,
+      stage: selectedStage,
+      title: selectedVisionTitle ?? '',
+      progress,
+      flags: {
+        vision_imaged: visionImaged,
+        resonance_shared: resonanceShared,
+      },
+      status_text: statusText,
+      diary_text: diaryText,
+    };
+
+    // 1) Visionの評価（簡易スコアやコメントを作る側）
+    void postJson('/api/vision/check/evaluate', payload);
+
+    // 2) Qコード保存（Vision-daily-check用のQ）
+    void postJson('/api/qcode/vision/check/evaluate', payload);
+  }
+
   /* ===== 保存 ===== */
   async function save() {
     if (saving || !userCode || !selectedVisionId) return;
@@ -189,7 +227,11 @@ export default function DailyCheckPanel({
         ? Date.parse(updatedAtISO)
         : Date.now();
 
-      if (progress >= 100) setLocked(true);
+      if (progress >= 100) {
+        setLocked(true);
+        // ←★ 完了になったら解析＆Qコードを自動発火
+        void triggerEvaluateAndQCode();
+      }
 
       showToast('✔ 保存しました');
     } catch (e) {

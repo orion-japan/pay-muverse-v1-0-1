@@ -2,13 +2,18 @@ import SofiaChat from '@/components/SofiaChat/SofiaChat';
 
 export const dynamic = 'force-dynamic';
 
-export default function SofiaPage() {
+export default async function SofiaPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ open?: string }>;
+}) {
+  const { open } = await searchParams;
+
   return (
     <main className="mu-main">
-      {/* 幅や余白は CSS の .sofia-page-wrap 側で管理 */}
       <div className="sofia-page-wrap">
-        {/* ★ Mu 固定（SofiaChat 側でデフォルト 'mu'。prop未対応でもOK） */}
-        <SofiaChat agent="mu" />
+        {/* Mu 固定。open は未指定なら undefined のまま渡す */}
+        <SofiaChat agent="mu" open={typeof open === 'string' ? open : undefined} />
       </div>
     </main>
   );

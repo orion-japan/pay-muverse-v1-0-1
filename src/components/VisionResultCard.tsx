@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase'; // album://（Private）用の署名URL解決で使用
+import SafeImage from '@/components/common/SafeImage';
 
 type PhaseKey = 'initial' | 'mid' | 'final';
 type ResultStatus = '成功' | '中断' | '意図違い';
@@ -180,7 +181,7 @@ export default function VisionResultCard({
       {/* サムネ（必要なら表示） */}
       {resolvedThumb && (
         <div className="vrc-thumb">
-          <img src={resolvedThumb} alt="" />
+          <SafeImage src={resolvedThumb} alt={title} aspectRatio="16/9" className="vision-cover" />
         </div>
       )}
 

@@ -5,12 +5,15 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { SUPABASE_URL, SERVICE_ROLE, verifyFirebaseAndAuthorize } from '@/lib/authz';
-import { generateMirraReply } from '@/lib/mirra/generate'; // ★ ここがカギ：generate.ts を使う
-// （buildSystemPrompt は generate.ts 内で使われるのでここでは不要）
+import { generateMirraReply } from '@/lib/mirra/generate'; // ★ generate.ts を使う
+import { recordQ } from '@/lib/qcode/record';              // ★ 追加：Qコード記録の共通口
 
 function json(data: any, init?: number | ResponseInit) {
-  const status = typeof init === 'number' ? init : (init as ResponseInit | undefined)?.['status'] ?? 200;
-  const headers = new Headers(typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers);
+  const status =
+    typeof init === 'number' ? init : (init as ResponseInit | undefined)?.['status'] ?? 200;
+  const headers = new Headers(
+    typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers,
+  );
   headers.set('Content-Type', 'application/json; charset=utf-8');
   return new NextResponse(JSON.stringify(data), { status, headers });
 }
@@ -22,27 +25,27 @@ export async function POST(req: NextRequest) {
     if (!auth?.ok) return json({ ok: false, error: auth?.error || 'unauthorized' }, auth?.status || 401);
     if (!auth.allowed) return json({ ok: false, error: 'forbidden' }, 403);
 
-// ---- 入力 ----
-const body = await req.json().catch(() => ({}));
-const text: string = String(body.text ?? body.message ?? '').trim();
-if (!text) return json({ ok: false, error: 'empty' }, 400);
+    // ---- 入力 ----
+    const body = await req.json().catch(() => ({}));
+    const text: string = String(body.text ?? body.message ?? '').trim();
+    if (!text) return json({ ok: false, error: 'empty' }, 400);
 
-// 👇 修正版
-const user_code: string | null =
-  (body.user_code as string | undefined) ??
-  auth.userCode ??
-  auth.user?.user_code ??
-  null;
+    // 👇 修正版（null 安全に取得）
+    const user_code: string | null =
+      (body.user_code as string | undefined) ??
+      auth.userCode ??
+      auth.user?.user_code ??
+      null;
 
-if (!user_code) return json({ ok: false, error: 'no_user_code' }, 401);
+    if (!user_code) return json({ ok: false, error: 'no_user_code' }, 401);
 
-const conversation_id: string = String(
-  body.thread_id ?? body.conversation_id ?? `mirra-${user_code}`
-);
+    const conversation_id: string = String(
+      body.thread_id ?? body.conversation_id ?? `mirra-${user_code}`,
+    );
 
-const supa = createClient(SUPABASE_URL!, SERVICE_ROLE!, {
-  auth: { persistSession: false },
-});
+    const supa = createClient(SUPABASE_URL!, SERVICE_ROLE!, {
+      auth: { persistSession: false },
+    });
 
     // ---- スレッド upsert（存在しなければ作る）----
     {
@@ -55,7 +58,7 @@ const supa = createClient(SUPABASE_URL!, SERVICE_ROLE!, {
           title: 'mirra 会話',
           updated_at: new Date().toISOString(),
         },
-        { onConflict: 'id' }
+        { onConflict: 'id' },
       );
       if (error) {
         console.error('[mtalk] upsert thread error:', error);
@@ -128,7 +131,7 @@ const supa = createClient(SUPABASE_URL!, SERVICE_ROLE!, {
     }
 
     // ---- mirra 応答生成：ここから generate.ts を必ず通す ----
-    const out = await generateMirraReply(text, seed, lastAssistantReply, 'consult');
+    const out = await generateMirraReply(text, seed, lastAssistantReply, 'consult', conversation_id);
 
     // ---- 応答を保存（talk_messages）----
     {
@@ -145,10 +148,44 @@ const supa = createClient(SUPABASE_URL!, SERVICE_ROLE!, {
       if (error) console.error('[mtalk] insert assistant msg error:', error);
     }
 
+    // ---- ★ Qコード記録（非致命）----
+    try {
+      const qres = {
+        ts: new Date().toISOString(),
+        currentQ: out?.meta?.currentQ ?? out?.meta?.current_q ?? null,
+        depthStage: out?.meta?.depthStage ?? out?.meta?.depth_stage ?? 'S1',
+        phase: out?.meta?.phase ?? 'Inner',
+        self: out?.meta?.selfAcceptance ?? null,
+        relation: out?.meta?.relation ?? null,
+        confidence:
+          typeof out?.meta?.relation?.confidence === 'number'
+            ? out.meta.relation.confidence
+            : undefined,
+        hint: out?.meta?.analysis?.keyword ?? null,
+        source: { type: 'mirra', model: out?.meta?.charge?.model ?? 'gpt-4o', version: '1' },
+        conversation_id,
+        message_id: null,
+      };
+
+      // ▼ 余剰プロパティチェック回避（型が古い参照でも落ちないように）
+      const recArgs: any = {
+        user_code,
+        source_type: 'mirra',
+        intent: 'chat',
+        qres,
+      };
+      await recordQ(recArgs);
+    } catch (e) {
+      console.warn('[mtalk] recordQ skipped:', (e as any)?.message || e);
+    }
+
     // ---- スレッド更新 ----
     await supa
       .from('talk_threads')
-      .update({ last_message_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .update({
+        last_message_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
       .eq('id', conversation_id);
 
     // ---- クレジット消費（存在しない環境はスキップ）----
@@ -199,6 +236,9 @@ const supa = createClient(SUPABASE_URL!, SERVICE_ROLE!, {
     });
   } catch (e: any) {
     console.error('[mtalk] error', e);
-    return json({ ok: false, error: 'internal_error', detail: String(e?.message || e) }, 500);
+    return json(
+      { ok: false, error: 'internal_error', detail: String(e?.message || e) },
+      500,
+    );
   }
 }

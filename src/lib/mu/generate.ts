@@ -16,7 +16,6 @@ const LOG_CFG =
   /^(1|true|yes|on)$/i.test(String((process as any)?.env?.MU_DEBUG_LOG_CONFIG || ''));
 
 if (LOG_CFG) {
-  // eslint-disable-next-line no-console
   console.log('[MU_CONFIG]', MU_CONFIG);
 }
 
