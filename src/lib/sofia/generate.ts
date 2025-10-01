@@ -4,6 +4,54 @@ import { buildSofiaSystemPrompt } from './buildSystemPrompt';
 import * as CFG from './config';
 import { inferQCode } from '@/lib/mirra/qcode';
 
+/* Knowledge API 呼び出し（絶対URL化・dev/本番対応） */
+async function kbSearch(query: string): Promise<{ title: string; content: string }[]> {
+  try {
+    let base = process.env.NEXT_PUBLIC_BASE_URL?.trim();
+    if (!base) {
+      const host = (process.env.NEXT_PUBLIC_VERCEL_URL || process.env.VERCEL_URL || '').trim();
+      if (host) base = host.startsWith('http') ? host : `https://${host}`;
+    }
+    if (!base) base = `http://localhost:${process.env.PORT || 3000}`;
+
+    const url = `${base}/api/knowledge/search?q=${encodeURIComponent(query)}`;
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) return [];
+    const js = await res.json();
+    return js.items?.map((it: any) => ({ title: it.title, content: it.content })) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/* 特定ワードトリガー（全角Q対応） */
+function kbTrigger(text: string): string | null {
+  const norm = (text || '').replace(/Ｑ/g, 'Q');
+  const m = norm.match(/\bQ[1-5]\b/i);
+  if (m) return m[0].toUpperCase();
+  const keywords = ['Qコード', 'Self', 'Vision', 'Board', 'iBoard', 'QBoard', 'Album', 'Event', 'Mirra', 'Sofia', 'Mu'];
+  for (const k of keywords) {
+    if (norm.includes(k)) return k;
+  }
+  return null;
+}
+
+function kbFormat(entries: { title: string; content: string }[]): string {
+  if (!entries.length) return '';
+  return (
+    '## Knowledge Booth\n' +
+    entries
+      .map(
+        (e) =>
+          `🌐 ${e.title} 知識ブース\n──────────────\n${e.content
+            .split('\n')
+            .map((line) => `・${line}`)
+            .join('\n')}\n──────────────\n➡ 詳しい活用法や深い意味は共鳴会で。`
+      )
+      .join('\n\n')
+  );
+}
+
 type GenOut = { reply: string; meta: Record<string, any>; cost: number };
 
 // ───────────────── 反復口調の抑制ヒント ─────────────────
@@ -39,8 +87,8 @@ function inferPhase(text: string): 'Inner' | 'Outer' {
   const t = (text || '').toLowerCase();
   const innerKeys = ['気持ち', '感情', '不安', 'イライラ', '怖', '心', '胸', 'わたし', '私'];
   const outerKeys = ['上司', '相手', '会議', '職場', 'メール', 'チーム', '外部', '環境'];
-  const innerHit = innerKeys.some(k => t.includes(k));
-  const outerHit = outerKeys.some(k => t.includes(k));
+  const innerHit = innerKeys.some((k) => t.includes(k));
+  const outerHit = outerKeys.some((k) => t.includes(k));
   if (innerHit && !outerHit) return 'Inner';
   if (outerHit && !innerHit) return 'Outer';
   return 'Inner';
@@ -97,11 +145,15 @@ function buildAnalysis(
   ];
 
   const keyword =
-    q === 'Q2' ? '境界が守られると怒りは方向性に変わる' :
-    q === 'Q3' ? '小さな安定が次の一歩を呼ぶ' :
-    q === 'Q1' ? '秩序は安心の足場' :
-    q === 'Q4' ? '圧が抜けると呼吸が戻る' :
-    '火種は小さくても前に進む';
+    q === 'Q2'
+      ? '境界が守られると怒りは方向性に変わる'
+      : q === 'Q3'
+      ? '小さな安定が次の一歩を呼ぶ'
+      : q === 'Q1'
+      ? '秩序は安心の足場'
+      : q === 'Q4'
+      ? '圧が抜けると呼吸が戻る'
+      : '火種は小さくても前に進む';
 
   return {
     summary,
@@ -119,7 +171,10 @@ function buildAnalysis(
 function seedToInt(seed?: string | null) {
   const s = String(seed ?? Date.now());
   let h = 2166136261 >>> 0;
-  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
   return h >>> 0;
 }
 
@@ -135,7 +190,7 @@ export async function generateSofiaReply(
   seed?: string | null,
   lastAssistantReply?: string | null,
   mode: 'diagnosis' | 'consult' = 'diagnosis',
-  conversationId?: string | null,
+  conversationId?: string | null
 ): Promise<GenOut> {
   const sys = buildSofiaSystemPrompt({});
   const antiRepeat = avoidRepeatHint(lastAssistantReply || undefined);
@@ -150,24 +205,29 @@ export async function generateSofiaReply(
   const self = inferSelfAcceptance(input);
   const relation = inferRelation(input);
 
-  let qMeta: { q?: 'Q1'|'Q2'|'Q3'|'Q4'|'Q5'; confidence?: number; hint?: string; color_hex?: string } = {};
-  try { qMeta = await inferQCode(input); } catch {}
+  let qMeta: { q?: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5'; confidence?: number; hint?: string; color_hex?: string } = {};
+  try {
+    qMeta = await inferQCode(input);
+  } catch {}
+
+  /* Knowledge 検索 */
+  let kbBlock = '';
+  let usedKnowledge: any[] = [];
+  const trigger = kbTrigger(input);
+  if (trigger) {
+    const entries = await kbSearch(trigger);
+    if (entries.length) {
+      kbBlock = kbFormat(entries);
+      usedKnowledge = entries;
+    }
+  }
 
   // ===== 設定の柔軟取得（新: SOFIA_AGENT / 旧: 個別定数） =====
   const sofiaAgent = (CFG as any).SOFIA_AGENT ?? {};
-  const MODEL =
-    sofiaAgent.model ??
-    (CFG as any).SOFIA_MODEL ?? 'gpt-4o';
-  const TEMP =
-    Number(sofiaAgent.temperature ??
-    (CFG as any).SOFIA_TEMPERATURE ?? 0.6);
-  const PRICE_IN =
-    Number(sofiaAgent.price_in ??
-    (CFG as any).SOFIA_PRICE_IN ?? 0);
-  const PRICE_OUT =
-    Number(sofiaAgent.price_out ??
-    (CFG as any).SOFIA_PRICE_OUT ?? 0);
-  // ===========================================================
+  const MODEL = sofiaAgent.model ?? (CFG as any).SOFIA_MODEL ?? 'gpt-4o';
+  const TEMP = Number(sofiaAgent.temperature ?? (CFG as any).SOFIA_TEMPERATURE ?? 0.6);
+  const PRICE_IN = Number(sofiaAgent.price_in ?? (CFG as any).SOFIA_PRICE_IN ?? 0);
+  const PRICE_OUT = Number(sofiaAgent.price_out ?? (CFG as any).SOFIA_PRICE_OUT ?? 0);
 
   // APIキー無し → フォールバック
   if (!process.env.OPENAI_API_KEY) {
@@ -184,25 +244,13 @@ export async function generateSofiaReply(
       relation,
       nextQ: null,
       currentQ: qMeta.q ?? null,
-      used_knowledge: [],
+      used_knowledge: usedKnowledge,
       personaTone: 'gentle_guide',
-      dialogue_trace: [
-        { step: 'detect_mode', data: { detectedTarget: null, mode } },
-        { step: 'state_infer', data: { phase, self, relation, currentQ: qMeta.q ?? null, nextQ: null } },
-        { step: 'indicators', data: { g: 0.5, stochastic: false, noiseAmp, seed: nSeed } },
-        { step: 'retrieve', data: { hits: 0, epsilon, noiseAmp, seed: retrSeed } },
-        { step: 'fallback_reply', data: { rule: 'variantFallback', hasReply: true } },
-      ],
-      stochastic_params: { epsilon, retrNoise: noiseAmp, retrSeed },
-      charge: { model: 'rule', aiId: 'rule', amount: 0 },
-      master_id: conversationId || `sofia_${(nSeed >>> 8).toString(36)}`,
-      sub_id: `sofia_${(nSeed >>> 4).toString(36)}`,
-      thread_id: conversationId || null,
-      board_id: null,
-      source_type: 'chat',
       analysis,
       q_meta: qMeta,
-      q: qMeta.q ? { code: qMeta.q, stage: 'S3', color: { base: 'Auto', hex: qMeta.color_hex ?? '#FFD54F' } } : undefined,
+      q: qMeta.q
+        ? { code: qMeta.q, stage: 'S3', color: { base: 'Auto', hex: qMeta.color_hex ?? '#FFD54F' } }
+        : undefined,
     };
 
     return { reply, meta, cost: 0 };
@@ -220,6 +268,14 @@ export async function generateSofiaReply(
     '・最後は短い問いで終える。',
   ].join('\n');
 
+  const messages: Array<{ role: 'system' | 'user'; content: string }> = [
+    { role: 'system', content: sys },
+    { role: 'system', content: formatRule },
+    { role: 'system', content: antiRepeat || '' },
+  ];
+  if (kbBlock) messages.push({ role: 'system', content: kbBlock });
+  messages.push({ role: 'user', content: input });
+
   const res = await openai.chat.completions.create({
     model: MODEL,
     temperature: TEMP,
@@ -227,12 +283,7 @@ export async function generateSofiaReply(
     presence_penalty: 0.3,
     frequency_penalty: 0.12,
     max_tokens: 300,
-    messages: [
-      { role: 'system', content: sys },
-      { role: 'system', content: formatRule },
-      { role: 'system', content: antiRepeat || '' },
-      { role: 'user', content: input },
-    ],
+    messages,
   });
 
   const raw = res.choices?.[0]?.message?.content?.trim() || variantFallback(input);
@@ -254,32 +305,13 @@ export async function generateSofiaReply(
     relation,
     nextQ: null,
     currentQ: qMeta.q ?? null,
-    used_knowledge: [],
+    used_knowledge: usedKnowledge,
     personaTone: 'gentle_guide',
-    dialogue_trace: [
-      { step: 'detect_mode', data: { detectedTarget: null, mode } },
-      { step: 'state_infer', data: { phase, self, relation, currentQ: qMeta.q ?? null, nextQ: null } },
-      { step: 'indicators', data: { g: 0.5, stochastic: false, noiseAmp, seed: nSeed } },
-      { step: 'retrieve', data: { hits: 0, epsilon, noiseAmp, seed: retrSeed } },
-      { step: 'openai_reply', data: {
-        model: MODEL,
-        temperature: TEMP,
-        top_p: 0.9,
-        presence_penalty: 0.3,
-        frequency_penalty: 0.12,
-        hasReply: !!raw,
-      } },
-    ],
-    stochastic_params: { epsilon, retrNoise: noiseAmp, retrSeed },
-    charge: { model: MODEL, aiId: MODEL, amount: 1 },
-    master_id: conversationId || `sofia_${(nSeed >>> 8).toString(36)}`,
-    sub_id: `sofia_${(nSeed >>> 4).toString(36)}`,
-    thread_id: conversationId || null,
-    board_id: null,
-    source_type: 'chat',
     analysis,
     q_meta: qMeta,
-    q: qMeta.q ? { code: qMeta.q, stage: 'S3', color: { base: 'Auto', hex: qMeta.color_hex ?? '#FFD54F' } } : undefined,
+    q: qMeta.q
+      ? { code: qMeta.q, stage: 'S3', color: { base: 'Auto', hex: qMeta.color_hex ?? '#FFD54F' } }
+      : undefined,
   };
 
   return { reply, meta, cost };

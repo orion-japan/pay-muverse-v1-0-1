@@ -61,7 +61,7 @@ export default function ThreadPage() {
       if (k in out) (out as any)[k] = a?.count ?? 0;
     }
     return out;
-  };
+      };
 
   const avatarSrcFrom = (code?: string | null) =>
     (code ? `/api/avatar/${encodeURIComponent(code)}` : DEFAULT_AVATAR);
@@ -347,120 +347,148 @@ export default function ThreadPage() {
     }
   }
 
-  /* ===== Render ===== */
-  return (
-    <div className="thread-page">
-      <div className="thread-topbar">
-        <button className="back-btn" onClick={goSelf}>← 戻る</button>
-      </div>
-
-      <header className="thread-header">
-        <img
-          src={avatarSrcFrom(parent?.user_code)}
-          alt="avatar"
-          className="avatar"
-          width={44}
-          height={44}
-          onClick={() => goProfile(parent?.user_code)}
-          onError={onAvatarError}
-        />
-
-        <div className="header-info">
-          {/* 親が自分の投稿なら削除（右上に配置） */}
-          {canDeleteParent && parent?.post_id && (
-            <button
-              className="delete-btn"
-              onClick={() => deletePost(parent.post_id, true /* cascade */)}
-              aria-label="親ポストを削除"
-            >
-              削除
-            </button>
-          )}
-
-          <div className="header-title">
-            <strong onClick={() => goProfile(parent?.user_code)}>
-              {parent?.click_username || parent?.user_code || 'スレッド'}
-            </strong>
-            <small>{parent ? formatJST(parent.created_at) : ''}</small>
-          </div>
-
-          {parent?.content && <p className="header-text">{parent.content}</p>}
-
-          {parent?.post_id && (
-            <ReactionBar
-              key={`parent-${parent.post_id}-${countsVersion}`}
-              postId={parent.post_id}
-              threadId={parent.thread_id ?? null}
-              isParent={true}
-              initialCounts={toCounts(toInitialCounts(parent.post_id))}
-            />
-          )}
+/* ===== Render ===== */
+return (
+  <div className="thread-layout">{/* ★ 2カラムレイアウトの親 */}
+    <div className="thread-main">
+      <div className="thread-page">
+        <div className="thread-topbar">
+          <button className="back-btn" onClick={goSelf}>← 戻る</button>
         </div>
-      </header>
 
-      <main className="thread-scroll" ref={listRef}>
-        {loading && <div className="meta">読み込み中...</div>}
-        {errMsg && <div className="meta" style={{ color: '#ff9aa2' }}>{errMsg}</div>}
-        {children.map(post => (
-          <article key={post.post_id} className="post">
-            <div className="author-line">
-              <img
-                className="avatar child"
-                src={avatarSrcFrom(post.user_code)}
-                alt="avatar"
-                width={32}
-                height={32}
-                onClick={() => goProfile(post.user_code)}
-                onError={onAvatarError}
+        <header className="thread-header">
+          <img
+            src={avatarSrcFrom(parent?.user_code)}
+            alt="avatar"
+            className="avatar"
+            width={44}
+            height={44}
+            onClick={() => goProfile(parent?.user_code)}
+            onError={onAvatarError}
+          />
+
+          <div className="header-info">
+            {canDeleteParent && parent?.post_id && (
+              <button
+                className="delete-btn"
+                onClick={() => deletePost(parent.post_id, true)}
+                aria-label="親ポストを削除"
+              >
+                削除
+              </button>
+            )}
+
+            <div className="header-title">
+              <strong onClick={() => goProfile(parent?.user_code)}>
+                {parent?.click_username || parent?.user_code || 'スレッド'}
+              </strong>
+              <small>{parent ? formatJST(parent.created_at) : ''}</small>
+            </div>
+
+            {/* 親本文 */}
+            {parent?.content && <p className="header-text">{parent.content}</p>}
+
+            {parent?.post_id && (
+              <ReactionBar
+                key={`parent-${parent.post_id}-${countsVersion}`}
+                postId={parent.post_id}
+                threadId={parent.thread_id ?? null}
+                isParent={true}
+                initialCounts={toCounts(toInitialCounts(parent.post_id))}
               />
-<div className="author-meta">
-  <strong onClick={() => goProfile(post.user_code)}>
-    {post.click_username || post.user_code || 'unknown'}
-  </strong>
-  <div className="meta-right">
-    <span className="time">{formatJST(post.created_at)}</span>
-    {!!userCode && post.user_code === userCode && (
-      <button
-        className="delete-btn"
-        onClick={() => deletePost(post.post_id, false /* 単体 */)}
-      >
-        削除
-      </button>
-    )}
-  </div>
-</div>
-</div>
+            )}
+          </div>
+        </header>
 
-            {/* 本文を太字で */}
-            <div className="content"><strong>{post.content}</strong></div>
+        <main className="thread-scroll" ref={listRef}>
+          {loading && <div className="meta">読み込み中...</div>}
+          {errMsg && <div className="meta" style={{ color: '#ff9aa2' }}>{errMsg}</div>}
 
-            <ReactionBar
-              key={`child-${post.post_id}-${countsVersion}`}
-              postId={post.post_id}
-              threadId={post.thread_id ?? null}
-              isParent={false}
-              initialCounts={toCounts(countsMap[post.post_id])}
+          {children.map(post => (
+            <article key={post.post_id} className="post" id={`p-${post.post_id}`}>
+              <div className="author-line">
+                <img
+                  className="avatar child"
+                  src={avatarSrcFrom(post.user_code)}
+                  alt="avatar"
+                  width={32}
+                  height={32}
+                  onClick={() => goProfile(post.user_code)}
+                  onError={onAvatarError}
+                />
+                <div className="author-meta">
+                  <strong onClick={() => goProfile(post.user_code)}>
+                    {post.click_username || post.user_code || 'unknown'}
+                  </strong>
+                  <div className="meta-right">
+                    <span className="time">{formatJST(post.created_at)}</span>
+                    {!!userCode && post.user_code === userCode && (
+                      <button
+                        className="delete-btn"
+                        onClick={() => deletePost(post.post_id, false)}
+                      >
+                        削除
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="content"><strong>{post.content}</strong></div>
+
+              <ReactionBar
+                key={`child-${post.post_id}-${countsVersion}`}
+                postId={post.post_id}
+                threadId={post.thread_id ?? null}
+                isParent={false}
+                initialCounts={toCounts(countsMap[post.post_id])}
+              />
+            </article>
+          ))}
+        </main>
+
+        {parent?.post_id && (
+          <section className="thread-comments">
+            <CommentsSection postId={parent.post_id} me={userCode ?? null} hideEmpty />
+          </section>
+        )}
+
+        <CommentDockPortal>
+          <div id="comment-dock" className="post-form">
+            <textarea
+              value={newComment}
+              onChange={e => setNewComment(e.target.value)}
+              placeholder="コメントを入力..."
             />
-          </article>
-        ))}
-      </main>
+            <button onClick={handlePost} disabled={!newComment.trim()}>送信</button>
+          </div>
+        </CommentDockPortal>
+      </div>
+    </div>
 
-      {parent?.post_id && (
-        <section className="thread-comments">
-          <CommentsSection postId={parent.post_id} me={userCode ?? null} hideEmpty />
+    {/* ★★★ 右サイドバー：親＋子の「全文」エリア ★★★ */}
+    <aside className="thread-sidebar">
+      <h3 className="sb-title">全文</h3>
+
+      {parent?.content && (
+        <section className="sb-block" id="full-parent">
+          <div className="sb-meta">
+            <span className="sb-author">{parent.click_username || parent.user_code}</span>
+            <span className="sb-time">{formatJST(parent.created_at)}</span>
+          </div>
+          <div className="sb-text">{parent.content}</div>
         </section>
       )}
 
-      <CommentDockPortal>
-        <div id="comment-dock" className="post-form">
-          <textarea
-            value={newComment}
-            onChange={e => setNewComment(e.target.value)}
-            placeholder="コメントを入力..."
-          />
-          <button onClick={handlePost} disabled={!newComment.trim()}>送信</button>
-        </div>
-      </CommentDockPortal>
-    </div>
-  );
-}
+      {children.map((post) => (
+        <section key={`full-${post.post_id}`} className="sb-block" id={`full-${post.post_id}`}>
+          <div className="sb-meta">
+            <span className="sb-author">{post.click_username || post.user_code}</span>
+            <span className="sb-time">{formatJST(post.created_at)}</span>
+          </div>
+          <div className="sb-text">{post.content}</div>
+        </section>
+      ))}
+    </aside>
+  </div>
+);}

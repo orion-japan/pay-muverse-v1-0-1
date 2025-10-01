@@ -50,6 +50,15 @@ const AI_CATALOG: ReadonlyArray<AICatalogItem> = [
   { id: 'gpt-4.1-mini', label: 'GPT-4.1 mini', model: 'gpt-4.1-mini', costPerTurn: 0.5, maxTokens: 8192, notes: '4.1の軽量版' },
 ];
 
+// ★ 追加: retrieveKnowledge のゆるい返却型
+type KBItem = {
+  id?: string;
+  title?: string;
+  content?: string;
+  url?: string;
+  tags?: string[];
+};
+
 function resolveAIByModel(modelIn?: string) {
   const m = (modelIn || '').trim();
   const hit = AI_CATALOG.find(x => x.model === m || x.id === m);
@@ -97,6 +106,7 @@ function ensureArray<T = any>(v: any): T[] { return Array.isArray(v) ? v : []; }
 function sanitizeBody(raw: any) {
   const allowModels = new Set(AI_CATALOG.map(x => x.model).concat(AI_CATALOG.map(x => x.id)));
   const modelRaw = typeof raw?.model === 'string' ? raw.model : 'gpt-4o';
+
   return {
     conversation_code: typeof raw?.conversation_code === 'string' ? raw.conversation_code : '',
     master_id: typeof raw?.master_id === 'string' ? raw.master_id : '',
@@ -118,6 +128,10 @@ function sanitizeBody(raw: any) {
     presence_penalty: typeof raw?.presence_penalty === 'number' ? raw.presence_penalty : undefined,
     response_format: raw?.response_format ?? undefined,
     cfg: typeof raw?.cfg === 'object' && raw?.cfg ? raw.cfg : undefined,
+
+    // KB（ナレッジ）参照のON/OFFと件数
+    use_kb: raw?.use_kb !== false,
+    kb_limit: Number.isFinite(raw?.kb_limit) ? Math.max(1, Math.min(8, Number(raw.kb_limit))) : undefined,
   };
 }
 
@@ -339,10 +353,44 @@ export async function POST(req: NextRequest) {
     });
     console.timeEnd('[iros] retrieveKnowledge');
 
-    // OpenAI payload
+    // === KB（ナレッジ）を System に注入する準備 ===
+    const useKB = safe.use_kb !== false; // デフォルトON
+    const kbArr: KBItem[] = Array.isArray(kb)
+      ? (kb as KBItem[]).slice(0, safe.kb_limit ?? RETRIEVE_LIMIT)
+      : [];
+    let kbBlock = '';
+
+    if (useKB && kbArr.length > 0) {
+      const lines: string[] = [];
+      lines.push('### Knowledge Base (retrieved)');
+      for (let i = 0; i < kbArr.length; i++) {
+        const k: KBItem = kbArr[i] ?? {};
+        const t = String(k.title ?? `K${i + 1}`);
+        const c = String(k.content ?? '').replace(/\s+/g, ' ').slice(0, 1200); // 長すぎ対策
+        const u = k.url ? `\n- source: ${k.url}` : '';
+        const tg = Array.isArray(k.tags) && k.tags.length ? `\n- tags: ${k.tags.join(', ')}` : '';
+        lines.push(`- (${i + 1}) ${t}\n  ${c}${u}${tg}`);
+      }
+      kbBlock = lines.join('\n');
+    }
+
+    const KB_GUIDE = `
+### Knowledge Use Rules
+- まず下の Knowledge Base を読み、回答はその根拠を要約して使うこと。
+- 関連が弱い場合は無理に使わず、「一致が弱い」と明記して一般知識で補う。
+- 参照した節は (K1)…(K4) のように番号で示すと、後続のロギングが容易になる。
+`.trim();
+
+    // OpenAI payload（SystemにKBを差し込む）
+    const sysMessages: Msg[] = [{ role: 'system', content: system }];
+    if (useKB && kbBlock) {
+      sysMessages.push({ role: 'system', content: KB_GUIDE });
+      sysMessages.push({ role: 'system', content: kbBlock });
+    }
+
     const payload: any = {
       model: ai.model,
-      messages: [{ role: 'system', content: system }, ...(messages as Msg[])],
+      messages: [...sysMessages, ...(messages as Msg[])],
       temperature: (typeof temperature === 'number') ? temperature : mappedTemperature,
     };
     if (typeof max_tokens === 'number') payload.max_tokens = max_tokens;

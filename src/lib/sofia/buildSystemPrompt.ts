@@ -190,6 +190,22 @@ export function buildSofiaSystemPrompt(opts: BuildPromptOptions = {}): string {
       `)
       : '';
 
+  // ★ Knowledge Booth（Mu 準拠の明示ルール）
+  const knowledgeBooth = dedent(`
+    ## Knowledge Booth
+    - 機能名やQコードが話題に出たら**知識ブース形式**で出力する。
+    - 構成例:
+      🌐 機能名 知識ブース
+      ──────────────
+      ・要点1
+      ・要点2
+      ・要点3
+      ──────────────
+      ➡ 詳しい活用法や深い意味は共鳴会で。
+    - 外部の一般知識で説明しない。**Muverse文脈で統一**する。
+    - 技術仕様やDBカラムなどの細部は避ける（必要なら共鳴会へ誘導）。
+  `);
+
   // ★ 追加：色エネルギーによる表現ルール（五行ワードを禁止）
   const colorEnergyRules = dedent(`
     ## Color Energy Rules
@@ -211,6 +227,8 @@ export function buildSofiaSystemPrompt(opts: BuildPromptOptions = {}): string {
     ${toneNote}
 
     ${guard}
+
+    ${knowledgeBooth}
 
     ${modeHints}
 
