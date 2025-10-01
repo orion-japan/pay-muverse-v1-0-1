@@ -24,17 +24,59 @@ async function kbSearch(query: string): Promise<{ title: string; content: string
   }
 }
 
-/* 特定ワードトリガー（全角Q対応） */
+/* 全角→半角 正規化 */
+function toHalfWidth(s: string) {
+  return (s || '').replace(/[！-～]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+}
+
+// --- kbTrigger: ここから丸ごと差し替え ---
 function kbTrigger(text: string): string | null {
-  const norm = (text || '').replace(/Ｑ/g, 'Q');
-  const m = norm.match(/\bQ[1-5]\b/i);
-  if (m) return m[0].toUpperCase();
-  const keywords = ['Qコード', 'Self', 'Vision', 'Board', 'iBoard', 'QBoard', 'Album', 'Event', 'Mirra', 'Sofia', 'Mu'];
-  for (const k of keywords) {
+  const norm = (text || '')
+    // 全角のQ→半角Q、全角英数→半角
+    .replace(/Ｑ/g, 'Q')
+    .replace(/[！-～]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+    .trim();
+
+  // 1) Q1〜Q5 明示パターン
+  const mQ = norm.match(/\bQ([1-5])\b/i);
+  if (mQ?.[0]) return mQ[0].toUpperCase();
+
+  // 2) 「◯◯ 知識ブース」「◯◯の知識ブース」などの直前語を抽出
+  const mKB =
+    norm.match(/([A-Za-z0-9一-龠ぁ-んァ-ヶー]+)\s*(?:の)?\s*知識ブース/) ||
+    norm.match(/知識ブース\s*(?:で|を)?\s*([^、。!\? ]+)/);
+  if (mKB?.[1]) return mKB[1];
+
+  // 3) 主要ワードの単純含有
+  const features = [
+    'Qコード',
+    'Self',
+    'Vision',
+    'Board',
+    'iBoard',
+    'QBoard',
+    'Album',
+    'Event',
+    'Mirra',
+    'Sofia',
+    'Mu',
+    'アプリ',
+    'アプリケーション',
+    '共鳴会' // ← 追加
+  ];
+
+  // 「◯◯とは/って」も拾う
+  for (const k of features) {
+    if (new RegExp(`${k}\\s*(とは|って)`).test(norm)) return k;
+  }
+  for (const k of features) {
     if (norm.includes(k)) return k;
   }
   return null;
 }
+// --- kbTrigger: ここまで ---
+
+
 
 function kbFormat(entries: { title: string; content: string }[]): string {
   if (!entries.length) return '';
@@ -43,10 +85,10 @@ function kbFormat(entries: { title: string; content: string }[]): string {
     entries
       .map(
         (e) =>
-          `🌐 ${e.title} 知識ブース\n──────────────\n${e.content
+          `🌐 ${e.title} 知識ブース\n──────────────\n<br/>${e.content
             .split('\n')
             .map((line) => `・${line}`)
-            .join('\n')}\n──────────────\n➡ 詳しい活用法や深い意味は共鳴会で。`
+            .join('\n')}\n──────────────\n<br/>➡ 詳しい活用法や深い意味は共鳴会で。`
       )
       .join('\n\n')
   );
@@ -219,6 +261,15 @@ export async function generateSofiaReply(
     if (entries.length) {
       kbBlock = kbFormat(entries);
       usedKnowledge = entries;
+    }
+  }
+  // Q表記のみ検出時の保険（全角/半角混在を拾う）
+  if (!kbBlock && /[ＱQ][１-５1-5]/.test(input)) {
+    const normQ = toHalfWidth(input).replace(/Ｑ/g, 'Q').match(/Q([1-5])/i)?.[0] ?? 'Q2';
+    const entries2 = await kbSearch(normQ);
+    if (entries2.length) {
+      kbBlock = kbFormat(entries2);
+      usedKnowledge = entries2;
     }
   }
 
