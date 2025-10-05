@@ -1,4 +1,3 @@
-// src/components/SofiaChat/agentClients.ts
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { fetchWithIdToken } from '@/lib/fetchWithIdToken';
@@ -53,6 +52,15 @@ async function tryFetchJson(
 
 const isUuid = (s: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+
+/** ローカル開発時のみ Mui API にユーザーを伝えるヘッダー */
+const devHeaders = (userCode?: string) => {
+  const h: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (process.env.NODE_ENV !== 'production' && userCode) {
+    h['x-mu-user'] = userCode; // app/api/agent/mui/route.ts の開発フォールバックが読む
+  }
+  return h;
+};
 
 /* =========================================================
  * 会話一覧
@@ -144,8 +152,7 @@ export async function fetchMessages(
     return (js.items ?? []).map((m: any) => ({
       id: String(m.id),
       role:
-        (m.role === 'bot' ? 'assistant' : (m.role as Role)) ??
-        ('assistant' as Role),
+        (m.role === 'bot' ? 'assistant' : (m.role as Role)) ?? ('assistant' as Role),
       content: String(m.content ?? ''),
       created_at: m.created_at ?? m.inserted_at ?? undefined,
       meta: m.meta ?? undefined,
@@ -189,43 +196,43 @@ export async function fetchMessages(
 }
 
 /* =========================================================
- * Mu送信用の内部関数（talk / analysis）
+ * Mu 送信（Mui API 経由）
  * =======================================================*/
-async function sendMuTalk(args: {
+async function sendMuViaMuiAPI(args: {
   userCode: string;
   conversationId?: string;
   messagesSoFar: Message[];
   text: string;
 }) {
-  const subId =
-    (typeof crypto !== 'undefined' && (crypto as any).randomUUID?.()) ||
-    `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  // 直近 50 件 + 今回の user を渡す
+  const hist = (Array.isArray(args.messagesSoFar) ? args.messagesSoFar : []).slice(-50);
+  const messages = [
+    ...hist.map((m) => ({ role: m.role, content: String(m.content ?? '') })),
+    { role: 'user' as const, content: args.text },
+  ];
 
-  const body = {
-    agent: 'mu',
-    message: args.text,
-    master_id: args.conversationId ?? undefined,
-    sub_id: subId,
-    thread_id: null,
-    board_id: null,
-    source_type: 'chat',
-  };
-
-  const r = await fetchWithIdToken('/api/agent/muai', {
+  const r = await fetch('/api/agent/mui', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    headers: devHeaders(args.userCode),
+    body: JSON.stringify({
+      conversation_code: args.conversationId ?? undefined,
+      messages,
+      source_type: 'chat',
+      use_kb: true,
+    }),
   });
 
   let js: any = {};
   try {
     js = await r.json();
   } catch {
-    try { js = { reply: await r.text() }; } catch {}
+    try {
+      js = { reply: await r.text() };
+    } catch {}
   }
 
   const nextConvId =
-    js?.conversation_id ??
+    js?.conversation_code ??
     js?.conversationId ??
     js?.master_id ??
     js?.meta?.master_id ??
@@ -235,83 +242,16 @@ async function sendMuTalk(args: {
   const replyText =
     js?.reply ?? js?.reply_text ?? js?.replyText ?? js?.message ?? '';
 
-  const rows: Message[] | null = Array.isArray(js?.rows)
-    ? js.rows.map((m: any) => ({
-        id: String(m.id ?? (crypto as any).randomUUID?.() ?? Date.now()),
-        role: m.role === 'bot' ? 'assistant' : (m.role as Role),
-        content: String(m.content ?? ''),
-        created_at: m.created_at ?? m.inserted_at ?? undefined,
-        meta: m.meta ?? undefined,
-      }))
-    : null;
-
+  // Mui API は rows ではなく replyText が基本。保存はサーバ側が実施済みなので、
+  // rows が無いときは直後に履歴を取り直す（UI 即時反映用）。
   return {
     conversationId: nextConvId,
     replyText,
-    rows,
+    rows: null as Message[] | null, // 後段で fetchMessages して補う
     meta: js?.meta,
-    credit: js?.credit ?? js?.credit_balance,
+    credit: js?.credit_balance ?? js?.credit ?? null,
   };
 }
-
-// src/components/SofiaChat/agentClients.ts の sendMuAnalysis を差し替え
-
-async function sendMuAnalysis(args: {
-  userCode: string;
-  conversationId?: string;
-  messagesSoFar: Message[];
-  text: string;
-  mode?: 'analysis' | 'talk';         // ★ 追加
-}) {
-  const r = await fetchWithIdToken('/api/agent/muai/reply', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      agent: 'mu',
-      userCode: args.userCode,
-      conversationId: args.conversationId ?? undefined,
-      text: args.text,
-      messages: args.messagesSoFar.map(m => ({ role: m.role, content: m.content })),
-      mode: args.mode ?? 'analysis',   // ★ 固定ではなく渡す
-    }),
-  });
-
-  let js: any = {};
-  try { js = await r.json(); } catch {
-    try { js = { replyText: await r.text() }; } catch {}
-  }
-
-  const nextConvId =
-    js?.conversationId ??
-    js?.conversation_id ??
-    js?.master_id ??
-    js?.meta?.master_id ??
-    args.conversationId ??
-    null;
-
-  const replyText =
-    js?.replyText ?? js?.reply ?? js?.reply_text ?? js?.message ?? '';
-
-  // ★ 追加：rows が返ってきたら UI 用にマッピングして渡す
-  const rows: Message[] | null = Array.isArray(js?.rows)
-    ? js.rows.map((m: any) => ({
-        id: String(m.id ?? crypto?.randomUUID?.() ?? Date.now()),
-        role: (m.role === 'bot' ? 'assistant' : m.role) as Role,
-        content: String(m.content ?? ''),
-        created_at: m.created_at ?? m.inserted_at ?? undefined,
-        meta: m.meta ?? undefined,
-      }))
-    : null;
-
-  return {
-    conversationId: nextConvId,
-    replyText,
-    rows,                  // ← ここを null ではなく rows を返す
-    meta: js?.meta,
-    credit: js?.credit ?? js?.credit_balance,
-  };
-}
-
 
 /* =========================================================
  * 送信（LLM 呼び出しを必ず発火）
@@ -326,7 +266,7 @@ export async function sendText(
     mode?: SendMode;
   }
 ) {
-  const { userCode, conversationId, messagesSoFar, text, mode } = args;
+  const { userCode, conversationId, messagesSoFar, text } = args;
 
   if (agent === 'mirra') {
     const tid = conversationId ?? `mirra-${userCode}`;
@@ -361,32 +301,18 @@ export async function sendText(
   }
 
   if (agent === 'mu') {
-    // UUID の convId を持っている間は analysis（replay）に固定して「同じ会話の続き」
-    const stickToReplay = !!(conversationId && isUuid(conversationId));
-    const useAnalysis = stickToReplay || mode === 'analysis';
-  
-    const res = useAnalysis
-      ? await sendMuAnalysis({ userCode, conversationId, messagesSoFar, text })
-      : await sendMuTalk({ userCode, conversationId, messagesSoFar, text });
-  
-    // --- ここから堅牢化 ---
-    // 1) rows が返っていれば即返す（最速描画）
-    if (res.rows && res.rows.length > 0) {
-      return res;
-    }
-  
-    // 2) rows が無い場合は必ず直後に履歴を取り直して返す
+    // まず Mui API で生成・保存
+    const res = await sendMuViaMuiAPI({ userCode, conversationId, messagesSoFar, text });
+
+    // rows が無い場合は反映済み前提で直後に強制再取得（UI を最速更新）
     if (res.conversationId) {
-      // 確実に DB 反映されるようにほんの少し待つ
-      await new Promise((r) => setTimeout(r, 400));
+      // 反映の誤差を吸収
+      await new Promise((r) => setTimeout(r, 300));
       const rows = await fetchMessages('mu', userCode, res.conversationId);
       return { ...res, rows };
     }
-  
-    // 3) それでもダメなら元のまま返す
     return res;
   }
-  
 
   // iros
   const r = await fetchWithIdToken('/api/sofia', {
@@ -402,7 +328,9 @@ export async function sendText(
     }),
   });
   let js: any = {};
-  try { js = await r.json(); } catch {
+  try {
+    js = await r.json();
+  } catch {
     const txt = await r.text();
     js = { reply: txt };
   }
@@ -414,11 +342,6 @@ export async function sendText(
     credit: js?.credit_balance,
   };
 }
-
-/* =========================================================
- * rename / delete
- * =======================================================*/
-// src/components/SofiaChat/agentClients.ts
 
 /* =========================================================
  * rename / delete
