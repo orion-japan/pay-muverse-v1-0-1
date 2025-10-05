@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-
+const [inputKey, setInputKey] = useState(0);
+const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 type ChatRole = 'user' | 'assistant';
 type Msg = { role: ChatRole; content: string };
 
@@ -419,17 +420,19 @@ export default function MuiChatPage() {
       </main>
 
       <footer className="composer">
-        <textarea
-          ref={textareaRef}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder={
-            imageFiles.length
-              ? 'OCRで読み取った文章を確認して、Ctrl/Cmd + Enterで送信'
-              : 'ここに相談内容を書くか、スクショをOCRで読み取って相談を始める'
-          }
-        />
+
+      <textarea
+  key={inputKey}             // ★追加：これで毎回まっさらなtextareaに
+  ref={textareaRef}
+  value={input}
+  onChange={(e) => setInput(e.target.value)}
+  onKeyDown={onKeyDown}
+  placeholder={
+    imageFiles.length
+      ? 'OCRで読み取った文章を確認して、Ctrl/Cmd + Enterで送信'
+      : 'ここに相談内容を書くか、スクショをOCRで読み取って相談を始める'
+  }
+/>
         <div className="actions">
           <button className="primary" onClick={send} disabled={!canSend}>
             {sending ? '送信中…' : '送信'}

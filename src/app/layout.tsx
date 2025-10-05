@@ -1,13 +1,14 @@
 // src/app/layout.tsx  ← 'use client' は付けない（Server Component）
 
-import './globals.css'
-import '../styles/layout.css'
-import Providers from './providers'
-import LayoutClient from './LayoutClient'
-import TelemetryBoot from '@/components/TelemetryBoot'
-import AuthExpose from './_auth-expose'
+import './globals.css';
+import '../styles/layout.css';
+import Providers from './providers';
+import LayoutClient from './LayoutClient';
+import TelemetryBoot from '@/components/TelemetryBoot';
+import AuthExpose from './_auth-expose';
+import type { Metadata } from 'next';
 
-export const metadata = {
+export const metadata: Metadata = {
   manifest: '/manifest.json',
   themeColor: '#0b1437',
   icons: {
@@ -24,10 +25,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* VAPID をDOM/Windowへ供給 */}
         <meta name="vapid" content={process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY} />
         <script
+          // env 値の差し込みはビルド時に文字列化して水和差異を回避
           dangerouslySetInnerHTML={{
-            __html: `window.__VAPID_PUBLIC_KEY__=${JSON.stringify(
-              process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || ''
-            )};`,
+            __html: `window.__VAPID_PUBLIC_KEY__=${JSON.stringify(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? '')};`,
           }}
         />
         {/* ▼ クリック無効化ガード（data-guard-lock="1" を持つ要素配下の操作を捕捉して無効化） */}
