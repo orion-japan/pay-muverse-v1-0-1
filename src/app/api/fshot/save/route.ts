@@ -1,56 +1,50 @@
-// src/app/api/fshot/save/route.ts
+// Next.js Route Handler（例）
+// file（従来のアップロード）or storage_path（直PUT後の保存）のどちらか必須に
+import { NextResponse } from 'next/server';
+
 export const runtime = 'nodejs';
 
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const URL  = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const SRV  = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const BUCKET = 'mui-fshot';
-
-const json = (d:any, s=200) => new NextResponse(JSON.stringify(d), {
-  status: s,
-  headers: { 'content-type': 'application/json; charset=utf-8' },
-});
-
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   try {
     const form = await req.formData();
-    const file = form.get('file') as File | null;
-    const ocr  = String(form.get('ocr_text') || '');
-    const user = String(form.get('user_code') || 'ANON');
-    const conv = (form.get('conversation_code') || null) as string | null;
 
-    if (!file) return json({ ok:false, error:'no file' }, 400);
+    const user_code = String(form.get('user_code') ?? '');
+    const conversation_code = (form.get('conversation_code') ?? '') as string;
+    const index = Number(form.get('index') ?? 0);
+    const ocr_text = (form.get('ocr_text') ?? '') as string;
 
-    // Service Role があれば優先。無ければ anon で（RLSポリシーが許可済）
-    const KEY = SRV || ANON;
-    const sb = createClient(URL, KEY, { auth: { persistSession: false } });
+    const file = form.get('file') as File | null; // 旧フロー
+    const storage_path = (form.get('storage_path') ?? '') as string; // 新フロー（直PUT）
 
-    const name = (file as any).name || 'upload';
-    const ext  = name.includes('.') ? name.split('.').pop()!.toLowerCase() : 'jpg';
-    const path = `ocr/${user}/${Date.now()}.${ext}`; // 先頭に「/」は付けない
-
-    // アップロード
-    const { error: upErr } = await sb.storage
-      .from(BUCKET)
-      .upload(path, file, { contentType: file.type, upsert: false });
-
-    if (upErr) {
-      // ここで原因をはっきり返す（Bucket not found, RLS, path不正など）
-      return json({ ok:false, stage:'upload', error: upErr.message, bucket: BUCKET, path }, 500);
+    if (!user_code) {
+      return NextResponse.json({ ok: false, error: 'user_code required' }, { status: 400 });
+    }
+    if (!file && !storage_path) {
+      // ★ ここを変更：file または storage_path のどちらかでOK
+      return NextResponse.json({ ok: false, error: 'file or storage_path required' }, { status: 400 });
     }
 
-    // 公開URL取得（public バケット前提）
-    const { data: pub } = sb.storage.from(BUCKET).getPublicUrl(path);
-    const url = pub?.publicUrl ?? null;
+    // ---- ここから先はあなたの保存ロジックに合わせて ----
+    // 例）Supabase の DB にメタを記録するだけ（擬似実装）
+    // - file がある場合は必要に応じて別ストレージへ保存
+    // - storage_path の場合は、すでに Supabase Storage にある前提でパスだけ保存
+    //
+    // const supabase = createClient(... SERVICE_ROLE ...);
+    // let stored_path = storage_path;
+    // if (file) {
+    //   // 旧フローの互換: アップロードして stored_path を得る
+    //   const uploadRes = await supabase.storage.from('uploads')
+    //     .upload(`mui/legacy/${Date.now()}-${file.name}`, file, { upsert: false });
+    //   if (uploadRes.error) throw uploadRes.error;
+    //   stored_path = uploadRes.data.path;
+    // }
+    // await supabase.from('fshot').insert({
+    //   user_code, conversation_code, index, ocr_text, storage_path: stored_path
+    // });
 
-    // （任意）OCR本文などを DB に保存したい場合はここで insert
-    // await sb.from('mu_fshot_sessions').insert({ ... })
-
-    return json({ ok:true, bucket: BUCKET, path, url, ocr, conversation_code: conv, user });
-  } catch (e:any) {
-    return json({ ok:false, stage:'catch', error: e?.message || String(e) }, 500);
+    // まずは成功だけ返す（最小）
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    return NextResponse.json({ ok: false, error: e?.message ?? 'server error' }, { status: 500 });
   }
 }

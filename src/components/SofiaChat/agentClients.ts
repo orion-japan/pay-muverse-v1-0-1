@@ -198,27 +198,35 @@ export async function fetchMessages(
 /* =========================================================
  * Mu 送信（Mui API 経由）
  * =======================================================*/
+// src/components/SofiaChat/agentClients.ts
+
+// 旧: Mui API 経由
 async function sendMuViaMuiAPI(args: {
   userCode: string;
   conversationId?: string;
   messagesSoFar: Message[];
   text: string;
 }) {
-  // 直近 50 件 + 今回の user を渡す
+  // 直近 50 件 + 今回の user を渡す（履歴はサーバでも復元されるので必須ではない）
   const hist = (Array.isArray(args.messagesSoFar) ? args.messagesSoFar : []).slice(-50);
   const messages = [
     ...hist.map((m) => ({ role: m.role, content: String(m.content ?? '') })),
     { role: 'user' as const, content: args.text },
   ];
 
-  const r = await fetch('/api/agent/mui', {
+  // 🔁 ここを /api/agent/muai に
+  // 🔁 認証付き fetch を使う（fetchWithIdToken）
+  const r = await fetchWithIdToken('/api/agent/muai', {
     method: 'POST',
-    headers: devHeaders(args.userCode),
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      conversation_code: args.conversationId ?? undefined,
-      messages,
+      // muai は message が必須。ID はあれば両方で渡す（互換）
+      message: args.text,
+      ...(args.conversationId
+        ? { master_id: args.conversationId, conversation_id: args.conversationId }
+        : {}),
       source_type: 'chat',
-      use_kb: true,
+      // 旧 mui の use_kb 等は muai では不要
     }),
   });
 
@@ -226,32 +234,28 @@ async function sendMuViaMuiAPI(args: {
   try {
     js = await r.json();
   } catch {
-    try {
-      js = { reply: await r.text() };
-    } catch {}
+    try { js = { reply: await r.text() }; } catch {}
   }
 
+  // muai の返り値に合わせて解決
   const nextConvId =
-    js?.conversation_code ??
-    js?.conversationId ??
+    js?.conversation_id ??
     js?.master_id ??
     js?.meta?.master_id ??
     args.conversationId ??
     null;
 
-  const replyText =
-    js?.reply ?? js?.reply_text ?? js?.replyText ?? js?.message ?? '';
+  const replyText = js?.reply ?? js?.reply_text ?? js?.message ?? '';
 
-  // Mui API は rows ではなく replyText が基本。保存はサーバ側が実施済みなので、
-  // rows が無いときは直後に履歴を取り直す（UI 即時反映用）。
   return {
     conversationId: nextConvId,
     replyText,
-    rows: null as Message[] | null, // 後段で fetchMessages して補う
+    rows: null as Message[] | null, // 保存はサーバで済むので、直後に fetchMessages で補完
     meta: js?.meta,
     credit: js?.credit_balance ?? js?.credit ?? null,
   };
 }
+
 
 /* =========================================================
  * 送信（LLM 呼び出しを必ず発火）

@@ -1,0 +1,505 @@
+.mui-root {
+    --bg: #0b1437;
+    --panel: #111a3f;
+    --panel2: #132151;
+    --text: #e8ecff;
+    --sub: #b8c0e8;
+    --accent: #7c8cff;
+    --ok: #61d6a7;
+    --danger: #ff6b88;
+    min-height: 100vh;
+    background: radial-gradient(1200px 600px at 20% -10%, #1a255a 0%, #0b1437 60%) no-repeat, var(--bg);
+    color: var(--text);
+    padding: 16px;
+    box-sizing: border-box;
+  }
+  .mui-header {
+    display: grid;
+    grid-template-areas: 'title' 'buttons';
+    align-items: start;
+    gap: 10px;
+    background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 14px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+  }
+  .mui-header .left { grid-area: title; }
+  .mui-header .right {
+    grid-area: buttons;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0,1fr));
+    gap: 8px; width: 100%; max-width: 360px; justify-self: start;
+  }
+  .mui-header .right button { width: 100%; padding: 10px 0; display:flex; align-items:center; justify-content:center; white-space:nowrap; }
+  
+  .mui-title { font-size: 18px; font-weight: 600; margin: 0; color: var(--text); letter-spacing: .5px; line-height: 1.4; }
+  .sub { margin: 2px 0 0; color: var(--sub); font-size: 12px; }
+  
+  button { border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.06); color: var(--text); border-radius: 10px; padding: 8px 12px; cursor: pointer; font-size: 14px; }
+  button:disabled { opacity: .6; cursor: not-allowed; }
+  button.primary { border-color: var(--accent); }
+  button.ghost { background: transparent; }
+  button.tiny { padding: 4px 8px; font-size: 12px; border-radius: 8px; }
+  
+  .dropzone { margin-bottom: 12px; border: 1px dashed rgba(255,255,255,.18); border-radius: 14px; min-height: 140px; display:flex; align-items:center; justify-content:center; padding:10px; background: var(--panel2); }
+  .drop-hint { text-align:center; color: var(--sub); display:grid; gap:6px; }
+  
+  /* 画像一覧：常に2列、中央寄せ */
+  .preview-grid { display:grid; grid-template-columns: repeat(2,1fr); gap:10px; max-width:620px; width:100%; margin:0 auto; }
+  .preview-item { display:grid; gap:6px; background: rgba(0,0,0,.15); border:1px solid rgba(255,255,255,.12); border-radius:12px; padding:8px; transition: opacity .15s ease, transform .15s ease, outline-color .15s ease; min-width:0; }
+  .preview-item.dragging { opacity:.6; }
+  .preview-item:hover { outline: 1px dashed rgba(255,255,255,.35); }
+  .thumb { position:relative; }
+  .thumb img { width:100%; height:120px; object-fit:cover; border-radius:8px; background:#000; display:block; }
+  .badge { position:absolute; top:6px; left:6px; background: rgba(0,0,0,.6); border:1px solid rgba(255,255,255,.2); font-size:12px; padding:2px 6px; border-radius:999px; }
+  .meta { display:flex; justify-content:space-between; gap:8px; color: var(--sub); font-size:12px; min-width:0; }
+  .name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:70%; }
+  .preview-actions { display:flex; gap:6px; justify-content:flex-end; }
+  .preview-toolbar { grid-column:1 / -1; display:flex; gap:8px; justify-content:flex-end; }
+  
+  .chat { display:grid; gap:10px; background: var(--panel); border-radius:14px; padding:12px; min-height:280px; max-height:55vh; overflow:auto; }
+  .empty { color: var(--sub); text-align:center; padding:20px 0; }
+  .bubble { display:grid; gap:6px; padding:10px; border-radius:12px; background: rgba(255,255,255,.03); }
+  .bubble.assistant { background: rgba(124,140,255,.08); }
+  .bubble .role { font-size:12px; color: var(--sub); }
+  .bubble .content { white-space: pre-wrap; line-height:1.6; }
+  
+  .composer { display:grid; gap:8px; background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02)); border:1px solid rgba(255,255,255,.08); border-radius:14px; padding:12px; margin-top:12px; }
+  .composer textarea { width:100%; min-height:90px; resize: vertical; color: var(--text); background: rgba(0,0,0,.15); border:1px solid rgba(255,255,255,.12); border-radius:10px; padding:10px; }
+  
+  .actions { display:flex; justify-content:flex-end; }
+  .error { margin-top:10px; color: var(--danger); }
+  
+  /* グローバル背景（必要なら） */
+  html, body { margin:0; padding:0; background:#0b1437; overflow-x:hidden; }
+  
+
+  .preview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+    gap: 8px;
+    padding: 8px;
+    justify-items: center;
+  }
+  
+  .preview-item {
+    width: 90px;
+    height: 90px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  .preview-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover; /* ← ここが重要（自動で中央をトリミング） */
+  }
+
+  /* Dropzone */
+.dropzone {
+    position: relative;
+    min-height: 140px;
+    border: 1px dashed rgba(255,255,255,.18);
+    border-radius: 14px;
+    background: var(--panel2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px;
+  }
+  .dropzone.is-drag {
+    outline: 2px dashed rgba(124,140,255,.7);
+    outline-offset: -6px;
+    background: rgba(124,140,255,.08);
+  }
+  .drop-hint {
+    text-align: center;
+    color: var(--sub);
+    display: grid;
+    gap: 6px;
+  }
+  
+  /* サムネ：小さくても全体が見える（contain） */
+  .preview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+    gap: 8px;
+    width: 100%;
+    max-width: 680px;
+    margin: 0 auto;
+  }
+  
+  .preview-item {
+    width: 100%;
+    aspect-ratio: 3 / 4;        /* スマホ縦っぽい比率の枠 */
+    background: rgba(0,0,0,.25); /* レターボックスがわかる程度の下地 */
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 10px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  .preview-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;   /* ← 全体を収める（中央に余白が生じてもOK） */
+    object-position: center;
+    display: block;
+  }
+  
+  /* ボタン等（既存のスタイルに合わせて） */
+  button.tiny { padding: 4px 8px; font-size: 12px; border-radius: 8px; }
+  button.primary { border: 1px solid var(--accent); }
+  button.ghost { background: transparent; }
+
+  /* 画面どこでもドロップOKのオーバーレイ */
+.drop-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: rgba(124, 140, 255, 0.10);
+    border: 2px dashed rgba(124, 140, 255, 0.8);
+    display: grid;
+    place-items: center;
+    pointer-events: all;
+  }
+  .drop-overlay .overlay-inner {
+    padding: 14px 18px;
+    border-radius: 12px;
+    background: rgba(0,0,0,.4);
+    border: 1px solid rgba(255,255,255,.25);
+    color: #e8ecff;
+    font-weight: 600;
+  }
+  
+  /* プレビューは“全体が見える”サムネ */
+  .preview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+    gap: 8px;
+    width: 100%;
+    max-width: 680px;
+    margin: 0 auto;
+  }
+  .preview-item {
+    width: 100%;
+    aspect-ratio: 3/4;
+    background: rgba(0,0,0,.25);
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 10px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .preview-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;   /* ←全体が見える */
+    object-position: center;
+    display: block;
+    pointer-events: none;  /* D&D競合を避ける */
+  }
+  
+  /* 生成結果の確認バー */
+  .mui-ocr-confirm {
+    display: grid;
+    gap: 10px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    padding: 12px;
+    margin: 12px 0;
+  }
+  .mui-ocr-confirm .btns {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+  
+/* 入力コンポーザ全体 */
+.mui-composer {
+  width: 92%;
+  max-width: 680px;   /* ← モバイルでも十分な横幅 */
+  margin: 16px auto 24px;
+}
+
+/* 入力ボックス */
+.composer-textarea {
+  width: 100%;
+  min-height: 200px;  /* ← 初期から大きめ */
+  max-height: 480px;  /* ← 長文は内部スクロール */
+  overflow-y: auto;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.18);
+  background: rgba(255,255,255,.06);
+  color: #f4f5f7;
+  font-size: 15px;
+  line-height: 1.8;
+  resize: vertical;   /* 手動でも伸縮できるように */
+}
+
+/* 送信ボタンの行 */
+.mui-composer .actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+
+.ocr-preview {
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.04);
+  padding: 12px;
+  border-radius: 10px;
+  margin: 10px 0 14px;
+}
+.ocr-title { font-weight: 600; margin-bottom: 6px; }
+.ocr-snippet {
+  white-space: pre-wrap;
+  max-height: 260px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  margin: 6px 0 10px;
+}
+.ocr-actions { display: flex; gap: 8px; }
+.ocr-actions .primary,
+.ocr-actions .ghost {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.06);
+  cursor: pointer;
+}
+
+
+
+/* ===== Romantic Light Mode (Bright Transparent Ver.) ===== */
+
+.mui-root {
+  --bg:        #f6f3ff;
+  --panel:     rgba(255,255,255,0.65);
+  --panel2:    rgba(255,255,255,0.55);
+  --text:      #2b214a;
+  --sub:       #655b8d;
+  --accent:    #c857ff;
+  --accent2:   #ff6fb3;
+  --accent3:   #5770ffb1;
+  --ok:        #33c3a69a;
+  --danger:    #ff5675;
+
+  background:
+    radial-gradient(800px 500px at 20% -10%, rgba(255,180,255,.55), transparent 70%),
+    radial-gradient(600px 400px at 80% 0%, rgba(255,160,220,.45), transparent 70%),
+    radial-gradient(800px 600px at 70% 90%, rgba(130,240,255,.35), transparent 70%),
+    linear-gradient(135deg, #ffe4ff 0%, #e4f2ff 60%, #ffffff 100%);
+  color: var(--text);
+  box-shadow: inset 0 0 60px rgba(255,255,255,0.2);
+}
+
+.mui-root::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(250px 200px at 20% 20%, rgba(255,200,255,.35), transparent 70%),
+    radial-gradient(250px 200px at 80% 25%, rgba(255,150,220,.25), transparent 70%),
+    radial-gradient(300px 220px at 70% 85%, rgba(140,250,255,.25), transparent 70%);
+  filter: blur(25px);
+  z-index: 0;
+}
+
+.mui-header {
+  background: rgba(255,255,255,0.7);
+  border: 1px solid rgba(255,255,255,0.5);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 10px 30px rgba(200,107,255,.25);
+}
+.mui-title {
+  color: #4a316f;
+  font-weight: 600;
+  text-shadow: 0 0 4px rgba(255,255,255,.5);
+}
+.sub { color: #7e6aa0; }
+
+button {
+  border: 1px solid rgba(255,255,255,.4);
+  background: linear-gradient(180deg, rgba(255,255,255,.85), rgba(255,255,255,.65));
+  color: #4a316f;
+  transition: all 0.2s ease;
+  font-weight: 600;
+}
+button.primary {
+  border-color: var(--accent2);
+  background: linear-gradient(180deg, #ffe0f7, #ffd0ef);
+  box-shadow: 0 0 16px rgba(255,150,255,.25);
+}
+button.primary:hover {
+  box-shadow: 0 0 26px rgba(255,150,255,.45);
+  transform: translateY(-1px);
+}
+button.ghost {
+  background: rgba(255,255,255,.5);
+}
+button.ghost:hover {
+  border-color: rgba(200,107,255,.5);
+  box-shadow: 0 0 12px rgba(200,107,255,.3);
+}
+
+.dropzone {
+  border: 2px dashed rgba(200,107,255,.35);
+  background: rgba(255,255,255,0.6);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 0 24px rgba(200,107,255,.15);
+}
+.drop-hint strong { color: #604b8e; }
+
+.chat {
+  background: rgba(255,255,255,0.65);
+  border: 1px solid rgba(255,255,255,.45);
+  box-shadow: 0 4px 20px rgba(200,107,255,.15);
+}
+.bubble.assistant {
+  background: linear-gradient(180deg, rgba(255,210,250,.6), rgba(255,255,255,.65));
+  border: 1px solid rgba(200,107,255,.3);
+  box-shadow: 0 0 10px rgba(200,107,255,.2);
+}
+.bubble.user {
+  background: rgba(255,255,255,.8);
+  border: 1px solid rgba(255,255,255,.3);
+}
+
+.composer {
+  background: rgba(255,255,255,0.75);
+  border: 1px solid rgba(255,255,255,0.4);
+  box-shadow: 0 4px 18px rgba(200,107,255,.15);
+  backdrop-filter: blur(10px);
+}
+.composer textarea {
+  background: rgba(255,255,255,0.9);
+  color: #30224d;
+  font-weight: 500;
+}
+.ocr-preview {
+  border: 1px solid rgba(120,255,255,.35);
+  background: rgba(255,255,255,0.8);
+  box-shadow: 0 0 18px rgba(120,255,255,.25);
+}
+
+/* 背景の微光エフェクト */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(255,255,255,0.05) 0,
+    rgba(255,255,255,0.1) 5px,
+    rgba(255,255,255,0) 10px
+  );
+  opacity: .4;
+  z-index: 0;
+}
+
+
+/* ラン（同一roleの連投）を左右に寄せて並べる */
+.run {
+  display: grid;
+  gap: 8px;
+  margin: 6px 0 10px;
+}
+.run.self { justify-items: end; }
+.run.partner { justify-items: start; }
+
+/* 連投セパレーター（＝“無言”を可視化） */
+.run-sep {
+  justify-self: center;
+  font-size: 12px;
+  color: var(--sub);
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 999px;
+  padding: 2px 10px;
+  margin-bottom: 6px;
+}
+
+/* 吹き出し左右の見た目（色味はお好みで） */
+.bubble.self {
+  background: rgba(124,140,255,.12);
+  border: 1px solid rgba(124,140,255,.35);
+}
+.bubble.partner {
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.18);
+}
+
+/* 既読バッジ（右下） */
+.bubble {
+  position: relative;
+}
+.read-chip {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  font-size: 11px;
+  color: var(--sub);
+  border: 1px solid rgba(255,255,255,.25);
+  padding: 2px 6px;
+  border-radius: 999px;
+  opacity: .95;
+  pointer-events: none;
+}
+
+/* 行のタイポ改善（見やすさのため） */
+.bubble .content {
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+.bubble .content .line { margin: 0 0 2px; }
+
+
+/* 入力ボックス（明るいテーマでも読める配色） */
+.composer-textarea {
+  width: 100%;
+  min-height: 200px;
+  max-height: 480px;
+  overflow-y: auto;
+  padding: 12px 14px;
+  border-radius: 12px;
+
+  /* ★ここを変更 */
+  background: rgba(255,255,255,0.95);     /* ほぼ白 */
+  color: #1d2330;                         /* 濃い文字色 */
+  border: 1px solid rgba(0,0,0,0.12);     /* 薄いグレーボーダー */
+  caret-color: #1d2330;                   /* カーソルも見やすく */
+
+  font-size: 15px;
+  line-height: 1.8;
+  resize: vertical;
+}
+
+/* プレースホルダも薄いグレーにして視認性UP */
+.composer-textarea::placeholder {
+  color: rgba(0,0,0,0.40);
+}
+
+/* クリック時のフォーカス境界（お好みで） */
+.composer-textarea:focus {
+  outline: none;
+  border-color: rgba(124,140,255,0.55);
+  box-shadow: 0 0 0 3px rgba(124,140,255,0.18);
+}

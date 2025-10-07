@@ -45,6 +45,11 @@ type MuiBody = {
   presence_penalty?: number;
   source_type?: string; // 'chat' | 'fshot' など
   vars?: any;
+
+  // ▼ 追加（構造は壊さず optional）
+  mode?: string;        // 'format_only' | 'coach_from_text' | 既定: 通常チャット
+  text?: string;        // format_only / coach_from_text の入力本文
+  instruction?: string; // format_only の追加指示（任意）
 };
 
 function json(data: any, init?: number | ResponseInit) {
@@ -113,6 +118,67 @@ export async function GET(req: NextRequest) {
   return json({ ok: true, service: 'Mui API' });
 }
 
+/** 返信のような文かをざっくり検知（format_onlyの安全弁） */
+function isLikelyReply(text: string): boolean {
+  const t = (text || '').trim();
+  if (!t) return false;
+  return /^(了解|わかりました|それはいい考え|おすすめ|〜してみて|ですね|でしょう)/m.test(t);
+}
+
+/** OCR/粗整形の最小版（話者ラベルとページ見出しは保持） */
+function simpleFormat(raw: string): string {
+  const lines = String(raw ?? '').split(/\r?\n/);
+  const out: string[] = [];
+  const endOK = /[。！？!?…」』）)】]$/;
+
+  for (const ln of lines) {
+    const s = ln.trim();
+    if (!s) continue;
+    if (/^【#\d+】$/.test(s)) { out.push(s); continue; }
+    if (/^[AB] /.test(s)) { out.push(s); continue; }
+
+    if (!out.length) { out.push(s); continue; }
+    const prev = out[out.length - 1];
+    if (!endOK.test(prev)) out[out.length - 1] = `${prev}${s.startsWith('、') ? '' : ' '}${s}`;
+    else out.push(s);
+  }
+  return out.join('\n');
+}
+
+/** 日本語ポリッシュ（意味は変えない最終仕上げ／A/Bや【#1】維持） */
+function polishJaKeepLabels(raw: string): string {
+  let s = String(raw ?? '');
+
+  // 空白・句読点
+  s = s
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\u3000/g, ' ')
+    .replace(/\s*([。！？…、，,.!?])/g, '$1')
+    .replace(/([「『（(【])\s+/g, '$1')
+    .replace(/\s+([」』）)】])/g, '$1')
+    .replace(/([ぁ-んァ-ヶ一-龥ー])\s+(?=[ぁ-んァ-ヶ一-龥ー])/g, '$1')
+    .replace(/\?/g, '？');
+
+  // 典型ノイズ
+  s = s
+    .replace(/おはよう、一?元気/g, 'おはよう、元気')
+    .replace(/言っる/g, '言ってる')
+    .replace(/クンょい/g, '')
+    .replace(/会えそな/g, '会えな')
+    .replace(/あぁあ+/g, 'あぁ')
+    .replace(/一(?=元気)/g, '')
+    .replace(/おはよ一/g, 'おはよー');
+
+  // 余計な見出し語
+  s = s
+    .replace(/^【出力】\s*/gim, '')
+    .replace(/^出力[:：]\s*/gim, '')
+    .replace(/^整形結果[:：]\s*/gim, '');
+
+  s = s.replace(/(\n){3,}/g, '\n\n').trim();
+  return s;
+}
+
 // ===== POST: 生成・保存・課金 =====
 export async function POST(req: NextRequest) {
   try {
@@ -143,7 +209,147 @@ export async function POST(req: NextRequest) {
     const source_type = raw.source_type || 'chat';
     const vars = raw.vars || {};
 
-    // 3) 軽量解析
+    // ========= format_only: 文章整形だけ（返信なし・非課金・未保存） =========
+    if (raw.mode === 'format_only') {
+      const targetText =
+        (typeof raw.text === 'string' && raw.text.trim()) ||
+        getLastUserText(messages) ||
+        '';
+
+      if (!targetText) return json({ ok: false, conversation_code, formatted: '' });
+
+      const SYS_FMT = [
+        'あなたは日本語の「整形器」です。意味や内容は一切改変せず、読みやすく直すだけに徹してください。',
+        '要件：誤字の軽微修正、不要記号の除去、句読点整理、自然な改行。A/Bなどの話者ラベルや【#n】見出しは必ず保持。',
+        'NG：追加の助言・要約・解釈・絵文字追加・追記文。出力は整形済み本文のみ。',
+        (raw.instruction || '').trim(),
+      ].filter(Boolean).join('\n');
+
+      const payloadFmt = {
+        model,
+        messages: [
+          { role: 'system', content: SYS_FMT },
+          { role: 'user', content: targetText }
+        ],
+        temperature: Math.min(0.3, temperature),
+        top_p,
+        frequency_penalty: 0,
+        presence_penalty: 0,
+      };
+
+      let formatted = '';
+      const aiFmt = await callOpenAI(payloadFmt);
+      if (aiFmt.ok) formatted = String(aiFmt.data?.choices?.[0]?.message?.content ?? '').trim();
+
+      // 返答っぽい/空のときは安全に自前整形へフォールバック
+      if (!formatted || isLikelyReply(formatted)) formatted = simpleFormat(targetText);
+
+      // 最終ポリッシュ（意味は変えない／ラベル維持）
+      formatted = polishJaKeepLabels(formatted);
+
+      return json({ ok: true, conversation_code, formatted, mode: 'format_only' });
+    }
+    // ========= /format_only =========
+
+    // ========= coach_from_text: 整形文を“最初の一手”に変換（課金・保存あり） =========
+    if (raw.mode === 'coach_from_text') {
+      const userText =
+        (typeof raw.text === 'string' && raw.text.trim()) ||
+        getLastUserText(messages) ||
+        '';
+
+      if (!userText) return json({ error: 'empty_text' }, 400);
+
+      // ここではKBは使わず、テキスト内容に即した短い一手を返す
+      const STYLE_RULES = `
+## Style
+- まず1文でやさしい共感。続けて要点を1文で言い換え。
+- その後「次の一歩」を1つだけ：具体的アクション or 1つの確認質問（どちらか片方）。
+- 長文禁止（合計 3〜6 行程度）。絵文字は使っても1つまで。
+- 一般論の羅列や説教はしない。入力本文に具体的に紐づける。
+`.trim();
+
+      const SYS_COACH = [
+        'あなたは恋愛スクショ相談「Mui」の会話パートナーです。以下はユーザーが整形した会話/メッセージ本文です。',
+        'あなたは“最初の一手”だけ返します（短い共感→要点の再述→次の一歩）。',
+        'アドバイスは1つまで、または確認質問は1つまで。両方は出さない。',
+        '相手の尊厳と境界を守り、押し付けない提案にする。',
+        STYLE_RULES,
+      ].join('\n\n');
+
+      const payloadCoach = {
+        model,
+        messages: [
+          { role: 'system', content: SYS_COACH },
+          { role: 'user', content: userText }
+        ],
+        temperature,
+        top_p,
+        frequency_penalty,
+        presence_penalty,
+      };
+
+      const ai = await callOpenAI(payloadCoach);
+      if (!ai.ok) return json({ error: 'Upstream error', status: ai.status, detail: ai.detail }, ai.status);
+      const reply: string = ai.data?.choices?.[0]?.message?.content ?? '';
+
+      // 課金（1ターン）
+      const chargeRes = await chargeOneTurn({ userCode, amount: 1, meta: { agent: 'mui', model, mode: 'coach_from_text' } });
+      if (!chargeRes.ok) {
+        const err = 'error' in chargeRes ? chargeRes.error : 'charge_failed';
+        const st  = 'status' in chargeRes && typeof chargeRes.status === 'number' ? chargeRes.status : 402;
+        return json({ error: err }, st);
+      }
+
+      // 保存：整形本文を user 発話として保存 → 返信保存
+      const sb = sbService();
+      const now = new Date().toISOString();
+      await sb.from('mu_turns').insert({
+        conv_id: conversation_code,
+        user_code: userCode,
+        role: 'user',
+        content: userText,
+        meta: { source_type: 'coach_from_text' },
+        used_credits: 0,
+        source_app: 'mu',
+        created_at: now,
+      } as any);
+
+      const phase = inferPhase(userText || '');
+      const self  = estimateSelfAcceptance(userText || '');
+      const relation = relationQualityFrom(phase, self.band);
+      const turnMeta = {
+        resonanceState: { phase, self, relation, currentQ: null, nextQ: null },
+        used_knowledge: [],
+        agent: 'mui',
+        model,
+        source_type: 'coach_from_text',
+      };
+
+      await sb.from('mu_turns').insert({
+        conv_id: conversation_code,
+        user_code: userCode,
+        role: 'assistant',
+        content: reply,
+        meta: turnMeta as any,
+        used_credits: 1,
+        source_app: 'mu',
+        created_at: now,
+      } as any);
+
+      return json({
+        ok: true,
+        conversation_code,
+        reply,
+        q: { code: 'Q2', stage: 'S1' },
+        meta: { phase, self, relation },
+        credit_balance: chargeRes.balance ?? null,
+        mode: 'coach_from_text',
+      });
+    }
+    // ========= /coach_from_text =========
+
+    // ========= 従来の通常チャット（既存ロジック） =========
     const lastUser = getLastUserText(messages);
     const phase = inferPhase(lastUser || '');
     const self = estimateSelfAcceptance(lastUser || '');
@@ -211,13 +417,11 @@ export async function POST(req: NextRequest) {
 
     // 7) 課金（1ターン=1クレジット）
     const chargeRes = await chargeOneTurn({ userCode, amount: 1, meta: { agent: 'mui', model } });
-
-if (!chargeRes.ok) {
-  const err = 'error' in chargeRes ? chargeRes.error : 'charge_failed';
-  const st  = 'status' in chargeRes && typeof chargeRes.status === 'number' ? chargeRes.status : 402;
-  return json({ error: err }, st);
-}
-
+    if (!chargeRes.ok) {
+      const err = 'error' in chargeRes ? chargeRes.error : 'charge_failed';
+      const st  = 'status' in chargeRes && typeof chargeRes.status === 'number' ? chargeRes.status : 402;
+      return json({ error: err }, st);
+    }
 
     // 8) DB 保存（mu_turns）
     const sb = sbService();
