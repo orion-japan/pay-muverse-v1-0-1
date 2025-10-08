@@ -1,4 +1,3 @@
-// src/utils/imageResize.ts
 export type ResizeOptions = {
   /** 出力の長辺（px）。未指定なら 256 */
   max?: number;
@@ -142,4 +141,24 @@ export async function resizeImage(
   const blob = await canvasToBlob(canvas, type, quality);
   if (!blob) throw new Error('Blob変換失敗');
   return blob;
+}
+
+/**
+ * ★ 追記：運用推奨の簡易ラッパー
+ *  - 長辺 <= 2000px
+ *  - WebP / 品質 0.8
+ *  - EXIF除去（toBlob変換で実質クリア）
+ */
+export async function compressToWebP(
+  file: File | Blob,
+  maxEdge = 2000,
+  quality = 0.8
+): Promise<Blob> {
+  return resizeImage(file, {
+    max: maxEdge,
+    square: false,
+    type: 'image/webp',
+    quality,
+    background: null,
+  });
 }
