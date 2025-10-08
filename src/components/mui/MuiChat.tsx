@@ -1,4 +1,3 @@
-// src/components/mui/MuiChat.tsx
 'use client';
 
 import React, { useCallback, useRef, useState } from 'react';
@@ -8,6 +7,9 @@ import type { Msg, MuiApiRes } from './types';
 import { api } from '@/lib/net/api';
 import { useMuiDrop } from './useMuiDrop';
 import { runOcrPipeline } from '@/lib/ocr/ocrPipeline';
+
+// ★ 追加：ステージ保存用の型（既存構造は維持）
+import type { StageId, Tone } from './types';
 
 export default function MuiChat() {
   // 会話系
@@ -33,6 +35,13 @@ export default function MuiChat() {
   // （任意のユーザー識別）
   const userCode: string =
     (typeof window !== 'undefined' && (window as any).__USER_CODE__) || 'ANON';
+
+  // ★ 追加：ケースID（seed_id）を内部で1つ持っておく（UIは変更しない）
+  const [seedId, setSeedId] = useState<string>(() => {
+    const d = new Date();
+    const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    return `CASE-${ymd}-${Math.random().toString(36).slice(2, 6)}`;
+  });
 
   /** 下端スクロール */
   const scrollToBottom = useCallback(() => {
@@ -85,95 +94,95 @@ export default function MuiChat() {
     [convCode, userCode]
   );
 
-// 返信っぽさの簡易検出（です/ます口調＋勧誘/質問など）
-function isLikelyReply(t: string): boolean {
-  const s = String(t || '').replace(/\s+/g, '');
-  const pats = [
-    /ですね[。!?]*$/, /でしょうか[。!?]*$/, /くださいね[。!?]*$/,
-    /と思います[。!?]*$/, /いかがですか[。!?]*$/, /お役に立て/g,
-  ];
-  if (pats.some((r) => r.test(s))) return true;
-  // 「あなた/私/お話/教えて」多用 & A/Bラベルが無い → 会話文っぽい
-  const polite = (s.match(/です|ます/g)?.length ?? 0) >= 5;
-  if (polite && /あなた|私|お話|教えて/.test(s) && !/^A|^B/m.test(t)) return true;
-  return false;
-}
+  // 返信っぽさの簡易検出（です/ます口調＋勧誘/質問など）
+  function isLikelyReply(t: string): boolean {
+    const s = String(t || '').replace(/\s+/g, '');
+    const pats = [
+      /ですね[。!?]*$/, /でしょうか[。!?]*$/, /くださいね[。!?]*$/,
+      /と思います[。!?]*$/, /いかがですか[。!?]*$/, /お役に立て/g,
+    ];
+    if (pats.some((r) => r.test(s))) return true;
+    // 「あなた/私/お話/教えて」多用 & A/Bラベルが無い → 会話文っぽい
+    const polite = (s.match(/です|ます/g)?.length ?? 0) >= 5;
+    if (polite && /あなた|私|お話|教えて/.test(s) && !/^A|^B/m.test(t)) return true;
+    return false;
+  }
 
-// 意味を変えないローカル簡易整形（最終フォールバック）
-function simpleFormat(raw: string): string {
-  let s = String(raw || '');
-  s = s.replace(/[ \t]+/g, ' ').replace(/\u3000/g, ' ');
-  s = s
-    .replace(/\s*([。！？…、，,.!?])/g, '$1')
-    .replace(/([「『（(【])\s+/g, '$1')
-    .replace(/\s+([」』）)】])/g, '$1');
-  // 和文の字間スペース除去
-  s = s.replace(/([ぁ-んァ-ヶ一-龥ー])\s+(?=[ぁ-んァ-ヶ一-龥ー])/g, '$1');
-  // 軽微な誤認補正
-  s = s.replace(/おはよ一/g, 'おはよー').replace(/言っる/g, '言ってる');
-  s = s.replace(/(\n){3,}/g, '\n\n');
-  return s.trim();
-}
+  // 意味を変えないローカル簡易整形（最終フォールバック）
+  function simpleFormat(raw: string): string {
+    let s = String(raw || '');
+    s = s.replace(/[ \t]+/g, ' ').replace(/\u3000/g, ' ');
+    s = s
+      .replace(/\s*([。！？…、，,.!?])/g, '$1')
+      .replace(/([「『（(【])\s+/g, '$1')
+      .replace(/\s+([」』）)】])/g, '$1');
+    // 和文の字間スペース除去
+    s = s.replace(/([ぁ-んァ-ヶ一-龥ー])\s+(?=[ぁ-んァ-ヶ一-龥ー])/g, '$1');
+    // 軽微な誤認補正
+    s = s.replace(/おはよ一/g, 'おはよー').replace(/言っる/g, '言ってる');
+    s = s.replace(/(\n){3,}/g, '\n\n');
+    return s.trim();
+  }
 
-/** 整形専用呼び出し（format_only） */
-const callAgentFormatOnly = useCallback(
-  async (raw: string) => {
-    // ガード付きプロンプトで「整形のみ」を強制
-    const guarded = [
-      '<<FORMAT_ONLY>>',
-      '【指示】以下の原文を、意味を変えずに句読点/改行/誤字のみ整える。',
-      '・新しい助言/相槌/質問/要約/説明は一切追加しない',
-      '・話者ラベル（A/B等）や文脈タグは保持',
-      '・出力は整形後の本文のみ（前置き/後書き禁止）',
-      '【原文】',
-      raw,
-      '<<END>>',
-    ].join('\n');
+  /** 整形専用呼び出し（format_only） */
+  const callAgentFormatOnly = useCallback(
+    async (raw: string) => {
+      // ガード付きプロンプトで「整形のみ」を強制
+      const guarded = [
+        '<<FORMAT_ONLY>>',
+        '【指示】以下の原文を、意味を変えずに句読点/改行/誤字のみ整える。',
+        '・新しい助言/相槌/質問/要約/説明は一切追加しない',
+        '・話者ラベル（A/B等）や文脈タグは保持',
+        '・出力は整形後の本文のみ（前置き/後書き禁止）',
+        '【原文】',
+        raw,
+        '<<END>>',
+      ].join('\n');
 
-    const url = `/api/agent/mui?user_code=${encodeURIComponent(userCode)}`;
-    const json = await api<MuiApiRes>(url, {
-      method: 'POST',
-      body: JSON.stringify({
-        text: guarded,
-        mode: 'format_only',
-        instruction:
-          '整形のみ。誤字訂正・不要記号除去・句読点/改行の整理。意味や内容の追加/改変は禁止。話者A/Bやタグは保持。出力は本文のみ。',
-        conversation_code: convCode,
-        user_code: userCode,
-      }),
-      headers: { 'x-user-code': userCode, 'Content-Type': 'application/json' },
-    });
+      const url = `/api/agent/mui?user_code=${encodeURIComponent(userCode)}`;
+      const json = await api<MuiApiRes>(url, {
+        method: 'POST',
+        body: JSON.stringify({
+          text: guarded,
+          mode: 'format_only',
+          instruction:
+            '整形のみ。誤字訂正・不要記号除去・句読点/改行の整理。意味や内容の追加/改変は禁止。話者A/Bやタグは保持。出力は本文のみ。',
+          conversation_code: convCode,
+          user_code: userCode,
+        }),
+        headers: { 'x-user-code': userCode, 'Content-Type': 'application/json' },
+      });
 
-    let reply =
-      (json as any).formatted ??
-      (json as any).reply ??
-      (json as any).message ??
-      '';
+      let reply =
+        (json as any).formatted ??
+        (json as any).reply ??
+        (json as any).message ??
+        '';
 
-    const newCode =
-      (json as any).conversation_code ??
-      (json as any).conv_code ??
-      convCode ??
-      null;
-    if (newCode) setConvCode(String(newCode));
+      const newCode =
+        (json as any).conversation_code ??
+        (json as any).conv_code ??
+        convCode ??
+        null;
+      if (newCode) setConvCode(String(newCode));
 
-    const newBal =
-      typeof (json as any).balance === 'number'
-        ? (json as any).balance
-        : typeof (json as any).credit === 'number'
-        ? (json as any).credit
-        : null;
-    if (typeof newBal === 'number') setBalance(newBal);
+      const newBal =
+        typeof (json as any).balance === 'number'
+          ? (json as any).balance
+          : typeof (json as any).credit === 'number'
+          ? (json as any).credit
+          : null;
+      if (typeof newBal === 'number') setBalance(newBal);
 
-    // 返信っぽければローカル整形にフォールバック
-    const out = String(reply || '').trim();
-    if (!out || isLikelyReply(out)) {
-      return simpleFormat(raw);
-    }
-    return out;
-  },
-  [convCode, userCode]
-);
+      // 返信っぽければローカル整形にフォールバック
+      const out = String(reply || '').trim();
+      if (!out || isLikelyReply(out)) {
+        return simpleFormat(raw);
+      }
+      return out;
+    },
+    [convCode, userCode]
+  );
 
   // ───────────────────────────────────────────────────────────────
   // OCR実行（従来：プレビュー）
@@ -311,6 +320,36 @@ const callAgentFormatOnly = useCallback(
       setError(e?.message || '整形に失敗しました');
     }
   }, [conv, composerText, callAgentFormatOnly, scrollToBottom]);
+
+  // ★ 追加：ステージ保存ヘルパー（UIは変更しない／任意のタイミングで呼び出し可）
+  const saveStage = useCallback(async (params: {
+    sub_id: StageId;
+    partner_detail: string;
+    tone: Tone;
+    next_step: string;
+    currentQ?: string; depthStage?: string; phase?: Tone['phase']; self_accept?: number;
+  }) => {
+    try {
+      const res = await api<{ ok: boolean; quartet?: any; error?: string }>(
+        '/api/agent/mui/stage/save',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-user-code': userCode },
+          body: JSON.stringify({
+            user_code: userCode,
+            seed_id: seedId,
+            ...params,
+          }),
+        }
+      );
+      if (!(res as any).ok) throw new Error((res as any).error || 'save failed');
+      // 必要なら (res as any).quartet をどこかに反映（現状は構造維持のため無操作）
+      return true;
+    } catch (e) {
+      console.warn('[stage/save] failed', e);
+      return false;
+    }
+  }, [seedId, userCode]);
 
   const placeholder =
     files.length > 0

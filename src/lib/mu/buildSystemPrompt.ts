@@ -127,6 +127,23 @@ export function buildMuSystemPrompt(opts: BuildMuPromptOptions = {}): string {
       - 内部実装の詳細な解説はしない（示唆レベルは可）。
     `);
 
+  // ★ 追加) Action Format（3本柱の強制）
+  const actionFormat = dedent(`
+    ## Action Format（必須）
+    - 返答は **必ず** 次の順で簡潔に出すこと：
+      1) **Goal**：目的を一文
+      2) **Today Action**（今からやる3手）
+         - A. 60秒タスク（準備）
+         - B. 送信文 or 行動（コピペ可能な完成形／20〜60文字目安）
+         - C. フォールバック（怖い/反応無い時）
+      3) **If-Then**（3分岐）
+         - ①好反応 → 次の一手
+         - ②保留/未読 → いつ・何を出すか
+         - ③ネガ/拒否 → 回復プロトコルの最短手順
+    - 抽象的な励ましのみの返答は禁止。必ずBに**実行文**（完成形）を含める。
+    - 「?」は1つまで。段落は2〜3文で区切る。
+  `);
+
   // 7) Features（Muverse機能一覧）
   const features = dedent(`
     ## Features (Muverse 機能一覧)
@@ -246,6 +263,8 @@ export function buildMuSystemPrompt(opts: BuildMuPromptOptions = {}): string {
     ${toneNote}
 
     ${guard}
+
+    ${actionFormat}
 
     ${features}
 
