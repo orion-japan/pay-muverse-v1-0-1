@@ -93,12 +93,17 @@ async function callOpenAI(payload: any) {
   return { ok: true as const, data };
 }
 
-// ---- dev fallback: userCode を取り出す（Firebase → ヘッダ → クエリ の順）----
+// ---- dev fallback: userCode を取り出す（Cookie → Firebase → ヘッダ → クエリ の順）----
 async function resolveUserCode(req: NextRequest) {
+  // 0) Cookie 最優先（ログイン時に発行された実ユーザーコード）
+  const cookieUser = req.cookies.get('mu_user_code')?.value?.trim();
+  if (cookieUser) return { ok: true as const, userCode: cookieUser };
+
+  // 1) Firebaseトークンが付与されている場合はそこから
   const z = await verifyFirebaseAndAuthorize(req);
   if (z.ok && z.allowed && z.userCode) return { ok: true as const, userCode: z.userCode };
 
-  // 開発中は x-mu-user / ?user_code= を許可
+  // 2) 開発時のみヘッダ／クエリも許可（本番では無効）
   const isDev = process.env.NODE_ENV !== 'production';
   if (isDev) {
     const hUser = req.headers.get('x-mu-user')?.trim();
@@ -106,8 +111,11 @@ async function resolveUserCode(req: NextRequest) {
     const userCode = hUser || qUser;
     if (userCode) return { ok: true as const, userCode };
   }
+
+  // 3) どれでも取れなければ 400
   return { ok: false as const, error: 'user_code required', status: 400 as const };
 }
+
 
 // ===== GET: ヘルス =====
 export async function GET(req: NextRequest) {

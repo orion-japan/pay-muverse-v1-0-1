@@ -55,9 +55,26 @@ export default function MuiMessageList({ items }: Props) {
 
   // 🔽 メッセージが更新されたら常に最下部まで自動スクロール
   useEffect(() => {
-    if (bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
+    let raf1 = 0;
+    let raf2 = 0;
+
+    const scroll = () => {
+      if (bottomRef.current) {
+        bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+      }
+    };
+
+    // レイアウト確定後に一度
+    raf1 = window.requestAnimationFrame(scroll);
+    // 画像やフォント適用で高さが遅れて変わる場合のフォロー（短い再試行）
+    raf2 = window.requestAnimationFrame(() => {
+      setTimeout(scroll, 60);
+    });
+
+    return () => {
+      if (raf1) cancelAnimationFrame(raf1);
+      if (raf2) cancelAnimationFrame(raf2);
+    };
   }, [items]);
 
   if (!items?.length) {

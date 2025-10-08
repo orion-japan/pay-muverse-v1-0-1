@@ -8,7 +8,7 @@ import { api } from '@/lib/net/api';
 import { useMuiDrop } from './useMuiDrop';
 import { runOcrPipeline } from '@/lib/ocr/ocrPipeline';
 
-// ★ 追加：ステージ保存用の型（既存構造は維持）
+// ★（任意型）ステージで使う型を残しておく。未使用でも構造維持のため。
 import type { StageId, Tone } from './types';
 
 export default function MuiChat() {
@@ -26,6 +26,9 @@ export default function MuiChat() {
   const [composerText, setComposerText] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // ★ 追加：OCR→本文に入れた直後だけ広げる
+  const [composerExpanded, setComposerExpanded] = useState(false);
+
   // 画像D&D / 選択
   const {
     files, urls, dragScreen,
@@ -36,14 +39,14 @@ export default function MuiChat() {
   const userCode: string =
     (typeof window !== 'undefined' && (window as any).__USER_CODE__) || 'ANON';
 
-  // ★ 追加：ケースID（seed_id）を内部で1つ持っておく（UIは変更しない）
-  const [seedId, setSeedId] = useState<string>(() => {
+  // ★ 追加：ケースID（seed_id）を内部で1つ持っておく（UI変更なし）
+  const [seedId] = useState<string>(() => {
     const d = new Date();
     const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
     return `CASE-${ymd}-${Math.random().toString(36).slice(2, 6)}`;
   });
 
-  /** 下端スクロール */
+  /** 下端スクロール（既存方式を維持） */
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
       const el = textareaRef.current;
@@ -55,9 +58,12 @@ export default function MuiChat() {
     });
   }, []);
 
-  /** 本体エージェント呼び出し（通常送信） */
+  // ───────────────────────────────────────────────────────────────
+  // 本体エージェント呼び出し（通常送信）
+  type AgentResult = { reply: string; conversation_code: string | null; balance: number | null };
+
   const callAgent = useCallback(
-    async (text: string) => {
+    async (text: string): Promise<AgentResult> => {
       const url = `/api/agent/mui?user_code=${encodeURIComponent(userCode)}`;
       const json = await api<MuiApiRes>(url, {
         method: 'POST',
@@ -89,7 +95,11 @@ export default function MuiChat() {
           : null;
       if (typeof newBal === 'number') setBalance(newBal);
 
-      return String(reply);
+      return {
+        reply: String(reply),
+        conversation_code: newCode ? String(newCode) : null,
+        balance: typeof newBal === 'number' ? newBal : null,
+      };
     },
     [convCode, userCode]
   );
@@ -236,6 +246,7 @@ export default function MuiChat() {
 
       const next = composerText ? composerText + '\n' + formatted : formatted;
       setComposerText(next);
+      setComposerExpanded(true);       // ★ ここで広げる
       setOcrPreview(null);
       scrollToBottom();
     } catch (e: any) {
@@ -250,6 +261,7 @@ export default function MuiChat() {
     if (!ocrPreview) return;
     const next = composerText ? composerText + '\n' + ocrPreview : ocrPreview;
     setComposerText(next);
+    setComposerExpanded(true);         // ★ ここでも広げる
     setOcrPreview(null);
     scrollToBottom();
   }, [ocrPreview, composerText, scrollToBottom]);
@@ -267,10 +279,11 @@ export default function MuiChat() {
       const userMsg: Msg = { role: 'user', content: trimmed };
       setConv((p) => [...p, userMsg]);
       setComposerText('');
+      setComposerExpanded(false);      // ★ 送信後は閉じる
       scrollToBottom();
 
       try {
-        const reply = await callAgent(trimmed);
+        const { reply, conversation_code: cc } = await callAgent(trimmed);
 
         const assistantMsg: Msg = { role: 'assistant', content: String(reply) };
         setConv((p) => [...p, assistantMsg]);
@@ -282,7 +295,7 @@ export default function MuiChat() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              conversation_code: convCode,
+              conversation_code: cc, // ★ そのターンで確定したIDで保存
               messages: [
                 { role: 'user', content: userMsg.content },
                 { role: 'assistant', content: assistantMsg.content },
@@ -296,7 +309,7 @@ export default function MuiChat() {
         setError(e?.message || '送信に失敗しました');
       }
     },
-    [callAgent, convCode, scrollToBottom]
+    [callAgent, scrollToBottom]
   );
 
   /** 追加：直前のアシスタント返答を整形→本文へ */
@@ -315,13 +328,14 @@ export default function MuiChat() {
       }
       const next = composerText ? composerText + '\n' + formatted : formatted;
       setComposerText(next);
+      setComposerExpanded(true);       // 整形→本文でも広げる
       scrollToBottom();
     } catch (e: any) {
       setError(e?.message || '整形に失敗しました');
     }
   }, [conv, composerText, callAgentFormatOnly, scrollToBottom]);
 
-  // ★ 追加：ステージ保存ヘルパー（UIは変更しない／任意のタイミングで呼び出し可）
+  // ★ 任意：ステージ保存ヘルパー（UI変更なし）
   const saveStage = useCallback(async (params: {
     sub_id: StageId;
     partner_detail: string;
@@ -343,7 +357,6 @@ export default function MuiChat() {
         }
       );
       if (!(res as any).ok) throw new Error((res as any).error || 'save failed');
-      // 必要なら (res as any).quartet をどこかに反映（現状は構造維持のため無操作）
       return true;
     } catch (e) {
       console.warn('[stage/save] failed', e);
@@ -353,8 +366,8 @@ export default function MuiChat() {
 
   const placeholder =
     files.length > 0
-      ? 'OCR→「AIで整形して本文へ」または「OCRで読み取る→プレビュー→本文に反映」（Ctrl/Cmd+Enterで送信）'
-      : 'スクショを選択/ドロップ → 「AIで整形して本文へ」でプレビュー無し投入／直前返答は「直前の返答を整形→本文」';
+      ? '（Ctrl/Cmd+Enterで送信）'
+      : 'メッセージを入れて送信';
 
   return (
     <>
@@ -396,7 +409,7 @@ export default function MuiChat() {
         </div>
       </header>
 
-      {/* 直前返答の整形ショートカット（会話下に入れると押しやすい場合は配置変更可） */}
+      {/* 直前返答の整形ショートカット */}
       <div className="inline-actions" style={{ display: 'flex', gap: 8, margin: '8px 0' }}>
         <button className="ghost" onClick={formatLastAssistantToComposer}>
           直前の返答を整形→本文
@@ -447,10 +460,14 @@ export default function MuiChat() {
         <MuiComposer
           placeholder={placeholder}
           value={composerText}
-          onChange={setComposerText}
+          onChange={(v) => {
+            setComposerText(v);
+            if (!v.trim()) setComposerExpanded(false); // 空に戻ったら閉じる
+          }}
           onSend={() => handleComposerSend(composerText)}
           sending={ocrRunning}
           textareaRef={textareaRef}
+          expanded={composerExpanded}       // ★ 追加
         />
       </div>
 
