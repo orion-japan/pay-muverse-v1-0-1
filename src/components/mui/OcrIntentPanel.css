@@ -1,0 +1,19 @@
+.ocr-wrap { padding: 12px; }
+.ocr-card { background: linear-gradient(180deg,#fff,#f7f9ff); border:1px solid #e5e8f3; border-radius:16px; padding:16px; }
+.ocr-title { margin:0 0 6px; font-size:18px; font-weight:700; }
+.ocr-desc { margin:0 0 12px; color:#546; line-height:1.6; }
+.ocr-upload { margin:12px 0 16px; }
+.ocr-label { display:inline-block; font-size:13px; color:#334; margin-bottom:6px; }
+.ocr-drop { margin-top:8px; border:1px dashed #b8c0e8; border-radius:12px; padding:16px; text-align:center; color:#667; background:#fbfcff; }
+.ocr-hint { margin-top:6px; font-size:12px; color:#556; }
+.ocr-ok { margin-top:6px; font-size:12px; color:#22883a; }
+.ocr-err { margin-top:6px; font-size:12px; color:#b4002d; }
+.ocr-textarea { width:100%; resize:vertical; padding:10px; border-radius:10px; border:1px solid #ccd3ea; background:#fff; font-size:14px; }
+.ocr-row { display:flex; align-items:center; gap:8px; margin-top:8px; }
+.ocr-select { padding:6px 10px; border-radius:8px; border:1px solid #ccd3ea; background:#fff; }
+.ocr-warn { margin-top:8px; color:#b35b00; background:#fff3d6; border:1px solid #ffd37a; padding:8px; border-radius:8px; font-size:13px; }
+.btn { border:0; border-radius:10px; padding:10px 14px; cursor:pointer; }
+.ocr-btn { margin-top:8px; background:#e9edff; }
+.go-btn { margin-top:12px; background:#6b7cff; color:#fff; }
+.ocr-steps { margin-top:12px; color:#566; }
+.ocr-steps ol { padding-left:18px; margin:6px 0 0; }

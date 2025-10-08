@@ -14,9 +14,21 @@ import { postprocessOcr } from './postprocess';
 import type { OcrResult, OcrPipelineOptions, LabeledMessage } from './types';
 
 // ───────────────────────────────────────────────────────────────
+// 本番(サーバ)での 404 対策：Tesseract アセットの固定パス
+// public/tesseract 以下に配置してください：
+//  - public/tesseract/worker.min.js
+//  - public/tesseract/tesseract-core-simd.wasm.js
+//  - public/tesseract/lang-data/jpn.traineddata.gz（必要に応じて eng も）
+// 変更したい場合は下記3定数を書き換えるだけでOK
+const WORKER_PATH = '/tesseract/worker.min.js';
+const CORE_PATH   = '/tesseract/tesseract-core-simd.wasm.js';
+const LANG_BASE   = '/tesseract/lang-data';
+// ───────────────────────────────────────────────────────────────
+
+// ───────────────────────────────────────────────────────────────
 // PSM 設定（型エラー回避＋一部環境での PSM 未反映対策）
 const baseCfg: Record<string, any> = {
-  langPath: '/tessdata-best',
+  langPath: LANG_BASE,                 // ← 既定の言語データパス
   tessedit_ocr_engine_mode: '1',
   user_defined_dpi: '300',
   // 日本語は単語間スペース不要なので 0 推奨（字間スペースが出にくい）
@@ -31,6 +43,16 @@ const cfg = (psm: 6 | 7): any => ({
   tessedit_pageseg_mode: String(psm),
   config: `--psm ${psm} --oem 1 -c user_defined_dpi=${baseCfg.user_defined_dpi} -c preserve_interword_spaces=${baseCfg.preserve_interword_spaces}`,
 });
+
+// Tesseract.recognize に渡すオプションを一元化（本番でも確実に読めるようにパス指定）
+const tessOpts = (psm: 6 | 7) =>
+  ({
+    ...cfg(psm),
+    workerPath: WORKER_PATH,
+    corePath: CORE_PATH,
+    langPath: LANG_BASE,
+    logger: () => {},
+  } as any);
 
 // ───────────────────────────────────────────────────────────────
 // 色だけに依存しない話者推定（位置優先→色補助→unknown）
@@ -156,7 +178,7 @@ export async function runOcrPipeline(
 
         for (const m of metas) {
           const buf = await m.blob.arrayBuffer();
-          const r = await Tesseract.recognize(buf as any, lang, cfg(7) as any);
+          const r = await Tesseract.recognize(buf as any, lang, tessOpts(7));
           const t = cleanOcrText(r?.data?.text ?? '').trim();
           if (!t) { sidesTmp.push('unknown'); continue; }
           parts.push(t);
@@ -188,7 +210,7 @@ export async function runOcrPipeline(
             const { hue, l } = await detectBlobAvgHueL(b);
             const sideGuess = inferSideByBlobColor(hue, l);
             const buf = await b.arrayBuffer();
-            const r = await Tesseract.recognize(buf as any, lang, cfg(7) as any);
+            const r = await Tesseract.recognize(buf as any, lang, tessOpts(7));
             const t = cleanOcrText(r?.data?.text ?? '').trim();
             if (!t) { sidesTmp.push('unknown'); continue; }
             parts.push(t);
@@ -210,7 +232,7 @@ export async function runOcrPipeline(
           const safe = await prepImageSoft(files[i]);
           const buf = await safe.arrayBuffer();
 
-          const r1 = await Tesseract.recognize(buf as any, lang, cfg(6) as any);
+          const r1 = await Tesseract.recognize(buf as any, lang, tessOpts(6));
           let t = cleanOcrText(r1?.data?.text ?? '');
 
           const conf = r1?.data?.confidence ?? 0;
@@ -220,7 +242,7 @@ export async function runOcrPipeline(
 
           if (conf < 86 || bad > 0.07) {
             try {
-              const r2 = await Tesseract.recognize(buf as any, lang, cfg(7) as any);
+              const r2 = await Tesseract.recognize(buf as any, lang, tessOpts(7));
               const t2 = cleanOcrText(r2?.data?.text ?? '');
               if (t2.length > t.length * 0.7) t = t2;
             } catch { /* keep t */ }
