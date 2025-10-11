@@ -103,19 +103,21 @@ async function resolveUserCode(req: NextRequest) {
   const z = await verifyFirebaseAndAuthorize(req);
   if (z.ok && z.allowed && z.userCode) return { ok: true as const, userCode: z.userCode };
 
-  // 2) 開発時のみヘッダ／クエリも許可（本番では無効）
+  // 2) 本番は same-origin のヘッダ/クエリのみ許可、開発は無条件許可
+  const hUser = req.headers.get('x-mu-user')?.trim();
+  const qUser = req.nextUrl.searchParams.get('user_code')?.trim();
   const isDev = process.env.NODE_ENV !== 'production';
-  if (isDev) {
-    const hUser = req.headers.get('x-mu-user')?.trim();
-    const qUser = req.nextUrl.searchParams.get('user_code')?.trim();
-    const userCode = hUser || qUser;
-    if (userCode) return { ok: true as const, userCode };
-  }
+  if (isDev && (hUser || qUser)) return { ok: true as const, userCode: (hUser || qUser)! };
+
+  const origin = req.headers.get('origin') || '';
+  const host   = req.headers.get('host')   || '';
+  const sameOrigin =
+    !!origin && (origin.endsWith(host) || origin === `https://${host}` || origin === `http://${host}`);
+  if (!isDev && sameOrigin && (hUser || qUser)) return { ok: true as const, userCode: (hUser || qUser)! };
 
   // 3) どれでも取れなければ 400
   return { ok: false as const, error: 'user_code required', status: 400 as const };
 }
-
 
 // ===== GET: ヘルス =====
 export async function GET(req: NextRequest) {
