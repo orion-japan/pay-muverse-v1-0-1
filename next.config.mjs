@@ -1,4 +1,3 @@
-// next.config.mjs
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -7,7 +6,7 @@ const nextConfig = {
     serverActions: { bodySizeLimit: '10mb' },
   },
 
-  // ★ 追加：本番ビルド中に ESLint 警告で落とさない
+  // 本番ビルドで ESLint 警告を無視
   eslint: {
     ignoreDuringBuilds: true,
   },
@@ -23,6 +22,7 @@ const nextConfig = {
 
   async headers() {
     return [
+      // 既存：フォントだけ長期キャッシュ（Tesseract系の設定は削除）
       {
         source: '/fonts/:path*',
         headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }],

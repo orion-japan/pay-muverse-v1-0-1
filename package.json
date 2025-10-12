@@ -52,7 +52,7 @@
     "resend": "^6.0.2",
     "swr": "^2.3.6",
     "tesseract.js": "2.1.5",
-    "tesseract.js-core": "^6.0.0",
+    "tesseract.js-core": "2.2.0",
     "tinify": "^1.8.1",
     "web-push": "^3.6.7",
     "zustand": "^5.0.8"

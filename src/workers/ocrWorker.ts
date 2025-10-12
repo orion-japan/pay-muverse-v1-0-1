@@ -1,34 +1,44 @@
-/// <reference lib="webworker" />
-// tesseract.js を Worker 内で動かす（1ジョブずつ）
-export type OcrJob = { id: string; file: ArrayBuffer; index: number; lang?: string };
-export type OcrDone = { id: string; index: number; text: string; error?: string };
+// src/workers/ocrWorker.ts
+'use client';
 
-let T: any = null;
-let workerImpl: any = null;
+import Tesseract from 'tesseract.js';
+import { getOcrCdnPaths } from '@lib/ocr/ocrPipeline';
 
-async function init(lang: string) {
-  if (!T) T = await import('tesseract.js');
-  if (!workerImpl) {
-    workerImpl = await T.createWorker();
-    if (workerImpl.loadLanguage && workerImpl.initialize) {
-      await workerImpl.loadLanguage(lang);
-      await workerImpl.initialize(lang);
-    } else if (workerImpl.reinitialize) {
-      await workerImpl.reinitialize(lang);
-    }
-  }
+export type OcrProgress = { status?: string; progress?: number };
+
+let _worker: Tesseract.Worker | null = null;
+
+export async function getOcrWorker(onProgress?: (p: OcrProgress) => void) {
+  if (_worker) return _worker;
+
+  const { workerPath, corePath, langPath } = getOcrCdnPaths();
+
+  _worker = await Tesseract.createWorker({
+    workerPath,
+    corePath,     // 非SIMD .wasm.js（同ディレクトリの .wasm を内部参照）
+    langPath,
+    gzip: true,
+    logger: (m) => onProgress?.(m),
+  });
+
+  await _worker.load();
+  return _worker;
 }
 
-self.onmessage = async (ev: MessageEvent<OcrJob>) => {
-  const { id, file, index, lang = 'jpn+eng' } = ev.data;
-  try {
-    await init(lang);
-    const r = await workerImpl.recognize(file as any);
-    const text = (r?.data?.text || '').trim();
-    const msg: OcrDone = { id, index, text };
-    (self as any).postMessage(msg);
-  } catch (e: any) {
-    const msg: OcrDone = { id, index, text: '', error: e?.message || 'ocr failed' };
-    (self as any).postMessage(msg);
-  }
-};
+export async function recognizeWithOcrWorker(
+  file: File | Blob | string,
+  lang: string = 'jpn',
+  onProgress?: (p: OcrProgress) => void,
+) {
+  const worker = await getOcrWorker(onProgress);
+  await worker.loadLanguage(lang);
+  await worker.initialize(lang);
+  const { data: { text } } = await worker.recognize(file);
+  await worker.terminate();
+  _worker = null;
+  return text;
+}
+
+export const runOcrWorker = recognizeWithOcrWorker;
+export const recognize = recognizeWithOcrWorker;
+export default recognizeWithOcrWorker;

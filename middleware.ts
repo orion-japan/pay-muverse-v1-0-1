@@ -1,34 +1,22 @@
-// middleware.ts
-import type { NextRequest } from 'next/server';
-import { NextResponse } from 'next/server';
-
-// この配列に入っている API は認証チェックをスキップ
-const PUBLIC_API_PREFIXES = [
-  '/api/push/vapid-public-key',
-  '/api/push/save-subscription',
-  '/api/push/send',
-  '/api/notification-settings',
-  '/api/notification-settings/save',
-];
+import { NextResponse, type NextRequest } from 'next/server';
 
 export function middleware(req: NextRequest) {
-  const { pathname } = req.nextUrl;
+  const res = NextResponse.next();
 
-  // 許可リストに入っているパスは素通し
-  if (PUBLIC_API_PREFIXES.some(p => pathname.startsWith(p))) {
-    return NextResponse.next();
+  if (!req.cookies.get('mu_sid')?.value) {
+    res.cookies.set({
+      name: 'mu_sid',
+      value: crypto.randomUUID(),
+      httpOnly: true,
+      sameSite: 'lax',   // ← 小文字
+      path: '/',
+      maxAge: 60 * 60 * 24 * 365, // 1年（秒）
+    });
   }
 
-  // ↓ ここに既存の認証チェックがあれば残す
-  // 例えばセッションCookieの確認など
-  // if (!req.cookies.get('session')) {
-  //   return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  // }
-
-  return NextResponse.next();
+  return res;
 }
 
-// matcher: APIルートを対象にする
 export const config = {
-  matcher: ['/api/:path*'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 };

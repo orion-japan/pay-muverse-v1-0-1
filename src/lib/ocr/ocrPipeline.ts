@@ -14,24 +14,27 @@ import { postprocessOcr } from './postprocess';
 import type { OcrResult, OcrPipelineOptions, LabeledMessage } from './types';
 
 // ───────────────────────────────────────────────────────────────
-// 本番(サーバ)での 404 対策：Tesseract アセットの固定パス
-// public/tesseract 以下に配置してください：
-//  - public/tesseract/worker.min.js
-//  - public/tesseract/tesseract-core-simd.wasm.js
-//  - public/tesseract/lang-data/jpn.traineddata.gz（必要に応じて eng も）
-// 変更したい場合は下記3定数を書き換えるだけでOK
-const WORKER_PATH = '/tesseract/worker.min.js';
-const CORE_PATH   = '/tesseract/tesseract-core-simd.wasm.js';
-const LANG_BASE   = '/tesseract/lang-data';
+// 404対策：Tesseractアセットを「CDN（非SIMD）」に固定
+export const OCR_CDN_VERSION = 'cdn-2025-10-12-3';
+export const WORKER_PATH: string =
+  `https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/worker.min.js?${OCR_CDN_VERSION}`;
+export const CORE_PATH: string =
+  `https://cdn.jsdelivr.net/npm/tesseract.js-core@2.2.0/tesseract-core.wasm.js?${OCR_CDN_VERSION}`;
+export const LANG_BASE: string =
+  `https://cdn.jsdelivr.net/npm/tesseract.js-core@2.2.0/lang-data`;
+
+// 呼び出し側がまとめて受け取れるように公開（★今回必要）
+export type OcrPaths = { workerPath: string; corePath: string; langPath: string };
+export function getOcrCdnPaths(): OcrPaths {
+  return { workerPath: WORKER_PATH, corePath: CORE_PATH, langPath: LANG_BASE };
+}
 // ───────────────────────────────────────────────────────────────
 
-// ───────────────────────────────────────────────────────────────
-// PSM 設定（型エラー回避＋一部環境での PSM 未反映対策）
+// PSM 設定
 const baseCfg: Record<string, any> = {
-  langPath: LANG_BASE,                 // ← 既定の言語データパス
+  langPath: LANG_BASE,
   tessedit_ocr_engine_mode: '1',
   user_defined_dpi: '300',
-  // 日本語は単語間スペース不要なので 0 推奨（字間スペースが出にくい）
   preserve_interword_spaces: '0',
   tessedit_char_whitelist:
     'ぁ-んァ-ヶ一-龥ーa-zA-Z0-9。、！？…「」『』（）()・%〜- ,.?!:\'"@',
@@ -44,7 +47,7 @@ const cfg = (psm: 6 | 7): any => ({
   config: `--psm ${psm} --oem 1 -c user_defined_dpi=${baseCfg.user_defined_dpi} -c preserve_interword_spaces=${baseCfg.preserve_interword_spaces}`,
 });
 
-// Tesseract.recognize に渡すオプションを一元化（本番でも確実に読めるようにパス指定）
+// Tesseract.recognize に渡すオプション（常にCDNパス）
 const tessOpts = (psm: 6 | 7) =>
   ({
     ...cfg(psm),
@@ -55,30 +58,25 @@ const tessOpts = (psm: 6 | 7) =>
   } as any);
 
 // ───────────────────────────────────────────────────────────────
-// 色だけに依存しない話者推定（位置優先→色補助→unknown）
+// （以下は元の処理ロジックそのまま）
 function inferSideByMeta(
   m: { x1: number; y1: number; x2: number; y2: number; avgHue?: number; avgL?: number },
   pageW: number
 ): 'self' | 'partner' | 'unknown' {
   const cx = (m.x1 + m.x2) / 2;
   const rel = cx / Math.max(pageW, 1);
-
-  // 1) 位置優先（右寄り=自分／左寄り=相手）
   if (rel >= 0.55) return 'self';
   if (rel <= 0.45) return 'partner';
-
-  // 2) 色補助（任意）— 閾値を少し緩めて検出率UP
   if (m.avgHue != null && m.avgL != null) {
     const h = m.avgHue!, l = m.avgL!;
-    const isGreen = h >= 70 && h <= 180 && l > 0.45; // 緑を広めに
-    const isWhite = l > 0.78;                         // 白も少し緩め
+    const isGreen = h >= 70 && h <= 180 && l > 0.45;
+    const isWhite = l > 0.78;
     if (isGreen) return 'self';
     if (isWhite) return 'partner';
   }
   return 'unknown';
 }
 
-// メタが無い場合の色ヒューリスティック（従来互換）
 async function detectBlobAvgHueL(blob: Blob): Promise<{ hue: number | null; l: number | null }> {
   const bmp = await createImageBitmap(blob);
   const w = bmp.width, h = bmp.height;
@@ -120,7 +118,6 @@ function inferSideByBlobColor(h: number | null, l: number | null): 'self' | 'par
   return 'unknown';
 }
 
-// unknown を前後で補間（交互前提）
 function fillUnknownSides(seq: Array<'self' | 'partner' | 'unknown'>): Array<'self' | 'partner'> {
   const out: Array<'self' | 'partner'> = [];
   for (let i = 0; i < seq.length; i++) {
@@ -135,10 +132,8 @@ function fillUnknownSides(seq: Array<'self' | 'partner' | 'unknown'>): Array<'se
   return out;
 }
 
-// A/B テキストへ整形（プレビュー用）。labeled が空なら null を返す。
 function formatAB(labeled: LabeledMessage[]): string | null {
   if (!labeled.length) return null;
-  // 連投は 1 行にまとめず、1 吹き出し = 1 行で出す
   const buf: string[] = [];
   for (const m of labeled) {
     const mark = m.side === 'self' ? 'A' : 'B';
@@ -161,7 +156,6 @@ export async function runOcrPipeline(
 
   for (let i = 0; i < files.length; i++) {
     try {
-      // まずメタ版があれば使う（存在チェック）
       const hasMeta =
         typeof (extractBubbleBlobsMeta as unknown as (f: File) => any) === 'function';
 
@@ -199,7 +193,6 @@ export async function runOcrPipeline(
 
         pageText = parts.join('\n');
       } else {
-        // メタなし：既存の Blob[] で処理し、色から推定
         let bubbles: Blob[] = [];
         try { bubbles = await extractBubbleBlobs(files[i]); } catch { /* noop */ }
 
@@ -228,7 +221,6 @@ export async function runOcrPipeline(
           }
           pageText = parts.join('\n');
         } else {
-          // バブル抽出に失敗：ページ丸ごとフォールバック（従来）
           const safe = await prepImageSoft(files[i]);
           const buf = await safe.arrayBuffer();
 
@@ -249,7 +241,6 @@ export async function runOcrPipeline(
           }
           pageText = t;
 
-          // フォールバック時は「句点で区切って交互割当（低信頼）」で labeled を作る
           const cand = postprocessOcr(pageText)
             .split(/\r?\n+/)
             .flatMap(line => line.split(/(?<=[。！？!?])/));
@@ -258,7 +249,7 @@ export async function runOcrPipeline(
             if (!text) continue;
             labeled.push({
               text,
-              side: (k % 2 === 0) ? 'partner' : 'self', // 低信頼
+              side: (k % 2 === 0) ? 'partner' : 'self',
               confidence: 0.4,
               xCenter: (k % 2 === 0) ? 0.2 : 0.8,
               yTop: 0, yBottom: 0,
@@ -267,7 +258,6 @@ export async function runOcrPipeline(
         }
       }
 
-      // 後処理（字間スペース除去・句読点整形・行結合）
       pageText = postprocessOcr(pageText || '');
       pages.push(pageText);
     } catch (e) {
@@ -276,10 +266,9 @@ export async function runOcrPipeline(
     }
   }
 
-  // labeled が取れていれば A/B 付きで rawText を整形、なければ従来の連結
   const ab = formatAB(labeled);
   const rawText = ab
-    ? `【#1】\n${ab}` // 複数ページの場合は必要に応じて拡張
+    ? `【#1】\n${ab}`
     : postprocessOcr(pages.map((t, i) => `【#${i + 1}】\n${t}`).join('\n\n').trim());
 
   return { rawText, pages, labeled };

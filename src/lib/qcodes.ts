@@ -1,28 +1,30 @@
 // src/lib/qcodes.ts
 
-export function normalizeQ(q?: string | null): ("Q1"|"Q2"|"Q3"|"Q4"|"Q5") | null {
+export type QSymbol = "Q1"|"Q2"|"Q3"|"Q4"|"Q5";
+
+export function normalizeQ(q?: string | null): QSymbol | null {
   if (!q) return null;
   const m = q.toUpperCase().match(/\bQ([1-5])\b/);
-  return m ? (`Q${m[1]}` as any) : null;
+  return m ? (`Q${m[1]}` as QSymbol) : null;
 }
 
 export function buildQCode(input: {
   hint?: string | null;
-  fallback?: "Q1"|"Q2"|"Q3"|"Q4"|"Q5";
+  fallback?: QSymbol;
   depth_stage?: string | null;
   intent?: string | null;
   ts_at?: string | null;
 }) {
   const q = normalizeQ(input.hint) ?? (input.fallback ?? "Q2");
   return {
-    current_q: q,
+    current_q: q,                // ← 既存のまま
     depth_stage: input.depth_stage ?? null,
     intent: input.intent ?? null,
     ts_at: input.ts_at ?? new Date().toISOString(),
   };
 }
 
-export function buildSystemPrompt(q: "Q1"|"Q2"|"Q3"|"Q4"|"Q5"): string {
+export function buildSystemPrompt(q: QSymbol): string {
   const tone =
     q === "Q5" ? "情熱を行動に変える" :
     q === "Q4" ? "恐れを浄化して前に進む" :
