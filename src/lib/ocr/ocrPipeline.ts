@@ -155,7 +155,7 @@ export async function runOcrPipeline(
   files: File[],
   opts: OcrPipelineOptions = {}
 ): Promise<OcrResult> {
-  const lang = opts.lang || 'jpn';
+  const lang = opts.lang || 'jpn+eng';
   const pages: string[] = [];
   const labeled: LabeledMessage[] = [];
 
