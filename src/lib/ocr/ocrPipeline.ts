@@ -14,16 +14,19 @@ import { postprocessOcr } from './postprocess';
 import type { OcrResult, OcrPipelineOptions, LabeledMessage } from './types';
 
 // ───────────────────────────────────────────────────────────────
-// 404対策：Tesseractアセットを「CDN（非SIMD）」に固定
-export const OCR_CDN_VERSION = 'cdn-2025-10-12-3';
+// 404対策：Tesseractアセットを「CDN」に固定（言語は Naptha 公式 tessdata）
+// さらに本番でのクロスオリジン Worker 対策として workerBlobURL を利用します。
+export const OCR_CDN_VERSION = 'cdn-2025-10-13';
 export const WORKER_PATH: string =
   `https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/worker.min.js?${OCR_CDN_VERSION}`;
+// 非SIMD版（互換性重視）。SIMDが安定する環境なら simd版に差し替えてOK
 export const CORE_PATH: string =
   `https://cdn.jsdelivr.net/npm/tesseract.js-core@2.2.0/tesseract-core.wasm.js?${OCR_CDN_VERSION}`;
+// ✅ 正しい言語データのベースURL（※ .gz まで直書きしない）
 export const LANG_BASE: string =
-  `https://cdn.jsdelivr.net/npm/tesseract.js-core@2.2.0/lang-data`;
+  `https://tessdata.projectnaptha.com/4.0.0`;
 
-// 呼び出し側がまとめて受け取れるように公開（★今回必要）
+// 呼び出し側がまとめて受け取れるように公開
 export type OcrPaths = { workerPath: string; corePath: string; langPath: string };
 export function getOcrCdnPaths(): OcrPaths {
   return { workerPath: WORKER_PATH, corePath: CORE_PATH, langPath: LANG_BASE };
@@ -48,12 +51,14 @@ const cfg = (psm: 6 | 7): any => ({
 });
 
 // Tesseract.recognize に渡すオプション（常にCDNパス）
+// 本番安定化のため workerBlobURL: true を付与（外部CDNのWorkerをblobラップして起動）
 const tessOpts = (psm: 6 | 7) =>
   ({
     ...cfg(psm),
     workerPath: WORKER_PATH,
     corePath: CORE_PATH,
     langPath: LANG_BASE,
+    workerBlobURL: true,
     logger: () => {},
   } as any);
 
