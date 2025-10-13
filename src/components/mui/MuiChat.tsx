@@ -1,3 +1,4 @@
+// src/components/mui/MuiChat.tsx
 'use client';
 
 import React, { useCallback, useRef, useState } from 'react';
@@ -7,8 +8,6 @@ import type { Msg, MuiApiRes } from './types';
 import { api } from '@/lib/net/api';
 import { useMuiDrop } from './useMuiDrop';
 import { runOcrPipeline } from '@/lib/ocr/ocrPipeline';
-
-// ★（任意型）ステージで使う型を残しておく。未使用でも構造維持のため。
 import type { StageId, Tone } from './types';
 
 export default function MuiChat() {
@@ -18,6 +17,9 @@ export default function MuiChat() {
   const [balance, setBalance] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // ▼ 追加：フェーズ1（＝Stage1）CTA の表示フラグ
+  const [showStage1CTA, setShowStage1CTA] = useState(false);
+
   // OCR
   const [ocrRunning, setOcrRunning] = useState(false);
   const [ocrPreview, setOcrPreview] = useState<string | null>(null);
@@ -26,7 +28,7 @@ export default function MuiChat() {
   const [composerText, setComposerText] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // ★ 追加：OCR→本文に入れた直後だけ広げる
+  // OCR→本文直後だけ広げる
   const [composerExpanded, setComposerExpanded] = useState(false);
 
   // 画像D&D / 選択
@@ -39,14 +41,14 @@ export default function MuiChat() {
   const userCode: string =
     (typeof window !== 'undefined' && (window as any).__USER_CODE__) || 'ANON';
 
-  // ★ 追加：ケースID（seed_id）を内部で1つ持っておく（UI変更なし）
+  // ケースID（seed_id）
   const [seedId] = useState<string>(() => {
     const d = new Date();
     const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
     return `CASE-${ymd}-${Math.random().toString(36).slice(2, 6)}`;
   });
 
-  /** 下端スクロール（既存方式を維持） */
+  /** 下端スクロール */
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
       const el = textareaRef.current;
@@ -92,6 +94,8 @@ export default function MuiChat() {
           ? (json as any).balance
           : typeof (json as any).credit === 'number'
           ? (json as any).credit
+          : typeof (json as any).credit_balance === 'number'
+          ? (json as any).credit_balance
           : null;
       if (typeof newBal === 'number') setBalance(newBal);
 
@@ -104,7 +108,7 @@ export default function MuiChat() {
     [convCode, userCode]
   );
 
-  // 返信っぽさの簡易検出（です/ます口調＋勧誘/質問など）
+  // 返信っぽさの簡易検出
   function isLikelyReply(t: string): boolean {
     const s = String(t || '').replace(/\s+/g, '');
     const pats = [
@@ -112,13 +116,12 @@ export default function MuiChat() {
       /と思います[。!?]*$/, /いかがですか[。!?]*$/, /お役に立て/g,
     ];
     if (pats.some((r) => r.test(s))) return true;
-    // 「あなた/私/お話/教えて」多用 & A/Bラベルが無い → 会話文っぽい
     const polite = (s.match(/です|ます/g)?.length ?? 0) >= 5;
     if (polite && /あなた|私|お話|教えて/.test(s) && !/^A|^B/m.test(t)) return true;
     return false;
   }
 
-  // 意味を変えないローカル簡易整形（最終フォールバック）
+  // ローカル簡易整形
   function simpleFormat(raw: string): string {
     let s = String(raw || '');
     s = s.replace(/[ \t]+/g, ' ').replace(/\u3000/g, ' ');
@@ -126,9 +129,7 @@ export default function MuiChat() {
       .replace(/\s*([。！？…、，,.!?])/g, '$1')
       .replace(/([「『（(【])\s+/g, '$1')
       .replace(/\s+([」』）)】])/g, '$1');
-    // 和文の字間スペース除去
     s = s.replace(/([ぁ-んァ-ヶ一-龥ー])\s+(?=[ぁ-んァ-ヶ一-龥ー])/g, '$1');
-    // 軽微な誤認補正
     s = s.replace(/おはよ一/g, 'おはよー').replace(/言っる/g, '言ってる');
     s = s.replace(/(\n){3,}/g, '\n\n');
     return s.trim();
@@ -137,7 +138,6 @@ export default function MuiChat() {
   /** 整形専用呼び出し（format_only） */
   const callAgentFormatOnly = useCallback(
     async (raw: string) => {
-      // ガード付きプロンプトで「整形のみ」を強制
       const guarded = [
         '<<FORMAT_ONLY>>',
         '【指示】以下の原文を、意味を変えずに句読点/改行/誤字のみ整える。',
@@ -181,10 +181,11 @@ export default function MuiChat() {
           ? (json as any).balance
           : typeof (json as any).credit === 'number'
           ? (json as any).credit
+          : typeof (json as any).credit_balance === 'number'
+          ? (json as any).credit_balance
           : null;
       if (typeof newBal === 'number') setBalance(newBal);
 
-      // 返信っぽければローカル整形にフォールバック
       const out = String(reply || '').trim();
       if (!out || isLikelyReply(out)) {
         return simpleFormat(raw);
@@ -207,7 +208,7 @@ export default function MuiChat() {
         setError('文字が認識できませんでした。');
         setOcrPreview(null);
       } else {
-        setOcrPreview(text); // 従来のプレビュー表示
+        setOcrPreview(text);
       }
     } catch (e: any) {
       setError(e?.message || 'OCR処理に失敗しました');
@@ -216,7 +217,7 @@ export default function MuiChat() {
     }
   }, [files]);
 
-  // 新：OCR→AI整形→本文へ（プレビューを出さない）
+  // 新：OCR→AI整形→本文へ
   const runOcrAndFormatToComposer = useCallback(async () => {
     if (!files.length) return;
     setError(null);
@@ -246,7 +247,7 @@ export default function MuiChat() {
 
       const next = composerText ? composerText + '\n' + formatted : formatted;
       setComposerText(next);
-      setComposerExpanded(true);       // ★ ここで広げる
+      setComposerExpanded(true);
       setOcrPreview(null);
       scrollToBottom();
     } catch (e: any) {
@@ -256,12 +257,12 @@ export default function MuiChat() {
     }
   }, [files, composerText, callAgentFormatOnly, scrollToBottom]);
 
-  // プレビュー → 入力欄に反映（従来）
+  // プレビュー → 入力欄に反映
   const applyOcrToComposer = useCallback(() => {
     if (!ocrPreview) return;
     const next = composerText ? composerText + '\n' + ocrPreview : ocrPreview;
     setComposerText(next);
-    setComposerExpanded(true);         // ★ ここでも広げる
+    setComposerExpanded(true);
     setOcrPreview(null);
     scrollToBottom();
   }, [ocrPreview, composerText, scrollToBottom]);
@@ -279,14 +280,21 @@ export default function MuiChat() {
       const userMsg: Msg = { role: 'user', content: trimmed };
       setConv((p) => [...p, userMsg]);
       setComposerText('');
-      setComposerExpanded(false);      // ★ 送信後は閉じる
+      setComposerExpanded(false);
+      // 新規送信時はCTAを一旦隠す（応答後に再表示）
+      setShowStage1CTA(false);
       scrollToBottom();
 
       try {
         const { reply, conversation_code: cc } = await callAgent(trimmed);
 
         const assistantMsg: Msg = { role: 'assistant', content: String(reply) };
+        // 二重追加にならないよう1回だけ push
         setConv((p) => [...p, assistantMsg]);
+
+        // 応答後にフェーズ1CTAを出す
+        setShowStage1CTA(true);
+
         scrollToBottom();
 
         // 会話ログ保存（失敗してもUIは進行）
@@ -295,7 +303,7 @@ export default function MuiChat() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              conversation_code: cc, // ★ そのターンで確定したIDで保存
+              conversation_code: cc,
               messages: [
                 { role: 'user', content: userMsg.content },
                 { role: 'assistant', content: assistantMsg.content },
@@ -312,7 +320,7 @@ export default function MuiChat() {
     [callAgent, scrollToBottom]
   );
 
-  /** 追加：直前のアシスタント返答を整形→本文へ */
+  /** 直前のアシスタント返答を整形→本文へ */
   const formatLastAssistantToComposer = useCallback(async () => {
     setError(null);
     const last = [...conv].reverse().find(m => m.role === 'assistant');
@@ -328,14 +336,14 @@ export default function MuiChat() {
       }
       const next = composerText ? composerText + '\n' + formatted : formatted;
       setComposerText(next);
-      setComposerExpanded(true);       // 整形→本文でも広げる
+      setComposerExpanded(true);
       scrollToBottom();
     } catch (e: any) {
       setError(e?.message || '整形に失敗しました');
     }
   }, [conv, composerText, callAgentFormatOnly, scrollToBottom]);
 
-  // ★ 任意：ステージ保存ヘルパー（UI変更なし）
+  // 任意：ステージ保存ヘルパー（UI変更なし）
   const saveStage = useCallback(async (params: {
     sub_id: StageId;
     partner_detail: string;
@@ -434,7 +442,7 @@ export default function MuiChat() {
         )}
       </section>
 
-      {/* OCR結果プレビュー（従来） */}
+      {/* OCR結果プレビュー */}
       {ocrPreview && (
         <section className="ocr-preview">
           <div className="ocr-title">OCR結果プレビュー</div>
@@ -455,6 +463,28 @@ export default function MuiChat() {
       {/* 会話ログ */}
       <MuiMessageList items={conv} />
 
+      {/* ▼ フェーズ1（無料）だけを表示。クリックで stage1 へ */}
+      {showStage1CTA && (
+        <div className="mui-cta" style={{ margin: '8px 12px 80px' }}>
+          <a
+            href={`/mui/stage1?conv=${encodeURIComponent(convCode || '')}`}
+            className="cta-btn primary"
+            style={{
+              display: 'inline-block',
+              padding: '10px 16px',
+              borderRadius: 9999,
+              background: '#4f46e5',
+              color: '#fff',
+              textDecoration: 'none',
+              fontWeight: 800,
+              boxShadow: '0 6px 18px rgba(79,70,229,.25)',
+            }}
+          >
+            フェーズ1：分析（無料）
+          </a>
+        </div>
+      )}
+
       {/* 入力欄（親制御） */}
       <div className="mui-composer">
         <MuiComposer
@@ -462,12 +492,12 @@ export default function MuiChat() {
           value={composerText}
           onChange={(v) => {
             setComposerText(v);
-            if (!v.trim()) setComposerExpanded(false); // 空に戻ったら閉じる
+            if (!v.trim()) setComposerExpanded(false);
           }}
           onSend={() => handleComposerSend(composerText)}
           sending={ocrRunning}
           textareaRef={textareaRef}
-          expanded={composerExpanded}       // ★ 追加
+          expanded={composerExpanded}
         />
       </div>
 

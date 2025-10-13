@@ -49,6 +49,14 @@ function groupRuns(items: Msg[]) {
   return runs;
 }
 
+/** 軽量マークダウン（**bold** と改行だけ） */
+function renderLine(line: string) {
+  const html = line
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') // escape
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  return <span dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
 export default function MuiMessageList({ items }: Props) {
   const runs = useMemo(() => groupRuns(items), [items]);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -66,7 +74,7 @@ export default function MuiMessageList({ items }: Props) {
 
     // レイアウト確定後に一度
     raf1 = window.requestAnimationFrame(scroll);
-    // 画像やフォント適用で高さが遅れて変わる場合のフォロー（短い再試行）
+    // 画像やフォント適用で高さが遅れて変わる場合のフォロー
     raf2 = window.requestAnimationFrame(() => {
       setTimeout(scroll, 60);
     });
@@ -105,7 +113,7 @@ export default function MuiMessageList({ items }: Props) {
                   <div className="content">
                     {text.split('\n').map((line, k) => (
                       <p key={k} className="line">
-                        {line}
+                        {renderLine(line)}
                       </p>
                     ))}
                   </div>
@@ -121,6 +129,32 @@ export default function MuiMessageList({ items }: Props) {
 
       {/* 👇 ここが自動スクロールのアンカー */}
       <div ref={bottomRef} style={{ height: '1px' }} />
+
+      <style jsx>{`
+  .chat { padding: 8px 12px 88px; }
+  .run { margin: 10px 0; display: flex; flex-direction: column; gap: 6px; }
+  .run.self { align-items: flex-end; }
+  .run.partner { align-items: flex-start; }
+  .run-sep { font-size: 12px; color: #6b7280; margin: 2px 6px; }
+  .bubble {
+    max-width: 88%;
+    background: #fff;
+    border: 1px solid rgba(73,86,121,.14);
+    border-radius: 14px;
+    padding: 10px 12px;
+    position: relative;
+    box-shadow: 0 2px 10px rgba(0,0,0,.04);
+  }
+  .bubble.self { background: #eef2ff; }
+  .content .line { margin: 0 0 4px; white-space: pre-wrap; word-break: break-word; }
+  .content .line:last-child { margin-bottom: 0; }
+  .read-chip {
+    position: absolute; right: 8px; bottom: -18px;
+    font-size: 11px; color: #6b7280;
+  }
+  .empty { color:#6b7280; padding: 12px; }
+`}</style>
+
     </section>
   );
 }

@@ -1,9 +1,9 @@
 // src/lib/mui/relationQualityFrom.ts
-import type { Phase, SelfBand, RelationQuality } from '@/lib/mui/types';
 
-export function relationQualityFrom(phase: Phase, band: SelfBand): RelationQuality {
-  // 簡易ロジック（必要に応じて強化）
-  if (band === 'lt20' || band === '10_40') return { label: 'discord', confidence: 0.7 };
-  if (band === '70_90' || band === 'gt90') return { label: 'harmony', confidence: 0.7 };
-  return { label: 'harmony', confidence: 0.5 };
+export function relationQualityFrom(text: string): '上昇' | '停滞' | '低下' {
+  const up = /(感謝|安心|尊重|合意|理解)/g.test(text);
+  const down = /(不信|苛立ち|沈黙|拒絶|冷たい)/g.test(text);
+  if (up && !down) return '上昇';
+  if (down && !up) return '低下';
+  return '停滞';
 }

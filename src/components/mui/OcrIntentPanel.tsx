@@ -1,170 +1,240 @@
-/* src/components/mui/OcrIntentPanel.tsx */
+// src/components/mui/OcrIntentPanel.tsx
 'use client';
 
-import React, { useCallback, useMemo, useState } from 'react';
-import './OcrIntentPanel.css';
+import React, { useEffect, useMemo, useState } from 'react';
 
-import { OCR_PHASE_POLICY, INTENT_CATEGORY_OPTIONS, OCR_INTENT_VIEW } from '@/lib/mui/ocr-intent';
-import { createOcrSeed, saveOcrIntent } from '@/lib/mui/api';
-import useOcrPipeline, { type OcrResult } from '@/components/mui/useOcrPipeline';
-
-/** 画像アップロード（仮実装）
- *  既にストレージアップロードの仕組みがある場合は差し替えてください。
- *  ここではプレビューURLを返すだけにしています（本番は不要）。
+/**
+ * OCR 取り込み時に「目的（Intent）」を軽く記録する小パネル。
+ * - 依存を排して、このファイルだけで動くように実装
+ * - 保存先は /api/agent/mui/stage/save
+ * - sub_id は 'ocr-intent' を使用（集計しやすいキー）
+ * - seed_id はセッション単位で生成： CASE-YYYYMMDD-xxxx
  */
-async function uploadFilesToStorage(files: File[]): Promise<string[]> {
-  return files.map((f) => URL.createObjectURL(f));
+
+// ========== 小ユーティリティ ==========
+function getOrCreateOcrId(): string {
+  if (typeof window === 'undefined') return '';
+  const k = 'mui:ocr_id';
+  const v = sessionStorage.getItem(k);
+  if (v) return v;
+  const d = new Date();
+  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+  const id = `CASE-${ymd}-${Math.random().toString(36).slice(2, 6)}`;
+  sessionStorage.setItem(k, id);
+  return id;
 }
 
+async function saveStage(payload: any) {
+  const res = await fetch('/api/agent/mui/stage/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok || !data?.ok) throw new Error(data?.error || 'saveStage failed');
+  return data;
+}
+
+// ========== コンポーネント本体 ==========
 type Props = {
-  userCode: string;
-  /** Stage1-1 へ遷移するハンドラ（既存のUIの方法に合わせて実装） */
-  onProceed: (seedId: string) => void;
+  user_code: string;
+  defaultText?: string;
+  onSaved?: (seed_id: string) => void;
+  onClose?: () => void;
 };
 
-export default function OcrIntentPanel({ userCode, onProceed }: Props) {
-  const [files, setFiles] = useState<File[]>([]);
-  const [intentText, setIntentText] = useState('');
-  const [intentCat, setIntentCat] = useState<string>(INTENT_CATEGORY_OPTIONS[0]);
+export default function OcrIntentPanel({
+  user_code,
+  defaultText = '',
+  onSaved,
+  onClose,
+}: Props) {
+  const [seedId, setSeedId] = useState('');
+  const [intent, setIntent] = useState<'scan' | 'analyze' | 'escalate'>('scan');
+  const [memo, setMemo] = useState(defaultText);
   const [busy, setBusy] = useState(false);
-  const [warn, setWarn] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
 
-  const { runOcr, running, result, error } = useOcrPipeline();
-
-  const onPick = useCallback((ev: React.ChangeEvent<HTMLInputElement>) => {
-    const fs = Array.from(ev.target.files ?? []);
-    setFiles(fs);
-    setWarn(null);
+  useEffect(() => {
+    setSeedId(getOrCreateOcrId());
   }, []);
 
-  const onDrop = useCallback((ev: React.DragEvent<HTMLDivElement>) => {
-    ev.preventDefault();
-    const fs = Array.from(ev.dataTransfer.files ?? []);
-    setFiles(fs);
-    setWarn(null);
-  }, []);
+  const toneBase = useMemo(
+    () => ({
+      phase: 'Outer',
+      q_current: 'Q2',
+      layer18: 'R3',
+      guardrails: ['断定禁止', '選択肢は2つ', '行動は1つ'],
+    }),
+    []
+  );
 
-  const onDragOver = useCallback((ev: React.DragEvent<HTMLDivElement>) => {
-    ev.preventDefault();
-  }, []);
+  const intentLabel = useMemo(() => {
+    switch (intent) {
+      case 'scan':
+        return 'スキャンのみ（下書き整理）';
+      case 'analyze':
+        return '分析（無料の棚卸し）';
+      case 'escalate':
+        return '詳細解析へ進めたい';
+    }
+  }, [intent]);
 
-  const canSubmit = useMemo(() => {
-    return !!intentText.trim() && !running && !busy;
-  }, [intentText, running, busy]);
-
-  const handleProceed = useCallback(async () => {
-    const text = intentText.trim();
-    if (!text) return;
-
-    // 入口ガード：この画面では本文に触れない
-    if (!OCR_PHASE_POLICY.allowContentTalk && /彼が|既読|未読|返信|言った|スクショ|本文|会話|LINE/i.test(text)) {
-      setWarn(OCR_PHASE_POLICY.violationMsg);
+  async function handleSave() {
+    if (!user_code) {
+      setInfo('user_code が未設定です。ログイン状態をご確認ください。');
       return;
     }
-
+    if (!seedId) {
+      setInfo('seed_id が未準備です。ページを更新してやり直してください。');
+      return;
+    }
+    setBusy(true);
+    setInfo(null);
     try {
-      setBusy(true);
-      setWarn(null);
-
-      // ① OCR 実行（結果は Stage1 で使う。ここでは触れない）
-      let ocrText = (result as OcrResult | null | undefined)?.text ?? '';
-      if (!ocrText) {
-        const r = await runOcr(files, { lang: 'jpn' });
-        if (r?.text) ocrText = r.text;
-      }
-
-      // ② 画像アップロード（仮実装）
-      const imageUrls = files.length ? await uploadFilesToStorage(files) : [];
-
-      // ③ seed 作成（本文は保存のみ）
-      const { seed_id } = await createOcrSeed({
-        user_code: userCode,
-        images: imageUrls,
-        ocr_text: ocrText,
-        meta: { pageCount: (result as any)?.pages?.length ?? 1 }
+      await saveStage({
+        user_code,
+        seed_id: seedId,
+        sub_id: 'ocr-intent',
+        phase: toneBase.phase,
+        depth_stage: toneBase.layer18,
+        q_current: toneBase.q_current,
+        next_step: intent,
+        partner_detail: memo || '',
+        tone: toneBase,
       });
-
-      // ④ 意図を保存（本文には触れない）
-      await saveOcrIntent({
-        user_code: userCode,
-        seed_id,
-        intent_text: text,
-        intent_category: intentCat
-      });
-
-      // ⑤ 次へ（Stage1 無料診断へ）
-      onProceed(seed_id);
+      setInfo('保存しました。');
+      onSaved?.(seedId);
+      // そのまま閉じたい場合はここで onClose?.();
     } catch (e: any) {
-      setWarn(e?.message ?? 'エラーが発生しました');
+      setInfo(`保存に失敗：${e?.message || e}`);
     } finally {
       setBusy(false);
     }
-  }, [intentText, intentCat, files, result, runOcr, userCode, onProceed]);
+  }
 
   return (
-    <div className="ocr-wrap">
-      <div className="ocr-card">
-        <h2 className="ocr-title">Mui — 恋愛相談（OCR入口）</h2>
-        <p className="ocr-desc">{OCR_INTENT_VIEW.uiText}</p>
-
-        <div className="ocr-upload">
-          <label className="ocr-label">スクショ画像</label>
-          <input type="file" accept="image/*" multiple onChange={onPick} />
-          <div className="ocr-drop" onDrop={onDrop} onDragOver={onDragOver}>
-            ここにLINEスクショをドロップ<br/>
-            または上の「画像を選ぶ」からアップロード
-          </div>
-          {files.length > 0 && <div className="ocr-hint">{files.length} 枚を選択中</div>}
-
-          <button className="btn ocr-btn" disabled={running || busy} onClick={() => runOcr(files, { lang: 'jpn' })}>
-            {running ? 'OCR中…' : 'OCRで読み取る'}
+    <div className="ocr-intent">
+      <header className="head">
+        <div>
+          <div className="eyebrow">OCR 取り込み設定</div>
+          <h2 className="h2">目的の選択とメモ</h2>
+          <p className="muted">
+            seed_id: <code>{seedId || '...'}</code>
+          </p>
+        </div>
+        {onClose && (
+          <button className="btn ghost" onClick={onClose} disabled={busy}>
+            閉じる
           </button>
+        )}
+      </header>
 
-          {!!(result as any)?.pages?.length && (
-            <div className="ocr-ok">OCRテキストを保存しました（本文には触れません）</div>
-          )}
-          {error && <div className="ocr-err">OCRエラー：{error}</div>}
+      {info && <div className="flash">{info}</div>}
+
+      <section className="section">
+        <div className="label">目的（Intent）</div>
+        <div className="radios">
+          <label className={`radio ${intent === 'scan' ? 'on' : ''}`}>
+            <input
+              type="radio"
+              name="intent"
+              value="scan"
+              checked={intent === 'scan'}
+              onChange={() => setIntent('scan')}
+            />
+            スキャンのみ（下書き整理）
+          </label>
+          <label className={`radio ${intent === 'analyze' ? 'on' : ''}`}>
+            <input
+              type="radio"
+              name="intent"
+              value="analyze"
+              checked={intent === 'analyze'}
+              onChange={() => setIntent('analyze')}
+            />
+            分析（無料の棚卸し）
+          </label>
+          <label className={`radio ${intent === 'escalate' ? 'on' : ''}`}>
+            <input
+              type="radio"
+              name="intent"
+              value="escalate"
+              checked={intent === 'escalate'}
+              onChange={() => setIntent('escalate')}
+            />
+            詳細解析へ進めたい
+          </label>
         </div>
+      </section>
 
-        <div className="ocr-intent">
-          <label className="ocr-label">あなたの「知りたいこと」（意図）</label>
-          <textarea
-            className="ocr-textarea"
-            rows={3}
-            placeholder="例：彼の本音を知りたい／嘘か本当か知りたい／どう返信すれば良い？"
-            value={intentText}
-            onChange={(e) => setIntentText(e.target.value)}
-          />
-          <div className="ocr-row">
-            <span className="ocr-label">カテゴリ</span>
-            <select
-              value={intentCat}
-              onChange={(e) => setIntentCat(e.target.value)}
-              className="ocr-select"
-            >
-              {INTENT_CATEGORY_OPTIONS.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
-          </div>
+      <section className="section">
+        <div className="label">補足メモ（任意）</div>
+        <textarea
+          className="ta"
+          placeholder="相手との関係 / いつの会話か / どこが気になるか など"
+          value={memo}
+          onChange={(e) => setMemo(e.target.value)}
+          rows={4}
+        />
+      </section>
 
-          {warn && <div className="ocr-warn">{warn}</div>}
+      <footer className="foot">
+        <button className="btn" onClick={onClose} disabled={busy}>
+          キャンセル
+        </button>
+        <div className="spacer" />
+        <button
+          className="btn primary"
+          onClick={handleSave}
+          disabled={busy || !seedId}
+          aria-label={`保存（${intentLabel}）`}
+        >
+          {busy ? '保存中…' : `保存：${intentLabel}`}
+        </button>
+      </footer>
 
-          <button className="btn go-btn" disabled={!canSubmit} onClick={handleProceed}>
-            {busy ? '準備中…' : '無料診断（Stage1）へ'}
-          </button>
-        </div>
-
-        <div className="ocr-steps">
-          <ol>
-            <li>スクショをアップ（この画面では本文に触れません）</li>
-            <li>「知りたいこと（意図）」を1つだけ入力</li>
-            <li>次の画面（Stage1）で無料の初期診断を表示</li>
-          </ol>
-        </div>
-      </div>
+      <style jsx>{`
+        .ocr-intent{
+          background: linear-gradient(180deg,#ffffff,#fafaff);
+          border: 1px solid rgba(0,0,0,.06);
+          border-radius: 16px;
+          padding: 14px;
+          box-shadow: 0 10px 28px rgba(0,0,0,.06);
+        }
+        .head{
+          display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:10px;
+        }
+        .eyebrow{ font-size:12px; color:#6b6f86; letter-spacing:.08em; }
+        .h2{ margin:4px 0; font-size:18px; font-weight:800; }
+        .muted{ color:#6b6f86; margin:0; }
+        .flash{
+          background: linear-gradient(180deg,#f0e9ff, #ffe6f6);
+          border:1px solid rgba(129,103,255,.25);
+          padding:8px 10px; border-radius:10px; margin:8px 0 10px; color:#3b3366;
+        }
+        .section{ margin: 10px 0; }
+        .label{ font-weight:700; margin-bottom:6px; }
+        .radios{ display: grid; gap: 6px; }
+        .radio{
+          display:flex; gap:8px; align-items:center;
+          padding:8px 10px; border-radius:12px; border:1px solid #e5e7eb; background:#fff;
+        }
+        .radio.on{ border-color:#c7d2fe; background:#eef2ff; }
+        .ta{
+          width:100%; resize:vertical; min-height:84px;
+          border:1px solid #e5e7eb; border-radius:12px; padding:10px; background:#fff;
+        }
+        .foot{ display:flex; align-items:center; gap:8px; margin-top:12px; }
+        .spacer{ flex:1; }
+        .btn{
+          appearance:none; cursor:pointer; border-radius:12px; padding:9px 14px;
+          background:#fff; border:1px solid #e5e7eb; color:#111827; font-weight:600;
+        }
+        .btn.ghost{ background:#f9fafb; }
+        .btn.primary{ background:#4f46e5; border-color:#4f46e5; color:#fff; }
+        .btn:disabled{ opacity:.6; cursor:default; }
+      `}</style>
     </div>
   );
 }

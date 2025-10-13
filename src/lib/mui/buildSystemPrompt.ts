@@ -1,13 +1,33 @@
-type Opts = { mode?: 'normal'|'diagnosis'; vars?: any };
-export function buildMuSystemPrompt(opts: Opts) {
-  const { mode='normal', vars={} } = opts || {};
-  const rs = vars?.resonanceState || {};
+// src/lib/mui/buildSystemPrompt.ts
+import type { ConversationStage } from './types';
+
+/** LLMのSystemプロンプト */
+export function buildSystemPrompt(): string {
   return [
-`あなたは恋愛相談AI「Mu」。日本語で簡潔・温度感のある返答を行う。`,
-`- 相手を断定しない / ラベルは柔らかく示す`,
-`- 会話は3〜6文 / 箇条書きは最大3点`,
-`- 返信の最後に「次の一手」を1文で提案`,
-`[現在の共鳴状態] phase=${rs.phase ?? 'Inner'}, self=${rs.selfAcceptance?.band ?? '40_70'}, relation=${rs.relation?.label ?? 'harmony'}, nextQ=${rs.nextQ ?? 'Q2'}`,
-mode==='diagnosis' ? `診断モード：相手の心理傾向、自己の共鳴、今すぐできる一手を短く。` : `通常モード：共感 → 見立て → 次の一手の順に。`
+    'あなたは思いやりのある会話設計AIです。',
+    '出力は必ず【最大3行＋最後に質問1つ】に制限してください。',
+    'トーンは断定調（です/ます）。ただし断罪・攻撃・医学的診断は禁止。',
+    'フェーズ定義: 1=自分の状態(感情整理), 2=相手の分析(事実/仮説分離), 3=現状分析(愛の七相), 4=未来予測と対処法(一手)。',
+    'chips（選択肢）は最大3個、短い日本語で。',
   ].join('\n');
+}
+
+/** LLMのUserプロンプト（原文/要約/目標/ユーザー回答を合成） */
+export function buildUserPrompt(
+  phase: ConversationStage | 'opening',
+  rawText: string,
+  summary: string,
+  goal?: string,
+  userReply?: string
+): string {
+  const lines: string[] = [];
+  lines.push(`フェーズ: ${phase}`);
+  lines.push('整形済み本文:');
+  lines.push(rawText || '(なし)');
+  lines.push('');
+  lines.push(`要約: ${summary || '(なし)'}`);
+  lines.push(`ゴール: ${goal || '(なし)'}`);
+  if (userReply) lines.push(`\nユーザーの回答: ${userReply}`);
+  lines.push('\n期待出力: 本文3行（断定調）＋最後に1つの質問（？で終える）＋ chips(0-3)');
+  return lines.join('\n');
 }

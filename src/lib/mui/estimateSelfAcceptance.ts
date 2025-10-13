@@ -1,10 +1,9 @@
-export type SelfAcceptance = { score: number; band: '40_70' | '70_90' | '10_40' };
+// src/lib/mui/estimateSelfAcceptance.ts
 
-export function estimateSelfAcceptance(text: string): SelfAcceptance {
-  // とりあえず “67” に反応 / なければ 50
-  const m = text.match(/\b([1-9]\d?|100)\b/);
-  const score = m ? Math.min(100, Math.max(0, Number(m[1]))) : 50;
-  const band: SelfAcceptance['band'] =
-    score >= 70 ? '70_90' : score < 40 ? '10_40' : '40_70';
-  return { score, band };
+/** 超簡易スコアリング（0..1）→ 0-100などに換算して使ってOK */
+export function estimateSelfAcceptance(text: string): number {
+  const neg = (text.match(/(無理|最悪|ダメ|嫌い|無価値|絶望)/g) || []).length;
+  const pos = (text.match(/(大丈夫|やれそう|落ち着く|安心|希望)/g) || []).length;
+  const score = 0.5 + (pos - neg) * 0.05;
+  return Math.max(0, Math.min(1, score));
 }

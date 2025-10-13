@@ -14,20 +14,18 @@
     "isolatedModules": true,
     "jsx": "preserve",
 
-    /* ====== ここ重要 ====== */
+    /* ====== パスエイリアス ====== */
     "baseUrl": "./src",
     "paths": {
       "@/*": ["*"],
       "@lib/*": ["lib/*"],
       "@components/*": ["components/*"]
     },
-    /* ===================== */
 
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ]
+    /* ====== カスタム型の探索先 ====== */
+    "typeRoots": ["./src/types", "./node_modules/@types"],
+
+    "plugins": [{ "name": "next" }]
   },
   "ts-node": {
     "esm": true
@@ -36,10 +34,11 @@
     "next-env.d.ts",
     ".next/types/**/*.ts",
     "**/*.ts",
-    "**/*.tsx"
+    "**/*.tsx",
+    "src/types/**/*.d.ts"
   ],
   "exclude": [
     "node_modules",
-    "supabase/functions"   // ← これを追加
+    "supabase/functions"
   ]
 }

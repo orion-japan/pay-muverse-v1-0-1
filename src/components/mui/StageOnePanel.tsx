@@ -69,7 +69,18 @@ const PROMPTS_STAGE1 = {
 次の一歩：下書きを1つだけ完成させる。`,
     nextStep: '『合意→要望→選択肢』の3文だけを書く',
   },
-};
+} as const;
+
+// ====== 簡易 **太字** 変換（構造は維持して <pre> で描画） ======
+function asHtmlWithBold(src: string) {
+  // エスケープしてから **text** を <strong> に変換、改行は <br>
+  const esc = src
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  const bolded = esc.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  return bolded.replace(/\n/g, '<br/>');
+}
 
 // ========= 簡易チャット =========
 function MiniChatBox({ onSend }: { onSend: (text: string) => void }) {
@@ -117,7 +128,14 @@ function StepCard({
 }
 
 // ========= メイン =========
-export default function StageOnePanel({ user_code }: { user_code?: string }) {
+// ★ conv を props に追加（page.tsx から渡ってくる conv クエリを受け取れるように）
+export default function StageOnePanel({
+  user_code,
+  conv,
+}: {
+  user_code?: string;
+  conv?: string | null;
+}) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [busy, setBusy] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
@@ -130,11 +148,17 @@ export default function StageOnePanel({ user_code }: { user_code?: string }) {
     const id = getOrCreateOcrId();
     setOcrId(id);
   }, []);
+
+  // ★ conv が props で来たらそれを優先。なければ sessionStorage で発番。
   useEffect(() => {
     if (!ocrId) return;
-    const cid = getOrCreateConvId(ocrId);
-    setConvId(cid);
-  }, [ocrId]);
+    if (conv && typeof conv === 'string' && conv.trim()) {
+      setConvId(conv.trim());
+    } else {
+      const cid = getOrCreateConvId(ocrId);
+      setConvId(cid);
+    }
+  }, [ocrId, conv]);
 
   const toneBase = useMemo(
     () => ({
@@ -216,7 +240,10 @@ export default function StageOnePanel({ user_code }: { user_code?: string }) {
             </div>
           }
         >
-          <pre className="prompt">{PROMPTS_STAGE1.step1.body}</pre>
+          <pre
+            className="prompt"
+            dangerouslySetInnerHTML={{ __html: asHtmlWithBold(PROMPTS_STAGE1.step1.body) }}
+          />
           <MiniChatBox onSend={() => { /* 任意: 会話APIへ */ }} />
         </StepCard>
       )}
@@ -249,7 +276,10 @@ export default function StageOnePanel({ user_code }: { user_code?: string }) {
             </div>
           }
         >
-          <pre className="prompt">{PROMPTS_STAGE1.step2.body}</pre>
+          <pre
+            className="prompt"
+            dangerouslySetInnerHTML={{ __html: asHtmlWithBold(PROMPTS_STAGE1.step2.body) }}
+          />
           <MiniChatBox onSend={() => { /* 任意 */ }} />
         </StepCard>
       )}
@@ -282,7 +312,10 @@ export default function StageOnePanel({ user_code }: { user_code?: string }) {
             </div>
           }
         >
-          <pre className="prompt">{PROMPTS_STAGE1.step3.body}</pre>
+          <pre
+            className="prompt"
+            dangerouslySetInnerHTML={{ __html: asHtmlWithBold(PROMPTS_STAGE1.step3.body) }}
+          />
           <MiniChatBox onSend={() => { /* 任意 */ }} />
         </StepCard>
       )}
@@ -334,6 +367,7 @@ export default function StageOnePanel({ user_code }: { user_code?: string }) {
           border: 1px dashed rgba(129,103,255,.35);
           border-radius: 12px; padding: 10px;
         }
+        .prompt strong{ font-weight:800; }
         .actions{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
         .spacer{ flex:1; }
         .btn{

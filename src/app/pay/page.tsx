@@ -17,18 +17,7 @@ const log   = (...a: any[]) => console.log(TAG, ...a);
 const warn  = (...a: any[]) => console.warn(TAG, ...a);
 const error = (...a: any[]) => console.error(TAG, ...a);
 
-/* ============ 型拡張 ============ */
-declare global {
-  interface Window {
-    Payjp?: any;
-    __payjpInstance?: any;
-    __payjpElements?: {
-      cardNumber?: any;
-      cardExpiry?: any;
-      cardCvc?: any;
-    };
-  }
-}
+
 
 /* ============ 軽量モーダル ============ */
 function PayResultModal({
@@ -224,7 +213,7 @@ function PageInner() {
           if (!window.Payjp) { warn('Payjp global not ready'); return; }
           if (!window.__payjpInstance) {
             log('create Payjp instance (iframe workflow)');
-            window.__payjpInstance = window.Payjp(pubKey!, { threeDSecureWorkflow: 'iframe' });
+            window.__payjpInstance = window.Payjp(pubKey!);
           }
           setPayjp(window.__payjpInstance);
           log('Payjp ready');
