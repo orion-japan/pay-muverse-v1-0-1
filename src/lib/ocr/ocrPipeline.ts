@@ -24,7 +24,7 @@ export const CORE_PATH: string =
   `https://cdn.jsdelivr.net/npm/tesseract.js-core@2.2.0/tesseract-core.wasm.js?${OCR_CDN_VERSION}`;
 // ✅ 正しい言語データのベースURL（※ .gz まで直書きしない）
 export const LANG_BASE: string =
-  `https://tessdata.projectnaptha.com/4.0.0`;
+  '/tesseract/lang-data';
 
 // 呼び出し側がまとめて受け取れるように公開
 export type OcrPaths = { workerPath: string; corePath: string; langPath: string };
