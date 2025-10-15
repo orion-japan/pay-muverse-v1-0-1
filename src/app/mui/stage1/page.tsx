@@ -1,7 +1,7 @@
 // src/app/mui/stage1/page.tsx
 // src/app/mui/stage1/page.tsx
 import StageOnePanel from '@/components/mui/StageOnePanel';
-
+import '@/components/mui/StageOnePanel.css';
 export default async function Page({
   searchParams,
 }: {

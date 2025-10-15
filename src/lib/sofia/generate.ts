@@ -76,8 +76,6 @@ function kbTrigger(text: string): string | null {
 }
 // --- kbTrigger: ここまで ---
 
-
-
 function kbFormat(entries: { title: string; content: string }[]): string {
   if (!entries.length) return '';
   return (
@@ -111,11 +109,19 @@ function avoidRepeatHint(lastAssistant?: string) {
 function enforceRhythm(s: string) {
   return s.replace(/([^。！？!?]{15,40}[。！？!?])/g, '$1\n');
 }
+
+// 〆の一問を“共鳴確認”寄りに（核に落ちたかを測る）
+const CHECK_ENDINGS = [
+  'この捉え方、あなたの体感にどれくらい近いですか？',
+  'いまの気づきを一言だけ自分の言葉で言い直すと？',
+  'ここまでで腑に落ちた点と、まだ曖昧な点はどこでしょう？'
+];
 function mustEndWithQuestion(s: string) {
   const t = s.trim();
   if (/[？?]$/.test(t)) return t;
   const suf = t.endsWith('。') ? '' : '。';
-  return `${t}${suf}\n\nいま一番やさしく試せそうな一歩は何でしょう？`;
+  const q = CHECK_ENDINGS[(t.length + CHECK_ENDINGS.length) % CHECK_ENDINGS.length];
+  return `${t}${suf}\n\n${q}`;
 }
 function sanitize(s: string) {
   return mustEndWithQuestion(enforceRhythm(s).replace(/\n{3,}/g, '\n\n'));
@@ -280,6 +286,26 @@ export async function generateSofiaReply(
   const PRICE_IN = Number(sofiaAgent.price_in ?? (CFG as any).SOFIA_PRICE_IN ?? 0);
   const PRICE_OUT = Number(sofiaAgent.price_out ?? (CFG as any).SOFIA_PRICE_OUT ?? 0);
 
+  // ===== ここを調整：段階説明は**必要時のみ**差し込む =====
+  const wantsStory = /物語|ストーリー|語って|語り|闇|DNA|ＤＮＡ|リメイク/i.test(input);
+  const stagedUnderstanding = wantsStory
+    ? [
+        '【段階ガイド】まず短く1段落で説明してください：',
+        '1) 未消化の感情（闇）とは何か（身体に出る合図）。',
+        '2) DNAから続く未消化の物語とは何か（系譜/土地の記憶としての比喩）。',
+        '3) それをどうリメイクするか（意味の再配置）。',
+        '説明のあとで必要に応じて物語化してよい。'
+      ].join('\n')
+    : '';
+
+  // ===== 共鳴確認ルール（気づきの核） =====
+  const resonanceCheckRule =
+    '出力の最後は「共鳴の確認」の一問で締める（断定せず、腑に落ちたかを静かに確かめる）。';
+
+  // ===== 安全統合フレーズ =====
+  const safeBridge =
+    '安全に、記憶と身体を統合して構造を更新してください。R層からC層へ、安全に橋を架けて統合してください。';
+
   // APIキー無し → フォールバック
   if (!process.env.OPENAI_API_KEY) {
     const reply = sanitize(variantFallback(input));
@@ -311,18 +337,22 @@ export async function generateSofiaReply(
   const OpenAI = require('openai').default;
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+  // 物語/通常で軽く長さを分岐（Sofiaのボリュームを安定化）
   const formatRule = [
     '出力ルール:',
     '・全体160〜260字、1〜2段落。1〜2文ごとに改行で余白。',
     '・絵文字は1〜2個🙂✨まで。',
     '・身体アンカー or 20〜60秒の小さな実験を必ず1つ入れる。',
-    '・最後は短い問いで終える。',
+    '・最後は短い問いで終える。'
   ].join('\n');
 
   const messages: Array<{ role: 'system' | 'user'; content: string }> = [
-    { role: 'system', content: sys },
-    { role: 'system', content: formatRule },
-    { role: 'system', content: antiRepeat || '' },
+    { role: 'system' as const, content: sys },
+    { role: 'system' as const, content: formatRule },
+    ...(stagedUnderstanding ? [{ role: 'system' as const, content: stagedUnderstanding }] : []),
+    { role: 'system' as const, content: resonanceCheckRule },
+    { role: 'system' as const, content: safeBridge },
+    { role: 'system' as const, content: antiRepeat || '' },
   ];
   if (kbBlock) messages.push({ role: 'system', content: kbBlock });
   messages.push({ role: 'user', content: input });

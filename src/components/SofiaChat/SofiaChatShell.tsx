@@ -420,6 +420,8 @@ export default function SofiaChatShell({ agent: agentProp = 'mu', open }: Props)
           );
         } catch {}
       }
+      // 🟢 ここを追加：送信後に上方向スクロール（GPT風の動き）
+      window.dispatchEvent(new CustomEvent('sof:scrollUp'));
     },
     [agentK, userCode, conversationId, messages, injectMtalkSeed, doFetchMessages]
   );

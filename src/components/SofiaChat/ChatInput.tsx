@@ -41,6 +41,30 @@ export default function ChatInput({
   // 二重送信ロック
   const sendLockRef = useRef(false);
 
+  // ▼▼ 追加：チャット本体を末尾までスクロールする関数（PC/モバイル両対応） ▼▼
+  const scrollChatToBottom = useCallback(() => {
+    // 想定するスクロール容器の候補（どれか1つが存在すればOK）
+    const el =
+      (document.querySelector('[data-sof-chat-scroll]') as HTMLElement) ||
+      (document.querySelector('.sof-chatScroll') as HTMLElement) ||
+      (document.querySelector('.sof-chatBody') as HTMLElement) ||
+      (document.scrollingElement as HTMLElement);
+
+    if (!el) return;
+
+    const doScroll = () =>
+      el.scrollTo({
+        top: Math.max(0, el.scrollTop - 200),
+        behavior: 'smooth',
+      });
+
+    // レイアウト確定後に複数回呼んでiOSのレイテンシを吸収
+    requestAnimationFrame(doScroll);
+    setTimeout(doScroll, 0);
+    setTimeout(doScroll, 120);
+  }, []);
+  // ▲▲ 追加ここまで ▲▲
+
   // 下書きロード
   useEffect(() => {
     try {
@@ -138,70 +162,89 @@ export default function ChatInput({
     [appendFiles, disabled, sending],
   );
 
-  // ★ 修正：allowEmpty/overrideText を追加（既存呼び出しはそのまま動作）
-  const handleSend = useCallback(async (opts?: { allowEmpty?: boolean; overrideText?: string }) => {
-    const value = (opts?.overrideText ?? text).trim();
-    const hasFiles = files.length > 0;
+// ★ 修正：allowEmpty/overrideText を追加（既存呼び出しはそのまま動作）
+const handleSend = useCallback(async (opts?: { allowEmpty?: boolean; overrideText?: string }) => {
+  const value = (opts?.overrideText ?? text).trim();
+  const hasFiles = files.length > 0;
 
-    // 入口ガード
-    if (disabled || sending || sendLockRef.current) return;
-    if (!opts?.allowEmpty && !value && !hasFiles) return;
-    if (overMaxFiles || overMaxSize) return;
+  // 入口ガード
+  if (disabled || sending || sendLockRef.current) return;
+  if (!opts?.allowEmpty && !value && !hasFiles) return;
+  if (overMaxFiles || overMaxSize) return;
 
-    // 占有
-    sendLockRef.current = true;
-    setSending(true);
+  // 占有
+  sendLockRef.current = true;
+  setSending(true);
 
+  try {
+    // ▼▼ 入力時は「上方向スクロール」を先に発火（GPT風） ▼▼
+    taRef.current?.blur();
+    window.dispatchEvent(new Event('sof:scrollUp'));
+    // ▲▲ ここを最優先 ▲▲
+
+    // UI クリア
+    setText('');
+    setFiles([]);
     try {
-      // UI 先行クリア
-      setText('');
-      setFiles([]);
-      try {
-        if (typeof window !== 'undefined') window.localStorage.removeItem(draftKey);
-      } catch {}
-      taRef.current?.focus();
+      if (typeof window !== 'undefined') window.localStorage.removeItem(draftKey);
+    } catch {}
 
-      console.info('[ChatInput] send start text.len=', value.length, 'files=', hasFiles ? files.length : 0);
-      if (onSendWithFiles) {
-        await onSendWithFiles(value, hasFiles ? files : null);
-      } else {
-        await onSend(value);
-      }
-      console.info('[ChatInput] send done');
-    } catch (e) {
-      console.error('[ChatInput] send error:', e);
-    } finally {
-      setSending(false);
-      sendLockRef.current = false;
-      // 最小高(66px)に戻してから再計算
-      if (taRef.current) {
-        taRef.current.style.height = '66px';
-        autoSize();
-      }
+    // ※ 下スクロールは削除（ここでやると上の動作を打ち消す）
+
+    taRef.current?.focus(); // デスクトップ環境でのフォーカス維持
+
+    console.info('[ChatInput] send start text.len=', value.length, 'files=', hasFiles ? files.length : 0);
+    if (onSendWithFiles) {
+      await onSendWithFiles(value, hasFiles ? files : null);
+    } else {
+      await onSend(value);
     }
-  }, [
-    text,
-    files,
-    disabled,
-    sending,
-    overMaxFiles,
-    overMaxSize,
-    onSendWithFiles,
-    onSend,
-    draftKey,
-    autoSize,
-  ]);
+    console.info('[ChatInput] send done');
+  } catch (e) {
+    console.error('[ChatInput] send error:', e);
+  } finally {
+    setSending(false);
+    sendLockRef.current = false;
+
+    // テキストエリア高さリセット
+    if (taRef.current) {
+      taRef.current.style.height = '66px';
+      autoSize();
+    }
+
+    // ▼ iOSなど遅延描画対策：再度“上方向スクロール”を少し後に呼ぶ
+    setTimeout(() => {
+      window.dispatchEvent(new Event('sof:scrollUp'));
+    }, 80);
+  }
+}, [
+  text,
+  files,
+  disabled,
+  sending,
+  overMaxFiles,
+  overMaxSize,
+  onSendWithFiles,
+  onSend,
+  draftKey,
+  autoSize,
+]);
+
+
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
         e.preventDefault();
         if (!sendLockRef.current) {
+          // ▼ Enter送信でも同様にスクロールを先行させる
+          taRef.current?.blur();
+          scrollChatToBottom();
           void handleSend();
         }
       }
     },
-    [isComposing, handleSend],
+    [isComposing, handleSend, scrollChatToBottom],
   );
 
   // フォーカス管理
@@ -223,35 +266,29 @@ export default function ChatInput({
     !overMaxFiles &&
     !overMaxSize;
 
-// ★ Q&Aボタン：ユーザー発言を保存せずに /api/mu/summary へ遷移
-const openQA = () => {
-  console.info('[ChatInput] open Q&A');
+  // ★ Q&Aボタン：ユーザー発言を保存せずに /api/mu/summary へ遷移
+  const openQA = () => {
+    console.info('[ChatInput] open Q&A');
 
-  // 入力欄と下書きをクリア
-  setText('');
-  setFiles([]);
-  try {
+    // 入力欄と下書きをクリア
+    setText('');
+    setFiles([]);
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem(draftKey);
+      }
+    } catch {}
+
+    const params = new URLSearchParams();
+    params.set('scope', 'qcode');
+    params.set('days', '30');
+
     if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(draftKey);
+      window.location.assign(`/api/mu/summary?${params.toString()}`);
     }
-  } catch {}
-
-  // Q総評APIへ直行（scope/daysは必要に応じて調整可能）
-  const params = new URLSearchParams();
-  params.set('scope', 'qcode');
-  params.set('days', '30');
-
-  if (typeof window !== 'undefined') {
-    window.location.assign(`/api/mu/summary?${params.toString()}`);
-  }
-};
-
+  };
 
   return (
-    /**
-     * ここは「中身のみ」。固定や z-index 管理は親 .sof-compose-dock が担当。
-     * （SofiaChatShell 側で <div className="sof-compose-dock"><ChatInput/></div> 前提）
-     */
     <div
       className="sof-compose"
       aria-label="メッセージ入力エリア"
@@ -329,7 +366,7 @@ const openQA = () => {
             📎
           </button>
 
-          {/* ▼▼ 追加：送信ボタンの“上”にQ&Aボタン ▼▼ */}
+          {/* ▼ Q&Aボタン（既存） */}
           <button
             type="button"
             className="sof-actionBtn sof-actionBtn--qa"
@@ -339,14 +376,17 @@ const openQA = () => {
           >
             Q＆A
           </button>
-          {/* ▲▲ 追加ここまで ▲▲ */}
 
           <button
             data-sof-send
             type="button"
             className="sof-actionBtn sof-actionBtn--send"
             onClick={() => {
-              if (!sendLockRef.current) void handleSend();
+              if (!sendLockRef.current) {
+                taRef.current?.blur();
+                scrollChatToBottom();
+                void handleSend();
+              }
             }}
             disabled={!canSend}
             aria-label="送信"

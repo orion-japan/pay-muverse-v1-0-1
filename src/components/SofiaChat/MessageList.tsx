@@ -119,6 +119,31 @@ export default function MessageList({
     firstRender.current = false;
   }, [messages, scrollToBottom]);
 
+/* ======== 送信時の上方向スクロール対応（GPT風） ======== */
+React.useEffect(() => {
+  const handleScrollUp = () => {
+    // listRef の他に .sof-msgs, .sof-center など候補も調べる
+    const el =
+      listRef.current ||
+      (document.querySelector('.sof-msgs') as HTMLElement) ||
+      (document.querySelector('.sof-center') as HTMLElement) ||
+      document.scrollingElement;
+    if (!el) return;
+
+    // スクロール上方向アニメーション（自然に浮き上がる）
+    const current = el.scrollTop;
+    const target = Math.max(0, current - 180);
+    el.scrollTo({
+      top: Math.max(0, el.scrollTop - 200),
+      behavior: 'smooth',
+    });
+  };
+
+  window.addEventListener('sof:scrollUp', handleScrollUp);
+  return () => window.removeEventListener('sof:scrollUp', handleScrollUp);
+}, []);
+
+
   /* ======== 表示フィルタ ========
    * ・ユーザー発話は隠さない（Q総評の質問が消えないように）
    * ・meta.hidden === true のみ明示的に非表示
