@@ -36,16 +36,40 @@ const safeLog = (...args: any[]) => {
 const trunc = (s: string, n = 120) =>
   (s || "").replace(/\s+/g, " ").slice(0, n) + ((s && s.length > n) ? "…" : "");
 
+/** 回数スコア用：正規表現のヒット回数を返す（flagsにg付与） */
+const countMatch = (rx: RegExp, text: string) => {
+  if (!text) return 0;
+  const flags = Array.from(new Set((rx.flags + "g").split(""))).join("");
+  const m = text.match(new RegExp(rx.source, flags));
+  return m ? m.length : 0;
+};
+
+/** 日本語対応の簡易トークナイザ（漢字・かな・英数の2/3-gramを混在） */
+const tokenizeJP = (text: string): string[] => {
+  const t = (text || "")
+    .replace(/[「」『』（）()［］【】〈〉《》〔〕]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const tokens: string[] = [];
+  const chunks = t.match(/[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}A-Za-z0-9]+/gu) || [];
+  for (const c of chunks) {
+    if (c.length <= 3) { tokens.push(c); continue; }
+    for (let i = 0; i < c.length - 1; i++) tokens.push(c.slice(i, i + 2));
+    for (let i = 0; i < c.length - 2; i++) tokens.push(c.slice(i, i + 3));
+  }
+  return Array.from(new Set(tokens)).slice(0, 200);
+};
+
 /* =========================
    Qコード / レイヤ ヒント
 ========================= */
-// ※五行ベース（必要に応じて拡張）
+// ※外部出力では色エネルギー（Silver/White, Green, Yellow/Brown, Blue/Teal, Red/Magenta）で扱う前提
 const Q_PATTERNS: Array<[QCode, RegExp]> = [
-  ["Q1", /(我慢|抑圧|整理|秩序|内省|責任感)/iu],          // 金
-  ["Q2", /(怒り|苛立ち|挑戦|成長|拡張|発芽)/iu],          // 木
-  ["Q3", /(不安|心配|迷い|土台|安定|調停|均衡)/iu],        // 土
-  ["Q4", /(恐怖|躊躇|浄化|水|流す|鎮静|静けさ)/iu],        // 水
-  ["Q5", /(ウツ|停滞|情熱|火種|創造|再点火|活性)/iu],      // 火
+  ["Q1", /(秩序|整える|抑制|規律|冷静|収束|責任)/iu],             // Silver/White 系
+  ["Q2", /(挑戦|苛立ち|突破|伸びる|推進|芽生え|加速)/iu],          // Green 系
+  ["Q3", /(不安|迷い|土台|均衡|調停|支える|抱える)/iu],            // Yellow/Brown 系
+  ["Q4", /(恐れ|躊躇|浄化|流す|鎮静|静けさ|余白|手放す)/iu],       // Blue/Teal 系
+  ["Q5", /(情熱|火種|再点火|活性|創造|高揚|駆動)/iu],             // Red/Magenta 系
 ];
 
 // 18段階（S/F/R/C/I/T × 1..3）
@@ -89,27 +113,25 @@ export function analyzeUserText(text: string): Analysis {
   safeLog("[Sofia:analyze] input:", trunc(text, 200));
 
   const qMatches = Q_PATTERNS
-    .map(([code, rx]) => ({ code, score: rx.test(text) ? 1 : 0 }))
-    .filter(x => x.score > 0);
+    .map(([code, rx]) => ({ code, score: countMatch(rx, text) }))
+    .filter(x => x.score > 0)
+    .sort((a, b) => b.score - a.score);
 
   const lMatches = LAYER_HINTS
-    .map(([layer, rx]) => ({ layer, score: rx.test(text) ? 1 : 0 }))
-    .filter(x => x.score > 0);
+    .map(([layer, rx]) => ({ layer, score: countMatch(rx, text) }))
+    .filter(x => x.score > 0)
+    .sort((a, b) => b.score - a.score);
 
-  // キーワード抽出（簡易）
-  const tokens = Array.from(new Set(
-    (text || "").toLowerCase()
-      .replace(/[^\p{Letter}\p{Number}\s]/gu, " ")
-      .split(/\s+/).filter(Boolean)
-  ));
+  // キーワード抽出（日本語対応の2/3-gram）
+  const tokens = tokenizeJP(text || "");
 
   const topQ = qMatches.slice(0, 3);
-  const topL = lMatches.slice(0, 2);
-  const keywords = tokens.slice(0, 20);
+  const topL = lMatches.slice(0, 3);
+  const keywords = tokens.slice(0, 30);
 
   safeLog("[Sofia:analyze] qcodes:", topQ);
   safeLog("[Sofia:analyze] layers:", topL);
-  safeLog("[Sofia:analyze] keywords(top20):", keywords);
+  safeLog("[Sofia:analyze] keywords(top30):", keywords);
 
   console.timeEnd?.("[Sofia:analyze] total");
   return { qcodes: topQ as any, layers: topL as any, keywords };
@@ -126,10 +148,10 @@ const OVERCONF = /(完璧|間違いない|俺が正しい|常に正しい|絶対
 /** 位相推定 */
 export function inferPhase(text: string | undefined): Phase {
   const t = (text || "");
-  const innerHit = /(内省|内側|怖い|不安|疲れ|落ち着|整理|静か|後悔|反省)/u.test(t);
-  const outerHit = /(相手|上司|部下|家族|チーム|営業|発言|投稿|発表|挑戦|批判|攻撃|怒り)/u.test(t);
-  const phase: Phase = innerHit && !outerHit ? "Inner" : outerHit && !innerHit ? "Outer" : "Inner";
-  safeLog("[analyze.inferPhase]", { innerHit, outerHit, phase });
+  const innerScore = countMatch(/(内省|内側|怖い|不安|疲れ|落ち着|整理|静か|後悔|反省|孤独|自己)/u, t);
+  const outerScore = countMatch(/(相手|上司|部下|家族|チーム|営業|発言|投稿|発表|挑戦|批判|攻撃|社会|顧客|市場)/u, t);
+  const phase: Phase = outerScore > innerScore ? "Outer" : "Inner";
+  safeLog("[analyze.inferPhase]", { innerScore, outerScore, phase });
   return phase;
 }
 
@@ -140,16 +162,19 @@ export function estimateSelfAcceptance(
   const t = (text || "");
   let score = 50;
 
-  const pos = (t.match(POS_SELF) ? 1 : 0);
-  const neg = (t.match(NEG_SELF) ? 1 : 0);
+  const POS_STRONG = /(確かに|できている|進んだ|助かった|良かった|嬉しい)/u;
+  const NEG_STRONG = /(最悪|無理だ|終わりだ|嫌だ|怖すぎる|全然できない)/u;
+
+  const pos = (t.match(POS_SELF) ? 1 : 0) + (t.match(POS_STRONG) ? 1 : 0);
+  const neg = (t.match(NEG_SELF) ? 1 : 0) + (t.match(NEG_STRONG) ? 1 : 0);
   const over = (t.match(OVERCONF) ? 1 : 0);
 
-  score += pos * 10;
-  score -= neg * 15;
-  score += over * 12; // 一見高いが後段で過信補正
+  score += pos * 12;
+  score -= neg * 16;
+  score += over * 10; // 一見高いが後段で過信補正
 
-  // 過信（>90）を実質 20% とみなすヒント
-  if (score > 90 && over) score = 20 + Math.min(10, pos * 5);
+  // 過信（>92）を実質低帯域へ補正
+  if (score > 92 && over) score = 28;
 
   score = Math.max(0, Math.min(100, Math.round(score)));
 

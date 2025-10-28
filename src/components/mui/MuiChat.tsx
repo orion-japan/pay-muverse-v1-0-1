@@ -1,4 +1,6 @@
 // src/components/mui/MuiChat.tsx
+/* eslint-disable @next/next/no-img-element */
+
 'use client';
 
 import React, { useCallback, useRef, useState } from 'react';
