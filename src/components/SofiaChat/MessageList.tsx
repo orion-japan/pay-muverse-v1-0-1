@@ -90,12 +90,12 @@ export default function MessageList({
 
       if (!error && data) {
         setResolvedAvatar(data.avatar_url ?? null);
-        if (data.name && !resolvedName) setResolvedName(data.name);
+        if (data.name && !currentUser?.name) setResolvedName(data.name);
       }
     }
 
     setResolvedAvatar(currentUser?.avatarUrl ?? null);
-    setResolvedName(currentUser?.name);
+    setResolvedName(currentUser?.name ?? undefined);
 
     fillFromProfiles();
 
@@ -103,7 +103,7 @@ export default function MessageList({
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supabase, currentUser?.id, currentUser?.avatarUrl]);
+  }, [supabase, currentUser?.id, currentUser?.avatarUrl, currentUser?.name]);
 
   /* ======== 自動スクロール（開いた瞬間＆新着時） ======== */
   const listRef = React.useRef<HTMLDivElement | null>(null);

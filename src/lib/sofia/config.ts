@@ -20,7 +20,7 @@ export type SofiaConfig = {
     // ユーザー吹き出し
     userBg: string;
     userFg: string;
-    userBorder: string;
+    userBorder: string;          // 境界線の色（CSS側で1px solidを付与）
     userRadius: number;
 
     // 段落余白
@@ -28,7 +28,7 @@ export type SofiaConfig = {
 
     // アシスタント吹き出し
     assistantBg: string;
-    assistantBorder: string;
+    assistantBorder: string;     // 完全な border 指定（例: "1px solid #e5e7eb"）
     assistantRadius: number;
     assistantShadow: string;
     bubbleMaxWidthPct: number;
