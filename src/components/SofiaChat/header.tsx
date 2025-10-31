@@ -14,6 +14,7 @@ export type HeaderProps = {
   onRefresh?: () => void; // 読み直し（未指定なら location.reload）
   /** 任意：外からアイコン差し替え */
   icon?: React.ReactNode;
+  userInfoBadge?: React.ReactNode;
 };
 
 export default function Header({
@@ -22,6 +23,7 @@ export default function Header({
   onCreateNewChat,
   onRefresh,
   icon,
+  userInfoBadge,
 }: HeaderProps) {
   const router = useRouter(); // ★ 追加
 
@@ -132,6 +134,7 @@ export default function Header({
 
       {/* 右端：読み直し＋新規 */}
       <div className="sof-right">
+        {userInfoBadge && <div className="sof-right__badge">{userInfoBadge}</div>}
         <button
           onClick={handleRefresh}
           className="sof-btn"
@@ -181,6 +184,11 @@ export default function Header({
         }
         .sof-right {
           justify-self: end;
+        }
+        .sof-right__badge {
+          display: inline-flex;
+          align-items: center;
+          margin-right: 8px;
         }
 
         .sof-center {

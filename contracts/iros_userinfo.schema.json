@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Iros Userinfo Response",
+  "type": "object",
+  "required": ["id", "name", "q_code", "depthStage"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "q_code": { "type": "string", "enum": ["Q1", "Q2", "Q3", "Q4", "Q5"] },
+    "depthStage": { "type": "string", "pattern": "^(S|F|R|C|I|T)[1-3]$" },
+    "avatarUrl": { "type": "string", "format": "uri" }
+  }
+}
