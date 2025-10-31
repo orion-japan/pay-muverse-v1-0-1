@@ -28,6 +28,7 @@ import {
   deleteConversation,
 } from './agentClients';
 import { useMtalkSeed } from './hooks/useMtalkSeed';
+import UserInfoBadge, { IrosQCode } from '@/ui/iroschat/components/UserInfoBadge';
 
 /* ===== types ===== */
 type CurrentUser = {
@@ -37,7 +38,69 @@ type CurrentUser = {
   credits: number;
   avatarUrl?: string | null;
 };
+type IrosUserInfo = {
+  id: string;
+  name: string;
+  q_code: IrosQCode;
+  depthStage: string;
+  avatarUrl?: string;
+};
 type Props = { agent?: string; open?: string };
+
+const IROS_Q_CODES = ['Q1', 'Q2', 'Q3', 'Q4', 'Q5'] as const;
+const isIrosQCode = (value: unknown): value is IrosQCode =>
+  typeof value === 'string' && (IROS_Q_CODES as readonly string[]).includes(value as IrosQCode);
+
+let irosUserInfoCache: IrosUserInfo | null = null;
+let irosUserInfoPromise: Promise<IrosUserInfo | null> | null = null;
+
+async function loadIrosUserInfo(): Promise<IrosUserInfo | null> {
+  if (irosUserInfoCache) return irosUserInfoCache;
+  if (!irosUserInfoPromise) {
+    irosUserInfoPromise = (async () => {
+      const endpoint = '/api/agent/iros/userinfo';
+      const maxAttempts = 2;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          const res = await fetch(endpoint, { cache: 'no-store' });
+          if (res.ok) {
+            const json = await res.json().catch(() => null);
+            const id = typeof json?.id === 'string' ? json.id : '';
+            const name = typeof json?.name === 'string' ? json.name.trim() : '';
+            const qRaw = json?.q_code;
+            const depthStage = typeof json?.depthStage === 'string' ? json.depthStage : '';
+            const avatarUrl = typeof json?.avatarUrl === 'string' ? json.avatarUrl : undefined;
+            if (id && name && depthStage && isIrosQCode(qRaw)) {
+              const normalized: IrosUserInfo = {
+                id,
+                name,
+                q_code: qRaw,
+                depthStage,
+                avatarUrl,
+              };
+              irosUserInfoCache = normalized;
+              return normalized;
+            }
+            return null;
+          }
+          const shouldRetry = (res.status === 401 || res.status === 500) && attempt < maxAttempts;
+          if (!shouldRetry) return null;
+        } catch (error) {
+          // ネットワーク例外は再試行せず終了
+          return null;
+        }
+      }
+      return null;
+    })();
+  }
+
+  const info = await irosUserInfoPromise;
+  if (!irosUserInfoCache && info) {
+    irosUserInfoCache = info;
+  }
+  irosUserInfoPromise = null;
+  return irosUserInfoCache ?? info;
+}
 
 /* ===== duplicate/over-fetch guards & utils ===== */
 const fetchedOnceByConv = new Set<string>(); // 会話IDごとに初回フェッチだけ通す
@@ -117,6 +180,9 @@ export default function SofiaChatShell({ agent: agentProp = 'mu', open }: Props)
   const [meta, setMeta] = useState<MetaData | null>(null);
 
   const [uiUser, setUiUser] = useState<CurrentUser | undefined>(undefined);
+  const [irosUserInfo, setIrosUserInfo] = useState<IrosUserInfo | null>(
+    agentK === 'iros' ? irosUserInfoCache : null
+  );
 
   const canUse = useMemo(() => !!userCode && !authLoading, [userCode, authLoading]);
 
@@ -147,6 +213,24 @@ export default function SofiaChatShell({ agent: agentProp = 'mu', open }: Props)
       credits: typeof uiUser.credits === 'number' ? uiUser.credits : 0,
     };
   }, [uiUser]);
+
+  useEffect(() => {
+    if (agentK !== 'iros') return;
+    let cancelled = false;
+    if (irosUserInfoCache) {
+      setIrosUserInfo(irosUserInfoCache);
+      return;
+    }
+    (async () => {
+      const info = await loadIrosUserInfo();
+      if (!cancelled && info) {
+        setIrosUserInfo(info);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [agentK]);
 
   // ユーザー情報
   useEffect(() => {
@@ -492,6 +576,11 @@ export default function SofiaChatShell({ agent: agentProp = 'mu', open }: Props)
             setMeta(null);
             try { window.localStorage.removeItem(lastConvKey(agentK)); } catch {}
           }}
+          userInfoBadge={
+            agentK === 'iros' && irosUserInfo ? (
+              <UserInfoBadge name={irosUserInfo.name} q={irosUserInfo.q_code} />
+            ) : undefined
+          }
         />
       </div>
 
