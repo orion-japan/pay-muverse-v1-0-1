@@ -4,9 +4,11 @@ import { getAuth } from 'firebase/auth';
 
 // ---- 共通：メッセージ正規化 ----
 type RawMsg = any;
-type Msg = { id: string; role: 'user' | 'assistant'; text: string; ts: number };
+export type IrosMessage = { id: string; role: 'user' | 'assistant'; text: string; ts: number };
+export type IrosConversation = { id: string; title: string; updated_at?: string | null };
+export type UserInfo = { id: string; name: string; userType: string; credits: number };
 
-function normalizeMessages(rows: RawMsg[]): Msg[] {
+function normalizeMessages(rows: RawMsg[]): IrosMessage[] {
   return (rows || []).map((m) => ({
     id: String(m.id ?? (globalThis.crypto?.randomUUID?.() ?? String(Math.random()))),
     role: m.role === 'user' ? 'user' : 'assistant',
@@ -40,9 +42,12 @@ async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
 
 type SendParams = { conversationId?: string; text: string };
 
-export default {
+// =====================================================
+// ここから「api」本体を先に宣言 → 最後に export / window 公開
+// =====================================================
+const api = {
   // 会話一覧
-  async listConversations(): Promise<Array<{ id: string; title: string; updated_at?: string }>> {
+  async listConversations(): Promise<Array<IrosConversation>> {
     const r = await authFetch('/api/agent/iros/conversations', { method: 'GET' });
     const j = await r.json();
     const list = Array.isArray(j?.conversations) ? j.conversations : Array.isArray(j?.rows) ? j.rows : [];
@@ -54,7 +59,7 @@ export default {
   },
 
   // メッセージ一覧
-  async fetchMessages(conversationId: string): Promise<Msg[]> {
+  async fetchMessages(conversationId: string): Promise<IrosMessage[]> {
     const r = await authFetch(
       `/api/agent/iros/messages?conversation_id=${encodeURIComponent(conversationId)}`,
       { method: 'GET' },
@@ -62,16 +67,6 @@ export default {
     const j = await r.json();
     const raw = Array.isArray(j?.messages) ? j.messages : Array.isArray(j?.rows) ? j.rows : [];
     return normalizeMessages(raw);
-  },
-
-  // ★ 追加：ユーザー発話をDB保存（UIが呼ぶ想定の postMessage）
-  async postMessage(args: { conversationId: string; text: string }): Promise<{ ok: true; id?: string }> {
-    const r = await authFetch('/api/agent/iros/messages', {
-      method: 'POST',
-      body: JSON.stringify({ conversation_id: args.conversationId, role: 'user', text: args.text }),
-    });
-    const j = await r.json();
-    return { ok: true, id: j?.message?.id ?? j?.id };
   },
 
   // 会話作成（空テキストでも発番）
@@ -106,8 +101,8 @@ export default {
     }
   },
 
-  // 送信（保存→解析の2段）※既存フロー互換用
-  async sendText({ conversationId, text }: SendParams): Promise<{ conversationId?: string; messages: Msg[] }> {
+  // 送信（保存→解析の2段）
+  async sendText({ conversationId, text }: SendParams): Promise<{ conversationId?: string; messages: IrosMessage[] }> {
     const t = (text ?? '').trim();
     if (!t) return { conversationId, messages: [] };
 
@@ -117,7 +112,7 @@ export default {
       cid = created.conversationId;
     }
 
-    // 保存
+    // 1) 保存（/messages）
     const r1 = await authFetch('/api/agent/iros/messages', {
       method: 'POST',
       body: JSON.stringify({ conversation_id: cid, role: 'user', text: t }),
@@ -125,7 +120,7 @@ export default {
     const j1 = await r1.json();
     const msgId = String(j1?.message?.id ?? j1?.id ?? `${Date.now()}`);
 
-    // 解析（失敗は無視）
+    // 2) 解析（/analyze）— 失敗は握りつぶす
     try {
       await authFetch('/api/agent/iros/analyze', {
         method: 'POST',
@@ -133,7 +128,39 @@ export default {
       });
     } catch {}
 
-    return { conversationId: cid, messages: [{ id: msgId, role: 'user', text: t, ts: Date.now() }] };
+    const draft: IrosMessage[] = [{ id: msgId, role: 'user', text: t, ts: Date.now() }];
+    return { conversationId: cid, messages: draft };
+  },
+
+  // 直接保存だけしたいとき（IrosChatContext 互換）
+  async postMessage(args: { conversationId: string; text: string }): Promise<{ ok: true }> {
+    await authFetch('/api/agent/iros/messages', {
+      method: 'POST',
+      body: JSON.stringify({ conversation_id: args.conversationId, role: 'user', text: args.text }),
+    });
+    return { ok: true };
+  },
+
+  // 返信生成
+  async reply(args: {
+    conversationId: string;
+    user_text: string;
+    mode?: 'Light' | 'Deep' | 'Transcend';
+    model?: string;
+  }): Promise<{ ok: boolean; message?: { id?: string; content: string } }> {
+    const r = await authFetch('/api/agent/iros/reply', {
+      method: 'POST',
+      body: JSON.stringify({
+        conversation_id: args.conversationId,
+        user_text: args.user_text,
+        mode: args.mode ?? 'Light',
+        model: args.model ?? 'gpt-4o',
+      }),
+    });
+    const j = await r.json();
+    const content = j?.message?.content ?? j?.content ?? j?.assistant_text ?? '';
+    const id = j?.message?.id ?? j?.id ?? undefined;
+    return { ok: !!content, message: content ? { id, content } : undefined };
   },
 
   // タイトル変更
@@ -171,7 +198,7 @@ export default {
   },
 
   // ユーザー情報
-  async getUserInfo(): Promise<{ id: string; name: string; userType: string; credits: number }> {
+  async getUserInfo(): Promise<UserInfo> {
     try {
       const r0 = await authFetch('/api/agent/iros/userinfo', { method: 'GET' });
       const j0 = await r0.json();
@@ -205,26 +232,14 @@ export default {
       }
     }
   },
-
-  // 返信生成
-  async reply(args: {
-    conversationId: string;
-    user_text: string;
-    mode?: 'Light' | 'Deep' | 'Transcend';
-    model?: string;
-  }): Promise<{ ok: boolean; message?: { id?: string; content: string } }> {
-    const r = await authFetch('/api/agent/iros/reply', {
-      method: 'POST',
-      body: JSON.stringify({
-        conversation_id: args.conversationId,
-        user_text: args.user_text,
-        mode: args.mode ?? 'Light',
-        model: args.model ?? 'gpt-4o',
-      }),
-    });
-    const j = await r.json();
-    const content = j?.message?.content ?? j?.content ?? j?.assistant_text ?? '';
-    const id = j?.message?.id ?? j?.id;
-    return { ok: !!content, message: content ? { id, content } : undefined };
-  },
 };
+
+// ---- ここで export / window 公開 ----
+export type IrosClient = typeof api;
+export default api;
+
+// DevTools から叩けるように（開発用）
+declare global {
+  interface Window { irosClient?: IrosClient }
+}
+if (typeof window !== 'undefined') (window as any).irosClient = api;
