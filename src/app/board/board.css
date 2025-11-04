@@ -74,7 +74,10 @@ h2 {
 }
 
 /* 一覧カード用のスライダー */
-.list-slider { position: relative; margin-bottom: 8px; }
+.list-slider {
+  position: relative;
+  margin-bottom: 8px;
+}
 .list-slider-wrap {
   display: flex;
   overflow-x: auto;
@@ -105,10 +108,13 @@ h2 {
   height: 32px;
   border-radius: 50%;
   border: none;
-  background: rgba(0,0,0,0.5);
+  background: rgba(0, 0, 0, 0.5);
   color: #fff;
   cursor: pointer;
 }
-.list-nav.prev { left: 6px; }
-.list-nav.next { right: 6px; }
-
+.list-nav.prev {
+  left: 6px;
+}
+.list-nav.next {
+  right: 6px;
+}

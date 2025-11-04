@@ -4,11 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import {
-  verifyFirebaseAndAuthorize,
-  SUPABASE_URL,
-  SERVICE_ROLE,
-} from '@/lib/authz';
+import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/authz';
 
 function sb() {
   return createClient(SUPABASE_URL!, SERVICE_ROLE!, {
@@ -17,7 +13,7 @@ function sb() {
 }
 
 const NS = '[mu.conversations]';
-const rid = () => (globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2));
+const rid = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
 const log = (id: string, ...a: any[]) => console.log(NS, id, ...a);
 const err = (id: string, ...a: any[]) => console.error(NS, id, ...a);
 
@@ -73,7 +69,10 @@ export async function GET(req: Request) {
       err(id, 'supabase error', { message: r2.error.message });
       return NextResponse.json(
         { items: [], error: String(r2.error.message || r2.error) },
-        { status: 200, headers: { 'x-mu-req': id, 'x-mu-list-error': String(r2.error.message || r2.error) } }
+        {
+          status: 200,
+          headers: { 'x-mu-req': id, 'x-mu-list-error': String(r2.error.message || r2.error) },
+        },
       );
     }
     data = r2.data ?? [];
@@ -123,7 +122,14 @@ export async function GET(req: Request) {
 
   return NextResponse.json(
     { items },
-    { status: 200, headers: { 'x-mu-req': id, 'x-mu-list-source': 'mu_conversations', 'x-mu-list-count': String(items.length) } }
+    {
+      status: 200,
+      headers: {
+        'x-mu-req': id,
+        'x-mu-list-source': 'mu_conversations',
+        'x-mu-list-count': String(items.length),
+      },
+    },
   );
 }
 
@@ -150,24 +156,33 @@ export async function POST(req: Request) {
     body = await req.json();
   } catch {
     err(id, 'invalid json');
-    return NextResponse.json({ error: 'invalid json' }, { status: 400, headers: { 'x-mu-req': id } });
+    return NextResponse.json(
+      { error: 'invalid json' },
+      { status: 400, headers: { 'x-mu-req': id } },
+    );
   }
 
-  const op    = body?.op;
-  const key   = body?.key as string | undefined;
+  const op = body?.op;
+  const key = body?.key as string | undefined;
   const title = body?.title as string | undefined;
-  const meta  = (body?.meta ?? {}) as Record<string, any>;
+  const meta = (body?.meta ?? {}) as Record<string, any>;
   log(id, 'payload', { op, hasKey: Boolean(key), title });
 
   if (op !== 'find_or_create' || !title || !key) {
     err(id, 'bad request');
-    return NextResponse.json({ error: 'bad request: op=find_or_create, key, title required' }, { status: 400, headers: { 'x-mu-req': id } });
+    return NextResponse.json(
+      { error: 'bad request: op=find_or_create, key, title required' },
+      { status: 400, headers: { 'x-mu-req': id } },
+    );
   }
 
   const userCode: string | undefined = z.userCode;
   if (!userCode) {
     err(id, 'missing userCode');
-    return NextResponse.json({ error: 'missing userCode' }, { status: 400, headers: { 'x-mu-req': id } });
+    return NextResponse.json(
+      { error: 'missing userCode' },
+      { status: 400, headers: { 'x-mu-req': id } },
+    );
   }
 
   const s = sb();
@@ -205,7 +220,10 @@ export async function POST(req: Request) {
 
   if (existingId) {
     log(id, 'reuse', { userCode, key, title, id: existingId, ms: Date.now() - t0 });
-    return NextResponse.json({ threadId: existingId, reused: true }, { headers: { 'x-mu-req': id } });
+    return NextResponse.json(
+      { threadId: existingId, reused: true },
+      { headers: { 'x-mu-req': id } },
+    );
   }
 
   const basePayload: any = {
@@ -240,11 +258,17 @@ export async function POST(req: Request) {
     console.timeEnd(`${NS} ${id} insert minimal`);
     if (e2) {
       err(id, 'insert minimal failed', { message: e2.message });
-      return NextResponse.json({ error: String(e2.message || e2) }, { status: 500, headers: { 'x-mu-req': id } });
+      return NextResponse.json(
+        { error: String(e2.message || e2) },
+        { status: 500, headers: { 'x-mu-req': id } },
+      );
     }
     insertedId = ins2?.id ?? null;
   }
 
   log(id, 'created', { userCode, key, title, id: insertedId, ms: Date.now() - t0 });
-  return NextResponse.json({ threadId: insertedId, reused: false }, { headers: { 'x-mu-req': id } });
+  return NextResponse.json(
+    { threadId: insertedId, reused: false },
+    { headers: { 'x-mu-req': id } },
+  );
 }

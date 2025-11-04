@@ -24,8 +24,12 @@ const payjp = Payjp(mustEnv('PAYJP_SECRET_KEY'), {
   httpAgent: agent,
 });
 
-function json(obj: any, status = 200) { return NextResponse.json(obj, { status }); }
-function err(obj: any, status = 500) { return NextResponse.json({ success: false, ...obj }, { status }); }
+function json(obj: any, status = 200) {
+  return NextResponse.json(obj, { status });
+}
+function err(obj: any, status = 500) {
+  return NextResponse.json({ success: false, ...obj }, { status });
+}
 const short = (s?: string, n = 8) => (s ? (s.length > n ? s.slice(0, n) + '…' : s) : '(none)');
 const isCus = (v?: string | null) => !!v && /^cus_[a-z0-9]+/i.test(v);
 
@@ -38,7 +42,8 @@ export async function POST(req: Request) {
     if (!idToken && body?.idToken) idToken = body.idToken;
 
     // フロントの命名ゆれ対策
-    const token: string | undefined = body?.token ?? body?.cardToken ?? body?.token_id ?? body?.cardTokenId;
+    const token: string | undefined =
+      body?.token ?? body?.cardToken ?? body?.token_id ?? body?.cardTokenId;
     const userCodeFromBody: string | undefined = body?.user_code ?? body?.userCode;
 
     if (!token) return err({ error: 'card token がありません', logTrail }, 400);
@@ -57,9 +62,11 @@ export async function POST(req: Request) {
     let customerId: string | null = null;
 
     if (userCodeFromBody) {
-      const r = await sb.from('users')
+      const r = await sb
+        .from('users')
         .select('user_code, click_email, payjp_customer_id, firebase_uid')
-        .eq('user_code', userCodeFromBody).maybeSingle();
+        .eq('user_code', userCodeFromBody)
+        .maybeSingle();
       if (r.data) {
         user_code = r.data.user_code;
         click_email = r.data.click_email ?? email ?? null;
@@ -70,9 +77,11 @@ export async function POST(req: Request) {
       }
     }
     if (!user_code) {
-      const r = await sb.from('users')
+      const r = await sb
+        .from('users')
         .select('user_code, click_email, payjp_customer_id')
-        .eq('firebase_uid', uid).maybeSingle();
+        .eq('firebase_uid', uid)
+        .maybeSingle();
       if (r.data) {
         user_code = r.data.user_code;
         click_email = r.data.click_email ?? email ?? null;
@@ -80,9 +89,11 @@ export async function POST(req: Request) {
       }
     }
     if (!user_code && email) {
-      const r = await sb.from('users')
+      const r = await sb
+        .from('users')
         .select('user_code, click_email, payjp_customer_id')
-        .eq('click_email', email).maybeSingle();
+        .eq('click_email', email)
+        .maybeSingle();
       if (r.data) {
         user_code = r.data.user_code;
         click_email = r.data.click_email ?? email ?? null;
@@ -93,7 +104,9 @@ export async function POST(req: Request) {
 
     // 既存 cus_ の検証（鍵違い/削除済みの 404 を踏んだら作り直す）
     if (customerId && !isCus(customerId)) {
-      logTrail.push(`⚠ DB payjp_customer_id は cus_ ではありません: ${short(customerId, 12)} → 無効化`);
+      logTrail.push(
+        `⚠ DB payjp_customer_id は cus_ ではありません: ${short(customerId, 12)} → 無効化`,
+      );
       customerId = null;
     }
     if (isCus(customerId)) {
@@ -115,7 +128,7 @@ export async function POST(req: Request) {
     if (!customerId) {
       const c = await payjp.customers.create({
         email: click_email || undefined,
-        card: token,                              // ← 作成時にカードも登録（default_card になる）
+        card: token, // ← 作成時にカードも登録（default_card になる）
         metadata: { user_code },
         description: `app user ${user_code}`,
       });
@@ -125,8 +138,8 @@ export async function POST(req: Request) {
       // 既存顧客にカード追加（default を更新）
       await payjp.customers.update(customerId, {
         card: token,
-        email: click_email || undefined,          // 足りてなければ合わせて更新
-        metadata: { user_code },                  // メタデータも補完
+        email: click_email || undefined, // 足りてなければ合わせて更新
+        metadata: { user_code }, // メタデータも補完
       });
       logTrail.push(`➕ card attached to ${short(customerId, 12)}`);
     }
@@ -149,28 +162,37 @@ export async function POST(req: Request) {
       logTrail.push(`ℹ default card fetch skipped: ${short(e?.message || String(e), 64)}`);
     }
 
-    const { error: upErr } = await sb.from('users').update({
-      payjp_customer_id: customerId,
-      card_registered: true,
-      ...(default_card_id ? { payjp_default_card_id: default_card_id } : {}),
-      ...(card_brand ? { card_brand } : {}),
-      ...(card_last4 ? { card_last4 } : {}),
-    }).eq('user_code', user_code);
+    const { error: upErr } = await sb
+      .from('users')
+      .update({
+        payjp_customer_id: customerId,
+        card_registered: true,
+        ...(default_card_id ? { payjp_default_card_id: default_card_id } : {}),
+        ...(card_brand ? { card_brand } : {}),
+        ...(card_last4 ? { card_last4 } : {}),
+      })
+      .eq('user_code', user_code);
     if (upErr) return err({ error: 'db_update_failed', detail: upErr.message, logTrail }, 500);
 
-    return json({
-      success: true,
-      customer_id: customerId,
-      user_code,
-      default_card_id: default_card_id,
-      card_brand,
-      card_last4,
-      logTrail,
-    }, 200);
+    return json(
+      {
+        success: true,
+        customer_id: customerId,
+        user_code,
+        default_card_id: default_card_id,
+        card_brand,
+        card_last4,
+        logTrail,
+      },
+      200,
+    );
   } catch (e: any) {
     const msg = e?.message || String(e);
     const isCardErr = /card|invalid|security code|insufficient|cvc|3d|three[-\s]?d/i.test(msg);
-    return err({ error: isCardErr ? 'payment_error' : 'internal_error', detail: msg, logTrail }, isCardErr ? 402 : 500);
+    return err(
+      { error: isCardErr ? 'payment_error' : 'internal_error', detail: msg, logTrail },
+      isCardErr ? 402 : 500,
+    );
   }
 }
 

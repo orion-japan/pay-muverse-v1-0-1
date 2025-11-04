@@ -17,7 +17,7 @@ export function postprocessOcr(input: string): string {
   s = s.replace(/\u200B|\u200C|\u200D|\uFEFF/g, '');
 
   // ブラケット系・ASCIIノイズ
-  s = s.replace(/\[[^\]\n]{1,20}\]/g, '');      // 短い [] 塊
+  s = s.replace(/\[[^\]\n]{1,20}\]/g, ''); // 短い [] 塊
   s = s.replace(/\[[A-Za-z0-9]{1,6}(?=\s|$)/g, '');
   s = s.replace(/[<>]{1,2}/g, '');
 
@@ -67,7 +67,7 @@ export function postprocessOcr(input: string): string {
         merged.splice(
           merged.length - 2,
           2,
-          (prev + (now.startsWith('、') ? '' : ' ') + now).trim()
+          (prev + (now.startsWith('、') ? '' : ' ') + now).trim(),
         );
       }
     }
@@ -80,10 +80,10 @@ export function postprocessOcr(input: string): string {
     .replace(/言っる/g, '言ってる')
     .replace(/会えそな/g, '会えな')
     .replace(/守\s*;/g, '守')
-    .replace(/濫/g, '。')             // 太陽誤認→句点（☀️にしたい場合は適宜変更）
+    .replace(/濫/g, '。') // 太陽誤認→句点（☀️にしたい場合は適宜変更）
     .replace(/[`［\[]\s*好\s*き\s*[`］\]]/g, '好き')
     .replace(/`(?=[ぁ-んァ-ヶ一-龥])|(?<=[ぁ-んァ-ヶ一-龥])`/g, '')
-    .replace(/[奉失奇]り/g, '寄り')  // 奉/失/奇り → 寄り
+    .replace(/[奉失奇]り/g, '寄り') // 奉/失/奇り → 寄り
     .replace(/で\s*ぞ\s*す/g, 'です')
     // 「TID?」系の化けを丁寧に復元
     .replace(/\bTID\?/g, 'ですか？')
@@ -97,7 +97,10 @@ export function postprocessOcr(input: string): string {
   s = s.replace(/(てる|てん)(ん)?。じゃない/g, '$1$2じゃない');
 
   // ノイズ系の軽補正
-  s = s.replace(/あぁあ+/g, 'あぁ').replace(/クンょい/g, '').replace(/\s*;\s*/g, '');
+  s = s
+    .replace(/あぁあ+/g, 'あぁ')
+    .replace(/クンょい/g, '')
+    .replace(/\s*;\s*/g, '');
 
   // 最終の和文間スペース締め
   s = s.replace(new RegExp(`(${jp})\\s+(${jp})`, 'g'), '$1$2');

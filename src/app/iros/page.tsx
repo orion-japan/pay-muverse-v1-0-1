@@ -1,15 +1,12 @@
-import SofiaChat from '@/components/SofiaChat/SofiaChat';
+'use client';
 
-export const dynamic = 'force-dynamic';
+import IrosLayout from '@/ui/iroschat/IrosLayout';
+import IrosChat from '@/ui/iroschat/IrosChat';
 
-export default function SofiaPage() {
+export default function Page() {
   return (
-    <main className="mu-main">
-      {/* 幅や余白は CSS の .sofia-page-wrap 側で管理 */}
-      <div className="sofia-page-wrap">
-        {/* ★ Iros 固定 */}
-        <SofiaChat agent="iros" />
-      </div>
-    </main>
+    <IrosLayout>
+      <IrosChat />
+    </IrosLayout>
   );
 }

@@ -15,10 +15,17 @@ export async function GET(req: NextRequest) {
 
   // 管理者チェック
   const admin = z.userCode!;
-  const { data: me } = await sb.from('users')
+  const { data: me } = await sb
+    .from('users')
     .select('plan_status, click_type')
-    .eq('user_code', admin).single();
-  const isAdmin = !!(me && ((me as any).plan_status === 'admin' || (me as any).plan_status === 'master' || (me as any).click_type === 'admin'));
+    .eq('user_code', admin)
+    .single();
+  const isAdmin = !!(
+    me &&
+    ((me as any).plan_status === 'admin' ||
+      (me as any).plan_status === 'master' ||
+      (me as any).click_type === 'admin')
+  );
   if (!isAdmin) return j({ error: 'not_admin' }, 403);
 
   const { searchParams } = new URL(req.url);

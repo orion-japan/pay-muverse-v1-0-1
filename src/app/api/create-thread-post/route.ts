@@ -11,8 +11,7 @@ function cleanupPK(v: string) {
 }
 function resolveServiceAccount() {
   // プロジェクトIDは NEXT_PUBLIC/FIREBASE のどちらでも可
-  const projectId =
-    process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+  const projectId = process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
 
   // ① 推奨: 3 変数直指定
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
@@ -66,7 +65,7 @@ if (!getApps().length) {
 /* ---------------------------- Supabase (SRK) ------------------------------- */
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! // サーバー専用
+  process.env.SUPABASE_SERVICE_ROLE_KEY!, // サーバー専用
 );
 
 /* ---------------------------------- POST ---------------------------------- */
@@ -116,11 +115,11 @@ export async function POST(req: Request) {
 
     // 5) posts に返信として挿入（※posts テーブルに存在するカラムのみ）
     const insertRow = {
-      thread_id,           // スキーマが thread_id 方式
+      thread_id, // スキーマが thread_id 方式
       content,
       user_code,
       board_type,
-      is_thread: false,    // スキーマにある想定（無ければ削除）
+      is_thread: false, // スキーマにある想定（無ければ削除）
       media_urls: body?.media_urls ?? [],
     };
 

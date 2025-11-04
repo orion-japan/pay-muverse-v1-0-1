@@ -1,82 +1,217 @@
-.vrc{display:grid;grid-template-columns:120px 1fr;gap:12px;
-    background:#fff;border:1px solid #eceaf7;border-radius:14px;overflow:hidden}
-  .vrc + .vrc{margin-top:10px}
-  
-  /* フェーズ別の縁色（うっすら） */
-  .vrc--initial{border-color:#e8ecff}
-  .vrc--mid{border-color:#ffe1f0}
-  .vrc--final{border-color:#ffe9d1}
-  
-  /* サムネ */
-  .vrc-thumb{background:#faf9ff;height:100%;min-height:92px}
-  .vrc-thumb img{display:block;width:100%;height:100%;object-fit:cover}
-  .vrc-thumb--ph{display:flex;align-items:center;justify-content:center;color:#999;font-size:12px}
-  
-  /* 本体 */
-  .vrc-body{padding:10px 12px 12px}
-  .vrc-top{display:flex;align-items:center;gap:8px}
-  .vrc-title{margin:6px 0 10px;font-size:15px;font-weight:800;color:#232338}
-  
-  /* バッジ類 */
-  .vrc-badge{padding:2px 8px;border-radius:999px;font-weight:700;border:1px solid #e3dcff;background:#efeaff;color:#6a4ee6}
-  .vrc-status--成功 .vrc-badge{background:#fff4cc;color:#8b6a00;border-color:#f1e1a3}
-  .vrc-status--中断 .vrc-badge{background:#f6ecff;color:#7a2bbd;border-color:#ead9ff}
-  .vrc-status--意図違い .vrc-badge{background:#eaf5ff;color:#2367c5;border-color:#cfe7ff}
-  
-  .vrc-q{background:#f6f7ff;border:1px solid #e6e8ff;border-radius:6px;padding:0 6px;font-size:12px}
-  .vrc-phase{margin-left:auto;color:#6a6a7e;font-size:12px}
-  
-  /* 進捗バー（自動移管までの割合） */
-  .vrc-rail{height:10px;background:#f0eff8;border-radius:999px;overflow:hidden;position:relative}
-  .vrc-rail__bar{height:100%;background:linear-gradient(90deg,#b9a6ff,#7b5cff);transition:width .6s ease}
-  
-  /* 残り日数 */
-  .vrc-note{margin:8px 0 10px;color:#5c5974;font-size:12px}
-  .vrc-note b{font-weight:800}
-  .vrc-link{border:none;background:none;padding:0;color:#6a4ee6;cursor:pointer;text-decoration:underline}
-  
-  /* アクション */
-  .vrc-actions{display:flex;gap:8px}
-  .vrc-btn{padding:8px 12px;border-radius:8px;border:1px solid #dedbea;background:#fff;font-weight:700;cursor:pointer}
-  .vrc-btn:disabled{opacity:.6;cursor:default}
-  .vrc-btn.primary{background:linear-gradient(135deg,#9b87ff,#7b5cff);color:#fff;border:none}
-  .vrc-btn.primary:hover{filter:brightness(1.05)}
-  .vrc-btn.ghost:hover{background:#f8f6ff}
-  
-  /* 期限超過（自動移管対象アラート） */
-  .vrc.is-due{box-shadow:0 0 0 3px rgba(255,196,0,.15) inset}
-  
-  /* 例: VisionResultCard.css */
-
-.vcard-header{
-  display:flex; align-items:center; justify-content:space-between; gap:12px;
+.vrc {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+  background: #fff;
+  border: 1px solid #eceaf7;
+  border-radius: 14px;
+  overflow: hidden;
 }
-.vcard-title{ font-weight:600; font-size:15px; }
-.vcard-status{
-  color:#fff; font-size:12px; line-height:1;
-  padding:6px 8px; border-radius:999px;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.15);
+.vrc + .vrc {
+  margin-top: 10px;
 }
-.vcard-thumb{ border-radius:12px; overflow:hidden; background:#f6f6f9; }
-.vcard-thumb img{ width:100%; height:100%; display:block; object-fit:cover; }
-.vcard-thumb.placeholder{ height:160px; }
 
+/* フェーズ別の縁色（うっすら） */
+.vrc--initial {
+  border-color: #e8ecff;
+}
+.vrc--mid {
+  border-color: #ffe1f0;
+}
+.vrc--final {
+  border-color: #ffe9d1;
+}
+
+/* サムネ */
+.vrc-thumb {
+  background: #faf9ff;
+  height: 100%;
+  min-height: 92px;
+}
+.vrc-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.vrc-thumb--ph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #999;
+  font-size: 12px;
+}
+
+/* 本体 */
+.vrc-body {
+  padding: 10px 12px 12px;
+}
+.vrc-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.vrc-title {
+  margin: 6px 0 10px;
+  font-size: 15px;
+  font-weight: 800;
+  color: #232338;
+}
+
+/* バッジ類 */
+.vrc-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+  border: 1px solid #e3dcff;
+  background: #efeaff;
+  color: #6a4ee6;
+}
+.vrc-status--成功 .vrc-badge {
+  background: #fff4cc;
+  color: #8b6a00;
+  border-color: #f1e1a3;
+}
+.vrc-status--中断 .vrc-badge {
+  background: #f6ecff;
+  color: #7a2bbd;
+  border-color: #ead9ff;
+}
+.vrc-status--意図違い .vrc-badge {
+  background: #eaf5ff;
+  color: #2367c5;
+  border-color: #cfe7ff;
+}
+
+.vrc-q {
+  background: #f6f7ff;
+  border: 1px solid #e6e8ff;
+  border-radius: 6px;
+  padding: 0 6px;
+  font-size: 12px;
+}
+.vrc-phase {
+  margin-left: auto;
+  color: #6a6a7e;
+  font-size: 12px;
+}
+
+/* 進捗バー（自動移管までの割合） */
+.vrc-rail {
+  height: 10px;
+  background: #f0eff8;
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+.vrc-rail__bar {
+  height: 100%;
+  background: linear-gradient(90deg, #b9a6ff, #7b5cff);
+  transition: width 0.6s ease;
+}
+
+/* 残り日数 */
+.vrc-note {
+  margin: 8px 0 10px;
+  color: #5c5974;
+  font-size: 12px;
+}
+.vrc-note b {
+  font-weight: 800;
+}
+.vrc-link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: #6a4ee6;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* アクション */
+.vrc-actions {
+  display: flex;
+  gap: 8px;
+}
+.vrc-btn {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #dedbea;
+  background: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+.vrc-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.vrc-btn.primary {
+  background: linear-gradient(135deg, #9b87ff, #7b5cff);
+  color: #fff;
+  border: none;
+}
+.vrc-btn.primary:hover {
+  filter: brightness(1.05);
+}
+.vrc-btn.ghost:hover {
+  background: #f8f6ff;
+}
+
+/* 期限超過（自動移管対象アラート） */
+.vrc.is-due {
+  box-shadow: 0 0 0 3px rgba(255, 196, 0, 0.15) inset;
+}
+
+/* 例: VisionResultCard.css */
+
+.vcard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.vcard-title {
+  font-weight: 600;
+  font-size: 15px;
+}
+.vcard-status {
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 8px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+}
+.vcard-thumb {
+  border-radius: 12px;
+  overflow: hidden;
+  background: #f6f6f9;
+}
+.vcard-thumb img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+.vcard-thumb.placeholder {
+  height: 160px;
+}
 
 /* 既存のバッジに準拠。必要なら調整 */
 .vrc-badge {
-  display:inline-block;
-  padding:4px 8px;
-  border-radius:999px;
-  font-size:12px;
-  line-height:1;
-  color:#fff;
-  background:#64748b; /* 既存の結果バッジ色 */
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1;
+  color: #fff;
+  background: #64748b; /* 既存の結果バッジ色 */
 }
 
 /* ステータス用（色は inline-style で付与） */
 .vrc-badge--vs {
-  margin-left:6px;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.15);
+  margin-left: 6px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
 }
 
 /* ===== ステータス（検討中/実践中/迷走中/順調/ラストスパート/達成/破棄）用 ===== */
@@ -88,58 +223,57 @@
 }
 
 /* 検討中:やや紫寄りの淡色 */
-.vrc-badge[data-vs="検討中"] {
+.vrc-badge[data-vs='検討中'] {
   background: #f6f7ff;
   color: #6a4ee6;
   border: 1px solid #e6e8ff;
 }
 
 /* 実践中:グリーン系 */
-.vrc-badge[data-vs="実践中"] {
+.vrc-badge[data-vs='実践中'] {
   background: #e7f8ef;
   color: #1d7f4e;
   border: 1px solid #c9f1dd;
 }
 
 /* 迷走中:アンバー系 */
-.vrc-badge[data-vs="迷走中"] {
+.vrc-badge[data-vs='迷走中'] {
   background: #fff2d6;
   color: #9a6a00;
   border: 1px solid #ffe5ad;
 }
 
 /* 順調:ブルー系（既存の意図違い系と近いトーン） */
-.vrc-badge[data-vs="順調"] {
+.vrc-badge[data-vs='順調'] {
   background: #eaf5ff;
   color: #2367c5;
   border: 1px solid #cfe7ff;
 }
 
 /* ラストスパート:パープル系 */
-.vrc-badge[data-vs="ラストスパート"] {
+.vrc-badge[data-vs='ラストスパート'] {
   background: #f1e8ff;
   color: #7a2bbd;
   border: 1px solid #e5d6ff;
 }
 
 /* 達成:レッド系（やや薄め） */
-.vrc-badge[data-vs="達成"] {
+.vrc-badge[data-vs='達成'] {
   background: #ffe5e5;
   color: #b71c1c;
   border: 1px solid #ffd0d0;
 }
 
 /* 破棄:グレー系 */
-.vrc-badge[data-vs="破棄"] {
+.vrc-badge[data-vs='破棄'] {
   background: #f1f5f9;
   color: #475569;
   border: 1px solid #e2e8f0;
 }
 
-
 /* 例: 小さな丸いバッジ */
-.sci-vstatus{
-  margin-left: auto;            /* 右寄せにしたい場合。不要なら削除 */
+.sci-vstatus {
+  margin-left: auto; /* 右寄せにしたい場合。不要なら削除 */
   margin-right: 6px;
   padding: 2px 8px;
   border-radius: 999px;
@@ -150,10 +284,38 @@
 }
 
 /* 色分け（必要に応じて調整） */
-.sci-vstatus[data-vs="検討中"]{ background:#f6f7ff; color:#6a4ee6; border-color:#e6e8ff; }
-.sci-vstatus[data-vs="実践中"]{ background:#e7f8ef; color:#1d7f4e; border-color:#c9f1dd; }
-.sci-vstatus[data-vs="迷走中"]{ background:#fff2d6; color:#9a6a00; border-color:#ffe5ad; }
-.sci-vstatus[data-vs="順調"]{   background:#eaf5ff; color:#2367c5; border-color:#cfe7ff; }
-.sci-vstatus[data-vs="ラストスパート"]{ background:#f1e8ff; color:#7a2bbd; border-color:#e5d6ff; }
-.sci-vstatus[data-vs="達成"]{   background:#ffe5e5; color:#b71c1c; border-color:#ffd0d0; }
-.sci-vstatus[data-vs="破棄"]{   background:#f1f5f9; color:#475569; border-color:#e2e8f0; }
+.sci-vstatus[data-vs='検討中'] {
+  background: #f6f7ff;
+  color: #6a4ee6;
+  border-color: #e6e8ff;
+}
+.sci-vstatus[data-vs='実践中'] {
+  background: #e7f8ef;
+  color: #1d7f4e;
+  border-color: #c9f1dd;
+}
+.sci-vstatus[data-vs='迷走中'] {
+  background: #fff2d6;
+  color: #9a6a00;
+  border-color: #ffe5ad;
+}
+.sci-vstatus[data-vs='順調'] {
+  background: #eaf5ff;
+  color: #2367c5;
+  border-color: #cfe7ff;
+}
+.sci-vstatus[data-vs='ラストスパート'] {
+  background: #f1e8ff;
+  color: #7a2bbd;
+  border-color: #e5d6ff;
+}
+.sci-vstatus[data-vs='達成'] {
+  background: #ffe5e5;
+  color: #b71c1c;
+  border-color: #ffd0d0;
+}
+.sci-vstatus[data-vs='破棄'] {
+  background: #f1f5f9;
+  color: #475569;
+  border-color: #e2e8f0;
+}

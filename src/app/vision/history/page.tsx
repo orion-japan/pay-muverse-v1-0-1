@@ -13,7 +13,7 @@ type HistItem = {
   phase: 'initial' | 'mid' | 'final' | null;
   moved_to_history_at?: string | null;
   archived_at?: string | null;
-  q_code?: any;                 // ← 文字列 or オブジェクト
+  q_code?: any; // ← 文字列 or オブジェクト
   iboard_thumb?: string | null; // album:// or direct URL
   supersedes_vision_id?: string | null;
   superseded_by_id?: string | null;
@@ -24,7 +24,11 @@ function toSafeQString(q: any): string | null {
   if (q == null) return null;
   if (typeof q === 'string') return q;
   if (typeof q === 'object' && typeof q.code === 'string') return q.code;
-  try { return JSON.stringify(q); } catch { return null; }
+  try {
+    return JSON.stringify(q);
+  } catch {
+    return null;
+  }
 }
 function fmtDate(iso?: string | null) {
   if (!iso) return '';
@@ -44,14 +48,17 @@ function HistoryThumb({ url }: { url: string }) {
   useEffect(() => {
     let alive = true;
     (async () => {
-      if (!url) { if (alive) setResolved(null); return; }
+      if (!url) {
+        if (alive) setResolved(null);
+        return;
+      }
       if (url.startsWith('album://')) {
         try {
           let path = url.replace(/^album:\/\//, '').replace(/^\/+/, '');
           // private-posts/ が重なっても剥がす
           path = path.replace(/^(?:private-posts\/)+/, '');
-          const { data, error } = await supabase
-            .storage.from('private-posts')
+          const { data, error } = await supabase.storage
+            .from('private-posts')
             .createSignedUrl(path, 60 * 60); // 1h
           if (!alive) return;
           setResolved(error ? null : (data?.signedUrl ?? null));
@@ -62,7 +69,9 @@ function HistoryThumb({ url }: { url: string }) {
         if (alive) setResolved(url);
       }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [url]);
 
   if (!resolved) return null;
@@ -79,8 +88,7 @@ export default function HistoryPage() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null); // ★ 追加: 処理中のカードID
 
-  const userCode =
-    typeof window !== 'undefined' ? (localStorage.getItem('user_code') || '') : '';
+  const userCode = typeof window !== 'undefined' ? localStorage.getItem('user_code') || '' : '';
 
   async function load() {
     setLoading(true);
@@ -89,11 +97,13 @@ export default function HistoryPage() {
       cache: 'no-store',
     });
     const json = await res.json().catch(() => ({}));
-    setItems(Array.isArray(json) ? json : (json.items || []));
+    setItems(Array.isArray(json) ? json : json.items || []);
     setLoading(false);
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   // ★ 追加: 実践へ戻す
   async function restoreVision(visionId: string) {
@@ -110,7 +120,7 @@ export default function HistoryPage() {
       });
       if (!res.ok) throw new Error(await res.text());
       // 履歴一覧から除去
-      setItems(prev => prev.filter(x => x.vision_id !== visionId));
+      setItems((prev) => prev.filter((x) => x.vision_id !== visionId));
     } catch (e) {
       console.error(e);
       alert('戻すのに失敗しました');
@@ -134,7 +144,7 @@ export default function HistoryPage() {
       });
       if (!res.ok) throw new Error(await res.text());
       // 履歴一覧から除去
-      setItems(prev => prev.filter(x => x.vision_id !== visionId));
+      setItems((prev) => prev.filter((x) => x.vision_id !== visionId));
     } catch (e) {
       console.error(e);
       alert('削除に失敗しました');
@@ -147,7 +157,9 @@ export default function HistoryPage() {
     <div className="vh-wrap">
       <div className="vh-header">
         <h2>履歴</h2>
-        <button className="vh-back" onClick={() => router.push('/vision')}>← 戻る</button>
+        <button className="vh-back" onClick={() => router.push('/vision')}>
+          ← 戻る
+        </button>
       </div>
 
       {loading ? (
@@ -191,7 +203,10 @@ export default function HistoryPage() {
                     </div>
 
                     {/* ★ 追加: アクション行（構造は維持しつつ末尾に追加） */}
-                    <div className="vh-actions" style={{ marginTop: '.5rem', display: 'flex', gap: '.5rem' }}>
+                    <div
+                      className="vh-actions"
+                      style={{ marginTop: '.5rem', display: 'flex', gap: '.5rem' }}
+                    >
                       <button
                         className="vh-btn"
                         disabled={disabled}

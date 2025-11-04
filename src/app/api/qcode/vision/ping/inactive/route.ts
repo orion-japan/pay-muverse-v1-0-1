@@ -13,7 +13,7 @@ export async function POST(req: Request) {
     const user_code = String(b.user_code || '').trim();
     const days = Math.max(1, Math.min(30, Number(b.days ?? 3)));
     if (!user_code) {
-      return NextResponse.json({ ok:false, error:'user_code required' }, { status:400 });
+      return NextResponse.json({ ok: false, error: 'user_code required' }, { status: 400 });
     }
 
     // 対象 seeds
@@ -25,14 +25,18 @@ export async function POST(req: Request) {
     if (eSeeds) throw eSeeds;
 
     const seedMap = new Map<string, { id: string; title: string }>();
-    for (const s of (seeds ?? [])) seedMap.set(String(s.id), { id: String(s.id), title: s.title });
+    for (const s of seeds ?? []) seedMap.set(String(s.id), { id: String(s.id), title: s.title });
 
     if (!seedMap.size) {
-      return NextResponse.json({ ok:true, sleepy: [], message: '種（ゴール）がまだ登録されていません。' });
+      return NextResponse.json({
+        ok: true,
+        sleepy: [],
+        message: '種（ゴール）がまだ登録されていません。',
+      });
     }
 
     // JST 今日 00:00 を基準に days 日前の 00:00 をカットオフ
-    const todayKey = new Date().toISOString().slice(0,10);
+    const todayKey = new Date().toISOString().slice(0, 10);
     const todayWin = jstDayWindow(todayKey);
     const cutoffMs = new Date(todayWin.start).getTime() - days * 86400000;
     const cutoffIso = new Date(cutoffMs).toISOString();
@@ -48,7 +52,7 @@ export async function POST(req: Request) {
     if (eChecks) throw eChecks;
 
     const lastBySeed = new Map<string, string>();
-    for (const r of (lastChecks ?? [])) {
+    for (const r of lastChecks ?? []) {
       const sid = String(r.seed_id);
       if (!lastBySeed.has(sid)) {
         lastBySeed.set(sid, r.created_at); // 最初(=最新)だけ保持
@@ -73,6 +77,6 @@ export async function POST(req: Request) {
         : 'すべて順調です！',
     });
   } catch (e: any) {
-    return NextResponse.json({ ok:false, error: e?.message ?? 'failed' }, { status:500 });
+    return NextResponse.json({ ok: false, error: e?.message ?? 'failed' }, { status: 500 });
   }
 }

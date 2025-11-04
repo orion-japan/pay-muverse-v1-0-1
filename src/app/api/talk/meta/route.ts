@@ -1,31 +1,37 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
-export const runtime = 'nodejs'
-export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-const SUPABASE_URL   = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const SERVICE_ROLE   = process.env.SUPABASE_SERVICE_ROLE_KEY!
-const sb = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } })
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const sb = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
 type MetaRow = {
-  thread_id: string
-  last_message_at: string | null
-  last_message_text: string | null
-  unread: number
-}
+  thread_id: string;
+  last_message_at: string | null;
+  last_message_text: string | null;
+  unread: number;
+};
 
 export async function POST(req: NextRequest) {
   try {
-    const { myCode, threadIds } = await req.json() as { myCode: string, threadIds: string[] }
+    const { myCode, threadIds } = (await req.json()) as { myCode: string; threadIds: string[] };
     if (!myCode || !Array.isArray(threadIds) || threadIds.length === 0) {
-      return NextResponse.json({ metaByThreadId: {} }, { status: 200, headers: { 'Cache-Control': 'no-store' } })
+      return NextResponse.json(
+        { metaByThreadId: {} },
+        { status: 200, headers: { 'Cache-Control': 'no-store' } },
+      );
     }
 
     // mirra-* は除外（念のため）
-    const ids = threadIds.filter(id => !/^mirra-/.test(id))
+    const ids = threadIds.filter((id) => !/^mirra-/.test(id));
     if (ids.length === 0) {
-      return NextResponse.json({ metaByThreadId: {} }, { status: 200, headers: { 'Cache-Control': 'no-store' } })
+      return NextResponse.json(
+        { metaByThreadId: {} },
+        { status: 200, headers: { 'Cache-Control': 'no-store' } },
+      );
     }
 
     // まとめて取得：最後のメッセージと未読件数
@@ -69,25 +75,37 @@ export async function POST(req: NextRequest) {
       group by c.thread_id, l.last_message_at, l.last_message_text
     `;
 
-    const { data, error } = await sb.rpc('sql', { sql, params: { ids, me: myCode } })
+    const { data, error } = await sb.rpc('sql', { sql, params: { ids, me: myCode } });
     if (error) {
-      console.warn('[meta] rpc error:', error)
-      return NextResponse.json({ metaByThreadId: {} }, { status: 200, headers: { 'Cache-Control': 'no-store' } })
+      console.warn('[meta] rpc error:', error);
+      return NextResponse.json(
+        { metaByThreadId: {} },
+        { status: 200, headers: { 'Cache-Control': 'no-store' } },
+      );
     }
 
-    const rows = (data as MetaRow[]) ?? []
-    const metaByThreadId: Record<string, { lastMessageAt: string | null; lastMessageText: string | null; unreadCount: number }> = {}
+    const rows = (data as MetaRow[]) ?? [];
+    const metaByThreadId: Record<
+      string,
+      { lastMessageAt: string | null; lastMessageText: string | null; unreadCount: number }
+    > = {};
     for (const r of rows) {
       metaByThreadId[r.thread_id] = {
         lastMessageAt: r.last_message_at,
         lastMessageText: r.last_message_text,
         unreadCount: Math.max(0, Number(r.unread || 0)),
-      }
+      };
     }
 
-    return NextResponse.json({ metaByThreadId }, { status: 200, headers: { 'Cache-Control': 'no-store' } })
+    return NextResponse.json(
+      { metaByThreadId },
+      { status: 200, headers: { 'Cache-Control': 'no-store' } },
+    );
   } catch (e: any) {
-    console.error('[meta] fatal', e)
-    return NextResponse.json({ metaByThreadId: {} }, { status: 200, headers: { 'Cache-Control': 'no-store' } })
+    console.error('[meta] fatal', e);
+    return NextResponse.json(
+      { metaByThreadId: {} },
+      { status: 200, headers: { 'Cache-Control': 'no-store' } },
+    );
   }
 }

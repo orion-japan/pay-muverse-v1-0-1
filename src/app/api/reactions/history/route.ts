@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
 /**
@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   try {
     // received: 自分の投稿に付いたリアクション
     // given    : 自分が付けたリアクション
-    let q = supabase
+    const q = supabase
       .from('reactions')
       .select('reaction_id, post_id, user_code, reaction, is_parent, created_at')
       .order('created_at', { ascending: false })
@@ -33,10 +33,9 @@ export async function GET(req: NextRequest) {
       // posts.user_code = 自分
       const { data: rows, error } = await q.in(
         'post_id',
-        (
-          await supabase.from('v_posts_jst').select('post_id').eq('user_code', user_code)
-
-        ).data?.map((r) => r.post_id) || ['00000000-0000-0000-0000-000000000000'] // 空防止
+        (await supabase.from('v_posts_jst').select('post_id').eq('user_code', user_code)).data?.map(
+          (r) => r.post_id,
+        ) || ['00000000-0000-0000-0000-000000000000'], // 空防止
       );
       if (error) throw error;
       return NextResponse.json({ ok: true, items: rows ?? [] });

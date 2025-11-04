@@ -23,7 +23,15 @@ type VisionModalProps = {
   onSaved?: (saved: any) => void;
 };
 
-const STATUS_LIST: Status[] = ['検討中', '実践中', '迷走中', '順調', 'ラストスパート', '達成', '破棄'];
+const STATUS_LIST: Status[] = [
+  '検討中',
+  '実践中',
+  '迷走中',
+  '順調',
+  'ラストスパート',
+  '達成',
+  '破棄',
+];
 
 /* ==== 橋渡しチェック ==== */
 function nextStageOf(s: Stage): Stage | null {
@@ -34,23 +42,81 @@ function nextStageOf(s: Stage): Stage | null {
 function defaultCriteria(from: Stage, to: Stage, vision_id: string) {
   if (from === 'S' && to === 'F') {
     return [
-      { vision_id, from_stage: 'S', to_stage: 'F', title: '意図メモを3つ書く', required_days: 3, required: true, order_index: 0 },
-      { vision_id, from_stage: 'S', to_stage: 'F', title: 'iBoardに1回投稿', required_days: 1, required: true, order_index: 1 },
+      {
+        vision_id,
+        from_stage: 'S',
+        to_stage: 'F',
+        title: '意図メモを3つ書く',
+        required_days: 3,
+        required: true,
+        order_index: 0,
+      },
+      {
+        vision_id,
+        from_stage: 'S',
+        to_stage: 'F',
+        title: 'iBoardに1回投稿',
+        required_days: 1,
+        required: true,
+        order_index: 1,
+      },
     ];
   }
   if (from === 'F' && to === 'R') {
     return [
-      { vision_id, from_stage: 'F', to_stage: 'R', title: '関連メモを5つ集める', required_days: 5, required: true, order_index: 0 },
-      { vision_id, from_stage: 'F', to_stage: 'R', title: '週のまとめを1回書く', required_days: 1, required: true, order_index: 1 },
+      {
+        vision_id,
+        from_stage: 'F',
+        to_stage: 'R',
+        title: '関連メモを5つ集める',
+        required_days: 5,
+        required: true,
+        order_index: 0,
+      },
+      {
+        vision_id,
+        from_stage: 'F',
+        to_stage: 'R',
+        title: '週のまとめを1回書く',
+        required_days: 1,
+        required: true,
+        order_index: 1,
+      },
     ];
   }
   if (from === 'R' && to === 'C') {
-    return [{ vision_id, from_stage: 'R', to_stage: 'C', title: '実行タスクを3件切る', required_days: 3, required: true, order_index: 0 }];
+    return [
+      {
+        vision_id,
+        from_stage: 'R',
+        to_stage: 'C',
+        title: '実行タスクを3件切る',
+        required_days: 3,
+        required: true,
+        order_index: 0,
+      },
+    ];
   }
   if (from === 'C' && to === 'I') {
     return [
-      { vision_id, from_stage: 'C', to_stage: 'I', title: '今週2回実行する', required_days: 2, required: true, order_index: 0 },
-      { vision_id, from_stage: 'C', to_stage: 'I', title: '成果を1回共有する', required_days: 1, required: true, order_index: 1 },
+      {
+        vision_id,
+        from_stage: 'C',
+        to_stage: 'I',
+        title: '今週2回実行する',
+        required_days: 2,
+        required: true,
+        order_index: 0,
+      },
+      {
+        vision_id,
+        from_stage: 'C',
+        to_stage: 'I',
+        title: '成果を1回共有する',
+        required_days: 1,
+        required: true,
+        order_index: 1,
+      },
     ];
   }
   return [];
@@ -81,8 +147,8 @@ async function seedStageCriteria(vision_id: string, from_stage: Stage, token: st
 type PickerTab = 'album' | 'iboard' | 'upload';
 type AlbumItem = {
   name: string;
-  url: string;   // 表示用（署名URL）
-  path: string;  // private-posts バケット内パス
+  url: string; // 表示用（署名URL）
+  path: string; // private-posts バケット内パス
   size?: number | null;
   updated_at?: string | null;
 };
@@ -91,7 +157,7 @@ type AlbumItem = {
 type ResizeRet = Blob | { blob: Blob; width?: number; height?: number; type?: string };
 async function resizeAsObject(
   file: File,
-  opts: any
+  opts: any,
 ): Promise<{ blob: Blob; width?: number; height?: number; type?: string }> {
   const r: ResizeRet = await (resizeImage as any)(file, opts);
   if (r instanceof Blob) return { blob: r, type: r.type };
@@ -114,7 +180,9 @@ async function listAlbumImages(userCode: string): Promise<AlbumItem[]> {
     const resolved = await Promise.all(
       files.map(async (f) => {
         const path = `${prefix}/${f.name}`;
-        const { data: signed } = await supabase.storage.from('private-posts').createSignedUrl(path, 60 * 30);
+        const { data: signed } = await supabase.storage
+          .from('private-posts')
+          .createSignedUrl(path, 60 * 30);
         return {
           name: f.name,
           url: signed?.signedUrl ?? '',
@@ -122,7 +190,7 @@ async function listAlbumImages(userCode: string): Promise<AlbumItem[]> {
           size: (f as any)?.metadata?.size ?? null,
           updated_at: (f as any)?.updated_at ?? null,
         };
-      })
+      }),
     );
     return resolved;
   } catch (e) {
@@ -148,7 +216,9 @@ function useResolvedThumb(raw?: string | null) {
         try {
           let path = raw.replace(/^album:\/\//, '').replace(/^\/+/, '');
           path = path.replace(new RegExp(`^(?:${ALBUM_BUCKET}/)+`), '');
-          const { data, error } = await supabase.storage.from(ALBUM_BUCKET).createSignedUrl(path, 60 * 60);
+          const { data, error } = await supabase.storage
+            .from(ALBUM_BUCKET)
+            .createSignedUrl(path, 60 * 60);
           if (canceled) return;
           if (error) {
             console.warn('createSignedUrl error:', error, { bucket: ALBUM_BUCKET, path });
@@ -280,7 +350,7 @@ export default function VisionModal({
         if (!saving) void handleSave();
       }
     },
-    [isOpen, saving] // eslint-disable-line
+    [isOpen, saving], // eslint-disable-line
   );
   useEffect(() => {
     if (!isOpen) return;
@@ -318,14 +388,21 @@ export default function VisionModal({
 
       const ucode = (effectiveUserCode || '').trim();
       if (!ucode) {
-        setErrorMsg('ユーザーコード取得前のためアップロードできません。しばらくしてからお試しください。');
+        setErrorMsg(
+          'ユーザーコード取得前のためアップロードできません。しばらくしてからお試しください。',
+        );
         return;
       }
 
       const auth = getAuth();
       if (!auth.currentUser) await signInAnonymously(auth);
 
-      const blob = await resizeImage(file, { max: 1600, type: 'image/webp', quality: 0.9, square: false });
+      const blob = await resizeImage(file, {
+        max: 1600,
+        type: 'image/webp',
+        quality: 0.9,
+        square: false,
+      });
 
       const safeName = file.name.replace(/[^\w.\-]+/g, '_').replace(/\.[^.]+$/, '.webp');
       const path = `${ucode}/${Date.now()}_${safeName}`;
@@ -337,11 +414,19 @@ export default function VisionModal({
       });
       if (upErr) throw upErr;
 
-      const { data: signed } = await supabase.storage.from('private-posts').createSignedUrl(path, 60 * 30);
+      const { data: signed } = await supabase.storage
+        .from('private-posts')
+        .createSignedUrl(path, 60 * 30);
 
       setThumbAndPulse(`album://${path}`, null);
       setAlbumItems((prev) => [
-        { name: safeName, url: signed?.signedUrl ?? '', path, size: blob.size, updated_at: new Date().toISOString() },
+        {
+          name: safeName,
+          url: signed?.signedUrl ?? '',
+          path,
+          size: blob.size,
+          updated_at: new Date().toISOString(),
+        },
         ...prev,
       ]);
       setPickerTab('album');
@@ -422,8 +507,8 @@ export default function VisionModal({
     typeof vision.q_code === 'string'
       ? vision.q_code
       : vision.q_code && typeof (vision.q_code as any).code === 'string'
-      ? (vision.q_code as any).code
-      : null;
+        ? (vision.q_code as any).code
+        : null;
 
   /* ==================== UI ==================== */
   return (
@@ -514,11 +599,15 @@ export default function VisionModal({
                 {pickerTab === 'album' && (
                   <div className="album-pane">
                     {!effectiveUserCode?.trim() ? (
-                      <div className="vmd-hint">ユーザーコードを取得中です…（少し待ってから再度お試しください）</div>
+                      <div className="vmd-hint">
+                        ユーザーコードを取得中です…（少し待ってから再度お試しください）
+                      </div>
                     ) : albumLoading ? (
                       <div className="vmd-hint">読み込み中…</div>
                     ) : albumItems.length === 0 ? (
-                      <div className="vmd-hint">アルバムに画像がありません。右の「アップロード」から追加できます。</div>
+                      <div className="vmd-hint">
+                        アルバムに画像がありません。右の「アップロード」から追加できます。
+                      </div>
                     ) : (
                       <div className="vmd-grid" style={{ ['--thumb' as any]: `${thumbSize}px` }}>
                         {albumItems.map((it) => (
@@ -529,7 +618,12 @@ export default function VisionModal({
                             title={it.name}
                           >
                             {/* ★ it.url（署名URL）を使う */}
-                            <SafeImage src={it.url} alt="" aspectRatio="1/1" className="vision-thumb" />
+                            <SafeImage
+                              src={it.url}
+                              alt=""
+                              aspectRatio="1/1"
+                              className="vision-thumb"
+                            />
                           </button>
                         ))}
                       </div>
@@ -564,7 +658,8 @@ export default function VisionModal({
                       {uploading && <span className="vmd-hint">アップロード中…</span>}
                     </div>
                     <div className="vmd-hint small">
-                      バケット: <code>private-posts</code> / フォルダ: <code>{(effectiveUserCode || '').trim()}/</code>（Private・表示は署名URL）
+                      バケット: <code>private-posts</code> / フォルダ:{' '}
+                      <code>{(effectiveUserCode || '').trim()}/</code>（Private・表示は署名URL）
                     </div>
                   </div>
                 )}

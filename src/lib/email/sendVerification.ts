@@ -1,6 +1,6 @@
 // lib/email/sendVerification.ts
 
-import nodemailer from 'nodemailer'
+import nodemailer from 'nodemailer';
 
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_SMTP_HOST,
@@ -14,7 +14,7 @@ const transporter = nodemailer.createTransport({
     // ✅ 自己署名証明書に対応（← ここが今回のポイント）
     rejectUnauthorized: false,
   },
-})
+});
 
 export async function sendVerificationEmail(to: string, link: string) {
   await transporter.sendMail({
@@ -25,5 +25,5 @@ export async function sendVerificationEmail(to: string, link: string) {
       <p>以下のリンクをクリックしてメールアドレスの確認を完了してください：</p>
       <p><a href="${link}">${link}</a></p>
     `,
-  })
+  });
 }

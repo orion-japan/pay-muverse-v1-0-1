@@ -11,9 +11,9 @@ type SelfPostModalProps = {
   isOpen: boolean;
   onClose: () => void;
   userCode: string;
-  boardType?: string | null;      // 'self' 推奨
-  onPostSuccess?: () => void;     // 互換
-  onPosted?: () => void;          // 互換
+  boardType?: string | null; // 'self' 推奨
+  onPostSuccess?: () => void; // 互換
+  onPosted?: () => void; // 互換
 };
 
 export default function SelfPostModal({
@@ -114,13 +114,12 @@ export default function SelfPostModal({
       }
 
       // タグ・board_type 正規化
-      const normalizedTags =
-        tags
-          .split(',')
-          .map((t) => t.trim())
-          .filter(Boolean)
-          .map((t) => (t.startsWith('#') ? t.slice(1) : t))
-          .filter((v, i, a) => a.indexOf(v) === i);
+      const normalizedTags = tags
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean)
+        .map((t) => (t.startsWith('#') ? t.slice(1) : t))
+        .filter((v, i, a) => a.indexOf(v) === i);
 
       const resolvedBoardType =
         boardType === undefined ||
@@ -133,7 +132,7 @@ export default function SelfPostModal({
       // 1) 親（posts）作成  ※ title は常に null
       const parentBody = {
         user_code: userCode,
-        title: null as string | null,                 // ← タイトル廃止
+        title: null as string | null, // ← タイトル廃止
         content: content.trim() || null,
         tags: normalizedTags.length ? normalizedTags : null,
         media_urls: uploadedUrl ? [uploadedUrl] : [],
@@ -156,8 +155,7 @@ export default function SelfPostModal({
       if (!threadId) throw new Error('threadId が取得できませんでした');
 
       // ★ Push 通知（失敗しても UI は継続）
-      const previewText =
-        (content && content.trim().slice(0, 40)) || '新しい Self Talk';
+      const previewText = (content && content.trim().slice(0, 40)) || '新しい Self Talk';
       fetch('/api/push/send', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -191,12 +189,7 @@ export default function SelfPostModal({
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <header className="modal-header">
           <h2>📝 Self Talkを投稿</h2>
-          <button
-            type="button"
-            className="modal-close"
-            onClick={onClose}
-            aria-label="閉じる"
-          >
+          <button type="button" className="modal-close" onClick={onClose} aria-label="閉じる">
             ×
           </button>
         </header>
@@ -214,7 +207,9 @@ export default function SelfPostModal({
               rows={3}
               style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflow: 'hidden' }}
             />
-            <div className="help" aria-live="polite">{contentLen} 字</div>
+            <div className="help" aria-live="polite">
+              {contentLen} 字
+            </div>
           </label>
 
           <label className="field">
@@ -256,11 +251,7 @@ export default function SelfPostModal({
         </div>
 
         <footer className="modal-actions">
-          <button
-            type="button"
-            className="mu-btn mu-btn--ghost"
-            onClick={onClose}
-          >
+          <button type="button" className="mu-btn mu-btn--ghost" onClick={onClose}>
             キャンセル
           </button>
           <button

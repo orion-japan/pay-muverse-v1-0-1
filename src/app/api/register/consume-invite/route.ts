@@ -1,6 +1,6 @@
 // /src/app/api/register/consume-invite/route.ts
-import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,19 +9,20 @@ export async function POST(req: NextRequest) {
 
     if (!user_code || !invite_code) {
       return NextResponse.json(
-        { ok: false, error: "missing: user_code or invite_code" },
-        { status: 400 }
+        { ok: false, error: 'missing: user_code or invite_code' },
+        { status: 400 },
       );
     }
 
     // 1) 招待コードを原子的に消費
-    const { data: redeemed, error: rpcErr } = await supabaseAdmin
-      .rpc("redeem_invite", { p_code: invite_code });
+    const { data: redeemed, error: rpcErr } = await supabaseAdmin.rpc('redeem_invite', {
+      p_code: invite_code,
+    });
 
     if (rpcErr) {
       return NextResponse.json(
         { ok: false, error: `redeem failed: ${rpcErr.message}` },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -34,21 +35,19 @@ export async function POST(req: NextRequest) {
 
     {
       const { error } = await supabaseAdmin
-        .from("users")
+        .from('users')
         .update(updatePayload)
-        .eq("user_code", user_code);
+        .eq('user_code', user_code);
       if (error) throw new Error(`users update failed: ${error.message}`);
     }
 
     // 3) グループ参加（あれば）
     if (redeemed.group_id) {
-      const { error } = await supabaseAdmin
-        .from("group_members")
-        .upsert({
-          group_id: redeemed.group_id,
-          user_code,
-          role: "member",
-        });
+      const { error } = await supabaseAdmin.from('group_members').upsert({
+        group_id: redeemed.group_id,
+        user_code,
+        role: 'member',
+      });
       if (error) throw new Error(`group_members upsert failed: ${error.message}`);
     }
 
@@ -63,9 +62,6 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: e?.message ?? "unknown error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: e?.message ?? 'unknown error' }, { status: 500 });
   }
 }

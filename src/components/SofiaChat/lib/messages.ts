@@ -19,7 +19,10 @@ export async function getConversations(user_code: string) {
 }
 
 /** メッセージ取得（/api/sofia GET?user_code=...&conversation_code=...） */
-export async function getMessages(user_code: string, conversation_code: string): Promise<Message[]> {
+export async function getMessages(
+  user_code: string,
+  conversation_code: string,
+): Promise<Message[]> {
   if (!user_code || !conversation_code) return [];
   const url = `/api/sofia?user_code=${encodeURIComponent(user_code)}&conversation_code=${encodeURIComponent(conversation_code)}`;
   const rs = await fetch(url, { method: 'GET', cache: 'no-store' });
@@ -45,7 +48,7 @@ export async function postMessage(payload: PostMessageParams): Promise<{
   needed?: boolean;
 }> {
   const body = {
-    user_code: payload.user,                     // ← API 仕様に合わせる
+    user_code: payload.user, // ← API 仕様に合わせる
     conversation_code: payload.conversation_id,
     mode: 'normal',
     // クライアント側は user 入力だけを渡す

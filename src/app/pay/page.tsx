@@ -13,25 +13,40 @@ import dayjs from 'dayjs';
 const TAG = '[PAY]';
 let RUN = 0;
 const t = () => `${(performance.now() / 1000).toFixed(3)}s`;
-const log   = (...a: any[]) => console.log(TAG, ...a);
-const warn  = (...a: any[]) => console.warn(TAG, ...a);
+const log = (...a: any[]) => console.log(TAG, ...a);
+const warn = (...a: any[]) => console.warn(TAG, ...a);
 const error = (...a: any[]) => console.error(TAG, ...a);
-
-
 
 /* ============ 軽量モーダル ============ */
 function PayResultModal({
-  open, title, message, onClose,
-}: { open: boolean; title: string; message: string; onClose: () => void }) {
+  open,
+  title,
+  message,
+  onClose,
+}: {
+  open: boolean;
+  title: string;
+  message: string;
+  onClose: () => void;
+}) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden />
-      <div role="dialog" aria-modal="true" className="relative w-[92%] max-w-sm rounded-2xl bg-white p-5 shadow-xl">
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="relative w-[92%] max-w-sm rounded-2xl bg-white p-5 shadow-xl"
+      >
         <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
         <p className="mt-2 text-sm text-gray-700 whitespace-pre-line">{message}</p>
         <div className="mt-4 flex justify-end">
-          <button className="rounded-xl bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700" onClick={onClose}>OK</button>
+          <button
+            className="rounded-xl bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700"
+            onClick={onClose}
+          >
+            OK
+          </button>
         </div>
       </div>
     </div>
@@ -50,7 +65,9 @@ async function getIdTokenWithTimeout(ms = 15000) {
   if (!u) throw new Error('ログインしてください');
   return Promise.race<string>([
     u.getIdToken(true),
-    new Promise((_, rej) => setTimeout(() => rej(new Error('IDトークンの取得がタイムアウトしました')), ms)),
+    new Promise((_, rej) =>
+      setTimeout(() => rej(new Error('IDトークンの取得がタイムアウトしました')), ms),
+    ),
   ]);
 }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -67,15 +84,21 @@ const isAlreadySubscribed = (payload: any): boolean => {
     const c1 = payload?.error?.code;
     const c2 = payload?.body?.error?.code;
     const msg = (payload?.error?.message || payload?.detail || '').toString().toLowerCase();
-    return c1 === 'already_subscribed' || c2 === 'already_subscribed' || msg.includes('already_subscribed');
-  } catch { return false; }
+    return (
+      c1 === 'already_subscribed' ||
+      c2 === 'already_subscribed' ||
+      msg.includes('already_subscribed')
+    );
+  } catch {
+    return false;
+  }
 };
 
 /** URL方式3DSの完了確認をポーリング（サーバ側で tds_finish → 購読作成を行う想定） */
 const pollFinalizeSubscribe = async (
   finalizePayload: any,
   idToken: string,
-  { timeoutMs = 120_000, intervalMs = 2_000 } = {}
+  { timeoutMs = 120_000, intervalMs = 2_000 } = {},
 ) => {
   const started = Date.now();
   let lastDetail: any = null;
@@ -87,7 +110,7 @@ const pollFinalizeSubscribe = async (
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
         body: JSON.stringify(finalizePayload),
       });
-      const j = await res.json().catch(() => ({} as any));
+      const j = await res.json().catch(() => ({}) as any);
       log('finalize poll tick', { ok: res.ok, payload: j });
 
       if (res.ok && j?.success) return { ok: true, data: j };
@@ -95,9 +118,12 @@ const pollFinalizeSubscribe = async (
 
       const d = String(j?.detail || '').toLowerCase();
       const looksPending =
-        d.includes('pending') || d.includes('unverified') ||
-        d.includes('require') || d.includes('confirm') ||
-        d.includes('3ds') || d.includes('authenticate');
+        d.includes('pending') ||
+        d.includes('unverified') ||
+        d.includes('require') ||
+        d.includes('confirm') ||
+        d.includes('3ds') ||
+        d.includes('authenticate');
 
       if (looksPending || (!res.ok && res.status >= 500)) {
         await sleep(intervalMs);
@@ -157,13 +183,19 @@ function PageInner() {
           cache: 'no-store',
         });
       } else {
-        if (!user_code) { warn(`#${runId}`, 'fetchStatus: user_code missing'); return; }
+        if (!user_code) {
+          warn(`#${runId}`, 'fetchStatus: user_code missing');
+          return;
+        }
         const url = `/api/account-status?user=${user_code}`;
         log(`#${runId}`, 'fetchStatus(by code) → GET', url, t());
         res = await fetchWithTimeout(url, { cache: 'no-store' });
       }
 
-      if (!res.ok) { warn(`#${runId}`, 'fetchStatus not ok:', res.status); return; }
+      if (!res.ok) {
+        warn(`#${runId}`, 'fetchStatus not ok:', res.status);
+        return;
+      }
       const json = await res.json();
       log(`#${runId}`, 'fetchStatus OK payload:', {
         plan_status: json?.plan_status,
@@ -175,14 +207,17 @@ function PageInner() {
       setCardRegistered(!!json.card_registered);
       setUserCredit(
         (typeof json.sofia_credit === 'number' ? json.sofia_credit : undefined) ??
-        (typeof json.credit_remain === 'number' ? json.credit_remain : 0)
+          (typeof json.credit_remain === 'number' ? json.credit_remain : 0),
       );
       setHistory(Array.isArray(json.history) ? json.history : []);
 
       const until = json?.plan_valid_until || json?.sub_next_payment || null;
       const isExpired = !!until && dayjs(until).isBefore(dayjs(), 'minute');
       setExpired(!!isExpired);
-      log(`#${runId}`, `fetchStatus done in ${(performance.now() - t0).toFixed(1)}ms, expired=${!!isExpired}`);
+      log(
+        `#${runId}`,
+        `fetchStatus done in ${(performance.now() - t0).toFixed(1)}ms, expired=${!!isExpired}`,
+      );
     } catch (err) {
       error(`#${runId}`, 'fetchStatus error:', err);
     }
@@ -210,7 +245,10 @@ function PageInner() {
 
       const boot = () => {
         try {
-          if (!window.Payjp) { warn('Payjp global not ready'); return; }
+          if (!window.Payjp) {
+            warn('Payjp global not ready');
+            return;
+          }
           if (!window.__payjpInstance) {
             log('create Payjp instance (iframe workflow)');
             window.__payjpInstance = window.Payjp(pubKey!);
@@ -218,11 +256,21 @@ function PageInner() {
           setPayjp(window.__payjpInstance);
           log('Payjp ready');
           resolve();
-        } catch (e) { error('ensurePayjpLoaded boot error:', e); reject(e); }
+        } catch (e) {
+          error('ensurePayjpLoaded boot error:', e);
+          reject(e);
+        }
       };
 
-      if (window.__payjpInstance) { setPayjp(window.__payjpInstance); resolve(); return; }
-      if (window.Payjp) { boot(); return; }
+      if (window.__payjpInstance) {
+        setPayjp(window.__payjpInstance);
+        resolve();
+        return;
+      }
+      if (window.Payjp) {
+        boot();
+        return;
+      }
 
       log('inject pay.js');
       const id = 'payjp-v2-sdk';
@@ -232,22 +280,39 @@ function PageInner() {
         s.src = 'https://js.pay.jp/v2/pay.js';
         s.async = true;
         s.onload = boot;
-        s.onerror = (e) => { error('pay.js load error', e); reject(new Error('PAY.JP SDK の読み込みに失敗')); };
+        s.onerror = (e) => {
+          error('pay.js load error', e);
+          reject(new Error('PAY.JP SDK の読み込みに失敗'));
+        };
         document.body.appendChild(s);
       } else {
-        const i = setInterval(() => { if (window.Payjp) { clearInterval(i); boot(); } }, 100);
-        setTimeout(() => { clearInterval(i); if (!window.Payjp) reject(new Error('PAY.JP SDK が利用不可')); }, 8000);
+        const i = setInterval(() => {
+          if (window.Payjp) {
+            clearInterval(i);
+            boot();
+          }
+        }, 100);
+        setTimeout(() => {
+          clearInterval(i);
+          if (!window.Payjp) reject(new Error('PAY.JP SDK が利用不可'));
+        }, 8000);
       }
     });
 
   /* ---------- カード要素 初期化（既存ロジックそのまま） ---------- */
   const initPayjpCard = async () => {
-    if (initCalled.current) { log('initPayjpCard skipped'); return; }
+    if (initCalled.current) {
+      log('initPayjpCard skipped');
+      return;
+    }
     initCalled.current = true;
     log('initPayjpCard start');
 
     await ensurePayjpLoaded().catch((e) => error('ensurePayjpLoaded failed:', e));
-    if (!window.__payjpInstance) { error('PAY.JP 初期化に失敗: window.Payjp 不在'); return; }
+    if (!window.__payjpInstance) {
+      error('PAY.JP 初期化に失敗: window.Payjp 不在');
+      return;
+    }
 
     if (window.__payjpElements?.cardNumber) {
       log('reuse shared elements');
@@ -261,7 +326,10 @@ function PageInner() {
     const numberHost = document.getElementById('card-number');
     const expiryHost = document.getElementById('card-expiry');
     const cvcHost = document.getElementById('card-cvc');
-    const alreadyMounted = !!numberHost?.querySelector('iframe') || !!expiryHost?.querySelector('iframe') || !!cvcHost?.querySelector('iframe');
+    const alreadyMounted =
+      !!numberHost?.querySelector('iframe') ||
+      !!expiryHost?.querySelector('iframe') ||
+      !!cvcHost?.querySelector('iframe');
 
     if (alreadyMounted) {
       log('hosts already have iframes → wait and attach refs');
@@ -282,14 +350,27 @@ function PageInner() {
     try {
       const pj = window.__payjpInstance;
       const elements = pj.elements();
-      const cn = elements.create('cardNumber');  cn.mount('#card-number');
-      const ce = elements.create('cardExpiry');  ce.mount('#card-expiry');
-      const cc = elements.create('cardCvc');     cc.mount('#card-cvc');
+      const cn = elements.create('cardNumber');
+      cn.mount('#card-number');
+      const ce = elements.create('cardExpiry');
+      ce.mount('#card-expiry');
+      const cc = elements.create('cardCvc');
+      cc.mount('#card-cvc');
 
-      window.__payjpElements = { ...(window.__payjpElements || {}), cardNumber: cn, cardExpiry: ce, cardCvc: cc };
-      setCardNumber(cn); setCardExpiry(ce); setCardCvc(cc); setCardReady(true);
+      window.__payjpElements = {
+        ...(window.__payjpElements || {}),
+        cardNumber: cn,
+        cardExpiry: ce,
+        cardCvc: cc,
+      };
+      setCardNumber(cn);
+      setCardExpiry(ce);
+      setCardCvc(cc);
+      setCardReady(true);
       log('mounted new elements');
-    } catch (e) { error('initPayjpCard mount error:', e); }
+    } catch (e) {
+      error('initPayjpCard mount error:', e);
+    }
   };
 
   /* ---------- 3DS ガード（既存） ---------- */
@@ -348,8 +429,14 @@ function PageInner() {
         </div>
       `;
       document.body.appendChild(host);
-      const close = () => { host.remove(); removeThreeDSGuards(); resolve(); };
-      host.querySelector<HTMLButtonElement>('#payjp-3ds-fb-close')?.addEventListener('click', close);
+      const close = () => {
+        host.remove();
+        removeThreeDSGuards();
+        resolve();
+      };
+      host
+        .querySelector<HTMLButtonElement>('#payjp-3ds-fb-close')
+        ?.addEventListener('click', close);
       host.querySelector<HTMLButtonElement>('#payjp-3ds-fb-open')?.addEventListener('click', () => {
         window.open(url, '_blank', 'noopener,noreferrer');
       });
@@ -387,20 +474,29 @@ function PageInner() {
       if (!payjp || !el) throw new Error('PAY.JP が初期化されていません');
 
       let tokenRes: any;
-      try { tokenRes = await payjp.createToken(el, { three_d_secure: true }); }
-      catch { tokenRes = await createTokenWithTimeout(el); }
+      try {
+        tokenRes = await payjp.createToken(el, { three_d_secure: true });
+      } catch {
+        tokenRes = await createTokenWithTimeout(el);
+      }
 
-      if (!tokenRes?.id) throw new Error(tokenRes?.error?.message || 'カードトークンの取得に失敗しました');
+      if (!tokenRes?.id)
+        throw new Error(tokenRes?.error?.message || 'カードトークンの取得に失敗しました');
       const token = tokenRes.id;
       log('card token created (3DS pending)', { token });
 
       const cardRes = await fetchWithTimeout('/api/pay/account/register-card', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-        body: JSON.stringify({ user_code: resolvedCode, token, ...(j?.payjp_customer_id ? { customer_id: j.payjp_customer_id } : {}) }),
+        body: JSON.stringify({
+          user_code: resolvedCode,
+          token,
+          ...(j?.payjp_customer_id ? { customer_id: j.payjp_customer_id } : {}),
+        }),
       });
       const cardJson = await cardRes.json().catch(() => ({}));
-      if (!cardRes.ok || !cardJson?.success) throw new Error(cardJson?.error || `カード登録失敗: ${cardRes.status}`);
+      if (!cardRes.ok || !cardJson?.success)
+        throw new Error(cardJson?.error || `カード登録失敗: ${cardRes.status}`);
 
       setCardRegistered(true);
       setModalTitle('カード登録（本人認証）が完了しました');
@@ -423,7 +519,10 @@ function PageInner() {
     log('subscribe button clicked', { loading, selectedPlan });
     if (loading) return;
     if (!selectedPlan?.plan_type) {
-      setModalTitle('エラー'); setModalMessage('プランを選択してください'); setModalOpen(true); return;
+      setModalTitle('エラー');
+      setModalMessage('プランを選択してください');
+      setModalOpen(true);
+      return;
     }
     if (userData?.plan_status === selectedPlan.plan_type && !expired) {
       log('already on this plan → short-circuit success');
@@ -437,9 +536,14 @@ function PageInner() {
     try {
       const idToken = await getIdTokenWithTimeout();
       const accRes = await fetchWithTimeout('/api/account-status', {
-        method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' }, cache: 'no-store',
+        method: 'POST',
+        headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+        cache: 'no-store',
       });
-      if (!accRes.ok) throw new Error(`アカウント情報の取得に失敗しました: ${await accRes.text() || accRes.status}`);
+      if (!accRes.ok)
+        throw new Error(
+          `アカウント情報の取得に失敗しました: ${(await accRes.text()) || accRes.status}`,
+        );
       const acc = await accRes.json();
 
       const resolvedCode: string | undefined = acc?.user_code;
@@ -459,19 +563,33 @@ function PageInner() {
       };
 
       const firstRes = await fetchWithTimeout('/api/pay/subscribe', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` }, body: JSON.stringify(basePayload),
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify(basePayload),
       });
-      const first = await firstRes.json().catch(() => ({} as any));
+      const first = await firstRes.json().catch(() => ({}) as any);
       log('subscribe first response', { ok: firstRes.ok, first });
 
       if (firstRes.ok && first?.success) {
-        setModalTitle('サブスク登録が完了しました'); setModalMessage('ご利用ありがとうございます。'); setModalOpen(true); await fetchStatus(true); return;
+        setModalTitle('サブスク登録が完了しました');
+        setModalMessage('ご利用ありがとうございます。');
+        setModalOpen(true);
+        await fetchStatus(true);
+        return;
       }
       if (isAlreadySubscribed(first)) {
-        setModalTitle('すでにこのプランに加入済みです'); setModalMessage('そのままご利用いただけます。'); setModalOpen(true); await fetchStatus(true); return;
+        setModalTitle('すでにこのプランに加入済みです');
+        setModalMessage('そのままご利用いただけます。');
+        setModalOpen(true);
+        await fetchStatus(true);
+        return;
       }
       if (!first?.confirmation_required) {
-        const detail = first?.detail || (Array.isArray(first?.missing) && first.missing.length ? `欠落フィールド: ${first.missing.join(', ')}` : '原因不明');
+        const detail =
+          first?.detail ||
+          (Array.isArray(first?.missing) && first.missing.length
+            ? `欠落フィールド: ${first.missing.join(', ')}`
+            : '原因不明');
         throw new Error(detail || '初回リクエストに失敗しました');
       }
 
@@ -483,42 +601,64 @@ function PageInner() {
       if (chargeId) {
         await runThreeDSIframe(chargeId);
         const finalizeRes = await fetchWithTimeout('/api/pay/subscribe', {
-          method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` }, body: JSON.stringify(finalizePayload),
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+          body: JSON.stringify(finalizePayload),
         });
-        const finalize = await finalizeRes.json().catch(() => ({} as any));
+        const finalize = await finalizeRes.json().catch(() => ({}) as any);
         log('subscribe finalize response (SDK)', { ok: finalizeRes.ok, finalize });
         if (!(finalizeRes.ok && finalize?.success) && !isAlreadySubscribed(finalize)) {
-          const detail = finalize?.detail || (Array.isArray(finalize?.missing) && finalize.missing.length ? `欠落フィールド: ${finalize.missing.join(', ')}` : '原因不明');
+          const detail =
+            finalize?.detail ||
+            (Array.isArray(finalize?.missing) && finalize.missing.length
+              ? `欠落フィールド: ${finalize.missing.join(', ')}`
+              : '原因不明');
           throw new Error(detail || 'サブスク登録に失敗しました');
         }
       } else if (confirmUrl) {
         const overlayPromise = runThreeDSViaUrl(confirmUrl);
         const poll = await pollFinalizeSubscribe(finalizePayload, idToken);
         if (poll.ok) {
-          document.getElementById('payjp-3ds-fb-close')?.dispatchEvent(new Event('click')); closeThreeDSModal(); await overlayPromise.catch(() => {});
+          document.getElementById('payjp-3ds-fb-close')?.dispatchEvent(new Event('click'));
+          closeThreeDSModal();
+          await overlayPromise.catch(() => {});
         } else {
-          throw new Error(typeof poll.error === 'string' ? `3Dセキュアの完了を確認できませんでした: ${poll.error}` : '3Dセキュアの完了確認でエラーが発生しました');
+          throw new Error(
+            typeof poll.error === 'string'
+              ? `3Dセキュアの完了を確認できませんでした: ${poll.error}`
+              : '3Dセキュアの完了確認でエラーが発生しました',
+          );
         }
       } else if (tdsrId) {
         await runThreeDSIframe(tdsrId);
         const finalizeRes = await fetchWithTimeout('/api/pay/subscribe', {
-          method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` }, body: JSON.stringify(finalizePayload),
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+          body: JSON.stringify(finalizePayload),
         });
-        const finalize = await finalizeRes.json().catch(() => ({} as any));
+        const finalize = await finalizeRes.json().catch(() => ({}) as any);
         log('subscribe finalize response (TDSR)', { ok: finalizeRes.ok, finalize });
         if (!(finalizeRes.ok && finalize?.success) && !isAlreadySubscribed(finalize)) {
-          const detail = finalize?.detail || (Array.isArray(finalize?.missing) && finalize.missing.length ? `欠落フィールド: ${finalize.missing.join(', ')}` : '原因不明');
+          const detail =
+            finalize?.detail ||
+            (Array.isArray(finalize?.missing) && finalize.missing.length
+              ? `欠落フィールド: ${finalize.missing.join(', ')}`
+              : '原因不明');
           throw new Error(detail || 'サブスク登録に失敗しました');
         }
       } else {
         throw new Error('3Dセキュア情報の取得に失敗しました（charge_id/tdsr_id/confirmation_url）');
       }
 
-      setModalTitle('サブスク登録が完了しました'); setModalMessage('ご利用ありがとうございます。'); setModalOpen(true);
+      setModalTitle('サブスク登録が完了しました');
+      setModalMessage('ご利用ありがとうございます。');
+      setModalOpen(true);
       await fetchStatus(true);
     } catch (err: any) {
       error('Subscription error:', err);
-      setModalTitle('サブスク登録エラー'); setModalMessage(String(err?.message || err)); setModalOpen(true);
+      setModalTitle('サブスク登録エラー');
+      setModalMessage(String(err?.message || err));
+      setModalOpen(true);
     } finally {
       setLoading(false);
     }
@@ -536,13 +676,18 @@ function PageInner() {
         body: JSON.stringify({ user_code }),
       });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok || !j?.success) throw new Error(j?.error || `キャンセルに失敗しました: ${res.status}`);
+      if (!res.ok || !j?.success)
+        throw new Error(j?.error || `キャンセルに失敗しました: ${res.status}`);
       setModalTitle('解約を受け付けました');
-      setModalMessage('アプリ表示は即時に free へ反映されます（最終確定はWebhookでも同期されます）。');
+      setModalMessage(
+        'アプリ表示は即時に free へ反映されます（最終確定はWebhookでも同期されます）。',
+      );
       setModalOpen(true);
       await fetchStatus(true);
     } catch (e: any) {
-      setModalTitle('解約エラー'); setModalMessage(String(e?.message || e)); setModalOpen(true);
+      setModalTitle('解約エラー');
+      setModalMessage(String(e?.message || e));
+      setModalOpen(true);
     } finally {
       setLoading(false);
     }
@@ -559,256 +704,243 @@ function PageInner() {
         body: JSON.stringify({ user_code }),
       });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok || !j?.success) throw new Error(j?.error || `カード削除に失敗しました: ${res.status}`);
-      setModalTitle('カードを削除しました'); setModalMessage('必要に応じて、再度カード登録を実施してください。'); setModalOpen(true);
+      if (!res.ok || !j?.success)
+        throw new Error(j?.error || `カード削除に失敗しました: ${res.status}`);
+      setModalTitle('カードを削除しました');
+      setModalMessage('必要に応じて、再度カード登録を実施してください。');
+      setModalOpen(true);
       await fetchStatus(true);
     } catch (e: any) {
-      setModalTitle('カード削除エラー'); setModalMessage(String(e?.message || e)); setModalOpen(true);
+      setModalTitle('カード削除エラー');
+      setModalMessage(String(e?.message || e));
+      setModalOpen(true);
     } finally {
       setLoading(false);
     }
   };
 
-/* ---------- 追加：同期（PAY.JPと整合） ---------- */
-const handleSyncNow = async () => {
-  if (syncing) return;
-  setSyncing(true);
-  try {
-    const idToken = await getIdTokenWithTimeout();
+  /* ---------- 追加：同期（PAY.JPと整合） ---------- */
+  const handleSyncNow = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      const idToken = await getIdTokenWithTimeout();
 
-    // ★ パスを /api/pay/account/refresh に修正
-    const res = await fetchWithTimeout('/api/pay/account/refresh', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${idToken}`,
-      },
-      body: JSON.stringify({}),
-    });
+      // ★ パスを /api/pay/account/refresh に修正
+      const res = await fetchWithTimeout('/api/pay/account/refresh', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({}),
+      });
 
-    const j = await res.json().catch(() => ({} as any));
-    log('refresh result', { status: res.status, payload: j });
+      const j = await res.json().catch(() => ({}) as any);
+      log('refresh result', { status: res.status, payload: j });
 
-    if (!res.ok) {
-      throw new Error(j?.error || `同期に失敗しました: ${res.status}`);
+      if (!res.ok) {
+        throw new Error(j?.error || `同期に失敗しました: ${res.status}`);
+      }
+
+      // サーバ実装どちらにも耐える: {changed:true} or {ok:true, plan_status...}
+      const changed = j?.changed ?? (j?.ok ? true : false);
+
+      // 画面ステートも更新（返っていれば反映）
+      setUserData((prev: any) => ({
+        ...(prev || {}),
+        plan_status: j?.plan_status ?? prev?.plan_status,
+        plan_valid_until: j?.next_payment_date ?? prev?.plan_valid_until,
+        last_payment_date: j?.last_payment_date ?? prev?.last_payment_date,
+      }));
+
+      setModalTitle('PAY.JPと整合チェック');
+      setModalMessage(
+        changed ? '最新の契約状態に更新しました。' : '変更はありませんでした（最新の状態です）。',
+      );
+      setModalOpen(true);
+
+      await fetchStatus(true);
+    } catch (e: any) {
+      setModalTitle('同期エラー');
+      setModalMessage(String(e?.message || e));
+      setModalOpen(true);
+    } finally {
+      setSyncing(false);
     }
+  };
 
-    // サーバ実装どちらにも耐える: {changed:true} or {ok:true, plan_status...}
-    const changed =
-      j?.changed ??
-      (j?.ok ? true : false);
+  /* ---------- UI ---------- */
+  return (
+    <main className="pay-main">
+      <h1 className="pay-title">ご利用プラン</h1>
 
-    // 画面ステートも更新（返っていれば反映）
-    setUserData((prev: any) => ({
-      ...(prev || {}),
-      plan_status: j?.plan_status ?? prev?.plan_status,
-      plan_valid_until: j?.next_payment_date ?? prev?.plan_valid_until,
-      last_payment_date: j?.last_payment_date ?? prev?.last_payment_date,
-    }));
-
-    setModalTitle('PAY.JPと整合チェック');
-    setModalMessage(
-      changed
-        ? '最新の契約状態に更新しました。'
-        : '変更はありませんでした（最新の状態です）。'
-    );
-    setModalOpen(true);
-
-    await fetchStatus(true);
-  } catch (e: any) {
-    setModalTitle('同期エラー');
-    setModalMessage(String(e?.message || e));
-    setModalOpen(true);
-  } finally {
-    setSyncing(false);
-  }
-};
-
-
-/* ---------- UI ---------- */
-return (
-  <main className="pay-main">
-    <h1 className="pay-title">ご利用プラン</h1>
-
-    <section className="mt-2 rounded-xl border border-gray-200 p-3 bg-white">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-sm text-gray-800">
-            <b>現在のプラン</b>：{userData?.plan_status ?? 'free'}
-            {/* ← (click_type: …) は非表示にしました */}
-          </div>
-          <div className="text-sm text-gray-800 mt-1">
-            <b>有効期限</b>：
-            {userData?.plan_valid_until
-              ? dayjs(userData.plan_valid_until).format('YYYY/MM/DD HH:mm')
-              : '―'}
-          </div>
-          <div className="text-sm text-gray-800 mt-1">
-            <b>クレジット残</b>：{userCredit}
-          </div>
-        </div>
-        {/* 上部の同期ボタンは削除しました */}
-      </div>
-    </section>
-
-    <PlanSelectPanel
-      userCode={user_code}
-      cardRegistered={cardRegistered}
-      userCredit={userCredit}
-      onPlanSelected={(plan) => {
-        log('onPlanSelected', plan);
-        setSelectedPlan(plan);
-      }}
-    />
-
-    {expired && (
-      <div className="mt-3 rounded-xl bg-amber-50 border border-amber-200 p-3 text-amber-900">
-        ⚠ サブスクリプションの有効期限が切れています。プランを再購入してください。
-      </div>
-    )}
-
-    {!cardRegistered && (
-      <>
-        {!showCardForm ? (
-          <div className="text-center mt-4">
-            <button
-              className="btn-card-register"
-              onClick={() => {
-                log('open card form');
-                setShowCardForm(true);
-                initPayjpCard();
-              }}
-              disabled={loading}
-            >
-              カードを登録する
-            </button>
-          </div>
-        ) : (
+      <section className="mt-2 rounded-xl border border-gray-200 p-3 bg-white">
+        <div className="flex items-start justify-between gap-3">
           <div>
-            <CardStyle />
-            <div className="text-center mt-4 mb-6">
+            <div className="text-sm text-gray-800">
+              <b>現在のプラン</b>：{userData?.plan_status ?? 'free'}
+              {/* ← (click_type: …) は非表示にしました */}
+            </div>
+            <div className="text-sm text-gray-800 mt-1">
+              <b>有効期限</b>：
+              {userData?.plan_valid_until
+                ? dayjs(userData.plan_valid_until).format('YYYY/MM/DD HH:mm')
+                : '―'}
+            </div>
+            <div className="text-sm text-gray-800 mt-1">
+              <b>クレジット残</b>：{userCredit}
+            </div>
+          </div>
+          {/* 上部の同期ボタンは削除しました */}
+        </div>
+      </section>
+
+      <PlanSelectPanel
+        userCode={user_code}
+        cardRegistered={cardRegistered}
+        userCredit={userCredit}
+        onPlanSelected={(plan) => {
+          log('onPlanSelected', plan);
+          setSelectedPlan(plan);
+        }}
+      />
+
+      {expired && (
+        <div className="mt-3 rounded-xl bg-amber-50 border border-amber-200 p-3 text-amber-900">
+          ⚠ サブスクリプションの有効期限が切れています。プランを再購入してください。
+        </div>
+      )}
+
+      {!cardRegistered && (
+        <>
+          {!showCardForm ? (
+            <div className="text-center mt-4">
               <button
-                onClick={handleCardRegistration}
-                disabled={!cardReady || loading}
-                className="btn-card-submit w-full"
+                className="btn-card-register"
+                onClick={() => {
+                  log('open card form');
+                  setShowCardForm(true);
+                  initPayjpCard();
+                }}
+                disabled={loading}
               >
-                {loading ? 'カード登録中…' : 'このカードを登録する'}
+                カードを登録する
               </button>
             </div>
-          </div>
-        )}
-      </>
-    )}
-
-    {cardRegistered && (
-      <>
-        <div className="registered-card-box text-center">
-          <p className="text-gray-700">
-            💳 登録済みカード: {userData?.card_brand || 'VISA'} ****{' '}
-            {userData?.card_last4 || '****'}
-          </p>
-        </div>
-
-        {/* 購入ボタンのボックス（CSSで余白管理） */}
-        <div className="subscribe-box">
-          <button
-            className="btn-subscribe w-full"
-            onClick={handleSubscribe}
-            disabled={!selectedPlan || loading}
-          >
-            {loading
-              ? '処理中…'
-              : expired
-              ? 'プランを再購入する'
-              : 'プランを購入する'}
-          </button>
-        </div>
-      </>
-    )}
-
-    {/* 履歴セクション（CSSで余白管理） */}
-{/* 履歴セクション（余白は CSS の .history-section で管理） */}
-<section className="history-section">
-  <details className="history-acc" open={false}>
-    <summary className="history-acc__summary">
-      <span className="history-acc__title">プラン履歴</span>
-      <span className="history-acc__count">{history.length} 件</span>
-      <svg className="history-acc__chev" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M7 10l5 5 5-5" />
-      </svg>
-    </summary>
-
-    {history.length === 0 ? (
-      <p className="history-empty">履歴はまだありません。</p>
-    ) : (
-      <ul className="history-list">
-        {history.map((h, i) => (
-          <li key={i} className="history-item">
-            <div className="history-row">
-              {/* 開始〜終了日時 */}
-              <div className="history-when">
-                <b>{dayjs(h.started_at).format('YYYY/MM/DD HH:mm')}</b>
-                {h.ended_at
-                  ? ` 〜 ${dayjs(h.ended_at).format('YYYY/MM/DD HH:mm')}`
-                  : ' 〜 現在'}
+          ) : (
+            <div>
+              <CardStyle />
+              <div className="text-center mt-4 mb-6">
+                <button
+                  onClick={handleCardRegistration}
+                  disabled={!cardReady || loading}
+                  className="btn-card-submit w-full"
+                >
+                  {loading ? 'カード登録中…' : 'このカードを登録する'}
+                </button>
               </div>
-
-              {/* プランの変更 */}
-              <div className="history-what">
-                {h.from_plan_status || '未設定'} → <b>{h.to_plan_status}</b>
-              </div>
-
-              {/* 理由やソースがある場合だけ表示 */}
-              {(h.reason || h.source) && (
-                <div className="history-meta">
-                  reason: {h.reason || '-'} / source: {h.source || '-'}
-                </div>
-              )}
             </div>
-          </li>
-        ))}
-      </ul>
-    )}
-  </details>
-</section>
+          )}
+        </>
+      )}
 
+      {cardRegistered && (
+        <>
+          <div className="registered-card-box text-center">
+            <p className="text-gray-700">
+              💳 登録済みカード: {userData?.card_brand || 'VISA'} ****{' '}
+              {userData?.card_last4 || '****'}
+            </p>
+          </div>
 
-    {/* ▼ 下部ボタン群（CSSでgap管理） */}
-    <div className="bottom-buttons">
-      <button
-        className="btn-cancel"
-        onClick={handleCancelSubscription}
-        disabled={loading}
-      >
-        プランを解約する
-      </button>
+          {/* 購入ボタンのボックス（CSSで余白管理） */}
+          <div className="subscribe-box">
+            <button
+              className="btn-subscribe w-full"
+              onClick={handleSubscribe}
+              disabled={!selectedPlan || loading}
+            >
+              {loading ? '処理中…' : expired ? 'プランを再購入する' : 'プランを購入する'}
+            </button>
+          </div>
+        </>
+      )}
 
-      <button
-        className="btn-remove-card"
-        onClick={handleRemoveCard}
-        disabled={loading}
-      >
-        カードを削除する
-      </button>
+      {/* 履歴セクション（CSSで余白管理） */}
+      {/* 履歴セクション（余白は CSS の .history-section で管理） */}
+      <section className="history-section">
+        <details className="history-acc" open={false}>
+          <summary className="history-acc__summary">
+            <span className="history-acc__title">プラン履歴</span>
+            <span className="history-acc__count">{history.length} 件</span>
+            <svg className="history-acc__chev" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M7 10l5 5 5-5" />
+            </svg>
+          </summary>
 
-      <button
-        className="btn-sync"
-        onClick={handleSyncNow}
-        disabled={syncing}
-        title="最新の契約状態を取得して反映します"
-      >
-        {syncing ? '同期中…' : 'プランチェック'}
-      </button>
-    </div>
+          {history.length === 0 ? (
+            <p className="history-empty">履歴はまだありません。</p>
+          ) : (
+            <ul className="history-list">
+              {history.map((h, i) => (
+                <li key={i} className="history-item">
+                  <div className="history-row">
+                    {/* 開始〜終了日時 */}
+                    <div className="history-when">
+                      <b>{dayjs(h.started_at).format('YYYY/MM/DD HH:mm')}</b>
+                      {h.ended_at
+                        ? ` 〜 ${dayjs(h.ended_at).format('YYYY/MM/DD HH:mm')}`
+                        : ' 〜 現在'}
+                    </div>
 
-    <PayResultModal
-      open={modalOpen}
-      title={modalTitle}
-      message={modalMessage}
-      onClose={() => setModalOpen(false)}
-    />
-  </main>
-);
+                    {/* プランの変更 */}
+                    <div className="history-what">
+                      {h.from_plan_status || '未設定'} → <b>{h.to_plan_status}</b>
+                    </div>
+
+                    {/* 理由やソースがある場合だけ表示 */}
+                    {(h.reason || h.source) && (
+                      <div className="history-meta">
+                        reason: {h.reason || '-'} / source: {h.source || '-'}
+                      </div>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </details>
+      </section>
+
+      {/* ▼ 下部ボタン群（CSSでgap管理） */}
+      <div className="bottom-buttons">
+        <button className="btn-cancel" onClick={handleCancelSubscription} disabled={loading}>
+          プランを解約する
+        </button>
+
+        <button className="btn-remove-card" onClick={handleRemoveCard} disabled={loading}>
+          カードを削除する
+        </button>
+
+        <button
+          className="btn-sync"
+          onClick={handleSyncNow}
+          disabled={syncing}
+          title="最新の契約状態を取得して反映します"
+        >
+          {syncing ? '同期中…' : 'プランチェック'}
+        </button>
+      </div>
+
+      <PayResultModal
+        open={modalOpen}
+        title={modalTitle}
+        message={modalMessage}
+        onClose={() => setModalOpen(false)}
+      />
+    </main>
+  );
 }
 
 /* ==== ここから下はそのまま ==== */

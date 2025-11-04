@@ -5,11 +5,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
 export type SofCurrentUser = {
-  id: string;               // user_code or auth uid
+  id: string; // user_code or auth uid
   name: string;
   userType: string;
   credits: number;
-  avatarUrl?: string | null;  // ← MessageList が読むのはコレ
+  avatarUrl?: string | null; // ← MessageList が読むのはコレ
 };
 
 /**
@@ -34,7 +34,11 @@ export function useCurrentUser(opts?: { userCode?: string }) {
       const userCode = opts?.userCode ?? null;
 
       // user_code で検索する場合
-      let prof = null as null | { name?: string | null; avatar_url?: string | null; user_code?: string };
+      let prof = null as null | {
+        name?: string | null;
+        avatar_url?: string | null;
+        user_code?: string;
+      };
 
       if (userCode) {
         const { data } = await supabase

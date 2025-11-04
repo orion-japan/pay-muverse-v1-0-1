@@ -14,7 +14,9 @@ const PLAN_IDS: Record<string, string | undefined> = {
 async function getUser(user_code: string) {
   const { data, error } = await supabaseAdmin
     .from('users')
-    .select('user_code, click_type, plan_status, payjp_customer_id, payjp_subscription_id, plan_valid_until')
+    .select(
+      'user_code, click_type, plan_status, payjp_customer_id, payjp_subscription_id, plan_valid_until',
+    )
     .eq('user_code', user_code)
     .maybeSingle();
   if (error) throw error;
@@ -30,11 +32,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'user_code and plan_type required' }, { status: 400 });
     }
     const planId = PLAN_IDS[plan_type];
-    if (!planId) return NextResponse.json({ error: `Unknown plan_type: ${plan_type}` }, { status: 400 });
+    if (!planId)
+      return NextResponse.json({ error: `Unknown plan_type: ${plan_type}` }, { status: 400 });
 
     const u = await getUser(user_code);
     if (!u.payjp_customer_id) {
-      return NextResponse.json({ error: 'customer not registered (card required)' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'customer not registered (card required)' },
+        { status: 400 },
+      );
     }
 
     // 既存サブスクを終了（即時キャンセル）
@@ -86,7 +92,11 @@ export async function POST(req: NextRequest) {
       }),
     });
 
-    return NextResponse.json({ success: true, subscription_id: sub?.id, current_period_end: periodEnd });
+    return NextResponse.json({
+      success: true,
+      subscription_id: sub?.id,
+      current_period_end: periodEnd,
+    });
   } catch (e: any) {
     console.error('[subscribe/start] error', e);
     return NextResponse.json({ error: e?.message || 'error' }, { status: 500 });

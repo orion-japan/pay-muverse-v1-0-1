@@ -8,13 +8,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const {
-      thread_id,
-      user_code,
-      content,
-      board_type,
-      media_urls = [],
-    } = body;
+    const { thread_id, user_code, content, board_type, media_urls = [] } = body;
 
     // 必須項目チェック
     if (!thread_id || !user_code || !content) {
@@ -53,7 +47,6 @@ export async function POST(req: NextRequest) {
 
     console.log('[✅ 子投稿 成功]', data);
     return NextResponse.json(data, { status: 201 });
-
   } catch (err: any) {
     console.error('[❌ 例外エラー]', err.message || err);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });

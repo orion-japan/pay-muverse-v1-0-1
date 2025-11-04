@@ -37,7 +37,7 @@ type RelationLabel = 'tension' | 'harmony' | 'neutral';
 // ===== env helpers =====
 function envNumAny(def: number, ...names: string[]): number {
   for (const n of names) {
-    const raw = (typeof process !== 'undefined' ? (process as any).env?.[n] : undefined);
+    const raw = typeof process !== 'undefined' ? (process as any).env?.[n] : undefined;
     if (raw != null) {
       const v = Number(raw);
       if (Number.isFinite(v)) return v;
@@ -47,7 +47,7 @@ function envNumAny(def: number, ...names: string[]): number {
 }
 function envStr(def: string, ...names: string[]): string {
   for (const n of names) {
-    const raw = (typeof process !== 'undefined' ? (process as any).env?.[n] : undefined);
+    const raw = typeof process !== 'undefined' ? (process as any).env?.[n] : undefined;
     if (typeof raw === 'string' && raw.trim() !== '') return raw;
   }
   return def;
@@ -55,9 +55,9 @@ function envStr(def: string, ...names: string[]): string {
 
 function tuneTemperature(base: number, q?: MuContext['q_code'], phase?: MuContext['phase']) {
   let t = base;
-  if (q === 'Q5') t += 0.10;
+  if (q === 'Q5') t += 0.1;
   if (q === 'Q2') t += 0.05;
-  if (q === 'Q3') t -= 0.10;
+  if (q === 'Q3') t -= 0.1;
   if (q === 'Q4') t -= 0.05;
   if (phase === 'Inner') t -= 0.05;
   if (phase === 'Outer') t += 0.05;
@@ -67,8 +67,8 @@ function tuneTemperature(base: number, q?: MuContext['q_code'], phase?: MuContex
 function maybeHint(opts: { q?: MuContext['q_code']; phase?: MuContext['phase']; idle?: boolean }) {
   let p = opts.idle ? 0.7 : 0.25;
   if (opts.q === 'Q3') p -= 0.15;
-  if (opts.q === 'Q4') p -= 0.10;
-  if (opts.q === 'Q5') p += 0.10;
+  if (opts.q === 'Q4') p -= 0.1;
+  if (opts.q === 'Q5') p += 0.1;
   if (opts.q === 'Q2') p += 0.05;
   p = Math.max(0.05, Math.min(0.9, p));
   if (Math.random() > p) return null;
@@ -102,10 +102,10 @@ function attachDebug(meta: any, extra?: Record<string, any>) {
 // ===== 軽い推定 =====
 function inferPhase(text: string): 'Inner' | 'Outer' {
   const t = (text || '').toLowerCase();
-  const innerKeys = ['気持ち','感情','不安','イライラ','怖','心','胸','わたし','私'];
-  const outerKeys = ['上司','相手','会議','職場','メール','チーム','外部','環境'];
-  const innerHit = innerKeys.some(k => t.includes(k));
-  const outerHit = outerKeys.some(k => t.includes(k));
+  const innerKeys = ['気持ち', '感情', '不安', 'イライラ', '怖', '心', '胸', 'わたし', '私'];
+  const outerKeys = ['上司', '相手', '会議', '職場', 'メール', 'チーム', '外部', '環境'];
+  const innerHit = innerKeys.some((k) => t.includes(k));
+  const outerHit = outerKeys.some((k) => t.includes(k));
   if (innerHit && !outerHit) return 'Inner';
   if (outerHit && !innerHit) return 'Outer';
   return 'Inner';
@@ -135,7 +135,7 @@ function buildAnalysis(
   q: string | null,
   phase: 'Inner' | 'Outer',
   self: { score: number; band: SelfBand },
-  relation: { label: RelationLabel; confidence: number }
+  relation: { label: RelationLabel; confidence: number },
 ) {
   const head = input.replace(/\s+/g, ' ').slice(0, 80);
   const qMap: Record<string, string> = {
@@ -148,7 +148,8 @@ function buildAnalysis(
   const summary = `${head}${head.length === 80 ? '…' : ''}（${q && qMap[q] ? qMap[q] : '内省フェーズ'}）`;
 
   let background = '自己期待と現実のギャップによるストレス反応が考えられます。';
-  if (q === 'Q1') background = '境界や手順への配慮が満たされず、苛立ちや詰まり感が生じている可能性。';
+  if (q === 'Q1')
+    background = '境界や手順への配慮が満たされず、苛立ちや詰まり感が生じている可能性。';
   if (q === 'Q2') background = '成長/裁量を妨げられた感覚が怒りとして表面化している可能性。';
   if (q === 'Q3') background = '不確実さや自己評価の揺らぎが不安として滞留している可能性。';
   if (q === 'Q4') background = '威圧/圧の記憶が再燃し、身体の萎縮が思考を狭めている可能性。';
@@ -158,15 +159,19 @@ function buildAnalysis(
     '事実/解釈/願いを3行で分ける',
     '20〜60秒のミニ実験（呼吸・姿勢・1行メモ）',
     '「本当はどうあってほしい？」を1問だけ書く',
-    '終わったら気分を1〜5で自己評価'
+    '終わったら気分を1〜5で自己評価',
   ];
 
   const keyword =
-    q === 'Q2' ? '境界が守られると怒りは方向性に変わる' :
-    q === 'Q3' ? '小さな安定が次の一歩を呼ぶ' :
-    q === 'Q1' ? '秩序は安心の足場' :
-    q === 'Q4' ? '圧が抜けると呼吸が戻る' :
-    '火種は小さくても前に進む';
+    q === 'Q2'
+      ? '境界が守られると怒りは方向性に変わる'
+      : q === 'Q3'
+        ? '小さな安定が次の一歩を呼ぶ'
+        : q === 'Q1'
+          ? '秩序は安心の足場'
+          : q === 'Q4'
+            ? '圧が抜けると呼吸が戻る'
+            : '火種は小さくても前に進む';
 
   return { summary, background, tips, keyword, phase, selfAcceptance: self, relation, q };
 }
@@ -174,20 +179,35 @@ function buildAnalysis(
 // --- ここから本体 ---
 export async function generateMuReply(message: string, ctx: MuContext) {
   const trace = new MuTrace();
-  const g = 0.5, stochastic = false, noiseAmp = 0.15;
+  const g = 0.5,
+    stochastic = false,
+    noiseAmp = 0.15;
   const seed = Math.floor(Math.random() * 1e11);
 
   const phase: 'Inner' | 'Outer' = ctx.phase ?? inferPhase(message);
   const self = inferSelfAcceptance(message);
   const relation = inferRelation(message);
 
-  let qMeta: { q?: 'Q1'|'Q2'|'Q3'|'Q4'|'Q5'; confidence?: number; hint?: string; color_hex?: string } = {};
-  try { qMeta = await inferQCode(message); } catch {}
+  let qMeta: {
+    q?: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
+    confidence?: number;
+    hint?: string;
+    color_hex?: string;
+  } = {};
+  try {
+    qMeta = await inferQCode(message);
+  } catch {}
 
   // 0) 画像リクエスト
   if (detectExplicitImageRequest(message)) {
     trace.add('detect_mode', { mode: 'image_request', trigger: 'explicit' });
-    trace.add('state_infer', { phase, depth_raw: null, depth_final: ctx.stage ?? null, q_code: qMeta.q ?? ctx.q_code ?? null, signals: { from: 'context' } });
+    trace.add('state_infer', {
+      phase,
+      depth_raw: null,
+      depth_final: ctx.stage ?? null,
+      q_code: qMeta.q ?? ctx.q_code ?? null,
+      signals: { from: 'context' },
+    });
     trace.add('indicators', { g, stochastic, noiseAmp, seed });
     trace.add('retrieve', { hits: 0, epsilon: 0.4 });
 
@@ -198,26 +218,64 @@ export async function generateMuReply(message: string, ctx: MuContext) {
       top_p: envNumAny(1, 'MU_TOP_P'),
       frequency_penalty: envNumAny(0, 'MU_FREQ_PENALTY'),
       presence_penalty: envNumAny(0, 'MU_PRES_PENALTY'),
-      user_code: ctx.user_code, master_id: ctx.master_id, sub_id: ctx.sub_id,
-      thread_id: ctx.thread_id ?? null, board_id: ctx.board_id ?? null,
-      source_type: ctx.source_type ?? 'chat', phase,
-      q_code: qMeta.q ?? ctx.q_code ?? null, hits: 0, epsilon: 0.4,
-      noiseAmp, stochastic, g, seed,
+      user_code: ctx.user_code,
+      master_id: ctx.master_id,
+      sub_id: ctx.sub_id,
+      thread_id: ctx.thread_id ?? null,
+      board_id: ctx.board_id ?? null,
+      source_type: ctx.source_type ?? 'chat',
+      phase,
+      q_code: qMeta.q ?? ctx.q_code ?? null,
+      hits: 0,
+      epsilon: 0.4,
+      noiseAmp,
+      stochastic,
+      g,
+      seed,
     });
-    augmentIrosCompatibleMeta(meta, { phase, g, stochastic, noiseAmp, seed, q_code: qMeta.q ?? ctx.q_code ?? null });
+    augmentIrosCompatibleMeta(meta, {
+      phase,
+      g,
+      stochastic,
+      noiseAmp,
+      seed,
+      q_code: qMeta.q ?? ctx.q_code ?? null,
+    });
     meta.analysis = buildAnalysis(message, reply, qMeta.q ?? null, phase, self, relation);
     meta.dialogue_trace = trace.dump();
-    meta.versions = { mu_prompt: meta.mu_prompt_version ?? 'mu.v2.1.0', q_mapper: 'qmap.v0.3.2', schema: 'mu.log.v1' };
+    meta.versions = {
+      mu_prompt: meta.mu_prompt_version ?? 'mu.v2.1.0',
+      q_mapper: 'qmap.v0.3.2',
+      schema: 'mu.log.v1',
+    };
     attachDebug(meta, { path: 'image_request', q_meta: qMeta });
 
-    const qTop = qMeta.q ? { code: qMeta.q, stage: ctx.stage ?? 'S1', color: { base: 'Auto', hex: qMeta.color_hex ?? '#FFD54F' } } : undefined;
-    return wrapMuResponse({ conversation_code: ctx.master_id, reply, meta, agent: 'mu', q: qTop } as any);
+    const qTop = qMeta.q
+      ? {
+          code: qMeta.q,
+          stage: ctx.stage ?? 'S1',
+          color: { base: 'Auto', hex: qMeta.color_hex ?? '#FFD54F' },
+        }
+      : undefined;
+    return wrapMuResponse({
+      conversation_code: ctx.master_id,
+      reply,
+      meta,
+      agent: 'mu',
+      q: qTop,
+    } as any);
   }
 
   // 1) 画像スタイル指定あり
   if (ctx.image_style) {
     trace.add('detect_mode', { mode: 'image_generate', trigger: 'style_set' });
-    trace.add('state_infer', { phase, depth_raw: null, depth_final: ctx.stage ?? null, q_code: qMeta.q ?? ctx.q_code ?? null, signals: { from: 'context' } });
+    trace.add('state_infer', {
+      phase,
+      depth_raw: null,
+      depth_final: ctx.stage ?? null,
+      q_code: qMeta.q ?? ctx.q_code ?? null,
+      signals: { from: 'context' },
+    });
     trace.add('indicators', { g, stochastic, noiseAmp, seed });
     trace.add('retrieve', { hits: 0, epsilon: 0.4 });
 
@@ -228,56 +286,130 @@ export async function generateMuReply(message: string, ctx: MuContext) {
       top_p: envNumAny(1, 'MU_TOP_P'),
       frequency_penalty: envNumAny(0, 'MU_FREQ_PENALTY'),
       presence_penalty: envNumAny(0, 'MU_PRES_PENALTY'),
-      user_code: ctx.user_code, master_id: ctx.master_id, sub_id: ctx.sub_id,
-      thread_id: ctx.thread_id ?? null, board_id: ctx.board_id ?? null,
-      source_type: ctx.source_type ?? 'chat', phase,
-      q_code: qMeta.q ?? ctx.q_code ?? null, hits: 0, epsilon: 0.4,
-      noiseAmp, stochastic, g, seed,
+      user_code: ctx.user_code,
+      master_id: ctx.master_id,
+      sub_id: ctx.sub_id,
+      thread_id: ctx.thread_id ?? null,
+      board_id: ctx.board_id ?? null,
+      source_type: ctx.source_type ?? 'chat',
+      phase,
+      q_code: qMeta.q ?? ctx.q_code ?? null,
+      hits: 0,
+      epsilon: 0.4,
+      noiseAmp,
+      stochastic,
+      g,
+      seed,
     });
-    augmentIrosCompatibleMeta(meta, { phase, g, stochastic, noiseAmp, seed, q_code: qMeta.q ?? ctx.q_code ?? null });
+    augmentIrosCompatibleMeta(meta, {
+      phase,
+      g,
+      stochastic,
+      noiseAmp,
+      seed,
+      q_code: qMeta.q ?? ctx.q_code ?? null,
+    });
     meta.analysis = buildAnalysis(message, reply, qMeta.q ?? null, phase, self, relation);
     meta.dialogue_trace = trace.dump();
-    meta.versions = { mu_prompt: meta.mu_prompt_version ?? 'mu.v2.1.0', q_mapper: 'qmap.v0.3.2', schema: 'mu.log.v1' };
+    meta.versions = {
+      mu_prompt: meta.mu_prompt_version ?? 'mu.v2.1.0',
+      q_mapper: 'qmap.v0.3.2',
+      schema: 'mu.log.v1',
+    };
     attachDebug(meta, { path: 'image_generate', q_meta: qMeta });
 
-    const qTop = qMeta.q ? { code: qMeta.q, stage: ctx.stage ?? 'S1', color: { base: 'Auto', hex: qMeta.color_hex ?? '#FFD54F' } } : undefined;
-    return wrapMuResponse({ conversation_code: ctx.master_id, reply, meta, agent: 'mu', q: qTop } as any);
+    const qTop = qMeta.q
+      ? {
+          code: qMeta.q,
+          stage: ctx.stage ?? 'S1',
+          color: { base: 'Auto', hex: qMeta.color_hex ?? '#FFD54F' },
+        }
+      : undefined;
+    return wrapMuResponse({
+      conversation_code: ctx.master_id,
+      reply,
+      meta,
+      agent: 'mu',
+      q: qTop,
+    } as any);
   }
 
   // 2) 通常テキスト返信（トピックで挙動切替）
-  const CREATIVE_KEYWORDS = ['アート','美術','表現','作品','詩','写真','絵','映画','デザイン','色','質感'] as const;
-  const LOVE_KEYWORDS = [
-    '恋愛','好き','告白','振ら','フラれ','彼氏','彼女','片思い','デート','既読','未読','返信',
-    '脈','距離','温度差','ブロック','友達止まり','LINE','ライン'
+  const CREATIVE_KEYWORDS = [
+    'アート',
+    '美術',
+    '表現',
+    '作品',
+    '詩',
+    '写真',
+    '絵',
+    '映画',
+    'デザイン',
+    '色',
+    '質感',
   ] as const;
-  const isCreative  = CREATIVE_KEYWORDS.some(w => message.includes(w));
-  const isLoveTopic = LOVE_KEYWORDS.some(w => message.includes(w));
+  const LOVE_KEYWORDS = [
+    '恋愛',
+    '好き',
+    '告白',
+    '振ら',
+    'フラれ',
+    '彼氏',
+    '彼女',
+    '片思い',
+    'デート',
+    '既読',
+    '未読',
+    '返信',
+    '脈',
+    '距離',
+    '温度差',
+    'ブロック',
+    '友達止まり',
+    'LINE',
+    'ライン',
+  ] as const;
+  const isCreative = CREATIVE_KEYWORDS.some((w) => message.includes(w));
+  const isLoveTopic = LOVE_KEYWORDS.some((w) => message.includes(w));
 
-  trace.add('detect_mode', { mode: isLoveTopic ? 'action' : (isCreative ? 'creative' : 'normal'), trigger: 'auto' });
+  trace.add('detect_mode', {
+    mode: isLoveTopic ? 'action' : isCreative ? 'creative' : 'normal',
+    trigger: 'auto',
+  });
 
   const system = buildMuSystemPrompt({});
   const model = (MU_AGENT as any)?.model ?? envStr('gpt-4o-mini', 'MU_MODEL');
   const baseTemp = (MU_AGENT as any)?.temperature ?? envNumAny(0.6, 'MU_TEMPERATURE');
-  const temperature = Math.max(0.1, Math.min(0.9,
-    tuneTemperature(baseTemp, qMeta.q ?? ctx.q_code, phase) + (isCreative ? +0.05 : isLoveTopic ? -0.05 : 0)
-  ));
+  const temperature = Math.max(
+    0.1,
+    Math.min(
+      0.9,
+      tuneTemperature(baseTemp, qMeta.q ?? ctx.q_code, phase) +
+        (isCreative ? +0.05 : isLoveTopic ? -0.05 : 0),
+    ),
+  );
   const top_p = envNumAny(1, 'MU_TOP_P');
   const frequency_penalty = envNumAny(0, 'MU_FREQ_PENALTY');
   const presence_penalty = envNumAny(0, 'MU_PRES_PENALTY');
 
-  trace.add('state_infer', { signals: { from: 'context' }, phase, depth_raw: null, depth_final: ctx.stage ?? null, q_code: qMeta.q ?? ctx.q_code ?? null });
+  trace.add('state_infer', {
+    signals: { from: 'context' },
+    phase,
+    depth_raw: null,
+    depth_final: ctx.stage ?? null,
+    q_code: qMeta.q ?? ctx.q_code ?? null,
+  });
 
   // ディレクティブ
-  const DIRECTIVE =
-    isLoveTopic
-      ? `（問題解決系）抽象語は禁止。短く具体に。「実行文」を含める。
+  const DIRECTIVE = isLoveTopic
+    ? `（問題解決系）抽象語は禁止。短く具体に。「実行文」を含める。
 必ず Goal / Today Action(A/B/C) / If-Then の順で出す。
 Bはコピペ可能な送信文（20〜60文字、敬体）。`
-      : isCreative
+    : isCreative
       ? `（創作/感性系）見出し・箇条書きは禁止。2〜3文で短く、最後に**質問は1つだけ**。A/Bの二択は**1行にまとめて**提示して良い。`
       : `見出しや箇条書きは避け、会話体で2〜3文＋最後に質問を1つだけ。`;
 
-  const key = (typeof process !== 'undefined' ? (process as any).env?.OPENAI_API_KEY : undefined);
+  const key = typeof process !== 'undefined' ? (process as any).env?.OPENAI_API_KEY : undefined;
 
   // --- APIキー未設定（mock） ---
   if (!key) {
@@ -293,21 +425,57 @@ Bはコピペ可能な送信文（20〜60文字、敬体）。`
     }
 
     const meta: any = buildMuMeta({
-      model, temperature, top_p, frequency_penalty, presence_penalty,
-      user_code: ctx.user_code, master_id: ctx.master_id, sub_id: ctx.sub_id,
-      thread_id: ctx.thread_id ?? null, board_id: ctx.board_id ?? null,
-      source_type: ctx.source_type ?? 'chat', phase,
-      q_code: qMeta.q ?? ctx.q_code ?? null, hits: 0, epsilon: 0.4,
-      noiseAmp, stochastic, g, seed,
+      model,
+      temperature,
+      top_p,
+      frequency_penalty,
+      presence_penalty,
+      user_code: ctx.user_code,
+      master_id: ctx.master_id,
+      sub_id: ctx.sub_id,
+      thread_id: ctx.thread_id ?? null,
+      board_id: ctx.board_id ?? null,
+      source_type: ctx.source_type ?? 'chat',
+      phase,
+      q_code: qMeta.q ?? ctx.q_code ?? null,
+      hits: 0,
+      epsilon: 0.4,
+      noiseAmp,
+      stochastic,
+      g,
+      seed,
     });
-    augmentIrosCompatibleMeta(meta, { phase, g, stochastic, noiseAmp, seed, q_code: qMeta.q ?? ctx.q_code ?? null });
+    augmentIrosCompatibleMeta(meta, {
+      phase,
+      g,
+      stochastic,
+      noiseAmp,
+      seed,
+      q_code: qMeta.q ?? ctx.q_code ?? null,
+    });
     meta.analysis = buildAnalysis(message, reply, qMeta.q ?? null, phase, self, relation);
     meta.dialogue_trace = trace.dump();
-    meta.versions = { mu_prompt: meta.mu_prompt_version ?? 'mu.v2.1.0', q_mapper: 'qmap.v0.3.2', schema: 'mu.log.v1' };
+    meta.versions = {
+      mu_prompt: meta.mu_prompt_version ?? 'mu.v2.1.0',
+      q_mapper: 'qmap.v0.3.2',
+      schema: 'mu.log.v1',
+    };
     attachDebug(meta, { path: 'text_mock', q_meta: qMeta });
 
-    const qTop = qMeta.q ? { code: qMeta.q, stage: ctx.stage ?? 'S1', color: { base: 'Auto', hex: qMeta.color_hex ?? '#FFD54F' } } : undefined;
-    return wrapMuResponse({ conversation_code: ctx.master_id, reply, meta, agent: 'mu', q: qTop } as any);
+    const qTop = qMeta.q
+      ? {
+          code: qMeta.q,
+          stage: ctx.stage ?? 'S1',
+          color: { base: 'Auto', hex: qMeta.color_hex ?? '#FFD54F' },
+        }
+      : undefined;
+    return wrapMuResponse({
+      conversation_code: ctx.master_id,
+      reply,
+      meta,
+      agent: 'mu',
+      q: qTop,
+    } as any);
   }
 
   // --- OpenAI呼び出し（1本だけ） ---
@@ -315,7 +483,11 @@ Bはコピペ可能な送信文（20〜60文字、敬体）。`
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model, temperature, top_p, frequency_penalty, presence_penalty,
+      model,
+      temperature,
+      top_p,
+      frequency_penalty,
+      presence_penalty,
       messages: [
         { role: 'system', content: system },
         ...(DIRECTIVE ? [{ role: 'system' as const, content: DIRECTIVE }] : []),
@@ -346,27 +518,70 @@ Bはコピペ可能な送信文（20〜60文字、敬体）。`
   trace.add('openai_reply', { model, temperature, top_p, seed });
 
   const meta: any = buildMuMeta({
-    model, temperature, top_p, frequency_penalty, presence_penalty,
-    user_code: ctx.user_code, master_id: ctx.master_id, sub_id: ctx.sub_id,
-    thread_id: ctx.thread_id ?? null, board_id: ctx.board_id ?? null,
-    source_type: ctx.source_type ?? 'chat', phase,
-    q_code: qMeta.q ?? ctx.q_code ?? null, hits: 0, epsilon: 0.4,
-    noiseAmp, stochastic, g, seed,
+    model,
+    temperature,
+    top_p,
+    frequency_penalty,
+    presence_penalty,
+    user_code: ctx.user_code,
+    master_id: ctx.master_id,
+    sub_id: ctx.sub_id,
+    thread_id: ctx.thread_id ?? null,
+    board_id: ctx.board_id ?? null,
+    source_type: ctx.source_type ?? 'chat',
+    phase,
+    q_code: qMeta.q ?? ctx.q_code ?? null,
+    hits: 0,
+    epsilon: 0.4,
+    noiseAmp,
+    stochastic,
+    g,
+    seed,
   });
-  augmentIrosCompatibleMeta(meta, { phase, g, stochastic, noiseAmp, seed, q_code: qMeta.q ?? ctx.q_code ?? null });
+  augmentIrosCompatibleMeta(meta, {
+    phase,
+    g,
+    stochastic,
+    noiseAmp,
+    seed,
+    q_code: qMeta.q ?? ctx.q_code ?? null,
+  });
   meta.analysis = buildAnalysis(message, reply, qMeta.q ?? null, phase, self, relation);
   meta.dialogue_trace = trace.dump();
-  meta.versions = { mu_prompt: meta.mu_prompt_version ?? 'mu.v2.1.0', q_mapper: 'qmap.v0.3.2', schema: 'mu.log.v1' };
+  meta.versions = {
+    mu_prompt: meta.mu_prompt_version ?? 'mu.v2.1.0',
+    q_mapper: 'qmap.v0.3.2',
+    schema: 'mu.log.v1',
+  };
   attachDebug(meta, { path: 'text_openai', q_meta: qMeta });
 
-  const qTop = qMeta.q ? { code: qMeta.q, stage: ctx.stage ?? 'S1', color: { base: 'Auto', hex: qMeta.color_hex ?? '#FFD54F' } } : undefined;
-  return wrapMuResponse({ conversation_code: ctx.master_id, reply, meta, agent: 'mu', q: qTop } as any);
+  const qTop = qMeta.q
+    ? {
+        code: qMeta.q,
+        stage: ctx.stage ?? 'S1',
+        color: { base: 'Auto', hex: qMeta.color_hex ?? '#FFD54F' },
+      }
+    : undefined;
+  return wrapMuResponse({
+    conversation_code: ctx.master_id,
+    reply,
+    meta,
+    agent: 'mu',
+    q: qTop,
+  } as any);
 }
 
 /** Iros互換メタ補正 */
 function augmentIrosCompatibleMeta(
   meta: any,
-  p: { phase: 'Inner' | 'Outer'; g: number; stochastic: boolean; noiseAmp: number; seed: number; q_code: MuContext['q_code'] | null; }
+  p: {
+    phase: 'Inner' | 'Outer';
+    g: number;
+    stochastic: boolean;
+    noiseAmp: number;
+    seed: number;
+    q_code: MuContext['q_code'] | null;
+  },
 ) {
   meta.stochastic = p.stochastic;
   meta.g = p.g;
@@ -376,10 +591,14 @@ function augmentIrosCompatibleMeta(
   meta.selfAcceptance = meta.selfAcceptance ?? { score: 50, band: '40_70' };
   meta.relation = meta.relation ?? { label: 'harmony', confidence: 0.6 };
   meta.nextQ = meta.nextQ ?? null;
-  meta.currentQ = meta.currentQ ?? (p.q_code ?? null);
+  meta.currentQ = meta.currentQ ?? p.q_code ?? null;
   meta.used_knowledge = Array.isArray(meta.used_knowledge) ? meta.used_knowledge : [];
-  meta.personaTone = meta.personaTone ?? (meta.mu_tone ?? 'gentle_guide');
-  meta.stochastic_params = { epsilon: meta.epsilon ?? 0.4, retrNoise: meta.noiseAmp ?? p.noiseAmp, retrSeed: 2054827127 };
+  meta.personaTone = meta.personaTone ?? meta.mu_tone ?? 'gentle_guide';
+  meta.stochastic_params = {
+    epsilon: meta.epsilon ?? 0.4,
+    retrNoise: meta.noiseAmp ?? p.noiseAmp,
+    retrSeed: 2054827127,
+  };
   meta.credit_auth_key = meta.credit_auth_key ?? undefined;
 }
 
@@ -402,7 +621,7 @@ function enforceThreePillars(text: string): string {
     '- 保留/未読：48h後「負担ゼロで A電話5分 / Bテキストだけ、どっちが楽？」',
     '- ネガ：終了宣言→回復プロトコル30分',
     '',
-    body
+    body,
   ].join('\n');
 }
 
@@ -428,7 +647,11 @@ function conversationalize(text: string, opts: { keepChoices?: boolean } = {}): 
 
   for (const raw of lines) {
     const line = raw.trim();
-    if (!line) { flushBucket(); out.push(''); continue; }
+    if (!line) {
+      flushBucket();
+      out.push('');
+      continue;
+    }
 
     if (/^[-・•]\s+/.test(line)) {
       bucket.push(line.replace(/^[-・•]\s+/, '').trim());

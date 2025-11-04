@@ -27,17 +27,18 @@ export async function POST(req: NextRequest) {
     const admin = createClient(url, serviceKey, { auth: { persistSession: false } });
 
     const safeMedia: string[] = Array.isArray(media_urls) ? media_urls.filter(Boolean) : [];
-    const safeTags: string[] | null =
-      Array.isArray(tags) ? tags :
-      (typeof tags === 'string' && tags.trim())
-        ? tags.split(',').map(t => t.trim()).filter(Boolean)
+    const safeTags: string[] | null = Array.isArray(tags)
+      ? tags
+      : typeof tags === 'string' && tags.trim()
+        ? tags
+            .split(',')
+            .map((t) => t.trim())
+            .filter(Boolean)
         : null;
 
     // ✅ visibility を安全に判定
     const allowedVisibility = ['public', 'private', 'friends'] as const;
-    const safeVisibility = allowedVisibility.includes(visibility)
-      ? visibility
-      : 'public';
+    const safeVisibility = allowedVisibility.includes(visibility) ? visibility : 'public';
 
     // 1) 親投稿を作成（is_thread = true / is_posted = true）
     const { data: inserted, error: insertErr } = await admin

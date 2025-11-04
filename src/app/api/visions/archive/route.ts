@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
 /**
@@ -16,13 +16,10 @@ export async function POST(req: NextRequest) {
   try {
     const url = new URL(req.url);
     const userCodeHeader =
-      req.headers.get('x-user-code') ||
-      url.searchParams.get('user_code') ||
-      '';
+      req.headers.get('x-user-code') || url.searchParams.get('user_code') || '';
 
     const body = (await req.json().catch(() => ({}))) as any;
-    const rawId: string | undefined =
-      body?.vision_id || body?.visionId || body?.id;
+    const rawId: string | undefined = body?.vision_id || body?.visionId || body?.id;
     const vision_id = (rawId ?? '').trim();
 
     if (!vision_id) {
@@ -83,19 +80,13 @@ export async function POST(req: NextRequest) {
     }
 
     if (!upd.data.moved_to_history_at) {
-      return NextResponse.json(
-        { error: 'update did not apply', data: upd.data },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: 'update did not apply', data: upd.data }, { status: 500 });
     }
 
     console.log('[archive] ✅ done', upd.data);
     return NextResponse.json({ ok: true, data: upd.data });
   } catch (e: any) {
     console.error('[archive] ❌ unexpected', e);
-    return NextResponse.json(
-      { error: e?.message || 'server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message || 'server error' }, { status: 500 });
   }
 }

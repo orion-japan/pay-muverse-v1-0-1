@@ -24,7 +24,9 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: Props) {
   const router = useRouter();
 
   const hardSignOut = async () => {
-    try { await signOut(auth); } catch {}
+    try {
+      await signOut(auth);
+    } catch {}
   };
 
   const handleLogin = async () => {
@@ -65,7 +67,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: Props) {
         const code = loginRes.status;
         throw new Error(
           (j?.error && `${j.error}`) ||
-            (code === 401 ? '資格情報が無効です（401）' : `サーバー認証失敗（${code}）`)
+            (code === 401 ? '資格情報が無効です（401）' : `サーバー認証失敗（${code}）`),
         );
       }
 
@@ -87,7 +89,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: Props) {
           (statusJson?.error && `${statusJson.error}`) ||
             (code === 401 || code === 403
               ? `アカウント情報取得拒否（${code}）`
-              : `アカウント情報取得失敗（${code}）`)
+              : `アカウント情報取得失敗（${code}）`),
         );
       }
 
@@ -116,7 +118,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: Props) {
       setError(
         typeof err?.message === 'string'
           ? err.message
-          : 'ログインに失敗しました。メールアドレスとパスワードを確認してください。'
+          : 'ログインに失敗しました。メールアドレスとパスワードを確認してください。',
       );
     } finally {
       setLoading(false);

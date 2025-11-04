@@ -37,7 +37,7 @@
   background: #fff;
   border: 1px solid var(--mu-border, #e5e7eb);
   border-radius: var(--mu-radius-lg, 10px);
-  box-shadow: var(--shadow, 0 1px 2px rgba(0,0,0,.04));
+  box-shadow: var(--shadow, 0 1px 2px rgba(0, 0, 0, 0.04));
   padding: 10px 12px;
 }
 
@@ -63,7 +63,7 @@
    JSXは触らずCSSだけで配置します */
 .self-frame .digest-row .oneline {
   display: grid;
-  grid-template-columns: 1fr auto;  /* 左: 著者/本文 / 右: 日時等 */
+  grid-template-columns: 1fr auto; /* 左: 著者/本文 / 右: 日時等 */
   grid-auto-rows: min-content;
   row-gap: 4px;
   column-gap: 8px;
@@ -86,7 +86,7 @@
 /* 2行目：本文を全幅で一段下に */
 .self-frame .digest-row .oneline .snippet {
   grid-row: 2;
-  grid-column: 1 / -1;   /* 2列ぶち抜き */
+  grid-column: 1 / -1; /* 2列ぶち抜き */
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3; /* ← 行数はお好みで 2→3 など */
@@ -96,7 +96,9 @@
 }
 
 /* ドット(・)は非表示でもOK（好み） */
-.self-frame .digest-row .oneline .dot { display: none; }
+.self-frame .digest-row .oneline .dot {
+  display: none;
+}
 
 /* リアクションの行は中央寄せ */
 .self-frame .digest-row .reaction-row,
@@ -107,7 +109,8 @@
 }
 
 /* 画像・長いURLがはみ出さないよう保険 */
-.self-frame, .self-frame * {
+.self-frame,
+.self-frame * {
   box-sizing: border-box;
   max-width: 100%;
 }

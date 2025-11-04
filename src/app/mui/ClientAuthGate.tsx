@@ -26,7 +26,7 @@ function isClientLoggedIn(): boolean {
   // 1) window.__USER_CODE__ が ANON 以外
   if (w?.__USER_CODE__ && w.__USER_CODE__ !== 'ANON') return true;
   // 2) ローカルストレージで保持している場合（任意）
-  const ls = (typeof localStorage !== 'undefined') ? localStorage.getItem('USER_CODE') : null;
+  const ls = typeof localStorage !== 'undefined' ? localStorage.getItem('USER_CODE') : null;
   if (ls && ls !== 'ANON') return true;
   return false;
 }
@@ -44,7 +44,10 @@ export function ClientAuthGate({ children }: { children: React.ReactNode }) {
 
     const decide = async () => {
       // A) window.__USER_CODE__ / localStorage
-      if (isClientLoggedIn()) { setOk(true); return; }
+      if (isClientLoggedIn()) {
+        setOk(true);
+        return;
+      }
 
       // B) Firebase currentUser / onAuthStateChanged
       try {
@@ -52,12 +55,17 @@ export function ClientAuthGate({ children }: { children: React.ReactNode }) {
         if (app) {
           const { getAuth, onAuthStateChanged } = await import('firebase/auth');
           const auth = getAuth();
-          if (auth?.currentUser) { setOk(true); return; }
+          if (auth?.currentUser) {
+            setOk(true);
+            return;
+          }
           unsubFirebase = onAuthStateChanged(auth, (u) => {
             if (u) setOk(true);
           });
         }
-      } catch { /* SDK 未ロードは無視 */ }
+      } catch {
+        /* SDK 未ロードは無視 */
+      }
 
       // C) 既存実装がモーダル完了時に発火できるフック
       const onLoginEvent = () => setOk(true);

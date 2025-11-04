@@ -32,22 +32,31 @@ type Props = { profile: Profile };
 
 const toDisplayString = (v: MaybeArray) => {
   if (!v) return '—';
-  return Array.isArray(v) ? (v.length ? v.join('、') : '—') : (v || '—');
+  return Array.isArray(v) ? (v.length ? v.join('、') : '—') : v || '—';
 };
 
 const toChips = (v: MaybeArray) => {
   if (!v) return [];
-  return Array.isArray(v) ? v : v.split(/[、,]+/).map((s) => s.trim()).filter(Boolean);
+  return Array.isArray(v)
+    ? v
+    : v
+        .split(/[、,]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
 };
 
 const linkOrDash = (u?: string) =>
-  u && u.trim()
-    ? (
-      <a href={/^https?:\/\//i.test(u) ? u : `https://${u}`} target="_blank" rel="noopener noreferrer">
-        {u}
-      </a>
-    )
-    : '—';
+  u && u.trim() ? (
+    <a
+      href={/^https?:\/\//i.test(u) ? u : `https://${u}`}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      {u}
+    </a>
+  ) : (
+    '—'
+  );
 
 export default function MyPageEntry({ profile }: Props) {
   const base = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '');
@@ -94,7 +103,9 @@ export default function MyPageEntry({ profile }: Props) {
           </div>
 
           <div className={styles.headAction}>
-            <a className={styles.editBtn} href="/mypage/create">プロフィールを編集</a>
+            <a className={styles.editBtn} href="/mypage/create">
+              プロフィールを編集
+            </a>
           </div>
         </section>
 
@@ -102,12 +113,24 @@ export default function MyPageEntry({ profile }: Props) {
         <section className={styles.card}>
           <div className={styles.cardHeader}>SNS / Link</div>
           <div className={styles.linksGrid}>
-            <div><span className={styles.icon}>𝕏</span> {linkOrDash(profile.x_handle)}</div>
-            <div><span className={styles.icon}>📷</span> {linkOrDash(profile.instagram)}</div>
-            <div><span className={styles.icon}>📘</span> {linkOrDash(profile.facebook)}</div>
-            <div><span className={styles.icon}>💼</span> {linkOrDash(profile.linkedin)}</div>
-            <div><span className={styles.icon}>▶️</span> {linkOrDash(profile.youtube)}</div>
-            <div><span className={styles.icon}>🌐</span> {linkOrDash(profile.website_url)}</div>
+            <div>
+              <span className={styles.icon}>𝕏</span> {linkOrDash(profile.x_handle)}
+            </div>
+            <div>
+              <span className={styles.icon}>📷</span> {linkOrDash(profile.instagram)}
+            </div>
+            <div>
+              <span className={styles.icon}>📘</span> {linkOrDash(profile.facebook)}
+            </div>
+            <div>
+              <span className={styles.icon}>💼</span> {linkOrDash(profile.linkedin)}
+            </div>
+            <div>
+              <span className={styles.icon}>▶️</span> {linkOrDash(profile.youtube)}
+            </div>
+            <div>
+              <span className={styles.icon}>🌐</span> {linkOrDash(profile.website_url)}
+            </div>
           </div>
         </section>
 
@@ -116,17 +139,29 @@ export default function MyPageEntry({ profile }: Props) {
           <div className={styles.card}>
             <div className={styles.cardHeader}>スキル</div>
             <div className={styles.chips}>
-              {toChips(profile.skills).length
-                ? toChips(profile.skills).map((t, i) => <span key={i} className={styles.chip}>#{t}</span>)
-                : <div className={styles.muted}>—</div>}
+              {toChips(profile.skills).length ? (
+                toChips(profile.skills).map((t, i) => (
+                  <span key={i} className={styles.chip}>
+                    #{t}
+                  </span>
+                ))
+              ) : (
+                <div className={styles.muted}>—</div>
+              )}
             </div>
           </div>
           <div className={styles.card}>
             <div className={styles.cardHeader}>興味</div>
             <div className={styles.chips}>
-              {toChips(profile.interests).length
-                ? toChips(profile.interests).map((t, i) => <span key={i} className={styles.chip}>{t}</span>)
-                : <div className={styles.muted}>—</div>}
+              {toChips(profile.interests).length ? (
+                toChips(profile.interests).map((t, i) => (
+                  <span key={i} className={styles.chip}>
+                    {t}
+                  </span>
+                ))
+              ) : (
+                <div className={styles.muted}>—</div>
+              )}
             </div>
           </div>
         </section>

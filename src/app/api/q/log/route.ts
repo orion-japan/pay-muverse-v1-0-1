@@ -4,7 +4,12 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE, normalizeAuthz } from '@/lib/authz';
+import {
+  verifyFirebaseAndAuthorize,
+  SUPABASE_URL,
+  SERVICE_ROLE,
+  normalizeAuthz,
+} from '@/lib/authz';
 
 export async function POST(req: NextRequest) {
   try {

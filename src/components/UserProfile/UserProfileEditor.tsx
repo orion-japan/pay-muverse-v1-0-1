@@ -52,7 +52,10 @@ type ProfileData = {
 // --- helpers ---
 const toCsv = (v?: string[] | null) => (Array.isArray(v) ? v.join(', ') : '');
 const toArr = (s: string): string[] =>
-  s.split(/[、,]+/).map((x) => x.trim()).filter(Boolean);
+  s
+    .split(/[、,]+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
 
 // フルURL → ストレージキー（保存時）
 const toStorageKey = (urlOrKey?: string | null): string => {
@@ -96,8 +99,7 @@ export default function UserProfileEditor() {
   }, []);
 
   // 差分適用
-  const patch = (p: Partial<ProfileData>) =>
-    setData((d) => ({ ...(d as ProfileData), ...p }));
+  const patch = (p: Partial<ProfileData>) => setData((d) => ({ ...(d as ProfileData), ...p }));
 
   // 表示用アバターURL（キャッシュバスター）
   const avatarUrl = useMemo(() => {
@@ -214,7 +216,9 @@ export default function UserProfileEditor() {
     <div className="edit-wrapper">
       <div className="edit-header">
         <div>
-          <h1 className="page-title" style={{ margin: 0 }}>マイページ編集</h1>
+          <h1 className="page-title" style={{ margin: 0 }}>
+            マイページ編集
+          </h1>
           {userCode ? <div className="page-sub">Code: {userCode}</div> : null}
         </div>
         <button className="mu-primary" onClick={handleSave} disabled={saving}>
@@ -227,11 +231,32 @@ export default function UserProfileEditor() {
       {/* Avatar block */}
       <section className="profile-card">
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <div style={{ width: 96, height: 96, borderRadius: '50%', overflow: 'hidden', background: '#eee' }}>
+          <div
+            style={{
+              width: 96,
+              height: 96,
+              borderRadius: '50%',
+              overflow: 'hidden',
+              background: '#eee',
+            }}
+          >
             {avatarUrl ? (
-              <SafeImage src={avatarUrl} alt="avatar" aspectRatio="1/1" className="avatar-preview" />
+              <SafeImage
+                src={avatarUrl}
+                alt="avatar"
+                aspectRatio="1/1"
+                className="avatar-preview"
+              />
             ) : (
-              <div style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center', color: '#888' }}>
+              <div
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  display: 'grid',
+                  placeItems: 'center',
+                  color: '#888',
+                }}
+              >
                 No Image
               </div>
             )}
@@ -240,7 +265,12 @@ export default function UserProfileEditor() {
             <div style={{ fontWeight: 600, fontSize: 18 }}>{displayName}</div>
             <label className="mu-secondary" style={{ display: 'inline-block', marginTop: 8 }}>
               {uploading ? 'アップロード中…' : '🖼 アバターを選択'}
-              <input type="file" accept="image/*" onChange={handlePickAvatar} style={{ display: 'none' }} />
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handlePickAvatar}
+                style={{ display: 'none' }}
+              />
             </label>
           </div>
         </div>

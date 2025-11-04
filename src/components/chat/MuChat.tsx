@@ -3,15 +3,15 @@
 // - props.messages を描画し、送信時に onSend を呼ぶ
 // - A/B/その他の簡易ボタンと画像ブリッジの定型句を提供
 
-"use client";
+'use client';
 
-import React, { useMemo, useRef, useState, useEffect } from "react";
-import { MU_AGENT, MU_UI_TEXT, MU_BRIDGE_TEXT, MU_STATES } from "@/lib/mu/config";
-import { buildImageBridgeText } from "@/lib/qcode/bridgeImage";
+import React, { useMemo, useRef, useState, useEffect } from 'react';
+import { MU_AGENT, MU_UI_TEXT, MU_BRIDGE_TEXT, MU_STATES } from '@/lib/mu/config';
+import { buildImageBridgeText } from '@/lib/qcode/bridgeImage';
 
 export type ChatMessage = {
   id: string;
-  role: "user" | "assistant" | "system";
+  role: 'user' | 'assistant' | 'system';
   content: string;
   at?: string;
   // サーバから付与されうる緩いメタ（型拡張は any で読む）
@@ -37,12 +37,12 @@ export default function MuChat(props: MuChatProps) {
     isLoading,
     onSend,
     onSuggestImage,
-    placeholder = "入力してください…（Mu：質問は1つまで）",
+    placeholder = '入力してください…（Mu：質問は1つまで）',
     showABHelper = true,
-    stateLabel = "INTENT_CHECKING",
+    stateLabel = 'INTENT_CHECKING',
   } = props;
 
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState('');
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const headerTitle = useMemo(() => `${MU_UI_TEXT.AGENT_DISPLAY_NAME}`, []);
@@ -50,28 +50,28 @@ export default function MuChat(props: MuChatProps) {
 
   // ==== Mu 以外のメッセージ混入を除外 + 会話IDスコープ + 粘着表示 ====
   const filtered = useMemo(() => {
-    const convKeys = ["conversation_id", "master_id", "convId", "conversationId"];
+    const convKeys = ['conversation_id', 'master_id', 'convId', 'conversationId'];
 
     const sameConv = (m: any) => {
       if (!conversationId) return true; // 会話ID指定がなければ許可
       for (const k of convKeys) {
         const v = m?.[k];
-        if (typeof v === "string" && v.trim() && v.trim() === conversationId) return true;
+        if (typeof v === 'string' && v.trim() && v.trim() === conversationId) return true;
       }
       return false;
     };
 
     const isMuAgent = (m: any) => {
-      const a = (m?.agent ?? "").toString().toLowerCase();
+      const a = (m?.agent ?? '').toString().toLowerCase();
       // agent が無い場合は後方互換で許可、ある場合は 'mu' のみ許可
-      return !a || a === "mu";
+      return !a || a === 'mu';
     };
 
     const list = (messages ?? []).filter((m: any) => {
       // 会話IDが指定されている場合はスコープ外を除外
       if (!sameConv(m)) return false;
 
-      if (m.role === "assistant" || m.role === "system") {
+      if (m.role === 'assistant' || m.role === 'system') {
         // Mu 専用：Mu 以外(Iros等)は表示しない（大小文字差は無視）
         return isMuAgent(m);
       }
@@ -97,13 +97,13 @@ export default function MuChat(props: MuChatProps) {
   const handleSend = async () => {
     const text = draft.trim();
     if (!text) return;
-    setDraft("");
+    setDraft('');
     await onSend({ text });
     inputRef.current?.focus();
   };
 
   const handleKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
@@ -111,7 +111,7 @@ export default function MuChat(props: MuChatProps) {
 
   const sendQuick = (t: string) => onSend({ text: t });
 
-  const imageSuggestText = useMemo(() => buildImageBridgeText({ phase: "suggest" }), []);
+  const imageSuggestText = useMemo(() => buildImageBridgeText({ phase: 'suggest' }), []);
 
   return (
     <div style={styles.root} data-agent={MU_AGENT.ID}>
@@ -130,13 +130,13 @@ export default function MuChat(props: MuChatProps) {
           <div style={styles.helperRow}>
             <span style={styles.helperHint}>{MU_UI_TEXT.ASK_INTENT_AB}</span>
             <div style={styles.helperBtns}>
-              <button style={styles.helperBtn} onClick={() => sendQuick("A でお願いします。")}>
+              <button style={styles.helperBtn} onClick={() => sendQuick('A でお願いします。')}>
                 Aで進める
               </button>
-              <button style={styles.helperBtn} onClick={() => sendQuick("B でお願いします。")}>
+              <button style={styles.helperBtn} onClick={() => sendQuick('B でお願いします。')}>
                 Bで進める
               </button>
-              <button style={styles.helperBtn} onClick={() => sendQuick("その他（自由入力）で。")}>
+              <button style={styles.helperBtn} onClick={() => sendQuick('その他（自由入力）で。')}>
                 その他
               </button>
             </div>
@@ -181,9 +181,15 @@ export default function MuChat(props: MuChatProps) {
   );
 }
 
-function MessageBubble({ role, content }: { role: "user" | "assistant" | "system"; content: string }) {
-  const isUser = role === "user";
-  const isSystem = role === "system";
+function MessageBubble({
+  role,
+  content,
+}: {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+}) {
+  const isUser = role === 'user';
+  const isSystem = role === 'system';
   return (
     <div
       style={{
@@ -200,108 +206,108 @@ function MessageBubble({ role, content }: { role: "user" | "assistant" | "system
 
 const styles: Record<string, React.CSSProperties> = {
   root: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    maxHeight: "100vh",
-    background: "var(--sof-bg, #0b1437)",
-    color: "#e8ecff",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    maxHeight: '100vh',
+    background: 'var(--sof-bg, #0b1437)',
+    color: '#e8ecff',
   },
   header: {
-    padding: "12px 16px",
-    borderBottom: "1px solid rgba(255,255,255,0.08)",
+    padding: '12px 16px',
+    borderBottom: '1px solid rgba(255,255,255,0.08)',
   },
   headerTitle: { fontSize: 16, fontWeight: 700 },
   headerSub: { fontSize: 12, opacity: 0.8, marginTop: 4 },
   statePill: {
     marginTop: 8,
-    display: "inline-block",
+    display: 'inline-block',
     fontSize: 11,
-    padding: "4px 8px",
+    padding: '4px 8px',
     borderRadius: 999,
-    border: "1px solid rgba(255,255,255,0.18)",
+    border: '1px solid rgba(255,255,255,0.18)',
     opacity: 0.9,
   },
   body: {
     flex: 1,
-    overflowY: "auto",
-    padding: "12px 16px",
-    display: "flex",
-    flexDirection: "column",
+    overflowY: 'auto',
+    padding: '12px 16px',
+    display: 'flex',
+    flexDirection: 'column',
     gap: 12,
   },
   footer: {
-    borderTop: "1px solid rgba(255,255,255,0.08)",
+    borderTop: '1px solid rgba(255,255,255,0.08)',
     padding: 12,
-    display: "grid",
-    gridTemplateColumns: "1fr auto",
+    display: 'grid',
+    gridTemplateColumns: '1fr auto',
     gap: 8,
   },
   textarea: {
-    width: "100%",
-    resize: "vertical",
+    width: '100%',
+    resize: 'vertical',
     minHeight: 48,
     maxHeight: 160,
     padding: 10,
     borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.16)",
-    background: "rgba(255,255,255,0.04)",
-    color: "#e8ecff",
-    outline: "none",
+    border: '1px solid rgba(255,255,255,0.16)',
+    background: 'rgba(255,255,255,0.04)',
+    color: '#e8ecff',
+    outline: 'none',
   },
-  actions: { display: "flex", alignItems: "center", gap: 8 },
+  actions: { display: 'flex', alignItems: 'center', gap: 8 },
   sendBtn: {
-    padding: "10px 16px",
+    padding: '10px 16px',
     borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.2)",
-    background: "linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06))",
-    color: "#fff",
-    cursor: "pointer",
+    border: '1px solid rgba(255,255,255,0.2)',
+    background: 'linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06))',
+    color: '#fff',
+    cursor: 'pointer',
   },
   bubble: {
-    maxWidth: "88%",
-    padding: "10px 12px",
+    maxWidth: '88%',
+    padding: '10px 12px',
     borderRadius: 12,
-    border: "1px solid rgba(255,255,255,0.16)",
-    background: "rgba(255,255,255,0.04)",
+    border: '1px solid rgba(255,255,255,0.16)',
+    background: 'rgba(255,255,255,0.04)',
   },
   bubbleUser: {
-    alignSelf: "flex-end",
-    background: "rgba(93, 139, 255, 0.12)",
-    borderColor: "rgba(93, 139, 255, 0.28)",
+    alignSelf: 'flex-end',
+    background: 'rgba(93, 139, 255, 0.12)',
+    borderColor: 'rgba(93, 139, 255, 0.28)',
   },
   bubbleSystem: {
-    alignSelf: "center",
-    background: "rgba(255,255,255,0.02)",
-    borderStyle: "dashed",
+    alignSelf: 'center',
+    background: 'rgba(255,255,255,0.02)',
+    borderStyle: 'dashed',
   },
   bubbleRole: { fontSize: 10, opacity: 0.6, marginBottom: 4 },
-  bubbleText: { whiteSpace: "pre-wrap", lineHeight: 1.6, fontSize: 14 },
+  bubbleText: { whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: 14 },
   helperRow: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: 8,
-    flexWrap: "wrap",
+    flexWrap: 'wrap',
     marginTop: 6,
   },
   helperHint: { fontSize: 12, opacity: 0.75 },
-  helperBtns: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  helperBtns: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   helperBtn: {
     fontSize: 12,
-    padding: "6px 10px",
+    padding: '6px 10px',
     borderRadius: 999,
-    border: "1px solid rgba(255,255,255,0.22)",
-    background: "rgba(255,255,255,0.06)",
-    color: "#fff",
-    cursor: "pointer",
+    border: '1px solid rgba(255,255,255,0.22)',
+    background: 'rgba(255,255,255,0.06)',
+    color: '#fff',
+    cursor: 'pointer',
   },
   helperBtnOutline: {
     fontSize: 12,
-    padding: "6px 10px",
+    padding: '6px 10px',
     borderRadius: 999,
-    border: "1px solid rgba(255,255,255,0.22)",
-    background: "transparent",
-    color: "#fff",
-    cursor: "pointer",
+    border: '1px solid rgba(255,255,255,0.22)',
+    background: 'transparent',
+    color: '#fff',
+    cursor: 'pointer',
   },
 };

@@ -7,10 +7,10 @@
    ========================================================= */
 
 /* ---- globals / variables ---- */
-:root{
-  --header-h: 60px;   /* sticky header の見積り */
-  --footer-h: 56px;   /* 端末のタブバー見積り（iOSなら 54〜60 で微調整）*/
-  --composer-h: 110px;/* 初期見積り。実際は MuiComposer の ResizeObserver が上書き */
+:root {
+  --header-h: 60px; /* sticky header の見積り */
+  --footer-h: 56px; /* 端末のタブバー見積り（iOSなら 54〜60 で微調整）*/
+  --composer-h: 110px; /* 初期見積り。実際は MuiComposer の ResizeObserver が上書き */
 }
 
 /* ---- base theme (dark) ---- */
@@ -36,52 +36,66 @@
 
 /* ---- light “Romantic” override ---- */
 .mui-root {
-  --bg:        #f6f3ff;
-  --panel:     rgba(255,255,255,0.65);
-  --panel2:    rgba(255,255,255,0.55);
-  --text:      #2b214a;
-  --sub:       #655b8d;
-  --accent:    #c857ff;
-  --accent2:   #ff6fb3;
-  --accent3:   #5770ffb1;
-  --ok:        #33c3a69a;
-  --danger:    #ff5675;
+  --bg: #f6f3ff;
+  --panel: rgba(255, 255, 255, 0.65);
+  --panel2: rgba(255, 255, 255, 0.55);
+  --text: #2b214a;
+  --sub: #655b8d;
+  --accent: #c857ff;
+  --accent2: #ff6fb3;
+  --accent3: #5770ffb1;
+  --ok: #33c3a69a;
+  --danger: #ff5675;
 
   background:
-    radial-gradient(800px 500px at 20% -10%, rgba(255,180,255,.55), transparent 70%),
-    radial-gradient(600px 400px at 80% 0%, rgba(255,160,220,.45), transparent 70%),
-    radial-gradient(800px 600px at 70% 90%, rgba(130,240,255,.35), transparent 70%),
+    radial-gradient(800px 500px at 20% -10%, rgba(255, 180, 255, 0.55), transparent 70%),
+    radial-gradient(600px 400px at 80% 0%, rgba(255, 160, 220, 0.45), transparent 70%),
+    radial-gradient(800px 600px at 70% 90%, rgba(130, 240, 255, 0.35), transparent 70%),
     linear-gradient(135deg, #ffe4ff 0%, #e4f2ff 60%, #ffffff 100%);
-  box-shadow: inset 0 0 60px rgba(255,255,255,0.2);
+  box-shadow: inset 0 0 60px rgba(255, 255, 255, 0.2);
 }
-.mui-root::before{
-  content:"";
-  position:fixed; inset:0; pointer-events:none;
+.mui-root::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
   background:
-    radial-gradient(250px 200px at 20% 20%, rgba(255,200,255,.35), transparent 70%),
-    radial-gradient(250px 200px at 80% 25%, rgba(255,150,220,.25), transparent 70%),
-    radial-gradient(300px 220px at 70% 85%, rgba(140,250,255,.25), transparent 70%);
+    radial-gradient(250px 200px at 20% 20%, rgba(255, 200, 255, 0.35), transparent 70%),
+    radial-gradient(250px 200px at 80% 25%, rgba(255, 150, 220, 0.25), transparent 70%),
+    radial-gradient(300px 220px at 70% 85%, rgba(140, 250, 255, 0.25), transparent 70%);
   filter: blur(25px);
-  z-index:0;
+  z-index: 0;
 }
 
 /* ---- layout padding guards (header/top & composer/bottom) ---- */
-html, body { margin:0; padding:0; background:#0b1437; overflow-x:hidden; }
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #0b1437;
+  overflow-x: hidden;
+}
 
 /* ヘッダー固定。本文は上余白を確保 */
-.mui-header{
+.mui-header {
   position: sticky;
   top: env(safe-area-inset-top, 0px);
   z-index: 60;
-  background: rgba(255,255,255,0.7);
-  border: 1px solid rgba(255,255,255,0.5);
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.5);
   backdrop-filter: blur(16px);
-  box-shadow: 0 10px 30px rgba(200,107,255,.25);
+  box-shadow: 0 10px 30px rgba(200, 107, 255, 0.25);
 }
-.mui-title { color:#4a316f; font-weight:600; text-shadow:0 0 4px rgba(255,255,255,.5); }
-.sub{ color:#7e6aa0; }
+.mui-title {
+  color: #4a316f;
+  font-weight: 600;
+  text-shadow: 0 0 4px rgba(255, 255, 255, 0.5);
+}
+.sub {
+  color: #7e6aa0;
+}
 
-.mui-root{
+.mui-root {
   /* 上下の安全余白（下は composer 実測で自動補正）*/
   padding-top: var(--header-h);
 }
@@ -89,134 +103,275 @@ html, body { margin:0; padding:0; background:#0b1437; overflow-x:hidden; }
 /* =========================================================
    Buttons / header grid
    ========================================================= */
-.mui-header{
-  display:grid; grid-template-areas:'title' 'buttons';
-  align-items:start; gap:10px; border-radius:14px; padding:12px 14px; margin-bottom:12px;
+.mui-header {
+  display: grid;
+  grid-template-areas: 'title' 'buttons';
+  align-items: start;
+  gap: 10px;
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
 }
-.mui-header .left { grid-area:title; }
-.mui-header .right{
-  grid-area:buttons;
-  display:grid; grid-template-columns:repeat(2, minmax(0,1fr));
-  gap:8px; width:100%; max-width:360px; justify-self:start;
+.mui-header .left {
+  grid-area: title;
 }
-button{
-  border:1px solid rgba(255,255,255,.4);
-  background: linear-gradient(180deg, rgba(255,255,255,.85), rgba(255,255,255,.65));
-  color:#4a316f; transition:all .2s ease; font-weight:600;
-  border-radius:10px; padding:8px 12px; cursor:pointer; font-size:14px;
+.mui-header .right {
+  grid-area: buttons;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+  max-width: 360px;
+  justify-self: start;
 }
-button:disabled{ opacity:.6; cursor:not-allowed; }
-button.primary{ border-color:var(--accent2); background:linear-gradient(180deg,#ffe0f7,#ffd0ef); box-shadow:0 0 16px rgba(255,150,255,.25);}
-button.primary:hover{ box-shadow:0 0 26px rgba(255,150,255,.45); transform:translateY(-1px);}
-button.ghost{ background:rgba(255,255,255,.5); }
-button.ghost:hover{ border-color:rgba(200,107,255,.5); box-shadow:0 0 12px rgba(200,107,255,.3); }
-button.tiny{ padding:4px 8px; font-size:12px; border-radius:8px; }
+button {
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.65));
+  color: #4a316f;
+  transition: all 0.2s ease;
+  font-weight: 600;
+  border-radius: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 14px;
+}
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+button.primary {
+  border-color: var(--accent2);
+  background: linear-gradient(180deg, #ffe0f7, #ffd0ef);
+  box-shadow: 0 0 16px rgba(255, 150, 255, 0.25);
+}
+button.primary:hover {
+  box-shadow: 0 0 26px rgba(255, 150, 255, 0.45);
+  transform: translateY(-1px);
+}
+button.ghost {
+  background: rgba(255, 255, 255, 0.5);
+}
+button.ghost:hover {
+  border-color: rgba(200, 107, 255, 0.5);
+  box-shadow: 0 0 12px rgba(200, 107, 255, 0.3);
+}
+button.tiny {
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 8px;
+}
 
 /* =========================================================
    Dropzone / previews
    ========================================================= */
-.dropzone{
-  position:relative; min-height:140px;
-  border:2px dashed rgba(200,107,255,.35);
-  border-radius:14px; background: rgba(255,255,255,0.6);
+.dropzone {
+  position: relative;
+  min-height: 140px;
+  border: 2px dashed rgba(200, 107, 255, 0.35);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.6);
   backdrop-filter: blur(8px);
-  box-shadow: 0 0 24px rgba(200,107,255,.15);
-  display:flex; align-items:center; justify-content:center;
-  padding:10px; margin-bottom:16px;
+  box-shadow: 0 0 24px rgba(200, 107, 255, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  margin-bottom: 16px;
 }
-.dropzone.is-drag{ outline:2px dashed rgba(124,140,255,.7); outline-offset:-6px; background:rgba(124,140,255,.08); }
-.drop-hint{ text-align:center; color:#604b8e; display:grid; gap:6px; }
+.dropzone.is-drag {
+  outline: 2px dashed rgba(124, 140, 255, 0.7);
+  outline-offset: -6px;
+  background: rgba(124, 140, 255, 0.08);
+}
+.drop-hint {
+  text-align: center;
+  color: #604b8e;
+  display: grid;
+  gap: 6px;
+}
 
-.preview-grid{
-  display:grid; grid-template-columns:repeat(auto-fill,minmax(92px,1fr));
-  gap:8px; width:100%; max-width:680px; margin:0 auto; padding:8px;
-  justify-items:center;
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 8px;
+  width: 100%;
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 8px;
+  justify-items: center;
 }
-.preview-item{
-  width:100%; aspect-ratio:3/4; background:rgba(0,0,0,.25);
-  border:1px solid rgba(255,255,255,.12); border-radius:10px; overflow:hidden;
-  display:flex; align-items:center; justify-content:center;
+.preview-item {
+  width: 100%;
+  aspect-ratio: 3/4;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.preview-item img{
-  width:100%; height:100%; object-fit:contain; object-position:center; display:block; pointer-events:none;
+.preview-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+  display: block;
+  pointer-events: none;
 }
 
 /* どこでもドロップOKのオーバーレイ */
-.drop-overlay{
-  position:fixed; inset:0; z-index:60; pointer-events:all;
-  background: rgba(124,140,255,0.10);
-  border: 2px dashed rgba(124,140,255,0.8);
-  display:grid; place-items:center;
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: all;
+  background: rgba(124, 140, 255, 0.1);
+  border: 2px dashed rgba(124, 140, 255, 0.8);
+  display: grid;
+  place-items: center;
 }
-.drop-overlay .overlay-inner{
-  padding:14px 18px; border-radius:12px; background:rgba(0,0,0,.4);
-  border:1px solid rgba(255,255,255,.25); color:#e8ecff; font-weight:600;
+.drop-overlay .overlay-inner {
+  padding: 14px 18px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #e8ecff;
+  font-weight: 600;
 }
 
 /* =========================================================
    Chat list
    ========================================================= */
-section.chat{
-  background: rgba(255,255,255,0.65);
-  border: 1px solid rgba(255,255,255,.45);
-  box-shadow: 0 4px 20px rgba(200,107,255,.15);
-  display:grid; gap:10px; border-radius:14px; padding:12px;
-  min-height:280px; overflow:auto;
+section.chat {
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  box-shadow: 0 4px 20px rgba(200, 107, 255, 0.15);
+  display: grid;
+  gap: 10px;
+  border-radius: 14px;
+  padding: 12px;
+  min-height: 280px;
+  overflow: auto;
   /* 下に composer が被らないよう余白を確保（inline を !important で上書きする main と整合） */
   padding-bottom: calc(var(--composer-h, 96px) + 10px) !important;
-  margin-top:8px;
+  margin-top: 8px;
 }
-.empty{ color:var(--sub); text-align:center; padding:20px 0; }
-
-.run{ display:grid; gap:8px; margin:6px 0 10px; }
-.run.self{ justify-items:end; }
-.run.partner{ justify-items:start; }
-.run-sep{
-  justify-self:center; font-size:12px; color:var(--sub);
-  background: rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12);
-  border-radius:999px; padding:2px 10px; margin-bottom:6px;
+.empty {
+  color: var(--sub);
+  text-align: center;
+  padding: 20px 0;
 }
 
-.bubble{ position:relative; display:grid; gap:6px; padding:10px; border-radius:12px; background:rgba(255,255,255,.8); border:1px solid rgba(255,255,255,.3); }
-.bubble.assistant{ background: linear-gradient(180deg, rgba(255,210,250,.6), rgba(255,255,255,.65)); border:1px solid rgba(200,107,255,.3); box-shadow:0 0 10px rgba(200,107,255,.2); }
-.bubble.self{ background: rgba(124,140,255,.12); border:1px solid rgba(124,140,255,.35); }
-.bubble.partner{ background: rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.18); }
-.bubble .content{ white-space:pre-wrap; line-height:1.7; }
-.bubble .content .line{ margin:0 0 2px; }
-.read-chip{
-  position:absolute; right:8px; bottom:6px; font-size:11px; color:var(--sub);
-  border:1px solid rgba(255,255,255,.25); padding:2px 6px; border-radius:999px; opacity:.95; pointer-events:none;
+.run {
+  display: grid;
+  gap: 8px;
+  margin: 6px 0 10px;
+}
+.run.self {
+  justify-items: end;
+}
+.run.partner {
+  justify-items: start;
+}
+.run-sep {
+  justify-self: center;
+  font-size: 12px;
+  color: var(--sub);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 2px 10px;
+  margin-bottom: 6px;
+}
+
+.bubble {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+.bubble.assistant {
+  background: linear-gradient(180deg, rgba(255, 210, 250, 0.6), rgba(255, 255, 255, 0.65));
+  border: 1px solid rgba(200, 107, 255, 0.3);
+  box-shadow: 0 0 10px rgba(200, 107, 255, 0.2);
+}
+.bubble.self {
+  background: rgba(124, 140, 255, 0.12);
+  border: 1px solid rgba(124, 140, 255, 0.35);
+}
+.bubble.partner {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+.bubble .content {
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+.bubble .content .line {
+  margin: 0 0 2px;
+}
+.read-chip {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  font-size: 11px;
+  color: var(--sub);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  padding: 2px 6px;
+  border-radius: 999px;
+  opacity: 0.95;
+  pointer-events: none;
 }
 
 /* =========================================================
    OCR preview card
    ========================================================= */
-.ocr-preview{
-  border: 1px solid rgba(120,255,255,.35);
-  background: rgba(255,255,255,0.8);
-  box-shadow: 0 0 18px rgba(120,255,255,.25);
-  padding:12px; border-radius:10px; margin:10px 0 14px;
+.ocr-preview {
+  border: 1px solid rgba(120, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 0 18px rgba(120, 255, 255, 0.25);
+  padding: 12px;
+  border-radius: 10px;
+  margin: 10px 0 14px;
 }
-.ocr-title{ font-weight:600; margin-bottom:6px; }
-.ocr-snippet{
-  white-space:pre-wrap; max-height:260px; overflow:auto;
+.ocr-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.ocr-snippet {
+  white-space: pre-wrap;
+  max-height: 260px;
+  overflow: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size:12.5px; line-height:1.55; margin:6px 0 10px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  margin: 6px 0 10px;
 }
-.ocr-actions{ display:flex; gap:8px; }
+.ocr-actions {
+  display: flex;
+  gap: 8px;
+}
 
 /* =========================================================
    Composer (fixed bottom)
    ========================================================= */
 /* ページ側：コンポーザーの高さぶんだけ下余白を“必ず”確保（inline を上書き） */
 html body main.mu-main,
-body .mu-main{
+body .mu-main {
   /* 余白 8〜12px はお好みで */
   padding-bottom: calc(var(--composer-h, 96px) + 10px) !important;
 }
 
 /* 親が flex でない時の保険（チャットを伸ばす） */
-.mu-page{ display:flex; flex-direction:column; min-height:0; }
+.mu-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
 
 .mui-composer {
   position: fixed;
@@ -234,7 +389,7 @@ body .mu-main{
   /* 背景と装飾 */
   background: color-mix(in srgb, #ffffff 92%, transparent);
   backdrop-filter: blur(6px);
-  border-top: 1px solid rgba(0, 0, 0, .06);
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
   width: 100%;
 
@@ -242,50 +397,75 @@ body .mu-main{
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
-
 /* 中身は中央カード幅 */
-.mui-composer-inner{
-  max-width: 560px; margin:0 auto; padding:10px 12px;
-  display:flex; align-items:flex-end; gap:8px;
+.mui-composer-inner {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 10px 12px;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
 }
 
 /* 入力域 */
-.composer-textarea{
-  flex:1 1 auto; box-sizing:border-box;
-  min-height:44px; max-height:240px; resize:none; overflow-y:auto;
-  padding:10px 12px; border-radius:12px; font-size:16px; line-height:1.5; color:#222;
-  background:#fff; border:1px solid rgba(0,0,0,.12);
+.composer-textarea {
+  flex: 1 1 auto;
+  box-sizing: border-box;
+  min-height: 44px;
+  max-height: 240px;
+  resize: none;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 16px;
+  line-height: 1.5;
+  color: #222;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
 }
-.composer-textarea::placeholder{ color: rgba(0,0,0,0.40); }
-.composer-textarea:focus{
-  outline:none; border-color:rgba(124,140,255,0.55);
-  box-shadow:0 0 0 3px rgba(124,140,255,0.18);
+.composer-textarea::placeholder {
+  color: rgba(0, 0, 0, 0.4);
+}
+.composer-textarea:focus {
+  outline: none;
+  border-color: rgba(124, 140, 255, 0.55);
+  box-shadow: 0 0 0 3px rgba(124, 140, 255, 0.18);
 }
 
 /* 送信ボタンの列 */
-.mui-composer .actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:10px; }
+.mui-composer .actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
 
 /* =========================================================
    Fine-tuning knobs
    ========================================================= */
 /* フッターが重なって見える場合、見かけの footer 高さを小さめにする */
-.mu-page, .mui-root, .mui-composer{
+.mu-page,
+.mui-root,
+.mui-composer {
   --footer-h: 60px; /* 44〜60 の範囲で端末に合わせて調整 */
 }
 
 /* スクロール末尾で止まる位置の安定化（アンカー時の停止ずれ対策） */
-.mu-main{
+.mu-main {
   scroll-padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--composer-h) + 48px);
 }
-section.chat{ scroll-margin-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--composer-h) + 24px); }
-
+section.chat {
+  scroll-margin-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--composer-h) + 24px);
+}
 
 /* 外側は“固定位置”とレイアウトだけにして、見た目は透明に */
-.mui-composer{
+.mui-composer {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: calc(var(--footer-h, 56px) + env(safe-area-inset-bottom, 0px) - 20px); /* もっと下げたいなら -20px 等 */
+  bottom: calc(
+    var(--footer-h, 56px) + env(safe-area-inset-bottom, 0px) - 20px
+  ); /* もっと下げたいなら -20px 等 */
   z-index: 50;
 
   /* ← ここを透明化（帯を消す） */
@@ -298,15 +478,15 @@ section.chat{ scroll-margin-bottom: calc(env(safe-area-inset-bottom, 0px) + var(
 }
 
 /* 見た目は内側だけに適用＝カード幅で綺麗に収まる */
-.mui-composer-inner{
+.mui-composer-inner {
   max-width: 400px;
   margin: 0 auto;
   padding: 10px 12px;
 
   background: color-mix(in srgb, #ffffff 92%, transparent);
   backdrop-filter: blur(6px);
-  border: 1px solid rgba(0,0,0,.06);
-  box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
   border-radius: 12px;
 
   display: flex;
@@ -315,7 +495,7 @@ section.chat{ scroll-margin-bottom: calc(env(safe-area-inset-bottom, 0px) + var(
 }
 
 /* 入力エリア（そのまま／お好みで） */
-.composer-textarea{
+.composer-textarea {
   flex: 1 1 auto;
   min-height: 44px;
   max-height: 240px;
@@ -327,6 +507,5 @@ section.chat{ scroll-margin-bottom: calc(env(safe-area-inset-bottom, 0px) + var(
   line-height: 1.5;
   color: #222;
   background: #fff;
-  border: 1px solid rgba(0,0,0,.12);
+  border: 1px solid rgba(0, 0, 0, 0.12);
 }
-

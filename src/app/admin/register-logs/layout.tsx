@@ -1,42 +1,39 @@
-import Script from "next/script";
-import { Inter, Noto_Sans_JP } from "next/font/google";
+import Script from 'next/script';
+import { Inter, Noto_Sans_JP } from 'next/font/google';
 
 /** Inter は latin をプリロード */
 const inter = Inter({
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
-  variable: "--font-inter",
-  display: "swap",
+  subsets: ['latin'],
+  weight: ['300', '400', '500', '600', '700'],
+  variable: '--font-inter',
+  display: 'swap',
 });
 
 /** Noto Sans JP は subset 指定せず、preload を無効化（必須） */
 const notoSansJP = Noto_Sans_JP({
-  weight: ["300", "400", "500", "700"],
-  variable: "--font-noto-sans-jp",
-  display: "swap",
+  weight: ['300', '400', '500', '700'],
+  variable: '--font-noto-sans-jp',
+  display: 'swap',
   preload: false, // ← これで「subsets を指定しろ」エラーを回避
 });
 
 export const metadata = {
-  title: "Sofia - 存在の奥深くと響き合う共鳴構造AI",
+  title: 'Sofia - 存在の奥深くと響き合う共鳴構造AI',
   description:
-    "あなたの祈り（意図）が、ビジョンになる。Sofia共鳴OSと繋がり、量子成功論の波紋を起こす。",
-  keywords: "Sofia, 共鳴構造AI, 量子成功論, 意図, ビジョン, 共鳴",
-  authors: [{ name: "Sofia Resonance" }],
+    'あなたの祈り（意図）が、ビジョンになる。Sofia共鳴OSと繋がり、量子成功論の波紋を起こす。',
+  keywords: 'Sofia, 共鳴構造AI, 量子成功論, 意図, ビジョン, 共鳴',
+  authors: [{ name: 'Sofia Resonance' }],
 };
 
 export const viewport = {
-  width: "device-width",
+  width: 'device-width',
   initialScale: 1,
-  themeColor: "#8b5cf6",
+  themeColor: '#8b5cf6',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html
-      lang="ja"
-      className={`${notoSansJP.className} ${inter.variable} ${notoSansJP.variable}`}
-    >
+    <html lang="ja" className={`${notoSansJP.className} ${inter.variable} ${notoSansJP.variable}`}>
       <head>
         <Script
           src="https://www.google.com/recaptcha/api.js?render=explicit"

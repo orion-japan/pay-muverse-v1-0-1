@@ -43,34 +43,27 @@ export async function GET(req: NextRequest) {
       if (error) throw error;
       items = (data || []).map((r: any) => ({
         user_code: String(r.user_code),
-        name:
-          String(r.display_name || r.full_name || r.username || r.user_code),
+        name: String(r.display_name || r.full_name || r.username || r.user_code),
       }));
     } else {
       // 名前で部分一致（display_name / full_name / username）
       const { data, error } = await supabase
         .from('profiles') // ←環境のテーブル名に合わせて
         .select('user_code, display_name, full_name, username, updated_at')
-        .or(
-          `display_name.ilike.%${q}%,full_name.ilike.%${q}%,username.ilike.%${q}%`
-        )
+        .or(`display_name.ilike.%${q}%,full_name.ilike.%${q}%,username.ilike.%${q}%`)
         .order('updated_at', { ascending: false })
         .limit(limit);
 
       if (error) throw error;
       items = (data || []).map((r: any) => ({
         user_code: String(r.user_code),
-        name:
-          String(r.display_name || r.full_name || r.username || r.user_code),
+        name: String(r.display_name || r.full_name || r.username || r.user_code),
       }));
     }
 
     return NextResponse.json({ ok: true, items }, { status: 200 });
   } catch (err: any) {
     console.error('[user-search] error', err);
-    return NextResponse.json(
-      { ok: false, error: String(err?.message ?? err) },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: String(err?.message ?? err) }, { status: 500 });
   }
 }

@@ -2,14 +2,8 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // 環境変数から柔軟に読む
-const url =
-  process.env.NEXT_PUBLIC_SUPABASE_URL ||
-  process.env.SUPABASE_URL ||
-  '';
-const anonKey =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  process.env.SUPABASE_ANON_KEY ||
-  '';
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
+const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
 // Service Role / Server 専用
 const serviceKey =
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
@@ -37,8 +31,8 @@ function createBrowserClient() {
 
 export const supabase =
   typeof window === 'undefined'
-    // --- Server: service role / no session persistence ---
-    ? (() => {
+    ? // --- Server: service role / no session persistence ---
+      (() => {
         if (!url || !serviceKey) {
           throw new Error('Supabase URL or Service Key is missing (server)');
         }
@@ -46,5 +40,5 @@ export const supabase =
           auth: { persistSession: false },
         });
       })()
-    // --- Browser singleton ---
-    : (globalThis.__supabase_browser__ ||= createBrowserClient());
+    : // --- Browser singleton ---
+      (globalThis.__supabase_browser__ ||= createBrowserClient());

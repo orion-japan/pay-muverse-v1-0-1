@@ -11,13 +11,7 @@ type KnowledgeItem = {
   tags: string[];
 };
 
-export default function KnowledgeModal({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
+export default function KnowledgeModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [q, setQ] = useState('');
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [toc, setToc] = useState<{ area: string; titles: string[] }[]>([]);
@@ -79,9 +73,7 @@ export default function KnowledgeModal({
           >
             検索
           </button>
-          <span className="ml-2 text-xs px-2 py-1 rounded bg-green-100 text-green-700">
-            無料
-          </span>
+          <span className="ml-2 text-xs px-2 py-1 rounded bg-green-100 text-green-700">無料</span>
         </div>
 
         <div className="flex gap-6">
@@ -89,16 +81,11 @@ export default function KnowledgeModal({
           <div className="w-1/3 border-r pr-3">
             {toc.map((section, i) => (
               <details key={i} className="mb-2">
-                <summary className="cursor-pointer font-medium">
-                  {section.area}
-                </summary>
+                <summary className="cursor-pointer font-medium">{section.area}</summary>
                 <ul className="ml-3 mt-1 space-y-1 text-sm">
                   {section.titles.map((t, idx) => (
                     <li key={idx}>
-                      <button
-                        className="underline text-blue-600"
-                        onClick={() => loadByTitle(t)}
-                      >
+                      <button className="underline text-blue-600" onClick={() => loadByTitle(t)}>
                         {t}
                       </button>
                     </li>
@@ -113,31 +100,22 @@ export default function KnowledgeModal({
             {selected ? (
               <div className="border rounded-lg p-3">
                 <div className="font-medium">{selected.title}</div>
-                <p className="mt-2 whitespace-pre-wrap text-sm text-gray-700">
-                  {selected.content}
-                </p>
-                {Array.isArray(selected.actions) &&
-                  selected.actions.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {selected.actions.map((a, idx) => (
-                        <a
-                          key={idx}
-                          href={a.href}
-                          className="text-sm underline text-blue-600"
-                        >
-                          {a.label}
-                        </a>
-                      ))}
-                    </div>
-                  )}
+                <p className="mt-2 whitespace-pre-wrap text-sm text-gray-700">{selected.content}</p>
+                {Array.isArray(selected.actions) && selected.actions.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {selected.actions.map((a, idx) => (
+                      <a key={idx} href={a.href} className="text-sm underline text-blue-600">
+                        {a.label}
+                      </a>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : items.length > 0 ? (
               items.map((it, i) => (
                 <div key={i} className="border rounded-lg p-3 mb-3">
                   <div className="font-medium">{it.title}</div>
-                  <p className="mt-2 whitespace-pre-wrap text-sm text-gray-700">
-                    {it.content}
-                  </p>
+                  <p className="mt-2 whitespace-pre-wrap text-sm text-gray-700">{it.content}</p>
                 </div>
               ))
             ) : (

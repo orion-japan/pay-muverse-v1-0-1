@@ -11,7 +11,9 @@ import { ClientAuthGate, LoginModalButton } from './ClientAuthGate';
 export default async function Page() {
   // まず Supabase Cookie を確認（本番の正規ルート）
   const supabase = createServerComponentClient({ cookies });
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   return (
     <div className="mui-root">

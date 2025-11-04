@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! // ← Service Role 必須
+  process.env.SUPABASE_SERVICE_ROLE_KEY!, // ← Service Role 必須
 );
 
 const payjp = Payjp(process.env.PAYJP_SECRET_KEY!);
@@ -95,9 +95,8 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: any) {
     const isCardErr = /card|invalid|security code|insufficient/i.test(err?.message || '');
-    return new NextResponse(
-      isCardErr ? 'Payment Error' : 'Internal Server Error',
-      { status: isCardErr ? 402 : 500 }
-    );
+    return new NextResponse(isCardErr ? 'Payment Error' : 'Internal Server Error', {
+      status: isCardErr ? 402 : 500,
+    });
   }
 }

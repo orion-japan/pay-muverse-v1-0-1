@@ -15,9 +15,12 @@ export type NormalizedUserInfo = {
 };
 
 const toLower = (v: any) => String(v ?? '').toLowerCase();
-const truthy  = (v: any) => v === true || v === 1 || v === '1' || v === 'true';
+const truthy = (v: any) => v === true || v === 1 || v === '1' || v === 'true';
 
-export async function resolveUserCode(input: { user_code?: string | null; idToken?: string | null }): Promise<string> {
+export async function resolveUserCode(input: {
+  user_code?: string | null;
+  idToken?: string | null;
+}): Promise<string> {
   const { user_code, idToken } = input;
   if (user_code) return user_code;
   if (!idToken) throw new Error('user_code or idToken required');
@@ -36,7 +39,10 @@ export async function resolveUserCode(input: { user_code?: string | null; idToke
   return data.user_code;
 }
 
-export async function getUserInfo(input: { user_code?: string | null; idToken?: string | null }): Promise<NormalizedUserInfo> {
+export async function getUserInfo(input: {
+  user_code?: string | null;
+  idToken?: string | null;
+}): Promise<NormalizedUserInfo> {
   const user_code = await resolveUserCode(input);
 
   const { data, error } = await supabaseAdmin
@@ -48,12 +54,12 @@ export async function getUserInfo(input: { user_code?: string | null; idToken?: 
   if (error) throw error;
   if (!data) throw new Error('USER_NOT_FOUND');
 
-  const role        = toLower(data.role ?? data.user_role);
-  const click_type  = toLower(data.click_type ?? (data as any).clickType);
+  const role = toLower(data.role ?? data.user_role);
+  const click_type = toLower(data.click_type ?? (data as any).clickType);
   const plan_status = toLower(data.plan_status ?? data.plan ?? (data as any).planStatus);
 
   const user_type = click_type || role || plan_status || 'member';
-  const is_admin  = truthy(data.is_admin)  || user_type === 'admin';
+  const is_admin = truthy(data.is_admin) || user_type === 'admin';
   const is_master = truthy(data.is_master) || user_type === 'master';
   const sofia_credit = Number(data.sofia_credit ?? 0);
 

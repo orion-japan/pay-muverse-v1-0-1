@@ -1,14 +1,7 @@
 // src/lib/mui/api.ts
-import type {
-  AgentMuiPayload,
-  AiOpening,
-  AiTurn,
-  ConversationStage,
-  StageSaveBody,
-} from './types';
+import type { AgentMuiPayload, AiOpening, AiTurn, ConversationStage, StageSaveBody } from './types';
 
-const INTERNAL_URL =
-  process.env.NEXT_PUBLIC_INTERNAL_URL || process.env.INTERNAL_URL || '';
+const INTERNAL_URL = process.env.NEXT_PUBLIC_INTERNAL_URL || process.env.INTERNAL_URL || '';
 
 export async function callAgentMui<T = any>(payload: AgentMuiPayload): Promise<T> {
   const r = await fetch(`${INTERNAL_URL}/api/agent/mui`, {
@@ -57,7 +50,10 @@ export function parseAgentTextToUi(text: string): {
   const withoutChips = lines.filter((l) => !l.startsWith('[chips]'));
   const qIdx = withoutChips.findIndex((l) => /[？?]$/.test(l));
   const question = qIdx >= 0 ? withoutChips[qIdx] : 'ここまでで質問はありますか？';
-  const body = withoutChips.slice(0, qIdx >= 0 ? qIdx : 3).slice(0, 3).join('\n');
+  const body = withoutChips
+    .slice(0, qIdx >= 0 ? qIdx : 3)
+    .slice(0, 3)
+    .join('\n');
 
   return { message: body, question, chips };
 }

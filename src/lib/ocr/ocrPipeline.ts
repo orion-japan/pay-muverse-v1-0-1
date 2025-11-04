@@ -17,14 +17,11 @@ import type { OcrResult, OcrPipelineOptions, LabeledMessage } from './types';
 // 404対策：Tesseractアセットを「CDN」に固定（言語は Naptha 公式 tessdata）
 // さらに本番でのクロスオリジン Worker 対策として workerBlobURL を利用します。
 export const OCR_CDN_VERSION = 'cdn-2025-10-13';
-export const WORKER_PATH: string =
-  `https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/worker.min.js?${OCR_CDN_VERSION}`;
+export const WORKER_PATH: string = `https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/worker.min.js?${OCR_CDN_VERSION}`;
 // 非SIMD版（互換性重視）。SIMDが安定する環境なら simd版に差し替えてOK
-export const CORE_PATH: string =
-  `https://cdn.jsdelivr.net/npm/tesseract.js-core@2.2.0/tesseract-core.wasm.js?${OCR_CDN_VERSION}`;
+export const CORE_PATH: string = `https://cdn.jsdelivr.net/npm/tesseract.js-core@2.2.0/tesseract-core.wasm.js?${OCR_CDN_VERSION}`;
 // ✅ 正しい言語データのベースURL（※ .gz まで直書きしない）
-export const LANG_BASE: string =
-  '/tesseract/lang-data';
+export const LANG_BASE: string = '/tesseract/lang-data';
 
 // 呼び出し側がまとめて受け取れるように公開
 export type OcrPaths = { workerPath: string; corePath: string; langPath: string };
@@ -39,10 +36,8 @@ const baseCfg: Record<string, any> = {
   tessedit_ocr_engine_mode: '1',
   user_defined_dpi: '300',
   preserve_interword_spaces: '0',
-  tessedit_char_whitelist:
-    'ぁ-んァ-ヶ一-龥ーa-zA-Z0-9。、！？…「」『』（）()・%〜- ,.?!:\'"@',
-  tessedit_char_blacklist:
-    '§†‡¶•¤°¢™®©~`^_|<>[]{}■□◆◇▲△▼▽※♪♫＝≒≠≡╳╱╲',
+  tessedit_char_whitelist: 'ぁ-んァ-ヶ一-龥ーa-zA-Z0-9。、！？…「」『』（）()・%〜- ,.?!:\'"@',
+  tessedit_char_blacklist: '§†‡¶•¤°¢™®©~`^_|<>[]{}■□◆◇▲△▼▽※♪♫＝≒≠≡╳╱╲',
 };
 const cfg = (psm: 6 | 7): any => ({
   ...baseCfg,
@@ -60,20 +55,21 @@ const tessOpts = (psm: 6 | 7) =>
     langPath: LANG_BASE,
     workerBlobURL: true,
     logger: () => {},
-  } as any);
+  }) as any;
 
 // ───────────────────────────────────────────────────────────────
 // （以下は元の処理ロジックそのまま）
 function inferSideByMeta(
   m: { x1: number; y1: number; x2: number; y2: number; avgHue?: number; avgL?: number },
-  pageW: number
+  pageW: number,
 ): 'self' | 'partner' | 'unknown' {
   const cx = (m.x1 + m.x2) / 2;
   const rel = cx / Math.max(pageW, 1);
   if (rel >= 0.55) return 'self';
   if (rel <= 0.45) return 'partner';
   if (m.avgHue != null && m.avgL != null) {
-    const h = m.avgHue!, l = m.avgL!;
+    const h = m.avgHue!,
+      l = m.avgL!;
     const isGreen = h >= 70 && h <= 180 && l > 0.45;
     const isWhite = l > 0.78;
     if (isGreen) return 'self';
@@ -84,26 +80,43 @@ function inferSideByMeta(
 
 async function detectBlobAvgHueL(blob: Blob): Promise<{ hue: number | null; l: number | null }> {
   const bmp = await createImageBitmap(blob);
-  const w = bmp.width, h = bmp.height;
+  const w = bmp.width,
+    h = bmp.height;
   const cw = Math.max(1, Math.floor(w / 8));
   const ch = Math.max(1, Math.floor(h / 8));
-  const cvs = ('OffscreenCanvas' in globalThis)
-    ? new OffscreenCanvas(cw, ch)
-    : Object.assign(document.createElement('canvas'), { width: cw, height: ch }) as HTMLCanvasElement;
+  const cvs =
+    'OffscreenCanvas' in globalThis
+      ? new OffscreenCanvas(cw, ch)
+      : (Object.assign(document.createElement('canvas'), {
+          width: cw,
+          height: ch,
+        }) as HTMLCanvasElement);
   // @ts-ignore
-  if ('width' in cvs) { (cvs as any).width = cw; (cvs as any).height = ch; }
+  if ('width' in cvs) {
+    (cvs as any).width = cw;
+    (cvs as any).height = ch;
+  }
   const ctx = (cvs as any).getContext('2d', { willReadFrequently: true })!;
   ctx.drawImage(bmp, 0, 0, cw, ch);
   const data: Uint8ClampedArray = ctx.getImageData(0, 0, cw, ch).data;
   bmp.close();
 
-  let rSum = 0, gSum = 0, bSum = 0, n = 0;
+  let rSum = 0,
+    gSum = 0,
+    bSum = 0,
+    n = 0;
   for (let i = 0; i < data.length; i += 4) {
-    rSum += data[i]; gSum += data[i + 1]; bSum += data[i + 2]; n++;
+    rSum += data[i];
+    gSum += data[i + 1];
+    bSum += data[i + 2];
+    n++;
   }
   if (!n) return { hue: null, l: null };
-  const r = rSum / (255 * n), g = gSum / (255 * n), b = bSum / (255 * n);
-  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const r = rSum / (255 * n),
+    g = gSum / (255 * n),
+    b = bSum / (255 * n);
+  const max = Math.max(r, g, b),
+    min = Math.min(r, g, b);
   const l = (max + min) / 2;
   if (max === min) return { hue: 0, l };
   const d = max - min;
@@ -127,7 +140,10 @@ function fillUnknownSides(seq: Array<'self' | 'partner' | 'unknown'>): Array<'se
   const out: Array<'self' | 'partner'> = [];
   for (let i = 0; i < seq.length; i++) {
     const cur = seq[i];
-    if (cur !== 'unknown') { out.push(cur); continue; }
+    if (cur !== 'unknown') {
+      out.push(cur);
+      continue;
+    }
     const prev = out[i - 1];
     const next = seq[i + 1] !== 'unknown' ? (seq[i + 1] as 'self' | 'partner') : undefined;
     if (prev && (!next || prev !== next)) out.push(prev === 'self' ? 'partner' : 'self');
@@ -153,7 +169,7 @@ function formatAB(labeled: LabeledMessage[]): string | null {
 
 export async function runOcrPipeline(
   files: File[],
-  opts: OcrPipelineOptions = {}
+  opts: OcrPipelineOptions = {},
 ): Promise<OcrResult> {
   const lang = opts.lang || 'jpn+eng';
   const pages: string[] = [];
@@ -161,15 +177,21 @@ export async function runOcrPipeline(
 
   for (let i = 0; i < files.length; i++) {
     try {
-      const hasMeta =
-        typeof (extractBubbleBlobsMeta as unknown as (f: File) => any) === 'function';
+      const hasMeta = typeof (extractBubbleBlobsMeta as unknown as (f: File) => any) === 'function';
 
       let pageText = '';
 
       if (hasMeta) {
         const metas: Array<{
-          blob: Blob; x1: number; y1: number; x2: number; y2: number;
-          avgHue: number; avgL: number; pageWidth: number; pageHeight: number;
+          blob: Blob;
+          x1: number;
+          y1: number;
+          x2: number;
+          y2: number;
+          avgHue: number;
+          avgL: number;
+          pageWidth: number;
+          pageHeight: number;
         }> = await (extractBubbleBlobsMeta as any)(files[i]);
 
         const parts: string[] = [];
@@ -179,7 +201,10 @@ export async function runOcrPipeline(
           const buf = await m.blob.arrayBuffer();
           const r = await Tesseract.recognize(buf as any, lang, tessOpts(7));
           const t = cleanOcrText(r?.data?.text ?? '').trim();
-          if (!t) { sidesTmp.push('unknown'); continue; }
+          if (!t) {
+            sidesTmp.push('unknown');
+            continue;
+          }
           parts.push(t);
           sidesTmp.push(inferSideByMeta(m, m.pageWidth));
         }
@@ -192,14 +217,19 @@ export async function runOcrPipeline(
             side: sides[k],
             confidence: sidesTmp[k] === 'unknown' ? 0.6 : 0.85,
             xCenter: sides[k] === 'self' ? 0.8 : 0.2,
-            yTop: 0, yBottom: 0,
+            yTop: 0,
+            yBottom: 0,
           });
         }
 
         pageText = parts.join('\n');
       } else {
         let bubbles: Blob[] = [];
-        try { bubbles = await extractBubbleBlobs(files[i]); } catch { /* noop */ }
+        try {
+          bubbles = await extractBubbleBlobs(files[i]);
+        } catch {
+          /* noop */
+        }
 
         if (bubbles.length) {
           const parts: string[] = [];
@@ -210,7 +240,10 @@ export async function runOcrPipeline(
             const buf = await b.arrayBuffer();
             const r = await Tesseract.recognize(buf as any, lang, tessOpts(7));
             const t = cleanOcrText(r?.data?.text ?? '').trim();
-            if (!t) { sidesTmp.push('unknown'); continue; }
+            if (!t) {
+              sidesTmp.push('unknown');
+              continue;
+            }
             parts.push(t);
             sidesTmp.push(sideGuess);
           }
@@ -221,7 +254,8 @@ export async function runOcrPipeline(
               side: sides[k],
               confidence: sidesTmp[k] === 'unknown' ? 0.55 : 0.8,
               xCenter: sides[k] === 'self' ? 0.8 : 0.2,
-              yTop: 0, yBottom: 0,
+              yTop: 0,
+              yBottom: 0,
             });
           }
           pageText = parts.join('\n');
@@ -242,22 +276,25 @@ export async function runOcrPipeline(
               const r2 = await Tesseract.recognize(buf as any, lang, tessOpts(7));
               const t2 = cleanOcrText(r2?.data?.text ?? '');
               if (t2.length > t.length * 0.7) t = t2;
-            } catch { /* keep t */ }
+            } catch {
+              /* keep t */
+            }
           }
           pageText = t;
 
           const cand = postprocessOcr(pageText)
             .split(/\r?\n+/)
-            .flatMap(line => line.split(/(?<=[。！？!?])/));
+            .flatMap((line) => line.split(/(?<=[。！？!?])/));
           for (let k = 0; k < cand.length; k++) {
             const text = cand[k].trim();
             if (!text) continue;
             labeled.push({
               text,
-              side: (k % 2 === 0) ? 'partner' : 'self',
+              side: k % 2 === 0 ? 'partner' : 'self',
               confidence: 0.4,
-              xCenter: (k % 2 === 0) ? 0.2 : 0.8,
-              yTop: 0, yBottom: 0,
+              xCenter: k % 2 === 0 ? 0.2 : 0.8,
+              yTop: 0,
+              yBottom: 0,
             });
           }
         }
@@ -274,7 +311,12 @@ export async function runOcrPipeline(
   const ab = formatAB(labeled);
   const rawText = ab
     ? `【#1】\n${ab}`
-    : postprocessOcr(pages.map((t, i) => `【#${i + 1}】\n${t}`).join('\n\n').trim());
+    : postprocessOcr(
+        pages
+          .map((t, i) => `【#${i + 1}】\n${t}`)
+          .join('\n\n')
+          .trim(),
+      );
 
   return { rawText, pages, labeled };
 }

@@ -9,11 +9,12 @@ export function getSupabaseBrowser() {
     typeof window === 'undefined' ||
     !process.env.NEXT_PUBLIC_SUPABASE_URL ||
     !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  ) return null;
+  )
+    return null;
 
   _sb = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
   );
   return _sb;
 }

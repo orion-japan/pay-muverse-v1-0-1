@@ -12,7 +12,10 @@ type Props = { planStatus: Plan };
 function urlBase64ToUint8Array(base64: string) {
   const padding = '='.repeat((4 - (base64.length % 4)) % 4);
   const base64Safe = (base64 + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const raw = typeof atob !== 'undefined' ? atob(base64Safe) : Buffer.from(base64Safe, 'base64').toString('binary');
+  const raw =
+    typeof atob !== 'undefined'
+      ? atob(base64Safe)
+      : Buffer.from(base64Safe, 'base64').toString('binary');
   const out = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
   return out;
@@ -32,7 +35,7 @@ function isStandalone() {
 
 export default function NotificationSettingsBox({ planStatus }: Props) {
   const [perm, setPerm] = useState<NotificationPermission>(
-    typeof Notification !== 'undefined' ? Notification.permission : 'default'
+    typeof Notification !== 'undefined' ? Notification.permission : 'default',
   );
   const [endpoint, setEndpoint] = useState<string>('');
   const [platform, setPlatform] = useState<'ios' | 'android' | 'desktop'>('desktop');
@@ -42,7 +45,7 @@ export default function NotificationSettingsBox({ planStatus }: Props) {
   // ★ 追加：consents を状態管理
   const [consents, setConsents] = useState<Record<string, any>>({});
 
-  const append = (m: string) => setLog(prev => (prev ? prev + '\n' + m : m));
+  const append = (m: string) => setLog((prev) => (prev ? prev + '\n' + m : m));
 
   useEffect(() => {
     const ua = navigator.userAgent || '';
@@ -101,7 +104,7 @@ export default function NotificationSettingsBox({ planStatus }: Props) {
     if (!res.ok || !j?.ok) throw new Error(j?.error || `save failed: ${res.status}`);
 
     // サーバ側はマージ保存なので、クライアント側も反映
-    setConsents(prev => ({ ...prev, ...patch }));
+    setConsents((prev) => ({ ...prev, ...patch }));
     append('consents saved: ' + JSON.stringify(patch));
   }
 
@@ -115,7 +118,9 @@ export default function NotificationSettingsBox({ planStatus }: Props) {
         append('consents load ERROR: ' + (e?.message || e));
       }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, []);
 
   /* ------------------- ここまで追加 ------------------- */
@@ -231,11 +236,13 @@ export default function NotificationSettingsBox({ planStatus }: Props) {
       <h3 style={{ marginBottom: 8 }}>通知・公開設定</h3>
 
       <div style={{ fontSize: 13, color: '#555', marginBottom: 8 }}>
-        権限: <b>{perm}</b> / 実行環境: <b>{platform}{platform==='ios' ? (isIOSPWA ? ' (PWA)' : ' (Safari)') : ''}</b>
+        権限: <b>{perm}</b> / 実行環境:{' '}
+        <b>
+          {platform}
+          {platform === 'ios' ? (isIOSPWA ? ' (PWA)' : ' (Safari)') : ''}
+        </b>
         {endpoint && (
-          <div style={{ marginTop: 4, overflowWrap: 'anywhere' }}>
-            endpoint: {endpoint}
-          </div>
+          <div style={{ marginTop: 4, overflowWrap: 'anywhere' }}>endpoint: {endpoint}</div>
         )}
       </div>
 

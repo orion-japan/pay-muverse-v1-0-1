@@ -1,47 +1,47 @@
 .msg {
-    display: flex;
-    align-items: flex-end;
-    margin: 6px 0;
-    max-width: 80%;
-  }
-  
-  .msg.other {
-    justify-content: flex-start;
-  }
-  .msg.other .bubble {
-    background: #f1f1f1;
-    color: #000;
-    border-radius: 12px 12px 12px 0;
-    margin-left: 6px;
-  }
-  .msg.other .avatar {
-    width: 32px; height: 32px;
-    border-radius: 50%;
-  }
-  
-  .msg.me {
-    margin-left: auto;
-    justify-content: flex-end;
-    text-align: right;
-  }
-  .msg.me .bubble {
-    background: #a5d6ff;
-    color: #000;
-    border-radius: 12px 12px 0 12px;
-  }
-  .msg.me .avatar {
-    display: none; /* 自分のアイコンは非表示でもOK */
-  }
-  
-  .bubble {
-    padding: 8px 12px;
-    word-break: break-word;
-    display: inline-block;
-  }
-  
-  .time {
-    font-size: 10px;
-    opacity: 0.6;
-    margin-top: 2px;
-  }
-  
+  display: flex;
+  align-items: flex-end;
+  margin: 6px 0;
+  max-width: 80%;
+}
+
+.msg.other {
+  justify-content: flex-start;
+}
+.msg.other .bubble {
+  background: #f1f1f1;
+  color: #000;
+  border-radius: 12px 12px 12px 0;
+  margin-left: 6px;
+}
+.msg.other .avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+}
+
+.msg.me {
+  margin-left: auto;
+  justify-content: flex-end;
+  text-align: right;
+}
+.msg.me .bubble {
+  background: #a5d6ff;
+  color: #000;
+  border-radius: 12px 12px 0 12px;
+}
+.msg.me .avatar {
+  display: none; /* 自分のアイコンは非表示でもOK */
+}
+
+.bubble {
+  padding: 8px 12px;
+  word-break: break-word;
+  display: inline-block;
+}
+
+.time {
+  font-size: 10px;
+  opacity: 0.6;
+  margin-top: 2px;
+}

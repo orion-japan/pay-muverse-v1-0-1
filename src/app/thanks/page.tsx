@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import { motion } from "framer-motion";
-import { useEffect, useState } from "react";
-import { auth } from "@/lib/firebase";
+import { motion } from 'framer-motion';
+import { useEffect, useState } from 'react';
+import { auth } from '@/lib/firebase';
 
 // === LPContinuationSection ===
 function LPContinuationSection() {
@@ -20,9 +20,15 @@ function LPContinuationSection() {
 
       <style jsx>{`
         @keyframes gradientShift {
-          0% { background-position: 0% 50%; }
-          50% { background-position: 100% 50%; }
-          100% { background-position: 0% 50%; }
+          0% {
+            background-position: 0% 50%;
+          }
+          50% {
+            background-position: 100% 50%;
+          }
+          100% {
+            background-position: 0% 50%;
+          }
         }
       `}</style>
     </section>
@@ -35,16 +41,16 @@ export default function ThanksPage() {
       <main className="relative min-h-screen flex flex-col items-center justify-center p-8 text-center overflow-hidden">
         {/* 背景グラデーション */}
         <div className="absolute inset-0 bg-gradient-to-br from-indigo-900 via-purple-900 to-black"></div>
-        
+
         {/* 光の効果 */}
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-purple-900/20 via-transparent to-transparent opacity-10"></div>
-        
+
         {/* メインコンテンツ */}
         <motion.div
           className="relative z-10 max-w-2xl mx-auto"
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 1.2, ease: "easeOut" }}
+          transition={{ duration: 1.2, ease: 'easeOut' }}
         >
           <motion.div
             className="mb-8"
@@ -53,8 +59,18 @@ export default function ThanksPage() {
             transition={{ duration: 0.8, delay: 0.3 }}
           >
             <div className="w-20 h-20 mx-auto mb-6 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
-              <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              <svg
+                className="w-10 h-10 text-white"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
               </svg>
             </div>
           </motion.div>
@@ -67,7 +83,7 @@ export default function ThanksPage() {
           >
             共鳴が始まりました
           </motion.h1>
-          
+
           <motion.p
             className="text-xl text-white/90 mb-8 font-light"
             initial={{ opacity: 0, y: 20 }}

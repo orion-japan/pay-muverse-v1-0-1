@@ -1,170 +1,179 @@
 .km-root {
-    width: 100%;
-    min-height: 100dvh;
-    background: #ffffff;
-  }
-  
-  .km-wrap {
-    max-width: 960px;
-    margin: 0 auto;
-    padding: 20px 16px 48px;
-  }
-  
-  .km-header {
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 16px;
-  }
-  
-  .km-title {
-    margin: 0;
-    font-size: 22px;
-    line-height: 1.2;
-    letter-spacing: 0.02em;
-    color: #222;
-  }
-  
-  .km-user {
-    font-size: 13px;
-    color: #666;
-  }
-  
-  .km-main {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 16px;
-  }
-  
-  .km-card {
-    border: 1px solid #eee;
-    border-radius: 12px;
-    box-shadow: 0 6px 20px rgba(0,0,0,0.06);
-    padding: 16px;
-    background: #fff;
-  }
-  
-  .km-card-title {
-    font-weight: 700;
-    font-size: 16px;
-    margin-bottom: 12px;
-    color: #333;
-  }
-  
-  .km-schedule {
-    border: 1px dashed #e3e3e3;
-    border-radius: 8px;
-    padding: 12px;
-    background: #fafafa;
-  }
-  
-  .km-schedule-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 0;
-    border-bottom: 1px solid #f0f0f0;
-  }
-  .km-schedule-row:last-child { border-bottom: 0; }
-  
-  .km-label {
-    width: 64px;
-    font-size: 13px;
-    color: #666;
-  }
-  .km-value {
-    font-size: 14px;
-    color: #222;
-  }
-  
-  .km-actions {
-    display: flex;
-    gap: 10px;
-    margin-top: 14px;
-  }
-  
-  .km-button {
-    appearance: none;
-    border: none;
-    border-radius: 8px;
-    padding: 10px 14px;
-    font-size: 14px;
-    cursor: pointer;
-    transition: transform 0.05s ease, box-shadow 0.15s ease, opacity 0.15s ease;
-  }
-  .km-button:active { transform: translateY(1px); }
-  
-  .km-button.primary {
-    background: #6c63ff;
-    color: #fff;
-    box-shadow: 0 6px 16px rgba(108,99,255,0.25);
-  }
-  .km-button.primary.disabled {
-    opacity: .45;
-    cursor: not-allowed;
-    box-shadow: none;
-  }
-  
-  .km-button.ghost {
-    background: #f5f5ff;
-    color: #4946b8;
-    box-shadow: inset 0 0 0 1px rgba(108,99,255,0.25);
-  }
-  
-  .km-note {
-    margin-top: 10px;
-    font-size: 13px;
-    color: #666;
-  }
-  
-  .km-linklike {
-    background: transparent;
-    color: #6c63ff;
-    border: none;
-    padding: 0 0 0 8px;
-    text-decoration: underline;
-    cursor: pointer;
-  }
-  
-  .km-description p {
-    margin: 0 0 8px 0;
-    color: #333;
-    line-height: 1.7;
-  }
-  .km-description ul {
-    margin: 6px 0 0 18px;
-    color: #444;
-    line-height: 1.6;
-  }
-  
-  .km-fullcenter {
-    width: 100%;
-    height: 100dvh;
-    display: grid;
-    place-items: center;
-    color: #555;
-  }
-  
-  .km-muted { color: #777; }
-  
-  .km-iframe {
-    width: 100%;
-    height: 100dvh;
-    border: none;
-    display: block;
-  }
- /* ===== Kyomeikai: ヘッダーかぶり対策 ===== */
-:root { --km-header-h: 56px; } /* ヘッダーの実高さに合わせて調整 */
+  width: 100%;
+  min-height: 100dvh;
+  background: #ffffff;
+}
 
+.km-wrap {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 20px 16px 48px;
+}
 
+.km-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.km-title {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  color: #222;
+}
+
+.km-user {
+  font-size: 13px;
+  color: #666;
+}
+
+.km-main {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+.km-card {
+  border: 1px solid #eee;
+  border-radius: 12px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
+  padding: 16px;
+  background: #fff;
+}
+
+.km-card-title {
+  font-weight: 700;
+  font-size: 16px;
+  margin-bottom: 12px;
+  color: #333;
+}
+
+.km-schedule {
+  border: 1px dashed #e3e3e3;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fafafa;
+}
+
+.km-schedule-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+.km-schedule-row:last-child {
+  border-bottom: 0;
+}
+
+.km-label {
+  width: 64px;
+  font-size: 13px;
+  color: #666;
+}
+.km-value {
+  font-size: 14px;
+  color: #222;
+}
+
+.km-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.km-button {
+  appearance: none;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 14px;
+  cursor: pointer;
+  transition:
+    transform 0.05s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease;
+}
+.km-button:active {
+  transform: translateY(1px);
+}
+
+.km-button.primary {
+  background: #6c63ff;
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(108, 99, 255, 0.25);
+}
+.km-button.primary.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.km-button.ghost {
+  background: #f5f5ff;
+  color: #4946b8;
+  box-shadow: inset 0 0 0 1px rgba(108, 99, 255, 0.25);
+}
+
+.km-note {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #666;
+}
+
+.km-linklike {
+  background: transparent;
+  color: #6c63ff;
+  border: none;
+  padding: 0 0 0 8px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.km-description p {
+  margin: 0 0 8px 0;
+  color: #333;
+  line-height: 1.7;
+}
+.km-description ul {
+  margin: 6px 0 0 18px;
+  color: #444;
+  line-height: 1.6;
+}
+
+.km-fullcenter {
+  width: 100%;
+  height: 100dvh;
+  display: grid;
+  place-items: center;
+  color: #555;
+}
+
+.km-muted {
+  color: #777;
+}
+
+.km-iframe {
+  width: 100%;
+  height: 100dvh;
+  border: none;
+  display: block;
+}
+/* ===== Kyomeikai: ヘッダーかぶり対策 ===== */
+:root {
+  --km-header-h: 56px;
+} /* ヘッダーの実高さに合わせて調整 */
 
 /* ヘッダー固定時に、下のコンテンツに余白をつける */
-.km-wrap{
+.km-wrap {
   /* iOSノッチ考慮 + ヘッダー高さ + 少し余白 */
   padding-top: calc(env(safe-area-inset-top, 0px) + var(--km-header-h) + 8px);
 }
-.km-header{
+.km-header {
   position: sticky;
   top: 0;
   z-index: 20;
@@ -175,38 +184,38 @@
 /* 共鳴会・愛祈の画像共通 */
 .km-image-wrap {
   display: flex;
-  justify-content: center;  /* 横中央 */
+  justify-content: center; /* 横中央 */
   margin: 12px 0;
 }
 
 .km-image {
-  max-width: 80%;   /* 画面幅の80%まで縮小 */
-  height: auto;     /* 縦横比維持 */
+  max-width: 80%; /* 画面幅の80%まで縮小 */
+  height: auto; /* 縦横比維持 */
   border-radius: 12px; /* 角を丸める（任意） */
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1); /* 軽い影（任意） */
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); /* 軽い影（任意） */
 }
 
 /* ページ全体のラップ */
 .km-wrap {
-  max-width: 800px;       /* コンテンツ幅の上限 */
-  margin: 0 auto;         /* 横中央寄せ */
-  padding: 12px 8px;      /* ← 上下左右の余白を縮小（デフォルト大きすぎる場合はここ） */
-  background: #fff;       /* 必要なら背景白 */
-  border-radius: 8px;     /* 角を軽く丸める（任意） */
+  max-width: 800px; /* コンテンツ幅の上限 */
+  margin: 0 auto; /* 横中央寄せ */
+  padding: 12px 8px; /* ← 上下左右の余白を縮小（デフォルト大きすぎる場合はここ） */
+  background: #fff; /* 必要なら背景白 */
+  border-radius: 8px; /* 角を軽く丸める（任意） */
 }
 
 .km-card {
   background: #fff;
   border-radius: 12px;
   padding: 16px;
-  margin: 16px 0;               /* 上下の間隔 */
-  box-shadow: 0 2px 6px rgba(0,0,0,0.05); /* 軽い影 */
+  margin: 16px 0; /* 上下の間隔 */
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05); /* 軽い影 */
 }
 
 /* カードとカードの間に細いアクセントライン */
 .km-card + .km-card {
   border-top: 3px solid #e0d4ff; /* 薄いパープル系ライン */
-  padding-top: 20px;             /* 線の分だけ余白追加 */
+  padding-top: 20px; /* 線の分だけ余白追加 */
 }
 
 .km-actions {
@@ -214,7 +223,6 @@
   justify-content: flex-end; /* ボタンを右端へ */
   margin-top: 12px;
 }
-
 
 .km-subtitle {
   font-size: 14px;
@@ -226,7 +234,7 @@
   padding: 12px;
   border-radius: 12px;
   background: #fff;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
   margin-bottom: 16px;
 }
 .km-cal-grid {
@@ -268,17 +276,24 @@
   border-radius: 999px;
   background: #eee;
 }
-.km-badge.kyomeikai { background: #c9e4ff; } /* 水色：共鳴会 */
-.km-badge.ainori    { background: #ffd3ea; } /* ピンク：瞑想会 */
-.km-cal-holiday { background: #fff3f3 !important; } /* 祝日背景 */
-.km-cal-out { opacity: 0.35; } /* 前後月の薄表示（必要なら） */
-
+.km-badge.kyomeikai {
+  background: #c9e4ff;
+} /* 水色：共鳴会 */
+.km-badge.ainori {
+  background: #ffd3ea;
+} /* ピンク：瞑想会 */
+.km-cal-holiday {
+  background: #fff3f3 !important;
+} /* 祝日背景 */
+.km-cal-out {
+  opacity: 0.35;
+} /* 前後月の薄表示（必要なら） */
 
 .km-cal {
   padding: 12px;
   border-radius: 12px;
   background: #fff;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
   margin-bottom: 16px;
 }
 
@@ -295,6 +310,12 @@
   background: #faf8ff;
 }
 
-.km-badge.kyomeikai { background: #c9e4ff; } /* 共鳴会＝水色 */
-.km-badge.ainori    { background: #ffd3ea; } /* 瞑想会＝ピンク */
-.km-cal-holiday     { background: #fff3f3 !important; } /* 祝日＝薄赤 */
+.km-badge.kyomeikai {
+  background: #c9e4ff;
+} /* 共鳴会＝水色 */
+.km-badge.ainori {
+  background: #ffd3ea;
+} /* 瞑想会＝ピンク */
+.km-cal-holiday {
+  background: #fff3f3 !important;
+} /* 祝日＝薄赤 */

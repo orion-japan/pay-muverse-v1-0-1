@@ -42,7 +42,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(data ?? [], { status: 200 });
     } else {
       // サマリー（free：数字のみ）
-      const { data, error } = await supabaseServer.rpc('shipmates_summary_for', { owner_code: owner });
+      const { data, error } = await supabaseServer.rpc('shipmates_summary_for', {
+        owner_code: owner,
+      });
       if (error) throw error;
       return NextResponse.json({ summary: data ?? [] }, { status: 200 });
     }

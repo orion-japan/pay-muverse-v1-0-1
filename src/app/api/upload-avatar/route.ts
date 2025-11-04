@@ -10,7 +10,7 @@ export async function POST(req: Request) {
   try {
     const form = await req.formData();
     const file = form.get('file') as File | null;
-    let idToken = (form.get('idToken') as string | null) || null;
+    const idToken = (form.get('idToken') as string | null) || null;
     let uid = (form.get('uid') as string | null) || null;
 
     if (!file) {
@@ -24,7 +24,10 @@ export async function POST(req: Request) {
     }
 
     if (!uid) {
-      return NextResponse.json({ success: false, error: 'Missing uid (no idToken/uid)' }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: 'Missing uid (no idToken/uid)' },
+        { status: 400 },
+      );
     }
 
     // uid → user_code 取得（usersテーブル想定）
@@ -36,7 +39,10 @@ export async function POST(req: Request) {
 
     if (userErr) {
       console.error('[upload-avatar] users 取得失敗', userErr);
-      return NextResponse.json({ success: false, error: 'failed to fetch user_code' }, { status: 500 });
+      return NextResponse.json(
+        { success: false, error: 'failed to fetch user_code' },
+        { status: 500 },
+      );
     }
     if (!userRow?.user_code) {
       return NextResponse.json({ success: false, error: 'user_code not found' }, { status: 404 });
@@ -64,24 +70,22 @@ export async function POST(req: Request) {
         contentType = 'image/png';
       } else {
         // sharp が無い環境 → 受け取った contentType を尊重（なければ png）
-        contentType = (file.type && /^image\//.test(file.type)) ? file.type : 'image/png';
+        contentType = file.type && /^image\//.test(file.type) ? file.type : 'image/png';
         console.warn('[upload-avatar] sharp が見つからないため、リサイズせずにアップロードします');
       }
     } catch (e) {
       // 例外時もフォールバック
-      contentType = (file.type && /^image\//.test(file.type)) ? file.type : 'image/png';
+      contentType = file.type && /^image\//.test(file.type) ? file.type : 'image/png';
       console.warn('[upload-avatar] リサイズ処理失敗: フォールバックでそのまま保存します', e);
     }
     // -----------------------------------------------------------------
 
     // Storage にアップロード（Service Role なので RLS を気にしなくてOK）
-    const { error: upErr } = await supabaseAdmin
-      .storage.from('avatars')
-      .upload(filePath, buffer, {
-        upsert: true,
-        contentType,
-        cacheControl: '3600',
-      });
+    const { error: upErr } = await supabaseAdmin.storage.from('avatars').upload(filePath, buffer, {
+      upsert: true,
+      contentType,
+      cacheControl: '3600',
+    });
 
     if (upErr) {
       console.error('[upload-avatar] Storage失敗', upErr);

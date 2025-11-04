@@ -10,6 +10,6 @@ export function cleanOcrText(s: string): string {
     .replace(/([「『（(【])[ \t]*/g, '$1')
     .replace(/[ \t]*([」』）)】])/g, '$1')
     .replace(/\n{3,}/g, '\n\n')
-    .replace(/[^\x00-\x7Fぁ-んァ-ヶ一-龥ー。、！？…「」『』（）()・%〜\s-]/g, '') // 不明文字除去
+    .replace(/[^\u0000-\x7Fぁ-んァ-ヶ一-龥ー。、！？…「」『』（）()・%〜\s-]/g, '') // 不明文字除去
     .trim();
 }

@@ -42,12 +42,15 @@ export async function GET(req: NextRequest) {
   try {
     const fromCookie = await readMuUserCode(req);
     const fromHeader = req.headers.get('x-mu-user')?.trim() || null;
-    const fromQuery  = req.nextUrl.searchParams.get('user_code')?.trim() || null;
-    const user_code  = fromCookie || fromHeader || fromQuery;
+    const fromQuery = req.nextUrl.searchParams.get('user_code')?.trim() || null;
+    const user_code = fromCookie || fromHeader || fromQuery;
 
     // user_code が無い場合でも 401 にせず 200 で未購入を返す（UIの赤ログ回避）
     if (!user_code) {
-      return json({ active: false, plan: null, until: null, user_code: null, reason: 'no_user_code' }, 200);
+      return json(
+        { active: false, plan: null, until: null, user_code: null, reason: 'no_user_code' },
+        200,
+      );
     }
 
     const sb = createClient(SB_URL, SRVKEY, { auth: { persistSession: false } });
@@ -58,12 +61,15 @@ export async function GET(req: NextRequest) {
       .maybeSingle(); // 行がない場合もOKにする
 
     if (error) {
-      return json({ active: false, plan: null, until: null, user_code, reason: error.message }, 200);
+      return json(
+        { active: false, plan: null, until: null, user_code, reason: error.message },
+        200,
+      );
     }
 
-    const plan  = data?.plan_status ?? null; // 'pro' | 'free' | null
-    const until = data?.plan_until ?? null;  // ISO | null
-    const now   = Date.now();
+    const plan = data?.plan_status ?? null; // 'pro' | 'free' | null
+    const until = data?.plan_until ?? null; // ISO | null
+    const now = Date.now();
     const okUntil = until ? new Date(until).getTime() > now : true;
     const active = plan === 'pro' && okUntil;
 

@@ -124,7 +124,7 @@ export default function MyPage() {
 
         // Array/CSV ゆらぎ吸収
         const toDisplay = (v: string[] | string | null | undefined) =>
-          Array.isArray(v) ? v : v ?? '';
+          Array.isArray(v) ? v : (v ?? '');
 
         const profileForUI: Profile = {
           user_code,
@@ -168,7 +168,9 @@ export default function MyPage() {
           const appCode = await resolveAppCode(idToken, user_code);
           if (!appCode) throw new Error('app_code が取得できませんでした。');
 
-          let rcode = '', mcode = '', eve = '';
+          let rcode = '',
+            mcode = '',
+            eve = '';
           try {
             const ri = await fetch('/api/my/invite-info', {
               method: 'GET',
@@ -178,14 +180,14 @@ export default function MyPage() {
             const ji = await ri.json().catch(() => ({}));
             rcode = pickString(ji, 'rcode') ?? '';
             mcode = pickString(ji, 'mcode') ?? '';
-            eve   = pickString(ji, 'eve', 'code') ?? '';
+            eve = pickString(ji, 'eve', 'code') ?? '';
           } catch {}
 
           const params = new URLSearchParams();
           params.set('ref', appCode);
           if (rcode) params.set('rcode', rcode);
           if (mcode) params.set('mcode', mcode);
-          if (eve)   params.set('eve', eve);
+          if (eve) params.set('eve', eve);
 
           const finalLink = `https://join.muverse.jp/register?${params.toString()}`;
           if (mounted) setJoinLink(finalLink);
@@ -265,7 +267,9 @@ export default function MyPage() {
 
         {/* 参加URL */}
         <section className="profile-card" style={{ marginTop: 12 }}>
-          <h2 className="section-title" style={{ margin: '0 0 8px' }}>参加用URL</h2>
+          <h2 className="section-title" style={{ margin: '0 0 8px' }}>
+            参加用URL
+          </h2>
 
           {linkLoading && <p style={{ margin: 0 }}>URL を準備中...</p>}
           {!linkLoading && linkMsg && <p style={{ color: '#b91c1c', margin: 0 }}>{linkMsg}</p>}
@@ -286,10 +290,14 @@ export default function MyPage() {
                   {joinLink}
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button className="settings-btn" onClick={shareViaLINE}>💚 LINEで共有</button>
+                  <button className="settings-btn" onClick={shareViaLINE}>
+                    💚 LINEで共有
+                  </button>
                   <button
                     className="settings-btn"
-                    onClick={async () => { if (joinLink) await navigator.clipboard.writeText(joinLink); }}
+                    onClick={async () => {
+                      if (joinLink) await navigator.clipboard.writeText(joinLink);
+                    }}
                   >
                     📋 リンクをコピー
                   </button>
@@ -300,14 +308,23 @@ export default function MyPage() {
               </div>
 
               {/* QRのみ */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 12, alignItems: 'center' }}>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'auto 1fr',
+                  gap: 12,
+                  alignItems: 'center',
+                }}
+              >
                 <canvas ref={qrCanvasRef} style={{ width: 160, height: 160 }} />
                 <div style={{ display: 'grid', gap: 8 }}>
                   <div style={{ fontSize: 12, color: '#6b7280' }}>
                     イベントや対面案内では、このQRを見せるだけでOKです。
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    <button className="settings-btn" onClick={downloadQR}>⬇️ QRを保存（PNG）</button>
+                    <button className="settings-btn" onClick={downloadQR}>
+                      ⬇️ QRを保存（PNG）
+                    </button>
                   </div>
                 </div>
               </div>
@@ -319,7 +336,9 @@ export default function MyPage() {
           <button className="edit-btn" onClick={() => router.push('/mypage/create')}>
             ✏️ プロフィールを編集
           </button>
-          <Link href="/mypage/settings" className="settings-btn">⚙️ 設定</Link>
+          <Link href="/mypage/settings" className="settings-btn">
+            ⚙️ 設定
+          </Link>
         </div>
       </div>
     </div>

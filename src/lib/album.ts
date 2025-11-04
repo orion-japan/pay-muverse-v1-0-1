@@ -3,8 +3,8 @@ import { supabase } from '@/lib/supabase';
 
 export type AlbumItem = {
   name: string;
-  url: string;    // 表示用（署名URL or /api/media のフォールバック）
-  path: string;   // private-posts 内のパス: <userCode>/<filename>
+  url: string; // 表示用（署名URL or /api/media のフォールバック）
+  path: string; // private-posts 内のパス: <userCode>/<filename>
   size?: number | null;
   updated_at?: string | null;
 };
@@ -25,9 +25,7 @@ export async function listAlbumImages(userCode: string): Promise<AlbumItem[]> {
     });
     if (error) throw error;
 
-    const files = (data || []).filter(
-      (f) => f && !f.name.startsWith('.') && !f.name.endsWith('/')
-    );
+    const files = (data || []).filter((f) => f && !f.name.startsWith('.') && !f.name.endsWith('/'));
 
     // 2) 各ファイルの署名URL生成。失敗時は /api/media にフォールバック
     const resolved = await Promise.all(
@@ -54,11 +52,11 @@ export async function listAlbumImages(userCode: string): Promise<AlbumItem[]> {
         return {
           name: f.name as string,
           url,
-          path,                                     // 相対パスはそのまま
+          path, // 相対パスはそのまま
           size: (f?.metadata?.size as number) ?? null,
           updated_at: (f?.updated_at as string) ?? null,
         } as AlbumItem;
-      })
+      }),
     );
 
     return resolved;

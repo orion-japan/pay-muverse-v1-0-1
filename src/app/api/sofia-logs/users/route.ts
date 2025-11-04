@@ -28,13 +28,15 @@ export async function GET(_req: NextRequest) {
       if (!k) continue;
       const cur = map.get(k) || { conversations: 0, last_turn_at: null };
       cur.conversations += 1;
-      cur.last_turn_at = cur.last_turn_at && r.last_turn_at && cur.last_turn_at > r.last_turn_at
-        ? cur.last_turn_at : (r.last_turn_at || cur.last_turn_at);
+      cur.last_turn_at =
+        cur.last_turn_at && r.last_turn_at && cur.last_turn_at > r.last_turn_at
+          ? cur.last_turn_at
+          : r.last_turn_at || cur.last_turn_at;
       map.set(k, cur);
     }
 
     const userCodes = Array.from(map.keys());
-    let names: Record<string, string> = {};
+    const names: Record<string, string> = {};
     if (userCodes.length) {
       const { data: profiles } = await supabase
         .from('users') // ← 貴環境の「名前持ち」テーブル。users.click_username 等に合わせてください

@@ -34,12 +34,7 @@ export default function ImageUploadComponent({ onUpload, className }: Props) {
     <div className={className}>
       <input type="file" onChange={handleFileChange} accept="image/*" />
       {previewUrl && (
-        <SafeImage
-          src={previewUrl}
-          alt="preview"
-          aspectRatio="1/1"
-          className="upload-preview"
-        />
+        <SafeImage src={previewUrl} alt="preview" aspectRatio="1/1" className="upload-preview" />
       )}
       <button onClick={handleUpload} disabled={uploading || !file}>
         {uploading ? 'アップロード中…' : 'アップロード'}

@@ -23,7 +23,7 @@ export async function POST(req: Request) {
       console.error('❌ Supabaseからメール取得失敗:', userError);
       return NextResponse.json(
         { error: 'ユーザーのメールアドレス取得に失敗しました' },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -51,7 +51,7 @@ export async function POST(req: Request) {
       console.error('❌ Supabase更新エラー:', updateError.message);
       return NextResponse.json(
         { error: 'Supabase更新エラー', detail: updateError.message },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -70,7 +70,7 @@ export async function POST(req: Request) {
         error: 'カード登録に失敗しました',
         detail: String(err),
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

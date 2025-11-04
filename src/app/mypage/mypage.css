@@ -3,8 +3,8 @@
   min-height: 100dvh;
   padding: 28px 14px 96px;
   background:
-    radial-gradient(800px 420px at 85% 0%, rgba(124, 58, 237, .16), transparent 60%),
-    radial-gradient(900px 500px at 10% 20%, rgba(34, 211, 238, .14), transparent 60%),
+    radial-gradient(800px 420px at 85% 0%, rgba(124, 58, 237, 0.16), transparent 60%),
+    radial-gradient(900px 500px at 10% 20%, rgba(34, 211, 238, 0.14), transparent 60%),
     var(--bg, #f6f7fb);
   display: block;
 }
@@ -48,7 +48,9 @@
   cursor: pointer;
   margin-top: 16px;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .register-button:hover {
@@ -69,37 +71,35 @@
   }
 }
 /* 背景（そのままでOK） */
-.mypage-wrapper{
+.mypage-wrapper {
   min-height: 100dvh;
   padding: 28px 14px 96px;
   background:
-    radial-gradient(800px 420px at 85% 0%, rgba(124, 58, 237, .16), transparent 60%),
-    radial-gradient(900px 500px at 10% 20%, rgba(34, 211, 238, .14), transparent 60%),
+    radial-gradient(800px 420px at 85% 0%, rgba(124, 58, 237, 0.16), transparent 60%),
+    radial-gradient(900px 500px at 10% 20%, rgba(34, 211, 238, 0.14), transparent 60%),
     var(--bg, #f6f7fb);
   display: block;
 }
 
 /* ← ここを広めに（左右パディングを最小化 & 最大幅も拡大） */
-.mypage-container{
-  max-width: 1120px;                           /* 980 → 1120 */
+.mypage-container {
+  max-width: 1120px; /* 980 → 1120 */
   margin: 0 auto;
-  padding: clamp(6px, 1.8vw, 12px)             /* 上 */
-           clamp(4px, 1.4vw, 10px)             /* 左右をグッと減らす */
-           100px;                               /* 下 */
+  padding: clamp(6px, 1.8vw, 12px) /* 上 */ clamp(4px, 1.4vw, 10px) /* 左右をグッと減らす */ 100px; /* 下 */
   background: transparent !important;
   border: 0 !important;
   box-shadow: none !important;
 }
 
 /* 念のため既存 scrollable も同様に無効化 */
-.mypage-container.scrollable{
+.mypage-container.scrollable {
   background: transparent !important;
   border: 0 !important;
   box-shadow: none !important;
 }
 
 /* インライン style で入ってくる余白は打ち消す */
-.mypage-container > div[style]{
+.mypage-container > div[style] {
   padding: 0 !important;
   background: transparent !important;
   border: 0 !important;
@@ -107,7 +107,9 @@
 }
 
 /* ===== 強制フル幅オーバーライド（最優先で効かせる） ===== */
-:root { --page-max: 1120px; }
+:root {
+  --page-max: 1120px;
+}
 
 /* 余白を最小化（外側） */
 .mypage-wrapper {
@@ -120,7 +122,7 @@
   max-width: var(--page-max) !important;
   margin-left: auto !important;
   margin-right: auto !important;
-  padding-left: 6px !important;   /* ← ここで左右余白を詰める */
+  padding-left: 6px !important; /* ← ここで左右余白を詰める */
   padding-right: 6px !important;
   background: transparent !important;
   border: 0 !important;
@@ -144,40 +146,50 @@
 
 /* iPhone 横幅でもギリまで使う（微調整） */
 @media (min-width: 540px) {
-  .mypage-container { padding-left: 10px !important; padding-right: 10px !important; }
+  .mypage-container {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+  }
 }
 
-.my-actions-row{
-  display:flex;
-  gap:8px;
-  margin-top:12px;
-  justify-content:flex-end;
+.my-actions-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  justify-content: flex-end;
 }
-.edit-btn,.settings-btn{
-  display:inline-flex;
-  align-items:center;
-  gap:6px;
-  padding:8px 12px;
-  border:1px solid #e5e7eb;
-  border-radius:10px;
-  background:#fff;
-  text-decoration:none;
-  font-weight:600;
-  transition:background .15s, box-shadow .15s, transform .06s;
+.edit-btn,
+.settings-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+  text-decoration: none;
+  font-weight: 600;
+  transition:
+    background 0.15s,
+    box-shadow 0.15s,
+    transform 0.06s;
 }
-.edit-btn:hover,.settings-btn:hover{
-  background:#f7f8fb;
-  box-shadow:0 2px 10px rgba(0,0,0,.04);
+.edit-btn:hover,
+.settings-btn:hover {
+  background: #f7f8fb;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
 }
-.edit-btn:active,.settings-btn:active{ transform:translateY(1px); }
-
+.edit-btn:active,
+.settings-btn:active {
+  transform: translateY(1px);
+}
 
 /* src/app/mypage/mypage.css */
 .mypage-wrapper {
   min-height: 100vh;
   background:
-    radial-gradient(1400px 700px at 10% 8%, rgba(246,240,255,0.9) 0%, transparent 60%),
-    radial-gradient(1200px 600px at 90% 85%, rgba(233,246,255,0.9) 0%, transparent 60%),
+    radial-gradient(1400px 700px at 10% 8%, rgba(246, 240, 255, 0.9) 0%, transparent 60%),
+    radial-gradient(1200px 600px at 90% 85%, rgba(233, 246, 255, 0.9) 0%, transparent 60%),
     linear-gradient(#fbf9ff, #ffffff);
   padding: 24px;
 }
@@ -191,69 +203,94 @@
   width: 100%;
   padding: 10px 12px;
   border-radius: 10px;
-  border: 1px solid rgba(130,130,180,.25);
-  background: rgba(255,255,255,.9);
+  border: 1px solid rgba(130, 130, 180, 0.25);
+  background: rgba(255, 255, 255, 0.9);
   outline: none;
-  transition: box-shadow .2s, border-color .2s;
+  transition:
+    box-shadow 0.2s,
+    border-color 0.2s;
   font-size: 14px;
 }
 .mu-textarea {
   width: 100%;
   padding: 10px 12px;
   border-radius: 10px;
-  border: 1px solid rgba(130,130,180,.25);
-  background: rgba(255,255,255,.9);
+  border: 1px solid rgba(130, 130, 180, 0.25);
+  background: rgba(255, 255, 255, 0.9);
   outline: none;
-  transition: box-shadow .2s, border-color .2s;
+  transition:
+    box-shadow 0.2s,
+    border-color 0.2s;
   font-size: 14px;
   resize: vertical;
 }
 .mu-textarea:focus {
-  border-color: rgba(106,140,255,.6);
-  box-shadow: 0 0 0 3px rgba(106,140,255,.12);
+  border-color: rgba(106, 140, 255, 0.6);
+  box-shadow: 0 0 0 3px rgba(106, 140, 255, 0.12);
 }
 
-.mu-input:focus, .mu-textarea:focus {
-  border-color: rgba(106,140,255,.6);
-  box-shadow: 0 0 0 3px rgba(106,140,255,.12);
+.mu-input:focus,
+.mu-textarea:focus {
+  border-color: rgba(106, 140, 255, 0.6);
+  box-shadow: 0 0 0 3px rgba(106, 140, 255, 0.12);
 }
-.basic-head { display:flex; gap:14px; align-items:center; margin-bottom:10px; }
-.basic-head .avatar img { width:72px; height:72px; border-radius:14px; object-fit:cover; }
-.basic-head .title h2 { margin:0; }
-.basic-head .sub { font-size:12px; opacity:.7; }
-.plain { padding:10px 12px; background:rgba(255,255,255,.6); border-radius:10px; border:1px solid rgba(130,130,180,.18); }
+.basic-head {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.basic-head .avatar img {
+  width: 72px;
+  height: 72px;
+  border-radius: 14px;
+  object-fit: cover;
+}
+.basic-head .title h2 {
+  margin: 0;
+}
+.basic-head .sub {
+  font-size: 12px;
+  opacity: 0.7;
+}
+.plain {
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 10px;
+  border: 1px solid rgba(130, 130, 180, 0.18);
+}
 
 /* 上の余白(緑)＝.mypage-wrapper の padding をゼロに */
-.mypage-wrapper{
+.mypage-wrapper {
   min-height: 100vh;
-  padding: 0 !important;              /* ← これで上の緑が消える */
-  background: none !important;        /* ← 背景の青/緑グラデも消す */
+  padding: 0 !important; /* ← これで上の緑が消える */
+  background: none !important; /* ← 背景の青/緑グラデも消す */
 }
 
 /* 代わりに内側で左右＆下だけ余白を確保（レイアウトは維持） */
-.mypage-container{
+.mypage-container {
   max-width: 1080px;
   margin: 0 auto;
-  padding: 0 12px 72px;               /* 上0 / 左右12 / 下72（フッター分） */
+  padding: 0 12px 72px; /* 上0 / 左右12 / 下72（フッター分） */
 }
-.mypage-wrapper{
-  padding-top: 0 !important;          /* 余白だけ消す */
+.mypage-wrapper {
+  padding-top: 0 !important; /* 余白だけ消す */
   padding-right: 0;
   padding-left: 0;
   /* 既存の background はそのまま */
 }
 
-.page-head{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
-.page-title{
-  margin:0;
-  font-size:18px;
-  letter-spacing:.02em;
+.page-title {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0.02em;
 }
-.page-sub{
-  font-size:12px;
-  opacity:.65;
+.page-sub {
+  font-size: 12px;
+  opacity: 0.65;
 }

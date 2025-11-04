@@ -1,7 +1,7 @@
 /* ===== self shell: 他ページのスタイル継承を遮断 ===== */
 .self-shell {
-  isolation: isolate;           /* stacking を分離 */
-  container-type: inline-size;  /* コンテナクエリ用（将来用） */
+  isolation: isolate; /* stacking を分離 */
+  container-type: inline-size; /* コンテナクエリ用（将来用） */
 }
 
 /* ここから先は self ページ専用スコープ */
@@ -52,7 +52,7 @@
   border: 1px solid var(--mu-border, #e6e6ef);
   border-radius: var(--mu-radius-lg, 12px);
   background: #fff;
-  box-shadow: var(--shadow, 0 2px 6px rgba(0,0,0,.04));
+  box-shadow: var(--shadow, 0 2px 6px rgba(0, 0, 0, 0.04));
   align-items: start;
 }
 
@@ -67,7 +67,7 @@
 /* 右側テキスト塊 */
 .digest-row .oneline {
   display: flex;
-  flex-direction: column;   /* ← 縦並びに変更 */
+  flex-direction: column; /* ← 縦並びに変更 */
   align-items: flex-start;
   gap: 2px;
   min-width: 0;
@@ -109,7 +109,7 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
   line-clamp: 3;
-  margin-top: 2px;      /* 名前との余白 */
+  margin-top: 2px; /* 名前との余白 */
   font-size: 15px;
   line-height: 1.6;
   white-space: normal;
@@ -134,7 +134,7 @@
   border-radius: 999px;
   border: none;
   background: #ffd84d;
-  box-shadow: 0 6px 18px rgba(0,0,0,.18);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
   font-weight: 800;
   cursor: pointer;
 }
@@ -154,12 +154,20 @@
   max-width: 360px;
   padding: 10px 12px;
   border-radius: 12px;
-  background: rgba(30,30,40,.92);
+  background: rgba(30, 30, 40, 0.92);
   color: #fff;
-  box-shadow: 0 8px 24px rgba(0,0,0,.25);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
 }
-.self-toast .ttl { font-weight: 700; margin-bottom: 4px; font-size: 14px; }
-.self-toast .body { font-size: 13px; line-height: 1.4; opacity: .9; }
+.self-toast .ttl {
+  font-weight: 700;
+  margin-bottom: 4px;
+  font-size: 14px;
+}
+.self-toast .body {
+  font-size: 13px;
+  line-height: 1.4;
+  opacity: 0.9;
+}
 .self-toast .okbtn {
   margin-top: 8px;
   padding: 4px 8px;
@@ -171,8 +179,12 @@
 
 /* ===== モバイル幅の微調整 ===== */
 @media (max-width: 560px) {
-  .digest-row { padding: 10px; }
-  .digest-row .oneline { gap: 4px; }
+  .digest-row {
+    padding: 10px;
+  }
+  .digest-row .oneline {
+    gap: 4px;
+  }
 }
 
 /* ===== self shell: 他ページのスタイル継承を遮断 ===== */
@@ -226,7 +238,7 @@
   border: 1px solid var(--mu-border, #e6e6ef);
   border-radius: var(--mu-radius-lg, 12px);
   background: #fff;
-  box-shadow: var(--shadow, 0 2px 6px rgba(0,0,0,.04));
+  box-shadow: var(--shadow, 0 2px 6px rgba(0, 0, 0, 0.04));
   align-items: start;
 }
 
@@ -259,7 +271,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;       /* ← 日付と投稿数の間隔 */
+  gap: 8px; /* ← 日付と投稿数の間隔 */
   width: 100%;
   font-size: 12px;
   color: #777;
@@ -314,37 +326,48 @@
   height: 56px;
   border-radius: 50%;
   border: none;
-  background: linear-gradient(135deg, #FFD84D, #FF9F1C);
+  background: linear-gradient(135deg, #ffd84d, #ff9f1c);
   color: #fff;
   font-size: 20px;
   font-weight: bold;
-  box-shadow: 0 6px 18px rgba(0,0,0,.25), 0 0 12px rgba(255,168,0,.6);
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.25),
+    0 0 12px rgba(255, 168, 0, 0.6);
   cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
 }
 .floating-button.attn:hover {
   transform: scale(1.1);
-  box-shadow: 0 8px 24px rgba(0,0,0,.3), 0 0 16px rgba(255,168,0,.8);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.3),
+    0 0 16px rgba(255, 168, 0, 0.8);
 }
 
 /* モバイル対応 */
 @media (max-width: 560px) {
-  .digest-row { padding: 10px; }
-  .digest-row .oneline { gap: 4px; }
+  .digest-row {
+    padding: 10px;
+  }
+  .digest-row .oneline {
+    gap: 4px;
+  }
 }
 
 /* --- DigestRow：行レイアウトを明示 --- */
 .self-shell .digest-row {
   display: grid;
-  grid-template-columns: 44px 1fr;      /* 左アバター / 右コンテンツ */
-  grid-template-rows: auto auto auto;   /* 頭 / 本文 / リアクション */
+  grid-template-columns: 44px 1fr; /* 左アバター / 右コンテンツ */
+  grid-template-rows: auto auto auto; /* 頭 / 本文 / リアクション */
   gap: 8px 10px;
 }
 
 .self-shell .digest-row .avatar {
-  grid-row: 1 / span 2;  /* 1〜2行目に跨る（上＋本文） */
+  grid-row: 1 / span 2; /* 1〜2行目に跨る（上＋本文） */
   grid-column: 1;
-  width: 44px; height: 44px;
+  width: 44px;
+  height: 44px;
   border-radius: 9999px;
   object-fit: cover;
 }
@@ -401,7 +424,7 @@
 /* 3行目：リアクション（中央寄せ） */
 .self-shell .digest-row .reaction-row {
   grid-row: 3;
-  grid-column: 1 / -1;   /* 全幅 */
+  grid-column: 1 / -1; /* 全幅 */
   display: flex;
   justify-content: center;
   margin-top: 2px;
@@ -414,13 +437,15 @@
 .self-shell .digest-row {
   /* ほんのり透明な紫→青のグラデを白の上に重ねる */
   background:
-    linear-gradient(180deg, rgba(122, 106, 255, 0.06) 0%, rgba(108, 206, 255, 0.06) 100%),
-    #ffffff;
+    linear-gradient(180deg, rgba(122, 106, 255, 0.06) 0%, rgba(108, 206, 255, 0.06) 100%), #ffffff;
   border: 1px solid rgba(128, 120, 255, 0.18);
   box-shadow:
     0 2px 6px rgba(100, 90, 255, 0.08),
     0 8px 24px rgba(100, 90, 255, 0.06);
-  transition: box-shadow .25s ease, transform .25s ease, border-color .25s ease;
+  transition:
+    box-shadow 0.25s ease,
+    transform 0.25s ease,
+    border-color 0.25s ease;
 }
 
 /* ふわっと浮くホバー（PCだけ） */
@@ -430,7 +455,7 @@
     border-color: rgba(108, 206, 255, 0.28);
     box-shadow:
       0 6px 18px rgba(100, 90, 255, 0.12),
-      0 14px 36px rgba(108, 206, 255, 0.10);
+      0 14px 36px rgba(108, 206, 255, 0.1);
   }
 }
 
@@ -447,16 +472,19 @@
   border: none;
   /* 立体感のあるグラデ＋内側ハイライト */
   background:
-    radial-gradient(120% 120% at 30% 20%, #fff 0%, rgba(255,255,255,.0) 55%),
+    radial-gradient(120% 120% at 30% 20%, #fff 0%, rgba(255, 255, 255, 0) 55%),
     linear-gradient(135deg, #ffd84d 0%, #ffb84d 100%);
   color: #553700;
   font-weight: 800;
   box-shadow:
-    0 6px 18px rgba(0,0,0,.22),
+    0 6px 18px rgba(0, 0, 0, 0.22),
     0 0 0 0 rgba(255, 216, 77, 0.65); /* アニメ開始時の外側グロー */
   z-index: 50;
   cursor: pointer;
-  transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    filter 0.18s ease;
   animation: glowPulse 2.2s ease-in-out infinite;
 }
 
@@ -465,7 +493,7 @@
   .floating-button.attn:hover {
     transform: translateY(-2px) scale(1.03);
     box-shadow:
-      0 10px 24px rgba(0,0,0,.26),
+      0 10px 24px rgba(0, 0, 0, 0.26),
       0 0 0 12px rgba(255, 216, 77, 0.08);
     filter: saturate(1.05);
   }
@@ -475,7 +503,7 @@
 .floating-button.attn:active {
   transform: translateY(0) scale(0.98);
   box-shadow:
-    0 4px 12px rgba(0,0,0,.22),
+    0 4px 12px rgba(0, 0, 0, 0.22),
     0 0 0 6px rgba(255, 216, 77, 0.12);
 }
 
@@ -483,27 +511,27 @@
 @keyframes glowPulse {
   0% {
     box-shadow:
-      0 6px 18px rgba(0,0,0,.22),
+      0 6px 18px rgba(0, 0, 0, 0.22),
       0 0 0 0 rgba(255, 216, 77, 0.55);
   }
   50% {
     box-shadow:
-      0 8px 22px rgba(0,0,0,.26),
+      0 8px 22px rgba(0, 0, 0, 0.26),
       0 0 0 12px rgba(255, 216, 77, 0.08);
   }
   100% {
     box-shadow:
-      0 6px 18px rgba(0,0,0,.22),
+      0 6px 18px rgba(0, 0, 0, 0.22),
       0 0 0 0 rgba(255, 216, 77, 0.55);
   }
 }
 
 /* ユーザーが“動きを減らす”設定の場合はアニメ停止 */
 @media (prefers-reduced-motion: reduce) {
-  .floating-button.attn { animation: none; }
+  .floating-button.attn {
+    animation: none;
+  }
 }
-
-
 
 /* =========================
    著者名は普通の文字に戻す
@@ -512,22 +540,22 @@
 
 /* 名前（author）：太字 → 通常フォント */
 .self-shell .digest-row .author {
-  font-weight: 500;      /* 標準に近い太さ */
-  color: #444;           /* やや落ち着いた色 */
+  font-weight: 500; /* 標準に近い太さ */
+  color: #444; /* やや落ち着いた色 */
 }
 
 /* 投稿本文（snippet）：やや大きめ＆濃い */
 .self-shell .digest-row .snippet {
-  font-size: 16px;       /* 既存より +1px */
-  font-weight: 600;      /* ほんのり強調 */
-  color: #222;           /* 黒寄りで目立つ */
+  font-size: 16px; /* 既存より +1px */
+  font-weight: 600; /* ほんのり強調 */
+  color: #222; /* 黒寄りで目立つ */
   line-height: 1.6;
 }
 /* 著者名をさらに薄くして控えめにする */
 .self-shell .digest-row .author {
-  font-weight: 400;   /* 普通の太さ */
-  color: #999;        /* 薄めのグレー */
-  font-size: 14px;    /* 本文より少し小さめ */
+  font-weight: 400; /* 普通の太さ */
+  color: #999; /* 薄めのグレー */
+  font-size: 14px; /* 本文より少し小さめ */
 }
 
 .floating-button.attn {
@@ -535,19 +563,38 @@
 }
 
 @keyframes pulse {
-  0%   { box-shadow: 0 0 0 0 rgba(255, 215, 77, 0.6); }
-  70%  { box-shadow: 0 0 15px 15px rgba(255, 215, 77, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(255, 215, 77, 0); }
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 215, 77, 0.6);
+  }
+  70% {
+    box-shadow: 0 0 15px 15px rgba(255, 215, 77, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 215, 77, 0);
+  }
 }
 
-
 /* self.css に追記 */
-.digest-row.compact { cursor: pointer; transition: box-shadow .15s ease, transform .05s ease; }
-.digest-row.compact:hover { box-shadow: 0 0 0 2px rgba(132,94,247,.18); }
-.digest-row.compact:active { transform: translateY(1px); }
-.digest-row.compact:focus { outline: 2px solid #845ef7; outline-offset: 2px; }
+.digest-row.compact {
+  cursor: pointer;
+  transition:
+    box-shadow 0.15s ease,
+    transform 0.05s ease;
+}
+.digest-row.compact:hover {
+  box-shadow: 0 0 0 2px rgba(132, 94, 247, 0.18);
+}
+.digest-row.compact:active {
+  transform: translateY(1px);
+}
+.digest-row.compact:focus {
+  outline: 2px solid #845ef7;
+  outline-offset: 2px;
+}
 
 /* 内側要素は通常カーソルでOK */
 .digest-row.compact .avatar,
 .digest-row.compact .author,
-.digest-row.compact .reaction-row { cursor: default; }
+.digest-row.compact .reaction-row {
+  cursor: default;
+}

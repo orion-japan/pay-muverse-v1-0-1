@@ -1,31 +1,130 @@
 /* KnowledgePage.module.css */
-.container { max-width: 1200px; margin: 0 auto; padding: 20px; background: #fafafa; min-height: 100vh; font-family: "Helvetica Neue", Arial, sans-serif; }
-.header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
-.headerTitle { font-size: 20px; font-weight: 700; }
-.backBtn { border: 1px solid #ccc; background: #fff; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
-.backBtn:hover { background: #f2f2f2; }
-.badgeFree { background: #e6f7e6; padding: 2px 6px; border-radius: 4px; font-size: 12px; color: #228822; }
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+  background: #fafafa;
+  min-height: 100vh;
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+}
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.headerTitle {
+  font-size: 20px;
+  font-weight: 700;
+}
+.backBtn {
+  border: 1px solid #ccc;
+  background: #fff;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.backBtn:hover {
+  background: #f2f2f2;
+}
+.badgeFree {
+  background: #e6f7e6;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #228822;
+}
 
-.search { display: flex; gap: 8px; margin-bottom: 20px; }
-.searchInput { flex: 1; padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px; }
-.searchBtn { border: 1px solid #ccc; border-radius: 6px; background: #fff; padding: 8px 12px; cursor: pointer; }
-.searchBtn:hover { background: #f2f2f2; }
+.search {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.searchInput {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+.searchBtn {
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.searchBtn:hover {
+  background: #f2f2f2;
+}
 
-.layout { display: flex; gap: 24px; }
-.toc { width: 260px; border-right: 1px solid #ddd; padding-right: 16px; }
-.toc summary { cursor: pointer; font-weight: 600; margin-bottom: 6px; }
-.toc ul { margin: 6px 0 12px 16px; padding: 0; list-style: none; }
-.tocItemBtn { background: none; border: none; padding: 0; cursor: pointer; color: #06c; text-decoration: underline; font-size: 14px; }
-.tocItemBtn:hover { color: #049; }
+.layout {
+  display: flex;
+  gap: 24px;
+}
+.toc {
+  width: 260px;
+  border-right: 1px solid #ddd;
+  padding-right: 16px;
+}
+.toc summary {
+  cursor: pointer;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.toc ul {
+  margin: 6px 0 12px 16px;
+  padding: 0;
+  list-style: none;
+}
+.tocItemBtn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: #06c;
+  text-decoration: underline;
+  font-size: 14px;
+}
+.tocItemBtn:hover {
+  color: #049;
+}
 
-.answer { flex: 1; min-height: 300px; }
-.card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 16px; background: #fff; }
-.cardTitle { font-weight: 700; font-size: 16px; margin-bottom: 8px; }
-.cardText { font-size: 14px; color: #333; line-height: 1.6; white-space: pre-wrap; }
-.cardLink { font-size: 13px; color: #06c; text-decoration: underline; margin-right: 8px; }
-.cardLink:hover { color: #049; }
-.tags { margin-top: 8px; font-size: 12px; color: #666; }
-
+.answer {
+  flex: 1;
+  min-height: 300px;
+}
+.card {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+  background: #fff;
+}
+.cardTitle {
+  font-weight: 700;
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+.cardText {
+  font-size: 14px;
+  color: #333;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.cardLink {
+  font-size: 13px;
+  color: #06c;
+  text-decoration: underline;
+  margin-right: 8px;
+}
+.cardLink:hover {
+  color: #049;
+}
+.tags {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #666;
+}
 
 /* コンテナ */
 .container {
@@ -34,7 +133,7 @@
   padding: 20px;
   background: #f8f7fb; /* 淡い紫背景 */
   min-height: 100vh;
-  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-family: 'Helvetica Neue', Arial, sans-serif;
 }
 
 /* ヘッダー */
@@ -154,7 +253,7 @@
   border-radius: 12px;
   padding: 20px;
   background: #fff;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
 }
 .cardTitle {
   font-weight: 700;
@@ -192,7 +291,6 @@
   font-size: 13px;
 }
 
-
 /* 既存の .container などはそのまま。以下を追加/一部差し替え */
 
 .header {
@@ -205,7 +303,7 @@
 
 /* いつでも表示する */
 .menuBtn {
-  display: inline-flex;           /* ← 常に表示 */
+  display: inline-flex; /* ← 常に表示 */
   align-items: center;
   border: 1px solid #ccc;
   background: #fff;
@@ -216,65 +314,133 @@
 
 /* モバイルでは左の固定TOCだけ消す（現状のまま） */
 @media (max-width: 860px) {
-  .tocDesktop { display: none; }
+  .tocDesktop {
+    display: none;
+  }
 }
 
 /* ドロワー/オーバーレイの表示条件はそのままでOK（PCでも開けて便利） */
 
 .menuIcon {
-  width: 20px; height: 2px; background: #333; display: block; position: relative;
+  width: 20px;
+  height: 2px;
+  background: #333;
+  display: block;
+  position: relative;
 }
-.menuIcon::before, .menuIcon::after {
-  content: ""; position: absolute; left: 0; width: 20px; height: 2px; background: #333;
+.menuIcon::before,
+.menuIcon::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  width: 20px;
+  height: 2px;
+  background: #333;
 }
-.menuIcon::before { top: -6px; }
-.menuIcon::after  { top:  6px; }
+.menuIcon::before {
+  top: -6px;
+}
+.menuIcon::after {
+  top: 6px;
+}
 
 /* レイアウト */
-.layout { display: flex; gap: 24px; }
+.layout {
+  display: flex;
+  gap: 24px;
+}
 
 /* デスクトップ用サイド目次（左固定） */
-.tocDesktop { width: 240px; border-right: 1px solid #ddd; padding-right: 16px; }
+.tocDesktop {
+  width: 240px;
+  border-right: 1px solid #ddd;
+  padding-right: 16px;
+}
 @media (max-width: 860px) {
-  .tocDesktop { display: none; }   /* 小画面では消す → ドロワーに任せる */
-  .menuBtn { display: inline-flex; align-items: center; }
+  .tocDesktop {
+    display: none;
+  } /* 小画面では消す → ドロワーに任せる */
+  .menuBtn {
+    display: inline-flex;
+    align-items: center;
+  }
 }
 
 /* 既存の目次系 */
 
-.tocSummary { cursor: pointer; font-weight: 600; margin-bottom: 6px; color: #444; }
-.tocList { margin: 6px 0 12px 16px; padding: 0; list-style: none; }
+.tocSummary {
+  cursor: pointer;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: #444;
+}
+.tocList {
+  margin: 6px 0 12px 16px;
+  padding: 0;
+  list-style: none;
+}
 
-.tocItemBtn { background: none; border: none; padding: 0; cursor: pointer; color: #5b34c7; text-decoration: underline; font-size: 14px; }
-.tocItemBtn:hover { color: #3c2291; }
+.tocItemBtn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: #5b34c7;
+  text-decoration: underline;
+  font-size: 14px;
+}
+.tocItemBtn:hover {
+  color: #3c2291;
+}
 
 /* 回答領域は既存の .answer, .card 等を使用 */
 
 /* ===== ドロワー（モバイル） ===== */
 .drawer {
   position: fixed;
-  top: 0; left: 0;
-  width: 78vw; max-width: 320px; height: 100vh;
+  top: 0;
+  left: 0;
+  width: 78vw;
+  max-width: 320px;
+  height: 100vh;
   background: #fff;
-  box-shadow: 2px 0 12px rgba(0,0,0,0.15);
-  transform: translateX(-100%);   /* 初期は隠す */
-  transition: transform .2s ease;
+  box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15);
+  transform: translateX(-100%); /* 初期は隠す */
+  transition: transform 0.2s ease;
   z-index: 60;
 }
-.drawerOpen { transform: translateX(0); }
+.drawerOpen {
+  transform: translateX(0);
+}
 .drawerHeader {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 14px; border-bottom: 1px solid #eee;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 14px;
+  border-bottom: 1px solid #eee;
 }
-.drawerTitle { font-weight: 700; }
+.drawerTitle {
+  font-weight: 700;
+}
 .drawerClose {
-  border: 1px solid #ccc; background: #fff; border-radius: 6px; padding: 4px 8px; cursor: pointer;
+  border: 1px solid #ccc;
+  background: #fff;
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
 }
-.drawerBody { padding: 12px 14px; overflow-y: auto; height: calc(100vh - 56px); }
+.drawerBody {
+  padding: 12px 14px;
+  overflow-y: auto;
+  height: calc(100vh - 56px);
+}
 
 /* 背景オーバーレイ */
 .overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 50;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 50;
 }
 
 .menuBtn {
@@ -287,25 +453,22 @@
   cursor: pointer;
 }
 
-
 /* ドロワー開時に、固定TOCは隠す＆背景のスクロールも止める */
 .isDrawerOpen {
-  overflow: hidden;                   /* 背景スクロール防止 */
+  overflow: hidden; /* 背景スクロール防止 */
 }
 .isDrawerOpen .tocDesktop {
-  display: none !important;           /* ← 既存の左メニューを強制的に非表示 */
+  display: none !important; /* ← 既存の左メニューを強制的に非表示 */
 }
 
 /* オーバーレイの操作性を確保（任意の補強） */
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.35);
+  background: rgba(0, 0, 0, 0.35);
   z-index: 50;
   pointer-events: auto;
 }
 .drawer {
-  z-index: 60;                        /* ドロワーがオーバーレイより上 */
+  z-index: 60; /* ドロワーがオーバーレイより上 */
 }
-
-

@@ -1,7 +1,7 @@
 // src/components/chat/agents.ts
 // チャットで利用可能なエージェントの一覧に Mu を追加
 
-import { MU_AGENT, MU_UI_TEXT } from "@/lib/mu/config";
+import { MU_AGENT, MU_UI_TEXT } from '@/lib/mu/config';
 
 export type ChatAgent = {
   id: string;

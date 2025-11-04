@@ -7,8 +7,11 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/authz';
 
 function json(data: any, init?: number | ResponseInit) {
-  const status = typeof init === 'number' ? init : (init as ResponseInit | undefined)?.['status'] ?? 200;
-  const headers = new Headers(typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers);
+  const status =
+    typeof init === 'number' ? init : ((init as ResponseInit | undefined)?.['status'] ?? 200);
+  const headers = new Headers(
+    typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers,
+  );
   headers.set('Content-Type', 'application/json; charset=utf-8');
   return new NextResponse(JSON.stringify(data), { status, headers });
 }
@@ -16,7 +19,7 @@ function json(data: any, init?: number | ResponseInit) {
 export async function DELETE(
   req: NextRequest,
   // ✅ params を Promise として受ける
-  context: { params: Promise<{ comment_id: string }> }
+  context: { params: Promise<{ comment_id: string }> },
 ) {
   try {
     // まず await で取り出す

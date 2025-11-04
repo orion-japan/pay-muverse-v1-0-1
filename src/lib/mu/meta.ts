@@ -3,7 +3,12 @@ export type MuPhase = 'Inner' | 'Outer' | null;
 export type MuQ = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5' | null;
 
 /** Iros 互換の dialogue_trace ステップ */
-export type MuTraceStep = 'detect_mode' | 'state_infer' | 'indicators' | 'retrieve' | 'openai_reply';
+export type MuTraceStep =
+  | 'detect_mode'
+  | 'state_infer'
+  | 'indicators'
+  | 'retrieve'
+  | 'openai_reply';
 export type MuTraceEntry = { step: MuTraceStep; data: Record<string, any> };
 export type MuDialogueTraceLite = MuTraceEntry[];
 
@@ -35,8 +40,8 @@ export type MuMetaInput = {
 
   // stochastic (optional)
   stochastic?: boolean;
-  g?: number;           // 任意指標
-  seed?: number;        // 乱数種
+  g?: number; // 任意指標
+  seed?: number; // 乱数種
 
   /** すでに生成済みの dialogue_trace を渡す場合（generate.ts 側で構築） */
   dialogue_trace?: MuDialogueTraceLite | undefined;
@@ -106,8 +111,9 @@ export function buildMuMeta(i: MuMetaInput) {
   };
 
   // dialogue_trace は generate.ts 側から供給されればそれを採用。無ければ Iros互換の既定を生成。
-  const dialogue_trace: MuDialogueTraceLite | undefined =
-    Array.isArray(i.dialogue_trace) ? i.dialogue_trace : buildDefaultTrace(i);
+  const dialogue_trace: MuDialogueTraceLite | undefined = Array.isArray(i.dialogue_trace)
+    ? i.dialogue_trace
+    : buildDefaultTrace(i);
 
   const meta = {
     stochastic: i.stochastic ?? false,
@@ -143,7 +149,7 @@ export function buildMuMeta(i: MuMetaInput) {
 }
 
 export function wrapMuResponse(params: {
-  conversation_code: string;   // = master_id でもOK
+  conversation_code: string; // = master_id でもOK
   reply: string;
   meta: ReturnType<typeof buildMuMeta>;
   credit_balance?: number;
@@ -153,14 +159,13 @@ export function wrapMuResponse(params: {
   const m = params.meta as any;
 
   // q ブロックは Iros 互換。stage は meta.stage があれば採用。
-  const q =
-    m.currentQ
-      ? {
-          code: m.currentQ,
-          stage: m.stage ?? null,
-          color: { base: 'Green', hex: '#22A559' }, // 既定（必要に応じて上位で差し替え）
-        }
-      : null;
+  const q = m.currentQ
+    ? {
+        code: m.currentQ,
+        stage: m.stage ?? null,
+        color: { base: 'Green', hex: '#22A559' }, // 既定（必要に応じて上位で差し替え）
+      }
+    : null;
 
   return {
     conversation_code: params.conversation_code,

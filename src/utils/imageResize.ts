@@ -12,11 +12,7 @@ export type ResizeOptions = {
 };
 
 /** Canvas.toBlob が null を返す Safari 対策のフォールバック */
-function canvasToBlob(
-  canvas: HTMLCanvasElement,
-  type: string,
-  quality?: number
-): Promise<Blob> {
+function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (blob) => {
@@ -35,7 +31,7 @@ function canvasToBlob(
         }
       },
       type,
-      quality
+      quality,
     );
   });
 }
@@ -48,21 +44,17 @@ function canvasToBlob(
  * - 呼び出し側が File でも Blob でも動く
  * - 互換性: もし呼び出しが { maxSize, format } を渡しても内部で解釈する
  */
-export async function resizeImage(
-  file: File | Blob,
-  opts: ResizeOptions = {}
-): Promise<Blob> {
+export async function resizeImage(file: File | Blob, opts: ResizeOptions = {}): Promise<Blob> {
   // 互換: maxSize / format が来ても既存構造は維持
-  const legacyMax =
-    (opts as any).maxSize != null ? Number((opts as any).maxSize) : undefined;
+  const legacyMax = (opts as any).maxSize != null ? Number((opts as any).maxSize) : undefined;
   const legacyType =
     (opts as any).format === 'webp'
       ? 'image/webp'
       : (opts as any).format === 'jpeg'
-      ? 'image/jpeg'
-      : (opts as any).format === 'png'
-      ? 'image/png'
-      : undefined;
+        ? 'image/jpeg'
+        : (opts as any).format === 'png'
+          ? 'image/png'
+          : undefined;
 
   const {
     max = legacyMax ?? 256,
@@ -152,7 +144,7 @@ export async function resizeImage(
 export async function compressToWebP(
   file: File | Blob,
   maxEdge = 2000,
-  quality = 0.8
+  quality = 0.8,
 ): Promise<Blob> {
   return resizeImage(file, {
     max: maxEdge,

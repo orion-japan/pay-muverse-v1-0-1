@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
 // 実データの表記に合わせる
@@ -13,10 +13,7 @@ const HISTORY_STATUSES = ['達成', '保留', '意図違い', '破棄'] as const
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
-    const userCode =
-      req.headers.get('x-user-code') ||
-      url.searchParams.get('user_code') ||
-      '';
+    const userCode = req.headers.get('x-user-code') || url.searchParams.get('user_code') || '';
 
     if (!userCode) {
       return NextResponse.json({ error: 'missing user_code' }, { status: 401 });
@@ -45,14 +42,8 @@ export async function GET(req: NextRequest) {
 
     // 並び替え：coalesce(moved_to_history_at, archived_at) DESC
     const items = (data ?? []).sort((a: any, b: any) => {
-      const ta =
-        Date.parse(a.moved_to_history_at ?? '') ||
-        Date.parse(a.archived_at ?? '') ||
-        0;
-      const tb =
-        Date.parse(b.moved_to_history_at ?? '') ||
-        Date.parse(b.archived_at ?? '') ||
-        0;
+      const ta = Date.parse(a.moved_to_history_at ?? '') || Date.parse(a.archived_at ?? '') || 0;
+      const tb = Date.parse(b.moved_to_history_at ?? '') || Date.parse(b.archived_at ?? '') || 0;
       return tb - ta;
     });
 
@@ -66,9 +57,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ items });
   } catch (e: any) {
     console.error('[history] error', e);
-    return NextResponse.json(
-      { error: e?.message || 'server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message || 'server error' }, { status: 500 });
   }
 }

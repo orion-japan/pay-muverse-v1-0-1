@@ -69,11 +69,7 @@ export default function ChatApp({ agent = 'mu' }: { agent?: 'mu' | 'iros' }) {
     >
       <div className="sof-body" style={{ overflow: 'auto' }}>
         {/* ✅ agent をリレー */}
-        <MessageList
-          messages={messages}
-          currentUser={currentUser}
-          agent={agent}
-        />
+        <MessageList messages={messages} currentUser={currentUser} agent={agent} />
       </div>
       <Composer isMaster={true /* ← マスター判定を実値に差し替え */} />
       <ToastHost />

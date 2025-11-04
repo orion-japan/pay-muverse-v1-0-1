@@ -1,14 +1,17 @@
 // src/lib/notify.ts
 export type PushKind = 'ftalk' | 'rtalk' | 'event' | 'live' | 'ai' | 'credit' | 'generic';
 
-export async function sendPushTo(user_code: string, params: {
-  kind?: PushKind;
-  title: string;
-  body?: string;
-  url?: string;
-  tag?: string;
-  renotify?: boolean;
-}) {
+export async function sendPushTo(
+  user_code: string,
+  params: {
+    kind?: PushKind;
+    title: string;
+    body?: string;
+    url?: string;
+    tag?: string;
+    renotify?: boolean;
+  },
+) {
   if (!user_code) return { ok: false, error: 'user_code required' };
 
   const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || ''}/api/push/send`, {

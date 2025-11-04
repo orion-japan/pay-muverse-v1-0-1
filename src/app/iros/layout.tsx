@@ -1,12 +1,15 @@
-import '@/components/SofiaChat/SofiaChat.css';
+// src/app/iros/page.tsx
+import { Suspense } from 'react';
+import IrosChat from '@/ui/iroschat/IrosChat';
 
-export default function SofiaLayout({ children }: { children: React.ReactNode }) {
+// CSR前提にして静的化を抑止（念のため）
+export const dynamic = 'force-dynamic';
+
+export default function Page() {
   return (
-    <div className="sofia-container">
-      {/* PC時に中央レーンを作るためのラッパ */}
-      <div className="sof-center">
-        {children}
-      </div>
-    </div>
+    <Suspense fallback={<div style={{padding:16}}>Loading…</div>}>
+      <IrosChat />
+    </Suspense>
   );
 }
+

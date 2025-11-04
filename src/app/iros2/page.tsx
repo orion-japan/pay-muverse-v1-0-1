@@ -18,7 +18,10 @@ const groupEnd = () => console.groupEnd();
 
 // /iros は SOFIA 固定
 const TENANT: 'sofia' = 'sofia';
-const SOFIA_UI_URL = (process.env.NEXT_PUBLIC_SOFIA_UI_URL ?? 'https://s.muverse.jp').replace(/\/+$/, '');
+const SOFIA_UI_URL = (process.env.NEXT_PUBLIC_SOFIA_UI_URL ?? 'https://s.muverse.jp').replace(
+  /\/+$/,
+  '',
+);
 const TARGET_UI_URL = SOFIA_UI_URL;
 
 type UserRole = 'free' | 'member' | 'pro' | 'master' | 'admin' | string;
@@ -37,7 +40,10 @@ export default function IrosPage() {
     startedAtRef.current = now();
     group('Init');
     log('TENANT =', TENANT);
-    log('ENV:', { NEXT_PUBLIC_SOFIA_UI_URL: process.env.NEXT_PUBLIC_SOFIA_UI_URL, resolved: { SOFIA_UI_URL, TARGET_UI_URL } });
+    log('ENV:', {
+      NEXT_PUBLIC_SOFIA_UI_URL: process.env.NEXT_PUBLIC_SOFIA_UI_URL,
+      resolved: { SOFIA_UI_URL, TARGET_UI_URL },
+    });
     groupEnd();
   }, []);
 
@@ -72,7 +78,9 @@ export default function IrosPage() {
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [loading, user]);
 
   // ===== アクセス制御（最優先） =====
@@ -95,7 +103,10 @@ export default function IrosPage() {
   }, [loading, user, role, router]);
   // ===================================
 
-  const userBrief = useMemo(() => (user ? { uid: user.uid, email: user.email ?? null } : null), [user]);
+  const userBrief = useMemo(
+    () => (user ? { uid: user.uid, email: user.email ?? null } : null),
+    [user],
+  );
 
   // 権限OKになってから iFrame URL を準備
   useEffect(() => {
@@ -129,7 +140,10 @@ export default function IrosPage() {
 
         clearTimeout(timer);
         log('📨 /api/resolve-so status =', res.status, `(+${now() - t1}ms)`);
-        const json: any = await res.clone().json().catch(() => ({}));
+        const json: any = await res
+          .clone()
+          .json()
+          .catch(() => ({}));
 
         group('resolve-so payload');
         log('ok =', json?.ok);
@@ -138,7 +152,8 @@ export default function IrosPage() {
         log('login_url =', json?.login_url);
         groupEnd();
 
-        if (!res.ok || !json?.ok) throw new Error(json?.error || `RESOLVE_FAILED (HTTP ${res.status})`);
+        if (!res.ok || !json?.ok)
+          throw new Error(json?.error || `RESOLVE_FAILED (HTTP ${res.status})`);
 
         const loginUrl: string | undefined = json?.login_url;
         const userCode: string | undefined = json?.user_code;
@@ -147,7 +162,9 @@ export default function IrosPage() {
         let base = loginUrl;
         if (!base) {
           if (!userCode) throw new Error('署名付きURLが取得できませんでした');
-          base = `${TARGET_UI_URL}${TARGET_UI_URL.includes('?') ? '&' : '?'}` + `user=${encodeURIComponent(userCode)}`;
+          base =
+            `${TARGET_UI_URL}${TARGET_UI_URL.includes('?') ? '&' : '?'}` +
+            `user=${encodeURIComponent(userCode)}`;
         }
         log('🧭 base url (before force) =', base);
 
@@ -156,7 +173,8 @@ export default function IrosPage() {
         try {
           const u = new URL(base);
           const sofiaHost = new URL(SOFIA_UI_URL).host;
-          if (u.host !== sofiaHost) log('⚠️ host force → SOFIA', { before: u.host, after: sofiaHost });
+          if (u.host !== sofiaHost)
+            log('⚠️ host force → SOFIA', { before: u.host, after: sofiaHost });
           u.protocol = 'https:';
           u.host = sofiaHost;
           // ③ iFrame用オプション

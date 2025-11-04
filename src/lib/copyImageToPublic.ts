@@ -1,7 +1,7 @@
 // src/lib/copyImageToPublic.ts
 export async function copyImageToPublic(
   originalUrl: string,
-  userCode: string
+  userCode: string,
 ): Promise<string | null> {
   console.log('========== [copyImageToPublic - API経由] START ==========');
   console.log('[📥 入力値]', { originalUrl, userCode });

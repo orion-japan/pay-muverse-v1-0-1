@@ -15,7 +15,7 @@ export async function getOcrWorker(onProgress?: (p: OcrProgress) => void) {
 
   _worker = await Tesseract.createWorker({
     workerPath,
-    corePath,     // 非SIMD .wasm.js（同ディレクトリの .wasm を内部参照）
+    corePath, // 非SIMD .wasm.js（同ディレクトリの .wasm を内部参照）
     langPath,
     gzip: true,
     logger: (m) => onProgress?.(m),
@@ -33,7 +33,9 @@ export async function recognizeWithOcrWorker(
   const worker = await getOcrWorker(onProgress);
   await worker.loadLanguage(lang);
   await worker.initialize(lang);
-  const { data: { text } } = await worker.recognize(file);
+  const {
+    data: { text },
+  } = await worker.recognize(file);
   await worker.terminate();
   _worker = null;
   return text;

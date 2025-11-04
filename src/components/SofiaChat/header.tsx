@@ -25,18 +25,11 @@ export default function Header({
 }: HeaderProps) {
   const router = useRouter(); // ★ 追加
 
-  const title =
-    agent === 'iros' ? 'iros_AI' : agent === 'mirra' ? 'mirra_AI' : 'mu_AI';
+  const title = agent === 'iros' ? 'iros_AI' : agent === 'mirra' ? 'mirra_AI' : 'mu_AI';
 
   const defaultIcon = (
     <Image
-      src={
-        agent === 'iros'
-          ? '/ir.png'
-          : agent === 'mirra'
-          ? '/mirra.png'
-          : '/mu_ai.png'
-      }
+      src={agent === 'iros' ? '/ir.png' : agent === 'mirra' ? '/mirra.png' : '/mu_ai.png'}
       alt={agent === 'iros' ? 'Iros' : agent === 'mirra' ? 'Mirra' : 'Mu'}
       width={24}
       height={24}
@@ -78,66 +71,60 @@ export default function Header({
 
       {/* 中央：アイコン＋タイトル（厳密中央） */}
 
-
-<style jsx>{`
-  .sof-icon-wrap {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;     /* 丸枠 */
-    overflow: hidden;       /* はみ出しをカット */
-    background: #f3f4f8;
-    border: 1px solid #e0e2ee;
-  }
-  .sof-icon-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;      /* 中央にトリミング */
-  }
-`}</style>
-{/* 中央：アイコン＋タイトル */}
-<div className="sof-center">
-  <span className="sof-icon-wrap">
-    {icon ?? (
-      <Image
-        src={
-          agent === 'iros'
-            ? '/ir.png'
-            : agent === 'mirra'
-            ? '/mirra.png'
-            : agent === 'mu'
-            ? '/mu_ai.png'
-            : '/sofia.png'
+      <style jsx>{`
+        .sof-icon-wrap {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 28px;
+          height: 28px;
+          border-radius: 50%; /* 丸枠 */
+          overflow: hidden; /* はみ出しをカット */
+          background: #f3f4f8;
+          border: 1px solid #e0e2ee;
         }
-        alt={
-          agent === 'iros'
-            ? 'Iros'
-            : agent === 'mirra'
-            ? 'mirra'
-            : agent === 'mu'
-            ? 'Mu'
-            : 'Sofia'
+        .sof-icon-img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover; /* 中央にトリミング */
         }
-        width={28}
-        height={28}
-        className="sof-icon-img"
-        priority
-      />
-    )}
-  </span>
-  <span className="sof-title">{title}</span>
-</div>
+      `}</style>
+      {/* 中央：アイコン＋タイトル */}
+      <div className="sof-center">
+        <span className="sof-icon-wrap">
+          {icon ?? (
+            <Image
+              src={
+                agent === 'iros'
+                  ? '/ir.png'
+                  : agent === 'mirra'
+                    ? '/mirra.png'
+                    : agent === 'mu'
+                      ? '/mu_ai.png'
+                      : '/sofia.png'
+              }
+              alt={
+                agent === 'iros'
+                  ? 'Iros'
+                  : agent === 'mirra'
+                    ? 'mirra'
+                    : agent === 'mu'
+                      ? 'Mu'
+                      : 'Sofia'
+              }
+              width={28}
+              height={28}
+              className="sof-icon-img"
+              priority
+            />
+          )}
+        </span>
+        <span className="sof-title">{title}</span>
+      </div>
 
       {/* 右端：読み直し＋新規 */}
       <div className="sof-right">
-        <button
-          onClick={handleRefresh}
-          className="sof-btn"
-          aria-label="読み直す"
-          title="読み直し"
-        >
+        <button onClick={handleRefresh} className="sof-btn" aria-label="読み直す" title="読み直し">
           ⟳
         </button>
         {onCreateNewChat && (
@@ -230,7 +217,9 @@ export default function Header({
           line-height: 1;
           font-size: 14px;
           cursor: pointer;
-          transition: transform 0.06s ease, background 0.15s ease,
+          transition:
+            transform 0.06s ease,
+            background 0.15s ease,
             box-shadow 0.15s ease;
           box-shadow: 0 1px 0 rgba(0, 0, 0, 0.03);
           user-select: none;

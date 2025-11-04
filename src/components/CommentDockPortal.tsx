@@ -12,7 +12,9 @@ export default function CommentDockPortal({ children }: Props) {
     el.id = 'comment-dock-host';
     document.body.appendChild(el);
     setHost(el);
-    return () => { document.body.removeChild(el); };
+    return () => {
+      document.body.removeChild(el);
+    };
   }, []);
 
   if (!host) return null;

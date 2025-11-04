@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! // service_roleキー
+  process.env.SUPABASE_SERVICE_ROLE_KEY!, // service_roleキー
 );
 
 export async function POST(req: Request) {
@@ -29,9 +29,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: uploadError.message }, { status: 400 });
     }
 
-    const { data } = supabaseAdmin.storage
-      .from('public-posts')
-      .getPublicUrl(filePath);
+    const { data } = supabaseAdmin.storage.from('public-posts').getPublicUrl(filePath);
 
     console.log('[✅ 公開URL取得成功]', data.publicUrl);
     return NextResponse.json({ publicUrl: data.publicUrl });

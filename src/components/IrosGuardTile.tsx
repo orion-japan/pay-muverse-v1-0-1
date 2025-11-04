@@ -6,10 +6,10 @@ import { fetchWithIdToken } from '@/lib/fetchWithIdToken';
 import styles from './IrosGuardTile.module.css';
 
 type Props = {
-  href: string;                 // 許可OK時の遷移先（例: '/iros_ai'）
+  href: string; // 許可OK時の遷移先（例: '/iros_ai'）
   className?: string;
   children: React.ReactNode;
-  onRequireLogin?: () => void;  // 未ログイン時の誘導
+  onRequireLogin?: () => void; // 未ログイン時の誘導
   onDenied?: (reason?: string) => void; // 権限NG/エラー時の通知
 };
 
@@ -23,14 +23,16 @@ export default function IrosGuardTile({
   const router = useRouter();
 
   const [pending, setPending] = React.useState(false);
-  const [unlocked, setUnlocked] = React.useState(false);   // 許可判定後だけ解除
+  const [unlocked, setUnlocked] = React.useState(false); // 許可判定後だけ解除
   const [reloadLock, setReloadLock] = React.useState(false); // リロード直後3秒ロック
 
   // 「リロード直後だけ3秒ロック」
   React.useEffect(() => {
     let isReload = false;
     try {
-      const nav = (performance.getEntriesByType?.('navigation') as PerformanceNavigationTiming[])?.[0];
+      const nav = (
+        performance.getEntriesByType?.('navigation') as PerformanceNavigationTiming[]
+      )?.[0];
       isReload = nav?.type === 'reload';
       // 旧APIフォールバック
       // @ts-ignore
@@ -48,8 +50,14 @@ export default function IrosGuardTile({
     setPending(true);
     try {
       const res = await fetchWithIdToken('/api/guard/iros', { method: 'GET' });
-      if (res.status === 401) { onRequireLogin?.(); return; }
-      if (!res.ok)           { onDenied?.('network_error'); return; }
+      if (res.status === 401) {
+        onRequireLogin?.();
+        return;
+      }
+      if (!res.ok) {
+        onDenied?.('network_error');
+        return;
+      }
       const data: { allowed: boolean } = await res.json();
       if (data.allowed) {
         setUnlocked(true);
@@ -91,12 +99,21 @@ export default function IrosGuardTile({
         onClickCapture={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          if (reloadLock) return;   // 3秒ロック中は何もしない
+          if (reloadLock) return; // 3秒ロック中は何もしない
           if (!unlocked) handleCheck(); // ロック明けはサーバ認証→OKなら遷移
         }}
-        onPointerDownCapture={(e) => { e.preventDefault(); e.stopPropagation(); }}
-        onTouchStartCapture={(e) => { e.preventDefault(); e.stopPropagation(); }}
-        onMouseDownCapture={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        onPointerDownCapture={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        onTouchStartCapture={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        onMouseDownCapture={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
         onKeyDownCapture={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();

@@ -10,12 +10,13 @@ const ZERO: Totals = { like: 0, heart: 0, smile: 0, wow: 0, share: 0 };
 /* -------- Supabase client (singleton on the browser) -------- */
 function getBrowserSupabase(): SupabaseClient | null {
   if (typeof window === 'undefined') return null;
-  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) return null;
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
+    return null;
   const g = window as unknown as { __sb_rx?: SupabaseClient };
   if (!g.__sb_rx) {
     g.__sb_rx = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     );
   }
   return g.__sb_rx;
@@ -49,7 +50,7 @@ export function useReactionCounts(postId?: string, opts?: { isParent?: boolean }
     try {
       const res = await fetch(url, { cache: 'no-store', signal: ac.signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const j = await res.json().catch(() => ({} as any));
+      const j = await res.json().catch(() => ({}) as any);
       const t = j?.totals ?? {};
       if (!mountedRef.current) return;
       setTotals({
@@ -92,7 +93,7 @@ export function useReactionCounts(postId?: string, opts?: { isParent?: boolean }
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'reactions', filter: `post_id=eq.${postId}` },
-        debouncedLoad
+        debouncedLoad,
       )
       .subscribe();
 

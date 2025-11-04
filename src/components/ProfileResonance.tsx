@@ -8,8 +8,8 @@ import type { Profile, ResonanceLog } from '@/components/UserProfile';
 type Props = {
   profile: Profile;
   routes?: {
-    post?: (url: string) => string;       // 元投稿URLをアプリ内に変換したい場合
-    qr?: (code: string) => string;        // 例: `/qcode?user=${code}`
+    post?: (url: string) => string; // 元投稿URLをアプリ内に変換したい場合
+    qr?: (code: string) => string; // 例: `/qcode?user=${code}`
     profileUrl?: (code: string) => string; // プロフィール共有URLを自作する場合
   };
 };
@@ -54,7 +54,7 @@ export default function ProfileResonance({ profile, routes }: Props) {
             const when = r.at ?? r.created_at ?? '';
             const txt = r.content ?? r.text ?? '';
             const raw = r.link ?? r.url ?? '';
-            const link = raw ? routes?.post?.(raw) ?? raw : '';
+            const link = raw ? (routes?.post?.(raw) ?? raw) : '';
             const key = r.id ?? `${i}-${raw || when || txt.slice(0, 8)}`;
 
             return (

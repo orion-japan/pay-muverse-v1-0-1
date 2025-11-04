@@ -1,7 +1,7 @@
-import React from "react";
-import Link from "next/link";
-import Image from "next/image";
-import s from "../styles/layout.module.css";
+import React from 'react';
+import Link from 'next/link';
+import Image from 'next/image';
+import s from '../styles/layout.module.css';
 
 type Props = { children: React.ReactNode };
 
@@ -13,7 +13,7 @@ export default function AppShell({ children }: Props) {
           <div className={s.brand}>
             {/* ブランドアイコンを next/image で最適化 */}
             <Image
-              src="/mu_logo3_s.png"     // public/mu_logo3_s.png
+              src="/mu_logo3_s.png" // public/mu_logo3_s.png
               alt="Muverse"
               width={24}
               height={24}

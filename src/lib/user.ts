@@ -61,10 +61,6 @@ export async function fetchUserInfoByCode(userCode: string) {
     profile: profileRow ?? null,
     // 画面でよく使う代表値（ニックネーム → プロフィール優先 / なければ users）
     displayName:
-      profileRow?.nickname ||
-      profileRow?.name ||
-      userRow?.nickname ||
-      userRow?.name ||
-      'ゲスト',
+      profileRow?.nickname || profileRow?.name || userRow?.nickname || userRow?.name || 'ゲスト',
   };
 }

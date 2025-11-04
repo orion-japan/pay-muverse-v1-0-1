@@ -33,21 +33,14 @@ export async function fetchQDaily(
   opts?: {
     from?: string;
     to?: string;
-    source_types?: string[];  // 例: ['self','event','invite']
-    intents?: string[];       // 例: ['habit','check','create']
-    limit?: number;           // 表示の上限
-    asc?: boolean;            // 並び
-  }
+    source_types?: string[]; // 例: ['self','event','invite']
+    intents?: string[]; // 例: ['habit','check','create']
+    limit?: number; // 表示の上限
+    asc?: boolean; // 並び
+  },
 ): Promise<QDailyRow[]> {
   const supabase = serverSupabase();
-  const {
-    from,
-    to,
-    source_types,
-    intents,
-    limit,
-    asc = false,
-  } = opts ?? {};
+  const { from, to, source_types, intents, limit, asc = false } = opts ?? {};
 
   let q = supabase
     .from('mv_user_q_daily_latest_per_intent')
@@ -56,12 +49,12 @@ export async function fetchQDaily(
     .order('day_jst', { ascending: asc }) as any;
 
   if (from) q = q.gte('day_jst', from);
-  if (to)   q = q.lte('day_jst', to);
+  if (to) q = q.lte('day_jst', to);
   if (source_types?.length) q = q.in('source_type', source_types);
-  if (intents?.length)      q = q.in('intent', intents);
-  if (limit)                q = q.limit(limit);
+  if (intents?.length) q = q.in('intent', intents);
+  if (limit) q = q.limit(limit);
 
-  const { data, error }:{ data: QDailyRow[]|null, error: any } = await q;
+  const { data, error }: { data: QDailyRow[] | null; error: any } = await q;
   if (error) throw error;
 
   return data ?? [];
@@ -71,7 +64,7 @@ export async function fetchQDaily(
 export async function fetchQDailyLastNDays(
   userCode: string,
   days: number,
-  extra?: Omit<Parameters<typeof fetchQDaily>[1], 'from'|'to'>
+  extra?: Omit<Parameters<typeof fetchQDaily>[1], 'from' | 'to'>,
 ) {
   const today = new Date();
   const utc = today.getTime() + today.getTimezoneOffset() * 60000;
@@ -85,25 +78,37 @@ export async function fetchQDailyLastNDays(
 
 /** 表示用にピボット（同じ日付のQ1〜Q5を横持ちに） */
 export type PivotRow = {
-  day: string; Q1:number; Q2:number; Q3:number; Q4:number; Q5:number; total:number;
+  day: string;
+  Q1: number;
+  Q2: number;
+  Q3: number;
+  Q4: number;
+  Q5: number;
+  total: number;
 };
 
 export function pivotDaily(rows: QDailyRow[]): PivotRow[] {
   const map: Record<string, PivotRow> = {};
   for (const r of rows) {
     const key = r.day_jst;
-    if (!map[key]) map[key] = { day: key, Q1:0, Q2:0, Q3:0, Q4:0, Q5:0, total:0 };
+    if (!map[key]) map[key] = { day: key, Q1: 0, Q2: 0, Q3: 0, Q4: 0, Q5: 0, total: 0 };
     // r.q は 'Q1'|'Q2'|'Q3'|'Q4'|'Q5' なので、型を狭めて安全に加算
     (map[key][r.q] as number) += r.q_count;
     map[key].total += r.q_count;
   }
   // 新しい日付が先に来るように降順
-  return Object.values(map).sort((a,b) => (a.day < b.day ? 1 : -1));
+  return Object.values(map).sort((a, b) => (a.day < b.day ? 1 : -1));
 }
 
 /** 代表Q（最多）を決める（同数タイは Q3>Q2>Q1>Q4>Q5 の優先） */
-export function pickRepresentativeQ(p: {Q1:number;Q2:number;Q3:number;Q4:number;Q5:number}): QCode {
-  const order: QCode[] = ['Q3','Q2','Q1','Q4','Q5'];
+export function pickRepresentativeQ(p: {
+  Q1: number;
+  Q2: number;
+  Q3: number;
+  Q4: number;
+  Q5: number;
+}): QCode {
+  const order: QCode[] = ['Q3', 'Q2', 'Q1', 'Q4', 'Q5'];
   let best: QCode = order[0];
   for (const q of order) if (p[q] > p[best]) best = q;
   return best;

@@ -1,10 +1,10 @@
 // Sofia風：Mu のペルソナ定義
 export type MuPersonaKey =
-  | 'base'            // いちばん中庸
-  | 'gentle_guide'    // やわらかく導く
-  | 'co_creator'      // 一緒に具体化
-  | 'mediator'        // 調停・合意形成
-  | 'quiet_companion' // 余白重視・静か
+  | 'base' // いちばん中庸
+  | 'gentle_guide' // やわらかく導く
+  | 'co_creator' // 一緒に具体化
+  | 'mediator' // 調停・合意形成
+  | 'quiet_companion'; // 余白重視・静か
 
 export const MU_PERSONAS: Record<MuPersonaKey, string> = {
   base: `

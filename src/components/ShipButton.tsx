@@ -7,11 +7,11 @@ import './ShipButton.css';
 type ShipLevel = 'S' | 'F' | 'R' | 'C' | 'I';
 
 const LEVELS: { key: ShipLevel; label: string; hint: string; dot: string }[] = [
-  { key: 'S', label: 'S｜気になる',   hint: 'さりげない見守り',         dot: '🟢' },
-  { key: 'F', label: 'F｜つながる',   hint: 'ゆるいつながり',           dot: '🔵' },
-  { key: 'R', label: 'R｜リスペクト', hint: '敬意・尊重',               dot: '🟣' },
-  { key: 'C', label: 'C｜共感',       hint: '価値観に深く共感',         dot: '🟠' },
-  { key: 'I', label: 'I｜共鳴',       hint: 'ほぼ一体として響き合う',   dot: '🔴' },
+  { key: 'S', label: 'S｜気になる', hint: 'さりげない見守り', dot: '🟢' },
+  { key: 'F', label: 'F｜つながる', hint: 'ゆるいつながり', dot: '🔵' },
+  { key: 'R', label: 'R｜リスペクト', hint: '敬意・尊重', dot: '🟣' },
+  { key: 'C', label: 'C｜共感', hint: '価値観に深く共感', dot: '🟠' },
+  { key: 'I', label: 'I｜共鳴', hint: 'ほぼ一体として響き合う', dot: '🔴' },
 ];
 
 type FetchResp = {
@@ -78,7 +78,7 @@ export default function ShipButton({
         }
         const token = await getToken();
         const url = `/api/check-follow?target=${encodeURIComponent(
-          targetUserCode
+          targetUserCode,
         )}&me=${encodeURIComponent(selfUserCode)}`;
         const res = await fetch(url, {
           method: 'GET',
@@ -89,8 +89,7 @@ export default function ShipButton({
         const data: FetchResp = await res.json();
 
         const myLevel: ShipLevel | null =
-          (data.level as ShipLevel | null) ??
-          (data.isFollowing ? 'F' : null);
+          (data.level as ShipLevel | null) ?? (data.isFollowing ? 'F' : null);
 
         if (!mounted) return;
         setLevel(myLevel);
@@ -138,15 +137,13 @@ export default function ShipButton({
       if (!res.ok) {
         setLevel(prev);
         const msg = await res.text().catch(() => '');
-        throw new Error(
-          `POST /api/follow failed: ${res.status}${msg ? ` ${msg}` : ''}`
-        );
+        throw new Error(`POST /api/follow failed: ${res.status}${msg ? ` ${msg}` : ''}`);
       }
 
       const data: FetchResp = await res.json().catch(() => ({}));
       setMutual(Boolean(data.mutual));
       setPartnerLevel((data.partnerLevel as ShipLevel | null) ?? partnerLevel);
-      setTalkEnabled(Boolean(data.talkEnabled ?? (newLevel >= 'F')));
+      setTalkEnabled(Boolean(data.talkEnabled ?? newLevel >= 'F'));
     } catch (e: any) {
       setErrorMsg(e?.message ?? '設定に失敗しました');
     } finally {
@@ -179,9 +176,7 @@ export default function ShipButton({
       if (!res.ok) {
         setLevel(prev);
         const msg = await res.text().catch(() => '');
-        throw new Error(
-          `POST /api/unfollow failed: ${res.status}${msg ? ` ${msg}` : ''}`
-        );
+        throw new Error(`POST /api/unfollow failed: ${res.status}${msg ? ` ${msg}` : ''}`);
       }
 
       setMutual(false);
@@ -282,9 +277,7 @@ export default function ShipButton({
       {errorMsg && <div className="ship-error">{errorMsg}</div>}
 
       {planStatus === 'free' && (
-        <div className="ship-plan-note">
-          課金すると F 以上（F Talk）が解放されます。
-        </div>
+        <div className="ship-plan-note">課金すると F 以上（F Talk）が解放されます。</div>
       )}
     </div>
   );

@@ -30,13 +30,13 @@ export async function POST(req: Request) {
       );
     }
 
-    const input = await req.json().catch(() => ({} as any));
+    const input = await req.json().catch(() => ({}) as any);
     const payload = {
       user_code: input.user_code ?? 'U-CKxc5NQQ',
-      title:     input.title     ?? 'Muverse 通知テスト',
-      body:      input.body      ?? 'これは通知のテストです',
-      url:       input.url       ?? 'https://muverse.jp/',
-      tag:       input.tag       ?? 'debug-test',
+      title: input.title ?? 'Muverse 通知テスト',
+      body: input.body ?? 'これは通知のテストです',
+      url: input.url ?? 'https://muverse.jp/',
+      tag: input.tag ?? 'debug-test',
     };
 
     console.log('[push-test] inbound payload:', payload);

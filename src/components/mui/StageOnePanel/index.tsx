@@ -25,7 +25,11 @@ function getOrCreateOcrId(): string {
   const v = sessionStorage.getItem(k);
   if (v) return v;
   const d = new Date();
-  const ymd = [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('');
+  const ymd = [
+    d.getFullYear(),
+    String(d.getMonth() + 1).padStart(2, '0'),
+    String(d.getDate()).padStart(2, '0'),
+  ].join('');
   const id = `CASE-${ymd}-${Math.random().toString(36).slice(2, 6)}`;
   sessionStorage.setItem(k, id);
   return id;
@@ -162,7 +166,11 @@ export default function StageOnePanel({
                 <p>
                   <strong>観測ポイント:</strong>
                 </p>
-                <ul>{phase1.bullets.map((b, i) => <li key={i}>{b}</li>)}</ul>
+                <ul>
+                  {phase1.bullets.map((b, i) => (
+                    <li key={i}>{b}</li>
+                  ))}
+                </ul>
               </>
             )}
             {!!phase1.advice?.length && (
@@ -170,7 +178,11 @@ export default function StageOnePanel({
                 <p>
                   <strong>注意点:</strong>
                 </p>
-                <ul>{phase1.advice.map((a, i) => <li key={i}>{a}</li>)}</ul>
+                <ul>
+                  {phase1.advice.map((a, i) => (
+                    <li key={i}>{a}</li>
+                  ))}
+                </ul>
               </>
             )}
             {!!phase1.next_actions?.length && (
@@ -178,7 +190,11 @@ export default function StageOnePanel({
                 <p>
                   <strong>次の一手:</strong>
                 </p>
-                <ul>{phase1.next_actions.map((n, i) => <li key={i}>{n}</li>)}</ul>
+                <ul>
+                  {phase1.next_actions.map((n, i) => (
+                    <li key={i}>{n}</li>
+                  ))}
+                </ul>
               </>
             )}
           </div>

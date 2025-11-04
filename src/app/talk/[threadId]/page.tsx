@@ -34,16 +34,15 @@ const getAvatar = (url: string | null | undefined) => {
   const base = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '');
   const u = (url ?? '').trim();
   if (!u) return '/avatar.png';
-  if (/^https?:\/\//i.test(u) || /^data:image\//i.test(u)) return u;                   // 既に完全URL
-  if (u.startsWith('/storage/v1/object/public/')) return `${base}${u}`;                 // Storage相対
-  if (u.startsWith('avatars/')) return `${base}/storage/v1/object/public/${u}`;         // avatarsキー
-  return `${base}/storage/v1/object/public/avatars/${u}`;                               // ファイル名のみ
+  if (/^https?:\/\//i.test(u) || /^data:image\//i.test(u)) return u; // 既に完全URL
+  if (u.startsWith('/storage/v1/object/public/')) return `${base}${u}`; // Storage相対
+  if (u.startsWith('avatars/')) return `${base}/storage/v1/object/public/${u}`; // avatarsキー
+  return `${base}/storage/v1/object/public/avatars/${u}`; // ファイル名のみ
 };
 
 const rowKey = (r: ChatRow) =>
   r.id || r.chat_id || `${r.thread_id}:${r.sender_code}:${r.created_at}`;
-const rowText = (r: ChatRow) =>
-  (r.message ?? r.body ?? (r as any).content ?? '') as string;
+const rowText = (r: ChatRow) => (r.message ?? r.body ?? (r as any).content ?? '') as string;
 
 const normalizeThreadId = (a?: string, b?: string) =>
   [a ?? '', b ?? ''].sort((x, y) => x.localeCompare(y)).join('__');
@@ -139,7 +138,7 @@ export default function PairTalkPage() {
 
       for (const r of items) {
         const already = prev.some(
-          (x) => (r.id && x.id === r.id) || (r.chat_id && x.chat_id === r.chat_id)
+          (x) => (r.id && x.id === r.id) || (r.chat_id && x.chat_id === r.chat_id),
         );
         if (!already) {
           const tmpKey = [...map.keys()].find((k) => {
@@ -149,7 +148,7 @@ export default function PairTalkPage() {
             const sameSender = m.sender_code === r.sender_code;
             const sameBody = rowText(m) === rowText(r);
             const dt = Math.abs(
-              new Date(r.created_at).getTime() - new Date(m.created_at).getTime()
+              new Date(r.created_at).getTime() - new Date(m.created_at).getTime(),
             );
             return sameSender && sameBody && dt < 30_000;
           });
@@ -159,7 +158,7 @@ export default function PairTalkPage() {
       }
 
       const arr = Array.from(map.values()).sort(
-        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
       );
       const last = arr[arr.length - 1];
       if (last) lastAtRef.current = last.created_at;
@@ -183,14 +182,13 @@ export default function PairTalkPage() {
   };
 
   /* ---- 既読化 ---- */
-  
 
   const markRead = async (why: string) => {
     if (!threadId || !myCode) return;
     try {
       const user = getAuth().currentUser;
       const idToken = await user?.getIdToken();
-  
+
       await fetch('/api/talk/mark-read', {
         method: 'POST',
         headers: {
@@ -207,8 +205,6 @@ export default function PairTalkPage() {
       console.warn('[FTalk] read mark error:', e);
     }
   };
- 
-
 
   /* ---- 初期ロード ---- */
   useEffect(() => {
@@ -267,8 +263,7 @@ export default function PairTalkPage() {
   /* ---- 通知許可 ---- */
   useEffect(() => {
     if (!('Notification' in window)) return;
-    if (Notification.permission === 'default')
-      Notification.requestPermission().catch(() => {});
+    if (Notification.permission === 'default') Notification.requestPermission().catch(() => {});
   }, []);
 
   /* ---- 送信 ---- */
@@ -277,7 +272,7 @@ export default function PairTalkPage() {
     const body = text.trim();
     setText('');
     if (taRef.current) taRef.current.style.height = 'auto';
-  
+
     sendingRef.current = true;
     try {
       const res = await fetch('/api/talk/messages', {
@@ -292,7 +287,7 @@ export default function PairTalkPage() {
         }),
       });
       if (!res.ok) throw new Error(await res.text());
-  
+
       // 送信後にまとめて取得
       await fetchMessages('after-send', lastAtRef.current);
       await markRead('after-send');
@@ -304,14 +299,12 @@ export default function PairTalkPage() {
       scrollToBottom();
     }
   };
-  
+
   /* ---- 再送 ---- */
   const retrySend = async (m: ChatRow) => {
     if (!m._error) return;
     setMsgs((prev) =>
-      prev.map((x) =>
-        rowKey(x) === rowKey(m) ? { ...x, _error: false, _pending: true } : x
-      )
+      prev.map((x) => (rowKey(x) === rowKey(m) ? { ...x, _error: false, _pending: true } : x)),
     );
     try {
       const res = await fetch('/api/talk/messages', {
@@ -330,9 +323,7 @@ export default function PairTalkPage() {
     } catch (e) {
       console.error('[FTalk] retry failed:', e);
       setMsgs((prev) =>
-        prev.map((x) =>
-          rowKey(x) === rowKey(m) ? { ...x, _pending: false, _error: true } : x
-        )
+        prev.map((x) => (rowKey(x) === rowKey(m) ? { ...x, _pending: false, _error: true } : x)),
       );
     }
   };
@@ -397,10 +388,7 @@ export default function PairTalkPage() {
             }}
           />
         </div>
-        <button
-          className="qr"
-          onClick={() => alert('（QRは後日API化予定。現状はダミーです）')}
-        >
+        <button className="qr" onClick={() => alert('（QRは後日API化予定。現状はダミーです）')}>
           Qコード
         </button>
       </header>
@@ -424,13 +412,12 @@ export default function PairTalkPage() {
                       src={getAvatar(peer?.avatar_url)}
                       alt=""
                       onError={(e) => {
-                        if (e.currentTarget.src !== '/avatar.png') e.currentTarget.src = '/avatar.png';
+                        if (e.currentTarget.src !== '/avatar.png')
+                          e.currentTarget.src = '/avatar.png';
                       }}
                     />
                   )}
-                  <div
-                    className={`bubble ${pending ? 'pending' : ''} ${error ? 'error' : ''}`}
-                  >
+                  <div className={`bubble ${pending ? 'pending' : ''} ${error ? 'error' : ''}`}>
                     {!mine && <div className="who">{peer?.name ?? peerCode}</div>}
                     <div className="text">{rowText(m)}</div>
                     <div className="meta">
@@ -449,7 +436,8 @@ export default function PairTalkPage() {
                       src={getAvatar(me?.avatar_url)}
                       alt=""
                       onError={(e) => {
-                        if (e.currentTarget.src !== '/avatar.png') e.currentTarget.src = '/avatar.png';
+                        if (e.currentTarget.src !== '/avatar.png')
+                          e.currentTarget.src = '/avatar.png';
                       }}
                     />
                   )}
@@ -525,7 +513,14 @@ export default function PairTalkPage() {
             padding: 12,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+            }}
+          >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <img src="/mirra.png" alt="mirra" width={20} height={20} />
               <strong>mirra（マインドトーク）</strong>
@@ -570,7 +565,8 @@ export default function PairTalkPage() {
                 {mirraPending ? '送信中…' : 'mirraに送る'}
               </button>
               <small style={{ opacity: 0.7 }}>
-                ※ この相談は <code>thread_id</code> を付けて mirra に引き継がれ、ログはAI側に保存されます（相手には届きません）。
+                ※ この相談は <code>thread_id</code> を付けて mirra
+                に引き継がれ、ログはAI側に保存されます（相手には届きません）。
               </small>
             </div>
           </div>
@@ -589,7 +585,7 @@ export default function PairTalkPage() {
                 whiteSpace: 'pre-wrap',
               }}
             >
-{mirraReply}
+              {mirraReply}
             </pre>
           )}
         </div>

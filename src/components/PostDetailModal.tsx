@@ -21,9 +21,7 @@ export default function PostDetailModal({ post, onClose, onUpdated }: any) {
         <p>{post.content}</p>
 
         <div className="modal-actions">
-          <button onClick={() => alert('編集モードでPostModalを開く')}>
-            編集
-          </button>
+          <button onClick={() => alert('編集モードでPostModalを開く')}>編集</button>
           <button onClick={handleDelete}>削除</button>
           <button onClick={onClose}>閉じる</button>
         </div>

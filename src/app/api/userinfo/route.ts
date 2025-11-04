@@ -12,8 +12,7 @@ export async function GET(req: Request) {
   } catch (e: any) {
     const message = e?.message ?? 'unknown';
     const status =
-      message === 'USER_NOT_FOUND' ? 404 :
-      message === 'user_code or idToken required' ? 400 : 500;
+      message === 'USER_NOT_FOUND' ? 404 : message === 'user_code or idToken required' ? 400 : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

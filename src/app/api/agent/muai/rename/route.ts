@@ -6,8 +6,11 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/authz';
 
 function json(data: any, init?: number | ResponseInit) {
-  const status = typeof init === 'number' ? init : (init as ResponseInit | undefined)?.['status'] ?? 200;
-  const headers = new Headers(typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers);
+  const status =
+    typeof init === 'number' ? init : ((init as ResponseInit | undefined)?.['status'] ?? 200);
+  const headers = new Headers(
+    typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers,
+  );
   headers.set('Content-Type', 'application/json; charset=utf-8');
   return new NextResponse(JSON.stringify(data), { status, headers });
 }

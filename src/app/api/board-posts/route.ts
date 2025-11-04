@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
     const { data: posts, error: postErr } = await supabase
       .from('posts')
       .select(
-        'post_id, title, content, created_at, board_type, user_code, is_thread, media_urls, tags, visibility'
+        'post_id, title, content, created_at, board_type, user_code, is_thread, media_urls, tags, visibility',
       )
       .eq('board_type', boardType)
       .eq('is_posted', true)

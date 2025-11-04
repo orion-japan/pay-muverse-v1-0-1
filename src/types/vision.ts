@@ -1,14 +1,7 @@
 export type Phase = 'initial' | 'mid' | 'final';
 export type Stage = 'S' | 'F' | 'R' | 'C' | 'I';
 
-export type Status =
-  | '検討中'
-  | '実践中'
-  | '迷走中'
-  | '順調'
-  | 'ラストスパート'
-  | '達成'
-  | '破棄';
+export type Status = '検討中' | '実践中' | '迷走中' | '順調' | 'ラストスパート' | '達成' | '破棄';
 
 export interface Vision {
   vision_id?: string;

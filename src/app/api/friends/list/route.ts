@@ -12,6 +12,6 @@ export async function GET(req: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   // 相手コードを抽出
-  const friends = (data ?? []).map(r => r.user_code_a === me ? r.user_code_b : r.user_code_a);
+  const friends = (data ?? []).map((r) => (r.user_code_a === me ? r.user_code_b : r.user_code_a));
   return NextResponse.json({ ok: true, friends });
 }

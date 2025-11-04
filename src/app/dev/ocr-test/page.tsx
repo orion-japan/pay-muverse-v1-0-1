@@ -6,7 +6,7 @@ import { runOcrWithTesseract, OcrProgress } from '@/lib/ocr/runOcrWithTesseract'
 
 // name を必ず string に正規化（ここで undefined を潰す）
 function getFileName(v: unknown): string {
-  return (typeof v === 'object' && v !== null && 'name' in (v as any))
+  return typeof v === 'object' && v !== null && 'name' in (v as any)
     ? String((v as any).name ?? '')
     : '';
 }
@@ -22,28 +22,36 @@ export default function OcrTestPage() {
     if (m.status) setStatus(m.status);
   }, []);
 
-  const handleFile = useCallback(async (file: File | null) => {
-    setError(''); setText(''); setProgress(0); setStatus('');
-    if (!file) return;
+  const handleFile = useCallback(
+    async (file: File | null) => {
+      setError('');
+      setText('');
+      setProgress(0);
+      setStatus('');
+      if (!file) return;
 
-    // ★★★ ここが重要（.endsWith は使わない）
-    const name = getFileName(file);
-    const isHeic = /\.heic$/i.test(name);   // 正規表現なら name が '' でも落ちない
-    console.log('[OCR] picked:', { name, type: (file as any).type });
+      // ★★★ ここが重要（.endsWith は使わない）
+      const name = getFileName(file);
+      const isHeic = /\.heic$/i.test(name); // 正規表現なら name が '' でも落ちない
+      console.log('[OCR] picked:', { name, type: (file as any).type });
 
-    if (isHeic) {
-      setError('HEICはそのままでは失敗する場合があります。PNG/JPEGで試すか、変換してからお試しください。');
-    }
+      if (isHeic) {
+        setError(
+          'HEICはそのままでは失敗する場合があります。PNG/JPEGで試すか、変換してからお試しください。',
+        );
+      }
 
-    try {
-      const result = await runOcrWithTesseract(file, 'jpn+eng', onProgress);
-      console.log('[OCR] done, length=', result?.length ?? 0);
-      setText(result || '(空)');
-    } catch (e: any) {
-      console.error('[OCR] error', e);
-      setError(e?.message ?? 'OCRでエラーが発生しました');
-    }
-  }, [onProgress]);
+      try {
+        const result = await runOcrWithTesseract(file, 'jpn+eng', onProgress);
+        console.log('[OCR] done, length=', result?.length ?? 0);
+        setText(result || '(空)');
+      } catch (e: any) {
+        console.error('[OCR] error', e);
+        setError(e?.message ?? 'OCRでエラーが発生しました');
+      }
+    },
+    [onProgress],
+  );
 
   return (
     <main className="p-4 max-w-screen-sm mx-auto">

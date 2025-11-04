@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
 
       const supabase = createClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!
+        process.env.SUPABASE_SERVICE_ROLE_KEY!,
       );
 
       const { data, error: qerr } = await supabase
@@ -38,14 +38,14 @@ export async function GET(req: NextRequest) {
     if (error || !user) {
       return NextResponse.json(
         { ok: false, error: String(error ?? 'Unauthorized') },
-        { status: 401 }
+        { status: 401 },
       );
     }
 
     const userCode = req.nextUrl.searchParams.get('user_code') || user.user_code;
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
     );
 
     const { data, error: qerr } = await supabase
@@ -63,9 +63,6 @@ export async function GET(req: NextRequest) {
     res.headers.set('Cache-Control', 's-maxage=60, stale-while-revalidate=120');
     return res;
   } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: String(e?.message ?? e) },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: String(e?.message ?? e) }, { status: 500 });
   }
 }

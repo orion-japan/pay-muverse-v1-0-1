@@ -19,23 +19,27 @@ export default function MenuSofiaItem() {
         setAllowed(false);
       }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const style: React.CSSProperties =
     allowed === null
-      ? { opacity: 0.4, pointerEvents: 'none' }   // チェック中は押せない
+      ? { opacity: 0.4, pointerEvents: 'none' } // チェック中は押せない
       : allowed
-      ? {}
-      : { opacity: 0.35, pointerEvents: 'none' }; // 非会員は押せない
+        ? {}
+        : { opacity: 0.35, pointerEvents: 'none' }; // 非会員は押せない
 
   return (
     <Link href="/sofia" style={{ textDecoration: 'none', ...style }}>
-      <div style={{
-        padding: '10px 12px',
-        borderRadius: 12,
-        border: '1px solid #e6e6e6'
-      }}>
+      <div
+        style={{
+          padding: '10px 12px',
+          borderRadius: 12,
+          border: '1px solid #e6e6e6',
+        }}
+      >
         Sofia
       </div>
     </Link>

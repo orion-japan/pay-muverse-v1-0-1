@@ -22,30 +22,26 @@ export async function POST(req: NextRequest) {
     // ✅ Google Sheets 認証
     const auth = new google.auth.GoogleAuth({
       credentials: JSON.parse(
-        await fs.readFile(
-          path.join(process.cwd(), './sofia-sheets-writer.json'),
-          'utf8'
-        )
+        await fs.readFile(path.join(process.cwd(), './sofia-sheets-writer.json'), 'utf8'),
       ),
       scopes: ['https://www.googleapis.com/auth/spreadsheets'],
     });
 
     const sheets = google.sheets({ version: 'v4', auth });
     const spreadsheetId =
-      process.env.GOOGLE_SHEETS_ID ||
-      '1Z8UAqjRzTT8NyVVnN3twMlmyq8TzjzzcYzrfLepl890'; // ← 必要に応じて変更
+      process.env.GOOGLE_SHEETS_ID || '1Z8UAqjRzTT8NyVVnN3twMlmyq8TzjzzcYzrfLepl890'; // ← 必要に応じて変更
 
     // ✅ 書き込む列（シート2）
     const values = [
       [
-        payment_date,                 // 日付
-        body.customer_id || '',       // 顧客ID
-        body.user_code || '',         // user_code
-        body.user_email || '',        // メール
-        body.plan_type || '',         // 選択プラン
-        body.charge_amount || '',     // 決済金額
-        body.sofia_credit || '',      // sofia_credit
-        body.webhook_id || '',        // Webhook IDなど（任意）
+        payment_date, // 日付
+        body.customer_id || '', // 顧客ID
+        body.user_code || '', // user_code
+        body.user_email || '', // メール
+        body.plan_type || '', // 選択プラン
+        body.charge_amount || '', // 決済金額
+        body.sofia_credit || '', // sofia_credit
+        body.webhook_id || '', // Webhook IDなど（任意）
       ],
     ];
 
@@ -54,7 +50,7 @@ export async function POST(req: NextRequest) {
     await sheets.spreadsheets.values.append({
       spreadsheetId,
       range: 'sheet2!A:K',
- // ← シート2で8列
+      // ← シート2で8列
       valueInputOption: 'USER_ENTERED',
       insertDataOption: 'INSERT_ROWS',
       requestBody: { values },

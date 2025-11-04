@@ -78,11 +78,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'userCode が必要です' }, { status: 400 });
     }
 
-    let query = admin
-      .from('posts')
-      .select('*')
-      .eq('board_type', bt)
-      .eq('is_posted', true);
+    let query = admin.from('posts').select('*').eq('board_type', bt).eq('is_posted', true);
 
     if (mode === 'create') {
       // Createページ: 自分の private（下書きや非公開運用ならこちら）
@@ -157,10 +153,13 @@ export async function POST(req: NextRequest) {
 
     // tags 正規化
     const normalizedTags: string[] = Array.isArray(body.tags)
-      ? body.tags.filter(Boolean) as string[]
+      ? (body.tags.filter(Boolean) as string[])
       : typeof body.tags === 'string'
-      ? body.tags.split(',').map((t) => t.trim()).filter((t) => t.length > 0)
-      : [];
+        ? body.tags
+            .split(',')
+            .map((t) => t.trim())
+            .filter((t) => t.length > 0)
+        : [];
 
     // Qコード卵
     const qCodeSeed: QCodeSeed = {
@@ -197,18 +196,14 @@ export async function POST(req: NextRequest) {
       category: body.category ?? null,
       tags: normalizedTags,
       media_urls: body.media_urls,
-      visibility,          // ← クライアント/既定を尊重
-      is_posted,           // ← 既定 true
-      board_type,          // ← クライアント/既定を尊重
+      visibility, // ← クライアント/既定を尊重
+      is_posted, // ← 既定 true
+      board_type, // ← クライアント/既定を尊重
       layout_type,
       q_code: qCodeSeed,
     };
 
-    const { data, error } = await admin
-      .from('posts')
-      .insert(insertData)
-      .select()
-      .limit(1);
+    const { data, error } = await admin.from('posts').insert(insertData).select().limit(1);
 
     if (error) {
       console.error('[❌ supabase insert エラー]', error);

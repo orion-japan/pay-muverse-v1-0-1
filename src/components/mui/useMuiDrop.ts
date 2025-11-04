@@ -33,7 +33,7 @@ export function useMuiDrop(): UseMuiDropReturn {
     (e: React.ChangeEvent<HTMLInputElement>) => {
       addFiles(e.target.files);
     },
-    [addFiles]
+    [addFiles],
   );
 
   return { files, urls, dragScreen, fileRef, addFiles, onPick, onFileChange, setDragScreen };

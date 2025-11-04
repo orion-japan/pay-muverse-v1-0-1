@@ -6,7 +6,7 @@
   --bg-soft: #f6edff;
   --line-soft: #ead9ff;
   --card-bg: #fff;
-  --card-shadow: 0 1px 2px rgba(0,0,0,.06);
+  --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
   --radius: 12px;
   --space-s: 8px;
   --space-m: 10px;
@@ -23,11 +23,11 @@
 =================================================================== */
 .thread-shell .thread-page .thread-header {
   display: grid;
-  grid-template-columns: 44px 1fr;     /* 2行目: avatar / info */
-  grid-template-rows: auto auto;       /* 1行目: back / 2行目: avatar+info */
+  grid-template-columns: 44px 1fr; /* 2行目: avatar / info */
+  grid-template-rows: auto auto; /* 1行目: back / 2行目: avatar+info */
   grid-template-areas:
-    "back back"
-    "avatar info";
+    'back back'
+    'avatar info';
   align-items: start;
   gap: 10px;
   padding: 10px 12px;
@@ -50,9 +50,11 @@
   border-radius: var(--radius);
   cursor: pointer;
   font-weight: 700;
-  box-shadow: 0 1px 0 rgba(0,0,0,0.06);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
 }
-.thread-shell .thread-page .thread-header .back-btn:hover { filter: brightness(0.98); }
+.thread-shell .thread-page .thread-header .back-btn:hover {
+  filter: brightness(0.98);
+}
 
 /* 2行目: アバター + 情報 */
 .thread-shell .thread-page .thread-header img.avatar {
@@ -75,8 +77,13 @@
   gap: 10px;
   align-items: baseline;
 }
-.thread-shell .thread-page .header-title > strong { font-weight: 700; }
-.thread-shell .thread-page .header-title > small  { color: #888; font-size: 12px; }
+.thread-shell .thread-page .header-title > strong {
+  font-weight: 700;
+}
+.thread-shell .thread-page .header-title > small {
+  color: #888;
+  font-size: 12px;
+}
 
 .thread-shell .thread-page .header-text {
   margin-top: 2px;
@@ -93,7 +100,7 @@
 =================================================================== */
 .thread-shell .thread-page .parent-like-box {
   display: flex;
-  justify-content: center;     /* 中央寄せ */
+  justify-content: center; /* 中央寄せ */
   align-items: center;
   gap: 8px;
   margin-top: 8px;
@@ -101,7 +108,7 @@
   border: 1.5px solid var(--yellow-line);
   border-radius: 10px;
   background: var(--yellow-bg);
-  overflow-x: auto;             /* はみ出し時は横スクロール */
+  overflow-x: auto; /* はみ出し時は横スクロール */
   scrollbar-width: thin;
 }
 
@@ -110,7 +117,7 @@
 =================================================================== */
 .thread-shell .thread-page .thread-scroll {
   overflow-y: auto;
-  padding: 8px 0 180px;         /* 画面下の入力固定ぶんの逃げ */
+  padding: 8px 0 180px; /* 画面下の入力固定ぶんの逃げ */
 }
 
 /* 投稿カード（Self寄せ） */
@@ -119,7 +126,7 @@
   border-radius: var(--radius);
   box-shadow: var(--card-shadow);
   padding: 8px 10px;
-  margin: 10px 0 12px 0;        /* 左0で最左寄せ */
+  margin: 10px 0 12px 0; /* 左0で最左寄せ */
 }
 
 .thread-shell .thread-page .author-line {
@@ -154,7 +161,7 @@
 .thread-page .post .reaction-row,
 .reaction-bar {
   display: flex;
-  justify-content: center;      /* 中央寄せ */
+  justify-content: center; /* 中央寄せ */
   align-items: center;
   gap: 6px;
   flex-wrap: nowrap;
@@ -169,7 +176,7 @@
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  bottom: 56px;                 /* タブバーが無ければ 0 に */
+  bottom: 56px; /* タブバーが無ければ 0 に */
   z-index: 1000;
   max-width: 480px;
   width: 100%;
@@ -179,7 +186,7 @@
   padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
   background: #fff;
   border-top: 1px solid #ececec;
-  box-shadow: 0 -4px 16px rgba(0,0,0,.06);
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.06);
 }
 
 .thread-shell .thread-page .post-form textarea {
@@ -199,23 +206,37 @@
   color: #fff;
   font-weight: 700;
   cursor: pointer;
-  transition: transform .06s ease;
+  transition: transform 0.06s ease;
 }
-.thread-shell .thread-page .post-form button:active { transform: translateY(1px); }
-.thread-shell .thread-page .post-form button:disabled { opacity: .5; cursor: not-allowed; }
+.thread-shell .thread-page .post-form button:active {
+  transform: translateY(1px);
+}
+.thread-shell .thread-page .post-form button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 /* ===================================================================
    細かい調整
 =================================================================== */
-.thread-shell .thread-page .muted { color: #888; }
-.thread-shell .thread-page .sep   { height: 1px; background: #f0f0f0; margin: 8px 0; }
+.thread-shell .thread-page .muted {
+  color: #888;
+}
+.thread-shell .thread-page .sep {
+  height: 1px;
+  background: #f0f0f0;
+  margin: 8px 0;
+}
 
 /* iOSの横スクロールバー目立ちすぎ対策 */
 .thread-shell .thread-page .parent-like-box::-webkit-scrollbar,
-.thread-shell .thread-page .thread-scroll::-webkit-scrollbar { height: 6px; width: 6px; }
+.thread-shell .thread-page .thread-scroll::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
 .thread-shell .thread-page .parent-like-box::-webkit-scrollbar-thumb,
 .thread-shell .thread-page .thread-scroll::-webkit-scrollbar-thumb {
-  background: rgba(0,0,0,.15);
+  background: rgba(0, 0, 0, 0.15);
   border-radius: 999px;
 }
 
@@ -236,10 +257,10 @@
 .thread-shell .thread-page .post {
   background: #fff;
   border-radius: 12px;
-  box-shadow: 0 1px 2px rgba(0,0,0,.06);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
   padding: 8px 10px;
   margin: 10px 0 12px 0;
-  display: block;                 /* ← ここを block に戻す */
+  display: block; /* ← ここを block に戻す */
 }
 
 /* --- 2) ヘッダー行（アバター/右側）のみ grid で2列 --- */
@@ -266,7 +287,7 @@
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
-  margin-left: 40px;              /* 32(avatar) + 8(gap) = 40px */
+  margin-left: 40px; /* 32(avatar) + 8(gap) = 40px */
 }
 
 /* --- 4) いいね行は中央寄せ。インデントはしない --- */
@@ -297,8 +318,9 @@
 }
 
 /* （任意）本文が空行から始まる時に余白が詰みすぎるのを軽減 */
-.thread-shell .thread-page .post .content p:first-child { margin-top: 0; }
-
+.thread-shell .thread-page .post .content p:first-child {
+  margin-top: 0;
+}
 
 /* コメント本文とリアクション群の区切り線 */
 .thread-shell .thread-page .post .content {
@@ -306,13 +328,15 @@
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
-  margin-left: 40px;              /* 名前と頭揃え */
-  padding-bottom: 6px;            /* 線との間に少し余白 */
-  border-bottom: 1px solid #eee;  /* ← 区切り線 */
+  margin-left: 40px; /* 名前と頭揃え */
+  padding-bottom: 6px; /* 線との間に少し余白 */
+  border-bottom: 1px solid #eee; /* ← 区切り線 */
 }
 
 /* ====== 下部タブバーの高さ（実寸に合わせて調整） ====== */
-:root { --tabbar-h: 72px; }  /* 64〜80px など、環境に合わせて */
+:root {
+  --tabbar-h: 72px;
+} /* 64〜80px など、環境に合わせて */
 
 .thread-page {
   position: relative;
@@ -321,8 +345,8 @@
 
 /* ---------- 戻るボタン ----------- */
 .back-btn {
-  --bd: rgba(0,0,0,.08);
-  --glow: rgba(132,94,247,.18);
+  --bd: rgba(0, 0, 0, 0.08);
+  --glow: rgba(132, 94, 247, 0.18);
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -330,18 +354,23 @@
   border-radius: 999px;
   border: 1px solid var(--bd);
   background: linear-gradient(180deg, #fff, #f7f4ff);
-  box-shadow: 0 1px 2px rgba(0,0,0,.06);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
   font-weight: 600;
   color: #5b4b8a;
   cursor: pointer;
-  transition: box-shadow .15s ease, transform .05s ease, border-color .2s;
+  transition:
+    box-shadow 0.15s ease,
+    transform 0.05s ease,
+    border-color 0.2s;
   user-select: none;
 }
 .back-btn:hover {
   box-shadow: 0 0 0 3px var(--glow);
-  border-color: rgba(132,94,247,.35);
+  border-color: rgba(132, 94, 247, 0.35);
 }
-.back-btn:active { transform: translateY(1px); }
+.back-btn:active {
+  transform: translateY(1px);
+}
 
 /* トップバー（戻るボタンを収める行） */
 .thread-topbar {
@@ -355,15 +384,16 @@
   /* コメント入力が固定で重ならないように、少し大きめに確保 */
 }
 
+:root {
+  --tabbar-h: 72px;
+} /* 下ナビ高さに合わせて調整 */
 
-:root { --tabbar-h: 72px; } /* 下ナビ高さに合わせて調整 */
-
-.thread-scroll{
+.thread-scroll {
   padding-bottom: calc(var(--tabbar-h) + 120px + env(safe-area-inset-bottom));
 }
 
 /* ← body 直下に出るので確実に画面基準で固定される */
-#comment-dock.post-form{
+#comment-dock.post-form {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
@@ -375,24 +405,24 @@
   gap: 8px;
   align-items: center;
   background: #fff;
-  border: 1px solid rgba(0,0,0,.08);
+  border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 14px;
   padding: 10px;
-  box-shadow: 0 6px 24px rgba(0,0,0,.08);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
 }
 
-#comment-dock.post-form textarea{
+#comment-dock.post-form textarea {
   flex: 1 1 auto;
   min-height: 36px;
   max-height: 96px;
   padding: 8px 10px;
-  border: 1px solid rgba(0,0,0,.06);
+  border: 1px solid rgba(0, 0, 0, 0.06);
   border-radius: 10px;
   resize: none;
   outline: none;
 }
 
-#comment-dock.post-form button{
+#comment-dock.post-form button {
   padding: 10px 14px;
   border-radius: 10px;
   border: 0;
@@ -402,7 +432,7 @@
   cursor: pointer;
 }
 
-.delete-btn{
+.delete-btn {
   margin-left: 8px;
   padding: 2px 8px;
   font-size: 12px;
@@ -412,11 +442,14 @@
   border-radius: 10px;
   cursor: pointer;
 }
-.delete-btn:hover{ background: #ffecee; }
+.delete-btn:hover {
+  background: #ffecee;
+}
 
-
-.thread-header .header-info { position: relative; }
-.thread-header .delete-btn{
+.thread-header .header-info {
+  position: relative;
+}
+.thread-header .delete-btn {
   position: absolute;
   right: 8px;
   top: 6px;
@@ -427,31 +460,35 @@
   background: #fff;
   border-radius: 999px;
   cursor: pointer;
-  opacity: .9;
+  opacity: 0.9;
 }
-.thread-header .delete-btn:hover { background: #fff5f6; opacity: 1; }
-
-
+.thread-header .delete-btn:hover {
+  background: #fff5f6;
+  opacity: 1;
+}
 
 /* 行レイアウトの土台 */
-.author-line { display: flex; gap: 8px; }
+.author-line {
+  display: flex;
+  gap: 8px;
+}
 
 /* 左右に分ける親 */
 .author-meta {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1 1 auto;     /* ← 幅を持たせる */
-  min-width: 0;       /* ← 右ブロックが押し出されないように */
+  flex: 1 1 auto; /* ← 幅を持たせる */
+  min-width: 0; /* ← 右ブロックが押し出されないように */
 }
 
 /* 右寄せの決め手 */
 .meta-right {
-  margin-left: auto;          /* ← これで右端へ */
+  margin-left: auto; /* ← これで右端へ */
   display: flex;
   align-items: center;
   gap: 8px;
-  white-space: nowrap;        /* 折り返さない */
+  white-space: nowrap; /* 折り返さない */
 }
 
 /* 親ヘッダも同じ思想 */
@@ -471,7 +508,7 @@
 /* 見た目の微調整 */
 .author-meta .time,
 .header-right .time {
-  opacity: .7;
+  opacity: 0.7;
   font-size: 12px;
 }
 .post .content {
@@ -481,15 +518,14 @@
 
 /* コメント本文をさらに太くする */
 .post .content strong {
-  font-weight: 800;     /* 通常のboldよりさらに太字 */
-  color: #222;          /* 読みやすい濃い色（任意） */
-  font-size: 15px;      /* 少し大きめにするなら追加 */
+  font-weight: 800; /* 通常のboldよりさらに太字 */
+  color: #222; /* 読みやすい濃い色（任意） */
+  font-size: 15px; /* 少し大きめにするなら追加 */
 }
 .header-text strong {
   font-weight: 800;
   color: #222;
 }
-
 
 /* === 2カラムレイアウト === */
 .thread-layout {
@@ -506,7 +542,7 @@
 }
 
 .thread-sidebar {
-  border-left: 1px solid rgba(0,0,0,0.08);
+  border-left: 1px solid rgba(0, 0, 0, 0.08);
   background: #fafafa;
   padding: 12px 14px;
   overflow-y: auto;
@@ -523,7 +559,7 @@
 .thread-sidebar .sb-block {
   margin-bottom: 16px;
   padding-bottom: 12px;
-  border-bottom: 1px dashed rgba(0,0,0,0.08);
+  border-bottom: 1px dashed rgba(0, 0, 0, 0.08);
 }
 
 .thread-sidebar .sb-meta {
@@ -541,8 +577,8 @@
 }
 
 .thread-sidebar .sb-text {
-  white-space: pre-wrap;     /* 改行保持 */
-  word-break: break-word;    /* 長い単語も折返し */
+  white-space: pre-wrap; /* 改行保持 */
+  word-break: break-word; /* 長い単語も折返し */
   overflow-wrap: anywhere;
   font-size: 14px;
   line-height: 1.6;
@@ -571,6 +607,6 @@
   }
   .thread-sidebar {
     border-left: none;
-    border-top: 1px solid rgba(0,0,0,0.08);
+    border-top: 1px solid rgba(0, 0, 0, 0.08);
   }
 }

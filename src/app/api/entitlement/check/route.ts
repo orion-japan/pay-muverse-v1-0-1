@@ -10,10 +10,7 @@ function must(name: string) {
   return v;
 }
 
-const supa = createClient(
-  must('NEXT_PUBLIC_SUPABASE_URL'),
-  must('SUPABASE_SERVICE_ROLE_KEY')
-);
+const supa = createClient(must('NEXT_PUBLIC_SUPABASE_URL'), must('SUPABASE_SERVICE_ROLE_KEY'));
 
 // 価格はUI参考用（最終価格は課金API側で再確定）
 const PRICES = {
@@ -67,7 +64,7 @@ export async function GET(req: NextRequest) {
           // 叩くたびに最新を返したいので no-store（必要に応じてs-maxage調整）
           'cache-control': 'no-store',
         },
-      }
+      },
     );
   } catch (e) {
     console.error('[entitlement/check] error', e);

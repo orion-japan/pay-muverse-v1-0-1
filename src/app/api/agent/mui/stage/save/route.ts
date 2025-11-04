@@ -12,7 +12,7 @@ function mustEnv(n: string) {
 /* ===== Supabase ===== */
 const supa = createClient(
   mustEnv('NEXT_PUBLIC_SUPABASE_URL'),
-  mustEnv('SUPABASE_SERVICE_ROLE_KEY')
+  mustEnv('SUPABASE_SERVICE_ROLE_KEY'),
 );
 
 /**
@@ -36,10 +36,18 @@ export async function POST(req: NextRequest) {
       user_code: string;
       seed_id: string;
       sub_id:
-        | 'stage1-1' | 'stage1-2' | 'stage1-3'
-        | 'stage2-1' | 'stage2-2' | 'stage2-3'
-        | 'stage3-1' | 'stage3-2' | 'stage3-3'
-        | 'stage4-1' | 'stage4-2' | 'stage4-3';
+        | 'stage1-1'
+        | 'stage1-2'
+        | 'stage1-3'
+        | 'stage2-1'
+        | 'stage2-2'
+        | 'stage2-3'
+        | 'stage3-1'
+        | 'stage3-2'
+        | 'stage3-3'
+        | 'stage4-1'
+        | 'stage4-2'
+        | 'stage4-3';
       phase: 'Inner' | 'Outer' | 'Mixed';
       depth_stage: string;
       q_current: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
@@ -49,10 +57,7 @@ export async function POST(req: NextRequest) {
     };
 
     if (!b.user_code || !b.seed_id || !b.sub_id) {
-      return NextResponse.json(
-        { ok: false, error: 'Missing required fields.' },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: 'Missing required fields.' }, { status: 400 });
     }
 
     /* ---- 1) RPC呼び出し (coarse stage append) ---- */
@@ -93,13 +98,11 @@ export async function POST(req: NextRequest) {
 
     /* ---- 3) Qコード解析結果をmui_phase1_resultsに格納（LS7含む場合） ---- */
     if (b.result?.q_code || b.result?.ls7) {
-      const { error: e3 } = await supa
-        .from('mui_phase1_results')
-        .upsert({
-          conv_code: b.seed_id,
-          result_json: b.result,
-          updated_at: new Date().toISOString(),
-        });
+      const { error: e3 } = await supa.from('mui_phase1_results').upsert({
+        conv_code: b.seed_id,
+        result_json: b.result,
+        updated_at: new Date().toISOString(),
+      });
 
       if (e3) {
         console.error('Upsert Error (mui_phase1_results):', e3);
@@ -110,9 +113,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     console.error('Save API Error:', e);
-    return NextResponse.json(
-      { ok: false, error: e?.message || String(e) },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: e?.message || String(e) }, { status: 500 });
   }
 }

@@ -6,7 +6,10 @@ import { adminAuth } from '@/lib/firebase-admin';
 export async function POST(req: Request) {
   try {
     // ① Supabase セッション（Cookie）で取得
-    const { data: { user }, error } = await supabaseServer.auth.getUser();
+    const {
+      data: { user },
+      error,
+    } = await supabaseServer.auth.getUser();
     if (!error && user) {
       return NextResponse.json({ user_code: user.id }, { status: 200 });
     }
@@ -21,7 +24,7 @@ export async function POST(req: Request) {
       // Content-Type が JSON のときだけ安全に読む
       const ctype = req.headers.get('content-type') || '';
       if (ctype.includes('application/json')) {
-        const body = await req.json().catch(() => ({} as any));
+        const body = await req.json().catch(() => ({}) as any);
         if (body?.idToken) idToken = String(body.idToken);
       }
     }

@@ -14,24 +14,24 @@ type Body = {
 // ========= ユーティリティ =========
 // 実行環境から自分自身の絶対URLを推定（HOME_URL > NEXT_PUBLIC_SITE_URL > req.origin）
 function getBaseUrl(req: NextRequest) {
-  const envBase =
-    process.env.HOME_URL ||
-    process.env.NEXT_PUBLIC_SITE_URL ||
-    '';
+  const envBase = process.env.HOME_URL || process.env.NEXT_PUBLIC_SITE_URL || '';
   if (envBase) return envBase.replace(/\/+$/, '');
   return req.nextUrl.origin.replace(/\/+$/, '');
 }
 
 // /api/push/send をベストエフォートで叩く
-async function sendPush(baseUrl: string, params: {
-  to: string;                // user_code
-  title: string;
-  body: string;
-  url: string;               // 相対でもOK（SW側で origin 補完）
-  kind?: 'rtalk' | 'generic';
-  tag?: string;              // 同一スレ上書き
-  renotify?: boolean;
-}) {
+async function sendPush(
+  baseUrl: string,
+  params: {
+    to: string; // user_code
+    title: string;
+    body: string;
+    url: string; // 相対でもOK（SW側で origin 補完）
+    kind?: 'rtalk' | 'generic';
+    tag?: string; // 同一スレ上書き
+    renotify?: boolean;
+  },
+) {
   try {
     const endpoint = new URL('/api/push/send', baseUrl).toString();
     await fetch(endpoint, {
@@ -62,17 +62,13 @@ export async function POST(req: NextRequest) {
 
     // バリデーション
     if (!post_id || !user_code || !content?.trim()) {
-      return NextResponse.json(
-        { ok: false, error: 'bad request', rid },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: 'bad request', rid }, { status: 400 });
     }
 
     // Supabase（管理権限：SRKがあればSRK、無ければAnon）
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const serviceKey =
-      process.env.SUPABASE_SERVICE_ROLE_KEY ||
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
     const admin = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false },
     });
@@ -89,10 +85,7 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (insErr) {
-      return NextResponse.json(
-        { ok: false, error: insErr.message, rid },
-        { status: 500 }
-      );
+      return NextResponse.json({ ok: false, error: insErr.message, rid }, { status: 500 });
     }
 
     // 2) 受信者の算出（投稿主 + 既存コメ参加者 － 自分）
@@ -134,19 +127,19 @@ export async function POST(req: NextRequest) {
             kind: 'generic',
             tag,
             renotify: true,
-          })
-        )
+          }),
+        ),
       );
     }
 
     return NextResponse.json(
       { ok: true, table: 'post_comments', data: inserted, rid },
-      { status: 201 }
+      { status: 201 },
     );
   } catch (e: any) {
     return NextResponse.json(
       { ok: false, error: e?.message ?? 'internal error', rid },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

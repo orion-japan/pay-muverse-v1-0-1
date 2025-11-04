@@ -4,15 +4,14 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import {
-  verifyFirebaseAndAuthorize,
-  SUPABASE_URL,
-  SERVICE_ROLE,
-} from '@/lib/authz';
+import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/authz';
 
 function json(data: any, init?: number | ResponseInit) {
-  const status = typeof init === 'number' ? init : (init as ResponseInit | undefined)?.['status'] ?? 200;
-  const headers = new Headers(typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers);
+  const status =
+    typeof init === 'number' ? init : ((init as ResponseInit | undefined)?.['status'] ?? 200);
+  const headers = new Headers(
+    typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers,
+  );
   headers.set('Content-Type', 'application/json; charset=utf-8');
   return new NextResponse(JSON.stringify(data), { status, headers });
 }
@@ -54,7 +53,8 @@ export async function GET(req: NextRequest) {
     }
 
     const seen = new Set<string>();
-    const pool: { conversation_id: string; title?: string | null; updated_at?: string | null }[] = [];
+    const pool: { conversation_id: string; title?: string | null; updated_at?: string | null }[] =
+      [];
 
     for (const r of (rep.data ?? []) as ReportRow[]) {
       const cid = String(r.conversation_id ?? '').trim();
@@ -75,7 +75,7 @@ export async function GET(req: NextRequest) {
 
     // ここで overrides を一括取得して適用
     if (pool.length) {
-      const ids = pool.map(p => p.conversation_id);
+      const ids = pool.map((p) => p.conversation_id);
       const ov = await supabase
         .from('mtalk_overrides')
         .select('session_id, title, archived')
@@ -83,7 +83,7 @@ export async function GET(req: NextRequest) {
         .in('session_id', ids);
 
       if (!ov.error && ov.data?.length) {
-        const map = new Map(ov.data.map(o => [String(o.session_id), o]));
+        const map = new Map(ov.data.map((o) => [String(o.session_id), o]));
         // archived は除外、title があれば上書き
         for (let i = pool.length - 1; i >= 0; i--) {
           const row = map.get(pool[i].conversation_id);
@@ -103,7 +103,7 @@ export async function GET(req: NextRequest) {
     // ...（必要なら以前のまま残してOK）
 
     const items = pool
-      .map(x => ({
+      .map((x) => ({
         conversation_id: x.conversation_id,
         title: (x.title ?? `${agent} 会話`).trim() || `${agent} 会話`,
         updated_at: x.updated_at ?? null,

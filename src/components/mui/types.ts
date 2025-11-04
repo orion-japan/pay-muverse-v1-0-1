@@ -7,35 +7,43 @@ export type StageId = 'stage1' | 'stage2' | 'stage3' | 'stage4';
 
 // 細粒度のサブID（保存ログ用）
 export type FineStageId =
-  | 'stage1-1' | 'stage1-2' | 'stage1-3'
-  | 'stage2-1' | 'stage2-2' | 'stage2-3'
-  | 'stage3-1' | 'stage3-2' | 'stage3-3'
-  | 'stage4-1' | 'stage4-2' | 'stage4-3';
+  | 'stage1-1'
+  | 'stage1-2'
+  | 'stage1-3'
+  | 'stage2-1'
+  | 'stage2-2'
+  | 'stage2-3'
+  | 'stage3-1'
+  | 'stage3-2'
+  | 'stage3-3'
+  | 'stage4-1'
+  | 'stage4-2'
+  | 'stage4-3';
 
 export type Tone = {
   phase: 'Inner' | 'Outer' | 'Mixed';
-  layer18: string;           // 例: 'R3' | 'C2' | 'T1'
-  q_current: string;         // 例: 'Q2'
-  next_q?: string | null;    // 例: 'Q1'
+  layer18: string; // 例: 'R3' | 'C2' | 'T1'
+  q_current: string; // 例: 'Q2'
+  next_q?: string | null; // 例: 'Q1'
   self_accept_band?: string; // 例: '40_70'
   relation_quality?: string; // 任意
-  guardrails?: string[];     // 断定禁止/選択肢は2つ/行動は1つ …など
+  guardrails?: string[]; // 断定禁止/選択肢は2つ/行動は1つ …など
 };
 
 export type StatusBrief = {
   phase: Tone['phase'];
-  currentQ: string;    // q_code.currentQ
-  depthStage: string;  // q_code.depthStage
+  currentQ: string; // q_code.currentQ
+  depthStage: string; // q_code.depthStage
 };
 
 export type Quartet = {
-  seed_id: string;               // ケースID
-  latest_stage: StageId;         // 1) 最新ステージ
-  status_brief: StatusBrief;     // 補助情報
+  seed_id: string; // ケースID
+  latest_stage: StageId; // 1) 最新ステージ
+  status_brief: StatusBrief; // 補助情報
   partner_detail: string | null; // 2) 相手の状態 (~200字)
-  tone: Tone | null;             // 3) トーン (Irosガード)
-  next_step: string | null;      // 4) 次の一歩（常に1つ）
-  created_at: string;            // ISO文字列
+  tone: Tone | null; // 3) トーン (Irosガード)
+  next_step: string | null; // 4) 次の一歩（常に1つ）
+  created_at: string; // ISO文字列
 };
 
 /** ===== 既存 API 型（後方互換） ===== */

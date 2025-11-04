@@ -187,13 +187,13 @@ export default function MuLogsPage() {
         <div className="field">
           <label>User</label>
           <select value={userCode} onChange={(e) => setUserCode(e.target.value)}>
-  <option value="">ユーザーを選択…</option>
-  {users.map((u) => (
-    <option key={u.user_code} value={u.user_code}>
-      {u.name || u.user_code}｜{u.conversations}件
-    </option>
-  ))}
-</select>
+            <option value="">ユーザーを選択…</option>
+            {users.map((u) => (
+              <option key={u.user_code} value={u.user_code}>
+                {u.name || u.user_code}｜{u.conversations}件
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="field">
@@ -207,8 +207,8 @@ export default function MuLogsPage() {
               {conversations === null
                 ? '会話ID'
                 : conversations.length === 0
-                ? '会話が見つかりません'
-                : '会話IDを選択…'}
+                  ? '会話が見つかりません'
+                  : '会話IDを選択…'}
             </option>
             {conversations?.map((c) => (
               <option key={c.id} value={c.id}>
@@ -286,16 +286,13 @@ export default function MuLogsPage() {
               <b>origin_app:</b> {detail.origin_app || ''}
             </div>
             <div>
-              <b>last_turn_at:</b>{' '}
-              <span className="mono">{detail.last_turn_at || ''}</span>
+              <b>last_turn_at:</b> <span className="mono">{detail.last_turn_at || ''}</span>
             </div>
             <div>
-              <b>created_at:</b>{' '}
-              <span className="mono">{detail.created_at || ''}</span>
+              <b>created_at:</b> <span className="mono">{detail.created_at || ''}</span>
             </div>
             <div>
-              <b>updated_at:</b>{' '}
-              <span className="mono">{detail.updated_at || ''}</span>
+              <b>updated_at:</b> <span className="mono">{detail.updated_at || ''}</span>
             </div>
           </div>
 

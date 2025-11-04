@@ -85,16 +85,11 @@ export default function PlanSelectPanel({
 
           {/* ✅ カード登録が済んでない場合 → モーダルを開く */}
           <button
-  className={`select-button select-button--${plan.plan_type} ${cardRegistered ? 'active' : 'disabled'}`}
-  onClick={() =>
-    cardRegistered ? handleSelectPlan(plan) : setShowCardModal(true)
-  }
->
-  {cardRegistered
-    ? `${plan.name} プランを選択`
-    : 'カードを登録してください'}
-</button>
-
+            className={`select-button select-button--${plan.plan_type} ${cardRegistered ? 'active' : 'disabled'}`}
+            onClick={() => (cardRegistered ? handleSelectPlan(plan) : setShowCardModal(true))}
+          >
+            {cardRegistered ? `${plan.name} プランを選択` : 'カードを登録してください'}
+          </button>
         </div>
       ))}
 
@@ -106,9 +101,6 @@ export default function PlanSelectPanel({
         onConfirm={confirmOverwrite}
         onCancel={cancelOverwrite}
       />
-
-    
-
     </div>
   );
 }

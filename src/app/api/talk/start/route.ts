@@ -8,7 +8,7 @@ import { SUPABASE_URL, SERVICE_ROLE, verifyFirebaseAndAuthorize } from '@/lib/au
 
 function json(data: any, init?: number | ResponseInit) {
   const status =
-    typeof init === 'number' ? init : (init as ResponseInit | undefined)?.['status'] ?? 200;
+    typeof init === 'number' ? init : ((init as ResponseInit | undefined)?.['status'] ?? 200);
   const headers = new Headers(
     typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.['headers'],
   );
@@ -18,7 +18,7 @@ function json(data: any, init?: number | ResponseInit) {
 
 /** ユーザーA/Bのコード順序を正規化（小さい方をAに） */
 function normalizePair(a: string, b: string) {
-  return a < b ? [a, b] as const : [b, a] as const;
+  return a < b ? ([a, b] as const) : ([b, a] as const);
 }
 
 type AuthzResultLoose = { user_code?: string; userCode?: string };

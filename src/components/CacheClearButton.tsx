@@ -26,7 +26,7 @@ export default function CacheClearButton({ keepLocalKeys = [], onDone = 'reload'
         try {
           await r.unregister();
         } catch {}
-      })
+      }),
     );
     return { sw: regs.length };
   }
@@ -62,7 +62,7 @@ export default function CacheClearButton({ keepLocalKeys = [], onDone = 'reload'
   async function handleClick() {
     if (running) return;
     const ok = window.confirm(
-      'キャッシュをクリアします。オフラインデータや古いUIが削除されます。よろしいですか？'
+      'キャッシュをクリアします。オフラインデータや古いUIが削除されます。よろしいですか？',
     );
     if (!ok) return;
 

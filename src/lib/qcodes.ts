@@ -1,6 +1,6 @@
 // src/lib/qcodes.ts
 
-export type QSymbol = "Q1"|"Q2"|"Q3"|"Q4"|"Q5";
+export type QSymbol = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
 
 export function normalizeQ(q?: string | null): QSymbol | null {
   if (!q) return null;
@@ -15,9 +15,9 @@ export function buildQCode(input: {
   intent?: string | null;
   ts_at?: string | null;
 }) {
-  const q = normalizeQ(input.hint) ?? (input.fallback ?? "Q2");
+  const q = normalizeQ(input.hint) ?? input.fallback ?? 'Q2';
   return {
-    current_q: q,                // ← 既存のまま
+    current_q: q, // ← 既存のまま
     depth_stage: input.depth_stage ?? null,
     intent: input.intent ?? null,
     ts_at: input.ts_at ?? new Date().toISOString(),
@@ -26,15 +26,19 @@ export function buildQCode(input: {
 
 export function buildSystemPrompt(q: QSymbol): string {
   const tone =
-    q === "Q5" ? "情熱を行動に変える" :
-    q === "Q4" ? "恐れを浄化して前に進む" :
-    q === "Q3" ? "不安を安定に変える" :
-    q === "Q2" ? "怒りを成長の推進力にする" :
-                 "秩序を整え静かに進める"; // Q1
+    q === 'Q5'
+      ? '情熱を行動に変える'
+      : q === 'Q4'
+        ? '恐れを浄化して前に進む'
+        : q === 'Q3'
+          ? '不安を安定に変える'
+          : q === 'Q2'
+            ? '怒りを成長の推進力にする'
+            : '秩序を整え静かに進める'; // Q1
   return [
-    "あなたは MuAI です。",
-    "ユーザーの意図を読み取り、次の具体的行動を3つ以内で提案してください。",
+    'あなたは MuAI です。',
+    'ユーザーの意図を読み取り、次の具体的行動を3つ以内で提案してください。',
     `現在のQは ${q}（${tone}）。`,
-    "箇条書き・短文・肯定的に、過去履歴があれば一貫性を示してください。",
-  ].join("\n");
+    '箇条書き・短文・肯定的に、過去履歴があれば一貫性を示してください。',
+  ].join('\n');
 }

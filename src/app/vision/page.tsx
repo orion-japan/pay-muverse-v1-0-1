@@ -21,14 +21,16 @@ function useThumbUrl(raw?: string | null) {
   useEffect(() => {
     let canceled = false;
     (async () => {
-      if (!raw) { if (!canceled) setUrl(null); return; }
+      if (!raw) {
+        if (!canceled) setUrl(null);
+        return;
+      }
 
       if (raw.startsWith('album://')) {
         let path = raw.replace(/^album:\/\//, '').replace(/^\/+/, '');
         // うっかり 'private-posts/' が入っても剥がす
         path = path.replace(new RegExp(`^(?:${ALBUM_BUCKET}/)+`), '');
-        const { data, error } = await supabase
-          .storage
+        const { data, error } = await supabase.storage
           .from(ALBUM_BUCKET)
           .createSignedUrl(path, 60 * 60); // 1h
         if (canceled) return;
@@ -37,14 +39,19 @@ function useThumbUrl(raw?: string | null) {
         if (!canceled) setUrl(raw); // 直URL（public-posts 等）はそのまま
       }
     })();
-    return () => { canceled = true; };
+    return () => {
+      canceled = true;
+    };
   }, [raw]);
 
   return url;
 }
 
 // ループ内でも使える薄い子コンポーネント
-function VisionThumb({ raw, className = 'vision-thumb' }:{
+function VisionThumb({
+  raw,
+  className = 'vision-thumb',
+}: {
   raw?: string | null;
   className?: string;
 }) {
@@ -62,11 +69,11 @@ const L = {
 };
 
 const STAGES: { key: Stage; label: string; icon: string }[] = [
-  { key: 'S', label: '種',     icon: '🌱' },
+  { key: 'S', label: '種', icon: '🌱' },
   { key: 'F', label: '広げる', icon: '🌊' },
-  { key: 'R', label: '洞察',   icon: '🪞' },
-  { key: 'C', label: '実践',   icon: '🔧' },
-  { key: 'I', label: '結果',   icon: '🌌' },
+  { key: 'R', label: '洞察', icon: '🪞' },
+  { key: 'C', label: '実践', icon: '🔧' },
+  { key: 'I', label: '結果', icon: '🌌' },
 ];
 
 type VisionWithTS = Vision & {
@@ -116,10 +123,12 @@ function applyOrderByStage(phase: Phase, rows: VisionWithTS[]) {
   const ord = loadOrder(phase);
   const ts = (v: VisionWithTS) => Date.parse(v.updated_at ?? v.created_at ?? '') || 0;
   const pos = new Map<string, number>();
-  (Object.keys(ord) as Stage[]).forEach(st => ord[st].forEach((id, i) => pos.set(`${st}:${id}`, i)));
+  (Object.keys(ord) as Stage[]).forEach((st) =>
+    ord[st].forEach((id, i) => pos.set(`${st}:${id}`, i)),
+  );
 
   function sortedFor(stage: Stage) {
-    const arr = rows.filter(r => r.stage === stage);
+    const arr = rows.filter((r) => r.stage === stage);
     return arr.sort((a, b) => {
       const pa = pos.get(`${stage}:${String(a.vision_id)}`) ?? Number.MAX_SAFE_INTEGER;
       const pb = pos.get(`${stage}:${String(b.vision_id)}`) ?? Number.MAX_SAFE_INTEGER;
@@ -135,18 +144,15 @@ function applyOrderByStage(phase: Phase, rows: VisionWithTS[]) {
     .concat(sortedFor('C'))
     .concat(sortedFor('I'));
 
-  L.ord('apply result (head)', next.slice(0, 5).map(v => ({ id: v.vision_id, st: v.stage })));
+  L.ord(
+    'apply result (head)',
+    next.slice(0, 5).map((v) => ({ id: v.vision_id, st: v.stage })),
+  );
   return next;
 }
 
 /* === 追加：Qコード評価（Vision→q_code_logs）ボタン === */
-function QuickEvaluateButton({
-  userCode,
-  visionId,
-}: {
-  userCode: string;
-  visionId: string;
-}) {
+function QuickEvaluateButton({ userCode, visionId }: { userCode: string; visionId: string }) {
   const [loading, setLoading] = useState(false);
   const [last, setLast] = useState<{ when: string; summary: string } | null>(null);
 
@@ -213,8 +219,8 @@ export default function VisionPage() {
   const [userCode, setUserCode] = useState<string>('');
   const [selectedVisionId, setSelectedVisionId] = useState<string | null>(null);
   const selectedVision = useMemo(
-    () => visions.find(v => v.vision_id === selectedVisionId) || null,
-    [visions, selectedVisionId]
+    () => visions.find((v) => v.vision_id === selectedVisionId) || null,
+    [visions, selectedVisionId],
   );
 
   /** 初回だけ自動選択（以降はユーザー選択を上書きしない） */
@@ -228,8 +234,7 @@ export default function VisionPage() {
   const [pendingHide, setPendingHide] = useState<Set<string>>(new Set());
 
   /** アクティブ判定（履歴/アーカイブ済みを除外） */
-  const isActiveVision = (v: VisionWithTS) =>
-    !v.archived_at && !v.moved_to_history_at;
+  const isActiveVision = (v: VisionWithTS) => !v.archived_at && !v.moved_to_history_at;
 
   /** 匿名サインインを一度だけ走らせるためのロック */
   const signInOnceRef = useRef<Promise<void> | null>(null);
@@ -304,9 +309,16 @@ export default function VisionPage() {
 
           // 配列 / {ok, data} 両対応
           let payload: any = null;
-          try { payload = await res.json(); } catch { payload = null; }
+          try {
+            payload = await res.json();
+          } catch {
+            payload = null;
+          }
 
-          if (!res.ok || (payload && typeof payload === 'object' && 'ok' in payload && !payload.ok)) {
+          if (
+            !res.ok ||
+            (payload && typeof payload === 'object' && 'ok' in payload && !payload.ok)
+          ) {
             if (seq !== loadSeqRef.current) return;
             setVisions([]);
             L.api('GET failed', res.status, payload?.error);
@@ -316,7 +328,7 @@ export default function VisionPage() {
           const rows: VisionWithTS[] = Array.isArray(payload) ? payload : (payload?.data ?? []);
           if (seq !== loadSeqRef.current) return;
 
-          const normalized = rows.map(v => ({ ...v, vision_id: String(v.vision_id) }));
+          const normalized = rows.map((v) => ({ ...v, vision_id: String(v.vision_id) }));
           const withThumbs = await enrichThumbs(normalized);
           if (seq !== loadSeqRef.current) return;
 
@@ -326,17 +338,26 @@ export default function VisionPage() {
           // 初回だけ自動選択
           if (!autoInitDoneRef.current) {
             autoInitDoneRef.current = true;
-            const stored = (() => { try { return localStorage.getItem(LS_SELECTED); } catch { return null; } })();
-            if (stored && applied.some(v => v.vision_id === stored)) {
+            const stored = (() => {
+              try {
+                return localStorage.getItem(LS_SELECTED);
+              } catch {
+                return null;
+              }
+            })();
+            if (stored && applied.some((v) => v.vision_id === stored)) {
               setSelectedVisionId(stored);
             } else {
-              const latest = [...applied].sort((a, b) => {
-                const ta = Date.parse(a.updated_at ?? a.created_at ?? '') || 0;
-                const tb = Date.parse(b.updated_at ?? b.created_at ?? '') || 0;
-                return tb - ta;
-              })[0]?.vision_id ?? null;
+              const latest =
+                [...applied].sort((a, b) => {
+                  const ta = Date.parse(a.updated_at ?? a.created_at ?? '') || 0;
+                  const tb = Date.parse(b.updated_at ?? b.created_at ?? '') || 0;
+                  return tb - ta;
+                })[0]?.vision_id ?? null;
               setSelectedVisionId(latest);
-              try { if (latest) localStorage.setItem(LS_SELECTED, latest); } catch {}
+              try {
+                if (latest) localStorage.setItem(LS_SELECTED, latest);
+              } catch {}
             }
           }
         } catch (e) {
@@ -347,24 +368,30 @@ export default function VisionPage() {
       };
 
       // サインイン状態変化で再読込 & 初回読込
-      unsubscribe = onAuthStateChanged(auth, (u) => { void load(u); });
+      unsubscribe = onAuthStateChanged(auth, (u) => {
+        void load(u);
+      });
       void load(auth.currentUser);
     })();
 
     // クリーンアップ
-    return () => { if (unsubscribe) unsubscribe(); };
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, [phase]);
 
   /** フェーズ切替時は選択をクリア（再度“初回”扱い） */
   useEffect(() => {
     setSelectedVisionId(null);
     autoInitDoneRef.current = false;
-    try { localStorage.removeItem(LS_SELECTED); } catch {}
+    try {
+      localStorage.removeItem(LS_SELECTED);
+    } catch {}
   }, [phase]);
 
   /** iBoard サムネ取得（既存の album:// は尊重し、無い時だけ iBoard から補完） */
   async function enrichThumbs(rows: VisionWithTS[]): Promise<VisionWithTS[]> {
-    const ids = rows.map(r => r.iboard_post_id).filter(Boolean) as string[];
+    const ids = rows.map((r) => r.iboard_post_id).filter(Boolean) as string[];
     if (ids.length === 0) return rows;
 
     const { data, error } = await supabase
@@ -381,15 +408,19 @@ export default function VisionPage() {
     }
 
     // 既存の iboard_thumb（album://... など）があればそれを優先
-    return rows.map(r => {
-      const keepAlbum = (typeof r.iboard_thumb === 'string' && r.iboard_thumb) ? r.iboard_thumb : null;
+    return rows.map((r) => {
+      const keepAlbum =
+        typeof r.iboard_thumb === 'string' && r.iboard_thumb ? r.iboard_thumb : null;
       const fromIboard = r.iboard_post_id ? (map.get(r.iboard_post_id) ?? null) : null;
       return { ...r, iboard_thumb: keepAlbum ?? fromIboard };
     });
   }
 
   /* ===== D&D ===== */
-  const onDragStart = () => { setDragging(true); L.dnd('start'); };
+  const onDragStart = () => {
+    setDragging(true);
+    L.dnd('start');
+  };
 
   function reorder<T>(list: T[], startIndex: number, endIndex: number): T[] {
     const result = Array.from(list);
@@ -400,19 +431,24 @@ export default function VisionPage() {
 
   const onDragEnd = async (result: DropResult) => {
     setDragging(false);
-    if (!result.destination) { L.dnd('end: no destination'); return; }
+    if (!result.destination) {
+      L.dnd('end: no destination');
+      return;
+    }
     const { source, destination, draggableId } = result;
     L.dnd('end', { source, destination, draggableId });
 
     const fromSt = source.droppableId as Stage;
-    const toSt   = destination.droppableId as Stage;
+    const toSt = destination.droppableId as Stage;
 
     // === 同一カラム内の並べ替え（バッチで sort_index 保存） ===
     if (fromSt === toSt) {
-      const same = visions.filter(v => v.stage === fromSt);
-      const reordered = reorder(same, source.index, destination.index)
-        .map((v, i) => ({ ...v, sort_index: i }));
-      const others = visions.filter(v => v.stage !== fromSt);
+      const same = visions.filter((v) => v.stage === fromSt);
+      const reordered = reorder(same, source.index, destination.index).map((v, i) => ({
+        ...v,
+        sort_index: i,
+      }));
+      const others = visions.filter((v) => v.stage !== fromSt);
       const next = [...others, ...reordered];
 
       setVisions(next);
@@ -425,33 +461,36 @@ export default function VisionPage() {
         if (!auth.currentUser) await signInAnonymously(auth);
         const token = await auth.currentUser!.getIdToken();
 
-        const order = reordered.map(v => ({ vision_id: v.vision_id, sort_index: v.sort_index ?? 0 }));
+        const order = reordered.map((v) => ({
+          vision_id: v.vision_id,
+          sort_index: v.sort_index ?? 0,
+        }));
         await fetch('/api/visions', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({ order }),
         });
-      } catch (e) { L.api('PUT reorder error', e); }
+      } catch (e) {
+        L.api('PUT reorder error', e);
+      }
       return;
     }
 
     // === 別カラムへ移動（from/to 両列をバッチPUT） ===
     const movedId = String(draggableId);
-    const moved = visions.find(v => String(v.vision_id) === movedId);
+    const moved = visions.find((v) => String(v.vision_id) === movedId);
     if (!moved) return;
 
-    const toList = visions
-      .filter(v => v.stage === toSt && String(v.vision_id) !== movedId);
+    const toList = visions.filter((v) => v.stage === toSt && String(v.vision_id) !== movedId);
     const movedUpdated = { ...moved, stage: toSt };
     toList.splice(destination.index, 0, movedUpdated);
 
-    const fromList = visions
-      .filter(v => v.stage === fromSt && String(v.vision_id) !== movedId);
+    const fromList = visions.filter((v) => v.stage === fromSt && String(v.vision_id) !== movedId);
 
-    const toWithIndex   = toList.map((v, i) => ({ ...v, sort_index: i }));
+    const toWithIndex = toList.map((v, i) => ({ ...v, sort_index: i }));
     const fromWithIndex = fromList.map((v, i) => ({ ...v, sort_index: i }));
 
-    const others = visions.filter(v => v.stage !== toSt && v.stage !== fromSt);
+    const others = visions.filter((v) => v.stage !== toSt && v.stage !== fromSt);
     const next = [...others, ...fromWithIndex, ...toWithIndex];
 
     setVisions(next);
@@ -474,8 +513,8 @@ export default function VisionPage() {
 
       // ② from/to 両列の sort_index をまとめて保存
       const order = [
-        ...fromWithIndex.map(v => ({ vision_id: v.vision_id, sort_index: v.sort_index ?? 0 })),
-        ...toWithIndex  .map(v => ({ vision_id: v.vision_id, sort_index: v.sort_index ?? 0 })),
+        ...fromWithIndex.map((v) => ({ vision_id: v.vision_id, sort_index: v.sort_index ?? 0 })),
+        ...toWithIndex.map((v) => ({ vision_id: v.vision_id, sort_index: v.sort_index ?? 0 })),
       ];
       await fetch('/api/visions', {
         method: 'PUT',
@@ -491,8 +530,8 @@ export default function VisionPage() {
   const upsertLocal = (saved: VisionWithTS) => {
     const normalized: VisionWithTS = { ...saved, vision_id: String(saved.vision_id) };
 
-    setVisions(prev => {
-      const i = prev.findIndex(x => String(x.vision_id) === normalized.vision_id);
+    setVisions((prev) => {
+      const i = prev.findIndex((x) => String(x.vision_id) === normalized.vision_id);
       const next = [...prev];
 
       if (i >= 0) {
@@ -506,19 +545,23 @@ export default function VisionPage() {
       return applied;
     });
 
-    try { localStorage.setItem(LS_SELECTED, String(normalized.vision_id)); } catch {}
+    try {
+      localStorage.setItem(LS_SELECTED, String(normalized.vision_id));
+    } catch {}
     setSelectedVisionId(String(normalized.vision_id));
   };
 
   /* 選択の永続化 */
   function persistSelected(id: string | null) {
-    try { id ? localStorage.setItem(LS_SELECTED, id) : localStorage.removeItem(LS_SELECTED); } catch {}
+    try {
+      id ? localStorage.setItem(LS_SELECTED, id) : localStorage.removeItem(LS_SELECTED);
+    } catch {}
   }
 
   /** 履歴移動後の即時反映（楽観的隠し＋確定除去） */
   function handleArchived(vid: string) {
-    setPendingHide(prev => new Set(prev).add(String(vid)));
-    setVisions(prev => prev.filter(v => String(v.vision_id) !== String(vid)));
+    setPendingHide((prev) => new Set(prev).add(String(vid)));
+    setVisions((prev) => prev.filter((v) => String(v.vision_id) !== String(vid)));
     setSelectedVisionId(null);
   }
 
@@ -534,35 +577,54 @@ export default function VisionPage() {
       {/* === フェーズタブ ＋ 新規＋履歴 === */}
       <div className="vision-topbar">
         <div className="vision-tabs">
-          <button className={phase === 'initial' ? 'is-active' : ''} onClick={() => setPhase('initial')}>初期</button>
-          <button className={phase === 'mid' ? 'is-active' : ''} onClick={() => setPhase('mid')}>中期</button>
-          <button className={phase === 'final' ? 'is-active' : ''} onClick={() => setPhase('final')}>後期</button>
+          <button
+            className={phase === 'initial' ? 'is-active' : ''}
+            onClick={() => setPhase('initial')}
+          >
+            初期
+          </button>
+          <button className={phase === 'mid' ? 'is-active' : ''} onClick={() => setPhase('mid')}>
+            中期
+          </button>
+          <button
+            className={phase === 'final' ? 'is-active' : ''}
+            onClick={() => setPhase('final')}
+          >
+            後期
+          </button>
         </div>
 
         <div className="vision-actions">
-          <a className="vision-history-link" href="/vision/history">履歴を見る</a>
-          <button className="vision-new-global" onClick={() => setOpenStage('S')}>＋ 新規</button>
+          <a className="vision-history-link" href="/vision/history">
+            履歴を見る
+          </a>
+          <button className="vision-new-global" onClick={() => setOpenStage('S')}>
+            ＋ 新規
+          </button>
         </div>
       </div>
 
       {/* カンバン */}
       <DragDropContext onDragStart={onDragStart} onDragEnd={onDragEnd}>
         <div className="vision-board">
-          {STAGES.map(stage => (
+          {STAGES.map((stage) => (
             <Droppable droppableId={stage.key} key={stage.key}>
               {(dropProvided) => (
                 <div className="vision-column">
-                  <div className="vision-col-header">{stage.icon} {stage.label}</div>
+                  <div className="vision-col-header">
+                    {stage.icon} {stage.label}
+                  </div>
                   <div
                     ref={dropProvided.innerRef}
                     {...dropProvided.droppableProps}
                     className="vision-col-body"
                   >
                     {visions
-                      .filter(v =>
-                        v.stage === stage.key &&
-                        isActiveVision(v) &&
-                        !pendingHide.has(String(v.vision_id))
+                      .filter(
+                        (v) =>
+                          v.stage === stage.key &&
+                          isActiveVision(v) &&
+                          !pendingHide.has(String(v.vision_id)),
                       )
                       .map((vision, index) => (
                         <Draggable
@@ -589,15 +651,21 @@ export default function VisionPage() {
                               {/* サムネ（album:// or 直URL 両対応） */}
                               {(() => {
                                 const rawThumb =
-                                  (typeof vision.iboard_thumb === 'string' && vision.iboard_thumb) ||
-                                  (vision as any).thumbnailUrl || (vision as any).thumbnail_url || null;
+                                  (typeof vision.iboard_thumb === 'string' &&
+                                    vision.iboard_thumb) ||
+                                  (vision as any).thumbnailUrl ||
+                                  (vision as any).thumbnail_url ||
+                                  null;
                                 return <VisionThumb raw={rawThumb} className="vision-thumb" />;
                               })()}
 
                               {/* 右上の編集ボタン（任意） */}
                               <button
                                 className="vision-edit-btn"
-                                onClick={(e) => { e.stopPropagation(); setEditing(vision); }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditing(vision);
+                                }}
                                 aria-label="編集"
                               >
                                 ✎
@@ -606,7 +674,10 @@ export default function VisionPage() {
                               <div className="vision-title">{vision.title}</div>
 
                               {/* 橋渡しチェック（クリック伝播を止める） */}
-                              <div className="vision-card-bridge" onClick={(e) => e.stopPropagation()}>
+                              <div
+                                className="vision-card-bridge"
+                                onClick={(e) => e.stopPropagation()}
+                              >
                                 <StageChecklistInline
                                   visionId={String(vision.vision_id)}
                                   from={vision.stage}
@@ -652,9 +723,13 @@ export default function VisionPage() {
       {/* ★ 一番下に履歴ボタン */}
       <div className="vision-footer">
         <a className="btn-hope" href="/practice/diary" aria-label="日々の実践の実績を見る">
-          <span className="btn-hope__icon" aria-hidden>🏆</span>
+          <span className="btn-hope__icon" aria-hidden>
+            🏆
+          </span>
           <span className="btn-hope__label">日々の実績を見る</span>
-          <span className="btn-hope__chevron" aria-hidden>➜</span>
+          <span className="btn-hope__chevron" aria-hidden>
+            ➜
+          </span>
         </a>
       </div>
 
@@ -666,7 +741,10 @@ export default function VisionPage() {
           defaultStage={'S'}
           userCode={userCode}
           onClose={() => setOpenStage(null)}
-          onSaved={(v) => { upsertLocal(v as VisionWithTS); setOpenStage(null); }}
+          onSaved={(v) => {
+            upsertLocal(v as VisionWithTS);
+            setOpenStage(null);
+          }}
         />
       )}
 
@@ -679,7 +757,10 @@ export default function VisionPage() {
           userCode={userCode}
           initial={editing}
           onClose={() => setEditing(null)}
-          onSaved={(v) => { upsertLocal(v as VisionWithTS); setEditing(null); }}
+          onSaved={(v) => {
+            upsertLocal(v as VisionWithTS);
+            setEditing(null);
+          }}
         />
       )}
     </div>

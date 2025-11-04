@@ -15,8 +15,17 @@ export async function GET(req: NextRequest) {
 
   // 管理者チェック
   const admin = z.userCode!;
-  const { data: me } = await sb.from('users').select('plan_status, click_type').eq('user_code', admin).single();
-  const isAdmin = !!(me && ((me as any).plan_status === 'admin' || (me as any).plan_status === 'master' || (me as any).click_type === 'admin'));
+  const { data: me } = await sb
+    .from('users')
+    .select('plan_status, click_type')
+    .eq('user_code', admin)
+    .single();
+  const isAdmin = !!(
+    me &&
+    ((me as any).plan_status === 'admin' ||
+      (me as any).plan_status === 'master' ||
+      (me as any).click_type === 'admin')
+  );
   if (!isAdmin) return j({ error: 'not_admin' }, 403);
 
   const { searchParams } = new URL(req.url);
@@ -26,17 +35,23 @@ export async function GET(req: NextRequest) {
 
   let data: any[] = [];
   if (exact) {
-    const { data: d1 } = await sb.from('users')
+    const { data: d1 } = await sb
+      .from('users')
       .select('user_code, click_email, credit_balance')
-      .eq('user_code', q).limit(1);
+      .eq('user_code', q)
+      .limit(1);
     if (d1?.length) data = d1;
   } else {
-    const { data: d1 } = await sb.from('users')
+    const { data: d1 } = await sb
+      .from('users')
       .select('user_code, click_email, credit_balance')
-      .eq('user_code', q).limit(1);
-    const { data: d2 } = await sb.from('users')
+      .eq('user_code', q)
+      .limit(1);
+    const { data: d2 } = await sb
+      .from('users')
       .select('user_code, click_email, credit_balance')
-      .ilike('click_email', `%${q}%`).limit(10);
+      .ilike('click_email', `%${q}%`)
+      .limit(10);
     data = [...(d1 || []), ...(d2 || [])];
   }
 

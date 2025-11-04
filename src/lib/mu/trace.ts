@@ -2,7 +2,12 @@
 import { MU_CONFIG, MU_LOGGING } from './config';
 
 export type MuLogDetail = 'off' | 'lite';
-export type MuTraceStep = 'detect_mode' | 'state_infer' | 'indicators' | 'retrieve' | 'openai_reply';
+export type MuTraceStep =
+  | 'detect_mode'
+  | 'state_infer'
+  | 'indicators'
+  | 'retrieve'
+  | 'openai_reply';
 export type MuTraceEntry = { step: MuTraceStep; data: Record<string, any> };
 export type MuDialogueTraceLite = MuTraceEntry[];
 
@@ -53,7 +58,7 @@ function sanitize(data: Record<string, any>) {
   if (sig && typeof sig === 'object') {
     const s = sig as { keywords?: unknown };
     if (Array.isArray(s.keywords)) {
-      (s as any).keywords = s.keywords.slice(0, 3).map(k => String(k).toLowerCase());
+      (s as any).keywords = s.keywords.slice(0, 3).map((k) => String(k).toLowerCase());
     }
     copy.signals = s as any;
   }

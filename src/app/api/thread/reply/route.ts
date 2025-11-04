@@ -7,17 +7,17 @@ export const dynamic = 'force-dynamic';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
 export async function POST(req: NextRequest) {
   try {
     const {
-      parent_post_id,         // 親ポストID（thread_idでもOK）
+      parent_post_id, // 親ポストID（thread_idでもOK）
       content,
       media_urls,
-      author_user_code,       // 返信した人
-      author_name,            // 返信者名（なくてもOK）
+      author_user_code, // 返信した人
+      author_name, // 返信者名（なくてもOK）
     } = await req.json();
 
     if (!parent_post_id || !author_user_code) {
@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
         content,
         media_urls,
         user_code: author_user_code,
-        is_posted: false,      // 子：未投稿扱いの運用なら
+        is_posted: false, // 子：未投稿扱いの運用なら
         is_thread: true,
         parent_board: parent_post_id,
         thread_id: parent_post_id,

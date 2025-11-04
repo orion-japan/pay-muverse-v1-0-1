@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 
-type Q = 'Q1'|'Q2'|'Q3'|'Q4'|'Q5';
+type Q = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
 type QCode = { currentQ: Q; depthStage?: string } & Record<string, any>;
 
 /* ===== 日付ヘルパー（JSTで“日付だけ”扱う） ===== */
@@ -46,13 +46,13 @@ export async function GET(req: Request) {
   const days = Number(searchParams.get('days') ?? '30');
   const limit = Math.min(Number(searchParams.get('limit') ?? '500'), 2000);
   const fromQ = searchParams.get('from'); // 'YYYY-MM-DD'
-  const toQ   = searchParams.get('to');   // 'YYYY-MM-DD'
+  const toQ = searchParams.get('to'); // 'YYYY-MM-DD'
 
   // ★ cookies() はコールバックで渡す（Nextの同期API警告を回避）
   const supabase = createRouteHandlerClient({ cookies: () => cookies() });
 
   // 期間の決定（JSTで“日付だけ”）
-  const today = new Date();               // 現在UTC
+  const today = new Date(); // 現在UTC
   const endDate = toQ ? parseYmd(toQ.replace(/\//g, '-')) : parseYmd(toJstYmd(today));
   // days 指定時は「包含で days 日」になるよう start = end - (days-1)
   const startDate = fromQ
@@ -60,7 +60,7 @@ export async function GET(req: Request) {
     : addDaysUTC(endDate, -Math.max(1, isFinite(days) ? days : 30) + 1);
 
   const fromStr = toJstYmd(startDate);
-  const toStr   = toJstYmd(endDate);
+  const toStr = toJstYmd(endDate);
   const daysSpan = inclusiveDays(startDate, endDate);
 
   // クエリ（for_date は DATE 型を想定。inclusive で gte/lte）
@@ -77,14 +77,11 @@ export async function GET(req: Request) {
 
   const { data, error, count } = await q;
   if (error) {
-    return NextResponse.json(
-      { ok: false, error: error.message },
-      { status: 400 }
-    );
+    return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
   }
 
   // currentQ を持つレコードのみ返す（古いデータ互換）
-  const items = (data ?? []).filter(r => r?.q_code?.currentQ);
+  const items = (data ?? []).filter((r) => r?.q_code?.currentQ);
 
   return NextResponse.json({
     ok: true,
@@ -106,7 +103,7 @@ export async function POST(req: Request) {
   if (!user_code || !qc?.currentQ) {
     return NextResponse.json(
       { ok: false, error: 'user_code と q_code(currentQ) は必須です' },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -125,17 +122,10 @@ export async function POST(req: Request) {
     extra: extra ?? null,
   };
 
-  const { data, error } = await supabase
-    .from('q_code_logs')
-    .insert(payload)
-    .select()
-    .single();
+  const { data, error } = await supabase.from('q_code_logs').insert(payload).select().single();
 
   if (error) {
-    return NextResponse.json(
-      { ok: false, error: error.message },
-      { status: 400 }
-    );
+    return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
   }
   return NextResponse.json({ ok: true, item: data });
 }

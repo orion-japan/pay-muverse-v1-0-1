@@ -5,11 +5,11 @@
    ========================================================= */
 
 /* ---- Tokens ---- */
-:root{
+:root {
   /* 中央レーン幅：画面に応じて広がり、上限で止まる */
-  --lane-max: 1360px;                     /* 本文/ヘッダーの上限幅（お好みで 1200〜1600） */
-  --gutter: 24px;                         /* 左右余白 */
-  --lane: clamp(960px, calc(100vw - var(--gutter)*2), var(--lane-max));
+  --lane-max: 1360px; /* 本文/ヘッダーの上限幅（お好みで 1200〜1600） */
+  --gutter: 24px; /* 左右余白 */
+  --lane: clamp(960px, calc(100vw - var(--gutter) * 2), var(--lane-max));
 
   /* 入力バー/メタは少し絞る（必要なら lane と同じでもOK） */
   --shell-max: 1200px;
@@ -26,32 +26,39 @@
   --sof-border: 1px solid #e6e6e6;
   --sof-bg: #fff;
   --sof-bg-page: #f7f8fb;
-  --sof-shadow-top: 0 -2px 10px rgba(0,0,0,.06);
+  --sof-shadow-top: 0 -2px 10px rgba(0, 0, 0, 0.06);
 }
 
 /* =========================================================
    Scaffold
    ========================================================= */
-.sofia-container{
+.sofia-container {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
   background: var(--sof-bg-page);
 }
-.sofia-page-main{ flex: 1 1 auto; overflow-y: auto; }
-.sofia-page-wrap{ width: var(--lane); margin: 0 auto; padding-top: calc(var(--sof-header-h) + 12px); }
+.sofia-page-main {
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+.sofia-page-wrap {
+  width: var(--lane);
+  margin: 0 auto;
+  padding-top: calc(var(--sof-header-h) + 12px);
+}
 
 /* mu-main / mu-page をフル幅に（上流の max-width を殺す） */
 main.mu-main,
 .mu-page,
-.sofia-container{
+.sofia-container {
   width: 100% !important;
   max-width: none !important;
   flex: 1 1 0% !important;
   min-width: 0 !important;
   align-self: stretch !important;
 }
-.sofia-container > [style*="max-width"]{
+.sofia-container > [style*='max-width'] {
   max-width: none !important;
   width: 100% !important;
   margin: 0 !important;
@@ -64,7 +71,9 @@ main.mu-main,
    ========================================================= */
 .sof-header-fixed {
   position: fixed;
-  top: 0; left: 0; right: 0;
+  top: 0;
+  left: 0;
+  right: 0;
   height: var(--sof-header-h);
   z-index: 100;
 
@@ -74,32 +83,61 @@ main.mu-main,
 
   background: linear-gradient(180deg, #fafafa 0%, #ffffff 100%);
   border-bottom: 1px solid #e5e7eb;
-  box-shadow: 0 2px 8px rgba(0,0,0,.06);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 /* 内側の Header コンポーネント */
-.sof-header-fixed > .sof-header{
+.sof-header-fixed > .sof-header {
   width: var(--lane);
   margin: 0 auto;
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  height: 100%; padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 100%;
+  padding: 0 12px;
 }
-.sof-header__title{ flex: 1; text-align: center; font-size: 16px; font-weight: 700; color: #111827; }
-.sof-header .sof-btn{
-  font-size: 14px; font-weight: 600; padding: 6px 12px; border-radius: 8px;
-  border: 1px solid #d1d5db; background:#fff; color:#374151;
-  cursor: pointer; transition: background .15s, color .15s, border-color .15s;
+.sof-header__title {
+  flex: 1;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
 }
-.sof-header .sof-btn:hover{ background:#f3f4f6; }
-.sof-header .sof-btn.primary{ background:#6b8cff; border-color:#6b8cff; color:#fff; }
-.sof-header .sof-btn.primary:hover{ background:#4f6de6; }
+.sof-header .sof-btn {
+  font-size: 14px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+}
+.sof-header .sof-btn:hover {
+  background: #f3f4f6;
+}
+.sof-header .sof-btn.primary {
+  background: #6b8cff;
+  border-color: #6b8cff;
+  color: #fff;
+}
+.sof-header .sof-btn.primary:hover {
+  background: #4f6de6;
+}
 
 /* 本文側はヘッダー分の余白を確保 */
-.sofia-page-wrap{ padding-top: calc(var(--sof-header-h) + 12px); }
+.sofia-page-wrap {
+  padding-top: calc(var(--sof-header-h) + 12px);
+}
 
 /* =========================================================
    MESSAGE LIST
    ========================================================= */
-.sof-msgs{
+.sof-msgs {
   width: 100%;
   max-width: var(--lane);
   margin: 0 auto;
@@ -116,10 +154,15 @@ main.mu-main,
   text-align: initial;
 }
 
-.sof-empty{ color:#94a3b8; text-align:center; padding:24px 8px; font-size:14px; }
+.sof-empty {
+  color: #94a3b8;
+  text-align: center;
+  padding: 24px 8px;
+  font-size: 14px;
+}
 
 /* バブル（左右寄せは従来のまま保持） */
-.sof-bubble{
+.sof-bubble {
   max-width: 86%;
   padding: 10px 14px;
   border-radius: 16px;
@@ -128,29 +171,41 @@ main.mu-main,
   word-break: break-word;
   background: #ffffff;
   border: 1px solid #e5e7eb;
-  box-shadow: 0 1px 2px rgba(0,0,0,.04);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 
   align-self: flex-start;
   margin-left: 0;
   margin-right: auto;
 }
-.sof-bubble.is-user{
+.sof-bubble.is-user {
   align-self: flex-end;
-  margin-left: 0; margin-right: 0;
-  background: #6b8cff; color:#fff; border-color:#6b8cff;
+  margin-left: 0;
+  margin-right: 0;
+  background: #6b8cff;
+  color: #fff;
+  border-color: #6b8cff;
   border-bottom-right-radius: 4px;
 }
-.sof-bubble.is-assistant{
+.sof-bubble.is-assistant {
   align-self: flex-start;
-  margin-left: 0; margin-right: auto;
-  background: #f8fafc; color:#111827; border-color:#e5e7eb;
+  margin-left: 0;
+  margin-right: auto;
+  background: #f8fafc;
+  color: #111827;
+  border-color: #e5e7eb;
   border-bottom-left-radius: 4px;
 }
-.sof-bubble__role{ font-size:11px; letter-spacing:.02em; color:#94a3b8; }
-.sof-bubble.is-user .sof-bubble__role{ color:rgba(255,255,255,.8); }
+.sof-bubble__role {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: #94a3b8;
+}
+.sof-bubble.is-user .sof-bubble__role {
+  color: rgba(255, 255, 255, 0.8);
+}
 
 /* 縦1文字になる事故を防止（保険） */
-.sof-bubble__text{
+.sof-bubble__text {
   writing-mode: horizontal-tb !important;
   text-orientation: mixed !important;
   white-space: normal !important;
@@ -159,23 +214,34 @@ main.mu-main,
 }
 
 /* 画像グリッド */
-.sof-bubble__imgs{ display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr)); gap:6px; }
-.sof-bubble__imgs img{
-  width:100%; height:96px; object-fit:cover; border-radius:10px;
-  border:1px solid #e5e7eb; background:#fff;
+.sof-bubble__imgs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 6px;
+}
+.sof-bubble__imgs img {
+  width: 100%;
+  height: 96px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
 }
 
 /* モバイルは吹き出しを少し広げる */
-@media (max-width: 480px){
-  .sof-bubble{ max-width: 92%; }
+@media (max-width: 480px) {
+  .sof-bubble {
+    max-width: 92%;
+  }
 }
 
 /* =========================================================
    META (indicator) – フッター直上（中身があるときだけ）
    ========================================================= */
-.sof-meta-dock{
+.sof-meta-dock {
   position: fixed;
-  left: 50%; transform: translateX(-50%);
+  left: 50%;
+  transform: translateX(-50%);
   bottom: var(--footer-safe-pad);
   z-index: 50;
 
@@ -183,7 +249,7 @@ main.mu-main,
   max-width: var(--shell);
 
   padding: 8px 12px 6px;
-  background: rgba(255,255,255,.95);
+  background: rgba(255, 255, 255, 0.95);
   -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
 
@@ -192,26 +258,30 @@ main.mu-main,
 }
 
 /* MetaPanel 側の強制上書き（“緑の帯”などの癖を消す） */
-.sof-meta-dock .meta-panel{
+.sof-meta-dock .meta-panel {
   background: #fff !important;
   border: 1px solid #e5e7eb !important;
   box-shadow: none !important;
 }
-.sof-meta-dock .meta-label{ border-left: none !important; color: #667085; }
+.sof-meta-dock .meta-label {
+  border-left: none !important;
+  color: #667085;
+}
 
 /* =========================================================
    INPUT – Meta のさらに上
    ========================================================= */
-.sof-compose-dock{
+.sof-compose-dock {
   position: fixed;
-  left: 50%; transform: translateX(-50%);
+  left: 50%;
+  transform: translateX(-50%);
   bottom: calc(var(--footer-safe-pad) + var(--meta-height));
   z-index: 60;
 
   width: 100%;
   max-width: var(--shell);
 
-  background: rgba(255,255,255,0.95);
+  background: rgba(255, 255, 255, 0.95);
   -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
   border-top: var(--sof-border);
@@ -220,7 +290,7 @@ main.mu-main,
 }
 
 /* 物理スペーサ（保険） */
-.sof-footer-spacer{
+.sof-footer-spacer {
   height: calc(var(--footer-safe-pad) + var(--meta-height) + var(--compose-height) + 24px);
 }
 
@@ -228,7 +298,7 @@ main.mu-main,
    mu-main の変な装飾を殺す（縦の色線など）
    ========================================================= */
 body.mu-body .mu-main:before,
-body.mu-body .mu-main:after{
+body.mu-body .mu-main:after {
   content: none !important;
   display: none !important;
 }
@@ -236,12 +306,12 @@ body.mu-body .mu-main:after{
 /* =========================================================
    小さめ画面向けの調整
    ========================================================= */
-@media (max-width: 640px){
-  :root{
+@media (max-width: 640px) {
+  :root {
     --lane: calc(100vw - 24px);
     --shell: calc(100vw - 24px);
   }
-  .sof-footer-spacer{
+  .sof-footer-spacer {
     height: calc(var(--footer-safe-pad) + var(--meta-height) + var(--compose-height) + 36px);
   }
 }
@@ -249,22 +319,23 @@ body.mu-body .mu-main:after{
 /* =========================================================
    PC向けの見やすさ微調整
    ========================================================= */
-@media (min-width: 1024px){
+@media (min-width: 1024px) {
   /* 吹き出しを少し広めに（好みで 75〜90%） */
-  .sof-bubble{ max-width: 80%; }
+  .sof-bubble {
+    max-width: 80%;
+  }
 }
-
 
 /* ===== sof-center を使った中央レーン強制（PCのみ） ===== */
-:root{
-  --lane-max: 1360px;   /* 本文/ヘッダの上限幅（好みで 1200〜1600） */
-  --shell-max: 1200px;  /* 入力バー/メタの上限幅 */
-  --gutter: 24px;       /* 左右余白 */
+:root {
+  --lane-max: 1360px; /* 本文/ヘッダの上限幅（好みで 1200〜1600） */
+  --shell-max: 1200px; /* 入力バー/メタの上限幅 */
+  --gutter: 24px; /* 左右余白 */
 }
 
-@media (min-width: 1024px){
+@media (min-width: 1024px) {
   /* sof-center 自体を“必ずフル幅”の3カラムグリッドに */
-  .sof-center{
+  .sof-center {
     width: 100%;
     min-width: 0;
     display: grid;
@@ -273,12 +344,12 @@ body.mu-body .mu-main:after{
   }
 
   /* sof-center の直下にぶら下がる要素は中央カラムに載せる */
-  .sof-center > *{
+  .sof-center > * {
     grid-column: 2;
   }
 
   /* 本文レーン：中央に固定。幅はグリッドに任せる */
-  .sof-center .sof-msgs{
+  .sof-center .sof-msgs {
     grid-column: 2;
     width: 100% !important;
     max-width: none !important;
@@ -289,7 +360,7 @@ body.mu-body .mu-main:after{
   }
 
   /* ページ内ラッパも中央に */
-  .sof-center .sofia-page-wrap{
+  .sof-center .sofia-page-wrap {
     grid-column: 2;
     width: 100%;
     max-width: none;
@@ -300,7 +371,7 @@ body.mu-body .mu-main:after{
 
   /* 固定UI（Meta/入力）は translateX で中央へ、幅は shell に制限 */
   .sof-meta-dock,
-  .sof-compose-dock{
+  .sof-compose-dock {
     left: 50% !important;
     transform: translateX(-50%) !important;
     width: 100% !important;
@@ -308,14 +379,14 @@ body.mu-body .mu-main:after{
   }
 
   /* ヘッダーの中身も中央レーン幅に合わせる（ヘッダー自体はそのまま固定） */
-  .sof-header-fixed > .sof-header{
-    width: min(var(--lane-max), calc(100vw - var(--gutter)*2));
+  .sof-header-fixed > .sof-header {
+    width: min(var(--lane-max), calc(100vw - var(--gutter) * 2));
     margin: 0 auto;
   }
 
   /* 文字が縦1列に潰れる事故の保険（役割ラベル + 本文） */
   .sof-bubble__role,
-  .sof-bubble__text{
+  .sof-bubble__text {
     writing-mode: horizontal-tb !important;
     white-space: normal !important;
     word-break: break-word !important;
@@ -325,7 +396,7 @@ body.mu-body .mu-main:after{
 
 /* ====== 入力バー直上フェード ====== */
 /* 中央レーン幅に合わせつつ、確実に画面下部で機能する固定オーバーレイ */
-.sof-fader{
+.sof-fader {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
@@ -335,7 +406,7 @@ body.mu-body .mu-main:after{
   height: 40px; /* フェードの厚みはお好みで 28〜48px 程度 */
   background: linear-gradient(
     to bottom,
-    rgba(247,248,251,0) 0%,
+    rgba(247, 248, 251, 0) 0%,
     var(--sof-bg-page) 80%,
     var(--sof-bg-page) 100%
   );
@@ -343,26 +414,30 @@ body.mu-body .mu-main:after{
   z-index: 55; /* メッセージより上、入力(.sof-compose-dock=60)より下 */
 }
 
-
-.sof-underlay{
+.sof-underlay {
   position: fixed;
   left: 0;
   right: 0;
   bottom: 0;
-  height: calc(var(--footer-safe-pad) + var(--meta-height) + var(--compose-height) + env(safe-area-inset-bottom, 0px));
-  background: #fff;                 /* ページ下地に合わせて必要なら var(--sof-bg-page) */
-  z-index: 58;                      /* メッセージより上、入力(.sof-compose-dock=60)より下 */
+  height: calc(
+    var(--footer-safe-pad) + var(--meta-height) + var(--compose-height) +
+      env(safe-area-inset-bottom, 0px)
+  );
+  background: #fff; /* ページ下地に合わせて必要なら var(--sof-bg-page) */
+  z-index: 58; /* メッセージより上、入力(.sof-compose-dock=60)より下 */
   pointer-events: none;
 }
-.sof-underlay::before{              /* ぼかし縁(任意) */
-  content: "";
+.sof-underlay::before {
+  /* ぼかし縁(任意) */
+  content: '';
   position: absolute;
-  left: 0; right: 0; top: -12px;
+  left: 0;
+  right: 0;
+  top: -12px;
   height: 12px;
-  background: linear-gradient(to bottom, rgba(0,0,0,.06), rgba(0,0,0,0));
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0));
   pointer-events: none;
 }
-
 
 .sof-underlay {
   position: fixed;
@@ -370,37 +445,33 @@ body.mu-body .mu-main:after{
   right: 0;
   bottom: 0;
   height: calc(
-    var(--footer-safe-pad) +
-    var(--meta-height) +
-    var(--compose-height) +
-    env(safe-area-inset-bottom, 0px)
+    var(--footer-safe-pad) + var(--meta-height) + var(--compose-height) +
+      env(safe-area-inset-bottom, 0px)
   );
   background: #fff;
-  z-index: 58;  /* ← Meta(59)より下に */
+  z-index: 58; /* ← Meta(59)より下に */
   pointer-events: none;
 }
 
 .sof-meta-dock {
-  z-index: 59;  /* ← Compose(60)より下、Underlayより上 */
+  z-index: 59; /* ← Compose(60)より下、Underlayより上 */
 }
 
 .sof-compose-dock {
-  box-shadow: 0 -2px 8px rgba(0,0,0,.08);
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.08);
 }
-
 
 /* src/components/SofiaChat/SofiaChat.css の末尾などに追記（任意）*/
 .sofia-container {
   background:
-    radial-gradient(1200px 600px at 50% -200px, rgba(107,140,255,.06), transparent 70%),
-    radial-gradient(900px 500px at 10% 110%, rgba(34,197,94,.04), transparent 60%),
-    #f7f8fb;
+    radial-gradient(1200px 600px at 50% -200px, rgba(107, 140, 255, 0.06), transparent 70%),
+    radial-gradient(900px 500px at 10% 110%, rgba(34, 197, 94, 0.04), transparent 60%), #f7f8fb;
 }
 
 /* ========= SOFIA_CONFIG（env）→ CSS 反映オーバーライド ========= */
 
 /* アシスタント吹き出し：文字サイズ・行間・字間・横幅 */
-.sof-bubble.is-assistant{
+.sof-bubble.is-assistant {
   font-size: var(--sofia-assist-fs, 15px);
   line-height: var(--sofia-assist-lh, 1.85);
   letter-spacing: var(--sofia-assist-ls, 0.01em);
@@ -409,17 +480,17 @@ body.mu-body .mu-main:after{
   background: var(--sofia-a-bg, #f8fafc);
   border: var(--sofia-a-border, 1px solid #e5e7eb);
   border-radius: var(--sofia-a-radius, 16px);
-  box-shadow: var(--sofia-a-shadow, 0 1px 2px rgba(0,0,0,.04));
+  box-shadow: var(--sofia-a-shadow, 0 1px 2px rgba(0, 0, 0, 0.04));
 }
 
 /* 段落・リストの余白 */
 .sof-bubble.is-assistant .sof-bubble__text p,
-.sof-bubble.is-assistant .sof-bubble__text li{
+.sof-bubble.is-assistant .sof-bubble__text li {
   margin: var(--sofia-p-margin, 6px) 0;
 }
 
 /* 引用の色味 */
-.sof-bubble.is-assistant .sof-bubble__text blockquote{
+.sof-bubble.is-assistant .sof-bubble__text blockquote {
   border-left: 4px solid var(--sofia-bq-border, #cbd5e1);
   background: var(--sofia-bq-bg, #f1f5f9);
   padding: 8px 10px;
@@ -428,7 +499,7 @@ body.mu-body .mu-main:after{
 }
 
 /* ユーザー吹き出しの色系も env で制御 */
-.sof-bubble.is-user{
+.sof-bubble.is-user {
   background: var(--sofia-user-bg, #6b8cff);
   color: var(--sofia-user-fg, #fff);
   border-color: var(--sofia-user-border, #6b8cff);
@@ -437,8 +508,8 @@ body.mu-body .mu-main:after{
 
 /* MetaPanel.css */
 .meta-panel {
-  position: relative;   /* fixedやabsoluteは避ける */
-  margin-bottom: 80px;  /* ← 入力ボックス高さぶん余白を確保 */
+  position: relative; /* fixedやabsoluteは避ける */
+  margin-bottom: 80px; /* ← 入力ボックス高さぶん余白を確保 */
   padding: 12px;
 }
 
@@ -446,20 +517,20 @@ body.mu-body .mu-main:after{
 .sof-compose-dock {
   position: sticky;
   bottom: env(safe-area-inset-bottom, 0);
-  z-index: 1000;           /* ← これを十分高く */
-  background: #fff;        /* 透け防止 */
-  box-shadow: 0 -6px 18px rgba(0,0,0,.06);
+  z-index: 1000; /* ← これを十分高く */
+  background: #fff; /* 透け防止 */
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.06);
 }
 
 /* SofiaChat.css */
 .sof-meta-dock {
-  position: relative;      /* ← fixed や sticky にしない */
-  z-index: 0;              /* 入力欄より下 */
+  position: relative; /* ← fixed や sticky にしない */
+  z-index: 0; /* 入力欄より下 */
 }
 
 /* MetaPanel.css */
 .meta-panel {
-  position: relative;      /* 念のため明示 */
+  position: relative; /* 念のため明示 */
   z-index: 0;
   margin-bottom: calc(var(--sof-compose-h, 96px) + 12px);
   /* ↑ 入力欄の高さ分だけ下に余白を確保（SofiaChat.tsxで --sof-compose-h を設定済み） */
@@ -470,17 +541,16 @@ body.mu-body .mu-main:after{
   padding-bottom: calc(var(--sof-compose-h, 96px) + 24px);
 }
 
-
 /* ===== ヘッダーを上部に据え付け固定 ===== */
 
 /* 固定ヘッダーの土台（背景は不透明 / 透け防止） */
 .sof-header-fixed {
-  position: fixed !important;      /* ← 固定 */
+  position: fixed !important; /* ← 固定 */
   top: 0;
   left: 0;
   right: 0;
   z-index: 2000;
-  background: #fff !important;     /* 透け防止 */
+  background: #fff !important; /* 透け防止 */
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
@@ -492,7 +562,7 @@ body.mu-body .mu-main:after{
   max-width: 100% !important;
   margin: 0 !important;
 
-  height: var(--sof-header-h, 48px);    /* 高さを変えたければここ */
+  height: var(--sof-header-h, 48px); /* 高さを変えたければここ */
   padding: 6px 10px;
 
   display: grid !important;
@@ -501,7 +571,7 @@ body.mu-body .mu-main:after{
   gap: 8px;
 
   background: #fff !important;
-  box-shadow: 0 2px 6px rgba(0,0,0,.08);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
 }
 
 /* タイトル中央固定 */
@@ -510,7 +580,7 @@ body.mu-body .mu-main:after{
   margin: 0;
   font-size: 16px;
   font-weight: 900;
-  letter-spacing: .3px;
+  letter-spacing: 0.3px;
   color: #111827;
   text-align: center;
   white-space: nowrap;
@@ -520,8 +590,14 @@ body.mu-body .mu-main:after{
 }
 
 /* 左右ボタンの位置 */
-.sof-header .sof-btn:first-of-type { grid-column: 1 !important; justify-self: start !important; }
-.sof-header .sof-btn:last-of-type  { grid-column: 3 !important; justify-self: end !important; }
+.sof-header .sof-btn:first-of-type {
+  grid-column: 1 !important;
+  justify-self: start !important;
+}
+.sof-header .sof-btn:last-of-type {
+  grid-column: 3 !important;
+  justify-self: end !important;
+}
 
 /* ボタンは不透明 */
 .sof-btn {
@@ -529,21 +605,26 @@ body.mu-body .mu-main:after{
   padding: 6px 12px;
   background: #f2f4ff !important;
   color: #4951ff !important;
-  border: 1px solid rgba(0,0,0,.06);
+  border: 1px solid rgba(0, 0, 0, 0.06);
   border-radius: 10px;
   font-size: 13px;
   font-weight: 800;
   line-height: 1;
   cursor: pointer;
-  box-shadow: 0 1px 0 rgba(0,0,0,.03);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.03);
 }
-.sof-btn.primary { background: #4951ff !important; color: #fff !important; border-color: rgba(0,0,0,.06); }
+.sof-btn.primary {
+  background: #4951ff !important;
+  color: #fff !important;
+  border-color: rgba(0, 0, 0, 0.06);
+}
 
 /* iOS ノッチ対応（任意） */
 @supports (padding: env(safe-area-inset-top)) {
-  .sof-header-fixed { padding-top: env(safe-area-inset-top); }
+  .sof-header-fixed {
+    padding-top: env(safe-area-inset-top);
+  }
 }
-
 
 .sof-header__title {
   flex: 1;
@@ -555,13 +636,12 @@ body.mu-body .mu-main:after{
 
 .sof-compose-dock {
   background: #fff;
-  border-radius: 10px;              /* ← 角丸小さめ */
-  box-shadow: 0 2px 6px rgba(0,0,0,0.08); /* ← 控えめに */
-  border-top: 4px solid transparent;       /* ← 上にラインの場所を確保 */
+  border-radius: 10px; /* ← 角丸小さめ */
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08); /* ← 控えめに */
+  border-top: 4px solid transparent; /* ← 上にラインの場所を確保 */
   border-image: linear-gradient(90deg, #8aa0ff, #9a7ff9) 1; /* 青紫グラデーション */
   padding: 8px;
 }
-
 
 /* =========================================================
   SofiaChat – layout + polish (header / list / meta / input)
@@ -569,11 +649,11 @@ body.mu-body .mu-main:after{
 ========================================================= */
 
 /* ---- Tokens ---- */
-:root{
+:root {
   /* レーン幅 */
-  --lane-max: 1360px;                 /* 本文/ヘッダの上限幅(1200–1600で好み) */
+  --lane-max: 1360px; /* 本文/ヘッダの上限幅(1200–1600で好み) */
   --gutter: 24px;
-  --lane: clamp(960px, calc(100vw - var(--gutter)*2), var(--lane-max));
+  --lane: clamp(960px, calc(100vw - var(--gutter) * 2), var(--lane-max));
 
   /* 下部UI(入力/Meta)の最大幅 */
   --shell-max: 1200px;
@@ -581,7 +661,7 @@ body.mu-body .mu-main:after{
 
   /* 高さ */
   --sof-header-h: 56px;
-  --footer-h: 56px;                   /* アプリ下部ナビの高さ */
+  --footer-h: 56px; /* アプリ下部ナビの高さ */
   --footer-safe-pad: var(--footer-h);
   --compose-height: 64px;
   --meta-height: 48px;
@@ -591,98 +671,158 @@ body.mu-body .mu-main:after{
   --sof-border: 1px solid #e6e6e6;
   --sof-bg: #fff;
   --sof-bg-page: #f7f8fb;
-  --sof-shadow-top: 0 -2px 10px rgba(0,0,0,.06);
+  --sof-shadow-top: 0 -2px 10px rgba(0, 0, 0, 0.06);
 }
 
 /* =========================================================
   Scaffold
 ========================================================= */
-.sofia-container{
+.sofia-container {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
   background:
-    radial-gradient(1200px 600px at 50% -200px, rgba(107,140,255,.06), transparent 70%),
-    radial-gradient(900px 500px at 10% 110%, rgba(34,197,94,.04), transparent 60%),
+    radial-gradient(1200px 600px at 50% -200px, rgba(107, 140, 255, 0.06), transparent 70%),
+    radial-gradient(900px 500px at 10% 110%, rgba(34, 197, 94, 0.04), transparent 60%),
     var(--sof-bg-page);
 }
-.sofia-page-main{ flex: 1 1 auto; overflow-y: auto; }
-.sofia-page-wrap{
+.sofia-page-main {
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+.sofia-page-wrap {
   width: var(--lane);
   margin: 0 auto;
   padding-top: calc(var(--sof-header-h) + 12px);
 }
 
 /* Next の max-width を強制解除する保険 */
-main.mu-main, .mu-page, .sofia-container{ width:100% !important; max-width:none !important; flex:1 1 0% !important; min-width:0 !important; }
-.sofia-container > [style*="max-width"]{ max-width:none !important; width:100% !important; margin:0 !important; padding:0 !important; }
+main.mu-main,
+.mu-page,
+.sofia-container {
+  width: 100% !important;
+  max-width: none !important;
+  flex: 1 1 0% !important;
+  min-width: 0 !important;
+}
+.sofia-container > [style*='max-width'] {
+  max-width: none !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
 
 /* =========================================================
   Header（据え付け固定・装飾あり）
 ========================================================= */
-.sof-header-fixed{
-  position: fixed; inset: 0 auto auto 0; right: 0;
+.sof-header-fixed {
+  position: fixed;
+  inset: 0 auto auto 0;
+  right: 0;
   height: var(--sof-header-h);
   z-index: 2000;
-  display: flex; justify-content: center; align-items: center;
+  display: flex;
+  justify-content: center;
+  align-items: center;
   background: linear-gradient(180deg, #fafafa 0%, #ffffff 100%);
   border-bottom: 1px solid #e5e7eb;
-  box-shadow: 0 2px 8px rgba(0,0,0,.06);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
-.sof-header-fixed > .sof-header{
-  width: min(var(--lane-max), calc(100vw - var(--gutter)*2));
+.sof-header-fixed > .sof-header {
+  width: min(var(--lane-max), calc(100vw - var(--gutter) * 2));
   margin: 0 auto;
   height: 100%;
-  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
   padding: 0 12px;
 }
-.sof-header__title{
-  grid-column: 2; margin:0; text-align:center;
-  font-size: 16px; font-weight: 900; letter-spacing: .3px; color:#111827;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+.sof-header__title {
+  grid-column: 2;
+  margin: 0;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: 0.3px;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
 }
-.sof-header .sof-btn{
-  appearance:none; padding:6px 12px;
-  border-radius: 10px; border:1px solid rgba(0,0,0,.06);
-  background:#f2f4ff; color:#4951ff; font-size:13px; font-weight:800; line-height:1;
-  cursor:pointer; box-shadow:0 1px 0 rgba(0,0,0,.03);
+.sof-header .sof-btn {
+  appearance: none;
+  padding: 6px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: #f2f4ff;
+  color: #4951ff;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.03);
 }
-.sof-header .sof-btn.primary{ background:#4951ff; color:#fff; }
+.sof-header .sof-btn.primary {
+  background: #4951ff;
+  color: #fff;
+}
 
 /* =========================================================
   Message List（下部UIに被らない余白を確保）
 ========================================================= */
-.sof-msgs{
-  width: 100%; max-width: var(--lane); margin: 0 auto;
-  display:flex; flex-direction:column; gap:10px;
+.sof-msgs {
+  width: 100%;
+  max-width: var(--lane);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   padding: 8px 12px;
   padding-bottom: calc(var(--footer-safe-pad) + var(--meta-height) + var(--compose-height) + 24px);
   align-items: stretch;
 }
 
 /* バブル（装飾を保持） */
-.sof-bubble{
+.sof-bubble {
   max-width: 86%;
   padding: 10px 14px;
   border-radius: 16px;
-  line-height: 1.6; font-size: 14px;
-  background: #ffffff; border: 1px solid #e5e7eb; box-shadow: 0 1px 2px rgba(0,0,0,.04);
-  align-self: flex-start; margin-left: 0; margin-right: auto;
+  line-height: 1.6;
+  font-size: 14px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  align-self: flex-start;
+  margin-left: 0;
+  margin-right: auto;
 }
-.sof-bubble.is-user{
-  align-self:flex-end; margin:0;
-  background:#6b8cff; color:#fff; border-color:#6b8cff;
+.sof-bubble.is-user {
+  align-self: flex-end;
+  margin: 0;
+  background: #6b8cff;
+  color: #fff;
+  border-color: #6b8cff;
   border-bottom-right-radius: 4px;
 }
-.sof-bubble.is-assistant{
-  background:#f8fafc; color:#111827; border-color:#e5e7eb;
-  border-bottom-left-radius:4px;
+.sof-bubble.is-assistant {
+  background: #f8fafc;
+  color: #111827;
+  border-color: #e5e7eb;
+  border-bottom-left-radius: 4px;
 }
-.sof-bubble__role{ font-size:11px; letter-spacing:.02em; color:#94a3b8; }
-.sof-bubble.is-user .sof-bubble__role{ color:rgba(255,255,255,.8); }
+.sof-bubble__role {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: #94a3b8;
+}
+.sof-bubble.is-user .sof-bubble__role {
+  color: rgba(255, 255, 255, 0.8);
+}
 /* 縦1文字事故の保険 */
 .sof-bubble__text,
-.sof-bubble__role{
+.sof-bubble__role {
   writing-mode: horizontal-tb !important;
   white-space: normal !important;
   word-break: break-word !important;
@@ -690,99 +830,151 @@ main.mu-main, .mu-page, .sofia-container{ width:100% !important; max-width:none 
 }
 
 /* 画像グリッド */
-.sof-bubble__imgs{ display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr)); gap:6px; }
-.sof-bubble__imgs img{ width:100%; height:96px; object-fit:cover; border-radius:10px; border:1px solid #e5e7eb; background:#fff; }
+.sof-bubble__imgs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 6px;
+}
+.sof-bubble__imgs img {
+  width: 100%;
+  height: 96px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+}
 
 /* =========================================================
   Meta – フッター直上（ぼかし/影を保持）
 ========================================================= */
-.sof-meta-dock{
+.sof-meta-dock {
   position: fixed;
-  left:50%; transform: translateX(-50%);
+  left: 50%;
+  transform: translateX(-50%);
   bottom: var(--footer-safe-pad);
   z-index: 59;
-  width: 100%; max-width: var(--shell);
+  width: 100%;
+  max-width: var(--shell);
   padding: 8px 12px 6px;
-  background: rgba(255,255,255,.95);
-  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  background: rgba(255, 255, 255, 0.95);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
   border-top: var(--sof-border);
   box-shadow: var(--sof-shadow-top);
 }
 /* MetaPanel の色味を統一 */
-.sof-meta-dock .meta-panel{ background:#fff !important; border:1px solid #e5e7eb !important; box-shadow:none !important; }
-.sof-meta-dock .meta-label{ border-left:none !important; color:#667085; }
+.sof-meta-dock .meta-panel {
+  background: #fff !important;
+  border: 1px solid #e5e7eb !important;
+  box-shadow: none !important;
+}
+.sof-meta-dock .meta-label {
+  border-left: none !important;
+  color: #667085;
+}
 
 /* =========================================================
   Input – Meta のさらに上（飾りフチ＆影）
 ========================================================= */
-.sof-compose-dock{
+.sof-compose-dock {
   position: fixed;
-  left:50%; transform: translateX(-50%);
+  left: 50%;
+  transform: translateX(-50%);
   bottom: calc(var(--footer-safe-pad) + var(--meta-height));
   z-index: 60;
-  width: 100%; max-width: var(--shell);
+  width: 100%;
+  max-width: var(--shell);
 
-  background: rgba(255,255,255,.95);
-  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
-  border-top: 4px solid transparent;                   /* グラデ枠の帯 */
+  background: rgba(255, 255, 255, 0.95);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  border-top: 4px solid transparent; /* グラデ枠の帯 */
   border-image: linear-gradient(90deg, #8aa0ff, #9a7ff9) 1;
-  box-shadow: 0 -2px 8px rgba(0,0,0,.08);
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.08);
   border-radius: 10px;
   padding: 8px 12px calc(8px + var(--safe-bottom));
 }
 
 /* 内側のテキストエリアやボタン（既存ChatInput.cssを活かす） */
-.sof-textarea{ width:100%; }
+.sof-textarea {
+  width: 100%;
+}
 
 /* =========================================================
   Underlay（下地の白帯＋フェード）※クリック透過
 ========================================================= */
-.sof-underlay{
-  position: fixed; left:0; right:0; bottom:0;
-  height: calc(var(--footer-safe-pad) + var(--meta-height) + var(--compose-height) + var(--safe-bottom));
-  background:#fff;
-  z-index: 58; pointer-events:none;
+.sof-underlay {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: calc(
+    var(--footer-safe-pad) + var(--meta-height) + var(--compose-height) + var(--safe-bottom)
+  );
+  background: #fff;
+  z-index: 58;
+  pointer-events: none;
 }
-.sof-underlay::before{
-  content:""; position:absolute; left:0; right:0; top:-12px; height:12px;
-  background: linear-gradient(to bottom, rgba(0,0,0,.06), rgba(0,0,0,0));
-  pointer-events:none;
+.sof-underlay::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -12px;
+  height: 12px;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0));
+  pointer-events: none;
 }
 
 /* 物理スペーサ（本文が隠れない保険） */
-.sof-footer-spacer{
+.sof-footer-spacer {
   height: calc(var(--footer-safe-pad) + var(--meta-height) + var(--compose-height) + 24px);
 }
 
 /* =========================================================
   中央寄せ（PC幅のみ sof-center をグリッド化）
 ========================================================= */
-@media (min-width:1024px){
-  .sof-center{
-    width:100%; min-width:0;
-    display:grid; grid-template-columns: 1fr minmax(960px, var(--lane-max)) 1fr;
-    align-items:start;
+@media (min-width: 1024px) {
+  .sof-center {
+    width: 100%;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 1fr minmax(960px, var(--lane-max)) 1fr;
+    align-items: start;
   }
-  .sof-center > *{ grid-column:2; }
+  .sof-center > * {
+    grid-column: 2;
+  }
   .sof-center .sof-msgs,
-  .sof-center .sofia-page-wrap{
-    width:100% !important; max-width:none !important; margin:0 !important;
-    padding-inline: var(--gutter); box-sizing: border-box;
+  .sof-center .sofia-page-wrap {
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding-inline: var(--gutter);
+    box-sizing: border-box;
   }
-  .sof-meta-dock, .sof-compose-dock{
-    left:50% !important; transform:translateX(-50%) !important;
-    width:100% !important; max-width: var(--shell-max) !important;
+  .sof-meta-dock,
+  .sof-compose-dock {
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    width: 100% !important;
+    max-width: var(--shell-max) !important;
   }
   /* バブルを少し広めに */
-  .sof-bubble{ max-width: 80%; }
+  .sof-bubble {
+    max-width: 80%;
+  }
 }
 
 /* =========================================================
   モバイル微調整
 ========================================================= */
-@media (max-width:640px){
-  :root{ --lane: calc(100vw - 24px); --shell: calc(100vw - 24px); }
-  .sof-footer-spacer{
+@media (max-width: 640px) {
+  :root {
+    --lane: calc(100vw - 24px);
+    --shell: calc(100vw - 24px);
+  }
+  .sof-footer-spacer {
     height: calc(var(--footer-safe-pad) + var(--meta-height) + var(--compose-height) + 36px);
   }
 }
@@ -791,12 +983,15 @@ main.mu-main, .mu-page, .sofia-container{ width:100% !important; max-width:none 
   Mu系の縦線など不要装飾をOFF
 ========================================================= */
 body.mu-body .mu-main:before,
-body.mu-body .mu-main:after{ content:none !important; display:none !important; }
+body.mu-body .mu-main:after {
+  content: none !important;
+  display: none !important;
+}
 
 /* =========================================================
   Env → CSS 反映 (アシスタントの見た目を変えたい場合)
 ========================================================= */
-.sof-bubble.is-assistant{
+.sof-bubble.is-assistant {
   font-size: var(--sofia-assist-fs, 15px);
   line-height: var(--sofia-assist-lh, 1.85);
   letter-spacing: var(--sofia-assist-ls, 0.01em);
@@ -804,16 +999,20 @@ body.mu-body .mu-main:after{ content:none !important; display:none !important; }
   background: var(--sofia-a-bg, #f8fafc);
   border: var(--sofia-a-border, 1px solid #e5e7eb);
   border-radius: var(--sofia-a-radius, 16px);
-  box-shadow: var(--sofia-a-shadow, 0 1px 2px rgba(0,0,0,.04));
+  box-shadow: var(--sofia-a-shadow, 0 1px 2px rgba(0, 0, 0, 0.04));
 }
 .sof-bubble.is-assistant .sof-bubble__text p,
-.sof-bubble.is-assistant .sof-bubble__text li{ margin: var(--sofia-p-margin, 6px) 0; }
-.sof-bubble.is-assistant .sof-bubble__text blockquote{
+.sof-bubble.is-assistant .sof-bubble__text li {
+  margin: var(--sofia-p-margin, 6px) 0;
+}
+.sof-bubble.is-assistant .sof-bubble__text blockquote {
   border-left: 4px solid var(--sofia-bq-border, #cbd5e1);
   background: var(--sofia-bq-bg, #f1f5f9);
-  padding: 8px 10px; border-radius: 6px; color:#475569;
+  padding: 8px 10px;
+  border-radius: 6px;
+  color: #475569;
 }
-.sof-bubble.is-user{
+.sof-bubble.is-user {
   background: var(--sofia-user-bg, #6b8cff);
   color: var(--sofia-user-fg, #fff);
   border-color: var(--sofia-user-border, #6b8cff);
@@ -821,20 +1020,21 @@ body.mu-body .mu-main:after{ content:none !important; display:none !important; }
 }
 
 /* ====== 共通レイアウト・トークン ====== */
-:root{
-  --lane-max: 1360px;         /* 本文/ヘッダーの上限幅 */
-  --shell-max: 1200px;        /* 入力バー/メタの上限幅 */
+:root {
+  --lane-max: 1360px; /* 本文/ヘッダーの上限幅 */
+  --shell-max: 1200px; /* 入力バー/メタの上限幅 */
   --gutter: 24px;
 
-  --footer-safe-pad: var(--footer-h, 54px);   /* Footer.tsxが持つ高さ（なければ54px） */
-  --compose-height: 64px;                     /* 入力欄おおよその高さ */
-  --meta-height: 48px;                        /* Metaがある時の高さ（ない時は0でもOK） */
+  --footer-safe-pad: var(--footer-h, 54px); /* Footer.tsxが持つ高さ（なければ54px） */
+  --compose-height: 64px; /* 入力欄おおよその高さ */
+  --meta-height: 48px; /* Metaがある時の高さ（ない時は0でもOK） */
 }
 
 /* ====== 入力欄（フッター直上に固定） ====== */
-.sof-compose-dock{
+.sof-compose-dock {
   position: fixed;
-  left: 50%; transform: translateX(-50%);
+  left: 50%;
+  transform: translateX(-50%);
   bottom: calc(var(--footer-safe-pad));
   z-index: 60;
 
@@ -844,65 +1044,77 @@ body.mu-body .mu-main:after{ content:none !important; display:none !important; }
   border-radius: 10px;
   border-top: 4px solid transparent;
   border-image: linear-gradient(90deg, #8aa0ff, #9a7ff9) 1;
-  box-shadow: 0 -2px 8px rgba(0,0,0,.08);
-  padding: 8px 12px calc(8px + env(safe-area-inset-bottom,0));
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.08);
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0));
 }
 
 /* ====== 下地（白板：navと入力欄の裏を埋める） ====== */
-.sof-underlay{
+.sof-underlay {
   position: fixed;
-  left: 0; right: 0; bottom: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   height: calc(var(--footer-safe-pad) + var(--compose-height));
   background: #fff;
-  z-index: 58;          /* メッセージより上、入力欄より下 */
+  z-index: 58; /* メッセージより上、入力欄より下 */
   pointer-events: none;
 }
-.sof-underlay::before{
-  content: "";
-  position: absolute; left: 0; right: 0; top: -12px; height: 12px;
-  background: linear-gradient(to bottom, rgba(0,0,0,.06), rgba(0,0,0,0));
+.sof-underlay::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -12px;
+  height: 12px;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0));
 }
 
 /* ====== メッセージ末尾の余白：固定UIに隠れないよう確保 ====== */
-.sof-footer-spacer{
+.sof-footer-spacer {
   height: calc(var(--footer-safe-pad) + var(--compose-height) + 24px);
 }
 
 /* ====== PC時：中央レーンに揃え、固定UIも中央寄せ ====== */
-@media (min-width: 1024px){
-  .sof-center{
+@media (min-width: 1024px) {
+  .sof-center {
     width: 100%;
     display: grid;
     grid-template-columns: 1fr minmax(960px, var(--lane-max)) 1fr;
     align-items: start;
   }
-  .sof-center > *, .sof-center .sofia-page-wrap, .sof-center .sof-msgs{
+  .sof-center > *,
+  .sof-center .sofia-page-wrap,
+  .sof-center .sof-msgs {
     grid-column: 2;
-    width: 100% !important; max-width: none !important; margin: 0 !important;
-    padding-inline: var(--gutter); box-sizing: border-box;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding-inline: var(--gutter);
+    box-sizing: border-box;
   }
-  .sof-compose-dock{
-    left: 50% !important; transform: translateX(-50%) !important;
+  .sof-compose-dock {
+    left: 50% !important;
+    transform: translateX(-50%) !important;
     max-width: var(--shell-max) !important;
   }
 }
 
 /* ====== バブルの“縦1文字事故”の保険 ====== */
-.sof-bubble__role, .sof-bubble__text{
+.sof-bubble__role,
+.sof-bubble__text {
   writing-mode: horizontal-tb !important;
   white-space: normal !important;
   word-break: break-word !important;
   overflow-wrap: anywhere !important;
 }
 
-:root{
+:root {
   /* 旧: 92px */
   --compose-height: 68px; /* 入力欄の既定高さを下げる */
 }
 
-
 /* 例：中央下に出す小さな黒ラベル */
-#credits-toast{
+#credits-toast {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
@@ -910,12 +1122,8 @@ body.mu-body .mu-main:after{ content:none !important; display:none !important; }
   bottom: calc(
     var(--footer-safe-pad) + var(--compose-height) + 12px + env(safe-area-inset-bottom, 0px)
   );
-  z-index: 60;     /* 入力欄より手前に */
+  z-index: 60; /* 入力欄より手前に */
 }
-
-
-
-
 
 .sof-msg {
   display: grid;
@@ -924,18 +1132,27 @@ body.mu-body .mu-main:after{ content:none !important; display:none !important; }
   align-items: start;
 }
 
-.sof-msg.is-assistant .avatar { grid-column: 1; }
-.sof-msg.is-assistant .bubble { grid-column: 2; justify-self: start; }
+.sof-msg.is-assistant .avatar {
+  grid-column: 1;
+}
+.sof-msg.is-assistant .bubble {
+  grid-column: 2;
+  justify-self: start;
+}
 
 .sof-msg.is-user {
   grid-template-columns: 1fr 40px;
 }
-.sof-msg.is-user .bubble { grid-column: 1; justify-self: end; }
-.sof-msg.is-user .avatar { grid-column: 2; }
-
+.sof-msg.is-user .bubble {
+  grid-column: 1;
+  justify-self: end;
+}
+.sof-msg.is-user .avatar {
+  grid-column: 2;
+}
 
 /* チャット内ヘッダーを固定 */
-.sof-header-fixed{
+.sof-header-fixed {
   position: sticky;
   top: 0;
   z-index: 50;
@@ -944,12 +1161,20 @@ body.mu-body .mu-main:after{ content:none !important; display:none !important; }
 }
 
 /* PC時の横幅（Irosと同等に） */
-.sofia-container .sof-center{ max-width: 960px; margin:0 auto; }
-@media (min-width:1280px){ .sofia-container .sof-center{ max-width: 1160px; } }
+.sofia-container .sof-center {
+  max-width: 960px;
+  margin: 0 auto;
+}
+@media (min-width: 1280px) {
+  .sofia-container .sof-center {
+    max-width: 1160px;
+  }
+}
 
 /* 吹き出し最大幅（PCで広め） */
-.sof-msg .bubble{ max-width: min(820px, 85vw); }
-
+.sof-msg .bubble {
+  max-width: min(820px, 85vw);
+}
 
 /* ===== チャット画面ではグローバルヘッダーを非表示 =====
    - body配下に .sofia-container があれば（= Iros/Mu/Mirraのチャット画面）適用
@@ -959,85 +1184,96 @@ body:has(.sofia-container) header:not(.sof-header),
 body:has(.sofia-container) .app-header,
 body:has(.sofia-container) .global-header,
 body.mu-body:has(.sofia-container) .header,
-body.mu-body:has(.sofia-container) nav[role="navigation"] {
+body.mu-body:has(.sofia-container) nav[role='navigation'] {
   display: none !important;
 }
 
 /* 念のため、チャット内ヘッダーを最前面に */
-.sof-header { z-index: 100 !important; }
-
+.sof-header {
+  z-index: 100 !important;
+}
 
 /* ====== MessageList 基本レイアウト ====== */
-.sof-msgs{
-  padding: 12px 10px 120px;        /* 下は入力欄ぶん余白 */
+.sof-msgs {
+  padding: 12px 10px 120px; /* 下は入力欄ぶん余白 */
   display: flex;
   flex-direction: column;
   gap: 14px;
 }
 
 /* 左:avatar / 右:bubble の2カラム（AI用） */
-.sof-msg{
+.sof-msg {
   display: grid;
-  grid-template-columns: 28px minmax(0,1fr);
+  grid-template-columns: 28px minmax(0, 1fr);
   align-items: start;
   column-gap: 10px;
 }
 
 /* ユーザーは左右を反転（右にアバター、左に吹き出し） */
-.sof-msg.is-user{
-  grid-template-columns: minmax(0,1fr) 28px;
+.sof-msg.is-user {
+  grid-template-columns: minmax(0, 1fr) 28px;
 }
-.sof-msg .avatar{
-  width: 28px; height: 28px;
+.sof-msg .avatar {
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   overflow: hidden;
 }
-.sof-msg.is-user .avatar{ grid-column: 2; }
-.sof-msg.is-user .bubble{ grid-column: 1; justify-self: end; }
+.sof-msg.is-user .avatar {
+  grid-column: 2;
+}
+.sof-msg.is-user .bubble {
+  grid-column: 1;
+  justify-self: end;
+}
 
 /* 吹き出し */
-.sof-msg .bubble{
+.sof-msg .bubble {
   padding: 10px 12px;
   border-radius: 14px;
   border: var(--sofia-a-border, 1px solid #e5e7eb);
   background: var(--sofia-a-bg, #ffffff);
-  box-shadow: var(--sofia-a-shadow, 0 1px 2px rgba(0,0,0,.04));
-  max-width: min(820px, 85vw);     /* PCで広め */
+  box-shadow: var(--sofia-a-shadow, 0 1px 2px rgba(0, 0, 0, 0.04));
+  max-width: min(820px, 85vw); /* PCで広め */
 }
 
 /* ユーザー吹き出しの配色（Iros準拠の薄めブルー） */
-.sof-msg.is-user .bubble{
+.sof-msg.is-user .bubble {
   background: var(--sofia-user-bg, #f0f9ff);
   color: var(--sofia-user-fg, #0b2940);
   border: 1px solid #cfe8ff;
 }
 
 /* ラベル（名前） */
-.sof-bubble__role{
+.sof-bubble__role {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  opacity: .9;
+  opacity: 0.9;
   margin-bottom: 6px;
 }
-.sof-msg.is-user .sof-bubble__role{
-  justify-content: flex-end; text-align: right;
+.sof-msg.is-user .sof-bubble__role {
+  justify-content: flex-end;
+  text-align: right;
 }
 
 /* 画像プレビュー（添付画像） */
-.sof-bubble__imgs{
+.sof-bubble__imgs {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px,1fr));
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
   gap: 8px;
   margin-bottom: 8px;
 }
-.sof-bubble__imgs img{
-  width: 100%; height: 120px; object-fit: cover; border-radius: 8px;
+.sof-bubble__imgs img {
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 8px;
 }
 
 /* バッジ（MuAI / Iros / Mirra など） */
-.sof-badge{
+.sof-badge {
   display: inline-block;
   font-size: 12px;
   padding: 2px 6px;
@@ -1049,10 +1285,10 @@ body.mu-body:has(.sofia-container) nav[role="navigation"] {
 }
 
 /* メタ情報（クレジット等） */
-.sof-meta{
+.sof-meta {
   margin-top: 6px;
   font-size: 12px;
-  opacity: .85;
+  opacity: 0.85;
   display: flex;
   gap: 10px;
   align-items: center;
@@ -1060,33 +1296,40 @@ body.mu-body:has(.sofia-container) nav[role="navigation"] {
 }
 
 /* 入力欄直上のフェード */
-.sof-fader{
+.sof-fader {
   position: sticky;
   bottom: calc(var(--sof-compose-h, 56px) + 8px);
   height: 48px;
-  background: linear-gradient(to bottom, rgba(249,250,251,0), rgba(249,250,251,1));
+  background: linear-gradient(to bottom, rgba(249, 250, 251, 0), rgba(249, 250, 251, 1));
   pointer-events: none;
 }
 
 /* （任意）アバター画像の体裁 */
-.sof-msg .avatar img{ width: 100%; height: 100%; object-fit: cover; display:block; }
-
+.sof-msg .avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
 
 /* ラベル行の余白を少しだけ詰める（アイコンを消したので） */
 .sof-bubble__role {
-  gap: 4px;        /* 6 → 4 */
+  gap: 4px; /* 6 → 4 */
   margin-bottom: 4px; /* 6 → 4 */
 }
 /* バブル上のラベル行（名前表示）を消す */
-.sof-bubble__role { display: none !important; }
+.sof-bubble__role {
+  display: none !important;
+}
 
 /* MuAI / Iros などの小さなバッジを消す */
-.sof-badge { display: none !important; }
-
+.sof-badge {
+  display: none !important;
+}
 
 /* 全体の幅をもっと広げたい場合 */
 .sof-bubble-custom {
-  max-width: 96%;   /* ← ここで自由に調整 */
+  max-width: 96%; /* ← ここで自由に調整 */
   width: auto;
   box-sizing: border-box;
 }
@@ -1114,7 +1357,6 @@ body.mu-body:has(.sofia-container) nav[role="navigation"] {
   line-height: 1.7;
   padding: 14px 16px;
 }
-
 
 /* アバターを36pxで統一（ユーザー/AI 共通） */
 .sof-msg .avatar {
@@ -1151,16 +1393,13 @@ body.mu-body:has(.sofia-container) nav[role="navigation"] {
   display: inline-block;
 }
 
-
-
-
 /* 共通 */
 .sof-bubble {
   border-radius: 24px;
   padding: 14px 18px;
   line-height: 1.7;
   font-size: 15px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
   max-width: 70%;
   white-space: pre-line;
 }
@@ -1170,7 +1409,7 @@ body.mu-body:has(.sofia-container) nav[role="navigation"] {
   background: linear-gradient(135deg, #f9f9ff, #f0f6ff);
   border: 1px solid rgba(180, 200, 255, 0.5);
   color: #333;
-  font-family: "Noto Serif JP", serif;
+  font-family: 'Noto Serif JP', serif;
 }
 
 /* ユーザー側 */
@@ -1179,7 +1418,7 @@ body.mu-body:has(.sofia-container) nav[role="navigation"] {
   color: #fff;
   border: none;
   align-self: flex-end;
-  font-family: "Noto Sans JP", sans-serif;
+  font-family: 'Noto Sans JP', sans-serif;
 }
 
 /* 入力欄 */
@@ -1189,7 +1428,7 @@ body.mu-body:has(.sofia-container) nav[role="navigation"] {
   padding: 10px 14px;
   font-size: 14px;
   background: #fff;
-  box-shadow: inset 0 2px 4px rgba(0,0,0,0.04);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.04);
 }
 .sof-send-btn {
   background: #7b50ff;

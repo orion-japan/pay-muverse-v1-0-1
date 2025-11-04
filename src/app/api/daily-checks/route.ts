@@ -6,8 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 /** Supabase(SR) */
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL!;
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL!;
 const SUPABASE_SERVICE_ROLE =
   process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE);
@@ -57,7 +56,9 @@ export async function GET(req: NextRequest) {
 
     if (isHistory) {
       const daysParam = Number(url.searchParams.get('days') || 14);
-      const days = Number.isFinite(daysParam) ? Math.max(1, Math.min(60, Math.floor(daysParam))) : 14;
+      const days = Number.isFinite(daysParam)
+        ? Math.max(1, Math.min(60, Math.floor(daysParam)))
+        : 14;
 
       const toStr = todayJstYmd();
       const fromStr = jstYmdDaysAgo(days - 1);

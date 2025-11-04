@@ -19,9 +19,7 @@ export async function POST(req: NextRequest) {
   try {
     // 1) Auth
     const authz = req.headers.get('authorization') || '';
-    const token = authz.toLowerCase().startsWith('bearer ')
-      ? authz.slice(7).trim()
-      : null;
+    const token = authz.toLowerCase().startsWith('bearer ') ? authz.slice(7).trim() : null;
     if (!token) return NextResponse.json({ error: 'missing token' }, { status: 401 });
 
     const decoded = await adminAuth.verifyIdToken(token).catch(() => null);
@@ -52,7 +50,10 @@ export async function POST(req: NextRequest) {
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       if (data?.user_code) {
         user_code = data.user_code;
-        await supabase.from('users').update({ firebase_uid: decoded.uid }).eq('user_code', user_code);
+        await supabase
+          .from('users')
+          .update({ firebase_uid: decoded.uid })
+          .eq('user_code', user_code);
       }
     }
 

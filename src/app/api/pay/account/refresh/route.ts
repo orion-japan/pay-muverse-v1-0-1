@@ -9,8 +9,7 @@ export const revalidate = 0;
 /* =========================
    Supabase 初期化
 ========================= */
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
 const SERVICE_ROLE =
   process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
@@ -89,7 +88,7 @@ export async function POST(req: NextRequest) {
     if (!sync.ok) {
       return NextResponse.json(
         { error: 'sync failed', detail: sync.error?.message || null },
-        { status: 500 }
+        { status: 500 },
       );
     }
 

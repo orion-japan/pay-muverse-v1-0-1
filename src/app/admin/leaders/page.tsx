@@ -1,12 +1,11 @@
 // src/app/admin/leaders/page.tsx
-"use client";
+'use client';
 
-import LeaderPanel from "./LeaderPanel";
-
+import LeaderPanel from './LeaderPanel';
 
 export default function LeadersPage() {
   return (
-    <main style={{ padding: "20px" }}>
+    <main style={{ padding: '20px' }}>
       <h2>リーダー管理画面</h2>
       <LeaderPanel />
     </main>

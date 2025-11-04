@@ -16,7 +16,7 @@ type Body = {
 
 function json(data: any, init?: number | ResponseInit) {
   const status =
-    typeof init === 'number' ? init : (init as ResponseInit | undefined)?.['status'] ?? 200;
+    typeof init === 'number' ? init : ((init as ResponseInit | undefined)?.['status'] ?? 200);
   const headers = new Headers(
     typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers,
   );
@@ -35,8 +35,7 @@ async function getOwnerUidByUserCode(supabase: any, user_code: string): Promise<
   if (error) return null;
   const uid = data?.supabase_uid as string | null;
   const isUuid =
-    !!uid &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(uid);
+    !!uid && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(uid);
   return isUuid ? uid! : null;
 }
 
@@ -69,7 +68,7 @@ export async function POST(req: NextRequest) {
     if (rep.user_code !== user_code) return json({ ok: false, error: 'forbidden' }, 403);
 
     // 2) 会話を用意（既存がなければ作る）
-    let conversation_id: string = rep.conversation_id || randomUUID();
+    const conversation_id: string = rep.conversation_id || randomUUID();
 
     if (!rep.conversation_id) {
       // owner_uid が必要なスキーマも考慮
@@ -84,7 +83,12 @@ export async function POST(req: NextRequest) {
       if (owner_uid) baseConv.owner_uid = owner_uid;
 
       const { error: convErr } = await supabase.from('conversations').insert(baseConv as any);
-      if (convErr && !String(convErr.message || '').toLowerCase().includes('duplicate')) {
+      if (
+        convErr &&
+        !String(convErr.message || '')
+          .toLowerCase()
+          .includes('duplicate')
+      ) {
         console.warn('[mtalk/consult] conversations insert warn:', convErr.message);
       }
 
@@ -97,8 +101,9 @@ export async function POST(req: NextRequest) {
 
     // 3) 初期2メッセージ（問題/回答）
     const nowISO = new Date().toISOString();
-    const problemText = (body?.problem_text?.trim() || '（mTalk）この相談の“問題”テキスト');
-    const answerText = (body?.answer_text?.trim() || rep.reply_text || '（mTalk）この相談の“回答”テキスト');
+    const problemText = body?.problem_text?.trim() || '（mTalk）この相談の“問題”テキスト';
+    const answerText =
+      body?.answer_text?.trim() || rep.reply_text || '（mTalk）この相談の“回答”テキスト';
 
     // a) 行テーブルがあれば試しに insert（無ければ info ログでスルー）
     const candidates = ['messages', 'talk_messages', 'mtalk_turns'] as const;
@@ -152,7 +157,10 @@ export async function POST(req: NextRequest) {
       if (convUpdErr) {
         console.warn('[mtalk/consult] conversations.messages update warn:', convUpdErr.message);
         // messages だけでも反映しておく
-        await supabase.from('conversations').update({ messages: next } as any).eq('id', conversation_id);
+        await supabase
+          .from('conversations')
+          .update({ messages: next } as any)
+          .eq('id', conversation_id);
       }
     } else if (convGetErr) {
       console.warn('[mtalk/consult] conversations select warn:', convGetErr.message);

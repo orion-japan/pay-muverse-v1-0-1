@@ -10,9 +10,7 @@ import { createClient } from '@supabase/supabase-js';
 /* ===== Firebase Admin init ===== */
 function resolveProjectId(): string | undefined {
   return (
-    process.env.FIREBASE_PROJECT_ID ||
-    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
-    undefined
+    process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || undefined
   );
 }
 try {
@@ -26,29 +24,27 @@ try {
 }
 
 /* ===== Supabase (service-role) ===== */
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL!;
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL!;
 const SUPABASE_SERVICE_ROLE =
   process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE);
 
 /* ===== columns (daily_checks) ===== */
-const SELECT_COLS =
-  [
-    'id',
-    'user_code',
-    'vision_id',
-    'check_date',
-    'vision_imaged',
-    'resonance_shared',
-    'status_text',
-    'diary_text',
-    'progress',
-    'q_code',
-    'is_final',
-    'created_at',
-    'updated_at',
-  ].join(',');
+const SELECT_COLS = [
+  'id',
+  'user_code',
+  'vision_id',
+  'check_date',
+  'vision_imaged',
+  'resonance_shared',
+  'status_text',
+  'diary_text',
+  'progress',
+  'q_code',
+  'is_final',
+  'created_at',
+  'updated_at',
+].join(',');
 
 /* ===== helpers ===== */
 async function getUserCode(req: NextRequest): Promise<string> {
@@ -73,11 +69,7 @@ async function getUserCode(req: NextRequest): Promise<string> {
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const date = searchParams.get('date'); // YYYY-MM-DD
-  const mode = (searchParams.get('mode') || 'final') as
-    | 'final'
-    | 'latest'
-    | 'timeline'
-    | 'diary';
+  const mode = (searchParams.get('mode') || 'final') as 'final' | 'latest' | 'timeline' | 'diary';
 
   if (!date) {
     return NextResponse.json({ error: 'date is required' }, { status: 400 });
@@ -145,12 +137,12 @@ export async function GET(req: NextRequest) {
         .eq('is_final', false)
         .or(
           [
-            'status_text.neq.',        // 空文字でない（null も除外される）
+            'status_text.neq.', // 空文字でない（null も除外される）
             'diary_text.neq.',
             'progress.gt.0',
             'vision_imaged.eq.true',
             'resonance_shared.eq.true',
-          ].join(',')
+          ].join(','),
         )
         .order('created_at', { ascending: true });
       if (e2) throw e2;
@@ -180,9 +172,6 @@ export async function GET(req: NextRequest) {
     if (e?.message === '401') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    return NextResponse.json(
-      { error: e?.message || 'internal error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message || 'internal error' }, { status: 500 });
   }
 }

@@ -29,7 +29,10 @@ export default function PushHelpCard() {
     else setPerm(Notification.permission);
 
     (async () => {
-      if (!('serviceWorker' in navigator)) { setSubscribed(null); return; }
+      if (!('serviceWorker' in navigator)) {
+        setSubscribed(null);
+        return;
+      }
       try {
         const reg = await navigator.serviceWorker.getRegistration();
         const sub = await reg?.pushManager.getSubscription();
@@ -89,15 +92,28 @@ export default function PushHelpCard() {
       <h3 className="push-title">プッシュ通知の受信設定</h3>
 
       <div className="push-status">
-        <div>ブラウザ権限：<strong>{perm === 'unsupported' ? '未対応' : perm}</strong></div>
-        <div>購読状態：<strong>{subscribed === null ? '不明' : subscribed ? '購読中' : '未購読'}</strong></div>
-        <div className="hint">※ ボタンはログイン中のあなた（user_code: {userCode ?? '—'}）への通知を再登録／送信します。</div>
+        <div>
+          ブラウザ権限：<strong>{perm === 'unsupported' ? '未対応' : perm}</strong>
+        </div>
+        <div>
+          購読状態：
+          <strong>{subscribed === null ? '不明' : subscribed ? '購読中' : '未購読'}</strong>
+        </div>
+        <div className="hint">
+          ※ ボタンはログイン中のあなた（user_code: {userCode ?? '—'}）への通知を再登録／送信します。
+        </div>
       </div>
 
       <div className="push-buttons">
-        <button className="push-btn" onClick={askPermission}>通知を許可する</button>
-        <button className="push-btn" onClick={reSubscribe} disabled={!userCode}>購読をやり直す</button>
-        <button className="push-btn" onClick={sendTest} disabled={!userCode}>テスト通知を送る</button>
+        <button className="push-btn" onClick={askPermission}>
+          通知を許可する
+        </button>
+        <button className="push-btn" onClick={reSubscribe} disabled={!userCode}>
+          購読をやり直す
+        </button>
+        <button className="push-btn" onClick={sendTest} disabled={!userCode}>
+          テスト通知を送る
+        </button>
       </div>
 
       {/* どの端末でも両方表示。自分の端末にはバッジを付ける */}
@@ -107,8 +123,12 @@ export default function PushHelpCard() {
           {onAndroidChrome && <span className="badge">あなたの端末</span>}
         </summary>
         <ol>
-          <li>右上の「︙」メニュー → <b>サイト設定</b> → <b>通知</b></li>
-          <li><b>www.muverse.jp</b> を <b>許可</b> にする</li>
+          <li>
+            右上の「︙」メニュー → <b>サイト設定</b> → <b>通知</b>
+          </li>
+          <li>
+            <b>www.muverse.jp</b> を <b>許可</b> にする
+          </li>
           <li>画面を戻って Muverse を再読み込み</li>
         </ol>
       </details>
@@ -119,10 +139,18 @@ export default function PushHelpCard() {
           {oniPhoneSafari && <span className="badge">あなたの端末</span>}
         </summary>
         <ol>
-          <li>iPhoneの <b>設定アプリ</b> を開く</li>
-          <li><b>通知</b> → 下へスクロールして <b>Safari</b> を選択</li>
-          <li><b>通知を許可</b> をオンにする</li>
-          <li>Safariで <b>www.muverse.jp</b> を開き、サイトからの通知を許可</li>
+          <li>
+            iPhoneの <b>設定アプリ</b> を開く
+          </li>
+          <li>
+            <b>通知</b> → 下へスクロールして <b>Safari</b> を選択
+          </li>
+          <li>
+            <b>通知を許可</b> をオンにする
+          </li>
+          <li>
+            Safariで <b>www.muverse.jp</b> を開き、サイトからの通知を許可
+          </li>
         </ol>
         <div className="hint">※ iOS 16.4 以降が必要です。</div>
       </details>

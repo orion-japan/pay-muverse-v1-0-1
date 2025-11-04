@@ -4,8 +4,6 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-
-
 export async function POST(req: Request) {
   try {
     const { idToken } = await req.json().catch(() => ({}));
@@ -36,7 +34,6 @@ export async function POST(req: Request) {
 
     // ③ customToken を返す
     return NextResponse.json({ customToken }, { status: 200 });
-
   } catch (err) {
     console.error('[custom-token] API例外発生', err);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });

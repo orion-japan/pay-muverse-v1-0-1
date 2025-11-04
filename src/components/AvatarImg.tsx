@@ -40,14 +40,7 @@ function resolveAvatarUrl(raw?: string | null): string {
   return `${SUPABASE_BASE}/storage/v1/object/public/${AVATAR_BUCKET}/${key}`;
 }
 
-const AvatarImg: React.FC<Props> = ({
-  src,
-  alt,
-  size = 32,
-  className,
-  style,
-  versionKey,
-}) => {
+const AvatarImg: React.FC<Props> = ({ src, alt, size = 32, className, style, versionKey }) => {
   // 初期URLを解決
   const initialUrl = React.useMemo(() => {
     const base = resolveAvatarUrl(src);

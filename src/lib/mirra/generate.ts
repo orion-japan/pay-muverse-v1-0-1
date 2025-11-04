@@ -1,9 +1,6 @@
 // src/lib/mirra/generate.ts
 import { buildSystemPrompt } from './buildSystemPrompt';
-import {
-  MIRRA_MODEL, MIRRA_TEMPERATURE,
-  MIRRA_PRICE_IN, MIRRA_PRICE_OUT
-} from './config';
+import { MIRRA_MODEL, MIRRA_TEMPERATURE, MIRRA_PRICE_IN, MIRRA_PRICE_OUT } from './config';
 import { inferQCode } from './qcode';
 import { OPENERS, MEANING_QUESTIONS, ACTION_STEPS, CLOSERS, SOMATIC_ALT } from './templates';
 
@@ -40,7 +37,7 @@ function clampBullets(lines: string[]) {
 }
 
 function limitEmojis(s: string) {
-  const emojis = Array.from(s.matchAll(/\p{Extended_Pictographic}/gu)).map(m => m[0]);
+  const emojis = Array.from(s.matchAll(/\p{Extended_Pictographic}/gu)).map((m) => m[0]);
   if (emojis.length <= 2) return s;
   let kept = 0;
   return s.replace(/\p{Extended_Pictographic}/gu, () => (++kept <= 2 ? '🙂' : ''));
@@ -56,9 +53,12 @@ function mustEndWithQuestion(s: string) {
 function stripRemakeSteps(s: string) {
   if (!RE_REMAKE.test(s)) return s;
   const lines = s.split(/\r?\n/);
-  const filtered = lines.filter(L => !(RE_LIST_HEAD.test(L) && /リメイク|変換|統合|解消/.test(L)));
+  const filtered = lines.filter(
+    (L) => !(RE_LIST_HEAD.test(L) && /リメイク|変換|統合|解消/.test(L)),
+  );
   let body = filtered.join('\n');
-  body += '\n\n※ mirra は「気づき」までを担当します。未消化の闇のリメイク（変換）は行いません。必要なら、iros を扱える master に相談するか、自分が master になる選択肢もあります。';
+  body +=
+    '\n\n※ mirra は「気づき」までを担当します。未消化の闇のリメイク（変換）は行いません。必要なら、iros を扱える master に相談するか、自分が master になる選択肢もあります。';
   return body;
 }
 
@@ -76,8 +76,14 @@ function enforceRhythm(s: string) {
 
 // --- 段落強制（2〜3文ごとに段落を分割） ---
 function enforceParagraphs(s: string) {
-  const lines = s.split(/\n/).map(v => v.trim()).filter(Boolean);
-  const sentences = lines.join(' ').split(/(?<=[。！？!?])\s*/).filter(Boolean);
+  const lines = s
+    .split(/\n/)
+    .map((v) => v.trim())
+    .filter(Boolean);
+  const sentences = lines
+    .join(' ')
+    .split(/(?<=[。！？!?])\s*/)
+    .filter(Boolean);
   const out: string[] = [];
   let bucket: string[] = [];
   for (let i = 0; i < sentences.length; i++) {
@@ -98,15 +104,23 @@ function normalizeListHeads(s: string) {
 
 function sanitizeOutput(s: string) {
   // 余計な空白正規化
-  s = s.replace(/[ \t\u3000]+/g, ' ').replace(/\s+\n/g, '\n').trim();
+  s = s
+    .replace(/[ \t\u3000]+/g, ' ')
+    .replace(/\s+\n/g, '\n')
+    .trim();
 
   s = enforceRhythm(s);
   s = enforceParagraphs(s);
   s = normalizeListHeads(s);
 
-  const paragraphs = s.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
-  const lines = paragraphs.flatMap(p => p.split(/\r?\n/));
-  let out = clampBullets(lines).join('\n\n').replace(/\n{3,}/g, '\n\n');
+  const paragraphs = s
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const lines = paragraphs.flatMap((p) => p.split(/\r?\n/));
+  let out = clampBullets(lines)
+    .join('\n\n')
+    .replace(/\n{3,}/g, '\n\n');
 
   out = stripRemakeSteps(out);
   out = limitEmojis(out);
@@ -122,18 +136,23 @@ function pickStrategy(seedNum: number) {
 function seedToInt(seed?: string | null) {
   const s = String(seed ?? Date.now());
   let h = 2166136261 >>> 0;
-  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
   return h >>> 0;
 }
-function pickFrom<T>(arr: T[], n: number) { return arr[n % arr.length]; }
+function pickFrom<T>(arr: T[], n: number) {
+  return arr[n % arr.length];
+}
 
 // --- 簡易: フェーズ/自己受容/関係性の推定（UI用） ---
 function inferPhase(text: string): 'Inner' | 'Outer' {
   const t = (text || '').toLowerCase();
-  const innerKeys = ['気持ち','感情','不安','イライラ','怖','心','胸','わたし','私'];
-  const outerKeys = ['上司','相手','会議','職場','メール','チーム','外部','環境'];
-  const innerHit = innerKeys.some(k => t.includes(k));
-  const outerHit = outerKeys.some(k => t.includes(k));
+  const innerKeys = ['気持ち', '感情', '不安', 'イライラ', '怖', '心', '胸', 'わたし', '私'];
+  const outerKeys = ['上司', '相手', '会議', '職場', 'メール', 'チーム', '外部', '環境'];
+  const innerHit = innerKeys.some((k) => t.includes(k));
+  const outerHit = outerKeys.some((k) => t.includes(k));
   if (innerHit && !outerHit) return 'Inner';
   if (outerHit && !innerHit) return 'Outer';
   return 'Inner';
@@ -165,7 +184,7 @@ function buildAnalysis(
   q: string | null,
   phase: 'Inner' | 'Outer',
   self: { score: number; band: SelfBand },
-  relation: { label: RelationLabel; confidence: number }
+  relation: { label: RelationLabel; confidence: number },
 ) {
   const head = input.replace(/\s+/g, ' ').slice(0, 80);
   const qMap: Record<string, string> = {
@@ -178,7 +197,8 @@ function buildAnalysis(
   const summary = `${head}${head.length === 80 ? '…' : ''}（${q && qMap[q] ? qMap[q] : '内省フェーズ'}）`;
 
   let background = '自己期待と現実のギャップによるストレス反応が考えられます。';
-  if (q === 'Q1') background = '境界や手順への配慮が満たされず、苛立ちや詰まり感が生じている可能性。';
+  if (q === 'Q1')
+    background = '境界や手順への配慮が満たされず、苛立ちや詰まり感が生じている可能性。';
   if (q === 'Q2') background = '成長/裁量を妨げられた感覚が怒りとして表面化している可能性。';
   if (q === 'Q3') background = '不確実さや自己評価の揺らぎが不安として滞留している可能性。';
   if (q === 'Q4') background = '威圧/圧の記憶が再燃し、身体の萎縮が思考を狭めている可能性。';
@@ -188,15 +208,19 @@ function buildAnalysis(
     '事実/解釈/願いを3行で分ける',
     '20〜60秒のミニ実験（呼吸・姿勢・1行メモ）',
     '「本当はどうあってほしい？」を1問だけ書く',
-    '終わったら気分を1〜5で自己評価'
+    '終わったら気分を1〜5で自己評価',
   ];
 
   const keyword =
-    q === 'Q2' ? '境界が守られると怒りは方向性に変わる' :
-    q === 'Q3' ? '小さな安定が次の一歩を呼ぶ' :
-    q === 'Q1' ? '秩序は安心の足場' :
-    q === 'Q4' ? '圧が抜けると呼吸が戻る' :
-    '火種は小さくても前に進む';
+    q === 'Q2'
+      ? '境界が守られると怒りは方向性に変わる'
+      : q === 'Q3'
+        ? '小さな安定が次の一歩を呼ぶ'
+        : q === 'Q1'
+          ? '秩序は安心の足場'
+          : q === 'Q4'
+            ? '圧が抜けると呼吸が戻る'
+            : '火種は小さくても前に進む';
 
   return {
     summary,
@@ -206,7 +230,7 @@ function buildAnalysis(
     phase,
     selfAcceptance: self,
     relation,
-    q
+    q,
   };
 }
 
@@ -224,8 +248,7 @@ export async function generateMirraReply(
   const antiRepeat = avoidRepeatHint(lastAssistantReply || undefined);
 
   const input =
-    (userText ?? '').trim() ||
-    '（入力が短いときは、呼吸の整え方を短く案内してください）';
+    (userText ?? '').trim() || '（入力が短いときは、呼吸の整え方を短く案内してください）';
 
   // ---- 軽推定（Qコード/フェーズ/自己受容/関係性） ----
   const nSeed = seedToInt(seed);
@@ -239,15 +262,17 @@ export async function generateMirraReply(
     const qres = await inferQCode(input);
     qMeta = qres;
     qTag = qres?.q ? ` [${qres.q}${qres.hint ? ':' + qres.hint : ''}]` : '';
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   // ---- 戦略ローテとテンプレ骨格（返信の誘導用） ----
   const sIdx = pickStrategy(nSeed);
-  const opener   = pickFrom(OPENERS, nSeed + 1) + qTag;
+  const opener = pickFrom(OPENERS, nSeed + 1) + qTag;
   const meaningQ = pickFrom(MEANING_QUESTIONS, nSeed + 2);
-  const action   = pickFrom(ACTION_STEPS, nSeed + 3);
-  const closer   = pickFrom(CLOSERS, nSeed + 4);
-  const somatic  = pickFrom(SOMATIC_ALT, nSeed + 5);
+  const action = pickFrom(ACTION_STEPS, nSeed + 3);
+  const closer = pickFrom(CLOSERS, nSeed + 4);
+  const somatic = pickFrom(SOMATIC_ALT, nSeed + 5);
 
   const blockA = `- ${opener}`;
   const blockB = `- ${meaningQ}`;
@@ -333,7 +358,10 @@ export async function generateMirraReply(
       personaTone: 'gentle_guide',
       dialogue_trace: [
         { step: 'detect_mode', data: { detectedTarget: null, mode } },
-        { step: 'state_infer', data: { phase, self, relation, currentQ: qMeta?.q ?? null, nextQ: null } },
+        {
+          step: 'state_infer',
+          data: { phase, self, relation, currentQ: qMeta?.q ?? null, nextQ: null },
+        },
         { step: 'indicators', data: { g: 0.5, stochastic: false, noiseAmp, seed: nSeed } },
         { step: 'retrieve', data: { hits: 0, epsilon, noiseAmp, seed: retrSeed } },
         {
@@ -344,9 +372,9 @@ export async function generateMirraReply(
             top_p: 0.9,
             presence_penalty: 0.6,
             frequency_penalty: 0.7,
-            hasReply: !!raw
-          }
-        }
+            hasReply: !!raw,
+          },
+        },
       ],
       stochastic_params: { epsilon, retrNoise: noiseAmp, retrSeed },
       charge: { model: MIRRA_MODEL, aiId: MIRRA_MODEL, amount: 1 },
@@ -355,7 +383,7 @@ export async function generateMirraReply(
       thread_id: conversationId || null,
       board_id: null,
       source_type: 'chat',
-      analysis
+      analysis,
     };
 
     return { text: reply, cost, meta };
@@ -382,7 +410,7 @@ export async function generateMirraReply(
       { step: 'state_infer', data: { phase, self, relation, currentQ: null, nextQ: null } },
       { step: 'indicators', data: { g: 0.5, stochastic: false, noiseAmp, seed: nSeed } },
       { step: 'retrieve', data: { hits: 0, epsilon, noiseAmp, seed: retrSeed } },
-      { step: 'fallback_reply', data: { rule: 'variantFallback', hasReply: true } }
+      { step: 'fallback_reply', data: { rule: 'variantFallback', hasReply: true } },
     ],
     stochastic_params: { epsilon, retrNoise: noiseAmp, retrSeed },
     charge: { model: 'rule', aiId: 'rule', amount: 0 },
@@ -391,7 +419,7 @@ export async function generateMirraReply(
     thread_id: conversationId || null,
     board_id: null,
     source_type: 'chat',
-    analysis
+    analysis,
   };
 
   return { text: reply, cost: 0, meta };
@@ -400,7 +428,10 @@ export async function generateMirraReply(
 // --- フォールバック ---
 function hash(s: string) {
   let h = 2166136261 >>> 0;
-  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
   return h >>> 0;
 }
 function pick<T>(arr: T[], seed: string) {
@@ -409,15 +440,19 @@ function pick<T>(arr: T[], seed: string) {
 }
 function variantFallback(input: string) {
   const t = input.replace(/\s+/g, ' ').slice(0, 40);
-  const anchors  = ['肩を下ろして3呼吸', 'みぞおちに手を当て2呼吸', '足裏の圧を30秒観察'];
-  const insights = ['事実/解釈を1行ずつ分ける', '「できたこと」を一つ挙げる', '気になる言い回しを短く写す'];
-  const steps    = ['20秒だけ手を動かす', '通勤の一停車ぶん観察', '寝る前に1行だけ記録'];
+  const anchors = ['肩を下ろして3呼吸', 'みぞおちに手を当て2呼吸', '足裏の圧を30秒観察'];
+  const insights = [
+    '事実/解釈を1行ずつ分ける',
+    '「できたこと」を一つ挙げる',
+    '気になる言い回しを短く写す',
+  ];
+  const steps = ['20秒だけ手を動かす', '通勤の一停車ぶん観察', '寝る前に1行だけ記録'];
 
   return [
     `まず${pick(anchors, t)}して、いまの体感を2語で書き出そう🙂`,
     '',
     `「${t}」については、${pick(insights, t + 'i')}。例として、会議前に胸のつかえを意識したら、椅子の背にもたれて息をゆっくり。`,
     '',
-    `次の一歩は${pick(steps, t + 's')}。終わったら気分を1〜5で自己評価。いちばん気になる場面はどこだろう？`
+    `次の一歩は${pick(steps, t + 's')}。終わったら気分を1〜5で自己評価。いちばん気になる場面はどこだろう？`,
   ].join('\n\n');
 }

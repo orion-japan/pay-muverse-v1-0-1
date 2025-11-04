@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
   if (!z?.ok) {
     return NextResponse.json(
       { allowed: false, error: z?.error ?? 'unauthorized' },
-      { status: z?.status ?? 401 }
+      { status: z?.status ?? 401 },
     );
   }
 
@@ -41,6 +41,6 @@ export async function GET(req: NextRequest) {
       clickType,
       userCode: (z as any).userCode ?? null,
     },
-    { status: 200 }
+    { status: 200 },
   );
 }

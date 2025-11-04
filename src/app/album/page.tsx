@@ -24,8 +24,8 @@ type Post = {
 // ★ 追加：private-posts からアルバム一覧（署名URL）を取得
 type AlbumItem = {
   name: string;
-  url: string;    // 表示用（署名URL）
-  path: string;   // private-posts/<userCode>/<file>
+  url: string; // 表示用（署名URL）
+  path: string; // private-posts/<userCode>/<file>
   size?: number | null;
   updated_at?: string | null;
 };
@@ -46,7 +46,9 @@ async function listAlbumImages(userCode: string): Promise<AlbumItem[]> {
     const resolved = await Promise.all(
       files.map(async (f) => {
         const path = `${prefix}/${f.name}`;
-        const { data: signed } = await supabase.storage.from(ALBUM_BUCKET).createSignedUrl(path, 60 * 30);
+        const { data: signed } = await supabase.storage
+          .from(ALBUM_BUCKET)
+          .createSignedUrl(path, 60 * 30);
         return {
           name: f.name,
           url: signed?.signedUrl ?? '',
@@ -54,7 +56,7 @@ async function listAlbumImages(userCode: string): Promise<AlbumItem[]> {
           size: (f as any)?.metadata?.size ?? null,
           updated_at: (f as any)?.updated_at ?? null,
         };
-      })
+      }),
     );
     return resolved;
   } catch (e) {
@@ -109,13 +111,13 @@ export default function AlbumPage() {
       // 2) コラージュと同じ：private-posts/<userCode>/ からアルバム画像
       const albumItems = await listAlbumImages(String(userCode));
       const albumPosts: Post[] = albumItems.map((it) => ({
-        post_id: `album://${it.path}`,                // 一意キーとして path を利用
+        post_id: `album://${it.path}`, // 一意キーとして path を利用
         title: it.name || null,
         content: null,
         media_urls: it.url ? [it.url] : [],
         tags: [],
         created_at: it.updated_at ?? new Date().toISOString(),
-        board_type: 'album',                           // ← ここで 'album' を明示
+        board_type: 'album', // ← ここで 'album' を明示
       }));
 
       // 3) マージ（重複 post_id は API 側を優先）
@@ -146,7 +148,7 @@ export default function AlbumPage() {
         [p.title, p.content, ...(p.tags || [])]
           .join(' ')
           .toLowerCase()
-          .includes(search.toLowerCase())
+          .includes(search.toLowerCase()),
       )
       .sort((a, b) => {
         if (sort === 'new') return +new Date(b.created_at) - +new Date(a.created_at);
@@ -174,9 +176,9 @@ export default function AlbumPage() {
   // ===== 追加: iボード作成（+I）と同じ挙動を共通関数化 =====
   const handleIBoardCreate = () => {
     if (!isQMode) {
-      setIsQMode(true);            // まず選択モードへ
+      setIsQMode(true); // まず選択モードへ
     } else if (selectedIds.size > 0) {
-      setIsQModalOpen(true);       // 選択済みなら投稿へ
+      setIsQModalOpen(true); // 選択済みなら投稿へ
     }
   };
 
@@ -244,9 +246,7 @@ export default function AlbumPage() {
             setSelectedPost(null);
           }}
           onEditSuccess={(updated) => {
-            setPosts((prev) =>
-              prev.map((p) => (p.post_id === updated.post_id ? updated : p))
-            );
+            setPosts((prev) => prev.map((p) => (p.post_id === updated.post_id ? updated : p)));
           }}
           onDeleteSuccess={(deletedId) => {
             setPosts((prev) => prev.filter((p) => p.post_id !== deletedId));
@@ -254,14 +254,17 @@ export default function AlbumPage() {
         />
       )}
 
-<div className="album-action-bar">
-  <div className="album-action-inner">
-  <a href="/collage" className="action-btn collage">＋ コラージュ作成</a>
-    <button onClick={handleIBoardCreate} className="action-btn iboard">＋ iボード作成</button>
-  </div>
-</div>
-<div className="album-bottom-spacer" />
-
+      <div className="album-action-bar">
+        <div className="album-action-inner">
+          <a href="/collage" className="action-btn collage">
+            ＋ コラージュ作成
+          </a>
+          <button onClick={handleIBoardCreate} className="action-btn iboard">
+            ＋ iボード作成
+          </button>
+        </div>
+      </div>
+      <div className="album-bottom-spacer" />
 
       {/* 既存のフローティング +I ボタンは残しつつ非表示化（構造保持・導線は下部バーに集約） */}
       <button

@@ -6,14 +6,13 @@ import '../../styles/modals.css';
 
 type GenericModalProps = {
   isOpen: boolean;
-  title: React.ReactNode;   // ← ここを string から React.ReactNode にする
+  title: React.ReactNode; // ← ここを string から React.ReactNode にする
   onCancel: () => void;
   onConfirm: () => void;
   confirmLabel?: string;
   cancelLabel?: string;
   children?: React.ReactNode;
 };
-
 
 export default function GenericModal({
   isOpen,

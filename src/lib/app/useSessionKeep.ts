@@ -9,7 +9,9 @@ export function useSessionKeep() {
         await fetch('/api/auth/refresh', { credentials: 'include' });
       } catch {}
     };
-    const onVis = () => { if (!document.hidden) tick(); };
+    const onVis = () => {
+      if (!document.hidden) tick();
+    };
 
     window.addEventListener('visibilitychange', onVis);
     window.addEventListener('focus', tick);

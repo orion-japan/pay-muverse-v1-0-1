@@ -1,31 +1,54 @@
 /* src/components/ReactionBar.css */
 .reaction-bar {
-    display: flex;
-    gap: 8px;
-    margin-top: 6px;
-    flex-wrap: wrap;
-  }
-  .reaction-btn {
-    background: #f8f8ff;
-    border: 1px solid #ddd;
-    border-radius: 18px;
-    padding: 4px 10px;
-    font-size: 14px;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .reaction-btn:hover { background: #fffbe6; }
-  .reaction-btn .count { font-size: 12px; color: #555; }
-  /* src/components/ReactionBar.css（追記OK） */
-.reaction-bar { display:flex; gap:8px; flex-wrap:wrap; }
-.reaction-btn {
-  background:#f8f8ff; border:1px solid #ddd; border-radius:18px;
-  padding:4px 10px; font-size:14px; display:inline-flex; align-items:center; gap:6px;
-  cursor:pointer;
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+  flex-wrap: wrap;
 }
-.reaction-btn .count { font-size:12px; color:#555; }
-.reaction-btn:hover { background:#fffbe6; }
-.reaction-bar.readonly .reaction-btn { cursor:default; pointer-events:none; opacity:.9; }
-
+.reaction-btn {
+  background: #f8f8ff;
+  border: 1px solid #ddd;
+  border-radius: 18px;
+  padding: 4px 10px;
+  font-size: 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.reaction-btn:hover {
+  background: #fffbe6;
+}
+.reaction-btn .count {
+  font-size: 12px;
+  color: #555;
+}
+/* src/components/ReactionBar.css（追記OK） */
+.reaction-bar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.reaction-btn {
+  background: #f8f8ff;
+  border: 1px solid #ddd;
+  border-radius: 18px;
+  padding: 4px 10px;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.reaction-btn .count {
+  font-size: 12px;
+  color: #555;
+}
+.reaction-btn:hover {
+  background: #fffbe6;
+}
+.reaction-bar.readonly .reaction-btn {
+  cursor: default;
+  pointer-events: none;
+  opacity: 0.9;
+}

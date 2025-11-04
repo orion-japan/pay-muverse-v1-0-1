@@ -87,7 +87,7 @@ export default function ProfilePage() {
         }
 
         const toDisplay = (v: string[] | string | null | undefined) =>
-          Array.isArray(v) ? v : v ?? '';
+          Array.isArray(v) ? v : (v ?? '');
 
         setProfile({
           user_code: codeStr,
@@ -112,7 +112,7 @@ export default function ProfilePage() {
         if (mine && codeStr !== mine) {
           const resFollow = await fetch(
             `/api/check-follow?target=${encodeURIComponent(codeStr)}&me=${encodeURIComponent(mine)}`,
-            { headers: { Authorization: `Bearer ${token}` } }
+            { headers: { Authorization: `Bearer ${token}` } },
           );
           if (resFollow.ok) {
             const f = await resFollow.json();
@@ -126,15 +126,18 @@ export default function ProfilePage() {
   }, [codeStr, router]);
 
   // 🔹 click_type → planStatus 正規化
-  const planStatus = useMemo<
-    'free' | 'regular' | 'premium' | 'master' | 'admin'
-  >(() => {
+  const planStatus = useMemo<'free' | 'regular' | 'premium' | 'master' | 'admin'>(() => {
     switch (clickType) {
-      case 'regular': return 'regular';
-      case 'premium': return 'premium';
-      case 'master': return 'master';
-      case 'admin': return 'admin';
-      default: return 'free';
+      case 'regular':
+        return 'regular';
+      case 'premium':
+        return 'premium';
+      case 'master':
+        return 'master';
+      case 'admin':
+        return 'admin';
+      default:
+        return 'free';
     }
   }, [clickType]);
 

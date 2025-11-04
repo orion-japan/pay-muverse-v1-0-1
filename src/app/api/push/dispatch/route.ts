@@ -1,32 +1,32 @@
 // src/app/api/push/dispatch/route.ts
-import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
-import webpush from 'web-push'
+import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+import webpush from 'web-push';
 
-export const runtime = 'nodejs'
-export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
-const supabase = createClient(url, serviceKey)
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const supabase = createClient(url, serviceKey);
 
 // --- 変更点: トップレベルで setVapidDetails しない ---
-const VAPID_PUBLIC = process.env.VAPID_PUBLIC || process.env.WEB_PUSH_PUBLIC_KEY
-const VAPID_PRIVATE = process.env.VAPID_PRIVATE || process.env.WEB_PUSH_PRIVATE_KEY
-const VAPID_CONTACT = process.env.WEB_PUSH_CONTACT || 'mailto:no-reply@example.com'
+const VAPID_PUBLIC = process.env.VAPID_PUBLIC || process.env.WEB_PUSH_PUBLIC_KEY;
+const VAPID_PRIVATE = process.env.VAPID_PRIVATE || process.env.WEB_PUSH_PRIVATE_KEY;
+const VAPID_CONTACT = process.env.WEB_PUSH_CONTACT || 'mailto:no-reply@example.com';
 
 // 必要なときだけ安全に設定
-let vapidReady = false
+let vapidReady = false;
 function ensureVapid() {
-  if (vapidReady) return true
-  if (!VAPID_PUBLIC || !VAPID_PRIVATE || !VAPID_CONTACT) return false
+  if (vapidReady) return true;
+  if (!VAPID_PUBLIC || !VAPID_PRIVATE || !VAPID_CONTACT) return false;
   try {
-    webpush.setVapidDetails(VAPID_CONTACT, VAPID_PUBLIC, VAPID_PRIVATE)
-    vapidReady = true
-    return true
+    webpush.setVapidDetails(VAPID_CONTACT, VAPID_PUBLIC, VAPID_PRIVATE);
+    vapidReady = true;
+    return true;
   } catch (e) {
-    console.error('[push] setVapidDetails error:', e)
-    return false
+    console.error('[push] setVapidDetails error:', e);
+    return false;
   }
 }
 
@@ -39,14 +39,14 @@ function ensureVapid() {
  */
 
 type PushPayload = {
-  title: string
-  body: string
-  url?: string
-  icon?: string
-  badge?: string
-  tag?: string
-  data?: Record<string, any>
-}
+  title: string;
+  body: string;
+  url?: string;
+  icon?: string;
+  badge?: string;
+  tag?: string;
+  data?: Record<string, any>;
+};
 
 export async function POST(req: Request) {
   try {
@@ -54,38 +54,38 @@ export async function POST(req: Request) {
     if (!ensureVapid()) {
       return NextResponse.json(
         { ok: false, message: 'Web Push disabled: missing VAPID keys' },
-        { status: 501 }
-      )
+        { status: 501 },
+      );
     }
 
     const { userCodes, payload } = (await req.json()) as {
-      userCodes?: string[]
-      payload?: PushPayload
-    }
+      userCodes?: string[];
+      payload?: PushPayload;
+    };
 
     if (!payload?.title || !payload?.body) {
       return NextResponse.json(
         { ok: false, message: 'payload.title and payload.body are required' },
-        { status: 400 }
-      )
+        { status: 400 },
+      );
     }
 
     // 送信対象ユーザーの決定
-    let targets: string[] = []
+    let targets: string[] = [];
     if (Array.isArray(userCodes) && userCodes.length) {
-      targets = userCodes
+      targets = userCodes;
     } else {
       // 全体送信（push_enabled のみ）
       const { data, error } = await supabase
         .from('user_settings')
         .select('user_code')
-        .eq('push_enabled', true)
-      if (error) throw error
-      targets = (data || []).map((r) => r.user_code)
+        .eq('push_enabled', true);
+      if (error) throw error;
+      targets = (data || []).map((r) => r.user_code);
     }
 
     if (!targets.length) {
-      return NextResponse.json({ ok: true, sent: 0, failed: 0 })
+      return NextResponse.json({ ok: true, sent: 0, failed: 0 });
     }
 
     // サブスクリプション取得（ユーザー設定とサブスクの両方で ON のものだけ）
@@ -93,23 +93,23 @@ export async function POST(req: Request) {
       .from('push_subscriptions')
       .select('user_code, endpoint, p256dh, auth, enabled')
       .in('user_code', targets)
-      .eq('enabled', true)
-    if (subErr) throw subErr
+      .eq('enabled', true);
+    if (subErr) throw subErr;
 
     // user_settings も確認（push_enabled=false のユーザーは弾く）
     const { data: settings, error: setErr } = await supabase
       .from('user_settings')
       .select('user_code, push_enabled')
-      .in('user_code', targets)
-    if (setErr) throw setErr
+      .in('user_code', targets);
+    if (setErr) throw setErr;
     const allowSet = new Set(
-      settings?.filter((s) => s.push_enabled !== false).map((s) => s.user_code) || []
-    )
+      settings?.filter((s) => s.push_enabled !== false).map((s) => s.user_code) || [],
+    );
 
-    const list = (subs || []).filter((s) => allowSet.has(s.user_code))
+    const list = (subs || []).filter((s) => allowSet.has(s.user_code));
 
-    let sent = 0
-    let failed = 0
+    let sent = 0;
+    let failed = 0;
 
     // 送信
     await Promise.all(
@@ -120,27 +120,27 @@ export async function POST(req: Request) {
               endpoint: s.endpoint,
               keys: { p256dh: s.p256dh, auth: s.auth },
             } as any,
-            JSON.stringify(payload)
-          )
-          sent++
+            JSON.stringify(payload),
+          );
+          sent++;
         } catch (e: any) {
-          failed++
-          console.warn('webpush failed:', e?.statusCode, e?.body)
+          failed++;
+          console.warn('webpush failed:', e?.statusCode, e?.body);
           // 410/404 などは登録を削除
           if (e?.statusCode === 410 || e?.statusCode === 404) {
             await supabase
               .from('push_subscriptions')
               .delete()
               .eq('user_code', s.user_code)
-              .eq('endpoint', s.endpoint)
+              .eq('endpoint', s.endpoint);
           }
         }
-      })
-    )
+      }),
+    );
 
-    return NextResponse.json({ ok: true, sent, failed })
+    return NextResponse.json({ ok: true, sent, failed });
   } catch (e: any) {
-    console.error('/api/push/dispatch POST', e)
-    return NextResponse.json({ ok: false, message: e?.message ?? 'Server error' }, { status: 500 })
+    console.error('/api/push/dispatch POST', e);
+    return NextResponse.json({ ok: false, message: e?.message ?? 'Server error' }, { status: 500 });
   }
 }

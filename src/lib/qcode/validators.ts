@@ -1,23 +1,23 @@
 // Mu 用のセーフティ／バリデーション文言とチェック関数
 
-import { MU_SAFETY, MU_TONE_RULES } from "@/lib/mu/config";
+import { MU_SAFETY, MU_TONE_RULES } from '@/lib/mu/config';
 
 /** セーフティカテゴリ */
-export type SafetyCategory = "medical" | "legal" | "finance" | "minor" | "other";
+export type SafetyCategory = 'medical' | 'legal' | 'finance' | 'minor' | 'other';
 
 /** セーフティ警告文を返す */
 export function safetyNotice(cat: SafetyCategory): string {
   switch (cat) {
-    case "medical":
+    case 'medical':
       return MU_SAFETY.MEDICAL;
-    case "legal":
+    case 'legal':
       return MU_SAFETY.LEGAL;
-    case "finance":
+    case 'finance':
       return MU_SAFETY.FINANCE;
-    case "minor":
+    case 'minor':
       return MU_SAFETY.MINOR;
     default:
-      return "一般情報としてご参考ください。必要に応じて専門家にご確認ください。";
+      return '一般情報としてご参考ください。必要に応じて専門家にご確認ください。';
   }
 }
 
@@ -47,9 +47,7 @@ export function enforcePoliteness(text: string): boolean {
   const sentences = text.split(/[\n。！？]/).filter((s) => s.trim().length > 0);
   if (sentences.length === 0) return true;
 
-  const politeEndings = sentences.filter((s) =>
-    /(です|ます|でした|ました)$/.test(s.trim())
-  );
+  const politeEndings = sentences.filter((s) => /(です|ます|でした|ました)$/.test(s.trim()));
 
   return politeEndings.length / sentences.length >= 0.6;
 }

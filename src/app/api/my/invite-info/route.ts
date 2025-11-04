@@ -1,9 +1,9 @@
 // src/app/api/my/invite-info/route.ts
-export const runtime = 'nodejs';         // ★ Admin SDK を使うので必須
-export const dynamic = 'force-dynamic';  // （任意）キャッシュ回避
+export const runtime = 'nodejs'; // ★ Admin SDK を使うので必須
+export const dynamic = 'force-dynamic'; // （任意）キャッシュ回避
 
 import { NextResponse } from 'next/server';
-import { adminAuth } from '@/lib/firebase-admin';   // ← ハイフン版
+import { adminAuth } from '@/lib/firebase-admin'; // ← ハイフン版
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { buildInviteUrl, resolveOrigin } from '@/lib/invite';
 

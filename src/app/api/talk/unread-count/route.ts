@@ -6,7 +6,8 @@ import { adminAuth } from '@/lib/firebase-admin';
 import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
-const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE || '';
+const SERVICE_ROLE =
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE || '';
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
 async function uidToUserCode(uid: string) {
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest) {
     // 1) 開発フォールバック: ヘッダ X-User-Code または ?me= で直接指定可
     const url = new URL(req.url);
     const meHeader = req.headers.get('x-user-code')?.trim() || '';
-    const meQuery  = url.searchParams.get('me')?.trim() || '';
+    const meQuery = url.searchParams.get('me')?.trim() || '';
 
     // 2) 本命: Authorization: Bearer <idToken>
     const authz = req.headers.get('authorization') || '';
@@ -40,22 +41,31 @@ export async function GET(req: NextRequest) {
 
     if (!me) {
       // 誰かわからなければ 0 を返す（ポーリングは止めない）
-      return NextResponse.json({ unread: 0 }, { status: 200, headers: { 'Cache-Control': 'no-store' } });
+      return NextResponse.json(
+        { unread: 0 },
+        { status: 200, headers: { 'Cache-Control': 'no-store' } },
+      );
     }
 
     // 集計は関数一本化
     const { data, error } = await sb.rpc('unread_total_sum_v3', { me });
     if (error) {
       console.warn('[unread-count] rpc error', error);
-      return NextResponse.json({ unread: 0 }, { status: 200, headers: { 'Cache-Control': 'no-store' } });
+      return NextResponse.json(
+        { unread: 0 },
+        { status: 200, headers: { 'Cache-Control': 'no-store' } },
+      );
     }
     const unread = Number(data ?? 0);
     return NextResponse.json(
       { unread: Number.isFinite(unread) ? unread : 0 },
-      { status: 200, headers: { 'Cache-Control': 'no-store' } }
+      { status: 200, headers: { 'Cache-Control': 'no-store' } },
     );
   } catch (e) {
     console.error('[unread-count] GET error', e);
-    return NextResponse.json({ unread: 0 }, { status: 200, headers: { 'Cache-Control': 'no-store' } });
+    return NextResponse.json(
+      { unread: 0 },
+      { status: 200, headers: { 'Cache-Control': 'no-store' } },
+    );
   }
 }

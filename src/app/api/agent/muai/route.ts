@@ -18,7 +18,7 @@ const COST_PER_TURN = Number(process.env.MU_COST_PER_TURN ?? '0.5'); // 1往復=
 /* ---------------- utils ---------------- */
 function json(data: any, init?: number | ResponseInit) {
   const status =
-    typeof init === 'number' ? init : (init as ResponseInit | undefined)?.['status'] ?? 200;
+    typeof init === 'number' ? init : ((init as ResponseInit | undefined)?.['status'] ?? 200);
 
   const headers = new Headers(
     typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers,
@@ -39,9 +39,9 @@ function sbService() {
 /* ==== ID utilities ==== */
 // サーバ保存・課金用の厳密 UUID
 const newUuid = () =>
-  (globalThis.crypto?.randomUUID?.() ??
-    // @ts-ignore - Node.js
-    require('crypto').randomUUID());
+  globalThis.crypto?.randomUUID?.() ??
+  // @ts-ignore - Node.js
+  require('crypto').randomUUID();
 
 // 既存IDを尊重（UUID / MU- / 何であれ）。無ければ UUID を採用
 function ensureMuMasterId(input?: string | null) {
@@ -285,8 +285,8 @@ export async function POST(req: NextRequest) {
       typeof mu?.confidence === 'number'
         ? mu.confidence
         : typeof mu?.meta?.relation?.confidence === 'number'
-        ? mu.meta.relation.confidence
-        : null;
+          ? mu.meta.relation.confidence
+          : null;
 
     const lastUserText = String(msg ?? '');
     const mu_phase = inferPhase(lastUserText);

@@ -7,8 +7,7 @@ export const dynamic = 'force-dynamic';
 
 // ---- Env 読み込み（ズレ吸収 & ログはマスク）
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SERVICE_ROLE =
-  process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_ROLE_KEY; // ← 両対応
+const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_ROLE_KEY; // ← 両対応
 const DEBUG = process.env.DEBUG_PUSH_API === '1';
 
 const mask = (v?: string | null) => (!v ? 'undefined' : `${v.slice(0, 4)}…(len:${v.length})`);
@@ -58,7 +57,6 @@ export async function POST(req: NextRequest) {
           endpoint: String(endpoint),
           p256dh: String(keys.p256dh),
           auth: String(keys.auth),
-        
         },
         { onConflict: 'endpoint' }, // endpoint UNIQUE を想定
       )

@@ -7,7 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! // Service role（server only）
+  process.env.SUPABASE_SERVICE_ROLE_KEY!, // Service role（server only）
 );
 
 export async function GET(req: NextRequest) {
@@ -21,8 +21,12 @@ export async function GET(req: NextRequest) {
     if (nested) raw = decodeURIComponent(nested[1]);
 
     // 2) デコードを2回試す（%2F がそのまま来るケースに備える）
-    try { raw = decodeURIComponent(raw); } catch {}
-    try { raw = decodeURIComponent(raw); } catch {}
+    try {
+      raw = decodeURIComponent(raw);
+    } catch {}
+    try {
+      raw = decodeURIComponent(raw);
+    } catch {}
 
     // 3) 前後の空白や先頭スラッシュを整理
     raw = raw.trim().replace(/^\/+/, '');

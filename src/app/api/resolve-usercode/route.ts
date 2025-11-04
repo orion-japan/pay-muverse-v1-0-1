@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'; // キャッシュ回避
 // Service Role はサーバー専用（クライアントに晒さない）
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
 // 共通: user_code を探す

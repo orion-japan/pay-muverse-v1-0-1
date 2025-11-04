@@ -3,8 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SERVICE_ROLE =
-  process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 function sbAdmin() {
   return createClient(SUPABASE_URL, SERVICE_ROLE, {
@@ -31,13 +30,8 @@ export async function GET(req: NextRequest) {
         .eq('id', conv_id)
         .maybeSingle();
 
-      if (cErr)
-        return NextResponse.json({ error: cErr.message }, { status: 500 });
-      if (!convo)
-        return NextResponse.json(
-          { error: 'conversation not found' },
-          { status: 404 }
-        );
+      if (cErr) return NextResponse.json({ error: cErr.message }, { status: 500 });
+      if (!convo) return NextResponse.json({ error: 'conversation not found' }, { status: 404 });
 
       const { count: turnsCount } = await sb
         .from('mu_turns')
@@ -51,8 +45,7 @@ export async function GET(req: NextRequest) {
         .order('created_at', { ascending: true })
         .limit(2000);
 
-      if (tErr)
-        return NextResponse.json({ error: tErr.message }, { status: 500 });
+      if (tErr) return NextResponse.json({ error: tErr.message }, { status: 500 });
 
       const conversation = {
         id: convo.id,
@@ -92,8 +85,7 @@ export async function GET(req: NextRequest) {
         .order('created_at', { ascending: false })
         .limit(pageSize);
 
-      if (listErr)
-        return NextResponse.json({ error: listErr.message }, { status: 500 });
+      if (listErr) return NextResponse.json({ error: listErr.message }, { status: 500 });
 
       const conversations = (rows ?? []).map((c: any) => ({
         id: c.id,
@@ -108,14 +100,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ conversations });
     }
 
-    return NextResponse.json(
-      { error: 'Specify either user_code or conv_id.' },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: 'Specify either user_code or conv_id.' }, { status: 400 });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'failed' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message || 'failed' }, { status: 500 });
   }
 }

@@ -1,0 +1,31 @@
+/* IrosChat のグローバル調整（CSS Modules外） */
+
+:root {
+  --header-h: 54px;
+  --footer-safe-pad: 56px;
+  --compose-h: 96px;              /* 入力バーの推定高さ */
+  --compose-extra-lift: 0px;      /* ← ここを上げると入力バーが“少し上”に移動 */
+}
+
+/* 背景やオーバーフローの全体調整 */
+.mu-main,
+#mu-page,
+html,
+body {
+  background: transparent !important;
+  overflow-x: hidden;
+}
+
+/* チャット本文のスクロール余白（ヘッダーと入力バーぶん） */
+[data-sof-chat-scroll],
+.sof-chatScroll,
+.sof-chatBody {
+  padding-bottom: calc(
+    var(--footer-safe-pad, 56px) +
+    var(--compose-h, 96px) +
+    var(--compose-extra-lift, 0px) +
+    16px
+  ) !important;
+  padding-top: var(--header-h, 54px);
+  box-sizing: border-box;
+}

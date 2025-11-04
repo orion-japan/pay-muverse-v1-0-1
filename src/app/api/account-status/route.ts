@@ -9,8 +9,7 @@ import { adminAuth } from '@/lib/firebase-admin';
 /* =========================
    Supabase Admin Client
 ========================= */
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
 const SERVICE_ROLE =
   process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
@@ -93,8 +92,8 @@ function json(data: any, init?: number | ResponseInit) {
    Users 取得（互換）
 ========================= */
 async function getUserSingle(where: { col: string; val: string }) {
-  let q = supabase.from('users').select(SELECT_FIELDS_NEW).eq(where.col, where.val).maybeSingle();
-  let r = (await q) as { data: UserRow | null; error: any };
+  const q = supabase.from('users').select(SELECT_FIELDS_NEW).eq(where.col, where.val).maybeSingle();
+  const r = (await q) as { data: UserRow | null; error: any };
   if (!r.error) return r;
 
   // 列差異の救済（レガシー）
@@ -303,8 +302,11 @@ export async function POST(req: NextRequest) {
 
         if (ins2.error || !ins2.data) {
           return json(
-            { error: 'User bootstrap failed', detail: ins.error?.message || ins2.error?.message || null },
-            { status: 500 }
+            {
+              error: 'User bootstrap failed',
+              detail: ins.error?.message || ins2.error?.message || null,
+            },
+            { status: 500 },
           );
         }
         data = ins2.data;

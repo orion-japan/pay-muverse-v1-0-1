@@ -4,8 +4,8 @@ import React, { useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
 type Props = {
-  userId: string;  // FirebaseのUIDやuser_codeなど
-  postId: string;  // 投稿ID（またはDate.now()でもOK）
+  userId: string; // FirebaseのUIDやuser_codeなど
+  postId: string; // 投稿ID（またはDate.now()でもOK）
 };
 
 export default function ImageUploadComponent({ userId, postId }: Props) {
@@ -54,9 +54,7 @@ export default function ImageUploadComponent({ userId, postId }: Props) {
       return;
     }
 
-    const { data: urlData } = supabase.storage
-      .from('public-posts')
-      .getPublicUrl(filename);
+    const { data: urlData } = supabase.storage.from('public-posts').getPublicUrl(filename);
     setPublicUrl(urlData?.publicUrl || null);
     console.log('投稿URL:', urlData?.publicUrl);
 
@@ -74,8 +72,15 @@ export default function ImageUploadComponent({ userId, postId }: Props) {
       )}
       {privateUrl && (
         <p className="text-sm mt-2">
-          🔒 ダウンロードURL（自分専用）:  
-          <a href={privateUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">ここ</a>
+          🔒 ダウンロードURL（自分専用）:
+          <a
+            href={privateUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 underline"
+          >
+            ここ
+          </a>
         </p>
       )}
       {file && (
@@ -89,8 +94,10 @@ export default function ImageUploadComponent({ userId, postId }: Props) {
       )}
       {publicUrl && (
         <p className="text-sm mt-2 text-green-700">
-          🌍 公開URL:  
-          <a href={publicUrl} target="_blank" rel="noopener noreferrer" className="underline">{publicUrl}</a>
+          🌍 公開URL:
+          <a href={publicUrl} target="_blank" rel="noopener noreferrer" className="underline">
+            {publicUrl}
+          </a>
         </p>
       )}
     </div>

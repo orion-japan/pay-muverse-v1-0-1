@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
 const ALLOWED = ['like', 'heart', 'smile', 'wow', 'share'] as const;
@@ -20,8 +20,14 @@ export async function GET(req: NextRequest) {
 
   if (!user_code) {
     return NextResponse.json(
-      { ok: false, message: 'user_code is required', received: z(), given: z(), totals: { received: 0, given: 0 } },
-      { status: 400 }
+      {
+        ok: false,
+        message: 'user_code is required',
+        received: z(),
+        given: z(),
+        totals: { received: 0, given: 0 },
+      },
+      { status: 400 },
     );
   }
 
@@ -34,7 +40,7 @@ export async function GET(req: NextRequest) {
     if (postErr) {
       console.warn('[summary] posts warn', postErr.message);
     }
-    const myPostIds: string[] = (myPosts ?? []).map(r => r.post_id);
+    const myPostIds: string[] = (myPosts ?? []).map((r) => r.post_id);
     const safeIds = myPostIds.length ? myPostIds : ['00000000-0000-0000-0000-000000000000']; // in() の空配列対策
 
     // 受け取り（自分の投稿に付いた反応）
@@ -68,13 +74,19 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(
       { ok: true, user_code, received, given, totals },
-      { headers: { 'Cache-Control': 'no-store' } }
+      { headers: { 'Cache-Control': 'no-store' } },
     );
   } catch (e: any) {
     console.error('[summary] UNEXPECTED', e);
     return NextResponse.json(
-      { ok: false, message: 'Unexpected error', received: z(), given: z(), totals: { received: 0, given: 0 } },
-      { status: 500 }
+      {
+        ok: false,
+        message: 'Unexpected error',
+        received: z(),
+        given: z(),
+        totals: { received: 0, given: 0 },
+      },
+      { status: 500 },
     );
   }
 }

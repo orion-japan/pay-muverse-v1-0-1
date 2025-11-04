@@ -9,10 +9,7 @@ import { PLAN_ID_MAP } from '@/lib/constants/planIdMap'; // ← 追加
 export const runtime = 'nodejs';
 
 // Supabase 初期化
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.supabaseKey!
-);
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.supabaseKey!);
 
 // PAY.JP 初期化
 const payjpClient = payjp(process.env.PAYJP_SECRET_KEY!, {
@@ -138,7 +135,6 @@ export async function POST(req: NextRequest) {
       sheetLogged,
       subscriptionId: subscription.id,
     });
-
   } catch (err: any) {
     let errorDetail = '';
     if (err?.response?.json) {
@@ -158,7 +154,7 @@ export async function POST(req: NextRequest) {
         success: false,
         sheetLogged,
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

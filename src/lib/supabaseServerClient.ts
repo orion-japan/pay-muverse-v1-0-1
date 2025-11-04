@@ -17,10 +17,10 @@ export async function getSupabaseServerClient() {
         get(name: string) {
           return cookieStore.get(name)?.value;
         },
-        set() {},     // 必要なら実装
-        remove() {},  // 必要なら実装
+        set() {}, // 必要なら実装
+        remove() {}, // 必要なら実装
       },
-    }
+    },
   );
 }
 

@@ -1,12 +1,12 @@
-'use client'
+'use client';
 
-import { useEffect } from 'react'
-import '@/app/globals.css'
+import { useEffect } from 'react';
+import '@/app/globals.css';
 
 // ✅ Props型を定義（onReady を追加）
 type Props = {
   onNameChange?: (name: string) => void;
-  onCardReady?: (ready: boolean) => void;   // ← iframe readyを親に伝える
+  onCardReady?: (ready: boolean) => void; // ← iframe readyを親に伝える
 };
 
 export default function CardStyle({ onNameChange, onCardReady }: Props) {
@@ -34,19 +34,19 @@ export default function CardStyle({ onNameChange, onCardReady }: Props) {
           color: '#222',
           letterSpacing: '0.03em',
           padding: '12px',
-          '::placeholder': { color: '#9ca3af' }
-        }
+          '::placeholder': { color: '#9ca3af' },
+        },
       };
 
       // ✅ 各フォーム mount
       const cardNumber = elements.create('cardNumber', { style });
       const cardExpiry = elements.create('cardExpiry', { style });
-      const cardCvc    = elements.create('cardCvc', { style });
+      const cardCvc = elements.create('cardCvc', { style });
 
       // ---- iframe Ready イベント ----
       cardNumber.on('ready', () => {
         console.log('✅ cardNumber iframe 完全 ready');
-        onCardReady?.(true);  // 親に「カード入力欄 ready」を通知
+        onCardReady?.(true); // 親に「カード入力欄 ready」を通知
       });
 
       cardExpiry.on('ready', () => {
@@ -77,11 +77,11 @@ export default function CardStyle({ onNameChange, onCardReady }: Props) {
 
         {/* ✅ ロゴ行 */}
         <div className="payjp-brand-row">
-          {['visa','mastercard','jcb','amex','diners'].map(b => (
-            <img 
-              key={b} 
-              src={`/${b}.png`}  // publicフォルダの画像を表示
-              alt={b} 
+          {['visa', 'mastercard', 'jcb', 'amex', 'diners'].map((b) => (
+            <img
+              key={b}
+              src={`/${b}.png`} // publicフォルダの画像を表示
+              alt={b}
               className="payjp-brand-icon"
             />
           ))}
@@ -93,16 +93,15 @@ export default function CardStyle({ onNameChange, onCardReady }: Props) {
           <div id="card-number" className="payjp-input" />
 
           <div className="payjp-two-col">
-  <div className="expiry-box">
-    <label className="payjp-label">有効期限</label>
-    <div id="card-expiry" className="payjp-input" />
-  </div>
-  <div className="cvc-box">
-    <label className="payjp-label">CVC番号</label>
-    <div id="card-cvc" className="payjp-input" />
-  </div>
-</div>
-
+            <div className="expiry-box">
+              <label className="payjp-label">有効期限</label>
+              <div id="card-expiry" className="payjp-input" />
+            </div>
+            <div className="cvc-box">
+              <label className="payjp-label">CVC番号</label>
+              <div id="card-cvc" className="payjp-input" />
+            </div>
+          </div>
 
           {/* ✅ 名義入力 → 親に渡す */}
           <label className="payjp-label">カード名義（半角英字）</label>
@@ -115,5 +114,5 @@ export default function CardStyle({ onNameChange, onCardReady }: Props) {
         </div>
       </div>
     </div>
-  )
+  );
 }

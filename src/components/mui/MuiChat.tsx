@@ -34,10 +34,8 @@ export default function MuiChat() {
   const [composerExpanded, setComposerExpanded] = useState(false);
 
   // 画像D&D / 選択
-  const {
-    files, urls, dragScreen,
-    fileRef, addFiles, onPick, onFileChange, setDragScreen,
-  } = useMuiDrop();
+  const { files, urls, dragScreen, fileRef, addFiles, onPick, onFileChange, setDragScreen } =
+    useMuiDrop();
 
   // （任意のユーザー識別）
   const userCode: string =
@@ -79,26 +77,20 @@ export default function MuiChat() {
         headers: { 'x-user-code': userCode, 'Content-Type': 'application/json' },
       });
 
-      const reply =
-        (json as any).reply ??
-        (json as any).message ??
-        '…';
+      const reply = (json as any).reply ?? (json as any).message ?? '…';
 
       const newCode =
-        (json as any).conversation_code ??
-        (json as any).conv_code ??
-        convCode ??
-        null;
+        (json as any).conversation_code ?? (json as any).conv_code ?? convCode ?? null;
       if (newCode) setConvCode(String(newCode));
 
       const newBal =
         typeof (json as any).balance === 'number'
           ? (json as any).balance
           : typeof (json as any).credit === 'number'
-          ? (json as any).credit
-          : typeof (json as any).credit_balance === 'number'
-          ? (json as any).credit_balance
-          : null;
+            ? (json as any).credit
+            : typeof (json as any).credit_balance === 'number'
+              ? (json as any).credit_balance
+              : null;
       if (typeof newBal === 'number') setBalance(newBal);
 
       return {
@@ -107,15 +99,19 @@ export default function MuiChat() {
         balance: typeof newBal === 'number' ? newBal : null,
       };
     },
-    [convCode, userCode]
+    [convCode, userCode],
   );
 
   // 返信っぽさの簡易検出
   function isLikelyReply(t: string): boolean {
     const s = String(t || '').replace(/\s+/g, '');
     const pats = [
-      /ですね[。!?]*$/, /でしょうか[。!?]*$/, /くださいね[。!?]*$/,
-      /と思います[。!?]*$/, /いかがですか[。!?]*$/, /お役に立て/g,
+      /ですね[。!?]*$/,
+      /でしょうか[。!?]*$/,
+      /くださいね[。!?]*$/,
+      /と思います[。!?]*$/,
+      /いかがですか[。!?]*$/,
+      /お役に立て/g,
     ];
     if (pats.some((r) => r.test(s))) return true;
     const polite = (s.match(/です|ます/g)?.length ?? 0) >= 5;
@@ -165,27 +161,20 @@ export default function MuiChat() {
         headers: { 'x-user-code': userCode, 'Content-Type': 'application/json' },
       });
 
-      let reply =
-        (json as any).formatted ??
-        (json as any).reply ??
-        (json as any).message ??
-        '';
+      const reply = (json as any).formatted ?? (json as any).reply ?? (json as any).message ?? '';
 
       const newCode =
-        (json as any).conversation_code ??
-        (json as any).conv_code ??
-        convCode ??
-        null;
+        (json as any).conversation_code ?? (json as any).conv_code ?? convCode ?? null;
       if (newCode) setConvCode(String(newCode));
 
       const newBal =
         typeof (json as any).balance === 'number'
           ? (json as any).balance
           : typeof (json as any).credit === 'number'
-          ? (json as any).credit
-          : typeof (json as any).credit_balance === 'number'
-          ? (json as any).credit_balance
-          : null;
+            ? (json as any).credit
+            : typeof (json as any).credit_balance === 'number'
+              ? (json as any).credit_balance
+              : null;
       if (typeof newBal === 'number') setBalance(newBal);
 
       const out = String(reply || '').trim();
@@ -194,7 +183,7 @@ export default function MuiChat() {
       }
       return out;
     },
-    [convCode, userCode]
+    [convCode, userCode],
   );
 
   // ───────────────────────────────────────────────────────────────
@@ -319,13 +308,13 @@ export default function MuiChat() {
         setError(e?.message || '送信に失敗しました');
       }
     },
-    [callAgent, scrollToBottom]
+    [callAgent, scrollToBottom],
   );
 
   /** 直前のアシスタント返答を整形→本文へ */
   const formatLastAssistantToComposer = useCallback(async () => {
     setError(null);
-    const last = [...conv].reverse().find(m => m.role === 'assistant');
+    const last = [...conv].reverse().find((m) => m.role === 'assistant');
     if (!last || !last.content?.trim()) {
       setError('整形対象のアシスタント返答が見つかりません。');
       return;
@@ -346,38 +335,41 @@ export default function MuiChat() {
   }, [conv, composerText, callAgentFormatOnly, scrollToBottom]);
 
   // 任意：ステージ保存ヘルパー（UI変更なし）
-  const saveStage = useCallback(async (params: {
-    sub_id: StageId;
-    partner_detail: string;
-    tone: Tone;
-    next_step: string;
-    currentQ?: string; depthStage?: string; phase?: Tone['phase']; self_accept?: number;
-  }) => {
-    try {
-      const res = await api<{ ok: boolean; quartet?: any; error?: string }>(
-        '/api/agent/mui/stage/save',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-user-code': userCode },
-          body: JSON.stringify({
-            user_code: userCode,
-            seed_id: seedId,
-            ...params,
-          }),
-        }
-      );
-      if (!(res as any).ok) throw new Error((res as any).error || 'save failed');
-      return true;
-    } catch (e) {
-      console.warn('[stage/save] failed', e);
-      return false;
-    }
-  }, [seedId, userCode]);
+  const saveStage = useCallback(
+    async (params: {
+      sub_id: StageId;
+      partner_detail: string;
+      tone: Tone;
+      next_step: string;
+      currentQ?: string;
+      depthStage?: string;
+      phase?: Tone['phase'];
+      self_accept?: number;
+    }) => {
+      try {
+        const res = await api<{ ok: boolean; quartet?: any; error?: string }>(
+          '/api/agent/mui/stage/save',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-user-code': userCode },
+            body: JSON.stringify({
+              user_code: userCode,
+              seed_id: seedId,
+              ...params,
+            }),
+          },
+        );
+        if (!(res as any).ok) throw new Error((res as any).error || 'save failed');
+        return true;
+      } catch (e) {
+        console.warn('[stage/save] failed', e);
+        return false;
+      }
+    },
+    [seedId, userCode],
+  );
 
-  const placeholder =
-    files.length > 0
-      ? '（Ctrl/Cmd+Enterで送信）'
-      : 'メッセージを入れて送信';
+  const placeholder = files.length > 0 ? '（Ctrl/Cmd+Enterで送信）' : 'メッセージを入れて送信';
 
   return (
     <>
@@ -409,11 +401,7 @@ export default function MuiChat() {
           >
             {ocrRunning ? '処理中…' : 'AIで整形して本文へ'}
           </button>
-          <button
-            className="ghost"
-            onClick={runOCR}
-            disabled={!files.length || ocrRunning}
-          >
+          <button className="ghost" onClick={runOCR} disabled={!files.length || ocrRunning}>
             {ocrRunning ? 'OCR中…' : 'OCRで読み取る'}
           </button>
         </div>

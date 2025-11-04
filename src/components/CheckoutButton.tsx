@@ -61,7 +61,9 @@ export default function CheckoutButton({ plan, user_code, hasCard }: Props) {
 
       // ❌ エラー返却がある場合
       if (data.error || !data.success) {
-        alert(`❌ エラー: ${data.error || data.detail || '不明なエラー'}\n\n${data.logTrail?.join('\n') || ''}`);
+        alert(
+          `❌ エラー: ${data.error || data.detail || '不明なエラー'}\n\n${data.logTrail?.join('\n') || ''}`,
+        );
         console.error('エラー内容:', data);
         return;
       }

@@ -21,7 +21,10 @@ export async function POST(req: Request) {
     }
     if (!file && !storage_path) {
       // ★ ここを変更：file または storage_path のどちらかでOK
-      return NextResponse.json({ ok: false, error: 'file or storage_path required' }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: 'file or storage_path required' },
+        { status: 400 },
+      );
     }
 
     // ---- ここから先はあなたの保存ロジックに合わせて ----

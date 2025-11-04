@@ -24,8 +24,8 @@ type Turn = {
   role: 'user' | 'assistant' | 'system' | string;
   content: string | null;
   used_credits?: number | string | null; // ← normalized
-  source?: string | null;                // ← normalized
-  sub_id?: string | null;                // ← normalized
+  source?: string | null; // ← normalized
+  sub_id?: string | null; // ← normalized
   meta?: any;
   created_at: string | null;
 };
@@ -44,7 +44,9 @@ async function callApi(url: string) {
   });
   const text = await res.text();
   let json: any = {};
-  try { json = text ? JSON.parse(text) : {}; } catch {}
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch {}
   if (!res.ok) throw new Error(json?.error || json?.message || text || 'Request failed');
   return json;
 }
@@ -106,7 +108,9 @@ export default function SofiaLogsPage() {
         setListLoading(false);
       }
     }, 300);
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userCode]);
 
@@ -153,7 +157,8 @@ export default function SofiaLogsPage() {
       const v = num(t.used_credits, 0);
       total += v;
       totalAbs += Math.abs(v);
-      const r = (t.role === 'assistant' || t.role === 'user' || t.role === 'system') ? t.role : 'other';
+      const r =
+        t.role === 'assistant' || t.role === 'user' || t.role === 'system' ? t.role : 'other';
       byRole[r] += v;
       count[r] += 1;
     }
@@ -164,10 +169,24 @@ export default function SofiaLogsPage() {
   // CSV（Mu と同じ列順）
   const csvForTurns = useMemo(() => {
     if (!detail || !turns?.length) return '';
-    const header = ['conv_id','turn_id','created_at','role','used_credits','source','sub_id','content'];
+    const header = [
+      'conv_id',
+      'turn_id',
+      'created_at',
+      'role',
+      'used_credits',
+      'source',
+      'sub_id',
+      'content',
+    ];
     const rows = turns.map((t) => [
-      t.conv_id, t.id, t.created_at ?? '', t.role,
-      num(t.used_credits, 0), t.source || '', t.sub_id || '',
+      t.conv_id,
+      t.id,
+      t.created_at ?? '',
+      t.role,
+      num(t.used_credits, 0),
+      t.source || '',
+      t.sub_id || '',
       (t.content || '').replaceAll('\n', '\\n').replaceAll('"', '""'),
     ]);
     const lines = [header.join(','), ...rows.map((r) => r.map((x) => `"${String(x)}"`).join(','))];
@@ -216,14 +235,16 @@ export default function SofiaLogsPage() {
                   {conversations === null
                     ? '会話ID'
                     : listLoading
-                    ? '読み込み中…'
-                    : conversations.length === 0
-                    ? '会話が見つかりません'
-                    : '会話IDを選択…'}
+                      ? '読み込み中…'
+                      : conversations.length === 0
+                        ? '会話が見つかりません'
+                        : '会話IDを選択…'}
                 </option>
                 {conversations?.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.id}{c.title ? `｜${c.title}` : ''}{c.last_turn_at ? `（${c.last_turn_at}）` : ''}
+                    {c.id}
+                    {c.title ? `｜${c.title}` : ''}
+                    {c.last_turn_at ? `（${c.last_turn_at}）` : ''}
                   </option>
                 ))}
               </select>
@@ -268,7 +289,9 @@ export default function SofiaLogsPage() {
                       <td>{c.origin_app || ''}</td>
                       <td className="mono">{c.last_turn_at || ''}</td>
                       <td className="mono">{c.created_at || ''}</td>
-                      <td><button onClick={() => setConvId(c.id)}>開く</button></td>
+                      <td>
+                        <button onClick={() => setConvId(c.id)}>開く</button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -291,14 +314,14 @@ export default function SofiaLogsPage() {
                   </span>
                 </div>
                 <div>
-                  <b>内訳:</b>{' '}
-                  assistant <span className="mono">{fmt(creditStats.byRole.assistant)}</span> ／
-                  user <span className="mono">{fmt(creditStats.byRole.user)}</span> ／
-                  system <span className="mono">{fmt(creditStats.byRole.system)}</span>
+                  <b>内訳:</b> assistant{' '}
+                  <span className="mono">{fmt(creditStats.byRole.assistant)}</span> ／ user{' '}
+                  <span className="mono">{fmt(creditStats.byRole.user)}</span> ／ system{' '}
+                  <span className="mono">{fmt(creditStats.byRole.system)}</span>
                 </div>
                 <div>
-                  <b>件数:</b>{' '}
-                  assistant {creditStats.count.assistant} ／ user {creditStats.count.user} ／ system {creditStats.count.system}
+                  <b>件数:</b> assistant {creditStats.count.assistant} ／ user{' '}
+                  {creditStats.count.user} ／ system {creditStats.count.system}
                 </div>
                 <div>
                   <b>assistant平均/turn:</b>{' '}
@@ -308,18 +331,37 @@ export default function SofiaLogsPage() {
 
               {/* メタ */}
               <div className="kv">
-                <div><b>conv_id:</b> <span className="mono">{detail.id}</span></div>
-                <div><b>user_code:</b> <span className="mono">{detail.user_code}</span></div>
-                <div><b>title:</b> {detail.title || ''}</div>
-                <div><b>origin_app:</b> {detail.origin_app || ''}</div>
-                <div><b>conversation_code:</b> <span className="mono">{detail.conversation_code || ''}</span></div>
-                <div><b>last_turn_at:</b> <span className="mono">{detail.last_turn_at || ''}</span></div>
-                <div><b>created_at:</b> <span className="mono">{detail.created_at || ''}</span></div>
-                <div><b>updated_at:</b> <span className="mono">{detail.updated_at || ''}</span></div>
+                <div>
+                  <b>conv_id:</b> <span className="mono">{detail.id}</span>
+                </div>
+                <div>
+                  <b>user_code:</b> <span className="mono">{detail.user_code}</span>
+                </div>
+                <div>
+                  <b>title:</b> {detail.title || ''}
+                </div>
+                <div>
+                  <b>origin_app:</b> {detail.origin_app || ''}
+                </div>
+                <div>
+                  <b>conversation_code:</b>{' '}
+                  <span className="mono">{detail.conversation_code || ''}</span>
+                </div>
+                <div>
+                  <b>last_turn_at:</b> <span className="mono">{detail.last_turn_at || ''}</span>
+                </div>
+                <div>
+                  <b>created_at:</b> <span className="mono">{detail.created_at || ''}</span>
+                </div>
+                <div>
+                  <b>updated_at:</b> <span className="mono">{detail.updated_at || ''}</span>
+                </div>
               </div>
 
               <div className="actions right">
-                <button onClick={downloadCSV} disabled={!turns?.length}>CSVエクスポート</button>
+                <button onClick={downloadCSV} disabled={!turns?.length}>
+                  CSVエクスポート
+                </button>
               </div>
 
               {/* ターン一覧（Mu と同列名） */}

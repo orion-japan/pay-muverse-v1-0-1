@@ -58,7 +58,7 @@ async function clearCardStateByCustomer(customerId: string) {
 async function setCardStateByCustomer(
   customerId: string,
   brand?: string | null,
-  last4?: string | null
+  last4?: string | null,
 ) {
   if (!customerId) return;
   await supabaseAdmin
@@ -75,7 +75,7 @@ async function planApply(
   new_click_type: string,
   reason: string,
   periodEnd?: string | null,
-  subId?: string | null
+  subId?: string | null,
 ) {
   await fetch(`${process.env.NEXT_PUBLIC_BASE_URL ?? ''}/api/pay/plan/apply`, {
     method: 'POST',
@@ -94,11 +94,7 @@ async function planApply(
 function resolveClickTypeFromSub(obj: any): string {
   // plan / product から click_type を決める
   const planId =
-    obj?.plan ||
-    obj?.plan_id ||
-    obj?.items?.[0]?.plan ||
-    obj?.items?.[0]?.plan_id ||
-    null;
+    obj?.plan || obj?.plan_id || obj?.items?.[0]?.plan || obj?.items?.[0]?.plan_id || null;
   if (!planId) return 'pro'; // 既定
   const proId = process.env.PAYJP_PLAN_PRO_ID;
   const masterId = process.env.PAYJP_PLAN_MASTER_ID;
@@ -145,15 +141,16 @@ export async function POST(req: NextRequest) {
         if (!user) break;
 
         const status: string | undefined = obj?.status; // 'active'|'trial'|'canceled'|'paused'|'past_due'|'expired' など
-        const periodEnd: string | undefined =
-          obj?.current_period_end || obj?.period?.end || null;
+        const periodEnd: string | undefined = obj?.current_period_end || obj?.period?.end || null;
 
         if (status === 'active') {
           const click = resolveClickTypeFromSub(obj); // pro / master
           await planApply(user.user_code, click, `webhook:${type}`, periodEnd, obj?.id ?? null);
         } else if (status === 'trial') {
           await planApply(user.user_code, 'trial', `webhook:${type}`, periodEnd, obj?.id ?? null);
-        } else if (['canceled', 'paused', 'past_due', 'expired', 'terminated'].includes(String(status || ''))) {
+        } else if (
+          ['canceled', 'paused', 'past_due', 'expired', 'terminated'].includes(String(status || ''))
+        ) {
           await planApply(user.user_code, 'free', `webhook:${type}`, null, null);
         }
         break;

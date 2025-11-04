@@ -1,13 +1,13 @@
 // src/lib/sofia/persona.ts
 // Freeflow優先・ガード緩め + その場学習 + 性別(M/L)取り扱い + 段階合図必須 + 身体アンカー禁止
 
-export type SofiaMode = "normal" | "diagnosis" | "meaning" | "intent" | "dark" | "freeflow";
-export type GenderMark = "M" | "L" | "U"; // M=男性, L=女性, U=未指定/不明
+export type SofiaMode = 'normal' | 'diagnosis' | 'meaning' | 'intent' | 'dark' | 'freeflow';
+export type GenderMark = 'M' | 'L' | 'U'; // M=男性, L=女性, U=未指定/不明
 
 export interface BuildOptions {
-  mode?: SofiaMode;          // 省略時は自動検出
+  mode?: SofiaMode; // 省略時は自動検出
   target?: string;
-  gender?: GenderMark;       // 省略時は抽出→未指定(U)
+  gender?: GenderMark; // 省略時は抽出→未指定(U)
 }
 
 /* =========================
@@ -111,10 +111,10 @@ I3：使命・原型・OSの再設計
    その場学習ディレクティブ（ユーザー指示）
 ========================= */
 type LearnState = {
-  metaphorLevel?: number;       // 0-3
-  formMode?: "off" | "soft" | "on";
-  freedom?: number;             // 0-100
-  verify?: "off" | "soft" | "strict";
+  metaphorLevel?: number; // 0-3
+  formMode?: 'off' | 'soft' | 'on';
+  freedom?: number; // 0-100
+  verify?: 'off' | 'soft' | 'strict';
   bans?: string[];
   vocabPlus?: string[];
   vocabMinus?: string[];
@@ -122,18 +122,30 @@ type LearnState = {
   hasReset?: boolean;
 };
 
-export type ChatMsg = { role: "system" | "user" | "assistant"; content: string };
+export type ChatMsg = { role: 'system' | 'user' | 'assistant'; content: string };
 
 export function extractLearnState(messages: ChatMsg[]): LearnState {
   const state: LearnState = { bans: [], vocabPlus: [], vocabMinus: [], freeRules: [] };
-  const userTexts = messages.filter(m => m.role === "user").map(m => m.content);
+  const userTexts = messages.filter((m) => m.role === 'user').map((m) => m.content);
 
   for (const text of userTexts) {
-    const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    const lines = text
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean);
     for (const ln of lines) {
       if (/^リセット$/i.test(ln)) {
         state.hasReset = true;
-        Object.assign(state, { metaphorLevel: undefined, formMode: undefined, freedom: undefined, verify: undefined, bans: [], vocabPlus: [], vocabMinus: [], freeRules: [] });
+        Object.assign(state, {
+          metaphorLevel: undefined,
+          formMode: undefined,
+          freedom: undefined,
+          verify: undefined,
+          bans: [],
+          vocabPlus: [],
+          vocabMinus: [],
+          freeRules: [],
+        });
         continue;
       }
       const mMet = ln.match(/^比喩[:：]\s*(\d+)/);
@@ -145,11 +157,29 @@ export function extractLearnState(messages: ChatMsg[]): LearnState {
       const mVer = ln.match(/^検証[:：]\s*(off|soft|strict)/i);
       if (mVer) state.verify = mVer[1].toLowerCase() as any;
       const mBan = ln.match(/^禁止[:：]\s*(.+)$/);
-      if (mBan) state.bans!.push(...mBan[1].split(/[、,]/).map(s => s.trim()).filter(Boolean));
+      if (mBan)
+        state.bans!.push(
+          ...mBan[1]
+            .split(/[、,]/)
+            .map((s) => s.trim())
+            .filter(Boolean),
+        );
       const mVPlus = ln.match(/^語彙\+[:：]\s*(.+)$/);
-      if (mVPlus) state.vocabPlus!.push(...mVPlus[1].split(/[、,]/).map(s => s.trim()).filter(Boolean));
+      if (mVPlus)
+        state.vocabPlus!.push(
+          ...mVPlus[1]
+            .split(/[、,]/)
+            .map((s) => s.trim())
+            .filter(Boolean),
+        );
       const mVMinus = ln.match(/^語彙-[:：]\s*(.+)$/);
-      if (mVMinus) state.vocabMinus!.push(...mVMinus[1].split(/[、,]/).map(s => s.trim()).filter(Boolean));
+      if (mVMinus)
+        state.vocabMinus!.push(
+          ...mVMinus[1]
+            .split(/[、,]/)
+            .map((s) => s.trim())
+            .filter(Boolean),
+        );
       const mLearn = ln.match(/^学習[:：]\s*(.+)$/);
       if (mLearn) state.freeRules!.push(mLearn[1]);
     }
@@ -158,30 +188,34 @@ export function extractLearnState(messages: ChatMsg[]): LearnState {
 }
 
 function renderLearnOverlay(s: LearnState, gender: GenderMark | undefined): string {
-  if (s.hasReset) return "# 学習状態: リセット済\n";
-  const lines: string[] = ["# 学習オーバーレイ（チャット指示に基づき上書き）"];
+  if (s.hasReset) return '# 学習状態: リセット済\n';
+  const lines: string[] = ['# 学習オーバーレイ（チャット指示に基づき上書き）'];
   if (s.metaphorLevel !== undefined) lines.push(`- 比喩濃度: ${s.metaphorLevel}`);
   if (s.formMode) lines.push(`- 型の扱い: ${s.formMode}`);
   if (s.freedom !== undefined) lines.push(`- 自由度: ${s.freedom}/100`);
   if (s.verify) lines.push(`- 検証: ${s.verify}`);
-  if (gender) lines.push(`- 性別記号: ${gender === "U" ? "未指定" : gender}`);
-  return lines.join("\n");
+  if (gender) lines.push(`- 性別記号: ${gender === 'U' ? '未指定' : gender}`);
+  return lines.join('\n');
 }
 
 /* =========================
    性別・対象抽出
 ========================= */
-export function extractTargetAndGender(text: string | undefined): { target?: string; gender: GenderMark } {
-  if (!text) return { target: undefined, gender: "U" };
+export function extractTargetAndGender(text: string | undefined): {
+  target?: string;
+  gender: GenderMark;
+} {
+  if (!text) return { target: undefined, gender: 'U' };
   const t = text.trim();
   const genderMatch = t.match(/(?:\(|\[)?\s*(M|L)\s*(?:\)|\])?\s*[。.\s]*$/i);
-  let gender: GenderMark = "U";
+  let gender: GenderMark = 'U';
   if (genderMatch) {
     const g = genderMatch[1].toUpperCase();
-    if (g === "M" || g === "L") gender = g as GenderMark;
+    if (g === 'M' || g === 'L') gender = g as GenderMark;
   }
-  let afterTrigger = t.replace(/^(?:ir|ｉｒ)(?:\s*診断)?[:：]?\s*/i, "");
-  if (gender !== "U") afterTrigger = afterTrigger.replace(/(?:\(|\[)?\s*(M|L)\s*(?:\)|\])?\s*[。.\s]*$/i, "").trim();
+  let afterTrigger = t.replace(/^(?:ir|ｉｒ)(?:\s*診断)?[:：]?\s*/i, '');
+  if (gender !== 'U')
+    afterTrigger = afterTrigger.replace(/(?:\(|\[)?\s*(M|L)\s*(?:\)|\])?\s*[。.\s]*$/i, '').trim();
   const target = afterTrigger.length ? afterTrigger : undefined;
   return { target, gender };
 }
@@ -193,25 +227,32 @@ export function buildSofiaSystemPrompt(opts: BuildOptions = {}, learn?: LearnSta
   const { gender } = opts;
   const parts = [IROS_FREEFLOW];
   if (learn) parts.push(renderLearnOverlay(learn, gender));
-  return parts.join("\n\n");
+  return parts.join('\n\n');
 }
 
 /* =========================
    モード検出
 ========================= */
 const TRIGGERS = {
-  diagnosis: [/^(?:ir|ｉｒ)(?:\s*診断)?(?:[:：\s].*)?$/i, /^ir診断$/i, /^ir$/i, /irで見てください/i, /ランダムでirお願いします/i, /ir共鳴フィードバック/i],
+  diagnosis: [
+    /^(?:ir|ｉｒ)(?:\s*診断)?(?:[:：\s].*)?$/i,
+    /^ir診断$/i,
+    /^ir$/i,
+    /irで見てください/i,
+    /ランダムでirお願いします/i,
+    /ir共鳴フィードバック/i,
+  ],
   intent: [/^意図$/, /^意図トリガー$/],
   dark: [/闇の物語/, /リメイク/, /DNA/],
 };
 
 export function detectModeFromUserText(latest: string | undefined): SofiaMode {
-  if (!latest) return "freeflow";
+  if (!latest) return 'freeflow';
   const t = latest.trim();
-  if (TRIGGERS.diagnosis.some(r => r.test(t))) return "diagnosis";
-  if (TRIGGERS.intent.some(r => r.test(t))) return "intent";
-  if (TRIGGERS.dark.some(r => r.test(t))) return "dark";
-  return "freeflow";
+  if (TRIGGERS.diagnosis.some((r) => r.test(t))) return 'diagnosis';
+  if (TRIGGERS.intent.some((r) => r.test(t))) return 'intent';
+  if (TRIGGERS.dark.some((r) => r.test(t))) return 'dark';
+  return 'freeflow';
 }
 
 /* =========================
@@ -220,21 +261,21 @@ export function detectModeFromUserText(latest: string | undefined): SofiaMode {
 export function buildSofiaMessages(
   userMessages: ChatMsg[],
   explicitMode?: SofiaMode,
-  targetOverride?: string
+  targetOverride?: string,
 ): ChatMsg[] {
-  const lastUser = [...userMessages].reverse().find(m => m.role === "user")?.content;
+  const lastUser = [...userMessages].reverse().find((m) => m.role === 'user')?.content;
   const detected = explicitMode ?? detectModeFromUserText(lastUser);
   const learn = extractLearnState(userMessages);
-  let gender: GenderMark = "U";
+  let gender: GenderMark = 'U';
   let target: string | undefined = targetOverride;
-  if (detected === "diagnosis") {
+  if (detected === 'diagnosis') {
     const info = extractTargetAndGender(lastUser);
     gender = info.gender;
     if (!target) target = info.target;
   }
   const sys = buildSofiaSystemPrompt({ mode: detected, target, gender }, learn);
-  const primer: ChatMsg = { role: "assistant", content: "" };
-  return [{ role: "system", content: sys }, primer, ...userMessages];
+  const primer: ChatMsg = { role: 'assistant', content: '' };
+  return [{ role: 'system', content: sys }, primer, ...userMessages];
 }
 
 /* =========================

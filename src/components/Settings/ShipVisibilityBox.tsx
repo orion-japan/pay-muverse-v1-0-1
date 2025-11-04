@@ -13,10 +13,7 @@ type Props = {
   fallbackVisibility?: Visibility; // default 'pair'
 };
 
-export default function ShipVisibilityBox({
-  planStatus,
-  fallbackVisibility = 'pair',
-}: Props) {
+export default function ShipVisibilityBox({ planStatus, fallbackVisibility = 'pair' }: Props) {
   const [loading, setLoading] = useState(true);
   const [visibility, setVisibility] = useState<Visibility>(fallbackVisibility);
   const [saving, setSaving] = useState<Visibility | null>(null);
@@ -31,7 +28,10 @@ export default function ShipVisibilityBox({
       try {
         const auth = getAuth();
         const user = auth.currentUser;
-        if (!user) { if (mounted) setLoading(false); return; }
+        if (!user) {
+          if (mounted) setLoading(false);
+          return;
+        }
         const token = await user.getIdToken(true);
 
         const res = await fetch('/api/ship-visibility', {
@@ -43,7 +43,10 @@ export default function ShipVisibilityBox({
         // 403 & needRefresh → トークン再取得して1回だけリトライ
         if (res.status === 403) {
           try {
-            const j = await res.clone().json().catch(() => ({}));
+            const j = await res
+              .clone()
+              .json()
+              .catch(() => ({}));
             if (j?.needRefresh) {
               const idt = await user.getIdToken(true);
               const res2 = await fetch('/api/ship-visibility', {
@@ -53,7 +56,12 @@ export default function ShipVisibilityBox({
               });
               if (res2.ok) {
                 const j2 = await res2.json().catch(() => null);
-                if (mounted && (j2?.ship_visibility === 'pair' || j2?.ship_visibility === 'shipmates' || j2?.ship_visibility === 'all')) {
+                if (
+                  mounted &&
+                  (j2?.ship_visibility === 'pair' ||
+                    j2?.ship_visibility === 'shipmates' ||
+                    j2?.ship_visibility === 'all')
+                ) {
                   setVisibility(j2.ship_visibility);
                 }
                 return;
@@ -70,7 +78,12 @@ export default function ShipVisibilityBox({
         }
 
         const j = await res.json().catch(() => null);
-        if (mounted && (j?.ship_visibility === 'pair' || j?.ship_visibility === 'shipmates' || j?.ship_visibility === 'all')) {
+        if (
+          mounted &&
+          (j?.ship_visibility === 'pair' ||
+            j?.ship_visibility === 'shipmates' ||
+            j?.ship_visibility === 'all')
+        ) {
           setVisibility(j.ship_visibility as Visibility);
         }
       } catch (e: any) {
@@ -84,7 +97,10 @@ export default function ShipVisibilityBox({
       }
     })();
 
-    return () => { mounted = false; ac.abort(); };
+    return () => {
+      mounted = false;
+      ac.abort();
+    };
   }, []);
 
   // プランに応じたロック（仕様：shipmates=課金以上 / all=master+）
@@ -118,7 +134,10 @@ export default function ShipVisibilityBox({
 
       // 403 needRefresh → 1回だけ再発行して再送
       if (res.status === 403) {
-        const j = await res.clone().json().catch(() => ({}));
+        const j = await res
+          .clone()
+          .json()
+          .catch(() => ({}));
         if (j?.needRefresh) {
           token = await user.getIdToken(true);
           res = await fetch('/api/update-ship-visibility', {
@@ -198,23 +217,82 @@ export default function ShipVisibilityBox({
 
       <style jsx>{`
         .ship-visibility-box {
-          border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; background: #fff;
+          border: 1px solid #e5e7eb;
+          border-radius: 12px;
+          padding: 16px;
+          background: #fff;
         }
-        .sv-title { font-weight: 700; margin-bottom: 6px; }
-        .sv-caption { color: #6b7280; font-size: 13px; margin-bottom: 12px; }
-        .sv-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-        .sv-card { border: 1px solid #e5e7eb; border-radius: 10px; background: #fafafa; padding: 14px 10px;
-          text-align: center; cursor: pointer; position: relative; transition: transform .08s, box-shadow .12s, border-color .12s; }
-        .sv-card:hover { transform: translateY(-1px); box-shadow: 0 2px 10px rgba(0,0,0,.04); }
-        .sv-card.active { border-color: #3b82f6; background: #eef4ff; }
-        .sv-card.locked { opacity: .6; cursor: not-allowed; }
-        .sv-emoji { font-size: 20px; margin-bottom: 6px; }
-        .sv-head { font-weight: 600; }
-        .sv-desc { font-size: 12px; color: #6b7280; }
-        .sv-badge { position: absolute; top: 8px; right: 8px; font-size: 12px; }
-        .sv-note { margin-top: 8px; font-size: 12px; color: #6b7280; }
-        .sv-error { margin-top: 8px; font-size: 13px; color: #dc2626; }
-        @media (max-width: 540px) { .sv-grid { grid-template-columns: 1fr; } }
+        .sv-title {
+          font-weight: 700;
+          margin-bottom: 6px;
+        }
+        .sv-caption {
+          color: #6b7280;
+          font-size: 13px;
+          margin-bottom: 12px;
+        }
+        .sv-grid {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 10px;
+        }
+        .sv-card {
+          border: 1px solid #e5e7eb;
+          border-radius: 10px;
+          background: #fafafa;
+          padding: 14px 10px;
+          text-align: center;
+          cursor: pointer;
+          position: relative;
+          transition:
+            transform 0.08s,
+            box-shadow 0.12s,
+            border-color 0.12s;
+        }
+        .sv-card:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+        }
+        .sv-card.active {
+          border-color: #3b82f6;
+          background: #eef4ff;
+        }
+        .sv-card.locked {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+        .sv-emoji {
+          font-size: 20px;
+          margin-bottom: 6px;
+        }
+        .sv-head {
+          font-weight: 600;
+        }
+        .sv-desc {
+          font-size: 12px;
+          color: #6b7280;
+        }
+        .sv-badge {
+          position: absolute;
+          top: 8px;
+          right: 8px;
+          font-size: 12px;
+        }
+        .sv-note {
+          margin-top: 8px;
+          font-size: 12px;
+          color: #6b7280;
+        }
+        .sv-error {
+          margin-top: 8px;
+          font-size: 13px;
+          color: #dc2626;
+        }
+        @media (max-width: 540px) {
+          .sv-grid {
+            grid-template-columns: 1fr;
+          }
+        }
       `}</style>
     </div>
   );

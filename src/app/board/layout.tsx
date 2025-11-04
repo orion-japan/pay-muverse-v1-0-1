@@ -3,11 +3,7 @@
 import React from 'react';
 import '../board/board.css'; // boardページ専用スタイル
 
-export default function BoardLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function BoardLayout({ children }: { children: React.ReactNode }) {
   return (
     <div
       className="board-layout"

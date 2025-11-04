@@ -8,7 +8,7 @@ export function middleware(req: NextRequest) {
       name: 'mu_sid',
       value: crypto.randomUUID(),
       httpOnly: true,
-      sameSite: 'lax',   // ← 小文字
+      sameSite: 'lax', // ← 小文字
       path: '/',
       maxAge: 60 * 60 * 24 * 365, // 1年（秒）
     });

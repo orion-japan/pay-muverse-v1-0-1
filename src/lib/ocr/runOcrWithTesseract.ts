@@ -16,17 +16,19 @@ export async function runOcrWithTesseract(
 
   const worker = await Tesseract.createWorker({
     workerPath: `https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/worker.min.js?${V}`,
-    corePath:   `https://cdn.jsdelivr.net/npm/tesseract.js-core@2.2.0/tesseract-core.wasm.js?${V}`, // 非SIMD固定
-    langPath:   `https://cdn.jsdelivr.net/npm/tesseract.js-core@2.2.0/lang-data`,
-    gzip:       true,
-    logger:     (m) => onProgress?.(m),
+    corePath: `https://cdn.jsdelivr.net/npm/tesseract.js-core@2.2.0/tesseract-core.wasm.js?${V}`, // 非SIMD固定
+    langPath: `https://cdn.jsdelivr.net/npm/tesseract.js-core@2.2.0/lang-data`,
+    gzip: true,
+    logger: (m) => onProgress?.(m),
   });
 
   await worker.load();
   await worker.loadLanguage(lang);
   await worker.initialize(lang);
 
-  const { data: { text } } = await worker.recognize(file);
+  const {
+    data: { text },
+  } = await worker.recognize(file);
 
   await worker.terminate();
   return text;

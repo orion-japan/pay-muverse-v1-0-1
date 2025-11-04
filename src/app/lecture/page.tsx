@@ -2,21 +2,18 @@
 
 import Link from 'next/link';
 import './lecture.css';
-import { useRouter } from 'next/navigation'; 
+import { useRouter } from 'next/navigation';
 
 export default function LectureMenu() {
-  const router = useRouter(); 
+  const router = useRouter();
   return (
-<div className="lecture__wrap">
-<div className="lessons__wrap">
-      {/* 戻るボタン */}
-      <button
-        className="backBtn"
-        onClick={() => router.back()}
-        aria-label="戻る"
-      >
-        ← 戻る
-      </button></div>
+    <div className="lecture__wrap">
+      <div className="lessons__wrap">
+        {/* 戻るボタン */}
+        <button className="backBtn" onClick={() => router.back()} aria-label="戻る">
+          ← 戻る
+        </button>
+      </div>
 
       <h1 className="lecture__title">Lecture メニュー</h1>
       <p className="lecture__intro">学びとQコード解析のためのメニューです。</p>

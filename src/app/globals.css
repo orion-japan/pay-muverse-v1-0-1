@@ -2,6 +2,37 @@
  🌍 1. 基本設定（Tailwind完全排除）
 ======================================== */
 
+/* === global variables (safe defaults) === */
+:root {
+  /* 実ヘッダー高・フッター高（iPhone安全域を考慮） */
+  --header-h: 53px;
+  --footer-safe-pad: calc(54px + env(safe-area-inset-bottom, 0px));
+
+  /* 使い回す場合の別名（あれば便利） */
+  --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+
+  /* 必要なら色系もここに統一
+  --sofia-bg: #ffffff;
+  --sofia-fg: #0f1115;
+  */
+}
+
+/* レイアウトの基本安定化（必要に応じて） */
+html, body {
+  min-height: 100%;
+  overflow-x: hidden;
+}
+
+/* フッター帯の分だけボディ下に余白を確保（重なり防止・任意） */
+body {
+  padding-bottom: var(--footer-safe-pad);
+}
+
+
+
+
+
+
 * {
   box-sizing: border-box;
   padding: 0;
@@ -160,17 +191,15 @@ div.input-box > div > iframe {
 ======================================== */
 
 .pay-main {
-  
   display: flex;
   flex-direction: column;
-  align-items: center;      /* ✅ 横センター */
-  justify-content: center;  /* ✅ 縦センター */
+  align-items: center; /* ✅ 横センター */
+  justify-content: center; /* ✅ 縦センター */
   padding: 15px 20px 0;
   background: linear-gradient(to bottom right, #eef4ff, #ffffff);
   font-family: 'Inter', 'Noto Sans JP', sans-serif;
   gap: 4px;
 }
-
 
 .pay-title {
   font-size: 28px;
@@ -227,7 +256,7 @@ div.input-box > div > iframe {
   padding: 14px;
   border-radius: 10px;
   background: #f9fafb;
-  box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
   margin-bottom: 10px;
 }
 
@@ -283,7 +312,7 @@ div.input-box > div > iframe {
 .payjp-wrap {
   width: 100%;
   max-width: 500px;
-  min-width: 380px;       /* ✅ これで縮小を防止 */
+  min-width: 380px; /* ✅ これで縮小を防止 */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -305,7 +334,6 @@ div.input-box > div > iframe {
   box-sizing: border-box;
 }
 
-
 .payjp-title {
   font-size: 20px;
   font-weight: bold;
@@ -317,7 +345,7 @@ div.input-box > div > iframe {
 /* ロゴ横並び */
 .brand-row {
   display: flex;
-  justify-content: space-between;  /* 🔥 均等配置 */
+  justify-content: space-between; /* 🔥 均等配置 */
   gap: 10px;
   margin-bottom: 20px;
 }
@@ -377,7 +405,7 @@ div.input-box > div > iframe {
 }
 .plan-panel {
   width: 100%;
-  max-width: 420px;    /* 🔥 420pxで固定 */
+  max-width: 420px; /* 🔥 420pxで固定 */
   margin: 0 auto 24px auto;
   background: #fff;
   padding: 20px;
@@ -385,7 +413,6 @@ div.input-box > div > iframe {
   border: 1px solid #e5e7eb;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
 }
-
 
 .plan-title {
   text-align: center;
@@ -405,7 +432,7 @@ div.input-box > div > iframe {
 }
 .plan-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
 }
 .plan-card.selected {
   border: 2px solid #2563eb;
@@ -456,52 +483,96 @@ div.input-box > div > iframe {
   cursor: not-allowed;
 }
 
-
 /* ===== Reset & theme ===== */
-:root{
+:root {
   --maxw: 430px;
   --bg-app: #f9fafb;
   --bg-page: #fff;
   --text: #333;
   --primary: #7b4fff;
-  --shadow: 0 4px 12px rgba(0,0,0,.08);
+  --shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
   --radius: 12px;
 }
 
 /* Reset */
-*{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%}
-body{
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+html,
+body {
+  height: 100%;
+}
+body {
   background: var(--bg-page);
   color: var(--text);
-  font-family: Inter,'Noto Sans JP',system-ui,sans-serif;
-  line-height:1.5;
+  font-family: Inter, 'Noto Sans JP', system-ui, sans-serif;
+  line-height: 1.5;
   /* ❌ 中央寄せはここに書かない */
 }
 
 /* Scrollbar（任意） */
-::-webkit-scrollbar{width:8px}
-::-webkit-scrollbar-thumb{border-radius:4px;background:linear-gradient(45deg,#8b5cf6,#ec4899)}
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: linear-gradient(45deg, #8b5cf6, #ec4899);
+}
 
 /* ユーティリティ */
-.mu-inner{width:100%;max-width:var(--maxw);margin:0 auto}
-.mu-card{background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);padding:16px}
+.mu-inner {
+  width: 100%;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+.mu-card {
+  background: #fff;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
 
 /* 旧レイアウトの癖を無効化（保険） */
-.page-wrapper,.frame-container,.dashboard-wrapper,.app-frame,.main-content{
-  max-width:none!important;float:none!important;margin-left:auto!important;margin-right:auto!important;
+.page-wrapper,
+.frame-container,
+.dashboard-wrapper,
+.app-frame,
+.main-content {
+  max-width: none !important;
+  float: none !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
 }
-body{display:block!important;justify-content:initial!important}
-img,iframe{display:block}
+body {
+  display: block !important;
+  justify-content: initial !important;
+}
+img,
+iframe {
+  display: block;
+}
 
 /* body で中央寄せしない（右寄せの元凶を潰す） */
-body { display: block !important; justify-content: initial !important; }
+body {
+  display: block !important;
+  justify-content: initial !important;
+}
 
 /* main は保険で中央 430px に */
-main { max-width: 430px !important; margin: 0 auto !important; display: block !important; }
+main {
+  max-width: 430px !important;
+  margin: 0 auto !important;
+  display: block !important;
+}
 
 /* 旧コンテナのクセを殺す（右寄り/横並びの保険） */
-.page-wrapper, .frame-container, .dashboard-wrapper, .app-frame, .main-content {
+.page-wrapper,
+.frame-container,
+.dashboard-wrapper,
+.app-frame,
+.main-content {
   max-width: none !important;
   float: none !important;
   margin-left: auto !important;
@@ -509,8 +580,14 @@ main { max-width: 430px !important; margin: 0 auto !important; display: block !i
 }
 
 /* 画像や iframe 下の謎の隙間対策＋横スク抑止 */
-img, iframe { display: block; }
-html, body { overflow-x: hidden; }
+img,
+iframe {
+  display: block;
+}
+html,
+body {
+  overflow-x: hidden;
+}
 /* === PAY ブランドロゴの並びを強制 === */
 .payjp-brand-row,
 .brand-row {
@@ -531,7 +608,7 @@ html, body { overflow-x: hidden; }
   width: auto !important;
   display: block !important;
   object-fit: contain !important;
-  opacity: .9;
+  opacity: 0.9;
 }
 main {
   padding-top: 0 !important;
@@ -541,7 +618,7 @@ main {
   content: '';
   display: block;
   height: 20px; /* 余白の高さを調整 */
-  background:#eff6fd; /* 緑色 */
+  background: #eff6fd; /* 緑色 */
 }
 
 .dashboard-wrapper img {
@@ -551,23 +628,26 @@ main {
   display: block;
   margin-top: 0 !important;
 }
-.mu-page > div[style*="padding-top"] {
+.mu-page > div[style*='padding-top'] {
   padding-top: 0 !important;
 }
 
-
-.tile.disabled { opacity: .4; filter: grayscale(100%); cursor: not-allowed; }
+.tile.disabled {
+  opacity: 0.4;
+  filter: grayscale(100%);
+  cursor: not-allowed;
+}
 
 /* 旧: 高さ50~60px相当 → 新: 40px程度に圧縮 */
 .header,
 .navbar {
-  height: 42px;             /* 高さ低めに */
-  padding: 4px 10px;        /* 上下paddingを圧縮 */
-  font-size: 14px;          /* 文字サイズも少し小さく */
+  height: 42px; /* 高さ低めに */
+  padding: 4px 10px; /* 上下paddingを圧縮 */
+  font-size: 14px; /* 文字サイズも少し小さく */
 }
 
 .header .logo {
-  height: 26px;             /* ロゴ画像も縮める */
+  height: 26px; /* ロゴ画像も縮める */
 }
 
 @font-face {
@@ -582,11 +662,12 @@ body {
   font-family: 'ZenMaruGothic', system-ui, sans-serif;
 }
 
-.pay-main{ padding-bottom: var(--footer-safe-pad) !important; }
-
+.pay-main {
+  padding-bottom: var(--footer-safe-pad) !important;
+}
 
 /* ---- 下端が隠れないための安全余白 ---- */
-:root{
+:root {
   /* 実際のタブ/フッターの高さに合わせて調整（例: 64px） */
   --footer-height: 64px;
   /* セーフエリア込みの下余白 */
@@ -594,20 +675,22 @@ body {
 }
 /* 古い iOS Safari 向けフォールバック */
 @supports (padding-bottom: constant(safe-area-inset-bottom)) {
-  :root{
+  :root {
     --footer-safe-pad: calc(var(--footer-height) + constant(safe-area-inset-bottom));
   }
 }
 
 /* 必要なら */
-html, body { height: 100%; }
+html,
+body {
+  height: 100%;
+}
 
 /* ★ コンテンツに常時「下余白」を強制付与（確実に勝つために !important） */
-.pay-main{
+.pay-main {
   padding-bottom: var(--footer-safe-pad) !important;
   box-sizing: border-box;
 }
-
 
 /* 解約ボタン（赤系） */
 .btn-cancel {
@@ -623,7 +706,9 @@ html, body { height: 100%; }
   border: 1px solid #b52a36;
   border-radius: 10px;
   cursor: pointer;
-  transition: background-color 0.2s, transform 0.1s;
+  transition:
+    background-color 0.2s,
+    transform 0.1s;
 }
 .btn-cancel:hover:not(:disabled) {
   background-color: #c82333;
@@ -653,7 +738,9 @@ html, body { height: 100%; }
   border: 1px solid #cfd4da;
   border-radius: 10px;
   cursor: pointer;
-  transition: background-color 0.2s, transform 0.1s;
+  transition:
+    background-color 0.2s,
+    transform 0.1s;
 }
 .btn-remove-card:hover:not(:disabled) {
   background-color: #e6e9ee;
@@ -674,39 +761,52 @@ html, body { height: 100%; }
 .btn-sync {
   display: inline-flex;
   align-items: center;
-  gap: .5rem;
-  padding: .625rem .875rem;
-  border-radius: .75rem;
-  font-size: .875rem;
+  gap: 0.5rem;
+  padding: 0.625rem 0.875rem;
+  border-radius: 0.75rem;
+  font-size: 0.875rem;
   font-weight: 600;
   color: #fff;
   background: linear-gradient(180deg, #6366f1 0%, #4f46e5 100%);
-  box-shadow: 0 6px 20px rgba(79,70,229,.22);
-  transition: transform .06s ease, filter .2s ease, box-shadow .2s ease, background .2s ease;
+  box-shadow: 0 6px 20px rgba(79, 70, 229, 0.22);
+  transition:
+    transform 0.06s ease,
+    filter 0.2s ease,
+    box-shadow 0.2s ease,
+    background 0.2s ease;
   will-change: transform;
 }
-.btn-sync:hover { filter: brightness(1.03); box-shadow: 0 8px 24px rgba(79,70,229,.28); }
-.btn-sync:active { transform: translateY(1px); }
-.btn-sync:disabled { opacity: .6; cursor: not-allowed; box-shadow: none; }
+.btn-sync:hover {
+  filter: brightness(1.03);
+  box-shadow: 0 8px 24px rgba(79, 70, 229, 0.28);
+}
+.btn-sync:active {
+  transform: translateY(1px);
+}
+.btn-sync:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+}
 
 /* カード登録ボタンの下に余白（履歴と詰まない） */
 .pay-main .card-register-area {
-  margin: 20px 0 28px;           /* 上20 / 下28 */
+  margin: 20px 0 28px; /* 上20 / 下28 */
   text-align: center;
 }
 
 /* 履歴セクションの上下余白（上を広め、下も少し空ける） */
 .pay-main .history-section {
-  margin-top: 36px !important;   /* ← 黒ボタンと十分離す */
-  margin-bottom: 20px !important;/* ← 下の操作ボタンとも離す */
+  margin-top: 36px !important; /* ← 黒ボタンと十分離す */
+  margin-bottom: 20px !important; /* ← 下の操作ボタンとも離す */
 }
 
 /* 下3ボタン（解約/削除/プランチェック）の等間隔 */
 .pay-main .bottom-buttons {
   display: flex;
   flex-direction: column;
-  gap: 22px;                     /* ← ボタン間の隙間を一括で管理 */
-  margin-top: 24px;              /* 履歴との間 */
+  gap: 22px; /* ← ボタン間の隙間を一括で管理 */
+  margin-top: 24px; /* 履歴との間 */
   text-align: center;
 }
 
@@ -722,7 +822,6 @@ html, body { height: 100%; }
 .pay-main .history-acc__summary {
   padding: 10px 12px;
 }
-
 
 /* ===============================
    プラン履歴セクション
@@ -835,14 +934,16 @@ details[open] .history-acc__chev {
   background: #fff;
   border-radius: 10px;
   padding: 14px 16px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
   border: 1px solid #e5e7eb;
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
 }
 
 .history-item:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 /* 行の中身 */
@@ -870,42 +971,44 @@ details[open] .history-acc__chev {
 }
 
 /* Footer が計測して入れる CSS 変数を確実に反映 */
-body { padding-bottom: var(--footer-safe-pad); }
+body {
+  padding-bottom: var(--footer-safe-pad);
+}
 
 /* ===== アクセントの共通色（デフォルト：青→紫） ===== */
 :root,
 .sof-container {
-  --accent-start: #5cc0ff;   /* 左色 */
-  --accent-end:   #b347ff;   /* 右色 */
-  --accent-height: 3px;      /* ラインの太さ */
-  --accent-inset:  10px;     /* 左右の内側オフセット（吹き出しの丸みに合わせて調整） */
-  --accent-glow:  0 0 10px rgba(131, 92, 255, .35); /* うっすら発光 */
+  --accent-start: #5cc0ff; /* 左色 */
+  --accent-end: #b347ff; /* 右色 */
+  --accent-height: 3px; /* ラインの太さ */
+  --accent-inset: 10px; /* 左右の内側オフセット（吹き出しの丸みに合わせて調整） */
+  --accent-glow: 0 0 10px rgba(131, 92, 255, 0.35); /* うっすら発光 */
 }
 
 /* 例：Mu テーマ（色替え） */
-.sof-container[data-chat-theme="mu"] {
-  --accent-start: #06b6d4;   /* シアン */
-  --accent-end:   #3b82f6;   /* ブルー */
-  --accent-glow:  0 0 10px rgba(59,130,246,.30);
+.sof-container[data-chat-theme='mu'] {
+  --accent-start: #06b6d4; /* シアン */
+  --accent-end: #3b82f6; /* ブルー */
+  --accent-glow: 0 0 10px rgba(59, 130, 246, 0.3);
 }
 
 /* 他テーマの例 */
-.sof-container[data-chat-theme="alt"] {
-  --accent-start: #ff7a18;   /* オレンジ */
-  --accent-end:   #af002d;   /* ピンク寄り赤 */
-  --accent-glow:  0 0 10px rgba(255,122,24,.30);
+.sof-container[data-chat-theme='alt'] {
+  --accent-start: #ff7a18; /* オレンジ */
+  --accent-end: #af002d; /* ピンク寄り赤 */
+  --accent-glow: 0 0 10px rgba(255, 122, 24, 0.3);
 }
 
 /* ===== 吹き出し上辺の“未来ライン” ===== */
 .sof-bubble {
-  position: relative;          /* ::before を載せる土台 */
+  position: relative; /* ::before を載せる土台 */
 }
 
 /* 両方の吹き出しに出す */
 .sof-bubble::before {
-  content: "";
+  content: '';
   position: absolute;
-  top: -1px;                   /* 0〜-1pxで微調整。被るなら 0 に */
+  top: -1px; /* 0〜-1pxで微調整。被るなら 0 に */
   left: var(--accent-inset);
   right: var(--accent-inset);
   height: var(--accent-height);
@@ -937,7 +1040,6 @@ body { padding-bottom: var(--footer-safe-pad); }
   content: none !important;
 }
 
-
 /* =========================
    基本トーン（お好みで調整可）
 ========================= */
@@ -945,14 +1047,14 @@ body { padding-bottom: var(--footer-safe-pad); }
 .sof-container {
   /* ユーザー吹き出し（青グラデ） */
   --user-start: #4da3ff;
-  --user-end:   #7a5dff;
-  --user-text:  #ffffff;
+  --user-end: #7a5dff;
+  --user-text: #ffffff;
 
   /* AI吹き出し（白～薄青・枠/影） */
   --ai-bg1: #ffffff;
   --ai-bg2: #f7fbff;
   --ai-border: rgba(90, 140, 220, 0.25);
-  --ai-shadow: 0 6px 22px rgba(15, 35, 80, 0.10);
+  --ai-shadow: 0 6px 22px rgba(15, 35, 80, 0.1);
 
   /* AIアイコンの光輪 */
   --ai-aura1: #51e1cf; /* ターコイズ */
@@ -969,7 +1071,10 @@ body { padding-bottom: var(--footer-safe-pad); }
   box-shadow: 0 6px 16px rgba(76, 84, 190, 0.22);
   border-radius: 14px 14px 6px 14px; /* 左下だけ少し尖らせて向きの違いを出す */
 }
-.sof-container .msg--user .bubble a { color: #fff; text-decoration: underline; }
+.sof-container .msg--user .bubble a {
+  color: #fff;
+  text-decoration: underline;
+}
 
 /* AIは白系＋薄い枠＆柔らかい影 */
 .sof-container .msg--ai .bubble {
@@ -983,7 +1088,7 @@ body { padding-bottom: var(--footer-safe-pad); }
 
 /* （任意）AI吹き出しに細いアクセントライン */
 .sof-container .msg--ai .bubble::before {
-  content: "";
+  content: '';
   position: absolute;
   left: -8px;
   top: 10px;
@@ -1002,21 +1107,27 @@ body { padding-bottom: var(--footer-safe-pad); }
   width: 36px;
   height: 36px;
   border-radius: 999px;
-  overflow: visible;            /* 光輪を見せるため */
+  overflow: visible; /* 光輪を見せるため */
   background: radial-gradient(circle at 35% 35%, #eefefd, #e7f6ff 60%, #d9efff 100%);
-  box-shadow: 0 0 0 2px #fff;   /* 白い縁取りで浮かせる */
+  box-shadow: 0 0 0 2px #fff; /* 白い縁取りで浮かせる */
 }
-.sof-container .msg--ai .avatar img { border-radius: 999px; display: block; width: 100%; height: 100%; object-fit: cover; }
+.sof-container .msg--ai .avatar img {
+  border-radius: 999px;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 
 /* 光のオーラ（にじむリング） */
 .sof-container .msg--ai .avatar::before {
-  content: "";
+  content: '';
   position: absolute;
   inset: -8px;
   border-radius: inherit;
   background: radial-gradient(circle, var(--ai-aura1) 0%, var(--ai-aura2) 45%, transparent 60%);
   filter: blur(12px);
-  opacity: .55;
+  opacity: 0.55;
   pointer-events: none;
 }
 
@@ -1027,9 +1138,9 @@ body { padding-bottom: var(--footer-safe-pad); }
    - そうでない場合は、コンテナに data-typing="ai" を付ければ表示
 ========================= */
 .sof-container .typing-badge {
-  position: sticky;     /* スクロール中も下辺に追随 */
+  position: sticky; /* スクロール中も下辺に追随 */
   bottom: 8px;
-  margin-left: auto;    /* 右寄せの小さなピル */
+  margin-left: auto; /* 右寄せの小さなピル */
   display: none;
   align-items: center;
   gap: 6px;
@@ -1039,49 +1150,74 @@ body { padding-bottom: var(--footer-safe-pad); }
   color: #fff;
   background: rgba(13, 22, 45, 0.75);
   backdrop-filter: blur(6px);
-  box-shadow: 0 2px 10px rgba(10, 20, 40, .25);
+  box-shadow: 0 2px 10px rgba(10, 20, 40, 0.25);
   z-index: 2;
 }
 
 /* 条件1: 返信中の仮メッセージがある（JS不要、DOMに .msg--ai.pending が出ていればOK） */
-.sof-container:has(.message-list .msg--ai.pending) .typing-badge { display: inline-flex; }
+.sof-container:has(.message-list .msg--ai.pending) .typing-badge {
+  display: inline-flex;
+}
 /* 条件2: ルートに data-typing="ai" を付与した場合（状態管理しているなら1行で制御可） */
-.sof-container[data-typing="ai"] .typing-badge { display: inline-flex; }
+.sof-container[data-typing='ai'] .typing-badge {
+  display: inline-flex;
+}
 
 /* 3点ドット（CSSのみ） */
-.sof-container .typing-badge .dots { display: inline-flex; gap: 4px; }
+.sof-container .typing-badge .dots {
+  display: inline-flex;
+  gap: 4px;
+}
 .sof-container .typing-badge .dot {
-  width: 4px; height: 4px; border-radius: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
   background: currentColor;
-  opacity: .25; transform: translateY(0);
+  opacity: 0.25;
+  transform: translateY(0);
   animation: typingBlink 1.2s infinite;
 }
-.sof-container .typing-badge .dot:nth-child(2) { animation-delay: .15s; }
-.sof-container .typing-badge .dot:nth-child(3) { animation-delay: .30s; }
+.sof-container .typing-badge .dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.sof-container .typing-badge .dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
 
 @keyframes typingBlink {
-  0%, 80%, 100% { opacity: .25; transform: translateY(0); }
-  40%          { opacity: 1;   transform: translateY(-2px); }
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
 }
 
 /* =========================
    細かい調整（行間・余白）
 ========================= */
-.sof-container .bubble { line-height: 1.65; }
+.sof-container .bubble {
+  line-height: 1.65;
+}
 .sof-container .msg--user .bubble,
-.sof-container .msg--ai .bubble { padding: 12px 14px; }
+.sof-container .msg--ai .bubble {
+  padding: 12px 14px;
+}
 
 .sof-container .msg--ai .avatar::before {
-  content: "";
+  content: '';
   position: absolute;
   inset: -10px; /* 光を広めに */
   border-radius: inherit;
   background: radial-gradient(circle, #6bf0dd 0%, #4fc3ff 40%, transparent 70%);
-  filter: blur(16px);  /* もっとにじませる */
-  opacity: .75;        /* 光量を強める */
+  filter: blur(16px); /* もっとにじませる */
+  opacity: 0.75; /* 光量を強める */
   pointer-events: none;
 }
-
 
 /* ========== Safe Area Utilities ========== */
 
@@ -1110,7 +1246,6 @@ body { padding-bottom: var(--footer-safe-pad); }
   --footer-max-w: 520px; /* フッターの最大幅（デフォルト） */
 }
 
-
 /* チャット画面配下では main / .mu-inner の固定幅を解除 */
 .sofia-container main,
 .sofia-container .mu-inner {
@@ -1118,21 +1253,23 @@ body { padding-bottom: var(--footer-safe-pad); }
   width: 100% !important;
 }
 
-
-
-
-
-
-
-
 /* === 微調整：タイルは据え置き、アイコン/文字だけ少し大きく === */
-body.mu-dashboard .tile .tile-icon{
+body.mu-dashboard .tile .tile-icon {
   /* 0.48→0.52 にして最大も 48→52px にアップ */
   width: clamp(36px, calc(var(--tile-size) * 0.52), 52px) !important;
   height: clamp(36px, calc(var(--tile-size) * 0.52), 52px) !important;
 }
 
-body.mu-dashboard .tile .tile-label{
+body.mu-dashboard .tile .tile-label {
   /* 0.14→0.155、最大 14→15px */
   font-size: clamp(12.5px, calc(var(--tile-size) * 0.155), 15px) !important;
+}
+
+
+
+/* ==== Global layout vars for Iros ==== */
+:root{
+  --header-h: 44px;                         /* IrosHeader の実高さに合わせる */
+  --footer-safe-pad: 56px;                  /* 下部ナビの高さ */
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
 }

@@ -8,15 +8,15 @@ export const dynamic = 'force-dynamic';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
 // uid → user_code
 async function uidToUserCode(uid: string) {
   const candidates: Array<{ table: string; codeCol: string; uidCol: string }> = [
-    { table: 'users',        codeCol: 'user_code', uidCol: 'firebase_uid' },
-    { table: 'users',        codeCol: 'user_code', uidCol: 'uid' },
-    { table: 'profiles',     codeCol: 'user_code', uidCol: 'uid' },
+    { table: 'users', codeCol: 'user_code', uidCol: 'firebase_uid' },
+    { table: 'users', codeCol: 'user_code', uidCol: 'uid' },
+    { table: 'profiles', codeCol: 'user_code', uidCol: 'uid' },
     { table: 'public_users', codeCol: 'user_code', uidCol: 'uid' },
   ];
 
@@ -57,15 +57,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({}, { headers: { 'Cache-Control': 'no-store' } });
     }
 
-    const consents =
-      data?.consents && typeof data.consents === 'object' ? data.consents : {};
+    const consents = data?.consents && typeof data.consents === 'object' ? data.consents : {};
 
     return NextResponse.json(consents, { headers: { 'Cache-Control': 'no-store' } });
   } catch (e: any) {
     console.error('[notification-settings] error:', e);
     return NextResponse.json(
       { error: e?.message ?? 'server error' },
-      { status: 500, headers: { 'Cache-Control': 'no-store' } }
+      { status: 500, headers: { 'Cache-Control': 'no-store' } },
     );
   }
 }

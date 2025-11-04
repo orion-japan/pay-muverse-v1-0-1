@@ -1,198 +1,296 @@
 /* ====== レイアウト基本 ====== */
 .vision-shell {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    padding: 16px;
-  }
-  
-  .vision-tabs { display: flex; gap: 8px; }
-  .vision-tabs button {
-    padding: 6px 14px;
-    border-radius: 8px;
-    border: 1px solid #ccc;
-    background: #f8f8f8;
-    cursor: pointer;
-  }
-  .vision-tabs button.is-active {
-    background: #6b6bf5;
-    border-color: #6b6bf5;
-    color: #fff;
-  }
-  
-  /* ★ 盤面は横スクロールのみ。縦は可視（D&Dの必須条件） */
-  .vision-board {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(240px, 1fr));
-    gap: 12px;
-    overflow-x: auto;
-    overflow-y: visible;      /* ← 重要：縦 overflow を作らない */
-    padding-bottom: 8px;
-  }
-  
-  .vision-column {
-    background: #fafafa;
-    border: 1px solid #e0e0e0;
-    border-radius: 10px;
-    display: flex;
-    flex-direction: column;
-    min-width: 220px;
-    overflow: visible;        /* ← 重要：縦 overflow を作らない */
-  }
-  
-  .vision-col-header {
-    font-weight: 600;
-    padding: 8px;
-    border-bottom: 1px solid #ddd;
-    text-align: center;
-  }
-  
-  /* ★ Droppable を付ける箱。縦 overflow を作らない */
-  .vision-col-body {
-    flex: 1;
-    padding: 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    overflow-y: visible;      /* ← auto/hide にしない */
-    min-height: 16px;         /* 空でもドロップ可 */
-  }
-  
-  /* ====== カード ====== */
-  .vision-card {
-    position: relative;
-    background: #fff;
-    border: 1px solid #ddd;
-    border-radius: 10px;
-    padding: 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    cursor: grab;
-  }
-  .vision-card:active { cursor: grabbing; }
-  
-  .vision-thumb {
-    width: 100%;
-    height: 100px;
-    object-fit: cover;
-    border-radius: 6px;
-  }
-  
-  .vision-title { font-size: 14px; font-weight: 600; }
-  .vision-intent { font-size: 12px; color: #555; }
-  .vision-status {
-    font-size: 11px;
-    background: #eee;
-    border-radius: 6px;
-    padding: 2px 6px;
-    align-self: flex-start;
-  }
-  
-  /* ドラッグハンドル（タッチ掴み優先） */
-  .vision-drag-handle {
-    position: absolute; top: 6px; right: 6px;
-    border: none; background: transparent; cursor: grab;
-    font-size: 16px; line-height: 1; padding: 4px;
-    touch-action: none;       /* ← 重要（モバイルで掴み優先） */
-    -ms-touch-action: none;
-  }
-  
-  .vision-card-click { cursor: pointer; user-select: none; -webkit-user-select: none; }
-  .vision-card-bridge { margin-top: 8px; }
-  
-  .vision-card.is-selected {
-    outline: 2px solid #8a6bff;
-    box-shadow: 0 0 0 3px rgba(138,107,255,0.15);
-  }
-  
-  /* ドラッグ中の見た目（transform はライブラリに任せる→上書きしない） */
-  .vision-card.is-dragging {
-    opacity: .9;
-    box-shadow: 0 8px 24px rgba(0,0,0,.18);
-    /* transform: translateY(-1px);  ← 削除：D&Dの transform を邪魔しない */
-  }
-  
-  /* ====== Bridge（インライン） ====== */
-  .stage-bridge { margin-top:8px; background:#00000006; border-radius:10px; padding:8px; }
-  .bridge-empty { font-size:12px; opacity:.7; }
-  .bridge-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:4px; }
-  .bridge-item { display:flex; align-items:center; justify-content:space-between; padding:4px 6px; background:#fff; border-radius:8px; }
-  .bridge-item .title { margin-left:6px; font-size:12px; }
-  .bridge-item .count { font-size:12px; opacity:.6; }
-  .bridge-footer { display:flex; align-items:center; justify-content:space-between; margin-top:8px; }
-  .bridge-progress { font-size:12px; opacity:.8; }
-  .bridge-next { font-size:12px; padding:6px 10px; border-radius:8px; }
-  
-  .bridge-list { display: flex; flex-direction: column; gap: 6px; }
-  .bridge-item { display: flex; align-items: center; gap: 8px; }
-  
-  .bridge-tick {
-    border: 1px solid #ddd;
-    background: #fff;
-    border-radius: 6px;
-    padding: 2px 8px;
-    cursor: pointer;
-    line-height: 1;
-  }
-  .bridge-body { flex: 1; }
-  .bridge-title { font-size: 12px; line-height: 1.2; }
-  .bridge-meter {
-    position: relative;
-    height: 6px;
-    border-radius: 999px;
-    background: #eee;
-    margin-top: 4px;
-  }
-  .bridge-bar {
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: 0%;
-    border-radius: 999px;
-    background: var(--accent, #7c3aed);
-  }
-  .bridge-text { font-size: 10px; margin-left: 6px; color: #666; }
-  
-  .link-like {
-    background: none;
-    border: none;
-    padding: 0;
-    text-decoration: underline;
-    cursor: pointer;
-    font-size: 12px;
-  }
-  
-  .text-xs { font-size: 12px; }
-  .text-muted { color: #666; }
-  .text-danger { color: #c0392b; }
-  
-  /* ====== 上部UI（新規ボタンなど） ====== */
-  .vision-topbar {
-    display: flex;
-    justify-content: flex-end;
-    margin-bottom: 8px;
-  }
-  .vision-new-global {
-    padding: 8px 14px;
-    border-radius: 10px;
-    border: 1px solid #d0c3ff;
-    background: linear-gradient(180deg, #eee9ff, #ded2ff);
-    cursor: pointer;
-  }
-  
-  /* 列末尾の＋カードが残っていた場合は非表示 */
-  .vision-column .vision-add { display: none !important; }
-  
-  /* ダブル定義のクリーンアップ（重複ガード） */
-  .stagecheck-actions { display: none; }
-  
-  /* vision.css に追加 */
-.vision-edit-btn{
-  position:absolute; top:6px; right:6px;
-  font-size:12px; padding:2px 6px; border-radius:8px;
-  background:#fff; border:1px solid #ddd; cursor:pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
 }
-.vision-card{ position:relative; }
+
+.vision-tabs {
+  display: flex;
+  gap: 8px;
+}
+.vision-tabs button {
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  background: #f8f8f8;
+  cursor: pointer;
+}
+.vision-tabs button.is-active {
+  background: #6b6bf5;
+  border-color: #6b6bf5;
+  color: #fff;
+}
+
+/* ★ 盤面は横スクロールのみ。縦は可視（D&Dの必須条件） */
+.vision-board {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(240px, 1fr));
+  gap: 12px;
+  overflow-x: auto;
+  overflow-y: visible; /* ← 重要：縦 overflow を作らない */
+  padding-bottom: 8px;
+}
+
+.vision-column {
+  background: #fafafa;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  overflow: visible; /* ← 重要：縦 overflow を作らない */
+}
+
+.vision-col-header {
+  font-weight: 600;
+  padding: 8px;
+  border-bottom: 1px solid #ddd;
+  text-align: center;
+}
+
+/* ★ Droppable を付ける箱。縦 overflow を作らない */
+.vision-col-body {
+  flex: 1;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: visible; /* ← auto/hide にしない */
+  min-height: 16px; /* 空でもドロップ可 */
+}
+
+/* ====== カード ====== */
+.vision-card {
+  position: relative;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: grab;
+}
+.vision-card:active {
+  cursor: grabbing;
+}
+
+.vision-thumb {
+  width: 100%;
+  height: 100px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.vision-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+.vision-intent {
+  font-size: 12px;
+  color: #555;
+}
+.vision-status {
+  font-size: 11px;
+  background: #eee;
+  border-radius: 6px;
+  padding: 2px 6px;
+  align-self: flex-start;
+}
+
+/* ドラッグハンドル（タッチ掴み優先） */
+.vision-drag-handle {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  border: none;
+  background: transparent;
+  cursor: grab;
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px;
+  touch-action: none; /* ← 重要（モバイルで掴み優先） */
+  -ms-touch-action: none;
+}
+
+.vision-card-click {
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.vision-card-bridge {
+  margin-top: 8px;
+}
+
+.vision-card.is-selected {
+  outline: 2px solid #8a6bff;
+  box-shadow: 0 0 0 3px rgba(138, 107, 255, 0.15);
+}
+
+/* ドラッグ中の見た目（transform はライブラリに任せる→上書きしない） */
+.vision-card.is-dragging {
+  opacity: 0.9;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  /* transform: translateY(-1px);  ← 削除：D&Dの transform を邪魔しない */
+}
+
+/* ====== Bridge（インライン） ====== */
+.stage-bridge {
+  margin-top: 8px;
+  background: #00000006;
+  border-radius: 10px;
+  padding: 8px;
+}
+.bridge-empty {
+  font-size: 12px;
+  opacity: 0.7;
+}
+.bridge-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.bridge-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px;
+  background: #fff;
+  border-radius: 8px;
+}
+.bridge-item .title {
+  margin-left: 6px;
+  font-size: 12px;
+}
+.bridge-item .count {
+  font-size: 12px;
+  opacity: 0.6;
+}
+.bridge-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+.bridge-progress {
+  font-size: 12px;
+  opacity: 0.8;
+}
+.bridge-next {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+
+.bridge-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.bridge-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bridge-tick {
+  border: 1px solid #ddd;
+  background: #fff;
+  border-radius: 6px;
+  padding: 2px 8px;
+  cursor: pointer;
+  line-height: 1;
+}
+.bridge-body {
+  flex: 1;
+}
+.bridge-title {
+  font-size: 12px;
+  line-height: 1.2;
+}
+.bridge-meter {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: #eee;
+  margin-top: 4px;
+}
+.bridge-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0%;
+  border-radius: 999px;
+  background: var(--accent, #7c3aed);
+}
+.bridge-text {
+  font-size: 10px;
+  margin-left: 6px;
+  color: #666;
+}
+
+.link-like {
+  background: none;
+  border: none;
+  padding: 0;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.text-xs {
+  font-size: 12px;
+}
+.text-muted {
+  color: #666;
+}
+.text-danger {
+  color: #c0392b;
+}
+
+/* ====== 上部UI（新規ボタンなど） ====== */
+.vision-topbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+.vision-new-global {
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid #d0c3ff;
+  background: linear-gradient(180deg, #eee9ff, #ded2ff);
+  cursor: pointer;
+}
+
+/* 列末尾の＋カードが残っていた場合は非表示 */
+.vision-column .vision-add {
+  display: none !important;
+}
+
+/* ダブル定義のクリーンアップ（重複ガード） */
+.stagecheck-actions {
+  display: none;
+}
+
+/* vision.css に追加 */
+.vision-edit-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #ddd;
+  cursor: pointer;
+}
+.vision-card {
+  position: relative;
+}
 
 /* 全体のトップバー */
 .vision-topbar {
@@ -244,7 +342,6 @@
   filter: brightness(1.05);
 }
 
-
 .vision-topbar {
   display: flex;
   align-items: center;
@@ -275,7 +372,9 @@
   font-weight: 700;
   font-size: 14px;
   text-decoration: none;
-  transition: background 0.2s ease, color 0.2s ease;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease;
 }
 
 .vision-history-link:hover {
@@ -283,19 +382,18 @@
   color: #4328b0;
 }
 
-
 .dcp-actions {
   display: flex;
   justify-content: space-between; /* 横並びで左右に配置 */
-  gap: 8px;                       /* ボタン間に余白 */
+  gap: 8px; /* ボタン間に余白 */
 }
 
 .dcp-actions button {
-  flex: 1;                        /* ボタン幅を均等に */
-  padding: 10px 0;                /* 高さを揃える */
+  flex: 1; /* ボタン幅を均等に */
+  padding: 10px 0; /* 高さを揃える */
   font-size: 14px;
   border-radius: 6px;
-  white-space: nowrap;            /* 改行しないで横書き */
+  white-space: nowrap; /* 改行しないで横書き */
 }
 
 .dcp-actions .dcp-criteria-btn {
@@ -359,81 +457,99 @@ button.dcp-secondary:hover {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;           /* ← ボタン同士の余白 */
-  margin-top: 8px;     /* ← 保存時間との余白 */
+  gap: 12px; /* ← ボタン同士の余白 */
+  margin-top: 8px; /* ← 保存時間との余白 */
 }
 
 /* 回数ボタン（小さめに） */
 .dcp-actions .dcp-criteria-btn {
-  font-size: 12px;      /* 文字を小さく */
-  padding: 4px 10px;    /* ボタンの余白も縮小 */
-  min-width: 60px;      /* 幅の下限を小さめに */
-  height: 28px;         /* 高さも小さめ */
+  font-size: 12px; /* 文字を小さく */
+  padding: 4px 10px; /* ボタンの余白も縮小 */
+  min-width: 60px; /* 幅の下限を小さめに */
+  height: 28px; /* 高さも小さめ */
   border-radius: 6px;
 }
 
-
-.vision-footer{
-  display:flex;
-  justify-content:flex-end;    /* 右端に寄せる */
+.vision-footer {
+  display: flex;
+  justify-content: flex-end; /* 右端に寄せる */
   padding: 16px 14px 22px;
 }
 
 /* 希望ボタン */
-.btn-hope{
-  --g1:#ffb86b;   /* sunrise orange */
-  --g2:#ff8bd1;   /* rosy pink   */
-  --g3:#8aa8ff;   /* soft blue   */
+.btn-hope {
+  --g1: #ffb86b; /* sunrise orange */
+  --g2: #ff8bd1; /* rosy pink   */
+  --g3: #8aa8ff; /* soft blue   */
 
-  display:inline-flex;
-  align-items:center;
-  gap:10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
 
-  padding:10px 16px;
-  border-radius:9999px;
+  padding: 10px 16px;
+  border-radius: 9999px;
 
-  color:#fff;
-  text-decoration:none;
-  font-weight:600;
-  letter-spacing:.02em;
+  color: #fff;
+  text-decoration: none;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 
   background: linear-gradient(135deg, var(--g1), var(--g2), var(--g3));
   background-size: 200% 200%;
   box-shadow:
-    0 6px 18px rgba(255, 140, 180, .35),
-    0 2px 6px rgba(0,0,0,.08);
+    0 6px 18px rgba(255, 140, 180, 0.35),
+    0 2px 6px rgba(0, 0, 0, 0.08);
 
-  transition: transform .15s ease, box-shadow .2s ease, background-position 1.2s ease;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.2s ease,
+    background-position 1.2s ease;
 }
 
 /* アクセシビリティ（キーボードフォーカス） */
-.btn-hope:focus-visible{
+.btn-hope:focus-visible {
   outline: none;
   box-shadow:
-    0 0 0 3px rgba(255,255,255,.9),
-    0 0 0 6px rgba(255, 140, 180, .55);
+    0 0 0 3px rgba(255, 255, 255, 0.9),
+    0 0 0 6px rgba(255, 140, 180, 0.55);
 }
 
 /* ふわっと前向きな動き */
-.btn-hope:hover{
+.btn-hope:hover {
   transform: translateY(-1px);
   background-position: 100% 0%;
   box-shadow:
-    0 10px 22px rgba(255, 140, 180, .40),
-    0 4px 12px rgba(0,0,0,.10);
+    0 10px 22px rgba(255, 140, 180, 0.4),
+    0 4px 12px rgba(0, 0, 0, 0.1);
 }
-.btn-hope:active{ transform: translateY(0); }
+.btn-hope:active {
+  transform: translateY(0);
+}
 
 /* 低速端末・設定に配慮 */
-@media (prefers-reduced-motion: reduce){
-  .btn-hope{ transition: none; background-size: auto; }
-  .btn-hope:hover{ transform:none; }
+@media (prefers-reduced-motion: reduce) {
+  .btn-hope {
+    transition: none;
+    background-size: auto;
+  }
+  .btn-hope:hover {
+    transform: none;
+  }
 }
 
-.btn-hope__icon{ font-size:18px; line-height:1; }
-.btn-hope__label{ font-size:14px; }
-.btn-hope__chevron{
-  font-size:14px; opacity:.9;
-  transform: translateX(0); transition: transform .15s ease;
+.btn-hope__icon {
+  font-size: 18px;
+  line-height: 1;
 }
-.btn-hope:hover .btn-hope__chevron{ transform: translateX(2px); }
+.btn-hope__label {
+  font-size: 14px;
+}
+.btn-hope__chevron {
+  font-size: 14px;
+  opacity: 0.9;
+  transform: translateX(0);
+  transition: transform 0.15s ease;
+}
+.btn-hope:hover .btn-hope__chevron {
+  transform: translateX(2px);
+}

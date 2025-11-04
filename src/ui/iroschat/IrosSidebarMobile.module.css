@@ -1,0 +1,136 @@
+/* src/ui/iroschat/IrosSidebarMobile.module.css */
+
+
+
+/* ==== portal/root ==== */
+.portal {
+  position: fixed;
+  inset: 0;
+  z-index: var(--drawer-z);
+  pointer-events: none;
+  isolation: isolate; /* 外側の stacking の影響を遮断 */
+}
+.portalActive { pointer-events: auto; }
+
+/* ==== dim（右側だけ覆う） ==== */
+.dim {
+  position: fixed;
+  left: var(--drawer-width);                /* ← これが肝！ */
+  right: 0;
+  top: var(--header-h);
+  bottom: calc(var(--footer-safe-pad) + var(--safe-bottom));
+  background: rgba(0, 0, 0, 0.28);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+  z-index: 0;                               /* 背面固定 */
+}
+.dimVisible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ==== drawer ==== */
+.drawer {
+  position: fixed;
+  top: var(--header-h);
+  bottom: calc(var(--footer-safe-pad) + var(--safe-bottom));
+  left: 0;
+  width: var(--drawer-width);
+  max-width: 100%;
+  background: var(--drawer-bg);             /* 不透明にして下のdimを隠す */
+  border-right: var(--drawer-border);
+  box-shadow: var(--drawer-shadow);
+  transform: translateX(-100%);
+  transition: transform var(--drawer-transition);
+  z-index: calc(var(--drawer-z) + 10);      /* dim(0) より常に前面 */
+  overflow: hidden;                          /* 子でスクロール管理 */
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+}
+.drawerOpen { transform: translateX(0); }
+
+/* ==== head ==== */
+.drawerHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  position: sticky;
+  top: 0;
+  background: #ffffff;                       /* ←必要なら #0e0f13 に */
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  z-index: 1;
+}
+.drawerTitle { font-size: 14px; font-weight: 600; color: #111827; }
+
+/* ==== buttons ==== */
+.iconButton {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #fafafa;
+  padding: 6px;
+  border-radius: 8px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #222222;
+  transition: background .15s ease, border-color .15s ease;
+}
+.iconButton:hover { background: #f1f5f9; }
+.iconButton:focus-visible { outline: 2px solid #6366f1; outline-offset: 2px; }
+.iconButtonDanger { color: #b42318; border-color: rgba(180,35,24,0.3); background: #fff5f5; }
+
+/* ==== user card ==== */
+.user {
+  margin: 8px 12px 12px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px;
+  font-size: 12px;
+  color: #444;
+  display: flex; flex-direction: column;
+}
+.userRow { display: block; width: 100%; text-align: left; background: transparent; border: none; padding: 6px 0; font: inherit; cursor: pointer; color: inherit; }
+.userRow + .userRow { border-top: 1px dashed rgba(15, 23, 42, 0.08); }
+
+/* ==== logs ==== */
+.logCard { margin: 0 12px 16px; border: 1px solid rgba(15,23,42,0.08); border-radius: 12px; background: #fff; font-size: 12px; color: #334155; overflow: hidden; }
+.logHead { padding: 10px 12px; font-weight: 600; border-bottom: 1px solid rgba(15,23,42,0.08); background: #f8fafc; }
+.logList { list-style: none; margin: 0; padding: 8px 0; display: flex; flex-direction: column; gap: 10px; }
+.logItem { padding: 0 12px; display: flex; flex-direction: column; gap: 4px; }
+.logItemUser .logRole { color: #2563eb; }
+.logItemAssistant .logRole { color: #7c3aed; }
+.logRow { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 11px; }
+.logRole { font-weight: 500; }
+.logTime { color: rgba(51,65,85,0.7); }
+.logContent { font-size: 12px; line-height: 1.6; color: #1f2937; word-break: break-word; }
+
+/* ==== conversations ==== */
+.list { list-style: none; margin: 0; padding: 8px 0 24px; }
+.listItem { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px dashed rgba(0,0,0,0.06); }
+.listTitle { border: 0; background: transparent; text-align: left; padding: 8px 4px; font-size: 14px; color: #222; cursor: pointer; display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+.listTitle:hover { color: #1f2937; }
+.listTitle:focus-visible { outline: 2px solid #6366f1; outline-offset: 2px; }
+.subTime { font-size: 11px; color: rgba(30,41,59,0.7); }
+.listOps { display: flex; gap: 6px; }
+.muted { font-size: 13px; color: rgba(51,65,85,0.7); padding: 10px 12px; }
+
+/* ==== meta fold ==== */
+.metaFold { margin: 12px; border: 1px solid rgba(15,23,42,0.08); border-radius: 12px; background: #fff; overflow: hidden; }
+.metaFoldToggle { width: 100%; display: flex; align-items: center; gap: 8px; justify-content: center; padding: 10px 8px; border: none; background: #fff; cursor: pointer; font: inherit; color: #1f2937; border-bottom: 1px solid rgba(15,23,42,0.06); }
+.metaFoldToggle:focus-visible { outline: 2px solid #6366f1; outline-offset: 2px; }
+.metaFoldBody { max-height: 0; overflow: hidden; transition: max-height .25s ease; }
+.metaFoldBodyOpen { max-height: 60vh; padding: 8px; overflow: auto; -webkit-overflow-scrolling: touch; }
+
+/* ==== small devices ==== */
+@media (max-width: 420px) {
+  .drawer { width: 92vw; } /* = var(--drawer-width) と一致 */
+}
+
+
+/* === Iros Sidebar Theme Override === */

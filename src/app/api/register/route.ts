@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
       Mcode,
       free_count,
       DATE,
-      eve // ★ 追加: イベントコード
+      eve, // ★ 追加: イベントコード
     } = data;
 
     // ✅ デフォルトは45
@@ -59,15 +59,15 @@ export async function POST(req: NextRequest) {
       Mcode: Mcode,
       free_count: creditToApply, // ← free_count をイベントで上書き
       DATE: DATE,
-      appliedBy // ★ デバッグ用（必要なら）
+      appliedBy, // ★ デバッグ用（必要なら）
     };
 
     const res = await fetch(CLICK_WEBHOOK_URL!, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
     });
 
     if (!res.ok) {
@@ -78,7 +78,11 @@ export async function POST(req: NextRequest) {
 
     console.log('Click送信成功:', await res.json());
 
-    return NextResponse.json({ success: true, applied_credit: creditToApply, applied_by: appliedBy });
+    return NextResponse.json({
+      success: true,
+      applied_credit: creditToApply,
+      applied_by: appliedBy,
+    });
   } catch (e) {
     console.error('サーバー処理エラー:', e);
     return NextResponse.json({ error: String(e) }, { status: 500 });

@@ -13,7 +13,9 @@ export function useMtalkSeed(urlFrom?: string, urlCid?: string, urlSummary?: str
     }
     if (!seed && urlSummary) seed = decodeURIComponent(urlSummary);
     if (seed && typeof window !== 'undefined' && urlCid) {
-      try { sessionStorage.removeItem(`mtalk:seed:${urlCid}`); } catch {}
+      try {
+        sessionStorage.removeItem(`mtalk:seed:${urlCid}`);
+      } catch {}
     }
     if (seed) mtalkSeedRef.current = seed;
   }, [urlFrom, urlCid, urlSummary]);

@@ -6,7 +6,10 @@ type CTA = { label: string; href: string };
 export default function MuiChatCTA({ actions }: { actions: CTA[] }) {
   if (!actions?.length) return null;
   return (
-    <div className="mui-cta" style={{ margin: '6px 0 8px', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+    <div
+      className="mui-cta"
+      style={{ margin: '6px 0 8px', display: 'flex', flexWrap: 'wrap', gap: 8 }}
+    >
       {actions.map((a, i) => (
         <Link
           key={i}

@@ -23,22 +23,12 @@ export async function GET(req: NextRequest) {
 
     if (error) {
       console.error('❌ Supabase Error:', error.message);
-      return NextResponse.json(
-        { success: false, error: 'Failed to fetch logs' },
-        { status: 500 }
-      );
+      return NextResponse.json({ success: false, error: 'Failed to fetch logs' }, { status: 500 });
     }
 
-    return NextResponse.json(
-      { success: true, logs: data || [] },
-      { status: 200 }
-    );
-
+    return NextResponse.json({ success: true, logs: data || [] }, { status: 200 });
   } catch (err) {
     console.error('❌ API Route Error:', err);
-    return NextResponse.json(
-      { success: false, error: 'Unexpected server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: 'Unexpected server error' }, { status: 500 });
   }
 }

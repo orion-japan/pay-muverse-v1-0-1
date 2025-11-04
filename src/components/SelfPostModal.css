@@ -7,7 +7,7 @@
   --mu-bg-soft: #f7f5ff;
   --mu-surface: #ffffff;
 
-  --mu-primary: #5a46e0;         /* ボタンなどの主色 */
+  --mu-primary: #5a46e0; /* ボタンなどの主色 */
   --mu-primary-weak: #efeaff;
   --mu-primary-border: #e4defc;
 
@@ -15,8 +15,8 @@
   --mu-text-weak: #666;
   --mu-muted: #8c8c8c;
 
-  --mu-border: rgba(0,0,0,0.08);
-  --mu-shadow: 0 10px 30px rgba(0,0,0,0.08);
+  --mu-border: rgba(0, 0, 0, 0.08);
+  --mu-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
 
   --mu-radius-lg: 14px;
   --mu-radius-md: 10px;
@@ -35,11 +35,7 @@
   inset: 0;
   width: 100%;
   height: 100%;
-  background: linear-gradient(
-      to bottom,
-      rgba(20, 16, 44, 0.55),
-      rgba(20, 16, 44, 0.35)
-    );
+  background: linear-gradient(to bottom, rgba(20, 16, 44, 0.55), rgba(20, 16, 44, 0.35));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -86,7 +82,7 @@
   font-size: 18px;
   font-weight: 800;
   color: var(--mu-text);
-  letter-spacing: .02em;
+  letter-spacing: 0.02em;
 }
 
 .modal-close {
@@ -124,7 +120,7 @@
 }
 
 /* テキスト・テキストエリア共通 */
-.modal input[type="text"],
+.modal input[type='text'],
 .modal select,
 .modal textarea {
   width: 100%;
@@ -135,15 +131,18 @@
   border: 1px solid var(--mu-border);
   border-radius: var(--mu-radius-md);
   outline: none;
-  transition: box-shadow .15s ease, border-color .15s ease, background .15s ease;
+  transition:
+    box-shadow 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease;
   box-sizing: border-box;
 }
 
-.modal input[type="text"]:focus,
+.modal input[type='text']:focus,
 .modal select:focus,
 .modal textarea:focus {
   border-color: var(--mu-primary-border);
-  box-shadow: 0 0 0 3px rgba(90, 70, 224, .12);
+  box-shadow: 0 0 0 3px rgba(90, 70, 224, 0.12);
   background: var(--mu-surface);
 }
 
@@ -199,7 +198,11 @@
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
-  transition: transform .02s ease, background .15s ease, border-color .15s ease, box-shadow .15s ease;
+  transition:
+    transform 0.02s ease,
+    background 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
   user-select: none;
 }
 
@@ -229,8 +232,8 @@
 }
 .mu-btn[disabled],
 .mu-btn:disabled,
-button[aria-disabled="true"] {
-  opacity: .6;
+button[aria-disabled='true'] {
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
@@ -289,21 +292,21 @@ button[aria-disabled="true"] {
 /* ===== SelfPostModal: 見た目の統一強化 ===== */
 .modal {
   /* 既存定義に上書きで少しリッチに */
-  box-shadow: var(--mu-shadow, 0 10px 30px rgba(0,0,0,.08));
-  border: 1px solid var(--mu-border, rgba(0,0,0,.08));
+  box-shadow: var(--mu-shadow, 0 10px 30px rgba(0, 0, 0, 0.08));
+  border: 1px solid var(--mu-border, rgba(0, 0, 0, 0.08));
   border-radius: var(--mu-radius-lg, 14px);
 }
 
 /* 入力ブロックの区切り */
 .modal .field:not(:last-of-type) {
   padding-bottom: 8px;
-  border-bottom: 1px solid var(--mu-border, rgba(0,0,0,.08));
+  border-bottom: 1px solid var(--mu-border, rgba(0, 0, 0, 0.08));
 }
 
 /* アクションボタンのベース質感 */
 .modal-actions .mu-btn {
-  box-shadow: 0 2px 8px rgba(0,0,0,.05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 .modal-actions .mu-btn:hover {
-  box-shadow: 0 8px 20px rgba(0,0,0,.10);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
 }

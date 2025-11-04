@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 // --- サーバー用 Supabase クライアント
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL as string,
-  process.env.SUPABASE_SERVICE_ROLE_KEY as string // RLS 影響を確実に避ける
+  process.env.SUPABASE_SERVICE_ROLE_KEY as string, // RLS 影響を確実に避ける
 );
 
 export const dynamic = 'force-dynamic';
@@ -55,7 +55,10 @@ export async function GET(req: NextRequest) {
     // const isParent = parseBool(searchParams.get('is_parent'));
 
     if (!postId) {
-      return NextResponse.json({ ok: true, totals: { ...ZERO } }, { status: 200, headers: NO_STORE });
+      return NextResponse.json(
+        { ok: true, totals: { ...ZERO } },
+        { status: 200, headers: NO_STORE },
+      );
     }
 
     const totals = await aggregateOneFromView(postId);
@@ -72,37 +75,48 @@ export async function GET(req: NextRequest) {
 /** POST: 単発/バッチ両対応（構造はそのまま） */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({} as any));
+    const body = await req.json().catch(() => ({}) as any);
 
     let items: OneReq[] = [];
     if (Array.isArray(body?.items)) {
       items = body.items.filter((it: any) => typeof it?.postId === 'string');
     } else if (Array.isArray(body?.post_ids)) {
-      items = body.post_ids.filter((id: any) => typeof id === 'string').map((id: string) => ({ postId: id }));
+      items = body.post_ids
+        .filter((id: any) => typeof id === 'string')
+        .map((id: string) => ({ postId: id }));
     } else if (typeof body?.postId === 'string') {
       items = [{ postId: body.postId, isParent: !!body.isParent }];
     }
 
     if (!items.length) {
-      return NextResponse.json({ ok: true, counts: {}, results: [] }, { status: 200, headers: NO_STORE });
+      return NextResponse.json(
+        { ok: true, counts: {}, results: [] },
+        { status: 200, headers: NO_STORE },
+      );
     }
 
     const results = await Promise.all(
       items.map(async (it) => {
         const totals = await aggregateOneFromView(it.postId);
         return { postId: it.postId, totals };
-      })
+      }),
     );
 
     const counts: Record<string, Totals> = {};
     for (const r of results) counts[r.postId] = r.totals;
 
     if (!Array.isArray(body?.items) && !Array.isArray(body?.post_ids) && body?.postId) {
-      return NextResponse.json({ ok: true, totals: results[0]?.totals ?? { ...ZERO } }, { status: 200, headers: NO_STORE });
+      return NextResponse.json(
+        { ok: true, totals: results[0]?.totals ?? { ...ZERO } },
+        { status: 200, headers: NO_STORE },
+      );
     }
 
     return NextResponse.json({ ok: true, counts, results }, { status: 200, headers: NO_STORE });
   } catch {
-    return NextResponse.json({ ok: true, counts: {}, results: [] }, { status: 200, headers: NO_STORE });
+    return NextResponse.json(
+      { ok: true, counts: {}, results: [] },
+      { status: 200, headers: NO_STORE },
+    );
   }
 }

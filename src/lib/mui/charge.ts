@@ -34,10 +34,7 @@ export async function ensurePayjp(): Promise<PayjpInstance> {
 }
 
 /** 指定DOMにカード要素をマウントしてトークンを作る（クライアント） */
-export async function createCardToken(
-  mountSelector: string,
-  email?: string
-): Promise<string> {
+export async function createCardToken(mountSelector: string, email?: string): Promise<string> {
   if (typeof window === 'undefined') throw new Error('createCardToken must run in browser');
   const payjp = await ensurePayjp();
   const elements = payjp.elements();
@@ -66,10 +63,10 @@ export async function createCardToken(
  *   })
  */
 export async function chargeOneTurn(params: {
-  amount: number;               // 例: 280 / 980 / 1980
-  token: string;                // PAY.JP の card トークン
+  amount: number; // 例: 280 / 980 / 1980
+  token: string; // PAY.JP の card トークン
   description?: string;
-  idempotencyKey?: string;      // 同一リクエストの重複防止に推奨
+  idempotencyKey?: string; // 同一リクエストの重複防止に推奨
 }): Promise<{ ok: true; chargeId: string; raw: any } | { ok: false; error: string }> {
   if (typeof window !== 'undefined') {
     return { ok: false, error: 'chargeOneTurn must run on server' };
@@ -84,20 +81,20 @@ export async function chargeOneTurn(params: {
   // PAY.JP Charges API
   const body = new URLSearchParams();
   body.set('amount', String(params.amount));
-  body.set('currency', 'jpy');          // デフォルト: jpy
-  body.set('card', params.token);       // card にトークンを渡す
+  body.set('currency', 'jpy'); // デフォルト: jpy
+  body.set('card', params.token); // card にトークンを渡す
   if (params.description) body.set('description', params.description);
 
   const headers: Record<string, string> = {
-    'Authorization': `Basic ${basic}`,
-    'Content-Type': 'application/x-www-form-urlencoded'
+    Authorization: `Basic ${basic}`,
+    'Content-Type': 'application/x-www-form-urlencoded',
   };
   if (params.idempotencyKey) headers['Idempotency-Key'] = params.idempotencyKey;
 
   const res = await fetch('https://api.pay.jp/v1/charges', {
     method: 'POST',
     headers,
-    body
+    body,
   });
 
   const json = await res.json().catch(() => ({}));

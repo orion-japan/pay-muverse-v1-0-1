@@ -2,13 +2,21 @@
 import type { OcrBlock, OcrMessage } from './types';
 
 /** さまざまな座標表現を x0,y0,x1,y1 に正規化 */
-function normXY(b: OcrBlock & {
-  // どれかが来るかもしれないので “任意プロパティ” として受ける
-  x0?: number; y0?: number; x1?: number; y1?: number;
-  left?: number; top?: number; right?: number; bottom?: number;
-  bbox?: { x0: number; y0: number; x1: number; y1: number };
-  page?: number;
-}) {
+function normXY(
+  b: OcrBlock & {
+    // どれかが来るかもしれないので “任意プロパティ” として受ける
+    x0?: number;
+    y0?: number;
+    x1?: number;
+    y1?: number;
+    left?: number;
+    top?: number;
+    right?: number;
+    bottom?: number;
+    bbox?: { x0: number; y0: number; x1: number; y1: number };
+    page?: number;
+  },
+) {
   const x0 = b.x0 ?? b.left ?? b.bbox?.x0 ?? 0;
   const y0 = b.y0 ?? b.top ?? b.bbox?.y0 ?? 0;
   const x1 = b.x1 ?? b.right ?? b.bbox?.x1 ?? x0;
@@ -41,12 +49,7 @@ export function extractMessages(blocks: OcrBlock[]): OcrMessage[] {
     .filter((v): v is OcrMessage => !!v);
 
   // 2) ページ→y→x で安定ソート
-  items.sort(
-    (a, b) =>
-      a.page - b.page ||
-      a.yTop - b.yTop ||
-      a.xCenter - b.xCenter
-  );
+  items.sort((a, b) => a.page - b.page || a.yTop - b.yTop || a.xCenter - b.xCenter);
 
   // 3) 近い行を結合（縦距離しきい値：ブロック高さの 0.8）
   const merged: OcrMessage[] = [];

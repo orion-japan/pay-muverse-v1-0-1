@@ -34,11 +34,21 @@ export default function UserProfile({
   return (
     <div className="profile-container">
       <div className="profile-grid-outer">
-        <section className="profile-card"><ProfileBasic profile={profile} /></section>
-        <section className="profile-card"><ProfileSNS profile={profile} /></section>
-        <section className="profile-card"><ProfileSkills profile={profile} /></section>
-        <section className="profile-card"><ProfileActivity profile={profile} /></section>
-        <section className="profile-card"><ProfileFriends profile={profile} /></section>
+        <section className="profile-card">
+          <ProfileBasic profile={profile} />
+        </section>
+        <section className="profile-card">
+          <ProfileSNS profile={profile} />
+        </section>
+        <section className="profile-card">
+          <ProfileSkills profile={profile} />
+        </section>
+        <section className="profile-card">
+          <ProfileActivity profile={profile} />
+        </section>
+        <section className="profile-card">
+          <ProfileFriends profile={profile} />
+        </section>
 
         {/* 共鳴履歴 */}
         <section className="profile-card">

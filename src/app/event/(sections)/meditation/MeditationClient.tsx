@@ -58,7 +58,9 @@ export default function MeditationClient() {
     const d = new Date(now);
     const dow = d.getDay();
     if (dow === 0 || isHolidayToday) return false; // 日曜・祝日NG
-    const y = d.getFullYear(), m = d.getMonth(), day = d.getDate();
+    const y = d.getFullYear(),
+      m = d.getMonth(),
+      day = d.getDate();
     const open = new Date(y, m, day, 5, 50, 0, 0).getTime();
     const close = new Date(y, m, day, 6, 10, 0, 0).getTime();
     const cur = d.getTime();
@@ -73,7 +75,9 @@ export default function MeditationClient() {
 
     if (user) {
       const base = new Date();
-      const y = base.getFullYear(), m = base.getMonth(), day = base.getDate();
+      const y = base.getFullYear(),
+        m = base.getMonth(),
+        day = base.getDate();
       const start = new Date(y, m, day, 6, 0, 0, 0).getTime();
       const cur = base.getTime();
 
@@ -109,7 +113,9 @@ export default function MeditationClient() {
           >
             ← 戻る
           </button>
-          <div className="km-card-title" style={{ margin: 0 }}>愛祈AINORI,１０００人</div>
+          <div className="km-card-title" style={{ margin: 0 }}>
+            愛祈AINORI,１０００人
+          </div>
         </div>
 
         <div className="km-image-wrap">
@@ -136,8 +142,13 @@ export default function MeditationClient() {
         </div>
 
         <div className="km-description" style={{ marginTop: 12 }}>
-          <p><b>瞑想会のURL（固定・表示のみ）</b></p>
-          <div className="km-url-row" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <p>
+            <b>瞑想会のURL（固定・表示のみ）</b>
+          </p>
+          <div
+            className="km-url-row"
+            style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}
+          >
             <span
               className="km-url"
               style={{
@@ -154,7 +165,9 @@ export default function MeditationClient() {
             <button
               className="km-button km-button-tiny"
               type="button"
-              onClick={() => { navigator.clipboard?.writeText(AINORI_FALLBACK_URL); }}
+              onClick={() => {
+                navigator.clipboard?.writeText(AINORI_FALLBACK_URL);
+              }}
               style={{ padding: '4px 8px', fontSize: 12, lineHeight: 1.2 }}
               title="URLをコピー"
             >
@@ -162,8 +175,8 @@ export default function MeditationClient() {
             </button>
           </div>
           <p style={{ marginTop: 6 }}>
-            ※ 平日のみ 05:50〜06:10（JST）にOPEN／日曜・祝日休み。<br />
-            ※ 瞑想会は参加資格なし、<b>全員参加OK</b>です。
+            ※ 平日のみ 05:50〜06:10（JST）にOPEN／日曜・祝日休み。
+            <br />※ 瞑想会は参加資格なし、<b>全員参加OK</b>です。
           </p>
         </div>
 

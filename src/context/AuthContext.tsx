@@ -111,11 +111,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     getIdTokenResult(u, /* forceRefresh */ false)
       .then((res) => {
         // exp の 60秒前に更新。余裕を持って取り直す
-        const expMs = (res.claims && (res as any).expirationTime)
-          ? new Date((res as any).expirationTime).getTime()
-          : (res as any)?.exp
-          ? Number((res as any).exp) * 1000
-          : 0;
+        const expMs =
+          res.claims && (res as any).expirationTime
+            ? new Date((res as any).expirationTime).getTime()
+            : (res as any)?.exp
+              ? Number((res as any).exp) * 1000
+              : 0;
 
         if (!expMs) return;
 
@@ -167,7 +168,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // user_code は uid と紐づけて管理。uidが変わったら確実に取り直す
         const cacheKey = 'user_code';
         const cached = typeof window !== 'undefined' ? localStorage.getItem(cacheKey) : null;
-        if (cached && (typeof window !== 'undefined')) {
+        if (cached && typeof window !== 'undefined') {
           // 以前の user_code が他uidの可能性を考慮（簡易チェック）
           // 必要に応じて uid を含むキャッシュキーにする実装へ移行してください。
         }
@@ -276,7 +277,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo(
     () => ({ loading, user, idToken, userCode, planStatus, logout }),
-    [loading, user, idToken, userCode, planStatus]
+    [loading, user, idToken, userCode, planStatus],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -312,7 +313,9 @@ export async function authedFetch(input: RequestInfo | URL, init: RequestInit = 
     res = await retry(true);
   }
   if (res.status === 401 || res.status === 403) {
-    try { await signOut(auth); } catch {}
+    try {
+      await signOut(auth);
+    } catch {}
     throw new Error('AUTH_EXPIRED');
   }
   return res;

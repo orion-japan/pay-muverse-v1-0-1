@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
 
     const rows: Array<{ date: string; event_id: string }> = Array.isArray(data) ? data : [];
     const header = 'date,event_id';
-    const body = rows.map(r => `${r.date},${r.event_id}`).join('\n');
+    const body = rows.map((r) => `${r.date},${r.event_id}`).join('\n');
     const csv = `${header}\n${body}\n`;
 
     return new NextResponse(csv, {

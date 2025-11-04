@@ -1,162 +1,223 @@
 /* ダーク基調 */
 .mtalk-root {
-    --bg: #0b1437;
-    --panel: #111a3f;
-    --panel2: #132151;
-    --text: #e8ecff;
-    --sub: #b8c0e8;
-    --accent: #7c8cff;
-    --danger: #ff6b88;
-    --ok: #61d6a7;
-  
-    min-height: 100vh;
-    background: radial-gradient(1200px 600px at 20% -10%, #1a255a 0%, #0b1437 60%) no-repeat,
-      var(--bg);
-    color: var(--text);
-    padding: 16px;
-  }
-  
-  .mtalk-intro {
-    background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 14px;
-    padding: 16px 18px;
-    margin-bottom: 14px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
-  }
-  .mtalk-intro h1 {
-    margin: 0 0 8px;
-    font-size: 20px;
-    letter-spacing: 0.3px;
-  }
-  .mtalk-intro .lead {
-    margin: 0;
-    color: var(--sub);
-    line-height: 1.6;
-  }
-  
-  .mtalk-agent {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-top: 12px;
-  }
-  .mtalk-agent .label { color: var(--sub); }
-  .mtalk-agent .radio { display: inline-flex; align-items: center; gap: 6px; }
-  
-  .mtalk-input {
-    background: var(--panel);
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 14px;
-    padding: 12px;
-  }
-  .mtalk-input textarea {
-    width: 100%;
-    resize: vertical;
-    background: var(--panel2);
-    color: var(--text);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 10px;
-    padding: 12px;
-    line-height: 1.6;
-    outline: none;
-  }
-  .mtalk-actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-top: 10px;
-  }
-  button.primary, button.secondary {
-    appearance: none;
-    border: 0;
-    border-radius: 10px;
-    padding: 10px 14px;
-    cursor: pointer;
-    color: #fff;
-  }
-  button.primary { background: linear-gradient(90deg, #6c7bff, #8c6cff); }
-  button.primary:disabled { opacity: .6; cursor: not-allowed; }
-  button.secondary { background: #2a3370; border: 1px solid rgba(255,255,255,0.1); }
-  
-  .warn { color: #ffd37c; }
-  .error {
-    margin-top: 8px;
-    color: var(--danger);
-    font-size: 14px;
-  }
-  
-  .mtalk-result {
-    margin-top: 14px;
-  }
-  .placeholder {
-    opacity: 0.6;
-    padding: 16px;
-    border: 1px dashed rgba(255,255,255,0.15);
-    border-radius: 12px;
-  }
-  
-  .report-card {
-    background: var(--panel);
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 14px;
-    padding: 12px;
-  }
-  .report-card .meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-    color: var(--sub);
-    margin-bottom: 8px;
-  }
-  .pill {
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 999px;
-    padding: 2px 8px;
-  }
-  .q-badge {
-    border-radius: 8px;
-    padding: 4px 8px;
-    color: #000;
-    font-weight: 700;
-  }
-  .q-badge.q1 { background: #d3e3ff; }  /* 金/秩序 */
-  .q-badge.q2 { background: #ffd3d3; }  /* 木/怒り */
-  .q-badge.q3 { background: #fff0c8; }  /* 土/不安 */
-  .q-badge.q4 { background: #d2f0ff; }  /* 水/恐怖 */
-  .q-badge.q5 { background: #ffe0f5; }  /* 火/情熱 */
-  
-  .reply {
-    white-space: pre-wrap;
-    line-height: 1.7;
-    background: var(--panel2);
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 10px;
-    padding: 12px;
-    color: var(--text);
-    margin: 0 0 10px;
-  }
-  .report-actions { display: flex; justify-content: flex-end; }
-  
+  --bg: #0b1437;
+  --panel: #111a3f;
+  --panel2: #132151;
+  --text: #e8ecff;
+  --sub: #b8c0e8;
+  --accent: #7c8cff;
+  --danger: #ff6b88;
+  --ok: #61d6a7;
 
-  /* ─── history bar ─── */
-.mtalk-history { margin: 8px 12px 16px; }
-.mtalk-history .mh-title { display:flex; align-items:center; gap:8px; font-weight:600; color:#e2e8f0; }
-.mtalk-history .mh-empty { font-weight:400; opacity:.7; }
+  min-height: 100vh;
+  background:
+    radial-gradient(1200px 600px at 20% -10%, #1a255a 0%, #0b1437 60%) no-repeat,
+    var(--bg);
+  color: var(--text);
+  padding: 16px;
+}
+
+.mtalk-intro {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin-bottom: 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+.mtalk-intro h1 {
+  margin: 0 0 8px;
+  font-size: 20px;
+  letter-spacing: 0.3px;
+}
+.mtalk-intro .lead {
+  margin: 0;
+  color: var(--sub);
+  line-height: 1.6;
+}
+
+.mtalk-agent {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+.mtalk-agent .label {
+  color: var(--sub);
+}
+.mtalk-agent .radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mtalk-input {
+  background: var(--panel);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  padding: 12px;
+}
+.mtalk-input textarea {
+  width: 100%;
+  resize: vertical;
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 12px;
+  line-height: 1.6;
+  outline: none;
+}
+.mtalk-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+button.primary,
+button.secondary {
+  appearance: none;
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  color: #fff;
+}
+button.primary {
+  background: linear-gradient(90deg, #6c7bff, #8c6cff);
+}
+button.primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+button.secondary {
+  background: #2a3370;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.warn {
+  color: #ffd37c;
+}
+.error {
+  margin-top: 8px;
+  color: var(--danger);
+  font-size: 14px;
+}
+
+.mtalk-result {
+  margin-top: 14px;
+}
+.placeholder {
+  opacity: 0.6;
+  padding: 16px;
+  border: 1px dashed rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+}
+
+.report-card {
+  background: var(--panel);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+  padding: 12px;
+}
+.report-card .meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  color: var(--sub);
+  margin-bottom: 8px;
+}
+.pill {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.q-badge {
+  border-radius: 8px;
+  padding: 4px 8px;
+  color: #000;
+  font-weight: 700;
+}
+.q-badge.q1 {
+  background: #d3e3ff;
+} /* 金/秩序 */
+.q-badge.q2 {
+  background: #ffd3d3;
+} /* 木/怒り */
+.q-badge.q3 {
+  background: #fff0c8;
+} /* 土/不安 */
+.q-badge.q4 {
+  background: #d2f0ff;
+} /* 水/恐怖 */
+.q-badge.q5 {
+  background: #ffe0f5;
+} /* 火/情熱 */
+
+.reply {
+  white-space: pre-wrap;
+  line-height: 1.7;
+  background: var(--panel2);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 12px;
+  color: var(--text);
+  margin: 0 0 10px;
+}
+.report-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ─── history bar ─── */
+.mtalk-history {
+  margin: 8px 12px 16px;
+}
+.mtalk-history .mh-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+.mtalk-history .mh-empty {
+  font-weight: 400;
+  opacity: 0.7;
+}
 .mtalk-history .mh-list {
-  margin-top:8px; display:flex; gap:8px; overflow:auto; padding-bottom:4px;
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+  overflow: auto;
+  padding-bottom: 4px;
 }
 .mtalk-history .mh-item {
-  min-width: 220px; max-width: 280px; text-align:left;
-  border-radius:12px; padding:10px 12px; border:1px solid rgba(255,255,255,.08);
-  background: rgba(15,23,42,.35); color:#e5e7eb; box-shadow: 0 4px 14px rgba(0,0,0,.18);
+  min-width: 220px;
+  max-width: 280px;
+  text-align: left;
+  border-radius: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(15, 23, 42, 0.35);
+  color: #e5e7eb;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
 }
-.mtalk-history .mh-item:hover { background: rgba(15,23,42,.5); }
-.mtalk-history .mh-title-line { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:600; }
-.mtalk-history .mh-date { opacity:.7; font-size:12px; margin-top:2px; }
-
+.mtalk-history .mh-item:hover {
+  background: rgba(15, 23, 42, 0.5);
+}
+.mtalk-history .mh-title-line {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+.mtalk-history .mh-date {
+  opacity: 0.7;
+  font-size: 12px;
+  margin-top: 2px;
+}
 
 /* ====== History dropdown ====== */
 .mtalk-history {
@@ -175,16 +236,16 @@
 
 .mh-empty {
   font-weight: 400;
-  opacity: .7;
+  opacity: 0.7;
 }
 
 /* 見た目をフルカスタム */
 .mh-dropdown {
-  --bg: #0e1735;          /* 面の色 */
-  --edge: #2a3a66;        /* 枠線 */
-  --edge-hover: #5f77ff;  /* hover/focusの枠 */
-  --text: #eaf0ff;        /* 文字色 */
-  --hint: #8fa2d9;        /* プレースホルダー色 */
+  --bg: #0e1735; /* 面の色 */
+  --edge: #2a3a66; /* 枠線 */
+  --edge-hover: #5f77ff; /* hover/focusの枠 */
+  --text: #eaf0ff; /* 文字色 */
+  --hint: #8fa2d9; /* プレースホルダー色 */
 
   -webkit-appearance: none;
   appearance: none;
@@ -196,50 +257,54 @@
   border: 1px solid var(--edge);
   background:
     /* 右側のグラデ影 */
-    linear-gradient(180deg, rgba(255,255,255,.06), rgba(0,0,0,.12)) padding-box,
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.12)) padding-box,
     var(--bg);
   color: var(--text);
   font-size: 14px;
   line-height: 44px;
   outline: none;
   box-shadow:
-    0 8px 24px rgba(15, 23, 42, .25),
-    inset 0 1px 0 rgba(255,255,255,.06);
-  transition: border-color .2s ease, box-shadow .2s ease, transform .08s ease;
+    0 8px 24px rgba(15, 23, 42, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.08s ease;
 
   /* ▼ 右側▼アイコン（SVG） */
-  background-image:
-    url("data:image/svg+xml;utf8,\
+  background-image: url("data:image/svg+xml;utf8,\
       <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23cfd9ff'>\
         <path d='M7 9l5 6 5-6z'/>\
       </svg>");
   background-repeat: no-repeat;
   background-size: 18px 18px;
-  background-position: right .75rem center;
+  background-position: right 0.75rem center;
 }
 
 .mh-dropdown:hover {
   border-color: var(--edge-hover);
   box-shadow:
-    0 10px 28px rgba(34, 54, 120, .35),
-    0 0 0 2px rgba(95, 119, 255, .18) inset;
+    0 10px 28px rgba(34, 54, 120, 0.35),
+    0 0 0 2px rgba(95, 119, 255, 0.18) inset;
 }
 
 .mh-dropdown:focus-visible {
   border-color: var(--edge-hover);
   box-shadow:
-    0 12px 32px rgba(34, 54, 120, .45),
-    0 0 0 3px rgba(95, 119, 255, .28) inset;
+    0 12px 32px rgba(34, 54, 120, 0.45),
+    0 0 0 3px rgba(95, 119, 255, 0.28) inset;
   transform: translateY(-1px);
 }
 
 /* disabled / placeholder風（value="" の option を選択時） */
-.mh-dropdown:has(option[value=""]:checked) {
+.mh-dropdown:has(option[value='']:checked) {
   color: var(--hint);
 }
 
 /* Windows/Edge 既定の▼を消す */
-.mh-dropdown::-ms-expand { display: none; }
+.mh-dropdown::-ms-expand {
+  display: none;
+}
 
 /* ドロップダウン内の項目の色（ダークに） */
 .mh-dropdown option {
@@ -249,14 +314,18 @@
 
 /* 狭い端末での密度を少し上げる */
 @media (max-width: 420px) {
-  .mh-dropdown { height: 42px; line-height: 42px; }
+  .mh-dropdown {
+    height: 42px;
+    line-height: 42px;
+  }
 }
 
 /* 低モーション環境 */
 @media (prefers-reduced-motion: reduce) {
-  .mh-dropdown { transition: none; }
+  .mh-dropdown {
+    transition: none;
+  }
 }
-
 
 .mtalk-root {
   padding-top: 12px; /* ヘッダーが必ず見えるよう余白 */
@@ -266,27 +335,25 @@
   margin-bottom: 16px;
 }
 
-
-
 /* 返信テキストのルート（.reply がバブル内のテキストラッパ想定） */
 .reply {
   /* 改行・空白をそのまま描画 */
   white-space: pre-wrap;
-  word-break: break-word;        /* 長単語で折返し */
+  word-break: break-word; /* 長単語で折返し */
   overflow-wrap: anywhere;
 
   /* 読みやすさ（1行の長さを制御） */
-  max-width: 64ch;               /* 60〜70桁が読みやすい */
+  max-width: 64ch; /* 60〜70桁が読みやすい */
 
   /* 既存 <p> が参照している CSS 変数を上書き */
-  --sofia-assist-fs: 15.5px;     /* 文字サイズ */
-  --sofia-assist-lh: 1.9;        /* 行間 */
-  --sofia-assist-ls: 0.02em;     /* 字間 */
-  --sofia-assist-m: 8px;         /* 段落の上下マージン */
+  --sofia-assist-fs: 15.5px; /* 文字サイズ */
+  --sofia-assist-lh: 1.9; /* 行間 */
+  --sofia-assist-ls: 0.02em; /* 字間 */
+  --sofia-assist-m: 8px; /* 段落の上下マージン */
 
   /* ダーク面に映えるトーンはそのまま流用 */
   background: var(--panel2);
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 10px;
   padding: 12px;
   color: var(--text);
@@ -297,9 +364,14 @@
 .reply p {
   margin: var(--sofia-assist-m, 8px) 0;
 }
-.reply p:first-child { margin-top: 0; }
-.reply p:last-child  { margin-bottom: 0; }
+.reply p:first-child {
+  margin-top: 0;
+}
+.reply p:last-child {
+  margin-bottom: 0;
+}
 
 /* 箇条書きの詰まり改善（任意） */
-.reply li { margin: 0.25em 0; }
-
+.reply li {
+  margin: 0.25em 0;
+}

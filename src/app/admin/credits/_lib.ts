@@ -4,7 +4,7 @@ import { verifyFirebaseAndAuthorize } from '@/lib/authz';
 
 export function json(data: any, init?: number | ResponseInit) {
   const status =
-    typeof init === 'number' ? init : (init as ResponseInit | undefined)?.['status'] ?? 200;
+    typeof init === 'number' ? init : ((init as ResponseInit | undefined)?.['status'] ?? 200);
   const headers = new Headers(
     typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers,
   );

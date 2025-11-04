@@ -6,9 +6,9 @@ import type { Stage } from '@/types/vision';
 type Props = {
   visionId: string;
   from: Stage;
-  showActions?: boolean;        // 操作ボタンの表示
+  showActions?: boolean; // 操作ボタンの表示
   variant?: 'seed' | 'mid' | 'late' | 'success' | 'alert'; // 色分け（任意）
-  className?: string;           // 追加クラス（任意）
+  className?: string; // 追加クラス（任意）
   /** ← 追加：ビジョンの現在ステータスを小さく表示（任意） */
   visionStatus?: VisionStatus | null;
 };
@@ -20,14 +20,7 @@ type Criteria = {
 };
 
 /** ステータス型（任意で受け取れる） */
-type VisionStatus =
-  | '検討中'
-  | '実践中'
-  | '迷走中'
-  | '順調'
-  | 'ラストスパート'
-  | '達成'
-  | '破棄';
+type VisionStatus = '検討中' | '実践中' | '迷走中' | '順調' | 'ラストスパート' | '達成' | '破棄';
 
 export default function StageChecklistInline({
   visionId,
@@ -52,7 +45,7 @@ export default function StageChecklistInline({
 
       const res = await fetch(
         `/api/vision-criteria?vision_id=${encodeURIComponent(visionId)}&from=${from}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` } },
       );
       if (!res.ok) {
         const t = await res.text();
@@ -64,7 +57,7 @@ export default function StageChecklistInline({
         setCriteria(null);
       } else {
         const achieved = Number(
-          data?.done_days ?? data?.achieved_days ?? data?.progress?.streak ?? 0
+          data?.done_days ?? data?.achieved_days ?? data?.progress?.streak ?? 0,
         );
         setCriteria({
           id: data.id ?? `${visionId}:${from}`,
@@ -96,13 +89,12 @@ export default function StageChecklistInline({
         setCriteria((prev) =>
           prev
             ? { ...prev, required_days: d.required_days }
-            : { id: `${visionId}:${from}`, required_days: d.required_days, achieved_days: 0 }
+            : { id: `${visionId}:${from}`, required_days: d.required_days, achieved_days: 0 },
         );
       }
     };
     window.addEventListener('vision:criteria-updated', handler as EventListener);
-    return () =>
-      window.removeEventListener('vision:criteria-updated', handler as EventListener);
+    return () => window.removeEventListener('vision:criteria-updated', handler as EventListener);
   }, [visionId, from]);
 
   async function createDefault() {
@@ -132,20 +124,12 @@ export default function StageChecklistInline({
   // ---- 表示値 ----
   const req = criteria?.required_days ?? 0;
   const done = criteria?.achieved_days ?? 0;
-  const ratio = useMemo(
-    () => Math.min(1, Math.max(0, req ? done / req : 0)),
-    [req, done]
-  );
+  const ratio = useMemo(() => Math.min(1, Math.max(0, req ? done / req : 0)), [req, done]);
   const reached = req > 0 && done >= req;
 
   return (
     <div
-      className={[
-        'sci-wrap',
-        `sci--${variant}`,
-        reached ? 'is-reached' : '',
-        className || '',
-      ]
+      className={['sci-wrap', `sci--${variant}`, reached ? 'is-reached' : '', className || '']
         .filter(Boolean)
         .join(' ')}
     >
@@ -161,11 +145,7 @@ export default function StageChecklistInline({
 
                 {/* ★ 追加：ビジョンの現在ステータス（小さなバッジ）。CSS で色付け可 */}
                 {visionStatus ? (
-                  <span
-                    className="sci-vstatus"
-                    data-vs={visionStatus}
-                    title="現在のステータス"
-                  >
+                  <span className="sci-vstatus" data-vs={visionStatus} title="現在のステータス">
                     {visionStatus}
                   </span>
                 ) : null}

@@ -67,22 +67,24 @@ export default function KnowledgeClient() {
 
   // ナレッジを根拠に Mu へ質問
   async function askMuWithItem(item: Item) {
-    const question = window.prompt('Mu に聞きたい内容を入力してください（このナレッジを根拠に回答します）');
+    const question = window.prompt(
+      'Mu に聞きたい内容を入力してください（このナレッジを根拠に回答します）',
+    );
     if (!question) return;
 
     setLoading(true);
     try {
       const body = {
-        text: question,                       // ユーザー入力（LLMへ渡す本文）
-        title: `KB: ${item.title}`,          // 会話名は短めに
-        reuse_key: `kb:${item.title}`,       // 同じ題名なら会話を再利用
+        text: question, // ユーザー入力（LLMへ渡す本文）
+        title: `KB: ${item.title}`, // 会話名は短めに
+        reuse_key: `kb:${item.title}`, // 同じ題名なら会話を再利用
         mode: 'analysis',
         meta: { from: 'knowledge', kb_title: item.title },
         kb: {
-          title: item.title,                 // 参照したナレッジのタイトル
-          content: item.content,             // ★本文（必須）
-          query: q ?? ''                     // 任意（検索語や補足）
-        }
+          title: item.title, // 参照したナレッジのタイトル
+          content: item.content, // ★本文（必須）
+          query: q ?? '', // 任意（検索語や補足）
+        },
       };
 
       const r = await fetch('/api/agent/muai/reply', {
@@ -118,7 +120,7 @@ export default function KnowledgeClient() {
     const text = `【参考】${item.title}\n${snippet}${item.content.length > 240 ? '…' : ''}`;
     navigator.clipboard?.writeText(text).then(
       () => alert('引用をコピーしました'),
-      () => alert('コピーに失敗しました')
+      () => alert('コピーに失敗しました'),
     );
   }
 
@@ -130,7 +132,7 @@ export default function KnowledgeClient() {
           <button className={styles.backBtn} onClick={() => router.back()} aria-label="戻る">
             ← 戻る
           </button>
-        <h1 className={styles.title}>Q&amp;A ナレッジ</h1>
+          <h1 className={styles.title}>Q&amp;A ナレッジ</h1>
           <span className={styles.badgeFree}>無料</span>
         </div>
 

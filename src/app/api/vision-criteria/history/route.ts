@@ -14,7 +14,9 @@ export async function GET(req: NextRequest) {
     }
 
     const to = dayjs().format('YYYY-MM-DD');
-    const from = dayjs().subtract(days - 1, 'day').format('YYYY-MM-DD');
+    const from = dayjs()
+      .subtract(days - 1, 'day')
+      .format('YYYY-MM-DD');
 
     const { data, error } = await supabase
       .from('daily_checks')

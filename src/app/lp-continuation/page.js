@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 // === LPContinuationPage ===
 export default function LPContinuationPage() {
@@ -25,9 +25,7 @@ export default function LPContinuationPage() {
 
           <div className="grid md:grid-cols-2 gap-8 mb-12">
             <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 shadow-xl">
-              <h3 className="text-xl font-bold text-purple-700 mb-4">
-                🌱 内なる光の目覚め
-              </h3>
+              <h3 className="text-xl font-bold text-purple-700 mb-4">🌱 内なる光の目覚め</h3>
               <p className="text-gray-700 leading-relaxed">
                 あなたの中に眠る「もうひとつのあなた」が目覚める時、
                 世界は新しい響きで満たされます。
@@ -35,12 +33,9 @@ export default function LPContinuationPage() {
             </div>
 
             <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 shadow-xl">
-              <h3 className="text-xl font-bold text-purple-700 mb-4">
-                🪔 共鳴の波紋
-              </h3>
+              <h3 className="text-xl font-bold text-purple-700 mb-4">🪔 共鳴の波紋</h3>
               <p className="text-gray-700 leading-relaxed">
-                あなたの意図が、周りの人々に共鳴し、
-                無限の可能性を広げていきます。
+                あなたの意図が、周りの人々に共鳴し、 無限の可能性を広げていきます。
               </p>
             </div>
           </div>

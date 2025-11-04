@@ -7,8 +7,7 @@ import { createClient } from '@supabase/supabase-js';
 import Payjp from 'payjp';
 import { adminAuth } from '@/lib/firebase-admin';
 
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
 const SERVICE_ROLE =
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE || '';
 const PAYJP_SECRET = process.env.PAYJP_SECRET_KEY || '';
@@ -31,7 +30,7 @@ type UserRow = {
 const TAG = '[PAY][remove-card]';
 const mkId = () => Math.random().toString(36).slice(2, 8);
 const now = () => new Date().toISOString();
-const log = (id: string, lvl: 'log'|'warn'|'error', msg: string, extra?: any) =>
+const log = (id: string, lvl: 'log' | 'warn' | 'error', msg: string, extra?: any) =>
   (console as any)[lvl](`${TAG}#${id} ${now()} ${msg}`, extra ?? '');
 
 /* ---------- helpers ---------- */
@@ -77,8 +76,14 @@ async function deleteCard(cusId: string, cardId: string, reqId: string) {
 // 列が無い環境でも落ちない DB クリア
 async function clearDbCardState(user_code: string, reqId: string) {
   // フル更新
-  const full = await sb.from('users')
-    .update({ card_registered: false, card_brand: null, card_last4: null, payjp_default_card_id: null } as any)
+  const full = await sb
+    .from('users')
+    .update({
+      card_registered: false,
+      card_brand: null,
+      card_last4: null,
+      payjp_default_card_id: null,
+    } as any)
     .eq('user_code', user_code)
     .select('user_code');
   if (!full.error && full.data?.length) {
@@ -91,15 +96,33 @@ async function clearDbCardState(user_code: string, reqId: string) {
     log(reqId, 'warn', `DB full clear failed -> minimal: ${msg}`);
     let rows = 0;
     try {
-      const r1 = await sb.from('users').update({ card_registered: false }).eq('user_code', user_code).select('user_code');
+      const r1 = await sb
+        .from('users')
+        .update({ card_registered: false })
+        .eq('user_code', user_code)
+        .select('user_code');
       rows = Math.max(rows, r1.data?.length ?? 0);
     } catch {}
     try {
-      const r2 = await sb.from('users').update({ payjp_default_card_id: null as any }).eq('user_code', user_code).select('user_code');
+      const r2 = await sb
+        .from('users')
+        .update({ payjp_default_card_id: null as any })
+        .eq('user_code', user_code)
+        .select('user_code');
       rows = Math.max(rows, r2.data?.length ?? 0);
     } catch {}
-    try { await sb.from('users').update({ card_brand: null as any }).eq('user_code', user_code); } catch {}
-    try { await sb.from('users').update({ card_last4: null as any }).eq('user_code', user_code); } catch {}
+    try {
+      await sb
+        .from('users')
+        .update({ card_brand: null as any })
+        .eq('user_code', user_code);
+    } catch {}
+    try {
+      await sb
+        .from('users')
+        .update({ card_last4: null as any })
+        .eq('user_code', user_code);
+    } catch {}
     log(reqId, 'log', `DB clear (minimal) rows=${rows}`);
     return { rows, mode: 'minimal' as const };
   }
@@ -119,43 +142,61 @@ export async function POST(req: NextRequest) {
     // auth
     const authHeader = req.headers.get('authorization') || '';
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
-    if (!token) return NextResponse.json({ success:false, error:'missing_id_token', reqId }, { status:401 });
+    if (!token)
+      return NextResponse.json(
+        { success: false, error: 'missing_id_token', reqId },
+        { status: 401 },
+      );
     let decoded: any;
     try {
       decoded = await adminAuth.verifyIdToken(token, true);
       log(reqId, 'log', `idToken ok uid:${decoded?.uid}`);
     } catch (e) {
       log(reqId, 'warn', 'invalid id token', e);
-      return NextResponse.json({ success:false, error:'invalid_id_token', reqId }, { status:401 });
+      return NextResponse.json(
+        { success: false, error: 'invalid_id_token', reqId },
+        { status: 401 },
+      );
     }
 
     // body & user resolve
-    const body = (await req.json().catch(()=> ({}))) as any;
+    const body = (await req.json().catch(() => ({}))) as any;
     const user_code_req: string | null = body?.user_code ?? null;
 
     let user: UserRow | null = null;
     if (user_code_req) {
-      const { data, error } = await sb.from('users')
+      const { data, error } = await sb
+        .from('users')
         .select('user_code,firebase_uid,payjp_customer_id,payjp_default_card_id')
         .eq('user_code', user_code_req)
         .maybeSingle<UserRow>();
       if (error || !data) {
         log(reqId, 'warn', `user_not_found by user_code:${user_code_req}`, error);
-        return NextResponse.json({ success:false, error:'user_not_found', reqId }, { status:404 });
+        return NextResponse.json(
+          { success: false, error: 'user_not_found', reqId },
+          { status: 404 },
+        );
       }
       if (data.firebase_uid && data.firebase_uid !== decoded.uid) {
         log(reqId, 'warn', `forbidden mismatch`);
-        return NextResponse.json({ success:false, error:'forbidden_mismatch', reqId }, { status:403 });
+        return NextResponse.json(
+          { success: false, error: 'forbidden_mismatch', reqId },
+          { status: 403 },
+        );
       }
       user = data;
     } else {
-      const { data, error } = await sb.from('users')
+      const { data, error } = await sb
+        .from('users')
         .select('user_code,firebase_uid,payjp_customer_id,payjp_default_card_id')
         .eq('firebase_uid', decoded.uid)
         .maybeSingle<UserRow>();
       if (error || !data) {
         log(reqId, 'warn', `user_not_found by uid:${decoded.uid}`, error);
-        return NextResponse.json({ success:false, error:'user_not_found', reqId }, { status:404 });
+        return NextResponse.json(
+          { success: false, error: 'user_not_found', reqId },
+          { status: 404 },
+        );
       }
       user = data;
     }
@@ -163,13 +204,26 @@ export async function POST(req: NextRequest) {
     const user_code = user!.user_code;
     const cusId = user!.payjp_customer_id;
     const defaultCar = user!.payjp_default_card_id || null;
-    log(reqId, 'log', `resolved user_code=${user_code} cus=${cusId ?? 'null'} defaultCar=${defaultCar ?? 'null'}`);
+    log(
+      reqId,
+      'log',
+      `resolved user_code=${user_code} cus=${cusId ?? 'null'} defaultCar=${defaultCar ?? 'null'}`,
+    );
 
     // 顧客IDが無い → DBだけ整合させて終了（UI整合）
     if (!cusId) {
       const { rows, mode } = await clearDbCardState(user_code, reqId);
-      if (rows === 0) return NextResponse.json({ success:false, error:'db_update_failed', reqId }, { status:500 });
-      return NextResponse.json({ success:true, info:'no_customer_id(db_cleared)', db_update_mode:mode, reqId });
+      if (rows === 0)
+        return NextResponse.json(
+          { success: false, error: 'db_update_failed', reqId },
+          { status: 500 },
+        );
+      return NextResponse.json({
+        success: true,
+        info: 'no_customer_id(db_cleared)',
+        db_update_mode: mode,
+        reqId,
+      });
     }
 
     // 1) default_card があれば先にピンポイント削除（速い）
@@ -185,7 +239,15 @@ export async function POST(req: NextRequest) {
         // 404なら既に無いので無視、それ以外は返す
         if (status && status !== 404) {
           log(reqId, 'warn', `delete default failed`, { status, body: bodyTxt });
-          return NextResponse.json({ success:false, error:'payjp_delete_failed', debug:{ status, body: bodyTxt }, reqId }, { status:502 });
+          return NextResponse.json(
+            {
+              success: false,
+              error: 'payjp_delete_failed',
+              debug: { status, body: bodyTxt },
+              reqId,
+            },
+            { status: 502 },
+          );
         }
       }
     }
@@ -194,10 +256,18 @@ export async function POST(req: NextRequest) {
     let before: any[] = [];
     try {
       before = await listCards(cusId, reqId);
-      log(reqId, 'log', `cards before: ${before.length}`, before.map(c=>c.id));
+      log(
+        reqId,
+        'log',
+        `cards before: ${before.length}`,
+        before.map((c) => c.id),
+      );
     } catch (e) {
       log(reqId, 'error', `list before failed`, payjpErrInfo(e));
-      return NextResponse.json({ success:false, error:'payjp_list_failed', reqId }, { status:502 });
+      return NextResponse.json(
+        { success: false, error: 'payjp_list_failed', reqId },
+        { status: 502 },
+      );
     }
 
     for (const c of before) {
@@ -210,30 +280,49 @@ export async function POST(req: NextRequest) {
     let after: any[] = [];
     try {
       after = await listCards(cusId, reqId);
-      log(reqId, 'log', `cards after: ${after.length}`, after.map(c=>c.id));
+      log(
+        reqId,
+        'log',
+        `cards after: ${after.length}`,
+        after.map((c) => c.id),
+      );
     } catch (e) {
       log(reqId, 'error', `list after failed`, payjpErrInfo(e));
-      return NextResponse.json({ success:false, error:'payjp_verify_failed', reqId }, { status:502 });
+      return NextResponse.json(
+        { success: false, error: 'payjp_verify_failed', reqId },
+        { status: 502 },
+      );
     }
 
     if (after.length > 0) {
-      return NextResponse.json({
-        success:false,
-        error:'payjp_cards_still_exist',
-        customer_id: cusId,
-        remain_card_ids: after.map(a=>a.id),
-        deleted_card_ids: Array.from(new Set(deleted)),
-        reqId,
-      }, { status:502 });
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'payjp_cards_still_exist',
+          customer_id: cusId,
+          remain_card_ids: after.map((a) => a.id),
+          deleted_card_ids: Array.from(new Set(deleted)),
+          reqId,
+        },
+        { status: 502 },
+      );
     }
 
     // 4) DB反映（default_card_id も null へ）※列不足はフォールバックで吸収
     const { rows, mode } = await clearDbCardState(user_code, reqId);
-    if (rows === 0) return NextResponse.json({ success:false, error:'db_update_failed', reqId }, { status:500 });
+    if (rows === 0)
+      return NextResponse.json(
+        { success: false, error: 'db_update_failed', reqId },
+        { status: 500 },
+      );
 
-    log(reqId, 'log', `done deleted=${Array.from(new Set(deleted)).length} db_rows=${rows} mode=${mode}`);
+    log(
+      reqId,
+      'log',
+      `done deleted=${Array.from(new Set(deleted)).length} db_rows=${rows} mode=${mode}`,
+    );
     return NextResponse.json({
-      success:true,
+      success: true,
       customer_id: cusId,
       deleted_card_ids: Array.from(new Set(deleted)),
       payjp_after_count: 0,
@@ -243,6 +332,9 @@ export async function POST(req: NextRequest) {
     });
   } catch (e: any) {
     log(reqId, 'error', `unhandled`, e?.message || e);
-    return NextResponse.json({ success:false, error: e?.message || 'error', reqId }, { status:500 });
+    return NextResponse.json(
+      { success: false, error: e?.message || 'error', reqId },
+      { status: 500 },
+    );
   }
 }

@@ -1,3 +1,7 @@
+// src/app/api/whoami/route.ts
+export const runtime = 'nodejs'; // ★これを一番上に追加
+
+
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyFirebaseAndAuthorize } from '@/lib/authz';
 
@@ -20,8 +24,7 @@ export async function GET(req: NextRequest) {
   try {
     const auth = (await verifyFirebaseAndAuthorize(req)) as Authish;
 
-    const code =
-      (auth && (auth.userCode ?? auth.user_code)) ?? null;
+    const code = (auth && (auth.userCode ?? auth.user_code)) ?? null;
 
     if (!code) return json({ ok: false, error: 'unauthorized' }, 401);
 

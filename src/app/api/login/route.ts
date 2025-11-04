@@ -30,7 +30,10 @@ export async function POST(req: NextRequest) {
 
     // デバッグ: admin 側の projectId / トークンの aud/iss をログ
     const decodedLoose = decodeJwtNoVerify(token);
-    console.log('[login] admin projectId =', process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID);
+    console.log(
+      '[login] admin projectId =',
+      process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    );
     console.log('[login] token aud/iss =', decodedLoose?.payload?.aud, decodedLoose?.payload?.iss);
 
     // ここで検証（revoked チェックはまず切って切り分け）
@@ -60,13 +63,26 @@ export async function POST(req: NextRequest) {
       if (insErr) {
         return NextResponse.json({ ok: false, error: insErr.message }, { status: 500 });
       }
-      return NextResponse.json({ ok: true, created: true, user_code, email_verified: emailVerified });
+      return NextResponse.json({
+        ok: true,
+        created: true,
+        user_code,
+        email_verified: emailVerified,
+      });
     }
 
     const user_code = existing[0].user_code as string;
-    await supabaseServer.from('users').update({ click_email: email }).eq('firebase_uid', firebase_uid);
+    await supabaseServer
+      .from('users')
+      .update({ click_email: email })
+      .eq('firebase_uid', firebase_uid);
 
-    return NextResponse.json({ ok: true, created: false, user_code, email_verified: emailVerified });
+    return NextResponse.json({
+      ok: true,
+      created: false,
+      user_code,
+      email_verified: emailVerified,
+    });
   } catch (e: any) {
     // verify 失敗原因を可視化
     console.error('[login] TOKEN_VERIFY_FAILED:', e?.errorInfo || e?.message || e);

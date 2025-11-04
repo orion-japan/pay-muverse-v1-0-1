@@ -4,14 +4,11 @@
 
 const V = 'rev-cdn-2025-10-12-1'; // キャッシュバスター（値を変えると確実に再取得）
 
-export const WORKER_PATH =
-  `https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/worker.min.js?${V}`;
+export const WORKER_PATH = `https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/worker.min.js?${V}`;
 
-export const CORE_PATH =
-  `https://cdn.jsdelivr.net/npm/tesseract.js-core@2.2.0/tesseract-core.wasm.js?${V}`;
+export const CORE_PATH = `https://cdn.jsdelivr.net/npm/tesseract.js-core@2.2.0/tesseract-core.wasm.js?${V}`;
 
-export const LANG_BASE =
-  `https://cdn.jsdelivr.net/npm/tesseract.js-core@2.2.0/lang-data`;
+export const LANG_BASE = `https://cdn.jsdelivr.net/npm/tesseract.js-core@2.2.0/lang-data`;
 
 // 互換用のヘルパ（呼び出し側がオブジェクトで受けたい場合）
 export function getOcrCdnPaths() {

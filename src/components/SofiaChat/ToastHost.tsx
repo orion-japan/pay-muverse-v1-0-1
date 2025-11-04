@@ -27,16 +27,18 @@ export default function ToastHost() {
   if (!toasts.length) return null;
 
   return (
-    <div style={{
-      position: 'fixed',
-      bottom: 20,
-      right: 20,
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 8,
-      zIndex: 1000,
-    }}>
-      {toasts.map(t => (
+    <div
+      style={{
+        position: 'fixed',
+        bottom: 20,
+        right: 20,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        zIndex: 1000,
+      }}
+    >
+      {toasts.map((t) => (
         <div
           key={t.id}
           style={{

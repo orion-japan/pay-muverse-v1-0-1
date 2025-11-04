@@ -46,8 +46,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const { searchParams } = new URL(req.url);
-    const rawBoardType =
-      searchParams.get('boardType') ?? searchParams.get('board_type');
+    const rawBoardType = searchParams.get('boardType') ?? searchParams.get('board_type');
 
     // board_type の正規化（未指定なら "self"）
     const boardType = (rawBoardType ?? 'self').toString();
@@ -75,7 +74,7 @@ export async function GET(req: NextRequest) {
           'tags',
           'visibility',
           'is_posted',
-        ].join(',')
+        ].join(','),
       )
       .eq('board_type', boardType)
       .eq('is_posted', true)
@@ -96,9 +95,9 @@ export async function GET(req: NextRequest) {
     }
 
     // 2) profiles をまとめて取得
-    const codes = Array.from(
-      new Set(postList.map((p: any) => p.user_code))
-    ).filter(Boolean) as string[];
+    const codes = Array.from(new Set(postList.map((p: any) => p.user_code))).filter(
+      Boolean,
+    ) as string[];
 
     const { data: profs, error: profErr } = await supabase
       .from('profiles')
@@ -109,10 +108,7 @@ export async function GET(req: NextRequest) {
       console.warn('[⚠️ GET] profiles 取得エラー（継続）:', profErr.message);
     }
 
-    const profileMap: Record<
-      string,
-      { name: string | null; avatar_url: string | null }
-    > = {};
+    const profileMap: Record<string, { name: string | null; avatar_url: string | null }> = {};
     (profs ?? []).forEach((r: any) => {
       profileMap[r.user_code] = {
         name: r.name ?? null,
@@ -198,8 +194,8 @@ export async function POST(req: NextRequest) {
       typeof board_type === 'string'
         ? board_type
         : typeof boardType === 'string'
-        ? boardType
-        : undefined;
+          ? boardType
+          : undefined;
     if (typeof rawBT === 'string') {
       const t = rawBT.trim();
       resolvedBoardType = t === '' || t.toLowerCase() === 'null' ? null : t;
@@ -213,11 +209,11 @@ export async function POST(req: NextRequest) {
       tags: Array.isArray(tags)
         ? tags
         : typeof tags === 'string' && tags.trim()
-        ? tags
-            .split(',')
-            .map((t: string) => t.trim())
-            .filter(Boolean)
-        : null,
+          ? tags
+              .split(',')
+              .map((t: string) => t.trim())
+              .filter(Boolean)
+          : null,
       media_urls: normalizedMediaUrls,
       visibility: visibility === 'private' ? 'private' : 'public',
       board_type: resolvedBoardType,
@@ -257,11 +253,11 @@ export async function POST(req: NextRequest) {
       const now = new Date();
 
       const insertPayload = {
-        user_code,                    // 投稿者
-        source_type: 'self',          // つぶやき由来
-        intent: 'reflection',         // or 'normal'
-        q_code: { code: qLabel },     // JSONB
-        post_id: postId,              // 元ポストと紐づけ
+        user_code, // 投稿者
+        source_type: 'self', // つぶやき由来
+        intent: 'reflection', // or 'normal'
+        q_code: { code: qLabel }, // JSONB
+        post_id: postId, // 元ポストと紐づけ
         created_at: now.toISOString(),
         for_date: jstDateYYYYMMDD(now), // JST日付
         extra: {

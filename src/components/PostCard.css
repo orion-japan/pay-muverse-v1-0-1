@@ -1,99 +1,98 @@
 .post-card {
-    border: 1px solid #ddd;
-    border-radius: 12px;
-    padding: 16px;
-    margin: 16px auto;
-    width: 100%;
-    max-width: 480px;
-    background: #fff;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-  }
-  
-  .post-header {
-    display: flex;
-    align-items: center;
-    margin-bottom: 12px;
-  }
-  
-  .avatar {
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    object-fit: cover;
-    margin-right: 12px;
-  }
-  
-  .username-date {
-    display: flex;
-    flex-direction: column;
-  }
-  
-  .username {
-    font-weight: bold;
-    font-size: 1rem;
-  }
-  
-  .date {
-    font-size: 0.8rem;
-    color: #777;
-  }
-  
-  .post-body {
-    margin-top: 8px;
-  }
-  
-  .post-title {
-    font-size: 1.1rem;
-    font-weight: bold;
-    margin-bottom: 6px;
-  }
-  
-  .post-content {
-    font-size: 0.95rem;
-    margin-bottom: 10px;
-    line-height: 1.5;
-  }
-  
-  .image-wrapper {
-    margin-bottom: 10px;
-  }
-  
-  .post-image {
-    width: 100%;
-    border-radius: 8px;
-    object-fit: cover;
-  }
-  
-  .tag-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-  
-  .tag {
-    background: #eee;
-    border-radius: 8px;
-    padding: 4px 10px;
-    font-size: 0.8rem;
-    color: #555;
-  }
-  
-  .post-footer {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 12px;
-  }
-  
-  .badge {
-    background-color: #ffe99d;
-    color: #8b6b00;
-    padding: 4px 10px;
-    border-radius: 12px;
-    font-size: 0.75rem;
-  }
-  
-  .meta {
-    font-size: 0.8rem;
-    color: #666;
-  }
-  
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  padding: 16px;
+  margin: 16px auto;
+  width: 100%;
+  max-width: 480px;
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.post-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  object-fit: cover;
+  margin-right: 12px;
+}
+
+.username-date {
+  display: flex;
+  flex-direction: column;
+}
+
+.username {
+  font-weight: bold;
+  font-size: 1rem;
+}
+
+.date {
+  font-size: 0.8rem;
+  color: #777;
+}
+
+.post-body {
+  margin-top: 8px;
+}
+
+.post-title {
+  font-size: 1.1rem;
+  font-weight: bold;
+  margin-bottom: 6px;
+}
+
+.post-content {
+  font-size: 0.95rem;
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+
+.image-wrapper {
+  margin-bottom: 10px;
+}
+
+.post-image {
+  width: 100%;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag {
+  background: #eee;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  color: #555;
+}
+
+.post-footer {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+
+.badge {
+  background-color: #ffe99d;
+  color: #8b6b00;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+}
+
+.meta {
+  font-size: 0.8rem;
+  color: #666;
+}

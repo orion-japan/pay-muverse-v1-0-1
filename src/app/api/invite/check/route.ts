@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 const BASE_CREDIT = 45;
 
@@ -13,9 +13,9 @@ export async function POST(req: NextRequest) {
 
     // 招待コードの検証
     const { data: inv, error } = await supabaseAdmin
-      .from("invite_codes")
-      .select("id, code, is_active, expires_at, max_uses, used_count, bonus_credit")
-      .eq("code", eve)
+      .from('invite_codes')
+      .select('id, code, is_active, expires_at, max_uses, used_count, bonus_credit')
+      .eq('code', eve)
       .maybeSingle();
 
     if (error) throw error;
@@ -35,15 +35,15 @@ export async function POST(req: NextRequest) {
 
     // 使用ログを保存（オプション）
     if (user_code) {
-      await supabaseAdmin.from("invite_uses").insert({
+      await supabaseAdmin.from('invite_uses').insert({
         invite_id: inv.id,
         user_code,
       });
       // used_count をインクリメント
       await supabaseAdmin
-        .from("invite_codes")
+        .from('invite_codes')
         .update({ used_count: (inv.used_count ?? 0) + 1 })
-        .eq("id", inv.id);
+        .eq('id', inv.id);
     }
 
     return NextResponse.json({ ok: true, credit, bonus });

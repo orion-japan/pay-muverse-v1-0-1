@@ -3,11 +3,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import {
-  verifyFirebaseAndAuthorize,
-  SUPABASE_URL,
-  SERVICE_ROLE,
-} from '@/lib/authz';
+import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/authz';
 
 export async function GET(req: NextRequest) {
   // 認証（master/admin 以外は 403）
@@ -25,7 +21,7 @@ export async function GET(req: NextRequest) {
   const { data, error } = await sb
     .from('conversations')
     .select('id, title, updated_at')
-    .eq('user_code', z.userCode)       // ★ ここで明示フィルタ
+    .eq('user_code', z.userCode) // ★ ここで明示フィルタ
     .order('updated_at', { ascending: false })
     .limit(50);
 

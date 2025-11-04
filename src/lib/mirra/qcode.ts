@@ -10,15 +10,80 @@ const client = HAS_API ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY! }) : n
 /** キーワード簡易ヒューリスティック */
 const keywordHeuristics: Record<QCode, string[]> = {
   // Q1: 金＝我慢/秩序
-  Q1: ['我慢','抑える','秩序','整える','詰まる','締め','評価','正しさ','手順','ルール','期限','守る'],
+  Q1: [
+    '我慢',
+    '抑える',
+    '秩序',
+    '整える',
+    '詰まる',
+    '締め',
+    '評価',
+    '正しさ',
+    '手順',
+    'ルール',
+    '期限',
+    '守る',
+  ],
   // Q2: 木＝怒り/成長
-  Q2: ['怒','苛立','攻め','急ぐ','前へ','突破','焦り','せか','イライラ','妨げ','阻害','挑戦','叱ら'],
+  Q2: [
+    '怒',
+    '苛立',
+    '攻め',
+    '急ぐ',
+    '前へ',
+    '突破',
+    '焦り',
+    'せか',
+    'イライラ',
+    '妨げ',
+    '阻害',
+    '挑戦',
+    '叱ら',
+  ],
   // Q3: 土＝不安/安定
-  Q3: ['不安','心配','迷い','停滞','重い','安定','疲れ','眠れ','落ち着か','ため息','居場所','ぐらつき'],
+  Q3: [
+    '不安',
+    '心配',
+    '迷い',
+    '停滞',
+    '重い',
+    '安定',
+    '疲れ',
+    '眠れ',
+    '落ち着か',
+    'ため息',
+    '居場所',
+    'ぐらつき',
+  ],
   // Q4: 水＝恐怖/浄化
-  Q4: ['恐れ','怖','萎縮','引く','冷える','静か','孤独','消えたい','圧','威圧','緊張','怯え'],
+  Q4: [
+    '恐れ',
+    '怖',
+    '萎縮',
+    '引く',
+    '冷える',
+    '静か',
+    '孤独',
+    '消えたい',
+    '圧',
+    '威圧',
+    '緊張',
+    '怯え',
+  ],
   // Q5: 火＝情熱/空虚
-  Q5: ['情熱','ワクワク','空虚','燃える','やりたい','開く','楽しい','嬉しい','光','高揚','やる気'],
+  Q5: [
+    '情熱',
+    'ワクワク',
+    '空虚',
+    '燃える',
+    'やりたい',
+    '開く',
+    '楽しい',
+    '嬉しい',
+    '光',
+    '高揚',
+    'やる気',
+  ],
 };
 
 /** シンプル色（UIタグ用） */
@@ -35,8 +100,14 @@ function heuristic(text: string): { q: QCode; score: number } {
   let best: QCode = 'Q3';
   let score = 0;
   (Object.keys(keywordHeuristics) as QCode[]).forEach((q) => {
-    const s = keywordHeuristics[q].reduce((acc, k) => (t.includes(k.toLowerCase()) ? acc + 1 : acc), 0);
-    if (s > score) { best = q; score = s; }
+    const s = keywordHeuristics[q].reduce(
+      (acc, k) => (t.includes(k.toLowerCase()) ? acc + 1 : acc),
+      0,
+    );
+    if (s > score) {
+      best = q;
+      score = s;
+    }
   });
   return { q: best, score };
 }
@@ -87,7 +158,7 @@ export async function inferQCode(userText: string): Promise<QResult> {
     const raw = r.choices?.[0]?.message?.content ?? '{}';
     const parsed = JSON.parse(raw) as { q?: string; confidence?: number; hint?: string };
 
-    const q = (['Q1','Q2','Q3','Q4','Q5'].includes(parsed.q || '') ? parsed.q : h.q) as QCode;
+    const q = (['Q1', 'Q2', 'Q3', 'Q4', 'Q5'].includes(parsed.q || '') ? parsed.q : h.q) as QCode;
 
     return {
       q,

@@ -14,7 +14,11 @@ export default function ImageSlider({ urls }: { urls: string[] }) {
 
   if (urls.length <= 1) {
     return (
-      <img src={urls[0]} alt="image-0" style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 10 }} />
+      <img
+        src={urls[0]}
+        alt="image-0"
+        style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 10 }}
+      />
     );
   }
 
@@ -29,8 +33,12 @@ export default function ImageSlider({ urls }: { urls: string[] }) {
       </div>
 
       {/* prev/next */}
-      <button className="nav prev" onClick={() => slideBy(-1)} aria-label="前へ">‹</button>
-      <button className="nav next" onClick={() => slideBy(1)} aria-label="次へ">›</button>
+      <button className="nav prev" onClick={() => slideBy(-1)} aria-label="前へ">
+        ‹
+      </button>
+      <button className="nav next" onClick={() => slideBy(1)} aria-label="次へ">
+        ›
+      </button>
     </div>
   );
 }

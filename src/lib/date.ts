@@ -18,7 +18,7 @@ export function formatJST(input?: string | Date | number, fmt = 'YYYY-MM-DD HH:m
 // その日のJST境界（DBクエリ用）
 export function jstDayRange(date: string | Date | number) {
   const startJ = dayjs(date).tz().startOf('day');
-  const endJ   = dayjs(date).tz().endOf('day');
+  const endJ = dayjs(date).tz().endOf('day');
   // DBがUTC保存(timestamptz)の場合、UTCに変換して境界を作る
   return {
     startUtcISO: startJ.utc().toISOString(),

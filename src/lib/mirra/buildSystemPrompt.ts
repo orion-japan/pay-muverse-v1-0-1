@@ -1,8 +1,8 @@
 // src/lib/mirra/buildSystemPrompt.ts
 
 export type MirraPromptOpts = {
-  seed?: string | null;          // 補助メモ（任意）
-  mode?: 'analyze' | 'consult';  // 初回 or 継続
+  seed?: string | null; // 補助メモ（任意）
+  mode?: 'analyze' | 'consult'; // 初回 or 継続
   lastAssistant?: string | null; // 直前返答（反復抑制用）
 };
 
@@ -45,6 +45,6 @@ export function buildSystemPrompt(opts: MirraPromptOpts = {}) {
     '- 同じ手段や言葉の連続使用',
     '',
     last ? `【直前返答の要約】${last}` : '',
-    seed ? `【参考メモ】\n${seed}\n---` : ''
+    seed ? `【参考メモ】\n${seed}\n---` : '',
   ].join('\n');
 }

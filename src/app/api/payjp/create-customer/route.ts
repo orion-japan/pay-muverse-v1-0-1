@@ -4,10 +4,7 @@ import Payjp from 'payjp';
 import { createClient } from '@supabase/supabase-js';
 
 // ✅ Supabase初期化（環境変数名を supabaseKey に統一）
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.supabaseKey!
-);
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.supabaseKey!);
 
 // ✅ PAY.JP初期化
 const payjp = Payjp(process.env.PAYJP_SECRET_KEY!);

@@ -1,37 +1,38 @@
-html, body {
-    height: 100%;
-    margin: 0;
-  }
-  
-  .app-container {
-    display: flex;
-    flex-direction: column;
-    min-height: 100vh;
-  }
-  
-  .app-main {
-    flex: 1 1 auto;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    padding: 0 12px;
-    box-sizing: border-box;
-  }
-  
-  .app-footer {
-    flex: 0 0 auto;
-    height: var(--footer-h, 56px);
-    background: #fff;
-    border-top: 1px solid #ddd;
-  }
-  .mu-main {
-    padding-bottom: var(--footer-safe-pad, 56px) !important;
-  }
-  
-  /* layout.css など共通スタイルに追記 */
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.app-main {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 12px;
+  box-sizing: border-box;
+}
+
+.app-footer {
+  flex: 0 0 auto;
+  height: var(--footer-h, 56px);
+  background: #fff;
+  border-top: 1px solid #ddd;
+}
+.mu-main {
+  padding-bottom: var(--footer-safe-pad, 56px) !important;
+}
+
+/* layout.css など共通スタイルに追記 */
 .page-container {
-  max-width: 480px;       /* スマホ幅に固定 */
-  margin: 0 auto;         /* 中央寄せ */
-  width: 100%;            /* 横スクロール防止 */
+  max-width: 480px; /* スマホ幅に固定 */
+  margin: 0 auto; /* 中央寄せ */
+  width: 100%; /* 横スクロール防止 */
 }
 
 /* styles/layout.css 等 */
@@ -43,8 +44,8 @@ html, body {
 
 .mobile-viewport {
   width: 100%;
-  max-width: 480px;   /* スマホ風に固定 */
-  min-width: 320px;   /* 予防線 */
+  max-width: 480px; /* スマホ風に固定 */
+  min-width: 320px; /* 予防線 */
   margin: 0 auto;
 }
 
@@ -56,5 +57,7 @@ html, body {
 
 /* ほかの幅指定に勝てるよう保険（iPadで有効） */
 @media (min-width: 768px) {
-  .mobile-viewport { max-width: 480px !important; }
+  .mobile-viewport {
+    max-width: 480px !important;
+  }
 }

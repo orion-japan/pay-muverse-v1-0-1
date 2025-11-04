@@ -27,7 +27,7 @@ export default function MTalkChatPage() {
       // すでに cid 付きで入ってきた場合も、このフラグを立てて以後は何もしない
       didReplaceRef.current = true;
     }
-  // ⚠ sp は依存に入れない（オブジェクトが変わって毎回走るため）
+    // ⚠ sp は依存に入れない（オブジェクトが変わって毎回走るため）
   }, [threadId, pathname, router, sp]);
 
   // agent は mu / iros / mirra（既定は mirra）

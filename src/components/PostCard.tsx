@@ -25,11 +25,7 @@ export default function PostCard({ post }: PostCardProps) {
   return (
     <div className="post-card">
       <div className="post-header">
-        <img
-          src={post.avatar_url || '/default-avatar.png'}
-          alt="avatar"
-          className="avatar"
-        />
+        <img src={post.avatar_url || '/default-avatar.png'} alt="avatar" className="avatar" />
         <div className="username-date">
           <div className="username">{post.click_username || 'Unknown'}</div>
           <div className="date">{new Date(post.created_at).toLocaleString()}</div>
@@ -41,11 +37,7 @@ export default function PostCard({ post }: PostCardProps) {
         {post.content && <p className="post-content">{post.content}</p>}
         {post.media_urls?.length > 0 && (
           <div className="image-wrapper">
-            <img
-              src={post.media_urls[0]}
-              alt="投稿画像"
-              className="post-image"
-            />
+            <img src={post.media_urls[0]} alt="投稿画像" className="post-image" />
           </div>
         )}
         {post.tags?.length > 0 && (

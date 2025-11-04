@@ -17,9 +17,16 @@ const SUPABASE_SERVICE_ROLE_KEY = mustEnv('SUPABASE_SERVICE_ROLE_KEY');
 
 // 文字列/配列ゆらぎを配列に正規化
 function normArr(v: unknown): string[] {
-  if (Array.isArray(v)) return v.map(String).map(s => s.trim()).filter(Boolean);
+  if (Array.isArray(v))
+    return v
+      .map(String)
+      .map((s) => s.trim())
+      .filter(Boolean);
   if (typeof v === 'string') {
-    return v.split(/[、,]+/).map(s => s.trim()).filter(Boolean);
+    return v
+      .split(/[、,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
   }
   return [];
 }
@@ -35,9 +42,7 @@ export async function POST(req: NextRequest) {
   try {
     // ---- Auth ----
     const authz = req.headers.get('authorization') || '';
-    const token = authz.toLowerCase().startsWith('bearer ')
-      ? authz.slice(7).trim()
-      : null;
+    const token = authz.toLowerCase().startsWith('bearer ') ? authz.slice(7).trim() : null;
     if (!token) return NextResponse.json({ error: 'missing token' }, { status: 401 });
 
     const decoded = await adminAuth.verifyIdToken(token).catch(() => null);
@@ -76,7 +81,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ---- Body ----
-    const body = await req.json().catch(() => ({} as any));
+    const body = await req.json().catch(() => ({}) as any);
 
     // ==========================================
     // profiles 側：プロフィール項目だけ保存（users は触らない）
@@ -127,9 +132,7 @@ export async function POST(req: NextRequest) {
 
     if (Object.keys(profilesPatch).length) {
       const row = { user_code, ...profilesPatch };
-      const { error } = await supabase
-        .from('profiles')
-        .upsert(row, { onConflict: 'user_code' });
+      const { error } = await supabase.from('profiles').upsert(row, { onConflict: 'user_code' });
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     }
 

@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
 /**
@@ -14,9 +14,7 @@ const supabase = createClient(
 export async function POST(req: NextRequest) {
   try {
     const url = new URL(req.url);
-    const userCode =
-      req.headers.get('x-user-code') ||
-      url.searchParams.get('user_code') || '';
+    const userCode = req.headers.get('x-user-code') || url.searchParams.get('user_code') || '';
 
     if (!userCode) {
       return NextResponse.json({ error: 'missing user_code' }, { status: 401 });

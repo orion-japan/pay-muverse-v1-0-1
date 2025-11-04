@@ -1,4 +1,4 @@
-'use client'; 
+'use client';
 
 import { useState, useEffect, useRef, KeyboardEvent } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
@@ -54,11 +54,11 @@ export default function DashboardPage() {
     const start = performance.now();
 
     const tick = (now: number) => {
-      const elapsed = (now - start) % duration;     // 0..duration
-      const p = elapsed / duration;                  // 0..1
+      const elapsed = (now - start) % duration; // 0..duration
+      const p = elapsed / duration; // 0..1
       // 0→0.5: min→max, 0.5→1: max→min の三角波
-      const t = p < 0.5 ? p * 2 : (1 - p) * 2;       // 0..1..0
-      const hue = minHue + (maxHue - minHue) * t;    // 200..300..200
+      const t = p < 0.5 ? p * 2 : (1 - p) * 2; // 0..1..0
+      const hue = minHue + (maxHue - minHue) * t; // 200..300..200
       setHue(hue);
       raf = requestAnimationFrame(tick);
     };
@@ -82,7 +82,9 @@ export default function DashboardPage() {
   useEffect(() => {
     let isReload = false;
     try {
-      const nav = (performance.getEntriesByType?.('navigation') as PerformanceNavigationTiming[])?.[0];
+      const nav = (
+        performance.getEntriesByType?.('navigation') as PerformanceNavigationTiming[]
+      )?.[0];
       isReload = nav?.type === 'reload';
       // 旧APIフォールバック
       // @ts-ignore
@@ -186,7 +188,10 @@ export default function DashboardPage() {
         const flagAdmin =
           truthy(meta.is_admin) || role === 'admin' || clickType === 'admin' || plan === 'admin';
         const flagMaster =
-          truthy(meta.is_master) || role === 'master' || clickType === 'master' || plan === 'master';
+          truthy(meta.is_master) ||
+          role === 'master' ||
+          clickType === 'master' ||
+          plan === 'master';
 
         const allowed = flagAdmin || flagMaster;
         setIsIrosAllowed(allowed);
@@ -210,7 +215,7 @@ export default function DashboardPage() {
     { title: 'Create', link: '/create', img: '/mu_create.png', alt: 'Create' },
     { title: 'm Talk', link: '/mtalk', img: '/mirra.png', alt: 'm Talk' },
     { title: 'F Shot', link: '/', img: '/mui.png', alt: 'F Shot' }, // ガード対象
-    { title: 'iros_AI', link: '/iros', img: '/ir2.png', alt: 'iros_AI' },
+    { title: 'iros_AI', link: '/sofia', img: '/ir2.png', alt: 'iros_AI' },
   ];
 
   // ※危険な直リンクは削除（ガードを素通りします）
@@ -247,7 +252,9 @@ export default function DashboardPage() {
     if (link === '/iros') {
       if (irosReloadLock) {
         // ロック中の案内（必要ならトースト等に変更）
-        setLiveModalText('リロード直後は 3 秒間、iros_AI は利用できません。しばらくお待ちください。');
+        setLiveModalText(
+          'リロード直後は 3 秒間、iros_AI は利用できません。しばらくお待ちください。',
+        );
         setLiveModalOpen(true);
         return;
       }
@@ -360,10 +367,11 @@ export default function DashboardPage() {
                 if (disabled) {
                   if (disabledByAuth) setIsLoginModalOpen(true);
                   else if (disabledByReload) {
-                    setLiveModalText('リロード直後は 3 秒間、iros_AI は利用できません。しばらくお待ちください。');
+                    setLiveModalText(
+                      'リロード直後は 3 秒間、iros_AI は利用できません。しばらくお待ちください。',
+                    );
                     setLiveModalOpen(true);
-                  }
-                  else if (disabledByRole) setDenyOpen(true);
+                  } else if (disabledByRole) setDenyOpen(true);
                   return;
                 }
                 handleClick(item.link);
@@ -376,8 +384,8 @@ export default function DashboardPage() {
                 disabledByReload
                   ? 'リロード直後は 3 秒間は利用できません'
                   : disabledByRole
-                  ? 'この機能は master / admin 限定です'
-                  : undefined
+                    ? 'この機能は master / admin 限定です'
+                    : undefined
               }
             >
               <div

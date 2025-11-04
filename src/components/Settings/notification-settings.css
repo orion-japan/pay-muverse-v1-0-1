@@ -1,29 +1,90 @@
 .notify-card {
-    background: #fff;
-    border-radius: 12px;
-    box-shadow: 0 6px 16px rgba(0,0,0,.06);
-    padding: 14px 16px;
-    margin-top: 16px;
-  }
-  .notify-title { font-weight:700; font-size:16px; margin-bottom:8px; }
-  .notify-item {
-    display:flex; align-items:center; justify-content:space-between;
-    padding:10px 4px;
-  }
-  .notify-item + .notify-item { border-top:1px solid #eee; }
-  .notify-label { font-size:14px; color:#333; }
-  .notify-body { font-size:14px; color:#555; }
-  .notify-saving, .notify-msg { margin-top:8px; font-size:12px; color:#777; }
-  
-  /* iOS風スイッチ */
-  .switch { position:relative; display:inline-block; width:46px; height:26px; }
-  .switch input { display:none; }
-  .slider { position:absolute; inset:0; background:#ccc; transition:.2s; border-radius:26px; cursor:pointer; }
-  .slider:before { content:""; position:absolute; height:22px; width:22px; left:2px; top:2px; background:#fff; transition:.2s; border-radius:50%; box-shadow:0 1px 3px rgba(0,0,0,.2); }
-  input:checked + .slider { background:#7cc576; }
-  input:checked + .slider:before { transform:translateX(20px); }
-  
-  .small-btn { margin-left:10px; padding:6px 10px; border:1px solid #ddd; background:#fafafa; border-radius:8px; cursor:pointer; }
-  .small-btn:disabled { opacity:.6; cursor:not-allowed; }
-  select { padding:6px 10px; border:1px solid #ddd; border-radius:8px; }
-  
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.06);
+  padding: 14px 16px;
+  margin-top: 16px;
+}
+.notify-title {
+  font-weight: 700;
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+.notify-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 4px;
+}
+.notify-item + .notify-item {
+  border-top: 1px solid #eee;
+}
+.notify-label {
+  font-size: 14px;
+  color: #333;
+}
+.notify-body {
+  font-size: 14px;
+  color: #555;
+}
+.notify-saving,
+.notify-msg {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #777;
+}
+
+/* iOS風スイッチ */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 46px;
+  height: 26px;
+}
+.switch input {
+  display: none;
+}
+.slider {
+  position: absolute;
+  inset: 0;
+  background: #ccc;
+  transition: 0.2s;
+  border-radius: 26px;
+  cursor: pointer;
+}
+.slider:before {
+  content: '';
+  position: absolute;
+  height: 22px;
+  width: 22px;
+  left: 2px;
+  top: 2px;
+  background: #fff;
+  transition: 0.2s;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+input:checked + .slider {
+  background: #7cc576;
+}
+input:checked + .slider:before {
+  transform: translateX(20px);
+}
+
+.small-btn {
+  margin-left: 10px;
+  padding: 6px 10px;
+  border: 1px solid #ddd;
+  background: #fafafa;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.small-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+select {
+  padding: 6px 10px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+}

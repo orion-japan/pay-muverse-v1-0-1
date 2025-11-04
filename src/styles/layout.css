@@ -1,23 +1,37 @@
 /* ルート main（全ページ共通の中央カラム） */
-.mu-main{
-    width:100%;
-    max-width:var(--maxw);
-    margin:0 auto;
-    padding:60px 0;             /* header + footer 分は JS 側で調整 */
-    min-height:100vh;
-    background:var(--bg-app);
-    box-sizing:border-box;
-  }
-  
-  /* ヘッダー/フッター：外＝全幅  内＝中央幅 */
-  .mu-header-outer,.mu-footer-outer{width:100%;display:flex;justify-content:center}
-  .mu-header-inner,.mu-footer-inner{width:100%;max-width:var(--maxw);}
-  
-  /* セクション安全ラッパ（ページ先頭に置くだけで中央化） */
-  .mu-page{width:100%;max-width:var(--maxw);margin:0 auto;background:var(--bg-app)}
-  
-  /* 共通 .mu-main はスマホ幅にする実装が入っているはず */
- 
+.mu-main {
+  width: 100%;
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 60px 0; /* header + footer 分は JS 側で調整 */
+  min-height: 100vh;
+  background: var(--bg-app);
+  box-sizing: border-box;
+}
+
+/* ヘッダー/フッター：外＝全幅  内＝中央幅 */
+.mu-header-outer,
+.mu-footer-outer {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+.mu-header-inner,
+.mu-footer-inner {
+  width: 100%;
+  max-width: var(--maxw);
+}
+
+/* セクション安全ラッパ（ページ先頭に置くだけで中央化） */
+.mu-page {
+  width: 100%;
+  max-width: var(--maxw);
+  margin: 0 auto;
+  background: var(--bg-app);
+}
+
+/* 共通 .mu-main はスマホ幅にする実装が入っているはず */
+
 /* 🔥 Mu_AI の時だけ 430px 制限を解除して全幅に */
 .mu-main--wide {
   max-width: none !important;
@@ -58,12 +72,16 @@ body.mu-ai .mu-page {
 }
 
 body.mu-ai .mu-main {
-  padding-top: 0 !important;   /* ← ヘッダー分の隙間を消す */
-  padding-bottom: 60px;        /* フッター分は維持 */
+  padding-top: 0 !important; /* ← ヘッダー分の隙間を消す */
+  padding-bottom: 60px; /* フッター分は維持 */
 }
 
 /* 念のため、旧コンテナのクセを殺して中央寄せ/右寄り崩れを防止 */
-.page-wrapper, .frame-container, .dashboard-wrapper, .app-frame, .main-content {
+.page-wrapper,
+.frame-container,
+.dashboard-wrapper,
+.app-frame,
+.main-content {
   max-width: none !important;
   float: none !important;
   margin-left: auto !important;
@@ -71,8 +89,14 @@ body.mu-ai .mu-main {
 }
 
 /* 画像や iframe 下の隙間対策＋横スク抑止 */
-img, iframe { display: block; }
-html, body { overflow-x: hidden; }
+img,
+iframe {
+  display: block;
+}
+html,
+body {
+  overflow-x: hidden;
+}
 
 /* ===== Mu_AI / Mu_Full ページの二重ヘッダー除去 ===== */
 body.mu-ai header,
@@ -80,7 +104,8 @@ body.mu-full header {
   display: none !important;
 }
 /* アプリ全体の背景（通常ページ） */
-html, body {
+html,
+body {
   min-height: 100%;
   background: linear-gradient(180deg, #faf7ff 0%, #ffffff 100%);
 }
@@ -90,10 +115,17 @@ html, body {
   background: #fff; /* ここは好みで。グラデ不要なら白でOK */
 }
 .tile-grid .tile {
-  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease;
 }
-.tile-grid .tile:hover { transform: translateY(-3px); }
-.tile-grid .tile:active { transform: translateY(-1px) scale(.99); }
+.tile-grid .tile:hover {
+  transform: translateY(-3px);
+}
+.tile-grid .tile:active {
+  transform: translateY(-1px) scale(0.99);
+}
 
 .notice-section,
 .tile-grid .tile {
@@ -109,34 +141,33 @@ header {
 }
 /* === Glass Header (特徴強め) =========================== */
 header {
-  position: sticky;           /* 既存ならそのままでOK */
+  position: sticky; /* 既存ならそのままでOK */
   top: 0;
   z-index: 100;
-  background: linear-gradient(
-    180deg,
-    rgba(255,255,255,0.42) 0%,
-    rgba(255,255,255,0.24) 100%
-  );
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.42) 0%, rgba(255, 255, 255, 0.24) 100%);
   backdrop-filter: saturate(160%) blur(10px);
   -webkit-backdrop-filter: saturate(160%) blur(10px); /* Safari */
-  border-bottom: 1px solid rgba(120,120,200,0.25);
+  border-bottom: 1px solid rgba(120, 120, 200, 0.25);
   box-shadow:
-    0 10px 24px rgba(62,37,139,0.08),   /* ふわっとした影 */
-    inset 0 1px 0 rgba(255,255,255,0.25); /* ガラス上辺のハイライト */
-  overflow: hidden;            /* ↓の装飾を切り抜くため */
+    0 10px 24px rgba(62, 37, 139, 0.08),
+    /* ふわっとした影 */ inset 0 1px 0 rgba(255, 255, 255, 0.25); /* ガラス上辺のハイライト */
+  overflow: hidden; /* ↓の装飾を切り抜くため */
 }
 
 /* 下辺に“光のアクセントライン” */
 header::after {
-  content: "";
+  content: '';
   position: absolute;
-  left: 0; right: 0; bottom: -1px;
+  left: 0;
+  right: 0;
+  bottom: -1px;
   height: 2px;
-  background: linear-gradient(90deg,
+  background: linear-gradient(
+    90deg,
     transparent 0%,
-    rgba(139,92,246,0.35) 25%,
-    rgba(59,130,246,0.35) 50%,
-    rgba(139,92,246,0.35) 75%,
+    rgba(139, 92, 246, 0.35) 25%,
+    rgba(59, 130, 246, 0.35) 50%,
+    rgba(139, 92, 246, 0.35) 75%,
     transparent 100%
   );
   pointer-events: none;
@@ -144,12 +175,12 @@ header::after {
 
 /* うっすら“ノイズ”でガラス質感（超控えめ） */
 header::before {
-  content: "";
-  position: absolute; inset: 0;
-  background-image:
-    radial-gradient(rgba(255,255,255,0.18) 0.5px, transparent 0.6px);
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.18) 0.5px, transparent 0.6px);
   background-size: 8px 8px;
-  opacity: .35;
+  opacity: 0.35;
   pointer-events: none;
 }
 
@@ -165,6 +196,6 @@ header button {
    JSで <body class="scrolled"> を付与できるなら */
 body.scrolled header {
   box-shadow:
-    0 14px 28px rgba(62,37,139,0.10),
-    inset 0 1px 0 rgba(255,255,255,0.25);
+    0 14px 28px rgba(62, 37, 139, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }

@@ -15,7 +15,7 @@ export async function POST(req: Request) {
     if (!user_code || !post_id || !comment_id) {
       return NextResponse.json(
         { ok: false, error: 'user_code, post_id and comment_id are required' },
-        { status: 400 }
+        { status: 400 },
       );
     }
 

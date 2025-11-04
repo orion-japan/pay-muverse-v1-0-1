@@ -4,11 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import {
-  verifyFirebaseAndAuthorize,
-  SUPABASE_URL,
-  SERVICE_ROLE,
-} from '@/lib/authz';
+import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/authz';
 
 /* ====== OpenAI ====== */
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
@@ -17,7 +13,7 @@ const CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 /* ====== helpers ====== */
 function json(data: any, init?: number | ResponseInit) {
   const status =
-    typeof init === 'number' ? init : (init as ResponseInit | undefined)?.['status'] ?? 200;
+    typeof init === 'number' ? init : ((init as ResponseInit | undefined)?.['status'] ?? 200);
   const headers = new Headers(
     typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers,
   );
@@ -116,13 +112,7 @@ async function llmClassifyQPhaseDepth(text: string) {
   }
 }
 
-async function llmMakeReport(
-  agent: Agent,
-  text: string,
-  q: string,
-  phase: string,
-  depth: string,
-) {
+async function llmMakeReport(agent: Agent, text: string, q: string, phase: string, depth: string) {
   const sys_mirra =
     'あなたは実務寄りの診断レポートライター。600字前後で日本語。構成は【要約】【観測】【背景仮説】【繰り返しがちな出来事】【小さな解決策】【再配置の合言葉】。読みやすく、実行可能な提案を入れてください。';
   const sys_iros =
@@ -182,7 +172,12 @@ async function ensureConversationAndSeed(
   const now = new Date().toISOString();
   const seedMessages = [
     { role: 'user', content: userSeedText, created_at: now, meta: { source: 'mtalk', seed: true } },
-    { role: 'assistant', content: assistantSeedText, created_at: now, meta: { source: 'mtalk', seed_reply: true } },
+    {
+      role: 'assistant',
+      content: assistantSeedText,
+      created_at: now,
+      meta: { source: 'mtalk', seed_reply: true },
+    },
   ];
 
   const { data: conv, error } = await supabase
@@ -212,7 +207,10 @@ export async function POST(req: NextRequest) {
 
     const body = (await req.json()) as Body;
     const agent = body.agent;
-    const texts = (body.texts || []).map(String).map((s) => s.trim()).filter(Boolean);
+    const texts = (body.texts || [])
+      .map(String)
+      .map((s) => s.trim())
+      .filter(Boolean);
     if (!['mirra', 'iros'].includes(agent)) {
       return json({ ok: false, error: 'agent must be mirra|iros' }, 400);
     }
@@ -277,10 +275,7 @@ export async function POST(req: NextRequest) {
     );
 
     if (!repIns.conversation_id) {
-      await supabase
-        .from('mtalk_reports')
-        .update({ conversation_id })
-        .eq('id', repIns.id);
+      await supabase.from('mtalk_reports').update({ conversation_id }).eq('id', repIns.id);
     }
 
     return json({

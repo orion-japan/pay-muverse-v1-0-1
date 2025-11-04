@@ -7,7 +7,8 @@ import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/au
 
 const json = (data: any, init?: number | ResponseInit) =>
   new NextResponse(JSON.stringify(data), {
-    status: typeof init === 'number' ? init : (init as ResponseInit | undefined)?.['status'] ?? 200,
+    status:
+      typeof init === 'number' ? init : ((init as ResponseInit | undefined)?.['status'] ?? 200),
     headers: { 'content-type': 'application/json; charset=utf-8' },
   });
 
@@ -15,7 +16,9 @@ type AnyBody = { conversation_id?: string; conv_id?: string; id?: string } | str
 
 function pickConvId(body: AnyBody, url: URL): string | undefined {
   if (typeof body === 'string') {
-    try { body = JSON.parse(body) as AnyBody; } catch {}
+    try {
+      body = JSON.parse(body) as AnyBody;
+    } catch {}
   }
   const b = (body as any) ?? {};
   return (
@@ -54,7 +57,11 @@ async function handler(req: NextRequest) {
     }
 
     // mu_conversations -> id(text) / user_code(text)
-    const c = await db.from('mu_conversations').delete().eq('user_code', user_code).eq('id', convId);
+    const c = await db
+      .from('mu_conversations')
+      .delete()
+      .eq('user_code', user_code)
+      .eq('id', convId);
     if (c.error) {
       console.error('[mu/delete] delete conversation error:', c.error);
       return json({ ok: false, error: 'delete_conv_failed' }, 500);

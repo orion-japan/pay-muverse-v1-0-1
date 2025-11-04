@@ -5,7 +5,7 @@ import payjp from 'payjp';
 // ✅ Supabase初期化（supabaseKey に修正）
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.supabaseKey!  // ← Vercel の登録に合わせた環境変数名
+  process.env.supabaseKey!, // ← Vercel の登録に合わせた環境変数名
 );
 
 // ✅ PAY.JP初期化
@@ -20,10 +20,7 @@ export async function POST(req: NextRequest) {
     console.log('📩 register-card に送信された user_code:', user_code);
 
     if (!token || !user_code) {
-      return NextResponse.json(
-        { error: 'token と user_code は必須です' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'token と user_code は必須です' }, { status: 400 });
     }
 
     // Supabaseからユーザー取得
@@ -36,7 +33,7 @@ export async function POST(req: NextRequest) {
     if (fetchError || !userData?.payjp_customer_id) {
       return NextResponse.json(
         { error: 'ユーザーまたはpayjp_customer_idが見つかりません' },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
@@ -52,7 +49,7 @@ export async function POST(req: NextRequest) {
     console.error('❌ register-card エラー:', err);
     return NextResponse.json(
       { error: 'カード登録に失敗しました', detail: String(err) },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

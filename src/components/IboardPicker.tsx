@@ -58,7 +58,7 @@ export default function IboardPicker({
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [posts, setPosts] = useState<IboardPost[]>([]); // iBoard
-  const [album, setAlbum] = useState<AlbumItem[]>([]);  // Album(Storage)
+  const [album, setAlbum] = useState<AlbumItem[]>([]); // Album(Storage)
   const [uploading, setUploading] = useState(false);
 
   const me = (userCode ?? '').trim();
@@ -120,7 +120,9 @@ export default function IboardPicker({
         setLoading(false);
       }
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [tab, userCode, clickUsername, limit, scope]);
 
   /* =========================
@@ -136,15 +138,17 @@ export default function IboardPicker({
         const prefixes: string[] = [];
         // userCode あり/なし の両方を走査（パス設計が揺れていても拾える）
         const withUser = me ? [`album/${me}/`, `iboard/${me}/`, `uploads/${me}/`] : [];
-        const noUser   = [`album/`, `iboard/`, `uploads/`];
+        const noUser = [`album/`, `iboard/`, `uploads/`];
         withUser.forEach((p) => prefixes.push(p));
         noUser.forEach((p) => prefixes.push(p));
 
         const items: AlbumItem[] = [];
         for (const prefix of prefixes) {
-          const { data, error } = await supabase.storage
-            .from(bucketName)
-            .list(prefix, { limit: 100, offset: 0, sortBy: { column: 'created_at', order: 'desc' } });
+          const { data, error } = await supabase.storage.from(bucketName).list(prefix, {
+            limit: 100,
+            offset: 0,
+            sortBy: { column: 'created_at', order: 'desc' },
+          });
           if (error) continue;
 
           for (const f of data || []) {
@@ -165,7 +169,9 @@ export default function IboardPicker({
         setLoading(false);
       }
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [tab, userCode, bucketName, me]);
 
   /* =========================
@@ -223,10 +229,13 @@ export default function IboardPicker({
         <div className="ibp-title">画像を選択</div>
         {/* デバッグ表示（不要なら削除OK） */}
         <div className="ibp-debug">
-          userCode: <code>{me || '(empty)'}</code> ｜ iBoard: {posts.length} ｜ Album: {album.length}
+          userCode: <code>{me || '(empty)'}</code> ｜ iBoard: {posts.length} ｜ Album:{' '}
+          {album.length}
         </div>
         {onClose && (
-          <button type="button" className="ibp-close" onClick={onClose} aria-label="閉じる">×</button>
+          <button type="button" className="ibp-close" onClick={onClose} aria-label="閉じる">
+            ×
+          </button>
         )}
       </div>
 
@@ -250,7 +259,13 @@ export default function IboardPicker({
           {tab === 'album' && (
             <label className="upload-btn" style={{ marginLeft: 8 }}>
               {uploading ? 'アップロード中…' : '画像をアップロード'}
-              <input type="file" accept="image/*" onChange={handleUpload} disabled={uploading} hidden />
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleUpload}
+                disabled={uploading}
+                hidden
+              />
             </label>
           )}
         </div>
@@ -279,7 +294,9 @@ export default function IboardPicker({
             <div className="ibp-grid">
               {posts.map((p) => {
                 const urls = Array.isArray(p.media_urls)
-                  ? p.media_urls.map((u: any) => (typeof u === 'string' ? u : u?.url || '')).filter(Boolean)
+                  ? p.media_urls
+                      .map((u: any) => (typeof u === 'string' ? u : u?.url || ''))
+                      .filter(Boolean)
                   : [];
                 const src = urls[0] || '';
                 const isSel = current === p.post_id;
@@ -301,8 +318,7 @@ export default function IboardPicker({
                 <div className="ibp-empty">
                   {scope === 'mine'
                     ? '自分の iBoard 画像投稿が見つかりません。'
-                    : '画像付きの iBoard 投稿が見つかりません。'
-                  }
+                    : '画像付きの iBoard 投稿が見つかりません。'}
                   <br />
                   「Album / Storage」タブから選ぶか、右上のアップロードをご利用ください。
                 </div>

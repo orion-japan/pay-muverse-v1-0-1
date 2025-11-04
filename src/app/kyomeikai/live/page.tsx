@@ -52,7 +52,9 @@ export default function LivePage() {
 
         // 既存インスタンス破棄
         if (apiRef.current) {
-          try { apiRef.current.dispose(); } catch {}
+          try {
+            apiRef.current.dispose();
+          } catch {}
           apiRef.current = null;
         }
 
@@ -60,10 +62,7 @@ export default function LivePage() {
         const roomName = (j?.room && String(j.room)) || `kyomeikai-live-${today}`;
 
         // 表示名のフォールバック
-        const displayName =
-          user?.displayName ||
-          user?.email?.split('@')[0] ||
-          'Guest';
+        const displayName = user?.displayName || user?.email?.split('@')[0] || 'Guest';
 
         apiRef.current = new window.JitsiMeetExternalAPI('meet.jit.si', {
           parentNode: containerRef.current,
@@ -81,14 +80,22 @@ export default function LivePage() {
           interfaceConfigOverwrite: {
             MOBILE_APP_PROMO: false,
             TOOLBAR_BUTTONS: [
-              'microphone', 'camera', 'desktop', 'tileview',
-              'chat', 'raisehand', 'settings', 'hangup'
+              'microphone',
+              'camera',
+              'desktop',
+              'tileview',
+              'chat',
+              'raisehand',
+              'settings',
+              'hangup',
             ],
           },
         });
 
         apiRef.current.on('readyToClose', () => {
-          try { apiRef.current?.dispose(); } catch {}
+          try {
+            apiRef.current?.dispose();
+          } catch {}
           apiRef.current = null;
         });
       } catch (e) {
@@ -99,7 +106,9 @@ export default function LivePage() {
 
     return () => {
       mounted = false;
-      try { apiRef.current?.dispose(); } catch {}
+      try {
+        apiRef.current?.dispose();
+      } catch {}
       apiRef.current = null;
     };
   }, [user]); // ← userCodeは依存から削除
@@ -107,7 +116,9 @@ export default function LivePage() {
   return (
     <div className="mu-page mu-main">
       <header className="km-header" style={{ padding: '12px 16px' }}>
-        <h1 className="km-title" style={{ fontSize: '18px' }}>共鳴会 LIVE</h1>
+        <h1 className="km-title" style={{ fontSize: '18px' }}>
+          共鳴会 LIVE
+        </h1>
       </header>
 
       {/* 埋め込み領域 */}
@@ -124,12 +135,14 @@ export default function LivePage() {
         }}
       >
         {isLive === false && (
-          <div style={{ textAlign: 'center', padding: '12px', opacity: .9 }}>
-            <div style={{ fontSize: '16px', marginBottom: '6px' }}>現在LIVE配信は行われていません。</div>
+          <div style={{ textAlign: 'center', padding: '12px', opacity: 0.9 }}>
+            <div style={{ fontSize: '16px', marginBottom: '6px' }}>
+              現在LIVE配信は行われていません。
+            </div>
             {roomFromStatus ? <div>次回ルーム: {roomFromStatus}</div> : null}
           </div>
         )}
-        {isLive === null && <div style={{ opacity: .8 }}>配信状況を確認中…</div>}
+        {isLive === null && <div style={{ opacity: 0.8 }}>配信状況を確認中…</div>}
         {/* isLive === true のときJitsiがこの領域に描画 */}
       </div>
     </div>

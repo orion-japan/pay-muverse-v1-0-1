@@ -14,12 +14,10 @@ export async function uploadAvatar(file: File): Promise<string> {
 
   const filePath = `${user.id}/avatar.png`;
 
-  const { error: uploadError } = await supabase.storage
-    .from('avatars')
-    .upload(filePath, file, {
-      upsert: true,
-      cacheControl: '3600',
-    });
+  const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, file, {
+    upsert: true,
+    cacheControl: '3600',
+  });
 
   if (uploadError) {
     throw new Error(`アップロード失敗: ${uploadError.message}`);

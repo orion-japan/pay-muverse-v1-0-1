@@ -11,9 +11,7 @@ type Params = { post_id: string };
 type SearchParams = { [k: string]: string | string[] | undefined };
 
 // 🟢 修正済み: params を Promise で受けて await
-export async function generateMetadata(
-  { params }: { params: Promise<Params> }
-): Promise<Metadata> {
+export async function generateMetadata({ params }: { params: Promise<Params> }): Promise<Metadata> {
   const { post_id } = await params;
 
   const { data } = await supabaseServer
@@ -76,8 +74,7 @@ export default async function BoardPostPage({
     : [];
 
   const likes = post.likes_count ?? post.q_code?.resonance?.likes ?? 0;
-  const coms =
-    post.comments_count ?? post.q_code?.resonance?.comments ?? (comments?.length ?? 0);
+  const coms = post.comments_count ?? post.q_code?.resonance?.comments ?? comments?.length ?? 0;
 
   const wantFocusComments = sp?.focus === 'comments';
 

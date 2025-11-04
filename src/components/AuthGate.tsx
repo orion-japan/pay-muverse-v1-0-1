@@ -9,7 +9,7 @@ export default function AuthGate() {
   const { user, loading } = useAuth();
 
   useEffect(() => {
-    if (loading) return;          // 認証確定まで待つ
+    if (loading) return; // 認証確定まで待つ
     if (!user) router.replace('/'); // 未ログインならホームへ
   }, [loading, user, router]);
 

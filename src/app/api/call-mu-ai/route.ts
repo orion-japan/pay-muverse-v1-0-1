@@ -14,7 +14,9 @@ async function postJson(url: string, body: any, signal: AbortSignal) {
   });
   const text = await res.text();
   let data: any = null;
-  try { data = text ? JSON.parse(text) : null; } catch {}
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {}
   return { res, text, data };
 }
 
@@ -53,7 +55,11 @@ export async function POST(req: NextRequest) {
 
     // 400なら旧形式でも試す（将来互換）
     if (res.status === 400) {
-      ({ res, text, data } = await postJson(url, { auth: { mode: 'firebase', idToken: token } }, controller.signal));
+      ({ res, text, data } = await postJson(
+        url,
+        { auth: { mode: 'firebase', idToken: token } },
+        controller.signal,
+      ));
       console.log('[call-mu-ai] try#2 status:', res.status, 'url:', url, 'body:', text);
     }
 
@@ -62,7 +68,7 @@ export async function POST(req: NextRequest) {
     if (!res.ok) {
       return NextResponse.json(
         { ok: false, error: 'MU_FORWARD_FAILED', debug: { status: res.status, url, body: text } },
-        { status: 502 }
+        { status: 502 },
       );
     }
 
@@ -70,7 +76,7 @@ export async function POST(req: NextRequest) {
     if (!mu) {
       return NextResponse.json(
         { ok: false, error: 'MU_NO_USER_CODE', mu: data, debug: { url } },
-        { status: 502 }
+        { status: 502 },
       );
     }
 

@@ -7,7 +7,9 @@ export default function EventHubPage() {
     <div className="km-wrap">
       <div className="km-card">
         <div className="km-card-title">Event</div>
-        <p className="km-hub-desc">よく使うメニューを選んでください。（画像と説明は後で差し替え）</p>
+        <p className="km-hub-desc">
+          よく使うメニューを選んでください。（画像と説明は後で差し替え）
+        </p>
 
         <div className="km-hlist">
           <a href="/event/calendar" className="km-hcard" aria-label="カレンダー・履歴">
@@ -50,5 +52,3 @@ export default function EventHubPage() {
     </div>
   );
 }
-
-

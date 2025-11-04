@@ -1,9 +1,9 @@
-import { Suspense } from 'react'
-import JitsiClient from './JitsiClient'
+import { Suspense } from 'react';
+import JitsiClient from './JitsiClient';
 
 // SSGさせない & キャッシュしない
-export const dynamic = 'force-dynamic'
-export const fetchCache = 'default-no-store'
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'default-no-store';
 // ※ revalidate は一切 export しない（衝突回避）
 
 export default function Page() {
@@ -26,5 +26,5 @@ export default function Page() {
     >
       <JitsiClient />
     </Suspense>
-  )
+  );
 }

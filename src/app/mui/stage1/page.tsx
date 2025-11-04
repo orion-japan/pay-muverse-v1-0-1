@@ -13,12 +13,10 @@ export default async function Page({
 }) {
   const sp = await searchParams;
 
-  const conv =
-    Array.isArray(sp.conv) ? sp.conv[0] : (sp.conv ?? null);
+  const conv = Array.isArray(sp.conv) ? sp.conv[0] : (sp.conv ?? null);
 
   // user_code は CSR 側で解決する想定なので固定でOK
   const user_code = 'ANON';
 
   return <StageOnePanel user_code={user_code} conv={conv} />;
 }
-

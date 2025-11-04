@@ -4,10 +4,10 @@ import { AffectAnalysis, Phase, SelfAcceptance, Relation } from './types';
 
 function inferPhase(text: string): Phase {
   const t = (text || '').toLowerCase();
-  const innerK = ['気持ち','感情','不安','イライラ','怖','心','胸','わたし','私'];
-  const outerK = ['上司','相手','会議','職場','メール','チーム','外部','環境'];
-  const inner = innerK.some(k => t.includes(k.toLowerCase()));
-  const outer = outerK.some(k => t.includes(k.toLowerCase()));
+  const innerK = ['気持ち', '感情', '不安', 'イライラ', '怖', '心', '胸', 'わたし', '私'];
+  const outerK = ['上司', '相手', '会議', '職場', 'メール', 'チーム', '外部', '環境'];
+  const inner = innerK.some((k) => t.includes(k.toLowerCase()));
+  const outer = outerK.some((k) => t.includes(k.toLowerCase()));
   if (inner && !outer) return 'Inner';
   if (outer && !inner) return 'Outer';
   return 'Inner';

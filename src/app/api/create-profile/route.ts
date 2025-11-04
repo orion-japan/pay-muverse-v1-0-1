@@ -18,17 +18,27 @@ export async function POST(req: Request) {
       linkedin: body.linkedin || null,
       youtube: body.youtube || null,
       website_url: body.website_url || null,
-      interests: Array.isArray(body.interests) ? body.interests : (body.interests ? [body.interests] : null),
-      skills: Array.isArray(body.skills) ? body.skills : (body.skills ? [body.skills] : null),
-      activity_area: Array.isArray(body.activity_area) ? body.activity_area : (body.activity_area ? [body.activity_area] : null),
-      languages: Array.isArray(body.languages) ? body.languages : (body.languages ? [body.languages] : null)
+      interests: Array.isArray(body.interests)
+        ? body.interests
+        : body.interests
+          ? [body.interests]
+          : null,
+      skills: Array.isArray(body.skills) ? body.skills : body.skills ? [body.skills] : null,
+      activity_area: Array.isArray(body.activity_area)
+        ? body.activity_area
+        : body.activity_area
+          ? [body.activity_area]
+          : null,
+      languages: Array.isArray(body.languages)
+        ? body.languages
+        : body.languages
+          ? [body.languages]
+          : null,
     };
 
     console.log('[create-profile] 挿入データ:', payload);
 
-    const { data, error } = await supabaseServer
-      .from('profiles')
-      .insert([payload]);
+    const { data, error } = await supabaseServer.from('profiles').insert([payload]);
 
     if (error) {
       console.error('[create-profile] DBエラー:', error);

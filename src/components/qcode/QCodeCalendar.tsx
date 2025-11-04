@@ -5,8 +5,8 @@ import { useEffect, useMemo, useState } from 'react';
 type QLog = {
   for_date: string; // 'YYYY-MM-DD'
   q_code?: {
-    currentQ?: 'Q1'|'Q2'|'Q3'|'Q4'|'Q5';
-    polarity?: 'ease'|'now'|'yin'|'yang';
+    currentQ?: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
+    polarity?: 'ease' | 'now' | 'yin' | 'yang';
   };
   intent?: string | null;
 };
@@ -17,7 +17,7 @@ export default function QCodeCalendar({
   onSelectDay,
 }: {
   days: '30' | '60' | '90';
-  intent: 'all'|'self_post'|'event_attend'|'vision_check';
+  intent: 'all' | 'self_post' | 'event_attend' | 'vision_check';
   onSelectDay?: (date: string, logs: QLog[]) => void;
 }) {
   const [items, setItems] = useState<QLog[]>([]);
@@ -75,13 +75,17 @@ export default function QCodeCalendar({
   }, [items, days]);
 
   // 色ロジック：Qごとの基本色
-  const BASE: Record<'Q1'|'Q2'|'Q3'|'Q4'|'Q5', string> = {
-    Q1:'#7b8da4', Q2:'#5aa06a', Q3:'#c2a05a', Q4:'#5a88c2', Q5:'#c25a5a'
+  const BASE: Record<'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5', string> = {
+    Q1: '#7b8da4',
+    Q2: '#5aa06a',
+    Q3: '#c2a05a',
+    Q4: '#5a88c2',
+    Q5: '#c25a5a',
   };
   const easeColor = (hex: string, alpha = 0.45) => {
-    const r = parseInt(hex.slice(1,3),16);
-    const g = parseInt(hex.slice(3,5),16);
-    const b = parseInt(hex.slice(5,7),16);
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
     return `rgba(${r},${g},${b},${alpha})`;
   };
 
@@ -89,22 +93,27 @@ export default function QCodeCalendar({
   const colorForDay = (dayLogs: QLog[]) => {
     if (!dayLogs?.length) return '#e8edf5';
     const qCount: Record<string, number> = {};
-    const polCount: Record<string, { ease:number; now:number }> = {};
+    const polCount: Record<string, { ease: number; now: number }> = {};
 
     for (const l of dayLogs) {
       const q = l?.q_code?.currentQ;
       if (!q) continue;
       qCount[q] = (qCount[q] ?? 0) + 1;
-      if (!polCount[q]) polCount[q] = { ease:0, now:0 };
-      const pol = l?.q_code?.polarity as ('ease'|'now'|undefined);
+      if (!polCount[q]) polCount[q] = { ease: 0, now: 0 };
+      const pol = l?.q_code?.polarity as 'ease' | 'now' | undefined;
       if (pol === 'ease') polCount[q].ease++;
       else polCount[q].now++;
     }
 
-    const topQ = (Object.entries(qCount).sort((a,b)=>b[1]-a[1])[0]?.[0] ?? 'Q3') as 'Q1'|'Q2'|'Q3'|'Q4'|'Q5';
-    const { ease, now } = polCount[topQ] ?? { ease:0, now:0 };
+    const topQ = (Object.entries(qCount).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'Q3') as
+      | 'Q1'
+      | 'Q2'
+      | 'Q3'
+      | 'Q4'
+      | 'Q5';
+    const { ease, now } = polCount[topQ] ?? { ease: 0, now: 0 };
     if (ease === now) return easeColor(BASE[topQ], 0.65);
-    if (ease > now)   return easeColor(BASE[topQ], 0.45);
+    if (ease > now) return easeColor(BASE[topQ], 0.45);
     return BASE[topQ];
   };
 
@@ -116,14 +125,25 @@ export default function QCodeCalendar({
   return (
     <div>
       {/* ヘッダー */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gap:8, fontSize:12, color:'#6a7a8a', marginBottom:6 }}>
-        {['日','月','火','水','木','金','土'].map((w)=>(
-          <div key={w} style={{ textAlign:'center' }}>{w}</div>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(7, 1fr)',
+          gap: 8,
+          fontSize: 12,
+          color: '#6a7a8a',
+          marginBottom: 6,
+        }}
+      >
+        {['日', '月', '火', '水', '木', '金', '土'].map((w) => (
+          <div key={w} style={{ textAlign: 'center' }}>
+            {w}
+          </div>
         ))}
       </div>
 
       {/* カレンダー本体 */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gap:8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 8 }}>
         {daysList.map((d) => {
           const logs = dayMap[d] ?? [];
           const bg = colorForDay(logs);
@@ -132,26 +152,26 @@ export default function QCodeCalendar({
           return (
             <button
               key={d}
-              onClick={()=>handleClick(d)}
+              onClick={() => handleClick(d)}
               title={d}
               style={{
-                aspectRatio:'1 / 1',
-                borderRadius:8,
-                border:'1px solid #e3e8f2',
-                background:bg,
-                display:'grid',
-                placeItems:'center',
-                cursor:'pointer',
-                outline:'none'
+                aspectRatio: '1 / 1',
+                borderRadius: 8,
+                border: '1px solid #e3e8f2',
+                background: bg,
+                display: 'grid',
+                placeItems: 'center',
+                cursor: 'pointer',
+                outline: 'none',
               }}
             >
-              <span style={{ fontWeight:600, color: has ? '#223' : '#889' }}>{dayNum}</span>
+              <span style={{ fontWeight: 600, color: has ? '#223' : '#889' }}>{dayNum}</span>
             </button>
           );
         })}
       </div>
 
-      {loading && <p style={{ marginTop:8, color:'#667' }}>読み込み中…</p>}
+      {loading && <p style={{ marginTop: 8, color: '#667' }}>読み込み中…</p>}
     </div>
   );
 }
@@ -159,7 +179,7 @@ export default function QCodeCalendar({
 /* utils */
 function toYMD(d: Date) {
   const y = d.getUTCFullYear();
-  const m = `${d.getUTCMonth()+1}`.padStart(2,'0');
-  const dd = `${d.getUTCDate()}`.padStart(2,'0');
+  const m = `${d.getUTCMonth() + 1}`.padStart(2, '0');
+  const dd = `${d.getUTCDate()}`.padStart(2, '0');
   return `${y}-${m}-${dd}`;
 }

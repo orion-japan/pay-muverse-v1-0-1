@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import React, { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
-import Link from "next/link";
+import React, { useEffect, useMemo, useState } from 'react';
+import { supabase } from '@/lib/supabaseClient';
+import Link from 'next/link';
 /** ===== 型（ゆるめ） ===== */
 type QNowRow = {
   user_code: string;
@@ -29,13 +29,13 @@ type ChainRow = {
   link_ok: boolean | null;
 };
 
-const Q_AXIS = ["Q1", "Q2", "Q3", "Q4", "Q5"];
-const STAGE_AXIS = ["S1", "S2", "S3", "T1", "T2", "T3"];
-const toKey = (q?: string | null, s?: string | null) => `${q ?? "-"}/${s ?? "-"}`;
+const Q_AXIS = ['Q1', 'Q2', 'Q3', 'Q4', 'Q5'];
+const STAGE_AXIS = ['S1', 'S2', 'S3', 'T1', 'T2', 'T3'];
+const toKey = (q?: string | null, s?: string | null) => `${q ?? '-'}/${s ?? '-'}`;
 
 // 0～max を 0～1 に正規化→薄い(#f8fafc)～濃い（青系）で塗り
 function cellColor(v: number, vmax: number) {
-  if (vmax <= 0 || v <= 0) return "#f8fafc";
+  if (vmax <= 0 || v <= 0) return '#f8fafc';
   const t = Math.min(1, v / vmax);
   const L = 95 - t * 55; // 95%→40%
   const S = 75; // 彩度
@@ -44,7 +44,7 @@ function cellColor(v: number, vmax: number) {
 }
 
 function fmt(ts?: string) {
-  if (!ts) return "-";
+  if (!ts) return '-';
   const d = new Date(ts);
   if (isNaN(d.getTime())) return ts;
   return `${d.toLocaleDateString()} ${d.toLocaleTimeString()}`;
@@ -52,16 +52,14 @@ function fmt(ts?: string) {
 
 /** === JSONの q_code から currentQ/depthStage を読み出す安全ヘルパ === */
 function readQFromJson(qj: any): { q?: string | null; stage?: string | null } {
-  if (!qj || typeof qj !== "object") return {};
+  if (!qj || typeof qj !== 'object') return {};
   const q = (qj.currentQ ?? qj.currentq ?? qj.Q ?? null) as string | null;
-  const stage = (qj.depthStage ?? qj.depthstage ?? qj.stage ?? null) as
-    | string
-    | null;
+  const stage = (qj.depthStage ?? qj.depthstage ?? qj.stage ?? null) as string | null;
   return { q, stage };
 }
 
 export default function AiQDashboard() {
-  const [userCode, setUserCode] = useState("669933");
+  const [userCode, setUserCode] = useState('669933');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -82,9 +80,9 @@ export default function AiQDashboard() {
     try {
       // 1) 今
       const { data: nowRows, error: eNow } = await supabase
-        .from("user_q_now")
-        .select("*")
-        .eq("user_code", code)
+        .from('user_q_now')
+        .select('*')
+        .eq('user_code', code)
         .limit(1);
 
       if (eNow) throw eNow;
@@ -93,20 +91,20 @@ export default function AiQDashboard() {
       // 2) タイムライン（ビュー）。無ければテーブルから抽出
       let tm: TimelineRow[] = [];
       const { data: tData, error: eT } = await supabase
-        .from("q_code_timeline")
-        .select("*")
-        .eq("user_code", code)
-        .order("created_at", { ascending: false })
+        .from('q_code_timeline')
+        .select('*')
+        .eq('user_code', code)
+        .order('created_at', { ascending: false })
         .limit(100);
       if (!eT && tData) {
         tm = tData as any;
       } else {
         // フォールバック（q_code_logs から抜粋）
         const { data: raw, error: eRaw } = await supabase
-          .from("q_code_logs")
-          .select("user_code,source_type,intent,created_at,q_code")
-          .eq("user_code", code)
-          .order("created_at", { ascending: false })
+          .from('q_code_logs')
+          .select('user_code,source_type,intent,created_at,q_code')
+          .eq('user_code', code)
+          .order('created_at', { ascending: false })
           .limit(100);
         if (eRaw) throw eRaw;
         tm =
@@ -126,21 +124,21 @@ export default function AiQDashboard() {
 
       // 3) 鎖（監査）
       const { data: cRows, error: eC } = await supabase
-        .from("q_code_chain_audit")
-        .select("user_code,created_at,prev_hash,curr_hash,link_ok")
-        .eq("user_code", code)
-        .order("created_at", { ascending: false })
+        .from('q_code_chain_audit')
+        .select('user_code,created_at,prev_hash,curr_hash,link_ok')
+        .eq('user_code', code)
+        .order('created_at', { ascending: false })
         .limit(5);
       if (eC) throw eC;
       setChain((cRows ?? []) as any);
 
       // 4) AI 由来の生ログ（ヒートマップ用）
       const { data: ai, error: eAI } = await supabase
-        .from("q_code_logs")
-        .select("created_at,source_type,intent,q_code")
-        .eq("user_code", code)
-        .eq("source_type", "sofia")
-        .order("created_at", { ascending: false })
+        .from('q_code_logs')
+        .select('created_at,source_type,intent,q_code')
+        .eq('user_code', code)
+        .eq('source_type', 'sofia')
+        .order('created_at', { ascending: false })
         .limit(300);
       if (eAI) throw eAI;
       const aiMapped =
@@ -158,7 +156,7 @@ export default function AiQDashboard() {
       setAiLogs(aiMapped);
     } catch (err: any) {
       console.error(err);
-      setErrorMsg(err?.message ?? "データ取得でエラーが発生しました");
+      setErrorMsg(err?.message ?? 'データ取得でエラーが発生しました');
     } finally {
       setLoading(false);
     }
@@ -182,14 +180,14 @@ export default function AiQDashboard() {
         q,
         stage,
         count: counts.get(toKey(q, stage)) ?? 0,
-      }))
+      })),
     );
     return { grid, vmax, total: aiLogs.length };
   }, [aiLogs]);
 
   const aiOnlyTimeline = useMemo(
-    () => timeline.filter((r) => r.source_type === "sofia"),
-    [timeline]
+    () => timeline.filter((r) => r.source_type === 'sofia'),
+    [timeline],
   );
 
   return (
@@ -217,7 +215,7 @@ export default function AiQDashboard() {
           disabled={loading}
           className="rounded bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
         >
-          {loading ? "読み込み中…" : "読み込み"}
+          {loading ? '読み込み中…' : '読み込み'}
         </button>
       </div>
 
@@ -238,11 +236,11 @@ export default function AiQDashboard() {
             </div>
             <div>
               <span className="inline-block w-24 text-gray-500">Q:</span>
-              <span className="font-semibold">{now.currentq ?? "-"}</span>
+              <span className="font-semibold">{now.currentq ?? '-'}</span>
             </div>
             <div>
               <span className="inline-block w-24 text-gray-500">stage:</span>
-              <span className="font-semibold">{now.depthstage ?? "-"}</span>
+              <span className="font-semibold">{now.depthstage ?? '-'}</span>
             </div>
             <div>
               <span className="inline-block w-24 text-gray-500">updated:</span>
@@ -267,9 +265,7 @@ export default function AiQDashboard() {
         <div className="rounded-lg border border-gray-200 bg-white p-4">
           <div className="text-xs text-gray-500">鎖チェック（最新5件）</div>
           <div className="mt-1 text-2xl font-semibold">
-            {
-              chain.filter((c) => c.link_ok === true).length
-            }/{chain.length}
+            {chain.filter((c) => c.link_ok === true).length}/{chain.length}
           </div>
         </div>
       </section>
@@ -277,9 +273,7 @@ export default function AiQDashboard() {
       {/* ヒートマップ */}
       <section className="mb-6 rounded-lg border border-gray-200 bg-white p-4">
         <div className="mb-3 flex items-center justify-between">
-          <div className="text-sm font-semibold">
-            ヒートマップ（AI由来：Q × Stage）
-          </div>
+          <div className="text-sm font-semibold">ヒートマップ（AI由来：Q × Stage）</div>
           <div className="text-xs text-gray-500">集計対象: {heatmap.total} 件</div>
         </div>
 
@@ -294,10 +288,7 @@ export default function AiQDashboard() {
             >
               <div />
               {STAGE_AXIS.map((s) => (
-                <div
-                  key={s}
-                  className="px-2 py-1 text-center text-xs text-gray-600"
-                >
+                <div key={s} className="px-2 py-1 text-center text-xs text-gray-600">
                   {s}
                 </div>
               ))}
@@ -312,9 +303,7 @@ export default function AiQDashboard() {
                   gridTemplateColumns: `72px repeat(${STAGE_AXIS.length}, 64px)`,
                 }}
               >
-                <div className="px-2 py-1 text-xs text-gray-600">
-                  {Q_AXIS[ri]}
-                </div>
+                <div className="px-2 py-1 text-xs text-gray-600">{Q_AXIS[ri]}</div>
                 {row.map((cell) => (
                   <div
                     key={`${cell.q}-${cell.stage}`}
@@ -324,9 +313,9 @@ export default function AiQDashboard() {
                   >
                     <span
                       className="text-xs font-medium"
-                      style={{ color: cell.count ? "#0f172a" : "#94a3b8" }}
+                      style={{ color: cell.count ? '#0f172a' : '#94a3b8' }}
                     >
-                      {cell.count || ""}
+                      {cell.count || ''}
                     </span>
                   </div>
                 ))}
@@ -341,10 +330,7 @@ export default function AiQDashboard() {
           <div
             className="h-3 w-24 rounded"
             style={{
-              background: `linear-gradient(90deg, ${cellColor(
-                0,
-                10
-              )}, ${cellColor(10, 10)})`,
+              background: `linear-gradient(90deg, ${cellColor(0, 10)}, ${cellColor(10, 10)})`,
             }}
           />
           <span>多</span>
@@ -375,9 +361,9 @@ export default function AiQDashboard() {
               {aiOnlyTimeline.map((r, i) => (
                 <tr key={i} className="border-b">
                   <td className="px-3 py-2">{fmt(r.created_at)}</td>
-                  <td className="px-3 py-2">{r.intent ?? "-"}</td>
-                  <td className="px-3 py-2">{r.q ?? "-"}</td>
-                  <td className="px-3 py-2">{r.stage ?? "-"}</td>
+                  <td className="px-3 py-2">{r.intent ?? '-'}</td>
+                  <td className="px-3 py-2">{r.q ?? '-'}</td>
+                  <td className="px-3 py-2">{r.stage ?? '-'}</td>
                 </tr>
               ))}
             </tbody>
@@ -410,14 +396,10 @@ export default function AiQDashboard() {
                 <tr key={i} className="border-b">
                   <td className="px-3 py-2">{fmt(c.created_at)}</td>
                   <td className="px-3 py-2">
-                    <code className="rounded bg-gray-50 px-1 py-0.5">
-                      {c.prev_hash ?? "null"}
-                    </code>
+                    <code className="rounded bg-gray-50 px-1 py-0.5">{c.prev_hash ?? 'null'}</code>
                   </td>
                   <td className="px-3 py-2">
-                    <code className="rounded bg-gray-50 px-1 py-0.5">
-                      {c.curr_hash}
-                    </code>
+                    <code className="rounded bg-gray-50 px-1 py-0.5">{c.curr_hash}</code>
                   </td>
                   <td className="px-3 py-2">
                     {c.link_ok ? (

@@ -5,7 +5,7 @@ export async function upscaleTrimOnly(
   file: File,
   scale = 3,
   topCut = 0.06,
-  bottomCut = 0.06
+  bottomCut = 0.06,
 ): Promise<Blob> {
   const bmp = await createImageBitmap(file);
   const w = Math.round(bmp.width * scale);
@@ -23,11 +23,9 @@ export async function upscaleTrimOnly(
   // @ts-ignore
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(bmp, 0, -cutY, w, h);
-  const out = await (cvs as any).convertToBlob
+  const out = (await (cvs as any).convertToBlob)
     ? (cvs as OffscreenCanvas).convertToBlob({ type: 'image/png', quality: 1 })
-    : new Promise<Blob>((r) =>
-        (cvs as HTMLCanvasElement).toBlob((b) => r(b!), 'image/png', 1)
-      );
+    : new Promise<Blob>((r) => (cvs as HTMLCanvasElement).toBlob((b) => r(b!), 'image/png', 1));
   bmp.close();
   return out;
 }
@@ -89,11 +87,9 @@ export async function prepImageSoft(file: File): Promise<Blob> {
   }
 
   ctx.putImageData(img, 0, 0);
-  const out = await (cvs as any).convertToBlob
+  const out = (await (cvs as any).convertToBlob)
     ? (cvs as OffscreenCanvas).convertToBlob({ type: 'image/png', quality: 1 })
-    : new Promise<Blob>((r) =>
-        (cvs as HTMLCanvasElement).toBlob((b) => r(b!), 'image/png', 1)
-      );
+    : new Promise<Blob>((r) => (cvs as HTMLCanvasElement).toBlob((b) => r(b!), 'image/png', 1));
   bmp.close();
   return out;
 }
@@ -107,9 +103,7 @@ export async function extractBubbleBlobs(file: File): Promise<Blob[]> {
 // ───────────────────────────────────────────────────────────────
 // 追加：メタ付き吹き出し抽出（位置と平均色を返す）
 // 既存 API を壊さないため、新しい関数として“追加”します。
-export async function extractBubbleBlobsMeta(
-  file: File
-): Promise<
+export async function extractBubbleBlobsMeta(file: File): Promise<
   Array<{
     blob: Blob;
     x1: number;
@@ -292,7 +286,7 @@ export async function extractBubbleBlobsMeta(
     const blob = await ((oc as any).convertToBlob
       ? (oc as OffscreenCanvas).convertToBlob({ type: 'image/png', quality: 1 })
       : new Promise<Blob>((r2) =>
-          (oc as HTMLCanvasElement).toBlob((b2) => r2(b2!), 'image/png', 1)
+          (oc as HTMLCanvasElement).toBlob((b2) => r2(b2!), 'image/png', 1),
         ));
 
     outs.push({

@@ -1,116 +1,114 @@
 /* src/app/profile/[code]/profile.css */
 .profile-page {
-    padding: 24px;
-  }
-  
-  .profile-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-  
-  .profile-avatar {
-    width: 64px;
-    height: 64px;
-    border-radius: 50%;
-    object-fit: cover;
-  }
-  
-  .follow-actions {
-    display: flex;
-    justify-content: center;
-    margin: 16px 0;
-  }
-  
-  .follow-btn {
-    font-size: 1.1rem;
-    padding: 10px 20px;
-    border-radius: 8px;
-    border: none;
-    cursor: pointer;
-    font-weight: bold;
-    background: linear-gradient(90deg, #6a11cb, #2575fc);
-    color: white;
-    transition: 0.3s;
-  }
-  
-  .follow-btn:hover {
-    background: linear-gradient(90deg, #2575fc, #6a11cb);
-  }
-  
-  .follow-btn.remove {
-    background: #ff6b6b;
-  }
-  
-  .follow-btn.remove:hover {
-    background: #ff4b4b;
-  }
-  
-  .follow-actions {
-    margin: 24px 0 48px; /* 👈 下に余白を多めにとる */
-    text-align: center;
-  }
-  
-  .follow-btn.big {
-    display: inline-block;
-    font-size: 1.3rem;
-    font-weight: bold;
-    padding: 14px 28px;
-    border-radius: 12px;
-    border: none;
-    cursor: pointer;
-    transition: 0.3s;
-    background: linear-gradient(135deg, #4a90e2, #357ab8);
-    color: #fff;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-  }
-  
-  .follow-btn.big:hover {
-    background: linear-gradient(135deg, #357ab8, #2d5c99);
-  }
-  
-  .follow-btn.big.remove {
-    background: linear-gradient(135deg, #e24a4a, #b83535);
-  }
-  
-  .follow-btn.big.remove:hover {
-    background: linear-gradient(135deg, #b83535, #8e2828);
-  }
- 
-  .follow-section {
-    margin: 20px 0;
-    text-align: center;
-  }
-  
-  .follow-section {
-    margin: 20px 0 40px; /* ← 下に40pxの余白を追加 */
-    text-align: center;
-  }
-  
-  .follow-btn {
-    padding: 14px 28px;
-    font-size: 18px;
-    font-weight: bold;
-    border-radius: 10px;
-    border: none;
-    cursor: pointer;
-    width: 90%;
-    max-width: 320px;
-    background-color: #0070f3;
-    color: white;
-    transition: background-color 0.2s;
-  }
-  
-  .follow-btn:hover {
-    background-color: #0059c1;
-  }
-  
-  .follow-btn.following {
-    background-color: #9b59b6;
-  }
-  
-  .follow-btn.following:hover {
-    background-color: #8e44ad;
-  }
-  
-  
+  padding: 24px;
+}
+
+.profile-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.profile-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.follow-actions {
+  display: flex;
+  justify-content: center;
+  margin: 16px 0;
+}
+
+.follow-btn {
+  font-size: 1.1rem;
+  padding: 10px 20px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-weight: bold;
+  background: linear-gradient(90deg, #6a11cb, #2575fc);
+  color: white;
+  transition: 0.3s;
+}
+
+.follow-btn:hover {
+  background: linear-gradient(90deg, #2575fc, #6a11cb);
+}
+
+.follow-btn.remove {
+  background: #ff6b6b;
+}
+
+.follow-btn.remove:hover {
+  background: #ff4b4b;
+}
+
+.follow-actions {
+  margin: 24px 0 48px; /* 👈 下に余白を多めにとる */
+  text-align: center;
+}
+
+.follow-btn.big {
+  display: inline-block;
+  font-size: 1.3rem;
+  font-weight: bold;
+  padding: 14px 28px;
+  border-radius: 12px;
+  border: none;
+  cursor: pointer;
+  transition: 0.3s;
+  background: linear-gradient(135deg, #4a90e2, #357ab8);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.follow-btn.big:hover {
+  background: linear-gradient(135deg, #357ab8, #2d5c99);
+}
+
+.follow-btn.big.remove {
+  background: linear-gradient(135deg, #e24a4a, #b83535);
+}
+
+.follow-btn.big.remove:hover {
+  background: linear-gradient(135deg, #b83535, #8e2828);
+}
+
+.follow-section {
+  margin: 20px 0;
+  text-align: center;
+}
+
+.follow-section {
+  margin: 20px 0 40px; /* ← 下に40pxの余白を追加 */
+  text-align: center;
+}
+
+.follow-btn {
+  padding: 14px 28px;
+  font-size: 18px;
+  font-weight: bold;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  width: 90%;
+  max-width: 320px;
+  background-color: #0070f3;
+  color: white;
+  transition: background-color 0.2s;
+}
+
+.follow-btn:hover {
+  background-color: #0059c1;
+}
+
+.follow-btn.following {
+  background-color: #9b59b6;
+}
+
+.follow-btn.following:hover {
+  background-color: #8e44ad;
+}

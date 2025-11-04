@@ -44,25 +44,27 @@ self.addEventListener('push', (event) => {
 
   console.log('[SW] showNotification ->', title, options);
 
-  event.waitUntil((async () => {
-    try {
-      await self.registration.showNotification(title, options);
-      console.log('[SW] showNotification success');
-    } catch (err) {
-      console.error('[SW] showNotification error:', err);
+  event.waitUntil(
+    (async () => {
       try {
-        await self.registration.showNotification(title, {
-          body: options.body,
-          tag: options.tag,
-          renotify: options.renotify,
-          data: options.data,
-        });
-        console.log('[SW] fallback showNotification success');
-      } catch (err2) {
-        console.error('[SW] fallback showNotification error:', err2);
+        await self.registration.showNotification(title, options);
+        console.log('[SW] showNotification success');
+      } catch (err) {
+        console.error('[SW] showNotification error:', err);
+        try {
+          await self.registration.showNotification(title, {
+            body: options.body,
+            tag: options.tag,
+            renotify: options.renotify,
+            data: options.data,
+          });
+          console.log('[SW] fallback showNotification success');
+        } catch (err2) {
+          console.error('[SW] fallback showNotification error:', err2);
+        }
       }
-    }
-  })());
+    })(),
+  );
 });
 
 self.addEventListener('notificationclick', (event) => {
@@ -71,29 +73,33 @@ self.addEventListener('notificationclick', (event) => {
 
   const targetUrl = event.notification?.data?.url || '/';
 
-  event.waitUntil((async () => {
-    const all = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+  event.waitUntil(
+    (async () => {
+      const all = await clients.matchAll({ type: 'window', includeUncontrolled: true });
 
-    for (const c of all) {
-      try {
-        const cu = new URL(c.url);
-        const tu = new URL(targetUrl, cu.origin);
-        if (cu.origin === tu.origin && cu.pathname === tu.pathname) {
-          if ('focus' in c) return await c.focus();
-        }
-      } catch {}
-    }
+      for (const c of all) {
+        try {
+          const cu = new URL(c.url);
+          const tu = new URL(targetUrl, cu.origin);
+          if (cu.origin === tu.origin && cu.pathname === tu.pathname) {
+            if ('focus' in c) return await c.focus();
+          }
+        } catch {}
+      }
 
-    if (all.length > 0) {
-      try { if ('focus' in all[0]) await all[0].focus(); } catch {}
-    }
+      if (all.length > 0) {
+        try {
+          if ('focus' in all[0]) await all[0].focus();
+        } catch {}
+      }
 
-    if (clients.openWindow) {
-      const opened = await clients.openWindow(targetUrl);
-      if (opened && 'focus' in opened) return await opened.focus();
-      return opened;
-    }
-  })());
+      if (clients.openWindow) {
+        const opened = await clients.openWindow(targetUrl);
+        if (opened && 'focus' in opened) return await opened.focus();
+        return opened;
+      }
+    })(),
+  );
 });
 
 self.addEventListener('message', (event) => {

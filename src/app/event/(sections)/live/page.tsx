@@ -49,11 +49,19 @@ export default function LivePage() {
       });
 
       // 念のためミュート/ビデオOFF（視聴専用想定）
-      try { api.executeCommand('toggleAudio'); } catch {}
-      try { api.executeCommand('toggleVideo'); } catch {}
+      try {
+        api.executeCommand('toggleAudio');
+      } catch {}
+      try {
+        api.executeCommand('toggleVideo');
+      } catch {}
     })();
 
-    return () => { try { api?.dispose(); } catch {} };
+    return () => {
+      try {
+        api?.dispose();
+      } catch {}
+    };
   }, []);
 
   return (

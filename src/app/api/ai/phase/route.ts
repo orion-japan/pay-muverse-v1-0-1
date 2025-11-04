@@ -5,11 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { buildSystemPrompt, buildUserPrompt } from '@/lib/mui/buildSystemPrompt';
 import { phaseTemplate } from '@/lib/mui/prompt';
 import { callAgentMui, parseAgentTextToUi, saveStage } from '@/lib/mui/api';
-import {
-  type ConversationStage,
-  type AgentMuiPayload,
-  type AiTurn,
-} from '@/lib/mui/types';
+import { type ConversationStage, type AgentMuiPayload, type AiTurn } from '@/lib/mui/types';
 import { createClient } from '@supabase/supabase-js';
 
 // ───────────────────────────────────────────────────────────────
@@ -19,10 +15,7 @@ function must(name: string) {
   if (!v) throw new Error(`Missing env: ${name}`);
   return v;
 }
-const supa = createClient(
-  must('NEXT_PUBLIC_SUPABASE_URL'),
-  must('SUPABASE_SERVICE_ROLE_KEY')
-);
+const supa = createClient(must('NEXT_PUBLIC_SUPABASE_URL'), must('SUPABASE_SERVICE_ROLE_KEY'));
 
 // 権利チェック（p2/p3/p4 or bundle のどれか）
 async function hasEntitlement(userId: string, stage: ConversationStage) {
@@ -72,10 +65,7 @@ export async function POST(req: NextRequest) {
     };
 
     if (!stage || !conversationId || !userId) {
-      return NextResponse.json(
-        { ok: false, error: 'missing_required_fields' },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: 'missing_required_fields' }, { status: 400 });
     }
 
     // ── 課金ガード（Stage 2〜4） ──
@@ -83,10 +73,7 @@ export async function POST(req: NextRequest) {
       const entitled = await hasEntitlement(userId, stage);
       if (!entitled) {
         // フロントはこれを受けて PAY.JP モーダルを表示 → /api/payjp/charge へ
-        return NextResponse.json(
-          { ok: false, error: 'payment_required', stage },
-          { status: 402 }
-        );
+        return NextResponse.json({ ok: false, error: 'payment_required', stage }, { status: 402 });
       }
     }
 
@@ -126,7 +113,7 @@ export async function POST(req: NextRequest) {
         const parsed = parseAgentTextToUi(
           [agentRes.line1, agentRes.line2, agentRes.line3, agentRes.question]
             .filter(Boolean)
-            .join('\n')
+            .join('\n'),
         );
         message = parsed.message;
         question = parsed.question || t.question;
@@ -135,13 +122,12 @@ export async function POST(req: NextRequest) {
     }
 
     // ── 保存（あなたの stage/save API にそのまま送る）──
-    const subId = (`stage${stage}-1`) as
-      | 'stage2-1' | 'stage3-1' | 'stage4-1' | 'stage1-1'; // 型満たし用
+    const subId = `stage${stage}-1` as 'stage2-1' | 'stage3-1' | 'stage4-1' | 'stage1-1'; // 型満たし用
     await saveStage({
       user_code: userId,
       seed_id: conversationId,
       sub_id: subId,
-      phase: 'Mixed',              // Inner/Outer/Bridge/Flow/Calm と併用するならUI側で差し替え
+      phase: 'Mixed', // Inner/Outer/Bridge/Flow/Calm と併用するならUI側で差し替え
       depth_stage: 'R3',
       q_current: ('Q' + String(stage)) as any,
       next_step: chips.join('/'),

@@ -1,17 +1,17 @@
 // src/server/telemetry.ts
-import { supabase } from "@/lib/supabase";
+import { supabase } from '@/lib/supabase';
 
 /** Telemetry Event 型（meta 追加） */
 export type TelemetryEvent = {
-  kind: string;               // "api" | "page" | "auth" | ...
-  path: string;               // API パスや URL
-  status?: number | null;     // HTTP ステータス相当
+  kind: string; // "api" | "page" | "auth" | ...
+  path: string; // API パスや URL
+  status?: number | null; // HTTP ステータス相当
   latency_ms?: number | null; // 処理時間(ms)
-  note?: string | null;       // エラーメッセージ等
-  ua?: string | null;         // UserAgent
+  note?: string | null; // エラーメッセージ等
+  ua?: string | null; // UserAgent
   session_id?: string | null; // セッションID
-  uid?: string | null;        // Firebase UID
-  user_code?: string | null;  // 数値 user_code
+  uid?: string | null; // Firebase UID
+  user_code?: string | null; // 数値 user_code
   meta?: Record<string, any> | null; // 追加情報（jsonb）
 };
 
@@ -31,13 +31,13 @@ export async function logEvent(ev: TelemetryEvent): Promise<void> {
       session_id: ev.session_id ?? null,
       uid: ev.uid ?? null,
       user_code: ev.user_code ?? null,
-      meta: ev.meta ?? {},              // ★ 追加
+      meta: ev.meta ?? {}, // ★ 追加
       // created_at は DB 側 default now()
     };
 
-    const { error } = await supabase.from("telemetry_event").insert([payload]);
-    if (error) console.warn("⚠ telemetry insert failed:", error.message);
+    const { error } = await supabase.from('telemetry_event').insert([payload]);
+    if (error) console.warn('⚠ telemetry insert failed:', error.message);
   } catch (e: any) {
-    console.warn("⚠ telemetry logEvent exception:", e?.message ?? e);
+    console.warn('⚠ telemetry logEvent exception:', e?.message ?? e);
   }
 }

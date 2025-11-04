@@ -3,97 +3,167 @@
    ヘッダー/フッターは狭いまま残し、中身だけ広げる
    ========================================================= */
 
-   .muLogs {
-    font-family: system-ui, sans-serif;
-    margin: 24px auto;
-    padding: 0 16px;
-  }
-  .muLogs__title { font-size: 22px; margin: 8px 0 16px; }
-  .muLogs__h2 { font-size: 18px; margin: 20px 0 8px; }
-  
-  .muLogs__search { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; margin: 12px 0 16px; }
-  .muLogs__search .field { display: flex; flex-direction: column; gap: 6px; }
-  .muLogs__search label { font-size: 12px; color: #666; }
-  .muLogs__search input,
-  .muLogs__search select { padding: 8px 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; }
-  .muLogs__search--3col { grid-template-columns: 1fr 1fr auto; }
-  
-  .actions.right { display: flex; justify-content: flex-end; margin: 8px 0; }
-  
-  button { padding: 8px 12px; border-radius: 8px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
-  button:disabled { opacity: .5; cursor: not-allowed; }
-  button.ghost { background: transparent; }
-  
-  .muLogs__table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  .muLogs__table th, .muLogs__table td { border: 1px solid #eee; padding: 8px 10px; vertical-align: top; }
-  .muLogs__table thead th { background: #f8f8f8; text-align: left; }
-  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
-  
-  .kv { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; margin: 8px 0 12px; }
-  .role { font-weight: 600; }
-  .role--user { color: #146; }
-  .role--assistant { color: #461; }
-  .content { white-space: pre-wrap; line-height: 1.5; }
-  
-  /* =========================================================
+.muLogs {
+  font-family: system-ui, sans-serif;
+  margin: 24px auto;
+  padding: 0 16px;
+}
+.muLogs__title {
+  font-size: 22px;
+  margin: 8px 0 16px;
+}
+.muLogs__h2 {
+  font-size: 18px;
+  margin: 20px 0 8px;
+}
+
+.muLogs__search {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 12px;
+  align-items: end;
+  margin: 12px 0 16px;
+}
+.muLogs__search .field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.muLogs__search label {
+  font-size: 12px;
+  color: #666;
+}
+.muLogs__search input,
+.muLogs__search select {
+  padding: 8px 10px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.muLogs__search--3col {
+  grid-template-columns: 1fr 1fr auto;
+}
+
+.actions.right {
+  display: flex;
+  justify-content: flex-end;
+  margin: 8px 0;
+}
+
+button {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  background: #fff;
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+button.ghost {
+  background: transparent;
+}
+
+.muLogs__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.muLogs__table th,
+.muLogs__table td {
+  border: 1px solid #eee;
+  padding: 8px 10px;
+  vertical-align: top;
+}
+.muLogs__table thead th {
+  background: #f8f8f8;
+  text-align: left;
+}
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 16px;
+  margin: 8px 0 12px;
+}
+.role {
+  font-weight: 600;
+}
+.role--user {
+  color: #146;
+}
+.role--assistant {
+  color: #461;
+}
+.content {
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+/* =========================================================
      ★ PC幅に広げる
      ========================================================= */
-  
-  /* ヘッダー・フッター以外のラッパーを解除 */
-  body.mu-logs-desktop .appShell,
-  body.mu-logs-desktop .app-main,
-  body.mu-logs-desktop .page,
-  body.mu-logs-desktop .content,
-  body.mu-logs-desktop .viewport,
-  body.mu-logs-desktop [data-app-shell],
-  body.mu-logs-desktop [data-page],
-  body.mu-logs-desktop [data-viewport] {
-    max-width: none !important;
-    width: 100% !important;
-  }
-  
-  /* 中身（muLogs）だけ広い中央コンテナにする */
-  body.mu-logs-desktop .muLogs {
-    max-width: 1200px;
-    margin: 24px auto;
-    padding: 16px;
-    background: transparent;
-  }
-  
-  /* テーブル列が長いときは折り返し or 横スクロール */
-  .muLogs .muLogs__table {
-    overflow-x: auto;
-  }
-  .muLogs .muLogs__table th,
-  .muLogs .muLogs__table td {
-    word-break: break-word;
-  }
-  
- /* ====== Mu Logs desktop override ====== */
+
+/* ヘッダー・フッター以外のラッパーを解除 */
+body.mu-logs-desktop .appShell,
+body.mu-logs-desktop .app-main,
+body.mu-logs-desktop .page,
+body.mu-logs-desktop .content,
+body.mu-logs-desktop .viewport,
+body.mu-logs-desktop [data-app-shell],
+body.mu-logs-desktop [data-page],
+body.mu-logs-desktop [data-viewport] {
+  max-width: none !important;
+  width: 100% !important;
+}
+
+/* 中身（muLogs）だけ広い中央コンテナにする */
+body.mu-logs-desktop .muLogs {
+  max-width: 1200px;
+  margin: 24px auto;
+  padding: 16px;
+  background: transparent;
+}
+
+/* テーブル列が長いときは折り返し or 横スクロール */
+.muLogs .muLogs__table {
+  overflow-x: auto;
+}
+.muLogs .muLogs__table th,
+.muLogs .muLogs__table td {
+  word-break: break-word;
+}
+
+/* ====== Mu Logs desktop override ====== */
 
 /* ページ全体を左右フルブリード */
 .mu-logs-bleed {
-    width: 100vw;
-    margin-left: calc(50% - 50vw);
-    margin-right: calc(50% - 50vw);
-  }
-  
-  /* 内側コンテナの幅を広げる（スマホ用 max-width を解除） */
-  .mu-logs-inner {
-    width: 100%;         /* フル幅 */
-    max-width: 1200px;   /* PCでは見やすい幅に中央寄せ */
-    margin: 0 auto;      /* 真ん中に */
-    padding: 24px 20px;  /* 余白 */
-  }
-  
-  /* 元の .muLogs の制限を解除 */
-  .mu-logs-inner .muLogs {
-    width: 100%;
-    max-width: none;     /* ← ここが重要。スマホ制約を無効化 */
-    margin: 0;
-    padding: 0;
-  }
-  /* ====== Mu Logs デスクトップ向け最終オーバーライド ====== */
+  width: 100vw;
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
+}
+
+/* 内側コンテナの幅を広げる（スマホ用 max-width を解除） */
+.mu-logs-inner {
+  width: 100%; /* フル幅 */
+  max-width: 1200px; /* PCでは見やすい幅に中央寄せ */
+  margin: 0 auto; /* 真ん中に */
+  padding: 24px 20px; /* 余白 */
+}
+
+/* 元の .muLogs の制限を解除 */
+.mu-logs-inner .muLogs {
+  width: 100%;
+  max-width: none; /* ← ここが重要。スマホ制約を無効化 */
+  margin: 0;
+  padding: 0;
+}
+/* ====== Mu Logs デスクトップ向け最終オーバーライド ====== */
 /* ヘッダー/フッターはそのまま。中身だけ広げる */
 
 body.mu-logs-desktop .container,
@@ -120,84 +190,87 @@ body.mu-logs-desktop .mu-logs-inner {
 
 /* ログ表示部分 */
 body.mu-logs-desktop .muLogs {
-  max-width: 1200px;   /* 任意：見やすい幅に */
+  max-width: 1200px; /* 任意：見やすい幅に */
   margin: 24px auto;
   padding: 16px;
 }
 
-
 /* ========== 会話詳細テーブル（マス目）最適化 ========== */
 /* 6列構成: time | role | used | source | sub_id | content */
 .muLogs__turns {
-    table-layout: fixed;           /* 列幅を安定させる */
-    width: 100%;
-  }
-  
-  .muLogs__turns thead th {
-    position: sticky;              /* ヘッダー固定 */
-    top: 0;
-    z-index: 1;
-    background: #f8f8f8;
-  }
-  
-  /* 列幅（PCで見やすい配分） */
-  .muLogs__turns th:nth-child(1),
-  .muLogs__turns td:nth-child(1) { /* time */
-    width: 180px;
-    white-space: nowrap;           /* 1行表示 */
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  }
-  
-  .muLogs__turns th:nth-child(2),
-  .muLogs__turns td:nth-child(2) { /* role */
-    width: 80px;
-    white-space: nowrap;
-  }
-  
-  .muLogs__turns th:nth-child(3),
-  .muLogs__turns td:nth-child(3) { /* used */
-    width: 80px;
-    white-space: nowrap;
-    text-align: right;
-  }
-  
-  .muLogs__turns th:nth-child(4),
-  .muLogs__turns td:nth-child(4) { /* source */
-    width: 120px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  
-  .muLogs__turns th:nth-child(5),
-  .muLogs__turns td:nth-child(5) { /* sub_id */
-    width: 160px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 12px;
-  }
-  
-  /* content は残り全部を使って折返し */
-  .muLogs__turns th:nth-child(6),
-  .muLogs__turns td:nth-child(6) { /* content */
-    width: auto;
-    white-space: pre-wrap;
-    word-break: break-word;
-    line-height: 1.5;
-  }
-  
-  /* 罫線・行の見やすさを少し向上 */
-  .muLogs__turns td {
-    border-bottom: 1px solid #eee;
-    vertical-align: top;
-    padding: 8px 10px;
-  }
-  .muLogs__turns tbody tr:nth-child(even) td {
-    background: #fafafa;
-  }
-  
-  
+  table-layout: fixed; /* 列幅を安定させる */
+  width: 100%;
+}
+
+.muLogs__turns thead th {
+  position: sticky; /* ヘッダー固定 */
+  top: 0;
+  z-index: 1;
+  background: #f8f8f8;
+}
+
+/* 列幅（PCで見やすい配分） */
+.muLogs__turns th:nth-child(1),
+.muLogs__turns td:nth-child(1) {
+  /* time */
+  width: 180px;
+  white-space: nowrap; /* 1行表示 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.muLogs__turns th:nth-child(2),
+.muLogs__turns td:nth-child(2) {
+  /* role */
+  width: 80px;
+  white-space: nowrap;
+}
+
+.muLogs__turns th:nth-child(3),
+.muLogs__turns td:nth-child(3) {
+  /* used */
+  width: 80px;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.muLogs__turns th:nth-child(4),
+.muLogs__turns td:nth-child(4) {
+  /* source */
+  width: 120px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.muLogs__turns th:nth-child(5),
+.muLogs__turns td:nth-child(5) {
+  /* sub_id */
+  width: 160px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+/* content は残り全部を使って折返し */
+.muLogs__turns th:nth-child(6),
+.muLogs__turns td:nth-child(6) {
+  /* content */
+  width: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+/* 罫線・行の見やすさを少し向上 */
+.muLogs__turns td {
+  border-bottom: 1px solid #eee;
+  vertical-align: top;
+  padding: 8px 10px;
+}
+.muLogs__turns tbody tr:nth-child(even) td {
+  background: #fafafa;
+}

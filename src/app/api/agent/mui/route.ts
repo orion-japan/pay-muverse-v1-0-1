@@ -23,22 +23,27 @@ const CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 
 // ===== Config =====
 const MODEL = (process.env.OPENAI_MODEL || 'gpt-4o').trim();
-const TEMP  = Number(process.env.MIRRA_TEMPERATURE ?? process.env.IROS_TEMPERATURE ?? 0.8);
+const TEMP = Number(process.env.MIRRA_TEMPERATURE ?? process.env.IROS_TEMPERATURE ?? 0.8);
 const TOP_P = Number(process.env.MIRRA_TOP_P ?? process.env.IROS_TOP_P ?? 0.95);
-const FREQ  = Number(process.env.MIRRA_FREQ_PENALTY ?? process.env.IROS_FREQ_PENALTY ?? 0.2);
-const PRES  = Number(process.env.MIRRA_PRES_PENALTY ?? process.env.IROS_PRES_PENALTY ?? 0.2);
+const FREQ = Number(process.env.MIRRA_FREQ_PENALTY ?? process.env.IROS_FREQ_PENALTY ?? 0.2);
+const PRES = Number(process.env.MIRRA_PRES_PENALTY ?? process.env.IROS_PRES_PENALTY ?? 0.2);
 
 // ===== ユーティリティ =====
 function json(data: any, init?: number | ResponseInit) {
-  const status = typeof init === 'number' ? init : (init as ResponseInit | undefined)?.['status'] ?? 200;
-  const headers = new Headers(typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers);
+  const status =
+    typeof init === 'number' ? init : ((init as ResponseInit | undefined)?.['status'] ?? 200);
+  const headers = new Headers(
+    typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers,
+  );
   headers.set('Content-Type', 'application/json; charset=utf-8');
   headers.set('Access-Control-Allow-Origin', '*');
   headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-mu-user');
   headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS, GET');
   return new NextResponse(JSON.stringify(data), { status, headers });
 }
-export async function OPTIONS() { return json({ ok: true }); }
+export async function OPTIONS() {
+  return json({ ok: true });
+}
 
 function sbService() {
   if (!SUPABASE_URL || !SERVICE_ROLE) throw new Error('Supabase env is missing');
@@ -76,12 +81,18 @@ async function resolveUserCode(req: NextRequest) {
   if (isDev && (hUser || qUser)) return { ok: true as const, userCode: (hUser || qUser)! };
 
   const origin = req.headers.get('origin') || '';
-  const host   = req.headers.get('host')   || '';
+  const host = req.headers.get('host') || '';
   const sameOrigin =
-    !!origin && (origin.endsWith(host) || origin === `https://${host}` || origin === `http://${host}`);
-  if (!isDev && sameOrigin && (hUser || qUser)) return { ok: true as const, userCode: (hUser || qUser)! };
+    !!origin &&
+    (origin.endsWith(host) || origin === `https://${host}` || origin === `http://${host}`);
+  if (!isDev && sameOrigin && (hUser || qUser))
+    return { ok: true as const, userCode: (hUser || qUser)! };
 
-  return { ok: false as const, error: 'Missing credentials (Bearer or _session cookie)', status: 401 as const };
+  return {
+    ok: false as const,
+    error: 'Missing credentials (Bearer or _session cookie)',
+    status: 401 as const,
+  };
 }
 
 // ===== adapters（handlers は (t: string) => ... を期待）=====
@@ -122,8 +133,9 @@ export async function POST(req: NextRequest) {
     const model = (raw.model || MODEL).trim();
     const temperature = typeof raw.temperature === 'number' ? raw.temperature : TEMP;
     const top_p = typeof raw.top_p === 'number' ? raw.top_p : TOP_P;
-    const frequency_penalty = typeof raw.frequency_penalty === 'number' ? raw.frequency_penalty : FREQ;
-    const presence_penalty  = typeof raw.presence_penalty  === 'number' ? raw.presence_penalty  : PRES;
+    const frequency_penalty =
+      typeof raw.frequency_penalty === 'number' ? raw.frequency_penalty : FREQ;
+    const presence_penalty = typeof raw.presence_penalty === 'number' ? raw.presence_penalty : PRES;
 
     // ← モードの堅牢判定（mode が無い/空でも text があれば coach_from_text に寄せる）
     const incomingMode =
@@ -164,19 +176,28 @@ export async function POST(req: NextRequest) {
         sbService,
         chargeIfNeeded,
         inferPhaseAdapter,
-        estimateSelfAdapter
+        estimateSelfAdapter,
       );
       const qcode = (res?.body as any)?.q?.code ?? null;
       if (process.env.NODE_ENV !== 'production') {
-        console.log('[mui] coach_from_text -> status:', res.status, 'conv:', conversation_code, 'Q:', qcode);
+        console.log(
+          '[mui] coach_from_text -> status:',
+          res.status,
+          'conv:',
+          conversation_code,
+          'Q:',
+          qcode,
+        );
       }
       return json(res.body, res.status);
     }
 
     // ===== 通常チャット =====
     const messages = Array.isArray(raw.messages) ? raw.messages.slice(-50) : [];
-    const use_kb   = raw.use_kb !== false;
-    const kb_limit = Number.isFinite(raw.kb_limit) ? Math.max(1, Math.min(8, Number(raw.kb_limit))) : 4;
+    const use_kb = raw.use_kb !== false;
+    const kb_limit = Number.isFinite(raw.kb_limit)
+      ? Math.max(1, Math.min(8, Number(raw.kb_limit)))
+      : 4;
 
     const res = await handleChat(
       userCode,
@@ -197,7 +218,7 @@ export async function POST(req: NextRequest) {
       kb_limit,
       messages,
       raw.source_type || 'chat',
-      sbService
+      sbService,
     );
     const qcode = (res?.body as any)?.q?.code ?? null;
     if (process.env.NODE_ENV !== 'production') {

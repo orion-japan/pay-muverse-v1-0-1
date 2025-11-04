@@ -86,7 +86,9 @@ export default function MyInvitePanel() {
       <h2 className="inv-h2">招待リンク・メール・QR</h2>
 
       {loading && <div className="inv-box">読み込み中...</div>}
-      {!loading && !info && <div className="inv-box inv-err">{msg || '情報が取得できませんでした'}</div>}
+      {!loading && !info && (
+        <div className="inv-box inv-err">{msg || '情報が取得できませんでした'}</div>
+      )}
 
       {info && (
         <div className="inv-grid">
@@ -101,12 +103,32 @@ export default function MyInvitePanel() {
               {copied && <span className="inv-ok">✓ コピーしました</span>}
             </div>
             <div className="inv-meta">
-              <div><label>ref</label><span>{info.ref}</span></div>
-              {info.rcode && <div><label>rcode</label><span>{info.rcode}</span></div>}
-              {info.mcode && <div><label>mcode</label><span>{info.mcode}</span></div>}
-              {info.group && <div><label>group</label><span>{info.group}</span></div>}
+              <div>
+                <label>ref</label>
+                <span>{info.ref}</span>
+              </div>
+              {info.rcode && (
+                <div>
+                  <label>rcode</label>
+                  <span>{info.rcode}</span>
+                </div>
+              )}
+              {info.mcode && (
+                <div>
+                  <label>mcode</label>
+                  <span>{info.mcode}</span>
+                </div>
+              )}
+              {info.group && (
+                <div>
+                  <label>group</label>
+                  <span>{info.group}</span>
+                </div>
+              )}
             </div>
-            <p className="inv-note">※ パラメータ必須ポリシーに合わせ、必要なクエリを含んでいます。</p>
+            <p className="inv-note">
+              ※ パラメータ必須ポリシーに合わせ、必要なクエリを含んでいます。
+            </p>
           </section>
 
           {/* 2) QRコード */}
@@ -139,7 +161,9 @@ export default function MyInvitePanel() {
                 onChange={(e) => setSenderName(e.target.value)}
               />
             </div>
-            <button className="inv-btn" onClick={sendEmail}>送信する</button>
+            <button className="inv-btn" onClick={sendEmail}>
+              送信する
+            </button>
             {msg && <p className="inv-msg">{msg}</p>}
           </section>
         </div>

@@ -6,11 +6,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { SUPABASE_URL, SERVICE_ROLE, verifyFirebaseAndAuthorize } from '@/lib/authz';
 import { generateMirraReply } from '@/lib/mirra/generate'; // ★ generate.ts を使う
-import { recordQ } from '@/lib/qcode/record';              // ★ 追加：Qコード記録の共通口
+import { recordQ } from '@/lib/qcode/record'; // ★ 追加：Qコード記録の共通口
 
 function json(data: any, init?: number | ResponseInit) {
   const status =
-    typeof init === 'number' ? init : (init as ResponseInit | undefined)?.['status'] ?? 200;
+    typeof init === 'number' ? init : ((init as ResponseInit | undefined)?.['status'] ?? 200);
   const headers = new Headers(
     typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers,
   );
@@ -22,7 +22,8 @@ export async function POST(req: NextRequest) {
   try {
     // ---- 認証 ----
     const auth = await verifyFirebaseAndAuthorize(req as any);
-    if (!auth?.ok) return json({ ok: false, error: auth?.error || 'unauthorized' }, auth?.status || 401);
+    if (!auth?.ok)
+      return json({ ok: false, error: auth?.error || 'unauthorized' }, auth?.status || 401);
     if (!auth.allowed) return json({ ok: false, error: 'forbidden' }, 403);
 
     // ---- 入力 ----
@@ -32,10 +33,7 @@ export async function POST(req: NextRequest) {
 
     // 👇 修正版（null 安全に取得）
     const user_code: string | null =
-      (body.user_code as string | undefined) ??
-      auth.userCode ??
-      auth.user?.user_code ??
-      null;
+      (body.user_code as string | undefined) ?? auth.userCode ?? auth.user?.user_code ?? null;
 
     if (!user_code) return json({ ok: false, error: 'no_user_code' }, 401);
 
@@ -131,7 +129,13 @@ export async function POST(req: NextRequest) {
     }
 
     // ---- mirra 応答生成：ここから generate.ts を必ず通す ----
-    const out = await generateMirraReply(text, seed, lastAssistantReply, 'consult', conversation_id);
+    const out = await generateMirraReply(
+      text,
+      seed,
+      lastAssistantReply,
+      'consult',
+      conversation_id,
+    );
 
     // ---- 応答を保存（talk_messages）----
     {
@@ -236,9 +240,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (e: any) {
     console.error('[mtalk] error', e);
-    return json(
-      { ok: false, error: 'internal_error', detail: String(e?.message || e) },
-      500,
-    );
+    return json({ ok: false, error: 'internal_error', detail: String(e?.message || e) }, 500);
   }
 }

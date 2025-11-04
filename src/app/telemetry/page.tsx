@@ -3,7 +3,13 @@ import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 
-type Search = { hours?: string; kind?: string; path?: string; limit?: string; view?: 'events' | 'sessions' };
+type Search = {
+  hours?: string;
+  kind?: string;
+  path?: string;
+  limit?: string;
+  view?: 'events' | 'sessions';
+};
 
 // ========== Supabase helpers ==========
 function sbAdmin() {
@@ -22,8 +28,10 @@ async function fetchEvents(searchParams: Search) {
 
   let q = sb
     .from('telemetry_event')
-    .select(`id, created_at, kind, path, status, latency_ms, note, session_id,
-             telemetry_session:telemetry_session (uid,user_code,ua)`)
+    .select(
+      `id, created_at, kind, path, status, latency_ms, note, session_id,
+             telemetry_session:telemetry_session (uid,user_code,ua)`,
+    )
     .gte('created_at', sinceIso)
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -45,7 +53,7 @@ type SessionRow = {
   ua: string | null;
   app_ver: string | null;
   started_at: string; // ISO
-  last_seen: string;  // ISO
+  last_seen: string; // ISO
 };
 
 type LastEvent = {
@@ -146,32 +154,69 @@ export default async function TelemetryPage({ searchParams }: { searchParams: Pr
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-        <a href={`/telemetry?${withParam(sp, 'view', 'events')}`} style={tabStyle(view === 'events')}>Events</a>
-        <a href={`/telemetry?${withParam(sp, 'view', 'sessions')}`} style={tabStyle(view === 'sessions')}>Sessions（落ちた時間）</a>
+        <a
+          href={`/telemetry?${withParam(sp, 'view', 'events')}`}
+          style={tabStyle(view === 'events')}
+        >
+          Events
+        </a>
+        <a
+          href={`/telemetry?${withParam(sp, 'view', 'sessions')}`}
+          style={tabStyle(view === 'sessions')}
+        >
+          Sessions（落ちた時間）
+        </a>
       </div>
 
       {/* Filters */}
       <form action="/telemetry" method="get" style={filtersStyle}>
         <input type="hidden" name="view" value={view} />
         <L label="Hours">
-          <input type="number" name="hours" defaultValue={Number(sp.hours ?? 24)} min={1} max={168} style={inStyle} />
+          <input
+            type="number"
+            name="hours"
+            defaultValue={Number(sp.hours ?? 24)}
+            min={1}
+            max={168}
+            style={inStyle}
+          />
         </L>
 
         {view === 'events' && (
           <>
             <L label="Kind">
-              <input name="kind" defaultValue={sp.kind ?? ''} placeholder="api / page / ..." style={inStyle} />
+              <input
+                name="kind"
+                defaultValue={sp.kind ?? ''}
+                placeholder="api / page / ..."
+                style={inStyle}
+              />
             </L>
             <L label="Path contains">
-              <input name="path" defaultValue={sp.path ?? ''} placeholder="/api/visions" style={inStyle} />
+              <input
+                name="path"
+                defaultValue={sp.path ?? ''}
+                placeholder="/api/visions"
+                style={inStyle}
+              />
             </L>
             <L label="Limit">
-              <input type="number" name="limit" defaultValue={Number(sp.limit ?? 200)} min={50} max={1000} step={50} style={inStyle} />
+              <input
+                type="number"
+                name="limit"
+                defaultValue={Number(sp.limit ?? 200)}
+                min={50}
+                max={1000}
+                step={50}
+                style={inStyle}
+              />
             </L>
           </>
         )}
 
-        <button type="submit" style={btnPrimary}>Apply</button>
+        <button type="submit" style={btnPrimary}>
+          Apply
+        </button>
       </form>
 
       {view === 'events' && events && <EventsTable {...events} />}
@@ -190,23 +235,57 @@ function EventsTable({ rows, hours }: any) {
       <div style={tableWrap}>
         <table style={tableStyle}>
           <thead style={theadStyle}>
-            <tr>{['time','kind','status','lat(ms)','path','uid','user_code','ua','session'].map((h,i)=>
-              <th key={i} style={{...thStyle, textAlign: i<=3?'center':'left'}}>{h}</th>)}
+            <tr>
+              {[
+                'time',
+                'kind',
+                'status',
+                'lat(ms)',
+                'path',
+                'uid',
+                'user_code',
+                'ua',
+                'session',
+              ].map((h, i) => (
+                <th key={i} style={{ ...thStyle, textAlign: i <= 3 ? 'center' : 'left' }}>
+                  {h}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {rows.length===0 && <EmptyRow colSpan={9} />}
+            {rows.length === 0 && <EmptyRow colSpan={9} />}
             {rows.map((r: any) => (
               <tr key={r.id}>
                 <td style={td}>{fmt(r.created_at)}</td>
                 <td style={td}>{r.kind}</td>
-                <td style={{...td,textAlign:'center'}}>{r.status ?? ''}</td>
-                <td style={{...td,textAlign:'center'}}>{r.latency_ms ?? ''}</td>
-                <td style={{...td,maxWidth:420,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{r.path ?? ''}</td>
+                <td style={{ ...td, textAlign: 'center' }}>{r.status ?? ''}</td>
+                <td style={{ ...td, textAlign: 'center' }}>{r.latency_ms ?? ''}</td>
+                <td
+                  style={{
+                    ...td,
+                    maxWidth: 420,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {r.path ?? ''}
+                </td>
                 <td style={td}>{r.telemetry_session?.uid ?? ''}</td>
                 <td style={td}>{r.telemetry_session?.user_code ?? ''}</td>
-                <td style={{...td,maxWidth:460,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{r.telemetry_session?.ua ?? ''}</td>
-                <td style={{...td,fontFamily:'monospace'}}>{r.session_id}</td>
+                <td
+                  style={{
+                    ...td,
+                    maxWidth: 460,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {r.telemetry_session?.ua ?? ''}
+                </td>
+                <td style={{ ...td, fontFamily: 'monospace' }}>{r.session_id}</td>
               </tr>
             ))}
           </tbody>
@@ -226,24 +305,58 @@ function SessionsTable({ rows, hours }: any) {
         <table style={tableStyle}>
           <thead style={theadStyle}>
             <tr>
-              {['last_seen（落ちた時刻）','理由(推定)','status','path(最後)','uid','user_code','ua','duration(min)','started_at','session']
-                .map((h,i)=><th key={i} style={{...thStyle, textAlign: i<=2?'center':'left'}}>{h}</th>)}
+              {[
+                'last_seen（落ちた時刻）',
+                '理由(推定)',
+                'status',
+                'path(最後)',
+                'uid',
+                'user_code',
+                'ua',
+                'duration(min)',
+                'started_at',
+                'session',
+              ].map((h, i) => (
+                <th key={i} style={{ ...thStyle, textAlign: i <= 2 ? 'center' : 'left' }}>
+                  {h}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {rows.length===0 && <EmptyRow colSpan={10} />}
+            {rows.length === 0 && <EmptyRow colSpan={10} />}
             {rows.map((r: any) => (
               <tr key={r.session_id}>
                 <td style={td}>{fmt(r.last_seen)}</td>
-                <td style={{...td,fontWeight:600}}>{r.reason}</td>
-                <td style={{...td,textAlign:'center'}}>{r.last_status ?? ''}</td>
-                <td style={{...td,maxWidth:420,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{r.last_path ?? ''}</td>
+                <td style={{ ...td, fontWeight: 600 }}>{r.reason}</td>
+                <td style={{ ...td, textAlign: 'center' }}>{r.last_status ?? ''}</td>
+                <td
+                  style={{
+                    ...td,
+                    maxWidth: 420,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {r.last_path ?? ''}
+                </td>
                 <td style={td}>{r.uid ?? ''}</td>
                 <td style={td}>{r.user_code ?? ''}</td>
-                <td style={{...td,maxWidth:420,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{r.ua ?? ''}</td>
-                <td style={{...td,textAlign:'center'}}>{r.duration_min}</td>
+                <td
+                  style={{
+                    ...td,
+                    maxWidth: 420,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {r.ua ?? ''}
+                </td>
+                <td style={{ ...td, textAlign: 'center' }}>{r.duration_min}</td>
                 <td style={td}>{fmt(r.started_at)}</td>
-                <td style={{...td,fontFamily:'monospace'}}>{r.session_id}</td>
+                <td style={{ ...td, fontFamily: 'monospace' }}>{r.session_id}</td>
               </tr>
             ))}
           </tbody>
@@ -265,22 +378,74 @@ function EmptyRow({ colSpan }: { colSpan: number }) {
 
 // ========== small utils/styles ==========
 const inStyle: React.CSSProperties = { padding: 8, borderRadius: 8, border: '1px solid #ccc' };
-const btnPrimary: React.CSSProperties = { padding: '10px 14px', borderRadius: 10, border: '1px solid #999', background: '#111', color: '#fff', fontWeight: 600 };
-const filtersStyle: React.CSSProperties = { display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', alignItems: 'end', marginBottom: 12 };
-const tableWrap: React.CSSProperties = { overflowX: 'auto', border: '1px solid #eee', borderRadius: 12 };
-const tableStyle: React.CSSProperties = { width: '100%', borderCollapse: 'separate', borderSpacing: 0, fontSize: 13 };
+const btnPrimary: React.CSSProperties = {
+  padding: '10px 14px',
+  borderRadius: 10,
+  border: '1px solid #999',
+  background: '#111',
+  color: '#fff',
+  fontWeight: 600,
+};
+const filtersStyle: React.CSSProperties = {
+  display: 'grid',
+  gap: 8,
+  gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))',
+  alignItems: 'end',
+  marginBottom: 12,
+};
+const tableWrap: React.CSSProperties = {
+  overflowX: 'auto',
+  border: '1px solid #eee',
+  borderRadius: 12,
+};
+const tableStyle: React.CSSProperties = {
+  width: '100%',
+  borderCollapse: 'separate',
+  borderSpacing: 0,
+  fontSize: 13,
+};
 const theadStyle: React.CSSProperties = { background: '#fafafa' };
-const thStyle: React.CSSProperties = { padding: '10px 12px', borderBottom: '1px solid #eee', position: 'sticky', top: 0, background: '#fafafa', textAlign: 'left' };
-const td: React.CSSProperties = { padding: '8px 12px', borderBottom: '1px solid #f0f0f0', verticalAlign: 'top' };
+const thStyle: React.CSSProperties = {
+  padding: '10px 12px',
+  borderBottom: '1px solid #eee',
+  position: 'sticky',
+  top: 0,
+  background: '#fafafa',
+  textAlign: 'left',
+};
+const td: React.CSSProperties = {
+  padding: '8px 12px',
+  borderBottom: '1px solid #f0f0f0',
+  verticalAlign: 'top',
+};
 
 function L({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label style={{ display: 'grid', gap: 4 }}><span>{label}</span>{children}</label>;
+  return (
+    <label style={{ display: 'grid', gap: 4 }}>
+      <span>{label}</span>
+      {children}
+    </label>
+  );
 }
-function fmt(s: string) { return new Date(s).toLocaleString(); }
-function numBetween(n: number, min: number, max: number) { return Math.min(Math.max(n, min), max); }
+function fmt(s: string) {
+  return new Date(s).toLocaleString();
+}
+function numBetween(n: number, min: number, max: number) {
+  return Math.min(Math.max(n, min), max);
+}
 function withParam(sp: Record<string, any>, key: string, val: string) {
-  const q = new URLSearchParams(sp as any); q.set(key, val); return q.toString();
+  const q = new URLSearchParams(sp as any);
+  q.set(key, val);
+  return q.toString();
 }
 function tabStyle(active: boolean): React.CSSProperties {
-  return { padding: '8px 12px', borderRadius: 10, border: '1px solid #ddd', background: active ? '#111' : '#fafafa', color: active ? '#fff' : '#333', fontWeight: 600, textDecoration: 'none' };
+  return {
+    padding: '8px 12px',
+    borderRadius: 10,
+    border: '1px solid #ddd',
+    background: active ? '#111' : '#fafafa',
+    color: active ? '#fff' : '#333',
+    fontWeight: 600,
+    textDecoration: 'none',
+  };
 }

@@ -61,19 +61,20 @@ export default function CreatePage() {
       }
 
       // アルバムの非公開のみ
-      const filtered = all.filter(
-        (p) => p.visibility === 'private' && p.board_type === 'album'
-      );
+      const filtered = all.filter((p) => p.visibility === 'private' && p.board_type === 'album');
 
       // 古い→新しい（最新が一番下）
       const sorted = filtered.sort(
-        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
       );
 
       setPosts(sorted);
 
       // 画像の合計枚数をカウント（ロード待ちのため）
-      const total = sorted.reduce((acc, p) => acc + (Array.isArray(p.media_urls) ? p.media_urls.length : 0), 0);
+      const total = sorted.reduce(
+        (acc, p) => acc + (Array.isArray(p.media_urls) ? p.media_urls.length : 0),
+        0,
+      );
       setImgTotal(total);
       setImgLoaded(0);
     } catch (err) {
@@ -93,10 +94,7 @@ export default function CreatePage() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     // 念のためページ全体にもフォールバック
     try {
-      const h = Math.max(
-        document.body.scrollHeight,
-        document.documentElement.scrollHeight
-      );
+      const h = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
       window.scrollTo({ top: h, behavior: 'smooth' });
     } catch {}
   };
@@ -167,7 +165,9 @@ export default function CreatePage() {
               {post.tags?.length > 0 && (
                 <div className="tags">
                   {post.tags.map((tag, i) => (
-                    <span key={i} className="tag">#{tag}</span>
+                    <span key={i} className="tag">
+                      #{tag}
+                    </span>
                   ))}
                 </div>
               )}
@@ -177,10 +177,13 @@ export default function CreatePage() {
       )}
 
       <div className="post-buttons">
-        <button className="post-button" onClick={() => {
-          hasAutoScrolledRef.current = false; // 新規投稿後も下まで行くように
-          setModalOpen(true);
-        }}>
+        <button
+          className="post-button"
+          onClick={() => {
+            hasAutoScrolledRef.current = false; // 新規投稿後も下まで行くように
+            setModalOpen(true);
+          }}
+        >
           ＋ 投稿する
         </button>
         <button className="post-button-red" onClick={() => router.push('/album')}>

@@ -79,9 +79,7 @@ export async function POST(req: NextRequest) {
 
     // 課金実行（idempotency key で二重送信防止）
     const idemp = crypto.randomUUID();
-    const description = bundle
-      ? 'Muverse フェーズ2〜4 一括解放'
-      : `Muverse フェーズ${stage} 解放`;
+    const description = bundle ? 'Muverse フェーズ2〜4 一括解放' : `Muverse フェーズ${stage} 解放`;
 
     const charge = await payjp.charges.create(
       {
@@ -92,7 +90,7 @@ export async function POST(req: NextRequest) {
         description,
         metadata: { userId, bundle: String(bundle), stage: String(stage ?? '') },
       },
-      { idempotency_key: idemp }
+      { idempotency_key: idemp },
     );
 
     if (charge.paid !== true) {
@@ -101,25 +99,24 @@ export async function POST(req: NextRequest) {
 
     // 権利付与（upsert）
     if (bundle) {
-      await supa.from('mui_entitlements').upsert(
-        { user_id: userId, bundle: true, p2: true, p3: true, p4: true },
-        { onConflict: 'user_id' }
-      );
+      await supa
+        .from('mui_entitlements')
+        .upsert(
+          { user_id: userId, bundle: true, p2: true, p3: true, p4: true },
+          { onConflict: 'user_id' },
+        );
     } else if (stage === 2) {
-      await supa.from('mui_entitlements').upsert(
-        { user_id: userId, p2: true },
-        { onConflict: 'user_id' }
-      );
+      await supa
+        .from('mui_entitlements')
+        .upsert({ user_id: userId, p2: true }, { onConflict: 'user_id' });
     } else if (stage === 3) {
-      await supa.from('mui_entitlements').upsert(
-        { user_id: userId, p3: true },
-        { onConflict: 'user_id' }
-      );
+      await supa
+        .from('mui_entitlements')
+        .upsert({ user_id: userId, p3: true }, { onConflict: 'user_id' });
     } else if (stage === 4) {
-      await supa.from('mui_entitlements').upsert(
-        { user_id: userId, p4: true },
-        { onConflict: 'user_id' }
-      );
+      await supa
+        .from('mui_entitlements')
+        .upsert({ user_id: userId, p4: true }, { onConflict: 'user_id' });
     }
 
     // 購入履歴を記録

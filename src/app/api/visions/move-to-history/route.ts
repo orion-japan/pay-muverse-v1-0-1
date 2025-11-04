@@ -10,7 +10,7 @@ const USE_STATUS_COLUMN = false;
 const admin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
+  { auth: { persistSession: false } },
 );
 
 // Firebase Admin init
@@ -34,7 +34,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const decoded = await getAuth().verifyIdToken(idToken).catch(() => null);
+    const decoded = await getAuth()
+      .verifyIdToken(idToken)
+      .catch(() => null);
     if (!decoded?.uid) {
       console.warn('❌ Invalid token');
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
@@ -88,7 +90,7 @@ export async function POST(req: NextRequest) {
       console.error('❌ [move-to-history] Update did not apply', data);
       return NextResponse.json(
         { error: 'Update did not apply (moved_to_history_at is null)', data },
-        { status: 500 }
+        { status: 500 },
       );
     }
 

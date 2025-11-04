@@ -1,125 +1,165 @@
 /* C:\Users\tongr\pay_muversev1.1.1\src\components\ShipButton.css */
 
 .ship-wrap {
-    border: 1px solid #e5e7eb;
-    border-radius: 10px;
-    padding: 12px;
-    max-width: 520px;
-    background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 12px;
+  max-width: 520px;
+  background: #fff;
+}
+
+.ship-skeleton {
+  height: 64px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #f5f5f5, #ececec, #f5f5f5);
+  background-size: 200% 100%;
+  animation: shimmer 1.2s infinite;
+}
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
   }
-  
-  .ship-skeleton {
-    height: 64px;
-    border-radius: 8px;
-    background: linear-gradient(90deg, #f5f5f5, #ececec, #f5f5f5);
-    background-size: 200% 100%;
-    animation: shimmer 1.2s infinite;
+  100% {
+    background-position: -200% 0;
   }
-  @keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-  }
-  
-  .ship-status {
-    margin-bottom: 10px;
-  }
-  
-  .ship-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 4px 0;
-  }
-  
-  .ship-tag {
-    font-size: 12px;
-    color: #6b7280;
-  }
-  
-  .ship-badge {
-    font-size: 12px;
-    border-radius: 999px;
-    padding: 4px 8px;
-    border: 1px solid #e5e7eb;
-    background: #fafafa;
-  }
-  
-  .ship-badge.lv-none { color: #6b7280; }
-  
-  .ship-badge.lv-S { border-color: #86efac; background: #f0fdf4; }
-  .ship-badge.lv-F { border-color: #93c5fd; background: #eff6ff; }
-  .ship-badge.lv-R { border-color: #d8b4fe; background: #faf5ff; }
-  .ship-badge.lv-C { border-color: #fdba74; background: #fff7ed; }
-  .ship-badge.lv-I { border-color: #fca5a5; background: #fff1f2; }
-  
-  .ship-badge.mutual { border-color: #a7f3d0; background: #ecfdf5; }
-  .ship-badge.asym   { border-color: #e5e7eb; background: #f9fafb; }
-  
-  .talk-indicator.on {
-    color: #065f46;
-    background: #d1fae5;
-    border-radius: 6px;
-    padding: 4px 8px;
-  }
-  .talk-indicator.off {
-    color: #6b7280;
-  }
-  
-  .ship-picker {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 6px;
-    margin: 10px 0;
-  }
-  
-  .ship-choice {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    border: 1px solid #e5e7eb;
-    background: #fff;
-    padding: 8px 10px;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 14px;
-  }
-  .ship-choice .dot { width: 1.2rem; display: inline-block; }
-  .ship-choice.active { outline: 2px solid #60a5fa; }
-  .ship-choice.locked { opacity: 0.6; cursor: not-allowed; }
-  .ship-choice:hover:not(.locked) { background: #f9fafb; }
-  
-  .ship-actions {
-    display: flex;
-    gap: 8px;
-    margin-top: 8px;
-  }
-  
-  .ship-btn {
-    border: none;
-    border-radius: 8px;
-    padding: 10px 12px;
-    cursor: pointer;
-    background: #111827;
-    color: #fff;
-    font-weight: 600;
-  }
-  .ship-btn.clear { background: #6b7280; }
-  .ship-btn.talk { background: #16a34a; }
-  .ship-btn.disabled,
-  .ship-btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-  
-  .ship-error {
-    margin-top: 8px;
-    color: #b91c1c;
-    font-size: 13px;
-  }
-  
-  .ship-plan-note {
-    margin-top: 8px;
-    font-size: 12px;
-    color: #374151;
-  }
-  
+}
+
+.ship-status {
+  margin-bottom: 10px;
+}
+
+.ship-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+
+.ship-tag {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.ship-badge {
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 4px 8px;
+  border: 1px solid #e5e7eb;
+  background: #fafafa;
+}
+
+.ship-badge.lv-none {
+  color: #6b7280;
+}
+
+.ship-badge.lv-S {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+.ship-badge.lv-F {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+.ship-badge.lv-R {
+  border-color: #d8b4fe;
+  background: #faf5ff;
+}
+.ship-badge.lv-C {
+  border-color: #fdba74;
+  background: #fff7ed;
+}
+.ship-badge.lv-I {
+  border-color: #fca5a5;
+  background: #fff1f2;
+}
+
+.ship-badge.mutual {
+  border-color: #a7f3d0;
+  background: #ecfdf5;
+}
+.ship-badge.asym {
+  border-color: #e5e7eb;
+  background: #f9fafb;
+}
+
+.talk-indicator.on {
+  color: #065f46;
+  background: #d1fae5;
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+.talk-indicator.off {
+  color: #6b7280;
+}
+
+.ship-picker {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.ship-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.ship-choice .dot {
+  width: 1.2rem;
+  display: inline-block;
+}
+.ship-choice.active {
+  outline: 2px solid #60a5fa;
+}
+.ship-choice.locked {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.ship-choice:hover:not(.locked) {
+  background: #f9fafb;
+}
+
+.ship-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.ship-btn {
+  border: none;
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  background: #111827;
+  color: #fff;
+  font-weight: 600;
+}
+.ship-btn.clear {
+  background: #6b7280;
+}
+.ship-btn.talk {
+  background: #16a34a;
+}
+.ship-btn.disabled,
+.ship-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ship-error {
+  margin-top: 8px;
+  color: #b91c1c;
+  font-size: 13px;
+}
+
+.ship-plan-note {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #374151;
+}

@@ -43,9 +43,7 @@ export async function POST(req: NextRequest) {
         resonance_type: resonanceType,
         q_code: qCode ?? {},
       };
-      const { error: insErr } = await supabase
-        .from('post_resonances')
-        .insert(payload);
+      const { error: insErr } = await supabase.from('post_resonances').insert(payload);
       if (insErr) throw insErr;
     }
 

@@ -148,7 +148,7 @@ const ReactionBar: React.FC<ReactionBarProps> = ({
   // クリックを許可できるか（readOnly または未ログインなら不可）
   const canInteract = useMemo(
     () => !readOnly && !!effectiveUserCode,
-    [readOnly, effectiveUserCode]
+    [readOnly, effectiveUserCode],
   );
 
   // --- 単発リロード：多重実行抑止＋空レスで上書き禁止 ---
@@ -186,7 +186,7 @@ const ReactionBar: React.FC<ReactionBarProps> = ({
         'postgres_changes',
         // ← 実DBテーブル名に合わせる（post_resonances）
         { event: '*', schema: 'public', table: 'post_resonances', filter: `post_id=eq.${postId}` },
-        () => reload()
+        () => reload(),
       )
       .subscribe();
     return () => {
@@ -270,9 +270,9 @@ const ReactionBar: React.FC<ReactionBarProps> = ({
         justifyContent: 'center',
         alignItems: 'center',
         gap: 10,
-        flexWrap: 'nowrap',      // ← 1段固定
+        flexWrap: 'nowrap', // ← 1段固定
         whiteSpace: 'nowrap',
-        overflowX: 'auto',       // ← 幅不足時は横スクロール
+        overflowX: 'auto', // ← 幅不足時は横スクロール
         WebkitOverflowScrolling: 'touch' as any,
       }}
     >

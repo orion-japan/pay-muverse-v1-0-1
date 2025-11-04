@@ -7,11 +7,13 @@ import { initializeApp, applicationDefault } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { createClient } from '@supabase/supabase-js';
 
-try { initializeApp({ credential: applicationDefault() }); } catch {}
+try {
+  initializeApp({ credential: applicationDefault() });
+} catch {}
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
 async function getUserCode(req: NextRequest) {
@@ -67,11 +69,7 @@ export async function POST(req: NextRequest) {
         .single();
     } else {
       // 無ければ作成
-      res = await supabase
-        .from('daily_checks')
-        .insert(payload)
-        .select(SELECT_COLS)
-        .single();
+      res = await supabase.from('daily_checks').insert(payload).select(SELECT_COLS).single();
     }
     if (res.error) throw res.error;
     return NextResponse.json({ row: res.data });

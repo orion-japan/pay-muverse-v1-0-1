@@ -1,7 +1,15 @@
 // src/state/resonance/ResonanceContext.tsx
 'use client';
 
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   ResonanceState,
   initialResonanceState,
@@ -66,21 +74,27 @@ export function ResonanceProvider({ children }: { children: React.ReactNode }) {
     }
   }, [persist]);
 
-  const syncFromAgentMeta = useCallback((meta: AgentMeta) => {
-    setState((prev) => {
-      const next = reduceWithAgentMeta(prev, meta);
-      persist(next);
-      return next;
-    });
-  }, [persist]);
+  const syncFromAgentMeta = useCallback(
+    (meta: AgentMeta) => {
+      setState((prev) => {
+        const next = reduceWithAgentMeta(prev, meta);
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
 
-  const patch = useCallback((partial: Partial<ResonanceState>) => {
-    setState((prev) => {
-      const next = { ...prev, ...partial, updatedAt: new Date().toISOString() };
-      persist(next);
-      return next;
-    });
-  }, [persist]);
+  const patch = useCallback(
+    (partial: Partial<ResonanceState>) => {
+      setState((prev) => {
+        const next = { ...prev, ...partial, updatedAt: new Date().toISOString() };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
 
   // 初回 & userCode 変化時にストレージ復元 + サーバ同期
   useEffect(() => {
@@ -94,7 +108,7 @@ export function ResonanceProvider({ children }: { children: React.ReactNode }) {
 
   const actions: Actions = useMemo(
     () => ({ setUserCode, syncFromServer, syncFromAgentMeta, patch }),
-    [patch, setUserCode, syncFromServer, syncFromAgentMeta]
+    [patch, setUserCode, syncFromServer, syncFromAgentMeta],
   );
 
   const value = useMemo<Ctx>(() => ({ state, actions }), [state, actions]);

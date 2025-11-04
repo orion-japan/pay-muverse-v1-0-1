@@ -8,7 +8,7 @@ export type QCode = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
 export type SelfBand = 'lt20' | '10_40' | '20_40' | '40_70' | '70_90' | 'gt90';
 
 export type SelfAcceptance = {
-  score: number;   // 0-100
+  score: number; // 0-100
   band: SelfBand;
 };
 
@@ -36,10 +36,10 @@ export type ConversationStage = 1 | 2 | 3 | 4;
 
 // UI表示のフォーカス名（日本語）
 export type Focus =
-  | '感情整理'   // Stage 1
-  | '事実整理'   // Stage 2
+  | '感情整理' // Stage 1
+  | '事実整理' // Stage 2
   | '選択肢検討' // Stage 3
-  | '合意形成'   // Stage 4
+  | '合意形成' // Stage 4
   | '安全確保';
 
 export type RiskLevel = 0 | 1 | 2 | 3; // 3=至急
@@ -53,27 +53,27 @@ export const PHASE_LABEL: Record<ConversationStage, Focus> = {
 
 // 開幕（無料）レスポンス
 export type AiOpening = {
-  opening_message: string;  // 3行以内
-  focus: Focus;             // 通常 '感情整理'
-  next_question: string;    // "？" で終える
-  chips: string[];          // 0-3 個
+  opening_message: string; // 3行以内
+  focus: Focus; // 通常 '感情整理'
+  next_question: string; // "？" で終える
+  chips: string[]; // 0-3 個
   risk_level: RiskLevel;
 };
 
 // 継続（有料）レスポンス
 export type AiTurn = {
-  message: string;          // 3行以内
-  next_question: string;    // "？" で終える
-  chips: string[];          // 0-3 個
-  phase_done?: boolean;     // Stage4 最終で true
+  message: string; // 3行以内
+  next_question: string; // "？" で終える
+  chips: string[]; // 0-3 個
+  phase_done?: boolean; // Stage4 最終で true
   risk_level: RiskLevel;
 };
 
 // agent/mui 呼び出しに使うペイロード
 export type AgentMuiPayload = {
-  system: string;                           // System プロンプト
-  user: string;                             // User コンテキスト
-  phase?: ConversationStage | 'opening';    // 生成側のモード
+  system: string; // System プロンプト
+  user: string; // User コンテキスト
+  phase?: ConversationStage | 'opening'; // 生成側のモード
 };
 
 // 価格（半額ローンチ。未設定時は既定値）
@@ -90,14 +90,22 @@ export type StageSaveBody = {
   user_code: string;
   seed_id: string;
   sub_id:
-    | 'stage1-1' | 'stage1-2' | 'stage1-3'
-    | 'stage2-1' | 'stage2-2' | 'stage2-3'
-    | 'stage3-1' | 'stage3-2' | 'stage3-3'
-    | 'stage4-1' | 'stage4-2' | 'stage4-3';
-  phase: Phase | 'Mixed';         // 互換のため 'Mixed' も許容
-  depth_stage: string;            // 例: 'R3'
-  q_current: QCode;               // 'Q1'..'Q5'
-  next_step: string;              // UIの次アクション（chips等）
-  result?: any;                   // フェーズ別のJSON
-  tone?: any;                     // 任意メタ（guardrails等）
+    | 'stage1-1'
+    | 'stage1-2'
+    | 'stage1-3'
+    | 'stage2-1'
+    | 'stage2-2'
+    | 'stage2-3'
+    | 'stage3-1'
+    | 'stage3-2'
+    | 'stage3-3'
+    | 'stage4-1'
+    | 'stage4-2'
+    | 'stage4-3';
+  phase: Phase | 'Mixed'; // 互換のため 'Mixed' も許容
+  depth_stage: string; // 例: 'R3'
+  q_current: QCode; // 'Q1'..'Q5'
+  next_step: string; // UIの次アクション（chips等）
+  result?: any; // フェーズ別のJSON
+  tone?: any; // 任意メタ（guardrails等）
 };

@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! // server only
+  process.env.SUPABASE_SERVICE_ROLE_KEY!, // server only
 );
 
 /**
@@ -14,11 +14,15 @@ const supabase = createClient(
  */
 export async function POST(req: NextRequest) {
   try {
-    const userCode = req.headers.get('x-user-code') || new URL(req.url).searchParams.get('user_code');
+    const userCode =
+      req.headers.get('x-user-code') || new URL(req.url).searchParams.get('user_code');
     if (!userCode) return NextResponse.json({ error: 'missing user_code' }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
-    const { vision_id, result_status } = body as { vision_id?: string; result_status?: string | null };
+    const { vision_id, result_status } = body as {
+      vision_id?: string;
+      result_status?: string | null;
+    };
     if (!vision_id) return NextResponse.json({ error: 'missing vision_id' }, { status: 400 });
 
     const payload =

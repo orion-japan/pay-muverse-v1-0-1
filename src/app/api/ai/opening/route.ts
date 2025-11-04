@@ -4,11 +4,7 @@ export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 import { buildSystemPrompt, buildUserPrompt } from '@/lib/mui/buildSystemPrompt';
 import { phaseTemplate } from '@/lib/mui/prompt';
-import {
-  type AiOpening,
-  type ConversationStage,
-  type AgentMuiPayload,
-} from '@/lib/mui/types';
+import { type AiOpening, type ConversationStage, type AgentMuiPayload } from '@/lib/mui/types';
 import { callAgentMui, parseAgentTextToUi } from '@/lib/mui/api';
 
 /**
@@ -42,10 +38,7 @@ export async function POST(req: NextRequest) {
     };
 
     if (!rawText || !conversationId || !userId) {
-      return NextResponse.json(
-        { ok: false, error: 'missing_required_fields' },
-        { status: 400 },
-      );
+      return NextResponse.json({ ok: false, error: 'missing_required_fields' }, { status: 400 });
     }
 
     // 開幕は常に Stage=1 を起動（無料フェーズのティザー）
@@ -123,8 +116,7 @@ export async function POST(req: NextRequest) {
     // さらに堅いフォールバック
     const t = phaseTemplate(1);
     const body: AiOpening = {
-      opening_message:
-        'まずは感情の位置を特定します。\n主旋律は不安寄り。ここから整えます。',
+      opening_message: 'まずは感情の位置を特定します。\n主旋律は不安寄り。ここから整えます。',
       focus: '感情整理',
       next_question: t.question,
       chips: t.chips,

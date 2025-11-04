@@ -16,12 +16,15 @@ export async function POST(req: NextRequest) {
     const supabase = createRouteHandlerClient({ cookies });
 
     // RLS 前提：本番は認証必須、開発は未認証なら no-op で 200 返す
-    const { data: { user }, error: userErr } = await supabase.auth.getUser();
+    const {
+      data: { user },
+      error: userErr,
+    } = await supabase.auth.getUser();
     const isDev = process.env.NODE_ENV !== 'production';
     if (userErr) throw userErr;
     if (!user) {
       if (isDev) {
-        const bodyDev = await req.json().catch(() => ({ messages: [] } as Body));
+        const bodyDev = await req.json().catch(() => ({ messages: [] }) as Body);
         if (Array.isArray(bodyDev.messages) && bodyDev.messages.length) {
           console.log('[mui/log][dev-noauth]', {
             count: bodyDev.messages.length,
@@ -31,7 +34,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({
           ok: true,
           dev_noauth: true,
-          count: Array.isArray(bodyDev.messages) ? bodyDev.messages.length : 0
+          count: Array.isArray(bodyDev.messages) ? bodyDev.messages.length : 0,
         });
       }
       return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });

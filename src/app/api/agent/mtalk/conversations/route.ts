@@ -8,7 +8,7 @@ import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/au
 
 function json(data: any, init?: number | ResponseInit) {
   const status =
-    typeof init === 'number' ? init : (init as ResponseInit | undefined)?.['status'] ?? 200;
+    typeof init === 'number' ? init : ((init as ResponseInit | undefined)?.['status'] ?? 200);
   const headers = new Headers(
     typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers,
   );
@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
           title: c.title ?? null,
           updated_at: c.updated_at ?? null,
         }))
-        .sort((a, b) => (order.get(a.id)! - order.get(b.id)!));
+        .sort((a, b) => order.get(a.id)! - order.get(b.id)!);
     }
 
     return json({ ok: true, items });

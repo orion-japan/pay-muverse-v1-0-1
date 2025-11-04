@@ -26,11 +26,11 @@ export async function POST(req: NextRequest) {
     // 1) node_modules の実ファイルパスを取得
     //    ※ tesseract.js-core は `npm i tesseract.js-core` 済みであること
     const workerFsPath = require.resolve('tesseract.js/src/worker-script/node/index.js'); // ← Node用
-    const coreFsPath   = require.resolve('tesseract.js-core/tesseract-core.wasm.js');
+    const coreFsPath = require.resolve('tesseract.js-core/tesseract-core.wasm.js');
 
     // 2) Windowsでも有効な file:// 絶対URLへ変換（超重要）
     const workerPath = pathToFileURL(workerFsPath).href;
-    const corePath   = pathToFileURL(coreFsPath).href;
+    const corePath = pathToFileURL(coreFsPath).href;
 
     // デバッグ：実際に渡すURLを確認（1回見えればOK）
     console.log('[OCR] workerPath:', workerPath);

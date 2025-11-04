@@ -2,42 +2,45 @@
 // Mu のシステムプロンプトを Sofia風に合成（persona + mode + vars）
 // ※自由度を高めたライト版：規則は最小限、雰囲気重視
 
-import { MU_PERSONAS, MuPersonaKey } from "./persona";
-import { MU_CONFIG } from "./config";
+import { MU_PERSONAS, MuPersonaKey } from './persona';
+import { MU_CONFIG } from './config';
 
-export type MuMode = "normal" | "intent" | "remake" | "diagnosis";
+export type MuMode = 'normal' | 'intent' | 'remake' | 'diagnosis';
 export type MuTone =
-  | "compassion_calm"
-  | "mediator_grounded"
-  | "co_creator_clear"
-  | "gentle_guide"
-  | "default";
+  | 'compassion_calm'
+  | 'mediator_grounded'
+  | 'co_creator_clear'
+  | 'gentle_guide'
+  | 'default';
 
 export interface BuildMuPromptOptions {
   personaKey?: MuPersonaKey;
   mode?: MuMode;
   vars?: Record<string, any>;
-  includeGuard?: boolean;     // 既定: true
+  includeGuard?: boolean; // 既定: true
   enforceResonance?: boolean; // 既定: true
   tone?: MuTone;
   creditPerTurn?: number;
   imageCredit?: number;
-  promptOverride?: string;    // 最優先で全文差し替え
+  promptOverride?: string; // 最優先で全文差し替え
 }
 
-export const MU_PROMPT_VERSION = "mu.v2.5.0";
+export const MU_PROMPT_VERSION = 'mu.v2.5.0';
 
 /* utils */
 const dedent = (s: string) =>
-  s.replace(/^\n?/, "").replace(/\n[ \t]+/g, "\n").trim();
+  s
+    .replace(/^\n?/, '')
+    .replace(/\n[ \t]+/g, '\n')
+    .trim();
 
 /** ${var|fallback} 形式の変数展開（未使用でも安全に素通し） */
 function applyVars(text: string, vars: Record<string, any>) {
-  return String(text ?? "").replace(/\$\{([^}]+)\}/g, (_, key) => {
-    const [raw, fallback] = String(key).split("|");
-    const name = (raw ?? "").trim();
+  return String(text ?? '').replace(/\$\{([^}]+)\}/g, (_, key) => {
+    const [raw, fallback] = String(key).split('|');
+    const name = (raw ?? '').trim();
     const v = vars?.[name];
-    return (v === undefined || v === null ? (fallback ?? "") : String(v)).trim();
+    return (v === undefined || v === null ? (fallback ?? '') : String(v)).trim();
   });
 }
 
@@ -53,18 +56,18 @@ function envNumAny(def: number, ...names: string[]): number {
   return def;
 }
 const DEFAULT_CREDITS = {
-  text: envNumAny(0.5, "MU_CREDIT_PER_TURN", "MU_CHAT_CREDIT_COST"),
-  image: envNumAny(3, "MU_IMAGE_CREDIT", "MU_IMAGE_CREDIT_COST"),
+  text: envNumAny(0.5, 'MU_CREDIT_PER_TURN', 'MU_CHAT_CREDIT_COST'),
+  image: envNumAny(3, 'MU_IMAGE_CREDIT', 'MU_IMAGE_CREDIT_COST'),
 };
 
 export function buildMuSystemPrompt(opts: BuildMuPromptOptions = {}): string {
   const {
-    personaKey = "base",
-    mode = "normal",
+    personaKey = 'base',
+    mode = 'normal',
     vars = {},
     includeGuard = true,
     enforceResonance = true,
-    tone = "default",
+    tone = 'default',
     creditPerTurn = DEFAULT_CREDITS.text,
     imageCredit = DEFAULT_CREDITS.image,
     promptOverride,
@@ -76,12 +79,12 @@ export function buildMuSystemPrompt(opts: BuildMuPromptOptions = {}): string {
   if (envOverride && envOverride.trim()) return envOverride;
 
   // 2) Persona（vars 展開に対応）
-  const personaRaw = MU_PERSONAS[personaKey] ?? MU_PERSONAS.base ?? "";
+  const personaRaw = MU_PERSONAS[personaKey] ?? MU_PERSONAS.base ?? '';
   const personaText = applyVars(personaRaw, { mode, ...vars });
 
   // 3) 共鳴スタイル（ライト）
   const resonance = !enforceResonance
-    ? ""
+    ? ''
     : dedent(`
       ## Style
       - Mu は**軽やかな伴走者**。説明は短く、余白を大切にする。
@@ -104,22 +107,22 @@ export function buildMuSystemPrompt(opts: BuildMuPromptOptions = {}): string {
     ## Tone
     - 先に要点を**ひと呼吸分**で示し、続けて補足や提案を添える。
     - ${
-      tone === "compassion_calm"
-        ? "やわらかさと安心感を優先。"
-        : tone === "mediator_grounded"
-        ? "落ち着いて合意を形にする。"
-        : tone === "co_creator_clear"
-        ? "明快に具体策へ。"
-        : tone === "gentle_guide"
-        ? "丁寧に方向をそっと示す。"
-        : "共感と明晰さのバランスを保つ。"
+      tone === 'compassion_calm'
+        ? 'やわらかさと安心感を優先。'
+        : tone === 'mediator_grounded'
+          ? '落ち着いて合意を形にする。'
+          : tone === 'co_creator_clear'
+            ? '明快に具体策へ。'
+            : tone === 'gentle_guide'
+              ? '丁寧に方向をそっと示す。'
+              : '共感と明晰さのバランスを保つ。'
     }
     - 不確実さは**仮説**として扱い、押し付けない。
   `);
 
   // 6) Guardrails（最小限）
   const guard = !includeGuard
-    ? ""
+    ? ''
     : dedent(`
       ## Guard
       - 医療/法務/投資は一般情報に留め、必要なら専門家を案内。
@@ -249,8 +252,8 @@ export function buildMuSystemPrompt(opts: BuildMuPromptOptions = {}): string {
     ## UI/Persona Config (note)
     - line-height(UI): ${ui.assistantLineHeight}
     - paragraph margin(UI): ${ui.paragraphMargin}px
-    - emoji: ${p.allowEmoji ? `allow (max ${p.maxEmojiPerReply})` : "disallow"}
-    - emoji candidates: ${p.allowEmoji ? (p.allowedEmoji.join(" ") || "(none)") : "(disabled)"}
+    - emoji: ${p.allowEmoji ? `allow (max ${p.maxEmojiPerReply})` : 'disallow'}
+    - emoji candidates: ${p.allowEmoji ? p.allowedEmoji.join(' ') || '(none)' : '(disabled)'}
   `);
 
   const final = dedent(`

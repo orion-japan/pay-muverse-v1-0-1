@@ -151,7 +151,10 @@ export default function MTalkPage() {
     setErrorMsg(null);
 
     try {
-      const lines = input.split('\n').map((s) => s.trim()).filter(Boolean);
+      const lines = input
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean);
       const res = await fetchWithIdToken('/api/agent/mtalk/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -209,7 +212,7 @@ export default function MTalkPage() {
       });
       const j = await res.json();
 
-      if (!(j?.ok)) {
+      if (!j?.ok) {
         setErrorMsg(j?.error || '相談の起動に失敗しました。');
         return;
       }
@@ -230,7 +233,8 @@ export default function MTalkPage() {
       url.searchParams.set('agent', 'mirra');
       url.searchParams.set('from', 'mtalk');
       url.searchParams.set('cid', hintedCid);
-      if (j.summary_hint) url.searchParams.set('summary_hint', String(j.summary_hint).slice(0, 220));
+      if (j.summary_hint)
+        url.searchParams.set('summary_hint', String(j.summary_hint).slice(0, 220));
       router.push(url.pathname + url.search);
     } catch {
       setErrorMsg('通信エラーが発生しました。');
@@ -254,7 +258,7 @@ export default function MTalkPage() {
           >
             <Header onLoginClick={handleLoginClick} />
           </div>,
-          portalHost
+          portalHost,
         )}
 
       <main className="mtalk-root">
@@ -293,10 +297,11 @@ export default function MTalkPage() {
           <p className="lead">
             多くの人は、無意識のセルフトークに導かれて、できない理由を賢く語る罠に入ります。
             <br />
-            <b>mTalk は、その声を見える化し、意図へ戻す入口。</b> ここで整えれば、マインドトークは静かになります。
+            <b>mTalk は、その声を見える化し、意図へ戻す入口。</b>{' '}
+            ここで整えれば、マインドトークは静かになります。
           </p>
 
-        <div className="mtalk-agent">
+          <div className="mtalk-agent">
             <span className="label">鑑定エージェント：</span>
             <label className="radio">
               <input

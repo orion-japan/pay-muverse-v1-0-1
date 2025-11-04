@@ -10,7 +10,7 @@ export interface Message {
 
 export interface PostMessageParams {
   query: string;
-  user: string;                       // user_code
+  user: string; // user_code
   conversation_id?: string;
   response_mode?: 'blocking' | 'streaming';
   inputs?: Record<string, any>;

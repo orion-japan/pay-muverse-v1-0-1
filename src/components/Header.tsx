@@ -1,36 +1,36 @@
-'use client'
-import Link from 'next/link'
-import { useAuth } from '@/context/AuthContext'
-import { useRouter } from 'next/navigation'
+'use client';
+import Link from 'next/link';
+import { useAuth } from '@/context/AuthContext';
+import { useRouter } from 'next/navigation';
 
-type Props = { onLoginClick: () => void }
+type Props = { onLoginClick: () => void };
 
 export default function Header({ onLoginClick }: Props) {
-  const { user, loading, logout } = useAuth()
-  const router = useRouter()
-  const isLoggedIn = !!user && !loading
+  const { user, loading, logout } = useAuth();
+  const router = useRouter();
+  const isLoggedIn = !!user && !loading;
 
   const prevent = (e: React.MouseEvent<HTMLAnchorElement>) => {
     if (!isLoggedIn) {
-      e.preventDefault()
-      onLoginClick()
+      e.preventDefault();
+      onLoginClick();
     }
-  }
+  };
 
   const handleLogout = async () => {
-    await logout()
-    router.push('/')
-  }
+    await logout();
+    router.push('/');
+  };
 
   // ★ 追加：再読み込み（フルリロード）
   const handleReload = () => {
     // 完全リロード（状態をすべて捨てる）
     if (typeof window !== 'undefined') {
-      window.location.reload()
+      window.location.reload();
     }
     // もし状態は維持してデータだけ更新したい場合は下を使用
     // router.refresh()
-  }
+  };
 
   return (
     // 外枠：全幅・中央寄せ（背景は付けない）
@@ -51,8 +51,8 @@ export default function Header({ onLoginClick }: Props) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '6px 10px',           // ← 10px 16px → 6px 10px
-          height: '44px',                // ← 60px → 44px
+          padding: '6px 10px', // ← 10px 16px → 6px 10px
+          height: '44px', // ← 60px → 44px
           fontWeight: 'bold',
           color: 'white',
           background: 'linear-gradient(90deg, #b089f9, #9a7ff9)',
@@ -65,7 +65,7 @@ export default function Header({ onLoginClick }: Props) {
           style={{
             textDecoration: 'none',
             color: 'white',
-            fontSize: '14px',            // ← 18px → 14px
+            fontSize: '14px', // ← 18px → 14px
             fontWeight: 800,
             padding: '4px 8px',
             borderRadius: '8px',
@@ -82,7 +82,7 @@ export default function Header({ onLoginClick }: Props) {
 
         <div
           style={{
-            fontSize: '16px',            // ← 22px → 16px
+            fontSize: '16px', // ← 22px → 16px
             fontWeight: 900,
             textAlign: 'center',
             letterSpacing: '.3px',
@@ -118,11 +118,11 @@ export default function Header({ onLoginClick }: Props) {
             <button
               onClick={handleLogout}
               style={{
-                height: '28px',          // ← 34px 相当 → 28px
+                height: '28px', // ← 34px 相当 → 28px
                 padding: '0 10px',
                 background: 'rgba(255,255,255,0.22)',
                 border: 'none',
-                borderRadius: '8px',     // ← 6px → 8px（視覚的に小さく見える）
+                borderRadius: '8px', // ← 6px → 8px（視覚的に小さく見える）
                 color: 'white',
                 fontSize: '12px',
                 fontWeight: 800,
@@ -154,5 +154,5 @@ export default function Header({ onLoginClick }: Props) {
         </div>
       </div>
     </header>
-  )
+  );
 }

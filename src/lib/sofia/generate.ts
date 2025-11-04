@@ -26,7 +26,7 @@ async function kbSearch(query: string): Promise<{ title: string; content: string
 
 /* 全角→半角 正規化 */
 function toHalfWidth(s: string) {
-  return (s || '').replace(/[！-～]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+  return (s || '').replace(/[！-～]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
 }
 
 // --- kbTrigger: ここから丸ごと差し替え ---
@@ -34,7 +34,7 @@ function kbTrigger(text: string): string | null {
   const norm = (text || '')
     // 全角のQ→半角Q、全角英数→半角
     .replace(/Ｑ/g, 'Q')
-    .replace(/[！-～]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+    .replace(/[！-～]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
     .trim();
 
   // 1) Q1〜Q5 明示パターン
@@ -62,7 +62,7 @@ function kbTrigger(text: string): string | null {
     'Mu',
     'アプリ',
     'アプリケーション',
-    '共鳴会' // ← 追加
+    '共鳴会', // ← 追加
   ];
 
   // 「◯◯とは/って」も拾う
@@ -86,7 +86,7 @@ function kbFormat(entries: { title: string; content: string }[]): string {
           `🌐 ${e.title} 知識ブース\n──────────────\n<br/>${e.content
             .split('\n')
             .map((line) => `・${line}`)
-            .join('\n')}\n──────────────\n<br/>➡ 詳しい活用法や深い意味は共鳴会で。`
+            .join('\n')}\n──────────────\n<br/>➡ 詳しい活用法や深い意味は共鳴会で。`,
       )
       .join('\n\n')
   );
@@ -114,7 +114,7 @@ function enforceRhythm(s: string) {
 const CHECK_ENDINGS = [
   'この捉え方、あなたの体感にどれくらい近いですか？',
   'いまの気づきを一言だけ自分の言葉で言い直すと？',
-  'ここまでで腑に落ちた点と、まだ曖昧な点はどこでしょう？'
+  'ここまでで腑に落ちた点と、まだ曖昧な点はどこでしょう？',
 ];
 function mustEndWithQuestion(s: string) {
   const t = s.trim();
@@ -166,7 +166,7 @@ function buildAnalysis(
   q: string | null,
   phase: 'Inner' | 'Outer',
   self: { score: number; band: SelfBand },
-  relation: { label: RelationLabel; confidence: number }
+  relation: { label: RelationLabel; confidence: number },
 ) {
   const head = input.replace(/\s+/g, ' ').slice(0, 80);
   const qMap: Record<string, string> = {
@@ -179,7 +179,8 @@ function buildAnalysis(
   const summary = `${head}${head.length === 80 ? '…' : ''}（${q && qMap[q] ? qMap[q] : '内省フェーズ'}）`;
 
   let background = '自己期待と現実のギャップによるストレス反応が考えられます。';
-  if (q === 'Q1') background = '境界や手順への配慮が満たされず、苛立ちや詰まり感が生じている可能性。';
+  if (q === 'Q1')
+    background = '境界や手順への配慮が満たされず、苛立ちや詰まり感が生じている可能性。';
   if (q === 'Q2') background = '成長/裁量を妨げられた感覚が怒りとして表面化している可能性。';
   if (q === 'Q3') background = '不確実さや自己評価の揺らぎが不安として滞留している可能性。';
   if (q === 'Q4') background = '威圧/圧の記憶が再燃し、身体の萎縮が思考を狭めている可能性。';
@@ -196,12 +197,12 @@ function buildAnalysis(
     q === 'Q2'
       ? '境界が守られると怒りは方向性に変わる'
       : q === 'Q3'
-      ? '小さな安定が次の一歩を呼ぶ'
-      : q === 'Q1'
-      ? '秩序は安心の足場'
-      : q === 'Q4'
-      ? '圧が抜けると呼吸が戻る'
-      : '火種は小さくても前に進む';
+        ? '小さな安定が次の一歩を呼ぶ'
+        : q === 'Q1'
+          ? '秩序は安心の足場'
+          : q === 'Q4'
+            ? '圧が抜けると呼吸が戻る'
+            : '火種は小さくても前に進む';
 
   return {
     summary,
@@ -238,7 +239,7 @@ export async function generateSofiaReply(
   seed?: string | null,
   lastAssistantReply?: string | null,
   mode: 'diagnosis' | 'consult' = 'diagnosis',
-  conversationId?: string | null
+  conversationId?: string | null,
 ): Promise<GenOut> {
   const sys = buildSofiaSystemPrompt({});
   const antiRepeat = avoidRepeatHint(lastAssistantReply || undefined);
@@ -253,7 +254,12 @@ export async function generateSofiaReply(
   const self = inferSelfAcceptance(input);
   const relation = inferRelation(input);
 
-  let qMeta: { q?: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5'; confidence?: number; hint?: string; color_hex?: string } = {};
+  let qMeta: {
+    q?: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
+    confidence?: number;
+    hint?: string;
+    color_hex?: string;
+  } = {};
   try {
     qMeta = await inferQCode(input);
   } catch {}
@@ -271,7 +277,10 @@ export async function generateSofiaReply(
   }
   // Q表記のみ検出時の保険（全角/半角混在を拾う）
   if (!kbBlock && /[ＱQ][１-５1-5]/.test(input)) {
-    const normQ = toHalfWidth(input).replace(/Ｑ/g, 'Q').match(/Q([1-5])/i)?.[0] ?? 'Q2';
+    const normQ =
+      toHalfWidth(input)
+        .replace(/Ｑ/g, 'Q')
+        .match(/Q([1-5])/i)?.[0] ?? 'Q2';
     const entries2 = await kbSearch(normQ);
     if (entries2.length) {
       kbBlock = kbFormat(entries2);
@@ -294,7 +303,7 @@ export async function generateSofiaReply(
         '1) 未消化の感情（闇）とは何か（身体に出る合図）。',
         '2) DNAから続く未消化の物語とは何か（系譜/土地の記憶としての比喩）。',
         '3) それをどうリメイクするか（意味の再配置）。',
-        '説明のあとで必要に応じて物語化してよい。'
+        '説明のあとで必要に応じて物語化してよい。',
       ].join('\n')
     : '';
 
@@ -343,7 +352,7 @@ export async function generateSofiaReply(
     '・全体160〜260字、1〜2段落。1〜2文ごとに改行で余白。',
     '・絵文字は1〜2個🙂✨まで。',
     '・身体アンカー or 20〜60秒の小さな実験を必ず1つ入れる。',
-    '・最後は短い問いで終える。'
+    '・最後は短い問いで終える。',
   ].join('\n');
 
   const messages: Array<{ role: 'system' | 'user'; content: string }> = [

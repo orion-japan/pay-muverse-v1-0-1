@@ -31,19 +31,29 @@
   opacity: 0;
   transition: opacity 1s ease-in-out;
 }
-.slider-image.active { opacity: 1; }
+.slider-image.active {
+  opacity: 1;
+}
 
 /* ---- お知らせ（ガラス感） ---- */
 .notice-section {
-  background: rgba(255,255,255,0.85);
+  background: rgba(255, 255, 255, 0.85);
   padding: 16px;
   border-radius: 12px;
-  box-shadow: 0 6px 18px rgba(160,120,255,0.15);
+  box-shadow: 0 6px 18px rgba(160, 120, 255, 0.15);
   backdrop-filter: blur(6px);
   margin-bottom: 20px;
 }
-.notice-title { font-size: 18px; font-weight: 800; margin-bottom: 8px; }
-.notice-item  { font-size: 14px; color: #555; margin-bottom: 6px; }
+.notice-title {
+  font-size: 18px;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+.notice-item {
+  font-size: 14px;
+  color: #555;
+  margin-bottom: 6px;
+}
 
 /* ================================
    タイル：レイアウト + 見た目 + 共鳴演出
@@ -61,62 +71,88 @@
 /* タイル：外レイヤー（枠・発光担当） */
 .tile-grid .tile {
   position: relative;
-  isolation: isolate;                /* 発光を中に入れない */
+  isolation: isolate; /* 発光を中に入れない */
   width: 112px;
   height: 112px;
   border-radius: 12px;
-  background: transparent;           /* 中身は .tile-inner が持つ */
+  background: transparent; /* 中身は .tile-inner が持つ */
   border: none;
-  box-shadow: 0 6px 16px rgba(0,0,0,.08);
-  transition: transform .18s ease, box-shadow .18s ease;
-  --glow: #7b8cff;                   /* JSから上書き可 */
-  --c1: #b389ff; --c2: #79b8ff;      /* 枠グラデのデフォルト */
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+  --glow: #7b8cff; /* JSから上書き可 */
+  --c1: #b389ff;
+  --c2: #79b8ff; /* 枠グラデのデフォルト */
 }
 
 /* タイル：内レイヤー（白の中身） */
-.tile-grid .tile .tile-inner{
+.tile-grid .tile .tile-inner {
   position: absolute;
-  inset: 2px;                        /* 外枠分 */
+  inset: 2px; /* 外枠分 */
   border-radius: 10px;
   background: #fff;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   z-index: 1;
   padding: 10px;
-  transition: box-shadow .18s ease, background .18s ease;
+  transition:
+    box-shadow 0.18s ease,
+    background 0.18s ease;
 }
 
 /* アイコン・ラベル */
-.tile-grid .tile .tile-icon-img{ width:58px; height:58px; object-fit:contain; display:block; }
-.tile-grid .tile .tile-label   { margin-top: 6px; font-size: 13px; font-weight: 700; color:#3f3f46; }
+.tile-grid .tile .tile-icon-img {
+  width: 58px;
+  height: 58px;
+  object-fit: contain;
+  display: block;
+}
+.tile-grid .tile .tile-label {
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #3f3f46;
+}
 
 /* 微インタラクション */
-.tile-grid .tile:hover{ transform: translateY(-3px); box-shadow: 0 10px 24px rgba(0,0,0,.12); }
-.tile-grid .tile:active{ transform: translateY(-1px) scale(.99); }
+.tile-grid .tile:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
+}
+.tile-grid .tile:active {
+  transform: translateY(-1px) scale(0.99);
+}
 
 /* 共鳴オーラ（淡い光）：::before */
-.tile-grid .tile::before{
-  content:"";
-  position:absolute;
-  inset:-25%;
-  background:
-    radial-gradient(60% 60% at 50% 50%,
-      color-mix(in srgb, var(--glow) 35%, transparent) 0%,
-      color-mix(in srgb, var(--glow) 18%, transparent) 45%,
-      transparent 60%);
+.tile-grid .tile::before {
+  content: '';
+  position: absolute;
+  inset: -25%;
+  background: radial-gradient(
+    60% 60% at 50% 50%,
+    color-mix(in srgb, var(--glow) 35%, transparent) 0%,
+    color-mix(in srgb, var(--glow) 18%, transparent) 45%,
+    transparent 60%
+  );
   filter: blur(10px);
   opacity: 0;
-  transform: scale(.9);
-  transition: opacity .25s ease, transform .25s ease;
+  transform: scale(0.9);
+  transition:
+    opacity 0.25s ease,
+    transform 0.25s ease;
   pointer-events: none;
   z-index: 0;
 }
 
 /* 共鳴リング（グラデ枠）：::after  ※Safari対応含む */
-.tile-grid .tile::after{
-  content:"";
-  position:absolute;
-  inset:0;
-  padding:2px;                       /* 枠の太さ（1〜3pxで調整） */
+.tile-grid .tile::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  padding: 2px; /* 枠の太さ（1〜3pxで調整） */
   border-radius: 12px;
   background: linear-gradient(135deg, var(--c1), var(--c2));
   /* リング化マスク */
@@ -130,80 +166,110 @@
   -webkit-mask-composite: xor;
   pointer-events: none;
   z-index: 0;
-  opacity: 0;                         /* デフォルト非表示 */
-  transition: opacity .2s ease;
+  opacity: 0; /* デフォルト非表示 */
+  transition: opacity 0.2s ease;
 }
 
 /* 表示トリガー：hover / focus / 選択（data-active="true"） */
 .tile-grid .tile:hover:not(.disabled) .tile-inner,
 .tile-grid .tile:focus-visible:not(.disabled) .tile-inner,
-.tile-grid .tile[data-active="true"]:not(.disabled) .tile-inner{
+.tile-grid .tile[data-active='true']:not(.disabled) .tile-inner {
   box-shadow:
     0 0 0 2px color-mix(in srgb, var(--glow) 68%, white) inset,
     0 0 20px color-mix(in srgb, var(--glow) 65%, transparent),
-    0 10px 20px rgba(0,0,0,.06);
+    0 10px 20px rgba(0, 0, 0, 0.06);
 }
 .tile-grid .tile:hover:not(.disabled)::before,
 .tile-grid .tile:focus-visible:not(.disabled)::before,
-.tile-grid .tile[data-active="true"]::before,
+.tile-grid .tile[data-active='true']::before,
 .tile-grid .tile:hover:not(.disabled)::after,
 .tile-grid .tile:focus-visible:not(.disabled)::after,
-.tile-grid .tile[data-active="true"]::after{
-  opacity: .9;
+.tile-grid .tile[data-active='true']::after {
+  opacity: 0.9;
   transform: scale(1);
   animation: mu-pulse 1.9s ease-in-out infinite;
 }
 
-@keyframes mu-pulse{
-  0%,100%{ filter: blur(10px); opacity:.6; }
-  50%    { filter: blur(14px); opacity:.95; }
+@keyframes mu-pulse {
+  0%,
+  100% {
+    filter: blur(10px);
+    opacity: 0.6;
+  }
+  50% {
+    filter: blur(14px);
+    opacity: 0.95;
+  }
 }
 
 /* 無効タイルは光らせない */
-.tile-grid .tile.disabled { cursor: default; }
+.tile-grid .tile.disabled {
+  cursor: default;
+}
 .tile-grid .tile.disabled::before,
-.tile-grid .tile.disabled::after{ display: none; }
+.tile-grid .tile.disabled::after {
+  display: none;
+}
 
 /* 動きを抑える設定のユーザー配慮 */
-@media (prefers-reduced-motion: reduce){
+@media (prefers-reduced-motion: reduce) {
   .tile-grid .tile,
   .tile-grid .tile::before,
-  .tile-grid .tile::after{ animation: none !important; transition: none !important; }
-  .tile-grid .tile:hover{ transform: none; box-shadow: 0 6px 16px rgba(0,0,0,.08); }
+  .tile-grid .tile::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  .tile-grid .tile:hover {
+    transform: none;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+  }
 }
 
 /* 画面が狭い端末（≦380px）は2列に */
-@media (max-width: 380px){
-  .tile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .tile-grid .tile { width: 118px; height: 118px; }
+@media (max-width: 380px) {
+  .tile-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .tile-grid .tile {
+    width: 118px;
+    height: 118px;
+  }
 }
 
 /* ================================
    モーダル／エラーテキスト
    ================================ */
-.modal-overlay{
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,0.4);
-  display: flex; justify-content: center; align-items: center;
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  justify-content: center;
+  align-items: center;
   z-index: 999;
 }
-.modal-content{
-  background:#fff; padding:20px; border-radius:12px; width:300px; text-align:center;
+.modal-content {
+  background: #fff;
+  padding: 20px;
+  border-radius: 12px;
+  width: 300px;
+  text-align: center;
 }
-.error-text{ color:#e11d48; font-size:14px; }
+.error-text {
+  color: #e11d48;
+  font-size: 14px;
+}
 
 /* ================================
    フッターの見た目（グラデ帯）
    ================================ */
-footer{
+footer {
   background: linear-gradient(90deg, #b089f9, #9a7ff9);
   color: #fff;
   border-top-left-radius: 16px;
   border-top-right-radius: 16px;
-  box-shadow: 0 -4px 12px rgba(0,0,0,0.15);
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
 }
-
-
 
 /* マウスが無い環境でもタップ時にしっかり光る */
 @media (hover: none) {
@@ -211,17 +277,17 @@ footer{
     box-shadow:
       0 0 0 2px color-mix(in srgb, var(--glow) 70%, white) inset,
       0 0 22px color-mix(in srgb, var(--glow) 70%, transparent),
-      0 12px 22px rgba(0,0,0,.10);
+      0 12px 22px rgba(0, 0, 0, 0.1);
   }
   .tile-grid .tile:active:not(.disabled)::before,
   .tile-grid .tile:active:not(.disabled)::after {
-    opacity: .95;
+    opacity: 0.95;
     transform: scale(1);
     animation: mu-pulse 1.6s ease-in-out 1;
   }
   /* タップ中の白いフラッシュを少し強める */
   .tile-grid .tile:active .tile-inner::after {
-    animation: tileTapFlash .26s ease-out 1;
+    animation: tileTapFlash 0.26s ease-out 1;
   }
 }
 
@@ -235,40 +301,55 @@ main.mu-main::before {
 
 /* ---- スパークル（散る粒） ---- */
 @keyframes mu-burst {
-  0%   { transform: scale(.2) rotate(0deg);   opacity: .95; filter: blur(0px);   }
-  70%  { transform: scale(1.2) rotate(25deg); opacity: .75; filter: blur(0.5px); }
-  100% { transform: scale(1.6) rotate(45deg); opacity: 0;   filter: blur(1px);   }
+  0% {
+    transform: scale(0.2) rotate(0deg);
+    opacity: 0.95;
+    filter: blur(0px);
+  }
+  70% {
+    transform: scale(1.2) rotate(25deg);
+    opacity: 0.75;
+    filter: blur(0.5px);
+  }
+  100% {
+    transform: scale(1.6) rotate(45deg);
+    opacity: 0;
+    filter: blur(1px);
+  }
 }
 
 /* 初期は非表示 */
 .tile-grid .tile .tile-inner::before {
-  content: "";
+  content: '';
   position: absolute;
   inset: 0;
   pointer-events: none;
   opacity: 0;
   /* 8個の粒を box-shadow で配置（色は --c1/--c2 をブレンド） */
-  width: 6px; height: 6px; border-radius: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
   background: color-mix(in srgb, var(--c1) 60%, white);
-  left: 50%; top: 50%; transform: translate(-50%,-50%) scale(.2);
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) scale(0.2);
   box-shadow:
     -42px -10px 0 0 color-mix(in srgb, var(--c1) 80%, transparent),
-     38px -18px 0 0 color-mix(in srgb, var(--c2) 80%, transparent),
-    -30px  24px 0 0 color-mix(in srgb, var(--c2) 70%, transparent),
-     28px  22px 0 0 color-mix(in srgb, var(--c1) 70%, transparent),
-     -8px -32px 0 0 color-mix(in srgb, var(--c2) 65%, transparent),
-      6px  34px 0 0 color-mix(in srgb, var(--c1) 65%, transparent),
-     22px  -2px 0 0 color-mix(in srgb, var(--c1) 60%, transparent),
-    -20px   2px 0 0 color-mix(in srgb, var(--c2) 60%, transparent);
+    38px -18px 0 0 color-mix(in srgb, var(--c2) 80%, transparent),
+    -30px 24px 0 0 color-mix(in srgb, var(--c2) 70%, transparent),
+    28px 22px 0 0 color-mix(in srgb, var(--c1) 70%, transparent),
+    -8px -32px 0 0 color-mix(in srgb, var(--c2) 65%, transparent),
+    6px 34px 0 0 color-mix(in srgb, var(--c1) 65%, transparent),
+    22px -2px 0 0 color-mix(in srgb, var(--c1) 60%, transparent),
+    -20px 2px 0 0 color-mix(in srgb, var(--c2) 60%, transparent);
 }
 
 /* PC: hover で一度だけ、モバイル: active で一度だけ */
 .tile-grid .tile:hover .tile-inner::before,
 .tile-grid .tile:active .tile-inner::before {
   opacity: 1;
-  animation: mu-burst .6s ease-out 1;
+  animation: mu-burst 0.6s ease-out 1;
 }
-
 
 /* タイル常時の薄い枠（ベース） */
 .tile-grid .tile .tile-inner {
@@ -276,28 +357,43 @@ main.mu-main::before {
 }
 
 /* もしタイルごとに色味を少し変えるなら（任意） */
-.tile--vision .tile-inner { border-color: rgba(77,166,255,0.22); }
-.tile--mu     .tile-inner { border-color: rgba(255,77,136,0.22); }
-.tile--kyomei .tile-inner { border-color: rgba(255,136,77,0.22); }
-.tile--plan   .tile-inner { border-color: rgba(66,165,245,0.22); }
-
-
+.tile--vision .tile-inner {
+  border-color: rgba(77, 166, 255, 0.22);
+}
+.tile--mu .tile-inner {
+  border-color: rgba(255, 77, 136, 0.22);
+}
+.tile--kyomei .tile-inner {
+  border-color: rgba(255, 136, 77, 0.22);
+}
+.tile--plan .tile-inner {
+  border-color: rgba(66, 165, 245, 0.22);
+}
 
 /* === 背景：24時間でゆっくり色相が回る === */
-:root{
+:root {
   /* JS から更新されるノブ */
-  --bg-h: 260;     /* 色相 (0–360) */
-  --bg-l1: 98%;    /* 上層の明度 */
-  --bg-l2: 96%;    /* 下層の明度 */
+  --bg-h: 260; /* 色相 (0–360) */
+  --bg-l1: 98%; /* 上層の明度 */
+  --bg-l2: 96%; /* 下層の明度 */
 }
 
 /* 既存の .dashboard-wrapper に上書き（または末尾に追加） */
-.dashboard-wrapper{
+.dashboard-wrapper {
   /* グラデを HSL の色相変化に追従させる */
   background:
-    radial-gradient(1200px 600px at 30% 15%, hsl(calc(var(--bg-h) + 12) 100% var(--bg-l1) / .55), transparent 60%),
-    radial-gradient(1000px 500px at 80% 85%, hsl(calc(var(--bg-h) - 18) 100% var(--bg-l2) / .50), transparent 60%),
-    linear-gradient(to bottom,
+    radial-gradient(
+      1200px 600px at 30% 15%,
+      hsl(calc(var(--bg-h) + 12) 100% var(--bg-l1) / 0.55),
+      transparent 60%
+    ),
+    radial-gradient(
+      1000px 500px at 80% 85%,
+      hsl(calc(var(--bg-h) - 18) 100% var(--bg-l2) / 0.5),
+      transparent 60%
+    ),
+    linear-gradient(
+      to bottom,
       hsl(var(--bg-h) 100% var(--bg-l1)),
       hsl(calc(var(--bg-h) + 20) 100% var(--bg-l2))
     );
@@ -305,14 +401,16 @@ main.mu-main::before {
 }
 
 /* 動きを抑えたいユーザー配慮（任意） */
-@media (prefers-reduced-motion: reduce){
-  .dashboard-wrapper{ transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-wrapper {
+    transition: none;
+  }
 }
 
 .tile-disabled {
   pointer-events: none; /* クリック完全禁止 */
   filter: grayscale(1) brightness(1.1);
-  opacity: .55;
+  opacity: 0.55;
   position: relative;
 }
 
@@ -321,7 +419,6 @@ main.mu-main::before {
   position: absolute;
   inset: 0;
   background: #fff;
-  opacity: .35;
+  opacity: 0.35;
   border-radius: inherit;
 }
-

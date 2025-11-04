@@ -29,9 +29,8 @@ export default function OcrFixPage() {
     }
   }, []);
 
-  const pct = typeof progress.progress === 'number'
-    ? Math.round(progress.progress * 100)
-    : undefined;
+  const pct =
+    typeof progress.progress === 'number' ? Math.round(progress.progress * 100) : undefined;
 
   return (
     <main className="p-4">
@@ -52,11 +51,7 @@ export default function OcrFixPage() {
         <span className="ml-2">({progress.status ?? '—'})</span>
       </p>
 
-      {error && (
-        <div className="mt-2 text-sm text-red-600 break-all">
-          {error}
-        </div>
-      )}
+      {error && <div className="mt-2 text-sm text-red-600 break-all">{error}</div>}
 
       <textarea
         className="mt-3 w-full h-64 p-2 border rounded"

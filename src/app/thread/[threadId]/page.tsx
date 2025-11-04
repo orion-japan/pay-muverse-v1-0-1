@@ -52,7 +52,13 @@ export default function ThreadPage() {
   const seenIds = useRef<Set<string>>(new Set());
 
   /* ===== Helpers ===== */
-  type CountsLike = Partial<{ like: number; heart: number; smile: number; wow: number; share: number }>;
+  type CountsLike = Partial<{
+    like: number;
+    heart: number;
+    smile: number;
+    wow: number;
+    share: number;
+  }>;
   const toCounts = (arr?: ReactionCount[] | null): CountsLike => {
     const out: CountsLike = { like: 0, heart: 0, smile: 0, wow: 0, share: 0 };
     if (!arr) return out;
@@ -61,10 +67,10 @@ export default function ThreadPage() {
       if (k in out) (out as any)[k] = a?.count ?? 0;
     }
     return out;
-      };
+  };
 
   const avatarSrcFrom = (code?: string | null) =>
-    (code ? `/api/avatar/${encodeURIComponent(code)}` : DEFAULT_AVATAR);
+    code ? `/api/avatar/${encodeURIComponent(code)}` : DEFAULT_AVATAR;
 
   const onAvatarError = (e: React.SyntheticEvent<HTMLImageElement>) => {
     const el = e.currentTarget;
@@ -100,10 +106,12 @@ export default function ThreadPage() {
       nameMap.set(r.user_code, r.name ?? null);
       if (r.avatar_url) addAvatars[r.user_code] = r.avatar_url as string;
     });
-    setAvatarMap(prev => ({ ...prev, ...addAvatars }));
+    setAvatarMap((prev) => ({ ...prev, ...addAvatars }));
 
-    return posts.map(p =>
-      p.user_code ? { ...p, click_username: nameMap.get(p.user_code) ?? p.click_username ?? p.user_code } : p
+    return posts.map((p) =>
+      p.user_code
+        ? { ...p, click_username: nameMap.get(p.user_code) ?? p.click_username ?? p.user_code }
+        : p,
     );
   }
 
@@ -113,15 +121,25 @@ export default function ThreadPage() {
   const childCountsUrl = (postId: string) =>
     `/api/reactions/counts?scope=post&post_id=${encodeURIComponent(postId)}&is_parent=false`;
 
-  async function fetchCountsSingle(postId: string, isParent: boolean): Promise<ReactionCount[] | null> {
+  async function fetchCountsSingle(
+    postId: string,
+    isParent: boolean,
+  ): Promise<ReactionCount[] | null> {
     const url = isParent ? parentCountsUrl(postId) : childCountsUrl(postId);
     try {
-      const res = await fetch(url, { cache: 'no-store', headers: { 'x-src': 'thread-page-single' } });
+      const res = await fetch(url, {
+        cache: 'no-store',
+        headers: { 'x-src': 'thread-page-single' },
+      });
       if (!res.ok) return null;
       const json = await res.json().catch(() => null);
-      const totals: Record<string, number> | undefined = json && (json.totals || json.counts || json.data);
+      const totals: Record<string, number> | undefined =
+        json && (json.totals || json.counts || json.data);
       if (!totals) return null;
-      const arr = Object.entries(totals).map(([r_type, count]) => ({ r_type, count: Number(count) || 0 }));
+      const arr = Object.entries(totals).map(([r_type, count]) => ({
+        r_type,
+        count: Number(count) || 0,
+      }));
       const sum = arr.reduce((s, a) => s + (a.count || 0), 0);
       if (sum === 0) return arr;
       return arr;
@@ -140,17 +158,20 @@ export default function ThreadPage() {
     });
     const j = await res.json().catch(() => ({}));
     const counts: Record<string, Record<string, number>> = j?.counts || {};
-    setCountsMap(prev => {
+    setCountsMap((prev) => {
       const next = { ...prev };
       for (const id of ids) {
         const totals = counts[id] || {};
         if (totals && Object.keys(totals).length) {
-          next[id] = Object.entries(totals).map(([r_type, count]) => ({ r_type, count: Number(count) || 0 }));
+          next[id] = Object.entries(totals).map(([r_type, count]) => ({
+            r_type,
+            count: Number(count) || 0,
+          }));
         }
       }
       return next;
     });
-    setCountsVersion(v => v + 1);
+    setCountsVersion((v) => v + 1);
   }
 
   async function fetchCountsForParentAndChildren(parentId?: string, childIds: string[] = []) {
@@ -183,7 +204,7 @@ export default function ThreadPage() {
           .order('created_at', { ascending: true });
         if (cErr) throw cErr;
 
-        const onlyChildren = (cRows ?? []).filter(p => p.post_id !== threadId);
+        const onlyChildren = (cRows ?? []).filter((p) => p.post_id !== threadId);
 
         const [hydratedParent] = await hydrateFromProfiles([pRow as Post]);
         const hydratedChildren = await hydrateFromProfiles(onlyChildren as Post[]);
@@ -195,7 +216,7 @@ export default function ThreadPage() {
         // 初期は一括取得のみ
         await fetchCountsForParentAndChildren(
           hydratedParent?.post_id,
-          hydratedChildren.map(p => p.post_id)
+          hydratedChildren.map((p) => p.post_id),
         );
       } catch (e: any) {
         console.error('[ThreadPage] init error', e);
@@ -218,22 +239,24 @@ export default function ThreadPage() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'posts', filter: `thread_id=eq.${threadId}` },
-        async payload => {
+        async (payload) => {
           if (payload.eventType === 'INSERT') {
             const row = payload.new as Post;
             if (seenIds.current.has(row.post_id)) return;
             if (row.post_id === threadId) return; // 親は無視
             const [hydrated] = await hydrateFromProfiles([row]);
-            setChildren(prev => (prev.some(p => p.post_id === row.post_id) ? prev : [...prev, hydrated]));
+            setChildren((prev) =>
+              prev.some((p) => p.post_id === row.post_id) ? prev : [...prev, hydrated],
+            );
             seenIds.current.add(row.post_id);
 
             const arr = await fetchCountsSingle(row.post_id, false);
             if (arr) {
-              setCountsMap(prev => ({ ...prev, [row.post_id]: arr }));
-              setCountsVersion(v => v + 1);
+              setCountsMap((prev) => ({ ...prev, [row.post_id]: arr }));
+              setCountsVersion((v) => v + 1);
             }
           }
-        }
+        },
       )
       .subscribe(() => console.log('[ThreadPage] Realtime (posts) subscribed'));
 
@@ -241,10 +264,17 @@ export default function ThreadPage() {
       .channel(`reactions_parent_${threadId}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'post_resonances', filter: `post_id=eq.${threadId}` },
+        {
+          event: '*',
+          schema: 'public',
+          table: 'post_resonances',
+          filter: `post_id=eq.${threadId}`,
+        },
         () => {
-          window.dispatchEvent(new CustomEvent('reactions:refresh', { detail: { post_id: String(threadId) } }));
-        }
+          window.dispatchEvent(
+            new CustomEvent('reactions:refresh', { detail: { post_id: String(threadId) } }),
+          );
+        },
       )
       .subscribe();
 
@@ -252,12 +282,19 @@ export default function ThreadPage() {
       .channel(`reactions_thread_${threadId}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'post_resonances', filter: `thread_id=eq.${threadId}` },
+        {
+          event: '*',
+          schema: 'public',
+          table: 'post_resonances',
+          filter: `thread_id=eq.${threadId}`,
+        },
         (payload) => {
           const changed = (payload.new as any)?.post_id || (payload.old as any)?.post_id;
           if (!changed) return;
-          window.dispatchEvent(new CustomEvent('reactions:refresh', { detail: { post_id: String(changed) } }));
-        }
+          window.dispatchEvent(
+            new CustomEvent('reactions:refresh', { detail: { post_id: String(changed) } }),
+          );
+        },
       )
       .subscribe();
 
@@ -298,13 +335,15 @@ export default function ThreadPage() {
       const inserted = (await res.json()) as Post;
       setNewComment('');
       const [hydrated] = await hydrateFromProfiles([inserted]);
-      setChildren(prev => (prev.some(p => p.post_id === inserted.post_id) ? prev : [...prev, hydrated]));
+      setChildren((prev) =>
+        prev.some((p) => p.post_id === inserted.post_id) ? prev : [...prev, hydrated],
+      );
       seenIds.current.add(inserted.post_id);
 
       const arr = await fetchCountsSingle(inserted.post_id, false);
       if (arr) {
-        setCountsMap(prev => ({ ...prev, [inserted.post_id]: arr }));
-        setCountsVersion(v => v + 1);
+        setCountsMap((prev) => ({ ...prev, [inserted.post_id]: arr }));
+        setCountsVersion((v) => v + 1);
       }
     } catch (e) {
       console.error(e);
@@ -316,9 +355,14 @@ export default function ThreadPage() {
   const canDeleteParent = !!userCode && !!parent?.user_code && parent.user_code === userCode;
 
   async function deletePost(postId: string, cascade: boolean) {
-    if (!confirm(cascade
-      ? '親ポストを削除します。子ポストとコメントも消えます。よろしいですか？'
-      : 'このポストを削除します。よろしいですか？')) return;
+    if (
+      !confirm(
+        cascade
+          ? '親ポストを削除します。子ポストとコメントも消えます。よろしいですか？'
+          : 'このポストを削除します。よろしいですか？',
+      )
+    )
+      return;
 
     try {
       const u = getAuth().currentUser;
@@ -339,156 +383,172 @@ export default function ThreadPage() {
       if (cascade) {
         goSelf();
       } else {
-        setChildren(prev => prev.filter(p => p.post_id !== postId));
-        setCountsMap(prev => { const n = { ...prev }; delete n[postId]; return n; });
+        setChildren((prev) => prev.filter((p) => p.post_id !== postId));
+        setCountsMap((prev) => {
+          const n = { ...prev };
+          delete n[postId];
+          return n;
+        });
       }
     } catch (e: any) {
       alert(e?.message || '削除に失敗しました');
     }
   }
 
-/* ===== Render ===== */
-return (
-  <div className="thread-layout">{/* ★ 2カラムレイアウトの親 */}
-    <div className="thread-main">
-      <div className="thread-page">
-        <div className="thread-topbar">
-          <button className="back-btn" onClick={goSelf}>← 戻る</button>
-        </div>
-
-        <header className="thread-header">
-          <img
-            src={avatarSrcFrom(parent?.user_code)}
-            alt="avatar"
-            className="avatar"
-            width={44}
-            height={44}
-            onClick={() => goProfile(parent?.user_code)}
-            onError={onAvatarError}
-          />
-
-          <div className="header-info">
-            {canDeleteParent && parent?.post_id && (
-              <button
-                className="delete-btn"
-                onClick={() => deletePost(parent.post_id, true)}
-                aria-label="親ポストを削除"
-              >
-                削除
-              </button>
-            )}
-
-            <div className="header-title">
-              <strong onClick={() => goProfile(parent?.user_code)}>
-                {parent?.click_username || parent?.user_code || 'スレッド'}
-              </strong>
-              <small>{parent ? formatJST(parent.created_at) : ''}</small>
-            </div>
-
-            {/* 親本文 */}
-            {parent?.content && <p className="header-text">{parent.content}</p>}
-
-            {parent?.post_id && (
-              <ReactionBar
-                key={`parent-${parent.post_id}-${countsVersion}`}
-                postId={parent.post_id}
-                threadId={parent.thread_id ?? null}
-                isParent={true}
-                initialCounts={toCounts(toInitialCounts(parent.post_id))}
-              />
-            )}
+  /* ===== Render ===== */
+  return (
+    <div className="thread-layout">
+      {/* ★ 2カラムレイアウトの親 */}
+      <div className="thread-main">
+        <div className="thread-page">
+          <div className="thread-topbar">
+            <button className="back-btn" onClick={goSelf}>
+              ← 戻る
+            </button>
           </div>
-        </header>
 
-        <main className="thread-scroll" ref={listRef}>
-          {loading && <div className="meta">読み込み中...</div>}
-          {errMsg && <div className="meta" style={{ color: '#ff9aa2' }}>{errMsg}</div>}
+          <header className="thread-header">
+            <img
+              src={avatarSrcFrom(parent?.user_code)}
+              alt="avatar"
+              className="avatar"
+              width={44}
+              height={44}
+              onClick={() => goProfile(parent?.user_code)}
+              onError={onAvatarError}
+            />
 
-          {children.map(post => (
-            <article key={post.post_id} className="post" id={`p-${post.post_id}`}>
-              <div className="author-line">
-                <img
-                  className="avatar child"
-                  src={avatarSrcFrom(post.user_code)}
-                  alt="avatar"
-                  width={32}
-                  height={32}
-                  onClick={() => goProfile(post.user_code)}
-                  onError={onAvatarError}
-                />
-                <div className="author-meta">
-                  <strong onClick={() => goProfile(post.user_code)}>
-                    {post.click_username || post.user_code || 'unknown'}
-                  </strong>
-                  <div className="meta-right">
-                    <span className="time">{formatJST(post.created_at)}</span>
-                    {!!userCode && post.user_code === userCode && (
-                      <button
-                        className="delete-btn"
-                        onClick={() => deletePost(post.post_id, false)}
-                      >
-                        削除
-                      </button>
-                    )}
-                  </div>
-                </div>
+            <div className="header-info">
+              {canDeleteParent && parent?.post_id && (
+                <button
+                  className="delete-btn"
+                  onClick={() => deletePost(parent.post_id, true)}
+                  aria-label="親ポストを削除"
+                >
+                  削除
+                </button>
+              )}
+
+              <div className="header-title">
+                <strong onClick={() => goProfile(parent?.user_code)}>
+                  {parent?.click_username || parent?.user_code || 'スレッド'}
+                </strong>
+                <small>{parent ? formatJST(parent.created_at) : ''}</small>
               </div>
 
-              <div className="content"><strong>{post.content}</strong></div>
+              {/* 親本文 */}
+              {parent?.content && <p className="header-text">{parent.content}</p>}
 
-              <ReactionBar
-                key={`child-${post.post_id}-${countsVersion}`}
-                postId={post.post_id}
-                threadId={post.thread_id ?? null}
-                isParent={false}
-                initialCounts={toCounts(countsMap[post.post_id])}
+              {parent?.post_id && (
+                <ReactionBar
+                  key={`parent-${parent.post_id}-${countsVersion}`}
+                  postId={parent.post_id}
+                  threadId={parent.thread_id ?? null}
+                  isParent={true}
+                  initialCounts={toCounts(toInitialCounts(parent.post_id))}
+                />
+              )}
+            </div>
+          </header>
+
+          <main className="thread-scroll" ref={listRef}>
+            {loading && <div className="meta">読み込み中...</div>}
+            {errMsg && (
+              <div className="meta" style={{ color: '#ff9aa2' }}>
+                {errMsg}
+              </div>
+            )}
+
+            {children.map((post) => (
+              <article key={post.post_id} className="post" id={`p-${post.post_id}`}>
+                <div className="author-line">
+                  <img
+                    className="avatar child"
+                    src={avatarSrcFrom(post.user_code)}
+                    alt="avatar"
+                    width={32}
+                    height={32}
+                    onClick={() => goProfile(post.user_code)}
+                    onError={onAvatarError}
+                  />
+                  <div className="author-meta">
+                    <strong onClick={() => goProfile(post.user_code)}>
+                      {post.click_username || post.user_code || 'unknown'}
+                    </strong>
+                    <div className="meta-right">
+                      <span className="time">{formatJST(post.created_at)}</span>
+                      {!!userCode && post.user_code === userCode && (
+                        <button
+                          className="delete-btn"
+                          onClick={() => deletePost(post.post_id, false)}
+                        >
+                          削除
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="content">
+                  <strong>{post.content}</strong>
+                </div>
+
+                <ReactionBar
+                  key={`child-${post.post_id}-${countsVersion}`}
+                  postId={post.post_id}
+                  threadId={post.thread_id ?? null}
+                  isParent={false}
+                  initialCounts={toCounts(countsMap[post.post_id])}
+                />
+              </article>
+            ))}
+          </main>
+
+          {parent?.post_id && (
+            <section className="thread-comments">
+              <CommentsSection postId={parent.post_id} me={userCode ?? null} hideEmpty />
+            </section>
+          )}
+
+          <CommentDockPortal>
+            <div id="comment-dock" className="post-form">
+              <textarea
+                value={newComment}
+                onChange={(e) => setNewComment(e.target.value)}
+                placeholder="コメントを入力..."
               />
-            </article>
-          ))}
-        </main>
+              <button onClick={handlePost} disabled={!newComment.trim()}>
+                送信
+              </button>
+            </div>
+          </CommentDockPortal>
+        </div>
+      </div>
 
-        {parent?.post_id && (
-          <section className="thread-comments">
-            <CommentsSection postId={parent.post_id} me={userCode ?? null} hideEmpty />
+      {/* ★★★ 右サイドバー：親＋子の「全文」エリア ★★★ */}
+      <aside className="thread-sidebar">
+        <h3 className="sb-title">全文</h3>
+
+        {parent?.content && (
+          <section className="sb-block" id="full-parent">
+            <div className="sb-meta">
+              <span className="sb-author">{parent.click_username || parent.user_code}</span>
+              <span className="sb-time">{formatJST(parent.created_at)}</span>
+            </div>
+            <div className="sb-text">{parent.content}</div>
           </section>
         )}
 
-        <CommentDockPortal>
-          <div id="comment-dock" className="post-form">
-            <textarea
-              value={newComment}
-              onChange={e => setNewComment(e.target.value)}
-              placeholder="コメントを入力..."
-            />
-            <button onClick={handlePost} disabled={!newComment.trim()}>送信</button>
-          </div>
-        </CommentDockPortal>
-      </div>
+        {children.map((post) => (
+          <section key={`full-${post.post_id}`} className="sb-block" id={`full-${post.post_id}`}>
+            <div className="sb-meta">
+              <span className="sb-author">{post.click_username || post.user_code}</span>
+              <span className="sb-time">{formatJST(post.created_at)}</span>
+            </div>
+            <div className="sb-text">{post.content}</div>
+          </section>
+        ))}
+      </aside>
     </div>
-
-    {/* ★★★ 右サイドバー：親＋子の「全文」エリア ★★★ */}
-    <aside className="thread-sidebar">
-      <h3 className="sb-title">全文</h3>
-
-      {parent?.content && (
-        <section className="sb-block" id="full-parent">
-          <div className="sb-meta">
-            <span className="sb-author">{parent.click_username || parent.user_code}</span>
-            <span className="sb-time">{formatJST(parent.created_at)}</span>
-          </div>
-          <div className="sb-text">{parent.content}</div>
-        </section>
-      )}
-
-      {children.map((post) => (
-        <section key={`full-${post.post_id}`} className="sb-block" id={`full-${post.post_id}`}>
-          <div className="sb-meta">
-            <span className="sb-author">{post.click_username || post.user_code}</span>
-            <span className="sb-time">{formatJST(post.created_at)}</span>
-          </div>
-          <div className="sb-text">{post.content}</div>
-        </section>
-      ))}
-    </aside>
-  </div>
-);}
+  );
+}

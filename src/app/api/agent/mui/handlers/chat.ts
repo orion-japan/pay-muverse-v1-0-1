@@ -41,7 +41,7 @@ export async function handleChat(
   kb_limit: number,
   messages: Msg[],
   source_type: string,
-  sbService: () => any
+  sbService: () => any,
 ) {
   const lastUser = getLastUserText(messages);
   const phase = inferPhase(lastUser);
@@ -51,14 +51,17 @@ export async function handleChat(
   const nextQ = currentQ ? nextQFrom(currentQ, phase) : null;
 
   const seed = Math.abs(
-    [...`${userCode}:${conversation_code}`].reduce((a, c) => ((a << 5) - a + c.charCodeAt(0)) | 0, 0)
+    [...`${userCode}:${conversation_code}`].reduce(
+      (a, c) => ((a << 5) - a + c.charCodeAt(0)) | 0,
+      0,
+    ),
   );
   const kb = use_kb
     ? await retrieveKnowledge(
         (raw.vars as any)?.analysis ?? { qcodes: [], layers: [], keywords: [] },
         kb_limit,
         lastUser,
-        { epsilon: 0.3, noiseAmp: 0.15, seed }
+        { epsilon: 0.3, noiseAmp: 0.15, seed },
       ).catch(() => [])
     : [];
 
@@ -67,7 +70,9 @@ export async function handleChat(
         .slice(0, kb_limit)
         .map((k: any, i: number) => {
           const t = String(k?.title ?? `K${i + 1}`);
-          const c = String(k?.content ?? '').replace(/\s+/g, ' ').slice(0, 900);
+          const c = String(k?.content ?? '')
+            .replace(/\s+/g, ' ')
+            .slice(0, 900);
           return `- (${i + 1}) ${t}\n  ${c}`;
         })
         .join('\n')
@@ -84,7 +89,9 @@ export async function handleChat(
     '不要な引用や前置きは避ける。',
     STYLE,
     use_kb && kbBlock ? '### Knowledge Base\n' + kbBlock : '',
-  ].filter(Boolean).join('\n\n');
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 
   const payload = {
     model,
@@ -96,7 +103,11 @@ export async function handleChat(
   };
 
   const ai = await callOpenAI(payload);
-  if (!ai?.ok) return { status: ai?.status ?? 502, body: { error: 'Upstream error', detail: ai?.detail ?? '' } };
+  if (!ai?.ok)
+    return {
+      status: ai?.status ?? 502,
+      body: { error: 'Upstream error', detail: ai?.detail ?? '' },
+    };
   const reply: string = ai.data?.choices?.[0]?.message?.content ?? '';
 
   const bill: any = await chargeIfNeeded({
@@ -105,7 +116,8 @@ export async function handleChat(
     payjpToken: raw.payjpToken,
     meta: { agent: 'mui', model },
   });
-  if (!bill?.ok) return { status: bill?.status ?? 402, body: { error: bill?.error ?? 'charge_failed' } };
+  if (!bill?.ok)
+    return { status: bill?.status ?? 402, body: { error: bill?.error ?? 'charge_failed' } };
 
   const sb = sbService();
   const now = new Date().toISOString();
@@ -129,7 +141,9 @@ export async function handleChat(
     content: reply,
     meta: {
       resonanceState: { phase, self, relation, currentQ, nextQ },
-      used_knowledge: Array.isArray(kb) ? kb.map((k: any, i: number) => ({ id: k.id, key: `K${i + 1}`, title: k.title })) : [],
+      used_knowledge: Array.isArray(kb)
+        ? kb.map((k: any, i: number) => ({ id: k.id, key: `K${i + 1}`, title: k.title }))
+        : [],
       agent: 'mui',
       model,
       source_type,

@@ -35,7 +35,9 @@ export default function AlbumModal({
       <div style={styles.modal}>
         <div style={styles.header}>
           <h3 style={styles.title}>{title}</h3>
-          <button style={styles.close} onClick={onClose} aria-label="close">×</button>
+          <button style={styles.close} onClick={onClose} aria-label="close">
+            ×
+          </button>
         </div>
 
         <div style={styles.body}>
@@ -44,9 +46,13 @@ export default function AlbumModal({
         </div>
 
         <div style={styles.footer}>
-          <button style={styles.secondary} onClick={onClose}>キャンセル</button>
+          <button style={styles.secondary} onClick={onClose}>
+            キャンセル
+          </button>
           {onConfirm && (
-            <button style={styles.primary} onClick={onConfirm}>決定</button>
+            <button style={styles.primary} onClick={onConfirm}>
+              決定
+            </button>
           )}
         </div>
       </div>

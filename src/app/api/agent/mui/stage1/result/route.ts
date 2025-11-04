@@ -12,7 +12,7 @@ function mustEnv(n: string) {
 /* ===== Supabase ===== */
 const supa = createClient(
   mustEnv('NEXT_PUBLIC_SUPABASE_URL'),
-  mustEnv('SUPABASE_SERVICE_ROLE_KEY')
+  mustEnv('SUPABASE_SERVICE_ROLE_KEY'),
 );
 
 /**
@@ -55,9 +55,7 @@ export async function GET(req: NextRequest) {
     let parsed: any = null;
     try {
       parsed =
-        typeof data.result_json === 'string'
-          ? JSON.parse(data.result_json)
-          : data.result_json;
+        typeof data.result_json === 'string' ? JSON.parse(data.result_json) : data.result_json;
     } catch {
       parsed = data.result_json;
     }
@@ -77,9 +75,6 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ ok: true, result: normalized });
   } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: e?.message || String(e) },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: e?.message || String(e) }, { status: 500 });
   }
 }

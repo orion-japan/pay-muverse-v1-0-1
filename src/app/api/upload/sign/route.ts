@@ -21,9 +21,13 @@ export async function POST(req: Request) {
 
     // バケットが無ければ作成（public 推奨）
     const { data: buckets } = await supabase.storage.listBuckets();
-    if (!buckets?.some(b => b.name === BUCKET)) {
+    if (!buckets?.some((b) => b.name === BUCKET)) {
       const { error: be } = await supabase.storage.createBucket(BUCKET, { public: true });
-      if (be) return NextResponse.json({ ok: false, error: `createBucket: ${be.message}` }, { status: 500 });
+      if (be)
+        return NextResponse.json(
+          { ok: false, error: `createBucket: ${be.message}` },
+          { status: 500 },
+        );
     }
 
     const ext = filename.split('.').pop()?.toLowerCase() || 'jpg';
@@ -34,14 +38,24 @@ export async function POST(req: Request) {
 
     const { data, error } = await supabase.storage.from(BUCKET).createSignedUploadUrl(path);
     if (error || !data?.token) {
-      return NextResponse.json({ ok: false, error: error?.message || 'sign failed' }, { status: 500 });
+      return NextResponse.json(
+        { ok: false, error: error?.message || 'sign failed' },
+        { status: 500 },
+      );
     }
 
     // ★ ここが重要：/sign/<bucket>/<path>
     const uploadUrl = `${SUPABASE_URL}/storage/v1/object/upload/sign/${BUCKET}/${path}`;
     const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${path}`;
 
-    return NextResponse.json({ ok: true, bucket: BUCKET, path, token: data.token, uploadUrl, publicUrl });
+    return NextResponse.json({
+      ok: true,
+      bucket: BUCKET,
+      path,
+      token: data.token,
+      uploadUrl,
+      publicUrl,
+    });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || 'server error' }, { status: 500 });
   }

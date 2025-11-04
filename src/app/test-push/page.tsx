@@ -1,16 +1,16 @@
-'use client'
+'use client';
 
-import { useState } from 'react'
+import { useState } from 'react';
 
 export default function TestPushPage() {
-  const [userCode, setUserCode] = useState('U-CKxc5NQQ')
-  const [title, setTitle] = useState('Muverse 通知テスト')
-  const [body, setBody] = useState('これは Android Chrome のテスト通知です')
-  const [url, setUrl] = useState('https://muverse.jp/')
-  const [result, setResult] = useState<string>('')
+  const [userCode, setUserCode] = useState('U-CKxc5NQQ');
+  const [title, setTitle] = useState('Muverse 通知テスト');
+  const [body, setBody] = useState('これは Android Chrome のテスト通知です');
+  const [url, setUrl] = useState('https://muverse.jp/');
+  const [result, setResult] = useState<string>('');
 
   const send = async () => {
-    setResult('送信中...')
+    setResult('送信中...');
     try {
       const res = await fetch('/api/push/send', {
         method: 'POST',
@@ -22,13 +22,13 @@ export default function TestPushPage() {
           url,
           kind: 'generic', // consents 無視して送れるように
         }),
-      })
-      const text = await res.text()
-      setResult(`status: ${res.status}\n${text}`)
+      });
+      const text = await res.text();
+      setResult(`status: ${res.status}\n${text}`);
     } catch (e: any) {
-      setResult(`error: ${String(e?.message ?? e)}`)
+      setResult(`error: ${String(e?.message ?? e)}`);
     }
-  }
+  };
 
   return (
     <div style={{ padding: 24, maxWidth: 560, margin: '0 auto' }}>
@@ -36,25 +36,25 @@ export default function TestPushPage() {
       <label>user_code</label>
       <input
         value={userCode}
-        onChange={e => setUserCode(e.target.value)}
+        onChange={(e) => setUserCode(e.target.value)}
         style={{ width: '100%', margin: '6px 0' }}
       />
       <label>title</label>
       <input
         value={title}
-        onChange={e => setTitle(e.target.value)}
+        onChange={(e) => setTitle(e.target.value)}
         style={{ width: '100%', margin: '6px 0' }}
       />
       <label>body</label>
       <input
         value={body}
-        onChange={e => setBody(e.target.value)}
+        onChange={(e) => setBody(e.target.value)}
         style={{ width: '100%', margin: '6px 0' }}
       />
       <label>url</label>
       <input
         value={url}
-        onChange={e => setUrl(e.target.value)}
+        onChange={(e) => setUrl(e.target.value)}
         style={{ width: '100%', margin: '6px 0' }}
       />
       <button onClick={send} style={{ marginTop: 12, padding: '10px 16px' }}>
@@ -72,5 +72,5 @@ export default function TestPushPage() {
         {result}
       </pre>
     </div>
-  )
+  );
 }

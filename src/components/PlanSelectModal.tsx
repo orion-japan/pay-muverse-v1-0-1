@@ -19,13 +19,7 @@ type Props = {
   onCancel: () => void;
 };
 
-export default function PlanSelectModal({
-  visible,
-  credit,
-  tempPlan,
-  onConfirm,
-  onCancel,
-}: Props) {
+export default function PlanSelectModal({ visible, credit, tempPlan, onConfirm, onCancel }: Props) {
   if (!visible || !tempPlan) return null;
 
   return (
@@ -33,23 +27,32 @@ export default function PlanSelectModal({
       isOpen={visible}
       title={
         <>
-          ⚠️ まだ利用可能な<br />クレジットが
+          ⚠️ まだ利用可能な
+          <br />
+          クレジットが
           <br />
           残っています
         </>
-      }   // ← ここに } を忘れず閉じる
+      } // ← ここに } を忘れず閉じる
       onCancel={onCancel}
       onConfirm={onConfirm}
       confirmLabel="OK（上書きして進む）"
       cancelLabel="キャンセル"
     >
       <p className="modal-message">
-        現在のクレジット: <strong>{credit}</strong><br />
-        このまま進むと、<br /><strong>{tempPlan.credit}</strong> クレジット/月 の<br />新しいプランに<br />
+        現在のクレジット: <strong>{credit}</strong>
+        <br />
+        このまま進むと、
+        <br />
+        <strong>{tempPlan.credit}</strong> クレジット/月 の<br />
+        新しいプランに
+        <br />
         <span className="highlight"> 上書き </span>されます。
       </p>
       <p className="modal-note">
-        ※ 残っているクレジットは<br />引き継がれません。
+        ※ 残っているクレジットは
+        <br />
+        引き継がれません。
       </p>
     </GenericModal>
   );

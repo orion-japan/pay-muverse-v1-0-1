@@ -20,9 +20,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'to and link are required' }, { status: 400 });
     }
 
-    const subject = senderName
-      ? `${senderName} から招待が届きました`
-      : `Muverse 招待リンク`;
+    const subject = senderName ? `${senderName} から招待が届きました` : `Muverse 招待リンク`;
 
     const html = `
       <p>こんにちは。</p>
@@ -53,7 +51,11 @@ export async function POST(req: Request) {
         subject,
         html,
       });
-      return NextResponse.json({ ok: true, provider: 'sendgrid', id: r[0]?.headers?.['x-message-id'] });
+      return NextResponse.json({
+        ok: true,
+        provider: 'sendgrid',
+        id: r[0]?.headers?.['x-message-id'],
+      });
     }
 
     return NextResponse.json({ error: 'No email provider configured' }, { status: 500 });

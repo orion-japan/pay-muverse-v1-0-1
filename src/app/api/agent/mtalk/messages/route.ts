@@ -7,13 +7,21 @@ import { createClient } from '@supabase/supabase-js';
 import { SUPABASE_URL, SERVICE_ROLE } from '@/lib/authz';
 
 function json(data: any, init?: number | ResponseInit) {
-  const status = typeof init === 'number' ? init : (init as ResponseInit | undefined)?.['status'] ?? 200;
-  const headers = new Headers(typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers);
+  const status =
+    typeof init === 'number' ? init : ((init as ResponseInit | undefined)?.['status'] ?? 200);
+  const headers = new Headers(
+    typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers,
+  );
   headers.set('Content-Type', 'application/json; charset=utf-8');
   return new NextResponse(JSON.stringify(data), { status, headers });
 }
 
-type Row = { role: 'system'|'user'|'assistant'; content: string; meta?: any; created_at?: string };
+type Row = {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+  meta?: any;
+  created_at?: string;
+};
 
 export async function GET(req: NextRequest) {
   try {
@@ -39,11 +47,11 @@ export async function GET(req: NextRequest) {
 
     // B) talk_messages(thread_id=cid) / 互換: conversation_id=cid
     let b: Row[] = [];
-    const tryTables: Array<{table:string; col:string}> = [
-      { table:'talk_messages', col:'thread_id' },
-      { table:'talk_messages', col:'conversation_id' },
-      { table:'messages',     col:'conversation_id' },   // 古い互換
-      { table:'mtalk_turns',  col:'conversation_id' },
+    const tryTables: Array<{ table: string; col: string }> = [
+      { table: 'talk_messages', col: 'thread_id' },
+      { table: 'talk_messages', col: 'conversation_id' },
+      { table: 'messages', col: 'conversation_id' }, // 古い互換
+      { table: 'mtalk_turns', col: 'conversation_id' },
     ];
     for (const t of tryTables) {
       const { data, error } = await sb
@@ -51,7 +59,10 @@ export async function GET(req: NextRequest) {
         .select('role, content, meta, created_at')
         .eq(t.col, conversation_id)
         .order('created_at', { ascending: true });
-      if (!error && Array.isArray(data) && data.length) { b = data as any; break; }
+      if (!error && Array.isArray(data) && data.length) {
+        b = data as any;
+        break;
+      }
     }
 
     // C) マージ（created_at で整列、重複は role+content+created_at で除外）
@@ -62,7 +73,7 @@ export async function GET(req: NextRequest) {
       return tx - ty;
     });
     const seen = new Set<string>();
-    const dedup = merged.filter(m => {
+    const dedup = merged.filter((m) => {
       const k = `${m.role}|${m.content}|${m.created_at ?? ''}`;
       if (seen.has(k)) return false;
       seen.add(k);

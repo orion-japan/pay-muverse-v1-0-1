@@ -31,7 +31,11 @@ export default function TelemetryBoot() {
     const auth = getAuth();
     const unsub = onIdTokenChanged(auth, (u) => {
       if (!u) {
-        logClientEvent({ kind: 'auth', path: 'auth/session-lost', note: 'token expired or signOut' });
+        logClientEvent({
+          kind: 'auth',
+          path: 'auth/session-lost',
+          note: 'token expired or signOut',
+        });
       }
     });
     return () => unsub();

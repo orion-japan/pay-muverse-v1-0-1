@@ -11,9 +11,7 @@ import { SOFIA_CONFIG } from './config';
 export type MsgRole = 'user' | 'assistant';
 
 /** 安全な外部リンクレンダラ */
-function LinkRenderer(
-  props: React.ComponentPropsWithoutRef<'a'> & { href?: string }
-) {
+function LinkRenderer(props: React.ComponentPropsWithoutRef<'a'> & { href?: string }) {
   const { href = '#', children, ...rest } = props;
   return (
     <a href={href} target="_blank" rel="noopener noreferrer nofollow" {...rest}>
@@ -69,11 +67,11 @@ export function MessageBubble({ role, text }: BubbleProps) {
   const isUser = role === 'user';
 
   // env → 数値・長さに整形
-  const fsPx = Number(SOFIA_CONFIG.ui.assistantFontSize ?? 16);     // px
+  const fsPx = Number(SOFIA_CONFIG.ui.assistantFontSize ?? 16); // px
   const lhNum = Number(SOFIA_CONFIG.ui.assistantLineHeight ?? 2.1); // line-height
   const lsEm = Number(SOFIA_CONFIG.ui.assistantLetterSpacing ?? 0); // em
-  const paraMgPx = Number(SOFIA_CONFIG.ui.paragraphMargin ?? 12);   // px
-  const softBreakHeightPx = 14;                                     // 単一改行の余白
+  const paraMgPx = Number(SOFIA_CONFIG.ui.paragraphMargin ?? 12); // px
+  const softBreakHeightPx = 14; // 単一改行の余白
 
   /** 吹き出しの枠スタイル */
   const bubbleStyle: React.CSSProperties = {
@@ -83,24 +81,24 @@ export function MessageBubble({ role, text }: BubbleProps) {
       : (SOFIA_CONFIG.ui.assistantRadius ?? 16)) as number,
     padding: '10px 12px',
     background: isUser
-      ? (SOFIA_CONFIG.ui.userBg || '#e6f3ff')
-      : (SOFIA_CONFIG.ui.assistantBg || '#ffffff'),
-    color: isUser ? (SOFIA_CONFIG.ui.userFg || '#111827') : undefined,
+      ? SOFIA_CONFIG.ui.userBg || '#e6f3ff'
+      : SOFIA_CONFIG.ui.assistantBg || '#ffffff',
+    color: isUser ? SOFIA_CONFIG.ui.userFg || '#111827' : undefined,
     border: isUser
       ? `1px solid ${SOFIA_CONFIG.ui.userBorder || '#e5e7eb'}`
-      : (SOFIA_CONFIG.ui.assistantBorder || '1px solid #e5e7eb'),
-    boxShadow: isUser ? undefined : (SOFIA_CONFIG.ui.assistantShadow || '0 1px 2px rgba(0,0,0,.06)'),
+      : SOFIA_CONFIG.ui.assistantBorder || '1px solid #e5e7eb',
+    boxShadow: isUser ? undefined : SOFIA_CONFIG.ui.assistantShadow || '0 1px 2px rgba(0,0,0,.06)',
     overflow: 'hidden', // マージン潰れ防止
     wordBreak: 'break-word',
   };
 
   /** 吹き出し内のラッパ（両者共通で“勝たせる”） */
   const contentStyle: React.CSSProperties = {
-    display: 'flow-root',           // マージン潰れ対策
+    display: 'flow-root', // マージン潰れ対策
     fontSize: fsPx,
     lineHeight: lhNum,
     letterSpacing: `${lsEm}em`,
-    whiteSpace: 'pre-wrap',         // 改行を生かす
+    whiteSpace: 'pre-wrap', // 改行を生かす
     wordBreak: 'break-word',
     overflowWrap: 'anywhere',
     fontFamily:
@@ -144,11 +142,7 @@ export function MessageBubble({ role, text }: BubbleProps) {
                     padding: '10px 12px',
                     margin: idx === 0 ? `0 0 ${paraMgPx}px` : `${paraMgPx}px 0 0`,
                     background:
-                      s.stage === 'dark'
-                        ? '#f8fafc'
-                        : s.stage === 'remake'
-                        ? '#f9fef8'
-                        : '#fffef7',
+                      s.stage === 'dark' ? '#f8fafc' : s.stage === 'remake' ? '#f9fef8' : '#fffef7',
                   }}
                 >
                   <div style={{ fontSize: 12, fontWeight: 700, opacity: 0.7, marginBottom: 6 }}>
@@ -220,7 +214,7 @@ export function MessageBubble({ role, text }: BubbleProps) {
             // 既存：通常の Markdown レンダリング
             <div className="markdown">
               <ReactMarkdown
-                remarkPlugins={remarkList}      // 単一改行 → <br/>
+                remarkPlugins={remarkList} // 単一改行 → <br/>
                 rehypePlugins={rehypeList}
                 components={{
                   a: LinkRenderer,

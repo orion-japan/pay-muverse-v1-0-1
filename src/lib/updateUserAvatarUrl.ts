@@ -2,9 +2,7 @@
 import { supabase } from './supabaseClient';
 
 export async function updateUserAvatarUrl(filePath: string): Promise<string> {
-  const { data: publicUrlData } = supabase.storage
-    .from('avatars')
-    .getPublicUrl(filePath);
+  const { data: publicUrlData } = supabase.storage.from('avatars').getPublicUrl(filePath);
 
   const publicUrl = publicUrlData.publicUrl;
 

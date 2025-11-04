@@ -7,11 +7,11 @@ import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 // ====== ENV ======
-const SB_URL  = Deno.env.get('SUPABASE_URL')!;                    // プロジェクトURL
-const SB_KEY  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;       // SRK（必須）
-const MAUTIC  = (Deno.env.get('MAUTIC_BASE') ?? '').replace(/\/+$/, '');
-const M_ID    = Deno.env.get('MAUTIC_CLIENT_ID') ?? '';
-const M_SEC   = Deno.env.get('MAUTIC_CLIENT_SECRET') ?? '';
+const SB_URL = Deno.env.get('SUPABASE_URL')!; // プロジェクトURL
+const SB_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!; // SRK（必須）
+const MAUTIC = (Deno.env.get('MAUTIC_BASE') ?? '').replace(/\/+$/, '');
+const M_ID = Deno.env.get('MAUTIC_CLIENT_ID') ?? '';
+const M_SEC = Deno.env.get('MAUTIC_CLIENT_SECRET') ?? '';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -65,9 +65,7 @@ serve(async (req: Request) => {
     // API: users ペイロード「だけ」事前確認できるよう preview を用意
     if (action === 'preview') {
       const users = await fetchUsersPage(sb, 0, previewCount);
-      const mapped = users
-        .filter((u) => isNonEmptyEmail(u?.click_email))
-        .map(mapToMauticPayload);
+      const mapped = users.filter((u) => isNonEmptyEmail(u?.click_email)).map(mapToMauticPayload);
       return json({ ok: true, sample: mapped });
     }
 
@@ -88,7 +86,10 @@ serve(async (req: Request) => {
 
         for (const u of users) {
           const email = (u?.click_email ?? '').trim();
-          if (!isNonEmptyEmail(email)) { totalSkipped++; continue; }
+          if (!isNonEmptyEmail(email)) {
+            totalSkipped++;
+            continue;
+          }
 
           try {
             const payload = mapToMauticPayload(u);
@@ -98,7 +99,8 @@ serve(async (req: Request) => {
               // 完全にネットワークを切りたい時は findContactByEmail をコメントアウト
               // const existed = null;
               const existed = await safeFind(token, email, dryRun);
-              if (existed?.id) totalUpdated++; else totalCreated++;
+              if (existed?.id) totalUpdated++;
+              else totalCreated++;
               continue;
             }
 
@@ -121,7 +123,17 @@ serve(async (req: Request) => {
         await sleep(150);
       }
 
-      return json({ ok: true, result: { created: totalCreated, updated: totalUpdated, skipped: totalSkipped, dryRun, pageStart: page, pageSize } });
+      return json({
+        ok: true,
+        result: {
+          created: totalCreated,
+          updated: totalUpdated,
+          skipped: totalSkipped,
+          dryRun,
+          pageStart: page,
+          pageSize,
+        },
+      });
     }
 
     return json({ ok: false, error: `unknown action: ${action}` }, 400);
@@ -178,7 +190,7 @@ async function getMauticToken(): Promise<string> {
   });
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
     body: params,
   });
   if (!res.ok) throw new Error(`[mautic] token failed: ${res.status} ${await res.text()}`);
@@ -188,8 +200,9 @@ async function getMauticToken(): Promise<string> {
 }
 
 async function safeFind(token: string, email: string, dryRun: boolean) {
-  try { return await findContactByEmail(token, email); }
-  catch (e) {
+  try {
+    return await findContactByEmail(token, email);
+  } catch (e) {
     // dryRun でも失敗理由が分かるように返す
     console.error('[mautic] search (dryRun) failed:', e);
     return null;
@@ -198,7 +211,9 @@ async function safeFind(token: string, email: string, dryRun: boolean) {
 
 async function findContactByEmail(token: string, email: string) {
   const url = `${MAUTIC}/api/contacts?search=${encodeURIComponent('email:' + email)}&limit=1`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+  });
   if (!res.ok) throw new Error(`[mautic] search failed: ${res.status} ${await res.text()}`);
   const j = await res.json();
   const list = j?.contacts ? Object.values(j.contacts as Record<string, any>) : [];
@@ -215,10 +230,10 @@ function mapToMauticPayload(u: UserRow) {
     firstname: u?.FullName ?? undefined,
     phone: phone,
     company: u?.organization ?? undefined,
-    plan: u?.plan ?? undefined,               // カスタムフィールド想定（未定義なら無視される）
+    plan: u?.plan ?? undefined, // カスタムフィールド想定（未定義なら無視される）
     plan_status: u?.plan_status ?? undefined, // 同上
     username: u?.click_username ?? undefined, // 同上（必要なければ削除OK）
-    user_code: u?.user_code ?? undefined,     // 同上
+    user_code: u?.user_code ?? undefined, // 同上
     supabase_uid: u?.supabase_uid ?? undefined,
   };
 }
@@ -230,7 +245,7 @@ async function createContact(token: string, payload: any) {
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
-      'Accept': 'application/json',
+      Accept: 'application/json',
     },
     body: JSON.stringify({ contact: payload }),
   });
@@ -244,7 +259,7 @@ async function updateContact(token: string, id: string | number, payload: any) {
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
-      'Accept': 'application/json',
+      Accept: 'application/json',
     },
     body: JSON.stringify({ contact: payload }),
   });

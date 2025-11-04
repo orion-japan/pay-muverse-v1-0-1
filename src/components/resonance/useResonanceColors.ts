@@ -6,11 +6,14 @@ import { mapQToColor } from '@/lib/sofia/qcolor';
 export function useResonanceColors() {
   const { state } = useResonance();
   const primary = useMemo(() => mapQToColor(state.currentQ ?? ''), [state.currentQ]);
-  const secondary = useMemo(() => mapQToColor(state.nextQ ?? '') ?? primary, [state.nextQ, primary]);
+  const secondary = useMemo(
+    () => mapQToColor(state.nextQ ?? '') ?? primary,
+    [state.nextQ, primary],
+  );
 
   useEffect(() => {
     const root = document.documentElement;
-    const p = primary?.hex ?? '#6b7280';   // fallback gray
+    const p = primary?.hex ?? '#6b7280'; // fallback gray
     const s = secondary?.hex ?? p;
     root.style.setProperty('--reso-color-primary', p);
     root.style.setProperty('--reso-color-secondary', s);

@@ -1,9 +1,9 @@
-'use client'
-import '../globals.css'
-import '../styles/layout.css'
-import Footer from '../components/Footer'
-import Header from '../components/Header'
-import { AuthProvider } from '@/context/AuthContext'
+'use client';
+import '../globals.css';
+import '../styles/layout.css';
+import Footer from '../components/Footer';
+import Header from '../components/Header';
+import { AuthProvider } from '@/context/AuthContext';
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -21,11 +21,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               minHeight: '100vh',
               display: 'flex',
               flexDirection: 'column',
-              boxSizing: 'border-box'
+              boxSizing: 'border-box',
             }}
           >
             {/* ✅ ヘッダー（ダミーで落ちないように修正） */}
-            <Header onLoginClick={() => { /* no-op */ }} />
+            <Header
+              onLoginClick={() => {
+                /* no-op */
+              }}
+            />
 
             {/* ✅ メイン：ヘッダー/フッター分の余白を確保 */}
             <div className="frame-container" style={{ flex: 1, width: '100%' }}>
@@ -33,9 +37,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 className="main-content"
                 style={{
                   width: '100%',
-                  paddingTop: 60,     // ヘッダー高
-                  paddingBottom: 60,  // フッター高
-                  boxSizing: 'border-box'
+                  paddingTop: 60, // ヘッダー高
+                  paddingBottom: 60, // フッター高
+                  boxSizing: 'border-box',
                 }}
               >
                 {children}
@@ -48,5 +52,5 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </AuthProvider>
       </body>
     </html>
-  )
+  );
 }

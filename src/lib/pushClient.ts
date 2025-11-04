@@ -15,7 +15,7 @@ function urlBase64ToUint8Array(base64String: string) {
  */
 export async function registerAndSendPush(
   payload: { title: string; body?: string; url?: string; tag?: string },
-  user_code: string
+  user_code: string,
 ) {
   if (!('serviceWorker' in navigator)) throw new Error('ServiceWorker not supported');
 
@@ -24,7 +24,9 @@ export async function registerAndSendPush(
 
   // 2) 通知権限（未決だけ要求）
   if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-    try { await Notification.requestPermission(); } catch {}
+    try {
+      await Notification.requestPermission();
+    } catch {}
   }
 
   // 3) Push購読

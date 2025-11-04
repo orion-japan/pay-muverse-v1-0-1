@@ -10,14 +10,14 @@ import './Diary.css';
 
 type LogItem = {
   id: string;
-  check_date?: string | null;           // JSTの暦日（YYYY-MM-DD）
+  check_date?: string | null; // JSTの暦日（YYYY-MM-DD）
   habit_name?: string | null;
   vision_checked?: boolean | null;
   resonance_checked?: boolean | null;
   mood_text?: string | null;
   memo_text?: string | null;
-  created_at?: string | null;           // 'YYYY-MM-DD HH:MM:SS(.ms)?' or ISO
-  updated_at?: string | null;           // 同上
+  created_at?: string | null; // 'YYYY-MM-DD HH:MM:SS(.ms)?' or ISO
+  updated_at?: string | null; // 同上
 };
 
 type MonthMap = Record<string, number>; // 'YYYY-MM-DD' -> count
@@ -60,7 +60,7 @@ function parseAsLocal(input?: string | null): Date | null {
 function chooseTimestampForDisplay(
   updated_at?: string | null,
   created_at?: string | null,
-  check_date?: string | null
+  check_date?: string | null,
 ): Date | null {
   // まず両方を UTC/Local でパース
   const cUTC = parseAsUtc(created_at || undefined);
@@ -87,7 +87,6 @@ function chooseTimestampForDisplay(
   return cUTC ?? cLOC ?? uUTC ?? uLOC ?? null;
 }
 
-
 export default function PracticeDiaryPage() {
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [logs, setLogs] = useState<LogItem[]>([]);
@@ -98,7 +97,7 @@ export default function PracticeDiaryPage() {
   // 当月矩形（週頭〜週末）で7x5/6の配列化
   const monthDays = useMemo(() => {
     const start = dayjs(currentDate).tz().startOf('month').startOf('week');
-    const end   = dayjs(currentDate).tz().endOf('month').endOf('week');
+    const end = dayjs(currentDate).tz().endOf('month').endOf('week');
     const days: Date[] = [];
     for (let d = start; d.isBefore(end); d = d.add(1, 'day')) days.push(d.toDate());
     return days;
@@ -119,21 +118,26 @@ export default function PracticeDiaryPage() {
     setLoading(false);
   }
 
-  useEffect(() => { fetchMonthMap(ym); }, [ym]);
-  useEffect(() => { fetchLogs(currentDate); }, [currentDate]);
+  useEffect(() => {
+    fetchMonthMap(ym);
+  }, [ym]);
+  useEffect(() => {
+    fetchLogs(currentDate);
+  }, [currentDate]);
 
   const handlers = useSwipeable({
-    onSwipedLeft: () => setCurrentDate(prev => shiftDays(prev, 1)),
-    onSwipedRight: () => setCurrentDate(prev => shiftDays(prev, -1)),
+    onSwipedLeft: () => setCurrentDate((prev) => shiftDays(prev, 1)),
+    onSwipedRight: () => setCurrentDate((prev) => shiftDays(prev, -1)),
     trackMouse: true,
   });
 
   const selectedJst = dayjs(currentDate).tz().format('YYYY-MM-DD');
 
-  const download = async (kind: 'day'|'month', format: 'md'|'csv') => {
-    const key = kind === 'day'
-      ? dayjs(currentDate).tz().format('YYYY-MM-DD')
-      : dayjs(currentDate).tz().format('YYYY-MM');
+  const download = async (kind: 'day' | 'month', format: 'md' | 'csv') => {
+    const key =
+      kind === 'day'
+        ? dayjs(currentDate).tz().format('YYYY-MM-DD')
+        : dayjs(currentDate).tz().format('YYYY-MM');
     const url = `/api/practice/export?kind=${kind}&key=${key}&format=${format}`;
     const res = await fetchWithIdToken(url);
     const blob = await res.blob();
@@ -191,60 +195,83 @@ export default function PracticeDiaryPage() {
         {loading && <div className="loading">読み込み中…</div>}
         {!loading && logs.length === 0 && (
           <div className="empty">
-            {monthMap[selectedJst] ? 'この日のデータを読み込めませんでした' : 'この日は記録がありません'}
+            {monthMap[selectedJst]
+              ? 'この日のデータを読み込めませんでした'
+              : 'この日は記録がありません'}
           </div>
         )}
 
-        {!loading && logs.map((it) => {
-          // 表示日の基準は check_date（JST 暦日）。時刻はタイムスタンプから整合する方を採用。
-          const chosen = chooseTimestampForDisplay(it.updated_at, it.created_at, it.check_date || undefined);
-          const headDate = it.check_date
-            ? formatJSTDate(it.check_date)
-            : formatJSTDate(chosen ?? (it.updated_at ?? it.created_at));
-          const headTime = chosen ? formatJST_HM(chosen) : '';
+        {!loading &&
+          logs.map((it) => {
+            // 表示日の基準は check_date（JST 暦日）。時刻はタイムスタンプから整合する方を採用。
+            const chosen = chooseTimestampForDisplay(
+              it.updated_at,
+              it.created_at,
+              it.check_date || undefined,
+            );
+            const headDate = it.check_date
+              ? formatJSTDate(it.check_date)
+              : formatJSTDate(chosen ?? it.updated_at ?? it.created_at);
+            const headTime = chosen ? formatJST_HM(chosen) : '';
 
-          return (
-            <article key={it.id} className="entry">
-              <header className="entry-head">
-                <h3>{it.habit_name || '実践チェック'}</h3>
-                <small>{`${headDate}${headTime ? ` ${headTime}` : ''}`}</small>
-              </header>
+            return (
+              <article key={it.id} className="entry">
+                <header className="entry-head">
+                  <h3>{it.habit_name || '実践チェック'}</h3>
+                  <small>{`${headDate}${headTime ? ` ${headTime}` : ''}`}</small>
+                </header>
 
-              <ul className="flags">
-                <li className={it.vision_checked ? 'on' : ''}>Vision</li>
-                <li className={it.resonance_checked ? 'on' : ''}>共鳴</li>
-              </ul>
+                <ul className="flags">
+                  <li className={it.vision_checked ? 'on' : ''}>Vision</li>
+                  <li className={it.resonance_checked ? 'on' : ''}>共鳴</li>
+                </ul>
 
-              {it.mood_text && (
-                <section>
-                  <h4>状況・気持ち</h4>
-                  <p>{it.mood_text}</p>
-                </section>
-              )}
+                {it.mood_text && (
+                  <section>
+                    <h4>状況・気持ち</h4>
+                    <p>{it.mood_text}</p>
+                  </section>
+                )}
 
-              {it.memo_text && (
-                <section>
-                  <h4>ひらめき・日記</h4>
-                  <p>{it.memo_text}</p>
-                </section>
-              )}
-            </article>
-          );
-        })}
+                {it.memo_text && (
+                  <section>
+                    <h4>ひらめき・日記</h4>
+                    <p>{it.memo_text}</p>
+                  </section>
+                )}
+              </article>
+            );
+          })}
       </div>
 
       <style jsx>{`
-        .mini-cal .cal-cell { position: relative; }
+        .mini-cal .cal-cell {
+          position: relative;
+        }
         .mini-cal .cal-cell .dot {
-          position: absolute; left: 50%; bottom: 4px; width: 6px; height: 6px;
-          border-radius: 50%; background: #6c8cff; transform: translateX(-50%);
+          position: absolute;
+          left: 50%;
+          bottom: 4px;
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: #6c8cff;
+          transform: translateX(-50%);
         }
         .download-row {
-          display: flex; gap: 8px; align-items: center; padding: 8px 6px 4px;
+          display: flex;
+          gap: 8px;
+          align-items: center;
+          padding: 8px 6px 4px;
         }
-        .download-row .spacer { flex: 1; }
+        .download-row .spacer {
+          flex: 1;
+        }
         .download-row button {
-          padding: 6px 10px; border-radius: 8px; border: 1px solid #ddd; background: #f9f9ff;
+          padding: 6px 10px;
+          border-radius: 8px;
+          border: 1px solid #ddd;
+          background: #f9f9ff;
         }
       `}</style>
     </div>

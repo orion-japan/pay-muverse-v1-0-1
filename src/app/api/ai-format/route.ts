@@ -6,24 +6,30 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 // 失敗時・キー無し時のフォールバック整形
 function fallbackFormat(src: string): string {
   // 太陽ノイズ等の軽補正
-  let s = src
+  const s = src
     .replace(/濫/g, '☀')
     .replace(/おはよ一/g, 'おはよー')
     .replace(/言っる/g, '言ってる')
     .replace(/会えそな/g, '会えな')
     .replace(/あぁあ+/g, 'あぁ')
-    .replace(/クンょい/g, '')  // 典型ノイズ
+    .replace(/クンょい/g, '') // 典型ノイズ
     .replace(/\s*;\s*/g, '');
 
   // 行ベースで A/B を付与
-  const lines = s.split(/\r?\n/).map(v => v.trim()).filter(Boolean);
+  const lines = s
+    .split(/\r?\n/)
+    .map((v) => v.trim())
+    .filter(Boolean);
 
   // 章ヘッダ「【#n】」はそのまま残す
   const out: string[] = [];
   let lastSpeaker: 'A' | 'B' | null = null;
 
   for (const raw of lines) {
-    if (/^【#\d+】$/.test(raw)) { out.push(raw); continue; }
+    if (/^【#\d+】$/.test(raw)) {
+      out.push(raw);
+      continue;
+    }
 
     // 既に A/B が付いていたら尊重
     if (/^[AB][：:\s]/.test(raw)) {
@@ -57,12 +63,16 @@ function fallbackFormat(src: string): string {
     // 「…と言うか/というか」で宙づりの時は軽く補完
     if (/言うか$/.test(t)) t += '、なんだろ？';
 
-    out.push(`${speaker}${t.startsWith('A') || t.startsWith('B') ? '' : ''}${t.startsWith('A') || t.startsWith('B') ? '' : ' '}${t}`.replace(/\s{2,}/g,' ').replace(/^([AB])\s+/, '$1'));
+    out.push(
+      `${speaker}${t.startsWith('A') || t.startsWith('B') ? '' : ''}${t.startsWith('A') || t.startsWith('B') ? '' : ' '}${t}`
+        .replace(/\s{2,}/g, ' ')
+        .replace(/^([AB])\s+/, '$1'),
+    );
     lastSpeaker = speaker;
   }
 
   // 「A A…」の重複プレフィクスを念のため除去
-  return out.map(line => line.replace(/^([AB])\1+/, '$1')).join('\n');
+  return out.map((line) => line.replace(/^([AB])\1+/, '$1')).join('\n');
 }
 
 // OpenAI 呼び出し（任意・簡易）
@@ -80,10 +90,13 @@ async function formatWithLLM(text: string): Promise<string> {
   // OpenAI v1 Chat Completions 例（fetch直叩き）
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: 'gpt-4o-mini', // 手元のモデルに合わせて変更
-      messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
+      messages: [
+        { role: 'system', content: sys },
+        { role: 'user', content: user },
+      ],
       temperature: 0.2,
     }),
   });

@@ -10,8 +10,7 @@ import { adminAuth } from '@/lib/firebase-admin';
 /* =========================
    ENV
 ========================= */
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
 const SERVICE_ROLE =
   process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const PAYJP_SECRET_KEY = process.env.PAYJP_SECRET_KEY || '';
@@ -61,7 +60,7 @@ async function getUserByUid(firebase_uid: string) {
         'next_payment_date', // 互換
         'payjp_customer_id',
         'payjp_subscription_id',
-      ].join(', ')
+      ].join(', '),
     )
     .eq('firebase_uid', firebase_uid)
     .maybeSingle();

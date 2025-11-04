@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import styles from './SafeNavTile.module.css';
 
 type Props = {
-  allowed: boolean;            // 認証後 master/admin なら true
+  allowed: boolean; // 認証後 master/admin なら true
   href: string;
   className?: string;
   children: React.ReactNode;
@@ -29,7 +29,7 @@ export default function SafeNavTile({
   return (
     <div
       className={`${styles.wrap} ${className}`}
-      data-guard-lock={isLocked ? '1' : undefined}   // ★ ガード印
+      data-guard-lock={isLocked ? '1' : undefined} // ★ ガード印
     >
       <button
         type="button"
@@ -41,7 +41,10 @@ export default function SafeNavTile({
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          if (isLocked) { onBlockedClick?.(); return; }
+          if (isLocked) {
+            onBlockedClick?.();
+            return;
+          }
           router.push(href);
         }}
       >

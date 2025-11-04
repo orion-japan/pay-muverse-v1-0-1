@@ -9,13 +9,17 @@ export async function POST(req: NextRequest) {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { auth: { persistSession: true } }
+    { auth: { persistSession: true } },
   );
 
-  const { data: { user }, error: authErr } = await supabase.auth.getUser();
+  const {
+    data: { user },
+    error: authErr,
+  } = await supabase.auth.getUser();
   if (authErr || !user) return NextResponse.json({ error: 'auth required' }, { status: 401 });
 
-  const { error } = await supabase.from('user_auth_map')
+  const { error } = await supabase
+    .from('user_auth_map')
     .upsert({ user_code, uid: user.id }, { onConflict: 'user_code' });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

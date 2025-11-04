@@ -11,8 +11,65 @@ type Props = {
 
 // UIのセレクト値（all / mates）⇔ サーバの値（all / shipmates）
 const uiToServer = (v: 'all' | 'mates') => (v === 'mates' ? 'shipmates' : 'all');
-const serverToUi = (v?: string): 'all' | 'mates' =>
-  v === 'shipmates' ? 'mates' : 'all';
+const serverToUi = (v?: string): 'all' | 'mates' => (v === 'shipmates' ? 'mates' : 'all');
+
+// ===== 認証ユーティリティ（共通化） =====
+async function getIdTokenSafe(force = false): Promise<string | null> {
+  try {
+    const user = getAuth().currentUser;
+    if (!user) return null;
+    return await user.getIdToken(force);
+  } catch {
+    return null;
+  }
+}
+function hasSessionCookie(): boolean {
+  try {
+    if (typeof document === 'undefined') return false;
+    return document.cookie.split(';').some((c) => c.trim().startsWith('__session='));
+  } catch {
+    return false;
+  }
+}
+async function ensureSessionIfNeeded() {
+  // Bearer も __session も無いときだけ軽く叩いておく（失敗しても無視）
+  if (hasSessionCookie()) return;
+  try {
+    await fetch('/api/resolve-usercode', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+  } catch {}
+}
+async function authedFetch(input: RequestInfo, init: RequestInit = {}) {
+  const headers = new Headers(init.headers || {});
+  const token = await getIdTokenSafe(false);
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  else if (!hasSessionCookie()) await ensureSessionIfNeeded();
+
+  const res0 = await fetch(input, {
+    ...init,
+    headers,
+    credentials: 'include',
+    cache: 'no-store',
+  });
+
+  // 初回だけ 401/403 をワンショット再試行
+  if (res0.status === 401 || res0.status === 403) {
+    const t2 = await getIdTokenSafe(true);
+    const headers2 = new Headers(init.headers || {});
+    if (t2) headers2.set('Authorization', `Bearer ${t2}`);
+    return fetch(input, {
+      ...init,
+      headers: headers2,
+      credentials: 'include',
+      cache: 'no-store',
+    });
+  }
+  return res0;
+}
 
 export default function NotificationSettingsBox({ planStatus }: Props) {
   const [loading, setLoading] = useState(true);
@@ -37,31 +94,12 @@ export default function NotificationSettingsBox({ planStatus }: Props) {
     (async () => {
       try {
         setLoading(true);
-        const user = getAuth().currentUser;
-        const token = await user?.getIdToken(true);
 
-        const doFetch = async () =>
-          fetch('/api/notification-settings', {
-            method: 'GET',
-            headers: token ? { Authorization: `Bearer ${token}` } : {},
-            cache: 'no-store',
-          });
-
-        let res = await doFetch();
-        if (res.status === 403) {
-          const j = await res.clone().json().catch(() => ({}));
-          if (j?.needRefresh && user) {
-            const t2 = await user.getIdToken(true);
-            res = await fetch('/api/notification-settings', {
-              method: 'GET',
-              headers: { Authorization: `Bearer ${t2}` },
-              cache: 'no-store',
-            });
-          }
-        }
+        const res = await authedFetch('/api/notification-settings', { method: 'GET' });
 
         if (alive && res.ok) {
-          const j = await res.json().catch(() => ({}));
+          const j = (await res.json().catch(() => ({}))) as any;
+
           // サーバのキー名は任意。存在すれば反映、無ければ初期値のまま
           if (typeof j.push_enabled === 'boolean') setPushEnabled(j.push_enabled);
           if (typeof j.vibrate === 'boolean') setVibrate(j.vibrate);
@@ -73,10 +111,12 @@ export default function NotificationSettingsBox({ planStatus }: Props) {
           if (typeof j.notify_writing === 'boolean') setWriting(j.notify_writing);
           if (typeof j.notify_ai === 'boolean') setAi(j.notify_ai);
           if (typeof j.notify_credit === 'boolean') setCredit(j.notify_credit);
+        } else if (alive) {
+          setErrorMsg('現在値の取得に失敗しました。後でもう一度お試しください。');
         }
-      } catch (e) {
+      } catch {
         // 読み込み失敗時は初期値のまま使えるようにしておく
-        setErrorMsg('現在値の取得に失敗しました。後でもう一度お試しください。');
+        if (alive) setErrorMsg('現在値の取得に失敗しました。後でもう一度お試しください。');
       } finally {
         if (alive) setLoading(false);
       }
@@ -91,13 +131,10 @@ export default function NotificationSettingsBox({ planStatus }: Props) {
       setSaving(true);
       setErrorMsg(null);
 
-      const user = getAuth().currentUser;
-      const token = await user?.getIdToken(true);
-
       const payload = {
         push_enabled: pushEnabled,
         vibrate,
-        self_scope: uiToServer(selfScope),     // 'mates' → 'shipmates'
+        self_scope: uiToServer(selfScope), // 'mates' → 'shipmates'
         create_scope: uiToServer(createScope), // 'mates' → 'shipmates'
         notify_ftalk: fTalk,
         notify_rtalk: rTalk,
@@ -107,25 +144,11 @@ export default function NotificationSettingsBox({ planStatus }: Props) {
         notify_credit: credit,
       };
 
-      const doPost = async (t?: string) =>
-        fetch('/api/notification-settings', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(t ? { Authorization: `Bearer ${t}` } : {}),
-          },
-          body: JSON.stringify(payload),
-        });
-
-      let res = await doPost(token || undefined);
-
-      if (res.status === 403) {
-        const j = await res.clone().json().catch(() => ({}));
-        if (j?.needRefresh && user) {
-          const t2 = await user.getIdToken(true);
-          res = await doPost(t2);
-        }
-      }
+      const res = await authedFetch('/api/notification-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
 
       if (!res.ok) {
         const raw = await res.text().catch(() => '');

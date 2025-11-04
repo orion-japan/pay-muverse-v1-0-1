@@ -9,9 +9,7 @@ import { createClient } from '@supabase/supabase-js';
 
 function resolveProjectId(): string | undefined {
   return (
-    process.env.FIREBASE_PROJECT_ID ||
-    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
-    undefined
+    process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || undefined
   );
 }
 try {
@@ -19,8 +17,7 @@ try {
   initializeApp({ credential: applicationDefault(), ...(projectId ? { projectId } : {}) });
 } catch {}
 
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL!;
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL!;
 const SUPABASE_SERVICE_ROLE =
   process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE);
@@ -31,7 +28,7 @@ function jstMonthRange(ym: string) {
   const eJ = new Date(Date.UTC(y, m, 1, 0, 0, 0));
   return {
     startUTC: new Date(sJ.getTime() - 9 * 3600 * 1000).toISOString(),
-    endUTC:   new Date(eJ.getTime() - 9 * 3600 * 1000).toISOString(),
+    endUTC: new Date(eJ.getTime() - 9 * 3600 * 1000).toISOString(),
   };
 }
 

@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useCallback } from 'react';
-import IrosGuardTile from '@/components/IrosGuardTile';  // ★ 追加
+import IrosGuardTile from '@/components/IrosGuardTile'; // ★ 追加
 
 type Props = {
   /** ログインモーダルを開く関数（未指定でも動くフォールバック付き） */

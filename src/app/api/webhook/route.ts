@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
   // Supabaseクライアント（service_roleでフルアクセス）
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY! // 🔑 anonではなくservice_roleを使用
+    process.env.SUPABASE_SERVICE_ROLE_KEY!, // 🔑 anonではなくservice_roleを使用
   );
 
   // 該当イベントの処理（subscription作成または更新）
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
           click_type: 'premium',
           sofiacredit: 200,
           payjp_subscription_id: sub.id,
-          last_payment_date: new Date().toISOString()
+          last_payment_date: new Date().toISOString(),
         })
         .eq('user_code', user.user_code);
 

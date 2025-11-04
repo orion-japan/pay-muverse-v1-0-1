@@ -1,13 +1,13 @@
 // src/components/AlbumPicker.tsx
-"use client";
+'use client';
 
-import React, { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import React, { useEffect, useMemo, useState } from 'react';
+import { supabase } from '@/lib/supabase';
 
 type AlbumFile = {
   name: string;
   path: string; // e.g. "669933/image.jpg"
-  url: string;  // public or signed url
+  url: string; // public or signed url
   size?: number | null;
   updatedAt?: string | null;
 };
@@ -15,7 +15,7 @@ type AlbumFile = {
 export default function AlbumPicker({
   open,
   userCode,
-  bucket = "album",
+  bucket = 'album',
   onClose,
   onPick,
   limit = 200,
@@ -33,7 +33,7 @@ export default function AlbumPicker({
 
   const selectedUrls = useMemo(
     () => files.filter((f) => sel[f.path]).map((f) => f.url),
-    [files, sel]
+    [files, sel],
   );
 
   useEffect(() => {
@@ -43,12 +43,10 @@ export default function AlbumPicker({
       setLoading(true);
       try {
         // 1) ユーザーフォルダ直下を一覧
-        const listRes = await supabase.storage
-          .from(bucket)
-          .list(`${userCode}`, {
-            limit,
-            sortBy: { column: "updated_at", order: "desc" },
-          });
+        const listRes = await supabase.storage.from(bucket).list(`${userCode}`, {
+          limit,
+          sortBy: { column: 'updated_at', order: 'desc' },
+        });
 
         if (listRes.error) throw listRes.error;
 
@@ -109,7 +107,7 @@ export default function AlbumPicker({
         {loading ? (
           <div style={{ padding: 16 }}>読み込み中…</div>
         ) : files.length === 0 ? (
-          <div style={{ padding: 16, color: "#666" }}>画像がありません</div>
+          <div style={{ padding: 16, color: '#666' }}>画像がありません</div>
         ) : (
           <div style={styles.grid}>
             {files.map((f) => (
@@ -118,14 +116,9 @@ export default function AlbumPicker({
                   type="checkbox"
                   checked={!!sel[f.path]}
                   onChange={() => toggle(f.path)}
-                  style={{ position: "absolute", top: 8, left: 8 }}
+                  style={{ position: 'absolute', top: 8, left: 8 }}
                 />
-                <img
-                  src={f.url}
-                  alt={f.name}
-                  style={styles.thumb}
-                  crossOrigin="anonymous"
-                />
+                <img src={f.url} alt={f.name} style={styles.thumb} crossOrigin="anonymous" />
                 <div style={styles.name}>{f.name}</div>
               </label>
             ))}
@@ -153,87 +146,87 @@ export default function AlbumPicker({
 
 const styles: Record<string, React.CSSProperties> = {
   backdrop: {
-    position: "fixed",
+    position: 'fixed',
     inset: 0,
-    background: "rgba(0,0,0,0.4)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    background: 'rgba(0,0,0,0.4)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     zIndex: 9999,
   },
   modal: {
-    width: "min(960px, 92vw)",
-    maxHeight: "86vh",
-    overflow: "auto",
-    background: "#fff",
+    width: 'min(960px, 92vw)',
+    maxHeight: '86vh',
+    overflow: 'auto',
+    background: '#fff',
     borderRadius: 12,
-    border: "1px solid #e7e7e7",
-    boxShadow: "0 12px 40px rgba(0,0,0,0.2)",
+    border: '1px solid #e7e7e7',
+    boxShadow: '0 12px 40px rgba(0,0,0,0.2)',
     padding: 12,
   },
   header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 10,
   },
   grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(4, 1fr)",
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, 1fr)',
     gap: 10,
   },
   cell: {
-    position: "relative",
-    display: "block",
-    border: "1px solid #eee",
+    position: 'relative',
+    display: 'block',
+    border: '1px solid #eee',
     borderRadius: 10,
-    overflow: "hidden",
-    background: "#fafafa",
-    cursor: "pointer",
+    overflow: 'hidden',
+    background: '#fafafa',
+    cursor: 'pointer',
   },
   thumb: {
-    width: "100%",
+    width: '100%',
     height: 150,
-    objectFit: "cover",
-    display: "block",
+    objectFit: 'cover',
+    display: 'block',
   },
   name: {
     fontSize: 12,
-    padding: "6px 8px",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    borderTop: "1px solid #eee",
-    background: "#fff",
+    padding: '6px 8px',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    borderTop: '1px solid #eee',
+    background: '#fff',
   },
   footer: {
-    display: "flex",
+    display: 'flex',
     gap: 8,
-    justifyContent: "flex-end",
+    justifyContent: 'flex-end',
     marginTop: 12,
   },
   primaryBtn: {
-    padding: "10px 14px",
+    padding: '10px 14px',
     borderRadius: 8,
-    border: "1px solid #6b5bfa",
-    background: "linear-gradient(180deg, #8f7dff 0%, #6b5bfa 100%)",
-    color: "#fff",
-    cursor: "pointer",
-    boxShadow: "0 6px 18px rgba(122, 101, 255, 0.25)",
+    border: '1px solid #6b5bfa',
+    background: 'linear-gradient(180deg, #8f7dff 0%, #6b5bfa 100%)',
+    color: '#fff',
+    cursor: 'pointer',
+    boxShadow: '0 6px 18px rgba(122, 101, 255, 0.25)',
   },
   secondaryBtn: {
-    padding: "10px 14px",
+    padding: '10px 14px',
     borderRadius: 8,
-    border: "1px solid #ddd",
-    background: "#fff",
-    color: "#333",
-    cursor: "pointer",
+    border: '1px solid #ddd',
+    background: '#fff',
+    color: '#333',
+    cursor: 'pointer',
   },
   iconBtn: {
-    border: "1px solid #ddd",
-    background: "#fff",
-    padding: "4px 8px",
+    border: '1px solid #ddd',
+    background: '#fff',
+    padding: '4px 8px',
     borderRadius: 6,
-    cursor: "pointer",
+    cursor: 'pointer',
   },
 };

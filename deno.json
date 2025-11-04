@@ -1,4 +1,3 @@
 {
-    "imports": { "web-push": "npm:web-push@3" }
-  }
-  
+  "imports": { "web-push": "npm:web-push@3" }
+}

@@ -9,8 +9,13 @@ export function useOcrWorker() {
   const [progress, setProgress] = useState<OcrProgress>({ running: false, current: 0, total: 0 });
 
   useEffect(() => {
-    workerRef.current = new Worker(new URL('../workers/ocrWorker.ts', import.meta.url), { type: 'module' });
-    return () => { workerRef.current?.terminate(); workerRef.current = null; };
+    workerRef.current = new Worker(new URL('../workers/ocrWorker.ts', import.meta.url), {
+      type: 'module',
+    });
+    return () => {
+      workerRef.current?.terminate();
+      workerRef.current = null;
+    };
   }, []);
 
   async function run(files: File[], onText: (idx: number, text: string) => void) {
@@ -31,7 +36,7 @@ export function useOcrWorker() {
         workerRef.current!.postMessage({ id, file: ab, index: i });
       });
 
-      setProgress(p => ({ ...p, current: i + 1 }));
+      setProgress((p) => ({ ...p, current: i + 1 }));
       onText(i, text);
     }
 

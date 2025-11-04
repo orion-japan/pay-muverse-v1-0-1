@@ -5,13 +5,13 @@
   border: 1px solid #ccc;
   background: #fff;
   cursor: pointer;
-  transition: opacity .2s;
+  transition: opacity 0.2s;
 }
 .btn:disabled {
   cursor: not-allowed;
 }
 .btn-locked {
-  pointer-events: none;       /* リロード直後もクリックできない */
+  pointer-events: none; /* リロード直後もクリックできない */
   filter: grayscale(1) brightness(1.1);
-  opacity: .55;
+  opacity: 0.55;
 }

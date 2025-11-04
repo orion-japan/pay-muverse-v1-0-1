@@ -7,9 +7,7 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyFirebaseAndAuthorize } from '@/lib/authz';
 
 const URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 export async function POST() {
   try {

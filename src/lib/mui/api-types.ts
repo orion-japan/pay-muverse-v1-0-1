@@ -20,7 +20,7 @@ export type MuiBody = {
 
   // mode 切替
   mode?: 'format_only' | 'coach_from_text'; // 未指定＝通常チャット
-  text?: string;        // format_only / coach_from_text の入力本文
+  text?: string; // format_only / coach_from_text の入力本文
   instruction?: string; // format_only の追加指示（任意）
 
   // 課金関連（opening/1 は無料、2〜4で有料）

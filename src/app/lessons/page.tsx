@@ -9,14 +9,10 @@ export default function LessonsMenu() {
   return (
     <div className="lessons__wrap">
       {/* 戻るボタン */}
-      <button
-        className="backBtn"
-        onClick={() => router.back()}
-        aria-label="戻る"
-      >
+      <button className="backBtn" onClick={() => router.back()} aria-label="戻る">
         ← 戻る
       </button>
-<br/>
+      <br />
       <h1 className="lessons__title">階層レクチャー</h1>
       <p className="lessons__intro">
         フェーズ・位相ベクトル・認識深度レベルなど、Sofia構造の学習ページです。

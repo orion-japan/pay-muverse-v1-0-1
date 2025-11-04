@@ -47,9 +47,13 @@ export default function PostModal({
         const ctx = canvas.getContext('2d');
         ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-        canvas.toBlob((blob) => {
-          if (blob) resolve(blob);
-        }, 'image/jpeg', 0.75);
+        canvas.toBlob(
+          (blob) => {
+            if (blob) resolve(blob);
+          },
+          'image/jpeg',
+          0.75,
+        );
       };
 
       reader.readAsDataURL(file);
@@ -104,7 +108,7 @@ export default function PostModal({
             .split(',')
             .map((t) => t.trim())
             .filter(Boolean),
-          visibility: 'private',   // ✅ 常に private 固定
+          visibility: 'private', // ✅ 常に private 固定
           is_posted: true,
           media_urls,
           board_type: 'album',
@@ -193,11 +197,7 @@ export default function PostModal({
           <button onClick={onClose} className="modal-button cancel">
             キャンセル
           </button>
-          <button
-            onClick={handleSubmit}
-            disabled={isSubmitting}
-            className="modal-button submit"
-          >
+          <button onClick={handleSubmit} disabled={isSubmitting} className="modal-button submit">
             {isSubmitting ? '投稿中...' : '投稿'}
           </button>
         </div>

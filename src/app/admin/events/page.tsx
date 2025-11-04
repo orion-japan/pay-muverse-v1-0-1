@@ -28,7 +28,7 @@ export default function EventToolsPage() {
     leader_user_code: '',
     group_name: '',
     invite_max_uses: 1000,
-    invite_expires_at: '',     // ← 初期表示時に1か月後(JST)を自動セット
+    invite_expires_at: '', // ← 初期表示時に1か月後(JST)を自動セット
     invite_notes: 'event',
     campaign_type: 'bonus-credit',
     bonus_credit: 45,
@@ -37,20 +37,20 @@ export default function EventToolsPage() {
     event_code: '',
 
     // ★ 追加：URLの ref として埋め込む app_code
-    app_code: '336699',        // 既定値。必要に応じて編集
+    app_code: '336699', // 既定値。必要に応じて編集
   });
 
   const [msg, setMsg] = useState<string | null>(null);
   const [created, setCreated] = useState<any>(null);
 
   function set<K extends keyof typeof form>(k: K, v: any) {
-    setForm(s => ({ ...s, [k]: v }));
+    setForm((s) => ({ ...s, [k]: v }));
   }
 
   // 初期マウント時に有効期限へデフォルト（1か月後JST）を入れる
   useEffect(() => {
     if (!form.invite_expires_at) {
-      setForm(s => ({ ...s, invite_expires_at: oneMonthLaterJSTString() }));
+      setForm((s) => ({ ...s, invite_expires_at: oneMonthLaterJSTString() }));
     }
   }, []); // eslint-disable-line
 
@@ -128,33 +128,36 @@ export default function EventToolsPage() {
         }}
       >
         <label>グループコード</label>
-        <input value={form.group_code} onChange={e => set('group_code', e.target.value)} />
+        <input value={form.group_code} onChange={(e) => set('group_code', e.target.value)} />
 
         <label>リーダー user_code（= rcode）</label>
-        <input value={form.leader_user_code} onChange={e => set('leader_user_code', e.target.value)} />
+        <input
+          value={form.leader_user_code}
+          onChange={(e) => set('leader_user_code', e.target.value)}
+        />
 
         <label>グループ名</label>
-        <input value={form.group_name} onChange={e => set('group_name', e.target.value)} />
+        <input value={form.group_name} onChange={(e) => set('group_name', e.target.value)} />
 
         <label>最大使用回数</label>
         <input
           type="number"
           value={form.invite_max_uses}
-          onChange={e => set('invite_max_uses', parseInt(e.target.value || '0'))}
+          onChange={(e) => set('invite_max_uses', parseInt(e.target.value || '0'))}
         />
 
         <label>有効期限(任意)</label>
         <input
           value={form.invite_expires_at}
-          onChange={e => set('invite_expires_at', e.target.value)}
+          onChange={(e) => set('invite_expires_at', e.target.value)}
           placeholder="2025-09-13T23:59:59+09:00"
         />
 
         <label>メモ</label>
-        <input value={form.invite_notes} onChange={e => set('invite_notes', e.target.value)} />
+        <input value={form.invite_notes} onChange={(e) => set('invite_notes', e.target.value)} />
 
         <label>イベント種別</label>
-        <select value={form.campaign_type} onChange={e => set('campaign_type', e.target.value)}>
+        <select value={form.campaign_type} onChange={(e) => set('campaign_type', e.target.value)}>
           <option value="bonus-credit">クレジット増量キャンペーン</option>
           <option value="none">なし</option>
         </select>
@@ -164,7 +167,7 @@ export default function EventToolsPage() {
           type="number"
           min={0}
           value={form.bonus_credit}
-          onChange={e => set('bonus_credit', parseInt(e.target.value || '0'))}
+          onChange={(e) => set('bonus_credit', parseInt(e.target.value || '0'))}
         />
 
         {/* ★ 追加：イベントコード（= eve） */}
@@ -176,7 +179,7 @@ export default function EventToolsPage() {
         </label>
         <input
           value={form.event_code}
-          onChange={e => set('event_code', e.target.value.trim())}
+          onChange={(e) => set('event_code', e.target.value.trim())}
           placeholder="QME-20250913"
           style={{
             borderColor: isValidEventCode(form.event_code) ? '#ddd' : '#f43f5e',
@@ -193,13 +196,16 @@ export default function EventToolsPage() {
         </label>
         <input
           value={form.app_code}
-          onChange={e => set('app_code', e.target.value)}
+          onChange={(e) => set('app_code', e.target.value)}
           placeholder="336699"
         />
       </div>
 
       <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
-        <button onClick={create} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #ddd' }}>
+        <button
+          onClick={create}
+          style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #ddd' }}
+        >
           作成
         </button>
         {sampleLink && (
@@ -224,14 +230,26 @@ export default function EventToolsPage() {
 
       {created && (
         <div style={{ marginTop: 12, border: '1px solid #eee', borderRadius: 12, padding: 12 }}>
-          <div>Group: <b>{created.group.group_code}</b> / {created.group.name}</div>
-          <div>Leader user_code (rcode): <b>{created.rcode}</b></div>
-          <div>Event Invite Code (eve): <b>{form.event_code || created.invite.code}</b></div>
-          <div>キャンペーン種別: <b>{created.invite.campaign_type || '-'}</b></div>
-          <div>増量クレジット: <b>{created.invite.bonus_credit ?? 0}</b></div>
+          <div>
+            Group: <b>{created.group.group_code}</b> / {created.group.name}
+          </div>
+          <div>
+            Leader user_code (rcode): <b>{created.rcode}</b>
+          </div>
+          <div>
+            Event Invite Code (eve): <b>{form.event_code || created.invite.code}</b>
+          </div>
+          <div>
+            キャンペーン種別: <b>{created.invite.campaign_type || '-'}</b>
+          </div>
+          <div>
+            増量クレジット: <b>{created.invite.bonus_credit ?? 0}</b>
+          </div>
 
           <div style={{ marginTop: 6 }}>配布URL例:</div>
-          <code style={{ display: 'block', marginTop: 6, wordBreak: 'break-all' }}>{sampleLink}</code>
+          <code style={{ display: 'block', marginTop: 6, wordBreak: 'break-all' }}>
+            {sampleLink}
+          </code>
           <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280' }}>
             ※ <b>ref</b> は参加者の <b>app_code</b> です。
           </div>

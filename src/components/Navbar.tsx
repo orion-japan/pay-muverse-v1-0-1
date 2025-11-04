@@ -1,6 +1,6 @@
 // 例: Navbar.tsx
-import Link from 'next/link'
-import Image from 'next/image'
+import Link from 'next/link';
+import Image from 'next/image';
 
 export default function Navbar() {
   return (
@@ -29,5 +29,5 @@ export default function Navbar() {
         <span className="text-xs mt-1">プラン</span>
       </Link>
     </nav>
-  )
+  );
 }

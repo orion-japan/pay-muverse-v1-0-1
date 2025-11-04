@@ -22,7 +22,7 @@ export async function setItemAsync(
     sameSite?: 'lax' | 'strict' | 'none';
     maxAge?: number;
     expires?: Date;
-  }
+  },
 ): Promise<void> {
   const store = await cookies();
   store.set({
@@ -41,7 +41,7 @@ export async function setItemAsync(
 /** 削除（実質 maxAge=0 で消す） */
 export async function removeItemAsync(
   name: string,
-  options?: { path?: string; domain?: string }
+  options?: { path?: string; domain?: string },
 ): Promise<void> {
   const store = await cookies();
   store.set({

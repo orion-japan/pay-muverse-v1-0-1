@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
     const target = url.searchParams.get('target'); // 見られているユーザー（フォローされる側）
-    const me = url.searchParams.get('me');         // クライアントが渡す自分の user_code（任意）
+    const me = url.searchParams.get('me'); // クライアントが渡す自分の user_code（任意）
 
     if (!target) {
       return NextResponse.json({ error: 'target required' }, { status: 400 });

@@ -5,11 +5,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import {
-  verifyFirebaseAndAuthorize,
-  SUPABASE_URL,
-  SERVICE_ROLE,
-} from '@/lib/authz';
+import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/authz';
 
 function sb() {
   return createClient(SUPABASE_URL!, SERVICE_ROLE!, { auth: { persistSession: false } });
@@ -17,9 +13,13 @@ function sb() {
 
 const DEV = process.env.NODE_ENV !== 'production';
 const NS = '[mu.turns]';
-const rid = () => (globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2));
-const log = (id: string, ...a: any[]) => { if (DEV) console.log(NS, id, ...a); };
-const err = (id: string, ...a: any[]) => { if (DEV) console.error(NS, id, ...a); };
+const rid = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
+const log = (id: string, ...a: any[]) => {
+  if (DEV) console.log(NS, id, ...a);
+};
+const err = (id: string, ...a: any[]) => {
+  if (DEV) console.error(NS, id, ...a);
+};
 const time = (label: string) => DEV && console.time(label);
 const timeEnd = (label: string) => DEV && console.timeEnd(label);
 
@@ -52,8 +52,10 @@ export async function GET(req: Request) {
 
   // ② ここから先は既存スレッド → 認証必須
   const z = await verifyFirebaseAndAuthorize(req as any);
-  if (!z.ok) return NextResponse.json({ error: z.error }, { status: z.status, headers: { 'x-mu-req': id } });
-  if (!z.allowed) return NextResponse.json({ error: 'forbidden' }, { status: 403, headers: { 'x-mu-req': id } });
+  if (!z.ok)
+    return NextResponse.json({ error: z.error }, { status: z.status, headers: { 'x-mu-req': id } });
+  if (!z.allowed)
+    return NextResponse.json({ error: 'forbidden' }, { status: 403, headers: { 'x-mu-req': id } });
 
   const s = sb();
 
@@ -68,11 +70,17 @@ export async function GET(req: Request) {
     timeEnd(tlabel);
     if (convErr || !conv) {
       err(id, 'conversation not found', { convId, message: convErr?.message });
-      return NextResponse.json({ error: 'conversation not found' }, { status: 404, headers: { 'x-mu-req': id } });
+      return NextResponse.json(
+        { error: 'conversation not found' },
+        { status: 404, headers: { 'x-mu-req': id } },
+      );
     }
   } catch (e) {
     err(id, 'verify conversation failed', { convId, e });
-    return NextResponse.json({ error: 'failed to verify conversation' }, { status: 500, headers: { 'x-mu-req': id } });
+    return NextResponse.json(
+      { error: 'failed to verify conversation' },
+      { status: 500, headers: { 'x-mu-req': id } },
+    );
   }
 
   const tlabel2 = `${NS} ${id} list turns`;
@@ -86,7 +94,10 @@ export async function GET(req: Request) {
 
   if (error) {
     err(id, 'supabase error', { message: error.message });
-    return NextResponse.json({ error: String(error.message || error) }, { status: 500, headers: { 'x-mu-req': id } });
+    return NextResponse.json(
+      { error: String(error.message || error) },
+      { status: 500, headers: { 'x-mu-req': id } },
+    );
   }
 
   const items = (data ?? []).map((row) => ({
@@ -109,12 +120,16 @@ export async function POST(req: Request) {
 
   // 認証必須
   const z = await verifyFirebaseAndAuthorize(req as any);
-  if (!z.ok) return NextResponse.json({ error: z.error }, { status: z.status, headers: { 'x-mu-req': id } });
-  if (!z.allowed) return NextResponse.json({ error: 'forbidden' }, { status: 403, headers: { 'x-mu-req': id } });
+  if (!z.ok)
+    return NextResponse.json({ error: z.error }, { status: z.status, headers: { 'x-mu-req': id } });
+  if (!z.allowed)
+    return NextResponse.json({ error: 'forbidden' }, { status: 403, headers: { 'x-mu-req': id } });
 
   // 入力
   let body: any = {};
-  try { body = await req.json(); } catch {}
+  try {
+    body = await req.json();
+  } catch {}
   const { conv_id, role, content, meta } = body ?? {};
 
   // ここで role を正規化（"bot"/"system" -> "assistant"、未指定は "user"）
@@ -135,7 +150,7 @@ export async function POST(req: Request) {
     .from('mu_turns')
     .insert({
       conv_id,
-      role: safeRole,     // ← enum対策：正規化済み
+      role: safeRole, // ← enum対策：正規化済み
       content,
       meta: meta ?? null,
       user_code: z.userCode, // だれが書いたか残す
@@ -146,7 +161,10 @@ export async function POST(req: Request) {
 
   if (error) {
     err(id, 'insert error', { message: error.message });
-    return NextResponse.json({ error: String(error.message || error) }, { status: 500, headers: { 'x-mu-req': id } });
+    return NextResponse.json(
+      { error: String(error.message || error) },
+      { status: 500, headers: { 'x-mu-req': id } },
+    );
   }
 
   log(id, 'POST ok', { conv_id, id: data?.id, role: safeRole, ms: Date.now() - t0 });

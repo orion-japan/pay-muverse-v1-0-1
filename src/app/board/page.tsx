@@ -39,8 +39,12 @@ function MediaSlider({ href, urls }: { href: string; urls: string[] }) {
           </Link>
         ))}
       </div>
-      <button className="list-nav prev" onClick={() => slideBy(-1)} aria-label="前へ">‹</button>
-      <button className="list-nav next" onClick={() => slideBy(1)} aria-label="次へ">›</button>
+      <button className="list-nav prev" onClick={() => slideBy(-1)} aria-label="前へ">
+        ‹
+      </button>
+      <button className="list-nav next" onClick={() => slideBy(1)} aria-label="次へ">
+        ›
+      </button>
     </div>
   );
 }
@@ -78,10 +82,8 @@ export default function BoardPage() {
   const PAGE_SIZE = 12;
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const likeCount = (p: Post) =>
-    p.likes_count ?? p.q_code?.resonance?.likes ?? 0;
-  const commentCount = (p: Post) =>
-    p.comments_count ?? p.q_code?.resonance?.comments ?? 0;
+  const likeCount = (p: Post) => p.likes_count ?? p.q_code?.resonance?.likes ?? 0;
+  const commentCount = (p: Post) => p.comments_count ?? p.q_code?.resonance?.comments ?? 0;
 
   const fetchPublicPosts = async () => {
     setLoading(true);
@@ -157,7 +159,7 @@ export default function BoardPage() {
     const q = search.trim().toLowerCase();
     if (q) {
       list = list.filter((p) =>
-        [p.title, p.content, ...(p.tags || [])].join(' ').toLowerCase().includes(q)
+        [p.title, p.content, ...(p.tags || [])].join(' ').toLowerCase().includes(q),
       );
     }
 
@@ -187,13 +189,13 @@ export default function BoardPage() {
 
   const paged = useMemo(
     () => visiblePosts.slice(0, PAGE_SIZE * pageCount),
-    [visiblePosts, pageCount]
+    [visiblePosts, pageCount],
   );
 
   // ✅ 下部アクションバー用：もっと見る可否
   const hasMore = useMemo(
     () => paged.length < visiblePosts.length,
-    [paged.length, visiblePosts.length]
+    [paged.length, visiblePosts.length],
   );
 
   return (
@@ -207,20 +209,37 @@ export default function BoardPage() {
             type="text"
             placeholder="検索（タイトル・本文・タグ）"
             value={search}
-            onChange={(e) => { setSearch(e.target.value); setPageCount(1); }}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPageCount(1);
+            }}
             style={{ flex: 1 }}
           />
-          <select value={category} onChange={(e) => { setCategory(e.target.value); setPageCount(1); }}>
+          <select
+            value={category}
+            onChange={(e) => {
+              setCategory(e.target.value);
+              setPageCount(1);
+            }}
+          >
             {categoryPool.map((c) => (
-              <option key={c} value={c}>{c}</option>
+              <option key={c} value={c}>
+                {c}
+              </option>
             ))}
           </select>
-          <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} title="並び替え">
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as SortKey)}
+            title="並び替え"
+          >
             <option value="new">新しい順</option>
             <option value="old">古い順</option>
             <option value="title">タイトル順</option>
           </select>
-          <button onClick={fetchPublicPosts} aria-label="再読込">再読込</button>
+          <button onClick={fetchPublicPosts} aria-label="再読込">
+            再読込
+          </button>
         </div>
 
         {/* タグフィルタ */}
@@ -234,8 +253,11 @@ export default function BoardPage() {
                   onClick={() => toggleTag(tag)}
                   className={`tag-chip ${active ? 'active' : ''}`}
                   style={{
-                    padding: '4px 10px', borderRadius: 14, border: '1px solid #ddd',
-                    background: active ? '#7b5cff' : '#fff', color: active ? '#fff' : '#333',
+                    padding: '4px 10px',
+                    borderRadius: 14,
+                    border: '1px solid #ddd',
+                    background: active ? '#7b5cff' : '#fff',
+                    color: active ? '#fff' : '#333',
                     cursor: 'pointer',
                   }}
                   aria-pressed={active}
@@ -309,7 +331,9 @@ export default function BoardPage() {
                   {post.tags && post.tags.length > 0 && (
                     <div className="tags">
                       {post.tags.map((tag, i) => (
-                        <span key={i} className="tag">#{tag}</span>
+                        <span key={i} className="tag">
+                          #{tag}
+                        </span>
                       ))}
                     </div>
                   )}
@@ -321,7 +345,9 @@ export default function BoardPage() {
           {/* もっと見る */}
           {paged.length < visiblePosts.length && (
             <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12 }}>
-              <button type="button" onClick={() => setPageCount((n) => n + 1)}>もっと見る</button>
+              <button type="button" onClick={() => setPageCount((n) => n + 1)}>
+                もっと見る
+              </button>
             </div>
           )}
         </>
@@ -339,8 +365,6 @@ export default function BoardPage() {
           ＋ コラージュを作る
         </button>
       </div>
-
-
 
       <div ref={bottomRef} style={{ height: '1px' }} />
     </div>

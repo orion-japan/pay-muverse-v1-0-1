@@ -84,10 +84,10 @@ export default function DailyCheckPanel({
       setLoading(true);
       try {
         const url = `/api/daily-checks?user_code=${encodeURIComponent(
-          userCode
+          userCode,
         )}&vision_id=${encodeURIComponent(selectedVisionId)}&date=${today}`;
         const res = await fetch(url, { cache: 'no-store', signal: ac.signal });
-        const json = await res.json().catch(() => ({} as any));
+        const json = await res.json().catch(() => ({}) as any);
         if (!res.ok) throw new Error(json?.error || String(res.status));
 
         const d = json?.data;
@@ -133,13 +133,11 @@ export default function DailyCheckPanel({
     (async () => {
       try {
         const url = `/api/daily-checks?history=1&days=14&user_code=${encodeURIComponent(
-          userCode
+          userCode,
         )}&vision_id=${encodeURIComponent(selectedVisionId)}`;
         const res = await fetch(url, { cache: 'no-store', signal: ac.signal });
-        const json = await res.json().catch(() => ({} as any));
-        setHistory(
-          Array.isArray(json?.data) ? (json.data as HistoryRow[]) : []
-        );
+        const json = await res.json().catch(() => ({}) as any);
+        setHistory(Array.isArray(json?.data) ? (json.data as HistoryRow[]) : []);
       } catch {
         setHistory([]);
       }
@@ -216,16 +214,14 @@ export default function DailyCheckPanel({
           is_final: false,
         }),
       });
-      const json = await res.json().catch(() => ({} as any));
+      const json = await res.json().catch(() => ({}) as any);
       if (!res.ok) throw new Error(json?.error || 'save failed');
 
       const updatedAtISO: string | null = json?.data?.updated_at || null;
       setSavedAt(updatedAtISO ? formatJST_HM(updatedAtISO) : null);
 
       dirtyRef.current = false;
-      lastLocalAtRef.current = updatedAtISO
-        ? Date.parse(updatedAtISO)
-        : Date.now();
+      lastLocalAtRef.current = updatedAtISO ? Date.parse(updatedAtISO) : Date.now();
 
       if (progress >= 100) {
         setLocked(true);
@@ -290,11 +286,7 @@ export default function DailyCheckPanel({
                   progress >= 100 ? 'done' : progress > 0 ? 'active' : 'new'
                 }`}
               >
-                {progress >= 100
-                  ? '🎉 完了！'
-                  : progress > 0
-                  ? '実践中 💪'
-                  : '未開始 ✨'}
+                {progress >= 100 ? '🎉 完了！' : progress > 0 ? '実践中 💪' : '未開始 ✨'}
               </span>
             </div>
           )}
@@ -367,11 +359,7 @@ export default function DailyCheckPanel({
           </div>
 
           <div className="dcp-actions">
-            <button
-              className="dcp-save"
-              onClick={save}
-              disabled={saving || !dirtyRef.current}
-            >
+            <button className="dcp-save" onClick={save} disabled={saving || !dirtyRef.current}>
               保存
             </button>
           </div>
@@ -380,8 +368,7 @@ export default function DailyCheckPanel({
 
       {locked && (
         <div className="dcp-locked">
-          今日の分は完了済みです。必要なら{' '}
-          <button onClick={unlockForEdit}>編集を再開</button>
+          今日の分は完了済みです。必要なら <button onClick={unlockForEdit}>編集を再開</button>
         </div>
       )}
 

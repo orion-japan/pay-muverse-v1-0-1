@@ -65,10 +65,16 @@ async function hydrateThreadsMeta(
     return {};
   }
   const { metaByThreadId } = (await res.json()) as {
-    metaByThreadId: Record<string, { lastMessageAt: string | null; lastMessageText: string | null; unreadCount: number }>;
+    metaByThreadId: Record<
+      string,
+      { lastMessageAt: string | null; lastMessageText: string | null; unreadCount: number }
+    >;
   };
 
-  const out: Record<string, Pick<FriendItem, 'lastMessageAt' | 'lastMessageText' | 'unreadCount'>> = {};
+  const out: Record<
+    string,
+    Pick<FriendItem, 'lastMessageAt' | 'lastMessageText' | 'unreadCount'>
+  > = {};
   for (const f of friends) {
     const tid = threadIdOf(myCode, f.user_code);
     const m = metaByThreadId[tid] || {};
@@ -185,9 +191,7 @@ export default function TalkPage() {
       const tid = String(r.thread_id || '');
       if (
         tid &&
-        (tid.includes(userCode) ||
-          r.sender_code === userCode ||
-          r.receiver_code === userCode)
+        (tid.includes(userCode) || r.sender_code === userCode || r.receiver_code === userCode)
       ) {
         handleRefresh();
       }
@@ -195,16 +199,8 @@ export default function TalkPage() {
 
     const channel = supabase
       .channel('talk-list')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'chats' },
-        onChange,
-      )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'chats' },
-        onChange,
-      )
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chats' }, onChange)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'chats' }, onChange)
       .subscribe();
 
     return () => {
@@ -216,9 +212,7 @@ export default function TalkPage() {
     if (!q.trim()) return friends;
     const key = q.toLowerCase();
     return friends.filter(
-      (f) =>
-        f.user_code.toLowerCase().includes(key) ||
-        (f.name ?? '').toLowerCase().includes(key),
+      (f) => f.user_code.toLowerCase().includes(key) || (f.name ?? '').toLowerCase().includes(key),
     );
   }, [q, friends]);
 
@@ -298,7 +292,8 @@ export default function TalkPage() {
         <div className="talk-loading">読み込み中...</div>
       ) : filtered.length === 0 ? (
         <div className="talk-empty">
-          現在、両想いが <b>S</b> 止まり、または相互フォローになっていません。<br />
+          現在、両想いが <b>S</b> 止まり、または相互フォローになっていません。
+          <br />
           <b>TTalk は Regular（F）以上</b> の関係から利用できます。
         </div>
       ) : (

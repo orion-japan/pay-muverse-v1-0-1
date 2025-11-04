@@ -3,11 +3,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import {
-  verifyFirebaseAndAuthorize,
-  SUPABASE_URL,
-  SERVICE_ROLE,
-} from '@/lib/authz';
+import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/authz';
 
 /* ===== Supabase (service role) ===== */
 function sb() {
@@ -43,13 +39,24 @@ const recordedDays = (arr: QDay[]) =>
   arr.filter((d) => d.q1 + d.q2 + d.q3 + d.q4 + d.q5 > 0).length;
 
 const sumDist = (arr: QDay[]): Dist =>
-  arr.reduce<Dist>((a, d) => ({
-    q1: a.q1 + d.q1, q2: a.q2 + d.q2, q3: a.q3 + d.q3, q4: a.q4 + d.q4, q5: a.q5 + d.q5,
-  }), { q1: 0, q2: 0, q3: 0, q4: 0, q5: 0 });
+  arr.reduce<Dist>(
+    (a, d) => ({
+      q1: a.q1 + d.q1,
+      q2: a.q2 + d.q2,
+      q3: a.q3 + d.q3,
+      q4: a.q4 + d.q4,
+      q5: a.q5 + d.q5,
+    }),
+    { q1: 0, q2: 0, q3: 0, q4: 0, q5: 0 },
+  );
 
-const repQ = (d: Dist): 'Q1'|'Q2'|'Q3'|'Q4'|'Q5'|null => {
-  const a: Array<['Q1'|'Q2'|'Q3'|'Q4'|'Q5', number]> = [
-    ['Q1', d.q1], ['Q2', d.q2], ['Q3', d.q3], ['Q4', d.q4], ['Q5', d.q5],
+const repQ = (d: Dist): 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5' | null => {
+  const a: Array<['Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5', number]> = [
+    ['Q1', d.q1],
+    ['Q2', d.q2],
+    ['Q3', d.q3],
+    ['Q4', d.q4],
+    ['Q5', d.q5],
   ];
   const top = a.reduce((x, y) => (y[1] > x[1] ? y : x));
   return top[1] > 0 ? top[0] : null;
@@ -67,8 +74,13 @@ const streakDays = (arr: QDay[]) => {
 };
 
 function buildSummary(args: {
-  n: number; rep_q: string | null; streak: number;
-  recorded_days: number; window_days: number; dist: Dist; category_today: CategoryToday;
+  n: number;
+  rep_q: string | null;
+  streak: number;
+  recorded_days: number;
+  window_days: number;
+  dist: Dist;
+  category_today: CategoryToday;
 }) {
   const coverage = args.window_days ? Math.round((args.recorded_days / args.window_days) * 100) : 0;
   const rep = args.rep_q ?? '未記録';
@@ -95,7 +107,10 @@ function buildSummary(args: {
 async function callJson(req: NextRequest, path: string) {
   const url = new URL(path, req.url);
   return fetch(url.toString(), {
-    headers: { cookie: req.headers.get('cookie') ?? '', authorization: req.headers.get('authorization') ?? '' },
+    headers: {
+      cookie: req.headers.get('cookie') ?? '',
+      authorization: req.headers.get('authorization') ?? '',
+    },
     cache: 'no-store',
   });
 }
@@ -103,7 +118,11 @@ async function postJson(req: NextRequest, path: string, body: any) {
   const url = new URL(path, req.url);
   return fetch(url.toString(), {
     method: 'POST',
-    headers: { 'content-type': 'application/json', cookie: req.headers.get('cookie') ?? '', authorization: req.headers.get('authorization') ?? '' },
+    headers: {
+      'content-type': 'application/json',
+      cookie: req.headers.get('cookie') ?? '',
+      authorization: req.headers.get('authorization') ?? '',
+    },
     body: JSON.stringify(body),
   });
 }
@@ -114,7 +133,7 @@ async function ensureConversation(
   userCode: string,
   reuseKey: string,
   title: string,
-  meta: Record<string, any>
+  meta: Record<string, any>,
 ) {
   try {
     const res = await postJson(req, '/api/agent/muai/conversations', {
@@ -155,7 +174,12 @@ async function ensureConversation(
 
   if (foundId) return { threadId: foundId, reused: true };
 
-  const base = { user_code: userCode, title, origin_app: 'mu', routed_from: meta?.routed_from ?? 'q-summary' };
+  const base = {
+    user_code: userCode,
+    title,
+    origin_app: 'mu',
+    routed_from: meta?.routed_from ?? 'q-summary',
+  };
   try {
     const { data: ins, error: e1 } = await s
       .from('mu_conversations')
@@ -184,28 +208,33 @@ export async function GET(req: NextRequest) {
   const queryUser = sp.get('user') ?? undefined;
   const userCode = z?.userCode ?? queryUser;
   if (!z.ok || !z.allowed || !userCode) {
-    const msg = encodeURIComponent('（サインイン情報が見つかりません。再ログイン後にお試しください）');
+    const msg = encodeURIComponent(
+      '（サインイン情報が見つかりません。再ログイン後にお試しください）',
+    );
     return NextResponse.redirect(new URL(`/chat/new?draft=${msg}`, req.url), { status: 302 });
   }
 
   const scope = sp.get('scope') ?? SCOPE_DEFAULT;
   const start = sp.get('start') ?? undefined;
-  const end   = sp.get('end') ?? undefined;
-  const days  = sp.get('days') ? Math.max(1, Number(sp.get('days'))) : (start && end ? undefined : 30);
-  const n     = windowDays({ days, start, end });
+  const end = sp.get('end') ?? undefined;
+  const days = sp.get('days') ? Math.max(1, Number(sp.get('days'))) : start && end ? undefined : 30;
+  const n = windowDays({ days, start, end });
 
   try {
     const qp = new URLSearchParams();
     if (days && !start && !end) qp.set('days', String(days));
     if (start) qp.set('start', start);
-    if (end)   qp.set('end', end);
+    if (end) qp.set('end', end);
     qp.set('user', String(userCode));
 
     const dailyRes = await callJson(req, `/api/q/daily_with_carry?${qp.toString()}`);
     if (!dailyRes.ok) throw new Error(`daily_with_carry ${dailyRes.status}`);
     const qdays: QDay[] = await dailyRes.json();
 
-    const catRes = await callJson(req, `/api/q/category_today?user=${encodeURIComponent(String(userCode))}`);
+    const catRes = await callJson(
+      req,
+      `/api/q/category_today?user=${encodeURIComponent(String(userCode))}`,
+    );
     if (!catRes.ok) throw new Error(`category_today ${catRes.status}`);
     const category_today: CategoryToday = await catRes.json();
 
@@ -216,26 +245,51 @@ export async function GET(req: NextRequest) {
     const streak = streakDays(qdays);
 
     if (recorded_days === 0) {
-      const draft = '（記録が見つかりませんでした。まずは今日の最小行動を1つだけ登録してみましょう）';
-      return NextResponse.redirect(new URL(`/chat/new?draft=${encodeURIComponent(draft)}`, req.url), { status: 302 });
+      const draft =
+        '（記録が見つかりませんでした。まずは今日の最小行動を1つだけ登録してみましょう）';
+      return NextResponse.redirect(
+        new URL(`/chat/new?draft=${encodeURIComponent(draft)}`, req.url),
+        { status: 302 },
+      );
     }
 
     const { title, body } = buildSummary({
-      n, rep_q: rq, streak, recorded_days, window_days, dist, category_today,
+      n,
+      rep_q: rq,
+      streak,
+      recorded_days,
+      window_days,
+      dist,
+      category_today,
     });
 
     const date_jst = jstDateStr();
     const reuseKey = `${userCode}:${date_jst}:${scope}:${n}`;
-    const meta = { scope, days: n, date_jst, rep_q: rq, template_version: TEMPLATE_VERSION, routed_from: 'q-summary' };
+    const meta = {
+      scope,
+      days: n,
+      date_jst,
+      rep_q: rq,
+      template_version: TEMPLATE_VERSION,
+      routed_from: 'q-summary',
+    };
 
-    const { threadId } = await ensureConversation(req, String(userCode), reuseKey, `Q総評 / ${date_jst} / ${rq ?? '-'}`, meta);
+    const { threadId } = await ensureConversation(
+      req,
+      String(userCode),
+      reuseKey,
+      `Q総評 / ${date_jst} / ${rq ?? '-'}`,
+      meta,
+    );
 
     const turnRes = await postJson(req, '/api/mu/turns', {
       conv_id: threadId,
       role: 'assistant',
       content: [
-        `# ${title}`, '',
-        body, '',
+        `# ${title}`,
+        '',
+        body,
+        '',
         `---`,
         `meta: summary_id=null, snapshot_id=null, template_version=${TEMPLATE_VERSION}, scope=${scope}, days=${n}, rep_q=${rq ?? ''}, streak_days=${streak}, generated_at=${new Date().toISOString()}`,
       ].join('\n'),
@@ -246,6 +300,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(new URL(`/chat?open=${threadId}`, req.url), { status: 302 });
   } catch (e: any) {
     const msg = `（Q総評の生成に失敗しました: ${e?.message ?? e}. 時間をおいて再度お試しください）`;
-    return NextResponse.redirect(new URL(`/chat/new?draft=${encodeURIComponent(msg)}`, req.url), { status: 302 });
+    return NextResponse.redirect(new URL(`/chat/new?draft=${encodeURIComponent(msg)}`, req.url), {
+      status: 302,
+    });
   }
 }

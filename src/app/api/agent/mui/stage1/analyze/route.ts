@@ -14,20 +14,14 @@ function clamp(s: string, max = 6000) {
 }
 
 /* ===== Supabase ===== */
-const supa = createClient(
-  must('NEXT_PUBLIC_SUPABASE_URL'),
-  must('SUPABASE_SERVICE_ROLE_KEY')
-);
+const supa = createClient(must('NEXT_PUBLIC_SUPABASE_URL'), must('SUPABASE_SERVICE_ROLE_KEY'));
 
 /* ===== API本体 ===== */
 export async function POST(req: Request) {
   try {
-    const { conv_code, user_code } = await req.json().catch(() => ({} as any));
+    const { conv_code, user_code } = await req.json().catch(() => ({}) as any);
     if (!conv_code)
-      return NextResponse.json(
-        { ok: false, error: 'conv_code is required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: 'conv_code is required' }, { status: 400 });
 
     /* ---- 会話ログ取得 ---- */
     const { data: logs } = await supa
@@ -38,10 +32,11 @@ export async function POST(req: Request) {
       .limit(40);
 
     const joined = (logs?.map((l: any) => l.content).join('\n\n') || '').trim();
- if (!joined) return NextResponse.json(
-  { ok:false, error:'会話ログが見つかりません（mui_chat_logs）。' },
-  { status:200 }
-);
+    if (!joined)
+      return NextResponse.json(
+        { ok: false, error: '会話ログが見つかりません（mui_chat_logs）。' },
+        { status: 200 },
+      );
 
     /* ---- OpenAI呼び出し ---- */
     const OPENAI_API_KEY = must('OPENAI_API_KEY');
@@ -51,8 +46,7 @@ export async function POST(req: Request) {
     const messages = [
       {
         role: 'system',
-        content:
-          'あなたは恋愛コミュニケーション解析AI「Mui」。JSONのみ返す。'
+        content: 'あなたは恋愛コミュニケーション解析AI「Mui」。JSONのみ返す。',
       },
       {
         role: 'user',
@@ -67,22 +61,22 @@ export async function POST(req: Request) {
             "ls7": { "top": "DEPENDENT|AVOIDER|CARETAKER|IDEALIST|CONTROLLER|FREE_SPIRIT|CHASER", "hits": [] }
           }`,
           '--- 会話ログ ---',
-          clamp(joined, 6000)
-        ].join('\n')
-      }
+          clamp(joined, 6000),
+        ].join('\n'),
+      },
     ];
 
     const r = await fetch(CHAT_URL, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${OPENAI_API_KEY}`,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         model: OPENAI_MODEL,
         messages,
-        temperature: 0.4
-      })
+        temperature: 0.4,
+      }),
     });
 
     if (!r.ok) throw new Error(`OpenAI API error (${r.status}): ${await r.text()}`);
@@ -99,30 +93,24 @@ export async function POST(req: Request) {
       bullets: parsed.bullets || [],
       advice: parsed.advice || [],
       next_actions: parsed.next_actions || [],
-      ls7: parsed.ls7 || null
+      ls7: parsed.ls7 || null,
     };
 
     /* ---- Supabaseに保存（upsert） ---- */
-    const { error: upErr } = await supa
-      .from('mui_phase1_results')
-      .upsert(
-        {
-          conv_code,
-          user_code: user_code || null,
-          q_code: result.q_code,
-          result_json: result
-        },
-        { onConflict: 'conv_code' }
-      );
+    const { error: upErr } = await supa.from('mui_phase1_results').upsert(
+      {
+        conv_code,
+        user_code: user_code || null,
+        q_code: result.q_code,
+        result_json: result,
+      },
+      { onConflict: 'conv_code' },
+    );
 
-    if (upErr)
-      throw new Error(`Supabase保存エラー: ${upErr.message || upErr}`);
+    if (upErr) throw new Error(`Supabase保存エラー: ${upErr.message || upErr}`);
 
     return NextResponse.json({ ok: true, stage: '1', result });
   } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: e?.message || String(e) },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: e?.message || String(e) }, { status: 500 });
   }
 }

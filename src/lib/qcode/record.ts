@@ -84,8 +84,17 @@ function clampPolarity(p?: QPolarity | null): QPolarity {
 // Intent 正規化（未知値は normal）
 function normalizeIntent(v?: string | null): QIntent {
   const valid: QIntent[] = [
-    'normal','chat','consult','diagnosis','self_post',
-    'event','comment','vision','vision_check','import','system'
+    'normal',
+    'chat',
+    'consult',
+    'diagnosis',
+    'self_post',
+    'event',
+    'comment',
+    'vision',
+    'vision_check',
+    'import',
+    'system',
   ];
   if (!v) return 'normal';
   return (valid.includes(v as QIntent) ? v : 'normal') as QIntent;
@@ -115,9 +124,9 @@ function buildQCodeJson(args: RecordQArgs) {
     meta: {
       agent: guessAgent(args.source_type || null),
       intent: normalizeIntent(args.intent),
-      source_type: (args.source_type || 'unknown'),
+      source_type: args.source_type || 'unknown',
       conversation_id: args.conversation_id ?? null,
-      post_id: (args.post_id != null ? String(args.post_id) : null),
+      post_id: args.post_id != null ? String(args.post_id) : null,
     },
   };
 }
@@ -137,8 +146,7 @@ export async function recordQ(args: RecordQArgs) {
   const intent = normalizeIntent(args.intent);
   const source_type = (args.source_type || 'unknown') as string;
 
-  const conversation_id =
-    (args.conversation_id && String(args.conversation_id)) || null;
+  const conversation_id = (args.conversation_id && String(args.conversation_id)) || null;
 
   const owner_user_code = args.owner_user_code ?? user_code;
   const actor_user_code = args.actor_user_code ?? user_code;
@@ -183,7 +191,7 @@ export async function recordQ(args: RecordQArgs) {
       .insert({
         created_at,
         user_code,
-        source_type,        // ★ ここを intent ではなく source_type に修正
+        source_type, // ★ ここを intent ではなく source_type に修正
         intent,
         q,
         stage,
@@ -201,20 +209,18 @@ export async function recordQ(args: RecordQArgs) {
 
   // 3) q_code_status
   try {
-    const { error } = await client
-      .from('q_code_status')
-      .upsert(
-        {
-          user_code,
-          current_q: q,
-          depth_stage: stage,
-          updated_at: created_at,
-          q_hint: q,
-          confidence: null,
-          last_at: created_at,
-        } as any,
-        { onConflict: 'user_code' },
-      );
+    const { error } = await client.from('q_code_status').upsert(
+      {
+        user_code,
+        current_q: q,
+        depth_stage: stage,
+        updated_at: created_at,
+        q_hint: q,
+        confidence: null,
+        last_at: created_at,
+      } as any,
+      { onConflict: 'user_code' },
+    );
     if (error) throw error;
   } catch (e: any) {
     console.warn('[qcode/record] upsert q_code_status warn:', e?.message || e);
@@ -257,25 +263,39 @@ export async function recordQ(args: RecordQArgs) {
 /* =========================
  * エージェント別ラッパ
  * ========================= */
-export async function recordQFromMu(args: Omit<RecordQArgs, 'source_type'> & { source_type?: string }) {
+export async function recordQFromMu(
+  args: Omit<RecordQArgs, 'source_type'> & { source_type?: string },
+) {
   return recordQ({ source_type: 'muai', ...args });
 }
-export async function recordQFromMirra(args: Omit<RecordQArgs, 'source_type'> & { source_type?: string }) {
+export async function recordQFromMirra(
+  args: Omit<RecordQArgs, 'source_type'> & { source_type?: string },
+) {
   return recordQ({ source_type: 'mirra', ...args });
 }
-export async function recordQFromSofia(args: Omit<RecordQArgs, 'source_type'> & { source_type?: string }) {
+export async function recordQFromSofia(
+  args: Omit<RecordQArgs, 'source_type'> & { source_type?: string },
+) {
   return recordQ({ source_type: 'sofia', ...args });
 }
-export async function recordQFromVision(args: Omit<RecordQArgs, 'source_type'> & { source_type?: string }) {
+export async function recordQFromVision(
+  args: Omit<RecordQArgs, 'source_type'> & { source_type?: string },
+) {
   return recordQ({ source_type: 'vision', ...args });
 }
-export async function recordQFromSelf(args: Omit<RecordQArgs, 'source_type'> & { source_type?: string }) {
+export async function recordQFromSelf(
+  args: Omit<RecordQArgs, 'source_type'> & { source_type?: string },
+) {
   return recordQ({ source_type: 'self', ...args });
 }
-export async function recordQFromComment(args: Omit<RecordQArgs, 'source_type'> & { source_type?: string }) {
+export async function recordQFromComment(
+  args: Omit<RecordQArgs, 'source_type'> & { source_type?: string },
+) {
   return recordQ({ source_type: 'comment', ...args });
 }
-export async function recordQFromEvent(args: Omit<RecordQArgs, 'source_type'> & { source_type?: string }) {
+export async function recordQFromEvent(
+  args: Omit<RecordQArgs, 'source_type'> & { source_type?: string },
+) {
   return recordQ({ source_type: 'event', ...args });
 }
 
@@ -283,7 +303,8 @@ export async function recordQFromEvent(args: Omit<RecordQArgs, 'source_type'> & 
  * バッチ / 簡易
  * ========================= */
 export async function recordQBatch(items: RecordQArgs[]) {
-  const results: Array<{ ok: true; value: any } | { ok: false; error: any; input: RecordQArgs }> = [];
+  const results: Array<{ ok: true; value: any } | { ok: false; error: any; input: RecordQArgs }> =
+    [];
   for (const it of items) {
     try {
       const x = await recordQ(it);

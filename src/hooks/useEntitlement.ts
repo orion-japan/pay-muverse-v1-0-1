@@ -30,7 +30,9 @@ export function useEntitlement(userId: string | null | undefined) {
     }
   }
 
-  useEffect(() => { refresh(); /* eslint-disable-next-line */ }, [userId]);
+  useEffect(() => {
+    refresh(); /* eslint-disable-next-line */
+  }, [userId]);
 
   return { loading, entitlement, prices, error, refresh };
 }

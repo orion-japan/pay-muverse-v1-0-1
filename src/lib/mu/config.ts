@@ -43,10 +43,7 @@ function envStringMulti(fallback: string, ...names: string[]): string {
 }
 
 /* 追加：ログ詳細の環境値を安全に収束させる（フォールバック付き） */
-function envLogDetailMulti(
-  fallback: 'off' | 'lite',
-  ...names: string[]
-): 'off' | 'lite' {
+function envLogDetailMulti(fallback: 'off' | 'lite', ...names: string[]): 'off' | 'lite' {
   const raw = (getEnvMulti(...names) || '').toLowerCase();
   return raw === 'off' ? 'off' : raw === 'lite' ? 'lite' : fallback;
 }
@@ -85,12 +82,10 @@ export const MU_BRIDGE_TEXT = {
 export const MU_SAFETY = {
   MEDICAL:
     '医療情報は一般的な内容にとどめます。具体の判断や検査は医療機関での確認をご検討ください。',
-  LEGAL:
-    '法的な判断は最終的に専門家へご相談ください。ここでは一般情報の範囲でお答えします。',
+  LEGAL: '法的な判断は最終的に専門家へご相談ください。ここでは一般情報の範囲でお答えします。',
   FINANCE:
     '投資や資産運用にはリスクがあります。最終判断はご自身で行い、必要に応じて専門家へご相談ください。',
-  MINOR:
-    '未成年への配慮を優先し、個人が特定される情報の扱いには注意します。',
+  MINOR: '未成年への配慮を優先し、個人が特定される情報の扱いには注意します。',
 } as const;
 
 /** 会話トーン・ルール */
@@ -120,8 +115,7 @@ export const MU_KPI = {
 /** UI用短文 */
 export const MU_UI_TEXT = {
   AGENT_DISPLAY_NAME: 'Mu（会話特化）',
-  AGENT_DESC:
-    'ゆとりある会話で意図をすばやく掴み、小さな次の一歩につなげます（深掘りは控えめ）。',
+  AGENT_DESC: 'ゆとりある会話で意図をすばやく掴み、小さな次の一歩につなげます（深掘りは控えめ）。',
   ASK_INTENT_AB: '（例：A／B／その他）※自由入力もOKです。',
   NEXT_ACTIONS_TITLE: '次アクション',
   DONE_NEXT_STEP: '次の一歩',

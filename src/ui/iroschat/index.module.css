@@ -1,0 +1,443 @@
+/* ========= IrosChat base (light transparent version) ========= */
+
+
+/* ---- App Layout ---- */
+.app {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  grid-template-rows: 100dvh;
+  background: transparent;
+  color: #111827;
+}
+
+.sidebar {
+  border-right: 1px solid rgba(0, 0, 0, 0.06);
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(6px);
+}
+
+.content {
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: 100%;
+  overflow: hidden;
+}
+
+/* ---- Sidebar ---- */
+.sidebarInner {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 14px 12px;
+}
+
+.brandLine {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 6px 14px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.brandDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #6ee7f5, #a78bfa);
+  box-shadow: 0 0 8px rgba(167, 139, 250, 0.4);
+}
+
+.brandTitle {
+  font-weight: 700;
+  line-height: 1.1;
+}
+.brandSub {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 4px;
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px;
+  border-radius: 10px;
+  text-decoration: none;
+  color: #1f2937;
+  border: 1px solid transparent;
+}
+.navItem:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+.navActive {
+  background: rgba(167, 139, 250, 0.12);
+  border-color: rgba(167, 139, 250, 0.25);
+}
+.navIcon {
+  width: 20px;
+  text-align: center;
+}
+
+.sidebarBottom {
+  margin-top: auto;
+  padding: 10px 6px 6px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+.tip {
+  font-size: 12px;
+  opacity: 0.7;
+  line-height: 1.6;
+}
+
+/* ---- Chat Page ---- */
+.page {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100%;
+  background: linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
+  overflow: auto;
+  overflow-x: hidden;
+  border-radius: 12px;
+}
+
+/* ヘッダー（固定） */
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 400;
+  padding: 12px 16px 10px;
+  background: rgba(255, 255, 255, 0.9);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #6ee7f5, #a78bfa);
+  box-shadow: 0 0 10px rgba(167, 139, 250, 0.5);
+}
+
+.title {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0.3px;
+}
+.subtitle {
+  margin: 6px 0 0;
+  opacity: 0.6;
+  font-size: 13px;
+}
+
+/* メイン */
+.main {
+  overflow: visible;
+  padding-top: 4px;
+}
+
+/* ===== タイムライン ===== */
+.timeline {
+  position: relative;
+  padding: 12px 16px calc(24px + var(--footer-safe-pad) + var(--chat-offset));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.emptyHint {
+  margin: 14px auto;
+  font-size: 13px;
+  opacity: 0.5;
+}
+
+/* 行コンテナ */
+.msgRow,
+.msgUser,
+.msgBot {
+  width: 100%;
+  display: flex;
+  gap: 8px;
+}
+.msgUser {
+  justify-content: flex-end;
+  align-items: flex-end;
+}
+.msgBot {
+  justify-content: flex-start;
+  align-items: flex-start;
+}
+
+/* バッジ */
+.msgBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: #fff;
+  color: #334155;
+  margin-bottom: 6px;
+}
+
+/* 吹き出し */
+.msgBubble {
+  max-width: min(680px, 86%);
+  padding: 10px 12px;
+  border-radius: var(--sofia-a-radius);
+  word-break: break-word;
+  white-space: pre-wrap;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+/* AI側 */
+.msgBot .msgBubble {
+  background: var(--sofia-a-bg-grad);
+  border: var(--sofia-a-border);
+  box-shadow: var(--sofia-a-shadow);
+  color: #0f172a;
+}
+
+/* ユーザー側 */
+.msgUser .msgBubble {
+  background: var(--sofia-u-bg-grad);
+  border: var(--sofia-u-border);
+  box-shadow: var(--sofia-u-shadow);
+  color: #0b1220;
+  border-radius: 16px;
+}
+
+/* テキスト */
+.msgText {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.85;
+  letter-spacing: 0.01em;
+}
+
+/* ローディング */
+.loadingRow {
+  display: flex;
+  gap: 6px;
+  padding: 6px 2px;
+  align-items: center;
+}
+.dotAnim {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #94a3b8;
+  opacity: 0.8;
+  animation: sofDots 1.3s infinite ease-in-out;
+}
+.dotAnim:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.dotAnim:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes sofDots {
+  0%,
+  80%,
+  100% {
+    transform: scale(0.7);
+    opacity: 0.55;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.error {
+  color: #b42318;
+  font-size: 13px;
+  background: #fff5f5;
+  border: 1px solid rgba(180, 35, 24, 0.28);
+  padding: 8px 10px;
+  border-radius: 10px;
+  max-width: 680px;
+}
+
+/* フッター */
+.footer {
+  padding: 10px 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(10px);
+  border-radius: 0 0 12px 12px;
+}
+
+/* 入力フォーム */
+.inputBar {
+  display: grid;
+  grid-template-columns: 1fr 88px;
+  gap: 8px;
+}
+.input {
+  background: #fff;
+  color: #1e293b;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  padding: 12px 12px;
+  outline: none;
+}
+.input:focus {
+  border-color: #a78bfa;
+  box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.2);
+}
+
+.btn {
+  background: linear-gradient(135deg, #6ee7f5, #a78bfa);
+  border: none;
+  border-radius: 10px;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* フルブリード補助 */
+.appFullBleed {
+  width: 100vw;
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
+}
+
+
+/* === Headerを完全固定 === */
+.header {
+  position: fixed !important;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 500;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  height: 56px;
+}
+
+/* 下の要素が隠れないように補正 */
+.page {
+  padding-top: 56px !important;
+}
+
+
+
+/* ---- Iros Header alignment fix ---- */
+.sof-header {
+  max-width: 680px;               /* 💡 チャット本体と同じ最大幅に合わせる */
+  margin: 0 auto;                 /* 中央寄せ */
+  left: 0;
+  right: 0;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: #fff;
+  border-bottom: 1px solid #e6e6ee;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+
+
+
+/* ===== Shellで使用しているクラスの最低限定義 ===== */
+
+.sof-layout {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: 100dvh;
+}
+
+.sof-page {
+  display: contents; /* grid行をそのまま使う */
+}
+
+.sof-main {
+  overflow: auto;
+}
+
+.sof-timeline {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 16px;
+  /* 入力欄に隠れないように下余白を確保 */
+  padding-bottom: calc(var(--footer-safe-pad, 56px) + 120px);
+}
+
+.sof-footer-spacer {
+  height: 0; /* スペーサーDOMはあるが見た目不要な場合 */
+}
+
+.sof-underlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+
+
+
+/* index.module.css など */
+.msgUser,
+.msgBot {
+  display: flex;
+  align-items: flex-end; /* ← 下揃え */
+  gap: 10px;
+}
+
+.msgUser {
+  justify-content: flex-end;
+}
+
+.msgBot {
+  justify-content: flex-start;
+}
+.msgBubble {
+  max-width: 86%;
+  padding: 10px 14px;
+  border-radius: 16px;
+  line-height: 1.8;
+  letter-spacing: 0.01em;
+  word-break: break-word;
+}
+
+.msgUser .msgBubble {
+  background: linear-gradient(180deg, #ffffff 0%, #eef5ff 100%);
+  border: 1px solid #cfe0ff;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06), 0 8px 24px rgba(30, 64, 175, 0.06);
+}
+
+.msgBot .msgBubble {
+  background: linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
+  border: 1px solid #e6eaf2;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06), 0 8px 24px rgba(2, 6, 23, 0.05);
+}

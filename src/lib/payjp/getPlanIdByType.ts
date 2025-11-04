@@ -1,4 +1,4 @@
-import Payjp from "payjp";
+import Payjp from 'payjp';
 
 const payjp = Payjp(process.env.PAYJP_SECRET_KEY!);
 
@@ -8,10 +8,12 @@ const payjp = Payjp(process.env.PAYJP_SECRET_KEY!);
 export async function getPlanIdByType(planType: string): Promise<string | null> {
   try {
     const plans = await payjp.plans.list({ limit: 100 }); // 最大取得
-    const matched = plans.data.find(plan => plan.metadata?.plan_type === planType || plan.id.includes(planType));
+    const matched = plans.data.find(
+      (plan) => plan.metadata?.plan_type === planType || plan.id.includes(planType),
+    );
     return matched?.id || null;
   } catch (error) {
-    console.error("🔴 getPlanIdByType エラー:", error);
+    console.error('🔴 getPlanIdByType エラー:', error);
     return null;
   }
 }

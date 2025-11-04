@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! // server-only
+  process.env.SUPABASE_SERVICE_ROLE_KEY!, // server-only
 );
 
 // Supabase の URL または相対パスから、/api/media に渡す src を作る
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
         visibility,
         board_type,
         created_at
-      `
+      `,
       )
       .eq('user_code', user_code)
       .order('created_at', { ascending: false });
@@ -75,31 +75,30 @@ export async function POST(req: NextRequest) {
     }
 
     // 返却前に media_urls を /api/media に正規化（期限切れの署名URLは配らない）
-    const normalized =
-      (rows || [])
-        // 任意: アルバムは private だけにしたい場合は以下を有効化
-        // .filter((p) => p.visibility === 'private')
-        .map((p) => {
-          const list = Array.isArray(p.media_urls) ? p.media_urls : [];
-          const proxied = list
-            .map((item) => (typeof item === 'string' ? item : String(item)))
-            .map(toMediaProxySrc)
-            .filter(Boolean);
+    const normalized = (rows || [])
+      // 任意: アルバムは private だけにしたい場合は以下を有効化
+      // .filter((p) => p.visibility === 'private')
+      .map((p) => {
+        const list = Array.isArray(p.media_urls) ? p.media_urls : [];
+        const proxied = list
+          .map((item) => (typeof item === 'string' ? item : String(item)))
+          .map(toMediaProxySrc)
+          .filter(Boolean);
 
-          return {
-            ...p,
-            media_urls: proxied,
-          };
-        })
-        // 画像が1枚もない投稿は落とす（アルバム用途なので）
-        .filter((p) => p.media_urls.length > 0);
+        return {
+          ...p,
+          media_urls: proxied,
+        };
+      })
+      // 画像が1枚もない投稿は落とす（アルバム用途なので）
+      .filter((p) => p.media_urls.length > 0);
 
     return NextResponse.json(
       { posts: normalized },
       {
         status: 200,
         headers: { 'Cache-Control': 'no-store' },
-      }
+      },
     );
   } catch (e: any) {
     console.error('[my-posts] unexpected error:', e?.message || e);

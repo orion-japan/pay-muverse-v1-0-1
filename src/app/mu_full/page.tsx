@@ -5,8 +5,7 @@ import { useAuth } from '@/context/AuthContext'; // Firebase認証用のContext
 
 const FOOTER_H = 60;
 // 既存の環境変数は残す（フォールバック用・ログ用）
-const MU_UI_URL =
-  (process.env.NEXT_PUBLIC_MU_UI_URL ?? 'https://m.muverse.jp').replace(/\/+$/, '');
+const MU_UI_URL = (process.env.NEXT_PUBLIC_MU_UI_URL ?? 'https://m.muverse.jp').replace(/\/+$/, '');
 
 export default function MuFullPage() {
   const { user, loading } = useAuth();
@@ -53,7 +52,7 @@ export default function MuFullPage() {
         clearTimeout(timer);
 
         console.log('[mu_full] 📥 /api/resolve-user ステータス:', res.status);
-        const json = await res.json().catch(() => ({} as any));
+        const json = await res.json().catch(() => ({}) as any);
 
         if (!res.ok || !json?.ok) {
           console.error('[mu_full] ❌ resolve-user 応答エラー:', json);

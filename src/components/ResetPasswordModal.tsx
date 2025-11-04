@@ -1,44 +1,44 @@
-'use client'
-import { useState } from 'react'
-import '../styles/loginmodal.css'
-import { sendPasswordResetEmail } from 'firebase/auth'
+'use client';
+import { useState } from 'react';
+import '../styles/loginmodal.css';
+import { sendPasswordResetEmail } from 'firebase/auth';
 import { auth } from '@/lib/firebase'; // ✅ これが必要です（authのエクスポートを確認してください）
 
 type Props = {
-  isOpen: boolean
-  onClose: () => void
-}
+  isOpen: boolean;
+  onClose: () => void;
+};
 
 export default function ResetPasswordModal({ isOpen, onClose }: Props) {
-  const [email, setEmail] = useState('')
-  const [message, setMessage] = useState('')
-  const [error, setError] = useState('')
-  const [isSent, setIsSent] = useState(false) // ✅ 送信後フラグ
+  const [email, setEmail] = useState('');
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [isSent, setIsSent] = useState(false); // ✅ 送信後フラグ
 
   const handleReset = async () => {
-    setMessage('')
-    setError('')
+    setMessage('');
+    setError('');
 
     if (!email.includes('@')) {
-      setError('有効なメールアドレスを入力してください')
-      return
+      setError('有効なメールアドレスを入力してください');
+      return;
     }
 
     try {
-      await sendPasswordResetEmail(auth, email)
-      setMessage('📩 パスワード再設定メールを送信しました。メールをご確認ください。')
-      setIsSent(true) // ✅ 送信済みに変更
+      await sendPasswordResetEmail(auth, email);
+      setMessage('📩 パスワード再設定メールを送信しました。メールをご確認ください。');
+      setIsSent(true); // ✅ 送信済みに変更
     } catch (err: any) {
-      console.error('❌ パスワード再設定エラー:', err)
+      console.error('❌ パスワード再設定エラー:', err);
       if (err.code === 'auth/user-not-found') {
-        setError('このメールアドレスは登録されていません')
+        setError('このメールアドレスは登録されていません');
       } else {
-        setError('再設定に失敗しました。メールアドレスを確認してください')
+        setError('再設定に失敗しました。メールアドレスを確認してください');
       }
     }
-  }
+  };
 
-  if (!isOpen) return null
+  if (!isOpen) return null;
 
   return (
     <div className="modal-overlay">
@@ -71,5 +71,5 @@ export default function ResetPasswordModal({ isOpen, onClose }: Props) {
         </div>
       </div>
     </div>
-  )
+  );
 }

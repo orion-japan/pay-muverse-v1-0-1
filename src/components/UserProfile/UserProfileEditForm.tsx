@@ -7,7 +7,7 @@ import './ProfileBox.css';
 type MyData = {
   // users 側
   user_code: string;
-  name: string;           // = users.click_username と同期
+  name: string; // = users.click_username と同期
   click_email?: string | null;
   headline?: string | null;
   mission?: string | null;
@@ -136,9 +136,19 @@ export default function UserProfileEditForm() {
     };
   }
 
-  if (loading) return <div className="profile-box"><p>読み込み中…</p></div>;
+  if (loading)
+    return (
+      <div className="profile-box">
+        <p>読み込み中…</p>
+      </div>
+    );
 
-  if (!data) return <div className="profile-box error"><p>{msg || 'データなし'}</p></div>;
+  if (!data)
+    return (
+      <div className="profile-box error">
+        <p>{msg || 'データなし'}</p>
+      </div>
+    );
 
   return (
     <div className="edit-wrapper">
@@ -160,7 +170,12 @@ export default function UserProfileEditForm() {
           </label>
           <label>
             ひとこと肩書き（headline）
-            <input type="text" maxLength={80} {...field('headline')} placeholder="例：しあわせ伝道師" />
+            <input
+              type="text"
+              maxLength={80}
+              {...field('headline')}
+              placeholder="例：しあわせ伝道師"
+            />
           </label>
           <label>
             所属（organization）
@@ -193,7 +208,11 @@ export default function UserProfileEditForm() {
           </label>
           <label>
             募集中・求めていること（looking_for）
-            <textarea rows={3} {...field('looking_for')} placeholder="例：仲間募集 / 共同研究 など" />
+            <textarea
+              rows={3}
+              {...field('looking_for')}
+              placeholder="例：仲間募集 / 共同研究 など"
+            />
           </label>
         </div>
       </section>
@@ -201,22 +220,28 @@ export default function UserProfileEditForm() {
       <section className="mu-card">
         <h2>SNS / リンク</h2>
         <div className="grid-3">
-          <label>X
+          <label>
+            X
             <input type="text" {...field('x_handle')} placeholder="@your_handle" />
           </label>
-          <label>Instagram
+          <label>
+            Instagram
             <input type="text" {...field('instagram')} placeholder="@your_ig" />
           </label>
-          <label>Facebook
+          <label>
+            Facebook
             <input type="text" {...field('facebook')} placeholder="facebook.com/..." />
           </label>
-          <label>LinkedIn
+          <label>
+            LinkedIn
             <input type="text" {...field('linkedin')} placeholder="linkedin.com/in/..." />
           </label>
-          <label>YouTube
+          <label>
+            YouTube
             <input type="text" {...field('youtube')} placeholder="youtube.com/@..." />
           </label>
-          <label>Website
+          <label>
+            Website
             <input type="url" {...field('website_url')} placeholder="https://..." />
           </label>
         </div>
@@ -225,7 +250,8 @@ export default function UserProfileEditForm() {
       <section className="mu-card">
         <h2>スキル / 興味 / 言語</h2>
         <div className="grid-3">
-          <label>skills（カンマ区切り）
+          <label>
+            skills（カンマ区切り）
             <input
               type="text"
               value={toCsv(data.skills || [])}
@@ -233,28 +259,37 @@ export default function UserProfileEditForm() {
               placeholder="design, nextjs, supabase"
             />
           </label>
-          <label>interests（カンマ区切り）
+          <label>
+            interests（カンマ区切り）
             <input
               type="text"
               value={toCsv(data.interests || [])}
-              onChange={(e) => setData((d) => ({ ...(d as any), interests: toArr(e.target.value) }))}
+              onChange={(e) =>
+                setData((d) => ({ ...(d as any), interests: toArr(e.target.value) }))
+              }
               placeholder="ai, resonance, art"
             />
           </label>
-          <label>languages（カンマ区切り）
+          <label>
+            languages（カンマ区切り）
             <input
               type="text"
               value={toCsv(data.languages || [])}
-              onChange={(e) => setData((d) => ({ ...(d as any), languages: toArr(e.target.value) }))}
+              onChange={(e) =>
+                setData((d) => ({ ...(d as any), languages: toArr(e.target.value) }))
+              }
               placeholder="ja, en"
             />
           </label>
         </div>
-        <label>activity_area（カンマ区切り）
+        <label>
+          activity_area（カンマ区切り）
           <input
             type="text"
             value={toCsv(data.activity_area || [])}
-            onChange={(e) => setData((d) => ({ ...(d as any), activity_area: toArr(e.target.value) }))}
+            onChange={(e) =>
+              setData((d) => ({ ...(d as any), activity_area: toArr(e.target.value) }))
+            }
             placeholder="tokyo, yokohama"
           />
         </label>

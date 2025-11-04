@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 export async function POST(req: NextRequest) {
   try {
@@ -7,7 +7,7 @@ export async function POST(req: NextRequest) {
     const { name, action, multiplier, bonus, start_at, end_at, expires_after_days } = body;
 
     const { data, error } = await supabaseAdmin
-      .from("credit_promotions")
+      .from('credit_promotions')
       .insert({
         name,
         action,
@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
         end_at,
         expires_after_days,
       })
-      .select("*")
+      .select('*')
       .single();
 
     if (error) throw error;

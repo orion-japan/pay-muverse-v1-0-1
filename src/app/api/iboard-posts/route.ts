@@ -19,12 +19,13 @@ async function fetchPublic(board: string | null) {
   if (error) throw error;
 
   // privateストレージ画像は除外（保険）
-  const filtered = (data || []).filter((p) =>
-    Array.isArray(p.media_urls) &&
-    p.media_urls.every((u: any) => {
-      const url = typeof u === 'string' ? u : u?.url || '';
-      return url && !url.includes('/private-posts/');
-    })
+  const filtered = (data || []).filter(
+    (p) =>
+      Array.isArray(p.media_urls) &&
+      p.media_urls.every((u: any) => {
+        const url = typeof u === 'string' ? u : u?.url || '';
+        return url && !url.includes('/private-posts/');
+      }),
   );
   return filtered;
 }

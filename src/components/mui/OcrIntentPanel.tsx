@@ -43,12 +43,7 @@ type Props = {
   onClose?: () => void;
 };
 
-export default function OcrIntentPanel({
-  user_code,
-  defaultText = '',
-  onSaved,
-  onClose,
-}: Props) {
+export default function OcrIntentPanel({ user_code, defaultText = '', onSaved, onClose }: Props) {
   const [seedId, setSeedId] = useState('');
   const [intent, setIntent] = useState<'scan' | 'analyze' | 'escalate'>('scan');
   const [memo, setMemo] = useState(defaultText);
@@ -66,7 +61,7 @@ export default function OcrIntentPanel({
       layer18: 'R3',
       guardrails: ['断定禁止', '選択肢は2つ', '行動は1つ'],
     }),
-    []
+    [],
   );
 
   const intentLabel = useMemo(() => {
@@ -195,45 +190,106 @@ export default function OcrIntentPanel({
       </footer>
 
       <style jsx>{`
-        .ocr-intent{
-          background: linear-gradient(180deg,#ffffff,#fafaff);
-          border: 1px solid rgba(0,0,0,.06);
+        .ocr-intent {
+          background: linear-gradient(180deg, #ffffff, #fafaff);
+          border: 1px solid rgba(0, 0, 0, 0.06);
           border-radius: 16px;
           padding: 14px;
-          box-shadow: 0 10px 28px rgba(0,0,0,.06);
+          box-shadow: 0 10px 28px rgba(0, 0, 0, 0.06);
         }
-        .head{
-          display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:10px;
+        .head {
+          display: flex;
+          align-items: flex-end;
+          justify-content: space-between;
+          gap: 12px;
+          margin-bottom: 10px;
         }
-        .eyebrow{ font-size:12px; color:#6b6f86; letter-spacing:.08em; }
-        .h2{ margin:4px 0; font-size:18px; font-weight:800; }
-        .muted{ color:#6b6f86; margin:0; }
-        .flash{
-          background: linear-gradient(180deg,#f0e9ff, #ffe6f6);
-          border:1px solid rgba(129,103,255,.25);
-          padding:8px 10px; border-radius:10px; margin:8px 0 10px; color:#3b3366;
+        .eyebrow {
+          font-size: 12px;
+          color: #6b6f86;
+          letter-spacing: 0.08em;
         }
-        .section{ margin: 10px 0; }
-        .label{ font-weight:700; margin-bottom:6px; }
-        .radios{ display: grid; gap: 6px; }
-        .radio{
-          display:flex; gap:8px; align-items:center;
-          padding:8px 10px; border-radius:12px; border:1px solid #e5e7eb; background:#fff;
+        .h2 {
+          margin: 4px 0;
+          font-size: 18px;
+          font-weight: 800;
         }
-        .radio.on{ border-color:#c7d2fe; background:#eef2ff; }
-        .ta{
-          width:100%; resize:vertical; min-height:84px;
-          border:1px solid #e5e7eb; border-radius:12px; padding:10px; background:#fff;
+        .muted {
+          color: #6b6f86;
+          margin: 0;
         }
-        .foot{ display:flex; align-items:center; gap:8px; margin-top:12px; }
-        .spacer{ flex:1; }
-        .btn{
-          appearance:none; cursor:pointer; border-radius:12px; padding:9px 14px;
-          background:#fff; border:1px solid #e5e7eb; color:#111827; font-weight:600;
+        .flash {
+          background: linear-gradient(180deg, #f0e9ff, #ffe6f6);
+          border: 1px solid rgba(129, 103, 255, 0.25);
+          padding: 8px 10px;
+          border-radius: 10px;
+          margin: 8px 0 10px;
+          color: #3b3366;
         }
-        .btn.ghost{ background:#f9fafb; }
-        .btn.primary{ background:#4f46e5; border-color:#4f46e5; color:#fff; }
-        .btn:disabled{ opacity:.6; cursor:default; }
+        .section {
+          margin: 10px 0;
+        }
+        .label {
+          font-weight: 700;
+          margin-bottom: 6px;
+        }
+        .radios {
+          display: grid;
+          gap: 6px;
+        }
+        .radio {
+          display: flex;
+          gap: 8px;
+          align-items: center;
+          padding: 8px 10px;
+          border-radius: 12px;
+          border: 1px solid #e5e7eb;
+          background: #fff;
+        }
+        .radio.on {
+          border-color: #c7d2fe;
+          background: #eef2ff;
+        }
+        .ta {
+          width: 100%;
+          resize: vertical;
+          min-height: 84px;
+          border: 1px solid #e5e7eb;
+          border-radius: 12px;
+          padding: 10px;
+          background: #fff;
+        }
+        .foot {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-top: 12px;
+        }
+        .spacer {
+          flex: 1;
+        }
+        .btn {
+          appearance: none;
+          cursor: pointer;
+          border-radius: 12px;
+          padding: 9px 14px;
+          background: #fff;
+          border: 1px solid #e5e7eb;
+          color: #111827;
+          font-weight: 600;
+        }
+        .btn.ghost {
+          background: #f9fafb;
+        }
+        .btn.primary {
+          background: #4f46e5;
+          border-color: #4f46e5;
+          color: #fff;
+        }
+        .btn:disabled {
+          opacity: 0.6;
+          cursor: default;
+        }
       `}</style>
     </div>
   );

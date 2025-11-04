@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SERVICE_ROLE =
-  process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 type ConvRow = {
   user_code: string;
@@ -40,19 +39,23 @@ export async function GET(req: NextRequest) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
     // 2) JS側でユーザー集計
-    const agg = new Map<string, { user_code: string; last_turn_at: string | null; conversations: number }>();
+    const agg = new Map<
+      string,
+      { user_code: string; last_turn_at: string | null; conversations: number }
+    >();
     for (const r of (data || []) as ConvRow[]) {
       if (!r.user_code) continue;
       const last = r.last_turn_at || r.created_at || null;
       const cur = agg.get(r.user_code);
-      if (!cur) agg.set(r.user_code, { user_code: r.user_code, last_turn_at: last, conversations: 1 });
+      if (!cur)
+        agg.set(r.user_code, { user_code: r.user_code, last_turn_at: last, conversations: 1 });
       else {
         cur.conversations += 1;
         if (last && (!cur.last_turn_at || last > cur.last_turn_at)) cur.last_turn_at = last;
       }
     }
-    let users = Array.from(agg.values());
-    const codes = users.map(u => u.user_code);
+    const users = Array.from(agg.values());
+    const codes = users.map((u) => u.user_code);
 
     // 3) 表示名の解決：users.click_username を最優先
     const nameMap: Record<string, string> = {};
@@ -60,46 +63,58 @@ export async function GET(req: NextRequest) {
     // 3-1) users.user_code が存在する構成
     for (const part of chunk(codes, 1000)) {
       try {
-        const { data: uByCode } =
-          await sb.from('users').select('user_code,click_username').in('user_code', part) as unknown as { data: UsersByCode[] | null };
+        const { data: uByCode } = (await sb
+          .from('users')
+          .select('user_code,click_username')
+          .in('user_code', part)) as unknown as { data: UsersByCode[] | null };
         for (const u of uByCode ?? []) {
           if (u.user_code && (u.click_username ?? '') !== '') {
             nameMap[u.user_code] = u.click_username as string;
           }
         }
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
     }
 
     // 3-2) user_q_codes(code → user_id) 経由で users.id → click_username を引く構成
-    const missing = codes.filter(c => !nameMap[c]);
+    const missing = codes.filter((c) => !nameMap[c]);
     if (missing.length) {
-      let codeToId: Record<string, string> = {};
+      const codeToId: Record<string, string> = {};
       for (const part of chunk(missing, 1000)) {
         try {
-          const { data: mapRows } =
-            await sb.from('user_q_codes').select('code,user_id').in('code', part) as unknown as { data: CodeToIdRow[] | null };
+          const { data: mapRows } = (await sb
+            .from('user_q_codes')
+            .select('code,user_id')
+            .in('code', part)) as unknown as { data: CodeToIdRow[] | null };
           for (const r of mapRows ?? []) {
             if (r.code && r.user_id) codeToId[r.code] = r.user_id;
           }
-        } catch { /* noop */ }
+        } catch {
+          /* noop */
+        }
       }
       const ids = Object.values(codeToId);
       for (const part of chunk(ids, 1000)) {
         try {
-          const { data: uById } =
-            await sb.from('users').select('id,click_username').in('id', part) as unknown as { data: UsersById[] | null };
+          const { data: uById } = (await sb
+            .from('users')
+            .select('id,click_username')
+            .in('id', part)) as unknown as { data: UsersById[] | null };
           for (const u of uById ?? []) {
-            const code = Object.keys(codeToId).find(c => codeToId[c] === u.id);
+            const code = Object.keys(codeToId).find((c) => codeToId[c] === u.id);
             if (code && (u.click_username ?? '') !== '' && !nameMap[code]) {
               nameMap[code] = u.click_username as string;
             }
           }
-        } catch { /* noop */ }
+        } catch {
+          /* noop */
+        }
       }
     }
 
     // 4) 整形・検索・並び・件数
-    let items = users.map(u => ({
+    let items = users.map((u) => ({
       user_code: u.user_code,
       name: nameMap[u.user_code] || u.user_code, // ← 取得できなければコードを表示
       conversations: u.conversations,
@@ -108,9 +123,8 @@ export async function GET(req: NextRequest) {
 
     if (q) {
       const k = q.toLowerCase();
-      items = items.filter(x =>
-        x.user_code.toLowerCase().includes(k) ||
-        (x.name || '').toLowerCase().includes(k)
+      items = items.filter(
+        (x) => x.user_code.toLowerCase().includes(k) || (x.name || '').toLowerCase().includes(k),
       );
     }
 

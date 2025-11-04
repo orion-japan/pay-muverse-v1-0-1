@@ -7,10 +7,7 @@ export async function POST(req: Request) {
 
   const { user_code, ...updateData } = body;
 
-  const { error } = await supabase
-    .from('profiles')
-    .update(updateData)
-    .eq('user_code', user_code);
+  const { error } = await supabase.from('profiles').update(updateData).eq('user_code', user_code);
 
   if (error) {
     return NextResponse.json({ success: false, error });

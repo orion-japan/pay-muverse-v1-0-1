@@ -35,22 +35,15 @@ async function getWebpushSafe() {
   return _webpush;
 }
 
-type Kind =
-  | 'ftalk'
-  | 'rtalk'
-  | 'event'
-  | 'live'
-  | 'ai'
-  | 'credit'
-  | 'generic';
+type Kind = 'ftalk' | 'rtalk' | 'event' | 'live' | 'ai' | 'credit' | 'generic';
 
 type SendBody = {
-  user_code: string;         // 受信者
-  kind?: Kind;               // 種別（consents判定用）
+  user_code: string; // 受信者
+  kind?: Kind; // 種別（consents判定用）
   title?: string;
   body?: string;
-  url?: string;              // クリック遷移先
-  tag?: string;              // 重複抑止用
+  url?: string; // クリック遷移先
+  tag?: string; // 重複抑止用
   renotify?: boolean;
   vibration?: boolean | number[]; // 上書きしたい場合（通常は consents で自動）
   icon?: string;
@@ -89,7 +82,10 @@ async function getSubscriptions(user_code: string) {
 }
 
 async function deleteSubscription(endpoint: string) {
-  console.warn('[push/send] deleting invalid subscription (410/404). endpoint suffix=', endpoint.slice(-24));
+  console.warn(
+    '[push/send] deleting invalid subscription (410/404). endpoint suffix=',
+    endpoint.slice(-24),
+  );
   await supabase.from('push_subscriptions').delete().eq('endpoint', endpoint);
 }
 
@@ -155,9 +151,7 @@ export async function POST(req: NextRequest) {
 
     // vibration の最終決定
     const vibrationEnabled =
-      typeof vibration !== 'undefined'
-        ? vibration
-        : consents.vibration !== false;
+      typeof vibration !== 'undefined' ? vibration : consents.vibration !== false;
 
     // ✅ デフォルト icon / badge を必ず付与
     const payload = {
@@ -179,8 +173,11 @@ export async function POST(req: NextRequest) {
     const webpush = await getWebpushSafe();
     if (!webpush) {
       return NextResponse.json(
-        { error: 'Server VAPID keys are missing. Set NEXT_PUBLIC_VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY.' },
-        { status: 500 }
+        {
+          error:
+            'Server VAPID keys are missing. Set NEXT_PUBLIC_VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY.',
+        },
+        { status: 500 },
       );
     }
 
@@ -209,7 +206,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (debug) console.log('[push/send] results:', results.map(r => ({ ok: r.ok, status: r.status, end: r.endpoint.slice(-24) })));
+    if (debug)
+      console.log(
+        '[push/send] results:',
+        results.map((r) => ({ ok: r.ok, status: r.status, end: r.endpoint.slice(-24) })),
+      );
 
     return NextResponse.json({
       ok: true,

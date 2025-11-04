@@ -18,7 +18,7 @@ export function buildUserPrompt(
   rawText: string,
   summary: string,
   goal?: string,
-  userReply?: string
+  userReply?: string,
 ): string {
   const lines: string[] = [];
   lines.push(`フェーズ: ${phase}`);

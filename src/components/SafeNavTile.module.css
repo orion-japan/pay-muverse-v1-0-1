@@ -1,19 +1,18 @@
 /* CSS Modules はクラス名の衝突が起きにくいので確実 */
 .locked {
-    pointer-events: none !important;  /* 念のため !important */
-    filter: grayscale(1) brightness(1.1) !important;
-    opacity: .55 !important;
-    position: relative; /* 疑似白膜の土台 */
-  }
-  
-  /* 擬似白膜（インラインでも上でフォールバック済みだが、こちらも適用） */
-  .locked::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: #fff;
-    opacity: .35;
-    border-radius: inherit;
-    pointer-events: none;
-  }
-  
+  pointer-events: none !important; /* 念のため !important */
+  filter: grayscale(1) brightness(1.1) !important;
+  opacity: 0.55 !important;
+  position: relative; /* 疑似白膜の土台 */
+}
+
+/* 擬似白膜（インラインでも上でフォールバック済みだが、こちらも適用） */
+.locked::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  opacity: 0.35;
+  border-radius: inherit;
+  pointer-events: none;
+}

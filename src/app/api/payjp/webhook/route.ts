@@ -9,7 +9,11 @@ export async function POST(req: NextRequest) {
   const signature = req.headers.get('payjp-signature');
 
   try {
-    const event = payjp.webhooks.constructEvent(body, signature!, process.env.PAYJP_WEBHOOK_SECRET!);
+    const event = payjp.webhooks.constructEvent(
+      body,
+      signature!,
+      process.env.PAYJP_WEBHOOK_SECRET!,
+    );
 
     if (event.type === 'subscription.updated') {
       const subscription = event.data as any; // ← 型が不明なので一旦 any にします

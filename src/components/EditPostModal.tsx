@@ -51,7 +51,7 @@ export default function EditPostModal({
         title,
         category,
         content: comment,
-        tags: tags.split(',').map(tag => tag.trim()),
+        tags: tags.split(',').map((tag) => tag.trim()),
         is_posted: isPosted,
       }),
     });

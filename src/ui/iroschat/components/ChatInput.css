@@ -1,0 +1,127 @@
+/* === ChatInput.css (GLOBAL) ===================================== */
+/* 置き場所例: src/ui/iroschat/IrosChat.css に統合して使う          */
+/* app/iros/layout.tsx で import '@/ui/iroschat/IrosChat.css'        */
+
+/* ---- 変数定義（1回だけ） ---- */
+:root {
+  --ui-max-width: 860px;     /* Sofia/Iros 共通の本文最大幅 */
+  --footer-safe-pad: 56px;   /* フッター安全域（ボトムNavなど） */
+  --compose-gap: 12px;       /* 通常の上げ幅 */
+  --compose-max-gap: 100px;  /* 上昇の上限（最大でここまで上がる） */
+}
+
+/* ---- 入力バーの固定配置（中央寄せ＋フッター上） ---- */
+.sof-compose {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: min(
+    calc(var(--footer-safe-pad) + var(--compose-gap)),
+    var(--compose-max-gap)
+  );
+  width: 100%;
+  max-width: var(--ui-max-width);
+  background: #ffffff;
+  border-top: 1px solid #e5e6eb;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.05);
+  border-radius: 10px 10px 0 0;
+  z-index: 20;
+  padding: 8px 10px;
+  box-sizing: border-box;
+}
+
+/* ---- 入力欄とアクション列のレイアウト ---- */
+.sof-inputWrap {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+/* ---- テキストエリア ---- */
+.sof-textarea {
+  flex: 1;
+  resize: none;
+  border: 1px solid #d6d7dd;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 14px;
+  line-height: 1.6;
+  background: #fafafa;
+  color: #333;
+  outline: none;
+  box-sizing: border-box;
+}
+
+/* ---- アクションボタン列（縦並び） ---- */
+.sof-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+/* ---- ボタン共通 ---- */
+.sof-actionBtn {
+  padding: 6px 12px;
+  font-size: 13px;
+  border-radius: 10px;
+  border: 1px solid #d4d6de;
+  background: #f8f9fc;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease, transform 0.06s ease;
+}
+.sof-actionBtn:hover {
+  background: #f2f5ff;
+}
+.sof-actionBtn:active {
+  transform: translateY(1px);
+}
+.sof-actionBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ---- 個別ボタン色 ---- */
+.sof-actionBtn--qa {
+  background: #f6f8ff;
+}
+.sof-actionBtn--send {
+  background: #e7f0ff;
+  border-color: #c3d8ff;
+}
+
+/* ---- モバイル微調整 ---- */
+@media (max-width: 480px) {
+  .sof-compose {
+    padding: 6px;
+    bottom: min(
+      calc(var(--footer-safe-pad) + var(--compose-gap)),
+      var(--compose-max-gap)
+    );
+    max-width: 100%;
+    border-radius: 0;
+  }
+  .sof-actionBtn {
+    font-size: 12px;
+    padding: 5px 10px;
+  }
+}
+
+
+
+/* 最下部の白い背景を、フッター＋入力バーの下に敷く */
+.mu-page::after {
+  content: "";
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  /* フッター高＋お好みの余白（入力バーの下に少し白を見せたい分） */
+  height: calc(var(--footer-safe-pad, 56px) + 12px + env(safe-area-inset-bottom, 0px));
+  background: #fff;          /* ここが“白い帯” */
+  z-index: 600;               /* 下敷き：フッター/入力より低く */
+  pointer-events: none;       /* クリック妨げない */
+}
+

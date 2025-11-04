@@ -26,13 +26,14 @@ export function applyVars(text: string, vars: Vars) {
 }
 
 const dedent = (s: string) =>
-  s.replace(/^\n?/, '').replace(/\n[ \t]+/g, '\n').trim();
+  s
+    .replace(/^\n?/, '')
+    .replace(/\n[ \t]+/g, '\n')
+    .trim();
 
 /** ログ用の短縮（改行は可視化） */
 const preview = (s: string, n = 360) =>
-  (s ?? '')
-    .replace(/\n/g, '\\n')
-    .slice(0, n) + (s && s.length > n ? '…(trunc)' : '');
+  (s ?? '').replace(/\n/g, '\\n').slice(0, n) + (s && s.length > n ? '…(trunc)' : '');
 
 /* -------------------------
    System Prompt Builder
@@ -81,7 +82,7 @@ export function buildSofiaSystemPrompt(opts: BuildPromptOptions = {}): string {
     - line-height(UI): ${ui.assistantLineHeight}
     - paragraph margin(UI): ${ui.paragraphMargin}px
     - emoji: ${allowEmoji ? `allow (max ${maxEmoji})` : 'disallow'}
-    - emoji candidates: ${allowEmoji ? (allowedEmoji || '(none set)') : '(disabled)'}
+    - emoji candidates: ${allowEmoji ? allowedEmoji || '(none set)' : '(disabled)'}
   `);
 
   // 3) Sofia流スタイル
@@ -106,12 +107,12 @@ export function buildSofiaSystemPrompt(opts: BuildPromptOptions = {}): string {
       tone === 'compassion_calm'
         ? 'やわらかく安心感を重視する。'
         : tone === 'mediator_grounded'
-        ? '衝突を調停し、合意形成を導く。'
-        : tone === 'co_creator_clear'
-        ? '共創者として明晰に具体策を示す。'
-        : tone === 'gentle_guide'
-        ? '丁寧なガイド役として方向を示す。'
-        : '共感と明晰さを保ちながら、意志ある提案を行う。'
+          ? '衝突を調停し、合意形成を導く。'
+          : tone === 'co_creator_clear'
+            ? '共創者として明晰に具体策を示す。'
+            : tone === 'gentle_guide'
+              ? '丁寧なガイド役として方向を示す。'
+              : '共感と明晰さを保ちながら、意志ある提案を行う。'
     }
     - 不確実でも「仮説」として言語化し、**実行可能なアクション**に落とす。
   `);

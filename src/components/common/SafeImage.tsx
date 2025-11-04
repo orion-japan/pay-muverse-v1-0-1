@@ -7,11 +7,19 @@ type Props = Omit<ImageProps, 'fill'> & {
 };
 
 export default function SafeImage({
-  src, alt, aspectRatio = '1/1', className, style, ...rest
+  src,
+  alt,
+  aspectRatio = '1/1',
+  className,
+  style,
+  ...rest
 }: Props) {
   return (
-    <div style={{ position:'relative', width:'100%', aspectRatio, ...style }} className={className}>
-      <Image src={src} alt={alt ?? ''} fill unoptimized style={{ objectFit:'cover' }} {...rest} />
+    <div
+      style={{ position: 'relative', width: '100%', aspectRatio, ...style }}
+      className={className}
+    >
+      <Image src={src} alt={alt ?? ''} fill unoptimized style={{ objectFit: 'cover' }} {...rest} />
     </div>
   );
 }

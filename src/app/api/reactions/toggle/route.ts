@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
 const ALLOWED = ['like', 'heart', 'smile', 'wow', 'share'] as const;
@@ -19,7 +19,7 @@ const dlog = (...a: any[]) => DEBUG && console.log('[reactions/toggle]', ...a);
 type Body = {
   post_id?: string;
   reaction?: AllowedReaction | string;
-  user_code?: string;          // 押した人
+  user_code?: string; // 押した人
   is_parent?: boolean;
   thread_id?: string | null;
 };
@@ -43,7 +43,8 @@ export async function POST(req: NextRequest) {
   if (!post_id) return bad('post_id is required');
   if (!user_code) return bad('user_code is required');
   if (!reaction) return bad('reaction is required');
-  if (!ALLOWED.includes(reaction as AllowedReaction)) return bad('reaction is not allowed', { reaction });
+  if (!ALLOWED.includes(reaction as AllowedReaction))
+    return bad('reaction is not allowed', { reaction });
 
   dlog('req body =', { post_id, reaction, user_code, is_parent, thread_id });
 
@@ -59,7 +60,10 @@ export async function POST(req: NextRequest) {
     const target_user_code: string | null = post?.user_code ?? null;
     if (!target_user_code) {
       console.warn('[reactions/toggle] post.user_code is NULL for post_id', post_id);
-      return NextResponse.json({ ok: false, message: 'post has no owner (user_code is NULL)' }, { status: 500 });
+      return NextResponse.json(
+        { ok: false, message: 'post has no owner (user_code is NULL)' },
+        { status: 500 },
+      );
     }
 
     // 既存チェック（列選択せずに head+count）
@@ -101,17 +105,18 @@ export async function POST(req: NextRequest) {
         const notif: Record<string, any> = {
           type: 'reaction',
           ref_post_id: post_id,
-          post_id,                                 // 互換
+          post_id, // 互換
           ref_reaction: reaction,
-          actor_user_code: user_code,              // 行動者
-          target_user_code,                        // 受け手（投稿者）
-          recipient_user_code: target_user_code,   // 互換: NOT NULL対策
-          user_code: target_user_code,             // 互換
+          actor_user_code: user_code, // 行動者
+          target_user_code, // 受け手（投稿者）
+          recipient_user_code: target_user_code, // 互換: NOT NULL対策
+          user_code: target_user_code, // 互換
           is_read: false,
         };
         dlog('will insert notification =', notif);
         const { error: notifErr } = await supabase.from('notifications').insert(notif);
-        if (notifErr) console.warn('[reactions/toggle] notification insert warn:', notifErr.message);
+        if (notifErr)
+          console.warn('[reactions/toggle] notification insert warn:', notifErr.message);
       }
     }
 
@@ -123,7 +128,10 @@ export async function POST(req: NextRequest) {
         .eq('post_id', post_id)
         .eq('reaction', 'like')
         .eq('is_parent', is_parent);
-      await supabase.from('posts').update({ likes_count: likeCount ?? 0 }).eq('post_id', post_id);
+      await supabase
+        .from('posts')
+        .update({ likes_count: likeCount ?? 0 })
+        .eq('post_id', post_id);
     }
 
     // 最新カウント（UI用）

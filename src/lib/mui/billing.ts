@@ -4,8 +4,13 @@ import { PRICES, type ConversationStage } from './types';
 export const BILLING_DISABLED = true as const;
 
 export type BillOkFree = { ok: true; free: true; balance: null };
-export type BillOkPaid = { ok: true; free?: false; chargeId: string | null; balance: number | null };
-export type BillNg     = { ok: false; error: string; status: number };
+export type BillOkPaid = {
+  ok: true;
+  free?: false;
+  chargeId: string | null;
+  balance: number | null;
+};
+export type BillNg = { ok: false; error: string; status: number };
 
 export async function chargeIfNeeded(opts: {
   userCode: string;
@@ -19,7 +24,7 @@ export async function chargeIfNeeded(opts: {
     return { ok: true, free: true, balance: null };
   }
 
-  const key = stage === 2 ? 'phase2' : stage === 3 ? 'phase3' : 'phase4' as keyof typeof PRICES;
+  const key = stage === 2 ? 'phase2' : stage === 3 ? 'phase3' : ('phase4' as keyof typeof PRICES);
   const amount = PRICES[key];
 
   if (!Number.isInteger(amount) || amount < 50 || amount > 9_999_999) {
@@ -37,6 +42,7 @@ export async function chargeIfNeeded(opts: {
     meta,
   } as any);
 
-  if (!res?.ok) return { ok: false, error: res?.error ?? 'charge_failed', status: res?.status ?? 402 };
+  if (!res?.ok)
+    return { ok: false, error: res?.error ?? 'charge_failed', status: res?.status ?? 402 };
   return { ok: true, chargeId: res.chargeId ?? null, balance: res.balance ?? null };
 }

@@ -6,11 +6,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { SUPABASE_URL, SERVICE_ROLE, verifyFirebaseAndAuthorize } from '@/lib/authz';
 
-function json(data:any, init?:number|ResponseInit){
-  const status = typeof init==='number'?init:(init as ResponseInit|undefined)?.['status']??200;
-  const headers = new Headers(typeof init==='number'?undefined:(init as ResponseInit|undefined)?.headers);
-  headers.set('Content-Type','application/json; charset=utf-8');
-  return new NextResponse(JSON.stringify(data),{status,headers});
+function json(data: any, init?: number | ResponseInit) {
+  const status =
+    typeof init === 'number' ? init : ((init as ResponseInit | undefined)?.['status'] ?? 200);
+  const headers = new Headers(
+    typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers,
+  );
+  headers.set('Content-Type', 'application/json; charset=utf-8');
+  return new NextResponse(JSON.stringify(data), { status, headers });
 }
 
 export async function GET(req: NextRequest) {
@@ -21,7 +24,8 @@ export async function GET(req: NextRequest) {
   const supa = createClient(SUPABASE_URL, SERVICE_ROLE);
 
   // adminチェック
-  const { data: me } = await supa.from('users')
+  const { data: me } = await supa
+    .from('users')
     .select('is_super_admin, user_code')
     .eq('user_code', z.userCode)
     .maybeSingle();
@@ -31,10 +35,11 @@ export async function GET(req: NextRequest) {
   const user_code = searchParams.get('user_code') || undefined;
   const from = searchParams.get('from') || undefined;
   const to = searchParams.get('to') || undefined;
-  const limit = Math.min(Number(searchParams.get('limit')||'200'), 1000);
+  const limit = Math.min(Number(searchParams.get('limit') || '200'), 1000);
 
   // v_credit_events を使う
-  let q = supa.from('v_credit_events')
+  let q = supa
+    .from('v_credit_events')
     .select('created_at, user_code, reason, amount, spent, granted')
     .order('created_at', { ascending: false })
     .limit(limit);

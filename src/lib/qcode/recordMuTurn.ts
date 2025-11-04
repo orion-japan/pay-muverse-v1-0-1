@@ -1,9 +1,9 @@
 // Mu のテキスト1往復のクレジット消費を計上（失敗時は既定0課金）
 
-import { muCreditPolicy, muQTag, type MuQTags } from "./muPolicy";
-import { MU_Q_LINK } from "@/lib/mu/config";
+import { muCreditPolicy, muQTag, type MuQTags } from './muPolicy';
+import { MU_Q_LINK } from '@/lib/mu/config';
 
-export type MuTurnStatus = "success" | "fail";
+export type MuTurnStatus = 'success' | 'fail';
 export type IntentTag = (typeof MU_Q_LINK.INTENT_TAGS)[number];
 
 export type RecordMuTextTurnParams = {
@@ -37,18 +37,18 @@ export function getMuTextTurnCost(): number {
 
 /** テキスト1往復を記録（ノーコード計上版） */
 export async function recordMuTextTurn(
-  params: RecordMuTextTurnParams
+  params: RecordMuTextTurnParams,
 ): Promise<RecordMuTextTurnResult> {
   const { user_code, status, chargeOnFailure = false } = params;
 
   const cost =
-    status === "success"
+    status === 'success'
       ? muCreditPolicy.textTurn.cost
       : chargeOnFailure
-      ? muCreditPolicy.textTurn.cost
-      : 0;
+        ? muCreditPolicy.textTurn.cost
+        : 0;
 
-  const tags = muQTag("textTurn");
+  const tags = muQTag('textTurn');
 
   return {
     ok: true,

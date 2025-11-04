@@ -23,7 +23,7 @@ export default function MuiOcrPanel({ initial = '' }: EditorProps) {
     setBusy(true);
     try {
       // 1) OCR
-      const r = await runOcrPipeline(files);          // 画像→テキスト（pages/rawText）
+      const r = await runOcrPipeline(files); // 画像→テキスト（pages/rawText）
       // 2) 軽整形（句読点/字間など）
       const base = postprocessOcr(r.rawText || '');
       // 3) AI整形（A/B付与・◎補完・誤字の軽修正・文割）

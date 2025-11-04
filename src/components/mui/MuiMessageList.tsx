@@ -52,7 +52,9 @@ function groupRuns(items: Msg[]) {
 /** 軽量マークダウン（**bold** と改行だけ） */
 function renderLine(line: string) {
   const html = line
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') // escape
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;') // escape
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   return <span dangerouslySetInnerHTML={{ __html: html }} />;
 }
@@ -131,30 +133,58 @@ export default function MuiMessageList({ items }: Props) {
       <div ref={bottomRef} style={{ height: '1px' }} />
 
       <style jsx>{`
-  .chat { padding: 8px 12px 88px; }
-  .run { margin: 10px 0; display: flex; flex-direction: column; gap: 6px; }
-  .run.self { align-items: flex-end; }
-  .run.partner { align-items: flex-start; }
-  .run-sep { font-size: 12px; color: #6b7280; margin: 2px 6px; }
-  .bubble {
-    max-width: 88%;
-    background: #fff;
-    border: 1px solid rgba(73,86,121,.14);
-    border-radius: 14px;
-    padding: 10px 12px;
-    position: relative;
-    box-shadow: 0 2px 10px rgba(0,0,0,.04);
-  }
-  .bubble.self { background: #eef2ff; }
-  .content .line { margin: 0 0 4px; white-space: pre-wrap; word-break: break-word; }
-  .content .line:last-child { margin-bottom: 0; }
-  .read-chip {
-    position: absolute; right: 8px; bottom: -18px;
-    font-size: 11px; color: #6b7280;
-  }
-  .empty { color:#6b7280; padding: 12px; }
-`}</style>
-
+        .chat {
+          padding: 8px 12px 88px;
+        }
+        .run {
+          margin: 10px 0;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .run.self {
+          align-items: flex-end;
+        }
+        .run.partner {
+          align-items: flex-start;
+        }
+        .run-sep {
+          font-size: 12px;
+          color: #6b7280;
+          margin: 2px 6px;
+        }
+        .bubble {
+          max-width: 88%;
+          background: #fff;
+          border: 1px solid rgba(73, 86, 121, 0.14);
+          border-radius: 14px;
+          padding: 10px 12px;
+          position: relative;
+          box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+        }
+        .bubble.self {
+          background: #eef2ff;
+        }
+        .content .line {
+          margin: 0 0 4px;
+          white-space: pre-wrap;
+          word-break: break-word;
+        }
+        .content .line:last-child {
+          margin-bottom: 0;
+        }
+        .read-chip {
+          position: absolute;
+          right: 8px;
+          bottom: -18px;
+          font-size: 11px;
+          color: #6b7280;
+        }
+        .empty {
+          color: #6b7280;
+          padding: 12px;
+        }
+      `}</style>
     </section>
   );
 }

@@ -72,7 +72,7 @@ export function useCase(userCode: string) {
         setLoading(false);
       }
     },
-    [userCode]
+    [userCode],
   );
 
   return { seedId, setSeedId, ensureSeed, quartet, fetchQuartet, saveStage, loading };

@@ -18,7 +18,9 @@ export default function PayjpModal({ open, onClose, userId, stage, bundle, price
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  useEffect(() => { setMsg(null); }, [open]);
+  useEffect(() => {
+    setMsg(null);
+  }, [open]);
 
   if (!open) return null;
 
@@ -50,8 +52,14 @@ export default function PayjpModal({ open, onClose, userId, stage, bundle, price
         <div id={mountId.current} className="border rounded p-3 mb-3" />
         {msg && <p className="text-sm text-gray-600 mb-2">{msg}</p>}
         <div className="flex gap-2 justify-end">
-          <button className="px-3 py-2" onClick={onClose} disabled={busy}>キャンセル</button>
-          <button className="px-4 py-2 bg-indigo-600 text-white rounded" onClick={handlePay} disabled={busy}>
+          <button className="px-3 py-2" onClick={onClose} disabled={busy}>
+            キャンセル
+          </button>
+          <button
+            className="px-4 py-2 bg-indigo-600 text-white rounded"
+            onClick={handlePay}
+            disabled={busy}
+          >
             {busy ? '処理中…' : '支払う'}
           </button>
         </div>

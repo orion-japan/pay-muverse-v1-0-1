@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
 export async function DELETE(req: NextRequest) {
@@ -35,10 +35,7 @@ export async function DELETE(req: NextRequest) {
   }
 
   // 🔥 投稿削除（これが必要！）
-  const { error: deleteError } = await supabase
-    .from('posts')
-    .delete()
-    .eq('post_id', post_id);
+  const { error: deleteError } = await supabase.from('posts').delete().eq('post_id', post_id);
 
   if (deleteError) {
     return NextResponse.json({ error: deleteError.message }, { status: 500 });
@@ -46,4 +43,3 @@ export async function DELETE(req: NextRequest) {
 
   return NextResponse.json({ success: true });
 }
-

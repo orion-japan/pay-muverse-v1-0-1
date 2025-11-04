@@ -9,7 +9,9 @@ import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/au
 
 /* ---------------- utils ---------------- */
 const DEV = process.env.NODE_ENV !== 'production';
-const dlog = (...a: any[]) => { if (DEV) console.info(...a); };
+const dlog = (...a: any[]) => {
+  if (DEV) console.info(...a);
+};
 const nowIso = () => new Date().toISOString();
 
 function sb() {
@@ -29,7 +31,7 @@ function safeTitle(s: string) {
 /** 期間を短く表示（8/31–9/29） */
 function compactDateLabel(src: string) {
   const range = src.match(
-    /(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})\s*[〜~\-–—]{1,3}\s*(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/
+    /(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})\s*[〜~\-–—]{1,3}\s*(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/,
   );
   if (range) {
     const [, , m1, d1, , m2, d2] = range;
@@ -46,7 +48,14 @@ function compactDateLabel(src: string) {
 /** 「Q2 / Ｑ２」などの抽出（半角・全角どちらもOK） */
 function extractQ(src: string) {
   if (!src) return '';
-  const map: Record<string, string> = { 'Ｑ':'Q', '１':'1', '２':'2', '３':'3', '４':'4', '５':'5' };
+  const map: Record<string, string> = {
+    Ｑ: 'Q',
+    '１': '1',
+    '２': '2',
+    '３': '3',
+    '４': '4',
+    '５': '5',
+  };
   const norm = src.replace(/[Ｑ１２３４５]/g, (ch) => map[ch] ?? ch);
   const m = norm.match(/(?:^|[\s\p{P}])Q\s*([1-5])(?=$|[\s\p{P}])/u);
   return m ? `Q${m[1]}` : '';
@@ -75,7 +84,11 @@ function simplifyQSummaryDisplay(raw: string) {
 
 /** reuse_key 用の軽い正規化 */
 function normalizeKey(s: string) {
-  return s.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9\-_.:]/g, '').slice(0, 100);
+  return s
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9\-_.:]/g, '')
+    .slice(0, 100);
 }
 
 /** 長文安全トリム（全角混在でも安全にカウント） */
@@ -86,15 +99,18 @@ function safeTrim(input: string | undefined, max = 2000) {
 }
 
 /* ---- Q自動推定（明示Qが無いとき用） ---- */
-const Q_COLORS: Record<'Q1'|'Q2'|'Q3'|'Q4'|'Q5', { base: string; mix: string; hex: string }> = {
-  Q1: { base: 'White',  mix: 'Gold',  hex: '#D4B106' },
-  Q2: { base: 'Green',  mix: 'Teal',  hex: '#2BA44E' },
+const Q_COLORS: Record<
+  'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5',
+  { base: string; mix: string; hex: string }
+> = {
+  Q1: { base: 'White', mix: 'Gold', hex: '#D4B106' },
+  Q2: { base: 'Green', mix: 'Teal', hex: '#2BA44E' },
   Q3: { base: 'Yellow', mix: 'Brown', hex: '#D4A017' },
-  Q4: { base: 'Blue',   mix: 'Navy',  hex: '#2952A3' },
-  Q5: { base: 'Red',    mix: 'Orange',hex: '#E5532D' },
+  Q4: { base: 'Blue', mix: 'Navy', hex: '#2952A3' },
+  Q5: { base: 'Red', mix: 'Orange', hex: '#E5532D' },
 };
 
-function inferQFromText(text: string): 'Q1'|'Q2'|'Q3'|'Q4'|'Q5' {
+function inferQFromText(text: string): 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5' {
   if (/(怒|いらいら|伸び|挑戦|焦り)/.test(text)) return 'Q2';
   if (/(不安|整え|安定|土台|落ち着)/.test(text)) return 'Q3';
   if (/(恐れ|浄化|手放|流す|怖)/.test(text)) return 'Q4';
@@ -103,7 +119,7 @@ function inferQFromText(text: string): 'Q1'|'Q2'|'Q3'|'Q4'|'Q5' {
 }
 
 /* ---- 共鳴Qの既定ナレッジ（kbが来ない時の最低限ヒント） ---- */
-const DEFAULT_Q_HINT: Record<'Q1'|'Q2'|'Q3'|'Q4'|'Q5', string> = {
+const DEFAULT_Q_HINT: Record<'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5', string> = {
   Q1: 'Q1＝金／秩序。整える力。過度に固くならないよう「余白」を作る。',
   Q2: 'Q2＝木／怒り・成長。伸びたい力が摩擦で苛立ちになりやすい。鍵は方向づけと「間」。',
   Q3: 'Q3＝土／不安・安定。土台づくり。小さなルーティンで重心を戻す。',
@@ -113,19 +129,43 @@ const DEFAULT_Q_HINT: Record<'Q1'|'Q2'|'Q3'|'Q4'|'Q5', string> = {
 
 /* ====== 初回“Q診断”の整形（Sofia風で詳しめ） ====== */
 type QProfile = {
-  label: string;      // 例: 木（成長）
-  summary: string;    // 1行サマリ
-  tips: string[];     // 2〜3行の扱い方
-  prompt: string;     // 次の一歩（短い問い）
+  label: string; // 例: 木（成長）
+  summary: string; // 1行サマリ
+  tips: string[]; // 2〜3行の扱い方
+  prompt: string; // 次の一歩（短い問い）
 };
-const Q_PROFILES: Record<'Q1'|'Q2'|'Q3'|'Q4'|'Q5', QProfile> = {
-  Q1: { label: '金（秩序）', summary: '整える力が前に出ています。', tips: ['情報を整理し、判断を遅らせる余白をつくる。','完璧主義の閾値を1段だけ下げる。'], prompt: '今日は何を手放すと軽くなりそう？' },
-  Q2: { label: '木（成長）', summary: '伸びたい力が摩擦でいらだちに変わりやすい帯域。', tips: ['方向づけと「間」を少し多めに取る。','小さな前進で伸び感を切らさない。'], prompt: 'いま1歩だけ進めるとしたら、どこ？' },
-  Q3: { label: '土（安定）', summary: '重心を戻す動きが必要。', tips: ['小さなルーティンを1つ固定。','栄養・睡眠・姿勢のどれかを底上げ。'], prompt: '毎日1分でできる土台の行為は？' },
-  Q4: { label: '水（浄化）', summary: '溜め込みを流すタイミング。', tips: ['短い呼吸法or散歩で循環を回復。','不要なタスクを1つ閉じる。'], prompt: '今すぐ手放したい「ひとつ」は？' },
-  Q5: { label: '火（情熱）', summary: '集中が点火しやすいが燃えすぎ注意。', tips: ['25分で区切る。','熱の行き先を1テーマに集約。'], prompt: '今日、火を灯したいテーマは？' },
+const Q_PROFILES: Record<'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5', QProfile> = {
+  Q1: {
+    label: '金（秩序）',
+    summary: '整える力が前に出ています。',
+    tips: ['情報を整理し、判断を遅らせる余白をつくる。', '完璧主義の閾値を1段だけ下げる。'],
+    prompt: '今日は何を手放すと軽くなりそう？',
+  },
+  Q2: {
+    label: '木（成長）',
+    summary: '伸びたい力が摩擦でいらだちに変わりやすい帯域。',
+    tips: ['方向づけと「間」を少し多めに取る。', '小さな前進で伸び感を切らさない。'],
+    prompt: 'いま1歩だけ進めるとしたら、どこ？',
+  },
+  Q3: {
+    label: '土（安定）',
+    summary: '重心を戻す動きが必要。',
+    tips: ['小さなルーティンを1つ固定。', '栄養・睡眠・姿勢のどれかを底上げ。'],
+    prompt: '毎日1分でできる土台の行為は？',
+  },
+  Q4: {
+    label: '水（浄化）',
+    summary: '溜め込みを流すタイミング。',
+    tips: ['短い呼吸法or散歩で循環を回復。', '不要なタスクを1つ閉じる。'],
+    prompt: '今すぐ手放したい「ひとつ」は？',
+  },
+  Q5: {
+    label: '火（情熱）',
+    summary: '集中が点火しやすいが燃えすぎ注意。',
+    tips: ['25分で区切る。', '熱の行き先を1テーマに集約。'],
+    prompt: '今日、火を灯したいテーマは？',
+  },
 };
-
 
 /* === Q総評ヘッダーの期間解析 / 単位ミスマッチ検知 ================== */
 function parseDateStr(s: string) {
@@ -140,7 +180,9 @@ function diffDaysInclusive(a: Date, b: Date) {
 
 /** ユーザー文の先頭にある「【Qコード総評】…」を読み取り、期間表示と注意書きを返す */
 function extractSummaryContext(raw: string): { periodLabel?: string; mismatchNote?: string } {
-  const mRange = raw.match(/【Qコード総評】\s*(\d{4}[-/]\d{2}[-/]\d{2})\s*[〜~\-–—]\s*(\d{4}[-/]\d{2}[-/]\d{2})/);
+  const mRange = raw.match(
+    /【Qコード総評】\s*(\d{4}[-/]\d{2}[-/]\d{2})\s*[〜~\-–—]\s*(\d{4}[-/]\d{2}[-/]\d{2})/,
+  );
   const mTotal = raw.match(/合計\s*(\d+)\s*(日|件)/);
   if (!mRange) return {};
 
@@ -157,17 +199,15 @@ function extractSummaryContext(raw: string): { periodLabel?: string; mismatchNot
     const total = Number(mTotal[1] || 0);
     // ゆるいヒューリスティック：日数×3 を大きく超えるなら件数の合計と判断
     if (total > days * 3) {
-      mismatchNote = '※ 見出しの「合計○件」は記録“件数”の総和の可能性があります。本診断では期間を“日数”として解釈しています。';
+      mismatchNote =
+        '※ 見出しの「合計○件」は記録“件数”の総和の可能性があります。本診断では期間を“日数”として解釈しています。';
     }
   }
   return { periodLabel, mismatchNote };
 }
 
-
-
-
-function calcQConfidence(text: string, q: 'Q1'|'Q2'|'Q3'|'Q4'|'Q5') {
-  const dict: Record<'Q1'|'Q2'|'Q3'|'Q4'|'Q5', RegExp[]> = {
+function calcQConfidence(text: string, q: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5') {
+  const dict: Record<'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5', RegExp[]> = {
     Q1: [/整(う|える)|秩序|ルール|仕組み/],
     Q2: [/怒|苛|伸び|挑戦|焦り|成長/],
     Q3: [/不安|安定|土台|習慣|落ち着/],
@@ -180,7 +220,7 @@ function calcQConfidence(text: string, q: 'Q1'|'Q2'|'Q3'|'Q4'|'Q5') {
 }
 
 /** Sofia風 “状態の手がかり” 抽出（絵文字つき・最大4件） */
-function extractSofiaClues(text: string, q: 'Q1'|'Q2'|'Q3'|'Q4'|'Q5'): string[] {
+function extractSofiaClues(text: string, q: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5'): string[] {
   const T = (b: boolean, s: string) => (b ? s : '');
   const clues: string[] = [];
 
@@ -217,9 +257,9 @@ function extractSofiaClues(text: string, q: 'Q1'|'Q2'|'Q3'|'Q4'|'Q5'): string[] 
 
 /** 初回“Q診断”カード（Sofia風・余白と改行を強調／詳しめ＋期間表記対応） */
 function firstDiagnosisBlock(
-  q: 'Q1'|'Q2'|'Q3'|'Q4'|'Q5',
+  q: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5',
   text: string,
-  ctx?: { periodLabel?: string; mismatchNote?: string }
+  ctx?: { periodLabel?: string; mismatchNote?: string },
 ) {
   const p = Q_PROFILES[q];
   const conf = calcQConfidence(text, q);
@@ -227,12 +267,15 @@ function firstDiagnosisBlock(
   const clues = extractSofiaClues(text, q);
 
   // Q別の落とし穴・具体例・最小ルーチン
-  const extras: Record<typeof q, {
-    pitfalls: string[];
-    examples: string[];
-    micro: string[];
-    anchor: string[];
-  }> = {
+  const extras: Record<
+    typeof q,
+    {
+      pitfalls: string[];
+      examples: string[];
+      micro: string[];
+      anchor: string[];
+    }
+  > = {
     Q1: {
       pitfalls: ['枠に合わせるほど選択肢が縮む', '「ちゃんと整ってからやる」に陥る'],
       examples: ['資料や設定の微修正が止まらない', '未着手タスクを眺めて固まる'],
@@ -280,9 +323,9 @@ function firstDiagnosisBlock(
   lines.push(
     '【概況】',
     `・${p.summary}`,
-    '・いまの文脈では、この帯域の特徴が前面に出ています。'
-      + ' 体内のリズム（睡眠・呼吸・姿勢）と、思考のリズム（優先順位・切り替え）を一度合わせると、'
-      + ' 余計なノイズが減り前進の手触りが戻りやすくなります。',
+    '・いまの文脈では、この帯域の特徴が前面に出ています。' +
+      ' 体内のリズム（睡眠・呼吸・姿勢）と、思考のリズム（優先順位・切り替え）を一度合わせると、' +
+      ' 余計なノイズが減り前進の手触りが戻りやすくなります。',
 
     '', // 余白
     '【状態の手がかり】',
@@ -314,15 +357,16 @@ function firstDiagnosisBlock(
     '【次の一歩】',
     `・${p.prompt}`,
     '・言葉にしてから着手すると、注意が散らず成功率が上がります。',
-    ''
+    '',
   );
 
   if (ctx?.mismatchNote) lines.push(ctx.mismatchNote);
-  lines.push('✳️ Muメモ: 記録や文脈が少ない場合、この診断は暫定です。必要なら話しながら微調整しましょう。');
+  lines.push(
+    '✳️ Muメモ: 記録や文脈が少ない場合、この診断は暫定です。必要なら話しながら微調整しましょう。',
+  );
 
   return lines.join('\n');
 }
-
 
 /* ---------------- conv find-or-create ---------------- */
 async function findOrCreateConversation(args: {
@@ -393,11 +437,7 @@ async function findOrCreateConversation(args: {
     dlog('[findOrCreateConversation] (b) failed:', e?.message || e);
   }
 
-  const { data, error } = await s
-    .from('mu_conversations')
-    .insert(baseCommon)
-    .select('id')
-    .single();
+  const { data, error } = await s.from('mu_conversations').insert(baseCommon).select('id').single();
   if (error) throw error;
   return { id: String(data!.id), reused: false };
 }
@@ -442,7 +482,7 @@ export async function POST(req: NextRequest) {
 
     // 明示Q→推定Q
     const explicitQ = extractQ(text);
-const inferredQ = inferQFromText(text);
+    const inferredQ = inferQFromText(text);
     const qCode = (explicitQ as any) || inferredQ;
     const qColor = Q_COLORS[qCode];
 
@@ -452,11 +492,11 @@ const inferredQ = inferQFromText(text);
     const kbQuery: string | undefined = kb?.query?.toString?.();
     const kbContent = safeTrim(kbContentRaw ?? '', 2000);
 
-    const effectiveReuseKey =
-      reuse_key ?? (kbTitle ? `kb:${normalizeKey(kbTitle)}` : undefined);
+    const effectiveReuseKey = reuse_key ?? (kbTitle ? `kb:${normalizeKey(kbTitle)}` : undefined);
 
-    const shortForTitle =
-      kbTitle ? safeTitle(`KB: ${kbTitle}`) : makeShortTitle(title ?? text ?? 'Q総評');
+    const shortForTitle = kbTitle
+      ? safeTitle(`KB: ${kbTitle}`)
+      : makeShortTitle(title ?? text ?? 'Q総評');
 
     const simplifiedDisplay = simplifyQSummaryDisplay(text);
 
@@ -488,18 +528,18 @@ const inferredQ = inferQFromText(text);
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return NextResponse.json({ error: 'OPENAI_API_KEY missing' }, { status: 500 });
 
-    const normalizedHistory =
-      Array.isArray(messages)
-        ? messages.filter(Boolean).map((m: any) => {
-            const raw = (m?.role ?? '').toString();
-            const role =
-              raw === 'bot' ? 'assistant'
+    const normalizedHistory = Array.isArray(messages)
+      ? messages.filter(Boolean).map((m: any) => {
+          const raw = (m?.role ?? '').toString();
+          const role =
+            raw === 'bot'
+              ? 'assistant'
               : raw === 'assistant' || raw === 'user' || raw === 'system'
-              ? raw
-              : 'user';
-            return { role, content: m?.content?.toString?.() ?? String(m?.content ?? '') };
-          })
-        : [];
+                ? raw
+                : 'user';
+          return { role, content: m?.content?.toString?.() ?? String(m?.content ?? '') };
+        })
+      : [];
 
     // 「最初は診断だけ / 以後は会話」
     const hasAssistantInHistory = normalizedHistory.some((m) => m.role === 'assistant');
@@ -513,7 +553,9 @@ const inferredQ = inferQFromText(text);
       (isFirstTurn
         ? 'For the first response, return ONLY a compact diagnosis card in Sofia style: sections = 概況 / 状態の手がかり / 扱い方ミニガイド / 次の一歩. Do not echo knowledge text.'
         : 'For follow-up turns, answer conversationally in 3–5 short lines, ending with one question. Do not echo knowledge text.') +
-      (kbContent ? ' If knowledge is provided, ground the answer in it and add a short citation at the end like: （出典: ナレッジ「<タイトル>」） for follow-up turns only.' : '');
+      (kbContent
+        ? ' If knowledge is provided, ground the answer in it and add a short citation at the end like: （出典: ナレッジ「<タイトル>」） for follow-up turns only.'
+        : '');
 
     // 知識は system で前置（本文には出さない）
     const kbSystem = kbContent
@@ -556,19 +598,27 @@ ${DEFAULT_Q_HINT[qCode]}`;
     if (banned.test(llmText)) llmText = llmText.replace(banned, '（共鳴Q2の誤解は削除）');
 
     // 出典の自動追記（会話時のみ／初回診断は出さない）
-    const shouldAppendCitation = !isFirstTurn && kbTitle && llmText && !/出典[:：]\s*ナレッジ/.test(llmText);
+    const shouldAppendCitation =
+      !isFirstTurn && kbTitle && llmText && !/出典[:：]\s*ナレッジ/.test(llmText);
     if (shouldAppendCitation) llmText += `\n（出典: ナレッジ「${kbTitle}」）`;
 
     // 表示（初回はSofia風診断カード、それ以外は会話文）
     const summaryCtx = extractSummaryContext(text);
-const reply = isFirstTurn ? firstDiagnosisBlock(qCode, text, summaryCtx) : llmText;
+    const reply = isFirstTurn ? firstDiagnosisBlock(qCode, text, summaryCtx) : llmText;
 
     /* --- 保存（mu_conversations / mu_turns）--- */
     const s = sb();
     try {
       await s.from('mu_conversations').upsert(
-        { id: convId, user_code: userCode, title: shortForTitle, origin_app: 'mu', updated_at: nowIso(), last_turn_at: nowIso() },
-        { onConflict: 'id' }
+        {
+          id: convId,
+          user_code: userCode,
+          title: shortForTitle,
+          origin_app: 'mu',
+          updated_at: nowIso(),
+          last_turn_at: nowIso(),
+        },
+        { onConflict: 'id' },
       );
 
       const tNow = Date.now();
@@ -581,7 +631,14 @@ const reply = isFirstTurn ? firstDiagnosisBlock(qCode, text, summaryCtx) : llmTe
         conv_id: convId,
         role: 'user',
         content: userVisible,
-        meta: { source: 'muai', kind: 'user', mode, reuse_key: effectiveReuseKey ?? null, original_text: simplifiedDisplay ? String(text) : null, kb: kbTitle ? { title: kbTitle } : null },
+        meta: {
+          source: 'muai',
+          kind: 'user',
+          mode,
+          reuse_key: effectiveReuseKey ?? null,
+          original_text: simplifiedDisplay ? String(text) : null,
+          kb: kbTitle ? { title: kbTitle } : null,
+        },
         used_credits: null,
         source_app: 'mu',
       });
@@ -598,7 +655,8 @@ const reply = isFirstTurn ? firstDiagnosisBlock(qCode, text, summaryCtx) : llmTe
           mode,
           reuse_key: effectiveReuseKey ?? null,
           kb: kbTitle ? { title: kbTitle } : null,
-          citations: shouldAppendCitation && kbTitle ? [{ type: 'knowledge', title: kbTitle }] : null,
+          citations:
+            shouldAppendCitation && kbTitle ? [{ type: 'knowledge', title: kbTitle }] : null,
           q: { code: qCode, color: qColor, stage: isFirstTurn ? 'S1' : 'S2' },
           first_diagnosis: isFirstTurn,
         },
@@ -633,7 +691,9 @@ const reply = isFirstTurn ? firstDiagnosisBlock(qCode, text, summaryCtx) : llmTe
           mu_tone: 'gentle_guide',
           mu_config_version: 'mu.config.v1.0.0',
           mu_prompt_hash: 'あなたは **Mu**。急かさず、短い文で、相手',
-          knowledge_used: kbTitle ? [{ id: `kb:${normalizeKey(kbTitle)}`, title: kbTitle, score: 0.8 }] : [],
+          knowledge_used: kbTitle
+            ? [{ id: `kb:${normalizeKey(kbTitle)}`, title: kbTitle, score: 0.8 }]
+            : [],
         },
         q: { code: qCode, stage: isFirstTurn ? 'S1' : 'S2', color: qColor },
         credit_balance: null,
@@ -651,38 +711,46 @@ const reply = isFirstTurn ? firstDiagnosisBlock(qCode, text, summaryCtx) : llmTe
       const masterId = convId;
       const subId = rid();
       const charge = { amount: 0.5, aiId: 'mu', model: 'gpt-4o-mini' };
-      return NextResponse.json({
-        agent: 'Mu',
-        reply,
-        meta: {
+      return NextResponse.json(
+        {
           agent: 'Mu',
-          source_type: 'chat',
-          confidence: 0.6,
-          phase: 'Inner',
-          selfAcceptance: { score: 50, band: '40_70' },
-          relation: { label: 'harmony', confidence: 0.6 },
+          reply,
+          meta: {
+            agent: 'Mu',
+            source_type: 'chat',
+            confidence: 0.6,
+            phase: 'Inner',
+            selfAcceptance: { score: 50, band: '40_70' },
+            relation: { label: 'harmony', confidence: 0.6 },
+            charge,
+            master_id: masterId,
+            sub_id: subId,
+            mu_prompt_version: 'mu.v2.5.0',
+            mu_persona: 'base',
+            mu_mode: 'normal',
+            mu_tone: 'gentle_guide',
+            mu_config_version: 'mu.config.v1.0.0',
+            mu_prompt_hash: 'あなたは **Mu**。急かさず、短い文で、相手',
+            knowledge_used: kbTitle
+              ? [{ id: `kb:${normalizeKey(kbTitle)}`, title: kbTitle, score: 0.8 }]
+              : [],
+          },
+          q: { code: qCode, stage: 'S1', color: qColor },
+          credit_balance: null,
           charge,
           master_id: masterId,
           sub_id: subId,
-          mu_prompt_version: 'mu.v2.5.0',
-          mu_persona: 'base',
-          mu_mode: 'normal',
-          mu_tone: 'gentle_guide',
-          mu_config_version: 'mu.config.v1.0.0',
-          mu_prompt_hash: 'あなたは **Mu**。急かさず、短い文で、相手',
-          knowledge_used: kbTitle ? [{ id: `kb:${normalizeKey(kbTitle)}`, title: kbTitle, score: 0.8 }] : [],
+          conversation_id: masterId,
+          title: safeTitle(shortForTitle || 'Mu 会話'),
         },
-        q: { code: qCode, stage: 'S1', color: qColor },
-        credit_balance: null,
-        charge,
-        master_id: masterId,
-        sub_id: subId,
-        conversation_id: masterId,
-        title: safeTitle(shortForTitle || 'Mu 会話'),
-      }, { status: 200 });
+        { status: 200 },
+      );
     }
   } catch (e: any) {
     console.error(`[muai.reply][${rid()}] UNEXPECTED`, e?.stack || e?.message || e);
-    return NextResponse.json({ error: 'unexpected', detail: e?.message ?? String(e) }, { status: 500 });
+    return NextResponse.json(
+      { error: 'unexpected', detail: e?.message ?? String(e) },
+      { status: 500 },
+    );
   }
 }

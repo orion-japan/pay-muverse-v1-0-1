@@ -2,9 +2,9 @@ export type QCode = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
 
 export type QResult = {
   code: QCode;
-  confidence: number;    // 0.0 - 1.0
-  hint?: string;         // 短い説明
-  color_hex?: string;    // UI用色
+  confidence: number; // 0.0 - 1.0
+  hint?: string; // 短い説明
+  color_hex?: string; // UI用色
   stage?: string | null; // S1..T3 など（任意）
 };
 

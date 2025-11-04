@@ -32,11 +32,15 @@ export function useOcrPipeline() {
     setProgress({ page: 0, total: files.length });
     try {
       // ライブラリの戻り値は実装差があるため any で受け、ここで正規化
-      const raw: BaseOcrResult & { text?: string; plainText?: string; fullText?: string; pages?: any } =
-        (await runOcrPipeline(files, opts)) as any;
+      const raw: BaseOcrResult & {
+        text?: string;
+        plainText?: string;
+        fullText?: string;
+        pages?: any;
+      } = (await runOcrPipeline(files, opts)) as any;
 
       const normalized: OcrResult = {
-        ...((raw as unknown) as BaseOcrResult),
+        ...(raw as unknown as BaseOcrResult),
         text: raw?.text ?? raw?.plainText ?? raw?.fullText ?? '',
         pages: (raw as any)?.pages ?? [],
       };
@@ -54,7 +58,7 @@ export function useOcrPipeline() {
 
   return useMemo(
     () => ({ runOcr, running, progress, error, result }),
-    [runOcr, running, progress, error, result]
+    [runOcr, running, progress, error, result],
   );
 }
 

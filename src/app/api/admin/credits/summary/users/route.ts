@@ -16,13 +16,12 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(Number(searchParams.get('limit') || 100), 500);
   const offset = Math.max(Number(searchParams.get('offset') || 0), 0);
 
-  if (!['plan_status','plan','click_type'].includes(group_by)) {
+  if (!['plan_status', 'plan', 'click_type'].includes(group_by)) {
     return j({ error: 'unsupported_group_by' }, 400);
   }
   if (!value) return j({ items: [], total: 0 });
 
-  const selectExpr =
-    'user_code,click_email,credit_balance,plan_status,plan,click_type';
+  const selectExpr = 'user_code,click_email,credit_balance,plan_status,plan,click_type';
 
   const { data, error, count } = await (sb.from('users') as any)
     .select(selectExpr, { count: 'exact' })

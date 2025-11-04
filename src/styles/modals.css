@@ -1,163 +1,161 @@
 /* === モーダル全体 === */
 .modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0, 0, 0, 0.45);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 9999;
-    animation: fadeIn 0.3s ease-in-out;
-  }
-  
-  .modal-box {
-    background: white;
-    padding: 24px;
-    width: 92%;
-    max-width: 420px;
-    border-radius: 14px;
-    box-shadow: 0 8px 25px rgba(56, 40, 120, 0.25);
-    text-align: center;
-    border-top: 4px solid #5d4bdb;
-  }
-  
-  /* === タイトル === */
-  .modal-title {
-    font-size: 20px;
-    font-weight: bold;
-    color: #4f46e5; /* 青紫 */
-    margin-bottom: 14px;
-  }
-  
-  /* === メッセージ本文 === */
-  .modal-message {
-    font-size: 15px;
-    color: #333;
-    line-height: 1.6;
-    margin-bottom: 6px;
-  }
-  
-  .modal-note {
-    color: #d93025;       /* Google系の注意カラー（濃い赤） */
-    font-size: 12px;
-    text-align: center;
-    margin-top: 6px;
-  }
-  
-  
-  /* === ボタン === */
-  .modal-buttons {
-    display: flex;
-    justify-content: center;
-    gap: 12px;
-  }
-  
-  /* キャンセルボタン */
-  .btn-cancel {
-    flex: 1;
-    padding: 10px 0;
-    background: #e5e7eb;
-    color: #374151;
-    border-radius: 8px;
-    font-weight: 500;
-    border: none;
-    cursor: pointer;
-    transition: background 0.2s ease;
-  }
-  .btn-cancel:hover {
-    background: #d1d5db;
-  }
-  
-  /* OKボタン（Muverseテーマカラー） */
-  .btn-confirm {
-    flex: 1;
-    padding: 10px 0;
-    background: linear-gradient(135deg, #6366f1, #8b5cf6); /* 青→紫 */
-    color: white;
-    font-weight: bold;
-    border-radius: 8px;
-    border: none;
-    cursor: pointer;
-    transition: opacity 0.2s ease;
-  }
-  .btn-confirm:hover {
-    opacity: 0.9;
-  }
-  
-  /* === フェードイン === */
-  @keyframes fadeIn {
-    from {
-      opacity: 0;
-      transform: scale(0.96);
-    }
-    to {
-      opacity: 1;
-      transform: scale(1);
-    }
-  }
-  @media (max-width: 420px) {
-    .modal-buttons {
-      flex-direction: column;
-      gap: 8px;
-    }
-    .modal-buttons button {
-      width: 100%;
-      font-size: 16px;
-      padding: 12px;
-    }
-    .modal-container {
-      width: 90% !important;
-      padding: 20px;
-    }
-  }
-  .modal-box {
-    background: white;
-    border-radius: 16px;
-    padding: 24px;
-    width: 320px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-    backdrop-filter: blur(8px);   /* ✅ 透明感 */
-    transform: scale(0.95);
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.45);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+.modal-box {
+  background: white;
+  padding: 24px;
+  width: 92%;
+  max-width: 420px;
+  border-radius: 14px;
+  box-shadow: 0 8px 25px rgba(56, 40, 120, 0.25);
+  text-align: center;
+  border-top: 4px solid #5d4bdb;
+}
+
+/* === タイトル === */
+.modal-title {
+  font-size: 20px;
+  font-weight: bold;
+  color: #4f46e5; /* 青紫 */
+  margin-bottom: 14px;
+}
+
+/* === メッセージ本文 === */
+.modal-message {
+  font-size: 15px;
+  color: #333;
+  line-height: 1.6;
+  margin-bottom: 6px;
+}
+
+.modal-note {
+  color: #d93025; /* Google系の注意カラー（濃い赤） */
+  font-size: 12px;
+  text-align: center;
+  margin-top: 6px;
+}
+
+/* === ボタン === */
+.modal-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
+/* キャンセルボタン */
+.btn-cancel {
+  flex: 1;
+  padding: 10px 0;
+  background: #e5e7eb;
+  color: #374151;
+  border-radius: 8px;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.btn-cancel:hover {
+  background: #d1d5db;
+}
+
+/* OKボタン（Muverseテーマカラー） */
+.btn-confirm {
+  flex: 1;
+  padding: 10px 0;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6); /* 青→紫 */
+  color: white;
+  font-weight: bold;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+.btn-confirm:hover {
+  opacity: 0.9;
+}
+
+/* === フェードイン === */
+@keyframes fadeIn {
+  from {
     opacity: 0;
-    animation: modalPop 0.3s ease forwards;
+    transform: scale(0.96);
   }
-  
-  @keyframes modalPop {
-    to {
-      transform: scale(1);
-      opacity: 1;
-    }
+  to {
+    opacity: 1;
+    transform: scale(1);
   }
-  
-  .btn-confirm {
-    background: linear-gradient(90deg, #7b61ff, #9d7dff);
-    color: white;
-    border: none;
-    border-radius: 8px;
-    padding: 10px 16px;
-    font-weight: bold;
-    transition: all 0.2s ease;
+}
+@media (max-width: 420px) {
+  .modal-buttons {
+    flex-direction: column;
+    gap: 8px;
   }
-  
-  .btn-confirm:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(123, 97, 255, 0.4);
+  .modal-buttons button {
+    width: 100%;
+    font-size: 16px;
+    padding: 12px;
   }
-  
-  .btn-cancel {
-    background: #f2f2f2;
-    color: #555;
-    border: none;
-    border-radius: 8px;
-    padding: 10px 16px;
-    margin-right: 8px;
-    transition: all 0.2s ease;
+  .modal-container {
+    width: 90% !important;
+    padding: 20px;
   }
-  
-  .btn-cancel:hover {
-    background: #e0e0e0;
+}
+.modal-box {
+  background: white;
+  border-radius: 16px;
+  padding: 24px;
+  width: 320px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  backdrop-filter: blur(8px); /* ✅ 透明感 */
+  transform: scale(0.95);
+  opacity: 0;
+  animation: modalPop 0.3s ease forwards;
+}
+
+@keyframes modalPop {
+  to {
+    transform: scale(1);
+    opacity: 1;
   }
-  
+}
+
+.btn-confirm {
+  background: linear-gradient(90deg, #7b61ff, #9d7dff);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-weight: bold;
+  transition: all 0.2s ease;
+}
+
+.btn-confirm:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(123, 97, 255, 0.4);
+}
+
+.btn-cancel {
+  background: #f2f2f2;
+  color: #555;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  margin-right: 8px;
+  transition: all 0.2s ease;
+}
+
+.btn-cancel:hover {
+  background: #e0e0e0;
+}

@@ -15,16 +15,16 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const days = url.searchParams.get('days');
   const start = url.searchParams.get('start');
-  const end   = url.searchParams.get('end');
-  const user  = url.searchParams.get('user') ?? undefined;
+  const end = url.searchParams.get('end');
+  const user = url.searchParams.get('user') ?? undefined;
 
   // /api/qcode/log を内部呼び出ししてログを取得
   const qp = new URLSearchParams();
   qp.set('limit', '5000'); // 広めに
   if (days && !start && !end) qp.set('days', days);
   if (start) qp.set('from', start);
-  if (end)   qp.set('to', end);
-  if (user)  qp.set('user', user);
+  if (end) qp.set('to', end);
+  if (user) qp.set('user', user);
   const logUrl = new URL(`/api/qcode/log?${qp.toString()}`, url.origin);
 
   const res = await fetch(logUrl.toString(), {

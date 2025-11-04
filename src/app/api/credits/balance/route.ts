@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
     if (!user_code) {
       return NextResponse.json(
         { success: false, balance: 0, remaining: 0, error: 'user_code required' },
-        { status: 200, headers: { 'Cache-Control': 'no-store' } }
+        { status: 200, headers: { 'Cache-Control': 'no-store' } },
       );
     }
 
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
           remaining,
           balance: remaining,
         },
-        { status: 200, headers: { 'Cache-Control': 'no-store' } }
+        { status: 200, headers: { 'Cache-Control': 'no-store' } },
       );
     }
 
@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
     if (sumErr) {
       return NextResponse.json(
         { success: false, balance: 0, remaining: 0, error: `sum failed: ${sumErr.message}` },
-        { status: 200, headers: { 'Cache-Control': 'no-store' } }
+        { status: 200, headers: { 'Cache-Control': 'no-store' } },
       );
     }
 
@@ -68,12 +68,12 @@ export async function POST(req: NextRequest) {
         remaining,
         balance: remaining,
       },
-      { status: 200, headers: { 'Cache-Control': 'no-store' } }
+      { status: 200, headers: { 'Cache-Control': 'no-store' } },
     );
   } catch (e: any) {
     return NextResponse.json(
       { success: false, balance: 0, remaining: 0, error: e?.message ?? 'unknown error' },
-      { status: 200, headers: { 'Cache-Control': 'no-store' } }
+      { status: 200, headers: { 'Cache-Control': 'no-store' } },
     );
   }
 }

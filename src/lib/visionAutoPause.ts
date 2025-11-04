@@ -2,9 +2,9 @@
 export type PhaseKey = 'initial' | 'mid' | 'final';
 
 export const PAUSE_THRESHOLD_DAYS: Record<PhaseKey, number> = {
-  initial: 14,  // 初期は短く
-  mid: 21,      // 中期は中間
-  final: 28,    // 後期は粘る
+  initial: 14, // 初期は短く
+  mid: 21, // 中期は中間
+  final: 28, // 後期は粘る
 };
 
 export const isOverdue = (lastActivityAt?: string | null, phase: PhaseKey = 'initial') => {

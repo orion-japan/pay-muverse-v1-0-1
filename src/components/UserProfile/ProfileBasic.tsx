@@ -23,8 +23,7 @@ export default function ProfileBasic({ profile, editable, onChange }: Props) {
   }, [profile?.avatar_url, base]);
 
   const set =
-    (k: keyof Profile) =>
-    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    (k: keyof Profile) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       onChange?.({ [k]: e.target.value } as Partial<Profile>);
 
   return (

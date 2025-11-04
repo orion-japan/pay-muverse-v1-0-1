@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 // Supabase クライアント（Service Role Key を使用）
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
 export async function PATCH(req: NextRequest) {

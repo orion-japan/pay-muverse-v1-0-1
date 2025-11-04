@@ -8,7 +8,7 @@ import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/au
 
 function json(data: any, init?: number | ResponseInit) {
   const status =
-    typeof init === 'number' ? init : (init as ResponseInit | undefined)?.['status'] ?? 200;
+    typeof init === 'number' ? init : ((init as ResponseInit | undefined)?.['status'] ?? 200);
   const headers = new Headers(
     typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers,
   );
@@ -79,7 +79,7 @@ async function assertOwned(
 /** PATCH: タイトル変更 */
 export async function PATCH(
   req: NextRequest,
-  ctx: { params: Promise<{ id: string }> } // ← Promise に変更（元の構造を維持）
+  ctx: { params: Promise<{ id: string }> }, // ← Promise に変更（元の構造を維持）
 ) {
   try {
     const auth = await verifyFirebaseAndAuthorize(req);
@@ -147,7 +147,7 @@ export async function PATCH(
 /** DELETE: 会話削除（conversations はハード、mirra は論理削除） */
 export async function DELETE(
   req: NextRequest,
-  ctx: { params: Promise<{ id: string }> } // ← Promise に変更（元の構造を維持）
+  ctx: { params: Promise<{ id: string }> }, // ← Promise に変更（元の構造を維持）
 ) {
   try {
     const auth = await verifyFirebaseAndAuthorize(req);

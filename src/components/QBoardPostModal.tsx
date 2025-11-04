@@ -92,10 +92,10 @@ export default function IBoardPostModal({
         category,
         tags: tagArray,
         media_urls: publicUrls,
-        visibility: 'public',     // 公開固定
-        is_posted: true,          // 投稿済み
-        board_type: 'iboard',     // ← Iボードに統一
-        layout_type: 'default',   // 予備
+        visibility: 'public', // 公開固定
+        is_posted: true, // 投稿済み
+        board_type: 'iboard', // ← Iボードに統一
+        layout_type: 'default', // 予備
       };
 
       console.log('📝 投稿データ送信:', postData);
@@ -174,12 +174,7 @@ export default function IBoardPostModal({
         {mediaUrls.length > 0 && (
           <div className="preview-container">
             {mediaUrls.map((url, idx) => (
-              <img
-                key={idx}
-                src={url}
-                alt={`preview-${idx}`}
-                className="preview-image"
-              />
+              <img key={idx} src={url} alt={`preview-${idx}`} className="preview-image" />
             ))}
           </div>
         )}

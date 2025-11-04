@@ -23,11 +23,13 @@ export function detectExplicitImageRequest(text: string): boolean {
 
 export function buildImageStyleAsk(): string {
   const cost = Number.isFinite(MU_CREDITS.IMAGE_PER_GEN) ? MU_CREDITS.IMAGE_PER_GEN : 3;
-  const suggest = MU_BRIDGE_TEXT.SUGGEST_IMAGE?.(cost)
-    ?? `画像にしますか？（${cost}クレジット）—OKなら “画像にして” と返答してください。`;
+  const suggest =
+    MU_BRIDGE_TEXT.SUGGEST_IMAGE?.(cost) ??
+    `画像にしますか？（${cost}クレジット）—OKなら “画像にして” と返答してください。`;
 
-  const ask = MU_BRIDGE_TEXT.ASK_STYLE
-    ?? 'スタイル（写実/シンプル/手描き風）どれにします？（未指定はシンプル）';
+  const ask =
+    MU_BRIDGE_TEXT.ASK_STYLE ??
+    'スタイル（写実/シンプル/手描き風）どれにします？（未指定はシンプル）';
 
   // 1行案内 → 次の一手でスタイル確認の流れ
   return `${suggest}\n${ask}`;

@@ -14,23 +14,26 @@ export function useOcrPipeline() {
     if (typeof m?.progress === 'number') setProgress(m.progress);
   }, []);
 
-  const runOcr = useCallback(async (file: File, lang: string = 'jpn') => {
-    if (!file) return '';
-    setRunning(true);
-    setError(null);
-    setProgress(0);
-    setText('');
-    try {
-      const t = await runOcrWithTesseract(file, lang, onProg);
-      setText(t);
-      return t;
-    } catch (e: any) {
-      setError(e?.message ?? 'OCR failed');
-      throw e;
-    } finally {
-      setRunning(false);
-    }
-  }, [onProg]);
+  const runOcr = useCallback(
+    async (file: File, lang: string = 'jpn') => {
+      if (!file) return '';
+      setRunning(true);
+      setError(null);
+      setProgress(0);
+      setText('');
+      try {
+        const t = await runOcrWithTesseract(file, lang, onProg);
+        setText(t);
+        return t;
+      } catch (e: any) {
+        setError(e?.message ?? 'OCR failed');
+        throw e;
+      } finally {
+        setRunning(false);
+      }
+    },
+    [onProg],
+  );
 
   return { running, progress, text, error, runOcr };
 }

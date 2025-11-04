@@ -12,8 +12,7 @@ import { getAuth } from 'firebase-admin/auth';
 const isBrowser = typeof window !== 'undefined';
 const isEdgeRuntime =
   // Next.js Edge Runtime では EdgeRuntime グローバルが定義される
-  typeof (globalThis as any).EdgeRuntime !== 'undefined' ||
-  process.env.NEXT_RUNTIME === 'edge';
+  typeof (globalThis as any).EdgeRuntime !== 'undefined' || process.env.NEXT_RUNTIME === 'edge';
 
 /** .env に入れた秘密鍵の改行(\n)復元＋両端の余計なダブルクォート除去 */
 function cleanupPrivateKey(v: string) {
@@ -25,9 +24,7 @@ function cleanupPrivateKey(v: string) {
 function resolveCredentials(): ServiceAccount | null {
   // projectId は公開可なので NEXT_PUBLIC/FIREBASE のどちらでも受ける
   const projectId =
-    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
-    process.env.FIREBASE_PROJECT_ID ||
-    '';
+    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || '';
 
   // ① 推奨: 個別3変数（.env で直接指定）
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL || '';
@@ -91,7 +88,7 @@ if (!isBrowser && !isEdgeRuntime && !getApps().length) {
 } else if (isEdgeRuntime) {
   // Edge では Admin SDK は使えない。ページ側で runtime='nodejs' を指定してください。
   console.warn(
-    '[firebase-admin] skipped initialization on Edge Runtime (set `export const runtime = "nodejs"` on the page or route).'
+    '[firebase-admin] skipped initialization on Edge Runtime (set `export const runtime = "nodejs"` on the page or route).',
   );
 }
 

@@ -36,11 +36,12 @@ export async function GET() {
   const nowJSTms = nowUTC.getTime() + 9 * 60 * 60 * 1000;
   const nowJST = new Date(nowJSTms);
 
-  let y = nowJST.getUTCFullYear();
-  let m = nowJST.getUTCMonth() + 1;
-  let d = nowJST.getUTCDate();
+  const y = nowJST.getUTCFullYear();
+  const m = nowJST.getUTCMonth() + 1;
+  const d = nowJST.getUTCDate();
 
-  const toDate = (yy: number, mm: number, dd: number) => new Date(Date.UTC(yy, mm - 1, dd, 0, 0, 0));
+  const toDate = (yy: number, mm: number, dd: number) =>
+    new Date(Date.UTC(yy, mm - 1, dd, 0, 0, 0));
   const isSunday = (dt: Date) => dt.getUTCDay() === 0;
 
   let candidate = toDate(y, m, d);
@@ -64,31 +65,53 @@ export async function GET() {
     candidate.getUTCMonth() + 1,
     candidate.getUTCDate(),
     6,
-    0
+    0,
   );
 
   // ――― 窓の定義（JST）
   // 「OPEN時間」= 05:50〜06:10（UI表示に合わせる）
-  const open_from = atJST(candidate.getUTCFullYear(), candidate.getUTCMonth() + 1, candidate.getUTCDate(), 5, 50);
-  const open_to   = atJST(candidate.getUTCFullYear(), candidate.getUTCMonth() + 1, candidate.getUTCDate(), 6, 10);
+  const open_from = atJST(
+    candidate.getUTCFullYear(),
+    candidate.getUTCMonth() + 1,
+    candidate.getUTCDate(),
+    5,
+    50,
+  );
+  const open_to = atJST(
+    candidate.getUTCFullYear(),
+    candidate.getUTCMonth() + 1,
+    candidate.getUTCDate(),
+    6,
+    10,
+  );
 
   // 「参加カウント窓」= 開始+10分の前後許容（±2分など）
-  const join_from = atJST(candidate.getUTCFullYear(), candidate.getUTCMonth() + 1, candidate.getUTCDate(), 6, 8);
-  const join_to   = atJST(candidate.getUTCFullYear(), candidate.getUTCMonth() + 1, candidate.getUTCDate(), 6, 12);
+  const join_from = atJST(
+    candidate.getUTCFullYear(),
+    candidate.getUTCMonth() + 1,
+    candidate.getUTCDate(),
+    6,
+    8,
+  );
+  const join_to = atJST(
+    candidate.getUTCFullYear(),
+    candidate.getUTCMonth() + 1,
+    candidate.getUTCDate(),
+    6,
+    12,
+  );
 
   // いずれも判定は UTC にしてから行う
   const nowUTCms = nowUTC.getTime();
   const is_open_window =
-    nowUTCms >= isoJstToUTC(open_from).getTime() &&
-    nowUTCms <= isoJstToUTC(open_to).getTime();
+    nowUTCms >= isoJstToUTC(open_from).getTime() && nowUTCms <= isoJstToUTC(open_to).getTime();
 
   const is_join_count_window =
-    nowUTCms >= isoJstToUTC(join_from).getTime() &&
-    nowUTCms <= isoJstToUTC(join_to).getTime();
+    nowUTCms >= isoJstToUTC(join_from).getTime() && nowUTCms <= isoJstToUTC(join_to).getTime();
 
   const body = {
     title: AINORI_TITLE,
-    start_at,                 // 例: 2025-09-23T06:00:00+09:00
+    start_at, // 例: 2025-09-23T06:00:00+09:00
     duration_min: 40,
     page_url: AINORI_PAGE_URL || undefined,
     meeting_number: AINORI_MEETING_NUMBER || undefined,
@@ -99,8 +122,13 @@ export async function GET() {
     open_to,
     join_from,
     join_to,
-    now_jst: atJST(nowJST.getUTCFullYear(), nowJST.getUTCMonth() + 1, nowJST.getUTCDate(),
-                   nowJST.getUTCHours(), nowJST.getUTCMinutes()),
+    now_jst: atJST(
+      nowJST.getUTCFullYear(),
+      nowJST.getUTCMonth() + 1,
+      nowJST.getUTCDate(),
+      nowJST.getUTCHours(),
+      nowJST.getUTCMinutes(),
+    ),
     is_open_window,
     is_join_count_window,
   };

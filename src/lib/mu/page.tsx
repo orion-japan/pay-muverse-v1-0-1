@@ -2,16 +2,11 @@
 // Mu 管理画面：現在のシステムプロンプトや設定値の確認用
 // docs/mu-agent.md へのリンクを追加
 
-"use client";
+'use client';
 
-import React, { useMemo } from "react";
-import {
-  MU_AGENT,
-  MU_CONFIG_VERSION,
-  MU_CREDITS,
-  MU_IMAGE,
-} from "@/lib/mu/config";
-import { buildMuSystemPrompt } from "@/lib/mu/buildSystemPrompt";
+import React, { useMemo } from 'react';
+import { MU_AGENT, MU_CONFIG_VERSION, MU_CREDITS, MU_IMAGE } from '@/lib/mu/config';
+import { buildMuSystemPrompt } from '@/lib/mu/buildSystemPrompt';
 
 export default function AdminMuPage() {
   const systemPrompt = useMemo(() => buildMuSystemPrompt(), []);
@@ -29,12 +24,7 @@ export default function AdminMuPage() {
           <li>Config Version: {MU_CONFIG_VERSION}</li>
         </ul>
         <div style={styles.docLink}>
-          <a
-            href="/docs/mu-agent.md"
-            target="_blank"
-            rel="noreferrer"
-            style={styles.link}
-          >
+          <a href="/docs/mu-agent.md" target="_blank" rel="noreferrer" style={styles.link}>
             📄 Mu 運用ガイド（docs/mu-agent.md）
           </a>
         </div>
@@ -69,10 +59,10 @@ export default function AdminMuPage() {
 const styles: Record<string, React.CSSProperties> = {
   root: {
     padding: 24,
-    fontFamily: "sans-serif",
-    color: "#e8ecff",
-    background: "#0b1437",
-    minHeight: "100vh",
+    fontFamily: 'sans-serif',
+    color: '#e8ecff',
+    background: '#0b1437',
+    minHeight: '100vh',
   },
   h1: { fontSize: 22, marginBottom: 16, fontWeight: 700 },
   h2: { fontSize: 16, marginTop: 20, marginBottom: 8, fontWeight: 600 },
@@ -80,22 +70,22 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 24,
     padding: 16,
     borderRadius: 8,
-    border: "1px solid rgba(255,255,255,0.15)",
-    background: "rgba(255,255,255,0.04)",
+    border: '1px solid rgba(255,255,255,0.15)',
+    background: 'rgba(255,255,255,0.04)',
   },
   pre: {
-    whiteSpace: "pre-wrap",
-    background: "rgba(0,0,0,0.4)",
+    whiteSpace: 'pre-wrap',
+    background: 'rgba(0,0,0,0.4)',
     padding: 12,
     borderRadius: 6,
     fontSize: 12,
     lineHeight: 1.6,
-    overflowX: "auto",
+    overflowX: 'auto',
   },
   docLink: { marginTop: 8 },
   link: {
     fontSize: 13,
-    color: "#9ecbff",
-    textDecoration: "underline",
+    color: '#9ecbff',
+    textDecoration: 'underline',
   },
 };

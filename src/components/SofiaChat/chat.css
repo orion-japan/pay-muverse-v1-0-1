@@ -1,71 +1,139 @@
 /* src/components/SofiaChat/chat.css */
-.composer { padding:12px; border-top:1px solid #2a2f45; }
-.composer .agent-tabs { margin-bottom:8px; }
-.composer .agent-tabs button { margin-right:6px; padding:4px 8px; border:1px solid #3b4365; background:#0c1130; cursor:pointer; }
-.composer .agent-tabs button.on { border-color:#6e76ff; }
-.composer .agent-tabs button:disabled { opacity:.5; cursor:not-allowed; }
-.composer .row { display:flex; gap:8px; }
-.composer input { flex:1; padding:10px; border:1px solid #3b4365; background:#0b1030; color:#e8ebff; }
-.composer button[type=submit] { padding:10px 14px; }
+.composer {
+  padding: 12px;
+  border-top: 1px solid #2a2f45;
+}
+.composer .agent-tabs {
+  margin-bottom: 8px;
+}
+.composer .agent-tabs button {
+  margin-right: 6px;
+  padding: 4px 8px;
+  border: 1px solid #3b4365;
+  background: #0c1130;
+  cursor: pointer;
+}
+.composer .agent-tabs button.on {
+  border-color: #6e76ff;
+}
+.composer .agent-tabs button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.composer .row {
+  display: flex;
+  gap: 8px;
+}
+.composer input {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid #3b4365;
+  background: #0b1030;
+  color: #e8ebff;
+}
+.composer button[type='submit'] {
+  padding: 10px 14px;
+}
 
-.messages { padding:12px; }
-.msg { display:flex; gap:10px; margin:10px 0; }
-.msg .badge { font-size:12px; padding:2px 6px; border:1px solid #4a5280; border-radius:8px; }
-.msg .body { flex:1; }
-.msg .reply { white-space:pre-wrap; line-height:1.6; }
-.msg .meta { font-size:12px; opacity:.8; margin-top:4px; display:flex; gap:8px; align-items:center; }
-.msg.err .reply { color:#ffb4b4; }
-.msg .retry { font-size:12px; padding:2px 8px; border:1px solid #6e76ff; background:#0b1038; }
+.messages {
+  padding: 12px;
+}
+.msg {
+  display: flex;
+  gap: 10px;
+  margin: 10px 0;
+}
+.msg .badge {
+  font-size: 12px;
+  padding: 2px 6px;
+  border: 1px solid #4a5280;
+  border-radius: 8px;
+}
+.msg .body {
+  flex: 1;
+}
+.msg .reply {
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+.msg .meta {
+  font-size: 12px;
+  opacity: 0.8;
+  margin-top: 4px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.msg.err .reply {
+  color: #ffb4b4;
+}
+.msg .retry {
+  font-size: 12px;
+  padding: 2px 8px;
+  border: 1px solid #6e76ff;
+  background: #0b1038;
+}
 
-.toast { position:fixed; right:16px; bottom:16px; padding:10px 14px; border-radius:8px; background:#10163a; border:1px solid #47508a; }
-.toast.warn { border-color:#ffcc66; }
+.toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #10163a;
+  border: 1px solid #47508a;
+}
+.toast.warn {
+  border-color: #ffcc66;
+}
 
 /* src/components/SofiaChat/chat.css に追記 */
-.sof-shell { 
-    height: 100vh; 
-    background:#0a0f2a; 
-    color:#e8ebff; 
-  }
-  .sof-body { 
-    overflow:auto; 
-    padding-bottom: env(safe-area-inset-bottom, 0);
-  }
-  .composer { 
-    padding:12px; 
-    border-top:1px solid #2a2f45; 
-    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0));
-  }
-  
-  @media (max-width: 480px) {
-    .sof-bubble { max-width: 92% !important; }
-  }
+.sof-shell {
+  height: 100vh;
+  background: #0a0f2a;
+  color: #e8ebff;
+}
+.sof-body {
+  overflow: auto;
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+.composer {
+  padding: 12px;
+  border-top: 1px solid #2a2f45;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0));
+}
 
-  /* src/components/SofiaChat/lib/chat.css に追記 */
+@media (max-width: 480px) {
+  .sof-bubble {
+    max-width: 92% !important;
+  }
+}
+
+/* src/components/SofiaChat/lib/chat.css に追記 */
 
 .agent-tabs {
-    display: flex;
-    gap: 6px;
-    margin-bottom: 8px;
-  }
-  
-  .agent-tabs button {
-    padding: 6px 10px;
-    border: 1px solid #3b4365;
-    background: #0c1130;
-    color: #e8ebff;
-    border-radius: 8px;
-    cursor: pointer;
-  }
-  
-  .agent-tabs button.on {
-    background: #1e293b;          /* アクティブ背景 */
-    border-color: #6e76ff;         /* アクティブ枠 */
-    box-shadow: 0 0 0 2px rgba(110,118,255,.25) inset;
-    font-weight: 600;
-  }
-  
-  .agent-tabs button:disabled {
-    opacity: .5;
-    cursor: not-allowed;
-  }
-  
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.agent-tabs button {
+  padding: 6px 10px;
+  border: 1px solid #3b4365;
+  background: #0c1130;
+  color: #e8ebff;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.agent-tabs button.on {
+  background: #1e293b; /* アクティブ背景 */
+  border-color: #6e76ff; /* アクティブ枠 */
+  box-shadow: 0 0 0 2px rgba(110, 118, 255, 0.25) inset;
+  font-weight: 600;
+}
+
+.agent-tabs button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

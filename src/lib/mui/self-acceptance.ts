@@ -15,7 +15,9 @@ export function normalizeSelfAcceptance(x: unknown): { score: number; band: Self
   return { score: 50, band: '40_70' };
 }
 
-function clamp01(n: number) { return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0.5; }
+function clamp01(n: number) {
+  return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0.5;
+}
 function scoreToBand(score: number): SelfBand {
   if (score < 20) return 'lt20';
   if (score < 40) return '20_40';

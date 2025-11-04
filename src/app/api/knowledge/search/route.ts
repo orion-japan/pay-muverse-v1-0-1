@@ -15,12 +15,12 @@ function tokenize(q: string) {
   return q
     .replace(/Ｑ/g, 'Q')
     .split(/[,\s　/／、・|]+/g)
-    .map(s => s.trim())
+    .map((s) => s.trim())
     .filter(Boolean);
 }
 
 // Qコード検出（Q1〜Q5）
-function detectQcode(q: string): 'Q1'|'Q2'|'Q3'|'Q4'|'Q5'|null {
+function detectQcode(q: string): 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5' | null {
   const m = q.replace(/Ｑ/g, 'Q').match(/\bQ([1-5])\b/i);
   return m ? (`Q${m[1]}` as any) : null;
 }
@@ -46,7 +46,7 @@ export async function GET(req: Request) {
     const { data, error } = await query.eq('title', qcode);
     if (!error && data && data.length) {
       return NextResponse.json({
-        items: data.map(r => ({ title: r.title, content: r.content })),
+        items: data.map((r) => ({ title: r.title, content: r.content })),
       });
     }
   }
@@ -63,11 +63,9 @@ export async function GET(req: Request) {
     query = query.or(orParts.join(',')).order('updated_at', { ascending: false });
   } else {
     // 万一トークン化できなければ、素直に全文一致
-    query = query.or([
-      `title.ilike.%${q}%`,
-      `content.ilike.%${q}%`,
-      `tags_normalized.ilike.%${q}%`,
-    ].join(','));
+    query = query.or(
+      [`title.ilike.%${q}%`, `content.ilike.%${q}%`, `tags_normalized.ilike.%${q}%`].join(','),
+    );
   }
 
   const { data, error } = await query;
@@ -76,6 +74,6 @@ export async function GET(req: Request) {
   }
 
   return NextResponse.json({
-    items: (data ?? []).map(r => ({ title: r.title, content: r.content })),
+    items: (data ?? []).map((r) => ({ title: r.title, content: r.content })),
   });
 }

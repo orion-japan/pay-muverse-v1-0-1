@@ -73,10 +73,7 @@ export default function YourForm() {
         required
         className="border px-4 py-2 w-full"
       />
-      <button
-        type="submit"
-        className="px-4 py-2 bg-blue-500 text-white rounded"
-      >
+      <button type="submit" className="px-4 py-2 bg-blue-500 text-white rounded">
         登録する
       </button>
     </form>

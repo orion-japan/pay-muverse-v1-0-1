@@ -430,7 +430,7 @@ export default function SofiaChatShell({ agent: agentProp = 'mu', open }: Props)
   const handleDelete = useCallback(
     async (id: string) => {
       const key = lastConvKey(agentK);
-  
+
       // 1) 正攻法の削除（agentClients が master/uuid を判定）
       try {
         await deleteConversation(agentK, id);
@@ -438,7 +438,7 @@ export default function SofiaChatShell({ agent: agentProp = 'mu', open }: Props)
         console.warn('[delete] failed:', e);
         // 失敗してもUIをサーバー真実と再同期する
       }
-  
+
       // 2) サーバーの最新一覧で同期
       let rows: ConvListItem[] = [];
       try {
@@ -452,7 +452,7 @@ export default function SofiaChatShell({ agent: agentProp = 'mu', open }: Props)
         return tb - ta;
       });
       setConversations(rows);
-  
+
       // 3) 選択と localStorage を調整
       const stillExists = rows.some((c) => c.id === conversationId);
       const next = stillExists ? conversationId : rows.find((c) => c.id !== id)?.id;
@@ -467,7 +467,7 @@ export default function SofiaChatShell({ agent: agentProp = 'mu', open }: Props)
     },
     [agentK, conversationId, userCode, doFetchMessages]
   );
-  
+
 
   const handleRename = useCallback(
     async (id: string, title: string) => {

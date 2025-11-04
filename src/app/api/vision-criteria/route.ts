@@ -5,12 +5,17 @@ import { initializeApp, applicationDefault } from 'firebase-admin/app';
 
 /* ==== Firebase Admin init (1本方式) ==== */
 function resolveProjectId(): string | undefined {
-  return process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || undefined;
+  return (
+    process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || undefined
+  );
 }
 try {
   const projectId = resolveProjectId();
   initializeApp({ credential: applicationDefault(), ...(projectId ? { projectId } : {}) });
-  console.log('✅ Firebase Admin initialized (vision-criteria)', projectId ? `(projectId=${projectId})` : '(no projectId)');
+  console.log(
+    '✅ Firebase Admin initialized (vision-criteria)',
+    projectId ? `(projectId=${projectId})` : '(no projectId)',
+  );
 } catch {
   console.log('ℹ️ Firebase already initialized (vision-criteria)');
 }
@@ -69,7 +74,7 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const vision_id = searchParams.get('vision_id') || '';
-  const from = (searchParams.get('from') || '') as 'S'|'F'|'R'|'C'|'I';
+  const from = (searchParams.get('from') || '') as 'S' | 'F' | 'R' | 'C' | 'I';
   if (!vision_id || !from) return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
 
   if (!(await assertVisionOwnedBy(user.uid, vision_id))) {
@@ -100,7 +105,9 @@ export async function GET(req: NextRequest) {
 
     if (chkErr) throw chkErr;
 
-    done_days = new Set((checks || []).filter(r => (r.progress ?? 0) > 0).map(r => r.check_date)).size;
+    done_days = new Set(
+      (checks || []).filter((r) => (r.progress ?? 0) > 0).map((r) => r.check_date),
+    ).size;
   } catch (e) {
     console.warn('⚠ done_days aggregate failed:', e);
   }

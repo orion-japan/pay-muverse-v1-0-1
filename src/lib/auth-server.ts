@@ -1,8 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { adminAuth } from '@/lib/firebase-admin';
 
-const url  = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const key  = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const key = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 export const sb = createClient(url, key, { auth: { persistSession: false } });
 
 export async function identifyUserFromIdToken(req: Request) {
@@ -20,7 +20,8 @@ export async function identifyUserFromIdToken(req: Request) {
   let payjp_customer_id: string | null = null;
 
   // 1) uid
-  const a = await sb.from('users')
+  const a = await sb
+    .from('users')
     .select('user_code, click_email, email, payjp_customer_id')
     .eq('firebase_uid', firebase_uid)
     .maybeSingle();
@@ -32,7 +33,8 @@ export async function identifyUserFromIdToken(req: Request) {
 
   // 2) uid で見つからず email があれば email
   if (!user_code && emailFromToken) {
-    const b = await sb.from('users')
+    const b = await sb
+      .from('users')
       .select('user_code, click_email, email, payjp_customer_id, firebase_uid')
       .or(`click_email.eq.${emailFromToken},email.eq.${emailFromToken}`)
       .maybeSingle();

@@ -39,9 +39,7 @@ export async function POST(req: NextRequest) {
   try {
     // 1) Authorization
     const authz = req.headers.get('authorization') || '';
-    const token = authz.toLowerCase().startsWith('bearer ')
-      ? authz.slice(7).trim()
-      : null;
+    const token = authz.toLowerCase().startsWith('bearer ') ? authz.slice(7).trim() : null;
     if (!token) {
       return NextResponse.json({ error: 'missing token' }, { status: 401 });
     }
@@ -85,10 +83,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (!user_code) {
-      return NextResponse.json(
-        { error: 'user_code not found for this account' },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: 'user_code not found for this account' }, { status: 404 });
     }
 
     // ====== 5) 直読み：users / profiles から組み立て ======
@@ -147,4 +142,3 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: e?.message || 'unknown' }, { status: 500 });
   }
 }
-

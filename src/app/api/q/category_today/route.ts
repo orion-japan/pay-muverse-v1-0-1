@@ -39,7 +39,10 @@ export async function GET(req: NextRequest) {
   const items: any[] = json.items ?? [];
 
   // intent をカテゴリに寄せる（プロジェクトの値に合わせて必要なら追加）
-  let self = 0, vision = 0, event = 0, ai = 0;
+  let self = 0,
+    vision = 0,
+    event = 0,
+    ai = 0;
   for (const it of items) {
     const intent: string | undefined = it?.intent;
     if (!intent) continue;

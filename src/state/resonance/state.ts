@@ -3,11 +3,22 @@ export type QCode = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5' | null;
 export type Phase = 'Inner' | 'Outer' | null;
 // 進行座標（S1〜I3/T3 まで。必要に応じて拡張）
 export type DepthStage =
-  | 'S1'|'S2'|'S3'|'S4'
-  | 'R1'|'R2'|'R3'
-  | 'C1'|'C2'|'C3'
-  | 'I1'|'I2'|'I3'
-  | 'T1'|'T2'|'T3'
+  | 'S1'
+  | 'S2'
+  | 'S3'
+  | 'S4'
+  | 'R1'
+  | 'R2'
+  | 'R3'
+  | 'C1'
+  | 'C2'
+  | 'C3'
+  | 'I1'
+  | 'I2'
+  | 'I3'
+  | 'T1'
+  | 'T2'
+  | 'T3'
   | null;
 
 export type RelationLabel = 'conflict' | 'neutral' | 'harmony' | null;
@@ -18,15 +29,15 @@ export type ResonanceState = {
   // 主要シグナル
   currentQ: QCode;
   nextQ: QCode;
-  phase: Phase;                 // 位相ベクトル
-  depthStage: DepthStage;       // 認識深度レベル（進行座標）
+  phase: Phase; // 位相ベクトル
+  depthStage: DepthStage; // 認識深度レベル（進行座標）
   selfAcceptanceScore: number | null; // 0-100 想定
   relationLabel: RelationLabel;
-  relationConfidence: number | null;  // 0-1
+  relationConfidence: number | null; // 0-1
 
   // タイムスタンプ
-  updatedAt: string | null;     // ISO
-  lastAt: string | null;        // ISO（サーバの "last_at" 互換）
+  updatedAt: string | null; // ISO
+  lastAt: string | null; // ISO（サーバの "last_at" 互換）
 };
 
 export const initialResonanceState: ResonanceState = {
@@ -90,7 +101,9 @@ async function getAuthToken(): Promise<string | null> {
   // Supabase セッションがある場合のフォールバック
   try {
     const { supabase } = await import('@/lib/supabase');
-    const { data: { session } } = await supabase.auth.getSession();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
     return session?.access_token ?? null;
   } catch {
     return null;

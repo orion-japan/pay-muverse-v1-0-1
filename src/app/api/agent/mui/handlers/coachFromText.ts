@@ -17,10 +17,16 @@ function computeRelation(_phase: string) {
 
 function looksGeneric(s: string) {
   const ng = [
-    'なんでも', 'どんな相談でも', 'お待ちしています', 'こんにちは', '詳しく教えて',
-    '考えてみましょう', 'どうしますか？', 'まずは落ち着いて'
+    'なんでも',
+    'どんな相談でも',
+    'お待ちしています',
+    'こんにちは',
+    '詳しく教えて',
+    '考えてみましょう',
+    'どうしますか？',
+    'まずは落ち着いて',
   ];
-  return ng.some(w => s.includes(w));
+  return ng.some((w) => s.includes(w));
 }
 
 /** 入力から6〜12文字の引用候補を抽出（A/B行や見出し除外） */
@@ -30,7 +36,10 @@ function pickQuoteFragment(input: string) {
     .replace(/^[AB] /gm, '')
     .replace(/\s+/g, ' ')
     .trim();
-  const parts = raw.split(/[。!?！？]/).map(s => s.trim()).filter(Boolean);
+  const parts = raw
+    .split(/[。!?！？]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
   for (const p of parts) {
     const t = p.replace(/[「」『』（）()【】]/g, '').trim();
     if (t.length >= 8) {
@@ -42,8 +51,9 @@ function pickQuoteFragment(input: string) {
 }
 
 /** A/B テキスト抽出 */
-function splitBySpeaker(s: string){
-  const A: string[] = [], B: string[] = [];
+function splitBySpeaker(s: string) {
+  const A: string[] = [],
+    B: string[] = [];
   for (const ln of String(s || '').split(/\r?\n/)) {
     if (/^A[ ：:]/.test(ln)) A.push(ln.replace(/^A[ ：:]\s*/, ''));
     else if (/^B[ ：:]/.test(ln)) B.push(ln.replace(/^B[ ：:]\s*/, ''));
@@ -75,7 +85,7 @@ export async function handleCoachFromText(
   sbService: () => any,
   chargeIfNeeded: (o: any) => Promise<any>,
   inferPhase: (t: string) => string,
-  estimateSelfAcceptance: (t: string) => any
+  estimateSelfAcceptance: (t: string) => any,
 ) {
   const userText = (typeof raw.text === 'string' && raw.text.trim()) || '';
   if (!userText) return { status: 400, body: { error: 'empty_text' } };
@@ -114,8 +124,11 @@ export async function handleCoachFromText(
     model,
     messages: [
       { role: 'system', content: SYS_COACH },
-      { role: 'system', content: `補助情報: AのQ=${qA}, BのQ=${qB}, 引用候補="${quote}", 視点=${pv}` },
-      { role: 'user', content: userText }
+      {
+        role: 'system',
+        content: `補助情報: AのQ=${qA}, BのQ=${qB}, 引用候補="${quote}", 視点=${pv}`,
+      },
+      { role: 'user', content: userText },
     ],
     temperature,
     top_p,
@@ -123,9 +136,12 @@ export async function handleCoachFromText(
     presence_penalty,
   };
 
-  let ai = await callOpenAI(payload);
+  const ai = await callOpenAI(payload);
   if (!ai?.ok) {
-    return { status: ai?.status ?? 502, body: { error: 'Upstream error', detail: ai?.detail ?? '' } };
+    return {
+      status: ai?.status ?? 502,
+      body: { error: 'Upstream error', detail: ai?.detail ?? '' },
+    };
   }
 
   // 再生成ガード：空/凡庸/引用なし → 温度上げて1回だけ再試行
@@ -163,7 +179,7 @@ export async function handleCoachFromText(
   } as any);
 
   const phase = inferPhase(userText);
-  const self  = estimateSelfAcceptance(userText);
+  const self = estimateSelfAcceptance(userText);
   const relation = computeRelation(phase);
 
   // 返信保存（メタに qBySpeaker と actions を載せておく）
@@ -198,8 +214,10 @@ export async function handleCoachFromText(
   if (process.env.NODE_ENV !== 'production') {
     console.log('[mui/coach_from_text:report]', {
       conv: conversation_code,
-      Q: 'Q2', pv,
-      qBySpeaker, preview: reply.slice(0, 80)
+      Q: 'Q2',
+      pv,
+      qBySpeaker,
+      preview: reply.slice(0, 80),
     });
   }
 

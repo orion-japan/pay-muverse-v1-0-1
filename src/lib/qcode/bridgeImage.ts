@@ -1,38 +1,38 @@
 // Mu 画像生成ブリッジ：定型文の提供とクレジット見積・記録用ペイロード生成
 
-import { MU_BRIDGE_TEXT, MU_Q_LINK } from "@/lib/mu/config";
-import { muCreditPolicy, muQTag, type MuQTags } from "./muPolicy";
+import { MU_BRIDGE_TEXT, MU_Q_LINK } from '@/lib/mu/config';
+import { muCreditPolicy, muQTag, type MuQTags } from './muPolicy';
 
-export type ImageStyle = "写実" | "シンプル" | "手描き風";
-export type ImageBridgePhase = "suggest" | "confirmStyle" | "done";
-export type ImageGenStatus = "success" | "fail";
+export type ImageStyle = '写実' | 'シンプル' | '手描き風';
+export type ImageBridgePhase = 'suggest' | 'confirmStyle' | 'done';
+export type ImageGenStatus = 'success' | 'fail';
 
 // MU_Q_LINK.INTENT_TAGS の要素型を安全に参照
 export type IntentTag = (typeof MU_Q_LINK.INTENT_TAGS)[number];
 
 export type BuildBridgeTextParams =
-  | { phase: "suggest"; costOverride?: number }
-  | { phase: "confirmStyle" }
-  | { phase: "done"; previewLine?: string };
+  | { phase: 'suggest'; costOverride?: number }
+  | { phase: 'confirmStyle' }
+  | { phase: 'done'; previewLine?: string };
 
 export function buildImageBridgeText(p: BuildBridgeTextParams): string {
-  if (p.phase === "suggest") {
+  if (p.phase === 'suggest') {
     return MU_BRIDGE_TEXT.SUGGEST_IMAGE(p.costOverride ?? muCreditPolicy.imageGen.cost);
   }
-  if (p.phase === "confirmStyle") {
+  if (p.phase === 'confirmStyle') {
     return MU_BRIDGE_TEXT.ASK_STYLE;
   }
   // done
-  const preview = p.previewLine ? `\n${MU_BRIDGE_TEXT.PREVIEW_PREFIX}${p.previewLine}` : "";
+  const preview = p.previewLine ? `\n${MU_BRIDGE_TEXT.PREVIEW_PREFIX}${p.previewLine}` : '';
   return `${MU_BRIDGE_TEXT.DONE_SAVED}${preview}`;
 }
 
 /** 画像スタイルの正規化（未指定は "シンプル"） */
 export function normalizeImageStyle(input?: string | null): ImageStyle {
-  const s = (input ?? "").trim();
-  if (/写実/.test(s)) return "写実";
-  if (/手描き|手書き|sketch|draw/i.test(s)) return "手描き風";
-  return "シンプル";
+  const s = (input ?? '').trim();
+  if (/写実/.test(s)) return '写実';
+  if (/手描き|手書き|sketch|draw/i.test(s)) return '手描き風';
+  return 'シンプル';
 }
 
 /** 見積: Mu 画像生成のクレジット */
@@ -72,18 +72,18 @@ export type RecordMuImageGenResult = {
 
 /** 記録ペイロード作成（副作用なし：上位でDB/台帳へ渡す） */
 export async function recordMuImageGen(
-  params: RecordMuImageGenParams
+  params: RecordMuImageGenParams,
 ): Promise<RecordMuImageGenResult> {
   const { status, chargeOnFailure = false } = params;
 
   const cost =
-    status === "success"
+    status === 'success'
       ? muCreditPolicy.imageGen.cost
       : chargeOnFailure
-      ? muCreditPolicy.imageGen.cost
-      : 0;
+        ? muCreditPolicy.imageGen.cost
+        : 0;
 
-  const tags = muQTag("imageGen");
+  const tags = muQTag('imageGen');
 
   return {
     ok: true,

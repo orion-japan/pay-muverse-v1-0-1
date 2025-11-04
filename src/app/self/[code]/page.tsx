@@ -21,8 +21,8 @@ type BasePost = {
   created_at: string;
   board_type?: string | null;
   user_code?: string | null;
-  thread_id?: string | null;     // 子に付く
-  is_posted?: boolean | null;    // true=親 / false=子
+  thread_id?: string | null; // 子に付く
+  is_posted?: boolean | null; // true=親 / false=子
 };
 
 type ReactionCount = { r_type: string; count: number };
@@ -34,7 +34,7 @@ const DEFAULT_AVATAR = '/iavatar_default.png';
 export default function SelfPage() {
   const params = useParams();
   const router = useRouter();
-  const pathname = usePathname();                 // 戻り時の再マウント用キー
+  const pathname = usePathname(); // 戻り時の再マウント用キー
   const { userCode: viewerUserCode } = useAuth();
 
   // /self/[code] の [code]
@@ -82,13 +82,24 @@ export default function SelfPage() {
   const seen = useRef<Set<string>>(new Set());
 
   const toArray = (v: any): any[] =>
-    Array.isArray(v) ? v :
-    Array.isArray(v?.data) ? v.data :
-    Array.isArray(v?.items) ? v.items :
-    Array.isArray(v?.rows) ? v.rows : [];
+    Array.isArray(v)
+      ? v
+      : Array.isArray(v?.data)
+        ? v.data
+        : Array.isArray(v?.items)
+          ? v.items
+          : Array.isArray(v?.rows)
+            ? v.rows
+            : [];
 
   // ReactionBar 用：配列→オブジェクト
-  type CountsLike = Partial<{ like: number; heart: number; smile: number; wow: number; share: number }>;
+  type CountsLike = Partial<{
+    like: number;
+    heart: number;
+    smile: number;
+    wow: number;
+    share: number;
+  }>;
   const toCounts = (arr?: ReactionCount[] | null): CountsLike => {
     const out: CountsLike = {};
     if (!arr) return out;
@@ -104,7 +115,10 @@ export default function SelfPage() {
   const countsUrl = (postId: string, isParent: boolean) =>
     `/api/reactions/counts?scope=post&post_id=${encodeURIComponent(postId)}&is_parent=${isParent ? 'true' : 'false'}`;
 
-  const fetchCountsOne = async (postId: string, isParent: boolean): Promise<ReactionCount[] | null> => {
+  const fetchCountsOne = async (
+    postId: string,
+    isParent: boolean,
+  ): Promise<ReactionCount[] | null> => {
     const url = countsUrl(postId, isParent);
     try {
       const res = await fetch(url, { cache: 'no-store' });
@@ -113,7 +127,10 @@ export default function SelfPage() {
       const totals: Record<string, number> | undefined =
         json && (json.totals || json.counts || json.data);
       if (!totals) return null;
-      return Object.entries(totals).map(([r_type, count]) => ({ r_type, count: (count as number) ?? 0 }));
+      return Object.entries(totals).map(([r_type, count]) => ({
+        r_type,
+        count: (count as number) ?? 0,
+      }));
     } catch {
       return null;
     }
@@ -154,13 +171,19 @@ export default function SelfPage() {
         const res = await fetch(url, { signal: ac.signal, cache: 'no-store' });
         const parentListRaw: BasePost[] = res.ok ? toArray(await res.json()) : [];
         const parents: Item[] = parentListRaw
-          .filter((p) => (p.user_code === code) && (!p.board_type || String(p.board_type).toLowerCase() === BOARD_TYPE))
+          .filter(
+            (p) =>
+              p.user_code === code &&
+              (!p.board_type || String(p.board_type).toLowerCase() === BOARD_TYPE),
+          )
           .map((p) => ({ ...p, kind: 'parent' as const, is_posted: true }));
 
         // 子：Supabase 直叩き（is_posted=false）
         const { data: childRows } = await supabase
           .from('posts')
-          .select('post_id, title, content, created_at, thread_id, user_code, board_type, is_posted')
+          .select(
+            'post_id, title, content, created_at, thread_id, user_code, board_type, is_posted',
+          )
           .eq('user_code', code)
           .eq('is_posted', false)
           .order('created_at', { ascending: false });
@@ -170,7 +193,7 @@ export default function SelfPage() {
           .map((c) => ({ ...c, kind: 'child' as const }));
 
         const merged = [...parents, ...children].sort(
-          (a, b) => +new Date(b.created_at) - +new Date(a.created_at)
+          (a, b) => +new Date(b.created_at) - +new Date(a.created_at),
         );
 
         if (mounted && !ac.signal.aborted) {
@@ -178,7 +201,10 @@ export default function SelfPage() {
 
           // 親/子それぞれのカウントを並列取得
           const entries = await Promise.all(
-            merged.map(async (it) => [it.post_id, await fetchCountsOne(it.post_id, it.kind === 'parent')] as const)
+            merged.map(
+              async (it) =>
+                [it.post_id, await fetchCountsOne(it.post_id, it.kind === 'parent')] as const,
+            ),
           );
           if (mounted && !ac.signal.aborted) {
             const next: Record<string, ReactionCount[]> = {};
@@ -219,7 +245,7 @@ export default function SelfPage() {
         const idx = prev.findIndex((p) => p.post_id === row.post_id);
         if (idx === -1) {
           const next = [{ ...(row as BasePost), kind }, ...prev].sort(
-            (a, b) => +new Date(b.created_at) - +new Date(a.created_at)
+            (a, b) => +new Date(b.created_at) - +new Date(a.created_at),
           );
           refetchCounts(next);
           return next;
@@ -250,7 +276,7 @@ export default function SelfPage() {
         (payload) => {
           if (payload.eventType === 'DELETE') remove(payload.old);
           else upsert(payload.new);
-        }
+        },
       )
       .subscribe();
 
@@ -267,7 +293,10 @@ export default function SelfPage() {
         return;
       }
       const entries = await Promise.all(
-        list.map(async (it) => [it.post_id, await fetchCountsOne(it.post_id, it.kind === 'parent')] as const)
+        list.map(
+          async (it) =>
+            [it.post_id, await fetchCountsOne(it.post_id, it.kind === 'parent')] as const,
+        ),
       );
       const next: Record<string, ReactionCount[]> = {};
       for (const [id, arr] of entries) next[id] = arr ?? [];
@@ -401,7 +430,10 @@ export default function SelfPage() {
               onClick={() => goThread(it)}
               style={{ cursor: 'pointer' }}
             >
-              <div className="self-item-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div
+                className="self-item-title"
+                style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+              >
                 <strong>{it.title ?? '(本文なし)'}</strong>
                 {it.kind === 'child' && (
                   <span
@@ -410,7 +442,7 @@ export default function SelfPage() {
                       padding: '2px 6px',
                       border: '1px solid #bbb',
                       borderRadius: 6,
-                      background: '#f7f7f7'
+                      background: '#f7f7f7',
                     }}
                     title="このユーザーによる返信（子投稿）"
                   >

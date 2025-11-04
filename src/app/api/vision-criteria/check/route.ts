@@ -5,12 +5,17 @@ import { getAuth } from 'firebase-admin/auth';
 
 /* ------- Firebase Admin 1本方式 ------- */
 function resolveProjectId(): string | undefined {
-  return process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || undefined;
+  return (
+    process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || undefined
+  );
 }
 try {
   const projectId = resolveProjectId();
   initializeApp({ credential: applicationDefault(), ...(projectId ? { projectId } : {}) });
-  console.log('✅ Firebase Admin (vision-criteria) initialized', projectId ? `(projectId=${projectId})` : '');
+  console.log(
+    '✅ Firebase Admin (vision-criteria) initialized',
+    projectId ? `(projectId=${projectId})` : '',
+  );
 } catch {
   console.log('ℹ️ Firebase Admin already initialized (vision-criteria)');
 }
@@ -45,12 +50,21 @@ async function resolveUserCode(firebaseUid: string): Promise<string> {
   const gen = () => String(Math.floor(100000 + Math.random() * 900000));
   let user_code = gen();
   for (let i = 0; i < 5; i++) {
-    const dupe = await supabase.from('users').select('user_code').eq('user_code', user_code).limit(1).maybeSingle();
+    const dupe = await supabase
+      .from('users')
+      .select('user_code')
+      .eq('user_code', user_code)
+      .limit(1)
+      .maybeSingle();
     if (!dupe.data) break;
     user_code = gen();
   }
 
-  const ins = await supabase.from('users').insert([{ user_code, firebase_uid: firebaseUid }]).select('user_code').single();
+  const ins = await supabase
+    .from('users')
+    .insert([{ user_code, firebase_uid: firebaseUid }])
+    .select('user_code')
+    .single();
   if (ins.error) throw ins.error;
   return String(ins.data.user_code);
 }
@@ -77,33 +91,93 @@ function defaultTemplates(from: Stage): Omit<BridgeRow, 'id' | 'vision_id'>[] {
   switch (from) {
     case 'S': // 種 → 広げる
       return [
-        { from_stage: 'S', to_stage: 'F', title: '意図を1日1回言語化する', required_days: 3, done_days: 0 },
-        { from_stage: 'S', to_stage: 'F', title: '観察メモを毎日1件残す', required_days: 3, done_days: 0 },
+        {
+          from_stage: 'S',
+          to_stage: 'F',
+          title: '意図を1日1回言語化する',
+          required_days: 3,
+          done_days: 0,
+        },
+        {
+          from_stage: 'S',
+          to_stage: 'F',
+          title: '観察メモを毎日1件残す',
+          required_days: 3,
+          done_days: 0,
+        },
       ];
     case 'F': // 広げる → 洞察
       return [
-        { from_stage: 'F', to_stage: 'R', title: '集めた材料を整理する', required_days: 2, done_days: 0 },
-        { from_stage: 'F', to_stage: 'R', title: '気づきをメモにまとめる', required_days: 2, done_days: 0 },
+        {
+          from_stage: 'F',
+          to_stage: 'R',
+          title: '集めた材料を整理する',
+          required_days: 2,
+          done_days: 0,
+        },
+        {
+          from_stage: 'F',
+          to_stage: 'R',
+          title: '気づきをメモにまとめる',
+          required_days: 2,
+          done_days: 0,
+        },
       ];
     case 'R': // 洞察 → 実践
       return [
-        { from_stage: 'R', to_stage: 'C', title: '小さな実験を設計する', required_days: 2, done_days: 0 },
-        { from_stage: 'R', to_stage: 'C', title: '初回の試行を実施', required_days: 1, done_days: 0 },
+        {
+          from_stage: 'R',
+          to_stage: 'C',
+          title: '小さな実験を設計する',
+          required_days: 2,
+          done_days: 0,
+        },
+        {
+          from_stage: 'R',
+          to_stage: 'C',
+          title: '初回の試行を実施',
+          required_days: 1,
+          done_days: 0,
+        },
       ];
     case 'C': // 実践 → 結果
       return [
-        { from_stage: 'C', to_stage: 'I', title: '実践ログを1日分記録', required_days: 3, done_days: 0 },
-        { from_stage: 'C', to_stage: 'I', title: '成果と学びをまとめる', required_days: 1, done_days: 0 },
+        {
+          from_stage: 'C',
+          to_stage: 'I',
+          title: '実践ログを1日分記録',
+          required_days: 3,
+          done_days: 0,
+        },
+        {
+          from_stage: 'C',
+          to_stage: 'I',
+          title: '成果と学びをまとめる',
+          required_days: 1,
+          done_days: 0,
+        },
       ];
     case 'I': // 結果 → 結果（留める）
     default:
-      return [{ from_stage: 'I', to_stage: 'I', title: '振り返りを書き留める', required_days: 1, done_days: 0 }];
+      return [
+        {
+          from_stage: 'I',
+          to_stage: 'I',
+          title: '振り返りを書き留める',
+          required_days: 1,
+          done_days: 0,
+        },
+      ];
   }
 }
 
 /* vision_id が当ユーザーのものかチェック */
 async function assertVisionOwner(user_code: string, vision_id: string) {
-  const v = await supabase.from('visions').select('vision_id,user_code').eq('vision_id', vision_id).single();
+  const v = await supabase
+    .from('visions')
+    .select('vision_id,user_code')
+    .eq('vision_id', vision_id)
+    .single();
   if (v.error) throw v.error;
   if (!v.data || String(v.data.user_code) !== String(user_code)) {
     throw new Error('Forbidden: vision owner mismatch');
@@ -168,7 +242,7 @@ export async function POST(req: NextRequest) {
     await assertVisionOwner(user_code, vision_id);
 
     if (body.seed) {
-      const rows = defaultTemplates(from).map(t => ({
+      const rows = defaultTemplates(from).map((t) => ({
         ...t,
         vision_id,
         // to_stage はテンプレに入っていますが、ない場合は次段に寄せておく
@@ -224,7 +298,11 @@ export async function PUT(req: NextRequest) {
 
   try {
     // 所有チェックのため親 Vision をたどる
-    const row = await supabase.from('vision_criteria').select('id,vision_id,required_days,done_days').eq('id', id).single();
+    const row = await supabase
+      .from('vision_criteria')
+      .select('id,vision_id,required_days,done_days')
+      .eq('id', id)
+      .single();
     if (row.error) throw row.error;
     await assertVisionOwner(user_code, row.data.vision_id);
 
@@ -241,7 +319,12 @@ export async function PUT(req: NextRequest) {
       delete (fields as any).op;
     }
 
-    const upd = await supabase.from('vision_criteria').update({ ...fields, updated_at: new Date().toISOString() }).eq('id', id).select('*').single();
+    const upd = await supabase
+      .from('vision_criteria')
+      .update({ ...fields, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select('*')
+      .single();
     if (upd.error) throw upd.error;
 
     return NextResponse.json(upd.data);

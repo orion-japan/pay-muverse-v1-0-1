@@ -19,7 +19,7 @@ export default function MuiComposer({
   onSend,
   sending = false,
   textareaRef,
-  expanded = false,         // ← 追加
+  expanded = false, // ← 追加
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const composingRef = useRef(false);
@@ -61,8 +61,13 @@ export default function MuiComposer({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onInput={(e) => autoGrow(e.currentTarget)}
-          onCompositionStart={() => { composingRef.current = true; }}
-          onCompositionEnd={(e) => { composingRef.current = false; autoGrow(e.currentTarget); }}
+          onCompositionStart={() => {
+            composingRef.current = true;
+          }}
+          onCompositionEnd={(e) => {
+            composingRef.current = false;
+            autoGrow(e.currentTarget);
+          }}
           onKeyDown={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
               if (composingRef.current) return;
@@ -87,8 +92,7 @@ export default function MuiComposer({
 function autoGrow(el: HTMLTextAreaElement) {
   const style = window.getComputedStyle(el);
   const lineH = parseFloat(style.lineHeight || '20') || 20;
-  const paddingY =
-    parseFloat(style.paddingTop || '0') + parseFloat(style.paddingBottom || '0');
+  const paddingY = parseFloat(style.paddingTop || '0') + parseFloat(style.paddingBottom || '0');
   const minH = Math.round(lineH * (el.rows || 3) + paddingY);
   el.style.height = 'auto';
   const next = Math.min(el.scrollHeight, 240);

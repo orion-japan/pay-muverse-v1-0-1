@@ -1,13 +1,13 @@
 // app/api/pay/subscribe/route.ts
-export const runtime = "nodejs";
+export const runtime = 'nodejs';
 
-import { NextRequest, NextResponse } from "next/server";
-import { google } from "googleapis";
-import dayjs from "dayjs";
-import Payjp from "payjp";
-import { createClient } from "@supabase/supabase-js";
-import { adminAuth } from "@/lib/firebase-admin";
-import { PLAN_ID_MAP } from "@/lib/constants/planIdMap";
+import { NextRequest, NextResponse } from 'next/server';
+import { google } from 'googleapis';
+import dayjs from 'dayjs';
+import Payjp from 'payjp';
+import { createClient } from '@supabase/supabase-js';
+import { adminAuth } from '@/lib/firebase-admin';
+import { PLAN_ID_MAP } from '@/lib/constants/planIdMap';
 
 /* ========= ENV ========= */
 function mustEnv(name: string) {
@@ -17,23 +17,21 @@ function mustEnv(name: string) {
 }
 
 [
-  "NEXT_PUBLIC_SUPABASE_URL",
-  "SUPABASE_SERVICE_ROLE_KEY",
-  "PAYJP_SECRET_KEY",
-  "GOOGLE_SERVICE_ACCOUNT_BASE64",
-  "GOOGLE_SHEET_ID",
+  'NEXT_PUBLIC_SUPABASE_URL',
+  'SUPABASE_SERVICE_ROLE_KEY',
+  'PAYJP_SECRET_KEY',
+  'GOOGLE_SERVICE_ACCOUNT_BASE64',
+  'GOOGLE_SHEET_ID',
 ].forEach(mustEnv);
 
 /* ========= Clients ========= */
-const sb = createClient(
-  mustEnv("NEXT_PUBLIC_SUPABASE_URL"),
-  mustEnv("SUPABASE_SERVICE_ROLE_KEY"),
-  { auth: { persistSession: false } }
-);
-const payjp = Payjp(mustEnv("PAYJP_SECRET_KEY"));
+const sb = createClient(mustEnv('NEXT_PUBLIC_SUPABASE_URL'), mustEnv('SUPABASE_SERVICE_ROLE_KEY'), {
+  auth: { persistSession: false },
+});
+const payjp = Payjp(mustEnv('PAYJP_SECRET_KEY'));
 
 /* ========= Helpers ========= */
-const safe = (v: any) => (v === undefined || v === null ? "" : v);
+const safe = (v: any) => (v === undefined || v === null ? '' : v);
 
 function normalizePayjpError(err: any) {
   const norm: Record<string, any> = {
@@ -46,7 +44,7 @@ function normalizePayjpError(err: any) {
     const raw = err?.response?.body;
     if (raw) {
       try {
-        norm.body = typeof raw === "string" ? JSON.parse(raw) : raw;
+        norm.body = typeof raw === 'string' ? JSON.parse(raw) : raw;
       } catch {
         norm.body = String(raw);
       }
@@ -58,16 +56,10 @@ function normalizePayjpError(err: any) {
 function isAlreadySubscribedPayload(p: any) {
   try {
     const code = p?.error?.code || p?.body?.error?.code || p?.code;
-    const msg = (
-      p?.error?.message ||
-      p?.body?.error?.message ||
-      p?.message ||
-      p?.detail ||
-      ""
-    )
+    const msg = (p?.error?.message || p?.body?.error?.message || p?.message || p?.detail || '')
       .toString()
       .toLowerCase();
-    return code === "already_subscribed" || msg.includes("already_subscribed");
+    return code === 'already_subscribed' || msg.includes('already_subscribed');
   } catch {
     return false;
   }
@@ -80,14 +72,14 @@ export async function POST(req: NextRequest) {
 
   try {
     /* ---------- 1) Firebase ID Token ---------- */
-    const authHeader = req.headers.get("authorization") || "";
-    const idToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    const authHeader = req.headers.get('authorization') || '';
+    const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
 
     if (!idToken) {
-      log("❌ missing Authorization: Bearer <idToken>");
+      log('❌ missing Authorization: Bearer <idToken>');
       return NextResponse.json(
-        { success: false, error: "missing_id_token", logTrail },
-        { status: 401 }
+        { success: false, error: 'missing_id_token', logTrail },
+        { status: 401 },
       );
     }
 
@@ -97,8 +89,8 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       log(`❌ invalid_id_token: ${String((e as any)?.message || e)}`);
       return NextResponse.json(
-        { success: false, error: "invalid_id_token", logTrail },
-        { status: 401 }
+        { success: false, error: 'invalid_id_token', logTrail },
+        { status: 401 },
       );
     }
 
@@ -123,69 +115,63 @@ export async function POST(req: NextRequest) {
     log(`📥 payload: ${JSON.stringify(body)}`);
 
     const missing: string[] = [];
-    if (!plan_type) missing.push("plan_type");
-    if (!customer_id) missing.push("customer_id");
-    if (!firebase_uid) missing.push("firebase_uid(token)");
+    if (!plan_type) missing.push('plan_type');
+    if (!customer_id) missing.push('customer_id');
+    if (!firebase_uid) missing.push('firebase_uid(token)');
     if (missing.length) {
-      log(`⚠ missing: ${missing.join(",")}`);
+      log(`⚠ missing: ${missing.join(',')}`);
       return NextResponse.json(
-        { success: false, error: "必要なパラメータが不足しています", missing, logTrail },
-        { status: 400 }
+        { success: false, error: '必要なパラメータが不足しています', missing, logTrail },
+        { status: 400 },
       );
     }
 
     // プランキーを正規化
     const planKey = String(plan_type).toLowerCase();
     const plan_price_id = PLAN_ID_MAP[planKey];
-    if (!plan_price_id || typeof plan_price_id !== "string") {
+    if (!plan_price_id || typeof plan_price_id !== 'string') {
       log(`❌ invalid plan_type: ${plan_type} (resolved key=${planKey})`);
       return NextResponse.json(
         { success: false, error: `無効なプラン: ${plan_type}`, logTrail },
-        { status: 400 }
+        { status: 400 },
       );
     }
     log(`📦 plan_id = ${plan_price_id}`);
 
     /* ---------- 3) Supabase ユーザー ---------- */
     let { data: user, error: userErr } = await sb
-      .from("users")
-      .select("*")
-      .eq("firebase_uid", firebase_uid!)
+      .from('users')
+      .select('*')
+      .eq('firebase_uid', firebase_uid!)
       .single();
 
     if ((!user || userErr) && emailFromToken) {
-      const retry = await sb
-        .from("users")
-        .select("*")
-        .eq("click_email", emailFromToken)
-        .single();
+      const retry = await sb.from('users').select('*').eq('click_email', emailFromToken).single();
       user = retry.data;
       userErr = retry.error;
       if (user && (!user.firebase_uid || user.firebase_uid !== firebase_uid)) {
-        await sb.from("users").update({ firebase_uid }).eq("user_code", user.user_code);
-        log("🔁 uid synced to users.firebase_uid");
+        await sb.from('users').update({ firebase_uid }).eq('user_code', user.user_code);
+        log('🔁 uid synced to users.firebase_uid');
       }
     }
 
     if (userErr || !user) {
-      log(`❌ Supabase user not found: ${userErr?.message || "no row"}`);
+      log(`❌ Supabase user not found: ${userErr?.message || 'no row'}`);
       return NextResponse.json(
-        { success: false, error: "ユーザーが見つかりません", logTrail },
-        { status: 404 }
+        { success: false, error: 'ユーザーが見つかりません', logTrail },
+        { status: 404 },
       );
     }
 
     const user_code = user.user_code as string;
-    const isAdmin = user.user_role === "admin";
-    log(`✅ user loaded: ${user_code} (admin=${isAdmin ? "yes" : "no"})`);
+    const isAdmin = user.user_role === 'admin';
+    log(`✅ user loaded: ${user_code} (admin=${isAdmin ? 'yes' : 'no'})`);
 
     /* ===========================================================
        A) finalize: 3DS 後（tdsr_id / charge_id）→ サブスク作成
        =========================================================== */
     if (tdsr_id || charge_id) {
-      log(
-        `🔁 finalize after 3DS: tdsr_id=${tdsr_id ?? "-"}, charge_id=${charge_id ?? "-"}`
-      );
+      log(`🔁 finalize after 3DS: tdsr_id=${tdsr_id ?? '-'}, charge_id=${charge_id ?? '-'}`);
 
       // 状態確認（ログのみ）
       try {
@@ -193,12 +179,12 @@ export async function POST(req: NextRequest) {
           const ch = await payjp.charges.retrieve(String(charge_id));
           log(
             `ℹ️ charge.status=${ch?.status}, three_d_secure_status=${
-              (ch as any)?.three_d_secure_status ?? "n/a"
-            }`
+              (ch as any)?.three_d_secure_status ?? 'n/a'
+            }`,
           );
         } else if (tdsr_id && (payjp as any).tdsRequests?.retrieve) {
           const tds = await (payjp as any).tdsRequests.retrieve(tdsr_id);
-          log(`ℹ️ tds_request.status=${tds?.status ?? "n/a"}`);
+          log(`ℹ️ tds_request.status=${tds?.status ?? 'n/a'}`);
         }
       } catch (e: any) {
         log(`⚠ status check failed: ${e?.message || e}`);
@@ -212,10 +198,10 @@ export async function POST(req: NextRequest) {
             limit: 100,
           } as any);
           const targets = (existing?.data ?? []).filter((s: any) =>
-            ["active", "trial", "trialing", "paused"].includes(String(s?.status))
+            ['active', 'trial', 'trialing', 'paused'].includes(String(s?.status)),
           );
           log(
-            `🪓 cancel targets: ${targets.map((s: any) => `${s.id}:${s.status}`).join(", ") || "(none)"}`
+            `🪓 cancel targets: ${targets.map((s: any) => `${s.id}:${s.status}`).join(', ') || '(none)'}`,
           );
           for (const s of targets) {
             try {
@@ -227,14 +213,14 @@ export async function POST(req: NextRequest) {
           }
           // DB 側もクリア
           await sb
-            .from("users")
+            .from('users')
             .update({
               payjp_subscription_id: null,
               last_payment_date: null,
               next_payment_date: null,
             })
-            .eq("user_code", user_code);
-          log("✅ DB subscription fields cleared");
+            .eq('user_code', user_code);
+          log('✅ DB subscription fields cleared');
         } catch (e: any) {
           log(`⚠ subscriptions.list failed: ${e?.message}`);
         }
@@ -259,13 +245,12 @@ export async function POST(req: NextRequest) {
               limit: 100,
             } as any);
             subscription =
-              (listed?.data ?? []).find(
-                (s: any) => String(s?.plan) === String(plan_price_id)
-              ) || (listed?.data ?? [])[0];
+              (listed?.data ?? []).find((s: any) => String(s?.plan) === String(plan_price_id)) ||
+              (listed?.data ?? [])[0];
             if (subscription) {
               log(`ℹ️ use existing subscription: ${subscription.id}`);
             } else {
-              log("🔴 already_subscribed but no subscription found");
+              log('🔴 already_subscribed but no subscription found');
             }
           } catch (e: any) {
             log(`🔴 list after already_subscribed failed: ${e?.message}`);
@@ -276,12 +261,12 @@ export async function POST(req: NextRequest) {
           return NextResponse.json(
             {
               success: false,
-              error: "サブスク登録に失敗しました",
-              detail: nerr.message || "subscriptions.create error",
+              error: 'サブスク登録に失敗しました',
+              detail: nerr.message || 'subscriptions.create error',
               payjp: nerr,
               logTrail,
             },
-            { status: 500 }
+            { status: 500 },
           );
         }
       }
@@ -290,7 +275,7 @@ export async function POST(req: NextRequest) {
       if (charge_id) {
         try {
           await payjp.charges.expire(String(charge_id));
-          log("🧹 probe charge expired");
+          log('🧹 probe charge expired');
         } catch (e: any) {
           log(`⚠ expire probe failed: ${e?.message || e}`);
         }
@@ -301,13 +286,13 @@ export async function POST(req: NextRequest) {
       const currentEnd = Number(subscription?.current_period_end ?? 0);
       const last_payment_date =
         currentStart > 0
-          ? dayjs.unix(currentStart).format("YYYY-MM-DD")
-          : dayjs().format("YYYY-MM-DD");
+          ? dayjs.unix(currentStart).format('YYYY-MM-DD')
+          : dayjs().format('YYYY-MM-DD');
       const next_payment_date =
         currentEnd > 0
-          ? dayjs.unix(currentEnd).format("YYYY-MM-DD")
-          : dayjs().add(1, "month").format("YYYY-MM-DD");
-      const payment_date = dayjs().format("YYYY-MM-DD");
+          ? dayjs.unix(currentEnd).format('YYYY-MM-DD')
+          : dayjs().add(1, 'month').format('YYYY-MM-DD');
+      const payment_date = dayjs().format('YYYY-MM-DD');
       const subscription_id = String(subscription.id);
 
       const updatePayload: Record<string, any> = {
@@ -317,23 +302,23 @@ export async function POST(req: NextRequest) {
       };
       if (!isAdmin) {
         updatePayload.sofia_credit =
-          typeof sofia_credit === "number" ? sofia_credit : user.sofia_credit ?? 0;
+          typeof sofia_credit === 'number' ? sofia_credit : (user.sofia_credit ?? 0);
         updatePayload.click_type = planKey;
         updatePayload.plan_status = planKey;
       }
 
       const { data: updated, error: upErr } = await sb
-        .from("users")
+        .from('users')
         .update(updatePayload)
-        .eq("user_code", user_code)
-        .select("user_code")
+        .eq('user_code', user_code)
+        .select('user_code')
         .maybeSingle();
 
       if (upErr || !updated) {
-        log(`🔴 DB update error: ${upErr?.message || "0 rows updated"}`);
+        log(`🔴 DB update error: ${upErr?.message || '0 rows updated'}`);
         return NextResponse.json(
-          { success: false, error: "サブスクリプション情報の更新に失敗しました", logTrail },
-          { status: 500 }
+          { success: false, error: 'サブスクリプション情報の更新に失敗しました', logTrail },
+          { status: 500 },
         );
       }
       log(`✅ DB updated, subscription_id=${subscription_id}`);
@@ -341,23 +326,22 @@ export async function POST(req: NextRequest) {
       // --- Google Sheets 追記 ---
       let sheets: any;
       try {
-        const decoded = Buffer.from(
-          mustEnv("GOOGLE_SERVICE_ACCOUNT_BASE64"),
-          "base64"
-        ).toString("utf-8");
+        const decoded = Buffer.from(mustEnv('GOOGLE_SERVICE_ACCOUNT_BASE64'), 'base64').toString(
+          'utf-8',
+        );
         const credentials = JSON.parse(decoded);
 
         const auth = new google.auth.GoogleAuth({
           credentials,
-          scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+          scopes: ['https://www.googleapis.com/auth/spreadsheets'],
         });
         const authClient = await auth.getClient();
-        sheets = google.sheets({ version: "v4", auth: authClient as any });
+        sheets = google.sheets({ version: 'v4', auth: authClient as any });
       } catch (err: any) {
         log(`❌ GoogleAuth init failed: ${err?.message ?? err}`);
         return NextResponse.json(
-          { success: false, error: "Google 認証初期化に失敗しました", logTrail },
-          { status: 500 }
+          { success: false, error: 'Google 認証初期化に失敗しました', logTrail },
+          { status: 500 },
         );
       }
 
@@ -365,28 +349,28 @@ export async function POST(req: NextRequest) {
         safe(user_code),
         safe(user_email || emailFromToken),
         safe(planKey),
-        typeof charge_amount === "number" ? charge_amount : 0,
-        typeof sofia_credit === "number" ? sofia_credit : 0,
+        typeof charge_amount === 'number' ? charge_amount : 0,
+        typeof sofia_credit === 'number' ? sofia_credit : 0,
         safe(customer_id),
         safe(last_payment_date),
         safe(next_payment_date),
         safe(user.card_registered),
         safe(payment_date),
-        "Web決済",
+        'Web決済',
         safe(subscription_id),
         safe(plan_price_id),
       ];
 
-      log("📤 Sheets append start");
+      log('📤 Sheets append start');
       try {
         await sheets.spreadsheets.values.append({
-          spreadsheetId: mustEnv("GOOGLE_SHEET_ID"),
-          range: "Sheet1!A1",
-          valueInputOption: "USER_ENTERED",
-          insertDataOption: "INSERT_ROWS",
+          spreadsheetId: mustEnv('GOOGLE_SHEET_ID'),
+          range: 'Sheet1!A1',
+          valueInputOption: 'USER_ENTERED',
+          insertDataOption: 'INSERT_ROWS',
           requestBody: { values: [row] },
         });
-        log("✅ Sheets append succeeded");
+        log('✅ Sheets append succeeded');
         return NextResponse.json({ success: true, logTrail });
       } catch (sheetError: any) {
         log(`❌ Sheets write failed: ${sheetError?.message}`);
@@ -396,11 +380,11 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           {
             success: false,
-            error: "Google Sheets への書き込みに失敗しました",
+            error: 'Google Sheets への書き込みに失敗しました',
             detail: sheetError?.message,
             logTrail,
           },
-          { status: 500 }
+          { status: 500 },
         );
       }
     }
@@ -409,18 +393,18 @@ export async function POST(req: NextRequest) {
        B) first call: 3DS 要否のために与信作成 → 3DS 案内
        =========================================================== */
     const probeAmount =
-      typeof charge_amount === "number" && charge_amount > 0 ? charge_amount : 100;
+      typeof charge_amount === 'number' && charge_amount > 0 ? charge_amount : 100;
     log(`💳 create probe charge: amount=${probeAmount}`);
 
     let charge: any;
     try {
       charge = await payjp.charges.create({
         amount: probeAmount,
-        currency: "jpy",
+        currency: 'jpy',
         customer: String(customer_id),
         capture: false,
         three_d_secure: true,
-        description: `3DS probe for ${planKey} by ${user_code_from_body || "unknown"}`,
+        description: `3DS probe for ${planKey} by ${user_code_from_body || 'unknown'}`,
       });
       log(`✅ charge created: ${charge?.id}`);
     } catch (err: any) {
@@ -429,12 +413,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: "与信の作成に失敗しました",
-          detail: "PAY.JP charges.create でエラー",
+          error: '与信の作成に失敗しました',
+          detail: 'PAY.JP charges.create でエラー',
           payjp: nerr,
           logTrail,
         },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -447,7 +431,7 @@ export async function POST(req: NextRequest) {
           tdsr_id_created = tdsReq.id as string;
           log(`✅ tds_request created: ${tdsr_id_created}`);
         } else {
-          log("⚠ tdsRequests.create returned no id");
+          log('⚠ tdsRequests.create returned no id');
         }
       }
     } catch (e: any) {
@@ -472,11 +456,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: "内部エラーが発生しました",
+        error: '内部エラーが発生しました',
         detail: msg,
         logTrail,
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

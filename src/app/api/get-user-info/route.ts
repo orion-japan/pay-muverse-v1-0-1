@@ -58,8 +58,8 @@ async function handle(req: NextRequest) {
       typeof sofia_creditRaw === 'number'
         ? sofia_creditRaw
         : Number.isFinite(Number(sofia_creditRaw))
-        ? Number(sofia_creditRaw)
-        : 0;
+          ? Number(sofia_creditRaw)
+          : 0;
 
     const login_url = `https://m.muverse.jp?user_code=${user_code}`;
 
@@ -77,5 +77,9 @@ async function handle(req: NextRequest) {
   }
 }
 
-export async function GET(req: NextRequest)  { return handle(req); }
-export async function POST(req: NextRequest) { return handle(req); }
+export async function GET(req: NextRequest) {
+  return handle(req);
+}
+export async function POST(req: NextRequest) {
+  return handle(req);
+}

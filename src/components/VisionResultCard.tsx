@@ -7,14 +7,7 @@ import SafeImage from '@/components/common/SafeImage';
 
 type PhaseKey = 'initial' | 'mid' | 'final';
 type ResultStatus = '成功' | '中断' | '意図違い';
-type VisionStatus =
-  | '検討中'
-  | '実践中'
-  | '迷走中'
-  | '順調'
-  | 'ラストスパート'
-  | '達成'
-  | '破棄';
+type VisionStatus = '検討中' | '実践中' | '迷走中' | '順調' | 'ラストスパート' | '達成' | '破棄';
 
 const AUTO_DAYS: Record<PhaseKey, number> = { initial: 7, mid: 14, final: 21 };
 const ALBUM_BUCKET = 'private-posts'; // ★ ここで固定
@@ -24,13 +17,13 @@ export type VisionResultCardProps = {
   title: string;
   phase: PhaseKey;
   resultStatus: ResultStatus;
-  resultedAt: string;                 // ISO
-  userCode: string;                   // x-user-code ヘッダ用
-  qCode?: string | null;              // バッジ表示用（※文字列以外は描画しない）
-  thumbnailUrl?: string | null;       // サムネがあれば表示（直URL or album://path）
+  resultedAt: string; // ISO
+  userCode: string; // x-user-code ヘッダ用
+  qCode?: string | null; // バッジ表示用（※文字列以外は描画しない）
+  thumbnailUrl?: string | null; // サムネがあれば表示（直URL or album://path）
   /** ← ステータス（検討中/実践中...）をカードに表示 */
   visionStatus?: VisionStatus | null;
-  onChanged?: () => void;             // 成功時のリフレッシュコールバック
+  onChanged?: () => void; // 成功時のリフレッシュコールバック
   className?: string;
 };
 
@@ -39,7 +32,7 @@ const STATUS_COLORS: Record<VisionStatus, string> = {
   実践中: '#22c55e',
   迷走中: '#f59e0b',
   順調: '#3b82f6',
-  'ラストスパート': '#a855f7',
+  ラストスパート: '#a855f7',
   達成: '#ef4444',
   破棄: '#6b7280',
 };
@@ -80,10 +73,9 @@ export default function VisionResultCard({
           let path = thumbnailUrl.replace(/^album:\/\//, '').replace(/^\/+/, '');
           path = path.replace(new RegExp(`^(?:${ALBUM_BUCKET}/)+`), '');
 
-          const { data, error } = await supabase
-            .storage
-            .from(ALBUM_BUCKET)                 // ★ ← album バケットを固定
-            .createSignedUrl(path, 60 * 60);    // 1h
+          const { data, error } = await supabase.storage
+            .from(ALBUM_BUCKET) // ★ ← album バケットを固定
+            .createSignedUrl(path, 60 * 60); // 1h
 
           if (!alive) return;
           if (error) {
@@ -102,7 +94,9 @@ export default function VisionResultCard({
         if (alive) setResolvedThumb(thumbnailUrl); // 直URL（http/https/data/blob等）はそのまま
       }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [thumbnailUrl]);
 
   // 残り日数と進捗割合（自動移管まで） — resultedAt が不正でも NaN を出さない
@@ -141,7 +135,9 @@ export default function VisionResultCard({
         // 1) 自分自身を即時非表示（楽観的）
         setHidden(true);
         // 2) 他の画面へも通知（VisionPage などが購読していれば即消える）
-        try { localStorage.setItem(`vision.hidden.${visionId}`, '1'); } catch {}
+        try {
+          localStorage.setItem(`vision.hidden.${visionId}`, '1');
+        } catch {}
         window.dispatchEvent(new CustomEvent('vision:archived', { detail: { visionId } }));
       }
 
@@ -159,8 +155,7 @@ export default function VisionResultCard({
     post('/api/visions/result', { vision_id: visionId, result_status: null });
 
   // 手動で履歴へ
-  const handleArchive = () =>
-    post('/api/visions/archive', { vision_id: visionId });
+  const handleArchive = () => post('/api/visions/archive', { vision_id: visionId });
 
   // ★ 非表示フラグが立っていたら描画しない
   if (hidden) return null;
@@ -209,7 +204,10 @@ export default function VisionResultCard({
           aria-valuemax={100}
           aria-valuenow={Math.round((Number.isFinite(ratio) ? ratio : 0) * 100)}
         >
-          <div className="vrc-rail__bar" style={{ width: `${(Number.isFinite(ratio) ? ratio : 0) * 100}%` }} />
+          <div
+            className="vrc-rail__bar"
+            style={{ width: `${(Number.isFinite(ratio) ? ratio : 0) * 100}%` }}
+          />
         </div>
 
         {/* 残り日数/メッセージ */}

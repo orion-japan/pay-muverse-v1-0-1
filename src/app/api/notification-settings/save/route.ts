@@ -6,10 +6,9 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
 // --- utils -------------------------------------------------------------
@@ -36,7 +35,7 @@ const ALLOWED_KEYS = [
   'notify_ai',
   'notify_credit',
 ] as const;
-type ConsentKey = typeof ALLOWED_KEYS[number];
+type ConsentKey = (typeof ALLOWED_KEYS)[number];
 
 const SELF_RANGES = new Set(['all', 'friends', 'none']);
 
@@ -101,9 +100,7 @@ export async function POST(req: NextRequest) {
 
     // --- sanitize payload ---
     const rawConsents: Record<string, any> =
-      typeof body.consents === 'object' && body.consents
-        ? body.consents
-        : body;
+      typeof body.consents === 'object' && body.consents ? body.consents : body;
 
     const incoming = sanitizeIncoming(rawConsents);
 
@@ -126,7 +123,9 @@ export async function POST(req: NextRequest) {
       // row does not exist → insert
       const { error: insErr } = await supabase
         .from('profiles')
-        .insert([{ user_code: targetUserCode, consents: merged, updated_at: new Date().toISOString() }]);
+        .insert([
+          { user_code: targetUserCode, consents: merged, updated_at: new Date().toISOString() },
+        ]);
       if (insErr) throw insErr;
     } else {
       // row exists → update
@@ -146,7 +145,7 @@ export async function POST(req: NextRequest) {
     console.error('[notification-settings/save] error:', e);
     return NextResponse.json(
       { error: typeof e?.message === 'string' ? e.message : 'server error' },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

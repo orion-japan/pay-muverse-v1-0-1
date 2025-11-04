@@ -35,7 +35,7 @@ export async function ensurePushSubscribed(uid: string): Promise<EnsureResult> {
         return buf ? btoa(String.fromCharCode(...new Uint8Array(buf))) : undefined;
       };
       p256dh = p256dh || getKey('p256dh');
-      auth   = auth   || getKey('auth');
+      auth = auth || getKey('auth');
     }
     if (!endpoint || !p256dh || !auth) throw new Error('subscription-incomplete');
 
@@ -51,7 +51,7 @@ export async function ensurePushSubscribed(uid: string): Promise<EnsureResult> {
       }),
     });
     if (!saveRes.ok) {
-      const t = await saveRes.text().catch(()=>'');
+      const t = await saveRes.text().catch(() => '');
       throw new Error(`save-subscription-failed${t ? `: ${t}` : ''}`);
     }
 

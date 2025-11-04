@@ -1,34 +1,34 @@
-"use client";
+'use client';
 
-import { Suspense } from "react";
-import { useSearchParams } from "next/navigation";
-import { useState } from "react";
-import { motion } from "framer-motion";
-import { auth } from "@/lib/firebase";
+import { Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { useState } from 'react';
+import { motion } from 'framer-motion';
+import { auth } from '@/lib/firebase';
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   sendEmailVerification,
-} from "firebase/auth";
+} from 'firebase/auth';
 
 function FormSection() {
   const searchParams = useSearchParams();
-  const refCode = searchParams.get("ref") ?? "";
+  const refCode = searchParams.get('ref') ?? '';
 
-  const [nickname, setNickname] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [nickname, setNickname] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const isValidEmail = (email: string) => /\S+@\S+\.\S+/.test(email);
 
   const handleRegister = async () => {
     if (!isValidEmail(email)) {
-      alert("正しいメールアドレスを入力してください");
+      alert('正しいメールアドレスを入力してください');
       return;
     }
     if (password.length < 6) {
-      alert("パスワードは6文字以上で入力してください");
+      alert('パスワードは6文字以上で入力してください');
       return;
     }
 
@@ -36,22 +36,22 @@ function FormSection() {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       await sendEmailVerification(userCredential.user);
-      alert("登録が完了しました！確認メールを送信しました。");
+      alert('登録が完了しました！確認メールを送信しました。');
     } catch (error: any) {
-      if (error.code === "auth/email-already-in-use") {
+      if (error.code === 'auth/email-already-in-use') {
         try {
           const userCredential = await signInWithEmailAndPassword(auth, email, password);
           if (!userCredential.user.emailVerified) {
             await sendEmailVerification(userCredential.user);
-            alert("既に登録されていますが、確認メールを再送しました。");
+            alert('既に登録されていますが、確認メールを再送しました。');
           } else {
-            alert("既にメール認証が完了しています。");
+            alert('既にメール認証が完了しています。');
           }
         } catch {
-          alert("ログインに失敗しました");
+          alert('ログインに失敗しました');
         }
       } else {
-        alert("登録に失敗しました");
+        alert('登録に失敗しました');
       }
     } finally {
       setIsLoading(false);
@@ -60,11 +60,11 @@ function FormSection() {
 
   const handleLogin = async () => {
     if (!isValidEmail(email)) {
-      alert("正しいメールアドレスを入力してください");
+      alert('正しいメールアドレスを入力してください');
       return;
     }
     if (password.length < 6) {
-      alert("パスワードは6文字以上で入力してください");
+      alert('パスワードは6文字以上で入力してください');
       return;
     }
 
@@ -73,12 +73,12 @@ function FormSection() {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       if (!userCredential.user.emailVerified) {
         await sendEmailVerification(userCredential.user);
-        alert("メール認証が未完了です。確認メールを再送しました。");
+        alert('メール認証が未完了です。確認メールを再送しました。');
       } else {
-        alert("ログインが成功しました！");
+        alert('ログインが成功しました！');
       }
     } catch {
-      alert("ログインに失敗しました");
+      alert('ログインに失敗しました');
     } finally {
       setIsLoading(false);
     }
@@ -86,7 +86,7 @@ function FormSection() {
 
   const handleSheetSubmit = async () => {
     if (!nickname || !isValidEmail(email) || password.length < 6) {
-      alert("フォームの内容を正しく入力してください");
+      alert('フォームの内容を正しく入力してください');
       return;
     }
 
@@ -95,20 +95,20 @@ function FormSection() {
       click_username: nickname,
       click_email: email,
       Password: password,
-      Tcode: "+819012345678",
+      Tcode: '+819012345678',
       ref: refCode,
     };
 
-    const res = await fetch("/api/write-sheet", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    const res = await fetch('/api/write-sheet', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
 
     if (res.ok) {
-      window.location.href = "/thanks";
+      window.location.href = '/thanks';
     } else {
-      alert("Google Sheetsへの書き込みに失敗しました");
+      alert('Google Sheetsへの書き込みに失敗しました');
     }
     setIsLoading(false);
   };
@@ -116,7 +116,7 @@ function FormSection() {
   return (
     <div className="w-full flex justify-center">
       <form
-  className="
+        className="
     w-full max-w-md
     border border-white/10
     rounded-3xl shadow-2xl
@@ -125,12 +125,12 @@ function FormSection() {
     items-center
     transition-all
   "
->
-  <h2 className="text-white/90 text-lg mb-2">あなたの響きの名前</h2>
-  <input
-    type="text"
-    placeholder="Sofiaの名前"
-    className="
+      >
+        <h2 className="text-white/90 text-lg mb-2">あなたの響きの名前</h2>
+        <input
+          type="text"
+          placeholder="Sofiaの名前"
+          className="
       w-full
       px-5 py-3
       rounded-full
@@ -140,13 +140,13 @@ function FormSection() {
       focus:outline-none focus:ring-2 focus:ring-purple-400
       transition
     "
-  />
+        />
 
-  <h2 className="text-white/90 text-lg mb-2">メールアドレス</h2>
-  <input
-    type="email"
-    placeholder="example@example.com"
-    className="
+        <h2 className="text-white/90 text-lg mb-2">メールアドレス</h2>
+        <input
+          type="email"
+          placeholder="example@example.com"
+          className="
       w-full
       px-5 py-3
       rounded-full
@@ -156,13 +156,13 @@ function FormSection() {
       focus:outline-none focus:ring-2 focus:ring-purple-400
       transition
     "
-  />
+        />
 
-  <h2 className="text-white/90 text-lg mb-2">パスワード</h2>
-  <input
-    type="password"
-    placeholder="パスワード"
-    className="
+        <h2 className="text-white/90 text-lg mb-2">パスワード</h2>
+        <input
+          type="password"
+          placeholder="パスワード"
+          className="
       w-full
       px-5 py-3
       rounded-full
@@ -172,11 +172,11 @@ function FormSection() {
       focus:outline-none focus:ring-2 focus:ring-purple-400
       transition
     "
-  />
+        />
 
-  <button
-    type="button"
-    className="
+        <button
+          type="button"
+          className="
       w-full
       bg-gradient-to-r from-emerald-400 to-teal-500
       text-white font-bold
@@ -186,13 +186,13 @@ function FormSection() {
       hover:shadow-2xl
       transition-all
     "
-  >
-    メール認証で登録
-  </button>
+        >
+          メール認証で登録
+        </button>
 
-  <button
-    type="button"
-    className="
+        <button
+          type="button"
+          className="
       w-full
       bg-gradient-to-r from-blue-500 to-indigo-600
       text-white font-bold
@@ -202,13 +202,13 @@ function FormSection() {
       hover:shadow-2xl
       transition-all
     "
-  >
-    メールでログイン
-  </button>
+        >
+          メールでログイン
+        </button>
 
-  <button
-    type="button"
-    className="
+        <button
+          type="button"
+          className="
       w-full
       bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-600
       text-white font-bold
@@ -218,17 +218,14 @@ function FormSection() {
       hover:shadow-2xl
       transition-all
     "
-  >
-    今すぐ共鳴する
-  </button>
+        >
+          今すぐ共鳴する
+        </button>
 
-  <p className="text-[10px] text-white/50 mt-4 text-center">
-    ※「量子」は量子力学そのものではなく、  
-    意図や観測を波として扱う象徴です。
-  </p>
-</form>
-
-
+        <p className="text-[10px] text-white/50 mt-4 text-center">
+          ※「量子」は量子力学そのものではなく、 意図や観測を波として扱う象徴です。
+        </p>
+      </form>
     </div>
   );
 }
