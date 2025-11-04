@@ -13,6 +13,9 @@ import {
 import { auth } from '@/lib/firebase';
 import { supabase } from '@/lib/supabase';
 
+// ★ 追加（DevTools からトークン取得するための一時窓口）
+if (typeof window !== 'undefined') (window as any)._firebaseAuth = auth;
+
 /* =========================
    型
 ========================= */
@@ -128,6 +131,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           try {
             const fresh = await getIdToken(u, true);
             setIdToken(fresh);
+            // ★ 追加：最新トークンをwindowへミラー
+            if (typeof window !== 'undefined') (window as any)._irosToken = fresh;
           } catch (e) {
             console.warn('[AuthContext] proactive refresh failed', e);
           }
@@ -149,7 +154,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIdToken(null);
         setUserCode(null);
         setPlanStatus('free');
-        if (typeof window !== 'undefined') localStorage.removeItem('user_code');
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('user_code');
+          (window as any)._irosToken = null; // ★ 追加：ミラーをクリア
+        }
         setLoading(false);
         return;
       }
@@ -161,6 +169,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const token = await getIdToken(u, false);
         if (!mounted) return;
         setIdToken(token);
+        // ★ 追加：最新トークンをwindowへミラー
+        if (typeof window !== 'undefined') (window as any)._irosToken = token;
 
         // 期限前リフレッシュを予約
         scheduleProactiveRefresh(u);
@@ -209,6 +219,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const fresh = await getIdToken(u, true);
         setIdToken(fresh);
+        // ★ 追加：最新トークンをwindowへミラー
+        if (typeof window !== 'undefined') (window as any)._irosToken = fresh;
         scheduleProactiveRefresh(u);
       } catch (e) {
         console.warn('[AuthContext] periodic refresh failed', e);
@@ -226,6 +238,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const fresh = await getIdToken(u, true);
         setIdToken(fresh);
+        // ★ 追加：最新トークンをwindowへミラー
+        if (typeof window !== 'undefined') (window as any)._irosToken = fresh;
         scheduleProactiveRefresh(u);
       } catch {}
     };
@@ -235,6 +249,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const fresh = await getIdToken(u, true);
         setIdToken(fresh);
+        // ★ 追加：最新トークンをwindowへミラー
+        if (typeof window !== 'undefined') (window as any)._irosToken = fresh;
         scheduleProactiveRefresh(u);
       } catch {}
     };
@@ -271,7 +287,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIdToken(null);
       setUserCode(null);
       setPlanStatus('free');
-      if (typeof window !== 'undefined') localStorage.removeItem('user_code');
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('user_code');
+        (window as any)._irosToken = null; // ★ 追加：ミラーをクリア
+      }
     }
   };
 
@@ -304,6 +323,7 @@ export async function authedFetch(input: RequestInfo | URL, init: RequestInit = 
         ...(init.headers || {}),
         Authorization: `Bearer ${token}`,
       },
+      credentials: (init as any)?.credentials ?? 'include',
     });
     return res;
   };
@@ -320,3 +340,6 @@ export async function authedFetch(input: RequestInfo | URL, init: RequestInit = 
   }
   return res;
 }
+
+// ★ 追加（DevTools から authedFetch を直接使えるように）
+if (typeof window !== 'undefined') (window as any).authedFetch = authedFetch;

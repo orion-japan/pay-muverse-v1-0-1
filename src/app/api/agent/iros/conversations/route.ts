@@ -110,14 +110,13 @@ export async function POST(req: NextRequest) {
       const title = String(body?.title ?? '新しい会話');
       const now = new Date().toISOString();
 
-      // 互換のため user_key があれば同値を入れる（NOT NULL 環境でも落ちないように）
       const insertRow: any = {
         user_code: userCode,
         title,
         started_at: now,
         updated_at: now,
       };
-      insertRow.user_key = userCode; // 存在しない列でもエラーにならない（Supabaseは無視する）
+      insertRow.user_key = userCode; // 存在しない列でもエラーにならない
 
       const { data, error } = await sb
         .from('iros_conversations')
@@ -146,7 +145,8 @@ export async function POST(req: NextRequest) {
         .select('id,user_code')
         .eq('id', id)
         .single();
-      if (chkErr || !chk) return NextResponse.json({ ok: false, error: 'not_found' }, { status: 404 });
+      if (chkErr || !chk)
+        return NextResponse.json({ ok: false, error: 'not_found' }, { status: 404 });
       if (String(chk.user_code) !== String(userCode))
         return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
 
@@ -165,14 +165,16 @@ export async function POST(req: NextRequest) {
     // ---- delete ----
     if (action === 'delete') {
       const id = String(body?.id ?? body?.conversationId ?? '');
-      if (!id) return NextResponse.json({ ok: false, error: 'missing_parameters' }, { status: 400 });
+      if (!id)
+        return NextResponse.json({ ok: false, error: 'missing_parameters' }, { status: 400 });
 
       const { data: chk, error: chkErr } = await sb
         .from('iros_conversations')
         .select('id,user_code')
         .eq('id', id)
         .single();
-      if (chkErr || !chk) return NextResponse.json({ ok: false, error: 'not_found' }, { status: 404 });
+      if (chkErr || !chk)
+        return NextResponse.json({ ok: false, error: 'not_found' }, { status: 404 });
       if (String(chk.user_code) !== String(userCode))
         return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
 

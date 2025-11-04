@@ -12,8 +12,9 @@ import React, {
 } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import irosClient from './lib/irosClient';
+import irosClientModule from './lib/irosClient'; // ← デフォルト import 前提（型は下で付与）
 
+/* ========= Types ========= */
 export type UserInfo = {
   id: string;
   name: string;
@@ -24,6 +25,25 @@ export type UserInfo = {
 export type IrosConversation = { id: string; title: string; updated_at?: string | null };
 export type IrosMessage = { id: string; role: 'user' | 'assistant'; text: string; ts: number };
 
+/* ---- irosClient の暫定型定義（ここで “unknown” を撲滅） ---- */
+type IrosAPI = {
+  createConversation(): Promise<{ conversationId: string }>;
+  listConversations(): Promise<IrosConversation[]>;
+  fetchMessages(conversationId: string): Promise<IrosMessage[]>;
+  renameConversation(conversationId: string, title: string): Promise<{ ok: true }>;
+  deleteConversation(conversationId: string): Promise<{ ok: true }>;
+  postMessage(args: { conversationId: string; text: string }): Promise<{ ok: true }>;
+  reply(args: {
+    conversationId: string;
+    user_text: string;
+    mode?: 'Light' | 'Deep' | 'Transcend';
+    model?: string;
+  }): Promise<{ ok: boolean; message?: { id?: string; content: string } }>;
+  getUserInfo(): Promise<UserInfo | null>;
+};
+// ここで型を上書きして使う
+const irosClient = irosClientModule as unknown as IrosAPI;
+
 type Ctx = {
   loading: boolean;
   error?: string;
@@ -32,9 +52,7 @@ type Ctx = {
   messages: IrosMessage[];
   userInfo: UserInfo | null;
 
-  /** 追加：新規会話を作って切替える */
   newConversation: () => Promise<void>;
-
   selectConversation: (id: string) => Promise<void>;
   send: (text: string) => Promise<void>;
   rename: (title: string) => Promise<void>;
@@ -51,6 +69,7 @@ export function useIrosChat(): Ctx {
   return c;
 }
 
+/* ========= Provider ========= */
 export default function IrosChatProvider({
   children,
   initialConversationId,
@@ -89,10 +108,7 @@ export default function IrosChatProvider({
       } catch (e: any) {
         lastErr = e;
         const msg = String(e?.message ?? e);
-        const isAuth =
-          /\b(401|403)\b/.test(msg) ||
-          /unauthorized/i.test(msg) ||
-          /forbidden/i.test(msg);
+        const isAuth = /\b(401|403)\b/.test(msg) || /unauthorized/i.test(msg) || /forbidden/i.test(msg);
         if (!isAuth && i >= 1) break;
         await new Promise((r) => setTimeout(r, baseMs * Math.pow(1.8, i)));
       }
@@ -104,7 +120,7 @@ export default function IrosChatProvider({
   const ensureConversationId = useCallback(async (): Promise<string> => {
     if (conversationId) return conversationId;
     const cid = await retryAuth(async () => {
-      const created = await irosClient.createConversation(); // POST /api/agent/iros（空でもOK）
+      const created = await irosClient.createConversation();
       if (!created?.conversationId) throw new Error('Failed to ensure conversation id');
       return created.conversationId as string;
     });
@@ -229,6 +245,7 @@ export default function IrosChatProvider({
     }
   }, [refreshConversations, router]);
 
+  /** 送信フロー：楽観追加 → DB保存（/messages）→ LLM返信（/reply）→ append → 同期再取得 */
   const send = useCallback(
     async (text: string) => {
       const t = (text ?? '').trim();
@@ -237,35 +254,38 @@ export default function IrosChatProvider({
       setError(undefined);
       setLoading(true);
       try {
-        const baseCid = await ensureConversationId();
-        const { conversationId: cid, messages: draft } = await retryAuth(() =>
-          irosClient.sendText({ conversationId: baseCid, text: t }),
+        const cid = await ensureConversationId();
+
+        // 1) 楽観追加（自分の発話）
+        const tempId = `temp-${Date.now()}`;
+        const now = Date.now();
+        setMessages((prev) => [...prev, { id: tempId, role: 'user', text: t, ts: now }]);
+
+        // 2) DB保存（/messages）
+        await retryAuth(() => irosClient.postMessage({ conversationId: cid, text: t }));
+
+        // 3) 返信生成（/reply）→ append
+        const rep = await retryAuth(() =>
+          irosClient.reply({ conversationId: cid, user_text: t, mode: 'Light' }),
         );
-
-        // 初回発番だった場合のURL同期
-        if (!conversationId && cid) {
-          setConversationId(cid);
-          router.replace(`/iros?cid=${encodeURIComponent(cid)}&agent=iros`, { scroll: false });
-          didSyncUrlRef.current = true;
+        if (rep?.message?.content) {
+          const ts = Date.now();
+          setMessages((prev) => [
+            ...prev.filter((m) => m.id !== tempId),
+            { id: String(rep.message!.id || `as-${ts}`), role: 'assistant', text: rep.message!.content, ts },
+          ]);
         }
 
-        if (draft && Array.isArray(draft)) {
-          setMessages(draft as IrosMessage[]);
-        }
-
-        // サーバ保存反映後のリロード
-        await retry(async () => {
-          const target = (cid || conversationId || baseCid)!;
-          const list = await irosClient.fetchMessages(target);
-          setMessages(list ?? []);
-        }, { tries: 3, baseMs: 250 });
+        // 4) 最終同期
+        const list = await irosClient.fetchMessages(cid);
+        if (Array.isArray(list)) setMessages(list);
       } catch (e: any) {
         setError(e?.message ?? String(e));
       } finally {
         setLoading(false);
       }
     },
-    [conversationId, ensureConversationId, router],
+    [ensureConversationId],
   );
 
   const rename = useCallback(
@@ -273,7 +293,7 @@ export default function IrosChatProvider({
       if (!conversationId) return;
       setError(undefined);
       await retryAuth(() => irosClient.renameConversation(conversationId, title));
-      setConversations(prev => prev.map(c => (c.id === conversationId ? { ...c, title } : c)));
+      setConversations((prev) => prev.map((c) => (c.id === conversationId ? { ...c, title } : c)));
     },
     [conversationId],
   );
@@ -282,7 +302,7 @@ export default function IrosChatProvider({
     if (!conversationId) return;
     setError(undefined);
     await retryAuth(() => irosClient.deleteConversation(conversationId));
-    setConversations(prev => prev.filter(c => c.id !== conversationId));
+    setConversations((prev) => prev.filter((c) => c.id !== conversationId));
     setConversationId(undefined);
     setMessages([]);
   }, [conversationId]);
@@ -325,7 +345,7 @@ export default function IrosChatProvider({
   return <IrosCtx.Provider value={value}>{children}</IrosCtx.Provider>;
 }
 
-// ---- 通常リトライ（非認証系）----
+/* ---- 通常リトライ（非認証系）---- */
 async function retry<T>(fn: () => Promise<T>, opt: { tries: number; baseMs: number }) {
   let lastErr: any;
   for (let i = 0; i < opt.tries; i++) {
@@ -333,7 +353,7 @@ async function retry<T>(fn: () => Promise<T>, opt: { tries: number; baseMs: numb
       return await fn();
     } catch (e: any) {
       lastErr = e;
-      await new Promise(r => setTimeout(r, opt.baseMs * Math.pow(2, i)));
+      await new Promise((r) => setTimeout(r, opt.baseMs * Math.pow(2, i)));
     }
   }
   throw lastErr;

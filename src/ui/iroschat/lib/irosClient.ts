@@ -45,7 +45,6 @@ export default {
   async listConversations(): Promise<Array<{ id: string; title: string; updated_at?: string }>> {
     const r = await authFetch('/api/agent/iros/conversations', { method: 'GET' });
     const j = await r.json();
-    // API差異: conversations / rows の両対応
     const list = Array.isArray(j?.conversations) ? j.conversations : Array.isArray(j?.rows) ? j.rows : [];
     return list.map((c: any) => ({
       id: String(c.id),
@@ -65,9 +64,18 @@ export default {
     return normalizeMessages(raw);
   },
 
+  // ★ 追加：ユーザー発話をDB保存（UIが呼ぶ想定の postMessage）
+  async postMessage(args: { conversationId: string; text: string }): Promise<{ ok: true; id?: string }> {
+    const r = await authFetch('/api/agent/iros/messages', {
+      method: 'POST',
+      body: JSON.stringify({ conversation_id: args.conversationId, role: 'user', text: args.text }),
+    });
+    const j = await r.json();
+    return { ok: true, id: j?.message?.id ?? j?.id };
+  },
+
   // 会話作成（空テキストでも発番）
   async createConversation(): Promise<{ conversationId: string }> {
-    // 標準: POST /api/agent/iros/conversations
     try {
       const r = await authFetch('/api/agent/iros/conversations', {
         method: 'POST',
@@ -83,7 +91,6 @@ export default {
       if (!cid) throw new Error('no id');
       return { conversationId: String(cid) };
     } catch {
-      // フォールバック: 旧 /api/agent/iros
       const r2 = await authFetch('/api/agent/iros', {
         method: 'POST',
         body: JSON.stringify({ text: '' }),
@@ -99,22 +106,18 @@ export default {
     }
   },
 
-  // 送信（保存→解析の2段）
-  async sendText({
-    conversationId,
-    text,
-  }: SendParams): Promise<{ conversationId?: string; messages: Msg[] }> {
+  // 送信（保存→解析の2段）※既存フロー互換用
+  async sendText({ conversationId, text }: SendParams): Promise<{ conversationId?: string; messages: Msg[] }> {
     const t = (text ?? '').trim();
     if (!t) return { conversationId, messages: [] };
 
-    // 会話IDが無い場合は発番
     let cid = conversationId;
     if (!cid) {
       const created = await this.createConversation();
       cid = created.conversationId;
     }
 
-    // 1) 保存（/messages）
+    // 保存
     const r1 = await authFetch('/api/agent/iros/messages', {
       method: 'POST',
       body: JSON.stringify({ conversation_id: cid, role: 'user', text: t }),
@@ -122,25 +125,19 @@ export default {
     const j1 = await r1.json();
     const msgId = String(j1?.message?.id ?? j1?.id ?? `${Date.now()}`);
 
-    // 2) 解析（/analyze）— 失敗は握りつぶす
+    // 解析（失敗は無視）
     try {
       await authFetch('/api/agent/iros/analyze', {
         method: 'POST',
         body: JSON.stringify({ conversation_id: cid, text: t }),
       });
-    } catch {
-      // no-op
-    }
+    } catch {}
 
-    // 3) draft（最低限の即時反映） → 完全な状態は上位で再取得
-    const draft: Msg[] = [{ id: msgId, role: 'user', text: t, ts: Date.now() }];
-
-    return { conversationId: cid, messages: draft };
+    return { conversationId: cid, messages: [{ id: msgId, role: 'user', text: t, ts: Date.now() }] };
   },
 
   // タイトル変更
   async renameConversation(conversationId: string, title: string): Promise<void> {
-    // PATCH が無い環境もあるので POST(action) にフォールバック
     try {
       const r = await authFetch('/api/agent/iros/conversations', {
         method: 'PATCH',
@@ -175,7 +172,6 @@ export default {
 
   // ユーザー情報
   async getUserInfo(): Promise<{ id: string; name: string; userType: string; credits: number }> {
-    // 新: /api/agent/iros/userinfo → 旧: /api/get-user-info → 最後に unified
     try {
       const r0 = await authFetch('/api/agent/iros/userinfo', { method: 'GET' });
       const j0 = await r0.json();
@@ -208,5 +204,27 @@ export default {
         };
       }
     }
+  },
+
+  // 返信生成
+  async reply(args: {
+    conversationId: string;
+    user_text: string;
+    mode?: 'Light' | 'Deep' | 'Transcend';
+    model?: string;
+  }): Promise<{ ok: boolean; message?: { id?: string; content: string } }> {
+    const r = await authFetch('/api/agent/iros/reply', {
+      method: 'POST',
+      body: JSON.stringify({
+        conversation_id: args.conversationId,
+        user_text: args.user_text,
+        mode: args.mode ?? 'Light',
+        model: args.model ?? 'gpt-4o',
+      }),
+    });
+    const j = await r.json();
+    const content = j?.message?.content ?? j?.content ?? j?.assistant_text ?? '';
+    const id = j?.message?.id ?? j?.id;
+    return { ok: !!content, message: content ? { id, content } : undefined };
   },
 };
