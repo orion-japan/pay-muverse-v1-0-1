@@ -37,8 +37,11 @@ export default function MessageList() {
     error?: string | null;
   };
 
-  // 認証ユーザー（avatarUrl を使う）
-  const { user } = (useAuth?.() ?? {}) as { user?: { avatarUrl?: string | null } };
+  // 認証ユーザー（avatarUrl を使う）— 呼び出しに失敗しても崩れないガード
+  const authVal = (typeof useAuth === 'function' ? useAuth() : {}) as {
+    user?: { avatarUrl?: string | null };
+  };
+  const { user } = authVal || {};
 
   // ===== 自動スクロール =====
   const listRef = React.useRef<HTMLDivElement | null>(null);
@@ -60,7 +63,7 @@ export default function MessageList() {
         listRef.current ||
         (document.querySelector('.sof-msgs') as HTMLElement) ||
         (document.querySelector('[data-sof-chat-scroll]') as HTMLElement) ||
-        document.scrollingElement;
+        (document.scrollingElement as HTMLElement | null);
       if (!el) return;
       el.scrollTo({ top: Math.max(0, el.scrollTop - 200), behavior: 'smooth' });
     };
@@ -70,9 +73,9 @@ export default function MessageList() {
 
   // ユーザーのアバターを解決（m.avatarUrl → user.avatarUrl → 既定）
   const resolveUserAvatar = (msg: IrosMessage): string => {
-    const perMessage = ((msg as any)?.avatarUrl as string | undefined)?.trim();
+    const perMessage = ((msg as any)?.avatarUrl as string | undefined)?.trim?.();
     if (perMessage) return perMessage;
-    const byAuth = user?.avatarUrl?.trim();
+    const byAuth = user?.avatarUrl?.trim?.() || '';
     if (byAuth) return byAuth;
     return FALLBACK_USER;
   };
@@ -107,7 +110,9 @@ export default function MessageList() {
                 loading="lazy"
                 referrerPolicy="no-referrer"
                 onError={(e) => {
-                  const el = e.currentTarget as HTMLImageElement;
+                  const el = e.currentTarget as HTMLImageElement & {
+                    dataset: Record<string, string | undefined>;
+                  };
                   // 1段目：既定PNGへ
                   if (!el.dataset.fallback1) {
                     el.dataset.fallback1 = '1';

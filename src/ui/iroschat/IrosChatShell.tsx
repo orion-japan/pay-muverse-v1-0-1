@@ -58,7 +58,11 @@ function IrosChatInner({ open }: Props) {
   useEffect(() => {
     const ui = ((SOFIA_CONFIG as any)?.ui ?? {}) as Record<string, any>;
     const get = <T,>(v: T | undefined, d: T) => v ?? d;
-    const set = (k: string, v: string) => document.documentElement.style.setProperty(k, v);
+    const set = (k: string, v: string) => {
+      try {
+        document.documentElement.style.setProperty(k, v);
+      } catch {}
+    };
     set('--sofia-container-maxw', `${get(ui.containerMaxWidth, 840)}px`);
     set('--sofia-bubble-maxw', `${get(ui.bubbleMaxWidthPct, 88)}%`);
     set('--sofia-a-border', get(ui.assistantBorder, '1px solid rgba(255,255,255,0.08)'));
@@ -77,12 +81,24 @@ function IrosChatInner({ open }: Props) {
   useLayoutEffect(() => {
     const el = composeRef.current;
     if (!el) return;
-    const set = () =>
-      document.documentElement.style.setProperty('--sof-compose-h', `${el.offsetHeight}px`);
-    set();
-    const ro = new ResizeObserver(set);
+    const setter = () => {
+      try {
+        document.documentElement.style.setProperty('--sof-compose-h', `${el.offsetHeight}px`);
+      } catch {}
+    };
+    setter();
+
+    // ResizeObserver が無い古環境でも落ちないように
+    const RO: typeof ResizeObserver | undefined = (typeof window !== 'undefined' ? (window as any).ResizeObserver : undefined);
+    if (!RO) return;
+
+    const ro = new RO(setter);
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => {
+      try {
+        ro.disconnect();
+      } catch {}
+    };
   }, []);
 
   // ==== Iros Context ====
@@ -102,19 +118,23 @@ function IrosChatInner({ open }: Props) {
 
     if (openTarget.type === 'new') {
       try {
-        window.localStorage.removeItem(lastConvKey(agentK));
+        if (typeof window !== 'undefined') window.localStorage.removeItem(lastConvKey(agentK));
       } catch {}
       // 新規会話を確実に発番
-      chat.newConversation?.();
+      try {
+        chat.newConversation?.();
+      } catch {}
       didHandleOpenRef.current = true;
       return;
     }
 
     if ((openTarget.type === 'cid' || openTarget.type === 'uuid') && openTarget.cid) {
       // 既存会話に切替（存在確認は select 内で失敗時クリーンに）
-      chat.selectConversation?.(openTarget.cid);
       try {
-        window.localStorage.setItem(lastConvKey(agentK), openTarget.cid);
+        chat.selectConversation?.(openTarget.cid);
+      } catch {}
+      try {
+        if (typeof window !== 'undefined') window.localStorage.setItem(lastConvKey(agentK), openTarget.cid);
       } catch {}
       didHandleOpenRef.current = true;
       return;
@@ -126,21 +146,27 @@ function IrosChatInner({ open }: Props) {
   useEffect(() => {
     if (!canUse) return;
     if (didSelectOnce.current) return;
-    if (!chat.conversations.length) return;
+
+    const convs = Array.isArray(chat.conversations) ? chat.conversations : [];
+    if (!convs.length) return;
 
     // open が何かを処理済みならスキップ
     if (didHandleOpenRef.current) return;
 
-    const sorted = [...chat.conversations].sort((a, b) => {
+    const sorted = [...convs].sort((a, b) => {
       const ta = new Date(a.updated_at || 0).getTime();
       const tb = new Date(b.updated_at || 0).getTime();
       return tb - ta;
     });
 
-    const stored =
-      typeof window !== 'undefined'
-        ? window.localStorage.getItem(lastConvKey(agentK)) || undefined
+    let stored: string | undefined;
+    try {
+      stored = typeof window !== 'undefined'
+        ? (window.localStorage.getItem(lastConvKey(agentK)) || undefined)
         : undefined;
+    } catch {
+      stored = undefined;
+    }
 
     const prefer =
       (urlCid && sorted.find((i) => i.id === urlCid)?.id) ||
@@ -149,12 +175,14 @@ function IrosChatInner({ open }: Props) {
 
     if (prefer) {
       didSelectOnce.current = true;
-      chat.selectConversation(prefer);
       try {
-        window.localStorage.setItem(lastConvKey(agentK), prefer);
+        chat.selectConversation?.(prefer);
+      } catch {}
+      try {
+        if (typeof window !== 'undefined') window.localStorage.setItem(lastConvKey(agentK), prefer);
       } catch {}
     }
-  }, [canUse, chat.conversations, chat, urlCid]);
+  }, [canUse, chat, chat.conversations, urlCid]);
 
   // ユーザー情報
   useEffect(() => {
@@ -163,7 +191,9 @@ function IrosChatInner({ open }: Props) {
   }, [userCode]);
 
   const handleDelete = async () => {
-    if (chat.conversationId) await chat.remove();
+    try {
+      if (chat.conversationId) await chat.remove?.();
+    } catch {}
   };
   const handleRename = async () => {};
 
@@ -174,9 +204,12 @@ function IrosChatInner({ open }: Props) {
           onShowSideBar={() => setIsMobileMenuOpen(true)}
           onCreateNewChat={() => {
             try {
-              window.localStorage.removeItem(lastConvKey(agentK));
+              if (typeof window !== 'undefined') window.localStorage.removeItem(lastConvKey(agentK));
             } catch {}
-            chat.newConversation?.(); // ← ここで必ず新規発番
+            // ← ここで必ず新規発番
+            try {
+              chat.newConversation?.();
+            } catch {}
           }}
         />
       </div>
@@ -203,12 +236,14 @@ function IrosChatInner({ open }: Props) {
             <IrosSidebarMobile
               isOpen={isMobileMenuOpen}
               onClose={() => setIsMobileMenuOpen(false)}
-              conversations={chat.conversations}
+              conversations={Array.isArray(chat.conversations) ? chat.conversations : []}
               onSelect={(id) => {
-                chat.selectConversation(id);
+                try {
+                  chat.selectConversation?.(id);
+                } catch {}
                 setIsMobileMenuOpen(false);
                 try {
-                  window.localStorage.setItem(lastConvKey(agentK), id);
+                  if (typeof window !== 'undefined') window.localStorage.setItem(lastConvKey(agentK), id);
                 } catch {}
               }}
               onDelete={handleDelete}

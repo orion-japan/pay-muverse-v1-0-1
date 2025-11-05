@@ -107,16 +107,19 @@ export async function POST(req: NextRequest) {
 
     // ---- create ----
     if (action === 'create') {
-      const title = String(body?.title ?? '新しい会話');
+      const title = String(body?.title ?? '新しい会話').trim() || '新しい会話';
       const now = new Date().toISOString();
 
-      const insertRow: any = {
+      // ★ 追加：user_key NOT NULL 対策。依存を増やさず user_code をフォールバック使用
+      const userKey: string = String(body?.user_key ?? userCode);
+
+      // ※ 存在しない列を避けるため、最低限の安全カラムのみを明示
+      const insertRow: Record<string, any> = {
         user_code: userCode,
+        user_key: userKey, // ← 重要：NOT NULL
         title,
-        started_at: now,
         updated_at: now,
       };
-      insertRow.user_key = userCode; // 存在しない列でもエラーにならない
 
       const { data, error } = await sb
         .from('iros_conversations')
@@ -135,7 +138,7 @@ export async function POST(req: NextRequest) {
     // ---- rename ----
     if (action === 'rename') {
       const id = String(body?.id ?? body?.conversationId ?? '');
-      const title = String(body?.title ?? '');
+      const title = String(body?.title ?? '').trim();
       if (!id || !title) {
         return NextResponse.json({ ok: false, error: 'missing_parameters' }, { status: 400 });
       }

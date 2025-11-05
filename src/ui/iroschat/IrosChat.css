@@ -1,7 +1,9 @@
 /* Iros専用（中身はSofiaChat.cssと同等に） */
 @charset "utf-8";
 
-/* 主要ルールだけ抜粋（そのまま全量コピペでもOK） */
+/* =========================
+   固定ヘッダー／トップ余白
+   ========================= */
 .sof-header-fixed {
   position: fixed !important;
   top: 0;
@@ -15,6 +17,10 @@
 .sof-top-spacer {
   height: calc(var(--sof-header-h, 56px) + 12px);
 }
+
+/* =========================
+   入力欄の「台座」(下部固定)
+   ========================= */
 .sof-compose-dock {
   position: sticky;
   bottom: env(safe-area-inset-bottom, 0);
@@ -22,6 +28,10 @@
   background: #fff;
   box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.06);
 }
+
+/* =========================
+   メタ領域・パネル
+   ========================= */
 .sof-meta-dock {
   position: relative;
   z-index: 0;
@@ -31,76 +41,90 @@
   z-index: 0;
   margin-bottom: calc(var(--sof-compose-h, 96px) + 12px);
 }
+
+/* =========================
+   メッセージエリア
+   ========================= */
 .sof-msgs {
   padding-bottom: calc(var(--sof-compose-h, 96px) + 24px);
 }
 
-
-
-/* 画面の器（必要なら定義） */
+/* =========================
+   画面の器（必要なら定義）
+   ========================= */
 .sofia-container {
   max-width: var(--sofia-container-maxw, 840px);
   margin: 0 auto;
   padding: 0 12px;
 }
 
-/* オーバーレイ系は初期無効化（覆って固まる事故を防ぐ） */
+/* =========================
+   オーバーレイ系は初期無効化
+   （覆って固まる事故を防ぐ）
+   ========================= */
 .sof-underlay,
 .sof-dim {
   pointer-events: none;
   opacity: 0;
 }
 
-/* メッセージエリアの下に “入力欄の高さぶん” 余白を持たせる */
-.sof-msgs {
-  padding-bottom: calc(var(--sof-compose-h, 96px) + 24px);
-}
-
-/* 入力欄固定の台座（Shellで .sof-compose-dock を使っている） */
-.sof-compose-dock {
-  position: sticky;
-  bottom: env(safe-area-inset-bottom, 0);
-  z-index: 1000;
-  background: #fff;
-  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.06);
-}
-
-/* ヘッダー分の上余白（Shellの .sof-top-spacer と一致） */
-.sof-header-fixed { position: fixed; top: 0; left: 0; right: 0; z-index: 2000; }
-.sof-top-spacer { height: calc(var(--sof-header-h, 56px) + 12px); }
-
+/* =========================
+   ルート変数（共通トークン）
+   ========================= */
 /* src/ui/iroschat/IrosChat.css */
 :root {
   --footer-safe-pad: 56px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --chat-offset: 12px;
 
+  /* アシスタント吹き出し（既定） */
   --sofia-a-fs: 15px;
   --sofia-a-lh: 1.85;
   --sofia-a-radius: 16px;
   --sofia-a-border: 1px solid #e6eaf2;
   --sofia-a-shadow: 0 1px 3px rgba(16, 24, 40, 0.06), 0 8px 24px rgba(2, 6, 23, 0.05);
   --sofia-a-bg-grad: linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
+
+  /* ユーザー吹き出し（既定） */
   --sofia-u-border: 1px solid #cfe0ff;
   --sofia-u-bg-grad: linear-gradient(180deg, #ffffff 0%, #eef5ff 100%);
   --sofia-u-shadow: 0 1px 3px rgba(16, 24, 40, 0.06), 0 8px 24px rgba(30, 64, 175, 0.06);
-}
 
-/* IrosChat.css（グローバル） */
-
-:root{
-  /* index.module.css の :root から移植 */
+  /* バブル最大幅（MessageList用） */
   --bubble-max-w: 720px;
-  /* …ここに index.module.css の :root 内の変数を全部ペースト… */
 }
 
+/* index.module.css の :root から必要な変数をここへ集約して貼り付けてください
 :root{
-  /* IrosSidebarMobile.module.css の :root から移植 */
+  --your-index-var-1: ...;
+  --your-index-var-2: ...;
+}
+*/
+
+/* IrosSidebarMobile.module.css の :root から必要な変数も集約してください */
+:root{
   --drawer-z: 1200;
   --drawer-width: min(90vw, 360px);
-  /* …ここに IrosSidebarMobile.module.css の :root 内の変数を全部ペースト… */
+  /* 例：
+  --drawer-dim-bg: rgba(0,0,0,.4);
+  --drawer-bg: #fff;
+  */
 }
 
+/* =========================
+   追加の安全ガード（任意）
+   ========================= */
+/* iOS/Safari の下端セーフエリア確保に寄与（必要なら利用） */
+.sof-footer-spacer {
+  height: calc(var(--safe-bottom, 0px) + 8px);
+}
 
+/* 背景ガード（IrosChatShell 内の .iro-chat-main と併用想定） */
+.iro-chat-bg {
+  pointer-events: none;
+}
 
-
+/* メッセージ吹き出しの共通最大幅（MessageList 側 inline-style と同等） */
+.sof-bubble-custom {
+  max-width: min(var(--bubble-max-w, 780px), 86%);
+}

@@ -35,22 +35,21 @@ export default function IrosHeader({
 
   const handleRefresh = (e?: React.MouseEvent) => {
     e?.preventDefault();
-    e?.stopPropagation(); // ← 親に伝播させない
+    e?.stopPropagation();
     if (onRefresh) onRefresh();
     else if (typeof window !== 'undefined') window.location.reload();
   };
 
   const handleMenu = (e?: React.MouseEvent) => {
     e?.preventDefault();
-    e?.stopPropagation(); // ← これが無いと他のハンドラが動く場合あり
+    e?.stopPropagation();
     onShowSideBar?.();
   };
 
   const handleNewChat = (e?: React.MouseEvent) => {
     e?.preventDefault();
-    e?.stopPropagation(); // ← サイドバー開閉への伝播を遮断
+    e?.stopPropagation();
 
-    // draft は先に消す
     try {
       if (typeof window !== 'undefined') {
         window.localStorage.removeItem('iros_chat_draft');
@@ -58,10 +57,8 @@ export default function IrosHeader({
     } catch {}
 
     if (onCreateNewChat) {
-      // 例: selectConversation('new') を内部で実行
       onCreateNewChat();
     } else {
-      // フォールバック（配線が無い場合）
       router.replace('/iros?cid=new&agent=iros', { scroll: false });
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('iros:new-chat'));

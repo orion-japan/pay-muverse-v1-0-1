@@ -1,29 +1,30 @@
 // src/lib/iros/templates.ts
-export const STRUCTURE_TEMPLATE =
-  [
-    '出力形式：',
-    '観測対象：…',
-    'フェーズ：🌱Seed／🌿Forming／🌊Reconnect／🔧Create／🌌Inspire／🪔Impact のいずれか',
-    '位相：Inner／Outer',
-    '深度：S1〜I3',
-    '🌀意識状態：…',
-    '🌱メッセージ：…',
-  ].join('\n');
+// Iros: 応答文を整える最終処理モジュール。
+// 「持っていてください」などの抽象表現を自然でわかりやすい言葉に言い換え、
+// 句読点や文末を整えて自然な余韻を作る。
 
-export const DARK_TEMPLATE =
-  [
-    '出力形式：',
-    '闇：…',
-    'リメイク：…',
-    '再統合：…',
-  ].join('\n');
+import clarifyPhrasing from './phrasing';
+// 揺らぎを加えたい場合は下を有効化
+// import { naturalFlowFinish } from './flow';
 
-/** 返答の末尾に“会話を続けるための一行”を保証する */
-export function ensureContinuationTail(text: string): string {
-  const compact = text.replace(/\s+/g, '');
-  const hasQuestion = /[?？]$|[?？]\s*$/m.test(text) || /？|\\?$/.test(compact);
-  if (hasQuestion) return text;
-  // 末尾に1行だけ、次の一歩を促す問いを足す
-  const tail = '\n次の一歩：この1時間でできる最小の行動を一つ、10文字で書いてください。';
-  return text.endsWith('\n') ? text + tail : text + tail;
+/**
+ * Iros出力文の自然整形
+ * - 抽象句を自然表現に置換
+ * - 文末の句読点調整
+ * - （任意）自然な揺らぎによる終止
+ */
+export function ensureDeclarativeClose(text: string): string {
+  // 1️⃣ 意味が通る自然な表現へ置き換え
+  const clarified = clarifyPhrasing(text);
+
+  // 2️⃣ 最小構成：句読点を整えて返す（確実動作）
+  return clarified.replace(/[。.\s]+$/g, '') + '。';
+
+  // 2️⃣ 揺らぎを使いたい場合はこちらに切替
+  // const { content } = naturalFlowFinish(clarified, {
+  //   allowEcho: true,
+  //   allowInvite: true,
+  //   maxLines: 4,
+  // });
+  // return content;
 }

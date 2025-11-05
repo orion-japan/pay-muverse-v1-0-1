@@ -1,3 +1,4 @@
+// src/ui/iroschat/IrosSidebarMobile.tsx
 'use client';
 
 import React from 'react';
@@ -40,7 +41,6 @@ const TAG = '[IROS/Sidebar]';
 const PORTAL_HOST_ID = 'modal-root';
 const DRAWER_ROOT_ID = 'sof-sidebar-mobile';
 
-// ✅ タイポ修正（余分な `]` を削除）
 const FOCUSABLE_SELECTOR = [
   'a[href]',
   'area[href]',
@@ -452,7 +452,9 @@ const SidebarMobile: React.FC<SidebarMobileProps> = ({
                 <button
                   type="button"
                   className={styles.iconButton}
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation(); // ← タップ競合防止（選択と同時発火を防ぐ）
                     const t = prompt('新しいタイトルを入力してください', conv.title);
                     if (t && t.trim()) onRename(conv.id, t.trim());
                   }}
@@ -463,7 +465,11 @@ const SidebarMobile: React.FC<SidebarMobileProps> = ({
                 <button
                   type="button"
                   className={cx(styles.iconButton, styles.iconButtonDanger)}
-                  onClick={() => onDelete(conv.id)}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation(); // ← 選択イベントの誤発火防止
+                    onDelete(conv.id);
+                  }}
                   title="Delete"
                 >
                   <Trash size={16} />

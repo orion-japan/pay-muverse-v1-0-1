@@ -51,6 +51,7 @@ export default function ChatInput() {
   const autoSize = useCallback(() => {
     const ta = taRef.current;
     if (!ta) return;
+    // レイアウト安定のため2フレーム使って計測
     requestAnimationFrame(() => {
       ta.style.height = 'auto';
       const minH = 66; // 3行相当
@@ -90,6 +91,8 @@ export default function ChatInput() {
         } catch {}
 
         taRef.current?.focus();
+
+        // 既存コンテキストの send をそのまま利用（構造は維持）
         await send(value);
       } catch (e) {
         console.error('[IrosChatInput] send error:', e);
