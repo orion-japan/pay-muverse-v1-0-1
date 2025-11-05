@@ -1,6 +1,17 @@
 /* src/ui/iroschat/IrosSidebarMobile.module.css */
 
-
+/* ===== CSS Vars (fallbacks) ===== */
+:root {
+  --drawer-z: 3000;
+  --drawer-width: 360px;
+  --header-h: 0px;
+  --footer-safe-pad: 0px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --drawer-bg: #ffffff; /* ダークにするなら #0e0f13 */
+  --drawer-border: 1px solid rgba(0,0,0,0.06);
+  --drawer-shadow: 0 18px 48px rgba(0,0,0,0.24);
+  --drawer-transition: .22s cubic-bezier(.2,.8,.2,1);
+}
 
 /* ==== portal/root ==== */
 .portal {
@@ -8,14 +19,15 @@
   inset: 0;
   z-index: var(--drawer-z);
   pointer-events: none;
-  isolation: isolate; /* 外側の stacking の影響を遮断 */
+  isolation: isolate;         /* 外側の stacking の影響を遮断 */
+  contain: layout paint;      /* 初期フレームのフリッカー低減 */
 }
 .portalActive { pointer-events: auto; }
 
 /* ==== dim（右側だけ覆う） ==== */
 .dim {
   position: fixed;
-  left: var(--drawer-width);                /* ← これが肝！ */
+  left: var(--drawer-width);                   /* ← 右側のみ覆う */
   right: 0;
   top: var(--header-h);
   bottom: calc(var(--footer-safe-pad) + var(--safe-bottom));
@@ -23,12 +35,13 @@
   opacity: 0;
   transition: opacity 0.2s ease;
   pointer-events: none;
-  z-index: 0;                               /* 背面固定 */
+  z-index: 0;                                  /* 背面固定 */
+  will-change: opacity;
 }
-.dimVisible {
-  opacity: 1;
-  pointer-events: auto;
-}
+
+/* 透け防止：開いている間は初期フレームから必ず不透明にする */
+.portalActive .dim { opacity: 1; pointer-events: auto; }
+.dimVisible { opacity: 1; pointer-events: auto; }
 
 /* ==== drawer ==== */
 .drawer {
@@ -38,18 +51,27 @@
   left: 0;
   width: var(--drawer-width);
   max-width: 100%;
-  background: var(--drawer-bg);             /* 不透明にして下のdimを隠す */
+  background: var(--drawer-bg);               /* 不透明で下のdimを隠す */
   border-right: var(--drawer-border);
   box-shadow: var(--drawer-shadow);
-  transform: translateX(-100%);
+
+  /* 初期フレーム透け防止 + 合成安定化 */
+  transform: translateZ(0) translateX(-100%);
   transition: transform var(--drawer-transition);
-  z-index: calc(var(--drawer-z) + 10);      /* dim(0) より常に前面 */
-  overflow: hidden;                          /* 子でスクロール管理 */
+  will-change: transform;
+
+  z-index: calc(var(--drawer-z) + 10);        /* dim より常に前面 */
+  overflow: hidden;                            /* 子でスクロール管理 */
   -webkit-overflow-scrolling: touch;
+
   display: flex;
   flex-direction: column;
+
+  /* backdrop の差異を無効化（iOS/Chromium） */
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
-.drawerOpen { transform: translateX(0); }
+.drawerOpen { transform: translateZ(0) translateX(0); }
 
 /* ==== head ==== */
 .drawerHead {
@@ -60,7 +82,7 @@
   padding: 12px 14px;
   position: sticky;
   top: 0;
-  background: #ffffff;                       /* ←必要なら #0e0f13 に */
+  background: #ffffff;                         /* 必要なら #0e0f13 */
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   z-index: 1;
 }
@@ -95,7 +117,11 @@
   color: #444;
   display: flex; flex-direction: column;
 }
-.userRow { display: block; width: 100%; text-align: left; background: transparent; border: none; padding: 6px 0; font: inherit; cursor: pointer; color: inherit; }
+.userRow {
+  display: block; width: 100%; text-align: left;
+  background: transparent; border: none; padding: 6px 0;
+  font: inherit; cursor: pointer; color: inherit;
+}
 .userRow + .userRow { border-top: 1px dashed rgba(15, 23, 42, 0.08); }
 
 /* ==== logs ==== */
@@ -112,8 +138,16 @@
 
 /* ==== conversations ==== */
 .list { list-style: none; margin: 0; padding: 8px 0 24px; }
-.listItem { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px dashed rgba(0,0,0,0.06); }
-.listTitle { border: 0; background: transparent; text-align: left; padding: 8px 4px; font-size: 14px; color: #222; cursor: pointer; display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+.listItem {
+  display: grid; grid-template-columns: 1fr auto;
+  align-items: center; gap: 6px; padding: 8px 12px;
+  border-bottom: 1px dashed rgba(0,0,0,0.06);
+}
+.listTitle {
+  border: 0; background: transparent; text-align: left; padding: 8px 4px;
+  font-size: 14px; color: #222; cursor: pointer;
+  display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px;
+}
 .listTitle:hover { color: #1f2937; }
 .listTitle:focus-visible { outline: 2px solid #6366f1; outline-offset: 2px; }
 .subTime { font-size: 11px; color: rgba(30,41,59,0.7); }
@@ -122,7 +156,11 @@
 
 /* ==== meta fold ==== */
 .metaFold { margin: 12px; border: 1px solid rgba(15,23,42,0.08); border-radius: 12px; background: #fff; overflow: hidden; }
-.metaFoldToggle { width: 100%; display: flex; align-items: center; gap: 8px; justify-content: center; padding: 10px 8px; border: none; background: #fff; cursor: pointer; font: inherit; color: #1f2937; border-bottom: 1px solid rgba(15,23,42,0.06); }
+.metaFoldToggle {
+  width: 100%; display: flex; align-items: center; gap: 8px; justify-content: center;
+  padding: 10px 8px; border: none; background: #fff; cursor: pointer; font: inherit; color: #1f2937;
+  border-bottom: 1px solid rgba(15,23,42,0.06);
+}
 .metaFoldToggle:focus-visible { outline: 2px solid #6366f1; outline-offset: 2px; }
 .metaFoldBody { max-height: 0; overflow: hidden; transition: max-height .25s ease; }
 .metaFoldBodyOpen { max-height: 60vh; padding: 8px; overflow: auto; -webkit-overflow-scrolling: touch; }
@@ -132,5 +170,5 @@
   .drawer { width: 92vw; } /* = var(--drawer-width) と一致 */
 }
 
-
 /* === Iros Sidebar Theme Override === */
+/* 必要ならここで :root の --drawer-bg などを上書きしてください */

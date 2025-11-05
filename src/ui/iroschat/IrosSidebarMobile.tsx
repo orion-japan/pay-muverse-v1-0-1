@@ -449,26 +449,40 @@ const SidebarMobile: React.FC<SidebarMobileProps> = ({
               </button>
 
               <div className={styles.listOps}>
+                {/* Rename：空文字禁止・40字制限 */}
                 <button
                   type="button"
                   className={styles.iconButton}
                   onClick={(e) => {
                     e.preventDefault();
-                    e.stopPropagation(); // ← タップ競合防止（選択と同時発火を防ぐ）
-                    const t = prompt('新しいタイトルを入力してください', conv.title);
-                    if (t && t.trim()) onRename(conv.id, t.trim());
+                    e.stopPropagation();
+                    const t = (prompt('新しいタイトルを入力してください', conv.title) ?? '').trim();
+                    if (!t) return;
+                    const title = t.slice(0, 40);
+                    onRename(conv.id, title);
                   }}
                   title="Rename"
                 >
                   <Edit size={16} />
                 </button>
+
+                {/* Delete：confirm + 連打防止（data-busy） */}
                 <button
                   type="button"
                   className={cx(styles.iconButton, styles.iconButtonDanger)}
                   onClick={(e) => {
                     e.preventDefault();
-                    e.stopPropagation(); // ← 選択イベントの誤発火防止
+                    e.stopPropagation();
+                    const btn = e.currentTarget as HTMLButtonElement;
+                    if (btn.dataset.busy === '1') return;
+                    if (!confirm('この会話を削除します。よろしいですか？')) return;
+                    btn.dataset.busy = '1';
                     onDelete(conv.id);
+                    setTimeout(() => {
+                      try {
+                        delete btn.dataset.busy;
+                      } catch {}
+                    }, 1000);
                   }}
                   title="Delete"
                 >
