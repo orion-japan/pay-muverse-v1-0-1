@@ -1,7 +1,8 @@
+// /src/app/api/agent/iros/reply/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { generateIrosReply } from '@/lib/iros/generate';
 import { deriveFinalMode } from '@/lib/iros/intent';
-import { IROS_PROMPT } from '@/lib/iros/system'; // buildSystemPrompt は使わない
+import { buildSystemPrompt } from '@/lib/iros/system'; // ✅ 修正：IROS_PROMPT は存在しないのでこちらを使用
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -46,8 +47,12 @@ export async function POST(req: NextRequest) {
       : seedMode;
     const mode = toMode(candidate);
 
-    // --- system prompt を確定（固定）---
-    const systemPrompt = IROS_PROMPT;
+    // --- system prompt を確定（buildSystemPrompt を使用）---
+    const systemPrompt = buildSystemPrompt({
+      personaName: 'Iros',
+      style: 'gentle',
+      extra: '- 出力は自然な会話体。見出しは出さず、呼吸で改行を入れる。',
+    });
 
     // --- 履歴整形 ---
     const history: HistoryMsg[] = Array.isArray(body.history)

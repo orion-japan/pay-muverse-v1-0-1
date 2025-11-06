@@ -77,6 +77,9 @@ async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   return res;
 }
 
+// ★ プレースホルダ題名検出
+const PLACEHOLDER_TITLE_RE = /^(新しい会話|新規セッション|Untitled|No Title|無題)/i;
+
 const irosClient: IrosAPI = {
   async createConversation() {
     if (typeof _raw.createConversation === 'function') return _raw.createConversation();
@@ -368,44 +371,43 @@ export default function IrosChatProvider({
     setUserInfo(u ?? null);
   }, []);
 
-// 共有ヘルパ：ロック/エラー処理/セットを1か所に
-const loadMessages = useCallback(async (targetId?: string) => {
-  if (fetchLock.current) return;
-  fetchLock.current = true;
-  try {
-    const cid = targetId ?? (await ensureConversationId());
-    const list = await retryAuth(() => irosClient.fetchMessages(cid));
-    setMessages(list ?? []);
-  } catch (e: any) {
-    setError(e?.message ?? String(e));
-    if (!targetId) setMessages([]); // 任意：現在会話時のみクリア
-  } finally {
-    fetchLock.current = false;
-  }
-}, [ensureConversationId]);
+  // 共有ヘルパ：ロック/エラー処理/セットを1か所に
+  const loadMessages = useCallback(async (targetId?: string) => {
+    if (fetchLock.current) return;
+    fetchLock.current = true;
+    try {
+      const cid = targetId ?? (await ensureConversationId());
+      const list = await retryAuth(() => irosClient.fetchMessages(cid));
+      setMessages(list ?? []);
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+      if (!targetId) setMessages([]); // 任意：現在会話時のみクリア
+    } finally {
+      fetchLock.current = false;
+    }
+  }, [ensureConversationId]);
 
-// 置き換え：現在会話の再読込
-const refreshMessages = useCallback(async () => {
-  await loadMessages(); // current cid
-}, [loadMessages]);
+  // 置き換え：現在会話の再読込
+  const refreshMessages = useCallback(async () => {
+    await loadMessages(); // current cid
+  }, [loadMessages]);
 
-// 置き換え：会話切替
-const selectConversation = useCallback(async (id: string) => {
-  setConversationId(id);
-  setError(undefined);
-  setLoading(true);
-  try {
-    await loadMessages(id); // 明示的に対象IDを読む
-    router.replace(`/iros?cid=${encodeURIComponent(id)}&agent=iros`, { scroll: false });
-    didSyncUrlRef.current = true;
-  } catch (e: any) {
-    setError(e?.message ?? String(e));
-    setMessages([]);
-  } finally {
-    setLoading(false);
-  }
-}, [loadMessages, router]);
-
+  // 置き換え：会話切替
+  const selectConversation = useCallback(async (id: string) => {
+    setConversationId(id);
+    setError(undefined);
+    setLoading(true);
+    try {
+      await loadMessages(id); // 明示的に対象IDを読む
+      router.replace(`/iros?cid=${encodeURIComponent(id)}&agent=iros`, { scroll: false });
+      didSyncUrlRef.current = true;
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+      setMessages([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [loadMessages, router]);
 
   const newConversation = useCallback(async () => {
     setError(undefined);
@@ -426,7 +428,7 @@ const selectConversation = useCallback(async (id: string) => {
     }
   }, [refreshConversations, router]);
 
-  /** 送信フロー：楽観追加（消さない）→ /messages 保存（user）→ replyAndStore（assistant保存）→ 最終同期 */
+  /** 送信フロー：楽観追加（消さない）→ /messages 保存（user）→ 自動リタイトル → replyAndStore（assistant保存）→ 最終同期 */
   const send = useCallback(
     async (text: string) => {
       const t = (text ?? '').trim();
@@ -447,6 +449,28 @@ const selectConversation = useCallback(async (id: string) => {
           irosClient.postMessage({ conversationId: cid, text: t, role: 'user' }),
         );
 
+        // 2.5) ★ 自動リタイトル：プレースホルダ題名なら retitle API
+        try {
+          const currentTitle = conversations.find((c) => c.id === cid)?.title ?? '';
+          if (PLACEHOLDER_TITLE_RE.test(currentTitle)) {
+            const res = await authFetch('/api/agent/iros/retitle', {
+              method: 'POST',
+              body: JSON.stringify({
+                conversationId: cid,
+                firstUserText: t,
+                currentTitle,
+              }),
+            }).then((r) => r.json());
+            if (res?.ok && res?.title) {
+              setConversations((prev) =>
+                prev.map((c) => (c.id === cid ? { ...c, title: res.title } : c)),
+              );
+            }
+          }
+        } catch {
+          // タイトル生成は UI を阻害しない
+        }
+
         // 3) 返信生成（保存付き）
         await retryAuth(() =>
           irosClient.replyAndStore({ conversationId: cid, user_text: t, mode: 'Light' }),
@@ -461,7 +485,7 @@ const selectConversation = useCallback(async (id: string) => {
         setLoading(false);
       }
     },
-    [ensureConversationId],
+    [ensureConversationId, conversations], // ← 依存に conversations を追加
   );
 
   const rename = useCallback(
