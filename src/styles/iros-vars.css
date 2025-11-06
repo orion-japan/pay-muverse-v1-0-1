@@ -1,0 +1,22 @@
+/* src/styles/iros-vars.css */
+/* Iros / Drawer で使うグローバルCSS変数を一元化 */
+
+:root {
+  --drawer-z: 3000;
+  --drawer-width: 360px;
+  --header-h: 0px;
+  --footer-safe-pad: 0px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  --drawer-bg: #ffffff; /* ダークにするなら #0e0f13 */
+  --drawer-border: 1px solid rgba(0,0,0,0.06);
+  --drawer-shadow: 0 18px 48px rgba(0,0,0,0.24);
+  --drawer-transition: .22s cubic-bezier(.2,.8,.2,1);
+}
+
+/* 必要なら Iros 画面だけ上書きするためのスコープ例
+   （Iros のレイアウトルートに data-iros を付与した場合に有効）
+[data-iros] {
+  --drawer-width: 360px;
+}
+*/

@@ -1,18 +1,5 @@
 /* src/ui/iroschat/IrosSidebarMobile.module.css */
 
-/* ===== CSS Vars (fallbacks) ===== */
-:root {
-  --drawer-z: 3000;
-  --drawer-width: 360px;
-  --header-h: 0px;
-  --footer-safe-pad: 0px;
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --drawer-bg: #ffffff; /* ダークにするなら #0e0f13 */
-  --drawer-border: 1px solid rgba(0,0,0,0.06);
-  --drawer-shadow: 0 18px 48px rgba(0,0,0,0.24);
-  --drawer-transition: .22s cubic-bezier(.2,.8,.2,1);
-}
-
 /* ==== portal/root ==== */
 .portal {
   position: fixed;
@@ -171,4 +158,5 @@
 }
 
 /* === Iros Sidebar Theme Override === */
-/* 必要ならここで :root の --drawer-bg などを上書きしてください */
+/* 必要ならグローバル側（src/styles/iros-vars.css）で :root もしくは [data-iros] スコープを使って
+   --drawer-bg / --drawer-border / --drawer-shadow などを上書きしてください。*/

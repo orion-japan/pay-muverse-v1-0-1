@@ -2,6 +2,7 @@
 
 import './globals.css';
 import '../styles/layout.css';
+import '../styles/iros-vars.css'; // ★ 追加：グローバル変数を全体に展開
 import Providers from './providers';
 import LayoutClient from './LayoutClient';
 import TelemetryBoot from '@/components/TelemetryBoot';
