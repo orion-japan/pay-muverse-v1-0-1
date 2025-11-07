@@ -14,12 +14,12 @@ export type Focus =
 export type FocusResult = {
   phase: Phase; depth: Depth; q: QCode; qName: string; qConf: number;
   domain: Domain;
-  protectedFocus: Focus;                 // ←「守っているもの」Top1
-  anchors: string[];                     // 抽出された手がかり
-  action: string;                        // 5分以内の一手（合成）
+  protectedFocus: Focus;
+  anchors: string[];
+  action: string;
 };
 
-// ---------- 1) 推定 ----------
+// ---------- 1) 推定（既存ロジックそのまま） ----------
 export function inferPhaseDepth(text: string): { phase: Phase; depth: Depth } {
   const t = text || '';
   const inner = /(疲|眠|静|内|迷|不安|落ち|祈)/.test(t);
@@ -64,11 +64,7 @@ function inferQ(text: string, phase: Phase, depth: Depth){
   return { q: top[0], name: Q_DESC[top[0]].name, conf };
 }
 
-// ---------- 2) アンカー抽出 ----------
-const ANCHOR_PATTERNS: Array<[Focus,RegExp]> = [
-  ['売上' as unknown as Focus, /(売上|CVR|契約|成約|単価)/], // for domain判定専用
-] as any; // フォーカス辞書は下で網羅
-
+// ---------- 2) アンカー抽出（既存＋α） ----------
 const FOCUS_HINTS: Array<[Focus,RegExp[]]> = [
   ['責任', [/責任|任務|役割|コミット/]],
   ['手順', [/手順|フロー|ルール|手続/]],
@@ -102,14 +98,13 @@ export function extractAnchors(text:string): string[] {
   FOCUS_HINTS.forEach(([label, regs])=>{
     regs.forEach(re=>{ if(re.test(text)) hits.add(label); });
   });
-  // ドメイン判断用の粗い語も拾う
   if (/(売上|顧客|契約|LP|CVR|広告|納期|見積|請求)/.test(text)) hits.add('business');
   if (/(作品|制作|デザイン|映像|曲|演出|投稿)/.test(text)) hits.add('creative');
   if (/(恋|彼氏|彼女|夫|妻|距離|デート)/.test(text)) hits.add('love');
   return Array.from(hits);
 }
 
-// ---------- 3) ドメイン ----------
+// ---------- 3) ドメイン（既存） ----------
 export function detectDomain(text:string): Domain {
   if (/(売上|顧客|契約|LP|CVR|広告|納期|請求|見積)/.test(text)) return 'business';
   if (/(作品|制作|デザイン|映像|曲|演出|投稿)/.test(text)) return 'creative';
@@ -117,35 +112,66 @@ export function detectDomain(text:string): Domain {
   return 'core';
 }
 
-// ---------- 4) Q優先とアンカーの結合 ----------
-const Q_PRIORS: Record<QCode, Focus[]> = {
-  Q1:['責任','手順','納期','品質','体裁','信用'],
-  Q2:['挑戦','拡張','提案','新規'],
-  Q3:['体調','睡眠','基盤','運用','習慣','キャッシュ'],
-  Q4:['滞留','不要','摩擦','恐れ','古いやり方'],
-  Q5:['強み','魅力','作品','物語'],
+// ---------- 4) 最終フォーカス選定（優先語を使わず、低確信時のみランダム） ----------
+const BANNED: Focus[] = ['責任','納期','体裁','信用'];   // 最終表示に使わない
+const SOFT_ALIAS: Partial<Record<Focus, Focus>> = {       // どうしても必要なら置換
+  責任: '提案',
+  納期: '手順',
+  体裁: '作品',
+  信用: '提案',
 };
 
-function pickProtectedFocus(q: QCode, anchors: string[], phase: Phase, depth: Depth): Focus {
-  // 1) Qの事前分布
-  const candidates = Q_PRIORS[q];
-  // 2) アンカー一致を強く採用
-  const anchored = candidates.find(f => anchors.includes(f as string));
-  if (anchored) return anchored;
-  // 3) 位相・深度の軽い補正（Innerは体調/睡眠、Outerは責任/提案を優先）
-  if (phase==='Inner'){
-    const pref = candidates.find(f=>['体調','睡眠','基盤'].includes(f)); if (pref) return pref;
-  } else {
-    const pref = candidates.find(f=>['責任','提案','納期','拡張'].includes(f)); if (pref) return pref;
-  }
-  // 4) デフォルト：先頭
-  return candidates[0];
+function randomPick(xs: Focus[]): Focus {
+  return xs[Math.floor(Math.random() * xs.length)];
 }
 
-// ---------- 5) 一手テンプレ ----------
+function randomPool(phase: Phase, depth: Depth): Focus[] {
+  // 位相・深度で「安全語」プール。重い言葉は最初から入れない。
+  if (phase === 'Inner') {
+    if (depth.startsWith('S')) return ['体調','睡眠','基盤','習慣','運用'];
+    if (depth.startsWith('R')) return ['強み','魅力','物語','恐れ'];  // 恐れ＝気づき用
+    if (depth.startsWith('C')) return ['作品','基盤','運用','強み'];
+    return ['体調','睡眠','基盤','強み','物語'];
+  } else {
+    if (depth.startsWith('R')) return ['提案','拡張','新規','強み','魅力'];
+    if (depth.startsWith('C')) return ['作品','拡張','提案','新規','物語'];
+    return ['提案','拡張','新規','強み','作品'];
+  }
+}
+
+function sanitizeFocus(f: Focus): Focus {
+  if (BANNED.includes(f)) return SOFT_ALIAS[f] ?? '手順';
+  return f;
+}
+
+function pickProtectedFocus(
+  q: QCode,
+  anchors: string[],
+  phase: Phase,
+  depth: Depth,
+  qConf: number
+): Focus {
+  // 1) アンカー一致を最優先（ただし禁止語は置換）
+  const anchorFocuses = anchors.filter(a => a && !['business','creative','love'].includes(a)) as Focus[];
+  if (anchorFocuses.length > 0) {
+    const first = sanitizeFocus(anchorFocuses[0] as Focus);
+    if (!BANNED.includes(first)) return first;
+  }
+
+  // 2) 確信度が高いなら、位相・深度に沿った「安全語」から固定寄りに選ぶ
+  if (qConf >= 0.7) {
+    const pool = randomPool(phase, depth);
+    return sanitizeFocus(pool[0]); // 先頭（安定）
+  }
+
+  // 3) 低確信時はランダム推定（位相・深度に応じたプールから抽選）
+  const pool = randomPool(phase, depth);
+  return sanitizeFocus(randomPick(pool));
+}
+
+// ---------- 5) 一手テンプレ（既存） ----------
 function synthesizeAction(focus: Focus, domain: Domain): string {
   const pick = (xs:string[])=>xs[0];
-
   const TEMPLATES: Record<Focus,string[]> = {
     責任:   ['未返信1件に「了解＋次の具体」を50字で返す'],
     手順:   ['作業チェックリストの先頭1項目だけ実行し、✔を付ける'],
@@ -173,21 +199,19 @@ function synthesizeAction(focus: Focus, domain: Domain): string {
     作品:   ['仮タイトルを1行決め、ファイル名末尾に _v0 を付ける'],
     物語:   ['主人公の一言セリフを20字で書く'],
   };
-
-  // ドメイン別の微修正
   if (domain==='business' && focus==='体裁') return '提案資料の見出しを7〜12字で1行だけ整える';
   if (domain==='creative' && focus==='品質') return '作品の粗を1点だけ直して「_fix1」を追記保存';
   return pick(TEMPLATES[focus] ?? ['今できる最小の一手を1つだけ実行']);
 }
 
-// ---------- 6) エントリ ----------
+// ---------- 6) エントリ（protectedFocus の決定だけ新方式を使用） ----------
 export function analyzeFocus(userText: string): FocusResult {
   const { phase, depth } = inferPhaseDepth(userText);
   const { q, name: qName, conf: qConf } = inferQ(userText, phase, depth);
   const domain = detectDomain(userText);
   const anchors = extractAnchors(userText);
 
-  const protectedFocus = pickProtectedFocus(q, anchors, phase, depth);
+  const protectedFocus = pickProtectedFocus(q, anchors, phase, depth, qConf);
   const action = synthesizeAction(protectedFocus, domain);
 
   return { phase, depth, q, qName, qConf: +qConf.toFixed(2), domain, protectedFocus, anchors, action };

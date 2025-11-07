@@ -125,3 +125,70 @@
   pointer-events: none;       /* クリック妨げない */
 }
 
+
+/* 入力ドック：境界線（左右いっぱい・常に見える） */
+.sof-compose-dock {
+  position: sticky; /* 既にfixed/stickyならそれでOK */
+  bottom: env(safe-area-inset-bottom, 0);
+  background: #fff;
+  z-index: 20; /* 下部ナビより上に */
+}
+
+/* 上端ライン（1px） */
+.sof-compose-dock::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: rgba(15, 23, 42, 0.14); /* 薄いグレー */
+  pointer-events: none;
+}
+
+/* 送信ボタン：大きめ＆押しやすく */
+.sof-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 8px; /* 上に少し余白 */
+}
+
+/* 万一、旧Q&Aボタンが残っていても非表示にする保険 */
+.sof-actionBtn--qa { display: none !important; }
+
+.sof-actionBtn--send {
+  background: linear-gradient(180deg, #5b7cff 0%, #3855ff 100%);
+  color: #fff;
+  border: 1px solid #3552ff;
+  border-radius: 12px;
+  font-weight: 600;
+  height: 44px;              /* タップ最適 */
+  min-width: 88px;           /* 視認性 */
+  padding: 0 22px;
+  font-size: 16px;
+  transition: transform .15s ease, opacity .15s ease, box-shadow .15s ease;
+}
+@media (min-width: 480px) {
+  .sof-actionBtn--send {
+    height: 48px;
+    padding: 0 24px;
+    font-size: 17px;
+  }
+}
+.sof-actionBtn--send:hover:not(:disabled) {
+  opacity: .92;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(56, 85, 255, .18);
+}
+.sof-actionBtn--send:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* 本文との“間”を強める：気持ち広めの余白 */
+.sof-compose {
+  padding: 6px; /* ここはスクショの数値を尊重 */
+}

@@ -4,13 +4,15 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/authz';
-import { IROS_PROMPT } from '@/lib/iros/config';
 import { createClient } from '@supabase/supabase-js';
+import { analyzeFocus } from '@/lib/iros/focusCore';
+import { generateIrosReply } from '@/lib/iros/generate';
+
+// 非言語型（config.ts に定義済）を参照可能に
+import type { ResonanceState, IntentPulse } from '@/lib/iros/config';
 
 const sb = createClient(SUPABASE_URL!, SERVICE_ROLE!);
-
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 
 type Role = 'system' | 'user' | 'assistant';
 type Msg = { role: Role; content: string };
@@ -21,8 +23,12 @@ type BodyIn = {
   messages?: Array<Partial<Msg> & { role?: string }>;
   model?: string;
   temperature?: number;
-  top_p?: number;
+  top_p?: number;            // 互換のため受けるが未使用
   max_tokens?: number;
+
+  // ★ 追加（任意・非言語）
+  resonance?: ResonanceState;
+  intent?: IntentPulse;
 };
 
 type IrosResponse = {
@@ -40,12 +46,27 @@ type IrosResponse = {
     g?: number;
     seed?: number | string;
     epsilon?: number;
-    __system_used?: string;
+  };
+  debug?: {
+    phase: string;
+    depth: string;
+    q: string;
+    qName: string;
+    qConf: number;
+    domain: string;
+    protectedFocus: string;
+    anchors: string[];
+    action: string;
+    qtrail?: any[];
+    qstate?: any;
+    pipeline: 'generateIrosReply';
+    // ★ 非言語の受理確認
+    resonance?: ResonanceState | null;
+    intent?: IntentPulse | null;
   };
 };
 
 const __DEV__ = process.env.NODE_ENV !== 'production';
-const dbg = (...a: any[]) => { if (__DEV__) console.log('[IROS API]', ...a); };
 
 const json = (data: any, status = 200) =>
   new NextResponse(JSON.stringify(data), {
@@ -53,7 +74,7 @@ const json = (data: any, status = 200) =>
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Debug',
       'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
     },
   });
@@ -69,44 +90,19 @@ function lastUserText(messages?: Msg[]) {
   return '';
 }
 
-function guessPhase(t: string): 'Inner' | 'Outer' {
-  return /私|わたし|自分|内側|迷い|不安|孤独|つらい|疲れ/i.test(t) ? 'Inner' : 'Outer';
-}
-function guessQ(t: string): IrosResponse['meta']['qcode'] {
-  const lc = (t || '').toLowerCase();
-  if (/[怒苛ムカ]|angry|frustrat/i.test(lc)) return 'Q2';
-  if (/不安|心配|焦り|anx|worr|uneasy/i.test(lc)) return 'Q3';
-  if (/怖|恐|fear/i.test(lc)) return 'Q4';
-  if (/情熱|ワクワク|嬉|喜|excited|passion/i.test(lc)) return 'Q5';
-  return 'Q1';
-}
-
-async function callOpenAI(payload: any) {
-  const r = await fetch(CHAT_URL, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!r.ok) {
-    const text = await r.text().catch(() => '');
-    return { ok: false as const, status: r.status, detail: text };
-  }
-  const data = await r.json();
-  return { ok: true as const, data };
-}
-
 function toRole(x?: string): Role | null {
   if (!x) return null;
   const v = x.toLowerCase();
   if (v === 'system' || v === 'user' || v === 'assistant') return v;
   return null;
 }
+
 function sanitizeMessages(m?: BodyIn['messages']): Msg[] {
   if (!Array.isArray(m)) return [];
   const out: Msg[] = [];
   for (const raw of m.slice(-40)) {
     const role = toRole(raw.role as any) ?? ('user' as Role);
-    const content = typeof raw.content === 'string' ? raw.content : '';
+    const content = typeof raw.content === 'string' ? raw.content.trim() : '';
     if (content) out.push({ role, content });
   }
   return out;
@@ -116,18 +112,19 @@ const isUUID = (s?: string) =>
   !!s && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s || '');
 
 export async function GET() {
-  return json({ ok: true, service: 'Iros API', model_hint: 'gpt-4o', time: new Date().toISOString() });
+  return json({ ok: true, service: 'Iros API', model_hint: process.env.IROS_MODEL || 'gpt-4o-mini', time: new Date().toISOString() });
 }
 
 export async function POST(req: NextRequest) {
   try {
     if (!OPENAI_API_KEY) return json({ error: 'Env OPENAI_API_KEY is missing' }, 500);
 
+    // 認可（Firebase）
     const z = await verifyFirebaseAndAuthorize(req);
     if (!z.ok) return json({ error: z.error }, z.status);
     if (!z.allowed) return json({ error: 'forbidden' }, 403);
 
-    // user_code を唯一の所有キーとして採用（users.user_key 参照はしない）
+    // user_code 抽出（唯一キー）
     const userCode: string = (() => {
       const u: any = z.user;
       if (typeof u === 'string') return u;
@@ -139,41 +136,33 @@ export async function POST(req: NextRequest) {
 
     const body = (await req.json().catch(() => ({}))) as BodyIn;
 
-    const model = (body.model || 'gpt-4o').trim();
-    const temperature = typeof body.temperature === 'number' ? body.temperature : 0.3;
-    const top_p = typeof body.top_p === 'number' ? body.top_p : 0.7;
-    const max_tokens = typeof body.max_tokens === 'number' ? body.max_tokens : undefined;
+    // モデル/生成パラメータ
+    const model = (body.model || process.env.IROS_MODEL || 'gpt-4o-mini').trim();
+    const temperature = typeof body.temperature === 'number' ? body.temperature : 0.45;
+    const max_tokens = typeof body.max_tokens === 'number' ? body.max_tokens : 640;
 
+    // 履歴＆ユーザー発話
     const history: Msg[] = sanitizeMessages(body.messages);
     const userTextRaw = String(body.text ?? '').trim();
     const userText = userTextRaw || lastUserText(history);
+    if (!userText) return json({ ok: false, error: 'empty_text' }, 400);
 
-    const phase = guessPhase(userText);
-    const qcode = guessQ(userText);
-    const epsilon = 0.4;
-    const noiseAmp = phase === 'Outer' ? 0.2 : 0.15;
-    const g = 0.8;
-    const seed = Date.now() % 100000;
+    // Qコード/位相・深度（本番には出さないが、保存とデバッグで使用）
+    const focus = analyzeFocus(userText);
 
-    const system = IROS_PROMPT;
-    const messages: Msg[] = [
-      { role: 'system', content: system },
-      ...history,
-      ...(userText ? [{ role: 'user', content: userText } as Msg] : []),
-    ];
-    const payload: any = { model, messages, temperature, top_p };
-    if (max_tokens) payload.max_tokens = max_tokens;
+    // ===== 生成（★ 非言語を必ず渡す） =====
+    const reply = await generateIrosReply({
+      userText,
+      history,
+      model,
+      temperature,
+      max_tokens,
+      apiKey: OPENAI_API_KEY,
+      resonance: body.resonance,  // ← 追加
+      intent: body.intent,        // ← 追加
+    });
 
-    let reply = '';
-    const r = await callOpenAI(payload);
-    if (!r.ok) return json({ ok: false, error: 'upstream_error', status: r.status, detail: r.detail }, r.status || 500);
-    reply = r.data?.choices?.[0]?.message?.content ?? '';
-
-    if (reply && userText && reply.trim() === userText.trim()) {
-      reply = '受け取りました。いまの感じを一言で言うと、どんなトーン？（落ち着く／張りつめる など）';
-    }
-
-    // ====== 保存 ======
+    // ====== 会話の保存 ======
     let convId: string;
     if (isUUID(body.conversationId)) {
       const { error } = await sb
@@ -182,7 +171,7 @@ export async function POST(req: NextRequest) {
           {
             id: body.conversationId,
             user_code: userCode,
-            user_key: userCode, // 互換: 列があれば埋める
+            user_key: userCode, // 互換
             updated_at: new Date().toISOString(),
           },
           { onConflict: 'id' },
@@ -204,19 +193,18 @@ export async function POST(req: NextRequest) {
       convId = String(data.id);
     }
 
-    const title = (userText || reply || '新規セッション').slice(0, 40);
-    await sb.from('iros_conversations').update({ title, updated_at: new Date().toISOString() }).eq('id', convId);
-
     const nowTs = Date.now();
-    if (userText) {
-      const { error: e1 } = await sb.from('iros_messages').insert({
-        conversation_id: convId,
-        role: 'user',
-        content: userText,
-        ts: nowTs,
-      });
-      if (e1) throw new Error(`msg_user_insert_failed: ${e1.message}`);
-    }
+
+    // user メッセージ保存
+    const { error: e1 } = await sb.from('iros_messages').insert({
+      conversation_id: convId,
+      role: 'user',
+      content: userText,
+      ts: nowTs,
+    });
+    if (e1) throw new Error(`msg_user_insert_failed: ${e1.message}`);
+
+    // assistant メッセージ保存
     const { error: e2 } = await sb.from('iros_messages').insert({
       conversation_id: convId,
       role: 'assistant',
@@ -224,31 +212,75 @@ export async function POST(req: NextRequest) {
       ts: nowTs + 1,
     });
     if (e2) throw new Error(`msg_assist_insert_failed: ${e2.message}`);
-    // ====== 保存ここまで ======
 
+    // 互換 rows/meta（軽量）
     const rows: IrosResponse['rows'] = [
       { key: '観測', value: (userText || '').slice(0, 140) },
-      { key: '位相(Phase)', value: phase },
-      { key: '主要Qコード', value: qcode },
+      { key: '位相(Phase)', value: focus.phase },
+      { key: '主要Qコード', value: focus.q },
     ];
 
     const meta: IrosResponse['meta'] = {
       agent: 'iros',
       conversation_id: convId,
       layer: 'S1',
-      phase,
-      qcode,
-      scores: { S: 0.6, R: 0.2, C: 0.1, I: 0.1 },
-      noiseAmp,
-      g,
-      seed,
-      epsilon,
-      __system_used: 'IROS_PROMPT',
+      phase: focus.phase,
+      qcode: focus.q,
+      scores: { S: 0.6, R: 0.2, C: 0.1, I: 0.1 }, // 互換用ダミー
+      noiseAmp: focus.phase === 'Outer' ? 0.2 : 0.15,
+      g: 0.8,
+      seed: Date.now() % 100000,
+      epsilon: 0.4,
     };
 
-    return json({ ok: true, reply, rows, meta } as IrosResponse);
+    // —— デバッグ可視化（本番では出さない）
+    const isDebug =
+      __DEV__ || process.env.IROS_DEBUG === '1' || req.headers.get('x-debug') === '1';
+
+    let debugExtra: any = undefined;
+    if (isDebug) {
+      try {
+        const { data: lastTrail } = await sb.rpc('iros_qtrail_last', { conv: convId, k: 8 }).select();
+        const { data: qState }   = await sb.rpc('iros_q_state', { conv: convId }).select();
+        debugExtra = {
+          qtrail: Array.isArray(lastTrail) ? lastTrail : [],
+          qstate: Array.isArray(qState) ? qState[0] : qState,
+        };
+      } catch {
+        debugExtra = { qtrail: [], qstate: null };
+      }
+    }
+
+    const payload: IrosResponse = {
+      ok: true,
+      reply,
+      rows,
+      meta,
+      ...(isDebug
+        ? {
+            debug: {
+              phase: String(focus.phase),
+              depth: String(focus.depth),
+              q: String(focus.q),
+              qName: String(focus.qName),
+              qConf: Number(focus.qConf),
+              domain: String(focus.domain),
+              protectedFocus: String(focus.protectedFocus),
+              anchors: focus.anchors as string[],
+              action: String(focus.action),
+              ...(debugExtra ?? {}),
+              pipeline: 'generateIrosReply',
+              // 受理確認
+              resonance: body.resonance ?? null,
+              intent: body.intent ?? null,
+            },
+          }
+        : {}),
+    };
+
+    return json(payload);
   } catch (e: any) {
-    if (__DEV__) dbg('unhandled', String(e?.message ?? e));
+    if (__DEV__) console.error('[IROS][unhandled]', String(e?.message ?? e));
     return json({ ok: false, error: 'unhandled_error', detail: String(e?.message ?? e) }, 500);
   }
 }

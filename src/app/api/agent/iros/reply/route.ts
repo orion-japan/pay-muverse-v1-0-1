@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateIrosReply } from '@/lib/iros/generate';
 import { deriveFinalMode } from '@/lib/iros/intent';
-import { buildSystemPrompt } from '@/lib/iros/system'; // ✅ 修正：IROS_PROMPT は存在しないのでこちらを使用
+import { analyzeFocus } from '@/lib/iros/focusCore'; // ← Qコード/位相・深度の観測用
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -47,34 +47,70 @@ export async function POST(req: NextRequest) {
       : seedMode;
     const mode = toMode(candidate);
 
-    // --- system prompt を確定（buildSystemPrompt を使用）---
-    const systemPrompt = buildSystemPrompt({
-      personaName: 'Iros',
-      style: 'gentle',
-      extra: '- 出力は自然な会話体。見出しは出さず、呼吸で改行を入れる。',
-    });
-
-    // --- 履歴整形 ---
+    // --- 履歴整形（空文字や不正型を除去） ---
     const history: HistoryMsg[] = Array.isArray(body.history)
       ? body.history
           .filter(
             (m): m is HistoryMsg =>
-              !!m && typeof m.content === 'string' && m.content.trim().length > 0,
+              !!m && (m.role === 'user' || m.role === 'assistant' || m.role === 'system') &&
+              typeof m.content === 'string' && m.content.trim().length > 0,
           )
           .map((m) => ({ role: m.role, content: m.content.trim() }))
       : [];
 
-    // --- Iros 応答生成 ---
+    // --- Qコード/位相・深度の観測（出力には含めないが、デバッグに使う） ---
+    const focus = analyzeFocus(body.user_text.trim());
+
+    // --- Iros 応答生成（system prompt は generate 側でのみ構築する＝重複排除） ---
     const assistant = await generateIrosReply({
       userText: body.user_text.trim(),
-      history, // generate 側で直近3件に丸める
+      history,
       model: process.env.IROS_MODEL || 'gpt-4o-mini',
-      temperature: 0.7,
-      max_tokens: 600,
+      temperature: 0.45,
+      max_tokens: 640,
       apiKey,
     });
 
-    return NextResponse.json({ ok: true, mode, systemPrompt, assistant });
+    // --- デバッグ出力（本番で出さない） ---
+    const isDebug =
+      process.env.NODE_ENV !== 'production' ||
+      process.env.IROS_DEBUG === '1' ||
+      req.headers.get('x-debug') === '1';
+
+    if (isDebug) {
+      // サーバーログに出す（本番では NODE_ENV=production 想定なので出ない）
+      // 個人情報やAPIキーはログに含めない
+      console.debug('[iros/reply][debug]', {
+        mode,
+        phase: focus.phase,
+        depth: focus.depth,
+        q: focus.q,
+        qName: focus.qName,
+        qConf: focus.qConf,
+        domain: focus.domain,
+        protectedFocus: focus.protectedFocus,
+        anchors: focus.anchors,
+        action: focus.action,
+      });
+    }
+
+    // レスポンス：本番では軽量、デバッグ時のみ debug を含める
+    const payload: any = { ok: true, mode, assistant };
+    if (isDebug) {
+      payload.debug = {
+        phase: focus.phase,
+        depth: focus.depth,
+        q: focus.q,
+        qName: focus.qName,
+        qConf: focus.qConf,
+        domain: focus.domain,
+        protectedFocus: focus.protectedFocus,
+        anchors: focus.anchors,
+        action: focus.action,
+      };
+    }
+
+    return NextResponse.json(payload);
   } catch (e: any) {
     console.error('[iros/reply] error', e);
     return bad(e?.message || 'Unexpected error', 500);

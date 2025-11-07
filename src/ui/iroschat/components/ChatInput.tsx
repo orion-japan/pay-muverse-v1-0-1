@@ -160,7 +160,7 @@ export default function ChatInput() {
           ref={taRef}
           className="sof-textarea"
           rows={1}
-          placeholder="短く、その時の呼吸に合わせて入力してください…（Shift+Enterで改行）"
+          placeholder="こちらに入力してください…（Shift+Enterで改行）"
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
@@ -171,36 +171,27 @@ export default function ChatInput() {
           aria-label="Irosへメッセージ"
         />
 
-        {/* アクション列（Q&A / 送信） */}
-        <div className="sof-actions">
-          <button
-            type="button"
-            className="sof-actionBtn sof-actionBtn--qa"
-            onClick={openQA}
-            aria-label="Q&Aを開く"
-            title="Q&Aを開く"
-          >
-            Q＆A
-          </button>
+{/* アクション列（送信のみ） */}
+<div className="sof-actions sof-actions--single">
+  <button
+    data-sof-send
+    type="button"
+    className="sof-actionBtn sof-actionBtn--send sof-actionBtn--lg"
+    onClick={() => {
+      if (!sendLockRef.current) {
+        taRef.current?.blur();
+        scrollChatToBottom();
+        void handleSend();
+      }
+    }}
+    disabled={!canSend}
+    aria-label="送信"
+    title="送信（Enter）"
+  >
+    送信
+  </button>
+</div>
 
-          <button
-            data-sof-send
-            type="button"
-            className="sof-actionBtn sof-actionBtn--send"
-            onClick={() => {
-              if (!sendLockRef.current) {
-                taRef.current?.blur();
-                scrollChatToBottom();
-                void handleSend();
-              }
-            }}
-            disabled={!canSend}
-            aria-label="送信"
-            title="送信（Enter）"
-          >
-            送信
-          </button>
-        </div>
       </div>
     </div>
   );

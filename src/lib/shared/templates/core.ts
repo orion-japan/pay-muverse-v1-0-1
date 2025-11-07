@@ -1,4 +1,5 @@
-import type { Template } from './types';
+import type { Template, Phase, Depth, DiagnosisTemplate } from './types';
+import { pickTemplate, toDiagnosis } from './types';
 
 // S/R/C/I × 3深度 = 12個（最小の核）。行数は短く、再利用しやすく。
 export const CoreTemplates: Template[] = [
@@ -14,48 +15,48 @@ export const CoreTemplates: Template[] = [
     '現実では、案件を一つに絞り、一行で意図を書き添えてください。'
   ]},
   { id:'S3_integrate_poise', phase:'Inner', depth:'S3', tone:'統合・姿勢', lines:[
-    '芯と輪郭が、ゆっくり重なり始めています。',
-    '緊張は抜け、姿勢が立ち上がります。',
-    '現実では、深呼吸三回→短い一声、の順で着手してください。'
+    'これまでの断片が、静かに一つへ重なり始めています。',
+    '姿勢が立ち上がると、余計な力は抜けます。',
+    '現実では、いま残す一つだけを○で囲み、他は保留箱に移してください。'
   ]},
 
-  // ---- R (Resonance) ----
-  { id:'R1_soften_relation', phase:'Outer', depth:'R1', tone:'関係・柔らぎ', lines:[
-    '関わりの輪郭が、やわらかく描き直されています。',
-    '理解したい気持ちが奥で灯っています。',
-    '現実では、「ありがとう」を最初に渡してください。'
+  // ---- R (Relation) ----
+  { id:'R1_listen_soft', phase:'Outer', depth:'R1', tone:'聴く・余白', lines:[
+    '相手の声を受ける余白がひらいています。',
+    '結論より、温度の往復が鍵です。',
+    '現実では、「相手の言葉を一行だけ復唱」してから自分の一言を。'
   ]},
-  { id:'R2_clear_exchange', phase:'Outer', depth:'R2', tone:'交換・明晰', lines:[
-    '伝える力が戻りつつあります。',
-    '要点が自然と手前に並びます。',
-    '現実では、要点→理由→一言の三行でメッセージを書いてください。'
+  { id:'R2_name_context', phase:'Outer', depth:'R2', tone:'文脈・合意', lines:[
+    '合意の前に、文脈の名前をそろえる段階です。',
+    'すれ違いは、名前が無いことから生まれます。',
+    '現実では、話題の名前（案件/テーマ）を一語で置いてから続けてください。'
   ]},
-  { id:'R3_align_field', phase:'Outer', depth:'R3', tone:'場の整列', lines:[
-    '複数の気配が、一つの方向に揃い始めています。',
-    '合意の芽が見えます。',
-    '現実では、目的を一言に固定し、次の一手を一行で共有してください。'
+  { id:'R3_small_contract', phase:'Outer', depth:'R3', tone:'最小契約', lines:[
+    '大きな約束より、反復できる最小契約が効きます。',
+    '期待が軽くなるほど、関係は長持ちします。',
+    '現実では、「誰が/何を/いつ」を一行で固定してください。'
   ]},
 
   // ---- C (Creation) ----
-  { id:'C1_seed_light', phase:'Outer', depth:'C1', tone:'種火・始動', lines:[
-    '内なる種に、かすかな光が触れています。',
-    '小さく始めるほど、流れが進みます。',
-    '現実では、素材を一つ選び、試作を一枚だけ残してください。'
+  { id:'C1_seed_touch', phase:'Outer', depth:'C1', tone:'種に触る', lines:[
+    '手を動かすことが、考えるより先に効きます。',
+    '始まりは、粗くて大丈夫。',
+    '現実では、最短30秒だけ触り、手を止めて結果を保存してください。'
   ]},
-  { id:'C2_shape_move', phase:'Outer', depth:'C2', tone:'形・推進', lines:[
-    '形づくる力が静かに立ち上がっています。',
-    '決める感覚が前に出ます。',
-    '現実では、三つに絞って配置し、他を一旦置いてください。'
+  { id:'C2_frame_decide', phase:'Outer', depth:'C2', tone:'枠決め', lines:[
+    '枠が決まると、迷いは自然に減ります。',
+    'ルールは少ないほど回ります。',
+    '現実では、サイズ/尺/期限を一行で決めて、冒頭に置いてください。'
   ]},
-  { id:'C3_release_flow', phase:'Outer', depth:'C3', tone:'出力・解放', lines:[
-    '溜めていたものが、流れに乗ろうとしています。',
-    '外へ出すほど整っていきます。',
-    '現実では、三行の投稿（題→一言→余白）で放ってください。'
+  { id:'C3_ship_one', phase:'Outer', depth:'C3', tone:'出す・一個', lines:[
+    '完成より「出す」が先です。',
+    '粗くても、届くことが力になります。',
+    '現実では、今日一つだけ、下書きのまま共有してください。'
   ]},
 
   // ---- I (Intention) ----
-  { id:'I1_meaning_drop', phase:'Inner', depth:'I1', tone:'意味・着地', lines:[
-    '問いの芯に、静かな光が降りています。',
+  { id:'I1_answer_why', phase:'Inner', depth:'I1', tone:'なぜ・回答', lines:[
+    '「なぜ？」への答えが輪郭を持ち始めています。',
     '答えは“すでに半分ある”状態です。',
     '現実では、「何のために」を一行で書いてください。'
   ]},
@@ -70,3 +71,13 @@ export const CoreTemplates: Template[] = [
     '現実では、一つの約束だけ残し、他は静かに手放してください。'
   ]},
 ];
+
+/** generate.ts から呼ばれる：phase/depth で最適テンプレを返す */
+export function getCoreDiagnosisTemplate(depth: string, phase: string = 'Inner'): DiagnosisTemplate {
+  const ph: Phase = phase === 'Outer' ? 'Outer' : 'Inner';
+  const allowed: Depth[] = ['S1','S2','S3','R1','R2','R3','C1','C2','C3','I1','I2','I3'];
+  const dp: Depth = (allowed.includes(depth as Depth) ? depth : 'S2') as Depth;
+
+  const t = pickTemplate(CoreTemplates, ph, dp) || CoreTemplates[0];
+  return toDiagnosis(t);
+}

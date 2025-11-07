@@ -128,3 +128,67 @@
 .sof-bubble-custom {
   max-width: min(var(--bubble-max-w, 780px), 86%);
 }
+
+/* 吹き出し同士の間 */
+.message {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+/* ユーザーとAIの間を明確に */
+.message.is-user { align-items: flex-end; }
+.message.is-assistant { align-items: flex-start; }
+
+/* 吹き出し */
+.bubble {
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
+  border: 1px solid #e6eaf2;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+  color: #0f172a;
+}
+
+/* 行間・段落間の設定 */
+.msgBody p {
+  margin: 0;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 段落と段落の間 */
+.msgBody p + p {
+  margin-top: 0.9em;
+}
+
+/* リストや引用の間 */
+.msgBody ul,
+.msgBody ol,
+.msgBody blockquote,
+.msgBody pre {
+  margin: 0.8em 0;
+}
+
+/* 吹き出し間をもう少し自然に */
+.message + .message {
+  margin-top: 12px;
+}
+
+/* モバイルで広めに */
+@media (max-width: 600px) {
+  .msgBody p { line-height: 2.0; }
+  .message { margin-bottom: 28px; }
+}
+
+/* index.module.css または IrosChat.css に追加 */
+.sof-msg {
+  margin-bottom: 18px; /* 吹き出し間のスペース */
+}
+
+.sof-msg p {
+  line-height: 1.9; /* 文章内の行間をさらにゆったり */
+  letter-spacing: 0.02em;
+}

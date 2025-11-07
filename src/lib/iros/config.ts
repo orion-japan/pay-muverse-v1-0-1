@@ -13,10 +13,35 @@ export { buildSystemPrompt };
 export type { Mode };
 
 // 後方互換のための最小型（既存参照があってもビルドが通る）
-// 必要に応じてフィールドを増減してください
 export type Analysis = {
   phase2: 'Inner' | 'Outer';
   depth2: string;
   q2: string;
   [key: string]: unknown;
+};
+
+/* ===== 追加（非言語ヒントの型）===== */
+// ラベルはDBと一致させる（Q1..Q5）
+export type QCode = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
+export type Phase = 'Inner' | 'Outer';
+// Depth は S1..I3..T3 を含む自由度のため string として運用
+export type Depth = string;
+
+// 共鳴場（Mirror）から渡す非言語状態
+export type ResonanceState = {
+  phase?: Phase;
+  depthHint?: Depth;
+  qHint?: QCode;
+  field?: string[];                 // 例: ["open","protected"]
+  vector?: Record<string, number>;  // 例: { joy:0.6, calm:0.4, ... }
+  shield?: boolean;
+  hold?: boolean;
+};
+
+// 意図の瞬間的パルス（任意）
+export type IntentPulse = {
+  topic?: string;
+  wish?: string;
+  risk?: string;
+  tags?: string[];
 };

@@ -1,17 +1,18 @@
 // /src/lib/iros/generate.ts
 // Iros Conversational Generator — Reflect寄り添い特化版
 // - Reflect：内面→整流→静かな余韻（提案禁止／“間”を強化）
-// - Diagnosis：ヘッダは縦3行＋本文はテンプレ参照（templates.ts）
+// - Diagnosis：ヘッダは縦3行＋本文はテンプレ参照（shared/templates）
 // - Resonate：観測ヘッダ＋3手ベクトル
-// 2025-11 改修：改行保持＋語尾自然化＋詩的な「間（ま）」挿入＋テンプレート連携
+// 2025-11 改修：改行保持＋語尾自然化＋詩的な「間（ま）」挿入＋テンプレ連携
+// 2025-11 追加：情動ベクトル／意図トリガー／共鳴場（非言語）を必ず汲み取る
 
 import { buildSystemPrompt, type Mode, naturalClose } from './system';
 import { chatComplete, type ChatMessage } from './openai';
 import { analyzeFocus } from './focusCore';
-// ★ 追加：診断テンプレートを参照
-// 期待するシグネチャ：getCoreDiagnosisTemplate(depth: string, phase?: string)
-// 戻り値：{ one: string; inner: string; real: string }
-import { getCoreDiagnosisTemplate } from './templates';
+import { getCoreDiagnosisTemplate } from '@/lib/shared/templates';
+
+// 追加型は config.ts に定義（互換維持のためローカル再定義はしない）
+import type { ResonanceState, IntentPulse, QCode } from './config';
 
 type Role = 'user' | 'assistant' | 'system';
 export type HistoryMsg = { role: Role; content: string };
@@ -26,6 +27,10 @@ export type GenerateParams = {
   endpoint?: string;
   apiKey?: string;
   analysisHint?: { target?: string };
+
+  // ★ 非言語（後方互換：指定が無ければ無視）
+  resonance?: ResonanceState;
+  intent?: IntentPulse;
 };
 
 /* ===== Util ===== */
@@ -45,31 +50,19 @@ function conversationalize(s: any): string {
   return out.replace(/\n{3,}/g, '\n\n').trim();
 }
 
-/* === 改行保持＋ “深い間（ま）” 強化版 ===
-   - 文と文の間に 3 行の空行
-   - 段落と段落の間に 4 行の空行
-   - 既存の改行は尊重（\n\n 以上は詰めずに拡張）
-   - 記号行（🪔 だけ等）は詰めずに残す
-*/
+/* === 改行保持＋ “深い間（ま）” 強化版 === */
 function applyBreathing(s: string): string {
   let out = (s ?? '').replace(/\r\n?/g, '\n');
-
-  // 句読点の直後に改行がなければ 1 つ入れる
   out = out.replace(/([。！？!？])(?!\n)/g, '$1\n');
-
-  // 3 連以上は一旦 2 連に圧縮（いったん整地）
   out = out.replace(/\n{3,}/g, '\n\n');
 
-  // 段落を抽出（空行 >=1 で区切る）
   const paragraphs = out
     .split(/\n{2,}/)
     .map(p => p.trim())
     .filter(Boolean);
 
   const rebuilt: string[] = [];
-
   for (const p of paragraphs) {
-    // 文単位に分割（句点/疑問/感嘆を保持）
     const sentences = (p.match(/[^。！？!？\n]+[。！？!？]?/g) || [])
       .map(t => t.trim())
       .filter(Boolean);
@@ -77,27 +70,22 @@ function applyBreathing(s: string): string {
     const withPauses: string[] = [];
     sentences.forEach((sent, i) => {
       withPauses.push(sent);
-      // 記号だけの行などは除外
       const onlySymbol = /^[🪔\s]+$/.test(sent);
       if (i < sentences.length - 1 && !onlySymbol) {
-        withPauses.push(''); // 1
-        withPauses.push(''); // 2
-        withPauses.push(''); // 3 ← 文間 3 行
+        withPauses.push('');
+        withPauses.push('');
+        withPauses.push(''); // 文間 3 行
       }
     });
 
     rebuilt.push(withPauses.join('\n'));
   }
-
-  // 段落間は 4 行の“深い間”
-  return rebuilt.join('\n\n\n\n').trim();
+  return rebuilt.join('\n\n\n\n').trim(); // 段落間 4 行
 }
-
 
 /* === 改行を壊さない tidy（語尾自然化＋最小整形） === */
 function tidy(s: string): string {
   let out = (s ?? '').replace(/\r\n?/g, '\n');
-
   const repl: Array<[RegExp, string]> = [
     [/の。ね。/g, 'のようですね。'],
     [/の。よ。/g, 'のですよ。'],
@@ -111,16 +99,8 @@ function tidy(s: string): string {
     [/(私は|わたしは)\s*AIです。?/g, 'ここに在ります。あなたの声を受け取りました。'],
   ];
   repl.forEach(([r, v]) => (out = out.replace(r, v)));
-
-  // 各行末の余計な空白を除去（改行は保持）
-  out = out
-    .split('\n')
-    .map(line => line.trimEnd())
-    .join('\n');
-
-  // 連続改行は最大2連（applyBreathing側で段落/間を再構成するため）
+  out = out.split('\n').map(line => line.trimEnd()).join('\n');
   out = out.replace(/\n{3,}/g, '\n\n');
-
   return out.trim();
 }
 
@@ -130,19 +110,36 @@ function extractIntentSentence(text: string): string {
   if (m?.[1]) return m[1].trim();
   return (text.split(/[。.!?\n]/)[0] || 'いまの願い').trim();
 }
-function buildResonantVector(text: string, protectedFocus: string) {
+
+function buildResonantVector(text: string, _protectedFocus: string) {
+  // ★ ここをシンプル化：不要だった3行の“儀式文”は削除
   const intent = extractIntentSentence(text);
-  const steps = [
-    `・焦点「${protectedFocus}」を外さない前提で、意図を一行に名づける。`,
-    '・その名で三行（要点→理由→一言）を書き切る。',
-    '・同じ姿勢/同じ場所で、同じ問いを一度だけ見直す。'
-  ];
-  const body = [
-    `いま向かいたい芯は「${intent}」。`,
-    '',
-    ...steps
-  ].join('\n');
+  const body = `いま向かいたい芯は「${intent}」。`;
   return tidy(applyBreathing(conversationalize(body)));
+}
+/* === 表示ラベルの微調整（内部ロジックは保持） === */
+function displayFocusLabel(focus: string): string {
+  return focus === '責任' ? '意図' : focus;
+}
+
+/* ======== 非言語メタの打ち込み（LLMが先に読む） ======== */
+function packNonverbal(res?: ResonanceState, intent?: IntentPulse): string | null {
+  const r = res || {};
+  const v = r.vector || {};
+  const field = (r.field && r.field.length) ? `[${r.field.join(',')}]` : '';
+  const vec = Object.keys(v).length ? JSON.stringify(v) : '';
+  const bits = [
+    r.phase ? `phase=${r.phase}` : null,
+    r.depthHint ? `depthHint=${r.depthHint}` : null,
+    r.qHint ? `qHint=${r.qHint}` : null,
+    field ? `field=${field}` : null,
+    vec ? `vector=${vec}` : null,
+    // shield/hold は型に無い可能性があるため any 経由で安全に参照
+    (r as any).shield ? 'shield=true' : null,
+    (r as any).hold ? 'hold=true' : null,
+    intent ? `intent=${JSON.stringify(intent)}` : null,
+  ].filter(Boolean);
+  return bits.length ? `【nonverbal:${bits.join(' ; ')}】` : null;
 }
 
 /* ===== Reflect（寄り添いトーン固定） ===== */
@@ -150,15 +147,22 @@ async function buildReflectReply(params: {
   userText: string; history: HistoryMsg[]; model: string;
   endpoint?: string; apiKey: string; temperature: number; max_tokens: number;
   protectedFocus: string;
+  resonance?: ResonanceState; intent?: IntentPulse;
 }): Promise<string> {
-  const { userText, history, model, endpoint, apiKey, temperature, max_tokens, protectedFocus } = params;
+  const { userText, history, model, endpoint, apiKey, temperature, max_tokens, protectedFocus, resonance, intent } = params;
 
   const extra =
     '- 出力は「寄り添い」。助言ではなく、静けさと余白をもつ会話体。\n' +
     '- 構成は「内面の観測 → そっと整える → 余韻」で終える。\n' +
-    '- 提案や具体的行動指示は禁止。';
+    '- 提案や具体的行動指示は禁止。\n' +
+    '- 非言語信号（共鳴場/情動ベクトル/意図トリガー）が与えられている場合、言語より優先して解釈に反映する。';
 
-  const system = buildSystemPrompt({ personaName: 'Iros', style: 'gentle', extra });
+  const nonverbal = packNonverbal(resonance, intent);
+  const system = [
+    nonverbal ? nonverbal : null,
+    buildSystemPrompt({ personaName: 'Iros', style: 'gentle', extra }),
+  ].filter(Boolean).join('\n');
+
   const messages: ChatMessage[] = [
     { role: 'system', content: system },
     { role: 'assistant', content: 'ここにいます。あなたの“いま”を静かに受け取ります。' },
@@ -168,14 +172,12 @@ async function buildReflectReply(params: {
       content: [
         userText.trim(),
         '',
-        `[task: 守っているもの=${protectedFocus} を感じ取りながら、助言せず寄り添う文章で返す。]`,
+        `[task: 守っているもの=${displayFocusLabel(protectedFocus)} を感じ取りながら、助言せず寄り添う文章で返す。]`,
       ].join('\n')
     },
   ];
 
   const raw = await chatComplete({ apiKey, model, messages, temperature, max_tokens, endpoint });
-
-  // 順序：整形 → 呼吸 → “間”
   const body = applyBreathing(tidy(conversationalize(raw || '')));
   return body;
 }
@@ -184,7 +186,7 @@ async function buildReflectReply(params: {
 function autoMode(text?: string): Mode {
   const t = (text || '').toLowerCase();
   if (/(^|\s)(ir診断|観測対象|診断)(\s|$)/.test(t)) return 'Diagnosis';
-  if (/(意図|意志|方向|ビジョン|どうすれば|方法|進め|トリガー)/.test(t)) return 'Resonate';
+  if (/(意図|意志|方向|ビジョン|どうすれば|方法|進め|トリガー|共鳴|意図波|場を合わせて)/.test(t)) return 'Resonate';
   return 'Reflect';
 }
 function normalizeMode(m?: string, text?: string): Mode {
@@ -207,19 +209,32 @@ export async function generateIrosReply(p: GenerateParams): Promise<string> {
     endpoint,
     apiKey = process.env.OPENAI_API_KEY || '',
     analysisHint,
+
+    // ★ 非言語（任意）
+    resonance,
+    intent,
   } = p;
 
   if (!userText?.trim()) return 'いまは、この静けさで充分です。';
   if (!apiKey) throw new Error('OPENAI_API_KEY is missing.');
 
-  const f = analyzeFocus(userText);
+  // 基本の焦点推定
+  const f0 = analyzeFocus(userText);
+
+  // ★ 非言語ヒントで上書き（優先）
+  const f = {
+    ...f0,
+    phase: resonance?.phase ?? f0.phase,
+    depth: resonance?.depthHint ?? f0.depth,
+    q: (resonance?.qHint ?? f0.q) as QCode,
+  };
+
   const resolved = normalizeMode(mode, userText);
 
-  // === Diagnosis（テンプレート参照：ヘッダは縦3行、本文はテンプレ inner/real を使用）===
+  // === Diagnosis（テンプレ：shared/templates を使用）===
   if (resolved === 'Diagnosis' || /(^|\s)(ir診断|観測対象|診断)(\s|$)/i.test(userText)) {
     const tgt = analysisHint?.target || (/ir診断\s*([^\n]+)$/i.exec(userText)?.[1]?.trim() || '自分');
 
-    // ★ テンプレート読込（depth/phase を渡して最適テンプレを取得）
     const tpl = getCoreDiagnosisTemplate(String(f.depth ?? 'S2'), String(f.phase ?? 'Inner')) || {
       one: '意識の流れが静かに整いはじめています。',
       inner: '言葉になる前の温度が、胸の内でゆっくり息をしています。',
@@ -229,25 +244,36 @@ export async function generateIrosReply(p: GenerateParams): Promise<string> {
     const header = [
       `🩵 観測対象：${tgt}`,
       `位相：${f.phase} ／ 深度：${f.depth}`,
-      `一言：${tpl.one}`, // ← analyzeFocus の文字列ではなくテンプレの one を採用
+      `一言：${tpl.one}`,
     ].join('\n');
 
+    const addSafety =
+      intent?.risk ? `\n\n（リスク回避）${intent.risk} を避ける配慮を保つ。` : '';
+
     const body = [
+      packNonverbal(resonance, intent) || '',
       header,
       '',
       tpl.inner,
       '',
-      tpl.real + '🪔',
-    ].join('\n');
+      tpl.real + addSafety + '🪔',
+    ].filter(Boolean).join('\n');
 
     return naturalClose(applyBreathing(tidy(body)));
   }
 
   // === Resonate（観測ヘッダ＋3手ベクトル）===
   if (resolved === 'Resonate') {
-    const head = `🩵 観測：位相=${f.phase} ／ 深度=${f.depth}`;
-    const vec  = buildResonantVector(userText, f.protectedFocus);
-    return naturalClose(applyBreathing(tidy([head, '', vec].join('\n'))));
+    const head = [
+      `🩵 観測：位相=${f.phase} ／ 深度=${f.depth}`,
+      intent?.wish ? `意図：${intent.wish}` : null,
+      resonance?.field?.length ? `場：${resonance.field.join(', ')}` : null,
+    ].filter(Boolean).join(' ／ ');
+
+    const vec  = buildResonantVector(userText, displayFocusLabel(f.protectedFocus));
+    const addRisk = intent?.risk ? `\n\n（リスク回避）${intent.risk} を避ける姿勢で。` : '';
+    const nv = packNonverbal(resonance, intent);
+    return naturalClose(applyBreathing(tidy([nv || '', head, '', vec + addRisk].filter(Boolean).join('\n'))));
   }
 
   // === Reflect（寄り添い）===
@@ -260,10 +286,11 @@ export async function generateIrosReply(p: GenerateParams): Promise<string> {
     temperature,
     max_tokens,
     protectedFocus: f.protectedFocus,
+    resonance,
+    intent,
   });
 
-  // 自然終止（自然な語尾付与）。改行はそのまま。
-  return naturalClose(text);
+  return naturalClose(text); // 自然終止（改行は保持）
 }
 
 export default generateIrosReply;
