@@ -16,6 +16,9 @@ const SUPABASE_ANON_KEY =
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
 const CREDITS_BYPASS = (process.env.CREDITS_BYPASS || '0') === '1';
 
+// 失敗しても 500 にしない（= 課金まわりの例外で落とさない）
+const CAPTURE_SOFT_FAIL = (process.env.CAPTURE_SOFT_FAIL || '1') === '1';
+
 /* ====== helpers ====== */
 const asAny = (v: unknown) => v as any;
 
@@ -29,23 +32,33 @@ function userClient(pgJwt?: string): SupabaseClient {
 /* Credits API（user_codeベース） */
 async function authorize(baseUrl: string, user_code: string, amount: number, ref: string) {
   if (CREDITS_BYPASS) return true;
-  const r = await fetch(`${baseUrl}/api/credits/authorize`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    cache: 'no-store',
-    body: JSON.stringify({ user_code, amount, ref }),
-  });
-  return r.ok;
+  try {
+    const r = await fetch(`${baseUrl}/api/credits/authorize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      body: JSON.stringify({ user_code, amount, ref }),
+    });
+    return r.ok;
+  } catch (e) {
+    console.warn('[credits] authorize error', e);
+    return false;
+  }
 }
 async function capture(baseUrl: string, user_code: string, amount: number, ref: string) {
   if (CREDITS_BYPASS) return true;
-  const r = await fetch(`${baseUrl}/api/credits/capture`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    cache: 'no-store',
-    body: JSON.stringify({ user_code, amount, ref }),
-  });
-  return r.ok;
+  try {
+    const r = await fetch(`${baseUrl}/api/credits/capture`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      body: JSON.stringify({ user_code, amount, ref }),
+    });
+    return r.ok;
+  } catch (e) {
+    console.warn('[credits] capture error', e);
+    return false;
+  }
 }
 async function voidAuth(baseUrl: string, user_code: string, amount: number, ref: string) {
   if (CREDITS_BYPASS) return;
@@ -56,7 +69,9 @@ async function voidAuth(baseUrl: string, user_code: string, amount: number, ref:
       cache: 'no-store',
       body: JSON.stringify({ user_code, amount, ref }),
     });
-  } catch {}
+  } catch (e) {
+    console.warn('[credits] void error', e);
+  }
 }
 
 /* ====== auth normalize (robust) ====== */
@@ -64,15 +79,11 @@ type AnyAuth = any;
 const s = (v: unknown) => (v == null ? '' : String(v));
 
 function pickAuth(raw: AnyAuth) {
-  // 返ってくる形の揺れをまとめて吸収
   const n = normalizeAuthz(raw) as AnyAuth;
   const x = { ...(raw || {}), ...(n || {}) };
 
-  const userCode =
-    s(x.userCode || x.user_code || x.uid || x.sub).trim() || undefined;
+  const userCode = s(x.userCode || x.user_code || x.uid || x.sub).trim() || undefined;
   const pgJwt = s(x.pgJwt || x.pg_jwt).trim() || undefined;
-
-  // userCode が取れていれば最優先で OK にする
   const ok = !!userCode || !!x.ok || !!x.allowed || x.status === 200;
 
   return { ok, userCode, pgJwt, raw: x };
@@ -82,7 +93,6 @@ function pickAuth(raw: AnyAuth) {
 export async function POST(req: NextRequest) {
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || req.nextUrl.origin;
 
-  // body は最初に1回だけ読む（catchでも使う）
   let body: any = {};
   try {
     body = await req.json();
@@ -90,7 +100,6 @@ export async function POST(req: NextRequest) {
 
   const supaAdmin = adminClient();
 
-  // 認証情報は関数スコープで保持（catchでも使う）
   let authed = {
     ok: false as boolean,
     userCode: undefined as string | undefined,
@@ -98,7 +107,7 @@ export async function POST(req: NextRequest) {
   };
 
   try {
-    /* 1) Firebase 認証 → 正規化（戻り型が環境差でズレても安全に読む） */
+    /* 1) Firebase 認証 → 正規化 */
     const raw = await verifyFirebaseAndAuthorize(req);
     const a = pickAuth(raw);
     authed.ok = a.ok;
@@ -127,7 +136,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'insufficient_credit' }, { status: 402 });
     }
 
-    /* 4) 直近履歴（SRで安全に読込） */
+    /* 4) 直近履歴 */
     const { data: history = [] } = await supaAdmin
       .from('iros_messages')
       .select('role, text')
@@ -188,13 +197,19 @@ export async function POST(req: NextRequest) {
     ]);
     if (e2) throw new Error(e2.message);
 
-    /* 8) 売上確定 */
+    /* 8) 売上確定（失敗しても落とさない） */
     const okCap = await capture(baseUrl, authed.userCode!, COST_PER_TURN, ref);
-    if (!okCap) throw new Error('capture_failed');
+    if (!okCap) {
+      console.warn('[credits] capture_failed (soft)', { user: authed.userCode, ref });
+      if (!CAPTURE_SOFT_FAIL) {
+        // 厳格モードにしたい場合のみエラー化（既定は落とさない）
+        throw new Error('capture_failed');
+      }
+    }
 
     return NextResponse.json({ ok: true, mode, assistant });
   } catch (err: any) {
-    // best-effort void（認証済みかつ入力量が揃っているときのみ）
+    // best-effort void（認証済み & 入力量が揃っているときのみ）
     try {
       const conversationId: string = s(body?.conversationId).trim();
       const user_text: string = s(body?.user_text).trim();
