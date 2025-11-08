@@ -236,7 +236,11 @@ function IrosChatInner({ open }: Props) {
             <IrosSidebarMobile
               isOpen={isMobileMenuOpen}
               onClose={() => setIsMobileMenuOpen(false)}
-              conversations={Array.isArray(chat.conversations) ? chat.conversations : []}
+              conversations={
+                Array.isArray(chat.conversations)
+                  ? (chat.conversations as any)
+                  : []
+              }
               onSelect={(id) => {
                 try {
                   chat.selectConversation?.(id);
