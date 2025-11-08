@@ -186,20 +186,28 @@ export default function Footer() {
         } catch {}
 
         const url = `/api/talk/unread-count?ts=${Date.now()}`;
-        const res = await fetchWithTimeout(
-          url,
-          {
+        const ctrl = new AbortController();
+        const timeout = setTimeout(() => ctrl.abort(), 4000); // ← タイムアウト追加（4秒）
+        let res: Response | null = null;
+
+        try {
+          res = await fetch(url, {
             method: 'GET',
             headers: {
               'Content-Type': 'application/json',
               ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
             },
-          },
-          8000,
-        );
+            signal: ctrl.signal,
+            cache: 'no-store',
+          });
+        } catch (e) {
+          console.warn('[unread] fetch failed', e);
+        } finally {
+          clearTimeout(timeout);
+        }
 
-        if (!res.ok) {
-          console.warn('[unread] HTTP', res.status);
+        if (!res || !res.ok) {
+          console.warn('[unread] HTTP error', res?.status);
           setTalk(0);
         } else {
           let j: any = null;
@@ -211,11 +219,11 @@ export default function Footer() {
           setTalk(Math.max(0, Number(j?.unread ?? 0)));
         }
       } catch (e) {
-        console.warn('[unread] fetch error/timeout', e);
+        console.warn('[unread] unexpected', e);
         setTalk(0);
       } finally {
         inFlight = false;
-        if (!stopped) timerId = window.setTimeout(load, 20000); // 再帰タイマー（重複防止）
+        if (!stopped) timerId = window.setTimeout(load, 20000); // 20秒ごとに再試行
       }
     };
 

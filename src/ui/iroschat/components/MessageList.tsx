@@ -1,3 +1,4 @@
+// src/ui/iroschat/components/MessageList.tsx
 'use client';
 
 import React from 'react';
@@ -7,12 +8,12 @@ import { useAuth } from '@/context/AuthContext'; // 動的アイコン用
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import ReactMarkdown from 'react-markdown';
-import '../IrosChat.css'; // ← 行間・間を整えるCSSを別ファイルで適用
+import '../IrosChat.css'; // 行間・余白の調整
 
 type IrosMessage = {
   id: string;
   role: 'user' | 'assistant';
-  text: string;
+  text: unknown; // 混在対策（確実に文字列化して描画）
   q?: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
   color?: string;
   ts?: number;
@@ -32,6 +33,27 @@ const FALLBACK_DATA =
       <rect x="7" y="26" width="26" height="10" rx="5" fill="#c8d2e3"/>
     </svg>`
   );
+
+/** [object Object]対策：最終的に必ず文字列へ正規化 */
+function toSafeString(v: unknown): string {
+  if (typeof v === 'string') return v;
+  if (v == null) return '';
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    const cand =
+      (typeof o.content === 'string' && o.content) ||
+      (typeof o.text === 'string' && o.text) ||
+      (typeof o.message === 'string' && o.message) ||
+      (typeof o.assistant === 'string' && o.assistant);
+    if (cand) return cand;
+    try {
+      return JSON.stringify(o, null, 2); // 可読性重視
+    } catch {
+      return String(v);
+    }
+  }
+  return String(v);
+}
 
 export default function MessageList() {
   const { messages, loading, error } = useIrosChat() as {
@@ -75,13 +97,16 @@ export default function MessageList() {
         const isUser = m.role === 'user';
         const iconSrc = isUser ? resolveUserAvatar(m) : '/ir.png';
 
+        // ここで必ず文字列化
+        const safeText = toSafeString(m.text);
+
         return (
-          <div
-            key={m.id}
-            className={`message ${isUser ? 'is-user' : 'is-assistant'}`}
-          >
+          <div key={m.id} className={`message ${isUser ? 'is-user' : 'is-assistant'}`}>
             {/* アバター */}
-            <div className="avatar" style={{ alignSelf: isUser ? 'flex-end' : 'flex-start' }}>
+            <div
+              className="avatar"
+              style={{ alignSelf: isUser ? 'flex-end' : 'flex-start' }}
+            >
               <img
                 src={iconSrc}
                 alt={isUser ? 'you' : 'Iros'}
@@ -135,7 +160,7 @@ export default function MessageList() {
               {/* 本文（行間・段落間を制御） */}
               <div className="msgBody">
                 <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
-                  {m.text}
+                  {safeText}
                 </ReactMarkdown>
               </div>
             </div>

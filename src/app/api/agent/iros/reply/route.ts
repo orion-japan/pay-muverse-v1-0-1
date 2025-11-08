@@ -1,118 +1,207 @@
-// /src/app/api/agent/iros/reply/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-import { generateIrosReply } from '@/lib/iros/generate';
-import { deriveFinalMode } from '@/lib/iros/intent';
-import { analyzeFocus } from '@/lib/iros/focusCore'; // ← Qコード/位相・深度の観測用
-
+// src/app/api/agent/iros/reply/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/* ===== 型定義 ===== */
-type HistoryMsg = { role: 'user' | 'assistant' | 'system'; content: string };
-type ReqBody = {
-  conversationId?: string;
-  user_text: string;
-  mode?: string;
-  history?: HistoryMsg[];
-};
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { chatComplete, type ChatMessage } from '@/lib/llm/chatComplete';
+import { adminClient } from '@/lib/credits/db';
+import { verifyFirebaseAndAuthorize, normalizeAuthz } from '@/lib/authz';
 
-/* ===== Mode 定義（型安全） ===== */
-const MODES = ['Light', 'Deep', 'Harmony', 'Transcend'] as const;
-type Mode = (typeof MODES)[number];
+/* ====== Config ====== */
+const COST_PER_TURN = Number(process.env.IROS_COST_PER_TURN || 5);
+const MODEL = process.env.IROS_MODEL || 'gpt-4o-mini';
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
+const SUPABASE_ANON_KEY =
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
+const CREDITS_BYPASS = (process.env.CREDITS_BYPASS || '0') === '1';
 
-function toMode(v: unknown): Mode {
-  const s = typeof v === 'string' ? v.trim() : '';
-  return (MODES as readonly string[]).includes(s as any) ? (s as Mode) : 'Light';
+/* ====== helpers ====== */
+const asAny = (v: unknown) => v as any;
+
+function userClient(pgJwt?: string): SupabaseClient {
+  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: { persistSession: false },
+    global: { headers: pgJwt ? { Authorization: `Bearer ${pgJwt}` } : {} },
+  });
 }
 
-/* ===== Utility ===== */
-function bad(message: string, code = 400) {
-  return NextResponse.json({ ok: false, error: message }, { status: code });
+/* Credits API（user_codeベース） */
+async function authorize(baseUrl: string, user_code: string, amount: number, ref: string) {
+  if (CREDITS_BYPASS) return true;
+  const r = await fetch(`${baseUrl}/api/credits/authorize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    cache: 'no-store',
+    body: JSON.stringify({ user_code, amount, ref }),
+  });
+  return r.ok;
 }
-
-/* ===== メイン処理 ===== */
-export async function POST(req: NextRequest) {
+async function capture(baseUrl: string, user_code: string, amount: number, ref: string) {
+  if (CREDITS_BYPASS) return true;
+  const r = await fetch(`${baseUrl}/api/credits/capture`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    cache: 'no-store',
+    body: JSON.stringify({ user_code, amount, ref }),
+  });
+  return r.ok;
+}
+async function voidAuth(baseUrl: string, user_code: string, amount: number, ref: string) {
+  if (CREDITS_BYPASS) return;
   try {
-    const apiKey = process.env.OPENAI_API_KEY || '';
-    if (!apiKey) return bad('OPENAI_API_KEY is not set on server.', 500);
+    await fetch(`${baseUrl}/api/credits/void`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      body: JSON.stringify({ user_code, amount, ref }),
+    });
+  } catch {}
+}
 
-    const body = (await req.json()) as ReqBody;
-    if (!body?.user_text?.trim()) return bad('`user_text` is required.');
+/* ====== auth normalize (robust) ====== */
+type AnyAuth = any;
+const s = (v: unknown) => (v == null ? '' : String(v));
 
-    // --- モード決定 ---
-    const requested = body.mode ?? 'Light';
-    const seedMode = toMode(requested);
-    const candidate = typeof deriveFinalMode === 'function'
-      ? deriveFinalMode(seedMode, body.user_text)
-      : seedMode;
-    const mode = toMode(candidate);
+function pickAuth(raw: AnyAuth) {
+  // 返ってくる形の揺れをまとめて吸収
+  const n = normalizeAuthz(raw) as AnyAuth;
+  const x = { ...(raw || {}), ...(n || {}) };
 
-    // --- 履歴整形（空文字や不正型を除去） ---
-    const history: HistoryMsg[] = Array.isArray(body.history)
-      ? body.history
-          .filter(
-            (m): m is HistoryMsg =>
-              !!m && (m.role === 'user' || m.role === 'assistant' || m.role === 'system') &&
-              typeof m.content === 'string' && m.content.trim().length > 0,
-          )
-          .map((m) => ({ role: m.role, content: m.content.trim() }))
-      : [];
+  const userCode =
+    s(x.userCode || x.user_code || x.uid || x.sub).trim() || undefined;
+  const pgJwt = s(x.pgJwt || x.pg_jwt).trim() || undefined;
 
-    // --- Qコード/位相・深度の観測（出力には含めないが、デバッグに使う） ---
-    const focus = analyzeFocus(body.user_text.trim());
+  // userCode が取れていれば最優先で OK にする
+  const ok = !!userCode || !!x.ok || !!x.allowed || x.status === 200;
 
-    // --- Iros 応答生成（system prompt は generate 側でのみ構築する＝重複排除） ---
-    const assistant = await generateIrosReply({
-      userText: body.user_text.trim(),
-      history,
-      model: process.env.IROS_MODEL || 'gpt-4o-mini',
-      temperature: 0.45,
-      max_tokens: 640,
-      apiKey,
+  return { ok, userCode, pgJwt, raw: x };
+}
+
+/* ====== handler ====== */
+export async function POST(req: NextRequest) {
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || req.nextUrl.origin;
+
+  // body は最初に1回だけ読む（catchでも使う）
+  let body: any = {};
+  try {
+    body = await req.json();
+  } catch {}
+
+  const supaAdmin = adminClient();
+
+  // 認証情報は関数スコープで保持（catchでも使う）
+  let authed = {
+    ok: false as boolean,
+    userCode: undefined as string | undefined,
+    pgJwt: undefined as string | undefined,
+  };
+
+  try {
+    /* 1) Firebase 認証 → 正規化（戻り型が環境差でズレても安全に読む） */
+    const raw = await verifyFirebaseAndAuthorize(req);
+    const a = pickAuth(raw);
+    authed.ok = a.ok;
+    authed.userCode = a.userCode;
+    authed.pgJwt = a.pgJwt;
+
+    if (!authed.userCode) {
+      return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
+    }
+
+    const supa = userClient(authed.pgJwt);
+
+    /* 2) 入力検証 */
+    const conversationId: string = s(body?.conversationId).trim();
+    const user_text: string = s(body?.user_text).trim();
+    const mode: string = s(body?.mode || 'Light');
+
+    if (!conversationId || !user_text) {
+      return NextResponse.json({ ok: false, error: 'INVALID_REQUEST' }, { status: 400 });
+    }
+
+    /* 3) クレジット オーソリ */
+    const ref = `iros:${conversationId}:${Date.now()}`;
+    const okAuth = await authorize(baseUrl, authed.userCode!, COST_PER_TURN, ref);
+    if (!okAuth) {
+      return NextResponse.json({ ok: false, error: 'insufficient_credit' }, { status: 402 });
+    }
+
+    /* 4) 直近履歴（SRで安全に読込） */
+    const { data: history = [] } = await supaAdmin
+      .from('iros_messages')
+      .select('role, text')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true })
+      .limit(10);
+
+    const messages: ChatMessage[] = [
+      {
+        role: 'system',
+        content:
+          process.env.IROS_SYSTEM_PROMPT ||
+          'You are Iros, a concise partner AI. Reply briefly, actionable, and kind.',
+      },
+      ...history.map((m: any) => ({
+        role: (m.role === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant',
+        content: s(m?.text),
+      })),
+      { role: 'user', content: user_text },
+    ];
+
+    /* 5) LLM */
+    const assistant: string = await chatComplete({
+      model: MODEL,
+      messages,
+      temperature: 0.4,
+      max_tokens: 420,
     });
 
-    // --- デバッグ出力（本番で出さない） ---
-    const isDebug =
-      process.env.NODE_ENV !== 'production' ||
-      process.env.IROS_DEBUG === '1' ||
-      req.headers.get('x-debug') === '1';
+    /* 6) メタ（暫定） */
+    const meta = { q: null, phase: null, depth: null, confidence: null, mode };
 
-    if (isDebug) {
-      // サーバーログに出す（本番では NODE_ENV=production 想定なので出ない）
-      // 個人情報やAPIキーはログに含めない
-      console.debug('[iros/reply][debug]', {
-        mode,
-        phase: focus.phase,
-        depth: focus.depth,
-        q: focus.q,
-        qName: focus.qName,
-        qConf: focus.qConf,
-        domain: focus.domain,
-        protectedFocus: focus.protectedFocus,
-        anchors: focus.anchors,
-        action: focus.action,
-      });
-    }
+    /* 7) 保存（user → assistant） */
+    const nowIso = new Date().toISOString();
+    const nowTs = Date.now();
 
-    // レスポンス：本番では軽量、デバッグ時のみ debug を含める
-    const payload: any = { ok: true, mode, assistant };
-    if (isDebug) {
-      payload.debug = {
-        phase: focus.phase,
-        depth: focus.depth,
-        q: focus.q,
-        qName: focus.qName,
-        qConf: focus.qConf,
-        domain: focus.domain,
-        protectedFocus: focus.protectedFocus,
-        anchors: focus.anchors,
-        action: focus.action,
-      };
-    }
+    const { error: e2 } = await supaAdmin.from('iros_messages').insert([
+      {
+        conversation_id: conversationId,
+        user_code: authed.userCode,
+        role: 'user',
+        content: user_text,
+        text: user_text,
+        meta: null,
+        created_at: nowIso,
+        ts: nowTs,
+      },
+      {
+        conversation_id: conversationId,
+        user_code: authed.userCode,
+        role: 'assistant',
+        content: assistant,
+        text: assistant,
+        meta,
+        created_at: nowIso,
+        ts: nowTs,
+      },
+    ]);
+    if (e2) throw new Error(e2.message);
 
-    return NextResponse.json(payload);
-  } catch (e: any) {
-    console.error('[iros/reply] error', e);
-    return bad(e?.message || 'Unexpected error', 500);
+    /* 8) 売上確定 */
+    const okCap = await capture(baseUrl, authed.userCode!, COST_PER_TURN, ref);
+    if (!okCap) throw new Error('capture_failed');
+
+    return NextResponse.json({ ok: true, mode, assistant });
+  } catch (err: any) {
+    // best-effort void（認証済みかつ入力量が揃っているときのみ）
+    try {
+      const conversationId: string = s(body?.conversationId).trim();
+      const user_text: string = s(body?.user_text).trim();
+      if (conversationId && user_text && authed.userCode) {
+        await voidAuth(baseUrl, authed.userCode, COST_PER_TURN, `iros:${conversationId}`);
+      }
+    } catch {}
+    return NextResponse.json({ ok: false, error: String(err?.message || 'error') }, { status: 500 });
   }
 }

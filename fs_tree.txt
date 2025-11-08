@@ -1,0 +1,438 @@
+.
+├── .cursorrules
+├── .env.local
+├── .eslintrc.cjs
+├── .eslintrc.json
+├── .gitignore
+├── .nvmrc
+├── .vscode
+│   └── settings.json
+├── .yarn
+│   └── install-state.gz
+├── .yarnrc.yml
+├── README.md
+├── base64.txt
+├── components.json
+├── copy-logs_20250922-100326
+│   ├── errors.csv
+│   └── payloads_new.csv
+├── copy-logs_20250922-101815
+│   ├── errors.csv
+│   ├── payloads_edit.csv
+│   └── payloads_new.csv
+├── deno.json
+├── eslint.config.js
+├── eslint.config.mjs
+├── fix-eslint-errors.sh
+├── fs_snapshot.txt
+├── fs_tree.txt
+├── global.d.ts
+├── gpts_snapshot_code.txt
+├── jsconfig.json
+├── middleware.ts
+├── next-env.d.ts
+├── next.config.mjs
+├── package-lock.json
+├── package.json
+├── project-structure.txt
+├── public
+│   ├── .well-known
+│   │   └── apple-developer-merchantid-domain-association
+│   ├── ainori1.jpeg
+│   ├── amex.png
+│   ├── avatar.png
+│   ├── diners.png
+│   ├── file.svg
+│   ├── fonts
+│   │   └── ZenMaruGothic-Regular.ttf
+│   ├── globe.svg
+│   ├── google-icon.svg
+│   ├── iavatar_default.png
+│   ├── ir.png
+│   ├── ir2.png
+│   ├── ito.png
+│   ├── jcb.png
+│   ├── kyoumai.png
+│   ├── kyoumei.jpg
+│   ├── lecture.png
+│   ├── live.png
+│   ├── ls7_dora.png
+│   ├── ls7_hato.png
+│   ├── ls7_hebi.png
+│   ├── ls7_kitune.png
+│   ├── ls7_neko.png
+│   ├── ls7_risu.png
+│   ├── ls7_usagi.png
+│   ├── m_tale.png
+│   ├── manifest.json
+│   ├── mastercard.png
+│   ├── mirra.png
+│   ├── mu_14.png
+│   ├── mu_20.png
+│   ├── mu_23.png
+│   ├── mu_24.png
+│   ├── mu_ai.png
+│   ├── mu_card.png
+│   ├── mu_create.png
+│   ├── mu_goal.png
+│   ├── mui.png
+│   ├── next.svg
+│   ├── nikki.png
+│   ├── pwaicon192.png
+│   ├── pwaicon512.png
+│   ├── service-worker.js
+│   ├── shot.png
+│   ├── sofia-hero.png
+│   ├── sofia-hero2.png
+│   ├── sofia-hero3.png
+│   ├── sw.js
+│   ├── tesseract
+│   │   └── lang-data
+│   ├── vercel.svg
+│   ├── visa.png
+│   └── window.svg
+├── req.json
+├── scripts
+│   └── test-qcode.ts
+├── src
+│   ├── ThreadListItem.tsx
+│   ├── app
+│   │   ├── (q)
+│   │   ├── (whatever)
+│   │   ├── 403
+│   │   ├── <route>
+│   │   ├── LayoutClient.tsx
+│   │   ├── TimezoneBoot.tsx
+│   │   ├── _auth-expose.tsx
+│   │   ├── _components
+│   │   ├── admin
+│   │   ├── ai-q-dashboard
+│   │   ├── album
+│   │   ├── api
+│   │   ├── board
+│   │   ├── cancel
+│   │   ├── chat
+│   │   ├── collage
+│   │   ├── create
+│   │   ├── credit
+│   │   ├── dashboard
+│   │   ├── dev
+│   │   ├── event
+│   │   ├── favicon.ico
+│   │   ├── global-error.tsx
+│   │   ├── globals.css
+│   │   ├── iros
+│   │   ├── iros2
+│   │   ├── knowledge
+│   │   ├── kyomeikai
+│   │   ├── layout.css
+│   │   ├── layout.tsx
+│   │   ├── lecture
+│   │   ├── lessons
+│   │   ├── live
+│   │   ├── logs
+│   │   ├── lp-continuation
+│   │   ├── mtalk
+│   │   ├── mu_full
+│   │   ├── mui
+│   │   ├── mypage
+│   │   ├── ops
+│   │   ├── page.tsx
+│   │   ├── pay
+│   │   ├── practice
+│   │   ├── profile
+│   │   ├── providers.tsx
+│   │   ├── push
+│   │   ├── qcode
+│   │   ├── register
+│   │   ├── self
+│   │   ├── sofia
+│   │   ├── success
+│   │   ├── talk
+│   │   ├── telemetry
+│   │   ├── test-push
+│   │   ├── thanks
+│   │   ├── thread
+│   │   ├── upload-avatar
+│   │   └── vision
+│   ├── components
+│   │   ├── AccountCard.tsx
+│   │   ├── AdminGate.tsx
+│   │   ├── AlbumButtonAndModal.tsx
+│   │   ├── AlbumCard.css
+│   │   ├── AlbumCard.tsx
+│   │   ├── AlbumModal.tsx
+│   │   ├── AlbumPicker.tsx
+│   │   ├── AppModal.tsx
+│   │   ├── AppShell.tsx
+│   │   ├── AuthGate.tsx
+│   │   ├── AuthReady.tsx
+│   │   ├── AvatarImg.tsx
+│   │   ├── CacheClearButton.tsx
+│   │   ├── Card.tsx
+│   │   ├── CardStyle.tsx
+│   │   ├── CheckoutButton.tsx
+│   │   ├── CommentDockPortal.tsx
+│   │   ├── CommentsSection.tsx
+│   │   ├── DailyCheckPanel.css
+│   │   ├── DailyCheckPanel.tsx
+│   │   ├── EditPostModal.css
+│   │   ├── EditPostModal.tsx
+│   │   ├── EmailVerifyModal.tsx
+│   │   ├── EventJoinCard.tsx
+│   │   ├── Footer.tsx
+│   │   ├── FooterPortal.tsx
+│   │   ├── FooterSpacer.tsx
+│   │   ├── ForbiddenModal.css
+│   │   ├── ForbiddenModal.tsx
+│   │   ├── FriendButton.tsx
+│   │   ├── FriendRequestsPanel.tsx
+│   │   ├── Header.tsx
+│   │   ├── HeaderGate.tsx
+│   │   ├── HomeButtons.css
+│   │   ├── HomeButtons.tsx
+│   │   ├── IboardCollageMaker.tsx
+│   │   ├── IboardPicker.css
+│   │   ├── IboardPicker.tsx
+│   │   ├── IframePage.tsx
+│   │   ├── ImageUploadComponent.tsx
+│   │   ├── IrosGuardTile.module.css
+│   │   ├── IrosGuardTile.tsx
+│   │   ├── KnowledgeModal.tsx
+│   │   ├── LoginModal.tsx
+│   │   ├── MenuSofiaItem.tsx
+│   │   ├── MuAiButton.tsx
+│   │   ├── MyInvitePanel
+│   │   ├── MyReactionsCard.tsx
+│   │   ├── Navbar.tsx
+│   │   ├── NotificationBell.tsx
+│   │   ├── OpenMuAiButton.tsx
+│   │   ├── PageHeader.tsx
+│   │   ├── PlanSelectModal.tsx
+│   │   ├── PlanSelectPanel.tsx
+│   │   ├── PlanStatusBadge.css
+│   │   ├── PlanStatusBadge.tsx
+│   │   ├── PostCard.css
+│   │   ├── PostCard.tsx
+│   │   ├── PostDetailModal.tsx
+│   │   ├── PostModal.css
+│   │   ├── PostModal.tsx
+│   │   ├── ProfileResonance.tsx
+│   │   ├── PushHelpCard.css
+│   │   ├── PushHelpCard.tsx
+│   │   ├── PushInitializer.tsx
+│   │   ├── PushRegister.tsx
+│   │   ├── QBoardPostModal.css
+│   │   ├── QBoardPostModal.tsx
+│   │   ├── QBoardUploadModal.tsx
+│   │   ├── QCodeBadge.css
+│   │   ├── QCodeBadge.tsx
+│   │   ├── ReactionBar.css
+│   │   ├── ReactionBar.tsx
+│   │   ├── ResetPasswordModal.tsx
+│   │   ├── RootLayout.tsx
+│   │   ├── SafeNavTile.css
+│   │   ├── SafeNavTile.module.css
+│   │   ├── SafeNavTile.tsx
+│   │   ├── SelfPostModal.css
+│   │   ├── SelfPostModal.tsx
+│   │   ├── SessionKeep.tsx
+│   │   ├── Settings
+│   │   ├── ShipButton.css
+│   │   ├── ShipButton.tsx
+│   │   ├── SofiaChat
+│   │   ├── SofiaChat.zip
+│   │   ├── StageChecklistInline.tsx
+│   │   ├── TelemetryBoot.tsx
+│   │   ├── ToastHost.tsx
+│   │   ├── UserProfile
+│   │   ├── VisionCheckButton.tsx
+│   │   ├── VisionModal.css
+│   │   ├── VisionModal.tsx
+│   │   ├── VisionResultCard.css
+│   │   ├── VisionResultCard.tsx
+│   │   ├── app-modal.css
+│   │   ├── card-style.css
+│   │   ├── chat
+│   │   ├── common
+│   │   ├── email-verify-modal.css
+│   │   ├── hooks
+│   │   ├── modals
+│   │   ├── mui
+│   │   ├── plan-card.css
+│   │   ├── post-modal.css
+│   │   ├── qcode
+│   │   └── resonance
+│   ├── compressPublicImages.ts
+│   ├── context
+│   │   └── AuthContext.tsx
+│   ├── data
+│   │   └── home.ts
+│   ├── hooks
+│   │   ├── useAutosizeTextArea.ts
+│   │   ├── useBgHue.ts
+│   │   ├── useCurrentUser.ts
+│   │   ├── useEntitlement.ts
+│   │   ├── useFooterSafePad.ts
+│   │   ├── useOcrWorker.ts
+│   │   └── useReactionCounts.ts
+│   ├── jest.config.ts
+│   ├── lib
+│   │   ├── ImageUploadComponent.tsx
+│   │   ├── accessTicket.ts
+│   │   ├── affect
+│   │   ├── album.ts
+│   │   ├── app
+│   │   ├── applyQ.ts
+│   │   ├── auth-server.ts
+│   │   ├── authz.ts
+│   │   ├── avatar.ts
+│   │   ├── constants
+│   │   ├── content.file.ts
+│   │   ├── content.ts
+│   │   ├── copyImageToPublic.ts
+│   │   ├── credits.ts
+│   │   ├── date.ts
+│   │   ├── db.ts
+│   │   ├── email
+│   │   ├── fetchWithIdToken.ts
+│   │   ├── field
+│   │   ├── firebase-admin.ts
+│   │   ├── firebase.ts
+│   │   ├── firebaseClient.ts
+│   │   ├── formatDate.ts
+│   │   ├── getIdToken.ts
+│   │   ├── helpers.ts
+│   │   ├── invite.ts
+│   │   ├── iros
+│   │   ├── iros-kb
+│   │   ├── jst-shim.ts
+│   │   ├── live-room.ts
+│   │   ├── makeUserCode.ts
+│   │   ├── media
+│   │   ├── metrics
+│   │   ├── mirra
+│   │   ├── mu
+│   │   ├── mui
+│   │   ├── net
+│   │   ├── notify.ts
+│   │   ├── ocr
+│   │   ├── payjp
+│   │   ├── payjp.ts
+│   │   ├── planMap.ts
+│   │   ├── push
+│   │   ├── pushClient.ts
+│   │   ├── qDaily.ts
+│   │   ├── qcode
+│   │   ├── qcode.zip
+│   │   ├── qcodes.ts
+│   │   ├── reactions.ts
+│   │   ├── recordQ.ts
+│   │   ├── server
+│   │   ├── server.zip
+│   │   ├── shared
+│   │   ├── signed.ts
+│   │   ├── sofia
+│   │   ├── sofia.zip
+│   │   ├── storage
+│   │   ├── supabase-browser.ts
+│   │   ├── supabase.ts
+│   │   ├── supabaseAdmin.ts
+│   │   ├── supabaseClient.ts
+│   │   ├── supabaseServer.ts
+│   │   ├── supabaseServerAdmin.ts
+│   │   ├── supabaseServerClient.ts
+│   │   ├── sw.js
+│   │   ├── telemetry.ts
+│   │   ├── theme.ts
+│   │   ├── updateUserAvatarUrl.ts
+│   │   ├── uploadAvatar.ts
+│   │   ├── user.ts
+│   │   ├── utils
+│   │   ├── utils.ts
+│   │   ├── verify-token.ts
+│   │   ├── verifyFirebaseToken.ts
+│   │   ├── visionArchive.ts
+│   │   ├── visionAutoPause.ts
+│   │   └── webpush.ts
+│   ├── lib_unused
+│   │   ├── fetchUserStatus.ts
+│   │   ├── payjp.ts
+│   │   └── payjpClient.ts
+│   ├── server
+│   │   ├── firebaseAdmin.ts
+│   │   └── telemetry.ts
+│   ├── sofia
+│   │   └── types.ts
+│   ├── state
+│   │   ├── modal.ts
+│   │   └── resonance
+│   ├── store
+│   │   └── useUnread.ts
+│   ├── styles
+│   │   ├── dashboard.css
+│   │   ├── email-verify-modal.css
+│   │   ├── global.d.ts
+│   │   ├── globals.css
+│   │   ├── iros-vars.css
+│   │   ├── layout.css
+│   │   ├── layout.module.css
+│   │   ├── loginmodal.css
+│   │   ├── modals.css
+│   │   └── tokens.css
+│   ├── tests
+│   │   └── muPrompt.spec.ts
+│   ├── types
+│   │   ├── index.ts
+│   │   ├── payjp-global.d.ts
+│   │   ├── remark-breaks.d.ts
+│   │   └── vision.ts
+│   ├── ui
+│   │   ├── PageTitle.tsx
+│   │   ├── button.tsx
+│   │   ├── card.tsx
+│   │   ├── compat
+│   │   ├── iroschat
+│   │   └── page-title.css
+│   ├── ui.zip
+│   ├── utils
+│   │   ├── getUserCode.ts
+│   │   ├── imageResize.ts
+│   │   ├── notify.ts
+│   │   ├── push.ts
+│   │   ├── redirectToMuAi.ts
+│   │   ├── registerPush.ts
+│   │   ├── resolveUser.ts
+│   │   └── telemetry-client.ts
+│   └── workers
+│       └── ocrWorker.ts
+├── supabase
+│   ├── .temp
+│   │   ├── cli-latest
+│   │   ├── gotrue-version
+│   │   ├── pooler-url
+│   │   ├── postgres-version
+│   │   └── rest-version
+│   ├── config.toml
+│   └── functions
+│       ├── deno.json
+│       ├── sendPush
+│       └── sync-mautic
+├── sync-logs_20250922-095319
+│   ├── created_payloads.csv
+│   ├── errors.csv
+│   └── run.log
+├── sync-logs_20250922-095630
+│   ├── created_payloads.csv
+│   ├── errors.csv
+│   └── run.log
+├── tsconfig.jest.json
+├── tsconfig.json
+├── tsconfig.tsbuildinfo
+├── vitest.config.ts
+├── vscode
+│   └── settings.json
+├── write-test.js
+└── yarn.lock
+
+121 directories, 315 files

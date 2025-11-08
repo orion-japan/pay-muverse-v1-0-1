@@ -7,11 +7,8 @@ import { getAuth } from 'firebase/auth';
 export type Role = 'user' | 'assistant' | 'system';
 export type HistoryMsg = { role: Role; content: string };
 
-export type IrosConversation = {
-  id: string;
-  title: string;
-  updated_at?: string | null;
-};
+export type IrosConversation = { id: string; title: string; updated_at?: string | null };
+
 
 export type IrosMessage = {
   id: string;
@@ -52,6 +49,79 @@ async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
     throw new Error(`HTTP ${res.status} ${text}`);
   }
   return res;
+}
+
+/* ========= ここが今回の核心：応答テキストの正規化 ========= */
+function normalizeAssistantText(json: any): string {
+  // 1) 代表的な場所
+  let t =
+    json?.message?.content ??
+    json?.assistant ??
+    json?.choices?.[0]?.message?.content ??
+    json?.output_text ??
+    '';
+
+  // 2) もし「[object Object]」など “オブジェクトの文字列化” が来たら取り出し直す
+  const bad = typeof t === 'string' && /^\[object Object\]$/.test(t);
+  if (bad || !t) {
+    // サーバが assistant をオブジェクトで持っているケースを救済
+    const a = json?.assistant;
+    if (a && typeof a === 'object') {
+      // よくあるプロパティ名の総当り
+      t =
+        a.text ??
+        a.content ??
+        a.message ??
+        a.output ??
+        a.plain ??
+        '';
+      if (!t) {
+        // content が配列（リッチブロック）だった場合の雑まとめ
+        if (Array.isArray(a.content)) {
+          t = a.content
+            .map((c: any) =>
+              typeof c === 'string'
+                ? c
+                : c?.text ?? c?.content ?? c?.message ?? ''
+            )
+            .filter(Boolean)
+            .join('\n\n');
+        } else if (typeof a === 'object') {
+          // 最後の手段：pretty JSON
+          t = JSON.stringify(a, null, 2);
+        }
+      }
+    }
+  }
+
+  // 3) まだ空なら debug をヒントに最低限の一文を合成
+  if (!t && json?.debug) {
+    const d = json.debug;
+    const hint = [
+      d.phase ? `位相:${d.phase}` : '',
+      d.depth ? `深度:${d.depth}` : '',
+      d.q ? `Q:${d.q}` : '',
+    ]
+      .filter(Boolean)
+      .join(' / ');
+    t = hint ? `はい。${hint} を感じました。🪔` : 'はい。🪔';
+  }
+
+  // 4) 最終安全化
+  if (typeof t !== 'string') t = String(t ?? '');
+  // 不要な [object Object] をここでも除去
+  if (/^\[object Object\]$/.test(t)) t = '';
+
+  // 軽い整形（末尾句点と🪔の整理）
+  t = (t ?? '').trim();
+  if (t && !/[。！？!?🪔]$/.test(t)) t += '。';
+  if (t) {
+    // 🪔の重複を1個に
+    t = t.replace(/🪔+/g, '');
+    t += '🪔';
+  }
+
+  return t;
 }
 
 /* ========= Conversations ========= */
@@ -147,10 +217,7 @@ export async function reply(params: {
   mode?: 'Light' | 'Deep' | 'Harmony' | 'Transcend' | string;
   history?: HistoryMsg[]; // 任意: 直近3件だけ送る
   model?: string;
-}): Promise<
-  | { ok: boolean; message?: { id?: string; content: string } } // 旧
-  | { ok: boolean; assistant?: string; mode?: string; systemPrompt?: string } // 新
-> {
+}): Promise<any> {
   const res = await authFetch('/api/agent/iros/reply', {
     method: 'POST',
     body: JSON.stringify({
@@ -165,23 +232,35 @@ export async function reply(params: {
   return json;
 }
 
-/* ========= 保存付き返信 ========= */
+/* ========= 保存付き返信（正規化を必ず通す） ========= */
+// /src/ui/iroschat/lib/irosClient.ts の replyAndStore を差し替え
 export async function replyAndStore(args: {
   conversationId: string;
   user_text: string;
   mode?: string;
   model?: string;
 }) {
-  const r = await reply(args); // 既存の reply を使用
-  const a =
-    (r as any)?.message?.content ??
-    (r as any)?.assistant ??
-    '';
-  if (a) {
-    await postMessage({ conversationId: args.conversationId, text: a, role: 'assistant' });
+  const r = await reply(args);
+
+  // サーバが保存したことを示す可能性のあるフラグ/IDを検知
+  const serverPersisted =
+    !!(r?.saved || r?.persisted || r?.db_saved || r?.message_id || r?.messageId);
+
+  const assistantText = normalizeAssistantText(r); // ← 前ターンで入れた正規化関数
+  const safe = assistantText || 'はい。🪔';
+
+  // サーバが保存していないときだけ、クライアントが保存
+  if (!serverPersisted) {
+    await postMessage({
+      conversationId: args.conversationId,
+      text: safe,
+      role: 'assistant',
+    });
   }
-  return r;
+
+  return { ...r, assistant: safe, saved: serverPersisted || undefined };
 }
+
 
 /* ========= User Info ========= */
 export async function getUserInfo(): Promise<UserInfo | null> {
@@ -207,7 +286,7 @@ const api = {
   deleteConversation,
   postMessage,
   reply,
-  replyAndStore, // ← ここに含める
+  replyAndStore,
   getUserInfo,
 };
 

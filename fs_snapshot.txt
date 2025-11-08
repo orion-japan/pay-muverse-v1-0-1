@@ -1,0 +1,857 @@
+=== TOP ===
+合計 12400
+drwxrwxr-x  17 orimoto orimoto     4096 11月  8 15:03 .
+drwxrwxr-x   3 orimoto orimoto     4096 11月  8 06:23 ..
+-rw-rw-r--   1 orimoto orimoto     5995 11月  1 12:40 .cursorrules
+-rwxr-xr-x   1 orimoto orimoto    15142 10月 27 14:25 .env.local
+-rw-rw-r--   1 orimoto orimoto     1890 11月  1 22:29 .eslintrc.cjs
+-rw-rw-r--   1 orimoto orimoto     1442 11月  1 22:29 .eslintrc.json
+drwxrwxr-x   8 orimoto orimoto     4096 11月  7 16:01 .git
+-rw-rw-r--   1 orimoto orimoto      684 10月 27 14:15 .gitignore
+drwxrwxr-x   6 orimoto orimoto     4096 11月  8 14:37 .next
+-rw-rw-r--   1 orimoto orimoto        3 10月 27 14:15 .nvmrc
+drwxrwxr-x   2 orimoto orimoto     4096 10月 27 14:33 .vercel
+drwxrwxr-x   2 orimoto orimoto     4096 10月 27 14:15 .vscode
+drwxrwxr-x   2 orimoto orimoto     4096 11月  7 15:57 .yarn
+-rw-rw-r--   1 orimoto orimoto       25 11月  7 15:57 .yarnrc.yml
+-rw-rw-r--   1 orimoto orimoto     1458 10月 27 14:15 README.md
+-rw-rw-r--   1 orimoto orimoto        0 10月 27 14:15 base64.txt
+-rw-rw-r--   1 orimoto orimoto      287 11月  1 22:29 components.json
+drwxrwxr-x   2 orimoto orimoto     4096 10月 27 14:15 copy-logs_20250922-100326
+drwxrwxr-x   2 orimoto orimoto     4096 10月 27 14:15 copy-logs_20250922-101815
+-rw-rw-r--   1 orimoto orimoto       50 11月  1 22:29 deno.json
+-rw-rw-r--   1 orimoto orimoto       21 11月  1 22:18 eslint.config.js
+-rw-rw-r--   1 orimoto orimoto      369 11月  1 22:29 eslint.config.mjs
+-rwxrwxr-x   1 orimoto orimoto     2299 11月  1 22:31 fix-eslint-errors.sh
+-rw-rw-r--   1 orimoto orimoto       12 11月  8 15:03 fs_snapshot.txt
+-rw-rw-r--   1 orimoto orimoto      319 11月  1 22:29 global.d.ts
+-rw-rw-r--   1 orimoto orimoto    31064 11月  8 14:42 gpts_snapshot_code.txt
+-rw-rw-r--   1 orimoto orimoto      179 10月 27 14:15 jsconfig.json
+-rw-rw-r--   1 orimoto orimoto      516 11月  1 22:29 middleware.ts
+-rw-rw-r--   1 orimoto orimoto      211 10月 27 14:25 next-env.d.ts
+-rw-rw-r--   1 orimoto orimoto      914 10月 27 14:15 next.config.mjs
+drwxrwxr-x 808 orimoto orimoto    32768 11月  7 15:57 node_modules
+-rw-rw-r--   1 orimoto orimoto   317837 11月  7 09:19 package-lock.json
+-rw-rw-r--   1 orimoto orimoto     2845 11月  7 09:19 package.json
+-rw-rw-r--   1 orimoto orimoto 11151554 10月 27 14:15 project-structure.txt
+drwxrwxr-x   5 orimoto orimoto     4096 10月 27 17:15 public
+-rw-rw-r--   1 orimoto orimoto      168 11月  1 22:29 req.json
+drwxrwxr-x   2 orimoto orimoto     4096 10月 27 14:15 scripts
+drwxrwxr-x  19 orimoto orimoto     4096 11月  2 22:04 src
+drwxrwxr-x   4 orimoto orimoto     4096 10月 27 14:15 supabase
+drwxrwxr-x   2 orimoto orimoto     4096 10月 27 14:15 sync-logs_20250922-095319
+drwxrwxr-x   2 orimoto orimoto     4096 10月 27 14:15 sync-logs_20250922-095630
+-rw-rw-r--   1 orimoto orimoto      340 11月  1 22:29 tsconfig.jest.json
+-rw-rw-r--   1 orimoto orimoto      780 11月  1 22:29 tsconfig.json
+-rw-rw-r--   1 orimoto orimoto   518207 11月  7 15:58 tsconfig.tsbuildinfo
+-rw-rw-r--   1 orimoto orimoto      276 11月  1 22:29 vitest.config.ts
+drwxrwxr-x   2 orimoto orimoto     4096 10月 27 14:15 vscode
+-rw-rw-r--   1 orimoto orimoto      918 11月  1 22:29 write-test.js
+-rw-rw-r--   1 orimoto orimoto   452745 11月  7 15:57 yarn.lock
+
+=== 主要ディレクトリ ===
+8.0K	./.vscode
+8.0K	./copy-logs_20250922-100326
+8.0K	./copy-logs_20250922-101815
+8.0K	./scripts
+8.0K	./vscode
+12K	./.vercel
+20K	./sync-logs_20250922-095319
+20K	./sync-logs_20250922-095630
+72K	./supabase
+1.2M	./.yarn
+9.0M	./src
+35M	./public
+48M	./.next
+74M	./.git
+1.2G	./node_modules
+1.4G	.
+
+=== API ルート（最大2階層） ===
+src/app/api
+src/app/api/shipmates
+src/app/api/auth
+src/app/api/auth/session
+src/app/api/secure-action
+src/app/api/mu
+src/app/api/mu/list
+src/app/api/mu/summary
+src/app/api/mu/turns
+src/app/api/logs
+src/app/api/jp-holiday
+src/app/api/mu-logs
+src/app/api/mu-logs/users
+src/app/api/board-posts
+src/app/api/payjp
+src/app/api/payjp/card-form
+src/app/api/payjp/register-card
+src/app/api/payjp/webhook
+src/app/api/payjp/change-card
+src/app/api/payjp/create-customer
+src/app/api/payjp/charge
+src/app/api/payjp/create-checkout-session
+src/app/api/ping
+src/app/api/set-leader.ts
+src/app/api/logout
+src/app/api/notification-settings
+src/app/api/notification-settings/save
+src/app/api/resend-verification
+src/app/api/components
+src/app/api/album
+src/app/api/album/insert
+src/app/api/delete-post
+src/app/api/reactions
+src/app/api/reactions/history
+src/app/api/reactions/counts
+src/app/api/reactions/summary
+src/app/api/reactions/toggle
+src/app/api/resolve-usercode
+src/app/api/get-user-info
+src/app/api/supabase
+src/app/api/supabase/register-user
+src/app/api/get-current-user
+src/app/api/update-name-visibility
+src/app/api/my-reactions
+src/app/api/ops
+src/app/api/ops/user-search
+src/app/api/health
+src/app/api/health/supabase
+src/app/api/media
+src/app/api/mu-ai
+src/app/api/mu-ai/send-token
+src/app/api/q
+src/app/api/q/log
+src/app/api/q/audit
+src/app/api/q/category_today
+src/app/api/q/unified
+src/app/api/q/daily_with_carry
+src/app/api/push-test
+src/app/api/billing
+src/app/api/billing/set-pro
+src/app/api/billing/status
+src/app/api/iboard-posts
+src/app/api/create-profile
+src/app/api/invites
+src/app/api/invites/create
+src/app/api/follow
+src/app/api/protected
+src/app/api/ai-format
+src/app/api/firebase
+src/app/api/firebase/custom-token
+src/app/api/user
+src/app/api/vision-criteria
+src/app/api/vision-criteria/history
+src/app/api/vision-criteria/check
+src/app/api/practice
+src/app/api/practice/export
+src/app/api/practice/draft
+src/app/api/practice/logs
+src/app/api/practice/calendar
+src/app/api/resolve-so
+src/app/api/sofia-logs
+src/app/api/sofia-logs/users
+src/app/api/get-user-code
+src/app/api/login
+src/app/api/kyomeikai
+src/app/api/kyomeikai/live
+src/app/api/kyomeikai/next
+src/app/api/jp-holidays
+src/app/api/plan
+src/app/api/plan/check
+src/app/api/self-posts
+src/app/api/resolve-user
+src/app/api/self
+src/app/api/self/create-thread
+src/app/api/self/add-comment
+src/app/api/mypage
+src/app/api/mypage/update
+src/app/api/mypage/upload-avatar
+src/app/api/mypage/me
+src/app/api/ainori
+src/app/api/ainori/next
+src/app/api/update-ship-visibility
+src/app/api/webhook
+src/app/api/upload-avatar
+src/app/api/copy-image-to-public
+src/app/api/ai
+src/app/api/ai/phase
+src/app/api/ai/opening
+src/app/api/fshot
+src/app/api/fshot/save
+src/app/api/fshot/echo
+src/app/api/fshot/start
+src/app/api/zapier
+src/app/api/check-user
+src/app/api/create-thread-post
+src/app/api/upload-public-image
+src/app/api/write-sheet
+src/app/api/verify-signed
+src/app/api/resonance
+src/app/api/resonance/counts
+src/app/api/resonance/toggle
+src/app/api/push
+src/app/api/push/send
+src/app/api/push/vapid-public-key
+src/app/api/push/dispatch
+src/app/api/push/subscribe
+src/app/api/push/save-subscription
+src/app/api/push/test
+src/app/api/pay
+src/app/api/pay/cron
+src/app/api/pay/subscription
+src/app/api/pay/webhook
+src/app/api/pay/subscribe
+src/app/api/pay/cancel-subscription
+src/app/api/pay/account
+src/app/api/guard
+src/app/api/guard/iros
+src/app/api/guard/sofia
+src/app/api/register-push
+src/app/api/comments
+src/app/api/telemetry
+src/app/api/telemetry/collect
+src/app/api/write-payment-sheet
+src/app/api/verify-complete
+src/app/api/register
+src/app/api/register/apply-initial-credit
+src/app/api/register/consume-invite
+src/app/api/my
+src/app/api/my/send-invite-email
+src/app/api/my/invite-info
+src/app/api/check-follow
+src/app/api/agent
+src/app/api/agent/analyze
+src/app/api/agent/mui
+src/app/api/agent/iros
+src/app/api/agent/muai
+src/app/api/agent/mtalk
+src/app/api/friends
+src/app/api/friends/request
+src/app/api/friends/list
+src/app/api/friends/respond
+src/app/api/env-check
+src/app/api/upload
+src/app/api/upload/sign
+src/app/api/daily-checks
+src/app/api/create-invite
+src/app/api/my-posts
+src/app/api/receive-log
+src/app/api/talk
+src/app/api/talk/send
+src/app/api/talk/meta
+src/app/api/talk/unread-count
+src/app/api/talk/messages
+src/app/api/talk/mark-read
+src/app/api/talk/start
+src/app/api/thread
+src/app/api/thread/reply
+src/app/api/thread/comment
+src/app/api/ship-visibility
+src/app/api/avatar
+src/app/api/avatar/[userCode]
+src/app/api/unfollow
+src/app/api/save-subscription
+src/app/api/upload-post
+src/app/api/conv
+src/app/api/conv/create
+src/app/api/conv/list
+src/app/api/conv/[id]
+src/app/api/call-mu-ai
+src/app/api/me
+src/app/api/thread-posts
+src/app/api/_debug
+src/app/api/_debug/supabase
+src/app/api/invite
+src/app/api/invite/check
+src/app/api/check-friend
+src/app/api/get-profile
+src/app/api/i-posts
+src/app/api/userinfo
+src/app/api/debug
+src/app/api/debug/env
+src/app/api/attendance
+src/app/api/attendance/history
+src/app/api/attendance/export
+src/app/api/attendance/days
+src/app/api/attendance/checkin
+src/app/api/post-image
+src/app/api/account-status
+src/app/api/account-status/refresh
+src/app/api/trace
+src/app/api/zoom
+src/app/api/zoom/webhook
+src/app/api/whoami
+src/app/api/credits
+src/app/api/credits/balance
+src/app/api/credits/power-meter
+src/app/api/credits/award
+src/app/api/dev
+src/app/api/dev/qtest
+src/app/api/update-profile
+src/app/api/link-user
+src/app/api/notifications
+src/app/api/notifications/mark-read
+src/app/api/qcode
+src/app/api/qcode/coach
+src/app/api/qcode/log
+src/app/api/qcode/append
+src/app/api/qcode/q-heatmap
+src/app/api/qcode/kyomeikai
+src/app/api/qcode/self
+src/app/api/qcode/ainori
+src/app/api/qcode/vision
+src/app/api/qcode/q-daily
+src/app/api/qcode/q-features
+src/app/api/qcode/event
+src/app/api/knowledge
+src/app/api/knowledge/get
+src/app/api/knowledge/search
+src/app/api/knowledge/toc
+src/app/api/thread-stats
+src/app/api/user-info
+src/app/api/visions
+src/app/api/visions/history
+src/app/api/visions/delete
+src/app/api/visions/move-to-history
+src/app/api/visions/auto-pause
+src/app/api/visions/auto-archive
+src/app/api/visions/result
+src/app/api/visions/unarchive
+src/app/api/visions/archive
+src/app/api/update-post
+src/app/api/sofia
+src/app/api/entitlement
+src/app/api/entitlement/check
+src/app/api/admin
+src/app/api/admin/groups
+src/app/api/admin/fetch-user
+src/app/api/admin/grant-credit
+src/app/api/admin/delete-user
+src/app/api/admin/users
+src/app/api/admin/telemetry
+src/app/api/admin/events
+src/app/api/admin/set-leader
+src/app/api/admin/promotions
+src/app/api/admin/register-logs
+src/app/api/admin/credit-tx
+src/app/api/admin/credits
+src/app/api/admin/create-promotion
+src/app/api/get-posts
+src/app/api/image
+src/app/api/image/generate
+
+=== API ファイル（200件まで） ===
+src/app/api/shipmates/route.ts
+src/app/api/auth/session/route.ts
+src/app/api/secure-action/route.ts
+src/app/api/mu/list/route.ts
+src/app/api/mu/summary/route.ts
+src/app/api/mu/turns/route.ts
+src/app/api/account-status.ts
+src/app/api/logs/route.ts
+src/app/api/jp-holiday/route.ts
+src/app/api/mu-logs/route.ts
+src/app/api/mu-logs/users/route.ts
+src/app/api/board-posts/route.ts
+src/app/api/payjp/card-form/route.ts
+src/app/api/payjp/register-card/route.ts
+src/app/api/payjp/webhook/route.ts
+src/app/api/payjp/change-card/route.ts
+src/app/api/payjp/create-customer/route.ts
+src/app/api/payjp/charge/route.ts
+src/app/api/payjp/create-checkout-session/route.ts
+src/app/api/ping/route.ts
+src/app/api/update-ship-visibility.ts
+src/app/api/set-leader.ts/route.ts
+src/app/api/logout/route.ts
+src/app/api/notification-settings/route.ts
+src/app/api/notification-settings/save/route.ts
+src/app/api/resend-verification/route.ts
+src/app/api/components/YourForm.tsx
+src/app/api/components/FormSection.tsx
+src/app/api/album/insert/route.ts
+src/app/api/delete-post/route.ts
+src/app/api/reactions/history/route.ts
+src/app/api/reactions/counts/route.ts
+src/app/api/reactions/summary/route.ts
+src/app/api/reactions/toggle/route.ts
+src/app/api/resolve-usercode/route.ts
+src/app/api/get-user-info/route.ts
+src/app/api/supabase/register-user/route.ts
+src/app/api/get-current-user/route.ts
+src/app/api/update-name-visibility/route.ts
+src/app/api/my-reactions/route.ts
+src/app/api/ops/user-search/route.ts
+src/app/api/health/supabase/route.ts
+src/app/api/media/route.ts
+src/app/api/mu-ai/send-token/route.ts
+src/app/api/q/log/route.ts
+src/app/api/q/audit/route.ts
+src/app/api/q/category_today/route.ts
+src/app/api/q/unified/route.ts
+src/app/api/q/daily_with_carry/route.ts
+src/app/api/push-test/route.ts
+src/app/api/billing/set-pro/route.ts
+src/app/api/billing/status/route.ts
+src/app/api/iboard-posts/route.ts
+src/app/api/create-profile/route.ts
+src/app/api/invites/create/route.ts
+src/app/api/follow/route.ts
+src/app/api/protected/route.ts
+src/app/api/ai-format/route.ts
+src/app/api/firebase/custom-token/route.ts
+src/app/api/user/ship-visibility.ts
+src/app/api/vision-criteria/history/route.ts
+src/app/api/vision-criteria/route.ts
+src/app/api/vision-criteria/check/route.ts
+src/app/api/practice/export/route.ts
+src/app/api/practice/draft/route.ts
+src/app/api/practice/logs/route.ts
+src/app/api/practice/calendar/route.ts
+src/app/api/resolve-so/route.ts
+src/app/api/sofia-logs/route.ts
+src/app/api/sofia-logs/users/route.ts
+src/app/api/get-user-code/route.ts
+src/app/api/login/route.ts
+src/app/api/kyomeikai/next/route.ts
+src/app/api/jp-holidays/route.ts
+src/app/api/plan/check/route.ts
+src/app/api/self-posts/route.ts
+src/app/api/resolve-user/route.ts
+src/app/api/self/create-thread/route.ts
+src/app/api/self/add-comment/route.ts
+src/app/api/mypage/update/route.ts
+src/app/api/mypage/upload-avatar/route.ts
+src/app/api/mypage/me/route.ts
+src/app/api/ainori/next/route.ts
+src/app/api/update-ship-visibility/route.ts
+src/app/api/webhook/route.ts
+src/app/api/upload-avatar/route.ts
+src/app/api/copy-image-to-public/route.ts
+src/app/api/ai/phase/route.ts
+src/app/api/ai/opening/route.ts
+src/app/api/fshot/save/route.ts
+src/app/api/fshot/echo/route.ts
+src/app/api/fshot/start/route.ts
+src/app/api/zapier/route.ts
+src/app/api/check-user/route.ts
+src/app/api/create-thread-post/route.ts
+src/app/api/upload-public-image/route.ts
+src/app/api/write-sheet/route.ts
+src/app/api/verify-signed/route.ts
+src/app/api/resonance/counts/route.ts
+src/app/api/resonance/toggle/route.ts
+src/app/api/push/send/route.ts
+src/app/api/push/vapid-public-key/route.ts
+src/app/api/push/dispatch/route.ts
+src/app/api/push/subscribe/route.ts
+src/app/api/push/save-subscription/route.ts
+src/app/api/push/test/route.ts
+src/app/api/pay/webhook/route.ts
+src/app/api/pay/layout.tsx
+src/app/api/pay/subscribe/route.ts
+src/app/api/pay/cancel-subscription/route.ts
+src/app/api/guard/iros/route.ts
+src/app/api/guard/sofia/route.ts
+src/app/api/register-push/route.ts
+src/app/api/comments/route.ts
+src/app/api/telemetry/route.ts
+src/app/api/telemetry/collect/route.ts
+src/app/api/write-payment-sheet/route.ts
+src/app/api/verify-complete/route.ts
+src/app/api/register/route.ts
+src/app/api/register/apply-initial-credit/route.ts
+src/app/api/register/consume-invite/route.ts
+src/app/api/my/send-invite-email/route.ts
+src/app/api/my/invite-info/route.ts
+src/app/api/check-follow/route.ts
+src/app/api/agent/iros.zip
+src/app/api/agent/analyze/route.ts
+src/app/api/agent/mui/route.ts
+src/app/api/agent/iros/route.ts
+src/app/api/agent/muai/route.ts
+src/app/api/agent/mtalk/route.ts
+src/app/api/friends/request/route.ts
+src/app/api/friends/list/route.ts
+src/app/api/friends/respond/route.ts
+src/app/api/env-check/route.ts
+src/app/api/upload/sign/route.ts
+src/app/api/daily-checks/route.ts
+src/app/api/create-invite/route.ts
+src/app/api/my-posts/route.ts
+src/app/api/receive-log/route.ts
+src/app/api/talk/send/route.ts
+src/app/api/talk/meta/route.ts
+src/app/api/talk/unread-count/route.ts
+src/app/api/talk/messages/route.ts
+src/app/api/talk/mark-read/route.ts
+src/app/api/talk/start/route.ts
+src/app/api/thread/reply/route.ts
+src/app/api/thread/comment/route.ts
+src/app/api/ship-visibility/route.ts
+src/app/api/avatar/[userCode]/route.ts
+src/app/api/unfollow/route.ts
+src/app/api/save-subscription/route.ts
+src/app/api/upload-post/route.ts
+src/app/api/conv/create/route.ts
+src/app/api/conv/list/route.ts
+src/app/api/conv/route.ts
+src/app/api/conv/[id]/route.ts
+src/app/api/call-mu-ai/route.ts
+src/app/api/me/route.ts
+src/app/api/thread-posts/route.ts
+src/app/api/_debug/supabase/route.ts
+src/app/api/invite/check/route.ts
+src/app/api/check-friend/route.ts
+src/app/api/get-profile/route.ts
+src/app/api/i-posts/route.ts
+src/app/api/userinfo/route.ts
+src/app/api/debug/env/route.ts
+src/app/api/attendance/history/route.ts
+src/app/api/attendance/export/route.ts
+src/app/api/attendance/days/route.ts
+src/app/api/attendance/checkin/route.ts
+src/app/api/post-image/route.ts
+src/app/api/account-status/route.ts
+src/app/api/account-status/refresh/route.ts
+src/app/api/trace/route.ts
+src/app/api/zoom/webhook/route.ts
+src/app/api/whoami/route.ts
+src/app/api/credits/balance/route.ts
+src/app/api/credits/power-meter/route.ts
+src/app/api/credits/award/route.ts
+src/app/api/dev/qtest/route.ts
+src/app/api/update-profile/route.ts
+src/app/api/link-user/route.ts
+src/app/api/notifications/route.ts
+src/app/api/notifications/mark-read/route.ts
+src/app/api/qcode/log/route.ts
+src/app/api/qcode/append/route.ts
+src/app/api/qcode/q-heatmap/QHeatmap.tsx
+src/app/api/qcode/q-daily/route.ts
+src/app/api/qcode/q-features/route.ts
+src/app/api/knowledge/get/route.ts
+src/app/api/knowledge/search/route.ts
+src/app/api/knowledge/toc/route.ts
+src/app/api/thread-stats/route.ts
+src/app/api/user-info/route.ts
+src/app/api/visions/history/route.ts
+src/app/api/visions/delete/route.ts
+src/app/api/visions/move-to-history/route.ts
+src/app/api/visions/route.ts
+src/app/api/visions/auto-pause/route.ts
+src/app/api/visions/auto-archive/route.ts
+
+=== エージェント関連（Iros/Sofia/Mu/Mirra/Mui） ===
+src/app/iros2/layout.tsx:9:export default function IrosLayout({ children }: { children: React.ReactNode }) {
+src/app/iros2/page.tsx:29:export default function IrosPage() {
+src/app/iros2/page.tsx:251:        Sofia_AI を開始中…
+src/app/lecture/q-analysis/page.tsx:286:      await fetch('/api/mu/turns', {
+src/app/lecture/q-analysis/page.tsx:466:          🪔 Mu AI 総評（{fromDate || toDate ? `${startDate}〜${endDateForTitle}` : `${days}日`}）
+src/app/dashboard/page.tsx:10:      title: 'Mu Logs',
+src/app/ops/sofia-logs/page.tsx:61:export default function SofiaLogsPage() {
+src/app/ops/sofia-logs/page.tsx:76:  // ユーザーリスト（Mu と同じ体験）
+src/app/ops/sofia-logs/page.tsx:141:  // 合計・内訳（Mu と同じ）
+src/app/ops/sofia-logs/page.tsx:169:  // CSV（Mu と同じ列順）
+src/app/ops/sofia-logs/page.tsx:211:          <h1 className="muLogs__title">Sofia Logs Viewer</h1>
+src/app/ops/sofia-logs/page.tsx:213:          {/* Mu と同じ検索UI：ユーザー → 会話 */}
+src/app/ops/sofia-logs/page.tsx:307:              {/* 合計（Mu と同じ） */}
+src/app/ops/sofia-logs/page.tsx:367:              {/* ターン一覧（Mu と同列名） */}
+src/app/chat/layout.tsx:2:import '@/components/SofiaChat/SofiaChat.css';
+src/app/chat/page.tsx:1:import SofiaChat from '@/components/SofiaChat/SofiaChat';
+src/app/chat/page.tsx:5:export default async function SofiaPage({
+src/app/chat/page.tsx:15:        {/* Mu 固定。open は未指定なら undefined のまま渡す */}
+src/app/chat/page.tsx:16:        <SofiaChat agent="mu" open={typeof open === 'string' ? open : undefined} />
+src/app/(whatever)/components/MuiOcrPanel.tsx:9:export default function MuiOcrPanel({ initial = '' }: EditorProps) {
+src/app/LayoutClient.tsx:91:  const isIros = pathname?.startsWith('/iros') === true;
+src/app/LayoutClient.tsx:92:  const isSofia = pathname?.startsWith('/sofia') === true;
+src/app/LayoutClient.tsx:103:      {!(isMuAI || isIros || isSofia) && mounted && (
+src/app/LayoutClient.tsx:127:      {!(isMuAI || isIros || isSofia) && mounted && (
+src/app/LayoutClient.tsx:182:  const isIros = pathname?.startsWith('/iros') === true;
+src/app/LayoutClient.tsx:183:  const isSofia = pathname?.startsWith('/sofia') === true;
+src/app/(q)/MuSummaryButton.tsx:8:    return `/api/mu/summary?${p.toString()}`;
+src/app/(q)/MuSummaryButton.tsx:18:      🪔 Mu AI 総評（{days}日）
+src/app/mui/stage2/page.tsx:1:// /app/mui/stage2/page.tsx
+src/app/mui/stage2/page.tsx:5:import StageTwoPanel from '@/components/mui/StageTwoPanel';
+src/app/mui/stage1/page.tsx:1:// src/app/mui/stage1/page.tsx
+src/app/mui/stage1/page.tsx:4:import StageOnePanel from '@/components/mui/StageOnePanel';
+src/app/mui/stage1/page.tsx:6:import '@/components/mui/StageOnePanel/StageOnePanel.css';
+src/app/mui/stage3/page.tsx:1:import StageThreePanel from '@/components/mui/StageThreePanel';
+src/app/mui/ClientAuthGate.tsx:4:import MuiChat from '@/components/mui/MuiChat';
+src/app/mui/ClientAuthGate.tsx:36: * いずれかでログインを検知したら <MuiChat /> を表示。
+src/app/mui/ClientAuthGate.tsx:102:  return ok ? <MuiChat /> : <>{children}</>;
+src/app/mui/page.tsx:3:import MuiChat from '@/components/mui/MuiChat';
+src/app/mui/page.tsx:22:        <MuiChat />
+src/app/mui/page.tsx:27:            <h1 className="mui-title">Mui — 恋愛相談</h1>
+src/app/mui/stage4/page.tsx:1:import StageFourPanel from '@/components/mui/StageFourPanel';
+src/app/lessons/page.tsx:18:        フェーズ・位相ベクトル・認識深度レベルなど、Sofia構造の学習ページです。
+src/app/talk/[threadId]/page.tsx:91:  const [showMirra, setShowMirra] = useState(false);
+src/app/talk/[threadId]/page.tsx:92:  const [mirraText, setMirraText] = useState('');
+src/app/talk/[threadId]/page.tsx:93:  const [mirraReply, setMirraReply] = useState<string | null>(null);
+src/app/talk/[threadId]/page.tsx:94:  const [mirraPending, setMirraPending] = useState(false);
+src/app/talk/[threadId]/page.tsx:332:  const sendToMirra = async () => {
+src/app/talk/[threadId]/page.tsx:334:    setMirraPending(true);
+src/app/talk/[threadId]/page.tsx:335:    setMirraReply(null);
+src/app/talk/[threadId]/page.tsx:344:      setMirraReply(json?.reply ?? '');
+src/app/talk/[threadId]/page.tsx:345:      setMirraText('');
+src/app/talk/[threadId]/page.tsx:351:      setMirraPending(false);
+src/app/talk/[threadId]/page.tsx:358:    if (sp.get('agent') === 'mirra') setShowMirra(true);
+src/app/talk/[threadId]/page.tsx:475:        onClick={() => setShowMirra((v) => !v)}
+src/app/talk/[threadId]/page.tsx:498:      {showMirra && (
+src/app/talk/[threadId]/page.tsx:529:              onClick={() => setShowMirra(false)}
+src/app/talk/[threadId]/page.tsx:540:              onChange={(e) => setMirraText(e.target.value)}
+src/app/talk/[threadId]/page.tsx:555:                onClick={sendToMirra}
+src/app/iros/layout.tsx:1:// src/app/iros/page.tsx
+src/app/iros/layout.tsx:3:import IrosChat from '@/ui/iroschat/IrosChat';
+src/app/iros/layout.tsx:11:      <IrosChat />
+src/app/iros/page.tsx:3:import IrosLayout from '@/ui/iroschat/IrosLayout';
+src/app/iros/page.tsx:4:import IrosChat from '@/ui/iroschat/IrosChat';
+src/app/iros/page.tsx:8:    <IrosLayout>
+src/app/iros/page.tsx:9:      <IrosChat />
+src/app/iros/page.tsx:10:    </IrosLayout>
+src/app/page.tsx:78:  const [isIrosAllowed, setIsIrosAllowed] = useState<boolean | null>(null);
+src/app/page.tsx:81:  const [irosReloadLock, setIrosReloadLock] = useState<boolean>(false);
+src/app/page.tsx:94:      setIrosReloadLock(true);
+src/app/page.tsx:95:      const t = setTimeout(() => setIrosReloadLock(false), 3000); // ← 3秒
+src/app/page.tsx:131:      setIsIrosAllowed(null);
+src/app/page.tsx:197:        setIsIrosAllowed(allowed);
+src/app/page.tsx:199:        if (!aborted) setIsIrosAllowed(false); // 取得失敗時は閉じておく
+src/app/page.tsx:261:      if (isIrosAllowed === false) {
+src/app/page.tsx:343:          const isIros = item.link === '/iros';
+src/app/page.tsx:345:          const disabledByRole = isIros && isIrosAllowed === false;
+src/app/page.tsx:347:          const disabledByReload = isIros && irosReloadLock;
+src/app/api/mu/list/route.ts:1:// src/app/api/mu/list/route.ts
+src/app/api/mu/summary/route.ts:285:    const turnRes = await postJson(req, '/api/mu/turns', {
+src/app/api/mu/turns/route.ts:1:// src/app/api/mu/turns/route.ts
+src/app/api/components/FormSection.tsx:132:          placeholder="Sofiaの名前"
+src/app/api/q/unified/route.ts:8:import { mapQToColor } from '@/lib/sofia/qcolor';
+src/app/api/sofia-logs/route.ts:9:type SofiaConversation = {
+src/app/api/sofia-logs/route.ts:20:type SofiaTurnRaw = {
+src/app/api/sofia-logs/route.ts:72:        .maybeSingle<SofiaConversation>(); // ← 型指定
+src/app/api/sofia-logs/route.ts:88:      // Sofiaの行を取得（conv_id/role/content は無い！）
+src/app/api/sofia-logs/route.ts:113:        .returns<SofiaTurnRaw[]>(); // ← 型指定
+src/app/api/sofia-logs/route.ts:168:        .returns<SofiaConversation[]>(); // ← 型指定
+src/app/api/self-posts/route.ts:31:/** 超簡易ヒューリスティック（必要なら後でVision/Sofiaの分類器に置換） */
+src/app/api/ai/phase/route.ts:5:import { buildSystemPrompt, buildUserPrompt } from '@/lib/mui/buildSystemPrompt';
+src/app/api/ai/phase/route.ts:6:import { phaseTemplate } from '@/lib/mui/prompt';
+src/app/api/ai/phase/route.ts:7:import { callAgentMui, parseAgentTextToUi, saveStage } from '@/lib/mui/api';
+src/app/api/ai/phase/route.ts:8:import { type ConversationStage, type AgentMuiPayload, type AiTurn } from '@/lib/mui/types';
+src/app/api/ai/phase/route.ts:92:    const payload: AgentMuiPayload = { system, user, phase: stage };
+src/app/api/ai/phase/route.ts:93:    const agentRes = await callAgentMui<any>(payload);
+src/app/api/ai/opening/route.ts:5:import { buildSystemPrompt, buildUserPrompt } from '@/lib/mui/buildSystemPrompt';
+src/app/api/ai/opening/route.ts:6:import { phaseTemplate } from '@/lib/mui/prompt';
+src/app/api/ai/opening/route.ts:7:import { type AiOpening, type ConversationStage, type AgentMuiPayload } from '@/lib/mui/types';
+src/app/api/ai/opening/route.ts:8:import { callAgentMui, parseAgentTextToUi } from '@/lib/mui/api';
+src/app/api/ai/opening/route.ts:66:    const payload: AgentMuiPayload = { system, user, phase: 'opening' };
+src/app/api/ai/opening/route.ts:67:    const agentRes = await callAgentMui<any>(payload);
+src/app/api/pay/layout.tsx:3:  themeColor: '#6f3bf5', // Mu のお好みの色に
+src/app/api/guard/iros/route.ts:1:// src/app/api/guard/sofia/route.ts
+src/app/api/agent/mui/log/route.ts:1:// src/app/api/agent/mui/log/route.ts
+src/app/api/agent/mui/log/route.ts:63:    console.error('[agent/mui/log]', e);
+src/app/api/agent/mui/stage1/analyze/route.ts:49:        content: 'あなたは恋愛コミュニケーション解析AI「Mui」。JSONのみ返す。',
+src/app/api/agent/mui/stage1/result/route.ts:19: * GET /api/agent/mui/stage1/result?conv=MU-xxxx
+src/app/api/agent/mui/route.ts:1:// src/app/api/agent/mui/route.ts
+src/app/api/agent/mui/route.ts:9:import { retrieveKnowledge } from '@/lib/sofia/retrieve';
+src/app/api/agent/mui/route.ts:10:import { nextQFrom } from '@/lib/mui/nextQFrom';
+src/app/api/agent/mui/route.ts:11:import { chargeIfNeeded } from '@/lib/mui/billing';
+src/app/api/agent/mui/route.ts:13:import { inferPhase as inferPhaseFn } from '@/lib/mui/inferPhase';
+src/app/api/agent/mui/route.ts:14:import { estimateSelfAcceptance as estimateSelfAcceptanceFn } from '@/lib/mui/estimateSelfAcceptance';
+src/app/api/agent/mui/route.ts:229:    console.error('[Mui API] Error:', e);
+src/app/api/agent/mui/stage/save/route.ts:19: * POST /api/agent/mui/stage/save
+src/app/api/agent/mui/case/[seed]/quartet/route.ts:1:// src/app/api/agent/mui/case/[seed]/quartet/route.ts
+src/app/api/agent/mui/ocr/intent/route.ts:1:// app/api/agent/mui/ocr/intent/route.ts
+src/app/api/agent/mui/handlers/chat.ts:6:type MuiBodyLocal = {
+src/app/api/agent/mui/handlers/chat.ts:28:  raw: MuiBodyLocal,
+src/app/api/agent/mui/handlers/chat.ts:88:    'あなたは恋愛スクショ相談「Mui」の会話パートナーです。短く温かく、実用的に返答します。',
+src/app/api/agent/mui/handlers/formatOnly.ts:3:type MuiBodyLocal = {
+src/app/api/agent/mui/handlers/formatOnly.ts:59:  raw: MuiBodyLocal,
+src/app/api/agent/mui/handlers/coachFromText.ts:6:type MuiBodyLocal = {
+src/app/api/agent/mui/handlers/coachFromText.ts:78:  raw: MuiBodyLocal,
+src/app/api/agent/mui/handlers/coachFromText.ts:105:あなたは恋愛相談AI「Mui」のナビゲータです。A=自分（相談者）、B=相手（対象）として読み解きます。
+src/app/api/agent/iros/compose/route.ts:1:// src/app/api/agent/iros/compose/route.ts
+src/app/api/agent/iros/compose/route.ts:124: * POST /api/agent/iros/compose
+src/app/api/agent/iros/reply/route.ts:1:// /src/app/api/agent/iros/reply/route.ts
+src/app/api/agent/iros/reply/route.ts:3:import { generateIrosReply } from '@/lib/iros/generate';
+src/app/api/agent/iros/reply/route.ts:4:import { deriveFinalMode } from '@/lib/iros/intent';
+src/app/api/agent/iros/reply/route.ts:5:import { analyzeFocus } from '@/lib/iros/focusCore'; // ← Qコード/位相・深度の観測用
+src/app/api/agent/iros/reply/route.ts:64:    // --- Iros 応答生成（system prompt は generate 側でのみ構築する＝重複排除） ---
+src/app/api/agent/iros/reply/route.ts:65:    const assistant = await generateIrosReply({
+src/app/api/agent/iros/conversations/route.ts:1:// src/app/api/agent/iros/conversations/route.ts
+src/app/api/agent/iros/conversations/route.ts:8:interface IrosConversationRow {
+src/app/api/agent/iros/conversations/route.ts:59:    const rows = (data ?? []) as IrosConversationRow[];
+src/app/api/agent/iros/analyze/route.ts:1:// src/app/api/agent/iros/analyze/route.ts
+src/app/api/agent/iros/analyze/route.ts:76: * POST /api/agent/iros/analyze
+src/app/api/agent/iros/antiparrot/route.ts:1:// src/app/api/agent/iros/antiparrot/route.ts
+src/app/api/agent/iros/antiparrot/route.ts:32: * POST /api/agent/iros/antiparrot
+src/app/api/agent/iros/messages/route.ts:1:// src/app/api/agent/iros/messages/route.ts
+src/app/api/agent/iros/messages/route.ts:72: * GET /api/agent/iros/messages
+src/app/api/agent/iros/messages/route.ts:144: * POST /api/agent/iros/messages
+src/app/api/agent/iros/route.ts:1:// src/app/api/agent/iros/route.ts
+src/app/api/agent/iros/route.ts:8:import { analyzeFocus } from '@/lib/iros/focusCore';
+src/app/api/agent/iros/route.ts:9:import { generateIrosReply } from '@/lib/iros/generate';
+src/app/api/agent/iros/route.ts:12:import type { ResonanceState, IntentPulse } from '@/lib/iros/config';
+src/app/api/agent/iros/route.ts:34:type IrosResponse = {
+src/app/api/agent/iros/route.ts:62:    pipeline: 'generateIrosReply';
+src/app/api/agent/iros/route.ts:115:  return json({ ok: true, service: 'Iros API', model_hint: process.env.IROS_MODEL || 'gpt-4o-mini', time: new Date().toISOString() });
+src/app/api/agent/iros/route.ts:154:    const reply = await generateIrosReply({
+src/app/api/agent/iros/route.ts:217:    const rows: IrosResponse['rows'] = [
+src/app/api/agent/iros/route.ts:223:    const meta: IrosResponse['meta'] = {
+src/app/api/agent/iros/route.ts:254:    const payload: IrosResponse = {
+src/app/api/agent/iros/route.ts:272:              pipeline: 'generateIrosReply',
+src/app/api/agent/iros/retitle/route.ts:1:// src/app/api/agent/iros/retitle/route.ts  ← 一時スタブ（安全に廃止）
+src/app/api/agent/iros/summarize/route.ts:1:// src/app/api/agent/iros/summarize/route.ts
+src/app/api/agent/iros/summarize/route.ts:14:} from '@/lib/iros/intent';
+src/app/api/agent/iros/summarize/route.ts:15:import { chatComplete } from '@/lib/iros/openai';
+src/app/api/agent/iros/summarize/route.ts:39: * POST /api/agent/iros/summarize
+src/app/api/agent/iros/summarize/route.ts:41: * 振る舞い: 会話ログ（直近N件）を集め、Iros調で短い要約＋「次の一歩」1つを返す
+src/app/api/agent/iros/sidebar/route.ts:1:// src/app/api/agent/iros/sidebar/route.ts
+src/app/api/agent/iros/title/route.ts:1:// src/app/api/agent/iros/title/route.ts
+src/app/api/agent/iros/title/route.ts:30: * POST /api/agent/iros/title
+src/app/api/agent/muai/reply/route.ts:28:  return (s || 'Mu 会話').slice(0, 120);
+src/app/api/agent/muai/reply/route.ts:130:/* ====== 初回“Q診断”の整形（Sofia風で詳しめ） ====== */
+src/app/api/agent/muai/reply/route.ts:222:/** Sofia風 “状態の手がかり” 抽出（絵文字つき・最大4件） */
+src/app/api/agent/muai/reply/route.ts:223:function extractSofiaClues(text: string, q: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5'): string[] {
+src/app/api/agent/muai/reply/route.ts:258:/** 初回“Q診断”カード（Sofia風・余白と改行を強調／詳しめ＋期間表記対応） */
+src/app/api/agent/muai/reply/route.ts:267:  const clues = extractSofiaClues(text, q);
+src/app/api/agent/muai/reply/route.ts:410:    title: safeTitle(preferredTitle || 'Mu 会話'),
+src/app/api/agent/muai/reply/route.ts:550:      'Reply in Japanese as Mu. Keep sentences short and kind.' +
+src/app/api/agent/muai/reply/route.ts:554:        ? 'For the first response, return ONLY a compact diagnosis card in Sofia style: sections = 概況 / 状態の手がかり / 扱い方ミニガイド / 次の一歩. Do not echo knowledge text.'
+src/app/api/agent/muai/reply/route.ts:605:    // 表示（初回はSofia風診断カード、それ以外は会話文）
+src/app/api/agent/muai/reply/route.ts:674:        agent: 'Mu',
+src/app/api/agent/muai/reply/route.ts:677:          agent: 'Mu',
+src/app/api/agent/muai/reply/route.ts:693:          mu_prompt_hash: 'あなたは **Mu**。急かさず、短い文で、相手',
+src/app/api/agent/muai/reply/route.ts:704:        title: safeTitle(shortForTitle || 'Mu 会話'),
+src/app/api/agent/muai/reply/route.ts:716:          agent: 'Mu',
+src/app/api/agent/muai/reply/route.ts:719:            agent: 'Mu',
+src/app/api/agent/muai/reply/route.ts:733:            mu_prompt_hash: 'あなたは **Mu**。急かさず、短い文で、相手',
+src/app/api/agent/muai/reply/route.ts:744:          title: safeTitle(shortForTitle || 'Mu 会話'),
+src/app/api/agent/muai/conversations/route.ts:116:    title: row.title ?? 'Mu 会話',
+src/app/api/agent/muai/route.ts:10:import { buildMuSystemPrompt, MU_PROMPT_VERSION } from '@/lib/mu/buildSystemPrompt';
+src/app/api/agent/muai/route.ts:11:import { MU_CONFIG } from '@/lib/mu/config';
+src/app/api/agent/muai/route.ts:12:import { mapQToColor } from '@/lib/sofia/qcolor';
+src/app/api/agent/muai/route.ts:13:import { inferPhase, estimateSelfAcceptance, relationQualityFrom } from '@/lib/sofia/analyze';
+src/app/api/agent/muai/route.ts:239:      const title = (String(msg || '').trim() || 'Mu 会話').slice(0, 20);
+src/app/api/agent/muai/route.ts:358:      agent: 'Mu',
+src/app/api/agent/muai/route.ts:361:        agent: 'Mu',
+src/app/api/agent/muai/route.ts:387:      title: msg.trim().slice(0, 20) || 'Mu 会話',
+src/app/api/agent/mtalk/route.ts:8:import { generateMirraReply } from '@/lib/mirra/generate'; // ★ generate.ts を使う
+src/app/api/agent/mtalk/route.ts:132:    const out = await generateMirraReply(
+src/app/api/call-mu-ai/route.ts:24:function normalizeMu(data: any) {
+src/app/api/call-mu-ai/route.ts:75:    const mu = normalizeMu(data);
+src/app/api/dev/qtest/route.ts:21:      'You are Iros. Facts must never be altered. Tone/ordering may be adjusted if hinted.';
+src/app/api/qcode/coach/advise/route.ts:9:// Mu AI 呼び出し（あなたの実装に合わせて調整）
+src/app/api/qcode/coach/advise/route.ts:19:  if (!r.ok) throw new Error(`Mu AI error: ${r.status}`);
+src/app/api/qcode/coach/advise/route.ts:64:    // 3) Mu AI へ投げる
+src/app/api/sofia/route.ts:1:// src/app/api/sofia/route.ts
+
+=== env（キー名のみ） ===
+SUPABASE_URL=****
+SUPABASE_ANON_KEY=****
+NEXT_PUBLIC_SUPABASE_URL=****
+NEXT_PUBLIC_SUPABASE_ANON_KEY=****
+SUPABASE_SERVICE_ROLE_KEY=****
+supabaseKey=****
+SUPABASE_JWT_SECRET=****
+NEXT_PUBLIC_FIREBASE_API_KEY=****
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=****
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=****
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=****
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=****
+NEXT_PUBLIC_FIREBASE_APP_ID=****
+FIREBASE_SERVICE_ACCOUNT_KEY=****
+FIREBASE_ADMIN_KEY_BASE64=****
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=****
+EMAIL_SENDER_ADDRESS=****
+EMAIL_SMTP_HOST=****
+EMAIL_SMTP_PORT=****
+EMAIL_SMTP_USER=****
+EMAIL_SMTP_PASS=****
+CLICK_API_URL=****
+CLICK_API_KEY=****
+NEXT_PUBLIC_SITE_URL=****
+GOOGLE_SHEET_ID=****
+GOOGLE_SERVICE_ACCOUNT_EMAIL=****
+GOOGLE_SERVICE_ACCOUNT_BASE64=****
+SHEETS_RANGE=****
+PAYJP_SECRET_KEY=****
+PAYJP_PUBLIC_KEY=****
+PAYJP_WEBHOOK_SECRET=****
+NEXT_PUBLIC_PAYJP_PUBLIC_KEY=****
+PLAN_ID_MASTER=****
+PLAN_ID_PREMIUM=****
+PLAN_ID_REGULAR=****
+ZOOM_ACCOUNT_ID=****
+ZOOM_CLIENT_ID=****
+ZOOM_CLIENT_SECRET=****
+ZOOM_WEBHOOK_SECRET=****
+SHARED_API_SECRET=****
+MU_AI_BASE_URL_PROD=****
+NEXT_PUBLIC_MU_UI_URL=****
+HOME_URL=****
+JWT_SECRET=****
+MU_SECRET_KEY_BASE64=****
+MU_API_URL=****
+MU_SHARED_ACCESS_SECRET=****
+TINIFY_API_KEY=****
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=****
+VAPID_PRIVATE_KEY=****
+SENDPUSH_EDGE_URL=****
+VAPID_SUBJECT=****
+NEXT_PUBLIC_TENANT=****
+NEXT_PUBLIC_SOFIA_UI_URL=****
+SO_SHARED_ACCESS_SECRET=****
+SOFIA_UI_URL=****
+OPENAI_API_KEY=****
+OPENAI_MODEL=****
+MU_MODEL=****
+MU_TEMPERATURE=****
+MU_TOP_P=****
+MU_FREQ_PENALTY=****
+MU_PRES_PENALTY=****
+MU_CHAT_CREDIT_COST=****
+MU_IMAGE_CREDIT_COST=****
+MU_IMAGE_MODEL=****
+MU_IMAGE_SIZE=****
+IROS_MODEL=****
+IROS_TEMPERATURE=****
+IROS_TOP_P=****
+IROS_FREQ_PENALTY=****
+IROS_PRES_PENALTY=****
+IROS_CHAT_CREDIT_COST=****
+IROS_IMAGE_CREDIT_COST=****
+IROS_IMAGE_MODEL=****
+IROS_IMAGE_SIZE=****
+SOFIA_EPSILON=****
+SOFIA_NOISEAMP=****
+SOFIA_DEEPEN_MULT=****
+NEXT_PUBLIC_SOFIA_ASSIST_FONTSIZE=****
+NEXT_PUBLIC_SOFIA_ASSIST_LH=****
+NEXT_PUBLIC_SOFIA_ASSIST_LS=****
+NEXT_PUBLIC_SOFIA_USER_BG=****
+NEXT_PUBLIC_SOFIA_USER_FG=****
+NEXT_PUBLIC_SOFIA_USER_BORDER=****
+NEXT_PUBLIC_SOFIA_USER_RADIUS=****
+NEXT_PUBLIC_SOFIA_ASSIST_BG=****
+NEXT_PUBLIC_SOFIA_ASSIST_BORDER=****
+NEXT_PUBLIC_SOFIA_ASSIST_RADIUS=****
+NEXT_PUBLIC_SOFIA_ASSIST_SHADOW=****
+NEXT_PUBLIC_SOFIA_BUBBLE_MAXW=****
+NEXT_PUBLIC_SOFIA_BQ_TINT_BORDER=****
+NEXT_PUBLIC_SOFIA_BQ_TINT_BG=****
+NEXT_PUBLIC_SOFIA_ALLOW_EMOJI=****
+NEXT_PUBLIC_SOFIA_MAX_EMOJI=****
+MU_LOG_DETAIL=****
+MU_TRACE_RETENTION_DAYS=****
+MIRRA_MODEL=****
+MIRRA_TEMPERATURE=****
+MIRRA_TOP_P=****
+MIRRA_FREQ_PENALTY=****
+MIRRA_PRES_PENALTY=****
+MIRRA_MAX_TOKENS=****
+MIRRA_CHAT_CREDIT_COST=****
+MIRRA_PRICE_IN=****
+MIRRA_PRICE_OUT=****
+MIRRA_PROMPT_DEBUG=****
+NEXT_PUBLIC_BASE_URL=****
+NEXT_PUBLIC_DEV_USER_CODE=****
+MU_DEV_USER_CODE=****

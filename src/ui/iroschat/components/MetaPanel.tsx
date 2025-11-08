@@ -1,3 +1,4 @@
+// /src/ui/iroschat/components/MetaPanel.tsx
 'use client';
 
 import React from 'react';
@@ -10,14 +11,20 @@ export type MetaData = {
   [k: string]: any;
 };
 
+type HistoryItem = { id: string; title?: string | null; updated_at?: string | null };
+
 type Props = {
   meta?: MetaData | null;
-  mirraHistory?: Array<{ id: string; title?: string | null; updated_at?: string | null }>;
+  mirraHistory?: HistoryItem[];
   onClose?: () => void;
 };
 
 export function MetaPanel({ meta, mirraHistory, onClose }: Props) {
-  if (!meta && !mirraHistory?.length) return null;
+  const hasMeta =
+    !!meta && (Boolean(meta.title) || Boolean(meta.summary) || (Array.isArray(meta.tags) && meta.tags.length > 0));
+  const hasHistory = Array.isArray(mirraHistory) && mirraHistory.length > 0;
+
+  if (!hasMeta && !hasHistory) return null;
 
   return (
     <aside
@@ -50,7 +57,7 @@ export function MetaPanel({ meta, mirraHistory, onClose }: Props) {
         )}
       </div>
 
-      {meta && (
+      {hasMeta && meta && (
         <div style={{ marginBottom: 10 }}>
           {meta.title && (
             <div style={{ fontSize: 13, marginBottom: 6 }}>
@@ -84,11 +91,11 @@ export function MetaPanel({ meta, mirraHistory, onClose }: Props) {
         </div>
       )}
 
-      {mirraHistory?.length ? (
+      {hasHistory && (
         <div>
           <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>最近の履歴</div>
           <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 6 }}>
-            {mirraHistory.map((h) => (
+            {mirraHistory!.map((h) => (
               <li
                 key={h.id}
                 style={{
@@ -105,7 +112,7 @@ export function MetaPanel({ meta, mirraHistory, onClose }: Props) {
             ))}
           </ul>
         </div>
-      ) : null}
+      )}
     </aside>
   );
 }

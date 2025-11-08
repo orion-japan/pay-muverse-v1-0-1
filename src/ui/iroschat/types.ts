@@ -1,27 +1,38 @@
-// src/ui/iroschat/types.ts
-// Iros 専用型
+// /src/ui/iroschat/types.ts
+// Iros 専用型（UI全体で共通利用）
 
-export type Role = 'user' | 'assistant';
+export type Role = 'user' | 'assistant' | 'system';
 
-// Qコード（他モジュールから参照されるため追加）
+// Qコード（将来の拡張用）
 export type QCode = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
 
 export type IrosConversation = {
-  id: string; // uuid
-  title: string;
-  created_at?: string; // ISO
-  updated_at?: string; // ISO
+  id: string;              // uuid
+  title?: string | null;
+  created_at?: string;     // ISO
+  updated_at?: string;     // ISO
+  agent?: string | null;   // 混在防止用（任意）
+};
+
+export type IrosMessageMeta = {
+  q?: QCode | null;
+  phase?: 'Inner' | 'Outer' | string | null;
+  depth?: string | null;         // 例: S1..I3
+  confidence?: number | null;    // 0..1
+  mode?: string | null;          // Light/Deep/...
+  [k: string]: any;
 };
 
 export type IrosMessage = {
-  id: string; // bigint → string で安全に
+  id: string;              // bigint → string で安全に
   role: Role;
-  content: string;
-  created_at: string; // ISO (ts/createdAt補完済み)
-  // 任意: 旧UI互換で残す（未使用でも害なし）
+  content?: string;        // API側の命名互換
+  text?: string;           // UI側の命名互換
+  created_at?: string;     // ISO
+  ts?: number;             // number(ms) 表示用
   q?: QCode;
   color?: string;
-  meta?: Record<string, any>;
+  meta?: IrosMessageMeta | Record<string, any> | null;
 };
 
 export type IrosUserInfo = {
@@ -31,19 +42,5 @@ export type IrosUserInfo = {
   credits?: number;
 };
 
-export type IrosClient = {
-  listConversations(): Promise<IrosConversation[]>;
-  fetchMessages(conversationId: string): Promise<IrosMessage[]>;
-  sendText(input: {
-    conversationId?: string;
-    text: string;
-    mode?: string;
-    // 追加ペイロードは必要に応じて
-  }): Promise<{
-    conversationId: string;
-    messages: IrosMessage[];
-  }>;
-  renameConversation(conversationId: string, title: string): Promise<void>;
-  deleteConversation(conversationId: string): Promise<void>;
-  getUserInfo(): Promise<IrosUserInfo | null>;
-};
+// 互換のためのエイリアス（他ファイルが Conversation を import していても通る）
+export type Conversation = IrosConversation;

@@ -15,23 +15,13 @@ import { useAuth } from '@/context/AuthContext';
 import * as irosClientModule from './lib/irosClient'; // default／named 両対応
 import { getAuth } from 'firebase/auth';
 import type { ResonanceState, IntentPulse } from '@/lib/iros/config';
+import type { IrosConversation, IrosMessage, IrosUserInfo } from './types';
 
 /* ========= DEV logger ========= */
 const __DEV__ = process.env.NODE_ENV !== 'production';
 const dbg = (...a: any[]) => {
   if (__DEV__) console.log('[IROS/CTX]', ...a);
 };
-
-/* ========= Types ========= */
-export type UserInfo = {
-  id: string;
-  name: string;
-  userType: string;
-  credits: number;
-};
-
-export type IrosConversation = { id: string; title: string; updated_at?: string | null };
-export type IrosMessage = { id: string; role: 'user' | 'assistant'; text: string; ts: number };
 
 /* ---- irosClient の暫定型定義（unknown撲滅） ---- */
 type IrosAPI = {
@@ -46,14 +36,13 @@ type IrosAPI = {
     user_text: string;
     mode?: 'Light' | 'Deep' | 'Transcend' | 'Harmony' | string;
     model?: string;
-    // ★ 非言語（任意）
     resonance?: ResonanceState;
     intent?: IntentPulse;
   }): Promise<
     | { ok: boolean; message?: { id?: string; content: string } } // 旧フォーマット
     | { ok: boolean; assistant?: string; mode?: string; systemPrompt?: string } // 新フォーマット
   >;
-  getUserInfo(): Promise<UserInfo | null>;
+  getUserInfo(): Promise<IrosUserInfo | null>;
 
   // ★ 追加：保存付き返信（assistant発話を /messages に保存まで担保）
   replyAndStore(args: {
@@ -112,8 +101,10 @@ const irosClient: IrosAPI = {
     return arr.map((c: any) => ({
       id: String(c.id),
       title: String(c.title ?? '新規セッション'),
+      created_at: c.created_at ?? null,
       updated_at: c.updated_at ?? c.created_at ?? null,
-    }));
+      agent: c.agent ?? 'iros',
+    })) as IrosConversation[];
   },
   async fetchMessages(conversationId: string) {
     if (typeof _raw.fetchMessages === 'function') return _raw.fetchMessages(conversationId);
@@ -125,10 +116,13 @@ const irosClient: IrosAPI = {
     const rows = Array.isArray(j?.messages) ? j.messages : [];
     return rows.map((m: any) => ({
       id: String(m.id),
-      role: m.role === 'assistant' ? 'assistant' : 'user',
+      role: (m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user') as IrosMessage['role'],
       text: String(m.content ?? m.text ?? ''),
+      content: String(m.content ?? m.text ?? ''),
+      created_at: m.created_at ?? null,
       ts: m.ts ? Number(m.ts) : new Date(m.created_at || Date.now()).getTime(),
-    }));
+      meta: m.meta ?? null,
+    })) as IrosMessage[];
   },
   async renameConversation(conversationId: string, title: string) {
     if (typeof _raw.renameConversation === 'function')
@@ -173,10 +167,9 @@ const irosClient: IrosAPI = {
         mode: args.mode ?? 'Light',
         history: [],
         model: args.model,
-
-        // ★★ ここが今回の追加2行（構造を崩さず可変の非言語を渡す）
-        resonance: (window as any).__iros?.resonance,
-        intent:    (window as any).__iros?.intent,
+        // 可変の非言語を渡す（無ければ undefined になるのでOK）
+        resonance: (window as any)?.__iros?.resonance,
+        intent:    (window as any)?.__iros?.intent,
       }),
     });
     return r.json();
@@ -202,29 +195,27 @@ const irosClient: IrosAPI = {
       return _raw.replyAndStore(args);
     }
 
-    // 1) 返信生成（/api/agent/iros に統一・textキー）
+    // 1) 返信生成（/api/agent/iros に統一）
     const rep =
-    typeof _raw.reply === 'function'
-      ? await _raw.reply(args)
-      : await (async () => {
-          const r = await authFetch('/api/agent/iros/reply', {
-            method: 'POST',
-            body: JSON.stringify({
-              conversationId: args.conversationId,
-              user_text: args.user_text,
-              mode: args.mode ?? 'Light',
-              history: [],
-              model: args.model,
+      typeof _raw.reply === 'function'
+        ? await _raw.reply(args)
+        : await (async () => {
+            const r = await authFetch('/api/agent/iros/reply', {
+              method: 'POST',
+              body: JSON.stringify({
+                conversationId: args.conversationId,
+                user_text: args.user_text,
+                mode: args.mode ?? 'Light',
+                history: [],
+                model: args.model,
+                resonance: (window as any)?.__iros?.resonance,
+                intent:    (window as any)?.__iros?.intent,
+              }),
+            });
+            return r.json();
+          })();
 
-              // ★★ 追加2行（こちらにも同じく）
-              resonance: (window as any).__iros?.resonance,
-              intent:    (window as any).__iros?.intent,
-            }),
-          });
-          return r.json();
-        })();
-
-    const assistantText =
+    const assistantText: string =
       (rep as any)?.message?.content ??
       (rep as any)?.assistant ??
       '';
@@ -261,7 +252,7 @@ type Ctx = {
   conversations: IrosConversation[];
   conversationId?: string;
   messages: IrosMessage[];
-  userInfo: UserInfo | null;
+  userInfo: IrosUserInfo | null;
 
   newConversation: () => Promise<void>;
   selectConversation: (id: string) => Promise<void>;
@@ -297,9 +288,9 @@ export default function IrosChatProvider({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   const [conversations, setConversations] = useState<IrosConversation[]>([]);
-  const [conversationId, setConversationId] = useState<String | undefined>(initialConversationId);
+  const [conversationId, setConversationId] = useState<string | undefined>(initialConversationId);
   const [messages, setMessages] = useState<IrosMessage[]>([]);
-  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
+  const [userInfo, setUserInfo] = useState<IrosUserInfo | null>(null);
 
   const didInit = useRef(false);
   const fetchLock = useRef(false);
@@ -332,7 +323,7 @@ export default function IrosChatProvider({
 
   // ---- conversationId を必ず確定 ----
   const ensureConversationId = useCallback(async (): Promise<string> => {
-    if (conversationId) return conversationId as string;
+    if (conversationId) return conversationId;
     const cid = await retryAuth(async () => {
       const created = await irosClient.createConversation();
       if (!created?.conversationId) throw new Error('Failed to ensure conversation id');
@@ -362,7 +353,7 @@ export default function IrosChatProvider({
 
         let cid =
           initialConversationId ||
-          (conversationId as string | undefined) ||
+          conversationId ||
           (list && list.length > 0 ? list[0].id : undefined);
 
         if (!cid) cid = await ensureConversationId();
@@ -393,7 +384,7 @@ export default function IrosChatProvider({
     if (currentCid === conversationId) return;
     if (didSyncUrlRef.current) return;
     didSyncUrlRef.current = true;
-    router.replace(`/iros?cid=${encodeURIComponent(conversationId as string)}&agent=iros`, {
+    router.replace(`/iros?cid=${encodeURIComponent(conversationId)}&agent=iros`, {
       scroll: false,
     });
     dbg('url sync ->', conversationId);
@@ -496,13 +487,11 @@ export default function IrosChatProvider({
         const tempId = `temp-${Date.now()}`;
         const now = Date.now();
         setMessages((prev) => [...prev, { id: tempId, role: 'user', text: t, ts: now }]);
-        dbg('send: optimistic add', { cid, len: t.length });
 
         // 2) DB保存（/messages：自分の発話）
         await retryAuth(() =>
           irosClient.postMessage({ conversationId: cid, text: t, role: 'user' }),
         );
-        dbg('send: user message stored');
 
         // 3) 返信生成＋保存（/api/agent/iros に統一）
         await retryAuth(() =>
@@ -510,12 +499,9 @@ export default function IrosChatProvider({
             conversationId: cid,
             user_text: t,
             mode: 'Light',
-            // 必要になった時に渡す（今は未使用）:
-            // resonance: { phase: 'Outer', depthHint: 'S2', vector: { calm: 0.7 } },
-            // intent: { wish: '広がりを育てたい' },
+            // resonance / intent は必要時に window.__iros.* から拾う
           }),
         );
-        dbg('send: replyAndStore done');
 
         // 4) 最終同期（DBの正を採用）
         const list = await retryAuth(() => irosClient.fetchMessages(cid));
@@ -560,7 +546,7 @@ export default function IrosChatProvider({
       loading,
       error,
       conversations,
-      conversationId: conversationId as string | undefined,
+      conversationId,
       messages,
       userInfo,
       newConversation,

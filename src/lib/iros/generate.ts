@@ -1,4 +1,3 @@
-// /src/lib/iros/generate.ts
 // Iros Conversational Generator — Reflect寄り添い特化版
 // - Reflect：内面→整流→静かな余韻（提案禁止／“間”を強化）
 // - Diagnosis：ヘッダは縦3行＋本文はテンプレ参照（shared/templates）

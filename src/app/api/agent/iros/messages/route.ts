@@ -28,30 +28,28 @@ type OutMsg = {
   color?: string;
 };
 
-const CONV_TABLE_CANDIDATES = [
+const CONV_TABLES = [
   'iros_conversations',
   'public.iros_conversations',
   'sofia_conversations',
   'conversations',
 ] as const;
 
-const MSG_TABLE_CANDIDATES = [
+const MSG_TABLES = [
   'iros_messages',
   'public.iros_messages',
   'sofia_messages',
   'messages',
 ] as const;
 
-/** ---------------------------
- * 安全select：候補テーブルを順に試す
- * --------------------------- */
+/** 汎用 select（候補テーブルを順に試す） */
 async function trySelect<T>(
   supabase: ReturnType<typeof sb>,
-  tableNames: readonly string[],
+  tables: readonly string[],
   selectClause: string,
   q: (query: any) => any,
 ): Promise<{ ok: true; data: T[]; table: string } | { ok: false; error: string }> {
-  for (const table of tableNames) {
+  for (const table of tables) {
     try {
       let query = (supabase as any).from(table).select(selectClause);
       query = q(query);
@@ -64,6 +62,24 @@ async function trySelect<T>(
   return { ok: false, error: 'select_failed_all_candidates' };
 }
 
+/** 汎用 insert（候補テーブルを順に試す） */
+async function tryInsert(
+  supabase: ReturnType<typeof sb>,
+  tables: readonly string[],
+  row: Record<string, any>,
+  returning: string,
+) {
+  for (const table of tables) {
+    try {
+      const { data, error } = await (supabase as any).from(table).insert([row]).select(returning).single();
+      if (!error) return { ok: true as const, data, table };
+    } catch {
+      /* continue */
+    }
+  }
+  return { ok: false as const, error: 'insert_failed_all_candidates' };
+}
+
 export async function OPTIONS() {
   return json({ ok: true });
 }
@@ -73,7 +89,6 @@ export async function OPTIONS() {
  * =============================== */
 export async function GET(req: NextRequest) {
   const safe = (p: any) => json(p, 200);
-
   try {
     const cid = req.nextUrl.searchParams.get('conversation_id') || '';
     if (!cid) return safe({ ok: true, messages: [], note: 'missing_conversation_id' });
@@ -84,41 +99,33 @@ export async function GET(req: NextRequest) {
     const userCode = String(auth.userCode || '');
     const supabase = sb();
 
-    // 所有確認（候補テーブル）
-    const conv = await trySelect<{ id: string; user_code: string }>(
+    // 所有確認（候補全探索／ownerがあれば一致必須）
+    const conv = await trySelect<{ id: string; user_code?: string | null }>(
       supabase,
-      CONV_TABLE_CANDIDATES,
+      CONV_TABLES,
       'id,user_code',
       (q) => q.eq('id', cid).limit(1),
     );
     if (conv.ok && conv.data[0]) {
-      const owner = String(conv.data[0].user_code || '');
+      const owner = String(conv.data[0].user_code ?? '');
       if (owner && owner !== userCode)
         return safe({ ok: true, messages: [], note: 'forbidden_owner_mismatch' });
     }
 
     // メッセージ取得
     const res = await trySelect<{
-      id: string;
-      conversation_id: string;
-      role: 'user' | 'assistant';
-      content?: string | null;
-      text?: string | null;
-      user_code?: string | null;
-      q_code?: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5' | null;
-      color?: string | null;
-      created_at?: string | null;
-      ts?: number | null;
+      id: string; conversation_id: string; role: 'user'|'assistant';
+      content?: string | null; text?: string | null;
+      user_code?: string | null; q_code?: OutMsg['q'] | null; color?: string | null;
+      created_at?: string | null; ts?: number | null;
     }>(
       supabase,
-      MSG_TABLE_CANDIDATES,
+      MSG_TABLES,
       'id,conversation_id,user_code,role,content,text,q_code,color,created_at,ts',
       (q) => q.eq('conversation_id', cid).order('created_at', { ascending: true }),
     );
-
     if (!res.ok) return safe({ ok: true, messages: [], note: 'messages_select_failed' });
 
-    // user_code が存在する場合は自分のみに絞る
     const filtered = res.data.filter((m) =>
       Object.prototype.hasOwnProperty.call(m, 'user_code')
         ? String(m.user_code ?? '') === userCode
@@ -156,13 +163,9 @@ export async function POST(req: NextRequest) {
     if (!userCode) return json({ ok: false, error: 'user_code_missing' }, 400);
 
     let body: any = {};
-    try {
-      body = await req.json();
-    } catch {}
+    try { body = await req.json(); } catch {}
 
-    const conversation_id: string = String(
-      body?.conversation_id || body?.conversationId || '',
-    ).trim();
+    const conversation_id: string = String(body?.conversation_id || body?.conversationId || '').trim();
     const text: string = String(body?.text ?? '').trim();
     const role: 'user' | 'assistant' =
       String(body?.role ?? '').toLowerCase() === 'assistant' ? 'assistant' : 'user';
@@ -172,48 +175,46 @@ export async function POST(req: NextRequest) {
 
     const supabase = sb();
 
-    // 所有確認
-    const { data: conv, error: convErr } = await supabase
-      .from('iros_conversations')
-      .select('id,user_code')
-      .eq('id', conversation_id)
-      .maybeSingle();
-
-    if (convErr) return json({ ok: false, error: 'conv_select_failed', detail: convErr.message }, 500);
-    if (!conv) return json({ ok: false, error: 'conversation_not_found' }, 404);
-    if (String(conv.user_code) !== String(userCode))
+    // 所有確認（候補全探索）
+    const conv = await trySelect<{ id: string; user_code?: string | null }>(
+      supabase,
+      CONV_TABLES,
+      'id,user_code',
+      (q) => q.eq('id', conversation_id).limit(1),
+    );
+    if (!conv.ok || !conv.data[0]) {
+      return json({ ok: false, error: 'conversation_not_found' }, 404);
+    }
+    const owner = String(conv.data[0].user_code ?? '');
+    if (owner && owner !== userCode) {
       return json({ ok: false, error: 'forbidden_owner_mismatch' }, 403);
+    }
 
     const nowIso = new Date().toISOString();
     const nowTs = Date.now();
 
-    const { data: ins, error: insErr } = await supabase
-      .from('iros_messages')
-      .insert([
-        {
-          conversation_id,
-          user_code: userCode,
-          role,
-          content: text,
-          text,
-          created_at: nowIso,
-          ts: nowTs,
-        },
-      ])
-      .select('id, created_at')
-      .single();
+    // content/text は互換のため両方に保存
+    const row = {
+      conversation_id,
+      user_code: userCode,
+      role,
+      content: text,
+      text,
+      created_at: nowIso,
+      ts: nowTs,
+    };
 
-    if (insErr || !ins)
-      return json({ ok: false, error: 'db_insert_failed', detail: insErr?.message }, 500);
+    const ins = await tryInsert(supabase, MSG_TABLES, row, 'id,created_at');
+    if (!ins.ok) return json({ ok: false, error: ins.error }, 500);
 
     return json({
       ok: true,
       message: {
-        id: String(ins.id),
+        id: String(ins.data.id),
         conversation_id,
         role,
         content: text,
-        created_at: ins.created_at ?? nowIso,
+        created_at: ins.data.created_at ?? nowIso,
       },
     });
   } catch (e: any) {
