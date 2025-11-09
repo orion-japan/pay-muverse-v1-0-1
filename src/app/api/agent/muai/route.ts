@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { randomUUID as nodeRandomUUID } from 'crypto';
+import { randomUUID as nodeRandomUUID } from 'node:crypto';
 
 import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/authz';
 import { generateMuReply, recordMuTextTurn } from '@/lib/mu';

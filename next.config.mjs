@@ -1,3 +1,6 @@
+// next.config.mjs
+import path from 'node:path';
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -6,9 +9,9 @@ const nextConfig = {
     serverActions: { bodySizeLimit: '10mb' },
   },
 
-  // Next 16 では eslint 設定は next.config から外す（lint は CLI で）
+  // ★ これが効く：Next が /src/app をルートと誤認しないよう固定
   turbopack: {
-    root: process.cwd(), // ルート誤認の抑止
+    root: path.resolve(process.cwd()),
   },
 
   images: {
@@ -18,15 +21,6 @@ const nextConfig = {
       { protocol: 'http', hostname: 'localhost', port: '3000', pathname: '/**' },
       { protocol: 'https', hostname: 'images.unsplash.com', pathname: '/**' },
     ],
-  },
-
-  async headers() {
-    return [
-      {
-        source: '/fonts/:path*',
-        headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }],
-      },
-    ];
   },
 };
 
