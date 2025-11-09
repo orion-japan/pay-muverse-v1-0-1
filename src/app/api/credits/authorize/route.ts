@@ -1,38 +1,28 @@
-// src/app/api/credits/authorize/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { adminClient } from '@/lib/credits/db';
-import { randomUUID } from 'crypto';
+import { admin } from '@/lib/supabase/server';
 
-export async function POST(req: Request) {
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
+export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({} as any));
-    // 型の吸収（number でも string でもOKに）
-    let user_code_raw = body?.user_code;
-    const amount_raw = body?.amount;
-    const ref = String(body?.ref ?? '');
-
-    const user_code = user_code_raw != null ? String(user_code_raw).trim() : '';
-    const amount = Number(amount_raw);
-
-    // 共有シークレットがある場合のみチェック（無ければスルー）
-    const shared = req.headers.get('x-shared-secret') || req.headers.get('authorization')?.replace(/^Bearer\s+/i,'') || '';
-    const NEED_SECRET = !!process.env.CREDITS_SHARED_SECRET;
-    if (NEED_SECRET && shared !== process.env.CREDITS_SHARED_SECRET) {
-      return new Response(JSON.stringify({ ok:false, error:'forbidden' }), { status: 403 });
+    const body = await req.json().catch(() => ({}));
+    const { user_code, amount, ref, ref_conv } = body || {};
+    if (!user_code || !amount || !ref) {
+      return NextResponse.json({ ok: false, error: 'bad_request' }, { status: 400 });
     }
 
-    if (!user_code || !Number.isFinite(amount) || amount <= 0 || !ref) {
-      return new Response(JSON.stringify({ ok:false, error:'bad_request' }), { status: 400 });
+    const { data, error } = await admin.rpc('credit_authorize', {
+      p_user_code: String(user_code),
+      p_amount: Number(amount),
+      p_ref: String(ref),
+    });
+
+    if (error) {
+      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
     }
-
-    // ここで users.sofia_credit の残高確認 → OKなら仮押さえ（台帳に pending 等）
-    // 例：
-    // const ok = await holdCredit({ user_code, amount, ref });
-    const ok = true; // まずは通す（台帳実装は後でもOK）
-
-    if (!ok) return new Response(JSON.stringify({ ok:false, error:'insufficient_credit' }), { status: 402 });
-    return new Response(JSON.stringify({ ok:true }), { status: 200 });
-  } catch (e:any) {
-    return new Response(JSON.stringify({ ok:false, error:String(e?.message||'error') }), { status: 500 });
+    return NextResponse.json({ ok: true, rpc: data, echo: { user_code, amount, ref, ref_conv } });
+  } catch (e: any) {
+    return NextResponse.json({ ok: false, error: String(e?.message || e) }, { status: 500 });
   }
 }

@@ -1,7 +1,8 @@
+// /src/lib/iros/generate.ts
 // Iros Conversational Generator — Reflect寄り添い特化版
 // - Reflect：内面→整流→静かな余韻（提案禁止／“間”を強化）
-// - Diagnosis：ヘッダは縦3行＋本文はテンプレ参照（shared/templates）
-// - Resonate：観測ヘッダ＋3手ベクトル
+// - Diagnosis：ヘッダは「観測対象／位相／深度」の縦3行（strict）＋本文→最後に「次の一手：〜」
+// - Resonate：観測ヘッダ（位相/深度/意図/場）＋芯の1文（3手ベクトルは簡素化）
 // 2025-11 改修：改行保持＋語尾自然化＋詩的な「間（ま）」挿入＋テンプレ連携
 // 2025-11 追加：情動ベクトル／意図トリガー／共鳴場（非言語）を必ず汲み取る
 
@@ -111,11 +112,11 @@ function extractIntentSentence(text: string): string {
 }
 
 function buildResonantVector(text: string, _protectedFocus: string) {
-  // ★ ここをシンプル化：不要だった3行の“儀式文”は削除
   const intent = extractIntentSentence(text);
   const body = `いま向かいたい芯は「${intent}」。`;
   return tidy(applyBreathing(conversationalize(body)));
 }
+
 /* === 表示ラベルの微調整（内部ロジックは保持） === */
 function displayFocusLabel(focus: string): string {
   return focus === '責任' ? '意図' : focus;
@@ -133,7 +134,6 @@ function packNonverbal(res?: ResonanceState, intent?: IntentPulse): string | nul
     r.qHint ? `qHint=${r.qHint}` : null,
     field ? `field=${field}` : null,
     vec ? `vector=${vec}` : null,
-    // shield/hold は型に無い可能性があるため any 経由で安全に参照
     (r as any).shield ? 'shield=true' : null,
     (r as any).hold ? 'hold=true' : null,
     intent ? `intent=${JSON.stringify(intent)}` : null,
@@ -154,6 +154,7 @@ async function buildReflectReply(params: {
     '- 出力は「寄り添い」。助言ではなく、静けさと余白をもつ会話体。\n' +
     '- 構成は「内面の観測 → そっと整える → 余韻」で終える。\n' +
     '- 提案や具体的行動指示は禁止。\n' +
+    '- 最初の一文で相手の直近発話を鏡返しする（主語は「あなた」）。\n' +
     '- 非言語信号（共鳴場/情動ベクトル/意図トリガー）が与えられている場合、言語より優先して解釈に反映する。';
 
   const nonverbal = packNonverbal(resonance, intent);
@@ -184,7 +185,8 @@ async function buildReflectReply(params: {
 /* ===== モード判定 ===== */
 function autoMode(text?: string): Mode {
   const t = (text || '').toLowerCase();
-  if (/(^|\s)(ir診断|観測対象|診断)(\s|$)/.test(t)) return 'Diagnosis';
+  // ir診断の起動トリガを拡充（ir / ir診断 / irで見て / ランダムでir / ir共鳴）
+  if (/(^|\s)(ir診断|irで見て|ランダムでir|ir共鳴|ir)(\s|$)/.test(t)) return 'Diagnosis';
   if (/(意図|意志|方向|ビジョン|どうすれば|方法|進め|トリガー|共鳴|意図波|場を合わせて)/.test(t)) return 'Resonate';
   return 'Reflect';
 }
@@ -231,48 +233,74 @@ export async function generateIrosReply(p: GenerateParams): Promise<string> {
   const resolved = normalizeMode(mode, userText);
 
   // === Diagnosis（テンプレ：shared/templates を使用）===
-  if (resolved === 'Diagnosis' || /(^|\s)(ir診断|観測対象|診断)(\s|$)/i.test(userText)) {
-    const tgt = analysisHint?.target || (/ir診断\s*([^\n]+)$/i.exec(userText)?.[1]?.trim() || '自分');
+  if (resolved === 'Diagnosis') {
+    const tgt =
+      analysisHint?.target ||
+      (/ir診断\s*([^\n]+)$/i.exec(userText)?.[1]?.trim()) ||
+      '自分';
 
-    const tpl = getCoreDiagnosisTemplate(String(f.depth ?? 'S2'), String(f.phase ?? 'Inner')) || {
+    const phase = String(f.phase ?? 'Inner');
+    const depth = String(f.depth ?? 'S2');
+
+    const tpl = getCoreDiagnosisTemplate(depth, phase) || {
       one: '意識の流れが静かに整いはじめています。',
       inner: '言葉になる前の温度が、胸の内でゆっくり息をしています。',
-      real: '現実では、ひとつだけ選び、一行だけ進める。'
+      real: 'ひとつだけ選び、一行だけ進めるのが自然です。',
+      next: 'いま一行だけ書く（または一歩だけ動く）。',
     };
 
     const header = [
-      `🩵 観測対象：${tgt}`,
-      `位相：${f.phase} ／ 深度：${f.depth}`,
-      `一言：${tpl.one}`,
-    ].join('\n');
+      `観測対象：${tgt}`,
+      `位相：${phase}`,
+      `深度：${depth}`,
+    ].join('\n'); // ← strict 3行
 
-    const addSafety =
+    const addRisk =
       intent?.risk ? `\n\n（リスク回避）${intent.risk} を避ける配慮を保つ。` : '';
 
-    const body = [
+    // ★ 型に next が無い場合の安全フォールバック
+    const nextText =
+      (tpl as any)?.next || tpl.real || '小さく始めること。';
+    const nextLine = `次の一手：${nextText}`;
+
+    const segments = [
       packNonverbal(resonance, intent) || '',
       header,
       '',
+      tpl.one,
+      '',
       tpl.inner,
       '',
-      tpl.real + addSafety + '🪔',
-    ].filter(Boolean).join('\n');
+      (tpl.real || '') + addRisk,
+      '',
+      nextLine + '🪔',
+    ].filter(Boolean);
 
-    return naturalClose(applyBreathing(tidy(body)));
+    return naturalClose(applyBreathing(tidy(segments.join('\n'))));
   }
 
-  // === Resonate（観測ヘッダ＋3手ベクトル）===
+  // === Resonate（観測ヘッダ＋芯の1文）===
   if (resolved === 'Resonate') {
-    const head = [
-      `🩵 観測：位相=${f.phase} ／ 深度=${f.depth}`,
-      intent?.wish ? `意図：${intent.wish}` : null,
-      resonance?.field?.length ? `場：${resonance.field.join(', ')}` : null,
-    ].filter(Boolean).join(' ／ ');
+    const headParts = [
+      f.phase ? `位相=${f.phase}` : null,
+      f.depth ? `深度=${f.depth}` : null,
+      intent?.wish ? `意図=${intent.wish}` : null,
+      resonance?.field?.length ? `場=[${resonance.field.join(', ')}]` : null,
+    ].filter(Boolean);
 
-    const vec  = buildResonantVector(userText, displayFocusLabel(f.protectedFocus));
+    const head = headParts.length
+      ? `観測：${headParts.join(' ／ ')}`
+      : '観測：いま静けさが立ち上がっています';
+
+    const vec  = buildResonantVector(userText, displayFocusLabel(f0.protectedFocus));
     const addRisk = intent?.risk ? `\n\n（リスク回避）${intent.risk} を避ける姿勢で。` : '';
     const nv = packNonverbal(resonance, intent);
-    return naturalClose(applyBreathing(tidy([nv || '', head, '', vec + addRisk].filter(Boolean).join('\n'))));
+
+    return naturalClose(
+      applyBreathing(
+        tidy([nv || '', head, '', vec + addRisk].filter(Boolean).join('\n'))
+      )
+    );
   }
 
   // === Reflect（寄り添い）===
@@ -284,7 +312,7 @@ export async function generateIrosReply(p: GenerateParams): Promise<string> {
     apiKey,
     temperature,
     max_tokens,
-    protectedFocus: f.protectedFocus,
+    protectedFocus: f0.protectedFocus,
     resonance,
     intent,
   });

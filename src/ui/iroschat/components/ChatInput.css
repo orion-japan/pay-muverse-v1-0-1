@@ -192,3 +192,31 @@
 .sof-compose {
   padding: 6px; /* ここはスクショの数値を尊重 */
 }
+
+
+/* 吹き出し内の箇条書きを内側にレイアウトする（はみ出し防止） */
+.bubble .msgBody ul,
+.bubble .msgBody ol {
+  list-style: none;        /* 既定のマーカーを消す */
+  margin: 0.25rem 0 0.5rem;
+  padding: 0;              /* 左余白を一旦クリア */
+}
+
+.bubble .msgBody li {
+  position: relative;
+  padding-left: 1.1rem;    /* マーカー用の内側余白を確保 */
+  line-height: 1.6;
+  word-break: break-word;
+  overflow-wrap: anywhere; /* 長い語でのはみ出しも防止 */
+}
+
+.bubble .msgBody li::before {
+  content: '•';            /* カスタムの黒丸 */
+  position: absolute;
+  left: 0; top: 0;
+}
+
+/* 念のため吹き出し自体のはみ出しも抑止 */
+.bubble {
+  overflow: hidden;
+}

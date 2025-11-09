@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { randomUUID as nodeRandomUUID } from 'crypto';
 
 import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/authz';
 import { generateMuReply, recordMuTextTurn } from '@/lib/mu';
@@ -11,7 +12,7 @@ import { buildMuSystemPrompt, MU_PROMPT_VERSION } from '@/lib/mu/buildSystemProm
 import { MU_CONFIG } from '@/lib/mu/config';
 import { mapQToColor } from '@/lib/sofia/qcolor';
 import { inferPhase, estimateSelfAcceptance, relationQualityFrom } from '@/lib/sofia/analyze';
-import { recordQ } from '@/lib/qcode/record'; // ★ 追加：Qコード記録
+import { recordQ } from '@/lib/qcode/record';
 
 const COST_PER_TURN = Number(process.env.MU_COST_PER_TURN ?? '0.5'); // 1往復=0.5
 
@@ -19,7 +20,6 @@ const COST_PER_TURN = Number(process.env.MU_COST_PER_TURN ?? '0.5'); // 1往復=
 function json(data: any, init?: number | ResponseInit) {
   const status =
     typeof init === 'number' ? init : ((init as ResponseInit | undefined)?.['status'] ?? 200);
-
   const headers = new Headers(
     typeof init === 'number' ? undefined : (init as ResponseInit | undefined)?.headers,
   );
@@ -37,13 +37,14 @@ function sbService() {
 }
 
 /* ==== ID utilities ==== */
-// サーバ保存・課金用の厳密 UUID
-const newUuid = () =>
-  globalThis.crypto?.randomUUID?.() ??
-  // @ts-ignore - Node.js
-  require('crypto').randomUUID();
+// 厳密 UUID（Nodeのwebcryptoが無い環境にも対応）
+const newUuid = () => {
+  // @ts-ignore
+  const webcrypto = (globalThis as any)?.crypto;
+  return typeof webcrypto?.randomUUID === 'function' ? webcrypto.randomUUID() : nodeRandomUUID();
+};
 
-// 既存IDを尊重（UUID / MU- / 何であれ）。無ければ UUID を採用
+// 既存IDを尊重（UUID / MU- / 任意）。無ければ UUID
 function ensureMuMasterId(input?: string | null) {
   const s = (input ?? '').trim();
   return s || newUuid();
@@ -57,18 +58,14 @@ function newClientSubId() {
 /** supabase_uid が空なら、click_email と Auth を突合せて自動補完（SR 利用） */
 async function ensureSupabaseUid(userCode: string) {
   const sb = sbService();
-
-  // users から対象ユーザー取得
   const { data: urow, error: uerr } = await sb
     .from('users')
     .select('user_code, click_email, supabase_uid')
     .eq('user_code', userCode)
     .single();
-
   if (uerr || !urow) return;
 
   if (!urow.supabase_uid && urow.click_email) {
-    // ✅ v2対応: authスキーマを直接クエリ（SR必須）
     const { data: au, error: aerr } = await sb
       .schema('auth')
       .from('users')
@@ -76,25 +73,18 @@ async function ensureSupabaseUid(userCode: string) {
       .eq('email', urow.click_email)
       .limit(1)
       .single();
-
     if (!aerr && au?.id) {
       const uid = au.id as string;
-
       const { error: updErr } = await sb
         .from('users')
         .update({ supabase_uid: uid })
         .eq('user_code', userCode);
-      if (updErr) {
-        console.error('[ensureSupabaseUid] update users.supabase_uid error:', updErr);
-      }
+      if (updErr) console.error('[ensureSupabaseUid] update users.supabase_uid error:', updErr);
 
-      // 任意: user_auth_map がある場合のみ同期
       const { error: mapErr } = await sb
         .from('user_auth_map')
         .upsert({ user_code: userCode, uid }, { onConflict: 'user_code' });
-      if (mapErr) {
-        console.warn('[ensureSupabaseUid] upsert user_auth_map warn:', mapErr.message);
-      }
+      if (mapErr) console.warn('[ensureSupabaseUid] upsert user_auth_map warn:', mapErr.message);
     }
   }
 }
@@ -121,25 +111,25 @@ export async function POST(req: NextRequest) {
       thread_id,
       board_id,
       source_type,
-      text, // ★ 旧UI互換
-      input, // ★ 旧UI互換
-      user_code: bodyUserCode, // ★ 保険
+      text, // 旧UI互換
+      input, // 旧UI互換
+      user_code: bodyUserCode, // 保険
     } = body || {};
 
-    // ★ 後方互換メッセージ解決
+    // 後方互換メッセージ解決
     const msgRaw = (message ?? text ?? input ?? '') as unknown;
     const msg = typeof msgRaw === 'string' ? msgRaw : String(msgRaw ?? '');
     if (!msg || !msg.trim()) return bad('empty message', 400);
 
-    // ★ user_code の最終決定（認証優先、無ければ body を採用）
+    // user_code（認証優先）
     const userCode =
       (z.userCode as string | null) ?? (typeof bodyUserCode === 'string' ? bodyUserCode : null);
     if (!userCode) return bad('user_code required', 400);
 
-    // 会話IDは既存値尊重。無ければ UUID を付与
+    // 会話IDは既存値尊重。無ければ UUID
     const master_id = ensureMuMasterId(inMaster ?? inConv);
 
-    // クライアントへ返す sub_id（従来：mu-...）
+    // クライアントへ返す従来 sub_id
     const client_sub_id =
       typeof inSub === 'string' && inSub.trim() ? inSub.trim() : newClientSubId();
 
@@ -210,17 +200,17 @@ export async function POST(req: NextRequest) {
     /* 1.5) supabase_uid 自動補完 */
     await ensureSupabaseUid(userCode);
 
-    /* 2) クレジット差し引き（SR） */
+    /* 2) クレジット差し引き（SR, 新RPC） */
     const sb = sbService();
     let credit_balance: number | null = null;
     {
       const capRes = await sb.rpc('mu_capture_credit', {
-        p_user_code: userCode,
-        p_amount: COST_PER_TURN,
-        p_idempotency_key: server_sub_id, // ★ UUID を使う（重複捕捉の精度を担保）
+        p_user_code: String(userCode),
+        p_amount: Number(COST_PER_TURN),
+        p_idempotency_key: String(server_sub_id), // UUIDで冪等化
         p_reason: 'mu_chat_turn',
         p_meta: { agent: 'muai', model: 'gpt-4.1-mini' },
-        p_ref_conversation_id: master_id,
+        p_ref_conversation_id: String(master_id),
       });
       if (capRes.error) {
         const msg = String(capRes.error.message || capRes.error);
@@ -255,10 +245,10 @@ export async function POST(req: NextRequest) {
         conv_id: master_id,
         role: 'user',
         content: String(msg ?? ''),
-        meta: { source: 'mu', kind: 'user', client_sub_id: client_sub_id }, // ★ クライアント sub_id も残す
+        meta: { source: 'mu', kind: 'user', client_sub_id: client_sub_id },
         used_credits: null,
         source_app: 'mu',
-        sub_id: server_sub_id, // ★ DB は UUID
+        sub_id: server_sub_id, // DBはUUID
       });
       if (insUser.error) console.error('[muai] insert mu_turns (user) error:', insUser.error);
 
@@ -266,10 +256,10 @@ export async function POST(req: NextRequest) {
         conv_id: master_id,
         role: 'assistant',
         content: replyText,
-        meta: { model: 'gpt-4.1-mini', client_sub_id: client_sub_id }, // ★
+        meta: { model: 'gpt-4.1-mini', client_sub_id: client_sub_id },
         used_credits: COST_PER_TURN,
         source_app: 'mu',
-        sub_id: server_sub_id, // ★ DB は UUID
+        sub_id: server_sub_id, // DBはUUID
       });
       if (insAssist.error)
         console.error('[muai] insert mu_turns (assistant) error:', insAssist.error);
@@ -312,7 +302,7 @@ export async function POST(req: NextRequest) {
       user_code: userCode,
       status: 'success',
       conversation_id: master_id,
-      message_id: client_sub_id, // ★ 従来 sub_id を外部ログ・レスポンスに採用
+      message_id: client_sub_id,
       meta: {
         q_code: final_code2,
         depth_stage: final_stage2,
@@ -327,31 +317,9 @@ export async function POST(req: NextRequest) {
         ...promptMeta,
       },
     });
+
     const q = (final_code2 ?? 'Q2') as 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
     const stage = (final_stage2 ?? 'S1') as 'S1' | 'S2' | 'S3';
-
-    try {
-      await recordQ({
-        user_code: userCode,
-        source_type: 'mu',
-        intent: 'normal', // ← 'chat' ではなく 'normal' に統一
-        q, // Qコード
-        stage, // 深度
-        conversation_id: master_id,
-        post_id: client_sub_id,
-        title: 'Mu応答', // 任意
-        extra: {
-          model: 'gpt-4.1-mini',
-          replyText,
-          relation: mu_relation,
-          confidence,
-          phase: mu_phase,
-          self: mu_self,
-        },
-      });
-    } catch (e) {
-      console.warn('[muai] recordQ skipped:', (e as any)?.message || e);
-    }
 
     /* 5) レスポンス（構造は従来どおり） */
     return json({
@@ -366,23 +334,20 @@ export async function POST(req: NextRequest) {
         relation: mu_relation,
         charge: { amount: COST_PER_TURN, aiId: 'mu', model: 'gpt-4.1-mini' },
         master_id,
-        sub_id: client_sub_id, // ここも従来の文字列 ID を返す
+        sub_id: client_sub_id, // ← 従来IDを返す
         thread_id: thread_id ?? null,
         board_id: board_id ?? null,
         ...promptMeta,
       },
-      q:
-        final_code2 || final_stage2
-          ? {
-              code: final_code2,
-              stage: final_stage2,
-              color: q_color ? { base: q_color.base, mix: q_color.mix, hex: q_color.hex } : null,
-            }
-          : null,
+      q: {
+        code: q,
+        stage,
+        color: q_color ? { base: q_color.base, mix: q_color.mix, hex: q_color.hex } : null,
+      },
       credit_balance,
       charge: { amount: COST_PER_TURN, aiId: 'mu', model: 'gpt-4.1-mini' },
       master_id,
-      sub_id: client_sub_id, // 従来どおり
+      sub_id: client_sub_id,
       conversation_id: master_id,
       title: msg.trim().slice(0, 20) || 'Mu 会話',
     });

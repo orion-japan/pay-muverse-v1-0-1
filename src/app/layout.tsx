@@ -1,17 +1,16 @@
-// src/app/layout.tsx  ← 'use client' は付けない（Server Component）
+// src/app/layout.tsx  ← Server Component（'use client' なし）
 
 import './globals.css';
 import '../styles/layout.css';
-import '../styles/iros-vars.css'; // ★ 追加：グローバル変数を全体に展開
+import '../styles/iros-vars.css'; // ★ グローバル変数を全体に展開
 import Providers from './providers';
 import LayoutClient from './LayoutClient';
 import TelemetryBoot from '@/components/TelemetryBoot';
 import AuthExpose from './_auth-expose';
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 
 export const metadata: Metadata = {
   manifest: '/manifest.json',
-  themeColor: '#0b1437',
   icons: {
     icon: '/mira.png',
     shortcut: '/mira.png',
@@ -19,19 +18,23 @@ export const metadata: Metadata = {
   },
 };
 
+// Next.js 15 推奨: themeColor は viewport へ
+export const viewport: Viewport = {
+  themeColor: '#0b1437',
+};
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ja">
       <head>
-        {/* VAPID をDOM/Windowへ供給 */}
+        {/* VAPID を DOM/Window へ供給（ビルド時に文字列化） */}
         <meta name="vapid" content={process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY} />
         <script
-          // env 値の差し込みはビルド時に文字列化して水和差異を回避
           dangerouslySetInnerHTML={{
             __html: `window.__VAPID_PUBLIC_KEY__=${JSON.stringify(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? '')};`,
           }}
         />
-        {/* ▼ クリック無効化ガード（data-guard-lock="1" を持つ要素配下の操作を捕捉して無効化） */}
+        {/* ▼ クリック無効化ガード（data-guard-lock="1" 配下の操作を捕捉して無効化） */}
         <script
           dangerouslySetInnerHTML={{
             __html: `(function(){
@@ -51,7 +54,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         e.stopPropagation();
         if (e.stopImmediatePropagation) e.stopImmediatePropagation();
       }
-    }, true); // capture段階で停止（Reactの水和前でも有効）
+    }, true);
   }
 })();`,
           }}

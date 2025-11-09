@@ -6,9 +6,9 @@ const nextConfig = {
     serverActions: { bodySizeLimit: '10mb' },
   },
 
-  // 本番ビルドで ESLint 警告を無視
-  eslint: {
-    ignoreDuringBuilds: true,
+  // Next 16 では eslint 設定は next.config から外す（lint は CLI で）
+  turbopack: {
+    root: process.cwd(), // ルート誤認の抑止
   },
 
   images: {
@@ -22,7 +22,6 @@ const nextConfig = {
 
   async headers() {
     return [
-      // 既存：フォントだけ長期キャッシュ（Tesseract系の設定は削除）
       {
         source: '/fonts/:path*',
         headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }],

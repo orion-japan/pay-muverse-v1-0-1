@@ -30,6 +30,7 @@ type IrosAPI = {
   fetchMessages(conversationId: string): Promise<IrosMessage[]>;
   renameConversation(conversationId: string, title: string): Promise<{ ok: true } | void>;
   deleteConversation(conversationId: string): Promise<{ ok: true } | void>;
+  /** ※ 残すが UI 側では使わない（/messages 直叩きは二重化の原因になるため） */
   postMessage(args: { conversationId: string; text: string; role?: 'user' | 'assistant' }): Promise<{ ok: true }>;
   reply(args: {
     conversationId?: string;
@@ -38,24 +39,12 @@ type IrosAPI = {
     model?: string;
     resonance?: ResonanceState;
     intent?: IntentPulse;
+    headers?: Record<string, string>; // 冪等キー付与用
   }): Promise<
     | { ok: boolean; message?: { id?: string; content: string } } // 旧フォーマット
     | { ok: boolean; assistant?: string; mode?: string; systemPrompt?: string } // 新フォーマット
   >;
   getUserInfo(): Promise<IrosUserInfo | null>;
-
-  // ★ 追加：保存付き返信（assistant発話を /messages に保存まで担保）
-  replyAndStore(args: {
-    conversationId: string;
-    user_text: string;
-    mode?: string;
-    model?: string;
-    resonance?: ResonanceState;
-    intent?: IntentPulse;
-  }): Promise<
-    | { ok: boolean; message?: { id?: string; content: string } }
-    | { ok: boolean; assistant?: string; mode?: string; systemPrompt?: string }
-  >;
 };
 
 // ====== フォールバックを含む irosClient ラッパー ======
@@ -161,6 +150,7 @@ const irosClient: IrosAPI = {
     dbg('reply() fallback', { mode: args.mode, hasCid: !!args.conversationId });
     const r = await authFetch('/api/agent/iros/reply', {
       method: 'POST',
+      headers: args.headers ?? undefined,
       body: JSON.stringify({
         conversationId: args.conversationId,
         user_text: args.user_text,
@@ -168,8 +158,8 @@ const irosClient: IrosAPI = {
         history: [],
         model: args.model,
         // 可変の非言語を渡す（無ければ undefined になるのでOK）
-        resonance: (window as any)?.__iros?.resonance,
-        intent:    (window as any)?.__iros?.intent,
+        resonance: (window as any)?.__iros?.resonance ?? args.resonance,
+        intent: (window as any)?.__iros?.intent ?? args.intent,
       }),
     });
     return r.json();
@@ -187,61 +177,6 @@ const irosClient: IrosAPI = {
       userType: String(u.userType ?? 'member'),
       credits: Number(u.credits ?? 0),
     };
-  },
-
-  // ★ 追加：保存付き返信
-  async replyAndStore(args) {
-    if (typeof _raw.replyAndStore === 'function') {
-      return _raw.replyAndStore(args);
-    }
-
-    // 1) 返信生成（/api/agent/iros に統一）
-    const rep =
-      typeof _raw.reply === 'function'
-        ? await _raw.reply(args)
-        : await (async () => {
-            const r = await authFetch('/api/agent/iros/reply', {
-              method: 'POST',
-              body: JSON.stringify({
-                conversationId: args.conversationId,
-                user_text: args.user_text,
-                mode: args.mode ?? 'Light',
-                history: [],
-                model: args.model,
-                resonance: (window as any)?.__iros?.resonance,
-                intent:    (window as any)?.__iros?.intent,
-              }),
-            });
-            return r.json();
-          })();
-
-    const assistantText: string =
-      (rep as any)?.message?.content ??
-      (rep as any)?.assistant ??
-      '';
-
-    dbg('replyAndStore: assistantText.len', assistantText?.length ?? 0);
-
-    // 2) 返信があれば /messages に保存
-    if (assistantText) {
-      if (typeof _raw.postMessage === 'function') {
-        await _raw.postMessage({
-          conversationId: args.conversationId,
-          text: assistantText,
-          role: 'assistant',
-        });
-      } else {
-        await authFetch('/api/agent/iros/messages', {
-          method: 'POST',
-          body: JSON.stringify({
-            conversation_id: args.conversationId,
-            text: assistantText,
-            role: 'assistant',
-          }),
-        });
-      }
-    }
-    return rep;
   },
 };
 
@@ -295,6 +230,7 @@ export default function IrosChatProvider({
   const didInit = useRef(false);
   const fetchLock = useRef(false);
   const didSyncUrlRef = useRef(false);
+  const inFlightRef = useRef(false); // ★ 送信多重ガード
 
   // ---- 認証系バックオフ ----
   async function retryAuth<T>(
@@ -472,14 +408,18 @@ export default function IrosChatProvider({
     [refreshConversations, router],
   );
 
-  /** 送信フロー：楽観追加 → /messages 保存（user） → replyAndStore（assistant保存） → 最終同期 */
+  /** 送信フロー：楽観追加 → /reply（冪等キー付き） → 最終同期
+   *  ※ /messages を UI からは呼ばない（保存は API 側で user/assistant 両方を実施） */
   const send = useCallback(
     async (text: string) => {
       const t = (text ?? '').trim();
       if (!t) return;
+      if (inFlightRef.current) return; // 多重送信ガード
 
       setError(undefined);
       setLoading(true);
+      inFlightRef.current = true;
+
       try {
         const cid = await ensureConversationId();
 
@@ -488,32 +428,29 @@ export default function IrosChatProvider({
         const now = Date.now();
         setMessages((prev) => [...prev, { id: tempId, role: 'user', text: t, ts: now }]);
 
-        // 2) DB保存（/messages：自分の発話）
+        // 2) 冪等キーを付けて /reply のみ叩く
+        const idem = `${cid}:${now}`;
         await retryAuth(() =>
-          irosClient.postMessage({ conversationId: cid, text: t, role: 'user' }),
-        );
-
-        // 3) 返信生成＋保存（/api/agent/iros に統一）
-        await retryAuth(() =>
-          irosClient.replyAndStore({
+          irosClient.reply({
             conversationId: cid,
             user_text: t,
             mode: 'Light',
-            // resonance / intent は必要時に window.__iros.* から拾う
+            headers: { 'x-idempotency-key': idem },
           }),
         );
 
-        // 4) 最終同期（DBの正を採用）
+        // 3) 最終同期（DBの正を採用）
         const list = await retryAuth(() => irosClient.fetchMessages(cid));
         if (Array.isArray(list)) setMessages(list);
 
-        // 5) 会話一覧も更新
+        // 4) 会話一覧も更新
         const convs = await retryAuth(() => irosClient.listConversations());
         if (Array.isArray(convs)) setConversations(convs);
       } catch (e: any) {
         setError(e?.message ?? String(e));
         dbg('send: error', e?.message ?? e);
       } finally {
+        inFlightRef.current = false;
         setLoading(false);
       }
     },

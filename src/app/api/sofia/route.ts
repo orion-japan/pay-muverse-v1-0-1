@@ -17,6 +17,10 @@ import { mapQToColor } from '@/lib/sofia/qcolor';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 
+/* ===== 課金フラグ（Iros と共通の挙動） ===== */
+const CREDITS_BYPASS = (process.env.CREDITS_BYPASS || '0') === '1';       // 1: 課金バイパス
+const CAPTURE_SOFT_FAIL = (process.env.CAPTURE_SOFT_FAIL || '1') === '1'; // 1: 失敗でも落とさない
+
 /* ===== 設定 ===== */
 const CFG: any = SOFIA_CONFIG ?? {};
 const CFG_OPENAI = CFG.openai ?? {};
@@ -109,11 +113,14 @@ function sanitizeBody(raw: any) {
 
   return {
     conversation_code: typeof raw?.conversation_code === 'string' ? raw.conversation_code : '',
-    master_id: typeof raw?.master_id === 'string' ? raw.master_id : '',
-    sub_id: typeof raw?.sub_id === 'string' ? raw.sub_id : '',
-    thread_id: typeof raw?.thread_id === 'string' ? raw.thread_id : null,
-    board_id: typeof raw?.board_id === 'string' ? raw.board_id : null,
-    source_type: typeof raw?.source_type === 'string' ? raw.source_type : 'chat',
+    master_id:         typeof raw?.master_id === 'string' ? raw.master_id : '',
+    sub_id:            typeof raw?.sub_id === 'string' ? raw.sub_id : '',
+    thread_id:         typeof raw?.thread_id === 'string' ? raw.thread_id : null,
+    board_id:          typeof raw?.board_id === 'string' ? raw.board_id : null,
+    source_type:       typeof raw?.source_type === 'string' ? raw.source_type : 'chat',
+
+    // ★ ref を追加（任意受け取り）
+    ref:               typeof raw?.ref === 'string' ? raw.ref : '',
 
     mode: (['normal','diagnosis','meaning','intent','dark','remake'] as SofiaMode[]).includes(raw?.mode) ? raw.mode : 'normal',
     promptKey: raw?.promptKey ?? 'base',
@@ -129,11 +136,12 @@ function sanitizeBody(raw: any) {
     response_format: raw?.response_format ?? undefined,
     cfg: typeof raw?.cfg === 'object' && raw?.cfg ? raw.cfg : undefined,
 
-    // KB（ナレッジ）参照のON/OFFと件数
+    // KB
     use_kb: raw?.use_kb !== false,
     kb_limit: Number.isFinite(raw?.kb_limit) ? Math.max(1, Math.min(8, Number(raw.kb_limit))) : undefined,
   };
 }
+
 
 /* ===== ir診断トリガー検出 ===== */
 function detectDiagnosisTarget(text: string) {
@@ -205,6 +213,38 @@ async function getBalanceWarning(userCode: string, expected: number) {
   return null;
 }
 
+/* ====== HTTP 経由の課金API（/api/credits/* を叩く） ====== */
+async function creditsAuthorize(baseUrl: string, user_code: string, amount: number, ref: string) {
+  if (CREDITS_BYPASS) return true;
+  try {
+    const r = await fetch(`${baseUrl}/api/credits/authorize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      body: JSON.stringify({ user_code, amount, ref }),
+    });
+    return r.ok;
+  } catch (e) {
+    console.warn('[sofia] authorize error', e);
+    return false;
+  }
+}
+async function creditsCapture(baseUrl: string, user_code: string, amount: number, ref: string) {
+  if (CREDITS_BYPASS) return true;
+  try {
+    const r = await fetch(`${baseUrl}/api/credits/capture`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      body: JSON.stringify({ user_code, amount, ref }),
+    });
+    return r.ok;
+  } catch (e) {
+    console.warn('[sofia] capture error', e);
+    return false;
+  }
+}
+
 /* ===== CORS ===== */
 export async function OPTIONS() { return json({ ok: true }); }
 
@@ -266,6 +306,7 @@ export async function POST(req: NextRequest) {
   try {
     if (!OPENAI_API_KEY) return bad('Env OPENAI_API_KEY is missing', 500);
 
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || req.nextUrl.origin;
     const z = await verifyFirebaseAndAuthorize(req);
     if (!z.ok) return json({ error: z.error }, z.status);
     if (!z.allowed) return json({ error: 'forbidden' }, 403);
@@ -366,7 +407,7 @@ export async function POST(req: NextRequest) {
       for (let i = 0; i < kbArr.length; i++) {
         const k: KBItem = kbArr[i] ?? {};
         const t = String(k.title ?? `K${i + 1}`);
-        const c = String(k.content ?? '').replace(/\s+/g, ' ').slice(0, 1200); // 長すぎ対策
+        const c = String(k.content ?? '').replace(/\s+/g, ' ').slice(0, 1200);
         const u = k.url ? `\n- source: ${k.url}` : '';
         const tg = Array.isArray(k.tags) && k.tags.length ? `\n- tags: ${k.tags.join(', ')}` : '';
         lines.push(`- (${i + 1}) ${t}\n  ${c}${u}${tg}`);
@@ -405,7 +446,15 @@ export async function POST(req: NextRequest) {
       return json({ error: 'insufficient_credit', warning, master_id, sub_id, conversation_id: master_id, conversation_code }, 402);
     }
 
-    // OpenAI 実行
+    // ====== 【ここから】Authorize → OpenAI → Capture の順で確定課金 ======
+    const ref = safe?.ref ? String(safe.ref) : `sofia:${conversation_code}:${Date.now()}`;
+
+    // 1) Authorize（不足やduplicateはAPI側で制御）
+    if (!(await creditsAuthorize(baseUrl, userCode, AMOUNT, ref))) {
+      return json({ error: 'authorize_failed' }, 402);
+    }
+
+    // 2) OpenAI 実行
     console.time('[iros] openai.chat');
     const result = await callOpenAI(payload);
     console.timeEnd('[iros] openai.chat');
@@ -415,39 +464,9 @@ export async function POST(req: NextRequest) {
     const data = result.data;
     const reply: string = data?.choices?.[0]?.message?.content ?? '';
 
-    // ここで reply が取れたら初めて「確定課金」
+    // ====== 会話保存・ログ ======
     const sb = sbService();
-    const capRes = await sb.rpc('mu_capture_credit', {
-      p_user_code: String(userCode),
-      p_amount: Number(AMOUNT),
-      p_idempotency_key: String(sub_id),
-      p_reason: 'iros_chat_turn',
-      p_meta: { agent: 'iros', model: ai.model },
-      p_ref_conversation_id: String(conversation_code),
-    });
 
-    if (capRes.error) {
-      const msg = String(capRes.error.message || capRes.error);
-      if (/insufficient/i.test(msg)) {
-        return json({ error: 'insufficient_credit' }, 402);
-      }
-      return json({ error: 'capture_failed', detail: msg }, 500);
-    }
-
-    // mu_capture_credit が新残高を返す想定（フォールバックあり）
-    let captured_balance: number | null = null;
-    if (typeof capRes.data === 'number' || typeof capRes.data === 'string') {
-      captured_balance = Number(capRes.data);
-    } else {
-      const { data: balRow } = await sb
-        .from('users')
-        .select('sofia_credit')
-        .eq('user_code', userCode)
-        .single();
-      captured_balance = balRow?.sofia_credit != null ? Number(balRow.sofia_credit) : null;
-    }
-
-    // 会話保存
     const merged: Msg[] = Array.isArray(messages) ? [...messages] : [];
     if (reply) merged.push({ role: 'assistant', content: reply });
 
@@ -481,6 +500,7 @@ export async function POST(req: NextRequest) {
       thread_id: thread_id ?? null,
       board_id: board_id ?? null,
       source_type: source_type ?? 'chat',
+      ref, // ★ 使った参照キーを保存
     };
 
     // 会話スレッド upsert
@@ -508,7 +528,7 @@ export async function POST(req: NextRequest) {
         user_code: userCode,
         conversation_code,
         turn_index,
-        user_text: lastUserMsg ?? '',
+        user_text: getLastUserText(messages) ?? '',
         assistant_text: reply ?? '',
         meta: metaPacked,
         created_at: new Date().toISOString(),
@@ -524,7 +544,7 @@ export async function POST(req: NextRequest) {
       const stageFinal = (
         stageHint === 'S1' || stageHint === 'S2' || stageHint === 'S3'
           ? stageHint
-          : (DEEPEN >= 1.8 ? 'S3' : (mode === 'diagnosis' ? 'S2' : 'S1'))
+          : (RETRIEVE_DEEPEN >= 1.8 ? 'S3' : (mode === 'diagnosis' ? 'S2' : 'S1'))
       ) as 'S1'|'S2'|'S3';
       const qc = mapQToColor(qFinal);
 
@@ -554,19 +574,26 @@ export async function POST(req: NextRequest) {
       console.warn('[q_code_logs insert] skipped:', String((e as any)?.message ?? e));
     }
 
-    // 応答用Q/Stage
+    // 3) Capture（失敗しても落とさない設定あり）
+    const okCap = await creditsCapture(baseUrl, userCode, AMOUNT, ref);
+    if (!okCap) {
+      console.warn('[sofia] capture_failed', { user: userCode, ref });
+      if (!CAPTURE_SOFT_FAIL) {
+        return json({ error: 'capture_failed' }, 500);
+      }
+    }
+
+    // 応答
     const qOut = (metaPacked.currentQ ?? metaPacked.nextQ ?? 'Q2') as 'Q1'|'Q2'|'Q3'|'Q4'|'Q5';
     const stageOut = ((vars as any)?.analysis?.qcodes?.[0]?.stage
       ?? (RETRIEVE_DEEPEN >= 1.8 ? 'S3' : (mode === 'diagnosis' ? 'S2' : 'S1'))) as 'S1'|'S2'|'S3';
     const qColor = mapQToColor(qOut);
 
-    // 応答（master_id は会話コードに固定）
     return json({
       conversation_code,
       reply,
       meta: metaPacked,
-      credit_balance: captured_balance,
-      charge: { model: ai.model, aiId: ai.id, amount: AMOUNT },
+      charge: { model: ai.model, aiId: ai.id, amount: AMOUNT, ref },
       q: { code: qOut, stage: stageOut, color: qColor },
 
       master_id,
