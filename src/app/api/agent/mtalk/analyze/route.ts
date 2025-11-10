@@ -220,13 +220,22 @@ export async function POST(req: NextRequest) {
     const balance = await getBalance(supabase, user_code);
     if (balance < cost) return json({ ok: false, error: 'insufficient_balance', balance }, 402);
 
-    let session_id = body.session_id || null;
-    if (!session_id) {
-      const { data: sess } = await supabase
+    // セッションIDの安全な確定
+    let session_id: string;
+    if (body.session_id) {
+      session_id = String(body.session_id);
+    } else {
+      type SessRow = { id: string } | null;
+      const { data: sess, error: sessErr } = await supabase
         .from('mtalk_sessions')
         .insert({ user_code, agent })
         .select('id')
-        .single();
+        .single<SessRow>();
+
+      if (sessErr) throw new Error(`mtalk_sessions.insert failed: ${sessErr.message}`);
+      if (!sess || !sess.id) {
+        return json({ ok: false, error: 'session_insert_failed' }, 500);
+      }
       session_id = sess.id;
     }
 
@@ -238,6 +247,7 @@ export async function POST(req: NextRequest) {
     const depth_stage = cls.depth_stage || fb.depth_stage;
 
     const reply_text = await llmMakeReport(agent, joined, q_emotion, phase, depth_stage);
+
     const balance_after_rpc = await chargeCredits(supabase, user_code, cost, 'mtalk_analyze', {
       agent,
       session_id,
@@ -261,6 +271,11 @@ export async function POST(req: NextRequest) {
       })
       .select('id, created_at, conversation_id')
       .single();
+
+    // repIns が無いことは通常ありませんが、型的に安全化
+    if (!repIns) {
+      return json({ ok: false, error: 'report_insert_failed' }, 500);
+    }
 
     const owner_uid = await getOwnerUidByUserCode(supabase, user_code);
     const title = `mTalk: ${texts[0]?.slice(0, 48) || '最初のマインドトーク'}`;
