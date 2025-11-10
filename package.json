@@ -99,6 +99,5 @@
   },
   "engines": {
     "node": "22.x"
-  },
-  "packageManager": "yarn@4.11.0"
+  }
 }
