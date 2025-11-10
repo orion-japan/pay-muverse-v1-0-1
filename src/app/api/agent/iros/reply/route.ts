@@ -111,8 +111,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'authorize_failed' }, { status: 402 });
     }
 
-    /* 5) 直近履歴（最大10件） */
-    const { data: history = [], error: histErr } = await supaAdmin
+    /* 5) 直近履歴（最大10件） — null を完全排除して配列へ正規化 */
+    type Row = { role: 'user' | 'assistant' | string; text?: string | null; content?: string | null };
+    const { data: historyRaw, error: histErr } = await supaAdmin
       .from('iros_messages')
       .select('role, text, content')
       .eq('conversation_id', conversationId)
@@ -120,10 +121,12 @@ export async function POST(req: NextRequest) {
       .limit(10);
     if (histErr) throw new Error(histErr.message);
 
-    /* 6) プロンプト構成 */
+    const history: Row[] = Array.isArray(historyRaw) ? historyRaw : [];
+
+    /* 6) プロンプト構成（history が空でも安全に展開） */
     const messages: ChatMessage[] = [
       { role: 'system', content: (IROS_SYSTEM || '').toString().trim() },
-      ...history.map((m: any) => ({
+      ...history.map((m) => ({
         role: (m.role === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant',
         content: s(m?.text ?? m?.content),
       })),
