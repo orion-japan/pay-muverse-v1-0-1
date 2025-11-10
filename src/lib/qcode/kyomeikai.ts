@@ -1,15 +1,16 @@
+// src/lib/qcode/kyomeikai.ts
 // 共鳴会のQコード 生成ロジック（新規カラムなし版）
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 type WindowMetrics = {
-  attRate: number; // 出席率 0..1
-  trendLast5: number; // 直近5回の平均（出席=1 欠席=0）
+  attRate: number;       // 出席率 0..1
+  trendLast5: number;    // 直近5回の平均（出席=1 欠席=0）
   cvIntervals: number | null; // 出席日の間隔 変動係数（null=出席1回以下）
-  streakAttend: number; // 連続出席
-  streakAbsent: number; // 連続欠席
-  expected: number; // 期間内の開催数
-  attended: number; // 期間内の出席数
-  missed: number; // 期間内の欠席数
+  streakAttend: number;  // 連続出席
+  streakAbsent: number;  // 連続欠席
+  expected: number;      // 期間内の開催数
+  attended: number;      // 期間内の出席数
+  missed: number;        // 期間内の欠席数
 };
 
 export type KyomeikaiQResult = {
@@ -33,23 +34,22 @@ export type KyomeikaiQResult = {
 };
 
 // ★ あなたの実テーブル名に合わせて調整してください
-const T_SCHEDULES = 'event_schedules'; // 開催定義: {event_id, date, ...}
-const T_ATTENDS = 'attendance_checkins'; // 出席ログ: {user_code, event_id, checked_at}
+const T_SCHEDULES = 'event_schedules';      // 開催定義: {event_id, date, ...}
+const T_ATTENDS  = 'attendance_checkins';   // 出席ログ: {user_code, event_id, checked_at}
 
 const EVENT_ID = 'kyomeikai';
 
+// Supabase行の型（暗黙any対策）
+type ScheduleRow = { date: string };
+type AttendRow = { checked_at: string };
+
 function qColor(q: KyomeikaiQResult['q']) {
   switch (q) {
-    case 'Q1':
-      return '#E0F2FE';
-    case 'Q2':
-      return '#DCFCE7';
-    case 'Q3':
-      return '#FEF3C7';
-    case 'Q4':
-      return '#FEE2E2';
-    case 'Q5':
-      return '#EDE9FE';
+    case 'Q1': return '#E0F2FE';
+    case 'Q2': return '#DCFCE7';
+    case 'Q3': return '#FEF3C7';
+    case 'Q4': return '#FEE2E2';
+    case 'Q5': return '#EDE9FE';
   }
 }
 
@@ -64,7 +64,7 @@ function pickQ(
 
   let q: KyomeikaiQResult['q'];
   if (metrics.streakAbsent >= 3 && isPresentToday) {
-    q = 'Q5'; // 連欠→復帰は転機扱い
+    q = 'Q5';                 // 連欠→復帰は転機扱い
   } else if (balance >= 0.8 && metrics.streakAbsent === 0) {
     q = 'Q2';
   } else if (balance >= 0.55) {
@@ -77,21 +77,26 @@ function pickQ(
 
   // 少しだけランダム揺らし（±1段階まで、Q2↔Q4跨ぎはしない）
   if (Math.random() < 0.12) {
-    const order: KyomeikaiQResult['q'][] = ['Q2', 'Q1', 'Q3', 'Q4']; // Q5は特例のため除外
+    const order: KyomeikaiQResult['q'][] = ['Q2', 'Q1', 'Q3', 'Q4']; // Q5は特例
     const idx = order.indexOf(q);
     if (idx >= 0) {
       const delta = Math.random() < 0.5 ? -1 : 1;
       const ni = Math.max(0, Math.min(order.length - 1, idx + delta));
-      // Q2→Q4, Q4→Q2 のジャンプ禁止
       if (!(q === 'Q2' && order[ni] === 'Q4') && !(q === 'Q4' && order[ni] === 'Q2')) {
         q = order[ni];
       }
     }
   }
 
-  const conf = q === 'Q2' ? 0.75 : q === 'Q1' ? 0.65 : q === 'Q3' ? 0.6 : q === 'Q4' ? 0.7 : 0.72;
+  const conf =
+    q === 'Q2' ? 0.75 :
+    q === 'Q1' ? 0.65 :
+    q === 'Q3' ? 0.60 :
+    q === 'Q4' ? 0.70 : 0.72;
 
-  const hint = `出席率${metrics.attRate.toFixed(2)} / 欠席連続${metrics.streakAbsent} / 直近トレンド${metrics.trendLast5.toFixed(2)} / balance${balance.toFixed(2)}`;
+  const hint =
+    `出席率${metrics.attRate.toFixed(2)} / 欠席連続${metrics.streakAbsent} / ` +
+    `直近トレンド${metrics.trendLast5.toFixed(2)} / balance${balance.toFixed(2)}`;
 
   return { q, confidence: conf, hint };
 }
@@ -111,7 +116,8 @@ async function getScheduleDates(fromIso: string, toIso: string): Promise<string[
     .lte('date', toIso);
 
   if (error) throw error;
-  return (data ?? []).map((r) => r.date);
+  const rows: ScheduleRow[] = (data ?? []) as ScheduleRow[];
+  return rows.map((r: ScheduleRow) => r.date); // ← r に型を明示
 }
 
 async function getUserAttendanceDates(
@@ -128,8 +134,9 @@ async function getUserAttendanceDates(
     .lte('checked_at', toIso + ' 23:59:59+09');
 
   if (error) throw error;
+  const rows: AttendRow[] = (data ?? []) as AttendRow[];
   const set = new Set<string>();
-  (data ?? []).forEach((r) => set.add(jstDateString(new Date(r.checked_at))));
+  rows.forEach((r: AttendRow) => set.add(jstDateString(new Date(r.checked_at)))); // ← 型明示
   return Array.from(set);
 }
 
@@ -137,10 +144,9 @@ async function getUserAttendanceDates(
 function trendLastN(schedulesAsc: string[], presentSet: Set<string>, N = 5): number {
   const lastN = schedulesAsc.slice(-N);
   if (lastN.length === 0) return 0;
-  const arr = lastN.map((d) => Number(presentSet.has(d))); // ← 型を number[] に
+  const arr = lastN.map((d) => Number(presentSet.has(d))); // number[] に揃える
   const avg = arr.reduce((sum, v) => sum + v, 0) / arr.length;
   return avg;
-
 }
 
 // 出席日の間隔（差分日数）の変動係数（std/mean）
@@ -196,7 +202,7 @@ export async function calcKyomeikaiQForDate(
 
   const attRate7 = expected7 > 0 ? attended7 / expected7 : 0;
   const trend5 = trendLastN(schedules7, presentSet7, 5);
-  const cvInt = cvIntervals(presentDates7.sort());
+  const cvInt = cvIntervals(presentDates7.slice().sort()); // 破壊的ソートを避ける
   const stAttend = streakFromTail(schedules7, presentSet7, 'attend');
   const stAbsent = streakFromTail(schedules7, presentSet7, 'absent');
 
