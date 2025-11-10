@@ -3,61 +3,54 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import AlbumCard from '@/components/AlbumCard';
-import PostDetailModal from '@/components/PostDetailModal';
 import EditPostModal from '@/components/EditPostModal';
 import QBoardPostModal from '@/components/QBoardPostModal';
+import type { Post } from '@/types/post';
 import './album.css';
-
-// ★ 追加：コラージュ側と同じアルバム取得ロジックを利用
 import { supabase } from '@/lib/supabase';
 
-type Post = {
-  post_id: string;
-  title?: string | null;
-  content?: string | null;
-  media_urls: string[];
-  tags?: string[];
-  created_at: string;
-  board_type?: string | null; // ← これを追加
-};
-
-// ★ 追加：private-posts からアルバム一覧（署名URL）を取得
+/* Storage (private-posts) 一覧用 */
 type AlbumItem = {
   name: string;
-  url: string; // 表示用（署名URL）
-  path: string; // private-posts/<userCode>/<file>
+  url: string;      // 署名URL
+  path: string;     // private-posts/<userCode>/<file>
   size?: number | null;
   updated_at?: string | null;
 };
+
 const ALBUM_BUCKET = 'private-posts';
 
 async function listAlbumImages(userCode: string): Promise<AlbumItem[]> {
   try {
-    const ucode = (userCode || '').trim();
-    if (!ucode) return [];
-    const prefix = `${ucode}`;
+    const u = (userCode || '').trim();
+    if (!u) return [];
+    const prefix = `${u}`;
+
     const { data, error } = await supabase.storage.from(ALBUM_BUCKET).list(prefix, {
       limit: 200,
       sortBy: { column: 'updated_at', order: 'desc' },
     });
     if (error) throw error;
 
-    const files = (data || []).filter((f) => !f.name.startsWith('.') && !f.name.endsWith('/'));
+    const files = (data || []).filter(f => !f.name.startsWith('.') && !f.name.endsWith('/'));
+
     const resolved = await Promise.all(
       files.map(async (f) => {
         const path = `${prefix}/${f.name}`;
         const { data: signed } = await supabase.storage
           .from(ALBUM_BUCKET)
           .createSignedUrl(path, 60 * 30);
+
         return {
           name: f.name,
           url: signed?.signedUrl ?? '',
           path,
           size: (f as any)?.metadata?.size ?? null,
           updated_at: (f as any)?.updated_at ?? null,
-        };
-      }),
+        } as AlbumItem;
+      })
     );
+
     return resolved;
   } catch (e) {
     console.warn('[AlbumPage] listAlbumImages error:', e);
@@ -87,8 +80,9 @@ export default function AlbumPage() {
 
   const fetchPosts = async () => {
     if (!userCode) return;
+
     try {
-      // 1) 既存の自分の投稿
+      // 1) 自分の投稿（API）
       const res = await fetch('/api/my-posts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -100,33 +94,38 @@ export default function AlbumPage() {
         const text = await res.text().catch(() => '(no body)');
         console.error('[AlbumPage] /api/my-posts NG', res.status, text);
       } else {
-        const data = await res.json().catch((e) => {
-          console.error('[AlbumPage] JSON parse error:', e);
-          return null;
-        });
-        apiPosts = Array.isArray(data?.posts) ? (data!.posts as Post[]) : [];
-        console.log('[AlbumPage] posts loaded:', apiPosts.length);
+        const json = await res.json().catch(() => null);
+        const raw = Array.isArray(json?.posts) ? (json!.posts as any[]) : [];
+        // ← ここで “null を undefined に寄せる” 正規化
+        apiPosts = raw.map((p): Post => ({
+          post_id: String(p.post_id),
+          title: p.title ?? undefined,
+          content: p.content ?? undefined,
+          media_urls: Array.isArray(p.media_urls) ? p.media_urls : [],
+          tags: Array.isArray(p.tags) ? p.tags : undefined,
+          created_at: p.created_at ?? new Date().toISOString(),
+          board_type: p.board_type ?? null,
+        }));
       }
 
-      // 2) コラージュと同じ：private-posts/<userCode>/ からアルバム画像
+      // 2) Storage からアルバム画像
       const albumItems = await listAlbumImages(String(userCode));
       const albumPosts: Post[] = albumItems.map((it) => ({
-        post_id: `album://${it.path}`, // 一意キーとして path を利用
-        title: it.name || null,
-        content: null,
+        post_id: `album://${it.path}`,
+        title: it.name ?? undefined,           // ★ null にしない
+        content: undefined,                    // ★ null にしない
         media_urls: it.url ? [it.url] : [],
         tags: [],
         created_at: it.updated_at ?? new Date().toISOString(),
-        board_type: 'album', // ← ここで 'album' を明示
+        board_type: 'album',
       }));
 
-      // 3) マージ（重複 post_id は API 側を優先）
-      const mergedMap = new Map<string, Post>();
-      for (const p of albumPosts) mergedMap.set(p.post_id, p);
-      for (const p of apiPosts) mergedMap.set(p.post_id, p);
+      // 3) マージ（同じ post_id は API を優先）
+      const map = new Map<string, Post>();
+      for (const p of albumPosts) map.set(p.post_id, p);
+      for (const p of apiPosts) map.set(p.post_id, p);
 
-      const merged = Array.from(mergedMap.values());
-      setPosts(merged);
+      setPosts([...map.values()]);
     } catch (e) {
       console.error('[AlbumPage] fetchPosts error:', e);
     }
@@ -137,24 +136,26 @@ export default function AlbumPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userCode]);
 
-  const filtered = useMemo(() => {
+  const filtered: Post[] = useMemo(() => {
     const list = posts
-      // board_type の表示対象を拡張（'album' | 'default' | 'self' | null/空 を表示）
       .filter((p) => {
         const bt = (p.board_type ?? '').toLowerCase();
         return bt === '' || bt === 'album' || bt === 'default' || bt === 'self';
       })
       .filter((p) =>
-        [p.title, p.content, ...(p.tags || [])]
+        [p.title, p.content, ...(p.tags ?? [])]
           .join(' ')
           .toLowerCase()
           .includes(search.toLowerCase()),
       )
       .sort((a, b) => {
-        if (sort === 'new') return +new Date(b.created_at) - +new Date(a.created_at);
-        if (sort === 'old') return +new Date(a.created_at) - +new Date(b.created_at);
+        const ac = a.created_at ?? new Date(0).toISOString();
+        const bc = b.created_at ?? new Date(0).toISOString();
+        if (sort === 'new') return +new Date(bc) - +new Date(ac);
+        if (sort === 'old') return +new Date(ac) - +new Date(bc);
         return (a.title || '').localeCompare(b.title || '');
       });
+
     return list;
   }, [posts, search, sort]);
 
@@ -173,13 +174,9 @@ export default function AlbumPage() {
     setIsQModalOpen(false);
   };
 
-  // ===== 追加: iボード作成（+I）と同じ挙動を共通関数化 =====
   const handleIBoardCreate = () => {
-    if (!isQMode) {
-      setIsQMode(true); // まず選択モードへ
-    } else if (selectedIds.size > 0) {
-      setIsQModalOpen(true); // 選択済みなら投稿へ
-    }
+    if (!isQMode) setIsQMode(true);
+    else if (selectedIds.size > 0) setIsQModalOpen(true);
   };
 
   return (
@@ -227,12 +224,11 @@ export default function AlbumPage() {
       {/* Q投稿モーダル */}
       {isQModalOpen && (
         <QBoardPostModal
-          posts={filtered.filter((p) => selectedIds.has(p.post_id))}
+          posts={filtered
+            .filter((p) => selectedIds.has(p.post_id))
+            .map((p) => ({ ...p, title: p.title ?? undefined }))}
           userCode={userCode || ''}
-          onClose={() => {
-            resetQMode();
-            fetchPosts();
-          }}
+          onClose={() => setIsQModalOpen(false)}
         />
       )}
 
@@ -266,7 +262,7 @@ export default function AlbumPage() {
       </div>
       <div className="album-bottom-spacer" />
 
-      {/* 既存のフローティング +I ボタンは残しつつ非表示化（構造保持・導線は下部バーに集約） */}
+      {/* 既存のフローティング +I は非表示で残す */}
       <button
         onClick={handleIBoardCreate}
         style={{
@@ -283,7 +279,7 @@ export default function AlbumPage() {
           boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
           cursor: 'pointer',
           zIndex: 100,
-          display: 'none', // ← 導線を下部バーに統一
+          display: 'none',
         }}
         aria-label="Qモード/投稿"
       >
@@ -295,7 +291,7 @@ export default function AlbumPage() {
           onClick={resetQMode}
           style={{
             position: 'fixed',
-            bottom: 80 + 54, // アクションバー＋マージンの上
+            bottom: 134,
             right: 20,
             width: 60,
             height: 36,
