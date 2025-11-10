@@ -176,7 +176,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const userCode: string | undefined = z.userCode;
+  const userCode: string | undefined = ((z.userCode ?? '') as string).trim() || undefined;
   if (!userCode) {
     err(id, 'missing userCode');
     return NextResponse.json(
