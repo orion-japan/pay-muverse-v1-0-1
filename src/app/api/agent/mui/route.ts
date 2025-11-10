@@ -113,6 +113,21 @@ const estimateSelfAdapter = (t: string) => {
   }
 };
 
+// ===== nextQFrom アダプタ（型合わせ用）=====
+type Q = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
+const isQ = (v: any): v is Q => v === 'Q1' || v === 'Q2' || v === 'Q3' || v === 'Q4' || v === 'Q5';
+const fallbackFromPhase = (phase: string): Q => {
+  if (/inner/i.test(phase)) return 'Q3';
+  if (/outer/i.test(phase)) return 'Q2';
+  return 'Q1';
+};
+/** handleChat が期待する (q:string, phase:string)=>string|null に合わせる */
+const nextQFromAdapter = (q: string, phase: string): string | null => {
+  const current: Q = isQ(q) ? q : fallbackFromPhase(phase || '');
+  const next = nextQFrom(current); // 既存の nextQFrom(current: Q): Q をそのまま利用
+  return next ?? null;
+};
+
 // ====== 主処理 ======
 export async function POST(req: NextRequest) {
   try {
@@ -210,7 +225,7 @@ export async function POST(req: NextRequest) {
       frequency_penalty,
       presence_penalty,
       retrieveKnowledge,
-      nextQFrom,
+      nextQFromAdapter,     // ★ ここをアダプタに変更
       inferPhaseAdapter,
       estimateSelfAdapter,
       chargeIfNeeded,

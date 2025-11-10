@@ -7,7 +7,7 @@ type Props = {
   onChange: (v: string) => void;
   onSend: () => void;
   sending?: boolean;
-  textareaRef?: React.RefObject<HTMLTextAreaElement>;
+  textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
   /** ← 追加: OCR直後などでベース高さを少し増やしたい時に使う */
   expanded?: boolean;
 };

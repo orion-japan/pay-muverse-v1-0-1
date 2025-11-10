@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import './MyInvitePanel.css';
 
@@ -25,18 +25,13 @@ export default function MyInvitePanel() {
     const run = async () => {
       setLoading(true);
       try {
-        const r = await fetch('/api/my/invite-info', {
-          method: 'GET',
-          headers: {
-            // 本番はIDトークンベースで /api 側が解決するのが理想
-            // 'x-user-code': '669933', // ← テスト用（不要なら外す）
-          },
-        });
+        const r = await fetch('/api/my/invite-info', { method: 'GET' });
         const j = await r.json();
         if (!r.ok) throw new Error(j?.error || 'failed');
         setInfo(j);
-      } catch (e: any) {
-        setMsg(`読み込みエラー: ${e?.message || e}`);
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e);
+        setMsg(`読み込みエラー: ${message}`);
       } finally {
         setLoading(false);
       }
@@ -48,7 +43,10 @@ export default function MyInvitePanel() {
     // リンクが取れたら QR を生成
     if (info?.link && canvasRef.current) {
       QRCode.toCanvas(canvasRef.current, info.link, { margin: 1, width: 240 }, (err) => {
-        if (err) setMsg(`QR生成エラー: ${err.message}`);
+        if (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          setMsg(`QR生成エラー: ${message}`);
+        }
       });
     }
   }, [info]);
@@ -76,8 +74,9 @@ export default function MyInvitePanel() {
       if (!r.ok) throw new Error(j?.error || '送信に失敗しました');
       setMsg('メールを送信しました');
       setToEmail('');
-    } catch (e: any) {
-      setMsg(`メール送信エラー: ${e?.message || e}`);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      setMsg(`メール送信エラー: ${message}`);
     }
   };
 
@@ -126,9 +125,7 @@ export default function MyInvitePanel() {
                 </div>
               )}
             </div>
-            <p className="inv-note">
-              ※ パラメータ必須ポリシーに合わせ、必要なクエリを含んでいます。
-            </p>
+            <p className="inv-note">※ パラメータ必須ポリシーに合わせ、必要なクエリを含んでいます。</p>
           </section>
 
           {/* 2) QRコード */}

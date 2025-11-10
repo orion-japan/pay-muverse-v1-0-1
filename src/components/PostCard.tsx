@@ -40,12 +40,10 @@ export default function PostCard({ post }: PostCardProps) {
             <img src={post.media_urls[0]} alt="投稿画像" className="post-image" />
           </div>
         )}
-        {post.tags?.length > 0 && (
+        {(post.tags ?? []).length > 0 && (
           <div className="tag-list">
-            {post.tags.map((tag, index) => (
-              <span key={index} className="tag">
-                #{tag}
-              </span>
+            {(post.tags ?? []).map((tag, i) => (
+              <span key={i} className="tag">#{tag}</span>
             ))}
           </div>
         )}

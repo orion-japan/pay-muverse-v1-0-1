@@ -486,7 +486,7 @@ export default function MuiChat() {
           }}
           onSend={() => handleComposerSend(composerText)}
           sending={ocrRunning}
-          textareaRef={textareaRef}
+          textareaRef={textareaRef as React.RefObject<HTMLTextAreaElement>}
           expanded={composerExpanded}
         />
       </div>

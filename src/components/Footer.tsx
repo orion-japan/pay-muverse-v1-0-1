@@ -182,7 +182,7 @@ export default function Footer() {
         try {
           const { getAuth } = await import('firebase/auth');
           const auth = getAuth();
-          idToken = await auth.currentUser?.getIdToken().catch(() => null);
+          idToken = (await auth.currentUser?.getIdToken().catch(() => null)) ?? null;
         } catch {}
 
         const url = `/api/talk/unread-count?ts=${Date.now()}`;

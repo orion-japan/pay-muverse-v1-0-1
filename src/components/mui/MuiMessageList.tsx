@@ -113,7 +113,7 @@ export default function MuiMessageList({ items }: Props) {
               return (
                 <div key={j} className={`bubble ${isSelf ? 'self' : 'partner'}`}>
                   <div className="content">
-                    {text.split('\n').map((line, k) => (
+                  {text.split('\n').map((line: string, k: number) => (
                       <p key={k} className="line">
                         {renderLine(line)}
                       </p>

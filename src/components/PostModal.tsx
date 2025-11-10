@@ -3,12 +3,18 @@
 import { useRef, useState } from 'react';
 import './PostModal.css';
 
+// MutableRefObject / RefObject のどちらでも受けられる型
+type ScrollRef =
+  | React.MutableRefObject<HTMLDivElement | null>
+  | React.RefObject<HTMLDivElement>
+  | null;
+
 type PostModalProps = {
   isOpen: boolean;
   onClose: () => void;
   userCode: string;
   onPostSuccess: () => void;
-  scrollTargetRef?: React.RefObject<HTMLDivElement>;
+  scrollTargetRef?: ScrollRef;
 };
 
 export default function PostModal({
@@ -81,7 +87,7 @@ export default function PostModal({
       throw new Error('画像アップロード失敗');
     }
 
-    return urls;
+    return urls as string[];
   };
 
   // 投稿処理
@@ -120,11 +126,13 @@ export default function PostModal({
       onPostSuccess();
       onClose();
 
+      // スクロール（外部ターゲットがあれば優先）
       setTimeout(() => {
-        const el = scrollTargetRef?.current;
-        if (el) {
-          el.scrollIntoView({ behavior: 'smooth' });
-        }
+        const el =
+          scrollTargetRef && 'current' in scrollTargetRef
+            ? scrollTargetRef.current
+            : null;
+        el?.scrollIntoView({ behavior: 'smooth' });
       }, 300);
     } catch (err) {
       console.error('[PostModal] ❌ 投稿失敗', err);

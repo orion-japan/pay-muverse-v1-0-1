@@ -24,7 +24,7 @@ export default function CreatePage() {
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
 
-  // スクロール用
+  // スクロール用（HTMLElement に広げて PostModal 側と一致させる）
   const bottomRef = useRef<HTMLDivElement>(null);
   const hasAutoScrolledRef = useRef(false); // 初回だけ自動スクロール
 
@@ -102,7 +102,6 @@ export default function CreatePage() {
   // 1) posts が描画キューに載った直後にスクロール（複数回呼んで確実に）
   useEffect(() => {
     if (!hasAutoScrolledRef.current && posts.length > 0) {
-      // 次フレーム、その少し後、さらに少し後…と3回トライ
       requestAnimationFrame(() => scrollToBottom());
       setTimeout(scrollToBottom, 60);
       setTimeout(scrollToBottom, 300);
@@ -162,9 +161,9 @@ export default function CreatePage() {
 
               {post.content && <p className="post-content">{post.content}</p>}
 
-              {post.tags?.length > 0 && (
+              {(post.tags ?? []).length > 0 && (
                 <div className="tags">
-                  {post.tags.map((tag, i) => (
+                  {(post.tags ?? []).map((tag, i) => (
                     <span key={i} className="tag">
                       #{tag}
                     </span>
@@ -192,7 +191,7 @@ export default function CreatePage() {
       </div>
 
       {/* 最下部アンカー */}
-      <div ref={bottomRef} style={{ height: 1 }} />
+      <div ref={bottomRef as React.RefObject<HTMLDivElement>} style={{ height: 1 }} />
 
       <PostModal
         isOpen={modalOpen}

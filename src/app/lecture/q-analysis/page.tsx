@@ -47,55 +47,38 @@ const hexToHsl = (hex: string) => {
   const r = parseInt(n.slice(0, 2), 16) / 255;
   const g = parseInt(n.slice(2, 4), 16) / 255;
   const b = parseInt(n.slice(4, 6), 16) / 255;
-  const max = Math.max(r, g, b),
-    min = Math.min(r, g, b);
-  let h = 0,
-    s = 0,
-    l = (max + min) / 2;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0, l = (max + min) / 2;
   if (max !== min) {
     const d = max - min;
     s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
     switch (max) {
-      case r:
-        h = (g - b) / d + (g < b ? 6 : 0);
-        break;
-      case g:
-        h = (b - r) / d + 2;
-        break;
-      case b:
-        h = (r - g) / d + 4;
-        break;
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / d + 2; break;
+      case b: h = (r - g) / d + 4; break;
     }
     h /= 6;
   }
   return { h: h * 360, s: s * 100, l: l * 100 };
 };
 const hslToHex = (h: number, s: number, l: number) => {
-  h /= 360;
-  s /= 100;
-  l /= 100;
+  h /= 360; s /= 100; l /= 100;
   const h2 = (p: number, q: number, t: number) => {
     if (t < 0) t += 1;
     if (t > 1) t -= 1;
-    if (t < 1 / 6) return p + (q - p) * 6 * t;
-    if (t < 1 / 2) return q;
-    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    if (t < 1/6) return p + (q - p) * 6 * t;
+    if (t < 1/2) return q;
+    if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
     return p;
   };
   let r: number, g: number, b: number;
-  if (s === 0) {
-    r = g = b = l;
-  } else {
+  if (s === 0) { r = g = b = l; }
+  else {
     const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
     const p = 2 * l - q;
-    r = h2(p, q, h + 1 / 3);
-    g = h2(p, q, h);
-    b = h2(p, q, h - 1 / 3);
+    r = h2(p, q, h + 1/3); g = h2(p, q, h); b = h2(p, q, h - 1/3);
   }
-  const toHex = (x: number) =>
-    Math.round(x * 255)
-      .toString(16)
-      .padStart(2, '0');
+  const toHex = (x: number) => Math.round(x * 255).toString(16).padStart(2, '0');
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 };
 const easeColor = (hex: string) => {
@@ -119,9 +102,7 @@ const fmtUTC = (d: Date) => {
   return `${y}-${m}-${day}`;
 };
 const utcToday = () =>
-  new Date(
-    Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()),
-  );
+  new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));
 const addUTCDays = (base: Date, delta: number) => {
   const d = new Date(base);
   d.setUTCDate(d.getUTCDate() + delta);
@@ -151,6 +132,13 @@ async function getBearerToken(): Promise<string | null> {
   } catch {}
   return null;
 }
+
+/* ====== Headers の型安全ビルダー（TS2769対策） ====== */
+const buildHeaders = (idToken?: string | null): HeadersInit => {
+  const base: Record<string, string> = { 'content-type': 'application/json' };
+  if (idToken) base.Authorization = `Bearer ${idToken}`;
+  return base;
+};
 
 /* ====== 総評テキスト生成 ====== */
 function buildSummaryText(opts: {
@@ -191,9 +179,7 @@ export default function QAnalysisPage() {
 
   // 相対期間
   const [days, setDays] = useState<'30' | '60' | '90'>('30');
-  const [intent, setIntent] = useState<'all' | 'self_post' | 'event_attend' | 'vision_check'>(
-    'all',
-  );
+  const [intent, setIntent] = useState<'all' | 'self_post' | 'event_attend' | 'vision_check'>('all');
   const [appearance, setAppearance] = useState<QPieAppearance>('none');
 
   // 絶対期間
@@ -222,7 +208,6 @@ export default function QAnalysisPage() {
     const DEV = process.env.NODE_ENV !== 'production';
     try {
       const bearer = await getBearerToken();
-      const authz = bearer ? { Authorization: `Bearer ${bearer}` } : {};
 
       const start = startDate;
       const end = endDateForTitle;
@@ -265,7 +250,7 @@ export default function QAnalysisPage() {
       if (DEV) console.info('[q-analysis] conv find_or_create', { key, title });
       const resConv = await fetch('/api/agent/muai/conversations', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...authz },
+        headers: buildHeaders(bearer),
         body: JSON.stringify({
           op: 'find_or_create',
           key,
@@ -285,7 +270,7 @@ export default function QAnalysisPage() {
       if (DEV) console.info('[q-analysis] post user turn', { threadId, len: summaryText.length });
       await fetch('/api/mu/turns', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...authz },
+        headers: buildHeaders(bearer),
         body: JSON.stringify({
           conv_id: threadId,
           role: 'user',
@@ -298,11 +283,11 @@ export default function QAnalysisPage() {
       if (DEV) console.info('[q-analysis] LLM call', { threadId });
       await fetch('/api/agent/muai/reply', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...authz },
+        headers: buildHeaders(bearer),
         body: JSON.stringify({
           agent: 'mu',
           conversationId: threadId,
-          text: summaryText, // ← これが無いと "text required"
+          text: summaryText,
           meta: { source: 'q-analysis' },
         }),
       });

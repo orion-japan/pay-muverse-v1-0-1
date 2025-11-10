@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer } from '@/lib/supabaseServer';
-import fetch from 'node-fetch';
+
 
 export async function POST(req: Request) {
   console.log('========== [API] copyImageToPublic START ==========');

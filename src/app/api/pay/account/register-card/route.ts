@@ -133,7 +133,7 @@ export async function POST(req: Request) {
         description: `app user ${user_code}`,
       });
       customerId = c.id;
-      logTrail.push(`🆕 customer created: ${short(customerId, 12)}`);
+      logTrail.push(`🆕 customer created: ${short(customerId ?? undefined, 12)}`);
     } else {
       // 既存顧客にカード追加（default を更新）
       await payjp.customers.update(customerId, {
