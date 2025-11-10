@@ -137,9 +137,10 @@ async function getUserAttendanceDates(
 function trendLastN(schedulesAsc: string[], presentSet: Set<string>, N = 5): number {
   const lastN = schedulesAsc.slice(-N);
   if (lastN.length === 0) return 0;
-  const arr = lastN.map((d) => (presentSet.has(d) ? 1 : 0));
-  const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
+  const arr = lastN.map((d) => Number(presentSet.has(d))); // ← 型を number[] に
+  const avg = arr.reduce((sum, v) => sum + v, 0) / arr.length;
   return avg;
+
 }
 
 // 出席日の間隔（差分日数）の変動係数（std/mean）
