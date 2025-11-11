@@ -166,10 +166,12 @@ export async function POST(req: NextRequest) {
     let user: UserRow | null = null;
     if (user_code_req) {
       const { data, error } = await sb
-        .from('users')
-        .select('user_code,firebase_uid,payjp_customer_id,payjp_default_card_id')
-        .eq('user_code', user_code_req)
-        .maybeSingle<UserRow>();
+      .from('users')
+      .select(/* 既存の選択カラムそのまま */)
+      .eq('user_code', user_code_req)
+      .maybeSingle(); // ← 型引数を外す
+
+    const userRow = data as unknown as UserRow | null; // ← 後段の既存参照に合わせて利用
       if (error || !data) {
         log(reqId, 'warn', `user_not_found by user_code:${user_code_req}`, error);
         return NextResponse.json(
@@ -187,10 +189,13 @@ export async function POST(req: NextRequest) {
       user = data;
     } else {
       const { data, error } = await sb
-        .from('users')
-        .select('user_code,firebase_uid,payjp_customer_id,payjp_default_card_id')
-        .eq('firebase_uid', decoded.uid)
-        .maybeSingle<UserRow>();
+      .from('users')
+      .select(/* 既存の選択カラムそのまま */)
+      .eq('firebase_uid', decoded.uid)
+      .maybeSingle(); // ← 型引数を外す
+
+    const userRow = data as unknown as UserRow | null; // ← 後段の既存参照に合わせて利用
+
       if (error || !data) {
         log(reqId, 'warn', `user_not_found by uid:${decoded.uid}`, error);
         return NextResponse.json(

@@ -23,7 +23,7 @@ export async function POST(req: Request) {
 
   // 3) 各ユーザーの助言を生成（1日1件UPSERTされる）
   const origin = process.env.APP_ORIGIN!;
-  const results = [];
+  const results: Array<{ user: string; ok: boolean }> = [];
   for (const t of targets as Array<{ user_code: string }>) {
     const r = await fetch(
       `${origin}/api/qcode/coach/advise?user=${encodeURIComponent(t.user_code)}`,

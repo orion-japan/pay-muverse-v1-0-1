@@ -1,70 +1,83 @@
-// /src/lib/iros/title.ts
-// 全体タイトルの自動生成（初回発話の要点＋短い絵文字）
-// 例：『静けさ』『芯の整い』『先へ』など
+// src/lib/iros/title.ts
+// Iros — title suggester（短い会話用タイトル生成）
+// 依存なし。buildPrompt / wire.orchestrator から呼ばれます。
 
-import { analyzeFocus } from './focusCore';
-
-const EMOJI_BY_QNAME: Record<string, string> = {
-  '秩序': '🧭',  // Q1（秩序）
-  '成長': '🌱',  // Q2（成長）
-  '安定': '🟫',  // Q3（安定）
-  '浄化': '💧',  // Q4（浄化）
-  '情熱': '🔥',  // Q5（情熱）
-  '':   '🪔',
-  default: '🪔',
+export type FocusLite = {
+  phase?: string; // 'Inner' | 'Outer'
+  depth?: string; // 'S1'..'I3'
+  q?: string;     // 'Q1'..'Q5'
 };
 
-function pickEmojiByQName(qName?: string): string {
-  if (!qName) return EMOJI_BY_QNAME.default;
-  // 部分一致でも拾えるように
-  for (const key of Object.keys(EMOJI_BY_QNAME)) {
-    if (!key) continue;
-    if (qName.includes(key)) return EMOJI_BY_QNAME[key];
-  }
-  return EMOJI_BY_QNAME.default;
-}
+export type MemoryLite = {
+  summary?: string;
+  keywords?: string[];
+} | null;
 
-/** 短い要約（最大14文字程度）を抜き出す */
-function summarize(text: string, max = 14): string {
-  const t = (text || '')
-    .replace(/\s+/g, ' ')
-    .replace(/[#@＃＠]/g, '')
+/** 日本語テキストから簡易タイトルを抽出（先頭文の名詞句ベース） */
+function extractHeadPhrase(text: string): string {
+  const t = String(text ?? '').trim();
+
+  if (!t) return '';
+
+  // 1) 改行で先頭段落を取る
+  const para = t.split(/\n+/)[0] || t;
+
+  // 2) 区切り（句点・？・！）で最初の文
+  const first = (para.split(/(?<=[。．!?！？])/)[0] || para).trim();
+
+  // 3) 不要助詞や読点の末尾を除去
+  let s = first.replace(/[。．!?！？]+$/u, '').trim();
+
+  // 4) 余分な接頭（「相談」「質問です」など）の軽い除去
+  s = s
+    .replace(/^相談(です|したい|があります)?/u, '')
+    .replace(/^質問(です|したい|があります)?/u, '')
+    .replace(/^お願い(です|したい)?/u, '')
+    .replace(/^助けてください/u, '')
     .trim();
 
-  if (!t) return 'はじめの声';
+  // 5) 先頭の「私は/自分は/今日」は削る
+  s = s.replace(/^(私は|自分は|今日は|今は)\s*/u, '').trim();
 
-  // 句点や改行で最初の塊を取る
-  let s = (t.split(/[。.!?\n]/)[0] || t).trim();
+  // 6) 20〜28文字程度に丸める
+  const MAX = 28;
+  if (s.length > MAX) s = s.slice(0, MAX);
 
-  // 助詞で終わっていたら少し詰める
-  s = s.replace(/[、，.,\s]+$/g, '');
-
-  if (s.length > max) s = s.slice(0, max);
-  if (!s) s = 'いまの気配';
-  return s;
+  // 空ならフォールバック
+  return s || '会話のメモ';
 }
 
-/** 初回ユーザー発話から会話名を生成 */
-export function generateConversationalTitle(firstUserText: string): string {
-  const src = (firstUserText ?? '').trim();
-  if (!src) return '新しい会話';
-
-  // 内面フォーカスの軽い推定（focusCore 側の型に依存しない）
-  const f = analyzeFocus(src) as any; // { protectedFocus?: string; qName?: string; phase?: string; depth?: string }
-  const core = String(f?.protectedFocus || summarize(src));
-  const emoji = pickEmojiByQName(String(f?.qName || ''));
-
-  return `${emoji} ${core}`;
+function labelFromFocus(f?: FocusLite): string {
+  if (!f) return '';
+  const parts: string[] = [];
+  if (f.q) parts.push(f.q);
+  if (f.phase) parts.push(f.phase);
+  if (f.depth) parts.push(f.depth);
+  return parts.join('·');
 }
 
-/** 既存タイトルを付け直すかどうか */
-export function shouldRetitle(currentTitle?: string | null): boolean {
-  if (!currentTitle) return true;
-  return /^(新しい会話|新規セッション|Untitled|No Title|無題)/i.test(currentTitle);
+/** タイトル候補を生成（テキスト先頭 + フォーカスラベル + キーワード1） */
+export function makeTitle(
+  userText: string,
+  focus?: FocusLite | null,
+  memory?: MemoryLite | undefined,
+): string {
+  const head = extractHeadPhrase(userText);
+  const lab = labelFromFocus(focus ?? undefined);
+  const kw =
+    (memory?.keywords && memory.keywords.find((k) => k && k.length <= 10)) ||
+    (memory?.summary ? memory.summary.split(/[、, ]/)[0] : '') ||
+    '';
+
+  const parts = [head, lab, kw].map((p) => String(p || '').trim()).filter(Boolean);
+
+  // 先頭優先で 16〜28 文字に収める
+  let title = parts.join(' | ').trim();
+  const MAX = 28;
+  if (title.length > MAX) title = title.slice(0, MAX);
+
+  // 最終フォールバック
+  return title || '会話のメモ';
 }
 
-/** 別名エクスポート：古い呼び名でも import 可能に */
-export const generateConversationTitle = generateConversationalTitle;
-
-/** どちら経路でも使えるよう default も残す */
-export default generateConversationalTitle;
+export default { makeTitle };

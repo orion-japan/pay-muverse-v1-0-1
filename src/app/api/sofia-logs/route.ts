@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
         .from('sofia_conversations')
         .select(CONV_FIELDS)
         .eq('id', conv_id)
-        .maybeSingle<SofiaConversation>(); // ← 型指定
+        .maybeSingle(); // ← 型指定
 
       if (cErr) return NextResponse.json({ error: cErr.message }, { status: 500 });
       if (!convo) return NextResponse.json({ error: 'conversation not found' }, { status: 404 });
@@ -110,7 +110,7 @@ export async function GET(req: NextRequest) {
         .order('turn_index', { ascending: true })
         .order('created_at', { ascending: true })
         .limit(2000)
-        .returns<SofiaTurnRaw[]>(); // ← 型指定
+        ; // ← 型指定
 
       if (tErr) return NextResponse.json({ error: tErr.message }, { status: 500 });
 
@@ -165,7 +165,7 @@ export async function GET(req: NextRequest) {
         .order('last_turn_at', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false })
         .limit(pageSize)
-        .returns<SofiaConversation[]>(); // ← 型指定
+        ; // ← 型指定
 
       if (listErr) return NextResponse.json({ error: listErr.message }, { status: 500 });
 

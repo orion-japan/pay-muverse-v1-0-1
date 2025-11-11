@@ -1,5 +1,5 @@
 // src/lib/authz.ts
-import { NextRequest } from 'next/server';
+import type { NextRequest } from 'next/server';
 import { adminAuth } from '@/lib/firebase-admin';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
@@ -36,7 +36,8 @@ export type AuthzResult = {
 
 /* ===== ログ補助 ===== */
 const NS = '[authz]';
-const rid = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
+const rid = () =>
+  (globalThis as any).crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
 const log = (id: string, ...a: any[]) => console.log(NS, id, ...a);
 const warn = (id: string, ...a: any[]) => console.warn(NS, id, ...a);
 const err = (id: string, ...a: any[]) => console.error(NS, id, ...a);
@@ -101,6 +102,26 @@ export async function verifyFirebaseAndAuthorize(
       const u = new URL((input as any).url);
       urlUserCode = u.searchParams.get('user_code');
     } catch {}
+  }
+
+  // 開発簡易トークン: Authorization: Bearer dev:<user_code>
+  if (isDev && bearerToken && bearerToken.startsWith('dev:')) {
+    const user = bearerToken.slice('dev:'.length).trim();
+    if (user) {
+      const pgJwt = signPostgresJwt({ user_code: user });
+      const ms = Date.now() - t0;
+      log(id, 'dev-bearer ok', { user, role: 'admin', ms });
+      return {
+        ok: true,
+        allowed: true,
+        status: 200,
+        pgJwt,
+        userCode: user,
+        role: 'admin',
+        user: { uid: 'dev-bearer', user_code: user },
+        uid: 'dev-bearer',
+      };
+    }
   }
 
   if (!bearerToken && !sessionCookie) {
@@ -181,9 +202,9 @@ export async function verifyFirebaseAndAuthorize(
     }
 
     const role: 'master' | 'admin' | 'other' =
-      u.click_type === 'master' || u.plan_status === 'master'
+      (u as any).click_type === 'master' || (u as any).plan_status === 'master'
         ? 'master'
-        : u.click_type === 'admin' || u.plan_status === 'admin'
+        : (u as any).click_type === 'admin' || (u as any).plan_status === 'admin'
           ? 'admin'
           : 'other';
 

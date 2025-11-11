@@ -75,6 +75,12 @@ export async function GET(req: NextRequest) {
 
     // ここで overrides を一括取得して適用
     if (pool.length) {
+      type OverrideRow = {
+        session_id: string | null;
+        title?: string | null;
+        archived?: boolean | null;
+      };
+
       const ids = pool.map((p) => p.conversation_id);
       const ov = await supabase
         .from('mtalk_overrides')
@@ -83,17 +89,23 @@ export async function GET(req: NextRequest) {
         .in('session_id', ids);
 
       if (!ov.error && ov.data?.length) {
-        const map = new Map(ov.data.map((o) => [String(o.session_id), o]));
+        const map = new Map<string, OverrideRow>(
+          (ov.data as OverrideRow[]).map((o) => [String(o.session_id ?? ''), o]),
+        );
+
         // archived は除外、title があれば上書き
         for (let i = pool.length - 1; i >= 0; i--) {
-          const row = map.get(pool[i].conversation_id);
+          const row = map.get(pool[i].conversation_id) as OverrideRow | undefined;
           if (!row) continue;
+
           if (row.archived) {
             pool.splice(i, 1);
             continue;
           }
-          if (row.title && row.title.trim()) {
-            pool[i].title = row.title.trim().slice(0, 100); // 任意の上限
+
+          const t = (row.title ?? '').trim();
+          if (t) {
+            pool[i].title = t.slice(0, 100); // 任意の上限
           }
         }
       }

@@ -111,7 +111,7 @@ export async function calcAinoriQForDate(
   const attRate7 = att7.length / 7;
   const attRate30 = att30.length / 30;
 
-  const allDates = [];
+  const allDates: string[] = [];
   for (let i = 0; i < 30; i++) {
     allDates.push(jstDateString(new Date(new Date(forDateIso).getTime() - i * 86400000)));
   }

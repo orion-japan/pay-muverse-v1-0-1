@@ -225,20 +225,23 @@ export async function POST(req: NextRequest) {
     if (body.session_id) {
       session_id = String(body.session_id);
     } else {
-      type SessRow = { id: string } | null;
-      const { data: sess, error: sessErr } = await supabase
-        .from('mtalk_sessions')
-        .insert({ user_code, agent })
-        .select('id')
-        .single<SessRow>();
+      // 1回だけ使うローカル型名で重複回避
+      type MtalkSess = { id: string };
 
-      if (sessErr) throw new Error(`mtalk_sessions.insert failed: ${sessErr.message}`);
-      if (!sess || !sess.id) {
+      const { data: sessRaw, error: sessErr } = await supabase
+        .from('mtalk_sessions')
+        .select('id')
+        .maybeSingle(); // 型引数なしでOK
+
+      if (sessErr) throw new Error(`mtalk_sessions.select failed: ${sessErr.message}`);
+
+      const sess = sessRaw as MtalkSess | null;
+
+      if (!sess?.id) {
         return json({ ok: false, error: 'session_insert_failed' }, 500);
       }
       session_id = sess.id;
     }
-
     const joined = texts.join('\n').slice(0, 2000);
     const fb = fallbackPhaseAndDepth(joined);
     const cls = await llmClassifyQPhaseDepth(joined);

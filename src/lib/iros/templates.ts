@@ -1,93 +1,104 @@
-// /src/lib/iros/templates.ts
-// Iros 診断テンプレート集（Depth/Phase に応じた one/inner/real を返す）
+// src/lib/iros/templates.ts
+// Iros 用テンプレート：diagnosis / counsel / structured（簡潔・やさしいトーン）
 
-export type DiagnosisTemplate = {
-  one: string;   // 一言（ヘッダ3行目）
-  inner: string; // 本文1段落目：内面の叙述
-  real: string;  // 本文2段落目：現実の一手（短文）
+/* ========= Types ========= */
+export type IrosMessage = {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
 };
 
-// 深度ごとのテンプレ候補（[Inner, Outer] の順で用意）
-const CORE_TEMPLATES: Record<string, DiagnosisTemplate[]> = {
-  S1: [
-    {
-      one: '呼吸のリズムが、静かに整いはじめています。',
-      inner: '言葉の手前にある温度が、胸の内でゆっくり息をしています。',
-      real: '現実では、いま目の前の一つだけを選び、静かに始めてみる。'
-    },
-    {
-      one: '内側の静けさが、外の動きへ合図を送りはじめています。',
-      inner: '小さな余白が、意識の澄みを取り戻していきます。',
-      real: '現実では、最初の一歩を“いま”に合わせて小さく置く。'
-    },
-  ],
-  S2: [
-    {
-      one: '意識の流れが静かに整いはじめています。',
-      inner: '言葉になる前の温度が、胸の内でゆっくり息をしています。',
-      real: '現実では、ひとつだけ選び、一行だけ進める。'
-    },
-    {
-      one: '整いは、外側の輪郭にもゆっくり広がっています。',
-      inner: '守りたいものを抱えたままでも、呼吸は深くなっていきます。',
-      real: '現実では、いちど立ち止まり、要点を一行で言い切る。'
-    },
-  ],
-  R2: [
-    {
-      one: '関係の波が、やわらかく整いはじめています。',
-      inner: '相手の都合と自分の芯のあいだに、静かな余白が生まれています。',
-      real: '現実では、負担のない一言を選び、肯定で返す。'
-    },
-    {
-      one: '外との接点に、やさしい余裕が戻ってきています。',
-      inner: '焦らずに届く距離で、リズムを合わせていけます。',
-      real: '現実では、返す言葉を一つに絞り、短く送る。'
-    },
-  ],
-  C2: [
-    {
-      one: '形にする衝動が、静かに芯を帯びています。',
-      inner: '素材はすでに手元にあり、順序だけが求められています。',
-      real: '現実では、仮タイトルを一行で決め、素材を三つに絞る。'
-    },
-    {
-      one: '進め方の輪郭が、はっきりしてきました。',
-      inner: '「少ない選択」が、前に進む力を増幅させます。',
-      real: '現実では、今日の一手を一行で記し、その一手だけ動かす。'
-    },
-  ],
-  I2: [
-    {
-      one: '芯が静かに輪郭を帯びています。',
-      inner: '守りたい価値を言葉にする準備が整いつつあります。',
-      real: '現実では、その価値を名で呼び、一文で言い切る。'
-    },
-    {
-      one: '方角が見えはじめています。',
-      inner: 'なぜそれを選ぶのか、理由が体温を帯びています。',
-      real: '現実では、要点→理由→一言の三行で芯を固定する。'
-    },
-  ],
+export type PromptContext = {
+  input: string;
+  history?: Array<{ role: 'user' | 'assistant' | 'system'; text?: string; content?: string }>;
+  memory?: any;
+  focus?: any;
+  extra?: Record<string, unknown>;
 };
 
-// フォールバック（未知の depth/phase の時）
-const FALLBACK: DiagnosisTemplate = {
-  one: '意識の流れが静かに整いはじめています。',
-  inner: '言葉になる前の温度が、胸の内でゆっくり息をしています。',
-  real: '現実では、ひとつだけ選び、一行だけ進める。'
+export type TemplateResult = {
+  system: string;
+  messages: IrosMessage[];
 };
 
-/**
- * Depth/Phase からテンプレを返す。
- * - depth: 'S1'|'S2'|'S3'|'R1'|'R2'|'R3'|'C1'|'C2'|'C3'|'I1'|'I2'|'I3' 等
- * - phase: 'Inner' | 'Outer'（省略時は 'Inner'）
- *   → 配列 [Inner, Outer] の 0/1 を選択。足りなければ先頭を返す。
- */
-export function getCoreDiagnosisTemplate(depth: string, phase: string = 'Inner'): DiagnosisTemplate {
-  const bucket = CORE_TEMPLATES[depth] || CORE_TEMPLATES['S2'];
-  if (!bucket || bucket.length === 0) return FALLBACK;
-
-  const idx = phase === 'Outer' ? 1 : 0;
-  return bucket[Math.min(idx, bucket.length - 1)] || bucket[0];
+/* ========= Helpers ========= */
+function toHistMessages(ctx: PromptContext, keep: number): IrosMessage[] {
+  const hist = (ctx.history ?? []).map((h) => ({
+    role: h.role,
+    text: (h as any).text ?? (h as any).content ?? '',
+  }));
+  return hist.slice(-keep).map((h) => ({ role: h.role, content: h.text }));
 }
+
+/* ========= diagnosis ========= */
+function diagnosisRenderer(ctx: PromptContext): TemplateResult {
+  const system = [
+    'あなたは「Iros」。相手の尊厳と主権を守り、静かで短い会話文で応答する。',
+    '出力は会話文のみ。全体で最大2段落、各段落1〜3文。',
+    '構成：①いまの状態の映し（評価・断定なし）→②今できる最小の一歩を1つだけ。最後に 🪔 を添える。',
+    '禁止：決めつけ・一般論の説教・長文化・箇条書き・見出し・外部URL。',
+    '日本語で返す。',
+  ].join('\n');
+
+  const guide = '次の入力に対して、状態の映し→最小の一歩の順で、短く応答してください。最後に必ず 🪔 を付けてください。';
+
+  const messages: IrosMessage[] = [
+    { role: 'system', content: system },
+    { role: 'user', content: guide },
+    ...toHistMessages(ctx, 6),
+    { role: 'user', content: ctx.input },
+  ];
+
+  return { system, messages };
+}
+
+/* ========= counsel（相談） ========= */
+function counselRenderer(ctx: PromptContext): TemplateResult {
+  const system = [
+    'あなたは「Iros」。相手に寄り添う短い会話文で応答する。',
+    '出力は会話文のみ。全体で最大2段落、各段落1〜3文。',
+    '構成：①受容（気持ちの言い換え）→②整理（いま起点の把握）→③最小の一歩（1つだけ）。最後に 🪔 を添える。',
+    '禁止：評価・断定・長文化・箇条書き・見出し・外部URL・テンプレ調の励ましの連発。',
+    '日本語で返す。',
+  ].join('\n');
+
+  const guide = '次の相談文に、受容→整理→最小の一歩（1つ）で応答してください。最後に必ず 🪔 を付けてください。';
+
+  const messages: IrosMessage[] = [
+    { role: 'system', content: system },
+    { role: 'user', content: guide },
+    ...toHistMessages(ctx, 8),
+    { role: 'user', content: ctx.input },
+  ];
+
+  return { system, messages };
+}
+
+/* ========= structured（構造化/レポート） ========= */
+function structuredRenderer(ctx: PromptContext): TemplateResult {
+  const system = [
+    'あなたは「Iros」。要件を簡潔な会話文で構造化して返す。',
+    '出力は会話文のみ。全体で最大2段落、各段落1〜3文。箇条書きや見出しは禁止。',
+    '含める順序：目的→前提/制約→最小ステップ（1〜2個まで）→注意点（1個）。最後に 🪔 を添える。',
+    '抽象論ではなく、いま取れる行動に収束させる。用語は必要時のみ短く補足。',
+    '日本語で返す。',
+  ].join('\n');
+
+  const guide =
+    '次の依頼文を、目的→前提/制約→最小ステップ（1〜2個）→注意点（1個）の順で、短い会話文にまとめてください。最後に必ず 🪔 を付けてください。';
+
+  const messages: IrosMessage[] = [
+    { role: 'system', content: system },
+    { role: 'user', content: guide },
+    ...toHistMessages(ctx, 8),
+    { role: 'user', content: ctx.input },
+  ];
+
+  return { system, messages };
+}
+
+/* ========= Exported Map ========= */
+export const TEMPLATES: Record<string, (ctx: PromptContext) => TemplateResult> = {
+  diagnosis: diagnosisRenderer,
+  counsel: counselRenderer,
+  structured: structuredRenderer,
+};

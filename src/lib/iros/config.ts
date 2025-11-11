@@ -1,7 +1,8 @@
-// /src/lib/iros/config.ts
+// src/lib/iros/config.ts
 // 役割：古い import を壊さず、system.ts に一元化
 // - 互換用に IROS_PROMPT をエイリアス提供（buildSystemPrompt()の即時値）
 // - 今後は buildSystemPrompt の使用推奨
+// - 型群（Phase/Depth/QCode/ResonanceState など）を共鳴モジュール全体で共通使用できるよう統一
 
 import { buildSystemPrompt, type Mode } from './system';
 

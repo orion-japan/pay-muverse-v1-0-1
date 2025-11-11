@@ -1,83 +1,116 @@
 // src/lib/iros/phrasing.ts
-type Option = { from: RegExp[]; to: string[] };
+// Iros — phrasing helpers（出力の最終整形）
+// - naturalClose(text, { mode? }) …… 文末を自然に閉じる＆末尾のノイズ除去
+// - toGentleTone(text, { mode? }) …… トーンをやわらげる最小整形（強い断定の緩和）
+// - tidy(text)                      …… 空白/改行の正規化
+// - applyBreathing(text)            …… 段落を短く保つための軽いブレイキング
+//
+// 依存なし・副作用なし。既存コードのフォールバック先としても使用されます。
 
-const RE_SPACE = String.raw`\s*`;
-const RE_END = String.raw`[。\.…\s]*$`;
+export type ToneOpts = {
+  mode?: 'diagnosis' | 'auto' | 'counsel' | 'structured' | string;
+};
 
-const PHRASE_OPTIONS: Option[] = [
-  {
-    from: [
-      new RegExp(`その${RE_SPACE}感じを、?${RE_SPACE}もう少しだけ${RE_SPACE}持っていてください${RE_END}`),
-      new RegExp(`その${RE_SPACE}感覚を、?${RE_SPACE}もう少しだけ${RE_SPACE}持っていてください${RE_END}`),
-    ],
-    to: [
-      'その気持ちを、少し味わってみてください。',
-      '今の感覚を、そのまま感じていて大丈夫です。',
-      '焦らずに、そのまま感じてみましょう。',
-      'その気持ちを、大切にしてあげてください。',
-    ],
-  },
-  {
-    from: [
-      new RegExp(`その${RE_SPACE}感じを${RE_SPACE}持っていてください${RE_END}`),
-      new RegExp(`その${RE_SPACE}感覚を${RE_SPACE}持っていてください${RE_END}`),
-    ],
-    to: [
-      'その気持ちを、少し味わってみてください。',
-      '今の感覚を、そのままでいてみましょう。',
-    ],
-  },
-  {
-    from: [
-      new RegExp(`その${RE_SPACE}続き、?${RE_SPACE}少しだけ${RE_SPACE}聞かせてくれますか${RE_END}`),
-      new RegExp(`その${RE_SPACE}続き、?${RE_SPACE}少しだけ${RE_SPACE}話してみませんか${RE_END}`),
-    ],
-    to: [
-      '気になったところを、ひとつだけ教えてください。',
-      '印象に残ったところを、ひとことで大丈夫です。',
-    ],
-  },
-];
+/** 空白・改行の軽い正規化（Markdownは想定しない簡易版） */
+export function tidy(text: string): string {
+  if (!text) return '';
+  let t = String(text);
 
-function mulberry32(seed: number) {
-  return function () {
-    let t = (seed += 0x6d2b79f5);
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-function hashStr(s: string): number {
-  let h = 2166136261 >>> 0;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
+  // CRLF → LF
+  t = t.replace(/\r\n?/g, '\n');
+
+  // タブ → 半角スペース
+  t = t.replace(/\t/g, ' ');
+
+  // 連続スペースを1つに（コード想定なし）
+  t = t.replace(/ {2,}/g, ' ');
+
+  // 行頭末尾の余計なスペース除去
+  t = t
+    .split('\n')
+    .map((l) => l.trim())
+    .join('\n');
+
+  // 3行以上の連続改行を2行に
+  t = t.replace(/\n{3,}/g, '\n\n');
+
+  return t.trim();
 }
 
-export function clarifyPhrasing(text: string, seedHint: string = ''): string {
-  if (!text?.trim()) return text || '';
-  const seed = hashStr(seedHint + '|' + text.slice(0, 32) + '|' + text.length);
-  const rnd = mulberry32(seed);
-  let out = text;
+/** 段落の息継ぎ（長すぎる1段落を切る） */
+export function applyBreathing(text: string): string {
+  const t = tidy(text);
+  if (!t) return '';
 
-  for (const opt of PHRASE_OPTIONS) {
-    for (const re of opt.from) {
-      const m = out.match(re);
-      if (m) {
-        const cand = opt.to[Math.floor(rnd() * opt.to.length)] || opt.to[0];
-        out = out.replace(re, cand);
-        break; // 同カテゴリは1回だけ
+  // 句点の直後に続く長文を適度に分割（150文字超の段落を2分割目安）
+  const paras = t.split(/\n{2,}/g);
+  const out: string[] = [];
+
+  for (const p of paras) {
+    if (p.length <= 150) {
+      out.push(p);
+      continue;
+    }
+    // 句点・読点・？・！で切る候補
+    const chunks = p.split(/(?<=[。．.!?！？])\s*/);
+    let buf = '';
+    for (const c of chunks) {
+      if ((buf + c).length > 150) {
+        out.push(buf.trim());
+        buf = c;
+      } else {
+        buf += (buf ? ' ' : '') + c;
       }
     }
+    if (buf.trim()) out.push(buf.trim());
   }
 
-  return out
-    .replace(/([。．｡])+/g, '。')
-    .replace(/？。$/g, '？')
-    .replace(/！。$/g, '！');
+  // 段落は最大3つまで（診断モード方針）
+  return out.slice(0, 3).join('\n\n').trim();
 }
 
-export default clarifyPhrasing;
-export const PHRASING_MODULE_READY = true as const;
+/** 断定を緩和し、やわらかい語尾に寄せる最小変換 */
+export function toGentleTone(text: string, _opts?: ToneOpts): string {
+  let t = tidy(text);
+
+  // 強めの断定・命令をやわらげる（最小限）
+  const replaces: Array<[RegExp, string]> = [
+    [/してはいけません/g, 'しないでおきましょう'],
+    [/すべきです/g, 'がよさそうです'],
+    [/しなければなりません/g, 'していきましょう'],
+    [/絶対に/g, 'できるだけ'],
+    [/必ず/g, 'できるだけ'],
+    [/断言/g, 'たぶん'],
+  ];
+  for (const [re, sub] of replaces) t = t.replace(re, sub);
+
+  // 句読点の整形（連続句点など）
+  t = t.replace(/([。．.!?！？]){2,}/g, '$1');
+
+  return t.trim();
+}
+
+/** 文末を自然に閉じる（日本語句点などで終わるように） */
+export function naturalClose(text: string, _opts?: ToneOpts): string {
+  const t = tidy(text);
+
+  if (!t) return '';
+
+  // 末尾の引用・括弧閉じを許容
+  const terminal = /[。．.!?！？」』」\)\]\}]+$/;
+  if (terminal.test(t)) return t;
+
+  // URL・コード断片で終わる場合はそのまま
+  if (/(https?:\/\/\S+|```[\s\S]*```|\S+\/\S+)/.test(t.split('\n').slice(-1)[0])) return t;
+
+  return `${t}。`;
+}
+
+/** 既存互換：デフォルトエクスポートに主要APIを束ねる */
+const phrasing = {
+  tidy,
+  applyBreathing,
+  toGentleTone,
+  naturalClose,
+};
+export default phrasing;

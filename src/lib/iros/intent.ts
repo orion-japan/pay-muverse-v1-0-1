@@ -1,83 +1,69 @@
 // src/lib/iros/intent.ts
+// Iros: 入力テキストから会話モードなどを推定する最小実装。
+// - detectMode(): Mode を返す（hint > キーワード）
+// - containsBannedAbstractIntro / inferGoal / detectIsDark は他ルート互換用の薄い実装
+// 既存コードの import 互換のため、detectMode は named と default の両方で export
 
-/**
- * Iros の「モード」定義。
- */
-export type Mode = 'Light' | 'Deep' | 'Harmony' | 'Transcend';
+export type Mode = 'auto' | 'diagnosis' | 'counsel' | 'structured';
 
-/**
- * ユーザ入力が抽象的すぎる/禁止したい導入句を含むかの簡易判定。
- */
-export function containsBannedAbstractIntro(text?: string): boolean {
-  const t = (text ?? '').toLowerCase();
-  const patterns = [
-    'まずは自己紹介',
-    '概要を教えて',
-    '抽象的に',
-    'とりあえず',
-    '何でもいい',
-    'なんでもいい',
-  ];
-  return patterns.some((p) => t.includes(p));
+type DetectArgs = {
+  text: string;
+  hint?: Mode | string | null;
+};
+
+export const TRIGGERS = {
+  counsel: [
+    /相談(が|です|したい|あります)/i,
+    /悩み|困って|助けて|どうしたら/i,
+  ],
+  structured: [
+    /レポート形式|構造化|要件を.*まとめて/i,
+    /箇条書き|整理して.*提示/i,
+  ],
+  diagnosis: [
+    /ir診断|診断してください|診断モード/i,
+  ],
+} as const;
+
+export async function detectMode(args: DetectArgs): Promise<{ mode: Mode }> {
+  const raw = String(args.text ?? '').trim();
+
+  // 1) ヒント最優先（妥当であれば採用）
+  const hint = (args.hint ?? '').toString().toLowerCase();
+  if (hint === 'counsel') return { mode: 'counsel' };
+  if (hint === 'structured') return { mode: 'structured' };
+  if (hint === 'diagnosis') return { mode: 'diagnosis' };
+
+  // 2) キーワードで判定
+  if (TRIGGERS.counsel.some((re) => re.test(raw))) return { mode: 'counsel' };
+  if (TRIGGERS.structured.some((re) => re.test(raw))) return { mode: 'structured' };
+  if (TRIGGERS.diagnosis.some((re) => re.test(raw))) return { mode: 'diagnosis' };
+
+  // 3) 既定
+  return { mode: 'auto' };
 }
 
-/**
- * 簡易ゴール推定（将来差し替え可）。
- */
-export function inferGoal(text?: string): 'diagnosis' | 'brainstorm' | 'advice' | 'chat' {
-  const t = (text ?? '').toLowerCase();
-  if (/\b(ir|ir診断|診断|analysis|analyze)\b/.test(t)) return 'diagnosis';
-  if (/\b(brainstorm|案出し|アイデア|発想)\b/.test(t)) return 'brainstorm';
-  if (/\b(help|advice|助言|アドバイス|どうすれば)\b/.test(t)) return 'advice';
-  return 'chat';
+/* ===== 互換ユーティリティ（別ルートが import しているため最低限を提供） ===== */
+
+// 「抽象イントロ（定義の押し付け）」を禁止する軽い検出。
+// 実際の運用ロジックが別にあるなら差し替えてOK。
+export function containsBannedAbstractIntro(text: string): boolean {
+  const s = (text ?? '').slice(0, 80);
+  return /あなたは|君は|人はこうだ|定義します|結論として/i.test(s);
 }
 
-/**
- * 「暗（ダーク）寄り」かの簡易判定。
- */
-export function detectIsDark(text?: string): boolean {
-  const t = (text ?? '').toLowerCase();
-  const neg = ['無理', '疲れ', 'しんど', '不安', '怖', 'つら', '怒', 'やめたい', '最悪', 'ダメ'];
-  const score = neg.reduce((acc, w) => (t.includes(w) ? acc + 1 : acc), 0);
-  return score >= 2;
+// ざっくりゴール推定（structured 用の見出し生成などで利用される想定）
+export function inferGoal(text: string): string | null {
+  const m =
+    text.match(/(?:目的|ゴール|目標)[：:]\s*([^\n。]+)/) ||
+    text.match(/(?:達成したいこと|やりたいこと)[：:]\s*([^\n。]+)/);
+  return m ? m[1].trim() : null;
 }
 
-/**
- * 文字列から最終モードを決定する正規化関数。
- * 第2引数 contextText は任意の文脈。未指定/不明時のフォールバックに利用。
- *
- * 呼び出し互換:
- *   deriveFinalMode(seedMode)
- *   deriveFinalMode(seedMode, body.user_text)
- */
-export function deriveFinalMode(input?: string | null, contextText?: string | null): Mode {
-  const s = String(input ?? '').trim().toLowerCase();
-
-  // 既知エイリアス吸収
-  if (['light', 'lite', 'l', 'normal', 'basic', 'default', 'デフォルト', 'ライト'].includes(s))
-    return 'Light';
-  if (['deep', 'd', 'heavy', '深い', 'ディープ'].includes(s)) return 'Deep';
-  if (['harmony', 'harmonic', 'bal', 'balance', '調和', 'ハーモニー'].includes(s)) return 'Harmony';
-  if (['transcend', 't', 'trans', 'beyond', '超越', 'トランセンド'].includes(s))
-    return 'Transcend';
-
-  if (['light', 'deep', 'harmony', 'transcend'].includes(s)) {
-    return (s.charAt(0).toUpperCase() + s.slice(1)) as Mode;
-  }
-
-  // --- フォールバック判断（contextText を活用）---
-  const ctx = (contextText ?? '').toLowerCase();
-  if (ctx) {
-    if (detectIsDark(ctx)) return 'Deep';
-    if (/(調和|バランス|和|仲直り|折衷|harmon)/.test(ctx)) return 'Harmony';
-    if (/(越える|超える|突破|超越|transcen)/.test(ctx)) return 'Transcend';
-  }
-  return 'Light';
+// ネガティブ・ダークトーンの簡易検出（相談/闇モードの分岐補助）
+export function detectIsDark(text: string): boolean {
+  return /(不安|恐れ|怒り|絶望|無力|つらい|苦しい|闇|憎しみ)/i.test(text ?? '');
 }
 
-/**
- * もしモード正規化だけ使いたい場合のエイリアス。
- */
-export function normalizeMode(m?: string | null): Mode {
-  return deriveFinalMode(m);
-}
+// 互換性のため default でも export（どちらの import 形でも動く）
+export default detectMode;

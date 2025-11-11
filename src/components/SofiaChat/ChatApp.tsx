@@ -1,11 +1,8 @@
-// src/components/SofiaChat/ChatApp.tsx
-'use client';
-
 import React from 'react';
 import Composer from './Composer';
 import MessageList from './MessageList';
 import ToastHost from './ToastHost';
-import type { Message } from 'types';
+
 import './chat.css';
 
 // 最小の現在ユーザー（必要なら置き換え）
@@ -18,7 +15,7 @@ const currentUser = {
 };
 
 export default function ChatApp({ agent = 'mu' }: { agent?: 'mu' | 'iros' }) {
-  const [messages, setMessages] = React.useState<Message[]>([]);
+  const [messages, setMessages] = React.useState<Array<import("./types").Message>>([]);
 
   // ユーザー送信を受け取る（Composer から発火）
   React.useEffect(() => {
@@ -27,7 +24,7 @@ export default function ChatApp({ agent = 'mu' }: { agent?: 'mu' | 'iros' }) {
       if (!text) return;
       setMessages((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), role: 'user', content: text } as Message,
+        { id: crypto.randomUUID(), role: 'user', content: text } as import("./types").Message,
       ]);
     };
 

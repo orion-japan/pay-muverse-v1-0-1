@@ -72,7 +72,7 @@ export default function AlbumPicker({
           resolved.push({
             name: it.name,
             path,
-            url,
+            url: url ?? '',
             size: (it as any).metadata?.size ?? null,
             updatedAt: (it as any).updated_at ?? null,
           });

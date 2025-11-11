@@ -21,7 +21,7 @@
     "@sendgrid/mail": "^8.1.5",
     "@supabase/auth-helpers-nextjs": "^0.10.0",
     "@supabase/ssr": "^0.6.1",
-    "@supabase/supabase-js": "^2.80.0",
+    "@supabase/supabase-js": "^2",
     "@types/pg": "^8.15.5",
     "@vercel/postgres": "^0.10.0",
     "axios": "^1.10.0",
