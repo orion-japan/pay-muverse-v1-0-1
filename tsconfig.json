@@ -1,13 +1,16 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["DOM", "DOM.Iterable", "ESNext"],
+    "lib": [
+      "DOM",
+      "DOM.Iterable",
+      "ESNext"
+    ],
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "incremental": true,
     "noEmit": true,
-
     "strict": true,
     "noImplicitAny": false,
     "skipLibCheck": true,
@@ -16,23 +19,38 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": false,
-
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "forceConsistentCasingInFileNames": true,
-
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"],
-      "@/ui/*": ["src/ui/*"],
-      "@/lib/*": ["src/lib/*"],
-      "@lib/*": ["src/lib/*"],
-      "@/types/*": ["src/types/*"]
+      "@/*": [
+        "src/*"
+      ],
+      "@/ui/*": [
+        "src/ui/*"
+      ],
+      "@/lib/*": [
+        "src/lib/*"
+      ],
+      "@lib/*": [
+        "src/lib/*"
+      ],
+      "@/types/*": [
+        "src/types/*"
+      ]
     },
-
-    "typeRoots": ["./src/types", "./node_modules/@types"],
-    "plugins": [{ "name": "next" }]
+    "typeRoots": [
+      "./src/types",
+      "./node_modules/@types"
+    ],
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ]
   },
-
   "include": [
     "next-env.d.ts",
     ".next/types/**/*.ts",
@@ -41,14 +59,12 @@
     "**/*.ts",
     "**/*.tsx"
   ],
-
   "exclude": [
     "node_modules",
     "supabase/functions",
     "dist",
     ".next",
     "out",
-
     "src/components/mui/useMuiDrop.ts",
     "src/lib/email/**",
     "src/lib/payjp/**",
