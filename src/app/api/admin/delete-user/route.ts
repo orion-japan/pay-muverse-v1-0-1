@@ -7,17 +7,29 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
-// Firebase Admin 初期化
+// Firebase Admin 初期化（Vercel で credentials ファイルが無い場合でもビルドが落ちないようにする）
+let firebaseReady = false;
+
 if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.applicationDefault(),
-  });
+  try {
+    admin.initializeApp({
+      // Vercel では GOOGLE_APPLICATION_CREDENTIALS / メタデータなどから自動取得を試みる
+      credential: admin.credential.applicationDefault(),
+    });
+    firebaseReady = true;
+  } catch (err) {
+    console.warn('[admin/delete-user] Firebase Admin init failed; firebase will be skipped', err);
+    firebaseReady = false;
+  }
 }
 
 export async function POST(req: NextRequest) {
   const { user_code } = await req.json();
   if (!user_code) {
-    return NextResponse.json({ ok: false, error: 'user_code is required' }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, error: 'user_code is required' },
+      { status: 400 },
+    );
   }
 
   const { data: user, error } = await supabase
@@ -27,14 +39,19 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (error || !user) {
-    return NextResponse.json({ ok: false, error: 'User not found' }, { status: 404 });
+    return NextResponse.json(
+      { ok: false, error: 'User not found' },
+      { status: 404 },
+    );
   }
 
   const results: Record<string, string> = {};
 
   // Firebase 削除
   try {
-    if (user.firebase_uid) {
+    if (!firebaseReady) {
+      results.firebase = 'skipped (firebase admin not initialized)';
+    } else if (user.firebase_uid) {
       await admin.auth().deleteUser(user.firebase_uid);
       results.firebase = 'deleted';
     } else {
