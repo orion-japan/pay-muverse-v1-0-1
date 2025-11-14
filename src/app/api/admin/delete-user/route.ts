@@ -18,7 +18,10 @@ if (!admin.apps.length) {
     });
     firebaseReady = true;
   } catch (err) {
-    console.warn('[admin/delete-user] Firebase Admin init failed; firebase will be skipped', err);
+    console.warn(
+      '[admin/delete-user] Firebase Admin init failed; firebase will be skipped',
+      err,
+    );
     firebaseReady = false;
   }
 }
