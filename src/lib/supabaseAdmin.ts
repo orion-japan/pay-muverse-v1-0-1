@@ -1,37 +1,32 @@
-// /src/lib/supabaseAdmin.ts
+// src/lib/supabaseAdmin.ts
 import 'server-only';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-// Server-only: 必ず .env.local に設定してください
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+// Server-only: .env / .env.local に設定必須
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string | undefined;
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY as string | undefined;
 
-// 実行環境ガード（誤ってクライアントで import された場合に気づけるように）
+// 誤 import ガード（クライアントから読み込まれないように）
 if (typeof window !== 'undefined') {
   throw new Error('supabaseAdmin must only be imported on the server.');
 }
+if (!url) throw new Error('Missing env: NEXT_PUBLIC_SUPABASE_URL');
+if (!serviceRoleKey) throw new Error('Missing env: SUPABASE_SERVICE_ROLE_KEY');
 
-if (!SUPABASE_URL) {
-  throw new Error('Missing env: NEXT_PUBLIC_SUPABASE_URL');
+// Next.js HMRでも単一インスタンスを再利用
+declare global {
+  // eslint-disable-next-line no-var
+  var __supabaseAdmin__: SupabaseClient | undefined;
 }
-if (!SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error('Missing env: SUPABASE_SERVICE_ROLE_KEY');
-}
-
-// Next.js dev(HMR) でも単一インスタンスを再利用してコネクション増殖を防ぐ
-// （構造はそのまま export const supabaseAdmin を維持）
-const globalForSupabase = globalThis as unknown as {
-  __supabaseAdmin?: SupabaseClient;
-};
 
 export const supabaseAdmin: SupabaseClient =
-  globalForSupabase.__supabaseAdmin ??
-  createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!, {
+  global.__supabaseAdmin__ ??
+  createClient(url, serviceRoleKey, {
     auth: { persistSession: false },
-    // （任意）明示的に public スキーマを使う場合は以下を残す
     db: { schema: 'public' },
+    global: { headers: { 'X-Client-Info': 'muverse-admin' } },
   });
 
-if (!globalForSupabase.__supabaseAdmin) {
-  globalForSupabase.__supabaseAdmin = supabaseAdmin;
+if (!global.__supabaseAdmin__) {
+  global.__supabaseAdmin__ = supabaseAdmin;
 }

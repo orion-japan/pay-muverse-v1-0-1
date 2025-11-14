@@ -1,5 +1,5 @@
-// lib/firebase.ts
-import { initializeApp, getApps, getApp } from 'firebase/app';
+// src/lib/firebase.ts
+import { initializeApp, getApps, getApp, setLogLevel } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 
 // ✅ Firebaseの環境変数
@@ -17,3 +17,10 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
 // ✅ Firebase Authエクスポート
 export const auth = getAuth(app);
+
+// ✅ デバッグ時のみ SDK ログを出す
+if (process.env.NEXT_PUBLIC_DEBUG_LOCAL === '1') {
+  // Firebase SDK 全体の内部ログを出力
+  setLogLevel('debug');
+  console.log('[firebase] DEBUG_LOCAL=1 → Firebase SDK log level set to "debug"');
+}

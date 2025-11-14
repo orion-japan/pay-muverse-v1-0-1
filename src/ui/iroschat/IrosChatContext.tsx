@@ -44,6 +44,13 @@ type IrosAPI = {
     | { ok: boolean; message?: { id?: string; content: string } } // 旧フォーマット
     | { ok: boolean; assistant?: string; mode?: string; systemPrompt?: string } // 新フォーマット
   >;
+  /** ★ 追加：/reply の戻りを正規化し、未保存なら assistant を保存する */
+  replyAndStore(args: {
+    conversationId: string;
+    user_text: string;
+    mode?: string;
+    model?: string;
+  }): Promise<{ assistant: string } & Record<string, any>>;
   getUserInfo(): Promise<IrosUserInfo | null>;
 };
 
@@ -163,6 +170,45 @@ const irosClient: IrosAPI = {
       }),
     });
     return r.json();
+  },
+  async replyAndStore(args) {
+    // 既存実装があればそれを尊重
+    if (typeof _raw.replyAndStore === 'function') {
+      return _raw.replyAndStore(args);
+    }
+    // フォールバック：/reply → 正規化 → 未保存なら assistant を保存
+    const r: any = await this.reply({
+      conversationId: args.conversationId,
+      user_text: args.user_text,
+      mode: args.mode ?? 'Light',
+      model: args.model,
+    });
+
+    // 正規化（代表的なキーを総当り）
+    let t =
+      r?.assistant ??
+      r?.message?.content ??
+      r?.choices?.[0]?.message?.content ??
+      r?.output_text ??
+      '';
+
+    if (typeof t !== 'string') t = String(t ?? '');
+    t = (t ?? '').trim();
+    if (t && !/[。！？!?🪔]$/.test(t)) t += '。';
+    if (t) t = t.replace(/🪔+/g, '') + '🪔';
+    const safe = t || 'はい。🪔';
+
+    const serverPersisted =
+      !!(r?.saved || r?.persisted || r?.db_saved || r?.message_id || r?.messageId);
+
+    if (!serverPersisted) {
+      await this.postMessage({
+        conversationId: args.conversationId,
+        text: safe,
+        role: 'assistant',
+      });
+    }
+    return { ...r, assistant: safe };
   },
   async getUserInfo() {
     if (typeof _raw.getUserInfo === 'function') return _raw.getUserInfo();
@@ -408,8 +454,8 @@ export default function IrosChatProvider({
     [refreshConversations, router],
   );
 
-  /** 送信フロー：楽観追加 → /reply（冪等キー付き） → 最終同期
-   *  ※ /messages を UI からは呼ばない（保存は API 側で user/assistant 両方を実施） */
+  /** 送信フロー：楽観追加 → user発話を保存 → replyAndStore → 最終同期
+   *  ※ /messages を UI からは呼ばない（保存は API 側 or ここで担保） */
   const send = useCallback(
     async (text: string) => {
       const t = (text ?? '').trim();
@@ -428,22 +474,21 @@ export default function IrosChatProvider({
         const now = Date.now();
         setMessages((prev) => [...prev, { id: tempId, role: 'user', text: t, ts: now }]);
 
-        // 2) 冪等キーを付けて /reply のみ叩く
-        const idem = `${cid}:${now}`;
+        // 2) ユーザー発話を先に確定保存
         await retryAuth(() =>
-          irosClient.reply({
-            conversationId: cid,
-            user_text: t,
-            mode: 'Light',
-            headers: { 'x-idempotency-key': idem },
-          }),
+          irosClient.postMessage({ conversationId: cid, text: t, role: 'user' }),
         );
 
-        // 3) 最終同期（DBの正を採用）
+        // 3) 返信を生成し、未保存なら assistant を保存（ここがポイント）
+        await retryAuth(() =>
+          irosClient.replyAndStore({ conversationId: cid, user_text: t, mode: 'Light' }),
+        );
+
+        // 4) 最終同期（DBの正を採用）
         const list = await retryAuth(() => irosClient.fetchMessages(cid));
         if (Array.isArray(list)) setMessages(list);
 
-        // 4) 会話一覧も更新
+        // 5) 会話一覧も更新
         const convs = await retryAuth(() => irosClient.listConversations());
         if (Array.isArray(convs)) setConversations(convs);
       } catch (e: any) {

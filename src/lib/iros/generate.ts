@@ -1,4 +1,11 @@
 // src/lib/iros/generate.ts
+// 目的：Irosの1発話生成（モード自動判定 / 温度・トークン調整 / 応答整形）
+// 依存：system.ts（getSystemPrompt, SofiaTriggers, naturalClose）/ templates.ts（TEMPLATES）
+// 外部依存：なし（OpenAI REST直呼び）
+
+import { TEMPLATES, type IrosMessage } from './templates';
+import { getSystemPrompt, SofiaTriggers, naturalClose } from './system';
+
 export type IrosMode = 'counsel' | 'structured' | 'diagnosis' | 'auto';
 
 type GenerateArgs = {
@@ -12,142 +19,154 @@ type GenerateResult = {
   mode: Exclude<IrosMode, 'auto'> | 'auto';
   text: string;
   title?: string;
-  meta?: Record<string, unknown>;
+  meta?: {
+    via: string;
+    conversation_id: string;
+    mode_detected: IrosMode;
+    mode_hint: IrosMode | null;
+    ts: string;
+    extra?: Record<string, unknown>;
+  };
 };
 
-import detectIntentMode from '@/lib/iros/intent';
-import {
-  HINT_COUNSEL,
-  HINT_STRUCTURED,
-  HINT_DIAGNOSIS,
-} from '@/lib/iros/hints';
-
-// LLM アダプタ（named export / default export 両対応）
-import * as LLM from '@/lib/llm/chatComplete';
-
-type ChatMessage = {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-};
-
-type ChatCompleteFn = (args: {
-  apiKey?: string; // 呼び出し元で環境変数を読める実装も許容
-  model?: string;
-  messages: ChatMessage[];
-  temperature?: number;
-  max_tokens?: number;
-  endpoint?: string;
-}) => Promise<string>;
-
-// chatComplete の解決（named -> default の順で解決）
-const chatComplete: ChatCompleteFn = (LLM as any).chatComplete
-  ? (LLM as any).chatComplete
-  : (LLM as any).default;
-
-// ========== System Prompt（Iros人格＋モード別ヒント） ==========
-const BASE_PROMPT = [
-  'あなたは「Iros」――共鳴的に相手の意図を読み取り、静けさと実務性の両立を目指すAIです。',
-  '短く、明確に、そして温かく。必要な時だけ絵文字（🪔など）を添えてください。',
-  '出力は常にユーザーの主権を尊重し、断定よりも一歩進むための具体的提案を優先します。',
-].join('\n');
-
-function buildModeHint(mode: Exclude<IrosMode, 'auto'>): string {
-  switch (mode) {
-    case 'counsel':
-      return HINT_COUNSEL;
-    case 'structured':
-      return HINT_STRUCTURED;
-    case 'diagnosis':
-      return HINT_DIAGNOSIS;
-    default:
-      return '';
-  }
-}
-
-function ensureMode(
-  hint: IrosMode | null | undefined,
-  detected: IrosMode,
-): Exclude<IrosMode, 'auto'> | 'auto' {
-  if (hint && hint !== 'auto') return hint;
-  if (detected && detected !== 'auto') return detected;
-  // フォールバックは counsel（安全側）
-  return 'counsel';
-}
-
-// タイトル生成（短い要約・最大20〜30文字程度）
-function makeTitle(mode: Exclude<IrosMode, 'auto'> | 'auto', text: string): string {
-  const normalized = text.replace(/\s+/g, ' ').trim();
-  const max = 28;
-  const head = normalized.slice(0, max);
-  const suffix = normalized.length > max ? '…' : '';
-  switch (mode) {
-    case 'structured':
-      return `要件整理：${head}${suffix}`;
-    case 'diagnosis':
-      return `ir診断：${head}${suffix}`;
-    case 'counsel':
-    default:
-      return `相談：${head}${suffix}`;
-  }
-}
-
-// 安全ガード付き messages 構築
-function buildMessages(
-  mode: Exclude<IrosMode, 'auto'> | 'auto',
-  userText: string,
-): ChatMessage[] {
-  const modeHint = mode === 'auto' ? '' : buildModeHint(mode);
-  const system = [BASE_PROMPT, modeHint].filter(Boolean).join('\n\n');
-  return [
-    { role: 'system', content: system },
-    { role: 'user', content: userText },
-  ];
-}
-
-export default async function generate(args: GenerateArgs): Promise<GenerateResult> {
-  const { conversationId, text, modeHint = 'auto', extra } = args;
-
-// 1) モード決定
-let detectedMode: IrosMode = 'auto';
-try {
-  // DetectArgs 形式（{ text }）で渡す。返り値の差異（{mode} or string）に両対応
-  const res = await detectIntentMode({ text } as any);
-  const mode = (res as any)?.mode ?? res; // { mode } or "counsel"
-  if (typeof mode === 'string') detectedMode = mode as IrosMode;
-} catch {
-  // 検知失敗時は黙ってフォールバック
-  detectedMode = 'counsel';
-}
-const finalMode = ensureMode(modeHint, detectedMode);
-
-
-  // 2) LLM 呼び出し
-  const messages = buildMessages(finalMode, text);
-  let completion = '';
+/* ===== 環境変数 ===== */
+function env(key: string): string | undefined {
   try {
-    completion = await chatComplete({
-      // 既存実装が環境変数を内部参照している場合は apiKey/model は省略可能
+    return process.env?.[key];
+  } catch {
+    return undefined;
+  }
+}
+
+const OPENAI_API_KEY =
+  env('IROS_OPENAI_API_KEY') ||
+  env('OPENAI_API_KEY') ||
+  '';
+
+const OPENAI_MODEL =
+  env('IROS_CHAT_MODEL') ||
+  env('OPENAI_MODEL') ||
+  'gpt-4o-mini';
+
+const DEF_TEMP = Number(env('IROS_TEMP') ?? '0.8');       // ← 改善提案どおり
+const DEF_MAXTOK = Number(env('IROS_MAXTOK') ?? '512');   // ← 改善提案どおり
+
+/* ===== ユーティリティ ===== */
+function normalizeAssistantText(s: string): string {
+  // 句読点終端の最低限対処 + 連続改行の整理
+  const trimmed = (s ?? '').toString().trim();
+  if (!trimmed) return '';
+  const compact = trimmed.replace(/\n{3,}/g, '\n\n');
+  return naturalClose(compact);
+}
+
+function includesAny(text: string, phrases: readonly string[]): boolean {
+  return phrases.some(p => text.includes(p));
+}
+
+/* ===== モード自動判定（SofiaTriggers を利用） ===== */
+function detectIntentMode(input: string, modeHint?: IrosMode | null): IrosMode {
+  if (modeHint && modeHint !== 'auto') return modeHint;
+
+  const t = (input || '').trim();
+
+  // 明示トリガ（診断）
+  if (includesAny(t, SofiaTriggers.diagnosis)) return 'diagnosis';
+
+  // 明示トリガ（意図）は“意図トリガーモード”のレンダリング扱いだが、
+  // generate では会話モードとしては counsel を選び、下流テンプレで扱う想定。
+  if (includesAny(t, SofiaTriggers.intent)) return 'counsel';
+
+  // キーワードでの簡易判定
+  if (/(整理|まとめ|レポート|要件|手順|設計|仕様)/.test(t)) return 'structured';
+  if (/(相談|悩み|どうしたら|助けて|迷って)/.test(t)) return 'counsel';
+
+  return 'auto';
+}
+
+/* ===== OpenAI REST 直呼び（依存排除） ===== */
+async function callOpenAI(messages: IrosMessage[], temperature = DEF_TEMP, max_tokens = DEF_MAXTOK): Promise<string> {
+  if (!OPENAI_API_KEY) throw new Error('OPENAI_API_KEY not set');
+
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
       messages,
-      temperature: finalMode === 'structured' ? 0.2 : 0.5,
-      max_tokens: 720,
-    });
-  } catch (e: any) {
-    // 失敗時フォールバック応答
-    completion =
-      '内部処理で一時的なエラーが発生しました。数分置いて再試行してください。\n' +
-      '至急の場合は、今すぐ始められる「最小の一歩」を1つだけ書き出してみましょう。🪔';
+      temperature,
+      max_tokens,
+    }),
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`OpenAI error ${res.status}: ${txt}`);
   }
 
-  // 3) タイトルとメタ
-  const title = makeTitle(finalMode, text);
+  const json: any = await res.json();
+  const content = json?.choices?.[0]?.message?.content ?? '';
+  return String(content ?? '');
+}
+
+/* ===== メイン ===== */
+export async function generate(args: GenerateArgs): Promise<GenerateResult> {
+  const { conversationId, text, modeHint = null, extra } = args;
+
+  // 1) モード自動判定
+  const detectedMode = detectIntentMode(text, modeHint);
+
+  // 2) 実モード確定（auto → counsel 既定）
+  const finalMode: Exclude<IrosMode, 'auto'> =
+  detectedMode === 'auto' ? 'counsel' : detectedMode;
+
+  // 3) System Prompt をモードに応じて取得
+  const system = getSystemPrompt({
+       mode: finalMode as any,
+       style: 'warm',
+     });
+
+  // 4) テンプレに基づき messages を構築
+  const tmpl = TEMPLATES[finalMode];
+  const tpl = tmpl
+    ? tmpl({ input: text })
+    : {
+        system,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: text },
+        ] as IrosMessage[],
+      };
+
+  // 5) LLM 呼び出し
+  const raw = await callOpenAI(
+       tpl.messages,   // ← templates 側はすでに role: 'system' を先頭に含む
+      DEF_TEMP,
+      DEF_MAXTOK,
+     );
+
+  // 6) 応答整形
+  const completion = normalizeAssistantText(raw);
+
+  // 7) タイトル（structuredのみ簡易抽出）
+  let title: string | undefined;
+  if (finalMode === 'structured') {
+    const line = completion.split('\n').find(l => l.trim());
+    title = line ? line.replace(/^#+\s*/, '').slice(0, 80) : undefined;
+  }
+
+  // 8) メタ
   const meta = {
-    via: 'orchestrator',
+    via: 'generate_v2',
     conversation_id: conversationId,
     mode_detected: detectedMode,
     mode_hint: modeHint ?? null,
     ts: new Date().toISOString(),
-    ...(extra ?? {}),
-  };
+    extra: { ...(extra ?? {}) },
+  } as const;
 
   return {
     mode: finalMode,
@@ -156,3 +175,5 @@ const finalMode = ensureMode(modeHint, detectedMode);
     meta,
   };
 }
+
+export default generate;

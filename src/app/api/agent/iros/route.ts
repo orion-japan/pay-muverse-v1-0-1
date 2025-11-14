@@ -1,4 +1,4 @@
-// /src/app/api/iros/route.ts
+// /src/app/api/agent/iros/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -7,95 +7,114 @@ import { verifyFirebaseAndAuthorize, normalizeAuthz } from '@/lib/authz';
 import { reserveAndSpendCredit } from '@/lib/mu/credits';
 import { runIrosChat } from '@/lib/iros/openai';
 import { saveIrosMemory } from '@/lib/iros/memory';
-import type { IrosChatRequest, IrosChatResponse, IrosMemory } from '@/lib/iros/types';
+import { SofiaTriggers } from '@/lib/iros/system';
 
-const COST_CHAT = 1;
+// ===== 最小ローカル型 =====
+type IrosMode = 'counsel' | 'structured' | 'diagnosis' | 'auto';
+type IrosChatRequestIn = { convo_id?: string; conversationId?: string; conversation_id?: string; text?: string; extra?: any; };
 
-function json<T>(b: T, status = 200) {
-  return NextResponse.json(b, { status });
-}
-function hash(s: string) {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = Math.imul(31, h) + s.charCodeAt(i) | 0;
-  return (h >>> 0).toString(36);
-}
-function extractKeyword(s: string) {
-  const m = (s.match(/[一-龠々〆ヵヶァ-ヶｦ-ﾝa-zA-Z0-9]{2,}/g) || []).slice(0, 3);
-  return m.join(' ').toLowerCase();
+function json<T>(b: T, status = 200) { return NextResponse.json(b, { status }); }
+
+// ---- normalizeAuthz の差分吸収（userCode を安全に取り出す）
+function getUserCodeFromAuthz(a: any): string | null {
+  if (!a) return null;
+  // 直接持っている場合
+  if (a.userCode) return String(a.userCode);
+  if (a.user_code) return String(a.user_code);
+  // user 配下の一般的な候補
+  const u = a.user ?? a.currentUser ?? null;
+  const cand = u?.user_code ?? u?.code ?? u?.id ?? null;
+  return cand ? String(cand) : null;
 }
 
-// ...前略（ファイル冒頭は現状のまま）
+// ---- モード検出（LLMを増やさない）
+function includesAny(text: string, phrases: readonly string[]) {
+  const t = (text || '').trim();
+  return phrases.some(p => t.includes(p));
+}
+function detectIntentMode(input: string): IrosMode {
+  const t = (input || '').trim();
+  if (includesAny(t, SofiaTriggers.diagnosis)) return 'diagnosis';
+  if (includesAny(t, SofiaTriggers.intent))    return 'counsel';
+  if (/(整理|まとめ|レポート|要件|手順|設計|仕様)/.test(t)) return 'structured';
+  if (/(相談|悩み|どうしたら|助けて|迷って)/.test(t))       return 'counsel';
+  return 'auto';
+}
+
+// ---- リクエスト正規化
+function parseBody(b: IrosChatRequestIn) {
+  const conversationId = b.convo_id || b.conversationId || b.conversation_id || '';
+  const text = b.text || '';
+  const extra = b.extra ?? null;
+  return { conversationId, text, extra };
+}
 
 export async function POST(req: NextRequest) {
   try {
+    const body = (await req.json()) as IrosChatRequestIn;
+    const { conversationId, text, extra } = parseBody(body);
+    if (!conversationId || !text) {
+      return json({ ok: false, error: 'bad_request' }, 400);
+    }
+
     // 1) 認証
-    const authz = await verifyFirebaseAndAuthorize(req);
-    const { user, error: authErr } = normalizeAuthz(authz);
-    if (!user) return json<IrosChatResponse>({ ok: false, error: authErr || 'Unauthorized' }, 401);
+    const auth = await verifyFirebaseAndAuthorize(req);
+    const authz = normalizeAuthz(auth);
+    const userCode = getUserCodeFromAuthz(authz);
+    if (!userCode) return json({ ok: false, error: 'unauthorized' }, 401);
 
-    // 2) 入力（互換吸収）
-    const raw = await req.json();
-    const payload = {
-      conversationId: raw.conversationId ?? raw.conversation_id,
-      userText:       raw.userText ?? raw.user_text,
-      mode:           raw.mode ?? raw.payload_mode ?? 'auto',
-      idempotencyKey: raw.idempotencyKey ?? raw.idempotency_key,
-    } as IrosChatRequest;
-
-    if (!payload.conversationId || !payload.userText) {
-      return json<IrosChatResponse>({ ok: false, error: 'INVALID_REQUEST' }, 400);
-    }
-
-    // 3) 課金
-    const idem = payload.idempotencyKey || `iros:${payload.conversationId}:${hash(payload.userText)}`;
+    // 2) クレジット（authorize→capture）
     const credit = await reserveAndSpendCredit({
-      user_code: user.user_code,
-      amount: COST_CHAT,
-      reason: 'iros.chat',
-      meta: { conversationId: payload.conversationId, idem },
-    });
-    if (!credit.ok) {
-      return json<IrosChatResponse>({ ok: false, error: credit.error || 'CREDIT_FAILED' }, 402);
-    }
+      user_code: userCode,
+      amount: 1,
+      ref_conv: conversationId,
+    } as any);
 
-    // 4) LLM（runIrosChat は string を返す）
+    // 3) 軽量モード検出（レスポンス/ヒント用）
+    const detected = detectIntentMode(text);
+    const finalMode: Exclude<IrosMode, 'auto'> = detected === 'auto' ? 'counsel' : detected;
+
+    // 4) 生成（既存の runIrosChat をそのまま利用）
     const replyText: string = await runIrosChat({
-      model: process.env.IROS_MODEL || 'gpt-4o-mini',
-      system: process.env.IROS_SYSTEM_PROMPT || 'You are Iros, a concise partner AI. Reply briefly and kindly.',
-      history: [], // ※必要なら直近履歴を詰める
-      user_text: payload.userText,
-      temperature: 0.4,
-      max_tokens: 420,
-    });
+      conversationId,
+      userCode,
+      text,
+      modeHint: finalMode as any,
+      extra,
+    } as any);
 
-    // 4.5) 簡易 layer 推定（後で focusCore に置換）
-    const layer: 'Core' | 'Surface' = (replyText?.length || 0) >= 200 ? 'Core' : 'Surface';
+    // 5) メモリ保存（ある場合のみ・互換）
+    const memory = await saveIrosMemory({
+      conversationId,
+      userCode,
+      input: text,
+      output: replyText,
+      layer: finalMode,
+      extra,
+    } as any);
 
-    // 5) メモリ（非致命）
-    const mem: IrosMemory = {
-      depth: layer === 'Core' ? 'I1' : 'S2',
-      tone: 'calm',
-      theme: 'general',
-      summary: replyText.slice(0, 240),
-      last_keyword: extractKeyword(payload.userText),
+    // 6) メタ
+    const meta = {
+      ts: new Date().toISOString(),
+      mode_hint: detected,
+      mode: finalMode,
+      userCode,
+      extra,
     };
-    try {
-      await saveIrosMemory({ conversationId: payload.conversationId, user_code: user.user_code, mem });
-    } catch (e) {
-      console.warn('[iros.memory] non-fatal:', e);
-    }
 
-    // 6) 応答（新旧クライアント両対応のキーで返す）
-    return json<IrosChatResponse & { assistant: string }>({
+    // 7) 応答（新旧互換 + jq用キー）
+    return json({
       ok: true,
-      reply: replyText,         // 新API
-      assistant: replyText,     // 旧UIの `assistant` 参照に対応
-      layer,
+      reply: replyText,     // 新
+      assistant: replyText, // 旧UI互換
+      text: replyText,      // jq '{mode, meta, text}'
+      mode: finalMode,
+      meta,
+      layer: finalMode,
       credit,
-      memory: mem,
-    });
+      memory,
+    }, 200);
   } catch (e: any) {
-    return json<IrosChatResponse>({ ok: false, error: String(e?.message || e) }, 500);
+    return json({ ok: false, error: String(e?.message || e) }, 500);
   }
 }
-

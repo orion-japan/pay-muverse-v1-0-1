@@ -1,0 +1,50 @@
+/* 画面全体（必ず fixed + inset:0） */
+.wrapper {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  background: black;
+  overflow: hidden;
+  z-index: 9999;
+}
+
+/* 2レイヤー専用アート画像 */
+.layer {
+  position: absolute;
+  inset: 0;
+
+  width: 100%;
+  height: 100%;
+
+  /* ここが重要 → 絶対 contain にする */
+  object-fit: contain;
+  object-position: center;
+
+  opacity: 0;
+  transition: opacity 7s ease-in-out; /* ← フェード時間 */
+}
+
+/* 表示レイヤー */
+.show {
+  opacity: 1;
+  z-index: 2;
+}
+
+/* 非表示レイヤー */
+.hide {
+  opacity: 0;
+  z-index: 1;
+}
+
+/* ローディング */
+.loading {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: white;
+  background: black;
+  font-size: 28px;
+}

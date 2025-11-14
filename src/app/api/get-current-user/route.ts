@@ -1,6 +1,6 @@
 // src/app/api/get-current-user/route.ts
 import { NextResponse } from 'next/server';
-import { supabaseServer } from '@/lib/supabaseServer';
+import { supabaseAdmin as supabaseServer } from '@/lib/supabaseAdmin';
 import { adminAuth } from '@/lib/firebase-admin';
 
 export async function POST(req: Request) {

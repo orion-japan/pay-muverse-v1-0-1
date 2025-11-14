@@ -1,79 +1,141 @@
+// file: src/app/api/credits/balance/route.ts
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const SUPABASE_SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const CORS = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'GET, POST, OPTIONS',
+  'access-control-allow-headers': 'Content-Type, Authorization, X-User-Code, x-user-code',
+} as const;
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE || SUPABASE_ANON);
+const RESP_HEADERS = {
+  ...CORS,
+  'Cache-Control': 'no-store',
+  'x-handler': 'app/api/credits/balance',
+} as const;
 
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json().catch(() => ({}));
-    const user_code = String(body?.user_code ?? '').trim();
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS });
+}
 
-    if (!user_code) {
-      return NextResponse.json(
-        { success: false, balance: 0, remaining: 0, error: 'user_code required' },
-        { status: 200, headers: { 'Cache-Control': 'no-store' } },
-      );
-    }
+/** getSupabase の明示ユニオン型（null as const を使わない） */
+type SBInitOk = { err: null; sb: SupabaseClient };
+type SBInitErr = { err: string; sb: null };
+type SBInit = SBInitOk | SBInitErr;
 
-    // ① users.sofia_credit を最優先
-    const { data: userRow, error: userErr } = await supabase
-      .from('users')
-      .select('sofia_credit')
-      .eq('user_code', user_code)
-      .maybeSingle();
+// --- 遅延初期化（ENV不足でもサーバを落とさず 500 を返す） ---
+function getSupabase(): SBInit {
+  const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+  const SUPABASE_SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
-    if (!userErr && userRow && userRow.sofia_credit != null) {
-      const remaining = Number(userRow.sofia_credit) || 0;
-      return NextResponse.json(
-        {
-          success: true,
-          source: 'users.sofia_credit',
-          running_net: null,
-          sum_delta: null,
-          remaining,
-          balance: remaining,
-        },
-        { status: 200, headers: { 'Cache-Control': 'no-store' } },
-      );
-    }
+  if (!SUPABASE_URL) return { err: 'ENV NEXT_PUBLIC_SUPABASE_URL is missing', sb: null };
 
-    // ② フォールバック：ledger の delta 合計
-    const { data: rows, error: sumErr } = await supabase
-      .from('credits_ledger')
-      .select('delta')
-      .eq('user_code', user_code);
+  const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE || SUPABASE_ANON, {
+    auth: { persistSession: false },
+  });
+  return { err: null, sb };
+}
 
-    if (sumErr) {
-      return NextResponse.json(
-        { success: false, balance: 0, remaining: 0, error: `sum failed: ${sumErr.message}` },
-        { status: 200, headers: { 'Cache-Control': 'no-store' } },
-      );
-    }
+function pickUserCode(req: NextRequest, body?: any): string | null {
+  const url = new URL(req.url);
+  const q = url.searchParams.get('user_code');
+  if (q && q.trim()) return q.trim();
 
-    const sumDelta = (rows ?? []).reduce((acc, r: any) => acc + Number(r?.delta ?? 0), 0);
-    // ※ あなたの運用が「delta = 付与(＋)・消費(－)」なら sumDelta が残高。
-    // もし「delta が累計消費のみ（常にマイナス）」ならここは 0 固定でもOK。
-    const remaining = sumDelta;
+  const hx = req.headers.get('x-user-code') || req.headers.get('X-User-Code');
+  if (hx && hx.trim()) return hx.trim();
 
+  const fromBody = String(body?.user_code ?? '').trim();
+  return fromBody || null;
+}
+
+async function fetchBalance(sb: SupabaseClient, user_code: string) {
+  // ① users.sofia_credit（最優先）
+  const { data: userRow, error: userErr } = await sb
+    .from('users')
+    .select('sofia_credit')
+    .eq('user_code', user_code)
+    .maybeSingle();
+
+  if (!userErr && userRow && userRow.sofia_credit != null) {
+    const remaining = Number(userRow.sofia_credit) || 0;
+    return {
+      ok: true,
+      user_code,
+      balance: remaining,
+      source: 'users.sofia_credit',
+      details: { sofia_credit: remaining },
+    } as const;
+  }
+
+  // ② ledger 合計
+  const { data: rows, error: sumErr } = await sb
+    .from('credits_ledger')
+    .select('delta')
+    .eq('user_code', user_code);
+
+  if (sumErr) {
+    return {
+      ok: false,
+      user_code,
+      balance: 0,
+      source: 'error',
+      details: { message: `sum failed: ${sumErr.message}`, stage: 'ledger_sum' },
+    } as const;
+  }
+
+  const sumDelta = (rows ?? []).reduce((acc, r: any) => acc + Number(r?.delta ?? 0), 0);
+  return {
+    ok: true,
+    user_code,
+    balance: sumDelta,
+    source: 'sum_only',
+    details: { sum_delta: sumDelta, rows: rows?.length ?? 0 },
+  } as const;
+}
+
+export async function GET(req: NextRequest) {
+  const user_code = pickUserCode(req);
+  if (!user_code) {
     return NextResponse.json(
-      {
-        success: true,
-        source: 'sum_only',
-        running_net: null,
-        sum_delta: sumDelta,
-        remaining,
-        balance: remaining,
-      },
-      { status: 200, headers: { 'Cache-Control': 'no-store' } },
-    );
-  } catch (e: any) {
-    return NextResponse.json(
-      { success: false, balance: 0, remaining: 0, error: e?.message ?? 'unknown error' },
-      { status: 200, headers: { 'Cache-Control': 'no-store' } },
+      { ok: false, user_code: null, balance: 0, source: 'error', details: { message: 'user_code required' } },
+      { status: 200, headers: RESP_HEADERS },
     );
   }
+
+  const { err, sb } = getSupabase();
+  if (err || !sb) {
+    return NextResponse.json(
+      { ok: false, user_code, balance: 0, source: 'error', details: { message: err ?? 'init_failed' } },
+      { status: 500, headers: RESP_HEADERS },
+    );
+  }
+
+  const res = await fetchBalance(sb, user_code);
+  return NextResponse.json(res, { status: 200, headers: RESP_HEADERS });
+}
+
+export async function POST(req: NextRequest) {
+  const body = await req.json().catch(() => ({}));
+  const user_code = pickUserCode(req, body);
+  if (!user_code) {
+    return NextResponse.json(
+      { ok: false, user_code: null, balance: 0, source: 'error', details: { message: 'user_code required' } },
+      { status: 200, headers: RESP_HEADERS },
+    );
+  }
+
+  const { err, sb } = getSupabase();
+  if (err || !sb) {
+    return NextResponse.json(
+      { ok: false, user_code, balance: 0, source: 'error', details: { message: err ?? 'init_failed' } },
+      { status: 500, headers: RESP_HEADERS },
+    );
+  }
+
+  const res = await fetchBalance(sb, user_code);
+  return NextResponse.json(res, { status: 200, headers: RESP_HEADERS });
 }

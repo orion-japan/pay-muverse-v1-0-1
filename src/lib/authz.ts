@@ -5,13 +5,17 @@ import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 
 /* ===== 環境変数（既存名に対応）===== */
-const _URL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || process.env.SUPABASE_URL?.trim();
+const _URL =
+  process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ??
+  process.env.SUPABASE_URL?.trim();
 
 const _SR =
-  process.env.SUPABASE_SERVICE_ROLE?.trim() || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  process.env.SUPABASE_SERVICE_ROLE?.trim() ??
+  process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
 
 const _JWT =
-  process.env.SUPABASE_JWT_SECRET?.trim() || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  process.env.SUPABASE_JWT_SECRET?.trim() ??
+  process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
 
 if (!_URL) throw new Error('ENV SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL is missing');
 if (!_SR) throw new Error('ENV SUPABASE_SERVICE_ROLE(_KEY) is missing');
@@ -37,10 +41,11 @@ export type AuthzResult = {
 /* ===== ログ補助 ===== */
 const NS = '[authz]';
 const rid = () =>
-  (globalThis as any).crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
-const log = (id: string, ...a: any[]) => console.log(NS, id, ...a);
-const warn = (id: string, ...a: any[]) => console.warn(NS, id, ...a);
-const err = (id: string, ...a: any[]) => console.error(NS, id, ...a);
+  (globalThis as any).crypto?.randomUUID?.() ??
+  Math.random().toString(36).slice(2);
+const log = (id: string, ...a: unknown[]) => console.log(NS, id, ...a);
+const warn = (id: string, ...a: unknown[]) => console.warn(NS, id, ...a);
+const err = (id: string, ...a: unknown[]) => console.error(NS, id, ...a);
 
 /* ===== Cookie ユーティリティ ===== */
 function parseCookies(header: string | null) {
@@ -48,6 +53,7 @@ function parseCookies(header: string | null) {
   if (!header) return out;
   header.split(';').forEach((p) => {
     const [k, ...v] = p.trim().split('=');
+    if (!k) return;
     out[k] = decodeURIComponent(v.join('=') || '');
   });
   return out;
@@ -63,18 +69,20 @@ function signPostgresJwt(claims: { user_code: string; firebase_uid?: string }) {
     firebase_uid: claims.firebase_uid ?? null,
     exp: Math.floor(Date.now() / 1000) + 15 * 60, // 15分
   } as const;
-  return jwt.sign(payload, POSTGREST_JWT, { algorithm: 'HS256' });
+  return jwt.sign(payload, POSTGREST_JWT as jwt.Secret, { algorithm: 'HS256' });
 }
 
 /* ===== 本体：Bearer or Cookie どちらでもOK =====
    - input: NextRequest | Request | string(Bearerトークン直渡し)
+   - 重要：claims 優先（role / user_code）。DB は claims が無い場合の補完のみ。
 */
 export async function verifyFirebaseAndAuthorize(
   input: NextRequest | Request | string,
 ): Promise<AuthzResult> {
   const id = rid();
   const t0 = Date.now();
-  const path = typeof input === 'string' ? 'bearer:string' : ((input as any)?.url ?? 'unknown');
+  const path =
+    typeof input === 'string' ? 'bearer:string' : ((input as any)?.url ?? 'unknown');
   log(id, 'start', { path });
 
   let bearerToken: string | null = null;
@@ -88,20 +96,30 @@ export async function verifyFirebaseAndAuthorize(
   if (typeof input === 'string') {
     bearerToken = input || null;
   } else {
-    const authz = input.headers.get('authorization') || input.headers.get('Authorization') || '';
-    bearerToken = authz.startsWith('Bearer ') ? authz.slice(7).trim() : null;
+    const authz =
+      input.headers.get('authorization') ||
+      input.headers.get('Authorization') ||
+      '';
+    bearerToken = authz.startsWith('Bearer ')
+      ? authz.slice(7).trim()
+      : null;
 
     // Cookie も見る（__session = Firebase Session Cookie）
     const cookies = parseCookies(input.headers.get('cookie'));
     sessionCookie = cookies.__session || null;
 
     // ← 開発フォールバック用の user_code 取得（ヘッダとURLクエリ）
-    devUserCode = input.headers.get('x-user-code') || input.headers.get('x-mu-user') || null;
+    devUserCode =
+      input.headers.get('x-user-code') ||
+      input.headers.get('x-mu-user') ||
+      null;
 
     try {
       const u = new URL((input as any).url);
       urlUserCode = u.searchParams.get('user_code');
-    } catch {}
+    } catch {
+      /* noop */
+    }
   }
 
   // 開発簡易トークン: Authorization: Bearer dev:<user_code>
@@ -161,32 +179,84 @@ export async function verifyFirebaseAndAuthorize(
   try {
     // 1) Firebase 検証（Bearer優先。無ければ SessionCookie）
     let firebaseUid: string;
+    let claimRole: string | undefined;
+    let claimUserCode: string | undefined;
+    let provider: string | undefined;
+
     console.time(`${NS} ${id} verify firebase`);
     if (bearerToken) {
       const dec = await adminAuth.verifyIdToken(bearerToken, true);
       firebaseUid = dec.uid;
+      claimRole = (dec as any).role;
+      claimUserCode = (dec as any).user_code;
+      provider = (dec as any)?.firebase?.sign_in_provider;
     } else {
       const dec = await adminAuth.verifySessionCookie(sessionCookie!, true);
       firebaseUid = dec.uid;
+      claimRole = (dec as any).role;
+      claimUserCode = (dec as any).user_code;
+      provider = (dec as any)?.firebase?.sign_in_provider;
     }
     console.timeEnd(`${NS} ${id} verify firebase`);
 
-    // 2) users から user_code / 権限取得（Service Role）
-    const adminSb = createClient(SUPABASE_URL, SERVICE_ROLE, {
-      auth: { persistSession: false },
-    });
+    // 2) claims 優先で user_code / role を決定
+    let finalUserCode: string | null = claimUserCode ?? null;
+    let finalRole: 'master' | 'admin' | 'other' = 'other';
 
-    console.time(`${NS} ${id} fetch user`);
-    // ※ ご利用のスキーマに合わせて 'firebase_uid' を変更してください
-    const { data: u, error } = await adminSb
-      .from('users')
-      .select('user_code, click_type, plan_status')
-      .eq('firebase_uid', firebaseUid)
-      .maybeSingle();
-    console.timeEnd(`${NS} ${id} fetch user`);
+    // role は claims を最優先採用（admin/master/other のいずれかに正規化）
+    if (typeof claimRole === 'string') {
+      const cr = claimRole.toLowerCase();
+      if (cr === 'master') finalRole = 'master';
+      else if (cr === 'admin') finalRole = 'admin';
+      else finalRole = 'other';
+    }
 
-    if (error) throw error;
-    if (!u?.user_code) {
+    // custom の場合は claims.user_code を優先採用（DB 不在でも通す）
+    const isCustom = provider === 'custom';
+
+    // 3) claims に user_code が無い場合のみ DB で補完
+    let dbUserCode: string | null = null;
+    let dbDerivedRole: 'master' | 'admin' | 'other' | null = null;
+
+    if (!finalUserCode) {
+      const adminSb = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
+      console.time(`${NS} ${id} fetch user`);
+      const { data: u, error } = await adminSb
+        .from('users')
+        .select('user_code, click_type, plan_status')
+        .eq('firebase_uid', firebaseUid)
+        .maybeSingle();
+      console.timeEnd(`${NS} ${id} fetch user`);
+
+      if (error) throw error;
+      if (u?.user_code) {
+        dbUserCode = u.user_code;
+        dbDerivedRole =
+          (u as any).click_type === 'master' || (u as any).plan_status === 'master'
+            ? 'master'
+            : (u as any).click_type === 'admin' || (u as any).plan_status === 'admin'
+              ? 'admin'
+              : 'other';
+      }
+    }
+
+    // claims or DB の順で user_code 採用
+    finalUserCode = finalUserCode ?? dbUserCode;
+
+    // role は claims が無い場合のみ DB から補完
+    if (finalRole === 'other' && dbDerivedRole) {
+      finalRole = dbDerivedRole;
+    }
+
+    // custom × claims.user_code がある場合は、DB 不在でも OK（最低限 user として扱う）
+    if (!finalUserCode && isCustom && claimUserCode) {
+      finalUserCode = claimUserCode;
+      // role が still other かつ claims も無ければ、最低限 'admin' にはせず 'other' のまま
+      // （set-balance 側の isAdminLike は x-user-code 一致でも許可できる設計を想定）
+    }
+
+    // どちらにも user_code が無ければ 401
+    if (!finalUserCode) {
       warn(id, 'user_code not found', { uid: firebaseUid });
       return {
         ok: false,
@@ -201,27 +271,20 @@ export async function verifyFirebaseAndAuthorize(
       };
     }
 
-    const role: 'master' | 'admin' | 'other' =
-      (u as any).click_type === 'master' || (u as any).plan_status === 'master'
-        ? 'master'
-        : (u as any).click_type === 'admin' || (u as any).plan_status === 'admin'
-          ? 'admin'
-          : 'other';
-
-    // 3) PostgREST/JWT（RLSで使う）
-    const pgJwt = signPostgresJwt({ user_code: u.user_code, firebase_uid: firebaseUid });
+    // 4) PostgREST/JWT（RLSで使う）
+    const pgJwt = signPostgresJwt({ user_code: finalUserCode, firebase_uid: firebaseUid });
 
     const ms = Date.now() - t0;
-    log(id, 'ok', { user: u.user_code, role, ms });
+    log(id, 'ok', { user: finalUserCode, role: finalRole, provider, ms });
 
     return {
       ok: true,
       allowed: true,
       status: 200,
       pgJwt,
-      userCode: u.user_code,
-      role,
-      user: { uid: firebaseUid, user_code: u.user_code },
+      userCode: finalUserCode,
+      role: finalRole,
+      user: { uid: firebaseUid, user_code: finalUserCode },
       uid: firebaseUid,
     };
   } catch (e: any) {
@@ -244,28 +307,35 @@ export async function verifyFirebaseAndAuthorize(
 /* ===== 既存互換：型 & 正規化ヘルパ ===== */
 export type AuthedUser = { uid: string; user_code: string };
 
-export function normalizeAuthz(result: any): { user: AuthedUser | null; error: string | null } {
+export function normalizeAuthz(
+  result: unknown,
+): { user: AuthedUser | null; error: string | null } {
+  const r: any = result;
+
   // パターンA: { ok: true/false, ... }
-  if (typeof result?.ok === 'boolean') {
-    if (result.ok) {
-      if (result.user && result.user.user_code)
-        return { user: result.user as AuthedUser, error: null };
-      if (result.userCode)
-        return { user: { uid: 'unknown', user_code: String(result.userCode) }, error: null };
-      if (result.user_code)
-        return { user: { uid: 'unknown', user_code: String(result.user_code) }, error: null };
+  if (typeof r?.ok === 'boolean') {
+    if (r.ok) {
+      if (r.user && r.user.user_code) {
+        return { user: r.user as AuthedUser, error: null };
+      }
+      if (r.userCode) {
+        return { user: { uid: 'unknown', user_code: String(r.userCode) }, error: null };
+      }
+      if (r.user_code) {
+        return { user: { uid: 'unknown', user_code: String(r.user_code) }, error: null };
+      }
       return { user: null, error: 'Authorized but no user info' };
     }
-    return { user: null, error: String(result.error ?? 'Unauthorized') };
+    return { user: null, error: String(r.error ?? 'Unauthorized') };
   }
 
   // パターンB: { user, error? }
-  if (result?.user) return { user: result.user as AuthedUser, error: null };
-  if (result?.error) return { user: null, error: String(result.error) };
+  if (r?.user) return { user: r.user as AuthedUser, error: null };
+  if (r?.error) return { user: null, error: String(r.error) };
 
   // パターンC: user を直接返す
-  if (result && typeof result === 'object' && ('user_code' in result || 'userCode' in result)) {
-    const code = (result as any).user_code ?? (result as any).userCode;
+  if (r && typeof r === 'object' && ('user_code' in r || 'userCode' in r)) {
+    const code = (r as any).user_code ?? (r as any).userCode;
     return { user: { uid: 'unknown', user_code: String(code) }, error: null };
   }
 

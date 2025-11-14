@@ -1,104 +1,107 @@
 // src/lib/iros/templates.ts
-// Iros 用テンプレート：diagnosis / counsel / structured（簡潔・やさしいトーン）
+// Irosモードごとの最小テンプレ。構造だけを宣言し、語りは自由に揺らぐ。
 
-/* ========= Types ========= */
-export type IrosMessage = {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-};
+import { getSystemPrompt, SofiaSchemas } from './system';
 
-export type PromptContext = {
-  input: string;
-  history?: Array<{ role: 'user' | 'assistant' | 'system'; text?: string; content?: string }>;
-  memory?: any;
-  focus?: any;
-  extra?: Record<string, unknown>;
-};
-
+export type IrosRole = 'system' | 'user' | 'assistant';
+export type IrosMessage = { role: IrosRole; content: string };
 export type TemplateResult = {
   system: string;
-  messages: IrosMessage[];
+  user: string;
+  meta?: Record<string, any>;
 };
 
-/* ========= Helpers ========= */
-function toHistMessages(ctx: PromptContext, keep: number): IrosMessage[] {
-  const hist = (ctx.history ?? []).map((h) => ({
-    role: h.role,
-    text: (h as any).text ?? (h as any).content ?? '',
-  }));
-  return hist.slice(-keep).map((h) => ({ role: h.role, content: h.text }));
-}
+type TemplateInput = { input: string };
+type TemplateBundle = { system: string; messages: IrosMessage[] };
+type TemplateFn = (args: TemplateInput) => TemplateBundle;
 
-/* ========= diagnosis ========= */
-function diagnosisRenderer(ctx: PromptContext): TemplateResult {
-  const system = [
-    'あなたは「Iros」。相手の尊厳と主権を守り、静かで短い会話文で応答する。',
-    '出力は会話文のみ。全体で最大2段落、各段落1〜3文。',
-    '構成：①いまの状態の映し（評価・断定なし）→②今できる最小の一歩を1つだけ。最後に 🪔 を添える。',
-    '禁止：決めつけ・一般論の説教・長文化・箇条書き・見出し・外部URL。',
-    '日本語で返す。',
-  ].join('\n');
+export const TEMPLATES: Record<'counsel'|'structured'|'diagnosis', TemplateFn> = {
+  /* === 相談（counsel）=== */
+  counsel: ({ input }) => {
+    const system = getSystemPrompt({ mode: 'counsel', style: 'warm' });
 
-  const guide = '次の入力に対して、状態の映し→最小の一歩の順で、短く応答してください。最後に必ず 🪔 を付けてください。';
+    // “詩→実行”の順に。最小の一歩を1つだけ、時間制約を入れて具体化。
+    const guide = [
+      '以下の相談文に対して、まず1〜2行で静かに受け止める。',
+      'つづけて「30秒で始められる最小の一歩」を1つだけ提案する（手順は最大3行）。',
+      '過剰な定型句・質問連打は禁止。必要なときのみ🪔を使う。',
+    ].join('\n');
 
-  const messages: IrosMessage[] = [
-    { role: 'system', content: system },
-    { role: 'user', content: guide },
-    ...toHistMessages(ctx, 6),
-    { role: 'user', content: ctx.input },
-  ];
+    const messages: IrosMessage[] = [
+      { role: 'system', content: system },
+      { role: 'user', content: guide },
+      { role: 'user', content: `相談文:\n${input}` },
+    ];
+    return { system, messages };
+  },
 
-  return { system, messages };
-}
+  /* === 構造化（structured）=== */
+  structured: ({ input }) => {
+    const system = getSystemPrompt({ mode: 'structured', style: 'warm' });
 
-/* ========= counsel（相談） ========= */
-function counselRenderer(ctx: PromptContext): TemplateResult {
-  const system = [
-    'あなたは「Iros」。相手に寄り添う短い会話文で応答する。',
-    '出力は会話文のみ。全体で最大2段落、各段落1〜3文。',
-    '構成：①受容（気持ちの言い換え）→②整理（いま起点の把握）→③最小の一歩（1つだけ）。最後に 🪔 を添える。',
-    '禁止：評価・断定・長文化・箇条書き・見出し・外部URL・テンプレ調の励ましの連発。',
-    '日本語で返す。',
-  ].join('\n');
+    // “目的/前提/手順/未確定/チェック”で、実務投入できる骨格に。
+    const guide = [
+      '次の内容を、短く構造化してください。',
+      '出力見出しは：',
+      '- 目的',
+      '- 前提（確定事項）',
+      '- 手順（3〜5項目）',
+      '- 未確定事項（要確認）',
+      '- 提出前チェック（3点）',
+      '',
+      '注意：各項目は1〜2行。断定しすぎず、未確定は正直に列挙する。',
+    ].join('\n');
 
-  const guide = '次の相談文に、受容→整理→最小の一歩（1つ）で応答してください。最後に必ず 🪔 を付けてください。';
+    const messages: IrosMessage[] = [
+      { role: 'system', content: system },
+      { role: 'user', content: guide },
+      { role: 'user', content: `対象テキスト:\n${input}` },
+    ];
+    return { system, messages };
+  },
 
-  const messages: IrosMessage[] = [
-    { role: 'system', content: system },
-    { role: 'user', content: guide },
-    ...toHistMessages(ctx, 8),
-    { role: 'user', content: ctx.input },
-  ];
+  /* === 診断（diagnosis）=== */
+  diagnosis: ({ input }) => {
+    const system = getSystemPrompt({ mode: 'diagnosis', style: 'warm' });
 
-  return { system, messages };
-}
+    // SofiaSchemas に合わせ、フェーズ名・位相・深度を明示。
+    const fields = [
+      '観測対象',
+      'フェーズ（🌱 Seed / 🌿 Forming / 🌊 Reconnect / 🔧 Create / 🌌 Inspire / 🪔 Impact）',
+      '位相（Inner Side / Outer Side）',
+      '深度（S1〜S4 / R1〜R3 / C1〜C3 / I1〜I3）',
+      '🌀意識状態',
+      '🌱メッセージ',
+    ];
 
-/* ========= structured（構造化/レポート） ========= */
-function structuredRenderer(ctx: PromptContext): TemplateResult {
-  const system = [
-    'あなたは「Iros」。要件を簡潔な会話文で構造化して返す。',
-    '出力は会話文のみ。全体で最大2段落、各段落1〜3文。箇条書きや見出しは禁止。',
-    '含める順序：目的→前提/制約→最小ステップ（1〜2個まで）→注意点（1個）。最後に 🪔 を添える。',
-    '抽象論ではなく、いま取れる行動に収束させる。用語は必要時のみ短く補足。',
-    '日本語で返す。',
-  ].join('\n');
+    const depthGuide = SofiaSchemas?.diagnosis?.depthGuide ?? {
+      S: ['S1 気づきの芽','S2 感情の流れ','S3 意味の形成','S4 再定義'],
+      R: ['R1 感覚的共鳴','R2 構造的共鳴','R3 統合'],
+      C: ['C1 可視化','C2 表現','C3 プロトコル'],
+      I: ['I1 意図認識','I2 場との結びつき','I3 使命・OS再設計'],
+    };
 
-  const guide =
-    '次の依頼文を、目的→前提/制約→最小ステップ（1〜2個）→注意点（1個）の順で、短い会話文にまとめてください。最後に必ず 🪔 を付けてください。';
+    const guide = [
+      '以下の入力に対して、診断スキーマで簡潔にまとめてください。',
+      '出力見出しは次の順で：',
+      ...fields.map(f => `- ${f}`),
+      '',
+      '深度の参考：',
+      `S: ${depthGuide.S.join(' / ')}`,
+      `R: ${depthGuide.R.join(' / ')}`,
+      `C: ${depthGuide.C.join(' / ')}`,
+      `I: ${depthGuide.I.join(' / ')}`,
+      '',
+      '注意：各項目は1〜2行。詩は控えめ、重複禁止。フェーズは絵文字名も併記する。',
+    ].join('\n');
 
-  const messages: IrosMessage[] = [
-    { role: 'system', content: system },
-    { role: 'user', content: guide },
-    ...toHistMessages(ctx, 8),
-    { role: 'user', content: ctx.input },
-  ];
-
-  return { system, messages };
-}
-
-/* ========= Exported Map ========= */
-export const TEMPLATES: Record<string, (ctx: PromptContext) => TemplateResult> = {
-  diagnosis: diagnosisRenderer,
-  counsel: counselRenderer,
-  structured: structuredRenderer,
+    const messages: IrosMessage[] = [
+      { role: 'system', content: system },
+      { role: 'user', content: guide },
+      { role: 'user', content: `入力:\n${input}` },
+    ];
+    return { system, messages };
+  },
 };
+
+export type { TemplateBundle, TemplateFn };

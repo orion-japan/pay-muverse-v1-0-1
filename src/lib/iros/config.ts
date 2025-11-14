@@ -1,19 +1,22 @@
 // src/lib/iros/config.ts
-// 役割：古い import を壊さず、system.ts に一元化
-// - 互換用に IROS_PROMPT をエイリアス提供（buildSystemPrompt()の即時値）
-// - 今後は buildSystemPrompt の使用推奨
-// - 型群（Phase/Depth/QCode/ResonanceState など）を共鳴モジュール全体で共通使用できるよう統一
+// 役割：最小 import を保持しつつ system.ts に一元化
+// - 既定用 IROS_PROMPT: 単純なレイヤレス提供（IROS_SYSTEM の即時値）
+// - 新API: getSystemPrompt（旧 buildSystemPrompt の役割）
+// - Mode / Analysis / Depth / QCode / ResonanceState などを共鳴モジュール全体で共通化できるよう統一
 
-import { buildSystemPrompt, type Mode } from './system';
+import IROS_SYSTEM, { type Mode, getSystemPrompt } from './system';
 
-// 互換: 旧コードが期待する定数。実体は現行System Promptの即時生成値
-export const IROS_PROMPT: string = buildSystemPrompt();
+// 既定の System Prompt（旧コード互換）
+export const IROS_PROMPT: string = IROS_SYSTEM;
 
-// そのまま再エクスポート（他モジュールが import しやすいように）
-export { buildSystemPrompt };
+// 旧コードが参照する `buildSystemPrompt()` を getSystemPrompt にマッピング
+export const buildSystemPrompt = getSystemPrompt;
 export type { Mode };
 
-// 後方互換のための最小型（既存参照があってもビルドが通る）
+// -----------------------------------------------
+// 以下は既存プロジェクトが参照する最低限の互換型
+// -----------------------------------------------
+
 export type Analysis = {
   phase2: 'Inner' | 'Outer';
   depth2: string;
@@ -33,8 +36,8 @@ export type ResonanceState = {
   phase?: Phase;
   depthHint?: Depth;
   qHint?: QCode;
-  field?: string[];                 // 例: ["open","protected"]
-  vector?: Record<string, number>;  // 例: { joy:0.6, calm:0.4, ... }
+  field?: string[];
+  vector?: Record<string, number>;
   shield?: boolean;
   hold?: boolean;
 };

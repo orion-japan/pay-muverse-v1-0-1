@@ -3,8 +3,8 @@
     "target": "ES2022",
     "lib": ["DOM", "DOM.Iterable", "ESNext"],
     "module": "ESNext",
-    "moduleResolution": "bundler",
-    "jsx": "react-jsx",
+    "moduleResolution": "Bundler",
+    "jsx": "preserve",
     "incremental": true,
     "noEmit": true,
 
@@ -27,12 +27,9 @@
       "@/lib/*": ["src/lib/*"],
       "@lib/*": ["src/lib/*"],
       "@/types/*": ["src/types/*"]
-      // ※ 競合しやすい "types": ["src/types/index.ts"] は削除
     },
 
-    // Supabase などの型シムを置く場合に備え、優先探索先を追加
     "typeRoots": ["./src/types", "./node_modules/@types"],
-
     "plugins": [{ "name": "next" }]
   },
 
@@ -52,7 +49,6 @@
     ".next",
     "out",
 
-    /* --- 一時除外（型が原因でビルド停止するものを回避）--- */
     "src/components/mui/useMuiDrop.ts",
     "src/lib/email/**",
     "src/lib/payjp/**",

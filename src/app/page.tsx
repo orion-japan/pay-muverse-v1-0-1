@@ -218,9 +218,6 @@ export default function DashboardPage() {
     { title: 'iros_AI', link: '/sofia', img: '/ir2.png', alt: 'iros_AI' },
   ];
 
-  // ※危険な直リンクは削除（ガードを素通りします）
-  // <a href="/chat?agent=iros" ...>Open iros</a>
-
   // 共鳴色
   const glowColors: Record<string, string> = {
     '/mu_full': '#8a2be2',
@@ -312,6 +309,17 @@ export default function DashboardPage() {
   const isHome = pathname === '/';
   const defaultActivePath = '/vision';
 
+  // 🔐 秘密ボタンクリック時の処理（パスワード 123456）
+  const handleSecretClick = () => {
+    const pw = window.prompt('開発用エリアのパスワードを入力してください');
+    if (pw === null) return; // キャンセル
+    if (pw === '123456') {
+      router.push('/secret-tools'); // ← 秘密メニュー用ページ（お好みのパスに変更OK）
+    } else {
+      alert('パスワードが違います');
+    }
+  };
+
   return (
     <div className="dashboard-wrapper">
       {/* スライダー */}
@@ -400,6 +408,35 @@ export default function DashboardPage() {
             </div>
           );
         })}
+      </section>
+
+      {/* 🔐 秘密ボタン（ページの一番下） */}
+      <section
+        style={{
+          margin: '12px 0 24px',
+          display: 'flex',
+          justifyContent: 'center',
+        }}
+      >
+        <button
+          type="button"
+          onClick={handleSecretClick}
+          style={{
+            padding: '8px 18px',
+            borderRadius: 999,
+            border: 'none',
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer',
+            background:
+              'linear-gradient(90deg, #7f9bff 0%, #ff90c9 50%, #ffd56b 100%)',
+            color: '#fff',
+            boxShadow: '0 4px 14px rgba(120,140,255,0.45)',
+            opacity: 0.85,
+          }}
+        >
+          🔐 Secret Lab
+        </button>
       </section>
 
       {/* ログインモーダル */}

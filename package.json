@@ -31,7 +31,7 @@
     "crypto-js": "^4.2.0",
     "dayjs": "^1.11.18",
     "firebase": "^12.5.0",
-    "firebase-admin": "^13.4.0",
+    "firebase-admin": "^12.7.0",
     "framer-motion": "^12.23.12",
     "googleapis": "^150.0.1",
     "highlight.js": "^11.11.1",
@@ -99,5 +99,6 @@
   },
   "engines": {
     "node": "22.x"
-  }
+  },
+  "packageManager": "yarn@4.0.0"
 }

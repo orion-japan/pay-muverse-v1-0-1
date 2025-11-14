@@ -1,6 +1,6 @@
 // src/app/api/shipmates/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseServer } from '@/lib/supabaseServer';
+import { supabaseAdmin as supabaseServer } from '@/lib/supabaseAdmin';
 import { adminAuth } from '@/lib/firebase-admin';
 
 type Plan = 'free' | 'regular' | 'premium' | 'master' | 'admin';

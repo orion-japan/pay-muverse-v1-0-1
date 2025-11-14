@@ -1,7 +1,7 @@
 // /api/update-name-visibility/route.ts（例）
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth } from '@/lib/firebase-admin';
-import { supabaseServer } from '@/lib/supabaseServer';
+import { supabaseAdmin as supabaseServer } from '@/lib/supabaseAdmin';
 
 export async function POST(req: NextRequest) {
   const { show } = await req.json(); // boolean
