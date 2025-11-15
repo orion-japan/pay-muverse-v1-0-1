@@ -1,7 +1,7 @@
 // src/lib/iros/buildPrompt.ts
 // mode に応じて templates を選び、LLM へ渡す system/messages を構築
 
-import { TEMPLATES } from './templates';
+import TEMPLATES from './templates';
 
 // TemplateResult をゆるくして型崩壊を防ぐ
 export type TemplateResult = {

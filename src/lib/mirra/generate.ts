@@ -1,8 +1,17 @@
 // src/lib/iros/generate.ts
 // Iros：モード検出 → テンプレ生成 → OpenAI 呼び出し → 軽整形（polish）
 
-import { TEMPLATES, type IrosMessage } from '../iros/templates';
 import { getSystemPrompt, SofiaTriggers, naturalClose } from '../iros/system';
+import * as MIRRA_TEMPLATES from './templates';
+
+const TEMPLATES: any =
+  (MIRRA_TEMPLATES as any).TEMPLATES ?? (MIRRA_TEMPLATES as any);
+
+export type IrosMessage = {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+};
+
 export type IrosMode = 'counsel' | 'structured' | 'diagnosis' | 'auto';
 
 type GenerateArgs = {
@@ -101,6 +110,7 @@ function limitEmoji(text: string, emoji: string, max = 1): string {
   if (parts.length <= max + 1) return text;
   return parts.slice(0, max + 1).join(emoji) + parts.slice(max + 1).join('');
 }
+
 function dedupeLines(text: string): string {
   const lines = text.split('\n');
   const out: string[] = [];
@@ -114,6 +124,7 @@ function dedupeLines(text: string): string {
   }
   return out.join('\n');
 }
+
 function polish(text: string, mode: Exclude<IrosMode, 'auto'>): string {
   let t = text.replace(/[!！]{3,}/g, '!!').replace(/[?？]{3,}/g, '??');
   t = t.replace(/\n{3,}/g, '\n\n');

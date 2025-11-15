@@ -4,14 +4,15 @@
 // - 新API: getSystemPrompt（旧 buildSystemPrompt の役割）
 // - Mode / Analysis / Depth / QCode / ResonanceState などを共鳴モジュール全体で共通化できるよう統一
 
-import IROS_SYSTEM, { type Mode, getSystemPrompt } from './system';
+import IROS_SYSTEM, { getSystemPrompt } from './system';
+
+export type Mode = string;
 
 // 既定の System Prompt（旧コード互換）
 export const IROS_PROMPT: string = IROS_SYSTEM;
 
 // 旧コードが参照する `buildSystemPrompt()` を getSystemPrompt にマッピング
 export const buildSystemPrompt = getSystemPrompt;
-export type { Mode };
 
 // -----------------------------------------------
 // 以下は既存プロジェクトが参照する最低限の互換型

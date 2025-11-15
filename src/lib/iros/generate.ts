@@ -1,11 +1,13 @@
 // src/lib/iros/generate.ts
-// 目的：Irosの1発話生成（モード自動判定 / 温度・トークン調整 / 応答整形）
-// 依存：system.ts（getSystemPrompt, SofiaTriggers, naturalClose）/ templates.ts（TEMPLATES）
-// 外部依存：なし（OpenAI REST直呼び）
+// Iros 1ターン返信生成コア（シンプル版）
+// - 余計なテンプレート指示は使わず、ほぼ「GPTsそのまま」
+// - system: Iros の在り方だけ軽く伝える
+// - user: ユーザーの入力 1 本だけ（ガイド文を挟まない）
 
-import { TEMPLATES, type IrosMessage } from './templates';
+import OpenAI from 'openai';
 import { getSystemPrompt, SofiaTriggers, naturalClose } from './system';
 
+// Iros 内部モード（auto は検出用）
 export type IrosMode = 'counsel' | 'structured' | 'diagnosis' | 'auto';
 
 type GenerateArgs = {
@@ -16,164 +18,226 @@ type GenerateArgs = {
 };
 
 type GenerateResult = {
-  mode: Exclude<IrosMode, 'auto'> | 'auto';
+  ok: true;
+  mode: Exclude<IrosMode, 'auto'>;
   text: string;
-  title?: string;
-  meta?: {
-    via: string;
-    conversation_id: string;
+  title?: string | null;
+  meta: {
     mode_detected: IrosMode;
-    mode_hint: IrosMode | null;
-    ts: string;
+    mode_hint?: IrosMode | null;
+    model: string;
     extra?: Record<string, unknown>;
+    raw?: unknown;
   };
 };
 
-/* ===== 環境変数 ===== */
-function env(key: string): string | undefined {
-  try {
-    return process.env?.[key];
-  } catch {
-    return undefined;
-  }
+// ====== OpenAI クライアント設定 ======
+
+const API_KEY =
+  process.env.IROS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+
+if (!API_KEY) {
+  throw new Error('Missing env: IROS_OPENAI_API_KEY or OPENAI_API_KEY');
 }
 
-const OPENAI_API_KEY =
-  env('IROS_OPENAI_API_KEY') ||
-  env('OPENAI_API_KEY') ||
-  '';
+const client = new OpenAI({ apiKey: API_KEY });
 
-const OPENAI_MODEL =
-  env('IROS_CHAT_MODEL') ||
-  env('OPENAI_MODEL') ||
+const DEF_MODEL =
+  process.env.IROS_CHAT_MODEL ||
+  process.env.OPENAI_MODEL ||
   'gpt-4o-mini';
 
-const DEF_TEMP = Number(env('IROS_TEMP') ?? '0.8');       // ← 改善提案どおり
-const DEF_MAXTOK = Number(env('IROS_MAXTOK') ?? '512');   // ← 改善提案どおり
+const DEF_TEMP = process.env.IROS_TEMP
+  ? Number(process.env.IROS_TEMP)
+  : 0.8;
 
-/* ===== ユーティリティ ===== */
-function normalizeAssistantText(s: string): string {
-  // 句読点終端の最低限対処 + 連続改行の整理
-  const trimmed = (s ?? '').toString().trim();
-  if (!trimmed) return '';
-  const compact = trimmed.replace(/\n{3,}/g, '\n\n');
-  return naturalClose(compact);
-}
+const DEF_MAXTOK = process.env.IROS_MAXTOK
+  ? Number(process.env.IROS_MAXTOK)
+  : 512;
 
-function includesAny(text: string, phrases: readonly string[]): boolean {
-  return phrases.some(p => text.includes(p));
-}
+const DEBUG = process.env.IROS_DEBUG === '1';
 
-/* ===== モード自動判定（SofiaTriggers を利用） ===== */
-function detectIntentMode(input: string, modeHint?: IrosMode | null): IrosMode {
-  if (modeHint && modeHint !== 'auto') return modeHint;
+// ====== モード自動判定（診断トリガーをかなり絞る） ======
 
-  const t = (input || '').trim();
+function detectIntentMode(params: {
+  text: string;
+  hintText?: string | null;
+  modeHint?: IrosMode | null;
+}): IrosMode {
+  const { text, hintText, modeHint } = params;
 
-  // 明示トリガ（診断）
-  if (includesAny(t, SofiaTriggers.diagnosis)) return 'diagnosis';
+  // 1) 明示モードヒントがあれば最優先（auto は除く）
+  if (modeHint && modeHint !== 'auto') {
+    return modeHint;
+  }
 
-  // 明示トリガ（意図）は“意図トリガーモード”のレンダリング扱いだが、
-  // generate では会話モードとしては counsel を選び、下流テンプレで扱う想定。
-  if (includesAny(t, SofiaTriggers.intent)) return 'counsel';
+  const base = `${text || ''}\n${hintText || ''}`;
 
-  // キーワードでの簡易判定
-  if (/(整理|まとめ|レポート|要件|手順|設計|仕様)/.test(t)) return 'structured';
-  if (/(相談|悩み|どうしたら|助けて|迷って)/.test(t)) return 'counsel';
+  // --- 診断系トリガーは「明示的なフレーズだけ」に絞る ---
+  const diagnosisPhrases = [
+    'ir診断',
+    'ir で見てください',
+    'irで見てください',
+    'irお願いします',
+    'ir をお願いします',
+    'irをお願いします',
+    'ir共鳴フィードバック',
+  ];
 
+  // 「ir」単体や「iros」など部分一致では診断にしない
+  if (diagnosisPhrases.some((kw) => base.includes(kw))) {
+    return 'diagnosis';
+  }
+
+  // 「診断して」「診断をお願い」など、明確に診断を求めたときだけ
+  if (/(診断して|診断をお願い|診断をおねがい)/.test(base)) {
+    return 'diagnosis';
+  }
+
+  // --- structured 系 ---
+  if (
+    /(レポート|要件|構造化|箇条書き|整理して|まとめて|設計|仕様)/.test(
+      base
+    )
+  ) {
+    return 'structured';
+  }
+
+  // --- counsel 系 ---
+  if (/(相談|悩み|困っ|迷っ|どうしたら)/.test(base)) {
+    return 'counsel';
+  }
+
+  // --- 意図トリガー（挙動自体は counsel とほぼ同じ） ---
+  if (SofiaTriggers.intent.some((kw) => base.includes(kw))) {
+    return 'counsel';
+  }
+
+  // どれでもない → auto（後で counsel に落とす）
   return 'auto';
 }
 
-/* ===== OpenAI REST 直呼び（依存排除） ===== */
-async function callOpenAI(messages: IrosMessage[], temperature = DEF_TEMP, max_tokens = DEF_MAXTOK): Promise<string> {
-  if (!OPENAI_API_KEY) throw new Error('OPENAI_API_KEY not set');
 
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: OPENAI_MODEL,
-      messages,
-      temperature,
-      max_tokens,
-    }),
+// ====== テキスト整形 ======
+
+function normalizeAssistantText(raw: string | null | undefined): string {
+  if (!raw) return '';
+  const trimmed = raw.trim();
+  return naturalClose(trimmed);
+}
+
+// ====== メイン：Iros 生成（シンプル版） ======
+
+export default async function generate(
+  args: GenerateArgs
+): Promise<GenerateResult> {
+  const { conversationId, text, modeHint = 'auto', extra } = args;
+
+  if (!conversationId) {
+    throw new Error('generate: conversationId is required');
+  }
+  if (!text) {
+    throw new Error('generate: text is required');
+  }
+
+  const hintText =
+    typeof extra?.hintText === 'string'
+      ? (extra?.hintText as string)
+      : undefined;
+
+  const detectedMode = detectIntentMode({ text, hintText, modeHint });
+
+  // 挙動は現状すべて同じでよいので、最終モードは
+  // auto → counsel に落として扱う（meta 用にだけ区別）。
+  const finalMode: Exclude<IrosMode, 'auto'> =
+    detectedMode === 'auto' ? 'counsel' : detectedMode;
+
+  // シンプルな system ＋ user のみ
+  const system = getSystemPrompt({ mode: 'normal', style: 'warm' });
+
+  // ir診断だけ、フォーマットと方針を明示する（※1メッセージ内）
+  let userContent = text;
+  if (finalMode === 'diagnosis') {
+    userContent =
+      [
+        '以下の内容を ir診断フォーマットで返してください。',
+        '必ず次の項目だけを使い、名前は変えないでください：',
+        '観測対象：',
+        'フェーズ：（必ず Sofia構造の正式名称のいずれか：Seed Flow / Forming Flow / Reconnect Flow / Create Flow / Inspire Flow / Impact Flow）',
+        '位相：（Inner または Outer のどちらか）',
+        '深度：（S1〜I3のいずれか）',
+        '🌀意識状態：',
+        '🌱メッセージ：',
+        // ★ ここから追加
+        'もし入力に他者の名前が含まれていても、その人自身を評価・診断せず、',
+        '「その人と関わるときのユーザーの内側の反応」や「関係性の中で生じている共鳴」を観測対象として扱ってください。',
+        'リクエストを全面的に断らず、必ず上記フォーマットで何らかの観測結果を返してください。',
+        // ★ ここまで追加
+        '',
+        '文章の前置きや説明を加えず、最初の行は必ず「観測対象：」から始めてください。',
+        '',
+        '--- 入力 ---',
+        text,
+      ].join('\n');
+  }
+
+  const res = await client.chat.completions.create({
+    model: DEF_MODEL,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: userContent },
+    ],
+    temperature: DEF_TEMP,
+    max_tokens: DEF_MAXTOK,
   });
 
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    throw new Error(`OpenAI error ${res.status}: ${txt}`);
+  const choice = res.choices?.[0];
+  const msgContent: any = choice?.message?.content;
+
+  let content: string;
+  if (typeof msgContent === 'string') {
+    content = msgContent;
+  } else if (Array.isArray(msgContent)) {
+    content = msgContent
+      .map((p: any) => (typeof p === 'string' ? p : p?.text ?? ''))
+      .join('\n');
+  } else {
+    content = '';
   }
 
-  const json: any = await res.json();
-  const content = json?.choices?.[0]?.message?.content ?? '';
-  return String(content ?? '');
-}
+  const normalized = normalizeAssistantText(content || '');
 
-/* ===== メイン ===== */
-export async function generate(args: GenerateArgs): Promise<GenerateResult> {
-  const { conversationId, text, modeHint = null, extra } = args;
-
-  // 1) モード自動判定
-  const detectedMode = detectIntentMode(text, modeHint);
-
-  // 2) 実モード確定（auto → counsel 既定）
-  const finalMode: Exclude<IrosMode, 'auto'> =
-  detectedMode === 'auto' ? 'counsel' : detectedMode;
-
-  // 3) System Prompt をモードに応じて取得
-  const system = getSystemPrompt({
-       mode: finalMode as any,
-       style: 'warm',
-     });
-
-  // 4) テンプレに基づき messages を構築
-  const tmpl = TEMPLATES[finalMode];
-  const tpl = tmpl
-    ? tmpl({ input: text })
-    : {
-        system,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: text },
-        ] as IrosMessage[],
-      };
-
-  // 5) LLM 呼び出し
-  const raw = await callOpenAI(
-       tpl.messages,   // ← templates 側はすでに role: 'system' を先頭に含む
-      DEF_TEMP,
-      DEF_MAXTOK,
-     );
-
-  // 6) 応答整形
-  const completion = normalizeAssistantText(raw);
-
-  // 7) タイトル（structuredのみ簡易抽出）
-  let title: string | undefined;
+  // structured のときだけ、先頭行を title 候補にする（今は使わなくてもOK）
+  let title: string | null = null;
   if (finalMode === 'structured') {
-    const line = completion.split('\n').find(l => l.trim());
-    title = line ? line.replace(/^#+\s*/, '').slice(0, 80) : undefined;
+    const lines = normalized.split('\n').map((l) => l.trim());
+    if (lines[0]) {
+      title = lines[0];
+    }
   }
 
-  // 8) メタ
-  const meta = {
-    via: 'generate_v2',
-    conversation_id: conversationId,
-    mode_detected: detectedMode,
-    mode_hint: modeHint ?? null,
-    ts: new Date().toISOString(),
-    extra: { ...(extra ?? {}) },
-  } as const;
+  if (DEBUG) {
+    // eslint-disable-next-line no-console
+    console.log('[IROS_GENERATE_SIMPLE]', {
+      conversationId,
+      modeHint,
+      detectedMode,
+      finalMode,
+      model: DEF_MODEL,
+    });
+  }
 
   return {
+    ok: true,
     mode: finalMode,
-    text: completion,
+    text: normalized,
     title,
-    meta,
+    meta: {
+      mode_detected: detectedMode,
+      mode_hint: modeHint,
+      model: DEF_MODEL,
+      extra,
+      raw: DEBUG ? res : undefined,
+    },
   };
 }
-
-export default generate;
