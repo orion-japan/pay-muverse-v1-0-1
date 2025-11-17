@@ -16,6 +16,7 @@ import * as TitleMod from './title';
 import * as HistMod from './history.adapter';
 import * as MemMod from './memory.adapter';
 import * as MemCore from './memory';
+import type { IrosMemory } from './types'; // ★ 追加
 
 type Mode = 'diagnosis' | 'auto' | 'counsel' | 'structured';
 
@@ -31,7 +32,10 @@ type RunResult = {
   reply: string;
   meta: {
     focus?: {
-      phase?: string; depth?: string; q?: string; reasons?: string[];
+      phase?: string;
+      depth?: string;
+      q?: string;
+      reasons?: string[];
     } | null;
     memory?: { summary?: string; keywords?: string[] } | null;
     timings?: Record<string, number>;
@@ -51,11 +55,21 @@ const analyzeFocus: (t: string) => any =
   (FocusMod as any).analyzeFocus ?? (() => null);
 
 const buildPrompt: (args: {
-  mode: Mode; text: string; history: ChatMessage[]; memory: any; focus: any; extra?: any;
+  mode: Mode;
+  text: string;
+  history: ChatMessage[];
+  memory: any;
+  focus: any;
+  extra?: any;
 }) => Promise<{ system: string; messages: ChatMessage[] }> =
-  (BuildPromptMod as any).buildPrompt ?? (async (a: any) => ({ system: '', messages: [
-    ...(a.history ?? []), { role: 'user', content: String(a.text ?? '') },
-  ]}));
+  (BuildPromptMod as any).buildPrompt ??
+  (async (a: any) => ({
+    system: '',
+    messages: [
+      ...(a.history ?? []),
+      { role: 'user', content: String(a.text ?? '') },
+    ],
+  }));
 
 const naturalClose: (t: string) => string =
   (PhrasingMod as any).naturalClose ?? ((t: string) => t);
@@ -68,6 +82,47 @@ const loadHistoryDB: (cid: string, limit: number) => Promise<ChatMessage[]> =
   (HistMod as any).loadHistory ??
   (async () => []);
 
+/* ======================================================
+ * メモリ読み書き（MemoryAdapter があればそちら優先）
+ *  - 無ければ MemCore.getIrosMemory / saveIrosMemory をラップして使う
+ * ====================================================== */
+
+// ★ 修正版: getIrosMemory をそのまま使えるようにラップ
+const loadMemorySnap: (cid: string) => Promise<IrosMemory | null> =
+  (MemMod as any).MemoryAdapter?.load ??
+  (async (cid: string) => {
+    if (typeof (MemCore as any).getIrosMemory === 'function') {
+      return (MemCore as any).getIrosMemory(cid);
+    }
+    return null;
+  });
+
+// ★ 修正版: saveIrosMemory の新しいシグネチャに合わせたラッパ
+const saveMemorySnap: (
+  cid: string,
+  userCode: string,
+  snap: any,
+) => Promise<void> =
+  (MemMod as any).MemoryAdapter?.save ??
+  (async (cid: string, userCode: string, snap: any) => {
+    if (typeof (MemCore as any).saveIrosMemory !== 'function') return;
+
+    // snap から IrosMemory を安全に組み立てる
+    const mem: IrosMemory = {
+      summary: String(snap?.summary ?? ''),
+      depth: String(snap?.depth ?? ''),
+      tone: String(snap?.tone ?? ''),
+      theme: String(snap?.theme ?? ''),
+      last_keyword: String(snap?.last_keyword ?? ''),
+    };
+
+    await (MemCore as any).saveIrosMemory({
+      conversationId: cid,
+      user_code: userCode || 'system',
+      mem,
+    });
+  });
+
 const saveMessagesDB: (args: {
   conversationId: string;
   userText: string;
@@ -77,16 +132,6 @@ const saveMessagesDB: (args: {
 }) => Promise<void> =
   (HistMod as any).saveMessagesDB ??
   (HistMod as any).saveMessages ??
-  (async () => {});
-
-const loadMemorySnap: (cid: string) => Promise<any> =
-  (MemMod as any).MemoryAdapter?.load ??
-  (MemCore as any).getIrosMemory ??
-  (async () => null);
-
-const saveMemorySnap: (cid: string, userCode: string, snap: any) => Promise<void> =
-  (MemMod as any).MemoryAdapter?.save ??
-  (MemCore as any).saveIrosMemory ??
   (async () => {});
 
 /* ===== factory ===== */
@@ -110,16 +155,29 @@ export function makeOrchestrator(opts?: { debug?: boolean; model?: string }) {
       const md0 = Date.now();
       const mode: Mode = (args?.mode as Mode) || detectIntentMode(text);
       timings.detect_mode_ms = Date.now() - md0;
-      if (debug) devlog('makeOrchestrator:mode', { mode }, { scope: 'orchestrator', isServerOnly: true });
+      if (debug)
+        devlog(
+          'makeOrchestrator:mode',
+          { mode },
+          { scope: 'orchestrator', isServerOnly: true },
+        );
 
       // 2) history
       const h0 = Date.now();
       // DB行を {role, content} へ正規化（null安全）
-      const historyRows = await loadHistoryDB(conversationId, 10).catch(() => []) as any[];
-      const history: ChatMessage[] = (historyRows || []).map((r) => ({
-        role: (r.role === 'assistant' ? 'assistant' : r.role === 'system' ? 'system' : 'user') as ChatMessage['role'],
-        content: String((r.content ?? r.text ?? '') || ''),
-      })).filter((m) => m.content.trim().length > 0);
+      const historyRows = (await loadHistoryDB(conversationId, 10).catch(
+        () => [],
+      )) as any[];
+      const history: ChatMessage[] = (historyRows || [])
+        .map(r => ({
+          role: (r.role === 'assistant'
+            ? 'assistant'
+            : r.role === 'system'
+            ? 'system'
+            : 'user') as ChatMessage['role'],
+          content: String((r.content ?? r.text ?? '') || ''),
+        }))
+        .filter(m => m.content.trim().length > 0);
       timings.load_history_ms = Date.now() - h0;
 
       // 3) memory
@@ -134,16 +192,27 @@ export function makeOrchestrator(opts?: { debug?: boolean; model?: string }) {
 
       // 5) prompt
       const p0 = Date.now();
-      const { system, messages } = await buildPrompt({ mode, text, history, memory, focus, extra: args?.extra });
+      const { system, messages } = await buildPrompt({
+        mode,
+        text,
+        history,
+        memory,
+        focus,
+        extra: args?.extra,
+      });
       timings.build_prompt_ms = Date.now() - p0;
 
       // 6) LLM
       const l0 = Date.now();
       const reply = await chatComplete({
         model,
-        messages: messages && messages.length
-          ? messages
-          : ([ system ? { role: 'system', content: system } : null, { role: 'user', content: text } ].filter(Boolean) as ChatMessage[]),
+        messages:
+          messages && messages.length
+            ? messages
+            : ([
+                system ? { role: 'system', content: system } : null,
+                { role: 'user', content: text },
+              ].filter(Boolean) as ChatMessage[]),
         temperature: 0.4,
         max_tokens: 640,
       });
@@ -165,18 +234,28 @@ export function makeOrchestrator(opts?: { debug?: boolean; model?: string }) {
           mode,
           meta: { focus, memory, title },
         });
+
         await saveMemorySnap(conversationId, String(args?.userCode ?? ''), {
           ...(memory ?? {}),
           updated_at: new Date().toISOString(),
         });
       } catch (e) {
-        devwarn('persist:fail', String((e as Error)?.message || e), { scope: 'orchestrator', isServerOnly: true });
+        devwarn(
+          'persist:fail',
+          String((e as Error)?.message || e),
+          { scope: 'orchestrator', isServerOnly: true },
+        );
       }
       timings.persist_ms = Date.now() - s0;
 
       timings.total_ms = Date.now() - t0;
 
-      if (debug) devlog('orchestrator.run:done', { mode, timings }, { scope: 'orchestrator', isServerOnly: true });
+      if (debug)
+        devlog(
+          'orchestrator.run:done',
+          { mode, timings },
+          { scope: 'orchestrator', isServerOnly: true },
+        );
 
       return {
         reply: closed,

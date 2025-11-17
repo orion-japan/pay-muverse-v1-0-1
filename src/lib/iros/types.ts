@@ -1,4 +1,5 @@
 // /src/lib/iros/types.ts
+
 export type IrosMode = 'auto' | 'surface' | 'core';
 
 export type IrosChatRequest = {
@@ -16,11 +17,19 @@ export type IrosCredit = {
   error?: string | null;
 };
 
+/**
+ * Iros が保存する軽量メモリ
+ * - summary      : Q/A の短い要約
+ * - depth        : 深度ラベル（例: 'S2' / 'I2' など）
+ * - tone         : トーン（'consult' / 'reflective' / 'creative' など）
+ * - theme        : テーマ名（mode などをそのまま入れてもよい）
+ * - last_keyword : 直近のキーワード（検索用）
+ */
 export type IrosMemory = {
-  depth: string;       // 例: "S2" | "I1"
-  tone: string;        // 例: "calm"
-  theme: string;       // 例: "general"
-  summary: string;     // 返信の短い要約
+  summary: string;
+  depth: string;
+  tone: string;
+  theme: string;
   last_keyword: string;
 };
 

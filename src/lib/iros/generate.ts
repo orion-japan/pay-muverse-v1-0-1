@@ -117,7 +117,6 @@ function detectIntentMode(params: {
   return 'auto';
 }
 
-
 // ====== テキスト整形 ======
 
 function normalizeAssistantText(raw: string | null | undefined): string {
@@ -152,33 +151,49 @@ export default async function generate(
   const finalMode: Exclude<IrosMode, 'auto'> =
     detectedMode === 'auto' ? 'counsel' : detectedMode;
 
+  // ==== system プロンプト（SofiaMode にマップ） ====
+  type SofiaMode = 'normal' | 'counsel' | 'structured' | 'diagnosis';
+
+  let sofiaMode: SofiaMode;
+  switch (finalMode) {
+    case 'counsel':
+      sofiaMode = 'counsel';
+      break;
+    case 'structured':
+      sofiaMode = 'structured';
+      break;
+    case 'diagnosis':
+      sofiaMode = 'diagnosis';
+      break;
+    default:
+      sofiaMode = 'normal';
+      break;
+  }
+
   // シンプルな system ＋ user のみ
-  const system = getSystemPrompt({ mode: 'normal', style: 'warm' });
+  const system = getSystemPrompt({ mode: sofiaMode as any, style: 'warm' });
 
   // ir診断だけ、フォーマットと方針を明示する（※1メッセージ内）
   let userContent = text;
   if (finalMode === 'diagnosis') {
-    userContent =
-      [
-        '以下の内容を ir診断フォーマットで返してください。',
-        '必ず次の項目だけを使い、名前は変えないでください：',
-        '観測対象：',
-        'フェーズ：（必ず Sofia構造の正式名称のいずれか：Seed Flow / Forming Flow / Reconnect Flow / Create Flow / Inspire Flow / Impact Flow）',
-        '位相：（Inner または Outer のどちらか）',
-        '深度：（S1〜I3のいずれか）',
-        '🌀意識状態：',
-        '🌱メッセージ：',
-        // ★ ここから追加
-        'もし入力に他者の名前が含まれていても、その人自身を評価・診断せず、',
-        '「その人と関わるときのユーザーの内側の反応」や「関係性の中で生じている共鳴」を観測対象として扱ってください。',
-        'リクエストを全面的に断らず、必ず上記フォーマットで何らかの観測結果を返してください。',
-        // ★ ここまで追加
-        '',
-        '文章の前置きや説明を加えず、最初の行は必ず「観測対象：」から始めてください。',
-        '',
-        '--- 入力 ---',
-        text,
-      ].join('\n');
+    userContent = [
+      '以下の内容を ir診断フォーマットで返してください。',
+      '必ず次の項目だけを使い、名前は変えないでください：',
+      '観測対象：',
+      'フェーズ：（必ず Sofia構造の正式名称のいずれか：Seed Flow / Forming Flow / Reconnect Flow / Create Flow / Inspire Flow / Impact Flow）',
+      '位相：（Inner または Outer のどちらか）',
+      '深度：（S1〜I3のいずれか）',
+      '🌀意識状態：',
+      '🌱メッセージ：',
+      'もし入力に他者の名前が含まれていても、その人自身を評価・診断せず、',
+      '「その人と関わるときのユーザーの内側の反応」や「関係性の中で生じている共鳴」を観測対象として扱ってください。',
+      'リクエストを全面的に断らず、必ず上記フォーマットで何らかの観測結果を返してください。',
+      '',
+      '文章の前置きや説明を加えず、最初の行は必ず「観測対象：」から始めてください。',
+      '',
+      '--- 入力 ---',
+      text,
+    ].join('\n');
   }
 
   const res = await client.chat.completions.create({
