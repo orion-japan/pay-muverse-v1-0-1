@@ -12,9 +12,12 @@ import type {
   IrosCredit,
 } from './types';
 
-import generate, {
-  type IrosMode as CoreMode,
-} from './generate';
+import { generateIrosReply, type GenerateResult } from './generate';
+import type { IrosMode } from './system';
+
+// 旧コード互換用の別名
+type CoreMode = IrosMode;
+
 
 // --- UI側モード → コア側モードの簡易マッピング ---
 //   'surface' → 一般相談（counsel）
@@ -90,14 +93,13 @@ export async function generateIrosChat(
   try {
     const coreModeHint = mapUiModeToCore(req.mode);
 
-    const coreRes = await generate({
+    const coreRes: GenerateResult = await generateIrosReply({
       conversationId: req.conversationId,
       text: req.userText,
-      modeHint: coreModeHint ?? 'auto',
-      extra: {
-        // 将来ここに hintText や Qコードなどを渡せる
-      },
+      // 旧 modeHint 相当は meta.mode に渡す
+      meta: coreModeHint ? { mode: coreModeHint } : undefined,
     });
+
 
     const layer = decideLayer(coreRes.mode);
     const memory = makeMemorySnapshot(coreRes.text, coreRes.mode);

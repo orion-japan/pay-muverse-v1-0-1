@@ -1,5 +1,6 @@
 // src/lib/iros/intent.ts
-import type { IrosMode } from '@/lib/iros/generate';
+import type { IrosMode } from '@/lib/iros/system';
+
 // orchestrator 側の実装差に耐性を持たせる（関数名/引数形の差異を吸収）
 import detect from '@/lib/iros/orchestratorCore';
 

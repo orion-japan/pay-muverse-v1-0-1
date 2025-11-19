@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyFirebaseAndAuthorize } from '@/lib/authz';
-import generate from '@/lib/iros/generate';
+import { generateIrosReply } from '@/lib/iros/generate';
 import { authorizeChat, captureChat, makeIrosRef } from '@/lib/credits/auto';
 import { createClient } from '@supabase/supabase-js';
 
@@ -185,11 +185,10 @@ export async function POST(req: NextRequest) {
     // 8) orchestrator 呼び出し（応答生成）
     let result: any;
     try {
-      result = await generate({
+      result = await generateIrosReply({
         conversationId,
         text,
-        modeHint: mode,
-        extra: { ...(extra || {}), userCode, hintText },
+        // ★ 極小Irosコア：今は meta は渡さない
       });
     } catch (e: any) {
       // 生成失敗：capture は呼ばず返す（authorize は0記録で安全）
