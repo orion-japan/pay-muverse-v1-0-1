@@ -7,7 +7,16 @@ import { getSystemPrompt, type IrosMeta, type IrosMode } from './system';
 const IROS_MODEL =
   process.env.IROS_MODEL ??
   process.env.OPENAI_MODEL ??
-  'gpt-4.1-mini';
+  'gpt-4o';
+
+  console.log('[IROS_MODEL-check]', {
+    IROS_MODEL_env: process.env.IROS_MODEL,
+    OPENAI_MODEL_env: process.env.OPENAI_MODEL,
+    resolved: process.env.IROS_MODEL ??
+              process.env.OPENAI_MODEL ??
+              'gpt-4o',
+  });
+
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
