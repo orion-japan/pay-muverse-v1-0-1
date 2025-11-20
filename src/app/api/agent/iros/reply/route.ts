@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyFirebaseAndAuthorize } from '@/lib/authz';
 import { authorizeChat, captureChat, makeIrosRef } from '@/lib/credits/auto';
 import { createClient } from '@supabase/supabase-js';
-import { logQFromIros } from '@/lib/q/logFromIros';  // ★ 追加
+import { logQFromIros } from '@/lib/q/logFromIros'; // ★ 追加（※現時点では未使用。Qメモリ配線時に利用予定）
 
 // ★ 追加：Iros Orchestrator + Memory Adapter
 import { runIrosTurn } from '@/lib/iros/orchestrator';
@@ -261,6 +261,49 @@ export async function POST(req: NextRequest) {
       res.headers.set('x-credit-amount', String(CREDIT_AMOUNT));
       if (traceId) res.headers.set('x-trace-id', String(traceId));
       return res;
+    }
+
+    // 8.5) Orchestratorの結果を /messages API に保存（assistant + meta）
+    try {
+      // assistant の本文を抽出
+      const assistantText: string =
+        result && typeof result === 'object'
+          ? (() => {
+              const r: any = result;
+              if (typeof r.content === 'string' && r.content.trim().length > 0) return r.content;
+              if (typeof r.text === 'string' && r.text.trim().length > 0) return r.text;
+              // content/text が無い場合は JSON 文字列として保存（デバッグ用）
+              return JSON.stringify(r);
+            })()
+          : String(result ?? '');
+
+      if (assistantText && assistantText.trim().length > 0) {
+        const metaForSave =
+          result && typeof result === 'object' && (result as any).meta
+            ? (result as any).meta
+            : null;
+
+        const origin = req.nextUrl.origin;
+        const msgUrl = new URL('/api/agent/iros/messages', origin);
+
+        await fetch(msgUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            // verifyFirebaseAndAuthorize を通すために認証ヘッダをそのまま引き継ぐ
+            Authorization: req.headers.get('authorization') ?? '',
+            'x-user-code': userCode,
+          },
+          body: JSON.stringify({
+            conversation_id: conversationId,
+            role: 'assistant',
+            text: assistantText,
+            meta: metaForSave,
+          }),
+        });
+      }
+    } catch (e) {
+      console.error('[IROS/Reply] failed to persist assistant message', e);
     }
 
     // 9) capture（authorize 成功時のみ実施：credit_capture_safe を内部で実行）

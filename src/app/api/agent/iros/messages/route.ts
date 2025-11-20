@@ -14,15 +14,57 @@ const json = (data: any, status = 200) =>
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type,Authorization',
     },
   });
 
+/** 汎用 select（候補テーブルを順に試す） */
+async function trySelect<T>(
+  supabase: ReturnType<typeof sb>,
+  tables: readonly string[],
+  columns: string,
+  modify: (q: any) => any,
+) {
+  for (const table of tables) {
+    try {
+      const { data, error } = await modify(
+        (supabase as any).from(table).select(columns),
+      );
+      if (!error) return { ok: true as const, data, table };
+    } catch {
+      // ignore and try next
+    }
+  }
+  return { ok: false, error: 'select_failed_all_candidates' };
+}
+
+/** 汎用 insert（候補テーブルを順に試す） */
+async function tryInsert(
+  supabase: ReturnType<typeof sb>,
+  tables: readonly string[],
+  row: Record<string, any>,
+  returning: string,
+) {
+  for (const table of tables) {
+    try {
+      const { data, error } = await (supabase as any).from(table).insert([row]).select(returning).single();
+      if (!error) return { ok: true as const, data, table };
+    } catch {
+      // ignore and try next
+    }
+  }
+  return { ok: false as const, error: 'insert_failed_all_candidates' };
+}
+
+/* ========= 型定義 ========= */
+
 type OutMsg = {
   id: string;
+  conversation_id: string;
   role: 'user' | 'assistant';
   content: string;
+  user_code?: string;
   created_at: string | null;
   q?: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
   color?: string;
@@ -42,64 +84,30 @@ const MSG_TABLES = [
   'messages',
 ] as const;
 
-/** 汎用 select（候補テーブルを順に試す） */
-async function trySelect<T>(
-  supabase: ReturnType<typeof sb>,
-  tables: readonly string[],
-  selectClause: string,
-  q: (query: any) => any,
-): Promise<{ ok: true; data: T[]; table: string } | { ok: false; error: string }> {
-  for (const table of tables) {
-    try {
-      let query = (supabase as any).from(table).select(selectClause);
-      query = q(query);
-      const { data, error } = await query;
-      if (!error) return { ok: true, data: (data as T[]) ?? [], table };
-    } catch {
-      /* continue */
-    }
-  }
-  return { ok: false, error: 'select_failed_all_candidates' };
-}
-
-/** 汎用 insert（候補テーブルを順に試す） */
-async function tryInsert(
-  supabase: ReturnType<typeof sb>,
-  tables: readonly string[],
-  row: Record<string, any>,
-  returning: string,
-) {
-  for (const table of tables) {
-    try {
-      const { data, error } = await (supabase as any).from(table).insert([row]).select(returning).single();
-      if (!error) return { ok: true as const, data, table };
-    } catch {
-      /* continue */
-    }
-  }
-  return { ok: false as const, error: 'insert_failed_all_candidates' };
-}
-
+/* ========= OPTIONS ========= */
 export async function OPTIONS() {
-  return json({ ok: true });
+  return json({ ok: true }, 200);
 }
 
-/* ===============================
- * GET /api/agent/iros/messages
- * =============================== */
+/* ========= GET /api/agent/iros/messages ========= */
 export async function GET(req: NextRequest) {
-  const safe = (p: any) => json(p, 200);
   try {
-    const cid = req.nextUrl.searchParams.get('conversation_id') || '';
-    if (!cid) return safe({ ok: true, messages: [], note: 'missing_conversation_id' });
-
     const auth = await verifyFirebaseAndAuthorize(req);
-    if (!auth.ok) return safe({ ok: true, messages: [], note: 'unauthorized' });
+    if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status || 401);
 
-    const userCode = String(auth.userCode || '');
+    const userCode =
+      (auth.user?.user_code as string) ||
+      (auth.user?.uid as string) ||
+      (auth.userCode as string) ||
+      '';
+    if (!userCode) return json({ ok: false, error: 'user_code_missing' }, 400);
+
+    const cid = req.nextUrl.searchParams.get('conversation_id') || '';
+    if (!cid) return json({ ok: false, error: 'missing_conversation_id' }, 400);
+
     const supabase = sb();
 
-    // 所有確認（候補全探索／ownerがあれば一致必須）
+    // 所有者確認
     const conv = await trySelect<{ id: string; user_code?: string | null }>(
       supabase,
       CONV_TABLES,
@@ -109,7 +117,7 @@ export async function GET(req: NextRequest) {
     if (conv.ok && conv.data[0]) {
       const owner = String(conv.data[0].user_code ?? '');
       if (owner && owner !== userCode)
-        return safe({ ok: true, messages: [], note: 'forbidden_owner_mismatch' });
+        return json({ ok: true, messages: [], note: 'forbidden_owner_mismatch' }, 200);
     }
 
     // メッセージ取得
@@ -124,7 +132,7 @@ export async function GET(req: NextRequest) {
       'id,conversation_id,user_code,role,content,text,q_code,color,created_at,ts',
       (q) => q.eq('conversation_id', cid).order('created_at', { ascending: true }),
     );
-    if (!res.ok) return safe({ ok: true, messages: [], note: 'messages_select_failed' });
+    if (!res.ok) return json({ ok: true, messages: [], note: 'messages_select_failed' }, 200);
 
     const filtered = res.data.filter((m) =>
       Object.prototype.hasOwnProperty.call(m, 'user_code')
@@ -134,22 +142,22 @@ export async function GET(req: NextRequest) {
 
     const messages: OutMsg[] = filtered.map((m) => ({
       id: String(m.id),
-      role: m.role,
-      content: (m.content ?? m.text ?? '') || '',
-      created_at: m.created_at ?? (m.ts ? new Date(m.ts).toISOString() : null),
-      q: (m.q_code ?? undefined) as any,
+      conversation_id: String(m.conversation_id),
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: (m.content ?? m.text ?? '').toString(),
+      user_code: m.user_code ?? undefined,
+      created_at: m.created_at ?? null,
+      q: m.q_code ?? undefined,
       color: m.color ?? undefined,
     }));
 
-    return safe({ ok: true, messages });
+    return json({ ok: true, messages }, 200);
   } catch (e: any) {
     return json({ ok: true, messages: [], note: 'exception', detail: String(e?.message ?? e) }, 200);
   }
 }
 
-/* ===============================
- * POST /api/agent/iros/messages
- * =============================== */
+/* ========= POST /api/agent/iros/messages ========= */
 export async function POST(req: NextRequest) {
   try {
     const auth = await verifyFirebaseAndAuthorize(req);
@@ -166,16 +174,29 @@ export async function POST(req: NextRequest) {
     try { body = await req.json(); } catch {}
 
     const conversation_id: string = String(body?.conversation_id || body?.conversationId || '').trim();
-    const text: string = String(body?.text ?? '').trim();
+    const text: string = String(body?.text ?? body?.content ?? '').trim();
+    const meta = body?.meta ?? null;
+    const q_code: string | null =
+      meta && typeof meta === 'object' && typeof meta.qCode === 'string'
+        ? meta.qCode
+        : null;
     const role: 'user' | 'assistant' =
       String(body?.role ?? '').toLowerCase() === 'assistant' ? 'assistant' : 'user';
 
     if (!conversation_id) return json({ ok: false, error: 'missing_conversation_id' }, 400);
     if (!text) return json({ ok: false, error: 'text_empty' }, 400);
 
+    // ★ legacy assistant（二重保存）防止
+    // reply API 内で meta 付き assistant を保存しているため、
+    // 旧フロントから飛んでくる「meta なし assistant」はスキップする。
+    if (role === 'assistant' && !meta && !q_code) {
+      console.log('[IROS/messages] skip legacy assistant without meta', { conversation_id });
+      return json({ ok: true, skipped: 'assistant_without_meta_legacy' }, 200);
+    }
+
     const supabase = sb();
 
-    // 所有確認（候補全探索）
+    // 所有確認
     const conv = await trySelect<{ id: string; user_code?: string | null }>(
       supabase,
       CONV_TABLES,
@@ -200,6 +221,8 @@ export async function POST(req: NextRequest) {
       role,
       content: text,
       text,
+      q_code,
+      meta,
       created_at: nowIso,
       ts: nowTs,
     };
