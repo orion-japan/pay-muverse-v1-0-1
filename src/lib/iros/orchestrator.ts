@@ -2,7 +2,7 @@
 // Iros Orchestrator — 極小版 + I層トリガー
 // - 余計なテンプレ・診断ロジックは持たせない
 // - mode / depth / qCode は「指定があれば使う」「なければ静かにデフォルト」
-// - depth だけは、テキストから I層トリガーを検出して自動 I1〜I3 に落とす余白を用意
+// - depth だけは、テキストから I層トリガーを検出して自動 I1〜I3 に落とす
 
 import {
   type IrosMode,
@@ -28,7 +28,7 @@ export type IrosOrchestratorArgs = {
   requestedDepth?: Depth;
   requestedQCode?: QCode;
 
-  // 将来的に memory/profile 等から渡すための拡張余地
+  // memory / Qトレースなどから渡されるベース情報
   baseMeta?: Partial<IrosMeta>;
 };
 
@@ -36,7 +36,6 @@ export type IrosOrchestratorArgs = {
 export type IrosOrchestratorResult = {
   content: string;
   meta: IrosMeta;
-  // 必要になればここに memory 更新結果などを足す余地を残す
 };
 
 /**
@@ -64,23 +63,58 @@ export async function runIrosTurn(
 
   const mode = normalizeMode(requestedMode);
 
-  // ★ depth は「明示指定 ＞ 自動検出 ＞ undefined」の順に決める
+  // ★ テキストからの自動検出
   const autoDepth = detectDepthFromText(text);
-  const depth = normalizeDepth(requestedDepth ?? autoDepth);
 
+  // ★ depth の優先順位:
+  //   1) autoDepth が I層(I1〜I3)なら最優先
+  //   2) それ以外は requestedDepth（＝Qメモリ S/R/C/I）を使う
+  //   3) それもなければ autoDepth（将来 S/R/C 自動推定を足す余白）
+  const rawDepth: Depth | undefined = (() => {
+    if (autoDepth && autoDepth.startsWith('I')) {
+      return autoDepth;
+    }
+    return requestedDepth ?? autoDepth;
+  })();
+
+  const depth = normalizeDepth(rawDepth);
   const qCode = normalizeQCode(requestedQCode);
 
+  // ★ meta のマージ:
+  // - baseMeta をベースに
+  // - depth / qCode が決まっているときだけ上書きする
   const meta: IrosMeta = {
     ...(baseMeta ?? {}),
     mode,
-    depth,
-    qCode,
-  };
+    ...(depth ? { depth } : {}),
+    ...(qCode ? { qCode } : {}),
+  } as IrosMeta;
+
+  // ===== v2 ログ（反映確認用） =====
+  console.log('[IROS/ORCH v2] runIrosTurn start', {
+    conversationId,
+    textSample: text.slice(0, 80),
+    requestedMode,
+    requestedDepth,
+    requestedQCode,
+    autoDepth,
+    chosenDepth: depth,
+    resolved: { mode, depth, qCode },
+    baseMeta,
+    finalMeta: meta,
+  });
+  // ==============================
 
   const result: GenerateResult = await generateIrosReply({
     conversationId,
     text,
     meta,
+  });
+
+  console.log('[IROS/ORCH v2] runIrosTurn done', {
+    conversationId,
+    resolved: { mode, depth, qCode },
+    replyLength: result.content.length,
   });
 
   return {
@@ -91,15 +125,12 @@ export async function runIrosTurn(
 
 /* ========= 最小バリデーション ========= */
 
-// mode が不正 or 未指定なら "mirror" を使う（静かな標準モード）
 function normalizeMode(mode?: IrosMode): IrosMode {
   if (!mode) return 'mirror';
   if (IROS_MODES.includes(mode)) return mode;
   return 'mirror';
 }
 
-// depth や qCode は「指定がなければ undefined」のままでもよい。
-// detectDepthFromText が I層トリガーを返したときだけ、I1〜I3が入る。
 function normalizeDepth(depth?: Depth): Depth | undefined {
   if (!depth) return undefined;
   if (DEPTH_VALUES.includes(depth)) return depth;
@@ -119,35 +150,25 @@ function normalizeQCode(qCode?: QCode): QCode | undefined {
  * - 強い I層ワードが含まれる → I2〜I3
  * - 弱い I層ワードが含まれる → I1
  * - それ以外 → undefined（＝depth 指定なし）
- *
- * ここでは「見当で深度を細かく決める」のではなく、
- * 「I層に入ってよいときだけ、そっと I層フラグを立てる」程度の動きにとどめる。
  */
 function detectDepthFromText(text: string): Depth | undefined {
   const t = (text || '').trim();
-
   if (!t) return undefined;
 
-  // 強い I層トリガー（存在・使命・生まれてきた意味 など）
+  // 強い I層トリガー
   const strongI =
     /(何のために|何のために生きて|使命|天命|生まれてきた意味|存在理由|存在の意味)/;
-  if (strongI.test(t)) {
-    return 'I3';
-  }
+  if (strongI.test(t)) return 'I3';
 
-  // 中程度の I層トリガー（本当は何を、どう生きたい など）
+  // 中程度の I層トリガー
   const midI =
     /(本当は何を|本当はどう|どう生きたい|生き方|自分の人生|本心|本音の願い)/;
-  if (midI.test(t)) {
-    return 'I2';
-  }
+  if (midI.test(t)) return 'I2';
 
-  // 弱い I層トリガー（願い・なりたい自分・将来どうありたい など）
+  // 弱い I層トリガー
   const softI =
     /(何を願っている|願いが分からない|なりたい自分|どんな自分でいたい|将来どうありたい|在り方)/;
-  if (softI.test(t)) {
-    return 'I1';
-  }
+  if (softI.test(t)) return 'I1';
 
   return undefined;
 }

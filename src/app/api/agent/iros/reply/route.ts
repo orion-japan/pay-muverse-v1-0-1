@@ -4,9 +4,13 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyFirebaseAndAuthorize } from '@/lib/authz';
-import { generateIrosReply } from '@/lib/iros/generate';
 import { authorizeChat, captureChat, makeIrosRef } from '@/lib/credits/auto';
 import { createClient } from '@supabase/supabase-js';
+import { logQFromIros } from '@/lib/q/logFromIros';  // ★ 追加
+
+// ★ 追加：Iros Orchestrator + Memory Adapter
+import { runIrosTurn } from '@/lib/iros/orchestrator';
+import { loadQTraceForUser, applyQTraceToMeta } from '@/lib/iros/memory.adapter';
 
 /** 共通CORS（/api/me と同等ポリシー + x-credit-cost 追加） */
 const CORS_HEADERS = {
@@ -27,11 +31,6 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
 );
 
-/** ヒント文字列から mode を推定（既指定 > hintText > 自動） */
-// file: src/app/api/agent/iros/reply/route.ts
-// resolveModeHintFromText 内の判定を強化（★ 追加）
-
-// file: src/app/api/agent/iros/reply/route.ts
 // ★ resolveModeHintFromText を置き換え
 function resolveModeHintFromText(input?: {
   modeHint?: string | null;
@@ -47,19 +46,18 @@ function resolveModeHintFromText(input?: {
 
   const t = (input?.text ?? '').toLowerCase();
 
-  // ★ 追加：日本語の“構造化/レポート系”キーワードで structured 扱い
+  // ★ 日本語の“構造化/レポート系”キーワードで structured 扱い
   const structuredJa = [
     'レポート形式', 'レポートで', 'レポートを', '構造化', '章立て',
     '箇条書き', '要件をまとめ', '要件整理', '要約して', '表にして',
-    '一覧化', '整理して出して', 'レポートとしてまとめ'
+    '一覧化', '整理して出して', 'レポートとしてまとめ',
   ];
-  if (structuredJa.some(k => t.includes(k))) return 'structured';
+  if (structuredJa.some((k) => t.includes(k))) return 'structured';
 
   if (t.includes('相談') || t.includes('悩み') || t.includes('困って')) return 'counsel';
 
   return 'auto';
 }
-
 
 /** auth から最良の userCode を抽出。ヘッダ x-user-code は開発補助として許容 */
 function pickUserCode(req: NextRequest, auth: any): string | null {
@@ -95,7 +93,10 @@ export async function POST(req: NextRequest) {
     // 1) Bearer/Firebase 検証 → 認可
     const auth = await verifyFirebaseAndAuthorize(req);
     if (!auth?.ok) {
-      return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401, headers: CORS_HEADERS });
+      return NextResponse.json(
+        { ok: false, error: 'unauthorized' },
+        { status: 401, headers: CORS_HEADERS },
+      );
     }
 
     // 2) 入力を取得
@@ -128,6 +129,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    console.log('[IROS/Reply] start', {
+      conversationId,
+      userCode,
+      uid,
+      modeHint: mode,
+      traceId,
+    });
+
     // 5) credit amount 決定（body.cost → header → 既定）
     const headerCost = req.headers.get('x-credit-cost');
     const bodyCost = body?.cost;
@@ -140,6 +149,11 @@ export async function POST(req: NextRequest) {
             ? Number(headerCost)
             : NaN;
     const CREDIT_AMOUNT = Number.isFinite(parsed) && parsed > 0 ? Number(parsed) : CHAT_CREDIT_AMOUNT;
+
+    console.log('[IROS/Reply] credit', {
+      userCode,
+      CREDIT_AMOUNT,
+    });
 
     // 6) クレジット参照キー生成（authorize / capture 共通）
     const creditRef = makeIrosRef(conversationId, startedAt);
@@ -182,16 +196,54 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 8) orchestrator 呼び出し（応答生成）
+    // 8) Qコードメモリ読み込み → Orchestrator 呼び出し
+    console.log('[IROS/Memory] loadQTraceForUser start', { userCode });
     let result: any;
+
     try {
-      result = await generateIrosReply({
+      const qTrace = await loadQTraceForUser(userCode, { limit: 50 });
+
+      console.log('[IROS/Memory] qTrace', {
+        snapshot: qTrace.snapshot,
+        counts: qTrace.counts,
+        streakQ: qTrace.streakQ,
+        streakLength: qTrace.streakLength,
+        lastEventAt: qTrace.lastEventAt,
+      });
+
+      // QTrace から depth / qCode を meta に反映
+      const baseMetaFromQ = applyQTraceToMeta(
+        {
+          qCode: undefined,
+          depth: undefined,
+        },
+        qTrace,
+      );
+
+      console.log('[IROS/Orchestrator] runIrosTurn args', {
+        conversationId,
+        mode,
+        baseMetaFromQ,
+      });
+
+      // mode === 'auto' のときは requestedMode は渡さない（オーケストレータ側に任せる）
+      const requestedMode = mode === 'auto' ? undefined : (mode as any);
+
+      result = await runIrosTurn({
         conversationId,
         text,
-        // ★ 極小Irosコア：今は meta は渡さない
+        requestedMode,
+        requestedDepth: baseMetaFromQ.depth as any,
+        requestedQCode: baseMetaFromQ.qCode as any,
+        baseMeta: {
+          ...baseMetaFromQ,
+          // ここに将来、ユーザー情報などを足す余地あり
+        },
       });
+
+      console.log('[IROS/Orchestrator] result.meta', result?.meta);
     } catch (e: any) {
-      // 生成失敗：capture は呼ばず返す（authorize は0記録で安全）
+      console.error('[IROS/Reply] generation_failed (orchestrator/memory)', e);
       const res = NextResponse.json(
         {
           ok: false,
@@ -216,7 +268,7 @@ export async function POST(req: NextRequest) {
 
     // 10) meta を統一し、credit情報を付与して返却
     const finalMode =
-      (result && typeof result === 'object' && typeof (result as any).mode === 'string')
+      result && typeof result === 'object' && typeof (result as any).mode === 'string'
         ? (result as any).mode
         : mode;
 
@@ -228,7 +280,6 @@ export async function POST(req: NextRequest) {
     };
     if (lowWarn) headers['x-warning'] = 'low_balance';
 
-    // 返却ボディの整形（result が object / string どちらでもOK）
     const basePayload = {
       ok: true,
       mode: finalMode,
@@ -252,11 +303,16 @@ export async function POST(req: NextRequest) {
           traceId: traceId ?? (result as any).meta?.extra?.traceId ?? null,
         },
       };
+
+      console.log('[IROS/Reply] response meta', meta);
+
       return NextResponse.json(
         { ...basePayload, ...(result as any), meta },
         { status: 200, headers },
       );
     } else {
+      console.log('[IROS/Reply] response (string result)', { userCode, mode: finalMode });
+
       return NextResponse.json(
         {
           ...basePayload,

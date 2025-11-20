@@ -15,11 +15,13 @@ interface UserInfo {
   userType: string;
   credits: number;
 }
+
 interface Conversation {
   id: string;
   title: string;
   updated_at?: string | null;
 }
+
 type MirraHistoryItem = any;
 type LogItem = { role: 'user' | 'assistant'; content: string; at: string };
 
@@ -171,7 +173,7 @@ const SidebarMobile: React.FC<SidebarMobileProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
-  // Firebase Bearer
+  // Firebase Bearer（conversations のフォールバック取得用）
   const getBearer = React.useCallback(async (): Promise<string | null> => {
     try {
       const auth = getAuth();
@@ -187,66 +189,6 @@ const SidebarMobile: React.FC<SidebarMobileProps> = ({
       return null;
     }
   }, []);
-
-  // ----- User Info -----
-  const [localUser, setLocalUser] = React.useState<UserInfo | null>(null);
-
-  React.useEffect(() => {
-    console.log(`${TAG}[userinfo] mount`, { agent, isOpen, hasPropUser: !!userInfo });
-    if (!isOpen) return;
-
-    const propLooksValid =
-      !!userInfo &&
-      (userInfo.name !== 'You' || userInfo.userType !== 'member' || (userInfo.credits ?? 0) !== 0);
-
-    if (propLooksValid) {
-      setLocalUser(null); // prop 優先
-      return;
-    }
-
-    let dead = false;
-    (async () => {
-      try {
-        console.log(`${TAG}[userinfo] fetch start -> /api/agent/iros/userinfo`);
-        const bearer = await getBearer();
-        const res = await fetch('/api/agent/iros/userinfo', {
-          method: 'GET',
-          headers: { ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}) },
-          credentials: 'include',
-        });
-        console.log(`${TAG}[userinfo] fetch done`, res.status);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const j = await res.json();
-        if (!dead) {
-          const u = j?.user ?? null;
-          if (u) {
-            setLocalUser({
-              id: String(u.id ?? 'me'),
-              name: String(u.name ?? 'You'),
-              userType: String(u.userType ?? 'member'),
-              credits: Number(u.credits ?? 0),
-            });
-          } else {
-            setLocalUser({ id: 'me', name: 'You', userType: 'member', credits: 0 });
-          }
-        }
-      } catch (e) {
-        console.warn(`${TAG}[userinfo] fetch error:`, e);
-        if (!dead) setLocalUser({ id: 'me', name: 'You', userType: 'member', credits: 0 });
-      }
-    })();
-
-    return () => {
-      dead = true;
-    };
-  }, [isOpen, userInfo, getBearer, agent]);
-
-  const uinfo = (() => {
-    const propLooksValid =
-      !!userInfo &&
-      (userInfo.name !== 'You' || userInfo.userType !== 'member' || (userInfo.credits ?? 0) !== 0);
-    return propLooksValid ? userInfo : localUser;
-  })();
 
   // ----- Conversations (fallback fetch) -----
   const [localConvs, setLocalConvs] = React.useState<Conversation[] | null>(null);
@@ -333,6 +275,9 @@ const SidebarMobile: React.FC<SidebarMobileProps> = ({
       console.warn(`${TAG} dispatch failed`, error);
     }
   };
+
+  // userInfo は親（IrosChatContext）から渡されたものだけを使う
+  const uinfo = userInfo;
 
   if (!isOpen || !portalElement) return null;
 
@@ -481,7 +426,9 @@ const SidebarMobile: React.FC<SidebarMobileProps> = ({
                     setTimeout(() => {
                       try {
                         delete btn.dataset.busy;
-                      } catch {}
+                      } catch {
+                        // ignore
+                      }
                     }, 1000);
                   }}
                   title="Delete"

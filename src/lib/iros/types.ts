@@ -1,4 +1,4 @@
-// /src/lib/iros/types.ts
+// src/lib/iros/types.ts
 
 export type IrosMode = 'auto' | 'surface' | 'core';
 

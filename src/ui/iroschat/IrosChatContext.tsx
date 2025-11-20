@@ -277,6 +277,7 @@ export default function IrosChatProvider({
   const fetchLock = useRef(false);
   const didSyncUrlRef = useRef(false);
   const inFlightRef = useRef(false); // ★ 送信多重ガード
+  const lastUserInfoAt = useRef(0);  // ★ 追加：userinfo スロットル用
 
   // ---- 認証系バックオフ ----
   async function retryAuth<T>(
@@ -380,10 +381,20 @@ export default function IrosChatProvider({
   }, []);
 
   const refreshUserInfo = useCallback(async () => {
+    const now = Date.now();
+
+    // ★ 5 秒以内の連続呼び出しはスキップ
+    if (now - lastUserInfoAt.current < 5000) {
+      dbg('refreshUserInfo: skip (too frequent)');
+      return;
+    }
+    lastUserInfoAt.current = now;
+
     const u = await retryAuth(() => irosClient.getUserInfo());
     setUserInfo(u ?? null);
     dbg('refreshUserInfo');
   }, []);
+
 
   // 共有ヘルパ：ロック/エラー処理/セットを1か所に
   const loadMessages = useCallback(
@@ -456,7 +467,9 @@ export default function IrosChatProvider({
 
   /** 送信フロー：楽観追加 → user発話を保存 → replyAndStore → 最終同期
    *  ※ /messages を UI からは呼ばない（保存は API 側 or ここで担保） */
-  const send = useCallback(
+  /** 送信フロー：楽観追加 → user発話を保存 → replyAndStore → 最終同期
+   *  ※ /messages を UI からは呼ばない（保存は API 側 or ここで担保） */
+   const send = useCallback(
     async (text: string) => {
       const t = (text ?? '').trim();
       if (!t) return;
@@ -479,8 +492,9 @@ export default function IrosChatProvider({
           irosClient.postMessage({ conversationId: cid, text: t, role: 'user' }),
         );
 
-        // 3) 返信を生成し、未保存なら assistant を保存（ここがポイント）
-        await retryAuth(() =>
+        // 3) 返信を生成し、未保存なら assistant を保存
+        //    ★ ここで /reply のフルJSON（meta含む）を受け取る
+        const reply: any = await retryAuth(() =>
           irosClient.replyAndStore({ conversationId: cid, user_text: t, mode: 'Light' }),
         );
 
@@ -491,6 +505,9 @@ export default function IrosChatProvider({
         // 5) 会話一覧も更新
         const convs = await retryAuth(() => irosClient.listConversations());
         if (Array.isArray(convs)) setConversations(convs);
+
+        // ★ ChatInput などから meta を受け取れるように返す
+        return reply;
       } catch (e: any) {
         setError(e?.message ?? String(e));
         dbg('send: error', e?.message ?? e);
@@ -501,6 +518,7 @@ export default function IrosChatProvider({
     },
     [ensureConversationId],
   );
+
 
   const rename = useCallback(
     async (title: string) => {

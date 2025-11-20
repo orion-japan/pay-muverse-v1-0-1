@@ -5,14 +5,14 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { SOFIA_CONFIG } from '@/lib/sofia/config';
-
 import IrosSidebarMobile from './IrosSidebarMobile';
 import IrosHeader from './IrosHeader';
 import MessageList from './components/MessageList';
 import ChatInput from './components/ChatInput';
+import IrosMetaBadge from './components/IrosMetaBadge';
 
 import './IrosChat.css';
-import { useIrosChat } from './IrosChatContext'; // Providerは読み込まない
+import { useIrosChat } from './IrosChatContext';
 
 type CurrentUser = {
   id: string;
@@ -39,6 +39,7 @@ function IrosChatInner({ open }: Props) {
   const agentK = 'iros';
   const { loading: authLoading, userCode } = useAuth();
 
+  // ★ 初期は必ず閉じた状態
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [uiUser, setUiUser] = useState<CurrentUser>();
   const [meta, setMeta] = useState<any>(null);
@@ -88,8 +89,8 @@ function IrosChatInner({ open }: Props) {
     };
     setter();
 
-    // ResizeObserver が無い古環境でも落ちないように
-    const RO: typeof ResizeObserver | undefined = (typeof window !== 'undefined' ? (window as any).ResizeObserver : undefined);
+    const RO: typeof ResizeObserver | undefined =
+      typeof window !== 'undefined' ? (window as any).ResizeObserver : undefined;
     if (!RO) return;
 
     const ro = new RO(setter);
@@ -110,17 +111,16 @@ function IrosChatInner({ open }: Props) {
     if (didHandleOpenRef.current) return;
     if (!canUse) return;
 
-    if (openTarget.type === 'menu') {
-      setIsMobileMenuOpen(true);
-      didHandleOpenRef.current = true;
-      return;
-    }
+    // ★ 以前は openTarget.type === 'menu' で setIsMobileMenuOpen(true)
+    //    → それが「毎回自動でサイドバーが開く」原因だったので削除。
+    //    menu で来ても、今は自動では開かない。
 
     if (openTarget.type === 'new') {
       try {
-        if (typeof window !== 'undefined') window.localStorage.removeItem(lastConvKey(agentK));
+        if (typeof window !== 'undefined') {
+          window.localStorage.removeItem(lastConvKey(agentK));
+        }
       } catch {}
-      // 新規会話を確実に発番
       try {
         chat.newConversation?.();
       } catch {}
@@ -129,12 +129,13 @@ function IrosChatInner({ open }: Props) {
     }
 
     if ((openTarget.type === 'cid' || openTarget.type === 'uuid') && openTarget.cid) {
-      // 既存会話に切替（存在確認は select 内で失敗時クリーンに）
       try {
         chat.selectConversation?.(openTarget.cid);
       } catch {}
       try {
-        if (typeof window !== 'undefined') window.localStorage.setItem(lastConvKey(agentK), openTarget.cid);
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem(lastConvKey(agentK), openTarget.cid);
+        }
       } catch {}
       didHandleOpenRef.current = true;
       return;
@@ -150,52 +151,74 @@ function IrosChatInner({ open }: Props) {
     const convs = Array.isArray(chat.conversations) ? chat.conversations : [];
     if (!convs.length) return;
 
-    // open が何かを処理済みならスキップ
-    if (didHandleOpenRef.current) return;
-
-    const sorted = [...convs].sort((a, b) => {
-      const ta = new Date(a.updated_at || 0).getTime();
-      const tb = new Date(b.updated_at || 0).getTime();
-      return tb - ta;
-    });
-
-    let stored: string | undefined;
-    try {
-      stored = typeof window !== 'undefined'
-        ? (window.localStorage.getItem(lastConvKey(agentK)) || undefined)
-        : undefined;
-    } catch {
-      stored = undefined;
+    // URL の cid が優先
+    if (urlCid) {
+      const exists = convs.some((c) => c.id === urlCid);
+      if (exists) {
+        try {
+          chat.selectConversation?.(urlCid);
+        } catch {}
+        didSelectOnce.current = true;
+        return;
+      }
     }
 
-    const prefer =
-      (urlCid && sorted.find((i) => i.id === urlCid)?.id) ||
-      (stored && sorted.find((i) => i.id === stored)?.id) ||
-      sorted[0]?.id;
+    // localStorage の lastConv
+    let lastId: string | null = null;
+    try {
+      if (typeof window !== 'undefined') {
+        lastId = window.localStorage.getItem(lastConvKey(agentK));
+      }
+    } catch {}
 
-    if (prefer) {
+    if (lastId) {
+      const exists = convs.some((c) => c.id === lastId);
+      if (exists) {
+        try {
+          chat.selectConversation?.(lastId);
+        } catch {}
+        didSelectOnce.current = true;
+        return;
+      }
+    }
+
+    // それでも決まらなければ、最新の会話
+    const latest = convs[0];
+    if (latest?.id) {
+      try {
+        chat.selectConversation?.(latest.id);
+      } catch {}
       didSelectOnce.current = true;
-      try {
-        chat.selectConversation?.(prefer);
-      } catch {}
-      try {
-        if (typeof window !== 'undefined') window.localStorage.setItem(lastConvKey(agentK), prefer);
-      } catch {}
     }
   }, [canUse, chat, chat.conversations, urlCid]);
 
-  // ユーザー情報
+  // ユーザー情報のロード
   useEffect(() => {
-    if (!userCode) return;
-    setUiUser({ id: userCode, name: 'You', userType: 'member', credits: 0 });
-  }, [userCode]);
+    let cancelled = false;
+    (async () => {
+      try {
+        await chat.refreshUserInfo();
+        if (!cancelled) {
+          setUiUser((chat.userInfo ?? null) as any);
+        }
+      } catch {
+        if (!cancelled) setUiUser(null as any);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [chat]);
 
   const handleDelete = async () => {
     try {
       if (chat.conversationId) await chat.remove?.();
     } catch {}
   };
-  const handleRename = async () => {};
+
+  const handleRename = async () => {
+    // まだ未実装
+  };
 
   return (
     <div className="sofia-container sof-center">
@@ -204,9 +227,10 @@ function IrosChatInner({ open }: Props) {
           onShowSideBar={() => setIsMobileMenuOpen(true)}
           onCreateNewChat={() => {
             try {
-              if (typeof window !== 'undefined') window.localStorage.removeItem(lastConvKey(agentK));
+              if (typeof window !== 'undefined') {
+                window.localStorage.removeItem(lastConvKey(agentK));
+              }
             } catch {}
-            // ← ここで必ず新規発番
             try {
               chat.newConversation?.();
             } catch {}
@@ -221,17 +245,30 @@ function IrosChatInner({ open }: Props) {
       />
 
       {authLoading ? (
-        <div style={{ display: 'grid', placeItems: 'center', minHeight: '60vh' }}>読み込み中…</div>
+        <div style={{ display: 'grid', placeItems: 'center', minHeight: '60vh' }}>
+          読み込み中…
+        </div>
       ) : !userCode ? (
         <div style={{ display: 'grid', placeItems: 'center', minHeight: '60vh' }}>
           ログインが必要です
         </div>
       ) : (
         <>
-          {/* ====== ここからチャット本体（白い下地＋右端の紫ライン付き） ====== */}
           <div className="iro-chat-main">
-            {/* 背景ガード（白ベース＋縦グラデーションライン） */}
             <div className="iro-chat-bg" />
+
+            {/* 右上メタ表示 */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'flex-end',
+                padding: '6px 12px 0',
+                position: 'relative',
+                zIndex: 3,
+              }}
+            >
+              <IrosMetaBadge qCode={meta?.qCode} depth={meta?.depth} mode={meta?.mode} compact />
+            </div>
 
             <IrosSidebarMobile
               isOpen={isMobileMenuOpen}
@@ -247,7 +284,9 @@ function IrosChatInner({ open }: Props) {
                 } catch {}
                 setIsMobileMenuOpen(false);
                 try {
-                  if (typeof window !== 'undefined') window.localStorage.setItem(lastConvKey(agentK), id);
+                  if (typeof window !== 'undefined') {
+                    window.localStorage.setItem(lastConvKey(agentK), id);
+                  }
                 } catch {}
               }}
               onDelete={handleDelete}
@@ -259,10 +298,9 @@ function IrosChatInner({ open }: Props) {
             <MessageList />
 
             <div className="sof-compose-dock" ref={composeRef}>
-              <ChatInput />
+              <ChatInput onMeta={setMeta} />
             </div>
           </div>
-          {/* ====== /チャット本体 ====== */}
         </>
       )}
 
@@ -273,6 +311,5 @@ function IrosChatInner({ open }: Props) {
 }
 
 export default function IrosChatShell(props: Props) {
-  // Providerは IrosChat.tsx 側のみでラップする
   return <IrosChatInner {...props} />;
 }

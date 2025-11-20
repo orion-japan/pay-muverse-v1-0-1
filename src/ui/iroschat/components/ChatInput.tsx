@@ -7,7 +7,12 @@ import { useIrosChat } from '../IrosChatContext';
 const DRAFT_KEY = 'iros_chat_draft';
 const QA_URL = '/api/iros/summary'; // ルートが異なる場合はここだけ変更
 
-export default function ChatInput() {
+type ChatInputProps = {
+  /** /reply から返ってきた meta を上位（Shell）に渡すためのフック */
+  onMeta?: (meta: any) => void;
+};
+
+export default function ChatInput({ onMeta }: ChatInputProps) {
   const { send, loading } = useIrosChat();
 
   const [text, setText] = useState('');
@@ -93,7 +98,20 @@ export default function ChatInput() {
         taRef.current?.focus();
 
         // 既存コンテキストの send をそのまま利用（構造は維持）
-        await send(value);
+        // send は実際には /reply のレスポンスを返すように実装済み
+        const res: any = await (send as any)(value);
+
+        // ★ meta を Shell 側に引き渡し
+        if (onMeta && res && typeof res === 'object') {
+          const meta = (res as any).meta ?? null;
+          if (meta) {
+            try {
+              onMeta(meta);
+            } catch (e) {
+              console.warn('[IrosChatInput] onMeta handler error:', e);
+            }
+          }
+        }
       } catch (e) {
         console.error('[IrosChatInput] send error:', e);
       } finally {
@@ -109,7 +127,7 @@ export default function ChatInput() {
         setTimeout(() => window.dispatchEvent(new Event('sof:scrollUp')), 80);
       }
     },
-    [text, loading, sending, send, autoSize],
+    [text, loading, sending, send, autoSize, onMeta],
   );
 
   // ▼ キー操作：Enter送信 / Shift+Enter改行 / IME中は無効
@@ -171,27 +189,26 @@ export default function ChatInput() {
           aria-label="Irosへメッセージ"
         />
 
-{/* アクション列（送信のみ） */}
-<div className="sof-actions sof-actions--single">
-  <button
-    data-sof-send
-    type="button"
-    className="sof-actionBtn sof-actionBtn--send sof-actionBtn--lg"
-    onClick={() => {
-      if (!sendLockRef.current) {
-        taRef.current?.blur();
-        scrollChatToBottom();
-        void handleSend();
-      }
-    }}
-    disabled={!canSend}
-    aria-label="送信"
-    title="送信（Enter）"
-  >
-    送信
-  </button>
-</div>
-
+        {/* アクション列（送信のみ） */}
+        <div className="sof-actions sof-actions--single">
+          <button
+            data-sof-send
+            type="button"
+            className="sof-actionBtn sof-actionBtn--send sof-actionBtn--lg"
+            onClick={() => {
+              if (!sendLockRef.current) {
+                taRef.current?.blur();
+                scrollChatToBottom();
+                void handleSend();
+              }
+            }}
+            disabled={!canSend}
+            aria-label="送信"
+            title="送信（Enter）"
+          >
+            送信
+          </button>
+        </div>
       </div>
     </div>
   );

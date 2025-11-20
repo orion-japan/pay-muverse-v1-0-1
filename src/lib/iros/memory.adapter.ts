@@ -1,82 +1,61 @@
 // src/lib/iros/memory.adapter.ts
-// Iros — memory adapter（DBスナップショット <-> Orchestrator）
-// - API：load({ conversationId }) → MemorySnap | null
-//        save({ conversationId, snapshot, lastTitle?, updatedAt? }) → void
-// - テーブルは `public.iros_memory` を想定（無ければ安全に no-op）
-//   DDL 例：
-//   create table if not exists public.iros_memory (
-//     conversation_id uuid primary key references public.iros_conversations(id) on delete cascade,
-//     snapshot jsonb,
-//     last_title text,
-//     updated_at timestamptz default now()
-//   );
+// Iros Memory Adapter
 
-import { adminClient } from '@/lib/credits/db';
+import type { IrosMemory, QTrace } from './memory/types';
+import { getIrosMemory, getQTrace } from './memory';
 
-export type MemorySnap = {
-  summary?: string;
-  keywords?: string[];
-} | null;
-
-type LoadArgs = { conversationId: string };
-type SaveArgs = {
-  conversationId: string;
-  snapshot: MemorySnap;
-  lastTitle?: string | null;
-  updatedAt?: string | null; // ISO string
+export type MemoryLoadOptions = {
+  limit?: number;
 };
 
-const TABLE = 'iros_memory';
+export async function loadIrosMemoryForUser(
+  userCode: string,
+  options?: MemoryLoadOptions
+): Promise<IrosMemory> {
 
-export async function load(args: LoadArgs): Promise<MemorySnap> {
-  const cid = String(args?.conversationId ?? '').trim();
-  if (!cid) return null;
+  // ★ 追加：どの userCode を読みに行くかログ
+  console.log('[IROS][MemoryAdapter] loadIrosMemoryForUser userCode =', userCode);
 
-  const supa = adminClient();
-  try {
-    const { data, error } = await supa
-      .from(TABLE)
-      .select('snapshot')
-      .eq('conversation_id', cid)
-      .maybeSingle();
+  const mem = await getIrosMemory(userCode, { limit: options?.limit });
 
-    if (error) {
-      // テーブル未作成などは no-op
-      console.warn('[memory.adapter] load error (ignored)', { message: error.message });
-      return null;
-    }
-    const snap = (data?.snapshot ?? null) as MemorySnap;
-    if (!snap || typeof snap !== 'object') return null;
-    return snap;
-  } catch (e: any) {
-    console.warn('[memory.adapter] load exception (ignored)', String(e?.message ?? e));
-    return null;
-  }
+  // ★ 追加：QTrace の snapshot を確認（currentQ, depthStage, updatedAt）
+  console.log('[IROS][MemoryAdapter] QTrace snapshot =', mem.qTrace.snapshot);
+
+  return mem;
 }
 
-export async function save(args: SaveArgs): Promise<void> {
-  const cid = String(args?.conversationId ?? '').trim();
-  if (!cid) return;
+export async function loadQTraceForUser(
+  userCode: string,
+  options?: MemoryLoadOptions
+): Promise<QTrace> {
+  const qTrace = await getQTrace(userCode, { limit: options?.limit });
 
-  const supa = adminClient();
-  const row = {
-    conversation_id: cid,
-    snapshot: args?.snapshot ?? null,
-    last_title: args?.lastTitle ?? null,
-    updated_at: args?.updatedAt ?? new Date().toISOString(),
-  };
+  // ★ 追加：QTrace 取得ログ
+  console.log('[IROS][MemoryAdapter] loadQTraceForUser snapshot =', qTrace.snapshot);
 
-  try {
-    const { error } = await supa
-      .from(TABLE)
-      .upsert(row, { onConflict: 'conversation_id' });
-
-    if (error) {
-      console.warn('[memory.adapter] save error (ignored)', { message: error.message });
-    }
-  } catch (e: any) {
-    console.warn('[memory.adapter] save exception (ignored)', String(e?.message ?? e));
-  }
+  return qTrace;
 }
 
-export default { load, save };
+export function applyQTraceToMeta<TMeta extends { qCode?: string; depth?: string }>(
+  meta: TMeta,
+  qTrace: QTrace
+): TMeta {
+  const next = { ...meta };
+
+  // ★ 追加：apply 時のログ
+  console.log('[IROS][MemoryAdapter] applyQTraceToMeta before =', meta);
+
+  const currentQ = qTrace.snapshot.currentQ;
+  if (currentQ) {
+    next.qCode = currentQ;
+  }
+
+  const stage = qTrace.snapshot.depthStage;
+  if (stage && /^([SRCI][1-3])$/.test(stage)) {
+    next.depth = stage;
+  }
+
+  console.log('[IROS][MemoryAdapter] applyQTraceToMeta after =', next);
+
+  return next;
+}
