@@ -12,6 +12,15 @@ import { logQFromIros } from '@/lib/q/logFromIros'; // ★ 追加（※現時点
 import { runIrosTurn } from '@/lib/iros/orchestrator';
 import { loadQTraceForUser, applyQTraceToMeta } from '@/lib/iros/memory.adapter';
 
+// ★ 追加：Rememberモード（期間バンドルRAG）
+import {
+  resolveRememberBundle,
+  type RememberScopeKind,
+} from '@/lib/iros/remember/resolveRememberBundle';
+
+// ★ 追加：モード判定（外出し）
+import { resolveModeHintFromText, resolveRememberScope } from './_mode';
+
 /** 共通CORS（/api/me と同等ポリシー + x-credit-cost 追加） */
 const CORS_HEADERS = {
   'access-control-allow-origin': '*',
@@ -101,8 +110,6 @@ async function saveUnifiedAnalysisInline(
 
   if (logErr) {
     console.error('[UnifiedAnalysis] log insert failed', logErr);
-    // ここで throw すると返信自体が止まるので、ログだけ出して続行でもよい
-    // throw new Error(`log insert failed: ${logErr.message}`);
     return;
   }
 
@@ -140,53 +147,12 @@ async function saveUnifiedAnalysisInline(
   }
 }
 
-// --------------------------------------------------------------------
-
-/** resolveModeHintFromText を置き換え */
-function resolveModeHintFromText(input?: {
-  modeHint?: string | null;
-  hintText?: string | null;
-  text?: string | null;
-}): 'structured' | 'diagnosis' | 'counsel' | 'auto' {
-  const direct = (input?.modeHint ?? '').toLowerCase().trim();
-  if (direct === 'structured' || direct === 'diagnosis' || direct === 'counsel') return direct;
-
-  const hint = (input?.hintText ?? '').toLowerCase();
-  if (hint.includes('structured')) return 'structured';
-  if (hint.includes('diagnosis') || hint.includes('ir診断') || hint.includes('診断')) return 'diagnosis';
-
-  const t = (input?.text ?? '').toLowerCase();
-
-  // 日本語の“構造化/レポート系”キーワードで structured 扱い
-  const structuredJa = [
-    'レポート形式',
-    'レポートで',
-    'レポートを',
-    '構造化',
-    '章立て',
-    '箇条書き',
-    '要件をまとめ',
-    '要件整理',
-    '要約して',
-    '表にして',
-    '一覧化',
-    '整理して出して',
-    'レポートとしてまとめ',
-  ];
-  if (structuredJa.some((k) => t.includes(k))) return 'structured';
-
-  if (t.includes('相談') || t.includes('悩み') || t.includes('困って')) return 'counsel';
-
-  return 'auto';
-}
-
 /** auth から最良の userCode を抽出。ヘッダ x-user-code は開発補助として許容 */
 function pickUserCode(req: NextRequest, auth: any): string | null {
   const h = req.headers.get('x-user-code');
   const fromHeader = h && h.trim() ? h.trim() : null;
   return (
     (auth?.userCode && String(auth.userCode)) ||
-    (auth?.user_code && String(auth.user_code)) ||
     fromHeader ||
     null
   );
@@ -235,8 +201,21 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // tenant_id（未指定なら 'default'） — Remember と UnifiedAnalysis 両方で使う
+    const tenantId: string =
+      typeof body?.tenant_id === 'string' && body.tenant_id.trim().length > 0
+        ? body.tenant_id.trim()
+        : 'default';
+
     // 3) mode 推定
     const mode = resolveModeHintFromText({ modeHint: modeHintInput, hintText, text });
+
+    // 3.5) Rememberモードのスコープ推定
+    const rememberScope: RememberScopeKind | null = resolveRememberScope({
+      modeHint: modeHintInput,
+      hintText,
+      text,
+    });
 
     // 4) userCode / uid を抽出（ログ用 & meta.extra 用）
     const userCode = pickUserCode(req, auth);
@@ -255,6 +234,7 @@ export async function POST(req: NextRequest) {
       userCode,
       uid,
       modeHint: mode,
+      rememberScope,
       traceId,
     });
 
@@ -348,22 +328,56 @@ export async function POST(req: NextRequest) {
         baseMetaFromQ,
       });
 
+      // Rememberモードが有効なら、過去ログバンドルを取り込み
+      let effectiveText = text;
+      let rememberDebug: any = null;
+
+      if (rememberScope) {
+        console.log('[IROS/Remember] resolveRememberBundle start', {
+          userCode,
+          tenantId,
+          scopeKind: rememberScope,
+        });
+
+        try {
+          const rememberResult = await resolveRememberBundle({
+            supabase,
+            userCode,
+            tenantId,
+            scopeKind: rememberScope,
+          });
+
+          if (rememberResult) {
+            effectiveText =
+              text +
+              '\n\n---\n[Rememberログ]\n' +
+              rememberResult.textForIros;
+
+            rememberDebug = {
+              scopeKind: rememberScope,
+              bundleId: rememberResult.bundle.id,
+            };
+          } else {
+            console.log('[IROS/Remember] no bundle found for scope', rememberScope);
+          }
+        } catch (e) {
+          console.error('[IROS/Remember] failed to resolve bundle', e);
+        }
+      }
+
       // mode === 'auto' のときは requestedMode は渡さない（オーケストレータ側に任せる）
       const requestedMode = mode === 'auto' ? undefined : (mode as any);
 
       result = await runIrosTurn({
         conversationId,
-        text,
+        text: effectiveText,
         requestedMode,
         requestedDepth: baseMetaFromQ.depth as any,
         requestedQCode: baseMetaFromQ.qCode as any,
-        baseMeta: {
-          ...baseMetaFromQ,
-          // ここに将来、ユーザー情報などを足す余地あり
-        },
+        baseMeta: baseMetaFromQ,
       });
 
-      console.log('[IROS/Orchestrator] result.meta', result?.meta);
+      console.log('[IROS/Orchestrator] result.meta', (result as any)?.meta);
     } catch (e: any) {
       console.error('[IROS/Reply] generation_failed (orchestrator/memory)', e);
       const res = NextResponse.json(
@@ -406,12 +420,6 @@ export async function POST(req: NextRequest) {
           : null;
 
       if (assistantText && assistantText.trim().length > 0) {
-        // tenant_id（未指定なら 'default'）
-        const tenantId =
-          typeof body?.tenant_id === 'string' && body.tenant_id.trim().length > 0
-            ? body.tenant_id.trim()
-            : 'default';
-
         // UnifiedAnalysis を構築して保存（失敗してもチャット自体は続行）
         try {
           const analysis = buildUnifiedAnalysis({
@@ -487,7 +495,7 @@ export async function POST(req: NextRequest) {
       const meta = {
         ...(result as any).meta ?? {},
         extra: {
-          ...((result as any).meta?.extra ?? {}),
+          ...(((result as any).meta?.extra) ?? {}),
           userCode: userCode ?? (result as any).meta?.extra?.userCode ?? null,
           hintText: hintText ?? (result as any).meta?.extra?.hintText ?? null,
           traceId: traceId ?? (result as any).meta?.extra?.traceId ?? null,

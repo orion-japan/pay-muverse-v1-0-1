@@ -13,7 +13,7 @@ import React, {
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import * as irosClientModule from './lib/irosClient'; // default／named 両対応
-import { getAuth } from 'firebase/auth';
+import { getAuth, type User } from 'firebase/auth';
 import type { ResonanceState, IntentPulse } from '@/lib/iros/config';
 import type { IrosConversation, IrosMessage, IrosUserInfo } from './types';
 
@@ -31,7 +31,11 @@ type IrosAPI = {
   renameConversation(conversationId: string, title: string): Promise<{ ok: true } | void>;
   deleteConversation(conversationId: string): Promise<{ ok: true } | void>;
   /** ※ 残すが UI 側では使わない（/messages 直叩きは二重化の原因になるため） */
-  postMessage(args: { conversationId: string; text: string; role?: 'user' | 'assistant' }): Promise<{ ok: true }>;
+  postMessage(args: {
+    conversationId: string;
+    text: string;
+    role?: 'user' | 'assistant';
+  }): Promise<{ ok: true }>;
   reply(args: {
     conversationId?: string;
     user_text: string;
@@ -57,16 +61,61 @@ type IrosAPI = {
 // ====== フォールバックを含む irosClient ラッパー ======
 const _raw = ((irosClientModule as any).default ?? irosClientModule) as Record<string, any>;
 
-async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+/**
+ * Firebase Auth の currentUser が有効になるまで待つ。
+ * 最大 timeoutMs ミリ秒待って、それでもいなければ null を返す。
+ */
+async function waitForCurrentUser(timeoutMs = 3000): Promise<User | null> {
   const auth = getAuth();
-  const u = auth.currentUser;
-  const token = u ? await u.getIdToken(false) : null;
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(init.headers as Record<string, string> | undefined),
-  };
-  const res = await fetch(input, { ...init, headers, credentials: 'include', cache: 'no-store' });
+  const start = Date.now();
+
+  // すでに取得済みならそのまま返す
+  if (auth.currentUser) return auth.currentUser;
+
+  while (!auth.currentUser && Date.now() - start < timeoutMs) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+
+  return auth.currentUser ?? null;
+}
+
+/**
+ * 認証付き fetch
+ * - currentUser が準備できるまで待機
+ * - user が取れない場合はサーバに投げずにエラーを投げる
+ */
+async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+  const headers = new Headers(init.headers || {});
+  const cred: RequestCredentials = init.credentials ?? 'include';
+
+  // ---- Firebase currentUser を待つ ----
+  const user = await waitForCurrentUser();
+
+  if (!user) {
+    const err = new Error('401 not_authenticated: firebase currentUser is null');
+    if (__DEV__) console.warn('[IROS/CTX] authFetch no currentUser', err.message);
+    // retryAuth で「認証系エラー」として扱ってもらうため 401 を含めたメッセージにしている
+    throw err;
+  }
+
+  // ---- ID トークン取得（まずはキャッシュ）----
+  const token = await user.getIdToken(false).catch(() => null);
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  // JSON 基本
+  if (!headers.has('Content-Type') && init.method && init.method !== 'GET') {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  const res = await fetch(input, {
+    ...init,
+    headers,
+    credentials: cred,
+    cache: 'no-store',
+  });
+
   if (!res.ok) {
     const t = await res.text().catch(() => '');
     if (__DEV__) console.warn('[IROS/CTX] authFetch error', res.status, t);
@@ -112,7 +161,11 @@ const irosClient: IrosAPI = {
     const rows = Array.isArray(j?.messages) ? j.messages : [];
     return rows.map((m: any) => ({
       id: String(m.id),
-      role: (m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user') as IrosMessage['role'],
+      role: (m.role === 'assistant'
+        ? 'assistant'
+        : m.role === 'system'
+          ? 'system'
+          : 'user') as IrosMessage['role'],
       text: String(m.content ?? m.text ?? ''),
       content: String(m.content ?? m.text ?? ''),
       created_at: m.created_at ?? null,
@@ -160,17 +213,20 @@ const irosClient: IrosAPI = {
       headers: args.headers ?? undefined,
       body: JSON.stringify({
         conversationId: args.conversationId,
-        user_text: args.user_text,
+        // ✅ ここを user_text → text に変更
+        text: args.user_text,
+        // ✅ modeHint も渡しておくとサーバ側ロジックと揃う
+        modeHint: args.mode ?? 'Light',
         mode: args.mode ?? 'Light',
         history: [],
         model: args.model,
-        // 可変の非言語を渡す（無ければ undefined になるのでOK）
         resonance: (window as any)?.__iros?.resonance ?? args.resonance,
         intent: (window as any)?.__iros?.intent ?? args.intent,
       }),
     });
     return r.json();
   },
+
   async replyAndStore(args) {
     // 既存実装があればそれを尊重
     if (typeof _raw.replyAndStore === 'function') {
@@ -277,7 +333,7 @@ export default function IrosChatProvider({
   const fetchLock = useRef(false);
   const didSyncUrlRef = useRef(false);
   const inFlightRef = useRef(false); // ★ 送信多重ガード
-  const lastUserInfoAt = useRef(0);  // ★ 追加：userinfo スロットル用
+  const lastUserInfoAt = useRef(0); // ★ 追加：userinfo スロットル用
 
   // ---- 認証系バックオフ ----
   async function retryAuth<T>(
@@ -395,7 +451,6 @@ export default function IrosChatProvider({
     dbg('refreshUserInfo');
   }, []);
 
-
   // 共有ヘルパ：ロック/エラー処理/セットを1か所に
   const loadMessages = useCallback(
     async (targetId?: string) => {
@@ -467,9 +522,7 @@ export default function IrosChatProvider({
 
   /** 送信フロー：楽観追加 → user発話を保存 → replyAndStore → 最終同期
    *  ※ /messages を UI からは呼ばない（保存は API 側 or ここで担保） */
-  /** 送信フロー：楽観追加 → user発話を保存 → replyAndStore → 最終同期
-   *  ※ /messages を UI からは呼ばない（保存は API 側 or ここで担保） */
-   const send = useCallback(
+  const send = useCallback(
     async (text: string) => {
       const t = (text ?? '').trim();
       if (!t) return;
@@ -518,7 +571,6 @@ export default function IrosChatProvider({
     },
     [ensureConversationId],
   );
-
 
   const rename = useCallback(
     async (title: string) => {
