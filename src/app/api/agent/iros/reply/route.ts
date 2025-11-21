@@ -31,7 +31,118 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
 );
 
-// ★ resolveModeHintFromText を置き換え
+// ---------- UnifiedAnalysis 専用ロジック（このファイル内だけで完結） ----------
+
+type UnifiedAnalysis = {
+  q_code: string | null;
+  depth_stage: string | null;
+  phase: string | null;
+  self_acceptance: number | null;
+  relation_tone: string | null;
+  keywords: string[];
+  summary: string | null;
+  raw: any;
+};
+
+function buildUnifiedAnalysis(params: {
+  userText: string;
+  assistantText: string;
+  meta: any;
+}): UnifiedAnalysis {
+  const { userText, assistantText, meta } = params;
+  const safeMeta = meta ?? {};
+  const safeAssistant =
+    typeof assistantText === 'string' ? assistantText : String(assistantText ?? '');
+
+  return {
+    q_code: safeMeta.qCode ?? safeMeta.q_code ?? null,
+    depth_stage: safeMeta.depth ?? safeMeta.depth_stage ?? null,
+    phase: safeMeta.phase ?? null,
+    self_acceptance:
+      typeof safeMeta.self_acceptance === 'number' ? safeMeta.self_acceptance : null,
+    relation_tone: safeMeta.relation_tone ?? null,
+    keywords: Array.isArray(safeMeta.keywords) ? safeMeta.keywords : [],
+    summary:
+      typeof safeMeta.summary === 'string' && safeMeta.summary.trim().length > 0
+        ? safeMeta.summary
+        : safeAssistant
+        ? safeAssistant.slice(0, 60)
+        : null,
+    raw: {
+      user_text: userText,
+      assistant_text: safeAssistant,
+      meta: safeMeta,
+    },
+  };
+}
+
+async function saveUnifiedAnalysisInline(
+  analysis: UnifiedAnalysis,
+  context: {
+    userCode: string;
+    tenantId: string;
+    agent: string;
+  },
+) {
+  // 1) unified_resonance_logs へ INSERT
+  const { error: logErr } = await supabase.from('unified_resonance_logs').insert({
+    tenant_id: context.tenantId,
+    user_code: context.userCode,
+    agent: context.agent,
+    q_code: analysis.q_code,
+    depth_stage: analysis.depth_stage,
+    phase: analysis.phase,
+    self_acceptance: analysis.self_acceptance,
+    relation_tone: analysis.relation_tone,
+    keywords: analysis.keywords,
+    summary: analysis.summary,
+    raw: analysis.raw,
+  });
+
+  if (logErr) {
+    console.error('[UnifiedAnalysis] log insert failed', logErr);
+    // ここで throw すると返信自体が止まるので、ログだけ出して続行でもよい
+    // throw new Error(`log insert failed: ${logErr.message}`);
+    return;
+  }
+
+  // 2) user_resonance_state を UPSERT（Qストリーク管理）
+  const { data: prev, error: prevErr } = await supabase
+    .from('user_resonance_state')
+    .select('*')
+    .eq('user_code', context.userCode)
+    .eq('tenant_id', context.tenantId)
+    .maybeSingle();
+
+  if (prevErr) {
+    console.error('[UnifiedAnalysis] state load failed', prevErr);
+    return;
+  }
+
+  const isSameQ = prev?.last_q === analysis.q_code;
+  const streak = isSameQ ? (prev?.streak_count ?? 0) + 1 : 1;
+
+  const { error: stateErr } = await supabase.from('user_resonance_state').upsert({
+    user_code: context.userCode,
+    tenant_id: context.tenantId,
+    last_q: analysis.q_code,
+    last_depth: analysis.depth_stage,
+    last_phase: analysis.phase,
+    last_self_acceptance: analysis.self_acceptance,
+    streak_q: analysis.q_code,
+    streak_count: streak,
+    updated_at: new Date().toISOString(),
+  });
+
+  if (stateErr) {
+    console.error('[UnifiedAnalysis] state upsert failed', stateErr);
+    return;
+  }
+}
+
+// --------------------------------------------------------------------
+
+/** resolveModeHintFromText を置き換え */
 function resolveModeHintFromText(input?: {
   modeHint?: string | null;
   hintText?: string | null;
@@ -46,11 +157,21 @@ function resolveModeHintFromText(input?: {
 
   const t = (input?.text ?? '').toLowerCase();
 
-  // ★ 日本語の“構造化/レポート系”キーワードで structured 扱い
+  // 日本語の“構造化/レポート系”キーワードで structured 扱い
   const structuredJa = [
-    'レポート形式', 'レポートで', 'レポートを', '構造化', '章立て',
-    '箇条書き', '要件をまとめ', '要件整理', '要約して', '表にして',
-    '一覧化', '整理して出して', 'レポートとしてまとめ',
+    'レポート形式',
+    'レポートで',
+    'レポートを',
+    '構造化',
+    '章立て',
+    '箇条書き',
+    '要件をまとめ',
+    '要件整理',
+    '要約して',
+    '表にして',
+    '一覧化',
+    '整理して出して',
+    'レポートとしてまとめ',
   ];
   if (structuredJa.some((k) => t.includes(k))) return 'structured';
 
@@ -144,11 +265,12 @@ export async function POST(req: NextRequest) {
       typeof bodyCost === 'number'
         ? bodyCost
         : typeof bodyCost === 'string'
-          ? Number(bodyCost)
-          : headerCost
-            ? Number(headerCost)
-            : NaN;
-    const CREDIT_AMOUNT = Number.isFinite(parsed) && parsed > 0 ? Number(parsed) : CHAT_CREDIT_AMOUNT;
+        ? Number(bodyCost)
+        : headerCost
+        ? Number(headerCost)
+        : NaN;
+    const CREDIT_AMOUNT =
+      Number.isFinite(parsed) && parsed > 0 ? Number(parsed) : CHAT_CREDIT_AMOUNT;
 
     console.log('[IROS/Reply] credit', {
       userCode,
@@ -264,6 +386,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 8.5) Orchestratorの結果を /messages API に保存（assistant + meta）
+    //      ＋ UnifiedAnalysis を共通テーブルに保存
     try {
       // assistant の本文を抽出
       const assistantText: string =
@@ -277,12 +400,36 @@ export async function POST(req: NextRequest) {
             })()
           : String(result ?? '');
 
-      if (assistantText && assistantText.trim().length > 0) {
-        const metaForSave =
-          result && typeof result === 'object' && (result as any).meta
-            ? (result as any).meta
-            : null;
+      const metaForSave =
+        result && typeof result === 'object' && (result as any).meta
+          ? (result as any).meta
+          : null;
 
+      if (assistantText && assistantText.trim().length > 0) {
+        // tenant_id（未指定なら 'default'）
+        const tenantId =
+          typeof body?.tenant_id === 'string' && body.tenant_id.trim().length > 0
+            ? body.tenant_id.trim()
+            : 'default';
+
+        // UnifiedAnalysis を構築して保存（失敗してもチャット自体は続行）
+        try {
+          const analysis = buildUnifiedAnalysis({
+            userText: text,
+            assistantText,
+            meta: metaForSave,
+          });
+
+          await saveUnifiedAnalysisInline(analysis, {
+            userCode,
+            tenantId,
+            agent: 'iros',
+          });
+        } catch (e) {
+          console.error('[IROS/Reply] failed to save unified analysis', e);
+        }
+
+        // 従来通り /messages API にも保存
         const origin = req.nextUrl.origin;
         const msgUrl = new URL('/api/agent/iros/messages', origin);
 
@@ -303,7 +450,7 @@ export async function POST(req: NextRequest) {
         });
       }
     } catch (e) {
-      console.error('[IROS/Reply] failed to persist assistant message', e);
+      console.error('[IROS/Reply] failed to persist assistant message or unified analysis', e);
     }
 
     // 9) capture（authorize 成功時のみ実施：credit_capture_safe を内部で実行）
