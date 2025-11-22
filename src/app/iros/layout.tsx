@@ -1,15 +1,25 @@
 // src/app/iros/layout.tsx
-import React from 'react';
+'use client';
+
+import React, { useEffect } from 'react';
 
 export default function IrosLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  // /iros 配下のページ（/iros, /iros/remember など）は
-  // すべてここに children として入ってきます。
-  // ここで IrosChat を直接描画せず、children をそのまま返すことで
-  // /iros/remember は RememberPage を正しく表示できます。
+  // /iros 配下に入ったときだけ html, body にフラグを立てて
+  // グローバルCSS側でスクロール制御できるようにする
+  useEffect(() => {
+    document.documentElement.setAttribute('data-iros', 'true');
+    document.body.setAttribute('data-iros', 'true');
+
+    return () => {
+      document.documentElement.removeAttribute('data-iros');
+      document.body.removeAttribute('data-iros');
+    };
+  }, []);
+
+  // children はそのまま返す（/iros, /iros/remember など）
   return <>{children}</>;
 }
-

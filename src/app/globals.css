@@ -1273,3 +1273,13 @@ body.mu-dashboard .tile .tile-label {
   --footer-safe-pad: 56px;                  /* 下部ナビの高さ */
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
+
+/* ===== /iros 読み込み時は外側スクロール禁止 (強制版) ===== */
+
+html[data-iros="true"],
+body[data-iros="true"],
+#mu-page[data-iros="true"],
+.mu-main[data-iros="true"] {
+  overflow-y: hidden !important;
+  overscroll-behavior: contain !important;
+}

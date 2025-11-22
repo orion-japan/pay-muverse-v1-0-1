@@ -8,12 +8,14 @@
 }
 
 /* 背景やオーバーフローの全体調整 */
+/* /iros ページを開いている間は、外側(html/body)も縦スクロールを止める */
 .mu-main,
 #mu-page,
 html,
 body {
   background: transparent !important;
   overflow-x: hidden;
+  overflow-y: hidden;             /* ★ 追加：外側の縦スクロールを禁止 */
 }
 
 /* チャット本文のスクロール余白（ヘッダーと入力バーぶん） */

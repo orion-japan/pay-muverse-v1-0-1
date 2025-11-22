@@ -48,7 +48,11 @@ async function tryInsert(
 ) {
   for (const table of tables) {
     try {
-      const { data, error } = await (supabase as any).from(table).insert([row]).select(returning).single();
+      const { data, error } = await (supabase as any)
+        .from(table)
+        .insert([row])
+        .select(returning)
+        .single();
       if (!error) return { ok: true as const, data, table };
     } catch {
       // ignore and try next
@@ -122,10 +126,16 @@ export async function GET(req: NextRequest) {
 
     // メッセージ取得
     const res = await trySelect<{
-      id: string; conversation_id: string; role: 'user'|'assistant';
-      content?: string | null; text?: string | null;
-      user_code?: string | null; q_code?: OutMsg['q'] | null; color?: string | null;
-      created_at?: string | null; ts?: number | null;
+      id: string;
+      conversation_id: string;
+      role: 'user' | 'assistant';
+      content?: string | null;
+      text?: string | null;
+      user_code?: string | null;
+      q_code?: OutMsg['q'] | null;
+      color?: string | null;
+      created_at?: string | null;
+      ts?: number | null;
     }>(
       supabase,
       MSG_TABLES,
@@ -134,11 +144,19 @@ export async function GET(req: NextRequest) {
     );
     if (!res.ok) return json({ ok: true, messages: [], note: 'messages_select_failed' }, 200);
 
-    const filtered = res.data.filter((m) =>
-      Object.prototype.hasOwnProperty.call(m, 'user_code')
-        ? String(m.user_code ?? '') === userCode
-        : true,
-    );
+    // ★ ここを修正：user_code が null / 空 のレガシー行は許可する
+    const filtered = res.data.filter((m) => {
+      // user_code カラム自体が無い → そのまま許可
+      if (!Object.prototype.hasOwnProperty.call(m, 'user_code')) return true;
+
+      const uc = m.user_code == null ? '' : String(m.user_code);
+
+      // レガシー行（user_code 未設定）は許可
+      if (!uc) return true;
+
+      // userCode が明示的に入っている行だけ絞り込み
+      return uc === userCode;
+    });
 
     const messages: OutMsg[] = filtered.map((m) => ({
       id: String(m.id),
@@ -153,7 +171,10 @@ export async function GET(req: NextRequest) {
 
     return json({ ok: true, messages }, 200);
   } catch (e: any) {
-    return json({ ok: true, messages: [], note: 'exception', detail: String(e?.message ?? e) }, 200);
+    return json(
+      { ok: true, messages: [], note: 'exception', detail: String(e?.message ?? e) },
+      200,
+    );
   }
 }
 
@@ -171,9 +192,13 @@ export async function POST(req: NextRequest) {
     if (!userCode) return json({ ok: false, error: 'user_code_missing' }, 400);
 
     let body: any = {};
-    try { body = await req.json(); } catch {}
+    try {
+      body = await req.json();
+    } catch {}
 
-    const conversation_id: string = String(body?.conversation_id || body?.conversationId || '').trim();
+    const conversation_id: string = String(
+      body?.conversation_id || body?.conversationId || '',
+    ).trim();
     const text: string = String(body?.text ?? body?.content ?? '').trim();
     const meta = body?.meta ?? null;
     const q_code: string | null =
@@ -183,14 +208,15 @@ export async function POST(req: NextRequest) {
     const role: 'user' | 'assistant' =
       String(body?.role ?? '').toLowerCase() === 'assistant' ? 'assistant' : 'user';
 
-    if (!conversation_id) return json({ ok: false, error: 'missing_conversation_id' }, 400);
+    if (!conversation_id)
+      return json({ ok: false, error: 'missing_conversation_id' }, 400);
     if (!text) return json({ ok: false, error: 'text_empty' }, 400);
 
     // ★ legacy assistant（二重保存）防止
-    // reply API 内で meta 付き assistant を保存しているため、
-    // 旧フロントから飛んでくる「meta なし assistant」はスキップする。
     if (role === 'assistant' && !meta && !q_code) {
-      console.log('[IROS/messages] skip legacy assistant without meta', { conversation_id });
+      console.log('[IROS/messages] skip legacy assistant without meta', {
+        conversation_id,
+      });
       return json({ ok: true, skipped: 'assistant_without_meta_legacy' }, 200);
     }
 
@@ -241,6 +267,9 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (e: any) {
-    return json({ ok: false, error: 'unhandled_error', detail: String(e?.message ?? e) }, 500);
+    return json(
+      { ok: false, error: 'unhandled_error', detail: String(e?.message ?? e) },
+      500,
+    );
   }
 }

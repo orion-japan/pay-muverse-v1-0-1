@@ -48,16 +48,20 @@
   will-change: transform;
 
   z-index: calc(var(--drawer-z) + 10);        /* dim より常に前面 */
-  overflow: hidden;                            /* 子でスクロール管理 */
+
+  /* ★ ここを変更 */
+  /* overflow: hidden;  ← これを消す or 無効化 */
+  overflow-y: auto;       /* 縦方向だけスクロール */
+  overflow-x: hidden;     /* 横は隠す */
   -webkit-overflow-scrolling: touch;
 
   display: flex;
   flex-direction: column;
 
-  /* backdrop の差異を無効化（iOS/Chromium） */
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
+
 .drawerOpen { transform: translateZ(0) translateX(0); }
 
 /* ==== head ==== */

@@ -1,6 +1,5 @@
 /* ========= IrosChat base (light transparent version) ========= */
 
-
 /* ---- App Layout ---- */
 .app {
   display: grid;
@@ -20,7 +19,7 @@
   height: 100dvh;
   display: grid;
   grid-template-rows: 100%;
-  overflow: hidden;
+  overflow: hidden; /* ← スクロールはタイムライン側に集約 */
 }
 
 /* ---- Sidebar ---- */
@@ -102,21 +101,29 @@
   grid-template-rows: auto 1fr auto;
   height: 100%;
   background: linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
-  overflow: auto;
-  overflow-x: hidden;
   border-radius: 12px;
+  overflow: hidden; /* ← ここも hidden、スクロールはタイムライン */
 }
 
 /* ヘッダー（固定） */
 .header {
-  position: sticky;
+  position: fixed; /* 画面上部に固定 */
   top: 0;
-  z-index: 400;
+  left: 0;
+  right: 0;
+  z-index: 500;
   padding: 12px 16px 10px;
-  background: rgba(255, 255, 255, 0.9);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  background: rgba(255, 255, 255, 0.95);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
   backdrop-filter: blur(10px);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  height: 56px;
+}
+
+/* 下の要素が隠れないように補正 */
+.pageInner {
+  /* page 内で使うラッパーがあればそこにこのクラスを付けてください */
+  padding-top: 56px;
 }
 
 .brand {
@@ -146,18 +153,25 @@
 
 /* メイン */
 .main {
-  overflow: visible;
-  padding-top: 4px;
+  /* スクロールしない。内部の .timeline がスクロールを持つ */
+  overflow: hidden;
 }
 
 /* ===== タイムライン ===== */
 .timeline {
   position: relative;
-  padding: 12px 16px calc(24px + var(--footer-safe-pad) + var(--chat-offset));
+  padding: 12px 16px;
+  padding-bottom: calc(24px + var(--footer-safe-pad, 56px) + var(--chat-offset, 0px));
   display: flex;
   flex-direction: column;
   gap: 12px;
   -webkit-overflow-scrolling: touch;
+
+  /* ★ ここを「スクロール可能な領域」にする */
+  height: calc(100dvh - 56px - 72px); /* 56: header, 72: footer の想定 */
+  max-height: calc(100dvh - 56px - 72px);
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .emptyHint {
@@ -174,6 +188,7 @@
   display: flex;
   gap: 8px;
 }
+
 .msgUser {
   justify-content: flex-end;
   align-items: flex-end;
@@ -198,33 +213,42 @@
   margin-bottom: 6px;
 }
 
-/* 吹き出し */
+/* 吹き出し共通 */
 .msgBubble {
   max-width: min(680px, 86%);
   padding: 10px 12px;
-  border-radius: var(--sofia-a-radius);
+  border-radius: 16px;
   word-break: break-word;
   white-space: pre-wrap;
   background: #ffffff;
   border: 1px solid rgba(0, 0, 0, 0.08);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  line-height: 1.8;
+  letter-spacing: 0.01em;
 }
 
 /* AI側 */
 .msgBot .msgBubble {
-  background: var(--sofia-a-bg-grad);
-  border: var(--sofia-a-border);
-  box-shadow: var(--sofia-a-shadow);
+  background: var(--sofia-a-bg-grad, linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%));
+  border: var(--sofia-a-border, 1px solid #e6eaf2);
+  box-shadow: var(
+    --sofia-a-shadow,
+    0 1px 3px rgba(16, 24, 40, 0.06),
+    0 8px 24px rgba(2, 6, 23, 0.05)
+  );
   color: #0f172a;
 }
 
 /* ユーザー側 */
 .msgUser .msgBubble {
-  background: var(--sofia-u-bg-grad);
-  border: var(--sofia-u-border);
-  box-shadow: var(--sofia-u-shadow);
+  background: var(--sofia-u-bg-grad, linear-gradient(180deg, #ffffff 0%, #eef5ff 100%));
+  border: var(--sofia-u-border, 1px solid #cfe0ff);
+  box-shadow: var(
+    --sofia-u-shadow,
+    0 1px 3px rgba(16, 24, 40, 0.06),
+    0 8px 24px rgba(30, 64, 175, 0.06)
+  );
   color: #0b1220;
-  border-radius: 16px;
 }
 
 /* テキスト */
@@ -242,6 +266,7 @@
   padding: 6px 2px;
   align-items: center;
 }
+
 .dotAnim {
   width: 6px;
   height: 6px;
@@ -256,6 +281,7 @@
 .dotAnim:nth-child(3) {
   animation-delay: 0.3s;
 }
+
 @keyframes sofDots {
   0%,
   80%,
@@ -294,6 +320,7 @@
   grid-template-columns: 1fr 88px;
   gap: 8px;
 }
+
 .input {
   background: #fff;
   color: #1e293b;
@@ -327,46 +354,7 @@
   margin-right: calc(50% - 50vw);
 }
 
-
-/* === Headerを完全固定 === */
-.header {
-  position: fixed !important;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 500;
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(10px);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  height: 56px;
-}
-
-/* 下の要素が隠れないように補正 */
-.page {
-  padding-top: 56px !important;
-}
-
-
-
-/* ---- Iros Header alignment fix ---- */
-.sof-header {
-  max-width: 680px;               /* 💡 チャット本体と同じ最大幅に合わせる */
-  margin: 0 auto;                 /* 中央寄せ */
-  left: 0;
-  right: 0;
-  position: sticky;
-  top: 0;
-  z-index: 50;
-  background: #fff;
-  border-bottom: 1px solid #e6e6ee;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-}
-
-
-
-
-/* ===== Shellで使用しているクラスの最低限定義 ===== */
+/* ===== Shell 互換クラス ===== */
 
 .sof-layout {
   display: grid;
@@ -375,25 +363,46 @@
 }
 
 .sof-page {
-  display: contents; /* grid行をそのまま使う */
+  display: contents;
 }
 
 .sof-main {
-  overflow: auto;
+  overflow: hidden; /* ← PCでは内部スクロールに任せる */
 }
 
+/* タイムライン本体（PCでスクロールを持つ） */
 .sof-timeline {
   position: relative;
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 12px 16px;
-  /* 入力欄に隠れないように下余白を確保 */
   padding-bottom: calc(var(--footer-safe-pad, 56px) + 120px);
+  max-height: calc(100dvh - 56px - 72px);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ---- モバイルでは「外側スクロール」に切り替え ---- */
+@media (max-width: 768px) {
+  .page {
+    height: auto;
+    overflow: visible;       /* ページ側にスクロールを渡す */
+  }
+
+  .sof-main {
+    overflow: visible;       /* 内側でクリップしない */
+  }
+
+  .sof-timeline {
+    max-height: none;
+    height: auto;
+    overflow: visible;       /* タイムライン自身はスクロールを持たない */
+  }
 }
 
 .sof-footer-spacer {
-  height: 0; /* スペーサーDOMはあるが見た目不要な場合 */
+  height: 0;
 }
 
 .sof-underlay {
@@ -405,39 +414,32 @@
 
 
 
-
-/* index.module.css など */
-.msgUser,
-.msgBot {
-  display: flex;
-  align-items: flex-end; /* ← 下揃え */
-  gap: 10px;
+/* /iros 専用：mu-main のスクロールは殺して、Iros 側に委譲する */
+.mu-main:has(.sof-layout) {
+  overflow: hidden !important;
+  -webkit-overflow-scrolling: auto;
 }
 
-.msgUser {
-  justify-content: flex-end;
-}
 
-.msgBot {
-  justify-content: flex-start;
-}
-.msgBubble {
-  max-width: 86%;
-  padding: 10px 14px;
-  border-radius: 16px;
-  line-height: 1.8;
-  letter-spacing: 0.01em;
-  word-break: break-word;
-}
 
-.msgUser .msgBubble {
-  background: linear-gradient(180deg, #ffffff 0%, #eef5ff 100%);
-  border: 1px solid #cfe0ff;
-  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06), 0 8px 24px rgba(30, 64, 175, 0.06);
-}
+/* ===== モバイル専用：二重スクロールを禁止 ===== */
+@media (max-width: 768px) {
 
-.msgBot .msgBubble {
-  background: linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
-  border: 1px solid #e6eaf2;
-  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06), 0 8px 24px rgba(2, 6, 23, 0.05);
+  /* 外側を scroll 任せにする */
+  .page {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .sof-main {
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  /* 内側のスクロールを完全に無効化 */
+  .sof-timeline {
+    max-height: none !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
 }
