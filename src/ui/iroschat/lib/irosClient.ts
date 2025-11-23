@@ -1,13 +1,19 @@
 // /src/ui/iroschat/lib/irosClient.ts
 'use client';
 
-import { getAuth } from 'firebase/auth';
+import { getAuth, type User } from 'firebase/auth';
+
+const __DEV__ = process.env.NODE_ENV !== 'production';
 
 /* ========= Types ========= */
 export type Role = 'user' | 'assistant' | 'system';
 export type HistoryMsg = { role: Role; content: string };
 
-export type IrosConversation = { id: string; title: string; updated_at?: string | null };
+export type IrosConversation = {
+  id: string;
+  title: string;
+  updated_at?: string | null;
+};
 
 export type IrosMessage = {
   id: string;
@@ -25,39 +31,93 @@ export type UserInfo = {
   credits: number;
 };
 
-/* ========= authFetch ========= */
-async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
-  const auth = getAuth();
-  const u = auth.currentUser;
-  const token = u ? await u.getIdToken(false) : null;
+/* ========= Firebase currentUser を待つ ========= */
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(init.headers as Record<string, string> | undefined),
-  };
+function waitForCurrentUser(timeoutMs = 5000): Promise<User | null> {
+  return new Promise((resolve) => {
+    const auth = getAuth();
+    // すでに取れている場合
+    if (auth.currentUser) {
+      resolve(auth.currentUser);
+      return;
+    }
+
+    let settled = false;
+
+    const unsub = auth.onAuthStateChanged((u) => {
+      if (settled) return;
+      settled = true;
+      try {
+        unsub();
+      } catch {}
+      resolve(u);
+    });
+
+    // タイムアウト保険
+    setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try {
+        unsub();
+      } catch {}
+      resolve(getAuth().currentUser ?? null);
+    }, timeoutMs);
+  });
+}
+
+/* ========= authFetch ========= */
+/**
+ * 認証付き fetch
+ * - currentUser が準備できるまで待機
+ * - user が取れない場合はサーバに投げずにエラーを投げる
+ * - ここで origin を付け足したりしない（呼び出し側は `/api/...` の相対パスでOK）
+ */
+async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+  const headers = new Headers(init.headers || {});
+  const cred: RequestCredentials = init.credentials ?? 'include';
+
+  // ---- Firebase currentUser を待つ ----
+  const user = await waitForCurrentUser();
+
+  if (!user) {
+    const err = new Error('401 not_authenticated: firebase currentUser is null');
+    if (__DEV__) console.warn('[IROS/API] authFetch no currentUser', err.message);
+    throw err;
+  }
+
+  // ---- ID トークン取得（まずはキャッシュ）----
+  const token = await user.getIdToken(false).catch(() => null);
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  // JSON 基本
+  if (!headers.has('Content-Type') && init.method && init.method !== 'GET') {
+    headers.set('Content-Type', 'application/json');
+  }
 
   const res = await fetch(input, {
     ...init,
     headers,
-    credentials: 'include',
+    credentials: cred,
     cache: 'no-store',
   });
+
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`HTTP ${res.status} ${text}`);
+    const t = await res.text().catch(() => '');
+    if (__DEV__) console.warn('[IROS/API] authFetch error', res.status, t);
+    throw new Error(`HTTP ${res.status} ${t}`);
   }
   return res;
 }
 
-/* ========= helper: URLのcid取得 ========= */
+/* ========= helper: URL の cid 取得 ========= */
 function getCidFromLocation(): string | null {
   if (typeof window === 'undefined') return null;
   return new URLSearchParams(window.location.search).get('cid');
 }
 
-/* ========= ここが今回の核心：応答テキストの正規化 ========= */
-// /src/ui/iroschat/lib/irosClient.ts の normalizeAssistantText を丸ごと置換
+/* ========= 応答テキストの正規化 ========= */
 function normalizeAssistantText(json: any): string {
   // 1) 代表的な場所（★ text / content を最優先で追加）
   let t =
@@ -69,25 +129,26 @@ function normalizeAssistantText(json: any): string {
     json?.output_text ??
     '';
 
-  // 2) もしオブジェクトの文字列化が来たら取り直す
+  // 2) [object Object] になってしまった場合の救済
   const bad = typeof t === 'string' && /^\[object Object\]$/.test(t);
   if (bad || !t) {
     const a = json?.assistant ?? json?.reply ?? json?.data;
     if (a && typeof a === 'object') {
       t =
-        a.text ??
-        a.content ??
-        a.message ??
-        a.output ??
-        a.plain ??
+        (a as any).text ??
+        (a as any).content ??
+        (a as any).message ??
+        (a as any).output ??
+        (a as any).plain ??
         '';
+
       if (!t) {
-        if (Array.isArray(a.content)) {
-          t = a.content
+        if (Array.isArray((a as any).content)) {
+          t = (a as any).content
             .map((c: any) =>
               typeof c === 'string'
                 ? c
-                : c?.text ?? c?.content ?? c?.message ?? ''
+                : c?.text ?? c?.content ?? c?.message ?? '',
             )
             .filter(Boolean)
             .join('\n\n');
@@ -98,7 +159,7 @@ function normalizeAssistantText(json: any): string {
     }
   }
 
-  // 3) まだ空なら debug をヒントに最低限の一文
+  // 3) まだ空なら debug から最低限の一文を作る
   if (!t && json?.debug) {
     const d = json.debug;
     const hint = [
@@ -124,7 +185,6 @@ function normalizeAssistantText(json: any): string {
   return t;
 }
 
-
 /* ========= Conversations ========= */
 export async function createConversation(): Promise<{ conversationId: string }> {
   const res = await authFetch('/api/agent/iros/conversations', {
@@ -138,14 +198,25 @@ export async function createConversation(): Promise<{ conversationId: string }> 
 }
 
 export async function listConversations(): Promise<IrosConversation[]> {
-  const res = await authFetch('/api/agent/iros/conversations', { method: 'GET' });
-  const j = await res.json();
-  const arr = Array.isArray(j?.conversations) ? j.conversations : [];
-  return arr.map((r: any) => ({
-    id: String(r.id),
-    title: (r.title ?? '新規セッション') as string,
-    updated_at: (r.updated_at ?? r.created_at ?? null) as string | null,
-  }));
+  try {
+    const res = await authFetch('/api/agent/iros/conversations', { method: 'GET' });
+    const j = await res.json();
+    const arr = Array.isArray(j?.conversations) ? j.conversations : [];
+    return arr.map((r: any) => ({
+      id: String(r.id),
+      title: (r.title ?? '新規セッション') as string,
+      updated_at: (r.updated_at ?? r.created_at ?? null) as string | null,
+    }));
+  } catch (e: any) {
+    const msg = String(e?.message ?? '');
+    // 未ログインまたは currentUser なしの場合は「会話なし」として扱う
+    if (msg.includes('401 not_authenticated') || msg.includes('HTTP 401')) {
+      if (__DEV__) console.info('[IrosClient] listConversations unauthenticated → []');
+      return [];
+    }
+    console.error('[IrosClient] listConversations error:', e);
+    return [];
+  }
 }
 
 export async function renameConversation(
@@ -173,15 +244,19 @@ export async function deleteConversation(conversationId: string): Promise<{ ok: 
 
 /* ========= Messages ========= */
 export async function fetchMessages(conversationId: string): Promise<IrosMessage[]> {
-  const url = new URL('/api/agent/iros/messages', window.location.origin);
-  url.searchParams.set('conversation_id', conversationId);
-  const res = await authFetch(url.toString(), { method: 'GET' });
+  const params = new URLSearchParams({ conversation_id: conversationId });
+  const res = await authFetch(`/api/agent/iros/messages?${params.toString()}`, {
+    method: 'GET',
+  });
   const j = await res.json();
 
   const arr = Array.isArray(j?.messages) ? j.messages : [];
   return arr.map((m: any) => {
-    const created =
-      m?.created_at ? new Date(m.created_at).getTime() : typeof m?.ts === 'number' ? m.ts : Date.now();
+    const created = m?.created_at
+      ? new Date(m.created_at).getTime()
+      : typeof m?.ts === 'number'
+      ? m.ts
+      : Date.now();
     return {
       id: String(m.id),
       role: m.role === 'assistant' ? 'assistant' : 'user',
@@ -201,7 +276,7 @@ export async function postMessage(args: {
   const res = await authFetch('/api/agent/iros/messages', {
     method: 'POST',
     body: JSON.stringify({
-      conversation_id: args.conversationId, // API側の期待に合わせる
+      conversation_id: args.conversationId,
       text: args.text,
       role: args.role ?? 'user',
     }),
@@ -212,13 +287,12 @@ export async function postMessage(args: {
 }
 
 /* ========= Reply (LLM) ========= */
-// API期待: { conversationId, text, modeHint?, extra? }
 export async function reply(params: {
   conversationId?: string;
-  user_text: string;     // ← UI入力
-  mode?: string;         // UIのモード文字列（→ modeHintへ）
+  user_text: string; // UI 入力
+  mode?: string; // UI のモード文字列（→ modeHint へ）
   history?: HistoryMsg[]; // 任意
-  model?: string;         // 任意
+  model?: string; // 任意
 }): Promise<any> {
   const cid = params.conversationId ?? getCidFromLocation();
   const text = (params.user_text ?? '').toString().trim();
@@ -227,8 +301,8 @@ export async function reply(params: {
 
   const payload = {
     conversationId: cid,
-    text,                        // ← サーバ要求キー
-    modeHint: params.mode,       // ← ヒント（任意）
+    text, // サーバ要求キー
+    modeHint: params.mode,
     extra: {
       model: params.model ?? undefined,
       history: Array.isArray(params.history) ? params.history.slice(-3) : undefined,
@@ -273,17 +347,31 @@ export async function replyAndStore(args: {
 
 /* ========= User Info ========= */
 export async function getUserInfo(): Promise<UserInfo | null> {
-  const res = await authFetch('/api/agent/iros/userinfo', { method: 'GET' });
-  const j = await res.json();
-  if (!j?.ok) return null;
-  const u = j.user || null;
-  if (!u) return null;
-  return {
-    id: String(u.id ?? 'me'),
-    name: String(u.name ?? 'You'),
-    userType: String(u.userType ?? 'member'),
-    credits: Number(u.credits ?? 0),
-  };
+  try {
+    const res = await authFetch('/api/agent/iros/userinfo', { method: 'GET' });
+    const j = await res.json();
+    if (!j?.ok) return null;
+
+    const u = j.user || null;
+    if (!u) return null;
+
+    return {
+      id: String(u.id ?? 'me'),
+      name: String(u.name ?? 'You'),
+      userType: String(u.userType ?? 'member'),
+      credits: Number(u.credits ?? 0),
+    };
+  } catch (e: any) {
+    const msg = String(e?.message ?? '');
+    // ★ 401（未ログイン or currentUser=null）は「ユーザー情報なし」として扱う
+    if (msg.includes('401 not_authenticated') || msg.includes('HTTP 401')) {
+      if (__DEV__) console.info('[IrosClient] getUserInfo: unauthenticated → null');
+      return null;
+    }
+
+    console.error('[IrosClient] getUserInfo error:', e);
+    return null;
+  }
 }
 
 /* ========= Default export & window hook ========= */
@@ -306,6 +394,7 @@ declare global {
     irosClient?: typeof api;
   }
 }
+
 if (typeof window !== 'undefined') {
   (window as any).irosClient = api;
 }

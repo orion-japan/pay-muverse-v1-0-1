@@ -5,6 +5,10 @@ import React from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 
+// ★ 追加：チャットコンテキスト & メタバッジ
+import { useIrosChat } from './IrosChatContext';
+import IrosMetaBadge from './components/IrosMetaBadge';
+
 export type HeaderProps = {
   onShowSideBar?: () => void;
   onCreateNewChat?: () => void;
@@ -20,6 +24,28 @@ export default function IrosHeader({
 }: HeaderProps) {
   const router = useRouter();
   const title = 'iros_AI';
+
+  // ★ 追加：IrosChatContext から最新メタ情報を取得（型は any で柔らかく）
+  const chatCtx = (typeof useIrosChat === 'function' ? useIrosChat() : null) as any;
+
+  // 可能性のあるキーを順番に探す（実装差異に強くするため）
+  const currentMeta =
+    chatCtx?.currentMeta ??
+    chatCtx?.lastMeta ??
+    chatCtx?.meta ??
+    null;
+
+  const qCode =
+    currentMeta?.qCode ??
+    currentMeta?.q_code ??
+    undefined;
+
+  const depth =
+    currentMeta?.depth ??
+    currentMeta?.depth_stage ??
+    null;
+
+  const mode = currentMeta?.mode ?? null;
 
   const defaultIcon = (
     <Image
@@ -88,6 +114,18 @@ export default function IrosHeader({
       </div>
 
       <div className="sof-right">
+        {/* ★ 追加：右上の Q / 深度 / モード インジケーター（compact 表示） */}
+        {currentMeta && (
+          <div className="sof-meta-wrap" aria-label="Iros meta indicator">
+            <IrosMetaBadge
+              qCode={qCode}
+              depth={depth}
+              mode={mode}
+              compact
+            />
+          </div>
+        )}
+
         <button
           type="button"
           onClick={handleRefresh}
@@ -182,6 +220,14 @@ export default function IrosHeader({
         .sof-btn:hover { background: #f2f6ff; }
         .sof-btn-accent { background: #eef5ff; border-color: #cfe0ff; }
         .sof-btn-accent:hover { background: #e6f0ff; }
+
+        /* ★ インジケーター用の軽い余白調整 */
+        .sof-meta-wrap {
+          display: flex;
+          align-items: center;
+          margin-right: 4px;
+        }
+
         @media (max-width: 480px) {
           .sof-header { height: 42px; padding: 4px 6px; }
           .sof-title { max-width: 54vw; font-size: 13px; }

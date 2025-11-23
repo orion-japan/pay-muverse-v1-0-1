@@ -14,8 +14,29 @@ type IrosMessage = {
   id: string;
   role: 'user' | 'assistant';
   text: unknown; // 混在対策（確実に文字列化して描画）
+
+  // 旧Qバッジ用（当面は残す）
   q?: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
   color?: string;
+
+  // 追加: サーバーから渡ってくる meta 一式
+  meta?: {
+    qCode?: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
+    depth?: string | null;
+    mode?:
+      | 'light'
+      | 'consult'
+      | 'mirror'
+      | 'resonate'
+      | 'counsel'
+      | 'structured'
+      | 'diagnosis'
+      | 'auto'
+      | string
+      | null;
+    [key: string]: any;
+  };
+
   ts?: number;
 };
 
@@ -31,7 +52,7 @@ const FALLBACK_DATA =
       <rect width="40" height="40" rx="20" fill="url(#g)"/>
       <circle cx="20" cy="16" r="8" fill="#b7c3d7"/>
       <rect x="7" y="26" width="26" height="10" rx="5" fill="#c8d2e3"/>
-    </svg>`
+    </svg>`,
   );
 
 /** [object Object]対策：最終的に必ず文字列へ正規化 */
@@ -100,6 +121,10 @@ export default function MessageList() {
         // ここで必ず文字列化
         const safeText = toSafeString(m.text);
 
+        // meta 優先で Q を表示（無ければ従来の m.q）
+        const qFromMeta = m.meta?.qCode;
+        const qToShow = qFromMeta ?? m.q;
+
         return (
           <div key={m.id} className={`message ${isUser ? 'is-user' : 'is-assistant'}`}>
             {/* アバター */}
@@ -142,7 +167,7 @@ export default function MessageList() {
                 maxWidth: 'min(var(--sofia-bubble-max, 780px), 86%)',
               }}
             >
-              {m.q && (
+              {qToShow && (
                 <div className="q-badge">
                   <span
                     style={{
@@ -153,7 +178,7 @@ export default function MessageList() {
                       display: 'inline-block',
                     }}
                   />
-                  {m.q}
+                  {qToShow}
                 </div>
               )}
 

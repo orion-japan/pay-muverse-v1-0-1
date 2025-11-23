@@ -41,7 +41,7 @@ function IrosChatInner({ open }: Props) {
 
   // ★ 初期は必ず閉じた状態
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [uiUser, setUiUser] = useState<CurrentUser>();
+  const [uiUser, setUiUser] = useState<CurrentUser | null>(null);
   const [meta, setMeta] = useState<any>(null);
 
   const composeRef = useRef<HTMLDivElement | null>(null);
@@ -105,15 +105,18 @@ function IrosChatInner({ open }: Props) {
   // ==== Iros Context ====
   const chat = useIrosChat();
 
+  // Context 側の userInfo をローカル表示用に同期
+  useEffect(() => {
+    setUiUser((chat.userInfo as any) ?? null);
+  }, [chat.userInfo]);
+
   // openパラメータ（menu/new/cid）の一回処理（ループ防止）
   const didHandleOpenRef = useRef(false);
   useEffect(() => {
     if (didHandleOpenRef.current) return;
     if (!canUse) return;
 
-    // ★ 以前は openTarget.type === 'menu' で setIsMobileMenuOpen(true)
-    //    → それが「毎回自動でサイドバーが開く」原因だったので削除。
-    //    menu で来ても、今は自動では開かない。
+    // menu で来ても自動ではサイドバーを開かない
 
     if (openTarget.type === 'new') {
       try {
@@ -121,26 +124,31 @@ function IrosChatInner({ open }: Props) {
           window.localStorage.removeItem(lastConvKey(agentK));
         }
       } catch {}
-      try {
-        chat.newConversation?.();
-      } catch {}
-      didHandleOpenRef.current = true;
+      // 新しい会話を開始
+      chat
+        .startConversation()
+        .catch(() => {})
+        .finally(() => {
+          didHandleOpenRef.current = true;
+        });
       return;
     }
 
     if ((openTarget.type === 'cid' || openTarget.type === 'uuid') && openTarget.cid) {
-      try {
-        chat.selectConversation?.(openTarget.cid);
-      } catch {}
-      try {
-        if (typeof window !== 'undefined') {
-          window.localStorage.setItem(lastConvKey(agentK), openTarget.cid);
-        }
-      } catch {}
-      didHandleOpenRef.current = true;
+      chat
+        .fetchMessages(openTarget.cid)
+        .catch(() => {})
+        .finally(() => {
+          try {
+            if (typeof window !== 'undefined') {
+              window.localStorage.setItem(lastConvKey(agentK), openTarget.cid!);
+            }
+          } catch {}
+          didHandleOpenRef.current = true;
+        });
       return;
     }
-  }, [canUse, chat, openTarget]);
+  }, [canUse, chat, openTarget, agentK]);
 
   // 初期選択（open 指定が無い通常遷移時）
   const didSelectOnce = useRef(false);
@@ -155,10 +163,12 @@ function IrosChatInner({ open }: Props) {
     if (urlCid) {
       const exists = convs.some((c) => c.id === urlCid);
       if (exists) {
-        try {
-          chat.selectConversation?.(urlCid);
-        } catch {}
-        didSelectOnce.current = true;
+        chat
+          .fetchMessages(urlCid)
+          .catch(() => {})
+          .finally(() => {
+            didSelectOnce.current = true;
+          });
         return;
       }
     }
@@ -174,10 +184,12 @@ function IrosChatInner({ open }: Props) {
     if (lastId) {
       const exists = convs.some((c) => c.id === lastId);
       if (exists) {
-        try {
-          chat.selectConversation?.(lastId);
-        } catch {}
-        didSelectOnce.current = true;
+        chat
+          .fetchMessages(lastId)
+          .catch(() => {})
+          .finally(() => {
+            didSelectOnce.current = true;
+          });
         return;
       }
     }
@@ -185,35 +197,28 @@ function IrosChatInner({ open }: Props) {
     // それでも決まらなければ、最新の会話
     const latest = convs[0];
     if (latest?.id) {
-      try {
-        chat.selectConversation?.(latest.id);
-      } catch {}
-      didSelectOnce.current = true;
+      chat
+        .fetchMessages(latest.id)
+        .catch(() => {})
+        .finally(() => {
+          didSelectOnce.current = true;
+        });
     }
-  }, [canUse, chat, chat.conversations, urlCid]);
-
-  // ユーザー情報のロード
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        await chat.refreshUserInfo();
-        if (!cancelled) {
-          setUiUser((chat.userInfo ?? null) as any);
-        }
-      } catch {
-        if (!cancelled) setUiUser(null as any);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [chat]);
+  }, [canUse, chat, chat.conversations, urlCid, agentK]);
 
   const handleDelete = async () => {
+    const cid = chat.activeConversationId;
+    if (!cid) return;
     try {
-      if (chat.conversationId) await chat.remove?.();
-    } catch {}
+      await chat.deleteConversation(cid);
+      try {
+        if (typeof window !== 'undefined') {
+          window.localStorage.removeItem(lastConvKey(agentK));
+        }
+      } catch {}
+    } catch {
+      // noop
+    }
   };
 
   const handleRename = async () => {
@@ -231,9 +236,7 @@ function IrosChatInner({ open }: Props) {
                 window.localStorage.removeItem(lastConvKey(agentK));
               }
             } catch {}
-            try {
-              chat.newConversation?.();
-            } catch {}
+            chat.startConversation().catch(() => {});
           }}
         />
       </div>
@@ -279,9 +282,7 @@ function IrosChatInner({ open }: Props) {
                   : []
               }
               onSelect={(id) => {
-                try {
-                  chat.selectConversation?.(id);
-                } catch {}
+                chat.fetchMessages(id).catch(() => {});
                 setIsMobileMenuOpen(false);
                 try {
                   if (typeof window !== 'undefined') {
@@ -291,7 +292,7 @@ function IrosChatInner({ open }: Props) {
               }}
               onDelete={handleDelete}
               onRename={handleRename}
-              userInfo={uiUser ?? null}
+              userInfo={uiUser}
               meta={meta as any}
             />
 

@@ -298,6 +298,34 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // 7.8) isFirstTurn 判定（この conversationId のメッセージ件数を確認）
+    let isFirstTurn = false;
+    try {
+      const { count: messageCount, error: msgErr } = await supabase
+        .from('iros_messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('conversation_id', conversationId);
+
+      if (msgErr) {
+        console.error('[IROS/Reply] failed to count messages for conversation', {
+          conversationId,
+          error: msgErr,
+        });
+      } else {
+        isFirstTurn = (messageCount ?? 0) === 0;
+      }
+    } catch (e) {
+      console.error('[IROS/Reply] unexpected error when counting messages', {
+        conversationId,
+        error: e,
+      });
+    }
+
+    console.log('[IROS/Reply] isFirstTurn', {
+      conversationId,
+      isFirstTurn,
+    });
+
     // 8) Qコードメモリ読み込み → Orchestrator 呼び出し
     console.log('[IROS/Memory] loadQTraceForUser start', { userCode });
     let result: any;
@@ -326,6 +354,7 @@ export async function POST(req: NextRequest) {
         conversationId,
         mode,
         baseMetaFromQ,
+        isFirstTurn,
       });
 
       // Rememberモードが有効なら、過去ログバンドルを取り込み
@@ -372,9 +401,14 @@ export async function POST(req: NextRequest) {
         conversationId,
         text: effectiveText,
         requestedMode,
+        // 深度は QTrace をヒントに渡す（OK）
         requestedDepth: baseMetaFromQ.depth as any,
-        requestedQCode: baseMetaFromQ.qCode as any,
+        // ★ Qコードは、まだ旧経路がQ2に偏っているので、いったん渡さない
+        //    （Iros本体の analyzeUnifiedTurn 側に委ねる）
+        requestedQCode: undefined,
         baseMeta: baseMetaFromQ,
+        // ★ 追加：会話の最初かどうか（長期履歴ダイジェスト用フラグ）
+        isFirstTurn,
       });
 
       console.log('[IROS/Orchestrator] result.meta', (result as any)?.meta);
@@ -414,10 +448,21 @@ export async function POST(req: NextRequest) {
             })()
           : String(result ?? '');
 
-      const metaForSave =
+      // LLM が返した meta を一度受け取り…
+      const metaRaw =
         result && typeof result === 'object' && (result as any).meta
           ? (result as any).meta
           : null;
+
+      // 🔧 Qコードまわりだけいったん無効化してから保存・レスポンスに使う
+      const metaForSave =
+        metaRaw && typeof metaRaw === 'object'
+          ? {
+              ...metaRaw,
+              qCode: undefined,
+              q_code: undefined,
+            }
+          : metaRaw;
 
       if (assistantText && assistantText.trim().length > 0) {
         // UnifiedAnalysis を構築して保存（失敗してもチャット自体は続行）

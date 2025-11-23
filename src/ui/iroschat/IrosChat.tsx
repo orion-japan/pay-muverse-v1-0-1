@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import IrosChatProvider from './IrosChatContext';
+import { IrosChatProvider } from './IrosChatContext';
 import IrosChatShell from './IrosChatShell';
 
 export default function IrosChat({ open = true }: { open?: boolean | string }) {

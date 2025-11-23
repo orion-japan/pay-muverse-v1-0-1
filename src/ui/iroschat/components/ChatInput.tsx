@@ -1,3 +1,4 @@
+// src/ui/iroschat/components/ChatInput.tsx
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -13,7 +14,8 @@ type ChatInputProps = {
 };
 
 export default function ChatInput({ onMeta }: ChatInputProps) {
-  const { send, loading } = useIrosChat();
+  // ★ ここだけ変更：send → sendMessage
+  const { sendMessage, loading } = useIrosChat();
 
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -97,11 +99,10 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
 
         taRef.current?.focus();
 
-        // 既存コンテキストの send をそのまま利用（構造は維持）
-        // send は実際には /reply のレスポンスを返すように実装済み
-        const res: any = await (send as any)(value);
+        // 既存コンテキストの sendMessage をそのまま利用
+        const res: any = await (sendMessage as any)(value);
 
-        // ★ meta を Shell 側に引き渡し
+        // ★ meta を Shell 側に引き渡し（sendMessage は現状値を返さないので、ここは今後拡張用）
         if (onMeta && res && typeof res === 'object') {
           const meta = (res as any).meta ?? null;
           if (meta) {
@@ -127,7 +128,7 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
         setTimeout(() => window.dispatchEvent(new Event('sof:scrollUp')), 80);
       }
     },
-    [text, loading, sending, send, autoSize, onMeta],
+    [text, loading, sending, sendMessage, autoSize, onMeta],
   );
 
   // ▼ キー操作：Enter送信 / Shift+Enter改行 / IME中は無効
