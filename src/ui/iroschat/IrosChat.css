@@ -192,3 +192,10 @@
   line-height: 1.9; /* 文章内の行間をさらにゆったり */
   letter-spacing: 0.02em;
 }
+
+
+div.bubble.is-assistant {
+  max-width: 100% !important;
+  width: 100% !important;
+  flex: 1 1 auto !important;
+}
