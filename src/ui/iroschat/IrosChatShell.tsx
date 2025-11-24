@@ -243,7 +243,7 @@ function IrosChatInner({ open }: Props) {
 
       <div
         className="sof-top-spacer"
-        style={{ height: 'calc(var(--sof-header-h, 56px) + 12px)' }}
+        style={{ height: 'calc(var(--sof-header-h, 25px) + 3px)' }}
         aria-hidden
       />
 

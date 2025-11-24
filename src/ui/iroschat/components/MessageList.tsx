@@ -117,6 +117,161 @@ function toSafeString(v: unknown): string {
   return String(v);
 }
 
+/* ========= I層テンプレ → GPT風Markdown 変換 ========= */
+
+/**
+ * ir診断用テンプレ
+ *  観測対象：{{...}}
+ *  深度：{{R2}}
+ *  位相：{{Outer}}
+ *  🌀意識状態：{{...}}
+ *  🪔メッセージ：{{...}}
+ * を GPT っぽい Markdown に変換する。
+ * 対応しないテキストの場合は input をそのまま返す。
+ */
+function transformIrTemplateToMarkdown(input: string): string {
+  if (!input.trim()) return input;
+
+  const lines = input.split(/\r?\n/).map((l) => l.trim());
+  const data = {
+    target: '',
+    depth: '',
+    phase: '',
+    state: '',
+    message: '',
+  };
+
+  const extractValue = (raw: string): string => {
+    let t = raw.trim();
+    // {{ ... }} を外す
+    const m = t.match(/^\{\{(.*)\}\}$/);
+    if (m) t = m[1].trim();
+    return t;
+  };
+
+  for (const line of lines) {
+    if (!line) continue;
+
+    const getAfterMark = (s: string) => {
+      const idxJa = s.indexOf('：');
+      const idxEn = s.indexOf(':');
+      const pos =
+        idxJa !== -1 ? idxJa : idxEn !== -1 ? idxEn : s.length;
+      return s.slice(pos + 1);
+    };
+
+    if (line.startsWith('観測対象')) {
+      data.target = extractValue(getAfterMark(line));
+      continue;
+    }
+    if (line.startsWith('深度')) {
+      data.depth = extractValue(getAfterMark(line));
+      continue;
+    }
+    if (line.startsWith('位相')) {
+      data.phase = extractValue(getAfterMark(line));
+      continue;
+    }
+    if (line.startsWith('🌀') || line.startsWith('意識状態')) {
+      data.state = extractValue(getAfterMark(line.replace('🌀', '')));
+      continue;
+    }
+    if (line.startsWith('🪔') || line.startsWith('メッセージ')) {
+      data.message = extractValue(getAfterMark(line.replace('🪔', '')));
+      continue;
+    }
+  }
+
+  const hasAny = Object.values(data).some((v) => v && v.trim());
+  if (!hasAny) return input; // irテンプレでなければそのまま
+
+  const out: string[] = [];
+
+  if (data.target) {
+    out.push('**🧿 観測対象**', '', data.target.trim(), '');
+  }
+
+  if (data.depth || data.phase) {
+    const meta: string[] = [];
+    if (data.depth) meta.push(`深度：${data.depth.trim()}`);
+    if (data.phase) meta.push(`位相：${data.phase.trim()}`);
+    if (meta.length) {
+      out.push('**構造メモ**', '', meta.join(' / '), '');
+    }
+  }
+
+  out.push('---', '');
+
+  if (data.state) {
+    out.push('', '**🌀 意識状態**', '', data.state.trim(), '');
+  }
+
+  if (data.message) {
+    out.push('', '**🪔 メッセージ**', '', data.message.trim(), '');
+  }
+
+  return out.join('\n');
+}
+
+/* ========= ReactMarkdown 用カスタムコンポーネント ========= */
+
+const markdownComponents: any = {
+  // 段落：行間を少し広めに
+  p: ({ children }: { children: React.ReactNode }) => (
+    <p
+      style={{
+        margin: '0 0 0.6em',
+        whiteSpace: 'pre-wrap',
+      }}
+    >
+      {children}
+    </p>
+  ),
+  // 太字：GPT風タイトル感
+  strong: ({ children }: { children: React.ReactNode }) => (
+    <strong
+      style={{
+        fontWeight: 700,
+        color: '#1f2933',
+        display: 'inline-block',
+        margin: '0.3em 0 0.25em',
+      }}
+    >
+      {children}
+    </strong>
+  ),
+  // 箇条書き
+  ul: ({ children }: { children: React.ReactNode }) => (
+    <ul
+      style={{
+        paddingLeft: '1.2em',
+        margin: '0.25em 0 0.6em',
+      }}
+    >
+      {children}
+    </ul>
+  ),
+  li: ({ children }: { children: React.ReactNode }) => (
+    <li
+      style={{
+        margin: '0.1em 0',
+      }}
+    >
+      {children}
+    </li>
+  ),
+  // 区切り線
+  hr: () => (
+    <hr
+      style={{
+        border: 'none',
+        borderTop: '1px dashed rgba(148, 163, 184, 0.7)',
+        margin: '0.6em 0 0.8em',
+      }}
+    />
+  ),
+};
+
 export default function MessageList() {
   const { messages, loading, error } = useIrosChat() as {
     messages: IrosMessage[];
@@ -164,7 +319,9 @@ export default function MessageList() {
         const iconSrc = isUser ? resolveUserAvatar(m) : '/ir.png';
 
         // ここで必ず文字列化
-        const safeText = toSafeString(m.text);
+        const rawText = toSafeString(m.text);
+        // I層テンプレなら GPT風Markdown に変換
+        const safeText = transformIrTemplateToMarkdown(rawText);
 
         // meta 優先で Q を表示（無ければ従来の m.q）
         const qFromMeta = m.meta?.qCode;
@@ -233,7 +390,10 @@ export default function MessageList() {
 
               {/* 本文（行間・段落間を ReactMarkdown + CSS で制御） */}
               <div className="msgBody">
-                <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm, remarkBreaks]}
+                  components={markdownComponents}
+                >
                   {safeText}
                 </ReactMarkdown>
               </div>

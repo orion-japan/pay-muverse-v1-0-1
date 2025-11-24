@@ -14,9 +14,6 @@
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
-.sof-top-spacer {
-  height: calc(var(--sof-header-h, 56px) + 12px);
-}
 
 /* =========================
    入力欄の「台座」(下部固定)
@@ -46,7 +43,7 @@
    メッセージエリア
    ========================= */
 .sof-msgs {
-  padding-bottom: calc(var(--sof-compose-h, 96px) + 24px);
+  padding-bottom: calc(var(--sof-compose-h, 100px) + 24px);
 }
 
 /* =========================
@@ -134,7 +131,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-bottom: 24px;
+  margin-bottom: 10px;
 }
 
 /* ユーザーとAIの間を明確に */
@@ -235,7 +232,7 @@
   margin: 0 0 1.3rem 0 !important;  /* 段落間の余白 */
   line-height: 2.0 !important;      /* やわらかい行間 */
   letter-spacing: 0.02em !important;
-  font-size: 14px !important;       /* ご指定のサイズ */
+  font-size: 15px !important;       /* ご指定のサイズ */
   color: #222 !important;
   word-break: break-word !important;
 }
@@ -264,3 +261,67 @@
     backdrop-filter: blur(6px) !important;
     -webkit-backdrop-filter: blur(6px) !important;
   }
+
+
+  /* === 下の入力欄にメッセージが隠れないようにする === */
+.sof-msgs {
+  padding-bottom: calc(100px) !important;
+  /* ↑ 120〜200px の間で調整。まず180pxでOK */
+}
+
+
+/* -- メッセージ全体の器（背景と内容の間に余白をつける） -- */
+.sof-msgs {
+  padding-left: 4px !important;
+  padding-right: 4px !important;
+}
+
+
+
+/* ===== GPT風チャット整形（最適化版） ===== */
+
+.msgBody {
+  font-size: 15px;
+  line-height: 1.6;
+  color: #2b2b2b;
+}
+
+/* 段落：余白最小化 */
+.msgBody p {
+  margin: 0 0 8px !important;
+}
+
+/* 箇条書き：インデントを浅く */
+.msgBody ul {
+  padding-left: 18px !important;
+  margin: 4px 0 8px !important;
+}
+.msgBody li {
+  margin: 2px 0 !important;
+}
+
+/* 太字：GPTより弱めに（強すぎを防ぐ） */
+.msgBody strong {
+  font-weight: 600;
+  color: #1f1f1f;
+}
+
+/* 罫線（hr）: ペールなGPT風 */
+.msgBody hr {
+  border: none;
+  border-top: 1px solid rgba(0,0,0,0.08);
+  margin: 12px 0 !important;
+}
+
+/* コード風バックティックは薄いグレーに */
+.msgBody code {
+  background: rgba(0,0,0,0.05);
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+/* markdown の <> が暴れないように */
+.msgBody a {
+  color: #6b6bff;
+  text-decoration: none;
+}
