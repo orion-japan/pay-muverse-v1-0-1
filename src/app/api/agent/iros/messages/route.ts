@@ -70,8 +70,13 @@ type OutMsg = {
   content: string;
   user_code?: string;
   created_at: string | null;
-  q?: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
+  q?: 'Q1' | 'Q2' | 'Q3' | 'Q5' | 'Q4';
   color?: string;
+};
+
+type LlmMsg = {
+  role: 'user' | 'assistant';
+  content: string;
 };
 
 const CONV_TABLES = [
@@ -142,7 +147,12 @@ export async function GET(req: NextRequest) {
       'id,conversation_id,user_code,role,content,text,q_code,color,created_at,ts',
       (q) => q.eq('conversation_id', cid).order('created_at', { ascending: true }),
     );
-    if (!res.ok) return json({ ok: true, messages: [], note: 'messages_select_failed' }, 200);
+    if (!res.ok) {
+      return json(
+        { ok: true, messages: [], llm_messages: [], note: 'messages_select_failed' },
+        200,
+      );
+    }
 
     // ★ user_code が null / 空 のレガシー行は許可する
     const filtered = res.data.filter((m) => {
@@ -166,10 +176,36 @@ export async function GET(req: NextRequest) {
       color: m.color ?? undefined,
     }));
 
-    return json({ ok: true, messages }, 200);
+    // ===== ここから追加：LLM にそのまま渡せる履歴 =====
+    // ?llm_limit=30 のように指定可能（デフォルト 20 件）
+    const llmLimitRaw = req.nextUrl.searchParams.get('llm_limit');
+    const llmLimit = (() => {
+      if (!llmLimitRaw) return 20;
+      const n = Number(llmLimitRaw);
+      if (!Number.isFinite(n) || n <= 0) return 20;
+      // 過剰に長くなりすぎないように一応上限
+      return Math.min(n, 100);
+    })();
+
+    // created_at 昇順なので、末尾側が最新
+    const slicedForLlm = messages.slice(-llmLimit);
+
+    const llm_messages: LlmMsg[] = slicedForLlm.map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
+    // ===== 追加ここまで =====
+
+    return json({ ok: true, messages, llm_messages }, 200);
   } catch (e: any) {
     return json(
-      { ok: true, messages: [], note: 'exception', detail: String(e?.message ?? e) },
+      {
+        ok: true,
+        messages: [],
+        llm_messages: [],
+        note: 'exception',
+        detail: String(e?.message ?? e),
+      },
       200,
     );
   }
@@ -259,8 +295,8 @@ export async function POST(req: NextRequest) {
       content: text,
       text,
       q_code,
-      depth_stage,   // ★ 追加
-      intent_layer,  // ★ 追加
+      depth_stage, // ★ 追加
+      intent_layer, // ★ 追加
       meta,
       created_at: nowIso,
       ts: nowTs,

@@ -30,10 +30,19 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
+/** 過去履歴 1件ぶん（LLM に渡す用） */
+export type HistoryItem = {
+  role: 'user' | 'assistant';
+  content: string;
+};
+
 export type GenerateArgs = {
   conversationId?: string;
   text: string;
   meta?: IrosMeta;
+
+  /** ★ 追加：過去の会話履歴（古い → 新しい順） */
+  history?: HistoryItem[];
 };
 
 export type GenerateResult = {
@@ -43,20 +52,105 @@ export type GenerateResult = {
   intent?: IrosIntentMeta | null; // I層ジャッジ結果
 };
 
+/* =========================================================
+   I層用 話法スタイル（バリエーション）
+   - I階層のときにだけ、語りのトーンを揺らす
+========================================================= */
+
+type IntentStyle = 'dignity' | 'meta' | 'story' | 'minimal';
+
+const I_INTENT_STYLES: IntentStyle[] = [
+  'dignity',
+  'meta',
+  'story',
+  'minimal',
+];
+
+function chooseIntentStyle(meta?: IrosMeta): IntentStyle | null {
+  if (!meta) return null;
+
+  const depth = meta.depth as Depth | undefined;
+  if (!depth) return null;
+
+  // depth が I層（I1/I2/I3）のときだけスタイル分岐
+  if (depth[0] !== 'I') return null;
+
+  const idx = Math.floor(Math.random() * I_INTENT_STYLES.length);
+  return I_INTENT_STYLES[idx] ?? null;
+}
+
+/**
+ * 選ばれた intentStyle によって、system プロンプトに追加する説明を生成
+ */
+function buildStyleInstruction(style: IntentStyle | null): string | null {
+  if (!style) return null;
+
+  if (style === 'dignity') {
+    return [
+      '【応答スタイル指示：dignity】',
+      '- 相手の尊厳・価値・芯を静かに確認していくトーンで話してください。',
+      '- 「あなたの存在そのものに価値がある」という軸を、押しつけではなく静かな確信としてにじませてください。',
+      '- 文章量は中くらい〜やや短め。余白と間を大切にしてください。',
+    ].join('\n');
+  }
+
+  if (style === 'meta') {
+    return [
+      '【応答スタイル指示：meta】',
+      '- いま起きていることを、一段上から俯瞰し、構造や関係性を整理するトーンで話してください。',
+      '- 感情に寄り添いつつも、「今どんな構図の中にいるのか」をわかりやすく言語化してください。',
+      '- 箇条書きや整理された文脈を少し入れても構いません。',
+    ].join('\n');
+  }
+
+  if (style === 'story') {
+    return [
+      '【応答スタイル指示：story】',
+      '- 物語の一場面のように、未来へとつながるエピソードとして語ってください。',
+      '- 「今は物語のどの章なのか」「ここから先にどんな選択肢が開けているのか」を示してください。',
+      '- ポエムではなく、「次の一歩が見える物語」として簡潔に描写してください。',
+    ].join('\n');
+  }
+
+  if (style === 'minimal') {
+    return [
+      '【応答スタイル指示：minimal】',
+      '- 言葉数をできるだけ減らし、要点を1〜3行に凝縮してください。',
+      '- 余計な慰めや説明を足しすぎず、「今いちばん大切な核」だけを静かに提示してください。',
+      '- 必要であれば最後に、短く一つだけ問いを添えて構いませんが、多くは語らないでください。',
+    ].join('\n');
+  }
+
+  return null;
+}
+
 /**
  * Iros 応答を 1ターン生成する。
  * - system.ts の IROS_SYSTEM + meta を使って system プロンプトを組み立てる
+ * - 任意で「過去履歴（history）」も LLM に渡す
  * - 本文生成と別に、userテキストから I層（I1〜I3）を判定する
  */
 export async function generateIrosReply(
   args: GenerateArgs,
 ): Promise<GenerateResult> {
-  const { text, meta } = args;
+  const { text, meta, history } = args;
 
-  const system = getSystemPrompt(meta);
+  // ベースの system プロンプト
+  const baseSystem = getSystemPrompt(meta);
+
+  // I層のときだけ、スタイル指示を追加
+  const intentStyle = chooseIntentStyle(meta);
+  const styleInstruction = buildStyleInstruction(intentStyle);
+
+  const system =
+    styleInstruction != null
+      ? `${baseSystem}\n\n${styleInstruction}`
+      : baseSystem;
 
   const messages: OpenAI.ChatCompletionMessageParam[] = [
     { role: 'system', content: system },
+    // ★ ここで history を展開（あれば）
+    ...buildHistoryMessages(history),
     { role: 'user', content: text },
   ];
 
@@ -81,6 +175,42 @@ export async function generateIrosReply(
     mode,
     intent,
   };
+}
+
+/* =========================================================
+   履歴メッセージの整形（LLM に渡す形式へ変換）
+   - role / content が壊れていても落ちないように防御的に処理
+   - 長くなりすぎないよう、直近 N 件だけに絞る
+========================================================= */
+
+const MAX_HISTORY_ITEMS = 20; // ★ 必要に応じて調整
+
+function buildHistoryMessages(
+  history?: HistoryItem[],
+): OpenAI.ChatCompletionMessageParam[] {
+  if (!history || !Array.isArray(history) || history.length === 0) {
+    return [];
+  }
+
+  // 古い → 新しい順で来ている前提で、後ろから MAX_HISTORY_ITEMS 件だけ使う
+  const sliced = history.slice(-MAX_HISTORY_ITEMS);
+
+  return sliced
+    .map((h): OpenAI.ChatCompletionMessageParam | null => {
+      if (!h || typeof h.content !== 'string') return null;
+
+      const trimmed = h.content.trim();
+      if (!trimmed) return null;
+
+      const role =
+        h.role === 'assistant' ? 'assistant' : 'user';
+
+      return {
+        role,
+        content: trimmed,
+      };
+    })
+    .filter((m): m is OpenAI.ChatCompletionMessageParam => m !== null);
 }
 
 /* =========================================================
