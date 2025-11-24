@@ -174,8 +174,8 @@ export async function runIrosTurn(
       requestedQCode,
       autoDepthFromDeepScan: rawDepthFromScan ?? null,
       autoQFromDeepScan: rawQFromScan ?? null,
-      chosenDepth: depth,
-      resolved: { mode, depth, qCode },
+      chosenDepth: depth ?? null,
+      resolved: { mode, depth: depth ?? null, qCode: qCode ?? null },
       baseMeta,
       goalAfterContinuity: goal,
       priorityWeights: priority.weights,
@@ -204,11 +204,24 @@ export async function runIrosTurn(
     };
   }
 
+  /* =========================================================
+     ⑤ 最終 meta の統合（Q / Depth / intentSummary を整える）
+  ========================================================= */
+  meta = buildFinalMeta({
+    baseMeta,
+    workingMeta: meta,
+    goal,
+  });
+
   if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
     console.log('[IROS/ORCH v2] runIrosTurn done', {
       conversationId,
-      resolved: { mode, depth, qCode },
-      goalKind: goal.kind,
+      resolved: {
+        mode,
+        depth: meta.depth ?? null,
+        qCode: meta.qCode ?? null,
+      },
+      goalKind: goal?.kind ?? null,
       replyLength: result.content.length,
       isFirstTurn,
       intentLayer: meta.intentLayer ?? null,
@@ -220,6 +233,72 @@ export async function runIrosTurn(
     content: result.content,
     meta,
   };
+}
+
+/* ========= 最終 meta の統合ヘルパー ========= */
+
+function buildFinalMeta(args: {
+  baseMeta?: Partial<IrosMeta>;
+  workingMeta: IrosMeta;
+  goal: any; // goalEngine の型に依存させず、柔らかく参照
+}): IrosMeta {
+  const { baseMeta, workingMeta, goal } = args;
+
+  const previousDepth = baseMeta?.depth as Depth | undefined;
+  const previousQ = baseMeta?.qCode as QCode | undefined;
+
+  const currentDepth = workingMeta.depth as Depth | undefined;
+  const currentQ = workingMeta.qCode as QCode | undefined;
+
+  const goalDepth = goal?.targetDepth as Depth | undefined;
+  const goalQ = goal?.targetQ as QCode | undefined;
+
+  const finalDepth: Depth | null =
+    currentDepth ?? goalDepth ?? previousDepth ?? null;
+
+  const finalQ: QCode | null =
+    currentQ ?? goalQ ?? previousQ ?? null;
+
+  const originalUnified = workingMeta.unified as UnifiedLikeAnalysis | undefined;
+  const goalKind = (goal?.kind as string | undefined) ?? null;
+  const intentLayer = (workingMeta.intentLayer as string | undefined) ?? null;
+
+  // intentSummary の再構成
+  const intentSummary =
+    (() => {
+      // もともと unified に LLM由来の intentSummary が入っていれば尊重
+      if (originalUnified?.intentSummary) {
+        return originalUnified.intentSummary;
+      }
+
+      if (intentLayer === 'I3') {
+        return '存在理由や生きる意味に触れながら、自分の状態や感情を整理しようとしています。';
+      }
+      if (intentLayer === 'I2') {
+        return 'これからの方向性や選択を見つめ直しながら、自分の状態や感情を整理しようとしています。';
+      }
+      if (intentLayer === 'I1') {
+        return 'いまの自分の在り方や感情を、安全な場所で受け止め直そうとしています。';
+      }
+      if (goalKind === 'stabilize') {
+        return '心の揺れを少し落ち着けながら、自分の状態や感情を整理しようとしています。';
+      }
+      return '自分の状態や感情の揺れを整理しようとしています。';
+    })();
+
+  const nextMeta: IrosMeta = {
+    ...workingMeta,
+    qCode: finalQ ?? undefined,
+    depth: finalDepth ?? undefined,
+    unified: {
+      q: { current: finalQ ?? null },
+      depth: { stage: finalDepth ?? null },
+      phase: originalUnified?.phase ?? null,
+      intentSummary,
+    },
+  };
+
+  return nextMeta;
 }
 
 /* ========= 最小バリデーション ========= */
@@ -404,7 +483,6 @@ function detectIDepthFromText(text: string): Depth | undefined {
   return undefined;
 }
 
-
 /* ========= 旧ロジック互換：テキスト → Depth（簡易版）
    - ここでは I層以外もざっくり見ておく
    ========================================= */
@@ -467,17 +545,15 @@ async function analyzeUnifiedTurn(params: {
   // 2) ここではまだ自動検出なし（将来の deepScan 拡張で差し替え）
   const qCode = normalizeQCode(requestedQCode) ?? null;
 
-  // 位相と intentSummary はダミー（将来 LLM に差し替え）
+  // 位相は簡易に Inner 推定のみ
   const phase: 'Inner' | 'Outer' | null =
     /心|気持ち|自分|本音|内側/.test(text) ? 'Inner' : null;
 
-  const intentSummary =
-    '自分の状態や感情の揺れを整理しようとしています。';
-
+  // intentSummary はここでは固定せず、buildFinalMeta 側に委ねる
   return {
     q: { current: qCode },
     depth: { stage: depth },
     phase,
-    intentSummary,
+    intentSummary: null,
   };
 }
