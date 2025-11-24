@@ -199,3 +199,115 @@ div.bubble.is-assistant {
   width: 100% !important;
   flex: 1 1 auto !important;
 }
+
+/* Iros 本文の読みやすさ調整 */
+.bubble.is-assistant {
+  max-width: 100%;
+  width: 100%;
+  flex: 1 1 auto;
+  padding: 16px 18px;        /* 内側の余白を少し増やす */
+}
+
+
+.bubble.is-assistant p {
+  line-height: 1.8 !important;
+}
+.bubble.is-assistant p + p {
+  margin-top: 14px !important;
+}
+.bubble.is-assistant {
+  padding: 20px 28px !important;
+}
+
+/* ===========================================
+   GPT方式：AI側バブルを完全に消す
+   =========================================== */
+
+/* AIメッセージのバブル要素を消す */
+.message.is-assistant .bubble {
+  background: none !important;
+  border: none !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+  max-width: 100% !important;
+}
+
+/* AIのアバターとメッセージは縦並びに */
+.message.is-assistant {
+  align-items: flex-start !important;
+}
+
+/* ========== AI側テキストの読みやすさ調整 ========== */
+
+/* AI文章の行間（ChatGPTは1.75程度） */
+.message.is-assistant .msgBody p {
+  line-height: 1.75 !important;
+  margin: 0 0 1.1rem 0 !important;
+  letter-spacing: 0.01em;
+  font-size: 15.8px;
+  color: #444;
+}
+
+/* 最後の段落の余白を削除 */
+.message.is-assistant .msgBody p:last-child {
+  margin-bottom: 0 !important;
+}
+
+/* 文章の左右余白：読書UIのような自然さ */
+.message.is-assistant .msgBody {
+  padding: 4px 4px 4px 4px !important;
+}
+
+/* ========== 行幅を調整（広がりすぎ防止）=========== */
+/* iPhone の表示幅で最適化のため 92% にする */
+.message.is-assistant {
+  width: 100% !important;
+}
+
+
+/* ========= 行間を柔らかく（最重要） ========= */
+.message.is-assistant .msgBody {
+  line-height: 1.9 !important;     /* やわらかい行間 */
+  letter-spacing: 0.02em !important;
+  font-size: 15px !important;
+  color: #222 !important;
+
+  padding-top: 4px !important;     /* 上の余白ちょい追加 */
+  padding-bottom: 16px !important; /* 全体を読みやすく */
+}
+
+/* ========= 段落の呼吸（余白） ========= */
+.message.is-assistant .msgBody p {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.message.is-assistant .msgBody p + p {
+  margin-top: 14px !important;   /* 段落と段落の間に呼吸 */
+}
+
+/* ========= 左右の余白（フラットなGPT風） ========= */
+.message.is-assistant {
+  padding-left: 8px !important;
+  padding-right: 12px !important;
+}
+
+/* ========= 絵文字の見やすさ（ぶつからないよう） ========= */
+.message.is-assistant .msgBody p {
+  word-break: break-word !important;
+}
+
+.message.is-assistant .msgBody p emoji,
+.message.is-assistant .msgBody p span.emoji {
+  margin-left: 4px !important;
+  margin-right: 4px !important;
+}
+
+/* ========= バブル消去（背景・角丸・影を完全無効） ========= */
+.bubble.is-assistant {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  max-width: 100% !important;
+}

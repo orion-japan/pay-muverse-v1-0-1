@@ -443,3 +443,43 @@
     overflow: visible !important;
   }
 }
+
+
+/* ===========================================
+   GPT風レイアウト：AI側バブルをフラットに
+   =========================================== */
+
+/* AI側バブルの背景・枠・影を消す ＋ 幅を広げる */
+.msgBot .msgBubble {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  max-width: 100% !important;
+}
+
+/* AIメッセージ全体は左寄せのまま、フル幅に近づける */
+.msgBot {
+  justify-content: flex-start;
+}
+
+/* ===== AIテキストの「行間」と「段落の呼吸」 ===== */
+
+/* 本文の基本スタイル（行間ゆったり＋少し大きめ） */
+.msgBot .msgText {
+  margin: 0 4px 1.1rem 4px;      /* 左右に4px、段落ごとに少し余白 */
+  line-height: 1.9;              /* やわらかい行間 */
+  letter-spacing: 0.02em;
+  font-size: 15px;
+  color: #222;
+}
+
+/* 最後の段落だけ下の余白をなくす */
+.msgBot .msgText:last-child {
+  margin-bottom: 0;
+}
+
+/* タイムライン上でAIメッセージの間隔を少し広げる */
+.timeline {
+  gap: 16px;
+}
