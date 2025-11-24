@@ -10,6 +10,7 @@ import {
   type Depth,
   type QCode,
   type IrosMeta,
+  type IrosIntentMeta,
   IROS_MODES,
   DEPTH_VALUES,
   QCODE_VALUES,
@@ -122,8 +123,8 @@ export async function runIrosTurn(
     },
   };
 
-  // ====== 次ターンに残る meta ======
-  const meta: IrosMeta = {
+  // ====== 次ターンに残る meta（I層はこのあと上書きする） ======
+  let meta: IrosMeta = {
     ...(baseMeta ?? {}),
     mode,
     ...(depth ? { depth } : {}),
@@ -183,13 +184,25 @@ export async function runIrosTurn(
   }
 
   /* =========================================================
-     ④ LLM：生成
+     ④ LLM：生成（本文 + I層ジャッジ）
   ========================================================= */
   const result: GenerateResult = await generateIrosReply({
     conversationId,
     text,
     meta,
   });
+
+  // I層ジャッジの結果を meta に反映（次ターン以降の「横にあるI層感覚」として保持）
+  if (result.intent) {
+    const intent: IrosIntentMeta = result.intent;
+    meta = {
+      ...meta,
+      intent,
+      intentLayer: intent.layer,
+      intentConfidence: intent.confidence ?? null,
+      intentReason: intent.reason ?? null,
+    };
+  }
 
   if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
     console.log('[IROS/ORCH v2] runIrosTurn done', {
@@ -198,6 +211,8 @@ export async function runIrosTurn(
       goalKind: goal.kind,
       replyLength: result.content.length,
       isFirstTurn,
+      intentLayer: meta.intentLayer ?? null,
+      intentConfidence: meta.intentConfidence ?? null,
     });
   }
 
@@ -344,17 +359,51 @@ function detectIDepthFromText(text: string): Depth | undefined {
   const t = (text || '').trim();
   if (!t) return undefined;
 
-  const strong = /(何のために|使命|存在理由|生きている意味|本当に生きたい理由)/;
-  if (strong.test(t)) return 'I3';
+  // I3：存在・生まれ・意味系の強トリガー
+  const strongWords = [
+    '何のために',
+    '何の為に',
+    '使命',
+    '存在理由',
+    '生きている意味',
+    '生きる意味',
+    '生まれてきた意味',
+    '生きてきた意味',
+    'なぜ生まれた',
+    'なぜ生まれてきた',
+    'なぜ自分はここにいる',
+    '存在意義',
+  ];
 
-  const mid = /(どう生きたい|人生そのもの|本心から|本当の願い|魂のレベル)/;
-  if (mid.test(t)) return 'I2';
+  if (strongWords.some(w => t.includes(w))) return 'I3';
 
-  const soft = /(ありたい姿|在り方|自分らしく|本音で生きたい)/;
-  if (soft.test(t)) return 'I1';
+  // I2：人生 / 本心 / 願い / 魂
+  const midWords = [
+    'どう生きたい',
+    '人生そのもの',
+    '本心から',
+    '本当の願い',
+    '魂のレベル',
+    '魂レベル',
+  ];
+
+  if (midWords.some(w => t.includes(w))) return 'I2';
+
+  // I1：在り方 / 自分らしく / 本音
+  const softWords = [
+    'ありたい姿',
+    '在り方',
+    '自分らしく',
+    '本音で生きたい',
+    '自分のまま',
+    '本当の自分',
+  ];
+
+  if (softWords.some(w => t.includes(w))) return 'I1';
 
   return undefined;
 }
+
 
 /* ========= 旧ロジック互換：テキスト → Depth（簡易版）
    - ここでは I層以外もざっくり見ておく
@@ -407,10 +456,10 @@ async function analyzeUnifiedTurn(params: {
 
   const autoDepth = detectDepthFromText(text);
 
-  // Depth 優先順位：
-  // 1) ユーザー指定（requestedDepth）
-  // 2) テキストからの自動検出（autoDepth）
-  const rawDepth: Depth | undefined = requestedDepth ?? autoDepth ?? undefined;
+  // ★ Depth 優先順位（QよりDepthを優先）：
+  // 1) テキストからの自動検出（autoDepth）
+  // 2) ユーザー指定（requestedDepth：Qトレースなど）
+  const rawDepth: Depth | undefined = autoDepth ?? requestedDepth ?? undefined;
   const depth = normalizeDepth(rawDepth) ?? null;
 
   // Q 優先順位：

@@ -7,6 +7,7 @@ import { verifyFirebaseAndAuthorize } from '@/lib/authz';
 import { authorizeChat, captureChat, makeIrosRef } from '@/lib/credits/auto';
 import { createClient } from '@supabase/supabase-js';
 import { logQFromIros } from '@/lib/q/logFromIros'; // ★ 追加（※現時点では未使用。Qメモリ配線時に利用予定）
+import { updateUserQNowFromMeta } from '@/lib/iros/qSnapshot';
 
 // ★ 追加：Iros Orchestrator + Memory Adapter
 import { runIrosTurn } from '@/lib/iros/orchestrator';
@@ -432,6 +433,17 @@ export async function POST(req: NextRequest) {
       if (traceId) res.headers.set('x-trace-id', String(traceId));
       return res;
     }
+
+// ★ Qスナップショット更新：user_q_now を（I層含めて）追従させる
+try {
+  await updateUserQNowFromMeta(supabase, userCode, result?.meta);
+} catch (e) {
+  console.error('[IROS/Reply] failed to update user_q_now from meta', e);
+}
+
+
+
+
 
     // 8.5) Orchestratorの結果を /messages API に保存（assistant + meta）
     //      ＋ UnifiedAnalysis を共通テーブルに保存

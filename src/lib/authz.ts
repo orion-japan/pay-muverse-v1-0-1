@@ -7,23 +7,27 @@ import jwt from 'jsonwebtoken';
 /* ===== 環境変数（既存名に対応）===== */
 const _URL =
   process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ??
-  process.env.SUPABASE_URL?.trim();
+  process.env.SUPABASE_URL?.trim() ??
+  '';
 
 const _SR =
   process.env.SUPABASE_SERVICE_ROLE?.trim() ??
-  process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ??
+  '';
 
 const _JWT =
   process.env.SUPABASE_JWT_SECRET?.trim() ??
-  process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ??
+  '';
 
 if (!_URL) throw new Error('ENV SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL is missing');
 if (!_SR) throw new Error('ENV SUPABASE_SERVICE_ROLE(_KEY) is missing');
 if (!_JWT) throw new Error('ENV SUPABASE_JWT_SECRET or SUPABASE_SERVICE_ROLE_KEY is missing');
 
-export const SUPABASE_URL = _URL;
-export const SERVICE_ROLE = _SR;
-export const POSTGREST_JWT = _JWT;
+export const SUPABASE_URL: string = _URL;
+export const SERVICE_ROLE: string = _SR;
+// ★ jwt.Secret として型を確定（undefined を排除）
+export const POSTGREST_JWT: jwt.Secret = _JWT;
 
 /* ===== 型（ルートとの互換最優先）===== */
 export type AuthzResult = {
@@ -34,7 +38,7 @@ export type AuthzResult = {
   userCode: string | null;
   role: 'master' | 'admin' | 'other';
   error?: string;
-  uid: string | null; // 追加（利用側の互換のため）
+  uid: string | null;
   user?: { uid: string; user_code: string } | null;
 };
 
@@ -59,23 +63,20 @@ function parseCookies(header: string | null) {
   return out;
 }
 
-/* ===== PostgREST 用 JWT =====
-   ※ sub は UUID である必要はなく、RLSで参照する「user_code」を入れる */
+/* ===== PostgREST 用 JWT ===== */
 function signPostgresJwt(claims: { user_code: string; firebase_uid?: string }) {
   const payload = {
-    sub: claims.user_code, // ← user_code を主体IDに
+    sub: claims.user_code,
     role: 'authenticated',
-    user_code: claims.user_code, // RLSで参照
+    user_code: claims.user_code,
     firebase_uid: claims.firebase_uid ?? null,
-    exp: Math.floor(Date.now() / 1000) + 15 * 60, // 15分
+    exp: Math.floor(Date.now() / 1000) + 15 * 60,
   } as const;
-  return jwt.sign(payload, POSTGREST_JWT as jwt.Secret, { algorithm: 'HS256' });
+
+  return jwt.sign(payload, POSTGREST_JWT, { algorithm: 'HS256' });
 }
 
-/* ===== 本体：Bearer or Cookie どちらでもOK =====
-   - input: NextRequest | Request | string(Bearerトークン直渡し)
-   - 重要：claims 優先（role / user_code）。DB は claims が無い場合の補完のみ。
-*/
+/* ===== 本体：Firebase 検証 + RLS 用 JWT ===== */
 export async function verifyFirebaseAndAuthorize(
   input: NextRequest | Request | string,
 ): Promise<AuthzResult> {
@@ -88,7 +89,6 @@ export async function verifyFirebaseAndAuthorize(
   let bearerToken: string | null = null;
   let sessionCookie: string | null = null;
 
-  // 開発用：user_code をヘッダ/クエリから拾う（Firebaseなしフォールバック）
   const isDev = process.env.NODE_ENV !== 'production';
   let devUserCode: string | null = null;
   let urlUserCode: string | null = null;
@@ -104,11 +104,9 @@ export async function verifyFirebaseAndAuthorize(
       ? authz.slice(7).trim()
       : null;
 
-    // Cookie も見る（__session = Firebase Session Cookie）
     const cookies = parseCookies(input.headers.get('cookie'));
     sessionCookie = cookies.__session || null;
 
-    // ← 開発フォールバック用の user_code 取得（ヘッダとURLクエリ）
     devUserCode =
       input.headers.get('x-user-code') ||
       input.headers.get('x-mu-user') ||
@@ -143,7 +141,6 @@ export async function verifyFirebaseAndAuthorize(
   }
 
   if (!bearerToken && !sessionCookie) {
-    // ★ 開発用フォールバック（Firebaseなしで通す）
     const fallbackCode = (devUserCode || urlUserCode || '').trim();
     if (isDev && fallbackCode) {
       const pgJwt = signPostgresJwt({ user_code: fallbackCode });
@@ -161,7 +158,6 @@ export async function verifyFirebaseAndAuthorize(
       };
     }
 
-    // 本番 or user_code 不在 → 401
     warn(id, 'no credentials');
     return {
       ok: false,
@@ -177,7 +173,7 @@ export async function verifyFirebaseAndAuthorize(
   }
 
   try {
-    // 1) Firebase 検証（Bearer優先。無ければ SessionCookie）
+    // 1) Firebase 検証
     let firebaseUid: string;
     let claimRole: string | undefined;
     let claimUserCode: string | undefined;
@@ -203,7 +199,6 @@ export async function verifyFirebaseAndAuthorize(
     let finalUserCode: string | null = claimUserCode ?? null;
     let finalRole: 'master' | 'admin' | 'other' = 'other';
 
-    // role は claims を最優先採用（admin/master/other のいずれかに正規化）
     if (typeof claimRole === 'string') {
       const cr = claimRole.toLowerCase();
       if (cr === 'master') finalRole = 'master';
@@ -211,7 +206,6 @@ export async function verifyFirebaseAndAuthorize(
       else finalRole = 'other';
     }
 
-    // custom の場合は claims.user_code を優先採用（DB 不在でも通す）
     const isCustom = provider === 'custom';
 
     // 3) claims に user_code が無い場合のみ DB で補完
@@ -219,7 +213,10 @@ export async function verifyFirebaseAndAuthorize(
     let dbDerivedRole: 'master' | 'admin' | 'other' | null = null;
 
     if (!finalUserCode) {
-      const adminSb = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
+      const adminSb = createClient(SUPABASE_URL, SERVICE_ROLE, {
+        auth: { persistSession: false },
+      });
+
       console.time(`${NS} ${id} fetch user`);
       const { data: u, error } = await adminSb
         .from('users')
@@ -240,22 +237,16 @@ export async function verifyFirebaseAndAuthorize(
       }
     }
 
-    // claims or DB の順で user_code 採用
     finalUserCode = finalUserCode ?? dbUserCode;
 
-    // role は claims が無い場合のみ DB から補完
     if (finalRole === 'other' && dbDerivedRole) {
       finalRole = dbDerivedRole;
     }
 
-    // custom × claims.user_code がある場合は、DB 不在でも OK（最低限 user として扱う）
     if (!finalUserCode && isCustom && claimUserCode) {
       finalUserCode = claimUserCode;
-      // role が still other かつ claims も無ければ、最低限 'admin' にはせず 'other' のまま
-      // （set-balance 側の isAdminLike は x-user-code 一致でも許可できる設計を想定）
     }
 
-    // どちらにも user_code が無ければ 401
     if (!finalUserCode) {
       warn(id, 'user_code not found', { uid: firebaseUid });
       return {
@@ -271,8 +262,11 @@ export async function verifyFirebaseAndAuthorize(
       };
     }
 
-    // 4) PostgREST/JWT（RLSで使う）
-    const pgJwt = signPostgresJwt({ user_code: finalUserCode, firebase_uid: firebaseUid });
+    // 4) PostgREST / JWT
+    const pgJwt = signPostgresJwt({
+      user_code: finalUserCode,
+      firebase_uid: firebaseUid,
+    });
 
     const ms = Date.now() - t0;
     log(id, 'ok', { user: finalUserCode, role: finalRole, provider, ms });
@@ -312,28 +306,31 @@ export function normalizeAuthz(
 ): { user: AuthedUser | null; error: string | null } {
   const r: any = result;
 
-  // パターンA: { ok: true/false, ... }
   if (typeof r?.ok === 'boolean') {
     if (r.ok) {
       if (r.user && r.user.user_code) {
         return { user: r.user as AuthedUser, error: null };
       }
       if (r.userCode) {
-        return { user: { uid: 'unknown', user_code: String(r.userCode) }, error: null };
+        return {
+          user: { uid: 'unknown', user_code: String(r.userCode) },
+          error: null,
+        };
       }
       if (r.user_code) {
-        return { user: { uid: 'unknown', user_code: String(r.user_code) }, error: null };
+        return {
+          user: { uid: 'unknown', user_code: String(r.user_code) },
+          error: null,
+        };
       }
       return { user: null, error: 'Authorized but no user info' };
     }
     return { user: null, error: String(r.error ?? 'Unauthorized') };
   }
 
-  // パターンB: { user, error? }
   if (r?.user) return { user: r.user as AuthedUser, error: null };
   if (r?.error) return { user: null, error: String(r.error) };
 
-  // パターンC: user を直接返す
   if (r && typeof r === 'object' && ('user_code' in r || 'userCode' in r)) {
     const code = (r as any).user_code ?? (r as any).userCode;
     return { user: { uid: 'unknown', user_code: String(code) }, error: null };

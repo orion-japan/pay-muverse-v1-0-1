@@ -70,12 +70,17 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
 
   const startConversation = useCallback(async () => {
     const r = await irosClient.createConversation();
+
+    // ★ 新規会話なので、前のメッセージをクリアしておく
+    setMessages([]);
+
     // 新しい会話をアクティブに
     activeConversationIdRef.current = r.conversationId;
     setActiveConversationId(r.conversationId);
+
     await reloadConversations();
     return r.conversationId;
-  }, [reloadConversations]);
+  }, [reloadConversations, setMessages]);
 
   const renameConversation = useCallback(
     async (cid: string, title: string) => {

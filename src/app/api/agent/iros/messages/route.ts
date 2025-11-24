@@ -144,17 +144,14 @@ export async function GET(req: NextRequest) {
     );
     if (!res.ok) return json({ ok: true, messages: [], note: 'messages_select_failed' }, 200);
 
-    // ★ ここを修正：user_code が null / 空 のレガシー行は許可する
+    // ★ user_code が null / 空 のレガシー行は許可する
     const filtered = res.data.filter((m) => {
-      // user_code カラム自体が無い → そのまま許可
       if (!Object.prototype.hasOwnProperty.call(m, 'user_code')) return true;
 
       const uc = m.user_code == null ? '' : String(m.user_code);
 
-      // レガシー行（user_code 未設定）は許可
       if (!uc) return true;
 
-      // userCode が明示的に入っている行だけ絞り込み
       return uc === userCode;
     });
 
@@ -201,10 +198,24 @@ export async function POST(req: NextRequest) {
     ).trim();
     const text: string = String(body?.text ?? body?.content ?? '').trim();
     const meta = body?.meta ?? null;
+
+    // --- ここから: meta から各種コードを抽出 ---
     const q_code: string | null =
       meta && typeof meta === 'object' && typeof meta.qCode === 'string'
         ? meta.qCode
         : null;
+
+    const depth_stage: string | null =
+      meta && typeof meta === 'object' && typeof meta.depth === 'string'
+        ? meta.depth
+        : null;
+
+    const intent_layer: string | null =
+      meta && typeof meta === 'object' && typeof meta.intentLayer === 'string'
+        ? meta.intentLayer
+        : null;
+    // --- ここまで追加 ---
+
     const role: 'user' | 'assistant' =
       String(body?.role ?? '').toLowerCase() === 'assistant' ? 'assistant' : 'user';
 
@@ -248,6 +259,8 @@ export async function POST(req: NextRequest) {
       content: text,
       text,
       q_code,
+      depth_stage,   // ★ 追加
+      intent_layer,  // ★ 追加
       meta,
       created_at: nowIso,
       ts: nowTs,

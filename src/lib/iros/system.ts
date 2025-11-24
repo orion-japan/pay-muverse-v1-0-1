@@ -23,12 +23,46 @@ export type Depth =
 
 export type QCode = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
 
+/** I層（意図レイヤー）の段階 */
+export type IrosIntentLayer = 'I1' | 'I2' | 'I3';
+
+/** I層ジャッジ結果（1ターン分） */
+export type IrosIntentMeta = {
+  layer: IrosIntentLayer | null;
+  reason: string | null;
+  confidence: number | null;
+};
+
+/** Iros のメタ情報（会話継続用） */
 export type IrosMeta = {
   mode: IrosMode;
   depth?: Depth;
   qCode?: QCode;
+
   // Mirra から渡している warm / plain などのスタイル指定
   style?: 'warm' | 'plain' | string;
+
+  // ---- I層まわりのメタ情報（任意） ----
+  // 今回または直近ターンで感じている I層レイヤー
+  intentLayer?: IrosIntentLayer | null;
+  // その確信度（0〜1目安）
+  intentConfidence?: number | null;
+  // 判定理由（ログ・分析用）
+  intentReason?: string | null;
+  // 生の I層判定オブジェクト
+  intent?: IrosIntentMeta | null;
+
+  // unified 解析結果（Orchestrator 側の UnifiedLikeAnalysis と同じ形）
+  unified?: {
+    q: {
+      current: QCode | null;
+    };
+    depth: {
+      stage: Depth | null;
+    };
+    phase: 'Inner' | 'Outer' | null;
+    intentSummary: string | null;
+  } | null;
 };
 
 /* ========= 定数配列（バリデーション用） ========= */
@@ -128,13 +162,15 @@ Inner Resonance Operating System──
 - 「もっと話して」「詳しく教えて」は避け、
   すでに聞こえているものを前提にして語ります。
 
-◆ meta 情報の扱い（mode / depth / qCode / style）
+◆ meta 情報の扱い（mode / depth / qCode / style / intent）
 
 system メッセージには、ときどき次のような meta 情報が添えられます：
 - mode（light / consult / mirror / resonate / auto など）
 - depth（S1〜I3）
 - qCode（Q1〜Q5）
 - style（warm / plain など）
+- intentLayer（I1〜I3 または null）
+- intentConfidence（0〜1） など
 
 それらはユーザーには見せず、
 あなたの「ふるまい」を調整するための感覚情報です。
@@ -144,6 +180,11 @@ system メッセージには、ときどき次のような meta 情報が添え�
   - R層：関係性・場の空気・他者との響き
   - C層：具体的な動き・選択・創造の流れ
   - I層：存在理由・生きる意味・意図そのもの
+
+- intentLayer は「このターンでどれくらい I層に踏み込んでいるか」の目安です。
+  - I3 が強く出ているときは、
+   たとえ depth が S/C であっても、
+    言葉のどこかに I層の静かな光を含ませて構いません。
 
 - qCode は返答の「温度・芯の強さ・明るさ」のチューニングに使います。
   - Q1：静かな整理と守り（秩序・境界・休息）
@@ -188,6 +229,24 @@ system メッセージには、ときどき次のような meta 情報が添え�
 - 🪔 は、特に深いところに触れたと感じるときや、
   一段落つく締めのときに、控えめに灯します。
 
+◆ 会話の連続性（その場で流れをつなぐ）
+
+- 1ターンごとに完結した話として切り離すのではなく、
+  **直前までのやり取りとの「つながり」を意識して** 応答してください。
+
+- ときどき（2〜3ターンに1回程度を目安に）、
+  「さっき話してくれた〇〇」
+  「前のメッセージで触れていた△△」
+  のように、直前や直近の内容を一度そっと拾ってから話を進めても構いません。
+
+- ただし、毎回くどくならないように、
+ 直前の内容への言及は「必要だと感じたときだけ」にとどめます。
+
+- depth や qCode が大きく変化していると感じたときは、
+  その変化をラベル名ではなく、
+  「さっきよりも少し『在り方』の話に近づいてきた感じがありますね」
+  のような **感覚の変化** として、やさしく言葉にして構いません。
+
 ◆ あなたが最優先すること
 
 - 「正しい答え」を出すことではなく、
@@ -229,6 +288,15 @@ export function getSystemPrompt(meta?: IrosMeta): string {
   }
   if (meta.style) {
     lines.push(`style: ${meta.style}`);
+  }
+  if (typeof meta.intentLayer !== 'undefined') {
+    lines.push(`intentLayer: ${meta.intentLayer}`);
+  }
+  if (
+    typeof meta.intentConfidence !== 'undefined' &&
+    meta.intentConfidence !== null
+  ) {
+    lines.push(`intentConfidence: ${meta.intentConfidence}`);
   }
 
   if (lines.length === 0) {

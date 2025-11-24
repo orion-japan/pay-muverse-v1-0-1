@@ -1,7 +1,7 @@
 // /src/ui/iroschat/lib/irosClient.ts
 'use client';
 
-import { getAuth, type User } from 'firebase/auth';
+import { getAuth, onAuthStateChanged, type User } from 'firebase/auth';
 
 const __DEV__ = process.env.NODE_ENV !== 'production';
 
@@ -31,36 +31,77 @@ export type UserInfo = {
   credits: number;
 };
 
-/* ========= Firebase currentUser を待つ ========= */
+/* ========= Firebase ID トークン取得（ユーザー準備待ち） ========= */
 
-function waitForCurrentUser(timeoutMs = 5000): Promise<User | null> {
-  return new Promise((resolve) => {
-    const auth = getAuth();
-    // すでに取れている場合
-    if (auth.currentUser) {
-      resolve(auth.currentUser);
-      return;
-    }
+async function getIdTokenSafe(timeoutMs = 5000): Promise<string> {
+  const auth = getAuth();
 
-    let settled = false;
+  // すでにログイン済みならそれを使う
+  if (auth.currentUser) {
+    return auth.currentUser.getIdToken();
+  }
 
-    const unsub = auth.onAuthStateChanged((u) => {
-      if (settled) return;
-      settled = true;
-      try {
-        unsub();
-      } catch {}
-      resolve(u);
-    });
+  // まだなら onAuthStateChanged で 1 回だけ待つ
+  return new Promise<string>((resolve, reject) => {
+    let done = false;
+
+    const unsubscribe = onAuthStateChanged(
+      auth,
+      async (user: User | null) => {
+        if (done) return;
+        done = true;
+        unsubscribe();
+
+        if (!user) {
+          const err = new Error(
+            '401 not_authenticated: firebase currentUser is null (onAuthStateChanged)',
+          );
+          if (__DEV__) {
+            console.warn('[IROS/API] getIdTokenSafe no user', err.message);
+          }
+          reject(err);
+          return;
+        }
+
+        try {
+          const token = await user.getIdToken();
+          resolve(token);
+        } catch (e) {
+          reject(e);
+        }
+      },
+      (error) => {
+        if (done) return;
+        done = true;
+        unsubscribe();
+        reject(error);
+      },
+    );
 
     // タイムアウト保険
-    setTimeout(() => {
-      if (settled) return;
-      settled = true;
+    setTimeout(async () => {
+      if (done) return;
+      done = true;
+      unsubscribe();
+
+      const user = auth.currentUser;
+      if (!user) {
+        const err = new Error(
+          '401 not_authenticated: firebase currentUser is null (timeout)',
+        );
+        if (__DEV__) {
+          console.warn('[IROS/API] getIdTokenSafe timeout', err.message);
+        }
+        reject(err);
+        return;
+      }
+
       try {
-        unsub();
-      } catch {}
-      resolve(getAuth().currentUser ?? null);
+        const token = await user.getIdToken();
+        resolve(token);
+      } catch (e) {
+        reject(e);
+      }
     }, timeoutMs);
   });
 }
@@ -68,28 +109,21 @@ function waitForCurrentUser(timeoutMs = 5000): Promise<User | null> {
 /* ========= authFetch ========= */
 /**
  * 認証付き fetch
- * - currentUser が準備できるまで待機
- * - user が取れない場合はサーバに投げずにエラーを投げる
- * - ここで origin を付け足したりしない（呼び出し側は `/api/...` の相対パスでOK）
+ * - Firebase ID トークンが取れるまで待機
+ * - 401 系は Error として投げるが、TypeError("Failed to fetch") は基本的にネットワークエラーのみ
+ * - 呼び出し側は `/api/...` の相対パス指定でOK
  */
 async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   const headers = new Headers(init.headers || {});
-  const cred: RequestCredentials = init.credentials ?? 'include';
+  const credentials = init.credentials ?? 'include';
 
-  // ---- Firebase currentUser を待つ ----
-  const user = await waitForCurrentUser();
-
-  if (!user) {
-    const err = new Error('401 not_authenticated: firebase currentUser is null');
-    if (__DEV__) console.warn('[IROS/API] authFetch no currentUser', err.message);
+  // ---- Firebase ID トークン取得（ユーザー準備待ち）----
+  const token = await getIdTokenSafe().catch((err) => {
+    if (__DEV__) console.warn('[IROS/API] authFetch getIdTokenSafe error', err);
     throw err;
-  }
+  });
 
-  // ---- ID トークン取得（まずはキャッシュ）----
-  const token = await user.getIdToken(false).catch(() => null);
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
+  headers.set('Authorization', `Bearer ${token}`);
 
   // JSON 基本
   if (!headers.has('Content-Type') && init.method && init.method !== 'GET') {
@@ -99,7 +133,7 @@ async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   const res = await fetch(input, {
     ...init,
     headers,
-    credentials: cred,
+    credentials,
     cache: 'no-store',
   });
 
