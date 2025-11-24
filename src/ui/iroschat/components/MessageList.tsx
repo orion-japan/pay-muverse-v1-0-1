@@ -55,6 +55,47 @@ const FALLBACK_DATA =
     </svg>`,
   );
 
+/* ========= muverse トーン用スタイル ========= */
+
+// タイムライン全体：ごく薄い muverse グラデ背景
+const chatAreaStyle: React.CSSProperties = {
+  padding: '12px 0 18px',
+  background:
+    'linear-gradient(180deg, #f5f7ff 0%, #eef5ff 35%, #faf6ff 70%, #ffffff 100%)',
+};
+
+// ユーザー吹き出し（薄い muverse グラデ）
+const userBubbleStyle: React.CSSProperties = {
+  background: 'linear-gradient(135deg, #f8f3ff 0%, #e8ddff 40%, #f7f0ff 100%)',
+  border: '1px solid rgba(147, 116, 255, 0.35)',
+  boxShadow: '0 10px 26px rgba(113, 88, 255, 0.22)',
+  color: '#2b2140',
+  borderRadius: 16,
+  padding: '10px 13px',
+};
+
+// アシスタントは GPT 風フラット：枠・影は CSS 側で消してあるのでここでは幅だけ
+const assistantBubbleShellStyle: React.CSSProperties = {
+  maxWidth: '100%',
+  width: '100%',
+  flex: '1 1 auto',
+};
+
+// Qバッジ（muverse 色味）
+const qBadgeStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  padding: '2px 8px',
+  borderRadius: 999,
+  fontSize: 11,
+  marginBottom: 6,
+  background:
+    'linear-gradient(135deg, rgba(129, 140, 248, 0.06), rgba(192, 132, 252, 0.16))',
+  border: '1px solid rgba(129, 140, 248, 0.45)',
+  color: '#4338ca',
+};
+
 /** [object Object]対策：最終的に必ず文字列へ正規化 */
 function toSafeString(v: unknown): string {
   if (typeof v === 'string') return v;
@@ -109,7 +150,11 @@ export default function MessageList() {
   };
 
   return (
-    <div ref={listRef} className={`${styles.timeline} sof-msgs`}>
+    <div
+      ref={listRef}
+      className={`${styles.timeline} sof-msgs`}
+      style={chatAreaStyle}
+    >
       {!messages.length && !loading && !error && (
         <div className={styles.emptyHint}>ここに会話が表示されます</div>
       )}
@@ -126,7 +171,10 @@ export default function MessageList() {
         const qToShow = qFromMeta ?? m.q;
 
         return (
-          <div key={m.id} className={`message ${isUser ? 'is-user' : 'is-assistant'}`}>
+          <div
+            key={m.id}
+            className={`message ${isUser ? 'is-user' : 'is-assistant'}`}
+          >
             {/* アバター */}
             <div
               className="avatar"
@@ -163,18 +211,19 @@ export default function MessageList() {
             <div
               className={`bubble ${isUser ? 'is-user' : 'is-assistant'}`}
               style={{
+                ...(isUser ? userBubbleStyle : assistantBubbleShellStyle),
                 alignSelf: isUser ? 'flex-end' : 'flex-start',
-                maxWidth: 'min(var(--sofia-bubble-max, 780px), 86%)',
+                maxWidth: 'min(760px, 88%)',
               }}
             >
               {qToShow && (
-                <div className="q-badge">
+                <div className="q-badge" style={qBadgeStyle}>
                   <span
                     style={{
                       width: 10,
                       height: 10,
                       borderRadius: 999,
-                      background: m.color || '#94a3b8',
+                      background: m.color || 'rgba(129,140,248,0.85)',
                       display: 'inline-block',
                     }}
                   />
@@ -182,7 +231,7 @@ export default function MessageList() {
                 </div>
               )}
 
-              {/* 本文（行間・段落間を制御） */}
+              {/* 本文（行間・段落間を ReactMarkdown + CSS で制御） */}
               <div className="msgBody">
                 <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
                   {safeText}

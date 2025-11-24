@@ -102,7 +102,7 @@
 */
 
 /* IrosSidebarMobile.module.css の :root から必要な変数も集約してください */
-:root{
+:root {
   --drawer-z: 1200;
   --drawer-width: min(90vw, 360px);
   /* 例：
@@ -138,20 +138,24 @@
 }
 
 /* ユーザーとAIの間を明確に */
-.message.is-user { align-items: flex-end; }
-.message.is-assistant { align-items: flex-start; }
+.message.is-user {
+  align-items: flex-end;
+}
+.message.is-assistant {
+  align-items: flex-start;
+}
 
-/* 吹き出し */
+/* 吹き出し（デフォルト。ユーザー側に主に適用） */
 .bubble {
   border-radius: 16px;
   padding: 12px 14px;
   background: linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
   border: 1px solid #e6eaf2;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
   color: #0f172a;
 }
 
-/* 行間・段落間の設定 */
+/* 行間・段落間の設定（共通の初期値） */
 .msgBody p {
   margin: 0;
   line-height: 1.9;
@@ -179,8 +183,12 @@
 
 /* モバイルで広めに */
 @media (max-width: 600px) {
-  .msgBody p { line-height: 2.0; }
-  .message { margin-bottom: 28px; }
+  .msgBody p {
+    line-height: 2.0;
+  }
+  .message {
+    margin-bottom: 28px;
+  }
 }
 
 /* index.module.css または IrosChat.css に追加 */
@@ -193,121 +201,66 @@
   letter-spacing: 0.02em;
 }
 
-
-div.bubble.is-assistant {
-  max-width: 100% !important;
-  width: 100% !important;
-  flex: 1 1 auto !important;
-}
-
-/* Iros 本文の読みやすさ調整 */
-.bubble.is-assistant {
-  max-width: 100%;
-  width: 100%;
-  flex: 1 1 auto;
-  padding: 16px 18px;        /* 内側の余白を少し増やす */
-}
-
-
-.bubble.is-assistant p {
-  line-height: 1.8 !important;
-}
-.bubble.is-assistant p + p {
-  margin-top: 14px !important;
-}
-.bubble.is-assistant {
-  padding: 20px 28px !important;
-}
-
 /* ===========================================
-   GPT方式：AI側バブルを完全に消す
-   =========================================== */
+   Iros assistant text: GPT風・読みやすさ最終版
+   - バブル無し
+   - 行間ゆったり
+   - フォントサイズ 14px
+=========================================== */
 
-/* AIメッセージのバブル要素を消す */
-.message.is-assistant .bubble {
+/* AIメッセージのバブル要素を消し、フラットにする */
+.sof-msgs .message.is-assistant .bubble {
   background: none !important;
   border: none !important;
-  padding: 0 !important;
   box-shadow: none !important;
+  padding: 0 !important;
   max-width: 100% !important;
 }
 
-/* AIのアバターとメッセージは縦並びに */
-.message.is-assistant {
-  align-items: flex-start !important;
-}
-
-/* ========== AI側テキストの読みやすさ調整 ========== */
-
-/* AI文章の行間（ChatGPTは1.75程度） */
-.message.is-assistant .msgBody p {
-  line-height: 1.75 !important;
-  margin: 0 0 1.1rem 0 !important;
-  letter-spacing: 0.01em;
-  font-size: 15.8px;
-  color: #444;
-}
-
-/* 最後の段落の余白を削除 */
-.message.is-assistant .msgBody p:last-child {
-  margin-bottom: 0 !important;
-}
-
-/* 文章の左右余白：読書UIのような自然さ */
-.message.is-assistant .msgBody {
-  padding: 4px 4px 4px 4px !important;
-}
-
-/* ========== 行幅を調整（広がりすぎ防止）=========== */
-/* iPhone の表示幅で最適化のため 92% にする */
-.message.is-assistant {
+/* 行の左右にすこしだけ余白を付ける */
+.sof-msgs .message.is-assistant {
   width: 100% !important;
+  padding: 0 10px 0 6px !important;
 }
 
+/* 本文ブロック全体：上下の余白と最大幅 */
+.sof-msgs .message.is-assistant .msgBody {
+  max-width: 720px;
+  padding-top: 4px !important;
+  padding-bottom: 18px !important;
+}
 
-/* ========= 行間を柔らかく（最重要） ========= */
-.message.is-assistant .msgBody {
-  line-height: 1.9 !important;     /* やわらかい行間 */
+/* 行間と段落の「呼吸」：ここが一番大事 */
+.sof-msgs .message.is-assistant .msgBody p {
+  margin: 0 0 1.3rem 0 !important;  /* 段落間の余白 */
+  line-height: 2.0 !important;      /* やわらかい行間 */
   letter-spacing: 0.02em !important;
-  font-size: 15px !important;
+  font-size: 14px !important;       /* ご指定のサイズ */
   color: #222 !important;
-
-  padding-top: 4px !important;     /* 上の余白ちょい追加 */
-  padding-bottom: 16px !important; /* 全体を読みやすく */
-}
-
-/* ========= 段落の呼吸（余白） ========= */
-.message.is-assistant .msgBody p {
-  margin: 0 !important;
-  padding: 0 !important;
-}
-
-.message.is-assistant .msgBody p + p {
-  margin-top: 14px !important;   /* 段落と段落の間に呼吸 */
-}
-
-/* ========= 左右の余白（フラットなGPT風） ========= */
-.message.is-assistant {
-  padding-left: 8px !important;
-  padding-right: 12px !important;
-}
-
-/* ========= 絵文字の見やすさ（ぶつからないよう） ========= */
-.message.is-assistant .msgBody p {
   word-break: break-word !important;
 }
 
-.message.is-assistant .msgBody p emoji,
-.message.is-assistant .msgBody p span.emoji {
-  margin-left: 4px !important;
-  margin-right: 4px !important;
+/* 最後の段落だけは下の余白を詰める */
+.sof-msgs .message.is-assistant .msgBody p:last-child {
+  margin-bottom: 0 !important;
 }
+/* ============================
+   ユーザー吹き出し ultra-light MUVERSE
+   ============================ */
 
-/* ========= バブル消去（背景・角丸・影を完全無効） ========= */
-.bubble.is-assistant {
-  background: none !important;
-  border: none !important;
-  box-shadow: none !important;
-  padding: 0 !important;
-  max-width: 100% !important;
-}
+   .message.is-user .bubble {
+    background: linear-gradient(
+      180deg,
+      rgba(230, 230, 255, 0.40),  /* うっすら淡紫 */
+      rgba(245, 245, 255, 0.25)   /* さらに透明寄り */
+    ) !important;
+
+    border: 1px solid rgba(170, 150, 255, 0.28) !important;
+    box-shadow: 0 4px 16px rgba(120, 100, 255, 0.10) !important;
+
+    color: #333 !important;
+    padding: 14px 16px !important;
+
+    backdrop-filter: blur(6px) !important;
+    -webkit-backdrop-filter: blur(6px) !important;
+  }
