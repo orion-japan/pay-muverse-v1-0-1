@@ -12,6 +12,16 @@ export default function AdminHome() {
     }, // ★ 追加
     {
       href: '/ops/sofia-logs',
+      title: 'sofia-1 Logs',
+      desc: 'irosAI 会話記録（ユーザーごと・会話IDごとに閲覧）',
+    },
+    {
+      href: '/ops/sofia-logs-normalized',
+      title: 'sofia-2 Logs',
+      desc: 'irosAI 会話記録（ユーザーごと・会話IDごとに閲覧）',
+    },
+    {
+      href: '/ops/iros-logs',
       title: 'iros Logs',
       desc: 'irosAI 会話記録（ユーザーごと・会話IDごとに閲覧）',
     },

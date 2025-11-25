@@ -26,7 +26,7 @@ export type QCode = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
  * user_q_now から切り出した「現在の状態」のスナップショット。
  */
 export type QSnapshot = {
-  currentQ: QCode | null;   // いま優勢な Q（なければ null）
+  currentQ: QCode | null;    // いま優勢な Q（なければ null）
   depthStage: string | null; // S1〜I3 などの深度ラベル（未設定可）
   updatedAt: string | null;  // 最終更新時刻（ISO文字列／未設定可）
 };
@@ -50,10 +50,42 @@ export type QTrace = {
  * Iros が扱う最小限のメモリ単位。
  * - userCode : アプリ側で使っている user_code
  * - qTrace   : Qコードの状態と履歴
+ *
+ * ＋ Sofia 型「構造OS」のコア記憶（その人の芯）
  */
 export type IrosMemory = {
   userCode: string;
   qTrace: QTrace;
+
+  /**
+   * その人の最も中心にある「意図軸」（例：「安心」「創造」「貢献」「自由」など）。
+   * すべての揺れの根にある “根源的な願い”。
+   */
+  coreIntent?: string | null;
+
+  /**
+   * 長期にわたって繰り返し現れる人生テーマ。
+   * 例）「境界線の揺れ」「責任と自由の葛藤」「自己価値の模索」
+   */
+  longTermTheme?: string | null;
+
+  /**
+   * 人との関係において現れやすい “構図の癖”。
+   * 例）「調整役になりがち」「受け取りすぎる」「支配−服従のループ」
+   */
+  relationshipPattern?: string | null;
+
+  /**
+   * Qコード／深度の傾向。（どこが落ちやすい／どこで開きやすいか）
+   * 例）「Q3が優勢」「I2→I3 に行きやすい」「C層で停滞しやすい」
+   */
+  energyPattern?: string | null;
+
+  /**
+   * その人らしい言語トーンや、反応の仕方の特徴。
+   * 例）「静かに深く考える」「未来志向」「内省が速い」など。
+   */
+  identityTone?: string | null;
 };
 
 // ====================== 共鳴メトリクス ======================
@@ -83,8 +115,8 @@ export type EvidenceCard = {
 };
 
 export type RetrievalBundle = {
-  miniSummary: string;    // 直近要約（ST-Context）
-  objectiveLine: string;  // 目的一句
+  miniSummary: string;       // 直近要約（ST-Context）
+  objectiveLine: string;     // 目的一句
   evidences: EvidenceCard[]; // 根拠カード（最大3〜5）
   metrics: ResonanceMetrics; // 共鳴指標サマリ
 };

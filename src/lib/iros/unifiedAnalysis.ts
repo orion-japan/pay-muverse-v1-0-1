@@ -19,6 +19,12 @@ export type UnifiedLikeAnalysis = {
   };
   phase: 'Inner' | 'Outer' | null;
   intentSummary: string | null;
+
+  // ★ Self Acceptance（0.0〜1.0 想定）
+  //   いまはダミー（常に null）だが、将来 LLM 解析結果をここに載せる
+  selfAcceptance?: number | null;
+  // 将来 unified 側で snake_case で返した場合の互換用
+  self_acceptance?: number | null;
 };
 
 /* ========= Depth/Q 正規化 ========= */
@@ -130,11 +136,14 @@ export async function analyzeUnifiedTurn(params: {
   const phase: 'Inner' | 'Outer' | null =
     /心|気持ち|自分|本音|内側/.test(text) ? 'Inner' : null;
 
-  // intentSummary はここでは固定せず、buildFinalMeta 側に委ねる
+  // intentSummary / selfAcceptance はここでは固定せず、
+  // buildFinalMeta / 将来の Unified LLM に委ねる
   return {
     q: { current: qCode },
     depth: { stage: depth },
     phase,
     intentSummary: null,
+    selfAcceptance: null,
+    self_acceptance: null,
   };
 }

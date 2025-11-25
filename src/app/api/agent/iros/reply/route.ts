@@ -6,20 +6,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyFirebaseAndAuthorize } from '@/lib/authz';
 import { authorizeChat, captureChat, makeIrosRef } from '@/lib/credits/auto';
 import { createClient } from '@supabase/supabase-js';
-import { logQFromIros } from '@/lib/q/logFromIros'; // ★ 追加（※現時点では未使用。Qメモリ配線時に利用予定）
 import { updateUserQNowFromMeta } from '@/lib/iros/qSnapshot';
-
-// ★ 追加：Iros Orchestrator + Memory Adapter
-import { runIrosTurn } from '@/lib/iros/orchestrator';
 import { loadQTraceForUser, applyQTraceToMeta } from '@/lib/iros/memory.adapter';
 
-// ★ 追加：Rememberモード（期間バンドルRAG）
-import {
-  resolveRememberBundle,
-  type RememberScopeKind,
-} from '@/lib/iros/remember/resolveRememberBundle';
+// ★ Qコード検出エンジン（新規）
+import { detectQFromText } from '@/lib/iros/q/detectQ';
 
-// ★ 追加：モード判定（外出し）
+// ★ Self Acceptance メーター
+import { estimateSelfAcceptance } from '@/lib/iros/sa/meter';
+
+// ★ Iros Orchestrator
+import { runIrosTurn } from '@/lib/iros/orchestrator';
+import type { QCode } from '@/lib/iros/system';
+
+// ★ Rememberモード（期間バンドルRAG）のスコープ推定だけ利用
+import type { RememberScopeKind } from '@/lib/iros/remember/resolveRememberBundle';
+
+// ★ モード判定（外出し）
 import { resolveModeHintFromText, resolveRememberScope } from './_mode';
 
 /** 共通CORS（/api/me と同等ポリシー + x-credit-cost 追加） */
@@ -39,6 +42,7 @@ const LOW_BALANCE_THRESHOLD = Number(
 );
 
 // ★ I層100%モードのフラグ（ENVベース）
+//   ※ 深度固定などのロジックは orchestrator 側に委譲し、ここではログ用途のみ
 const FORCE_I_LAYER = process.env.IROS_FORCE_I_LAYER === '1';
 
 // service-role で現在残高を読むための Supabase クライアント
@@ -61,11 +65,20 @@ type UnifiedAnalysis = {
   raw: any;
 };
 
-function buildUnifiedAnalysis(params: {
+function clampSelfAcceptance(value: unknown): number | null {
+  if (typeof value !== 'number' || Number.isNaN(value)) return null;
+
+  // 0.0〜1.0 にクランプ
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
+}
+
+async function buildUnifiedAnalysis(params: {
   userText: string;
   assistantText: string;
   meta: any;
-}): UnifiedAnalysis {
+}): Promise<UnifiedAnalysis> {
   const { userText, assistantText, meta } = params;
   const safeMeta = meta ?? {};
   const safeAssistant =
@@ -73,14 +86,86 @@ function buildUnifiedAnalysis(params: {
       ? assistantText
       : String(assistantText ?? '');
 
+  // ★ orchestrator で整えた unified を最優先で使う
+  const unified = safeMeta.unified ?? {};
+
+  const unifiedQ =
+    unified &&
+    unified.q &&
+    typeof unified.q.current === 'string'
+      ? unified.q.current
+      : null;
+
+  const unifiedDepth =
+    unified &&
+    unified.depth &&
+    typeof unified.depth.stage === 'string'
+      ? unified.depth.stage
+      : null;
+
+  const unifiedPhase =
+    unified && typeof unified.phase === 'string' ? unified.phase : null;
+
+  // ---- Q / Depth / Phase ----
+  const qCode =
+    unifiedQ ?? safeMeta.qCode ?? safeMeta.q_code ?? null;
+
+  const depthStage =
+    unifiedDepth ?? safeMeta.depth ?? safeMeta.depth_stage ?? null;
+
+  const phase =
+    unifiedPhase ?? safeMeta.phase ?? null;
+
+  // ---- Self Acceptance（0.0〜1.0 スケール）----
+  // 優先順位：
+  // 1) meta.selfAcceptance  (camelCase: orchestrator からの値)
+  // 2) safeMeta.self_acceptance（過去互換 or 他ルート）
+  // 3) unified.self_acceptance（将来 unified 側で持たせる場合）
+  // 4) ★ fallback として「今回の userText から簡易推定」
+  let selfAcceptanceRaw: number | null =
+    typeof safeMeta.selfAcceptance === 'number'
+      ? safeMeta.selfAcceptance
+      : typeof safeMeta.self_acceptance === 'number'
+      ? safeMeta.self_acceptance
+      : typeof unified?.self_acceptance === 'number'
+      ? unified.self_acceptance
+      : null;
+
+  if (selfAcceptanceRaw == null) {
+    try {
+      // meter.ts 側は { userText, depthStage, qCode } 形式の入力
+      const saResult: any = await estimateSelfAcceptance({
+        userText,
+        depthStage,
+        qCode,
+      } as any);
+
+      // 返り値の型バリエーションに全部対応しておく
+      if (typeof saResult === 'number') {
+        selfAcceptanceRaw = saResult;
+      } else if (saResult && typeof saResult.value === 'number') {
+        // 現状の meter.ts の形（value を持っている）
+        selfAcceptanceRaw = saResult.value;
+      } else if (saResult && typeof saResult.normalized === 'number') {
+        selfAcceptanceRaw = saResult.normalized;
+      } else if (saResult && typeof saResult.score === 'number') {
+        selfAcceptanceRaw = saResult.score;
+      }
+    } catch (e) {
+      console.error(
+        '[UnifiedAnalysis] estimateSelfAcceptance fallback failed',
+        e,
+      );
+    }
+  }
+
+  const selfAcceptance = clampSelfAcceptance(selfAcceptanceRaw);
+
   return {
-    q_code: safeMeta.qCode ?? safeMeta.q_code ?? null,
-    depth_stage: safeMeta.depth ?? safeMeta.depth_stage ?? null,
-    phase: safeMeta.phase ?? null,
-    self_acceptance:
-      typeof safeMeta.self_acceptance === 'number'
-        ? safeMeta.self_acceptance
-        : null,
+    q_code: qCode,
+    depth_stage: depthStage,
+    phase,
+    self_acceptance: selfAcceptance,
     relation_tone: safeMeta.relation_tone ?? null,
     keywords: Array.isArray(safeMeta.keywords) ? safeMeta.keywords : [],
     summary:
@@ -98,6 +183,7 @@ function buildUnifiedAnalysis(params: {
   };
 }
 
+// UnifiedAnalysis を DB に保存（Q推定 + 状態アップデートまで）
 async function saveUnifiedAnalysisInline(
   analysis: UnifiedAnalysis,
   context: {
@@ -106,6 +192,39 @@ async function saveUnifiedAnalysisInline(
     agent: string;
   },
 ) {
+  // 0) まず Q フィールドを決定する（既存優先＋fallback）
+  let qCode: string | null = analysis.q_code;
+
+  if (!qCode) {
+    // Unified / meta に Q が無い場合のみ、ユーザー発言から推定
+    const raw = analysis.raw ?? {};
+    const userText: string | null =
+      (typeof raw.user_text === 'string' ? raw.user_text : null) ?? null;
+
+    if (userText && userText.trim().length > 0) {
+      try {
+        // ★ 新Qエンジン：キーワード＋GPT で推定
+        const detected = await detectQFromText(userText);
+        if (detected) {
+          qCode = detected;
+        }
+      } catch (e) {
+        console.error(
+          '[UnifiedAnalysis] detectQFromText failed, fallback to simple keyword',
+          e,
+        );
+        // 失敗時だけ簡易版キーワード判定にフォールバック
+        const fallback = detectQFallbackFromText(userText);
+        if (fallback) {
+          qCode = fallback;
+        }
+      }
+    }
+  }
+
+  // analysis 自体にも反映しておく（将来 debug 用）
+  analysis.q_code = qCode ?? null;
+
   // 1) unified_resonance_logs へ INSERT
   const { error: logErr } = await supabase
     .from('unified_resonance_logs')
@@ -113,7 +232,7 @@ async function saveUnifiedAnalysisInline(
       tenant_id: context.tenantId,
       user_code: context.userCode,
       agent: context.agent,
-      q_code: analysis.q_code,
+      q_code: qCode,
       depth_stage: analysis.depth_stage,
       phase: analysis.phase,
       self_acceptance: analysis.self_acceptance,
@@ -141,7 +260,7 @@ async function saveUnifiedAnalysisInline(
     return;
   }
 
-  const isSameQ = prev?.last_q === analysis.q_code;
+  const isSameQ = prev?.last_q === qCode;
   const streak = isSameQ ? (prev?.streak_count ?? 0) + 1 : 1;
 
   const { error: stateErr } = await supabase
@@ -149,11 +268,11 @@ async function saveUnifiedAnalysisInline(
     .upsert({
       user_code: context.userCode,
       tenant_id: context.tenantId,
-      last_q: analysis.q_code,
+      last_q: qCode,
       last_depth: analysis.depth_stage,
       last_phase: analysis.phase,
       last_self_acceptance: analysis.self_acceptance,
-      streak_q: analysis.q_code,
+      streak_q: qCode,
       streak_count: streak,
       updated_at: new Date().toISOString(),
     });
@@ -164,22 +283,33 @@ async function saveUnifiedAnalysisInline(
   }
 }
 
-/** auth から最良の userCode を抽出。ヘッダ x-user-code は開発補助として許容 */
-function pickUserCode(req: NextRequest, auth: any): string | null {
-  const h = req.headers.get('x-user-code');
-  const fromHeader = h && h.trim() ? h.trim() : null;
-  return (auth?.userCode && String(auth.userCode)) || fromHeader || null;
-}
+// ---------- Q 簡易 fallback 判定ロジック ----------
 
-/** auth から uid をできるだけ抽出（ログ用） */
-function pickUid(auth: any): string | null {
-  return (
-    (auth?.uid && String(auth.uid)) ||
-    (auth?.firebase_uid && String(auth.firebase_uid)) ||
-    (auth?.user?.id && String(auth.user.id)) ||
-    (auth?.me?.id && String(auth.me.id)) ||
-    null
-  );
+function detectQFallbackFromText(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const t = text.trim();
+  if (!t) return null;
+
+  // ひとまず雑に keyword ベース（将来、専用LLMや detectQ.ts に差し替え可）
+  const hasAnger =
+    /怒|イライラ|腹立|キレそう|むかつ|苛立/.test(t);
+  const hasAnxiety =
+    /不安|心配|落ち着かない|そわそわ|緊張/.test(t);
+  const hasFear =
+    /怖い|恐い|恐怖|怯え|トラウマ/.test(t);
+  const hasEmptiness =
+    /空虚|虚し|むなしい|燃え尽き|やる気が出ない|情熱がわかない/.test(t);
+  const hasSuppress =
+    /我慢|耐えて|抑えて|無理して|遠慮して/.test(t);
+
+  // 優先度：怒り(Q2) → 不安(Q3) → 恐怖(Q4) → 空虚(Q5) → 我慢(Q1)
+  if (hasAnger) return 'Q2';
+  if (hasAnxiety) return 'Q3';
+  if (hasFear) return 'Q4';
+  if (hasEmptiness) return 'Q5';
+  if (hasSuppress) return 'Q1';
+
+  return null;
 }
 
 /* =========================================================
@@ -251,6 +381,24 @@ async function buildConversationHistoryDigest(
   }
 }
 
+/** auth から最良の userCode を抽出。ヘッダ x-user-code は開発補助として許容 */
+function pickUserCode(req: NextRequest, auth: any): string | null {
+  const h = req.headers.get('x-user-code');
+  const fromHeader = h && h.trim() ? h.trim() : null;
+  return (auth?.userCode && String(auth.userCode)) || fromHeader || null;
+}
+
+/** auth から uid をできるだけ抽出（ログ用） */
+function pickUid(auth: any): string | null {
+  return (
+    (auth?.uid && String(auth.uid)) ||
+    (auth?.firebase_uid && String(auth.firebase_uid)) ||
+    (auth?.user?.id && String(auth.user.id)) ||
+    (auth?.me?.id && String(auth.me.id)) ||
+    null
+  );
+}
+
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
 }
@@ -295,7 +443,11 @@ export async function POST(req: NextRequest) {
         : 'default';
 
     // 3) mode 推定
-    const mode = resolveModeHintFromText({ modeHint: modeHintInput, hintText, text });
+    const mode = resolveModeHintFromText({
+      modeHint: modeHintInput,
+      hintText,
+      text,
+    });
 
     // 3.5) Rememberモードのスコープ推定
     const rememberScope: RememberScopeKind | null = resolveRememberScope({
@@ -448,11 +600,12 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 8) Qコードメモリ読み込み → Orchestrator 呼び出し（I層100%テスト版）
+    // 8) Iros メモリ読み込み → Orchestrator 呼び出し
     console.log('[IROS/Memory] loadQTraceForUser start', { userCode });
     let result: any;
 
     try {
+      // ★ QTrace を読み込む
       const qTrace = await loadQTraceForUser(userCode, { limit: 50 });
 
       console.log('[IROS/Memory] qTrace', {
@@ -463,7 +616,7 @@ export async function POST(req: NextRequest) {
         lastEventAt: qTrace.lastEventAt,
       });
 
-      // QTrace から depth / qCode を meta に反映
+      // ★ QTrace を meta に反映（最新版）
       const baseMetaFromQ = applyQTraceToMeta(
         {
           qCode: undefined,
@@ -472,7 +625,7 @@ export async function POST(req: NextRequest) {
         qTrace,
       );
 
-      // ★ I層100%モード：ENVフラグでON/OFF
+      // I層100%モード：ENVフラグでON/OFF
       const FORCE_I_LAYER_LOCAL = FORCE_I_LAYER;
 
       // I層モードでも mirror ベース
@@ -483,15 +636,13 @@ export async function POST(req: NextRequest) {
           ? undefined
           : (mode as any);
 
-      // 深度は I2 に固定（テスト用）
+      // 深度は I2 に固定（テスト用） or QTrace 由来
       const requestedDepth = FORCE_I_LAYER_LOCAL
         ? ('I2' as any)
         : (baseMetaFromQ.depth as any);
 
-      // ★ baseMeta は any にして型エラーを回避（中身は既存ロジックと同じ）
+      // baseMeta（orchestrator に渡す初期メタ）
       const baseMetaForTurn: any = {};
-
-      // I層強制モードのときは、depth は I2 に任せるので Q側の depth は渡さない
       if (!FORCE_I_LAYER_LOCAL && baseMetaFromQ.depth) {
         baseMetaForTurn.depth = baseMetaFromQ.depth as any;
       }
@@ -499,18 +650,75 @@ export async function POST(req: NextRequest) {
         baseMetaForTurn.qCode = baseMetaFromQ.qCode as any;
       }
 
-      // ★ historyDigest を含めた effectiveText を定義
+      // ★★★ Self Acceptance を「runIrosTurn の前」に推定して baseMeta に注入 ★★★
+      try {
+        const saInput: any = {
+          // meter 側のログに合わせて柔らかく渡す
+          qCode:
+            (baseMetaForTurn.qCode as QCode | undefined) ??
+            (baseMetaFromQ.qCode as QCode | undefined) ??
+            (qTrace.snapshot?.currentQ as QCode | undefined) ??
+            null,
+          depthStage:
+            (baseMetaForTurn.depth as string | undefined) ??
+            (baseMetaFromQ.depth as string | undefined) ??
+            (qTrace.snapshot?.depthStage as string | undefined) ??
+            null,
+          phase: undefined,
+          hasHistoryDigest: !!historyDigest,
+          lastSelfAcceptance: undefined,
+          userText: text,
+        };
+
+        const saResult: any = await estimateSelfAcceptance(saInput);
+
+        let saValue: number | null = null;
+        if (typeof saResult === 'number') {
+          saValue = saResult;
+        } else if (saResult && typeof saResult.value === 'number') {
+          saValue = saResult.value;
+        } else if (saResult && typeof saResult.normalized === 'number') {
+          saValue = saResult.normalized;
+        } else if (saResult && typeof saResult.score === 'number') {
+          saValue = saResult.score;
+        }
+
+        if (saValue != null && !Number.isNaN(saValue)) {
+          baseMetaForTurn.selfAcceptance = saValue;
+        }
+      } catch (e) {
+        console.error(
+          '[IROS/Reply] estimateSelfAcceptance for baseMeta failed',
+          e,
+        );
+      }
+
+      // historyDigest を含めた effectiveText を定義
       const effectiveText =
         historyDigest && historyDigest.trim().length > 0
           ? `【これまでの流れ（要約）】\n${historyDigest}\n\n【今回のユーザー発言】\n${text}`
           : text;
+
+      // ★ このターンのユーザー発言から Qコードを推定（Orchestrator 用）
+      let requestedQCode: QCode | undefined = undefined;
+      try {
+        const detected = await detectQFromText(text);
+        if (detected) {
+          requestedQCode = detected as QCode;
+        }
+      } catch (e) {
+        console.error(
+          '[IROS/Reply] detectQFromText failed (orchestrator path)',
+          e,
+        );
+      }
 
       result = await runIrosTurn({
         conversationId,
         text: effectiveText,
         requestedMode,
         requestedDepth,
-        requestedQCode: undefined, // QはIros本体に任せる
+        requestedQCode,
         baseMeta: baseMetaForTurn,
         isFirstTurn,
       });
@@ -583,15 +791,13 @@ export async function POST(req: NextRequest) {
         metaRaw && typeof metaRaw === 'object'
           ? {
               ...metaRaw,
-              qCode: undefined,
-              q_code: undefined,
             }
           : metaRaw;
 
       if (assistantText && assistantText.trim().length > 0) {
         // UnifiedAnalysis を構築して保存（失敗してもチャット自体は続行）
         try {
-          const analysis = buildUnifiedAnalysis({
+          const analysis = await buildUnifiedAnalysis({
             userText: text,
             assistantText,
             meta: metaForSave,

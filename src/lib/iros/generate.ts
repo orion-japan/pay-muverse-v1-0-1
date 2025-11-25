@@ -8,22 +8,18 @@ import {
   getSystemPrompt,
   type IrosMeta,
   type IrosMode,
-  type Depth,          // 将来の拡張用に残しておく（S/R/C/I 全体の深度）
+  type Depth, // 将来の拡張用（S/R/C/I/T 全体の深度）
   type IrosIntentMeta, // I層メタ情報（layer / reason / confidence）
 } from './system';
+import type { IntentLineAnalysis } from './intent/intentLineEngine';
 
 const IROS_MODEL =
-  process.env.IROS_MODEL ??
-  process.env.OPENAI_MODEL ??
-  'gpt-4o';
+  process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-4o';
 
 console.log('[IROS_MODEL-check]', {
   IROS_MODEL_env: process.env.IROS_MODEL,
   OPENAI_MODEL_env: process.env.OPENAI_MODEL,
-  resolved:
-    process.env.IROS_MODEL ??
-    process.env.OPENAI_MODEL ??
-    'gpt-4o',
+  resolved: process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-4o',
 });
 
 const client = new OpenAI({
@@ -41,16 +37,77 @@ export type GenerateArgs = {
   text: string;
   meta?: IrosMeta;
 
-  /** ★ 追加：過去の会話履歴（古い → 新しい順） */
+  /** 過去の会話履歴（古い → 新しい順） */
   history?: HistoryItem[];
 };
 
 export type GenerateResult = {
-  content: string;      // Iros 本文
-  text: string;         // 旧 chatCore 互換用（= content と同じ）
-  mode: IrosMode;       // 実際に使っているモード（meta.mode が無ければ mirror）
+  content: string; // Iros 本文
+  text: string; // 旧 chatCore 互換用（= content と同じ）
+  mode: IrosMode; // 実際に使っているモード（meta.mode が無ければ mirror）
   intent?: IrosIntentMeta | null; // I層ジャッジ結果
 };
+
+/* =========================================================
+   Meaning Block Builder
+   IntentLine + I層 + Unified を束ねて
+   返答の前に「構図ブロック」を作る
+========================================================= */
+
+function buildMeaningBlock(meta?: IrosMeta | null): string {
+  if (!meta) return '';
+
+  const parts: string[] = [];
+
+  // ① 今の章（IntentLine）
+  const intentLine: IntentLineAnalysis | undefined | null =
+    (meta as any)?.intentLine;
+  if (intentLine?.nowLabel) {
+    parts.push(`### 【いまの章】\n${intentLine.nowLabel}`);
+  }
+
+  // ② 守ろうとしているもの
+  if (intentLine?.coreNeed) {
+    parts.push(`### 【奥で守ろうとしている願い】\n${intentLine.coreNeed}`);
+  }
+
+  // ③ 未来方向
+  if (intentLine?.direction && intentLine.direction !== 'unknown') {
+    parts.push(`### 【未来方向】\n${intentLine.direction}`);
+  }
+
+  // ④ I層：意図の深度
+  if (meta.intent) {
+    const { layer, reason } = meta.intent;
+    if (layer) {
+      parts.push(
+        [
+          '### 【I層：意図の深度】',
+          `- レイヤー: ${layer}`,
+          `- 理由: ${reason ?? '（理由なし）'}`,
+        ].join('\n'),
+      );
+    }
+  }
+
+  // ⑤ Unified 構図（任意）
+  if (meta.unified) {
+    const uni = meta.unified;
+    parts.push(
+      [
+        '### 【Unified 構図】',
+        `- Q: ${uni.q.current ?? '—'}`,
+        `- Depth: ${uni.depth.stage ?? '—'}`,
+        `- Phase: ${uni.phase ?? '—'}`,
+        `- Intent Summary: ${uni.intentSummary ?? '—'}`,
+      ].join('\n'),
+    );
+  }
+
+  if (parts.length === 0) return '';
+
+  return parts.join('\n\n');
+}
 
 /* =========================================================
    I層用 話法スタイル（バリエーション）
@@ -59,12 +116,7 @@ export type GenerateResult = {
 
 type IntentStyle = 'dignity' | 'meta' | 'story' | 'minimal';
 
-const I_INTENT_STYLES: IntentStyle[] = [
-  'dignity',
-  'meta',
-  'story',
-  'minimal',
-];
+const I_INTENT_STYLES: IntentStyle[] = ['dignity', 'meta', 'story', 'minimal'];
 
 function chooseIntentStyle(meta?: IrosMeta): IntentStyle | null {
   if (!meta) return null;
@@ -124,6 +176,109 @@ function buildStyleInstruction(style: IntentStyle | null): string | null {
   return null;
 }
 
+/* =========================================================
+   SA → トーン指示
+   - SelfAcceptance / mode / depth に応じて LLM へのヒントを生成
+========================================================= */
+
+function buildSAToneHint(
+  sa: number | null,
+  mode?: IrosMode | null,
+  depth?: Depth | null,
+): string {
+  let band: 'low' | 'mid' | 'high' = 'mid';
+
+  if (sa == null || Number.isNaN(sa)) {
+    band = 'mid';
+  } else if (sa < 0.3) {
+    band = 'low';
+  } else if (sa > 0.7) {
+    band = 'high';
+  }
+
+  const modeLabel =
+    mode === 'consult' || mode === 'counsel'
+      ? '相談モード寄り'
+      : mode === 'resonate'
+      ? '前向き共鳴モード寄り'
+      : 'ミラー（鏡）モード寄り';
+
+  const depthLabel = (() => {
+    if (!depth) return '';
+    if (depth.startsWith('S')) return '（Self 領域：自分の安心・土台）';
+    if (depth.startsWith('R')) return '（Resonance 領域：関係性・距離感）';
+    if (depth.startsWith('C')) return '（Creation 領域：行動・創造）';
+    if (depth.startsWith('I')) return '（Intention 領域：生き方・意味）';
+    return '';
+  })();
+
+  if (band === 'low') {
+    return [
+      '自己受容が低めの状態です。',
+      'まず「いまの気持ちをそのまま認める」ことを最優先してください。',
+      '語りはやさしく、安心を広げるトーンで、強い断定は避けてください。',
+      `${modeLabel}${depthLabel} から、そっと寄り添いながら応答してください。`,
+    ].join('\n');
+  }
+
+  if (band === 'high') {
+    return [
+      '自己受容が十分に育っている状態です。',
+      '未来や意図ラインをはっきりと言い切って構いません。',
+      '適度にチャレンジを促し、「次の一歩」を具体的に示してください。',
+      `${modeLabel}${depthLabel} から、少し背中を押すトーンで応答してください。`,
+    ].join('\n');
+  }
+
+  // mid
+  return [
+    '自己受容は揺れの中にあります。',
+    '寄り添いと構造提示のバランスを取りつつ、少し先の未来を静かに指し示してください。',
+    `${modeLabel}${depthLabel} から、安心と整理の両方を届けるトーンで応答してください。`,
+  ].join('\n');
+}
+
+/* =========================================================
+   IntentLine → LLM への内部メモ変換
+   - systemメッセージとして渡し、「章の言い切り」と未来方向を強調
+========================================================= */
+
+function buildIntentLineMemo(
+  intentLine?: IntentLineAnalysis | null,
+): string | null {
+  if (!intentLine) return null;
+
+  const parts: string[] = [];
+
+  parts.push('【内部解析メモ：意図ライン】');
+
+  if (intentLine.nowLabel) {
+    parts.push(`- 今の章: ${intentLine.nowLabel}`);
+  }
+  if (intentLine.coreNeed) {
+    parts.push(`- 守ろうとしているもの: ${intentLine.coreNeed}`);
+  }
+  if (intentLine.intentBand) {
+    parts.push(`- 意図帯域: ${intentLine.intentBand}（I層レベルの位置）`);
+  }
+  if (intentLine.direction && intentLine.direction !== 'unknown') {
+    parts.push(`- 未来方向: ${intentLine.direction}`);
+  }
+  if (intentLine.focusLayer) {
+    parts.push(`- フォーカスレイヤ: ${intentLine.focusLayer} 帯を優先して扱うとよい`);
+  }
+  if (intentLine.riskHint) {
+    parts.push(`- リスク注意: ${intentLine.riskHint}`);
+  }
+  if (intentLine.guidanceHint) {
+    parts.push(`- ガイドライン: ${intentLine.guidanceHint}`);
+  }
+
+  if (parts.length <= 1) return null;
+
+  return parts.join('\n');
+}
+
 /**
  * Iros 応答を 1ターン生成する。
  * - system.ts の IROS_SYSTEM + meta を使って system プロンプトを組み立てる
@@ -133,7 +288,7 @@ function buildStyleInstruction(style: IntentStyle | null): string | null {
 export async function generateIrosReply(
   args: GenerateArgs,
 ): Promise<GenerateResult> {
-  const { text, meta, history } = args;
+  const { text, meta, history, conversationId } = args;
 
   // ベースの system プロンプト
   const baseSystem = getSystemPrompt(meta);
@@ -142,16 +297,55 @@ export async function generateIrosReply(
   const intentStyle = chooseIntentStyle(meta);
   const styleInstruction = buildStyleInstruction(intentStyle);
 
-  const system =
+  // IntentLine から内部解析メモを生成
+  const intentLineMemo = buildIntentLineMemo(
+    (meta as any)?.intentLine ?? null,
+  );
+
+  // ★ Self Acceptance / mode / depth を取得
+  const saValue =
+    meta && typeof (meta as any)?.selfAcceptance === 'number'
+      ? ((meta as any).selfAcceptance as number)
+      : null;
+  const currentMode: IrosMode = meta?.mode ?? 'mirror';
+  const currentDepth: Depth | undefined = meta?.depth as Depth | undefined;
+
+  const saToneHint = buildSAToneHint(saValue, currentMode, currentDepth ?? null);
+
+  // styleInstruction と SA トーンヒントを system に合成
+  const systemWithStyle =
     styleInstruction != null
       ? `${baseSystem}\n\n${styleInstruction}`
       : baseSystem;
 
+  const system =
+    saToneHint && saToneHint.trim().length > 0
+      ? `${systemWithStyle}\n\n---\n[SelfAcceptance Tone Hint]\n${saToneHint}`
+      : systemWithStyle;
+
   const messages: OpenAI.ChatCompletionMessageParam[] = [
-    { role: 'system', content: system },
-    // ★ ここで history を展開（あれば）
+    {
+      role: 'system' as const,
+      content: system,
+    },
+
+    // IntentLine を system メモとして渡す（あれば）
+    ...(intentLineMemo
+      ? [
+          {
+            role: 'system' as const,
+            content: intentLineMemo,
+          },
+        ]
+      : []),
+
+    // history を展開（あれば）
     ...buildHistoryMessages(history),
-    { role: 'user', content: text },
+
+    {
+      role: 'user' as const,
+      content: text,
+    },
   ];
 
   // ① 本文生成
@@ -164,14 +358,20 @@ export async function generateIrosReply(
   const content =
     res.choices[0]?.message?.content?.toString().trim() ?? '';
 
-  const mode: IrosMode = meta?.mode ?? 'mirror';
+  const mode: IrosMode = currentMode ?? 'mirror';
 
   // ② I層解析（ユーザー入力ベース）
   const intent = await analyzeIntentLayer(text);
 
+  // ③ Meaning Block 統合
+  const meaningBlock = buildMeaningBlock(meta);
+  const finalContent = meaningBlock
+    ? `${meaningBlock}\n\n${content}`
+    : content;
+
   return {
-    content,
-    text: content,
+    content: finalContent,
+    text: finalContent,
     mode,
     intent,
   };
@@ -183,7 +383,7 @@ export async function generateIrosReply(
    - 長くなりすぎないよう、直近 N 件だけに絞る
 ========================================================= */
 
-const MAX_HISTORY_ITEMS = 20; // ★ 必要に応じて調整
+const MAX_HISTORY_ITEMS = 20; // 必要に応じて調整
 
 function buildHistoryMessages(
   history?: HistoryItem[],
@@ -202,7 +402,7 @@ function buildHistoryMessages(
       const trimmed = h.content.trim();
       if (!trimmed) return null;
 
-      const role =
+      const role: 'assistant' | 'user' =
         h.role === 'assistant' ? 'assistant' : 'user';
 
       return {
@@ -210,7 +410,10 @@ function buildHistoryMessages(
         content: trimmed,
       };
     })
-    .filter((m): m is OpenAI.ChatCompletionMessageParam => m !== null);
+    .filter(
+      (m): m is OpenAI.ChatCompletionMessageParam =>
+        m !== null,
+    );
 }
 
 /* =========================================================
@@ -273,7 +476,6 @@ async function analyzeIntentLayer(userText: string): Promise<IrosIntentMeta> {
         ? parsed.layer
         : null;
 
-    // ★ ここを Depth ではなく I1/I2/I3 専用の union にする
     const layer: 'I1' | 'I2' | 'I3' | null =
       layerRaw === 'I1' || layerRaw === 'I2' || layerRaw === 'I3'
         ? (layerRaw as 'I1' | 'I2' | 'I3')
@@ -326,7 +528,7 @@ function safeParseJson(text: string): any | null {
     }
   }
 
-  // 何か説明 + JSON の場合を想定して { ... } 部分だけ抜き出す
+  // 何か説明 + JSON の場合を想定して { ... } 部分だけ抜き出して再トライ
   const first = trimmed.indexOf('{');
   const last = trimmed.lastIndexOf('}');
   if (first >= 0 && last > first) {
