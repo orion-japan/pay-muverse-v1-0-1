@@ -1,3 +1,4 @@
+// src/components/LoginModal.tsx
 'use client';
 
 import { useState } from 'react';
@@ -41,7 +42,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: Props) {
 
       await user.reload(); // ステータス最新化
 
-      // メール未認証 → 認証案内モーダル表示（この時点では Firebase 上はサインイン中）
+      // メール未認証 → 認証案内モーダル表示
       if (!user.emailVerified) {
         setShowVerifyModal(true);
         setLoading(false);
@@ -58,7 +59,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: Props) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${idToken}`,
         },
-        body: JSON.stringify({}), // 互換
+        body: JSON.stringify({}),
       });
 
       if (!loginRes.ok) {
@@ -234,7 +235,6 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: Props) {
 
       <ResetPasswordModal isOpen={showResetModal} onClose={() => setShowResetModal(false)} />
 
-      {/* 再送信時に即閉じるバージョン */}
       <EmailVerifyModal
         isOpen={showVerifyModal}
         onClose={() => setShowVerifyModal(false)}

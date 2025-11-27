@@ -16,7 +16,7 @@ export type ResonanceSnapshot = {
   q: QCode | null;                // 現在の Q（なければ null）
   depth: Depth | null;            // 現在の深度レイヤ（なければ null）
   phase: PhaseFlag;               // Inner / Outer / null
-  selfAcceptance: number | null;  // 自己肯定率（0〜100想定・null可）
+  selfAcceptance: number | null;  // SelfAcceptance（0.0〜1.0想定・null可）
   relationTone?: RelationTone;    // 関係性トーン（任意）
   /** 直近の Q の履歴（古い→新しい順） */
   historyQ?: QCode[];
@@ -59,13 +59,15 @@ export function deriveIntentLine(snapshot: ResonanceSnapshot): IntentLineAnalysi
   const { q, depth, phase, selfAcceptance, relationTone, historyQ } = snapshot;
 
   // ---------- 1) SA 帯域から基礎トーンを決める ----------
-  const sa = selfAcceptance ?? 50;
+  // ※ SelfAcceptance は 0.0〜1.0 スケールで入ってくる想定
+  const sa = selfAcceptance ?? 0.5;
   let saBand: 'danger' | 'confused' | 'growth' | 'stable' | 'overconfident';
 
-  if (sa <= 20) saBand = 'danger';
-  else if (sa <= 40) saBand = 'confused';
-  else if (sa <= 70) saBand = 'growth';
-  else if (sa <= 90) saBand = 'stable';
+  // 0.0〜1.0 をそのまま帯域にマッピング
+  if (sa <= 0.2) saBand = 'danger';
+  else if (sa <= 0.4) saBand = 'confused';
+  else if (sa <= 0.7) saBand = 'growth';
+  else if (sa <= 0.9) saBand = 'stable';
   else saBand = 'overconfident';
 
   // ---------- 2) Qコードから「感情の主方向」を判定 ----------
@@ -129,7 +131,7 @@ export function deriveIntentLine(snapshot: ResonanceSnapshot): IntentLineAnalysi
     // 危険帯はまず stabilize 優先
     if (saBand === 'danger') return 'stabilize';
 
-    // Relation が discord 强めなら reconnect or cutOff
+    // Relation が discord 強めなら reconnect or cutOff
     if (relationTone === 'discord') {
       if (q === 'Q2' || q === 'Q5') return 'cutOff';
       return 'reconnect';
@@ -176,8 +178,10 @@ export function deriveIntentLine(snapshot: ResonanceSnapshot): IntentLineAnalysi
     return null;
   })();
 
-  // ---------- 8) 「今の章」のラベル ----------
-  const nowLabel = `いまのあなたは、「${qLabel}」が${layerLabel}の中で強く揺れている章にいます。`;
+  // ---------- 8) 「今の状態」のラベル（※「章にいます」を廃止） ----------
+  const nowLabel =
+    `いまのあなたは、「${qLabel}」がテーマになっている状態です。` +
+    ` いまは ${layerLabel} にフォーカスが当たっています。`;
 
   // ---------- 9) CoreNeed（本来守りたいもの） ----------
   const coreNeed = (() => {

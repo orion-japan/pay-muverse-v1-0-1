@@ -42,11 +42,44 @@ import {
   type IntentLineAnalysis,
 } from './intent/intentLineEngine';
 
+// ★ 意味づけ・SelfAcceptance 系ヘルパー（分割先）
+import {
+  clampSelfAcceptance,
+  resolveModeWithSA,
+  buildFinalMeta,
+  buildPersonalMeaningBlock,
+  classifySelfAcceptance,
+} from './orchestratorMeaning';
+
+// ★ QTrace（揺れの履歴）を扱うコア
+import { updateQTrace, type QTrace } from './orchestratorCore';
+
+// ★ Y/H（揺れ・余白）推定コア
+import { computeYH } from './analysis/computeYH';
+
+// ★ MemoryState（現在地レイヤー）読み書き
+import {
+  loadIrosMemoryState,
+  upsertIrosMemoryState,
+  type IrosMemoryState,
+} from './memoryState';
+
+// ★ Self Acceptance メーター
+//   - ここで得られる値は「瞬間の気分」ではなく、
+//     lastSelfAcceptance をブレンドした “自己肯定ライン（長期ベースライン）”
+import {
+  estimateSelfAcceptance,
+  type SelfAcceptanceInput,
+} from './sa/meter';
+
 // ★ I層強制モード（ENV）
 //   - true のとき、requestedDepth を優先して depth を固定する
 const FORCE_I_LAYER =
   typeof process !== 'undefined' &&
   process.env.IROS_FORCE_I_LAYER === '1';
+
+// Priority 型（SA 補正用）
+type IrosPriority = ReturnType<typeof deriveIrosPriority>;
 
 // ==== Orchestrator に渡す引数 ==== //
 export type IrosOrchestratorArgs = {
@@ -61,6 +94,9 @@ export type IrosOrchestratorArgs = {
 
   /** ★ この会話の最初のターンかどうか（reply/route.ts から渡す） */
   isFirstTurn?: boolean;
+
+  /** ★ MemoryState 読み書き用：user_code */
+  userCode?: string;
 };
 
 // ==== Orchestrator から返す結果 ==== //
@@ -68,80 +104,6 @@ export type IrosOrchestratorResult = {
   content: string;
   meta: IrosMeta;
 };
-
-// ★ Self Acceptance を 0.0〜1.0 にクランプ
-function clampSelfAcceptance(value: unknown): number | null {
-  if (typeof value !== 'number' || Number.isNaN(value)) return null;
-  if (value < 0) return 0;
-  if (value > 1) return 1;
-  return value;
-}
-
-/* ========= SA → バンド分類 & モード重み用ヘルパー ========= */
-
-type SelfAcceptanceBand = 'low' | 'mid' | 'high';
-
-function classifySelfAcceptance(sa: number | null): SelfAcceptanceBand {
-  if (sa == null || Number.isNaN(sa)) return 'mid';
-  if (sa < 0.3) return 'low';
-  if (sa > 0.7) return 'high';
-  return 'mid';
-}
-
-type ModeWeights = {
-  counsel: number;
-  mirror: number;
-  resonate: number;
-};
-
-function resolveModeWithSA(
-  base: ModeWeights,
-  saValue: number | null,
-): IrosMode {
-  const band = classifySelfAcceptance(saValue);
-
-  // ベース値をコピー
-  let w: ModeWeights = { ...base };
-
-  // ★ SA に応じて重みを調整
-  switch (band) {
-    case 'low':
-      // SA < 0.3 → counsel 率 80% くらいに寄せるイメージ
-      w.counsel += 2.0;
-      w.mirror -= 0.5;
-      w.resonate -= 0.5;
-      break;
-
-    case 'mid':
-      // SA 0.3〜0.7 → mirror を中心に
-      w.mirror += 1.0;
-      break;
-
-    case 'high':
-      // SA > 0.7 → 前向きな forward/resonate を強める
-      w.resonate += 2.0;
-      w.mirror -= 0.5;
-      break;
-  }
-
-  // 下限補正（マイナスにならないように）
-  w = {
-    counsel: Math.max(w.counsel, 0),
-    mirror: Math.max(w.mirror, 0),
-    resonate: Math.max(w.resonate, 0),
-  };
-
-  // ★ 最も重みの大きいモードを採用
-  const winner = (Object.entries(w) as [keyof ModeWeights, number][])
-    .sort((a, b) => b[1] - a[1])[0]?.[0];
-
-  if (winner === 'counsel') return 'consult'; // 相談系モードにマッピング
-  if (winner === 'mirror') return 'mirror';
-  if (winner === 'resonate') return 'resonate'; // 「forward」イメージ
-
-  // フォールバック
-  return 'mirror';
-}
 
 export async function runIrosTurn(
   args: IrosOrchestratorArgs,
@@ -154,7 +116,75 @@ export async function runIrosTurn(
     requestedQCode,
     baseMeta,
     isFirstTurn,
+    userCode,
   } = args;
+
+  // ★ MemoryState / QTrace から順に上書きしていくベース
+  let mergedBaseMeta: Partial<IrosMeta> | undefined = baseMeta;
+
+  /* =========================================================
+     -1) MemoryState 読み込み
+         - userCode ごとに 1行だけ持っている「現在地」を baseMeta に合成
+  ========================================================= */
+  let memoryState: IrosMemoryState | null = null;
+
+  if (userCode) {
+    try {
+      memoryState = await loadIrosMemoryState(userCode);
+
+      if (
+        typeof process !== 'undefined' &&
+        process.env.NODE_ENV !== 'production'
+      ) {
+        console.log('[IROS/ORCH v2] loaded MemoryState', {
+          userCode,
+          hasMemory: !!memoryState,
+          depthStage: memoryState?.depthStage ?? null,
+          qPrimary: memoryState?.qPrimary ?? null,
+          selfAcceptance: memoryState?.selfAcceptance ?? null,
+          yLevel: memoryState?.yLevel ?? null,
+          hLevel: memoryState?.hLevel ?? null,
+        });
+      }
+
+      if (memoryState) {
+        const hasBaseSA =
+          typeof (mergedBaseMeta as any)?.selfAcceptance === 'number' &&
+          !Number.isNaN((mergedBaseMeta as any).selfAcceptance);
+
+        mergedBaseMeta = {
+          ...(mergedBaseMeta ?? {}),
+          // depth / qCode：明示指定 or 既存 meta があればそちら優先
+          ...(mergedBaseMeta?.depth
+            ? {}
+            : memoryState.depthStage
+            ? { depth: memoryState.depthStage as Depth }
+            : {}),
+          ...(mergedBaseMeta?.qCode
+            ? {}
+            : memoryState.qPrimary
+            ? { qCode: memoryState.qPrimary as QCode }
+            : {}),
+          // SelfAcceptance / Y / H だけを合成（phase / intent 系は一旦外す）
+          // ★ selfAcceptance は「自己肯定ライン」。baseMeta に無い場合のみ MemoryState から補完
+          ...(!hasBaseSA && typeof memoryState.selfAcceptance === 'number'
+            ? { selfAcceptance: memoryState.selfAcceptance }
+            : {}),
+          ...(typeof memoryState.yLevel === 'number'
+            ? { yLevel: memoryState.yLevel }
+            : {}),
+          ...(typeof memoryState.hLevel === 'number'
+            ? { hLevel: memoryState.hLevel }
+            : {}),
+        };
+      }
+    } catch (e) {
+      console.error('[IROS/ORCH v2] loadIrosMemoryState failed', {
+        userCode,
+        error: e,
+      });
+    }
+  }
 
   /* =========================================================
      0) Unified-like 解析（Q / Depth の決定をここに集約）
@@ -178,21 +208,27 @@ export async function runIrosTurn(
 
   /* =========================================================
      A) 深度スキャン + 連続性補正
-        - scan結果（autoDepthFromDeepScan / autoQFromDeepScan）
-        - 前回の meta.depth / meta.qCode
-        - isFirstTurn
-        を組み合わせて最終 depth / Q を決定
+        - 基本方針：
+          「今回のスキャン結果（autoDepthFromDeepScan）を最優先」
+        - scanDepth が取れない場合のみ、前回の depth から補完
   ========================================================= */
 
-  // まずは通常の Depth 連続性ロジックを適用
-  const depthFromContinuity = normalizeDepth(
-    applyDepthContinuity({
-      scanDepth: rawDepthFromScan,
-      lastDepth: baseMeta?.depth,
-      text,
-      isFirstTurn: !!isFirstTurn,
-    }),
-  );
+  let depthFromContinuity: Depth | undefined;
+
+  if (rawDepthFromScan) {
+    // ✅ 今回のスキャン結果があるときは、それをそのまま「今回の視点」として採用
+    depthFromContinuity = rawDepthFromScan;
+  } else {
+    // ✅ スキャンできなかったときだけ、連続性ロジックで補完
+    depthFromContinuity = normalizeDepth(
+      applyDepthContinuity({
+        scanDepth: rawDepthFromScan,
+        lastDepth: mergedBaseMeta?.depth,
+        text,
+        isFirstTurn: !!isFirstTurn,
+      }),
+    );
+  }
 
   // ★ I層強制モードのときは requestedDepth をそのまま採用
   let depth: Depth | undefined;
@@ -202,12 +238,34 @@ export async function runIrosTurn(
     depth = depthFromContinuity;
   }
 
+  // Qコードはこれまで通り「スキャン結果＋連続性」で決める
   const qCode = normalizeQCode(
     applyQContinuity({
       scanQ: rawQFromScan,
-      lastQ: baseMeta?.qCode,
+      lastQ: (mergedBaseMeta as any)?.qCode,
       isFirstTurn: !!isFirstTurn,
     }),
+  );
+
+  /* =========================================================
+     A-2) QTrace の更新（D: 揺れの履歴ログ用の基盤）
+          - mergedBaseMeta.qTrace を読み、今回の qCode で 1ステップ更新
+          - 結果は meta.qTrace として次ターン・ログに残す
+  ========================================================= */
+  const prevQTrace = (mergedBaseMeta as any)?.qTrace as
+    | QTrace
+    | undefined
+    | null;
+
+  const qTrace: QTrace = updateQTrace(
+    prevQTrace ?? {
+      lastQ: null,
+      dominantQ: null,
+      streakQ: null,
+      streakLength: 0,
+      volatility: 0,
+    },
+    qCode ?? null,
   );
 
   /* =========================================================
@@ -227,32 +285,70 @@ export async function runIrosTurn(
   };
 
   /* =========================================================
-     SA) Self Acceptance の決定
-         - unified（将来 LLM 出力）→ baseMeta の順で参照し、0.0〜1.0 にクランプ
+     SA) Self Acceptance（自己肯定“ライン”）の決定
+         - sa/meter.ts を利用して、text / depth / Q / phase / lastSA から推定
+         - ここで扱う selfAcceptance は「瞬間の気分」ではなく、
+           lastSelfAcceptance をブレンドした *自己肯定ライン* として扱う
   ========================================================= */
-  const unifiedSelfAcceptanceRaw =
-    typeof (unified as any)?.selfAcceptance === 'number'
-      ? (unified as any).selfAcceptance
-      : typeof (unified as any)?.self_acceptance === 'number'
-      ? (unified as any).self_acceptance
+
+  // 直近のライン SA（あれば）を lastSelfAcceptance として渡す
+  // ✅ 修正済み：MemoryState を最優先、その次に mergedBaseMeta
+  const lastSelfAcceptanceRaw =
+    typeof memoryState?.selfAcceptance === 'number'
+      ? memoryState.selfAcceptance
+      : typeof (mergedBaseMeta as any)?.selfAcceptance === 'number'
+      ? (mergedBaseMeta as any).selfAcceptance
       : null;
 
-  const baseSelfAcceptanceRaw =
-    typeof (baseMeta as any)?.selfAcceptance === 'number'
-      ? (baseMeta as any).selfAcceptance
-      : null;
+  // phase は Unified の結果を優先し、無ければ MemoryState から補完
+  const phaseForSA: 'Inner' | 'Outer' | null =
+    fixedUnified?.phase === 'Inner' || fixedUnified?.phase === 'Outer'
+      ? fixedUnified.phase
+      : memoryState?.phase ?? null;
 
-  const selfAcceptance = clampSelfAcceptance(
-    unifiedSelfAcceptanceRaw ?? baseSelfAcceptanceRaw,
-  );
+  const saInput: SelfAcceptanceInput = {
+    userText: text,
+    // Orchestrator 単体では直前の assistantText を持っていないため、ここでは空文字。
+    // （将来、route 側から渡すように拡張可能）
+    assistantText: '',
+    qCode: qCode ?? null,
+    depthStage: depth ?? null,
+    phase: phaseForSA,
+    historyDigest: null,
+    lastSelfAcceptance: lastSelfAcceptanceRaw,
+  };
+
+  // meter から返ってくる値 = 「更新済みの自己肯定ライン」
+  const saResult = await estimateSelfAcceptance(saInput);
+  const selfAcceptanceLine = clampSelfAcceptance(saResult.value);
+
+  // ★ unified 側にも SelfAcceptance ラインを埋め込む（UI / ログ用）
+  if (fixedUnified) {
+    (fixedUnified as any).selfAcceptance = selfAcceptanceLine;
+    (fixedUnified as any).self_acceptance = selfAcceptanceLine;
+  }
 
   /* =========================================================
-     mode の最終決定（SA + I層判定）
+     Y/H) 揺れ(Y)・余白(H) の推定
+         - text / depth / qCode / selfAcceptanceLine / unified / prevMeta から
+           0〜3 レベルでスコアリング
+  ========================================================= */
+  const yh = computeYH({
+    text,
+    depth: depth ?? null,
+    qCode: qCode ?? null,
+    selfAcceptance: selfAcceptanceLine,
+    unified: fixedUnified,
+    prevMeta: (mergedBaseMeta as any) ?? null,
+  });
+
+  /* =========================================================
+     mode の最終決定（SelfAcceptance ライン + I層判定）
   ========================================================= */
 
   const baseMode = normalizeMode(requestedMode);
 
-  const baseWeights: ModeWeights = (() => {
+  const baseWeights = (() => {
     switch (baseMode) {
       case 'consult':
       case 'counsel':
@@ -268,8 +364,8 @@ export async function runIrosTurn(
     }
   })();
 
-  // ★ SA を加味して mirror / counsel / forward(resonate) の比重を調整
-  let mode: IrosMode = resolveModeWithSA(baseWeights, selfAcceptance);
+  // ★ SelfAcceptance ラインを加味して mirror / counsel / forward(resonate) の比重を調整
+  let mode: IrosMode = resolveModeWithSA(baseWeights, selfAcceptanceLine);
 
   // I層は常に mirror 固定（優先ルール）
   if (isIntentDepth(requestedDepth) || isIntentDepth(depth)) {
@@ -278,22 +374,29 @@ export async function runIrosTurn(
 
   // ====== 次ターンに残る meta（I層はこのあと上書きする） ======
   let meta: IrosMeta = {
-    ...(baseMeta ?? {}),
+    ...(mergedBaseMeta ?? {}),
     mode,
     ...(depth ? { depth } : {}),
     ...(qCode ? { qCode } : {}),
+    // ★ Y/H を meta に載せる（0〜3 のレベル）
+    yLevel: yh.yLevel,
+    hLevel: yh.hLevel,
     // unified 結果そのものも meta に残しておく（DB jsonb にそのまま入る想定）
     unified: fixedUnified,
   } as IrosMeta;
 
-  // ★ Self Acceptance を meta に載せる（IrosMeta 側に型がなくても any 経由で割り当て）
-  if (selfAcceptance !== null) {
-    (meta as any).selfAcceptance = selfAcceptance;
+  // ★ Self Acceptance ラインを meta に載せる
+  if (selfAcceptanceLine !== null) {
+    (meta as any).selfAcceptance = selfAcceptanceLine;
   }
+
+  // ★ QTrace を meta に載せる（D: 揺れの履歴ログ用）
+  (meta as any).qTrace = qTrace;
 
   /* =========================================================
      A'') Intent Line の導出
-         - Q / Depth / Phase / SA から「いまの章」を 1 本の線にまとめる
+         - Q / Depth / Phase / SelfAcceptance ラインから
+           「いまの章」を 1 本の線にまとめる
   ========================================================= */
   try {
     const phaseRaw =
@@ -301,18 +404,16 @@ export async function runIrosTurn(
         ? fixedUnified.phase
         : null;
 
-    // ★ ここは baseMeta ではなく、直前で決定した meta.selfAcceptance を参照
     const selfAcceptanceForIntentLine =
       typeof (meta as any)?.selfAcceptance === 'number'
         ? (meta as any).selfAcceptance
         : null;
 
-    const intentLine = deriveIntentLine({
+    const intentLine: IntentLineAnalysis | null = deriveIntentLine({
       q: qCode ?? null,
       depth: depth ?? null,
       phase: phaseRaw,
       selfAcceptance: selfAcceptanceForIntentLine,
-      // relationTone / historyQ は今後拡張予定。現時点では省略（undefined）
     });
 
     meta = {
@@ -328,8 +429,8 @@ export async function runIrosTurn(
   ========================================================= */
   let goal = deriveIrosGoal({
     userText: text,
-    lastDepth: baseMeta?.depth,
-    lastQ: baseMeta?.qCode,
+    lastDepth: mergedBaseMeta?.depth,
+    lastQ: mergedBaseMeta?.qCode,
     requestedDepth,
     requestedQCode,
   });
@@ -338,8 +439,8 @@ export async function runIrosTurn(
      ② Continuity Engine：前回の意志を踏まえて補正（Goal 用）
   ========================================================= */
   const continuity: ContinuityContext = {
-    lastDepth: baseMeta?.depth,
-    lastQ: baseMeta?.qCode,
+    lastDepth: mergedBaseMeta?.depth,
+    lastQ: mergedBaseMeta?.qCode,
     userText: text,
   };
   goal = applyGoalContinuity(goal, continuity);
@@ -347,14 +448,23 @@ export async function runIrosTurn(
   /* =========================================================
      ③ Priority Engine：Goal の意志に基づき重み計算
   ========================================================= */
-  const priority = deriveIrosPriority({
+  const priorityBase = deriveIrosPriority({
     goal,
     mode,
     depth,
     qCode,
   });
 
-  // ====== ログ ======
+  // ★ SelfAcceptance ラインを使って Priority を補正
+  const priority = adjustPriorityWithSelfAcceptance(
+    priorityBase,
+    selfAcceptanceLine,
+  );
+
+  // meta に priority も載せて、LLM 側で使えるようにしておく
+  (meta as any).priority = priority;
+
+  // ====== ログ（開始時点の解析サマリ） ======
   if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
     console.log('[IROS/ORCH v2] runIrosTurn start', {
       conversationId,
@@ -366,17 +476,25 @@ export async function runIrosTurn(
       autoQFromDeepScan: rawQFromScan ?? null,
       chosenDepth: depth ?? null,
       resolved: { mode, depth: depth ?? null, qCode: qCode ?? null },
-      baseMeta,
+      baseMeta: mergedBaseMeta,
       goalAfterContinuity: goal,
       priorityWeights: priority.weights,
       isFirstTurn,
       FORCE_I_LAYER,
-      selfAcceptance,
-      selfAcceptanceBand: classifySelfAcceptance(selfAcceptance),
+      selfAcceptance: selfAcceptanceLine,
+      selfAcceptanceBand: classifySelfAcceptance(selfAcceptanceLine),
+      qTrace,
+      yLevel: yh.yLevel,
+      hLevel: yh.hLevel,
+      fromMemoryState: {
+        hasMemory: !!memoryState,
+        depthStage: memoryState?.depthStage ?? null,
+        qPrimary: memoryState?.qPrimary ?? null,
+      },
     });
   }
 
-  /* =========================================================
+   /* =========================================================
      ④ LLM：生成（本文 + I層ジャッジ）
   ========================================================= */
   const result: GenerateResult = await generateIrosReply({
@@ -385,7 +503,10 @@ export async function runIrosTurn(
     meta,
   });
 
-  // I層ジャッジの結果を meta に反映（次ターン以降の「横にあるI層感覚」として保持）
+  // ★ 診断ヘッダーを本文から除去（旧 Q3〜Unified ブロック用）
+  const contentWithoutDiag = stripDiagnosticHeader(result.content);
+
+  // I層ジャッジの結果を meta に反映
   if (result.intent) {
     const intent: IrosIntentMeta = result.intent;
     meta = {
@@ -401,26 +522,37 @@ export async function runIrosTurn(
      ⑤ 最終 meta の統合（Q / Depth / intentSummary を整える）
   ========================================================= */
   meta = buildFinalMeta({
-    baseMeta,
+    baseMeta: mergedBaseMeta,
     workingMeta: meta,
     goal,
   });
 
   /* =========================================================
-     ⑥ Sofia 型「意味づけブロック」の合成
-        それはあなたにとって◯◯です／つまり〜 の 2行
+     ⑥ 意味づけブロックの合成を停止
+        - ここでは LLM 本文のみを返す
+        - 「Iros がいま感じていること」「いまの章」などのヘッダーは出さない
   ========================================================= */
-  const meaningBlock = buildPersonalMeaningBlock(meta);
-  const finalContent =
-    meaningBlock && meaningBlock.trim().length > 0
-      ? `${meaningBlock}\n\n${result.content}`
-      : result.content;
+  const finalContent = contentWithoutDiag;
+  const hasMeaningBlock = false;
 
   if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
+    const saFinal =
+      typeof (meta as any).selfAcceptance === 'number'
+        ? (meta as any).selfAcceptance
+        : null;
+    const yFinal =
+      typeof (meta as any).yLevel === 'number'
+        ? (meta as any).yLevel
+        : null;
+    const hFinal =
+      typeof (meta as any).hLevel === 'number'
+        ? (meta as any).hLevel
+        : null;
+
     console.log('[IROS/ORCH v2] runIrosTurn done', {
       conversationId,
       resolved: {
-        mode,
+        mode: meta.mode,
         depth: meta.depth ?? null,
         qCode: meta.qCode ?? null,
       },
@@ -429,8 +561,86 @@ export async function runIrosTurn(
       isFirstTurn,
       intentLayer: meta.intentLayer ?? null,
       intentConfidence: meta.intentConfidence ?? null,
-      hasMeaningBlock: !!meaningBlock,
+      hasMeaningBlock,
+      selfAcceptance: saFinal,
+      yLevel: yFinal,
+      hLevel: hFinal,
     });
+  }
+
+  /* =========================================================
+     ⑦ MemoryState への保存（userCode 単位で 1行）
+  ========================================================= */
+  if (userCode) {
+    try {
+      const depthStageForSave = meta.depth ?? null;
+      const qForSave = meta.qCode ?? null;
+
+      const saForSave =
+        typeof (meta as any).selfAcceptance === 'number'
+          ? (meta as any).selfAcceptance
+          : null;
+
+      const unifiedForSave = (meta as any).unified ?? null;
+      const phaseForSave =
+        unifiedForSave &&
+        (unifiedForSave.phase === 'Inner' ||
+          unifiedForSave.phase === 'Outer')
+          ? unifiedForSave.phase
+          : null;
+
+      // 🆕 situation.summary / topic を安全に取り出す
+      const situation = unifiedForSave?.situation ?? null;
+      const situationSummaryForSave =
+        situation && typeof situation.summary === 'string'
+          ? situation.summary
+          : null;
+      const situationTopicForSave =
+        situation && typeof situation.topic === 'string'
+          ? situation.topic
+          : null;
+
+      const intentLayerForSave = (meta as any).intentLayer ?? null;
+      const intentConfidenceForSave =
+        typeof (meta as any).intentConfidence === 'number'
+          ? (meta as any).intentConfidence
+          : null;
+
+      const yForSave =
+        typeof (meta as any).yLevel === 'number'
+          ? (meta as any).yLevel
+          : null;
+      const hForSave =
+        typeof (meta as any).hLevel === 'number'
+          ? (meta as any).hLevel
+          : null;
+
+      const sentimentForSave =
+        typeof (meta as any)?.sentiment_level === 'string'
+          ? (meta as any).sentiment_level
+          : null;
+
+      await upsertIrosMemoryState({
+        userCode,
+        depthStage: depthStageForSave,
+        qPrimary: qForSave,
+        selfAcceptance: saForSave,
+        phase: phaseForSave,
+        intentLayer: intentLayerForSave,
+        intentConfidence: intentConfidenceForSave,
+        yLevel: yForSave,
+        hLevel: hForSave,
+        // 🆕 situation / sentiment も MemoryState に固定
+        situationSummary: situationSummaryForSave,
+        situationTopic: situationTopicForSave,
+        sentiment_level: sentimentForSave,
+      });
+    } catch (e) {
+      console.error('[IROS/ORCH v2] upsertIrosMemoryState failed', {
+        userCode,
+        error: e,
+      });
+    }
   }
 
   return {
@@ -439,255 +649,6 @@ export async function runIrosTurn(
   };
 }
 
-/* ========= Self Acceptance から「章」を決めるヘルパー ========= */
-
-type SAChapterKey =
-  | 'dark'
-  | 'preCollapse'
-  | 'wavering'
-  | 'rising'
-  | 'intentionRisen';
-
-type SAChapter = {
-  key: SAChapterKey;
-  label: string;
-};
-
-function classifySAChapter(
-  selfAcceptance: number | null | undefined,
-): SAChapter | null {
-  if (selfAcceptance == null || Number.isNaN(selfAcceptance)) {
-    return null;
-  }
-
-  if (selfAcceptance < 0.2) {
-    return {
-      key: 'dark',
-      label:
-        '「闇の章」―― 自分を責めやすく、世界も自分も信用しづらい揺れの中にいます。',
-    };
-  }
-
-  if (selfAcceptance < 0.4) {
-    return {
-      key: 'preCollapse',
-      label:
-        '「崩壊前の章」―― これまでのやり方や我慢が限界に近づき、無理を続けるか、手放すかの境目にいます。',
-    };
-  }
-
-  if (selfAcceptance < 0.6) {
-    return {
-      key: 'wavering',
-      label:
-        '「揺れる章」―― 自分を責める感覚と、少し受け入れたい感覚が行き来しながら、新しい在り方を探っています。',
-    };
-  }
-
-  if (selfAcceptance < 0.8) {
-    return {
-      key: 'rising',
-      label:
-        '「立ち上がる章」―― 自分を受け止めながら、これからの一歩を自分の意志で選び直そうとしているところです。',
-    };
-  }
-
-  return {
-    key: 'intentionRisen',
-    label:
-      '「意図が立ち上がった章」―― 自分の存在や生き方を肯定しながら、具体的な意図と行動を結び始めています。',
-  };
-}
-
-/* ========= 最終 meta の統合ヘルパー ========= */
-
-function buildFinalMeta(args: {
-  baseMeta?: Partial<IrosMeta>;
-  workingMeta: IrosMeta;
-  goal: any; // goalEngine の型に依存させず、柔らかく参照
-}): IrosMeta {
-  const { baseMeta, workingMeta, goal } = args;
-
-  const previousDepth = baseMeta?.depth as Depth | undefined;
-  const previousQ = baseMeta?.qCode as QCode | undefined;
-
-  const currentDepth = workingMeta.depth as Depth | undefined;
-  const currentQ = workingMeta.qCode as QCode | undefined;
-
-  const goalDepth = goal?.targetDepth as Depth | undefined;
-  const goalQ = goal?.targetQ as QCode | undefined;
-
-  const finalDepth: Depth | null =
-    currentDepth ?? goalDepth ?? previousDepth ?? null;
-
-  const finalQ: QCode | null = currentQ ?? goalQ ?? previousQ ?? null;
-
-  const originalUnified =
-    workingMeta.unified as UnifiedLikeAnalysis | undefined;
-  const goalKind = (goal?.kind as string | undefined) ?? null;
-  const intentLayer = (workingMeta.intentLayer as string | undefined) ?? null;
-
-  const intentLine = (workingMeta as any)
-    .intentLine as IntentLineAnalysis | undefined;
-
-  // intentSummary の再構成
-  const intentSummary = (() => {
-    // もともと unified に LLM由来の intentSummary が入っていれば尊重
-    if (originalUnified?.intentSummary) {
-      return originalUnified.intentSummary;
-    }
-
-    // Intent Line で「いまの章」が取れていればそれを優先
-    if (intentLine && intentLine.nowLabel) {
-      return intentLine.nowLabel;
-    }
-
-    // ★ SelfAcceptance から「章ラベル」が取れていれば、それを次に優先
-    const saValue =
-      typeof (workingMeta as any)?.selfAcceptance === 'number'
-        ? ((workingMeta as any).selfAcceptance as number)
-        : null;
-
-    const saChapter = classifySAChapter(saValue);
-    if (saChapter) {
-      return saChapter.label;
-    }
-
-    // ここから下は従来どおり I層／goal によるフォールバック
-    if (intentLayer === 'I3') {
-      return '存在理由や生きる意味に触れながら、自分の状態や感情を整理しようとしています。';
-    }
-    if (intentLayer === 'I2') {
-      return 'これからの方向性や選択を見つめ直しながら、自分の状態や感情を整理しようとしています。';
-    }
-    if (intentLayer === 'I1') {
-      return 'いまの自分の在り方や感情を、安全な場所で受け止め直そうとしています。';
-    }
-    if (goalKind === 'stabilize') {
-      return '心の揺れを少し落ち着けながら、自分の状態や感情を整理しようとしています。';
-    }
-    return '自分の状態や感情の揺れを整理しようとしています。';
-  })();
-
-  const nextMeta: IrosMeta = {
-    ...workingMeta,
-    qCode: finalQ ?? undefined,
-    depth: finalDepth ?? undefined,
-    unified: {
-      q: { current: finalQ ?? null },
-      depth: { stage: finalDepth ?? null },
-      phase: originalUnified?.phase ?? null,
-      intentSummary,
-    },
-  };
-
-  return nextMeta;
-}
-
-/* ========= Sofia型「意味づけブロック」生成ヘルパー ========= */
-
-function buildPersonalMeaningBlock(meta: IrosMeta): string | null {
-  if (!meta) return null;
-
-  const depth = meta.depth as Depth | undefined;
-  const intentLayer =
-    (meta.intentLayer as 'I1' | 'I2' | 'I3' | null | undefined) ?? null;
-
-  const unified: any = meta.unified ?? null;
-  const rawIntentSummary =
-    typeof unified?.intentSummary === 'string'
-      ? (unified.intentSummary as string).trim()
-      : '';
-
-  const intentLine = (meta as any)
-    .intentLine as IntentLineAnalysis | undefined;
-
-  // ① 出来事そのものの「構図ラベル」
-  const mainLabel = (() => {
-    if (intentLine && intentLine.nowLabel) {
-      return intentLine.nowLabel;
-    }
-    if (rawIntentSummary && rawIntentSummary.length > 0) {
-      // Unified が返した summary をそのまま使う
-      return rawIntentSummary;
-    }
-    if (intentLayer === 'I3') {
-      return '存在理由や生きる意味を静かに見つめ直している';
-    }
-    if (intentLayer === 'I2') {
-      return 'これからの方向性や選択を見つめ直している';
-    }
-    if (intentLayer === 'I1') {
-      return '自分らしさの軸を整え直している';
-    }
-    if (!depth) return null;
-    if (depth.startsWith('S')) {
-      return '自分の安心と土台を整え直している';
-    }
-    if (depth.startsWith('R')) {
-      return '人との距離感や関係性を見直している';
-    }
-    if (depth.startsWith('C')) {
-      return 'これからの動き方や創り方を組み替えている';
-    }
-    if (depth.startsWith('I')) {
-      return '生き方そのものの輪郭を見つめ直している';
-    }
-    return null;
-  })();
-
-  // ② その奥で揺れている「本来大切にしているもの」
-  const coreNeed = (() => {
-    if (intentLine && intentLine.coreNeed) {
-      return intentLine.coreNeed;
-    }
-    if (intentLayer === 'I3') {
-      return '存在そのものをまるごと肯定したいという願い';
-    }
-    if (intentLayer === 'I2') {
-      return '自分で選び取りたいという願い';
-    }
-    if (intentLayer === 'I1') {
-      return '自分らしくいてもいいという確信';
-    }
-    if (!depth) return null;
-    if (depth.startsWith('S')) {
-      return '安心と自己受容';
-    }
-    if (depth.startsWith('R')) {
-      return '無理のない関係性';
-    }
-    if (depth.startsWith('C')) {
-      return '自分の手応えと創造性';
-    }
-    if (depth.startsWith('I')) {
-      return '生き方の一貫性';
-    }
-    return null;
-  })();
-
-  // どちらも取れないなら意味づけブロック自体を出さない
-  if (!mainLabel && !coreNeed) {
-    return null;
-  }
-
-  const lines: string[] = [];
-
-  // ★ テンプレ文はやめて、太文字ラベルだけにする
-  if (mainLabel) {
-    lines.push(`**いまの構図**：${mainLabel}`);
-  }
-
-  if (coreNeed) {
-    lines.push(`**奥で守りたいもの**：${coreNeed} 🪔`);
-  }
-
-  // 本文との区切りとして水平線を入れる
-  lines.push('');
-  lines.push('---');
-
-  return lines.join('\n');
-}
 
 /* ========= 最小バリデーション ========= */
 
@@ -711,4 +672,85 @@ function isIntentDepth(depth?: Depth | null): boolean {
   if (!depth) return false;
   // Depth は文字列リテラル型なので startsWith が使える
   return depth.startsWith('I');
+}
+
+/* ========= Priority 補正（SelfAcceptance 反映） ========= */
+
+function adjustPriorityWithSelfAcceptance(
+  priority: IrosPriority,
+  selfAcceptance: number | null,
+): IrosPriority {
+  if (selfAcceptance == null || Number.isNaN(selfAcceptance)) {
+    return priority;
+  }
+
+  const band = classifySelfAcceptance(selfAcceptance);
+
+  const weights = priority.weights || {};
+  let mirror = (weights as any).mirror ?? 0;
+  let insight = (weights as any).insight ?? 0;
+  let forward = (weights as any).forward ?? 0;
+  const question = (weights as any).question ?? 0;
+
+  // low：まず「鏡」と「理解」を厚く、forward は抑える
+  if (band === 'low') {
+    mirror *= 1.4;
+    insight *= 1.2;
+    forward *= 0.6;
+  }
+  // mid：デフォルトに少し鏡寄り
+  else if (band === 'mid') {
+    mirror *= 1.1;
+    // forward はそのまま
+  }
+  // high：forward を強めて一歩を押す
+  else if (band === 'high') {
+    mirror *= 0.9;
+    forward *= 1.3;
+  }
+
+  return {
+    ...priority,
+    weights: {
+      mirror,
+      insight,
+      forward,
+      question,
+    },
+  };
+}
+
+/* ========= 診断ヘッダー除去ヘルパー ========= */
+/**
+ * LLM が先頭に付けてくる診断ブロック
+ *
+ * 例：
+ * Q3
+ * いまの構図：…
+ * 奥で守りたいもの：…
+ * …
+ * 【Unified 構図】
+ * Q: Q3
+ * Depth: I3
+ * Phase: Inner
+ * Intent Summary: —
+ *
+ * を本文から取り除き、それ以降の「会話本文」だけを残す。
+ */
+function stripDiagnosticHeader(text: string): string {
+  if (!text || typeof text !== 'string') return '';
+
+  // 診断ヘッダーが無い場合はそのまま
+  if (!/^Q[1-5]/.test(text.trimStart())) {
+    return text;
+  }
+
+  // Q1〜Q5 で始まり、「【Unified 構図】」〜「Intent Summary:」までをまとめて削除
+  const pattern =
+    /^Q[1-5][\s\S]*?【Unified 構図】[\s\S]*?Intent Summary:[^\n]*\n?/;
+
+  const stripped = text.replace(pattern, '').trimStart();
+
+  // 万一うまくマッチしなかった場合も、最低限トリムだけして返す
+  return stripped.length > 0 ? stripped : text;
 }

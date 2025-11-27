@@ -11,6 +11,11 @@ const FALLBACK_H = 56;
 type ItemId = 'home' | 'talk' | 'board' | 'pay' | 'mypage';
 type Item = { id: ItemId; label: string; href: string; icon?: React.ReactNode };
 
+// ★ 追加：未読ポーリングを有効にするフラグ（デフォルト off）
+const ENABLE_UNREAD_POLL =
+  process.env.NEXT_PUBLIC_ENABLE_UNREAD_POLL === '1' &&
+  process.env.NODE_ENV === 'production';
+
 function toast(msg: string) {
   const id = 'mu-footer-toast';
   document.getElementById(id)?.remove();
@@ -154,8 +159,14 @@ export default function Footer() {
     if (pathname !== it.href) router.push(it.href);
   };
 
-  // ===== 未読バッジ（止まらない安全版）=====
-  useEffect(() => {
+   // ===== 未読バッジ（止まらない安全版）=====
+   useEffect(() => {
+    // ★ 追加：ポーリング自体を無効化（ログを止める本体）
+    if (!ENABLE_UNREAD_POLL) {
+      setCounts((c) => ({ ...c, talk: 0 }));
+      return;
+    }
+
     if (debugBadge > 0) {
       setCounts((c) => ({ ...c, talk: debugBadge }));
       return;
@@ -164,6 +175,7 @@ export default function Footer() {
       setCounts((c) => ({ ...c, talk: 0 }));
       return;
     }
+
 
     const sb = getSb();
     const cleanups: Array<() => void> = [];

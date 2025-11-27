@@ -15,10 +15,9 @@ import {
   stopHeartbeat,
   wireOnlineOffline,
   tracePage,
-  tlog, // ★ 追加
+  tlog,
 } from '@/lib/telemetry';
 
-// ★ 追加: Resonance Context（Q/Phase の共有）
 import { ResonanceProvider, useResonance } from '@/state/resonance/ResonanceContext';
 
 /* =========================
@@ -90,12 +89,43 @@ function LayoutBody({ children }: { children: React.ReactNode }) {
     pathname?.startsWith('/mu_ai') === true || pathname?.startsWith('/mu_full') === true;
   const isIros = pathname?.startsWith('/iros') === true;
   const isSofia = pathname?.startsWith('/sofia') === true;
+  const isIrosAi = pathname?.startsWith('/iros-ai') === true; // ★ IROS-AI 判定
 
-  // ★ /credit 以外はフッターの高さを測って CSS 変数を更新（/sofia も含める）
-  usePortalFooterPadding(!isCredit);
+  // /credit と /iros-ai 以外はフッター高さを測る
+  usePortalFooterPadding(!(isCredit || isIrosAi));
 
-  // main の padding-bottom（/credit だけ 0、/sofia でもフッター高さぶん確保）
-  const mainPad = useMemo(() => (isCredit ? '0' : 'var(--footer-safe-pad, 56px)'), [isCredit]);
+  // main の padding-bottom
+  const mainPad = useMemo(
+    () => (isCredit || isIrosAi ? '0' : 'var(--footer-safe-pad, 56px)'),
+    [isCredit, isIrosAi],
+  );
+
+  // /iros-ai のときは外側スクロールを切る
+  const mainOverflowY: 'auto' | 'visible' = isIrosAi ? 'visible' : 'auto';
+
+  // ★ IROS-AI: body / html 自体のスクロールも止める
+  useEffect(() => {
+    if (!mounted) return;
+
+    const html = document.documentElement;
+    const body = document.body;
+
+    const prevHtmlOverflow = html.style.overflowY;
+    const prevBodyOverflow = body.style.overflowY;
+
+    if (isIrosAi) {
+      html.style.overflowY = 'hidden';
+      body.style.overflowY = 'hidden';
+    } else {
+      html.style.overflowY = prevHtmlOverflow || '';
+      body.style.overflowY = prevBodyOverflow || '';
+    }
+
+    return () => {
+      html.style.overflowY = prevHtmlOverflow;
+      body.style.overflowY = prevBodyOverflow;
+    };
+  }, [isIrosAi, mounted]);
 
   return (
     <>
@@ -108,7 +138,7 @@ function LayoutBody({ children }: { children: React.ReactNode }) {
         className={`mu-main ${isMuAI ? 'mu-main--wide' : ''}`}
         style={{
           flex: '1 1 auto',
-          overflowY: 'auto',
+          overflowY: mainOverflowY,
           WebkitOverflowScrolling: 'touch',
           paddingBottom: mainPad,
         }}
@@ -116,14 +146,14 @@ function LayoutBody({ children }: { children: React.ReactNode }) {
         <div className={`mu-page ${isMuAI ? 'mu-page--wide' : ''}`}>{children}</div>
       </main>
 
-      {/* ★ /credit 以外はフッターを表示（/sofia も表示） */}
-      {!isCredit && mounted && (
+      {/* /credit と /iros-ai 以外はフッターを表示 */}
+      {!isCredit && !isIrosAi && mounted && (
         <FooterPortal>
           <Footer />
         </FooterPortal>
       )}
 
-      {/* ヘッダー由来のモーダル → ヘッダーを出さないページでは非表示（/sofia も非表示） */}
+      {/* ヘッダー由来モーダル */}
       {!(isMuAI || isIros || isSofia) && mounted && (
         <LoginModal
           isOpen={showLogin}
@@ -160,14 +190,13 @@ function showToast(title: string, body: string, url: string) {
   setTimeout(() => div.remove(), 8000);
 }
 
-/* ★ 追加：Auth→ResonanceContext へ userCode を流し込むだけの小コンポーネント */
+/* Auth→ResonanceContext へ userCode を流し込むだけの小コンポーネント */
 function BootstrapResonanceUser() {
   const { userCode } = useAuth();
   const { state, actions } = useResonance();
   useEffect(() => {
     if (userCode && state.userCode !== userCode) {
       actions.setUserCode(userCode);
-      // 起動時に一度サーバ同期（UIは止めない）
       actions.syncFromServer().catch(() => {});
     }
   }, [userCode, state.userCode, actions]);
@@ -176,47 +205,42 @@ function BootstrapResonanceUser() {
 
 export default function LayoutClient({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { userCode, idToken, loading } = useAuth(); // ★ idToken/loading を受け取る
+  const { userCode, idToken, loading } = useAuth();
   const isMuAI =
     pathname?.startsWith('/mu_ai') === true || pathname?.startsWith('/mu_full') === true;
   const isIros = pathname?.startsWith('/iros') === true;
   const isSofia = pathname?.startsWith('/sofia') === true;
 
-  // ★ 監視記録（テレメトリ）起動：セッション生成・HB・オンライン監視
+  // 監視記録（テレメトリ）
   useEffect(() => {
     ensureSessionId();
     const unbind = wireOnlineOffline();
 
-    // ← 初回に一度だけ、どのパスから始まったかを明示ログ
     tlog({
       kind: 'online',
       path: 'heartbeat_start',
       note: JSON.stringify({ first_path: pathname }),
     });
 
-    // HB は 1引数だけでOK（第2引数は使わない）
     startHeartbeat(30000);
 
     return () => {
       unbind?.();
       stopHeartbeat();
     };
-    // 初回だけ
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ★ ページ遷移のトレース
+  // ページ遷移トレース
   useEffect(() => {
     tracePage(pathname || '/');
   }, [pathname]);
 
-  // SW 登録＋フォールバック受信＋subscription 登録（副作用のみ）
+  // SW登録＋プッシュ登録
   useEffect(() => {
     let onMsg: ((e: MessageEvent) => void) | null = null;
     (async () => {
       if (!('serviceWorker' in navigator)) return;
-
-      // ★ 認証が確定していなければ何もしない（401防止）
       if (loading || !userCode || !idToken) return;
 
       const reg = await navigator.serviceWorker.register('/sw.js');
@@ -249,9 +273,8 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
     return () => {
       if (onMsg) navigator.serviceWorker.removeEventListener('message', onMsg);
     };
-  }, [userCode, idToken, loading]); // ★ 依存を拡張
+  }, [userCode, idToken, loading]);
 
-  // ★ ここだけ Provider を巻く（構造はそのまま）
   return (
     <ResonanceProvider>
       <BootstrapResonanceUser />

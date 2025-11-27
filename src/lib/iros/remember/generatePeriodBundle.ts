@@ -16,6 +16,7 @@ export type ResonancePeriodBundleJson = {
   representative_sentences: string[];
   overall_summary: string;
   unresolved_points?: string[];
+  // ★ 統計情報（LLMが埋めてもよいし、サーバ側で補完してもよい）
   q_stats?: Record<string, number>;
   depth_stats?: Record<string, number>;
 };
@@ -199,7 +200,9 @@ export async function generateResonancePeriodBundle(
   "main_topics": [string, ...],
   "representative_sentences": [string, ...],
   "overall_summary": string,
-  "unresolved_points": [string, ...]
+  "unresolved_points": [string, ...],
+  "q_stats": { "Q1": number, "Q2": number, ... },        // 任意：参考用
+  "depth_stats": { "S1": number, "I3": number, ... }     // 任意：参考用
 }
 `.trim();
 
@@ -229,9 +232,9 @@ ${JSON.stringify(logSummaries, null, 2)}
     { role: 'user', content: userPrompt },
   ];
 
-  // 🔴 ここをあなたの chatComplete の仕様に合わせて修正
+  // ★ mini系は使わず、env が無ければ gpt-4.1 をデフォルトにする
   const rawText = await chatComplete({
-    model: process.env.OPENAI_API_MODEL || 'gpt-4.1-mini', // ※必要に応じて変更
+    model: process.env.OPENAI_API_MODEL || 'gpt-4.1',
     messages,
   });
 
@@ -244,6 +247,14 @@ ${JSON.stringify(logSummaries, null, 2)}
       rawText
     );
     throw e;
+  }
+
+  // Q/Depth の統計は、LLMが返さなかった場合でもこちらで補完しておく
+  if (!bundleJson.q_stats) {
+    bundleJson.q_stats = qStats;
+  }
+  if (!bundleJson.depth_stats) {
+    bundleJson.depth_stats = depthStats;
   }
 
   const title =

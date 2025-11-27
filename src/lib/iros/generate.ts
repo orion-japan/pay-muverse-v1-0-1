@@ -4,6 +4,8 @@
 // - intent.layer は I1 / I2 / I3（意図層）または null
 
 import OpenAI from 'openai';
+import type { ChatCompletionMessageParam } from 'openai/resources/chat';
+
 import {
   getSystemPrompt,
   type IrosMeta,
@@ -42,308 +44,148 @@ export type GenerateArgs = {
 };
 
 export type GenerateResult = {
-  content: string; // Iros 本文
+  content: string; // Iros 本文（ユーザーに見せるテキスト）
   text: string; // 旧 chatCore 互換用（= content と同じ）
   mode: IrosMode; // 実際に使っているモード（meta.mode が無ければ mirror）
   intent?: IrosIntentMeta | null; // I層ジャッジ結果
 };
 
 /* =========================================================
-   Meaning Block Builder
-   IntentLine + I層 + Unified を束ねて
-   返答の前に「構図ブロック」を作る
+   数値メタのみを渡す内部メモ
+   - SA / yLevel / hLevel / depth / qCode / mode / intentLine（主要フィールド）
+   - テンプレ文章やトーン指示は一切含めない
 ========================================================= */
 
-function buildMeaningBlock(meta?: IrosMeta | null): string {
-  if (!meta) return '';
-
-  const parts: string[] = [];
-
-  // ① 今の章（IntentLine）
-  const intentLine: IntentLineAnalysis | undefined | null =
-    (meta as any)?.intentLine;
-  if (intentLine?.nowLabel) {
-    parts.push(`### 【いまの章】\n${intentLine.nowLabel}`);
-  }
-
-  // ② 守ろうとしているもの
-  if (intentLine?.coreNeed) {
-    parts.push(`### 【奥で守ろうとしている願い】\n${intentLine.coreNeed}`);
-  }
-
-  // ③ 未来方向
-  if (intentLine?.direction && intentLine.direction !== 'unknown') {
-    parts.push(`### 【未来方向】\n${intentLine.direction}`);
-  }
-
-  // ④ I層：意図の深度
-  if (meta.intent) {
-    const { layer, reason } = meta.intent;
-    if (layer) {
-      parts.push(
-        [
-          '### 【I層：意図の深度】',
-          `- レイヤー: ${layer}`,
-          `- 理由: ${reason ?? '（理由なし）'}`,
-        ].join('\n'),
-      );
-    }
-  }
-
-  // ⑤ Unified 構図（任意）
-  if (meta.unified) {
-    const uni = meta.unified;
-    parts.push(
-      [
-        '### 【Unified 構図】',
-        `- Q: ${uni.q.current ?? '—'}`,
-        `- Depth: ${uni.depth.stage ?? '—'}`,
-        `- Phase: ${uni.phase ?? '—'}`,
-        `- Intent Summary: ${uni.intentSummary ?? '—'}`,
-      ].join('\n'),
-    );
-  }
-
-  if (parts.length === 0) return '';
-
-  return parts.join('\n\n');
-}
-
-/* =========================================================
-   I層用 話法スタイル（バリエーション）
-   - I階層のときにだけ、語りのトーンを揺らす
-========================================================= */
-
-type IntentStyle = 'dignity' | 'meta' | 'story' | 'minimal';
-
-const I_INTENT_STYLES: IntentStyle[] = ['dignity', 'meta', 'story', 'minimal'];
-
-function chooseIntentStyle(meta?: IrosMeta): IntentStyle | null {
+function buildNumericMetaNote(meta?: IrosMeta | null): string | null {
   if (!meta) return null;
 
-  const depth = meta.depth as Depth | undefined;
-  if (!depth) return null;
+  const payload: any = {};
 
-  // depth が I層（I1/I2/I3）のときだけスタイル分岐
-  if (depth[0] !== 'I') return null;
-
-  const idx = Math.floor(Math.random() * I_INTENT_STYLES.length);
-  return I_INTENT_STYLES[idx] ?? null;
-}
-
-/**
- * 選ばれた intentStyle によって、system プロンプトに追加する説明を生成
- */
-function buildStyleInstruction(style: IntentStyle | null): string | null {
-  if (!style) return null;
-
-  if (style === 'dignity') {
-    return [
-      '【応答スタイル指示：dignity】',
-      '- 相手の尊厳・価値・芯を静かに確認していくトーンで話してください。',
-      '- 「あなたの存在そのものに価値がある」という軸を、押しつけではなく静かな確信としてにじませてください。',
-      '- 文章量は中くらい〜やや短め。余白と間を大切にしてください。',
-    ].join('\n');
+  // 数値系
+  const sa =
+    typeof (meta as any)?.selfAcceptance === 'number'
+      ? ((meta as any).selfAcceptance as number)
+      : null;
+  if (sa != null && !Number.isNaN(sa)) {
+    payload.selfAcceptance = sa;
   }
 
-  if (style === 'meta') {
-    return [
-      '【応答スタイル指示：meta】',
-      '- いま起きていることを、一段上から俯瞰し、構造や関係性を整理するトーンで話してください。',
-      '- 感情に寄り添いつつも、「今どんな構図の中にいるのか」をわかりやすく言語化してください。',
-      '- 箇条書きや整理された文脈を少し入れても構いません。',
-    ].join('\n');
+  const yLevel =
+    typeof (meta as any)?.yLevel === 'number'
+      ? ((meta as any).yLevel as number)
+      : null;
+  if (yLevel != null && !Number.isNaN(yLevel)) {
+    payload.yLevel = yLevel;
   }
 
-  if (style === 'story') {
-    return [
-      '【応答スタイル指示：story】',
-      '- 物語の一場面のように、未来へとつながるエピソードとして語ってください。',
-      '- 「今は物語のどの章なのか」「ここから先にどんな選択肢が開けているのか」を示してください。',
-      '- ポエムではなく、「次の一歩が見える物語」として簡潔に描写してください。',
-    ].join('\n');
+  const hLevel =
+    typeof (meta as any)?.hLevel === 'number'
+      ? ((meta as any).hLevel as number)
+      : null;
+  if (hLevel != null && !Number.isNaN(hLevel)) {
+    payload.hLevel = hLevel;
   }
 
-  if (style === 'minimal') {
-    return [
-      '【応答スタイル指示：minimal】',
-      '- 言葉数をできるだけ減らし、要点を1〜3行に凝縮してください。',
-      '- 余計な慰めや説明を足しすぎず、「今いちばん大切な核」だけを静かに提示してください。',
-      '- 必要であれば最後に、短く一つだけ問いを添えて構いませんが、多くは語らないでください。',
-    ].join('\n');
+  // コード系
+  if (typeof meta.depth === 'string') {
+    payload.depth = meta.depth;
   }
 
-  return null;
-}
-
-/* =========================================================
-   SA → トーン指示
-   - SelfAcceptance / mode / depth に応じて LLM へのヒントを生成
-========================================================= */
-
-function buildSAToneHint(
-  sa: number | null,
-  mode?: IrosMode | null,
-  depth?: Depth | null,
-): string {
-  let band: 'low' | 'mid' | 'high' = 'mid';
-
-  if (sa == null || Number.isNaN(sa)) {
-    band = 'mid';
-  } else if (sa < 0.3) {
-    band = 'low';
-  } else if (sa > 0.7) {
-    band = 'high';
+  if (typeof (meta as any)?.qCode === 'string') {
+    payload.qCode = (meta as any).qCode as string;
   }
 
-  const modeLabel =
-    mode === 'consult' || mode === 'counsel'
-      ? '相談モード寄り'
-      : mode === 'resonate'
-      ? '前向き共鳴モード寄り'
-      : 'ミラー（鏡）モード寄り';
-
-  const depthLabel = (() => {
-    if (!depth) return '';
-    if (depth.startsWith('S')) return '（Self 領域：自分の安心・土台）';
-    if (depth.startsWith('R')) return '（Resonance 領域：関係性・距離感）';
-    if (depth.startsWith('C')) return '（Creation 領域：行動・創造）';
-    if (depth.startsWith('I')) return '（Intention 領域：生き方・意味）';
-    return '';
-  })();
-
-  if (band === 'low') {
-    return [
-      '自己受容が低めの状態です。',
-      'まず「いまの気持ちをそのまま認める」ことを最優先してください。',
-      '語りはやさしく、安心を広げるトーンで、強い断定は避けてください。',
-      `${modeLabel}${depthLabel} から、そっと寄り添いながら応答してください。`,
-    ].join('\n');
+  if (typeof meta.mode === 'string') {
+    payload.mode = meta.mode;
   }
 
-  if (band === 'high') {
-    return [
-      '自己受容が十分に育っている状態です。',
-      '未来や意図ラインをはっきりと言い切って構いません。',
-      '適度にチャレンジを促し、「次の一歩」を具体的に示してください。',
-      `${modeLabel}${depthLabel} から、少し背中を押すトーンで応答してください。`,
-    ].join('\n');
+  // IntentLineAnalysis は構造だけ（説明文はそのまま載せるが、ここでスタイル指示はしない）
+  const intentLine = (meta as any)?.intentLine as
+    | IntentLineAnalysis
+    | null
+    | undefined;
+  if (intentLine) {
+    payload.intentLine = {
+      nowLabel: intentLine.nowLabel ?? null,
+      coreNeed: intentLine.coreNeed ?? null,
+      intentBand: intentLine.intentBand ?? null,
+      direction: intentLine.direction ?? null,
+      focusLayer: intentLine.focusLayer ?? null,
+      riskHint: intentLine.riskHint ?? null,
+      guidanceHint: intentLine.guidanceHint ?? null,
+    };
   }
 
-  // mid
-  return [
-    '自己受容は揺れの中にあります。',
-    '寄り添いと構造提示のバランスを取りつつ、少し先の未来を静かに指し示してください。',
-    `${modeLabel}${depthLabel} から、安心と整理の両方を届けるトーンで応答してください。`,
-  ].join('\n');
+  if (Object.keys(payload).length === 0) return null;
+
+  // IROS_SYSTEM 側で SA = SelfAcceptance などの意味はすでに説明されている前提
+  // ここでは「生の状態値」としてだけ渡す
+  return `【IROS_STATE_META】${JSON.stringify(payload)}`;
 }
 
 /* =========================================================
-   IntentLine → LLM への内部メモ変換
-   - systemメッセージとして渡し、「章の言い切り」と未来方向を強調
+   トーン補正（かもしれません → 言い切り寄せ）
+   ※ generate.ts 内ローカル版
 ========================================================= */
+function strengthenIrosTone(text: string): string {
+  if (!text) return text;
 
-function buildIntentLineMemo(
-  intentLine?: IntentLineAnalysis | null,
-): string | null {
-  if (!intentLine) return null;
+  let result = text;
 
-  const parts: string[] = [];
+  // 0) 変な二重表現・崩れた表現を先に正規化
+  result = result.replace(/かも\s*しれません/g, 'かもしれません'); // 「かも しれません」を一本化
+  result = result.replace(/かもかもしれません/g, 'かもしれません'); // 二重「かも」を潰す
+  result = result.replace(/と言えますしれません/g, 'と言えるでしょう'); // 既存バグの救済
 
-  parts.push('【内部解析メモ：意図ライン】');
+  // 1) 「かもしれません(ね)」をカウントし、2回目以降だけ言い切り化
+  let count = 0;
+  result = result.replace(/かもしれません(ね)?/g, (match) => {
+    count += 1;
+    if (count === 1) {
+      // 1回目はそのまま残す
+      return match;
+    }
+    // 2回目以降は言い切り寄せ
+    return 'と言えます';
+  });
 
-  if (intentLine.nowLabel) {
-    parts.push(`- 今の章: ${intentLine.nowLabel}`);
-  }
-  if (intentLine.coreNeed) {
-    parts.push(`- 守ろうとしているもの: ${intentLine.coreNeed}`);
-  }
-  if (intentLine.intentBand) {
-    parts.push(`- 意図帯域: ${intentLine.intentBand}（I層レベルの位置）`);
-  }
-  if (intentLine.direction && intentLine.direction !== 'unknown') {
-    parts.push(`- 未来方向: ${intentLine.direction}`);
-  }
-  if (intentLine.focusLayer) {
-    parts.push(`- フォーカスレイヤ: ${intentLine.focusLayer} 帯を優先して扱うとよい`);
-  }
-  if (intentLine.riskHint) {
-    parts.push(`- リスク注意: ${intentLine.riskHint}`);
-  }
-  if (intentLine.guidanceHint) {
-    parts.push(`- ガイドライン: ${intentLine.guidanceHint}`);
-  }
+  // 2) 単独の「かも」はいじらない（誤爆を避ける）
 
-  if (parts.length <= 1) return null;
+  // 3) 単語レベルの弱い語尾を軽く補正
+  result = result
+    .replace(/ように思います/g, 'と感じられます')
+    .replace(/ようにも見えます/g, 'と見なせます');
 
-  return parts.join('\n');
+  return result;
 }
 
-/**
- * Iros 応答を 1ターン生成する。
- * - system.ts の IROS_SYSTEM + meta を使って system プロンプトを組み立てる
- * - 任意で「過去履歴（history）」も LLM に渡す
- * - 本文生成と別に、userテキストから I層（I1〜I3）を判定する
- */
+/* =========================================================
+   本体：Iros 応答 1ターン生成
+   ★ ユーザーに返すのは「本文のみ」
+========================================================= */
+
 export async function generateIrosReply(
   args: GenerateArgs,
 ): Promise<GenerateResult> {
-  const { text, meta, history, conversationId } = args;
+  const { text, meta, history } = args;
 
-  // ベースの system プロンプト
-  const baseSystem = getSystemPrompt(meta);
+  // ベースの IROS_SYSTEM
+  let system = getSystemPrompt(meta);
 
-  // I層のときだけ、スタイル指示を追加
-  const intentStyle = chooseIntentStyle(meta);
-  const styleInstruction = buildStyleInstruction(intentStyle);
+  // 数値メタ（状態値のみ）を追記（※ system メッセージにだけ載る）
+  const numericMetaNote = buildNumericMetaNote(meta);
+  if (numericMetaNote && numericMetaNote.trim().length > 0) {
+    system = `${system}\n\n${numericMetaNote}`;
+  }
 
-  // IntentLine から内部解析メモを生成
-  const intentLineMemo = buildIntentLineMemo(
-    (meta as any)?.intentLine ?? null,
-  );
-
-  // ★ Self Acceptance / mode / depth を取得
-  const saValue =
-    meta && typeof (meta as any)?.selfAcceptance === 'number'
-      ? ((meta as any).selfAcceptance as number)
-      : null;
-  const currentMode: IrosMode = meta?.mode ?? 'mirror';
-  const currentDepth: Depth | undefined = meta?.depth as Depth | undefined;
-
-  const saToneHint = buildSAToneHint(saValue, currentMode, currentDepth ?? null);
-
-  // styleInstruction と SA トーンヒントを system に合成
-  const systemWithStyle =
-    styleInstruction != null
-      ? `${baseSystem}\n\n${styleInstruction}`
-      : baseSystem;
-
-  const system =
-    saToneHint && saToneHint.trim().length > 0
-      ? `${systemWithStyle}\n\n---\n[SelfAcceptance Tone Hint]\n${saToneHint}`
-      : systemWithStyle;
-
-  const messages: OpenAI.ChatCompletionMessageParam[] = [
+  const messages: ChatCompletionMessageParam[] = [
     {
-      role: 'system' as const,
+      role: 'system',
       content: system,
     },
-
-    // IntentLine を system メモとして渡す（あれば）
-    ...(intentLineMemo
-      ? [
-          {
-            role: 'system' as const,
-            content: intentLineMemo,
-          },
-        ]
-      : []),
-
-    // history を展開（あれば）
     ...buildHistoryMessages(history),
-
     {
-      role: 'user' as const,
+      role: 'user',
       content: text,
     },
   ];
@@ -355,19 +197,30 @@ export async function generateIrosReply(
     temperature: 0.7,
   });
 
-  const content =
-    res.choices[0]?.message?.content?.toString().trim() ?? '';
+  const rawContent = res.choices[0]?.message?.content?.toString().trim() ?? '';
 
+  // SA に応じて「かもしれません」を言い切り寄せ
+  const saValue =
+    typeof (meta as any)?.selfAcceptance === 'number'
+      ? ((meta as any).selfAcceptance as number)
+      : null;
+
+  let content = rawContent;
+
+  // selfAcceptance が十分あるときだけトーン補正をかける
+  // lowゾーン（< 0.3）は、あえて「かもしれません」を残しておく
+  if (saValue == null || saValue >= 0.3) {
+    content = strengthenIrosTone(content);
+  }
+
+  const currentMode: IrosMode = meta?.mode ?? 'mirror';
   const mode: IrosMode = currentMode ?? 'mirror';
 
   // ② I層解析（ユーザー入力ベース）
   const intent = await analyzeIntentLayer(text);
 
-  // ③ Meaning Block 統合
-  const meaningBlock = buildMeaningBlock(meta);
-  const finalContent = meaningBlock
-    ? `${meaningBlock}\n\n${content}`
-    : content;
+  // ③ 余計なヘッダーは一切付けず、そのまま本文のみ返す
+  const finalContent = content;
 
   return {
     content: finalContent,
@@ -378,25 +231,22 @@ export async function generateIrosReply(
 }
 
 /* =========================================================
-   履歴メッセージの整形（LLM に渡す形式へ変換）
-   - role / content が壊れていても落ちないように防御的に処理
-   - 長くなりすぎないよう、直近 N 件だけに絞る
+   履歴メッセージの整形
 ========================================================= */
 
-const MAX_HISTORY_ITEMS = 20; // 必要に応じて調整
+const MAX_HISTORY_ITEMS = 20;
 
 function buildHistoryMessages(
   history?: HistoryItem[],
-): OpenAI.ChatCompletionMessageParam[] {
+): ChatCompletionMessageParam[] {
   if (!history || !Array.isArray(history) || history.length === 0) {
     return [];
   }
 
-  // 古い → 新しい順で来ている前提で、後ろから MAX_HISTORY_ITEMS 件だけ使う
   const sliced = history.slice(-MAX_HISTORY_ITEMS);
 
   return sliced
-    .map((h): OpenAI.ChatCompletionMessageParam | null => {
+    .map((h): ChatCompletionMessageParam | null => {
       if (!h || typeof h.content !== 'string') return null;
 
       const trimmed = h.content.trim();
@@ -410,17 +260,11 @@ function buildHistoryMessages(
         content: trimmed,
       };
     })
-    .filter(
-      (m): m is OpenAI.ChatCompletionMessageParam =>
-        m !== null,
-    );
+    .filter((m): m is ChatCompletionMessageParam => m !== null);
 }
 
 /* =========================================================
    I層アナライザー
-   - userText から I1 / I2 / I3 を判定（なければ null）
-   - reason / confidence も付与
-   - ここでは「意図層に触れているかどうか」だけを見る
 ========================================================= */
 
 async function analyzeIntentLayer(userText: string): Promise<IrosIntentMeta> {
@@ -454,7 +298,7 @@ async function analyzeIntentLayer(userText: string): Promise<IrosIntentMeta> {
     '※ 迷う場合は、より浅いレイヤー（I1寄り）を選び、どう迷ったかを reason に書いてください。',
   ].join('\n');
 
-  const messages: OpenAI.ChatCompletionMessageParam[] = [
+  const messages: ChatCompletionMessageParam[] = [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: trimmed },
   ];
@@ -472,9 +316,7 @@ async function analyzeIntentLayer(userText: string): Promise<IrosIntentMeta> {
     const parsed = safeParseJson(text);
 
     const layerRaw =
-      parsed && typeof parsed.layer === 'string'
-        ? parsed.layer
-        : null;
+      parsed && typeof parsed.layer === 'string' ? parsed.layer : null;
 
     const layer: 'I1' | 'I2' | 'I3' | null =
       layerRaw === 'I1' || layerRaw === 'I2' || layerRaw === 'I3'
@@ -482,9 +324,7 @@ async function analyzeIntentLayer(userText: string): Promise<IrosIntentMeta> {
         : null;
 
     const reason =
-      parsed && typeof parsed.reason === 'string'
-        ? parsed.reason
-        : null;
+      parsed && typeof parsed.reason === 'string' ? parsed.reason : null;
 
     let confidence: number | null = null;
     if (parsed && typeof parsed.confidence === 'number') {
@@ -511,15 +351,12 @@ async function analyzeIntentLayer(userText: string): Promise<IrosIntentMeta> {
 
 /**
  * LLMの出力から JSON を安全に取り出すヘルパー。
- * - 素直に JSON ならそのまま parse
- * - それ以外なら、最初の { 〜 最後の } を抜き出して再トライ
  */
 function safeParseJson(text: string): any | null {
   if (!text) return null;
 
   const trimmed = text.trim();
 
-  // 素直な JSON の場合
   if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
     try {
       return JSON.parse(trimmed);
@@ -528,7 +365,6 @@ function safeParseJson(text: string): any | null {
     }
   }
 
-  // 何か説明 + JSON の場合を想定して { ... } 部分だけ抜き出して再トライ
   const first = trimmed.indexOf('{');
   const last = trimmed.lastIndexOf('}');
   if (first >= 0 && last > first) {

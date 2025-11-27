@@ -1,5 +1,8 @@
 // src/lib/iros/unifiedAnalysis.ts
 // Unified-like 解析（Depth / Q / 位相）の入口ロジック
+// ✅ ここでは「テキストからの Depth / Q / 位相 / トピック推定」だけを行う。
+// ✅ SelfAcceptance（自己肯定率）は絶対にここで計算しない（常に null を返す）。
+// ✅ ネガ/ポジ（polarity / sentiment）はここでは扱わず、出力トーン用の別レイヤーに委譲する。
 
 import {
   type Depth,
@@ -19,6 +22,12 @@ export type UnifiedLikeAnalysis = {
   };
   phase: 'Inner' | 'Outer' | null;
   intentSummary: string | null;
+
+  // ★ 状況サマリ & トピック（小言ログ用）
+  situation?: {
+    summary: string | null; // そのターンの状況・テーマが一瞬でわかる 1〜2行テキスト
+    topic: string | null;   // 恋愛 / 仕事 / お金 / 家族 / 自己・メンタル などのざっくりカテゴリ
+  };
 
   // ★ Self Acceptance（0.0〜1.0 想定）
   //   いまはダミー（常に null）だが、将来 LLM 解析結果をここに載せる
@@ -96,18 +105,97 @@ function detectDepthFromText(text: string): Depth | undefined {
   if (iDepth) return iDepth;
 
   // 関係・共鳴（R）
-  const rel = /(あの人|彼氏|彼女|上司|部下|同僚|家族|親|子ども|人間関係|職場の空気)/;
+  const rel = /(あの人|彼氏|彼女|上司|部下|同僚|家族|親|子ども|子供|人間関係|職場の空気)/;
   if (rel.test(t)) return 'R1';
 
   // 創造・行動（C）
-  const act = /(やめたい|転職|始めたい|挑戦|プロジェクト|作品|創りたい|つくりたい)/;
+  const act = /(やめたい|辞めたい|転職|始めたい|挑戦|プロジェクト|作品|創りたい|つくりたい|起業|ビジネス)/;
   if (act.test(t)) return 'C1';
 
   // 自己まわり（S）
-  const self = /(しんどい|つらい|疲れた|不安|イライラ|眠れない|ストレス)/;
+  const self = /(しんどい|つらい|辛い|疲れた|不安|イライラ|眠れない|ストレス)/;
   if (self.test(t)) return 'S2';
 
   return undefined;
+}
+
+/* ========= 状況トピック推定（簡易カテゴリ） ========= */
+
+function detectSituationTopic(text: string): string | null {
+  const t = (text || '').trim();
+  if (!t) return null;
+
+  // 恋愛・パートナーシップ
+  if (
+    /(彼氏|彼女|恋愛|好きな人|片思い|両想い|結婚|プロポーズ|離婚|不倫|パートナー|夫|妻|カレ|カノジョ)/.test(
+      t,
+    )
+  ) {
+    return '恋愛・パートナーシップ';
+  }
+
+  // 仕事・キャリア
+  if (
+    /(仕事|職場|会社|上司|部下|同僚|パワハラ|モラハラ|評価|人事|昇進|転職|残業|プロジェクト)/.test(
+      t,
+    )
+  ) {
+    return '仕事・キャリア';
+  }
+
+  // お金・収入
+  if (/(お金|収入|給料|年収|売上|支払い|生活費|借金|ローン|家賃)/.test(t)) {
+    return 'お金・収入';
+  }
+
+  // 家族・家庭
+  if (/(家族|親|父|母|子ども|子供|夫婦|家庭|実家|親戚)/.test(t)) {
+    return '家族・家庭';
+  }
+
+  // 自己・メンタル
+  if (
+    /(自己肯定感|自信がない|自信が持てない|孤独|寂しい|しんどい|つらい|辛い|不安|落ち込む|メンタル)/.test(
+      t,
+    )
+  ) {
+    return '自己・メンタル';
+  }
+
+  // デフォルト：ざっくり「その他・ライフ全般」
+  return 'その他・ライフ全般';
+}
+
+/* ========= 状況サマリ生成（1〜2行） ========= */
+
+function buildSituationSummary(
+  text: string,
+  topic: string | null,
+): string | null {
+  const t = (text || '').trim();
+  if (!t) return null;
+
+  // トピック別のテンプレ主語
+  switch (topic) {
+    case '恋愛・パートナーシップ':
+      return '恋愛・パートナーシップに関する今の気持ちや迷いを整理しようとしている状態';
+    case '仕事・キャリア':
+      return '仕事や職場での状況・ストレスについて、自分の立ち位置やこれからを考え直している状態';
+    case 'お金・収入':
+      return 'お金や収入・生活の安定について、不安や今後の見通しを確認しようとしている状態';
+    case '家族・家庭':
+      return '家族や家庭との関係性について、心の重さやバランスを見つめ直している状態';
+    case '自己・メンタル':
+      return '自分自身の心の状態やメンタルの揺れについて、言葉にしながら整えようとしている状態';
+    default:
+      break;
+  }
+
+  // テンプレに当てはまらない場合は、テキストを短く切り出す
+  if (t.length <= 60) {
+    return t;
+  }
+  return t.slice(0, 60) + '…';
 }
 
 /* ========= Unified-like 解析（ダミー強化版） ========= */
@@ -136,6 +224,10 @@ export async function analyzeUnifiedTurn(params: {
   const phase: 'Inner' | 'Outer' | null =
     /心|気持ち|自分|本音|内側/.test(text) ? 'Inner' : null;
 
+  // ★ 新規：状況トピック & サマリ（小言ログ用）
+  const topic = detectSituationTopic(text);
+  const summary = buildSituationSummary(text, topic);
+
   // intentSummary / selfAcceptance はここでは固定せず、
   // buildFinalMeta / 将来の Unified LLM に委ねる
   return {
@@ -143,6 +235,10 @@ export async function analyzeUnifiedTurn(params: {
     depth: { stage: depth },
     phase,
     intentSummary: null,
+    situation: {
+      summary,
+      topic,
+    },
     selfAcceptance: null,
     self_acceptance: null,
   };

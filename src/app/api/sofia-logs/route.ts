@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const SERVICE_ROLE =
+  process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const DEBUG = process.env.DEBUG_OPS_SOFIALOGS === '1';
 
 type SofiaConversation = {
@@ -68,7 +69,9 @@ type MuLikeTurn = {
 };
 
 function sbAdmin() {
-  return createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
+  return createClient(SUPABASE_URL, SERVICE_ROLE, {
+    auth: { persistSession: false },
+  });
 }
 
 const CONV_FIELDS =
@@ -79,7 +82,10 @@ export async function GET(req: NextRequest) {
   const user_code = url.searchParams.get('user_code')?.trim() || null;
   const conv_id = url.searchParams.get('conv_id')?.trim() || null;
   const turnType = (url.searchParams.get('turn_type') || 'raw').toLowerCase(); // 'raw' | 'normalized'
-  const pageSize = Math.max(1, Math.min(200, Number(url.searchParams.get('page_size') || 50)));
+  const pageSize = Math.max(
+    1,
+    Math.min(200, Number(url.searchParams.get('page_size') || 50)),
+  );
 
   try {
     const sb = sbAdmin();
@@ -97,12 +103,19 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: cErr.message }, { status: 500 });
       }
       if (!convo) {
-        return NextResponse.json({ error: 'conversation not found' }, { status: 404 });
+        return NextResponse.json(
+          { error: 'conversation not found' },
+          { status: 404 },
+        );
       }
 
       const code = (convo as SofiaConversation).conversation_code;
       if (!code) {
-        return NextResponse.json({ conversation: convo, turns: [], turns_count: 0 });
+        return NextResponse.json({
+          conversation: convo,
+          turns: [],
+          turns_count: 0,
+        });
       }
 
       // ===== ターン件数 =====
@@ -119,7 +132,10 @@ export async function GET(req: NextRequest) {
 
       if (turnType === 'normalized') {
         // ---------- sofia_turns_normalized ----------
-        const { data: raw, error: tErr } = await sb
+        // ★ 修正ポイント：
+        //   ・まず降順（新しい順）で最大 2000 件取得
+        //   ・その後 .reverse() して「最新 2000 件を古い→新しい順」に並べ替え
+        const { data: rawDesc, error: tErr } = await sb
           .from('sofia_turns_normalized')
           .select(
             [
@@ -141,8 +157,8 @@ export async function GET(req: NextRequest) {
             ].join(','),
           )
           .eq('conversation_code', code)
-          .order('turn_index', { ascending: true })
-          .order('created_at', { ascending: true })
+          .order('turn_index', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: false })
           .limit(2000);
 
         if (tErr) {
@@ -150,7 +166,9 @@ export async function GET(req: NextRequest) {
           return NextResponse.json({ error: tErr.message }, { status: 500 });
         }
 
-        for (const r of (raw ?? []) as SofiaTurnNormalized[]) {
+        const raw = (rawDesc ?? []).slice().reverse(); // 最新2000件を古い→新しい順へ
+
+        for (const r of raw as SofiaTurnNormalized[]) {
           const meta = {
             phase: r.phase,
             self_acceptance: r.self_acceptance,
@@ -193,7 +211,8 @@ export async function GET(req: NextRequest) {
         }
       } else {
         // ---------- 旧 sofia_turns ----------
-        const { data: raw, error: tErr } = await sb
+        // ★ 同じく、最新 2000 件を取得してから reverse
+        const { data: rawDesc, error: tErr } = await sb
           .from('sofia_turns')
           .select(
             [
@@ -214,8 +233,8 @@ export async function GET(req: NextRequest) {
             ].join(','),
           )
           .eq('conversation_code', code)
-          .order('turn_index', { ascending: true })
-          .order('created_at', { ascending: true })
+          .order('turn_index', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: false })
           .limit(2000);
 
         if (tErr) {
@@ -223,8 +242,10 @@ export async function GET(req: NextRequest) {
           return NextResponse.json({ error: tErr.message }, { status: 500 });
         }
 
+        const raw = (rawDesc ?? []).slice().reverse(); // 最新2000件を古い→新しい順へ
+
         turns = [];
-        for (const r of (raw ?? []) as SofiaTurnRaw[]) {
+        for (const r of raw as SofiaTurnRaw[]) {
           const userContent = r.user_text ?? r.user_message ?? null;
           const asstContent = r.assistant_text ?? r.reply ?? null;
 
@@ -277,16 +298,23 @@ export async function GET(req: NextRequest) {
         .limit(pageSize);
 
       if (listErr) {
-        if (DEBUG) console.error('[SofiaLogs] conversation list error:', listErr);
+        if (DEBUG)
+          console.error('[SofiaLogs] conversation list error:', listErr);
         return NextResponse.json({ error: listErr.message }, { status: 500 });
       }
 
       return NextResponse.json({ conversations: conversations ?? [] });
     }
 
-    return NextResponse.json({ error: 'Specify either user_code or conv_id.' }, { status: 400 });
+    return NextResponse.json(
+      { error: 'Specify either user_code or conv_id.' },
+      { status: 400 },
+    );
   } catch (e: any) {
     if (DEBUG) console.error('[SofiaLogs] fatal error:', e);
-    return NextResponse.json({ error: e?.message || 'failed' }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message || 'failed' },
+      { status: 500 },
+    );
   }
 }

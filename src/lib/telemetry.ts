@@ -1,6 +1,15 @@
 // src/lib/telemetry.ts
 // 収集API: /api/telemetry/collect へ送るだけの最小実装
 
+// ★ 追加：テレメトリ送信を制御するフラグ
+// - デフォルトは false（＝何も送らない）
+// - 本番で使いたいときだけ、.env に
+//     NEXT_PUBLIC_ENABLE_TELEMETRY=1
+//   を入れる
+const ENABLE_TELEMETRY =
+  process.env.NEXT_PUBLIC_ENABLE_TELEMETRY === '1' &&
+  process.env.NODE_ENV === 'production';
+
 export type TLog = {
   kind?: 'api' | 'page' | 'auth' | 'online';
   path?: string;
@@ -12,6 +21,9 @@ export type TLog = {
 };
 
 export function tlog(p: TLog) {
+  // ★ 追加：無効時は完全に何もしない（fetch / sendBeacon すらしない）
+  if (!ENABLE_TELEMETRY) return;
+
   try {
     const payload = JSON.stringify(p || {});
     if (navigator.sendBeacon) {

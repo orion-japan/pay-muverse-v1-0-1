@@ -26,7 +26,7 @@ export function resolveModeHintFromText(input?: {
     'レポートで',
     'レポートを',
     '構造化',
-    '章立て',
+    'フェーズ立て',
     '箇条書き',
     '要件をまとめ',
     '要件整理',
