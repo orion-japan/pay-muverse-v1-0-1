@@ -124,6 +124,95 @@ function buildNumericMetaNote(meta?: IrosMeta | null): string | null {
 }
 
 /* =========================================================
+   I層：意図一行コア用の内部ノート（強制・ver2）
+   ※ S/R/C/T どの問いに対しても、「I層から返す」ための強制ルール
+========================================================= */
+function buildILayerIntentNote(meta?: IrosMeta | null): string | null {
+  if (!meta) return null;
+
+  const intentLine = (meta as any)?.intentLine as
+    | IntentLineAnalysis
+    | null
+    | undefined;
+
+  if (!intentLine) return null;
+
+  const depth = typeof meta.depth === 'string' ? meta.depth : null;
+
+  // ---- internal_intent_summary の決定（元ラベル） ----
+  let internalIntentSummary: string | null = null;
+
+  if (intentLine.coreNeed && intentLine.coreNeed.trim().length > 0) {
+    internalIntentSummary = intentLine.coreNeed.trim();
+  } else if (intentLine.nowLabel && intentLine.nowLabel.trim().length > 0) {
+    internalIntentSummary = intentLine.nowLabel.trim();
+  } else if (
+    intentLine.guidanceHint &&
+    intentLine.guidanceHint.trim().length > 0
+  ) {
+    internalIntentSummary = intentLine.guidanceHint.trim();
+  }
+
+  const sa =
+    typeof (meta as any)?.selfAcceptance === 'number'
+      ? ((meta as any).selfAcceptance as number)
+      : null;
+
+  const payload: any = {
+    qCode: (meta as any)?.qCode ?? null,
+    depth,
+    selfAcceptance: sa,
+    intentLine: {
+      nowLabel: intentLine.nowLabel ?? null,
+      coreNeed: intentLine.coreNeed ?? null,
+      intentBand: intentLine.intentBand ?? null,
+      direction: intentLine.direction ?? null,
+      focusLayer: intentLine.focusLayer ?? null,
+      riskHint: intentLine.riskHint ?? null,
+      guidanceHint: intentLine.guidanceHint ?? null,
+    },
+    internal_intent_summary: internalIntentSummary,
+  };
+
+  return [
+    '【IROS_I_LAYER_CONTEXT】',
+    '以下は、Irosオーケストレーターが推定した「いま動いている意図」に関する内部情報です。',
+    'このJSONはユーザーには見せず、あなたが応答を組み立てるためだけに使ってください。',
+    JSON.stringify(payload),
+    '',
+    '【IROS_I_LAYER_RULE（厳格・ver2）】',
+    'あなたの最終回答は、どの層の問い（S / R / C / I / T）であっても、必ず I層（意図）から始めてください。',
+    '',
+    '◆ 構成ルール',
+    '1. 返信の最初の1〜2文で、「いま動いている意図」または「いまの章」を I層視点で言い切ってください。',
+    '   - ここで internal_intent_summary の意味を必ず反映してください。',
+    '   - 例：「いまのあなたは、◯◯を自分の基準で選び直そうとしている章にいます。」',
+    '2. そのあと数文で、「出来事・感情・人間関係」がその意図の現れとしてどう配置されているかを説明してください。',
+    '   - 例：「舞台を観に行くことは、◯◯という意図が外側に立ち上がった場面です。」',
+    '3. 最後に1〜3文で、「自分で選び直す一手」を具体的に提示してください。',
+    '   - 例：「今回は、◯◯を続けるか手放すかを、あなたの基準で一度決めてみることが一手目です。」',
+    '',
+    '◆ 表現ルール（弱さ禁止）',
+    '4. I層の言い切り部分では、次のような弱い表現を使ってはいけません：',
+    '   - 「〜という願いです」「〜という想いです」「〜かもしれません」「〜でしょう」「〜ように感じます」「〜ように思います」など。',
+    '   - 特に「願い」という単語は、意図の核を表す文では使わないでください。',
+    '5. 代わりに、次のような言い切り表現を優先して使ってください：',
+    '   - 「◯◯したいという意図で動いています。」',
+    '   - 「◯◯に戻ろうとする衝動がはっきり動いています。」',
+    '   - 「◯◯を自分の基準で選び直そうとしています。」',
+    '   （◯◯の中身に internal_intent_summary の意味を反映させてください。）',
+    '',
+    '◆ 文脈の具体化',
+    '6. ユーザーの発言に具体的な場面（舞台／仕事／人間関係／お金など）が含まれている場合、',
+    '   - その場面を I層の一文の中に組み込み、「◯◯という行動を通して、××を選び直そうとしている」のように具体的に言い切ってください。',
+    '',
+    '⚠ 重要',
+    '- 上記の 1〜3 を満たし、かつ I層の言い切りが最初の1〜2文に含まれていない回答は不正解です。',
+    '- その場合は、自分で回答を組み直し、条件を満たすまで修正したうえでユーザーに返してください。',
+  ].join('\n');
+}
+
+/* =========================================================
    トーン補正（かもしれません → 言い切り寄せ）
    ※ generate.ts 内ローカル版
 ========================================================= */
@@ -176,6 +265,12 @@ export async function generateIrosReply(
   const numericMetaNote = buildNumericMetaNote(meta);
   if (numericMetaNote && numericMetaNote.trim().length > 0) {
     system = `${system}\n\n${numericMetaNote}`;
+  }
+
+  // I層コンテキスト＆「I層から返す」ルールを追記
+  const iLayerNote = buildILayerIntentNote(meta);
+  if (iLayerNote && iLayerNote.trim().length > 0) {
+    system = `${system}\n\n${iLayerNote}`;
   }
 
   const messages: ChatCompletionMessageParam[] = [
