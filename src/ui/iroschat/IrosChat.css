@@ -278,50 +278,72 @@
 
 
 
-/* ===== GPT風チャット整形（最適化版） ===== */
+/* ===========================================
+   Iros assistant text: タイポだけ調整（枠なし）
+   - レイアウトはいじらない
+   - 行間と段落、太字と hr だけ整える
+   ========================================== */
 
-.msgBody {
-  font-size: 15px;
-  line-height: 1.6;
-  color: #2b2b2b;
+/* AIメッセージのバブルはフラットに（構図そのまま） */
+.sof-msgs .message.is-assistant .bubble {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  max-width: 100% !important;
 }
 
-/* 段落：余白最小化 */
-.msgBody p {
-  margin: 0 0 8px !important;
+/* 本文ブロックの幅と上下の余白だけ少し整える */
+.sof-msgs .message.is-assistant .msgBody {
+  max-width: 720px;
+  padding-top: 4px;
+  padding-bottom: 14px;
 }
 
-/* 箇条書き：インデントを浅く */
-.msgBody ul {
-  padding-left: 18px !important;
-  margin: 4px 0 8px !important;
-}
-.msgBody li {
-  margin: 2px 0 !important;
-}
-
-/* 太字：GPTより弱めに（強すぎを防ぐ） */
-.msgBody strong {
-  font-weight: 600;
-  color: #1f1f1f;
+/* 段落：行間をゆったり、段落間に1行ぶんの息継ぎ */
+.sof-msgs .message.is-assistant .msgBody p {
+  margin: 0 0 1.0rem 0 !important;
+  line-height: 1.95 !important;
+  letter-spacing: 0.02em !important;
+  font-size: 15px !important;
+  color: #222 !important;
+  word-break: break-word !important;
 }
 
-/* 罫線（hr）: ペールなGPT風 */
-.msgBody hr {
+/* 最後の段落だけは下の余白を詰める */
+.sof-msgs .message.is-assistant .msgBody p:last-child {
+  margin-bottom: 0 !important;
+}
+
+/* 太字：少しだけ大きくして、小見出しっぽく */
+.sof-msgs .message.is-assistant .msgBody strong {
+  display: inline-block;
+  margin: 0.3rem 0 0.2rem;
+  font-weight: 700;
+  font-size: 15.5px;
+  color: #111827;
+}
+
+/* 区切り線：テキストの中の「場面転換」だけ淡く見せる */
+.sof-msgs .message.is-assistant .msgBody hr {
   border: none;
-  border-top: 1px solid rgba(0,0,0,0.08);
-  margin: 12px 0 !important;
+  border-top: 1px solid rgba(148, 163, 184, 0.45);
+  margin: 0.8rem 0 0.9rem !important;
 }
 
-/* コード風バックティックは薄いグレーに */
-.msgBody code {
-  background: rgba(0,0,0,0.05);
-  padding: 2px 4px;
-  border-radius: 4px;
+/* 箇条書き：インデント控えめでテキストとなじませる */
+.sof-msgs .message.is-assistant .msgBody ul {
+  padding-left: 1.1em !important;
+  margin: 0.3rem 0 0.9rem !important;
+}
+.sof-msgs .message.is-assistant .msgBody li {
+  margin: 0.12rem 0 !important;
 }
 
-/* markdown の <> が暴れないように */
-.msgBody a {
-  color: #6b6bff;
-  text-decoration: none;
+
+
+/* Iros：Qバッジの縦位置を少し下げる */
+.sof-msgs .message.is-assistant .q-badge {
+  margin-top: 6px !important;      /* 3〜8pxくらいで好みに調整 */
+  transform: translateY(2px);      /* もっと下げたければ 3〜4px に */
 }

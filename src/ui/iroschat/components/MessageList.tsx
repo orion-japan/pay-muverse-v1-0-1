@@ -260,6 +260,24 @@ function transformIrTemplateToMarkdown(input: string): string {
 }
 
 
+/**
+ * カギカッコごと太字になっているパターンを
+ * 「**カギカッコの中身だけ太字」に変換する。
+ * 例：**「小さな一歩」** → 「**小さな一歩**」
+ */
+function normalizeBoldInsideQuotes(input: string): string {
+  if (!input) return input;
+
+  // 「〜」パターン
+  let out = input.replace(/\*\*「([^」]+)」\*\*/g, '「**$1**」');
+
+  // 『〜』パターンも一応サポートしたかったら
+  out = out.replace(/\*\*『([^』]+)』\*\*/g, '『**$1**』');
+
+  return out;
+}
+
+
 /* ========= ReactMarkdown 用カスタムコンポーネント ========= */
 
 const markdownComponents: any = {
@@ -267,26 +285,30 @@ const markdownComponents: any = {
   p: ({ children }: { children: React.ReactNode }) => (
     <p
       style={{
-        margin: '0 0 0.6em',
+        margin: '0 0 0.8em',      // ちょっとだけ余白を増やす
         whiteSpace: 'pre-wrap',
       }}
     >
       {children}
     </p>
   ),
-  // 太字：GPT風タイトル感
+
+  // 太字：sofiaカードの「小見出し」っぽく強調
   strong: ({ children }: { children: React.ReactNode }) => (
     <strong
       style={{
         fontWeight: 700,
-        color: '#1f2933',
+        color: '#111827',
+        fontSize: '1.02rem',     // 👈 ベース文字より少し大きく
+        letterSpacing: '0.01em',
         display: 'inline-block',
-        margin: '0.3em 0 0.25em',
+        margin: '0.45em 0 0.25em', // 上に少し余白 → 段が分かれて見える
       }}
     >
       {children}
     </strong>
   ),
+
   // 箇条書き
   ul: ({ children }: { children: React.ReactNode }) => (
     <ul
@@ -307,6 +329,7 @@ const markdownComponents: any = {
       {children}
     </li>
   ),
+
   // 区切り線
   hr: () => (
     <hr
@@ -318,6 +341,7 @@ const markdownComponents: any = {
     />
   ),
 };
+
 
 export default function MessageList() {
   const { messages, loading, error } = useIrosChat() as {
@@ -361,93 +385,107 @@ export default function MessageList() {
         <div className={styles.emptyHint}>ここに会話が表示されます</div>
       )}
 
-      {messages.map((m) => {
-        const isUser = m.role === 'user';
-        const iconSrc = isUser ? resolveUserAvatar(m) : '/ir.png';
+{messages.map((m) => {
+  const isUser = m.role === 'user';
+  const iconSrc = isUser ? resolveUserAvatar(m) : '/ir.png';
 
-        // ここで必ず文字列化
-        const rawText = toSafeString(m.text);
-        // I層テンプレなら GPT風Markdown に変換
-        const safeText = transformIrTemplateToMarkdown(rawText);
+  const rawText = toSafeString(m.text);
+  const safeText = normalizeBoldInsideQuotes(
+    transformIrTemplateToMarkdown(rawText),
+  );
 
-        // meta 優先で Q を表示（無ければ従来の m.q）
-        const qFromMeta = m.meta?.qCode;
-        const qToShow = qFromMeta ?? m.q;
+  const qFromMeta = m.meta?.qCode;
+  const qToShow = qFromMeta ?? m.q;
 
-        return (
-          <div
-            key={m.id}
-            className={`message ${isUser ? 'is-user' : 'is-assistant'}`}
-          >
-            {/* アバター */}
-            <div
-              className="avatar"
-              style={{ alignSelf: isUser ? 'flex-end' : 'flex-start' }}
-            >
-              <img
-                src={iconSrc}
-                alt={isUser ? 'you' : 'Iros'}
-                width={AVATAR_SIZE}
-                height={AVATAR_SIZE}
-                onError={(e) => {
-                  const el = e.currentTarget as HTMLImageElement & {
-                    dataset: Record<string, string | undefined>;
-                  };
-                  if (!el.dataset.fallback1) {
-                    el.dataset.fallback1 = '1';
-                    el.src = FALLBACK_USER;
-                    return;
-                  }
-                  if (!el.dataset.fallback2) {
-                    el.dataset.fallback2 = '1';
-                    el.src = FALLBACK_DATA;
-                  }
-                }}
-                style={{
-                  borderRadius: '50%',
-                  objectFit: 'cover',
-                  display: 'block',
-                }}
-              />
-            </div>
+  return (
+    <div
+      key={m.id}
+      className={`message ${isUser ? 'is-user' : 'is-assistant'}`}
+    >
+      {/* ▼ アイコン＋Qバッジを横一列に並べるヘッダー行 ▼ */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: isUser ? 'flex-end' : 'flex-start',
+          gap: 6,
+          marginBottom: 4,
+        }}
+      >
+        {/* アバター */}
+        <div
+          className="avatar"
+          style={{ alignSelf: 'center' }}
+        >
+          <img
+            src={iconSrc}
+            alt={isUser ? 'you' : 'Iros'}
+            width={AVATAR_SIZE}
+            height={AVATAR_SIZE}
+            onError={(e) => {
+              const el = e.currentTarget as HTMLImageElement & {
+                dataset: Record<string, string | undefined>;
+              };
+              if (!el.dataset.fallback1) {
+                el.dataset.fallback1 = '1';
+                el.src = FALLBACK_USER;
+                return;
+              }
+              if (!el.dataset.fallback2) {
+                el.dataset.fallback2 = '1';
+                el.src = FALLBACK_DATA;
+              }
+            }}
+            style={{
+              borderRadius: '50%',
+              objectFit: 'cover',
+              display: 'block',
+            }}
+          />
+        </div>
 
-            {/* 吹き出し */}
-            <div
-              className={`bubble ${isUser ? 'is-user' : 'is-assistant'}`}
+        {/* Qバッジ：Iros（assistant）のときだけアイコンの右に表示 */}
+        {!isUser && qToShow && (
+          <div className="q-badge" style={qBadgeStyle}>
+            <span
               style={{
-                ...(isUser ? userBubbleStyle : assistantBubbleShellStyle),
-                alignSelf: isUser ? 'flex-end' : 'flex-start',
-                maxWidth: 'min(760px, 88%)',
-              }}
-            >
-              {qToShow && (
-                <div className="q-badge" style={qBadgeStyle}>
-                  <span
-                    style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: 999,
-                      background: m.color || 'rgba(129,140,248,0.85)',
-                      display: 'inline-block',
-                    }}
-                  />
-                  {qToShow}
-                </div>
-              )}
+                width: 10,
+                height: 10,
+                borderRadius: 999,
+                background: m.color || 'rgba(129,140,248,0.85)',
+                display: 'inline-block',
 
-              {/* 本文（行間・段落間を ReactMarkdown + CSS で制御） */}
-              <div className="msgBody">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm, remarkBreaks]}
-                  components={markdownComponents}
-                >
-                  {safeText}
-                </ReactMarkdown>
-              </div>
-            </div>
+              }}
+            />
+            {qToShow}
           </div>
-        );
-      })}
+        )}
+      </div>
+
+      {/* 吹き出し（構図はこれまで通り） */}
+      <div
+        className={`bubble ${isUser ? 'is-user' : 'is-assistant'}`}
+        style={{
+          ...(isUser ? userBubbleStyle : assistantBubbleShellStyle),
+          alignSelf: isUser ? 'flex-end' : 'flex-start',
+          maxWidth: 'min(760px, 88%)',
+        }}
+      >
+        {/* ユーザー側でQを見せたいならここに残してもOK（今は非表示のままでも良い） */}
+
+        <div className="msgBody">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkBreaks]}
+            components={markdownComponents}
+          >
+            {safeText}
+          </ReactMarkdown>
+        </div>
+      </div>
+    </div>
+  );
+})}
+
 
       {loading && <div className={styles.loadingRow}>...</div>}
       {error && <div className={styles.error}>{error}</div>}
