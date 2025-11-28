@@ -16,6 +16,8 @@ import {
   QCODE_VALUES,
 } from './system';
 
+
+
 import { deriveIrosGoal } from './will/goalEngine';
 import { deriveIrosPriority } from './will/priorityEngine';
 
@@ -72,14 +74,18 @@ import {
   type SelfAcceptanceInput,
 } from './sa/meter';
 
+// ★ I層 Piercing / Priority 補正（分割ファイル）
+import {
+  detectIrTrigger,
+  decidePierceMode,
+  adjustPriorityWithSelfAcceptance,
+} from './orchestratorPierce';
+
 // ★ I層強制モード（ENV）
 //   - true のとき、requestedDepth を優先して depth を固定する
 const FORCE_I_LAYER =
   typeof process !== 'undefined' &&
   process.env.IROS_FORCE_I_LAYER === '1';
-
-// Priority 型（SA 補正用）
-type IrosPriority = ReturnType<typeof deriveIrosPriority>;
 
 // ==== Orchestrator に渡す引数 ==== //
 export type IrosOrchestratorArgs = {
@@ -230,9 +236,9 @@ export async function runIrosTurn(
     );
   }
 
-  // ★ I層強制モードのときは requestedDepth をそのまま採用
+  // ★ I層強制モード or requestedDepth が I層 のときは requestedDepth を最優先
   let depth: Depth | undefined;
-  if (FORCE_I_LAYER && requestedDepth) {
+  if ((FORCE_I_LAYER || isIntentDepth(requestedDepth)) && requestedDepth) {
     depth = requestedDepth;
   } else {
     depth = depthFromContinuity;
@@ -292,7 +298,6 @@ export async function runIrosTurn(
   ========================================================= */
 
   // 直近のライン SA（あれば）を lastSelfAcceptance として渡す
-  // ✅ 修正済み：MemoryState を最優先、その次に mergedBaseMeta
   const lastSelfAcceptanceRaw =
     typeof memoryState?.selfAcceptance === 'number'
       ? memoryState.selfAcceptance
@@ -309,7 +314,6 @@ export async function runIrosTurn(
   const saInput: SelfAcceptanceInput = {
     userText: text,
     // Orchestrator 単体では直前の assistantText を持っていないため、ここでは空文字。
-    // （将来、route 側から渡すように拡張可能）
     assistantText: '',
     qCode: qCode ?? null,
     depthStage: depth ?? null,
@@ -342,6 +346,24 @@ export async function runIrosTurn(
     prevMeta: (mergedBaseMeta as any) ?? null,
   });
 
+// ==========================================
+// ir診断：観測対象の抽出（トリガー時のみ）
+// ==========================================
+const irTriggered = detectIrTrigger(text);
+
+
+// ===============================
+// I層 Piercing 判定（再利用する）
+// ===============================
+const pierceDecision = decidePierceMode({
+  depth: depth ?? null,
+  requestedDepth,
+  selfAcceptance: selfAcceptanceLine,
+  yLevel: yh.yLevel,
+  irTriggered, // ← さっきのを再利用！
+});
+
+
   /* =========================================================
      mode の最終決定（SelfAcceptance ライン + I層判定）
   ========================================================= */
@@ -367,6 +389,11 @@ export async function runIrosTurn(
   // ★ SelfAcceptance ラインを加味して mirror / counsel / forward(resonate) の比重を調整
   let mode: IrosMode = resolveModeWithSA(baseWeights, selfAcceptanceLine);
 
+  // ★ pierceMode 中は基本的に mirror 優先
+  if (pierceDecision.pierceMode && mode !== 'mirror') {
+    mode = 'mirror';
+  }
+
   // I層は常に mirror 固定（優先ルール）
   if (isIntentDepth(requestedDepth) || isIntentDepth(depth)) {
     mode = 'mirror';
@@ -383,6 +410,10 @@ export async function runIrosTurn(
     hLevel: yh.hLevel,
     // unified 結果そのものも meta に残しておく（DB jsonb にそのまま入る想定）
     unified: fixedUnified,
+    // ★ I層 Piercing 状態を meta に載せる
+    pierceMode: pierceDecision.pierceMode,
+    pierceReason: pierceDecision.pierceReason,
+
   } as IrosMeta;
 
   // ★ Self Acceptance ラインを meta に載せる
@@ -396,7 +427,7 @@ export async function runIrosTurn(
   /* =========================================================
      A'') Intent Line の導出
          - Q / Depth / Phase / SelfAcceptance ラインから
-           「いまの章」を 1 本の線にまとめる
+           「いまのフェーズ」を 1 本の線にまとめる
   ========================================================= */
   try {
     const phaseRaw =
@@ -414,11 +445,19 @@ export async function runIrosTurn(
       depth: depth ?? null,
       phase: phaseRaw,
       selfAcceptance: selfAcceptanceForIntentLine,
+      // relationTone / historyQ は今は未使用（将来拡張用）
     });
 
+    // ★ Intent Line と T層ヒント / 未来記憶フラグを meta に載せる
     meta = {
       ...meta,
       intentLine,
+      ...(intentLine && (intentLine as any).tLayerHint
+        ? { tLayerHint: (intentLine as any).tLayerHint }
+        : {}),
+      ...(intentLine && typeof (intentLine as any).hasFutureMemory === 'boolean'
+        ? { hasFutureMemory: (intentLine as any).hasFutureMemory }
+        : {}),
     };
   } catch (e) {
     console.warn('[IROS/ORCH] deriveIntentLine failed', e);
@@ -466,6 +505,9 @@ export async function runIrosTurn(
 
   // ====== ログ（開始時点の解析サマリ） ======
   if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
+    const irTargetType = (meta as any).irTargetType ?? null;
+    const irTargetText = (meta as any).irTargetText ?? null;
+
     console.log('[IROS/ORCH v2] runIrosTurn start', {
       conversationId,
       textSample: text.slice(0, 80),
@@ -491,10 +533,20 @@ export async function runIrosTurn(
         depthStage: memoryState?.depthStage ?? null,
         qPrimary: memoryState?.qPrimary ?? null,
       },
+      // 🆕 I層 Piercing 関連
+      irTriggered,
+      pierceModeCandidate: pierceDecision.pierceMode,
+      pierceReasonCandidate: pierceDecision.pierceReason,
+      // 🆕 ir 観測対象
+      irTargetType,
+      irTargetText,
+      // 🆕 T層ヒント（ログ確認用）
+      tLayerHint: (meta as any).tLayerHint ?? null,
+      hasFutureMemory: (meta as any).hasFutureMemory ?? null,
     });
   }
 
-   /* =========================================================
+  /* =========================================================
      ④ LLM：生成（本文 + I層ジャッジ）
   ========================================================= */
   const result: GenerateResult = await generateIrosReply({
@@ -528,12 +580,14 @@ export async function runIrosTurn(
   });
 
   /* =========================================================
-     ⑥ 意味づけブロックの合成を停止
-        - ここでは LLM 本文のみを返す
-        - 「Iros がいま感じていること」「いまの章」などのヘッダーは出さない
+     ⑥ 表示モード
+        - いまは常に「LLM本文のみ」をそのまま返す
+        - 構図（Q / depth / intentLine）は meta 側だけで利用し、
+          UI には「いまの構図：〜」などのヘッダーは出さない
   ========================================================= */
-  const finalContent = contentWithoutDiag;
-  const hasMeaningBlock = false;
+
+  const finalContent: string = contentWithoutDiag;
+  const hasMeaningBlock: boolean = false;
 
   if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
     const saFinal =
@@ -565,8 +619,16 @@ export async function runIrosTurn(
       selfAcceptance: saFinal,
       yLevel: yFinal,
       hLevel: hFinal,
+      pierceMode: (meta as any).pierceMode ?? null,
+      pierceReason: (meta as any).pierceReason ?? null,
+      irTargetType: (meta as any).irTargetType ?? null,
+      irTargetText: (meta as any).irTargetText ?? null,
+      tLayerHint: (meta as any).tLayerHint ?? null,
+      hasFutureMemory: (meta as any).hasFutureMemory ?? null,
     });
   }
+
+
 
   /* =========================================================
      ⑦ MemoryState への保存（userCode 単位で 1行）
@@ -630,7 +692,7 @@ export async function runIrosTurn(
         intentConfidence: intentConfidenceForSave,
         yLevel: yForSave,
         hLevel: hForSave,
-        // 🆕 situation / sentiment も MemoryState に固定
+        // situation / sentiment も MemoryState に固定
         situationSummary: situationSummaryForSave,
         situationTopic: situationTopicForSave,
         sentiment_level: sentimentForSave,
@@ -649,7 +711,131 @@ export async function runIrosTurn(
   };
 }
 
+/* ========= 表示モード／ヘッダー生成ヘルパー ========= */
 
+type PresentationKind = 'plain' | 'withHeader' | 'irOnly';
+
+/**
+ * どの「線路」で返すかを決める:
+ * - irOnly     : ir診断コマンド（ir診断 上司 など）
+ * - withHeader : I層 or mirror モード → 冒頭コメントを付与
+ * - plain      : それ以外は LLM 本文のみ
+ */
+function decidePresentationKind(args: {
+  text: string;
+  meta: IrosMeta;
+  irTriggered: boolean;
+  requestedDepth?: Depth;
+}): PresentationKind {
+  const { text, meta, irTriggered, requestedDepth } = args;
+
+  const normalizedText = text.replace(/\s/g, '');
+
+  // 「ir診断」「ir診断上司」などを判定
+  const isIrCommand =
+    irTriggered && normalizedText.includes('ir診断');
+
+  const resolvedDepth: Depth | undefined =
+    (meta.depth as Depth | undefined) ?? requestedDepth ?? undefined;
+
+  const isIntentDepthActive = isIntentDepth(resolvedDepth);
+
+  if (isIrCommand) {
+    return 'irOnly';
+  }
+
+  // I層 or mirror モードのときは、基本的にコメントヘッダーを付ける
+  if (isIntentDepthActive || meta.mode === 'mirror') {
+    return 'withHeader';
+  }
+
+  return 'plain';
+}
+
+/**
+ * 通常の「いまの構図」コメント
+ *  - Qコード／Depth から 1行〜2行のヘッダーを生成
+ */
+function buildStructuredHeader(meta: IrosMeta): string | null {
+  const q = (meta.qCode as QCode | undefined) ?? undefined;
+  const depth = (meta.depth as Depth | undefined) ?? undefined;
+
+  const qPhrase = describeQCodeBrief(q);
+  const depthSentence = describeDepthPhaseLabel(depth);
+
+  if (!qPhrase && !depthSentence) return null;
+
+  const lines: string[] = [];
+
+  if (q) {
+    // 例: Q3
+    lines.push(q);
+  }
+
+  const segments: string[] = [];
+  if (qPhrase) {
+    segments.push(`「${qPhrase}」`);
+  }
+  if (depthSentence) {
+    segments.push(depthSentence);
+  }
+
+  const joined =
+    segments.length === 1
+      ? segments[0]
+      : `${segments[0]}の中で${segments[1]}`;
+
+  lines.push(`いまの構図：いまのあなたは、${joined}にいます。`);
+
+  return lines.join('\n');
+}
+
+
+
+/**
+ * Qコード → 一言ラベル
+ *  - Q1〜Q5 の意味付けをここで固定
+ */
+function describeQCodeBrief(qCode?: QCode | null): string | null {
+  if (!qCode) return null;
+  switch (qCode) {
+    case 'Q1':
+      return '我慢と秩序のゆらぎ';
+    case 'Q2':
+      return '怒りと成長欲求のゆらぎ';
+    case 'Q3':
+      return '不安と安定欲求のゆらぎ';
+    case 'Q4':
+      return '恐れと浄化欲求のゆらぎ';
+    case 'Q5':
+      return '空虚と情熱のゆらぎ';
+    default:
+      return null;
+  }
+}
+
+/**
+ * Depth → 大まかな「流れ」のラベル
+ *  - S/R/C/I/T をざっくりフェーズ言語に変換
+ */
+function describeDepthPhaseLabel(depth?: Depth | null): string | null {
+  if (!depth) return null;
+  const head = depth.charAt(0);
+  switch (head) {
+    case 'S':
+      return '日常の足元で「自分の感覚」を確かめ直している流れ';
+    case 'R':
+      return '誰かとの関係や場との距離感を組み直している流れ';
+    case 'C':
+      return 'これから創っていく「形」を選び直している流れ';
+    case 'I':
+      return '生き方そのものの輪郭を見つめ直している流れ';
+    case 'T':
+      return 'これまでの流れを超えていく転換点のフェーズ';
+    default:
+      return null;
+  }
+}
 /* ========= 最小バリデーション ========= */
 
 function normalizeMode(mode?: IrosMode): IrosMode {
@@ -674,68 +860,10 @@ function isIntentDepth(depth?: Depth | null): boolean {
   return depth.startsWith('I');
 }
 
-/* ========= Priority 補正（SelfAcceptance 反映） ========= */
-
-function adjustPriorityWithSelfAcceptance(
-  priority: IrosPriority,
-  selfAcceptance: number | null,
-): IrosPriority {
-  if (selfAcceptance == null || Number.isNaN(selfAcceptance)) {
-    return priority;
-  }
-
-  const band = classifySelfAcceptance(selfAcceptance);
-
-  const weights = priority.weights || {};
-  let mirror = (weights as any).mirror ?? 0;
-  let insight = (weights as any).insight ?? 0;
-  let forward = (weights as any).forward ?? 0;
-  const question = (weights as any).question ?? 0;
-
-  // low：まず「鏡」と「理解」を厚く、forward は抑える
-  if (band === 'low') {
-    mirror *= 1.4;
-    insight *= 1.2;
-    forward *= 0.6;
-  }
-  // mid：デフォルトに少し鏡寄り
-  else if (band === 'mid') {
-    mirror *= 1.1;
-    // forward はそのまま
-  }
-  // high：forward を強めて一歩を押す
-  else if (band === 'high') {
-    mirror *= 0.9;
-    forward *= 1.3;
-  }
-
-  return {
-    ...priority,
-    weights: {
-      mirror,
-      insight,
-      forward,
-      question,
-    },
-  };
-}
-
 /* ========= 診断ヘッダー除去ヘルパー ========= */
 /**
- * LLM が先頭に付けてくる診断ブロック
- *
- * 例：
- * Q3
- * いまの構図：…
- * 奥で守りたいもの：…
- * …
- * 【Unified 構図】
- * Q: Q3
- * Depth: I3
- * Phase: Inner
- * Intent Summary: —
- *
- * を本文から取り除き、それ以降の「会話本文」だけを残す。
+ * LLM が先頭に付けてくる診断ブロックを本文から取り除き、
+ * それ以降の「会話本文」だけを残す。
  */
 function stripDiagnosticHeader(text: string): string {
   if (!text || typeof text !== 'string') return '';

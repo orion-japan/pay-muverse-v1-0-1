@@ -41,7 +41,7 @@ function normText(v: string | null | undefined): string {
   return (v ?? '').trim();
 }
 
-/** Qコードから「その章の自己肯定のベース傾向」をざっくり推定（初期値専用） */
+/** Qコードから「そのフェーズの自己肯定のベース傾向」をざっくり推定（初期値専用） */
 function baseFromQ(qCode: string | null): { base: number | null; note?: string } {
   if (!qCode) return { base: null };
 

@@ -3,7 +3,7 @@
 // Qコード × 深度 × 位相 × SelfAcceptance から
 // 「いま・過去・未来の意図ライン」を構造的に推定する中枢モジュール
 
-import type { QCode, Depth } from '../system';
+import type { QCode, Depth, TLayer } from '../system';
 
 /** 位相はここではローカル定義（他所に Phase 型があっても衝突しないように文字列のみ） */
 export type PhaseFlag = 'Inner' | 'Outer' | null;
@@ -43,12 +43,16 @@ export type IntentLineAnalysis = {
   intentBand: IntentBand;
   /** 未来に向かう動きの“方向性” */
   direction: IntentDirection;
-  /** 未来に向けて、Iros が特に意識すべきレイヤ帯（S/R/C/Iのどこを優先するか） */
+  /** 未来に向けて、Iros が特に意識すべきレイヤ帯（S/R/C/I/Tのどこを優先するか） */
   focusLayer: 'S' | 'R' | 'C' | 'I' | 'T' | null;
   /** リスク（崩壊／停滞／過信など、SAとQから見る注意ポイント） */
   riskHint: string | null;
   /** 未来に向けた 1〜2行のナビゲーション文（LLM前の構造コメント） */
   guidanceHint: string;
+  /** いま触れかかっている T層の段階（なければ null） */
+  tLayerHint?: TLayer | null;
+  /** 「未来の記憶フィールド」に触れている感触があるかどうか */
+  hasFutureMemory: boolean;
 };
 
 /**
@@ -222,8 +226,35 @@ export function deriveIntentLine(snapshot: ResonanceSnapshot): IntentLineAnalysi
     if (direction === 'cutOff') {
       return 'これ以上自分をすり減らすつながりから、そっと距離を取ることが、「本当に守りたいもの」を守る選択につながりそうです。';
     }
-    return 'いまの揺れそのものが、あなたの意図ラインを次の章へと運んでいる最中です。';
+    return 'いまの揺れそのものが、あなたの意図ラインを次のステージへと運んでいる最中です。';
   })();
+
+  // ---------- 11) T層ヒント（未来の記憶フィールド） ----------
+  const tLayerHint: TLayer | null = (() => {
+    // もともと T深度ならそのまま
+    if (depth === 'T1' || depth === 'T2' || depth === 'T3') {
+      return depth;
+    }
+
+    // I3 × SA 高め → T1 に触れかけている
+    if (depth === 'I3' && (saBand === 'stable' || saBand === 'overconfident')) {
+      return 'T1';
+    }
+
+    // IntentBand I3 ＋ Qが長く同じ方向で続いている → T2相当の流れ
+    if (intentBand === 'I3' && historyQ && historyQ.length >= 4) {
+      const recent = historyQ.slice(-4);
+      const allSame = recent.every((qq) => qq === recent[0]);
+      if (allSame && (saBand === 'growth' || saBand === 'stable' || saBand === 'overconfident')) {
+        return 'T2';
+      }
+    }
+
+    // その他は T層にはまだ明確には触れていない扱い
+    return null;
+  })();
+
+  const hasFutureMemory = tLayerHint != null;
 
   return {
     nowLabel,
@@ -233,5 +264,7 @@ export function deriveIntentLine(snapshot: ResonanceSnapshot): IntentLineAnalysi
     focusLayer,
     riskHint,
     guidanceHint,
+    tLayerHint,
+    hasFutureMemory,
   };
 }

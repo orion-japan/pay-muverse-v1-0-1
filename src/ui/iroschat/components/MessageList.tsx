@@ -132,69 +132,114 @@ function toSafeString(v: unknown): string {
 function transformIrTemplateToMarkdown(input: string): string {
   if (!input.trim()) return input;
 
-  const lines = input.split(/\r?\n/).map((l) => l.trim());
+  const rawLines = input.split(/\r?\n/);
+
+  type Section = 'none' | 'state' | 'message';
+
   const data = {
     target: '',
     depth: '',
     phase: '',
-    state: '',
-    message: '',
+    stateLines: [] as string[],
+    messageLines: [] as string[],
   };
 
   const extractValue = (raw: string): string => {
     let t = raw.trim();
-    // {{ ... }} を外す
     const m = t.match(/^\{\{(.*)\}\}$/);
     if (m) t = m[1].trim();
     return t;
   };
 
-  for (const line of lines) {
-    if (!line) continue;
+  const getAfterMark = (s: string): string => {
+    const idxJa = s.indexOf('：');
+    const idxEn = s.indexOf(':');
+    const pos =
+      idxJa !== -1 ? idxJa : idxEn !== -1 ? idxEn : -1;
+    return pos >= 0 ? s.slice(pos + 1) : '';
+  };
 
-    const getAfterMark = (s: string) => {
-      const idxJa = s.indexOf('：');
-      const idxEn = s.indexOf(':');
-      const pos =
-        idxJa !== -1 ? idxJa : idxEn !== -1 ? idxEn : s.length;
-      return s.slice(pos + 1);
-    };
+  // 絵文字を前処理で削る（🌀 / 🌱 / 🪔）
+  const normalizeHead = (line: string): string =>
+    line
+      .replace(/^🌀\s*/, '')
+      .replace(/^🌱\s*/, '')
+      .replace(/^🪔\s*/, '')
+      .trim();
 
+  let section: Section = 'none';
+
+  for (const raw of rawLines) {
+    const line = normalizeHead(raw);
+    if (!line) {
+      // 空行も state/message 中なら保持
+      if (section === 'state') data.stateLines.push('');
+      if (section === 'message') data.messageLines.push('');
+      continue;
+    }
+
+    // 見出し・メタ系
     if (line.startsWith('観測対象')) {
       data.target = extractValue(getAfterMark(line));
+      section = 'none';
       continue;
     }
     if (line.startsWith('深度')) {
       data.depth = extractValue(getAfterMark(line));
+      section = 'none';
       continue;
     }
     if (line.startsWith('位相')) {
       data.phase = extractValue(getAfterMark(line));
+      section = 'none';
       continue;
     }
-    if (line.startsWith('🌀') || line.startsWith('意識状態')) {
-      data.state = extractValue(getAfterMark(line.replace('🌀', '')));
+
+    // セクション開始
+    if (line.startsWith('意識状態')) {
+      section = 'state';
+      continue; // この行自体には本文がないのでスキップ
+    }
+    if (line.startsWith('メッセージ')) {
+      section = 'message';
       continue;
     }
-    if (line.startsWith('🪔') || line.startsWith('メッセージ')) {
-      data.message = extractValue(getAfterMark(line.replace('🪔', '')));
+
+    // セクション内の本文
+    if (section === 'state') {
+      data.stateLines.push(raw.trim());
       continue;
     }
+    if (section === 'message') {
+      data.messageLines.push(raw.trim());
+      continue;
+    }
+
+    // それ以外の行はそのまま無視（ir テンプレ以外の装飾など）
   }
 
-  const hasAny = Object.values(data).some((v) => v && v.trim());
+  const stateText = data.stateLines.join('\n').trim();
+  const messageText = data.messageLines.join('\n').trim();
+
+  const hasAny =
+    !!data.target ||
+    !!data.depth ||
+    !!data.phase ||
+    !!stateText ||
+    !!messageText;
+
   if (!hasAny) return input; // irテンプレでなければそのまま
 
   const out: string[] = [];
 
   if (data.target) {
-    out.push('**🧿 観測対象**', '', data.target.trim(), '');
+    out.push('**🧿 観測対象**', '', data.target, '');
   }
 
   if (data.depth || data.phase) {
     const meta: string[] = [];
-    if (data.depth) meta.push(`深度：${data.depth.trim()}`);
-    if (data.phase) meta.push(`位相：${data.phase.trim()}`);
+    if (data.depth) meta.push(`深度：${data.depth}`);
+    if (data.phase) meta.push(`位相：${data.phase}`);
     if (meta.length) {
       out.push('**構造メモ**', '', meta.join(' / '), '');
     }
@@ -202,16 +247,18 @@ function transformIrTemplateToMarkdown(input: string): string {
 
   out.push('---', '');
 
-  if (data.state) {
-    out.push('', '**🌀 意識状態**', '', data.state.trim(), '');
+  if (stateText) {
+    out.push('', '**🌀 意識状態**', '', stateText, '');
   }
 
-  if (data.message) {
-    out.push('', '**🪔 メッセージ**', '', data.message.trim(), '');
+  if (messageText) {
+    // 表示は 🌱 でも 🪔 でも好みでOK。ここでは system.ts に合わせて 🌱 にします。
+    out.push('', '**🌱 メッセージ**', '', messageText, '');
   }
 
   return out.join('\n');
 }
+
 
 /* ========= ReactMarkdown 用カスタムコンポーネント ========= */
 
