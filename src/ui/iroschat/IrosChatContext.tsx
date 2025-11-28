@@ -12,6 +12,7 @@ import React, {
 
 import { irosClient } from './lib/irosApiClient';
 import type { IrosMessage, IrosConversation, IrosUserInfo } from './types';
+import { auth } from '@/lib/firebase';
 
 type SendResult =
   | {
@@ -30,10 +31,10 @@ type IrosChatContextType = {
 
   fetchMessages: (cid: string) => Promise<void>;
 
-  // 通常メッセージ送信
+  // 通常のチャット送信
   sendMessage: (text: string, mode?: string) => Promise<SendResult>;
 
-  // ★ Future-Seed（T層デモ）専用
+  // ★ Future-Seed 用（T層デモ）
   sendFutureSeed: () => Promise<SendResult>;
 
   // 既存
@@ -83,7 +84,7 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
 
     await reloadConversations();
     return r.conversationId;
-  }, [reloadConversations, setMessages]);
+  }, [reloadConversations]);
 
   const renameConversation = useCallback(
     async (cid: string, title: string) => {
@@ -108,13 +109,43 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
 
   /* ========== Messages ========== */
 
-  const fetchMessages = useCallback(async (cid: string) => {
-    // 会話切り替え時にアクティブ ID を更新
-    activeConversationIdRef.current = cid;
-    setActiveConversationId(cid);
-    const rows = await irosClient.fetchMessages(cid);
-    setMessages(rows);
-  }, []);
+  const fetchMessages = useCallback(
+    async (cid: string) => {
+      // 直前の会話IDを保持しておく（会話が変わったかどうか判定するため）
+      const prevCid = activeConversationIdRef.current;
+
+      // 会話切り替え時にアクティブ ID を更新
+      activeConversationIdRef.current = cid;
+      setActiveConversationId(cid);
+
+      const rows = await irosClient.fetchMessages(cid);
+
+      setMessages((prev) => {
+        // 会話が変わっていたら、過去の Seed は引き継がずにサーバー結果だけにする
+        if (prevCid !== cid) {
+          return rows;
+        }
+
+        // 同じ会話IDのままリロードされた場合、
+        // フロント専用の Future-Seed メッセージだけを残してマージする
+        const seedMsgs = (prev || []).filter(
+          (m) =>
+            m &&
+            m.role === 'assistant' &&
+            (m as any).meta &&
+            (m as any).meta.tLayerModeActive === true,
+        );
+
+        if (!seedMsgs.length) {
+          return rows;
+        }
+
+        return [...rows, ...seedMsgs];
+      });
+    },
+    [],
+  );
+
 
   const sendMessage = useCallback(
     async (text: string, mode: string = 'auto'): Promise<SendResult> => {
@@ -178,58 +209,130 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
     [reloadConversations],
   );
 
-  // ★ Future-Seed（T層デモ）専用：/api/agent/iros/future-seed を叩く
-  const sendFutureSeed = useCallback(async (): Promise<SendResult> => {
-    setLoading(true);
-    try {
-      const res = await fetch('/api/agent/iros/future-seed', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}), // 現状はデモなのでボディ無しでOK
+   /* ========== Future-Seed（T層デモ） ========== */
+
+   const sendFutureSeed = useCallback(
+    async (): Promise<SendResult> => {
+      // 優先順：
+      // 1) ref に入っている activeConversationId
+      // 2) state に入っている activeConversationId
+      // 3) conversations の先頭
+      let cid = activeConversationIdRef.current;
+
+      if (!cid) {
+        if (activeConversationId) {
+          cid = activeConversationId;
+        } else if (conversations && conversations.length > 0) {
+          cid = conversations[0].id;
+        }
+
+        if (cid) {
+          console.log(
+            '[IROS] Future-Seed: activeConversationId を補完しました',
+            cid,
+          );
+          activeConversationIdRef.current = cid;
+          setActiveConversationId(cid);
+        }
+      }
+
+      console.log('[IROS] Seed ボタンが押されました（Future-Seed 起動）');
+
+      if (!cid) {
+        console.warn(
+          '[IROS] No active conversation for future-seed (after fallback)',
+        );
+        return null;
+      }
+
+      setLoading(true);
+      try {
+        // ---- ★ Firebase ID トークンを取得して Authorization ヘッダーに付与 ----
+        const currentUser = auth.currentUser;
+        const idToken = currentUser ? await currentUser.getIdToken() : null;
+
+        if (!idToken) {
+          console.warn('[IROS] Future-Seed: no idToken (not logged in?)');
+          return null;
+        }
+
+        const body = {
+          conversationId: cid, // 今はサーバー側では未使用だが将来のために送っておく
+        };
+        console.log('[IROS] Future-Seed request body', body);
+
+        const res = await fetch('/api/agent/iros/future-seed', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+          const detail = await res.text().catch(() => '(no body)');
+          console.error('[IROS] future-seed API error', res.status, detail);
+          return null;
+        }
+
+        const data: any = await res.json();
+
+        // reply / assistant / message の順で拾う
+        const assistant =
+          (data?.reply as string | undefined) ??
+          (data?.assistant as string | undefined) ??
+          (data?.message as string | undefined) ??
+          '';
+
+        const meta = data?.meta ?? data?.result?.meta ?? null;
+
+        if (!assistant) {
+          console.warn('[IROS] Future-Seed result null');
+          return null;
+        }
+
+      // Seed メッセージをローカル state に追加（DB保存はしない）
+      setMessages((m) => {
+        const next = [
+          ...m,
+          {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            text: assistant,
+            content: assistant,
+            created_at: new Date().toISOString(),
+            ts: Date.now(),
+            meta,
+          } as IrosMessage,
+        ];
+
+        console.log('[IROS] Seed setMessages', {
+          before: m.length,
+          after: next.length,
+          last: {
+            id: next[next.length - 1]?.id,
+            role: next[next.length - 1]?.role,
+            meta: next[next.length - 1]?.meta,
+          },
+        });
+
+        return next;
       });
 
-      if (!res.ok) {
-        console.error('[IROS] future-seed API error', res.status);
-        return null;
-      }
-
-      const data: any = await res.json();
-
-      // 返却形式に多少揺れがあっても耐えるよう、候補を順に見る
-      const assistant =
-        (data?.assistant as string | undefined) ??
-        (data?.message as string | undefined) ??
-        '';
-
-      const meta = data?.meta ?? data?.result?.meta ?? null;
-
-      // 返信テキストが空なら、メッセージは追加しない
-      if (!assistant) {
-        return null;
-      }
-
-      // ★ Seed メッセージをローカル state に追加（DB保存はしない）
-      setMessages((m) => [
-        ...m,
-        {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          text: assistant,
-          content: assistant,
-          created_at: new Date().toISOString(),
-          ts: Date.now(),
-          meta,
-        } as IrosMessage,
-      ]);
-
       return { assistant, meta: meta ?? undefined };
-    } catch (e) {
-      console.error('[IROS] future-seed failed', e);
-      return null;
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+
+      } catch (e) {
+        console.error('[IROS] future-seed failed', e);
+        return null;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [activeConversationId, conversations],
+  );
+
+
 
   /* ========== User Info ========== */
 
@@ -276,7 +379,7 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
 
         fetchMessages,
         sendMessage,
-        sendFutureSeed, // ★ 追加
+        sendFutureSeed,
         startConversation,
         renameConversation,
         deleteConversation,

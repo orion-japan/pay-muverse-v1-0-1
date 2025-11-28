@@ -9,6 +9,7 @@ import { auth } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import styles from './index.module.css';
 import LoginModal from '@/components/LoginModal';
+import { useIrosChat } from './IrosChatContext'; // ★ 追加：Future-Seed 呼び出し用
 
 /**
  * Iros-AI 専用レイアウト
@@ -23,6 +24,7 @@ export default function IrosAiLayout({
   const [seedActive, setSeedActive] = useState(false); // Seed準備中インジケータ
 
   const { userCode } = useAuth(); // ログイン状態を取得
+  const { sendFutureSeed } = useIrosChat(); // ★ Future-Seed API 呼び出し
   const router = useRouter();
 
   // ★ ログアウト処理
@@ -39,12 +41,31 @@ export default function IrosAiLayout({
     }
   };
 
-  // ★ Seed ボタンクリック（いまはデモ：視覚フィードバックのみ）
-  const handleSeedClick = () => {
+  // ★ Seed ボタンクリック → /api/agent/iros/future-seed を叩いて Seed メッセージ追加
+  const handleSeedClick = async () => {
     if (seedActive) return; // 連打防止
-    console.log('[IROS] Seed ボタンが押されました（デモモード）');
+
+    // ログインしていなければ、まずログインモーダルを開く
+    if (!userCode) {
+      setShowLogin(true);
+      return;
+    }
+
+    console.log('[IROS] Seed ボタンが押されました（Future-Seed 起動）');
     setSeedActive(true);
-    setTimeout(() => setSeedActive(false), 800);
+
+    try {
+      const result = await sendFutureSeed();
+      console.log('[IROS] Future-Seed result', result);
+      // sendFutureSeed 内で setMessages 済みなので、ここではログだけ
+      if (!result) {
+        console.warn('[IROS] Future-Seed: 応答が空でした');
+      }
+    } catch (e) {
+      console.error('[IROS] Future-Seed 呼び出し中にエラー', e);
+    } finally {
+      setTimeout(() => setSeedActive(false), 600);
+    }
   };
 
   return (
@@ -224,7 +245,7 @@ export default function IrosAiLayout({
                           whiteSpace: 'nowrap',
                         }}
                       >
-                        ログイン
+                          ログイン
                       </button>
 
                       {/* 設定リンク（未ログインでもOK） */}
@@ -248,7 +269,7 @@ export default function IrosAiLayout({
               )}
             </div>
 
-            {/* ★ Seed 状態の小さな表示（デモ用） */}
+            {/* ★ Seed 状態の小さな表示 */}
             {seedActive && (
               <span
                 style={{
@@ -262,7 +283,7 @@ export default function IrosAiLayout({
               </span>
             )}
 
-            {/* 🌱 Seed ボタン（いまはデモ：APIはまだ直結していない） */}
+            {/* 🌱 Seed ボタン（Future-Seed 実行） */}
             <button
               type="button"
               onClick={handleSeedClick}
@@ -272,11 +293,12 @@ export default function IrosAiLayout({
                 border: 'none',
                 background: '#4F46E5',
                 color: '#ffffff',
-                cursor: 'pointer',
+                cursor: seedActive ? 'default' : 'pointer',
                 fontSize: '0.85rem',
                 whiteSpace: 'nowrap',
                 opacity: seedActive ? 0.7 : 1,
               }}
+              disabled={seedActive}
             >
               Seed
             </button>

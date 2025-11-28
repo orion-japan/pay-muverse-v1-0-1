@@ -416,9 +416,22 @@ export default function MessageList() {
     bottomRef.current?.scrollIntoView({ behavior, block: 'end' });
 
   React.useEffect(() => {
+    console.log('[IROS UI] messages updated', {
+      len: messages.length,
+      last: messages[messages.length - 1]
+        ? {
+            id: messages[messages.length - 1].id,
+            role: messages[messages.length - 1].role,
+            meta: messages[messages.length - 1].meta,
+          }
+        : null,
+    });
+
     scrollToBottom(first.current ? 'auto' : 'smooth');
     first.current = false;
   }, [messages]);
+
+
 
   const resolveUserAvatar = (msg: IrosMessage): string => {
     const perMessage = ((msg as any)?.avatarUrl as string | undefined)?.trim?.();

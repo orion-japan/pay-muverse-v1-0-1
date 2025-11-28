@@ -40,8 +40,12 @@ export async function POST(req: NextRequest) {
 
     // --- 入力 ---
     const body = (await req.json().catch(() => ({}))) as any;
-    const text: string = String(body.text ?? body.message ?? '').trim();
-    if (!text) return json({ ok: false, error: 'empty' }, 400);
+
+    // ★ text は任意：空なら内部トリガー文に差し替える
+    const rawText: string = String(body.text ?? body.message ?? '').trim();
+    const text: string =
+      rawText ||
+      'いまの私の流れと、これから数ヶ月の未来Seedを教えてください。';
 
     const user_code: string | null =
       (body.user_code as string | undefined) ??
@@ -75,7 +79,6 @@ export async function POST(req: NextRequest) {
       tLayerHint?: string;
     } = {
       mode: 'mirror',
-      // ここは undefined 許容で、あれば使う
       depth: (mem?.depth_stage as Depth | undefined) ?? undefined,
       qCode: (mem?.q_primary as QCode | undefined) ?? undefined,
       selfAcceptance:
@@ -95,11 +98,8 @@ export async function POST(req: NextRequest) {
     const out = await generateIrosReply({
       text,
       meta,
-      history: [], // 未来Seed用なので履歴は一旦オフにしておく（必要なら後で足す）
+      history: [], // 未来Seed用なので履歴は一旦オフ（必要になったら追加）
     });
-
-    // ここではログ保存やクレジット処理は「デモ用」として省略
-    //（必要になったら mtalk や /api/agent/iros/reply を参考に追加）
 
     return json({
       ok: true,
@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
       agent: 'iros',
       user_code,
       reply: out.text,
-      meta: meta,
+      meta,
     });
   } catch (e: any) {
     console.error('[future-seed] error', e);
