@@ -19,29 +19,45 @@ export default function IrosAiLayout({
   children: React.ReactNode;
 }) {
   const [showLogin, setShowLogin] = useState(false);
-  const { userCode } = useAuth(); // ★ ログイン状態を取得
+  const [showMenu, setShowMenu] = useState(false);
+  const [seedActive, setSeedActive] = useState(false); // Seed準備中インジケータ
+
+  const { userCode } = useAuth(); // ログイン状態を取得
   const router = useRouter();
 
   // ★ ログアウト処理
   const handleLogout = async () => {
     try {
-      // セッションCookie用の logout API がある前提
-      // なければここは後で一緒に実装しましょう
       await fetch('/api/logout', { method: 'POST' }).catch(() => {});
     } catch {
-      // API 側は失敗しても、クライアント側は続行
     } finally {
       try {
         await signOut(auth);
       } catch {}
       router.refresh();
+      setShowMenu(false);
     }
+  };
+
+  // ★ Seed ボタンクリック（いまはデモ：視覚フィードバックのみ）
+  const handleSeedClick = () => {
+    if (seedActive) return; // 連打防止
+    console.log('[IROS] Seed ボタンが押されました（デモモード）');
+    setSeedActive(true);
+    setTimeout(() => setSeedActive(false), 800);
   };
 
   return (
     <div className={styles.root}>
       {/* ===== 上部ヘッダー ===== */}
-      <header aria-label="Iros-AI header">
+      <header
+        aria-label="Iros-AI header"
+        style={{
+          position: 'sticky',
+          top: 0,
+          zIndex: 2000,
+        }}
+      >
         <div
           style={{
             display: 'flex',
@@ -74,58 +90,196 @@ export default function IrosAiLayout({
               alignItems: 'center',
             }}
           >
-            {/* ★ ログイン状態で出し分け */}
-            {userCode ? (
-              // ログイン中 → ログアウトボタン
+            {/* ⚙ メニューアイコン（ドロップダウン） */}
+            <div
+              style={{
+                position: 'relative',
+                display: 'flex',
+                alignItems: 'center',
+              }}
+            >
               <button
                 type="button"
-                onClick={handleLogout}
+                onClick={() => setShowMenu((v) => !v)}
+                aria-haspopup="true"
+                aria-expanded={showMenu}
                 style={{
-                  padding: '6px 14px',
-                  borderRadius: 999,
+                  width: 30,
+                  height: 30,
+                  borderRadius: '999px',
                   border: '1px solid rgba(0,0,0,0.15)',
                   background: '#ffffff',
                   cursor: 'pointer',
-                  fontSize: '0.85rem',
+                  fontSize: '1rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: 0,
                 }}
               >
-                ログアウト
+                {/* 三本線アイコン */}
+                <span
+                  style={{
+                    display: 'block',
+                    width: 14,
+                    height: 2,
+                    background: '#111827',
+                    borderRadius: 999,
+                    position: 'relative',
+                  }}
+                >
+                  <span
+                    style={{
+                      position: 'absolute',
+                      left: 0,
+                      top: -5,
+                      width: 14,
+                      height: 2,
+                      borderRadius: 999,
+                      background: '#111827',
+                    }}
+                  />
+                  <span
+                    style={{
+                      position: 'absolute',
+                      left: 0,
+                      top: 5,
+                      width: 14,
+                      height: 2,
+                      borderRadius: 999,
+                      background: '#111827',
+                    }}
+                  />
+                </span>
               </button>
-            ) : (
-              // 未ログイン → ログインモーダルを開く
-              <button
-                type="button"
-                onClick={() => setShowLogin(true)}
+
+              {showMenu && (
+                <div
+                  style={{
+                    position: 'fixed',
+                    top: 70, // ヘッダーのすぐ下あたり
+                    right: 24,
+                    background: '#ffffff',
+                    borderRadius: 12,
+                    border: '1px solid rgba(0,0,0,0.08)',
+                    boxShadow: '0 8px 24px rgba(15,23,42,0.18)',
+                    padding: '6px 0',
+                    minWidth: 150,
+                    zIndex: 9999,
+                  }}
+                >
+                  {userCode ? (
+                    <>
+                      {/* 設定（ログイン中） */}
+                      <Link
+                        href="/iros-ai/settings"
+                        onClick={() => setShowMenu(false)}
+                        style={{
+                          display: 'block',
+                          padding: '8px 14px',
+                          fontSize: '0.85rem',
+                          textDecoration: 'none',
+                          color: '#111827',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        設定
+                      </Link>
+
+                      {/* ログアウト */}
+                      <button
+                        type="button"
+                        onClick={handleLogout}
+                        style={{
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '8px 14px',
+                          fontSize: '0.85rem',
+                          border: 'none',
+                          background: 'transparent',
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        ログアウト
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      {/* ログイン（モーダル） */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowMenu(false);
+                          setShowLogin(true);
+                        }}
+                        style={{
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '8px 14px',
+                          fontSize: '0.85rem',
+                          border: 'none',
+                          background: 'transparent',
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        ログイン
+                      </button>
+
+                      {/* 設定リンク（未ログインでもOK） */}
+                      <Link
+                        href="/iros-ai/settings"
+                        onClick={() => setShowMenu(false)}
+                        style={{
+                          display: 'block',
+                          padding: '8px 14px',
+                          fontSize: '0.85rem',
+                          textDecoration: 'none',
+                          color: '#111827',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        設定
+                      </Link>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* ★ Seed 状態の小さな表示（デモ用） */}
+            {seedActive && (
+              <span
                 style={{
-                  padding: '6px 14px',
-                  borderRadius: 999,
-                  border: '1px solid rgba(0,0,0,0.15)',
-                  background: '#ffffff',
-                  cursor: 'pointer',
-                  fontSize: '0.85rem',
+                  fontSize: '0.75rem',
+                  color: '#4F46E5',
+                  opacity: 0.9,
+                  whiteSpace: 'nowrap',
                 }}
               >
-                ログイン
-              </button>
+                Seed 準備中…
+              </span>
             )}
 
-            {/* 設定ボタン → /iros-ai/settings へ遷移 */}
-            <Link href="/iros-ai/settings">
-              <button
-                type="button"
-                style={{
-                  padding: '6px 14px',
-                  borderRadius: 999,
-                  border: 'none',
-                  background: '#111827',
-                  color: '#ffffff',
-                  cursor: 'pointer',
-                  fontSize: '0.85rem',
-                }}
-              >
-                設定
-              </button>
-            </Link>
+            {/* 🌱 Seed ボタン（いまはデモ：APIはまだ直結していない） */}
+            <button
+              type="button"
+              onClick={handleSeedClick}
+              style={{
+                padding: '6px 16px',
+                borderRadius: 999,
+                border: 'none',
+                background: '#4F46E5',
+                color: '#ffffff',
+                cursor: 'pointer',
+                fontSize: '0.85rem',
+                whiteSpace: 'nowrap',
+                opacity: seedActive ? 0.7 : 1,
+              }}
+            >
+              Seed
+            </button>
           </nav>
         </div>
       </header>

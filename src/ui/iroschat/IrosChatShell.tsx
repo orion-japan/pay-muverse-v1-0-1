@@ -32,6 +32,9 @@ type OpenTarget =
 
 const lastConvKey = (agent: string) => `sofia:lastConv:${agent}`;
 
+// 未来Seedボタン用のカスタムイベント名
+const FUTURE_SEED_EVENT = 'iros:future-seed';
+
 function IrosChatInner({ open }: Props) {
   const sp = useSearchParams();
   const urlCid = sp?.get('cid') ?? undefined;
@@ -109,6 +112,41 @@ function IrosChatInner({ open }: Props) {
   useEffect(() => {
     setUiUser((chat.userInfo as any) ?? null);
   }, [chat.userInfo]);
+
+  // === 未来Seed（β）ボタンからのトリガーをハンドリング ===
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handler = async () => {
+      if (!userCode || authLoading) return;
+
+      try {
+        // アクティブな会話がなければ新規作成
+        let cid = chat.activeConversationId;
+        if (!cid) {
+          cid = await chat.newConversation();
+        }
+
+        // 送るプロンプト（ここはあとで自由に調整OK）
+        const seedPrompt =
+          '【未来Seed】\n' +
+          'いまの私の「未来の種（Seed）」をみてください。\n' +
+          '1. その種は、どんな「未来の景色」につながっていますか？\n' +
+          '2. そこに至るまで、どんな「努力」や「プロセス」が育っていきますか？\n' +
+          '3. その結果として、どんな「実り」や「成功」が手の中に残りますか？\n' +
+          'Iros の視点で、静かに描写してください。';
+
+        await chat.sendMessage(seedPrompt, 'future_seed');
+      } catch (e) {
+        console.warn('[IrosChatInner] future-seed handler error:', e);
+      }
+    };
+
+    window.addEventListener(FUTURE_SEED_EVENT, handler as EventListener);
+    return () => {
+      window.removeEventListener(FUTURE_SEED_EVENT, handler as EventListener);
+    };
+  }, [chat, userCode, authLoading]);
 
   // openパラメータ（menu/new/cid）の一回処理（ループ防止）
   const didHandleOpenRef = useRef(false);

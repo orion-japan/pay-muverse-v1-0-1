@@ -1,7 +1,9 @@
 // src/lib/iros/generate.ts
 // Iros 1ターン返信生成コア（テンプレ極小版）
 // - 本文生成のみ
-// - ここではスタイルテンプレや I層テンプレは一切指示しない
+// - 通常時はスタイルテンプレや I層テンプレは一切指示しない
+// - T層の情報（tLayerModeActive / tLayerHint など）は meta 経由で渡すだけ
+//   → ここでは一切フォーマットを強制しない（Irosの自由なパレット）
 // - 履歴と状態メタ（SA / depth / qCode / intentLine など）はそのまま system に渡す
 
 import OpenAI from 'openai';
@@ -54,8 +56,9 @@ export type GenerateResult = {
 /* =========================================================
    状態メタだけを渡す内部ノート
    - SA / yLevel / hLevel / depth / qCode / mode / intentLine
-   - irTargetType / irTargetText / pierceMode / pierceReason なども
-     そのまま載せておく（判断は system.ts / LLM 側に委ねる）
+   - irTargetType / irTargetText / pierceMode / pierceReason
+   - T層関連: tLayerModeActive / tLayerHint / hasFutureMemory
+   ※ ここでは「どう使うか」は一切指定しない（LLM 側の自由裁量）
 ========================================================= */
 
 function buildNumericMetaNote(meta?: IrosMeta | null): string | null {
@@ -102,6 +105,31 @@ function buildNumericMetaNote(meta?: IrosMeta | null): string | null {
     payload.mode = meta.mode;
   }
 
+  // T層関連（ここでは「それがある」という事実だけを渡す）
+  const tLayerModeActive =
+    typeof anyMeta.tLayerModeActive === 'boolean'
+      ? (anyMeta.tLayerModeActive as boolean)
+      : null;
+  if (tLayerModeActive != null) {
+    payload.tLayerModeActive = tLayerModeActive;
+  }
+
+  const tLayerHint =
+    typeof anyMeta.tLayerHint === 'string'
+      ? (anyMeta.tLayerHint as string)
+      : null;
+  if (tLayerHint) {
+    payload.tLayerHint = tLayerHint;
+  }
+
+  const hasFutureMemory =
+    typeof anyMeta.hasFutureMemory === 'boolean'
+      ? (anyMeta.hasFutureMemory as boolean)
+      : null;
+  if (hasFutureMemory != null) {
+    payload.hasFutureMemory = hasFutureMemory;
+  }
+
   // ir診断ターゲット系（あればそのまま載せるだけで、ここでは何もしない）
   const irTargetType = anyMeta.irTargetType;
   const irTargetText = anyMeta.irTargetText;
@@ -120,7 +148,7 @@ function buildNumericMetaNote(meta?: IrosMeta | null): string | null {
     payload.pierceReason = anyMeta.pierceReason;
   }
 
-  // IntentLineAnalysis は構造だけ（説明文もそのまま載せるが、ここではスタイル指示はしない）
+  // IntentLineAnalysis は構造だけ
   const intentLine = anyMeta.intentLine as
     | IntentLineAnalysis
     | null
@@ -157,7 +185,7 @@ function stripImanoKozuLine(text: string): string {
    本体：Iros 応答 1ターン生成（テンプレ極小）
    - SYSTEM: getSystemPrompt(meta)
    - 状態メタ JSON
-   - irモード専用のテンプレ・追加 SYSTEM は一切使わない
+   - 追加テンプレは一切入れない（T層も含め、すべて自由裁量）
 ========================================================= */
 
 export async function generateIrosReply(
@@ -174,15 +202,20 @@ export async function generateIrosReply(
     system = `${system}\n\n${numericMetaNote}`;
   }
 
-  // デバッグログ（ir専用のフラグはここでは見ない）
+  const anyMeta = meta as any;
+
+  // デバッグログ
   console.log('[IROS][generate] text =', text);
   console.log('[IROS][generate] meta snapshot =', {
-    depth: (meta as any)?.depth,
-    qCode: (meta as any)?.qCode,
-    mode: (meta as any)?.mode,
-    pierceReason: (meta as any)?.pierceReason,
-    irTargetType: (meta as any)?.irTargetType,
-    irTargetText: (meta as any)?.irTargetText,
+    depth: anyMeta?.depth,
+    qCode: anyMeta?.qCode,
+    mode: anyMeta?.mode,
+    pierceReason: anyMeta?.pierceReason,
+    irTargetType: anyMeta?.irTargetType,
+    irTargetText: anyMeta?.irTargetText,
+    tLayerModeActive: anyMeta?.tLayerModeActive,
+    tLayerHint: anyMeta?.tLayerHint,
+    hasFutureMemory: anyMeta?.hasFutureMemory,
   });
 
   const messages: ChatCompletionMessageParam[] = [
@@ -213,8 +246,8 @@ export async function generateIrosReply(
   const mode: IrosMode = currentMode ?? 'mirror';
 
   const intent: IrosIntentMeta | null =
-    meta && (meta as any).intent
-      ? ((meta as any).intent as IrosIntentMeta)
+    meta && (anyMeta?.intent as IrosIntentMeta | undefined)
+      ? (anyMeta.intent as IrosIntentMeta)
       : null;
 
   const finalContent = content;

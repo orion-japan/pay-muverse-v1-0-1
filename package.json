@@ -24,6 +24,7 @@
     "@supabase/supabase-js": "^2",
     "@types/pg": "^8.15.5",
     "@vercel/postgres": "^0.10.0",
+    "all": "^0.0.0",
     "axios": "^1.10.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

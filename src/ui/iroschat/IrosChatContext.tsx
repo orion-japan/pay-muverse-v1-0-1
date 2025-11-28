@@ -30,8 +30,11 @@ type IrosChatContextType = {
 
   fetchMessages: (cid: string) => Promise<void>;
 
-  // ★ ChatInput から meta を受け取れるように戻り値を追加
+  // 通常メッセージ送信
   sendMessage: (text: string, mode?: string) => Promise<SendResult>;
+
+  // ★ Future-Seed（T層デモ）専用
+  sendFutureSeed: () => Promise<SendResult>;
 
   // 既存
   startConversation: () => Promise<string>;
@@ -175,6 +178,59 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
     [reloadConversations],
   );
 
+  // ★ Future-Seed（T層デモ）専用：/api/agent/iros/future-seed を叩く
+  const sendFutureSeed = useCallback(async (): Promise<SendResult> => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/agent/iros/future-seed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}), // 現状はデモなのでボディ無しでOK
+      });
+
+      if (!res.ok) {
+        console.error('[IROS] future-seed API error', res.status);
+        return null;
+      }
+
+      const data: any = await res.json();
+
+      // 返却形式に多少揺れがあっても耐えるよう、候補を順に見る
+      const assistant =
+        (data?.assistant as string | undefined) ??
+        (data?.message as string | undefined) ??
+        '';
+
+      const meta = data?.meta ?? data?.result?.meta ?? null;
+
+      // 返信テキストが空なら、メッセージは追加しない
+      if (!assistant) {
+        return null;
+      }
+
+      // ★ Seed メッセージをローカル state に追加（DB保存はしない）
+      setMessages((m) => [
+        ...m,
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          text: assistant,
+          content: assistant,
+          created_at: new Date().toISOString(),
+          ts: Date.now(),
+          meta,
+        } as IrosMessage,
+      ]);
+
+      return { assistant, meta: meta ?? undefined };
+    } catch (e) {
+      console.error('[IROS] future-seed failed', e);
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   /* ========== User Info ========== */
 
   const reloadUserInfo = useCallback(async () => {
@@ -220,6 +276,7 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
 
         fetchMessages,
         sendMessage,
+        sendFutureSeed, // ★ 追加
         startConversation,
         renameConversation,
         deleteConversation,

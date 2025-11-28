@@ -16,8 +16,6 @@ import {
   QCODE_VALUES,
 } from './system';
 
-
-
 import { deriveIrosGoal } from './will/goalEngine';
 import { deriveIrosPriority } from './will/priorityEngine';
 
@@ -346,23 +344,21 @@ export async function runIrosTurn(
     prevMeta: (mergedBaseMeta as any) ?? null,
   });
 
-// ==========================================
-// ir診断：観測対象の抽出（トリガー時のみ）
-// ==========================================
-const irTriggered = detectIrTrigger(text);
+  // ==========================================
+  // ir診断：観測対象の抽出（トリガー時のみ）
+  // ==========================================
+  const irTriggered = detectIrTrigger(text);
 
-
-// ===============================
-// I層 Piercing 判定（再利用する）
-// ===============================
-const pierceDecision = decidePierceMode({
-  depth: depth ?? null,
-  requestedDepth,
-  selfAcceptance: selfAcceptanceLine,
-  yLevel: yh.yLevel,
-  irTriggered, // ← さっきのを再利用！
-});
-
+  // ===============================
+  // I層 Piercing 判定（再利用する）
+  // ===============================
+  const pierceDecision = decidePierceMode({
+    depth: depth ?? null,
+    requestedDepth,
+    selfAcceptance: selfAcceptanceLine,
+    yLevel: yh.yLevel,
+    irTriggered, // ← さっきのを再利用！
+  });
 
   /* =========================================================
      mode の最終決定（SelfAcceptance ライン + I層判定）
@@ -413,7 +409,6 @@ const pierceDecision = decidePierceMode({
     // ★ I層 Piercing 状態を meta に載せる
     pierceMode: pierceDecision.pierceMode,
     pierceReason: pierceDecision.pierceReason,
-
   } as IrosMeta;
 
   // ★ Self Acceptance ラインを meta に載せる
@@ -462,6 +457,33 @@ const pierceDecision = decidePierceMode({
   } catch (e) {
     console.warn('[IROS/ORCH] deriveIntentLine failed', e);
   }
+
+  /* =========================================================
+     A''') 未来方向モード検出（T層フラグ整備）
+           - intentLine / tLayerHint / hasFutureMemory / テキスト内容から
+             「未来方向が前面に出ているか」を判定し、meta にフラグ付け
+  ========================================================= */
+  const futureDirectionActive = detectFutureDirectionMode({
+    text,
+    irTriggered,
+    intentLine: (meta as any).intentLine ?? null,
+  });
+
+  if (futureDirectionActive) {
+    // tLayerHint / hasFutureMemory が未設定の場合の補完
+    if (!(meta as any).tLayerHint) {
+      // 未来方向モード時のデフォルト T層ヒント（将来必要に応じて調整）
+      (meta as any).tLayerHint =
+        (meta as any).intentLine?.tLayerHint ?? 'T2';
+    }
+
+    if (typeof (meta as any).hasFutureMemory !== 'boolean') {
+      (meta as any).hasFutureMemory = true;
+    }
+  }
+
+  // LLM 側で参照しやすいよう、「いま T層を前面に出すべきか」のフラグを固定
+  (meta as any).tLayerModeActive = futureDirectionActive;
 
   /* =========================================================
      ① Goal Engine：今回の "意志" を生成
@@ -543,6 +565,7 @@ const pierceDecision = decidePierceMode({
       // 🆕 T層ヒント（ログ確認用）
       tLayerHint: (meta as any).tLayerHint ?? null,
       hasFutureMemory: (meta as any).hasFutureMemory ?? null,
+      tLayerModeActive: (meta as any).tLayerModeActive ?? null,
     });
   }
 
@@ -625,10 +648,9 @@ const pierceDecision = decidePierceMode({
       irTargetText: (meta as any).irTargetText ?? null,
       tLayerHint: (meta as any).tLayerHint ?? null,
       hasFutureMemory: (meta as any).hasFutureMemory ?? null,
+      tLayerModeActive: (meta as any).tLayerModeActive ?? null,
     });
   }
-
-
 
   /* =========================================================
      ⑦ MemoryState への保存（userCode 単位で 1行）
@@ -790,8 +812,6 @@ function buildStructuredHeader(meta: IrosMeta): string | null {
   return lines.join('\n');
 }
 
-
-
 /**
  * Qコード → 一言ラベル
  *  - Q1〜Q5 の意味付けをここで固定
@@ -836,6 +856,52 @@ function describeDepthPhaseLabel(depth?: Depth | null): string | null {
       return null;
   }
 }
+
+/* ========= 未来方向モード検出ヘルパー ========= */
+
+function detectFutureDirectionMode(args: {
+  text: string;
+  irTriggered: boolean;
+  intentLine: IntentLineAnalysis | null | undefined;
+}): boolean {
+  const { text, irTriggered, intentLine } = args;
+
+  // 1) IntentLine からのシグナルを最優先
+  if (
+    intentLine &&
+    ((intentLine as any).hasFutureMemory === true ||
+      (intentLine as any).tLayerHint)
+  ) {
+    return true;
+  }
+
+  // 2) テキストのキーワード（未来 / 意図 / 方向 系）
+  const compact = text.replace(/\s/g, '');
+  const futureKeywords = [
+    'これから',
+    '今後',
+    '未来',
+    '将来',
+    'どこに向かう',
+    'どう進めば',
+    '進み方',
+    '方向性',
+    '意図',
+    'ビジョン',
+  ];
+
+  if (futureKeywords.some((kw) => compact.includes(kw))) {
+    return true;
+  }
+
+  // 3) ir診断など、構造的に「先」を見るモードは T層寄りとみなす
+  if (irTriggered) {
+    return true;
+  }
+
+  return false;
+}
+
 /* ========= 最小バリデーション ========= */
 
 function normalizeMode(mode?: IrosMode): IrosMode {

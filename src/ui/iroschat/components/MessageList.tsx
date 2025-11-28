@@ -34,6 +34,8 @@ type IrosMessage = {
       | 'auto'
       | string
       | null;
+    tLayerModeActive?: boolean;
+    tLayerHint?: string | null;
     [key: string]: any;
   };
 
@@ -96,6 +98,56 @@ const qBadgeStyle: React.CSSProperties = {
   color: '#4338ca',
 };
 
+/** Seed（Future-Seed）用のヘッダーバー */
+const seedHeaderStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 8,
+  padding: '6px 10px 4px',
+  marginBottom: 6,
+  borderRadius: 10,
+  background:
+    'linear-gradient(135deg, rgba(56,189,248,0.1), rgba(129,140,248,0.15))',
+  border: '1px solid rgba(59,130,246,0.35)',
+};
+
+const seedLabelStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  fontSize: 11,
+  fontWeight: 600,
+  color: '#0f172a',
+};
+
+const seedTLHintStyle: React.CSSProperties = {
+  padding: '2px 8px',
+  borderRadius: 999,
+  fontSize: 10,
+  background: 'rgba(37,99,235,0.08)',
+  color: '#1d4ed8',
+};
+
+const seedCancelButtonStyle: React.CSSProperties = {
+  padding: '4px 10px',
+  borderRadius: 999,
+  border: 'none',
+  fontSize: 11,
+  fontWeight: 500,
+  cursor: 'pointer',
+  background: 'rgba(248,250,252,0.85)',
+  color: '#1e293b',
+  boxShadow: '0 0 0 1px rgba(148,163,184,0.7)',
+};
+
+const seedCanceledNoteStyle: React.CSSProperties = {
+  fontSize: 11,
+  color: '#64748b',
+  fontStyle: 'italic',
+  padding: '4px 0',
+};
+
 /** [object Object]対策：最終的に必ず文字列へ正規化 */
 function toSafeString(v: unknown): string {
   if (typeof v === 'string') return v;
@@ -154,8 +206,7 @@ function transformIrTemplateToMarkdown(input: string): string {
   const getAfterMark = (s: string): string => {
     const idxJa = s.indexOf('：');
     const idxEn = s.indexOf(':');
-    const pos =
-      idxJa !== -1 ? idxJa : idxEn !== -1 ? idxEn : -1;
+    const pos = idxJa !== -1 ? idxJa : idxEn !== -1 ? idxEn : -1;
     return pos >= 0 ? s.slice(pos + 1) : '';
   };
 
@@ -259,7 +310,6 @@ function transformIrTemplateToMarkdown(input: string): string {
   return out.join('\n');
 }
 
-
 /**
  * カギカッコごと太字になっているパターンを
  * 「**カギカッコの中身だけ太字」に変換する。
@@ -271,12 +321,11 @@ function normalizeBoldInsideQuotes(input: string): string {
   // 「〜」パターン
   let out = input.replace(/\*\*「([^」]+)」\*\*/g, '「**$1**」');
 
-  // 『〜』パターンも一応サポートしたかったら
+  // 『〜』パターンも一応サポート
   out = out.replace(/\*\*『([^』]+)』\*\*/g, '『**$1**』');
 
   return out;
 }
-
 
 /* ========= ReactMarkdown 用カスタムコンポーネント ========= */
 
@@ -285,7 +334,7 @@ const markdownComponents: any = {
   p: ({ children }: { children: React.ReactNode }) => (
     <p
       style={{
-        margin: '0 0 0.8em',      // ちょっとだけ余白を増やす
+        margin: '0 0 0.8em', // ちょっとだけ余白を増やす
         whiteSpace: 'pre-wrap',
       }}
     >
@@ -299,7 +348,7 @@ const markdownComponents: any = {
       style={{
         fontWeight: 700,
         color: '#111827',
-        fontSize: '1.02rem',     // 👈 ベース文字より少し大きく
+        fontSize: '1.02rem', // ベース文字より少し大きく
         letterSpacing: '0.01em',
         display: 'inline-block',
         margin: '0.45em 0 0.25em', // 上に少し余白 → 段が分かれて見える
@@ -342,7 +391,6 @@ const markdownComponents: any = {
   ),
 };
 
-
 export default function MessageList() {
   const { messages, loading, error } = useIrosChat() as {
     messages: IrosMessage[];
@@ -358,6 +406,11 @@ export default function MessageList() {
   const listRef = React.useRef<HTMLDivElement | null>(null);
   const bottomRef = React.useRef<HTMLDivElement | null>(null);
   const first = React.useRef(true);
+
+  // Seed の「キャンセル済みID」をフロントだけで保持
+  const [seedCanceled, setSeedCanceled] = React.useState<
+    Record<string, boolean>
+  >({});
 
   const scrollToBottom = (behavior: ScrollBehavior = 'auto') =>
     bottomRef.current?.scrollIntoView({ behavior, block: 'end' });
@@ -375,6 +428,13 @@ export default function MessageList() {
     return FALLBACK_USER;
   };
 
+  const handleSeedCancel = (id: string) => {
+    setSeedCanceled((prev) => ({
+      ...prev,
+      [id]: true,
+    }));
+  };
+
   return (
     <div
       ref={listRef}
@@ -385,107 +445,131 @@ export default function MessageList() {
         <div className={styles.emptyHint}>ここに会話が表示されます</div>
       )}
 
-{messages.map((m) => {
-  const isUser = m.role === 'user';
-  const iconSrc = isUser ? resolveUserAvatar(m) : '/ir.png';
+      {messages.map((m) => {
+        const isUser = m.role === 'user';
+        const iconSrc = isUser ? resolveUserAvatar(m) : '/ir.png';
 
-  const rawText = toSafeString(m.text);
-  const safeText = normalizeBoldInsideQuotes(
-    transformIrTemplateToMarkdown(rawText),
-  );
+        const rawText = toSafeString(m.text);
+        const safeText = normalizeBoldInsideQuotes(
+          transformIrTemplateToMarkdown(rawText),
+        );
 
-  const qFromMeta = m.meta?.qCode;
-  const qToShow = qFromMeta ?? m.q;
+        const qFromMeta = m.meta?.qCode;
+        const qToShow = qFromMeta ?? m.q;
 
-  return (
-    <div
-      key={m.id}
-      className={`message ${isUser ? 'is-user' : 'is-assistant'}`}
-    >
-      {/* ▼ アイコン＋Qバッジを横一列に並べるヘッダー行 ▼ */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: isUser ? 'flex-end' : 'flex-start',
-          gap: 6,
-          marginBottom: 4,
-        }}
-      >
-        {/* アバター */}
-        <div
-          className="avatar"
-          style={{ alignSelf: 'center' }}
-        >
-          <img
-            src={iconSrc}
-            alt={isUser ? 'you' : 'Iros'}
-            width={AVATAR_SIZE}
-            height={AVATAR_SIZE}
-            onError={(e) => {
-              const el = e.currentTarget as HTMLImageElement & {
-                dataset: Record<string, string | undefined>;
-              };
-              if (!el.dataset.fallback1) {
-                el.dataset.fallback1 = '1';
-                el.src = FALLBACK_USER;
-                return;
-              }
-              if (!el.dataset.fallback2) {
-                el.dataset.fallback2 = '1';
-                el.src = FALLBACK_DATA;
-              }
-            }}
-            style={{
-              borderRadius: '50%',
-              objectFit: 'cover',
-              display: 'block',
-            }}
-          />
-        </div>
+        const isSeed =
+          !isUser && !!m.meta?.tLayerModeActive === true; // Future-Seed判定
+        const tHint = m.meta?.tLayerHint || 'T2';
+        const isSeedCanceled = isSeed && seedCanceled[m.id];
 
-        {/* Qバッジ：Iros（assistant）のときだけアイコンの右に表示 */}
-        {!isUser && qToShow && (
-          <div className="q-badge" style={qBadgeStyle}>
-            <span
-              style={{
-                width: 10,
-                height: 10,
-                borderRadius: 999,
-                background: m.color || 'rgba(129,140,248,0.85)',
-                display: 'inline-block',
-
-              }}
-            />
-            {qToShow}
-          </div>
-        )}
-      </div>
-
-      {/* 吹き出し（構図はこれまで通り） */}
-      <div
-        className={`bubble ${isUser ? 'is-user' : 'is-assistant'}`}
-        style={{
-          ...(isUser ? userBubbleStyle : assistantBubbleShellStyle),
-          alignSelf: isUser ? 'flex-end' : 'flex-start',
-          maxWidth: 'min(760px, 88%)',
-        }}
-      >
-        {/* ユーザー側でQを見せたいならここに残してもOK（今は非表示のままでも良い） */}
-
-        <div className="msgBody">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkBreaks]}
-            components={markdownComponents}
+        return (
+          <div
+            key={m.id}
+            className={`message ${isUser ? 'is-user' : 'is-assistant'}`}
           >
-            {safeText}
-          </ReactMarkdown>
-        </div>
-      </div>
-    </div>
-  );
-})}
+            {/* ▼ アイコン＋Qバッジを横一列に並べるヘッダー行 ▼ */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: isUser ? 'flex-end' : 'flex-start',
+                gap: 6,
+                marginBottom: 4,
+              }}
+            >
+              {/* アバター */}
+              <div className="avatar" style={{ alignSelf: 'center' }}>
+                <img
+                  src={iconSrc}
+                  alt={isUser ? 'you' : 'Iros'}
+                  width={AVATAR_SIZE}
+                  height={AVATAR_SIZE}
+                  onError={(e) => {
+                    const el = e.currentTarget as HTMLImageElement & {
+                      dataset: Record<string, string | undefined>;
+                    };
+                    if (!el.dataset.fallback1) {
+                      el.dataset.fallback1 = '1';
+                      el.src = FALLBACK_USER;
+                      return;
+                    }
+                    if (!el.dataset.fallback2) {
+                      el.dataset.fallback2 = '1';
+                      el.src = FALLBACK_DATA;
+                    }
+                  }}
+                  style={{
+                    borderRadius: '50%',
+                    objectFit: 'cover',
+                    display: 'block',
+                  }}
+                />
+              </div>
 
+              {/* Qバッジ：Iros（assistant）のときだけアイコンの右に表示 */}
+              {!isUser && qToShow && (
+                <div className="q-badge" style={qBadgeStyle}>
+                  <span
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: 999,
+                      background: m.color || 'rgba(129,140,248,0.85)',
+                      display: 'inline-block',
+                    }}
+                  />
+                  {qToShow}
+                </div>
+              )}
+            </div>
+
+            {/* 吹き出し（構図はこれまで通り） */}
+            <div
+              className={`bubble ${isUser ? 'is-user' : 'is-assistant'}`}
+              style={{
+                ...(isUser ? userBubbleStyle : assistantBubbleShellStyle),
+                alignSelf: isUser ? 'flex-end' : 'flex-start',
+                maxWidth: 'min(760px, 88%)',
+              }}
+            >
+              {/* Seed用ヘッダーバー（デモモード・フロント専用） */}
+              {isSeed && (
+                <div style={seedHeaderStyle}>
+                  <div style={seedLabelStyle}>
+                    <span>🌌 Future Seed</span>
+                    <span style={seedTLHintStyle}>{tHint}</span>
+                  </div>
+                  {!isSeedCanceled && (
+                    <button
+                      type="button"
+                      style={seedCancelButtonStyle}
+                      onClick={() => handleSeedCancel(m.id)}
+                    >
+                      Seedをキャンセル
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Seedキャンセル後の説明（本文は非表示） */}
+              {isSeed && isSeedCanceled ? (
+                <div style={seedCanceledNoteStyle}>
+                  Seedはキャンセルされました（この操作は表示のみで、DBやクレジットには影響しません）
+                </div>
+              ) : (
+                <div className="msgBody">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm, remarkBreaks]}
+                    components={markdownComponents}
+                  >
+                    {safeText}
+                  </ReactMarkdown>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
 
       {loading && <div className={styles.loadingRow}>...</div>}
       {error && <div className={styles.error}>{error}</div>}
