@@ -184,6 +184,23 @@ function toSafeString(v: unknown): string {
 function transformIrTemplateToMarkdown(input: string): string {
   if (!input.trim()) return input;
 
+  // 🔹新ir診断フォーマットはそのまま表示する
+  // 例：
+  // 🧿 観測対象：◯◯
+  // 🪔 I/T層の刺さる一句：〜
+  // 構造スキャン
+  // フェーズ：〜
+  // 位相：〜
+  // 深度：〜
+  // 🌀 その瞬間の揺れ：〜
+  // 🌱 次の一手：〜
+  if (
+    /🧿\s*観測対象[:：]/.test(input) &&
+    /I\/T層の刺さる一句/.test(input)
+  ) {
+    return input;
+  }
+
   const rawLines = input.split(/\r?\n/);
 
   type Section = 'none' | 'state' | 'message';
@@ -223,13 +240,11 @@ function transformIrTemplateToMarkdown(input: string): string {
   for (const raw of rawLines) {
     const line = normalizeHead(raw);
     if (!line) {
-      // 空行も state/message 中なら保持
       if (section === 'state') data.stateLines.push('');
       if (section === 'message') data.messageLines.push('');
       continue;
     }
 
-    // 見出し・メタ系
     if (line.startsWith('観測対象')) {
       data.target = extractValue(getAfterMark(line));
       section = 'none';
@@ -246,17 +261,15 @@ function transformIrTemplateToMarkdown(input: string): string {
       continue;
     }
 
-    // セクション開始
     if (line.startsWith('意識状態')) {
       section = 'state';
-      continue; // この行自体には本文がないのでスキップ
+      continue;
     }
     if (line.startsWith('メッセージ')) {
       section = 'message';
       continue;
     }
 
-    // セクション内の本文
     if (section === 'state') {
       data.stateLines.push(raw.trim());
       continue;
@@ -265,8 +278,6 @@ function transformIrTemplateToMarkdown(input: string): string {
       data.messageLines.push(raw.trim());
       continue;
     }
-
-    // それ以外の行はそのまま無視（ir テンプレ以外の装飾など）
   }
 
   const stateText = data.stateLines.join('\n').trim();
@@ -279,7 +290,7 @@ function transformIrTemplateToMarkdown(input: string): string {
     !!stateText ||
     !!messageText;
 
-  if (!hasAny) return input; // irテンプレでなければそのまま
+  if (!hasAny) return input;
 
   const out: string[] = [];
 
@@ -303,12 +314,12 @@ function transformIrTemplateToMarkdown(input: string): string {
   }
 
   if (messageText) {
-    // 表示は 🌱 でも 🪔 でも好みでOK。ここでは system.ts に合わせて 🌱 にします。
     out.push('', '**🌱 メッセージ**', '', messageText, '');
   }
 
   return out.join('\n');
 }
+
 
 /**
  * カギカッコごと太字になっているパターンを

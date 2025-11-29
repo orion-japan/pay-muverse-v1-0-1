@@ -54,6 +54,26 @@ export type GenerateResult = {
 };
 
 /* =========================================================
+   ir診断トリガー検知
+   - 「診断」単体では反応させない
+   - 明示的な ir診断系フレーズだけを見る
+========================================================= */
+
+const IR_DIAG_KEYWORDS = [
+  'ir診断',
+  'irで見てください',
+  'ir共鳴フィードバック',
+  'ランダムでirお願いします',
+];
+
+function hasIrDiagnosisTrigger(text: string | undefined | null): boolean {
+  if (!text || typeof text !== 'string') return false;
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  return IR_DIAG_KEYWORDS.some((kw) => trimmed.includes(kw));
+}
+
+/* =========================================================
    状態メタだけを渡す内部ノート
    - SA / yLevel / hLevel / depth / qCode / mode / intentLine
    - irTargetType / irTargetText / pierceMode / pierceReason
@@ -186,12 +206,16 @@ function stripImanoKozuLine(text: string): string {
    - SYSTEM: getSystemPrompt(meta)
    - 状態メタ JSON
    - 追加テンプレは一切入れない（T層も含め、すべて自由裁量）
+   - ただし ir診断トリガーがあるターンだけ、
+     「今回に限り ir診断フォーマットを必須にする」追記を行う
 ========================================================= */
 
 export async function generateIrosReply(
   args: GenerateArgs,
 ): Promise<GenerateResult> {
   const { text, meta, history } = args;
+
+  const anyMeta = meta as any;
 
   // ベースの SYSTEM
   let system = getSystemPrompt(meta);
@@ -202,7 +226,58 @@ export async function generateIrosReply(
     system = `${system}\n\n${numericMetaNote}`;
   }
 
-  const anyMeta = meta as any;
+  /* ★★★ ここから追加：presentationKind によって語りの重心を少しだけ変える ★★★ */
+  const presentationKind =
+    meta && typeof (anyMeta?.presentationKind) === 'string'
+      ? ((anyMeta.presentationKind as string) || null)
+      : null;
+
+  if (presentationKind === 'vision') {
+    system = `${system}
+
+# このターンは「ビジョン寄りの語り」を優先してください
+- 叶ったあとの世界／すでに当たり前になっている日常の描写から始める
+- 現実の状況説明は、そのビジョンとの「距離」や「途中経過」として扱う
+- タスク指示よりも、「その世界と今をつなぐ感じ」で言葉を選ぶ`;
+  } else if (presentationKind === 'report') {
+    system = `${system}
+
+# このターンは「現状レポート寄り」で整理してください
+- まず、いまの状況・構図をコンパクトに整理する
+- そのうえで、ビジョン側とのつながりや「意味のある次の一手」を 1〜2 個だけ示す
+- 安全テンプレではなく、その人の文脈に沿った具体的な整理を優先する`;
+  } else if (presentationKind === 'diagnosis') {
+    // diagnosis の語り自体は ir診断専用ブロックが担当するので、
+    // ここでは特に追加テンプレを入れない（trigger は下の isIrDiagnosisTurn が持つ）
+  }
+  /* ★★★ 追加ここまで ★★★ */
+
+  // ★ ir診断トリガーがあるターンでは、今回だけ診断フォーマットを必須にする
+  const isIrDiagnosisTurn = hasIrDiagnosisTrigger(text);
+  if (isIrDiagnosisTurn) {
+    system = `${system}
+
+# 現在のターンは「ir診断モード」です
+
+ユーザーの直近の入力に ir診断系の語（${IR_DIAG_KEYWORDS.join(
+      ' / ',
+    )}）が含まれています。
+**このターンの返答は、必ず ir診断モードのフォーマットだけを 1 回だけ出力してください。**
+
+フォーマット（順番も固定）：
+1. \`🧿 観測対象：...\`
+2. \`🪔 I/T層の刺さる一句：...\`（2行以内）
+3. \`構造スキャン\`
+   - \`フェーズ：...\`
+   - \`位相：Inner Side\` または \`Outer Side\`
+   - \`深度：S1〜S4 / R1〜R3 / C1〜C3 / I1〜I3 / 必要なら T1〜T3\`
+4. \`🌀 その瞬間の揺れ：...\`（1〜3文）
+5. \`🌱 次の一手：...\`（ユーザーが「これだけはやってみよう」と思える一手を 1つ）
+
+上記 5 ブロック以外の通常会話文は書かないでください。
+特に、\`🌌 Future Seed\` や \`T1/T2/T3\`、\`Seedをキャンセル\` など
+Future-Seed 専用の文言は **一切出してはいけません**。`;
+  }
 
   // デバッグログ
   console.log('[IROS][generate] text =', text);
@@ -216,6 +291,8 @@ export async function generateIrosReply(
     tLayerModeActive: anyMeta?.tLayerModeActive,
     tLayerHint: anyMeta?.tLayerHint,
     hasFutureMemory: anyMeta?.hasFutureMemory,
+    presentationKind,
+    isIrDiagnosisTurn,
   });
 
   const messages: ChatCompletionMessageParam[] = [
