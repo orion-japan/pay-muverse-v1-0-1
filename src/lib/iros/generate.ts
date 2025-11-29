@@ -208,6 +208,8 @@ function stripImanoKozuLine(text: string): string {
    - 追加テンプレは一切入れない（T層も含め、すべて自由裁量）
    - ただし ir診断トリガーがあるターンだけ、
      「今回に限り ir診断フォーマットを必須にする」追記を行う
+   - さらに presentationKind（vision / report）に応じて
+     そのターンの「話し方の重心」を少しだけ指定する
 ========================================================= */
 
 export async function generateIrosReply(
@@ -226,31 +228,23 @@ export async function generateIrosReply(
     system = `${system}\n\n${numericMetaNote}`;
   }
 
-  /* ★★★ ここから追加：presentationKind によって語りの重心を少しだけ変える ★★★ */
+  // presentationKind（report / vision / diagnosis など）があれば読む
   const presentationKind =
-    meta && typeof (anyMeta?.presentationKind) === 'string'
-      ? ((anyMeta.presentationKind as string) || null)
-      : null;
+    anyMeta && typeof anyMeta.presentationKind === 'string'
+      ? (anyMeta.presentationKind as string)
+      : undefined;
 
-  if (presentationKind === 'vision') {
+  // ★ Report（現状レポート寄り）のときだけ、軽く指示を足す
+  if (presentationKind === 'report') {
     system = `${system}
 
-# このターンは「ビジョン寄りの語り」を優先してください
-- 叶ったあとの世界／すでに当たり前になっている日常の描写から始める
-- 現実の状況説明は、そのビジョンとの「距離」や「途中経過」として扱う
-- タスク指示よりも、「その世界と今をつなぐ感じ」で言葉を選ぶ`;
-  } else if (presentationKind === 'report') {
-    system = `${system}
+# このターンは「現状レポート寄り」でまとめてください
 
-# このターンは「現状レポート寄り」で整理してください
-- まず、いまの状況・構図をコンパクトに整理する
-- そのうえで、ビジョン側とのつながりや「意味のある次の一手」を 1〜2 個だけ示す
-- 安全テンプレではなく、その人の文脈に沿った具体的な整理を優先する`;
-  } else if (presentationKind === 'diagnosis') {
-    // diagnosis の語り自体は ir診断専用ブロックが担当するので、
-    // ここでは特に追加テンプレを入れない（trigger は下の isIrDiagnosisTurn が持つ）
+- まず、いまの状態や構図をコンパクトに整理してください（2〜4文程度）。
+- そのうえで、「ここから意味のある一手」を 1〜2 個だけ提案してください。
+- 未来ビジョンの物語を広げすぎず、いま起きていることを分かりやすく言葉にすることを優先してください。
+- テンプレ的な説明ではなく、ユーザーの言葉や状況に即した具体的な表現にしてください。`;
   }
-  /* ★★★ 追加ここまで ★★★ */
 
   // ★ ir診断トリガーがあるターンでは、今回だけ診断フォーマットを必須にする
   const isIrDiagnosisTurn = hasIrDiagnosisTrigger(text);
