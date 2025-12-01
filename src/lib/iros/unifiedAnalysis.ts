@@ -222,7 +222,7 @@ export async function analyzeUnifiedTurn(params: {
 
   // 位相は簡易に Inner 推定のみ
   const phase: 'Inner' | 'Outer' | null =
-    /心|気持ち|自分|本音|内側/.test(text) ? 'Inner' : null;
+    /心|気持ち|自分|本音|内面/.test(text) ? 'Inner' : null;
 
   // ★ 新規：状況トピック & サマリ（小言ログ用）
   const topic = detectSituationTopic(text);

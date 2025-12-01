@@ -4,6 +4,12 @@
 // - JSON結果のパース
 // ※ ここでは LLM 呼び出しまでは行わない（上位レイヤーで chatComplete などに接続）
 
+// ※現在は未使用
+// Self Acceptance（1ターン単位）の LLM評価プロンプト生成モジュール
+// 将来、LLMベースのSA評価を再導入する場合に利用する
+// 2025-12-01 現在：meter.ts（SAライン算出）を標準採用中
+
+
 import type { QCode, Depth } from '../system';
 
 /* ========= 型定義 ========= */

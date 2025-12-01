@@ -98,7 +98,7 @@ const qBadgeStyle: React.CSSProperties = {
   color: '#4338ca',
 };
 
-/** Seed（Future-Seed）用のヘッダーバー */
+/** Vision / Hint 用のヘッダーバー（旧 Seed スタイルを流用） */
 const seedHeaderStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
@@ -127,25 +127,6 @@ const seedTLHintStyle: React.CSSProperties = {
   fontSize: 10,
   background: 'rgba(37,99,235,0.08)',
   color: '#1d4ed8',
-};
-
-const seedCancelButtonStyle: React.CSSProperties = {
-  padding: '4px 10px',
-  borderRadius: 999,
-  border: 'none',
-  fontSize: 11,
-  fontWeight: 500,
-  cursor: 'pointer',
-  background: 'rgba(248,250,252,0.85)',
-  color: '#1e293b',
-  boxShadow: '0 0 0 1px rgba(148,163,184,0.7)',
-};
-
-const seedCanceledNoteStyle: React.CSSProperties = {
-  fontSize: 11,
-  color: '#64748b',
-  fontStyle: 'italic',
-  padding: '4px 0',
 };
 
 /** [object Object]対策：最終的に必ず文字列へ正規化 */
@@ -320,7 +301,6 @@ function transformIrTemplateToMarkdown(input: string): string {
   return out.join('\n');
 }
 
-
 /**
  * カギカッコごと太字になっているパターンを
  * 「**カギカッコの中身だけ太字」に変換する。
@@ -418,11 +398,6 @@ export default function MessageList() {
   const bottomRef = React.useRef<HTMLDivElement | null>(null);
   const first = React.useRef(true);
 
-  // Seed の「キャンセル済みID」をフロントだけで保持
-  const [seedCanceled, setSeedCanceled] = React.useState<
-    Record<string, boolean>
-  >({});
-
   const scrollToBottom = (behavior: ScrollBehavior = 'auto') =>
     bottomRef.current?.scrollIntoView({ behavior, block: 'end' });
 
@@ -442,21 +417,12 @@ export default function MessageList() {
     first.current = false;
   }, [messages]);
 
-
-
   const resolveUserAvatar = (msg: IrosMessage): string => {
     const perMessage = ((msg as any)?.avatarUrl as string | undefined)?.trim?.();
     if (perMessage) return perMessage;
     const byAuth = user?.avatarUrl?.trim?.() || '';
     if (byAuth) return byAuth;
     return FALLBACK_USER;
-  };
-
-  const handleSeedCancel = (id: string) => {
-    setSeedCanceled((prev) => ({
-      ...prev,
-      [id]: true,
-    }));
   };
 
   return (
@@ -481,10 +447,16 @@ export default function MessageList() {
         const qFromMeta = m.meta?.qCode;
         const qToShow = qFromMeta ?? m.q;
 
-        const isSeed =
-          !isUser && !!m.meta?.tLayerModeActive === true; // Future-Seed判定
+        // 🔹 Vision モード判定
+        const isVisionMode = !isUser && m.meta?.mode === 'vision';
+
+        // 🔹 Vision Hint（T層フラグのみ）の判定
+        const isVisionHint =
+          !isUser &&
+          m.meta?.mode !== 'vision' &&
+          !!m.meta?.tLayerModeActive === true;
+
         const tHint = m.meta?.tLayerHint || 'T2';
-        const isSeedCanceled = isSeed && seedCanceled[m.id];
 
         return (
           <div
@@ -556,40 +528,35 @@ export default function MessageList() {
                 maxWidth: 'min(760px, 88%)',
               }}
             >
-              {/* Seed用ヘッダーバー（デモモード・フロント専用） */}
-              {isSeed && (
-                <div style={seedHeaderStyle}>
-                  <div style={seedLabelStyle}>
-                    <span>🌌 Future Seed</span>
-                    <span style={seedTLHintStyle}>{tHint}</span>
-                  </div>
-                  {!isSeedCanceled && (
-                    <button
-                      type="button"
-                      style={seedCancelButtonStyle}
-                      onClick={() => handleSeedCancel(m.id)}
-                    >
-                      Seedをキャンセル
-                    </button>
-                  )}
-                </div>
-              )}
+              {/* ▼ Vision系ヘッダー（Mode / Hint） */}
+              {(isVisionMode || isVisionHint) && (
+  <div style={seedHeaderStyle}>
+    <div style={seedLabelStyle}>
+      {isVisionMode ? (
+        <>
+          <span>🌌 Vision Mode</span>
+          <span style={seedTLHintStyle}>{tHint}</span>
+          {/* ← ここを追加：Vision 中も T 層アクティブなら ✨ を添える */}
+          {m.meta?.tLayerModeActive && (
+            <span style={{ marginLeft: 6, fontSize: 14 }}>✨</span>
+          )}
+        </>
+      ) : (
+        <span style={{ fontSize: 14, opacity: 0.9 }}>✨</span>
+      )}
+    </div>
+  </div>
+)}
 
-              {/* Seedキャンセル後の説明（本文は非表示） */}
-              {isSeed && isSeedCanceled ? (
-                <div style={seedCanceledNoteStyle}>
-                  Seedはキャンセルされました（この操作は表示のみで、DBやクレジットには影響しません）
-                </div>
-              ) : (
-                <div className="msgBody">
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm, remarkBreaks]}
-                    components={markdownComponents}
-                  >
-                    {safeText}
-                  </ReactMarkdown>
-                </div>
-              )}
+
+              <div className="msgBody">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm, remarkBreaks]}
+                  components={markdownComponents}
+                >
+                  {safeText}
+                </ReactMarkdown>
+              </div>
             </div>
           </div>
         );
@@ -601,3 +568,4 @@ export default function MessageList() {
     </div>
   );
 }
+

@@ -218,7 +218,7 @@ export function deriveIntentLine(snapshot: ResonanceSnapshot): IntentLineAnalysi
       return '一気に進もうとするよりも、「いまの揺れを受け止める小さな余白」をつくることが、次の一歩を生み出してくれそうです。';
     }
     if (direction === 'expand') {
-      return 'すでに内側では次の一歩が芽生えつつあります。小さく試せる行動を 1つだけ選んでみることで、流れが自然に動き出しそうです。';
+      return 'すでに内面では次の一歩が芽生えつつあります。小さく試せる行動を 1つだけ選んでみることで、流れが自然に動き出しそうです。';
     }
     if (direction === 'reconnect') {
       return '関係性やつながりを、少しだけ安心できる形に整え直すことが、あなたの意図ラインを静かに前に進めてくれそうです。';

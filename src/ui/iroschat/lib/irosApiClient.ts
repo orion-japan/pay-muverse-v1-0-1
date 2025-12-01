@@ -6,6 +6,10 @@ import { getAuth, type User } from 'firebase/auth';
 import type { ResonanceState, IntentPulse } from '@/lib/iros/config';
 import type { IrosConversation, IrosMessage, IrosUserInfo } from '../types';
 
+/* ========= Iros 口調スタイル ========= */
+/** ※ IrosChatContext.tsx の IrosStyle と必ず揃えること */
+export type IrosStyle = 'friendly' | 'biz-soft' | 'biz-formal' | 'plain';
+
 /* ========= DEV logger ========= */
 const __DEV__ = process.env.NODE_ENV !== 'production';
 const dbg = (...a: any[]) => {
@@ -38,6 +42,9 @@ export type IrosAPI = {
     resonance?: ResonanceState;
     intent?: IntentPulse;
     headers?: Record<string, string>; // 冪等キー付与用
+
+    // 🗣 追加：Iros の口調スタイル
+    style?: IrosStyle;
   }): Promise<
     | { ok: boolean; message?: { id?: string; content: string } } // 旧フォーマット
     | {
@@ -53,6 +60,9 @@ export type IrosAPI = {
     user_text: string;
     mode?: string;
     model?: string;
+
+    // 🗣 追加：Iros の口調スタイル
+    style?: IrosStyle;
   }): Promise<{ assistant: string } & Record<string, any>>;
   getUserInfo(): Promise<IrosUserInfo | null>;
 };
@@ -263,7 +273,11 @@ export const irosClient: IrosAPI = {
 
   async reply(args) {
     if (typeof _raw.reply === 'function') return _raw.reply(args);
-    dbg('reply() fallback', { mode: args.mode, hasCid: !!args.conversationId });
+    dbg('reply() fallback', {
+      mode: args.mode,
+      hasCid: !!args.conversationId,
+      style: args.style,
+    });
     const r = await authFetch('/api/agent/iros/reply', {
       method: 'POST',
       headers: args.headers ?? undefined,
@@ -276,6 +290,9 @@ export const irosClient: IrosAPI = {
         model: args.model,
         resonance: (window as any)?.__iros?.resonance ?? args.resonance,
         intent: (window as any)?.__iros?.intent ?? args.intent,
+
+        // 🗣 サーバー側へスタイルヒントとして渡す
+        styleHint: args.style,
       }),
     });
     return r.json();
@@ -291,6 +308,9 @@ export const irosClient: IrosAPI = {
       user_text: args.user_text,
       mode: args.mode ?? 'Light',
       model: args.model,
+
+      // 🗣 ここでも style を引き継ぐ
+      style: args.style,
     });
 
     // 正規化

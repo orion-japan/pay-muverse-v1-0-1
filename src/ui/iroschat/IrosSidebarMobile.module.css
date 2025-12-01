@@ -164,3 +164,18 @@
 /* === Iros Sidebar Theme Override === */
 /* 必要ならグローバル側（src/styles/iros-vars.css）で :root もしくは [data-iros] スコープを使って
    --drawer-bg / --drawer-border / --drawer-shadow などを上書きしてください。*/
+
+   .user {
+    margin: 8px 12px 12px;
+    padding: 10px 12px;
+    background: #f8fafc;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 12px;
+    font-size: 12px;
+    color: #444;
+    display: flex; flex-direction: column;
+
+    /* ← ここに追加する！ */
+    margin-top: 60px;
+  }
+

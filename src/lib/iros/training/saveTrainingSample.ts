@@ -76,7 +76,7 @@ export async function saveIrosTrainingSample(
   const mirrorMode: string | null =
     typeof m.mode === 'string' ? m.mode : null;
 
-  // 「いまの構図」＝ 小言テキスト
+  // 「いまの構図」＝ 小言テキスト（あれば）
   const intentSummary: string | null =
     typeof unified.intentSummary === 'string'
       ? unified.intentSummary
@@ -85,7 +85,7 @@ export async function saveIrosTrainingSample(
   // intentLine 全体（nowLabel / coreNeed / riskHint ...）
   const intentLine: any = m.intentLine ?? null;
 
-  // --- 💡 追加：そのターンの状況サマリ／トピック ---
+  // --- 💡 そのターンの状況サマリ／トピック ---
   const situation: any =
     unified.situation ?? m.situation ?? {}; // 将来の拡張も見越してフォールバック
 
@@ -103,6 +103,37 @@ export async function saveIrosTrainingSample(
       ? m.situationTopic
       : null;
 
+  // --- 🔧 analysis_text 用テキスト（NOT NULL 対応のフォールバック）---
+  const primary =
+    typeof intentSummary === 'string' && intentSummary.trim().length > 0
+      ? intentSummary.trim()
+      : null;
+
+  const fromSituation =
+    !primary &&
+    typeof situationSummary === 'string' &&
+    situationSummary.trim().length > 0
+      ? situationSummary.trim()
+      : null;
+
+  const fromIntentLine =
+    !primary &&
+    !fromSituation &&
+    intentLine &&
+    typeof intentLine.nowLabel === 'string' &&
+    intentLine.nowLabel.trim().length > 0
+      ? intentLine.nowLabel.trim()
+      : null;
+
+  // 最後の砦として inputText 先頭 120 文字
+  const fallback =
+    !primary && !fromSituation && !fromIntentLine
+      ? (inputText ?? '').toString().slice(0, 120)
+      : null;
+
+  const analysisText: string =
+    primary ?? fromSituation ?? fromIntentLine ?? fallback ?? '';
+
   const row = {
     user_code: userCode,
     tenant_id: tenantId,
@@ -110,19 +141,19 @@ export async function saveIrosTrainingSample(
     message_id: messageId,
     source: 'iros' as const,
     input_text: inputText,
-    analysis_text: intentSummary,     // ★ 小言テキストをここに保存
+    analysis_text: analysisText,          // ★ 必ず文字列を入れる
     q_code: qCode,
     depth_stage: depthStage,
     phase,
     self_acceptance: selfAcceptance,
     mirror_mode: mirrorMode,
-    intent_line: intentLine,          // ★ intentLine を JSONB で保存
-    situation_summary: situationSummary, // ★ 新カラム
-    situation_topic: situationTopic,     // ★ 新カラム
+    intent_line: intentLine,              // ★ intentLine を JSONB で保存
+    situation_summary: situationSummary,  // ★ 新カラム
+    situation_topic: situationTopic,      // ★ 新カラム
     tags,
     extra: {
-      meta: m,                        // meta 丸ごと
-      replyText: replyText ?? null,   // 返答全文（必要なら学習に使えるように）
+      meta: m,                            // meta 丸ごと
+      replyText: replyText ?? null,       // 返答全文（必要なら学習に使えるように）
     },
   };
 

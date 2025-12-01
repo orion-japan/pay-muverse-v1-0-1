@@ -10,6 +10,7 @@ import {
   type QCode,
   type IrosMeta,
   type TLayer,
+  type IrosStyle,         // ★ 追加：口調スタイル
   DEPTH_VALUES,
   QCODE_VALUES,
 } from './system';
@@ -44,6 +45,12 @@ import { stripDiagnosticHeader } from './orchestratorPresentation';
 // モード決定（mirror / vision / diagnosis）
 import { applyModeToMeta } from './orchestratorMode';
 
+// Vision-Trigger（ビジョンモード 自動遷移）
+import {
+  detectVisionTrigger,
+  logVisionTrigger,
+} from './visionTrigger';
+
 // ==== I層強制モード（ENV） ====
 //   - true のとき、requestedDepth を優先して depth を固定する
 const FORCE_I_LAYER =
@@ -66,6 +73,12 @@ export type IrosOrchestratorArgs = {
 
   /** ★ MemoryState 読み書き用：user_code */
   userCode?: string;
+
+  /** ★ v_iros_user_profile の1行分（任意） */
+  userProfile?: Record<string, any> | null;
+
+  /** ★ 口調スタイル（route / handleIrosReply から渡す） */
+  style?: IrosStyle | string | null;
 };
 
 // ==== Orchestrator から返す結果 ==== //
@@ -86,6 +99,8 @@ export async function runIrosTurn(
     baseMeta,
     isFirstTurn,
     userCode,
+    userProfile,
+    style, // ★ 追加
   } = args;
 
   // ----------------------------------------------------------------
@@ -114,6 +129,13 @@ export async function runIrosTurn(
     ...(memoryMeta || {}),
     ...(baseMeta || {}),
   };
+
+  // ★ style の反映：
+  //   - 明示指定された style を最優先
+  //   - なければ memory / baseMeta 側をそのまま使う
+  if (typeof style !== 'undefined' && style !== null) {
+    (mergedBaseMeta as any).style = style;
+  }
 
   // depth / qCode の初期値決定
   const initialDepth = determineInitialDepth(
@@ -172,8 +194,14 @@ export async function runIrosTurn(
       typeof selfAcceptanceLine === 'number'
         ? clampSelfAcceptance(selfAcceptanceLine)
         : mergedBaseMeta.selfAcceptance ?? null,
-    yLevel: typeof yLevel === 'number' ? yLevel : mergedBaseMeta.yLevel ?? null,
-    hLevel: typeof hLevel === 'number' ? hLevel : mergedBaseMeta.hLevel ?? null,
+    yLevel:
+      typeof yLevel === 'number'
+        ? yLevel
+        : mergedBaseMeta.yLevel ?? null,
+    hLevel:
+      typeof hLevel === 'number'
+        ? hLevel
+        : mergedBaseMeta.hLevel ?? null,
     intentLine: intentLine ?? mergedBaseMeta.intentLine ?? null,
     tLayerHint: normalizedTLayer ?? mergedBaseMeta.tLayerHint ?? null,
     hasFutureMemory:
@@ -191,20 +219,70 @@ export async function runIrosTurn(
     (meta as any).tLayerModeActive = true;
   }
 
-// --------------------------------------------------
-// 5. モード決定（mirror / vision / diagnosis）
-// --------------------------------------------------
-meta = applyModeToMeta(text, {
-  requestedMode,
-  meta,
-  isFirstTurn: !!isFirstTurn,
-  intentLine,
-  tLayerHint: normalizedTLayer,
-  forceILayer: FORCE_I_LAYER, // ← ここだけ forceLayer → forceILayer
-});
+  // ★ v_iros_user_profile 由来の userProfile を meta に載せる
+  //   - Memory 側に既にあれば、今回の userProfile を優先
+  if (typeof userProfile !== 'undefined') {
+    (meta as any).userProfile = userProfile;
+  }
+
+  // ★ ユーザーの「呼び名」を解決して meta.userCallName に載せる
+  //   - 優先順位: ai_call_name > display_name
+  //   - 両方なければ設定しない（LLM側は「あなた」で話す）
+  {
+    const profileForName: Record<string, any> | null =
+      (typeof userProfile !== 'undefined' && userProfile) ||
+      ((meta as any).userProfile as Record<string, any> | null | undefined) ||
+      null;
+
+    if (profileForName) {
+      const callNameRaw =
+        (profileForName.ai_call_name as string | null | undefined) ??
+        (profileForName.display_name as string | null | undefined) ??
+        null;
+
+      const callName =
+        typeof callNameRaw === 'string' && callNameRaw.trim().length > 0
+          ? callNameRaw.trim()
+          : null;
+
+      if (callName) {
+        (meta as any).userCallName = callName;
+      }
+    }
+  }
 
   // ----------------------------------------------------------------
-  // 6. Will フェーズ：Goal / Priority の決定
+  // 5. Vision-Trigger 判定（ビジョンモードへの自動ジャンプ）
+  // ----------------------------------------------------------------
+  const visionResult = detectVisionTrigger({ text, meta });
+  if (visionResult.triggered) {
+    meta = visionResult.meta;
+    logVisionTrigger(visionResult);
+  }
+
+  // ----------------------------------------------------------------
+  // 6. モード決定（mirror / vision / diagnosis）
+  // ----------------------------------------------------------------
+  meta = applyModeToMeta(text, {
+    requestedMode,
+    meta,
+    isFirstTurn: !!isFirstTurn,
+    intentLine,
+    tLayerHint: normalizedTLayer,
+    forceILayer: FORCE_I_LAYER, // ← ここだけ forceLayer → forceILayer
+  });
+
+  // 🔹 Vision Hint 用：
+  //  - Vision モードではない
+  //  - でも T層ヒント（T1〜T3）が付いている
+  // そんなターンでは、フロント側で ✨ を出すために
+  // tLayerModeActive を true にしておく
+  if (meta.mode !== 'vision' && meta.tLayerHint) {
+    (meta as any).tLayerModeActive = true;
+  }
+
+  // ----------------------------------------------------------------
+  // 7. Will フェーズ：Goal / Priority の決定
   // ----------------------------------------------------------------
   const { goal, priority } = computeGoalAndPriority({
     text,
@@ -218,7 +296,7 @@ meta = applyModeToMeta(text, {
   (meta as any).priority = priority;
 
   // ----------------------------------------------------------------
-  // 7. 本文生成（LLM 呼び出し）
+  // 8. 本文生成（LLM 呼び出し）
   // ----------------------------------------------------------------
   const gen: GenerateResult = await generateIrosReply({
     text,
@@ -231,7 +309,7 @@ meta = applyModeToMeta(text, {
   content = stripDiagnosticHeader(content);
 
   // ----------------------------------------------------------------
-  // 8. MemoryState 保存
+  // 9. MemoryState 保存
   // ----------------------------------------------------------------
   if (userCode) {
     await saveMemoryStateFromMeta({
@@ -241,7 +319,7 @@ meta = applyModeToMeta(text, {
   }
 
   // ----------------------------------------------------------------
-  // 9. Orchestrator 結果として返却
+  // 10. Orchestrator 結果として返却
   // ----------------------------------------------------------------
   return {
     content,

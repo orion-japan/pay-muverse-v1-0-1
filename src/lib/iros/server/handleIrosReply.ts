@@ -6,8 +6,26 @@ import { loadQTraceForUser, applyQTraceToMeta } from '@/lib/iros/memory.adapter'
 import { detectQFromText } from '@/lib/iros/q/detectQ';
 import { estimateSelfAcceptance } from '@/lib/iros/sa/meter';
 import { runIrosTurn } from '@/lib/iros/orchestrator';
-import type { QCode } from '@/lib/iros/system';
+import type { QCode, IrosStyle } from '@/lib/iros/system';
 import type { RememberScopeKind } from '@/lib/iros/remember/resolveRememberBundle';
+
+// ★ 追加：トピック変化モジュール
+import {
+  detectTopicChangeRequest,
+  loadTopicChangeContext,
+  formatTopicChangeForPrompt,
+} from '@/lib/iros/topicChange';
+
+// ★ 追加：v_iros_topic_state_latest の型（必要な項目だけ）
+type TopicStateLatestRow = {
+  topic_key?: string | null;
+  topic?: string | null;
+  topic_label?: string | null;
+  last_used_at?: string | null;
+};
+
+// ★ 追加：v_iros_user_profile の型
+import type { IrosUserProfileRow } from './loadUserProfile';
 
 // Supabase（Iros内部用）
 const supabase = createClient(
@@ -93,13 +111,18 @@ async function buildUnifiedAnalysis(params: {
       ? unified.self_acceptance
       : null;
 
+  // ★ ここは「保険用」：meta/unified に無いときだけ meter.ts v2 で推定
   if (selfAcceptanceRaw == null) {
     try {
       const saResult: any = await estimateSelfAcceptance({
         userText,
-        depthStage,
+        assistantText,
         qCode,
-      } as any);
+        depthStage,
+        phase: phase ?? null,
+        historyDigest: null,
+        lastSelfAcceptance: null,
+      });
 
       if (typeof saResult === 'number') {
         selfAcceptanceRaw = saResult;
@@ -328,6 +351,58 @@ async function buildConversationHistoryDigest(
   }
 }
 
+/* =========================================================
+   トピック変化モード：最新トピックの推定
+========================================================= */
+
+/**
+ * v_iros_topic_state_latest から、このユーザーの「直近で使われたトピック」を 1 件取得。
+ * いまのところは last_used_at 降順で 1件だけ見る簡易版。
+ */
+async function resolveLatestTopicKeyForUser(
+  userCode: string,
+): Promise<{ topicKey: string; topicLabel: string | null } | null> {
+  try {
+    const { data, error } = await supabase
+      .from('v_iros_topic_state_latest')
+      .select('topic_key, topic, topic_label, last_used_at')
+      .eq('user_code', userCode)
+      .order('last_used_at', { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.error('[IROS/TopicChange] failed to load latest topic', {
+        userCode,
+        error,
+      });
+      return null;
+    }
+
+    const row = (data && data[0]) as TopicStateLatestRow | undefined;
+    if (!row) return null;
+
+    const topicKey =
+      (row.topic_key && row.topic_key.trim()) ||
+      (row.topic && row.topic.trim()) ||
+      null;
+
+    if (!topicKey) return null;
+
+    const topicLabel =
+      (row.topic_label && row.topic_label.trim()) ||
+      (row.topic && row.topic.trim()) ||
+      null;
+
+    return { topicKey, topicLabel };
+  } catch (e) {
+    console.error('[IROS/TopicChange] unexpected error in resolveLatestTopicKey', {
+      userCode,
+      error: e,
+    });
+    return null;
+  }
+}
+
 // ---------- 外部から呼ぶ Iros サーバー本処理 ----------
 
 export type HandleIrosReplyInput = {
@@ -341,6 +416,12 @@ export type HandleIrosReplyInput = {
   reqOrigin: string;
   authorizationHeader: string | null;
   traceId?: string | null;
+
+  // ★ 追加：route.ts から渡すユーザープロファイル
+  userProfile?: IrosUserProfileRow | null;
+
+  // ★ 追加：Iros の口調スタイル（任意）
+  style?: IrosStyle | string | null;
 };
 
 export type HandleIrosReplySuccess = {
@@ -375,6 +456,8 @@ export async function handleIrosReply(
     reqOrigin,
     authorizationHeader,
     traceId,
+    userProfile, // ★ 追加
+    style,       // ★ 追加
   } = params;
 
   console.log('[IROS/Reply] handleIrosReply start', {
@@ -385,6 +468,15 @@ export async function handleIrosReply(
     rememberScope,
     traceId,
     FORCE_I_LAYER,
+    style, // ★ ログ
+  });
+
+  // ★ プロファイル確認ログ
+  console.log('[IROS/Reply] userProfile for turn', {
+    userCode,
+    hasProfile: !!userProfile,
+    plan_status: userProfile?.plan_status ?? null,
+    sofia_credit: userProfile?.sofia_credit ?? null,
   });
 
   try {
@@ -456,6 +548,24 @@ export async function handleIrosReply(
 
     const FORCE_I_LAYER_LOCAL = FORCE_I_LAYER;
 
+    // 3.1) このターンで使う「effectiveStyle」を決定
+    const styleFromProfile: string | null =
+      userProfile && typeof (userProfile as any).style === 'string'
+        ? ((userProfile as any).style as string)
+        : null;
+
+    const effectiveStyle: IrosStyle | string | null =
+      (style && typeof style === 'string' && style.trim().length > 0
+        ? style
+        : null) ?? styleFromProfile ?? null;
+
+    console.log('[IROS/Reply] effectiveStyle', {
+      requestedStyle: style,
+      styleFromProfile,
+      effectiveStyle,
+    });
+
+
     const requestedMode =
       FORCE_I_LAYER_LOCAL
         ? ('mirror' as any)
@@ -467,54 +577,79 @@ export async function handleIrosReply(
       ? ('I2' as any)
       : (baseMetaFromQ.depth as any);
 
+    // 3.5) トピック別の現在地（optional）
+    const topicStateMap: Record<string, any> | null = null;
+
+    // ★ プロファイル + トピック現在地 + トピック変化情報を含めた baseMeta を組み立てる
+    const extra: any = {};
+    if (userProfile) extra.userProfile = userProfile;
+    if (topicStateMap) extra.topicStateMap = topicStateMap;
+    if (effectiveStyle) extra.styleHint = effectiveStyle; // ★ style ヒントも入れておく
+    // ★ ここで「変化を一緒に見て欲しい」リクエストかどうかを判定し、
+    //    直近トピックの前回/今回スナップショットを LLM 用文字列として用意する。
+    let topicChangePromptBlock: string | null = null;
+    try {
+      const wantsTopicChangeView = detectTopicChangeRequest(text);
+      if (wantsTopicChangeView) {
+        const latestTopic = await resolveLatestTopicKeyForUser(userCode);
+        if (latestTopic) {
+          const changeCtx = await loadTopicChangeContext({
+            client: supabase,
+            userCode,
+            topicKey: latestTopic.topicKey,
+            topicLabel: latestTopic.topicLabel,
+            limit: 2,
+          });
+          if (changeCtx) {
+            topicChangePromptBlock = formatTopicChangeForPrompt(changeCtx);
+            console.log('[IROS/TopicChange] prepared topicChangePromptBlock', {
+              userCode,
+              topicKey: latestTopic.topicKey,
+            });
+          } else {
+            console.log(
+              '[IROS/TopicChange] not enough samples for topicChange',
+              {
+                userCode,
+                topicKey: latestTopic.topicKey,
+              },
+            );
+          }
+        } else {
+          console.log(
+            '[IROS/TopicChange] latest topic not found for user',
+            { userCode },
+          );
+        }
+      }
+    } catch (e) {
+      console.error('[IROS/TopicChange] prepare failed', {
+        userCode,
+        error: e,
+      });
+    }
+
+    if (topicChangePromptBlock) {
+      extra.topicChangeRequested = true;
+      extra.topicChangePrompt = topicChangePromptBlock;
+    }
+
     const baseMetaForTurn: any = {};
+    if (Object.keys(extra).length > 0) {
+      baseMetaForTurn.extra = extra;
+    }
+
+    // ★ ここで style を meta に直接反映（getSystemPrompt まで届く）
+    if (effectiveStyle) {
+      baseMetaForTurn.style = effectiveStyle as any;
+    }
+
+
     if (!FORCE_I_LAYER_LOCAL && baseMetaFromQ.depth) {
       baseMetaForTurn.depth = baseMetaFromQ.depth as any;
     }
     if (baseMetaFromQ.qCode != null) {
       baseMetaForTurn.qCode = baseMetaFromQ.qCode as any;
-    }
-
-    // Self Acceptance を runIrosTurn 前に推定
-    try {
-      const saInput: any = {
-        qCode:
-          (baseMetaForTurn.qCode as QCode | undefined) ??
-          (baseMetaFromQ.qCode as QCode | undefined) ??
-          (qTrace.snapshot?.currentQ as QCode | undefined) ??
-          null,
-        depthStage:
-          (baseMetaForTurn.depth as string | undefined) ??
-          (baseMetaFromQ.depth as string | undefined) ??
-          (qTrace.snapshot?.depthStage as string | undefined) ??
-          null,
-        phase: undefined,
-        hasHistoryDigest: !!historyDigest,
-        lastSelfAcceptance: undefined,
-        userText: text,
-      };
-
-      const saResult: any = await estimateSelfAcceptance(saInput);
-
-      let saValue: number | null = null;
-      if (typeof saResult === 'number') {
-        saValue = saResult;
-      } else if (saResult && typeof saResult.value === 'number') {
-        saValue = saResult.value;
-      } else if (saResult && typeof saResult.normalized === 'number') {
-        saValue = saResult.normalized;
-      } else if (saResult && typeof saResult.score === 'number') {
-        saValue = saResult.score;
-      }
-
-      if (saValue != null && !Number.isNaN(saValue)) {
-        baseMetaForTurn.selfAcceptance = saValue;
-      }
-    } catch (e) {
-      console.error(
-        '[IROS/Reply] estimateSelfAcceptance for baseMeta failed',
-        e,
-      );
     }
 
     const effectiveText =
@@ -543,7 +678,9 @@ export async function handleIrosReply(
       requestedQCode,
       baseMeta: baseMetaForTurn,
       isFirstTurn,
-      userCode, // ★ ここを追加
+      userCode,
+      userProfile: userProfile ?? null,
+      style: effectiveStyle,  // ← ここを修正
     });
 
 

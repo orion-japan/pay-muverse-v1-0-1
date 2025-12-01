@@ -7,6 +7,13 @@ import { verifyFirebaseAndAuthorize } from '@/lib/authz';
 import { authorizeChat, captureChat, makeIrosRef } from '@/lib/credits/auto';
 import { createClient } from '@supabase/supabase-js';
 import { saveIrosTrainingSample } from '@/lib/iros/training/saveTrainingSample';
+// ★ Iros ユーザープロファイル読込
+import { loadIrosUserProfile } from '@/lib/iros/server/loadUserProfile';
+
+// ★ テーマ別スナップショット（iros_topic_state）
+import {
+  upsertTopicStateWithCleanup,
+} from '@/lib/iros/topicState';
 
 // Irosサーバー本処理
 import {
@@ -34,11 +41,12 @@ const LOW_BALANCE_THRESHOLD = Number(
   process.env.IROS_LOW_BALANCE_THRESHOLD ?? 10,
 );
 
-// service-role で現在残高を読むための Supabase クライアント（残高チェック専用）
+// service-role で現在残高を読むための Supabase クライアント（残高チェック + 訓練用保存など）
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY ??
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY ??
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
 /** auth から最良の userCode を抽出。ヘッダ x-user-code は開発補助として許容 */
@@ -83,6 +91,14 @@ export async function POST(req: NextRequest) {
     const hintText: string | undefined = body?.hintText ?? body?.modeHintText; // 後方互換
     const modeHintInput: string | undefined = body?.modeHint;
     const extra: Record<string, any> | undefined = body?.extra;
+
+    // ★ 追加：口調スタイル（client から style または styleHint で飛んでくる想定）
+    const styleInput: string | undefined =
+      typeof body?.style === 'string'
+        ? body.style
+        : typeof body?.styleHint === 'string'
+        ? body.styleHint
+        : undefined;
 
     if (!conversationId || !text) {
       return NextResponse.json(
@@ -135,6 +151,7 @@ export async function POST(req: NextRequest) {
       modeHint: mode,
       rememberScope,
       traceId,
+      style: styleInput,
     });
 
     // 5) credit amount 決定（body.cost → header → 既定）
@@ -214,6 +231,18 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // 7.6) ユーザープロファイルを取得（任意）
+    let userProfile: any | null = null;
+    try {
+      userProfile = await loadIrosUserProfile(supabase, userCode);
+    } catch (e) {
+      console.warn('[IROS/Reply] userProfile fetch failed', {
+        userCode,
+        error: String(e),
+      });
+    }
+
+
     // 8) Iros 本体処理へ委譲
     const origin = req.nextUrl.origin;
     const authHeader = req.headers.get('authorization');
@@ -229,6 +258,8 @@ export async function POST(req: NextRequest) {
       reqOrigin: origin,
       authorizationHeader: authHeader,
       traceId,
+      userProfile,
+      style: styleInput ?? null,
     });
 
     // 8.x) 生成失敗時
@@ -300,6 +331,11 @@ export async function POST(req: NextRequest) {
     if (result && typeof result === 'object') {
       const meta = {
         ...(result as any).meta ?? {},
+        // ★ ここでレスポンス側の meta にも userProfile を載せる
+        userProfile:
+          (result as any).meta?.userProfile ??
+          userProfile ??
+          null,
         extra: {
           ...(((result as any).meta?.extra) ?? {}),
           userCode:
@@ -318,6 +354,53 @@ export async function POST(req: NextRequest) {
       };
 
       console.log('[IROS/Reply] response meta', meta);
+
+      // ★ テーマ別「現在地」スナップショットを更新（iros_topic_state）
+      try {
+        const anyMeta = meta as any;
+
+        const rawTopic =
+          anyMeta.situation_topic ??
+          anyMeta.situationTopic ??
+          anyMeta.topic ??
+          anyMeta.unified?.situation?.topic ??
+          null;
+
+        const topic =
+          typeof rawTopic === 'string' && rawTopic.trim().length > 0
+            ? rawTopic.trim()
+            : null;
+
+        const saValue =
+          typeof anyMeta.selfAcceptance === 'number'
+            ? anyMeta.selfAcceptance
+            : typeof anyMeta.self_acceptance === 'number'
+            ? anyMeta.self_acceptance
+            : null;
+
+        console.log('[IROS/TopicState] resolve topic for snapshot', {
+          userCode,
+          rawTopic,
+          topic,
+          saValue,
+        });
+
+        if (topic && userCode) {
+          await upsertTopicStateWithCleanup({
+            userCode,
+            topicKey: topic, // ← topic → topicKey
+            selfAcceptance: saValue,
+            inputText: text,
+            // route 側では message_id / created_at がないため、現在時刻を記録
+            turnCreatedAt: new Date().toISOString(),
+          });
+        }
+      } catch (e) {
+        console.warn('[IROS/Reply] upsertTopicStateWithCleanup failed', {
+          userCode,
+          error: String(e),
+        });
+      }
 
       // ★ 訓練用サンプルを保存（失敗しても本処理は継続）
       await saveIrosTrainingSample({
@@ -346,7 +429,10 @@ export async function POST(req: NextRequest) {
         {
           ...basePayload,
           content: result,
-          meta: { extra: { userCode, hintText, traceId } },
+          meta: {
+            userProfile: userProfile ?? null,
+            extra: { userCode, hintText, traceId },
+          },
         },
         { status: 200, headers },
       );

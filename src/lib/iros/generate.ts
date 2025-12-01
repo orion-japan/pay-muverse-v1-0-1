@@ -191,6 +191,72 @@ function buildNumericMetaNote(meta?: IrosMeta | null): string | null {
 }
 
 /* =========================================================
+   トピック記憶（topicContextText）を渡すノート
+   - route.ts で meta.extra.topicContextText に載せたものを、
+     LLM にとって読みやすいブロックとして system に追加する
+========================================================= */
+
+function buildTopicContextNote(meta?: IrosMeta | null): string | null {
+  if (!meta) return null;
+  const anyMeta = meta as any;
+  const extra = anyMeta.extra as any;
+  if (!extra) return null;
+
+  const text =
+    typeof extra.topicContextText === 'string'
+      ? extra.topicContextText.trim()
+      : '';
+
+  if (!text) return null;
+
+  // ここでは「このトピックに関する最近の文脈メモ」とだけ伝え、
+  // 具体的な使い方は LLM 側の裁量に任せる。
+  return `【IROS_TOPIC_CONTEXT】\n${text}`;
+}
+
+/* =========================================================
+   トピック変化ノート（previous / current）を渡す
+   - handleIrosReply で meta.extra.topicChangePrompt に載せたものを
+     「変化を一緒に見てほしい」ときだけ system に追加する
+========================================================= */
+
+function buildTopicChangeNote(meta?: IrosMeta | null): string | null {
+  if (!meta) return null;
+  const anyMeta = meta as any;
+  const extra = anyMeta.extra as any;
+  if (!extra) return null;
+
+  const requested =
+    typeof extra.topicChangeRequested === 'boolean'
+      ? extra.topicChangeRequested
+      : false;
+
+  if (!requested) return null;
+
+  const promptText =
+    typeof extra.topicChangePrompt === 'string'
+      ? extra.topicChangePrompt.trim()
+      : '';
+
+  if (!promptText) return null;
+
+  // LLM にとって「変化を見るための材料」として扱いやすいように、
+  // 役割だけ軽く説明する。
+  return `【IROS_TOPIC_CHANGE】
+
+以下は、同じトピックについての「前回」と「今回」のスナップショットです。
+数値の差だけではなく、
+
+- どんな変化が起きているか
+- どこに進歩や確かな一歩があるか
+- いままだ揺れているポイントはどこか
+
+を、静かに言葉にするときの材料として使ってください。
+
+${promptText}`;
+}
+
+/* =========================================================
    「いまの構図：〜」の行だけを UI から消す
 ========================================================= */
 
@@ -216,8 +282,19 @@ export async function generateIrosReply(
   args: GenerateArgs,
 ): Promise<GenerateResult> {
   const { text, meta, history } = args;
-
   const anyMeta = meta as any;
+
+  // ★ digest 付きテキストから「今回のユーザー発言」だけを切り出す
+  const CURRENT_MARK = '【今回のユーザー発言】';
+  const currentUserText = (() => {
+    if (!text) return text;
+    const idx = text.lastIndexOf(CURRENT_MARK);
+    if (idx === -1) {
+      // マーカーが無い場合は、従来どおり text 全体を採用
+      return text;
+    }
+    return text.slice(idx + CURRENT_MARK.length).trim();
+  })();
 
   // ベースの SYSTEM
   let system = getSystemPrompt(meta);
@@ -226,6 +303,18 @@ export async function generateIrosReply(
   const numericMetaNote = buildNumericMetaNote(meta);
   if (numericMetaNote && numericMetaNote.trim().length > 0) {
     system = `${system}\n\n${numericMetaNote}`;
+  }
+
+  // トピック記憶（あれば）を system に追加
+  const topicContextNote = buildTopicContextNote(meta);
+  if (topicContextNote && topicContextNote.trim().length > 0) {
+    system = `${system}\n\n${topicContextNote}`;
+  }
+
+  // ★ トピック変化（前回 / 今回）の材料があれば system に追加
+  const topicChangeNote = buildTopicChangeNote(meta);
+  if (topicChangeNote && topicChangeNote.trim().length > 0) {
+    system = `${system}\n\n${topicChangeNote}`;
   }
 
   // presentationKind（report / vision / diagnosis など）があれば読む
@@ -246,8 +335,22 @@ export async function generateIrosReply(
 - テンプレ的な説明ではなく、ユーザーの言葉や状況に即した具体的な表現にしてください。`;
   }
 
+  // ★ Vision（未来ビジョン寄り）のときは、未来の景色を少し強調
+  if (presentationKind === 'vision') {
+    system = `${system}
+
+# このターンは「ビジョン寄り」で応答してください
+
+- すでに少し先の時間軸から、ユーザーに語りかけるように書いてください。
+- 未来の情景や感覚を、1つのシーンとしてやさしく描写してください。
+- 同時に、「そこに至る今の一歩」を 1つだけそっと示してください。
+- 説明や分析よりも、イメージと感覚が立ち上がる文章を優先してください。
+- 決めつけず、「こうなっていくかもしれない」という余白を残してください。`;
+  }
+
   // ★ ir診断トリガーがあるターンでは、今回だけ診断フォーマットを必須にする
-  const isIrDiagnosisTurn = hasIrDiagnosisTrigger(text);
+  //    → 判定には「今回のユーザー発言」だけを使う
+  const isIrDiagnosisTurn = hasIrDiagnosisTrigger(currentUserText);
   if (isIrDiagnosisTurn) {
     system = `${system}
 
@@ -269,12 +372,13 @@ export async function generateIrosReply(
 5. \`🌱 次の一手：...\`（ユーザーが「これだけはやってみよう」と思える一手を 1つ）
 
 上記 5 ブロック以外の通常会話文は書かないでください。
-特に、\`🌌 Future Seed\` や \`T1/T2/T3\`、\`Seedをキャンセル\` など
+特に、\`🌌 Future Seed\` や \`T1/T2/T3\` など
 Future-Seed 専用の文言は **一切出してはいけません**。`;
   }
 
   // デバッグログ
   console.log('[IROS][generate] text =', text);
+  console.log('[IROS][generate] currentUserText =', currentUserText);
   console.log('[IROS][generate] meta snapshot =', {
     depth: anyMeta?.depth,
     qCode: anyMeta?.qCode,
@@ -287,6 +391,7 @@ Future-Seed 専用の文言は **一切出してはいけません**。`;
     hasFutureMemory: anyMeta?.hasFutureMemory,
     presentationKind,
     isIrDiagnosisTurn,
+    topicChangeRequested: (anyMeta?.extra as any)?.topicChangeRequested ?? false,
   });
 
   const messages: ChatCompletionMessageParam[] = [
@@ -330,6 +435,7 @@ Future-Seed 専用の文言は **一切出してはいけません**。`;
     intent,
   };
 }
+
 
 /* =========================================================
    履歴メッセージの整形（そのまま維持）

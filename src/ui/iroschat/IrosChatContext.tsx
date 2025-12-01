@@ -11,6 +11,7 @@ import React, {
 } from 'react';
 
 import { irosClient } from './lib/irosApiClient';
+import type { IrosStyle } from './lib/irosApiClient';
 import type { IrosMessage, IrosConversation, IrosUserInfo } from './types';
 import { auth } from '@/lib/firebase';
 
@@ -28,6 +29,9 @@ type IrosChatContextType = {
   userInfo: IrosUserInfo | null;
 
   activeConversationId: string | null;
+
+  /** 現在の Iros 口調スタイル（settings で選択されたもの） */
+  style: IrosStyle;
 
   fetchMessages: (cid: string) => Promise<void>;
 
@@ -53,17 +57,41 @@ const IrosChatContext = createContext<IrosChatContextType | null>(null);
 
 export const useIrosChat = () => useContext(IrosChatContext)!;
 
+const STYLE_STORAGE_KEY = 'iros.style';
+
 export const IrosChatProvider = ({ children }: { children: React.ReactNode }) => {
   const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState<IrosMessage[]>([]);
   const [conversations, setConversations] = useState<IrosConversation[]>([]);
   const [userInfo, setUserInfo] = useState<IrosUserInfo | null>(null);
 
+  // 口調スタイル（/iros-ai/settings で localStorage に保存した値を読む）
+  const [style, setStyle] = useState<IrosStyle>('friendly');
+
   // 表示用の state + 内部ロジック用の ref の両立
   const [activeConversationId, setActiveConversationId] = useState<string | null>(
     null,
   );
   const activeConversationIdRef = useRef<string | null>(null);
+
+  /* ========== Style 初期ロード ========== */
+
+  useEffect(() => {
+    try {
+      if (typeof window === 'undefined') return;
+      const v = window.localStorage.getItem(STYLE_STORAGE_KEY);
+      if (
+        v === 'friendly' ||
+        v === 'biz-soft' ||
+        v === 'biz-formal' ||
+        v === 'plain'
+      ) {
+        setStyle(v);
+      }
+    } catch {
+      // localStorage が使えない環境ではデフォルト(friendly)のまま
+    }
+  }, []);
 
   /* ========== Conversations ========== */
 
@@ -146,7 +174,6 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
     [],
   );
 
-
   const sendMessage = useCallback(
     async (text: string, mode: string = 'auto'): Promise<SendResult> => {
       const cid = activeConversationIdRef.current;
@@ -179,6 +206,8 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
         conversationId: cid,
         user_text: text,
         mode,
+        // ★ ここで現在の style をサーバーに渡す
+        style,
       });
 
       const assistant = (r?.assistant ?? '') as string;
@@ -206,12 +235,12 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
       // ⑤ ChatInput へ meta を返す（インジケータ用）
       return { assistant, meta: meta ?? undefined };
     },
-    [reloadConversations],
+    [reloadConversations, style],
   );
 
-   /* ========== Future-Seed（T層デモ） ========== */
+  /* ========== Future-Seed（T層デモ） ========== */
 
-   const sendFutureSeed = useCallback(
+  const sendFutureSeed = useCallback(
     async (): Promise<SendResult> => {
       // 優先順：
       // 1) ref に入っている activeConversationId
@@ -292,36 +321,35 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
           return null;
         }
 
-      // Seed メッセージをローカル state に追加（DB保存はしない）
-      setMessages((m) => {
-        const next = [
-          ...m,
-          {
-            id: crypto.randomUUID(),
-            role: 'assistant',
-            text: assistant,
-            content: assistant,
-            created_at: new Date().toISOString(),
-            ts: Date.now(),
-            meta,
-          } as IrosMessage,
-        ];
+        // Seed メッセージをローカル state に追加（DB保存はしない）
+        setMessages((m) => {
+          const next = [
+            ...m,
+            {
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              text: assistant,
+              content: assistant,
+              created_at: new Date().toISOString(),
+              ts: Date.now(),
+              meta,
+            } as IrosMessage,
+          ];
 
-        console.log('[IROS] Seed setMessages', {
-          before: m.length,
-          after: next.length,
-          last: {
-            id: next[next.length - 1]?.id,
-            role: next[next.length - 1]?.role,
-            meta: next[next.length - 1]?.meta,
-          },
+          console.log('[IROS] Seed setMessages', {
+            before: m.length,
+            after: next.length,
+            last: {
+              id: next[next.length - 1]?.id,
+              role: next[next.length - 1]?.role,
+              meta: next[next.length - 1]?.meta,
+            },
+          });
+
+          return next;
         });
 
-        return next;
-      });
-
-      return { assistant, meta: meta ?? undefined };
-
+        return { assistant, meta: meta ?? undefined };
       } catch (e) {
         console.error('[IROS] future-seed failed', e);
         return null;
@@ -331,8 +359,6 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
     },
     [activeConversationId, conversations],
   );
-
-
 
   /* ========== User Info ========== */
 
@@ -344,12 +370,15 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
   /* ========== 新しいチャット / 会話選択 API ========== */
 
   // 新しい会話を作って、そのまま開くためのヘルパー
-  const newConversation = useCallback(async () => {
-    const cid = await startConversation();
-    // 念のためサーバ側状態も同期（通常は空配列が返る）
-    await fetchMessages(cid);
-    return cid;
-  }, [startConversation, fetchMessages]);
+  const newConversation = useCallback(
+    async () => {
+      const cid = await startConversation();
+      // 念のためサーバ側状態も同期（通常は空配列が返る）
+      await fetchMessages(cid);
+      return cid;
+    },
+    [startConversation, fetchMessages],
+  );
 
   // 既存会話を選択して開く
   const selectConversation = useCallback(
@@ -376,6 +405,7 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
         conversations,
         userInfo,
         activeConversationId,
+        style, // ★ 追加：現在のスタイルも公開
 
         fetchMessages,
         sendMessage,

@@ -60,7 +60,7 @@ function estimateQ(t: string): AnalyzeOut['q_primary'] {
   return 'Q1';
 }
 function estimatePhase(t: string): AnalyzeOut['phase'] {
-  const i = ['感じ','内側','心','内観','静けさ'];
+  const i = ['感じ','内面','心','内観','静けさ'];
   const o = ['相手','仕事','世界','関係','環境'];
   const ic = i.reduce((a, w) => a + (t.includes(w) ? 1 : 0), 0);
   const oc = o.reduce((a, w) => a + (t.includes(w) ? 1 : 0), 0);
