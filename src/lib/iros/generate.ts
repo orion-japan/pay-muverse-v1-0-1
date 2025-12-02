@@ -363,7 +363,7 @@ export async function generateIrosReply(
 
 フォーマット（順番も固定）：
 1. \`🧿 観測対象：...\`
-2. \`🪔 I/T層の刺さる一句：...\`（2行以内）
+2. \`🪔 irosからの一句：...\`（2行以内）
 3. \`構造スキャン\`
    - \`フェーズ：...\`
    - \`位相：Inner Side\` または \`Outer Side\`

@@ -3,8 +3,9 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { auth } from '@/lib/firebase';
 
-// Iros の口調スタイル（system.ts / irosApiClient.ts と揃える）
+// Iros の口調スタイル（他ファイルと union を揃える）
 type IrosStyle = 'friendly' | 'biz-soft' | 'biz-formal' | 'plain';
 
 const STYLE_LABELS: Record<IrosStyle, string> = {
@@ -28,17 +29,56 @@ const STYLE_DESCRIPTIONS: Record<IrosStyle, string> = {
 // localStorage のキー（フロント専用）
 const STORAGE_KEY = 'iros.style';
 
+/** プロファイルAPIに style を保存する */
+async function saveStyleToServer(next: IrosStyle) {
+  try {
+    const user = auth.currentUser;
+    const token = user ? await user.getIdToken() : null;
+
+    if (!token) {
+      console.warn('[IROS/settings] no currentUser, skip profile upsert');
+      return;
+    }
+
+    const res = await fetch('/api/agent/iros/profile/upsert', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ style: next }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '(no body)');
+      console.error('[IROS/settings] profile upsert failed', res.status, body);
+    } else {
+      console.log('[IROS/settings] profile upsert ok', next);
+    }
+  } catch (e) {
+    console.error('[IROS/settings] profile upsert error', e);
+  }
+}
+
 export default function IrosAiSettingsPage() {
   const [style, setStyle] = useState<IrosStyle>('friendly');
   const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<Date | null>(null);
 
   // 初期読み込み（ブラウザのみ）
   useEffect(() => {
     try {
-      const v = typeof window !== 'undefined'
-        ? window.localStorage.getItem(STORAGE_KEY)
-        : null;
-      if (v === 'friendly' || v === 'biz-soft' || v === 'biz-formal' || v === 'plain') {
+      const v =
+        typeof window !== 'undefined'
+          ? window.localStorage.getItem(STORAGE_KEY)
+          : null;
+      if (
+        v === 'friendly' ||
+        v === 'biz-soft' ||
+        v === 'biz-formal' ||
+        v === 'plain'
+      ) {
         setStyle(v);
       }
     } catch {
@@ -48,16 +88,24 @@ export default function IrosAiSettingsPage() {
     }
   }, []);
 
-  // 選択変更時に localStorage へ保存
-  const handleChange = (next: IrosStyle) => {
+  // 選択変更時に localStorage + DB へ保存
+  const handleChange = async (next: IrosStyle) => {
     setStyle(next);
+
+    // localStorage
     try {
       if (typeof window !== 'undefined') {
         window.localStorage.setItem(STORAGE_KEY, next);
       }
     } catch {
-      // 失敗しても致命的ではないので握りつぶす
+      /* ignore */
     }
+
+    // DB(iros_user_profile.style) へ保存
+    setSaving(true);
+    await saveStyleToServer(next);
+    setSaving(false);
+    setSavedAt(new Date());
   };
 
   return (
@@ -85,8 +133,8 @@ export default function IrosAiSettingsPage() {
       <p style={{ opacity: 0.7, marginBottom: '20px', lineHeight: 1.6 }}>
         Iros の「口調スタイル」を切り替えられるようにしました。
         <br />
-        ここで選んだスタイルは、ブラウザ内に保存され、チャット画面から参照できるようにします。
-        （この画面では保存だけを行い、実際の反映はこのあと Chat 側で実装します）
+        ここで選んだスタイルは、ブラウザ内とプロフィールの両方に保存され、
+        チャット画面から参照できるようになります。
       </p>
 
       {/* 口調スタイル 選択ブロック */}
@@ -95,14 +143,13 @@ export default function IrosAiSettingsPage() {
           border: '1px solid rgba(0,0,0,0.12)',
           borderRadius: 12,
           padding: '16px',
-          marginBottom: '24px',
+          marginBottom: '16px',
         }}
       >
         <h2 style={{ fontSize: '1rem', marginBottom: '8px' }}>🗣 口調スタイル</h2>
         <p style={{ fontSize: '0.85rem', opacity: 0.75, marginBottom: '12px' }}>
-          いまは <strong>Muverse 内の Iros 全体に対して共通のスタイル</strong> として扱います。
-          <br />
-          （ユーザー別・会話別の細かい切り替えは、必要になったら拡張予定です）
+          いまは <strong>Muverse 内の Iros 全体に対して共通のスタイル</strong>{' '}
+          として扱います。
         </p>
 
         {!loaded && (
@@ -125,7 +172,9 @@ export default function IrosAiSettingsPage() {
                   marginBottom: '8px',
                   cursor: 'pointer',
                   background:
-                    style === key ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,1)',
+                    style === key
+                      ? 'rgba(0,0,0,0.03)'
+                      : 'rgba(255,255,255,1)',
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -159,19 +208,12 @@ export default function IrosAiSettingsPage() {
         )}
       </section>
 
-      <section style={{ fontSize: '0.8rem', opacity: 0.7, lineHeight: 1.6 }}>
-        <p style={{ marginBottom: 4 }}>
-          🔧 技術メモ（開発用）：
-        </p>
-        <ul style={{ paddingLeft: '1.2em', margin: 0 }}>
-          <li>
-            選択値は <code>localStorage["{STORAGE_KEY}"]</code> に保存されます。
-          </li>
-          <li>
-            Chat 側では、<code>localStorage</code> から値を読み取り、
-            <code>meta.style</code> として LLM に渡す想定です。
-          </li>
-        </ul>
+      {/* 保存ステータス表示（おまけ） */}
+      <section style={{ fontSize: '0.8rem', opacity: 0.8, lineHeight: 1.6 }}>
+        {saving && <p>保存中です…</p>}
+        {!saving && savedAt && (
+          <p>サーバーに保存しました（{savedAt.toLocaleTimeString()}）</p>
+        )}
       </section>
     </div>
   );

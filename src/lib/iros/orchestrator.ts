@@ -51,6 +51,10 @@ import {
   logVisionTrigger,
 } from './visionTrigger';
 
+import { savePersonIntentState } from './memory/savePersonIntent';
+
+
+
 // ==== I層強制モード（ENV） ====
 //   - true のとき、requestedDepth を優先して depth を固定する
 const FORCE_I_LAYER =
@@ -319,6 +323,70 @@ export async function runIrosTurn(
   }
 
   // ----------------------------------------------------------------
+  // 9.5 Person Intent Memory 保存（ir診断ターンのみ）
+  // ----------------------------------------------------------------
+  if (userCode && meta) {
+    const anyMeta = meta as any;
+    const isIrDiagnosisTurn = !!anyMeta.isIrDiagnosisTurn;
+
+    if (!isIrDiagnosisTurn) {
+      // ir診断以外のターンでは何もしない
+      if (process.env.DEBUG_IROS_INTENT === '1') {
+        console.log('[IROS/PersonIntentState] skip (not ir diagnosis turn)', {
+          mode: meta.mode,
+        });
+      }
+    } else {
+      // 観測対象ラベルを、今回のユーザー入力テキストから抽出する
+      let label = 'self';
+      const trimmed = (text || '').trim();
+
+      if (trimmed.startsWith('ir診断')) {
+        const rest = trimmed.slice('ir診断'.length).trim(); // 「自分」「上司」など
+        if (rest.length > 0) {
+          label = rest;
+        }
+      }
+
+      if (process.env.DEBUG_IROS_INTENT === '1') {
+        console.log('[IROS/PersonIntentState] save candidate', {
+          userCode,
+          label,
+          depth: meta.depth,
+          qCode: meta.qCode,
+          selfAcceptance: meta.selfAcceptance,
+        });
+      }
+
+      try {
+        await savePersonIntentState({
+          ownerUserCode: userCode,
+          // ひとまず「ir診断で観測した対象」という意味で固定
+          targetType: 'ir-diagnosis',
+          targetLabel: label,
+          qPrimary: meta.qCode ?? null,
+          depthStage: meta.depth ?? null,
+          phase: meta.phase ?? null,
+          tLayerHint: meta.tLayerHint ?? null,
+          selfAcceptance:
+            typeof meta.selfAcceptance === 'number'
+              ? meta.selfAcceptance
+              : null,
+          // intentBand / direction などは IntentLine 型を確認してから後で追加
+        });
+      } catch (e) {
+        console.error(
+          '[IROS/Orchestrator] savePersonIntentState error',
+          e,
+        );
+      }
+    }
+  }
+
+
+
+
+  // ----------------------------------------------------------------
   // 10. Orchestrator 結果として返却
   // ----------------------------------------------------------------
   return {
@@ -354,3 +422,5 @@ function normalizeQCode(qCode?: QCode): QCode | undefined {
   if (!qCode) return undefined;
   return QCODE_VALUES.includes(qCode) ? qCode : undefined;
 }
+
+

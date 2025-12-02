@@ -168,7 +168,7 @@ function transformIrTemplateToMarkdown(input: string): string {
   // 🔹新ir診断フォーマットはそのまま表示する
   // 例：
   // 🧿 観測対象：◯◯
-  // 🪔 I/T層の刺さる一句：〜
+  // 🪔 irosからの一句：〜
   // 構造スキャン
   // フェーズ：〜
   // 位相：〜

@@ -43,6 +43,9 @@ export type IrosAPI = {
     intent?: IntentPulse;
     headers?: Record<string, string>; // 冪等キー付与用
 
+
+
+
     // 🗣 追加：Iros の口調スタイル
     style?: IrosStyle;
   }): Promise<
@@ -164,6 +167,80 @@ export async function retryAuth<T>(
   }
   throw lastErr;
 }
+
+// ====== Person-Intent 状態ビュー取得 ======
+
+export type PersonIntentStateRow = {
+  user_code: string;
+  situation_topic: string | null;
+  target_kind: string | null;
+  target_label: string | null;
+  conversation_id: string | null;
+  last_created_at: string | null;
+  last_q_code: string | null;
+  last_depth_stage: string | null;
+  last_self_acceptance: number | null;
+  y_level: number | null;
+  h_level: number | null;
+};
+
+/**
+ * /api/intent/person-state を叩いて
+ * 「ユーザーごとの意図状態（状況×対象）」一覧を取得する
+ */
+export async function fetchPersonIntentState(): Promise<
+  PersonIntentStateRow[]
+> {
+  return retryAuth(async () => {
+    const res = await authFetch('/api/intent/person-state', {
+      method: 'GET',
+    });
+    const j = await res.json();
+
+    // 返却形式が「配列」または「{ rows: [...] }」のどちらでも動くようにしておく
+    const rowsRaw = Array.isArray(j)
+      ? j
+      : Array.isArray(j?.rows)
+      ? j.rows
+      : [];
+
+    return rowsRaw.map((r: any) => ({
+      user_code: String(r.user_code),
+      situation_topic:
+        r.situation_topic != null ? String(r.situation_topic) : null,
+      target_kind: r.target_kind != null ? String(r.target_kind) : null,
+      target_label: r.target_label != null ? String(r.target_label) : null,
+      conversation_id:
+        r.conversation_id != null ? String(r.conversation_id) : null,
+      last_created_at:
+        r.last_created_at != null ? String(r.last_created_at) : null,
+      last_q_code: r.last_q_code != null ? String(r.last_q_code) : null,
+      last_depth_stage:
+        r.last_depth_stage != null ? String(r.last_depth_stage) : null,
+      last_self_acceptance:
+        typeof r.last_self_acceptance === 'number'
+          ? r.last_self_acceptance
+          : r.last_self_acceptance != null
+          ? Number(r.last_self_acceptance)
+          : null,
+      y_level:
+        typeof r.y_level === 'number'
+          ? r.y_level
+          : r.y_level != null
+          ? Number(r.y_level)
+          : null,
+      h_level:
+        typeof r.h_level === 'number'
+          ? r.h_level
+          : r.h_level != null
+          ? Number(r.h_level)
+          : null,
+    })) as PersonIntentStateRow[];
+  });
+}
+
+
+
 
 /* ========= 実体 irosClient ========= */
 

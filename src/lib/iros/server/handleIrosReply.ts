@@ -34,6 +34,40 @@ const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
 );
 
+// ★ Iros ユーザープロファイルの style を更新（or 挿入）
+async function upsertIrosUserStyle(userCode: string, style: string | null) {
+  if (!style) return;
+
+  try {
+    const { error } = await supabase
+      .from('iros_user_profile') // ← 実際のテーブル名に合わせて変更
+      .upsert({
+        user_code: userCode,
+        style,
+        updated_at: new Date().toISOString(),
+      });
+
+    if (error) {
+      console.error('[IROS/UserProfile] upsert style failed', {
+        userCode,
+        style,
+        error,
+      });
+    } else {
+      console.log('[IROS/UserProfile] upsert style ok', {
+        userCode,
+        style,
+      });
+    }
+  } catch (e) {
+    console.error('[IROS/UserProfile] upsert style unexpected error', {
+      userCode,
+      style,
+      error: e,
+    });
+  }
+}
+
 // I層100%モード（ENVベース）
 const FORCE_I_LAYER = process.env.IROS_FORCE_I_LAYER === '1';
 
@@ -564,6 +598,12 @@ export async function handleIrosReply(
       styleFromProfile,
       effectiveStyle,
     });
+
+    // ★ 決まった effectiveStyle を DB にも反映（設定画面の選択を永続化）
+    if (effectiveStyle && typeof effectiveStyle === 'string') {
+      await upsertIrosUserStyle(userCode, effectiveStyle);
+    }
+
 
 
     const requestedMode =
