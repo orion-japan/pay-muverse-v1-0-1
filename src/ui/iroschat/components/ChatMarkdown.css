@@ -1,0 +1,208 @@
+/* =======================================
+   Chat Markdown 共通スタイル
+   （Iros / Sofia 専用）
+   ======================================= */
+
+/* ▼ セクション見出し（🧿 / 🌀 / 🌱 など） */
+.sof-msgs .msgBody .iros-section-heading {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: #5738ff; /* アイキャッチ色 / サイドラベル */
+  margin: 18px 0 10px;
+  display: flex;
+  align-items: center;
+}
+
+.sof-msgs .msgBody .iros-section-heading .emoji {
+  margin-right: 6px;
+}
+
+/* ▼ セクションテキストブロック */
+.sof-msgs .msgBody .iros-section-block {
+  margin-bottom: 16px;
+  padding-left: 10px;
+  border-left: 3px solid #e2d7ff;
+}
+
+/* 通常本文 */
+.sof-msgs .msgBody .iros-section-block p {
+  color: #2e2a45;
+  line-height: 1.7;
+  margin: 6px 0;
+}
+
+/* 補足（カッコ書きなど）を薄く */
+.sof-msgs .msgBody .iros-section-block p small,
+.sof-msgs .msgBody .iros-section-block p em {
+  color: #6b6b6b;
+  font-style: normal;
+}
+
+/* =======================================
+   強調テキスト：共鳴スタイル
+   ======================================= */
+
+/* ベース：刺さる行動方向性の言葉 */
+.sof-msgs .msgBody .iros-emphasis {
+  font-weight: 600;
+}
+
+/* 🌌 Vision（青紫） */
+.sof-msgs .msgBody .iros-emphasis-vision {
+  color: #4b2fff !important;
+  background: none !important;
+}
+
+/* 🔥 通常（濃ピンク→濃青グラデ） */
+.sof-msgs .msgBody .iros-emphasis-normal {
+  /* 標準プロパティを先に書く → Lint 対策 */
+  background: linear-gradient(90deg, #c01880 0%, #002b99 100%);
+  background-clip: text;
+  color: transparent;
+
+  /* WebKit 系ブラウザ用（Safari / iOS） */
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* フォールバック（古いブラウザ / 特殊環境用） */
+@supports not (-webkit-background-clip: text) {
+  .sof-msgs .msgBody .iros-emphasis-normal {
+    color: #c01880 !important;
+  }
+}
+
+/* =======================================
+   Vision テーマ（msgBody 全体）
+   ======================================= */
+
+/* 🌌 Vision Mode 全体の雰囲気 */
+.sof-msgs .msgBody.vision-theme {
+  position: relative;
+  border-radius: 14px;
+  padding: 10px 12px;
+  margin: -2px -6px 0;
+  background: radial-gradient(
+      circle at 0% 0%,
+      rgba(75, 47, 255, 0.12),
+      transparent 55%
+    ),
+    radial-gradient(
+      circle at 100% 100%,
+      rgba(192, 132, 252, 0.16),
+      transparent 55%
+    );
+  border: 1px solid rgba(75, 47, 255, 0.22);
+}
+
+/* Vision + T層 Hint がアクティブなときの、すこしだけ光の粒感 */
+.sof-msgs .msgBody.vision-hint-theme {
+  box-shadow: 0 0 24px rgba(75, 47, 255, 0.25);
+}
+
+/* Vision でない通常モード時は、ボーダーや背景をリセットしておく保険 */
+.sof-msgs .msgBody:not(.vision-theme) {
+  border-radius: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* =======================================
+   strong 見出し用：絵文字アイコン
+   ======================================= */
+
+/* 見出し（ReactMarkdown の strong）に余白を足す */
+.sof-msgs .msgBody strong {
+  position: relative;
+  padding-left: 1.6em; /* 左にアイコン分のスペース */
+}
+
+/* デフォルトのアイコン：きらめき */
+.sof-msgs .msgBody strong::before {
+  content: '✨';
+  position: absolute;
+  left: 0;
+  top: 0.1em;
+  font-size: 0.9em;
+  opacity: 0.9;
+}
+
+/* Vision モードのときだけ、アイコンを変える */
+.sof-msgs .msgBody.vision-theme strong::before {
+  content: '🌌';
+}
+/* =======================================
+   見出しアイコン（✨ / 🌌）
+   strong と h1〜h4 どちらでも効くようにする
+   ======================================= */
+
+   .sof-msgs .msgBody h1,
+   .sof-msgs .msgBody h2,
+   .sof-msgs .msgBody h3,
+   .sof-msgs .msgBody h4,
+   .sof-msgs .msgBody strong {
+     position: relative;
+     display: inline-flex;
+     align-items: center;
+     padding-left: 1.6em; /* 左にアイコンぶんスペース */
+   }
+
+   /* デフォルト：✨ */
+   .sof-msgs .msgBody h1::before,
+   .sof-msgs .msgBody h2::before,
+   .sof-msgs .msgBody h3::before,
+   .sof-msgs .msgBody h4::before,
+   .sof-msgs .msgBody strong::before {
+     content: '✨';
+     position: absolute;
+     left: 0;
+     top: 0.05em;
+     font-size: 0.9em;
+     opacity: 0.9;
+   }
+
+   /* Vision モードのときはアイコンを 🌌 に変更 */
+   .sof-msgs .msgBody.vision-theme h1::before,
+   .sof-msgs .msgBody.vision-theme h2::before,
+   .sof-msgs .msgBody.vision-theme h3::before,
+   .sof-msgs .msgBody.vision-theme h4::before,
+   .sof-msgs .msgBody.vision-theme strong::before {
+     content: '🌌';
+   }
+/* =======================================
+   セクション見出し（🧿 / 🌀 / 🌅 など）
+   ======================================= */
+
+   .msgBody .iros-section-heading {
+    display: block;
+    margin: 1.2em 0 0.4em;
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+
+  /* ▼ デフォルトのアイコン（通常モード） */
+  .msgBody .iros-section-heading::before {
+    content: '✨';
+    display: inline-block;
+    margin-right: 6px;
+  }
+
+  /* ▼ Vision テーマ時のアイコン切り替え */
+  .msgBody.vision-theme .iros-section-heading::before {
+    content: '🌅';
+  }
+  .msgBody .iros-section-heading {
+    display: block;
+    margin: 1.2em 0 0.4em;
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+
+  /* ← これ新しく追加 */
+  .msgBody .iros-section-heading-icon {
+    display: inline-block;
+    margin-right: 6px;
+  }

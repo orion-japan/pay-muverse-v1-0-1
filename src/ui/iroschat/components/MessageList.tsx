@@ -76,12 +76,18 @@ const userBubbleStyle: React.CSSProperties = {
   padding: '10px 13px',
 };
 
-// アシスタントは GPT 風フラット：枠・影は CSS 側で消してあるのでここでは幅だけ
+// アシスタントは「白いカード」風レイアウト
 const assistantBubbleShellStyle: React.CSSProperties = {
   maxWidth: '100%',
   width: '100%',
   flex: '1 1 auto',
+  background: '#ffffff',
+  borderRadius: 18,
+  padding: '14px 18px',
+  border: '1px solid rgba(148, 163, 184, 0.35)',
+  boxShadow: '0 18px 40px rgba(15, 23, 42, 0.08)',
 };
+
 
 // Qバッジ（muverse 色味）
 const qBadgeStyle: React.CSSProperties = {
@@ -152,29 +158,10 @@ function toSafeString(v: unknown): string {
 
 /* ========= I層テンプレ → GPT風Markdown 変換 ========= */
 
-/**
- * ir診断用テンプレ
- *  観測対象：{{...}}
- *  深度：{{R2}}
- *  位相：{{Outer}}
- *  🌀意識状態：{{...}}
- *  🪔メッセージ：{{...}}
- * を GPT っぽい Markdown に変換する。
- * 対応しないテキストの場合は input をそのまま返す。
- */
 function transformIrTemplateToMarkdown(input: string): string {
   if (!input.trim()) return input;
 
   // 🔹新ir診断フォーマットはそのまま表示する
-  // 例：
-  // 🧿 観測対象：◯◯
-  // 🪔 irosからの一句：〜
-  // 構造スキャン
-  // フェーズ：〜
-  // 位相：〜
-  // 深度：〜
-  // 🌀 その瞬間の揺れ：〜
-  // 🌱 次の一手：〜
   if (
     /🧿\s*観測対象[:：]/.test(input) &&
     /I\/T層の刺さる一句/.test(input)
@@ -200,6 +187,7 @@ function transformIrTemplateToMarkdown(input: string): string {
     if (m) t = m[1].trim();
     return t;
   };
+
 
   const getAfterMark = (s: string): string => {
     const idxJa = s.indexOf('：');
@@ -304,7 +292,6 @@ function transformIrTemplateToMarkdown(input: string): string {
 /**
  * カギカッコごと太字になっているパターンを
  * 「**カギカッコの中身だけ太字」に変換する。
- * 例：**「小さな一歩」** → 「**小さな一歩**」
  */
 function normalizeBoldInsideQuotes(input: string): string {
   if (!input) return input;
@@ -320,67 +307,95 @@ function normalizeBoldInsideQuotes(input: string): string {
 
 /* ========= ReactMarkdown 用カスタムコンポーネント ========= */
 
-const markdownComponents: any = {
-  // 段落：行間を少し広めに
-  p: ({ children }: { children: React.ReactNode }) => (
-    <p
-      style={{
-        margin: '0 0 0.8em', // ちょっとだけ余白を増やす
-        whiteSpace: 'pre-wrap',
-      }}
-    >
-      {children}
-    </p>
-  ),
+// メッセージごとのモードに応じて、コンポーネントを生成
+function createMarkdownComponents(isVisionMode: boolean): any {
+  return {
+    // 段落：ChatGPT っぽく、素直な本文
+    p: ({ children }: { children: React.ReactNode }) => (
+      <p
+        style={{
+          margin: '0 0 0.85em',
+          lineHeight: 1.8,
+          fontSize: '0.96rem',
+          whiteSpace: 'pre-wrap',
+          color: '#111827',
+        }}
+      >
+        {children}
+      </p>
+    ),
 
-  // 太字：sofiaカードの「小見出し」っぽく強調
-  strong: ({ children }: { children: React.ReactNode }) => (
-    <strong
-      style={{
-        fontWeight: 700,
-        color: '#111827',
-        fontSize: '1.02rem', // ベース文字より少し大きく
-        letterSpacing: '0.01em',
-        display: 'inline-block',
-        margin: '0.45em 0 0.25em', // 上に少し余白 → 段が分かれて見える
-      }}
-    >
-      {children}
-    </strong>
-  ),
+    strong: ({ children }: { children: React.ReactNode }) => {
+      // strong の中身をテキスト化
+      const text = typeof children === 'string' ? children : '';
+      const isSectionHeading =
+        text.length > 0 &&
+        /^[^。.!?\n]+$/.test(text); // タイトル行っぽい簡易判定
 
-  // 箇条書き
-  ul: ({ children }: { children: React.ReactNode }) => (
-    <ul
-      style={{
-        paddingLeft: '1.2em',
-        margin: '0.25em 0 0.6em',
-      }}
-    >
-      {children}
-    </ul>
-  ),
-  li: ({ children }: { children: React.ReactNode }) => (
-    <li
-      style={{
-        margin: '0.1em 0',
-      }}
-    >
-      {children}
-    </li>
-  ),
+      return (
+        <strong
+          className={isSectionHeading ? 'iros-section-heading' : undefined}
+          style={{
+            display: 'block',
+            margin: '1.2em 0 0.4em',
+            fontSize: '1.05rem',
+            fontWeight: 700,
+            letterSpacing: '0.02em',
+          }}
+        >
+          {children}
+        </strong>
+      );
+    },
 
-  // 区切り線
-  hr: () => (
-    <hr
-      style={{
-        border: 'none',
-        borderTop: '1px dashed rgba(148, 163, 184, 0.7)',
-        margin: '0.6em 0 0.8em',
-      }}
-    />
-  ),
-};
+
+    // 共鳴ハイライト（*こういう部分*）→ さっきの class 方式
+    em: ({ children }: { children: React.ReactNode }) => (
+      <span
+        className={
+          'iros-emphasis ' +
+          (isVisionMode ? 'iros-emphasis-vision' : 'iros-emphasis-normal')
+        }
+      >
+        {children}
+      </span>
+    ),
+
+    // 箇条書き：ChatGPT っぽくシンプルに
+    ul: ({ children }: { children: React.ReactNode }) => (
+      <ul
+        style={{
+          paddingLeft: '1.25em',
+          margin: '0.2em 0 0.9em',
+        }}
+      >
+        {children}
+      </ul>
+    ),
+    li: ({ children }: { children: React.ReactNode }) => (
+      <li
+        style={{
+          margin: '0.15em 0',
+          lineHeight: 1.8,
+        }}
+      >
+        {children}
+      </li>
+    ),
+
+    // 区切り線（---）：ChatGPT風の細いグレーライン
+    hr: () => (
+      <hr
+        style={{
+          border: 'none',
+          borderTop: '1px solid rgba(148, 163, 184, 0.6)',
+          margin: '1.1em 0 1.3em',
+        }}
+      />
+    ),
+  };
+}
+
 
 export default function MessageList() {
   const { messages, loading, error } = useIrosChat() as {
@@ -530,33 +545,41 @@ export default function MessageList() {
             >
               {/* ▼ Vision系ヘッダー（Mode / Hint） */}
               {(isVisionMode || isVisionHint) && (
-  <div style={seedHeaderStyle}>
-    <div style={seedLabelStyle}>
-      {isVisionMode ? (
-        <>
-          <span>🌌 Vision Mode</span>
-          <span style={seedTLHintStyle}>{tHint}</span>
-          {/* ← ここを追加：Vision 中も T 層アクティブなら ✨ を添える */}
-          {m.meta?.tLayerModeActive && (
-            <span style={{ marginLeft: 6, fontSize: 14 }}>✨</span>
-          )}
-        </>
-      ) : (
-        <span style={{ fontSize: 14, opacity: 0.9 }}>✨</span>
-      )}
-    </div>
-  </div>
-)}
+                <div style={seedHeaderStyle}>
+                  <div style={seedLabelStyle}>
+                    {isVisionMode ? (
+                      <>
+                        <span>🌌 Vision Mode</span>
+                        <span style={seedTLHintStyle}>{tHint}</span>
+                        {m.meta?.tLayerModeActive && (
+                          <span style={{ marginLeft: 6, fontSize: 14 }}>✨</span>
+                        )}
+                      </>
+                    ) : (
+                      <span style={{ fontSize: 14, opacity: 0.9 }}>✨</span>
+                    )}
+                  </div>
+                </div>
+              )}
 
+<div
+  className={`msgBody ${
+    isVisionMode ? 'vision-theme' : ''
+  } ${isVisionHint ? 'vision-hint-theme' : ''}`}
+  style={{
+    fontSize: 14,
+    lineHeight: 1.9,
+    color: '#111827',
+  }}
+>
+  <ReactMarkdown
+    remarkPlugins={[remarkGfm, remarkBreaks]}
+    components={createMarkdownComponents(isVisionMode)}
+  >
+    {safeText}
+  </ReactMarkdown>
+</div>
 
-              <div className="msgBody">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm, remarkBreaks]}
-                  components={markdownComponents}
-                >
-                  {safeText}
-                </ReactMarkdown>
-              </div>
             </div>
           </div>
         );
@@ -568,4 +591,3 @@ export default function MessageList() {
     </div>
   );
 }
-
