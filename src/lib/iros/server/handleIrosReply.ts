@@ -2,7 +2,19 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { updateUserQNowFromMeta } from '@/lib/iros/qSnapshot';
-import { loadQTraceForUser, applyQTraceToMeta } from '@/lib/iros/memory.adapter';
+
+// ★ Qトレース ＋ meta反映
+import {
+  loadQTraceForUser,
+  applyQTraceToMeta,
+} from '@/lib/iros/memory.adapter';
+
+// ★ Iros-GIGA 意図アンカー ユーティリティ
+import {
+  loadIntentAnchorForUser,
+  upsertIntentAnchorForUser,
+} from '@/lib/iros/intentAnchor';
+
 import { detectQFromText } from '@/lib/iros/q/detectQ';
 import { estimateSelfAcceptance } from '@/lib/iros/sa/meter';
 import { runIrosTurn } from '@/lib/iros/orchestrator';
@@ -16,6 +28,15 @@ import {
   formatTopicChangeForPrompt,
 } from '@/lib/iros/topicChange';
 
+// ★ 追加：過去状態リコールユーティリティ
+import { preparePastStateNoteForTurn } from '@/lib/iros/memoryRecall';
+
+// ★ 追加：v_iros_user_profile の型
+import type { IrosUserProfileRow } from './loadUserProfile';
+
+// ★ 追加：Polarity / Stability 計算ロジック
+import { computePolarityAndStability } from '@/lib/iros/analysis/polarity';
+
 // ★ 追加：v_iros_topic_state_latest の型（必要な項目だけ）
 type TopicStateLatestRow = {
   topic_key?: string | null;
@@ -24,10 +45,7 @@ type TopicStateLatestRow = {
   last_used_at?: string | null;
 };
 
-// ★ 追加：v_iros_user_profile の型
-import type { IrosUserProfileRow } from './loadUserProfile';
-
-// Supabase（Iros内部用）
+// Supabase(Iros内部用)
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY ??
@@ -68,10 +86,51 @@ async function upsertIrosUserStyle(userCode: string, style: string | null) {
   }
 }
 
+// ★★★ 追加：user_code → user_id(uuid) を解決するヘルパー
+type IrosUserMapRow = {
+  user_id: string;
+};
+
+async function resolveUserIdFromUserCode(
+  userCode: string,
+): Promise<string | null> {
+  try {
+    const { data, error } = await supabase
+      .from('iros_user_map')
+      .select('user_id')
+      .eq('user_code', userCode)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[IROS/UserMap] failed to resolve user_id from user_code', {
+        userCode,
+        error,
+      });
+      return null;
+    }
+
+    if (!data) return null;
+
+    const row = data as IrosUserMapRow;
+    if (!row.user_id) return null;
+
+    return row.user_id;
+  } catch (e) {
+    console.error(
+      '[IROS/UserMap] unexpected error in resolveUserIdFromUserCode',
+      {
+        userCode,
+        error: e,
+      },
+    );
+    return null;
+  }
+}
+
 // I層100%モード（ENVベース）
 const FORCE_I_LAYER = process.env.IROS_FORCE_I_LAYER === '1';
 
-// ---------- UnifiedAnalysis ロジック（元 route.ts と同じ） ----------
+// ---------- UnifiedAnalysis ロジック ----------
 
 type UnifiedAnalysis = {
   q_code: string | null;
@@ -126,14 +185,12 @@ async function buildUnifiedAnalysis(params: {
     unified && typeof unified.phase === 'string' ? unified.phase : null;
 
   // ---- Q / Depth / Phase ----
-  const qCode =
-    unifiedQ ?? safeMeta.qCode ?? safeMeta.q_code ?? null;
+  const qCode = unifiedQ ?? safeMeta.qCode ?? safeMeta.q_code ?? null;
 
   const depthStage =
     unifiedDepth ?? safeMeta.depth ?? safeMeta.depth_stage ?? null;
 
-  const phase =
-    unifiedPhase ?? safeMeta.phase ?? null;
+  const phase = unifiedPhase ?? safeMeta.phase ?? null;
 
   // ---- Self Acceptance（0.0〜1.0 スケール）----
   let selfAcceptanceRaw: number | null =
@@ -199,6 +256,25 @@ async function buildUnifiedAnalysis(params: {
   };
 }
 
+// ★ 追加：Supabase(PostgREST)に投げる前に「純粋な JSON」にクリーンアップするヘルパー
+function makePostgrestSafePayload<T extends Record<string, any>>(
+  payload: T,
+): T | null {
+  try {
+    // JSON.stringify できない値（BigInt, 関数, Symbol, 循環参照など）があるとここで落ちる
+    const json = JSON.stringify(payload);
+    if (!json) return null;
+    return JSON.parse(json) as T;
+  } catch (e) {
+    console.error(
+      '[UnifiedAnalysis] payload JSON serialize failed',
+      e,
+      payload,
+    );
+    return null;
+  }
+}
+
 // UnifiedAnalysis を DB に保存（Q推定 + 状態アップデートまで）
 async function saveUnifiedAnalysisInline(
   analysis: UnifiedAnalysis,
@@ -237,25 +313,37 @@ async function saveUnifiedAnalysisInline(
 
   analysis.q_code = qCode ?? null;
 
-  const { error: logErr } = await supabase
-    .from('unified_resonance_logs')
-    .insert({
-      tenant_id: context.tenantId,
-      user_code: context.userCode,
-      agent: context.agent,
-      q_code: qCode,
-      depth_stage: analysis.depth_stage,
-      phase: analysis.phase,
-      self_acceptance: analysis.self_acceptance,
-      relation_tone: analysis.relation_tone,
-      keywords: analysis.keywords,
-      summary: analysis.summary,
-      raw: analysis.raw,
-    });
+  // ★ Supabase へ投げる前に、一度 payload を構築
+  const logPayload = {
+    tenant_id: context.tenantId,
+    user_code: context.userCode,
+    agent: context.agent,
+    q_code: qCode,
+    depth_stage: analysis.depth_stage,
+    phase: analysis.phase,
+    self_acceptance: analysis.self_acceptance,
+    relation_tone: analysis.relation_tone,
+    keywords: analysis.keywords,
+    summary: analysis.summary,
+    raw: analysis.raw ?? null,
+  };
 
-  if (logErr) {
-    console.error('[UnifiedAnalysis] log insert failed', logErr);
-    return;
+  // ★ ここで「JSON として安全な形」にクリーンアップ
+  const safeLogPayload = makePostgrestSafePayload(logPayload);
+
+  if (!safeLogPayload) {
+    console.error(
+      '[UnifiedAnalysis] log insert skipped: payload not JSON-serializable',
+    );
+  } else {
+    const { error: logErr } = await supabase
+      .from('unified_resonance_logs')
+      .insert(safeLogPayload);
+
+    if (logErr) {
+      console.error('[UnifiedAnalysis] log insert failed', logErr);
+      return;
+    }
   }
 
   const { data: prev, error: prevErr } = await supabase
@@ -273,19 +361,30 @@ async function saveUnifiedAnalysisInline(
   const isSameQ = prev?.last_q === qCode;
   const streak = isSameQ ? (prev?.streak_count ?? 0) + 1 : 1;
 
+  const statePayload = {
+    user_code: context.userCode,
+    tenant_id: context.tenantId,
+    last_q: qCode,
+    last_depth: analysis.depth_stage,
+    last_phase: analysis.phase,
+    last_self_acceptance: analysis.self_acceptance,
+    streak_q: qCode,
+    streak_count: streak,
+    updated_at: new Date().toISOString(),
+  };
+
+  const safeStatePayload = makePostgrestSafePayload(statePayload);
+
+  if (!safeStatePayload) {
+    console.error(
+      '[UnifiedAnalysis] state upsert skipped: payload not JSON-serializable',
+    );
+    return;
+  }
+
   const { error: stateErr } = await supabase
     .from('user_resonance_state')
-    .upsert({
-      user_code: context.userCode,
-      tenant_id: context.tenantId,
-      last_q: qCode,
-      last_depth: analysis.depth_stage,
-      last_phase: analysis.phase,
-      last_self_acceptance: analysis.self_acceptance,
-      streak_q: qCode,
-      streak_count: streak,
-      updated_at: new Date().toISOString(),
-    });
+    .upsert(safeStatePayload);
 
   if (stateErr) {
     console.error('[UnifiedAnalysis] state upsert failed', stateErr);
@@ -293,19 +392,18 @@ async function saveUnifiedAnalysisInline(
   }
 }
 
-// ---------- Q 簡易 fallback 判定ロジック（元 route.ts） ----------
+// ---------- Q 簡易 fallback 判定ロジック ----------
 
-function detectQFallbackFromText(text: string | null | undefined): string | null {
+function detectQFallbackFromText(
+  text: string | null | undefined,
+): string | null {
   if (!text) return null;
   const t = text.trim();
   if (!t) return null;
 
-  const hasAnger =
-    /怒|イライラ|腹立|キレそう|むかつ|苛立/.test(t);
-  const hasAnxiety =
-    /不安|心配|落ち着かない|そわそわ|緊張/.test(t);
-  const hasFear =
-    /怖い|恐い|恐怖|怯え|トラウマ/.test(t);
+  const hasAnger = /怒|イライラ|腹立|キレそう|むかつ|苛立/.test(t);
+  const hasAnxiety = /不安|心配|落ち着かない|そわそわ|緊張/.test(t);
+  const hasFear = /怖い|恐い|恐怖|怯え|トラウマ/.test(t);
   const hasEmptiness =
     /空虚|虚し|むなしい|燃え尽き|やる気が出ない|情熱がわかない/.test(t);
   const hasSuppress =
@@ -321,7 +419,7 @@ function detectQFallbackFromText(text: string | null | undefined): string | null
 }
 
 /* =========================================================
-   会話履歴ダイジェスト
+   会話履歴ダイジェスト（GPS的な位置ログ用）
 ========================================================= */
 
 const MAX_HISTORY_ROWS = 30;
@@ -429,10 +527,13 @@ async function resolveLatestTopicKeyForUser(
 
     return { topicKey, topicLabel };
   } catch (e) {
-    console.error('[IROS/TopicChange] unexpected error in resolveLatestTopicKey', {
-      userCode,
-      error: e,
-    });
+    console.error(
+      '[IROS/TopicChange] unexpected error in resolveLatestTopicKey',
+      {
+        userCode,
+        error: e,
+      },
+    );
     return null;
   }
 }
@@ -476,6 +577,86 @@ export type HandleIrosReplyOutput =
   | HandleIrosReplySuccess
   | HandleIrosReplyError;
 
+// UnifiedAnalysis の結果を「直近の user メッセージ」に反映する
+async function applyAnalysisToLastUserMessage(params: {
+  conversationId: string;
+  analysis: UnifiedAnalysis;
+}) {
+  const { conversationId, analysis } = params;
+
+  try {
+    // 1) 直近の user メッセージ 1件を取得
+    const { data: row, error: selectErr } = await supabase
+      .from('iros_messages')
+      .select('id')
+      .eq('conversation_id', conversationId)
+      .eq('role', 'user')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (selectErr) {
+      console.error(
+        '[UnifiedAnalysis] failed to load last user message for update',
+        {
+          conversationId,
+          error: selectErr,
+        },
+      );
+      return;
+    }
+
+    if (!row || !(row as any).id) {
+      console.log(
+        '[UnifiedAnalysis] no user message found to update q_code/depth_stage',
+        { conversationId },
+      );
+      return;
+    }
+
+    const messageId = (row as { id: string }).id;
+
+    // 2) q_code / depth_stage を更新
+    const { error: updateErr } = await supabase
+      .from('iros_messages')
+      .update({
+        q_code: analysis.q_code ?? null,
+        depth_stage: analysis.depth_stage ?? null,
+      })
+      .eq('id', messageId);
+
+    if (updateErr) {
+      console.error(
+        '[UnifiedAnalysis] failed to update user message q_code/depth_stage',
+        {
+          conversationId,
+          messageId,
+          error: updateErr,
+        },
+      );
+      return;
+    }
+
+    console.log(
+      '[UnifiedAnalysis] user message q_code/depth_stage updated',
+      {
+        conversationId,
+        messageId,
+        q_code: analysis.q_code ?? null,
+        depth_stage: analysis.depth_stage ?? null,
+      },
+    );
+  } catch (e) {
+    console.error(
+      '[UnifiedAnalysis] unexpected error while updating user message',
+      {
+        conversationId,
+        error: e,
+      },
+    );
+  }
+}
+
 export async function handleIrosReply(
   params: HandleIrosReplyInput,
 ): Promise<HandleIrosReplyOutput> {
@@ -491,7 +672,7 @@ export async function handleIrosReply(
     authorizationHeader,
     traceId,
     userProfile, // ★ 追加
-    style,       // ★ 追加
+    style, // ★ 追加
   } = params;
 
   console.log('[IROS/Reply] handleIrosReply start', {
@@ -548,7 +729,7 @@ export async function handleIrosReply(
       isFirstTurn,
     });
 
-    // 2) 会話履歴ダイジェスト
+    // 2) 会話履歴ダイジェスト（GPS的位置情報的に使う）
     let historyDigest: string | null = null;
     if (!isFirstTurn) {
       historyDigest = await buildConversationHistoryDigest(conversationId);
@@ -571,6 +752,38 @@ export async function handleIrosReply(
       streakLength: qTrace.streakLength,
       lastEventAt: qTrace.lastEventAt,
     });
+
+    // ★ user_code → user_id(uuid) を一度だけ解決して、このターンで使い回す
+    const userId = await resolveUserIdFromUserCode(userCode);
+
+    // ★★★ 3.0）「過去状態を一緒に見たい」トリガー検知 ＋ カルテ生成
+    let pastStateNoteText: string | null = null;
+    let hasPastStateNote = false;
+
+    try {
+      const recall = await preparePastStateNoteForTurn({
+        client: supabase,
+        userCode,
+        userText: text,
+        topicLabel: null, // TODO: topic が取れたらここに渡す
+        limit: 3,
+      });
+
+      pastStateNoteText = recall.pastStateNoteText;
+      hasPastStateNote = recall.hasNote;
+
+      console.log('[IROS/MemoryRecall] pastStateNoteText prepared', {
+        userCode,
+        hasNote: recall.hasNote,
+        triggerKind: recall.triggerKind,
+        keyword: recall.keyword ?? null,
+      });
+    } catch (e) {
+      console.warn('[IROS/MemoryRecall] error while preparing pastStateNote', {
+        userCode,
+        error: e,
+      });
+    }
 
     const baseMetaFromQ = applyQTraceToMeta(
       {
@@ -599,12 +812,41 @@ export async function handleIrosReply(
       effectiveStyle,
     });
 
-    // ★ 決まった effectiveStyle を DB にも反映（設定画面の選択を永続化）
+    // 決まった effectiveStyle を DB にも反映
     if (effectiveStyle && typeof effectiveStyle === 'string') {
       await upsertIrosUserStyle(userCode, effectiveStyle);
     }
 
+    // ★★★ 3.2) user_id(uuid) と Iros-GIGA 意図アンカーを読み込み
+    let intentAnchorForTurn: {
+      text: string;
+      strength: number | null;
+      y_level: number | null;
+      h_level: number | null;
+    } | null = null;
 
+    try {
+      if (userId) {
+        const anchorRow = await loadIntentAnchorForUser(supabase, userId);
+        if (anchorRow) {
+          intentAnchorForTurn = {
+            text: anchorRow.anchor_text,
+            strength: anchorRow.intent_strength ?? null,
+            y_level: anchorRow.y_level ?? null,
+            h_level: anchorRow.h_level ?? null,
+          };
+        }
+      } else {
+        console.log('[IROS/IntentAnchor] user_id not found for userCode', {
+          userCode,
+        });
+      }
+    } catch (e) {
+      console.error('[IROS/IntentAnchor] failed to load anchor for turn', {
+        userCode,
+        error: e,
+      });
+    }
 
     const requestedMode =
       FORCE_I_LAYER_LOCAL
@@ -625,6 +867,17 @@ export async function handleIrosReply(
     if (userProfile) extra.userProfile = userProfile;
     if (topicStateMap) extra.topicStateMap = topicStateMap;
     if (effectiveStyle) extra.styleHint = effectiveStyle; // ★ style ヒントも入れておく
+
+    // ★★★ Intent Anchor を extra にも積んでおく（LLM side で参照しやすくする）
+    if (intentAnchorForTurn) {
+      extra.intentAnchor = intentAnchorForTurn;
+    }
+
+    // ★★★ MemoryRecall：過去カルテが取れたら extra に格納（LLM 用の内部メモ）
+    if (pastStateNoteText) {
+      extra.pastStateNoteText = pastStateNoteText;
+    }
+
     // ★ ここで「変化を一緒に見て欲しい」リクエストかどうかを判定し、
     //    直近トピックの前回/今回スナップショットを LLM 用文字列として用意する。
     let topicChangePromptBlock: string | null = null;
@@ -684,6 +937,10 @@ export async function handleIrosReply(
       baseMetaForTurn.style = effectiveStyle as any;
     }
 
+    // ★★★ Intent Anchor を meta のトップレベルにも載せておく（orchestrator 側からも参照しやすい形）
+    if (intentAnchorForTurn) {
+      baseMetaForTurn.intent_anchor = intentAnchorForTurn;
+    }
 
     if (!FORCE_I_LAYER_LOCAL && baseMetaFromQ.depth) {
       baseMetaForTurn.depth = baseMetaFromQ.depth as any;
@@ -692,10 +949,14 @@ export async function handleIrosReply(
       baseMetaForTurn.qCode = baseMetaFromQ.qCode as any;
     }
 
-    const effectiveText =
-      historyDigest && historyDigest.trim().length > 0
-        ? `【これまでの流れ（要約）】\n${historyDigest}\n\n【今回のユーザー発言】\n${text}`
-        : text;
+    // ★ 履歴ダイジェストは「GPS 的な位置情報」として meta に渡す。
+    if (historyDigest && historyDigest.trim().length > 0) {
+      baseMetaForTurn.historyDigest = historyDigest;
+    }
+
+    // ★★ シンプル構想：LLM に渡すテキストは「今回のユーザー発言」そのものだけ。
+    //     以前のような「【これまでの流れ（要約）】〜【今回のユーザー発言】」ラップは廃止。
+    const effectiveText = text;
 
     let requestedQCode: QCode | undefined = undefined;
     try {
@@ -720,9 +981,8 @@ export async function handleIrosReply(
       isFirstTurn,
       userCode,
       userProfile: userProfile ?? null,
-      style: effectiveStyle,  // ← ここを修正
+      style: effectiveStyle, // ← effectiveStyle をそのまま渡す
     });
-
 
     console.log('[IROS/Orchestrator] result.meta', (result as any)?.meta);
 
@@ -759,12 +1019,140 @@ export async function handleIrosReply(
         ? (result as any).meta
         : null;
 
-    const metaForSave =
-      metaRaw && typeof metaRaw === 'object'
-        ? {
-            ...metaRaw,
+        const metaForSave =
+        metaRaw && typeof metaRaw === 'object'
+          ? {
+              ...metaRaw,
+            }
+          : metaRaw;
+
+      if (metaForSave && typeof metaForSave === 'object') {
+        try {
+          const m: any = metaForSave;
+          const unified = m.unified ?? {};
+
+          // --- ここは既にある Pol/Stab 用の処理 ---
+          const qCodeForPol: string | null =
+            (m.qCode as string | undefined) ??
+            (m.q_code as string | undefined) ??
+            (unified?.q?.current as string | undefined) ??
+            null;
+
+          const saForPol: number | null =
+            typeof m.selfAcceptance === 'number'
+              ? m.selfAcceptance
+              : typeof m.self_acceptance === 'number'
+              ? m.self_acceptance
+              : typeof unified?.self_acceptance === 'number'
+              ? unified.self_acceptance
+              : null;
+
+          const yLevelRaw =
+            m.yLevel ?? m.y_level ?? unified?.yLevel ?? unified?.y_level ?? null;
+
+          let yLevelForPol: number | null = null;
+          if (typeof yLevelRaw === 'number') {
+            yLevelForPol = yLevelRaw;
+          } else if (
+            typeof yLevelRaw === 'string' &&
+            yLevelRaw.trim() !== '' &&
+            !Number.isNaN(Number(yLevelRaw))
+          ) {
+            yLevelForPol = Number(yLevelRaw);
           }
-        : metaRaw;
+
+          const pol = computePolarityAndStability({
+            qCode: (qCodeForPol as any) ?? null,
+            selfAcceptance: saForPol,
+            yLevel: yLevelForPol,
+          });
+
+          m.polarityScore = pol.polarityScore;
+          m.polarityBand = pol.polarityBand;
+          m.stabilityBand = pol.stabilityBand;
+
+          m.polarity_score = pol.polarityScore;
+          m.polarity_band = pol.polarityBand;
+          m.stability_band = pol.stabilityBand;
+
+          // ============================
+          // ★ mirror / I-layer / intent
+          // ============================
+
+          // mirror 列 → 実際に使われたモード
+          const modeFromResult: string | undefined =
+            typeof (result as any)?.mode === 'string'
+              ? (result as any).mode
+              : typeof m.mode === 'string'
+              ? m.mode
+              : undefined;
+
+          if (modeFromResult && modeFromResult.trim().length > 0) {
+            // ★ meta.mirror に入れる（カラム名 mirror に合わせる）
+            m.mirror = modeFromResult.trim();
+          }
+
+          // I-layer 列 → depth が I層ならその depth を入れる
+          const depthForLayer: string | null =
+            (m.depth as string | undefined) ??
+            (m.depth_stage as string | undefined) ??
+            (unified?.depth?.stage as string | undefined) ??
+            null;
+
+          if (depthForLayer && depthForLayer.startsWith('I')) {
+            // 例: I1 / I2 / I3
+            m.i_layer = depthForLayer;
+          } else {
+            m.i_layer = null;
+          }
+
+          // intent 列 → intent_anchor.text の短い要約
+          const ia = m.intent_anchor;
+          if (ia && typeof ia.text === 'string') {
+            const label = ia.text.trim();
+            m.intent =
+              label.length > 40 ? label.slice(0, 40) + '…' : label;
+          }
+        } catch (e) {
+          console.error(
+            '[IROS/Reply] computePolarityAndStability / mirror / i_layer / intent failed',
+            e,
+          );
+        }
+      }
+
+
+    // ★★★ Iros-GIGA：meta に intent_anchor が入っていたら DB に upsert（初回抽出＆更新）
+    if (userId && metaForSave && typeof metaForSave === 'object') {
+      const ia: any = (metaForSave as any).intent_anchor;
+      // 想定フォーマット：{ text: string, strength?: number, y_level?: number, h_level?: number }
+      if (ia && typeof ia.text === 'string' && ia.text.trim().length > 0) {
+        try {
+          await upsertIntentAnchorForUser(supabase, {
+            userId,
+            anchorText: ia.text.trim(),
+            intentStrength:
+              typeof ia.strength === 'number' ? ia.strength : null,
+            yLevel: typeof ia.y_level === 'number' ? ia.y_level : null,
+            hLevel: typeof ia.h_level === 'number' ? ia.h_level : null,
+          });
+          console.log('[IROS/IntentAnchor] upsert from metaForSave', {
+            userCode,
+            userId,
+            anchorText: ia.text.trim(),
+          });
+        } catch (e) {
+          console.error(
+            '[IROS/IntentAnchor] failed to upsert from metaForSave',
+            {
+              userCode,
+              userId,
+              error: e,
+            },
+          );
+        }
+      }
+    }
 
     if (assistantText && assistantText.trim().length > 0) {
       try {
@@ -774,10 +1162,17 @@ export async function handleIrosReply(
           meta: metaForSave,
         });
 
+        // ① unified_resonance_logs / user_resonance_state への保存
         await saveUnifiedAnalysisInline(analysis, {
           userCode,
           tenantId,
           agent: 'iros',
+        });
+
+        // ② 直近の user メッセージに Q / depth_stage を反映
+        await applyAnalysisToLastUserMessage({
+          conversationId,
+          analysis,
         });
       } catch (e) {
         console.error(

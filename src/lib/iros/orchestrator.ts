@@ -10,7 +10,7 @@ import {
   type QCode,
   type IrosMeta,
   type TLayer,
-  type IrosStyle,         // ★ 追加：口調スタイル
+  type IrosStyle, // ★ 追加：口調スタイル
   DEPTH_VALUES,
   QCODE_VALUES,
 } from './system';
@@ -53,7 +53,10 @@ import {
 
 import { savePersonIntentState } from './memory/savePersonIntent';
 
-
+// 🔸 Iros Soul（Silent Advisor）レイヤー
+import { shouldUseSoul } from './soul/shouldUseSoul';
+import { runIrosSoul } from './soul/runIrosSoul';
+import type { IrosSoulInput } from './soul/types';
 
 // ==== I層強制モード（ENV） ====
 //   - true のとき、requestedDepth を優先して depth を固定する
@@ -91,6 +94,9 @@ export type IrosOrchestratorResult = {
   meta: IrosMeta;
 };
 
+// src/lib/iros/orchestrator.ts
+// Iros Orchestrator — Will Engine（Goal / Priority）+ Continuity Engine 統合版
+
 export async function runIrosTurn(
   args: IrosOrchestratorArgs,
 ): Promise<IrosOrchestratorResult> {
@@ -106,6 +112,10 @@ export async function runIrosTurn(
     userProfile,
     style, // ★ 追加
   } = args;
+
+  // ★★ ここにあった「0. 意図の薄いターン（挨拶 / コマンド）」の
+  //     早期 return ロジックは削除しました。
+  //     すべての入力を通常どおり解析〜Soul〜Will〜generate に通します。
 
   // ----------------------------------------------------------------
   // 1. MemoryState 読み込み（meta ベースのみ使用）
@@ -230,8 +240,6 @@ export async function runIrosTurn(
   }
 
   // ★ ユーザーの「呼び名」を解決して meta.userCallName に載せる
-  //   - 優先順位: ai_call_name > display_name
-  //   - 両方なければ設定しない（LLM側は「あなた」で話す）
   {
     const profileForName: Record<string, any> | null =
       (typeof userProfile !== 'undefined' && userProfile) ||
@@ -255,6 +263,130 @@ export async function runIrosTurn(
     }
   }
 
+  // ★ Iros-GIGA：意図アンカー（intent_anchor）を meta に反映
+  {
+    const unifiedAnchor: any =
+      unified && typeof unified === 'object'
+        ? (unified as any).intent_anchor ?? null
+        : null;
+
+    const baseAnchor: any =
+      (mergedBaseMeta as any).intent_anchor ??
+      ((meta as any).intent_anchor ?? null);
+
+    const coreNeedText: string | null =
+      intentLine && typeof (intentLine as any).coreNeed === 'string'
+        ? ((intentLine as any).coreNeed as string)
+        : null;
+
+    let anchorTextRaw: string | null = null;
+    let strength: number | null = null;
+    let y_level: number | null = null;
+    let h_level: number | null = null;
+
+    const sourceAnchor: any = unifiedAnchor ?? baseAnchor ?? null;
+
+    if (
+      sourceAnchor &&
+      typeof sourceAnchor.text === 'string' &&
+      sourceAnchor.text.trim().length > 0
+    ) {
+      anchorTextRaw = sourceAnchor.text.trim();
+      strength =
+        typeof sourceAnchor.strength === 'number'
+          ? sourceAnchor.strength
+          : null;
+      y_level =
+        typeof sourceAnchor.y_level === 'number'
+          ? sourceAnchor.y_level
+          : typeof yLevel === 'number'
+          ? yLevel
+          : null;
+      h_level =
+        typeof sourceAnchor.h_level === 'number'
+          ? sourceAnchor.h_level
+          : typeof hLevel === 'number'
+          ? hLevel
+          : null;
+    }
+
+    if (anchorTextRaw) {
+      const marker = '【今回のユーザー発言】';
+      const idx = anchorTextRaw.indexOf(marker);
+      if (idx >= 0) {
+        anchorTextRaw = anchorTextRaw.slice(idx + marker.length).trim();
+      }
+
+      anchorTextRaw = anchorTextRaw.split(/\r?\n/)[0].trim();
+
+      if (
+        anchorTextRaw.startsWith('【これまでの流れ') ||
+        anchorTextRaw.length > 64
+      ) {
+        anchorTextRaw = null;
+      }
+    }
+
+    let finalAnchorText: string | null = null;
+
+    if (coreNeedText && coreNeedText.trim().length > 0) {
+      finalAnchorText = coreNeedText.trim();
+    } else if (anchorTextRaw && anchorTextRaw.trim().length > 0) {
+      finalAnchorText = anchorTextRaw.trim();
+    }
+
+    if (finalAnchorText) {
+      (meta as any).intent_anchor = {
+        text: finalAnchorText,
+        strength,
+        y_level,
+        h_level,
+        raw:
+          anchorTextRaw && anchorTextRaw !== finalAnchorText
+            ? anchorTextRaw
+            : undefined,
+      };
+    }
+  }
+
+  // ----------------------------------------------------------------
+  // 4.5 Iros Soul レイヤー（Silent Advisor）呼び出し
+  // ----------------------------------------------------------------
+  let soulNote: any = null;
+  try {
+    const soulInput: IrosSoulInput = {
+      userText: text,
+      qCode: meta.qCode ?? null,
+      depthStage: meta.depth ?? null,
+      phase: meta.phase ?? null,
+      selfAcceptance: meta.selfAcceptance ?? null,
+      yLevel: meta.yLevel ?? null,
+      hLevel: meta.hLevel ?? null,
+      situationSummary: null,
+      situationTopic: null,
+      intentNowLabel:
+        intentLine && typeof (intentLine as any).nowLabel === 'string'
+          ? (intentLine as any).nowLabel
+          : null,
+      intentGuidanceHint:
+        intentLine && typeof (intentLine as any).guidanceHint === 'string'
+          ? (intentLine as any).guidanceHint
+          : null,
+    };
+
+    if (shouldUseSoul(soulInput)) {
+      soulNote = await runIrosSoul(soulInput, {});
+    }
+  } catch (e) {
+    if (process.env.DEBUG_IROS_SOUL === '1') {
+      console.error('[IROS/Soul] error', e);
+    }
+  }
+
+  if (soulNote) {
+    (meta as any).soulNote = soulNote;
+  }
+
   // ----------------------------------------------------------------
   // 5. Vision-Trigger 判定（ビジョンモードへの自動ジャンプ）
   // ----------------------------------------------------------------
@@ -273,14 +405,9 @@ export async function runIrosTurn(
     isFirstTurn: !!isFirstTurn,
     intentLine,
     tLayerHint: normalizedTLayer,
-    forceILayer: FORCE_I_LAYER, // ← ここだけ forceLayer → forceILayer
+    forceILayer: FORCE_I_LAYER,
   });
 
-  // 🔹 Vision Hint 用：
-  //  - Vision モードではない
-  //  - でも T層ヒント（T1〜T3）が付いている
-  // そんなターンでは、フロント側で ✨ を出すために
-  // tLayerModeActive を true にしておく
   if (meta.mode !== 'vision' && meta.tLayerHint) {
     (meta as any).tLayerModeActive = true;
   }
@@ -294,6 +421,8 @@ export async function runIrosTurn(
     qCode: meta.qCode,
     selfAcceptanceLine: meta.selfAcceptance ?? null,
     mode: (meta.mode ?? 'mirror') as IrosMode,
+    // ★ 追加
+    soulNote: (meta as any).soulNote ?? null,
   });
 
   (meta as any).goal = goal;
@@ -309,7 +438,7 @@ export async function runIrosTurn(
 
   let content = gen.content;
 
-  // ir診断ヘッダーなどを UI 用に削る
+  // （テンプレ適用は行わない。LLM と Soul に任せる）
   content = stripDiagnosticHeader(content);
 
   // ----------------------------------------------------------------
@@ -329,39 +458,20 @@ export async function runIrosTurn(
     const anyMeta = meta as any;
     const isIrDiagnosisTurn = !!anyMeta.isIrDiagnosisTurn;
 
-    if (!isIrDiagnosisTurn) {
-      // ir診断以外のターンでは何もしない
-      if (process.env.DEBUG_IROS_INTENT === '1') {
-        console.log('[IROS/PersonIntentState] skip (not ir diagnosis turn)', {
-          mode: meta.mode,
-        });
-      }
-    } else {
-      // 観測対象ラベルを、今回のユーザー入力テキストから抽出する
+    if (isIrDiagnosisTurn) {
       let label = 'self';
       const trimmed = (text || '').trim();
 
       if (trimmed.startsWith('ir診断')) {
-        const rest = trimmed.slice('ir診断'.length).trim(); // 「自分」「上司」など
+        const rest = trimmed.slice('ir診断'.length).trim();
         if (rest.length > 0) {
           label = rest;
         }
       }
 
-      if (process.env.DEBUG_IROS_INTENT === '1') {
-        console.log('[IROS/PersonIntentState] save candidate', {
-          userCode,
-          label,
-          depth: meta.depth,
-          qCode: meta.qCode,
-          selfAcceptance: meta.selfAcceptance,
-        });
-      }
-
       try {
         await savePersonIntentState({
           ownerUserCode: userCode,
-          // ひとまず「ir診断で観測した対象」という意味で固定
           targetType: 'ir-diagnosis',
           targetLabel: label,
           qPrimary: meta.qCode ?? null,
@@ -372,7 +482,6 @@ export async function runIrosTurn(
             typeof meta.selfAcceptance === 'number'
               ? meta.selfAcceptance
               : null,
-          // intentBand / direction などは IntentLine 型を確認してから後で追加
         });
       } catch (e) {
         console.error(
@@ -383,9 +492,6 @@ export async function runIrosTurn(
     }
   }
 
-
-
-
   // ----------------------------------------------------------------
   // 10. Orchestrator 結果として返却
   // ----------------------------------------------------------------
@@ -394,6 +500,7 @@ export async function runIrosTurn(
     meta,
   };
 }
+
 
 /* ============================================================================
  * 補助：Depth / QCode 正規化
@@ -422,5 +529,4 @@ function normalizeQCode(qCode?: QCode): QCode | undefined {
   if (!qCode) return undefined;
   return QCODE_VALUES.includes(qCode) ? qCode : undefined;
 }
-
 

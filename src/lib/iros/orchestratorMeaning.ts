@@ -268,3 +268,84 @@ export function buildFinalMeta(args: {
 export function buildPersonalMeaningBlock(_meta: IrosMeta): string {
   return '';
 }
+
+/* ========= Sofia 型リフレームスタイルノート ========= */
+
+/**
+ * Soul / IntentLine をもとに、
+ * 「○○が怖い」→「本当は ◯◯ を守りたい自分がいる」という
+ * Sofia っぽいリフレーム指示を LLM に渡すためのノート。
+ */
+
+export type IrosSoulNote = {
+  core_need?: string | null;
+  risk_flags?: string[] | null;
+  tone_hint?: string | null;
+  step_phrase?: string | null;
+  soul_sentence?: string | null;
+  notes?: string | null;
+};
+
+export function buildReframeStyleNote(meta?: IrosMeta | null): string | null {
+  if (!meta) return null;
+
+  const soul = (meta as any).soulNote as IrosSoulNote | undefined;
+  const intentLine = (meta as any)
+    .intentLine as IntentLineAnalysis | undefined;
+
+  if (!soul && !intentLine) return null;
+
+  const q = meta.qCode ?? 'Q?';
+  const depth = meta.depth ?? 'R1';
+
+  const coreFromSoul = soul?.core_need?.trim();
+  const coreFromIntent = intentLine?.coreNeed?.trim();
+
+  const core1 = coreFromSoul || coreFromIntent || '';
+  if (!core1) return null;
+
+  const core2 =
+    coreFromSoul &&
+    coreFromIntent &&
+    coreFromSoul !== coreFromIntent
+      ? coreFromIntent
+      : null;
+
+  const lines: string[] = [
+    '# Sofia 型リフレーム指針（Soul & IntentLine ベース）',
+    '',
+    '- ユーザーの表面のテーマ（評価・数字・不安など）を否定せず、',
+    '  まずは「そのまま言葉にしてあげる」ことから始めてください。',
+    '',
+    '◆ A. まず恐れや不安をそのまま描写する',
+    '  - 例：「評価が下がってしまうことが、一番怖いんだよね。」',
+    '',
+    '◆ B. 「〜じゃなくて、本当は ◯◯ を守りたい自分がいる」の形で静かにリフレームする',
+    '  - 表層の焦点（評価・数字・結果など）ではなく、次のような core_need にピントを合わせてください。',
+    `  - 今回の core_need 候補:`,
+    `    - ${core1}`,
+  ];
+
+  if (core2) {
+    lines.push(`    - ${core2}`);
+  }
+
+  lines.push(
+    '',
+    '  - 例：',
+    '    「評価そのものが問題なんじゃなくて、',
+    '      これまで積み重ねてきた努力や、ちゃんと生きてきた自分を',
+    '      否定されたくないっていう気持ちのほうが大きいのかもしれないね。」',
+    '',
+    '◆ C. 文末で I層 / T層 の“余韻”を少しだけにじませる',
+    '  - 「この経験を通して、どんな自分として生きていきたいか」',
+    '    「この出来事が、これからの生き方にどんな意味を足してくれるか」など、',
+    '    I層〜T層のニュアンスを、一言そっと添えてください。',
+    '  - ただし、説教や断定ではなく、読み手の内側で静かに意味づけが起こる程度の強さにとどめてください。',
+    '',
+    `- メインのトーンは、現在の深度 ${depth} と Q=${q} の安定を最優先にし、`,
+    '  I層 / T層は「最後のひと息」「余韻」として使ってください。',
+  );
+
+  return lines.join('\n');
+}

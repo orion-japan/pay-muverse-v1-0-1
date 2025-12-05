@@ -39,28 +39,6 @@ async function trySelect<T>(
   return { ok: false, error: 'select_failed_all_candidates' };
 }
 
-/** 汎用 insert（候補テーブルを順に試す） */
-async function tryInsert(
-  supabase: ReturnType<typeof sb>,
-  tables: readonly string[],
-  row: Record<string, any>,
-  returning: string,
-) {
-  for (const table of tables) {
-    try {
-      const { data, error } = await (supabase as any)
-        .from(table)
-        .insert([row])
-        .select(returning)
-        .single();
-      if (!error) return { ok: true as const, data, table };
-    } catch {
-      // ignore and try next
-    }
-  }
-  return { ok: false as const, error: 'insert_failed_all_candidates' };
-}
-
 /* ========= 型定義 ========= */
 
 type OutMsg = {
@@ -70,9 +48,13 @@ type OutMsg = {
   content: string;
   user_code?: string;
   created_at: string | null;
-  q?: 'Q1' | 'Q2' | 'Q3' | 'Q5' | 'Q4';
+  q?: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
   color?: string;
+  depth_stage?: string | null;
+  intent_layer?: string | null;
+  meta?: any;
 };
+
 
 type LlmMsg = {
   role: 'user' | 'assistant';
@@ -93,10 +75,65 @@ const MSG_TABLES = [
   'messages',
 ] as const;
 
+/** JSON 用に Unicode をサニタイズする（壊れたサロゲートペアを削除） */
+function sanitizeJsonDeep(value: any): any {
+  if (value == null) return value;
+
+  const t = typeof value;
+
+  if (t === 'string') {
+    const s = value;
+    const out: string[] = [];
+    for (let i = 0; i < s.length; i++) {
+      const code = s.charCodeAt(i);
+
+      // 高位サロゲート
+      if (code >= 0xd800 && code <= 0xdbff) {
+        const next = i + 1 < s.length ? s.charCodeAt(i + 1) : 0;
+        if (next >= 0xdc00 && next <= 0xdfff) {
+          // 正しいペアはそのまま残す
+          out.push(s[i], s[i + 1]);
+          i++; // 下位サロゲートをスキップ
+        } else {
+          // ペアになっていない高位サロゲートは捨てる
+        }
+        continue;
+      }
+
+      // 単独の低位サロゲートも捨てる
+      if (code >= 0xdc00 && code <= 0xdfff) {
+        continue;
+      }
+
+      out.push(s[i]);
+    }
+    return out.join('');
+  }
+
+  if (t === 'number' || t === 'boolean') return value;
+
+  if (Array.isArray(value)) {
+    return value.map((v) => sanitizeJsonDeep(v));
+  }
+
+  if (t === 'object') {
+    const out: any = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (typeof v === 'undefined' || typeof v === 'function') continue;
+      out[k] = sanitizeJsonDeep(v);
+    }
+    return out;
+  }
+
+  // それ以外（symbol, function など）は JSON に載せない
+  return undefined;
+}
+
 /* ========= OPTIONS ========= */
 export async function OPTIONS() {
   return json({ ok: true }, 200);
 }
+
 
 /* ========= GET /api/agent/iros/messages ========= */
 export async function GET(req: NextRequest) {
@@ -129,7 +166,7 @@ export async function GET(req: NextRequest) {
         return json({ ok: true, messages: [], note: 'forbidden_owner_mismatch' }, 200);
     }
 
-    // メッセージ取得
+    // メッセージ取得（★ meta / depth_stage / intent_layer も select）
     const res = await trySelect<{
       id: string;
       conversation_id: string;
@@ -139,14 +176,18 @@ export async function GET(req: NextRequest) {
       user_code?: string | null;
       q_code?: OutMsg['q'] | null;
       color?: string | null;
+      depth_stage?: string | null;
+      intent_layer?: string | null;
+      meta?: any;
       created_at?: string | null;
       ts?: number | null;
     }>(
       supabase,
       MSG_TABLES,
-      'id,conversation_id,user_code,role,content,text,q_code,color,created_at,ts',
+      'id,conversation_id,user_code,role,content,text,q_code,depth_stage,intent_layer,color,meta,created_at,ts',
       (q) => q.eq('conversation_id', cid).order('created_at', { ascending: true }),
     );
+
     if (!res.ok) {
       return json(
         { ok: true, messages: [], llm_messages: [], note: 'messages_select_failed' },
@@ -157,11 +198,8 @@ export async function GET(req: NextRequest) {
     // ★ user_code が null / 空 のレガシー行は許可する
     const filtered = res.data.filter((m) => {
       if (!Object.prototype.hasOwnProperty.call(m, 'user_code')) return true;
-
       const uc = m.user_code == null ? '' : String(m.user_code);
-
       if (!uc) return true;
-
       return uc === userCode;
     });
 
@@ -174,27 +212,30 @@ export async function GET(req: NextRequest) {
       created_at: m.created_at ?? null,
       q: m.q_code ?? undefined,
       color: m.color ?? undefined,
+      depth_stage: m.depth_stage ?? null,
+      intent_layer: m.intent_layer ?? null,
+      meta: m.meta ?? undefined,
+      mirror: m.meta?.mirror ?? null,
+      i_layer: m.meta?.i_layer ?? null,
+      intent: m.meta?.intent ?? null,
+
     }));
 
     // ===== ここから追加：LLM にそのまま渡せる履歴 =====
-    // ?llm_limit=30 のように指定可能（デフォルト 20 件）
     const llmLimitRaw = req.nextUrl.searchParams.get('llm_limit');
     const llmLimit = (() => {
       if (!llmLimitRaw) return 20;
       const n = Number(llmLimitRaw);
       if (!Number.isFinite(n) || n <= 0) return 20;
-      // 過剰に長くなりすぎないように一応上限
       return Math.min(n, 100);
     })();
 
-    // created_at 昇順なので、末尾側が最新
     const slicedForLlm = messages.slice(-llmLimit);
 
     const llm_messages: LlmMsg[] = slicedForLlm.map((m) => ({
       role: m.role,
       content: m.content,
     }));
-    // ===== 追加ここまで =====
 
     return json({ ok: true, messages, llm_messages }, 200);
   } catch (e: any) {
@@ -233,24 +274,32 @@ export async function POST(req: NextRequest) {
       body?.conversation_id || body?.conversationId || '',
     ).trim();
     const text: string = String(body?.text ?? body?.content ?? '').trim();
-    const meta = body?.meta ?? null;
+    const metaRaw = body?.meta ?? null;
 
-    // --- ここから: meta から各種コードを抽出 ---
+    // --- meta から各種コードを抽出 ---
     const q_code: string | null =
-      meta && typeof meta === 'object' && typeof meta.qCode === 'string'
-        ? meta.qCode
+      metaRaw && typeof metaRaw === 'object' && typeof metaRaw.qCode === 'string'
+        ? metaRaw.qCode
         : null;
 
     const depth_stage: string | null =
-      meta && typeof meta === 'object' && typeof meta.depth === 'string'
-        ? meta.depth
+      metaRaw && typeof metaRaw === 'object' && typeof metaRaw.depth === 'string'
+        ? metaRaw.depth
         : null;
 
     const intent_layer: string | null =
-      meta && typeof meta === 'object' && typeof meta.intentLayer === 'string'
-        ? meta.intentLayer
+      metaRaw &&
+      typeof metaRaw === 'object' &&
+      typeof metaRaw.intentLayer === 'string'
+        ? metaRaw.intentLayer
         : null;
-    // --- ここまで追加 ---
+
+    // DB に投げる前に Unicode / undefined などをクリーンアップ
+    const metaSanitized = sanitizeJsonDeep(metaRaw);
+    const meta =
+      metaSanitized === null || typeof metaSanitized === 'undefined'
+        ? null
+        : metaSanitized;
 
     const role: 'user' | 'assistant' =
       String(body?.role ?? '').toLowerCase() === 'assistant' ? 'assistant' : 'user';
@@ -258,14 +307,6 @@ export async function POST(req: NextRequest) {
     if (!conversation_id)
       return json({ ok: false, error: 'missing_conversation_id' }, 400);
     if (!text) return json({ ok: false, error: 'text_empty' }, 400);
-
-    // ★ legacy assistant（二重保存）防止
-    if (role === 'assistant' && !meta && !q_code) {
-      console.log('[IROS/messages] skip legacy assistant without meta', {
-        conversation_id,
-      });
-      return json({ ok: true, skipped: 'assistant_without_meta_legacy' }, 200);
-    }
 
     const supabase = sb();
 
@@ -287,32 +328,85 @@ export async function POST(req: NextRequest) {
     const nowIso = new Date().toISOString();
     const nowTs = Date.now();
 
-    // content/text は互換のため両方に保存
-    const row = {
+    // 共通カラム
+    const baseRow = {
       conversation_id,
       user_code: userCode,
       role,
       content: text,
       text,
-      q_code,
-      depth_stage, // ★ 追加
-      intent_layer, // ★ 追加
-      meta,
       created_at: nowIso,
       ts: nowTs,
     };
 
-    const ins = await tryInsert(supabase, MSG_TABLES, row, 'id,created_at');
-    if (!ins.ok) return json({ ok: false, error: ins.error }, 500);
+    // q_code は、あるテーブル（sofia / iros）にはあるが messages にはないので別扱い
+    const baseRowWithQ = {
+      ...baseRow,
+      q_code,
+    };
+
+    let inserted: { id: string | number; created_at: string | null } | null = null;
+
+    // テーブルごとに適した形で insert
+    for (const table of MSG_TABLES) {
+      let row: any;
+
+      if (table === 'iros_messages' || table === 'public.iros_messages') {
+        // 新スキーマ：meta / depth_stage / intent_layer あり
+        row = {
+          ...baseRowWithQ,
+          depth_stage,
+          intent_layer,
+          meta,
+        };
+      } else if (table === 'sofia_messages') {
+        // Sofia 時代のスキーマ：q_code まではある想定、meta 系は送らない
+        row = baseRowWithQ;
+      } else if (table === 'messages') {
+        // 超レガシー：q_code も meta もないテーブルを想定
+        row = baseRow;
+      } else {
+        // 想定外テーブルはとりあえず baseRow のみ
+        row = baseRow;
+      }
+
+      try {
+        const { data, error } = await (supabase as any)
+          .from(table)
+          .insert([row])
+          .select('id,created_at')
+          .single();
+
+        if (!error && data) {
+          inserted = {
+            id: data.id,
+            created_at: data.created_at ?? nowIso,
+          };
+          break;
+        }
+
+        if (error && process.env.NODE_ENV !== 'production') {
+          console.warn('[IROS/messages] insert error', table, error);
+        }
+      } catch (e) {
+        if (process.env.NODE_ENV !== 'production') {
+          console.warn('[IROS/messages] insert exception', table, e);
+        }
+      }
+    }
+
+    if (!inserted) {
+      return json({ ok: false, error: 'insert_failed_all_candidates' }, 500);
+    }
 
     return json({
       ok: true,
       message: {
-        id: String(ins.data.id),
+        id: String(inserted.id),
         conversation_id,
         role,
         content: text,
-        created_at: ins.data.created_at ?? nowIso,
+        created_at: inserted.created_at,
       },
     });
   } catch (e: any) {

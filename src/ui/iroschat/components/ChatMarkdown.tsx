@@ -1,7 +1,7 @@
 // src/ui/iroschat/components/ChatMarkdown.tsx
 'use client';
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -19,7 +19,19 @@ const HEADING_ICONS: Record<string, string> = {
   '時間の流れと一年の終わり': '⌛️',
 };
 
+// ** ～ ** の内側の余白をトリムするヘルパー
+// 例: "** 今日、選べる一歩**" → "**今日、選べる一歩**"
+function normalizeBold(text: string): string {
+  return text.replace(
+    /\*\*\s+([^*][^*]*?)\s*\*\*/g,
+    (_match, inner: string) => `**${String(inner).trim()}**`,
+  );
+}
+
 export default function ChatMarkdown({ text, className }: ChatMarkdownProps) {
+  // ここで一度 normalize してから ReactMarkdown に渡す
+  const normalized = useMemo(() => normalizeBold(text), [text]);
+
   return (
     <div className={className}>
       <ReactMarkdown
@@ -62,11 +74,7 @@ export default function ChatMarkdown({ text, className }: ChatMarkdownProps) {
                   letterSpacing: '0.02em',
                 }}
               >
-                {icon && (
-                  <span style={{ marginRight: '0.45em' }}>
-                    {icon}
-                  </span>
-                )}
+                {icon && <span style={{ marginRight: '0.45em' }}>{icon}</span>}
                 <span>{raw}</span>
               </strong>
             );
@@ -129,7 +137,7 @@ export default function ChatMarkdown({ text, className }: ChatMarkdownProps) {
           },
         }}
       >
-        {text}
+        {normalized}
       </ReactMarkdown>
     </div>
   );

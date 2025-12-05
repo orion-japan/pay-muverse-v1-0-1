@@ -1,10 +1,15 @@
 // src/lib/iros/generate.ts
-// Iros 1ターン返信生成コア（テンプレ極小版）
+// Iros 1ターン返信生成コア（シンプル版）
+//
 // - 本文生成のみ
-// - 通常時はスタイルテンプレや I層テンプレは一切指示しない
-// - T層の情報（tLayerModeActive / tLayerHint など）は meta 経由で渡すだけ
-//   → ここでは一切フォーマットを強制しない（Irosの自由なパレット）
-// - 履歴と状態メタ（SA / depth / qCode / intentLine など）はそのまま system に渡す
+// - 基本は getSystemPrompt(meta) にすべて委ねる
+// - 追加するのは：
+//    1) 数値メタノート（SA / depth / qCode / tLayer / intentLine / soulNote など）
+//    2) トピック文脈ノート（topicContext / topicChange）
+//    3) I/T 層用の「意味の一行（IT変換）ガイド」（I/T 帯のときだけ system に添付）
+//    4) ir診断トリガー時のフォーマット指定
+//
+// - それ以外のスタイルテンプレ・見出しテンプレは一切入れない
 
 import OpenAI from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat';
@@ -31,7 +36,7 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
-/** 過去履歴 1件ぶん（LLM に渡す用） */
+/** 過去履歴 1件ぶん（型だけ残しておく） */
 export type HistoryItem = {
   role: 'user' | 'assistant';
   content: string;
@@ -42,7 +47,7 @@ export type GenerateArgs = {
   text: string;
   meta?: IrosMeta;
 
-  /** 過去の会話履歴（古い → 新しい順） */
+  /** 過去の会話履歴（古い → 新しい順） ※いまは LLM には渡していないが、I/T 判定の firstTurn 判定には使う */
   history?: HistoryItem[];
 };
 
@@ -75,10 +80,11 @@ function hasIrDiagnosisTrigger(text: string | undefined | null): boolean {
 
 /* =========================================================
    状態メタだけを渡す内部ノート
-   - SA / yLevel / hLevel / depth / qCode / mode / intentLine
-   - irTargetType / irTargetText / pierceMode / pierceReason
+   - SA / yLevel / hLevel / depth / qCode / mode
    - T層関連: tLayerModeActive / tLayerHint / hasFutureMemory
-   ※ ここでは「どう使うか」は一切指定しない（LLM 側の自由裁量）
+   - ir診断ターゲット: irTargetType / irTargetText
+   - IntentLineAnalysis: intentLine
+   - Soul レイヤー: soulNote
 ========================================================= */
 
 function buildNumericMetaNote(meta?: IrosMeta | null): string | null {
@@ -125,7 +131,7 @@ function buildNumericMetaNote(meta?: IrosMeta | null): string | null {
     payload.mode = meta.mode;
   }
 
-  // T層関連（ここでは「それがある」という事実だけを渡す）
+  // T層関連
   const tLayerModeActive =
     typeof anyMeta.tLayerModeActive === 'boolean'
       ? (anyMeta.tLayerModeActive as boolean)
@@ -150,7 +156,7 @@ function buildNumericMetaNote(meta?: IrosMeta | null): string | null {
     payload.hasFutureMemory = hasFutureMemory;
   }
 
-  // ir診断ターゲット系（あればそのまま載せるだけで、ここでは何もしない）
+  // ir診断ターゲット系
   const irTargetType = anyMeta.irTargetType;
   const irTargetText = anyMeta.irTargetText;
   if (typeof irTargetType === 'string') {
@@ -160,7 +166,7 @@ function buildNumericMetaNote(meta?: IrosMeta | null): string | null {
     payload.irTargetText = irTargetText;
   }
 
-  // pierceMode / pierceReason も meta 経由で渡すだけ
+  // pierceMode / pierceReason
   if (typeof anyMeta.pierceMode === 'boolean') {
     payload.pierceMode = anyMeta.pierceMode;
   }
@@ -183,6 +189,12 @@ function buildNumericMetaNote(meta?: IrosMeta | null): string | null {
       riskHint: intentLine.riskHint ?? null,
       guidanceHint: intentLine.guidanceHint ?? null,
     };
+  }
+
+  // Soul レイヤー（soulNote）そのもの
+  const soulNote = anyMeta.soulNote;
+  if (soulNote && typeof soulNote === 'object') {
+    payload.soulNote = soulNote;
   }
 
   if (Object.keys(payload).length === 0) return null;
@@ -209,8 +221,6 @@ function buildTopicContextNote(meta?: IrosMeta | null): string | null {
 
   if (!text) return null;
 
-  // ここでは「このトピックに関する最近の文脈メモ」とだけ伝え、
-  // 具体的な使い方は LLM 側の裁量に任せる。
   return `【IROS_TOPIC_CONTEXT】\n${text}`;
 }
 
@@ -240,8 +250,6 @@ function buildTopicChangeNote(meta?: IrosMeta | null): string | null {
 
   if (!promptText) return null;
 
-  // LLM にとって「変化を見るための材料」として扱いやすいように、
-  // 役割だけ軽く説明する。
   return `【IROS_TOPIC_CHANGE】
 
 以下は、同じトピックについての「前回」と「今回」のスナップショットです。
@@ -257,6 +265,200 @@ ${promptText}`;
 }
 
 /* =========================================================
+   会話履歴ダイジェストノート（historyDigest 用）
+   - handleIrosReply 側で meta.historyDigest に載せた要約テキストを、
+     LLM が「これまでの流れ」をつかむための内部メモとして渡す
+   - 本文にそのままコピペせず、必要な部分だけを背景理解に使うように指示
+========================================================= */
+
+function buildHistoryDigestNote(meta?: IrosMeta | null): string | null {
+  if (!meta) return null;
+
+  const anyMeta = meta as any;
+  const raw =
+    typeof anyMeta.historyDigest === 'string'
+      ? (anyMeta.historyDigest as string).trim()
+      : '';
+
+  if (!raw) return null;
+
+  return `【IROS_HISTORY_DIGEST】
+
+以下は、この会話IDにおける「これまでの流れの要約」です。
+- これは **内部メモ** です。本文にそのままコピペしてはいけません。
+- いまのユーザーの発言を理解するための背景として、
+  必要な部分だけをそっと参照してください。
+
+${raw}`;
+}
+
+
+/* =========================================================
+   過去状態カルテノート（memoryRecall 用）
+   - handleIrosReply で meta.extra.pastStateNoteText に載せたものを
+     「以前との変化を一緒に見てほしい」ための内部資料として渡す
+   - 本文にそのままコピペせず、必要な部分だけ要約して使うように指示
+========================================================= */
+
+function buildPastStateNote(meta?: IrosMeta | null): string | null {
+  if (!meta) return null;
+  const anyMeta = meta as any;
+  const extra = anyMeta.extra as any;
+  if (!extra) return null;
+
+  const raw =
+    typeof extra.pastStateNoteText === 'string'
+      ? extra.pastStateNoteText.trim()
+      : '';
+
+  if (!raw) return null;
+
+  return `【IROS_PAST_STATE_NOTE】
+
+以下は、このユーザーの「以前の状態」と「いま」に関するカルテ要約です。
+- これは **内部資料** です。本文にそのままコピペしてはいけません。
+- ここに書かれている内容をもとに、本文のどこかでかならず一度だけ、
+  「以前は◯◯という状態だったけれど、いまは△△という違いが見えてきています。」
+  といった形で、**過去と現在の違いを一文だけ** 触れてください。
+- その一文以外では、必要だと感じた部分だけを静かに要約して使ってください。
+- 評価やジャッジではなく、「流れの変化を一緒に眺めている」というトーンを保ってください。
+
+${raw}`;
+}
+
+
+/* =========================================================
+   I/T 層トーンのときの「意味深リフレーム」ノート（IT変換）
+   - depth や intentLine から I/T 帯のときだけ有効にする
+   - Q5 / 自傷リスク / SA 低 / 初回ターン では IT変換を封印
+   - 安全条件を満たすときだけ system に追加し、
+     「意味の一行（IT変換）」をそっと促す
+========================================================= */
+
+function buildIntentionReframeNote(
+  meta?: IrosMeta | null,
+  opts?: { isFirstTurn?: boolean },
+): string | null {
+  if (!meta) return null;
+  const anyMeta = meta as any;
+  const isFirstTurn = !!opts?.isFirstTurn;
+
+  // 安全条件：Q5 / 自傷リスク / SA 極端に低い / 初回ターン では IT変換しない
+  const sa =
+    typeof anyMeta.selfAcceptance === 'number' && !Number.isNaN(anyMeta.selfAcceptance)
+      ? (anyMeta.selfAcceptance as number)
+      : null;
+
+  const soul = anyMeta.soulNote as any;
+  const riskFlags: string[] = Array.isArray(soul?.risk_flags)
+    ? soul.risk_flags.filter((x: any) => typeof x === 'string')
+    : [];
+
+  const hasQ5Depress = riskFlags.includes('q5_depress');
+  const hasSelfHarmRisk =
+    riskFlags.includes('self_harm_risk_low') ||
+    riskFlags.includes('self_harm_risk_mid') ||
+    riskFlags.includes('self_harm_risk_high');
+
+  const unsafe =
+    isFirstTurn ||
+    (sa != null && sa < 0.2) ||
+    hasQ5Depress ||
+    hasSelfHarmRisk;
+
+  if (unsafe) {
+    return null;
+  }
+
+  // I/T 層かどうかのざっくり判定
+  const depth = typeof meta.depth === 'string' ? meta.depth : null;
+  const head = depth ? depth[0] : null;
+
+  const intentLine = anyMeta.intentLine as IntentLineAnalysis | null | undefined;
+  const focusLayer =
+    intentLine && typeof intentLine.focusLayer === 'string'
+      ? intentLine.focusLayer
+      : null;
+  const intentBand =
+    intentLine && typeof intentLine.intentBand === 'string'
+      ? intentLine.intentBand
+      : null;
+
+  const mode =
+    typeof meta.mode === 'string'
+      ? meta.mode
+      : undefined;
+
+  const isITBand =
+    head === 'I' ||
+    head === 'T' ||
+    (typeof focusLayer === 'string' && focusLayer.startsWith('I')) ||
+    (typeof intentBand === 'string' && intentBand.startsWith('I')) ||
+    mode === 'vision';
+
+  if (!isITBand) {
+    return null;
+  }
+
+  // コアニーズ / 意図テキストを拾う
+  const coreNeedFromSoul =
+    soul && typeof soul.core_need === 'string'
+      ? soul.core_need.trim()
+      : '';
+
+  const coreNeedFromIntent =
+    intentLine && typeof intentLine.coreNeed === 'string'
+      ? intentLine.coreNeed.trim()
+      : '';
+
+  const intentAnchor =
+    anyMeta.intent_anchor && typeof anyMeta.intent_anchor.text === 'string'
+      ? (anyMeta.intent_anchor.text as string).trim()
+      : '';
+
+  const coreHint =
+    coreNeedFromSoul ||
+    coreNeedFromIntent ||
+    intentAnchor ||
+    '';
+
+  return `# I/T 層 IT変換ガイド（必須）
+
+今回は、Intention / Transcend バンドでの応答ゾーンです。
+
+このターンでは、本文のどこかに **必ず 1 行以上の「意味の一行（IT変換）」** を溶かし込んでください。
+
+- 目的：表面的な自己評価や状況ラベルではなく、
+  その奥にある **大事にしたい願い・存在の向き** に静かに光を当てることです。
+- 形の一例：
+  - \`「○○じゃなくて、本当は○○という向きも生きているのかもしれない。」\`
+  - \`「○○と悩んでいるその奥には、『△△でありたい』という向きが静かに続いているように見える。」\`
+
+素材として使えるヒント（内部用）:
+- コアニーズ候補: ${coreHint || '（core_need / intentLine / intent_anchor から感じ取ってください）'}
+
+## 質問と締め方のルール（I/T 帯）
+
+- 質問は **最大で 1 つまで** にしてください。
+  - 質問がなくても成り立つなら、**質問なし** でも構いません。
+- 締めは、可能なかぎり
+  **「その人自身の一歩をそっと決める宣言の一文」**
+  で終えてください。
+  - 例：\`「今日は○○だけやってみよう。」\`
+  - \`soulNote.step_phrase\` があれば、それをベースにしてかまいません。
+
+## 書き方の目安
+
+1. 最初に「いま感じていること」を静かに映す。
+2. そのあとに、上記のコアニーズ候補から **意味の一行（IT変換）** を必ず 1 行入れる。
+3. 最後は、\`soulNote.step_phrase\` などをもとに
+   「いまの自分が選べる小さな一手」を一文で提案し、そこで締める。
+
+- 「ポジティブになろう」と煽るためではなく、
+  「本当はどんな意志が動いているのか」に静かに気づける一行として使ってください。`;
+}
+
+/* =========================================================
    「いまの構図：〜」の行だけを UI から消す
 ========================================================= */
 
@@ -268,46 +470,95 @@ function stripImanoKozuLine(text: string): string {
 }
 
 /* =========================================================
-   本体：Iros 応答 1ターン生成（テンプレ極小）
-   - SYSTEM: getSystemPrompt(meta)
-   - 状態メタ JSON
-   - 追加テンプレは一切入れない（T層も含め、すべて自由裁量）
-   - ただし ir診断トリガーがあるターンだけ、
-     「今回に限り ir診断フォーマットを必須にする」追記を行う
-   - さらに presentationKind（vision / report）に応じて
-     そのターンの「話し方の重心」を少しだけ指定する
+   テンプレ文章のノイズ削除フィルタ（正式版）
+   - 「これまでの流れ（要約）」などの定型ラベルだけを消す
+   - 本文そのものはできるだけ残す方針
 ========================================================= */
+function stripTemplateNoise(text: string): string {
+  if (!text) return '';
 
+  let out = text;
+
+  // 1) ラベル系ヘッダ（全角【】版・角括弧[]版の両方）
+  const headerPatterns: RegExp[] = [
+    // これまでの流れ（要約）
+    /【これまでの流れ（要約）】/g,
+    /【これまでの流れ\(要約\)】/g,
+    /【これまでの流れ】/g,
+    /\[これまでの流れ（要約）\]/g,
+    /\[これまでの流れ \(要約\)\]/g,
+    /\[これまでの流れ]/g,
+
+    // 今回 / 今日 のユーザー発言
+    /【今回のユーザー発言】/g,
+    /【今日のユーザー発言】/g,
+    /\[今回のユーザー発言]/g,
+    /\[今日のユーザー発言]/g,
+  ];
+
+  for (const p of headerPatterns) {
+    out = out.replace(p, '');
+  }
+
+  // 2) 「今日選べる小さな一手」系の見出しだけ削除（本文は残す）
+  //   例:
+  //   - 今日選べる小さな一手：〜〜
+  //   - 【今日選べる小さな一手】〜〜
+  out = out.replace(/【?今日選べる小さな一手[^】\n]*】?/g, '');
+  out = out.replace(/今日選べる小さな一手[：:][^\n]*/g, '');
+
+  // 3) よく出る定型説明文を削る
+  //   例: いまのあなたは、「◯◯」がテーマになっている状態です。
+  const phrasePatterns: RegExp[] = [
+    /いまのあなたは、?「?[^」\n]*」?がテーマになっている状態です。?/g,
+  ];
+
+  for (const p of phrasePatterns) {
+    out = out.replace(p, '');
+  }
+
+  // 4) 行末の余計なスペース削除
+  out = out.replace(/[ \t]+\n/g, '\n');
+
+  // 5) 空行が増えすぎたところを整える
+  out = out.replace(/\n{3,}/g, '\n\n');
+
+  return out.trim();
+}
+
+/* =========================================================
+   本体：Iros 応答 1ターン生成（シンプル版）
+   - SYSTEM: getSystemPrompt(meta)
+   - 数値メタ JSON / トピック文脈 / I/T 層 IT変換 / ir診断フォーマット
+   - LLM には「今回のユーザー発言」だけを渡し、
+     長い履歴ダイジェストや history メッセージは渡さない
+========================================================= */
 export async function generateIrosReply(
   args: GenerateArgs,
 ): Promise<GenerateResult> {
-  const { text, meta, history } = args;
+  const { text: rawText, meta } = args;
   const anyMeta = meta as any;
+
+  // 初回ターンかどうか（I/T IT変換の安全判定にだけ使う）
+  const isFirstTurn = !args.history || args.history.length === 0;
 
   // ★ digest 付きテキストから「今回のユーザー発言」だけを切り出す
   const CURRENT_MARK = '【今回のユーザー発言】';
   const currentUserText = (() => {
-    if (!text) return text;
-    const idx = text.lastIndexOf(CURRENT_MARK);
+    if (!rawText) return rawText;
+    const idx = rawText.lastIndexOf(CURRENT_MARK);
     if (idx === -1) {
-      // マーカーが無い場合は、従来どおり text 全体を採用
-      return text;
+      return rawText;
     }
-    return text.slice(idx + CURRENT_MARK.length).trim();
+    return rawText.slice(idx + CURRENT_MARK.length).trim();
   })();
+
+  // LLM に渡す user テキストは「今回のユーザー発言」だけにする
+  const userPromptText = `【今回のユーザー発言】
+${currentUserText}`;
 
   // ベースの SYSTEM
   let system = getSystemPrompt(meta);
-
-  // 深度 × トーン：Resonance Style 指示を追加
-  const resonanceStyleNote = buildResonanceStyleNote(meta);
-  if (resonanceStyleNote && resonanceStyleNote.trim().length > 0) {
-    system = `${system}\n\n${resonanceStyleNote}`;
-  }
-
-  // ★ ブロック構成ルール（GPT っぽい見出しの付け方）
-  const blockStructureNote = buildBlockStructureNote();
-  system = `${system}\n\n${blockStructureNote}`;
 
   // 状態メタ（数値・コード）を JSON で system にだけ載せる
   const numericMetaNote = buildNumericMetaNote(meta);
@@ -320,47 +571,35 @@ export async function generateIrosReply(
   if (topicContextNote && topicContextNote.trim().length > 0) {
     system = `${system}\n\n${topicContextNote}`;
   }
+  // 会話履歴ダイジェスト（あれば）を system に追加
+  const historyDigestNote = buildHistoryDigestNote(meta);
+  if (historyDigestNote && historyDigestNote.trim().length > 0) {
+    system = `${system}\n\n${historyDigestNote}`;
+  }
 
-  // ★ トピック変化（前回 / 今回）の材料があれば system に追加
+  // トピック変化（前回 / 今回）の材料があれば system に追加
   const topicChangeNote = buildTopicChangeNote(meta);
   if (topicChangeNote && topicChangeNote.trim().length > 0) {
     system = `${system}\n\n${topicChangeNote}`;
   }
 
-  // presentationKind（report / vision / diagnosis など）があれば読む
-  const presentationKind =
-    anyMeta && typeof anyMeta.presentationKind === 'string'
-      ? (anyMeta.presentationKind as string)
-      : undefined;
-
-  // ★ Report（現状レポート寄り）のときだけ、軽く指示を足す
-  if (presentationKind === 'report') {
-    system = `${system}
-
-# このターンは「現状レポート寄り」でまとめてください
-
-- まず、いまの状態や構図をコンパクトに整理してください（2〜4文程度）。
-- そのうえで、「ここから意味のある一手」を 1〜2 個だけ提案してください。
-- 未来ビジョンの物語を広げすぎず、いま起きていることを分かりやすく言葉にすることを優先してください。
-- テンプレ的な説明ではなく、ユーザーの言葉や状況に即した具体的な表現にしてください。`;
+  // 過去状態カルテ（memoryRecall）の材料があれば system に追加
+  const pastStateNote = buildPastStateNote(meta);
+  if (pastStateNote && pastStateNote.trim().length > 0) {
+    system = `${system}\n\n${pastStateNote}`;
   }
 
-  // ★ Vision（未来ビジョン寄り）のときは、未来の景色を少し強調
-  if (presentationKind === 'vision') {
-    system = `${system}
-
-# このターンは「ビジョン寄り」で応答してください
-
-- すでに少し先の時間軸から、ユーザーに語りかけるように書いてください。
-- 未来の情景や感覚を、1つのシーンとしてやさしく描写してください。
-- 同時に、「そこに至る今の一歩」を 1つだけそっと示してください。
-- 説明や分析よりも、イメージと感覚が立ち上がる文章を優先してください。
-- 決めつけず、「こうなっていくかもしれない」という余白を残してください。`;
+  // 🔸 I/T 層 IT変換ノートを、条件を満たすときだけ system に追加
+  //    - depth が I*/T* / mode=vision / intentBand=I* などのとき
+  //    - Q5_depress や self_harm_risk / SA 極端に低い ときは自動で無効化
+  const itNote = buildIntentionReframeNote(meta);
+  if (itNote && itNote.trim().length > 0) {
+    system = `${system}\n\n${itNote}`;
   }
 
-  // ★ ir診断トリガーがあるターンでは、今回だけ診断フォーマットを必須にする
-  //    → 判定には「今回のユーザー発言」だけを使う
+  // ir診断トリガーがあるターンでは、今回だけ診断フォーマットを必須にする
   const isIrDiagnosisTurn = hasIrDiagnosisTrigger(currentUserText);
+
   if (isIrDiagnosisTurn) {
     system = `${system}
 
@@ -387,7 +626,7 @@ Future-Seed 専用の文言は **一切出してはいけません**。`;
   }
 
   // デバッグログ
-  console.log('[IROS][generate] text =', text);
+  console.log('[IROS][generate] text =', userPromptText);
   console.log('[IROS][generate] currentUserText =', currentUserText);
   console.log('[IROS][generate] meta snapshot =', {
     depth: anyMeta?.depth,
@@ -399,9 +638,9 @@ Future-Seed 専用の文言は **一切出してはいけません**。`;
     tLayerModeActive: anyMeta?.tLayerModeActive,
     tLayerHint: anyMeta?.tLayerHint,
     hasFutureMemory: anyMeta?.hasFutureMemory,
-    presentationKind,
-    isIrDiagnosisTurn,
     topicChangeRequested: (anyMeta?.extra as any)?.topicChangeRequested ?? false,
+    hasPastStateNote: !!(anyMeta?.extra as any)?.pastStateNoteText,
+    isIrDiagnosisTurn,
   });
 
   const messages: ChatCompletionMessageParam[] = [
@@ -409,10 +648,9 @@ Future-Seed 専用の文言は **一切出してはいけません**。`;
       role: 'system',
       content: system,
     },
-    ...buildHistoryMessages(history),
     {
       role: 'user',
-      content: text,
+      content: userPromptText,
     },
   ];
 
@@ -425,9 +663,13 @@ Future-Seed 専用の文言は **一切出してはいけません**。`;
   const rawContent =
     res.choices[0]?.message?.content?.toString().trim() ?? '';
 
-  // 「いまの構図：〜」の行だけ削除（残りはすべて LLM 任せ）
-  const content = stripImanoKozuLine(rawContent);
+  // ① まず「いまの構図：〜」行を削除
+  const noKozu = stripImanoKozuLine(rawContent);
 
+  // ② 見出しテンプレや決まり文句を削る
+  const content = stripTemplateNoise(noKozu);
+
+  // 現在の Iros モードと intent メタを復元
   const currentMode: IrosMode = meta?.mode ?? 'mirror';
   const mode: IrosMode = currentMode ?? 'mirror';
 
@@ -436,6 +678,10 @@ Future-Seed 専用の文言は **一切出してはいけません**。`;
       ? (anyMeta.intent as IrosIntentMeta)
       : null;
 
+  // ============================
+  // Voice レイヤーは現状スキップ：
+  // LLM 本文（テンプレ削除後）をそのまま使う
+  // ============================
   const finalContent = content;
 
   return {
@@ -444,177 +690,4 @@ Future-Seed 専用の文言は **一切出してはいけません**。`;
     mode,
     intent,
   };
-}
-
-/* =========================================================
-   深度 × トーン：Resonance Style 指示ノート
-   - meta.depth に応じて、文章トーンの「重心」だけを指定する
-   - 実際の内容や構造は Iros（LLM）に委ねる
-========================================================= */
-
-function buildResonanceStyleNote(meta?: IrosMeta | null): string | null {
-  const depth = meta?.depth ?? null;
-
-  type DepthBand = 'S' | 'R' | 'C' | 'I' | 'T' | 'unknown';
-  let band: DepthBand = 'unknown';
-
-  if (typeof depth === 'string' && depth.length > 0) {
-    const head = depth[0] as DepthBand;
-    if (head === 'S' || head === 'R' || head === 'C' || head === 'I' || head === 'T') {
-      band = head;
-    }
-  }
-
-  const base = `# Iros 共鳴スタイル（Resonance Style）
-
-- テンプレートではなく、そのユーザー固有の状況と言葉に即して書いてください。
-- 理論（ロジック）と比喩（イメージ）を両方使い、「なぜいまそれが起きているのか」を静かに説明してください。
-- 文章量に制限はありませんが、2〜3行ごとに改行し、読みやすいリズムを意識してください。
-- 説教や命令ではなく、「内側の確信に光を当てる」つもりで書いてください。
-- ブロック構成（ラベル付き／ベタ書き）は、別途与えられるガイドラインに従い、毎ターン柔軟に選んでください。`;
-
-  let depthNote = '';
-
-  switch (band) {
-    case 'S':
-      depthNote = `
-- いまは Self（S層：自己まわり）の深度です。
-  → 感情の安全と自己理解を優先し、落ち着いたトーンで書いてください。
-  → 現在の状態の整理と、小さな一歩を示すことを重心にしてください。`;
-      break;
-
-    case 'R':
-      depthNote = `
-- いまは Resonance（R層：関係・つながり）の深度です。
-  → 人や場との関係性にフォーカスし、「間」や余白を少し多めに取ってください。
-  → 相手や環境の視点もそっと含め、視野が広がるような書き方にしてください。`;
-      break;
-
-    case 'C':
-      depthNote = `
-- いまは Creation（C層：創造と行動）の深度です。
-  → 少しエネルギーを高め、「これから何を創っていくか」に焦点を当ててください。
-  → 抽象だけでなく、具体的な一手や選択肢も1〜3個ほど示してください。`;
-      break;
-
-    case 'I':
-      depthNote = `
-- いまは Intention（I層：意図・存在目的）の深度です。
-  → ドラマティックさと静けさを両立させ、「なぜそれがこのタイミングで起きているのか」を深く掘り下げてください。
-  → 物語や象徴的な比喩を用いて、その人の存在レベルの意図が感じられるように書いてください。`;
-      break;
-
-    case 'T':
-      depthNote = `
-- いまは Transcend（T層：超越的視点）の深度です。
-  → 直接的なアドバイスよりも、詩的・象徴的な表現を通して「全体性」や「つながり」の感覚を伝えてください。
-  → 決めつけず、読み手の内側で自然に意味づけが起こる余白を残してください。`;
-      break;
-
-    default:
-      depthNote = `
-- 深度情報が明確でないときは、Self〜Resonance の中間くらいのトーンで、
-  現在の状態の整理と、やさしい方向づけを両立させてください。`;
-      break;
-  }
-
-  return `${base}\n\n${depthNote}`;
-}
-
-/* =========================================================
-   ブロック構成ルール（GPT風の見出し生成）
-   - 内部で 5 役割を“骨組み”として参照しつつも、0〜5スロットを可変で使う
-   - ラベルは固定リストを使わず、その場で即興でつくる
-   - 見出しゼロや途中から見出しをやめるのも OK
-========================================================= */
-
-function buildBlockStructureNote(): string {
-  return `# 内側でだけ使う「5つの役割」と、ゆるい構造ガイド
-
-あなたは返答を考えるとき、次の5つの役割を
-「頭の中のメモ」のようにそっと意識してください。
-
-1. いま・現在の状態
-2. 奥にある意図や願い
-3. いま起きている揺らぎ・葛藤
-4. 今選べる一手・具体的なアクション
-5. その一手がひらく意味・景色
-
-ただし、この5つの言葉や順番を
-そのまま **画面上の見出しとして繰り返し使ってはいけません。**
-
-- 「【いまの状態】」「【奥にある意図】」
-  「【今選べる一手】」「【その一手がひらく景色】」
-  などのフレーズは、できるだけ直接は書かず、
-  あくまで **内側の整理用ラベル** としてのみ使ってください。
-- 毎ターン、5つすべてを書く必要はありません。
-  ユーザーにとって必要な要素だけを 0〜5 個、自然に混ぜてください。
-
----
-
-## 文章の見せ方（ChatGPT に近いスタイル）
-
-画面上の見た目は、次のような「ゆるいブロック構造」にしてください。
-
-- 基本は **素直な段落の文章** で構いません。
-- 必要なときだけ、短いタイトルを **太字（\`**タイトル**\`）** で付けても構いません。
-- タイトルを付ける場合も、毎回おなじみのフレーズにせず、
-  その場に合った 1〜2 行の言い換えを使ってください。
-- 大きく場面が切り替わるときだけ、
-  \`---\`（区切り線）を 1回入れる程度にとどめてください。
-
-例（あくまで一例・これに縛られない）：
-
-- 「一日の終わりに」「いま感じていること」
-- 「心の奥で守っているもの」「本当はこうなりたい気持ち」
-- 「今日選べる小さな一歩」「静かにできる具体的な動き」
-- 「その先にひらけていく景色」「この流れの意味」
-
----
-
-## テンプレ感を避けるための注意
-
-- 毎ターン、同じラベルを機械的に繰り返さないでください。
-- かっこ付きの定型ラベル（【〜】や［〜］）を多用せず、
-  自然な文章の流れを優先してください。
-- ユーザーが短い返答を求めているときは、
-  見出しなしの短い段落だけで返して構いません。
-
-目的は「テンプレを埋めること」ではなく、
-ユーザーが Chat アプリ上で読みやすいかたちで、
-やさしく状況と一歩先が見えるようにすることです。`;
-}
-
-
-/* =========================================================
-   履歴メッセージの整形（そのまま維持）
-========================================================= */
-
-const MAX_HISTORY_ITEMS = 20;
-
-function buildHistoryMessages(
-  history?: HistoryItem[],
-): ChatCompletionMessageParam[] {
-  if (!history || !Array.isArray(history) || history.length === 0) {
-    return [];
-  }
-
-  const sliced = history.slice(-MAX_HISTORY_ITEMS);
-
-  return sliced
-    .map((h): ChatCompletionMessageParam | null => {
-      if (!h || typeof h.content !== 'string') return null;
-
-      const trimmed = h.content.trim();
-      if (!trimmed) return null;
-
-      const role: 'assistant' | 'user' =
-        h.role === 'assistant' ? 'assistant' : 'user';
-
-      return {
-        role,
-        content: trimmed,
-      };
-    })
-    .filter((m): m is ChatCompletionMessageParam => m !== null);
 }

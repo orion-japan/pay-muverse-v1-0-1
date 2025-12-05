@@ -3,6 +3,7 @@
 // - Unified-like 解析
 // - depth / Q の決定（連続性補正付き）
 // - SelfAcceptance ライン / Y・H
+// - Polarity / Stability
 // - ir診断トリガー / I層ピアス判定
 // - IntentLine / T層ヒント / 未来方向モード
 
@@ -19,6 +20,13 @@ import { applyDepthContinuity, applyQContinuity } from './depthContinuity';
 import { updateQTrace, type QTrace } from './orchestratorCore';
 
 import { computeYH } from './analysis/computeYH';
+
+// ★ 追加：Polarity & Stability 計算
+import {
+  computePolarityAndStability,
+  type PolarityBand,
+  type StabilityBand,
+} from './analysis/polarity';
 
 import {
   estimateSelfAcceptance,
@@ -47,6 +55,12 @@ export type OrchestratorAnalysisResult = {
   qTrace: QTrace;
   yLevel: number | null;
   hLevel: number | null;
+
+  // ★ 追加：Polarity / Stability
+  polarityScore: number | null;
+  polarityBand: PolarityBand;
+  stabilityBand: StabilityBand;
+
   irTriggered: boolean;
   pierceDecision: PierceDecision;
   intentLine: IntentLineAnalysis | null;
@@ -96,9 +110,6 @@ export async function runOrchestratorAnalysis(args: {
 
   /* =========================================================
      A) 深度スキャン + 連続性補正
-        - 基本方針：
-          「今回のスキャン結果（rawDepthFromScan）を最優先」
-        - scanDepth が取れない場合のみ、前回の depth から補完
   ========================================================= */
 
   const lastDepth = baseMeta?.depth;
@@ -221,6 +232,93 @@ export async function runOrchestratorAnalysis(args: {
   const yLevel = yh.yLevel ?? null;
   const hLevel = yh.hLevel ?? null;
 
+  // ★ unified にも Y/H を埋め込んでおく（必要なら）
+  (fixedUnified as any).yLevel = yLevel;
+  (fixedUnified as any).hLevel = hLevel;
+
+  /* =========================================================
+     Polarity & Stability の推定
+  ========================================================= */
+  const pol = computePolarityAndStability({
+    qCode: qCode ?? null,
+    selfAcceptance: selfAcceptanceLine,
+    yLevel,
+  });
+
+  const polarityScore = pol.polarityScore;
+  const polarityBand = pol.polarityBand;
+  const stabilityBand = pol.stabilityBand;
+
+  // ログ / LLM 用に unified にも入れておく
+  (fixedUnified as any).polarityScore = polarityScore;
+  (fixedUnified as any).polarityBand = polarityBand;
+  (fixedUnified as any).stabilityBand = stabilityBand;
+
+  /* =========================================================
+     GIGA) Intent Anchor（意図アンカー）の暫定導出
+  ========================================================= */
+  let intentAnchor:
+    | {
+        text: string;
+        strength?: number | null;
+        y_level?: number | null;
+        h_level?: number | null;
+      }
+    | null = null;
+
+  // すでに meta 側に意図アンカーがあれば、それをベースにする
+  const baseAnchor =
+    (baseMeta as any)?.intent_anchor &&
+    typeof (baseMeta as any).intent_anchor === 'object'
+      ? (baseMeta as any).intent_anchor
+      : null;
+
+  if (
+    baseAnchor &&
+    typeof baseAnchor.text === 'string' &&
+    baseAnchor.text.trim().length > 0
+  ) {
+    // 既存アンカーを優先（数値だけ今回の Y/H, SA で補完）
+    intentAnchor = {
+      text: baseAnchor.text.trim(),
+      strength:
+        typeof baseAnchor.strength === 'number'
+          ? baseAnchor.strength
+          : selfAcceptanceLine,
+      y_level:
+        typeof baseAnchor.y_level === 'number'
+          ? baseAnchor.y_level
+          : yLevel,
+      h_level:
+        typeof baseAnchor.h_level === 'number'
+          ? baseAnchor.h_level
+          : hLevel,
+    };
+  } else {
+    // アンカーがまだ無い場合のみ、テキストから暫定生成
+    const raw = (text || '').trim();
+    if (raw.length > 0) {
+      // 「最初の文」をざっくり拾う（。！？で区切る）→ なければ全文
+      const m = raw.match(/^(.+?[。！？!?])/);
+      const core = (m && m[1]) || raw;
+      const anchorText = core.slice(0, 180).trim();
+
+      if (anchorText.length > 0) {
+        intentAnchor = {
+          text: anchorText,
+          strength: selfAcceptanceLine,
+          y_level: yLevel,
+          h_level: hLevel,
+        };
+      }
+    }
+  }
+
+  // unified にも意図アンカーを埋め込む（Orchestrator / ログ / LLM 用）
+  if (intentAnchor) {
+    (fixedUnified as any).intent_anchor = intentAnchor;
+  }
+
   /* =========================================================
      ir診断トリガー + I層 Piercing 判定
   ========================================================= */
@@ -296,6 +394,9 @@ export async function runOrchestratorAnalysis(args: {
     qTrace,
     yLevel,
     hLevel,
+    polarityScore,
+    polarityBand,
+    stabilityBand,
     irTriggered,
     pierceDecision,
     intentLine,

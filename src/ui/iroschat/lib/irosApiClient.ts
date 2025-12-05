@@ -33,6 +33,7 @@ export type IrosAPI = {
     conversationId: string;
     text: string;
     role?: 'user' | 'assistant';
+    meta?: any; // ★ 追加
   }): Promise<{ ok: true }>;
   reply(args: {
     conversationId?: string;
@@ -42,9 +43,6 @@ export type IrosAPI = {
     resonance?: ResonanceState;
     intent?: IntentPulse;
     headers?: Record<string, string>; // 冪等キー付与用
-
-
-
 
     // 🗣 追加：Iros の口調スタイル
     style?: IrosStyle;
@@ -239,9 +237,6 @@ export async function fetchPersonIntentState(): Promise<
   });
 }
 
-
-
-
 /* ========= 実体 irosClient ========= */
 
 export const irosClient: IrosAPI = {
@@ -331,6 +326,7 @@ export const irosClient: IrosAPI = {
     conversationId: string;
     text: string;
     role?: 'user' | 'assistant';
+    meta?: any;
   }) {
     if (typeof _raw.postMessage === 'function') return _raw.postMessage(args);
     dbg('postMessage() fallback', {
@@ -343,10 +339,13 @@ export const irosClient: IrosAPI = {
         conversation_id: args.conversationId,
         text: args.text,
         role: args.role ?? 'user',
+        // ★ ここで meta を渡す
+        meta: args.meta ?? null,
       }),
     });
     return { ok: true as const };
   },
+
 
   async reply(args) {
     if (typeof _raw.reply === 'function') return _raw.reply(args);
@@ -390,6 +389,9 @@ export const irosClient: IrosAPI = {
       style: args.style,
     });
 
+    // ★ 追加：orchestrator からの meta を拾う
+    const meta = r?.meta ?? null;
+
     // 正規化
     let t =
       r?.assistant ??
@@ -406,16 +408,18 @@ export const irosClient: IrosAPI = {
 
     const serverPersisted =
       !!(r?.saved ||
-      r?.persisted ||
-      r?.db_saved ||
-      r?.message_id ||
-      r?.messageId);
+        r?.persisted ||
+        r?.db_saved ||
+        r?.message_id ||
+        r?.messageId);
 
     if (!serverPersisted) {
       await this.postMessage({
         conversationId: args.conversationId,
         text: safe,
         role: 'assistant',
+        // ★ ここで meta を一緒に保存
+        meta,
       });
     }
     return { ...r, assistant: safe };

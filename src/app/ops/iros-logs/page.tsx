@@ -55,6 +55,24 @@ const num = (v: any, fallback = 0) => {
 const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
 
 /**
+ * 旧Irosの「[お金・収入]: {...}」のような
+ * JSON入りメタ1行を先頭から削るヘルパ
+ */
+function stripLegacyMetaHeader(raw: string | null | undefined): string {
+  if (!raw) return '';
+  const lines = raw.split('\n');
+  if (lines.length === 0) return '';
+
+  const first = lines[0];
+  // かなり大雑把でOK：1行目に { と } が両方あれば「旧meta行」とみなして削除
+  if (first.includes('{') && first.includes('}')) {
+    const rest = lines.slice(1).join('\n').trimStart();
+    return rest;
+  }
+  return raw;
+}
+
+/**
  * Y/H をアイコン付きで表示するヘルパ
  * （ログ CSV には生の数値をそのまま出す）
  */
@@ -488,6 +506,7 @@ export default function IrosLogsPage() {
 
                     const yDisplay = formatYDisplay(yLevel);
                     const hDisplay = formatHDisplay(hLevel);
+                    const cleanedContent = stripLegacyMetaHeader(t.content);
 
                     return (
                       <React.Fragment key={t.id}>
@@ -546,7 +565,7 @@ export default function IrosLogsPage() {
                                   {unifiedSummary}
                                 </div>
                               ) : null}
-                              {t.content || ''}
+                              {cleanedContent || ''}
                             </div>
                           </td>
                         </tr>

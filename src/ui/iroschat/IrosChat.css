@@ -347,3 +347,11 @@
   margin-top: 6px !important;      /* 3〜8pxくらいで好みに調整 */
   transform: translateY(2px);      /* もっと下げたければ 3〜4px に */
 }
+
+
+/* ここが今 120px !important になっているはず */
+.sof-msgs {
+  /* 下側に“たっぷり余白”を作って、最後のメッセージを上に浮かせる */
+  padding-bottom: max(40vh, 120px);
+  padding-right: 4px;
+}

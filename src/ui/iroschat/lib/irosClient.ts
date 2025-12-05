@@ -22,6 +22,7 @@ export type IrosMessage = {
   ts: number; // epoch ms
   q?: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
   color?: string;
+  meta?: any; // ★ 追加
 };
 
 export type UserInfo = {
@@ -306,6 +307,7 @@ export async function postMessage(args: {
   conversationId: string;
   text: string;
   role?: 'user' | 'assistant';
+  meta?: any; // ★ 追加
 }): Promise<{ ok: true }> {
   const res = await authFetch('/api/agent/iros/messages', {
     method: 'POST',
@@ -313,6 +315,7 @@ export async function postMessage(args: {
       conversation_id: args.conversationId,
       text: args.text,
       role: args.role ?? 'user',
+      meta: args.meta ?? null, // ★ 追加：サーバに meta を渡す
     }),
   });
   const j = await res.json();
@@ -351,33 +354,38 @@ export async function reply(params: {
   return json;
 }
 
-/* ========= 保存付き返信（正規化を必ず通す） ========= */
+// src/ui/iroschat/lib/irosClient.ts 内の replyAndStore をこの形に置き換え
+
 export async function replyAndStore(args: {
   conversationId: string;
   user_text: string;
   mode?: string;
   model?: string;
 }) {
+  // ① サーバーに返信を依頼
   const r = await reply(args);
 
-  // サーバ保存フラグ検知
-  const serverPersisted =
-    !!(r?.saved || r?.persisted || r?.db_saved || r?.message_id || r?.messageId);
-
+  // ② テキスト正規化（[object Object] 対策＋🪔 付与）
   const assistantText = normalizeAssistantText(r);
   const safe = assistantText || 'はい。🪔';
 
-  // サーバ未保存なら、クライアントで保存
-  if (!serverPersisted) {
-    await postMessage({
-      conversationId: args.conversationId,
-      text: safe,
-      role: 'assistant',
-    });
-  }
+  // ③ orchestrator から返ってきた meta を拾う
+  const meta = r?.meta ?? null;
 
-  return { ...r, assistant: safe, saved: serverPersisted || undefined };
+  // ★ ここでは DB には一切保存しない ★
+  // （assistant の保存はサーバー側 / orchestrator に任せる）
+  // → これで「assistant が2行入る」現象が止まります。
+
+  // 呼び出し側（IrosChatContext）で使うために、
+  // assistant と meta だけ整えて返す
+  return {
+    ...r,
+    assistant: safe,
+    meta,
+    saved: true, // フラグだけ true にしておく（実際の保存はサーバー側）
+  };
 }
+
 
 /* ========= User Info ========= */
 export async function getUserInfo(): Promise<UserInfo | null> {

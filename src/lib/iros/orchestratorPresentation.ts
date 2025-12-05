@@ -1,8 +1,9 @@
 // src/lib/iros/orchestratorPresentation.ts
 // Iros Orchestrator — プレゼン系ヘルパーまとめ
 // - 表示モード判定（ヘッダー付与など）
-// - Q / Depth ラベル生成
 // - 診断ヘッダー除去
+//
+// ★ テンプレゼロ版：構図ヘッダー文章は一切生成しない
 
 import type { Depth, QCode, IrosMeta } from './system';
 
@@ -12,9 +13,10 @@ export type PresentationKind = 'plain' | 'withHeader' | 'irOnly';
 
 /**
  * どの「線路」で返すかを決める:
- * - irOnly     : ir診断コマンド（ir診断 上司 など）
- * - withHeader : I層 or mirror モード → 冒頭コメントを付与
- * - plain      : それ以外は LLM 本文のみ
+ * - irOnly : ir診断コマンド（ir診断 上司 など）
+ * - plain  : それ以外は LLM 本文のみ
+ *
+ * ※ テンプレゼロ方針のため、withHeader は現在使用しない
  */
 export function decidePresentationKind(args: {
   text: string;
@@ -22,7 +24,7 @@ export function decidePresentationKind(args: {
   irTriggered: boolean;
   requestedDepth?: Depth;
 }): PresentationKind {
-  const { text, meta, irTriggered, requestedDepth } = args;
+  const { text, irTriggered } = args;
 
   const normalizedText = text.replace(/\s/g, '');
 
@@ -30,20 +32,11 @@ export function decidePresentationKind(args: {
   const isIrCommand =
     irTriggered && normalizedText.includes('ir診断');
 
-  const resolvedDepth: Depth | undefined =
-    (meta.depth as Depth | undefined) ?? requestedDepth ?? undefined;
-
-  const isIntentDepthActive = isIntentDepth(resolvedDepth);
-
   if (isIrCommand) {
     return 'irOnly';
   }
 
-  // I層 or mirror モードのときは、基本的にコメントヘッダーを付ける
-  if (isIntentDepthActive || meta.mode === 'mirror') {
-    return 'withHeader';
-  }
-
+  // 通常はすべてプレーン（LLM本文のみ）
   return 'plain';
 }
 
@@ -51,45 +44,16 @@ export function decidePresentationKind(args: {
 
 /**
  * 通常の「いまの構図」コメント
- *  - Qコード／Depth から 1行〜2行のヘッダーを生成
+ *  - ★ テンプレゼロ方針のため、現在は何も返さない
  */
-export function buildStructuredHeader(meta: IrosMeta): string | null {
-  const q = (meta.qCode as QCode | undefined) ?? undefined;
-  const depth = (meta.depth as Depth | undefined) ?? undefined;
-
-  const qPhrase = describeQCodeBrief(q);
-  const depthSentence = describeDepthPhaseLabel(depth);
-
-  if (!qPhrase && !depthSentence) return null;
-
-  const lines: string[] = [];
-
-  if (q) {
-    // 例: Q3
-    lines.push(q);
-  }
-
-  const segments: string[] = [];
-  if (qPhrase) {
-    segments.push(`「${qPhrase}」`);
-  }
-  if (depthSentence) {
-    segments.push(depthSentence);
-  }
-
-  const joined =
-    segments.length === 1
-      ? segments[0]
-      : `${segments[0]}の中で${segments[1]}`;
-
-  lines.push(`いまの構図：いまのあなたは、${joined}にいます。`);
-
-  return lines.join('\n');
+export function buildStructuredHeader(_meta: IrosMeta): string | null {
+  return null;
 }
 
 /**
  * Qコード → 一言ラベル
- *  - Q1〜Q5 の意味付けをここで固定
+ *  - いまは直接 UI には出さないが、
+ *    将来の構造ラベル用に残しておく
  */
 export function describeQCodeBrief(qCode?: QCode | null): string | null {
   if (!qCode) return null;
@@ -111,7 +75,7 @@ export function describeQCodeBrief(qCode?: QCode | null): string | null {
 
 /**
  * Depth → 大まかな「流れ」のラベル
- *  - S/R/C/I/T をざっくりフェーズ言語に変換
+ *  - これも meta 用の構造ラベルとして温存
  */
 export function describeDepthPhaseLabel(
   depth?: Depth | null,
@@ -163,6 +127,5 @@ export function stripDiagnosticHeader(text: string): string {
 /** I層（I1〜I3）かどうかの判定ヘルパー */
 function isIntentDepth(depth?: Depth | null): boolean {
   if (!depth) return false;
-  // Depth は文字列リテラル型なので startsWith が使える
   return depth.startsWith('I');
 }

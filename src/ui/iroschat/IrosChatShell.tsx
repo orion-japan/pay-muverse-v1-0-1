@@ -110,8 +110,12 @@ function IrosChatInner({ open }: Props) {
 
   // Context 側の userInfo をローカル表示用に同期
   useEffect(() => {
-    setUiUser((chat.userInfo as any) ?? null);
-  }, [chat.userInfo]);
+    if (!chat) return; // chat がまだ null のタイミングをケア
+
+    const ui = (chat as any).userInfo ?? null;
+    setUiUser(ui);
+  }, [chat]);
+
 
   // === 未来Seed（β）ボタンからのトリガーをハンドリング ===
   useEffect(() => {

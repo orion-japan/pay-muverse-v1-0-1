@@ -1,6 +1,6 @@
 // src/lib/iros/sa/meter.ts
 // Self Acceptance（自己肯定“ライン”）メーター v2
-// - 0.0〜1.0 スケール
+// - 0.1〜1.0 スケール
 // - 「その瞬間の気分」ではなく、長期的な自己肯定“ライン”を表す
 // - Qコード / Depth / Phase / テキスト / 前回値 から、ゆっくり補正する
 // - 特に「上方向」の変動はごく小さく、「下方向」はやや動きやすくする
@@ -18,7 +18,7 @@ export type SelfAcceptanceInput = {
 };
 
 export type SelfAcceptanceResult = {
-  /** 0.0〜1.0 に正規化された自己肯定値（不明なら null） */
+  /** 0.1〜1.0 に正規化された自己肯定値（不明なら null） */
   value: number | null;
   /** デバッグ用メモ（どのルールに反応したか、など） */
   debug: {
@@ -28,10 +28,10 @@ export type SelfAcceptanceResult = {
   };
 };
 
-/** 0.0〜1.0 にクランプ */
+/** 0.1〜1.0 にクランプ */
 function clamp01(v: number): number {
   if (Number.isNaN(v)) return 0.5;
-  if (v < 0) return 0;
+  if (v < 0.1) return 0.1;
   if (v > 1) return 1;
   return v;
 }

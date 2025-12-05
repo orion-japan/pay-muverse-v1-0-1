@@ -4,16 +4,15 @@
 import React from 'react';
 import { useIrosChat } from '../IrosChatContext';
 import styles from '../index.module.css';
-import { useAuth } from '@/context/AuthContext'; // 動的アイコン用
-import remarkGfm from 'remark-gfm';
-import remarkBreaks from 'remark-breaks';
-import ReactMarkdown from 'react-markdown';
-import '../IrosChat.css'; // 行間・余白の調整
+import { useAuth } from '@/context/AuthContext';
+import '../IrosChat.css';
+
+import ChatMarkdown from './ChatMarkdown';
 
 type IrosMessage = {
   id: string;
   role: 'user' | 'assistant';
-  text: unknown; // 混在対策（確実に文字列化して描画）
+  text: unknown;
 
   // 旧Qバッジ用（当面は残す）
   q?: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
@@ -61,7 +60,7 @@ const FALLBACK_DATA =
 
 // タイムライン全体：ごく薄い muverse グラデ背景
 const chatAreaStyle: React.CSSProperties = {
-  padding: '12px 0 18px',
+  padding: '12px 0 40vh',
   background:
     'linear-gradient(180deg, #f5f7ff 0%, #eef5ff 35%, #faf6ff 70%, #ffffff 100%)',
 };
@@ -88,7 +87,6 @@ const assistantBubbleShellStyle: React.CSSProperties = {
   boxShadow: '0 18px 40px rgba(15, 23, 42, 0.08)',
 };
 
-
 // Qバッジ（muverse 色味）
 const qBadgeStyle: React.CSSProperties = {
   display: 'inline-flex',
@@ -104,7 +102,7 @@ const qBadgeStyle: React.CSSProperties = {
   color: '#4338ca',
 };
 
-/** Vision / Hint 用のヘッダーバー（旧 Seed スタイルを流用） */
+/** Vision / Hint 用のヘッダーバー */
 const seedHeaderStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
@@ -148,7 +146,7 @@ function toSafeString(v: unknown): string {
       (typeof o.assistant === 'string' && o.assistant);
     if (cand) return cand;
     try {
-      return JSON.stringify(o, null, 2); // 可読性重視
+      return JSON.stringify(o, null, 2);
     } catch {
       return String(v);
     }
@@ -161,7 +159,7 @@ function toSafeString(v: unknown): string {
 function transformIrTemplateToMarkdown(input: string): string {
   if (!input.trim()) return input;
 
-  // 🔹新ir診断フォーマットはそのまま表示する
+  // 新 ir診断フォーマットはそのまま表示する
   if (
     /🧿\s*観測対象[:：]/.test(input) &&
     /I\/T層の刺さる一句/.test(input)
@@ -187,7 +185,6 @@ function transformIrTemplateToMarkdown(input: string): string {
     if (m) t = m[1].trim();
     return t;
   };
-
 
   const getAfterMark = (s: string): string => {
     const idxJa = s.indexOf('：');
@@ -290,110 +287,22 @@ function transformIrTemplateToMarkdown(input: string): string {
 }
 
 /**
- * カギカッコごと太字になっているパターンを
- * 「**カギカッコの中身だけ太字」に変換する。
+ * 太字まわりのゆらぎを正規化する
+ * - "** 〜 **" → "**〜**"（先頭/末尾の空白を削る）
+ * - 「**〜**」 → 「**〜**」形式にそろえる
  */
-function normalizeBoldInsideQuotes(input: string): string {
+function normalizeBoldMarks(input: string): string {
   if (!input) return input;
 
-  // 「〜」パターン
-  let out = input.replace(/\*\*「([^」]+)」\*\*/g, '「**$1**」');
+  // 1) "** テキスト **" のように、内側の両端に空白がある場合
+  //    → Markdown で強調と認識されないことがあるので削る
+  let out = input.replace(/\*\*\s+([^*][^*]*?)\s*\*\*/g, '**$1**');
 
-  // 『〜』パターンも一応サポート
+  // 2) カギカッコごと太字→中身だけ太字
+  out = out.replace(/\*\*「([^」]+)」\*\*/g, '「**$1**」');
   out = out.replace(/\*\*『([^』]+)』\*\*/g, '『**$1**』');
 
   return out;
-}
-
-/* ========= ReactMarkdown 用カスタムコンポーネント ========= */
-
-// メッセージごとのモードに応じて、コンポーネントを生成
-function createMarkdownComponents(isVisionMode: boolean): any {
-  return {
-    // 段落：ChatGPT っぽく、素直な本文
-    p: ({ children }: { children: React.ReactNode }) => (
-      <p
-        style={{
-          margin: '0 0 0.85em',
-          lineHeight: 1.8,
-          fontSize: '0.96rem',
-          whiteSpace: 'pre-wrap',
-          color: '#111827',
-        }}
-      >
-        {children}
-      </p>
-    ),
-
-    strong: ({ children }: { children: React.ReactNode }) => {
-      // strong の中身をテキスト化
-      const text = typeof children === 'string' ? children : '';
-      const isSectionHeading =
-        text.length > 0 &&
-        /^[^。.!?\n]+$/.test(text); // タイトル行っぽい簡易判定
-
-      return (
-        <strong
-          className={isSectionHeading ? 'iros-section-heading' : undefined}
-          style={{
-            display: 'block',
-            margin: '1.2em 0 0.4em',
-            fontSize: '1.05rem',
-            fontWeight: 700,
-            letterSpacing: '0.02em',
-          }}
-        >
-          {children}
-        </strong>
-      );
-    },
-
-
-    // 共鳴ハイライト（*こういう部分*）→ さっきの class 方式
-    em: ({ children }: { children: React.ReactNode }) => (
-      <span
-        className={
-          'iros-emphasis ' +
-          (isVisionMode ? 'iros-emphasis-vision' : 'iros-emphasis-normal')
-        }
-      >
-        {children}
-      </span>
-    ),
-
-    // 箇条書き：ChatGPT っぽくシンプルに
-    ul: ({ children }: { children: React.ReactNode }) => (
-      <ul
-        style={{
-          paddingLeft: '1.25em',
-          margin: '0.2em 0 0.9em',
-        }}
-      >
-        {children}
-      </ul>
-    ),
-    li: ({ children }: { children: React.ReactNode }) => (
-      <li
-        style={{
-          margin: '0.15em 0',
-          lineHeight: 1.8,
-        }}
-      >
-        {children}
-      </li>
-    ),
-
-    // 区切り線（---）：ChatGPT風の細いグレーライン
-    hr: () => (
-      <hr
-        style={{
-          border: 'none',
-          borderTop: '1px solid rgba(148, 163, 184, 0.6)',
-          margin: '1.1em 0 1.3em',
-        }}
-      />
-    ),
-  };
 }
 
 
@@ -411,25 +320,51 @@ export default function MessageList() {
 
   const listRef = React.useRef<HTMLDivElement | null>(null);
   const bottomRef = React.useRef<HTMLDivElement | null>(null);
+
   const first = React.useRef(true);
 
   const scrollToBottom = (behavior: ScrollBehavior = 'auto') =>
     bottomRef.current?.scrollIntoView({ behavior, block: 'end' });
 
   React.useEffect(() => {
+    if (!messages.length) return;
+
+    const last = messages[messages.length - 1];
+
     console.log('[IROS UI] messages updated', {
       len: messages.length,
-      last: messages[messages.length - 1]
-        ? {
-            id: messages[messages.length - 1].id,
-            role: messages[messages.length - 1].role,
-            meta: messages[messages.length - 1].meta,
-          }
-        : null,
+      last: last ? { id: last.id, role: last.role, meta: last.meta } : null,
     });
 
-    scrollToBottom(first.current ? 'auto' : 'smooth');
-    first.current = false;
+    // 初回ロード時：一番下へ
+    if (first.current) {
+      scrollToBottom('auto');
+      first.current = false;
+      return;
+    }
+
+    const container = listRef.current;
+    const bottomEl = bottomRef.current;
+    if (!container || !bottomEl) return;
+
+    if (last.role === 'user') {
+      // ユーザーメッセージ送信時：画面中央付近に持ち上げる
+      const bottomOffset = bottomEl.offsetTop;
+      const viewHeight = container.clientHeight;
+      const desiredRatio = 0.5;
+
+      const targetTopRaw = bottomOffset - viewHeight * desiredRatio;
+      const maxScroll = container.scrollHeight - viewHeight;
+      const targetTop = Math.max(0, Math.min(targetTopRaw, maxScroll));
+
+      container.scrollTo({
+        top: targetTop,
+        behavior: 'smooth',
+      });
+    } else {
+      // Iros の返答時：一番下まで追尾
+      scrollToBottom('smooth');
+    }
   }, [messages]);
 
   const resolveUserAvatar = (msg: IrosMessage): string => {
@@ -450,22 +385,19 @@ export default function MessageList() {
         <div className={styles.emptyHint}>ここに会話が表示されます</div>
       )}
 
-      {messages.map((m) => {
+      {messages.map((m, idx) => {
         const isUser = m.role === 'user';
         const iconSrc = isUser ? resolveUserAvatar(m) : '/ir.png';
 
         const rawText = toSafeString(m.text);
-        const safeText = normalizeBoldInsideQuotes(
+        const safeText = normalizeBoldMarks(
           transformIrTemplateToMarkdown(rawText),
         );
-
         const qFromMeta = m.meta?.qCode;
         const qToShow = qFromMeta ?? m.q;
 
-        // 🔹 Vision モード判定
         const isVisionMode = !isUser && m.meta?.mode === 'vision';
 
-        // 🔹 Vision Hint（T層フラグのみ）の判定
         const isVisionHint =
           !isUser &&
           m.meta?.mode !== 'vision' &&
@@ -517,7 +449,7 @@ export default function MessageList() {
                 />
               </div>
 
-              {/* Qバッジ：Iros（assistant）のときだけアイコンの右に表示 */}
+              {/* Qバッジ：Iros（assistant）のときだけ */}
               {!isUser && qToShow && (
                 <div className="q-badge" style={qBadgeStyle}>
                   <span
@@ -534,7 +466,7 @@ export default function MessageList() {
               )}
             </div>
 
-            {/* 吹き出し（構図はこれまで通り） */}
+            {/* 吹き出し */}
             <div
               className={`bubble ${isUser ? 'is-user' : 'is-assistant'}`}
               style={{
@@ -543,7 +475,7 @@ export default function MessageList() {
                 maxWidth: 'min(760px, 88%)',
               }}
             >
-              {/* ▼ Vision系ヘッダー（Mode / Hint） */}
+              {/* Vision系ヘッダー（Mode / Hint） */}
               {(isVisionMode || isVisionHint) && (
                 <div style={seedHeaderStyle}>
                   <div style={seedLabelStyle}>
@@ -562,24 +494,18 @@ export default function MessageList() {
                 </div>
               )}
 
-<div
-  className={`msgBody ${
-    isVisionMode ? 'vision-theme' : ''
-  } ${isVisionHint ? 'vision-hint-theme' : ''}`}
-  style={{
-    fontSize: 14,
-    lineHeight: 1.9,
-    color: '#111827',
-  }}
->
-  <ReactMarkdown
-    remarkPlugins={[remarkGfm, remarkBreaks]}
-    components={createMarkdownComponents(isVisionMode)}
-  >
-    {safeText}
-  </ReactMarkdown>
-</div>
-
+              <div
+                className={`msgBody ${
+                  isVisionMode ? 'vision-theme' : ''
+                } ${isVisionHint ? 'vision-hint-theme' : ''}`}
+                style={{
+                  fontSize: 14,
+                  lineHeight: 1.9,
+                  color: '#111827',
+                }}
+              >
+                <ChatMarkdown text={safeText} />
+              </div>
             </div>
           </div>
         );
