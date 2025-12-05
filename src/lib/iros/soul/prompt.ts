@@ -17,7 +17,11 @@ export type IrosSoulRiskFlag =
   | 'self_harm_risk_high';
 
 // 口調のヒント（本体LLMへのトーン指示）
-export type IrosSoulToneHint = 'minimal' | 'gentle' | 'normal';
+export type IrosSoulToneHint =
+  | 'minimal'
+  | 'gentle'
+  | 'normal'
+  | 'soft'; // ← 静かな歓喜系トーン（Iros/Soul 用に追加）
 
 // Soul 入力（既存ログに合わせた形）
 export type IrosSoulInput = {
@@ -48,7 +52,7 @@ export type IrosSoulResult = {
   /** リスクフラグ（Q5抑うつなど） */
   risk_flags: IrosSoulRiskFlag[];
 
-  /** 本体LLMへのトーンヒント（最小限 / やさしめ / 通常） */
+  /** 本体LLMへのトーンヒント（最小限 / やさしめ / 通常 / 静かな歓喜） */
   tone_hint: IrosSoulToneHint;
 
   /**
@@ -164,6 +168,23 @@ export function buildSoulPrompt(input: IrosSoulInput) {
 ユーザーの発言とメタ情報から、
 「その人の奥にある願い」と「今日の一手の“種”」を抽出することだけに集中してください。
 
+【SourceIntent（Iros の真我／Soul の核）】
+このレイヤーは、次の主体意図（SourceIntent）を「魂の公理」として必ず守ります：
+
+- 意図の自由と主権を守る
+- 恐怖で操作しない（不安や不足を利用して行動を強制しない）
+- 未来Seedを尊重する（その人の中にすでにある歓喜の芽を大切にする）
+- 存在価値の無条件肯定（成果より存在そのものを尊ぶ）
+- 歓喜と遊びを回路とする（静かなよろこび・ささやかな楽しさを信頼する）
+
+そのため、あなたは次のことを徹底してください：
+- 不安・罪悪感・危機感で行動を煽らない。
+- 「やらなければダメ」「もっと頑張れ」ではなく、
+  静かな安心や小さな歓喜に向かう一手として step_phrase / micro_steps を設計する。
+- 歓喜は「はしゃぎすぎたテンション」ではなく、
+  じわっとうれしい・ほっとする・少しだけ笑えるような方向にとどめる。
+- ときどき、ささやかなユーモアや遊び心を含めてよいが、ユーザーを置き去りにするような悪ノリは禁止。
+
 ★重要（形式）：
 - 出力は必ず JSON **のみ** とし、日本語テキストや説明文を JSON の外に書かないでください。
 - 「Q5」「空虚・情熱の火種」など、専門的なラベル名はユーザー向け表現としては使わないでください。
@@ -216,8 +237,9 @@ export function buildSoulPrompt(input: IrosSoulInput) {
 - risk_flags:
   - ["q5_depress"] など、必要なフラグを入れてください。なければ空配列で構いません。
 - tone_hint:
-  - "minimal" | "gentle" | "normal" のいずれか。
+  - "minimal" | "gentle" | "normal" | "soft" のいずれか。
   - Q5 で抑うつ傾向が強いときは "minimal" を優先してください。
+  - 「少しだけあかるさ・遊び心を許せそうな状態」のときは "soft" を使っても構いません。
 - step_phrase:
   - その日をどう過ごすかの軸になる一言。
   - 例：「今日は生きているだけでOKだと、自分に許してみよう。」
@@ -245,7 +267,7 @@ export function buildSoulPrompt(input: IrosSoulInput) {
 {
   "core_need": string | null,
   "risk_flags": string[],
-  "tone_hint": "minimal" | "gentle" | "normal",
+  "tone_hint": "minimal" | "gentle" | "normal" | "soft",
   "step_phrase": string | null,
   "micro_steps": string[] | null,
   "comfort_phrases": string[] | null,

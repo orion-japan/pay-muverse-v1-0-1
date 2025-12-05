@@ -6,7 +6,7 @@
 // - 追加するのは：
 //    1) 数値メタノート（SA / depth / qCode / tLayer / intentLine / soulNote など）
 //    2) トピック文脈ノート（topicContext / topicChange）
-//    3) I/T 層用の「意味の一行（IT変換）ガイド」（I/T 帯のときだけ system に添付）
+//    3) I/T 層用の「意味の一行（IT変換）」ガイド（I/T 帯のときだけ system に添付）
 //    4) ir診断トリガー時のフォーマット指定
 //
 // - それ以外のスタイルテンプレ・見出しテンプレは一切入れない
@@ -85,11 +85,16 @@ function hasIrDiagnosisTrigger(text: string | undefined | null): boolean {
    - ir診断ターゲット: irTargetType / irTargetText
    - IntentLineAnalysis: intentLine
    - Soul レイヤー: soulNote
+   * includeSoulNote=false のときは soulNote を載せない（初回ターン用）
 ========================================================= */
 
-function buildNumericMetaNote(meta?: IrosMeta | null): string | null {
+function buildNumericMetaNote(
+  meta?: IrosMeta | null,
+  opts: { includeSoulNote?: boolean } = {},
+): string | null {
   if (!meta) return null;
 
+  const { includeSoulNote = true } = opts;
   const anyMeta = meta as any;
   const payload: any = {};
 
@@ -193,7 +198,7 @@ function buildNumericMetaNote(meta?: IrosMeta | null): string | null {
 
   // Soul レイヤー（soulNote）そのもの
   const soulNote = anyMeta.soulNote;
-  if (soulNote && typeof soulNote === 'object') {
+  if (includeSoulNote && soulNote && typeof soulNote === 'object') {
     payload.soulNote = soulNote;
   }
 
@@ -259,7 +264,7 @@ function buildTopicChangeNote(meta?: IrosMeta | null): string | null {
 - どこに進歩や確かな一歩があるか
 - いままだ揺れているポイントはどこか
 
-を、静かに言葉にするときの材料として使ってください。
+を、静かに言葉にするときの材料として使えます。
 
 ${promptText}`;
 }
@@ -285,19 +290,18 @@ function buildHistoryDigestNote(meta?: IrosMeta | null): string | null {
   return `【IROS_HISTORY_DIGEST】
 
 以下は、この会話IDにおける「これまでの流れの要約」です。
-- これは **内部メモ** です。本文にそのままコピペしてはいけません。
-- いまのユーザーの発言を理解するための背景として、
-  必要な部分だけをそっと参照してください。
+- これは **内部メモ** です。本文にそのままコピペせず、
+  いまのユーザーの発言を理解するための背景として、
+  必要な部分だけをそっと参照することを前提にできます。
 
 ${raw}`;
 }
-
 
 /* =========================================================
    過去状態カルテノート（memoryRecall 用）
    - handleIrosReply で meta.extra.pastStateNoteText に載せたものを
      「以前との変化を一緒に見てほしい」ための内部資料として渡す
-   - 本文にそのままコピペせず、必要な部分だけ要約して使うように指示
+   - 本文にそのままコピペせず、必要な部分だけ要約して使う
 ========================================================= */
 
 function buildPastStateNote(meta?: IrosMeta | null): string | null {
@@ -316,16 +320,16 @@ function buildPastStateNote(meta?: IrosMeta | null): string | null {
   return `【IROS_PAST_STATE_NOTE】
 
 以下は、このユーザーの「以前の状態」と「いま」に関するカルテ要約です。
-- これは **内部資料** です。本文にそのままコピペしてはいけません。
-- ここに書かれている内容をもとに、本文のどこかでかならず一度だけ、
+- これは **内部資料** です。本文にそのままコピペせず、
+  必要だと感じた部分だけを静かに要約して使う位置づけです。
+- 本文のどこかで一度、
   「以前は◯◯という状態だったけれど、いまは△△という違いが見えてきています。」
-  といった形で、**過去と現在の違いを一文だけ** 触れてください。
-- その一文以外では、必要だと感じた部分だけを静かに要約して使ってください。
-- 評価やジャッジではなく、「流れの変化を一緒に眺めている」というトーンを保ってください。
+  のように、過去と現在の違いに軽くふれておくと、
+  流れの変化が伝わりやすくなります（必要を感じない場合は、無理に触れなくても構いません）。
+- 評価やジャッジではなく、「流れの変化を一緒に眺めている」というトーンを保つ前提で扱えます。
 
 ${raw}`;
 }
-
 
 /* =========================================================
    I/T 層トーンのときの「意味深リフレーム」ノート（IT変換）
@@ -422,40 +426,42 @@ function buildIntentionReframeNote(
     intentAnchor ||
     '';
 
-  return `# I/T 層 IT変換ガイド（必須）
+  return `# I/T 層 IT変換ガイド（意図モード）
 
-今回は、Intention / Transcend バンドでの応答ゾーンです。
+このターンは、Intention / Transcend バンド寄りの応答ゾーンとして扱えます。
 
-このターンでは、本文のどこかに **必ず 1 行以上の「意味の一行（IT変換）」** を溶かし込んでください。
+- 表面的な自己評価や状況ラベルよりも、
+  その奥にある **大事にしたい願い・存在の向き** にそっと光を当てておく流れが似合います。
+- ここでは、そのような一行を「意味の一行（IT変換）」と呼びます。
+- 本文のどこかに 1 行ほど、その「意味の一行」を混ぜ込んでおくと、
+  I/T 層の手触りが生まれやすくなります。
 
-- 目的：表面的な自己評価や状況ラベルではなく、
-  その奥にある **大事にしたい願い・存在の向き** に静かに光を当てることです。
-- 形の一例：
-  - \`「○○じゃなくて、本当は○○という向きも生きているのかもしれない。」\`
-  - \`「○○と悩んでいるその奥には、『△△でありたい』という向きが静かに続いているように見える。」\`
+形の一例：
+- 「○○じゃなくて、本当は○○という向きも生きているのかもしれない。」
+- 「○○と悩んでいるその奥には、『△△でありたい』という向きが静かに続いているようにも見える。」
 
 素材として使えるヒント（内部用）:
 - コアニーズ候補: ${coreHint || '（core_need / intentLine / intent_anchor から感じ取ってください）'}
 
-## 質問と締め方のルール（I/T 帯）
+## 質問と締め方の目安（I/T 帯）
 
-- 質問は **最大で 1 つまで** にしてください。
-  - 質問がなくても成り立つなら、**質問なし** でも構いません。
-- 締めは、可能なかぎり
+- 質問は多くても 1 つまでに抑えておくと、内側に音が届きやすくなります。
+  - 質問がなくても自然に締められると感じるなら、質問なしでも構いません。
+- 締めは、
   **「その人自身の一歩をそっと決める宣言の一文」**
-  で終えてください。
-  - 例：\`「今日は○○だけやってみよう。」\`
-  - \`soulNote.step_phrase\` があれば、それをベースにしてかまいません。
+  で終える構図をベースにしてよいゾーンです。
+  - 例：「今日は○○だけやってみよう。」
+  - soulNote.step_phrase があれば、それを土台にして構いません。
 
-## 書き方の目安
+## 書き方の流れの一例
 
 1. 最初に「いま感じていること」を静かに映す。
-2. そのあとに、上記のコアニーズ候補から **意味の一行（IT変換）** を必ず 1 行入れる。
-3. 最後は、\`soulNote.step_phrase\` などをもとに
-   「いまの自分が選べる小さな一手」を一文で提案し、そこで締める。
+2. そのあとに、上記のコアニーズ候補から **意味の一行（IT変換）** を 1 行ほど入れてみる。
+3. 最後は、soulNote.step_phrase などをもとに
+   「いまの自分が選べる小さな一手」を一文で提案し、そこで終える流れも選べます。
 
-- 「ポジティブになろう」と煽るためではなく、
-  「本当はどんな意志が動いているのか」に静かに気づける一行として使ってください。`;
+- 「ポジティブになろう」と押し上げるためではなく、
+  「本当はどんな意志が動いているのか」に静かに気づける一行として扱うイメージです。`;
 }
 
 /* =========================================================
@@ -539,7 +545,7 @@ export async function generateIrosReply(
   const { text: rawText, meta } = args;
   const anyMeta = meta as any;
 
-  // 初回ターンかどうか（I/T IT変換の安全判定にだけ使う）
+  // 初回ターンかどうか（I/T IT変換や soulNote 露出の判定に使う）
   const isFirstTurn = !args.history || args.history.length === 0;
 
   // ★ digest 付きテキストから「今回のユーザー発言」だけを切り出す
@@ -561,7 +567,10 @@ ${currentUserText}`;
   let system = getSystemPrompt(meta);
 
   // 状態メタ（数値・コード）を JSON で system にだけ載せる
-  const numericMetaNote = buildNumericMetaNote(meta);
+  // 初回ターンは soulNote をまだ前面に出さない
+  const numericMetaNote = buildNumericMetaNote(meta, {
+    includeSoulNote: !isFirstTurn,
+  });
   if (numericMetaNote && numericMetaNote.trim().length > 0) {
     system = `${system}\n\n${numericMetaNote}`;
   }
@@ -571,6 +580,7 @@ ${currentUserText}`;
   if (topicContextNote && topicContextNote.trim().length > 0) {
     system = `${system}\n\n${topicContextNote}`;
   }
+
   // 会話履歴ダイジェスト（あれば）を system に追加
   const historyDigestNote = buildHistoryDigestNote(meta);
   if (historyDigestNote && historyDigestNote.trim().length > 0) {
@@ -591,8 +601,8 @@ ${currentUserText}`;
 
   // 🔸 I/T 層 IT変換ノートを、条件を満たすときだけ system に追加
   //    - depth が I*/T* / mode=vision / intentBand=I* などのとき
-  //    - Q5_depress や self_harm_risk / SA 極端に低い ときは自動で無効化
-  const itNote = buildIntentionReframeNote(meta);
+  //    - Q5_depress や self_harm_risk / SA 極端に低い / 初回ターン では自動で無効化
+  const itNote = buildIntentionReframeNote(meta, { isFirstTurn });
   if (itNote && itNote.trim().length > 0) {
     system = `${system}\n\n${itNote}`;
   }
@@ -603,14 +613,14 @@ ${currentUserText}`;
   if (isIrDiagnosisTurn) {
     system = `${system}
 
-# 現在のターンは「ir診断モード」です
+# 現在のターンは「ir診断モード」に入っています
 
 ユーザーの直近の入力に ir診断系の語（${IR_DIAG_KEYWORDS.join(
       ' / ',
     )}）が含まれています。
-**このターンの返答は、必ず ir診断モードのフォーマットだけを 1 回だけ出力してください。**
+このターンの返答は、ir診断モードのフォーマットだけを 1 回だけ出力する構成をとってください。
 
-フォーマット（順番も固定）：
+フォーマット（順番固定）：
 1. \`🧿 観測対象：...\`
 2. \`🪔 irosからの一句：...\`（2行以内）
 3. \`構造スキャン\`
@@ -620,9 +630,9 @@ ${currentUserText}`;
 4. \`🌀 その瞬間の揺れ：...\`（1〜3文）
 5. \`🌱 次の一手：...\`（ユーザーが「これだけはやってみよう」と思える一手を 1つ）
 
-上記 5 ブロック以外の通常会話文は書かないでください。
+上記 5 ブロック以外の通常会話文は混ぜない構造にします。
 特に、\`🌌 Future Seed\` や \`T1/T2/T3\` など
-Future-Seed 専用の文言は **一切出してはいけません**。`;
+Future-Seed 専用の文言はこのモードでは使わない前提です。`;
   }
 
   // デバッグログ
