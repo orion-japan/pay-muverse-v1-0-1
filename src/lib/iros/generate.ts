@@ -23,6 +23,10 @@ import {
 } from './system';
 import type { IntentLineAnalysis } from './intent/intentLineEngine';
 
+// ★ 追加：Soul コンテキスト（orion固有）連携
+import type { SoulReplyContext } from './soul/composeSoulReply';
+import { buildPersonalContextFromSoul } from './personalContext';
+
 const IROS_MODEL =
   process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-4o';
 
@@ -108,12 +112,12 @@ function buildNumericMetaNote(
   }
 
   const yLevel =
-    typeof anyMeta.yLevel === 'number'
-      ? (anyMeta.yLevel as number)
-      : null;
-  if (yLevel != null && !Number.isNaN(yLevel)) {
-    payload.yLevel = yLevel;
-  }
+  typeof anyMeta.yLevel === 'number'
+    ? (anyMeta.yLevel as number)
+    : null;
+if (yLevel != null && !Number.isNaN(yLevel)) {
+  payload.yLevel = yLevel;
+}
 
   const hLevel =
     typeof anyMeta.hLevel === 'number'
@@ -565,6 +569,35 @@ ${currentUserText}`;
 
   // ベースの SYSTEM
   let system = getSystemPrompt(meta);
+
+  // 🔸 Soul / 揺らぎロジックに同期した「orion固有コンテキスト」
+  // - S層 × tone=minimal のときは intensity=none → 何も追加しない
+  // - I/T層 や Q5リスクなど深い/揺れが大きいときだけ strong で濃く効かせる
+  if (meta && anyMeta?.soulNote) {
+    const soulCtx: SoulReplyContext = {
+      userText: currentUserText ?? '',
+      qCode: typeof anyMeta.qCode === 'string' ? anyMeta.qCode : undefined,
+      depthStage: typeof meta.depth === 'string' ? meta.depth : undefined,
+      styleHint:
+        typeof anyMeta.style === 'string'
+          ? anyMeta.style
+          : undefined,
+      soulNote: anyMeta.soulNote,
+    };
+
+    const personal = buildPersonalContextFromSoul({
+      soulCtx,
+      // topicLabel は必要になったら route.ts 側から meta.extra 等で渡す
+      topicLabel: undefined,
+    });
+
+    if (personal.text && personal.text.trim().length > 0) {
+      system = `${system}\n\n${personal.text}`;
+      console.log('[IROS][generate] personalContext', {
+        intensity: personal.intensity,
+      });
+    }
+  }
 
   // 状態メタ（数値・コード）を JSON で system にだけ載せる
   // 初回ターンは soulNote をまだ前面に出さない

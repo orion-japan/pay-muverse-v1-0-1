@@ -58,6 +58,9 @@ import { shouldUseSoul } from './soul/shouldUseSoul';
 import { runIrosSoul } from './soul/runIrosSoul';
 import type { IrosSoulInput } from './soul/types';
 
+// ★ 今日できること？トリガー検出
+import { detectActionRequest } from './will/detectActionRequest';
+
 // ==== I層強制モード（ENV） ====
 //   - true のとき、requestedDepth を優先して depth を固定する
 const FORCE_I_LAYER =
@@ -415,7 +418,7 @@ export async function runIrosTurn(
   // ----------------------------------------------------------------
   // 7. Will フェーズ：Goal / Priority の決定
   // ----------------------------------------------------------------
-  const { goal, priority } = computeGoalAndPriority({
+  let { goal, priority } = computeGoalAndPriority({
     text,
     depth: meta.depth,
     qCode: meta.qCode,
@@ -424,6 +427,49 @@ export async function runIrosTurn(
     // ★ 追加
     soulNote: (meta as any).soulNote ?? null,
   });
+
+  // ★ 「今日できること？」など、具体的な一歩を求めるターンなら
+  //    forward 重みをブーストして、問い返しより行動提案を優先させる
+  const isActionRequest = detectActionRequest(text);
+
+  if (isActionRequest && priority) {
+    const anyPriority = priority as any;
+    const weights = { ...(anyPriority.weights || {}) };
+
+    const currentForward =
+      typeof weights.forward === 'number' ? weights.forward : 0;
+    const currentMirror =
+      typeof weights.mirror === 'number' ? weights.mirror : 0.8;
+
+    // forward を 0.8 以上に引き上げ、mirror は少しだけ抑える
+    weights.forward = Math.max(currentForward, 0.8);
+    weights.mirror = Math.min(currentMirror, 0.7);
+
+    anyPriority.weights = weights;
+
+    // debugNote にフラグを追加（ログ確認用）
+    const baseDebug: string =
+      typeof anyPriority.debugNote === 'string'
+        ? anyPriority.debugNote
+        : '';
+    anyPriority.debugNote = baseDebug
+      ? `${baseDebug} +actionRequest`
+      : 'actionRequest';
+
+    priority = anyPriority as IrosPriorityType;
+
+    // goal の理由だけ、今日の一歩向きに寄せておく（kind はそのまま）
+    if (goal) {
+      const anyGoal = goal as any;
+      const baseReason: string =
+        typeof anyGoal.reason === 'string' ? anyGoal.reason : '';
+      if (!baseReason) {
+        anyGoal.reason =
+          'ユーザーが「今日できること？」と具体的な一歩を求めているため、forward を優先';
+      }
+      goal = anyGoal as IrosGoalType;
+    }
+  }
 
   (meta as any).goal = goal;
   (meta as any).priority = priority;
@@ -529,4 +575,3 @@ function normalizeQCode(qCode?: QCode): QCode | undefined {
   if (!qCode) return undefined;
   return QCODE_VALUES.includes(qCode) ? qCode : undefined;
 }
-
