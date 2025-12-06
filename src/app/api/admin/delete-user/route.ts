@@ -20,14 +20,15 @@ function initFirebaseAdmin() {
   }
 
   const json = process.env.FIREBASE_ADMIN_CREDENTIALS_JSON;
-  if (!json) {
+if (!json) {
+  if (process.env.NODE_ENV !== 'production') {
     console.warn(
       '[admin/delete-user] FIREBASE_ADMIN_CREDENTIALS_JSON is not set; firebase admin will be skipped',
     );
-    firebaseReady = false;
-    return;
   }
-
+  firebaseReady = false;
+  return;
+}
   try {
     const serviceAccount = JSON.parse(json) as ServiceAccount;
 
