@@ -20,6 +20,76 @@ export type SoulReplyContext = {
   soulNote?: SoulNoteLike | null;
 };
 
+/* ========= 内部トーン型 & ゆらぎヘルパー ========= */
+
+// ★ここだけ差し替え
+
+type SoulTone = 'minimal' | 'gentle' | 'normal';
+
+/**
+ * LLM から返ってくる tone_hint を、内部トーン型に正規化
+ */
+function normalizeTone(raw: string | null | undefined): SoulTone {
+  const t = (raw ?? '').toLowerCase().trim();
+
+  // そのまま使える値
+  if (t === 'minimal' || t === 'gentle' || t === 'normal') {
+    return t;
+  }
+
+  // LLM がよく返しそうなバリエーション
+  if (t === 'soft' || t === 'softly' || t === 'warm-soft' || t === 'calm') {
+    // やわらかめのトーン → internal 上は gentle 扱いにする
+    return 'gentle';
+  }
+
+  // それ以外はデフォルト
+  return 'normal';
+}
+
+
+/**
+ * Soul のトーンを、低確率で「となりのトーン」にだけ揺らす。
+ * - Q5 リスク時は一切揺らさない（安全優先）
+ * - 「キャラ変」ではなく、「今日は少しだけやさしめ」程度の微変化
+ */
+function applySoulToneJitter(
+  baseTone: SoulTone,
+  opts: { qCode?: string | null; isQ5Risk: boolean },
+): SoulTone {
+  if (opts.isQ5Risk) return baseTone;
+
+  const r = Math.random();
+
+  switch (baseTone) {
+    case 'minimal': {
+      // たまにだけ、すこしやわらかく
+      if (r < 0.1) return 'gentle';
+      return 'minimal';
+    }
+    case 'gentle': {
+      // ごく稀に、キュッと最小限寄り or ほんの少し濃いめ
+      if (r < 0.08) return 'minimal';
+      if (r < 0.16) return 'normal';
+      return 'gentle';
+    }
+    case 'normal':
+    default: {
+      // Q2（成長モード）なら、やや gentle 偏重
+      if (opts.qCode === 'Q2') {
+        if (r < 0.12) return 'gentle';
+        if (r < 0.18) return 'minimal';
+        return 'normal';
+      }
+
+      // それ以外はごく小さく揺らす
+      if (r < 0.06) return 'minimal';
+      if (r < 0.12) return 'gentle';
+      return 'normal';
+    }
+  }
+}
+
 /**
  * SoulNote をもとに、「1〜3段落くらいの短い返信コア」を作る。
  * - ここで作ったテキストを、そのまま Iros の返信本文として使ってもいいし、
@@ -41,15 +111,24 @@ export function composeSoulReply(ctx: SoulReplyContext): string {
   const coreNeed = soulNote.core_need?.trim();
   const step = soulNote.step_phrase?.trim();
   const soulSent = soulNote.soul_sentence?.trim();
-  const tone = (soulNote.tone_hint ?? '').toLowerCase();
   const riskFlags = soulNote.risk_flags ?? [];
 
   const isQ5Risk = riskFlags.includes('q5_depress') || qCode === 'Q5';
 
+  // ★ Soul のトーンを正規化 → ゆらぎ適用
+  const baseTone = normalizeTone(soulNote.tone_hint);
+  const effectiveTone = applySoulToneJitter(baseTone, { qCode, isQ5Risk });
+
   const lines: string[] = [];
 
   // ① 現在の状態をやわらかく受け止めるブロック（短く）
-  lines.push(buildOpeningLine(userText, { tone, styleHint, isQ5Risk }));
+  lines.push(
+    buildOpeningLine(userText, {
+      tone: effectiveTone,
+      styleHint,
+      isQ5Risk,
+    }),
+  );
 
   // ② core_need を「願い」として映し返すブロック
   if (coreNeed) {
@@ -87,7 +166,7 @@ function trimToOneLine(text: string | null | undefined): string {
 
 function buildOpeningLine(
   userText: string,
-  opts: { tone: string; styleHint?: string | null; isQ5Risk: boolean },
+  opts: { tone: SoulTone; styleHint?: string | null; isQ5Risk: boolean },
 ): string {
   const short = trimToOneLine(userText);
 
@@ -100,10 +179,25 @@ function buildOpeningLine(
   }
 
   if (short) {
-    return `「${short}」と打ち明けてくれてありがとう。その気持ちが出てきたこと自体が、大事なサインに見えるよ。`;
+    // tone によってニュアンスを微調整
+    if (opts.tone === 'minimal') {
+      return `「${short}」と感じているんだね。その気持ちが出てきたことだけ、いまは大事にしよう。`;
+    }
+    if (opts.tone === 'gentle') {
+      return `「${short}」と打ち明けてくれてありがとう。その気持ちが出てきたこと自体が、大事なサインに見えるよ。`;
+    }
+    // normal
+    return `「${short}」と感じている自分を、そのままここに置いておける場所だよ。まずは、そう思った自分を認めてあげてほしい。`;
   }
 
-  return 'いま感じていることを、ここに置いてくれてありがとう。その気持ちが出てきたこと自体が、大事なサインに見えるよ。';
+  // ユーザー文が空に近い場合
+  if (opts.tone === 'minimal') {
+    return 'いま感じていることを、言葉にならないままここに置いておいても大丈夫だよ。';
+  }
+  if (opts.tone === 'gentle') {
+    return 'いま感じていることを、ここに置いてくれてありがとう。その気持ちが出てきたこと自体が、大事なサインに見えるよ。';
+  }
+  return 'うまく言葉にならなくても、いまの自分をそのままここに預けてくれて大丈夫だよ。';
 }
 
 function buildCoreNeedLine(
