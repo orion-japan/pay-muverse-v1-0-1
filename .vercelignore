@@ -1,0 +1,2 @@
+# Vercel build should ignore Yarn lock to enforce npm
+yarn.lock
