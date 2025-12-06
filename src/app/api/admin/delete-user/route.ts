@@ -1,21 +1,40 @@
+// app/api/admin/delete-user/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import admin from 'firebase-admin';
+import admin, { ServiceAccount } from 'firebase-admin';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
-// Firebase Admin 初期化（Vercel で credentials ファイルが無い場合でもビルドが落ちないようにする）
+// Firebase Admin 初期化（JSON 環境変数からのみ読む / ファイルは使わない）
 let firebaseReady = false;
 
-if (!admin.apps.length) {
+function initFirebaseAdmin() {
+  if (firebaseReady) return;
+
+  if (admin.apps.length) {
+    firebaseReady = true;
+    return;
+  }
+
+  const json = process.env.FIREBASE_ADMIN_CREDENTIALS_JSON;
+  if (!json) {
+    console.warn(
+      '[admin/delete-user] FIREBASE_ADMIN_CREDENTIALS_JSON is not set; firebase admin will be skipped',
+    );
+    firebaseReady = false;
+    return;
+  }
+
   try {
+    const serviceAccount = JSON.parse(json) as ServiceAccount;
+
     admin.initializeApp({
-      // Vercel では GOOGLE_APPLICATION_CREDENTIALS / メタデータなどから自動取得を試みる
-      credential: admin.credential.applicationDefault(),
+      credential: admin.credential.cert(serviceAccount),
     });
+
     firebaseReady = true;
   } catch (err) {
     console.warn(
@@ -25,6 +44,9 @@ if (!admin.apps.length) {
     firebaseReady = false;
   }
 }
+
+// モジュール読み込み時に一度だけ初期化を試みる
+initFirebaseAdmin();
 
 export async function POST(req: NextRequest) {
   const { user_code } = await req.json();
