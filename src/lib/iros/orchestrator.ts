@@ -97,6 +97,80 @@ export type IrosOrchestratorResult = {
   meta: IrosMeta;
 };
 
+/* ============================================================================
+ * 任せる系（delegate intent）オーバーライド
+ * ========================================================================== */
+
+/**
+ * ユーザーが「任せる／決めて／進めて／動かして／動ける形に／選択させないで」
+ * などの **決定権の委譲** をしているとき、
+ *
+ * - goal.kind を 'enableAction' に寄せる
+ * - goal.targetDepth / priority.goal.targetDepth を 'C1' に固定
+ * - forward 重みを強くし、mirror を下げる
+ *
+ * ことで、S2 uncover 固定から「行動フェーズ（C1）」へ drift させる。
+ */
+// 任せる系（delegate intent）オーバーライド
+function applyDelegateIntentOverride(params: {
+  goal: IrosGoalType;
+  priority: IrosPriorityType;
+  text: string;
+}): { goal: IrosGoalType; priority: IrosPriorityType } {
+  const { goal, priority, text } = params;
+
+  const delegatePattern =
+    /(任せ|決めて|進めて|導いて|動かして|動ける形|選択させないで)/;
+
+  if (!delegatePattern.test(text)) {
+    return { goal, priority };
+  }
+
+  // goal を any で柔らかく扱う
+  const anyGoal: any = { ...(goal as any) };
+
+  anyGoal.kind = 'enableAction';
+  anyGoal.targetDepth = 'C1';
+
+  if (typeof anyGoal.reason !== 'string' || !anyGoal.reason) {
+    anyGoal.reason =
+      'delegateIntent: ユーザーが決定権を Iros に委ねたため、C1 方向の行動フェーズへ drift';
+  }
+
+  // priority も any で扱う
+  const anyPriority: any = { ...(priority as any) };
+  if (!anyPriority.goal) anyPriority.goal = {};
+  if (!anyPriority.weights) anyPriority.weights = {};
+
+  const weights = anyPriority.weights;
+
+  const currentForward =
+    typeof weights.forward === 'number' ? weights.forward : 0;
+  const currentMirror =
+    typeof weights.mirror === 'number' ? weights.mirror : 0.8;
+
+  // 行動寄りへ強制シフト
+  weights.forward = Math.max(currentForward, 0.9);
+  weights.mirror = Math.min(currentMirror, 0.4);
+
+  anyPriority.goal.targetDepth = 'C1';
+  anyPriority.goal.kind = anyGoal.kind;
+
+  const baseDebug: string =
+    typeof anyPriority.debugNote === 'string'
+      ? anyPriority.debugNote
+      : '';
+  anyPriority.debugNote = baseDebug
+    ? `${baseDebug} +delegateIntent`
+    : 'delegateIntent';
+
+  return {
+    goal: anyGoal as IrosGoalType,
+    priority: anyPriority as IrosPriorityType,
+  };
+}
+
+
 // src/lib/iros/orchestrator.ts
 // Iros Orchestrator — Will Engine（Goal / Priority）+ Continuity Engine 統合版
 
@@ -424,6 +498,14 @@ export async function runIrosTurn(
     soulNote: (meta as any).soulNote ?? null,
   });
 
+  // ★ delegate intent（任せる／決めて／進めて／動かして...）のとき、
+  //    goal.kind / targetDepth / weights を C1 行動フェーズ寄りに上書き
+  ({ goal, priority } = applyDelegateIntentOverride({
+    goal: goal ?? null,
+    priority: priority ?? null,
+    text,
+  }));
+
   // ★ 「今日できること？」など、具体的な一歩を求めるターンなら
   //    forward 重みをブーストして、問い返しより行動提案を優先させる
   const isActionRequest = detectActionRequest(text);
@@ -483,8 +565,6 @@ export async function runIrosTurn(
   // （テンプレ適用は行わない。LLM と Soul に任せる）
   content = stripDiagnosticHeader(content);
 
-
-
   // ----------------------------------------------------------------
   // 10. meta の最終調整：Goal.targetDepth を depth に反映
   // ----------------------------------------------------------------
@@ -505,11 +585,11 @@ export async function runIrosTurn(
 
   // unified.depth.stage にも同じものを流し込む
   if ((finalMeta as any).unified) {
-    const unified = (finalMeta as any).unified || {};
-    const unifiedDepth = unified.depth || {};
+    const unifiedAny = (finalMeta as any).unified || {};
+    const unifiedDepth = unifiedAny.depth || {};
 
     (finalMeta as any).unified = {
-      ...unified,
+      ...unifiedAny,
       depth: {
         ...unifiedDepth,
         stage:
@@ -594,7 +674,6 @@ export async function runIrosTurn(
     meta: finalMeta,
   };
 }
-
 
 /* ============================================================================
  * 補助：Depth / QCode 正規化
