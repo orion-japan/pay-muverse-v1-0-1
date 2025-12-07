@@ -181,7 +181,7 @@ export async function runIrosTurn(
   });
 
   const {
-    depth: resolvedDepth,
+    depth,
     qCode: resolvedQCode,
     selfAcceptanceLine,
     unified,
@@ -205,7 +205,7 @@ export async function runIrosTurn(
   // ----------------------------------------------------------------
   let meta: IrosMeta = {
     ...(mergedBaseMeta as IrosMeta),
-    depth: resolvedDepth ?? normalizedDepth,
+    depth: normalizedDepth,
     qCode: resolvedQCode ?? normalizedQCode,
     selfAcceptance:
       typeof selfAcceptanceLine === 'number'
@@ -221,11 +221,7 @@ export async function runIrosTurn(
         : mergedBaseMeta.hLevel ?? null,
     intentLine: intentLine ?? mergedBaseMeta.intentLine ?? null,
     tLayerHint: normalizedTLayer ?? mergedBaseMeta.tLayerHint ?? null,
-    hasFutureMemory:
-      typeof hasFutureMemory === 'boolean'
-        ? hasFutureMemory
-        : mergedBaseMeta.hasFutureMemory ?? null,
-    unified: unified ?? mergedBaseMeta.unified ?? null,
+    hasFutureMemory,
   };
 
   if (qTrace) {
@@ -487,21 +483,73 @@ export async function runIrosTurn(
   // （テンプレ適用は行わない。LLM と Soul に任せる）
   content = stripDiagnosticHeader(content);
 
+
+
   // ----------------------------------------------------------------
-  // 9. MemoryState 保存
+  // 10. meta の最終調整：Goal.targetDepth を depth に反映
   // ----------------------------------------------------------------
-  if (userCode) {
-    await saveMemoryStateFromMeta({
-      userCode,
-      meta,
+  // ここまでで meta / goal / priority は確定している前提
+
+  // まず「どの Depth を採用するか」を1本にまとめる
+  const resolvedDepth: Depth | null =
+    (goal?.targetDepth as Depth | undefined) ??
+    (meta.depth as Depth | undefined) ??
+    (meta.unified?.depth?.stage as Depth | null) ??
+    null;
+
+  // meta を上書きコピー
+  let finalMeta: IrosMeta = {
+    ...meta,
+    depth: resolvedDepth ?? undefined,
+  };
+
+  // unified.depth.stage にも同じものを流し込む
+  if ((finalMeta as any).unified) {
+    const unified = (finalMeta as any).unified || {};
+    const unifiedDepth = unified.depth || {};
+
+    (finalMeta as any).unified = {
+      ...unified,
+      depth: {
+        ...unifiedDepth,
+        stage:
+          resolvedDepth ??
+          unifiedDepth.stage ??
+          null,
+      },
+    };
+  }
+
+  // 開発時ログ（ここで depth が見えるように）
+  if (
+    typeof process !== 'undefined' &&
+    process.env.NODE_ENV !== 'production'
+  ) {
+    // eslint-disable-next-line no-console
+    console.log('[IROS/Orchestrator] result.meta', {
+      depth: finalMeta.depth,
+      qCode: finalMeta.qCode,
+      goalKind: goal?.kind,
+      goalTargetDepth: goal?.targetDepth,
+      priorityTargetDepth: priority?.goal?.targetDepth,
     });
   }
 
   // ----------------------------------------------------------------
-  // 9.5 Person Intent Memory 保存（ir診断ターンのみ）
+  // 11. MemoryState 保存（finalMeta ベース）
   // ----------------------------------------------------------------
-  if (userCode && meta) {
-    const anyMeta = meta as any;
+  if (userCode) {
+    await saveMemoryStateFromMeta({
+      userCode,
+      meta: finalMeta,
+    });
+  }
+
+  // ----------------------------------------------------------------
+  // 11.5 Person Intent Memory 保存（ir診断ターンのみ）
+  // ----------------------------------------------------------------
+  if (userCode && finalMeta) {
+    const anyMeta = finalMeta as any;
     const isIrDiagnosisTurn = !!anyMeta.isIrDiagnosisTurn;
 
     if (isIrDiagnosisTurn) {
@@ -520,13 +568,13 @@ export async function runIrosTurn(
           ownerUserCode: userCode,
           targetType: 'ir-diagnosis',
           targetLabel: label,
-          qPrimary: meta.qCode ?? null,
-          depthStage: meta.depth ?? null,
-          phase: meta.phase ?? null,
-          tLayerHint: meta.tLayerHint ?? null,
+          qPrimary: finalMeta.qCode ?? null,
+          depthStage: finalMeta.depth ?? null,
+          phase: finalMeta.phase ?? null,
+          tLayerHint: finalMeta.tLayerHint ?? null,
           selfAcceptance:
-            typeof meta.selfAcceptance === 'number'
-              ? meta.selfAcceptance
+            typeof finalMeta.selfAcceptance === 'number'
+              ? finalMeta.selfAcceptance
               : null,
         });
       } catch (e) {
@@ -539,11 +587,11 @@ export async function runIrosTurn(
   }
 
   // ----------------------------------------------------------------
-  // 10. Orchestrator 結果として返却
+  // 12. Orchestrator 結果として返却
   // ----------------------------------------------------------------
   return {
     content,
-    meta,
+    meta: finalMeta,
   };
 }
 

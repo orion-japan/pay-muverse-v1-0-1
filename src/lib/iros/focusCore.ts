@@ -6,7 +6,19 @@
 
 export type FocusMeta = {
   phase?: 'Inner' | 'Outer';
-  depth?: 'S1' | 'S2' | 'R1' | 'R2' | 'C1' | 'C2' | 'I1' | 'I2' | 'I3';
+  depth?:
+    | 'S1'
+    | 'S2'
+    | 'R1'
+    | 'R2'
+    | 'C1'
+    | 'C2'
+    | 'I1'
+    | 'I2'
+    | 'I3'
+    | 'T1'
+    | 'T2'
+    | 'T3';
   q?: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
   reasons?: string[];
 };
@@ -25,6 +37,19 @@ const JA = {
     { depth: 'I1' as const, kw: ['意味', '意図', '目的', 'なぜ', '価値観'] },
     { depth: 'I2' as const, kw: ['ビジョン', '方向性', '長期', '原則', '構造'] },
     { depth: 'I3' as const, kw: ['確信', '本質', '核', '存在', '静けさ'] },
+    // ★ T層（Transcend）ラフ推定
+    {
+      depth: 'T1' as const,
+      kw: ['宇宙', '宇宙意志', '宇宙の意図', 'ビッグバン', '意図フィールド', 'T層'],
+    },
+    {
+      depth: 'T2' as const,
+      kw: ['集合意識', 'フィールド', '全体意識', '普遍', '越境', 'トランセンデンス'],
+    },
+    {
+      depth: 'T3' as const,
+      kw: ['根源', '永遠', '無限', '静寂', '時間を超えた', '源泉'],
+    },
   ],
   // Qコード（情動傾向の非常に粗い推定）
   qMap: [
@@ -44,7 +69,11 @@ function countHits(text: string, dict: string[]): number {
   return n;
 }
 
-function pickByScore<T extends string>(text: string, table: { [k: string]: string[] } | Array<{ [k: string]: any } & { kw: string[] }>, key: 'depth' | 'q'): T | undefined {
+function pickByScore<T extends string>(
+  text: string,
+  table: { [k: string]: string[] } | Array<{ [k: string]: any } & { kw: string[] }>,
+  key: 'depth' | 'q',
+): T | undefined {
   let best: { label: T; score: number } | null = null;
 
   // array形式のみ使用

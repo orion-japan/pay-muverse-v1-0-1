@@ -1,6 +1,6 @@
 // src/lib/iros/deepScan.ts
 // Iros DeepScan — 1ターン分のテキストから
-// - Depth(S/R/C/I)
+// - Depth(S/R/C/I/T)
 // - Phase(Inner/Outer)
 // - QCode(Q1〜Q5)
 // をざっくり推定する軽量アルゴリズム
@@ -21,14 +21,27 @@ function norm(text: string): string {
 /* ========= Depth 判定 ========= */
 /**
  * 旧 detectDepthFromText を少し拡張版
- * - I層ワードを最優先
+ * - T層ワードを最優先
+ * - 次に I層ワード
  * - 次に C / R / S をざっくり見る
  */
 function inferDepth(text: string): Depth | null {
   const t = norm(text);
   if (!t) return null;
 
-  // Intention 層
+  // Transcend 層（T1〜T3）
+  // ※「宇宙意志・フィールド・根源」などの語を優先
+  if (/(根源|源泉|永遠|無限|時間を超えた|静寂|沈黙そのもの)/.test(t)) {
+    return 'T3';
+  }
+  if (/(集合意識|全体意識|フィールド|場そのもの|普遍|トランセンデンス|越境)/.test(t)) {
+    return 'T2';
+  }
+  if (/(宇宙|宇宙意志|宇宙の意図|ビッグバン|意図フィールド|T層)/.test(t)) {
+    return 'T1';
+  }
+
+  // Intention 層（I1〜I3）
   if (/(何のために|使命|存在理由|生きている意味|生き方|魂|本質)/.test(t)) {
     return 'I3';
   }
@@ -39,7 +52,7 @@ function inferDepth(text: string): Depth | null {
     return 'I1';
   }
 
-  // Creation 層
+  // Creation 層（C1〜C3）
   if (/(プロジェクト|仕組み|設計|システム|ロードマップ|戦略|計画)/.test(t)) {
     return 'C3';
   }
@@ -50,7 +63,7 @@ function inferDepth(text: string): Depth | null {
     return 'C1';
   }
 
-  // Resonance 層
+  // Resonance 層（R1〜R3）
   if (/(人間関係|チーム|組織|社内|家族|パートナー|友達|上司|部下)/.test(t)) {
     return 'R2';
   }
@@ -61,7 +74,7 @@ function inferDepth(text: string): Depth | null {
     return 'R3';
   }
 
-  // Self 層
+  // Self 層（S1〜S3）
   if (/(自分がわからない|自分を責めてしまう|自己否定|自己肯定)/.test(t)) {
     return 'S3';
   }
@@ -129,6 +142,9 @@ function inferQ(text: string): QCode | null {
 function buildIntentSummary(depth: Depth | null): string {
   if (!depth) {
     return '自分の状態や感情の揺れを整理しようとしています。';
+  }
+  if (depth.startsWith('T')) {
+    return '宇宙意志や意図フィールドの流れと、自分の今を重ね合わせようとしています。';
   }
   if (depth.startsWith('I')) {
     return '生き方や存在意図そのものに静かに触れようとしています。';

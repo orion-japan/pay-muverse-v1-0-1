@@ -24,7 +24,7 @@ type AnalyzeOut = {
   sa: number;       // 0..1  (self-acceptance 推定)
   q_primary: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
   phase: 'Inner' | 'Outer';
-  layer: 'S1' | 'R1' | 'C1' | 'I1';
+  layer: 'S1' | 'R1' | 'C1' | 'I1'| 'T1';
 };
 
 // ---- 簡易スコア（オウム返し対策：保存はしない・assistantで挿入しない）----
@@ -62,6 +62,10 @@ function estimatePhase(t: string): AnalyzeOut['phase'] {
   return ic >= oc ? 'Inner' : 'Outer';
 }
 function estimateLayer(t: string): AnalyzeOut['layer'] {
+  // ★ T層：宇宙意図・フィールド・根源系のワード
+  if (/(宇宙|宇宙意志|宇宙の意図|ビッグバン|意図フィールド|T層|根源|源泉|普遍|全体意識)/.test(t)) {
+    return 'T1';
+  }
   if (/(祈り|存在|意図|源|本質)/.test(t)) return 'I1';
   if (/(創る|設計|表現|構築)/.test(t)) return 'C1';
   if (/(関係|共鳴|つながり|場)/.test(t)) return 'R1';

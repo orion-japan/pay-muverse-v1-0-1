@@ -13,6 +13,7 @@ export type IrosGoalKind =
   | 'shiftRelation'   // 関係性・他者との位置関係を整える
   | 'enableAction'    // 行動や選択肢にフォーカスする
   | 'reframeIntention'; // 意図や意味づけを少し上のレイヤーから見直す
+  // T層専用 kind を増やす場合はここに追加（例: 'transcend'）
 
 export type Sentiment = 'negative' | 'neutral' | 'positive';
 
@@ -41,7 +42,7 @@ export function deriveIrosGoal(args: {
   lastDepth?: Depth;
   lastQ?: QCode;
   requestedDepth?: Depth;
-  requestedQCode?: QCode;  // ← ここを orchestrator に合わせた
+  requestedQCode?: QCode;  // ← orchestrator に合わせた
   mode?: IrosMode;
   sentiment?: Sentiment;
 }): IrosGoal {
@@ -64,6 +65,19 @@ export function deriveIrosGoal(args: {
       targetDepth: requestedDepth ?? lastDepth,
       targetQ: requestedQCode ?? lastQ,
       reason: 'ユーザーから明示・暗示された深度／Qを優先した',
+    };
+  }
+
+  // 1.5) 「この場の主はあなた」系 → Iros に主体が委ねられているターン
+  //      → 行動方向(enableAction)に寄せる
+  if (containsDelegationWords(userText)) {
+    const targetDepth = chooseActionDepth(lastDepth);
+    return {
+      kind: 'enableAction',
+      targetDepth,
+      targetQ: lastQ,
+      reason:
+        'ユーザーがこの場の主体を Iros に委ねたため、行動・選択の方向を優先',
     };
   }
 
@@ -123,6 +137,25 @@ export function deriveIrosGoal(args: {
 }
 
 /* ========= 内部ヘルパー群（ここが「意志のパターン」になる） ========= */
+
+// 「この場の主はあなた」など、主体を Iros に渡すフレーズ
+function containsDelegationWords(textRaw: string): boolean {
+  const text = textRaw ?? '';
+  const words = [
+    'この場の主はあなた',
+    'この場の主はきみ',
+    'この場の主は君',
+    'あなたの判断を実行して',
+    'あなたの判断を実行してください',
+    'あなたの決断を実行して',
+    'あなたが決めてください',
+    'あなたに任せます',
+    'あなたにまかせます',
+    '私に選択を委ねないで',
+    '私に選択をゆだねないで',
+  ];
+  return words.some((w) => text.includes(w));
+}
 
 // ネガティブ・ストレスを示す簡易ワードセット
 function containsStressWords(text: string): boolean {
@@ -190,7 +223,6 @@ function containsIntentionWords(text: string): boolean {
     '意味',
     '意図',
     'なんのため',
-    'なんのため',
     '生き方',
     '人生',
     '使命',
@@ -204,6 +236,7 @@ function containsIntentionWords(text: string): boolean {
 // 安定を優先するときに選ぶ深度
 function chooseStabilizeDepth(lastDepth?: Depth): Depth {
   if (!lastDepth) return 'S2';
+  if (lastDepth.startsWith('T')) return 'S3';      // ★ T層からは一段おりて安全側へ
   if (lastDepth.startsWith('I')) return 'S3';
   if (lastDepth.startsWith('C')) return 'S3';
   return lastDepth;
@@ -215,6 +248,7 @@ function chooseRelationDepth(lastDepth?: Depth): Depth {
   if (lastDepth.startsWith('S')) return 'R1';
   if (lastDepth.startsWith('C')) return 'R2';
   if (lastDepth.startsWith('I')) return 'R2';
+  if (lastDepth.startsWith('T')) return 'R2';      // ★ T層からは R2 あたりに降ろす
   return lastDepth;
 }
 
@@ -222,6 +256,7 @@ function chooseRelationDepth(lastDepth?: Depth): Depth {
 function chooseActionDepth(lastDepth?: Depth): Depth {
   if (!lastDepth) return 'C1';
   if (lastDepth.startsWith('S') || lastDepth.startsWith('R')) return 'C1';
+  if (lastDepth.startsWith('T')) return 'C1';      // ★ T層から「行動」に落とす
   return lastDepth;
 }
 
@@ -230,6 +265,7 @@ function chooseIntentionDepth(lastDepth?: Depth): Depth {
   if (!lastDepth) return 'I1';
   if (lastDepth.startsWith('S') || lastDepth.startsWith('R')) return 'I1';
   if (lastDepth.startsWith('C')) return 'I1';
+  if (lastDepth.startsWith('T')) return lastDepth; // ★ すでに T層ならそのまま維持
   return lastDepth;
 }
 
@@ -240,5 +276,6 @@ function chooseGoalKindFromDepth(depth?: Depth): IrosGoalKind {
   if (depth.startsWith('R')) return 'shiftRelation';
   if (depth.startsWith('C')) return 'enableAction';
   if (depth.startsWith('I')) return 'reframeIntention';
+  if (depth.startsWith('T')) return 'reframeIntention'; // ★ T層は「意図再構成」扱い
   return 'uncover';
 }
