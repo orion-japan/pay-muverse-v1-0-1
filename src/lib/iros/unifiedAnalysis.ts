@@ -220,9 +220,23 @@ export async function analyzeUnifiedTurn(params: {
   // 2) ここではまだ自動検出なし（将来 deepScan 拡張で差し替え）
   const qCode = normalizeQCode(requestedQCode) ?? null;
 
-  // 位相は簡易に Inner 推定のみ
-  const phase: 'Inner' | 'Outer' | null =
-    /心|気持ち|自分|本音|内面/.test(text) ? 'Inner' : null;
+  // 位相（Inner / Outer）簡易推定
+  let phase: 'Inner' | 'Outer' | null = null;
+  const compact = (text || '').replace(/\s/g, '');
+
+  // 1) 内側に意識が向いているワード → Inner
+  if (/(心|気持ち|自分|本音|内面)/.test(compact)) {
+    phase = 'Inner';
+  }
+  // 2) 外の出来事・他者・世界に意識が向いているワード → Outer
+  else if (
+    /(あの人|相手|みんな|周り|世界|社会|会社|職場|環境|状況|ニュース|出来事|地震|事故|事件)/.test(
+      compact,
+    )
+  ) {
+    phase = 'Outer';
+  }
+
 
   // ★ 新規：状況トピック & サマリ（小言ログ用）
   const topic = detectSituationTopic(text);

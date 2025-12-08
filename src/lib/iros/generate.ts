@@ -712,6 +712,8 @@ ${currentUserText}`;
   const isIrDiagnosisTurn = hasIrDiagnosisTrigger(currentUserText);
 
   // ★ 主体OSテンプレ：通常モードのときだけ適用
+  //   → いまはテンプレ会話になるので一旦停止する
+  /*
   if (!isIrDiagnosisTurn) {
     system = `${system}
 
@@ -728,6 +730,8 @@ ${currentUserText}`;
   この一文を非表示にする場合がありますが、
   Iros は毎ターンこの方向宣言文を生成していて構いません。`;
   }
+  */
+
 
 
   // ir診断トリガーがあるターンでは、今回だけ診断フォーマットを必須にする
@@ -859,11 +863,10 @@ Future-Seed 専用の文言はこのモードでは使わない前提です。`;
   // ============================
   let finalContent = content;
 
-  // ★ ir診断モード以外のターンでは、
-  //    「いまは、この方向が流れです…」の一文をそっと添える
-  finalContent = appendDirectionDeclarationIfNeeded(finalContent, {
-    isIrDiagnosisTurn,
-  });
+  // ★ 方向宣言テンプレは一旦停止する
+  // finalContent = appendDirectionDeclarationIfNeeded(finalContent, {
+  //   isIrDiagnosisTurn,
+  // });
 
   return {
     content: finalContent,
@@ -872,4 +875,5 @@ Future-Seed 専用の文言はこのモードでは使わない前提です。`;
     intent,
     nextStep,
   };
+
 }

@@ -179,6 +179,32 @@ export async function runOrchestratorAnalysis(args: {
   };
 
   /* =========================================================
+     P) Phase（Inner / Outer）の統一
+     - unified / memoryState / baseMeta のどこかにあれば採用
+  ========================================================= */
+  let phase: 'Inner' | 'Outer' | null = null;
+
+  // 1) unified 側にすでに phase があればそれを最優先
+  const unifiedPhaseRaw: unknown = (unified as any).phase;
+  if (unifiedPhaseRaw === 'Inner' || unifiedPhaseRaw === 'Outer') {
+    phase = unifiedPhaseRaw;
+  } else if (memoryState?.phase === 'Inner' || memoryState?.phase === 'Outer') {
+    // 2) なければ MemoryState から補完
+    phase = memoryState.phase;
+  } else if (
+    baseMeta &&
+    ((baseMeta as any).phase === 'Inner' ||
+      (baseMeta as any).phase === 'Outer')
+  ) {
+    // 3) さらに無ければ baseMeta（前回 meta）から補完
+    phase = (baseMeta as any).phase as 'Inner' | 'Outer';
+  }
+
+  // fixedUnified にも phase を明示的に乗せておく
+  (fixedUnified as any).phase = phase;
+
+
+  /* =========================================================
      SA) Self Acceptance（自己肯定“ライン”）の決定
   ========================================================= */
 

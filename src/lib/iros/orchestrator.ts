@@ -315,6 +315,25 @@ export async function runIrosTurn(
     hasFutureMemory,
   };
 
+  // ----------------------------------------------------------------
+  // ★ Phase パース＆格納：Unified または baseMeta から採用
+  // ----------------------------------------------------------------
+  let phase: 'Inner' | 'Outer' | null = null;
+
+  const unifiedPhaseRaw =
+    (unified?.phase as string | undefined) ??
+    ((mergedBaseMeta as any)?.phase as string | undefined) ??
+    null;
+
+  if (typeof unifiedPhaseRaw === 'string') {
+    const p = unifiedPhaseRaw.trim().toLowerCase();
+    if (p === 'inner') phase = 'Inner';
+    else if (p === 'outer') phase = 'Outer';
+  }
+
+  (meta as any).phase = phase;
+
+
   if (qTrace) {
     (meta as any).qTrace = qTrace;
   }
