@@ -1,4 +1,3 @@
-// src/ui/iroschat/components/MessageList.tsx
 'use client';
 
 import React from 'react';
@@ -8,7 +7,11 @@ import { useAuth } from '@/context/AuthContext';
 import '../IrosChat.css';
 
 import ChatMarkdown from './ChatMarkdown';
+import IrosButton, {
+  IrosNextStepGear,
+} from './IrosButton';
 
+// メッセージ型
 type IrosMessage = {
   id: string;
   role: 'user' | 'assistant';
@@ -35,6 +38,17 @@ type IrosMessage = {
       | null;
     tLayerModeActive?: boolean;
     tLayerHint?: string | null;
+
+    // ★ WILLエンジンから返ってくる「次の一歩」候補
+    nextStep?: {
+      gear?: 'safety' | 'soft-rotate' | 'full-rotate' | string;
+      options?: {
+        key: string; // A / B / C / D など
+        label: string; // ボタンに表示する短い文
+        description?: string; // （あれば）説明文
+      }[];
+    };
+
     [key: string]: any;
   };
 
@@ -295,7 +309,6 @@ function normalizeBoldMarks(input: string): string {
   if (!input) return input;
 
   // 1) "** テキスト **" のように、内側の両端に空白がある場合
-  //    → Markdown で強調と認識されないことがあるので削る
   let out = input.replace(/\*\*\s+([^*][^*]*?)\s*\*\*/g, '**$1**');
 
   // 2) カギカッコごと太字→中身だけ太字
@@ -305,12 +318,16 @@ function normalizeBoldMarks(input: string): string {
   return out;
 }
 
-
 export default function MessageList() {
-  const { messages, loading, error } = useIrosChat() as {
+  const { messages, loading, error, sendNextStepChoice } = useIrosChat() as {
     messages: IrosMessage[];
     loading: boolean;
     error?: string | null;
+    sendNextStepChoice: (opt: {
+      key: string;
+      label: string;
+      gear?: string | null;
+    }) => Promise<any>;
   };
 
   const authVal = (typeof useAuth === 'function' ? useAuth() : {}) as {
@@ -385,7 +402,7 @@ export default function MessageList() {
         <div className={styles.emptyHint}>ここに会話が表示されます</div>
       )}
 
-      {messages.map((m, idx) => {
+      {messages.map((m) => {
         const isUser = m.role === 'user';
         const iconSrc = isUser ? resolveUserAvatar(m) : '/ir.png';
 
@@ -404,6 +421,8 @@ export default function MessageList() {
           !!m.meta?.tLayerModeActive === true;
 
         const tHint = m.meta?.tLayerHint || 'T2';
+
+        const nextStep = m.meta?.nextStep;
 
         return (
           <div
@@ -494,6 +513,7 @@ export default function MessageList() {
                 </div>
               )}
 
+              {/* 本文＋「次の一歩」ボタン */}
               <div
                 className={`msgBody ${
                   isVisionMode ? 'vision-theme' : ''
@@ -504,7 +524,48 @@ export default function MessageList() {
                   color: '#111827',
                 }}
               >
+                {/* 本文 */}
                 <ChatMarkdown text={safeText} />
+
+                {/* ★ WILLエンジンの「次の一歩」オプション（必要なときだけ表示） */}
+                {!isUser &&
+                  nextStep?.options &&
+                  nextStep.options.length > 0 && (
+                    <div
+                      style={{
+                        marginTop: 16,
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        gap: 8,
+                      }}
+                    >
+                      {nextStep.options.map((opt) => (
+                        <IrosButton
+                          key={opt.key}
+                          option={opt}
+                          gear={nextStep.gear as IrosNextStepGear}
+                          pending={loading}
+                          onClick={async (option) => {
+                            console.log(
+                              '[IROS UI] nextStep option clicked',
+                              {
+                                key: option.key,
+                                label: option.label,
+                                gear: nextStep.gear ?? null,
+                              },
+                            );
+
+                            await sendNextStepChoice({
+                              key: option.key,
+                              label: option.label,
+                              gear: (nextStep.gear ??
+                                null) as string | null,
+                            });
+                          }}
+                        />
+                      ))}
+                    </div>
+                  )}
               </div>
             </div>
           </div>

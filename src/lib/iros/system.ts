@@ -44,6 +44,7 @@ export type QCode = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
 
 export type TLayer = 'T1' | 'T2' | 'T3';
 export type IrosIntentLayer = 'I1' | 'I2' | 'I3';
+export type Phase = 'Inner' | 'Outer';
 
 export type IrosIntentMeta = {
   layer: IrosIntentLayer | null;

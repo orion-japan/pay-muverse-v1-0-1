@@ -4,6 +4,9 @@
 // - 1ターンごとの meta から「今の位置」と「これまでの積み重ね」を更新する
 
 import type { Depth, QCode, IrosMeta } from '../system';
+import { inferMetrics } from './metrics';
+
+type Phase = 'Inner' | 'Outer';
 
 /* ========= 型定義 ========= */
 
@@ -17,6 +20,7 @@ export type IrosMemoryState = {
   lastKeyword: string | null;  // 直近のキーワード（会話のフックになる語）
   qPrimary: QCode | null;      // 代表的な Q の色
   qCounts: Record<QCode, number>; // Q1〜Q5 の累積カウント
+  phase: Phase | null;         // Inner / Outer （3軸意思決定用のフェーズ）
   updatedAt?: string;          // ISO 文字列（DB の updated_at と対応）
 };
 
@@ -45,6 +49,7 @@ export function createEmptyMemoryState(userCode: string): IrosMemoryState {
       Q4: 0,
       Q5: 0,
     },
+    phase: null,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -83,6 +88,7 @@ export function mapRowToMemoryState(row: any | null): IrosMemoryState | null {
     lastKeyword: row.last_keyword ?? null,
     qPrimary: (row.q_primary as QCode | null) ?? null,
     qCounts,
+    phase: (row.phase as Phase | null) ?? null,
     updatedAt: row.updated_at ?? undefined,
   };
 }
@@ -101,6 +107,7 @@ export function serializeMemoryStateForDB(state: IrosMemoryState) {
     last_keyword: state.lastKeyword,
     q_primary: state.qPrimary,
     q_counts: state.qCounts,
+    phase: state.phase,
     updated_at: state.updatedAt ?? new Date().toISOString(),
   };
 }
@@ -123,9 +130,21 @@ export function updateMemoryStateFromTurn(
 
   const { text, meta } = input;
 
+  // ★ テキストからの共鳴メトリクス（Phase / Depth / Q）を推定
+  const metrics = inferMetrics(text);
+
+  // meta.phase（LLM推定）を最優先、その次に metrics.phase、最後に過去 state.phase
+  const phaseFromMeta: Phase | null =
+    (meta.phase as Phase | null) ?? null;
+  const phaseFromMetrics: Phase | null = metrics.phase ?? null;
+
   // 1) Q の更新（カウント + 代表Q）
   const qFromMeta: QCode | null =
-    meta.qCode ?? meta.unified?.q.current ?? null;
+    meta.qCode ??
+    meta.unified?.q.current ??
+    metrics.q_primary ??
+    null;
+
   const nextQCounts = { ...base.qCounts };
 
   if (qFromMeta) {
@@ -136,7 +155,11 @@ export function updateMemoryStateFromTurn(
 
   // 2) 深度（Depth）の更新
   const depthFromMeta: Depth | null =
-    meta.depth ?? meta.unified?.depth.stage ?? null;
+    meta.depth ??
+    meta.unified?.depth.stage ??
+    (metrics.depth as Depth | null) ??
+    null;
+
   const depthStage = depthFromMeta ?? base.depthStage ?? null;
 
   // 3) トーンの推定
@@ -155,7 +178,11 @@ export function updateMemoryStateFromTurn(
   // 5) last_keyword の更新
   const lastKeyword = extractLastKeyword(text) ?? base.lastKeyword;
 
-  // 6) サマリーはここでは軽く更新フラグだけ
+  // 6) フェーズ（Inner / Outer）の更新
+  const phase: Phase | null =
+    phaseFromMeta ?? phaseFromMetrics ?? base.phase ?? null;
+
+  // 7) サマリーはここでは軽く更新フラグだけ
   //    本格的な要約は summarizeClient.ts など別モジュールで上書きする想定
   const summary = base.summary ?? buildInitialSummary(theme, depthStage);
 
@@ -168,6 +195,7 @@ export function updateMemoryStateFromTurn(
     lastKeyword,
     qPrimary,
     qCounts: nextQCounts,
+    phase,
     updatedAt: new Date().toISOString(),
   };
 }

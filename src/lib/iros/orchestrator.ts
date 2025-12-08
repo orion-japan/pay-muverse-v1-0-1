@@ -228,6 +228,23 @@ export async function runIrosTurn(
     (mergedBaseMeta as any).style = style;
   }
 
+  // ★ 前回ターンの Goal.kind / uncoverStreak を取得
+  const previousGoal: any =
+    (mergedBaseMeta as any).goal &&
+    typeof (mergedBaseMeta as any).goal === 'object'
+      ? (mergedBaseMeta as any).goal
+      : null;
+
+  const lastGoalKind: any =
+    previousGoal && typeof previousGoal.kind === 'string'
+      ? previousGoal.kind
+      : null;
+
+  const previousUncoverStreak: number =
+    typeof (mergedBaseMeta as any).uncoverStreak === 'number'
+      ? (mergedBaseMeta as any).uncoverStreak
+      : 0;
+
   // depth / qCode の初期値決定
   const initialDepth = determineInitialDepth(
     requestedDepth,
@@ -496,6 +513,9 @@ export async function runIrosTurn(
     mode: (meta.mode ?? 'mirror') as IrosMode,
     // ★ 追加
     soulNote: (meta as any).soulNote ?? null,
+    // ★ 三軸回転用：前回 Goal.kind と uncover 連続カウント
+    lastGoalKind,
+    previousUncoverStreak,
   });
 
   // ★ delegate intent（任せる／決めて／進めて／動かして...）のとき、
@@ -548,6 +568,13 @@ export async function runIrosTurn(
       goal = anyGoal as IrosGoalType;
     }
   }
+
+  // ★ uncoverStreak を更新して meta に保存（連続回数）
+  const nextUncoverStreak: number =
+    goal && (goal as any).kind === 'uncover'
+      ? previousUncoverStreak + 1
+      : 0;
+  (meta as any).uncoverStreak = nextUncoverStreak;
 
   (meta as any).goal = goal;
   (meta as any).priority = priority;
@@ -612,6 +639,7 @@ export async function runIrosTurn(
       goalKind: goal?.kind,
       goalTargetDepth: goal?.targetDepth,
       priorityTargetDepth: priority?.goal?.targetDepth,
+      uncoverStreak: (finalMeta as any).uncoverStreak ?? 0,
     });
   }
 

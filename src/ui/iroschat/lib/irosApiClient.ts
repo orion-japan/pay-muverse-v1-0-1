@@ -46,6 +46,13 @@ export type IrosAPI = {
 
     // 🗣 追加：Iros の口調スタイル
     style?: IrosStyle;
+
+    // ★ ギア選択から渡す情報（任意）
+    nextStepChoice?: {
+      key: string;
+      label: string;
+      gear?: string | null;
+    };
   }): Promise<
     | { ok: boolean; message?: { id?: string; content: string } } // 旧フォーマット
     | {
@@ -64,6 +71,13 @@ export type IrosAPI = {
 
     // 🗣 追加：Iros の口調スタイル
     style?: IrosStyle;
+
+    // ★ ギア選択から渡す情報（任意）
+    nextStepChoice?: {
+      key: string;
+      label: string;
+      gear?: string | null;
+    };
   }): Promise<{ assistant: string } & Record<string, any>>;
   getUserInfo(): Promise<IrosUserInfo | null>;
 };
@@ -346,7 +360,6 @@ export const irosClient: IrosAPI = {
     return { ok: true as const };
   },
 
-
   async reply(args) {
     if (typeof _raw.reply === 'function') return _raw.reply(args);
     dbg('reply() fallback', {
@@ -369,6 +382,9 @@ export const irosClient: IrosAPI = {
 
         // 🗣 サーバー側へスタイルヒントとして渡す
         styleHint: args.style,
+
+        // ★ ギア選択（nextStep）情報をそのまま渡す
+        nextStepChoice: args.nextStepChoice ?? undefined,
       }),
     });
     return r.json();
@@ -387,6 +403,9 @@ export const irosClient: IrosAPI = {
 
       // 🗣 ここでも style を引き継ぐ
       style: args.style,
+
+      // ★ ギア選択（nextStep）を reply にも渡す
+      nextStepChoice: args.nextStepChoice,
     });
 
     // ★ 追加：orchestrator からの meta を拾う

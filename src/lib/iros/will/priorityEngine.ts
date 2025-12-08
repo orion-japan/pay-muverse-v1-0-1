@@ -42,8 +42,9 @@ export function deriveIrosPriority(args: {
   sentiment?: Sentiment;
   depth?: Depth;
   qCode?: QCode;
+  phase?: 'Inner' | 'Outer';
 }): IrosPriority {
-  const { goal, mode, sentiment, depth, qCode } = args;
+  const { goal, mode, sentiment, depth, qCode, phase } = args;
 
   // 1) Goal.kind ベースで素のウェイトを決める
   let weights = baseWeightsFromGoalKind(goal.kind);
@@ -53,6 +54,9 @@ export function deriveIrosPriority(args: {
 
   // 3) 現在の depth に応じて微調整
   weights = adjustByDepth(weights, depth);
+
+  // 3.5) Phase（Inner / Outer）に応じて微調整（Y軸トルク）
+  weights = adjustByPhase(weights, phase, goal.kind);
 
   // 4) mode（IrosMode）に応じて微調整
   weights = adjustByMode(weights, mode);
@@ -80,6 +84,7 @@ export function deriveIrosPriority(args: {
     sentiment,
     depth,
     qCode,
+    phase,
     targetDepth: goal.targetDepth,
     targetQ: goal.targetQ,
   });
@@ -90,6 +95,7 @@ export function deriveIrosPriority(args: {
     console.log('[IROS/WILL priority]', {
       goalKind: goal.kind,
       depth,
+      phase,
       targetDepth: goal.targetDepth,
       qCode,
       targetQ: goal.targetQ,
@@ -205,6 +211,42 @@ function adjustByDepth(
   } else if (depth.startsWith('I')) {
     // Intention層：Insightを強め、Mirrorは少し落ち着かせる
     w.insight = clamp01(w.insight * 1.15);
+    w.mirror *= 0.9;
+  }
+
+  return w;
+}
+
+/* ========= 3.5 Phase（Inner / Outer）ベースの微調整 ========= */
+
+function adjustByPhase(
+  weights: ChannelWeights,
+  phase?: 'Inner' | 'Outer',
+  goalKind?: IrosGoalKind,
+): ChannelWeights {
+  if (!phase) return weights;
+
+  const w = { ...weights };
+
+  if (phase === 'Inner') {
+    // 内向きフェーズ：
+    //  - Mirror を少し厚く
+    //  - Forward は控えめ。ただし enableAction / reframeIntention のときは
+    //    「完全にゼロにはしない」ように下限を設ける。
+    w.mirror = clamp01(w.mirror * 1.1);
+    w.forward *= 0.7;
+
+    if (goalKind === 'enableAction' || goalKind === 'reframeIntention') {
+      // 行動系ゴールのときは、Forward の下限を少し確保
+      if (w.forward < 0.35) {
+        w.forward = 0.35;
+      }
+    }
+  } else if (phase === 'Outer') {
+    // 外向きフェーズ：
+    //  - Forward を強め、Mirror は少し薄く
+    //  - 「外に触れる一歩」を取りやすくするトルク
+    w.forward = clamp01(w.forward * 1.2);
     w.mirror *= 0.9;
   }
 
@@ -357,6 +399,7 @@ function buildDebugNote(args: {
   sentiment?: Sentiment;
   depth?: Depth;
   qCode?: QCode;
+  phase?: 'Inner' | 'Outer';
   targetDepth?: Depth;
   targetQ?: QCode;
 }): string {
@@ -364,6 +407,7 @@ function buildDebugNote(args: {
   if (args.mode) parts.push(`mode=${args.mode}`);
   if (args.sentiment) parts.push(`sentiment=${args.sentiment}`);
   if (args.depth) parts.push(`depth=${args.depth}`);
+  if (args.phase) parts.push(`phase=${args.phase}`);
   if (args.qCode) parts.push(`q=${args.qCode}`);
   if (args.targetDepth) parts.push(`targetDepth=${args.targetDepth}`);
   if (args.targetQ) parts.push(`targetQ=${args.targetQ}`);

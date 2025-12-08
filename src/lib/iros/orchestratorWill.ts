@@ -5,6 +5,7 @@
 import type { Depth, QCode, IrosMode } from './system';
 
 import { deriveIrosGoal } from './will/goalEngine';
+import type { IrosGoalKind } from './will/goalEngine';
 
 import {
   applyGoalContinuity,
@@ -14,6 +15,9 @@ import {
 import { deriveIrosPriority } from './will/priorityEngine';
 
 import { adjustPriorityWithSelfAcceptance } from './orchestratorPierce';
+
+// ★ 三軸回転エンジンを使用
+import { shouldRotateBand } from './will/rotationEngine';
 
 // 返り値の型は元の関数からそのまま推論
 export type IrosGoalType = ReturnType<typeof deriveIrosGoal>;
@@ -46,6 +50,10 @@ export type ComputeGoalAndPriorityArgs = {
     risk_flags?: string[] | null;
     tone_hint?: string | null;
   } | null;
+
+  /** ★ 三軸回転：前回 Goal.kind ／ uncover 連続カウント */
+  lastGoalKind?: IrosGoalKind | null;
+  previousUncoverStreak?: number;
 };
 
 export type ComputeGoalAndPriorityResult = {
@@ -71,6 +79,8 @@ export function computeGoalAndPriority(
     mode,
     selfAcceptanceLine,
     soulNote,
+    lastGoalKind,
+    previousUncoverStreak,
   } = args;
 
   /* =========================================================
@@ -82,6 +92,9 @@ export function computeGoalAndPriority(
     lastQ,
     requestedDepth,
     requestedQCode,
+    // ★ 三軸回転用
+    lastGoalKind: lastGoalKind ?? undefined,
+    uncoverStreak: previousUncoverStreak ?? 0,
   });
 
   /* =========================================================
@@ -98,11 +111,16 @@ export function computeGoalAndPriority(
 
     if (hasQ5Depress && goal) {
       const anyGoal: any = goal;
+
       if (typeof anyGoal.kind === 'string') {
         // 主目的を「安定・保護」に寄せる
         anyGoal.kind = 'stabilize';
 
-        // 既存の detail があれば壊さないように軽くマーキングだけ追加
+        // ★ 理由テキストも、魂レイヤー起点の内容にそろえる
+        anyGoal.reason =
+          'SoulLayer が Q5_depress を検出したため、このターンは安定・保護を最優先する';
+
+        // 既存の detail があれば壊さないようにマーキングだけ追加
         if (anyGoal.detail && typeof anyGoal.detail === 'object') {
           anyGoal.detail = {
             ...anyGoal.detail,
@@ -114,10 +132,10 @@ export function computeGoalAndPriority(
           };
         }
       }
+
       goal = anyGoal as IrosGoalType;
     }
   } catch (e) {
-    // ここで失敗しても致命的ではないのでログだけに留める（必要なら DEBUG フラグで出力）
     if (process.env.DEBUG_IROS_WILL === '1') {
       // eslint-disable-next-line no-console
       console.error('[IROS/Will] soul-based goal adjustment failed', e);
@@ -134,6 +152,52 @@ export function computeGoalAndPriority(
   };
 
   goal = applyGoalContinuity(goal, continuity);
+
+  /* =========================================================
+     ②.5 三軸回転：shouldRotateBand で帯域回転を判定
+       - S帯で Q3 & uncover ストリークなどの条件を満たしたときだけ
+       - SelfAcceptance / risk_flags / stay意図 も考慮
+  ========================================================= */
+  try {
+    const anyGoal: any = goal;
+
+    const baseDepth: Depth | null =
+      (anyGoal?.targetDepth as Depth | undefined) ??
+      depth ??
+      lastDepth ??
+      null;
+
+    const rotation = shouldRotateBand({
+      lastDepth: lastDepth ?? null,
+      currentDepth: baseDepth,
+      qCode: qCode ?? undefined,
+      lastGoalKind: lastGoalKind ?? null,
+      uncoverStreak: previousUncoverStreak ?? 0,
+      selfAcceptance: selfAcceptanceLine,
+      riskFlags: soulNote?.risk_flags ?? null,
+      // ★ ユーザーからの「ステイしてほしい」明示は、
+      //   現状は未実装なので false 固定（将来、テキスト解析で補強）
+      stayRequested: false,
+    });
+
+    if (rotation.shouldRotate && rotation.nextDepth) {
+      anyGoal.targetDepth = rotation.nextDepth;
+      goal = anyGoal as IrosGoalType;
+
+      if (process.env.DEBUG_IROS_WILL === '1') {
+        // eslint-disable-next-line no-console
+        console.log('[IROS/Will] band rotation applied', rotation);
+      }
+    } else if (process.env.DEBUG_IROS_WILL === '1') {
+      // eslint-disable-next-line no-console
+      console.log('[IROS/Will] band rotation skipped', rotation);
+    }
+  } catch (e) {
+    if (process.env.DEBUG_IROS_WILL === '1') {
+      // eslint-disable-next-line no-console
+      console.error('[IROS/Will] band rotation failed', e);
+    }
+  }
 
   /* =========================================================
      ③ Priority Engine：Goal の意志に基づき重み計算

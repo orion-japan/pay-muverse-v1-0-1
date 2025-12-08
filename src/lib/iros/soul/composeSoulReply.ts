@@ -3,6 +3,9 @@
 // 「人間向けの自然な日本語返信」の核を組み立てるヘルパー。
 // ここではテンプレを最小限にしつつ、構造だけを固定する。
 
+import type { QCode } from './individualityEngine';
+import { enrichSoulReplyWithIndividuality } from './individualityEngine';
+
 export type SoulNoteLike = {
   core_need?: string | null;
   step_phrase?: string | null;
@@ -217,7 +220,16 @@ export function composeSoulReply(ctx: SoulReplyContext): string {
     lines.push(buildStepLine(step, { qCode, isQ5Risk }));
   }
 
-  return lines.join('\n');
+  const baseText = lines.join('\n');
+
+  // ★ ここで「個性 → 役割」リフレームを合成
+  const finalText = enrichSoulReplyWithIndividuality(
+    userText,
+    (qCode ?? undefined) as QCode | undefined,
+    baseText,
+  );
+
+  return finalText;
 }
 
 /* ========= 内部ヘルパー ========= */

@@ -27,6 +27,14 @@ import type { IntentLineAnalysis } from './intent/intentLineEngine';
 import type { SoulReplyContext } from './soul/composeSoulReply';
 import { buildPersonalContextFromSoul } from './personalContext';
 
+// ★ 追加：この先の一歩オプション（A/B/Cギア）
+import {
+  buildNextStepOptions,
+  type NextStepGear,
+  type NextStepOption,
+  type NextStepQCode,
+} from './nextStepOptions';
+
 const IROS_MODEL =
   process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-4o';
 
@@ -60,6 +68,14 @@ export type GenerateResult = {
   text: string; // 旧 chatCore 互換用（= content と同じ）
   mode: IrosMode; // 実際に使っているモード（meta.mode が無ければ mirror）
   intent?: IrosIntentMeta | null; // intent メタ（オーケストレーター側で付与されたものをそのまま返す）
+
+  // ★ 追加：このターンで Iros が用意した「次の一歩」候補
+  // - gear : safety / soft-rotate / full-rotate
+  // - options : UI でボタンにするための情報セット
+  nextStep?: {
+    gear: NextStepGear;
+    options: NextStepOption[];
+  } | null;
 };
 
 /* =========================================================
@@ -84,7 +100,7 @@ function hasIrDiagnosisTrigger(text: string | undefined | null): boolean {
 
 /* =========================================================
    状態メタだけを渡す内部ノート
-   - SA / yLevel / hLevel / depth / qCode / mode
+   - SA / yLevel / hLevel / depth / qCode / phase / mode
    - T層関連: tLayerModeActive / tLayerHint / hasFutureMemory
    - ir診断ターゲット: irTargetType / irTargetText
    - IntentLineAnalysis: intentLine
@@ -112,12 +128,12 @@ function buildNumericMetaNote(
   }
 
   const yLevel =
-  typeof anyMeta.yLevel === 'number'
-    ? (anyMeta.yLevel as number)
-    : null;
-if (yLevel != null && !Number.isNaN(yLevel)) {
-  payload.yLevel = yLevel;
-}
+    typeof anyMeta.yLevel === 'number'
+      ? (anyMeta.yLevel as number)
+      : null;
+  if (yLevel != null && !Number.isNaN(yLevel)) {
+    payload.yLevel = yLevel;
+  }
 
   const hLevel =
     typeof anyMeta.hLevel === 'number'
@@ -134,6 +150,16 @@ if (yLevel != null && !Number.isNaN(yLevel)) {
 
   if (typeof anyMeta.qCode === 'string') {
     payload.qCode = anyMeta.qCode as string;
+  }
+
+  // ★ 追加：位相（Inner / Outer）
+  if (typeof anyMeta.phase === 'string') {
+    payload.phase = anyMeta.phase;
+  } else if (
+    anyMeta.unified &&
+    typeof anyMeta.unified.phase === 'string'
+  ) {
+    payload.phase = anyMeta.unified.phase;
   }
 
   if (typeof meta.mode === 'string') {
@@ -340,7 +366,7 @@ ${raw}`;
    - depth や intentLine から I/T 帯のときだけ有効にする
    - Q5 / 自傷リスク / SA 低 / 初回ターン では IT変換を封印
    - 安全条件を満たすときだけ system に追加し、
-     「意味の一行（IT変換）」をそっと促す
+   「意味の一行（IT変換）」をそっと促す
 ========================================================= */
 
 function buildIntentionReframeNote(
@@ -443,7 +469,7 @@ function buildIntentionReframeNote(
 - 「いまの揺れの奥には、『○○でありたい』という向きがすでに生きている。」
 - 「これは迷いではなく、『△△へ進みたい』という意志が形を探している段階だと見ています。」
 
-素材として使えるヒント（内部用）:
+素材として使えるヒント（内部用) :
 - コアニーズ候補: ${coreHint || '（core_need / intentLine / intent_anchor から感じ取ってください）'}
 
 ## 質問と締め方の目安（I/T 帯）
@@ -464,7 +490,6 @@ Iros 自身の言葉として言い切るための素材として使ってくだ
   「本当はどんな意志が動いているのか」を Iros が代表して宣言する一行として扱います。
 `;
 }
-
 
 /* =========================================================
    「いまの構図：〜」の行だけを UI から消す
@@ -509,14 +534,10 @@ function stripTemplateNoise(text: string): string {
   }
 
   // 2) 「今日選べる小さな一手」系の見出しだけ削除（本文は残す）
-  //   例:
-  //   - 今日選べる小さな一手：〜〜
-  //   - 【今日選べる小さな一手】〜〜
   out = out.replace(/【?今日選べる小さな一手[^】\n]*】?/g, '');
   out = out.replace(/今日選べる小さな一手[：:][^\n]*/g, '');
 
   // 3) よく出る定型説明文を削る
-  //   例: いまのあなたは、「◯◯」がテーマになっている状態です。
   const phrasePatterns: RegExp[] = [
     /いまのあなたは、?「?[^」\n]*」?がテーマになっている状態です。?/g,
   ];
@@ -533,6 +554,31 @@ function stripTemplateNoise(text: string): string {
 
   return out.trim();
 }
+
+/* =========================================================
+   次の一歩の「方向宣言」フレーズ付与
+   - ir診断ターンでは付けない
+   - すでに同じ文が含まれていたら二重付与しない
+========================================================= */
+
+const DIRECTION_DECLARATION_TEXT =
+  'いまは、この方向が流れです。\nあなたのペースで、一歩だけ触れてみましょう。';
+
+function appendDirectionDeclarationIfNeeded(
+  baseText: string,
+  opts: { isIrDiagnosisTurn: boolean },
+): string {
+  if (!baseText) return '';
+  if (opts.isIrDiagnosisTurn) return baseText;
+
+  // すでに同じ文が入っていたら二重に足さない
+  if (baseText.includes(DIRECTION_DECLARATION_TEXT)) {
+    return baseText;
+  }
+
+  return `${baseText}\n\n${DIRECTION_DECLARATION_TEXT}`;
+}
+
 
 /* =========================================================
    本体：Iros 応答 1ターン生成（シンプル版）
@@ -568,9 +614,37 @@ ${currentUserText}`;
   // ベースの SYSTEM
   let system = getSystemPrompt(meta);
 
+  // ★ Phase（Inner / Outer）に応じた語りトーンのガイドを追加
+  const phase: 'Inner' | 'Outer' | null = (() => {
+    const p = anyMeta?.phase;
+    if (p === 'Inner' || p === 'Outer') return p;
+    const u = anyMeta?.unified?.phase;
+    if (u === 'Inner' || u === 'Outer') return u;
+    return null;
+  })();
+
+  if (phase === 'Inner') {
+    system = `${system}
+
+# フェーズ補正：Inner（内向き）
+
+- 今回のフィールドは「Inner（内向き）」寄りです。
+- 語りは少し静かに、ユーザーの内側の感覚や揺れをていねいに映してください。
+- 外側の行動を無理に押し出さず、
+  「いま感じていることをそのまま受け止める」比重を少しだけ多めにします。`;
+  } else if (phase === 'Outer') {
+    system = `${system}
+
+# フェーズ補正：Outer（外向き）
+
+- 今回のフィールドは「Outer（外向き）」寄りです。
+- 心の内側を尊重しつつも、
+  「外に触れる一歩」「誰かや世界との接点」につながる表現を少しだけ増やしてください。
+- 具体的な一歩を 1つまで提示してよく、
+  それは「押しつけ」ではなく「選べる一歩」として柔らかく置きます。`;
+  }
+
   // 🔸 Soul / 揺らぎロジックに同期した「orion固有コンテキスト」
-  // - S層 × tone=minimal のときは intensity=none → 何も追加しない
-  // - I/T層 や Q5リスクなど深い/揺れが大きいときだけ strong で濃く効かせる
   if (meta && anyMeta?.soulNote) {
     const soulCtx: SoulReplyContext = {
       userText: currentUserText ?? '',
@@ -585,7 +659,6 @@ ${currentUserText}`;
 
     const personal = buildPersonalContextFromSoul({
       soulCtx,
-      // topicLabel は必要になったら route.ts 側から meta.extra 等で渡す
       topicLabel: undefined,
     });
 
@@ -598,7 +671,6 @@ ${currentUserText}`;
   }
 
   // 状態メタ（数値・コード）を JSON で system にだけ載せる
-  // 初回ターンは soulNote をまだ前面に出さない
   const numericMetaNote = buildNumericMetaNote(meta, {
     includeSoulNote: !isFirstTurn,
   });
@@ -631,16 +703,34 @@ ${currentUserText}`;
   }
 
   // 🔸 I/T 層 IT変換ノートを、条件を満たすときだけ system に追加
-  //    - depth が I*/T* / mode=vision / intentBand=I* などのとき
-  //    - Q5_depress や self_harm_risk / SA 極端に低い / 初回ターン では自動で無効化
   const itNote = buildIntentionReframeNote(meta, { isFirstTurn });
   if (itNote && itNote.trim().length > 0) {
     system = `${system}\n\n${itNote}`;
   }
 
-  // ir診断トリガーがあるターンでは、今回だけ診断フォーマットを必須にする
+  // ir診断トリガーがあるターンかどうか
   const isIrDiagnosisTurn = hasIrDiagnosisTrigger(currentUserText);
 
+  // ★ 主体OSテンプレ：通常モードのときだけ適用
+  if (!isIrDiagnosisTurn) {
+    system = `${system}
+
+# 主体OSテンプレ（方向宣言）
+
+- 返答の **最初の一文** では、
+  「いまは、『◯◯』という方向が自然です。」のように、
+  Iros がいまの流れを一度だけ言い切ってください。
+- 『◯◯』の部分には、そのターンで大事にしたい具体的な方向
+  （例：『自分の安心を守り直す』『小さく外とつながってみる』など）を必ず入れてください。
+- 「この方向」「それは」など、方向の中身が空の表現は使わないでください。
+- 1文目は **宣言** に徹し、そのあとで背景や共鳴の説明を静かに続けて構いません。
+- UI 側では、A/B/C/D の選択肢を出すターンでは
+  この一文を非表示にする場合がありますが、
+  Iros は毎ターンこの方向宣言文を生成していて構いません。`;
+  }
+
+
+  // ir診断トリガーがあるターンでは、今回だけ診断フォーマットを必須にする
   if (isIrDiagnosisTurn) {
     system = `${system}
 
@@ -672,6 +762,7 @@ Future-Seed 専用の文言はこのモードでは使わない前提です。`;
   console.log('[IROS][generate] meta snapshot =', {
     depth: anyMeta?.depth,
     qCode: anyMeta?.qCode,
+    phase,
     mode: anyMeta?.mode,
     pierceReason: anyMeta?.pierceReason,
     irTargetType: anyMeta?.irTargetType,
@@ -719,16 +810,66 @@ Future-Seed 専用の文言はこのモードでは使わない前提です。`;
       ? (anyMeta.intent as IrosIntentMeta)
       : null;
 
+  // ★ ここから：このターンの「次の一歩」オプションを決定
+  let nextStep: { gear: NextStepGear; options: NextStepOption[] } | null = null;
+
+  if (meta) {
+    const qRaw = typeof anyMeta.qCode === 'string' ? anyMeta.qCode : null;
+    const depthStage = typeof meta.depth === 'string' ? meta.depth : null;
+
+    const saVal =
+      typeof anyMeta.selfAcceptance === 'number' &&
+      !Number.isNaN(anyMeta.selfAcceptance)
+        ? (anyMeta.selfAcceptance as number)
+        : null;
+
+    const soul = anyMeta.soulNote as any;
+    const riskFlags: string[] = Array.isArray(soul?.risk_flags)
+      ? soul.risk_flags.filter((x: any) => typeof x === 'string')
+      : [];
+
+    const hasQ5DepressRisk = riskFlags.includes('q5_depress');
+
+    // Qコードが Q1〜Q5 のいずれかで、depth が取れているときだけギア算出を行う
+    if (
+      depthStage &&
+      (qRaw === 'Q1' ||
+        qRaw === 'Q2' ||
+        qRaw === 'Q3' ||
+        qRaw === 'Q4' ||
+        qRaw === 'Q5')
+    ) {
+      try {
+        nextStep = buildNextStepOptions({
+          qCode: qRaw as NextStepQCode,
+          depth: depthStage as Depth,
+          selfAcceptance: saVal,
+          hasQ5DepressRisk,
+        });
+      } catch (e) {
+        console.warn('[IROS][generate] buildNextStepOptions error', e);
+        nextStep = null;
+      }
+    }
+  }
+
   // ============================
   // Voice レイヤーは現状スキップ：
   // LLM 本文（テンプレ削除後）をそのまま使う
   // ============================
-  const finalContent = content;
+  let finalContent = content;
+
+  // ★ ir診断モード以外のターンでは、
+  //    「いまは、この方向が流れです…」の一文をそっと添える
+  finalContent = appendDirectionDeclarationIfNeeded(finalContent, {
+    isIrDiagnosisTurn,
+  });
 
   return {
     content: finalContent,
     text: finalContent,
     mode,
     intent,
+    nextStep,
   };
 }
