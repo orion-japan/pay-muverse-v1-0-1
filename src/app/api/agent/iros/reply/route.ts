@@ -1,4 +1,4 @@
-// file: src/app/api/agent/iros/reply/route.ts
+// src/app/api/agent/iros/reply/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -15,7 +15,7 @@ import {
   upsertTopicStateWithCleanup,
 } from '@/lib/iros/topicState';
 
-// Irosサーバー本処理
+// ★★★ 新コア：Iros 共通リクエストハンドラ
 import {
   handleIrosReply,
   type HandleIrosReplyOutput,
@@ -24,6 +24,9 @@ import {
 // Rememberモード（スコープ推定のみ利用）
 import type { RememberScopeKind } from '@/lib/iros/remember/resolveRememberBundle';
 import { resolveModeHintFromText, resolveRememberScope } from './_mode';
+
+// ★ 三軸「次の一歩」メタ付与
+import { attachNextStepMeta } from '@/lib/iros/nextStepOptions';
 
 /** 共通CORS（/api/me と同等ポリシー + x-credit-cost 追加） */
 const CORS_HEADERS = {
@@ -242,8 +245,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-
-    // 8) Iros 本体処理へ委譲
+    // 8) Iros 共通本体処理へ委譲（★ handleIrosRequest を利用）
     const origin = req.nextUrl.origin;
     const authHeader = req.headers.get('authorization');
 
@@ -261,6 +263,7 @@ export async function POST(req: NextRequest) {
       userProfile,
       style: styleInput ?? null,
     });
+
 
     // 8.x) 生成失敗時
     if (!irosResult.ok) {
@@ -329,7 +332,8 @@ export async function POST(req: NextRequest) {
 
     // === ここからレスポンス生成 & 訓練サンプル保存 ===
     if (result && typeof result === 'object') {
-      const meta = {
+      // いったんベースの meta を組み立てる
+      let meta: any = {
         ...(result as any).meta ?? {},
         // ★ ここでレスポンス側の meta にも userProfile を載せる
         userProfile:
@@ -352,6 +356,33 @@ export async function POST(req: NextRequest) {
             null,
         },
       };
+
+      // ★ 三軸「次の一歩」オプションを meta に付与
+      meta = attachNextStepMeta({
+        meta,
+        // qCode / depth / SA は meta or unified からできるだけ拾う
+        qCode:
+          (meta.qCode as any) ??
+          (meta.q_code as any) ??
+          (meta.unified?.q?.current as any) ??
+          'Q3',
+        depth:
+          (meta.depth as any) ??
+          (meta.depth_stage as any) ??
+          (meta.unified?.depth?.stage as any) ??
+          'S2',
+        selfAcceptance:
+          typeof meta.selfAcceptance === 'number'
+            ? meta.selfAcceptance
+            : typeof meta.self_acceptance === 'number'
+            ? meta.self_acceptance
+            : typeof meta.unified?.self_acceptance === 'number'
+            ? meta.unified.self_acceptance
+            : null,
+        // ★ いまは Q5 落ち込みリスク判定は未実装なので false 固定
+        hasQ5DepressRisk: false,
+        userText: text,
+      });
 
       console.log('[IROS/Reply] response meta', meta);
 

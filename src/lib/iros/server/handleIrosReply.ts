@@ -37,6 +37,9 @@ import type { IrosUserProfileRow } from './loadUserProfile';
 // ★ 追加：Polarity / Stability 計算ロジック
 import { computePolarityAndStability } from '@/lib/iros/analysis/polarity';
 
+// ★ 追加：MemoryState（3軸）保存ユーティリティ
+import { upsertIrosMemoryState } from '@/lib/iros/memoryState';
+
 // ★ 追加：v_iros_topic_state_latest の型（必要な項目だけ）
 type TopicStateLatestRow = {
   topic_key?: string | null;
@@ -1019,108 +1022,107 @@ export async function handleIrosReply(
         ? (result as any).meta
         : null;
 
-        const metaForSave =
-        metaRaw && typeof metaRaw === 'object'
-          ? {
-              ...metaRaw,
-            }
-          : metaRaw;
-
-      if (metaForSave && typeof metaForSave === 'object') {
-        try {
-          const m: any = metaForSave;
-          const unified = m.unified ?? {};
-
-          // --- ここは既にある Pol/Stab 用の処理 ---
-          const qCodeForPol: string | null =
-            (m.qCode as string | undefined) ??
-            (m.q_code as string | undefined) ??
-            (unified?.q?.current as string | undefined) ??
-            null;
-
-          const saForPol: number | null =
-            typeof m.selfAcceptance === 'number'
-              ? m.selfAcceptance
-              : typeof m.self_acceptance === 'number'
-              ? m.self_acceptance
-              : typeof unified?.self_acceptance === 'number'
-              ? unified.self_acceptance
-              : null;
-
-          const yLevelRaw =
-            m.yLevel ?? m.y_level ?? unified?.yLevel ?? unified?.y_level ?? null;
-
-          let yLevelForPol: number | null = null;
-          if (typeof yLevelRaw === 'number') {
-            yLevelForPol = yLevelRaw;
-          } else if (
-            typeof yLevelRaw === 'string' &&
-            yLevelRaw.trim() !== '' &&
-            !Number.isNaN(Number(yLevelRaw))
-          ) {
-            yLevelForPol = Number(yLevelRaw);
+    const metaForSave =
+      metaRaw && typeof metaRaw === 'object'
+        ? {
+            ...metaRaw,
           }
+        : metaRaw;
 
-          const pol = computePolarityAndStability({
-            qCode: (qCodeForPol as any) ?? null,
-            selfAcceptance: saForPol,
-            yLevel: yLevelForPol,
-          });
+    if (metaForSave && typeof metaForSave === 'object') {
+      try {
+        const m: any = metaForSave;
+        const unified = m.unified ?? {};
 
-          m.polarityScore = pol.polarityScore;
-          m.polarityBand = pol.polarityBand;
-          m.stabilityBand = pol.stabilityBand;
+        // --- ここは既にある Pol/Stab 用の処理 ---
+        const qCodeForPol: string | null =
+          (m.qCode as string | undefined) ??
+          (m.q_code as string | undefined) ??
+          (unified?.q?.current as string | undefined) ??
+          null;
 
-          m.polarity_score = pol.polarityScore;
-          m.polarity_band = pol.polarityBand;
-          m.stability_band = pol.stabilityBand;
+        const saForPol: number | null =
+          typeof m.selfAcceptance === 'number'
+            ? m.selfAcceptance
+            : typeof m.self_acceptance === 'number'
+            ? m.self_acceptance
+            : typeof unified?.self_acceptance === 'number'
+            ? unified.self_acceptance
+            : null;
 
-          // ============================
-          // ★ mirror / I-layer / intent
-          // ============================
+        const yLevelRaw =
+          m.yLevel ?? m.y_level ?? unified?.yLevel ?? unified?.y_level ?? null;
 
-          // mirror 列 → 実際に使われたモード
-          const modeFromResult: string | undefined =
-            typeof (result as any)?.mode === 'string'
-              ? (result as any).mode
-              : typeof m.mode === 'string'
-              ? m.mode
-              : undefined;
-
-          if (modeFromResult && modeFromResult.trim().length > 0) {
-            // ★ meta.mirror に入れる（カラム名 mirror に合わせる）
-            m.mirror = modeFromResult.trim();
-          }
-
-          // I-layer 列 → depth が I層ならその depth を入れる
-          const depthForLayer: string | null =
-            (m.depth as string | undefined) ??
-            (m.depth_stage as string | undefined) ??
-            (unified?.depth?.stage as string | undefined) ??
-            null;
-
-          if (depthForLayer && depthForLayer.startsWith('I')) {
-            // 例: I1 / I2 / I3
-            m.i_layer = depthForLayer;
-          } else {
-            m.i_layer = null;
-          }
-
-          // intent 列 → intent_anchor.text の短い要約
-          const ia = m.intent_anchor;
-          if (ia && typeof ia.text === 'string') {
-            const label = ia.text.trim();
-            m.intent =
-              label.length > 40 ? label.slice(0, 40) + '…' : label;
-          }
-        } catch (e) {
-          console.error(
-            '[IROS/Reply] computePolarityAndStability / mirror / i_layer / intent failed',
-            e,
-          );
+        let yLevelForPol: number | null = null;
+        if (typeof yLevelRaw === 'number') {
+          yLevelForPol = yLevelRaw;
+        } else if (
+          typeof yLevelRaw === 'string' &&
+          yLevelRaw.trim() !== '' &&
+          !Number.isNaN(Number(yLevelRaw))
+        ) {
+          yLevelForPol = Number(yLevelRaw);
         }
-      }
 
+        const pol = computePolarityAndStability({
+          qCode: (qCodeForPol as any) ?? null,
+          selfAcceptance: saForPol,
+          yLevel: yLevelForPol,
+        });
+
+        m.polarityScore = pol.polarityScore;
+        m.polarityBand = pol.polarityBand;
+        m.stabilityBand = pol.stabilityBand;
+
+        m.polarity_score = pol.polarityScore;
+        m.polarity_band = pol.polarityBand;
+        m.stability_band = pol.stabilityBand;
+
+        // ============================
+        // ★ mirror / I-layer / intent
+        // ============================
+
+        // mirror 列 → 実際に使われたモード
+        const modeFromResult: string | undefined =
+          typeof (result as any)?.mode === 'string'
+            ? (result as any).mode
+            : typeof m.mode === 'string'
+            ? m.mode
+            : undefined;
+
+        if (modeFromResult && modeFromResult.trim().length > 0) {
+          // ★ meta.mirror に入れる（カラム名 mirror に合わせる）
+          m.mirror = modeFromResult.trim();
+        }
+
+        // I-layer 列 → depth が I層ならその depth を入れる
+        const depthForLayer: string | null =
+          (m.depth as string | undefined) ??
+          (m.depth_stage as string | undefined) ??
+          (unified?.depth?.stage as string | undefined) ??
+          null;
+
+        if (depthForLayer && depthForLayer.startsWith('I')) {
+          // 例: I1 / I2 / I3
+          m.i_layer = depthForLayer;
+        } else {
+          m.i_layer = null;
+        }
+
+        // intent 列 → intent_anchor.text の短い要約
+        const ia = m.intent_anchor;
+        if (ia && typeof ia.text === 'string') {
+          const label = ia.text.trim();
+          m.intent =
+            label.length > 40 ? label.slice(0, 40) + '…' : label;
+        }
+      } catch (e) {
+        console.error(
+          '[IROS/Reply] computePolarityAndStability / mirror / i_layer / intent failed',
+          e,
+        );
+      }
+    }
 
     // ★★★ Iros-GIGA：meta に intent_anchor が入っていたら DB に upsert（初回抽出＆更新）
     if (userId && metaForSave && typeof metaForSave === 'object') {
@@ -1151,6 +1153,188 @@ export async function handleIrosReply(
             },
           );
         }
+      }
+    }
+
+    // ★★★ MemoryState：meta / unified から 3軸状態を iros_memory_state に保存
+    if (metaForSave && typeof metaForSave === 'object') {
+      try {
+        const m: any = metaForSave;
+        const unified = m.unified ?? {};
+
+        const qPrimary: string | null =
+          (m.qCode as string | undefined) ??
+          (m.q_code as string | undefined) ??
+          (unified?.q?.current as string | undefined) ??
+          null;
+
+        const depthStageForState: string | null =
+          (m.depth as string | undefined) ??
+          (m.depth_stage as string | undefined) ??
+          (unified?.depth?.stage as string | undefined) ??
+          null;
+
+        const phaseRaw: string | undefined =
+          (m.phase as string | undefined) ??
+          (unified?.phase as string | undefined);
+
+        let phaseForState: 'Inner' | 'Outer' | null = null;
+        if (typeof phaseRaw === 'string' && phaseRaw.trim().length > 0) {
+          const p = phaseRaw.trim().toLowerCase();
+          if (p === 'inner') {
+            phaseForState = 'Inner';
+          } else if (p === 'outer') {
+            phaseForState = 'Outer';
+          }
+        }
+
+        const selfAcceptanceRawForState: unknown =
+          typeof m.selfAcceptance === 'number'
+            ? m.selfAcceptance
+            : typeof m.self_acceptance === 'number'
+            ? m.self_acceptance
+            : typeof unified?.self_acceptance === 'number'
+            ? unified.self_acceptance
+            : null;
+
+        const selfAcceptanceForState = clampSelfAcceptance(
+          selfAcceptanceRawForState,
+        );
+
+        let intentLayerForState: string | null = null;
+        const intentLayerRaw: unknown =
+          (m.intentLayer as string | undefined) ??
+          (m.intent_layer as string | undefined) ??
+          (unified?.intentLine?.focusLayer as string | undefined) ??
+          (unified?.intent_line?.focusLayer as string | undefined) ??
+          null;
+
+        if (
+          typeof intentLayerRaw === 'string' &&
+          intentLayerRaw.trim().length > 0
+        ) {
+          const il = intentLayerRaw.trim().toUpperCase();
+          if (['S', 'R', 'C', 'I', 'T'].includes(il)) {
+            intentLayerForState = il;
+          } else {
+            // 将来拡張用にその他の文字列もそのまま保存しておく
+            intentLayerForState = intentLayerRaw.trim();
+          }
+        }
+
+        let intentConfidenceForState: number | null = null;
+        const intentConfidenceRaw: unknown =
+          typeof m.intentConfidence === 'number'
+            ? m.intentConfidence
+            : typeof m.intent_confidence === 'number'
+            ? m.intent_confidence
+            : typeof unified?.intentLine?.confidence === 'number'
+            ? unified.intentLine.confidence
+            : typeof unified?.intent_line?.confidence === 'number'
+            ? unified.intent_line.confidence
+            : null;
+
+        if (
+          typeof intentConfidenceRaw === 'number' &&
+          Number.isFinite(intentConfidenceRaw)
+        ) {
+          intentConfidenceForState = intentConfidenceRaw;
+        }
+
+        let yLevelForState: number | null = null;
+        const yLevelRawForState: unknown =
+          typeof m.yLevel === 'number'
+            ? m.yLevel
+            : typeof m.y_level === 'number'
+            ? m.y_level
+            : typeof unified?.yLevel === 'number'
+            ? unified.yLevel
+            : typeof unified?.y_level === 'number'
+            ? unified.y_level
+            : null;
+
+        if (
+          typeof yLevelRawForState === 'number' &&
+          Number.isFinite(yLevelRawForState)
+        ) {
+          yLevelForState = yLevelRawForState;
+        }
+
+        let hLevelForState: number | null = null;
+        const hLevelRawForState: unknown =
+          typeof m.hLevel === 'number'
+            ? m.hLevel
+            : typeof m.h_level === 'number'
+            ? m.h_level
+            : typeof unified?.hLevel === 'number'
+            ? unified.hLevel
+            : typeof unified?.h_level === 'number'
+            ? unified.h_level
+            : null;
+
+        if (
+          typeof hLevelRawForState === 'number' &&
+          Number.isFinite(hLevelRawForState)
+        ) {
+          hLevelForState = hLevelRawForState;
+        }
+
+        const situationSummaryForState: string | null =
+          typeof m.situationSummary === 'string'
+            ? m.situationSummary
+            : typeof unified?.situation?.summary === 'string'
+            ? unified.situation.summary
+            : null;
+
+        const situationTopicForState: string | null =
+          typeof m.situationTopic === 'string'
+            ? m.situationTopic
+            : typeof unified?.situation?.topic === 'string'
+            ? unified.situation.topic
+            : null;
+
+        const sentimentLevelForState: string | null =
+          typeof m.sentiment_level === 'string'
+            ? m.sentiment_level
+            : typeof unified?.sentiment_level === 'string'
+            ? unified.sentiment_level
+            : typeof unified?.sentiment === 'string'
+            ? unified.sentiment
+            : null;
+
+        await upsertIrosMemoryState({
+          userCode,
+          depthStage: depthStageForState ?? null,
+          qPrimary,
+          selfAcceptance: selfAcceptanceForState,
+          phase: phaseForState,
+          intentLayer: intentLayerForState,
+          intentConfidence: intentConfidenceForState,
+          yLevel: yLevelForState,
+          hLevel: hLevelForState,
+          situationSummary: situationSummaryForState,
+          situationTopic: situationTopicForState,
+          sentiment_level: sentimentLevelForState,
+        });
+
+        console.log('[IROS/MemoryState] upsert from metaForSave ok', {
+          userCode,
+          depthStage: depthStageForState,
+          qPrimary,
+          phase: phaseForState,
+          intentLayer: intentLayerForState,
+          yLevel: yLevelForState,
+          hLevel: hLevelForState,
+          sentiment_level: sentimentLevelForState,
+        });
+      } catch (e) {
+        console.error(
+          '[IROS/MemoryState] upsert from metaForSave failed',
+          {
+            userCode,
+            error: e,
+          },
+        );
       }
     }
 

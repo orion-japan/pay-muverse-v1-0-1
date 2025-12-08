@@ -38,6 +38,13 @@ type IrosChatContextType = {
   // 通常のチャット送信
   sendMessage: (text: string, mode?: string) => Promise<SendResult>;
 
+  // ★ ギア選択（nextStep ボタン）からの送信
+  sendNextStepChoice: (opt: {
+    key: string;
+    label: string;
+    gear?: string | null;
+  }) => Promise<SendResult>;
+
   // ★ Future-Seed 用（T層デモ）
   sendFutureSeed: () => Promise<SendResult>;
 
@@ -238,6 +245,90 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
     [reloadConversations, style],
   );
 
+  /* ========== NextStep（ギア選択） ========== */
+
+  const sendNextStepChoice = useCallback(
+    async (opt: {
+      key: string;
+      label: string;
+      gear?: string | null;
+    }): Promise<SendResult> => {
+      const cid = activeConversationIdRef.current;
+      if (!cid) return null;
+
+      setLoading(true);
+
+      // ★ ユーザー側の見た目としては通常メッセージと同じ 1 行にする
+      const payloadText = `[${opt.key}] ${opt.label}`;
+
+      // ① user メッセージをローカルに即反映（choice 情報だけ meta に保持）
+      setMessages((m) => [
+        ...m,
+        {
+          id: crypto.randomUUID(),
+          role: 'user',
+          text: payloadText,
+          content: payloadText,
+          created_at: new Date().toISOString(),
+          ts: Date.now(),
+          meta: {
+            nextStepChoice: {
+              key: opt.key,
+              label: opt.label,
+              gear: opt.gear ?? null,
+            },
+          },
+        } as IrosMessage,
+      ]);
+
+      // ② DB に user メッセージ保存（構造は sendMessage と同じで text のみ）
+      await irosClient.postMessage({
+        conversationId: cid,
+        text: payloadText,
+        role: 'user',
+      });
+
+      // ③ WILLエンジンに「ギア選択が行われた」ことを渡す
+      //    ※ mode: 'nextStep' / nextStepChoice はサーバ側で拾えるようにする
+      const r: any = await irosClient.replyAndStore({
+        conversationId: cid,
+        user_text: payloadText,
+        mode: 'nextStep',
+        style,
+        nextStepChoice: {
+          key: opt.key,
+          label: opt.label,
+          gear: opt.gear ?? null,
+        },
+      });
+
+      const assistant = (r?.assistant ?? '') as string;
+      const meta = r?.meta ?? null;
+
+      // ④ assistant をローカル state に反映
+      setMessages((m) => [
+        ...m,
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          text: assistant,
+          content: assistant,
+          created_at: new Date().toISOString(),
+          ts: Date.now(),
+          meta,
+        } as IrosMessage,
+      ]);
+
+      setLoading(false);
+
+      // ⑤ 会話一覧の updated_at を更新
+      await reloadConversations();
+
+      return { assistant, meta: meta ?? undefined };
+    },
+    [reloadConversations, style],
+  );
+
   /* ========== Future-Seed（T層デモ） ========== */
 
   const sendFutureSeed = useCallback(
@@ -409,6 +500,7 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
 
         fetchMessages,
         sendMessage,
+        sendNextStepChoice,
         sendFutureSeed,
         startConversation,
         renameConversation,

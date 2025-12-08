@@ -1,7 +1,4 @@
 // src/lib/iros/wire.orchestrator.ts
-// Iros Orchestrator の呼び出し窓口（極小版）
-// - API やサーバーコンポーネントから使いやすい形にラップする
-// - DB 保存やメトリクスはここでは実装しない（TODO として余白だけ残す）
 
 import {
   runIrosTurn,
@@ -14,24 +11,16 @@ import {
   type QCode,
   type IrosMeta,
 } from './system';
+import { applyWillDepthDrift } from './willEngine'; // ★ ここはそのまま
 
 // ==== 外部から受け取る想定のリクエスト型 ==== //
 export type IrosWireRequest = {
-  // 認証済みユーザーのコード（例: user_code）
   userCode: string;
-
-  // 会話単位のID（なければ新規として扱う想定）
   conversationId?: string;
-
-  // ユーザー発話
   text: string;
-
-  // 呼び出し側が明示的に指定したい場合だけ使用
   mode?: IrosMode;
   depth?: Depth;
   qCode?: QCode;
-
-  // 将来的に memory/profile から渡したい追加メタ
   baseMeta?: Partial<IrosMeta>;
 };
 
@@ -44,14 +33,6 @@ export type IrosWireResponse = {
   };
 };
 
-/**
- * Iros の1ターン処理をまとめて呼び出す窓口。
- *
- * 役割:
- * - 外部から受け取ったパラメータを IrosOrchestratorArgs に変換
- * - runIrosTurn を呼び出し、結果を IrosWireResponse に整形
- * - 将来、ここに「DB保存」「メトリクス記録」などを追加できる余白を残す
- */
 export async function handleIrosRequest(
   req: IrosWireRequest,
 ): Promise<IrosWireResponse> {
@@ -77,6 +58,27 @@ export async function handleIrosRequest(
 
   const result: IrosOrchestratorResult = await runIrosTurn(orchestratorArgs);
 
+  // ---- WILL（Depth drift／ボタン反映）を unified にだけ適用 ---- //
+  const rawMeta: any = result.meta ?? {};
+  const unifiedBefore: any = rawMeta.unified;
+
+  let metaAfterWill: any = rawMeta;
+
+  if (unifiedBefore) {
+    const unifiedAfter = applyWillDepthDrift(unifiedBefore); // ★ unified だけ通す
+
+    // ★ WILL の結果から depth を引き出して、上位の meta.depth にも反映する
+    const depthAfter =
+      (unifiedAfter?.depth?.stage as Depth | undefined) ??
+      (rawMeta?.depth as Depth | undefined);
+
+    metaAfterWill = {
+      ...rawMeta,
+      unified: unifiedAfter,
+      depth: depthAfter,
+    };
+  }
+
   // ---- 将来のDB保存・メトリクス記録のための余白 ---- //
   // 例:
   // await saveIrosMessage({
@@ -84,17 +86,20 @@ export async function handleIrosRequest(
   //   conversationId,
   //   role: 'assistant',
   //   content: result.content,
-  //   meta: result.meta,
+  //   meta: metaAfterWill,
   // });
-  //
-  // ※ 実装は memory/store.ts や Supabase クライアントの構成を
-  //    確認した上で、別途コード or SQL で明示的に追加する。
 
   const meta: IrosMeta & { userCode: string; conversationId?: string } = {
-    ...(result.meta ?? {}),
+    ...(metaAfterWill as IrosMeta),
     userCode,
     conversationId,
   };
+
+  console.log('[WILL][after]', {
+    depthBefore: rawMeta?.unified?.depth,
+    depthAfter: metaAfterWill?.unified?.depth,
+    depthTopLevel: meta.depth,
+  });
 
   return {
     content: result.content,

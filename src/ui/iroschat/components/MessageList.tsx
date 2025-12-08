@@ -319,17 +319,17 @@ function normalizeBoldMarks(input: string): string {
 }
 
 export default function MessageList() {
-  const { messages, loading, error, sendNextStepChoice } = useIrosChat() as {
-    messages: IrosMessage[];
-    loading: boolean;
-    error?: string | null;
-    sendNextStepChoice: (opt: {
-      key: string;
-      label: string;
-      gear?: string | null;
-    }) => Promise<any>;
-  };
-
+  const { messages, loading, error, sendNextStepChoice } =
+    useIrosChat() as unknown as {
+      messages: IrosMessage[];
+      loading: boolean;
+      error?: string | null;
+      sendNextStepChoice?: (opt: {
+        key: string;
+        label: string;
+        gear?: string | null;
+      }) => Promise<unknown>;
+    };
   const authVal = (typeof useAuth === 'function' ? useAuth() : {}) as {
     user?: { avatarUrl?: string | null };
   };
@@ -539,31 +539,34 @@ export default function MessageList() {
                         gap: 8,
                       }}
                     >
-                      {nextStep.options.map((opt) => (
-                        <IrosButton
-                          key={opt.key}
-                          option={opt}
-                          gear={nextStep.gear as IrosNextStepGear}
-                          pending={loading}
-                          onClick={async (option) => {
-                            console.log(
-                              '[IROS UI] nextStep option clicked',
-                              {
-                                key: option.key,
-                                label: option.label,
-                                gear: nextStep.gear ?? null,
-                              },
-                            );
+{nextStep.options.map((opt, index) => (
+  <IrosButton
+    // ← React の key は必ず何かしら入るように三段階フォールバック
+    key={(opt as any).id ?? opt.key ?? `${index}`}
+    option={opt}
+    gear={nextStep.gear as IrosNextStepGear}
+    pending={loading}
+    onClick={async (option) => {
+      // runtime では id が付いてくる前提 / なければ key / それもなければ index
+      const id = (option as any).id ?? option.key ?? `${index}`;
 
-                            await sendNextStepChoice({
-                              key: option.key,
-                              label: option.label,
-                              gear: (nextStep.gear ??
-                                null) as string | null,
-                            });
-                          }}
-                        />
-                      ))}
+      console.log('[IROS UI] nextStep option clicked', {
+        key: id,
+        label: option.label,
+        gear: nextStep.gear ?? null,
+      });
+
+      if (sendNextStepChoice) {
+        await sendNextStepChoice({
+          key: id,
+          label: option.label,
+          gear: (nextStep.gear ?? null) as string | null,
+        });
+      }
+    }}
+  />
+))}
+
                     </div>
                   )}
               </div>

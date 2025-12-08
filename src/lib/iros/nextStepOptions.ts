@@ -282,3 +282,56 @@ export function buildNextStepOptions(params: {
 
   return { gear, options };
 }
+/**
+ * meta に nextStep 情報を付け足すヘルパー
+ *
+ * - すでに meta.nextStep がある場合は上書きしない
+ * - ユーザー発話に「選択肢」「決められない」「選べない」「どうしたらいい」
+ *   のいずれかが含まれているときだけ発火
+ *
+ * ※ あとで /api/agent/iros/reply から呼び出して使います。
+ */
+export function attachNextStepMeta(params: {
+  meta: any;
+  qCode: NextStepQCode;
+  depth: Depth;
+  selfAcceptance: number | null;
+  hasQ5DepressRisk: boolean;
+  userText: string;
+}): any {
+  const { meta, qCode, depth, selfAcceptance, hasQ5DepressRisk, userText } =
+    params;
+
+  // すでに nextStep があれば何もしない
+  if (meta?.nextStep?.options?.length) {
+    return meta;
+  }
+
+  const text = userText ?? '';
+
+  // 👇 ここが「どんな入力でボタンを出すか」の条件
+  const shouldOfferNextStep =
+    text.includes('選択肢') ||
+    text.includes('決められない') ||
+    text.includes('選べない') ||
+    text.includes('どうしたらいい');
+
+  if (!shouldOfferNextStep) {
+    return meta;
+  }
+
+  const { gear, options } = buildNextStepOptions({
+    qCode,
+    depth,
+    selfAcceptance,
+    hasQ5DepressRisk,
+  });
+
+  return {
+    ...meta,
+    nextStep: {
+      gear,
+      options,
+    },
+  };
+}
