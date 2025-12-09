@@ -1086,10 +1086,11 @@ export async function handleIrosReply(
           // ★ assistantText 内の 【IROS_STATE_META】 をパースして meta にマージ
           try {
             const match = assistantText.match(
-              /【IROS_STATE_META】(\{[\s\S]*?\})/,
+              /【IROS_STATE_META】({[\s\S]*})/,
             );
             if (match && match[1]) {
-              const payload = JSON.parse(match[1]);
+              const raw = match[1].trim();
+              const payload = JSON.parse(raw);
 
               if (typeof payload.selfAcceptance === 'number') {
                 m.selfAcceptance = payload.selfAcceptance;
@@ -1157,6 +1158,7 @@ export async function handleIrosReply(
           }
 
           const unified = m.unified ?? {};
+
 
           // --- ここは既にある Pol/Stab 用の処理 ---
           const qCodeForPol: string | null =
