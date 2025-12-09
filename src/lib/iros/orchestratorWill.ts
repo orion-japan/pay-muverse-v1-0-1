@@ -54,12 +54,16 @@ export type ComputeGoalAndPriorityArgs = {
   /** ★ 三軸回転：前回 Goal.kind ／ uncover 連続カウント */
   lastGoalKind?: IrosGoalKind | null;
   previousUncoverStreak?: number;
+
+  /** ★ Phase（Inner / Outer）— Y軸トルク用。未解決なら null */
+  phase?: 'Inner' | 'Outer' | null;
 };
 
 export type ComputeGoalAndPriorityResult = {
   goal: IrosGoalType;
   priority: IrosPriorityType;
 };
+
 
 /**
  * Goal / Continuity / Priority / SA補正 をひとまとめにしたユーティリティ。
@@ -81,6 +85,7 @@ export function computeGoalAndPriority(
     soulNote,
     lastGoalKind,
     previousUncoverStreak,
+    phase, // ★ ここを追加
   } = args;
 
   /* =========================================================
@@ -207,6 +212,7 @@ export function computeGoalAndPriority(
     mode,
     depth,
     qCode,
+    phase: phase ?? undefined, // ★ Phase を渡す
   });
 
   // ★ SelfAcceptance ラインを使って Priority を補正

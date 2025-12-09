@@ -333,7 +333,6 @@ export async function runIrosTurn(
 
   (meta as any).phase = phase;
 
-
   if (qTrace) {
     (meta as any).qTrace = qTrace;
   }
@@ -521,21 +520,24 @@ export async function runIrosTurn(
     (meta as any).tLayerModeActive = true;
   }
 
-  // ----------------------------------------------------------------
-  // 7. Will フェーズ：Goal / Priority の決定
-  // ----------------------------------------------------------------
-  let { goal, priority } = computeGoalAndPriority({
-    text,
-    depth: meta.depth,
-    qCode: meta.qCode,
-    selfAcceptanceLine: meta.selfAcceptance ?? null,
-    mode: (meta.mode ?? 'mirror') as IrosMode,
-    // ★ 追加
-    soulNote: (meta as any).soulNote ?? null,
-    // ★ 三軸回転用：前回 Goal.kind と uncover 連続カウント
-    lastGoalKind,
-    previousUncoverStreak,
-  });
+// ----------------------------------------------------------------
+ // 7. Will フェーズ：Goal / Priority の決定
+ // ----------------------------------------------------------------
+ let { goal, priority } = computeGoalAndPriority({
+  text,
+  depth: meta.depth,
+  qCode: meta.qCode,
+  selfAcceptanceLine: meta.selfAcceptance ?? null,
+  mode: (meta.mode ?? 'mirror') as IrosMode,
+  // ★ 魂レイヤー
+  soulNote: (meta as any).soulNote ?? null,
+  // ★ 三軸回転用：前回 Goal.kind と uncover 連続カウント
+  lastGoalKind,
+  previousUncoverStreak,
+  // ★ Phase（Inner / Outer）を Will エンジンに渡す
+  phase: (meta as any).phase ?? null,
+});
+
 
   // ★ delegate intent（任せる／決めて／進めて／動かして...）のとき、
   //    goal.kind / targetDepth / weights を C1 行動フェーズ寄りに上書き
