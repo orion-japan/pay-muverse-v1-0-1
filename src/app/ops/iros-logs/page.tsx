@@ -55,22 +55,32 @@ const num = (v: any, fallback = 0) => {
 const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
 
 /**
- * 旧Irosの「[お金・収入]: {...}」のような
- * JSON入りメタ1行を先頭から削るヘルパ
+ * 旧Irosの「[お金・収入]: {...}」や
+ * 先頭の【IROS_STATE_META】... 行を削るヘルパ
  */
 function stripLegacyMetaHeader(raw: string | null | undefined): string {
   if (!raw) return '';
   const lines = raw.split('\n');
   if (lines.length === 0) return '';
 
-  const first = lines[0];
-  // かなり大雑把でOK：1行目に { と } が両方あれば「旧meta行」とみなして削除
+  const first = lines[0].trimStart();
+
+  // ① 新Iros用: 先頭が 【IROS_STATE_META】 で始まる行なら削る
+  if (first.startsWith('【IROS_STATE_META】')) {
+    const rest = lines.slice(1).join('\n').trimStart();
+    return rest;
+  }
+
+  // ② 旧Iros用: 1行目に { と } が両方あれば「旧meta行」とみなして削除
   if (first.includes('{') && first.includes('}')) {
     const rest = lines.slice(1).join('\n').trimStart();
     return rest;
   }
+
+  // どちらでもなければそのまま返す
   return raw;
 }
+
 
 /**
  * Y/H をアイコン付きで表示するヘルパ

@@ -92,16 +92,25 @@ export function toGentleTone(text: string, _opts?: ToneOpts): string {
 
 /** 文末を自然に閉じる（日本語句点などで終わるように） */
 export function naturalClose(text: string, _opts?: ToneOpts): string {
-  const t = tidy(text);
-
+  let t = tidy(text);
   if (!t) return '';
 
-  // 末尾の引用・括弧閉じを許容
+  // ここで「かもしれません」系を物理的に削る
+  t = t
+    .replace(/かもしれません。/g, '。')
+    .replace(/かもしれません/g, '')
+    .replace(/かも知れません。/g, '。')
+    .replace(/かも知れません/g, '')
+    .replace(/かもしれない。/g, '。')
+    .replace(/かもしれない/g, '');
+
+  // 末尾が句点・記号で終わっていればそのまま
   const terminal = /[。．.!?！？」』」\)\]\}]+$/;
   if (terminal.test(t)) return t;
 
   // URL・コード断片で終わる場合はそのまま
-  if (/(https?:\/\/\S+|```[\s\S]*```|\S+\/\S+)/.test(t.split('\n').slice(-1)[0])) return t;
+  const lastLine = t.split('\n').slice(-1)[0];
+  if (/(https?:\/\/\S+|```[\s\S]*```|\S+\/\S+)/.test(lastLine)) return t;
 
   return `${t}。`;
 }

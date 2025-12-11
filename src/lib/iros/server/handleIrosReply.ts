@@ -1050,7 +1050,7 @@ export async function handleIrosReply(
     }
 
     // assistant 本文抽出
-    const assistantText: string =
+    let assistantText: string =
       result && typeof result === 'object'
         ? (() => {
             const r: any = result;
@@ -1083,79 +1083,85 @@ export async function handleIrosReply(
         try {
           const m: any = metaForSave;
 
-          // ★ assistantText 内の 【IROS_STATE_META】 をパースして meta にマージ
-          try {
-            const match = assistantText.match(
-              /【IROS_STATE_META】({[\s\S]*})/,
-            );
-            if (match && match[1]) {
-              const raw = match[1].trim();
-              const payload = JSON.parse(raw);
+// ★ assistantText 内の 【IROS_STATE_META】 をパースして meta にマージ
+try {
+  const match = assistantText.match(
+    /【IROS_STATE_META】({[\s\S]*?})/,
+  );
+  if (match && match[1]) {
+    const raw = match[1].trim();
+    const payload = JSON.parse(raw);
 
-              if (typeof payload.selfAcceptance === 'number') {
-                m.selfAcceptance = payload.selfAcceptance;
-              }
-              if (typeof payload.yLevel === 'number') {
-                m.yLevel = payload.yLevel;
-              }
-              if (typeof payload.hLevel === 'number') {
-                m.hLevel = payload.hLevel;
-              }
-              if (typeof payload.depth === 'string') {
-                m.depth = payload.depth;
-              }
-              if (typeof payload.qCode === 'string') {
-                m.qCode = payload.qCode;
-              }
-              if (typeof payload.phase === 'string') {
-                m.phase = payload.phase;
-              }
-              if (typeof payload.mode === 'string') {
-                m.mode = payload.mode;
-              }
-              if (typeof payload.tLayerModeActive === 'boolean') {
-                m.tLayerModeActive = payload.tLayerModeActive;
-              }
-              if (typeof payload.tLayerHint === 'string') {
-                m.tLayerHint = payload.tLayerHint;
-              }
-              if (typeof payload.hasFutureMemory === 'boolean') {
-                m.hasFutureMemory = payload.hasFutureMemory;
-              }
-              if (typeof payload.irTargetType === 'string') {
-                m.irTargetType = payload.irTargetType;
-              }
-              if (typeof payload.irTargetText === 'string') {
-                m.irTargetText = payload.irTargetText;
-              }
-              if (typeof payload.pierceMode === 'boolean') {
-                m.pierceMode = payload.pierceMode;
-              }
-              if (typeof payload.pierceReason === 'string') {
-                m.pierceReason = payload.pierceReason;
-              }
-              if (payload.intentLine && typeof payload.intentLine === 'object') {
-                m.intentLine = payload.intentLine;
-              }
-              if (payload.soulNote && typeof payload.soulNote === 'object') {
-                m.soulNote = payload.soulNote;
-              }
+    if (typeof payload.selfAcceptance === 'number') {
+      m.selfAcceptance = payload.selfAcceptance;
+    }
+    if (typeof payload.yLevel === 'number') {
+      m.yLevel = payload.yLevel;
+    }
+    if (typeof payload.hLevel === 'number') {
+      m.hLevel = payload.hLevel;
+    }
+    if (typeof payload.depth === 'string') {
+      m.depth = payload.depth;
+    }
+    if (typeof payload.qCode === 'string') {
+      m.qCode = payload.qCode;
+    }
+    if (typeof payload.phase === 'string') {
+      m.phase = payload.phase;
+    }
+    if (typeof payload.mode === 'string') {
+      m.mode = payload.mode;
+    }
+    if (typeof payload.tLayerModeActive === 'boolean') {
+      m.tLayerModeActive = payload.tLayerModeActive;
+    }
+    if (typeof payload.tLayerHint === 'string') {
+      m.tLayerHint = payload.tLayerHint;
+    }
+    if (typeof payload.hasFutureMemory === 'boolean') {
+      m.hasFutureMemory = payload.hasFutureMemory;
+    }
+    if (typeof payload.irTargetType === 'string') {
+      m.irTargetType = payload.irTargetType;
+    }
+    if (typeof payload.irTargetText === 'string') {
+      m.irTargetText = payload.irTargetText;
+    }
+    if (typeof payload.pierceMode === 'boolean') {
+      m.pierceMode = payload.pierceMode;
+    }
+    if (typeof payload.pierceReason === 'string') {
+      m.pierceReason = payload.pierceReason;
+    }
+    if (payload.intentLine && typeof payload.intentLine === 'object') {
+      m.intentLine = payload.intentLine;
+    }
+    if (payload.soulNote && typeof payload.soulNote === 'object') {
+      m.soulNote = payload.soulNote;
+    }
 
-              console.log('[IROS/StateMeta] merged from IROS_STATE_META', {
-                phase: m.phase,
-                depth: m.depth,
-                qCode: m.qCode,
-                selfAcceptance: m.selfAcceptance,
-                yLevel: m.yLevel,
-                hLevel: m.hLevel,
-              });
-            }
-          } catch (e) {
-            console.error(
-              '[IROS/StateMeta] failed to parse IROS_STATE_META from assistantText',
-              e,
-            );
-          }
+    console.log('[IROS/StateMeta] merged from IROS_STATE_META', {
+      phase: m.phase,
+      depth: m.depth,
+      qCode: m.qCode,
+      selfAcceptance: m.selfAcceptance,
+      yLevel: m.yLevel,
+      hLevel: m.hLevel,
+    });
+
+    // ★ メタ JSON 部分を本文から削除しておく（ここが重要）
+    assistantText = assistantText
+      .replace(/【IROS_STATE_META】({[\s\S]*?})/, '')
+      .trim();
+  }
+} catch (e) {
+  console.error(
+    '[IROS/StateMeta] failed to parse IROS_STATE_META from assistantText',
+    e,
+  );
+}
+
 
           const unified = m.unified ?? {};
 

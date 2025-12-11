@@ -168,6 +168,19 @@ function toSafeString(v: unknown): string {
   return String(v);
 }
 
+/** 先頭の【IROS_STATE_META】... 行を削る（チャットには見せない） */
+function stripIrosMetaHeader(raw: string): string {
+  if (!raw) return '';
+  const lines = raw.split('\n');
+  if (lines.length === 0) return '';
+  const first = lines[0].trimStart();
+
+  if (first.startsWith('【IROS_STATE_META】')) {
+    return lines.slice(1).join('\n').trimStart();
+  }
+  return raw;
+}
+
 /* ========= I層テンプレ → GPT風Markdown 変換 ========= */
 
 function transformIrTemplateToMarkdown(input: string): string {
@@ -402,11 +415,12 @@ export default function MessageList() {
         <div className={styles.emptyHint}>ここに会話が表示されます</div>
       )}
 
-      {messages.map((m) => {
+      {messages.map((m, index) => {
         const isUser = m.role === 'user';
         const iconSrc = isUser ? resolveUserAvatar(m) : '/ir.png';
 
-        const rawText = toSafeString(m.text);
+        // ★ メタを本文から隠す：toSafeString → stripIrosMetaHeader
+        const rawText = stripIrosMetaHeader(toSafeString(m.text));
         const safeText = normalizeBoldMarks(
           transformIrTemplateToMarkdown(rawText),
         );
@@ -539,34 +553,35 @@ export default function MessageList() {
                         gap: 8,
                       }}
                     >
-{nextStep.options.map((opt, index) => (
-  <IrosButton
-    // ← React の key は必ず何かしら入るように三段階フォールバック
-    key={(opt as any).id ?? opt.key ?? `${index}`}
-    option={opt}
-    gear={nextStep.gear as IrosNextStepGear}
-    pending={loading}
-    onClick={async (option) => {
-      // runtime では id が付いてくる前提 / なければ key / それもなければ index
-      const id = (option as any).id ?? option.key ?? `${index}`;
+                      {nextStep.options.map((opt) => (
+                        <IrosButton
+                          key={(opt as any).id ?? opt.key}
+                          option={opt}
+                          gear={nextStep.gear as IrosNextStepGear}
+                          pending={loading}
+                          onClick={async (option) => {
+                            const id =
+                              (option as any).id ?? option.key ?? '';
+                            console.log(
+                              '[IROS UI] nextStep option clicked',
+                              {
+                                key: id,
+                                label: option.label,
+                                gear: nextStep.gear ?? null,
+                              },
+                            );
 
-      console.log('[IROS UI] nextStep option clicked', {
-        key: id,
-        label: option.label,
-        gear: nextStep.gear ?? null,
-      });
-
-      if (sendNextStepChoice) {
-        await sendNextStepChoice({
-          key: id,
-          label: option.label,
-          gear: (nextStep.gear ?? null) as string | null,
-        });
-      }
-    }}
-  />
-))}
-
+                            if (sendNextStepChoice) {
+                              await sendNextStepChoice({
+                                key: id,
+                                label: option.label,
+                                gear: (nextStep.gear ??
+                                  null) as string | null,
+                              });
+                            }
+                          }}
+                        />
+                      ))}
                     </div>
                   )}
               </div>
