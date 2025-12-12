@@ -83,8 +83,12 @@ export async function saveIrosTrainingSample(
       ? depthObj.stage
       : null;
 
-  const phase: string | null =
-    typeof unified.phase === 'string' ? unified.phase : null;
+      const phase: string | null =
+      typeof m.phase === 'string'
+        ? m.phase
+        : typeof unified.phase === 'string'
+        ? unified.phase
+        : null;
 
   const selfAcceptance: number | null =
     typeof m.selfAcceptance === 'number'
@@ -104,7 +108,6 @@ export async function saveIrosTrainingSample(
       ? Math.round(m.hLevel) // ★ 2.25 → 2 などに丸める
       : null;
 
-
   // --- モード・IntentLine -------------------------------------
   const mirrorMode: string | null =
     typeof m.mode === 'string' ? m.mode : null;
@@ -116,8 +119,8 @@ export async function saveIrosTrainingSample(
 
   const intentLine: any = m.intentLine ?? null;
 
-  // --- 状況サマリ / トピック ---------------------------------
-  const situationSummary: string | null =
+  // --- 状況サマリ / トピック（ベース値） ----------------------
+  const baseSituationSummary: string | null =
     typeof situation.summary === 'string'
       ? situation.summary
       : typeof m.situationSummary === 'string'
@@ -146,9 +149,9 @@ export async function saveIrosTrainingSample(
 
   const fromSituation =
     !primary &&
-    typeof situationSummary === 'string' &&
-    situationSummary.trim()
-      ? situationSummary.trim()
+    typeof baseSituationSummary === 'string' &&
+    baseSituationSummary.trim()
+      ? baseSituationSummary.trim()
       : null;
 
   const fromIntentLine =
@@ -167,6 +170,28 @@ export async function saveIrosTrainingSample(
 
   const analysisText: string =
     primary ?? fromSituation ?? fromIntentLine ?? fallback ?? '';
+
+  // --- situation_summary の最終決定 ---------------------------
+  // 1) unified / meta に summary があればそれを優先
+  // 2) なければ、analysisText を 200 文字まで切って保存
+  let situationSummary: string | null = baseSituationSummary;
+  if (!situationSummary || !situationSummary.trim()) {
+    situationSummary =
+      analysisText && analysisText.trim().length > 0
+        ? analysisText.slice(0, 200)
+        : null;
+  }
+
+  // 3) それでも空なら、inputText をトリムして 200 文字まで切る
+  // 4) それでも空なら、最終保険として固定文言を入れる
+  if (!situationSummary || !situationSummary.trim()) {
+    const trimmedInput = (inputText ?? '').toString().trim();
+    if (trimmedInput.length > 0) {
+      situationSummary = trimmedInput.slice(0, 200);
+    } else {
+      situationSummary = '（内容なし）';
+    }
+  }
 
   // --- 挿入する行（まずは生の row） ---------------------------
   const rawRow = {
@@ -204,6 +229,7 @@ export async function saveIrosTrainingSample(
     conversation_id: rowSanitized.conversation_id,
     q_code: rowSanitized.q_code,
     depth_stage: rowSanitized.depth_stage,
+    phase: rowSanitized.phase,
     self_acceptance: rowSanitized.self_acceptance,
     situation_summary: rowSanitized.situation_summary,
     situation_topic: rowSanitized.situation_topic,
@@ -212,6 +238,7 @@ export async function saveIrosTrainingSample(
     target_kind: rowSanitized.target_kind,
     target_label: rowSanitized.target_label,
   });
+
 
   // ★ Supabase に送る前に JSON として正規化
   let rowToInsert: any = rowSanitized;

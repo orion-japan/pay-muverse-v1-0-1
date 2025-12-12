@@ -61,6 +61,9 @@ import type { IrosSoulInput } from './soul/types';
 // ★ 今日できること？トリガー検出
 import { detectActionRequest } from './will/detectActionRequest';
 
+// ★ CONT: 意志の連続性（Depth / Q のなだらか化）
+import { applyGoalContinuity } from './will/continuityEngine'; // ★ CONT 追加
+
 // ==== I層強制モード（ENV） ====
 //   - true のとき、requestedDepth を優先して depth を固定する
 const FORCE_I_LAYER =
@@ -170,10 +173,7 @@ function applyDelegateIntentOverride(params: {
   };
 }
 
-
-// src/lib/iros/orchestrator.ts
 // Iros Orchestrator — Will Engine（Goal / Priority）+ Continuity Engine 統合版
-
 export async function runIrosTurn(
   args: IrosOrchestratorArgs,
 ): Promise<IrosOrchestratorResult> {
@@ -220,6 +220,12 @@ export async function runIrosTurn(
     ...(memoryMeta || {}),
     ...(baseMeta || {}),
   };
+
+  // ★ CONT: 連続性用に「前回までの depth / qCode」を控えておく
+  const lastDepthForContinuity: Depth | undefined =
+    (mergedBaseMeta.depth as Depth | undefined) ?? undefined;
+  const lastQForContinuity: QCode | undefined =
+    (mergedBaseMeta.qCode as QCode | undefined) ?? undefined;
 
   // ★ style の反映：
   //   - 明示指定された style を最優先
@@ -520,24 +526,23 @@ export async function runIrosTurn(
     (meta as any).tLayerModeActive = true;
   }
 
-// ----------------------------------------------------------------
- // 7. Will フェーズ：Goal / Priority の決定
- // ----------------------------------------------------------------
- let { goal, priority } = computeGoalAndPriority({
-  text,
-  depth: meta.depth,
-  qCode: meta.qCode,
-  selfAcceptanceLine: meta.selfAcceptance ?? null,
-  mode: (meta.mode ?? 'mirror') as IrosMode,
-  // ★ 魂レイヤー
-  soulNote: (meta as any).soulNote ?? null,
-  // ★ 三軸回転用：前回 Goal.kind と uncover 連続カウント
-  lastGoalKind,
-  previousUncoverStreak,
-  // ★ Phase（Inner / Outer）を Will エンジンに渡す
-  phase: (meta as any).phase ?? null,
-});
-
+  // ----------------------------------------------------------------
+  // 7. Will フェーズ：Goal / Priority の決定
+  // ----------------------------------------------------------------
+  let { goal, priority } = computeGoalAndPriority({
+    text,
+    depth: meta.depth,
+    qCode: meta.qCode,
+    selfAcceptanceLine: meta.selfAcceptance ?? null,
+    mode: (meta.mode ?? 'mirror') as IrosMode,
+    // ★ 魂レイヤー
+    soulNote: (meta as any).soulNote ?? null,
+    // ★ 三軸回転用：前回 Goal.kind と uncover 連続カウント
+    lastGoalKind,
+    previousUncoverStreak,
+    // ★ Phase（Inner / Outer）を Will エンジンに渡す
+    phase: (meta as any).phase ?? null,
+  });
 
   // ★ delegate intent（任せる／決めて／進めて／動かして...）のとき、
   //    goal.kind / targetDepth / weights を C1 行動フェーズ寄りに上書き
@@ -587,6 +592,54 @@ export async function runIrosTurn(
           'ユーザーが「今日できること？」と具体的な一歩を求めているため、forward を優先';
       }
       goal = anyGoal as IrosGoalType;
+    }
+  }
+
+  // ★ CONT: ContinuityEngine で「前回の depth/Q からなだらかに」補正
+  if (goal) {
+    const continuityContext = {
+      lastDepth: lastDepthForContinuity,
+      lastQ: lastQForContinuity,
+      userText: text,
+    };
+
+    const adjustedGoal = applyGoalContinuity(goal as any, continuityContext);
+
+    // priority.goal 側にも targetDepth / targetQ を反映しておく
+    if (priority) {
+      const anyPriority = priority as any;
+      if (!anyPriority.goal) anyPriority.goal = {};
+
+      if (
+        typeof adjustedGoal.targetDepth === 'string' &&
+        adjustedGoal.targetDepth
+      ) {
+        anyPriority.goal.targetDepth = adjustedGoal.targetDepth;
+      }
+
+      if (
+        typeof (adjustedGoal as any).targetQ === 'string' &&
+        (adjustedGoal as any).targetQ
+      ) {
+        anyPriority.goal.targetQ = (adjustedGoal as any).targetQ;
+      }
+
+      priority = anyPriority as IrosPriorityType;
+    }
+
+    goal = adjustedGoal as IrosGoalType;
+
+    if (
+      typeof process !== 'undefined' &&
+      process.env.NODE_ENV !== 'production'
+    ) {
+      // eslint-disable-next-line no-console
+      console.log('[IROS/CONT applyGoalContinuity]', {
+        lastDepth: lastDepthForContinuity,
+        lastQ: lastQForContinuity,
+        finalTargetDepth: (goal as any).targetDepth,
+        finalTargetQ: (goal as any).targetQ,
+      });
     }
   }
 
@@ -667,6 +720,12 @@ export async function runIrosTurn(
   // ----------------------------------------------------------------
   // 11. MemoryState 保存（finalMeta ベース）
   // ----------------------------------------------------------------
+  // ★ ここで「今回の一言」を situationSummary として流し込む
+  (finalMeta as any).situationSummary =
+    typeof text === 'string' && text.trim().length > 0
+      ? text.trim()
+      : null;
+
   if (userCode) {
     await saveMemoryStateFromMeta({
       userCode,

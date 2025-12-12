@@ -40,6 +40,8 @@ export type DepthDriftOutput = {
     // 実際に「ボタン意図を採用したかどうか」
     appliedRequest: boolean;
     reason: string;
+    // ★ 追加：Q / SA / intentLayer から計算した安全度
+    safety: DriftSafety;
   };
 };
 
@@ -89,6 +91,46 @@ function shiftBand(band: 'S' | 'R' | 'C' | 'I', delta: number): 'S' | 'R' | 'C' 
   return order[nextIdx];
 }
 
+/* ========= 追加：ドリフト安全度（Q / SA / intentLayer から推定） ========= */
+
+export type DriftSafety = 'conservative' | 'normal' | 'aggressive';
+
+function computeDriftSafety(params: {
+  qCode?: QCode | null;
+  selfAcceptance?: number | null;
+  intentLayer?: 'S' | 'R' | 'C' | 'I' | 'T' | null;
+}): DriftSafety {
+  const { qCode, selfAcceptance, intentLayer } = params;
+
+  // 1. 強めの「守り」条件 → 即 conservative
+  if (typeof selfAcceptance === 'number' && selfAcceptance < 0.4) {
+    return 'conservative';
+  }
+  if (qCode === 'Q1' || qCode === 'Q3') {
+    return 'conservative';
+  }
+
+  // 2. 攻めたい条件をスコア加算
+  let aggressiveScore = 0;
+
+  if (typeof selfAcceptance === 'number' && selfAcceptance >= 0.7) {
+    aggressiveScore += 1;
+  }
+  if (qCode === 'Q4' || qCode === 'Q5') {
+    aggressiveScore += 1;
+  }
+  if (intentLayer === 'C' || intentLayer === 'I' || intentLayer === 'T') {
+    aggressiveScore += 1;
+  }
+
+  if (aggressiveScore >= 2) {
+    return 'aggressive';
+  }
+
+  // 3. どちらでもない → normal
+  return 'normal';
+}
+
 /**
  * requestedDepth へ「どのくらい寄せるか」を計算する。
  *
@@ -99,10 +141,18 @@ function shiftBand(band: 'S' | 'R' | 'C' | 'I', delta: number): 'S' | 'R' | 'C' 
  * goalKindHint:
  * - "stabilize": レベル変化を小さめに（band優先）
  * - "reframeIntention": band変化を優先して I / C 側へ寄りやすく
+ *
+ * DriftSafety:
+ * - conservative: 「守り」寄り → band だけ or 小さな変化に抑える
+ * - normal: 既存ロジック通り
+ * - aggressive: full-rotate 時にそのまま target に合わせやすく
  */
 export function computeDepthDriftWithNextStep(input: DepthDriftInput): DepthDriftOutput {
   const {
     currentDepth,
+    qCode,
+    selfAcceptance,
+    intentLayer,
     gear,
     nextStepMeta,
   } = input;
@@ -114,6 +164,8 @@ export function computeDepthDriftWithNextStep(input: DepthDriftInput): DepthDrif
   const requestedDepth = nextStepMeta?.requestedDepth ?? null;
   const goalKindHint = nextStepMeta?.goalKindHint ?? null;
 
+  const safety = computeDriftSafety({ qCode: qCode ?? null, selfAcceptance, intentLayer });
+
   // 基本方針: currentDepth が解釈できない / requestedDepth がない / safe-hold の場合はそのまま返す
   if (!parsedCurrent) {
     return {
@@ -124,6 +176,7 @@ export function computeDepthDriftWithNextStep(input: DepthDriftInput): DepthDrif
         goalKindHint,
         appliedRequest: false,
         reason: 'currentDepth が未定義 or 解釈不能のため、そのまま維持',
+        safety,
       },
     };
   }
@@ -139,6 +192,7 @@ export function computeDepthDriftWithNextStep(input: DepthDriftInput): DepthDrif
         reason: gearValue === 'safe-hold'
           ? 'safe-hold ギアのため、ボタン意図を採用せず現状維持'
           : 'requestedDepth が指定されていないため、現状維持',
+        safety,
       },
     };
   }
@@ -153,11 +207,12 @@ export function computeDepthDriftWithNextStep(input: DepthDriftInput): DepthDrif
         goalKindHint,
         appliedRequest: false,
         reason: 'requestedDepth が "S2" 形式でないため、現状維持',
+        safety,
       },
     };
   }
 
-  // ここから、ギアと goalKind を見ながら「どこまで寄せるか」を決める
+  // ここから、ギアと goalKind / safety を見ながら「どこまで寄せるか」を決める
   const { band: curBand, level: curLevel } = parsedCurrent;
   const { band: tgtBand, level: tgtLevel } = parsedTarget;
 
@@ -165,15 +220,31 @@ export function computeDepthDriftWithNextStep(input: DepthDriftInput): DepthDrif
   let nextLevel = curLevel;
 
   if (gearValue === 'full-rotate') {
-    // フル回転：target にほぼ合わせる
-    nextBand = tgtBand;
-    nextLevel = tgtLevel;
+    if (safety === 'conservative') {
+      // フル回転要求でも「守り」モードのときは、
+      // 一気には飛ばさず soft-rotate 相当の動きに抑える
+      nextBand = curBand !== tgtBand
+        ? shiftBand(curBand, curBand < tgtBand ? 1 : -1)
+        : curBand;
 
-    // ただし「stabilize」の場合はレベルだけ少し抑える
-    if (goalKindHint === 'stabilize') {
-      // 中間レベルに寄せる（例: 3 → 2）
-      const midLevel = Math.round((curLevel + tgtLevel) / 2);
-      nextLevel = midLevel;
+      // level は据え置き or ごく小さな変化
+      if (curLevel !== tgtLevel && goalKindHint !== 'stabilize') {
+        const levelDelta = tgtLevel > curLevel ? 1 : -1;
+        nextLevel = curLevel + levelDelta;
+      }
+    } else {
+      // フル回転：target にほぼ合わせる
+      nextBand = tgtBand;
+      nextLevel = tgtLevel;
+
+      // ただし「stabilize」の場合はレベルだけ少し抑える
+      if (goalKindHint === 'stabilize') {
+        // 中間レベルに寄せる（例: 3 → 2）
+        const midLevel = Math.round((curLevel + tgtLevel) / 2);
+        nextLevel = midLevel;
+      }
+
+      // aggressive のときはそのまま、normal もこのまま扱う
     }
   } else if (gearValue === 'soft-rotate') {
     // 小回転：一歩だけ target へ近づく
@@ -184,7 +255,9 @@ export function computeDepthDriftWithNextStep(input: DepthDriftInput): DepthDrif
     }
 
     // 2) level を 1ステップだけ寄せるか
-    if (curLevel !== tgtLevel) {
+    // conservative の場合は「band だけ寄せて level は据え置き」にして、
+    // なるべく安定側に保つ
+    if (safety !== 'conservative' && curLevel !== tgtLevel) {
       // "stabilize" の場合は、レベル変化をより小さくする（band変化を優先）
       const levelDelta = tgtLevel > curLevel ? 1 : -1;
       if (goalKindHint === 'stabilize') {
@@ -211,7 +284,8 @@ export function computeDepthDriftWithNextStep(input: DepthDriftInput): DepthDrif
       requestedDepth,
       goalKindHint,
       appliedRequest: true,
-      reason: 'nextStep.meta とギア設定に基づき、Depth を drift させた',
+      reason: 'nextStep.meta とギア設定 + safety に基づき、Depth を drift させた',
+      safety,
     },
   };
 }

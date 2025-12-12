@@ -171,51 +171,90 @@ export async function upsertIrosMemoryState(
     sentiment_level,
   } = input;
 
+  // ① 既存の状態を読み込み（あればマージに使う）
+  const previous = await loadIrosMemoryState(userCode);
+
+  // ② null/undefined で「潰さない」フィールドはここでマージ
+  const finalDepthStage =
+    depthStage ?? previous?.depthStage ?? null;
+  const finalQPrimary =
+    qPrimary ?? previous?.qPrimary ?? null;
+  const finalSelfAcceptance =
+    typeof selfAcceptance === 'number'
+      ? selfAcceptance
+      : previous?.selfAcceptance ?? null;
+
+  const finalPhase: 'Inner' | 'Outer' | null =
+    phase ?? previous?.phase ?? null;
+
+  const finalIntentLayer =
+    intentLayer ?? previous?.intentLayer ?? null;
+
+  const finalIntentConfidence =
+    typeof intentConfidence === 'number'
+      ? intentConfidence
+      : previous?.intentConfidence ?? null;
+
+  const finalYLevel =
+    typeof yLevel === 'number'
+      ? yLevel
+      : previous?.yLevel ?? null;
+
+  const finalHLevel =
+    typeof hLevel === 'number'
+      ? hLevel
+      : previous?.hLevel ?? null;
+
+  const finalSentimentLevel =
+    typeof sentiment_level === 'string' && sentiment_level.length > 0
+      ? sentiment_level
+      : previous?.sentimentLevel ?? null;
+
   // ★ 0〜3 に丸めて integer 化（DB カラムは integer）
   const yLevelInt =
-    typeof yLevel === 'number' && Number.isFinite(yLevel)
-      ? Math.max(0, Math.min(3, Math.round(yLevel)))
+    typeof finalYLevel === 'number' && Number.isFinite(finalYLevel)
+      ? Math.max(0, Math.min(3, Math.round(finalYLevel)))
       : null;
 
   const hLevelInt =
-    typeof hLevel === 'number' && Number.isFinite(hLevel)
-      ? Math.max(0, Math.min(3, Math.round(hLevel)))
+    typeof finalHLevel === 'number' && Number.isFinite(finalHLevel)
+      ? Math.max(0, Math.min(3, Math.round(finalHLevel)))
       : null;
 
-  // Debug summary（文字列なので小数もOKだが、見た目を揃えるため整数で）
+  // Debug summary
   const summaryParts: string[] = [];
-  if (depthStage) summaryParts.push(`depth=${depthStage}`);
-  if (qPrimary) summaryParts.push(`q=${qPrimary}`);
-  if (typeof selfAcceptance === 'number') {
-    summaryParts.push(`sa=${selfAcceptance.toFixed(3)}`);
+  if (finalDepthStage) summaryParts.push(`depth=${finalDepthStage}`);
+  if (finalQPrimary) summaryParts.push(`q=${finalQPrimary}`);
+  if (typeof finalSelfAcceptance === 'number') {
+    summaryParts.push(`sa=${finalSelfAcceptance.toFixed(3)}`);
   }
   if (typeof yLevelInt === 'number') summaryParts.push(`y=${yLevelInt}`);
   if (typeof hLevelInt === 'number') summaryParts.push(`h=${hLevelInt}`);
-  if (phase) summaryParts.push(`phase=${phase}`);
-  if (intentLayer) summaryParts.push(`intent=${intentLayer}`);
-  if (typeof intentConfidence === 'number') {
-    summaryParts.push(`ic=${intentConfidence.toFixed(3)}`);
+  if (finalPhase) summaryParts.push(`phase=${finalPhase}`);
+  if (finalIntentLayer) summaryParts.push(`intent=${finalIntentLayer}`);
+  if (typeof finalIntentConfidence === 'number') {
+    summaryParts.push(`ic=${finalIntentConfidence.toFixed(3)}`);
   }
-  if (typeof sentiment_level === 'string' && sentiment_level.length > 0) {
-    summaryParts.push(`sent=${sentiment_level}`);
+  if (typeof finalSentimentLevel === 'string' && finalSentimentLevel.length > 0) {
+    summaryParts.push(`sent=${finalSentimentLevel}`);
   }
 
   const summary = summaryParts.length > 0 ? summaryParts.join(',') : null;
 
   const payload = {
     user_code: userCode,
-    depth_stage: depthStage,
-    q_primary: qPrimary,
-    self_acceptance: selfAcceptance,
-    phase,
-    intent_layer: intentLayer,
-    intent_confidence: intentConfidence,
+    depth_stage: finalDepthStage,
+    q_primary: finalQPrimary,
+    self_acceptance: finalSelfAcceptance,
+    phase: finalPhase,
+    intent_layer: finalIntentLayer,
+    intent_confidence: finalIntentConfidence,
     y_level: yLevelInt,
     h_level: hLevelInt,
     summary,
     updated_at: new Date().toISOString(),
     // 🆕 追加分
-    sentiment_level,
+    sentiment_level: finalSentimentLevel,
     situation_summary: situationSummary,
     situation_topic: situationTopic,
   };
@@ -238,15 +277,15 @@ export async function upsertIrosMemoryState(
     ) {
       console.log('[IROS/MemoryState] upsert ok', {
         userCode,
-        depthStage,
-        qPrimary,
-        selfAcceptance,
-        phase,
-        intentLayer,
-        intentConfidence,
+        depthStage: finalDepthStage,
+        qPrimary: finalQPrimary,
+        selfAcceptance: finalSelfAcceptance,
+        phase: finalPhase,
+        intentLayer: finalIntentLayer,
+        intentConfidence: finalIntentConfidence,
         yLevel: yLevelInt,
         hLevel: hLevelInt,
-        sentiment_level,
+        sentiment_level: finalSentimentLevel,
         situationSummary,
         situationTopic,
       });

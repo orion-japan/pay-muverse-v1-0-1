@@ -39,7 +39,7 @@ const FILLER_WORDS_REGEX = /(前に|前回|この前|あのとき|あの時|例�
  * メイン入口：
  * - kind = 'keyword'      → keyword 付きで DB 検索に回す
  * - kind = 'recent_topic' → キーワードなしで「最近のスナップショット」を拾う
- * - kind = 'none'         → 何もしない
+ * - kind = 'none'         → 何もしない（※ prepare 側で fallback する）
  */
 export function detectMemoryRecallTriggerFromText(
   rawText: string,
@@ -72,7 +72,7 @@ export function detectMemoryRecallTriggerFromText(
     };
   }
 
-  // 3) それ以外はリコールなし
+  // 3) それ以外はリコールなし（※ prepare 側で recent_topic にフォールバック）
   return { kind: 'none' };
 }
 
@@ -386,17 +386,23 @@ export async function preparePastStateNoteForTurn(args: {
   const { client, userCode, userText, topicLabel } = args;
 
   // 1) トリガー判定
-  const trigger = detectMemoryRecallTriggerFromText(userText);
+  let trigger = detectMemoryRecallTriggerFromText(userText);
 
+  // ★ ここが今回のポイント：
+  //   - detectMemoryRecallTriggerFromText が 'none' を返しても、
+  //     「毎ターン recent_topic フォールバックするモード」にする。
+  //   - つまり、kind = 'none' の場合は、強制的に 'recent_topic' に差し替える。
   if (trigger.kind === 'none') {
-    console.log('[IROS/MemoryRecall] no trigger in text', {
-      userCode,
-      userText,
-    });
-    return {
-      hasNote: false,
-      pastStateNoteText: null,
-      triggerKind: null,
+    console.log(
+      '[IROS/MemoryRecall] no explicit trigger in text → fallback to recent_topic',
+      {
+        userCode,
+        userText,
+      },
+    );
+
+    trigger = {
+      kind: 'recent_topic',
       keyword: null,
     };
   }
@@ -446,3 +452,4 @@ export async function preparePastStateNoteForTurn(args: {
     keyword: trigger.keyword ?? null,
   };
 }
+

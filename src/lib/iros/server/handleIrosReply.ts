@@ -20,6 +20,7 @@ import { estimateSelfAcceptance } from '@/lib/iros/sa/meter';
 import { runIrosTurn } from '@/lib/iros/orchestrator';
 import type { QCode, IrosStyle } from '@/lib/iros/system';
 import type { RememberScopeKind } from '@/lib/iros/remember/resolveRememberBundle';
+import { applyWillDepthDrift } from '@/lib/iros/willEngine';
 
 // ★ 追加：トピック変化モジュール
 import {
@@ -1037,7 +1038,33 @@ export async function handleIrosReply(
       style: effectiveStyle, // ← effectiveStyle をそのまま渡す
     });
 
+    // ★ WILL（Depth drift）を unified にだけ適用し、meta.depth にも反映
+    (() => {
+      const metaAny: any = (result as any)?.meta ?? null;
+      const unifiedBefore: any = metaAny?.unified ?? null;
+      if (!unifiedBefore) return;
+
+      const unifiedAfter = applyWillDepthDrift(unifiedBefore);
+
+      const depthAfter: string | undefined =
+        (unifiedAfter?.depth?.stage as string | undefined) ??
+        (metaAny?.depth as string | undefined);
+
+      (result as any).meta = {
+        ...metaAny,
+        unified: unifiedAfter,
+        depth: depthAfter,
+      };
+
+      console.log('[WILL][after]', {
+        depthBefore: unifiedBefore?.depth,
+        depthAfter: unifiedAfter?.depth,
+        depthTopLevel: depthAfter,
+      });
+    })();
+
     console.log('[IROS/Orchestrator] result.meta', (result as any)?.meta);
+
 
     // Qスナップショット更新
     try {
