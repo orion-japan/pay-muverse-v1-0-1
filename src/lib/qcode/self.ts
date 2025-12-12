@@ -1,5 +1,5 @@
 // src/lib/qcode/self.ts
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { writeQCodeWithEnv } from '@/lib/qcode/qcode-adapter';
 
 type Q = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
 
@@ -40,11 +40,16 @@ function smallJitter<QT extends Q>(q: QT): Q {
 // ====== streakなど軽い指標 ======
 async function getDailyStreak(user_code: string, days = 14) {
   const from = jstDate(new Date(Date.now() - (days - 1) * 86400000));
+
+  // ここは “自己投稿の指標” なので、Qログ統一とは別でOK
+  const { supabaseAdmin } = await import('@/lib/supabaseAdmin');
+
   const { data, error } = await supabaseAdmin
     .from('self_posts')
     .select('created_at')
     .eq('user_code', user_code)
     .gte('created_at', from + ' 00:00:00+09');
+
   if (error) return { streakPost: 0, posts: 0 };
 
   // 日別ユニーク
@@ -106,7 +111,9 @@ export async function recordQOnSelfPost(p: {
   const { streakPost } = await getDailyStreak(p.user_code, 14);
   let { q, hint, conf } = decideQForPost(streakPost);
   q = smallJitter(q);
-  const q_code = {
+
+  // 返却用（UIで必要なら使える）
+  const q_code_local = {
     q,
     confidence: conf,
     hint,
@@ -122,11 +129,27 @@ export async function recordQOnSelfPost(p: {
       streak_post_14d: streakPost,
     },
   };
-  const { error } = await supabaseAdmin
-    .from('q_code_logs')
-    .insert([{ user_code: p.user_code, source_type: 'self', intent: 'self_post', q_code }]);
-  if (error) throw error;
-  return q_code;
+
+  try {
+    await writeQCodeWithEnv({
+      user_code: p.user_code,
+      source_type: 'self',
+      intent: 'self_post',
+      q,
+      stage: 'S1',
+      layer: 'inner',
+      polarity: 'now',
+      post_id: p.post_id, // uuidでなくても adapter 側で extra に退避される
+      extra: {
+        action: 'self_post',
+        ...q_code_local,
+      },
+    });
+  } catch (e: any) {
+    console.warn('[qcode/self] recordQOnSelfPost warn:', e?.message ?? e);
+  }
+
+  return q_code_local;
 }
 
 export async function recordQOnSelfComment(p: {
@@ -136,7 +159,8 @@ export async function recordQOnSelfComment(p: {
 }) {
   let { q, hint, conf } = decideQForComment();
   q = smallJitter(q);
-  const q_code = {
+
+  const q_code_local = {
     q,
     confidence: conf,
     hint,
@@ -151,11 +175,28 @@ export async function recordQOnSelfComment(p: {
       comment_id: p.comment_id,
     },
   };
-  const { error } = await supabaseAdmin
-    .from('q_code_logs')
-    .insert([{ user_code: p.user_code, source_type: 'self', intent: 'self_comment', q_code }]);
-  if (error) throw error;
-  return q_code;
+
+  try {
+    await writeQCodeWithEnv({
+      user_code: p.user_code,
+      source_type: 'self',
+      intent: 'comment',
+      q,
+      stage: 'S1',
+      layer: 'inner',
+      polarity: 'now',
+      post_id: p.post_id,
+      extra: {
+        action: 'self_comment',
+        comment_id: p.comment_id,
+        ...q_code_local,
+      },
+    });
+  } catch (e: any) {
+    console.warn('[qcode/self] recordQOnSelfComment warn:', e?.message ?? e);
+  }
+
+  return q_code_local;
 }
 
 export async function recordQOnSelfReaction(p: {
@@ -166,7 +207,8 @@ export async function recordQOnSelfReaction(p: {
   const sent = mapReactionToSentiment(p.reaction);
   let { q, hint, conf } = decideQForReaction(sent);
   q = smallJitter(q);
-  const q_code = {
+
+  const q_code_local = {
     q,
     confidence: conf,
     hint,
@@ -182,9 +224,27 @@ export async function recordQOnSelfReaction(p: {
       sentiment: sent,
     },
   };
-  const { error } = await supabaseAdmin
-    .from('q_code_logs')
-    .insert([{ user_code: p.user_code, source_type: 'self', intent: 'self_reaction', q_code }]);
-  if (error) throw error;
-  return q_code;
+
+  try {
+    await writeQCodeWithEnv({
+      user_code: p.user_code,
+      source_type: 'self',
+      intent: 'comment',
+      q,
+      stage: 'S1',
+      layer: 'inner',
+      polarity: 'now',
+      post_id: p.post_id,
+      extra: {
+        action: 'self_reaction',
+        reaction: p.reaction,
+        sentiment: sent,
+        ...q_code_local,
+      },
+    });
+  } catch (e: any) {
+    console.warn('[qcode/self] recordQOnSelfReaction warn:', e?.message ?? e);
+  }
+
+  return q_code_local;
 }

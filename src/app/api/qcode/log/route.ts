@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 
+import { writeQCodeWithEnv } from '@/lib/qcode/qcode-adapter';
+
 type Q = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
 type QCode = { currentQ: Q; depthStage?: string } & Record<string, any>;
 
@@ -12,12 +14,10 @@ const JST_OFFSET_MIN = 9 * 60;
 /** 'YYYY-MM-DD' → Date（ローカル日付をUTCの 00:00 として扱う） */
 function parseYmd(ymd: string): Date {
   const [y, m, d] = ymd.split('-').map(Number);
-  // 月は0始まり
   return new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
 }
 /** Date → 'YYYY-MM-DD'（JST基準で日付だけ） */
 function toJstYmd(d: Date): string {
-  // d はUTC基準。JSTでの“日付”を算出
   const ms = d.getTime() + JST_OFFSET_MIN * 60_000;
   const j = new Date(ms);
   const y = j.getUTCFullYear();
@@ -36,6 +36,11 @@ function inclusiveDays(a: Date, b: Date): number {
   const MS = 86_400_000;
   return Math.floor((b.getTime() - a.getTime()) / MS) + 1;
 }
+/** 'YYYY-MM-DD' 以外は null */
+function normalizeForDate(v: any): string | null {
+  if (typeof v !== 'string') return null;
+  return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
+}
 
 /* ================================================= */
 
@@ -48,13 +53,11 @@ export async function GET(req: Request) {
   const fromQ = searchParams.get('from'); // 'YYYY-MM-DD'
   const toQ = searchParams.get('to'); // 'YYYY-MM-DD'
 
-  // ★ cookies() はコールバックで渡す（Nextの同期API警告を回避）
   const supabase = createRouteHandlerClient({ cookies: () => cookies() });
 
   // 期間の決定（JSTで“日付だけ”）
   const today = new Date(); // 現在UTC
   const endDate = toQ ? parseYmd(toQ.replace(/\//g, '-')) : parseYmd(toJstYmd(today));
-  // days 指定時は「包含で days 日」になるよう start = end - (days-1)
   const startDate = fromQ
     ? parseYmd(fromQ.replace(/\//g, '-'))
     : addDaysUTC(endDate, -Math.max(1, isFinite(days) ? days : 30) + 1);
@@ -63,7 +66,6 @@ export async function GET(req: Request) {
   const toStr = toJstYmd(endDate);
   const daysSpan = inclusiveDays(startDate, endDate);
 
-  // クエリ（for_date は DATE 型を想定。inclusive で gte/lte）
   let q = supabase
     .from('q_code_logs')
     .select('for_date,user_code,q_code,intent,extra', { count: 'exact' })
@@ -80,8 +82,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
   }
 
-  // currentQ を持つレコードのみ返す（古いデータ互換）
-  const items = (data ?? []).filter((r) => r?.q_code?.currentQ);
+  const items = (data ?? []).filter((r) => (r as any)?.q_code?.currentQ);
 
   return NextResponse.json({
     ok: true,
@@ -91,7 +92,6 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const supabase = createRouteHandlerClient({ cookies: () => cookies() });
   const body = await req.json().catch(() => ({}));
 
   const { user_code, q, stage, q_code, intent, seed_id, for_date, extra } = body ?? {};
@@ -107,25 +107,37 @@ export async function POST(req: Request) {
     );
   }
 
-  // for_date は 'YYYY-MM-DD' 前提。未指定なら“今日(JST)”の日付文字列。
-  const forDateStr =
-    typeof for_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(for_date)
-      ? for_date
-      : toJstYmd(new Date());
+  // for_date は 'YYYY-MM-DD'。未指定なら “今日(JST)”
+  const forDateStr = normalizeForDate(for_date) ?? toJstYmd(new Date());
 
-  const payload = {
-    user_code,
-    q_code: qc,
-    intent: intent ?? 'manual',
-    seed_id: seed_id ?? null,
-    for_date: forDateStr,
-    extra: extra ?? null,
-  };
+  try {
+    const res = await writeQCodeWithEnv({
+      user_code: String(user_code),
+      source_type: 'env', // ← このAPI経由での手動/環境ログ
+      intent: String(intent ?? 'manual'),
+      q: qc.currentQ,
+      stage: qc.depthStage ?? 'S1',
+      layer: (qc as any)?.layer ?? 'inner',
+      polarity: (qc as any)?.polarity ?? 'now',
+      for_date: forDateStr,
+      extra: {
+        ...(extra ?? {}),
+        seed_id: seed_id ?? null,
+        q_code_raw: qc,
+        _from: 'api/qcode/log:POST',
+      },
+    });
 
-  const { data, error } = await supabase.from('q_code_logs').insert(payload).select().single();
-
-  if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+    return NextResponse.json({
+      ok: true,
+      created_at: res.created_at,
+      for_date: res.for_date,
+      ids: res.ids,
+    });
+  } catch (e: any) {
+    return NextResponse.json(
+      { ok: false, error: e?.message ?? String(e) },
+      { status: 400 },
+    );
   }
-  return NextResponse.json({ ok: true, item: data });
 }

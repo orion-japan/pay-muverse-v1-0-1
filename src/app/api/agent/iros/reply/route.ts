@@ -28,6 +28,10 @@ import { resolveModeHintFromText, resolveRememberScope } from './_mode';
 // ★ 三軸「次の一歩」メタ付与
 import { attachNextStepMeta } from '@/lib/iros/nextStepOptions';
 
+// ★★★ 文章エンジン（レンダリング層）
+import { buildResonanceVector } from '@lib/iros/language/resonanceVector';
+import { renderReply } from '@/lib/iros/language/renderReply';
+
 /** 共通CORS（/api/me と同等ポリシー + x-credit-cost 追加） */
 const CORS_HEADERS = {
   'access-control-allow-origin': '*',
@@ -386,52 +390,171 @@ export async function POST(req: NextRequest) {
 
       console.log('[IROS/Reply] response meta', meta);
 
-      // ★ テーマ別「現在地」スナップショットを更新（iros_topic_state）
-      try {
-        const anyMeta = meta as any;
+// ★★★ 文章エンジン（レンダリング層）を適用（デモ用は extra.renderEngine=true で確実にON）
+const enableRenderEngine =
+  (extra && (extra as any).renderEngine === true) ||
+  process.env.IROS_ENABLE_RENDER_ENGINE === '1';
 
-        const rawTopic =
-          anyMeta.situation_topic ??
-          anyMeta.situationTopic ??
-          anyMeta.topic ??
-          anyMeta.unified?.situation?.topic ??
-          null;
+console.log('[IROS/Reply] renderEngine gate', {
+  conversationId,
+  userCode,
+  enableRenderEngine,
+  envEnable: process.env.IROS_ENABLE_RENDER_ENGINE,
+  extraRenderEngine: extra ? (extra as any).renderEngine : undefined,
+  extraKeys: extra ? Object.keys(extra) : [],
+});
 
-        const topic =
-          typeof rawTopic === 'string' && rawTopic.trim().length > 0
-            ? rawTopic.trim()
-            : null;
+if (enableRenderEngine) {
+  try {
+    const contentBefore = String((result as any).content ?? '').trim();
 
-        const saValue =
-          typeof anyMeta.selfAcceptance === 'number'
-            ? anyMeta.selfAcceptance
-            : typeof anyMeta.self_acceptance === 'number'
-            ? anyMeta.self_acceptance
-            : null;
+    if (contentBefore.length > 0) {
+      const vector = buildResonanceVector({
+        qCode: (meta as any)?.qCode ?? (meta as any)?.q_code ?? null,
+        depth: (meta as any)?.depth ?? (meta as any)?.depth_stage ?? null,
+        phase: (meta as any)?.phase ?? null,
 
-        console.log('[IROS/TopicState] resolve topic for snapshot', {
-          userCode,
-          rawTopic,
-          topic,
-          saValue,
-        });
+        // ★ これが抜けてたのが原因
+        selfAcceptance:
+          (meta as any)?.selfAcceptance ??
+          (meta as any)?.self_acceptance ??
+          null,
 
-        if (topic && userCode) {
-          await upsertTopicStateWithCleanup({
-            userCode,
-            topicKey: topic, // ← topic → topicKey
-            selfAcceptance: saValue,
-            inputText: text,
-            // route 側では message_id / created_at がないため、現在時刻を記録
-            turnCreatedAt: new Date().toISOString(),
-          });
-        }
-      } catch (e) {
-        console.warn('[IROS/Reply] upsertTopicStateWithCleanup failed', {
-          userCode,
-          error: String(e),
-        });
+        yLevel: (meta as any)?.yLevel ?? (meta as any)?.y_level ?? null,
+        hLevel: (meta as any)?.hLevel ?? (meta as any)?.h_level ?? null,
+
+        situationSummary:
+          (meta as any)?.situationSummary ??
+          (meta as any)?.situation_summary ??
+          null,
+
+        situationTopic:
+          (meta as any)?.situationTopic ??
+          (meta as any)?.situation_topic ??
+          null,
+
+        // 任意（あれば）
+        intentLayer:
+          (meta as any)?.intentLayer ??
+          (meta as any)?.intent_layer ??
+          (meta as any)?.intentLine?.focusLayer ??
+          (meta as any)?.intent_line?.focusLayer ??
+          null,
+
+        intentConfidence:
+          (meta as any)?.intentConfidence ??
+          (meta as any)?.intent_confidence ??
+          (meta as any)?.intentLine?.confidence ??
+          (meta as any)?.intent_line?.confidence ??
+          null,
+      });
+
+
+      const userWantsEssence = /本質|ズバ|はっきり|ハッキリ|意図|核心|要点/.test(text);
+
+      const qNow =
+        (meta.qCode as any) ??
+        (meta.q_code as any) ??
+        (meta.unified?.q?.current as any) ??
+        null;
+
+      const highDefensiveness = qNow === 'Q1' || qNow === 'Q4';
+
+      const coreNeed =
+        (meta.soulNote?.core_need as string) ??
+        (meta.core_need as string) ??
+        (meta.unified?.soulNote?.core_need as string) ??
+        null;
+
+      const insightCandidate =
+        coreNeed && String(coreNeed).trim().length > 0 ? String(coreNeed).trim() : null;
+
+      const nextStepCandidate =
+        (meta.nextStep as any)?.text ??
+        (meta.next_step as any)?.text ??
+        (meta.nextStep as any)?.label ??
+        (meta.next_step as any)?.label ??
+        (meta.nextStepMeta as any)?.text ??
+        null;
+
+      const facts = contentBefore;
+
+      const minimalEmoji =
+        typeof styleInput === 'string' &&
+        (styleInput.includes('biz-formal') || styleInput.includes('biz'));
+
+      console.log('[IROS/Reply][renderEngine] inputs', {
+        conversationId,
+        userCode,
+        styleInput,
+        minimalEmoji,
+        qNow,
+        userWantsEssence,
+        highDefensiveness,
+        insightCandidate,
+        nextStepCandidate,
+        vector,
+      });
+
+      // meta.extra に記録（UI / デバッグ用）
+      meta.extra = {
+        ...(meta.extra ?? {}),
+        resonanceVector: vector,
+        renderEngine: {
+          userWantsEssence,
+          highDefensiveness,
+          minimalEmoji,
+          insightCandidate,
+          nextStepCandidate,
+        },
+      };
+
+      const rendered = renderReply(
+        vector,
+        {
+          facts,
+          insight: insightCandidate,
+          nextStep: nextStepCandidate,
+          userWantsEssence,
+          highDefensiveness,
+          seed: String(conversationId),
+        },
+        {
+          minimalEmoji,
+          forceExposeInsight: (extra && (extra as any).forceExposeInsight === true) || false,
+        },
+      );
+
+      const renderedText =
+        typeof rendered === 'string'
+          ? rendered
+          : (rendered as any)?.text
+          ? String((rendered as any).text)
+          : String(rendered ?? '');
+
+      if (renderedText.trim().length > 0) {
+        (result as any).content = renderedText; // ★ UI返却に反映
+        meta.extra = {
+          ...(meta.extra ?? {}),
+          renderEngineApplied: true,
+        };
+      } else {
+        meta.extra = {
+          ...(meta.extra ?? {}),
+          renderEngineApplied: false,
+          renderEngineEmpty: true,
+        };
       }
+    }
+  } catch (e) {
+    console.warn('[IROS/Reply] renderEngine failed (ignored)', {
+      conversationId,
+      userCode,
+      error: String(e),
+    });
+  }
+} // ← ★ これが閉じてないと、次の if(result...) でパーサが死ぬ
+
 
       // ★ 訓練用サンプルを保存（失敗しても本処理は継続）
       await saveIrosTrainingSample({
@@ -441,7 +564,7 @@ export async function POST(req: NextRequest) {
         conversationId,
         messageId: null, // 必要になったら message_id を渡す
         inputText: text, // ユーザー入力
-        replyText: (result as any).content ?? '', // Iros の返答全文
+        replyText: (result as any).content ?? '', // ★ レンダリング後の返答を保存
         meta, // Q / depth / SA など
         tags: ['iros', 'auto'],
       });

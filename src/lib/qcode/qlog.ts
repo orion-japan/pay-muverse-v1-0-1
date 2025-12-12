@@ -1,14 +1,46 @@
 // src/lib/qcode/qlog.ts
-import { SupabaseClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { writeQCode } from './qcode-adapter';
 
-// 既存の Q 型があれば流用。なければこの型を使う。
 export type QCode = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
+export type QStage = 'S1' | 'S2' | 'S3';
+export type QLayer = 'inner' | 'outer';
+export type QPolarity = 'ease' | 'now';
+
+const VALID_INTENTS = [
+  'normal',
+  'chat',
+  'consult',
+  'diagnosis',
+  'self_post',
+  'event',
+  'comment',
+  'vision',
+  'vision_check',
+  'import',
+  'system',
+] as const;
+
+export type QIntent = (typeof VALID_INTENTS)[number];
 
 export type QLogPayload = {
   user_code: string;
-  source_type: 'self' | 'sofia' | 'vision' | 'mui_stage' | 'event' | 'invite' | 'daily' | 'env';
-  intent: string; // 例: 'habit' | 'check' | 'create' など
+  source_type:
+    | 'self'
+    | 'sofia'
+    | 'vision'
+    | 'mui_stage'
+    | 'event'
+    | 'invite'
+    | 'daily'
+    | 'env';
+  intent: string; // 未知は normal に落とす
   q: QCode;
+
+  stage?: QStage; // 省略時 S1
+  layer?: QLayer; // 省略時 inner
+  polarity?: QPolarity; // 省略時 now
+
   created_at?: string; // ISO。省略時は now()
   for_date?: string; // 'YYYY-MM-DD' (JST)。省略時は今日(JST)
   extra?: Record<string, any>; // 根拠・ルール・関連IDなど
@@ -24,20 +56,72 @@ export function jstDateYYYYMMDD(d = new Date()): string {
   return `${y}-${m}-${dd}`;
 }
 
-/** q_code_logs へ1行書き込み（失敗しても throw はしない） */
+function clampStage(s?: QStage | null): QStage {
+  return s === 'S2' || s === 'S3' ? s : 'S1';
+}
+function clampLayer(l?: QLayer | null): QLayer {
+  return l === 'outer' ? 'outer' : 'inner';
+}
+function clampPolarity(p?: QPolarity | null): QPolarity {
+  return p === 'ease' ? 'ease' : 'now';
+}
+function normalizeIntent(v?: string | null): QIntent {
+  if (!v) return 'normal';
+  return (VALID_INTENTS as readonly string[]).includes(v) ? (v as QIntent) : 'normal';
+}
+
+/**
+ * ✅ 統一ログ：qcode-adapter.writeQCode() に委譲
+ *
+ * - q_code_logs（履歴）
+ * - q_code_timeline_store（view の元）
+ * - user_q_now（最新スナップショット）
+ *
+ * 失敗しても throw しない（従来互換）
+ */
 export async function logQCode(admin: SupabaseClient, p: QLogPayload): Promise<void> {
   const now = p.created_at ? new Date(p.created_at) : new Date();
 
-  const row = {
-    user_code: p.user_code,
-    source_type: p.source_type,
-    intent: p.intent,
-    q_code: { code: p.q }, // JSONB
-    created_at: now.toISOString(), // DBはUTCで受ける
-    for_date: p.for_date ?? jstDateYYYYMMDD(now), // 表示・集計はJST
-    extra: p.extra ?? {},
-  };
+  const user_code = String(p.user_code);
+  const source_type = String(p.source_type || 'unknown');
+  const intent = normalizeIntent(p.intent);
 
-  const { error } = await admin.from('q_code_logs').insert(row);
-  if (error) console.warn('[QLOG insert failed]', error.message, row);
+  const stage = clampStage(p.stage);
+  const layer = clampLayer(p.layer);
+  const polarity = clampPolarity(p.polarity);
+
+  const for_date = p.for_date ?? jstDateYYYYMMDD(now);
+
+  try {
+    await writeQCode(admin, {
+      user_code,
+      source_type,
+      intent,
+      q: p.q,
+      stage,
+      layer,
+      polarity,
+      created_at: now.toISOString(),
+      extra: {
+        ...(p.extra ?? {}),
+        for_date,
+        _from: 'qlog',
+        q_raw: p.q,
+        stage_raw: p.stage ?? null,
+        layer_raw: p.layer ?? null,
+        polarity_raw: p.polarity ?? null,
+      },
+    });
+  } catch (e: any) {
+    console.warn('[QLOG write failed]', e?.message || e, {
+      user_code,
+      source_type,
+      intent,
+      q: p.q,
+      stage,
+      layer,
+      polarity,
+      for_date,
+    });
+  }
 }

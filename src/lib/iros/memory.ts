@@ -107,10 +107,45 @@ function buildQTraceFromRows(
   let streakLength = 0;
   let lastEventAt: string | null = null;
 
-  if (rows.length > 0) {
-    lastEventAt = rows[0]?.created_at ?? null;
+  // timeline の先頭（最新）日時
+  const timelineLast = rows.length > 0 ? (rows[0]?.created_at ?? null) : null;
+  lastEventAt = timelineLast;
+
+  // ---- staleness 判定（timeline が snapshot より古い／止まってる）----
+  const snapAt = snapshot.updatedAt ? Date.parse(snapshot.updatedAt) : NaN;
+  const lastAt = timelineLast ? Date.parse(timelineLast) : NaN;
+
+  const timelineIsStale =
+    snapshot.currentQ !== null &&
+    snapshot.updatedAt !== null &&
+    (timelineLast === null || (Number.isFinite(snapAt) && Number.isFinite(lastAt) && snapAt > lastAt));
+
+  if (timelineIsStale) {
+    // ここが今回のログのケース：user_q_now は新しいのに timeline が古い
+    console.warn('[IrosMemory] q_code_timeline is stale. Use snapshot only.', {
+      snapshot,
+      timelineLast,
+      rowsLen: rows.length,
+    });
+
+    const q = snapshot.currentQ as QCode | null;
+    if (q) {
+      counts[q] = 1;
+      streakQ = q;
+      streakLength = 1;
+      lastEventAt = snapshot.updatedAt ?? null;
+    }
+
+    return {
+      snapshot,
+      counts,
+      streakQ,
+      streakLength,
+      lastEventAt,
+    };
   }
 
+  // ---- 通常：timeline を信用して streak/counts を作る ----
   let currentStreakQ: QCode | null = null;
   let currentLength = 0;
 
@@ -128,7 +163,6 @@ function buildQTraceFromRows(
     } else if (q === currentStreakQ) {
       currentLength += 1;
     } else {
-      // 最初の Q から違う Q が出たら streak をそこで打ち切る
       break;
     }
   }
@@ -145,29 +179,6 @@ function buildQTraceFromRows(
   };
 }
 
-/**
- * userCode がまだ一度も Qコードを記録していない場合に使う空メモリー。
- */
-function createEmptyMemory(userCode: string): IrosMemory {
-  const snapshot: QSnapshot = {
-    currentQ: null,
-    depthStage: null,
-    updatedAt: null,
-  };
-
-  const trace: QTrace = {
-    snapshot,
-    counts: {},
-    streakQ: null,
-    streakLength: 0,
-    lastEventAt: null,
-  };
-
-  return {
-    userCode,
-    qTrace: trace,
-  };
-}
 
 // ====================== 公開関数：読み出し ======================
 
@@ -231,6 +242,30 @@ export async function loadIrosMemory(
 
   return memory;
 }
+
+function createEmptyMemory(userCode: string): IrosMemory {
+  const snapshot: QSnapshot = {
+    currentQ: null,
+    depthStage: null,
+    updatedAt: null,
+  };
+
+  const trace: QTrace = {
+    snapshot,
+    counts: {},
+    streakQ: null,
+    streakLength: 0,
+    lastEventAt: null,
+  };
+
+  return {
+    userCode,
+    qTrace: trace,
+  };
+}
+
+
+
 
 /**
  * IrosMemory をそのまま返すヘルパー。

@@ -7,16 +7,20 @@ export const dynamic = 'force-dynamic';
 
 // ---- Env 読み込み（ズレ吸収 & ログはマスク）
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_ROLE_KEY; // ← 両対応
+const SERVICE_ROLE =
+  process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_ROLE_KEY; // ← 両対応
 const DEBUG = process.env.DEBUG_PUSH_API === '1';
 
-const mask = (v?: string | null) => (!v ? 'undefined' : `${v.slice(0, 4)}…(len:${v.length})`);
+const mask = (v?: string | null) =>
+  !v ? 'undefined' : `${v.slice(0, 4)}…(len:${v.length})`;
 const dbg = (...a: any[]) => DEBUG && console.log('[register-push]', ...a);
 
 function getSbAdmin() {
   if (!SUPABASE_URL) throw new Error('env:NEXT_PUBLIC_SUPABASE_URL missing');
   if (!SERVICE_ROLE) throw new Error('env:SUPABASE_SERVICE_ROLE missing');
-  return createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
+  return createClient(SUPABASE_URL, SERVICE_ROLE, {
+    auth: { persistSession: false },
+  });
 }
 
 type Body = {
@@ -25,6 +29,14 @@ type Body = {
   keys?: { p256dh?: string; auth?: string };
 };
 
+function safeJsonParse(text: string): { ok: true; value: any } | { ok: false; error: string } {
+  try {
+    return { ok: true, value: JSON.parse(text) };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message ?? e) };
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     dbg('env', {
@@ -32,7 +44,26 @@ export async function POST(req: NextRequest) {
       sr: mask(SERVICE_ROLE || null),
     });
 
-    const { user_code, endpoint, keys } = (await req.json()) as Body;
+    // ★ まず text で読む（空body / 壊れたJSON を安全に弾く）
+    const raw = await req.text();
+    if (!raw || !raw.trim()) {
+      dbg('empty body');
+      return NextResponse.json(
+        { ok: false, error: 'empty body' },
+        { status: 400 },
+      );
+    }
+
+    const parsed = safeJsonParse(raw);
+    if (!parsed.ok) {
+      console.error('[register-push] invalid json:', parsed.error);
+      return NextResponse.json(
+        { ok: false, error: 'invalid json', detail: parsed.error },
+        { status: 400 },
+      );
+    }
+
+    const { user_code, endpoint, keys } = (parsed.value ?? {}) as Body;
 
     dbg('inbound', {
       user_code,
@@ -64,7 +95,6 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (error) {
-      // ここで「Invalid API key」などが来る場合は Service Role 未設定/誤設定
       console.error('[register-push] upsert error:', error);
       return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
     }
@@ -74,7 +104,6 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     console.error('[register-push] fatal:', err);
     const msg = String(err?.message ?? err);
-    // env が無い場合は 500 で返す
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }
 }

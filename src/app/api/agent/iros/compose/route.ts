@@ -242,8 +242,10 @@ export async function POST(req: NextRequest) {
     }
 
     const data = await res.json();
-    const assistantText: string = data?.choices?.[0]?.message?.content?.toString()?.trim?.() || '';
+    let assistantText: string  = data?.choices?.[0]?.message?.content?.toString()?.trim?.() || '';
     if (!assistantText) return json({ ok: false, error: 'empty_model_output' }, 502);
+
+
 
     // (3b) assistant保存（解析は analysis(jsonb) として付与可能な環境で格納）
     const nowIso2 = new Date().toISOString();

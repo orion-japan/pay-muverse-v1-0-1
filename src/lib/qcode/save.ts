@@ -1,33 +1,81 @@
-import { createClient } from '@supabase/supabase-js';
+// src/lib/qcode/save.ts
 import type { QRes } from './types';
+import type { QCode, QStage, QLayer, QPolarity, QIntent } from './record';
+import { writeQCodeWithSR } from './qcode-adapter';
 
-// SR で安全に保存
+/**
+ * 旧: q_code_logs / q_code_timeline_store / user_q_now へ直INSERT
+ * 新: ✅ qcode-adapter.writeQCodeWithSR()（統一入口）へ委譲
+ */
 export async function saveQRes(
   sbUrl: string,
   srKey: string,
   user_code: string,
   qres: QRes,
-  source_type: string, // 'mirra'|'mu'|'replay'|'event'|'self'|'comment'|'vision'|'vision_progress'|'vision_journal'
-  intent: string = 'chat', // 'chat'|'post'|'diary'|'progress' など
+  source_type: string,
+  intent: string = 'chat',
 ) {
-  const sb = createClient(sbUrl, srKey, { auth: { persistSession: false } });
-  // 履歴 追記
-  const ins = await sb.from('q_code_logs').insert({
-    user_code,
-    source_type,
-    intent,
-    q_code: qres,
-  });
-  if (ins.error) throw new Error(`q_code_logs insert_failed: ${ins.error.message}`);
+  // QRes -> 抽出
+  const q = (qres as any)?.currentQ as QCode | undefined;
+  const stage = (qres as any)?.depthStage as QStage | undefined;
+  const layer = (qres as any)?.layer as QLayer | undefined;
+  const polarity = (qres as any)?.polarity as QPolarity | undefined;
 
-  // 最新 上書き
-  const up = await sb.from('user_q_codes').upsert(
-    {
-      user_code,
-      q_code: qres,
-      updated_at: new Date().toISOString(),
+  if (!q) throw new Error('[qcode/save] qres.currentQ missing');
+
+  // intent 正規化（未知は normal）
+  const intentSafe: QIntent = ([
+    'normal',
+    'chat',
+    'consult',
+    'diagnosis',
+    'self_post',
+    'event',
+    'comment',
+    'vision',
+    'vision_check',
+    'import',
+    'system',
+    'auto',
+    'iros_chat',
+  ] as const).includes(intent as any)
+    ? (intent as QIntent)
+    : 'normal';
+
+  const stageSafe: QStage = stage === 'S2' || stage === 'S3' ? stage : 'S1';
+  const layerSafe: QLayer = layer === 'outer' ? 'outer' : 'inner';
+  const polaritySafe: QPolarity = polarity === 'ease' ? 'ease' : 'now';
+
+  const sourceTypeSafe = String(source_type || 'unknown');
+  const userCodeSafe = String(user_code);
+
+  const created_at = new Date().toISOString();
+
+  // ✅ 統一入口へ
+  await writeQCodeWithSR(sbUrl, srKey, {
+    user_code: userCodeSafe,
+    source_type: sourceTypeSafe,
+    intent: intentSafe,
+    q,
+    stage: stageSafe,
+    layer: layerSafe,
+    polarity: polaritySafe,
+    created_at,
+    extra: {
+      _from: 'saveQRes',
+      qres_raw: qres,
     },
-    { onConflict: 'user_code' },
-  );
-  if (up.error) throw new Error(`user_q_codes upsert_failed: ${up.error.message}`);
+  });
+
+  return {
+    ok: true as const,
+    user_code: userCodeSafe,
+    q,
+    stage: stageSafe,
+    layer: layerSafe,
+    polarity: polaritySafe,
+    intent: intentSafe,
+    source_type: sourceTypeSafe,
+    created_at,
+  };
 }
