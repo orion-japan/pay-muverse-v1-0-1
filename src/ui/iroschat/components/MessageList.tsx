@@ -7,9 +7,7 @@ import { useAuth } from '@/context/AuthContext';
 import '../IrosChat.css';
 
 import ChatMarkdown from './ChatMarkdown';
-import IrosButton, {
-  IrosNextStepGear,
-} from './IrosButton';
+import IrosButton, { IrosNextStepGear } from './IrosButton';
 
 // メッセージ型
 type IrosMessage = {
@@ -187,10 +185,7 @@ function transformIrTemplateToMarkdown(input: string): string {
   if (!input.trim()) return input;
 
   // 新 ir診断フォーマットはそのまま表示する
-  if (
-    /🧿\s*観測対象[:：]/.test(input) &&
-    /I\/T層の刺さる一句/.test(input)
-  ) {
+  if (/🧿\s*観測対象[:：]/.test(input) && /I\/T層の刺さる一句/.test(input)) {
     return input;
   }
 
@@ -277,11 +272,7 @@ function transformIrTemplateToMarkdown(input: string): string {
   const messageText = data.messageLines.join('\n').trim();
 
   const hasAny =
-    !!data.target ||
-    !!data.depth ||
-    !!data.phase ||
-    !!stateText ||
-    !!messageText;
+    !!data.target || !!data.depth || !!data.phase || !!stateText || !!messageText;
 
   if (!hasAny) return input;
 
@@ -316,15 +307,15 @@ function transformIrTemplateToMarkdown(input: string): string {
 /**
  * 太字まわりのゆらぎを正規化する
  * - "** 〜 **" → "**〜**"（先頭/末尾の空白を削る）
- * - 「**〜**」 → 「**〜**」形式にそろえる
+ * - **「〜」** / **『〜』** → 「**〜**」 / 『**〜**』
  */
 function normalizeBoldMarks(input: string): string {
   if (!input) return input;
 
-  // 1) "** テキスト **" のように、内側の両端に空白がある場合
+  // "** テキスト **" → "**テキスト**"
   let out = input.replace(/\*\*\s+([^*][^*]*?)\s*\*\*/g, '**$1**');
 
-  // 2) カギカッコごと太字→中身だけ太字
+  // カギカッコごと太字 → 中身だけ太字
   out = out.replace(/\*\*「([^」]+)」\*\*/g, '「**$1**」');
   out = out.replace(/\*\*『([^』]+)』\*\*/g, '『**$1**』');
 
@@ -332,17 +323,13 @@ function normalizeBoldMarks(input: string): string {
 }
 
 export default function MessageList() {
-  const { messages, loading, error, sendNextStepChoice } =
-    useIrosChat() as unknown as {
-      messages: IrosMessage[];
-      loading: boolean;
-      error?: string | null;
-      sendNextStepChoice?: (opt: {
-        key: string;
-        label: string;
-        gear?: string | null;
-      }) => Promise<unknown>;
-    };
+  const { messages, loading, error, sendNextStepChoice } = useIrosChat() as unknown as {
+    messages: IrosMessage[];
+    loading: boolean;
+    error?: string | null;
+    sendNextStepChoice?: (opt: { key: string; label: string; gear?: string | null }) => Promise<unknown>;
+  };
+
   const authVal = (typeof useAuth === 'function' ? useAuth() : {}) as {
     user?: { avatarUrl?: string | null };
   };
@@ -350,7 +337,6 @@ export default function MessageList() {
 
   const listRef = React.useRef<HTMLDivElement | null>(null);
   const bottomRef = React.useRef<HTMLDivElement | null>(null);
-
   const first = React.useRef(true);
 
   const scrollToBottom = (behavior: ScrollBehavior = 'auto') =>
@@ -387,10 +373,7 @@ export default function MessageList() {
       const maxScroll = container.scrollHeight - viewHeight;
       const targetTop = Math.max(0, Math.min(targetTopRaw, maxScroll));
 
-      container.scrollTo({
-        top: targetTop,
-        behavior: 'smooth',
-      });
+      container.scrollTo({ top: targetTop, behavior: 'smooth' });
     } else {
       // Iros の返答時：一番下まで追尾
       scrollToBottom('smooth');
@@ -406,43 +389,30 @@ export default function MessageList() {
   };
 
   return (
-    <div
-      ref={listRef}
-      className={`${styles.timeline} sof-msgs`}
-      style={chatAreaStyle}
-    >
+    <div ref={listRef} className={`${styles.timeline} sof-msgs`} style={chatAreaStyle}>
       {!messages.length && !loading && !error && (
         <div className={styles.emptyHint}>ここに会話が表示されます</div>
       )}
 
-      {messages.map((m, index) => {
+      {messages.map((m) => {
         const isUser = m.role === 'user';
         const iconSrc = isUser ? resolveUserAvatar(m) : '/ir.png';
 
-        // ★ メタを本文から隠す：toSafeString → stripIrosMetaHeader
+        // ★ メタを本文から隠す：toSafeString → stripIrosMetaHeader → transform → normalize
         const rawText = stripIrosMetaHeader(toSafeString(m.text));
-        const safeText = normalizeBoldMarks(
-          transformIrTemplateToMarkdown(rawText),
-        );
+        const safeText = normalizeBoldMarks(transformIrTemplateToMarkdown(rawText));
+
         const qFromMeta = m.meta?.qCode;
         const qToShow = qFromMeta ?? m.q;
 
         const isVisionMode = !isUser && m.meta?.mode === 'vision';
-
-        const isVisionHint =
-          !isUser &&
-          m.meta?.mode !== 'vision' &&
-          !!m.meta?.tLayerModeActive === true;
-
+        const isVisionHint = !isUser && m.meta?.mode !== 'vision' && !!m.meta?.tLayerModeActive === true;
         const tHint = m.meta?.tLayerHint || 'T2';
 
         const nextStep = m.meta?.nextStep;
 
         return (
-          <div
-            key={m.id}
-            className={`message ${isUser ? 'is-user' : 'is-assistant'}`}
-          >
+          <div key={m.id} className={`message ${isUser ? 'is-user' : 'is-assistant'}`}>
             {/* ▼ アイコン＋Qバッジを横一列に並べるヘッダー行 ▼ */}
             <div
               style={{
@@ -529,61 +499,43 @@ export default function MessageList() {
 
               {/* 本文＋「次の一歩」ボタン */}
               <div
-                className={`msgBody ${
-                  isVisionMode ? 'vision-theme' : ''
-                } ${isVisionHint ? 'vision-hint-theme' : ''}`}
-                style={{
-                  fontSize: 14,
-                  lineHeight: 1.9,
-                  color: '#111827',
-                }}
+                className={`msgBody ${isVisionMode ? 'vision-theme' : ''} ${
+                  isVisionHint ? 'vision-hint-theme' : ''
+                }`}
+                style={{ fontSize: 14, lineHeight: 1.9, color: '#111827' }}
               >
                 {/* 本文 */}
                 <ChatMarkdown text={safeText} />
 
                 {/* ★ WILLエンジンの「次の一歩」オプション（必要なときだけ表示） */}
-                {!isUser &&
-                  nextStep?.options &&
-                  nextStep.options.length > 0 && (
-                    <div
-                      style={{
-                        marginTop: 16,
-                        display: 'flex',
-                        flexWrap: 'wrap',
-                        gap: 8,
-                      }}
-                    >
-                      {nextStep.options.map((opt) => (
-                        <IrosButton
-                          key={(opt as any).id ?? opt.key}
-                          option={opt}
-                          gear={nextStep.gear as IrosNextStepGear}
-                          pending={loading}
-                          onClick={async (option) => {
-                            const id =
-                              (option as any).id ?? option.key ?? '';
-                            console.log(
-                              '[IROS UI] nextStep option clicked',
-                              {
-                                key: id,
-                                label: option.label,
-                                gear: nextStep.gear ?? null,
-                              },
-                            );
+                {!isUser && nextStep?.options && nextStep.options.length > 0 && (
+                  <div style={{ marginTop: 16, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {nextStep.options.map((opt) => (
+                      <IrosButton
+                        key={(opt as any).id ?? opt.key}
+                        option={opt}
+                        gear={nextStep.gear as IrosNextStepGear}
+                        pending={loading}
+                        onClick={async (option) => {
+                          const id = (option as any).id ?? option.key ?? '';
+                          console.log('[IROS UI] nextStep option clicked', {
+                            key: id,
+                            label: option.label,
+                            gear: nextStep.gear ?? null,
+                          });
 
-                            if (sendNextStepChoice) {
-                              await sendNextStepChoice({
-                                key: id,
-                                label: option.label,
-                                gear: (nextStep.gear ??
-                                  null) as string | null,
-                              });
-                            }
-                          }}
-                        />
-                      ))}
-                    </div>
-                  )}
+                          if (sendNextStepChoice) {
+                            await sendNextStepChoice({
+                              key: id,
+                              label: option.label,
+                              gear: (nextStep.gear ?? null) as string | null,
+                            });
+                          }
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>

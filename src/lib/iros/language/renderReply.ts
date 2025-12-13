@@ -434,17 +434,19 @@ function shapeInsightDiffuse(
 ): string {
   const { mode, seed } = ctx;
 
+  // テンプレ臭が出やすい言い回しは全面撤去（滲ませ表現を自然語に寄せる）
+
   const frames =
     mode === 'casual'
       ? [
-          '{X} が影響していそうです。',
-          '{X} の要素が混ざっていそうです。',
-          '背景として {X} が絡んでいそうです。',
+          '{X} が、いまの中心にあります。',
+          '{X} が、静かに効いています。',
+          '{X} が、今の判断基準になっています。',
         ]
       : [
-          '{X} の感触が、裏で効いていそうです。',
-          '奥では {X} が混ざっている気配があります。',
-          '{X} の方向に、反応が寄っているようです。',
+          '{X} が、背後で支点になっています。',
+          '{X} が、反応の起点として働いています。',
+          '{X} が、現在の焦点として現れています。',
         ];
 
   const frame = pick(seed + '|iS', frames);
@@ -539,10 +541,11 @@ function softenInsight(text: string, seed: string): string {
   if (style === 'neutral') return t;
 
   return t
-    .replace(/です。$/g, 'の感じです。')
-    .replace(/である。$/g, 'である気配です。')
+    .replace(/です。$/g, '感じです。')
+    // .replace(/である。$/g, '気配です。')  // ← テンプレ臭の原因なので撤去
     .replace(/だ。$/g, 'かもしれません。');
 }
+
 
 function normalizeOne(s: string): string {
   return (s ?? '').toString().trim();

@@ -161,7 +161,6 @@ function cleanKeyword(raw: string): string | null {
   return kw;
 }
 
-
 /* =========================================================
    2) 過去状態カルテの取得
    - iros_training_samples をメインで参照
@@ -222,10 +221,7 @@ async function loadRecentSnapshots(args: {
   let trainQuery = baseTrainQuery;
 
   if (trigger.kind === 'keyword' && trigger.keyword) {
-    trainQuery = trainQuery.ilike(
-      'situation_summary',
-      `%${trigger.keyword}%`,
-    );
+    trainQuery = trainQuery.ilike('situation_summary', `%${trigger.keyword}%`);
   }
 
   let { data: trainData, error: trainError } = await trainQuery
@@ -244,19 +240,16 @@ async function loadRecentSnapshots(args: {
   }
 
   // keyword で 0 件だった場合 → 最近 N 件にフォールバック
-  if (
-    trainData.length === 0 &&
-    trigger.kind === 'keyword'
-  ) {
+  if (trainData.length === 0 && trigger.kind === 'keyword') {
     const fb = await baseTrainQuery
       .order('created_at', { ascending: false })
       .limit(limit);
 
     if (fb.error) {
-      console.error(
-        '[IROS/MemoryRecall] training_samples fallback error',
-        { userCode, error: fb.error },
-      );
+      console.error('[IROS/MemoryRecall] training_samples fallback error', {
+        userCode,
+        error: fb.error,
+      });
     } else if (fb.data) {
       trainData = fb.data;
     }
@@ -341,9 +334,7 @@ function buildPastStateNoteTextFromSnapshots(args: {
 
   for (const row of rows) {
     const dateStr =
-      row.date && row.date.length >= 10
-        ? row.date.slice(0, 10)
-        : '----------';
+      row.date && row.date.length >= 10 ? row.date.slice(0, 10) : '----------';
 
     const q = row.q_primary ?? '―';
     const depth = row.depth_stage ?? '―';
@@ -352,13 +343,12 @@ function buildPastStateNoteTextFromSnapshots(args: {
         ? row.self_acceptance.toFixed(2)
         : '―';
     const summary =
-      (row.situation_summary && row.situation_summary.trim()) ||
-      '(メモなし)';
+      (row.situation_summary && row.situation_summary.trim()) || '(メモなし)';
 
     lines.push(`- 日付: ${dateStr}`);
     lines.push(`  Q: ${q} / 深度: ${depth} / SA: ${sa}`);
     lines.push(`  状況メモ: ${summary}`);
-    lines.push(''); // 空行
+    lines.push('');
   }
 
   return lines.join('\n');
@@ -382,32 +372,48 @@ export async function preparePastStateNoteForTurn(args: {
   userText: string;
   topicLabel?: string | null;
   limit?: number;
+
+  /**
+   * ★ 追加：
+   * detectMemoryRecallTriggerFromText が 'none' のときに、
+   * 強制的に recent_topic へフォールバックするかどうか。
+   * - デフォルト true（現要件：毎ターン recent_topic フォールバック）
+   * - トークン厳しい時に false にして条件付き運用へ移行できる
+   */
+  forceRecentTopicFallback?: boolean;
 }): Promise<MemoryRecallResult> {
   const { client, userCode, userText, topicLabel } = args;
 
   // 1) トリガー判定
   let trigger = detectMemoryRecallTriggerFromText(userText);
 
+  const forceFallback =
+    typeof args.forceRecentTopicFallback === 'boolean'
+      ? args.forceRecentTopicFallback
+      : true;
+
   // ★ ここが今回のポイント：
-  //   - detectMemoryRecallTriggerFromText が 'none' を返しても、
-  //     「毎ターン recent_topic フォールバックするモード」にする。
-  //   - つまり、kind = 'none' の場合は、強制的に 'recent_topic' に差し替える。
-  if (trigger.kind === 'none') {
+  //   - kind='none' でも毎ターン recent_topic に倒す（デフォルト true）
+  if (trigger.kind === 'none' && forceFallback) {
     console.log(
       '[IROS/MemoryRecall] no explicit trigger in text → fallback to recent_topic',
-      {
-        userCode,
-        userText,
-      },
+      { userCode, userText },
     );
 
-    trigger = {
-      kind: 'recent_topic',
+    trigger = { kind: 'recent_topic', keyword: null };
+  }
+
+  // ★ 強制フォールバックしない運用のときは、none なら即return
+  if (trigger.kind === 'none') {
+    return {
+      hasNote: false,
+      pastStateNoteText: null,
+      triggerKind: 'none',
       keyword: null,
     };
   }
 
-  // 2) 最近の状態をロード（keyword の場合は training_samples で優先＋フォールバック）
+  // 2) 最近の状態をロード
   const rows = await loadRecentSnapshots({
     client,
     userCode,
@@ -452,4 +458,3 @@ export async function preparePastStateNoteForTurn(args: {
     keyword: trigger.keyword ?? null,
   };
 }
-

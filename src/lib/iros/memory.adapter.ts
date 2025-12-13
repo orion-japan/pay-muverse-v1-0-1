@@ -66,24 +66,22 @@ export function applyQTraceToMeta<
   qTrace: QTrace
 ): TMeta {
 
-  // ★ before ログ
   console.log('[IROS][MemoryAdapter] applyQTraceToMeta before =', meta);
 
   const next = { ...meta };
 
-  /* ---- Qコード ---- */
+  // ---- Qコード（穴埋めのみ。既にあるなら上書きしない）----
   const currentQ = qTrace?.snapshot?.currentQ;
-  if (currentQ) {
+  if (!next.qCode && currentQ) {
     next.qCode = currentQ;
   }
 
-  /* ---- depth stage ---- */
+  // ---- depth stage（穴埋めのみ。既にあるなら上書きしない）----
   const stage = qTrace?.snapshot?.depthStage;
-  if (stage && /^([SRCI][1-3])$/.test(stage)) {
+  if (!next.depth && stage && /^([SRCI][1-3])$/.test(stage)) {
     next.depth = stage;
   }
 
-  // ★ after ログ
   console.log('[IROS][MemoryAdapter] applyQTraceToMeta after =', next);
 
   return next;

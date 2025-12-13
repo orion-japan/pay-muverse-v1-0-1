@@ -93,7 +93,7 @@ export function buildSoulPrompt(input: IrosSoulInput) {
      現在の userText の向きがどう関係しているかを見ます。
    - "with"    : 本来の願いと「おおむね同じ方向」を向いている
    - "against" : 本来の願いとは逆向き、または遠ざかる方向が強い
-   - "foggy"   : どちらとも言い切れない／混ざっている
+   - "foggy"   : どちらとも言い切れない／判別がつきにくい
 
 2. subject_stance（主体としての受け身 / 主体出動）
    - "receive"  : 主体としての受け身
