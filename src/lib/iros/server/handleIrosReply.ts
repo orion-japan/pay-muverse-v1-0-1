@@ -59,6 +59,25 @@ import {
 /* =========================================================
    型/定義
 ========================================================= */
+// handleIrosReply.ts 内で使う：summary正規化（重複圧縮 / 空白圧縮 / 長さ制限）
+function normalizeTextForSummary(s: string | null, maxLen = 200): string | null {
+  if (!s) return null;
+
+  // 空白圧縮
+  let t = String(s).replace(/\s+/g, ' ').trim();
+  if (!t) return null;
+
+  // 「同じ文を2回貼った」系の重複を圧縮（例: "A A" / "A。A。" など）
+  const half = Math.floor(t.length / 2);
+  if (half >= 8) {
+    const a = t.slice(0, half).trim();
+    const b = t.slice(half).trim();
+    if (a && b && a === b) t = a;
+  }
+
+  // 長さ制限
+  return t.length > maxLen ? t.slice(0, maxLen) + '…' : t;
+}
 
 
 
@@ -1299,33 +1318,46 @@ const baseMetaFromQ = applyQTraceToMeta(
         try {
           const unified2 = m.unified ?? {};
 
-          if (
-            typeof m.situationSummary !== 'string' ||
-            m.situationSummary.trim().length === 0
-          ) {
-            const us = unified2?.situation?.summary;
-            if (typeof us === 'string' && us.trim().length > 0) {
-              m.situationSummary = us.trim();
-            } else {
-              const t = String(text ?? '').replace(/\s+/g, ' ').trim();
-              m.situationSummary = t.length > 120 ? t.slice(0, 120) + '…' : t;
-            }
-          }
+// ✅ situationSummary / situationTopic を必ず作る（重複圧縮つき）
+if (
+  typeof m.situationSummary !== 'string' ||
+  m.situationSummary.trim().length === 0
+) {
+  const us = unified2?.situation?.summary;
 
-          if (
-            typeof m.situationTopic !== 'string' ||
-            m.situationTopic.trim().length === 0
-          ) {
-            const resolved = resolveSituationTopicFromMeta(m);
+  if (typeof us === 'string' && us.trim().length > 0) {
+    // unified優先 + 正規化（重複圧縮 / 空白圧縮 / 長さ制限）
+    m.situationSummary = normalizeTextForSummary(us, 200) ?? us.trim();
+  } else {
+    // ユーザー入力を最優先で summary にする（新会話でも必ず入る）
+    const raw = String(text ?? '');
+    m.situationSummary =
+      normalizeTextForSummary(raw, 200) ??
+      (() => {
+        const t = raw.replace(/\s+/g, ' ').trim();
+        return t.length > 200 ? t.slice(0, 200) + '…' : t;
+      })();
+  }
+} else {
+  // 既に入っている場合も、保存前に正規化しておく
+  m.situationSummary =
+    normalizeTextForSummary(m.situationSummary, 200) ?? m.situationSummary;
+}
 
-            if (typeof resolved === 'string' && resolved.trim().length > 0) {
-              m.situationTopic = resolved.trim();
-            } else if (typeof m.topic === 'string' && m.topic.trim().length > 0) {
-              m.situationTopic = m.topic.trim();
-            } else {
-              m.situationTopic = null;
-            }
-          }
+if (
+  typeof m.situationTopic !== 'string' ||
+  m.situationTopic.trim().length === 0
+) {
+  const resolved = resolveSituationTopicFromMeta(m);
+
+  if (typeof resolved === 'string' && resolved.trim().length > 0) {
+    m.situationTopic = resolved.trim();
+  } else if (typeof m.topic === 'string' && m.topic.trim().length > 0) {
+    m.situationTopic = m.topic.trim();
+  } else {
+    m.situationTopic = null;
+  }
+}
 
           const existingCoreNeed =
             m.soulNote &&

@@ -47,23 +47,23 @@ function clampInt03(v: number | null): number | null {
  * - “同じ文字列の繰り返し” を 1回に圧縮（例: A+A や A A、A…A）
  * - 長すぎる場合のトリム
  */
+// file: src/lib/iros/server/handleIrosReply.ts
+// （あなたが貼ってくれたファイルに対する追記＆差し替え）
+
+// ★ 追記：summary用のテキスト正規化（重複圧縮込み）
 function normalizeTextForSummary(s: string | null, maxLen = 200): string | null {
   if (!s) return null;
 
-  // 空白正規化（日本語でも混ざる空白を潰す）
+  // 空白正規化
   let t = s.replace(/\s+/g, ' ').trim();
   if (!t) return null;
 
-  // === 重複圧縮（全体が同一パターンの繰り返しなら、最小単位に潰す） ===
-  // 例:
-  // - "会社で…苦手会社で…苦手" → "会社で…苦手"
-  // - "abc abc" → "abc"
-  // - "aaaaaa" → "a"
+  // “全体が同一パターンの繰り返し” を 1回に圧縮
   const collapseWholeRepetition = (text: string): string => {
     const n = text.length;
     if (n < 2) return text;
 
-    // まずは “半分が同じ” を高速チェック（2回繰り返しケース）
+    // 2回繰り返し（半分一致）を高速チェック
     if (n % 2 === 0) {
       const half = n / 2;
       const a = text.slice(0, half);
@@ -71,30 +71,26 @@ function normalizeTextForSummary(s: string | null, maxLen = 200): string | null 
       if (a === b) return a;
     }
 
-    // 一般形：最小周期を探す（maxLen=200想定なので O(n^2)でもOK）
-    // k = 周期長
+    // 一般形：最小周期を探す（maxLen想定なので O(n^2)でもOK）
     for (let k = 1; k <= Math.floor(n / 2); k++) {
       if (n % k !== 0) continue;
       const unit = text.slice(0, k);
       const repeats = n / k;
       if (repeats <= 1) continue;
-      if (unit.repeat(repeats) === text) {
-        return unit;
-      }
+      if (unit.repeat(repeats) === text) return unit;
     }
 
     return text;
   };
 
-  // 1回圧縮して、さらに「空白あり繰り返し」も拾うためにもう一度だけ試す
-  // （例: "A A" → 空白正規化後でも "A A" のままなので、全体周期で潰せる）
+  // 2回だけ試す（空白混在のケースも拾いやすくする）
   t = collapseWholeRepetition(t);
   t = collapseWholeRepetition(t);
 
-  // 末尾トリム
   if (t.length > maxLen) return t.slice(0, maxLen) + '…';
   return t;
 }
+
 
 function normalizeTargetKind(v: any): TargetKind {
   const s = pickString(v);
