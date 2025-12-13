@@ -41,6 +41,12 @@ export type IrosSoulInput = {
 
   /** 意図ライン解析からのガイダンスヒント（あれば） */
   intentGuidanceHint: string | null;
+
+  /**
+   * 意図アンカーのテキスト（あれば）
+   * - intentLine.coreNeed / intent_anchor.text 等から渡す「本当の向き」の要約
+   */
+  intentAnchorText?: string | null;
 };
 
 /**
@@ -49,12 +55,22 @@ export type IrosSoulInput = {
  *   将来拡張用に string も許可しておく
  */
 export type IrosSoulRiskFlag =
-  | 'over_control'   // Q1: 過剰な我慢・コントロール
-  | 'anger'          // Q2: 怒り・攻撃性
-  | 'anxiety'        // Q3: 不安の増幅
-  | 'fear'           // Q4: 恐怖・トラウマ
-  | 'q5_depress'     // Q5: うつ傾向・空虚感
-  | string;          // 予備拡張
+  | 'over_control' // Q1: 過剰な我慢・コントロール
+  | 'anger' // Q2: 怒り・攻撃性
+  | 'anxiety' // Q3: 不安の増幅
+  | 'fear' // Q4: 恐怖・トラウマ
+  | 'q5_depress' // Q5: うつ傾向・空虚感
+  | 'needs_human_support'
+  | 'self_harm_risk_low'
+  | 'self_harm_risk_mid'
+  | 'self_harm_risk_high'
+  | string; // 予備拡張
+
+/**
+ * 本体のトーン調整ヒント（Soul → 本体LLM）
+ * - prompt.ts 側の仕様（minimal/gentle/normal/soft）に統一
+ */
+export type IrosSoulToneHint = 'minimal' | 'gentle' | 'normal' | 'soft';
 
 /**
  * 魂LLMが返す "魂メモ" JSON
@@ -68,19 +84,15 @@ export type IrosSoulNote = {
   core_need: string;
 
   /**
-   * Qコード別・心理帯域別の注意フラグ。
+   * 心理帯域別の注意フラグ。
    *  例: ['q5_depress', 'anxiety'] など。
    */
   risk_flags: IrosSoulRiskFlag[];
 
   /**
    * 本体のトーン調整ヒント。
-   *  - 'soft'   : やわらかく・受容多め
-   *  - 'light'  : さらっと・軽やかに
-   *  - 'firm'   : 少し芯を通す・ハッキリめ
-   *  - 'minimal': 最小限・静かに
    */
-  tone_hint: 'soft' | 'light' | 'firm' | 'minimal';
+  tone_hint: IrosSoulToneHint;
 
   /**
    * step_phrase:
@@ -88,6 +100,16 @@ export type IrosSoulNote = {
    *  任意。出さない場合は null。
    */
   step_phrase?: string | null;
+
+  /**
+   * 具体的なミクロ行動案（0〜3 個）
+   */
+  micro_steps?: string[] | null;
+
+  /**
+   * 自己否定を和らげる一言候補（0〜3 個）
+   */
+  comfort_phrases?: string[] | null;
 
   /**
    * soul_sentence:
@@ -101,4 +123,14 @@ export type IrosSoulNote = {
    *  Iros本体向けのメモ。ユーザーには見せない内部向けコメント。
    */
   notes?: string | null;
+
+  /**
+   * 本来の願い（core_need / intentAnchor）と、現在の語りの方向関係
+   */
+  alignment?: 'with' | 'against' | 'foggy';
+
+  /**
+   * 本体LLMが取るべき主体性の扱い方（内部目安）
+   */
+  subject_stance?: 'receive' | 'activate';
 };

@@ -1,12 +1,11 @@
 // src/lib/iros/orchestratorState.ts
-// Iros Orchestrator — MemoryState 読み書き専用ヘルパー
+// Iros Orchestrator — MemoryState 読み込み専用ヘルパー
 // - userCode ごとの「現在地」を読み込み、baseMeta に合成
-// - 返信後の meta から MemoryState を1行 upsert
+// - 保存（upsert）は handleIrosReply 側に集約する（ここではDB保存しない）
 
 import type { Depth, QCode, IrosMeta } from './system';
 import {
   loadIrosMemoryState,
-  upsertIrosMemoryState,
   type IrosMemoryState,
 } from './memoryState';
 
@@ -94,84 +93,24 @@ export async function loadBaseMetaFromMemoryState(args: {
 }
 
 /**
- * 返信後の meta / unified から MemoryState を1行 upsert する。
- * runIrosTurn の最後から呼ぶ想定。
+ * 互換のため残すが、ここではDB保存しない。
+ * MemoryState の upsert は handleIrosReply 側に集約する。
  */
 export async function saveMemoryStateFromMeta(args: {
   userCode?: string;
   meta: IrosMeta;
 }): Promise<void> {
-  const { userCode, meta } = args;
-
+  const { userCode } = args;
   if (!userCode) return;
 
-  try {
-    const depthStageForSave = meta.depth ?? null;
-    const qForSave = meta.qCode ?? null;
-
-    const saForSave =
-      typeof (meta as any).selfAcceptance === 'number'
-        ? (meta as any).selfAcceptance
-        : null;
-
-    const unifiedForSave = (meta as any).unified ?? null;
-    const phaseForSave =
-      unifiedForSave &&
-      (unifiedForSave.phase === 'Inner' ||
-        unifiedForSave.phase === 'Outer')
-        ? unifiedForSave.phase
-        : null;
-
-    // 🆕 situation.summary / topic を安全に取り出す
-    const situation = unifiedForSave?.situation ?? null;
-    const situationSummaryForSave =
-      situation && typeof situation.summary === 'string'
-        ? situation.summary
-        : null;
-    const situationTopicForSave =
-      situation && typeof situation.topic === 'string'
-        ? situation.topic
-        : null;
-
-    const intentLayerForSave = (meta as any).intentLayer ?? null;
-    const intentConfidenceForSave =
-      typeof (meta as any).intentConfidence === 'number'
-        ? (meta as any).intentConfidence
-        : null;
-
-    const yForSave =
-      typeof (meta as any).yLevel === 'number'
-        ? (meta as any).yLevel
-        : null;
-    const hForSave =
-      typeof (meta as any).hLevel === 'number'
-        ? (meta as any).hLevel
-        : null;
-
-    const sentimentForSave =
-      typeof (meta as any)?.sentiment_level === 'string'
-        ? (meta as any).sentiment_level
-        : null;
-
-    await upsertIrosMemoryState({
+  if (
+    typeof process !== 'undefined' &&
+    process.env.NODE_ENV !== 'production'
+  ) {
+    console.log('[IROS/STATE] saveMemoryStateFromMeta skipped (writer is handleIrosReply)', {
       userCode,
-      depthStage: depthStageForSave,
-      qPrimary: qForSave,
-      selfAcceptance: saForSave,
-      phase: phaseForSave,
-      intentLayer: intentLayerForSave,
-      intentConfidence: intentConfidenceForSave,
-      yLevel: yForSave,
-      hLevel: hForSave,
-      // situation / sentiment も MemoryState に固定
-      situationSummary: situationSummaryForSave,
-      situationTopic: situationTopicForSave,
-      sentiment_level: sentimentForSave,
-    });
-  } catch (e) {
-    console.error('[IROS/STATE] upsertIrosMemoryState failed', {
-      userCode,
-      error: e,
     });
   }
+
+  return;
 }

@@ -321,6 +321,52 @@ export async function runIrosTurn(
     hasFutureMemory,
   };
 
+// ★ situation_topic を確実に付与（Training/集計/MemoryState の舵取り）
+// 優先：meta → snake_case → unified → extra.pastStateNoteText から抽出 → 既定値
+function resolveSituationTopicFromMeta(meta: any): string | null {
+  const m: any = meta ?? {};
+  const unified: any = m?.unified ?? {};
+  const note: any = m?.extra?.pastStateNoteText;
+
+  const fromMeta =
+    typeof m.situationTopic === 'string' && m.situationTopic.trim().length > 0
+      ? m.situationTopic.trim()
+      : null;
+
+  const fromSnake =
+    typeof m.situation_topic === 'string' && m.situation_topic.trim().length > 0
+      ? m.situation_topic.trim()
+      : null;
+
+  const fromUnified =
+    typeof unified?.situation_topic === 'string' &&
+    unified.situation_topic.trim().length > 0
+      ? unified.situation_topic.trim()
+      : typeof unified?.situation?.topic === 'string' &&
+        unified.situation.topic.trim().length > 0
+      ? unified.situation.topic.trim()
+      : null;
+
+  const fromNote = (() => {
+    if (typeof note !== 'string' || note.trim().length === 0) return null;
+
+    // 1) 「対象トピック: XXX」
+    const m1 = note.match(/対象トピック:\s*([^\n\r]+)/);
+    // 2) 「対象トピックXXX」（コロン無しも拾う）
+    const m2 = note.match(/対象トピック\s*([^\n\r]+)/);
+
+    const picked =
+      (m1 && m1[1]) ? String(m1[1]).trim()
+      : (m2 && m2[1]) ? String(m2[1]).trim()
+      : null;
+
+    return picked && picked.length > 0 ? picked : null;
+  })();
+
+  return fromMeta ?? fromSnake ?? fromUnified ?? fromNote ?? null;
+}
+
+
   // ----------------------------------------------------------------
   // ★ Phase パース＆格納：Unified または baseMeta から採用
   // ----------------------------------------------------------------
@@ -463,43 +509,69 @@ export async function runIrosTurn(
     }
   }
 
-  // ----------------------------------------------------------------
-  // 4.5 Iros Soul レイヤー（Silent Advisor）呼び出し
-  // ----------------------------------------------------------------
-  let soulNote: any = null;
-  try {
-    const soulInput: IrosSoulInput = {
-      userText: text,
-      qCode: meta.qCode ?? null,
-      depthStage: meta.depth ?? null,
-      phase: meta.phase ?? null,
-      selfAcceptance: meta.selfAcceptance ?? null,
-      yLevel: meta.yLevel ?? null,
-      hLevel: meta.hLevel ?? null,
-      situationSummary: null,
-      situationTopic: null,
-      intentNowLabel:
-        intentLine && typeof (intentLine as any).nowLabel === 'string'
-          ? (intentLine as any).nowLabel
-          : null,
-      intentGuidanceHint:
-        intentLine && typeof (intentLine as any).guidanceHint === 'string'
-          ? (intentLine as any).guidanceHint
-          : null,
-    };
+// ----------------------------------------------------------------
+// 4.5 Iros Soul レイヤー（Silent Advisor）呼び出し
+// ----------------------------------------------------------------
+let soulNote: any = null;
+try {
+  // ★ intentAnchorText を確実に作る（優先：meta.intent_anchor.text → intentLine.coreNeed）
+  const intentAnchorText: string | null =
+    (meta as any)?.intent_anchor?.text &&
+    typeof (meta as any).intent_anchor.text === 'string' &&
+    (meta as any).intent_anchor.text.trim().length > 0
+      ? (meta as any).intent_anchor.text.trim()
+      : intentLine && typeof (intentLine as any).coreNeed === 'string'
+      ? String((intentLine as any).coreNeed).trim() || null
+      : null;
 
-    if (shouldUseSoul(soulInput)) {
-      soulNote = await runIrosSoul(soulInput, {});
-    }
-  } catch (e) {
-    if (process.env.DEBUG_IROS_SOUL === '1') {
-      console.error('[IROS/Soul] error', e);
-    }
-  }
+  // ★ situationTopic を meta/unified/notes から拾う（あなたが作った関数を使う）
+  const situationTopic: string | null = resolveSituationTopicFromMeta(meta);
+// ★ 追加：拾えた topic は meta にも保存（Training/MemoryState へ残す）
+if (situationTopic) {
+  (meta as any).situationTopic = situationTopic;
+}
 
-  if (soulNote) {
-    (meta as any).soulNote = soulNote;
+  const soulInput: IrosSoulInput = {
+    userText: text,
+    qCode: meta.qCode ?? null,
+    depthStage: meta.depth ?? null,
+    phase: meta.phase ?? null,
+    selfAcceptance: meta.selfAcceptance ?? null,
+    yLevel: meta.yLevel ?? null,
+    hLevel: meta.hLevel ?? null,
+
+    // ★ ここは「今回のターン」なので text を入れる（null にしない）
+    situationSummary:
+      typeof text === 'string' && text.trim().length > 0 ? text.trim() : null,
+
+    // ★ topic も供給
+    situationTopic,
+
+    // ★ これが今回の本題：Soul に意図アンカーを渡す
+    intentAnchorText,
+
+    intentNowLabel:
+      intentLine && typeof (intentLine as any).nowLabel === 'string'
+        ? (intentLine as any).nowLabel
+        : null,
+    intentGuidanceHint:
+      intentLine && typeof (intentLine as any).guidanceHint === 'string'
+        ? (intentLine as any).guidanceHint
+        : null,
+  };
+
+  if (shouldUseSoul(soulInput)) {
+    soulNote = await runIrosSoul(soulInput, {});
   }
+} catch (e) {
+  if (process.env.DEBUG_IROS_SOUL === '1') {
+    console.error('[IROS/Soul] error', e);
+  }
+}
+
+if (soulNote) {
+  (meta as any).soulNote = soulNote;
+}
 
   // ----------------------------------------------------------------
   // 5. Vision-Trigger 判定（ビジョンモードへの自動ジャンプ）

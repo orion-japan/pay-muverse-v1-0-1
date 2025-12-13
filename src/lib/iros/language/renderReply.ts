@@ -1,9 +1,14 @@
 // src/lib/iros/language/renderReply.ts
 // iros — Field Rendering (文章レンダリング層)
-// - 構造(facts/insight/next)を「テンプレ」ではなく「重心」で描画する
-// - 刺し(insight)は毎回"候補"がある前提。ただし露出は条件で制御する。
+//
+// 方針：
+// - 「中身はメタで決める / 見せ方（器）は選ぶ」
+// - テンプレ固定ではなく、候補群から seed で決定的に揺らす
+// - ただし、挨拶/雑談/説明不要のときは短く（器: NONE）
+// - “箇条書き毎回”を避け、番号/見出しは必要な時だけ
 
 import type { ResonanceVector } from './resonanceVector';
+import type { ReplyPlan, ContainerId, ReplySlotKey } from './planReply';
 
 export type RenderMode = 'casual' | 'intent' | 'transcend';
 
@@ -12,7 +17,6 @@ export type RenderInput = {
   facts: string;
 
   // 任意: 刺し（本質の置き換え1文）
-  // ※生成側では毎ターン作る想定だが、空ならレンダラーは出さない
   insight?: string | null;
 
   // 任意: 0.5未来の一手（押し付けない具体）
@@ -25,7 +29,6 @@ export type RenderInput = {
   highDefensiveness?: boolean;
 
   // 任意: 返答のゆらぎを固定するためのシード（conversationId/turnIdなど）
-  // 無ければfactsから生成する（完全ランダムにはしない）
   seed?: string;
 };
 
@@ -52,6 +55,7 @@ export function renderReply(
 
   const seed =
     (input.seed && input.seed.trim()) || stableSeedFromText(input.facts);
+
   const minimalEmoji = !!opts.minimalEmoji;
   const maxLines = typeof opts.maxLines === 'number' ? opts.maxLines : 14;
 
@@ -80,26 +84,21 @@ export function renderReply(
   // 0.5未来の一手（groundingが低い場合は軽く）
   const next = nextRaw ? shapeNext(nextRaw, { vector, mode, seed }) : null;
 
-  // 絵文字・リズム（テンプレ固定ではなく候補から選ぶ）
-  const header = buildHeader({ mode, vector, minimalEmoji, seed, exposeInsight });
-  const joiner = '\n\n';
+  // 器を選び、スロットを組み立てる
+  const plan = buildPlan({
+    vector,
+    mode,
+    seed,
+    minimalEmoji,
+    facts,
+    insight,
+    next,
+    userWantsEssence: !!input.userWantsEssence,
+    highDefensiveness: !!input.highDefensiveness,
+    exposeInsight,
+  });
 
-  const blocks: string[] = [];
-
-  // 直答は最優先（まどろっこしさ除去）
-  blocks.push(shapeFacts(facts, { vector, mode, seed, minimalEmoji }));
-
-  // 刺しは「必要なときだけ露出」。露出しない場合でも滲ませはここで1行入れる。
-  if (insight) blocks.push(insight);
-
-  // 0.5未来（押しつけない具体）
-  if (next) blocks.push(next);
-
-  // 組み立て
-  const body = blocks.filter(Boolean).join(joiner);
-
-  // 先頭に軽い“存在感”を置く（やりすぎない）
-  const out = header ? `${header}${joiner}${body}` : body;
+  const out = renderFromPlan(plan, { mode, vector, seed, minimalEmoji });
 
   return clampLines(out, maxLines).trim();
 }
@@ -109,7 +108,6 @@ export function renderReply(
 ========================= */
 
 function inferMode(vector: ResonanceVector): RenderMode {
-  // resonanceVector.ts 側で「必ず number」に確定している前提
   const grounding = vector.grounding;
   const transcendence = vector.transcendence;
 
@@ -132,19 +130,210 @@ function shouldExposeInsight(args: {
   // 防御が強い時は露出を抑える（刺しは“滲ませ”に落とす）
   if (highDefensiveness && mode !== 'transcend') return false;
 
-  // ユーザーが「本質」を要求している、または精度が高いモードなら露出しやすく
+  // ユーザーが「本質」を要求しているなら露出
   if (userWantsEssence) return true;
 
-  // precision が高い、transcendence が高い、もしくは intent 以上なら露出しやすい
+  // transcend は露出しやすい
   if (mode === 'transcend') return true;
+
+  // intent でも precision が高いなら露出
   if (mode === 'intent' && vector.precision >= 0.62) return true;
 
-  // それ以外は露出しない（滲ませ）
   return false;
 }
 
 /* =========================
-   Rendering blocks
+   Plan: container + slots
+========================= */
+
+function buildPlan(args: {
+  vector: ResonanceVector;
+  mode: RenderMode;
+  seed: string;
+  minimalEmoji: boolean;
+
+  facts: string;
+  insight: string | null;
+  next: string | null;
+
+  userWantsEssence: boolean;
+  highDefensiveness: boolean;
+  exposeInsight: boolean;
+}): ReplyPlan {
+  const {
+    vector,
+    mode,
+    seed,
+    minimalEmoji,
+    facts,
+    insight,
+    next,
+    userWantsEssence,
+    highDefensiveness,
+    exposeInsight,
+  } = args;
+
+  const containerId = pickContainer({
+    vector,
+    mode,
+    seed,
+    facts,
+    insight,
+    next,
+    userWantsEssence,
+    highDefensiveness,
+  });
+
+  const slots: Partial<Record<ReplySlotKey, string>> = {};
+
+  // opener（存在感）は、やりすぎない・挨拶雑談では消える
+  const header = buildHeader({ mode, vector, minimalEmoji, seed, exposeInsight });
+  if (header && containerId !== 'NONE') slots.opener = header;
+
+  // facts（必須）
+  slots.facts = shapeFacts(facts, { vector, mode, seed, minimalEmoji });
+
+  // mirror（刺し or 滲ませ）
+  if (insight) slots.mirror = insight;
+
+  // elevate（一段上の俯瞰：transcend寄りの時だけ薄く）
+  const elevate = buildElevateLine({ vector, mode, seed, minimalEmoji });
+  if (elevate) slots.elevate = elevate;
+
+  // move（次の一手）
+  if (next) slots.move = next;
+
+  // ask（問いは「置く」：毎回は出さない）
+  const ask = buildAskLine({ vector, mode, seed, userWantsEssence, highDefensiveness });
+  if (ask) slots.ask = ask;
+
+  return {
+    containerId,
+    slots,
+    debug: {
+      reason: `container=${containerId}`,
+      pickedBy: 'rule',
+    },
+  };
+}
+
+function pickContainer(args: {
+  vector: ResonanceVector;
+  mode: RenderMode;
+  seed: string;
+  facts: string;
+  insight: string | null;
+  next: string | null;
+  userWantsEssence: boolean;
+  highDefensiveness: boolean;
+}): ContainerId {
+  const { mode, seed, facts, insight, next, userWantsEssence, highDefensiveness } = args;
+
+  const hasInsight = !!insight;
+  const hasNext = !!next;
+
+  const shortFacts = facts.trim().length <= 50;
+  const longFacts = facts.trim().length >= 160;
+
+  // 1) 挨拶/雑談/説明不要：短く（NONE）
+  if (mode === 'casual' && shortFacts && !hasInsight && !hasNext) return 'NONE';
+
+  // 2) 防御が強いとき：器は静かに（PLAIN）
+  if (highDefensiveness && mode !== 'transcend') return 'PLAIN';
+
+  // 3) 「教えて」「手順」「説得力」相当（ここでは userWantsEssence を代理）
+  if (userWantsEssence || (hasInsight && longFacts)) {
+    return pick(seed + '|c', ['NUMBERED', 'HEADING', 'PLAIN']) as ContainerId;
+  }
+
+  // 4) transcend は “見出し” が相性良い（ただし毎回固定しない）
+  if (mode === 'transcend') {
+    return pick(seed + '|cT', ['HEADING', 'PLAIN', 'HEADING']) as ContainerId;
+  }
+
+  // 既定：静かな段落
+  return 'PLAIN';
+}
+
+function renderFromPlan(
+  plan: ReplyPlan,
+  ctx: { mode: RenderMode; vector: ResonanceVector; seed: string; minimalEmoji: boolean },
+): string {
+  const { containerId, slots } = plan;
+
+  const s = (k: ReplySlotKey) => normalizeNullable(slots[k]);
+
+  const opener = s('opener');
+  const facts = s('facts') ?? '';
+  const mirror = s('mirror');
+  const elevate = s('elevate');
+  const move = s('move');
+  const ask = s('ask');
+
+  if (containerId === 'NONE') {
+    const parts = [facts, move].filter(Boolean);
+    return parts.join('\n\n').trim();
+  }
+
+  if (containerId === 'PLAIN') {
+    return [opener, facts, mirror, elevate, move, ask].filter(Boolean).join('\n\n').trim();
+  }
+
+  if (containerId === 'HEADING') {
+    // HEADING のときは “芯” の絵文字が二重になりやすいので、mirror から先頭の印を剥ぐ
+    const mirrorClean = mirror ? stripLeadingMarkers(mirror) : null;
+    const elevateClean = elevate ? stripLeadingMarkers(elevate) : null;
+
+    const blocks: string[] = [];
+    if (opener) blocks.push(opener);
+
+    blocks.push(`■ 現象\n${facts}`);
+
+    if (mirrorClean) blocks.push(`■ 芯\n${mirrorClean}`);
+
+    if (elevateClean) blocks.push(`■ 俯瞰\n${elevateClean}`);
+
+    if (move) blocks.push(`■ 次\n${move}`);
+
+    if (ask) blocks.push(`■ 確認\n${stripLeadingMarkers(ask)}`);
+
+    return blocks.join('\n\n').trim();
+  }
+
+  if (containerId === 'NUMBERED') {
+    // NUMBERED のときは “move 重複” を内容一致で判定しない。投入フラグで管理する。
+    const steps: string[] = [];
+    if (opener) steps.push(opener);
+
+    steps.push(`1) ${facts}`);
+
+    if (mirror) steps.push(`2) ${stripLeadingMarkers(mirror)}`);
+
+    let moveInserted = false;
+
+    if (elevate) {
+      steps.push(`3) ${stripLeadingMarkers(elevate)}`);
+    } else if (move) {
+      steps.push(`3) ${move}`);
+      moveInserted = true;
+    }
+
+    if (move && !moveInserted && steps.length < 5) {
+      steps.push(`4) ${move}`);
+      moveInserted = true;
+    }
+
+    if (ask && steps.length < 6) steps.push(`最後に：${stripLeadingMarkers(ask)}`);
+
+    return steps.join('\n\n').trim();
+  }
+
+  // BULLET は “毎回は出さない” 前提。必要になったら別途ルール追加で使う。
+  return [opener, facts, mirror, elevate, move, ask].filter(Boolean).join('\n\n').trim();
+}
+
+/* =========================
+   Rendering blocks (slots)
 ========================= */
 
 function buildHeader(args: {
@@ -166,7 +355,6 @@ function buildHeader(args: {
 
   const head = pick(seed + '|h', candidates);
 
-  // 刺し露出のときだけ少し空気を作る
   if (exposeInsight && head) {
     const pre = pick(seed + '|p', [
       '少しだけ、芯を言います。',
@@ -186,11 +374,9 @@ function shapeFacts(
   const { mode, seed, minimalEmoji } = ctx;
 
   if (mode === 'casual') {
-    // 直答を短く、説明しすぎない
     return facts;
   }
 
-  // intent/transcend は、冒頭に“受け取り”を軽く添える（テンプレ固定しない）
   const leadIns = minimalEmoji
     ? ['', '']
     : mode === 'intent'
@@ -199,7 +385,6 @@ function shapeFacts(
 
   const lead = pick(seed + '|f0', leadIns);
 
-  // “受け取り文”は入れすぎない（0〜1回）
   const prefaces =
     mode === 'intent'
       ? [
@@ -215,7 +400,6 @@ function shapeFacts(
 
   const preface = pick(seed + '|f1', prefaces);
 
-  // facts が短い場合は前置き不要
   if (facts.length <= 60) return `${lead}${facts}`;
 
   return `${lead}${preface}\n${facts}`;
@@ -227,7 +411,6 @@ function shapeInsightDirect(
 ): string {
   const { mode, seed } = ctx;
 
-  // 直刺し（断定しすぎない表現も候補に入れる）
   const frames =
     mode === 'transcend'
       ? [
@@ -251,7 +434,6 @@ function shapeInsightDiffuse(
 ): string {
   const { mode, seed } = ctx;
 
-  // 滲ませ（同じ芯を言い切らずに“傾向”として置く）
   const frames =
     mode === 'casual'
       ? [
@@ -266,8 +448,6 @@ function shapeInsightDiffuse(
         ];
 
   const frame = pick(seed + '|iS', frames);
-
-  // 露出しない場合は絵文字も軽く
   const marker = mode === 'casual' ? '' : '🪔 ';
   return `${marker}${frame.replace('{X}', softenInsight(insight, seed))}`;
 }
@@ -278,7 +458,6 @@ function shapeNext(
 ): string {
   const { vector, mode, seed } = ctx;
 
-  // grounding が低いなら “提案の軽さ” を上げる（命令しない）
   const gentle = vector.grounding < 0.45 || mode === 'transcend';
   const frames = gentle
     ? [
@@ -297,19 +476,68 @@ function shapeNext(
   return `🌱 ${line}`;
 }
 
+function buildElevateLine(args: {
+  vector: ResonanceVector;
+  mode: RenderMode;
+  seed: string;
+  minimalEmoji: boolean;
+}): string | null {
+  const { vector, mode, seed, minimalEmoji } = args;
+
+  const want =
+    mode === 'transcend' ||
+    (mode === 'intent' && vector.transcendence >= 0.55);
+
+  if (!want) return null;
+
+  const frames = [
+    'ここは「結論」より、流れの向きが先に決まっています。',
+    '出来事そのものより、“向き”が先に立っている局面です。',
+    '答えを急ぐより、今は“方向”を整える段階です。',
+  ];
+
+  const line = pick(seed + '|e', frames);
+  return minimalEmoji ? line : `🪔 ${line}`;
+}
+
+function buildAskLine(args: {
+  vector: ResonanceVector;
+  mode: RenderMode;
+  seed: string;
+  userWantsEssence: boolean;
+  highDefensiveness: boolean;
+}): string | null {
+  const { mode, seed, userWantsEssence, highDefensiveness } = args;
+
+  if (highDefensiveness) return null;
+  if (!userWantsEssence && mode === 'casual') return null;
+
+  const frames = userWantsEssence
+    ? ['いま一番ひっかかるのは、どこですか？', '核心を一言で言うなら、何ですか？']
+    : ['このまま進めるなら、何を残したいですか？', 'どこが一番ズレていますか？'];
+
+  return `🌀 ${pick(seed + '|q', frames)}`;
+}
+
 /* =========================
    Helpers: anti-template drift
 ========================= */
 
+function stripLeadingMarkers(text: string): string {
+  // 先頭の絵文字・記号・全角スペースを軽く除去（見出し/番号の二重装飾を防ぐ）
+  return (text ?? '')
+    .toString()
+    .trim()
+    .replace(/^(?:[🌀🪔🌌🌱✨]+[\s　]*)+/u, '')
+    .trim();
+}
+
 function softenInsight(text: string, seed: string): string {
   const t = text.trim();
-
-  // ランダムではなく seed で分岐（同じ入力なら同じゆらぎ）
   const style = pick(seed + '|soft', ['soft', 'neutral', 'soft']);
 
   if (style === 'neutral') return t;
 
-  // ざっくり柔らげ
   return t
     .replace(/です。$/g, 'の感じです。')
     .replace(/である。$/g, 'である気配です。')
@@ -336,7 +564,6 @@ function pick(seed: string, arr: string[]): string {
 }
 
 function simpleHash(s: string): number {
-  // 軽量・決定的（暗号用途ではない）
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) {
     h ^= s.charCodeAt(i);
@@ -349,8 +576,7 @@ function clampLines(text: string, maxLines: number): string {
   const lines = text.split('\n');
   if (lines.length <= maxLines) return text;
 
-  // 末尾を優先して残しすぎない。次の一手は残したいので、後ろから詰める。
-  const keepTail = Math.min(5, maxLines); // nextStep があることが多い
+  const keepTail = Math.min(5, maxLines);
   const headMax = Math.max(0, maxLines - keepTail);
 
   const head = lines.slice(0, headMax);

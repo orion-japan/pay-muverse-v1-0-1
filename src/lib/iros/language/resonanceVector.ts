@@ -1,9 +1,9 @@
-// file: src/lib/iros/language/resonanceVector.ts
+// src/lib/iros/language/resonanceVector.ts
+// iros — Resonance Vector (render engine input)
+// ※このファイルは「単独定義」にする：他を import しない（循環を絶つ）
 
 export type QCode = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
-
 export type Phase = 'Inner' | 'Outer';
-
 export type IntentLayer = 'S' | 'R' | 'C' | 'I' | 'T';
 
 export type ResonanceVector = {
@@ -179,7 +179,6 @@ function buildLabel(rv: Omit<ResonanceVector, 'label'>): string {
   if (rv.polarityBand) parts.push(`Pol:${rv.polarityBand}`);
   if (rv.stabilityBand) parts.push(`Stb:${rv.stabilityBand}`);
 
-  // 互換フィールドも軽く見える化（デバッグ用）
   parts.push(`DL:${rv.depthLevel}`);
   parts.push(`G:${rv.grounding.toFixed(2)}`);
   parts.push(`T:${rv.transcendence.toFixed(2)}`);
@@ -189,12 +188,6 @@ function buildLabel(rv: Omit<ResonanceVector, 'label'>): string {
   return label.length > 0 ? label : 'RV';
 }
 
-/**
- * depthStage (S/R/C/I/T) から粗い depthLevel(0..2) を推定
- * - 0: Seed/日常（S帯）
- * - 1: 中間（R/C帯）
- * - 2: 深い/超越（I/T帯）
- */
 function inferDepthLevel(depthStage: string | null): number | null {
   if (!depthStage) return null;
   const s = depthStage.trim().toUpperCase();
@@ -206,9 +199,6 @@ function inferDepthLevel(depthStage: string | null): number | null {
   return null;
 }
 
-/**
- * stabilityBand / selfAcceptance から grounding(0..1) を推定
- */
 function inferGrounding(params: {
   selfAcceptance: number | null;
   stabilityBand: string | null;
@@ -226,40 +216,19 @@ function inferGrounding(params: {
   return null;
 }
 
-/**
- * depthLevel から transcendence(0..1) を推定
- */
 function inferTranscendence(depthLevel: number): number {
   if (depthLevel >= 2) return 0.8;
   if (depthLevel === 1) return 0.4;
   return 0.2;
 }
 
-/**
- * intentConfidence があれば precision に寄せる（なければ中間）
- */
 function inferPrecision(intentConfidence: number | null): number {
   const c = clamp01(intentConfidence);
   return c != null ? c : 0.5;
 }
 
-/**
- * meta / unified の混在入力から、1つの ResonanceVector を組み立てる
- */
 export function buildResonanceVector(input: ResonanceVectorInput): ResonanceVector {
   const unified = pickUnified(input);
-
-  // ==============================
-  // ★ デバッグ：selfAcceptance 流入確認（原因確定用）
-  // ==============================
-  try {
-    console.log('[RV][debug] selfAcceptance candidates', {
-      input_selfAcceptance: (input as any)?.selfAcceptance,
-      input_self_acceptance: (input as any)?.self_acceptance,
-      unified_self_acceptance: unified?.self_acceptance,
-      unified_all: unified,
-    });
-  } catch {}
 
   const qCode =
     normalizeQCode(input.qCode) ??
@@ -325,19 +294,25 @@ export function buildResonanceVector(input: ResonanceVectorInput): ResonanceVect
     toStr(unified?.stability_band) ??
     null;
 
-  const yLevel =
-    toNum(input.yLevel) ??
-    toNum(input.y_level) ??
-    toNum(unified?.yLevel) ??
-    toNum(unified?.y_level) ??
-    null;
+  const yLevel = (() => {
+    const raw =
+      toNum(input.yLevel) ??
+      toNum(input.y_level) ??
+      toNum(unified?.yLevel) ??
+      toNum(unified?.y_level) ??
+      null;
+    return raw == null ? null : clampInt(raw, 0, 3);
+  })();
 
-  const hLevel =
-    toNum(input.hLevel) ??
-    toNum(input.h_level) ??
-    toNum(unified?.hLevel) ??
-    toNum(unified?.h_level) ??
-    null;
+  const hLevel = (() => {
+    const raw =
+      toNum(input.hLevel) ??
+      toNum(input.h_level) ??
+      toNum(unified?.hLevel) ??
+      toNum(unified?.h_level) ??
+      null;
+    return raw == null ? null : clampInt(raw, 0, 3);
+  })();
 
   const situationSummary =
     toStr(input.situationSummary) ??
@@ -349,9 +324,7 @@ export function buildResonanceVector(input: ResonanceVectorInput): ResonanceVect
     toStr(unified?.situation?.topic) ??
     null;
 
-  // ==============================
   // 互換フィールド（null 禁止）
-  // ==============================
   const depthLevel =
     clampInt(
       toNum(input.depthLevel) ??
@@ -404,36 +377,23 @@ export function buildResonanceVector(input: ResonanceVectorInput): ResonanceVect
   };
 
   rv.label = buildLabel(rv);
-
   return rv;
 }
 
-
-/**
- * LLM に渡す用の短いブロック（ログ/プロンプト用）
- */
 export function formatResonanceVectorForPrompt(rv: ResonanceVector): string {
   const lines: string[] = [];
-
   lines.push(`RV: ${rv.label}`);
-
   if (rv.situationTopic) lines.push(`topic: ${rv.situationTopic}`);
   if (rv.situationSummary) lines.push(`summary: ${rv.situationSummary}`);
-
   return lines.join('\n');
 }
 
-/**
- * メタ（metaForSave など）から直接、RV テキストを作る便利関数
- */
 export function buildResonanceVectorText(metaLike: ResonanceVectorInput): string {
   const rv = buildResonanceVector(metaLike);
   return formatResonanceVectorForPrompt(rv);
 }
 
-/**
- * 互換 export（どこかで違う名前で呼ばれても死なないため）
- */
+// 互換 export（呼び名ゆれ対策）
 export const computeResonanceVector = buildResonanceVector;
 export const toResonanceVector = buildResonanceVector;
 export const formatResonanceVector = formatResonanceVectorForPrompt;
