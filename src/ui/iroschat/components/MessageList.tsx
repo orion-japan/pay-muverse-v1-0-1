@@ -124,8 +124,8 @@ const seedHeaderStyle: React.CSSProperties = {
   marginBottom: 6,
   borderRadius: 10,
   background:
-    'linear-gradient(135deg, rgba(56,189,248,0.1), rgba(129,140,248,0.15))',
-  border: '1px solid rgba(59,130,246,0.35)',
+    'linear-gradient(135deg, rgba(56, 189, 248, 0.1), rgba(129, 140, 248, 0.15))',
+  border: '1px solid rgba(59, 130, 246, 0.35)',
 };
 
 const seedLabelStyle: React.CSSProperties = {
@@ -141,42 +141,77 @@ const seedTLHintStyle: React.CSSProperties = {
   padding: '2px 8px',
   borderRadius: 999,
   fontSize: 10,
-  background: 'rgba(37,99,235,0.08)',
+  background: 'rgba(37, 99, 235, 0.08)',
   color: '#1d4ed8',
 };
 
-/** [object Object]対策：最終的に必ず文字列へ正規化 */
+/** [object Object]対策：本文として使える文字列が無い object は「表示しない」 */
 function toSafeString(v: unknown): string {
   if (typeof v === 'string') return v;
   if (v == null) return '';
+
+  // object の場合：本文候補キーだけ拾う。無ければ空文字（←ここが重要）
   if (typeof v === 'object') {
     const o = v as Record<string, unknown>;
+
     const cand =
       (typeof o.content === 'string' && o.content) ||
       (typeof o.text === 'string' && o.text) ||
       (typeof o.message === 'string' && o.message) ||
-      (typeof o.assistant === 'string' && o.assistant);
-    if (cand) return cand;
-    try {
-      return JSON.stringify(o, null, 2);
-    } catch {
-      return String(v);
-    }
+      (typeof o.assistant === 'string' && o.assistant) ||
+      (typeof (o as any).reply === 'string' && (o as any).reply);
+
+    return cand || '';
   }
-  return String(v);
+
+  // number / boolean などは文字列化
+  try {
+    return String(v);
+  } catch {
+    return '';
+  }
 }
 
-/** 先頭の【IROS_STATE_META】... 行を削る（チャットには見せない） */
+/**
+ * 先頭の【IROS_STATE_META】… を削る（1行目にJSONが連結してる/改行で続く両対応）
+ * - 【IROS_STATE_META】{...}
+ * - 【IROS_STATE_META】\n{...}\n（以降本文）
+ */
 function stripIrosMetaHeader(raw: string): string {
   if (!raw) return '';
-  const lines = raw.split('\n');
-  if (lines.length === 0) return '';
-  const first = lines[0].trimStart();
 
-  if (first.startsWith('【IROS_STATE_META】')) {
-    return lines.slice(1).join('\n').trimStart();
+  // 1) まず「先頭行」にタグがあるケース
+  const lines = raw.split('\n');
+  const first = lines[0]?.trimStart() ?? '';
+
+  if (!first.startsWith('【IROS_STATE_META】')) return raw;
+
+  // 1-a) 先頭行が「タグだけ」のケース → 次行以降へ
+  if (first === '【IROS_STATE_META】') {
+    // JSONが数行に渡る可能性があるので、最初の行が「{」から始まるなら
+    // その JSON ブロックをざっくり飛ばして、残りを返す
+    let i = 1;
+    if ((lines[i] ?? '').trimStart().startsWith('{')) {
+      // 簡易：括弧の深さで JSON ブロック終端を探す（失敗しても安全に進む）
+      let depth = 0;
+      for (; i < lines.length; i++) {
+        const s = lines[i];
+        for (const ch of s) {
+          if (ch === '{') depth++;
+          else if (ch === '}') depth = Math.max(0, depth - 1);
+        }
+        if (depth === 0) {
+          i++; // JSON終端行の次から本文
+          break;
+        }
+      }
+    }
+    return lines.slice(i).join('\n').trimStart();
   }
-  return raw;
+
+  // 1-b) 先頭行が「タグ + JSON + もしかして本文」になってるケース
+  // 例: 【IROS_STATE_META】{"qCode":"Q3"}\n本文...
+  return lines.slice(1).join('\n').trimStart();
 }
 
 /* ========= I層テンプレ → GPT風Markdown 変換 ========= */
@@ -272,7 +307,11 @@ function transformIrTemplateToMarkdown(input: string): string {
   const messageText = data.messageLines.join('\n').trim();
 
   const hasAny =
-    !!data.target || !!data.depth || !!data.phase || !!stateText || !!messageText;
+    !!data.target ||
+    !!data.depth ||
+    !!data.phase ||
+    !!stateText ||
+    !!messageText;
 
   if (!hasAny) return input;
 
@@ -323,12 +362,17 @@ function normalizeBoldMarks(input: string): string {
 }
 
 export default function MessageList() {
-  const { messages, loading, error, sendNextStepChoice } = useIrosChat() as unknown as {
-    messages: IrosMessage[];
-    loading: boolean;
-    error?: string | null;
-    sendNextStepChoice?: (opt: { key: string; label: string; gear?: string | null }) => Promise<unknown>;
-  };
+  const { messages, loading, error, sendNextStepChoice } =
+    useIrosChat() as unknown as {
+      messages: IrosMessage[];
+      loading: boolean;
+      error?: string | null;
+      sendNextStepChoice?: (opt: {
+        key: string;
+        label: string;
+        gear?: string | null;
+      }) => Promise<unknown>;
+    };
 
   const authVal = (typeof useAuth === 'function' ? useAuth() : {}) as {
     user?: { avatarUrl?: string | null };
@@ -389,7 +433,11 @@ export default function MessageList() {
   };
 
   return (
-    <div ref={listRef} className={`${styles.timeline} sof-msgs`} style={chatAreaStyle}>
+    <div
+      ref={listRef}
+      className={`${styles.timeline} sof-msgs`}
+      style={chatAreaStyle}
+    >
       {!messages.length && !loading && !error && (
         <div className={styles.emptyHint}>ここに会話が表示されます</div>
       )}
@@ -406,13 +454,17 @@ export default function MessageList() {
         const qToShow = qFromMeta ?? m.q;
 
         const isVisionMode = !isUser && m.meta?.mode === 'vision';
-        const isVisionHint = !isUser && m.meta?.mode !== 'vision' && !!m.meta?.tLayerModeActive === true;
+        const isVisionHint =
+          !isUser && m.meta?.mode !== 'vision' && !!m.meta?.tLayerModeActive === true;
         const tHint = m.meta?.tLayerHint || 'T2';
 
         const nextStep = m.meta?.nextStep;
 
         return (
-          <div key={m.id} className={`message ${isUser ? 'is-user' : 'is-assistant'}`}>
+          <div
+            key={m.id}
+            className={`message ${isUser ? 'is-user' : 'is-assistant'}`}
+          >
             {/* ▼ アイコン＋Qバッジを横一列に並べるヘッダー行 ▼ */}
             <div
               style={{
@@ -509,7 +561,14 @@ export default function MessageList() {
 
                 {/* ★ WILLエンジンの「次の一歩」オプション（必要なときだけ表示） */}
                 {!isUser && nextStep?.options && nextStep.options.length > 0 && (
-                  <div style={{ marginTop: 16, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  <div
+                    style={{
+                      marginTop: 16,
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: 8,
+                    }}
+                  >
                     {nextStep.options.map((opt) => (
                       <IrosButton
                         key={(opt as any).id ?? opt.key}

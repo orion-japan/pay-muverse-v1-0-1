@@ -1,60 +1,47 @@
 // src/lib/iros/soul/shouldUseSoul.ts
-// Iros 魂LLMを起動するかどうかを判定するヘルパー
-// - Qコード / SA / Y / H から「難しい帯域」を検出する
-// - ここはあくまで暫定のしきい値ロジックとしておき、実運用しながら調整する想定
+// Iros Soul を起動するかどうかの判定（failsafe 専用）
+//
+// 方針（2025-12-14 合意）
+// - Soul はミラー/語り手ではなく、failsafe 専用モジュール
+// - 通常ルートでは絶対に呼ばない
+// - 3軸（Q / Depth / Phase）が欠損・不整合・破損している場合のみ true
 
-import type { QCode } from '../system';
 import type { IrosSoulInput } from './types';
 
-// 魂を優先的に起動したい Q 帯域
-const SOUL_Q_CODES: QCode[] = ['Q2', 'Q3', 'Q4', 'Q5'];
+/** Qコードの妥当値（failsafe 判定用） */
+const VALID_Q = new Set(['Q1', 'Q2', 'Q3', 'Q4', 'Q5']);
+
+/** Phase の妥当値（failsafe 判定用） */
+const VALID_PHASE = new Set(['Inner', 'Outer']);
+
+/** DepthStage の妥当値（S1〜I3, T1〜T3 を許容） */
+function isValidDepthStage(v: unknown): boolean {
+  if (typeof v !== 'string') return false;
+  // 例: S1..S6 / R1..R3 / C1..C3 / I1..I3 / T1..T3 など
+  // ※あなたの実装に合わせて必要ならレンジを絞ってOK
+  return /^(S|F|R|C|I|T)[0-9]+$/.test(v);
+}
 
 /**
- * Iros 魂を回すかどうかの判定
- *
- * 方針（レポートの内容をコード化）：
- * - Q2〜Q5 の「難しい帯域」を中心に、SA/Y/H の条件を満たしたときだけ起動
- * - 特に Q5（うつ寄り）は、原則として必ず起動
- * - Qコードが取れていなくても、SA がかなり低く Y 高・H 低なら起動
+ * Soul を回すかどうか（failsafe only）
+ * true になるのは「3軸が壊れている/取れていない/不整合」のときだけ。
  */
 export function shouldUseSoul(input: IrosSoulInput): boolean {
-  const { qCode, selfAcceptance: sa, yLevel: y, hLevel: h } = input;
+  const { qCode, depthStage, phase } = input;
 
-  // ---- 1) Qコードの帯域判定 ----------------------------------------
+  // ---- 1) 3軸の欠損（最優先） ------------------------------------
+  // qCode は null になり得る型なので「null の時点で failsafe」
+  if (qCode == null) return true;
 
-  const isSoulBandQ = qCode != null && SOUL_Q_CODES.includes(qCode);
+  // depthStage / phase も未取得なら failsafe
+  if (depthStage == null) return true;
+  if (phase == null) return true;
 
-  const isQ5 = qCode === 'Q5'; // うつ / 空虚 帯域 → 原則 魂を必ず起動
+  // ---- 2) 3軸の不整合（壊れた値が混入） ----------------------------
+  if (!VALID_Q.has(String(qCode))) return true;
+  if (!isValidDepthStage(depthStage)) return true;
+  if (!VALID_PHASE.has(String(phase))) return true;
 
-  // ---- 2) SA / Y / H のしきい値 ------------------------------------
-
-  // SA が低め（自己否定が強くなりやすいライン）
-  const saLow = typeof sa === 'number' && sa < 0.45;
-
-  // 揺れが強い（感情の波が大きい）
-  const strongShake = typeof y === 'number' && y >= 0.6;
-
-  // 余白が少ない（キャパが少なく、情報を詰め込みにくい）
-  const lowMargin = typeof h === 'number' && h <= 0.35;
-
-  // ---- 3) 組み合わせロジック --------------------------------------
-
-  // ✅ Q5 帯域なら、基本的に必ず魂を起動
-  if (isQ5) {
-    return true;
-  }
-
-  // ✅ Q2〜Q4 で、かつ SA低 or 揺れ大 or 余白少 → 魂を起動
-  if (isSoulBandQ && (saLow || strongShake || lowMargin)) {
-    return true;
-  }
-
-  // ✅ Qコードが取れていなくても、
-  //    SAがかなり低く、揺れが強い or 余白が少ない場合は魂でセーフティをかける
-  if (!qCode && saLow && (strongShake || lowMargin)) {
-    return true;
-  }
-
-  // それ以外は、通常は魂を回さない（本体のみで処理）
+  // ---- 3) ここまで来たら正常：Soul は呼ばない ----------------------
   return false;
 }

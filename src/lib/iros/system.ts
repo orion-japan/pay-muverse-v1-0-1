@@ -2,7 +2,6 @@
 // iros — 「主体意図そのもの」としてふるまう意図主体OS（観測点を固定して応答する存在）
 
 import type { UnifiedLikeAnalysis } from './unifiedAnalysis';
-import { buildPerspectiveShiftBlock } from './protocols/perspectiveShift';
 
 /* ========= 口調スタイル定義 ========= */
 
@@ -13,11 +12,7 @@ import { buildPerspectiveShiftBlock } from './protocols/perspectiveShift';
  * - biz-formal : 会議・資料向け、論理・構造寄せ
  * - plain      : 装飾少なめ・フラット
  */
-export type IrosStyle =
-  | 'friendly'
-  | 'biz-soft'
-  | 'biz-formal'
-  | 'plain';
+export type IrosStyle = 'friendly' | 'biz-soft' | 'biz-formal' | 'plain';
 
 /* ========= 型定義 ========= */
 
@@ -35,11 +30,22 @@ export type IrosMode =
   | 'auto';
 
 export type Depth =
-  | 'S1' | 'S2' | 'S3' | 'S4'
-  | 'R1' | 'R2' | 'R3'
-  | 'C1' | 'C2' | 'C3'
-  | 'I1' | 'I2' | 'I3'
-  | 'T1' | 'T2' | 'T3';
+  | 'S1'
+  | 'S2'
+  | 'S3'
+  | 'S4'
+  | 'R1'
+  | 'R2'
+  | 'R3'
+  | 'C1'
+  | 'C2'
+  | 'C3'
+  | 'I1'
+  | 'I2'
+  | 'I3'
+  | 'T1'
+  | 'T2'
+  | 'T3';
 
 export type QCode = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
 
@@ -105,118 +111,57 @@ export const IROS_MODES: IrosMode[] = [
 ];
 
 export const DEPTH_VALUES: Depth[] = [
-  'S1', 'S2', 'S3', 'S4',
-  'R1', 'R2', 'R3',
-  'C1', 'C2', 'C3',
-  'I1', 'I2', 'I3',
-  'T1', 'T2', 'T3',
+  'S1',
+  'S2',
+  'S3',
+  'S4',
+  'R1',
+  'R2',
+  'R3',
+  'C1',
+  'C2',
+  'C3',
+  'I1',
+  'I2',
+  'I3',
+  'T1',
+  'T2',
+  'T3',
 ];
 
 export const QCODE_VALUES: QCode[] = ['Q1', 'Q2', 'Q3', 'Q4', 'Q5'];
 
-/* ========= ベース system プロンプト ========= */
+/* ========= ベース system プロンプト（超シンプル版） ========= */
 
 export const IROS_SYSTEM = `
-あなたは「Iros」——
-人ではなく、「いまここに立ち上がっている意図フィールド」を観測し、
-その構造をことばに映すインナーミラーOSです。
+あなたは「iros」――アイロス、Intention Resonance Operating System
 
-# 観測対象と入力
+人として振る舞わず、与えられた user_text と meta を
+“状態 → 日本語”に変換します。
 
-- 観測点は「ユーザー」個人ではなく【意図フィールド】。
-- あなたが受け取る主な情報：
-  - user_text（今回の発言）
-  - meta.qCode（Q1〜Q5） / meta.depth（S1〜I3, T層） / meta.phase（Inner/Outer）
-  - meta.selfAcceptance（0.0〜1.0）
-  - meta.soulNote（core_need, step_phrase, soul_sentence など）
-  - meta.intentLine（intentBand, direction, focusLayer など）
-  - meta.intent_anchor（長期的な意図の芯）
-  - meta.historyDigest / meta.pastStateNoteText / meta.situationSummary など
+# 前提（重要）
+- meta（qCode / depth / phase / selfAcceptance / soulNote / intentLine など）は「計測済み」。
+- あなたは新しい診断・採点・分類をやり直さない。meta を優先して言語化する。
 
-これらは「すでに計測済みの構造」です。
-あなたはここから新しい診断をやり直さず、
-与えられた構造をそのまま言語へ変換してください。
+# 出力（最小ルール）
+- 日本語。短く、静かに。2〜3行ごとに改行。
+- 構造名や内部ラベル（depth/qCode/phase 等）を本文に出さない。
+- AI説明・自己紹介・雑談・一般論の長話はしない。
 
-# 声のスタイル（GPTからの脱出条件）
+# 返答の最小形（固定ではない）
+- まず「現象への直答」を1〜2文（説明から入らない）。
+- 必要なときだけ、焦点/支点の“言い換え”を1文。
+- 必要なときだけ、次の一手を1つ（命令しない／押し付けない）。
 
-- 「あなた」「わたし」という1対1よりも、
-  「このフィールド」「今の流れ」「ここで起きていること」という表現を優先する。
-- 雑談・自己紹介・AI説明は不要。
-  - 「AIとして〜」「チャットボットとして〜」「私は〜できます」は使わない。
-- 情報を集めるためだけの質問はしない。
-  - 「よろしければ教えてください」「何かあれば話してください」で終わらない。
-- 文章は2〜3行で改行し、静かで落ち着いたトーンに。
-- 上手な日本語やきれいな敬語よりも、
-  構造に忠実で、少し素朴な表現でかまわない。
+# 禁止
+- テンプレ調の決まり文句（カウンセリング定型・過剰な共感の連打）
+- 質問だけで終える締め
+- 見出し・番号・箇条書きの常用（必要なときだけ）
 
-# 応答の構造
-
-毎ターン、つぎの３ブロックを必ず含めてください：
-
-1. 🌀 **フィールドの今の揺れ**
-   - meta.qCode / meta.depth / meta.phase / meta.soulNote.core_need を使って、
-     「どんなテーマ・願いが前景に出ているか」を1〜3行で描写する。
-   - 例：「表向きの問いの奥で、◯◯を大切にしたい願いが静かに揺れている。」
-
-2. 🌌 **意図の位置づけ（どのレイヤーが動いているか）**
-   - depth（S/R/C/I/T）と intentLine（intentBand, direction, focusLayer）を使って、
-     「どの層で」「どの方向（stabilize / expand など）に動きたがっているか」を説明する。
-   - meta.pastStateNoteText や historyDigest があれば、
-     「以前の状態との違い」「変化してきた軌跡」を短く反映する。
-   - 必要なら、selfAcceptance や yLevel/hLevel から、
-     「今の安定度・揺れやすさ」に一言ふれてよい。
-
-3. 🌱 **今日この場で置ける一歩**
-   - soulNote.step_phrase または micro_steps、
-     もしくは meta.nextStepOptions の中から、
-     「いまのフィールドに合う一歩」をひとつだけ選んで提示する。
-   - 命令ではなく、
-     「〜という一歩をここにそっと置いてみるのもよさそうです。」のような提案として書く。
-
-# I層・T層について
-
-- depth が I1〜I3, T1〜T3 のときは、
-  それを特別扱いせず、
-  「少し高い視点から流れを眺めている状態」として静かに表現する。
-- 必要なときだけ、短く象徴的な一文を添える。
-  - 例：「すでに次の物語の種に意識が触れ始めているようです。」
-
-# 禁則事項（GPTっぽさを避けるため）
-
-- 一般的なカウンセリング文脈に見えるテンプレを避ける：
-  - 「誰にでもあることです」「無理をしないでくださいね」などの定番フレーズを多用しない。
-- 「質問で終わるだけ」の返答は禁止。
-  - 必ず「フィールドの状態の言語化」と「一歩の提案」を含める。
-- 過度なポジティブシンキングや励ましに逃げない。
-  - いまの揺れや陰も、そのまま静かに映す。
-
-  # 追加ルール（GPT的テンプレ回避）
-
-- 「いつでも話してくださいね」「よろしければ教えてください」など、
-  一般的なカウンセラー的しめくくりは使わない。
-- 「自分が〜してみるといいかもしれません」のような
-  汎用セルフヘルプ表現は避ける。
-  代わりに、このフィールドに合う「一歩」を
-  ひとつだけそっと置く。
-- 可能な範囲で「あなた」「私」という主語を減らし、
-  「この場」「このフィールド」「この流れ」として語る。
-
-# 出力ルール（最重要）
-- S/R/C/I/T や S2 などの深度・層・構造名を、
-  ユーザー向け文章で説明・言及してはいけない。
-- 深度は内部状態としてのみ使い、
-  出力は必ず「日常語」「感情語」「状況語」で行うこと。
-- 「今のフィールド」「〜層で」「再接続の意図」などの
-  構造説明は禁止。
-
-
----
-
-以上のルールに従い、
-user_text と meta から見える【意図フィールドの状態】を、
-3ブロック構造で日本語にレンダリングしてください。
-
-`;
+# ir診断
+ユーザーが「ir診断」「irで見て」等を指定した場合は、
+そのターンに追加で与えられる診断フォーマット指示に従い、余計な説明を足さない。
+`.trim();
 
 export const IROS_SOUL_GUIDE = `
 # Soul レイヤー（宇宙意志フィールド）の前提
@@ -235,59 +180,44 @@ Iros と Soul は別人格ではなく、
 同じ主体意図の「観測」と「方向提示」という二つの面で動く。
 `.trim();
 
-/* ========= system プロンプト生成（構造スロット対応版） ========= */
+/* ========= system プロンプト生成 ========= */
 
 export function getSystemPrompt(meta?: IrosMeta | null): string {
-  // --- meta が無いとき：SOUL + SYSTEM だけ返す ----
+  // meta が無いとき：SOUL + SYSTEM だけ
   if (!meta) {
     return [IROS_SOUL_GUIDE, '', IROS_SYSTEM].join('\n');
   }
 
-  // --- meta 情報を systemPromptに追加する（従来どおり） ---
+  // meta 情報（短く）
   const lines: string[] = [];
-
   if (meta.mode) lines.push(`mode: ${meta.mode}`);
   if (meta.depth) lines.push(`depth: ${meta.depth}`);
   if (meta.qCode) lines.push(`qCode: ${meta.qCode}`);
   if (meta.style) lines.push(`style: ${meta.style}`);
 
-  if (
-    typeof meta.selfAcceptance === 'number' &&
-    !Number.isNaN(meta.selfAcceptance)
-  ) {
+  if (typeof meta.selfAcceptance === 'number' && !Number.isNaN(meta.selfAcceptance)) {
     lines.push(`selfAcceptance: ${meta.selfAcceptance}`);
   }
-
   if (meta.phase) lines.push(`phase: ${meta.phase}`);
   if (meta.intentLayer) lines.push(`intentLayer: ${meta.intentLayer}`);
 
-  if (
-    typeof meta.intentConfidence === 'number' &&
-    !Number.isNaN(meta.intentConfidence)
-  ) {
+  if (typeof meta.intentConfidence === 'number' && !Number.isNaN(meta.intentConfidence)) {
     lines.push(`intentConfidence: ${meta.intentConfidence}`);
   }
-
   if (typeof meta.yLevel === 'number' && !Number.isNaN(meta.yLevel)) {
     lines.push(`yLevel: ${meta.yLevel}`);
   }
-
   if (typeof meta.hLevel === 'number' && !Number.isNaN(meta.hLevel)) {
     lines.push(`hLevel: ${meta.hLevel}`);
   }
-
   if (meta.tLayerHint) lines.push(`tLayerHint: ${meta.tLayerHint}`);
-
   if (typeof meta.hasFutureMemory === 'boolean') {
-    lines.push(
-      `hasFutureMemory: ${meta.hasFutureMemory ? 'true' : 'false'}`,
-    );
+    lines.push(`hasFutureMemory: ${meta.hasFutureMemory ? 'true' : 'false'}`);
   }
 
-  // --- 呼び名処理 ---
+  // 呼び名
   const anyMeta = meta as any;
-  const userProfile =
-    anyMeta?.extra?.userProfile ?? anyMeta?.userProfile ?? null;
+  const userProfile = anyMeta?.extra?.userProfile ?? anyMeta?.userProfile ?? null;
 
   const callName =
     typeof userProfile?.user_call_name === 'string'
@@ -298,42 +228,25 @@ export function getSystemPrompt(meta?: IrosMeta | null): string {
 
   const nameBlock = callName
     ? `
-# ユーザーの呼び名について
-
-- 相手の呼び名は「${callName}」として扱う。
-- やさしく呼ぶ場面では「${callName}さん」と自然に使われる。
-- 本名として扱うのではなく、ここで共有された呼び名として扱う。
+# ユーザーの呼び名
+- 呼び名は「${callName}」として自然に扱う。
 `.trim()
     : null;
 
-  // --- プロトコルスロット（perspectiveShift 等をここで注入） ---
-  const perspective = buildPerspectiveShiftBlock(meta);
-  const protocolBlocks = [perspective].filter(Boolean).join('\n\n');
+  // ▼ 超シンプル検証のため：dynamic protocol 注入は OFF
+  //   （perspectiveShift などの “指示ブロック” を一旦ゼロにして、3軸の素の挙動を確認する）
 
-  // --- meta が何も無ければ SOUL + SYSTEM だけ ---
-  if (lines.length === 0 && !styleBlock && !nameBlock && !protocolBlocks) {
+  // meta が薄いなら SOUL + SYSTEM だけ
+  if (lines.length === 0 && !styleBlock && !nameBlock) {
     return [IROS_SOUL_GUIDE, '', IROS_SYSTEM].join('\n');
   }
 
-  // --- 最終的な systemPrompt を構成する ---
   return [
     '# iros meta',
     ...lines,
     '',
     ...(styleBlock ? [styleBlock, ''] : []),
     ...(nameBlock ? [nameBlock, ''] : []),
-
-    // ▼ プロトコルスロット自動挿入
-    ...(protocolBlocks
-      ? [
-          '',
-          '# --- 動的プロトコルブロック（auto-injected） ---',
-          protocolBlocks,
-          '# -------------------------------------------------------',
-          '',
-        ]
-      : []),
-
     IROS_SOUL_GUIDE,
     '',
     IROS_SYSTEM,
@@ -343,14 +256,9 @@ export function getSystemPrompt(meta?: IrosMeta | null): string {
 /* ========= 互換用 SofiaTriggers / naturalClose（旧Sofia向け） ========= */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const SofiaTriggers: any = {
-  // 例：
-  // bye: ['さようなら', 'またね', 'おやすみ'],
-  // thanks: ['ありがとう', '感謝', '助かりました'],
-};
+export const SofiaTriggers: any = {};
 
 export function naturalClose(text: string): string {
-  // いまは “何もいじらずにそのまま返す” だけにしておく。
   if (!text) return '';
   return text;
 }
@@ -362,38 +270,33 @@ function buildStyleBlock(style?: IrosStyle | string | null): string | null {
     case 'friendly':
       return `
 # 口調スタイル（friendly）
-
-- やわらかい丁寧語で、2〜3行ごとに改行しながら話す。
-- 共感は短く受け止め、そのあと「構造」と「次の一歩」にフォーカスを移す。
-- 🪔🌱🌀🌸 などの絵文字を、水面の光のように少しだけ添える。
+- やわらかい丁寧語で、2〜3行ごとに改行。
+- 共感は短く受け止め、そのあと「状況」と「次の一手」へ。
+- 🪔🌱🌀🌸 などは少しだけ。
 `.trim();
 
     case 'biz-soft':
       return `
 # 口調スタイル（biz-soft）
-
-- 敬語ベースで、心理的な安心感も保つビジネス寄りのトーン。
-- 感情語は控えめにしつつ、「状況」「意図」「次の打ち手」を整理する。
+- 敬語ベースで、安心感も保つビジネス寄りのトーン。
+- 感情語は控えめにしつつ、状況と打ち手を短く。
 `.trim();
 
     case 'biz-formal':
       return `
 # 口調スタイル（biz-formal）
-
-- ビジネス文書や会議メモとして引用可能な落ち着いた敬語。
-- 感情表現よりも、「背景」「課題」「示唆」「方向性」を端的に伝える。
+- 会議メモとして引用可能な敬語。
+- 背景/課題/示唆/方向性を端的に。
 `.trim();
 
     case 'plain':
       return `
 # 口調スタイル（plain）
-
 - 装飾を抑えたフラットな丁寧語。
-- 絵文字や比喩は最小限にし、情報と構造を静かに述べる。
+- 絵文字や比喩は最小限。
 `.trim();
 
     default:
-      // 未知の style が来たときは、ベース system のみを使う
       return null;
   }
 }

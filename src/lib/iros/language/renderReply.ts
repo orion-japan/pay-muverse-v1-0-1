@@ -54,7 +54,8 @@ export function renderReply(
   const mode = opts.mode ?? inferMode(vector);
 
   const seed =
-    (input.seed && input.seed.trim()) || stableSeedFromText(input.facts);
+  (input.seed && input.seed.trim()) || stableSeedFromInput(vector, input);
+
 
   const minimalEmoji = !!opts.minimalEmoji;
   const maxLines = typeof opts.maxLines === 'number' ? opts.maxLines : 14;
@@ -574,6 +575,21 @@ function simpleHash(s: string): number {
   }
   return h | 0;
 }
+
+function stableSeedFromInput(vector: ResonanceVector, input: RenderInput): string {
+  const parts = [
+    input.facts ?? '',
+    input.insight ?? '',
+    input.nextStep ?? '',
+    String(vector.depthLevel ?? ''),
+    String(Math.round((vector.grounding ?? 0) * 100)),
+    String(Math.round((vector.precision ?? 0) * 100)),
+    String(Math.round((vector.transcendence ?? 0) * 100)),
+  ].join('|');
+
+  return String(simpleHash(parts));
+}
+
 
 function clampLines(text: string, maxLines: number): string {
   const lines = text.split('\n');

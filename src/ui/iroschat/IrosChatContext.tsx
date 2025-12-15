@@ -66,6 +66,49 @@ export const useIrosChat = () => useContext(IrosChatContext)!;
 
 const STYLE_STORAGE_KEY = 'iros.style';
 
+/**
+ * ✅ サーバーから返ってくる message.text が object になっても、
+ * UI に meta ダンプが表示されないように「必ず文字列」に正規化する。
+ */
+function normalizeText(t: unknown): string {
+  if (typeof t === 'string') return t;
+  if (t == null) return '';
+
+  // object の場合、よくあるキーを優先して拾う
+  if (typeof t === 'object') {
+    const o = t as any;
+
+    if (typeof o.assistant === 'string') return o.assistant;
+    if (typeof o.reply === 'string') return o.reply;
+    if (typeof o.message === 'string') return o.message;
+    if (typeof o.content === 'string') return o.content;
+    if (typeof o.text === 'string') return o.text;
+
+    // それでもダメなら「表示しない」（ここが重要）
+    return '';
+  }
+
+  // number / boolean などは文字列化
+  try {
+    return String(t);
+  } catch {
+    return '';
+  }
+}
+
+function normalizeMessages(rows: IrosMessage[]): IrosMessage[] {
+  return (rows || []).map((m) => {
+    const t = normalizeText((m as any)?.text);
+    const c = normalizeText((m as any)?.content ?? (m as any)?.text);
+
+    return {
+      ...m,
+      text: t,
+      content: c || t,
+    } as IrosMessage;
+  });
+}
+
 export const IrosChatProvider = ({ children }: { children: React.ReactNode }) => {
   const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState<IrosMessage[]>([]);
@@ -153,7 +196,8 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
       activeConversationIdRef.current = cid;
       setActiveConversationId(cid);
 
-      const rows = await irosClient.fetchMessages(cid);
+      const rowsRaw = await irosClient.fetchMessages(cid);
+      const rows = normalizeMessages(rowsRaw);
 
       setMessages((prev) => {
         // 会話が変わっていたら、過去の Seed は引き継がずにサーバー結果だけにする
@@ -217,7 +261,7 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
         style,
       });
 
-      const assistant = (r?.assistant ?? '') as string;
+      const assistant = normalizeText(r?.assistant ?? '');
       const meta = r?.meta ?? null;
 
       // ③ assistant をローカル state に反映
@@ -302,7 +346,7 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
         },
       });
 
-      const assistant = (r?.assistant ?? '') as string;
+      const assistant = normalizeText(r?.assistant ?? '');
       const meta = r?.meta ?? null;
 
       // ④ assistant をローカル state に反映
@@ -400,10 +444,7 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
 
         // reply / assistant / message の順で拾う
         const assistant =
-          (data?.reply as string | undefined) ??
-          (data?.assistant as string | undefined) ??
-          (data?.message as string | undefined) ??
-          '';
+          normalizeText(data?.reply ?? data?.assistant ?? data?.message ?? '');
 
         const meta = data?.meta ?? data?.result?.meta ?? null;
 

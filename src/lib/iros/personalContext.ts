@@ -33,7 +33,7 @@ export function buildPersonalContextFromSoul(input: PersonalContextInput): Perso
   const { soulCtx, topicLabel } = input;
   const soulNote = soulCtx.soulNote as SoulNoteLike | null;
 
-  const intensity = decidePersonalIntensityFromSoul(soulCtx);
+  const intensity = decidePersonalIntensityFromSoul(soulCtx.soulNote);
 
   if (!soulNote || intensity === 'none') {
     return { intensity, text: null };
@@ -55,7 +55,7 @@ export function buildPersonalContextFromSoul(input: PersonalContextInput): Perso
     lines.push(`● このユーザーの核となる願い：${coreNeed}`);
   }
 
-  if (intensity === 'strong') {
+  if (intensity === 'high') {
     // 2) strong のときだけ、もう少し深い情報を渡す
 
     if (soulSent) {

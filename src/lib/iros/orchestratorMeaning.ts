@@ -290,9 +290,7 @@ export function buildReframeStyleNote(meta?: IrosMeta | null): string | null {
   if (!meta) return null;
 
   const soul = (meta as any).soulNote as IrosSoulNote | undefined;
-  const intentLine = (meta as any)
-    .intentLine as IntentLineAnalysis | undefined;
-
+  const intentLine = (meta as any).intentLine as IntentLineAnalysis | undefined;
   if (!soul && !intentLine) return null;
 
   const q = meta.qCode ?? 'Q?';
@@ -305,46 +303,31 @@ export function buildReframeStyleNote(meta?: IrosMeta | null): string | null {
   if (!core1) return null;
 
   const core2 =
-    coreFromSoul &&
-    coreFromIntent &&
-    coreFromSoul !== coreFromIntent
+    coreFromSoul && coreFromIntent && coreFromSoul !== coreFromIntent
       ? coreFromIntent
       : null;
 
   const lines: string[] = [
-    '# Sofia 型リフレーム指針（Soul & IntentLine ベース）',
+    '# iros リフレーム指針（軽量）',
     '',
-    '- ユーザーの表面のテーマ（評価・数字・不安など）を否定せず、',
-    '  まずは「そのまま言葉にしてあげる」ことから始めてください。',
-    '',
-    '◆ A. まず恐れや不安をそのまま描写する',
-    '  - 例：「評価が下がってしまうことが、一番怖いんだよね。」',
-    '',
-    '◆ B. 「〜じゃなくて、本当は ◯◯ を守りたい自分がいる」の形で静かにリフレームする',
-    '  - 表層の焦点（評価・数字・結果など）ではなく、次のような core_need にピントを合わせてください。',
-    `  - 今回の core_need 候補:`,
-    `    - ${core1}`,
+    '- 最初に：現象への直答を 1〜2文（説明から入らない）',
+    '- 次に：core_need へ焦点を移す 1文（決まり文句を使わず自然語で）',
+    `  - core_need: ${core1}`,
   ];
 
-  if (core2) {
-    lines.push(`    - ${core2}`);
-  }
+  if (core2) lines.push(`  - core_need(補助): ${core2}`);
 
   lines.push(
     '',
-    '  - 例：',
-    '    「評価そのものが問題なんじゃなくて、',
-    '      これまで積み重ねてきた努力や、ちゃんと生きてきた自分を',
-    '      否定されたくないっていう気持ちのほうが大きいのかもしれないね。」',
+    '- 最後に：次の一手を 1つだけ（命令しない／問いは求められた時だけ）',
     '',
-    '◆ C. 文末で I層 / T層 の“余韻”を少しだけにじませる',
-    '  - 「この経験を通して、どんな自分として生きていきたいか」',
-    '    「この出来事が、これからの生き方にどんな意味を足してくれるか」など、',
-    '    I層〜T層のニュアンスを、一言そっと添えてください。',
-    '  - ただし、説教や断定ではなく、読み手の内側で静かに意味づけが起こる程度の強さにとどめてください。',
+    '- 禁止：以下の定型句を使わない',
+    '  - 「〜じゃなくて」',
+    '  - 「この場では／この場面では」',
+    '  - 「願いが揺れている」',
+    '  - 「気になることがあれば…」',
     '',
-    `- メインのトーンは、現在の深度 ${depth} と Q=${q} の安定を最優先にし、`,
-    '  I層 / T層は「最後のひと息」「余韻」として使ってください。',
+    `- トーン優先：depth=${depth}, Q=${q}`,
   );
 
   return lines.join('\n');

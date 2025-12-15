@@ -57,6 +57,47 @@ function extractSelfAcceptance(meta: unknown): number | null {
   return null;
 }
 
+// --- Viewer 互換の meta 正規化（旧UIが読むキーを補う） ---
+function normalizeMetaForViewer(meta: unknown): any {
+  if (!meta || typeof meta !== 'object') return meta;
+
+  const m: any = meta;
+
+  // 既に旧キーがあるなら尊重（上書きしない）
+  const u: any = m.unified && typeof m.unified === 'object' ? m.unified : null;
+  const il: any = m.intentLine && typeof m.intentLine === 'object' ? m.intentLine : null;
+
+  // Pol / Stab（旧UIは meta.polarityBand / stabilityBand を見る）
+  if (m.polarityBand == null && u?.polarityBand != null) m.polarityBand = u.polarityBand;
+  if (m.polarity_band == null && u?.polarity_band != null) m.polarity_band = u.polarity_band;
+
+  if (m.stabilityBand == null && u?.stabilityBand != null) m.stabilityBand = u.stabilityBand;
+  if (m.stability_band == null && u?.stability_band != null) m.stability_band = u.stability_band;
+
+  // mirror（旧UIは meta.mirrorMode を見るが、現状は meta.mode が本体）
+  if (m.mirrorMode == null && typeof m.mode === 'string') m.mirrorMode = m.mode;
+  if (m.mirror_mode == null && typeof m.mode === 'string') m.mirror_mode = m.mode;
+
+  // I-layer（旧UIは meta.intentLayer を見る。今は intentLine.focusLayer がそれ）
+  if (m.intentLayer == null && typeof il?.focusLayer === 'string') m.intentLayer = il.focusLayer;
+  if (m.intent_layer == null && typeof il?.focusLayer === 'string') m.intent_layer = il.focusLayer;
+
+  // intent（旧UIは meta.intentLine “文字列” を表示している）
+  // 新構造の短いラベル候補：unified.intent_anchor.text → intent_anchor.text → situation.summary
+  if (typeof m.intentLine !== 'string' || !m.intentLine) {
+    const intentText =
+      (typeof u?.intent_anchor?.text === 'string' && u.intent_anchor.text) ||
+      (typeof m?.intent_anchor?.text === 'string' && m.intent_anchor.text) ||
+      (typeof u?.situation?.summary === 'string' && u.situation.summary) ||
+      '';
+    if (intentText) m.intentLine = intentText;
+  }
+
+  return m;
+}
+
+
+
 export async function GET(req: NextRequest) {
   // Sofia-logs と同じく URL / KEY を渡す
   const supabase = createClient(
@@ -203,7 +244,8 @@ export async function GET(req: NextRequest) {
         ? row.role
         : row.role ?? 'assistant';
 
-    const sa = extractSelfAcceptance(row.meta);
+    const metaNorm = normalizeMetaForViewer(row.meta);
+    const sa = extractSelfAcceptance(metaNorm);
 
     return {
       id: row.id,
@@ -213,11 +255,12 @@ export async function GET(req: NextRequest) {
       q_code: row.q_code,
       depth_stage: row.depth_stage,
       self_acceptance: sa,
-      meta: row.meta,
+      meta: metaNorm, // ★ここ
       used_credits: null,
       created_at: row.created_at,
     };
   });
+
 
   const first = typedRows[0];
   const last = typedRows[typedRows.length - 1];

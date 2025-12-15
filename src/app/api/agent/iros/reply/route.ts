@@ -92,33 +92,32 @@ export async function POST(req: NextRequest) {
   const startedAt = Date.now();
 
   try {
-// 1) Bearer/Firebase 検証 → 認可（DEV_BYPASS は x-user-code がある時だけ発動）
-const DEV_BYPASS = process.env.IROS_DEV_BYPASS_AUTH === '1';
+    // 1) Bearer/Firebase 検証 → 認可（DEV_BYPASS は x-user-code がある時だけ発動）
+    const DEV_BYPASS = process.env.IROS_DEV_BYPASS_AUTH === '1';
 
-let auth: any = null;
+    let auth: any = null;
 
-const hUserCode = req.headers.get('x-user-code');
-const bypassUserCode =
-  hUserCode && hUserCode.trim().length > 0 ? hUserCode.trim() : null;
+    const hUserCode = req.headers.get('x-user-code');
+    const bypassUserCode =
+      hUserCode && hUserCode.trim().length > 0 ? hUserCode.trim() : null;
 
-if (DEV_BYPASS && bypassUserCode) {
-  // ★ DEV専用：curl 等で叩くための認証バイパス（x-user-code 必須）
-  auth = { ok: true, userCode: bypassUserCode, uid: 'dev-bypass' };
+    if (DEV_BYPASS && bypassUserCode) {
+      // ★ DEV専用：curl 等で叩くための認証バイパス（x-user-code 必須）
+      auth = { ok: true, userCode: bypassUserCode, uid: 'dev-bypass' };
 
-  console.warn('[IROS/Reply] DEV_BYPASS_AUTH used', {
-    userCode: bypassUserCode,
-  });
-} else {
-  // ★ ブラウザ通常動作：Firebase 認証へフォールバック
-  auth = await verifyFirebaseAndAuthorize(req);
-  if (!auth?.ok) {
-    return NextResponse.json(
-      { ok: false, error: 'unauthorized' },
-      { status: 401, headers: CORS_HEADERS },
-    );
-  }
-}
-
+      console.warn('[IROS/Reply] DEV_BYPASS_AUTH used', {
+        userCode: bypassUserCode,
+      });
+    } else {
+      // ★ ブラウザ通常動作：Firebase 認証へフォールバック
+      auth = await verifyFirebaseAndAuthorize(req);
+      if (!auth?.ok) {
+        return NextResponse.json(
+          { ok: false, error: 'unauthorized' },
+          { status: 401, headers: CORS_HEADERS },
+        );
+      }
+    }
 
     // 2) 入力を取得
     const body = await req.json().catch(() => ({} as any));
@@ -449,6 +448,9 @@ if (DEV_BYPASS && bypassUserCode) {
       meta.targetKind = normalizedTargetKind;
       meta.target_kind = normalizedTargetKind;
 
+      // ★★★ ここが本丸：返却metaの y/h を “整数に統一” する（DBとUIとTrainingを一致させる）
+      meta = normalizeMetaLevels(meta);
+
       console.log('[IROS/Reply] response meta', meta);
 
       // ★★★ Render Engine の適用（ここで「適用箇所」を固定）
@@ -577,30 +579,51 @@ function applyRenderEngineIfEnabled(params: {
     }
 
     const vector = buildResonanceVector({
-      qCode: (meta as any)?.qCode ?? (meta as any)?.q_code ?? null,
-      depth: (meta as any)?.depth ?? (meta as any)?.depth_stage ?? null,
-      phase: (meta as any)?.phase ?? null,
+      qCode: (meta as any)?.qCode ?? (meta as any)?.q_code ?? meta?.unified?.q?.current ?? null,
+      depth: (meta as any)?.depth ?? (meta as any)?.depth_stage ?? meta?.unified?.depth?.stage ?? null,
+      phase: (meta as any)?.phase ?? meta?.unified?.phase ?? null,
 
-      // ★必須：ここが抜けると precision が変になる
       selfAcceptance:
-        (meta as any)?.selfAcceptance ?? (meta as any)?.self_acceptance ?? null,
-
-      yLevel: (meta as any)?.yLevel ?? (meta as any)?.y_level ?? null,
-      hLevel: (meta as any)?.hLevel ?? (meta as any)?.h_level ?? null,
-
-      situationSummary:
-        (meta as any)?.situationSummary ??
-        (meta as any)?.situation_summary ??
+        (meta as any)?.selfAcceptance ??
+        (meta as any)?.self_acceptance ??
+        meta?.unified?.selfAcceptance ??
+        meta?.unified?.self_acceptance ??
         null,
 
+      yLevel: (meta as any)?.yLevel ?? (meta as any)?.y_level ?? meta?.unified?.yLevel ?? meta?.unified?.y_level ?? null,
+      hLevel: (meta as any)?.hLevel ?? (meta as any)?.h_level ?? meta?.unified?.hLevel ?? meta?.unified?.h_level ?? null,
+
+      // ★追加：Pol/Stab を unified から拾う
+      polarityScore:
+        (meta as any)?.polarityScore ??
+        (meta as any)?.polarity_score ??
+        meta?.unified?.polarityScore ??
+        meta?.unified?.polarity_score ??
+        null,
+      polarityBand:
+        (meta as any)?.polarityBand ??
+        (meta as any)?.polarity_band ??
+        meta?.unified?.polarityBand ??
+        meta?.unified?.polarity_band ??
+        null,
+      stabilityBand:
+        (meta as any)?.stabilityBand ??
+        (meta as any)?.stability_band ??
+        meta?.unified?.stabilityBand ??
+        meta?.unified?.stability_band ??
+        null,
+
+      situationSummary:
+        (meta as any)?.situationSummary ?? (meta as any)?.situation_summary ?? meta?.unified?.situation?.summary ?? null,
       situationTopic:
-        (meta as any)?.situationTopic ?? (meta as any)?.situation_topic ?? null,
+        (meta as any)?.situationTopic ?? (meta as any)?.situation_topic ?? meta?.unified?.situation?.topic ?? null,
 
       intentLayer:
         (meta as any)?.intentLayer ??
         (meta as any)?.intent_layer ??
         (meta as any)?.intentLine?.focusLayer ??
         (meta as any)?.intent_line?.focusLayer ??
+        meta?.unified?.intentLayer ??
         null,
 
       intentConfidence:
@@ -610,6 +633,7 @@ function applyRenderEngineIfEnabled(params: {
         (meta as any)?.intent_line?.confidence ??
         null,
     });
+
 
     const userWantsEssence =
       /本質|ズバ|はっきり|ハッキリ|意図|核心|要点/.test(userText);
@@ -725,4 +749,96 @@ function applyRenderEngineIfEnabled(params: {
 
     return { meta };
   }
+}
+
+/**
+ * yLevel / hLevel を “整数に統一” する（DBの int と常に一致させる）
+ * - meta / meta.unified / intent_anchor（camel/snake）まで同期
+ * - null は触らない
+ */
+function normalizeMetaLevels(meta: any): any {
+  const m = meta ?? {};
+  const u = m.unified ?? {};
+
+  const yRaw =
+    pickNumber(m.yLevel, m.y_level, u.yLevel, u.y_level) ?? null;
+  const hRaw =
+    pickNumber(m.hLevel, m.h_level, u.hLevel, u.h_level) ?? null;
+
+  const yInt = yRaw == null ? null : clampInt(Math.round(yRaw), 0, 3);
+  const hInt = hRaw == null ? null : clampInt(Math.round(hRaw), 0, 3);
+
+  // 何も無ければそのまま
+  if (yInt == null && hInt == null) return m;
+
+  // meta
+  if (yInt != null) {
+    m.yLevel = yInt;
+    m.y_level = yInt;
+  }
+  if (hInt != null) {
+    m.hLevel = hInt;
+    m.h_level = hInt;
+  }
+
+  // unified
+  m.unified = m.unified ?? {};
+  if (yInt != null) {
+    m.unified.yLevel = yInt;
+    m.unified.y_level = yInt;
+  }
+  if (hInt != null) {
+    m.unified.hLevel = hInt;
+    m.unified.h_level = hInt;
+  }
+
+  // unified.intent_anchor
+  if (m.unified.intent_anchor && typeof m.unified.intent_anchor === 'object') {
+    if (yInt != null) {
+      m.unified.intent_anchor.y_level = yInt;
+    }
+    if (hInt != null) {
+      m.unified.intent_anchor.h_level = hInt;
+    }
+  }
+
+  // meta.intent_anchor（camel側に置いてる場合）
+  if (m.intent_anchor && typeof m.intent_anchor === 'object') {
+    if (yInt != null) {
+      m.intent_anchor.y_level = yInt;
+    }
+    if (hInt != null) {
+      m.intent_anchor.h_level = hInt;
+    }
+  }
+
+  // デバッグ：揃えたことを明示
+  m.extra = {
+    ...(m.extra ?? {}),
+    normalizedLevels: {
+      yLevelRaw: yRaw,
+      hLevelRaw: hRaw,
+      yLevelInt: yInt,
+      hLevelInt: hInt,
+    },
+  };
+
+  return m;
+}
+
+function pickNumber(...vals: any[]): number | null {
+  for (const v of vals) {
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string' && v.trim().length > 0) {
+      const n = Number(v);
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  return null;
+}
+
+function clampInt(v: number, min: number, max: number): number {
+  if (v < min) return min;
+  if (v > max) return max;
+  return v;
 }

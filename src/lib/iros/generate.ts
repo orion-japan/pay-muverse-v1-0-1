@@ -25,7 +25,8 @@ import type { SoulReplyContext } from './soul/composeSoulReply';
 import { buildPersonalContextFromSoul } from './personalContext';
 
 // ★ Sofia 型リフレーム指針ノート（これは既存の一括ガイドとして利用）
-import { buildReframeStyleNote } from './orchestratorMeaning';
+// import { buildReframeStyleNote } from './orchestratorMeaning';
+
 
 const IROS_MODEL =
   process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-4o';
@@ -368,13 +369,16 @@ ${currentUserText}`;
   const isIrDiagnosisTurn = hasIrDiagnosisTrigger(currentUserText);
 
   // 🔸 Sofia 型リフレーム指針（core_need / intentLine ベース）
-  // - 通常会話ターンのみ有効
-  if (!isIrDiagnosisTurn && meta) {
-    const reframeNote = buildReframeStyleNote(meta);
-    if (reframeNote && reframeNote.trim().length > 0) {
-      system = `${system}\n\n${reframeNote}`;
-    }
-  }
+  // - 超シンプル検証のため、いったん system 追記を OFF にする
+  // - renderReply.ts / soulNote の効果だけで「素の3軸」を確認する
+  //
+  // if (!isIrDiagnosisTurn && meta) {
+  //   const reframeNote = buildReframeStyleNote(meta);
+  //   if (reframeNote && reframeNote.trim().length > 0) {
+  //     system = `${system}\n\n${reframeNote}`;
+  //   }
+  // }
+
 
   // ir診断トリガーがあるターンでは、今回だけ診断フォーマットを使う
   if (isIrDiagnosisTurn) {

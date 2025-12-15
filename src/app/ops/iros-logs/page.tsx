@@ -481,23 +481,62 @@ export default function IrosLogsPage() {
                 <tbody>
                   {turns?.map((t) => {
                     const meta = (t.meta ?? {}) as any;
+
                     const yLevel = meta?.yLevel ?? meta?.y_level ?? null;
                     const hLevel = meta?.hLevel ?? meta?.h_level ?? null;
+
+                    const unified = meta?.unified ?? null;
+
+                    // Pol/Stab は unified に入ってる場合がある
+                    const polarityBand =
+                      meta?.polarityBand ??
+                      meta?.polarity_band ??
+                      unified?.polarityBand ??
+                      unified?.polarity_band ??
+                      '';
+
+                    const stabilityBand =
+                      meta?.stabilityBand ??
+                      meta?.stability_band ??
+                      unified?.stabilityBand ??
+                      unified?.stability_band ??
+                      '';
+
+                    // mirror は mirrorMode が無いなら mode を使う
                     const mirrorMode =
-                      meta?.mirrorMode ?? meta?.mirror_mode ?? null;
+                      meta?.mirrorMode ??
+                      meta?.mirror_mode ??
+                      meta?.mode ??
+                      '';
+
+                    // I-layer は intentLayer が無いなら intentLine.intentBand を使う
                     const intentLayer =
-                      meta?.intentLayer ?? meta?.intent_layer ?? null;
+                      meta?.intentLayer ??
+                      meta?.intent_layer ??
+                      meta?.intentLine?.intentBand ??
+                      '';
+
+                    // intent（表示用の短いラベル）
+                    // string が無ければ intentLine object を1行に圧縮して出す
+                    const intentLineObj = meta?.intentLine;
                     const intentLine =
                       typeof meta?.intentLine === 'string'
                         ? meta.intentLine
+                        : intentLineObj && typeof intentLineObj === 'object'
+                        ? [
+                            intentLineObj.nowLabel,
+                            intentLineObj.coreNeed,
+                            intentLineObj.direction
+                              ? `dir:${intentLineObj.direction}`
+                              : null,
+                            intentLineObj.focusLayer
+                              ? `focus:${intentLineObj.focusLayer}`
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(' / ')
                         : '';
 
-                    const polarityBand =
-                      meta?.polarityBand ?? meta?.polarity_band ?? '';
-                    const stabilityBand =
-                      meta?.stabilityBand ?? meta?.stability_band ?? '';
-
-                    const unified = meta?.unified ?? null;
                     const situation = unified?.situation ?? null;
                     const topic =
                       typeof situation?.topic === 'string'
@@ -551,6 +590,7 @@ export default function IrosLogsPage() {
                           </td>
                           <td className="content">{topic}</td>
                         </tr>
+
                         {/* content 行（横幅いっぱいを1セルで／中でスクロール） */}
                         <tr className="muLogs__turnContentRow">
                           <td className="content" colSpan={13}>

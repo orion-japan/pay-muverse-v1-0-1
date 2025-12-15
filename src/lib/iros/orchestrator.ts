@@ -19,12 +19,8 @@ import { generateIrosReply, type GenerateResult } from './generate';
 
 import { clampSelfAcceptance } from './orchestratorMeaning';
 
-// MemoryState 読み書き
-import {
-  loadBaseMetaFromMemoryState,
-  saveMemoryStateFromMeta,
-  type LoadStateResult,
-} from './orchestratorState';
+import { loadBaseMetaFromMemoryState, type LoadStateResult } from './orchestratorState';
+
 
 // 解析フェーズ（Unified / depth / Q / SA / YH / IntentLine / T層）
 import {
@@ -194,32 +190,26 @@ export async function runIrosTurn(
   //     早期 return ロジックは削除しました。
   //     すべての入力を通常どおり解析〜Soul〜Will〜generate に通します。
 
-  // ----------------------------------------------------------------
-  // 1. MemoryState 読み込み（meta ベースのみ使用）
-  // ----------------------------------------------------------------
-  let loadResult: LoadStateResult | null = null;
-  if (userCode) {
-    loadResult = await loadBaseMetaFromMemoryState({
-      userCode,
-      baseMeta,
-    });
-  }
+// ----------------------------------------------------------------
+// 1. MemoryState 読み込み（meta ベースのみ使用）
+// ----------------------------------------------------------------
+let loadResult: LoadStateResult | null = null;
+if (userCode) {
+  loadResult = await loadBaseMetaFromMemoryState({
+    userCode,
+    baseMeta,
+  });
+}
 
-  // 型の差分を吸収するため any 経由で meta を読む
-  const memoryMeta: Partial<IrosMeta> | undefined = loadResult
-    ? ((loadResult as any).meta as Partial<IrosMeta> | undefined)
-    : undefined;
-  const memoryState: unknown = loadResult
-    ? (loadResult as any).memoryState ?? null
-    : null;
+// ----------------------------------------------------------------
+// 2. baseMeta 構築（ルート引数 + Memory の統合）
+// ----------------------------------------------------------------
+// loadBaseMetaFromMemoryState は { mergedBaseMeta, memoryState } を返す前提
+const mergedBaseMeta: Partial<IrosMeta> =
+  loadResult?.mergedBaseMeta ?? baseMeta ?? {};
 
-  // ----------------------------------------------------------------
-  // 2. baseMeta 構築（ルート引数 + Memory の統合）
-  // ----------------------------------------------------------------
-  const mergedBaseMeta: Partial<IrosMeta> = {
-    ...(memoryMeta || {}),
-    ...(baseMeta || {}),
-  };
+// memoryState は解析に渡す
+const memoryState: unknown = loadResult?.memoryState ?? null;
 
   // ★ CONT: 連続性用に「前回までの depth / qCode」を控えておく
   const lastDepthForContinuity: Depth | undefined =
@@ -297,12 +287,22 @@ export async function runIrosTurn(
       ? (tLayerHint as TLayer)
       : null;
 
+  // 解析から返った depth を正規化して採用（なければ従来通り fallback）
+  const analyzedDepth: Depth | undefined =
+    normalizeDepth(depth as Depth | undefined) ?? normalizedDepth;
+
   // ----------------------------------------------------------------
   // 4. meta 初期化（解析結果を反映）
   // ----------------------------------------------------------------
   let meta: IrosMeta = {
     ...(mergedBaseMeta as IrosMeta),
-    depth: normalizedDepth,
+
+    // ★ 追加：今回ターンの unified を meta に載せる（生成・topic・後段が参照できるように）
+    unified: (unified as any) ?? (mergedBaseMeta as any).unified ?? null,
+
+    // ★ 修正：analysis由来の depth を優先
+    depth: analyzedDepth,
+
     qCode: resolvedQCode ?? normalizedQCode,
     selfAcceptance:
       typeof selfAcceptanceLine === 'number'
@@ -561,7 +561,8 @@ if (situationTopic) {
   };
 
   if (shouldUseSoul(soulInput)) {
-    soulNote = await runIrosSoul(soulInput, {});
+    soulNote = await runIrosSoul(soulInput);
+
   }
 } catch (e) {
   if (process.env.DEBUG_IROS_SOUL === '1') {
@@ -798,12 +799,6 @@ if (soulNote) {
       ? text.trim()
       : null;
 
-  if (userCode) {
-    await saveMemoryStateFromMeta({
-      userCode,
-      meta: finalMeta,
-    });
-  }
 
   // ----------------------------------------------------------------
   // 11.5 Person Intent Memory 保存（ir診断ターンのみ）

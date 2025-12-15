@@ -1,13 +1,13 @@
-// src/lib/iros/orchestratorState.ts
-// Iros Orchestrator — MemoryState 読み込み専用ヘルパー
+// file: src/lib/iros/server/handleIrosReply.state.ts
+// iros - Server-side state helpers (MemoryState read only)
 // - userCode ごとの「現在地」を読み込み、baseMeta に合成
-// - 保存（upsert）は handleIrosReply 側に集約する（ここではDB保存しない）
+// - 保存（upsert）は handleIrosReply.persist 側に集約する（ここではDB保存しない）
 
-import type { Depth, QCode, IrosMeta } from './system';
+import type { Depth, QCode, IrosMeta } from '../system';
 import {
   loadIrosMemoryState,
   type IrosMemoryState,
-} from './memoryState';
+} from '../memoryState';
 
 export type LoadStateResult = {
   /** MemoryState を合成した baseMeta（無ければ undefined） */
@@ -58,7 +58,7 @@ export async function loadBaseMetaFromMemoryState(args: {
 
       mergedBaseMeta = {
         ...(mergedBaseMeta ?? {}),
-        // depth / qCode：明示指定 or 既存 meta があればそちら優先
+        // depth / qCode：baseMeta が優先。無ければ MemoryState で補完
         ...(mergedBaseMeta?.depth
           ? {}
           : memoryState.depthStage
@@ -69,8 +69,7 @@ export async function loadBaseMetaFromMemoryState(args: {
           : memoryState.qPrimary
           ? { qCode: memoryState.qPrimary as QCode }
           : {}),
-        // SelfAcceptance / Y / H だけを合成（phase / intent 系は一旦外す）
-        // ★ selfAcceptance は「自己肯定ライン」。baseMeta に無い場合のみ MemoryState から補完
+        // selfAcceptance は「自己肯定ライン」。baseMeta に無い場合のみ補完
         ...(!hasBaseSA && typeof memoryState.selfAcceptance === 'number'
           ? { selfAcceptance: memoryState.selfAcceptance }
           : {}),
@@ -107,12 +106,12 @@ export async function saveMemoryStateFromMeta(args: {
     typeof process !== 'undefined' &&
     process.env.NODE_ENV !== 'production'
   ) {
-    console.log('[IROS/STATE] saveMemoryStateFromMeta no-op (persist is handled in handleIrosReply)', {
-      userCode,
-    });
+    // ✅ ログ文言を1つに統一
+    console.log(
+      '[IROS/STATE] saveMemoryStateFromMeta skipped (persist is handled in handleIrosReply)',
+      { userCode },
+    );
   }
 
-  // no-op: 保存は handleIrosReply.persist.ts の persistMemoryStateIfAny に集約
   return;
 }
-
