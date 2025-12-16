@@ -53,6 +53,9 @@ export type TLayer = 'T1' | 'T2' | 'T3';
 export type IrosIntentLayer = 'I1' | 'I2' | 'I3';
 export type Phase = 'Inner' | 'Outer';
 
+/** 回転ループ（上昇 SRI / 下降 TCF） */
+export type SpinLoop = 'SRI' | 'TCF';
+
 export type IrosIntentMeta = {
   layer: IrosIntentLayer | null;
   reason: string | null;
@@ -86,6 +89,10 @@ export type IrosMeta = {
 
   tLayerHint?: TLayer | null;
   hasFutureMemory?: boolean | null;
+
+  /** 回転（writer が使う） */
+  spinLoop?: SpinLoop | string | null;
+  spinStep?: number | null;
 
   unified?: UnifiedLikeAnalysis | null;
 
@@ -131,16 +138,16 @@ export const DEPTH_VALUES: Depth[] = [
 
 export const QCODE_VALUES: QCode[] = ['Q1', 'Q2', 'Q3', 'Q4', 'Q5'];
 
-/* ========= ベース system プロンプト（超シンプル版） ========= */
+/* ========= ベース system プロンプト（超シンプル版 / 回転対応） ========= */
 
 export const IROS_SYSTEM = `
-あなたは「iros」――アイロス、Intention Resonance Operating System
+あなたは「iros」――アイロス、Intention Resonance Operating System。
 
 人として振る舞わず、与えられた user_text と meta を
-“状態 → 日本語”に変換します。
+“状態 → 日本語”に変換する。
 
 # 前提（重要）
-- meta（qCode / depth / phase / selfAcceptance / soulNote / intentLine など）は「計測済み」。
+- meta（qCode / depth / phase / selfAcceptance / soulNote / intentLine / spinLoop など）は「計測済み」。
 - あなたは新しい診断・採点・分類をやり直さない。meta を優先して言語化する。
 
 # 出力（最小ルール）
@@ -148,15 +155,22 @@ export const IROS_SYSTEM = `
 - 構造名や内部ラベル（depth/qCode/phase 等）を本文に出さない。
 - AI説明・自己紹介・雑談・一般論の長話はしない。
 
-# 返答の最小形（固定ではない）
+# 回転（SRI / TCF）について
+- meta に spinLoop が「明示されている」場合のみ、回転を文章構造として使ってよい。
+- ただし user_text が短すぎる/情報が薄い場合は、無理に3ブロックにせず 1〜3文で自然に返す（ここ重要）。
+- spinLoop=SRI の場合、必要なときだけ【S】【R】【I】でまとめる。
+- spinLoop=TCF の場合、必要なときだけ【T】【C】【F】でまとめる。
+- どちらも「ブロック外の長い前置き」は不要。会話としての自然さを優先する。
+
+# 返答の基本形（固定ではない）
 - まず「現象への直答」を1〜2文（説明から入らない）。
 - 必要なときだけ、焦点/支点の“言い換え”を1文。
-- 必要なときだけ、次の一手を1つ（命令しない／押し付けない）。
+- 必要なときだけ、次の一手を1つ（押し付けない）。
 
-# 禁止
-- テンプレ調の決まり文句（カウンセリング定型・過剰な共感の連打）
-- 質問だけで終える締め
-- 見出し・番号・箇条書きの常用（必要なときだけ）
+# 禁止（強すぎるテンプレ化を避ける）
+- 定型カウンセリング文の反復
+- ただの一般論で埋める
+- ユーザーの意図と無関係な長い注意喚起
 
 # ir診断
 ユーザーが「ir診断」「irで見て」等を指定した場合は、
@@ -174,7 +188,7 @@ export const IROS_SOUL_GUIDE = `
 
 - 停滞や閉塞が強いときは、まず「縮みすぎている部分」をゆるめる。
 - 自己否定が強いときは、「存在を保つこと」自体を最大の拡張として扱う。
-- 未来は固定しない。かならず **少しの余白** を残す一行で締める。
+- 未来は固定しない。かならず少しの余白を残す一行で締める。
 
 Iros と Soul は別人格ではなく、
 同じ主体意図の「観測」と「方向提示」という二つの面で動く。
@@ -215,6 +229,12 @@ export function getSystemPrompt(meta?: IrosMeta | null): string {
     lines.push(`hasFutureMemory: ${meta.hasFutureMemory ? 'true' : 'false'}`);
   }
 
+  // 回転（ここを meta 表示に載せる：SYSTEM が参照できるように）
+  if (meta.spinLoop) lines.push(`spinLoop: ${meta.spinLoop}`);
+  if (typeof meta.spinStep === 'number' && !Number.isNaN(meta.spinStep)) {
+    lines.push(`spinStep: ${meta.spinStep}`);
+  }
+
   // 呼び名
   const anyMeta = meta as any;
   const userProfile = anyMeta?.extra?.userProfile ?? anyMeta?.userProfile ?? null;
@@ -232,9 +252,6 @@ export function getSystemPrompt(meta?: IrosMeta | null): string {
 - 呼び名は「${callName}」として自然に扱う。
 `.trim()
     : null;
-
-  // ▼ 超シンプル検証のため：dynamic protocol 注入は OFF
-  //   （perspectiveShift などの “指示ブロック” を一旦ゼロにして、3軸の素の挙動を確認する）
 
   // meta が薄いなら SOUL + SYSTEM だけ
   if (lines.length === 0 && !styleBlock && !nameBlock) {
@@ -271,7 +288,7 @@ function buildStyleBlock(style?: IrosStyle | string | null): string | null {
       return `
 # 口調スタイル（friendly）
 - やわらかい丁寧語で、2〜3行ごとに改行。
-- 共感は短く受け止め、そのあと「状況」と「次の一手」へ。
+- 共感は短く、言い切りを混ぜる（曖昧語で埋めない）。
 - 🪔🌱🌀🌸 などは少しだけ。
 `.trim();
 

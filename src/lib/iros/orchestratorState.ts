@@ -16,6 +16,30 @@ export type LoadStateResult = {
   memoryState: IrosMemoryState | null;
 };
 
+function normalizePhase(
+  raw: unknown,
+): 'Inner' | 'Outer' | null {
+  if (typeof raw !== 'string') return null;
+  const p = raw.trim().toLowerCase();
+  if (p === 'inner') return 'Inner';
+  if (p === 'outer') return 'Outer';
+  return null;
+}
+
+function normalizeSpinLoop(raw: unknown): 'SRI' | 'TCF' | null {
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim().toUpperCase();
+  if (s === 'SRI') return 'SRI';
+  if (s === 'TCF') return 'TCF';
+  return null;
+}
+
+function normalizeSpinStep(raw: unknown): 0 | 1 | 2 | null {
+  if (typeof raw !== 'number' || Number.isNaN(raw)) return null;
+  if (raw === 0 || raw === 1 || raw === 2) return raw;
+  return null;
+}
+
 /**
  * userCode ごとの MemoryState を読み込み、
  * baseMeta に depth / qCode / selfAcceptance / Y / H を合成する。
@@ -56,21 +80,74 @@ export async function loadBaseMetaFromMemoryState(args: {
         typeof (mergedBaseMeta as any)?.selfAcceptance === 'number' &&
         !Number.isNaN((mergedBaseMeta as any).selfAcceptance);
 
+      // ★ phase / spin は MemoryState 側のキー揺れに耐える（camel / snake 両対応）
+      const msAny: any = memoryState as any;
+
+      const msPhaseRaw =
+        typeof msAny.phase === 'string'
+          ? msAny.phase
+          : typeof msAny.phase_mode === 'string'
+          ? msAny.phase_mode
+          : typeof msAny.phaseMode === 'string'
+          ? msAny.phaseMode
+          : null;
+
+      const msSpinLoopRaw =
+        typeof msAny.spinLoop === 'string'
+          ? msAny.spinLoop
+          : typeof msAny.spin_loop === 'string'
+          ? msAny.spin_loop
+          : null;
+
+      const msSpinStepRaw =
+        typeof msAny.spinStep === 'number'
+          ? msAny.spinStep
+          : typeof msAny.spin_step === 'number'
+          ? msAny.spin_step
+          : null;
+
+      // ★ 正規化（IrosMeta の型に合わせる）
+      const normalizedPhase = normalizePhase(msPhaseRaw);
+      const normalizedSpinLoop = normalizeSpinLoop(msSpinLoopRaw);
+      const normalizedSpinStep = normalizeSpinStep(msSpinStepRaw);
+
       mergedBaseMeta = {
         ...(mergedBaseMeta ?? {}),
-        // depth / qCode：明示指定 or 既存 meta があればそちら優先
+
+        // depth / qCode / phase：明示指定 or 既存 meta があればそちら優先
         ...(mergedBaseMeta?.depth
           ? {}
           : memoryState.depthStage
           ? { depth: memoryState.depthStage as Depth }
           : {}),
+
         ...(mergedBaseMeta?.qCode
           ? {}
           : memoryState.qPrimary
           ? { qCode: memoryState.qPrimary as QCode }
           : {}),
-        // SelfAcceptance / Y / H だけを合成（phase / intent 系は一旦外す）
-        // ★ selfAcceptance は「自己肯定ライン」。baseMeta に無い場合のみ MemoryState から補完
+
+        // ✅ phase を追加（pivot の prev.phase を成立させるため必須）
+        ...(mergedBaseMeta?.phase
+          ? {}
+          : (memoryState as any)?.phase
+          ? { phase: (memoryState as any).phase }
+          : {}),
+
+        // ★ phase / spin：baseMeta 側に無いときだけ MemoryState から補完（正規化済み）
+        ...(!(mergedBaseMeta as any)?.phase && normalizedPhase
+          ? { phase: normalizedPhase }
+          : {}),
+        ...(!(mergedBaseMeta as any)?.spinLoop && normalizedSpinLoop
+          ? { spinLoop: normalizedSpinLoop }
+          : {}),
+        ...(typeof (mergedBaseMeta as any)?.spinStep === 'number'
+          ? {}
+          : normalizedSpinStep !== null
+          ? { spinStep: normalizedSpinStep }
+          : {}),
+
+        // SelfAcceptance / Y / H（baseMeta に無い場合のみ補完）
         ...(!hasBaseSA && typeof memoryState.selfAcceptance === 'number'
           ? { selfAcceptance: memoryState.selfAcceptance }
           : {}),
@@ -107,12 +184,12 @@ export async function saveMemoryStateFromMeta(args: {
     typeof process !== 'undefined' &&
     process.env.NODE_ENV !== 'production'
   ) {
-    console.log('[IROS/STATE] saveMemoryStateFromMeta no-op (persist is handled in handleIrosReply)', {
-      userCode,
-    });
+    console.log(
+      '[IROS/STATE] saveMemoryStateFromMeta no-op (persist is handled in handleIrosReply)',
+      { userCode },
+    );
   }
 
   // no-op: 保存は handleIrosReply.persist.ts の persistMemoryStateIfAny に集約
   return;
 }
-

@@ -10,6 +10,12 @@ import type { IrosConversation, IrosMessage, IrosUserInfo } from '../types';
 /** ※ IrosChatContext.tsx の IrosStyle と必ず揃えること */
 export type IrosStyle = 'friendly' | 'biz-soft' | 'biz-formal' | 'plain';
 
+/* ========= history（LLMに渡す会話履歴） ========= */
+export type IrosChatHistoryItem = {
+  role: 'user' | 'assistant';
+  content: string;
+};
+
 /* ========= DEV logger ========= */
 const __DEV__ = process.env.NODE_ENV !== 'production';
 const dbg = (...a: any[]) => {
@@ -35,6 +41,7 @@ export type IrosAPI = {
     role?: 'user' | 'assistant';
     meta?: any; // ★ 追加
   }): Promise<{ ok: true }>;
+
   reply(args: {
     conversationId?: string;
     user_text: string;
@@ -46,6 +53,9 @@ export type IrosAPI = {
 
     // 🗣 追加：Iros の口調スタイル
     style?: IrosStyle;
+
+    // ✅ 追加：会話履歴（LLMへ渡す）
+    history?: IrosChatHistoryItem[];
 
     // ★ ギア選択から渡す情報（任意）
     nextStepChoice?: {
@@ -62,6 +72,7 @@ export type IrosAPI = {
         systemPrompt?: string;
       } // 新フォーマット
   >;
+
   /** /reply の戻りを正規化し、未保存なら assistant を保存する */
   replyAndStore(args: {
     conversationId: string;
@@ -72,6 +83,9 @@ export type IrosAPI = {
     // 🗣 追加：Iros の口調スタイル
     style?: IrosStyle;
 
+    // ✅ 追加：会話履歴（LLMへ渡す）
+    history?: IrosChatHistoryItem[];
+
     // ★ ギア選択から渡す情報（任意）
     nextStepChoice?: {
       key: string;
@@ -79,6 +93,7 @@ export type IrosAPI = {
       gear?: string | null;
     };
   }): Promise<{ assistant: string } & Record<string, any>>;
+
   getUserInfo(): Promise<IrosUserInfo | null>;
 };
 
@@ -366,6 +381,7 @@ export const irosClient: IrosAPI = {
       mode: args.mode,
       hasCid: !!args.conversationId,
       style: args.style,
+      history_len: args.history?.length ?? 0,
     });
     const r = await authFetch('/api/agent/iros/reply', {
       method: 'POST',
@@ -375,7 +391,10 @@ export const irosClient: IrosAPI = {
         text: args.user_text, // user_text → text
         modeHint: args.mode ?? 'Light',
         mode: args.mode ?? 'Light',
-        history: [],
+
+        // ✅ history をそのまま渡す（なければ空配列）
+        history: Array.isArray(args.history) ? args.history : [],
+
         model: args.model,
         resonance: (window as any)?.__iros?.resonance ?? args.resonance,
         intent: (window as any)?.__iros?.intent ?? args.intent,
@@ -401,10 +420,13 @@ export const irosClient: IrosAPI = {
       mode: args.mode ?? 'Light',
       model: args.model,
 
-      // 🗣 ここでも style を引き継ぐ
+      // 🗣 style
       style: args.style,
 
-      // ★ ギア選択（nextStep）を reply にも渡す
+      // ✅ history
+      history: args.history,
+
+      // ★ nextStep
       nextStepChoice: args.nextStepChoice,
     });
 
@@ -437,7 +459,7 @@ export const irosClient: IrosAPI = {
         conversationId: args.conversationId,
         text: safe,
         role: 'assistant',
-        // ★ ここで meta を一緒に保存
+        // ★ meta も一緒に保存
         meta,
       });
     }

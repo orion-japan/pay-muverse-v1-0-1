@@ -18,7 +18,7 @@ export type LoadStateResult = {
 
 /**
  * userCode ごとの MemoryState を読み込み、
- * baseMeta に depth / qCode / selfAcceptance / Y / H を合成する。
+ * baseMeta に depth / qCode / selfAcceptance / Y / H / spin / descent を合成する。
  */
 export async function loadBaseMetaFromMemoryState(args: {
   userCode?: string;
@@ -48,6 +48,11 @@ export async function loadBaseMetaFromMemoryState(args: {
         selfAcceptance: memoryState?.selfAcceptance ?? null,
         yLevel: memoryState?.yLevel ?? null,
         hLevel: memoryState?.hLevel ?? null,
+        spinLoop: (memoryState as any)?.spinLoop ?? (memoryState as any)?.spin_loop ?? null,
+        descentGate:
+          (memoryState as any)?.descentGate ??
+          (memoryState as any)?.descent_gate ??
+          null,
       });
     }
 
@@ -56,8 +61,20 @@ export async function loadBaseMetaFromMemoryState(args: {
         typeof (mergedBaseMeta as any)?.selfAcceptance === 'number' &&
         !Number.isNaN((mergedBaseMeta as any).selfAcceptance);
 
+      // --- 回転系（snake/camel 両対応で読む） ---
+      const spinLoop =
+        (memoryState as any)?.spinLoop ??
+        (memoryState as any)?.spin_loop ??
+        null;
+
+      const descentGate =
+        (memoryState as any)?.descentGate ??
+        (memoryState as any)?.descent_gate ??
+        null;
+
       mergedBaseMeta = {
         ...(mergedBaseMeta ?? {}),
+
         // depth / qCode：baseMeta が優先。無ければ MemoryState で補完
         ...(mergedBaseMeta?.depth
           ? {}
@@ -69,16 +86,22 @@ export async function loadBaseMetaFromMemoryState(args: {
           : memoryState.qPrimary
           ? { qCode: memoryState.qPrimary as QCode }
           : {}),
-        // selfAcceptance は「自己肯定ライン」。baseMeta に無い場合のみ補完
+
+        // selfAcceptance は baseMeta に無い場合のみ補完
         ...(!hasBaseSA && typeof memoryState.selfAcceptance === 'number'
           ? { selfAcceptance: memoryState.selfAcceptance }
           : {}),
+
         ...(typeof memoryState.yLevel === 'number'
           ? { yLevel: memoryState.yLevel }
           : {}),
         ...(typeof memoryState.hLevel === 'number'
           ? { hLevel: memoryState.hLevel }
           : {}),
+
+        // ★ 回転状態（判断はしない、載せるだけ）
+        ...(spinLoop ? { spinLoop } : {}),
+        ...(descentGate ? { descentGate } : {}),
       };
     }
   } catch (e) {
@@ -93,7 +116,7 @@ export async function loadBaseMetaFromMemoryState(args: {
 
 /**
  * 互換のため残すが、ここではDB保存しない。
- * MemoryState の upsert は handleIrosReply 側に集約する。
+ * MemoryState の upsert は handleIrosReply.persist 側に集約する。
  */
 export async function saveMemoryStateFromMeta(args: {
   userCode?: string;
@@ -106,7 +129,6 @@ export async function saveMemoryStateFromMeta(args: {
     typeof process !== 'undefined' &&
     process.env.NODE_ENV !== 'production'
   ) {
-    // ✅ ログ文言を1つに統一
     console.log(
       '[IROS/STATE] saveMemoryStateFromMeta skipped (persist is handled in handleIrosReply)',
       { userCode },

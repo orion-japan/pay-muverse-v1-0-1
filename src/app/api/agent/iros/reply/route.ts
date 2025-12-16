@@ -127,6 +127,12 @@ export async function POST(req: NextRequest) {
     const modeHintInput: string | undefined = body?.modeHint;
     const extra: Record<string, any> | undefined = body?.extra;
 
+    // ✅ 追加：会話履歴（LLMに渡す）
+    // NOTE: `history` という変数名は window.history と衝突しやすいので避ける
+    const chatHistory: unknown[] | undefined = Array.isArray(body?.history)
+      ? (body.history as unknown[])
+      : undefined;
+
     // ★ 追加：口調スタイル（client から style または styleHint で飛んでくる想定）
     const styleInput: string | undefined =
       typeof body?.style === 'string'
@@ -186,6 +192,7 @@ export async function POST(req: NextRequest) {
       rememberScope,
       traceId,
       style: styleInput,
+      history_len: chatHistory?.length ?? 0,
     });
 
     // 5) credit amount 決定（body.cost → header → 既定）
@@ -201,7 +208,9 @@ export async function POST(req: NextRequest) {
         : NaN;
 
     const CREDIT_AMOUNT =
-      Number.isFinite(parsed) && parsed > 0 ? Number(parsed) : CHAT_CREDIT_AMOUNT;
+      Number.isFinite(parsed) && parsed > 0
+        ? Number(parsed)
+        : CHAT_CREDIT_AMOUNT;
 
     console.log('[IROS/Reply] credit', { userCode, CREDIT_AMOUNT });
 
@@ -250,7 +259,11 @@ export async function POST(req: NextRequest) {
       if (!balErr && balRow && balRow.sofia_credit != null) {
         const balance = Number(balRow.sofia_credit) || 0;
         if (balance < LOW_BALANCE_THRESHOLD) {
-          lowWarn = { code: 'low_balance', balance, threshold: LOW_BALANCE_THRESHOLD };
+          lowWarn = {
+            code: 'low_balance',
+            balance,
+            threshold: LOW_BALANCE_THRESHOLD,
+          };
         }
       }
     }
@@ -282,7 +295,10 @@ export async function POST(req: NextRequest) {
       authorizationHeader: authHeader,
       traceId,
       userProfile,
-      style: styleInput ?? null,
+      style: styleInput ?? (userProfile?.style ?? null),
+
+      // ✅ 追加：履歴を渡す
+      history: chatHistory,
     });
 
     // 8.x) 生成失敗時
@@ -309,7 +325,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { result, finalMode } = irosResult;
+    const { result, finalMode, metaForSave, assistantText } =
+  irosResult as any;
+
 
     // 9) capture
     const capRes = await captureChat(req, userCode, CREDIT_AMOUNT, creditRef);
@@ -347,17 +365,39 @@ export async function POST(req: NextRequest) {
 
     // === ここからレスポンス生成 & 訓練サンプル保存 ===
     if (result && typeof result === 'object') {
-      // いったんベースの meta を組み立てる
-      let meta: any = {
-        ...(result as any).meta ?? {},
-        userProfile: (result as any).meta?.userProfile ?? userProfile ?? null,
-        extra: {
-          ...(((result as any).meta?.extra) ?? {}),
-          userCode: userCode ?? (result as any).meta?.extra?.userCode ?? null,
-          hintText: hintText ?? (result as any).meta?.extra?.hintText ?? null,
-          traceId: traceId ?? (result as any).meta?.extra?.traceId ?? null,
-        },
-      };
+// いったんベースの meta を組み立てる（metaForSave を優先）
+let meta: any = {
+  // ★ handleIrosReply.postProcess 以降の「確定メタ」を土台にする
+  ...(metaForSave ?? {}),
+
+  // （必要なら）orch 側が持っている meta を上書きで重ねる
+  ...(((result as any).meta) ?? {}),
+
+  userProfile:
+    (metaForSave as any)?.userProfile ??
+    (result as any)?.meta?.userProfile ??
+    userProfile ??
+    null,
+
+  // extra は「metaForSave.extra → result.meta.extra → routeで追加」の順にマージ
+  extra: {
+    ...(((metaForSave as any)?.extra) ?? {}),
+    ...((((result as any).meta?.extra)) ?? {}),
+
+    userCode: userCode ?? (metaForSave as any)?.extra?.userCode ?? null,
+    hintText: hintText ?? (metaForSave as any)?.extra?.hintText ?? null,
+    traceId: traceId ?? (metaForSave as any)?.extra?.traceId ?? null,
+
+    // ✅ デバッグ用：historyの長さだけ返す
+    historyLen: Array.isArray(chatHistory) ? chatHistory.length : 0,
+  },
+};
+
+// ★ content も handleIrosReply の assistantText を正にする（renderEngine 等の前提が安定）
+if (typeof assistantText === 'string' && assistantText.trim().length > 0) {
+  (result as any).content = assistantText;
+}
+
 
       // ★ 三軸「次の一歩」オプションを meta に付与
       meta = attachNextStepMeta({
@@ -397,7 +437,8 @@ export async function POST(req: NextRequest) {
           ? (meta as any).unified.situation_topic.trim()
           : (() => {
               const note = (meta as any)?.extra?.pastStateNoteText;
-              if (typeof note !== 'string' || note.trim().length === 0) return null;
+              if (typeof note !== 'string' || note.trim().length === 0)
+                return null;
 
               const m1 = note.match(/対象トピック:\s*([^\n\r]+)/);
               const m2 = note.match(/対象トピック\s*([^\n\r]+)/);
@@ -451,7 +492,70 @@ export async function POST(req: NextRequest) {
       // ★★★ ここが本丸：返却metaの y/h を “整数に統一” する（DBとUIとTrainingを一致させる）
       meta = normalizeMetaLevels(meta);
 
+// ★ unified.intent_anchor を “固定アンカー” に同期（ブレ防止）
+{
+  const fixedText =
+    typeof meta?.intent_anchor?.text === 'string' && meta.intent_anchor.text
+      ? meta.intent_anchor.text
+      : null;
+
+  const fixedPhrase =
+    typeof meta?.intent_anchor?.phrase === 'string' && meta.intent_anchor.phrase
+      ? meta.intent_anchor.phrase
+      : null;
+
+  const fixedStrength =
+    meta?.intent_anchor?.strength != null ? meta.intent_anchor.strength : null;
+
+  if (fixedText) {
+    meta.unified = meta.unified ?? {};
+    meta.unified.intent_anchor = meta.unified.intent_anchor ?? {};
+
+    meta.unified.intent_anchor.text = fixedText;
+    if (fixedPhrase) meta.unified.intent_anchor.phrase = fixedPhrase;
+    if (fixedStrength != null) meta.unified.intent_anchor.strength = fixedStrength;
+  }
+}
+
+
+
       console.log('[IROS/Reply] response meta', meta);
+
+      // ✅ UI が goal.targetQ を拾って Q3 を表示してしまう事故を防ぐ
+      // 方針：表示用は常に「現在Q（meta.qCode / unified.q.current）」
+      //       targetQ は UI に返さない（内部的には meta.goalTargetQ に退避だけする）
+      {
+        const currentQ =
+          (typeof meta?.qCode === 'string' && meta.qCode) ||
+          (typeof meta?.q_code === 'string' && meta.q_code) ||
+          (typeof meta?.unified?.q?.current === 'string' &&
+            meta.unified.q.current) ||
+          null;
+
+        if (currentQ) {
+          meta.qCode = currentQ;
+          meta.q_code = currentQ;
+          (meta as any).q = currentQ;
+        }
+
+        const goalTargetQ =
+          typeof meta?.goal?.targetQ === 'string'
+            ? meta.goal.targetQ
+            : typeof meta?.priority?.goal?.targetQ === 'string'
+            ? meta.priority.goal.targetQ
+            : null;
+
+        if (goalTargetQ) {
+          (meta as any).goalTargetQ = goalTargetQ;
+        }
+
+        if (meta?.goal && typeof meta.goal === 'object') {
+          delete meta.goal.targetQ;
+        }
+        if (meta?.priority?.goal && typeof meta.priority.goal === 'object') {
+          delete meta.priority.goal.targetQ;
+        }
+      }
 
       // ★★★ Render Engine の適用（ここで「適用箇所」を固定）
       const applied = applyRenderEngineIfEnabled({
@@ -474,7 +578,7 @@ export async function POST(req: NextRequest) {
         conversationId,
         messageId: null,
         inputText: text,
-        replyText: (result as any).content ?? '', // ★ レンダリング後の返答を保存
+        replyText: (result as any).content ?? '',
         meta,
         tags: ['iros', 'auto'],
       });
@@ -497,7 +601,12 @@ export async function POST(req: NextRequest) {
         content: result,
         meta: {
           userProfile: userProfile ?? null,
-          extra: { userCode, hintText, traceId },
+          extra: {
+            userCode,
+            hintText,
+            traceId,
+            historyLen: Array.isArray(chatHistory) ? chatHistory.length : 0,
+          },
         },
       },
       { status: 200, headers },
@@ -579,8 +688,16 @@ function applyRenderEngineIfEnabled(params: {
     }
 
     const vector = buildResonanceVector({
-      qCode: (meta as any)?.qCode ?? (meta as any)?.q_code ?? meta?.unified?.q?.current ?? null,
-      depth: (meta as any)?.depth ?? (meta as any)?.depth_stage ?? meta?.unified?.depth?.stage ?? null,
+      qCode:
+        (meta as any)?.qCode ??
+        (meta as any)?.q_code ??
+        meta?.unified?.q?.current ??
+        null,
+      depth:
+        (meta as any)?.depth ??
+        (meta as any)?.depth_stage ??
+        meta?.unified?.depth?.stage ??
+        null,
       phase: (meta as any)?.phase ?? meta?.unified?.phase ?? null,
 
       selfAcceptance:
@@ -590,10 +707,19 @@ function applyRenderEngineIfEnabled(params: {
         meta?.unified?.self_acceptance ??
         null,
 
-      yLevel: (meta as any)?.yLevel ?? (meta as any)?.y_level ?? meta?.unified?.yLevel ?? meta?.unified?.y_level ?? null,
-      hLevel: (meta as any)?.hLevel ?? (meta as any)?.h_level ?? meta?.unified?.hLevel ?? meta?.unified?.h_level ?? null,
+      yLevel:
+        (meta as any)?.yLevel ??
+        (meta as any)?.y_level ??
+        meta?.unified?.yLevel ??
+        meta?.unified?.y_level ??
+        null,
+      hLevel:
+        (meta as any)?.hLevel ??
+        (meta as any)?.h_level ??
+        meta?.unified?.hLevel ??
+        meta?.unified?.h_level ??
+        null,
 
-      // ★追加：Pol/Stab を unified から拾う
       polarityScore:
         (meta as any)?.polarityScore ??
         (meta as any)?.polarity_score ??
@@ -614,9 +740,15 @@ function applyRenderEngineIfEnabled(params: {
         null,
 
       situationSummary:
-        (meta as any)?.situationSummary ?? (meta as any)?.situation_summary ?? meta?.unified?.situation?.summary ?? null,
+        (meta as any)?.situationSummary ??
+        (meta as any)?.situation_summary ??
+        meta?.unified?.situation?.summary ??
+        null,
       situationTopic:
-        (meta as any)?.situationTopic ?? (meta as any)?.situation_topic ?? meta?.unified?.situation?.topic ?? null,
+        (meta as any)?.situationTopic ??
+        (meta as any)?.situation_topic ??
+        meta?.unified?.situation?.topic ??
+        null,
 
       intentLayer:
         (meta as any)?.intentLayer ??
@@ -634,9 +766,9 @@ function applyRenderEngineIfEnabled(params: {
         null,
     });
 
-
-    const userWantsEssence =
-      /本質|ズバ|はっきり|ハッキリ|意図|核心|要点/.test(userText);
+    const userWantsEssence = /本質|ズバ|はっきり|ハッキリ|意図|核心|要点/.test(
+      userText,
+    );
 
     const qNow =
       (meta.qCode as any) ??
@@ -699,7 +831,7 @@ function applyRenderEngineIfEnabled(params: {
     const rendered = renderReply(
       vector,
       {
-        facts: contentBefore,
+        facts: String(resultObj?.content ?? '').trim(),
         insight: insightCandidate,
         nextStep: nextStepCandidate,
         userWantsEssence,
@@ -708,7 +840,8 @@ function applyRenderEngineIfEnabled(params: {
       },
       {
         minimalEmoji,
-        forceExposeInsight: !!extra && (extra as any).forceExposeInsight === true,
+        forceExposeInsight:
+          !!extra && (extra as any).forceExposeInsight === true,
       },
     );
 
@@ -760,18 +893,14 @@ function normalizeMetaLevels(meta: any): any {
   const m = meta ?? {};
   const u = m.unified ?? {};
 
-  const yRaw =
-    pickNumber(m.yLevel, m.y_level, u.yLevel, u.y_level) ?? null;
-  const hRaw =
-    pickNumber(m.hLevel, m.h_level, u.hLevel, u.h_level) ?? null;
+  const yRaw = pickNumber(m.yLevel, m.y_level, u.yLevel, u.y_level) ?? null;
+  const hRaw = pickNumber(m.hLevel, m.h_level, u.hLevel, u.h_level) ?? null;
 
   const yInt = yRaw == null ? null : clampInt(Math.round(yRaw), 0, 3);
   const hInt = hRaw == null ? null : clampInt(Math.round(hRaw), 0, 3);
 
-  // 何も無ければそのまま
   if (yInt == null && hInt == null) return m;
 
-  // meta
   if (yInt != null) {
     m.yLevel = yInt;
     m.y_level = yInt;
@@ -781,7 +910,6 @@ function normalizeMetaLevels(meta: any): any {
     m.h_level = hInt;
   }
 
-  // unified
   m.unified = m.unified ?? {};
   if (yInt != null) {
     m.unified.yLevel = yInt;
@@ -792,7 +920,6 @@ function normalizeMetaLevels(meta: any): any {
     m.unified.h_level = hInt;
   }
 
-  // unified.intent_anchor
   if (m.unified.intent_anchor && typeof m.unified.intent_anchor === 'object') {
     if (yInt != null) {
       m.unified.intent_anchor.y_level = yInt;
@@ -802,7 +929,6 @@ function normalizeMetaLevels(meta: any): any {
     }
   }
 
-  // meta.intent_anchor（camel側に置いてる場合）
   if (m.intent_anchor && typeof m.intent_anchor === 'object') {
     if (yInt != null) {
       m.intent_anchor.y_level = yInt;
@@ -812,7 +938,6 @@ function normalizeMetaLevels(meta: any): any {
     }
   }
 
-  // デバッグ：揃えたことを明示
   m.extra = {
     ...(m.extra ?? {}),
     normalizedLevels: {

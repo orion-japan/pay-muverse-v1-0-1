@@ -2,7 +2,13 @@
 // iros - Gates (Greeting / Micro)
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { HandleIrosReplySuccess, HandleIrosReplyOutput } from './handleIrosReply';
+import type {
+  HandleIrosReplySuccess,
+  HandleIrosReplyOutput,
+} from './handleIrosReply';
+
+// ✅ 追加：保存は persist.ts に一本化
+import { persistAssistantMessage } from './handleIrosReply.persist';
 
 export type GateBaseArgs = {
   supabase: SupabaseClient;
@@ -74,48 +80,21 @@ function isMicroTurn(raw: string): boolean {
   return /^(どうする|やる|やっちゃう|いく|いける|どうしよ|どうしよう|行く|行ける)$/.test(core);
 }
 
-
-/**
- * ゲート内のアシスタントメッセージ保存
- * - persist.ts の persistAssistantMessage とは「別経路」なので、
- *   ここではゲートが返したときだけ保存する（handleIrosReply.ts は return するので二重保存にならない）
- */
-async function persistAssistantMessageGate(args: {
-  reqOrigin: string;
-  authorizationHeader: string | null;
-  userCode: string;
-  conversationId: string;
-  assistantText: string;
-  metaForSave: any;
-}) {
-  const { reqOrigin, authorizationHeader, userCode, conversationId, assistantText, metaForSave } = args;
-
-  try {
-    const msgUrl = new URL('/api/agent/iros/messages', reqOrigin);
-    await fetch(msgUrl.toString(), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: authorizationHeader ?? '',
-        'x-user-code': userCode,
-      },
-      body: JSON.stringify({
-        conversation_id: conversationId,
-        role: 'assistant',
-        text: assistantText,
-        meta: metaForSave,
-      }),
-    });
-  } catch (e) {
-    console.error('[IROS/Gates] failed to persist assistant message', e);
-  }
-}
-
 /* =====================================================
    Greeting gate: 挨拶は「完全一致のみ」で返す（記憶・意図・深度に触れない）
 ===================================================== */
-export async function runGreetingGate(args: GateBaseArgs): Promise<HandleIrosReplyOutput | null> {
-  const { conversationId, text, userCode, userProfile, reqOrigin, authorizationHeader } = args;
+export async function runGreetingGate(
+  args: GateBaseArgs,
+): Promise<HandleIrosReplyOutput | null> {
+  const {
+    supabase,
+    conversationId,
+    text,
+    userCode,
+    userProfile,
+    reqOrigin,
+    authorizationHeader,
+  } = args;
 
   const greeting = normalizeTailPunct(text);
   const isGreeting = GREETINGS.has(greeting);
@@ -135,13 +114,18 @@ export async function runGreetingGate(args: GateBaseArgs): Promise<HandleIrosRep
 
   const result = { content: assistantText, meta: metaForSave, mode: 'light' };
 
-  console.log('[IROS/GreetingGate] matched exact greeting', { userCode, greeting });
+  console.log('[IROS/GreetingGate] matched exact greeting', {
+    userCode,
+    greeting,
+  });
 
-  await persistAssistantMessageGate({
+  // ✅ 保存経路を統一（persist.ts）
+  await persistAssistantMessage({
+    supabase,
     reqOrigin,
     authorizationHeader,
-    userCode,
     conversationId,
+    userCode,
     assistantText,
     metaForSave,
   });
@@ -159,10 +143,20 @@ export async function runGreetingGate(args: GateBaseArgs): Promise<HandleIrosRep
 
 /* =====================================================
    Micro gate: 超短文は「軽量・間の返し」で返す
-   - 方針：いったん「決める/動く」系だけ micro にする（疲れ/休みは通常LLMへ）
 ===================================================== */
-export async function runMicroGate(args: MicroGateArgs): Promise<HandleIrosReplyOutput | null> {
-  const { conversationId, text, userCode, userProfile, reqOrigin, authorizationHeader, traceId } = args;
+export async function runMicroGate(
+  args: MicroGateArgs,
+): Promise<HandleIrosReplyOutput | null> {
+  const {
+    supabase,
+    conversationId,
+    text,
+    userCode,
+    userProfile,
+    reqOrigin,
+    authorizationHeader,
+    traceId,
+  } = args;
 
   if (!isMicroTurn(text)) return null;
 
@@ -201,8 +195,8 @@ export async function runMicroGate(args: MicroGateArgs): Promise<HandleIrosReply
   const pickedOptions = isActionCore
     ? actionOptions
     : isDecisionQuestion
-    ? questionOptions
-    : actionOptions;
+      ? questionOptions
+      : actionOptions;
 
   const assistantText = `${lead}\n${pickedOptions}\n${tail}`;
 
@@ -219,11 +213,13 @@ export async function runMicroGate(args: MicroGateArgs): Promise<HandleIrosReply
 
   console.log('[IROS/MicroGate] matched micro input', { userCode, text, core });
 
-  await persistAssistantMessageGate({
+  // ✅ 保存経路を統一（persist.ts）
+  await persistAssistantMessage({
+    supabase,
     reqOrigin,
     authorizationHeader,
-    userCode,
     conversationId,
+    userCode,
     assistantText,
     metaForSave,
   });

@@ -450,8 +450,21 @@ export default function MessageList() {
         const rawText = stripIrosMetaHeader(toSafeString(m.text));
         const safeText = normalizeBoldMarks(transformIrTemplateToMarkdown(rawText));
 
-        const qFromMeta = m.meta?.qCode;
-        const qToShow = qFromMeta ?? m.q;
+// ✅ 表示用Qコードは「現在Q」を優先して拾う（targetQ / goalTargetQ は表示に使わない）
+const qToShowRaw =
+  (m.meta?.qCode as any) ??
+  (m.meta?.q as any) ??
+  (m.meta?.unified?.q?.current as any) ??
+  ((m as any)?.q_code as any) ??
+  ((m as any)?.q as any) ??
+  null;
+
+// 安全弁：Q1〜Q5 以外は出さない
+const qToShowSafe =
+  typeof qToShowRaw === 'string' && /^Q[1-5]$/.test(qToShowRaw)
+    ? (qToShowRaw as 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5')
+    : null;
+
 
         const isVisionMode = !isUser && m.meta?.mode === 'vision';
         const isVisionHint =
@@ -505,7 +518,7 @@ export default function MessageList() {
               </div>
 
               {/* Qバッジ：Iros（assistant）のときだけ */}
-              {!isUser && qToShow && (
+              {!isUser && qToShowSafe && (
                 <div className="q-badge" style={qBadgeStyle}>
                   <span
                     style={{
@@ -516,7 +529,7 @@ export default function MessageList() {
                       display: 'inline-block',
                     }}
                   />
-                  {qToShow}
+                  {qToShowSafe}
                 </div>
               )}
             </div>

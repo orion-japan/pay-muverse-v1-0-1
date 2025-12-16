@@ -1,5 +1,12 @@
 // src/lib/iros/types.ts
 
+// ★ "S4" のような幽霊値を通さないための正規化（通るのは DepthStage のみ）
+//   ただし legacy 互換として "S4" は "F1" に正規化して救済する
+export function normalizeDepthStage(v: unknown): DepthStage | null {
+  if (v === 'S4') return 'F1'; // legacy alias
+  if (!isDepthStage(v)) return null;
+  return v;
+}
 // ===== 既存 Iros v1 系型 =====
 
 export type IrosMode = 'auto' | 'surface' | 'core';
@@ -57,8 +64,6 @@ export type IrosChatResponse =
  * 1 = 小さな揺れ
  * 2 = 中くらいの揺れ
  * 3 = 大きな揺れ
- *
- * 実装側では 0–3 の数値として扱う前提にしておく。
  */
 export type YLevel = 0 | 1 | 2 | 3;
 
@@ -77,23 +82,79 @@ export type HLevel = 0 | 1 | 2 | 3;
  * - 'hold'    : 揺れが大きい時の「受け止め・保留」寄り
  * - 'reframe' : 認知の整理・捉え直しを強めるモード
  * - 'deep'    : I層寄りの深い鏡（前提：ユーザーがそれを望んでいる時）
- *
- * 実際のロジックは resolveMirrorMode 側で決定する。
  */
 export type MirrorMode = 'default' | 'hold' | 'reframe' | 'deep';
 
-/**
- * 1ターン分の Iros メタ情報（Orchestrator 〜 ログ共通）
- * 既存 meta との互換を優先しつつ、揺れ・余白・ミラーのフィールドも追加。
- *
- * - IrosMeta / UnifiedAnalysis に寄せたフィールド名
- * - DB(jsonb) にそのまま入れても壊れないよう緩めの型にしている
- */
+// ===== ここから「深度/位相/Q/spin」の正本（F1–F3を正式化） =====
+
+export type Phase = 'Inner' | 'Outer';
+export type QCode = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
+
+export type DepthStage =
+  | 'S1' | 'S2' | 'S3'
+  | 'F1' | 'F2' | 'F3'
+  | 'R1' | 'R2' | 'R3'
+  | 'C1' | 'C2' | 'C3'
+  | 'I1' | 'I2' | 'I3'
+  | 'T1' | 'T2' | 'T3';
+
+export type DepthGroup = 'S' | 'F' | 'R' | 'C' | 'I' | 'T';
+
+export const DEPTH_STAGE_VALUES: DepthStage[] = [
+  'S1','S2','S3',
+  'F1','F2','F3',
+  'R1','R2','R3',
+  'C1','C2','C3',
+  'I1','I2','I3',
+  'T1','T2','T3',
+];
+
+export function isDepthStage(v: unknown): v is DepthStage {
+  return typeof v === 'string' && (DEPTH_STAGE_VALUES as string[]).includes(v);
+}
+
+export function groupOfDepthStage(v: unknown): DepthGroup | null {
+  if (typeof v !== 'string' || v.length < 2) return null;
+  const g = v[0]?.toUpperCase();
+  if (g === 'S' || g === 'F' || g === 'R' || g === 'C' || g === 'I' || g === 'T') {
+    return g as DepthGroup;
+  }
+  return null;
+}
+
+// （重複定義の置き換え）
+// normalizeDepthStage はファイル上部に定義済みなので、ここでは再定義しない。
+
+export function normalizeDepthStageLegacy(v: unknown): DepthStage | null {
+  if (typeof v !== 'string') return null;
+
+  const s = v.trim();
+
+  // legacy bridge
+  if (s === 'S4') return 'F1';
+
+  if (!isDepthStage(s)) return null;
+  return s;
+}
+
+
+
+// spin
+export type SpinLoop = 'SRI' | 'TCF';
+export type SpinStep = 0 | 1 | 2;
+
+export type SpinState = {
+  spinLoop: SpinLoop;
+  spinStep: SpinStep;
+};
+
+// ===== 1ターン分の Iros メタ情報（Orchestrator 〜 ログ共通） =====
+
 export type IrosTurnMeta = {
-  // 既存フィールド（名称は route.ts / UnifiedAnalysis に合わせて緩くしておく）
-  qCode?: string | null;
-  depth?: string | null;
-  phase?: string | null;
+  // 正本（推奨キー）
+  qCode?: QCode | null;
+  depth?: DepthStage | null;
+  phase?: Phase | null;
   selfAcceptance?: number | null;
 
   // 揺れ・余白・ミラー
@@ -101,25 +162,28 @@ export type IrosTurnMeta = {
   hLevel?: HLevel | null;
   mirrorMode?: MirrorMode | null;
 
-  // UnifiedAnalysis 互換の構造（最低限使いそうな部分だけ）
+  // spin（表示/ログ/永続化の共通キー）
+  spinLoop?: SpinLoop | null;
+  spinStep?: SpinStep | null;
+
+  // UnifiedAnalysis 互換の構造（最低限）
   unified?:
     | {
-        q?: { current?: string | null } | null;
-        depth?: { stage?: string | null } | null;
-        phase?: string | null;
+        q?: { current?: QCode | null } | null;
+        depth?: { stage?: DepthStage | null } | null;
+        phase?: Phase | null;
         self_acceptance?: number | null;
         [key: string]: any;
       }
     | null;
 
-  // 拡張用：トーン・関係性・キーワードなど
+  // 拡張用
   relation_tone?: string | null;
   keywords?: string[];
   summary?: string | null;
 
-  // 追加メタ（userCode / traceId / mode などを自由に入れる領域）
   extra?: Record<string, any> | null;
 
-  // 将来の拡張に備えて、その他の予備フィールドも許容
+  // 予備（将来の拡張に備えて）
   [key: string]: any;
 };

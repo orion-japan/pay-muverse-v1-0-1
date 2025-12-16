@@ -80,28 +80,31 @@ export async function irosReply(body: {
   text?: string;
   modeHint?: string;
   extra?: Json;
+
+  // ✅追加
+  history?: unknown[];
 }): Promise<Json> {
   const cid = body.conversationId ?? getCidFromLocation();
   const text = (body.text ?? '').toString().trim();
 
-  if (!cid) {
-    throw new Error('conversationId is required (no body.conversationId and no ?cid in URL)');
-  }
-  if (!text) {
-    throw new Error('text is required');
-  }
+  if (!cid) throw new Error('conversationId is required (no body.conversationId and no ?cid in URL)');
+  if (!text) throw new Error('text is required');
 
   const payload = {
     conversationId: cid,
     text,
     modeHint: body.modeHint,
     extra: body.extra,
+
+    // ✅追加
+    history: Array.isArray(body.history) ? body.history : undefined,
   };
 
   const res = await withAuthFetch('/api/agent/iros/reply', {
     method: 'POST',
     body: JSON.stringify(payload),
   });
+
   if (!res.ok) {
     const msg = await res.text().catch(() => '');
     throw new Error(`reply failed: ${res.status} ${msg}`);
@@ -109,23 +112,6 @@ export async function irosReply(body: {
   return res.json();
 }
 
-export async function irosConversations(): Promise<Json> {
-  const res = await withAuthFetch('/api/agent/iros/conversations', { method: 'GET' });
-  if (!res.ok) {
-    const msg = await res.text().catch(() => '');
-    throw new Error(`conversations failed: ${res.status} ${msg}`);
-  }
-  return res.json();
-}
-
-export async function irosUserInfo(): Promise<Json> {
-  const res = await withAuthFetch('/api/agent/iros/userinfo', { method: 'GET' });
-  if (!res.ok) {
-    const msg = await res.text().catch(() => '');
-    throw new Error(`userinfo failed: ${res.status} ${msg}`);
-  }
-  return res.json();
-}
 
 /**
  * Remember バンドル一覧を取得する（認証付き）

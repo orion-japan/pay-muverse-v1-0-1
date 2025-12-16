@@ -328,7 +328,7 @@ export async function reply(params: {
   conversationId?: string;
   user_text: string; // UI 入力
   mode?: string; // UI のモード文字列（→ modeHint へ）
-  history?: HistoryMsg[]; // 任意
+  history?: HistoryMsg[]; // 任意（{role, content}）
   model?: string; // 任意
 }): Promise<any> {
   const cid = params.conversationId ?? getCidFromLocation();
@@ -336,34 +336,59 @@ export async function reply(params: {
   if (!cid) throw new Error('reply: conversationId is required (body or ?cid)');
   if (!text) throw new Error('reply: text is required');
 
-  const payload = {
+  // ✅ サーバが読むのは body.history（直下）
+  const history = Array.isArray(params.history)
+    ? params.history
+        .filter((m) => m && (m.role === 'user' || m.role === 'assistant'))
+        .slice(-12)
+        .map((m) => ({
+          role: m.role,
+          content: typeof m.content === 'string' ? m.content : String(m.content ?? ''),
+        }))
+    : undefined;
+
+  const payload: any = {
     conversationId: cid,
-    text, // サーバ要求キー
+    text,
     modeHint: params.mode,
     extra: {
       model: params.model ?? undefined,
-      history: Array.isArray(params.history) ? params.history.slice(-3) : undefined,
     },
+    ...(history && history.length > 0 ? { history } : {}),
   };
+
+  // ✅ 送信内容のキーと historyLen を確実にログ（固定{}は禁止）
+  console.log('[IROS][client] calling /api/agent/iros/reply', {
+    from: 'irosClient.ts',
+    conversationId: payload.conversationId,
+    textLen: String(payload.text ?? '').length,
+    historyLen: Array.isArray(payload.history) ? payload.history.length : 0,
+  });
 
   const res = await authFetch('/api/agent/iros/reply', {
     method: 'POST',
     body: JSON.stringify(payload),
   });
+
   const json = await res.json().catch(() => ({}));
   return json;
 }
-
-// src/ui/iroschat/lib/irosClient.ts 内の replyAndStore をこの形に置き換え
 
 export async function replyAndStore(args: {
   conversationId: string;
   user_text: string;
   mode?: string;
   model?: string;
+  history?: HistoryMsg[];
 }) {
-  // ① サーバーに返信を依頼
-  const r = await reply(args);
+  // ① サーバーに返信を依頼（history を渡す）
+  const r = await reply({
+    conversationId: args.conversationId,
+    user_text: args.user_text,
+    mode: args.mode,
+    model: args.model,
+    history: args.history,
+  });
 
   // ② テキスト正規化（[object Object] 対策＋🪔 付与）
   const assistantText = normalizeAssistantText(r);
@@ -372,20 +397,16 @@ export async function replyAndStore(args: {
   // ③ orchestrator から返ってきた meta を拾う
   const meta = r?.meta ?? null;
 
-  // ★ ここでは DB には一切保存しない ★
-  // （assistant の保存はサーバー側 / orchestrator に任せる）
-  // → これで「assistant が2行入る」現象が止まります。
+  // ★ クライアント側では assistant を DB に二重保存しない ★
+  // （保存はサーバ側に任せる）
 
-  // 呼び出し側（IrosChatContext）で使うために、
-  // assistant と meta だけ整えて返す
   return {
     ...r,
     assistant: safe,
     meta,
-    saved: true, // フラグだけ true にしておく（実際の保存はサーバー側）
+    saved: true,
   };
 }
-
 
 /* ========= User Info ========= */
 export async function getUserInfo(): Promise<UserInfo | null> {

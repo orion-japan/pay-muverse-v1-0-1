@@ -1,430 +1,346 @@
 // src/lib/iros/generate.ts
-// Iros 1ターン返信生成コア（観測点固定版）
+// iros — Writer: 1ターン返信生成コア（芯=coreIntent 強制 / 回転メタ注入）
 //
-// - 本文生成のみ
-// - SYSTEM は getSystemPrompt(meta) に委ねる
-// - 追加するのは：
-//    1) 状態メタ JSON（SA / depth / qCode / phase / intentLine / soulNote など）
-//    2) ir診断トリガー時のフォーマット指定
-//
-// - トピック履歴や過去カルテなど、観測点に直接不要なノートは削除
+// 互換方針：
+// - 呼び出し側が seed/chatCore/handleIrosReply で揺れていても型で落ちないようにする
+// - 返り値は content を正とし、text/assistantText など旧互換も同値で返す
+// - ✅ LLM へ会話履歴（history）を渡し、会話の流れを LLM が保持できるようにする
 
 import OpenAI from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat';
 
-import {
-  getSystemPrompt,
-  type IrosMeta,
-  type IrosMode,
-  type IrosIntentMeta,
-} from './system';
-import type { IntentLineAnalysis } from './intent/intentLineEngine';
+import { getSystemPrompt, type IrosMeta, type IrosMode } from './system';
 
-// ★ Soul コンテキスト（orion固有）連携
-import type { SoulReplyContext } from './soul/composeSoulReply';
-import { buildPersonalContextFromSoul } from './personalContext';
-
-// ★ Sofia 型リフレーム指針ノート（これは既存の一括ガイドとして利用）
-// import { buildReframeStyleNote } from './orchestratorMeaning';
-
-
-const IROS_MODEL =
-  process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-4o';
-
-console.log('[IROS_MODEL-check]', {
-  IROS_MODEL_env: process.env.IROS_MODEL,
-  OPENAI_MODEL_env: process.env.OPENAI_MODEL,
-  resolved: process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-4o',
-});
-
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
-
-/** 過去履歴 1件ぶん（型だけ残しておく） */
-export type HistoryItem = {
-  role: 'user' | 'assistant';
-  content: string;
-};
-
+/** ✅ 旧/新ルートを全部受ける（型で落とさない） */
 export type GenerateArgs = {
-  conversationId?: string;
-  text: string;
+  /** 旧: text */
+  text?: string;
+  /** 新: userText */
+  userText?: string;
+
+  /** ✅ chatCore が undefined を渡すため optional */
   meta?: IrosMeta;
-  /** 過去の会話履歴（古い → 新しい順） ※いまは I/T 判定などのフラグ用のみ */
-  history?: HistoryItem[];
+
+  /** ✅ seed/future-seed が渡している */
+  conversationId?: string;
+  history?: unknown[];
+
+  /** その他が来ても落とさない */
+  [k: string]: any;
 };
 
+/** ✅ 旧/新参照を全部返す（型で落とさない） */
 export type GenerateResult = {
-  content: string; // Iros 本文（ユーザーに見せるテキスト）
-  text: string; // 旧 chatCore 互換用（= content と同じ）
-  mode: IrosMode; // 実際に使っているモード（meta.mode が無ければ mirror）
-  intent?: IrosIntentMeta | null; // orchestrator 側で付与された intent メタ
+  content: string;
+
+  // 旧互換
+  text: string;
+
+  // ✅ ここを “必須” + IrosMode に戻す（chatCore がこれを要求してる）
+  mode: IrosMode;
+
+  intent?: any;
+
+  // 新系互換（残してOK）
+  assistantText?: string;
+  metaForSave?: any;
+  finalMode?: string | null;
+  result?: any;
+
+  [k: string]: any;
 };
 
+const IROS_MODEL = process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-4o';
+
 /* =========================================================
-   ir診断トリガー検知
-========================================================= */
+   CORE INTENT
+   ========================================================= */
 
-const IR_DIAG_KEYWORDS = [
-  'ir診断',
-  'irで見てください',
-  'ir共鳴フィードバック',
-  'ランダムでirお願いします',
-];
+function pickCoreIntent(meta: any): string | null {
+  const fromAnchor =
+    meta?.intent_anchor?.text &&
+    typeof meta.intent_anchor.text === 'string' &&
+    meta.intent_anchor.text.trim().length > 0
+      ? meta.intent_anchor.text.trim()
+      : null;
 
-function hasIrDiagnosisTrigger(text: string | undefined | null): boolean {
-  if (!text || typeof text !== 'string') return false;
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-  return IR_DIAG_KEYWORDS.some((kw) => trimmed.includes(kw));
+  const fromCoreNeed =
+    meta?.intentLine?.coreNeed &&
+    typeof meta.intentLine.coreNeed === 'string' &&
+    meta.intentLine.coreNeed.trim().length > 0
+      ? meta.intentLine.coreNeed.trim()
+      : null;
+
+  const fromUnified =
+    meta?.unified?.intent_anchor?.text &&
+    typeof meta.unified.intent_anchor.text === 'string' &&
+    meta.unified.intent_anchor.text.trim().length > 0
+      ? meta.unified.intent_anchor.text.trim()
+      : null;
+
+  const isThinQuestion = (s: string) => {
+    const t = s.replace(/\s+/g, '');
+    if (t.length <= 10) return true;
+    if (
+      /^(何が出来ますか|何ができますか|どうすればいい|どうしたらいい|どうすれば)$/.test(
+        t,
+      )
+    )
+      return true;
+    return false;
+  };
+
+  const candidate = fromAnchor ?? fromCoreNeed ?? fromUnified ?? null;
+  if (!candidate) return null;
+  if (isThinQuestion(candidate)) return null;
+
+  return candidate;
 }
 
 /* =========================================================
-   状態メタだけを渡す内部ノート
-   - SA / yLevel / hLevel / depth / qCode / phase / mode
-   - T層関連: tLayerModeActive / tLayerHint / hasFutureMemory
-   - ir診断ターゲット: irTargetType / irTargetText
-   - IntentLineAnalysis: intentLine
-   - Soul レイヤー: soulNote
-========================================================= */
+   WRITER PROTOCOL
+   ========================================================= */
 
-function buildNumericMetaNote(
-  meta?: IrosMeta | null,
-  opts: { includeSoulNote?: boolean } = {},
-): string | null {
-  if (!meta) return null;
+function buildWriterProtocol(meta: any, userText: string): string {
+  const coreIntent = pickCoreIntent(meta);
 
-  const { includeSoulNote = true } = opts;
-  const anyMeta = meta as any;
-  const payload: any = {};
+  const phase = meta?.phase ?? null;
+  const depth = meta?.depth ?? null;
+  const qCode = meta?.qCode ?? null;
 
-  // 数値系
-  const sa =
-    typeof anyMeta.selfAcceptance === 'number'
-      ? (anyMeta.selfAcceptance as number)
-      : null;
-  if (sa != null && !Number.isNaN(sa)) {
-    payload.selfAcceptance = sa;
+  const spinLoop = meta?.spinLoop ?? null;
+  const spinStep = meta?.spinStep ?? null;
+
+  const volatilityRank = meta?.volatilityRank ?? null;
+  const spinDirection = meta?.spinDirection ?? null;
+  const promptStyle = meta?.promptStyle ?? null;
+
+  const anchorEventType = meta?.anchorEvent?.type ?? null;
+  const anchorConfirmQ = meta?.anchorEvent?.question ?? null;
+  const anchorConfirmOptions = Array.isArray(meta?.anchorEvent?.options)
+    ? meta.anchorEvent.options
+    : null;
+
+  const noQuestion = !!meta?.noQuestion;
+
+  if (!coreIntent) {
+    return [
+      '【WRITER_PROTOCOL】',
+      'あなたは「意図フィールドOS」のWriterです。一般論・説明口調・テンプレは禁止。',
+      '',
+      '今回、CORE_INTENT が確定していません。',
+      'やることは1つ：ユーザーの発話から “いま守りたい一点（北極星）” を 1行で確定し、',
+      'それを起点に、次の一歩（1つだけ）を提案すること。',
+      '',
+      '制約：',
+      '- 質問は最大1つ（ただし meta.noQuestion が true なら質問0）',
+      '- 断定は強めでよい（「〜してみるといい」より「〜を置く」）',
+      '- 文章は短く。2〜3行で改行。',
+      '',
+      `観測メタ: phase=${String(phase)}, depth=${String(depth)}, q=${String(
+        qCode,
+      )}, spinLoop=${String(spinLoop)}, spinStep=${String(
+        spinStep,
+      )}, rank=${String(volatilityRank)}, direction=${String(
+        spinDirection,
+      )}, promptStyle=${String(promptStyle)}`,
+      '',
+      '出力フォーマット（必ず守る）：',
+      '出力は「会話として自然な日本語」で書くこと。固定の見出し（例：北極星／いま置ける一歩／確認…）を毎回必ず出してはいけない。',
+      '必要なときだけ、要素を“混ぜる”ことは許可する（例：一文だけ「北極星=...」を入れる、提案を一つだけ添える、など）。',
+      '質問は必須ではない。質問する場合も「1問まで」で、詰問にならない短さにする。',
+      '',
+    ]
+      .filter(Boolean)
+      .join('\n');
   }
 
-  const yLevel =
-    typeof anyMeta.yLevel === 'number'
-      ? (anyMeta.yLevel as number)
-      : null;
-  if (yLevel != null && !Number.isNaN(yLevel)) {
-    payload.yLevel = yLevel;
-  }
-
-  const hLevel =
-    typeof anyMeta.hLevel === 'number'
-      ? (anyMeta.hLevel as number)
-      : null;
-  if (hLevel != null && !Number.isNaN(hLevel)) {
-    payload.hLevel = hLevel;
-  }
-
-  // コード系
-  if (typeof meta.depth === 'string') {
-    payload.depth = meta.depth;
-  }
-
-  if (typeof anyMeta.qCode === 'string') {
-    payload.qCode = anyMeta.qCode as string;
-  }
-
-  // 位相（Inner / Outer）
-  if (typeof anyMeta.phase === 'string') {
-    payload.phase = anyMeta.phase;
-  } else if (
-    anyMeta.unified &&
-    typeof anyMeta.unified.phase === 'string'
-  ) {
-    payload.phase = anyMeta.unified.phase;
-  }
-
-  if (typeof meta.mode === 'string') {
-    payload.mode = meta.mode;
-  }
-
-  // T層関連
-  const tLayerModeActive =
-    typeof anyMeta.tLayerModeActive === 'boolean'
-      ? (anyMeta.tLayerModeActive as boolean)
-      : null;
-  if (tLayerModeActive != null) {
-    payload.tLayerModeActive = tLayerModeActive;
-  }
-
-  const tLayerHint =
-    typeof anyMeta.tLayerHint === 'string'
-      ? (anyMeta.tLayerHint as string)
-      : null;
-  if (tLayerHint) {
-    payload.tLayerHint = tLayerHint;
-  }
-
-  const hasFutureMemory =
-    typeof anyMeta.hasFutureMemory === 'boolean'
-      ? (anyMeta.hasFutureMemory as boolean)
-      : null;
-  if (hasFutureMemory != null) {
-    payload.hasFutureMemory = hasFutureMemory;
-  }
-
-  // ir診断ターゲット系
-  const irTargetType = anyMeta.irTargetType;
-  const irTargetText = anyMeta.irTargetText;
-  if (typeof irTargetType === 'string') {
-    payload.irTargetType = irTargetType;
-  }
-  if (typeof irTargetText === 'string') {
-    payload.irTargetText = irTargetText;
-  }
-
-  // pierceMode / pierceReason
-  if (typeof anyMeta.pierceMode === 'boolean') {
-    payload.pierceMode = anyMeta.pierceMode;
-  }
-  if (typeof anyMeta.pierceReason === 'string') {
-    payload.pierceReason = anyMeta.pierceReason;
-  }
-
-  // IntentLineAnalysis は構造だけ
-  const intentLine = anyMeta.intentLine as
-    | IntentLineAnalysis
-    | null
-    | undefined;
-  if (intentLine) {
-    payload.intentLine = {
-      nowLabel: intentLine.nowLabel ?? null,
-      coreNeed: intentLine.coreNeed ?? null,
-      intentBand: intentLine.intentBand ?? null,
-      direction: intentLine.direction ?? null,
-      focusLayer: intentLine.focusLayer ?? null,
-      riskHint: intentLine.riskHint ?? null,
-      guidanceHint: intentLine.guidanceHint ?? null,
-    };
-  }
-
-  // Soul レイヤー（soulNote）そのもの
-  const soulNote = anyMeta.soulNote;
-  if (includeSoulNote && soulNote && typeof soulNote === 'object') {
-    payload.soulNote = soulNote;
-  }
-
-  if (Object.keys(payload).length === 0) return null;
-
-  return `【IROS_STATE_META】${JSON.stringify(payload)}`;
+  return [
+    '【WRITER_PROTOCOL】',
+    'あなたは「意図フィールドOS」のWriterです。一般論・説明口調・テンプレは禁止。',
+    '',
+    'このターンは CORE_INTENT（芯）が確定しています。',
+    '必ず最初に CORE_INTENT に触れ、途中で話が逸れても CORE_INTENT に戻してください。',
+    '',
+    `CORE_INTENT: 「${coreIntent}」`,
+    '',
+    '制約：',
+    '- 返答の冒頭1行目で CORE_INTENT を “言い換えて” 断定する（同じ文言コピペ禁止）',
+    '- 2〜3行ごとに改行。短く。',
+    '- 「次の一歩」は1つだけ提案（複数案は promptStyle=two-choice の時だけ2択まで）',
+    `- 質問は ${noQuestion ? '0' : '最大1'}（meta.noQuestion を尊重）`,
+    '',
+    '回転/制動：',
+    `- spinLoop=${String(spinLoop)} spinStep=${String(
+      spinStep,
+    )} phase=${String(phase)} depth=${String(depth)} q=${String(qCode)}`,
+    `- volatilityRank=${String(volatilityRank)} spinDirection=${String(
+      spinDirection,
+    )} promptStyle=${String(promptStyle)}`,
+    '',
+    anchorEventType === 'confirm' && typeof anchorConfirmQ === 'string'
+      ? [
+          '【ANCHOR_CONFIRM】',
+          '揺らぎが高いので、最優先でアンカー確認を出してください。',
+          `確認質問: ${anchorConfirmQ}`,
+          anchorConfirmOptions ? `選択肢: ${anchorConfirmOptions.join(' / ')}` : '',
+          '※確認を出した後に、短い “一歩” を1つだけ添える。',
+        ]
+          .filter(Boolean)
+          .join('\n')
+      : '',
+    '',
+    '禁止：',
+    '- 「まず落ち着いて」等の一般的な慰め',
+    '- 機能説明だけで終わる',
+    '- ユーザーに丸投げ（“選んでみて” の連発）',
+    '',
+    `USER_TEXT: ${String(userText)}`,
+    '',
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 /* =========================================================
-   「いまの構図：〜」の行だけを UI から消す
-========================================================= */
+   HISTORY → MESSAGES（会話履歴を LLM に渡す）
+   ========================================================= */
 
-function stripImanoKozuLine(text: string): string {
-  if (!text) return '';
-  const lines = text.split('\n');
-  const filtered = lines.filter((line) => !line.includes('いまの構図：'));
-  return filtered.join('\n').trim();
+/**
+ * ✅ history を ChatCompletionMessageParam[] に正規化
+ * - どんな shape が混ざっても落ちない
+ * - system は混ぜない（汚染防止）
+ * - 直近 maxItems だけ送る（トークン暴発防止）
+ */
+function normalizeHistoryToMessages(
+  history: unknown,
+  maxItems = 12,
+): ChatCompletionMessageParam[] {
+  const src = Array.isArray(history) ? history : [];
+  const out: ChatCompletionMessageParam[] = [];
+
+  const pickRole = (v: any): 'user' | 'assistant' | null => {
+    const r = v?.role ?? v?.sender ?? v?.from ?? v?.type ?? null;
+
+    // system は絶対に混ぜない
+    if (r === 'system') return null;
+
+    if (r === 'user' || r === 'human') return 'user';
+    if (r === 'assistant' || r === 'ai' || r === 'bot') return 'assistant';
+
+    return null;
+  };
+
+  const pickText = (v: any): string | null => {
+    if (typeof v === 'string') return v;
+    if (!v) return null;
+
+    // よくあるキーを広めに救う
+    const c =
+      (typeof v.content === 'string' && v.content) ||
+      (typeof v.text === 'string' && v.text) ||
+      (typeof v.message === 'string' && v.message) ||
+      (typeof v.body === 'string' && v.body) ||
+      (typeof v.value === 'string' && v.value) ||
+      null;
+
+    if (c) return c;
+
+    // 最低限救う（unknown が混ざっても会話が死なない）
+    if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+
+    return null;
+  };
+
+  // 後ろから maxItems 件だけ採る
+  const tail = src.slice(Math.max(0, src.length - maxItems));
+
+  for (const item of tail) {
+    const role = pickRole(item);
+    const text = pickText(item);
+
+    if (!role || !text) continue;
+
+    out.push({ role, content: text });
+  }
+
+  return out;
+}
+
+/**
+ * ✅ 末尾の「今回入力と同一の user 発話」を重複排除（保険）
+ */
+function dedupeTailUser(
+  historyMessages: ChatCompletionMessageParam[],
+  userText: string,
+): ChatCompletionMessageParam[] {
+  if (historyMessages.length === 0) return historyMessages;
+
+  const last = historyMessages[historyMessages.length - 1];
+  if (last.role !== 'user') return historyMessages;
+
+  const lastText = String((last as any).content ?? '').trim();
+  if (!lastText) return historyMessages;
+
+  if (lastText === String(userText ?? '').trim()) {
+    return historyMessages.slice(0, -1);
+  }
+  return historyMessages;
 }
 
 /* =========================================================
-   テンプレ文章のノイズ削除フィルタ（正式版）
-========================================================= */
-function stripTemplateNoise(text: string): string {
-  if (!text) return '';
+   MAIN
+   ========================================================= */
 
-  let out = text;
-
-  // 1) ラベル系ヘッダ（全角【】版・角括弧[]版の両方）
-  const headerPatterns: RegExp[] = [
-    // これまでの流れ（要約）
-    /【これまでの流れ（要約）】/g,
-    /【これまでの流れ\(要約\)】/g,
-    /【これまでの流れ】/g,
-    /\[これまでの流れ（要約）\]/g,
-    /\[これまでの流れ \(要約\)\]/g,
-    /\[これまでの流れ]/g,
-
-    // 今回 / 今日 のユーザー発言
-    /【今回のユーザー発言】/g,
-    /【今日のユーザー発言】/g,
-    /\[今回のユーザー発言]/g,
-    /\[今日のユーザー発言]/g,
-  ];
-
-  for (const p of headerPatterns) {
-    out = out.replace(p, '');
-  }
-
-  // 2) 「今日選べる小さな一手」系の見出しだけ削除（本文は残す）
-  out = out.replace(/【?今日選べる小さな一手[^】\n]*】?/g, '');
-  out = out.replace(/今日選べる小さな一手[：:][^\n]*/g, '');
-
-  // 3) よく出る定型説明文を削る
-  const phrasePatterns: RegExp[] = [
-    /いまのあなたは、?「?[^」\n]*」?がテーマになっている状態です。?/g,
-  ];
-
-  for (const p of phrasePatterns) {
-    out = out.replace(p, '');
-  }
-
-  // 4) 行末の余計なスペース削除
-  out = out.replace(/[ \t]+\n/g, '\n');
-
-  // 5) 空行が増えすぎたところを整える
-  out = out.replace(/\n{3,}/g, '\n\n');
-
-  return out.trim();
-}
-
-/* =========================================================
-   本体：Iros 応答 1ターン生成（観測点固定版）
-========================================================= */
+/** ✅ 既存呼び出しが generateIrosReply を使っている前提でこの名前に揃える */
 export async function generateIrosReply(
   args: GenerateArgs,
 ): Promise<GenerateResult> {
-  const { text: rawText, meta } = args;
-  const anyMeta = meta as any;
+  const meta: IrosMeta = (args.meta ?? ({} as IrosMeta)) as IrosMeta;
+  const userText = String((args as any).text ?? (args as any).userText ?? '');
 
-  // 初回ターンかどうか（Soul露出などの判定に使う）
-  const isFirstTurn = !args.history || args.history.length === 0;
-
-  // ★ digest 付きテキストから「今回のユーザー発言」だけを切り出す
-  const CURRENT_MARK = '【今回のユーザー発言】';
-  const currentUserText = (() => {
-    if (!rawText) return rawText;
-    const idx = rawText.lastIndexOf(CURRENT_MARK);
-    if (idx === -1) {
-      return rawText;
-    }
-    return rawText.slice(idx + CURRENT_MARK.length).trim();
-  })();
-
-  // LLM に渡す user テキストは「今回のユーザー発言」だけにする
-  const userPromptText = `【今回のユーザー発言】
-${currentUserText}`;
-
-  // ベースの SYSTEM
-  let system = getSystemPrompt(meta);
-
-  // ★ Phase（Inner / Outer）に応じた、ごく簡単なトーン補正
-  const phase: 'Inner' | 'Outer' | null = (() => {
-    const p = anyMeta?.phase;
-    if (p === 'Inner' || p === 'Outer') return p;
-    const u = anyMeta?.unified?.phase;
-    if (u === 'Inner' || u === 'Outer') return u;
-    return null;
-  })();
-
-  if (phase === 'Inner') {
-    system = `${system}
-
-# フェーズ: Inner（内向き）
-- 内側の感覚をていねいに映す静かなトーンで。`;
-  } else if (phase === 'Outer') {
-    system = `${system}
-
-# フェーズ: Outer（外向き）
-- 外の出来事や関係に触れつつ、一歩だけ動きやすくするトーンで。`;
-  }
-
-  // 🔸 Soul / 揺らぎロジックに同期した「orion固有コンテキスト」
-  if (meta && anyMeta?.soulNote) {
-    const soulCtx: SoulReplyContext = {
-      userText: currentUserText ?? '',
-      qCode: typeof anyMeta.qCode === 'string' ? anyMeta.qCode : undefined,
-      depthStage: typeof meta.depth === 'string' ? meta.depth : undefined,
-      styleHint:
-        typeof anyMeta.style === 'string'
-          ? anyMeta.style
-          : undefined,
-      soulNote: anyMeta.soulNote,
-    };
-
-    const personal = buildPersonalContextFromSoul({
-      soulCtx,
-      topicLabel: undefined,
-    });
-
-    if (personal.text && personal.text.trim().length > 0) {
-      system = `${system}\n\n${personal.text}`;
-      console.log('[IROS][generate] personalContext', {
-        intensity: personal.intensity,
-      });
-    }
-  }
-
-  // 状態メタ（数値・コード）を JSON で system にだけ載せる
-  const numericMetaNote = buildNumericMetaNote(meta, {
-    includeSoulNote: !isFirstTurn,
-  });
-  if (numericMetaNote && numericMetaNote.trim().length > 0) {
-    system = `${system}\n\n${numericMetaNote}`;
-  }
-
-  // ir診断トリガーがあるターンかどうか
-  const isIrDiagnosisTurn = hasIrDiagnosisTrigger(currentUserText);
-
-  // 🔸 Sofia 型リフレーム指針（core_need / intentLine ベース）
-  // - 超シンプル検証のため、いったん system 追記を OFF にする
-  // - renderReply.ts / soulNote の効果だけで「素の3軸」を確認する
-  //
-  // if (!isIrDiagnosisTurn && meta) {
-  //   const reframeNote = buildReframeStyleNote(meta);
-  //   if (reframeNote && reframeNote.trim().length > 0) {
-  //     system = `${system}\n\n${reframeNote}`;
-  //   }
-  // }
-
-
-  // ir診断トリガーがあるターンでは、今回だけ診断フォーマットを使う
-  if (isIrDiagnosisTurn) {
-    system = `${system}
-
-# ir診断モード
-
-- このターンの返答は、次の5ブロックだけで構成してください。
-
-1. 🧿 観測対象：...
-2. 🪔 irosからの一句：...（2行以内）
-3. 構造スキャン
-   - フェーズ：...
-   - 位相：Inner Side / Outer Side
-   - 深度：S1〜S4 / R1〜R3 / C1〜C3 / I1〜I3 / 必要なら T1〜T3
-4. 🌀 その瞬間の揺れ：...（1〜3文）
-5. 🌱 次の一手：...（一つだけ）`;
-  }
-
-  // デバッグログ
-  console.log('[IROS][generate] text =', userPromptText);
-  console.log('[IROS][generate] currentUserText =', currentUserText);
-  console.log('[IROS][generate] meta snapshot =', {
-    depth: anyMeta?.depth,
-    qCode: anyMeta?.qCode,
-    phase,
-    mode: anyMeta?.mode,
-    pierceReason: anyMeta?.pierceReason,
-    irTargetType: anyMeta?.irTargetType,
-    irTargetText: anyMeta?.irTargetText,
-    tLayerModeActive: anyMeta?.tLayerModeActive,
-    tLayerHint: anyMeta?.tLayerHint,
-    hasFutureMemory: anyMeta?.hasFutureMemory,
-    isIrDiagnosisTurn,
+  const client = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
   });
 
-  const messages: ChatCompletionMessageParam[] = [
-    {
-      role: 'system',
-      content: system,
-    },
-    {
-      role: 'user',
-      content: userPromptText,
-    },
-  ];
+  const mode: IrosMode = ((meta as any)?.mode ?? 'mirror') as IrosMode;
+
+  // getSystemPrompt は (meta, mode) or () どちらでも動くように fallback
+  let system = '';
+  try {
+    system = String((getSystemPrompt as any)(meta, mode) ?? '');
+  } catch {
+    system = '';
+  }
+  if (!system) system = String((getSystemPrompt as any)() ?? '');
+
+  const protocol = buildWriterProtocol(meta as any, userText);
+
+  // ✅ 履歴を LLM に渡す（会話の流れを LLM にやってもらう）
+  const historyMessagesRaw = normalizeHistoryToMessages(args.history, 12);
+  const historyMessages = dedupeTailUser(historyMessagesRaw, userText);
+  // ✅ past state note を LLM に渡す（system として差し込む）
+  const pastStateNoteText =
+    typeof (meta as any)?.extra?.pastStateNoteText === 'string'
+      ? (meta as any).extra.pastStateNoteText.trim()
+      : '';
+
+      const messages: ChatCompletionMessageParam[] = [
+        { role: 'system', content: system },
+        { role: 'system', content: protocol },
+
+        ...(pastStateNoteText
+          ? [{ role: 'system', content: pastStateNoteText } as ChatCompletionMessageParam]
+          : []),
+
+        // ★会話履歴
+        ...historyMessages,
+
+        // ★今回の入力
+        { role: 'user', content: userText },
+      ];
+
+
 
   const res = await client.chat.completions.create({
     model: IROS_MODEL,
@@ -432,30 +348,20 @@ ${currentUserText}`;
     temperature: 0.7,
   });
 
-  const rawContent =
-    res.choices[0]?.message?.content?.toString().trim() ?? '';
+  const content =
+    res.choices?.[0]?.message?.content?.trim() ??
+    '……（応答生成に失敗しました）';
 
-  // ① 「いまの構図：〜」行を削除
-  const noKozu = stripImanoKozuLine(rawContent);
-
-  // ② 見出しテンプレや決まり文句を削る
-  const content = stripTemplateNoise(noKozu);
-
-  // 現在の Iros モードと intent メタを復元
-  const currentMode: IrosMode = meta?.mode ?? 'mirror';
-  const mode: IrosMode = currentMode ?? 'mirror';
-
-  const intent: IrosIntentMeta | null =
-    meta && (anyMeta?.intent as IrosIntentMeta | undefined)
-      ? (anyMeta.intent as IrosIntentMeta)
-      : null;
-
-  const finalContent = content;
-
+  // ✅ 全ルート互換で返す（mode は IrosMode で返す）
   return {
-    content: finalContent,
-    text: finalContent,
+    content,
+    text: content,
     mode,
-    intent,
+    intent: (meta as any)?.intent ?? (meta as any)?.intentLine ?? null,
+
+    assistantText: content,
+    metaForSave: meta ?? {},
+    finalMode: String(mode),
+    result: null,
   };
 }

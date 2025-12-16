@@ -40,19 +40,21 @@ async function resolveIsFirstTurn(
   conversationId: string,
 ): Promise<boolean> {
   try {
-    const { count, error } = await supabase
+    const { data, error } = await supabase
       .from('iros_messages')
-      .select('id', { count: 'exact', head: true })
-      .eq('conversation_id', conversationId);
+      .select('id')
+      .eq('conversation_id', conversationId)
+      .limit(1);
 
     if (error) {
-      console.error('[IROS/Context] count messages failed', {
+      console.error('[IROS/Context] resolveIsFirstTurn select failed', {
         conversationId,
         error,
       });
       return false;
     }
-    return (count ?? 0) === 0;
+
+    return (data?.length ?? 0) === 0;
   } catch (e) {
     console.error('[IROS/Context] resolveIsFirstTurn unexpected', {
       conversationId,
@@ -61,6 +63,7 @@ async function resolveIsFirstTurn(
     return false;
   }
 }
+
 
 export async function buildTurnContext(
   args: BuildTurnContextArgs,
@@ -106,6 +109,35 @@ export async function buildTurnContext(
     baseMeta: baseMetaForTurn,
   });
   baseMetaForTurn = mergedBaseMeta ?? baseMetaForTurn;
+
+  // ★ 回転状態（spin/descent）を camelCase に寄せて保持（下流の取りこぼし防止）
+  {
+    const spinLoop =
+      baseMetaForTurn?.spinLoop ??
+      baseMetaForTurn?.spin_loop ??
+      null;
+
+    const descentGate =
+      baseMetaForTurn?.descentGate ??
+      baseMetaForTurn?.descent_gate ??
+      null;
+
+    if (spinLoop) baseMetaForTurn.spinLoop = spinLoop;
+    if (descentGate) baseMetaForTurn.descentGate = descentGate;
+  }
+
+  // ★ phase を baseMetaForTurn に注入（pivot 判定のため必須）
+{
+  const phase =
+    baseMetaForTurn?.phase ??
+    baseMetaForTurn?.phase_raw ??
+    baseMetaForTurn?.phaseStage ??
+    null;
+
+  if (phase) {
+    baseMetaForTurn.phase = phase;
+  }
+}
 
   return {
     isFirstTurn,

@@ -1,79 +1,134 @@
 // src/lib/iros/protocols/perspectiveShift.ts
-// Sofia 型の「視点シフト」プロトコル（テンプレ文型・乱発禁止版）
-// - 「それは◯◯という話ではなくて〜」という定型文を、毎回は使わない
-// - 「観測 → 別視点 → 次の一歩」の三段構造は使わない
-// - ここぞのタイミングだけで発動する「一行だけのレイヤーずらし」として扱う
+// 「北極星（アンカー）」や「ヒント」を出すブロック生成
+// 方針：アンカーは “確定（set/reset）している時だけ” 北極星として出す。
+//      未確定（none/confirm）のときは、Insight ヒントを1つだけ出す。
 
-import type { IrosMeta } from '../system';
+type Maybe<T> = T | null | undefined;
 
-/**
- * 視点シフトプロトコル本体
- *
- * - 出来事レベルの話を、「奥でどんな願い・意図が動いているか」に言い換える一行だけを書く
- * - 「観測対象」「その瞬間の揺れ」「次の一手」など、ラベル付きの段落は作らない
- * - 決まった文型を繰り返すのではなく、その都度ことばを変えて構造を切り取る
- */
-export const PERSPECTIVE_SHIFT_PROTOCOL = `
-# 視点シフト構造（Sofia 型・非テンプレ／一行だけ）
-
-- このブロックは、「ここで視点を一段ずらすと場が軽くなる／深まる」と
-  Iros がはっきり感じ取れたときだけ使う。
-- 迷うときは、このブロックを使わず、揺れをそのまま描写する。
-
-## 1. 使用頻度とタイミング
-
-- 「それは◯◯という話ではなくて〜」のように、
-  いったん何かを否定してから本質を言い換える視点シフトは、
-  毎ターン使わない。
-- **「観測 → 別視点 → 次の一歩」の三段構成は使ってはならない。**
-  - 「観測対象：」「その瞬間の揺れ：」「次の一手：」などの
-    ラベル付きの見出し・段落は作らない。
-- この型を解禁してよいのは、次の3条件がそろったときだけ：
-  1. Q2 または Q3（揺れ・葛藤が強い）
-  2. 深度が S1〜R2（自己〜関係レイヤーの揺れ）
-  3. ユーザーの言葉と、フィールドの奥に見える意図が明らかにズレていると
-     Iros が判断したとき
-- 一つのテーマ／スレッドの中で、この型を何度も繰り返さない。
-
-## 2. 書き方（必ず「一行だけ・ラベルなし」）
-
-- 出来事レベルの話を、「奥でどんな願い・意図が動いているか」に
-  言い換える **一行だけ** を書く。
-- その一行は、本文の流れの中にさりげなく織り込む。
-  - 見出しや区切り線を増やさない。
-  - 「〜という動きが一番強くなっている。」のような型を連発しない。
-- 同じ文型を繰り返さず、そのターンに一番合う日本語を毎回あらためて選ぶ。
-- 例（そのままコピペはしない）：
-  - 「この話の奥では、『自分の感覚を信じていたい』という願いが静かに動いている。」
-  - 「ここでは、境界線を守りたい気持ちがそっと前に出ている。」
-`.trim();
+export type AnchorEventType = 'none' | 'confirm' | 'set' | 'reset';
 
 /**
- * このターンで視点シフトプロトコルを使うかどうかを決めるヘルパー
- *
- * - 「ここぞ」の場面だけで使いたいので、ある程度条件を絞る
- * - 暫定ルール：感情が動いていて (Q2/Q3)、かつ S〜R 層にいるときに有効化
+ * ここでは IrosMeta の完全型に依存しないため、必要最低限だけ参照する。
+ * system.ts 側の meta から下のキーが来ていれば動く。
  */
-export function buildPerspectiveShiftBlock(meta?: IrosMeta | null): string | null {
-  if (!meta) return null;
+export type PerspectiveShiftMeta = {
+  qCode?: Maybe<'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5'>;
+  depth?: Maybe<string>;
+  phase?: Maybe<'Inner' | 'Outer'>;
+  situationSummary?: Maybe<string>;
+  recentTopic?: Maybe<string>;
+  userText?: Maybe<string>;
 
-  const q = meta.qCode;
-  const depth = meta.depth ?? null;
+  // ✅ 重要：このターンのアンカー確定イベント
+  // - set/reset のときだけ北極星として表示する
+  anchorEventType?: Maybe<AnchorEventType>;
 
-  // 深度が T層 のときは使わない（T層は別プロトコルに任せる）
-  if (depth && depth.startsWith('T')) return null;
+  // 互換：どこかに入ってる可能性があるイベント名
+  intentAnchorEventType?: Maybe<AnchorEventType>;
+  anchorEvent?: Maybe<{ type?: Maybe<AnchorEventType> }>;
 
-  // 「感情が動いている & 自分〜関係あたり」のときにここぞで使う
-  const isEmotionalQ = q === 'Q2' || q === 'Q3';
-  const isSelfOrRelationDepth =
-    depth === null ||
-    depth.startsWith('S') ||
-    depth.startsWith('R');
+  // アンカー（北極星）候補：どの形でも拾えるようにしておく
+  // ※ unified.intent_anchor / intent_anchor の形も拾う
+  intentAnchor?: Maybe<{
+    anchor_text?: Maybe<string>;
+    anchorText?: Maybe<string>;
+    text?: Maybe<string>;
+  }>;
+  intent_anchor?: Maybe<{
+    text?: Maybe<string>;
+    anchor_text?: Maybe<string>;
+  }>;
+  unified?: Maybe<{
+    intent_anchor?: Maybe<{
+      text?: Maybe<string>;
+      anchor_text?: Maybe<string>;
+    }>;
+  }>;
+};
 
-  if (!isEmotionalQ || !isSelfOrRelationDepth) {
-    // それ以外のターンでは、このプロトコルは注入しない
-    return null;
+function normalizeText(t: Maybe<string>): string {
+  return (t ?? '').replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ').trim();
+}
+
+/** 互換込みで anchorEventType を拾う（最終的に set/reset だけが“北極星”） */
+function pickAnchorEventType(meta: PerspectiveShiftMeta): AnchorEventType {
+  const t1 = meta.anchorEventType;
+  if (t1 === 'none' || t1 === 'confirm' || t1 === 'set' || t1 === 'reset') return t1;
+
+  const t2 = meta.intentAnchorEventType;
+  if (t2 === 'none' || t2 === 'confirm' || t2 === 'set' || t2 === 'reset') return t2;
+
+  const t3 = meta.anchorEvent?.type;
+  if (t3 === 'none' || t3 === 'confirm' || t3 === 'set' || t3 === 'reset') return t3;
+
+  return 'none';
+}
+
+function pickAnchorText(meta: PerspectiveShiftMeta): string {
+  const a = meta.intentAnchor;
+  const u1 = meta.unified?.intent_anchor;
+  const u2 = meta.intent_anchor;
+
+  const t =
+    normalizeText(a?.anchor_text) ||
+    normalizeText(a?.anchorText) ||
+    normalizeText(a?.text) ||
+    normalizeText(u1?.text) ||
+    normalizeText(u1?.anchor_text) ||
+    normalizeText(u2?.text) ||
+    normalizeText(u2?.anchor_text);
+
+  return t;
+}
+
+/**
+ * Qコードごとに「洞察のネタ（Insight）」を1つだけ返す。
+ * ※ここは後で世界観に寄せて増やせる。
+ */
+function buildInsightHint(meta: PerspectiveShiftMeta): string {
+  const q = meta.qCode ?? null;
+
+  const s = normalizeText(meta.situationSummary);
+  const u = normalizeText(meta.userText);
+  const hasMaterial = Boolean(s || u);
+
+  const byQ: Record<NonNullable<PerspectiveShiftMeta['qCode']>, string> = {
+    Q1: 'いまは「秩序を保ちたい／崩したくない」が強く働いているかもしれません。',
+    Q2: 'いまは「動くと確定してしまう」ことへの警戒が混ざっているかもしれません。',
+    Q3: 'いまは「不確実さの中で安全を確保したい」が前に出ているかもしれません。',
+    Q4: 'いまは「踏み込むのが怖い／侵入されたくない」の境界反応が出ているかもしれません。',
+    Q5: 'いまは「空っぽに感じるほど消耗している」か「火を戻したい」が同時に来ているかもしれません。',
+  };
+
+  const base = q
+    ? byQ[q]
+    : 'いまは「状況そのもの」より「心の揺れ方」に答えが埋まっているかもしれません。';
+
+  if (hasMaterial) {
+    const tail = s ? `（状況: ${s}）` : u ? `（発話: ${u}）` : '';
+    return `${base}\n${tail}`.trim();
   }
 
-  return PERSPECTIVE_SHIFT_PROTOCOL;
+  return base;
+}
+
+/**
+ * 文章ブロック生成
+ * - アンカーが “確定（set/reset）” → 北極星ブロック
+ * - それ以外 → Insight ヒントを1つだけ
+ */
+export function buildPerspectiveShiftBlock(meta: PerspectiveShiftMeta): string {
+  const eventType = pickAnchorEventType(meta);
+  const anchor = pickAnchorText(meta);
+
+  // ✅ set/reset のときだけ北極星を出す（none/confirm は出さない）
+  if ((eventType === 'set' || eventType === 'reset') && anchor) {
+    return ['【北極星】', anchor].join('\n');
+  }
+
+  // ✅ それ以外はヒント（1つだけ）
+  const hint = buildInsightHint(meta);
+  if (!hint) return '';
+
+  return ['【ヒント】', hint].join('\n');
 }
