@@ -33,7 +33,8 @@ const REMEMBER_TRIGGER_REGEX =
   /(覚えてる[？\?]?|覚えてます[か？\?]*|覚えていましたっけ[？\?]?)/;
 
 // 「あの時」「前に」などのノイズを削りたい時用
-const FILLER_WORDS_REGEX = /(前に|前回|この前|あのとき|あの時|例の|あの件の?|その件の?)/g;
+const FILLER_WORDS_REGEX =
+  /(前に|前回|この前|あのとき|あの時|例の|あの件の?|その件の?)/g;
 
 /**
  * メイン入口：
@@ -80,7 +81,7 @@ export function detectMemoryRecallTriggerFromText(
  * 全角記号 → 半角、前後の空白・？を削る程度の軽い正規化
  */
 function normalizeForRecall(input: string): string {
-  return input
+  return (input ?? '')
     .replace(/[\uFF01-\uFF5E]/g, (ch) =>
       String.fromCharCode(ch.charCodeAt(0) - 0xfee0),
     ) // 全角英数記号 → 半角
@@ -94,7 +95,7 @@ function normalizeForRecall(input: string): string {
  * - 末尾が「か？」「かな？」など
  */
 function isQuestionLike(text: string): boolean {
-  const t = text.trim();
+  const t = (text ?? '').trim();
   if (!t) return false;
 
   if (/[？?]$/.test(t)) return true;
@@ -134,7 +135,7 @@ function extractRecallKeyword(text: string): string | null {
  * 抜き出したキーワードから、ノイズ・接頭語を削る
  */
 function cleanKeyword(raw: string): string | null {
-  let kw = raw;
+  let kw = raw ?? '';
 
   // 「前に / この前 / あの時 / 例の …」などを削る
   kw = kw.replace(FILLER_WORDS_REGEX, '');
@@ -180,6 +181,7 @@ type TrainingSampleRow = {
 
 type MemoryStateRow = {
   updated_at: string | null;
+  summary: string | null;
   depth_stage: string | null;
   q_primary: string | null;
   self_acceptance: number | null;
@@ -189,6 +191,10 @@ type MemoryStateRow = {
 
 type SnapshotRow = {
   date: string | null;
+
+  // ★ summary 優先（iros_memory_state.summary）
+  summary?: string | null;
+
   depth_stage: string | null;
   q_primary: string | null;
   self_acceptance: number | null;
@@ -258,6 +264,7 @@ async function loadRecentSnapshots(args: {
   if (trainData.length > 0) {
     return (trainData as TrainingSampleRow[]).map((row) => ({
       date: row.created_at,
+      summary: null, // training_samples には summary は無い
       depth_stage: row.depth_stage,
       q_primary: row.q_code,
       self_acceptance: row.self_acceptance,
@@ -271,7 +278,7 @@ async function loadRecentSnapshots(args: {
   const { data: memData, error: memError } = await client
     .from('iros_memory_state')
     .select(
-      'updated_at, depth_stage, q_primary, self_acceptance, situation_summary, situation_topic',
+      'updated_at, summary, depth_stage, q_primary, self_acceptance, situation_summary, situation_topic',
     )
     .eq('user_code', userCode)
     .order('updated_at', { ascending: false })
@@ -289,6 +296,7 @@ async function loadRecentSnapshots(args: {
 
   return (memData as MemoryStateRow[]).map((row) => ({
     date: row.updated_at,
+    summary: row.summary,
     depth_stage: row.depth_stage,
     q_primary: row.q_primary,
     self_acceptance: row.self_acceptance,
@@ -299,6 +307,10 @@ async function loadRecentSnapshots(args: {
 
 /**
  * スナップショット配列から IROS_PAST_STATE_NOTE 文字列を組み立てる
+ *
+ * ★方針：
+ *  - iros_memory_state.summary が取れているなら、それを最優先で LLM に渡す
+ *  - summary が無い場合のみ、従来の詳細スナップショット形式にフォールバック
  */
 function buildPastStateNoteTextFromSnapshots(args: {
   rows: SnapshotRow[];
@@ -308,6 +320,17 @@ function buildPastStateNoteTextFromSnapshots(args: {
   const { rows, topicLabel, keyword } = args;
   if (!rows || rows.length === 0) return null;
 
+  // ★ summary 最優先（最新=rows[0] 前提：loadRecentSnapshots は新しい順）
+  const latest = rows[0];
+  const summary =
+    typeof latest?.summary === 'string' ? latest.summary.trim() : '';
+
+  if (summary) {
+    // summary は「そのまま LLM に渡すテキスト」想定なので、余計な装飾は付けない
+    return summary;
+  }
+
+  // ---- summary が無い場合のみ、従来ロジック ----
   const lines: string[] = [];
 
   lines.push('【IROS_PAST_STATE_NOTE】');
@@ -342,12 +365,12 @@ function buildPastStateNoteTextFromSnapshots(args: {
       typeof row.self_acceptance === 'number'
         ? row.self_acceptance.toFixed(2)
         : '―';
-    const summary =
+    const memo =
       (row.situation_summary && row.situation_summary.trim()) || '(メモなし)';
 
     lines.push(`- 日付: ${dateStr}`);
     lines.push(`  Q: ${q} / 深度: ${depth} / SA: ${sa}`);
-    lines.push(`  状況メモ: ${summary}`);
+    lines.push(`  状況メモ: ${memo}`);
     lines.push('');
   }
 
@@ -435,7 +458,7 @@ export async function preparePastStateNoteForTurn(args: {
     };
   }
 
-  // 3) ノート文字列を組み立て
+  // 3) ノート文字列を組み立て（summary 最優先）
   const noteText = buildPastStateNoteTextFromSnapshots({
     rows,
     topicLabel: topicLabel ?? null,
@@ -449,6 +472,7 @@ export async function preparePastStateNoteForTurn(args: {
     hasNote,
     triggerKind: trigger.kind,
     keyword: trigger.keyword,
+    usedSummary: typeof rows?.[0]?.summary === 'string' && !!rows[0].summary?.trim(),
   });
 
   return {

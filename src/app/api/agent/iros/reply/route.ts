@@ -571,17 +571,35 @@ if (typeof assistantText === 'string' && assistantText.trim().length > 0) {
       meta = applied.meta;
 
       // ★ 訓練用サンプルを保存（失敗しても本処理は継続）
-      await saveIrosTrainingSample({
-        supabase,
-        userCode,
-        tenantId,
-        conversationId,
-        messageId: null,
-        inputText: text,
-        replyText: (result as any).content ?? '',
-        meta,
-        tags: ['iros', 'auto'],
-      });
+      // ✅ skipTraining / recallOnly のときは訓練保存しない（goal recall 等）
+      const skipTraining =
+        meta?.skipTraining === true ||
+        meta?.skip_training === true ||
+        meta?.recallOnly === true ||
+        meta?.recall_only === true;
+
+      if (!skipTraining) {
+        await saveIrosTrainingSample({
+          supabase,
+          userCode,
+          tenantId,
+          conversationId,
+          messageId: null,
+          inputText: text,
+          replyText: (result as any).content ?? '',
+          meta,
+          tags: ['iros', 'auto'],
+        });
+      } else {
+        meta.extra = {
+          ...(meta.extra ?? {}),
+          trainingSkipped: true,
+          trainingSkipReason:
+            meta?.skipTraining === true || meta?.skip_training === true
+              ? 'skipTraining'
+              : 'recallOnly',
+        };
+      }
 
       return NextResponse.json(
         { ...basePayload, ...(result as any), meta },

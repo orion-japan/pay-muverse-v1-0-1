@@ -3,12 +3,21 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+/* =========================
+ * Helpers
+ * ========================= */
+
+type Phase = 'Inner' | 'Outer';
+type SpinLoop = 'SRI' | 'TCF';
+type DescentGate = 'closed' | 'offered' | 'accepted';
+type AnchorEventType = 'none' | 'confirm' | 'set' | 'reset';
+
 function toInt0to3(v: unknown): number | null {
   if (typeof v !== 'number' || !Number.isFinite(v)) return null;
   return Math.max(0, Math.min(3, Math.round(v)));
 }
 
-function normalizePhase(v: unknown): 'Inner' | 'Outer' | null {
+function normalizePhase(v: unknown): Phase | null {
   if (typeof v !== 'string') return null;
   const p = v.trim().toLowerCase();
   if (p === 'inner') return 'Inner';
@@ -16,7 +25,7 @@ function normalizePhase(v: unknown): 'Inner' | 'Outer' | null {
   return null;
 }
 
-function normalizeSpinLoop(v: unknown): 'SRI' | 'TCF' | null {
+function normalizeSpinLoop(v: unknown): SpinLoop | null {
   if (typeof v !== 'string') return null;
   const s = v.trim().toUpperCase();
   if (s === 'SRI') return 'SRI';
@@ -24,21 +33,19 @@ function normalizeSpinLoop(v: unknown): 'SRI' | 'TCF' | null {
   return null;
 }
 
-function normalizeDescentGate(
-  v: unknown
-): 'closed' | 'offered' | 'accepted' | null {
+function normalizeSpinStep(v: unknown): 0 | 1 | 2 | null {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+  const n = Math.round(v);
+  if (n === 0 || n === 1 || n === 2) return n;
+  return null;
+}
+
+function normalizeDescentGate(v: unknown): DescentGate | null {
   if (typeof v !== 'string') return null;
   const s = v.trim().toLowerCase();
   if (s === 'closed') return 'closed';
   if (s === 'offered') return 'offered';
   if (s === 'accepted') return 'accepted';
-  return null;
-}
-
-function normalizeSpinStep(v: unknown): 0 | 1 | 2 | null {
-  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
-  const n = Math.round(v);
-  if (n === 0 || n === 1 || n === 2) return n;
   return null;
 }
 
@@ -62,16 +69,12 @@ function normalizeAnchorText(text: string): string {
  * - metaForSave.anchorEvent.type を最優先
  * - 互換として anchorEventType も拾う
  */
-function pickAnchorEventType(
-  metaForSave: any
-): 'none' | 'confirm' | 'set' | 'reset' {
+function pickAnchorEventType(metaForSave: any): AnchorEventType {
   const t1 = metaForSave?.anchorEvent?.type;
-  if (t1 === 'none' || t1 === 'confirm' || t1 === 'set' || t1 === 'reset')
-    return t1;
+  if (t1 === 'none' || t1 === 'confirm' || t1 === 'set' || t1 === 'reset') return t1;
 
   const t2 = metaForSave?.anchorEventType;
-  if (t2 === 'none' || t2 === 'confirm' || t2 === 'set' || t2 === 'reset')
-    return t2;
+  if (t2 === 'none' || t2 === 'confirm' || t2 === 'set' || t2 === 'reset') return t2;
 
   return 'none';
 }
@@ -119,23 +122,52 @@ function isMetaAnchorText(text: string): boolean {
  * - DB上のアンカーは「北極星」なので、通常ターンでは更新しない
  * - 更新できるのは set/reset のときだけ
  * - confirm は「表に出す」だけで、DB更新はしない
+ *
+ * 追加安全策：
+ * - reset は「消す」なので anchorText 不要
+ * - メタ発話は set/reset でも絶対拒否
  */
 function shouldWriteIntentAnchorToMemoryState(args: {
-  anchorEventType: 'none' | 'confirm' | 'set' | 'reset';
+  anchorEventType: AnchorEventType;
   anchorText: string | null;
-}): boolean {
+}): { action: 'keep' | 'set' | 'reset' } {
   const { anchorEventType, anchorText } = args;
 
-  // set/reset 以外は絶対に書かない（北極星を動かさない）
-  if (anchorEventType !== 'set' && anchorEventType !== 'reset') return false;
+  if (anchorEventType === 'reset') {
+    // reset はクリア（テキスト不要）
+    return { action: 'reset' };
+  }
 
-  if (!anchorText) return false;
+  if (anchorEventType !== 'set') {
+    return { action: 'keep' };
+  }
 
-  // メタ発話は set/reset でも拒否
-  if (isMetaAnchorText(anchorText)) return false;
+  if (!anchorText) return { action: 'keep' };
+  if (isMetaAnchorText(anchorText)) return { action: 'keep' };
 
-  return true;
+  return { action: 'set' };
 }
+
+/** SUN固定判定：揺れやすいのでパターンを増やす */
+function isFixedNorthSun(metaForSave: any): boolean {
+  // 明示フラグ
+  if (metaForSave?.fixedNorth?.key === 'SUN') return true;
+  if (metaForSave?.fixed_north?.key === 'SUN') return true;
+
+  // intent_anchor 側の互換
+  if (metaForSave?.intent_anchor?.fixed === true) return true;
+  if (metaForSave?.intentAnchor?.fixed === true) return true;
+
+  // 文字キーで来る可能性
+  if (metaForSave?.north_star === 'SUN') return true;
+  if (metaForSave?.northStar === 'SUN') return true;
+
+  return false;
+}
+
+/* =========================
+ * Persist: messages
+ * ========================= */
 
 export async function persistAssistantMessage(args: {
   supabase: SupabaseClient; // 使わないが、呼び出し側の統一のため受け取る
@@ -158,12 +190,11 @@ export async function persistAssistantMessage(args: {
   try {
     const msgUrl = new URL('/api/agent/iros/messages', reqOrigin);
 
-    // ★ writer を必ず一本化（skip判定の揺れを消す）
-    // ★ さらに y/h は DB 保存と揃えるため整数に丸めて meta にも反映
+    // y/h は DB 保存と揃えるため整数に丸めて meta にも反映
     const yInt = toInt0to3(metaForSave?.yLevel ?? metaForSave?.unified?.yLevel);
     const hInt = toInt0to3(metaForSave?.hLevel ?? metaForSave?.unified?.hLevel);
 
-    // ★ phase/spin は camel/snake 両対応で拾って、messages 側にも両方入れる（互換）
+    // phase/spin は camel/snake 両対応で拾って、messages 側にも両方入れる（互換）
     const phaseRaw =
       metaForSave?.phase ??
       metaForSave?.phase_mode ??
@@ -196,19 +227,18 @@ export async function persistAssistantMessage(args: {
       ...(yInt !== null ? { yLevel: yInt } : {}),
       ...(hInt !== null ? { hLevel: hInt } : {}),
 
-      // ✅ 正規化した値を camelCase にも載せる
+      // 正規化した値を camelCase にも載せる
       ...(phaseNorm ? { phase: phaseNorm } : {}),
       ...(spinLoopNorm ? { spinLoop: spinLoopNorm } : {}),
       ...(typeof spinStepNorm === 'number' ? { spinStep: spinStepNorm } : {}),
 
-      // ✅ 互換：snake_case も同値で載せる（過去コード/集計/デバッグ用）
+      // 互換：snake_case も同値で載せる（過去コード/集計/デバッグ用）
       ...(phaseNorm ? { phase_mode: phaseNorm } : {}),
       ...(spinLoopNorm ? { spin_loop: spinLoopNorm } : {}),
       ...(typeof spinStepNorm === 'number' ? { spin_step: spinStepNorm } : {}),
     };
 
-    // ✅ messages 保存：text/content を両方入れて互換を維持する
-    await fetch(msgUrl.toString(), {
+    const res = await fetch(msgUrl.toString(), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -218,22 +248,29 @@ export async function persistAssistantMessage(args: {
       body: JSON.stringify({
         conversation_id: conversationId,
         role: 'assistant',
-
         // legacy / newer 両対応
         text: assistantText,
         content: assistantText,
-
         meta,
       }),
     });
+
+    if (!res.ok) {
+      const t = await res.text().catch(() => '');
+      console.warn('[IROS/Persist] persistAssistantMessage not ok', {
+        status: res.status,
+        body: t?.slice?.(0, 300) ?? '',
+      });
+    }
   } catch (e) {
     console.error('[IROS/Persist] persistAssistantMessage failed', e);
   }
 }
 
-/**
- * Qコードスナップショット（既存の writeQCodeWithEnv に統一）
- */
+/* =========================
+ * Persist: Q snapshot
+ * ========================= */
+
 export async function persistQCodeSnapshotIfAny(args: {
   userCode: string;
   conversationId: string;
@@ -249,6 +286,7 @@ export async function persistQCodeSnapshotIfAny(args: {
     const q: any = m?.qCode ?? m?.q_code ?? unified?.q?.current ?? null;
     const stage: any = m?.depth ?? m?.depth_stage ?? unified?.depth?.stage ?? null;
 
+    // ここは将来 meta から取れるなら差し替え可
     const layer: any = 'inner';
     const polarity: any = 'now';
 
@@ -275,6 +313,10 @@ export async function persistQCodeSnapshotIfAny(args: {
   }
 }
 
+/* =========================
+ * Persist: intent_anchor (reserved)
+ * ========================= */
+
 export async function persistIntentAnchorIfAny(_args: {
   supabase: SupabaseClient;
   userCode: string;
@@ -286,12 +328,17 @@ export async function persistIntentAnchorIfAny(_args: {
   return;
 }
 
+/* =========================
+ * Persist: iros_memory_state
+ * ========================= */
+
 export async function persistMemoryStateIfAny(args: {
   supabase: SupabaseClient;
   userCode: string;
+  userText: string; // ★追加
   metaForSave: any;
 }) {
-  const { supabase, userCode, metaForSave } = args;
+  const { supabase, userCode, userText, metaForSave } = args; // ★追加
 
   try {
     if (!metaForSave) return;
@@ -302,7 +349,6 @@ export async function persistMemoryStateIfAny(args: {
     const depth = metaForSave.depth ?? unified?.depth?.stage ?? null;
     const qCode = metaForSave.qCode ?? unified?.q?.current ?? null;
 
-    // phase は揺れやすいので正規化して 'Inner' | 'Outer' に寄せる
     const phaseRaw = metaForSave.phase ?? unified?.phase ?? null;
     const phase = normalizePhase(phaseRaw);
 
@@ -312,11 +358,11 @@ export async function persistMemoryStateIfAny(args: {
       unified?.self_acceptance ??
       null;
 
-    // ★ y/h は DB が integer なので、必ず 0..3 に丸めて整数化する
+    // y/h は DB が integer なので、必ず 0..3 に丸めて整数化する
     const yInt = toInt0to3(metaForSave?.yLevel ?? unified?.yLevel);
     const hInt = toInt0to3(metaForSave?.hLevel ?? unified?.hLevel);
 
-    // ★ situation 系
+    // situation
     const situationSummary =
       metaForSave.situationSummary ??
       unified?.situation?.summary ??
@@ -335,7 +381,7 @@ export async function persistMemoryStateIfAny(args: {
       unified?.sentiment_level ??
       null;
 
-    // ★ spin
+    // spin
     const spinLoopRaw =
       metaForSave.spinLoop ??
       metaForSave.spin_loop ??
@@ -353,7 +399,7 @@ export async function persistMemoryStateIfAny(args: {
     const spinLoop = normalizeSpinLoop(spinLoopRaw);
     const spinStep = normalizeSpinStep(spinStepRaw);
 
-    // ★ descentGate（列がある環境だけ入れる前提。値だけ拾う）
+    // descentGate（列がある環境だけ入れる前提。値だけ拾う）
     const descentGateRaw =
       metaForSave.descentGate ??
       metaForSave.descent_gate ??
@@ -361,37 +407,36 @@ export async function persistMemoryStateIfAny(args: {
       unified?.descentGate ??
       null;
 
-    // ✅ 正規化して 'closed'|'offered'|'accepted' に限定
     const descentGate = normalizeDescentGate(descentGateRaw);
 
-    // ★ intent_anchor（jsonb）
+    // intent_anchor（jsonb）
     const intentAnchorRaw =
       metaForSave.intent_anchor ??
       metaForSave.intentAnchor ??
       null;
 
-    // ★ 固定北（SUN）はDBアンカー更新の対象にしない（常に“背後の北”）
-    const isFixedNorthSun =
-      metaForSave?.fixedNorth?.key === 'SUN' ||
-      metaForSave?.intent_anchor?.fixed === true ||
-      metaForSave?.intentAnchor?.fixed === true;
-
     const anchorText = extractAnchorText(intentAnchorRaw);
 
-    // ✅ アンカー更新イベント（北極星更新の許可）
+    // アンカー更新イベント
     const anchorEventType = pickAnchorEventType(metaForSave);
 
-    // ✅ DBへ書くかどうか（set/reset のときだけ）
-    //    ただし固定北（SUN）は絶対に書かない
-    const willWriteAnchor = isFixedNorthSun
-      ? false
-      : shouldWriteIntentAnchorToMemoryState({
-          anchorEventType,
-          anchorText,
-        });
+    // 固定北（SUN）判定
+    const fixedSun = isFixedNorthSun(metaForSave);
+
+    // set/reset 判定（固定SUNなら常に keep）
+    const anchorDecision = fixedSun
+      ? { action: 'keep' as const }
+      : shouldWriteIntentAnchorToMemoryState({ anchorEventType, anchorText });
+
+    // 追加の安全策：メタ発話が紛れたら強制 keep
+    const metaLike = anchorText ? isMetaAnchorText(anchorText) : false;
+    const finalAnchorDecision =
+      metaLike && anchorDecision.action !== 'keep' ? { action: 'keep' as const } : anchorDecision;
 
     console.log('[IROS/STATE] persistMemoryStateIfAny start', {
       userCode,
+      // ★確認ログ（次のStepで goal 抽出に使う）
+      userText: (userText ?? '').slice(0, 80),
       depth,
       qCode,
       phaseRaw,
@@ -406,21 +451,19 @@ export async function persistMemoryStateIfAny(args: {
       spinStep,
       descentGateRaw,
       descentGate,
-      hasIntentAnchor: !!intentAnchorRaw,
+      fixedSun,
       anchorText,
       anchorEventType,
-      willWriteAnchor,
+      anchorDecision: finalAnchorDecision.action,
     });
 
-    // 保存する意味がある最低条件（ここは維持）
+    // 保存する意味がある最低条件
     if (!depth && !qCode) {
-      console.warn('[IROS/STATE] skip persistMemoryStateIfAny (no depth/q)', {
-        userCode,
-      });
+      console.warn('[IROS/STATE] skip persistMemoryStateIfAny (no depth/q)', { userCode });
       return;
     }
 
-    // ✅ 重要：null は “保存しない” payload にする（過去の値を壊さない）
+    // null は “保存しない” payload にする（過去の値を壊さない）
     const upsertPayload: any = {
       user_code: userCode,
       updated_at: new Date().toISOString(),
@@ -440,15 +483,40 @@ export async function persistMemoryStateIfAny(args: {
     if (situationSummary) upsertPayload.situation_summary = situationSummary;
     if (situationTopic) upsertPayload.situation_topic = situationTopic;
 
+    /* ✅ 追加：文章メモリ（summary）
+       - situationSummary を最優先
+       - 無ければ metaForSave からユーザー原文っぽいものを拾う
+       - ある時だけ保存（過去の summary は壊さない）
+    */
+    const rawUserText =
+      metaForSave?.userText ??
+      metaForSave?.user_text ??
+      metaForSave?.input_text ??
+      metaForSave?.text ??
+      null;
+
+    const summaryCandidate =
+      (typeof situationSummary === 'string' && situationSummary.trim()) ||
+      (typeof rawUserText === 'string' && rawUserText.trim()) ||
+      null;
+
+    if (summaryCandidate) {
+      const s = summaryCandidate.replace(/\s+/g, ' ').trim();
+      upsertPayload.summary = s.length > 200 ? s.slice(0, 200) : s;
+    }
+
     if (spinLoop) upsertPayload.spin_loop = spinLoop;
     if (typeof spinStep === 'number') upsertPayload.spin_step = spinStep;
 
-    // ✅ descent_gate：列が無い環境が混ざるので「入れて失敗したら外してリトライ」方式にする
     if (descentGate) upsertPayload.descent_gate = descentGate;
 
-    // ✅ ✅ ✅ 核心：intent_anchor は set/reset のときだけ保存（通常ターンは絶対に触らない）
-    if (willWriteAnchor && intentAnchorRaw) {
+    // ✅ 核心：intent_anchor は set/reset のときだけ触る（SUN固定 or keep は触らない）
+    if (finalAnchorDecision.action === 'set' && intentAnchorRaw) {
       upsertPayload.intent_anchor = intentAnchorRaw;
+    } else if (finalAnchorDecision.action === 'reset') {
+      upsertPayload.intent_anchor = null;
+    } else {
+      if ('intent_anchor' in upsertPayload) delete upsertPayload.intent_anchor;
     }
 
     // 1回目 upsert
@@ -456,12 +524,11 @@ export async function persistMemoryStateIfAny(args: {
       .from('iros_memory_state')
       .upsert(upsertPayload, { onConflict: 'user_code' });
 
-    // ✅ 42703(未定義カラム) で descent_gate が原因なら、外して1回だけ再試行
+    // 42703(未定義カラム) で descent_gate が原因なら、外して1回だけ再試行
     if (error) {
       const code = (error as any)?.code;
       const msg = (error as any)?.message ?? '';
-      const isMissingDescentGate =
-        code === '42703' && /descent_gate/i.test(msg);
+      const isMissingDescentGate = code === '42703' && /descent_gate/i.test(msg);
 
       if (isMissingDescentGate && 'descent_gate' in upsertPayload) {
         console.warn('[IROS/STATE] descent_gate missing in DB. retry without it.', {
@@ -481,10 +548,7 @@ export async function persistMemoryStateIfAny(args: {
     }
 
     if (error) {
-      console.error('[IROS/STATE] persistMemoryStateIfAny failed', {
-        userCode,
-        error,
-      });
+      console.error('[IROS/STATE] persistMemoryStateIfAny failed', { userCode, error });
     } else {
       console.log('[IROS/STATE] persistMemoryStateIfAny ok', {
         userCode,
@@ -494,14 +558,16 @@ export async function persistMemoryStateIfAny(args: {
         spinLoop: upsertPayload.spin_loop ?? '(kept)',
         spinStep: upsertPayload.spin_step ?? '(kept)',
         descentGate: upsertPayload.descent_gate ?? '(kept)',
-        intentAnchor: upsertPayload.intent_anchor ? '(updated)' : '(kept)',
+        intentAnchor:
+          'intent_anchor' in upsertPayload
+            ? upsertPayload.intent_anchor === null
+              ? '(cleared)'
+              : '(updated)'
+            : '(kept)',
       });
     }
   } catch (e) {
-    console.error('[IROS/STATE] persistMemoryStateIfAny exception', {
-      userCode,
-      error: e,
-    });
+    console.error('[IROS/STATE] persistMemoryStateIfAny exception', { userCode, error: e });
   }
 }
 

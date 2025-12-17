@@ -17,11 +17,7 @@ export type SaveIrosTrainingSampleParams = {
   tags?: string[];
 };
 
-export type TargetKind =
-  | 'stabilize'
-  | 'expand'
-  | 'pierce'
-  | 'uncover';
+export type TargetKind = 'stabilize' | 'expand' | 'pierce' | 'uncover';
 
 function pickString(v: any): string | null {
   if (typeof v === 'string') {
@@ -44,13 +40,9 @@ function clampInt03(v: number | null): number | null {
 /**
  * summary用のテキスト正規化
  * - 連続空白の圧縮
- * - “同じ文字列の繰り返し” を 1回に圧縮（例: A+A や A A、A…A）
+ * - “全体が同一パターンの繰り返し” を 1回に圧縮（例: A+A や A A、A…A）
  * - 長すぎる場合のトリム
  */
-// file: src/lib/iros/server/handleIrosReply.ts
-// （あなたが貼ってくれたファイルに対する追記＆差し替え）
-
-// ★ 追記：summary用のテキスト正規化（重複圧縮込み）
 function normalizeTextForSummary(s: string | null, maxLen = 200): string | null {
   if (!s) return null;
 
@@ -91,7 +83,6 @@ function normalizeTextForSummary(s: string | null, maxLen = 200): string | null 
   return t;
 }
 
-
 function normalizeTargetKind(v: any): TargetKind {
   const s = pickString(v);
   if (!s) return 'stabilize';
@@ -105,9 +96,7 @@ function normalizeTargetKind(v: any): TargetKind {
   return 'stabilize';
 }
 
-export async function saveIrosTrainingSample(
-  params: SaveIrosTrainingSampleParams,
-) {
+export async function saveIrosTrainingSample(params: SaveIrosTrainingSampleParams) {
   const {
     supabase,
     userCode,
@@ -133,10 +122,7 @@ export async function saveIrosTrainingSample(
     pickString(meta?.unified?.depth?.stage) ??
     null;
 
-  const phase =
-    pickString(meta?.phase) ??
-    pickString(meta?.unified?.phase) ??
-    null;
+  const phase = pickString(meta?.phase) ?? pickString(meta?.unified?.phase) ?? null;
 
   const selfAcceptance =
     pickNumber(meta?.selfAcceptance) ??
@@ -144,7 +130,7 @@ export async function saveIrosTrainingSample(
     pickNumber(meta?.unified?.self_acceptance) ??
     null;
 
-  // ★ 新会話でも必ず埋まる：situation_summary は「ユーザー入力」を最優先にする
+  // ★ situation_summary は「ユーザー入力」最優先（新会話でも必ず埋まる）
   const situationSummaryFromMeta =
     pickString(meta?.situationSummary) ??
     pickString(meta?.situation_summary) ??
@@ -162,7 +148,7 @@ export async function saveIrosTrainingSample(
     pickString(meta?.unified?.situation?.topic) ??
     null;
 
-  // y/h（0〜3 integer）
+  // y/h（0〜3 int）
   const yLevelRaw =
     pickNumber(meta?.yLevel) ??
     pickNumber(meta?.y_level) ??
@@ -180,7 +166,7 @@ export async function saveIrosTrainingSample(
   const yLevel = clampInt03(yLevelRaw);
   const hLevel = clampInt03(hLevelRaw);
 
-  // ★ target_kind：meta直下 → intentLine.direction → default
+  // target_kind
   const targetKind = normalizeTargetKind(
     meta?.targetKind ??
       meta?.target_kind ??
@@ -190,19 +176,19 @@ export async function saveIrosTrainingSample(
   );
 
   const targetLabel =
-    pickString(meta?.targetLabel) ??
-    pickString(meta?.target_label) ??
-    null;
+    pickString(meta?.targetLabel) ?? pickString(meta?.target_label) ?? null;
 
-  // DB列は reply_text が無いので analysis_text に寄せる（replyText は extra に保存）
-  // ※ training_samples の analysis_text は「抽象化/意図の要約」なので unified.intentSummary を最優先
+  /**
+   * ★重要：analysis_text には「返信」を入れる
+   * - DBに reply_text 列が無いので analysis_text を “返信本文置き場” として使う
+   * - intentSummary がある場合は extra に残し、analysis_text はまず replyText を優先
+   */
   const analysisText =
-    pickString(meta?.unified?.intentSummary) ??
-    pickString(meta?.unified?.situation?.summary) ??
-    pickString(meta?.intentLine?.nowLabel) ??
-    // ここで replyText を入れるのは “最後の最後” にする（inputText 優先）
-    pickString(inputText) ??
     pickString(replyText) ??
+    pickString(meta?.unified?.intentSummary) ??
+    pickString(meta?.intentLine?.nowLabel) ??
+    pickString(meta?.unified?.situation?.summary) ??
+    pickString(inputText) ??
     '（内容なし）';
 
   const payload = {
@@ -227,7 +213,6 @@ export async function saveIrosTrainingSample(
     mirror_mode: pickString(meta?.mode) ?? null,
     intent_line: meta?.intentLine ?? meta?.intent_line ?? null,
 
-    // ★ ここが肝：新会話でも必ず “ユーザー側の状況” が入る（重複は圧縮される）
     situation_summary: situationSummary,
     situation_topic: situationTopic,
 
@@ -238,6 +223,7 @@ export async function saveIrosTrainingSample(
     extra: {
       meta: meta ?? null,
       replyText: replyText ?? null,
+      intentSummary: pickString(meta?.unified?.intentSummary) ?? null,
     },
   };
 
@@ -264,7 +250,7 @@ export async function saveIrosTrainingSample(
 
   if (error) {
     console.error('[IROS][Training] insert error', error);
-    throw error; // route.ts 側で 500 にして原因が見えるようにする
+    throw error;
   }
 
   console.log('[IROS][Training] insert ok');

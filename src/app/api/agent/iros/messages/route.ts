@@ -151,6 +151,19 @@ export async function GET(req: NextRequest) {
     const cid = req.nextUrl.searchParams.get('conversation_id') || '';
     if (!cid) return json({ ok: false, error: 'missing_conversation_id' }, 400);
 
+    // ★ 追加: limit と meta のON/OFF
+    const limitRaw = req.nextUrl.searchParams.get('limit');
+    const limit = (() => {
+      if (!limitRaw) return 200; // ★ デフォルト上限（必要なら調整）
+      const n = Number(limitRaw);
+      if (!Number.isFinite(n) || n <= 0) return 200;
+      return Math.min(n, 500);
+    })();
+
+    const includeMeta =
+      req.nextUrl.searchParams.get('include_meta') === '1' ||
+      req.nextUrl.searchParams.get('includeMeta') === '1';
+
     const supabase = sb();
 
     // 所有者確認
@@ -163,29 +176,21 @@ export async function GET(req: NextRequest) {
     if (conv.ok && conv.data[0]) {
       const owner = String(conv.data[0].user_code ?? '');
       if (owner && owner !== userCode)
-        return json({ ok: true, messages: [], note: 'forbidden_owner_mismatch' }, 200);
+        return json({ ok: true, messages: [], llm_messages: [], note: 'forbidden_owner_mismatch' }, 200);
     }
 
-    // メッセージ取得（★ meta / depth_stage / intent_layer も select）
-    const res = await trySelect<{
-      id: string;
-      conversation_id: string;
-      role: 'user' | 'assistant';
-      content?: string | null;
-      text?: string | null;
-      user_code?: string | null;
-      q_code?: OutMsg['q'] | null;
-      color?: string | null;
-      depth_stage?: string | null;
-      intent_layer?: string | null;
-      meta?: any;
-      created_at?: string | null;
-      ts?: number | null;
-    }>(
+    // ★ meta を含めるかで select を切り替える（重い列を常に取らない）
+    const columnsBase =
+      'id,conversation_id,user_code,role,content,text,q_code,depth_stage,intent_layer,color,created_at,ts';
+    const columns = includeMeta ? `${columnsBase},meta` : columnsBase;
+
+    // ★ 重要: created_at ASC で全件は重いので、
+    //   created_at DESC + limit で取り、最後に UI 用に昇順へ戻す
+    const res = await trySelect<any>(
       supabase,
       MSG_TABLES,
-      'id,conversation_id,user_code,role,content,text,q_code,depth_stage,intent_layer,color,meta,created_at,ts',
-      (q) => q.eq('conversation_id', cid).order('created_at', { ascending: true }),
+      columns,
+      (q) => q.eq('conversation_id', cid).order('created_at', { ascending: false }).limit(limit),
     );
 
     if (!res.ok) {
@@ -196,14 +201,17 @@ export async function GET(req: NextRequest) {
     }
 
     // ★ user_code が null / 空 のレガシー行は許可する
-    const filtered = res.data.filter((m) => {
+    const filtered = (res.data ?? []).filter((m: any) => {
       if (!Object.prototype.hasOwnProperty.call(m, 'user_code')) return true;
       const uc = m.user_code == null ? '' : String(m.user_code);
       if (!uc) return true;
       return uc === userCode;
     });
 
-    const messages: OutMsg[] = filtered.map((m) => ({
+    // DESC で取ったので、ここで ASC に戻す
+    filtered.reverse();
+
+    const messages: OutMsg[] = filtered.map((m: any) => ({
       id: String(m.id),
       conversation_id: String(m.conversation_id),
       role: m.role === 'assistant' ? 'assistant' : 'user',
@@ -214,14 +222,10 @@ export async function GET(req: NextRequest) {
       color: m.color ?? undefined,
       depth_stage: m.depth_stage ?? null,
       intent_layer: m.intent_layer ?? null,
-      meta: m.meta ?? undefined,
-      mirror: m.meta?.mirror ?? null,
-      i_layer: m.meta?.i_layer ?? null,
-      intent: m.meta?.intent ?? null,
-
+      meta: includeMeta ? (m.meta ?? undefined) : undefined,
     }));
 
-    // ===== ここから追加：LLM にそのまま渡せる履歴 =====
+    // ===== LLM にそのまま渡せる履歴（軽量）=====
     const llmLimitRaw = req.nextUrl.searchParams.get('llm_limit');
     const llmLimit = (() => {
       if (!llmLimitRaw) return 20;
@@ -230,9 +234,7 @@ export async function GET(req: NextRequest) {
       return Math.min(n, 100);
     })();
 
-    const slicedForLlm = messages.slice(-llmLimit);
-
-    const llm_messages: LlmMsg[] = slicedForLlm.map((m) => ({
+    const llm_messages: LlmMsg[] = messages.slice(-llmLimit).map((m) => ({
       role: m.role,
       content: m.content,
     }));
@@ -251,6 +253,7 @@ export async function GET(req: NextRequest) {
     );
   }
 }
+
 
 /* ========= POST /api/agent/iros/messages ========= */
 export async function POST(req: NextRequest) {

@@ -111,9 +111,11 @@ async function getIdTokenSafe(timeoutMs = 5000): Promise<string> {
 /**
  * 認証付き fetch
  * - Firebase ID トークンが取れるまで待機
- * - 401 系は Error として投げるが、TypeError("Failed to fetch") は基本的にネットワークエラーのみ
- * - 呼び出し側は `/api/...` の相対パス指定でOK
+ * - AbortController でタイムアウトを明示
+ * - 401/timeout を区別してログしやすくする
  */
+const AUTH_FETCH_TIMEOUT_MS = 60_000; // ★ 必要なら延長（例: 90_000）
+
 async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   const headers = new Headers(init.headers || {});
   const credentials = init.credentials ?? 'include';
@@ -131,20 +133,45 @@ async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
     headers.set('Content-Type', 'application/json');
   }
 
-  const res = await fetch(input, {
-    ...init,
-    headers,
-    credentials,
-    cache: 'no-store',
-  });
+  // ---- timeout ----
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), AUTH_FETCH_TIMEOUT_MS);
 
-  if (!res.ok) {
-    const t = await res.text().catch(() => '');
-    if (__DEV__) console.warn('[IROS/API] authFetch error', res.status, t);
-    throw new Error(`HTTP ${res.status} ${t}`);
+  try {
+    const res = await fetch(input, {
+      ...init,
+      headers,
+      credentials,
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      const t = await res.text().catch(() => '');
+      if (__DEV__) console.warn('[IROS/API] authFetch error', res.status, t);
+
+      // ★ timeout が body に混ざって 401 になってるケースを識別しやすくする
+      if (res.status === 401 && /timeout of 25000ms exceeded/i.test(t)) {
+        throw new Error(`HTTP 401 (upstream-timeout) ${t}`);
+      }
+
+      throw new Error(`HTTP ${res.status} ${t}`);
+    }
+
+    return res;
+  } catch (e: any) {
+    // AbortError を明示的に timeout 扱い
+    if (e?.name === 'AbortError') {
+      const msg = `HTTP 408 client_timeout: exceeded ${AUTH_FETCH_TIMEOUT_MS}ms`;
+      if (__DEV__) console.warn('[IROS/API] authFetch abort', { input: String(input), msg });
+      throw new Error(msg);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
   }
-  return res;
 }
+
 
 /* ========= helper: URL の cid 取得 ========= */
 function getCidFromLocation(): string | null {
