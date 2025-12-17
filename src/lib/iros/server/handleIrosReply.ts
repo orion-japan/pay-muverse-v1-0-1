@@ -719,151 +719,69 @@ export async function handleIrosReply(
       console.warn('[IROS][HistoryX] merge failed', e);
     }
 
-/* =========================
-   Recall gate (generic)
-   - 「昨日のあれ」「この前のあれ」「何だっけ」など
-   - LLM無しで履歴から“直近の意味ある文”を返す
-========================= */
+    /* ---------------------------
+       1.5) Generic recall gate（会話の自然接続）
+       - LLM無しで履歴から“直近の意味ある user 発話”を返す
+       - recall汚染防止：user発話のみ + recallテンプレ除外
+    ---------------------------- */
 
-function isRecallQuestion(s: string): boolean {
-  const t = (s ?? '').trim();
-  if (!t) return false;
+    {
+      const recallHistory = (historyForTurn as any[])
+        .filter((m) => String(m?.role ?? '').toLowerCase() === 'user')
+        .filter((m) => {
+          const s = norm(m?.content ?? m?.text ?? (m as any)?.message ?? '');
+          if (!s) return false;
 
-  // 「昨日のあれなんだっけ」「この前のやつ」「前回何だった？」など
-  return (
-    /(昨日|この前|さっき|前回|先週|先日|前の|あれ|それ|あの|その).*(何|なん|どれ|どっち|だった|だっけ|覚えて|思い出)/.test(
-      t,
-    ) ||
-    /(なんでしたっけ|何でしたっけ|何だっけ|なんだっけ|覚えてる\?|覚えてる？|思い出して)/.test(
-      t,
-    )
-  );
-}
+          // “recallのrecall” 防止（テンプレ文を履歴候補から排除）
+          if (/^たぶんこれのことかな：/.test(s)) return false;
+          if (/^たぶんこれのことかな：「/.test(s)) return false;
 
-/**
- * 履歴から “直近の意味ある user 発話” を拾う（汎用）
- * - recall質問・短すぎる相槌・メタ会話を除外
- * - まずは最短実装（スコアリング無し）
- */
-function pickRecallCandidateFromHistory(history: any[]): string | null {
-  if (!Array.isArray(history) || history.length === 0) return null;
+          return true;
+        });
 
-  const norm = (s: any) => String(s ?? '').replace(/\s+/g, ' ').trim();
+      const recall = await runGenericRecallGate({
+        text,
+        history: recallHistory,
+      });
 
-  const isQuestionLike = (s: string) => {
-    if (!s) return true;
-    if (/[？?]$/.test(s)) return true;
-    if (
-      /なんでしたっけ|何でしたっけ|何だっけ|なんだっけ|どれ|どっち|教えて|思い出|覚えて/.test(
-        s,
-      )
-    )
-      return true;
-    return false;
-  };
+      if (recall) {
+        const metaForSave = {
+          mode: 'light',
+          recallOnly: true,
+          recallKind: recall.recallKind,
+          skipTraining: true,
+          nextStep: null,
+          next_step: null,
+          timing: t,
+        };
 
-  // 目標ラベル/汎用ラベル（= 中身がない）を弾く
-  const isLabelLike = (s: string) => {
-    const t = s.replace(/[。！!]/g, '').trim();
-    if (!t) return true;
-    if (t === '今日の目標' || t === '目標') return true;
-    if (/^(今日の)?目標(は)?(なに|何)?(ですか)?$/.test(t)) return true;
+        await persistAssistantMessage({
+          supabase,
+          reqOrigin,
+          authorizationHeader,
+          conversationId,
+          userCode,
+          assistantText: recall.assistantText,
+          metaForSave,
+        });
 
-    // 「昨日のあれ」「この前のやつ」だけ、みたいな中身ゼロ
-    if (/^(昨日|この前|さっき|前回|先日|前の)\s*(あれ|それ|やつ|件)\s*$/.test(t))
-      return true;
-    if (/^(あれ|それ|あの|その)\s*(w|笑)?$/.test(t)) return true;
+        t.finished_at = nowIso();
+        t.total_ms = msSince(t0);
 
-    return false;
-  };
+        return {
+          ok: true,
+          result: {
+            content: recall.assistantText,
+            meta: metaForSave,
+            mode: 'light',
+          },
+          assistantText: recall.assistantText,
+          metaForSave,
+          finalMode: 'light',
+        };
+      }
+    }
 
-  // “意味ある文”の最低条件（超シンプル）
-  const looksMeaningful = (s: string) => {
-    if (!s) return false;
-    if (isQuestionLike(s)) return false;
-    if (isLabelLike(s)) return false;
-
-    // 相槌・短すぎ除外
-    if (s.length < 8) return false;
-
-    // 開発ログ・構文っぽいのは除外（誤爆防止）
-    if (/^(\$|>|\[authz\]|\[IROS\/|GET \/|POST \/)/.test(s)) return false;
-    if (/^(rg |sed |npm |npx |curl )/.test(s)) return false;
-
-    return true;
-  };
-
-  // 末尾から user の“意味ある文”を1つ拾う
-  for (let i = history.length - 1; i >= 0; i--) {
-    const m = history[i];
-    if (!m) continue;
-    const role = String(m.role ?? '').toLowerCase();
-    if (role !== 'user') continue;
-
-    const s = norm(m.content ?? m.text ?? (m as any).message ?? '');
-    if (looksMeaningful(s)) return s;
-  }
-
-  return null;
-}
-
-/* ---------------------------
-   1.5) Generic recall gate（会話の自然接続）
----------------------------- */
-
-{
-  // ✅ recall汚染防止：user発話だけに絞る + recallテンプレ除外
-  const recallHistory = (historyForTurn as any[])
-    .filter((m) => String(m?.role ?? '').toLowerCase() === 'user')
-    .filter((m) => {
-      const s = norm(m?.content ?? m?.text ?? (m as any)?.message ?? '');
-      if (!s) return false;
-
-      // “recallのrecall” 防止（テンプレ文を履歴候補から排除）
-      if (/^たぶんこれのことかな：/.test(s)) return false;
-      if (/^たぶんこれのことかな：「/.test(s)) return false;
-
-      return true;
-    });
-
-  const recall = runGenericRecallGate({
-    text,
-    history: recallHistory,
-  });
-
-  if (recall) {
-    const metaForSave = {
-      mode: 'light',
-      recallOnly: true,
-      recallKind: recall.recallKind,
-      skipTraining: true,
-      nextStep: null,
-      next_step: null,
-      timing: t,
-    };
-
-    await persistAssistantMessage({
-      supabase,
-      reqOrigin,
-      authorizationHeader,
-      conversationId,
-      userCode,
-      assistantText: recall.assistantText,
-      metaForSave,
-    });
-
-    t.finished_at = nowIso();
-    t.total_ms = msSince(t0);
-
-    return {
-      ok: true,
-      result: { content: recall.assistantText, meta: metaForSave, mode: 'light' },
-      assistantText: recall.assistantText,
-      metaForSave,
-      finalMode: 'light',
-    };
-  }
-}
 
 
     /* ---------------------------

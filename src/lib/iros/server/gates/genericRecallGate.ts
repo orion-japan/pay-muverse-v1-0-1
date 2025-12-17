@@ -59,12 +59,12 @@ function isRecallAnswerLike(s: string): boolean {
   const t = (s ?? '').trim();
   if (!t) return true;
 
-  // これが二重ネスト事故の直接原因
-  if (t.startsWith('たぶんこれのことかな：')) return true;
-  if (t.startsWith('たぶんこれのことかな：「')) return true;
+  // 文字揺れ含めて “含んでたら” 全部落とす（最強安全）
+  if (t.includes('たぶんこれのことかな：')) return true;
 
   return false;
 }
+
 
 /** クエリから “探すキーワード” を抽出（短くて強いものだけ） */
 function extractRecallKeywords(q: string): string[] {

@@ -2,8 +2,11 @@
 
 export type RecallResult =
   | {
-      assistantText: string;
+      /** gateが直接返答を確定させない（＝場を切らない） */
+      assistantText: string | null;
+
       recallKind: 'recall_from_history';
+      /** ここが “材料” になる */
       recalledText: string;
     }
   | null;
@@ -36,12 +39,34 @@ function isQuestionLike(s: string): boolean {
   return false;
 }
 
+/** 「recall返答そのもの」や「固定テンプレ」を拾う事故を防ぐ */
+function isRecallAnswerLike(s: string): boolean {
+  const t = (s ?? '').trim();
+  if (!t) return true;
+
+  // 代表的な recall テンプレ（今後増えたらここに足す）
+  if (t.startsWith('たぶんこれのことかな：')) return true;
+  if (t.startsWith('たぶんこれのことかな：「')) return true;
+
+  return false;
+}
+
 function looksMeaningful(s: string): boolean {
   if (!s) return false;
+
+  // ★ 質問文は recall 候補にしない
   if (isQuestionLike(s)) return false;
+
+  // ★ recallテンプレの自己参照ループを除外
+  if (isRecallAnswerLike(s)) return false;
+
+  // ★ 固定アンカーだけ拾う事故を避ける
+  if (/^太陽SUN$/.test(s)) return false;
+
+  // ★ 短すぎ除外
   if (s.length < 8) return false;
 
-  // 開発ログ・コマンド除外
+  // ★ 開発ログ・コマンド除外
   if (/^(\$|>|\[authz\]|\[IROS\/|GET \/|POST \/)/.test(s)) return false;
   if (/^(rg |sed |npm |npx |curl )/.test(s)) return false;
 
@@ -84,6 +109,12 @@ export async function runGenericRecallGate(args: {
   return {
     recallKind: 'recall_from_history',
     recalledText: recalled,
-    assistantText: `たぶんこれのことかな：「${recalled}」です。🪔`,
+
+    /**
+     * ✅ ここで喋らない
+     * - 「たぶんこれのことかな」テンプレで場を切らない
+     * - recalledText を Writer/LLM に渡して自然言語化させる
+     */
+    assistantText: null,
   };
 }
