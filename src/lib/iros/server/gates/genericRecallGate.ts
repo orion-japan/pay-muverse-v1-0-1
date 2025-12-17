@@ -28,26 +28,27 @@ function isQuestionLike(s: string): boolean {
 }
 
 export function isGenericRecallQuestion(text: string): boolean {
-  const t = normalize(text);
+  const t = (text ?? '').trim();
   if (!t) return false;
 
-  // NOTE:
-  // - 「今」は通常会話の頻出語で誤発火するため除外。
-  // - 「今さっき」だけを許可する（必要な場合のみ）
-  // - 「それって/あれって」は疑問形のときだけ反応（誤発火防止）
+  // ★ まず「名前」系の誤爆を完全に殺す（"名前" が recall になる事故）
+  // ここは安全のため明示的に除外しておく
+  if (/^(あなたの名前|名前は\?|名前は？|名前教えて)$/i.test(t)) return false;
 
-  const strong =
-    /さっき|この前|昨日|前(に)?|今さっき|なんだっけ|何だっけ|どれだっけ|どの話|覚えてる|思い出/.test(
+  // ★ 「前」単体は危険なので捨てる。文脈付きだけ拾う
+  const hit =
+    /さっき|今さっき|先ほど|この前|昨日|以前|その前|前に|覚えてる|思い出|何だっけ|なんだっけ|どれだっけ|どの話/.test(
       t,
     );
 
-  if (strong) return true;
+  if (!hit) return false;
 
   // 「それって/あれって」は質問っぽいときだけ
-  if (/(それって|あれって)/.test(t) && isQuestionLike(t)) return true;
+  if (/(それって|あれって)/.test(t) && !isQuestionLike(t)) return false;
 
-  return false;
+  return true;
 }
+
 
 /* ---------------------------
    抽出ユーティリティ
