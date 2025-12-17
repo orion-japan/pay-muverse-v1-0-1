@@ -719,6 +719,68 @@ export async function handleIrosReply(
       console.warn('[IROS][HistoryX] merge failed', e);
     }
 
+// --- 1) History (single source of truth for this turn) ---
+// ...（既存）historyForTurn を作る
+
+// --- 1.2) Cross-conversation history merge ---
+// ...（既存）mergeHistoryForTurn まで終わった直後
+
+/* ---------------------------
+   1.3) Generic Recall Gate（会話の糊）
+   - 「さっき/この前/目標/何だっけ」系は LLMに行く前にここで拾う
+---------------------------- */
+try {
+  const recall = runGenericRecallGate({
+    text,
+    history: historyForTurn as any[],
+  });
+
+  if (recall) {
+    // ✅ Gateで返す（LLMに行かない）
+    // 必要最低限のmetaだけ付ける（保存は後段の Persist に乗せるため）
+    const gateMetaForSave = {
+      style: style ?? (userProfile as any)?.style ?? 'friendly',
+      mode: 'recall',
+      recall: {
+        kind: recall.recallKind,
+        recalledText: recall.recalledText,
+      },
+      // ここでSUN固定は触らない（sanitizeIntentAnchorMeta が後で守る）
+    };
+
+    // Persist（通常ルートと同じ順番で最低限）
+    // ※「返したのに履歴に残らない」を防ぐ
+    const ts = nowNs();
+
+    const t5 = nowNs();
+    await persistAssistantMessage({
+      supabase,
+      reqOrigin,
+      authorizationHeader,
+      conversationId,
+      userCode,
+      assistantText: recall.assistantText,
+      metaForSave: gateMetaForSave,
+    });
+    t.persist_ms.assistant_message_ms = msSince(t5);
+
+    t.persist_ms.total_ms = msSince(ts);
+    t.finished_at = nowIso();
+    t.total_ms = msSince(t0);
+
+    return {
+      ok: true,
+      result: { gate: 'generic_recall', ...recall },
+      assistantText: recall.assistantText,
+      metaForSave: gateMetaForSave,
+      finalMode: 'recall',
+    };
+  }
+} catch (e) {
+  console.warn('[IROS/Gate] genericRecallGate failed', e);
+}
+
+
     /* ---------------------------
        1.5) Generic recall gate（会話の自然接続）
        - LLM無しで履歴から“直近の意味ある user 発話”を返す
