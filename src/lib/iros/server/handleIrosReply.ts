@@ -1,12 +1,14 @@
 // file: src/lib/iros/server/handleIrosReply.ts
 
+import OpenAI from 'openai';
+
 import type { IrosStyle } from '@/lib/iros/system';
 import type { RememberScopeKind } from '@/lib/iros/remember/resolveRememberBundle';
 import type { IrosUserProfileRow } from './loadUserProfile';
 
 import { getIrosSupabaseAdmin } from './handleIrosReply.supabase';
 
-import { runGreetingGate, runMicroGate } from './handleIrosReply.gates';
+import { runGreetingGate } from './handleIrosReply.gates';
 import { buildTurnContext } from './handleIrosReply.context';
 import { runOrchestratorTurn } from './handleIrosReply.orchestrator';
 import { postProcessReply } from './handleIrosReply.postprocess';
@@ -22,6 +24,12 @@ import {
 
 // ★ アンカー汚染を防ぐための判定（保存ゲートと同じ基準）
 import { isMetaAnchorText } from '@/lib/iros/intentAnchor';
+
+// ✅ micro writer（短文LLM）
+import {
+  runMicroWriter,
+  type MicroWriterGenerate,
+} from '@/lib/iros/writers/microWriter';
 
 export type HandleIrosReplyInput = {
   conversationId: string;
@@ -61,6 +69,8 @@ export type HandleIrosReplyOutput =
   | HandleIrosReplyError;
 
 const supabase = getIrosSupabaseAdmin();
+
+const IROS_MODEL = process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-4o';
 
 /* =========================
    History loader
@@ -152,9 +162,50 @@ function shouldBypassMicroGate(userText: string): boolean {
   ];
 
   if (keywords.some((k) => s.includes(k))) return true;
-  if (s.endsWith('?') || s.endsWith('？')) return true;
 
   return false;
+}
+
+
+/* =========================
+   Micro turn detect (inline)
+   - 短文は “芯/回転/制約” を文章に乗せない
+   - ただし数値メタは Context で算出して保存する
+========================= */
+
+function normalizeTailPunct(s: string): string {
+  return (s ?? '').trim().replace(/[！!。．…]+$/g, '').trim();
+}
+function buildMicroCore(raw: string) {
+  const rawTrim = (raw ?? '').trim();
+  const hasQuestion = /[?？]$/.test(rawTrim);
+
+  const core = normalizeTailPunct(rawTrim)
+    .replace(/[?？]/g, '')
+    .replace(/\s+/g, '')
+    .trim();
+
+  return { rawTrim, hasQuestion, core, len: core.length };
+}
+function isMicroTurn(raw: string): boolean {
+  const { rawTrim, core, len } = buildMicroCore(raw);
+  if (!rawTrim) return false;
+
+  if (/[A-Za-z0-9]/.test(core)) return false;
+
+  if (
+    /(何|なに|どこ|いつ|だれ|誰|なぜ|どうして|どうやって|いくら|何色|色)/.test(
+      core,
+    )
+  ) {
+    return false;
+  }
+
+  if (len < 2 || len > 10) return false;
+
+  return /^(どうする|やる|やっちゃう|いく|いける|どうしよ|どうしよう|行く|行ける)$/.test(
+    core,
+  );
 }
 
 /* =========================
@@ -209,7 +260,6 @@ const norm = (v: any): string => {
 
   return String(v).replace(/\s+/g, ' ').trim();
 };
-
 
 /* =========================
    IntentAnchor sanitize
@@ -464,6 +514,26 @@ function computePivot(prevMeta: any, nextMeta: any): IrosPivot {
 }
 
 /* =========================================================
+   Micro Writer: generator（同じOpenAIで短文だけ作る）
+========================================================= */
+
+const microGenerate: MicroWriterGenerate = async (args) => {
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+  const res = await client.chat.completions.create({
+    model: IROS_MODEL,
+    messages: [
+      { role: 'system', content: String(args.system ?? '') },
+      { role: 'user', content: String(args.prompt ?? '') },
+    ],
+    temperature: typeof args.temperature === 'number' ? args.temperature : 0.6,
+    max_tokens: typeof args.maxTokens === 'number' ? args.maxTokens : 140,
+  });
+
+  return res.choices?.[0]?.message?.content ?? '';
+};
+
+/* =========================================================
    main
 ========================================================= */
 
@@ -539,19 +609,109 @@ export async function handleIrosReply(
 
     const bypassMicro = shouldBypassMicroGate(text);
 
-    if (!bypassMicro) {
-      const gatedMicro = await runMicroGate({
-        supabase,
-        conversationId,
-        userCode,
-        text,
-        userProfile,
-        reqOrigin,
-        authorizationHeader,
-        traceId,
+    // ✅ Micro（独立ルート）
+    // - 文章：microWriter（芯/回転/制約を出さない）
+    // - 数値メタ：buildTurnContext で算出して保存
+    if (!bypassMicro && isMicroTurn(text)) {
+      const name = userProfile?.user_call_name || 'あなた';
+      const seed = `${conversationId}|${userCode}|${traceId ?? ''}|${Date.now()}`;
+
+      const mw = await runMicroWriter(microGenerate, {
+        name,
+        userText: text,
+        seed,
       });
-      if (gatedMicro) return gatedMicro;
-    } else {
+
+      if (mw.ok) {
+        // 1) history
+        let historyForTurn: unknown[] = Array.isArray(history)
+          ? history
+          : await loadConversationHistory(supabase, conversationId, 30);
+
+        // 2) context（数値メタだけ欲しい）
+        const tc = nowNs();
+        const ctx = await (buildTurnContext as any)({
+          supabase,
+          conversationId,
+          userCode,
+          text,
+          mode,
+          traceId,
+          userProfile,
+          requestedStyle: style ?? null,
+          history: historyForTurn,
+        });
+        t.context_ms = msSince(tc);
+
+        // 3) meta（短文用：数値だけは乗せる）
+        const metaForSave = {
+          ...(ctx?.baseMetaForTurn ?? {}),
+          style: ctx?.effectiveStyle ?? style ?? (userProfile as any)?.style ?? 'friendly',
+
+          mode: 'light',
+          microOnly: true,
+
+          // micro は “会話の間” なので学習/記憶は抑制（必要なら後で外せる）
+          skipMemory: true,
+          skipTraining: true,
+
+          nextStep: null,
+          next_step: null,
+        };
+
+        // timing 注入
+        metaForSave.timing = t;
+
+        // SUN固定保護（念のため）
+        try {
+          sanitizeIntentAnchorMeta(metaForSave);
+        } catch {}
+
+        // 4) persist（最低限）
+        const ts = nowNs();
+
+        const t1 = nowNs();
+        await persistQCodeSnapshotIfAny({
+          userCode,
+          conversationId,
+          requestedMode: ctx?.requestedMode ?? mode,
+          metaForSave,
+        });
+        t.persist_ms.q_snapshot_ms = msSince(t1);
+
+        const t5 = nowNs();
+        await persistAssistantMessage({
+          supabase,
+          reqOrigin,
+          authorizationHeader,
+          conversationId,
+          userCode,
+          assistantText: mw.text,
+          metaForSave,
+        });
+        t.persist_ms.assistant_message_ms = msSince(t5);
+
+        t.persist_ms.total_ms = msSince(ts);
+
+        t.gate_ms = msSince(tg);
+        t.finished_at = nowIso();
+        t.total_ms = msSince(t0);
+
+        return {
+          ok: true,
+          result: { gate: 'micro_writer' },
+          assistantText: mw.text,
+          metaForSave,
+          finalMode: 'light',
+        };
+      }
+
+      // microWriter が壊れたら通常ルートへフォールバック（落とさない）
+      console.warn('[IROS/MicroWriter] failed -> fallback to normal', {
+        reason: mw.reason,
+        detail: mw.detail,
+      });
+    } else if (bypassMicro) {
       console.log('[IROS/Gate] bypass micro gate (context recall)', {
         conversationId,
         userCode,
@@ -700,7 +860,6 @@ export async function handleIrosReply(
         supabase,
         userCode,
         limit: 60,
-        // 今会話もDBにあるなら除外したい場合は有効化
         // excludeConversationId: conversationId,
       });
 
@@ -719,72 +878,57 @@ export async function handleIrosReply(
       console.warn('[IROS][HistoryX] merge failed', e);
     }
 
-// --- 1) History (single source of truth for this turn) ---
-// ...（既存）historyForTurn を作る
+    /* ---------------------------
+       1.3) Generic Recall Gate（会話の糊）
+   ---------------------------- */
+    try {
+      const recall = runGenericRecallGate({
+        text,
+        history: historyForTurn as any[],
+      });
 
-// --- 1.2) Cross-conversation history merge ---
-// ...（既存）mergeHistoryForTurn まで終わった直後
+      if (recall) {
+        const gateMetaForSave = {
+          style: style ?? (userProfile as any)?.style ?? 'friendly',
+          mode: 'recall',
+          recall: {
+            kind: recall.recallKind,
+            recalledText: recall.recalledText,
+          },
+        };
 
-/* ---------------------------
-   1.3) Generic Recall Gate（会話の糊）
-   - 「さっき/この前/目標/何だっけ」系は LLMに行く前にここで拾う
----------------------------- */
-try {
-  const recall = runGenericRecallGate({
-    text,
-    history: historyForTurn as any[],
-  });
+        const ts = nowNs();
 
-  if (recall) {
-    // ✅ Gateで返す（LLMに行かない）
-    // 必要最低限のmetaだけ付ける（保存は後段の Persist に乗せるため）
-    const gateMetaForSave = {
-      style: style ?? (userProfile as any)?.style ?? 'friendly',
-      mode: 'recall',
-      recall: {
-        kind: recall.recallKind,
-        recalledText: recall.recalledText,
-      },
-      // ここでSUN固定は触らない（sanitizeIntentAnchorMeta が後で守る）
-    };
+        const t5 = nowNs();
+        await persistAssistantMessage({
+          supabase,
+          reqOrigin,
+          authorizationHeader,
+          conversationId,
+          userCode,
+          assistantText: recall.assistantText,
+          metaForSave: gateMetaForSave,
+        });
+        t.persist_ms.assistant_message_ms = msSince(t5);
 
-    // Persist（通常ルートと同じ順番で最低限）
-    // ※「返したのに履歴に残らない」を防ぐ
-    const ts = nowNs();
+        t.persist_ms.total_ms = msSince(ts);
+        t.finished_at = nowIso();
+        t.total_ms = msSince(t0);
 
-    const t5 = nowNs();
-    await persistAssistantMessage({
-      supabase,
-      reqOrigin,
-      authorizationHeader,
-      conversationId,
-      userCode,
-      assistantText: recall.assistantText,
-      metaForSave: gateMetaForSave,
-    });
-    t.persist_ms.assistant_message_ms = msSince(t5);
-
-    t.persist_ms.total_ms = msSince(ts);
-    t.finished_at = nowIso();
-    t.total_ms = msSince(t0);
-
-    return {
-      ok: true,
-      result: { gate: 'generic_recall', ...recall },
-      assistantText: recall.assistantText,
-      metaForSave: gateMetaForSave,
-      finalMode: 'recall',
-    };
-  }
-} catch (e) {
-  console.warn('[IROS/Gate] genericRecallGate failed', e);
-}
-
+        return {
+          ok: true,
+          result: { gate: 'generic_recall', ...recall },
+          assistantText: recall.assistantText,
+          metaForSave: gateMetaForSave,
+          finalMode: 'recall',
+        };
+      }
+    } catch (e) {
+      console.warn('[IROS/Gate] genericRecallGate failed', e);
+    }
 
     /* ---------------------------
        1.5) Generic recall gate（会話の自然接続）
-       - LLM無しで履歴から“直近の意味ある user 発話”を返す
-       - recall汚染防止：user発話のみ + recallテンプレ除外
     ---------------------------- */
 
     {
@@ -794,7 +938,6 @@ try {
           const s = norm(m?.content ?? m?.text ?? (m as any)?.message ?? '');
           if (!s) return false;
 
-          // “recallのrecall” 防止（テンプレ文を履歴候補から排除）
           if (/^たぶんこれのことかな：/.test(s)) return false;
           if (/^たぶんこれのことかな：「/.test(s)) return false;
 
@@ -843,8 +986,6 @@ try {
         };
       }
     }
-
-
 
     /* ---------------------------
        2) Context
@@ -946,7 +1087,6 @@ try {
       next: out.metaForSave,
     });
 
-    // pivot はログ用途（必要なら meta に入れてもOK）
     try {
       const pivot = computePivot(ctx.baseMetaForTurn, out.metaForSave);
       out.metaForSave = out.metaForSave ?? {};
@@ -955,11 +1095,9 @@ try {
       console.warn('[IROS/Reply] computePivot failed', e);
     }
 
-    // timing 注入
     out.metaForSave = out.metaForSave ?? {};
     out.metaForSave.timing = t;
 
-    // SUN固定保護
     try {
       out.metaForSave = sanitizeIntentAnchorMeta(out.metaForSave);
     } catch (e) {
@@ -1025,11 +1163,10 @@ try {
       t.persist_ms.intent_anchor_ms = msSince(t2);
 
       const t3 = nowNs();
-
       await persistMemoryStateIfAny({
         supabase,
         userCode,
-        userText: text, // ★追加
+        userText: text,
         metaForSave: out.metaForSave,
       });
       t.persist_ms.memory_state_ms = msSince(t3);

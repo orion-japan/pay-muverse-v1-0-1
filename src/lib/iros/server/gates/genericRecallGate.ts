@@ -1,7 +1,4 @@
 // src/lib/iros/server/gates/genericRecallGate.ts
-// iros - Generic recall gate (conversation glue)
-// - 「さっき/この前/昨日/何だっけ」等で履歴から拾って自然に会話をつなぐ
-// - ここでは「候補抽出 + 返答文生成」までを担当（永続化は呼び出し側で行う）
 
 export type GenericRecallGateResult =
   | {
@@ -10,10 +7,6 @@ export type GenericRecallGateResult =
       recalledText: string;
     }
   | null;
-
-/* ---------------------------
-   判定
----------------------------- */
 
 function normalize(s: any): string {
   return String(s ?? '').replace(/\s+/g, ' ').trim();
@@ -31,42 +24,39 @@ export function isGenericRecallQuestion(text: string): boolean {
   const t = (text ?? '').trim();
   if (!t) return false;
 
-  // ★ まず「名前」系の誤爆を完全に殺す（"名前" が recall になる事故）
-  // ここは安全のため明示的に除外しておく
   if (/^(あなたの名前|名前は\?|名前は？|名前教えて)$/i.test(t)) return false;
 
-  // ★ 「前」単体は危険なので捨てる。文脈付きだけ拾う
   const hit =
-    /さっき|今さっき|先ほど|この前|昨日|以前|その前|前に|覚えてる|思い出|何だっけ|なんだっけ|どれだっけ|どの話/.test(
+    /さっき|今さっき|先ほど|この前|昨日|以前|その前|前に|覚えてる|思い出|何だっけ|なんだっけ|どれだっけ|どの話|目標/.test(
       t,
     );
 
   if (!hit) return false;
-
-  // 「それって/あれって」は質問っぽいときだけ
   if (/(それって|あれって)/.test(t) && !isQuestionLike(t)) return false;
 
   return true;
 }
 
-
-/* ---------------------------
-   抽出ユーティリティ
----------------------------- */
-
 /** 「recall返答そのもの」を拾ってしまう事故を防ぐ */
 function isRecallAnswerLike(s: string): boolean {
   const t = (s ?? '').trim();
   if (!t) return true;
-
-  // 文字揺れ含めて “含んでたら” 全部落とす（最強安全）
-  if (t.includes('たぶんこれのことかな：')) return true;
-
+  if (t.startsWith('たぶんこれのことかな：')) return true;
+  if (t.startsWith('たぶんこれのことかな：「')) return true;
   return false;
 }
 
+function isGoalRecallQuery(q: string): boolean {
+  const t = (q ?? '').trim();
+  if (!t) return false;
+  return (
+    /(今日|僕|わたし|俺).*(目標).*(なん|何|覚えて|覚えてない|でしたっけ|どれ|\?|\？)/.test(
+      t,
+    ) ||
+    /(目標).*(覚えて|覚えてない|でしたっけ|どれ|\?|\？)/.test(t)
+  );
+}
 
-/** クエリから “探すキーワード” を抽出（短くて強いものだけ） */
 function extractRecallKeywords(q: string): string[] {
   const t = (q ?? '').trim();
   if (!t) return [];
@@ -77,24 +67,7 @@ function extractRecallKeywords(q: string): string[] {
     .trim();
 
   const strong: string[] = [];
-  const presets = [
-    '目標',
-    'お礼',
-    '感謝',
-    'ありがとう',
-    'サンキュー',
-    'thanks',
-    '名前',
-    'URL',
-    'リンク',
-    'コード',
-    'SQL',
-    '関数',
-    'ファイル',
-    '予定',
-    '時間',
-    '場所',
-  ];
+  const presets = ['目標', '今日', 'iros', '完成', 'URL', 'リンク', 'コード', 'SQL', '関数', 'ファイル'];
 
   for (const p of presets) {
     if (cleaned.toLowerCase().includes(p.toLowerCase())) strong.push(p);
@@ -116,20 +89,15 @@ function extractRecallKeywords(q: string): string[] {
     if (!uniq.some((u) => u.toLowerCase() === k)) uniq.push(x);
   }
 
-  return uniq.slice(0, 4);
+  return uniq.slice(0, 6);
 }
 
-/**
- * 履歴から拾う（安全版）
- * - 原則 user 発話のみ
- * - recall返答っぽい文は除外（ネスト事故防止）
- * - 重要：query（今回の発話）と同一の文は除外（自己参照ループ防止）
- */
 function pickRecallFromHistory(query: string, history: any[]): string | null {
   if (!Array.isArray(history) || history.length === 0) return null;
 
   const qNorm = normalize(query);
   const keywords = extractRecallKeywords(query);
+  const goalQuery = isGoalRecallQuery(query);
 
   const getRole = (m: any) => String(m?.role ?? '').toLowerCase();
   const getText = (m: any) =>
@@ -137,27 +105,54 @@ function pickRecallFromHistory(query: string, history: any[]): string | null {
 
   const looksAllowed = (s: string) => {
     if (!s) return false;
-
-    // ★ 自己参照ループ防止：今回の入力と同一なら候補にしない
     if (qNorm && normalize(s) === qNorm) return false;
-
     if (isQuestionLike(s)) return false;
     if (isRecallAnswerLike(s)) return false;
-
-    // 固定アンカーだけ拾う事故を避ける
     if (/^太陽SUN$/.test(s)) return false;
 
-    // 開発ログ・コマンド除外
     if (/^(\$|>|\[authz\]|\[IROS\/|GET \/|POST \/)/.test(s)) return false;
     if (/^(rg |sed |npm |npx |curl )/.test(s)) return false;
 
-    // 短すぎ除外
     if (s.length < 8) return false;
-
     return true;
   };
 
-  // 1) キーワード一致（userのみ）
+  // ✅ 目標クエリは “スコアで選ぶ”
+  if (goalQuery) {
+    let best: { s: string; score: number } | null = null;
+
+    for (let i = history.length - 1; i >= 0; i--) {
+      const m = history[i];
+      if (!m) continue;
+      if (getRole(m) !== 'user') continue;
+
+      const s = getText(m);
+      if (!looksAllowed(s)) continue;
+
+      // 目標っぽい文だけを候補にする
+      const hasGoalWord = /目標/.test(s);
+      const hasToday = /今日|今日は/.test(s);
+      if (!hasGoalWord && !hasToday) continue;
+
+      let score = 0;
+      if (hasGoalWord) score += 5;
+      if (hasToday) score += 3;
+      if (/iros/i.test(s)) score += 3;
+      if (/完成|ほぼ完成/.test(s)) score += 3;
+
+      // キーワード一致で加点
+      for (const k of keywords) {
+        if (k && s.toLowerCase().includes(k.toLowerCase())) score += 1;
+      }
+
+      if (!best || score > best.score) best = { s, score };
+    }
+
+    if (best) return best.s;
+    // 目標候補が無ければ通常ロジックへ落とす
+  }
+
+  // 1) キーワード一致（userのみ）→ 最初のヒットで返す（通常）
   if (keywords.length > 0) {
     for (let i = history.length - 1; i >= 0; i--) {
       const m = history[i];
@@ -174,7 +169,7 @@ function pickRecallFromHistory(query: string, history: any[]): string | null {
     }
   }
 
-  // 2) フォールバック：直近の user「質問じゃない・recall返答じゃない」発話
+  // 2) フォールバック：直近の user 発話
   for (let i = history.length - 1; i >= 0; i--) {
     const m = history[i];
     if (!m) continue;
@@ -189,10 +184,6 @@ function pickRecallFromHistory(query: string, history: any[]): string | null {
   return null;
 }
 
-/* ---------------------------
-   メイン
----------------------------- */
-
 export function runGenericRecallGate(args: {
   text: string;
   history: any[];
@@ -204,9 +195,13 @@ export function runGenericRecallGate(args: {
   const recalled = pickRecallFromHistory(text, history);
   if (!recalled) return null;
 
+  const goalQuery = isGoalRecallQuery(text);
+
   return {
     recallKind: 'recall_from_history',
     recalledText: recalled,
-    assistantText: `たぶんこれのことかな：「${recalled}」です。🪔`,
+    assistantText: goalQuery
+      ? `今日の目標は「${recalled}」です。🪔`
+      : `直近だと「${recalled}」が該当します。🪔`,
   };
 }

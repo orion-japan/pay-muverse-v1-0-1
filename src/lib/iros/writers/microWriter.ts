@@ -1,5 +1,5 @@
 // file: src/lib/iros/writers/microWriter.ts
-// iros - Micro Writer (same LLM via injected generator)
+// iros - Micro Writer (short reply only; no menu / no ABC)
 
 export type MicroWriterGenerate = (args: {
   system: string;
@@ -17,51 +17,80 @@ export type MicroWriterInput = {
   seed: string;
 };
 
-export type MicroWriterOutput = {
-  ok: true;
-  text: string; // 4行固定（1行 + 3択）
-} | {
-  ok: false;
-  reason: 'format_invalid' | 'generation_failed' | 'empty_input';
-  detail?: string;
-};
+export type MicroWriterOutput =
+  | { ok: true; text: string } // 1〜2行の短い返し
+  | {
+      ok: false;
+      reason: 'format_invalid' | 'generation_failed' | 'empty_input';
+      detail?: string;
+    };
 
 function normalizeMicro(s: string): string {
-  return (s ?? '')
+  return String(s ?? '')
     .trim()
     .replace(/[！!。．…]+$/g, '')
     .trim();
 }
 
-/** 固定フォーマット（4行）に丸める。崩れてたら null */
-function coerceToFourLines(raw: string): string | null {
+/**
+ * Micro出力で許可する絵文字
+ * - 🪔 は許可（最大1個）
+ * - その他の絵文字は除去
+ */
+function sanitizeMicroEmoji(raw: string): string {
+  const s = String(raw ?? '');
+
+  // Unicode絵文字（おおむね）を拾う：Extended_Pictographic
+  // ※ 🪔 は許可するので、いったん🪔だけプレースホルダ退避
+  const PLACEHOLDER = '__IROS_LAMP__';
+  const escaped = s.replace(/🪔/g, PLACEHOLDER);
+
+  // 絵文字っぽい文字を除去
+  const removed = escaped.replace(/\p{Extended_Pictographic}/gu, '');
+
+  // 🪔を戻す
+  const restored = removed.replace(new RegExp(PLACEHOLDER, 'g'), '🪔');
+
+  // 🪔が複数あれば先頭1個だけ残す
+  const firstIdx = restored.indexOf('🪔');
+  if (firstIdx === -1) return restored;
+
+  const before = restored.slice(0, firstIdx + 2); // 🪔はサロゲートなので+2
+  const after = restored.slice(firstIdx + 2).replace(/🪔/g, '');
+  return (before + after).replace(/\s+$/g, '').trimEnd();
+}
+
+/**
+ * LLM出力を「1〜2行」に丸める。
+ * - 空行除去
+ * - 3行以上なら先頭2行だけ採用
+ * - 極端な長文は軽く切る（安全弁）
+ */
+function coerceToTwoLines(raw: string): string | null {
   const lines = String(raw ?? '')
     .replace(/\r\n/g, '\n')
     .split('\n')
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
 
-  if (lines.length < 4) return null;
+  if (lines.length === 0) return null;
 
-  // 先頭4行を採用（それ以上は捨てる）
-  const first4 = lines.slice(0, 4);
+  const first2 = lines.slice(0, 2);
 
-  // A/B/C の3択っぽさ最低限
-  const hasABC =
-    /^(①|A|Ａ)[\s　]/.test(first4[1]) &&
-    /^(②|B|Ｂ)[\s　]/.test(first4[2]) &&
-    /^(③|C|Ｃ)[\s　]/.test(first4[3]);
+  // “メニュー/選択肢”っぽい行頭を弾く（くどさ防止）
+  const looksLikeMenu = first2.some((l) =>
+    /^(①|②|③|A[\s　]|B[\s　]|C[\s　]|・|-|\*|\d+\.)/.test(l),
+  );
+  if (looksLikeMenu) return null;
 
-  if (!hasABC) return null;
+  // 2行を超える長さになりがちなときの安全弁（目安）
+  const joined = first2.join('\n');
+  const hardMax = 220; // UIで“短文”に見える範囲の上限
+  const clipped = joined.length > hardMax ? joined.slice(0, hardMax).trim() : joined;
 
-  return first4.join('\n');
+  return clipped;
 }
 
-/**
- * 短文の「間」を作る writer（同じLLMで生成）
- * - 返答を “1行 + 3択” に固定することで UI の安定性を確保
- * - seed を混ぜてテンプレ感を減らす（ただし暴れすぎない）
- */
 export async function runMicroWriter(
   generate: MicroWriterGenerate,
   input: MicroWriterInput,
@@ -75,25 +104,22 @@ export async function runMicroWriter(
     return { ok: false, reason: 'empty_input' };
   }
 
-  // ざっくり分類（疲労系だけは “休む/整える/置く” を混ぜやすくする）
+  // ざっくり分類（疲労系だけは“休む/整える”に寄せやすくする）
   const core = userText.replace(/[?？]/g, '').replace(/\s+/g, '').trim();
   const isTiredMicro = /^(疲れた|休みたい|しんどい|つらい|無理|眠い)$/.test(core);
 
   const system = `
 あなたは iros の「Micro Writer」。
-目的：短い入力に対して、テンプレ臭くない “間の返し（1行＋3択）” を生成する。
+目的：短い入力に対して、“くどくない短文（1〜2行）”で返す。
+この応答は深い分析や制御ロジックの代替ではなく、会話の「間」を作る。
 
-【出力フォーマット（厳守）】
-- 必ず4行だけ出力する
-- 1行目：${name || 'あなた'}さん宛ての1行（状況を決めつけない）
-- 2行目：① ... （短く）
-- 3行目：② ... （短く）
-- 4行目：③ ... （短く、最後に「→」で選ばせる。行末に絵文字は1つだけ：🪔 or 🌀 or 🌱）
-
-【禁止】
-- 長文説明、説教、分析
-- “原因”の推測（例：彼が忙しい等）を短文で断定
-- 4行を超える
+【出力ルール（厳守）】
+- 出力は1〜2行のみ（3行以上は禁止）
+- 断定しない（状況/原因の決めつけ禁止）
+- 説明・一般論・指南・分析は禁止
+- 選択肢（①②③/A/B/C/箇条書き/メニュー）を出さない
+- 質問は最大1つまで（必要なら最後に短く）
+- 絵文字は使ってよい（🪔は可）。ただし最大1個まで（それ以外は使わない）
 
 【ゆらぎ】
 - seed=${seed} を言い回しの軽い揺らぎに使う（毎回同じ言い方にしない）
@@ -103,30 +129,33 @@ export async function runMicroWriter(
 入力: ${userText}
 
 トーン指示:
-- 余白を作る
+- 余白を作る（短く）
 - でも投げっぱなしにしない
-- 3択は「今この瞬間に選べる」粒度にする
-- ${isTiredMicro ? '疲労系なので「休む/整える/置く」を自然に含めやすくする' : '決断/着手系なので「決める/整える/置く」を自然に含めやすくする'}
+- ${isTiredMicro ? '疲労系なので「休む/整える」に自然に寄せてよい' : '決断/着手系なら「今の一点」を静かに受け止める'}
 `.trim();
 
   try {
     const raw = await generate({
       system,
       prompt,
-      temperature: 0.9,
-      maxTokens: 120,
+      // 短文を崩さず、固定化もしすぎない
+      temperature: 0.7,
+      maxTokens: 90,
     });
 
-    const coerced = coerceToFourLines(raw);
+    const coerced = coerceToTwoLines(raw);
     if (!coerced) {
       return {
         ok: false,
         reason: 'format_invalid',
-        detail: 'LLM output did not match 4-line ABC format',
+        detail: 'LLM output did not match 1-2 line no-menu format',
       };
     }
 
-    return { ok: true, text: coerced };
+    // ✅ 🪔だけ許可（最大1個）
+    const sanitized = sanitizeMicroEmoji(coerced);
+
+    return { ok: true, text: sanitized };
   } catch (e) {
     return {
       ok: false,

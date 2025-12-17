@@ -69,7 +69,11 @@ function isMicroTurn(raw: string): boolean {
   if (/[A-Za-z0-9]/.test(core)) return false;
 
   // ★ 保険：質問語彙っぽいものは micro にしない（例: 何色？など）
-  if (/(何|なに|どこ|いつ|だれ|誰|なぜ|どうして|どうやって|いくら|何色|色)/.test(core)) {
+  if (
+    /(何|なに|どこ|いつ|だれ|誰|なぜ|どうして|どうやって|いくら|何色|色)/.test(
+      core,
+    )
+  ) {
     return false;
   }
 
@@ -77,7 +81,9 @@ function isMicroTurn(raw: string): boolean {
   if (len < 2 || len > 10) return false;
 
   // 語彙一致のみ（?だけで micro にしない）
-  return /^(どうする|やる|やっちゃう|いく|いける|どうしよ|どうしよう|行く|行ける)$/.test(core);
+  return /^(どうする|やる|やっちゃう|いく|いける|どうしよ|どうしよう|行く|行ける)$/.test(
+    core,
+  );
 }
 
 /* =====================================================

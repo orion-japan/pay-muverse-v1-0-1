@@ -5,13 +5,17 @@
 // - 呼び出し側が seed/chatCore/handleIrosReply で揺れていても型で落ちないようにする
 // - 返り値は content を正とし、text/assistantText など旧互換も同値で返す
 // - ✅ LLM へ会話履歴（history）を渡し、会話の流れを LLM が保持できるようにする
+//
+// 追加方針（2025-12-17）:
+// - 短文（超短い入力）には「芯」「回転」「制約」を文章に乗せない
+// - ただし “数値メタ” だけは必ず末尾に 1 行で付ける（説明は禁止）
 
 import OpenAI from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat';
 
 import { getSystemPrompt, type IrosMeta, type IrosMode } from './system';
 
-/** ✅ 旧/新ルートを全部受ける（型で落とさない） */
+/** ✅ 旧/新ルートを全部受ける（型で落ちない） */
 export type GenerateArgs = {
   /** 旧: text */
   text?: string;
@@ -29,7 +33,7 @@ export type GenerateArgs = {
   [k: string]: any;
 };
 
-/** ✅ 旧/新参照を全部返す（型で落とさない） */
+/** ✅ 旧/新参照を全部返す（型で落ちない） */
 export type GenerateResult = {
   content: string;
 
@@ -98,10 +102,136 @@ function pickCoreIntent(meta: any): string | null {
 }
 
 /* =========================================================
+   SHORT INPUT DETECTOR
+   ========================================================= */
+
+function normalizeUserText(s: string): string {
+  return String(s ?? '').trim();
+}
+
+/**
+ * “短文” 判定：
+ * - かなり短い入力は、文章に「芯/回転/制約」を乗せない
+ * - ただし数値メタだけは末尾に付ける
+ */
+function isShortTurn(userText: string): boolean {
+  const t = normalizeUserText(userText)
+    .replace(/[！!。．…]+$/g, '')
+    .trim();
+  if (!t) return false;
+
+  // 目安：10文字以下（記号だけ/1文字は除外）
+  const core = t.replace(/[?？]/g, '').replace(/\s+/g, '');
+  if (core.length < 2) return true;
+  return core.length <= 10;
+}
+
+/* =========================================================
+   NUMERIC FOOTER (numbers only)
+   ========================================================= */
+
+function toNum(v: unknown): number | null {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+  return v;
+}
+
+function toIntLike(v: unknown): number | null {
+  const n = toNum(v);
+  if (n === null) return null;
+  return Math.round(n);
+}
+
+function fmt(v: number | null, digits = 2): string | null {
+  if (v === null) return null;
+  const d = Math.max(0, Math.min(6, digits));
+  return v.toFixed(d);
+}
+
+/**
+ * 末尾に付ける「数値だけ」行（説明禁止）
+ * - 例：〔sa0.52 y2 h1 pol0.09 g0.52 t0.20 p0.50〕
+ * - 無い値は出さない（空になったら null）
+ */
+function buildNumericFooter(meta: any): string | null {
+  const sa =
+    toNum(meta?.selfAcceptance) ??
+    toNum(meta?.unified?.selfAcceptance) ??
+    toNum(meta?.unified?.self_acceptance) ??
+    null;
+
+  const y =
+    toIntLike(meta?.yLevel) ??
+    toIntLike(meta?.unified?.yLevel) ??
+    toIntLike(meta?.unified?.y_level) ??
+    null;
+
+  const h =
+    toIntLike(meta?.hLevel) ??
+    toIntLike(meta?.unified?.hLevel) ??
+    toIntLike(meta?.unified?.h_level) ??
+    null;
+
+  const pol = toNum(meta?.unified?.polarityScore) ?? toNum(meta?.polarityScore) ?? null;
+
+  // renderEngine の vector で計算されてることが多い想定だが、無いなら出さない
+  const g = toNum(meta?.unified?.grounding) ?? toNum(meta?.grounding) ?? null;
+  const t = toNum(meta?.unified?.transcendence) ?? toNum(meta?.transcendence) ?? null;
+  const p = toNum(meta?.unified?.precision) ?? toNum(meta?.precision) ?? null;
+
+  const parts: string[] = [];
+
+  const saS = fmt(sa, 2);
+  if (saS) parts.push(`sa${saS}`);
+
+  if (y !== null) parts.push(`y${y}`);
+  if (h !== null) parts.push(`h${h}`);
+
+  const polS = fmt(pol, 2);
+  if (polS) parts.push(`pol${polS}`);
+
+  const gS = fmt(g, 2);
+  if (gS) parts.push(`g${gS}`);
+
+  const tS = fmt(t, 2);
+  if (tS) parts.push(`t${tS}`);
+
+  const pS = fmt(p, 2);
+  if (pS) parts.push(`p${pS}`);
+
+  if (!parts.length) return null;
+
+  return `〔${parts.join(' ')}〕`;
+}
+
+/* =========================================================
    WRITER PROTOCOL
    ========================================================= */
 
 function buildWriterProtocol(meta: any, userText: string): string {
+  const shortTurn = isShortTurn(userText);
+
+// --- ① buildWriterProtocol() の shortTurn ブロックをこの内容に差し替え ---
+// ✅ 短文：芯/回転/制約/数値ブロックは “本文に一切出さない”
+if (shortTurn) {
+  return [
+    '【WRITER_PROTOCOL】',
+    'あなたは「意図フィールドOS」のWriterです。一般論・説明口調・テンプレは禁止。',
+    '',
+    'このターンは “短文” です。',
+    '重要：',
+    '- 「芯」「回転」「制約」「メタ」などの言葉を本文に出さない',
+    '- 数値ブロック（〔sa...〕 や [sa...] など）を本文に出さない',
+    '- 分析・説教・長文は禁止（1〜2行で終える）',
+    '- 質問は最大1つまで（必要なら最後に短く）',
+    '',
+    `USER_TEXT: ${String(userText)}`,
+    '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+  // ✅ 通常：従来の protocol（芯/回転/制約）を活かす
   const coreIntent = pickCoreIntent(meta);
 
   const phase = meta?.phase ?? null;
@@ -149,6 +279,8 @@ function buildWriterProtocol(meta: any, userText: string): string {
       '出力は「会話として自然な日本語」で書くこと。固定の見出し（例：北極星／いま置ける一歩／確認…）を毎回必ず出してはいけない。',
       '必要なときだけ、要素を“混ぜる”ことは許可する（例：一文だけ「北極星=...」を入れる、提案を一つだけ添える、など）。',
       '質問は必須ではない。質問する場合も「1問まで」で、詰問にならない短さにする。',
+      '',
+      `USER_TEXT: ${String(userText)}`,
       '',
     ]
       .filter(Boolean)
@@ -319,28 +451,27 @@ export async function generateIrosReply(
   // ✅ 履歴を LLM に渡す（会話の流れを LLM にやってもらう）
   const historyMessagesRaw = normalizeHistoryToMessages(args.history, 12);
   const historyMessages = dedupeTailUser(historyMessagesRaw, userText);
+
   // ✅ past state note を LLM に渡す（system として差し込む）
   const pastStateNoteText =
     typeof (meta as any)?.extra?.pastStateNoteText === 'string'
       ? (meta as any).extra.pastStateNoteText.trim()
       : '';
 
-      const messages: ChatCompletionMessageParam[] = [
-        { role: 'system', content: system },
-        { role: 'system', content: protocol },
+  const messages: ChatCompletionMessageParam[] = [
+    { role: 'system', content: system },
+    { role: 'system', content: protocol },
 
-        ...(pastStateNoteText
-          ? [{ role: 'system', content: pastStateNoteText } as ChatCompletionMessageParam]
-          : []),
+    ...(pastStateNoteText
+      ? [{ role: 'system', content: pastStateNoteText } as ChatCompletionMessageParam]
+      : []),
 
-        // ★会話履歴
-        ...historyMessages,
+    // ★会話履歴
+    ...historyMessages,
 
-        // ★今回の入力
-        { role: 'user', content: userText },
-      ];
-
-
+    // ★今回の入力
+    { role: 'user', content: userText },
+  ];
 
   const res = await client.chat.completions.create({
     model: IROS_MODEL,
@@ -348,9 +479,37 @@ export async function generateIrosReply(
     temperature: 0.7,
   });
 
-  const content =
+  let content =
     res.choices?.[0]?.message?.content?.trim() ??
     '……（応答生成に失敗しました）';
+
+// ================================
+// Numeric footer control（表示制御）
+// ================================
+
+// 明示ONのときだけ出す（通常は出さない）
+const showNumericFooter =
+  process.env.IROS_NUMERIC_FOOTER === '1' ||
+  (meta as any)?.extra?.showNumericFooter === true;
+
+// micro / recall では絶対に出さない（本文汚染防止）
+const hardHideNumericFooter =
+  (meta as any)?.microOnly === true ||
+  (meta as any)?.recallOnly === true ||
+  String(mode) === 'recall';
+
+if (showNumericFooter && !hardHideNumericFooter) {
+  // LLMが勝手に付けた数値行を除去（保険）
+  // 〔sa...〕 と [sa...] の両方を剥がす（末尾のみ）
+  content = content
+    .replace(/\n*\s*[〔\[]sa[^\n]*[〕\]]\s*$/g, '')
+    .trim();
+
+  const footer = buildNumericFooter(meta as any);
+  if (footer) {
+    content = `${content}\n${footer}`;
+  }
+}
 
   // ✅ 全ルート互換で返す（mode は IrosMode で返す）
   return {
