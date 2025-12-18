@@ -171,11 +171,13 @@ function buildNumericFooter(meta: any): string | null {
     toIntLike(meta?.unified?.h_level) ??
     null;
 
-  const pol = toNum(meta?.unified?.polarityScore) ?? toNum(meta?.polarityScore) ?? null;
+  const pol =
+    toNum(meta?.unified?.polarityScore) ?? toNum(meta?.polarityScore) ?? null;
 
   // renderEngine の vector で計算されてることが多い想定だが、無いなら出さない
   const g = toNum(meta?.unified?.grounding) ?? toNum(meta?.grounding) ?? null;
-  const t = toNum(meta?.unified?.transcendence) ?? toNum(meta?.transcendence) ?? null;
+  const t =
+    toNum(meta?.unified?.transcendence) ?? toNum(meta?.transcendence) ?? null;
   const p = toNum(meta?.unified?.precision) ?? toNum(meta?.precision) ?? null;
 
   const parts: string[] = [];
@@ -204,32 +206,100 @@ function buildNumericFooter(meta: any): string | null {
 }
 
 /* =========================================================
+   SAFE SLOT → GENERATION CONTROL
+   ========================================================= */
+
+/**
+ * meta.slotPlan から SAFE タグを拾う
+ * - slotBuilder は { OBS, SHIFT, NEXT, SAFE } の object を入れている想定
+ * - truthy なら発火（本文には一切出さない）
+ */
+function pickSafeTagFromMeta(meta: any): string | null {
+  const sp = meta?.slotPlan;
+  if (!sp || typeof sp !== 'object') return null;
+
+  const safe = (sp as any).SAFE;
+  if (typeof safe === 'string' && safe.trim().length > 0) return safe.trim();
+
+  // 念のため：SAFE が boolean / その他でも truthy なら拾う
+  if (!!safe) return String(safe);
+
+  return null;
+}
+
+/**
+ * SAFE 制御メッセージ（system）
+ * - “警告文”を出すのではなく、LLMの生成姿勢を制動する
+ * - SAFE / gate / meta 等の語は本文に出させない
+ */
+function buildSafeSystemMessage(meta: any, userText: string): ChatCompletionMessageParam | null {
+  const safeTag = pickSafeTagFromMeta(meta);
+  if (!safeTag) return null;
+
+  // 強度（offered は “減速”、accepted は “守り” を強める）
+  const isOffered = safeTag.includes('offered');
+  const isAccepted = safeTag.includes('accepted');
+
+  const lines: string[] = [];
+
+  lines.push('【SAFE_CONTROL】');
+  lines.push('このターンは安全制動が必要です。');
+  lines.push('');
+  lines.push('絶対条件：');
+  lines.push('- 本文に「SAFE」「安全」「ゲート」「メタ」「プロトコル」「スロット」等の内部語を出さない');
+  lines.push('- 強い断定・決めつけ・診断っぽい言い回しを避ける（特に心身・医療・法律・金融）');
+  lines.push('- 危険行為/医療判断/法的判断/投資判断の具体助言はしない');
+  lines.push('- ユーザーの主権を保持：命令形の連発、詰問、圧の強い誘導は禁止');
+  lines.push('- 文章は短く（最大3〜5行）。必要なら改行して静かに。');
+  lines.push('- 質問は0〜1（原則0）。問いが必要なら最後に1つだけ、短く。');
+
+  if (isOffered) {
+    lines.push('');
+    lines.push('制動の方針（offered）：');
+    lines.push('- “整える/保留する/一旦置く” の方向へ寄せる');
+    lines.push('- 次の一手は「小さく」「戻れる」形で1つだけ');
+  }
+
+  if (isAccepted) {
+    lines.push('');
+    lines.push('制動の方針（accepted）：');
+    lines.push('- “守る/固定する/安全に着地させる” を優先する');
+    lines.push('- 次の一手は「いま守れる最小ルール」を1つだけ');
+  }
+
+  // 念のため userText を参照（LLMに “いま何を返すか” を誤解させない）
+  lines.push('');
+  lines.push(`USER_TEXT: ${String(userText)}`);
+
+  return { role: 'system', content: lines.join('\n') } as ChatCompletionMessageParam;
+}
+
+/* =========================================================
    WRITER PROTOCOL
    ========================================================= */
 
 function buildWriterProtocol(meta: any, userText: string): string {
   const shortTurn = isShortTurn(userText);
 
-// --- ① buildWriterProtocol() の shortTurn ブロックをこの内容に差し替え ---
-// ✅ 短文：芯/回転/制約/数値ブロックは “本文に一切出さない”
-if (shortTurn) {
-  return [
-    '【WRITER_PROTOCOL】',
-    'あなたは「意図フィールドOS」のWriterです。一般論・説明口調・テンプレは禁止。',
-    '',
-    'このターンは “短文” です。',
-    '重要：',
-    '- 「芯」「回転」「制約」「メタ」などの言葉を本文に出さない',
-    '- 数値ブロック（〔sa...〕 や [sa...] など）を本文に出さない',
-    '- 分析・説教・長文は禁止（1〜2行で終える）',
-    '- 質問は最大1つまで（必要なら最後に短く）',
-    '',
-    `USER_TEXT: ${String(userText)}`,
-    '',
-  ]
-    .filter(Boolean)
-    .join('\n');
-}
+  // ✅ 短文：芯/回転/制約/数値ブロックは “本文に一切出さない”
+  if (shortTurn) {
+    return [
+      '【WRITER_PROTOCOL】',
+      'あなたは「意図フィールドOS」のWriterです。一般論・説明口調・テンプレは禁止。',
+      '',
+      'このターンは “短文” です。',
+      '重要：',
+      '- 「芯」「回転」「制約」「メタ」などの言葉を本文に出さない',
+      '- 数値ブロック（〔sa...〕 や [sa...] など）を本文に出さない',
+      '- 分析・説教・長文は禁止（1〜2行で終える）',
+      '- 質問は最大1つまで（必要なら最後に短く）',
+      '',
+      `USER_TEXT: ${String(userText)}`,
+      '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
 
   // ✅ 通常：従来の protocol（芯/回転/制約）を活かす
   const coreIntent = pickCoreIntent(meta);
@@ -420,6 +490,56 @@ function dedupeTailUser(
   return historyMessages;
 }
 
+// ==============================
+// Frame / Slots hint (Writer)
+// ==============================
+
+type FrameKind = 'S' | 'R' | 'C' | 'I' | 'T' | 'MICRO' | 'NONE';
+
+function buildWriterHintsFromMeta(meta: any): {
+  frame: FrameKind | null;
+  slotKeys: string[];
+  hintText: string | null;
+} {
+  const frame: FrameKind | null =
+    typeof meta?.frame === 'string' ? (meta.frame as FrameKind) : null;
+
+  const slotPlan: Record<string, any> =
+    meta?.slotPlan && typeof meta.slotPlan === 'object' ? meta.slotPlan : {};
+
+  const slotKeys = Object.entries(slotPlan)
+    .filter(([, v]) => !!v)
+    .map(([k]) => k);
+
+  // まだ本文テンプレは作らない。LLMに “型” だけ伝える。
+  if (!frame && slotKeys.length === 0) {
+    return { frame: null, slotKeys: [], hintText: null };
+  }
+
+  const frameGuide: Record<FrameKind, string> = {
+    S: '自己の内側（観測→整える）を短く深く',
+    R: '状況/相手/関係（接続→見取り図）を中心に',
+    C: '具体の実行案（手順/次の一手）を中心に',
+    I: '意図/軸（なぜ/何のため）を中心に',
+    T: 'ひらめき/視点上昇（俯瞰→再定義）を中心に',
+    MICRO: '超短文でも崩れない最小返答（1〜3行）',
+    NONE: '装飾少なめ、素の返答でOK',
+  };
+
+  const hintLines: string[] = [];
+  if (frame) hintLines.push(`FRAME=${frame}（${frameGuide[frame]}）`);
+  if (slotKeys.length > 0) hintLines.push(`SLOTS=${slotKeys.join(',')}`);
+
+  // ※ここは “指示” ではなく “参考ヒント” として渡すのがポイント
+  const hintText =
+    `【writer hint】\n` +
+    hintLines.join('\n') +
+    `\n- これはテンプレ本文ではなく、返答の型/観点のヒントです。\n` +
+    `- スロットは全て埋めなくてOK。自然な日本語を最優先。`;
+
+  return { frame, slotKeys, hintText };
+}
+
 /* =========================================================
    MAIN
    ========================================================= */
@@ -430,6 +550,16 @@ export async function generateIrosReply(
 ): Promise<GenerateResult> {
   const meta: IrosMeta = (args.meta ?? ({} as IrosMeta)) as IrosMeta;
   const userText = String((args as any).text ?? (args as any).userText ?? '');
+
+  // ✅ Frame/Slots hint を meta から作る（generateIrosReply の中だけ）
+  const writerHints = buildWriterHintsFromMeta(meta as any);
+  const writerHintMessage: ChatCompletionMessageParam | null =
+    writerHints.hintText
+      ? ({ role: 'system', content: writerHints.hintText } as ChatCompletionMessageParam)
+      : null;
+
+  // ✅ SAFE slot を生成制御に接続（system 1通）
+  const safeSystemMessage = buildSafeSystemMessage(meta as any, userText);
 
   const client = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
@@ -462,6 +592,12 @@ export async function generateIrosReply(
     { role: 'system', content: system },
     { role: 'system', content: protocol },
 
+    // ✅ SAFE制御（必要時のみ、system 1通）
+    ...(safeSystemMessage ? [safeSystemMessage] : []),
+
+    // ✅ frame/slots の “参考ヒント” を system の後ろに1通だけ差し込む
+    ...(writerHintMessage ? [writerHintMessage] : []),
+
     ...(pastStateNoteText
       ? [{ role: 'system', content: pastStateNoteText } as ChatCompletionMessageParam]
       : []),
@@ -483,33 +619,33 @@ export async function generateIrosReply(
     res.choices?.[0]?.message?.content?.trim() ??
     '……（応答生成に失敗しました）';
 
-// ================================
-// Numeric footer control（表示制御）
-// ================================
+  // ================================
+  // Numeric footer control（表示制御）
+  // ================================
 
-// 明示ONのときだけ出す（通常は出さない）
-const showNumericFooter =
-  process.env.IROS_NUMERIC_FOOTER === '1' ||
-  (meta as any)?.extra?.showNumericFooter === true;
+  // 明示ONのときだけ出す（通常は出さない）
+  const showNumericFooter =
+    process.env.IROS_NUMERIC_FOOTER === '1' ||
+    (meta as any)?.extra?.showNumericFooter === true;
 
-// micro / recall では絶対に出さない（本文汚染防止）
-const hardHideNumericFooter =
-  (meta as any)?.microOnly === true ||
-  (meta as any)?.recallOnly === true ||
-  String(mode) === 'recall';
+  // micro / recall では絶対に出さない（本文汚染防止）
+  const hardHideNumericFooter =
+    (meta as any)?.microOnly === true ||
+    (meta as any)?.recallOnly === true ||
+    String(mode) === 'recall';
 
-if (showNumericFooter && !hardHideNumericFooter) {
-  // LLMが勝手に付けた数値行を除去（保険）
-  // 〔sa...〕 と [sa...] の両方を剥がす（末尾のみ）
-  content = content
-    .replace(/\n*\s*[〔\[]sa[^\n]*[〕\]]\s*$/g, '')
-    .trim();
+  if (showNumericFooter && !hardHideNumericFooter) {
+    // LLMが勝手に付けた数値行を除去（保険）
+    // 〔sa...〕 と [sa...] の両方を剥がす（末尾のみ）
+    content = content
+      .replace(/\n*\s*[〔\[]sa[^\n]*[〕\]]\s*$/g, '')
+      .trim();
 
-  const footer = buildNumericFooter(meta as any);
-  if (footer) {
-    content = `${content}\n${footer}`;
+    const footer = buildNumericFooter(meta as any);
+    if (footer) {
+      content = `${content}\n${footer}`;
+    }
   }
-}
 
   // ✅ 全ルート互換で返す（mode は IrosMode で返す）
   return {

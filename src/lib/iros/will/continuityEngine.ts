@@ -1,18 +1,13 @@
 // src/lib/iros/will/continuityEngine.ts
-// Iros Continuity Engine — 意志の連続性 + I3ブースト
-//
-// ・前回の Depth / Q を参考に「なだらかに」進める
-// ・「深層トリガー語」が出たら I3 を優先
-// ・ Continuity が決めた targetDepth / targetQ を Goal に反映
-// ・ NODE_ENV !== 'production' のときだけログ出力
 
 import type { Depth, QCode } from '../system';
 import type { IrosGoal } from './goalEngine';
 
 export type ContinuityContext = {
-  lastDepth?: Depth;
-  lastQ?: QCode;
-  userText?: string; // ★ 元のユーザー発話（深層トリガー判定用）
+  // ★ optional をやめる：呼び出し側で必ず渡す（無いなら null）
+  lastDepth: Depth | null;
+  lastQ: QCode | null;
+  userText?: string;
 };
 
 // 深層トリガー語（I3へ昇格させる単語）
@@ -30,59 +25,33 @@ const DEEP_TRIGGER = [
   'T3',
 ];
 
-/**
- * applyGoalContinuity
- *  - Goal.targetDepth / targetQ を「前回の状態」＋「深層トリガー」で補正する
- *  - I層へ向かいそうな流れはスムーズに進める
- */
-export function applyGoalContinuity(
-  goal: IrosGoal,
-  ctx: ContinuityContext,
-): IrosGoal {
+export function applyGoalContinuity(goal: IrosGoal, ctx: ContinuityContext): IrosGoal {
   const { lastDepth, lastQ, userText } = ctx;
 
   let adjusted: IrosGoal = { ...goal };
 
-  /* =========================================================
-     ① 「深層トリガー語」が text に含まれる場合 → I3 を最優先
-  ========================================================= */
+  // ① 深層トリガー → I3 優先
   if (userText) {
     const hit = DEEP_TRIGGER.some((word) => userText.includes(word));
-    if (hit) {
-      adjusted = { ...adjusted, targetDepth: 'I3' };
-    }
+    if (hit) adjusted = { ...adjusted, targetDepth: 'I3' };
   }
 
-  /* =========================================================
-     ② Depth の連続性（ジャンプ調整）
-  ========================================================= */
+  // ② Depth の連続性（ジャンプ調整）
   if (lastDepth && adjusted.targetDepth) {
     adjusted = {
       ...adjusted,
       targetDepth: softenDepthJump(lastDepth, adjusted.targetDepth),
     };
   } else if (!adjusted.targetDepth && lastDepth) {
-    adjusted = {
-      ...adjusted,
-      targetDepth: lastDepth,
-    };
+    adjusted = { ...adjusted, targetDepth: lastDepth };
   }
 
-  /* =========================================================
-     ③ 前回の Q を引き継ぐ
-  ========================================================= */
+  // ③ 前回の Q を引き継ぐ
   if (!adjusted.targetQ && lastQ) {
-    adjusted = {
-      ...adjusted,
-      targetQ: lastQ,
-    };
+    adjusted = { ...adjusted, targetQ: lastQ };
   }
 
-  /* =========================================================
-     ④ 開発時のみログ（本番では出さない）
-  ========================================================= */
   if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
-    // eslint-disable-next-line no-console
     console.log('[IROS/CONT continuity]', {
       lastDepth,
       lastQ,
@@ -93,6 +62,7 @@ export function applyGoalContinuity(
 
   return adjusted;
 }
+
 
 /* ========= 内部：Depthジャンプのなだらか化 ========= */
 

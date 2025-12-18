@@ -74,9 +74,28 @@ export function renderReply(
   const spinLoop = ((vector as any).spinLoop ?? null) as string | null;
   const spinStep = ((vector as any).spinStep ?? null) as number | null;
 
-  const isDescent = spinLoop === 'TCF';
+  // descentGate 互換（boolean / union / null）
+  const descentGateRaw = (vector as any).descentGate as
+    | 'closed'
+    | 'offered'
+    | 'accepted'
+    | boolean
+    | null
+    | undefined;
 
-  // TCF のときは ask（問い）を抑制
+  const descentGate =
+    descentGateRaw === true
+      ? 'accepted'
+      : descentGateRaw === false
+        ? 'closed'
+        : descentGateRaw === 'closed' || descentGateRaw === 'offered' || descentGateRaw === 'accepted'
+          ? descentGateRaw
+          : 'closed';
+
+  // TCF または descentGate が closed 以外なら「下降」とみなす
+  const isDescent = spinLoop === 'TCF' || descentGate !== 'closed';
+
+  // 下降時は ask（問い）を抑制
   const suppressAsk = isDescent;
 
   // next がある場合だけ、F（定着/習慣）寄りに寄せる

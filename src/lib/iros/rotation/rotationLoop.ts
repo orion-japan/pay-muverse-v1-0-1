@@ -37,15 +37,17 @@ export type DepthStage =
 export type DescentGateState = 'closed' | 'offered' | 'accepted';
 
 export type DescentGateInput = {
-  qCode: QCode;
-  sa: number | null; // self_acceptance 0..1 想定
-  depthStage: DepthStage;
+  qCode: QCode | null;
+  sa: number | null;
 
-  // “話しの流れ”として最低限の補助（すでにあるなら入れる）
-  // uncover / defend など、ネガ寄りのターゲット判定に使える
+  // ★ 修正：厳密型を要求しない
+  depthStage: string | null;
+
+  // ★ 追加：ユーザー本文（境界ワード検出に使う）
+  // - Orchestrator の 7.5 から userText: text を渡す
+  userText?: string | null;
+
   targetKind?: string | null;
-
-  // 前ターンの状態（ヒステリシス用）
   prevDescentGate?: DescentGateState | null;
 };
 
@@ -62,10 +64,41 @@ function clamp01(x: number): number {
   return x;
 }
 
-function depthLetter(depthStage: DepthStage): string {
-  const s = String(depthStage ?? '').trim().toUpperCase();
-  const m = s.match(/^([SFRCIT])[123]$/);
-  return m ? m[1] : '';
+function depthLetter(
+  depthStage: string | null
+): '' | 'S' | 'F' | 'R' | 'C' | 'I' | 'T' {
+  if (!depthStage) return '';
+  if (depthStage === 'S4') return ''; // ★ 幽霊値は無視
+
+  const m = depthStage.match(/^([SRCFIT])[123]$/);
+  return m ? (m[1] as any) : '';
+}
+
+/**
+ * ★ 境界（踏み込まれたくない）検出
+ * - SA/Q が安定していても、ここが来たら「問い圧」を下げるため descentGate を offered/accepted に寄せる
+ * - 目的：SAFE スロットを確実に立てる（Frame/Slots側）
+ */
+function detectBoundaryRequest(text: string | null | undefined): boolean {
+  if (!text) return false;
+  const t = text.trim();
+  if (!t) return false;
+
+  const patterns: RegExp[] = [
+    /踏み込(まれ)?たくない/,
+    /踏み込まないで/,
+    /放っておいて/,
+    /放置して/,
+    /もう(これ以上)?(踏み込まないで|やめて|やだ|無理)/,
+    /(ひとり|一人)にして/,
+    /距離(を)?(置きたい|ほしい|取りたい)/,
+    /聞かないで/,
+    /触れないで/,
+    /詮索しないで/,
+    /干渉しないで/,
+  ];
+
+  return patterns.some((re) => re.test(t));
 }
 
 /**
@@ -106,20 +139,44 @@ export function decideDescentGate(input: DescentGateInput): DescentGateDecision 
 
   const prevIsDown = prev === 'offered' || prev === 'accepted';
 
+  // ========== 0) 境界ワードが来たら最優先で “下降ゲート” を開く ==========
+  // - 初回：offered（「踏み込みません」モード）
+  // - すでに下降中：accepted を保持（減速継続）
+  if (detectBoundaryRequest(input.userText)) {
+    if (prevIsDown) {
+      return {
+        descentGate: 'accepted',
+        reason: `boundary-hold: prev=${prev}, sa=${sa.toFixed(
+          2
+        )}, q=${q ?? 'null'}, band=${band || 'NA'}`,
+      };
+    }
+    return {
+      descentGate: 'offered',
+      reason: `boundary-offer: sa=${sa.toFixed(2)}, q=${q ?? 'null'}, band=${
+        band || 'NA'
+      }`,
+    };
+  }
+
   // ========== 1) すでに下降中なら「復帰条件」を満たすまで保持 ==========
   if (prevIsDown) {
     // 復帰条件（例）
     if ((sa >= RECOVER_SA && qIsRise) || (sa >= 0.62 && isHighBand)) {
       return {
         descentGate: 'closed',
-        reason: `recover: prev=${prev}, sa=${sa.toFixed(2)}, q=${q ?? 'null'}, band=${band || 'NA'}`,
+        reason: `recover: prev=${prev}, sa=${sa.toFixed(2)}, q=${
+          q ?? 'null'
+        }, band=${band || 'NA'}`,
       };
     }
 
     // 下降中は accepted に寄せて保持（offered を保持したいならここを prev 返しにしてもOK）
     return {
       descentGate: 'accepted',
-      reason: `hold: prev=${prev}, sa=${sa.toFixed(2)}, q=${q ?? 'null'}, band=${band || 'NA'}`,
+      reason: `hold: prev=${prev}, sa=${sa.toFixed(2)}, q=${
+        q ?? 'null'
+      }, band=${band || 'NA'}`,
     };
   }
 
@@ -132,7 +189,9 @@ export function decideDescentGate(input: DescentGateInput): DescentGateDecision 
   if (shouldDrop) {
     return {
       descentGate: 'offered',
-      reason: `drop: sa=${sa.toFixed(2)}, q=${q ?? 'null'}, band=${band || 'NA'}, target=${target || 'NA'}`,
+      reason: `drop: sa=${sa.toFixed(2)}, q=${q ?? 'null'}, band=${
+        band || 'NA'
+      }, target=${target || 'NA'}`,
     };
   }
 

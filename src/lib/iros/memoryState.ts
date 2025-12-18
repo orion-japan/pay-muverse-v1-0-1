@@ -250,11 +250,52 @@ export async function upsertIrosMemoryState(
       ? sentiment_level
       : previous?.sentimentLevel ?? null;
 
-  // ★ 回転（null/undefined なら潰さない）
-  const finalSpinLoop = spinLoop ?? previous?.spinLoop ?? null;
+  // ---------------------------------------------------------
+  // ★ normalize helpers（このブロック内だけで完結）
+  // ---------------------------------------------------------
+  const normalizeSpinLoop = (v: any): 'SRI' | 'TCF' | null => {
+    if (typeof v !== 'string') return null;
+    const s = v.trim().toUpperCase();
+    return s === 'SRI' || s === 'TCF' ? (s as any) : null;
+  };
+
+  const normalizeSpinStep = (v: any): number | null => {
+    if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+    // spinStep は integer 前提（必要なら上限を変えてOK）
+    const n = Math.round(v);
+    return Math.max(0, Math.min(9, n)); // ← 上限は運用に合わせて調整可
+  };
+
+  const normalizeDescentGate = (v: any): 'closed' | 'offered' | 'accepted' | null => {
+    if (v == null) return null;
+
+    if (typeof v === 'string') {
+      const s = v.trim().toLowerCase();
+      if (s === 'closed' || s === 'offered' || s === 'accepted') return s as any;
+      return null;
+    }
+
+    // 互換：boolean のとき（旧）
+    if (typeof v === 'boolean') return v ? 'accepted' : 'closed';
+
+    return null;
+  };
+
+  // ★ 回転（null/undefined なら潰さない + “正規化” してから確定）
+  const finalSpinLoop =
+    normalizeSpinLoop(spinLoop) ??
+    normalizeSpinLoop(previous?.spinLoop) ??
+    null;
+
   const finalSpinStep =
-    typeof spinStep === 'number' ? spinStep : previous?.spinStep ?? null;
-  const finalDescentGate = descentGate ?? previous?.descentGate ?? null;
+    normalizeSpinStep(spinStep) ??
+    normalizeSpinStep(previous?.spinStep) ??
+    null;
+
+  const finalDescentGate =
+    normalizeDescentGate(descentGate) ??
+    normalizeDescentGate(previous?.descentGate) ??
+    null;
 
   // ★ 0〜3 に丸めて integer 化（DB カラムは integer）
   const yLevelInt =
@@ -308,7 +349,7 @@ export async function upsertIrosMemoryState(
     situation_summary: situationSummary,
     situation_topic: situationTopic,
 
-    // ★ 回転
+    // ★ 回転（正規化済み）
     spin_loop: finalSpinLoop,
     spin_step: finalSpinStep,
     descent_gate: finalDescentGate,

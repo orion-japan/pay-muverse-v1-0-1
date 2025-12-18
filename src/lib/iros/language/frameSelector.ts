@@ -1,89 +1,147 @@
 // src/lib/iros/language/frameSelector.ts
-// iros — Layer C: Frame Selector（器の選択）
-// - 入力: meta(depth/descentGate) + inputKind だけ
-// - 出力: FRAME（器）
-// - LLMは使わない（純関数）
+// iros — Frame Selector（器の選択）
+// - 返答の「型（フレーム）」を決める
+// - inputKind と IrosState だけで決める（本文は作らない）
 
-import type { Depth } from '@/lib/iros/system';
-import type { DescentGateState } from '@/lib/iros/rotation/rotationLoop';
+/**
+ * 入力の種類
+ * - orchestrator / tests / router で共有
+ */
+export type InputKind =
+  | 'unknown'
+  | 'greeting'
+  | 'debug'
+  | 'request'
+  | 'question'
+  | 'micro'
+  | 'chat';
 
+/**
+ * フレーム（器）
+ */
 export type FrameKind =
   | 'S'
   | 'R'
   | 'C'
+  | 'F'
   | 'I'
   | 'T'
-  | 'F'
   | 'MICRO'
   | 'NONE';
 
-export type InputKind =
-  | 'micro' // 短文・一言・相槌
-  | 'greeting'
-  | 'chat'
-  | 'question'
-  | 'request' // 実務依頼（実装/手順/調査など）
-  | 'debug' // ログ/エラー/原因追跡
-  | 'unknown';
+/**
+ * DescentGate（落下ゲート）状態：union 正
+ * - closed:   降りない（安全）
+ * - offered:  降下を提案する段階
+ * - accepted: 降下中（/降下許可済）
+ */
+export type DescentGateState = 'closed' | 'offered' | 'accepted';
 
-export type FrameSelectorMeta = {
-  depth?: Depth | null;
-
-  /**
-   * ✅ 方針：descentGate は boolean を捨てて string union に統一
-   * - 'closed'   : 通常
-   * - 'offered'  : 下降提案
-   * - 'accepted' : 下降中（保持）
-   *
-   * 互換：古い boolean が来てもここで吸収
-   */
-  descentGate?: DescentGateState | boolean | null;
+/**
+ * FrameSelector が参照する最小状態
+ */
+export type FrameSelectorState = {
+  depth: string | null;
+  descentGate: DescentGateState | boolean | null; // ★互換：旧booleanも許可
 };
 
-function depthBand(depth?: Depth | null): 'S' | 'F' | 'R' | 'C' | 'I' | 'T' | null {
-  if (!depth) return null;
-  const c = String(depth)[0]?.toUpperCase() as any;
-  if (c === 'S' || c === 'F' || c === 'R' || c === 'C' || c === 'I' || c === 'T') return c;
+/**
+ * descentGate の入力（union/boolean/null）を union に正規化
+ */
+function normalizeDescentGate(
+  v: DescentGateState | boolean | null | undefined
+): DescentGateState {
+  // 旧互換
+  if (v === true) return 'accepted';
+  if (v === false) return 'closed';
+
+  // 正規
+  if (v === 'closed' || v === 'offered' || v === 'accepted') return v;
+
+  return 'closed';
+}
+
+function isDescending(dg: DescentGateState): boolean {
+  // 「closed」以外は下降系として扱う
+  return dg !== 'closed';
+}
+
+function normalizeDepthHead(depth: string | null): 'S' | 'F' | 'R' | 'C' | 'I' | 'T' | null {
+  if (!depth || typeof depth !== 'string') return null;
+  const s = depth.trim().toUpperCase();
+  if (!s) return null;
+
+  const head = (s[0] ?? '') as any;
+  if (head === 'S' || head === 'F' || head === 'R' || head === 'C' || head === 'I' || head === 'T') {
+    return head;
+  }
   return null;
 }
 
-function isDescentOn(v: FrameSelectorMeta['descentGate']): boolean {
-  if (v == null) return false;
-  if (typeof v === 'boolean') return v;
-  // DescentGateState
-  return v !== 'closed';
+/**
+ * フレーム選択
+ * - 原則：短文は MICRO
+ * - 降下（TCF）に入ったら T/C/F を優先する
+ * - depth head が I/T/F のときは I/T/F を返しやすくする
+ */
+export function selectFrame(
+  state: FrameSelectorState,
+  inputKind: InputKind
+): FrameKind {
+  const dg = normalizeDescentGate(state?.descentGate);
+  const depthHead = normalizeDepthHead(state?.depth); // 'S' | 'F' | 'R' | 'C' | 'I' | 'T' | null
+
+  // 1) 超短文は器が崩れない MICRO を最優先
+  if (inputKind === 'micro') return 'MICRO';
+
+  // 2) デバッグ系は NONE（余計な装飾なし）
+  if (inputKind === 'debug') return 'NONE';
+
+  // 3) 実装依頼/作業依頼は C 寄せ（器としての整理）
+  if (inputKind === 'request') return 'C';
+
+  // 4) 挨拶は NONE（軽く）
+  if (inputKind === 'greeting') return 'NONE';
+
+  // 5) 下降中なら T/C/F の器を強める（深度 head を優先）
+  if (isDescending(dg)) {
+    if (depthHead === 'T') return 'T';
+    if (depthHead === 'C') return 'C';
+    if (depthHead === 'F') return 'F';
+
+    // depth が取れない下降は、提案=offered なら T、実行=accepted なら F（支える）を優先
+    return dg === 'offered' ? 'T' : 'F';
+  }
+
+  // 6) 通常（上昇・安定側）：depth head を素直に反映
+  if (depthHead === 'I') return 'I';
+  if (depthHead === 'T') return 'T';
+  if (depthHead === 'C') return 'C';
+  if (depthHead === 'F') return 'F';
+  if (depthHead === 'R') return 'R';
+  if (depthHead === 'S') return 'S';
+
+  // 7) question / chat のデフォルト
+  if (inputKind === 'question') return 'R'; // 質問は R（状況と接続）に寄せる最小版
+  return 'NONE';
 }
 
 /**
- * Frame 選択（最小確定版）
- * 優先順位：
- * 1) descentGate ON → MICRO（短文でも崩れない器）を基本に、必要なら S
- * 2) inputKind micro/greeting → MICRO/NONE
- * 3) request/debug → C（作業・手順の器）
- * 4) depth の帯域 → そのまま重心にする（S/R/C/I/T/F）
- * 5) fallback → NONE
+ * FramePlan reason の文字列を作る（デバッグ用）
+ * - descentGate が空になる事故を防ぐため、ここで必ず normalize する
+ * - 呼び出し側が state を一部欠落で渡しても壊れない
  */
-export function selectFrame(meta: FrameSelectorMeta, inputKind: InputKind): FrameKind {
-  const descent = isDescentOn(meta.descentGate);
-  const band = depthBand(meta.depth);
+export function buildFrameReason(args: {
+  frame: FrameKind;
+  inputKind: InputKind;
+  state: Partial<FrameSelectorState> | null | undefined;
+}): string {
+  const { frame, inputKind, state } = args;
 
-  // 1) 落下中は「崩れない器」を優先
-  if (descent) {
-    // 深度がS帯ならS固定、それ以外はMICROで安全に返す
-    if (band === 'S') return 'S';
-    return 'MICRO';
-  }
+  const depthStage =
+    typeof state?.depth === 'string' && state.depth.trim() ? state.depth.trim() : '';
 
-  // 2) 入力が短い/挨拶は器を軽く
-  if (inputKind === 'micro') return 'MICRO';
-  if (inputKind === 'greeting') return 'NONE';
+  const dg = normalizeDescentGate(state?.descentGate as any);
 
-  // 3) 実務・デバッグはCreationの器
-  if (inputKind === 'request' || inputKind === 'debug') return 'C';
-
-  // 4) 深度帯域に追従（重心）
-  if (band) return band;
-
-  // 5) 何も分からないなら素で返す
-  return 'NONE';
+  return `frame=${frame} by inputKind=${inputKind} depth=${depthStage} descentGate=${dg}`;
 }

@@ -124,16 +124,35 @@ function depthRiskScore(depthStage: DepthStage): number {
 }
 
 function targetRiskScore(targetKind: string | null | undefined): number {
-  const t = String(targetKind ?? '').trim().toLowerCase();
+  const raw = String(targetKind ?? '').trim().toLowerCase();
+
+  // ------------------------------------------------------------
+  // 互換: goal.kind（enableAction等）や別名が混入してもここで正規化
+  // 期待するのは: uncover / expand / stabilize / pierce / forward 系
+  // ------------------------------------------------------------
+  const norm =
+    raw === 'enableaction' ? 'expand'
+    : raw === 'enable_action' ? 'expand'
+    : raw === 'action' ? 'expand'
+    : raw === 'act' ? 'expand'
+    : raw === 'forward' ? 'forward'
+    : raw;
 
   // uncover は深掘りなので、落下中にやると悪化することがある → 少しリスク加点
-  if (t === 'uncover') return 0.25;
+  if (norm === 'uncover') return 0.25;
 
-  // forward / enableAction などは落下から抜ける一歩になりやすい → リスク減点
-  if (t === 'forward' || t === 'enableaction' || t === 'act') return -0.10;
+  // expand（行動/前進）系は落下から抜ける一歩になりやすい → リスク減点
+  if (norm === 'forward' || norm === 'expand') return -0.10;
+
+  // stabilize は安全寄り（悪化させにくい）→ 影響なし
+  if (norm === 'stabilize') return 0;
+
+  // pierce は鋭い切り込みで刺激になりやすい → 微加点（必要なら後で調整）
+  if (norm === 'pierce') return 0.10;
 
   return 0;
 }
+
 
 /**
  * decideDescentGate

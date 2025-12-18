@@ -83,15 +83,64 @@ function normalizeTextForSummary(s: string | null, maxLen = 200): string | null 
   return t;
 }
 
+/**
+ * target_kind 正規化
+ * - 4分類（stabilize/expand/pierce/uncover）に必ず落とす
+ * - Orchestrator の goal.kind が増えても、ここで汚染を止める
+ */
 function normalizeTargetKind(v: any): TargetKind {
   const s = pickString(v);
   if (!s) return 'stabilize';
 
   const lowered = s.toLowerCase();
+
+  // 既存の正規値
   if (lowered === 'stabilize') return 'stabilize';
   if (lowered === 'expand') return 'expand';
   if (lowered === 'pierce') return 'pierce';
   if (lowered === 'uncover') return 'uncover';
+
+  // Orchestrator/Will 側の kind からの橋渡し（重要）
+  // - enableAction は forward 寄りなので expand に寄せる（stabilize に落とさない）
+  if (lowered === 'enableaction') return 'expand';
+  if (lowered === 'action') return 'expand';
+  if (lowered === 'create') return 'expand';
+
+  // 防御/安全/停止系は stabilize に寄せる
+  if (lowered === 'safety') return 'stabilize';
+  if (lowered === 'safe') return 'stabilize';
+  if (lowered === 'brake') return 'stabilize';
+  if (lowered === 'cooldown') return 'stabilize';
+
+  return 'stabilize';
+}
+
+/**
+ * Training 用 targetKind の決定（ここが“唯一の真実”）
+ * 優先順位：
+ * 1) meta.goal.kind（Orchestrator が確定したもの）【最優先】
+ * 2) meta.targetKind / meta.target_kind（互換）
+ * 3) meta.priority.goal.kind（念のため）
+ * 4) intentLine.direction（既存の fallback）
+ */
+function resolveTrainingTargetKind(meta: any): TargetKind {
+  const fromGoalKind = pickString(meta?.goal?.kind);
+  if (fromGoalKind) return normalizeTargetKind(fromGoalKind);
+
+  const fromMeta =
+    pickString(meta?.targetKind) ??
+    pickString(meta?.target_kind) ??
+    null;
+  if (fromMeta) return normalizeTargetKind(fromMeta);
+
+  const fromPriorityKind = pickString(meta?.priority?.goal?.kind);
+  if (fromPriorityKind) return normalizeTargetKind(fromPriorityKind);
+
+  const fromIntentDir =
+    pickString(meta?.intentLine?.direction) ??
+    pickString(meta?.intent_line?.direction) ??
+    null;
+  if (fromIntentDir) return normalizeTargetKind(fromIntentDir);
 
   return 'stabilize';
 }
@@ -122,7 +171,10 @@ export async function saveIrosTrainingSample(params: SaveIrosTrainingSampleParam
     pickString(meta?.unified?.depth?.stage) ??
     null;
 
-  const phase = pickString(meta?.phase) ?? pickString(meta?.unified?.phase) ?? null;
+  const phase =
+    pickString(meta?.phase) ??
+    pickString(meta?.unified?.phase) ??
+    null;
 
   const selfAcceptance =
     pickNumber(meta?.selfAcceptance) ??
@@ -166,17 +218,13 @@ export async function saveIrosTrainingSample(params: SaveIrosTrainingSampleParam
   const yLevel = clampInt03(yLevelRaw);
   const hLevel = clampInt03(hLevelRaw);
 
-  // target_kind
-  const targetKind = normalizeTargetKind(
-    meta?.targetKind ??
-      meta?.target_kind ??
-      meta?.intentLine?.direction ??
-      meta?.intent_line?.direction ??
-      null,
-  );
+  // target_kind（★修正：goal.kind を最優先にする）
+  const targetKind = resolveTrainingTargetKind(meta);
 
   const targetLabel =
-    pickString(meta?.targetLabel) ?? pickString(meta?.target_label) ?? null;
+    pickString(meta?.targetLabel) ??
+    pickString(meta?.target_label) ??
+    null;
 
   /**
    * ★重要：analysis_text には「返信」を入れる

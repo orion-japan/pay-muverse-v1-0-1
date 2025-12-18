@@ -40,7 +40,13 @@ function normalizeSpinStep(v: unknown): 0 | 1 | 2 | null {
   return null;
 }
 
+// ✅ boolean互換あり（Aの確定）
 function normalizeDescentGate(v: unknown): DescentGate | null {
+  if (v == null) return null;
+
+  // 互換: boolean が来たら
+  if (typeof v === 'boolean') return v ? 'accepted' : 'closed';
+
   if (typeof v !== 'string') return null;
   const s = v.trim().toLowerCase();
   if (s === 'closed') return 'closed';
@@ -338,76 +344,118 @@ export async function persistMemoryStateIfAny(args: {
   userText: string; // ★追加
   metaForSave: any;
 }) {
-  const { supabase, userCode, userText, metaForSave } = args; // ★追加
+  const { supabase, userCode, userText, metaForSave } = args;
 
   try {
     if (!metaForSave) return;
 
+// ✅ A: previous を先に取得（merge の土台）
+const { data: previous, error: prevErr } = await supabase
+  .from('iros_memory_state')
+  .select(
+    [
+      'depth_stage',
+      'q_primary',
+      'phase',
+      'self_acceptance',
+      'y_level',
+      'h_level',
+      'spin_loop',
+      'spin_step',
+      'descent_gate',
+      'intent_anchor',
+      'summary',
+      'situation_summary',
+      'situation_topic',
+      'sentiment_level',
+    ].join(',')
+  )
+  .eq('user_code', userCode)
+  .maybeSingle();
+
+if (prevErr) {
+  console.warn('[IROS/STATE] load previous memory_state not ok (continue)', {
+    userCode,
+    code: (prevErr as any)?.code,
+    message: (prevErr as any)?.message,
+  });
+}
+
+
     // unified を最優先で使う（postProcessReply 後は必ず揃っている）
     const unified: any = metaForSave.unified ?? {};
 
-    const depth = metaForSave.depth ?? unified?.depth?.stage ?? null;
-    const qCode = metaForSave.qCode ?? unified?.q?.current ?? null;
+    const depthInput = metaForSave.depth ?? unified?.depth?.stage ?? null;
+    const qCodeInput = metaForSave.qCode ?? unified?.q?.current ?? null;
 
-    const phaseRaw = metaForSave.phase ?? unified?.phase ?? null;
-    const phase = normalizePhase(phaseRaw);
+    const phaseRawInput = metaForSave.phase ?? unified?.phase ?? null;
+    const phaseInput = normalizePhase(phaseRawInput);
 
-    const selfAcceptance =
+    const selfAcceptanceInput =
       metaForSave.selfAcceptance ??
       unified?.selfAcceptance ??
       unified?.self_acceptance ??
       null;
 
     // y/h は DB が integer なので、必ず 0..3 に丸めて整数化する
-    const yInt = toInt0to3(metaForSave?.yLevel ?? unified?.yLevel);
-    const hInt = toInt0to3(metaForSave?.hLevel ?? unified?.hLevel);
+    const yIntInput = toInt0to3(metaForSave?.yLevel ?? unified?.yLevel);
+    const hIntInput = toInt0to3(metaForSave?.hLevel ?? unified?.hLevel);
 
     // situation
-    const situationSummary =
+    const situationSummaryInput =
       metaForSave.situationSummary ??
       unified?.situation?.summary ??
       metaForSave.situation_summary ??
       null;
 
-    const situationTopic =
+    const situationTopicInput =
       metaForSave.situationTopic ??
       unified?.situation?.topic ??
       metaForSave.situation_topic ??
       null;
 
-    const sentimentLevel =
+    const sentimentLevelInput =
       metaForSave.sentimentLevel ??
       metaForSave.sentiment_level ??
       unified?.sentiment_level ??
       null;
 
-    // spin
-    const spinLoopRaw =
+    // --------
+    // ✅ A: spin / descentGate は「normalize → merge」する（nullで潰さない）
+    // --------
+    const spinLoopRawInput =
       metaForSave.spinLoop ??
       metaForSave.spin_loop ??
       unified?.spin_loop ??
       unified?.spinLoop ??
       null;
 
-    const spinStepRaw =
+    const spinStepRawInput =
       metaForSave.spinStep ??
       metaForSave.spin_step ??
       unified?.spin_step ??
       unified?.spinStep ??
       null;
 
-    const spinLoop = normalizeSpinLoop(spinLoopRaw);
-    const spinStep = normalizeSpinStep(spinStepRaw);
-
-    // descentGate（列がある環境だけ入れる前提。値だけ拾う）
-    const descentGateRaw =
+    const descentGateRawInput =
       metaForSave.descentGate ??
       metaForSave.descent_gate ??
       unified?.descent_gate ??
       unified?.descentGate ??
       null;
 
-    const descentGate = normalizeDescentGate(descentGateRaw);
+    const spinLoopNormInput = normalizeSpinLoop(spinLoopRawInput);
+    const spinStepNormInput = normalizeSpinStep(spinStepRawInput);
+    const descentGateNormInput = normalizeDescentGate(descentGateRawInput);
+
+    const spinLoopNormPrev = normalizeSpinLoop(previous?.spin_loop ?? null);
+    const spinStepNormPrev = normalizeSpinStep(previous?.spin_step ?? null);
+    const descentGateNormPrev = normalizeDescentGate(previous?.descent_gate ?? null);
+
+    // ✅ merge ルール（確定仕様）
+    const finalSpinLoop: SpinLoop | null = spinLoopNormInput ?? spinLoopNormPrev ?? null;
+    const finalSpinStep: 0 | 1 | 2 | null = spinStepNormInput ?? spinStepNormPrev ?? null;
+    const finalDescentGate: DescentGate | null = descentGateNormInput ?? descentGateNormPrev ?? null;
 
     // intent_anchor（jsonb）
     const intentAnchorRaw =
@@ -435,22 +483,33 @@ export async function persistMemoryStateIfAny(args: {
 
     console.log('[IROS/STATE] persistMemoryStateIfAny start', {
       userCode,
-      // ★確認ログ（次のStepで goal 抽出に使う）
       userText: (userText ?? '').slice(0, 80),
-      depth,
-      qCode,
-      phaseRaw,
-      phase,
+
+      depthInput,
+      qCodeInput,
+      phaseRawInput,
+      phaseInput,
+
       yLevelRaw: metaForSave?.yLevel ?? unified?.yLevel ?? null,
       hLevelRaw: metaForSave?.hLevel ?? unified?.hLevel ?? null,
-      yLevelInt: yInt,
-      hLevelInt: hInt,
-      spinLoopRaw,
-      spinLoop,
-      spinStepRaw,
-      spinStep,
-      descentGateRaw,
-      descentGate,
+      yLevelInt: yIntInput,
+      hLevelInt: hIntInput,
+
+      spinLoopRawInput,
+      spinLoopNormInput,
+      spinLoopNormPrev,
+      finalSpinLoop,
+
+      spinStepRawInput,
+      spinStepNormInput,
+      spinStepNormPrev,
+      finalSpinStep,
+
+      descentGateRawInput,
+      descentGateNormInput,
+      descentGateNormPrev,
+      finalDescentGate,
+
       fixedSun,
       anchorText,
       anchorEventType,
@@ -458,32 +517,34 @@ export async function persistMemoryStateIfAny(args: {
     });
 
     // 保存する意味がある最低条件
-    if (!depth && !qCode) {
+    if (!depthInput && !qCodeInput) {
       console.warn('[IROS/STATE] skip persistMemoryStateIfAny (no depth/q)', { userCode });
       return;
     }
 
     // null は “保存しない” payload にする（過去の値を壊さない）
+    // ※ただし回転3点は final* を保存する（inputがnullでも previous を保持）
     const upsertPayload: any = {
       user_code: userCode,
       updated_at: new Date().toISOString(),
     };
 
-    if (depth) upsertPayload.depth_stage = depth;
-    if (qCode) upsertPayload.q_primary = qCode;
-    if (phase) upsertPayload.phase = phase;
+    if (depthInput) upsertPayload.depth_stage = depthInput;
+    if (qCodeInput) upsertPayload.q_primary = qCodeInput;
+    if (phaseInput) upsertPayload.phase = phaseInput;
 
-    if (typeof selfAcceptance === 'number')
-      upsertPayload.self_acceptance = selfAcceptance;
+    if (typeof selfAcceptanceInput === 'number') {
+      upsertPayload.self_acceptance = selfAcceptanceInput;
+    }
 
-    if (typeof yInt === 'number') upsertPayload.y_level = yInt;
-    if (typeof hInt === 'number') upsertPayload.h_level = hInt;
+    if (typeof yIntInput === 'number') upsertPayload.y_level = yIntInput;
+    if (typeof hIntInput === 'number') upsertPayload.h_level = hIntInput;
 
-    if (sentimentLevel != null) upsertPayload.sentiment_level = sentimentLevel;
-    if (situationSummary) upsertPayload.situation_summary = situationSummary;
-    if (situationTopic) upsertPayload.situation_topic = situationTopic;
+    if (sentimentLevelInput != null) upsertPayload.sentiment_level = sentimentLevelInput;
+    if (situationSummaryInput) upsertPayload.situation_summary = situationSummaryInput;
+    if (situationTopicInput) upsertPayload.situation_topic = situationTopicInput;
 
-    /* ✅ 追加：文章メモリ（summary）
+    /* ✅ 文章メモリ（summary）
        - situationSummary を最優先
        - 無ければ metaForSave からユーザー原文っぽいものを拾う
        - ある時だけ保存（過去の summary は壊さない）
@@ -496,7 +557,7 @@ export async function persistMemoryStateIfAny(args: {
       null;
 
     const summaryCandidate =
-      (typeof situationSummary === 'string' && situationSummary.trim()) ||
+      (typeof situationSummaryInput === 'string' && situationSummaryInput.trim()) ||
       (typeof rawUserText === 'string' && rawUserText.trim()) ||
       null;
 
@@ -505,19 +566,18 @@ export async function persistMemoryStateIfAny(args: {
       upsertPayload.summary = s.length > 200 ? s.slice(0, 200) : s;
     }
 
-    if (spinLoop) upsertPayload.spin_loop = spinLoop;
-    if (typeof spinStep === 'number') upsertPayload.spin_step = spinStep;
+    // ✅ 回転3点：final* を入れる（inputがnullでも previous を保持した final になる）
+    if (finalSpinLoop) upsertPayload.spin_loop = finalSpinLoop;
+    if (typeof finalSpinStep === 'number') upsertPayload.spin_step = finalSpinStep;
 
-    if (typeof descentGate === 'string') upsertPayload.descent_gate = descentGate;
-
+    // descent_gate は列がない環境があるので、まず入れて失敗なら外して再試行
+    if (finalDescentGate) upsertPayload.descent_gate = finalDescentGate;
 
     // ✅ 核心：intent_anchor は set/reset のときだけ触る（SUN固定 or keep は触らない）
     if (finalAnchorDecision.action === 'set' && intentAnchorRaw) {
       upsertPayload.intent_anchor = intentAnchorRaw;
     } else if (finalAnchorDecision.action === 'reset') {
       upsertPayload.intent_anchor = null;
-    } else {
-      if ('intent_anchor' in upsertPayload) delete upsertPayload.intent_anchor;
     }
 
     // 1回目 upsert

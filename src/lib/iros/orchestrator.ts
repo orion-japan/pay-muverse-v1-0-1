@@ -76,8 +76,9 @@ import { applyDelegateIntentOverride } from './will/delegateIntentOverride';
 // ★ CONT: 意志の連続性（Depth / Q のなだらか化）
 import { applyGoalContinuity } from './will/continuityEngine'; // ★ CONT 追加
 
-import { selectFrame, type InputKind } from './language/frameSelector';
+import { selectFrame } from './language/frameSelector';
 import { buildSlots } from './language/slotBuilder';
+import { classifyInputKind } from './language/inputKind';
 
 import { decideDescentGate } from './rotation/rotationLoop';
 // ==== 固定アンカー（北） ====
@@ -268,6 +269,14 @@ export async function runIrosTurn(
     (mergedBaseMeta as any).volatilityRank === 'high')
       ? ((mergedBaseMeta as any).volatilityRank as 'low' | 'mid' | 'high')
       : null;
+
+// ★ 追加：前回ターンの descentGate（下降の扉）
+const lastDescentGate: 'closed' | 'offered' | 'accepted' | null =
+  (mergedBaseMeta as any).descentGate === 'closed' ||
+  (mergedBaseMeta as any).descentGate === 'offered' ||
+  (mergedBaseMeta as any).descentGate === 'accepted'
+    ? ((mergedBaseMeta as any).descentGate as 'closed' | 'offered' | 'accepted')
+    : null;
 
 
   // ----------------------------------------------------------------
@@ -598,225 +607,198 @@ export async function runIrosTurn(
     (meta as any).tLayerModeActive = true;
   }
 
-  // ----------------------------------------------------------------
-  // 7. Will フェーズ：Goal / Priority の決定
-  // ----------------------------------------------------------------
-  let { goal, priority } = computeGoalAndPriority({
-    text,
-    depth: meta.depth,
-    qCode: meta.qCode,
-    selfAcceptanceLine: meta.selfAcceptance ?? null,
-    mode: (meta.mode ?? 'mirror') as IrosMode,
-    // ★ 魂レイヤー
-    soulNote: (meta as any).soulNote ?? null,
-    // ★ 三軸回転用：前回 Goal.kind と uncover 連続カウント
-    lastGoalKind,
-    previousUncoverStreak,
-    // ★ Phase（Inner / Outer）を Will エンジンに渡す
-    phase: (meta as any).phase ?? null,
-  });
-
-  // ★ delegate intent（任せる／決めて／進めて／動かして...）のとき上書き
-  if (goal && priority) {
-    ({ goal, priority } = applyDelegateIntentOverride({
-      goal,
-      priority,
-      text,
-    }));
-  }
-
-  // ★ delegate intent のときは「問い返しを抑制」フラグ
-  const isDelegateIntent =
-    !!(priority as any)?.debugNote &&
-    String((priority as any).debugNote).includes('delegateIntent');
-
-  if (isDelegateIntent) {
-    (meta as any).noQuestion = true;
-    (meta as any).replyStyleHint = 'no-question-action-first';
-  }
-
-  // ★ 「今日できること？」など具体的な一歩を求めるターン
-  const isActionRequest = detectActionRequest(text);
-
-  if (isActionRequest && priority) {
-    const anyPriority = priority as any;
-    const weights = { ...(anyPriority.weights || {}) };
-
-    const currentForward =
-      typeof weights.forward === 'number' ? weights.forward : 0;
-    const currentMirror =
-      typeof weights.mirror === 'number' ? weights.mirror : 0.8;
-
-    weights.forward = Math.max(currentForward, 0.8);
-    weights.mirror = Math.min(currentMirror, 0.7);
-
-    anyPriority.weights = weights;
-
-    const baseDebug: string =
-      typeof anyPriority.debugNote === 'string'
-        ? anyPriority.debugNote
-        : '';
-    anyPriority.debugNote = baseDebug
-      ? `${baseDebug} +actionRequest`
-      : 'actionRequest';
-
-    priority = anyPriority as IrosPriorityType;
-
-    if (goal) {
-      const anyGoal = goal as any;
-      const baseReason: string =
-        typeof anyGoal.reason === 'string' ? anyGoal.reason : '';
-      if (!baseReason) {
-        anyGoal.reason =
-          'ユーザーが「今日できること？」と具体的な一歩を求めているため、forward を優先';
-      }
-      goal = anyGoal as IrosGoalType;
-    }
-  }
-
-  // ★ CONT: ContinuityEngine で「前回の depth/Q からなだらかに」補正
-  if (goal) {
-    const continuityContext = {
-      lastDepth: lastDepthForContinuity,
-      lastQ: lastQForContinuity,
-      userText: text,
-    };
-
-    const adjustedGoal = applyGoalContinuity(goal as any, continuityContext);
-
-    // priority.goal 側にも targetDepth / targetQ を反映しておく
-    if (priority) {
-      const anyPriority = priority as any;
-      if (!anyPriority.goal) anyPriority.goal = {};
-
-      if (
-        typeof adjustedGoal.targetDepth === 'string' &&
-        adjustedGoal.targetDepth
-      ) {
-        // ★ ここでも S4 を潰す（goal由来）
-        anyPriority.goal.targetDepth = normalizeDepthStrictOrNull(adjustedGoal.targetDepth as any);
-      }
-
-      if (
-        typeof (adjustedGoal as any).targetQ === 'string' &&
-        (adjustedGoal as any).targetQ
-      ) {
-        anyPriority.goal.targetQ = (adjustedGoal as any).targetQ;
-      }
-
-      priority = anyPriority as IrosPriorityType;
-    }
-
-    // ★ goal 自体も S4 を潰す
-    if (adjustedGoal && typeof (adjustedGoal as any).targetDepth === 'string') {
-      (adjustedGoal as any).targetDepth = normalizeDepthStrictOrNull((adjustedGoal as any).targetDepth);
-    }
-
-    goal = adjustedGoal as IrosGoalType;
-
-    if (
-      typeof process !== 'undefined' &&
-      process.env.NODE_ENV !== 'production'
-    ) {
-      // eslint-disable-next-line no-console
-      console.log('[IROS/CONT applyGoalContinuity]', {
-        lastDepth: lastDepthForContinuity,
-        lastQ: lastQForContinuity,
-        finalTargetDepth: (goal as any).targetDepth,
-        finalTargetQ: (goal as any).targetQ,
-      });
-    }
-  }
-
-  // ★ uncoverStreak を更新して meta に保存（連続回数）
-  const nextUncoverStreak: number =
-    goal && (goal as any).kind === 'uncover'
-      ? previousUncoverStreak + 1
-      : 0;
-  (meta as any).uncoverStreak = nextUncoverStreak;
-
-  (meta as any).goal = goal;
-  (meta as any).priority = priority;
-
 // ----------------------------------------------------------------
-// 7.5 DescentGate（落下ゲート）+ Frame/Slots（器/枠）を “本文生成前” に確定
+// 7. Will フェーズ：Goal / Priority の決定
 // ----------------------------------------------------------------
+let { goal, priority } = computeGoalAndPriority({
+  text,
+  depth: meta.depth,
+  qCode: meta.qCode,
+  lastDepth: lastDepthForContinuity,
+  lastQ: lastQForContinuity,
+  selfAcceptanceLine: meta.selfAcceptance ?? null,
+  mode: (meta.mode ?? 'mirror') as IrosMode,
+  soulNote: (meta as any).soulNote ?? null,
+  lastGoalKind,
+  previousUncoverStreak,
+  phase: (meta as any).phase ?? null,
+
+  // ✅ 前回の回転状態（MemoryState由来）を Will に渡す
+  // ※ ここで使う lastSpinLoop / lastDescentGate は、上で控えた “前回値” を想定
+  spinLoop: (typeof lastSpinLoop !== 'undefined' ? lastSpinLoop : null) ?? null,
+  descentGate:
+    (typeof lastDescentGate !== 'undefined' ? lastDescentGate : null) ?? null,
+});
+
+// ✅ targetQ が undefined に落ちるケースを強制補完（ログで targetQ: undefined が出ていたため）
 {
-  const classifyInputKind = (t: string): InputKind => {
-    const s = (t ?? '').trim();
-    if (s.length === 0) return 'unknown';
+  const q = meta.qCode ?? null;
+  if (q) {
+    if (goal && (goal as any).targetQ == null) (goal as any).targetQ = q;
+    if (priority?.goal && (priority.goal as any).targetQ == null)
+      (priority.goal as any).targetQ = q;
+  }
+}
 
-    if (/^(おはよう|こんにちは|こんばんは|やあ|hi|hello)\b/i.test(s)) return 'greeting';
-    if (/(error|stack|tsc|typecheck|例外|エラー|ログ|stack trace)/i.test(s)) return 'debug';
-    if (/(実装|修正|追加|削除|変更|接続|差分|diff|SQL|関数|ファイル|orchestrator)/i.test(s)) return 'request';
-    if (/[？?]$/.test(s) || /(どう|なぜ|何|どれ)/.test(s)) return 'question';
-    if (s.length <= 8) return 'micro';
+// ✅ meta.rotationState.reason が undefined になるのを潰す（ログ/デバッグの証拠を残す）
+{
+  const g: any = goal as any;
+  const rs = g?.rotationState ?? null;
 
-    return 'chat';
+  (meta as any).rotationState = {
+    spinLoop:
+      (rs && typeof rs.spinLoop === 'string' ? rs.spinLoop : null) ??
+      ((meta as any).spinLoop ?? null),
+    descentGate:
+      (rs && typeof rs.descentGate === 'string' ? rs.descentGate : null) ??
+      ((meta as any).descentGate ?? null),
+    depth:
+      (rs && typeof rs.depth === 'string' ? rs.depth : null) ??
+      ((meta as any).depth ?? null),
+    reason:
+      (rs && typeof rs.reason === 'string' ? rs.reason : null) ??
+      'rotationState: reason not provided',
   };
+}
 
-  // ✅ prevDescentGate を boolean ではなく union に正規化
-  const normalizePrevDescentGate = (
-    v: any
-  ): 'closed' | 'offered' | 'accepted' | null => {
-    if (v == null) return null;
+// delegate intent 上書き
+if (goal && priority) {
+  ({ goal, priority } = applyDelegateIntentOverride({
+    goal,
+    priority,
+    text,
+  }));
+}
 
-    if (typeof v === 'string') {
-      const s = v.trim().toLowerCase();
-      if (s === 'closed' || s === 'offered' || s === 'accepted') return s as any;
-      return null;
+// delegate intent → 問い返し抑制
+const isDelegateIntent =
+  !!(priority as any)?.debugNote &&
+  String((priority as any).debugNote).includes('delegateIntent');
+
+if (isDelegateIntent) {
+  (meta as any).noQuestion = true;
+  (meta as any).replyStyleHint = 'no-question-action-first';
+}
+
+// 「今日できること？」など
+const isActionRequest = detectActionRequest(text);
+
+if (isActionRequest && priority) {
+  const anyPriority = priority as any;
+  const weights = { ...(anyPriority.weights || {}) };
+
+  weights.forward = Math.max(weights.forward ?? 0, 0.8);
+  weights.mirror = Math.min(weights.mirror ?? 0.8, 0.7);
+
+  anyPriority.weights = weights;
+  anyPriority.debugNote = anyPriority.debugNote
+    ? `${anyPriority.debugNote} +actionRequest`
+    : 'actionRequest';
+
+  priority = anyPriority as IrosPriorityType;
+
+  if (goal) {
+    const anyGoal = goal as any;
+    if (!anyGoal.reason) {
+      anyGoal.reason =
+        'ユーザーが「今日できること？」と具体的な一歩を求めているため、forward を優先';
     }
-
-    // 互換：boolean が残っていたら変換
-    if (typeof v === 'boolean') return v ? 'accepted' : 'closed';
-
-    return null;
-  };
-
-  const prevDescentGate = normalizePrevDescentGate((mergedBaseMeta as any).descentGate);
-
-  const dg = decideDescentGate({
-    qCode: (meta as any).qCode ?? null,
-    sa: typeof (meta as any).selfAcceptance === 'number' ? (meta as any).selfAcceptance : null,
-    depthStage: ((meta as any).depth as any) ?? null,
-    targetKind: (goal as any)?.kind ?? null,
-    prevDescentGate,
-  });
-
-  // ✅ meta には union を保存
-  (meta as any).descentGate = dg.descentGate;
-  (meta as any).descentGateReason = dg.reason;
-  (meta as any).descentGateDebug = null; // rotationLoop版には debug は無いので固定でOK
-
-  const inputKind = classifyInputKind(text);
-  (meta as any).inputKind = inputKind;
-
-  // ✅ FrameSelector はまだ boolean 前提 → “下降中か” に変換して渡す
-  const descentBoolForFrame = dg.descentGate !== 'closed';
-
-  const frame = selectFrame(
-    { depth: ((meta as any).depth as any) ?? null, descentGate: descentBoolForFrame },
-    inputKind
-  );
-
-  // ✅ SlotBuilder は union 前提 → そのまま渡す
-  const slotPlan = buildSlots(frame, { descentGate: dg.descentGate });
-
-  (meta as any).frame = frame;
-  (meta as any).slotPlan = slotPlan.slots;
-
-  console.log('[IROS/frame+slots]', {
-    descentGate: dg.descentGate,
-    frame,
-    slots: Object.entries(slotPlan.slots)
-      .filter(([, v]) => v)
-      .map(([k]) => k)
-      .join(','),
-  });
+    goal = anyGoal as IrosGoalType;
+  }
 }
 
 
+// uncoverStreak 更新
+(meta as any).uncoverStreak =
+  goal && (goal as any).kind === 'uncover'
+    ? previousUncoverStreak + 1
+    : 0;
 
+(meta as any).goal = goal;
+(meta as any).priority = priority;
+
+
+// ----------------------------------------------------------------
+// 7.5 DescentGate + Frame + Slots（唯一の決定点）
+// ----------------------------------------------------------------
+{
+  const inputKind = classifyInputKind(text);
+  (meta as any).inputKind = inputKind;
+
+  type TargetKind = 'stabilize' | 'expand' | 'pierce' | 'uncover';
+
+  const normalizeTargetKind = (v: unknown): TargetKind => {
+    if (typeof v !== 'string') return 'stabilize';
+    const s = v.trim().toLowerCase();
+
+    // そのまま来る4分類
+    if (s === 'stabilize') return 'stabilize';
+    if (s === 'expand') return 'expand';
+    if (s === 'pierce') return 'pierce';
+    if (s === 'uncover') return 'uncover';
+
+    // bridge: goal.kind → 4分類
+    if (s === 'enableaction') return 'expand';
+    if (s === 'action') return 'expand';
+    if (s === 'create') return 'expand';
+
+    return 'stabilize';
+  };
+
+  // ✅ 優先順位：meta（すでに計算済み） > goal.kind（bridge用）
+  const rawTargetKind =
+    (meta as any).targetKind ??
+    (meta as any).target_kind ??
+    (goal as any)?.kind ??
+    null;
+
+  const targetKindNorm = normalizeTargetKind(rawTargetKind);
+
+  (meta as any).targetKind = targetKindNorm;
+  (meta as any).target_kind = targetKindNorm; // snake互換
+
+
+
+  const dg = decideDescentGate({
+    qCode: meta.qCode ?? null,
+    sa: typeof meta.selfAcceptance === 'number' ? meta.selfAcceptance : null,
+
+    // ★ Depth 型を要求しない。string として渡す
+    depthStage:
+      typeof meta.depth === 'string' && meta.depth.length > 0
+        ? meta.depth
+        : null,
+
+    // ★ ここも正規化後を渡す（stabilize潰しを止める）
+    targetKind: targetKindNorm,
+
+    prevDescentGate: (mergedBaseMeta as any).descentGate ?? null,
+  });
+
+  (meta as any).descentGate = dg.descentGate;
+  (meta as any).descentGateReason = dg.reason;
+
+  // ✅ Frame + Slots をここで一括確定
+  const frame = selectFrame(
+    {
+      depth:
+        typeof meta.depth === 'string' && meta.depth.length > 0
+          ? meta.depth
+          : null,
+      descentGate: meta.descentGate ?? null,
+    },
+    inputKind
+  );
+
+  // ✅ SlotBuilder に spinLoop も渡す（TCF(下降)なら descentGate=closed でも SAFE を立てられる）
+  const slotPlan = buildSlots(frame, {
+    descentGate: meta.descentGate,
+    spinLoop: (meta as any).spinLoop ?? null,
+  });
+
+  (meta as any).frame = frame;
+  (meta as any).slotPlan = slotPlan.slots;
+}
 
   // ----------------------------------------------------------------
   // 8. 本文生成（LLM 呼び出し）

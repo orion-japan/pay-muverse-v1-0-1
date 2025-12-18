@@ -1034,37 +1034,6 @@ export async function handleIrosReply(
     t.context_ms = msSince(tc);
 
     /* ---------------------------
-       ✅ 2.1) FramePlan（器＋スロット）をここで確定（LLMなし）
-       - buildTurnContext の直後
-       - Orchestrator / PostProcess が参照できるよう meta に注入
-    ---------------------------- */
-
-    const inputKind: InputKind = detectInputKind(text);
-
-    const stateLite: IrosStateLite = {
-      depthStage:
-        (ctx?.baseMetaForTurn as any)?.depthStage ??
-        (ctx as any)?.requestedDepth ??
-        null,
-      phase: (ctx?.baseMetaForTurn as any)?.phase ?? null,
-      qCode: (ctx?.baseMetaForTurn as any)?.qCode ?? null,
-      targetKind: (ctx?.baseMetaForTurn as any)?.targetKind ?? null,
-    };
-
-    const framePlan = buildFramePlan({ state: stateLite, inputKind });
-
-    ctx.baseMetaForTurn = ctx.baseMetaForTurn ?? {};
-    ctx.baseMetaForTurn.extra = ctx.baseMetaForTurn.extra ?? {};
-    ctx.baseMetaForTurn.extra.framePlan = framePlan;
-
-    console.log('[IROS][FramePlan]', {
-      inputKind,
-      depthStage: stateLite.depthStage,
-      frame: framePlan.frame,
-      slots: framePlan.slots.map((s) => ({ id: s.id, required: s.required })),
-    });
-
-    /* ---------------------------
        3) Orchestrator
     ---------------------------- */
 
@@ -1142,9 +1111,7 @@ out.metaForSave.timing = t;
 
 // ✅ persist に必ず残す（postProcess が extra を作り直しても守る）
 out.metaForSave.extra = out.metaForSave.extra ?? {};
-if (!out.metaForSave.extra.framePlan) {
-  out.metaForSave.extra.framePlan = framePlan;
-}
+
 
 try {
   out.metaForSave = sanitizeIntentAnchorMeta(out.metaForSave);
@@ -1152,28 +1119,40 @@ try {
   console.warn('[IROS/Reply] sanitizeIntentAnchorMeta failed', e);
 }
 
-// rotation bridge（最低限）
-// ✅ descentGate を boolean で持ち込ませない。string union に正規化する。
-const normalizeDescentGateBridge = (
-  v: any
-): 'closed' | 'offered' | 'accepted' | null => {
-  if (v == null) return null;
+// rotation bridge（最低限・安定版）
+// ✅ descentGate を boolean/unknown で持ち込ませない。必ず union に落とす。
+// ✅ spinLoop / depth も rot 側優先で “取りこぼし” を防ぐ。
+const normalizeDescentGateBridge = (v: any): 'closed' | 'offered' | 'accepted' => {
+  if (v == null) return 'closed';
 
-  // 正式：string のとき
   if (typeof v === 'string') {
     const s = v.trim().toLowerCase();
-    if (s === 'closed' || s === 'offered' || s === 'accepted') return s as any;
-    return null;
+    if (s === 'closed' || s === 'offered' || s === 'accepted') return s;
+    return 'closed';
   }
 
-  // 互換：boolean のとき（現状ここが来てる）
+  // 互換：boolean のとき（旧）
   if (typeof v === 'boolean') return v ? 'accepted' : 'closed';
 
+  return 'closed';
+};
+
+const normalizeSpinLoopBridge = (v: any): 'SRI' | 'TCF' | null => {
+  if (typeof v !== 'string') return null;
+  const s = v.trim().toUpperCase();
+  if (s === 'SRI' || s === 'TCF') return s as any;
   return null;
+};
+
+const normalizeDepthBridge = (v: any): string | null => {
+  if (typeof v !== 'string') return null;
+  const s = v.trim();
+  return s ? s : null;
 };
 
 try {
   const m: any = out.metaForSave ?? {};
+
   const rot =
     m.rotation ??
     m.rotationState ??
@@ -1181,15 +1160,25 @@ try {
     (m.will && (m.will.rotation ?? m.will.spin)) ??
     null;
 
-  // ✅ descentGate を persist が理解できる形に正規化する
-  const dg = normalizeDescentGateBridge(rot?.descentGate ?? m.descentGate);
-  if (dg) m.descentGate = dg;
+  // ✅ descentGate: rot優先 → meta fallback → 最後は closed
+  m.descentGate = normalizeDescentGateBridge(rot?.descentGate ?? m.descentGate);
 
-  m.depth = rot?.nextDepth ?? rot?.depth ?? m.depth ?? null;
+  // ✅ spinLoop: rot優先で拾う（無ければmeta）
+  m.spinLoop =
+    normalizeSpinLoopBridge(rot?.spinLoop ?? rot?.loop) ??
+    normalizeSpinLoopBridge(m.spinLoop) ??
+    null;
 
+  // ✅ depth: rotの nextDepth/depth を優先（無ければmeta）
+  m.depth =
+    normalizeDepthBridge(rot?.nextDepth ?? rot?.depth) ??
+    normalizeDepthBridge(m.depth) ??
+    null;
+
+  // ✅ persist が読む “正規化済み” の rotationState を再構成
   m.rotationState = {
-    spinLoop: m.spinLoop ?? null,
-    descentGate: m.descentGate ?? null,
+    spinLoop: m.spinLoop,
+    descentGate: m.descentGate,
     depth: m.depth,
     reason: rot?.reason ?? undefined,
   };
@@ -1204,6 +1193,7 @@ try {
 } catch (e) {
   console.warn('[IROS/Reply] rotation bridge failed', e);
 }
+
 
     /* ---------------------------
        6) Persist (order fixed)
