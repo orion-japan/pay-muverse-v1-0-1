@@ -508,7 +508,8 @@ export async function persistMemoryStateIfAny(args: {
     if (spinLoop) upsertPayload.spin_loop = spinLoop;
     if (typeof spinStep === 'number') upsertPayload.spin_step = spinStep;
 
-    if (descentGate) upsertPayload.descent_gate = descentGate;
+    if (typeof descentGate === 'string') upsertPayload.descent_gate = descentGate;
+
 
     // ✅ 核心：intent_anchor は set/reset のときだけ触る（SUN固定 or keep は触らない）
     if (finalAnchorDecision.action === 'set' && intentAnchorRaw) {

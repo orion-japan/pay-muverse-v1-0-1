@@ -490,8 +490,7 @@ if (typeof assistantText === 'string' && assistantText.trim().length > 0) {
       meta.target_kind = normalizedTargetKind;
 
       // ★★★ ここが本丸：返却metaの y/h を “整数に統一” する（DBとUIとTrainingを一致させる）
-      meta = normalizeMetaLevels(meta);
-
+// meta = normalizeMetaLevels(meta);
 // ★ unified.intent_anchor を “固定アンカー” に同期（ブレ防止）
 {
   const fixedText =
@@ -784,6 +783,27 @@ function applyRenderEngineIfEnabled(params: {
         null,
     });
 
+    // ★ 追加：spinLoop / spinStep は「最終 meta」を優先して vector に同期（SRI/TCFズレ防止）
+    const spinLoopFromMeta =
+      (meta as any)?.spinLoop ??
+      (meta as any)?.spin_loop ??
+      (meta as any)?.unified?.spinLoop ??
+      (meta as any)?.unified?.spin_loop ??
+      null;
+
+    const spinStepFromMeta =
+      (meta as any)?.spinStep ??
+      (meta as any)?.spin_step ??
+      (meta as any)?.unified?.spinStep ??
+      (meta as any)?.unified?.spin_step ??
+      null;
+
+    const vectorForRender = {
+      ...vector,
+      spinLoop: spinLoopFromMeta ?? (vector as any).spinLoop ?? null,
+      spinStep: spinStepFromMeta ?? (vector as any).spinStep ?? null,
+    };
+
     const userWantsEssence = /本質|ズバ|はっきり|ハッキリ|意図|核心|要点/.test(
       userText,
     );
@@ -830,13 +850,13 @@ function applyRenderEngineIfEnabled(params: {
       highDefensiveness,
       insightCandidate,
       nextStepCandidate,
-      vector,
+      vector: vectorForRender,
     });
 
     // meta.extra にデバッグ情報
     meta.extra = {
       ...(meta.extra ?? {}),
-      resonanceVector: vector,
+      resonanceVector: vectorForRender,
       renderEngine: {
         userWantsEssence,
         highDefensiveness,
@@ -847,7 +867,7 @@ function applyRenderEngineIfEnabled(params: {
     };
 
     const rendered = renderReply(
-      vector,
+      vectorForRender as any,
       {
         facts: String(resultObj?.content ?? '').trim(),
         insight: insightCandidate,
@@ -900,7 +920,7 @@ function applyRenderEngineIfEnabled(params: {
 
     return { meta };
   }
-}
+
 
 /**
  * yLevel / hLevel を “整数に統一” する（DBの int と常に一致させる）
@@ -984,4 +1004,4 @@ function clampInt(v: number, min: number, max: number): number {
   if (v < min) return min;
   if (v > max) return max;
   return v;
-}
+}}

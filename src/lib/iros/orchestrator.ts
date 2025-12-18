@@ -60,6 +60,9 @@ import {
 
 import { savePersonIntentState } from './memory/savePersonIntent';
 
+// ✅ 1) import を追加（他の import 群のどこでもOK。おすすめは spin周りの近く）
+import type { DescentGateState } from './rotation/rotationLoop';
+
 // 🔸 Iros Soul（Silent Advisor）レイヤー
 import { shouldUseSoul } from './soul/shouldUseSoul';
 import { runIrosSoul } from './soul/runIrosSoul';
@@ -73,6 +76,10 @@ import { applyDelegateIntentOverride } from './will/delegateIntentOverride';
 // ★ CONT: 意志の連続性（Depth / Q のなだらか化）
 import { applyGoalContinuity } from './will/continuityEngine'; // ★ CONT 追加
 
+import { selectFrame, type InputKind } from './language/frameSelector';
+import { buildSlots } from './language/slotBuilder';
+
+import { decideDescentGate } from './rotation/rotationLoop';
 // ==== 固定アンカー（北） ====
 // - ユーザー発話から抽出しない
 // - 常に「太陽SUN」を北として持つ
@@ -731,6 +738,86 @@ export async function runIrosTurn(
   (meta as any).goal = goal;
   (meta as any).priority = priority;
 
+// ----------------------------------------------------------------
+// 7.5 DescentGate（落下ゲート）+ Frame/Slots（器/枠）を “本文生成前” に確定
+// ----------------------------------------------------------------
+{
+  const classifyInputKind = (t: string): InputKind => {
+    const s = (t ?? '').trim();
+    if (s.length === 0) return 'unknown';
+
+    if (/^(おはよう|こんにちは|こんばんは|やあ|hi|hello)\b/i.test(s)) return 'greeting';
+    if (/(error|stack|tsc|typecheck|例外|エラー|ログ|stack trace)/i.test(s)) return 'debug';
+    if (/(実装|修正|追加|削除|変更|接続|差分|diff|SQL|関数|ファイル|orchestrator)/i.test(s)) return 'request';
+    if (/[？?]$/.test(s) || /(どう|なぜ|何|どれ)/.test(s)) return 'question';
+    if (s.length <= 8) return 'micro';
+
+    return 'chat';
+  };
+
+  // ✅ prevDescentGate を boolean ではなく union に正規化
+  const normalizePrevDescentGate = (
+    v: any
+  ): 'closed' | 'offered' | 'accepted' | null => {
+    if (v == null) return null;
+
+    if (typeof v === 'string') {
+      const s = v.trim().toLowerCase();
+      if (s === 'closed' || s === 'offered' || s === 'accepted') return s as any;
+      return null;
+    }
+
+    // 互換：boolean が残っていたら変換
+    if (typeof v === 'boolean') return v ? 'accepted' : 'closed';
+
+    return null;
+  };
+
+  const prevDescentGate = normalizePrevDescentGate((mergedBaseMeta as any).descentGate);
+
+  const dg = decideDescentGate({
+    qCode: (meta as any).qCode ?? null,
+    sa: typeof (meta as any).selfAcceptance === 'number' ? (meta as any).selfAcceptance : null,
+    depthStage: ((meta as any).depth as any) ?? null,
+    targetKind: (goal as any)?.kind ?? null,
+    prevDescentGate,
+  });
+
+  // ✅ meta には union を保存
+  (meta as any).descentGate = dg.descentGate;
+  (meta as any).descentGateReason = dg.reason;
+  (meta as any).descentGateDebug = null; // rotationLoop版には debug は無いので固定でOK
+
+  const inputKind = classifyInputKind(text);
+  (meta as any).inputKind = inputKind;
+
+  // ✅ FrameSelector はまだ boolean 前提 → “下降中か” に変換して渡す
+  const descentBoolForFrame = dg.descentGate !== 'closed';
+
+  const frame = selectFrame(
+    { depth: ((meta as any).depth as any) ?? null, descentGate: descentBoolForFrame },
+    inputKind
+  );
+
+  // ✅ SlotBuilder は union 前提 → そのまま渡す
+  const slotPlan = buildSlots(frame, { descentGate: dg.descentGate });
+
+  (meta as any).frame = frame;
+  (meta as any).slotPlan = slotPlan.slots;
+
+  console.log('[IROS/frame+slots]', {
+    descentGate: dg.descentGate,
+    frame,
+    slots: Object.entries(slotPlan.slots)
+      .filter(([, v]) => v)
+      .map(([k]) => k)
+      .join(','),
+  });
+}
+
+
+
+
   // ----------------------------------------------------------------
   // 8. 本文生成（LLM 呼び出し）
   // ----------------------------------------------------------------
@@ -767,6 +854,16 @@ export async function runIrosTurn(
     ...meta,
     depth: (resolvedDepth ?? fallbackDepth) ?? undefined,
   };
+
+// ✅ 7.5で確定した “安全/器/枠” を finalMeta に確実に引き継ぐ
+(finalMeta as any).descentGate = (meta as any).descentGate ?? (finalMeta as any).descentGate ?? null;
+(finalMeta as any).descentGateReason = (meta as any).descentGateReason ?? (finalMeta as any).descentGateReason ?? null;
+(finalMeta as any).descentGateDebug = (meta as any).descentGateDebug ?? (finalMeta as any).descentGateDebug ?? null;
+
+(finalMeta as any).inputKind = (meta as any).inputKind ?? (finalMeta as any).inputKind ?? null;
+(finalMeta as any).frame = (meta as any).frame ?? (finalMeta as any).frame ?? null;
+(finalMeta as any).slotPlan = (meta as any).slotPlan ?? (finalMeta as any).slotPlan ?? null;
+
 
   // unified.depth.stage にも同じものを流し込む（ここでもS4は残らない）
   if ((finalMeta as any).unified) {

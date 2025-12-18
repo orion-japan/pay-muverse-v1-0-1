@@ -4,17 +4,23 @@
 
 export type QCode = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
 export type Phase = 'Inner' | 'Outer';
-export type IntentLayer = 'S' | 'R' | 'C' | 'I' | 'T';
+
+// ★ F を追加（Forming / 習慣・定着）
+export type IntentLayer = 'S' | 'F' | 'R' | 'C' | 'I' | 'T';
+
+// ★ 回転（上昇/下降）メタを追加
+export type SpinLoop = 'SRI' | 'TCF';
+export type SpinStep = 0 | 1 | 2;
 
 export type ResonanceVector = {
   qCode: QCode | null;
-  depthStage: string | null; // S1..I3 / T1..T3 などを想定（文字列で保持）
+  depthStage: string | null; // S1..I3 / T1..T3 / F1..F3 などを想定（文字列で保持）
   phase: Phase | null;
 
   // 0.0 - 1.0
   selfAcceptance: number | null;
 
-  // S/R/C/I/T
+  // S/F/R/C/I/T
   intentLayer: IntentLayer | null;
 
   // 0.0 - 1.0（あれば）
@@ -33,14 +39,18 @@ export type ResonanceVector = {
   situationSummary: string | null;
   situationTopic: string | null;
 
+  // ★ 回転メタ（下向きTCFのために必須）
+  spinLoop: SpinLoop;
+  spinStep: SpinStep;
+
   /**
    * ---- 互換フィールド（renderReply.ts が参照している旧名）----
    * ※ renderReply.ts が null 許容していないので、ここは「必ず number」で返す
    */
-  depthLevel: number;      // 0..2
-  grounding: number;       // 0..1
-  transcendence: number;   // 0..1
-  precision: number;       // 0..1
+  depthLevel: number; // 0..2
+  grounding: number; // 0..1
+  transcendence: number; // 0..1
+  precision: number; // 0..1
 
   // LLM 用の短いラベル
   label: string;
@@ -82,6 +92,13 @@ export type ResonanceVectorInput = {
 
   situationSummary?: unknown;
   situationTopic?: unknown;
+
+  // ★ 回転入力（どこから来ても拾えるように）
+  spinLoop?: unknown;
+  spin_loop?: unknown;
+
+  spinStep?: unknown;
+  spin_step?: unknown;
 
   // 互換入力（どこかで入ってたら拾う）
   depthLevel?: unknown;
@@ -151,7 +168,7 @@ export function normalizeIntentLayer(v: unknown): IntentLayer | null {
   const s = toStr(v);
   if (!s) return null;
   const u = s.toUpperCase();
-  if (u === 'S' || u === 'R' || u === 'C' || u === 'I' || u === 'T') {
+  if (u === 'S' || u === 'F' || u === 'R' || u === 'C' || u === 'I' || u === 'T') {
     return u as IntentLayer;
   }
   return null;
@@ -160,6 +177,21 @@ export function normalizeIntentLayer(v: unknown): IntentLayer | null {
 export function normalizeDepthStage(v: unknown): string | null {
   const s = toStr(v);
   return s ? s : null;
+}
+
+export function normalizeSpinLoop(v: unknown): SpinLoop | null {
+  const s = toStr(v);
+  if (!s) return null;
+  const u = s.toUpperCase();
+  if (u === 'SRI' || u === 'TCF') return u as SpinLoop;
+  return null;
+}
+
+export function normalizeSpinStep(v: unknown): SpinStep | null {
+  const n = toNum(v);
+  if (n == null) return null;
+  const x = clampInt(n, 0, 2);
+  return (x === 0 || x === 1 || x === 2) ? (x as SpinStep) : null;
 }
 
 function pickUnified(input: ResonanceVectorInput): any {
@@ -179,6 +211,8 @@ function buildLabel(rv: Omit<ResonanceVector, 'label'>): string {
   if (rv.polarityBand) parts.push(`Pol:${rv.polarityBand}`);
   if (rv.stabilityBand) parts.push(`Stb:${rv.stabilityBand}`);
 
+  parts.push(`Loop:${rv.spinLoop}${rv.spinStep}`);
+
   parts.push(`DL:${rv.depthLevel}`);
   parts.push(`G:${rv.grounding.toFixed(2)}`);
   parts.push(`T:${rv.transcendence.toFixed(2)}`);
@@ -195,8 +229,45 @@ function inferDepthLevel(depthStage: string | null): number | null {
   if (s.startsWith('I')) return 2;
   if (s.startsWith('C')) return 1;
   if (s.startsWith('R')) return 1;
+  if (s.startsWith('F')) return 0; // F は “定着” だが renderer互換の depthLevel は 0 側へ寄せる
   if (s.startsWith('S')) return 0;
   return null;
+}
+
+function inferIntentLayerFromDepthStage(depthStage: string | null): IntentLayer | null {
+  if (!depthStage) return null;
+  const s = depthStage.trim().toUpperCase();
+  const ch = s.charAt(0);
+  if (ch === 'S' || ch === 'F' || ch === 'R' || ch === 'C' || ch === 'I' || ch === 'T') {
+    return ch as IntentLayer;
+  }
+  return null;
+}
+
+function inferSpinLoopFromDepthStage(depthStage: string | null): SpinLoop | null {
+  if (!depthStage) return null;
+  const s = depthStage.trim().toUpperCase();
+  if (s.startsWith('T') || s.startsWith('C') || s.startsWith('F')) return 'TCF';
+  if (s.startsWith('S') || s.startsWith('R') || s.startsWith('I')) return 'SRI';
+  return null;
+}
+
+function inferSpinStepFrom(depthStage: string | null, loop: SpinLoop): SpinStep {
+  const s = (depthStage ?? '').trim().toUpperCase();
+  const head = s.charAt(0);
+
+  if (loop === 'SRI') {
+    if (head === 'S') return 0;
+    if (head === 'R') return 1;
+    if (head === 'I') return 2;
+    return 0;
+  }
+
+  // loop === 'TCF'
+  if (head === 'T') return 0;
+  if (head === 'C') return 1;
+  if (head === 'F') return 2;
+  return 0;
 }
 
 function inferGrounding(params: {
@@ -262,6 +333,7 @@ export function buildResonanceVector(input: ResonanceVectorInput): ResonanceVect
     normalizeIntentLayer(input?.unified?.intent_line?.focusLayer) ??
     normalizeIntentLayer((input as any)?.intentLine?.focusLayer) ??
     normalizeIntentLayer((input as any)?.intent_line?.focusLayer) ??
+    inferIntentLayerFromDepthStage(depthStage) ??
     null;
 
   const intentConfidence =
@@ -324,6 +396,22 @@ export function buildResonanceVector(input: ResonanceVectorInput): ResonanceVect
     toStr(unified?.situation?.topic) ??
     null;
 
+  // ★ 回転：入力があれば最優先、なければ depthStage から推定
+  const spinLoop =
+    normalizeSpinLoop(input.spinLoop) ??
+    normalizeSpinLoop(input.spin_loop) ??
+    normalizeSpinLoop(unified?.spinLoop) ??
+    normalizeSpinLoop(unified?.spin_loop) ??
+    inferSpinLoopFromDepthStage(depthStage) ??
+    'SRI';
+
+  const spinStep =
+    normalizeSpinStep(input.spinStep) ??
+    normalizeSpinStep(input.spin_step) ??
+    normalizeSpinStep(unified?.spinStep) ??
+    normalizeSpinStep(unified?.spin_step) ??
+    inferSpinStepFrom(depthStage, spinLoop);
+
   // 互換フィールド（null 禁止）
   const depthLevel =
     clampInt(
@@ -369,6 +457,8 @@ export function buildResonanceVector(input: ResonanceVectorInput): ResonanceVect
     hLevel,
     situationSummary,
     situationTopic,
+    spinLoop,
+    spinStep,
     depthLevel,
     grounding,
     transcendence,
@@ -385,6 +475,7 @@ export function formatResonanceVectorForPrompt(rv: ResonanceVector): string {
   lines.push(`RV: ${rv.label}`);
   if (rv.situationTopic) lines.push(`topic: ${rv.situationTopic}`);
   if (rv.situationSummary) lines.push(`summary: ${rv.situationSummary}`);
+  lines.push(`spin: ${rv.spinLoop}:${rv.spinStep}`);
   return lines.join('\n');
 }
 
