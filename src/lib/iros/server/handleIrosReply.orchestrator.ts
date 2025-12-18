@@ -1,5 +1,9 @@
 // file: src/lib/iros/server/handleIrosReply.orchestrator.ts
-// iros - Orchestrator wrapper (minimal + anchor safety)
+// iros - Orchestrator wrapper
+// ✅ 役割：Context で確定した構造（rotationState / framePlan）を
+//    そのまま Orchestrator / Writer に届ける
+// - intentAnchor だけ検疫
+// - 回転やフレームは「触らない・削らない」
 
 import { runIrosTurn } from '@/lib/iros/orchestrator';
 import type { IrosStyle } from '@/lib/iros/system';
@@ -17,11 +21,16 @@ export type RunOrchestratorTurnArgs = {
   requestedDepth: string | undefined;
   requestedQCode: string | undefined;
 
+  /** ✅ Context で確定した唯一の基礎メタ */
   baseMetaForTurn: any;
 
   userProfile: IrosUserProfileRow | null;
   effectiveStyle: IrosStyle | string | null;
 };
+
+/* =========================
+   intentAnchor sanitize（最小）
+========================= */
 
 function pickIntentAnchorText(meta: any): string {
   const a = meta?.intentAnchor;
@@ -42,14 +51,14 @@ function sanitizeIntentAnchor(meta: any): any {
 
   const a = meta.intentAnchor;
 
-  // DB行っぽい形なら許可しやすい（id/user_id/created_at 等）
+  // DB 行っぽい形なら許可
   const looksLikeRow =
     Boolean(a?.id) ||
     Boolean(a?.user_id) ||
     Boolean(a?.created_at) ||
     Boolean(a?.updated_at);
 
-  // set/reset イベントなら許可しやすい
+  // set/reset イベントなら許可
   const ev: string | null =
     meta.anchorEventType ??
     meta.intentAnchorEventType ??
@@ -65,13 +74,13 @@ function sanitizeIntentAnchor(meta: any): any {
     return meta;
   }
 
-  // 2) メタ判定に引っかかる → 捨てる
+  // 2) メタ文言 → 捨てる
   if (isMetaAnchorText(text)) {
     delete meta.intentAnchor;
     return meta;
   }
 
-  // 3) Rowでもなく、set/reset でもない → 擬似アンカーとして捨てる
+  // 3) Row でも event でもない → 捨てる
   if (!looksLikeRow && !shouldBeRealEvent) {
     delete meta.intentAnchor;
     return meta;
@@ -80,8 +89,12 @@ function sanitizeIntentAnchor(meta: any): any {
   return meta;
 }
 
+/* =========================
+   main
+========================= */
+
 export async function runOrchestratorTurn(
-  args: RunOrchestratorTurnArgs
+  args: RunOrchestratorTurnArgs,
 ): Promise<any> {
   const {
     conversationId,
@@ -96,29 +109,52 @@ export async function runOrchestratorTurn(
     effectiveStyle,
   } = args;
 
-  // ✅ 入力側：baseMeta の intentAnchor を必ず検疫（ここが一番効く）
+  // =========================================================
+  // ✅ 入力メタ：Context で確定した構造をそのまま使う
+  // - shallow copy だけ
+  // - intentAnchor 以外は触らない
+  // =========================================================
   const safeBaseMeta =
     baseMetaForTurn && typeof baseMetaForTurn === 'object'
       ? { ...baseMetaForTurn }
       : {};
 
+  // intentAnchor だけ検疫（回転・framePlan は絶対に触らない）
   sanitizeIntentAnchor(safeBaseMeta);
 
-  // runIrosTurn 側の引数型に合わせて any で渡す（段階的に厳密化する）
+  // デバッグ（必要最低限）
+  console.log('[IROS/Orchestrator] input meta snapshot', {
+    hasRotationState: Boolean(safeBaseMeta.rotationState),
+    spinLoop: safeBaseMeta.rotationState?.spinLoop ?? safeBaseMeta.spinLoop ?? null,
+    descentGate: safeBaseMeta.rotationState?.descentGate ?? safeBaseMeta.descentGate ?? null,
+    depth: safeBaseMeta.rotationState?.depth ?? safeBaseMeta.depth ?? null,
+    frame: safeBaseMeta.framePlan?.frame ?? null,
+  });
+
+  // =========================================================
+  // runIrosTurn
+  // - requestedDepth / QCode は “補助”
+  // - 実質の判断は baseMeta（rotationState / framePlan）
+  // =========================================================
   const result = await runIrosTurn({
     conversationId,
     userCode,
     text,
     isFirstTurn,
+
     requestedMode: requestedMode as any,
     requestedDepth: requestedDepth as any,
     requestedQCode: requestedQCode as any,
+
     baseMeta: safeBaseMeta,
     userProfile,
     style: effectiveStyle as any,
   } as any);
 
-  // ✅ 出力側：orchResult.meta も検疫（万一 meta 生成側が汚染しても止血）
+  // =========================================================
+  // ✅ 出力メタ：intentAnchor だけ再検疫
+  // - rotationState / framePlan は保持
+  // =========================================================
   try {
     if (result && typeof result === 'object') {
       const r: any = result;
@@ -127,7 +163,9 @@ export async function runOrchestratorTurn(
         sanitizeIntentAnchor(r.meta);
       }
     }
-  } catch {}
+  } catch (e) {
+    console.warn('[IROS/Orchestrator] output sanitize failed', e);
+  }
 
   return result;
 }

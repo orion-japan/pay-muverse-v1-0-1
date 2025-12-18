@@ -1,5 +1,5 @@
 // file: src/lib/iros/server/handleIrosReply.postprocess.ts
-// iros - Postprocess (minimal first + meta safety)
+// iros - Postprocess (minimal first + meta safety + rotationState single source)
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { IrosStyle } from '@/lib/iros/system';
@@ -63,11 +63,7 @@ function extractAssistantText(orchResult: any): string {
 
 function pickIntentAnchorText(meta: any): string {
   const a = meta?.intentAnchor;
-  const t =
-    (a?.anchor_text ?? '') ||
-    (a?.anchorText ?? '') ||
-    (a?.text ?? '') ||
-    '';
+  const t = (a?.anchor_text ?? '') || (a?.anchorText ?? '') || (a?.text ?? '') || '';
   return String(t);
 }
 
@@ -85,10 +81,7 @@ function sanitizeIntentAnchor(meta: any): any {
 
   const a = meta.intentAnchor;
   const looksLikeRow =
-    Boolean(a?.id) ||
-    Boolean(a?.user_id) ||
-    Boolean(a?.created_at) ||
-    Boolean(a?.updated_at);
+    Boolean(a?.id) || Boolean(a?.user_id) || Boolean(a?.created_at) || Boolean(a?.updated_at);
 
   // 1) テキストが無い → 捨てる
   if (!hasText) {
@@ -120,9 +113,81 @@ function sanitizeIntentAnchor(meta: any): any {
   return meta;
 }
 
-export async function postProcessReply(
-  args: PostProcessReplyArgs,
-): Promise<PostProcessReplyOutput> {
+/* =========================================================
+   RotationState single source (postprocess side)
+   - ここで metaForSave.rotationState を必ず「正規形」に揃える
+   - render / persist は rotationState だけを見る前提に寄せる
+========================================================= */
+
+type DescentGate = 'closed' | 'offered' | 'accepted';
+type SpinLoop = 'SRI' | 'TCF';
+
+function normalizeDescentGate(v: any): DescentGate {
+  if (v == null) return 'closed';
+
+  if (typeof v === 'string') {
+    const s = v.trim().toLowerCase();
+    if (s === 'closed' || s === 'offered' || s === 'accepted') return s as DescentGate;
+    return 'closed';
+  }
+
+  // 互換：boolean のとき（旧）
+  if (typeof v === 'boolean') return v ? 'accepted' : 'closed';
+
+  return 'closed';
+}
+
+function normalizeSpinLoop(v: any): SpinLoop | null {
+  if (typeof v !== 'string') return null;
+  const s = v.trim().toUpperCase();
+  if (s === 'SRI' || s === 'TCF') return s as SpinLoop;
+  return null;
+}
+
+function normalizeDepth(v: any): string | null {
+  if (typeof v !== 'string') return null;
+  const s = v.trim();
+  return s ? s : null;
+}
+
+function ensureRotationState(meta: any, orchResult: any): any {
+  const m: any = meta && typeof meta === 'object' ? meta : {};
+
+  // orchResult 由来の rotation 候補も拾う（metaに入ってない場合の取りこぼし防止）
+  const or: any = orchResult && typeof orchResult === 'object' ? orchResult : null;
+
+  const rot =
+    m.rotation ??
+    m.rotationState ??
+    m.spin ??
+    (m.will && (m.will.rotation ?? m.will.spin)) ??
+    (or && (or.rotation ?? or.rotationState ?? or.spin ?? (or.will && (or.will.rotation ?? or.will.spin)))) ??
+    null;
+
+  const spinLoop =
+    normalizeSpinLoop(rot?.spinLoop ?? rot?.loop) ?? normalizeSpinLoop(m.spinLoop) ?? null;
+
+  const descentGate = normalizeDescentGate(rot?.descentGate ?? m.descentGate);
+
+  const depth =
+    normalizeDepth(rot?.nextDepth ?? rot?.depth) ?? normalizeDepth(m.depth) ?? null;
+
+  // ここで “唯一の正規形” に揃える
+  m.spinLoop = spinLoop;
+  m.descentGate = descentGate;
+  m.depth = depth;
+
+  m.rotationState = {
+    spinLoop,
+    descentGate,
+    depth,
+    reason: rot?.reason ?? undefined,
+  };
+
+  return m;
+}
+
+export async function postProcessReply(args: PostProcessReplyArgs): Promise<PostProcessReplyOutput> {
   const { orchResult, supabase, userCode, userText } = args;
 
   const assistantText = extractAssistantText(orchResult);
@@ -133,11 +198,18 @@ export async function postProcessReply(
       ? (orchResult as any).meta
       : null;
 
-  const metaForSave: any =
-    metaRaw && typeof metaRaw === 'object' ? { ...metaRaw } : {};
+  const metaForSave: any = metaRaw && typeof metaRaw === 'object' ? { ...metaRaw } : {};
 
   // ✅ “北極星事故” の最後の止血（ここでも落とす）
   sanitizeIntentAnchor(metaForSave);
+
+  // ✅ rotationState を postprocess 時点で一本化しておく
+  // （handleIrosReply.ts 側にも bridge があってOK。ここは「取りこぼし防止」）
+  try {
+    ensureRotationState(metaForSave, orchResult);
+  } catch (e) {
+    console.warn('[IROS/PostProcess] ensureRotationState failed', e);
+  }
 
   // =========================================================
   // ✅ ここが「注入」本体：pastStateNote を作って meta.extra に入れる
@@ -146,10 +218,10 @@ export async function postProcessReply(
     const topicLabel =
       typeof args.topicLabel === 'string'
         ? args.topicLabel
-        : (metaForSave?.situation_topic ??
-            metaForSave?.situationTopic ??
-            metaForSave?.topicLabel ??
-            null);
+        : metaForSave?.situation_topic ??
+          metaForSave?.situationTopic ??
+          metaForSave?.topicLabel ??
+          null;
 
     const limit =
       typeof args.pastStateLimit === 'number' && Number.isFinite(args.pastStateLimit)
@@ -178,7 +250,6 @@ export async function postProcessReply(
       metaForSave.extra.pastStateTriggerKind = recall.triggerKind ?? null;
       metaForSave.extra.pastStateKeyword = recall.keyword ?? null;
     } else {
-      // 明示的に消したいならここで null を入れる
       metaForSave.extra.pastStateNoteText = null;
       metaForSave.extra.pastStateTriggerKind = recall.triggerKind ?? null;
       metaForSave.extra.pastStateKeyword = recall.keyword ?? null;
