@@ -41,9 +41,8 @@ export async function POST(req: NextRequest) {
     // --- 入力 ---
     const body = (await req.json().catch(() => ({}))) as any;
 
-    // ★ text は任意：空なら内部トリガー文に差し替える
     const rawText: string = String(body.text ?? body.message ?? '').trim();
-    const text: string =
+    const baseText =
       rawText ||
       'いまの私の流れと、これから数ヶ月の未来Seedを教えてください。';
 
@@ -58,47 +57,86 @@ export async function POST(req: NextRequest) {
       auth: { persistSession: false },
     });
 
-    // --- iros_memory_state から最新のラインを1件取得 ---
-    const { data: mem, error: memErr } = await supa
-      .from('iros_memory_state')
-      .select(
-        'depth_stage, q_primary, self_acceptance, y_level, h_level',
-      )
-      .eq('user_code', user_code)
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    // --- iros_memory_state から最新のラインを1件取得（string/number 両対応） ---
+    const selectCols = 'depth_stage, q_primary, self_acceptance, y_level, h_level, phase, spin_loop, spin_step';
+
+    let mem: any = null;
+    let memErr: any = null;
+
+    // ① string で試す
+    {
+      const r = await supa
+        .from('iros_memory_state')
+        .select(selectCols)
+        .eq('user_code', user_code)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      mem = r.data;
+      memErr = r.error;
+    }
+
+    // ② 取れなければ number で再試行
+    if (!mem) {
+      const n = Number(user_code);
+      if (Number.isFinite(n)) {
+        const r2 = await supa
+          .from('iros_memory_state')
+          .select(selectCols)
+          .eq('user_code', n as any)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        mem = r2.data ?? mem;
+        memErr = r2.error ?? memErr;
+      }
+    }
 
     if (memErr) {
       console.warn('[future-seed] memory_state warn:', memErr.message);
     }
 
-    // --- meta を組み立て（必要最小限 + T層起動） ---
-    const meta: IrosMeta & {
-      tLayerModeActive?: boolean;
-      tLayerHint?: string;
-    } = {
+    // ✅ sysトリガーに確実に乗せる：seed: を必ず先頭に付与
+    const text = baseText.startsWith('seed:') ? baseText : `seed: ${baseText}`;
+
+    // --- meta を組み立て（デモ用に“確実に”IT寄りへ） ---
+    const meta: IrosMeta = {
       mode: 'mirror',
-      depth: (mem?.depth_stage as Depth | undefined) ?? undefined,
-      qCode: (mem?.q_primary as QCode | undefined) ?? undefined,
+
+      // mem があれば尊重、なければ SeedはT2に固定
+      depth: ((mem?.depth_stage as Depth | undefined) ?? 'T2') as Depth,
+
+      // mem があれば尊重、なければ SeedはQ3に寄せる（ギア上げ）
+      qCode: ((mem?.q_primary as QCode | undefined) ?? 'Q3') as QCode,
+
       selfAcceptance:
-        typeof mem?.self_acceptance === 'number'
-          ? mem.self_acceptance
+        typeof mem?.self_acceptance === 'number' ? mem.self_acceptance : 0.5,
+
+      yLevel: typeof mem?.y_level === 'number' ? mem.y_level : undefined,
+      hLevel: typeof mem?.h_level === 'number' ? mem.h_level : undefined,
+
+      phase:
+        typeof mem?.phase === 'string'
+          ? (mem.phase === 'Inner' ? 'Inner' : mem.phase === 'Outer' ? 'Outer' : undefined)
           : undefined,
-      yLevel:
-        typeof mem?.y_level === 'number' ? mem.y_level : undefined,
-      hLevel:
-        typeof mem?.h_level === 'number' ? mem.h_level : undefined,
-      // ★ ここで「未来Seedモード」をオンにする
-      tLayerModeActive: true,
+
+      spinLoop:
+        typeof mem?.spin_loop === 'string' ? mem.spin_loop : 'TCF', // Seedは下降系でもOK
+      spinStep:
+        typeof mem?.spin_step === 'number' ? mem.spin_step : 0,
+
+      // ✅ sys 側の “demoForceILayer” に乗せる
+      demoForceILayer: true,
+
+      // 既に system.ts にあるキーも活用（使う側がいれば効く）
       tLayerHint: 'T2',
+      hasFutureMemory: true,
     };
 
-    // --- iros 本体に、未来Seedモードで1ターンだけ生成させる ---
     const out = await generateIrosReply({
       text,
       meta,
-      history: [], // 未来Seed用なので履歴は一旦オフ（必要になったら追加）
+      history: [],
     });
 
     return json({
@@ -108,6 +146,11 @@ export async function POST(req: NextRequest) {
       user_code,
       reply: out.text,
       meta,
+      debug: {
+        memFound: !!mem,
+        memDepth: mem?.depth_stage ?? null,
+        memQ: mem?.q_primary ?? null,
+      },
     });
   } catch (e: any) {
     console.error('[future-seed] error', e);

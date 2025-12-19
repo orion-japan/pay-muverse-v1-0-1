@@ -1,40 +1,36 @@
 // src/lib/iros/q/detectQ.ts
-// Iros Q Detection Engine
-// - キーワードベースの一次判定（超軽量）
+// iros — Q Detection Engine
+// - 概念シグナル（方向性/関連）ベースの一次判定（超軽量）
 // - GPTベースの補完判定（few-shot分類）
-// - 両方を組み合わせて Q1〜Q5 を推定する
+// - （追加）Tシグナル（Transcend）を「フラグ」として併走（Qとは別軸）
+// - Q は Q1〜Q5 を返す / T は boolean で返す（必要なら別APIで利用）
 
 import OpenAI from 'openai';
-import type { QCode } from '../system';   // ← これが正しい
-
+import type { QCode } from '../system';
 
 // Q判定用モデル（なければ IROS_MODEL → gpt-4o）
-const Q_MODEL =
-  process.env.IROS_Q_MODEL ??
-  process.env.IROS_MODEL ??
-  'gpt-4o';
+const Q_MODEL = process.env.IROS_Q_MODEL ?? process.env.IROS_MODEL ?? 'gpt-4o';
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
+export type QTDetectResult = {
+  q: QCode | null;
+  t: boolean; // T層シグナル（Qとは別軸）
+  reason?: string | null;
+};
+
 /**
- * キーワードベースの一次判定
- * - 軽量＆高速
- * - 明らかなケースのみ拾う（迷う場合は null で GPT に回す）
+ * 方向性（関連）を拾うため：概念シグナル中心の正規表現ベース
+ * - 誤爆を避けるため「弱い単発」は決めない（null → GPTへ）
  */
 export function detectQByKeywords(text: string): QCode | null {
-  const t = (text || '').toLowerCase();
+  const raw = (text || '').trim();
+  if (!raw) return null;
 
-  if (!t.trim()) return null;
-
-  // 日本語は lowerCase の意味が薄いので、元テキストも併用
-  const raw = text;
-
-  const contains = (kw: string) =>
-    t.includes(kw.toLowerCase()) || raw.includes(kw);
-
-  let score: Record<QCode, number> = {
+  // 方向性（関連）を拾うため：概念シグナル中心
+  const score: Record<QCode, number> = {
     Q1: 0,
     Q2: 0,
     Q3: 0,
@@ -42,120 +38,145 @@ export function detectQByKeywords(text: string): QCode | null {
     Q5: 0,
   };
 
-  // Q1：我慢／秩序
-  const q1Keywords = [
-    '我慢',
-    '耐えて',
-    '耐える',
-    '抑えて',
-    '抑える',
-    'ちゃんとしないと',
-    'ちゃんとしなきゃ',
-    'ルール',
-    '規則',
-    '責任',
-    '評価される',
-    'ミスできない',
-    '失敗できない',
-  ];
-  for (const kw of q1Keywords) {
-    if (contains(kw)) score.Q1++;
-  }
-
-  // Q2：怒り／成長
-  const q2Keywords = [
-    '怒り',
-    '怒って',
-    'ムカつく',
-    'ムカついて',
-    '腹が立',
-    'イライラ',
-    '苛立ち',
-    'キレそう',
-    '許せない',
-    '納得いかない',
-    '見返したい',
-    '成長したい',
-    '変わりたい',
-  ];
-  for (const kw of q2Keywords) {
-    if (contains(kw)) score.Q2++;
-  }
-
-  // Q3：不安／安定
-  const q3Keywords = [
-    '不安',
-    '心配',
-    '焦り',
-    '焦って',
-    '迷って',
-    '迷い',
-    '悩んで',
-    '落ち着かない',
-    '大丈夫かな',
-    'どうしよう',
-    '将来が見えない',
-    '安定したい',
-  ];
-  for (const kw of q3Keywords) {
-    if (contains(kw)) score.Q3++;
-  }
-
-  // Q4：恐怖／浄化
-  const q4Keywords = [
-    '怖い',
-    '恐い',
-    '恐怖',
-    'トラウマ',
-    'フラッシュバック',
-    '思い出したくない',
-    '消えてほしい',
-    '逃げたい',
-    '近づきたくない',
-    '信用できない',
-    '信頼できない',
-  ];
-  for (const kw of q4Keywords) {
-    if (contains(kw)) score.Q4++;
-  }
-
-  // Q5：空虚／情熱
-  const q5Keywords = [
-    '虚し',
-    'むなしい',
-    '空虚',
-    '空っぽ',
-    '何も感じない',
-    'やる気が出ない',
-    '燃え尽き',
-    '燃えつき',
-    '情熱',
-    'ワクワク',
-    '本当はやりたい',
-    '本気でやりたい',
-  ];
-  for (const kw of q5Keywords) {
-    if (contains(kw)) score.Q5++;
-  }
-
-  // 一番スコアが高いQを採用（すべて0なら null）
-  let best: { q: QCode | null; score: number } = {
-    q: null,
-    score: 0,
+  const add = (q: QCode, n: number) => {
+    score[q] += n;
   };
 
-  (Object.keys(score) as QCode[]).forEach((q) => {
-    if (score[q] > best.score) {
-      best = { q, score: score[q] };
+  // 「ヒット数」を安全に数える（gフラグを強制してブレを消す）
+  const countMatches = (patterns: RegExp[]) => {
+    let c = 0;
+    for (const p of patterns) {
+      const flags = p.flags.includes('g') ? p.flags : `${p.flags}g`;
+      const re = new RegExp(p.source, flags);
+      const m = raw.match(re);
+      c += m ? m.length : 0;
     }
-  });
+    return c;
+  };
 
-  if (!best.q || best.score === 0) return null;
+  // ----------------------------
+  // Q1：我慢／秩序（義務・評価・抑制の“圧”）
+  // ----------------------------
+  add(
+    'Q1',
+    countMatches([
+      /(しなきゃ|しないと|ねば|べき|義務|責任|ルール|規則|正しく|きちんと|ちゃんと)/,
+      /(評価|査定|怒られ|叱られ|ミスできない|失敗できない|迷惑かけられない)/,
+      /(抑え|我慢|耐え|堪え|飲み込ん)/,
+    ]) * 2,
+  );
 
-  // 「ほんのちょっとだけ引っかかった」程度なら GPT に回す
-  if (best.score === 1) return null;
+  // ----------------------------
+  // Q2：怒り／成長（侵害・理不尽・境界反応＋変化の推進力）
+  // ----------------------------
+  add(
+    'Q2',
+    countMatches([
+      /(ムカ|腹が立|イライラ|苛立|キレそう|怒)/,
+      /(許せない|納得いかない|理不尽|筋が通らない|舐められ|軽く見られ)/,
+      /(見返したい|取り戻したい|変えたい|変わりたい|改善|成長|強くなりたい)/,
+    ]) * 2,
+  );
+
+  // ----------------------------
+  // Q3：不安／安定（不確実・迷い・決められなさ＝“揺れ”）
+  // ※「怖い」はQ4寄りなので、Q3では“不安文脈”に限定して拾う
+  // ----------------------------
+  add(
+    'Q3',
+    countMatches([
+      /(不安|心配|焦|落ち着かない|そわそわ)/,
+      /(どうしよう|大丈夫かな|迷|悩)/,
+      /(決められない|わからない|先が見えない|将来|安定)/,
+      /(不安で.*怖|心配で.*怖)/,
+    ]) * 2,
+  );
+
+  // ----------------------------
+  // Q4：恐怖／浄化（危険回避・身体反応・トラウマ＝“回避”）
+  // ----------------------------
+  add(
+    'Q4',
+    countMatches([
+      /(怖い|恐い|恐怖|不気味|震え|鳥肌)/,
+      /(逃げたい|避けたい|近づけない|無理|拒否反応|身構え)/,
+      /(トラウマ|フラッシュバック|思い出したくない|信用できない|信頼できない)/,
+      // 身体反応シグナル（方向性）
+      /(足がすくむ|息が(できない|苦しい)|動けない|心臓が(痛い|苦しい)|過呼吸|吐き気)/,
+    ]) * 2,
+  );
+
+  // ----------------------------
+  // Q5：空虚／情熱（虚無・燃え尽き・意味喪失＋火種）
+  // ----------------------------
+  add(
+    'Q5',
+    countMatches([
+      /(虚し|むなしい|空虚|空っぽ|意味がない|無意味|無価値)/,
+      /(燃え尽き|燃えつき|やる気が出ない|何も感じない|感情が(ない|死んでる))/,
+      // 火種（情熱側）
+      /(情熱|ワクワク|本当はやりたい|本気でやりたい|やり直したい|熱が戻る)/,
+    ]) * 2,
+  );
+
+  // ----------------------------
+  // 弱い単発は「決めない」：GPTに回す
+  // ----------------------------
+  const entries = (Object.keys(score) as QCode[]).map((q) => ({
+    q,
+    s: score[q],
+  }));
+  entries.sort((a, b) => b.s - a.s);
+
+  const best = entries[0];
+  const second = entries[1];
+
+  if (!best || best.s <= 0) return null;
+
+  // 閾値：弱いときは null（GPTへ）
+  if (best.s < 4) return null;
+
+  // 競ってるときも null（GPTへ）
+  if (second && best.s - second.s <= 1) return null;
 
   return best.q;
+}
+
+/**
+ * Tシグナル（Transcend）を軽量検出（Qとは別軸）
+ * - “意図”や“真理”などの単語だけでTにしない（誤爆が多い）
+ * - 「現実を超える視点／大局／普遍／静けさ／統合／本質」など “方向性” を複合で拾う
+ */
+export function detectTBySignals(text: string): boolean {
+  const raw = (text || '').trim();
+  if (!raw) return false;
+
+  const score = (() => {
+    const patterns: RegExp[] = [
+      // 視点の上昇 / 俯瞰
+      /(俯瞰|大局|全体像|視座|高い視点|メタ視点|構造で見る|俯瞰して)/,
+      // 本質 / 真理 / 普遍
+      /(本質|真理|普遍|原理|根源|宇宙|存在|意図の源|北極星|太陽SUN)/,
+      // 統合 / 再統合 / 超越
+      /(統合|再統合|超越|手放す|溶ける|境界が薄い|一致|一致する)/,
+      // 静けさ / 余白 / 祈りっぽい語感（※宗教断定はしない）
+      /(静けさ|余白|祈り|沈黙|ただ在る|響き|フィールド|共鳴)/,
+      // 時間軸の跳躍
+      /(時間を超|過去を超|未来から|時間軸|次元|トランス|T層)/,
+    ];
+
+    let c = 0;
+    for (const p of patterns) {
+      const flags = p.flags.includes('g') ? p.flags : `${p.flags}g`;
+      const re = new RegExp(p.source, flags);
+      const m = raw.match(re);
+      c += m ? m.length : 0;
+    }
+    return c;
+  })();
+
+  // 弱い単発はTにしない（誤爆回避）
+  return score >= 2;
 }
 
 /**
@@ -163,34 +184,49 @@ export function detectQByKeywords(text: string): QCode | null {
  * - キーワードで決め切れない場合にのみ呼ぶ
  */
 export async function detectQByGPT(text: string): Promise<QCode | null> {
+  const r = await detectQTByGPT(text);
+  return r.q;
+}
+
+/**
+ * GPTベースの Q + T 推定（few-shot分類）
+ * - Qが曖昧な時に「方向性で」補完
+ * - Tは boolean（Qとは独立）
+ */
+export async function detectQTByGPT(text: string): Promise<QTDetectResult> {
   const trimmed = (text || '').trim();
-  if (!trimmed) return null;
+  if (!trimmed) return { q: null, t: false, reason: null };
 
   const systemPrompt = [
-    'あなたは感情構造を分類するアナライザーです。',
-    'ユーザーの文章を読み、次の Qコードのどれに近いかを判定してください。',
+    'あなたは「意識の方向性」を読むアナライザーです。',
+    'ユーザーの文章を読み、次の Qコード（Q1〜Q5）と、Tシグナル（transcend: true/false）を判定してください。',
     '',
     'Q1＝金（我慢／秩序）',
-    '  - 例：我慢している、抑えている、評価・ルール・責任へのプレッシャー',
+    '  - 義務・責任・評価・ルール・抑制の圧',
     '',
     'Q2＝木（怒り／成長）',
-    '  - 例：怒り、苛立ち、納得いかなさ、成長したい・変わりたいエネルギー',
+    '  - 侵害/理不尽への反応、境界反応、変えたい・改善・成長の推進力',
     '',
     'Q3＝土（不安／安定）',
-    '  - 例：不安、焦り、迷い、将来や安定への心配',
+    '  - 不確実さ、迷い、決められない、安定の必要',
     '',
     'Q4＝水（恐怖／浄化）',
-    '  - 例：恐怖、トラウマ、逃げたい、信用できない、関係を断ちたい感覚',
+    '  - 危険回避、トラウマ、拒否反応、身体反応（足がすくむ/息が苦しい等）',
     '',
     'Q5＝火（空虚／情熱）',
-    '  - 例：虚しさ、空虚感、燃え尽き、しかしどこかに情熱の火種がある状態',
+    '  - 虚無・意味喪失・燃え尽き、ただし火種（やりたい/ワクワク）が残る',
     '',
-    '上記のどれにもはっきり当てはまらない場合は null を選んでください。',
+    'T（transcend）= true となるのは、Qとは別に、次のような「視座の上昇/統合/本質」方向が明確なときです：',
+    '  - 大局/俯瞰/構造/普遍/本質/統合/静けさ/時間軸の跳躍 など',
+    '  - 単語だけでなく「方向性」が見える場合に true にしてください。',
     '',
-    '出力は次の JSON 形式 1行のみで返してください（日本語の説明はしない）：',
+    'どれにもはっきり当てはまらない場合は q を null にしてください。',
+    '',
+    '出力は次の JSON 形式 1行のみ（日本語の説明は他に書かない）：',
     '{',
     '  "q": "Q1" | "Q2" | "Q3" | "Q4" | "Q5" | null,',
-    '  "reason": "なぜそのQを選んだかの短い日本語説明"',
+    '  "t": true | false,',
+    '  "reason": "短い日本語（30字以内）"',
     '}',
   ].join('\n');
 
@@ -210,8 +246,10 @@ export async function detectQByGPT(text: string): Promise<QCode | null> {
     const textOut = typeof raw === 'string' ? raw.trim() : String(raw).trim();
     const parsed = safeParseJson(textOut);
 
-    const qRaw =
-      parsed && typeof parsed.q === 'string' ? parsed.q : null;
+    const qRaw = parsed && typeof parsed.q === 'string' ? parsed.q : null;
+    const tRaw = parsed && typeof parsed.t === 'boolean' ? parsed.t : null;
+    const reason =
+      parsed && typeof parsed.reason === 'string' ? parsed.reason : null;
 
     const q: QCode | null =
       qRaw === 'Q1' ||
@@ -222,15 +260,20 @@ export async function detectQByGPT(text: string): Promise<QCode | null> {
         ? (qRaw as QCode)
         : null;
 
-    return q;
+    // Tは「軽量シグナル」も併用（GPTの誤爆/過小評価を補正）
+    const tBySignals = detectTBySignals(trimmed);
+    const t = Boolean((tRaw ?? false) || tBySignals);
+
+    return { q, t, reason };
   } catch (e) {
-    console.warn('[IROS/Q] detectQByGPT error', e);
-    return null;
+    console.warn('[IROS/Q] detectQTByGPT error', e);
+    // GPT失敗時もTは軽量で拾える
+    return { q: null, t: detectTBySignals(trimmed), reason: null };
   }
 }
 
 /**
- * 公開関数：キーワード → GPT の順に Q を推定する
+ * 公開関数：概念シグナル（軽量）→ GPT の順に Q を推定する
  */
 export async function detectQFromText(text: string): Promise<QCode | null> {
   const kw = detectQByKeywords(text);
@@ -238,6 +281,25 @@ export async function detectQFromText(text: string): Promise<QCode | null> {
 
   const gptQ = await detectQByGPT(text);
   return gptQ;
+}
+
+/**
+ * 公開関数：概念シグナル（軽量）→ GPT の順に Q と T を推定する
+ * - Qは null のままでもOK（後段の continuity / stabilize に任せる）
+ * - Tは「方向性」フラグとして利用可能
+ */
+export async function detectQTFromText(text: string): Promise<QTDetectResult> {
+  const qByKw = detectQByKeywords(text);
+  const tBySig = detectTBySignals(text);
+
+  // Qが決まった場合でも、Tは別軸で返す（false固定にしない）
+  if (qByKw) {
+    return { q: qByKw, t: tBySig, reason: 'kw:concept-signals' };
+  }
+
+  const gpt = await detectQTByGPT(text);
+  // GPT結果に軽量Tを重ねる（detectQTByGPT側でもやるが保険）
+  return { ...gpt, t: Boolean(gpt.t || tBySig) };
 }
 
 /**

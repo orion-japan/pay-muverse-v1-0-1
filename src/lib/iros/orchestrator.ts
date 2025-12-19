@@ -80,6 +80,8 @@ import { buildSlots, type NoDeltaKind } from './language/slotBuilder';
 import { classifyInputKind } from './language/inputKind';
 import { detectILayerForce } from './rotation/iLayerForce';
 import { selectFrame, type FrameKind } from './language/frameSelector';
+import { computeITTrigger } from '@/lib/iros/rotation/computeITTrigger';
+
 
 import { decideDescentGate } from './rotation/rotationLoop';
 // ==== 固定アンカー（北） ====
@@ -241,8 +243,7 @@ export async function runIrosTurn(
   );
 
   const initialQCode =
-    (requestedQCode as QCode | undefined) ??
-    (mergedBaseMeta.qCode as QCode | undefined);
+  (requestedQCode as QCode | undefined) ?? undefined;
 
   // ★ ここでも S4 を潰す（入口）
   const normalizedDepth = normalizeDepthStrict(initialDepth);
@@ -331,7 +332,9 @@ const lastDescentGate: 'closed' | 'offered' | 'accepted' | null =
     // ★ 修正：analysis由来の depth を優先（S4は潰し済）
     depth: analyzedDepth,
 
-    qCode: resolvedQCode ?? normalizedQCode,
+    // ★優先順位：analysis（今回観測） > 明示指定 > 継続（lastQ） > null
+    qCode: resolvedQCode ?? normalizedQCode ?? lastQForContinuity ?? undefined,
+
     selfAcceptance:
       typeof selfAcceptanceLine === 'number'
         ? clampSelfAcceptance(selfAcceptanceLine)
@@ -412,13 +415,19 @@ const lastDescentGate: 'closed' | 'offered' | 'accepted' | null =
 
   (meta as any).phase = phase;
 
+  // ✅ qTrace を meta に載せる（analysis由来）
   if (qTrace) {
     (meta as any).qTrace = qTrace;
+
+    // ✅ postprocess が確実に拾うための互換キー
+    // （handleIrosReply.postprocess.ts の qTraceUpdated 取得用）
+    (meta as any).qTraceUpdated = qTrace;
   }
 
   if (tLayerModeActive) {
     (meta as any).tLayerModeActive = true;
   }
+
 
   // ★ v_iros_user_profile 由来の userProfile を meta に載せる
   //   - Memory 側に既にあれば、今回の userProfile を優先
@@ -909,6 +918,46 @@ if (isActionRequest && priority) {
   });
 
   let content = gen.content;
+
+// ----------------------------------------------------------------
+// 7.75 IT Trigger（I→T の扉） + I語彙の表出許可（別レーン）
+// ※注意：meta.iLayerForce は detectILayerForce の “オブジェクト” なので触らない
+// ----------------------------------------------------------------
+{
+  const it = computeITTrigger({
+    text,
+    history: [], // orchestrator は履歴を持たない（chatCore 側で後日強化）
+    meta: {
+      depthStage: meta.depth ?? null,
+      intentLine: (meta as any).intentLine ?? null,
+    },
+  });
+
+  // ✅ I語彙を本文に1行出す「別レーン」フラグ（衝突回避）
+  (meta as any).iLexemeForce = it.iLayerForce === true;
+
+  // ✅ I→T が成立した時だけ Tを開く（未成立なら既存値を壊さない）
+  if (it.ok && it.tLayerModeActive) {
+    (meta as any).tLayerModeActive = true;
+    (meta as any).tLayerHint = it.tLayerHint ?? (meta as any).tLayerHint ?? 'T2';
+    (meta as any).tVector = it.tVector;
+  }
+
+  if (typeof process !== 'undefined' && process.env.DEBUG_IROS_IT === '1') {
+    // eslint-disable-next-line no-console
+    console.log('[IROS/IT_TRIGGER]', {
+      ok: it.ok,
+      reason: it.reason,
+      flags: it.flags,
+      iLexemeForce: (meta as any).iLexemeForce ?? null,
+      tLayerModeActive: (meta as any).tLayerModeActive ?? null,
+      tLayerHint: (meta as any).tLayerHint ?? null,
+      tVector: (meta as any).tVector ?? null,
+    });
+  }
+}
+
+
 
   // （テンプレ適用は行わない。LLM と Soul に任せる）
   content = stripDiagnosticHeader(content);

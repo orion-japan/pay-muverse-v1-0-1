@@ -200,6 +200,44 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
 
   const metaForSave: any = metaRaw && typeof metaRaw === 'object' ? { ...metaRaw } : {};
 
+  // ✅ 最終確定：qTraceUpdated を metaForSave に焼き込む（返却直前の meta 実体に反映）
+  // - qTraceUpdated は上流で計算済みの想定。orchResult / metaRaw のどちらかに乗っているものを拾う。
+  // ✅ 最終確定：qTraceUpdated を metaForSave / metaForReply に焼き込む
+  const qTraceUpdated: any =
+    (orchResult as any)?.qTraceUpdated ??
+    (metaRaw as any)?.qTraceUpdated ??
+    null;
+
+  const applyQTraceUpdated = (m: any) => {
+    if (!m || !qTraceUpdated || typeof qTraceUpdated !== 'object') return;
+
+    const streak = Number(qTraceUpdated.streakLength ?? 0);
+    const streakSafe = Number.isFinite(streak) ? streak : 0;
+
+    m.qTrace = {
+      ...(m.qTrace ?? {}),
+      ...qTraceUpdated,
+      streakLength: streakSafe,
+    };
+
+    // uncoverStreak も同期（allow条件がこれを見るなら）
+    if (streakSafe > 0) {
+      m.uncoverStreak = Math.max(Number(m.uncoverStreak ?? 0), streakSafe);
+    }
+
+    // 互換キーも合わせる（返却側が見るため）
+    m.qTraceUpdated = {
+      ...(m.qTraceUpdated ?? {}),
+      ...qTraceUpdated,
+      streakLength: streakSafe,
+    };
+  };
+
+  const metaForReply = metaForSave;
+
+  applyQTraceUpdated(metaForSave);
+  applyQTraceUpdated(metaForReply);
+
   // ✅ “北極星事故” の最後の止血（ここでも落とす）
   sanitizeIntentAnchor(metaForSave);
 

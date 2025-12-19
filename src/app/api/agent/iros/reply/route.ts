@@ -654,6 +654,9 @@ meta = applied.meta;
   }
 }
 
+
+
+
 // ===== render engine helper (do not place inside POST) =====
 
 function applyRenderEngineIfEnabled(params: {
@@ -691,6 +694,32 @@ function applyRenderEngineIfEnabled(params: {
       extraKeys: extra ? Object.keys(extra) : [],
     },
   };
+
+// ✅ QTrace を meta に確定させる（POSTハンドラ内、meta 生成直後に置く）
+// 例）const { replyText, meta } = result; の直後あたり
+
+const qTraceUpdated = meta?.qTrace; // まずは現状の meta.qTrace を基準にする（安全）
+
+// ✅ 最終確定：qTraceUpdated を meta に焼き込む（返却直前で上書き防止）
+if (meta && qTraceUpdated && typeof qTraceUpdated === 'object') {
+  const streak = Number((qTraceUpdated as any).streakLength ?? 0);
+
+  meta.qTrace = {
+    ...(meta.qTrace ?? {}),
+    ...qTraceUpdated,
+    streakLength: Number.isFinite(streak) ? streak : 0,
+  };
+
+  // uncoverStreak も同期（allow条件がこれを見るなら）
+  if (Number.isFinite(streak) && streak > 0) {
+    (meta as any).uncoverStreak = Math.max(
+      Number((meta as any).uncoverStreak ?? 0),
+      streak
+    );
+  }
+}
+
+
 
   console.log('[IROS/Reply] renderEngine gate', {
     conversationId,
@@ -835,10 +864,11 @@ function applyRenderEngineIfEnabled(params: {
       (meta.unified?.soulNote?.core_need as string) ??
       null;
 
-    const insightCandidate =
+      let insightCandidate: string | null =
       coreNeed && String(coreNeed).trim().length > 0
         ? String(coreNeed).trim()
         : null;
+
 
     const nextStepCandidate =
       (meta.nextStep as any)?.text ??
@@ -861,6 +891,64 @@ const framePlan = (meta as any)?.framePlan ?? null;
 (vectorForRender as any).slotPlan = (meta as any)?.slotPlan ?? null;
 // 必要なら将来拡張用（今は未使用でもOK）
 // (vectorForRender as any).noDelta = !!(meta as any)?.noDelta;
+
+// --- Orientation Whisper（向き還り1文）: 2回目以降だけ ---
+// 既存 insightCandidate があるなら優先して潰さない
+if (!insightCandidate) {
+  const noDelta = (meta as any)?.noDelta === true;
+  const noDeltaKind = (meta as any)?.noDeltaKind ?? null;
+
+  const uncoverStreak =
+    typeof (meta as any)?.uncoverStreak === 'number'
+      ? (meta as any).uncoverStreak
+      : Number((meta as any)?.qTrace?.streakLength ?? 0);
+
+  const volatilityRank = ((meta as any)?.volatilityRank as any) ?? null;
+
+  const allow =
+    noDelta &&
+    (noDeltaKind === 'stuck' || noDeltaKind === 'repeat-warning') &&
+    uncoverStreak >= 2 &&
+    (uncoverStreak === 2 || (uncoverStreak >= 3 && volatilityRank === 'high'));
+
+  if (allow) {
+    // 1文のみ・問いなし・理由なし・評価なし
+    if (qNow === 'Q2') {
+      insightCandidate = '変えようとする力は十分ある。向きだけは嘘をついていない。';
+    } else if (qNow === 'Q3') {
+      insightCandidate = '決めなくていい。戻る方向だけ保てばいい。';
+    } else {
+      insightCandidate = '今日は答えを出す時間じゃない。向きだけ戻せばいい。';
+    }
+  }
+}
+
+// --- QTrace Bridge (render直前に、最新のstreakをmetaへ反映) ---
+// 症状: [IROS/QTrace] updated では streakLength=2 なのに、renderEngine inputs では 1 に戻る。
+// 対策: render直前で meta の qTrace / uncoverStreak を同期して「2回目以降」を成立させる。
+
+{
+  const mq = (meta as any)?.qTrace ?? null;
+
+  // もし run内で「最新のqTrace（更新後）」を別変数で持っているならそれを優先
+  // 例: const qTraceUpdated = ...
+  const latest = (globalThis as any)?.__IROS_QTRACE_UPDATED__ ?? null; // ※プロジェクト内で実在する変数に置き換えてOK
+
+  const streakFromMeta = Number(mq?.streakLength ?? 0);
+  const streakFromLatest = Number(latest?.streakLength ?? 0);
+  const finalStreak = Math.max(streakFromMeta, streakFromLatest);
+
+  if (!Number.isNaN(finalStreak) && finalStreak > 0) {
+    (meta as any).qTrace = { ...(mq ?? {}), ...(latest ?? {}), streakLength: finalStreak };
+    // uncoverStreak を「2回目以降」の判定材料に使っているので、ここで同期
+    (meta as any).uncoverStreak =
+      typeof (meta as any).uncoverStreak === 'number'
+        ? Math.max((meta as any).uncoverStreak, finalStreak)
+        : finalStreak;
+  }
+}
+
+
 
 console.log('[IROS/Reply][renderEngine] inputs', {
   conversationId,

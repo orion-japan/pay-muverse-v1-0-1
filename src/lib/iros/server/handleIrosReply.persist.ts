@@ -388,6 +388,42 @@ if (prevErr) {
     const depthInput = metaForSave.depth ?? unified?.depth?.stage ?? null;
     const qCodeInput = metaForSave.qCode ?? unified?.q?.current ?? null;
 
+// =========================
+// QTrace 更新（streak育成）
+// =========================
+
+const prevQ = previous?.q_primary ?? null;
+
+let streakQ: string | null = null;
+let streakLength = 1;
+
+if (qCodeInput && prevQ === qCodeInput) {
+  streakQ = qCodeInput;
+  const prevTrace = metaForSave?.qTrace;
+  const prevLen =
+    typeof prevTrace?.streakLength === 'number'
+      ? prevTrace.streakLength
+      : 1;
+  streakLength = prevLen + 1;
+} else if (qCodeInput) {
+  streakQ = qCodeInput;
+  streakLength = 1;
+}
+
+// metaForSave に反映（generate 側が拾う）
+metaForSave.qTrace = {
+  lastQ: qCodeInput,
+  dominantQ: qCodeInput,
+  streakQ,
+  streakLength,
+};
+console.log('[IROS/QTrace] updated', {
+  prevQ,
+  qNow: qCodeInput,
+  streakQ,
+  streakLength,
+});
+
     const phaseRawInput = metaForSave.phase ?? unified?.phase ?? null;
     const phaseInput = normalizePhase(phaseRawInput);
 

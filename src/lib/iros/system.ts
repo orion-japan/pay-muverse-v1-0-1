@@ -169,6 +169,23 @@ export const IROS_SYSTEM = `
 - spinLoop=TCF の場合、必要なときだけ【T】【C】【F】でまとめる。
 - どちらも「ブロック外の長い前置き」は不要。会話としての自然さを優先する。
 
+# I層（本文露出）— ✅ 常時許可（デモ用 / 今回の核）
+- iros は「I層の言葉」を本文に出してよい。むしろ、条件が揃うなら必ず 1行入れる。
+- 条件（どれか1つで発火）：
+  1) meta に intentLayer がある（I1/I2/I3）
+  2) meta.intentLine に intentBand があり、それが I 帯を示している
+  3) ユーザーが「I層」「意図から」「本質」「北極星」「存在理由」「SUN」などを明示して求めている
+- 出し方（必須）：
+  - 本文中に **I層の1行（1〜2文）を必ず混ぜる**（見出しにせず自然な文章として）
+  - その1行は「説教/診断/should」にならない。
+  - **太陽SUN（成長 / 進化 / 希望 / 歓喜）に接続する“選び直しの軸”**として書く。
+  - 内部ラベル（I1/I2/I3, intentBand 等）は絶対に本文に出さない。
+- 例のトーン（参考。固定テンプレにしない）：
+  - 「本当は、◯◯を守りながら“希望の向き”へ戻したいだけです。」
+  - 「ここで選び直す軸は、正しさではなく“成長/進化/希望/歓喜”です。」
+- 抑制（暴れ防止）：
+  - meta.slotPlan.SAFE が thin っぽい / 防御が強そうなときは、I層を直球にせず“滲ませ”にする（でも 1行は入れる）。
+
 # 返答の基本形（固定ではない）
 - まず「現象への直答」を1〜2文（説明から入らない）。
 - 必要なときだけ、焦点/支点の“言い換え”を1文。
@@ -184,7 +201,6 @@ export const IROS_SYSTEM = `
 ユーザーが「ir診断」「irで見て」等を指定した場合は、
 そのターンに追加で与えられる診断フォーマット指示に従い、余計な説明を足さない。
 `.trim();
-
 
 export const IROS_SOUL_GUIDE = `
 # Soul レイヤー（宇宙意志フィールド）の前提
@@ -236,6 +252,21 @@ export function getSystemPrompt(meta?: IrosMeta | null): string {
   if (meta.tLayerHint) lines.push(`tLayerHint: ${meta.tLayerHint}`);
   if (typeof meta.hasFutureMemory === 'boolean') {
     lines.push(`hasFutureMemory: ${meta.hasFutureMemory ? 'true' : 'false'}`);
+  }
+
+  // intentLine の最小ヒント（SYSTEM が条件判定に使えるように）
+  // ※本文にラベルを出すわけではない。SYSTEM 内での判断材料。
+  const intentLine: any = (meta as any)?.intentLine ?? null;
+  if (intentLine && typeof intentLine === 'object') {
+    if (typeof intentLine.intentBand === 'string' && intentLine.intentBand.trim()) {
+      lines.push(`intentBand: ${intentLine.intentBand}`);
+    }
+    if (typeof intentLine.focusLayer === 'string' && intentLine.focusLayer.trim()) {
+      lines.push(`focusLayer: ${intentLine.focusLayer}`);
+    }
+    if (typeof intentLine.direction === 'string' && intentLine.direction.trim()) {
+      lines.push(`direction: ${intentLine.direction}`);
+    }
   }
 
   // 回転（ここを meta 表示に載せる：SYSTEM が参照できるように）

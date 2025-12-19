@@ -127,7 +127,10 @@ function detectInputKind(userText: string): InputKind {
   }
 
   // question（明確な質問）
-  if (/[?？]$/.test(s) || /(なに|何|どこ|いつ|だれ|誰|なぜ|どうして|どうやって)/.test(s)) {
+  if (
+    /[?？]$/.test(s) ||
+    /(なに|何|どこ|いつ|だれ|誰|なぜ|どうして|どうやって)/.test(s)
+  ) {
     return 'question';
   }
 
@@ -171,13 +174,16 @@ export type HandleIrosReplyError = {
   detail: string;
 };
 
-export type HandleIrosReplyOutput = HandleIrosReplySuccess | HandleIrosReplyError;
+export type HandleIrosReplyOutput =
+  | HandleIrosReplySuccess
+  | HandleIrosReplyError;
 
 const supabase = getIrosSupabaseAdmin();
-const IROS_MODEL = process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-4o';
+const IROS_MODEL =
+  process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-4o';
 
 /* =========================
-   History loader
+   History loader (single source of truth)
 ========================= */
 
 async function loadConversationHistory(
@@ -186,10 +192,10 @@ async function loadConversationHistory(
   limit = 30,
 ): Promise<unknown[]> {
   try {
-    // ✅ まず「新しい順」で limit 件取る（最新文脈を落とさない）
     const { data, error } = await supabaseClient
       .from('iros_messages')
-      .select('role, text, content, created_at')
+      // ✅ meta を必ず取る（qPrimary/qTrace/depthなどがここに入ってる想定）
+      .select('role, text, content, meta, created_at')
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: false })
       .limit(limit);
@@ -199,7 +205,6 @@ async function loadConversationHistory(
       return [];
     }
 
-    // ✅ LLMには「古い→新しい」の順で渡したいので反転
     const rows = (data ?? []).slice().reverse();
 
     const history = rows.map((m: any) => ({
@@ -210,14 +215,19 @@ async function loadConversationHistory(
           : typeof m?.text === 'string'
             ? m.text
             : '',
+      // ✅ generate側が m.meta.qPrimary / m.meta.q_code を拾えるようにする
+      meta: m?.meta && typeof m.meta === 'object' ? m.meta : undefined,
     }));
 
     console.log('[IROS/History] loaded', {
       conversationId,
       limit,
       returned: history.length,
-      first: history[0]?.content?.slice?.(0, 40),
-      last: history[history.length - 1]?.content?.slice?.(0, 40),
+      metaSample: (history as any[]).find((x) => x?.meta)?.meta
+        ? 'has_meta'
+        : 'no_meta',
+      first: (history as any[])[0]?.content?.slice?.(0, 40),
+      last: (history as any[])[history.length - 1]?.content?.slice?.(0, 40),
     });
 
     return history;
@@ -225,6 +235,67 @@ async function loadConversationHistory(
     console.error('[IROS/History] unexpected', { conversationId, error: e });
     return [];
   }
+}
+
+/**
+ * ✅ this turn の history を 1回だけ組み立てる（この関数の返り値を全段に渡す）
+ * - params.history があればそれを優先（API層から渡す想定）
+ * - なければ conversationId の messages をロード
+ * - さらに user_code ベースの cross-conversation を必要に応じてマージ
+ */
+async function buildHistoryForTurn(args: {
+  supabaseClient: any;
+  conversationId: string;
+  userCode: string;
+  providedHistory?: unknown[] | null;
+  includeCrossConversation?: boolean;
+  baseLimit?: number;
+  crossLimit?: number;
+  maxTotal?: number;
+}): Promise<unknown[]> {
+  const {
+    supabaseClient,
+    conversationId,
+    userCode,
+    providedHistory,
+    includeCrossConversation = true,
+    baseLimit = 30,
+    crossLimit = 60,
+    maxTotal = 80,
+  } = args;
+
+  // 1) base
+  let turnHistory: unknown[] = Array.isArray(providedHistory)
+    ? providedHistory
+    : await loadConversationHistory(supabaseClient, conversationId, baseLimit);
+
+  // 2) cross-conversation
+  if (includeCrossConversation) {
+    try {
+      const dbHistory = await loadRecentHistoryAcrossConversations({
+        supabase: supabaseClient,
+        userCode,
+        limit: crossLimit,
+        excludeConversationId: conversationId,
+      });
+
+      turnHistory = mergeHistoryForTurn({
+        dbHistory,
+        turnHistory: turnHistory as any[],
+        maxTotal,
+      });
+
+      console.log('[IROS][HistoryX] merged', {
+        userCode,
+        dbCount: dbHistory.length,
+        mergedCount: Array.isArray(turnHistory) ? turnHistory.length : -1,
+      });
+    } catch (e) {
+      console.warn('[IROS][HistoryX] merge failed', e);
+    }
+  }
+
+  return turnHistory;
 }
 
 /* =========================
@@ -444,10 +515,18 @@ function extractGoalFromHistory(history: any[]): string | null {
 
 function pickIntentAnchorText(m: any): string {
   const a1 = m?.intentAnchor;
-  const t1 = (a1?.anchor_text ?? '') || (a1?.anchorText ?? '') || (a1?.text ?? '') || '';
+  const t1 =
+    (a1?.anchor_text ?? '') ||
+    (a1?.anchorText ?? '') ||
+    (a1?.text ?? '') ||
+    '';
 
   const a2 = m?.intent_anchor;
-  const t2 = (a2?.anchor_text ?? '') || (a2?.anchorText ?? '') || (a2?.text ?? '') || '';
+  const t2 =
+    (a2?.anchor_text ?? '') ||
+    (a2?.anchorText ?? '') ||
+    (a2?.text ?? '') ||
+    '';
 
   return String(t1 || t2 || '');
 }
@@ -456,7 +535,8 @@ function sanitizeIntentAnchorMeta(metaForSave: any): any {
   const m = metaForSave ?? {};
   if (!m.intentAnchor && !m.intent_anchor) return m;
 
-  const fixedNorthKey = typeof m?.fixedNorth?.key === 'string' ? m.fixedNorth.key : null;
+  const fixedNorthKey =
+    typeof m?.fixedNorth?.key === 'string' ? m.fixedNorth.key : null;
 
   const fixed1 = Boolean(m?.intentAnchor?.fixed);
   const fixed2 = Boolean(m?.intent_anchor?.fixed);
@@ -619,10 +699,15 @@ export async function handleIrosReply(
       });
 
       if (mw.ok) {
-        // 1) history
-        let historyForTurn: unknown[] = Array.isArray(history)
-          ? history
-          : await loadConversationHistory(supabase, conversationId, 30);
+        // ✅ single source of truth（microでも同じ historyForTurn を1回だけ作る）
+        const historyForTurn = await buildHistoryForTurn({
+          supabaseClient: supabase,
+          conversationId,
+          userCode,
+          providedHistory: history ?? null,
+          includeCrossConversation: false, // microは軽量優先（必要なら true にしてOK）
+          baseLimit: 30,
+        });
 
         // 2) context（数値メタだけ欲しい）
         const tc = nowNs();
@@ -720,37 +805,19 @@ export async function handleIrosReply(
 
     /* ---------------------------
        1) History (single source of truth for this turn)
+       - ここで1回だけ作って、以後すべてに渡す
     ---------------------------- */
 
-    let historyForTurn: unknown[] = Array.isArray(history)
-      ? history
-      : await loadConversationHistory(supabase, conversationId, 30);
-
-    /* ---------------------------
-       1.2) Cross-conversation history (user_code based)
-    ---------------------------- */
-    try {
-      const dbHistory = await loadRecentHistoryAcrossConversations({
-        supabase,
-        userCode,
-        limit: 60,
-        excludeConversationId: conversationId,
-      });
-
-      historyForTurn = mergeHistoryForTurn({
-        dbHistory,
-        turnHistory: historyForTurn as any[],
-        maxTotal: 80,
-      });
-
-      console.log('[IROS][HistoryX] merged', {
-        userCode,
-        dbCount: dbHistory.length,
-        mergedCount: Array.isArray(historyForTurn) ? historyForTurn.length : -1,
-      });
-    } catch (e) {
-      console.warn('[IROS][HistoryX] merge failed', e);
-    }
+    const historyForTurn: unknown[] = await buildHistoryForTurn({
+      supabaseClient: supabase,
+      conversationId,
+      userCode,
+      providedHistory: history ?? null,
+      includeCrossConversation: true,
+      baseLimit: 30,
+      crossLimit: 60,
+      maxTotal: 80,
+    });
 
     // デバッグ：直近3件だけ
     console.log(
@@ -1102,99 +1169,100 @@ export async function handleIrosReply(
       console.warn('[IROS/Reply] pastStateNote inject failed', e);
     }
 
-/* ---------------------------
-   5) Timing / FramePlan / Sanitize / Rotation bridge
----------------------------- */
+    /* ---------------------------
+       5) Timing / Sanitize / Rotation bridge
+    ---------------------------- */
 
-out.metaForSave = out.metaForSave ?? {};
-out.metaForSave.timing = t;
+    out.metaForSave = out.metaForSave ?? {};
+    out.metaForSave.timing = t;
 
-// ✅ persist に必ず残す（postProcess が extra を作り直しても守る）
-out.metaForSave.extra = out.metaForSave.extra ?? {};
+    // ✅ persist に必ず残す（postProcess が extra を作り直しても守る）
+    out.metaForSave.extra = out.metaForSave.extra ?? {};
 
+    try {
+      out.metaForSave = sanitizeIntentAnchorMeta(out.metaForSave);
+    } catch (e) {
+      console.warn('[IROS/Reply] sanitizeIntentAnchorMeta failed', e);
+    }
 
-try {
-  out.metaForSave = sanitizeIntentAnchorMeta(out.metaForSave);
-} catch (e) {
-  console.warn('[IROS/Reply] sanitizeIntentAnchorMeta failed', e);
-}
+    // rotation bridge（最低限・安定版）
+    // ✅ descentGate を boolean/unknown で持ち込ませない。必ず union に落とす。
+    // ✅ spinLoop / depth も rot 側優先で “取りこぼし” を防ぐ。
+    const normalizeDescentGateBridge = (
+      v: any,
+    ): 'closed' | 'offered' | 'accepted' => {
+      if (v == null) return 'closed';
 
-// rotation bridge（最低限・安定版）
-// ✅ descentGate を boolean/unknown で持ち込ませない。必ず union に落とす。
-// ✅ spinLoop / depth も rot 側優先で “取りこぼし” を防ぐ。
-const normalizeDescentGateBridge = (v: any): 'closed' | 'offered' | 'accepted' => {
-  if (v == null) return 'closed';
+      if (typeof v === 'string') {
+        const s = v.trim().toLowerCase();
+        if (s === 'closed' || s === 'offered' || s === 'accepted') return s;
+        return 'closed';
+      }
 
-  if (typeof v === 'string') {
-    const s = v.trim().toLowerCase();
-    if (s === 'closed' || s === 'offered' || s === 'accepted') return s;
-    return 'closed';
-  }
+      // 互換：boolean のとき（旧）
+      if (typeof v === 'boolean') return v ? 'accepted' : 'closed';
 
-  // 互換：boolean のとき（旧）
-  if (typeof v === 'boolean') return v ? 'accepted' : 'closed';
+      return 'closed';
+    };
 
-  return 'closed';
-};
+    const normalizeSpinLoopBridge = (v: any): 'SRI' | 'TCF' | null => {
+      if (typeof v !== 'string') return null;
+      const s = v.trim().toUpperCase();
+      if (s === 'SRI' || s === 'TCF') return s as any;
+      return null;
+    };
 
-const normalizeSpinLoopBridge = (v: any): 'SRI' | 'TCF' | null => {
-  if (typeof v !== 'string') return null;
-  const s = v.trim().toUpperCase();
-  if (s === 'SRI' || s === 'TCF') return s as any;
-  return null;
-};
+    const normalizeDepthBridge = (v: any): string | null => {
+      if (typeof v !== 'string') return null;
+      const s = v.trim();
+      return s ? s : null;
+    };
 
-const normalizeDepthBridge = (v: any): string | null => {
-  if (typeof v !== 'string') return null;
-  const s = v.trim();
-  return s ? s : null;
-};
+    try {
+      const m: any = out.metaForSave ?? {};
 
-try {
-  const m: any = out.metaForSave ?? {};
+      const rot =
+        m.rotation ??
+        m.rotationState ??
+        m.spin ??
+        (m.will && (m.will.rotation ?? m.will.spin)) ??
+        null;
 
-  const rot =
-    m.rotation ??
-    m.rotationState ??
-    m.spin ??
-    (m.will && (m.will.rotation ?? m.will.spin)) ??
-    null;
+      // ✅ descentGate: rot優先 → meta fallback → 最後は closed
+      m.descentGate = normalizeDescentGateBridge(
+        rot?.descentGate ?? m.descentGate,
+      );
 
-  // ✅ descentGate: rot優先 → meta fallback → 最後は closed
-  m.descentGate = normalizeDescentGateBridge(rot?.descentGate ?? m.descentGate);
+      // ✅ spinLoop: rot優先で拾う（無ければmeta）
+      m.spinLoop =
+        normalizeSpinLoopBridge(rot?.spinLoop ?? rot?.loop) ??
+        normalizeSpinLoopBridge(m.spinLoop) ??
+        null;
 
-  // ✅ spinLoop: rot優先で拾う（無ければmeta）
-  m.spinLoop =
-    normalizeSpinLoopBridge(rot?.spinLoop ?? rot?.loop) ??
-    normalizeSpinLoopBridge(m.spinLoop) ??
-    null;
+      // ✅ depth: rotの nextDepth/depth を優先（無ければmeta）
+      m.depth =
+        normalizeDepthBridge(rot?.nextDepth ?? rot?.depth) ??
+        normalizeDepthBridge(m.depth) ??
+        null;
 
-  // ✅ depth: rotの nextDepth/depth を優先（無ければmeta）
-  m.depth =
-    normalizeDepthBridge(rot?.nextDepth ?? rot?.depth) ??
-    normalizeDepthBridge(m.depth) ??
-    null;
+      // ✅ persist が読む “正規化済み” の rotationState を再構成
+      m.rotationState = {
+        spinLoop: m.spinLoop,
+        descentGate: m.descentGate,
+        depth: m.depth,
+        reason: rot?.reason ?? undefined,
+      };
 
-  // ✅ persist が読む “正規化済み” の rotationState を再構成
-  m.rotationState = {
-    spinLoop: m.spinLoop,
-    descentGate: m.descentGate,
-    depth: m.depth,
-    reason: rot?.reason ?? undefined,
-  };
+      out.metaForSave = m;
 
-  out.metaForSave = m;
-
-  console.log('[IROS/Reply] rotation bridge', {
-    spinLoop: m.spinLoop,
-    descentGate: m.descentGate,
-    depth: m.depth,
-  });
-} catch (e) {
-  console.warn('[IROS/Reply] rotation bridge failed', e);
-}
-
-
+      console.log('[IROS/Reply] rotation bridge', {
+        spinLoop: m.spinLoop,
+        descentGate: m.descentGate,
+        depth: m.depth,
+      });
+    } catch (e) {
+      console.warn('[IROS/Reply] rotation bridge failed', e);
+    }
 
     /* ---------------------------
        6) Persist (order fixed)

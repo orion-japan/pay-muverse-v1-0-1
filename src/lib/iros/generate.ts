@@ -14,6 +14,9 @@ import OpenAI from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat';
 
 import { getSystemPrompt, type IrosMeta, type IrosMode } from './system';
+import { decideQBrakeRelease, normalizeQ } from '@/lib/iros/rotation/qBrakeRelease';
+import { runItDemoGate } from '@/lib/iros/rotation/itDemoGate';
+
 
 /** ✅ 旧/新ルートを全部受ける（型で落ちない） */
 export type GenerateArgs = {
@@ -300,6 +303,61 @@ function buildWriterProtocol(meta: any, userText: string): string {
       .filter(Boolean)
       .join('\n');
   }
+
+  // ✅ IT：視点の切替（反復/停滞で立ち上がる）
+  // - 深さではなく「見方」を変える
+  // - 1行目で再定義（リフレーム）し、次の一手は1つだけ
+  // - “助言リスト”や一般論に落とさない
+  const renderMode = String((meta as any)?.renderMode ?? '').toUpperCase();
+  if (renderMode === 'IT') {
+    const noQuestion = !!(meta as any)?.noQuestion;
+
+    // 参考情報（本文に出す必要はないが、LLMの姿勢を揃える）
+    const itReason = String((meta as any)?.itReason ?? '');
+    const sameIntentStreak = Number((meta as any)?.sameIntentStreak ?? 0) || 0;
+
+    return [
+      '【WRITER_PROTOCOL】',
+      'あなたは「意図フィールドOS」のWriterです。一般論・説明口調・テンプレは禁止。',
+      '',
+      'このターンは IT（視点の切替）です。',
+      '狙い：同じ相談が繰り返されているため、「事象の解決」ではなく「判断軸/信頼設計/未来の置き方」へ視点を上げる。',
+      '',
+      '▼1行目の型（絶対）',
+      '- 1行目は必ず “再定義” の一文で始める（短く、断定）',
+      '- 形式は次のどれかに固定（本文でこの見出しは出さない。出すのは1行目の一文だけ）：',
+      '  A) 「これは◯◯の話ではなく、◯◯の設計の話です。」',
+      '  B) 「いま詰まっているのは◯◯ではなく、◯◯の合意です。」',
+      '  C) 「焦点は◯◯ではなく、◯◯を守る置き方です。」',
+      '',
+      '▼再定義の辞書（入力に合わせて選ぶ）',
+      '- 締切/仕事の遅れ → 信頼設計 / 合意設計 / 期待値の同期',
+      '- どう言うか → 関係の設計 / 伝え方の骨格',
+      '- 怒り/怖さ → 自分の境界線 / 条件提示',
+      '- 決断できない → 判断軸 / 優先順位の固定',
+      '',
+      '必須：',
+      '- 2〜3行ごとに改行。短く。',
+      '- 次の一手は1つだけ（実行できる最小の設計）',
+      `- 質問は ${noQuestion ? '0' : '最大1'}（原則0。必要なら最後に1つだけ短く）`,
+      '',
+      '禁止：',
+      '- ありがちな一般論（「落ち着いて」「信頼できる人に」等）',
+      '- 箇条書きの助言が続く（ToDo羅列）',
+      '- 相手を断罪/診断する言い方',
+      '- “機能説明” を本文に出す（IT/ゲート/メタ/反復などの内部語も本文に出さない）',
+      '',
+      `IT_HINT: reason=${itReason} sameIntentStreak=${String(sameIntentStreak)}`,
+      '',
+      `USER_TEXT: ${String(userText)}`,
+      '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+  }
+
+
 
   // ✅ 通常：従来の protocol（芯/回転/制約）を活かす
   const coreIntent = pickCoreIntent(meta);
@@ -600,6 +658,42 @@ function buildWriterHintsFromMeta(meta: any): {
   return { frame, slotKeys, hintText };
 }
 
+// ===== history から Q を拾うユーティリティ =====
+// src/lib/iros/generate.ts
+
+function pickRecentUserQsFromHistory(history: any[], take = 3): string[] {
+  const out: string[] = [];
+  const hs = Array.isArray(history) ? history : [];
+
+  // newest last を作りたいので「古い→新しい」で走査
+  for (let i = 0; i < hs.length; i++) {
+    const m = hs[i];
+    if (!m) continue;
+
+    const role = String(m.role ?? '').toLowerCase();
+    if (role !== 'user') continue;
+
+    // ✅ ここが重要：HistoryX / turnHistory / 旧互換のどれでも拾えるようにする
+    const qRaw =
+      (m.q_code ?? null) ??
+      (m.q ?? null) ??
+      (m.qCode ?? null) ??
+      (m.meta?.qCode ?? null) ??
+      (m.meta?.q_code ?? null) ??
+      (m.meta?.q ?? null);
+
+    const q = normalizeQ(qRaw); // 既に generate.ts 冒頭で import されている normalizeQ を使う
+    if (!q) continue;
+
+    out.push(q);
+
+    // 直近だけ残す（サイズ管理）
+    if (out.length > take) out.splice(0, out.length - take);
+  }
+
+  return out;
+}
+
 
 /* =========================================================
    MAIN
@@ -612,14 +706,132 @@ export async function generateIrosReply(
   const meta: IrosMeta = (args.meta ?? ({} as IrosMeta)) as IrosMeta;
   const userText = String((args as any).text ?? (args as any).userText ?? '');
 
-  // ✅ Frame/Slots hint を meta から作る（generateIrosReply の中だけ）
+  /* ---------------------------------
+     QTrace / QNow / recentUserQs
+     ※ すべて let。再宣言しない
+  --------------------------------- */
+
+  let qTrace: any = (meta as any)?.qTrace ?? null;
+
+  let qNow: string | null = normalizeQ(
+    (meta as any)?.qPrimary ??
+      (meta as any)?.q_code ??
+      qTrace?.lastQ ??
+      null,
+  );
+
+  let recentUserQs: string[] = [];
+
+  /* ---------------------------------
+     history から拾う
+  --------------------------------- */
+  recentUserQs = pickRecentUserQsFromHistory((args as any).history, 3);
+
+  /* ---------------------------------
+     qTrace を必ず合成（反復を作る）
+  --------------------------------- */
+  const streakQ = normalizeQ(qTrace?.streakQ ?? qTrace?.lastQ ?? null);
+
+  if (streakQ) {
+    if (recentUserQs.length === 0) {
+      recentUserQs = [streakQ];
+    } else if (recentUserQs[recentUserQs.length - 1] === streakQ) {
+      recentUserQs = [...recentUserQs, streakQ];
+    }
+    recentUserQs = recentUserQs.slice(-3);
+  }
+
+  /* ---------------------------------
+     Qブレーキ判定
+  --------------------------------- */
+  const qBrake = decideQBrakeRelease({
+    qNow,
+    sa: (meta as any)?.selfAcceptance ?? null,
+    recentUserQs,
+  });
+
+  /* ---------------------------------
+     適用
+  --------------------------------- */
+  if (qBrake.shouldRelease) {
+    (meta as any).intentLayer = 'I';
+    (meta as any).extra = (meta as any).extra ?? {};
+    (meta as any).extra.generalBrake = 'OFF';
+    (meta as any).extra.brakeReleaseReason = qBrake.reason;
+    (meta as any).extra.brakeReleaseDetail = qBrake.detail;
+
+    console.log('[IROS][QBrakeRelease][generate] ON', {
+      qNow,
+      reason: qBrake.reason,
+      detail: qBrake.detail,
+      recentUserQs,
+    });
+  } else {
+    console.log('[IROS][QBrakeRelease][generate] OFF', {
+      qNow,
+      reason: qBrake.reason,
+      detail: qBrake.detail,
+      recentUserQs,
+    });
+  }
+
+  /* ---------------------------------
+     IT demo gate（2回目入力→ renderMode='IT'）
+     ※ Q非依存 / 失敗してもターンを落とさない
+  --------------------------------- */
+  try {
+    const itGate = runItDemoGate({
+      userText,
+      history: Array.isArray((args as any).history) ? (args as any).history : [],
+      qTrace: (meta as any)?.qTrace ?? null,
+      mode: (meta as any)?.mode ?? null,
+     requestedDepth:
+   ((meta as any)?.depth ??
+     (meta as any)?.depthStage ??
+     (meta as any)?.depth_stage ??
+     null) as any,
+
+      // デモ固定
+      repeatThreshold: 0.82,
+      repeatMinLen: 10,
+      maxPick: 12,
+
+      // 手動で確実にITにしたい場合：meta.itForce=true を入れる
+      itForce: (meta as any)?.itForce ?? null,
+    });
+
+    (meta as any).renderMode = itGate.renderMode; // 'IT' | 'NORMAL'
+    (meta as any).itReason = itGate.itReason ?? null;
+    (meta as any).itEvidence = itGate.itEvidence ?? null;
+
+    // 観測用（必要ならログ）
+    (meta as any).sameIntentStreak = itGate.sameIntentStreak;
+    (meta as any).repeatReason = itGate.repeatReason;
+
+    console.log('[IROS][ITDemoGate][generate]', {
+      renderMode: itGate.renderMode,
+      itReason: itGate.itReason,
+      sameIntentStreak: itGate.sameIntentStreak,
+      repeatReason: itGate.repeatReason,
+      itEvidence: itGate.itEvidence,
+    });
+  } catch (e) {
+    // デモ優先：落とさない
+    (meta as any).renderMode = (meta as any).renderMode ?? 'NORMAL';
+    console.log('[IROS][ITDemoGate][generate] skipped by error');
+  }
+
+
+  /* ------------------------------------------------------- */
+
+  // ✅ Frame / Slots hint
   const writerHints = buildWriterHintsFromMeta(meta as any);
   const writerHintMessage: ChatCompletionMessageParam | null =
     writerHints.hintText
       ? ({ role: 'system', content: writerHints.hintText } as ChatCompletionMessageParam)
       : null;
 
-  // ✅ SAFE slot を生成制御に接続（system 1通）
+  // ✅ SAFE slot
   const safeSystemMessage = buildSafeSystemMessage(meta as any, userText);
 
   const client = new OpenAI({
@@ -628,7 +840,7 @@ export async function generateIrosReply(
 
   const mode: IrosMode = ((meta as any)?.mode ?? 'mirror') as IrosMode;
 
-  // getSystemPrompt は (meta, mode) or () どちらでも動くように fallback
+  // system prompt fallback
   let system = '';
   try {
     system = String((getSystemPrompt as any)(meta, mode) ?? '');
@@ -639,11 +851,10 @@ export async function generateIrosReply(
 
   const protocol = buildWriterProtocol(meta as any, userText);
 
-  // ✅ 履歴を LLM に渡す（会話の流れを LLM にやってもらう）
+  // history → LLM
   const historyMessagesRaw = normalizeHistoryToMessages(args.history, 12);
   const historyMessages = dedupeTailUser(historyMessagesRaw, userText);
 
-  // ✅ past state note を LLM に渡す（system として差し込む）
   const pastStateNoteText =
     typeof (meta as any)?.extra?.pastStateNoteText === 'string'
       ? (meta as any).extra.pastStateNoteText.trim()
@@ -653,20 +864,13 @@ export async function generateIrosReply(
     { role: 'system', content: system },
     { role: 'system', content: protocol },
 
-    // ✅ SAFE制御（必要時のみ、system 1通）
     ...(safeSystemMessage ? [safeSystemMessage] : []),
-
-    // ✅ frame/slots の “参考ヒント” を system の後ろに1通だけ差し込む
     ...(writerHintMessage ? [writerHintMessage] : []),
-
     ...(pastStateNoteText
       ? [{ role: 'system', content: pastStateNoteText } as ChatCompletionMessageParam]
       : []),
 
-    // ★会話履歴
     ...historyMessages,
-
-    // ★今回の入力
     { role: 'user', content: userText },
   ];
 
@@ -680,24 +884,20 @@ export async function generateIrosReply(
     res.choices?.[0]?.message?.content?.trim() ??
     '……（応答生成に失敗しました）';
 
-  // ================================
-  // Numeric footer control（表示制御）
-  // ================================
+  /* ---------------------------------
+     Numeric footer
+  --------------------------------- */
 
-  // 明示ONのときだけ出す（通常は出さない）
   const showNumericFooter =
     process.env.IROS_NUMERIC_FOOTER === '1' ||
     (meta as any)?.extra?.showNumericFooter === true;
 
-  // micro / recall では絶対に出さない（本文汚染防止）
   const hardHideNumericFooter =
     (meta as any)?.microOnly === true ||
     (meta as any)?.recallOnly === true ||
     String(mode) === 'recall';
 
   if (showNumericFooter && !hardHideNumericFooter) {
-    // LLMが勝手に付けた数値行を除去（保険）
-    // 〔sa...〕 と [sa...] の両方を剥がす（末尾のみ）
     content = content
       .replace(/\n*\s*[〔\[]sa[^\n]*[〕\]]\s*$/g, '')
       .trim();
@@ -708,13 +908,14 @@ export async function generateIrosReply(
     }
   }
 
-  // ✅ 全ルート互換で返す（mode は IrosMode で返す）
+  /* ---------------------------------
+     return
+  --------------------------------- */
   return {
     content,
     text: content,
     mode,
     intent: (meta as any)?.intent ?? (meta as any)?.intentLine ?? null,
-
     assistantText: content,
     metaForSave: meta ?? {},
     finalMode: String(mode),

@@ -173,14 +173,37 @@ export function buildSlots(frame: FrameKind, ctx: BuildSlotsContext): SlotPlan {
     // OBS に no-delta を必ず付与
     slots.OBS = slots.OBS ? `${slots.OBS}:no-delta` : 'OBS:no-delta';
 
-    // repeat/stuck のときだけ「責め→条件」へ寄せるタグに差し替え（強制はしない、最小）
-    if (noDeltaKind === 'repeat-warning' || noDeltaKind === 'stuck') {
+    // ★追加：stuck は「深まり注入口」
+    // - ただし I層に落とさない（1行だけ刺す）
+    // - SAFEテンプレに吸われないよう、Writer が拾えるタグを立てる
+    if (noDeltaKind === 'stuck') {
+      // S/R/F 帯は「固定前提の確定」へ寄せる（断定は1行、圧は上げない）
+      if (frame === 'S' || frame === 'R' || frame === 'F') {
+        slots.SHIFT = 'SHIFT:nonchange-structure';
+        slots.NEXT = 'NEXT:probe-conditions';
+
+        // ここが本丸：INSIGHT を 1行だけ許可（テンプレではなく“入口”）
+        // ※ render 側で insightCandidate が null のままでも、slotPlan から拾えるようにする想定
+        // 既存キーがあるなら尊重し、無ければ付与
+        if (!(slots as any).INSIGHT) (slots as any).INSIGHT = 'INSIGHT:stuck:one-line';
+      }
+
+      // I層は「断定→一致点→次の一手」へ寄せる（刺すが、圧は上げない）
+      if (frame === 'I') {
+        slots.SHIFT = iLayerDual ? 'SHIFT:intention:dual:pin' : 'SHIFT:intention:pin';
+        slots.NEXT = iLayerDual ? 'NEXT:intention:align:one-step' : 'NEXT:intention:one-step';
+
+        // Iフレームでも “1行だけ” は許可（長文化させない）
+        if (!(slots as any).INSIGHT) (slots as any).INSIGHT = 'INSIGHT:stuck:one-line';
+      }
+    }
+
+    // repeat-warning は従来どおり（責め→条件へ寄せる）
+    if (noDeltaKind === 'repeat-warning') {
       if (frame === 'S' || frame === 'R' || frame === 'F') {
         slots.SHIFT = 'SHIFT:nonchange-structure';
         slots.NEXT = 'NEXT:probe-conditions';
       }
-
-      // I層は「断定→一致点→次の一手」へ寄せる（刺すが、圧は上げない）
       if (frame === 'I') {
         slots.SHIFT = iLayerDual ? 'SHIFT:intention:dual:pin' : 'SHIFT:intention:pin';
         slots.NEXT = iLayerDual ? 'NEXT:intention:align:one-step' : 'NEXT:intention:one-step';
@@ -188,8 +211,10 @@ export function buildSlots(frame: FrameKind, ctx: BuildSlotsContext): SlotPlan {
     }
 
     // SAFE が未設定なら薄い保険だけ置く（下降SAFEがある場合は尊重）
-    if (!slots.SAFE) slots.SAFE = 'SAFE:no-delta';
+    // ★ただし INSIGHT(stuck) がある場合は SAFE が主役にならないように「残すけど薄く」
+    if (!slots.SAFE) slots.SAFE = noDeltaKind === 'stuck' ? 'SAFE:thin' : 'SAFE:no-delta';
   }
 
   return { frame, slots };
 }
+

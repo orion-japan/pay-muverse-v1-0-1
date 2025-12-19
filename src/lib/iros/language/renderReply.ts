@@ -1,17 +1,5 @@
 // src/lib/iros/language/renderReply.ts
 // iros — Field Rendering (文章レンダリング層)
-//
-// 方針：
-// - 「中身はメタで決める / 見せ方（器）は選ぶ」
-// - テンプレ固定ではなく、候補群から seed で決定的に揺らす
-// - “箇条書き毎回”を避け、番号/見出しは必要な時だけ
-// - 下降（TCF）のときは「問い」を抑え、「定着（F）」寄りの next に寄せる
-//
-// ✅ 追加（今回の核）
-// - slotPlan / vector から :no-delta を検知したら、facts の前に
-//   「評価なしの状態翻訳 1文」を必ず差し込む（NO_DELTA_OBS）
-// - 文章は固定テンプレにしない（seedで揺らす）
-// - blame/diagnosis/should は入れない
 
 import type { ResonanceVector } from './resonanceVector';
 import type { ReplyPlan, ContainerId, ReplySlotKey } from './planReply';
@@ -19,36 +7,18 @@ import type { ReplyPlan, ContainerId, ReplySlotKey } from './planReply';
 export type RenderMode = 'casual' | 'intent' | 'transcend';
 
 export type RenderInput = {
-  // 必須: 表層の直答（短く）
   facts: string;
-
-  // 任意: 刺し（本質の置き換え1文）
   insight?: string | null;
-
-  // 任意: 0.5未来の一手（押し付けない具体）
   nextStep?: string | null;
-
-  // 任意: ユーザーが「本質」「意図」「ズバッと」等を求めているときに true
   userWantsEssence?: boolean;
-
-  // 任意: 強い防御/不安のときは刺し露出を抑えたい場合に true
   highDefensiveness?: boolean;
-
-  // 任意: 返答のゆらぎを固定するためのシード（conversationId/turnIdなど）
   seed?: string;
 };
 
 export type RenderOptions = {
-  // 強制モード（未指定なら vector から推定）
   mode?: RenderMode;
-
-  // 刺しを必ず露出する（デモ用）
   forceExposeInsight?: boolean;
-
-  // 絵文字を抑える（企業向けなど）
   minimalEmoji?: boolean;
-
-  // 返答の最大行数目安（超えたら詰める）
   maxLines?: number;
 };
 
@@ -57,74 +27,70 @@ export function renderReply(
   input: RenderInput,
   opts: RenderOptions = {},
 ): string {
-
   const framePlan = (opts as any)?.framePlan ?? null;
 
-// --- SPIN debug (取り元ズレ吸収 + シャドー禁止) ---
-type SpinLayer = 'S' | 'R' | 'C' | 'I' | 'T';
+  // --- SPIN debug (取り元ズレ吸収 + シャドー禁止) ---
+  type SpinLayer = 'S' | 'R' | 'C' | 'I' | 'T';
 
-function normalizeSpinLayer(v: unknown): SpinLayer | null {
-  if (typeof v !== 'string') return null;
-  const s = v.trim().toUpperCase();
-  return s === 'S' || s === 'R' || s === 'C' || s === 'I' || s === 'T'
-    ? (s as SpinLayer)
-    : null;
-}
+  function normalizeSpinLayer(v: unknown): SpinLayer | null {
+    if (typeof v !== 'string') return null;
+    const s = v.trim().toUpperCase();
+    return s === 'S' || s === 'R' || s === 'C' || s === 'I' || s === 'T'
+      ? (s as SpinLayer)
+      : null;
+  }
 
-// framePlan / vector が「引数にある版」「optsにある版」どっちでも拾えるようにする
-const fp: any =
-  (typeof framePlan !== 'undefined' ? (framePlan as any) : null) ??
-  (opts as any)?.framePlan ??
-  null;
+  const fp: any =
+    (typeof framePlan !== 'undefined' ? (framePlan as any) : null) ??
+    (opts as any)?.framePlan ??
+    null;
 
-const vx: any =
-  (typeof vector !== 'undefined' ? (vector as any) : null) ??
-  (opts as any)?.vector ??
-  null;
+  const vx: any =
+    (typeof vector !== 'undefined' ? (vector as any) : null) ??
+    (opts as any)?.vector ??
+    null;
 
-const spinLayer: SpinLayer | null =
-  normalizeSpinLayer(fp?.frame) ??
-  normalizeSpinLayer(vx?.intentLayer) ??
-  null;
+  const spinLayer: SpinLayer | null =
+    normalizeSpinLayer(fp?.frame) ??
+    normalizeSpinLayer(vx?.intentLayer) ??
+    null;
 
-console.log('[RENDER][SPIN]', {
-  loop: vx?.spinLoop ?? null,
-  step: vx?.spinStep ?? null,
-  frame: fp?.frame ?? null,
-  layer: spinLayer,
-});
+  console.log('[RENDER][SPIN]', {
+    loop: vx?.spinLoop ?? null,
+    step: vx?.spinStep ?? null,
+    frame: fp?.frame ?? null,
+    layer: spinLayer,
+  });
 
-// ✅ trace は「dev + 明示フラグ」のときだけ出す（通常ログを汚さない）
-const enableTrace =
-  process.env.NODE_ENV !== 'production' &&
-  (process.env.IROS_RENDER_TRACE === '1' ||
-    (opts as any)?.debugTrace === true);
+  const enableTrace =
+    process.env.NODE_ENV !== 'production' &&
+    (process.env.IROS_RENDER_TRACE === '1' ||
+      (opts as any)?.debugTrace === true);
 
-if (enableTrace) {
-  console.trace('[RENDER][SPIN][CALLER]');
-}
+  if (enableTrace) {
+    console.trace('[RENDER][SPIN][CALLER]');
+  }
 
-const mode = opts.mode ?? inferMode(vector);
+  const mode = opts.mode ?? inferMode(vector);
 
-const seed =
-  (input.seed && input.seed.trim()) || stableSeedFromInput(vector, input);
+  const seed =
+    (input.seed && input.seed.trim()) || stableSeedFromInput(vector, input);
 
-const minimalEmoji = !!opts.minimalEmoji;
-const maxLines = typeof opts.maxLines === 'number' ? opts.maxLines : 14;
+  const minimalEmoji = !!opts.minimalEmoji;
+  const maxLines = typeof opts.maxLines === 'number' ? opts.maxLines : 14;
 
-  // ✅ NO_DELTA 検知（slotPlan / vector のどこから来ても落ちない）
+  // ✅ NO_DELTA 検知
   const noDelta = detectNoDelta(vector);
   const noDeltaKind = detectNoDeltaKind(vector);
 
   const factsRaw = normalizeOne(input.facts);
-  const insightRaw = normalizeNullable(input.insight);
+  const insightRaw0 = normalizeNullable(input.insight);
   const nextRaw = normalizeNullable(input.nextStep);
 
   // ---- 🔻下降（TCF）制御 ----
   const spinLoop = ((vector as any).spinLoop ?? null) as string | null;
   const spinStep = ((vector as any).spinStep ?? null) as number | null;
 
-  // descentGate 互換（boolean / union / null）
   const descentGateRaw = (vector as any).descentGate as
     | 'closed'
     | 'offered'
@@ -138,22 +104,30 @@ const maxLines = typeof opts.maxLines === 'number' ? opts.maxLines : 14;
       ? 'accepted'
       : descentGateRaw === false
         ? 'closed'
-        : descentGateRaw === 'closed' || descentGateRaw === 'offered' || descentGateRaw === 'accepted'
+        : descentGateRaw === 'closed' ||
+            descentGateRaw === 'offered' ||
+            descentGateRaw === 'accepted'
           ? descentGateRaw
           : 'closed';
 
-  // TCF または descentGate が closed 以外なら「下降」とみなす
   const isDescent = spinLoop === 'TCF' || descentGate !== 'closed';
+  const suppressAsk = true; // ✅ ここ重要：デフォルトで「問い」を出さない（提案で閉じる）
 
-  // 下降時は ask（問い）を抑制
-  const suppressAsk = isDescent;
-
-  // next がある場合だけ、F（定着/習慣）寄りに寄せる
   const nextAdjusted =
     nextRaw && isDescent
       ? adjustNextForDescent(nextRaw, seed, spinStep)
       : nextRaw;
   // ---- 🔺ここまで ----
+
+  const autoInsightRaw =
+    !insightRaw0 &&
+    noDelta &&
+    noDeltaKind === 'stuck' &&
+    hasStuckOneLineInsightTag(vector)
+      ? buildStuckOneLineInsight(vector, factsRaw, seed)
+      : null;
+
+  const insightRaw = insightRaw0 ?? autoInsightRaw;
 
   const exposeInsightFlag =
     !!opts.forceExposeInsight ||
@@ -167,19 +141,22 @@ const maxLines = typeof opts.maxLines === 'number' ? opts.maxLines : 14;
 
   const insight = insightRaw
     ? exposeInsightFlag
-      ? shapeInsightDirect(insightRaw, { mode, seed })
-      : shapeInsightDiffuse(insightRaw, { mode, seed })
+      ? shapeInsightDirect(insightRaw, { mode, seed, minimalEmoji })
+      : shapeInsightDiffuse(insightRaw, { mode, seed, minimalEmoji })
     : null;
 
-  const next = nextAdjusted ? shapeNext(nextAdjusted, { vector, mode, seed }) : null;
+  const next = nextAdjusted
+    ? shapeNext(nextAdjusted, { vector, mode, seed, minimalEmoji })
+    : null;
 
-  // ✅ facts をここで “NO_DELTA_OBS 1文” で前処理する
+  // ✅ facts を “NO_DELTA_OBS 1文” で前処理（ただしテンプレ臭は排除）
   const facts = shapeFactsWithNoDelta(factsRaw, {
     mode,
     seed,
     minimalEmoji,
     noDelta,
     noDeltaKind,
+    vector,
   });
 
   const plan = buildPlan({
@@ -192,12 +169,8 @@ const maxLines = typeof opts.maxLines === 'number' ? opts.maxLines : 14;
     next,
     userWantsEssence: !!input.userWantsEssence,
     highDefensiveness: !!input.highDefensiveness,
-
-    // ✅ ここ重要：未定義 exposeInsight は使わず flag を渡す
     exposeInsight: exposeInsightFlag,
-
-    // ✅ 下降時 ask 抑制
-    suppressAsk,
+    suppressAsk, // ✅ 常時 true
   });
 
   const out = renderFromPlan(plan);
@@ -212,17 +185,14 @@ const maxLines = typeof opts.maxLines === 'number' ? opts.maxLines : 14;
 function detectNoDelta(vector: ResonanceVector): boolean {
   const v: any = vector as any;
 
-  // 1) 直値（metaから持ってきた等）
   if (v?.noDelta === true) return true;
 
-  // 2) slotPlan が object の場合（slotBuilder.ts の {OBS,SHIFT,NEXT,SAFE}）
   const sp = v?.slotPlan;
   if (sp && typeof sp === 'object' && !Array.isArray(sp)) {
     const obs = typeof sp.OBS === 'string' ? sp.OBS : null;
     if (obs && obs.includes(':no-delta')) return true;
   }
 
-  // 3) planSlots など別名互換
   const slots = v?.slots;
   if (slots && typeof slots === 'object' && !Array.isArray(slots)) {
     const obs = typeof slots.OBS === 'string' ? slots.OBS : null;
@@ -232,7 +202,9 @@ function detectNoDelta(vector: ResonanceVector): boolean {
   return false;
 }
 
-function detectNoDeltaKind(vector: ResonanceVector): 'repeat-warning' | 'short-loop' | 'stuck' | 'unknown' | null {
+function detectNoDeltaKind(
+  vector: ResonanceVector,
+): 'repeat-warning' | 'short-loop' | 'stuck' | 'unknown' | null {
   const v: any = vector as any;
   const k = v?.noDeltaKind;
 
@@ -247,36 +219,126 @@ function detectNoDeltaKind(vector: ResonanceVector): 'repeat-warning' | 'short-l
   return null;
 }
 
+function detectInsightSlot(vector: ResonanceVector): string | null {
+  const v: any = vector as any;
+
+  const sp = v?.slotPlan;
+  if (sp && typeof sp === 'object' && !Array.isArray(sp)) {
+    const ins = typeof sp.INSIGHT === 'string' ? sp.INSIGHT : null;
+    if (ins) return ins;
+  }
+
+  const slots = v?.slots;
+  if (slots && typeof slots === 'object' && !Array.isArray(slots)) {
+    const ins = typeof slots.INSIGHT === 'string' ? slots.INSIGHT : null;
+    if (ins) return ins;
+  }
+
+  return null;
+}
+
+/* =========================
+   INSIGHT auto (stuck one-line)
+========================= */
+
+function hasStuckOneLineInsightTag(vector: ResonanceVector): boolean {
+  const v: any = vector as any;
+  const sp = v?.slotPlan;
+  const tag =
+    sp && typeof sp === 'object' && !Array.isArray(sp) ? sp.INSIGHT : null;
+
+  if (typeof tag === 'string' && tag.includes('INSIGHT:stuck:one-line')) return true;
+
+  const slots = v?.slots;
+  const tag2 =
+    slots && typeof slots === 'object' && !Array.isArray(slots) ? slots.INSIGHT : null;
+
+  return typeof tag2 === 'string' && tag2.includes('INSIGHT:stuck:one-line');
+}
+
+function buildStuckOneLineInsight(
+  vector: ResonanceVector,
+  facts: string,
+  seed: string,
+): string {
+  const v: any = vector as any;
+  const s = String(v?.situationSummary ?? '').trim();
+  const key = `${s} ${facts}`.trim();
+
+  // ⚠️ ここは「固定前提」系の言い回しを廃止して“論点の固着”に統一
+  if (key.includes('浮気')) {
+    return '論点は「境界が崩れた地点」を特定できていないことに固着しています。';
+  }
+  if (key.includes('考えない') || key.includes('相手の事')) {
+    return '論点は「相手が配慮するはず」という期待の置き場に固着しています。';
+  }
+  if (key.includes('なんで')) {
+    return '論点は「当然こうなるはず」という期待が先に立っている点に固着しています。';
+  }
+
+  const base = s || facts;
+  const clip = base.length > 32 ? base.slice(0, 32) + '…' : base;
+
+  const frames = [
+    `論点は「${clip}」の一点に固着しています。`,
+    `いま止まっているのは「${clip}」の焦点が動いていないためです。`,
+    `詰まりは「${clip}」の見方が固定化しているところにあります。`,
+  ];
+
+  return pick(seed + '|stk1', frames);
+}
+
+/* =========================
+   NO_DELTA observation line
+========================= */
+
 function buildNoDeltaObservationLine(args: {
   seed: string;
   minimalEmoji: boolean;
   kind: 'repeat-warning' | 'short-loop' | 'stuck' | 'unknown' | null;
+  vector: ResonanceVector;
+  facts: string;
 }): string {
-  const { seed, minimalEmoji, kind } = args;
+  const { seed, kind, vector, facts } = args;
 
-  // 評価なし / 診断なし / should無し
+  // --- stuck 専用：固有1行（テンプレ臭を抑える） ---
+  const insightSlot = detectInsightSlot(vector);
+  if (kind === 'stuck' && insightSlot === 'INSIGHT:stuck:one-line') {
+    const v: any = vector as any;
+    const summary = (v?.situationSummary ?? '').toString().trim();
+
+    if (summary) {
+      return `いま詰まっているのは、「${summary}」の見方が動いていないためです。`;
+    }
+
+    const f = (facts ?? '').toString().trim();
+    if (f) return `いま詰まっているのは、「${stripLeadingMarkers(f)}」の見方が動いていないためです。`;
+
+    return 'いま詰まっているのは、見方が一点に固着しているためです。';
+  }
+
+  // --- 既定：短い“状態説明”だけ（嫌われテンプレ文言は入れない） ---
   const linesRepeat = [
-    '理解があっても、行動を変えなくても成立している状態が続いています。',
-    '注意が繰り返されるのは、現状のままでも回ってしまう条件が残っているためです。',
-    '分かっていることと、行動が切り替わることが、まだ同じ線に乗っていない状態です。',
+    '理解と行動の切り替えが、まだ同じ線に乗っていない状態です。',
+    '現状のままでも回ってしまう条件が残っている状態です。',
+    '言い換えはできても、具体の手がまだ固定されていない状態です。',
   ];
 
   const linesShort = [
-    '短いやり取りが続くときは、論点が「言葉」より先に止まっていることが多いです。',
-    'この長さの応答が往復するときは、状態の整理が先に必要な局面です。',
-    '短文で回っているのは、いま“次の条件”が未確定なサインです。',
+    '短文で往復しているのは、論点がまだ整列していないサインです。',
+    '短いやり取りが続くときは、整理の1手が先に必要な局面です。',
+    'いまは“次の条件”が未確定なまま回っている状態です。',
   ];
 
   const linesStuck = [
-    '状況が進まないのは、いまの構造のままでも成立してしまうからです。',
-    '変化が起きないのは、行動を変える前提がまだ揃っていない状態だからです。',
-    '停滞しているように見えるのは、条件が固定されたまま回っているためです。',
+    'いまは、焦点が一点に固着して回っている状態です。',
+    '停滞に見えるのは、同じ条件で成立し続けているためです。',
+    '変化が起きないのは、切り替え点がまだ特定されていないためです。',
   ];
 
   const linesUnknown = [
-    'いまは「変える」より先に、成立している条件を一度だけ言語化する局面です。',
-    'ここは結論を急ぐより、成立している構造を先に一文で置くのが効きます。',
-    '変化が出ないときは、まず“何が成立しているか”を一度だけ整えます。',
+    'いまは、結論より先に「整理」の1手が必要な局面です。',
+    'ここは、状況を1行で整列させる段階です。',
   ];
 
   const arr =
@@ -288,11 +350,7 @@ function buildNoDeltaObservationLine(args: {
           ? linesStuck
           : linesUnknown;
 
-  const line = pick(seed + '|nd', arr);
-
-  // 絵文字は render全体の方針に従う（ここでは抑えめ）
-  if (minimalEmoji) return line;
-  return line; // あえて無印（ここに絵文字を足すと“テンプレ感”が出やすい）
+  return pick(seed + '|nd', arr);
 }
 
 function shapeFactsWithNoDelta(
@@ -303,24 +361,23 @@ function shapeFactsWithNoDelta(
     minimalEmoji: boolean;
     noDelta: boolean;
     noDeltaKind: 'repeat-warning' | 'short-loop' | 'stuck' | 'unknown' | null;
+    vector: ResonanceVector;
   },
 ): string {
-  const { mode, seed, minimalEmoji, noDelta, noDeltaKind } = ctx;
+  const { mode, seed, minimalEmoji, noDelta, noDeltaKind, vector } = ctx;
 
-  // NO_DELTA でないなら従来通り
-  if (!noDelta) return shapeFacts(facts, { mode, seed, minimalEmoji });
+  const shapedFacts = shapeFacts(facts, { mode, seed, minimalEmoji });
+
+  if (!noDelta) return shapedFacts;
 
   const obs1 = buildNoDeltaObservationLine({
     seed,
     minimalEmoji,
     kind: noDeltaKind,
+    vector,
+    facts,
   });
 
-  // “必ず1文 → その後に現象(facts)” の順を固定（ここがプレゼンで効く）
-  const shapedFacts = shapeFacts(facts, { mode, seed, minimalEmoji });
-
-  // facts が短い時でも、obs1 を先頭に置く
-  // ※ここは「改行2つ」だと重いので 1改行で軽く接続
   if (!shapedFacts) return obs1;
   return `${obs1}\n${shapedFacts}`;
 }
@@ -349,7 +406,6 @@ function shouldExposeInsight(args: {
   const { mode, vector, hasInsight, userWantsEssence, highDefensiveness } = args;
   if (!hasInsight) return false;
 
-  // 防御が強い時は露出を抑える（刺しは“滲ませ”へ）
   if (highDefensiveness && mode !== 'transcend') return false;
 
   if (userWantsEssence) return true;
@@ -406,30 +462,26 @@ function buildPlan(args: {
 
   const slots: Partial<Record<ReplySlotKey, string>> = {};
 
-  // opener（存在感）はやりすぎない
   const header = buildHeader({ mode, minimalEmoji, seed, exposeInsight });
   if (header && containerId !== 'NONE') slots.opener = header;
 
-  // facts（必須）
-  slots.facts = shapeFacts(facts, { mode, seed, minimalEmoji });
+  slots.facts = facts; // ✅ ここで二重整形しない（テンプレ増殖を防ぐ）
 
-  // mirror（刺し or 滲ませ）
   if (insight) slots.mirror = insight;
 
-  // elevate（俯瞰）
   const elevate = buildElevateLine({ vector, mode, seed, minimalEmoji });
   if (elevate) slots.elevate = elevate;
 
-  // move（次の一手）
   if (next) slots.move = next;
 
-  // ask（問いは置く：毎回出さない & suppressAsk で抑制）
+  // ✅ 問いは原則出さない（必要なら上流で nextStep を作って閉じる）
   const ask = buildAskLine({
     mode,
     seed,
     userWantsEssence,
     highDefensiveness,
     suppressAsk,
+    minimalEmoji,
   });
   if (ask) slots.ask = ask;
 
@@ -461,23 +513,17 @@ function pickContainer(args: {
   const shortFacts = facts.trim().length <= 50;
   const longFacts = facts.trim().length >= 160;
 
-  // 1) 挨拶/雑談：短く（NONE）
   if (mode === 'casual' && shortFacts && !hasInsight && !hasNext) return 'NONE';
-
-  // 2) 防御が強いとき：静かに
   if (highDefensiveness && mode !== 'transcend') return 'PLAIN';
 
-  // 3) 「教えて」「手順」「説得力」相当（ここでは userWantsEssence を代理）
   if (userWantsEssence || (hasInsight && longFacts)) {
     return pick(seed + '|c', ['NUMBERED', 'HEADING', 'PLAIN']) as ContainerId;
   }
 
-  // 4) transcend は “見出し” 相性良い（固定しない）
   if (mode === 'transcend') {
     return pick(seed + '|cT', ['HEADING', 'PLAIN', 'HEADING']) as ContainerId;
   }
 
-  // 既定：静かな段落
   return 'PLAIN';
 }
 
@@ -513,7 +559,7 @@ function renderFromPlan(plan: ReplyPlan): string {
     if (mirrorClean) blocks.push(`■ 芯\n${mirrorClean}`);
     if (elevateClean) blocks.push(`■ 俯瞰\n${elevateClean}`);
     if (move) blocks.push(`■ 次\n${move}`);
-    if (ask) blocks.push(`■ 確認\n${stripLeadingMarkers(ask)}`);
+    if (ask) blocks.push(`■ 補足\n${stripLeadingMarkers(ask)}`);
 
     return blocks.join('\n\n').trim();
   }
@@ -539,12 +585,11 @@ function renderFromPlan(plan: ReplyPlan): string {
       moveInserted = true;
     }
 
-    if (ask && steps.length < 6) steps.push(`最後に：${stripLeadingMarkers(ask)}`);
+    if (ask && steps.length < 6) steps.push(`${stripLeadingMarkers(ask)}`);
 
     return steps.join('\n\n').trim();
   }
 
-  // BULLET は必要になったらルール追加で使う
   return [opener, facts, mirror, elevate, move, ask].filter(Boolean).join('\n\n').trim();
 }
 
@@ -572,9 +617,9 @@ function buildHeader(args: {
 
   if (exposeInsight && head) {
     const pre = pick(seed + '|p', [
-      '少しだけ、芯を言います。',
       '要点だけ置きます。',
-      '本質を一つだけ。',
+      '芯を一つだけ。',
+      '結論を先に。',
     ]);
     return `${head} ${pre}`;
   }
@@ -588,104 +633,83 @@ function shapeFacts(
 ): string {
   const { mode, seed, minimalEmoji } = ctx;
 
-  if (mode === 'casual') return facts;
+  const f = (facts ?? '').toString().trim();
+  if (!f) return '';
 
-  const leadIns = minimalEmoji
-    ? ['', '']
-    : mode === 'intent'
-      ? ['', '🌀 ']
-      : ['', '🌌 '];
+  // ✅ ここが肝：固定テンプレ前置きを廃止して、factsをそのまま返す
+  // 必要なら最小の合図だけ（短く）
+  if (mode === 'casual') return f;
 
-  const lead = pick(seed + '|f0', leadIns);
+  if (minimalEmoji) return f;
 
-  const prefaces =
-    mode === 'intent'
-      ? [
-          'いま起きている状況は、こう整理できます。',
-          'まず現象だけ、短くまとめます。',
-          '表の話としては、こうです。',
-        ]
-      : [
-          'まず、現象を一段上から整理します。',
-          '表層の出来事を、芯だけ残して並べます。',
-          'ここで起きていることを、静かに分解します。',
-        ];
+  // 長文だけ、軽い導入を“固定文なし”で揺らす（テンプレ臭を消す）
+  if (f.length >= 120) {
+    const lead = pick(seed + '|fLead', ['', '', '']);
+    return `${lead}${f}`.trim();
+  }
 
-  const preface = pick(seed + '|f1', prefaces);
-
-  if (facts.length <= 60) return `${lead}${facts}`;
-  return `${lead}${preface}\n${facts}`;
+  return f;
 }
 
 function shapeInsightDirect(
   insight: string,
-  ctx: { mode: RenderMode; seed: string },
+  ctx: { mode: RenderMode; seed: string; minimalEmoji: boolean },
 ): string {
-  const { mode, seed } = ctx;
+  const { mode, seed, minimalEmoji } = ctx;
+  const x = insight.trim();
+  if (!x) return '';
 
   const frames =
     mode === 'transcend'
-      ? [
-          '本当に触れているのは、{X} です。',
-          '論点は {X} にあります。',
-          '核心は {X} に移っています。',
-        ]
-      : [
-          '本当に引っかかっているのは、{X} です。',
-          '焦点は {X} にあります。',
-          '{X} が、いちばん効いています。',
-        ];
+      ? ['核心は {X} です。', '論点は {X} にあります。', '{X} が支点です。']
+      : ['焦点は {X} です。', '{X} がいちばん効いています。', '要点は {X} です。'];
 
-  const frame = pick(seed + '|iD', frames);
-  return `🌀 ${frame.replace('{X}', insight.trim())}`;
+  const frame = pick(seed + '|iD', frames).replace('{X}', x);
+  return minimalEmoji ? frame : `🌀 ${frame}`;
 }
 
 function shapeInsightDiffuse(
   insight: string,
-  ctx: { mode: RenderMode; seed: string },
+  ctx: { mode: RenderMode; seed: string; minimalEmoji: boolean },
 ): string {
-  const { mode, seed } = ctx;
+  const { mode, seed, minimalEmoji } = ctx;
+  const x = softenInsight(insight.trim(), seed);
+  if (!x) return '';
 
   const frames =
     mode === 'casual'
-      ? [
-          '{X} が、いまの中心にあります。',
-          '{X} が、静かに効いています。',
-          '{X} が、今の判断基準になっています。',
-        ]
-      : [
-          '{X} が、背後で支点になっています。',
-          '{X} が、反応の起点として働いています。',
-          '{X} が、現在の焦点として現れています。',
-        ];
+      ? ['{X} が中心です。', '{X} が静かに効いています。', '{X} が判断基準になっています。']
+      : ['{X} が支点になっています。', '{X} が反応の起点です。', '{X} が焦点として現れています。'];
 
-  const frame = pick(seed + '|iS', frames);
-  const marker = mode === 'casual' ? '' : '🪔 ';
-  return `${marker}${frame.replace('{X}', softenInsight(insight, seed))}`;
+  const frame = pick(seed + '|iS', frames).replace('{X}', x);
+  if (minimalEmoji) return frame;
+  return mode === 'casual' ? frame : `🪔 ${frame}`;
 }
 
 function shapeNext(
   next: string,
-  ctx: { vector: ResonanceVector; mode: RenderMode; seed: string },
+  ctx: { vector: ResonanceVector; mode: RenderMode; seed: string; minimalEmoji: boolean },
 ): string {
-  const { vector, mode, seed } = ctx;
+  const { vector, mode, seed, minimalEmoji } = ctx;
+
+  const n = next.trim();
+  if (!n) return '';
 
   const gentle = vector.grounding < 0.45 || mode === 'transcend';
   const frames = gentle
     ? [
-        'よければ次は、{N} を試してみてください。',
-        'もし合えば、{N} を一回だけやってみるのも手です。',
-        '小さく動かすなら、{N} からで十分です。',
+        '{N} を1回だけ試すのがよさそうです。',
+        '{N} を小さく入れると進みます。',
+        'まず {N} を置くのが自然です。',
       ]
     : [
-        '次の一手は、{N} です。',
-        'いちばん効く一手は、{N} です。',
-        'まず {N} を入れると、空気が整います。',
+        '次の一手は {N} です。',
+        'まず {N} を入れると進みます。',
+        '{N} から着地させるのが効きます。',
       ];
 
-  const frame = pick(seed + '|n', frames);
-  const line = frame.replace('{N}', next.trim());
-  return `🌱 ${line}`;
+  const line = pick(seed + '|n', frames).replace('{N}', n);
+  return minimalEmoji ? line : `🌱 ${line}`;
 }
 
 function buildElevateLine(args: {
@@ -703,9 +727,9 @@ function buildElevateLine(args: {
   if (!want) return null;
 
   const frames = [
-    'ここは「結論」より、流れの向きが先に決まっています。',
-    '出来事そのものより、“向き”が先に立っている局面です。',
-    '答えを急ぐより、今は“方向”を整える段階です。',
+    '答えを急ぐより、いまは“向き”を整える局面です。',
+    '出来事より先に、流れの向きが決まる段階です。',
+    'ここは結論より、方向が先に立ちます。',
   ];
 
   const line = pick(seed + '|e', frames);
@@ -718,36 +742,49 @@ function buildAskLine(args: {
   userWantsEssence: boolean;
   highDefensiveness: boolean;
   suppressAsk: boolean;
+  minimalEmoji: boolean;
 }): string | null {
-  const { mode, seed, userWantsEssence, highDefensiveness, suppressAsk } = args;
+  const { mode, seed, userWantsEssence, highDefensiveness, suppressAsk, minimalEmoji } = args;
 
+  // ✅ 原則：問いは出さない（テンプレ化して嫌われるため）
   if (suppressAsk) return null;
   if (highDefensiveness) return null;
   if (!userWantsEssence && mode === 'casual') return null;
 
+  // “質問”ではなく“提案”で閉じる（必要なときだけ）
   const frames = userWantsEssence
-    ? ['いま一番ひっかかるのは、どこですか？', '核心を一言で言うなら、何ですか？']
-    : ['このまま進めるなら、何を残したいですか？', 'どこが一番ズレていますか？'];
+    ? [
+        '必要なら、優先順位だけ1行で置けます。',
+        '必要なら、どれを守りたいかだけ残せます。',
+      ]
+    : [
+        '必要なら、次に残す1行だけ決められます。',
+        '必要なら、判断材料を1つだけ追加できます。',
+      ];
 
-  return `🌀 ${pick(seed + '|q', frames)}`;
+  const line = pick(seed + '|q', frames);
+  return minimalEmoji ? line : `🪔 ${line}`;
 }
 
 /* =========================
    Descent helper (TCF)
 ========================= */
 
-function adjustNextForDescent(next: string, seed: string, spinStep: number | null): string {
+function adjustNextForDescent(
+  next: string,
+  seed: string,
+  spinStep: number | null,
+): string {
   const base = (next ?? '').toString().trim();
   if (!base) return base;
 
-  const step = typeof spinStep === 'number' && Number.isFinite(spinStep) ? Math.round(spinStep) : null;
+  const step =
+    typeof spinStep === 'number' && Number.isFinite(spinStep)
+      ? Math.round(spinStep)
+      : null;
 
-  // step の意味は実装側に合わせてOK（ここは「Fへ寄せる」ことが目的）
-  // - step=0: T寄り（静かな再起動）
-  // - step=1: C寄り（形にする）
-  // - step=2: F寄り（習慣/定着）
   if (step === 2) {
-    const tail = pick(seed + '|dF', ['を毎日1回だけ', 'を“固定ルール”に', 'を習慣の1手に']);
+    const tail = pick(seed + '|dF', ['を毎日1回だけ', 'を固定ルールに', 'を習慣の1手に']);
     return `${base}${tail}`;
   }
   if (step === 1) {
@@ -755,12 +792,12 @@ function adjustNextForDescent(next: string, seed: string, spinStep: number | nul
     return `${base}${tail}`;
   }
 
-  const tail = pick(seed + '|dT', ['を静かに再起動する', 'を一度だけ整える', 'を小さく立ち上げる']);
+  const tail = pick(seed + '|dT', ['を一度だけ整える', 'を小さく立ち上げる', 'を静かに再起動する']);
   return `${base}${tail}`;
 }
 
 /* =========================
-   Helpers: anti-template drift
+   Helpers
 ========================= */
 
 function stripLeadingMarkers(text: string): string {

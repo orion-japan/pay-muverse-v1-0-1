@@ -10,16 +10,14 @@
 import type { Depth, QCode, IrosMeta } from './system';
 import type { IrosMemoryState } from './memoryState';
 
-import {
-  analyzeUnifiedTurn,
-  type UnifiedLikeAnalysis,
-} from './unifiedAnalysis';
-
-import { applyDepthContinuity, applyQContinuity } from './depthContinuity';
+import { analyzeUnifiedTurn, type UnifiedLikeAnalysis } from './unifiedAnalysis';
 
 import { updateQTrace, type QTrace } from './orchestratorCore';
 
 import { computeYH } from './analysis/computeYH';
+
+import { applyDepthContinuity, applyQContinuity } from './depthContinuity';
+
 
 // ★ 追加：Polarity & Stability 計算
 import {
@@ -28,22 +26,13 @@ import {
   type StabilityBand,
 } from './analysis/polarity';
 
-import {
-  estimateSelfAcceptance,
-  type SelfAcceptanceInput,
-} from './sa/meter';
+import { estimateSelfAcceptance, type SelfAcceptanceInput } from './sa/meter';
 
 import { clampSelfAcceptance } from './orchestratorMeaning';
 
-import {
-  deriveIntentLine,
-  type IntentLineAnalysis,
-} from './intent/intentLineEngine';
+import { deriveIntentLine, type IntentLineAnalysis } from './intent/intentLineEngine';
 
-import {
-  detectIrTrigger,
-  decidePierceMode,
-} from './orchestratorPierce';
+import { detectIrTrigger, decidePierceMode } from './orchestratorPierce';
 
 type PierceDecision = ReturnType<typeof decidePierceMode>;
 
@@ -90,7 +79,8 @@ export async function runOrchestratorAnalysis(args: {
   } = args;
 
   /* =========================================================
-     0) Unified-like 解析（Q / Depth の決定入口）
+     0) Unified-like 解析（Depth / Phase / Situation）
+     ※ Q は unified で扱わない（常に null）
   ========================================================= */
   const unified = await analyzeUnifiedTurn({
     text,
@@ -98,59 +88,131 @@ export async function runOrchestratorAnalysis(args: {
     requestedQCode,
   });
 
-  // LLM / ルールベースの生の推定結果
-  const rawDepthFromScan: Depth | undefined =
-    unified.depth.stage ?? undefined;
+  // 生の推定（Depthのみ）
+  const rawDepthFromScan: Depth | undefined = unified.depth.stage ?? undefined;
 
-  // ★ Q は unified の結果が無ければ requestedQCode をそのままスキャン結果として利用
-  const rawQFromScan: QCode | undefined =
-    (unified.q.current as QCode | undefined) ??
-    requestedQCode ??
-    undefined;
+/* =========================================================
+   A) 深度スキャン + 連続性補正（scanがあっても必ず通す）
+========================================================= */
+const lastDepth = baseMeta?.depth;
+const lastQ = (baseMeta as any)?.qCode as QCode | undefined;
+
+const depth: Depth | undefined = normalizeDepth(
+  applyDepthContinuity({
+    scanDepth: rawDepthFromScan, // undefinedでもOK
+    lastDepth,
+    text,
+    isFirstTurn: !!isFirstTurn,
+  }),
+);
 
   /* =========================================================
-     A) 深度スキャン + 連続性補正
+     P) Phase（Inner / Outer）の統一（Q決定の材料に使う）
   ========================================================= */
+  let phase: 'Inner' | 'Outer' | null = null;
 
-  const lastDepth = baseMeta?.depth;
-  const lastQ = (baseMeta as any)?.qCode as QCode | undefined;
-
-  let depthFromContinuity: Depth | undefined;
-
-  if (rawDepthFromScan) {
-    // ✅ 今回のスキャン結果があるときは、それをそのまま「今回の視点」として採用
-    depthFromContinuity = rawDepthFromScan;
-  } else {
-    // ✅ スキャンできなかったときだけ、連続性ロジックで補完
-    depthFromContinuity = normalizeDepth(
-      applyDepthContinuity({
-        scanDepth: rawDepthFromScan,
-        lastDepth,
-        text,
-        isFirstTurn: !!isFirstTurn,
-      }),
-    );
+  const unifiedPhaseRaw: unknown = (unified as any).phase;
+  if (unifiedPhaseRaw === 'Inner' || unifiedPhaseRaw === 'Outer') {
+    phase = unifiedPhaseRaw;
+  } else if (memoryState?.phase === 'Inner' || memoryState?.phase === 'Outer') {
+    phase = memoryState.phase;
+  } else if (
+    baseMeta &&
+    ((baseMeta as any).phase === 'Inner' || (baseMeta as any).phase === 'Outer')
+  ) {
+    phase = (baseMeta as any).phase as 'Inner' | 'Outer';
   }
 
-  // depth 最終決定（I層強制は orchestrator.ts 側で処理する想定）
-  const depth: Depth | undefined = depthFromContinuity;
-
-  // Qコードはこれまで通り「スキャン結果＋連続性」で決める
-  const qCode: QCode | undefined = normalizeQCode(
-    applyQContinuity({
-      scanQ: rawQFromScan,
-      lastQ,
-      isFirstTurn: !!isFirstTurn,
-    }),
-  );
+  /* =========================================================
+     ir診断トリガー（Q候補生成の材料）
+  ========================================================= */
+  const irTriggered = detectIrTrigger(text);
 
   /* =========================================================
-     A-2) QTrace の更新（D: 揺れの履歴ログ用の基盤）
+     SA) Self Acceptance（自己肯定“ライン”）
+     ※ ここでは qCode は未確定なので null で計測（Qで誤誘導しない）
   ========================================================= */
-  const prevQTrace = (baseMeta as any)?.qTrace as
-    | QTrace
-    | undefined
-    | null;
+  const lastSelfAcceptanceRaw =
+    typeof memoryState?.selfAcceptance === 'number'
+      ? memoryState.selfAcceptance
+      : typeof (baseMeta as any)?.selfAcceptance === 'number'
+        ? (baseMeta as any).selfAcceptance
+        : null;
+
+  const phaseForSA: 'Inner' | 'Outer' | null = phase;
+
+  const saInput0: SelfAcceptanceInput = {
+    userText: text,
+    assistantText: '',
+    qCode: null,
+    depthStage: depth ?? null,
+    phase: phaseForSA,
+    historyDigest: null,
+    lastSelfAcceptance: lastSelfAcceptanceRaw,
+  };
+
+  const saResult0 = await estimateSelfAcceptance(saInput0);
+  const selfAcceptanceLine = clampSelfAcceptance(saResult0.value);
+
+  /* =========================================================
+     Y/H) 揺れ(Y)・余白(H)（Q決定の材料に使うため “仮” 計算）
+     ※ qCode 未確定なので null で1回計算
+  ========================================================= */
+  const yh0 = computeYH({
+    text,
+    depth: depth ?? null,
+    qCode: null,
+    selfAcceptance: selfAcceptanceLine,
+    unified,
+    prevMeta: (baseMeta as any) ?? null,
+  });
+
+/* =========================================================
+   Q) Qコード確定（明示Qがあれば絶対勝ち / それ以外は continuity）
+========================================================= */
+const explicitQ = pickExplicitQCode(text);
+
+const qCodeCandidate = proposeQFromSignals({
+  lastQ: lastQ ?? null,
+  depth: depth ?? null,
+  phase,
+  irTriggered,
+  selfAcceptance: selfAcceptanceLine,
+  lastSelfAcceptance: lastSelfAcceptanceRaw,
+  yLevel: yh0.yLevel ?? null,
+  hLevel: yh0.hLevel ?? null,
+  isFirstTurn: !!isFirstTurn,
+  requestedQCode: requestedQCode ?? null,
+  text,
+});
+
+const stabilizedQ =
+  stabilizeQ({
+    candidate: qCodeCandidate,
+    lastQ: lastQ ?? null,
+    selfAcceptance: selfAcceptanceLine,
+    lastSelfAcceptance: lastSelfAcceptanceRaw,
+    yLevel: yh0.yLevel ?? null,
+    isFirstTurn: !!isFirstTurn,
+  }) ?? null;
+
+// ✅ 明示Qがある場合：continuityは通さず、そのまま最終確定
+// ✅ 明示Qがない場合：continuityで「戻し/維持」を決める（scanQに候補を渡すのが重要）
+const qFinal: QCode | null = explicitQ
+  ? explicitQ
+  : (applyQContinuity({
+      scanQ: (stabilizedQ ?? qCodeCandidate) ?? undefined,
+      lastQ: lastQ ?? undefined,
+      isFirstTurn: !!isFirstTurn,
+    }) ?? null);
+
+
+const qCode: QCode | undefined = qFinal ?? undefined;
+
+  /* =========================================================
+     A-2) QTrace の更新（最終Qで更新する）
+  ========================================================= */
+  const prevQTrace = (baseMeta as any)?.qTrace as QTrace | undefined | null;
 
   const qTrace: QTrace = updateQTrace(
     prevQTrace ?? {
@@ -164,87 +226,20 @@ export async function runOrchestratorAnalysis(args: {
   );
 
   /* =========================================================
-     A') 統一：最終決定した depth / qCode を unified にも反映
+     A') 統一：最終決定した depth / qCode / phase / SA を unified に反映
   ========================================================= */
   const fixedUnified: UnifiedLikeAnalysis = {
     ...unified,
-    q: {
-      ...unified.q,
-      current: qCode ?? unified.q.current,
-    },
-    depth: {
-      ...unified.depth,
-      stage: depth ?? unified.depth.stage,
-    },
+    q: { ...unified.q, current: qCode ?? null },
+    depth: { ...unified.depth, stage: depth ?? unified.depth.stage },
+    phase,
   };
 
-  /* =========================================================
-     P) Phase（Inner / Outer）の統一
-     - unified / memoryState / baseMeta のどこかにあれば採用
-  ========================================================= */
-  let phase: 'Inner' | 'Outer' | null = null;
-
-  // 1) unified 側にすでに phase があればそれを最優先
-  const unifiedPhaseRaw: unknown = (unified as any).phase;
-  if (unifiedPhaseRaw === 'Inner' || unifiedPhaseRaw === 'Outer') {
-    phase = unifiedPhaseRaw;
-  } else if (memoryState?.phase === 'Inner' || memoryState?.phase === 'Outer') {
-    // 2) なければ MemoryState から補完
-    phase = memoryState.phase;
-  } else if (
-    baseMeta &&
-    ((baseMeta as any).phase === 'Inner' ||
-      (baseMeta as any).phase === 'Outer')
-  ) {
-    // 3) さらに無ければ baseMeta（前回 meta）から補完
-    phase = (baseMeta as any).phase as 'Inner' | 'Outer';
-  }
-
-  // fixedUnified にも phase を明示的に乗せておく
-  (fixedUnified as any).phase = phase;
-
+  (fixedUnified as any).selfAcceptance = selfAcceptanceLine;
+  (fixedUnified as any).self_acceptance = selfAcceptanceLine;
 
   /* =========================================================
-     SA) Self Acceptance（自己肯定“ライン”）の決定
-  ========================================================= */
-
-  // 直近のライン SA（あれば）を lastSelfAcceptance として渡す
-  const lastSelfAcceptanceRaw =
-    typeof memoryState?.selfAcceptance === 'number'
-      ? memoryState.selfAcceptance
-      : typeof (baseMeta as any)?.selfAcceptance === 'number'
-      ? (baseMeta as any).selfAcceptance
-      : null;
-
-  // phase は Unified の結果を優先し、無ければ MemoryState から補完
-  const phaseForSA: 'Inner' | 'Outer' | null =
-    fixedUnified?.phase === 'Inner' || fixedUnified?.phase === 'Outer'
-      ? fixedUnified.phase
-      : memoryState?.phase ?? null;
-
-  const saInput: SelfAcceptanceInput = {
-    userText: text,
-    // Orchestrator 単体では直前の assistantText を持っていないため、ここでは空文字。
-    assistantText: '',
-    qCode: qCode ?? null,
-    depthStage: depth ?? null,
-    phase: phaseForSA,
-    historyDigest: null,
-    lastSelfAcceptance: lastSelfAcceptanceRaw,
-  };
-
-  // meter から返ってくる値 = 「更新済みの自己肯定ライン」
-  const saResult = await estimateSelfAcceptance(saInput);
-  const selfAcceptanceLine = clampSelfAcceptance(saResult.value);
-
-  // ★ unified 側にも SelfAcceptance ラインを埋め込む（UI / ログ用）
-  if (fixedUnified) {
-    (fixedUnified as any).selfAcceptance = selfAcceptanceLine;
-    (fixedUnified as any).self_acceptance = selfAcceptanceLine;
-  }
-
-  /* =========================================================
-     Y/H) 揺れ(Y)・余白(H) の推定
+     Y/H) 揺れ(Y)・余白(H)（確定Qで再計算）
   ========================================================= */
   const yh = computeYH({
     text,
@@ -258,7 +253,6 @@ export async function runOrchestratorAnalysis(args: {
   const yLevel = yh.yLevel ?? null;
   const hLevel = yh.hLevel ?? null;
 
-  // ★ unified にも Y/H を埋め込んでおく（必要なら）
   (fixedUnified as any).yLevel = yLevel;
   (fixedUnified as any).hLevel = hLevel;
 
@@ -275,7 +269,6 @@ export async function runOrchestratorAnalysis(args: {
   const polarityBand = pol.polarityBand;
   const stabilityBand = pol.stabilityBand;
 
-  // ログ / LLM 用に unified にも入れておく
   (fixedUnified as any).polarityScore = polarityScore;
   (fixedUnified as any).polarityBand = polarityBand;
   (fixedUnified as any).stabilityBand = stabilityBand;
@@ -292,7 +285,6 @@ export async function runOrchestratorAnalysis(args: {
       }
     | null = null;
 
-  // すでに meta 側に意図アンカーがあれば、それをベースにする
   const baseAnchor =
     (baseMeta as any)?.intent_anchor &&
     typeof (baseMeta as any).intent_anchor === 'object'
@@ -304,7 +296,6 @@ export async function runOrchestratorAnalysis(args: {
     typeof baseAnchor.text === 'string' &&
     baseAnchor.text.trim().length > 0
   ) {
-    // 既存アンカーを優先（数値だけ今回の Y/H, SA で補完）
     intentAnchor = {
       text: baseAnchor.text.trim(),
       strength:
@@ -321,10 +312,8 @@ export async function runOrchestratorAnalysis(args: {
           : hLevel,
     };
   } else {
-    // アンカーがまだ無い場合のみ、テキストから暫定生成
     const raw = (text || '').trim();
     if (raw.length > 0) {
-      // 「最初の文」をざっくり拾う（。！？で区切る）→ なければ全文
       const m = raw.match(/^(.+?[。！？!?])/);
       const core = (m && m[1]) || raw;
       const anchorText = core.slice(0, 180).trim();
@@ -340,17 +329,13 @@ export async function runOrchestratorAnalysis(args: {
     }
   }
 
-  // unified にも意図アンカーを埋め込む（Orchestrator / ログ / LLM 用）
   if (intentAnchor) {
     (fixedUnified as any).intent_anchor = intentAnchor;
   }
 
   /* =========================================================
-     ir診断トリガー + I層 Piercing 判定
+     I層 Piercing 判定
   ========================================================= */
-
-  const irTriggered = detectIrTrigger(text);
-
   const pierceDecision = decidePierceMode({
     depth: depth ?? null,
     requestedDepth,
@@ -377,17 +362,13 @@ export async function runOrchestratorAnalysis(args: {
       depth: depth ?? null,
       phase: phaseForIntentLine,
       selfAcceptance: selfAcceptanceLine,
-      // relationTone / historyQ は今は未使用（将来拡張用）
     });
 
     if (intentLine && (intentLine as any).tLayerHint) {
       tLayerHint = (intentLine as any).tLayerHint as string;
     }
 
-    if (
-      intentLine &&
-      typeof (intentLine as any).hasFutureMemory === 'boolean'
-    ) {
+    if (intentLine && typeof (intentLine as any).hasFutureMemory === 'boolean') {
       hasFutureMemory = (intentLine as any).hasFutureMemory as boolean;
     }
   } catch (e) {
@@ -410,6 +391,23 @@ export async function runOrchestratorAnalysis(args: {
     if (hasFutureMemory === null) {
       hasFutureMemory = true;
     }
+  }
+
+  console.log('[IROS/QDECIDE] ping');
+
+  console.log('[IROS/QDECIDE][analysis]', {
+    text: (text || '').slice(0, 60),
+    lastQ: (baseMeta as any)?.qCode ?? null,
+    unifiedQ: (unified as any)?.q?.current ?? null,
+    scanQ: (unified as any)?.q?.current ?? null,
+    explicitQ: explicitQ ?? null,
+    decidedQ: qCode ?? null,
+    depth: depth ?? null,
+    phase,
+  });
+
+  if (explicitQ) {
+    console.log('[IROS/QDECIDE][explicit]', { explicitQ, applied: true });
   }
 
   return {
@@ -444,6 +442,151 @@ function normalizeQCode(qCode?: QCode): QCode | undefined {
   return qCode;
 }
 
+/**
+ * ユーザーが先頭/文中で「Q1〜Q5」を明示した場合に拾う
+ * 例: "Q3 心配です", "今Q1っぽい", "（Q2）"
+ */
+function pickExplicitQCode(text: string): QCode | null {
+  const s = String(text || '');
+  if (!s) return null;
+
+  // なるべく事故らないように「Q + 1桁」を拾う（全角・空白・記号も許容）
+  // 例: "Q3", "Q 3", "Ｑ３", "(Q2)" などを許容
+  const normalized = s
+    .replace(/[Ｑ]/g, 'Q')
+    .replace(/[０-９]/g, (d) => String('０１２３４５６７８９'.indexOf(d)))
+    .replace(/\s+/g, '');
+
+  const m = normalized.match(/Q([1-5])/);
+  if (!m) return null;
+
+  const q = `Q${m[1]}` as QCode;
+  if (q === 'Q1' || q === 'Q2' || q === 'Q3' || q === 'Q4' || q === 'Q5') {
+    return q;
+  }
+  return null;
+}
+
+/**
+ * Q候補の生成（キーワード分類はしない）
+ * - requestedQCode は初回のみ採用
+ * - 以後は depth/phase/SA/YH/irTriggered など “構造シグナル” から候補を出す
+ */
+function proposeQFromSignals(args: {
+  lastQ: QCode | null;
+  depth: Depth | null;
+  phase: 'Inner' | 'Outer' | null;
+  irTriggered: boolean;
+  selfAcceptance: number | null;
+  lastSelfAcceptance: number | null;
+  yLevel: number | null;
+  hLevel: number | null;
+  isFirstTurn: boolean;
+  requestedQCode: QCode | null;
+  text: string;
+}): QCode | null {
+  const {
+    lastQ,
+    depth,
+    phase,
+    irTriggered,
+    selfAcceptance,
+    lastSelfAcceptance,
+    yLevel,
+    isFirstTurn,
+    requestedQCode,
+  } = args;
+
+  // 0) 初回のみ：明示指定があれば採用（以後は固定化原因になるので使わない）
+  if (isFirstTurn && requestedQCode) return requestedQCode;
+
+  // 1) SA変化（落差/上昇）は “軸変換の圧” として強い
+  const deltaSA =
+    typeof selfAcceptance === 'number' && typeof lastSelfAcceptance === 'number'
+      ? selfAcceptance - lastSelfAcceptance
+      : 0;
+
+  // 2) 揺れ（Y）が強い：不安/恐怖帯域へ寄る（Q3/Q4）
+  //    ※ここは「感情分類」ではなく「安定性シグナル」からの推定
+  const y = typeof yLevel === 'number' ? yLevel : 0;
+
+  // 3) I層/ir は “深度上げ” の圧が強い → 抑制(Q1) or 変容(Q3) のどちらかへ寄せる
+  const isI = depth === 'I1' || depth === 'I2' || depth === 'I3';
+
+  if (irTriggered || isI) {
+    // SAが落ちている/揺れているなら「中心化（Q3）」へ
+    if (deltaSA <= -0.03 || y >= 2) return 'Q3';
+    // それ以外は「再配列（Q1）」へ（秩序/再決定）
+    return 'Q1';
+  }
+
+  // 4) 創造/行動（C）寄り：推進（Q2/Q5）
+  const isC = depth === 'C1' || depth === 'C2' || depth === 'C3';
+  if (isC) {
+    if (deltaSA >= 0.03) return 'Q5'; // 上がってる → 情熱
+    return 'Q2'; // 動かす → 変容
+  }
+
+  // 5) 関係/共鳴（R）寄り：推進（Q2） or 調整（Q3）
+  const isR = depth === 'R1' || depth === 'R2' || depth === 'R3';
+  if (isR) {
+    if (y >= 2) return 'Q3'; // 揺れてる → 中央へ
+    return 'Q2';
+  }
+
+  // 6) Self（S）寄り：安定化（Q1/Q3）
+  const isS = depth === 'S1' || depth === 'S2' || depth === 'S3';
+  if (isS) {
+    if (y >= 2 || deltaSA <= -0.03) return 'Q3';
+    return 'Q1';
+  }
+
+  // 7) Phaseだけ見える場合：Innerは整える(Q1/Q3)、Outerは動かす(Q2)
+  if (phase === 'Inner') {
+    if (y >= 2 || deltaSA <= -0.03) return 'Q3';
+    return 'Q1';
+  }
+  if (phase === 'Outer') {
+    return 'Q2';
+  }
+
+  // 8) 何も決め手がない：前回を維持
+  return lastQ ?? null;
+}
+
+/**
+ * Qの安定化（固定化ではない）
+ * - candidate が lastQ と違う場合でも “強いシグナル” があるときだけ切り替える
+ */
+function stabilizeQ(args: {
+  candidate: QCode | null;
+  lastQ: QCode | null;
+  selfAcceptance: number | null;
+  lastSelfAcceptance: number | null;
+  yLevel: number | null;
+  isFirstTurn: boolean;
+}): QCode | null {
+  const { candidate, lastQ, selfAcceptance, lastSelfAcceptance, yLevel } = args;
+  if (!candidate) return lastQ ?? null;
+  if (!lastQ) return candidate;
+  if (candidate === lastQ) return candidate;
+
+  const deltaSA =
+    typeof selfAcceptance === 'number' && typeof lastSelfAcceptance === 'number'
+      ? Math.abs(selfAcceptance - lastSelfAcceptance)
+      : 0;
+
+  const y = typeof yLevel === 'number' ? yLevel : 0;
+
+  // “強さ” の目安（0〜1くらいで扱う）
+  const strength = Math.max(Math.min(1, deltaSA * 10), Math.min(1, y / 3));
+
+  // 強い時だけ切替（弱い時は lastQ を維持＝暴れ防止）
+  if (strength >= 0.55) return candidate;
+
+  return lastQ;
+}
+
 /* ========= 未来方向モード検出ヘルパー ========= */
 
 function detectFutureDirectionMode(args: {
@@ -453,7 +596,6 @@ function detectFutureDirectionMode(args: {
 }): boolean {
   const { text, irTriggered, intentLine } = args;
 
-  // 1) IntentLine からのシグナルを最優先
   if (
     intentLine &&
     ((intentLine as any).hasFutureMemory === true ||
@@ -462,7 +604,6 @@ function detectFutureDirectionMode(args: {
     return true;
   }
 
-  // 2) テキストのキーワード（未来 / 意図 / 方向 系）
   const compact = text.replace(/\s/g, '');
   const futureKeywords = [
     'これから',
@@ -481,7 +622,6 @@ function detectFutureDirectionMode(args: {
     return true;
   }
 
-  // 3) ir診断など、構造的に「先」を見るモードは T層寄りとみなす
   if (irTriggered) {
     return true;
   }
