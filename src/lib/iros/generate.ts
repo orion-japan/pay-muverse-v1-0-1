@@ -492,26 +492,87 @@ function dedupeTailUser(
 
 // ==============================
 // Frame / Slots hint (Writer)
+// - meta.framePlan を最優先で拾い、meta.frame と同期する版（debug logs込み）
 // ==============================
 
 type FrameKind = 'S' | 'R' | 'C' | 'I' | 'T' | 'MICRO' | 'NONE';
+
+function normalizeFrameKind(v: unknown): FrameKind | null {
+  if (typeof v !== 'string') return null;
+  const s = v.trim().toUpperCase();
+  if (
+    s === 'S' ||
+    s === 'R' ||
+    s === 'C' ||
+    s === 'I' ||
+    s === 'T' ||
+    s === 'MICRO' ||
+    s === 'NONE'
+  ) {
+    return s as FrameKind;
+  }
+  return null;
+}
 
 function buildWriterHintsFromMeta(meta: any): {
   frame: FrameKind | null;
   slotKeys: string[];
   hintText: string | null;
 } {
-  const frame: FrameKind | null =
-    typeof meta?.frame === 'string' ? (meta.frame as FrameKind) : null;
+  const fp =
+    meta?.framePlan && typeof meta.framePlan === 'object' ? meta.framePlan : null;
+
+  // --- debug: 入口で見えている meta/framePlan を固定観測 ---
+  console.log('[IROS/frame-debug] input', {
+    meta_frame_before: meta?.frame ?? null,
+    framePlan_frame: fp?.frame ?? null,
+    framePlan_slots_keys: Array.isArray(fp?.slots)
+      ? fp.slots.map((s: any) => s?.key).filter(Boolean)
+      : null,
+    slotPlan_keys:
+      meta?.slotPlan && typeof meta.slotPlan === 'object'
+        ? Object.keys(meta.slotPlan)
+        : null,
+  });
+
+  // ① frame: framePlan.frame を“唯一の正”として採用
+  const frameFromPlan = normalizeFrameKind(fp?.frame);
+  const frameFromMeta = normalizeFrameKind(meta?.frame);
+
+  const frame: FrameKind | null = frameFromPlan ?? frameFromMeta ?? null;
+
+  // ★同期：framePlan があるなら meta.frame も必ず一致させる（後方互換/表示用）
+  if (frameFromPlan && meta && typeof meta === 'object') {
+    meta.frame = frameFromPlan;
+
+    // --- debug: 同期の結果を固定観測 ---
+    console.log('[IROS/frame-debug] sync', {
+      frameFromPlan,
+      meta_frame_after: meta?.frame ?? null,
+    });
+  } else {
+    console.log('[IROS/frame-debug] sync-skip', {
+      frameFromPlan: frameFromPlan ?? null,
+      meta_frame_before: meta?.frame ?? null,
+    });
+  }
+
+  // ② slots: framePlan.slots → meta.slotPlan の順で拾う
+  const slotKeysFromPlan: string[] = Array.isArray(fp?.slots)
+    ? fp.slots
+        .map((s: any) => (typeof s?.key === 'string' ? s.key : null))
+        .filter(Boolean)
+    : [];
 
   const slotPlan: Record<string, any> =
     meta?.slotPlan && typeof meta.slotPlan === 'object' ? meta.slotPlan : {};
 
-  const slotKeys = Object.entries(slotPlan)
+  const slotKeysFromMap = Object.entries(slotPlan)
     .filter(([, v]) => !!v)
     .map(([k]) => k);
 
-  // まだ本文テンプレは作らない。LLMに “型” だけ伝える。
+  const slotKeys = slotKeysFromPlan.length > 0 ? slotKeysFromPlan : slotKeysFromMap;
+
   if (!frame && slotKeys.length === 0) {
     return { frame: null, slotKeys: [], hintText: null };
   }
@@ -530,7 +591,6 @@ function buildWriterHintsFromMeta(meta: any): {
   if (frame) hintLines.push(`FRAME=${frame}（${frameGuide[frame]}）`);
   if (slotKeys.length > 0) hintLines.push(`SLOTS=${slotKeys.join(',')}`);
 
-  // ※ここは “指示” ではなく “参考ヒント” として渡すのがポイント
   const hintText =
     `【writer hint】\n` +
     hintLines.join('\n') +
@@ -539,6 +599,7 @@ function buildWriterHintsFromMeta(meta: any): {
 
   return { frame, slotKeys, hintText };
 }
+
 
 /* =========================================================
    MAIN

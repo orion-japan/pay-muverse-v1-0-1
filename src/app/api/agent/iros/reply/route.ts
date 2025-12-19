@@ -490,7 +490,7 @@ if (typeof assistantText === 'string' && assistantText.trim().length > 0) {
       meta.target_kind = normalizedTargetKind;
 
       // ★★★ ここが本丸：返却metaの y/h を “整数に統一” する（DBとUIとTrainingを一致させる）
-// meta = normalizeMetaLevels(meta);
+meta = normalizeMetaLevels(meta);
 // ★ unified.intent_anchor を “固定アンカー” に同期（ブレ防止）
 {
   const fixedText =
@@ -555,19 +555,32 @@ if (typeof assistantText === 'string' && assistantText.trim().length > 0) {
           delete meta.priority.goal.targetQ;
         }
       }
+      console.log('[DBG][style-pick]', { styleInput, metaStyle: meta?.style, metaUserStyle: meta?.userProfile?.style, userProfileStyle: userProfile?.style });
 
-      // ★★★ Render Engine の適用（ここで「適用箇所」を固定）
-      const applied = applyRenderEngineIfEnabled({
-        conversationId,
-        userCode,
-        userText: text,
-        styleInput: styleInput ?? null,
-        extra: extra ?? null,
-        meta,
-        resultObj: result as any,
-      });
+// ★★★ Render Engine の適用（ここで「適用箇所」を固定）
+const effectiveStyle =
+  (typeof styleInput === 'string' && styleInput.trim().length > 0
+    ? styleInput
+    : typeof meta?.style === 'string' && meta.style.trim().length > 0
+    ? meta.style
+    : typeof meta?.userProfile?.style === 'string' &&
+      meta.userProfile.style.trim().length > 0
+    ? meta.userProfile.style
+    : typeof userProfile?.style === 'string' && userProfile.style.trim().length > 0
+    ? userProfile.style
+    : null);
 
-      meta = applied.meta;
+const applied = applyRenderEngineIfEnabled({
+  conversationId,
+  userCode,
+  userText: text,
+  styleInput: effectiveStyle,
+  extra: extra ?? null,
+  meta,
+  resultObj: result as any,
+});
+
+meta = applied.meta;
 
       // ★ 訓練用サンプルを保存（失敗しても本処理は継続）
       // ✅ skipTraining / recallOnly のときは訓練保存しない（goal recall 等）
@@ -835,23 +848,34 @@ function applyRenderEngineIfEnabled(params: {
       (meta.nextStepMeta as any)?.text ??
       null;
 
-    // biz-soft / biz-formal は絵文字抑制
-    const minimalEmoji =
-      typeof styleInput === 'string' &&
-      (styleInput.includes('biz-formal') || styleInput.includes('biz-soft'));
+// biz-soft / biz-formal は絵文字抑制
+const minimalEmoji =
+  typeof styleInput === 'string' &&
+  (styleInput.includes('biz-formal') || styleInput.includes('biz-soft'));
 
-    console.log('[IROS/Reply][renderEngine] inputs', {
-      conversationId,
-      userCode,
-      styleInput,
-      minimalEmoji,
-      qNow,
-      userWantsEssence,
-      highDefensiveness,
-      insightCandidate,
-      nextStepCandidate,
-      vector: vectorForRender,
-    });
+// ★ framePlan は「route側のmeta」から取る（ctx はこの層に存在しない）
+const framePlan = (meta as any)?.framePlan ?? null;
+
+// ★ renderReply 側で detectNoDelta / slotPlan 判定に使えるように載せる
+//（vector は ResonanceVector 型なので any でブリッジ）
+(vectorForRender as any).slotPlan = (meta as any)?.slotPlan ?? null;
+// 必要なら将来拡張用（今は未使用でもOK）
+// (vectorForRender as any).noDelta = !!(meta as any)?.noDelta;
+
+console.log('[IROS/Reply][renderEngine] inputs', {
+  conversationId,
+  userCode,
+  styleInput,
+  minimalEmoji,
+  qNow,
+  userWantsEssence,
+  highDefensiveness,
+  insightCandidate,
+  nextStepCandidate,
+  framePlan, // ★ログ確認用
+  slotPlan: (vectorForRender as any).slotPlan, // ★ここも見える化
+  vector: vectorForRender,
+});
 
     // meta.extra にデバッグ情報
     meta.extra = {
@@ -880,7 +904,10 @@ function applyRenderEngineIfEnabled(params: {
         minimalEmoji,
         forceExposeInsight:
           !!extra && (extra as any).forceExposeInsight === true,
-      },
+
+        // ✅ 追加：renderReply 側が (opts as any).framePlan で拾えるように渡す
+        framePlan: (meta as any)?.framePlan ?? null,
+      } as any,
     );
 
     const renderedText =
@@ -920,7 +947,7 @@ function applyRenderEngineIfEnabled(params: {
 
     return { meta };
   }
-
+} // ✅ applyRenderEngineIfEnabled をここで確実に閉じる
 
 /**
  * yLevel / hLevel を “整数に統一” する（DBの int と常に一致させる）
@@ -959,21 +986,13 @@ function normalizeMetaLevels(meta: any): any {
   }
 
   if (m.unified.intent_anchor && typeof m.unified.intent_anchor === 'object') {
-    if (yInt != null) {
-      m.unified.intent_anchor.y_level = yInt;
-    }
-    if (hInt != null) {
-      m.unified.intent_anchor.h_level = hInt;
-    }
+    if (yInt != null) m.unified.intent_anchor.y_level = yInt;
+    if (hInt != null) m.unified.intent_anchor.h_level = hInt;
   }
 
   if (m.intent_anchor && typeof m.intent_anchor === 'object') {
-    if (yInt != null) {
-      m.intent_anchor.y_level = yInt;
-    }
-    if (hInt != null) {
-      m.intent_anchor.h_level = hInt;
-    }
+    if (yInt != null) m.intent_anchor.y_level = yInt;
+    if (hInt != null) m.intent_anchor.h_level = hInt;
   }
 
   m.extra = {
@@ -1004,4 +1023,5 @@ function clampInt(v: number, min: number, max: number): number {
   if (v < min) return min;
   if (v > max) return max;
   return v;
-}}
+}
+

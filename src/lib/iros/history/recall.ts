@@ -80,13 +80,31 @@ function looksMeaningful(s: string): boolean {
 export function pickRecallFromHistory(history: any[]): string | null {
   if (!Array.isArray(history) || history.length === 0) return null;
 
+  // ★ 末尾が user の場合、それは「今回入力」の可能性があるので除外したい
+  // - runGenericRecallGate 側で text を渡せない形を維持するため、
+  //   「末尾の user 発言」を currentCandidate として扱い、同一文をスキップする。
+  let currentCandidate: string | null = null;
+  for (let j = history.length - 1; j >= 0; j--) {
+    const m = history[j];
+    if (!m) continue;
+    if (String(m.role).toLowerCase() !== 'user') continue;
+    const s = normalize(m.content ?? m.text ?? m.message);
+    currentCandidate = s || null;
+    break;
+  }
+
   for (let i = history.length - 1; i >= 0; i--) {
     const m = history[i];
     if (!m) continue;
     if (String(m.role).toLowerCase() !== 'user') continue;
 
     const s = normalize(m.content ?? m.text ?? m.message);
-    if (looksMeaningful(s)) return s;
+    if (!looksMeaningful(s)) continue;
+
+    // ★ 「今回入力っぽい末尾user」と同じならスキップ（空回り防止）
+    if (currentCandidate && s === currentCandidate) continue;
+
+    return s;
   }
   return null;
 }
@@ -118,3 +136,4 @@ export async function runGenericRecallGate(args: {
     assistantText: null,
   };
 }
+

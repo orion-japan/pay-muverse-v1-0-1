@@ -6,6 +6,12 @@
 // - テンプレ固定ではなく、候補群から seed で決定的に揺らす
 // - “箇条書き毎回”を避け、番号/見出しは必要な時だけ
 // - 下降（TCF）のときは「問い」を抑え、「定着（F）」寄りの next に寄せる
+//
+// ✅ 追加（今回の核）
+// - slotPlan / vector から :no-delta を検知したら、facts の前に
+//   「評価なしの状態翻訳 1文」を必ず差し込む（NO_DELTA_OBS）
+// - 文章は固定テンプレにしない（seedで揺らす）
+// - blame/diagnosis/should は入れない
 
 import type { ResonanceVector } from './resonanceVector';
 import type { ReplyPlan, ContainerId, ReplySlotKey } from './planReply';
@@ -51,22 +57,66 @@ export function renderReply(
   input: RenderInput,
   opts: RenderOptions = {},
 ): string {
-  // ✅ ログ
-  console.log('[RENDER][SPIN]', {
-    loop: (vector as any).spinLoop,
-    step: (vector as any).spinStep,
-    layer: vector.intentLayer,
-  });
 
-  const mode = opts.mode ?? inferMode(vector);
+  const framePlan = (opts as any)?.framePlan ?? null;
 
-  const seed =
-    (input.seed && input.seed.trim()) || stableSeedFromInput(vector, input);
+// --- SPIN debug (取り元ズレ吸収 + シャドー禁止) ---
+type SpinLayer = 'S' | 'R' | 'C' | 'I' | 'T';
 
-  const minimalEmoji = !!opts.minimalEmoji;
-  const maxLines = typeof opts.maxLines === 'number' ? opts.maxLines : 14;
+function normalizeSpinLayer(v: unknown): SpinLayer | null {
+  if (typeof v !== 'string') return null;
+  const s = v.trim().toUpperCase();
+  return s === 'S' || s === 'R' || s === 'C' || s === 'I' || s === 'T'
+    ? (s as SpinLayer)
+    : null;
+}
 
-  const facts = normalizeOne(input.facts);
+// framePlan / vector が「引数にある版」「optsにある版」どっちでも拾えるようにする
+const fp: any =
+  (typeof framePlan !== 'undefined' ? (framePlan as any) : null) ??
+  (opts as any)?.framePlan ??
+  null;
+
+const vx: any =
+  (typeof vector !== 'undefined' ? (vector as any) : null) ??
+  (opts as any)?.vector ??
+  null;
+
+const spinLayer: SpinLayer | null =
+  normalizeSpinLayer(fp?.frame) ??
+  normalizeSpinLayer(vx?.intentLayer) ??
+  null;
+
+console.log('[RENDER][SPIN]', {
+  loop: vx?.spinLoop ?? null,
+  step: vx?.spinStep ?? null,
+  frame: fp?.frame ?? null,
+  layer: spinLayer,
+});
+
+// ✅ trace は「dev + 明示フラグ」のときだけ出す（通常ログを汚さない）
+const enableTrace =
+  process.env.NODE_ENV !== 'production' &&
+  (process.env.IROS_RENDER_TRACE === '1' ||
+    (opts as any)?.debugTrace === true);
+
+if (enableTrace) {
+  console.trace('[RENDER][SPIN][CALLER]');
+}
+
+const mode = opts.mode ?? inferMode(vector);
+
+const seed =
+  (input.seed && input.seed.trim()) || stableSeedFromInput(vector, input);
+
+const minimalEmoji = !!opts.minimalEmoji;
+const maxLines = typeof opts.maxLines === 'number' ? opts.maxLines : 14;
+
+  // ✅ NO_DELTA 検知（slotPlan / vector のどこから来ても落ちない）
+  const noDelta = detectNoDelta(vector);
+  const noDeltaKind = detectNoDeltaKind(vector);
+
+  const factsRaw = normalizeOne(input.facts);
   const insightRaw = normalizeNullable(input.insight);
   const nextRaw = normalizeNullable(input.nextStep);
 
@@ -115,13 +165,22 @@ export function renderReply(
       highDefensiveness: !!input.highDefensiveness,
     });
 
-    const insight = insightRaw
+  const insight = insightRaw
     ? exposeInsightFlag
       ? shapeInsightDirect(insightRaw, { mode, seed })
       : shapeInsightDiffuse(insightRaw, { mode, seed })
     : null;
 
   const next = nextAdjusted ? shapeNext(nextAdjusted, { vector, mode, seed }) : null;
+
+  // ✅ facts をここで “NO_DELTA_OBS 1文” で前処理する
+  const facts = shapeFactsWithNoDelta(factsRaw, {
+    mode,
+    seed,
+    minimalEmoji,
+    noDelta,
+    noDeltaKind,
+  });
 
   const plan = buildPlan({
     vector,
@@ -144,6 +203,126 @@ export function renderReply(
   const out = renderFromPlan(plan);
 
   return clampLines(out, maxLines).trim();
+}
+
+/* =========================
+   NO_DELTA detection
+========================= */
+
+function detectNoDelta(vector: ResonanceVector): boolean {
+  const v: any = vector as any;
+
+  // 1) 直値（metaから持ってきた等）
+  if (v?.noDelta === true) return true;
+
+  // 2) slotPlan が object の場合（slotBuilder.ts の {OBS,SHIFT,NEXT,SAFE}）
+  const sp = v?.slotPlan;
+  if (sp && typeof sp === 'object' && !Array.isArray(sp)) {
+    const obs = typeof sp.OBS === 'string' ? sp.OBS : null;
+    if (obs && obs.includes(':no-delta')) return true;
+  }
+
+  // 3) planSlots など別名互換
+  const slots = v?.slots;
+  if (slots && typeof slots === 'object' && !Array.isArray(slots)) {
+    const obs = typeof slots.OBS === 'string' ? slots.OBS : null;
+    if (obs && obs.includes(':no-delta')) return true;
+  }
+
+  return false;
+}
+
+function detectNoDeltaKind(vector: ResonanceVector): 'repeat-warning' | 'short-loop' | 'stuck' | 'unknown' | null {
+  const v: any = vector as any;
+  const k = v?.noDeltaKind;
+
+  if (typeof k === 'string') {
+    const s = k.trim().toLowerCase();
+    if (s === 'repeat-warning') return 'repeat-warning';
+    if (s === 'short-loop') return 'short-loop';
+    if (s === 'stuck') return 'stuck';
+    if (s === 'unknown') return 'unknown';
+  }
+
+  return null;
+}
+
+function buildNoDeltaObservationLine(args: {
+  seed: string;
+  minimalEmoji: boolean;
+  kind: 'repeat-warning' | 'short-loop' | 'stuck' | 'unknown' | null;
+}): string {
+  const { seed, minimalEmoji, kind } = args;
+
+  // 評価なし / 診断なし / should無し
+  const linesRepeat = [
+    '理解があっても、行動を変えなくても成立している状態が続いています。',
+    '注意が繰り返されるのは、現状のままでも回ってしまう条件が残っているためです。',
+    '分かっていることと、行動が切り替わることが、まだ同じ線に乗っていない状態です。',
+  ];
+
+  const linesShort = [
+    '短いやり取りが続くときは、論点が「言葉」より先に止まっていることが多いです。',
+    'この長さの応答が往復するときは、状態の整理が先に必要な局面です。',
+    '短文で回っているのは、いま“次の条件”が未確定なサインです。',
+  ];
+
+  const linesStuck = [
+    '状況が進まないのは、いまの構造のままでも成立してしまうからです。',
+    '変化が起きないのは、行動を変える前提がまだ揃っていない状態だからです。',
+    '停滞しているように見えるのは、条件が固定されたまま回っているためです。',
+  ];
+
+  const linesUnknown = [
+    'いまは「変える」より先に、成立している条件を一度だけ言語化する局面です。',
+    'ここは結論を急ぐより、成立している構造を先に一文で置くのが効きます。',
+    '変化が出ないときは、まず“何が成立しているか”を一度だけ整えます。',
+  ];
+
+  const arr =
+    kind === 'repeat-warning'
+      ? linesRepeat
+      : kind === 'short-loop'
+        ? linesShort
+        : kind === 'stuck'
+          ? linesStuck
+          : linesUnknown;
+
+  const line = pick(seed + '|nd', arr);
+
+  // 絵文字は render全体の方針に従う（ここでは抑えめ）
+  if (minimalEmoji) return line;
+  return line; // あえて無印（ここに絵文字を足すと“テンプレ感”が出やすい）
+}
+
+function shapeFactsWithNoDelta(
+  facts: string,
+  ctx: {
+    mode: RenderMode;
+    seed: string;
+    minimalEmoji: boolean;
+    noDelta: boolean;
+    noDeltaKind: 'repeat-warning' | 'short-loop' | 'stuck' | 'unknown' | null;
+  },
+): string {
+  const { mode, seed, minimalEmoji, noDelta, noDeltaKind } = ctx;
+
+  // NO_DELTA でないなら従来通り
+  if (!noDelta) return shapeFacts(facts, { mode, seed, minimalEmoji });
+
+  const obs1 = buildNoDeltaObservationLine({
+    seed,
+    minimalEmoji,
+    kind: noDeltaKind,
+  });
+
+  // “必ず1文 → その後に現象(facts)” の順を固定（ここがプレゼンで効く）
+  const shapedFacts = shapeFacts(facts, { mode, seed, minimalEmoji });
+
+  // facts が短い時でも、obs1 を先頭に置く
+  // ※ここは「改行2つ」だと重いので 1改行で軽く接続
+  if (!shapedFacts) return obs1;
+  return `${obs1}\n${shapedFacts}`;
 }
 
 /* =========================

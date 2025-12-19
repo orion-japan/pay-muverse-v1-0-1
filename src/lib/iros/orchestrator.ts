@@ -76,9 +76,10 @@ import { applyDelegateIntentOverride } from './will/delegateIntentOverride';
 // ★ CONT: 意志の連続性（Depth / Q のなだらか化）
 import { applyGoalContinuity } from './will/continuityEngine'; // ★ CONT 追加
 
-import { selectFrame } from './language/frameSelector';
-import { buildSlots } from './language/slotBuilder';
+import { buildSlots, type NoDeltaKind } from './language/slotBuilder';
 import { classifyInputKind } from './language/inputKind';
+import { detectILayerForce } from './rotation/iLayerForce';
+import { selectFrame, type FrameKind } from './language/frameSelector';
 
 import { decideDescentGate } from './rotation/rotationLoop';
 // ==== 固定アンカー（北） ====
@@ -717,6 +718,46 @@ if (isActionRequest && priority) {
 (meta as any).goal = goal;
 (meta as any).priority = priority;
 
+// ----------------------------------------------------------------
+// 7.25 I層を「確実に」出す強制ゲート（presentation-critical）
+// - ユーザーが I層を要求したら、mode/depth/goal を I帯へ固定
+// - TCF 落下（descent）に入らないよう扉を閉じる
+// ----------------------------------------------------------------
+{
+  const iForce = detectILayerForce({
+    userText: text,
+    mode: (meta.mode ?? null) as any,
+    requestedDepth:
+      ((goal as any)?.targetDepth as any) ??
+      (requestedDepth ?? null) ??
+      ((meta.depth as any) ?? null),
+  });
+
+  // デバッグ保存（あとでログで「なぜI層になったか」追える）
+  (meta as any).iLayerForce = iForce;
+
+  if (iForce.force) {
+    // mode を vision に固定（I層返しの器）
+    meta.mode = (iForce.requestedMode ?? 'vision') as any;
+
+    // depth を I帯に固定（最終depth決定でブレさせない）
+    if (iForce.requestedDepth) {
+      meta.depth = iForce.requestedDepth as any;
+
+      if (goal) (goal as any).targetDepth = iForce.requestedDepth as any;
+      if (priority?.goal) (priority.goal as any).targetDepth = iForce.requestedDepth as any;
+    }
+
+    // TCF 落下は止める（I層プレゼン中は混線させない）
+    (meta as any).descentGate = 'closed';
+    (meta as any).descentGateReason = 'I-layer forced: lock descentGate=closed';
+  }
+
+  // 「上司のI層 / 自分のI層」両建てフラグ（slotBuilder側で使える）
+  if (iForce.dual) {
+    (meta as any).iLayerDual = true;
+  }
+}
 
 // ----------------------------------------------------------------
 // 7.5 DescentGate + Frame + Slots（唯一の決定点）
@@ -779,7 +820,7 @@ if (isActionRequest && priority) {
   (meta as any).descentGateReason = dg.reason;
 
   // ✅ Frame + Slots をここで一括確定
-  const frame = selectFrame(
+  const frameSelected = selectFrame(
     {
       depth:
         typeof meta.depth === 'string' && meta.depth.length > 0
@@ -790,15 +831,74 @@ if (isActionRequest && priority) {
     inputKind
   );
 
+  // ✅ I層強制なら frame は必ず I（最後の砦）
+  const frame: FrameKind =
+    (meta as any)?.iLayerForce?.force ? 'I' : frameSelected;
+
+
+
+  // ✅ NO_DELTA 判定（Slot用）
+  // - 目的：Writerに「冒頭1文=状態翻訳」を必ず出させるためのシグナル
+  // - ここでは“本文”は作らない（タグを渡すだけ）
+  const rotationReason = String((meta as any)?.rotationState?.reason ?? '');
+  const spinStepNow =
+    typeof (meta as any).spinStep === 'number' ? (meta as any).spinStep : null;
+
+  const nd = (() => {
+    const t = String(text ?? '').trim();
+
+    // 1) 変わらない系（repeat warning）
+    const isRepeatWarning =
+      /同じ注意|何度も|繰り返し|変わらない|分かっている.*変わらない|わかっている.*変わらない/.test(
+        t
+      );
+
+    // 2) 短文ループ（short loop）
+    const isShortLoop =
+      t.length <= 12 && (inputKind === 'chat' || inputKind === 'question');
+
+    // 3) 回転停止/非変化（stuck）
+    const looksStoppedByReason =
+      rotationReason.length > 0 &&
+      (rotationReason.includes('回転') ||
+        rotationReason.includes('満たしていない') ||
+        rotationReason.includes('起きない'));
+
+    const looksStoppedByMeta = spinStepNow === 0 && rotationReason.length > 0;
+
+    const noDelta = !!(isRepeatWarning || isShortLoop || looksStoppedByReason || looksStoppedByMeta);
+
+    let kind: NoDeltaKind | null = null;
+    if (noDelta) {
+      if (isRepeatWarning) kind = 'repeat-warning';
+      else if (isShortLoop) kind = 'short-loop';
+      else kind = 'stuck';
+    }
+
+    return { noDelta, kind };
+  })();
+  (meta as any).noDelta = nd.noDelta;
+  (meta as any).noDeltaKind = nd.kind;
+
   // ✅ SlotBuilder に spinLoop も渡す（TCF(下降)なら descentGate=closed でも SAFE を立てられる）
   const slotPlan = buildSlots(frame, {
-    descentGate: meta.descentGate,
+    descentGate: (meta as any)?.iLayerForce?.force ? 'closed' : meta.descentGate,
     spinLoop: (meta as any).spinLoop ?? null,
+    noDelta: (meta as any).noDelta === true,
+    noDeltaKind: (meta as any).noDeltaKind ?? null,
+    iLayerDual: (meta as any).iLayerDual === true,
   });
 
   (meta as any).frame = frame;
   (meta as any).slotPlan = slotPlan.slots;
+
+
+
+  (meta as any).frame = frame;
+  (meta as any).slotPlan = slotPlan.slots;
 }
+
+
 
   // ----------------------------------------------------------------
   // 8. 本文生成（LLM 呼び出し）

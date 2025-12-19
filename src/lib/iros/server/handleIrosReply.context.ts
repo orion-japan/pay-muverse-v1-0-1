@@ -223,7 +223,8 @@ export async function buildTurnContext(
     } as any;
 
     // ✅ buildFramePlan のシグネチャ差を吸収（TS引数数チェック回避）
-    const framePlan = (buildFramePlan as any)(stateLite, inputKind);
+    const framePlan = buildFramePlan({ state: stateLite, inputKind });
+
 
     baseMetaForTurn.inputKind = inputKind;
     baseMetaForTurn.framePlan = framePlan;

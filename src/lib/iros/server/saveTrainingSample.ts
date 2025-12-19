@@ -128,9 +128,7 @@ function resolveTrainingTargetKind(meta: any): TargetKind {
   if (fromGoalKind) return normalizeTargetKind(fromGoalKind);
 
   const fromMeta =
-    pickString(meta?.targetKind) ??
-    pickString(meta?.target_kind) ??
-    null;
+    pickString(meta?.targetKind) ?? pickString(meta?.target_kind) ?? null;
   if (fromMeta) return normalizeTargetKind(fromMeta);
 
   const fromPriorityKind = pickString(meta?.priority?.goal?.kind);
@@ -145,7 +143,57 @@ function resolveTrainingTargetKind(meta: any): TargetKind {
   return 'stabilize';
 }
 
-export async function saveIrosTrainingSample(params: SaveIrosTrainingSampleParams) {
+// 本文（replyText）やユーザー入力（inputText）が analysis_text に混ざる事故を強制的に防ぐ
+function normText(s: string): string {
+  return s.replace(/\s+/g, ' ').trim();
+}
+
+function sanitizeAnalysisTextForTraining(
+  analysisText: unknown,
+  replyText: unknown,
+  inputText: unknown
+): string | null {
+  const a = typeof analysisText === 'string' ? analysisText.trim() : '';
+  if (!a) return null;
+
+  const r = typeof replyText === 'string' ? replyText.trim() : '';
+  if (r && normText(a) === normText(r)) return null; // 同一なら本文混入
+
+  const i = typeof inputText === 'string' ? inputText.trim() : '';
+  if (i && normText(a) === normText(i)) return null; // 同一ならユーザー入力混入
+
+  return a;
+}
+
+/**
+ * analysis_text の安全fallback（“分析ラベル”）
+ * - ユーザー入力を使わず、メタからのみ構成
+ * - これで（内容なし）率を下げる
+ */
+function buildFallbackAnalysisLabel(args: {
+  qCode: string | null;
+  depthStage: string | null;
+  phase: string | null;
+  targetKind: TargetKind;
+  situationTopic: string | null;
+}): string {
+  const parts: string[] = [];
+
+  if (args.qCode) parts.push(`Q:${args.qCode}`);
+  if (args.depthStage) parts.push(`D:${args.depthStage}`);
+  if (args.phase) parts.push(`P:${args.phase}`);
+
+  parts.push(`K:${args.targetKind}`);
+
+  if (args.situationTopic) parts.push(`T:${args.situationTopic}`);
+
+  // 何もなくても kind だけは必ず入る
+  return parts.join(' / ');
+}
+
+export async function saveIrosTrainingSample(
+  params: SaveIrosTrainingSampleParams
+) {
   const {
     supabase,
     userCode,
@@ -159,26 +207,28 @@ export async function saveIrosTrainingSample(params: SaveIrosTrainingSampleParam
   } = params;
 
   // --- meta 抽出（camel/snake 両対応） ---
+
   const qCode =
     pickString(meta?.qCode) ??
     pickString(meta?.q_code) ??
+    pickString(meta?.qPrimary) ??
+    pickString(meta?.q_primary) ??
     pickString(meta?.unified?.q?.current) ??
     null;
 
   const depthStage =
-    pickString(meta?.depth) ??
+    pickString(meta?.depthStage) ??
     pickString(meta?.depth_stage) ??
+    pickString(meta?.depth) ??
     pickString(meta?.unified?.depth?.stage) ??
     null;
 
-  const phase =
-    pickString(meta?.phase) ??
-    pickString(meta?.unified?.phase) ??
-    null;
+  const phase = pickString(meta?.phase) ?? pickString(meta?.unified?.phase) ?? null;
 
   const selfAcceptance =
     pickNumber(meta?.selfAcceptance) ??
     pickNumber(meta?.self_acceptance) ??
+    pickNumber(meta?.unified?.selfAcceptance) ??
     pickNumber(meta?.unified?.self_acceptance) ??
     null;
 
@@ -218,25 +268,41 @@ export async function saveIrosTrainingSample(params: SaveIrosTrainingSampleParam
   const yLevel = clampInt03(yLevelRaw);
   const hLevel = clampInt03(hLevelRaw);
 
-  // target_kind（★修正：goal.kind を最優先にする）
+  // target_kind（★ goal.kind を最優先にする）
   const targetKind = resolveTrainingTargetKind(meta);
 
   const targetLabel =
-    pickString(meta?.targetLabel) ??
-    pickString(meta?.target_label) ??
-    null;
+    pickString(meta?.targetLabel) ?? pickString(meta?.target_label) ?? null;
 
   /**
-   * ★重要：analysis_text には「返信」を入れる
-   * - DBに reply_text 列が無いので analysis_text を “返信本文置き場” として使う
-   * - intentSummary がある場合は extra に残し、analysis_text はまず replyText を優先
+   * ★重要：analysis_text は「分析/メタ」専用
+   * - ユーザー入力/返信本文と一致する候補は捨てる
+   * - それでも空なら “分析ラベル” に落とす（ユーザー入力は使わない）
    */
-  const analysisText =
-    pickString(replyText) ??
+  const analysisTextCandidate =
     pickString(meta?.unified?.intentSummary) ??
+    pickString(meta?.unified?.intent_summary) ??
     pickString(meta?.intentLine?.nowLabel) ??
-    pickString(meta?.unified?.situation?.summary) ??
-    pickString(inputText) ??
+    pickString(meta?.intent_line?.nowLabel) ??
+    pickString(meta?.intentLine?.guidanceHint) ??
+    pickString(meta?.intent_line?.guidanceHint) ??
+    pickString(meta?.intentLine?.riskHint) ??
+    pickString(meta?.intent_line?.riskHint) ??
+    pickString(meta?.goal?.reason) ??
+    pickString(meta?.priority?.goal?.reason) ??
+    null;
+
+  const fallbackAnalysisLabel = buildFallbackAnalysisLabel({
+    qCode,
+    depthStage,
+    phase,
+    targetKind,
+    situationTopic,
+  });
+
+  const analysisTextForTraining =
+    sanitizeAnalysisTextForTraining(analysisTextCandidate, replyText, inputText) ??
+    sanitizeAnalysisTextForTraining(fallbackAnalysisLabel, replyText, inputText) ??
     '（内容なし）';
 
   const payload = {
@@ -248,7 +314,7 @@ export async function saveIrosTrainingSample(params: SaveIrosTrainingSampleParam
     source: 'iros',
 
     input_text: inputText,
-    analysis_text: analysisText,
+    analysis_text: analysisTextForTraining,
 
     q_code: qCode,
     depth_stage: depthStage,
@@ -271,7 +337,11 @@ export async function saveIrosTrainingSample(params: SaveIrosTrainingSampleParam
     extra: {
       meta: meta ?? null,
       replyText: replyText ?? null,
-      intentSummary: pickString(meta?.unified?.intentSummary) ?? null,
+      intentSummary:
+        pickString(meta?.unified?.intentSummary) ??
+        pickString(meta?.unified?.intent_summary) ??
+        null,
+      analysisFallbackLabel: fallbackAnalysisLabel,
     },
   };
 

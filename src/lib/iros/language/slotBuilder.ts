@@ -13,9 +13,21 @@ export type SlotPlan = {
   slots: Record<SlotKey, string | null>;
 };
 
+// ✅ 追加：変化なし（No-Delta）の種別（上流で判定して渡す）
+export type NoDeltaKind = 'repeat-warning' | 'short-loop' | 'stuck' | 'unknown';
+
 export type BuildSlotsContext = {
   descentGate: DescentGateState | boolean | null | undefined; // 互換：旧booleanも許可
   spinLoop?: SpinLoop | null | undefined; // ✅ 追加：回転ループ（TCF なら下降扱い）
+
+  // ✅ 追加：No-Delta シグナル（SlotBuilderは「タグを立てる」だけ）
+  // - true のとき、OBS に :no-delta を付与して Writer に「冒頭1文=状態翻訳」を強制させる
+  noDelta?: boolean | null | undefined;
+  noDeltaKind?: NoDeltaKind | null | undefined;
+
+  // ✅ 追加：I層プレゼン用（上司I層 + 自分I層など “両建て” を Writer に伝える）
+  // - slotBuilder 側では本文を作らず、タグだけ立てる
+  iLayerDual?: boolean | null | undefined;
 };
 
 function normalizeDescentGate(
@@ -32,6 +44,16 @@ function normalizeSpinLoop(v: unknown): SpinLoop | null {
   const s = v.trim().toUpperCase();
   if (s === 'SRI') return 'SRI';
   if (s === 'TCF') return 'TCF';
+  return null;
+}
+
+function normalizeNoDeltaKind(v: unknown): NoDeltaKind | null {
+  if (typeof v !== 'string') return null;
+  const s = v.trim().toLowerCase();
+  if (s === 'repeat-warning' || s === 'repeat') return 'repeat-warning';
+  if (s === 'short-loop' || s === 'short') return 'short-loop';
+  if (s === 'stuck') return 'stuck';
+  if (s === 'unknown') return 'unknown';
   return null;
 }
 
@@ -52,6 +74,12 @@ function baseSlots(): Record<SlotKey, string | null> {
 export function buildSlots(frame: FrameKind, ctx: BuildSlotsContext): SlotPlan {
   const dg = normalizeDescentGate(ctx?.descentGate);
   const loop = normalizeSpinLoop(ctx?.spinLoop);
+
+  const noDelta = ctx?.noDelta === true;
+  const noDeltaKind = normalizeNoDeltaKind(ctx?.noDeltaKind) ?? null;
+
+  const iLayerDual = ctx?.iLayerDual === true;
+
   const slots = baseSlots();
 
   // --- 下降ゲート（安全・減速） ---
@@ -60,9 +88,7 @@ export function buildSlots(frame: FrameKind, ctx: BuildSlotsContext): SlotPlan {
     slots.SAFE =
       dg === 'offered' ? 'SAFE:descent-offered' : 'SAFE:descent-accepted';
   } else {
-    // ✅ 追加：dg が closed でも「TCF(下降)」なら SAFE を立てる
-    // - 下降回転のときは、ユーザーが「踏み込まれたくない」方向に寄りやすいので、
-    //   Slot側で常に安全ギアを入れる（FramePlan.required の整合も取れる）
+    // ✅ dg が closed でも「TCF(下降)」なら SAFE を立てる
     if (loop === 'TCF') {
       slots.SAFE = 'SAFE:spin-tcf';
     }
@@ -117,9 +143,12 @@ export function buildSlots(frame: FrameKind, ctx: BuildSlotsContext): SlotPlan {
     }
 
     case 'I': {
-      slots.OBS = 'OBS:intention';
-      slots.SHIFT = 'SHIFT:intention';
-      slots.NEXT = 'NEXT:intention';
+      // I = 本質 / 意図 / 未来（刺す・確信・結論寄せの器）
+      slots.OBS = iLayerDual ? 'OBS:intention:dual' : 'OBS:intention';
+      slots.SHIFT = iLayerDual ? 'SHIFT:intention:dual' : 'SHIFT:intention';
+      slots.NEXT = iLayerDual ? 'NEXT:intention:align' : 'NEXT:intention';
+      // I層プレゼン中は SAFE を邪魔しない（あれば尊重）。無ければ薄く置く
+      if (!slots.SAFE) slots.SAFE = 'SAFE:intention';
       break;
     }
 
@@ -135,6 +164,31 @@ export function buildSlots(frame: FrameKind, ctx: BuildSlotsContext): SlotPlan {
       // 将来拡張用：何もしない
       break;
     }
+  }
+
+  // ✅ NO_DELTA_OBS（最小で効く追加）
+  // - “本文”は作らない。Writer が「冒頭1文=状態翻訳」を必ず出せるようにタグを立てるだけ。
+  // - MICRO/NONE は崩れやすいのでここでは触らない（必要なら上流で frame を切り替える）
+  if (noDelta && frame !== 'NONE' && frame !== 'MICRO') {
+    // OBS に no-delta を必ず付与
+    slots.OBS = slots.OBS ? `${slots.OBS}:no-delta` : 'OBS:no-delta';
+
+    // repeat/stuck のときだけ「責め→条件」へ寄せるタグに差し替え（強制はしない、最小）
+    if (noDeltaKind === 'repeat-warning' || noDeltaKind === 'stuck') {
+      if (frame === 'S' || frame === 'R' || frame === 'F') {
+        slots.SHIFT = 'SHIFT:nonchange-structure';
+        slots.NEXT = 'NEXT:probe-conditions';
+      }
+
+      // I層は「断定→一致点→次の一手」へ寄せる（刺すが、圧は上げない）
+      if (frame === 'I') {
+        slots.SHIFT = iLayerDual ? 'SHIFT:intention:dual:pin' : 'SHIFT:intention:pin';
+        slots.NEXT = iLayerDual ? 'NEXT:intention:align:one-step' : 'NEXT:intention:one-step';
+      }
+    }
+
+    // SAFE が未設定なら薄い保険だけ置く（下降SAFEがある場合は尊重）
+    if (!slots.SAFE) slots.SAFE = 'SAFE:no-delta';
   }
 
   return { frame, slots };

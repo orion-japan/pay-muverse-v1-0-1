@@ -66,13 +66,22 @@ function isDescending(dg: DescentGateState): boolean {
   return dg !== 'closed';
 }
 
-function normalizeDepthHead(depth: string | null): 'S' | 'F' | 'R' | 'C' | 'I' | 'T' | null {
+function normalizeDepthHead(
+  depth: string | null
+): 'S' | 'F' | 'R' | 'C' | 'I' | 'T' | null {
   if (!depth || typeof depth !== 'string') return null;
   const s = depth.trim().toUpperCase();
   if (!s) return null;
 
   const head = (s[0] ?? '') as any;
-  if (head === 'S' || head === 'F' || head === 'R' || head === 'C' || head === 'I' || head === 'T') {
+  if (
+    head === 'S' ||
+    head === 'F' ||
+    head === 'R' ||
+    head === 'C' ||
+    head === 'I' ||
+    head === 'T'
+  ) {
     return head;
   }
   return null;
@@ -89,7 +98,7 @@ export function selectFrame(
   inputKind: InputKind
 ): FrameKind {
   const dg = normalizeDescentGate(state?.descentGate);
-  const depthHead = normalizeDepthHead(state?.depth); // 'S' | 'F' | 'R' | 'C' | 'I' | 'T' | null
+  const depthHead = normalizeDepthHead(state?.depth);
 
   // 1) 超短文は器が崩れない MICRO を最優先
   if (inputKind === 'micro') return 'MICRO';
@@ -97,19 +106,21 @@ export function selectFrame(
   // 2) デバッグ系は NONE（余計な装飾なし）
   if (inputKind === 'debug') return 'NONE';
 
-  // 3) 実装依頼/作業依頼は C 寄せ（器としての整理）
+  // 3) 実装依頼 / 作業依頼は C（整理された器）
   if (inputKind === 'request') return 'C';
 
   // 4) 挨拶は NONE（軽く）
   if (inputKind === 'greeting') return 'NONE';
 
-  // 5) 下降中なら T/C/F の器を強める（深度 head を優先）
+  // 5) 下降中（TCF）なら T/C/F を優先
   if (isDescending(dg)) {
     if (depthHead === 'T') return 'T';
     if (depthHead === 'C') return 'C';
     if (depthHead === 'F') return 'F';
 
-    // depth が取れない下降は、提案=offered なら T、実行=accepted なら F（支える）を優先
+    // depth が取れない場合のフォールバック
+    // - offered ＝ まだ降りる前 → T（気づき）
+    // - accepted＝ 降下中       → F（支える）
     return dg === 'offered' ? 'T' : 'F';
   }
 
@@ -122,14 +133,15 @@ export function selectFrame(
   if (depthHead === 'S') return 'S';
 
   // 7) question / chat のデフォルト
-  if (inputKind === 'question') return 'R'; // 質問は R（状況と接続）に寄せる最小版
+  if (inputKind === 'question') return 'R';
+
   return 'NONE';
 }
 
 /**
  * FramePlan reason の文字列を作る（デバッグ用）
- * - descentGate が空になる事故を防ぐため、ここで必ず normalize する
- * - 呼び出し側が state を一部欠落で渡しても壊れない
+ * - descentGate が空になる事故を防ぐため、ここで必ず normalize
+ * - 呼び出し側が state を欠落で渡しても壊れない
  */
 export function buildFrameReason(args: {
   frame: FrameKind;
@@ -139,7 +151,9 @@ export function buildFrameReason(args: {
   const { frame, inputKind, state } = args;
 
   const depthStage =
-    typeof state?.depth === 'string' && state.depth.trim() ? state.depth.trim() : '';
+    typeof state?.depth === 'string' && state.depth.trim()
+      ? state.depth.trim()
+      : '';
 
   const dg = normalizeDescentGate(state?.descentGate as any);
 
