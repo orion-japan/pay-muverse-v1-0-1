@@ -8,6 +8,10 @@ import { isMetaAnchorText } from '@/lib/iros/intentAnchor';
 // ★ 追加：MemoryRecall から pastStateNote を作る
 import { preparePastStateNoteForTurn } from '@/lib/iros/memoryRecall';
 
+// ★★★ 追加：文章レンダリング層（IT時だけ差し替え）
+import { renderReply } from '@/lib/iros/language/renderReply';
+import { buildResonanceVector } from '@/lib/iros/language/resonanceVector';
+
 export type PostProcessReplyArgs = {
   supabase: SupabaseClient;
   userCode: string;
@@ -156,21 +160,46 @@ function ensureRotationState(meta: any, orchResult: any): any {
   // orchResult 由来の rotation 候補も拾う（metaに入ってない場合の取りこぼし防止）
   const or: any = orchResult && typeof orchResult === 'object' ? orchResult : null;
 
+  // ✅ extra 由来（UIボタン等の override）
+  const ex: any = m.extra && typeof m.extra === 'object' ? m.extra : {};
+
   const rot =
     m.rotation ??
     m.rotationState ??
     m.spin ??
     (m.will && (m.will.rotation ?? m.will.spin)) ??
-    (or && (or.rotation ?? or.rotationState ?? or.spin ?? (or.will && (or.will.rotation ?? or.will.spin)))) ??
+    (or &&
+      (or.rotation ??
+        or.rotationState ??
+        or.spin ??
+        (or.will && (or.will.rotation ?? or.will.spin)))) ??
     null;
 
+  // ---------------------------------------------------------
+  // ✅ 優先順位：extra → rot → meta
+  // （ボタンなどで明示した値を「確実に勝たせる」）
+  // ---------------------------------------------------------
   const spinLoop =
-    normalizeSpinLoop(rot?.spinLoop ?? rot?.loop) ?? normalizeSpinLoop(m.spinLoop) ?? null;
+    normalizeSpinLoop(ex?.spinLoop ?? ex?.spin_loop) ??
+    normalizeSpinLoop(rot?.spinLoop ?? rot?.loop) ??
+    normalizeSpinLoop(m.spinLoop) ??
+    null;
 
-  const descentGate = normalizeDescentGate(rot?.descentGate ?? m.descentGate);
+  const descentGate = normalizeDescentGate(
+    ex?.descentGate ?? ex?.descent_gate ?? rot?.descentGate ?? m.descentGate,
+  );
 
   const depth =
-    normalizeDepth(rot?.nextDepth ?? rot?.depth) ?? normalizeDepth(m.depth) ?? null;
+    normalizeDepth(ex?.depth ?? ex?.nextDepth ?? ex?.next_depth) ??
+    normalizeDepth(rot?.nextDepth ?? rot?.depth) ??
+    normalizeDepth(m.depth) ??
+    null;
+
+  // ✅ renderMode も extra を本体に同期（ログの “renderMode: undefined” を消す）
+  const rm = ex?.renderMode ?? ex?.render_mode;
+  if (rm != null && m.renderMode == null && m.render_mode == null) {
+    m.renderMode = rm;
+  }
 
   // ここで “唯一の正規形” に揃える
   m.spinLoop = spinLoop;
@@ -186,6 +215,7 @@ function ensureRotationState(meta: any, orchResult: any): any {
 
   return m;
 }
+
 
 /* =========================================================
    pastStateNote injection guards (single source)
@@ -256,7 +286,7 @@ function shouldSkipPastStateNote(args: PostProcessReplyArgs, metaForSave: any): 
   // 2) recall モード中は注入しない（recall 自体が別ルート）
   if (requestedMode === 'recall') return true;
 
-    // 3) goal系は注入しない（割り込み/混線防止）
+  // 3) goal系は注入しない（割り込み/混線防止）
   //    recall系は “明示 recall” のときだけ許可する
   const recallOrGoal = isRecallOrGoalLike(userText);
   if (recallOrGoal && !explicitRecall) return true;
@@ -269,10 +299,23 @@ function shouldSkipPastStateNote(args: PostProcessReplyArgs, metaForSave: any): 
   return false;
 }
 
+/* =========================================================
+   IT Render switch (postprocess side)
+   - meta.renderMode === 'IT' の時だけ renderReply を通して差し替える
+========================================================= */
+
+function isItRenderMode(metaForSave: any): boolean {
+  const rm =
+    metaForSave?.renderMode ?? metaForSave?.render_mode ?? metaForSave?.extra?.renderMode ?? null;
+
+  return String(rm ?? '').toUpperCase() === 'IT';
+}
+
 export async function postProcessReply(args: PostProcessReplyArgs): Promise<PostProcessReplyOutput> {
   const { orchResult, supabase, userCode, userText } = args;
 
   const assistantText = extractAssistantText(orchResult);
+  let finalAssistantText = assistantText;
 
   // meta は result.meta をベースにする（なければ空オブジェクトで統一）
   const metaRaw =
@@ -282,13 +325,8 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
 
   const metaForSave: any = metaRaw && typeof metaRaw === 'object' ? { ...metaRaw } : {};
 
-  // ✅ 最終確定：qTraceUpdated を metaForSave に焼き込む（返却直前の meta 実体に反映）
-  // - qTraceUpdated は上流で計算済みの想定。orchResult / metaRaw のどちらかに乗っているものを拾う。
   // ✅ 最終確定：qTraceUpdated を metaForSave / metaForReply に焼き込む
-  const qTraceUpdated: any =
-    (orchResult as any)?.qTraceUpdated ??
-    (metaRaw as any)?.qTraceUpdated ??
-    null;
+  const qTraceUpdated: any = (orchResult as any)?.qTraceUpdated ?? (metaRaw as any)?.qTraceUpdated ?? null;
 
   const applyQTraceUpdated = (m: any) => {
     if (!m || !qTraceUpdated || typeof qTraceUpdated !== 'object') return;
@@ -323,8 +361,7 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
   // ✅ “北極星事故” の最後の止血（ここでも落とす）
   sanitizeIntentAnchor(metaForSave);
 
-  // ✅ rotationState を postprocess 時点で一本化しておく
-  // （handleIrosReply.ts 側にも bridge があってOK。ここは「取りこぼし防止」）
+  // ✅ rotationState を postprocess 時点で一本化しておく（取りこぼし防止）
   try {
     ensureRotationState(metaForSave, orchResult);
   } catch (e) {
@@ -332,9 +369,7 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
   }
 
   // =========================================================
-  // ✅ ここが「注入」本体：pastStateNote を作って meta.extra に入れる
-  //   - single source: postprocess のみ
-  //   - ただし「必要な時だけ」注入する（ガードあり）
+  // ✅ pastStateNote 注入（必要な時だけ）
   // =========================================================
   metaForSave.extra = metaForSave.extra ?? {};
 
@@ -349,68 +384,135 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
       userCode,
       reason: 'guard',
     });
+  } else {
+    try {
+      const topicLabel =
+        typeof args.topicLabel === 'string'
+          ? args.topicLabel
+          : metaForSave?.situation_topic ?? metaForSave?.situationTopic ?? metaForSave?.topicLabel ?? null;
 
-    return { assistantText, metaForSave };
-  }
+      const limit =
+        typeof args.pastStateLimit === 'number' && Number.isFinite(args.pastStateLimit)
+          ? args.pastStateLimit
+          : 3;
 
-  try {
-    const topicLabel =
-      typeof args.topicLabel === 'string'
-        ? args.topicLabel
-        : metaForSave?.situation_topic ??
-          metaForSave?.situationTopic ??
-          metaForSave?.topicLabel ??
-          null;
+      // ✅ Step B：default false（常時fallbackをやめる）
+      // true にするのは：
+      // - 引数で明示
+      // - topicLabel がある
+      // - 明示 recall 要求がある
+      const explicitRecall = isExplicitRecallRequest(userText);
 
-    const limit =
-      typeof args.pastStateLimit === 'number' && Number.isFinite(args.pastStateLimit)
-        ? args.pastStateLimit
-        : 3;
+      const forceFallback =
+        typeof args.forceRecentTopicFallback === 'boolean'
+          ? args.forceRecentTopicFallback
+          : Boolean(topicLabel) || explicitRecall;
 
-    // ✅ Step B：default false（常時fallbackをやめる）
-    // true にするのは：
-    // - 引数で明示
-    // - topicLabel がある
-    // - 明示 recall 要求がある
-    const explicitRecall = isExplicitRecallRequest(userText);
+      // ★ memoryRecall 側の引数名が (client) でも (supabase) でも壊れないように両方渡す
+      const recall = await preparePastStateNoteForTurn({
+        client: supabase,
+        supabase,
+        userCode,
+        userText,
+        topicLabel,
+        limit,
+        forceRecentTopicFallback: forceFallback,
+      } as any);
 
-    const forceFallback =
-      typeof args.forceRecentTopicFallback === 'boolean'
-        ? args.forceRecentTopicFallback
-        : Boolean(topicLabel) || explicitRecall;
+      // hasNote の時だけ入れる（トークン節約）
+      if (recall?.hasNote && recall?.pastStateNoteText) {
+        metaForSave.extra.pastStateNoteText = recall.pastStateNoteText;
+        metaForSave.extra.pastStateTriggerKind = recall.triggerKind ?? null;
+        metaForSave.extra.pastStateKeyword = recall.keyword ?? null;
+      } else {
+        metaForSave.extra.pastStateNoteText = null;
+        metaForSave.extra.pastStateTriggerKind = recall?.triggerKind ?? null;
+        metaForSave.extra.pastStateKeyword = recall?.keyword ?? null;
+      }
 
-    const recall = await preparePastStateNoteForTurn({
-      client: supabase,
-      userCode,
-      userText,
-      topicLabel,
-      limit,
-      forceRecentTopicFallback: forceFallback,
-    });
-
-    // hasNote の時だけ入れる（トークン節約）
-    if (recall.hasNote && recall.pastStateNoteText) {
-      metaForSave.extra.pastStateNoteText = recall.pastStateNoteText;
-      metaForSave.extra.pastStateTriggerKind = recall.triggerKind ?? null;
-      metaForSave.extra.pastStateKeyword = recall.keyword ?? null;
-    } else {
-      metaForSave.extra.pastStateNoteText = null;
-      metaForSave.extra.pastStateTriggerKind = recall.triggerKind ?? null;
-      metaForSave.extra.pastStateKeyword = recall.keyword ?? null;
+      console.log('[IROS/PostProcess] pastStateNote injected', {
+        userCode,
+        hasNote: Boolean(recall?.hasNote),
+        triggerKind: recall?.triggerKind ?? null,
+        keyword: recall?.keyword ?? null,
+        len: recall?.pastStateNoteText ? recall.pastStateNoteText.length : 0,
+        forceFallback,
+        topicLabel,
+      });
+    } catch (e) {
+      console.warn('[IROS/PostProcess] pastStateNote inject failed', e);
     }
-
-    console.log('[IROS/PostProcess] pastStateNote injected', {
-      userCode,
-      hasNote: recall.hasNote,
-      triggerKind: recall.triggerKind,
-      keyword: recall.keyword,
-      len: recall.pastStateNoteText ? recall.pastStateNoteText.length : 0,
-      forceFallback,
-      topicLabel,
-    });
-  } catch (e) {
-    console.warn('[IROS/PostProcess] pastStateNote inject failed', e);
   }
 
-  return { assistantText, metaForSave };
+  // =========================================================
+  // ★★★ IT のときだけ renderReply を噛ませて最終表示を差し替える（最小・確実版）
+  // =========================================================
+  if (isItRenderMode(metaForSave)) {
+    try {
+      const spinLoop = metaForSave?.rotationState?.spinLoop ?? metaForSave?.spinLoop ?? null;
+
+      const descentGate =
+        metaForSave?.rotationState?.descentGate ?? metaForSave?.descentGate ?? 'closed';
+
+      const spinStep =
+        typeof metaForSave?.spinStep === 'number' && Number.isFinite(metaForSave.spinStep)
+          ? metaForSave.spinStep
+          : null;
+
+      // framePlan は renderReply.ts が参照する可能性があるので温存
+      const framePlan = metaForSave?.framePlan ?? null;
+
+      // ResonanceVector を meta から組む
+      const vector = buildResonanceVector({
+        meta: metaForSave,
+        userText,
+      } as any);
+
+      // IT構造化の材料
+      const input = {
+        facts: userText,
+        insight: assistantText,
+        nextStep: null,
+        userWantsEssence: true,
+        highDefensiveness: false,
+        userText,
+      };
+
+      // ★ renderMode='IT' を opts に渡す（renderReply.ts 側が拾う）
+      const renderedText = renderReply(vector as any, input as any, {
+        mode: 'transcend',
+        maxLines: 14,
+        ...( {
+          renderMode: 'IT',
+          spinLoop,
+          descentGate,
+          framePlan,
+          spinStep,
+        } as any ),
+      } as any);
+
+      const out = toNonEmptyString(renderedText);
+      if (out) {
+        finalAssistantText = out;
+
+        metaForSave.extra = metaForSave.extra ?? {};
+        metaForSave.extra.renderedBy = 'renderReply';
+        metaForSave.extra.renderedMode = 'IT';
+      }
+
+      console.log('[IROS/PostProcess] renderReply applied', {
+        userCode,
+        renderMode: metaForSave?.renderMode,
+        itReason: metaForSave?.itReason ?? metaForSave?.extra?.itReason ?? null,
+        len: out ? out.length : 0,
+        spinLoop,
+        spinStep,
+        descentGate,
+      });
+    } catch (e) {
+      console.warn('[IROS/PostProcess] renderReply failed (fallback to assistantText)', e);
+    }
+  }
+
+  return { assistantText: finalAssistantText, metaForSave };
 }

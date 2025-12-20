@@ -1,5 +1,5 @@
-// src/lib/iros/language/renderReply.ts
-// iros — Field Rendering (文章レンダリング層)
+// file: src/lib/iros/language/renderReply.ts
+// iros — Field Rendering (文章レンダリング層) [compact]
 
 import type { ResonanceVector } from './resonanceVector';
 import type { ReplyPlan, ContainerId, ReplySlotKey } from './planReply';
@@ -13,6 +13,10 @@ export type RenderInput = {
   userWantsEssence?: boolean;
   highDefensiveness?: boolean;
   seed?: string;
+
+  // ✅ 追加：IT構造化の材料（あれば使う / 無くても落ちない）
+  // ※上流で userText を渡せるようになったら、より自然に“状態定義”が書ける
+  userText?: string | null;
 };
 
 export type RenderOptions = {
@@ -29,69 +33,19 @@ export function renderReply(
 ): string {
   const framePlan = (opts as any)?.framePlan ?? null;
 
-  // --- SPIN debug (取り元ズレ吸収 + シャドー禁止) ---
-  type SpinLayer = 'S' | 'R' | 'C' | 'I' | 'T';
+  // ✅ 外部（extra/meta）からの強制指定を優先して拾う
+  const forcedRenderMode = (opts as any)?.renderMode as string | undefined;
+  const forcedSpinLoop = (opts as any)?.spinLoop as string | undefined;
+  const forcedDescentGate = (opts as any)?.descentGate as unknown;
 
-  function normalizeSpinLayer(v: unknown): SpinLayer | null {
-    if (typeof v !== 'string') return null;
-    const s = v.trim().toUpperCase();
-    return s === 'S' || s === 'R' || s === 'C' || s === 'I' || s === 'T'
-      ? (s as SpinLayer)
-      : null;
-  }
+  // ---- 🔻下降（TCF）制御（vector ではなく “強制指定込み” で判定） ----
+  const spinLoop = (forcedSpinLoop ?? ((vector as any).spinLoop ?? null)) as
+    | 'SRI'
+    | 'TCF'
+    | string
+    | null;
 
-  const fp: any =
-    (typeof framePlan !== 'undefined' ? (framePlan as any) : null) ??
-    (opts as any)?.framePlan ??
-    null;
-
-  const vx: any =
-    (typeof vector !== 'undefined' ? (vector as any) : null) ??
-    (opts as any)?.vector ??
-    null;
-
-  const spinLayer: SpinLayer | null =
-    normalizeSpinLayer(fp?.frame) ??
-    normalizeSpinLayer(vx?.intentLayer) ??
-    null;
-
-  console.log('[RENDER][SPIN]', {
-    loop: vx?.spinLoop ?? null,
-    step: vx?.spinStep ?? null,
-    frame: fp?.frame ?? null,
-    layer: spinLayer,
-  });
-
-  const enableTrace =
-    process.env.NODE_ENV !== 'production' &&
-    (process.env.IROS_RENDER_TRACE === '1' ||
-      (opts as any)?.debugTrace === true);
-
-  if (enableTrace) {
-    console.trace('[RENDER][SPIN][CALLER]');
-  }
-
-  const mode = opts.mode ?? inferMode(vector);
-
-  const seed =
-    (input.seed && input.seed.trim()) || stableSeedFromInput(vector, input);
-
-  const minimalEmoji = !!opts.minimalEmoji;
-  const maxLines = typeof opts.maxLines === 'number' ? opts.maxLines : 14;
-
-  // ✅ NO_DELTA 検知
-  const noDelta = detectNoDelta(vector);
-  const noDeltaKind = detectNoDeltaKind(vector);
-
-  const factsRaw = normalizeOne(input.facts);
-  const insightRaw0 = normalizeNullable(input.insight);
-  const nextRaw = normalizeNullable(input.nextStep);
-
-  // ---- 🔻下降（TCF）制御 ----
-  const spinLoop = ((vector as any).spinLoop ?? null) as string | null;
-  const spinStep = ((vector as any).spinStep ?? null) as number | null;
-
-  const descentGateRaw = (vector as any).descentGate as
+  const descentGateRaw = (forcedDescentGate ?? (vector as any).descentGate) as
     | 'closed'
     | 'offered'
     | 'accepted'
@@ -111,53 +65,74 @@ export function renderReply(
           : 'closed';
 
   const isDescent = spinLoop === 'TCF' || descentGate !== 'closed';
-  const suppressAsk = true; // ✅ ここ重要：デフォルトで「問い」を出さない（提案で閉じる）
+  const suppressAsk = true;
+
+  // ✅ IT 指定が来たら mode を強制的に transcend 扱いに寄せる（まず動かす）
+  const baseMode = opts.mode ?? inferMode(vector);
+  const mode: RenderMode = forcedRenderMode === 'IT' ? 'transcend' : baseMode;
+
+  // 以降は元の処理のまま
+  const seed =
+    (input.seed && input.seed.trim()) || stableSeedFromInput(vector, input);
+
+  const minimalEmoji = !!opts.minimalEmoji;
+  const maxLines = typeof opts.maxLines === 'number' ? opts.maxLines : 14;
+
+  // ✅ NO_DELTA 検知（現状は“差し込まない”方針だが、将来の条件分岐に残しておく）
+  const noDelta = detectNoDelta(vector);
+  const noDeltaKind = detectNoDeltaKind(vector);
+
+  const factsRaw = normalizeOne(input.facts);
+  const insightRaw0 = normalizeNullable(input.insight);
+  const nextRaw = normalizeNullable(input.nextStep);
+
+  const spinStep = ((vector as any).spinStep ?? null) as number | null;
 
   const nextAdjusted =
     nextRaw && isDescent
       ? adjustNextForDescent(nextRaw, seed, spinStep)
       : nextRaw;
-  // ---- 🔺ここまで ----
 
-  const autoInsightRaw =
-    !insightRaw0 &&
-    noDelta &&
-    noDeltaKind === 'stuck' &&
-    hasStuckOneLineInsightTag(vector)
-      ? buildStuckOneLineInsight(vector, factsRaw, seed)
-      : null;
+  // ✅ IT構造化（最短デモ）：forcedRenderMode==='IT' のときは通常planを通さず返す
+  if (forcedRenderMode === 'IT') {
+    const itText = renderITStructured({
+      seed,
+      minimalEmoji,
+      maxLines,
+      userText: normalizeNullable(input.userText) ?? '',
+      facts: factsRaw,
+      insight: insightRaw0,
+      nextStep: nextAdjusted,
+      isDescent,
+      spinStep,
+    });
 
-  const insightRaw = insightRaw0 ?? autoInsightRaw;
+    return itText.trim();
+  }
 
-  const exposeInsightFlag =
+  // ---- noDelta 最小（factsに余計な観測文は足さない方針）----
+  // ※テンプレ臭の原因になりやすいので「kind確定でも差し込まない」版
+  const facts = shapeFacts(factsRaw, { mode, seed, minimalEmoji });
+
+  const exposeInsight =
     !!opts.forceExposeInsight ||
     shouldExposeInsight({
       mode,
       vector,
-      hasInsight: !!insightRaw,
+      hasInsight: !!insightRaw0,
       userWantsEssence: !!input.userWantsEssence,
       highDefensiveness: !!input.highDefensiveness,
     });
 
-  const insight = insightRaw
-    ? exposeInsightFlag
-      ? shapeInsightDirect(insightRaw, { mode, seed, minimalEmoji })
-      : shapeInsightDiffuse(insightRaw, { mode, seed, minimalEmoji })
+  const insight = insightRaw0
+    ? exposeInsight
+      ? shapeInsightDirect(insightRaw0, { mode, seed, minimalEmoji })
+      : shapeInsightDiffuse(insightRaw0, { mode, seed, minimalEmoji })
     : null;
 
-  const next = nextAdjusted
-    ? shapeNext(nextAdjusted, { vector, mode, seed, minimalEmoji })
+  const next = nextRaw
+    ? shapeNext(nextRaw, { vector, mode, seed, minimalEmoji })
     : null;
-
-  // ✅ facts を “NO_DELTA_OBS 1文” で前処理（ただしテンプレ臭は排除）
-  const facts = shapeFactsWithNoDelta(factsRaw, {
-    mode,
-    seed,
-    minimalEmoji,
-    noDelta,
-    noDeltaKind,
-    vector,
-  });
 
   const plan = buildPlan({
     vector,
@@ -169,233 +144,95 @@ export function renderReply(
     next,
     userWantsEssence: !!input.userWantsEssence,
     highDefensiveness: !!input.highDefensiveness,
-    exposeInsight: exposeInsightFlag,
-    suppressAsk, // ✅ 常時 true
+    exposeInsight,
   });
 
   const out = renderFromPlan(plan);
-
   return clampLines(out, maxLines).trim();
 }
 
 /* =========================
-   NO_DELTA detection
+   ✅ IT structured renderer
 ========================= */
 
-function detectNoDelta(vector: ResonanceVector): boolean {
-  const v: any = vector as any;
-
-  if (v?.noDelta === true) return true;
-
-  const sp = v?.slotPlan;
-  if (sp && typeof sp === 'object' && !Array.isArray(sp)) {
-    const obs = typeof sp.OBS === 'string' ? sp.OBS : null;
-    if (obs && obs.includes(':no-delta')) return true;
-  }
-
-  const slots = v?.slots;
-  if (slots && typeof slots === 'object' && !Array.isArray(slots)) {
-    const obs = typeof slots.OBS === 'string' ? slots.OBS : null;
-    if (obs && obs.includes(':no-delta')) return true;
-  }
-
-  return false;
-}
-
-function detectNoDeltaKind(
-  vector: ResonanceVector,
-): 'repeat-warning' | 'short-loop' | 'stuck' | 'unknown' | null {
-  const v: any = vector as any;
-  const k = v?.noDeltaKind;
-
-  if (typeof k === 'string') {
-    const s = k.trim().toLowerCase();
-    if (s === 'repeat-warning') return 'repeat-warning';
-    if (s === 'short-loop') return 'short-loop';
-    if (s === 'stuck') return 'stuck';
-    if (s === 'unknown') return 'unknown';
-  }
-
-  return null;
-}
-
-function detectInsightSlot(vector: ResonanceVector): string | null {
-  const v: any = vector as any;
-
-  const sp = v?.slotPlan;
-  if (sp && typeof sp === 'object' && !Array.isArray(sp)) {
-    const ins = typeof sp.INSIGHT === 'string' ? sp.INSIGHT : null;
-    if (ins) return ins;
-  }
-
-  const slots = v?.slots;
-  if (slots && typeof slots === 'object' && !Array.isArray(slots)) {
-    const ins = typeof slots.INSIGHT === 'string' ? slots.INSIGHT : null;
-    if (ins) return ins;
-  }
-
-  return null;
-}
-
-/* =========================
-   INSIGHT auto (stuck one-line)
-========================= */
-
-function hasStuckOneLineInsightTag(vector: ResonanceVector): boolean {
-  const v: any = vector as any;
-  const sp = v?.slotPlan;
-  const tag =
-    sp && typeof sp === 'object' && !Array.isArray(sp) ? sp.INSIGHT : null;
-
-  if (typeof tag === 'string' && tag.includes('INSIGHT:stuck:one-line')) return true;
-
-  const slots = v?.slots;
-  const tag2 =
-    slots && typeof slots === 'object' && !Array.isArray(slots) ? slots.INSIGHT : null;
-
-  return typeof tag2 === 'string' && tag2.includes('INSIGHT:stuck:one-line');
-}
-
-function buildStuckOneLineInsight(
-  vector: ResonanceVector,
-  facts: string,
-  seed: string,
-): string {
-  const v: any = vector as any;
-  const s = String(v?.situationSummary ?? '').trim();
-  const key = `${s} ${facts}`.trim();
-
-  // ⚠️ ここは「固定前提」系の言い回しを廃止して“論点の固着”に統一
-  if (key.includes('浮気')) {
-    return '論点は「境界が崩れた地点」を特定できていないことに固着しています。';
-  }
-  if (key.includes('考えない') || key.includes('相手の事')) {
-    return '論点は「相手が配慮するはず」という期待の置き場に固着しています。';
-  }
-  if (key.includes('なんで')) {
-    return '論点は「当然こうなるはず」という期待が先に立っている点に固着しています。';
-  }
-
-  const base = s || facts;
-  const clip = base.length > 32 ? base.slice(0, 32) + '…' : base;
-
-  const frames = [
-    `論点は「${clip}」の一点に固着しています。`,
-    `いま止まっているのは「${clip}」の焦点が動いていないためです。`,
-    `詰まりは「${clip}」の見方が固定化しているところにあります。`,
-  ];
-
-  return pick(seed + '|stk1', frames);
-}
-
-/* =========================
-   NO_DELTA observation line
-========================= */
-
-function buildNoDeltaObservationLine(args: {
+function renderITStructured(args: {
   seed: string;
   minimalEmoji: boolean;
-  kind: 'repeat-warning' | 'short-loop' | 'stuck' | 'unknown' | null;
-  vector: ResonanceVector;
+  maxLines: number;
+
+  userText: string;
   facts: string;
+  insight: string | null;
+  nextStep: string | null;
+
+  isDescent: boolean;
+  spinStep: number | null;
 }): string {
-  const { seed, kind, vector, facts } = args;
-
-  // --- stuck 専用：固有1行（テンプレ臭を抑える） ---
-  const insightSlot = detectInsightSlot(vector);
-  if (kind === 'stuck' && insightSlot === 'INSIGHT:stuck:one-line') {
-    const v: any = vector as any;
-    const summary = (v?.situationSummary ?? '').toString().trim();
-
-    if (summary) {
-      return `いま詰まっているのは、「${summary}」の見方が動いていないためです。`;
-    }
-
-    const f = (facts ?? '').toString().trim();
-    if (f) return `いま詰まっているのは、「${stripLeadingMarkers(f)}」の見方が動いていないためです。`;
-
-    return 'いま詰まっているのは、見方が一点に固着しているためです。';
-  }
-
-  // --- 既定：短い“状態説明”だけ（嫌われテンプレ文言は入れない） ---
-  const linesRepeat = [
-    '理解と行動の切り替えが、まだ同じ線に乗っていない状態です。',
-    '現状のままでも回ってしまう条件が残っている状態です。',
-    '言い換えはできても、具体の手がまだ固定されていない状態です。',
-  ];
-
-  const linesShort = [
-    '短文で往復しているのは、論点がまだ整列していないサインです。',
-    '短いやり取りが続くときは、整理の1手が先に必要な局面です。',
-    'いまは“次の条件”が未確定なまま回っている状態です。',
-  ];
-
-  const linesStuck = [
-    'いまは、焦点が一点に固着して回っている状態です。',
-    '停滞に見えるのは、同じ条件で成立し続けているためです。',
-    '変化が起きないのは、切り替え点がまだ特定されていないためです。',
-  ];
-
-  const linesUnknown = [
-    'いまは、結論より先に「整理」の1手が必要な局面です。',
-    'ここは、状況を1行で整列させる段階です。',
-  ];
-
-  const arr =
-    kind === 'repeat-warning'
-      ? linesRepeat
-      : kind === 'short-loop'
-        ? linesShort
-        : kind === 'stuck'
-          ? linesStuck
-          : linesUnknown;
-
-  return pick(seed + '|nd', arr);
-}
-
-// src/lib/iros/language/renderReply.ts
-
-function shapeFactsWithNoDelta(
-  facts: string,
-  ctx: {
-    mode: RenderMode;
-    seed: string;
-    minimalEmoji: boolean;
-    noDelta: boolean;
-    noDeltaKind: 'repeat-warning' | 'short-loop' | 'stuck' | 'unknown' | null;
-    vector: ResonanceVector;
-  },
-): string {
-  const { mode, seed, minimalEmoji, noDelta, noDeltaKind, vector } = ctx;
-
-  const shapedFacts = shapeFacts(facts, { mode, seed, minimalEmoji });
-
-  if (!noDelta) return shapedFacts;
-
-  // ✅ 重要：unknown / null の場合は “観測1行テンプレ” を差し込まない
-  // （テンプレ臭の最大原因。noDeltaKind が確定しているときだけ出す）
-  if (noDeltaKind == null || noDeltaKind === 'unknown') {
-    return shapedFacts;
-  }
-
-  const obs1 = buildNoDeltaObservationLine({
+  const {
     seed,
     minimalEmoji,
-    kind: noDeltaKind,
-    vector,
+    maxLines,
+    userText,
     facts,
-  });
+    insight,
+    nextStep,
+    isDescent,
+    spinStep,
+  } = args;
 
-  // obs1 が空なら facts をそのまま
-  if (!obs1) return shapedFacts;
+  // --- 文の役割（テンプレ文ではなく“型”） ---
+  // I: 状態定義 / ズレ言語化 / 停滞理由
+  const I1 =
+    insight?.trim() ||
+    (userText
+      ? `いま止まっているのは、${soften(userText)} の出来事そのものより、“動きに変換できていない感覚”が残っているからです。`
+      : facts
+        ? `いま止まっているのは、起きている事実（${soften(facts)}）の外側に、まだ“結晶化していない焦点”があるからです。`
+        : 'いまは「答え」ではなく、状態を一度だけ確定する局面です。');
 
-  if (!shapedFacts) return obs1;
-  return `${obs1}\n${shapedFacts}`;
+  const I2 =
+    '守りたいものと、動き方の形が一致していない。だから迷いとして現れている。';
+  const I3 =
+    '選択肢の問題ではなく、焦点がまだ一点に結晶化していないだけです。';
+
+  // T: 未来方向 / 未来状態
+  const T1 =
+    '次の1週間は、正解探しより先に「守りたいものが守られる形」を先に作る。';
+  const T2 =
+    '未来は「不安が消える」より、「迷っても進める足場がある」状態へ。';
+
+  // C: 次の一手（最大2） / やらないこと
+  const nextBase = nextStep?.trim() || '最初の一手だけを切り出して、1分で置く。';
+
+  const nextAdjusted =
+    isDescent ? adjustNextForDescent(nextBase, seed, spinStep) : nextBase;
+
+  const C1 = `今夜は、${nextAdjusted}`;
+  const C2 = '必要なら、境界線を短い一通で先に置く。説明は増やさない。';
+  const C3 = '代わりに、比較と反省で時間を溶かすのはやめる。';
+
+  // F: 確信 / 余韻
+  const F1 = minimalEmoji
+    ? 'もう変化は起きています。あとは、その変化に沿って歩くだけ。'
+    : 'もう変化は起きています。あとは、その変化に沿って歩くだけ。🪔';
+
+  const F2 = '“できる側”のあなたに、戻っています。';
+
+  // 改行設計（スマホ半面〜半面ちょい）
+  const lines: string[] = [I1, I2, I3, '', T1, T2, '', C1, C2, C3, '', F1, F2];
+
+  const text = lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return clampLines(text, maxLines);
 }
 
+function soften(x: string): string {
+  const t = (x ?? '').toString().trim();
+  if (!t) return '';
+  return t.length > 40 ? t.slice(0, 40) + '…' : t;
+}
 
 /* =========================
-   Mode inference & filters
+   Mode
 ========================= */
 
 function inferMode(vector: ResonanceVector): RenderMode {
@@ -404,7 +241,6 @@ function inferMode(vector: ResonanceVector): RenderMode {
 
   if (vector.depthLevel === 2 || transcendence >= 0.7) return 'transcend';
   if (vector.depthLevel === 0 && grounding >= 0.45) return 'casual';
-
   return 'intent';
 }
 
@@ -417,18 +253,15 @@ function shouldExposeInsight(args: {
 }): boolean {
   const { mode, vector, hasInsight, userWantsEssence, highDefensiveness } = args;
   if (!hasInsight) return false;
-
   if (highDefensiveness && mode !== 'transcend') return false;
-
   if (userWantsEssence) return true;
   if (mode === 'transcend') return true;
   if (mode === 'intent' && vector.precision >= 0.62) return true;
-
   return false;
 }
 
 /* =========================
-   Plan: container + slots
+   Plan / Container
 ========================= */
 
 function buildPlan(args: {
@@ -436,16 +269,12 @@ function buildPlan(args: {
   mode: RenderMode;
   seed: string;
   minimalEmoji: boolean;
-
   facts: string;
   insight: string | null;
   next: string | null;
-
   userWantsEssence: boolean;
   highDefensiveness: boolean;
   exposeInsight: boolean;
-
-  suppressAsk: boolean;
 }): ReplyPlan {
   const {
     vector,
@@ -458,11 +287,9 @@ function buildPlan(args: {
     userWantsEssence,
     highDefensiveness,
     exposeInsight,
-    suppressAsk,
   } = args;
 
   const containerId = pickContainer({
-    vector,
     mode,
     seed,
     facts,
@@ -477,38 +304,20 @@ function buildPlan(args: {
   const header = buildHeader({ mode, minimalEmoji, seed, exposeInsight });
   if (header && containerId !== 'NONE') slots.opener = header;
 
-  slots.facts = facts; // ✅ ここで二重整形しない（テンプレ増殖を防ぐ）
-
+  slots.facts = facts;
   if (insight) slots.mirror = insight;
 
-  const elevate = buildElevateLine({ vector, mode, seed, minimalEmoji });
-  if (elevate) slots.elevate = elevate;
-
+  // elevate/ask は “短縮版” では出さない（テンプレ化の主因になりやすい）
   if (next) slots.move = next;
-
-  // ✅ 問いは原則出さない（必要なら上流で nextStep を作って閉じる）
-  const ask = buildAskLine({
-    mode,
-    seed,
-    userWantsEssence,
-    highDefensiveness,
-    suppressAsk,
-    minimalEmoji,
-  });
-  if (ask) slots.ask = ask;
 
   return {
     containerId,
     slots,
-    debug: {
-      reason: `container=${containerId}`,
-      pickedBy: 'rule',
-    },
+    debug: { reason: `container=${containerId}`, pickedBy: 'rule' },
   };
 }
 
 function pickContainer(args: {
-  vector: ResonanceVector;
   mode: RenderMode;
   seed: string;
   facts: string;
@@ -517,7 +326,8 @@ function pickContainer(args: {
   userWantsEssence: boolean;
   highDefensiveness: boolean;
 }): ContainerId {
-  const { mode, seed, facts, insight, next, userWantsEssence, highDefensiveness } = args;
+  const { mode, seed, facts, insight, next, userWantsEssence, highDefensiveness } =
+    args;
 
   const hasInsight = !!insight;
   const hasNext = !!next;
@@ -547,66 +357,38 @@ function renderFromPlan(plan: ReplyPlan): string {
   const opener = s('opener');
   const facts = s('facts') ?? '';
   const mirror = s('mirror');
-  const elevate = s('elevate');
   const move = s('move');
-  const ask = s('ask');
 
   if (containerId === 'NONE') {
-    const parts = [facts, move].filter(Boolean);
-    return parts.join('\n\n').trim();
+    return [facts, move].filter(Boolean).join('\n\n').trim();
   }
 
   if (containerId === 'PLAIN') {
-    return [opener, facts, mirror, elevate, move, ask].filter(Boolean).join('\n\n').trim();
+    return [opener, facts, mirror, move].filter(Boolean).join('\n\n').trim();
   }
 
   if (containerId === 'HEADING') {
-    const mirrorClean = mirror ? stripLeadingMarkers(mirror) : null;
-    const elevateClean = elevate ? stripLeadingMarkers(elevate) : null;
-
     const blocks: string[] = [];
     if (opener) blocks.push(opener);
-
     blocks.push(`■ 現象\n${facts}`);
-    if (mirrorClean) blocks.push(`■ 芯\n${mirrorClean}`);
-    if (elevateClean) blocks.push(`■ 俯瞰\n${elevateClean}`);
+    if (mirror) blocks.push(`■ 芯\n${stripLeadingMarkers(mirror)}`);
     if (move) blocks.push(`■ 次\n${move}`);
-    if (ask) blocks.push(`■ 補足\n${stripLeadingMarkers(ask)}`);
-
     return blocks.join('\n\n').trim();
   }
 
-  if (containerId === 'NUMBERED') {
-    const steps: string[] = [];
-    if (opener) steps.push(opener);
+  // NUMBERED
+  const steps: string[] = [];
+  if (opener) steps.push(opener);
 
-    steps.push(`1) ${facts}`);
-    if (mirror) steps.push(`2) ${stripLeadingMarkers(mirror)}`);
+  steps.push(`1) ${facts}`);
+  if (mirror) steps.push(`2) ${stripLeadingMarkers(mirror)}`);
+  if (move) steps.push(`3) ${move}`);
 
-    let moveInserted = false;
-
-    if (elevate) {
-      steps.push(`3) ${stripLeadingMarkers(elevate)}`);
-    } else if (move) {
-      steps.push(`3) ${move}`);
-      moveInserted = true;
-    }
-
-    if (move && !moveInserted && steps.length < 5) {
-      steps.push(`4) ${move}`);
-      moveInserted = true;
-    }
-
-    if (ask && steps.length < 6) steps.push(`${stripLeadingMarkers(ask)}`);
-
-    return steps.join('\n\n').trim();
-  }
-
-  return [opener, facts, mirror, elevate, move, ask].filter(Boolean).join('\n\n').trim();
+  return steps.join('\n\n').trim();
 }
 
 /* =========================
-   Rendering blocks (slots)
+   Slot shaping
 ========================= */
 
 function buildHeader(args: {
@@ -628,11 +410,7 @@ function buildHeader(args: {
   const head = pick(seed + '|h', candidates);
 
   if (exposeInsight && head) {
-    const pre = pick(seed + '|p', [
-      '要点だけ置きます。',
-      '芯を一つだけ。',
-      '結論を先に。',
-    ]);
+    const pre = pick(seed + '|p', ['要点だけ置きます。', '芯を一つだけ。', '結論を先に。']);
     return `${head} ${pre}`;
   }
 
@@ -643,23 +421,8 @@ function shapeFacts(
   facts: string,
   ctx: { mode: RenderMode; seed: string; minimalEmoji: boolean },
 ): string {
-  const { mode, seed, minimalEmoji } = ctx;
-
   const f = (facts ?? '').toString().trim();
   if (!f) return '';
-
-  // ✅ ここが肝：固定テンプレ前置きを廃止して、factsをそのまま返す
-  // 必要なら最小の合図だけ（短く）
-  if (mode === 'casual') return f;
-
-  if (minimalEmoji) return f;
-
-  // 長文だけ、軽い導入を“固定文なし”で揺らす（テンプレ臭を消す）
-  if (f.length >= 120) {
-    const lead = pick(seed + '|fLead', ['', '', '']);
-    return `${lead}${f}`.trim();
-  }
-
   return f;
 }
 
@@ -700,7 +463,12 @@ function shapeInsightDiffuse(
 
 function shapeNext(
   next: string,
-  ctx: { vector: ResonanceVector; mode: RenderMode; seed: string; minimalEmoji: boolean },
+  ctx: {
+    vector: ResonanceVector;
+    mode: RenderMode;
+    seed: string;
+    minimalEmoji: boolean;
+  },
 ): string {
   const { vector, mode, seed, minimalEmoji } = ctx;
 
@@ -722,61 +490,6 @@ function shapeNext(
 
   const line = pick(seed + '|n', frames).replace('{N}', n);
   return minimalEmoji ? line : `🌱 ${line}`;
-}
-
-function buildElevateLine(args: {
-  vector: ResonanceVector;
-  mode: RenderMode;
-  seed: string;
-  minimalEmoji: boolean;
-}): string | null {
-  const { vector, mode, seed, minimalEmoji } = args;
-
-  // ✅ 変更：intent では原則出さない（soulっぽさの主因）
-  // “向き”は T（transcend）に入った時だけ出す
-  const want = mode === 'transcend';
-
-  if (!want) return null;
-
-  const frames = [
-    '答えを急ぐより、いまは“向き”を整える局面です。',
-    '出来事より先に、流れの向きが決まる段階です。',
-    'ここは結論より、方向が先に立ちます。',
-  ];
-
-  const line = pick(seed + '|e', frames);
-  return minimalEmoji ? line : `🪔 ${line}`;
-}
-
-
-function buildAskLine(args: {
-  mode: RenderMode;
-  seed: string;
-  userWantsEssence: boolean;
-  highDefensiveness: boolean;
-  suppressAsk: boolean;
-  minimalEmoji: boolean;
-}): string | null {
-  const { mode, seed, userWantsEssence, highDefensiveness, suppressAsk, minimalEmoji } = args;
-
-  // ✅ 原則：問いは出さない（テンプレ化して嫌われるため）
-  if (suppressAsk) return null;
-  if (highDefensiveness) return null;
-  if (!userWantsEssence && mode === 'casual') return null;
-
-  // “質問”ではなく“提案”で閉じる（必要なときだけ）
-  const frames = userWantsEssence
-    ? [
-        '必要なら、優先順位だけ1行で置けます。',
-        '必要なら、どれを守りたいかだけ残せます。',
-      ]
-    : [
-        '必要なら、次に残す1行だけ決められます。',
-        '必要なら、判断材料を1つだけ追加できます。',
-      ];
-
-  const line = pick(seed + '|q', frames);
-  return minimalEmoji ? line : `🪔 ${line}`;
 }
 
 /* =========================
@@ -824,12 +537,9 @@ function stripLeadingMarkers(text: string): string {
 function softenInsight(text: string, seed: string): string {
   const t = text.trim();
   const style = pick(seed + '|soft', ['soft', 'neutral', 'soft']);
-
   if (style === 'neutral') return t;
 
-  return t
-    .replace(/です。$/g, '感じです。')
-    .replace(/だ。$/g, 'かもしれません。');
+  return t.replace(/です。$/g, '感じです。').replace(/だ。$/g, 'かもしれません。');
 }
 
 function normalizeOne(s: string): string {
@@ -861,10 +571,10 @@ function stableSeedFromInput(vector: ResonanceVector, input: RenderInput): strin
     input.facts ?? '',
     input.insight ?? '',
     input.nextStep ?? '',
-    String(vector.depthLevel ?? ''),
-    String(Math.round((vector.grounding ?? 0) * 100)),
-    String(Math.round((vector.precision ?? 0) * 100)),
-    String(Math.round((vector.transcendence ?? 0) * 100)),
+    String((vector as any).depthLevel ?? ''),
+    String(Math.round(((vector as any).grounding ?? 0) * 100)),
+    String(Math.round(((vector as any).precision ?? 0) * 100)),
+    String(Math.round(((vector as any).transcendence ?? 0) * 100)),
   ].join('|');
 
   return String(simpleHash(parts));
@@ -881,4 +591,45 @@ function clampLines(text: string, maxLines: number): string {
   const tail = lines.slice(lines.length - keepTail);
 
   return [...head, ...tail].join('\n');
+}
+
+/* =========================
+   NO_DELTA detection (minimal restore)
+========================= */
+
+function detectNoDelta(vector: ResonanceVector): boolean {
+  const v: any = vector as any;
+
+  if (v?.noDelta === true) return true;
+
+  const sp = v?.slotPlan;
+  if (sp && typeof sp === 'object' && !Array.isArray(sp)) {
+    const obs = typeof sp.OBS === 'string' ? sp.OBS : null;
+    if (obs && obs.includes(':no-delta')) return true;
+  }
+
+  const slots = v?.slots;
+  if (slots && typeof slots === 'object' && !Array.isArray(slots)) {
+    const obs = typeof slots.OBS === 'string' ? slots.OBS : null;
+    if (obs && obs.includes(':no-delta')) return true;
+  }
+
+  return false;
+}
+
+function detectNoDeltaKind(
+  vector: ResonanceVector,
+): 'repeat-warning' | 'short-loop' | 'stuck' | 'unknown' | null {
+  const v: any = vector as any;
+  const k = v?.noDeltaKind;
+
+  if (typeof k === 'string') {
+    const s = k.trim().toLowerCase();
+    if (s === 'repeat-warning') return 'repeat-warning';
+    if (s === 'short-loop') return 'short-loop';
+    if (s === 'stuck') return 'stuck';
+    if (s === 'unknown') return 'unknown';
+  }
+
+  return null;
 }

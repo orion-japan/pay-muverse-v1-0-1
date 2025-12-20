@@ -5,30 +5,29 @@
 // - ギアB：ソフト回転（意志ベクトルだけ上向き）
 // - ギアC：フル回転（depthも含めて上げる前提）
 //
-// ※ ここでは「選択肢の定義」と「ギア決定ロジック」だけを持たせる。
-//    実際にボタンとして出す/使う場所は、generate側で後から接続。
+// ✅ 追加：ITデモ（C/I/T 固定3ボタン）
+// - ここで「ボタンとして何を出すか」だけ決める
+// - 押した後に “IT言語でガッツリ1ページ” を出すのは renderReply 側（renderMode='IT'）の責務
 
-import type { Depth, IrosMode } from './system';
+import type { Depth, IrosMode } from '../system';
 
 /**
  * 三軸ギアのレベル
- * - 'safety'      : ギアA（セーフティ）…S2に留まりたいとき
- * - 'soft-rotate' : ギアB（ソフト回転）…意志だけ少しR/Iへ向ける
- * - 'full-rotate' : ギアC（フル回転）…depthごと回してOKなとき
  */
-export type NextStepGear = 'safety' | 'soft-rotate' | 'full-rotate';
+export type NextStepGear = 'safety' | 'soft-rotate' | 'full-rotate' | 'it-demo';
 
 /**
- * Qコードの簡易型（既存のQCode unionと合わせてもOK）
+ * Qコードの簡易型
  */
 export type NextStepQCode = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
 
 /**
+ * ✅ ITデモで「どの層から返すか」
+ */
+export type ItTarget = 'C' | 'I' | 'T';
+
+/**
  * ユーザーに提示する「この先の一歩」オプション
- *
- * - label        : ボタンにそのまま使えるテキスト
- * - description  : 補足の一文（省略可）
- * - meta         : 次ターンに渡したい意図（requestedDepth など）
  */
 export type NextStepOption = {
   id: string;
@@ -38,24 +37,21 @@ export type NextStepOption = {
   description?: string;
 
   meta: {
-    /** depthの希望（Orchestrator側で解釈してよい） */
+    /** depthの希望 */
     requestedDepth?: Depth;
 
     /** modeの希望（mirror / vision など） */
     requestedMode?: IrosMode;
 
-    /**
-     * goalのニュアンスヒント
-     * - 'uncover'  : 背景を掘る
-     * - 'stabilize': 安定・保護
-     * - 'forward'  : 前向きな一歩・行動
-     *
-     * 既存の IrosGoalKind にマップするのは後段でOK。
-     */
+    /** goalのニュアンスヒント */
     goalKindHint?: 'uncover' | 'stabilize' | 'forward';
 
-    /** セーフティ関連のフラグ（必要なら後で拡張） */
+    /** セーフティ関連のフラグ */
     safetyTag?: 'q5_protect' | 'none';
+
+    // ✅ 追加：ITトリガー情報（押したら renderMode='IT' に切り替える材料）
+    renderMode?: 'IT';
+    itTarget?: ItTarget;
   };
 };
 
@@ -69,43 +65,21 @@ export type DecideNextStepGearInput = {
   hasQ5DepressRisk: boolean;
 };
 
-/**
- * いまの状態から「どのギアで選択肢を出すか」を決める。
- * しきい値は後から調整しやすいように、ここにベタ書きしている。
- */
 export function decideNextStepGear(
   input: DecideNextStepGearInput,
-): NextStepGear {
+): Exclude<NextStepGear, 'it-demo'> {
   const { qCode, selfAcceptance, hasQ5DepressRisk } = input;
 
-  // SelfAcceptance 未評価または極端に低い場合は、まずセーフティ
-  if (selfAcceptance == null || selfAcceptance < 0.4) {
-    return 'safety';
-  }
-
-  // Q5かつ「Q5_depress」リスクがあるときは、無理に回さない
-  if (qCode === 'Q5' && hasQ5DepressRisk) {
-    return 'safety';
-  }
-
-  // 0.4〜0.7くらいはソフト回転ゾーン
-  if (selfAcceptance < 0.7) {
-    return 'soft-rotate';
-  }
-
-  // それ以上はフル回転も視野に入れてよい
+  if (selfAcceptance == null || selfAcceptance < 0.4) return 'safety';
+  if (qCode === 'Q5' && hasQ5DepressRisk) return 'safety';
+  if (selfAcceptance < 0.7) return 'soft-rotate';
   return 'full-rotate';
 }
 
-/** NextStepタグを表示から消す（先頭に複数ついてても全部落とす） */
-function stripNextStepTagsForDisplay(raw: string): string {
-  if (!raw) return '';
-  return raw.replace(/^\s*(\[[a-zA-Z0-9_\-]+\]\s*)+/g, '').trimStart();
-}
+/* =========================================================
+   Normal options (existing)
+========================================================= */
 
-/**
- * ギアA：セーフティモード（S2に留まる前提）
- */
 function buildSafetyOptions(): NextStepOption[] {
   return [
     {
@@ -115,7 +89,6 @@ function buildSafetyOptions(): NextStepOption[] {
       description:
         'いま感じていることを、もう少しだけ一緒に整理していくモードです。',
       meta: {
-        // depthは固定（S2に留まる）
         requestedDepth: 'S2' as Depth,
         requestedMode: 'mirror' as IrosMode,
         goalKindHint: 'uncover',
@@ -151,10 +124,6 @@ function buildSafetyOptions(): NextStepOption[] {
   ];
 }
 
-/**
- * ギアB：ソフト回転（意志だけ R/I 側に少し向ける）
- * depthStage自体はまだS2のまま扱ってよい想定。
- */
 function buildSoftRotateOptions(): NextStepOption[] {
   return [
     {
@@ -177,7 +146,6 @@ function buildSoftRotateOptions(): NextStepOption[] {
       description:
         'R層（つながり）の方向に、意識だけ少し向けてみる選択肢です。',
       meta: {
-        // depthStageはS2のままでも、目線はR方向へ
         requestedDepth: 'R2' as Depth,
         requestedMode: 'mirror' as IrosMode,
         goalKindHint: 'uncover',
@@ -200,9 +168,6 @@ function buildSoftRotateOptions(): NextStepOption[] {
   ];
 }
 
-/**
- * ギアC：フル回転（depthごと R/C/I に上げていく前提）
- */
 function buildFullRotateOptions(): NextStepOption[] {
   return [
     {
@@ -247,18 +212,13 @@ function buildFullRotateOptions(): NextStepOption[] {
   ];
 }
 
-/**
- * 公開関数：
- * - いまの状態（qCode / depth / SA / q5リスク）からギアを決め、
- *   そのギアに合った「この先の一歩」選択肢セットを返す。
- */
 export function buildNextStepOptions(params: {
   qCode: NextStepQCode;
   depth: Depth;
   selfAcceptance: number | null;
   hasQ5DepressRisk: boolean;
 }): {
-  gear: NextStepGear;
+  gear: Exclude<NextStepGear, 'it-demo'>;
   options: NextStepOption[];
 } {
   const gear = decideNextStepGear({
@@ -278,65 +238,74 @@ export function buildNextStepOptions(params: {
       options = buildSoftRotateOptions();
       break;
     case 'full-rotate':
-      options = buildFullRotateOptions();
-      break;
     default:
-      // 型的には来ないが、安全側に倒す
-      options = buildSafetyOptions();
+      options = buildFullRotateOptions();
       break;
   }
 
   return { gear, options };
 }
 
-/**
- * nextStep ボタン押下のタグを userText から抽出する
- *
- * UIが当面 `[soft_shift_future] xxx` のように送ってくる前提で、
- * - choiceId（= option.id）を取り出す
- * - cleanText（タグを外した本文）も返す
- */
-export function extractNextStepChoiceFromText(userText: string): {
-  choiceId: string | null;
-  cleanText: string;
-} {
-  const text = String(userText ?? '');
+/* =========================================================
+   ✅ IT Demo options (NEW)
+   - C / I / T の固定3ボタン
+   - 押したら renderMode='IT' に切り替える材料を meta に入れる
+========================================================= */
 
-  // 先頭の [id] を拾う（例: "[soft_shift_future] 〜"）
-  const m = text.match(/^\s*\[([a-zA-Z0-9_\-]+)\]\s*(.*)$/);
-  if (!m) return { choiceId: null, cleanText: text };
-
-  const choiceId = m[1] ?? null;
-  const cleanText = (m[2] ?? '').trim();
-
-  return {
-    choiceId,
-    cleanText: cleanText.length ? cleanText : '', // 本文がないケースも許容
-  };
-}
-
-/**
- * option.id から NextStepOption を引く
- * （ギアに依存せず、全候補から探す）
- */
-export function findNextStepOptionById(id: string): NextStepOption | null {
-  const all = [
-    ...buildSafetyOptions(),
-    ...buildSoftRotateOptions(),
-    ...buildFullRotateOptions(),
+function buildItDemoOptions(): NextStepOption[] {
+  return [
+    {
+      id: 'it_from_c',
+      gear: 'it-demo',
+      label: 'C層：アイディアを出す',
+      description: '具体案を複数並べて、次の一手を組み立てる',
+      meta: {
+        renderMode: 'IT',
+        itTarget: 'C',
+        requestedDepth: 'C2' as Depth,
+        requestedMode: 'consult' as IrosMode,
+        goalKindHint: 'forward',
+        safetyTag: 'none',
+      },
+    },
+    {
+      id: 'it_from_i',
+      gear: 'it-demo',
+      label: 'I層：未来から受け取る',
+      description: '今の迷いを“構造”として見て、未来の方向へ揃える',
+      meta: {
+        renderMode: 'IT',
+        itTarget: 'I',
+        requestedDepth: 'I2' as Depth,
+        requestedMode: 'vision' as IrosMode,
+        goalKindHint: 'forward',
+        safetyTag: 'none',
+      },
+    },
+    {
+      id: 'it_from_t',
+      gear: 'it-demo',
+      label: 'T層：気づきから反転させる',
+      description: '意図の核に刺して、現実側（C/F）へ流す',
+      meta: {
+        renderMode: 'IT',
+        itTarget: 'T',
+        // TはDepth unionに無い可能性があるので、ここではI2に寄せておく（render側でT扱い）
+        requestedDepth: 'I2' as Depth,
+        requestedMode: 'vision' as IrosMode,
+        goalKindHint: 'forward',
+        safetyTag: 'none',
+      },
+    },
   ];
-  return all.find((o) => o.id === id) ?? null;
 }
-
 
 /**
  * meta に nextStep 情報を付け足すヘルパー
  *
- * - すでに meta.nextStep がある場合は上書きしない
- * - ユーザー発話に「選択肢」「決められない」「選べない」「どうしたらいい」
- *   のいずれかが含まれているときだけ発火
- *
- * ※ あとで /api/agent/iros/reply から呼び出して使います。
+ * ✅ 追加方針：
+ * - ITデモが欲しい文言なら「C/I/T 固定3ボタン」を優先で出す
+ * - それ以外は従来通り「相談っぽい入力」だけ nextStep を出す
  */
 export function attachNextStepMeta(params: {
   meta: any;
@@ -350,24 +319,40 @@ export function attachNextStepMeta(params: {
     params;
 
   // すでに nextStep があれば何もしない
-  if (meta?.nextStep?.options?.length) {
-    return meta;
+  if (meta?.nextStep?.options?.length) return meta;
+
+  const text = String(userText ?? '');
+
+  // ✅ ITデモ判定（このどれかが入ってたらC/I/Tボタンを出す）
+  const wantsItDemo =
+    text.includes('IT') ||
+    text.includes('IT層') ||
+    text.includes('I層') ||
+    text.includes('T層') ||
+    text.includes('C層') ||
+    text.includes('ITトリガー') ||
+    text.includes('IT返し');
+
+  if (wantsItDemo) {
+    return {
+      ...meta,
+      nextStep: {
+        gear: 'it-demo' as NextStepGear,
+        options: buildItDemoOptions(),
+      },
+    };
   }
 
-  const text = userText ?? '';
-
-  // 👇 ここが「どんな入力でボタンを出すか」の条件
+  // 従来：相談入力でだけ nextStep を出す
   const shouldOfferNextStep =
     text.includes('選択肢') ||
     text.includes('決められない') ||
     text.includes('選べない') ||
     text.includes('どうしたらいい');
 
-  if (!shouldOfferNextStep) {
-    return meta;
-  }
+  if (!shouldOfferNextStep) return meta;
 
-  const { gear, options } = buildNextStepOptions({
+  const built = buildNextStepOptions({
     qCode,
     depth,
     selfAcceptance,
@@ -377,8 +362,8 @@ export function attachNextStepMeta(params: {
   return {
     ...meta,
     nextStep: {
-      gear,
-      options,
+      gear: built.gear,
+      options: built.options,
     },
   };
 }

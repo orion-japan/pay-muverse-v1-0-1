@@ -9,11 +9,8 @@ import { auth } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import styles from './index.module.css';
 import LoginModal from '@/components/LoginModal';
-import { useIrosChat } from './IrosChatContext'; // ★ 追加：Future-Seed 呼び出し用
+import { useIrosChat } from './IrosChatContext';
 
-/**
- * Iros-AI 専用レイアウト
- */
 export default function IrosAiLayout({
   children,
 }: {
@@ -21,13 +18,14 @@ export default function IrosAiLayout({
 }) {
   const [showLogin, setShowLogin] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
-  const [seedActive, setSeedActive] = useState(false); // Seed準備中インジケータ
 
-  const { userCode } = useAuth(); // ログイン状態を取得
-  const { sendFutureSeed } = useIrosChat(); // ★ Future-Seed API 呼び出し
+  // そのまま使ってOK（renameは後で）
+  const [seedActive, setSeedActive] = useState(false);
+
+  const { userCode } = useAuth();
+  const { sendMessage } = useIrosChat(); // ✅ ここを sendFutureSeed → sendMessage に
   const router = useRouter();
 
-  // ★ ログアウト処理
   const handleLogout = async () => {
     try {
       await fetch('/api/logout', { method: 'POST' }).catch(() => {});
@@ -41,28 +39,21 @@ export default function IrosAiLayout({
     }
   };
 
-  // ★ Seed ボタンクリック → /api/agent/iros/future-seed を叩いて Seed メッセージ追加
+  // ✅ 右上ボタン：押したら「選択肢」を user 発話として送り、NextStep を出させる
   const handleSeedClick = async () => {
-    if (seedActive) return; // 連打防止
+    if (seedActive) return;
 
-    // ログインしていなければ、まずログインモーダルを開く
     if (!userCode) {
       setShowLogin(true);
       return;
     }
 
-    console.log('[IROS] Seed ボタンが押されました（Future-Seed 起動）');
     setSeedActive(true);
-
     try {
-      const result = await sendFutureSeed();
-      console.log('[IROS] Future-Seed result', result);
-      // sendFutureSeed 内で setMessages 済みなので、ここではログだけ
-      if (!result) {
-        console.warn('[IROS] Future-Seed: 応答が空でした');
-      }
+      console.log('[IROS] 選択ボタン → 選択肢トリガー送信');
+      await sendMessage('選択肢', 'nextStep'); // ★ 演出の核
     } catch (e) {
-      console.error('[IROS] Future-Seed 呼び出し中にエラー', e);
+      console.error('[IROS] 選択肢トリガー送信でエラー', e);
     } finally {
       setTimeout(() => setSeedActive(false), 600);
     }
@@ -70,14 +61,9 @@ export default function IrosAiLayout({
 
   return (
     <div className={styles.root}>
-      {/* ===== 上部ヘッダー ===== */}
       <header
         aria-label="Iros-AI header"
-        style={{
-          position: 'sticky',
-          top: 0,
-          zIndex: 2000,
-        }}
+        style={{ position: 'sticky', top: 0, zIndex: 2000 }}
       >
         <div
           style={{
@@ -104,21 +90,9 @@ export default function IrosAiLayout({
             </span>
           </div>
 
-          <nav
-            style={{
-              display: 'flex',
-              gap: '10px',
-              alignItems: 'center',
-            }}
-          >
-            {/* ⚙ メニューアイコン（ドロップダウン） */}
-            <div
-              style={{
-                position: 'relative',
-                display: 'flex',
-                alignItems: 'center',
-              }}
-            >
+          <nav style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            {/* ⚙ メニュー（そのまま） */}
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
               <button
                 type="button"
                 onClick={() => setShowMenu((v) => !v)}
@@ -138,7 +112,6 @@ export default function IrosAiLayout({
                   padding: 0,
                 }}
               >
-                {/* 三本線アイコン */}
                 <span
                   style={{
                     display: 'block',
@@ -178,7 +151,7 @@ export default function IrosAiLayout({
                 <div
                   style={{
                     position: 'fixed',
-                    top: 70, // ヘッダーのすぐ下あたり
+                    top: 70,
                     right: 24,
                     background: '#ffffff',
                     borderRadius: 12,
@@ -191,7 +164,6 @@ export default function IrosAiLayout({
                 >
                   {userCode ? (
                     <>
-                      {/* 設定（ログイン中） */}
                       <Link
                         href="/iros-ai/settings"
                         onClick={() => setShowMenu(false)}
@@ -207,7 +179,6 @@ export default function IrosAiLayout({
                         設定
                       </Link>
 
-                      {/* ログアウト */}
                       <button
                         type="button"
                         onClick={handleLogout}
@@ -227,7 +198,6 @@ export default function IrosAiLayout({
                     </>
                   ) : (
                     <>
-                      {/* ログイン（モーダル） */}
                       <button
                         type="button"
                         onClick={() => {
@@ -245,10 +215,9 @@ export default function IrosAiLayout({
                           whiteSpace: 'nowrap',
                         }}
                       >
-                          ログイン
+                        ログイン
                       </button>
 
-                      {/* 設定リンク（未ログインでもOK） */}
                       <Link
                         href="/iros-ai/settings"
                         onClick={() => setShowMenu(false)}
@@ -269,7 +238,7 @@ export default function IrosAiLayout({
               )}
             </div>
 
-            {/* ★ Seed 状態の小さな表示 */}
+            {/* 動作中表示 */}
             {seedActive && (
               <span
                 style={{
@@ -279,11 +248,11 @@ export default function IrosAiLayout({
                   whiteSpace: 'nowrap',
                 }}
               >
-                Seed 準備中…
+                選択肢 準備中…
               </span>
             )}
 
-            {/* 🌱 Seed ボタン（Future-Seed 実行） */}
+            {/* ✅ Seed → 選択 */}
             <button
               type="button"
               onClick={handleSeedClick}
@@ -300,18 +269,16 @@ export default function IrosAiLayout({
               }}
               disabled={seedActive}
             >
-              Seed
+              選択
             </button>
           </nav>
         </div>
       </header>
 
-      {/* ===== メインエリア ===== */}
       <main className={styles.content} aria-label="Iros-AI content">
         {children}
       </main>
 
-      {/* ===== ログインモーダル ===== */}
       <LoginModal
         isOpen={showLogin}
         onClose={() => setShowLogin(false)}

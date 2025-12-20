@@ -25,6 +25,40 @@ import { attachNextStepMeta } from '@/lib/iros/nextStepOptions';
 import { buildResonanceVector } from '@lib/iros/language/resonanceVector';
 import { renderReply } from '@/lib/iros/language/renderReply';
 
+// NextStep（ボタンタグ除去）
+import {
+  extractNextStepChoiceFromText,
+  findNextStepOptionById,
+} from '@/lib/iros/nextStepOptions';
+
+/**
+ * [choiceId] 形式のタグを除去したい場合のパーサ（保険）
+ * ※ 今は extractNextStepChoiceFromText を使ってるので未使用でもOK
+ */
+function parseChoiceTag(input: string): {
+  choiceId: string | null;
+  cleanText: string;
+} {
+  const s = String(input ?? '').trim();
+  const m = s.match(/^\[([a-zA-Z0-9_-]+)\]\s*(.*)$/s);
+  if (!m) return { choiceId: null, cleanText: s };
+  const choiceId = m[1] || null;
+  const cleanText = (m[2] ?? '').trim();
+  return { choiceId, cleanText };
+}
+
+/**
+ * ★ IT強制トリガー（最小）
+ * - soft_shift_future なら IT返しを強制
+ * - it_* プレフィックスも強制
+ */
+function shouldForceIT(choiceId: string | null): boolean {
+  if (!choiceId) return false;
+  if (choiceId === 'soft_shift_future') return true;
+  if (choiceId.startsWith('it_')) return true;
+  return false;
+}
+
 /** 共通CORS（/api/me と同等ポリシー + x-credit-cost 追加） */
 const CORS_HEADERS = {
   'access-control-allow-origin': '*',
@@ -318,27 +352,99 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 8) Iros 共通本体処理へ委譲
-    const origin = req.nextUrl.origin;
-    const authHeader = req.headers.get('authorization');
+// =========================================================
+// 8) Iros 共通本体処理へ委譲
+// ★ NextStep + IT trigger（ここが “最短でIT返し” の中核）
+// =========================================================
 
-    const irosResult: HandleIrosReplyOutput = await handleIrosReply({
-      conversationId,
-      text,
-      hintText,
-      mode,
-      userCode,
-      tenantId,
-      rememberScope,
-      reqOrigin: origin,
-      authorizationHeader: authHeader,
-      traceId,
-      userProfile,
-      style: styleInput ?? (userProfile?.style ?? null),
+// --- NextStep: ボタン押下タグの除去（保険） ---
+const rawText = String(text ?? '');
+const extracted = extractNextStepChoiceFromText(rawText);
 
-      // ✅ 履歴
-      history: chatHistory,
-    });
+// ✅ UIが extra.choiceId を送ってくる前提に切り替える（本文にタグを混ぜない）
+// - まず extra.choiceId を優先
+// - 無ければ本文先頭の [id] から拾う（後方互換）
+const choiceIdFromExtra =
+  extra && typeof (extra as any).choiceId === 'string'
+    ? String((extra as any).choiceId).trim()
+    : null;
+
+const extractedChoiceId =
+  extracted?.choiceId && String(extracted.choiceId).trim().length > 0
+    ? String(extracted.choiceId).trim()
+    : null;
+
+const effectiveChoiceId = choiceIdFromExtra || extractedChoiceId || null;
+
+// ✅ 本文は「タグ除去済み」を優先（UIがタグ無しでも安全）
+const cleanText =
+  extracted?.cleanText && String(extracted.cleanText).trim().length > 0
+    ? String(extracted.cleanText).trim()
+    : '';
+
+const finalText = cleanText.length ? cleanText : rawText;
+
+// option（将来の意図ログ用：今は必須ではない）
+const picked = effectiveChoiceId
+  ? findNextStepOptionById(effectiveChoiceId)
+  : null;
+
+// ★ IT FORCE（effectiveChoiceId で判定）
+const forceIT = shouldForceIT(effectiveChoiceId);
+
+
+
+// ★ 下流へ渡す extra（body.extra を壊さず拡張）
+const extraMerged: Record<string, any> = {
+  ...(extra ?? {}),
+  choiceId: effectiveChoiceId,        // ✅ 下流は常にこれを見る
+  extractedChoiceId: extractedChoiceId, // ✅ デバッグ用（任意だが超便利）
+  forceIT,
+
+  // ✅ これを追加：renderReply を確実に発火させる
+  renderEngine: forceIT ? true : (extra as any)?.renderEngine,
+
+  // UIヘッダ用
+  tLayerModeActive: forceIT ? true : undefined,
+  tLayerHint: forceIT ? 'T2' : undefined,
+
+  // 回転を IT 側へ寄せる（最短で効かせる）
+  spinLoop: forceIT ? 'TCF' : undefined,
+
+  // ✅ これを置換：'open' は潰れるので 'offered' にする
+  descentGate: forceIT ? 'offered' : undefined,
+
+  renderMode: forceIT ? 'IT' : undefined,
+};
+
+
+// ★ handleIrosReply に最短で効かせる：mode/hintText を上書き
+const modeForHandle = forceIT ? 'IT' : mode;
+const hintTextForHandle = forceIT ? 'IT' : hintText;
+
+const origin = req.nextUrl.origin;
+const authHeader = req.headers.get('authorization');
+
+const irosResult: HandleIrosReplyOutput = await handleIrosReply({
+  conversationId,
+  text: finalText, // ★ タグ除去済み
+  hintText: hintTextForHandle,
+  mode: modeForHandle,
+
+  userCode,
+  tenantId,
+  rememberScope,
+  reqOrigin: origin,
+  authorizationHeader: authHeader,
+  traceId,
+  userProfile,
+  style: styleInput ?? (userProfile?.style ?? null),
+  history: chatHistory,
+
+  // ★ ここが効く（renderEngine / 文章層 / rotation bridge へ渡る）
+  extra: extraMerged,
+});
+
 
     // 8.x) 生成失敗時
     if (!irosResult.ok) {
@@ -379,13 +485,14 @@ export async function POST(req: NextRequest) {
     if (lowWarn) headers['x-warning'] = 'low_balance';
     if (traceId) headers['x-trace-id'] = String(traceId);
 
+    // ★ effectiveMode は “IT上書き” を自然に反映
     const effectiveMode =
       finalMode ??
       (result &&
       typeof result === 'object' &&
       typeof (result as any).mode === 'string'
         ? (result as any).mode
-        : mode);
+        : modeForHandle);
 
     const basePayload = {
       ok: true,
@@ -418,9 +525,20 @@ export async function POST(req: NextRequest) {
           ...((((result as any).meta?.extra)) ?? {}),
 
           userCode: userCode ?? (metaForSave as any)?.extra?.userCode ?? null,
-          hintText: hintText ?? (metaForSave as any)?.extra?.hintText ?? null,
+
+          // ★ 上書き後の hintText/mode を追跡できるように
+          hintText: hintTextForHandle ?? (metaForSave as any)?.extra?.hintText ?? null,
           traceId: traceId ?? (metaForSave as any)?.extra?.traceId ?? null,
           historyLen: Array.isArray(chatHistory) ? chatHistory.length : 0,
+
+          // ★ NextStep/IT トリガー情報を meta.extra に合流（下流デバッグ用）
+          choiceId: extraMerged.choiceId ?? null,
+          forceIT: extraMerged.forceIT ?? false,
+          renderMode: extraMerged.renderMode ?? null,
+          spinLoop: extraMerged.spinLoop ?? null,
+          descentGate: extraMerged.descentGate ?? null,
+          tLayerModeActive: extraMerged.tLayerModeActive ?? null,
+          tLayerHint: extraMerged.tLayerHint ?? null,
         },
       };
 
@@ -454,7 +572,9 @@ export async function POST(req: NextRequest) {
             ? meta.unified.self_acceptance
             : null,
         hasQ5DepressRisk: false,
-        userText: text,
+
+        // ★ タグ無し本文で評価させる（UI/DB/Trainingの汚れを避ける）
+        userText: finalText,
       });
 
       // ★ situation_topic を確実に付与（Training/集計の舵取り）
@@ -476,14 +596,14 @@ export async function POST(req: NextRequest) {
               const m1 = note.match(/対象トピック:\s*([^\n\r]+)/);
               const m2 = note.match(/対象トピック\s*([^\n\r]+)/);
 
-              const picked =
+              const pickedTopic =
                 m1 && m1[1]
                   ? String(m1[1]).trim()
                   : m2 && m2[1]
                   ? String(m2[1]).trim()
                   : null;
 
-              return picked && picked.length > 0 ? picked : null;
+              return pickedTopic && pickedTopic.length > 0 ? pickedTopic : null;
             })();
 
       (meta as any).situationTopic = rawSituationTopic ?? 'その他・ライフ全般';
@@ -601,9 +721,15 @@ export async function POST(req: NextRequest) {
       const applied = applyRenderEngineIfEnabled({
         conversationId,
         userCode,
-        userText: text,
+
+        // ★ タグ無し本文で判定させる（本質判定/ズバ判定などが汚れない）
+        userText: finalText,
+
         styleInput: effectiveStyle,
-        extra: extra ?? null,
+
+        // ★ extraMerged を渡す（forceIT 等を render engine でも参照可能に）
+        extra: extraMerged ?? null,
+
         meta,
         resultObj: result as any,
       });
@@ -624,7 +750,10 @@ export async function POST(req: NextRequest) {
           tenantId,
           conversationId,
           messageId: null,
-          inputText: text,
+
+          // ★ タグ無し本文で保存
+          inputText: finalText,
+
           replyText: (result as any).content ?? '',
           meta,
           tags: ['iros', 'auto'],
@@ -929,6 +1058,9 @@ function applyRenderEngineIfEnabled(params: {
       framePlan,
       slotPlan: (vectorForRender as any).slotPlan,
       vector: vectorForRender,
+      forceIT: (extra as any)?.forceIT,
+      choiceId: (extra as any)?.choiceId,
+      renderMode: (extra as any)?.renderMode,
     });
 
     // meta.extra にデバッグ情報
@@ -975,6 +1107,13 @@ function applyRenderEngineIfEnabled(params: {
         ...(meta.extra ?? {}),
         renderEngineApplied: true,
       };
+
+      console.log('[IROS/Reply][renderEngine] output', {
+        conversationId,
+        userCode,
+        len: renderedText.length,
+        head: renderedText.slice(0, 160),
+      });
     } else {
       meta.extra = {
         ...(meta.extra ?? {}),

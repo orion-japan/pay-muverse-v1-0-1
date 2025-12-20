@@ -329,99 +329,128 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
     [reloadConversations, style],
   );
 
-  /* ========== NextStep（ギア選択） ========== */
+/* ========== NextStep（ギア選択） ========== */
 
-  const sendNextStepChoice = useCallback(
-    async (opt: {
-      key: string;
-      label: string;
-      gear?: string | null;
-    }): Promise<SendResult> => {
-      const cid = activeConversationIdRef.current;
-      if (!cid) return null;
+const sendNextStepChoice = useCallback(
+  async (opt: {
+    key: string;
+    label: string;
+    gear?: string | null;
+  }): Promise<SendResult> => {
+    const cid = activeConversationIdRef.current;
+    if (!cid) return null;
 
-      setLoading(true);
+    setLoading(true);
 
-      // ★ ユーザー側の見た目としては通常メッセージと同じ 1 行にする
-      const payloadText = `[${opt.key}] ${opt.label}`;
+    // ✅ 押された選択肢（タグ無し）
+    const choiceText = String(opt.label ?? '').trim();
 
-      const userMsg: IrosMessage = {
-        id: crypto.randomUUID(),
-        role: 'user',
-        text: payloadText,
-        content: payloadText,
-        created_at: new Date().toISOString(),
-        ts: Date.now(),
-        meta: {
-          nextStepChoice: {
-            key: opt.key,
-            label: opt.label,
-            gear: opt.gear ?? null,
-          },
+    // ✅ 直前の assistant を探して「引用」に使う（UI表示だけ）
+    const lastAssistantText = (() => {
+      const arr = messagesRef.current || [];
+      for (let i = arr.length - 1; i >= 0; i--) {
+        const m: any = arr[i];
+        if (!m) continue;
+        if (m.role !== 'assistant') continue;
+
+        const t = normalizeText(m.content ?? m.text).trim();
+        if (t) return t;
+      }
+      return '';
+    })();
+
+    // ✅ UIに見せる本文：引用 + 選択肢
+    // ※ 引用が無いときは選択肢のみ
+    const displayText = lastAssistantText
+      ? `> ${lastAssistantText.replace(/\n/g, '\n> ')}\n\n${choiceText}`
+      : choiceText;
+
+    // ✅ サーバへはタグ付き raw を送る（DB保存は既存どおりstripされる）
+    const rawText = `[${opt.key}] ${opt.label}`;
+
+    const userMsg: IrosMessage = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      text: displayText,      // ✅ UI表示は「引用＋選択肢」
+      content: displayText,   // ✅ UI表示は「引用＋選択肢」
+      created_at: new Date().toISOString(),
+      ts: Date.now(),
+      meta: {
+        nextStepChoice: {
+          key: opt.key,
+          label: opt.label,
+          gear: opt.gear ?? null,
         },
+        quotedFromAssistant: lastAssistantText ? true : false,
+      },
+    } as IrosMessage;
+
+    try {
+      // ① user メッセージをローカルに即反映（引用つき）
+      setMessages((m) => [...m, userMsg]);
+
+      // ② DB 保存は rawText（タグ付き）で送る
+      await irosClient.postMessage({
+        conversationId: cid,
+        text: rawText,
+        role: 'user',
+      });
+
+      // ✅ LLM に渡す history（引用はUI演出なので、LLMには“選択肢だけ”を積む）
+      const llmUserMsg: IrosMessage = {
+        ...userMsg,
+        text: choiceText,
+        content: choiceText,
       } as IrosMessage;
 
-      try {
-        // ① user メッセージをローカルに即反映
-        setMessages((m) => [...m, userMsg]);
+      const history = buildHistoryForLLM(
+        [...(messagesRef.current || []), llmUserMsg],
+        10,
+      );
 
-        // ② DB に user メッセージ保存
-        await irosClient.postMessage({
-          conversationId: cid,
-          text: payloadText,
-          role: 'user',
-        });
+      // ③ reply はタグ無しテキスト + nextStepChoice
+      const r: any = await irosClient.replyAndStore({
+        conversationId: cid,
+        user_text: choiceText, // ✅ LLMには「選択肢だけ」
+        mode: 'nextStep',
+        style,
+        nextStepChoice: {
+          key: opt.key,
+          label: opt.label,
+          gear: opt.gear ?? null,
+        },
+        history,
+      });
 
-        // ✅ LLM に渡す history を作る（直近10ペア）
-        const history = buildHistoryForLLM(
-          [...(messagesRef.current || []), userMsg],
-          10,
-        );
+      const assistant = normalizeText(r?.assistant ?? '');
+      const meta = r?.meta ?? null;
 
-        // ③ WILLエンジンに「ギア選択が行われた」ことを渡す
-        const r: any = await irosClient.replyAndStore({
-          conversationId: cid,
-          user_text: payloadText,
-          mode: 'nextStep',
-          style,
-          nextStepChoice: {
-            key: opt.key,
-            label: opt.label,
-            gear: opt.gear ?? null,
-          },
-          history, // ✅ 追加
-        });
+      // ④ assistant をローカル state に反映
+      setMessages((m) => [
+        ...m,
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          text: assistant,
+          content: assistant,
+          created_at: new Date().toISOString(),
+          ts: Date.now(),
+          meta,
+        } as IrosMessage,
+      ]);
 
-        const assistant = normalizeText(r?.assistant ?? '');
-        const meta = r?.meta ?? null;
+      await reloadConversations();
+      return { assistant, meta: meta ?? undefined };
+    } catch (e) {
+      console.error('[IROS] sendNextStepChoice failed', e);
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  },
+  [reloadConversations, style],
+);
 
-        // ④ assistant をローカル state に反映
-        setMessages((m) => [
-          ...m,
-          {
-            id: crypto.randomUUID(),
-            role: 'assistant',
-            text: assistant,
-            content: assistant,
-            created_at: new Date().toISOString(),
-            ts: Date.now(),
-            meta,
-          } as IrosMessage,
-        ]);
-
-        // ⑤ 会話一覧の updated_at を更新
-        await reloadConversations();
-
-        return { assistant, meta: meta ?? undefined };
-      } catch (e) {
-        console.error('[IROS] sendNextStepChoice failed', e);
-        return null;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [reloadConversations, style],
-  );
 
   /* ========== Future-Seed（T層デモ） ========== */
 

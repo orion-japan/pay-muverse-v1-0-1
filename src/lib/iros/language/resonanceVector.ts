@@ -1,4 +1,4 @@
-// src/lib/iros/language/resonanceVector.ts
+// src/lib/iros/language/resonancets
 // iros — Resonance Vector (render engine input)
 // ※このファイルは「単独定義」にする：他を import しない（循環を絶つ）
 

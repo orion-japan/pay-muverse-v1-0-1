@@ -10,6 +10,12 @@ import {
   SERVICE_ROLE,
 } from '@/lib/authz';
 
+// ✅ 追加：NextStep タグ除去 & 意図メタ取得
+import {
+  extractNextStepChoiceFromText,
+  findNextStepOptionById,
+} from '@/lib/iros/nextStepOptions';
+
 const sb = () => createClient(SUPABASE_URL!, SERVICE_ROLE!);
 
 const json = (data: any, status = 200) =>
@@ -155,7 +161,10 @@ export async function GET(req: NextRequest) {
       auth = await verifyFirebaseAndAuthorize(req);
     } catch (e: any) {
       const ms = msSince(t0);
-      console.error('[IROS/messages][GET] authz throw', { ms, message: String(e?.message ?? e) });
+      console.error('[IROS/messages][GET] authz throw', {
+        ms,
+        message: String(e?.message ?? e),
+      });
       return json(
         { ok: false, error: 'authz_throw', detail: String(e?.message ?? e), ms },
         isUpstreamTimeout(e) ? 504 : 401,
@@ -165,8 +174,12 @@ export async function GET(req: NextRequest) {
     if (!auth.ok) {
       const ms = msSince(t0);
       // upstream-timeout っぽい時は 504 に寄せる（401誤判定を防ぐ）
-      const status = isUpstreamTimeout(auth) ? 504 : (auth.status || 401);
-      console.warn('[IROS/messages][GET] authz not ok', { ms, status, error: auth.error });
+      const status = isUpstreamTimeout(auth) ? 504 : auth.status || 401;
+      console.warn('[IROS/messages][GET] authz not ok', {
+        ms,
+        status,
+        error: auth.error,
+      });
       return json({ ok: false, error: auth.error, ms }, status);
     }
 
@@ -201,13 +214,22 @@ export async function GET(req: NextRequest) {
       'id,user_code',
       (q) => q.eq('id', cid).limit(1),
     );
-    console.log('[IROS/messages][GET] conv select', { ms: msSince(tConv), ok: conv.ok, table: (conv as any).table });
+    console.log('[IROS/messages][GET] conv select', {
+      ms: msSince(tConv),
+      ok: conv.ok,
+      table: (conv as any).table,
+    });
 
     if (conv.ok && (conv as any).data?.[0]) {
       const owner = String((conv as any).data[0].user_code ?? '');
       if (owner && owner !== userCode) {
         return json(
-          { ok: true, messages: [], llm_messages: [], note: 'forbidden_owner_mismatch' },
+          {
+            ok: true,
+            messages: [],
+            llm_messages: [],
+            note: 'forbidden_owner_mismatch',
+          },
           200,
         );
       }
@@ -222,7 +244,8 @@ export async function GET(req: NextRequest) {
       supabase,
       MSG_TABLES,
       columns,
-      (q) => q.eq('conversation_id', cid).order('created_at', { ascending: false }).limit(limit),
+      (q) =>
+        q.eq('conversation_id', cid).order('created_at', { ascending: false }).limit(limit),
     );
     console.log('[IROS/messages][GET] msg select', {
       ms: msSince(tSel),
@@ -260,7 +283,7 @@ export async function GET(req: NextRequest) {
       color: m.color ?? undefined,
       depth_stage: m.depth_stage ?? null,
       intent_layer: m.intent_layer ?? null,
-      meta: includeMeta ? (m.meta ?? undefined) : undefined,
+      meta: includeMeta ? m.meta ?? undefined : undefined,
     }));
 
     const llmLimitRaw = req.nextUrl.searchParams.get('llm_limit');
@@ -304,7 +327,10 @@ export async function POST(req: NextRequest) {
       auth = await verifyFirebaseAndAuthorize(req);
     } catch (e: any) {
       const ms = msSince(t0);
-      console.error('[IROS/messages][POST] authz throw', { ms, message: String(e?.message ?? e) });
+      console.error('[IROS/messages][POST] authz throw', {
+        ms,
+        message: String(e?.message ?? e),
+      });
       return json(
         { ok: false, error: 'authz_throw', detail: String(e?.message ?? e), ms },
         isUpstreamTimeout(e) ? 504 : 401,
@@ -313,7 +339,7 @@ export async function POST(req: NextRequest) {
 
     if (!auth.ok) {
       const ms = msSince(t0);
-      const status = isUpstreamTimeout(auth) ? 504 : (auth.status || 401);
+      const status = isUpstreamTimeout(auth) ? 504 : auth.status || 401;
       console.warn('[IROS/messages][POST] authz not ok', { ms, status, error: auth.error });
       return json({ ok: false, error: auth.error, ms }, status);
     }
@@ -333,38 +359,60 @@ export async function POST(req: NextRequest) {
     const conversation_id: string = String(
       body?.conversation_id || body?.conversationId || '',
     ).trim();
-    const text: string = String(body?.text ?? body?.content ?? '').trim();
+
+    // ✅ raw を保持してから NextStep を剥がす
+    const rawText: string = String(body?.text ?? body?.content ?? '');
+    const { choiceId, cleanText } = extractNextStepChoiceFromText(rawText);
+    const finalText = (cleanText && cleanText.trim().length ? cleanText : rawText).trim();
+
+    const picked = choiceId ? findNextStepOptionById(choiceId) : null;
+
     const metaRaw = body?.meta ?? null;
 
+    // ✅ meta.extra に nextStep 情報を隠して残す（reply と messages で同じ思想）
+    const baseMetaRaw =
+      metaRaw && typeof metaRaw === 'object' && !Array.isArray(metaRaw) ? metaRaw : {};
+    const baseExtraRaw =
+      baseMetaRaw.extra && typeof baseMetaRaw.extra === 'object' && !Array.isArray(baseMetaRaw.extra)
+        ? baseMetaRaw.extra
+        : {};
+
+    const metaAugRaw = {
+      ...baseMetaRaw,
+      extra: {
+        ...baseExtraRaw,
+        nextStepChoiceId: choiceId ?? null,
+        nextStepPickedMeta: picked?.meta ?? null,
+      },
+    };
+
     const q_code: string | null =
-      metaRaw && typeof metaRaw === 'object' && typeof metaRaw.qCode === 'string'
-        ? metaRaw.qCode
+      metaAugRaw && typeof metaAugRaw === 'object' && typeof (metaAugRaw as any).qCode === 'string'
+        ? (metaAugRaw as any).qCode
         : null;
 
     const depth_stage: string | null =
-      metaRaw && typeof metaRaw === 'object' && typeof metaRaw.depth === 'string'
-        ? metaRaw.depth
+      metaAugRaw && typeof metaAugRaw === 'object' && typeof (metaAugRaw as any).depth === 'string'
+        ? (metaAugRaw as any).depth
         : null;
 
     const intent_layer: string | null =
-      metaRaw &&
-      typeof metaRaw === 'object' &&
-      typeof metaRaw.intentLayer === 'string'
-        ? metaRaw.intentLayer
+      metaAugRaw &&
+      typeof metaAugRaw === 'object' &&
+      typeof (metaAugRaw as any).intentLayer === 'string'
+        ? (metaAugRaw as any).intentLayer
         : null;
 
-    const metaSanitized = sanitizeJsonDeep(metaRaw);
+    const metaSanitized = sanitizeJsonDeep(metaAugRaw);
     const meta =
-      metaSanitized === null || typeof metaSanitized === 'undefined'
-        ? null
-        : metaSanitized;
+      metaSanitized === null || typeof metaSanitized === 'undefined' ? null : metaSanitized;
 
     const role: 'user' | 'assistant' =
       String(body?.role ?? '').toLowerCase() === 'assistant' ? 'assistant' : 'user';
 
     if (!conversation_id)
       return json({ ok: false, error: 'missing_conversation_id' }, 400);
-    if (!text) return json({ ok: false, error: 'text_empty' }, 400);
+    if (!finalText) return json({ ok: false, error: 'text_empty' }, 400);
 
     const supabase = sb();
 
@@ -376,7 +424,11 @@ export async function POST(req: NextRequest) {
       'id,user_code',
       (q) => q.eq('id', conversation_id).limit(1),
     );
-    console.log('[IROS/messages][POST] conv select', { ms: msSince(tConv), ok: conv.ok, table: (conv as any).table });
+    console.log('[IROS/messages][POST] conv select', {
+      ms: msSince(tConv),
+      ok: conv.ok,
+      table: (conv as any).table,
+    });
 
     if (!conv.ok || !(conv as any).data?.[0]) {
       return json({ ok: false, error: 'conversation_not_found' }, 404);
@@ -389,12 +441,13 @@ export async function POST(req: NextRequest) {
     const nowIso = new Date().toISOString();
     const nowTs = Date.now();
 
+    // ✅ DBには必ず finalText（タグなし）
     const baseRow = {
       conversation_id,
       user_code: userCode,
       role,
-      content: text,
-      text,
+      content: finalText,
+      text: finalText,
       created_at: nowIso,
       ts: nowTs,
     };
@@ -462,17 +515,28 @@ export async function POST(req: NextRequest) {
       return json({ ok: false, error: 'insert_failed_all_candidates', ms: msSince(t0) }, 500);
     }
 
-    console.log('[IROS/messages][POST] done', { ms: msSince(t0), tableUsed: (inserted as any)?.table });
-    return json({
-      ok: true,
-      message: {
-        id: String(inserted.id),
-        conversation_id,
-        role,
-        content: text,
-        created_at: inserted.created_at,
-      },
-    });
+// ✅ 先に strip の中身を出す（デバッグ情報）
+console.log('[IROS/messages][POST] nextStep strip', {
+  rawText,
+  choiceId,
+  cleanText,
+  finalText,
+});
+
+// ✅ 最後に done（終わりの印）
+console.log('[IROS/messages][POST] done', { ms: msSince(t0) });
+
+return json({
+  ok: true,
+  message: {
+    id: String(inserted.id),
+    conversation_id,
+    role,
+    content: finalText,
+    created_at: inserted.created_at,
+  },
+});
+
   } catch (e: any) {
     const ms = msSince(t0);
     console.error('[IROS/messages][POST] exception', { ms, message: String(e?.message ?? e) });

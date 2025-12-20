@@ -14,9 +14,11 @@ import OpenAI from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat';
 
 import { getSystemPrompt, type IrosMeta, type IrosMode } from './system';
-import { decideQBrakeRelease, normalizeQ } from '@/lib/iros/rotation/qBrakeRelease';
+import {
+  decideQBrakeRelease,
+  normalizeQ,
+} from '@/lib/iros/rotation/qBrakeRelease';
 import { runItDemoGate } from '@/lib/iros/rotation/itDemoGate';
-
 
 /** ✅ 旧/新ルートを全部受ける（型で落ちない） */
 export type GenerateArgs = {
@@ -57,7 +59,8 @@ export type GenerateResult = {
   [k: string]: any;
 };
 
-const IROS_MODEL = process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-4o';
+const IROS_MODEL =
+  process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-4o';
 
 /* =========================================================
    CORE INTENT
@@ -127,6 +130,16 @@ function isShortTurn(userText: string): boolean {
   const core = t.replace(/[?？]/g, '').replace(/\s+/g, '');
   if (core.length < 2) return true;
   return core.length <= 10;
+}
+
+/* =========================================================
+   RENDER MODE (IT / NORMAL)
+   - buildWriterProtocol / buildWriterHintsFromMeta で共通化
+   ========================================================= */
+
+function getRenderMode(meta: any): 'IT' | 'NORMAL' {
+  const rm = String(meta?.renderMode ?? '').trim().toUpperCase();
+  return rm === 'IT' ? 'IT' : 'NORMAL';
 }
 
 /* =========================================================
@@ -235,7 +248,10 @@ function pickSafeTagFromMeta(meta: any): string | null {
  * - “警告文”を出すのではなく、LLMの生成姿勢を制動する
  * - SAFE / gate / meta 等の語は本文に出させない
  */
-function buildSafeSystemMessage(meta: any, userText: string): ChatCompletionMessageParam | null {
+function buildSafeSystemMessage(
+  meta: any,
+  userText: string,
+): ChatCompletionMessageParam | null {
   const safeTag = pickSafeTagFromMeta(meta);
   if (!safeTag) return null;
 
@@ -249,10 +265,16 @@ function buildSafeSystemMessage(meta: any, userText: string): ChatCompletionMess
   lines.push('このターンは安全制動が必要です。');
   lines.push('');
   lines.push('絶対条件：');
-  lines.push('- 本文に「SAFE」「安全」「ゲート」「メタ」「プロトコル」「スロット」等の内部語を出さない');
-  lines.push('- 強い断定・決めつけ・診断っぽい言い回しを避ける（特に心身・医療・法律・金融）');
+  lines.push(
+    '- 本文に「SAFE」「安全」「ゲート」「メタ」「プロトコル」「スロット」等の内部語を出さない',
+  );
+  lines.push(
+    '- 強い断定・決めつけ・診断っぽい言い回しを避ける（特に心身・医療・法律・金融）',
+  );
   lines.push('- 危険行為/医療判断/法的判断/投資判断の具体助言はしない');
-  lines.push('- ユーザーの主権を保持：命令形の連発、詰問、圧の強い誘導は禁止');
+  lines.push(
+    '- ユーザーの主権を保持：命令形の連発、詰問、圧の強い誘導は禁止',
+  );
   lines.push('- 文章は短く（最大3〜5行）。必要なら改行して静かに。');
   lines.push('- 質問は0〜1（原則0）。問いが必要なら最後に1つだけ、短く。');
 
@@ -274,80 +296,23 @@ function buildSafeSystemMessage(meta: any, userText: string): ChatCompletionMess
   lines.push('');
   lines.push(`USER_TEXT: ${String(userText)}`);
 
-  return { role: 'system', content: lines.join('\n') } as ChatCompletionMessageParam;
+  return { role: 'system', content: lines.join('\n') };
 }
 
 /* =========================================================
-   WRITER PROTOCOL
-   ========================================================= */
+   WRITER PROTOCOL (full rewrite)
+   - Always attach / Conditional apply: WHISPER
+   - Short / IT / Normal
+   - No “template smell” while still deterministic
+========================================================= */
 
 function buildWriterProtocol(meta: any, userText: string): string {
   const shortTurn = isShortTurn(userText);
+  const renderMode = getRenderMode(meta); // 'IT' | 'NORMAL'
 
-  // ✅ 短文：芯/回転/制約/数値ブロックは “本文に一切出さない”
-  if (shortTurn) {
-    return [
-      '【WRITER_PROTOCOL】',
-      'あなたは「意図フィールドOS」のWriterです。一般論・説明口調・テンプレは禁止。',
-      '',
-      'このターンは “短文” です。',
-      '重要：',
-      '- 「芯」「回転」「制約」「メタ」などの言葉を本文に出さない',
-      '- 数値ブロック（〔sa...〕 や [sa...] など）を本文に出さない',
-      '- 分析・説教・長文は禁止（1〜2行で終える）',
-      '- 質問は最大1つまで（必要なら最後に短く）',
-      '',
-      `USER_TEXT: ${String(userText)}`,
-      '',
-    ]
-      .filter(Boolean)
-      .join('\n');
-  }
+  const noQuestion = !!meta?.noQuestion;
 
-// ✅ IT：視点の切替（反復/停滞で立ち上がる）
-const renderMode = String((meta as any)?.renderMode ?? '').toUpperCase();
-if (renderMode === 'IT') {
-  const noQuestion = !!(meta as any)?.noQuestion;
-  const itReason = String((meta as any)?.itReason ?? '');
-  const sameIntentStreak = Number((meta as any)?.sameIntentStreak ?? 0) || 0;
-
-  return [
-    '【WRITER_PROTOCOL】',
-    'あなたは「意図フィールドOS」のWriterです。一般論・説明口調・テンプレは禁止。',
-    '',
-    'このターンは IT（視点の切替）です。',
-    '',
-    '必須（型は固定、言い回しは固定しない）：',
-    '- 1行目は必ず「再定義」の一文で始める（短く、断定）',
-    '- ただし「焦点は〜ではなく〜」の構文は使用禁止（テンプレ臭が出るため）',
-    '- “説明”ではなく “置き換え” をする（例：守る条件 / 合意 / 境界 / 判断軸 / 期待値同期 など）',
-    '',
-    '出力ルール：',
-    '- 2〜3行ごとに改行。短く。',
-    '- 次の一手は1つだけ（実行できる最小の設計）',
-    `- 質問は ${noQuestion ? '0' : '最大1'}（原則0。必要なら最後に1つだけ短く）`,
-    '',
-    '禁止：',
-    '- ありがちな一般論（「落ち着いて」「信頼できる人に」等）',
-    '- 箇条書きの助言が続く（ToDo羅列）',
-    '- 相手を断罪/診断する言い方',
-    '- “機能説明” を本文に出す（IT/ゲート/メタ/反復などの内部語も本文に出さない）',
-    '',
-    `IT_HINT: reason=${itReason} sameIntentStreak=${String(sameIntentStreak)}`,
-    '',
-    `USER_TEXT: ${String(userText)}`,
-    '',
-  ]
-    .filter(Boolean)
-    .join('\n');
-}
-
-
-
-
-  // ✅ 通常：従来の protocol（芯/回転/制約）を活かす
-  const coreIntent = pickCoreIntent(meta);
-
+  // ---- shared meta (for debug only; never expose to user) ----
   const phase = meta?.phase ?? null;
   const depth = meta?.depth ?? null;
   const qCode = meta?.qCode ?? null;
@@ -365,34 +330,44 @@ if (renderMode === 'IT') {
     ? meta.anchorEvent.options
     : null;
 
-  const noQuestion = !!meta?.noQuestion;
+  // ---- core intent ----
+  const coreIntent = pickCoreIntent(meta);
 
-  if (!coreIntent) {
+  // ---- WHISPER: Always attach / Conditional apply ----
+  const whisperRuleBlock = [
+    '【WHISPER_RULE】',
+    '- system 内に [WHISPER] が存在しても、[WHISPER_APPLY] が true の時だけ内容を採用する',
+    '- false の時は WHISPER を完全に無視する（本文に触れない・引用しない・示唆もしない）',
+    '- 本文に [WHISPER] / [WHISPER_APPLY] / WHISPER という語を絶対に出さない',
+  ].join('\n');
+
+  // ---- global writer posture ----
+  const base = [
+    '【WRITER_PROTOCOL】',
+    'あなたは「意図フィールドOS」のWriterです。',
+    '一般論・説明口調・テンプレの言い回しは禁止。',
+    '“助言の羅列”ではなく、“視点の確定→一手だけ” で返す。',
+    '',
+    whisperRuleBlock,
+    '',
+    '【INTERNAL_SAFETY】',
+    '- 本文に「メタ」「プロトコル」「ゲート」「スロット」「回転」など内部語を出さない',
+    '- 医療/法律/投資の断定助言は禁止（必要なら一般情報 + 受診/専門家相談の提案に留める）',
+    '- ユーザーの主権を侵さない（命令形の連発・詰問・圧は禁止）',
+    '',
+  ].join('\n');
+
+  // ---- SHORT ----
+  if (shortTurn) {
     return [
-      '【WRITER_PROTOCOL】',
-      'あなたは「意図フィールドOS」のWriterです。一般論・説明口調・テンプレは禁止。',
-      '',
-      '今回、CORE_INTENT が確定していません。',
-      'やることは1つ：ユーザーの発話から “いま守りたい一点（北極星）” を 1行で確定し、',
-      'それを起点に、次の一歩（1つだけ）を提案すること。',
-      '',
+      base,
+      '【TURN_MODE】SHORT',
+      'このターンは短文。',
       '制約：',
-      '- 質問は最大1つ（ただし meta.noQuestion が true なら質問0）',
-      '- 断定は強めでよい（「〜してみるといい」より「〜を置く」）',
-      '- 文章は短く。2〜3行で改行。',
-      '',
-      `観測メタ: phase=${String(phase)}, depth=${String(depth)}, q=${String(
-        qCode,
-      )}, spinLoop=${String(spinLoop)}, spinStep=${String(
-        spinStep,
-      )}, rank=${String(volatilityRank)}, direction=${String(
-        spinDirection,
-      )}, promptStyle=${String(promptStyle)}`,
-      '',
-      '出力フォーマット（必ず守る）：',
-      '出力は「会話として自然な日本語」で書くこと。固定の見出し（例：北極星／いま置ける一歩／確認…）を毎回必ず出してはいけない。',
-      '必要なときだけ、要素を“混ぜる”ことは許可する（例：一文だけ「北極星=...」を入れる、提案を一つだけ添える、など）。',
-      '質問は必須ではない。質問する場合も「1問まで」で、詰問にならない短さにする。',
+      '- 1〜2行で終える（長文禁止）',
+      `- 質問は ${noQuestion ? '0' : '最大1'}（必要なら最後に1つだけ短く）`,
+      '- 「芯/北極星/意図/回転/数値」など概念説明は禁止',
+      '- 数値ブロック（〔sa...〕 / [sa...] など）を本文に出さない',
       '',
       `USER_TEXT: ${String(userText)}`,
       '',
@@ -401,45 +376,114 @@ if (renderMode === 'IT') {
       .join('\n');
   }
 
-  return [
-    '【WRITER_PROTOCOL】',
-    'あなたは「意図フィールドOS」のWriterです。一般論・説明口調・テンプレは禁止。',
-    '',
-    'このターンは CORE_INTENT（芯）が確定しています。',
-    '必ず最初に CORE_INTENT に触れ、途中で話が逸れても CORE_INTENT に戻してください。',
-    '',
-    `CORE_INTENT: 「${coreIntent}」`,
-    '',
-    '制約：',
-    '- 返答の冒頭1行目で CORE_INTENT を “言い換えて” 断定する（同じ文言コピペ禁止）',
-    '- 2〜3行ごとに改行。短く。',
-    '- 「次の一歩」は1つだけ提案（複数案は promptStyle=two-choice の時だけ2択まで）',
-    `- 質問は ${noQuestion ? '0' : '最大1'}（meta.noQuestion を尊重）`,
-    '',
-    '回転/制動：',
-    `- spinLoop=${String(spinLoop)} spinStep=${String(
-      spinStep,
-    )} phase=${String(phase)} depth=${String(depth)} q=${String(qCode)}`,
-    `- volatilityRank=${String(volatilityRank)} spinDirection=${String(
-      spinDirection,
-    )} promptStyle=${String(promptStyle)}`,
-    '',
+  // ---- IT ----
+  if (renderMode === 'IT') {
+    const itReason = String(meta?.itReason ?? '');
+    const sameIntentStreak = Number(meta?.sameIntentStreak ?? 0) || 0;
+
+    return [
+      base,
+      '【TURN_MODE】IT',
+      'このターンは “視点の切替（再定義）” を行う。',
+      '',
+      '必須：',
+      '- 1行目は「再定義」の一文で開始（短く、断定）',
+      '- 「焦点は〜ではなく〜」構文は禁止（テンプレ臭のため）',
+      '- “説明”ではなく “置き換え” を行う（守る条件 / 合意 / 境界 / 判断軸 / 期待値同期 等）',
+      '',
+      '出力：',
+      '- 2〜3行ごとに改行。短く。',
+      '- “次の一手” は1つだけ（実行できる最小設計）',
+      `- 質問は ${noQuestion ? '0' : '最大1'}（原則0、必要なら最後に1つだけ短く）`,
+      '',
+      '禁止：',
+      '- ありがちな一般論（「落ち着いて」「信頼できる人に」等）',
+      '- ToDo羅列が続く箇条書き',
+      '- 相手を断罪/診断する言い方',
+      '- “機能説明” を本文に出す（IT/反復/ゲート等の内部語も禁止）',
+      '',
+      `IT_HINT: reason=${itReason} sameIntentStreak=${String(sameIntentStreak)}`,
+      '',
+      `USER_TEXT: ${String(userText)}`,
+      '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  // ---- NORMAL (non-IT) ----
+
+  // A) coreIntent missing → “北極星を1行で確定” して一手
+  if (!coreIntent) {
+    return [
+      base,
+      '【TURN_MODE】NORMAL',
+      'CORE_INTENT は未確定。',
+      '',
+      'やることは2つだけ：',
+      '- 1行目で「いま守りたい一点（北極星）」を “会話として自然な日本語” で確定する',
+      '- 2〜3行目以降で “次の一手” を1つだけ置く（小さく、戻れる形）',
+      '',
+      '制約：',
+      '- 固定の見出し（例：北極星／いま置ける一歩／確認…）を毎回必ず出すのは禁止',
+      `- 質問は ${noQuestion ? '0' : '最大1'}（詰問禁止。必要なら最後に短く）`,
+      '- 断定は強めでよい（「〜してみるといい」より「〜を置く」）',
+      '- 一般論/説教/説明口調は禁止',
+      '',
+      `OBS_META: phase=${String(phase)} depth=${String(depth)} q=${String(
+        qCode,
+      )} spinLoop=${String(spinLoop)} spinStep=${String(
+        spinStep,
+      )} rank=${String(volatilityRank)} direction=${String(
+        spinDirection,
+      )} promptStyle=${String(promptStyle)}`,
+      '',
+      `USER_TEXT: ${String(userText)}`,
+      '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  // B) coreIntent present → “言い換え断定 → 一手”
+  const anchorConfirmBlock =
     anchorEventType === 'confirm' && typeof anchorConfirmQ === 'string'
       ? [
           '【ANCHOR_CONFIRM】',
-          '揺らぎが高いので、最優先でアンカー確認を出してください。',
+          '揺らぎが高い：最優先でアンカー確認を出す。',
           `確認質問: ${anchorConfirmQ}`,
           anchorConfirmOptions ? `選択肢: ${anchorConfirmOptions.join(' / ')}` : '',
-          '※確認を出した後に、短い “一歩” を1つだけ添える。',
+          '※確認の後に “次の一手” を1つだけ添える。',
         ]
           .filter(Boolean)
           .join('\n')
-      : '',
+      : '';
+
+  return [
+    base,
+    '【TURN_MODE】NORMAL',
+    'CORE_INTENT は確定。',
+    '',
+    `CORE_INTENT: 「${coreIntent}」`,
+    '',
+    '必須：',
+    '- 返答の1行目で CORE_INTENT を “言い換えて” 断定する（同文コピペ禁止）',
+    '- 2〜3行ごとに改行。短く。',
+    '- “次の一手” は1つだけ（promptStyle=two-choice の時だけ2択まで）',
+    `- 質問は ${noQuestion ? '0' : '最大1'}（必要なら最後に1つだけ短く）`,
+    '',
+    anchorConfirmBlock ? anchorConfirmBlock : '',
     '',
     '禁止：',
     '- 「まず落ち着いて」等の一般的な慰め',
     '- 機能説明だけで終わる',
     '- ユーザーに丸投げ（“選んでみて” の連発）',
+    '',
+    `ROTATION_META: spinLoop=${String(spinLoop)} spinStep=${String(
+      spinStep,
+    )} phase=${String(phase)} depth=${String(depth)} q=${String(qCode)} rank=${String(
+      volatilityRank,
+    )} direction=${String(spinDirection)} promptStyle=${String(promptStyle)}`,
     '',
     `USER_TEXT: ${String(userText)}`,
     '',
@@ -566,15 +610,14 @@ function buildWriterHintsFromMeta(meta: any): {
   const fp =
     meta?.framePlan && typeof meta.framePlan === 'object' ? meta.framePlan : null;
 
-// ✅ IT のときは “器” を T に「寄せる発想」だが、
-//    frame は【上書きしない】。
-//    理由：Context(framePlan) を単一ソースにするため。
-const renderMode = String((meta as any)?.renderMode ?? '').toUpperCase();
-if (renderMode === 'IT') {
-  // keep fp.frame (決定は framePlan に委譲)
-  // keep meta.frame (sticky事故防止：ここでは触らない)
-}
-
+  // ✅ IT のときは “器” を T に「寄せる発想」だが、
+  //    frame は【上書きしない】。
+  //    理由：Context(framePlan) を単一ソースにするため。
+  const rm = getRenderMode(meta);
+  if (rm === 'IT') {
+    // keep fp.frame (決定は framePlan に委譲)
+    // keep meta.frame (sticky事故防止：ここでは触らない)
+  }
 
   // --- debug: 入口で見えている meta/framePlan を固定観測 ---
   console.log('[IROS/frame-debug] input', {
@@ -595,12 +638,12 @@ if (renderMode === 'IT') {
 
   const frame: FrameKind | null = frameFromPlan ?? frameFromMeta ?? null;
 
-// ✅ frame は「この関数内のローカル決定」だけで扱う（meta は汚さない）
-console.log('[IROS/frame-debug] decided', {
-  frameFromPlan: frameFromPlan ?? null,
-  meta_frame_before: meta?.frame ?? null,
-  decided_frame: frame,
-});
+  // ✅ frame は「この関数内のローカル決定」だけで扱う（meta は汚さない）
+  console.log('[IROS/frame-debug] decided', {
+    frameFromPlan: frameFromPlan ?? null,
+    meta_frame_before: meta?.frame ?? null,
+    decided_frame: frame,
+  });
 
   // ② slots: framePlan.slots → meta.slotPlan の順で拾う
   const slotKeysFromPlan: string[] = Array.isArray(fp?.slots)
@@ -616,7 +659,8 @@ console.log('[IROS/frame-debug] decided', {
     .filter(([, v]) => !!v)
     .map(([k]) => k);
 
-  const slotKeys = slotKeysFromPlan.length > 0 ? slotKeysFromPlan : slotKeysFromMap;
+  const slotKeys =
+    slotKeysFromPlan.length > 0 ? slotKeysFromPlan : slotKeysFromMap;
 
   if (!frame && slotKeys.length === 0) {
     return { frame: null, slotKeys: [], hintText: null };
@@ -669,7 +713,7 @@ function pickRecentUserQsFromHistory(history: any[], take = 3): string[] {
       (m.meta?.q_code ?? null) ??
       (m.meta?.q ?? null);
 
-    const q = normalizeQ(qRaw); // 既に generate.ts 冒頭で import されている normalizeQ を使う
+    const q = normalizeQ(qRaw); // generate.ts 冒頭で import されている normalizeQ を使う
     if (!q) continue;
 
     out.push(q);
@@ -680,7 +724,6 @@ function pickRecentUserQsFromHistory(history: any[], take = 3): string[] {
 
   return out;
 }
-
 
 /* =========================================================
    MAIN
@@ -712,14 +755,10 @@ export async function generateIrosReply(
   let qTrace: any = (meta as any)?.qTrace ?? null;
 
   let qNow: string | null = normalizeQ(
-    (meta as any)?.qPrimary ??
-      (meta as any)?.q_code ??
-      qTrace?.lastQ ??
-      null,
+    (meta as any)?.qPrimary ?? (meta as any)?.q_code ?? qTrace?.lastQ ?? null,
   );
 
   let recentUserQs: string[] = [];
-
 
   /* ---------------------------------
      history から拾う
@@ -774,83 +813,64 @@ export async function generateIrosReply(
     });
   }
 
-  /* ---------------------------------
-     IT demo gate（2回目入力→ renderMode='IT'）
-     ※ Q非依存 / 失敗してもターンを落とさない
-  --------------------------------- */
-  try {
-    // ✅ history の受け口を一本化（caller 側の key ブレ吸収）
-    const rawHistory: unknown[] = (() => {
-      const a: any = args as any;
-      if (Array.isArray(a?.history) && a.history.length) return a.history;
-      if (Array.isArray(a?.historyForTurn) && a.historyForTurn.length)
-        return a.historyForTurn;
-      if (Array.isArray(a?.messages) && a.messages.length) return a.messages;
-      return Array.isArray(a?.history) ? a.history : [];
-    })();
 
-    const itGate = runItDemoGate({
-      userText,
-      history: rawHistory, // ★ ここが本命
-      qTrace: (meta as any)?.qTrace ?? null,
-      mode: (meta as any)?.mode ?? null,
-      requestedDepth:
-        ((meta as any)?.depth ??
-          (meta as any)?.depthStage ??
-          (meta as any)?.depth_stage ??
-          null) as any,
 
-      // デモ固定
-      repeatThreshold: 0.82,
-      repeatMinLen: 10,
-      maxPick: 12,
 
-      // 手動で確実にITにしたい場合：meta.itForce=true
-      itForce: (meta as any)?.itForce ?? null,
-    });
 
-    (meta as any).renderMode = itGate.renderMode; // 'IT' | 'NORMAL'
-    (meta as any).itReason = itGate.itReason ?? null;
-    (meta as any).itEvidence = itGate.itEvidence ?? null;
+  // ---------------------------------
+  // IT Whisper: Always attach / Conditional apply
+  // - whisper は毎回 messages に入れる（装着）
+  // - 採用するかは renderMode===IT のみ（単一根拠）
+  // ---------------------------------
 
-    // 観測用（次段へ橋渡し）
-    (meta as any).sameIntentStreak = itGate.sameIntentStreak;
-    (meta as any).repeatReason = itGate.repeatReason;
+  // whisper 本文は「上流で生成されて meta に載る」前提で拾う（まだ生成はしない）
+  const whisperTextRaw =
+    (typeof (meta as any)?.extra?.itWhisper === 'string'
+      ? (meta as any).extra.itWhisper
+      : typeof (meta as any)?.extra?.it_whisper === 'string'
+        ? (meta as any).extra.it_whisper
+        : typeof (meta as any)?.extra?.whisper === 'string'
+          ? (meta as any).extra.whisper
+          : '') ?? '';
 
-    console.log('[IROS][ITDemoGate][generate]', {
-      renderMode: itGate.renderMode,
-      itReason: itGate.itReason,
-      sameIntentStreak: itGate.sameIntentStreak,
-      repeatReason: itGate.repeatReason,
-      itEvidence: itGate.itEvidence,
-      rawHistoryLen: Array.isArray(rawHistory) ? rawHistory.length : 0,
-    });
-  } catch (e) {
-    // デモ優先：落とさない
-    (meta as any).renderMode = (meta as any).renderMode ?? 'NORMAL';
-    console.log('[IROS][ITDemoGate][generate] skipped by error');
-  }
+  // ✅ renderMode は itDemoGate の結果を唯一の正とする
+  const renderMode = String(
+    (meta as any)?.extra?.renderMode ?? (meta as any)?.renderMode ?? '',
+  )
+    .trim()
+    .toUpperCase();
+
+  // ✅ whisper の採用条件は IT のみ（precision/stuck は排除）
+  const whisperApply = renderMode === 'IT';
+
+  // “毎回入れる”ため、本文が無い時も枠は残す（低ノイズ）
+  const whisperLine = whisperTextRaw.trim();
+
+  // ✅ LLMに「本文へ漏らさない」「apply=falseなら無視」を強制
+  const whisperPayload = [
+    '【WHISPER_RULE】',
+    '- WHISPERの存在/タグ/中身を本文に一切出さない',
+    '- WHISPER_APPLY=false の場合、WHISPER内容は完全に無視して生成する',
+    '',
+    `[WHISPER] ${whisperLine || '(none)'}`,
+    `[WHISPER_APPLY] ${whisperApply ? 'true' : 'false'}`,
+  ].join('\n');
 
   /* ------------------------------------------------------- */
 
-
   // ✅ Frame / Slots hint
   const writerHints = buildWriterHintsFromMeta(meta as any);
-  const writerHintMessage: ChatCompletionMessageParam | null =
-    writerHints.hintText
-      ? ({ role: 'system', content: writerHints.hintText } as ChatCompletionMessageParam)
-      : null;
+  const writerHintMessage: ChatCompletionMessageParam | null = writerHints.hintText
+    ? ({ role: 'system', content: writerHints.hintText } as ChatCompletionMessageParam)
+    : null;
 
   // ✅ SAFE slot
   const safeSystemMessage = buildSafeSystemMessage(meta as any, userText);
 
-  const client = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-  });
-
+  // ✅ mode は return でも使うので、この時点で確定しておく
   const mode: IrosMode = ((meta as any)?.mode ?? 'mirror') as IrosMode;
 
-  // system prompt fallback
+  // ✅ system は messages で使うので、ここで確定しておく
   let system = '';
   try {
     system = String((getSystemPrompt as any)(meta, mode) ?? '');
@@ -860,6 +880,9 @@ export async function generateIrosReply(
   if (!system) system = String((getSystemPrompt as any)() ?? '');
 
   const protocol = buildWriterProtocol(meta as any, userText);
+
+  // ✅ client は create の前に必ず生成しておく
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
   // history → LLM
   const historyMessagesRaw = normalizeHistoryToMessages(args.history, 12);
@@ -874,10 +897,13 @@ export async function generateIrosReply(
     { role: 'system', content: system },
     { role: 'system', content: protocol },
 
+    // ✅ WHISPER は毎回 attach（apply は WHISPER_APPLY のみで制御）
+    { role: 'system', content: whisperPayload },
+
     ...(safeSystemMessage ? [safeSystemMessage] : []),
     ...(writerHintMessage ? [writerHintMessage] : []),
     ...(pastStateNoteText
-      ? [{ role: 'system', content: pastStateNoteText } as ChatCompletionMessageParam]
+      ? ([{ role: 'system', content: pastStateNoteText }] as ChatCompletionMessageParam[])
       : []),
 
     ...historyMessages,
@@ -891,8 +917,7 @@ export async function generateIrosReply(
   });
 
   let content =
-    res.choices?.[0]?.message?.content?.trim() ??
-    '……（応答生成に失敗しました）';
+    res.choices?.[0]?.message?.content?.trim() ?? '……（応答生成に失敗しました）';
 
   /* ---------------------------------
      Numeric footer
@@ -908,9 +933,7 @@ export async function generateIrosReply(
     String(mode) === 'recall';
 
   if (showNumericFooter && !hardHideNumericFooter) {
-    content = content
-      .replace(/\n*\s*[〔\[]sa[^\n]*[〕\]]\s*$/g, '')
-      .trim();
+    content = content.replace(/\n*\s*[〔\[]sa[^\n]*[〕\]]\s*$/g, '').trim();
 
     const footer = buildNumericFooter(meta as any);
     if (footer) {

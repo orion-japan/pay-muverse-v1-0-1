@@ -1,14 +1,5 @@
 // file: src/lib/iros/rotation/itDemoGate.ts
 // iros — IT demo gate (bridge)
-// 目的：
-// - history から recentUserTexts を拾って decideRepeatGate() で sameIntentStreak を作る
-// - detectILayerForce() に sameIntentStreak / qTrace / requestedDepth / mode を渡す
-// - 戻り値に renderMode='IT' の判定と理由をまとめて返す
-//
-// これにより上流は：
-//   const g = runItDemoGate({ userText, history, mode, requestedDepth, qTrace });
-//   if (g.renderMode==='IT') meta.renderMode='IT'
-// だけでデモが動く（Q非依存）
 
 import type { Depth, IrosMode } from '@/lib/iros/system';
 
@@ -31,29 +22,21 @@ function pickText(m: any): string {
 }
 
 export type ItDemoGateResult = {
-  // ここがデモの主役
   renderMode: 'NORMAL' | 'IT';
   itReason?: string;
   itEvidence?: Record<string, unknown>;
 
-  // I/T 明示フォース（必要なら併用できる）
   force: boolean;
   dual: boolean;
   requestedDepth?: Depth;
   requestedMode?: IrosMode;
   reason: string;
 
-  // repeat 側の詳細（ログに出す用）
   sameIntentStreak: number;
   repeatReason: string;
   repeatDetail: Record<string, unknown>;
 };
 
-/**
- * history から user 発話を拾う（最新が末尾の想定だが、逆でも最後だけ使うので壊れない）
- * - 直近 maxPick 件だけ拾う（軽量）
- * - 「今ターンの userText」は除外したいので、上流が history に含める前提ならOK
- */
 function pickRecentUserTexts(history: unknown[], maxPick: number): string[] {
   if (!Array.isArray(history) || history.length === 0) return [];
 
@@ -68,36 +51,36 @@ function pickRecentUserTexts(history: unknown[], maxPick: number): string[] {
 
     out.push(t);
   }
-
-  // reverseして「古→新」っぽく戻す（decideRepeatGateはどっちでもいいが、ログが読みやすい）
   return out.reverse();
 }
 
-/**
- * runItDemoGate
- * - sameIntentStreak（2回目）→ IT
- * - iLayerForce（明示ワード）→ I/T を確実化
- */
 export function runItDemoGate(args: {
   userText: string;
 
-  // 上流が持ってるはずのもの
-  history?: unknown[]; // messages履歴
-  qTrace?: { streakLength?: number | null } | null;
+  history?: unknown[];
+
+  // ★★ streakQ を見るので型を拡張（qTraceUpdated も拾う）
+  qTrace?: { streakQ?: string | null; streakLength?: number | null } | null;
+  qTraceUpdated?: { streakQ?: string | null; streakLength?: number | null } | null;
 
   mode?: IrosMode | null;
   requestedDepth?: Depth | null;
 
-  // デモ調整
-  repeatThreshold?: number; // default 0.82
-  repeatMinLen?: number; // default 10
-  maxPick?: number; // default 12
+  repeatThreshold?: number;
+  repeatMinLen?: number;
+  maxPick?: number;
 
-  // 強制スイッチ
+  // ★★ UI choiceId を直接受ける（it_ 判定をここでやる）
+  choiceId?: string | null;
+
+  // 強制スイッチ（保険）
   itForce?: boolean | null;
 }): ItDemoGateResult {
   const history = Array.isArray(args.history) ? args.history : [];
-  const recentUserTexts = pickRecentUserTexts(history, Math.max(1, args.maxPick ?? 12));
+  const recentUserTexts = pickRecentUserTexts(
+    history,
+    Math.max(1, args.maxPick ?? 12),
+  );
 
   const repeat = decideRepeatGate({
     textNow: args.userText,
@@ -106,26 +89,96 @@ export function runItDemoGate(args: {
     minLen: args.repeatMinLen ?? 10,
   });
 
+  // =========================================================
+  // ★★ IT Trigger (single source of truth)
+  // 1) UI: choiceId startsWith it_
+  // 2) same text twice: EXACT_MATCH only
+  // 3) Q2 streak2: streakQ==='Q2' && streakLength>=2
+  // =========================================================
+
+  const choiceId = args.choiceId ?? null;
+
+  const uiIT = !!(choiceId && String(choiceId).startsWith('it_'));
+
+  // ★★ 要件は「完全一致」なので EXACT_MATCH のみ採用
+  const sameTextTwice =
+    repeat.reason === 'EXACT_MATCH' && repeat.sameIntentStreak >= 2;
+
+  // ★★ qTrace が来ない経路があるので qTraceUpdated も拾う
+  const qTraceEffective = args.qTrace ?? args.qTraceUpdated ?? null;
+
+  const streakQ = qTraceEffective?.streakQ ?? null;
+  const streakLength = qTraceEffective?.streakLength ?? null;
+  const q2Streak2 = streakQ === 'Q2' && (streakLength ?? 0) >= 2;
+
+  const manual = !!(args.itForce ?? false);
+
+  const forceIT = manual || uiIT || sameTextTwice || q2Streak2;
+
+  const itReasons = [
+    manual ? 'MANUAL_FORCE' : null,
+    uiIT ? 'UI_IT_CHOICE' : null,
+    sameTextTwice ? 'SAME_TEXT_TWICE' : null,
+    q2Streak2 ? 'Q2_STREAK2' : null,
+  ].filter(Boolean) as string[];
+
+  // ★★ 観客に「system切替じゃない」を説明できる証拠ログ
+  console.log('[IROS/IT][itDemoGate]', {
+    forceIT,
+    itReasons,
+    choiceId,
+    sameTextTwice,
+    q2Streak2,
+    streakQ,
+    streakLength,
+    repeatReason: repeat.reason,
+    sameIntentStreak: repeat.sameIntentStreak,
+
+    // 念のため、どっちを採用したかも残す
+    hasQTrace: !!args.qTrace,
+    hasQTraceUpdated: !!args.qTraceUpdated,
+  });
+
+  // =========================================================
+  // detectILayerForce は “I/T明示ワード” の補助として残す
+  // ★★ ただし ITが決まったら itForce として渡す（配線一箇所化）
+  // =========================================================
+
   const forced = detectILayerForce({
     userText: args.userText,
     mode: args.mode ?? null,
     requestedDepth: args.requestedDepth ?? null,
 
-    // ★ここが今回の肝：Repeat結果をそのまま渡す
     sameIntentStreak: repeat.sameIntentStreak,
-    qTrace: args.qTrace ?? null,
+    qTrace: qTraceEffective,
 
-    // 手動IT（デモ確実）
-    itForce: args.itForce ?? null,
+    // ★★ IT確定なら常に true（ここで一箇所に収束）
+    itForce: forceIT ? true : null,
 
-    // しきい値は2固定でOK（必要なら expose）
     itThreshold: 2,
   });
 
+  // ★★ renderMode はこのゲートが最終決定（唯一根拠）
+  const finalRenderMode: 'NORMAL' | 'IT' = forceIT ? 'IT' : forced.renderMode;
+
   return {
-    renderMode: forced.renderMode,
-    itReason: forced.itReason,
-    itEvidence: forced.itEvidence,
+    renderMode: finalRenderMode,
+    itReason: forceIT ? itReasons.join('|') : forced.itReason,
+    itEvidence: forceIT
+      ? {
+          choiceId,
+          itReasons,
+          sameTextTwice,
+          q2Streak2,
+          streakQ,
+          streakLength,
+          repeat: {
+            reason: repeat.reason,
+            sameIntentStreak: repeat.sameIntentStreak,
+            detail: repeat.detail,
+          },
+        }
+      : forced.itEvidence,
 
     force: forced.force,
     dual: forced.dual,

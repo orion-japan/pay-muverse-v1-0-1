@@ -448,7 +448,13 @@ export default function MessageList() {
 
         // ★ メタを本文から隠す：toSafeString → stripIrosMetaHeader → transform → normalize
         const rawText = stripIrosMetaHeader(toSafeString(m.text));
-        const safeText = normalizeBoldMarks(transformIrTemplateToMarkdown(rawText));
+        const displayText = stripNextStepTagsForDisplay(rawText);
+        const safeText = normalizeBoldMarks(transformIrTemplateToMarkdown(displayText));
+        /** NextStepタグを表示から消す（先頭に複数ついてても全部落とす） */
+function stripNextStepTagsForDisplay(raw: string): string {
+  if (!raw) return '';
+  return raw.replace(/^\s*(\[[a-zA-Z0-9_\-]+\]\s*)+/g, '').trimStart();
+}
 
 // ✅ 表示用Qコードは「現在Q」を優先して拾う（targetQ / goalTargetQ は表示に使わない）
 const qToShowRaw =
@@ -582,30 +588,51 @@ const qToShowSafe =
                       gap: 8,
                     }}
                   >
-                    {nextStep.options.map((opt) => (
-                      <IrosButton
-                        key={(opt as any).id ?? opt.key}
-                        option={opt}
-                        gear={nextStep.gear as IrosNextStepGear}
-                        pending={loading}
-                        onClick={async (option) => {
-                          const id = (option as any).id ?? option.key ?? '';
-                          console.log('[IROS UI] nextStep option clicked', {
-                            key: id,
-                            label: option.label,
-                            gear: nextStep.gear ?? null,
-                          });
+{nextStep.options.map((opt) => {
+  // ✅ 受け取り options が旧型でも新型でも動くように正規化
+  const normalized = {
+    id: (opt as any).id ?? opt.key,      // ← choiceId 本体
+    key: opt.key,                        // ← A/B/C など表示用（無くてもOK）
+    label: opt.label,
+    description: opt.description,
+  };
 
-                          if (sendNextStepChoice) {
-                            await sendNextStepChoice({
-                              key: id,
-                              label: option.label,
-                              gear: (nextStep.gear ?? null) as string | null,
-                            });
-                          }
-                        }}
-                      />
-                    ))}
+  return (
+    <IrosButton
+      key={normalized.id}
+      option={normalized as any}
+      gear={nextStep.gear as IrosNextStepGear}
+      pending={loading}
+      onClick={async (option) => {
+        const id = (option as any).id ?? option.key ?? '';
+        const displayLabel = option.label;
+
+        // ✅ 送信本文だけ「タグ付き」にする（UI表示は server の strip が担当）
+        const alreadyTagged =
+        typeof displayLabel === 'string' && displayLabel.startsWith(`[${id}]`);
+
+      const rawText = alreadyTagged ? displayLabel : `[${id}] ${displayLabel}`;
+
+
+        console.log('[IROS UI] nextStep option clicked', {
+          id,
+          displayLabel,
+          rawText,
+          gear: nextStep.gear ?? null,
+        });
+
+        if (sendNextStepChoice) {
+          await sendNextStepChoice({
+            key: id,
+            label: rawText, // ★ここが重要：/reply に choiceId を届ける
+            gear: (nextStep.gear ?? null) as string | null,
+          });
+        }
+      }}
+    />
+  );
+})}
+
                   </div>
                 )}
               </div>

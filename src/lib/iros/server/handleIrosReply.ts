@@ -52,6 +52,8 @@ import {
   type IrosStateLite,
 } from '@/lib/iros/language/frameSlots';
 
+
+
 /* =========================
    Helpers: Achievement summary drop filter
 ========================= */
@@ -158,6 +160,8 @@ export type HandleIrosReplyInput = {
 
   /** ✅ 会話履歴（Writer/LLMに渡すため） */
   history?: unknown[];
+    // ✅ 追加：route.ts から渡す拡張情報（NextStep / IT trigger / renderMode など）
+    extra?: Record<string, any>;
 };
 
 export type HandleIrosReplySuccess = {
@@ -664,6 +668,7 @@ export async function handleIrosReply(
     userProfile,
     style,
     history,
+    extra, // ✅ 追加：route.ts から渡される拡張情報（NextStep / IT trigger / renderMode 等）
   } = params;
 
   console.log('[IROS/Reply] handleIrosReply start', {
@@ -676,6 +681,14 @@ export async function handleIrosReply(
     style,
     history_len: Array.isArray(history) ? history.length : null,
   });
+
+  console.log('[IROS/Reply] extra keys', {
+    conversationId,
+    keys: Object.keys(extra ?? {}),
+    extra: extra ?? null,
+  });
+
+
 
   try {
     /* ---------------------------
@@ -1094,71 +1107,126 @@ if (enableGoalRecall && goalRecallQ) {
       console.warn('[IROS/Gate] genericRecallGate failed', e);
     }
 
-    /* ---------------------------
-       2) Context
-    ---------------------------- */
+/* ---------------------------
+   2) Context
+---------------------------- */
 
-    const tc = nowNs();
-    const ctx = await (buildTurnContext as any)({
-      supabase,
-      conversationId,
-      userCode,
-      text,
-      mode,
-      traceId,
-      userProfile,
-      requestedStyle: style ?? null,
-      history: historyForTurn,
-    });
-    t.context_ms = msSince(tc);
+const tc = nowNs();
+const ctx = await (buildTurnContext as any)({
+  supabase,
+  conversationId,
+  userCode,
+  text,
+  mode,
+  traceId,
+  userProfile,
+  requestedStyle: style ?? null,
+  history: historyForTurn,
 
-    /* ---------------------------
-       3) Orchestrator
-    ---------------------------- */
+  // ✅ 追加：route から来た extra を context に渡す
+  extra: extra ?? null,
+});
+t.context_ms = msSince(tc);
 
-    const to = nowNs();
-    const orch = await (runOrchestratorTurn as any)({
-      conversationId,
-      userCode,
-      text,
-      isFirstTurn: ctx.isFirstTurn,
-      requestedMode: ctx.requestedMode,
-      requestedDepth: ctx.requestedDepth,
-      requestedQCode: ctx.requestedQCode,
-      baseMetaForTurn: ctx.baseMetaForTurn, // ✅ framePlan 入り
-      userProfile: userProfile ?? null,
-      effectiveStyle: ctx.effectiveStyle,
-      history: historyForTurn,
-    });
-    t.orchestrator_ms = msSince(to);
+/* ---------------------------
+   3) Orchestrator
+---------------------------- */
 
-    /* ---------------------------
-       4) PostProcess
-    ---------------------------- */
+// ✅ baseMetaForTurn に extra を必ずマージ（ここが “消えない” 本体）
+const baseMetaMergedForTurn: any = {
+  ...(ctx.baseMetaForTurn ?? {}),
+  extra: {
+    ...(((ctx.baseMetaForTurn as any)?.extra) ?? {}),
+    ...(extra ?? {}),
+  },
+};
 
-    const tp = nowNs();
-    const out = await (postProcessReply as any)({
-      supabase,
-      userCode,
-      conversationId,
-      userText: text,
-      effectiveStyle: ctx.effectiveStyle,
-      requestedMode: ctx.requestedMode,
-      orchResult: orch,
-      history: historyForTurn,
-    });
-    t.postprocess_ms = msSince(tp);
+// デバッグ（必要なら）
+console.log('[IROS/Reply] merged extra', {
+  keys: Object.keys(baseMetaMergedForTurn.extra ?? {}),
+  renderMode: baseMetaMergedForTurn.extra?.renderMode ?? null,
+  forceIT: baseMetaMergedForTurn.extra?.forceIT ?? null,
+});
 
-    /* ---------------------------
-       5) Timing / Sanitize / Rotation bridge
-    ---------------------------- */
+const to = nowNs();
+const orch = await (runOrchestratorTurn as any)({
+  conversationId,
+  userCode,
+  text,
+  isFirstTurn: ctx.isFirstTurn,
+  requestedMode: ctx.requestedMode,
+  requestedDepth: ctx.requestedDepth,
+  requestedQCode: ctx.requestedQCode,
 
+  // ✅ 差し替え：マージ済みを渡す
+  baseMetaForTurn: baseMetaMergedForTurn,
 
-    out.metaForSave = out.metaForSave ?? {};
-    out.metaForSave.timing = t;
+  userProfile: userProfile ?? null,
+  effectiveStyle: ctx.effectiveStyle,
+  history: historyForTurn,
+
+  // ✅ 追加：orch にも extra を渡す（受け側が拾えるように）
+  extra: extra ?? null,
+});
+t.orchestrator_ms = msSince(to);
+
+/* ---------------------------
+   4) PostProcess
+---------------------------- */
+
+const tp = nowNs();
+const out = await (postProcessReply as any)({
+  supabase,
+  userCode,
+  conversationId,
+  userText: text,
+  effectiveStyle: ctx.effectiveStyle,
+  requestedMode: ctx.requestedMode,
+  orchResult: orch,
+  history: historyForTurn,
+
+  // ✅ 追加：postprocess にも extra を渡す
+  extra: extra ?? null,
+});
+t.postprocess_ms = msSince(tp);
+
+/* ---------------------------
+   5) Timing / Sanitize / Rotation bridge
+---------------------------- */
+
+out.metaForSave = out.metaForSave ?? {};
+out.metaForSave.timing = t;
 
     // ✅ persist に必ず残す（postProcess が extra を作り直しても守る）
-    out.metaForSave.extra = out.metaForSave.extra ?? {};
+// ✅ persist に必ず残す（postProcess が extra を作り直しても守る）
+out.metaForSave.extra = out.metaForSave.extra ?? {};
+
+// ✅ 1) route から来た extra を “最後に” 必ず再注入（single source）
+if (extra && typeof extra === 'object') {
+  out.metaForSave.extra = {
+    ...(out.metaForSave.extra ?? {}),
+    ...(extra ?? {}),
+  };
+}
+
+// ✅ 2) renderMode はトップレベル1本化（ここが最終固定点）
+const extraRenderMode =
+  typeof out.metaForSave.extra?.renderMode === 'string'
+    ? out.metaForSave.extra.renderMode
+    : null;
+
+if (!out.metaForSave.renderMode && extraRenderMode) {
+  out.metaForSave.renderMode = extraRenderMode;
+}
+
+// ✅ 3) forceIT が true なら renderMode を必ず IT に落とす（補助情報→決定情報へ）
+if (
+  String(out.metaForSave.renderMode ?? '').trim() === '' &&
+  out.metaForSave.extra?.forceIT === true
+) {
+  out.metaForSave.renderMode = 'IT';
+}
+
 
     try {
       out.metaForSave = sanitizeIntentAnchorMeta(out.metaForSave);
