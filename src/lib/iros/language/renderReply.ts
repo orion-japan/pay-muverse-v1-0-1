@@ -353,6 +353,8 @@ function buildNoDeltaObservationLine(args: {
   return pick(seed + '|nd', arr);
 }
 
+// src/lib/iros/language/renderReply.ts
+
 function shapeFactsWithNoDelta(
   facts: string,
   ctx: {
@@ -370,6 +372,12 @@ function shapeFactsWithNoDelta(
 
   if (!noDelta) return shapedFacts;
 
+  // ✅ 重要：unknown / null の場合は “観測1行テンプレ” を差し込まない
+  // （テンプレ臭の最大原因。noDeltaKind が確定しているときだけ出す）
+  if (noDeltaKind == null || noDeltaKind === 'unknown') {
+    return shapedFacts;
+  }
+
   const obs1 = buildNoDeltaObservationLine({
     seed,
     minimalEmoji,
@@ -378,9 +386,13 @@ function shapeFactsWithNoDelta(
     facts,
   });
 
+  // obs1 が空なら facts をそのまま
+  if (!obs1) return shapedFacts;
+
   if (!shapedFacts) return obs1;
   return `${obs1}\n${shapedFacts}`;
 }
+
 
 /* =========================
    Mode inference & filters
@@ -720,9 +732,9 @@ function buildElevateLine(args: {
 }): string | null {
   const { vector, mode, seed, minimalEmoji } = args;
 
-  const want =
-    mode === 'transcend' ||
-    (mode === 'intent' && vector.transcendence >= 0.55);
+  // ✅ 変更：intent では原則出さない（soulっぽさの主因）
+  // “向き”は T（transcend）に入った時だけ出す
+  const want = mode === 'transcend';
 
   if (!want) return null;
 
@@ -735,6 +747,7 @@ function buildElevateLine(args: {
   const line = pick(seed + '|e', frames);
   return minimalEmoji ? line : `🪔 ${line}`;
 }
+
 
 function buildAskLine(args: {
   mode: RenderMode;

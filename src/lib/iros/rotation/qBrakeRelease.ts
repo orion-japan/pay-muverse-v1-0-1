@@ -210,9 +210,10 @@ export function decideQBrakeRelease(args: {
   const qs: QCode[] = qsRaw.map(normalizeQ).filter((x): x is QCode => x != null);
 
   const last = qs.length >= 1 ? qs[qs.length - 1] : null;
-  const prev = qs.length >= 2 ? qs[qs.length - 2] : null;
 
-  const qNow_streak2 = !!(qNow && last === qNow && prev === qNow);
+  // ✅ 「直近が同じQ」なら “streak2相当” とみなす（generateの時点で取れる情報で確実に動く）
+  const qNow_streak2 = !!(qNow && last === qNow);
+
   const q2_streak2 = qNow === 'Q2' && qNow_streak2;
   const q1_streak2 = qNow === 'Q1' && qNow_streak2;
 

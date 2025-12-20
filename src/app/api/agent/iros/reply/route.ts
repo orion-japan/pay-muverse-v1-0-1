@@ -3,11 +3,13 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+
 import { verifyFirebaseAndAuthorize } from '@/lib/authz';
 import { authorizeChat, captureChat, makeIrosRef } from '@/lib/credits/auto';
-import { createClient } from '@supabase/supabase-js';
-import { saveIrosTrainingSample } from '@/lib/iros/server/saveTrainingSample';
+
 import { loadIrosUserProfile } from '@/lib/iros/server/loadUserProfile';
+import { saveIrosTrainingSample } from '@/lib/iros/server/saveTrainingSample';
 
 import {
   handleIrosReply,
@@ -84,6 +86,42 @@ function pickUid(auth: any): string | null {
   );
 }
 
+/** qTrace / qTraceUpdated は metaForSave の確定値を最優先で勝たせる（streak巻き戻り防止） */
+function finalizeQTrace(meta: any, metaForSave: any): any {
+  const m = meta ?? {};
+
+  const fromSave =
+    metaForSave?.qTraceUpdated ??
+    metaForSave?.qTrace ??
+    metaForSave?.unified?.qTraceUpdated ??
+    metaForSave?.unified?.qTrace ??
+    null;
+
+  if (!fromSave || typeof fromSave !== 'object') return m;
+
+  const streak = Number((fromSave as any).streakLength ?? 0);
+  const streakSafe = Number.isFinite(streak) ? streak : 0;
+
+  m.qTrace = {
+    ...(m.qTrace ?? {}),
+    ...fromSave,
+    streakLength: streakSafe,
+  };
+
+  m.qTraceUpdated = {
+    ...(m.qTraceUpdated ?? {}),
+    ...fromSave,
+    streakLength: streakSafe,
+  };
+
+  // 2回目以降判定に使うなら、ここでだけ同期（render helper では触らない）
+  if (streakSafe > 0) {
+    m.uncoverStreak = Math.max(Number(m.uncoverStreak ?? 0), streakSafe);
+  }
+
+  return m;
+}
+
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
 }
@@ -127,13 +165,12 @@ export async function POST(req: NextRequest) {
     const modeHintInput: string | undefined = body?.modeHint;
     const extra: Record<string, any> | undefined = body?.extra;
 
-    // ✅ 追加：会話履歴（LLMに渡す）
-    // NOTE: `history` という変数名は window.history と衝突しやすいので避ける
+    // ✅ 会話履歴（LLMに渡す）
     const chatHistory: unknown[] | undefined = Array.isArray(body?.history)
       ? (body.history as unknown[])
       : undefined;
 
-    // ★ 追加：口調スタイル（client から style または styleHint で飛んでくる想定）
+    // ★ 口調スタイル（client から style または styleHint で飛んでくる想定）
     const styleInput: string | undefined =
       typeof body?.style === 'string'
         ? body.style
@@ -156,6 +193,8 @@ export async function POST(req: NextRequest) {
     const tenantId: string =
       typeof body?.tenant_id === 'string' && body.tenant_id.trim().length > 0
         ? body.tenant_id.trim()
+        : typeof body?.tenantId === 'string' && body.tenantId.trim().length > 0
+        ? body.tenantId.trim()
         : 'default';
 
     // 3) mode 推定
@@ -297,7 +336,7 @@ export async function POST(req: NextRequest) {
       userProfile,
       style: styleInput ?? (userProfile?.style ?? null),
 
-      // ✅ 追加：履歴を渡す
+      // ✅ 履歴
       history: chatHistory,
     });
 
@@ -325,9 +364,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { result, finalMode, metaForSave, assistantText } =
-  irosResult as any;
-
+    const { result, finalMode, metaForSave, assistantText } = irosResult as any;
 
     // 9) capture
     const capRes = await captureChat(req, userCode, CREDIT_AMOUNT, creditRef);
@@ -365,39 +402,35 @@ export async function POST(req: NextRequest) {
 
     // === ここからレスポンス生成 & 訓練サンプル保存 ===
     if (result && typeof result === 'object') {
-// いったんベースの meta を組み立てる（metaForSave を優先）
-let meta: any = {
-  // ★ handleIrosReply.postProcess 以降の「確定メタ」を土台にする
-  ...(metaForSave ?? {}),
+      // いったんベースの meta を組み立てる（metaForSave を優先）
+      let meta: any = {
+        ...(metaForSave ?? {}),
+        ...(((result as any).meta) ?? {}),
 
-  // （必要なら）orch 側が持っている meta を上書きで重ねる
-  ...(((result as any).meta) ?? {}),
+        userProfile:
+          (metaForSave as any)?.userProfile ??
+          (result as any)?.meta?.userProfile ??
+          userProfile ??
+          null,
 
-  userProfile:
-    (metaForSave as any)?.userProfile ??
-    (result as any)?.meta?.userProfile ??
-    userProfile ??
-    null,
+        extra: {
+          ...(((metaForSave as any)?.extra) ?? {}),
+          ...((((result as any).meta?.extra)) ?? {}),
 
-  // extra は「metaForSave.extra → result.meta.extra → routeで追加」の順にマージ
-  extra: {
-    ...(((metaForSave as any)?.extra) ?? {}),
-    ...((((result as any).meta?.extra)) ?? {}),
+          userCode: userCode ?? (metaForSave as any)?.extra?.userCode ?? null,
+          hintText: hintText ?? (metaForSave as any)?.extra?.hintText ?? null,
+          traceId: traceId ?? (metaForSave as any)?.extra?.traceId ?? null,
+          historyLen: Array.isArray(chatHistory) ? chatHistory.length : 0,
+        },
+      };
 
-    userCode: userCode ?? (metaForSave as any)?.extra?.userCode ?? null,
-    hintText: hintText ?? (metaForSave as any)?.extra?.hintText ?? null,
-    traceId: traceId ?? (metaForSave as any)?.extra?.traceId ?? null,
+      // ★ content は handleIrosReply の assistantText を正にする（renderEngine 等の前提が安定）
+      if (typeof assistantText === 'string' && assistantText.trim().length > 0) {
+        (result as any).content = assistantText;
+      }
 
-    // ✅ デバッグ用：historyの長さだけ返す
-    historyLen: Array.isArray(chatHistory) ? chatHistory.length : 0,
-  },
-};
-
-// ★ content も handleIrosReply の assistantText を正にする（renderEngine 等の前提が安定）
-if (typeof assistantText === 'string' && assistantText.trim().length > 0) {
-  (result as any).content = assistantText;
-}
-
+      // ✅ QTrace 確定（ここだけでやる：helper内では触らない）
+      meta = finalizeQTrace(meta, metaForSave);
 
       // ★ 三軸「次の一歩」オプションを meta に付与
       meta = attachNextStepMeta({
@@ -457,7 +490,6 @@ if (typeof assistantText === 'string' && assistantText.trim().length > 0) {
       (meta as any).situation_topic = (meta as any).situationTopic;
 
       // ★ target_kind を確実に付与（Training の舵取り）
-      // 方針：meta.* が最優先 → goal.kind / goalKind → intentLine.direction（最後のフォールバック）
       const rawTargetKind =
         typeof meta.targetKind === 'string' && meta.targetKind.trim().length > 0
           ? meta.targetKind.trim()
@@ -489,40 +521,36 @@ if (typeof assistantText === 'string' && assistantText.trim().length > 0) {
       meta.targetKind = normalizedTargetKind;
       meta.target_kind = normalizedTargetKind;
 
-      // ★★★ ここが本丸：返却metaの y/h を “整数に統一” する（DBとUIとTrainingを一致させる）
-meta = normalizeMetaLevels(meta);
-// ★ unified.intent_anchor を “固定アンカー” に同期（ブレ防止）
-{
-  const fixedText =
-    typeof meta?.intent_anchor?.text === 'string' && meta.intent_anchor.text
-      ? meta.intent_anchor.text
-      : null;
+      // ★★★ y/h を “整数に統一”
+      meta = normalizeMetaLevels(meta);
 
-  const fixedPhrase =
-    typeof meta?.intent_anchor?.phrase === 'string' && meta.intent_anchor.phrase
-      ? meta.intent_anchor.phrase
-      : null;
+      // ★ unified.intent_anchor を “固定アンカー” に同期（ブレ防止）
+      {
+        const fixedText =
+          typeof meta?.intent_anchor?.text === 'string' && meta.intent_anchor.text
+            ? meta.intent_anchor.text
+            : null;
 
-  const fixedStrength =
-    meta?.intent_anchor?.strength != null ? meta.intent_anchor.strength : null;
+        const fixedPhrase =
+          typeof meta?.intent_anchor?.phrase === 'string' &&
+          meta.intent_anchor.phrase
+            ? meta.intent_anchor.phrase
+            : null;
 
-  if (fixedText) {
-    meta.unified = meta.unified ?? {};
-    meta.unified.intent_anchor = meta.unified.intent_anchor ?? {};
+        const fixedStrength =
+          meta?.intent_anchor?.strength != null ? meta.intent_anchor.strength : null;
 
-    meta.unified.intent_anchor.text = fixedText;
-    if (fixedPhrase) meta.unified.intent_anchor.phrase = fixedPhrase;
-    if (fixedStrength != null) meta.unified.intent_anchor.strength = fixedStrength;
-  }
-}
-
-
-
-      console.log('[IROS/Reply] response meta', meta);
+        if (fixedText) {
+          meta.unified = meta.unified ?? {};
+          meta.unified.intent_anchor = meta.unified.intent_anchor ?? {};
+          meta.unified.intent_anchor.text = fixedText;
+          if (fixedPhrase) meta.unified.intent_anchor.phrase = fixedPhrase;
+          if (fixedStrength != null)
+            meta.unified.intent_anchor.strength = fixedStrength;
+        }
+      }
 
       // ✅ UI が goal.targetQ を拾って Q3 を表示してしまう事故を防ぐ
-      // 方針：表示用は常に「現在Q（meta.qCode / unified.q.current）」
-      //       targetQ は UI に返さない（内部的には meta.goalTargetQ に退避だけする）
       {
         const currentQ =
           (typeof meta?.qCode === 'string' && meta.qCode) ||
@@ -555,35 +583,34 @@ meta = normalizeMetaLevels(meta);
           delete meta.priority.goal.targetQ;
         }
       }
-      console.log('[DBG][style-pick]', { styleInput, metaStyle: meta?.style, metaUserStyle: meta?.userProfile?.style, userProfileStyle: userProfile?.style });
 
-// ★★★ Render Engine の適用（ここで「適用箇所」を固定）
-const effectiveStyle =
-  (typeof styleInput === 'string' && styleInput.trim().length > 0
-    ? styleInput
-    : typeof meta?.style === 'string' && meta.style.trim().length > 0
-    ? meta.style
-    : typeof meta?.userProfile?.style === 'string' &&
-      meta.userProfile.style.trim().length > 0
-    ? meta.userProfile.style
-    : typeof userProfile?.style === 'string' && userProfile.style.trim().length > 0
-    ? userProfile.style
-    : null);
+      // ★★★ Render Engine の適用（ここで「適用箇所」を固定）
+      const effectiveStyle =
+        (typeof styleInput === 'string' && styleInput.trim().length > 0
+          ? styleInput
+          : typeof meta?.style === 'string' && meta.style.trim().length > 0
+          ? meta.style
+          : typeof meta?.userProfile?.style === 'string' &&
+            meta.userProfile.style.trim().length > 0
+          ? meta.userProfile.style
+          : typeof userProfile?.style === 'string' &&
+            userProfile.style.trim().length > 0
+          ? userProfile.style
+          : null);
 
-const applied = applyRenderEngineIfEnabled({
-  conversationId,
-  userCode,
-  userText: text,
-  styleInput: effectiveStyle,
-  extra: extra ?? null,
-  meta,
-  resultObj: result as any,
-});
+      const applied = applyRenderEngineIfEnabled({
+        conversationId,
+        userCode,
+        userText: text,
+        styleInput: effectiveStyle,
+        extra: extra ?? null,
+        meta,
+        resultObj: result as any,
+      });
 
-meta = applied.meta;
+      meta = applied.meta;
 
       // ★ 訓練用サンプルを保存（失敗しても本処理は継続）
-      // ✅ skipTraining / recallOnly のときは訓練保存しない（goal recall 等）
       const skipTraining =
         meta?.skipTraining === true ||
         meta?.skip_training === true ||
@@ -654,9 +681,6 @@ meta = applied.meta;
   }
 }
 
-
-
-
 // ===== render engine helper (do not place inside POST) =====
 
 function applyRenderEngineIfEnabled(params: {
@@ -683,7 +707,7 @@ function applyRenderEngineIfEnabled(params: {
   const envRenderEngine = process.env.IROS_ENABLE_RENDER_ENGINE === '1';
   const enableRenderEngine = extraRenderEngine || envRenderEngine;
 
-  // ★ 迷子防止：ゲート根拠を必ず meta に残す（レスポンスだけで原因追跡できる）
+  // ★ ゲート根拠を meta に残す（レスポンスだけで原因追跡できる）
   meta.extra = {
     ...(meta.extra ?? {}),
     renderEngineGate: {
@@ -694,32 +718,6 @@ function applyRenderEngineIfEnabled(params: {
       extraKeys: extra ? Object.keys(extra) : [],
     },
   };
-
-// ✅ QTrace を meta に確定させる（POSTハンドラ内、meta 生成直後に置く）
-// 例）const { replyText, meta } = result; の直後あたり
-
-const qTraceUpdated = meta?.qTrace; // まずは現状の meta.qTrace を基準にする（安全）
-
-// ✅ 最終確定：qTraceUpdated を meta に焼き込む（返却直前で上書き防止）
-if (meta && qTraceUpdated && typeof qTraceUpdated === 'object') {
-  const streak = Number((qTraceUpdated as any).streakLength ?? 0);
-
-  meta.qTrace = {
-    ...(meta.qTrace ?? {}),
-    ...qTraceUpdated,
-    streakLength: Number.isFinite(streak) ? streak : 0,
-  };
-
-  // uncoverStreak も同期（allow条件がこれを見るなら）
-  if (Number.isFinite(streak) && streak > 0) {
-    (meta as any).uncoverStreak = Math.max(
-      Number((meta as any).uncoverStreak ?? 0),
-      streak
-    );
-  }
-}
-
-
 
   console.log('[IROS/Reply] renderEngine gate', {
     conversationId,
@@ -825,7 +823,7 @@ if (meta && qTraceUpdated && typeof qTraceUpdated === 'object') {
         null,
     });
 
-    // ★ 追加：spinLoop / spinStep は「最終 meta」を優先して vector に同期（SRI/TCFズレ防止）
+    // ★ spinLoop / spinStep は「最終 meta」を優先して vector に同期
     const spinLoopFromMeta =
       (meta as any)?.spinLoop ??
       (meta as any)?.spin_loop ??
@@ -864,11 +862,10 @@ if (meta && qTraceUpdated && typeof qTraceUpdated === 'object') {
       (meta.unified?.soulNote?.core_need as string) ??
       null;
 
-      let insightCandidate: string | null =
+    let insightCandidate: string | null =
       coreNeed && String(coreNeed).trim().length > 0
         ? String(coreNeed).trim()
         : null;
-
 
     const nextStepCandidate =
       (meta.nextStep as any)?.text ??
@@ -878,92 +875,61 @@ if (meta && qTraceUpdated && typeof qTraceUpdated === 'object') {
       (meta.nextStepMeta as any)?.text ??
       null;
 
-// biz-soft / biz-formal は絵文字抑制
-const minimalEmoji =
-  typeof styleInput === 'string' &&
-  (styleInput.includes('biz-formal') || styleInput.includes('biz-soft'));
+    // biz-soft / biz-formal は絵文字抑制
+    const minimalEmoji =
+      typeof styleInput === 'string' &&
+      (styleInput.includes('biz-formal') || styleInput.includes('biz-soft'));
 
-// ★ framePlan は「route側のmeta」から取る（ctx はこの層に存在しない）
-const framePlan = (meta as any)?.framePlan ?? null;
+    // framePlan は route 側で meta に載せたものを拾う
+    const framePlan = (meta as any)?.framePlan ?? null;
 
-// ★ renderReply 側で detectNoDelta / slotPlan 判定に使えるように載せる
-//（vector は ResonanceVector 型なので any でブリッジ）
-(vectorForRender as any).slotPlan = (meta as any)?.slotPlan ?? null;
-// 必要なら将来拡張用（今は未使用でもOK）
-// (vectorForRender as any).noDelta = !!(meta as any)?.noDelta;
+    // renderReply 側で slotPlan 判定に使えるように載せる（型は any でブリッジ）
+    (vectorForRender as any).slotPlan = (meta as any)?.slotPlan ?? null;
 
-// --- Orientation Whisper（向き還り1文）: 2回目以降だけ ---
-// 既存 insightCandidate があるなら優先して潰さない
-if (!insightCandidate) {
-  const noDelta = (meta as any)?.noDelta === true;
-  const noDeltaKind = (meta as any)?.noDeltaKind ?? null;
+    // --- Orientation Whisper（向き還り1文）: 2回目以降だけ ---
+    if (!insightCandidate) {
+      const noDelta = (meta as any)?.noDelta === true;
+      const noDeltaKind = (meta as any)?.noDeltaKind ?? null;
 
-  const uncoverStreak =
-    typeof (meta as any)?.uncoverStreak === 'number'
-      ? (meta as any).uncoverStreak
-      : Number((meta as any)?.qTrace?.streakLength ?? 0);
+      const uncoverStreak =
+        typeof (meta as any)?.uncoverStreak === 'number'
+          ? (meta as any).uncoverStreak
+          : Number((meta as any)?.qTrace?.streakLength ?? 0);
 
-  const volatilityRank = ((meta as any)?.volatilityRank as any) ?? null;
+      const volatilityRank = ((meta as any)?.volatilityRank as any) ?? null;
 
-  const allow =
-    noDelta &&
-    (noDeltaKind === 'stuck' || noDeltaKind === 'repeat-warning') &&
-    uncoverStreak >= 2 &&
-    (uncoverStreak === 2 || (uncoverStreak >= 3 && volatilityRank === 'high'));
+      const allow =
+        noDelta &&
+        (noDeltaKind === 'stuck' || noDeltaKind === 'repeat-warning') &&
+        uncoverStreak >= 2 &&
+        (uncoverStreak === 2 ||
+          (uncoverStreak >= 3 && volatilityRank === 'high'));
 
-  if (allow) {
-    // 1文のみ・問いなし・理由なし・評価なし
-    if (qNow === 'Q2') {
-      insightCandidate = '変えようとする力は十分ある。向きだけは嘘をついていない。';
-    } else if (qNow === 'Q3') {
-      insightCandidate = '決めなくていい。戻る方向だけ保てばいい。';
-    } else {
-      insightCandidate = '今日は答えを出す時間じゃない。向きだけ戻せばいい。';
+      if (allow) {
+        if (qNow === 'Q2') {
+          insightCandidate = '変えようとする力は十分ある。向きだけは嘘をついていない。';
+        } else if (qNow === 'Q3') {
+          insightCandidate = '決めなくていい。戻る方向だけ保てばいい。';
+        } else {
+          insightCandidate = '今日は答えを出す時間じゃない。向きだけ戻せばいい。';
+        }
+      }
     }
-  }
-}
 
-// --- QTrace Bridge (render直前に、最新のstreakをmetaへ反映) ---
-// 症状: [IROS/QTrace] updated では streakLength=2 なのに、renderEngine inputs では 1 に戻る。
-// 対策: render直前で meta の qTrace / uncoverStreak を同期して「2回目以降」を成立させる。
-
-{
-  const mq = (meta as any)?.qTrace ?? null;
-
-  // もし run内で「最新のqTrace（更新後）」を別変数で持っているならそれを優先
-  // 例: const qTraceUpdated = ...
-  const latest = (globalThis as any)?.__IROS_QTRACE_UPDATED__ ?? null; // ※プロジェクト内で実在する変数に置き換えてOK
-
-  const streakFromMeta = Number(mq?.streakLength ?? 0);
-  const streakFromLatest = Number(latest?.streakLength ?? 0);
-  const finalStreak = Math.max(streakFromMeta, streakFromLatest);
-
-  if (!Number.isNaN(finalStreak) && finalStreak > 0) {
-    (meta as any).qTrace = { ...(mq ?? {}), ...(latest ?? {}), streakLength: finalStreak };
-    // uncoverStreak を「2回目以降」の判定材料に使っているので、ここで同期
-    (meta as any).uncoverStreak =
-      typeof (meta as any).uncoverStreak === 'number'
-        ? Math.max((meta as any).uncoverStreak, finalStreak)
-        : finalStreak;
-  }
-}
-
-
-
-console.log('[IROS/Reply][renderEngine] inputs', {
-  conversationId,
-  userCode,
-  styleInput,
-  minimalEmoji,
-  qNow,
-  userWantsEssence,
-  highDefensiveness,
-  insightCandidate,
-  nextStepCandidate,
-  framePlan, // ★ログ確認用
-  slotPlan: (vectorForRender as any).slotPlan, // ★ここも見える化
-  vector: vectorForRender,
-});
+    console.log('[IROS/Reply][renderEngine] inputs', {
+      conversationId,
+      userCode,
+      styleInput,
+      minimalEmoji,
+      qNow,
+      userWantsEssence,
+      highDefensiveness,
+      insightCandidate,
+      nextStepCandidate,
+      framePlan,
+      slotPlan: (vectorForRender as any).slotPlan,
+      vector: vectorForRender,
+    });
 
     // meta.extra にデバッグ情報
     meta.extra = {
@@ -992,8 +958,6 @@ console.log('[IROS/Reply][renderEngine] inputs', {
         minimalEmoji,
         forceExposeInsight:
           !!extra && (extra as any).forceExposeInsight === true,
-
-        // ✅ 追加：renderReply 側が (opts as any).framePlan で拾えるように渡す
         framePlan: (meta as any)?.framePlan ?? null,
       } as any,
     );
@@ -1006,7 +970,7 @@ console.log('[IROS/Reply][renderEngine] inputs', {
         : String(rendered ?? '');
 
     if (renderedText.trim().length > 0) {
-      resultObj.content = renderedText; // ★反映
+      resultObj.content = renderedText;
       meta.extra = {
         ...(meta.extra ?? {}),
         renderEngineApplied: true,
@@ -1035,7 +999,7 @@ console.log('[IROS/Reply][renderEngine] inputs', {
 
     return { meta };
   }
-} // ✅ applyRenderEngineIfEnabled をここで確実に閉じる
+}
 
 /**
  * yLevel / hLevel を “整数に統一” する（DBの int と常に一致させる）
@@ -1112,4 +1076,3 @@ function clampInt(v: number, min: number, max: number): number {
   if (v > max) return max;
   return v;
 }
-

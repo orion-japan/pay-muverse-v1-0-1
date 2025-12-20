@@ -171,6 +171,68 @@ function isFixedNorthSun(metaForSave: any): boolean {
   return false;
 }
 
+// ✅ 追加：qTrace を persist 直前で正規化（branch差を吸収）
+function normalizeQTraceForPersist(metaForSave: any): any {
+  if (!metaForSave || typeof metaForSave !== 'object') return metaForSave;
+
+  const qTrace =
+    metaForSave.qTrace && typeof metaForSave.qTrace === 'object'
+      ? metaForSave.qTrace
+      : null;
+
+  const qTraceUpdated =
+    metaForSave.qTraceUpdated && typeof metaForSave.qTraceUpdated === 'object'
+      ? metaForSave.qTraceUpdated
+      : null;
+
+  if (!qTrace && !qTraceUpdated) return metaForSave;
+
+  const lenQ =
+    typeof (qTrace as any)?.streakLength === 'number' &&
+    Number.isFinite((qTrace as any).streakLength)
+      ? Math.max(0, Math.floor((qTrace as any).streakLength))
+      : null;
+
+  const lenU =
+    typeof (qTraceUpdated as any)?.streakLength === 'number' &&
+    Number.isFinite((qTraceUpdated as any).streakLength)
+      ? Math.max(0, Math.floor((qTraceUpdated as any).streakLength))
+      : null;
+
+  // ✅ 重要：streakLength は “大きい方” を採用（1で潰される事故を防ぐ）
+  const streakLength =
+    lenQ == null && lenU == null ? undefined : Math.max(lenQ ?? 0, lenU ?? 0);
+
+  // 形は qTrace + qTraceUpdated をマージして「最終形」を作る
+  const mergedQTrace = {
+    ...(qTrace ?? {}),
+    ...(qTraceUpdated ?? {}),
+    ...(streakLength !== undefined ? { streakLength } : {}),
+  };
+
+  const uncoverPrevRaw = metaForSave.uncoverStreak;
+  const uncoverPrev =
+    typeof uncoverPrevRaw === 'number' && Number.isFinite(uncoverPrevRaw)
+      ? Math.max(0, Math.floor(uncoverPrevRaw))
+      : 0;
+
+  const uncoverNext =
+    typeof mergedQTrace.streakLength === 'number'
+      ? Math.max(uncoverPrev, mergedQTrace.streakLength)
+      : uncoverPrev;
+
+  return {
+    ...metaForSave,
+    qTrace: mergedQTrace,
+    // ✅ ここも重要：DBに入る qTraceUpdated は常に “最終形” に揃える
+    qTraceUpdated: mergedQTrace,
+    uncoverStreak: uncoverNext,
+  };
+}
+
+
+
+
 /* =========================
  * Persist: messages
  * ========================= */
@@ -226,8 +288,10 @@ export async function persistAssistantMessage(args: {
     const spinLoopNorm = normalizeSpinLoop(spinLoopRaw);
     const spinStepNorm = normalizeSpinStep(spinStepRaw);
 
+    const metaForSaveNormalized = normalizeQTraceForPersist(metaForSave);
+
     const meta = {
-      ...(metaForSave ?? {}),
+      ...(metaForSaveNormalized ?? {}),
       writer: 'handleIrosReply',
 
       ...(yInt !== null ? { yLevel: yInt } : {}),

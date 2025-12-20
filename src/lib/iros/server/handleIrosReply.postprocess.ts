@@ -187,6 +187,88 @@ function ensureRotationState(meta: any, orchResult: any): any {
   return m;
 }
 
+/* =========================================================
+   pastStateNote injection guards (single source)
+   - 相談の芯を最優先：必要な時だけ注入する
+========================================================= */
+
+function normalizeText(v: unknown): string {
+  return typeof v === 'string' ? v.trim() : String(v ?? '').trim();
+}
+
+function isRecallOrGoalLike(textRaw: string): boolean {
+  const t = normalizeText(textRaw);
+  if (!t) return false;
+
+  // 最小の検出（デモ仕上げ用）：goal/recall 系の割り込み判定
+  // ※この判定は「注入禁止」に使う（注入トリガーではない）
+  return (
+    t.includes('目標') ||
+    t.includes('ゴール') ||
+    t.includes('覚えて') ||
+    t.includes('覚えてる') ||
+    t.includes('思い出') ||
+    t.includes('前の話') ||
+    t.includes('さっきの') ||
+    t.includes('先週') ||
+    t.includes('達成') ||
+    t.toLowerCase().includes('recall')
+  );
+}
+
+function isExplicitRecallRequest(textRaw: string): boolean {
+  const t = normalizeText(textRaw);
+  if (!t) return false;
+
+  // 明示的に「思い出して」「前の話」などを要求している場合だけ true
+  return (
+    t.includes('思い出して') ||
+    t.includes('前の話') ||
+    t.includes('前回') ||
+    t.includes('さっきの話') ||
+    t.includes('先週の') ||
+    t.toLowerCase().includes('recall')
+  );
+}
+
+function getStreakLength(meta: any): number {
+  const v =
+    meta?.qTrace?.streakLength ??
+    meta?.qTraceUpdated?.streakLength ??
+    meta?.uncoverStreak ??
+    0;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function shouldSkipPastStateNote(args: PostProcessReplyArgs, metaForSave: any): boolean {
+  const requestedMode = (args.requestedMode ?? metaForSave?.mode ?? '').toString().toLowerCase();
+  const userText = normalizeText(args.userText);
+
+  // 明示 recall だけは「相談継続中」でも注入を許可する（ただし他の強制OFF条件は優先）
+  const explicitRecall = isExplicitRecallRequest(userText);
+
+  // 1) メタで明示的に禁止
+  if (metaForSave?.skipMemory === true) return true;
+  if (metaForSave?.goalRecallOnly === true) return true;
+  if (metaForSave?.achievementSummaryOnly === true) return true;
+
+  // 2) recall モード中は注入しない（recall 自体が別ルート）
+  if (requestedMode === 'recall') return true;
+
+    // 3) goal系は注入しない（割り込み/混線防止）
+  //    recall系は “明示 recall” のときだけ許可する
+  const recallOrGoal = isRecallOrGoalLike(userText);
+  if (recallOrGoal && !explicitRecall) return true;
+
+  // 4) 相談が連続している最中（streak 継続中）は注入しない（芯を守る）
+  //    ※ただし「明示 recall」だけは例外
+  const streak = getStreakLength(metaForSave);
+  if (!explicitRecall && streak > 0) return true;
+
+  return false;
+}
+
 export async function postProcessReply(args: PostProcessReplyArgs): Promise<PostProcessReplyOutput> {
   const { orchResult, supabase, userCode, userText } = args;
 
@@ -251,7 +333,26 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
 
   // =========================================================
   // ✅ ここが「注入」本体：pastStateNote を作って meta.extra に入れる
+  //   - single source: postprocess のみ
+  //   - ただし「必要な時だけ」注入する（ガードあり）
   // =========================================================
+  metaForSave.extra = metaForSave.extra ?? {};
+
+  const skipInject = shouldSkipPastStateNote(args, metaForSave);
+  if (skipInject) {
+    // 注入しない場合も、フィールドは明示的に落として混線を防ぐ
+    metaForSave.extra.pastStateNoteText = null;
+    metaForSave.extra.pastStateTriggerKind = null;
+    metaForSave.extra.pastStateKeyword = null;
+
+    console.log('[IROS/PostProcess] pastStateNote skipped', {
+      userCode,
+      reason: 'guard',
+    });
+
+    return { assistantText, metaForSave };
+  }
+
   try {
     const topicLabel =
       typeof args.topicLabel === 'string'
@@ -266,10 +367,17 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
         ? args.pastStateLimit
         : 3;
 
+    // ✅ Step B：default false（常時fallbackをやめる）
+    // true にするのは：
+    // - 引数で明示
+    // - topicLabel がある
+    // - 明示 recall 要求がある
+    const explicitRecall = isExplicitRecallRequest(userText);
+
     const forceFallback =
       typeof args.forceRecentTopicFallback === 'boolean'
         ? args.forceRecentTopicFallback
-        : true; // ★要件：毎ターン recent_topic fallback
+        : Boolean(topicLabel) || explicitRecall;
 
     const recall = await preparePastStateNoteForTurn({
       client: supabase,
@@ -279,8 +387,6 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
       limit,
       forceRecentTopicFallback: forceFallback,
     });
-
-    metaForSave.extra = metaForSave.extra ?? {};
 
     // hasNote の時だけ入れる（トークン節約）
     if (recall.hasNote && recall.pastStateNoteText) {
@@ -299,6 +405,8 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
       triggerKind: recall.triggerKind,
       keyword: recall.keyword,
       len: recall.pastStateNoteText ? recall.pastStateNoteText.length : 0,
+      forceFallback,
+      topicLabel,
     });
   } catch (e) {
     console.warn('[IROS/PostProcess] pastStateNote inject failed', e);

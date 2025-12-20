@@ -99,29 +99,33 @@ const FORCE_I_LAYER =
   typeof process !== 'undefined' &&
   process.env.IROS_FORCE_I_LAYER === '1';
 
-// ==== Orchestrator に渡す引数 ==== //
-export type IrosOrchestratorArgs = {
-  conversationId?: string;
-  text: string;
+  export type IrosOrchestratorArgs = {
+    conversationId?: string;
+    text: string;
 
-  requestedMode?: IrosMode;
-  requestedDepth?: Depth;
-  requestedQCode?: QCode;
+    requestedMode?: IrosMode;
+    requestedDepth?: Depth;
+    requestedQCode?: QCode;
 
-  baseMeta?: Partial<IrosMeta>;
+    baseMeta?: Partial<IrosMeta>;
 
-  /** ★ この会話の最初のターンかどうか（reply/route.ts から渡す） */
-  isFirstTurn?: boolean;
+    /** ★ この会話の最初のターンかどうか（reply/route.ts から渡す） */
+    isFirstTurn?: boolean;
 
-  /** ★ MemoryState 読み書き用：user_code */
-  userCode?: string;
+    /** ★ MemoryState 読み書き用：user_code */
+    userCode?: string;
 
-  /** ★ v_iros_user_profile の1行分（任意） */
-  userProfile?: Record<string, any> | null;
+    /** ★ v_iros_user_profile の1行分（任意） */
+    userProfile?: Record<string, any> | null;
 
-  /** ★ 口調スタイル（route / handleIrosReply から渡す） */
-  style?: IrosStyle | string | null;
-};
+    /** ★ 口調スタイル（route / handleIrosReply から渡す） */
+    style?: IrosStyle | string | null;
+
+    /** ✅ NEW: LLM / ITDemoGate / repeat 用の履歴（handleIrosReply 側で渡せる） */
+    history?: unknown[];
+  };
+
+
 
 // ==== Orchestrator から返す結果 ==== //
 export type IrosOrchestratorResult = {
@@ -168,7 +172,7 @@ export async function runIrosTurn(
   args: IrosOrchestratorArgs,
 ): Promise<IrosOrchestratorResult> {
   const {
-    conversationId, // ← いまは未使用（将来拡張用）
+    conversationId,
     text,
     requestedMode,
     requestedDepth,
@@ -178,7 +182,9 @@ export async function runIrosTurn(
     userCode,
     userProfile,
     style, // ★ 追加
+    history, // ✅ NEW（ここに入れる）
   } = args;
+
 
   // ★★ ここにあった「0. 意図の薄いターン（挨拶 / コマンド）」の
   //     早期 return ロジックは削除しました。
@@ -910,52 +916,57 @@ if (isActionRequest && priority) {
 
 
   // ----------------------------------------------------------------
+  // 7.75 IT Trigger（I→T の扉） + I語彙の表出許可（別レーン）
+  // ✅ 重要：generate より “前” に動かす（本文に反映させるため）
+  // ※注意：meta.iLayerForce は detectILayerForce の “オブジェクト” なので触らない
+  // ----------------------------------------------------------------
+  {
+    const it = computeITTrigger({
+      text,
+      // ✅ runIrosTurn の args から受け取った history を使う（なければ空配列）
+      history: Array.isArray(history) ? history : [],
+      meta: {
+        depthStage: meta.depth ?? null,
+        intentLine: (meta as any).intentLine ?? null,
+      },
+    });
+
+    // ✅ I語彙を本文に1行出す「別レーン」フラグ（衝突回避）
+    (meta as any).iLexemeForce = it.iLayerForce === true;
+
+    // ✅ I→T が成立した時だけ Tを開く（未成立なら既存値を壊さない）
+    if (it.ok && it.tLayerModeActive) {
+      (meta as any).tLayerModeActive = true;
+      (meta as any).tLayerHint =
+        it.tLayerHint ?? (meta as any).tLayerHint ?? 'T2';
+      (meta as any).tVector = it.tVector;
+    }
+
+    if (typeof process !== 'undefined' && process.env.DEBUG_IROS_IT === '1') {
+      // eslint-disable-next-line no-console
+      console.log('[IROS/IT_TRIGGER]', {
+        ok: it.ok,
+        reason: it.reason,
+        flags: it.flags,
+        iLexemeForce: (meta as any).iLexemeForce ?? null,
+        tLayerModeActive: (meta as any).tLayerModeActive ?? null,
+        tLayerHint: (meta as any).tLayerHint ?? null,
+        tVector: (meta as any).tVector ?? null,
+      });
+    }
+  }
+
+  // ----------------------------------------------------------------
   // 8. 本文生成（LLM 呼び出し）
+  // ✅ generate に history を渡す（ITDemoGate / writerが使える）
   // ----------------------------------------------------------------
   const gen: GenerateResult = await generateIrosReply({
     text,
     meta,
+    history: Array.isArray(history) ? history : [],
   });
 
   let content = gen.content;
-
-// ----------------------------------------------------------------
-// 7.75 IT Trigger（I→T の扉） + I語彙の表出許可（別レーン）
-// ※注意：meta.iLayerForce は detectILayerForce の “オブジェクト” なので触らない
-// ----------------------------------------------------------------
-{
-  const it = computeITTrigger({
-    text,
-    history: [], // orchestrator は履歴を持たない（chatCore 側で後日強化）
-    meta: {
-      depthStage: meta.depth ?? null,
-      intentLine: (meta as any).intentLine ?? null,
-    },
-  });
-
-  // ✅ I語彙を本文に1行出す「別レーン」フラグ（衝突回避）
-  (meta as any).iLexemeForce = it.iLayerForce === true;
-
-  // ✅ I→T が成立した時だけ Tを開く（未成立なら既存値を壊さない）
-  if (it.ok && it.tLayerModeActive) {
-    (meta as any).tLayerModeActive = true;
-    (meta as any).tLayerHint = it.tLayerHint ?? (meta as any).tLayerHint ?? 'T2';
-    (meta as any).tVector = it.tVector;
-  }
-
-  if (typeof process !== 'undefined' && process.env.DEBUG_IROS_IT === '1') {
-    // eslint-disable-next-line no-console
-    console.log('[IROS/IT_TRIGGER]', {
-      ok: it.ok,
-      reason: it.reason,
-      flags: it.flags,
-      iLexemeForce: (meta as any).iLexemeForce ?? null,
-      tLayerModeActive: (meta as any).tLayerModeActive ?? null,
-      tLayerHint: (meta as any).tLayerHint ?? null,
-      tVector: (meta as any).tVector ?? null,
-    });
-  }
-}
 
 
 

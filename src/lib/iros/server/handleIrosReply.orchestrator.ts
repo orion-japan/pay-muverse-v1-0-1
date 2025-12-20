@@ -4,6 +4,7 @@
 //    そのまま Orchestrator / Writer に届ける
 // - intentAnchor だけ検疫
 // - 回転やフレームは「触らない・削らない」
+// ✅ 追加：history を受け取り、そのまま runIrosTurn に渡す（ITDemoGate 用）
 
 import { runIrosTurn } from '@/lib/iros/orchestrator';
 import type { IrosStyle } from '@/lib/iros/system';
@@ -23,6 +24,9 @@ export type RunOrchestratorTurnArgs = {
 
   /** ✅ Context で確定した唯一の基礎メタ */
   baseMetaForTurn: any;
+
+  /** ✅ NEW: ITDemoGate / repeat 判定用の履歴（handleIrosReply 側から渡す） */
+  history?: unknown[];
 
   userProfile: IrosUserProfileRow | null;
   effectiveStyle: IrosStyle | string | null;
@@ -105,19 +109,35 @@ export async function runOrchestratorTurn(
     requestedDepth,
     requestedQCode,
     baseMetaForTurn,
+    history, // ✅ 追加
     userProfile,
     effectiveStyle,
   } = args;
 
   // =========================================================
   // ✅ 入力メタ：Context で確定した構造をそのまま使う
-  // - shallow copy だけ
-  // - intentAnchor 以外は触らない
+  // - top は shallow copy
+  // - rotationState / framePlan / intentAnchor は参照共有を切る（破壊的更新対策）
+  // - intentAnchor 以外は触らない（= 値は変えず、clone だけ）
   // =========================================================
   const safeBaseMeta =
     baseMetaForTurn && typeof baseMetaForTurn === 'object'
       ? { ...baseMetaForTurn }
       : {};
+
+  // ✅ 参照共有を切る（Context確定値を汚さないため）
+  if (
+    safeBaseMeta.rotationState &&
+    typeof safeBaseMeta.rotationState === 'object'
+  ) {
+    safeBaseMeta.rotationState = { ...safeBaseMeta.rotationState };
+  }
+  if (safeBaseMeta.framePlan && typeof safeBaseMeta.framePlan === 'object') {
+    safeBaseMeta.framePlan = { ...safeBaseMeta.framePlan };
+  }
+  if (safeBaseMeta.intentAnchor && typeof safeBaseMeta.intentAnchor === 'object') {
+    safeBaseMeta.intentAnchor = { ...safeBaseMeta.intentAnchor };
+  }
 
   // intentAnchor だけ検疫（回転・framePlan は絶対に触らない）
   sanitizeIntentAnchor(safeBaseMeta);
@@ -126,9 +146,11 @@ export async function runOrchestratorTurn(
   console.log('[IROS/Orchestrator] input meta snapshot', {
     hasRotationState: Boolean(safeBaseMeta.rotationState),
     spinLoop: safeBaseMeta.rotationState?.spinLoop ?? safeBaseMeta.spinLoop ?? null,
-    descentGate: safeBaseMeta.rotationState?.descentGate ?? safeBaseMeta.descentGate ?? null,
+    descentGate:
+      safeBaseMeta.rotationState?.descentGate ?? safeBaseMeta.descentGate ?? null,
     depth: safeBaseMeta.rotationState?.depth ?? safeBaseMeta.depth ?? null,
     frame: safeBaseMeta.framePlan?.frame ?? null,
+    historyLen: Array.isArray(history) ? history.length : 0, // ✅ 追加
   });
 
   // =========================================================
@@ -147,6 +169,10 @@ export async function runOrchestratorTurn(
     requestedQCode: requestedQCode as any,
 
     baseMeta: safeBaseMeta,
+
+    // ✅ NEW: 履歴をそのまま Orchestrator → generate → ITDemoGate へ届ける
+    history: Array.isArray(history) ? history : [],
+
     userProfile,
     style: effectiveStyle as any,
   } as any);

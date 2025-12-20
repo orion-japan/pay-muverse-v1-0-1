@@ -179,21 +179,47 @@ export async function verifyFirebaseAndAuthorize(
     let claimUserCode: string | undefined;
     let provider: string | undefined;
 
+    const isTimeoutLike = (e: any) => {
+      const msg = String(e?.message ?? e ?? '');
+      return msg.includes('timeout') || msg.includes('ETIMEDOUT') || msg.includes('Deadline');
+    };
+
+    const verifyIdTokenWithFallback = async (token: string) => {
+      try {
+        return await adminAuth.verifyIdToken(token, true); // checkRevoked = true
+      } catch (e) {
+        // タイムアウト等のときだけ、失効チェックなしで救済
+        if (isTimeoutLike(e)) {
+          warn(id, 'verifyIdToken timeout -> retry without revoked-check');
+          return await adminAuth.verifyIdToken(token, false);
+        }
+        throw e;
+      }
+    };
+
+    const verifySessionCookieWithFallback = async (cookie: string) => {
+      try {
+        return await adminAuth.verifySessionCookie(cookie, true); // checkRevoked = true
+      } catch (e) {
+        if (isTimeoutLike(e)) {
+          warn(id, 'verifySessionCookie timeout -> retry without revoked-check');
+          return await adminAuth.verifySessionCookie(cookie, false);
+        }
+        throw e;
+      }
+    };
+
     console.time(`${NS} ${id} verify firebase`);
-    if (bearerToken) {
-      const dec = await adminAuth.verifyIdToken(bearerToken, true);
-      firebaseUid = dec.uid;
-      claimRole = (dec as any).role;
-      claimUserCode = (dec as any).user_code;
-      provider = (dec as any)?.firebase?.sign_in_provider;
-    } else {
-      const dec = await adminAuth.verifySessionCookie(sessionCookie!, true);
-      firebaseUid = dec.uid;
-      claimRole = (dec as any).role;
-      claimUserCode = (dec as any).user_code;
-      provider = (dec as any)?.firebase?.sign_in_provider;
-    }
+    const dec = bearerToken
+      ? await verifyIdTokenWithFallback(bearerToken)
+      : await verifySessionCookieWithFallback(sessionCookie!);
+
+    firebaseUid = dec.uid;
+    claimRole = (dec as any).role;
+    claimUserCode = (dec as any).user_code;
+    provider = (dec as any)?.firebase?.sign_in_provider;
     console.timeEnd(`${NS} ${id} verify firebase`);
+
 
     // 2) claims 優先で user_code / role を決定
     let finalUserCode: string | null = claimUserCode ?? null;

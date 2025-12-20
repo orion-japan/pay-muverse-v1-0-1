@@ -182,6 +182,16 @@ const supabase = getIrosSupabaseAdmin();
 const IROS_MODEL =
   process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-4o';
 
+
+/**
+ * ✅ Goal recall を完全に止めるフラグ
+ * - '1' のときだけ有効
+ * - それ以外は無効（デフォルトOFF）
+ */
+const enableGoalRecall = process.env.IROS_ENABLE_GOAL_RECALL === '1';
+
+
+
 /* =========================
    History loader (single source of truth)
 ========================= */
@@ -837,7 +847,9 @@ export async function handleIrosReply(
 
     const goalRecallQ = isGoalRecallQ(text);
 
-    if (goalRecallQ) {
+    // ✅ デモ中の誤爆を止める：ENVが1のときだけ Goal recall を動かす
+if (enableGoalRecall && goalRecallQ) {
+
       let goalRaw: string | null = null;
       let goalSource: 'db' | 'history' | 'none' = 'none';
 
@@ -1138,40 +1150,9 @@ export async function handleIrosReply(
     t.postprocess_ms = msSince(tp);
 
     /* ---------------------------
-       4.5) Past state note (二重注入防止)
-    ---------------------------- */
-
-    try {
-      out.metaForSave = out.metaForSave ?? {};
-      out.metaForSave.extra = out.metaForSave.extra ?? {};
-
-      const already =
-        typeof out.metaForSave.extra.pastStateNoteText === 'string' &&
-        out.metaForSave.extra.pastStateNoteText.trim().length > 0;
-
-      if (!already) {
-        const { preparePastStateNoteForTurn } = await import('@/lib/iros/memoryRecall');
-
-        const note = await preparePastStateNoteForTurn({
-          client: supabase,
-          userCode,
-          userText: text,
-          topicLabel: null,
-          limit: 3,
-          forceRecentTopicFallback: true,
-        });
-
-        out.metaForSave.extra.pastStateNoteText = note?.pastStateNoteText ?? null;
-        out.metaForSave.extra.pastStateTriggerKind = note?.triggerKind ?? null;
-        out.metaForSave.extra.pastStateKeyword = note?.keyword ?? null;
-      }
-    } catch (e) {
-      console.warn('[IROS/Reply] pastStateNote inject failed', e);
-    }
-
-    /* ---------------------------
        5) Timing / Sanitize / Rotation bridge
     ---------------------------- */
+
 
     out.metaForSave = out.metaForSave ?? {};
     out.metaForSave.timing = t;

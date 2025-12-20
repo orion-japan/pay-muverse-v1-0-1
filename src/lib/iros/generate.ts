@@ -304,58 +304,44 @@ function buildWriterProtocol(meta: any, userText: string): string {
       .join('\n');
   }
 
-  // ✅ IT：視点の切替（反復/停滞で立ち上がる）
-  // - 深さではなく「見方」を変える
-  // - 1行目で再定義（リフレーム）し、次の一手は1つだけ
-  // - “助言リスト”や一般論に落とさない
-  const renderMode = String((meta as any)?.renderMode ?? '').toUpperCase();
-  if (renderMode === 'IT') {
-    const noQuestion = !!(meta as any)?.noQuestion;
+// ✅ IT：視点の切替（反復/停滞で立ち上がる）
+const renderMode = String((meta as any)?.renderMode ?? '').toUpperCase();
+if (renderMode === 'IT') {
+  const noQuestion = !!(meta as any)?.noQuestion;
+  const itReason = String((meta as any)?.itReason ?? '');
+  const sameIntentStreak = Number((meta as any)?.sameIntentStreak ?? 0) || 0;
 
-    // 参考情報（本文に出す必要はないが、LLMの姿勢を揃える）
-    const itReason = String((meta as any)?.itReason ?? '');
-    const sameIntentStreak = Number((meta as any)?.sameIntentStreak ?? 0) || 0;
+  return [
+    '【WRITER_PROTOCOL】',
+    'あなたは「意図フィールドOS」のWriterです。一般論・説明口調・テンプレは禁止。',
+    '',
+    'このターンは IT（視点の切替）です。',
+    '',
+    '必須（型は固定、言い回しは固定しない）：',
+    '- 1行目は必ず「再定義」の一文で始める（短く、断定）',
+    '- ただし「焦点は〜ではなく〜」の構文は使用禁止（テンプレ臭が出るため）',
+    '- “説明”ではなく “置き換え” をする（例：守る条件 / 合意 / 境界 / 判断軸 / 期待値同期 など）',
+    '',
+    '出力ルール：',
+    '- 2〜3行ごとに改行。短く。',
+    '- 次の一手は1つだけ（実行できる最小の設計）',
+    `- 質問は ${noQuestion ? '0' : '最大1'}（原則0。必要なら最後に1つだけ短く）`,
+    '',
+    '禁止：',
+    '- ありがちな一般論（「落ち着いて」「信頼できる人に」等）',
+    '- 箇条書きの助言が続く（ToDo羅列）',
+    '- 相手を断罪/診断する言い方',
+    '- “機能説明” を本文に出す（IT/ゲート/メタ/反復などの内部語も本文に出さない）',
+    '',
+    `IT_HINT: reason=${itReason} sameIntentStreak=${String(sameIntentStreak)}`,
+    '',
+    `USER_TEXT: ${String(userText)}`,
+    '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
 
-    return [
-      '【WRITER_PROTOCOL】',
-      'あなたは「意図フィールドOS」のWriterです。一般論・説明口調・テンプレは禁止。',
-      '',
-      'このターンは IT（視点の切替）です。',
-      '狙い：同じ相談が繰り返されているため、「事象の解決」ではなく「判断軸/信頼設計/未来の置き方」へ視点を上げる。',
-      '',
-      '▼1行目の型（絶対）',
-      '- 1行目は必ず “再定義” の一文で始める（短く、断定）',
-      '- 形式は次のどれかに固定（本文でこの見出しは出さない。出すのは1行目の一文だけ）：',
-      '  A) 「これは◯◯の話ではなく、◯◯の設計の話です。」',
-      '  B) 「いま詰まっているのは◯◯ではなく、◯◯の合意です。」',
-      '  C) 「焦点は◯◯ではなく、◯◯を守る置き方です。」',
-      '',
-      '▼再定義の辞書（入力に合わせて選ぶ）',
-      '- 締切/仕事の遅れ → 信頼設計 / 合意設計 / 期待値の同期',
-      '- どう言うか → 関係の設計 / 伝え方の骨格',
-      '- 怒り/怖さ → 自分の境界線 / 条件提示',
-      '- 決断できない → 判断軸 / 優先順位の固定',
-      '',
-      '必須：',
-      '- 2〜3行ごとに改行。短く。',
-      '- 次の一手は1つだけ（実行できる最小の設計）',
-      `- 質問は ${noQuestion ? '0' : '最大1'}（原則0。必要なら最後に1つだけ短く）`,
-      '',
-      '禁止：',
-      '- ありがちな一般論（「落ち着いて」「信頼できる人に」等）',
-      '- 箇条書きの助言が続く（ToDo羅列）',
-      '- 相手を断罪/診断する言い方',
-      '- “機能説明” を本文に出す（IT/ゲート/メタ/反復などの内部語も本文に出さない）',
-      '',
-      `IT_HINT: reason=${itReason} sameIntentStreak=${String(sameIntentStreak)}`,
-      '',
-      `USER_TEXT: ${String(userText)}`,
-      '',
-    ]
-      .filter(Boolean)
-      .join('\n');
-
-  }
 
 
 
@@ -580,6 +566,16 @@ function buildWriterHintsFromMeta(meta: any): {
   const fp =
     meta?.framePlan && typeof meta.framePlan === 'object' ? meta.framePlan : null;
 
+// ✅ IT のときは “器” を T に「寄せる発想」だが、
+//    frame は【上書きしない】。
+//    理由：Context(framePlan) を単一ソースにするため。
+const renderMode = String((meta as any)?.renderMode ?? '').toUpperCase();
+if (renderMode === 'IT') {
+  // keep fp.frame (決定は framePlan に委譲)
+  // keep meta.frame (sticky事故防止：ここでは触らない)
+}
+
+
   // --- debug: 入口で見えている meta/framePlan を固定観測 ---
   console.log('[IROS/frame-debug] input', {
     meta_frame_before: meta?.frame ?? null,
@@ -599,21 +595,12 @@ function buildWriterHintsFromMeta(meta: any): {
 
   const frame: FrameKind | null = frameFromPlan ?? frameFromMeta ?? null;
 
-  // ★同期：framePlan があるなら meta.frame も必ず一致させる（後方互換/表示用）
-  if (frameFromPlan && meta && typeof meta === 'object') {
-    meta.frame = frameFromPlan;
-
-    // --- debug: 同期の結果を固定観測 ---
-    console.log('[IROS/frame-debug] sync', {
-      frameFromPlan,
-      meta_frame_after: meta?.frame ?? null,
-    });
-  } else {
-    console.log('[IROS/frame-debug] sync-skip', {
-      frameFromPlan: frameFromPlan ?? null,
-      meta_frame_before: meta?.frame ?? null,
-    });
-  }
+// ✅ frame は「この関数内のローカル決定」だけで扱う（meta は汚さない）
+console.log('[IROS/frame-debug] decided', {
+  frameFromPlan: frameFromPlan ?? null,
+  meta_frame_before: meta?.frame ?? null,
+  decided_frame: frame,
+});
 
   // ② slots: framePlan.slots → meta.slotPlan の順で拾う
   const slotKeysFromPlan: string[] = Array.isArray(fp?.slots)
@@ -706,6 +693,17 @@ export async function generateIrosReply(
   const meta: IrosMeta = (args.meta ?? ({} as IrosMeta)) as IrosMeta;
   const userText = String((args as any).text ?? (args as any).userText ?? '');
 
+  // ==============================
+  // Frame sticky を断つ（重要）
+  // - args.meta は毎回 frame を含み得る（前ターン残骸）
+  // - generate では毎ターン必ず一回クリアして、framePlan で決める
+  // ==============================
+  if (meta && typeof meta === 'object') {
+    delete (meta as any).frame;
+    delete (meta as any).slots;
+    delete (meta as any).frameSlots;
+  }
+
   /* ---------------------------------
      QTrace / QNow / recentUserQs
      ※ すべて let。再宣言しない
@@ -721,6 +719,7 @@ export async function generateIrosReply(
   );
 
   let recentUserQs: string[] = [];
+
 
   /* ---------------------------------
      history から拾う
@@ -780,23 +779,33 @@ export async function generateIrosReply(
      ※ Q非依存 / 失敗してもターンを落とさない
   --------------------------------- */
   try {
+    // ✅ history の受け口を一本化（caller 側の key ブレ吸収）
+    const rawHistory: unknown[] = (() => {
+      const a: any = args as any;
+      if (Array.isArray(a?.history) && a.history.length) return a.history;
+      if (Array.isArray(a?.historyForTurn) && a.historyForTurn.length)
+        return a.historyForTurn;
+      if (Array.isArray(a?.messages) && a.messages.length) return a.messages;
+      return Array.isArray(a?.history) ? a.history : [];
+    })();
+
     const itGate = runItDemoGate({
       userText,
-      history: Array.isArray((args as any).history) ? (args as any).history : [],
+      history: rawHistory, // ★ ここが本命
       qTrace: (meta as any)?.qTrace ?? null,
       mode: (meta as any)?.mode ?? null,
-     requestedDepth:
-   ((meta as any)?.depth ??
-     (meta as any)?.depthStage ??
-     (meta as any)?.depth_stage ??
-     null) as any,
+      requestedDepth:
+        ((meta as any)?.depth ??
+          (meta as any)?.depthStage ??
+          (meta as any)?.depth_stage ??
+          null) as any,
 
       // デモ固定
       repeatThreshold: 0.82,
       repeatMinLen: 10,
       maxPick: 12,
 
-      // 手動で確実にITにしたい場合：meta.itForce=true を入れる
+      // 手動で確実にITにしたい場合：meta.itForce=true
       itForce: (meta as any)?.itForce ?? null,
     });
 
@@ -804,7 +813,7 @@ export async function generateIrosReply(
     (meta as any).itReason = itGate.itReason ?? null;
     (meta as any).itEvidence = itGate.itEvidence ?? null;
 
-    // 観測用（必要ならログ）
+    // 観測用（次段へ橋渡し）
     (meta as any).sameIntentStreak = itGate.sameIntentStreak;
     (meta as any).repeatReason = itGate.repeatReason;
 
@@ -814,6 +823,7 @@ export async function generateIrosReply(
       sameIntentStreak: itGate.sameIntentStreak,
       repeatReason: itGate.repeatReason,
       itEvidence: itGate.itEvidence,
+      rawHistoryLen: Array.isArray(rawHistory) ? rawHistory.length : 0,
     });
   } catch (e) {
     // デモ優先：落とさない
@@ -821,8 +831,8 @@ export async function generateIrosReply(
     console.log('[IROS][ITDemoGate][generate] skipped by error');
   }
 
-
   /* ------------------------------------------------------- */
+
 
   // ✅ Frame / Slots hint
   const writerHints = buildWriterHintsFromMeta(meta as any);

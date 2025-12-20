@@ -4,7 +4,11 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/authz';
+import {
+  verifyFirebaseAndAuthorize,
+  SUPABASE_URL,
+  SERVICE_ROLE,
+} from '@/lib/authz';
 
 const sb = () => createClient(SUPABASE_URL!, SERVICE_ROLE!);
 
@@ -18,6 +22,19 @@ const json = (data: any, status = 200) =>
       'Access-Control-Allow-Headers': 'Content-Type,Authorization',
     },
   });
+
+/** --- 追加: 計測ヘルパ --- */
+function msSince(t0: bigint) {
+  return Number((process.hrtime.bigint() - t0) / BigInt(1e6));
+}
+function isUpstreamTimeout(err: any) {
+  const msg = String(err?.message ?? err ?? '');
+  return (
+    msg.includes('timeout of 25000ms exceeded') ||
+    msg.toLowerCase().includes('upstream-timeout') ||
+    msg.toLowerCase().includes('timed out')
+  );
+}
 
 /** 汎用 select（候補テーブルを順に試す） */
 async function trySelect<T>(
@@ -55,7 +72,6 @@ type OutMsg = {
   meta?: any;
 };
 
-
 type LlmMsg = {
   role: 'user' | 'assistant';
   content: string;
@@ -91,11 +107,8 @@ function sanitizeJsonDeep(value: any): any {
       if (code >= 0xd800 && code <= 0xdbff) {
         const next = i + 1 < s.length ? s.charCodeAt(i + 1) : 0;
         if (next >= 0xdc00 && next <= 0xdfff) {
-          // 正しいペアはそのまま残す
           out.push(s[i], s[i + 1]);
-          i++; // 下位サロゲートをスキップ
-        } else {
-          // ペアになっていない高位サロゲートは捨てる
+          i++;
         }
         continue;
       }
@@ -125,7 +138,6 @@ function sanitizeJsonDeep(value: any): any {
     return out;
   }
 
-  // それ以外（symbol, function など）は JSON に載せない
   return undefined;
 }
 
@@ -134,12 +146,29 @@ export async function OPTIONS() {
   return json({ ok: true }, 200);
 }
 
-
 /* ========= GET /api/agent/iros/messages ========= */
 export async function GET(req: NextRequest) {
+  const t0 = process.hrtime.bigint();
   try {
-    const auth = await verifyFirebaseAndAuthorize(req);
-    if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status || 401);
+    let auth: any;
+    try {
+      auth = await verifyFirebaseAndAuthorize(req);
+    } catch (e: any) {
+      const ms = msSince(t0);
+      console.error('[IROS/messages][GET] authz throw', { ms, message: String(e?.message ?? e) });
+      return json(
+        { ok: false, error: 'authz_throw', detail: String(e?.message ?? e), ms },
+        isUpstreamTimeout(e) ? 504 : 401,
+      );
+    }
+
+    if (!auth.ok) {
+      const ms = msSince(t0);
+      // upstream-timeout っぽい時は 504 に寄せる（401誤判定を防ぐ）
+      const status = isUpstreamTimeout(auth) ? 504 : (auth.status || 401);
+      console.warn('[IROS/messages][GET] authz not ok', { ms, status, error: auth.error });
+      return json({ ok: false, error: auth.error, ms }, status);
+    }
 
     const userCode =
       (auth.user?.user_code as string) ||
@@ -151,10 +180,9 @@ export async function GET(req: NextRequest) {
     const cid = req.nextUrl.searchParams.get('conversation_id') || '';
     if (!cid) return json({ ok: false, error: 'missing_conversation_id' }, 400);
 
-    // ★ 追加: limit と meta のON/OFF
     const limitRaw = req.nextUrl.searchParams.get('limit');
     const limit = (() => {
-      if (!limitRaw) return 200; // ★ デフォルト上限（必要なら調整）
+      if (!limitRaw) return 200;
       const n = Number(limitRaw);
       if (!Number.isFinite(n) || n <= 0) return 200;
       return Math.min(n, 500);
@@ -166,32 +194,44 @@ export async function GET(req: NextRequest) {
 
     const supabase = sb();
 
-    // 所有者確認
+    const tConv = process.hrtime.bigint();
     const conv = await trySelect<{ id: string; user_code?: string | null }>(
       supabase,
       CONV_TABLES,
       'id,user_code',
       (q) => q.eq('id', cid).limit(1),
     );
-    if (conv.ok && conv.data[0]) {
-      const owner = String(conv.data[0].user_code ?? '');
-      if (owner && owner !== userCode)
-        return json({ ok: true, messages: [], llm_messages: [], note: 'forbidden_owner_mismatch' }, 200);
+    console.log('[IROS/messages][GET] conv select', { ms: msSince(tConv), ok: conv.ok, table: (conv as any).table });
+
+    if (conv.ok && (conv as any).data?.[0]) {
+      const owner = String((conv as any).data[0].user_code ?? '');
+      if (owner && owner !== userCode) {
+        return json(
+          { ok: true, messages: [], llm_messages: [], note: 'forbidden_owner_mismatch' },
+          200,
+        );
+      }
     }
 
-    // ★ meta を含めるかで select を切り替える（重い列を常に取らない）
     const columnsBase =
       'id,conversation_id,user_code,role,content,text,q_code,depth_stage,intent_layer,color,created_at,ts';
     const columns = includeMeta ? `${columnsBase},meta` : columnsBase;
 
-    // ★ 重要: created_at ASC で全件は重いので、
-    //   created_at DESC + limit で取り、最後に UI 用に昇順へ戻す
+    const tSel = process.hrtime.bigint();
     const res = await trySelect<any>(
       supabase,
       MSG_TABLES,
       columns,
       (q) => q.eq('conversation_id', cid).order('created_at', { ascending: false }).limit(limit),
     );
+    console.log('[IROS/messages][GET] msg select', {
+      ms: msSince(tSel),
+      ok: res.ok,
+      table: (res as any).table,
+      rows: Array.isArray((res as any).data) ? (res as any).data.length : 0,
+      includeMeta,
+      limit,
+    });
 
     if (!res.ok) {
       return json(
@@ -200,15 +240,13 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // ★ user_code が null / 空 のレガシー行は許可する
-    const filtered = (res.data ?? []).filter((m: any) => {
+    const filtered = ((res as any).data ?? []).filter((m: any) => {
       if (!Object.prototype.hasOwnProperty.call(m, 'user_code')) return true;
       const uc = m.user_code == null ? '' : String(m.user_code);
       if (!uc) return true;
       return uc === userCode;
     });
 
-    // DESC で取ったので、ここで ASC に戻す
     filtered.reverse();
 
     const messages: OutMsg[] = filtered.map((m: any) => ({
@@ -225,7 +263,6 @@ export async function GET(req: NextRequest) {
       meta: includeMeta ? (m.meta ?? undefined) : undefined,
     }));
 
-    // ===== LLM にそのまま渡せる履歴（軽量）=====
     const llmLimitRaw = req.nextUrl.searchParams.get('llm_limit');
     const llmLimit = (() => {
       if (!llmLimitRaw) return 20;
@@ -239,8 +276,11 @@ export async function GET(req: NextRequest) {
       content: m.content,
     }));
 
+    console.log('[IROS/messages][GET] done', { ms: msSince(t0), count: messages.length });
     return json({ ok: true, messages, llm_messages }, 200);
   } catch (e: any) {
+    const ms = msSince(t0);
+    console.error('[IROS/messages][GET] exception', { ms, message: String(e?.message ?? e) });
     return json(
       {
         ok: true,
@@ -248,18 +288,35 @@ export async function GET(req: NextRequest) {
         llm_messages: [],
         note: 'exception',
         detail: String(e?.message ?? e),
+        ms,
       },
       200,
     );
   }
 }
 
-
 /* ========= POST /api/agent/iros/messages ========= */
 export async function POST(req: NextRequest) {
+  const t0 = process.hrtime.bigint();
   try {
-    const auth = await verifyFirebaseAndAuthorize(req);
-    if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status || 401);
+    let auth: any;
+    try {
+      auth = await verifyFirebaseAndAuthorize(req);
+    } catch (e: any) {
+      const ms = msSince(t0);
+      console.error('[IROS/messages][POST] authz throw', { ms, message: String(e?.message ?? e) });
+      return json(
+        { ok: false, error: 'authz_throw', detail: String(e?.message ?? e), ms },
+        isUpstreamTimeout(e) ? 504 : 401,
+      );
+    }
+
+    if (!auth.ok) {
+      const ms = msSince(t0);
+      const status = isUpstreamTimeout(auth) ? 504 : (auth.status || 401);
+      console.warn('[IROS/messages][POST] authz not ok', { ms, status, error: auth.error });
+      return json({ ok: false, error: auth.error, ms }, status);
+    }
 
     const userCode =
       (auth.user?.user_code as string) ||
@@ -279,7 +336,6 @@ export async function POST(req: NextRequest) {
     const text: string = String(body?.text ?? body?.content ?? '').trim();
     const metaRaw = body?.meta ?? null;
 
-    // --- meta から各種コードを抽出 ---
     const q_code: string | null =
       metaRaw && typeof metaRaw === 'object' && typeof metaRaw.qCode === 'string'
         ? metaRaw.qCode
@@ -297,7 +353,6 @@ export async function POST(req: NextRequest) {
         ? metaRaw.intentLayer
         : null;
 
-    // DB に投げる前に Unicode / undefined などをクリーンアップ
     const metaSanitized = sanitizeJsonDeep(metaRaw);
     const meta =
       metaSanitized === null || typeof metaSanitized === 'undefined'
@@ -314,16 +369,19 @@ export async function POST(req: NextRequest) {
     const supabase = sb();
 
     // 所有確認
+    const tConv = process.hrtime.bigint();
     const conv = await trySelect<{ id: string; user_code?: string | null }>(
       supabase,
       CONV_TABLES,
       'id,user_code',
       (q) => q.eq('id', conversation_id).limit(1),
     );
-    if (!conv.ok || !conv.data[0]) {
+    console.log('[IROS/messages][POST] conv select', { ms: msSince(tConv), ok: conv.ok, table: (conv as any).table });
+
+    if (!conv.ok || !(conv as any).data?.[0]) {
       return json({ ok: false, error: 'conversation_not_found' }, 404);
     }
-    const owner = String(conv.data[0].user_code ?? '');
+    const owner = String((conv as any).data[0].user_code ?? '');
     if (owner && owner !== userCode) {
       return json({ ok: false, error: 'forbidden_owner_mismatch' }, 403);
     }
@@ -331,7 +389,6 @@ export async function POST(req: NextRequest) {
     const nowIso = new Date().toISOString();
     const nowTs = Date.now();
 
-    // 共通カラム
     const baseRow = {
       conversation_id,
       user_code: userCode,
@@ -342,7 +399,6 @@ export async function POST(req: NextRequest) {
       ts: nowTs,
     };
 
-    // q_code は、あるテーブル（sofia / iros）にはあるが messages にはないので別扱い
     const baseRowWithQ = {
       ...baseRow,
       q_code,
@@ -352,10 +408,10 @@ export async function POST(req: NextRequest) {
 
     // テーブルごとに適した形で insert
     for (const table of MSG_TABLES) {
+      const tIns = process.hrtime.bigint();
       let row: any;
 
       if (table === 'iros_messages' || table === 'public.iros_messages') {
-        // 新スキーマ：meta / depth_stage / intent_layer あり
         row = {
           ...baseRowWithQ,
           depth_stage,
@@ -363,13 +419,10 @@ export async function POST(req: NextRequest) {
           meta,
         };
       } else if (table === 'sofia_messages') {
-        // Sofia 時代のスキーマ：q_code まではある想定、meta 系は送らない
         row = baseRowWithQ;
       } else if (table === 'messages') {
-        // 超レガシー：q_code も meta もないテーブルを想定
         row = baseRow;
       } else {
-        // 想定外テーブルはとりあえず baseRow のみ
         row = baseRow;
       }
 
@@ -380,6 +433,14 @@ export async function POST(req: NextRequest) {
           .select('id,created_at')
           .single();
 
+        console.log('[IROS/messages][POST] insert tried', {
+          table,
+          ms: msSince(tIns),
+          ok: !error,
+          hasData: !!data,
+          err: error ? String(error.message ?? error) : null,
+        });
+
         if (!error && data) {
           inserted = {
             id: data.id,
@@ -387,21 +448,21 @@ export async function POST(req: NextRequest) {
           };
           break;
         }
-
-        if (error && process.env.NODE_ENV !== 'production') {
-          console.warn('[IROS/messages] insert error', table, error);
-        }
       } catch (e) {
-        if (process.env.NODE_ENV !== 'production') {
-          console.warn('[IROS/messages] insert exception', table, e);
-        }
+        console.log('[IROS/messages][POST] insert exception', {
+          table,
+          ms: msSince(tIns),
+          err: String((e as any)?.message ?? e),
+        });
       }
     }
 
     if (!inserted) {
-      return json({ ok: false, error: 'insert_failed_all_candidates' }, 500);
+      console.error('[IROS/messages][POST] insert failed all', { ms: msSince(t0) });
+      return json({ ok: false, error: 'insert_failed_all_candidates', ms: msSince(t0) }, 500);
     }
 
+    console.log('[IROS/messages][POST] done', { ms: msSince(t0), tableUsed: (inserted as any)?.table });
     return json({
       ok: true,
       message: {
@@ -413,8 +474,10 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (e: any) {
+    const ms = msSince(t0);
+    console.error('[IROS/messages][POST] exception', { ms, message: String(e?.message ?? e) });
     return json(
-      { ok: false, error: 'unhandled_error', detail: String(e?.message ?? e) },
+      { ok: false, error: 'unhandled_error', detail: String(e?.message ?? e), ms },
       500,
     );
   }
