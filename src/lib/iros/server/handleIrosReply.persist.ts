@@ -495,40 +495,61 @@ export async function persistMemoryStateIfAny(args: {
             ? true
             : null;
 
-    // =========================
-    // QTrace 更新（streak育成）
-    // =========================
-    const prevQ = (previous as any)?.q_primary ?? null;
+// =========================
+// QTrace 更新（persistでは“再計算しない”）
+// - 解析側で出た確定値を尊重
+// - 無い場合のみ最小推定
+// =========================
+const prevQ = (previous as any)?.q_primary ?? null;
 
-    let streakQ: string | null = null;
-    let streakLength = 1;
+const qtu = metaForSave?.qTraceUpdated;
+const qtuLen =
+  typeof qtu?.streakLength === 'number' && Number.isFinite(qtu.streakLength)
+    ? Math.max(0, Math.floor(qtu.streakLength))
+    : null;
 
-    if (qCodeInput && prevQ === qCodeInput) {
-      streakQ = qCodeInput;
-      const prevTrace = metaForSave?.qTrace;
-      const prevLen =
-        typeof prevTrace?.streakLength === 'number'
-          ? prevTrace.streakLength
-          : 1;
-      streakLength = prevLen + 1;
-    } else if (qCodeInput) {
-      streakQ = qCodeInput;
-      streakLength = 1;
-    }
+let streakQ: string | null = null;
+let streakLength = 1;
 
-    // metaForSave に反映（generate 側が拾う）
-    metaForSave.qTrace = {
-      lastQ: qCodeInput,
-      dominantQ: qCodeInput,
-      streakQ,
-      streakLength,
-    };
-    console.log('[IROS/QTrace] updated', {
-      prevQ,
-      qNow: qCodeInput,
-      streakQ,
-      streakLength,
-    });
+if (qCodeInput) {
+  if (qtuLen != null) {
+    // ✅ 解析側の確定値をそのまま採用
+    streakQ = qCodeInput;
+    streakLength = qtuLen;
+  } else if (prevQ === qCodeInput) {
+    // ✅ 保険：確定値が無い場合のみ推定
+    streakQ = qCodeInput;
+    streakLength = 2; // 最低限（前回と同じなら2）
+  } else {
+    streakQ = qCodeInput;
+    streakLength = 1;
+  }
+}
+
+// metaForSave に反映（次ターン以降が拾う）
+metaForSave.qTrace = {
+  ...(metaForSave.qTrace ?? {}),
+  lastQ: qCodeInput,
+  dominantQ: qCodeInput,
+  streakQ,
+  streakLength,
+};
+metaForSave.qTraceUpdated = {
+  ...(metaForSave.qTraceUpdated ?? {}),
+  lastQ: qCodeInput,
+  dominantQ: qCodeInput,
+  streakQ,
+  streakLength,
+};
+
+console.log('[IROS/QTrace] persisted', {
+  prevQ,
+  qNow: qCodeInput,
+  streakQ,
+  streakLength,
+  from: qtuLen != null ? 'qTraceUpdated' : 'fallback',
+});
+
 
     const phaseRawInput = metaForSave.phase ?? unified?.phase ?? null;
     const phaseInput = normalizePhase(phaseRawInput);

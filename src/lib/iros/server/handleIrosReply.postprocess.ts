@@ -477,136 +477,81 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
   // =========================================================
   if (isItRenderMode(metaForSave)) {
     try {
-      const spinLoop = metaForSave?.rotationState?.spinLoop ?? metaForSave?.spinLoop ?? null;
+      const spinLoop =
+        metaForSave?.rotationState?.spinLoop ?? metaForSave?.spinLoop ?? null;
 
       const descentGate =
         metaForSave?.rotationState?.descentGate ?? metaForSave?.descentGate ?? 'closed';
 
       const spinStep =
-        typeof metaForSave?.spinStep === 'number' && Number.isFinite(metaForSave.spinStep)
-          ? metaForSave.spinStep
+        typeof (metaForSave as any)?.spinStep === 'number' &&
+        Number.isFinite((metaForSave as any).spinStep)
+          ? (metaForSave as any).spinStep
           : null;
 
-      // framePlan は renderReply.ts が参照する可能性があるので温存
-      const framePlan = metaForSave?.framePlan ?? null;
+      const framePlan = (metaForSave as any)?.framePlan ?? null;
 
-      // ResonanceVector を meta から組む
       const vector = buildResonanceVector({
         meta: metaForSave,
         userText,
       } as any);
 
-      // IT構造化の材料
       const input = {
         facts: userText,
-        insight: assistantText,
+        insight: null,        // ✅ ここが本質。assistantText を入れない
         nextStep: null,
         userWantsEssence: true,
         highDefensiveness: false,
         userText,
       };
-      console.log('[IROS/PostProcess] IT check', {
-        userCode,
-        renderMode: metaForSave?.renderMode ?? null,
-        render_mode: metaForSave?.render_mode ?? null,
-        extra_renderMode: metaForSave?.extra?.renderMode ?? null,
-        extra_render_mode: metaForSave?.extra?.render_mode ?? null,
-        itTriggerKind:
-          metaForSave?.extra?.itTriggerKind ?? metaForSave?.itTriggerKind ?? null,
-      });
 
-// file: src/lib/iros/server/handleIrosReply.postprocess.ts
-// （508行付近の IT check ログの直後に追記）
 
-      // ✅ IT発火の「事実」を persist 層へ渡す（q_counts / itTriggered）
-      // - renderMode は既に 'IT' になっている（or extra.renderMode）
-      // - しかし persist は itTriggered / qCounts を見て更新するため、ここで確定させる
-      if (
-        metaForSave?.renderMode === 'IT' ||
-        metaForSave?.extra?.renderMode === 'IT'
-      ) {
-        // 1) 発火フラグ（persist のログ itTriggered:null を潰す）
-        (metaForSave as any).itTriggered = true;
-        if (metaForSave?.extra && typeof metaForSave.extra === 'object') {
-          (metaForSave.extra as any).itTriggered = true;
-        }
+      const forcedRenderMode =
+        (metaForSave as any)?.renderMode ?? (metaForSave as any)?.extra?.renderMode ?? undefined;
 
-        // 2) qCounts: it_cooldown を最低 1 に立てる（0のまま事故を防ぐ）
-        //   - 既存キー: qCounts / q_counts どちらでも来うるので吸収
-        const prevQCountsRaw =
-          (metaForSave as any).qCounts ??
-          (metaForSave as any).q_counts ??
-          (metaForSave as any).extra?.qCounts ??
-          (metaForSave as any).extra?.q_counts ??
-          {};
+      const shouldRunRenderReply = forcedRenderMode === 'IT';
 
-        const prevQCounts =
-          prevQCountsRaw && typeof prevQCountsRaw === 'object'
-            ? prevQCountsRaw
-            : {};
+      let renderedText = assistantText;
 
-        const prevCooldown =
-          typeof (prevQCounts as any).it_cooldown === 'number' &&
-          Number.isFinite((prevQCounts as any).it_cooldown)
-            ? (prevQCounts as any).it_cooldown
-            : 0;
-
-        const nextCooldown = Math.max(prevCooldown, 1);
-
-        const nextQCounts = {
-          ...(prevQCounts as any),
-          it_cooldown: nextCooldown,
-        };
-
-        (metaForSave as any).qCounts = nextQCounts;
-        (metaForSave as any).q_counts = nextQCounts;
-
-        if (metaForSave?.extra && typeof metaForSave.extra === 'object') {
-          (metaForSave.extra as any).qCounts = nextQCounts;
-          (metaForSave.extra as any).q_counts = nextQCounts;
-        }
+      if (shouldRunRenderReply) {
+        renderedText = renderReply(vector as any, input as any, {
+          mode: 'transcend',
+          maxLines: 14,
+          ...({
+            renderMode: 'IT',
+            itDensity:
+              (metaForSave as any)?.extra?.itDensity ??
+              (((metaForSave as any)?.extra?.itTriggerKind ??
+                (metaForSave as any)?.itTriggerKind) === 'button'
+                ? 'normal'
+                : 'micro'),
+            spinLoop,
+            descentGate,
+            framePlan,
+            spinStep,
+          } as any),
+        } as any);
       }
-
-
-
-      // ★ renderMode='IT' を opts に渡す（renderReply.ts 側が拾う）
-      const renderedText = renderReply(vector as any, input as any, {
-        mode: 'transcend',
-        maxLines: 14,
-        ...({
-          renderMode: 'IT',
-
-          // ✅ 追加：IT密度（ボタン=normal / 自然発火=micro を推奨）
-          itDensity:
-            (metaForSave?.extra?.itDensity as any) ??
-            ((metaForSave?.extra?.itTriggerKind ?? metaForSave?.itTriggerKind) === 'button'
-              ? 'normal'
-              : 'micro'),
-
-          spinLoop,
-          descentGate,
-          framePlan,
-          spinStep,
-        } as any),
-      } as any);
 
       const out = toNonEmptyString(renderedText);
       if (out) {
         finalAssistantText = out;
 
-        metaForSave.extra = metaForSave.extra ?? {};
-        metaForSave.extra.renderedBy = 'renderReply';
-        metaForSave.extra.renderedMode = 'IT';
+        if (shouldRunRenderReply) {
+          (metaForSave as any).extra = (metaForSave as any).extra ?? {};
+          (metaForSave as any).extra.renderedBy = 'renderReply';
+          (metaForSave as any).extra.renderedMode = 'IT';
+        }
       }
 
       console.log('[IROS/PostProcess] renderReply applied', {
         userCode,
-        renderMode: metaForSave?.renderMode,
-        itReason: metaForSave?.itReason ?? metaForSave?.extra?.itReason ?? null,
+        renderMode: (metaForSave as any)?.renderMode ?? null,
         len: out ? out.length : 0,
         spinLoop,
         spinStep,
         descentGate,
+        shouldRunRenderReply,
       });
     } catch (e) {
       console.warn('[IROS/PostProcess] renderReply failed (fallback to assistantText)', e);

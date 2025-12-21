@@ -775,7 +775,7 @@ if (isActionRequest && priority) {
 }
 
 // ----------------------------------------------------------------
-// 7.5 DescentGate + Frame + Slots（唯一の決定点）
+// 7.5 DescentGate + Frame + Slots（唯一の決定点 / 正規化版）
 // ----------------------------------------------------------------
 {
   const inputKind = classifyInputKind(text);
@@ -787,13 +787,12 @@ if (isActionRequest && priority) {
     if (typeof v !== 'string') return 'stabilize';
     const s = v.trim().toLowerCase();
 
-    // そのまま来る4分類
     if (s === 'stabilize') return 'stabilize';
     if (s === 'expand') return 'expand';
     if (s === 'pierce') return 'pierce';
     if (s === 'uncover') return 'uncover';
 
-    // bridge: goal.kind → 4分類
+    // bridge
     if (s === 'enableaction') return 'expand';
     if (s === 'action') return 'expand';
     if (s === 'create') return 'expand';
@@ -801,7 +800,7 @@ if (isActionRequest && priority) {
     return 'stabilize';
   };
 
-  // ✅ 優先順位：meta（すでに計算済み） > goal.kind（bridge用）
+  // 優先順位：meta → goal.kind
   const rawTargetKind =
     (meta as any).targetKind ??
     (meta as any).target_kind ??
@@ -811,77 +810,80 @@ if (isActionRequest && priority) {
   const targetKindNorm = normalizeTargetKind(rawTargetKind);
 
   (meta as any).targetKind = targetKindNorm;
-  (meta as any).target_kind = targetKindNorm; // snake互換
+  (meta as any).target_kind = targetKindNorm;
 
-
-
+  // ----------------------------------------------------------------
+  // DescentGate 決定（※ I層強制でない限り自然回転）
+  // ----------------------------------------------------------------
   const dg = decideDescentGate({
     qCode: meta.qCode ?? null,
     sa: typeof meta.selfAcceptance === 'number' ? meta.selfAcceptance : null,
-
-    // ★ Depth 型を要求しない。string として渡す
     depthStage:
       typeof meta.depth === 'string' && meta.depth.length > 0
         ? meta.depth
         : null,
-
-    // ★ ここも正規化後を渡す（stabilize潰しを止める）
     targetKind: targetKindNorm,
-
     prevDescentGate: (mergedBaseMeta as any).descentGate ?? null,
   });
 
-  (meta as any).descentGate = dg.descentGate;
-  (meta as any).descentGateReason = dg.reason;
+  // ★ I層 force のときだけ descent を閉じる
+  const isILayerForced = (meta as any)?.iLayerForce?.force === true;
 
-  // ✅ Frame + Slots をここで一括確定
+  (meta as any).descentGate = isILayerForced ? 'closed' : dg.descentGate;
+  (meta as any).descentGateReason = isILayerForced
+    ? 'I-layer forced'
+    : dg.reason;
+
+  // ----------------------------------------------------------------
+  // Frame 決定（I層強制時のみ I に固定）
+  // ----------------------------------------------------------------
   const frameSelected = selectFrame(
     {
       depth:
         typeof meta.depth === 'string' && meta.depth.length > 0
           ? meta.depth
           : null,
-      descentGate: meta.descentGate ?? null,
+      descentGate: (meta as any).descentGate ?? null,
     },
     inputKind
   );
 
-  // ✅ I層強制なら frame は必ず I（最後の砦）
-  const frame: FrameKind =
-    (meta as any)?.iLayerForce?.force ? 'I' : frameSelected;
+  const frame: FrameKind = isILayerForced ? 'I' : frameSelected;
 
-
-
-  // ✅ NO_DELTA 判定（Slot用）
-  // - 目的：Writerに「冒頭1文=状態翻訳」を必ず出させるためのシグナル
-  // - ここでは“本文”は作らない（タグを渡すだけ）
+  // ----------------------------------------------------------------
+  // NO_DELTA 判定（slot 用）
+  // ----------------------------------------------------------------
   const rotationReason = String((meta as any)?.rotationState?.reason ?? '');
   const spinStepNow =
-    typeof (meta as any).spinStep === 'number' ? (meta as any).spinStep : null;
+    typeof (meta as any).spinStep === 'number'
+      ? (meta as any).spinStep
+      : null;
 
   const nd = (() => {
     const t = String(text ?? '').trim();
 
-    // 1) 変わらない系（repeat warning）
     const isRepeatWarning =
       /同じ注意|何度も|繰り返し|変わらない|分かっている.*変わらない|わかっている.*変わらない/.test(
         t
       );
 
-    // 2) 短文ループ（short loop）
     const isShortLoop =
       t.length <= 12 && (inputKind === 'chat' || inputKind === 'question');
 
-    // 3) 回転停止/非変化（stuck）
     const looksStoppedByReason =
       rotationReason.length > 0 &&
       (rotationReason.includes('回転') ||
         rotationReason.includes('満たしていない') ||
         rotationReason.includes('起きない'));
 
-    const looksStoppedByMeta = spinStepNow === 0 && rotationReason.length > 0;
+    const looksStoppedByMeta =
+      spinStepNow === 0 && rotationReason.length > 0;
 
-    const noDelta = !!(isRepeatWarning || isShortLoop || looksStoppedByReason || looksStoppedByMeta);
+    const noDelta =
+      isRepeatWarning ||
+      isShortLoop ||
+      looksStoppedByReason ||
+      looksStoppedByMeta;
 
     let kind: NoDeltaKind | null = null;
     if (noDelta) {
@@ -892,22 +894,20 @@ if (isActionRequest && priority) {
 
     return { noDelta, kind };
   })();
+
   (meta as any).noDelta = nd.noDelta;
   (meta as any).noDeltaKind = nd.kind;
 
-  // ✅ SlotBuilder に spinLoop も渡す（TCF(下降)なら descentGate=closed でも SAFE を立てられる）
+  // ----------------------------------------------------------------
+  // SlotBuilder（ここで完全確定）
+  // ----------------------------------------------------------------
   const slotPlan = buildSlots(frame, {
-    descentGate: (meta as any)?.iLayerForce?.force ? 'closed' : meta.descentGate,
+    descentGate: (meta as any).descentGate,
     spinLoop: (meta as any).spinLoop ?? null,
-    noDelta: (meta as any).noDelta === true,
-    noDeltaKind: (meta as any).noDeltaKind ?? null,
+    noDelta: nd.noDelta === true,
+    noDeltaKind: nd.kind ?? null,
     iLayerDual: (meta as any).iLayerDual === true,
   });
-
-  (meta as any).frame = frame;
-  (meta as any).slotPlan = slotPlan.slots;
-
-
 
   (meta as any).frame = frame;
   (meta as any).slotPlan = slotPlan.slots;
@@ -932,7 +932,8 @@ if (isActionRequest && priority) {
     });
 
     // ✅ I語彙を本文に1行出す「別レーン」フラグ（衝突回避）
-    (meta as any).iLexemeForce = it.iLayerForce === true;
+    (meta as any).iLexemeForce =
+  (meta as any).iLexemeForce === true || it.iLayerForce === true;
 
     // ✅ I→T が成立した時だけ Tを開く（未成立なら既存値を壊さない）
     if (it.ok && it.tLayerModeActive) {

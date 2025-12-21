@@ -180,9 +180,9 @@ function buildSoftRotateOptions(): NextStepOption[] {
     {
       id: 'soft_shift_future',
       gear: 'soft-rotate',
-      label: 'この先どうなっていたいか、ぼんやりイメージしてみる',
+      label: 'この先に進みたい。わからないを解決したい',
       description:
-        'I層（未来）の方向に、イメージだけそっと広げてみる選択肢です。',
+        'I層（未来）の方向に、「進めない理由」と「進めるための成立条件」を短く定義する選択肢です。',
       meta: {
         requestedDepth: 'I1' as Depth,
         requestedMode: 'vision' as IrosMode,

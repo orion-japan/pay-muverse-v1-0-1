@@ -801,25 +801,31 @@ export async function generateIrosReply(
 
   /* ---------------------------------
      qTrace を必ず合成（反復を作る）
+     ❌ ← これを削除（“疑似2連”を作ってしまう）
   --------------------------------- */
-  const streakQ = normalizeQ(qTrace?.streakQ ?? qTrace?.lastQ ?? null);
-
-  if (streakQ) {
-    if (recentUserQs.length === 0) {
-      recentUserQs = [streakQ];
-    } else if (recentUserQs[recentUserQs.length - 1] === streakQ) {
-      recentUserQs = [...recentUserQs, streakQ];
-    }
-    recentUserQs = recentUserQs.slice(-3);
-  }
+  // const streakQ = normalizeQ(qTrace?.streakQ ?? qTrace?.lastQ ?? null);
+  // if (streakQ) {
+  //   if (recentUserQs.length === 0) {
+  //     recentUserQs = [streakQ];
+  //   } else if (recentUserQs[recentUserQs.length - 1] === streakQ) {
+  //     recentUserQs = [...recentUserQs, streakQ];
+  //   }
+  //   recentUserQs = recentUserQs.slice(-3);
+  // }
 
   /* ---------------------------------
-     Qブレーキ判定
+     “実ユーザー2連” 判定用の系列を作る（history + 今回）
+  --------------------------------- */
+  const qSeqForTurn = [...recentUserQs, qNow].filter(Boolean) as string[];
+  const qSeq3 = qSeqForTurn.slice(-3);
+
+  /* ---------------------------------
+     Qブレーキ判定（系列は qSeq3 を使う）
   --------------------------------- */
   const qBrake = decideQBrakeRelease({
     qNow,
     sa: (meta as any)?.selfAcceptance ?? null,
-    recentUserQs,
+    recentUserQs: qSeq3,
   });
 
   /* ---------------------------------
@@ -846,82 +852,6 @@ export async function generateIrosReply(
       recentUserQs,
     });
   }
-
-
-/* ---------------------------------
-   IT DEMO TRIGGER + COOLDOWN（確実版 / 交互仕様）
---------------------------------- */
-
-const userCodeForLog = String((args as any)?.userCode ?? '');
-
-// ✅ generate.ts では meta 経由のみ使う（memoryState は未定義）
-const qCounts =
-  (((meta as any)?.memoryState?.qCounts ??
-    (meta as any)?.memoryState?.q_counts ??
-    (meta as any)?.q_counts ??
-    (meta as any)?.rotationState?.q_counts ??
-    {}) as Record<string, any>);
-
-const itCooldownPrev = Number(qCounts?.it_cooldown ?? 0);
-
-// qBrake.detail から Q2×2 を確定
-const qBrakeDetail = (qBrake as any)?.detail ?? {};
-const isQ2x2 =
-  qNow === 'Q2' &&
-  (qBrakeDetail.q2_streak2 === true ||
-   qBrakeDetail.qNow_streak2 === true);
-
-// ✅ 交互仕様：前回1ならブロック、0なら許可
-const itAllowed = itCooldownPrev <= 0;
-
-const IT_REASON = 'Q2x2(by qBrake.detail)';
-
-if (isQ2x2 && itAllowed) {
-  (meta as any).extra = (meta as any).extra ?? {};
-
-  (meta as any).renderMode = 'IT';
-  (meta as any).extra.renderMode = 'IT';
-  (meta as any).extra.forceIT = true;
-
-  (meta as any).itReason = IT_REASON;
-  (meta as any).extra.itReason = IT_REASON;
-
-  console.log('[IROS][ITDemo][generate] ON', {
-    userCode: userCodeForLog,
-    qNow,
-    itCooldownPrev,
-    isQ2x2,
-    qCounts,
-  });
-} else {
-  const wasSetByThis =
-    (meta as any)?.itReason === IT_REASON ||
-    (meta as any)?.extra?.itReason === IT_REASON;
-
-  if (wasSetByThis) {
-    delete (meta as any).renderMode;
-    delete (meta as any).extra.renderMode;
-    delete (meta as any).itReason;
-    delete (meta as any).extra.itReason;
-  }
-
-  (meta as any).extra = (meta as any).extra ?? {};
-  (meta as any).extra.forceIT = false;
-  (meta as any).extra.itBlockedReason = !isQ2x2
-    ? 'not-eligible'
-    : !itAllowed
-      ? 'cooldown'
-      : 'unknown';
-
-  console.log('[IROS][ITDemo][generate] OFF', {
-    userCode: userCodeForLog,
-    qNow,
-    itCooldownPrev,
-    isQ2x2,
-    qCounts,
-    blockedReason: (meta as any).extra.itBlockedReason,
-  });
-}
 
 
 

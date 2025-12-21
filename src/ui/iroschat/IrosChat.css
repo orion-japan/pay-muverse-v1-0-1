@@ -49,11 +49,14 @@
 /* =========================
    画面の器（必要なら定義）
    ========================= */
+/* 画面の器：PCでも横幅制限をしない */
 .sofia-container {
-  max-width: var(--sofia-container-maxw, 840px);
-  margin: 0 auto;
+  max-width: none !important;
+  width: 100% !important;
+  margin: 0 !important;
   padding: 0 12px;
 }
+
 
 /* =========================
    オーバーレイ系は初期無効化
@@ -354,4 +357,15 @@
   /* 下側に“たっぷり余白”を作って、最後のメッセージを上に浮かせる */
   padding-bottom: max(40vh, 120px);
   padding-right: 4px;
+}
+
+
+.message.is-assistant .bubble {
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+.message.is-assistant .msgBody {
+  max-width: 720px;
 }

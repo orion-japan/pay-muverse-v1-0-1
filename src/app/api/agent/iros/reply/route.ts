@@ -485,14 +485,16 @@ const irosResult: HandleIrosReplyOutput = await handleIrosReply({
     if (lowWarn) headers['x-warning'] = 'low_balance';
     if (traceId) headers['x-trace-id'] = String(traceId);
 
-    // ★ effectiveMode は “IT上書き” を自然に反映
-    const effectiveMode =
-      finalMode ??
-      (result &&
-      typeof result === 'object' &&
-      typeof (result as any).mode === 'string'
-        ? (result as any).mode
-        : modeForHandle);
+// ★ effectiveMode は “metaForSave.renderMode” を最優先（renderReplyの結果とUI表示を同期）
+const effectiveMode =
+  (typeof metaForSave?.renderMode === 'string' && metaForSave.renderMode) ||
+  (typeof metaForSave?.extra?.renderedMode === 'string' && metaForSave.extra.renderedMode) ||
+  finalMode ||
+  (result &&
+  typeof result === 'object' &&
+  typeof (result as any).mode === 'string'
+    ? (result as any).mode
+    : modeForHandle);
 
     const basePayload = {
       ok: true,
