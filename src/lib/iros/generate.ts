@@ -931,22 +931,35 @@ export async function generateIrosReply(
       ? (meta as any).extra.pastStateNoteText.trim()
       : '';
 
+  // ✅ 明示 recall のときだけ pastState を注入（デモ事故防止）
+  const t = String(userText ?? '').trim();
+  const explicitRecall =
+    t.includes('思い出して') ||
+    t.includes('前の話') ||
+    t.includes('前回') ||
+    t.includes('さっきの話') ||
+    t.includes('先週の') ||
+    t.toLowerCase().includes('recall');
+
+  const allowPastStateInject = explicitRecall;
+
   const messages: ChatCompletionMessageParam[] = [
     { role: 'system', content: system },
     { role: 'system', content: protocol },
 
-    // ✅ WHISPER は毎回 attach（apply は WHISPER_APPLY のみで制御）
     { role: 'system', content: whisperPayload },
 
     ...(safeSystemMessage ? [safeSystemMessage] : []),
     ...(writerHintMessage ? [writerHintMessage] : []),
-    ...(pastStateNoteText
+
+    ...(allowPastStateInject && pastStateNoteText
       ? ([{ role: 'system', content: pastStateNoteText }] as ChatCompletionMessageParam[])
       : []),
 
     ...historyMessages,
     { role: 'user', content: userText },
   ];
+
 
   const res = await client.chat.completions.create({
     model: IROS_MODEL,
