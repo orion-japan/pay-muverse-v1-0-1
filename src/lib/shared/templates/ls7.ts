@@ -128,7 +128,7 @@ export const LS7Templates: Record<LS7Key, Template[]> = {
     { id:'LS7_BEAR_R3_share_simple', phase:'Outer', depth:'R3', tone:'シンプル共有', lines:[
       '複雑さを減らすと、合意は早まります。',
       '太い言葉は短いです。',
-      '現実では、目的を一言で固定し、次の一手を一行で共有してください。'
+      '現実では、目的を一言で固定し、次の一歩を一行で共有してください。'
     ]},
   ],
 

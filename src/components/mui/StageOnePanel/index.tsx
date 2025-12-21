@@ -142,7 +142,7 @@ export default function StageOnePanel({
             <ul className="lead__list">
               <li>A｜状況と状態：事実と解釈を分けて把握</li>
               <li>B｜パターン解説：愛の七相（LS7）で示唆</li>
-              <li>C｜落とし込み：次の一手を1つだけ</li>
+              <li>C｜落とし込み：次の一歩を1つだけ</li>
             </ul>
           </div>
         </StepCard>
@@ -188,7 +188,7 @@ export default function StageOnePanel({
             {!!phase1.next_actions?.length && (
               <>
                 <p>
-                  <strong>次の一手:</strong>
+                  <strong>次の一歩:</strong>
                 </p>
                 <ul>
                   {phase1.next_actions.map((n, i) => (

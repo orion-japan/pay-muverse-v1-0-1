@@ -137,10 +137,21 @@ function isShortTurn(userText: string): boolean {
    - buildWriterProtocol / buildWriterHintsFromMeta で共通化
    ========================================================= */
 
+// src/lib/iros/generate.ts
+// ✅ renderMode の単一ソースは「meta.extra.renderMode / meta.renderMode」
+// （どっちに立ってても IT を拾えるようにする）
 function getRenderMode(meta: any): 'IT' | 'NORMAL' {
-  const rm = String(meta?.renderMode ?? '').trim().toUpperCase();
+  const rmRaw =
+    (meta as any)?.extra?.renderMode ??
+    (meta as any)?.extra?.render_mode ??
+    (meta as any)?.renderMode ??
+    (meta as any)?.render_mode ??
+    '';
+
+  const rm = String(rmRaw).trim().toUpperCase();
   return rm === 'IT' ? 'IT' : 'NORMAL';
 }
+
 
 /* =========================================================
    NUMERIC FOOTER (numbers only)
@@ -282,14 +293,14 @@ function buildSafeSystemMessage(
     lines.push('');
     lines.push('制動の方針（offered）：');
     lines.push('- “整える/保留する/一旦置く” の方向へ寄せる');
-    lines.push('- 次の一手は「小さく」「戻れる」形で1つだけ');
+    lines.push('- 次の一歩は「小さく」「戻れる」形で1つだけ');
   }
 
   if (isAccepted) {
     lines.push('');
     lines.push('制動の方針（accepted）：');
     lines.push('- “守る/固定する/安全に着地させる” を優先する');
-    lines.push('- 次の一手は「いま守れる最小ルール」を1つだけ');
+    lines.push('- 次の一歩は「いま守れる最小ルール」を1つだけ');
   }
 
   // 念のため userText を参照（LLMに “いま何を返すか” を誤解させない）
@@ -393,7 +404,7 @@ function buildWriterProtocol(meta: any, userText: string): string {
       '',
       '出力：',
       '- 2〜3行ごとに改行。短く。',
-      '- “次の一手” は1つだけ（実行できる最小設計）',
+      '- “次の一歩” は1つだけ（実行できる最小設計）',
       `- 質問は ${noQuestion ? '0' : '最大1'}（原則0、必要なら最後に1つだけ短く）`,
       '',
       '禁止：',
@@ -422,7 +433,7 @@ function buildWriterProtocol(meta: any, userText: string): string {
       '',
       'やることは2つだけ：',
       '- 1行目で「いま守りたい一点（北極星）」を “会話として自然な日本語” で確定する',
-      '- 2〜3行目以降で “次の一手” を1つだけ置く（小さく、戻れる形）',
+      '- 2〜3行目以降で “次の一歩” を1つだけ置く（小さく、戻れる形）',
       '',
       '制約：',
       '- 固定の見出し（例：北極星／いま置ける一歩／確認…）を毎回必ず出すのは禁止',
@@ -453,7 +464,7 @@ function buildWriterProtocol(meta: any, userText: string): string {
           '揺らぎが高い：最優先でアンカー確認を出す。',
           `確認質問: ${anchorConfirmQ}`,
           anchorConfirmOptions ? `選択肢: ${anchorConfirmOptions.join(' / ')}` : '',
-          '※確認の後に “次の一手” を1つだけ添える。',
+          '※確認の後に “次の一歩” を1つだけ添える。',
         ]
           .filter(Boolean)
           .join('\n')
@@ -469,7 +480,7 @@ function buildWriterProtocol(meta: any, userText: string): string {
     '必須：',
     '- 返答の1行目で CORE_INTENT を “言い換えて” 断定する（同文コピペ禁止）',
     '- 2〜3行ごとに改行。短く。',
-    '- “次の一手” は1つだけ（promptStyle=two-choice の時だけ2択まで）',
+    '- “次の一歩” は1つだけ（promptStyle=two-choice の時だけ2択まで）',
     `- 質問は ${noQuestion ? '0' : '最大1'}（必要なら最後に1つだけ短く）`,
     '',
     anchorConfirmBlock ? anchorConfirmBlock : '',
@@ -610,14 +621,13 @@ function buildWriterHintsFromMeta(meta: any): {
   const fp =
     meta?.framePlan && typeof meta.framePlan === 'object' ? meta.framePlan : null;
 
-  // ✅ IT のときは “器” を T に「寄せる発想」だが、
-  //    frame は【上書きしない】。
-  //    理由：Context(framePlan) を単一ソースにするため。
-  const rm = getRenderMode(meta);
-  if (rm === 'IT') {
-    // keep fp.frame (決定は framePlan に委譲)
-    // keep meta.frame (sticky事故防止：ここでは触らない)
-  }
+  // ✅ renderMode は getRenderMode(meta) だけを見る（単一ソース）
+  //    ※ extra / 直下どちらに立っても IT を拾える
+  const rm = getRenderMode(meta); // 'IT' | 'NORMAL'
+
+  // ✅ whisper の採用条件は IT のみ（precision/stuck は排除）
+  const whisperApply = rm === 'IT';
+
 
   // --- debug: 入口で見えている meta/framePlan を固定観測 ---
   console.log('[IROS/frame-debug] input', {
@@ -669,7 +679,7 @@ function buildWriterHintsFromMeta(meta: any): {
   const frameGuide: Record<FrameKind, string> = {
     S: '自己の内側（観測→整える）を短く深く',
     R: '状況/相手/関係（接続→見取り図）を中心に',
-    C: '具体の実行案（手順/次の一手）を中心に',
+    C: '具体の実行案（手順/次の一歩）を中心に',
     I: '意図/軸（なぜ/何のため）を中心に',
     T: 'ひらめき/視点上昇（俯瞰→再定義）を中心に',
     MICRO: '超短文でも崩れない最小返答（1〜3行）',
@@ -813,6 +823,40 @@ export async function generateIrosReply(
     });
   }
 
+
+/* ---------------------------------
+   IT DEMO TRIGGER (確実版 / generate.ts用)
+   - generate.ts には previous が無いので参照しない
+   - 直前2回がQ2かどうかは qBrake.detail が既に判定している
+--------------------------------- */
+
+const qBrakeDetail = (qBrake as any)?.detail ?? {};
+const isQ2x2 =
+  qNow === 'Q2' &&
+  (qBrakeDetail.q2_streak2 === true || qBrakeDetail.qNow_streak2 === true);
+
+if (isQ2x2) {
+  (meta as any).extra = (meta as any).extra ?? {};
+
+  // ★参照揺れ対策で両方に立てる
+  (meta as any).extra.renderMode = 'IT';
+  (meta as any).renderMode = 'IT';
+
+  (meta as any).extra.forceIT = true; // デバッグ用（後で消してOK）
+  (meta as any).itReason = 'Q2x2(by qBrake.detail)';
+
+  console.log('[IROS][ITDemo][generate] ON', {
+    qNow,
+    qBrakeDetail,
+    recentUserQs,
+  });
+} else {
+  console.log('[IROS][ITDemo][generate] OFF', {
+    qNow,
+    qBrakeDetail,
+    recentUserQs,
+  });
+}
 
 
 

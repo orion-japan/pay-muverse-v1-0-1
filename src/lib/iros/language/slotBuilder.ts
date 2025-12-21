@@ -188,7 +188,7 @@ export function buildSlots(frame: FrameKind, ctx: BuildSlotsContext): SlotPlan {
         if (!(slots as any).INSIGHT) (slots as any).INSIGHT = 'INSIGHT:stuck:one-line';
       }
 
-      // I層は「断定→一致点→次の一手」へ寄せる（刺すが、圧は上げない）
+      // I層は「断定→一致点→次の一歩」へ寄せる（刺すが、圧は上げない）
       if (frame === 'I') {
         slots.SHIFT = iLayerDual ? 'SHIFT:intention:dual:pin' : 'SHIFT:intention:pin';
         slots.NEXT = iLayerDual ? 'NEXT:intention:align:one-step' : 'NEXT:intention:one-step';

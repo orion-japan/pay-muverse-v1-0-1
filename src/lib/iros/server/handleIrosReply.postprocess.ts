@@ -478,18 +478,27 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
         userText,
       };
 
-      // ★ renderMode='IT' を opts に渡す（renderReply.ts 側が拾う）
-      const renderedText = renderReply(vector as any, input as any, {
-        mode: 'transcend',
-        maxLines: 14,
-        ...( {
-          renderMode: 'IT',
-          spinLoop,
-          descentGate,
-          framePlan,
-          spinStep,
-        } as any ),
-      } as any);
+// ★ renderMode='IT' を opts に渡す（renderReply.ts 側が拾う）
+const renderedText = renderReply(vector as any, input as any, {
+  mode: 'transcend',
+  maxLines: 14,
+  ...( {
+    renderMode: 'IT',
+
+    // ✅ 追加：IT密度（ボタン=normal / 自然発火=micro を推奨）
+    itDensity:
+      (metaForSave?.extra?.itDensity as any) ??
+      ((metaForSave?.extra?.itTriggerKind ?? metaForSave?.itTriggerKind) === 'button'
+        ? 'normal'
+        : 'micro'),
+
+    spinLoop,
+    descentGate,
+    framePlan,
+    spinStep,
+  } as any ),
+} as any);
+
 
       const out = toNonEmptyString(renderedText);
       if (out) {

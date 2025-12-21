@@ -13,6 +13,7 @@ import { buildTurnContext } from './handleIrosReply.context';
 import { runOrchestratorTurn } from './handleIrosReply.orchestrator';
 import { postProcessReply } from './handleIrosReply.postprocess';
 import { runGenericRecallGate } from '@/lib/iros/server/gates/genericRecallGate';
+import { writeIT } from '@/lib/iros/language/itWriter';
 
 import {
   persistAssistantMessage,
@@ -44,15 +45,6 @@ import {
 } from '@/lib/iros/writers/microWriter';
 
 import { loadLatestGoalByUserCode } from '@/lib/iros/server/loadLatestGoalByUserCode';
-
-// ✅ FramePlan（器＋スロット）(Layer C/D)
-import {
-  buildFramePlan,
-  type InputKind,
-  type IrosStateLite,
-} from '@/lib/iros/language/frameSlots';
-
-
 
 /* =========================
    Helpers: Achievement summary drop filter
@@ -107,39 +99,6 @@ function shouldDropFromAchievementSummary(s: unknown): boolean {
 }
 
 /* =========================
-   Helpers: InputKind detector (LLM禁止・純関数)
-========================= */
-
-function detectInputKind(userText: string): InputKind {
-  const s = String(userText ?? '').trim();
-  if (!s) return 'unknown';
-
-  // review（達成/振り返り系。period gate に乗らない場合でも“器”を選べるように）
-  if (/(達成|サマリ|進捗|振り返り|まとめ|総括|レビュー|できたこと|やったこと)/.test(s)) {
-    return 'review';
-  }
-
-  // task（実装/修正/デバッグ/設計）
-  if (
-    /(実装|修正|改修|デバッグ|バグ|エラー|ログ|原因|再現|調査|確認|設計|仕様|コード|関数|ファイル|import|export|tsc|typecheck|TypeScript|Next\.js|Supabase|SQL)/i.test(
-      s,
-    )
-  ) {
-    return 'task';
-  }
-
-  // question（明確な質問）
-  if (
-    /[?？]$/.test(s) ||
-    /(なに|何|どこ|いつ|だれ|誰|なぜ|どうして|どうやって)/.test(s)
-  ) {
-    return 'question';
-  }
-
-  return 'chat';
-}
-
-/* =========================
    Types
 ========================= */
 
@@ -160,8 +119,9 @@ export type HandleIrosReplyInput = {
 
   /** ✅ 会話履歴（Writer/LLMに渡すため） */
   history?: unknown[];
-    // ✅ 追加：route.ts から渡す拡張情報（NextStep / IT trigger / renderMode など）
-    extra?: Record<string, any>;
+
+  /** ✅ route.ts から渡す拡張情報（NextStep / IT trigger / renderMode など） */
+  extra?: Record<string, any>;
 };
 
 export type HandleIrosReplySuccess = {
@@ -186,15 +146,12 @@ const supabase = getIrosSupabaseAdmin();
 const IROS_MODEL =
   process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-4o';
 
-
 /**
  * ✅ Goal recall を完全に止めるフラグ
  * - '1' のときだけ有効
  * - それ以外は無効（デフォルトOFF）
  */
 const enableGoalRecall = process.env.IROS_ENABLE_GOAL_RECALL === '1';
-
-
 
 /* =========================
    History loader (single source of truth)
@@ -379,7 +336,11 @@ function isMicroTurn(raw: string): boolean {
 
   if (/[A-Za-z0-9]/.test(core)) return false;
 
-  if (/(何|なに|どこ|いつ|だれ|誰|なぜ|どうして|どうやって|いくら|何色|色)/.test(core)) {
+  if (
+    /(何|なに|どこ|いつ|だれ|誰|なぜ|どうして|どうやって|いくら|何色|色)/.test(
+      core,
+    )
+  ) {
     return false;
   }
 
@@ -668,7 +629,7 @@ export async function handleIrosReply(
     userProfile,
     style,
     history,
-    extra, // ✅ 追加：route.ts から渡される拡張情報（NextStep / IT trigger / renderMode 等）
+    extra, // ✅ route.ts から渡される拡張情報（NextStep / IT trigger / renderMode 等）
   } = params;
 
   console.log('[IROS/Reply] handleIrosReply start', {
@@ -687,8 +648,6 @@ export async function handleIrosReply(
     keys: Object.keys(extra ?? {}),
     extra: extra ?? null,
   });
-
-
 
   try {
     /* ---------------------------
@@ -744,6 +703,7 @@ export async function handleIrosReply(
           userProfile,
           requestedStyle: style ?? null,
           history: historyForTurn,
+          extra: extra ?? null,
         });
         t.context_ms = msSince(tc);
 
@@ -765,6 +725,12 @@ export async function handleIrosReply(
           nextStep: null,
           next_step: null,
           timing: t,
+        };
+
+        // ✅ extra を確実に残す（microでも統一）
+        metaForSave.extra = {
+          ...(metaForSave.extra ?? {}),
+          ...(extra ?? {}),
         };
 
         // SUN固定保護（念のため）
@@ -861,8 +827,7 @@ export async function handleIrosReply(
     const goalRecallQ = isGoalRecallQ(text);
 
     // ✅ デモ中の誤爆を止める：ENVが1のときだけ Goal recall を動かす
-if (enableGoalRecall && goalRecallQ) {
-
+    if (enableGoalRecall && goalRecallQ) {
       let goalRaw: string | null = null;
       let goalSource: 'db' | 'history' | 'none' = 'none';
 
@@ -925,7 +890,7 @@ if (enableGoalRecall && goalRecallQ) {
         ? `今日の目標は「${goal1}」です。🪔`
         : `直近の履歴から「今日の目標」が見つかりませんでした。いまの目標を1行で置いてください。🪔`;
 
-      const metaForSave = {
+      const metaForSave: any = {
         style: style ?? (userProfile as any)?.style ?? 'friendly',
         mode: 'light',
         goalRecallOnly: true,
@@ -934,6 +899,9 @@ if (enableGoalRecall && goalRecallQ) {
         nextStep: null,
         next_step: null,
         timing: t,
+        extra: {
+          ...(extra ?? {}),
+        },
       };
 
       await persistAssistantMessage({
@@ -1009,7 +977,7 @@ if (enableGoalRecall && goalRecallQ) {
         const summary = buildAchievementSummary(userMsgs as any, period);
         const assistantText = renderAchievementSummaryText(summary);
 
-        const metaForSave = {
+        const metaForSave: any = {
           style: style ?? (userProfile as any)?.style ?? 'friendly',
           mode: 'light',
           achievementSummaryOnly: true,
@@ -1018,6 +986,9 @@ if (enableGoalRecall && goalRecallQ) {
           nextStep: null,
           next_step: null,
           timing: t,
+          extra: {
+            ...(extra ?? {}),
+          },
         };
 
         await persistAssistantMessage({
@@ -1065,7 +1036,7 @@ if (enableGoalRecall && goalRecallQ) {
       });
 
       if (recall) {
-        const gateMetaForSave = {
+        const gateMetaForSave: any = {
           style: style ?? (userProfile as any)?.style ?? 'friendly',
           mode: 'recall',
           recall: {
@@ -1075,6 +1046,9 @@ if (enableGoalRecall && goalRecallQ) {
           skipTraining: true,
           skipMemory: true,
           timing: t,
+          extra: {
+            ...(extra ?? {}),
+          },
         };
 
         const ts = nowNs();
@@ -1107,126 +1081,148 @@ if (enableGoalRecall && goalRecallQ) {
       console.warn('[IROS/Gate] genericRecallGate failed', e);
     }
 
-/* ---------------------------
-   2) Context
----------------------------- */
+    /* ---------------------------
+       2) Context
+    ---------------------------- */
 
-const tc = nowNs();
-const ctx = await (buildTurnContext as any)({
-  supabase,
-  conversationId,
-  userCode,
-  text,
-  mode,
-  traceId,
-  userProfile,
-  requestedStyle: style ?? null,
-  history: historyForTurn,
+    const tc = nowNs();
+    const ctx = await (buildTurnContext as any)({
+      supabase,
+      conversationId,
+      userCode,
+      text,
+      mode,
+      traceId,
+      userProfile,
+      requestedStyle: style ?? null,
+      history: historyForTurn,
 
-  // ✅ 追加：route から来た extra を context に渡す
-  extra: extra ?? null,
-});
-t.context_ms = msSince(tc);
+      // ✅ 追加：route から来た extra を context に渡す
+      extra: extra ?? null,
+    });
+    t.context_ms = msSince(tc);
 
-/* ---------------------------
-   3) Orchestrator
----------------------------- */
+    /* ---------------------------
+       3) Orchestrator
+    ---------------------------- */
 
-// ✅ baseMetaForTurn に extra を必ずマージ（ここが “消えない” 本体）
-const baseMetaMergedForTurn: any = {
-  ...(ctx.baseMetaForTurn ?? {}),
-  extra: {
-    ...(((ctx.baseMetaForTurn as any)?.extra) ?? {}),
-    ...(extra ?? {}),
-  },
-};
+    // ✅ baseMetaForTurn に extra を必ずマージ（ここが “消えない” 本体）
+    const baseMetaMergedForTurn: any = {
+      ...(ctx.baseMetaForTurn ?? {}),
+      extra: {
+        ...(((ctx.baseMetaForTurn as any)?.extra) ?? {}),
+        ...(extra ?? {}),
+      },
+    };
 
-// デバッグ（必要なら）
-console.log('[IROS/Reply] merged extra', {
-  keys: Object.keys(baseMetaMergedForTurn.extra ?? {}),
-  renderMode: baseMetaMergedForTurn.extra?.renderMode ?? null,
-  forceIT: baseMetaMergedForTurn.extra?.forceIT ?? null,
-});
+    console.log('[IROS/Reply] merged extra', {
+      keys: Object.keys(baseMetaMergedForTurn.extra ?? {}),
+      renderMode: baseMetaMergedForTurn.extra?.renderMode ?? null,
+      forceIT: baseMetaMergedForTurn.extra?.forceIT ?? null,
+    });
 
-const to = nowNs();
-const orch = await (runOrchestratorTurn as any)({
-  conversationId,
-  userCode,
-  text,
-  isFirstTurn: ctx.isFirstTurn,
-  requestedMode: ctx.requestedMode,
-  requestedDepth: ctx.requestedDepth,
-  requestedQCode: ctx.requestedQCode,
+    const to = nowNs();
+    const orch = await (runOrchestratorTurn as any)({
+      conversationId,
+      userCode,
+      text,
+      isFirstTurn: ctx.isFirstTurn,
+      requestedMode: ctx.requestedMode,
+      requestedDepth: ctx.requestedDepth,
+      requestedQCode: ctx.requestedQCode,
 
-  // ✅ 差し替え：マージ済みを渡す
-  baseMetaForTurn: baseMetaMergedForTurn,
+      // ✅ 差し替え：マージ済みを渡す
+      baseMetaForTurn: baseMetaMergedForTurn,
 
-  userProfile: userProfile ?? null,
-  effectiveStyle: ctx.effectiveStyle,
-  history: historyForTurn,
+      userProfile: userProfile ?? null,
+      effectiveStyle: ctx.effectiveStyle,
+      history: historyForTurn,
 
-  // ✅ 追加：orch にも extra を渡す（受け側が拾えるように）
-  extra: extra ?? null,
-});
-t.orchestrator_ms = msSince(to);
+      // ✅ 追加：orch にも extra を渡す（受け側が拾えるように）
+      extra: extra ?? null,
+    });
+    t.orchestrator_ms = msSince(to);
 
-/* ---------------------------
-   4) PostProcess
----------------------------- */
+    /* ---------------------------
+       4) PostProcess
+    ---------------------------- */
 
-const tp = nowNs();
-const out = await (postProcessReply as any)({
-  supabase,
-  userCode,
-  conversationId,
-  userText: text,
-  effectiveStyle: ctx.effectiveStyle,
-  requestedMode: ctx.requestedMode,
-  orchResult: orch,
-  history: historyForTurn,
+    const tp = nowNs();
+    const out = await (postProcessReply as any)({
+      supabase,
+      userCode,
+      conversationId,
+      userText: text,
+      effectiveStyle: ctx.effectiveStyle,
+      requestedMode: ctx.requestedMode,
+      orchResult: orch,
+      history: historyForTurn,
 
-  // ✅ 追加：postprocess にも extra を渡す
-  extra: extra ?? null,
-});
-t.postprocess_ms = msSince(tp);
+      // ✅ 追加：postprocess にも extra を渡す
+      extra: extra ?? null,
+    });
+    t.postprocess_ms = msSince(tp);
 
-/* ---------------------------
-   5) Timing / Sanitize / Rotation bridge
----------------------------- */
+// ✅ Frame/Slots single source of truth
+// - contextの framePlan は「計画」に過ぎないので、保存/描画は orch の確定値に統一する
+try {
+  const orchMeta: any =
+    (orch as any)?.meta ??
+    (orch as any)?.result?.meta ??
+    null;
 
-out.metaForSave = out.metaForSave ?? {};
-out.metaForSave.timing = t;
+  if (orchMeta) {
+    if (orchMeta.frame != null) out.metaForSave.frame = orchMeta.frame;
+    if (orchMeta.slotPlan != null) out.metaForSave.slotPlan = orchMeta.slotPlan;
+  } // ← ★これが抜けていた
+
+  // 一旦コメントアウト or 削除（framePlan を殺さない）
+  // if ((out.metaForSave as any).framePlan) delete (out.metaForSave as any).framePlan;
+  // if ((out.metaForSave as any).frame_plan) delete (out.metaForSave as any).frame_plan;
+
+  console.log('[IROS/Reply] frame/slot fixed (from orch)', {
+    frame: out.metaForSave?.frame ?? null,
+    slotPlanLen: Array.isArray(out.metaForSave?.slotPlan)
+      ? out.metaForSave.slotPlan.length
+      : null,
+  });
+} catch (e) {
+  console.warn('[IROS/Reply] frame/slot fix failed', e);
+}
+
+
+    /* ---------------------------
+       5) Timing / Sanitize / Rotation bridge
+    ---------------------------- */
+
+    out.metaForSave = out.metaForSave ?? {};
+    out.metaForSave.timing = t;
 
     // ✅ persist に必ず残す（postProcess が extra を作り直しても守る）
-// ✅ persist に必ず残す（postProcess が extra を作り直しても守る）
-out.metaForSave.extra = out.metaForSave.extra ?? {};
+    out.metaForSave.extra = out.metaForSave.extra ?? {};
 
-// ✅ 1) route から来た extra を “最後に” 必ず再注入（single source）
-if (extra && typeof extra === 'object') {
-  out.metaForSave.extra = {
-    ...(out.metaForSave.extra ?? {}),
-    ...(extra ?? {}),
-  };
-}
+    // ✅ 1) route から来た extra を “最後に” 必ず再注入（single source）
+    if (extra && typeof extra === 'object') {
+      out.metaForSave.extra = {
+        ...(out.metaForSave.extra ?? {}),
+        ...(extra ?? {}),
+      };
+    }
 
-// ✅ 2) renderMode はトップレベル1本化（ここが最終固定点）
-const extraRenderMode =
-  typeof out.metaForSave.extra?.renderMode === 'string'
-    ? out.metaForSave.extra.renderMode
-    : null;
+    // ✅ 2) renderMode はトップレベル1本化（ここが最終固定点）
+    const extraRenderMode =
+      typeof out.metaForSave.extra?.renderMode === 'string'
+        ? out.metaForSave.extra.renderMode
+        : null;
 
-if (!out.metaForSave.renderMode && extraRenderMode) {
-  out.metaForSave.renderMode = extraRenderMode;
-}
+    if (!out.metaForSave.renderMode && extraRenderMode) {
+      out.metaForSave.renderMode = extraRenderMode;
+    }
 
-// ✅ 3) forceIT が true なら renderMode を必ず IT に落とす（補助情報→決定情報へ）
-if (
-  String(out.metaForSave.renderMode ?? '').trim() === '' &&
-  out.metaForSave.extra?.forceIT === true
-) {
-  out.metaForSave.renderMode = 'IT';
-}
-
+    // ✅ 3) forceIT が true なら renderMode を IT に落とす（最終補助）
+    if (out.metaForSave.extra?.forceIT === true) {
+      out.metaForSave.renderMode = 'IT';
+    }
 
     try {
       out.metaForSave = sanitizeIntentAnchorMeta(out.metaForSave);
@@ -1309,9 +1305,50 @@ if (
         descentGate: m.descentGate,
         depth: m.depth,
       });
+
+      // ✅ IT本文スイッチ（single source）
+      // - metaForSave.renderMode が最終確定した後にだけ判定する
+      // - 差し替えた本文がそのまま Persist される（リロードしても変わらない）
+      if (out.metaForSave?.renderMode === 'IT') {
+        try {
+          const it = writeIT(
+            {
+              userText: text,
+              assistantText: out.assistantText,
+              metaForSave: out.metaForSave,
+              requestedMode: ctx.requestedMode,
+              tenantId,
+            } as any,
+          );
+
+          const itText =
+            typeof (it as any)?.text === 'string'
+              ? (it as any).text
+              : typeof (it as any)?.assistantText === 'string'
+                ? (it as any).assistantText
+                : typeof (it as any)?.content === 'string'
+                  ? (it as any).content
+                  : null;
+
+          if (itText) {
+            out.assistantText = itText;
+            console.log('[IROS/Reply] IT writer applied', {
+              renderMode: out.metaForSave.renderMode,
+              len: itText.length,
+            });
+          } else {
+            console.warn('[IROS/Reply] IT writer returned no text-like field', {
+              keys: it && typeof it === 'object' ? Object.keys(it as any) : null,
+            });
+          }
+        } catch (e) {
+          console.warn('[IROS/Reply] IT writer failed (kept original text)', e);
+        }
+      }
     } catch (e) {
       console.warn('[IROS/Reply] rotation bridge failed', e);
     }
+
 
     /* ---------------------------
        6) Persist (order fixed)

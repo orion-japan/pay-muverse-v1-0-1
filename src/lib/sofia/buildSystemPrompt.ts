@@ -142,7 +142,7 @@ export function buildSofiaSystemPrompt(opts: BuildPromptOptions = {}): string {
     ## Mode Hints
     - normal: 上記スタイルで自然に回答。
     - meaning/intent: 要点を明確に、短い段落で。
-    - diagnosis: 難所と次の一手を簡潔に示す（内部テンプレ利用）。
+    - diagnosis: 難所と次の一歩を簡潔に示す（内部テンプレ利用）。
     - dark: **三相（影→向きの変換→統合）を内部で保持**し、**見出しやタグを出さず**改行とリズムで表現する。
     - remake: 文体を保ちつつ整形・圧縮。
   `);
@@ -158,7 +158,7 @@ export function buildSofiaSystemPrompt(opts: BuildPromptOptions = {}): string {
         深度：S1〜T3（18段階ラベルのみ）
         🌀意識状態：1〜2文（比喩・象徴可）
         🌱メッセージ：1〜3行（静かな指針）
-  
+
       ## Output Format (strict)
      - 診断の際は下記の**見出しと順序を厳守**し、Markdownプレーンテキストで出力すること（箇条書きにしない）。
        観測対象：${(vars?.diagnosisTarget as string) || '（未指定）'}

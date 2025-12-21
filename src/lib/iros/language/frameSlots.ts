@@ -80,13 +80,20 @@ function safeState(v: unknown): IrosStateLite {
 
 function isDescentOpen(v: unknown): boolean {
   if (v === true) return true;
+
   if (typeof v === 'string') {
     const s = v.trim().toLowerCase();
+
     // 互換：open/true/1 だけを「立ってる」と扱う
     if (s === 'open' || s === 'true' || s === '1') return true;
+
+    // ✅ iros の union を open 扱いに寄せる（重要）
+    if (s === 'offered' || s === 'accepted') return true;
   }
+
   return false;
 }
+
 
 function depthLetter(
   depthStage?: string | null
@@ -156,7 +163,7 @@ export function buildSlots(args: {
   const base: SlotPlan[] = [
     { id: 'OBS', required: true, hint: '観測（事実/状況の再提示）' },
     { id: 'SHIFT', required: true, hint: '視点の転換（1つだけ）' },
-    { id: 'NEXT', required: true, hint: '次の一手（1つだけ）' },
+    { id: 'NEXT', required: true, hint: '次の一歩（1つだけ）' },
     { id: 'SAFE', required: true, hint: '安全句（静かな保険）' },
   ];
 
@@ -165,7 +172,7 @@ export function buildSlots(args: {
     return base.map((s) => {
       if (s.id === 'OBS') return { ...s, hint: '観測（短く一行）' };
       if (s.id === 'SHIFT') return { ...s, hint: '視点転換（1フレーズ）' };
-      if (s.id === 'NEXT') return { ...s, hint: '次の一手（1つ、短く）' };
+      if (s.id === 'NEXT') return { ...s, hint: '次の一歩（1つ、短く）' };
       if (s.id === 'SAFE')
         return { ...s, hint: '安全句（断定しすぎない短い保険）' };
       return s;
@@ -178,7 +185,7 @@ export function buildSlots(args: {
       if (s.id === 'OBS') return { ...s, hint: '観測（ストーリー化せず、事実だけ）' };
       if (s.id === 'SHIFT') return { ...s, hint: '視点転換（評価→運用／責め→扱い）' };
       if (s.id === 'NEXT')
-        return { ...s, hint: '次の一手（極小の1手／成功確率を上げる）' };
+        return { ...s, hint: '次の一歩（極小の1手／成功確率を上げる）' };
       if (s.id === 'SAFE') return { ...s, hint: '安全句（決めつけを解除する一言）' };
       return s;
     });

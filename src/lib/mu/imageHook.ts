@@ -31,6 +31,6 @@ export function buildImageStyleAsk(): string {
     MU_BRIDGE_TEXT.ASK_STYLE ??
     'スタイル（写実/シンプル/手描き風）どれにします？（未指定はシンプル）';
 
-  // 1行案内 → 次の一手でスタイル確認の流れ
+  // 1行案内 → 次の一歩でスタイル確認の流れ
   return `${suggest}\n${ask}`;
 }

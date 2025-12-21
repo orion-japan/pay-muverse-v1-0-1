@@ -26,6 +26,9 @@ export type RenderOptions = {
   maxLines?: number;
 };
 
+// ✅ IT 密度（自然発火は micro/compact、ボタンは normal 想定）
+export type ItDensity = 'micro' | 'compact' | 'normal';
+
 export function renderReply(
   vector: ResonanceVector,
   input: RenderInput,
@@ -37,6 +40,25 @@ export function renderReply(
   const forcedRenderMode = (opts as any)?.renderMode as string | undefined;
   const forcedSpinLoop = (opts as any)?.spinLoop as string | undefined;
   const forcedDescentGate = (opts as any)?.descentGate as unknown;
+
+  // ✅ 追加：IT density（postprocess が渡せるように）
+  // - opts.itDensity: 最優先（UIボタン/自然発火で出し分け）
+  // - opts.density: 互換
+  // - vector/meta 経由も一応拾う（壊れないように）
+  const forcedItDensityRaw =
+    (opts as any)?.itDensity ??
+    (opts as any)?.density ??
+    (vector as any)?.itDensity ??
+    (vector as any)?.meta?.extra?.itDensity ??
+    (vector as any)?.extra?.itDensity ??
+    null;
+
+  const forcedItDensity: ItDensity =
+    String(forcedItDensityRaw ?? '').toLowerCase() === 'micro'
+      ? 'micro'
+      : String(forcedItDensityRaw ?? '').toLowerCase() === 'compact'
+        ? 'compact'
+        : 'normal';
 
   // ---- 🔻下降（TCF）制御（vector ではなく “強制指定込み” で判定） ----
   const spinLoop = (forcedSpinLoop ?? ((vector as any).spinLoop ?? null)) as
@@ -83,8 +105,22 @@ export function renderReply(
   const noDeltaKind = detectNoDeltaKind(vector);
 
   const factsRaw = normalizeOne(input.facts);
-  const insightRaw0 = normalizeNullable(input.insight);
-  const nextRaw = normalizeNullable(input.nextStep);
+
+  // --- slotPlan (from vector) を拾う ---
+  const slotPlan0 = pickSlotPlanFromVector(vector);
+
+  // --- required slot を埋める（SHIFT/NEXT が null のまま落ちないように） ---
+  const slotPlan = fillRequiredSlots({ framePlan, slotPlan: slotPlan0 });
+
+  // --- insight/nextStep が上流から来てない場合、slotPlan から最小生成して差し込む ---
+  const insightFromSlots = buildInsightFromSlotPlan(slotPlan, seed);
+  const nextFromSlots = buildNextFromSlotPlan(slotPlan, seed);
+
+  const insightRaw0 =
+    normalizeNullable(input.insight) ?? normalizeNullable(insightFromSlots);
+
+  const nextRaw =
+    normalizeNullable(input.nextStep) ?? normalizeNullable(nextFromSlots);
 
   const spinStep = ((vector as any).spinStep ?? null) as number | null;
 
@@ -99,6 +135,7 @@ export function renderReply(
       seed,
       minimalEmoji,
       maxLines,
+      itDensity: forcedItDensity, // ✅ 追加
       userText: normalizeNullable(input.userText) ?? '',
       facts: factsRaw,
       insight: insightRaw0,
@@ -147,7 +184,7 @@ export function renderReply(
     exposeInsight,
   });
 
-  const out = renderFromPlan(plan);
+  const out = renderFromPlan(plan, { seed });
   return clampLines(out, maxLines).trim();
 }
 
@@ -159,6 +196,9 @@ function renderITStructured(args: {
   seed: string;
   minimalEmoji: boolean;
   maxLines: number;
+
+  // ✅ 追加：密度
+  itDensity: ItDensity;
 
   userText: string;
   facts: string;
@@ -172,6 +212,7 @@ function renderITStructured(args: {
     seed,
     minimalEmoji,
     maxLines,
+    itDensity,
     userText,
     facts,
     insight,
@@ -180,8 +221,7 @@ function renderITStructured(args: {
     spinStep,
   } = args;
 
-  // --- 文の役割（テンプレ文ではなく“型”） ---
-  // I: 状態定義 / ズレ言語化 / 停滞理由
+  // --- I: 状態定義 / ズレ言語化 / 停滞理由 ---
   const I1 =
     insight?.trim() ||
     (userText
@@ -195,14 +235,14 @@ function renderITStructured(args: {
   const I3 =
     '選択肢の問題ではなく、焦点がまだ一点に結晶化していないだけです。';
 
-  // T: 未来方向 / 未来状態
+  // --- T: 未来方向 / 未来状態 ---
   const T1 =
     '次の1週間は、正解探しより先に「守りたいものが守られる形」を先に作る。';
   const T2 =
     '未来は「不安が消える」より、「迷っても進める足場がある」状態へ。';
 
-  // C: 次の一手（最大2） / やらないこと
-  const nextBase = nextStep?.trim() || '最初の一手だけを切り出して、1分で置く。';
+  // --- C: 次の一歩（最大2） / やらないこと ---
+  const nextBase = nextStep?.trim() || '最初の一歩だけを取り出して、1分で決める。';
 
   const nextAdjusted =
     isDescent ? adjustNextForDescent(nextBase, seed, spinStep) : nextBase;
@@ -211,14 +251,32 @@ function renderITStructured(args: {
   const C2 = '必要なら、境界線を短い一通で先に置く。説明は増やさない。';
   const C3 = '代わりに、比較と反省で時間を溶かすのはやめる。';
 
-  // F: 確信 / 余韻
+  // --- F: 確信 / 余韻 ---
   const F1 = minimalEmoji
     ? 'もう変化は起きています。あとは、その変化に沿って歩くだけ。'
     : 'もう変化は起きています。あとは、その変化に沿って歩くだけ。🪔';
 
   const F2 = '“できる側”のあなたに、戻っています。';
 
-  // 改行設計（スマホ半面〜半面ちょい）
+  // =========================================================
+  // ✅ 密度ごとの出力（自然発火は micro/compact）
+  // =========================================================
+
+  // ■ micro: 1行I / 1行T / 1行C / 1行F（頻発してもくどくならない）
+  if (itDensity === 'micro') {
+    const lines: string[] = [I1, T1, C1, F1];
+    const text = lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    return clampLines(text, Math.min(maxLines, 8));
+  }
+
+  // ■ compact: 構造は見せるが削る（8〜10行目安）
+  if (itDensity === 'compact') {
+    const lines: string[] = [I1, I2, '', T1, T2, '', C1, C3, '', F1];
+    const text = lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    return clampLines(text, Math.min(maxLines, 12));
+  }
+
+  // ■ normal: いまの濃いIT（ボタン想定）
   const lines: string[] = [I1, I2, I3, '', T1, T2, '', C1, C2, C3, '', F1, F2];
 
   const text = lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
@@ -349,8 +407,9 @@ function pickContainer(args: {
   return 'PLAIN';
 }
 
-function renderFromPlan(plan: ReplyPlan): string {
+function renderFromPlan(plan: ReplyPlan, ctx: { seed: string }): string {
   const { containerId, slots } = plan;
+  const { seed } = ctx;
 
   const s = (k: ReplySlotKey) => normalizeNullable(slots[k]);
 
@@ -370,9 +429,16 @@ function renderFromPlan(plan: ReplyPlan): string {
   if (containerId === 'HEADING') {
     const blocks: string[] = [];
     if (opener) blocks.push(opener);
+
     blocks.push(`■ 現象\n${facts}`);
+
     if (mirror) blocks.push(`■ 芯\n${stripLeadingMarkers(mirror)}`);
-    if (move) blocks.push(`■ 次\n${move}`);
+
+    if (move) {
+      const label = pickNextSectionLabel(seed);
+      blocks.push(`■ ${label}\n${move}`);
+    }
+
     return blocks.join('\n\n').trim();
   }
 
@@ -461,6 +527,11 @@ function shapeInsightDiffuse(
   return mode === 'casual' ? frame : `🪔 ${frame}`;
 }
 
+/**
+ * ✅ 「次の一歩」を固定ラベルにしない
+ * - 先頭の言い回しを seed 固定で揺らす
+ * - “次の一歩は〜” を極力使わない（使うとしても低頻度）
+ */
 function shapeNext(
   next: string,
   ctx: {
@@ -476,20 +547,15 @@ function shapeNext(
   if (!n) return '';
 
   const gentle = vector.grounding < 0.45 || mode === 'transcend';
-  const frames = gentle
-    ? [
-        '{N} を1回だけ試すのがよさそうです。',
-        '{N} を小さく入れると進みます。',
-        'まず {N} を置くのが自然です。',
-      ]
-    : [
-        '次の一手は {N} です。',
-        'まず {N} を入れると進みます。',
-        '{N} から着地させるのが効きます。',
-      ];
 
-  const line = pick(seed + '|n', frames).replace('{N}', n);
-  return minimalEmoji ? line : `🌱 ${line}`;
+  const lead = pickNextLead(seed, gentle);
+  const tail = pickNextTail(seed, gentle);
+
+  // 例: "今夜は、{N}。" / "まずは {N} だけ。" / "{N} を1回だけ。"
+  const line = `${lead}${n}${tail}`.replace(/\s{2,}/g, ' ').trim();
+
+  if (minimalEmoji) return line;
+  return `🌱 ${line}`;
 }
 
 /* =========================
@@ -520,6 +586,59 @@ function adjustNextForDescent(
 
   const tail = pick(seed + '|dT', ['を一度だけ整える', 'を小さく立ち上げる', 'を静かに再起動する']);
   return `${base}${tail}`;
+}
+
+/* =========================
+   Next phrasing (bank)
+========================= */
+
+function pickNextLead(seed: string, gentle: boolean): string {
+  // ※「次の一歩は」を使わずに、同義を散らす
+  const arr = gentle
+    ? [
+        '今夜は、',
+        'まずは ',
+        'ここから ',
+        '',
+        'いったん ',
+        '小さく ',
+      ]
+    : [
+        'まず ',
+        '今夜は、',
+        'ここから ',
+        '',
+        '先に ',
+        '最初に ',
+      ];
+
+  const picked = pick(seed + '|nLead', arr);
+
+  // lead が空のときも自然になるよう、必要なら語尾側で整える
+  return picked;
+}
+
+function pickNextTail(seed: string, gentle: boolean): string {
+  const arr = gentle
+    ? [' を1回だけ。', ' だけ。', ' を短く。', ' を5分だけ。', ' を小さく。', '。']
+    : [' から着地。', ' を先に通す。', ' を短く。', ' を10分だけ。', '。', ''];
+
+  // 末尾が句点なしにならないよう、tail で担保
+  const t = pick(seed + '|nTail', arr);
+  if (!t) return '。';
+  return t.startsWith(' ') || t.startsWith('。') ? t : ` ${t}`;
+}
+
+function pickNextSectionLabel(seed: string): string {
+  // HEADING の「■ 次」がテンプレ臭なので、ここも揺らす（意味は維持）
+  return pick(seed + '|nLabel', [
+    '動き',
+    '一歩',
+    '着地',
+    'ここから',
+    'やること',
+    '手順',
+  ]);
 }
 
 /* =========================
@@ -633,3 +752,97 @@ function detectNoDeltaKind(
 
   return null;
 }
+
+function pickSlotPlanFromVector(
+  vector: ResonanceVector,
+): Record<string, string | null> | null {
+  const v: any = vector as any;
+  const sp = v?.slotPlan;
+  if (!sp || typeof sp !== 'object' || Array.isArray(sp)) return null;
+
+  // OBS/SHIFT/NEXT/SAFE だけ持つ（余計なキーは無視）
+  return {
+    OBS: typeof sp.OBS === 'string' ? sp.OBS : null,
+    SHIFT: typeof sp.SHIFT === 'string' ? sp.SHIFT : null,
+    NEXT: typeof sp.NEXT === 'string' ? sp.NEXT : null,
+    SAFE: typeof sp.SAFE === 'string' ? sp.SAFE : null,
+  };
+}
+
+// framePlan.slots の required を見て null を埋める
+function fillRequiredSlots(args: {
+  framePlan: any | null;
+  slotPlan: Record<string, string | null> | null;
+}): Record<string, string | null> {
+  const fp = args.framePlan;
+  const sp = (args.slotPlan ?? {}) as Record<string, string | null>;
+
+  const requiredIds: string[] = Array.isArray(fp?.slots)
+    ? fp.slots
+        .filter((s: any) => s && s.required === true && typeof s.id === 'string')
+        .map((s: any) => String(s.id))
+    : [];
+
+  // 最小既定値（今回の本丸は SHIFT / NEXT）
+  const defaults: Record<string, string> = {
+    OBS: 'OBS:reflect',
+    SHIFT: 'SHIFT:one-angle',
+    NEXT: 'NEXT:action',
+    SAFE: 'SAFE:soft',
+  };
+
+  for (const id of requiredIds) {
+    if (sp[id] == null) sp[id] = defaults[id] ?? `${id}:default`;
+  }
+
+  // required が無くても最低限は埋める（デモが止まらない）
+  if (sp.SHIFT == null) sp.SHIFT = defaults.SHIFT;
+  if (sp.NEXT == null) sp.NEXT = defaults.NEXT;
+
+  return sp;
+}
+
+function buildInsightFromSlotPlan(
+  slotPlan: Record<string, string | null> | null,
+  seed: string,
+): string | null {
+  const shift = slotPlan?.SHIFT ?? null;
+  if (!shift) return null;
+
+  // “型”から最小の視点転換だけ作る（テンプレ臭を抑える）
+  if (shift.startsWith('SHIFT:one-angle')) {
+    return pick(seed + '|shift', [
+      '視点を一段だけ変えるなら、「好き/嫌い」ではなく「楽に続くか」で選ぶのが効きます。',
+      '焦点を少しずらすなら、「正しいか」より「守りたいものが守られる形か」を基準にしてみてください。',
+      'ポイントは、結論を急がず「進める形」を先に決めることです。',
+    ]);
+  }
+
+  // それ以外はニュートラルに
+  return pick(seed + '|shift2', [
+    '一度だけ視点を切り替えると、動きが見えやすくなります。',
+    'ここは見方を一段ずらすと、迷いがほどけます。',
+  ]);
+}
+
+function buildNextFromSlotPlan(
+  slotPlan: Record<string, string | null> | null,
+  seed: string,
+): string | null {
+  const next = slotPlan?.NEXT ?? null;
+  if (!next) return null;
+
+  if (next.startsWith('NEXT:action')) {
+    return pick(seed + '|next', [
+      '候補を3つだけ書き、いちばん軽いものを10分だけ試す。',
+      'やることを1つに絞り、まず5分だけ着手する。',
+      '「今夜やる1手」だけ決めて、他は保留にする。',
+    ]);
+  }
+
+  return pick(seed + '|next2', [
+    '小さく1回だけ試す。',
+    '1つだけ置いて、そこで止める。',
+  ]);
+}
+

@@ -57,7 +57,7 @@ export async function callLLM(params: CallLLMParams): Promise<CallLLMResult> {
       ? [
           '構造スキャンを実行しました。',
           `位相(Phase): ${phase} / 主要Qコード: ${qGuess}`,
-          '次の一手: 1) “いま取れる1アクション”を1つ選ぶ 2) 5分以内に着手。',
+          '次の一歩: 1) “いま取れる1アクション”を1つ選ぶ 2) 5分以内に着手。',
         ].join('\n')
       : '了解しました。続けましょう。';
 

@@ -360,61 +360,89 @@ export async function POST(req: NextRequest) {
       body?.conversation_id || body?.conversationId || '',
     ).trim();
 
-    // ✅ raw を保持してから NextStep を剥がす
-    const rawText: string = String(body?.text ?? body?.content ?? '');
-    const { choiceId, cleanText } = extractNextStepChoiceFromText(rawText);
-    const finalText = (cleanText && cleanText.trim().length ? cleanText : rawText).trim();
+// ✅ raw を保持してから NextStep を剥がす
+const rawText: string = String(body?.text ?? body?.content ?? '');
 
-    const picked = choiceId ? findNextStepOptionById(choiceId) : null;
+// ✅ ① 本文から抽出（従来のタグ方式）
+const extracted = extractNextStepChoiceFromText(rawText);
 
-    const metaRaw = body?.meta ?? null;
+// ✅ ② body / meta から choiceId を拾う（「タグを隠す」運用向け）
+const choiceIdFromBody: string | null = (() => {
+  const c1 = body?.choiceId ?? body?.extractedChoiceId ?? null;
+  if (typeof c1 === 'string' && c1.trim()) return c1.trim();
 
-    // ✅ meta.extra に nextStep 情報を隠して残す（reply と messages で同じ思想）
-    const baseMetaRaw =
-      metaRaw && typeof metaRaw === 'object' && !Array.isArray(metaRaw) ? metaRaw : {};
-    const baseExtraRaw =
-      baseMetaRaw.extra && typeof baseMetaRaw.extra === 'object' && !Array.isArray(baseMetaRaw.extra)
-        ? baseMetaRaw.extra
-        : {};
+  const m = body?.meta;
+  if (m && typeof m === 'object' && !Array.isArray(m)) {
+    const c2 = (m as any).choiceId ?? (m as any).extractedChoiceId ?? null;
+    if (typeof c2 === 'string' && c2.trim()) return c2.trim();
 
-    const metaAugRaw = {
-      ...baseMetaRaw,
-      extra: {
-        ...baseExtraRaw,
-        nextStepChoiceId: choiceId ?? null,
-        nextStepPickedMeta: picked?.meta ?? null,
-      },
-    };
+    const ex = (m as any).extra;
+    if (ex && typeof ex === 'object' && !Array.isArray(ex)) {
+      const c3 = (ex as any).choiceId ?? (ex as any).extractedChoiceId ?? null;
+      if (typeof c3 === 'string' && c3.trim()) return c3.trim();
+    }
+  }
 
-    const q_code: string | null =
-      metaAugRaw && typeof metaAugRaw === 'object' && typeof (metaAugRaw as any).qCode === 'string'
-        ? (metaAugRaw as any).qCode
-        : null;
+  return null;
+})();
 
-    const depth_stage: string | null =
-      metaAugRaw && typeof metaAugRaw === 'object' && typeof (metaAugRaw as any).depth === 'string'
-        ? (metaAugRaw as any).depth
-        : null;
+// ✅ 最終 choiceId は「body優先 → 本文抽出」
+const choiceId = choiceIdFromBody ?? extracted.choiceId ?? null;
 
-    const intent_layer: string | null =
-      metaAugRaw &&
-      typeof metaAugRaw === 'object' &&
-      typeof (metaAugRaw as any).intentLayer === 'string'
-        ? (metaAugRaw as any).intentLayer
-        : null;
+// ✅ cleanText は抽出結果を使う（タグが無いなら rawText のまま）
+const cleanText = extracted.cleanText;
+const finalText = (cleanText && cleanText.trim().length ? cleanText : rawText).trim();
 
-    const metaSanitized = sanitizeJsonDeep(metaAugRaw);
-    const meta =
-      metaSanitized === null || typeof metaSanitized === 'undefined' ? null : metaSanitized;
+const picked = choiceId ? findNextStepOptionById(choiceId) : null;
 
-    const role: 'user' | 'assistant' =
-      String(body?.role ?? '').toLowerCase() === 'assistant' ? 'assistant' : 'user';
+const metaRaw = body?.meta ?? null;
 
-    if (!conversation_id)
-      return json({ ok: false, error: 'missing_conversation_id' }, 400);
-    if (!finalText) return json({ ok: false, error: 'text_empty' }, 400);
+// ✅ meta.extra に nextStep 情報を隠して残す（reply と messages で同じ思想）
+const baseMetaRaw =
+  metaRaw && typeof metaRaw === 'object' && !Array.isArray(metaRaw) ? metaRaw : {};
+const baseExtraRaw =
+  baseMetaRaw.extra &&
+  typeof baseMetaRaw.extra === 'object' &&
+  !Array.isArray(baseMetaRaw.extra)
+    ? baseMetaRaw.extra
+    : {};
 
-    const supabase = sb();
+const metaAugRaw = {
+  ...baseMetaRaw,
+  extra: {
+    ...baseExtraRaw,
+    nextStepChoiceId: choiceId ?? null,
+    nextStepPickedMeta: picked?.meta ?? null,
+  },
+};
+
+const q_code: string | null =
+  metaAugRaw && typeof metaAugRaw === 'object' && typeof (metaAugRaw as any).qCode === 'string'
+    ? (metaAugRaw as any).qCode
+    : null;
+
+const depth_stage: string | null =
+  metaAugRaw && typeof metaAugRaw === 'object' && typeof (metaAugRaw as any).depth === 'string'
+    ? (metaAugRaw as any).depth
+    : null;
+
+const intent_layer: string | null =
+  metaAugRaw &&
+  typeof metaAugRaw === 'object' &&
+  typeof (metaAugRaw as any).intentLayer === 'string'
+    ? (metaAugRaw as any).intentLayer
+    : null;
+
+const metaSanitized = sanitizeJsonDeep(metaAugRaw);
+const meta = metaSanitized === null || typeof metaSanitized === 'undefined' ? null : metaSanitized;
+
+const role: 'user' | 'assistant' =
+  String(body?.role ?? '').toLowerCase() === 'assistant' ? 'assistant' : 'user';
+
+if (!conversation_id) return json({ ok: false, error: 'missing_conversation_id' }, 400);
+if (!finalText) return json({ ok: false, error: 'text_empty' }, 400);
+
+const supabase = sb();
 
     // 所有確認
     const tConv = process.hrtime.bigint();

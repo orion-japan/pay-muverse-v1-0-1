@@ -319,7 +319,7 @@ export function buildReframeStyleNote(meta?: IrosMeta | null): string | null {
 
   lines.push(
     '',
-    '- 最後に：次の一手を 1つだけ（命令しない／問いは求められた時だけ）',
+    '- 最後に：次の一歩を 1つだけ（命令しない／問いは求められた時だけ）',
     '',
     '- 禁止：以下の定型句を使わない',
     '  - 「〜じゃなくて」',
