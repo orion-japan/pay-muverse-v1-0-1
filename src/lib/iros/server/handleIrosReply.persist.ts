@@ -12,6 +12,10 @@ type SpinLoop = 'SRI' | 'TCF';
 type DescentGate = 'closed' | 'offered' | 'accepted';
 type AnchorEventType = 'none' | 'confirm' | 'set' | 'reset';
 
+type QCounts = {
+  it_cooldown?: number; // 0/1 を想定（将来拡張OK）
+};
+
 function toInt0to3(v: unknown): number | null {
   if (typeof v !== 'number' || !Number.isFinite(v)) return null;
   return Math.max(0, Math.min(3, Math.round(v)));
@@ -53,6 +57,19 @@ function normalizeDescentGate(v: unknown): DescentGate | null {
   if (s === 'offered') return 'offered';
   if (s === 'accepted') return 'accepted';
   return null;
+}
+
+function normalizeQCounts(v: unknown): QCounts {
+  if (!v || typeof v !== 'object') return { it_cooldown: 0 };
+  const obj = v as any;
+
+  const cd =
+    typeof obj.it_cooldown === 'number'
+      ? obj.it_cooldown
+      : 0;
+
+  // ✅ 交互仕様：0 or 1 に固定
+  return { it_cooldown: cd > 0 ? 1 : 0 };
 }
 
 /** intent_anchor から text を安全に取り出す */
@@ -203,7 +220,6 @@ function normalizeQTraceForPersist(metaForSave: any): any {
   const streakLength =
     lenQ == null && lenU == null ? undefined : Math.max(lenQ ?? 0, lenU ?? 0);
 
-  // 形は qTrace + qTraceUpdated をマージして「最終形」を作る
   const mergedQTrace = {
     ...(qTrace ?? {}),
     ...(qTraceUpdated ?? {}),
@@ -224,14 +240,10 @@ function normalizeQTraceForPersist(metaForSave: any): any {
   return {
     ...metaForSave,
     qTrace: mergedQTrace,
-    // ✅ ここも重要：DBに入る qTraceUpdated は常に “最終形” に揃える
     qTraceUpdated: mergedQTrace,
     uncoverStreak: uncoverNext,
   };
 }
-
-
-
 
 /* =========================
  * Persist: messages
@@ -302,7 +314,7 @@ export async function persistAssistantMessage(args: {
       ...(spinLoopNorm ? { spinLoop: spinLoopNorm } : {}),
       ...(typeof spinStepNorm === 'number' ? { spinStep: spinStepNorm } : {}),
 
-      // 互換：snake_case も同値で載せる（過去コード/集計/デバッグ用）
+      // 互換：snake_case も同値で載せる
       ...(phaseNorm ? { phase_mode: phaseNorm } : {}),
       ...(spinLoopNorm ? { spin_loop: spinLoopNorm } : {}),
       ...(typeof spinStepNorm === 'number' ? { spin_step: spinStepNorm } : {}),
@@ -405,46 +417,52 @@ export async function persistIntentAnchorIfAny(_args: {
 export async function persistMemoryStateIfAny(args: {
   supabase: SupabaseClient;
   userCode: string;
-  userText: string; // ★追加
+  userText: string;
   metaForSave: any;
+
+  // ✅ 任意：q_counts を外から渡せる
+  qCounts?: unknown | null;
+
+  // ✅ 任意：そのターンで IT が発火したか（最優先）
+  itTriggered?: boolean;
 }) {
-  const { supabase, userCode, userText, metaForSave } = args;
+  const { supabase, userCode, userText, metaForSave, qCounts, itTriggered } = args;
 
   try {
     if (!metaForSave) return;
 
-// ✅ A: previous を先に取得（merge の土台）
-const { data: previous, error: prevErr } = await supabase
-  .from('iros_memory_state')
-  .select(
-    [
-      'depth_stage',
-      'q_primary',
-      'phase',
-      'self_acceptance',
-      'y_level',
-      'h_level',
-      'spin_loop',
-      'spin_step',
-      'descent_gate',
-      'intent_anchor',
-      'summary',
-      'situation_summary',
-      'situation_topic',
-      'sentiment_level',
-    ].join(',')
-  )
-  .eq('user_code', userCode)
-  .maybeSingle();
+    // ✅ A: previous を先に取得（merge の土台）
+    const { data: previous, error: prevErr } = await supabase
+      .from('iros_memory_state')
+      .select(
+        [
+          'q_counts',
+          'depth_stage',
+          'q_primary',
+          'phase',
+          'self_acceptance',
+          'y_level',
+          'h_level',
+          'spin_loop',
+          'spin_step',
+          'descent_gate',
+          'intent_anchor',
+          'summary',
+          'situation_summary',
+          'situation_topic',
+          'sentiment_level',
+        ].join(',')
+      )
+      .eq('user_code', userCode)
+      .maybeSingle();
 
-if (prevErr) {
-  console.warn('[IROS/STATE] load previous memory_state not ok (continue)', {
-    userCode,
-    code: (prevErr as any)?.code,
-    message: (prevErr as any)?.message,
-  });
-}
-
+    if (prevErr) {
+      console.warn('[IROS/STATE] load previous memory_state not ok (continue)', {
+        userCode,
+        code: (prevErr as any)?.code,
+        message: (prevErr as any)?.message,
+      });
+    }
 
     // unified を最優先で使う（postProcessReply 後は必ず揃っている）
     const unified: any = metaForSave.unified ?? {};
@@ -452,41 +470,65 @@ if (prevErr) {
     const depthInput = metaForSave.depth ?? unified?.depth?.stage ?? null;
     const qCodeInput = metaForSave.qCode ?? unified?.q?.current ?? null;
 
-// =========================
-// QTrace 更新（streak育成）
-// =========================
+    // --- IT発火の復元（引数 > meta.itTriggered > meta.extra.itTriggered > renderMode=IT）---
+    const itTriggeredRawFromMeta =
+      (metaForSave as any)?.itTriggered ??
+      (metaForSave as any)?.extra?.itTriggered ??
+      null;
 
-const prevQ = previous?.q_primary ?? null;
+    const renderModeRaw =
+      (metaForSave as any)?.renderMode ??
+      (metaForSave as any)?.extra?.renderMode ??
+      (metaForSave as any)?.render_mode ??
+      (metaForSave as any)?.extra?.render_mode ??
+      null;
 
-let streakQ: string | null = null;
-let streakLength = 1;
+    const renderModeNorm =
+      typeof renderModeRaw === 'string' ? renderModeRaw.trim().toUpperCase() : '';
 
-if (qCodeInput && prevQ === qCodeInput) {
-  streakQ = qCodeInput;
-  const prevTrace = metaForSave?.qTrace;
-  const prevLen =
-    typeof prevTrace?.streakLength === 'number'
-      ? prevTrace.streakLength
-      : 1;
-  streakLength = prevLen + 1;
-} else if (qCodeInput) {
-  streakQ = qCodeInput;
-  streakLength = 1;
-}
+    const itTriggeredFinal: boolean | null =
+      typeof itTriggered === 'boolean'
+        ? itTriggered
+        : typeof itTriggeredRawFromMeta === 'boolean'
+          ? itTriggeredRawFromMeta
+          : renderModeNorm === 'IT'
+            ? true
+            : null;
 
-// metaForSave に反映（generate 側が拾う）
-metaForSave.qTrace = {
-  lastQ: qCodeInput,
-  dominantQ: qCodeInput,
-  streakQ,
-  streakLength,
-};
-console.log('[IROS/QTrace] updated', {
-  prevQ,
-  qNow: qCodeInput,
-  streakQ,
-  streakLength,
-});
+    // =========================
+    // QTrace 更新（streak育成）
+    // =========================
+    const prevQ = (previous as any)?.q_primary ?? null;
+
+    let streakQ: string | null = null;
+    let streakLength = 1;
+
+    if (qCodeInput && prevQ === qCodeInput) {
+      streakQ = qCodeInput;
+      const prevTrace = metaForSave?.qTrace;
+      const prevLen =
+        typeof prevTrace?.streakLength === 'number'
+          ? prevTrace.streakLength
+          : 1;
+      streakLength = prevLen + 1;
+    } else if (qCodeInput) {
+      streakQ = qCodeInput;
+      streakLength = 1;
+    }
+
+    // metaForSave に反映（generate 側が拾う）
+    metaForSave.qTrace = {
+      lastQ: qCodeInput,
+      dominantQ: qCodeInput,
+      streakQ,
+      streakLength,
+    };
+    console.log('[IROS/QTrace] updated', {
+      prevQ,
+      qNow: qCodeInput,
+      streakQ,
+      streakLength,
+    });
 
     const phaseRawInput = metaForSave.phase ?? unified?.phase ?? null;
     const phaseInput = normalizePhase(phaseRawInput);
@@ -521,7 +563,7 @@ console.log('[IROS/QTrace] updated', {
       null;
 
     // --------
-    // ✅ A: spin / descentGate は「normalize → merge」する（nullで潰さない）
+    // ✅ spin / descentGate は「normalize → merge」する（nullで潰さない）
     // --------
     const spinLoopRawInput =
       metaForSave.spinLoop ??
@@ -548,21 +590,57 @@ console.log('[IROS/QTrace] updated', {
     const spinStepNormInput = normalizeSpinStep(spinStepRawInput);
     const descentGateNormInput = normalizeDescentGate(descentGateRawInput);
 
-    const spinLoopNormPrev = normalizeSpinLoop(previous?.spin_loop ?? null);
-    const spinStepNormPrev = normalizeSpinStep(previous?.spin_step ?? null);
-    const descentGateNormPrev = normalizeDescentGate(previous?.descent_gate ?? null);
+    const spinLoopNormPrev = normalizeSpinLoop((previous as any)?.spin_loop ?? null);
+    const spinStepNormPrev = normalizeSpinStep((previous as any)?.spin_step ?? null);
+    const descentGateNormPrev = normalizeDescentGate((previous as any)?.descent_gate ?? null);
 
-    // ✅ merge ルール（確定仕様）
     const finalSpinLoop: SpinLoop | null = spinLoopNormInput ?? spinLoopNormPrev ?? null;
     const finalSpinStep: 0 | 1 | 2 | null = spinStepNormInput ?? spinStepNormPrev ?? null;
-    const finalDescentGate: DescentGate | null = descentGateNormInput ?? descentGateNormPrev ?? null;
+    const finalDescentGate: DescentGate | null =
+      descentGateNormInput ?? descentGateNormPrev ?? null;
+
+// q_counts（IT cooldown / reset を一本化）
+const prevQCounts = normalizeQCounts((previous as any)?.q_counts);
+const incomingQCounts = qCounts ? normalizeQCounts(qCounts) : null;
+
+// ✅ extra から ITリセットフラグを読む（名前揺れ対応）
+const itResetRequested =
+  Boolean((metaForSave as any)?.extra?.itReset) ||
+  Boolean((metaForSave as any)?.extra?.resetIT) ||
+  Boolean((metaForSave as any)?.extra?.resetItCooldown);
+
+const prevCooldown =
+  typeof prevQCounts.it_cooldown === 'number'
+    ? prevQCounts.it_cooldown
+    : 0;
+
+// ✅ 「IT発火したか」の最終判定を cooldown 側でも使う
+// 優先順位：引数(itTriggered) > metaから復元(itTriggeredFinal)
+const itTriggeredForCounts =
+  typeof itTriggered === 'boolean' ? itTriggered : itTriggeredFinal === true;
+
+// ✅ 次の cooldown をここで確定させる
+let nextCooldown: number;
+
+if (itResetRequested) {
+  // ★ 最優先：必ず 0
+  nextCooldown = 0;
+} else if (itTriggeredForCounts) {
+  // IT発火したターンは「クールダウン開始」
+  nextCooldown = 1;
+} else {
+  // ✅ 交互仕様：非発火ターンは必ず 0（減衰しない）
+  nextCooldown = 0;
+}
+const nextQCounts: QCounts = {
+  ...(incomingQCounts ?? prevQCounts),
+  it_cooldown: nextCooldown,
+};
+
+
 
     // intent_anchor（jsonb）
-    const intentAnchorRaw =
-      metaForSave.intent_anchor ??
-      metaForSave.intentAnchor ??
-      null;
-
+    const intentAnchorRaw = metaForSave.intent_anchor ?? metaForSave.intentAnchor ?? null;
     const anchorText = extractAnchorText(intentAnchorRaw);
 
     // アンカー更新イベント
@@ -579,7 +657,9 @@ console.log('[IROS/QTrace] updated', {
     // 追加の安全策：メタ発話が紛れたら強制 keep
     const metaLike = anchorText ? isMetaAnchorText(anchorText) : false;
     const finalAnchorDecision =
-      metaLike && anchorDecision.action !== 'keep' ? { action: 'keep' as const } : anchorDecision;
+      metaLike && anchorDecision.action !== 'keep'
+        ? { action: 'keep' as const }
+        : anchorDecision;
 
     console.log('[IROS/STATE] persistMemoryStateIfAny start', {
       userCode,
@@ -610,6 +690,10 @@ console.log('[IROS/QTrace] updated', {
       descentGateNormPrev,
       finalDescentGate,
 
+      itTriggered: itTriggeredFinal ?? null,
+      q_counts_prev: prevQCounts,
+      q_counts_next: nextQCounts,
+
       fixedSun,
       anchorText,
       anchorEventType,
@@ -623,7 +707,6 @@ console.log('[IROS/QTrace] updated', {
     }
 
     // null は “保存しない” payload にする（過去の値を壊さない）
-    // ※ただし回転3点は final* を保存する（inputがnullでも previous を保持）
     const upsertPayload: any = {
       user_code: userCode,
       updated_at: new Date().toISOString(),
@@ -673,6 +756,9 @@ console.log('[IROS/QTrace] updated', {
     // descent_gate は列がない環境があるので、まず入れて失敗なら外して再試行
     if (finalDescentGate) upsertPayload.descent_gate = finalDescentGate;
 
+    // ✅ q_counts
+    upsertPayload.q_counts = nextQCounts;
+
     // ✅ 核心：intent_anchor は set/reset のときだけ触る（SUN固定 or keep は触らない）
     if (finalAnchorDecision.action === 'set' && intentAnchorRaw) {
       upsertPayload.intent_anchor = intentAnchorRaw;
@@ -719,6 +805,7 @@ console.log('[IROS/QTrace] updated', {
         spinLoop: upsertPayload.spin_loop ?? '(kept)',
         spinStep: upsertPayload.spin_step ?? '(kept)',
         descentGate: upsertPayload.descent_gate ?? '(kept)',
+        qCounts: upsertPayload.q_counts ?? '(kept)',
         intentAnchor:
           'intent_anchor' in upsertPayload
             ? upsertPayload.intent_anchor === null

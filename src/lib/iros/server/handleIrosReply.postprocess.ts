@@ -41,11 +41,36 @@ export type PostProcessReplyOutput = {
   metaForSave: any;
 };
 
+// ✅ 追加：jsonb(q_counts) を安全に扱う
+function normalizeJsonObject(v: unknown): Record<string, any> {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
+  return v as Record<string, any>;
+}
+
+function toInt0to9(v: unknown): number | null {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+  const n = Math.round(v);
+  return Math.max(0, Math.min(9, n));
+}
+
 function toNonEmptyString(v: unknown): string | null {
   if (typeof v !== 'string') return null;
   const t = v.trim();
   return t.length > 0 ? t : null;
 }
+
+// ✅ NEW: q_counts を最低限の形で正規化
+type QCounts = {
+  it_cooldown?: number; // 0 or 1 を想定（将来拡張OK）
+};
+
+function normalizeQCounts(v: unknown): QCounts {
+  if (!v || typeof v !== 'object') return { it_cooldown: 0 };
+  const obj = v as any;
+  const cd = typeof obj.it_cooldown === 'number' ? obj.it_cooldown : 0;
+  return { it_cooldown: Math.max(0, Math.min(3, Math.round(cd))) };
+}
+
 
 function extractAssistantText(orchResult: any): string {
   if (orchResult && typeof orchResult === 'object') {
@@ -216,7 +241,6 @@ function ensureRotationState(meta: any, orchResult: any): any {
   return m;
 }
 
-
 /* =========================================================
    pastStateNote injection guards (single source)
    - 相談の芯を最優先：必要な時だけ注入する
@@ -326,7 +350,8 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
   const metaForSave: any = metaRaw && typeof metaRaw === 'object' ? { ...metaRaw } : {};
 
   // ✅ 最終確定：qTraceUpdated を metaForSave / metaForReply に焼き込む
-  const qTraceUpdated: any = (orchResult as any)?.qTraceUpdated ?? (metaRaw as any)?.qTraceUpdated ?? null;
+  const qTraceUpdated: any =
+    (orchResult as any)?.qTraceUpdated ?? (metaRaw as any)?.qTraceUpdated ?? null;
 
   const applyQTraceUpdated = (m: any) => {
     if (!m || !qTraceUpdated || typeof qTraceUpdated !== 'object') return;
@@ -389,7 +414,10 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
       const topicLabel =
         typeof args.topicLabel === 'string'
           ? args.topicLabel
-          : metaForSave?.situation_topic ?? metaForSave?.situationTopic ?? metaForSave?.topicLabel ?? null;
+          : metaForSave?.situation_topic ??
+            metaForSave?.situationTopic ??
+            metaForSave?.topicLabel ??
+            null;
 
       const limit =
         typeof args.pastStateLimit === 'number' && Number.isFinite(args.pastStateLimit)
@@ -477,28 +505,90 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
         highDefensiveness: false,
         userText,
       };
+      console.log('[IROS/PostProcess] IT check', {
+        userCode,
+        renderMode: metaForSave?.renderMode ?? null,
+        render_mode: metaForSave?.render_mode ?? null,
+        extra_renderMode: metaForSave?.extra?.renderMode ?? null,
+        extra_render_mode: metaForSave?.extra?.render_mode ?? null,
+        itTriggerKind:
+          metaForSave?.extra?.itTriggerKind ?? metaForSave?.itTriggerKind ?? null,
+      });
 
-// ★ renderMode='IT' を opts に渡す（renderReply.ts 側が拾う）
-const renderedText = renderReply(vector as any, input as any, {
-  mode: 'transcend',
-  maxLines: 14,
-  ...( {
-    renderMode: 'IT',
+// file: src/lib/iros/server/handleIrosReply.postprocess.ts
+// （508行付近の IT check ログの直後に追記）
 
-    // ✅ 追加：IT密度（ボタン=normal / 自然発火=micro を推奨）
-    itDensity:
-      (metaForSave?.extra?.itDensity as any) ??
-      ((metaForSave?.extra?.itTriggerKind ?? metaForSave?.itTriggerKind) === 'button'
-        ? 'normal'
-        : 'micro'),
+      // ✅ IT発火の「事実」を persist 層へ渡す（q_counts / itTriggered）
+      // - renderMode は既に 'IT' になっている（or extra.renderMode）
+      // - しかし persist は itTriggered / qCounts を見て更新するため、ここで確定させる
+      if (
+        metaForSave?.renderMode === 'IT' ||
+        metaForSave?.extra?.renderMode === 'IT'
+      ) {
+        // 1) 発火フラグ（persist のログ itTriggered:null を潰す）
+        (metaForSave as any).itTriggered = true;
+        if (metaForSave?.extra && typeof metaForSave.extra === 'object') {
+          (metaForSave.extra as any).itTriggered = true;
+        }
 
-    spinLoop,
-    descentGate,
-    framePlan,
-    spinStep,
-  } as any ),
-} as any);
+        // 2) qCounts: it_cooldown を最低 1 に立てる（0のまま事故を防ぐ）
+        //   - 既存キー: qCounts / q_counts どちらでも来うるので吸収
+        const prevQCountsRaw =
+          (metaForSave as any).qCounts ??
+          (metaForSave as any).q_counts ??
+          (metaForSave as any).extra?.qCounts ??
+          (metaForSave as any).extra?.q_counts ??
+          {};
 
+        const prevQCounts =
+          prevQCountsRaw && typeof prevQCountsRaw === 'object'
+            ? prevQCountsRaw
+            : {};
+
+        const prevCooldown =
+          typeof (prevQCounts as any).it_cooldown === 'number' &&
+          Number.isFinite((prevQCounts as any).it_cooldown)
+            ? (prevQCounts as any).it_cooldown
+            : 0;
+
+        const nextCooldown = Math.max(prevCooldown, 1);
+
+        const nextQCounts = {
+          ...(prevQCounts as any),
+          it_cooldown: nextCooldown,
+        };
+
+        (metaForSave as any).qCounts = nextQCounts;
+        (metaForSave as any).q_counts = nextQCounts;
+
+        if (metaForSave?.extra && typeof metaForSave.extra === 'object') {
+          (metaForSave.extra as any).qCounts = nextQCounts;
+          (metaForSave.extra as any).q_counts = nextQCounts;
+        }
+      }
+
+
+
+      // ★ renderMode='IT' を opts に渡す（renderReply.ts 側が拾う）
+      const renderedText = renderReply(vector as any, input as any, {
+        mode: 'transcend',
+        maxLines: 14,
+        ...({
+          renderMode: 'IT',
+
+          // ✅ 追加：IT密度（ボタン=normal / 自然発火=micro を推奨）
+          itDensity:
+            (metaForSave?.extra?.itDensity as any) ??
+            ((metaForSave?.extra?.itTriggerKind ?? metaForSave?.itTriggerKind) === 'button'
+              ? 'normal'
+              : 'micro'),
+
+          spinLoop,
+          descentGate,
+          framePlan,
+          spinStep,
+        } as any),
+      } as any);
 
       const out = toNonEmptyString(renderedText);
       if (out) {

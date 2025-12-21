@@ -51,7 +51,7 @@ export type ITWriterInput = {
 
   /**
    * 次の一歩（C）候補（最大2件まで使う）
-   * - 無ければ “最初の一手を切り出す” 形で生成する
+   * - 無ければ “最初の一歩を切り出す” 形で生成する
    */
   nextActions?: Array<string | null | undefined> | null;
 
@@ -240,7 +240,7 @@ function buildEvidenceHint(evidence: Record<string, unknown>): string | null {
   }
 
   if (typeof uncoverStreak === 'number' && uncoverStreak >= 2) {
-    return '表面の理由ではなく、奥の守りが反応している。';
+    return '表面の理由ではなく、心の奥が反応している。';
   }
 
   return null;
@@ -257,30 +257,30 @@ function makeStateDefinitionLine(
   const t = norm(userText);
   const evHint = buildEvidenceHint(safeObj(evidence));
 
-  if (!t) return 'いま起きていることを、先に一度だけ言語化する局面です。';
+  if (!t) return 'いま思っている事を、先に一度だけ言語化する局面です。';
 
   if (evHint) {
-    return `${evHint} いま起きていることは、出来事の大小より「止まり方」が先に出ていることです。`;
+    return `${evHint} いまの話は、出来事の大小より「止まり方」が先に出ていることです。`;
   }
 
-  return `いま起きていることは、${t} という出来事そのものより、「言い出せない／動けない」感覚が先に残っていることです。`;
+  return `向き合うべきは、${t} という出来事そのものより、「言い出せない／動けない」感覚が先に残っていることです。`;
 }
 
 function makeMisalignmentLine(userText: string): string {
   const t = norm(userText);
-  if (!t) return '自分を保ちたい感覚と、取ろうとしている手段がずれている。';
+  if (!t) return '自分自身を保ちたい感覚と、現実の手段がずれている。';
 
   const theme = detectThemeFromUserText(t);
 
   if (theme.isReportOrBoss) {
-    return '自分が保ちたいのは信頼や関係なのに、動き方が「怖さの回避」になっている。だから迷いとして現れている。';
+    return '自分が求める事は信頼や関係なのに、動き方が「怖さの回避」になっている。だから迷いとして現れている。';
   }
 
   if (theme.isChoiceOrOption) {
-    return '自分を保ちたい軸はあるのに、動き方の形がまだ決まっていない。だから迷いとして現れている。';
+    return '自分を保つ軸はあるのに、動き方の形がまだ決まっていない。だから迷いとして現れている。';
   }
 
-  return '自分を保ちたい軸と、動き方の形が一致していない。だから迷いとして現れている。';
+  return '自分らしい軸と、動き方の形が一致していない。だから迷いとして現れている。';
 }
 
 function makeStuckReasonLine(userText: string): string {
@@ -291,31 +291,31 @@ function makeStuckReasonLine(userText: string): string {
   }
 
   if (theme.isNeedConcrete) {
-    return '知識の不足ではなく、「一手を短くする形」がまだ決まっていないだけです。';
+    return '知識の不足ではなく、「本心」がまだ決まっていないだけです。';
   }
 
-  return '選択肢の問題ではなく、焦点がまだ一点に結晶化していないだけです。';
+  return '選択肢の問題ではなく、焦点がまだ一点に落ち着いてないだけです。';
 }
 
 function makeFutureDirectionLine(userText: string): string {
   const theme = detectThemeFromUserText(userText);
 
   if (theme.isReportOrBoss) {
-    return '次の1週間は、正解探しより先に「最小の報告で信頼を保てる形」を先に作る。';
+    return '次の期間、正解探しより先に「最小の報告で信頼を保てる形」を先に作る。';
   }
 
   if (theme.isFearOrAvoid) {
-    return '次の1週間は、気合より先に「怖くても通せる形」を先に作る。';
+    return '今度は、気合より先に「怖くても進める形」を先に作る。';
   }
 
-  return '次の1週間は、正解探しより先に「自分を保てる形」を先に作る。';
+  return '次のチャンスは、正解探しより先に「自分を保てる形」を先に作る。';
 }
 
 function makeFutureStateLine(userText: string): string {
   const theme = detectThemeFromUserText(userText);
 
   if (theme.isReportOrBoss) {
-    return '未来は「怒られない」より、「短く報告できて前に進める足場がある」状態へ。';
+    return '未来は「目指すのは「怒られないこと」じゃなくて、短く報告して、次に進める形があること。」状態へ。';
   }
 
   return '未来は「不安が消える」より、「迷っても進める足場がある」状態へ。';
@@ -327,7 +327,7 @@ function makeAutoActions(userText: string): { a1: string; a2?: string; a3?: stri
 
   if (theme.isReportOrBoss) {
     return {
-      a1: '最初の一手は「相談したいことがあります」とだけ先に置く（1行でいい）。',
+      a1: '最初の一歩は「相談したいことがあります」とだけ先に置く（1行でいい）。',
       a2: '次に、期日・遅れている理由・次の見通しを“箇条書き3つ”で送る。説明は増やさない。',
       a3: '最後に「代替案（A/B）か、再期限の提案」を1つだけ添える。',
     };
@@ -335,7 +335,7 @@ function makeAutoActions(userText: string): { a1: string; a2?: string; a3?: stri
 
   if (theme.isFearOrAvoid) {
     return {
-      a1: '最初の一手は「短く言う形」を作る。長文にしない。',
+      a1: '最初の一歩は「短く言う形」を作る。長文にしない。',
       a2: '相手がいるなら、境界線を短い一通で先に置く。説明は増やさない。',
       a3: '“怖さがあるまま”でも通せる文面にする。',
     };
@@ -343,15 +343,15 @@ function makeAutoActions(userText: string): { a1: string; a2?: string; a3?: stri
 
   if (theme.isStuckOrBlocked) {
     return {
-      a1: '今夜は、最初の一手だけを切り出して、1分で置く。',
+      a1: '今夜は、最初の一歩だけを切り出して、1分で置く。',
       a2: '決め切らなくていい。まず“置ける形”だけ決める。',
       a3: '「誰に／いつまでに／何を」だけを書いて、終える。',
     };
   }
 
   return {
-    a1: '今夜は、最初の一手だけを切り出して、1分で置く。',
-    a2: '相手がいるなら、境界線を短い一通で先に置く。説明は増やさない。',
+    a1: '今夜は、最初の一歩だけを初めて、納得する。',
+    a2: '相手がいるなら、境界線を短い一通で先に作る。説明は増やさない。',
     a3: '文章を増やさず、通す。',
   };
 }
@@ -360,14 +360,14 @@ function makeStopDoingLine(userText: string): string {
   const theme = detectThemeFromUserText(userText);
 
   if (theme.isReportOrBoss) {
-    return '代わりに、頭の中で謝罪文を膨らませて時間を溶かすのはやめる。';
+    return '代わりに、頭の中で謝罪文を膨らませて時間を費やすのはやめる。';
   }
 
   if (theme.isFearOrAvoid) {
-    return '代わりに、「怖さが消えるまで待つ」で止まるのはやめる。';
+    return '代わりに、「怖さが消えるまで待つ」って止まるのをやめる。';
   }
 
-  return '代わりに、比較と反省で時間を溶かすのはやめる。';
+  return '代わりに、比較と反省で時間を費やすのはやめる。';
 }
 
 
@@ -380,18 +380,18 @@ function makeTPierceLine(userText: string): string {
   const theme = detectThemeFromUserText(t);
 
   if (theme.isReportOrBoss) {
-    return '守りたいのは「完璧さ」ではなく、信頼が切れないこと。';
+    return '完璧さより、信頼が切れないこと。';
   }
 
   if (theme.isFearOrAvoid) {
-    return '守りたいのは「怖さが消えること」ではなく、怖くても壊れない形。';
+    return '怖さが消えるより、怖くても壊れない形。';
   }
 
   if (theme.isChoiceOrOption) {
-    return '守りたいのは「正解」ではなく、軸が折れないこと。';
+    return '正解より、軸が折れないこと。';
   }
 
-  return '守りたいのは「答え」ではなく、軸が折れないこと。';
+  return '答えより、戻ってこられる足場があること。';
 }
 
 function makeTReverseLine(): string {
@@ -552,7 +552,7 @@ export function writeIT(input: ITWriterInput): ITWriterOutput {
       : 'ゴールは「感情が消える」ではなく、「短く通せる形がある」こと。',
     // C補強
     itTarget === 'I'
-      ? '一手は短く。やることを1つにする。'
+      ? '一歩は短く。やることを1つにする。'
       : '文章を増やさない。短くして、通す。',
     // T補強（Tの場合のみ強め）
     itTarget === 'T' ? '核が決まれば、現実の形は自然に揃う。' : '',

@@ -184,7 +184,7 @@ export async function runMicroGate(
   const actionOptions = pickVariant(seed + '|a', [
     `① いま行く（小さく着手）\n② 30秒だけ整える\n③ 今日は畳む（回復優先）`,
     `A いま / B 30秒整える / C 今日は置く`,
-    `① まず一手\n② まず整える\n③ まず休む`,
+    `① まず一歩\n② まず整える\n③ まず休む`,
   ]);
 
   const questionOptions = pickVariant(seed + '|q', [

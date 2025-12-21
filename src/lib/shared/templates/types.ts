@@ -10,7 +10,7 @@ export interface Template {
   phase: Phase;
   depth: Depth;
   tone: string;     // 語感ラベル（例：静けさ・調和・創造・意図）
-  lines: string[];  // [一言, 内面描写, 現実の一手] など、短文の配列
+  lines: string[];  // [一言, 内面描写, 現実の一歩] など、短文の配列
 }
 
 /** 診断モード用：テンプレから {one, inner, real} を取り出す */

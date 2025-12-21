@@ -1,7 +1,7 @@
 // src/lib/shared/templates/creative.ts
 import type { Template } from './types';
 
-// 創作（企画・制作・発信）を“内面→現実の一手”に落とす核テンプレ
+// 創作（企画・制作・発信）を“内面→現実の一歩”に落とす核テンプレ
 export const CreativeTemplates: Template[] = [
   // ---- S (Self) ----
   { id:'CR_S1_unblock', phase:'Inner', depth:'S1', tone:'詰まり解消', lines:[

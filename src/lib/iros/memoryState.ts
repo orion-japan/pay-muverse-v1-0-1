@@ -5,6 +5,7 @@
 // - createClient() を 0引数で呼ばない（ts(2554) 回避）
 // - loadIrosMemoryState は「DB row → IrosMemoryState」へ必ず整形して返す（途中 return バグ除去）
 // - phase / spin_loop / spin_step / descent_gate も MemoryState として扱えるようにする
+// - 🆕 q_counts（it_cooldown 等）も MemoryState として扱う（ITデモのクールダウン土台）
 
 import { createClient } from '@supabase/supabase-js';
 
@@ -60,6 +61,9 @@ export type IrosMemoryState = {
   // 🆕 場のテーマ保持用
   situationSummary?: string | null;
   situationTopic?: string | null;
+
+  // 🆕 クールダウン等（JSONB想定）
+  qCounts?: { it_cooldown?: number } | null;
 };
 
 /**
@@ -91,6 +95,25 @@ export type UpsertMemoryStateInput = {
   spinLoop?: string | null;
   spinStep?: number | null;
   descentGate?: string | null;
+
+  // 🆕 q_counts（必要なら渡す。null/undefined なら潰さない）
+  qCounts?: { it_cooldown?: number } | null;
+};
+
+// ---------------------------------------------------------
+// 🆕 q_counts normalize
+// ---------------------------------------------------------
+const normalizeQCounts = (v: any): { it_cooldown: number } | null => {
+  if (v == null) return null;
+  if (typeof v !== 'object') return null;
+
+  const cdRaw = (v as any).it_cooldown;
+  const cd =
+    typeof cdRaw === 'number' && Number.isFinite(cdRaw)
+      ? Math.max(0, Math.min(3, Math.round(cdRaw)))
+      : 0;
+
+  return { it_cooldown: cd };
 };
 
 /* =========================================================
@@ -122,6 +145,8 @@ export async function loadIrosMemoryState(
         'spin_loop',
         'spin_step',
         'descent_gate',
+        // 🆕 q_counts
+        'q_counts',
       ].join(','),
     )
     .eq('user_code', userCode)
@@ -129,6 +154,8 @@ export async function loadIrosMemoryState(
 
   if (error) throw error;
   if (!data) return null;
+
+  const qCountsNorm = normalizeQCounts((data as any).q_counts);
 
   const state: IrosMemoryState = {
     userCode: data.user_code,
@@ -165,6 +192,9 @@ export async function loadIrosMemoryState(
       typeof data.situation_summary === 'string' ? data.situation_summary : null,
     situationTopic:
       typeof data.situation_topic === 'string' ? data.situation_topic : null,
+
+    // 🆕 q_counts
+    qCounts: qCountsNorm,
   };
 
   if (
@@ -187,6 +217,7 @@ export async function loadIrosMemoryState(
       sentimentLevel: state.sentimentLevel,
       situationSummary: state.situationSummary,
       situationTopic: state.situationTopic,
+      qCounts: state.qCounts ?? null,
     });
   }
 
@@ -216,6 +247,7 @@ export async function upsertIrosMemoryState(
     spinLoop,
     spinStep,
     descentGate,
+    qCounts,
   } = input;
 
   // ① 既存の状態を読み込み（あればマージに使う）
@@ -266,7 +298,9 @@ export async function upsertIrosMemoryState(
     return Math.max(0, Math.min(9, n)); // ← 上限は運用に合わせて調整可
   };
 
-  const normalizeDescentGate = (v: any): 'closed' | 'offered' | 'accepted' | null => {
+  const normalizeDescentGate = (
+    v: any,
+  ): 'closed' | 'offered' | 'accepted' | null => {
     if (v == null) return null;
 
     if (typeof v === 'string') {
@@ -296,6 +330,10 @@ export async function upsertIrosMemoryState(
     normalizeDescentGate(descentGate) ??
     normalizeDescentGate(previous?.descentGate) ??
     null;
+
+  // 🆕 q_counts（null/undefined なら潰さない + 正規化して確定）
+  const finalQCounts =
+    normalizeQCounts(qCounts) ?? normalizeQCounts(previous?.qCounts) ?? null;
 
   // ★ 0〜3 に丸めて integer 化（DB カラムは integer）
   const yLevelInt =
@@ -328,6 +366,7 @@ export async function upsertIrosMemoryState(
   if (finalSpinLoop) summaryParts.push(`spin=${finalSpinLoop}`);
   if (typeof finalSpinStep === 'number') summaryParts.push(`step=${finalSpinStep}`);
   if (finalDescentGate) summaryParts.push(`descent=${finalDescentGate}`);
+  if (finalQCounts?.it_cooldown != null) summaryParts.push(`it_cd=${finalQCounts.it_cooldown}`);
 
   const summary = summaryParts.length > 0 ? summaryParts.join(',') : null;
 
@@ -353,6 +392,9 @@ export async function upsertIrosMemoryState(
     spin_loop: finalSpinLoop,
     spin_step: finalSpinStep,
     descent_gate: finalDescentGate,
+
+    // 🆕 q_counts（正規化済み / null なら DB のままにしたいなら upsert しない運用でもOK）
+    q_counts: finalQCounts,
   };
 
   try {
@@ -387,6 +429,7 @@ export async function upsertIrosMemoryState(
         spinLoop: finalSpinLoop,
         spinStep: finalSpinStep,
         descentGate: finalDescentGate,
+        qCounts: finalQCounts,
       });
     }
   } catch (e) {

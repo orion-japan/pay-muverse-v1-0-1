@@ -1298,7 +1298,7 @@ try {
         reason: rot?.reason ?? undefined,
       };
 
-      out.metaForSave = m;
+ out.metaForSave = m;
 
       console.log('[IROS/Reply] rotation bridge', {
         spinLoop: m.spinLoop,

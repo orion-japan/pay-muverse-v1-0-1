@@ -24,7 +24,7 @@ export function phaseTemplate(phase: ConversationStage) {
       };
     case 4:
       return {
-        seed: 'このままなら温度は緩やかに低下。今週の一手は遅延時の連絡ルールを先出し合意。',
+        seed: 'このままなら温度は緩やかに低下。今週の一歩は遅延時の連絡ルールを先出し合意。',
         chips: ['ルール合意', '頻度調整', '一旦距離'],
         question: '最初の一歩を1文でどうしますか？',
       };

@@ -103,7 +103,7 @@ function buildMirrorBlock(ctx: IrosVoiceContext): string {
 }
 
 /**
- * そのときの「小さな一手」や寄り添いの言葉
+ * そのときの「小さな一歩」や寄り添いの言葉
  * ※ 見出しや固定フレーズは付けず、中身だけ返す
  */
 function buildStepBlock(ctx: IrosVoiceContext): string {
@@ -155,7 +155,7 @@ export function buildIrosVoiceReply(ctx: IrosVoiceContext): string {
     parts.push(mirror);
   }
 
-  // ③ そのとき選べる一手 / 寄り添い（見出しなし）
+  // ③ そのとき選べる一歩 / 寄り添い（見出しなし）
   const stepBlock = buildStepBlock(ctx);
   if (stepBlock) {
     parts.push(stepBlock);

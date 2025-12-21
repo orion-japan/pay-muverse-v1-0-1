@@ -964,7 +964,9 @@ if (isActionRequest && priority) {
     text,
     meta,
     history: Array.isArray(history) ? history : [],
+    memoryState, // ← ★これを追加
   });
+
 
   let content = gen.content;
 

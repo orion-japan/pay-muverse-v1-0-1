@@ -357,7 +357,7 @@ function buildWriterProtocol(meta: any, userText: string): string {
     '【WRITER_PROTOCOL】',
     'あなたは「意図フィールドOS」のWriterです。',
     '一般論・説明口調・テンプレの言い回しは禁止。',
-    '“助言の羅列”ではなく、“視点の確定→一手だけ” で返す。',
+    '“助言の羅列”ではなく、“視点の確定→一歩だけ” で返す。',
     '',
     whisperRuleBlock,
     '',
@@ -424,7 +424,7 @@ function buildWriterProtocol(meta: any, userText: string): string {
 
   // ---- NORMAL (non-IT) ----
 
-  // A) coreIntent missing → “北極星を1行で確定” して一手
+  // A) coreIntent missing → “北極星を1行で確定” して一歩
   if (!coreIntent) {
     return [
       base,
@@ -456,7 +456,7 @@ function buildWriterProtocol(meta: any, userText: string): string {
       .join('\n');
   }
 
-  // B) coreIntent present → “言い換え断定 → 一手”
+  // B) coreIntent present → “言い換え断定 → 一歩”
   const anchorConfirmBlock =
     anchorEventType === 'confirm' && typeof anchorConfirmQ === 'string'
       ? [
@@ -746,6 +746,30 @@ export async function generateIrosReply(
   const meta: IrosMeta = (args.meta ?? ({} as IrosMeta)) as IrosMeta;
   const userText = String((args as any).text ?? (args as any).userText ?? '');
 
+  // =========================================================
+  // MemoryState attach (generate side)
+  // - cooldown 判定が必ず効くように、args.memoryState を meta に取り込む
+  // =========================================================
+  const memoryStateFromArgs = (args as any)?.memoryState ?? null;
+  if (
+    memoryStateFromArgs &&
+    typeof memoryStateFromArgs === 'object' &&
+    !(meta as any)?.memoryState
+  ) {
+    (meta as any).memoryState = memoryStateFromArgs;
+  }
+
+  // ついでに q_counts 直下も補助的に載せる（参照揺れ対策）
+  if (
+    !(meta as any)?.q_counts &&
+    (meta as any)?.memoryState?.q_counts &&
+    typeof (meta as any).memoryState.q_counts === 'object'
+  ) {
+    (meta as any).q_counts = (meta as any).memoryState.q_counts;
+  }
+
+
+
   // ==============================
   // Frame sticky を断つ（重要）
   // - args.meta は毎回 frame を含み得る（前ターン残骸）
@@ -825,39 +849,79 @@ export async function generateIrosReply(
 
 
 /* ---------------------------------
-   IT DEMO TRIGGER (確実版 / generate.ts用)
-   - generate.ts には previous が無いので参照しない
-   - 直前2回がQ2かどうかは qBrake.detail が既に判定している
+   IT DEMO TRIGGER + COOLDOWN（確実版 / 交互仕様）
 --------------------------------- */
 
+const userCodeForLog = String((args as any)?.userCode ?? '');
+
+// ✅ generate.ts では meta 経由のみ使う（memoryState は未定義）
+const qCounts =
+  (((meta as any)?.memoryState?.qCounts ??
+    (meta as any)?.memoryState?.q_counts ??
+    (meta as any)?.q_counts ??
+    (meta as any)?.rotationState?.q_counts ??
+    {}) as Record<string, any>);
+
+const itCooldownPrev = Number(qCounts?.it_cooldown ?? 0);
+
+// qBrake.detail から Q2×2 を確定
 const qBrakeDetail = (qBrake as any)?.detail ?? {};
 const isQ2x2 =
   qNow === 'Q2' &&
-  (qBrakeDetail.q2_streak2 === true || qBrakeDetail.qNow_streak2 === true);
+  (qBrakeDetail.q2_streak2 === true ||
+   qBrakeDetail.qNow_streak2 === true);
 
-if (isQ2x2) {
+// ✅ 交互仕様：前回1ならブロック、0なら許可
+const itAllowed = itCooldownPrev <= 0;
+
+const IT_REASON = 'Q2x2(by qBrake.detail)';
+
+if (isQ2x2 && itAllowed) {
   (meta as any).extra = (meta as any).extra ?? {};
 
-  // ★参照揺れ対策で両方に立てる
-  (meta as any).extra.renderMode = 'IT';
   (meta as any).renderMode = 'IT';
+  (meta as any).extra.renderMode = 'IT';
+  (meta as any).extra.forceIT = true;
 
-  (meta as any).extra.forceIT = true; // デバッグ用（後で消してOK）
-  (meta as any).itReason = 'Q2x2(by qBrake.detail)';
+  (meta as any).itReason = IT_REASON;
+  (meta as any).extra.itReason = IT_REASON;
 
   console.log('[IROS][ITDemo][generate] ON', {
+    userCode: userCodeForLog,
     qNow,
-    qBrakeDetail,
-    recentUserQs,
+    itCooldownPrev,
+    isQ2x2,
+    qCounts,
   });
 } else {
+  const wasSetByThis =
+    (meta as any)?.itReason === IT_REASON ||
+    (meta as any)?.extra?.itReason === IT_REASON;
+
+  if (wasSetByThis) {
+    delete (meta as any).renderMode;
+    delete (meta as any).extra.renderMode;
+    delete (meta as any).itReason;
+    delete (meta as any).extra.itReason;
+  }
+
+  (meta as any).extra = (meta as any).extra ?? {};
+  (meta as any).extra.forceIT = false;
+  (meta as any).extra.itBlockedReason = !isQ2x2
+    ? 'not-eligible'
+    : !itAllowed
+      ? 'cooldown'
+      : 'unknown';
+
   console.log('[IROS][ITDemo][generate] OFF', {
+    userCode: userCodeForLog,
     qNow,
-    qBrakeDetail,
-    recentUserQs,
+    itCooldownPrev,
+    isQ2x2,
+    qCounts,
+    blockedReason: (meta as any).extra.itBlockedReason,
   });
 }
-
 
 
 

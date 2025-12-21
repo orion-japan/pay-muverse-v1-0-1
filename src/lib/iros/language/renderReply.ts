@@ -24,6 +24,9 @@ export type RenderOptions = {
   forceExposeInsight?: boolean;
   minimalEmoji?: boolean;
   maxLines?: number;
+
+  // （拡張）上流が渡す可能性があるもの：any で拾う
+  // framePlan / renderMode / spinLoop / descentGate / itDensity ...
 };
 
 // ✅ IT 密度（自然発火は micro/compact、ボタンは normal 想定）
@@ -36,10 +39,25 @@ export function renderReply(
 ): string {
   const framePlan = (opts as any)?.framePlan ?? null;
 
-  // ✅ 外部（extra/meta）からの強制指定を優先して拾う
-  const forcedRenderMode = (opts as any)?.renderMode as string | undefined;
-  const forcedSpinLoop = (opts as any)?.spinLoop as string | undefined;
-  const forcedDescentGate = (opts as any)?.descentGate as unknown;
+// ✅ 外部（extra/meta）からの強制指定を優先して拾う
+// - opts は postprocess / handleIrosReply 側から渡される可能性あり
+// - 自然発火・ボタン発火どちらもここに集約する
+const forcedRenderMode =
+  ((opts as any)?.renderMode ??
+    (opts as any)?.meta?.renderMode ??
+    (opts as any)?.extra?.renderMode) as string | undefined;
+
+const forcedSpinLoop =
+  ((opts as any)?.spinLoop ??
+    (opts as any)?.meta?.spinLoop ??
+    (opts as any)?.extra?.spinLoop) as string | undefined;
+
+const forcedDescentGate =
+  (opts as any)?.descentGate ??
+  (opts as any)?.meta?.descentGate ??
+  (opts as any)?.extra?.descentGate ??
+  undefined;
+
 
   // ✅ 追加：IT density（postprocess が渡せるように）
   // - opts.itDensity: 最優先（UIボタン/自然発火で出し分け）
@@ -87,7 +105,6 @@ export function renderReply(
           : 'closed';
 
   const isDescent = spinLoop === 'TCF' || descentGate !== 'closed';
-  const suppressAsk = true;
 
   // ✅ IT 指定が来たら mode を強制的に transcend 扱いに寄せる（まず動かす）
   const baseMode = opts.mode ?? inferMode(vector);
@@ -101,8 +118,9 @@ export function renderReply(
   const maxLines = typeof opts.maxLines === 'number' ? opts.maxLines : 14;
 
   // ✅ NO_DELTA 検知（現状は“差し込まない”方針だが、将来の条件分岐に残しておく）
-  const noDelta = detectNoDelta(vector);
-  const noDeltaKind = detectNoDeltaKind(vector);
+  // ※いまは未使用でも keep（将来の分岐用）
+  const _noDelta = detectNoDelta(vector);
+  const _noDeltaKind = detectNoDeltaKind(vector);
 
   const factsRaw = normalizeOne(input.facts);
 
@@ -148,7 +166,6 @@ export function renderReply(
   }
 
   // ---- noDelta 最小（factsに余計な観測文は足さない方針）----
-  // ※テンプレ臭の原因になりやすいので「kind確定でも差し込まない」版
   const facts = shapeFacts(factsRaw, { mode, seed, minimalEmoji });
 
   const exposeInsight =
@@ -225,38 +242,38 @@ function renderITStructured(args: {
   const I1 =
     insight?.trim() ||
     (userText
-      ? `いま止まっているのは、${soften(userText)} の出来事そのものより、“動きに変換できていない感覚”が残っているからです。`
+      ? `いま動けないのは、${soften(userText)} の出来事そのものより、“動く事に変換できていない感覚”が邪魔しているからです。`
       : facts
-        ? `いま止まっているのは、起きている事実（${soften(facts)}）の外側に、まだ“結晶化していない焦点”があるからです。`
-        : 'いまは「答え」ではなく、状態を一度だけ確定する局面です。');
+        ? `いま動いてないのは、起きている事実（${soften(facts)}）の外側に、まだ“固まっていない"焦点”があるからです。`
+        : 'いまは「答え」ではなく、状況を一度確定する局面です。');
 
   const I2 =
-    '守りたいものと、動き方の形が一致していない。だから迷いとして現れている。';
+    '正しいと思う方向と、動き方の方向が一致していない。だから迷いとして現れている。';
   const I3 =
-    '選択肢の問題ではなく、焦点がまだ一点に結晶化していないだけです。';
+    '選択肢の問題ではなく、焦点がまだ一点に絞られていないだけです。';
 
   // --- T: 未来方向 / 未来状態 ---
   const T1 =
-    '次の1週間は、正解探しより先に「守りたいものが守られる形」を先に作る。';
+    '次は、正解探しより先に「自分が壊れない形」を先に作る。';
   const T2 =
-    '未来は「不安が消える」より、「迷っても進める足場がある」状態へ。';
+    '未来は「不安をゼロにする事」より、「迷っても前に進める足場がある」状態へ。';
 
   // --- C: 次の一歩（最大2） / やらないこと ---
   const nextBase = nextStep?.trim() || '最初の一歩だけを取り出して、1分で決める。';
 
-  const nextAdjusted =
+  const nextAdj =
     isDescent ? adjustNextForDescent(nextBase, seed, spinStep) : nextBase;
 
-  const C1 = `今夜は、${nextAdjusted}`;
+  const C1 = `今夜は、${nextAdj}`;
   const C2 = '必要なら、境界線を短い一通で先に置く。説明は増やさない。';
-  const C3 = '代わりに、比較と反省で時間を溶かすのはやめる。';
+  const C3 = '代わりに、比較と反省で時間を費やすのはやめる。';
 
   // --- F: 確信 / 余韻 ---
   const F1 = minimalEmoji
-    ? 'もう変化は起きています。あとは、その変化に沿って歩くだけ。'
+    ? 'もう変化は起きています。あとは、その変化に沿って歩むだけ。'
     : 'もう変化は起きています。あとは、その変化に沿って歩くだけ。🪔';
 
-  const F2 = '“できる側”のあなたに、戻っています。';
+  const F2 = '“できる側”のあなたに、変わっていきます。';
 
   // =========================================================
   // ✅ 密度ごとの出力（自然発火は micro/compact）
@@ -278,7 +295,6 @@ function renderITStructured(args: {
 
   // ■ normal: いまの濃いIT（ボタン想定）
   const lines: string[] = [I1, I2, I3, '', T1, T2, '', C1, C2, C3, '', F1, F2];
-
   const text = lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   return clampLines(text, maxLines);
 }
@@ -294,11 +310,11 @@ function soften(x: string): string {
 ========================= */
 
 function inferMode(vector: ResonanceVector): RenderMode {
-  const grounding = vector.grounding;
-  const transcendence = vector.transcendence;
+  const grounding = (vector as any).grounding ?? 0;
+  const transcendence = (vector as any).transcendence ?? 0;
 
-  if (vector.depthLevel === 2 || transcendence >= 0.7) return 'transcend';
-  if (vector.depthLevel === 0 && grounding >= 0.45) return 'casual';
+  if ((vector as any).depthLevel === 2 || transcendence >= 0.7) return 'transcend';
+  if ((vector as any).depthLevel === 0 && grounding >= 0.45) return 'casual';
   return 'intent';
 }
 
@@ -314,7 +330,7 @@ function shouldExposeInsight(args: {
   if (highDefensiveness && mode !== 'transcend') return false;
   if (userWantsEssence) return true;
   if (mode === 'transcend') return true;
-  if (mode === 'intent' && vector.precision >= 0.62) return true;
+  if (mode === 'intent' && ((vector as any).precision ?? 0) >= 0.62) return true;
   return false;
 }
 
@@ -485,7 +501,7 @@ function buildHeader(args: {
 
 function shapeFacts(
   facts: string,
-  ctx: { mode: RenderMode; seed: string; minimalEmoji: boolean },
+  _ctx: { mode: RenderMode; seed: string; minimalEmoji: boolean },
 ): string {
   const f = (facts ?? '').toString().trim();
   if (!f) return '';
@@ -529,8 +545,6 @@ function shapeInsightDiffuse(
 
 /**
  * ✅ 「次の一歩」を固定ラベルにしない
- * - 先頭の言い回しを seed 固定で揺らす
- * - “次の一歩は〜” を極力使わない（使うとしても低頻度）
  */
 function shapeNext(
   next: string,
@@ -546,12 +560,11 @@ function shapeNext(
   const n = next.trim();
   if (!n) return '';
 
-  const gentle = vector.grounding < 0.45 || mode === 'transcend';
+  const gentle = ((vector as any).grounding ?? 0) < 0.45 || mode === 'transcend';
 
   const lead = pickNextLead(seed, gentle);
   const tail = pickNextTail(seed, gentle);
 
-  // 例: "今夜は、{N}。" / "まずは {N} だけ。" / "{N} を1回だけ。"
   const line = `${lead}${n}${tail}`.replace(/\s{2,}/g, ' ').trim();
 
   if (minimalEmoji) return line;
@@ -593,52 +606,25 @@ function adjustNextForDescent(
 ========================= */
 
 function pickNextLead(seed: string, gentle: boolean): string {
-  // ※「次の一歩は」を使わずに、同義を散らす
   const arr = gentle
-    ? [
-        '今夜は、',
-        'まずは ',
-        'ここから ',
-        '',
-        'いったん ',
-        '小さく ',
-      ]
-    : [
-        'まず ',
-        '今夜は、',
-        'ここから ',
-        '',
-        '先に ',
-        '最初に ',
-      ];
+    ? ['今日は、', 'まずは ', 'ここから ', '', 'いったん ', 'スムーズ ']
+    : ['まず ', '今夜は、', 'ここから ', '', '先に ', '最初に '];
 
-  const picked = pick(seed + '|nLead', arr);
-
-  // lead が空のときも自然になるよう、必要なら語尾側で整える
-  return picked;
+  return pick(seed + '|nLead', arr);
 }
 
 function pickNextTail(seed: string, gentle: boolean): string {
   const arr = gentle
-    ? [' を1回だけ。', ' だけ。', ' を短く。', ' を5分だけ。', ' を小さく。', '。']
+    ? [' を1度だけ。', ' だけ。', ' を短く。', ' を5分だけ。', ' を小さく。', '。']
     : [' から着地。', ' を先に通す。', ' を短く。', ' を10分だけ。', '。', ''];
 
-  // 末尾が句点なしにならないよう、tail で担保
   const t = pick(seed + '|nTail', arr);
   if (!t) return '。';
   return t.startsWith(' ') || t.startsWith('。') ? t : ` ${t}`;
 }
 
 function pickNextSectionLabel(seed: string): string {
-  // HEADING の「■ 次」がテンプレ臭なので、ここも揺らす（意味は維持）
-  return pick(seed + '|nLabel', [
-    '動き',
-    '一歩',
-    '着地',
-    'ここから',
-    'やること',
-    '手順',
-  ]);
+  return pick(seed + '|nLabel', ['動き', '一歩', '着地', 'ここから', 'やること', '手順']);
 }
 
 /* =========================
@@ -691,9 +677,9 @@ function stableSeedFromInput(vector: ResonanceVector, input: RenderInput): strin
     input.insight ?? '',
     input.nextStep ?? '',
     String((vector as any).depthLevel ?? ''),
-    String(Math.round(((vector as any).grounding ?? 0) * 100)),
-    String(Math.round(((vector as any).precision ?? 0) * 100)),
-    String(Math.round(((vector as any).transcendence ?? 0) * 100)),
+    String(Math.round((((vector as any).grounding ?? 0) as number) * 100)),
+    String(Math.round((((vector as any).precision ?? 0) as number) * 100)),
+    String(Math.round((((vector as any).transcendence ?? 0) as number) * 100)),
   ].join('|');
 
   return String(simpleHash(parts));
@@ -760,7 +746,6 @@ function pickSlotPlanFromVector(
   const sp = v?.slotPlan;
   if (!sp || typeof sp !== 'object' || Array.isArray(sp)) return null;
 
-  // OBS/SHIFT/NEXT/SAFE だけ持つ（余計なキーは無視）
   return {
     OBS: typeof sp.OBS === 'string' ? sp.OBS : null,
     SHIFT: typeof sp.SHIFT === 'string' ? sp.SHIFT : null,
@@ -783,7 +768,6 @@ function fillRequiredSlots(args: {
         .map((s: any) => String(s.id))
     : [];
 
-  // 最小既定値（今回の本丸は SHIFT / NEXT）
   const defaults: Record<string, string> = {
     OBS: 'OBS:reflect',
     SHIFT: 'SHIFT:one-angle',
@@ -795,7 +779,6 @@ function fillRequiredSlots(args: {
     if (sp[id] == null) sp[id] = defaults[id] ?? `${id}:default`;
   }
 
-  // required が無くても最低限は埋める（デモが止まらない）
   if (sp.SHIFT == null) sp.SHIFT = defaults.SHIFT;
   if (sp.NEXT == null) sp.NEXT = defaults.NEXT;
 
@@ -809,16 +792,14 @@ function buildInsightFromSlotPlan(
   const shift = slotPlan?.SHIFT ?? null;
   if (!shift) return null;
 
-  // “型”から最小の視点転換だけ作る（テンプレ臭を抑える）
   if (shift.startsWith('SHIFT:one-angle')) {
     return pick(seed + '|shift', [
       '視点を一段だけ変えるなら、「好き/嫌い」ではなく「楽に続くか」で選ぶのが効きます。',
-      '焦点を少しずらすなら、「正しいか」より「守りたいものが守られる形か」を基準にしてみてください。',
+      '焦点を少しずらすなら、「正しいか」より「自分が壊れない形」を基準にしてみてください。',
       'ポイントは、結論を急がず「進める形」を先に決めることです。',
     ]);
   }
 
-  // それ以外はニュートラルに
   return pick(seed + '|shift2', [
     '一度だけ視点を切り替えると、動きが見えやすくなります。',
     'ここは見方を一段ずらすと、迷いがほどけます。',
@@ -834,15 +815,11 @@ function buildNextFromSlotPlan(
 
   if (next.startsWith('NEXT:action')) {
     return pick(seed + '|next', [
-      '候補を3つだけ書き、いちばん軽いものを10分だけ試す。',
-      'やることを1つに絞り、まず5分だけ着手する。',
-      '「今夜やる1手」だけ決めて、他は保留にする。',
+      '候補を3つだけ書き、いちばん軽いものを試す。',
+      'やることを1つに絞り、まず少しだけ着手する。',
+      '「次やる1手」だけ決めて、他は保留にする。',
     ]);
   }
 
-  return pick(seed + '|next2', [
-    '小さく1回だけ試す。',
-    '1つだけ置いて、そこで止める。',
-  ]);
+  return pick(seed + '|next2', ['少し覗いて', '1つだけ試して、そこで止める']);
 }
-

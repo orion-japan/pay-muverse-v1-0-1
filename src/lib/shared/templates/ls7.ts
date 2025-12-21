@@ -1,7 +1,7 @@
 // src/lib/shared/templates/ls7.ts
 // Mui（恋愛）用：LS7アーキタイプ専用テンプレ
 // 既存の Template 型（phase/depth/tone/lines）に準拠。
-// lines = [一言（診断要約）, 内面描写, 現実の一手] の最小3文。
+// lines = [一言（診断要約）, 内面描写, 現実の一歩] の最小3文。
 
 import type { Template } from './types';
 
@@ -64,7 +64,7 @@ export function normalizeLS7Key(label: string): LS7Key | undefined {
 /**
  * 各アーキタイプにつき 2〜3 深度の最小核テンプレを定義。
  * - phase は恋愛文脈で R(Outer) と S/I(Inner) を主に使用
- * - 余白を残しつつも、必ず現実の一手で着地
+ * - 余白を残しつつも、必ず現実の一歩で着地
  */
 export const LS7Templates: Record<LS7Key, Template[]> = {
   CAT: [
