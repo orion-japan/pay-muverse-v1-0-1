@@ -251,33 +251,8 @@ export function runGenericRecallGate(args: {
   text: string;
   history: any[];
 }): GenericRecallGateResult {
-  const { text, history } = args;
-
-  if (!isGenericRecallQuestion(text)) return null;
-
-  const recalled = pickRecallFromHistory(text, history);
-
-  // ✅ ここが今回の修正ポイント：
-  // 見つからないなら “recallモードにしない” で null を返す（通常応答へ）
-  if (!recalled) return null;
-
-  const goalQuery = isGoalRecallQuery(text);
-  const scope = detectScopeFromQuery(text);
-
-  const prefix =
-    goalQuery && scope === 'yesterday'
-      ? '昨日の目標は'
-      : goalQuery && scope === 'today'
-        ? '今日の目標は'
-        : goalQuery
-          ? '目標は'
-          : '直近だと';
-
-  return {
-    recallKind: 'recall_from_history',
-    recalledText: recalled,
-    assistantText: goalQuery
-      ? `${prefix}「${recalled}」です。🪔`
-      : `${prefix}「${recalled}」が該当します。🪔`,
-  };
+  // ✅ 全体停止（プレゼン事故防止）
+  // - 「直近だと…が該当します」系の返答を完全に無効化
+  // - recall の自動割り込みをしない（通常応答へ）
+  return null;
 }
