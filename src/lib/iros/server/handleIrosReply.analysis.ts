@@ -7,7 +7,11 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { detectQFromText } from '@/lib/iros/q/detectQ';
 import { estimateSelfAcceptance } from '@/lib/iros/sa/meter';
-import { clampSelfAcceptance, makePostgrestSafePayload, detectQFallbackFromText } from './handleIrosReply.pure';
+import {
+  clampSelfAcceptance,
+  makePostgrestSafePayload,
+  detectQFallbackFromText,
+} from './handleIrosReply.pure';
 
 export type UnifiedAnalysis = {
   q_code: string | null;
@@ -18,6 +22,12 @@ export type UnifiedAnalysis = {
   keywords: string[];
   summary: string | null;
   raw: any;
+
+  /**
+   * orchestrator が生成した unified（必要なら保持）
+   * ※ save 時に unified.q.current へ fallback を反映するために使う
+   */
+  unified?: any;
 };
 
 export async function buildUnifiedAnalysis(params: {
@@ -46,9 +56,7 @@ export async function buildUnifiedAnalysis(params: {
       : null;
 
   const unifiedPhase =
-    unified && typeof unified.phase === 'string'
-      ? unified.phase
-      : null;
+    unified && typeof unified.phase === 'string' ? unified.phase : null;
 
   // ---- Q / Depth / Phase ----
   const qCode = unifiedQ ?? safeMeta.qCode ?? safeMeta.q_code ?? null;
@@ -61,10 +69,10 @@ export async function buildUnifiedAnalysis(params: {
     typeof safeMeta.selfAcceptance === 'number'
       ? safeMeta.selfAcceptance
       : typeof safeMeta.self_acceptance === 'number'
-      ? safeMeta.self_acceptance
-      : typeof unified?.self_acceptance === 'number'
-      ? unified.self_acceptance
-      : null;
+        ? safeMeta.self_acceptance
+        : typeof unified?.self_acceptance === 'number'
+          ? unified.self_acceptance
+          : null;
 
   // meta/unified に無いときだけ meter.ts v2 で推定
   if (selfAcceptanceRaw == null) {
@@ -89,7 +97,10 @@ export async function buildUnifiedAnalysis(params: {
         selfAcceptanceRaw = saResult.score;
       }
     } catch (e) {
-      console.error('[UnifiedAnalysis] estimateSelfAcceptance fallback failed', e);
+      console.error(
+        '[UnifiedAnalysis] estimateSelfAcceptance fallback failed',
+        e,
+      );
     }
   }
 
@@ -106,13 +117,14 @@ export async function buildUnifiedAnalysis(params: {
       typeof safeMeta.summary === 'string' && safeMeta.summary.trim().length > 0
         ? safeMeta.summary
         : safeAssistant
-        ? safeAssistant.slice(0, 60)
-        : null,
+          ? safeAssistant.slice(0, 60)
+          : null,
     raw: {
       user_text: userText,
       assistant_text: safeAssistant,
       meta: safeMeta,
     },
+    unified,
   };
 }
 
@@ -137,13 +149,34 @@ export async function saveUnifiedAnalysisInline(
       try {
         const detected = await detectQFromText(userText);
         if (detected) qCode = detected;
+
+        // ✅ 追加：unified 側にも反映（未設定の時だけ）
+        const u: any = analysis.unified ?? null;
+        if (detected && u) {
+          const cur =
+            u?.q && typeof u.q.current === 'string' ? u.q.current : null;
+          if (!cur) {
+            u.q = { ...(u.q ?? {}), current: detected };
+          }
+        }
       } catch (e) {
         console.error(
           '[UnifiedAnalysis] detectQFromText failed, fallback to simple keyword',
           e,
         );
+
         const fallback = detectQFallbackFromText(userText);
         if (fallback) qCode = fallback;
+
+        // ✅ 追加：fallback でも unified 側に反映（未設定の時だけ）
+        const u: any = analysis.unified ?? null;
+        if (fallback && u) {
+          const cur =
+            u?.q && typeof u.q.current === 'string' ? u.q.current : null;
+          if (!cur) {
+            u.q = { ...(u.q ?? {}), current: fallback };
+          }
+        }
       }
     }
   }
@@ -222,10 +255,29 @@ export async function saveUnifiedAnalysisInline(
     .from('user_resonance_state')
     .upsert(safeStatePayload as any);
 
+  // ✅ user_resonance_state upsert の直後（関数内）
   if (stateErr) {
-    console.error('[UnifiedAnalysis] state upsert failed', stateErr);
-    return;
+    console.error('[IROS][ResonanceState] upsert failed', {
+      userCode: context.userCode,
+      tenantId: context.tenantId,
+      qCode,
+      depthStage: analysis.depth_stage,
+      phase: analysis.phase,
+      message: stateErr.message,
+      details: (stateErr as any)?.details,
+      hint: (stateErr as any)?.hint,
+    });
+
+    throw new Error(`user_resonance_state upsert failed: ${stateErr.message}`);
   }
+
+  console.log('[IROS][ResonanceState] upsert ok', {
+    userCode: context.userCode,
+    tenantId: context.tenantId,
+    qCode,
+    depthStage: analysis.depth_stage,
+    phase: analysis.phase,
+  });
 }
 
 export async function applyAnalysisToLastUserMessage(params: {

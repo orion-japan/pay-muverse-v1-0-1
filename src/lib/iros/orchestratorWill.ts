@@ -1,5 +1,5 @@
 // src/lib/iros/orchestratorWill.ts
-// Iros Orchestrator — Will パート集約
+// iros Orchestrator — Will パート集約
 // - Goal / Continuity / Priority / SA補正 をまとめて扱うヘルパー
 
 import type { Depth, QCode, IrosMode } from './system';
@@ -19,6 +19,9 @@ import { adjustPriorityWithSelfAcceptance } from './orchestratorPierce';
 
 // ★ 置き換え：shouldRotateBand → decideRotation
 import { decideRotation } from './will/rotationEngine';
+
+// ✅ 追加：Vent/Will detector（continuity の Q 継続/遮断の判断材料）
+import { detectVentWill } from './will/detectVentWill';
 
 // 返り値の型は元の関数からそのまま推論
 export type IrosGoalType = ReturnType<typeof deriveIrosGoal>;
@@ -116,6 +119,30 @@ export function computeGoalAndPriority(
   } = args;
 
   /* =========================================================
+     0) Vent/Will 判定（Q continuity に lastQ を載せるか切るか）
+     - 意志より感情にのまれやすい：基本は「感情継続」（lastQ を渡す）
+     - ただし、強い前向き意志が明確（willTag）なら「操縦席に戻った」扱いで lastQ を切る
+  ========================================================= */
+  const vw = detectVentWill(text);
+
+  // v1 ルール：
+  // - willTag=true → Q continuity を遮断（lastQ を null）
+  // - willTag=false → Q continuity を継続（lastQ を渡す）
+  const continuityLastQ: QCode | null = vw.willTag ? null : (lastQ ?? null);
+
+  if (process.env.DEBUG_IROS_WILL === '1') {
+    // eslint-disable-next-line no-console
+    console.log('[IROS/VentWill]', {
+      ventScore: vw.ventScore,
+      willScore: vw.willScore,
+      willTag: vw.willTag,
+      ventHits: vw.reasons.ventHits,
+      willHits: vw.reasons.willHits,
+      continuityLastQ,
+    });
+  }
+
+  /* =========================================================
      ① Goal Engine：今回の "意志" を生成
   ========================================================= */
   let goal = deriveIrosGoal({
@@ -128,6 +155,27 @@ export function computeGoalAndPriority(
     lastGoalKind: lastGoalKind ?? undefined,
     uncoverStreak: previousUncoverStreak ?? 0,
   });
+
+  // ✅ デバッグ/学習用：goal.detail に Vent/Will の痕跡を残す（任意）
+  try {
+    const anyGoal: any = goal;
+    anyGoal.detail = {
+      ...(anyGoal.detail && typeof anyGoal.detail === 'object'
+        ? anyGoal.detail
+        : {}),
+      ventWill: {
+        ventScore: vw.ventScore,
+        willScore: vw.willScore,
+        willTag: vw.willTag,
+        ventHits: vw.reasons.ventHits,
+        willHits: vw.reasons.willHits,
+        continuityLastQ,
+      },
+    };
+    goal = anyGoal as IrosGoalType;
+  } catch {
+    // no-op
+  }
 
   /* =========================================================
      ①.5 魂レイヤーによる Goal の補正（Q5_depress 保護）
@@ -168,17 +216,61 @@ export function computeGoalAndPriority(
     }
   }
 
+  // ✅ Q continuity を切ったターンは「このターンの qCode」を goal.targetQ に同期する
+  // - willTag=true などで continuityLastQ=null になった場合、
+  //   deriveIrosGoal が lastQ 起点で targetQ を埋めてしまうズレをここで潰す
+  if (continuityLastQ === null && qCode) {
+    const anyGoal: any = goal;
+    const prev = typeof anyGoal.targetQ === 'string' ? anyGoal.targetQ : null;
+
+    if (prev !== qCode) {
+      anyGoal.targetQ = qCode;
+      anyGoal.detail = {
+        ...(anyGoal.detail && typeof anyGoal.detail === 'object' ? anyGoal.detail : {}),
+        targetQForcedToCurrent: true,
+        targetQPrev: prev,
+        targetQNow: qCode,
+        targetQReason: 'continuityLastQ is null → prefer current decided qCode',
+      };
+      goal = anyGoal as IrosGoalType;
+    }
+  }
+
+
   /* =========================================================
      ② Continuity Engine：前回の意志を踏まえて補正（Goal 用）
      ※ ContinuityContext は「null運用」(undefined禁止) に統一
   ========================================================= */
   const continuity: ContinuityContext = {
     lastDepth: lastDepth ?? null,
-    lastQ: lastQ ?? null,
+    lastQ: continuityLastQ, // ✅ ここが肝：Vent/Will 判定で Q の継続/遮断
     userText: text,
   };
 
+  // ★ safety: goal.targetQ が空なら「このターンで決まった qCode」を入れておく
+  // （continuity が “lastQ に戻す” 系の補正をするなら、ここを起点に挙動が見える）
+  if (!goal.targetQ && qCode) {
+    (goal as any).targetQ = qCode;
+  }
+
+  // ✅ 追加ログ：applyGoalContinuity の入出力を確定させる
+  // （ctx 未定義エラーを避けるため continuity を参照する）
+  // eslint-disable-next-line no-console
+  console.log('[IROS/GOAL_CONT] applyGoalContinuity', {
+    goal_in: goal,
+    ctx: {
+      lastQ: continuity.lastQ,
+      lastDepth: continuity.lastDepth,
+      // 任意（型に無ければ null）
+      qTrace: (continuity as any)?.qTrace ?? null,
+      memoryQ: (continuity as any)?.memoryState?.qPrimary ?? null,
+    },
+  });
+
   goal = applyGoalContinuity(goal, continuity);
+
+  // eslint-disable-next-line no-console
+  console.log('[IROS/GOAL_CONT]  result', { goal_out: goal });
 
   /* =========================================================
      ②.5 三軸回転：decideRotation で帯域回転 + gate/loop を更新
@@ -212,7 +304,7 @@ export function computeGoalAndPriority(
 
       stayRequested: false,
 
-      // ✅ 前回状態（args に追加したので any 不要）
+      // ✅ 前回状態
       lastSpinLoop: spinLoop ?? null,
       lastDescentGate: descentGate ?? null,
 

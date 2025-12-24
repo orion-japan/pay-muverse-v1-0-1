@@ -467,8 +467,8 @@ export async function persistMemoryStateIfAny(args: {
     // unified を最優先で使う（postProcessReply 後は必ず揃っている）
     const unified: any = metaForSave.unified ?? {};
 
-    const depthInput = metaForSave.depth ?? unified?.depth?.stage ?? null;
-    const qCodeInput = metaForSave.qCode ?? unified?.q?.current ?? null;
+    const qCodeInput = unified?.q?.current ?? metaForSave.qCode ?? null;
+    const depthInput = unified?.depth?.stage ?? metaForSave.depth ?? null;
 
     // --- IT発火の復元（引数 > meta.itTriggered > meta.extra.itTriggered > renderMode=IT）---
     const itTriggeredRawFromMeta =
@@ -498,7 +498,7 @@ export async function persistMemoryStateIfAny(args: {
 // =========================
 // QTrace 更新（persistでは“再計算しない”）
 // - 解析側で出た確定値を尊重
-// - 無い場合のみ最小推定
+// - ただし「1固定で巻き戻る事故」だけは防ぐ
 // =========================
 const prevQ = (previous as any)?.q_primary ?? null;
 
@@ -512,12 +512,13 @@ let streakQ: string | null = null;
 let streakLength = 1;
 
 if (qCodeInput) {
+  const sameAsPrev = prevQ != null && prevQ === qCodeInput;
+
   if (qtuLen != null) {
-    // ✅ 解析側の確定値をそのまま採用
+    // ✅ 上流の値を尊重しつつ、同一Q連続なのに 1 に巻き戻るのだけ防ぐ
     streakQ = qCodeInput;
-    streakLength = qtuLen;
-  } else if (prevQ === qCodeInput) {
-    // ✅ 保険：確定値が無い場合のみ推定
+    streakLength = Math.max(qtuLen, sameAsPrev ? 2 : 1);
+  } else if (sameAsPrev) {
     streakQ = qCodeInput;
     streakLength = 2; // 最低限（前回と同じなら2）
   } else {
@@ -527,20 +528,41 @@ if (qCodeInput) {
 }
 
 // metaForSave に反映（次ターン以降が拾う）
+// 既に qTraceUpdated があるなら “上書きしない”
 metaForSave.qTrace = {
   ...(metaForSave.qTrace ?? {}),
   lastQ: qCodeInput,
   dominantQ: qCodeInput,
+  ...(metaForSave.qTrace?.streakLength == null ? { streakQ, streakLength } : {}),
+};
+
+if (!metaForSave.qTraceUpdated) {
+  metaForSave.qTraceUpdated = {
+    lastQ: qCodeInput,
+    dominantQ: qCodeInput,
+    streakQ,
+    streakLength,
+    from: qtuLen != null ? 'qTraceUpdated' : 'fallback', // ★ これでDBで判定できる
+  };
+} else {
+  // ★ from を残す（DB調査用）
+  metaForSave.qTraceUpdated = {
+    ...(metaForSave.qTraceUpdated ?? {}),
+    from:
+      (metaForSave.qTraceUpdated as any)?.from ??
+      (qtuLen != null ? 'qTraceUpdated' : 'fallback'),
+  };
+}
+
+console.log('[IROS/QTrace] persisted', {
+  prevQ,
+  qNow: qCodeInput,
   streakQ,
   streakLength,
-};
-metaForSave.qTraceUpdated = {
-  ...(metaForSave.qTraceUpdated ?? {}),
-  lastQ: qCodeInput,
-  dominantQ: qCodeInput,
-  streakQ,
-  streakLength,
-};
+  from: qtuLen != null ? 'qTraceUpdated' : 'fallback',
+});
+
+
 
 console.log('[IROS/QTrace] persisted', {
   prevQ,

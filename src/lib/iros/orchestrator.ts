@@ -201,7 +201,7 @@ export async function runIrosTurn(
     });
   }
 
-  // ----------------------------------------------------------------
+   // ----------------------------------------------------------------
   // 2. baseMeta 構築（ルート引数 + Memory の統合）
   // ----------------------------------------------------------------
   // loadBaseMetaFromMemoryState は { mergedBaseMeta, memoryState } を返す前提
@@ -212,11 +212,24 @@ export async function runIrosTurn(
   const memoryState: unknown = loadResult?.memoryState ?? null;
 
   // ★ CONT: 連続性用に「前回までの depth / qCode」を控えておく
-  const lastDepthForContinuity: Depth | undefined =
-    normalizeDepthStrict((mergedBaseMeta.depth as Depth | undefined) ?? undefined) ?? undefined;
+  // mergedBaseMeta に無い場合は MemoryState のキー名（depthStage / qPrimary）から拾う
+  const ms: any = loadResult?.memoryState ?? null;
 
-  const lastQForContinuity: QCode | undefined =
-    (mergedBaseMeta.qCode as QCode | undefined) ?? undefined;
+  const lastDepthForContinuity: Depth | null =
+    normalizeDepthStrict(
+      (mergedBaseMeta.depth as any) ??
+      (ms?.depthStage as any) ??
+      undefined
+    ) ?? null;
+
+  // ★ CONT: lastQ は必ず「正規化済み QCode or null」に固定（undefined を持たない）
+  const lastQForContinuity: QCode | null =
+    normalizeQCode(
+      (mergedBaseMeta.qCode as any) ??
+      (ms?.qPrimary as any) ??
+      undefined
+    ) ?? null;
+
 
   // ★ style の反映：
   //   - 明示指定された style を最優先
@@ -258,17 +271,17 @@ export async function runIrosTurn(
   // ② runIrosTurn() 内：mergedBaseMeta 構築後（lastDepthForContinuity の近く）に追加
   //    ※「前回の spin / phase」を控える（慣性と反転条件のため）
   const lastSpinLoop: SpinLoop | null =
-    ((mergedBaseMeta as any).spinLoop as SpinLoop | undefined) ?? null;
+    (((mergedBaseMeta as any).spinLoop ?? ms?.spinLoop) as SpinLoop | undefined) ?? null;
 
   const lastSpinStep: SpinStep | null =
-    (typeof (mergedBaseMeta as any).spinStep === 'number'
-      ? ((mergedBaseMeta as any).spinStep as SpinStep)
+    (typeof ((mergedBaseMeta as any).spinStep ?? ms?.spinStep) === 'number'
+      ? (((mergedBaseMeta as any).spinStep ?? ms?.spinStep) as SpinStep)
       : null);
 
-  const lastPhaseForSpin: 'Inner' | 'Outer' | null =
-    ((mergedBaseMeta as any).phase === 'Inner' || (mergedBaseMeta as any).phase === 'Outer')
-      ? ((mergedBaseMeta as any).phase as 'Inner' | 'Outer')
-      : null;
+  const lastPhaseForSpin: 'Inner' | 'Outer' | null = (() => {
+    const p = ((mergedBaseMeta as any).phase ?? ms?.phase) as any;
+    return p === 'Inner' || p === 'Outer' ? p : null;
+  })();
 
   // ★ 前回ターンの揺らぎランク（ヒステリシス用）
   const lastVolatilityRank: 'low' | 'mid' | 'high' | null =
@@ -278,14 +291,11 @@ export async function runIrosTurn(
       ? ((mergedBaseMeta as any).volatilityRank as 'low' | 'mid' | 'high')
       : null;
 
-// ★ 追加：前回ターンの descentGate（下降の扉）
-const lastDescentGate: 'closed' | 'offered' | 'accepted' | null =
-  (mergedBaseMeta as any).descentGate === 'closed' ||
-  (mergedBaseMeta as any).descentGate === 'offered' ||
-  (mergedBaseMeta as any).descentGate === 'accepted'
-    ? ((mergedBaseMeta as any).descentGate as 'closed' | 'offered' | 'accepted')
-    : null;
-
+  // ★ 追加：前回ターンの descentGate（下降の扉）
+  const lastDescentGate: 'closed' | 'offered' | 'accepted' | null = (() => {
+    const dg = ((mergedBaseMeta as any).descentGate ?? ms?.descentGate) as any;
+    return dg === 'closed' || dg === 'offered' || dg === 'accepted' ? dg : null;
+  })();
 
   // ----------------------------------------------------------------
   // 3. 解析フェーズ（Unified / depth / Q / SA / YH / IntentLine / T層）
@@ -630,8 +640,11 @@ let { goal, priority } = computeGoalAndPriority({
   text,
   depth: meta.depth,
   qCode: meta.qCode,
-  lastDepth: lastDepthForContinuity,
-  lastQ: lastQForContinuity,
+
+  // ★ CONT: null は渡さない（undefined へ寄せる）
+  lastDepth: lastDepthForContinuity ?? undefined,
+  lastQ: lastQForContinuity ?? undefined,
+
   selfAcceptanceLine: meta.selfAcceptance ?? null,
   mode: (meta.mode ?? 'mirror') as IrosMode,
   soulNote: (meta as any).soulNote ?? null,
@@ -639,12 +652,11 @@ let { goal, priority } = computeGoalAndPriority({
   previousUncoverStreak,
   phase: (meta as any).phase ?? null,
 
-  // ✅ 前回の回転状態（MemoryState由来）を Will に渡す
-  // ※ ここで使う lastSpinLoop / lastDescentGate は、上で控えた “前回値” を想定
   spinLoop: (typeof lastSpinLoop !== 'undefined' ? lastSpinLoop : null) ?? null,
   descentGate:
     (typeof lastDescentGate !== 'undefined' ? lastDescentGate : null) ?? null,
 });
+
 
 // ✅ targetQ が undefined に落ちるケースを強制補完（ログで targetQ: undefined が出ていたため）
 {

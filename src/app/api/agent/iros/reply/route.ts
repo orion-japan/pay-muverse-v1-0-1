@@ -552,6 +552,29 @@ const effectiveMode =
       // ✅ QTrace 確定（ここだけでやる：helper内では触らない）
       meta = finalizeQTrace(meta, metaForSave);
 
+
+// FIX: Q single source (route.ts minimal)
+{
+  const qFinal =
+    (typeof (metaForSave as any)?.qCode === 'string' && (metaForSave as any).qCode) ||
+    (typeof (metaForSave as any)?.q_code === 'string' && (metaForSave as any).q_code) ||
+    (typeof (metaForSave as any)?.unified?.q?.current === 'string' &&
+      (metaForSave as any).unified.q.current) ||
+    null;
+
+  if (qFinal) {
+    meta.qCode = qFinal;
+    meta.q_code = qFinal;
+    (meta as any).q = qFinal;
+
+    meta.unified = meta.unified ?? {};
+    meta.unified.q = meta.unified.q ?? {};
+    meta.unified.q.current = qFinal;
+  }
+}
+
+
+
       // ★ 三軸「次の一歩」オプションを meta に付与
       meta = attachNextStepMeta({
         meta,
@@ -737,6 +760,49 @@ const effectiveMode =
       });
 
       meta = applied.meta;
+
+// ===============================
+// DEBUG: Q single-source check (route.ts)
+// - metaForSave（postprocess確定値） vs meta（マージ後/RenderEngine後）
+// - ここで差が出たら「route.ts 内で巻き戻し」確定
+// ===============================
+{
+  const qFromSave =
+    (typeof (metaForSave as any)?.qCode === 'string' && (metaForSave as any).qCode) ||
+    (typeof (metaForSave as any)?.q_code === 'string' && (metaForSave as any).q_code) ||
+    (typeof (metaForSave as any)?.unified?.q?.current === 'string' &&
+      (metaForSave as any).unified.q.current) ||
+    null;
+
+  const qFromMeta =
+    (typeof meta?.qCode === 'string' && meta.qCode) ||
+    (typeof meta?.q_code === 'string' && meta.q_code) ||
+    (typeof meta?.unified?.q?.current === 'string' && meta.unified.q.current) ||
+    null;
+
+  const goalTargetQ =
+    (typeof meta?.goalTargetQ === 'string' && meta.goalTargetQ) ||
+    (typeof meta?.goal?.targetQ === 'string' && meta.goal.targetQ) ||
+    (typeof meta?.priority?.goal?.targetQ === 'string' && meta.priority.goal.targetQ) ||
+    null;
+
+  console.log('[IROS/Reply][DEBUG][Q] compare', {
+    conversationId,
+    userCode,
+    modeForHandle,
+    effectiveMode,
+    qFromSave,
+    qFromMeta,
+    unifiedCurrent: meta?.unified?.q?.current ?? null,
+    qCode: meta?.qCode ?? null,
+    q_code: meta?.q_code ?? null,
+    goalTargetQ,
+    hasAttachNextStepMeta: !!meta?.nextStepMeta || !!meta?.nextStep,
+    renderEngineGate: meta?.extra?.renderEngineGate ?? null,
+    renderedMode: meta?.extra?.renderedMode ?? null,
+  });
+}
+
 
       // ★ 訓練用サンプルを保存（失敗しても本処理は継続）
       const skipTraining =

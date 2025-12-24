@@ -18,7 +18,6 @@ import { computeYH } from './analysis/computeYH';
 
 import { applyDepthContinuity, applyQContinuity } from './depthContinuity';
 
-
 // ★ 追加：Polarity & Stability 計算
 import {
   computePolarityAndStability,
@@ -30,7 +29,10 @@ import { estimateSelfAcceptance, type SelfAcceptanceInput } from './sa/meter';
 
 import { clampSelfAcceptance } from './orchestratorMeaning';
 
-import { deriveIntentLine, type IntentLineAnalysis } from './intent/intentLineEngine';
+import {
+  deriveIntentLine,
+  type IntentLineAnalysis,
+} from './intent/intentLineEngine';
 
 import { detectIrTrigger, decidePierceMode } from './orchestratorPierce';
 
@@ -80,7 +82,7 @@ export async function runOrchestratorAnalysis(args: {
 
   /* =========================================================
      0) Unified-like 解析（Depth / Phase / Situation）
-     ※ Q は unified で扱わない（常に null）
+     ※ Q は unified で「使ってもいい」が、無ければ null 前提で扱う
   ========================================================= */
   const unified = await analyzeUnifiedTurn({
     text,
@@ -91,20 +93,20 @@ export async function runOrchestratorAnalysis(args: {
   // 生の推定（Depthのみ）
   const rawDepthFromScan: Depth | undefined = unified.depth.stage ?? undefined;
 
-/* =========================================================
-   A) 深度スキャン + 連続性補正（scanがあっても必ず通す）
-========================================================= */
-const lastDepth = baseMeta?.depth;
-const lastQ = (baseMeta as any)?.qCode as QCode | undefined;
+  /* =========================================================
+     A) 深度スキャン + 連続性補正（scanがあっても必ず通す）
+  ========================================================= */
+  const lastDepth = baseMeta?.depth;
+  const lastQ = (baseMeta as any)?.qCode as QCode | undefined;
 
-const depth: Depth | undefined = normalizeDepth(
-  applyDepthContinuity({
-    scanDepth: rawDepthFromScan, // undefinedでもOK
-    lastDepth,
-    text,
-    isFirstTurn: !!isFirstTurn,
-  }),
-);
+  const depth: Depth | undefined = normalizeDepth(
+    applyDepthContinuity({
+      scanDepth: rawDepthFromScan, // undefinedでもOK
+      lastDepth,
+      text,
+      isFirstTurn: !!isFirstTurn,
+    }),
+  );
 
   /* =========================================================
      P) Phase（Inner / Outer）の統一（Q決定の材料に使う）
@@ -167,47 +169,53 @@ const depth: Depth | undefined = normalizeDepth(
     prevMeta: (baseMeta as any) ?? null,
   });
 
-/* =========================================================
-   Q) Qコード確定（明示Qがあれば絶対勝ち / それ以外は continuity）
-========================================================= */
-const explicitQ = pickExplicitQCode(text);
+  /* =========================================================
+     Q) Qコード確定（明示Qがあれば絶対勝ち / それ以外は continuity）
+     - unifiedQ / scanQ も「材料」として拾えるようにする（存在すれば）
+  ========================================================= */
+  const explicitQ = pickExplicitQCode(text);
 
-const qCodeCandidate = proposeQFromSignals({
-  lastQ: lastQ ?? null,
-  depth: depth ?? null,
-  phase,
-  irTriggered,
-  selfAcceptance: selfAcceptanceLine,
-  lastSelfAcceptance: lastSelfAcceptanceRaw,
-  yLevel: yh0.yLevel ?? null,
-  hLevel: yh0.hLevel ?? null,
-  isFirstTurn: !!isFirstTurn,
-  requestedQCode: requestedQCode ?? null,
-  text,
-});
+  // unified 側に Q が入っている場合だけ拾う（無理に作らない）
+  const unifiedQ: QCode | null = normalizeQCode((unified as any)?.q?.current);
 
-const stabilizedQ =
-  stabilizeQ({
-    candidate: qCodeCandidate,
-    lastQ: lastQ ?? null,
+  // 候補生成（キーワード分類ではなく “構造シグナル”）
+  const qCodeCandidate = proposeQFromSignals({
+    lastQ: (lastQ ?? null) as QCode | null,
+    unifiedQ,
+    depth: depth ?? null,
+    phase,
+    irTriggered,
     selfAcceptance: selfAcceptanceLine,
     lastSelfAcceptance: lastSelfAcceptanceRaw,
     yLevel: yh0.yLevel ?? null,
+    hLevel: yh0.hLevel ?? null,
     isFirstTurn: !!isFirstTurn,
-  }) ?? null;
+    requestedQCode: requestedQCode ?? null,
+    text,
+  });
 
-// ✅ 明示Qがある場合：continuityは通さず、そのまま最終確定
-// ✅ 明示Qがない場合：continuityで「戻し/維持」を決める（scanQに候補を渡すのが重要）
-const qFinal: QCode | null = explicitQ
-  ? explicitQ
-  : (applyQContinuity({
-      scanQ: (stabilizedQ ?? qCodeCandidate) ?? undefined,
-      lastQ: lastQ ?? undefined,
+  const stabilizedQ =
+    stabilizeQ({
+      candidate: qCodeCandidate,
+      lastQ: (lastQ ?? null) as QCode | null,
+      selfAcceptance: selfAcceptanceLine,
+      lastSelfAcceptance: lastSelfAcceptanceRaw,
+      yLevel: yh0.yLevel ?? null,
       isFirstTurn: !!isFirstTurn,
-    }) ?? null);
+    }) ?? null;
 
+  // ✅ 明示Qがある場合：continuityは通さず、そのまま最終確定
+  // ✅ 明示Qがない場合：continuityで「戻し/維持」を決める
+  //    scanQには「候補」を渡す（ここが “前回に張り付く” を緩和する本線）
+  const qFinal: QCode | null = explicitQ
+    ? explicitQ
+    : (applyQContinuity({
+        scanQ: (stabilizedQ ?? qCodeCandidate) ?? undefined,
+        lastQ: lastQ ?? undefined,
+        isFirstTurn: !!isFirstTurn,
+      }) ?? null);
 
-const qCode: QCode | undefined = qFinal ?? undefined;
+  const qCode: QCode | undefined = qFinal ?? undefined;
 
   /* =========================================================
      A-2) QTrace の更新（最終Qで更新する）
@@ -274,7 +282,9 @@ const qCode: QCode | undefined = qFinal ?? undefined;
   (fixedUnified as any).stabilityBand = stabilityBand;
 
   /* =========================================================
-     GIGA) Intent Anchor（意図アンカー）の暫定導出
+     Intent Anchor（意図アンカー）の暫定導出
+     - ここは「覚えてる？」の直接修正ではない
+     - ただし、会話の “軸” を meta / state に残すための材料を作る
   ========================================================= */
   let intentAnchor:
     | {
@@ -303,13 +313,9 @@ const qCode: QCode | undefined = qFinal ?? undefined;
           ? baseAnchor.strength
           : selfAcceptanceLine,
       y_level:
-        typeof baseAnchor.y_level === 'number'
-          ? baseAnchor.y_level
-          : yLevel,
+        typeof baseAnchor.y_level === 'number' ? baseAnchor.y_level : yLevel,
       h_level:
-        typeof baseAnchor.h_level === 'number'
-          ? baseAnchor.h_level
-          : hLevel,
+        typeof baseAnchor.h_level === 'number' ? baseAnchor.h_level : hLevel,
     };
   } else {
     const raw = (text || '').trim();
@@ -393,13 +399,13 @@ const qCode: QCode | undefined = qFinal ?? undefined;
     }
   }
 
+  // ---- Debug log（原因追跡に使う）----
   console.log('[IROS/QDECIDE] ping');
-
   console.log('[IROS/QDECIDE][analysis]', {
     text: (text || '').slice(0, 60),
     lastQ: (baseMeta as any)?.qCode ?? null,
-    unifiedQ: (unified as any)?.q?.current ?? null,
-    scanQ: (unified as any)?.q?.current ?? null,
+    unifiedQ: unifiedQ ?? null,
+    scanQ: (stabilizedQ ?? qCodeCandidate) ?? null,
     explicitQ: explicitQ ?? null,
     decidedQ: qCode ?? null,
     depth: depth ?? null,
@@ -437,43 +443,82 @@ function normalizeDepth(depth?: Depth): Depth | undefined {
   return depth;
 }
 
-function normalizeQCode(qCode?: QCode): QCode | undefined {
-  if (!qCode) return undefined;
-  return qCode;
-}
-
-/**
- * ユーザーが先頭/文中で「Q1〜Q5」を明示した場合に拾う
- * 例: "Q3 心配です", "今Q1っぽい", "（Q2）"
- */
-function pickExplicitQCode(text: string): QCode | null {
-  const s = String(text || '');
-  if (!s) return null;
-
-  // なるべく事故らないように「Q + 1桁」を拾う（全角・空白・記号も許容）
-  // 例: "Q3", "Q 3", "Ｑ３", "(Q2)" などを許容
-  const normalized = s
-    .replace(/[Ｑ]/g, 'Q')
-    .replace(/[０-９]/g, (d) => String('０１２３４５６７８９'.indexOf(d)))
-    .replace(/\s+/g, '');
-
-  const m = normalized.match(/Q([1-5])/);
-  if (!m) return null;
-
-  const q = `Q${m[1]}` as QCode;
-  if (q === 'Q1' || q === 'Q2' || q === 'Q3' || q === 'Q4' || q === 'Q5') {
-    return q;
+function normalizeQCode(qCode?: unknown): QCode | null {
+  if (qCode === 'Q1' || qCode === 'Q2' || qCode === 'Q3' || qCode === 'Q4' || qCode === 'Q5') {
+    return qCode as QCode;
   }
   return null;
 }
 
 /**
+ * ユーザーが先頭/文中で「Q1〜Q5」を“状態宣言”として明示した場合に拾う
+ * 例:
+ * - "Q3 心配です"
+ * - "今Q1っぽい"
+ * - "（Q2）"
+ * - "Q5状態で…"
+ * - "これはQ3の状態だ"
+ *
+ * ✅ 方針：
+ * - 「設計・説明文脈」は explicit 扱いしない（例: "RならQ2でいい", "Q1に倒したい"）
+ * - “宣言っぽい形”だけ拾う（今/現在/状態/っぽい/です/だ/（Q2）など）
+ */
+function pickExplicitQCode(text: string): QCode | null {
+  const s = String(text || '');
+  if (!s) return null;
+
+  // 正規化（全角Q/数字→半角、連続空白→単一化）
+  const normalized = s
+    .replace(/[Ｑ]/g, 'Q')
+    .replace(/[０-９]/g, (d) => String('０１２３４５６７８９'.indexOf(d)))
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const compact = normalized.replace(/\s+/g, '');
+
+  // ❌ 先に“設計・説明”っぽい文脈を除外（ここに引っかかったら explicit としては扱わない）
+  // 例:
+  // - "RならQ2でいい"
+  // - "Q1に倒したい / Q2へ寄せる / Q3に戻す"
+  // - "Q2を優先 / Q1を採用 / Q3で固定"
+  if (
+    /ならQ[1-5]/.test(compact) ||
+    /Q[1-5]で(?:いい|OK|よい)/.test(compact) ||
+    /Q[1-5]に(?:倒|寄|戻|する|したい)/.test(compact) ||
+    /Q[1-5]を(?:優先|採用|固定|選ぶ)/.test(compact)
+  ) {
+    return null;
+  }
+
+  // ✅ “状態宣言”パターンを拾う（区切り文字が無くてもOK）
+  // - 単独/括弧: "Q2", "(Q2)", "（Q2）"
+  // - 連結: "Q5状態", "Q3の状態", "Q4状態で"
+  // - 口語: "今Q1", "現在Q2", "Q3です", "Q2だ", "Q5っぽい"
+  const m = compact.match(
+    /(?:^|[（(【\[]|[：:、,。.!?？])(?:今|いま|現在|現状)?Q([1-5])(?:です|だ|っぽい|寄り|と思う|状態(?:で|だ|です)?|の状態(?:だ|です)?|状態)?(?:$|[）)】\]]|[：:、,。.!?？])/,
+  );
+
+  // ↑この正規表現は「Q5状態で」みたいな連結も拾えるように
+  //   "状態" / "状態で" / "の状態" を許容しているのがポイント
+
+  if (!m) return null;
+
+  const q = `Q${m[1]}` as QCode;
+  return q;
+}
+
+
+/**
  * Q候補の生成（キーワード分類はしない）
  * - requestedQCode は初回のみ採用
  * - 以後は depth/phase/SA/YH/irTriggered など “構造シグナル” から候補を出す
+ *
+ * ✅ 重要：
+ * - 「Outer だから Q2」みたいな固定化ロジックは入れない（名残を削除）
  */
 function proposeQFromSignals(args: {
   lastQ: QCode | null;
+  unifiedQ: QCode | null;
   depth: Depth | null;
   phase: 'Inner' | 'Outer' | null;
   irTriggered: boolean;
@@ -487,6 +532,7 @@ function proposeQFromSignals(args: {
 }): QCode | null {
   const {
     lastQ,
+    unifiedQ,
     depth,
     phase,
     irTriggered,
@@ -497,8 +543,13 @@ function proposeQFromSignals(args: {
     requestedQCode,
   } = args;
 
+
   // 0) 初回のみ：明示指定があれば採用（以後は固定化原因になるので使わない）
   if (isFirstTurn && requestedQCode) return requestedQCode;
+
+
+  // 0.5) unified でQが明確なら “候補” として採用（最終決定は stabilize/continuity）
+  if (unifiedQ && unifiedQ !== lastQ) return unifiedQ;
 
   // 1) SA変化（落差/上昇）は “軸変換の圧” として強い
   const deltaSA =
@@ -507,47 +558,46 @@ function proposeQFromSignals(args: {
       : 0;
 
   // 2) 揺れ（Y）が強い：不安/恐怖帯域へ寄る（Q3/Q4）
-  //    ※ここは「感情分類」ではなく「安定性シグナル」からの推定
   const y = typeof yLevel === 'number' ? yLevel : 0;
 
-  // 3) I層/ir は “深度上げ” の圧が強い → 抑制(Q1) or 変容(Q3) のどちらかへ寄せる
+  // 3) I層/ir は “深度上げ” の圧が強い → 中央化(Q3) / 再配列(Q1)
   const isI = depth === 'I1' || depth === 'I2' || depth === 'I3';
-
   if (irTriggered || isI) {
-    // SAが落ちている/揺れているなら「中心化（Q3）」へ
     if (deltaSA <= -0.03 || y >= 2) return 'Q3';
-    // それ以外は「再配列（Q1）」へ（秩序/再決定）
     return 'Q1';
   }
 
-  // 4) 創造/行動（C）寄り：推進（Q2/Q5）
+  // 4) C寄り：上がってるなら情熱(Q5)、それ以外は変化推進(Q2)
   const isC = depth === 'C1' || depth === 'C2' || depth === 'C3';
   if (isC) {
-    if (deltaSA >= 0.03) return 'Q5'; // 上がってる → 情熱
-    return 'Q2'; // 動かす → 変容
-  }
-
-  // 5) 関係/共鳴（R）寄り：推進（Q2） or 調整（Q3）
-  const isR = depth === 'R1' || depth === 'R2' || depth === 'R3';
-  if (isR) {
-    if (y >= 2) return 'Q3'; // 揺れてる → 中央へ
+    if (deltaSA >= 0.03) return 'Q5';
     return 'Q2';
   }
 
-  // 6) Self（S）寄り：安定化（Q1/Q3）
+  // 5) R寄り：揺れてるなら中央(Q3)、それ以外は推進(Q2)
+  const isR = depth === 'R1' || depth === 'R2' || depth === 'R3';
+  if (isR) {
+    if (y >= 2) return 'Q3';
+    return 'Q2';
+  }
+
+  // 6) S寄り：揺れ/落差があればQ3、そうでなければQ1
   const isS = depth === 'S1' || depth === 'S2' || depth === 'S3';
   if (isS) {
     if (y >= 2 || deltaSA <= -0.03) return 'Q3';
     return 'Q1';
   }
 
-  // 7) Phaseだけ見える場合：Innerは整える(Q1/Q3)、Outerは動かす(Q2)
+  // 7) phaseしか材料がない場合：
+  //    - Inner: 整える(Q1) / 揺れが強いならQ3
+  //    - Outer: “固定”はしない。lastQ を基本に、揺れが強いときだけQ3へ寄せる
   if (phase === 'Inner') {
     if (y >= 2 || deltaSA <= -0.03) return 'Q3';
     return 'Q1';
   }
   if (phase === 'Outer') {
-    return 'Q2';
+    if (y >= 2 || deltaSA <= -0.03) return 'Q3';
+    return lastQ ?? null;
   }
 
   // 8) 何も決め手がない：前回を維持
@@ -567,6 +617,7 @@ function stabilizeQ(args: {
   isFirstTurn: boolean;
 }): QCode | null {
   const { candidate, lastQ, selfAcceptance, lastSelfAcceptance, yLevel } = args;
+
   if (!candidate) return lastQ ?? null;
   if (!lastQ) return candidate;
   if (candidate === lastQ) return candidate;
@@ -578,11 +629,10 @@ function stabilizeQ(args: {
 
   const y = typeof yLevel === 'number' ? yLevel : 0;
 
-  // “強さ” の目安（0〜1くらいで扱う）
   const strength = Math.max(Math.min(1, deltaSA * 10), Math.min(1, y / 3));
 
   // 強い時だけ切替（弱い時は lastQ を維持＝暴れ防止）
-  if (strength >= 0.55) return candidate;
+  if (strength >= 0.40) return candidate;
 
   return lastQ;
 }

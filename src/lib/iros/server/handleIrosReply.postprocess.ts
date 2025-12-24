@@ -12,6 +12,13 @@ import { preparePastStateNoteForTurn } from '@/lib/iros/memoryRecall';
 import { renderReply } from '@/lib/iros/language/renderReply';
 import { buildResonanceVector } from '@/lib/iros/language/resonanceVector';
 
+import {
+  buildUnifiedAnalysis,
+  saveUnifiedAnalysisInline,
+  applyAnalysisToLastUserMessage,
+} from './handleIrosReply.analysis';
+
+
 export type PostProcessReplyArgs = {
   supabase: SupabaseClient;
   userCode: string;
@@ -241,6 +248,7 @@ function ensureRotationState(meta: any, orchResult: any): any {
   return m;
 }
 
+
 /* =========================================================
    pastStateNote injection guards (single source)
    - 相談の芯を最優先：必要な時だけ注入する
@@ -351,8 +359,7 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
 
   // ✅ 最終確定：qTraceUpdated を metaForSave / metaForReply に焼き込む
   const qTraceUpdated: any =
-    (orchResult as any)?.qTraceUpdated ?? (metaRaw as any)?.qTraceUpdated ?? null;
-
+  (metaRaw as any)?.qTraceUpdated ?? (orchResult as any)?.qTraceUpdated ?? null;
   const applyQTraceUpdated = (m: any) => {
     if (!m || !qTraceUpdated || typeof qTraceUpdated !== 'object') return;
 
@@ -472,91 +479,137 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
     }
   }
 
-  // =========================================================
-  // ★★★ IT のときだけ renderReply を噛ませて最終表示を差し替える（最小・確実版）
-  // =========================================================
-  if (isItRenderMode(metaForSave)) {
-    try {
-      const spinLoop =
-        metaForSave?.rotationState?.spinLoop ?? metaForSave?.spinLoop ?? null;
+// =========================================================
+// ★★★ IT のときだけ renderReply を噛ませて最終表示を差し替える（最小・確実版）
+// =========================================================
+if (isItRenderMode(metaForSave)) {
+  try {
+    const spinLoop =
+      metaForSave?.rotationState?.spinLoop ?? (metaForSave as any)?.spinLoop ?? null;
 
-      const descentGate =
-        metaForSave?.rotationState?.descentGate ?? metaForSave?.descentGate ?? 'closed';
+    const descentGate =
+      metaForSave?.rotationState?.descentGate ??
+      (metaForSave as any)?.descentGate ??
+      'closed';
 
-      const spinStep =
-        typeof (metaForSave as any)?.spinStep === 'number' &&
-        Number.isFinite((metaForSave as any).spinStep)
-          ? (metaForSave as any).spinStep
-          : null;
+    const spinStep =
+      typeof (metaForSave as any)?.spinStep === 'number' &&
+      Number.isFinite((metaForSave as any).spinStep)
+        ? (metaForSave as any).spinStep
+        : null;
 
-      const framePlan = (metaForSave as any)?.framePlan ?? null;
+    const framePlan = (metaForSave as any)?.framePlan ?? null;
 
-      const vector = buildResonanceVector({
-        meta: metaForSave,
-        userText,
+    const vector = buildResonanceVector({
+      meta: metaForSave,
+      userText,
+    } as any);
+
+    const input = {
+      facts: userText,
+      insight: null, // ✅ ここが本質。assistantText を入れない
+      nextStep: null,
+      userWantsEssence: true,
+      highDefensiveness: false,
+      userText,
+    };
+
+    const forcedRenderMode =
+      (metaForSave as any)?.renderMode ??
+      (metaForSave as any)?.extra?.renderMode ??
+      undefined;
+
+    const shouldRunRenderReply = forcedRenderMode === 'IT';
+
+    let renderedText = finalAssistantText;
+
+    if (shouldRunRenderReply) {
+      renderedText = renderReply(vector as any, input as any, {
+        mode: 'transcend',
+        maxLines: 14,
+        ...({
+          renderMode: 'IT',
+          itDensity:
+            (metaForSave as any)?.extra?.itDensity ??
+            (((metaForSave as any)?.extra?.itTriggerKind ??
+              (metaForSave as any)?.itTriggerKind) === 'button'
+              ? 'normal'
+              : 'micro'),
+          spinLoop,
+          descentGate,
+          framePlan,
+          spinStep,
+        } as any),
       } as any);
+    }
 
-      const input = {
-        facts: userText,
-        insight: null,        // ✅ ここが本質。assistantText を入れない
-        nextStep: null,
-        userWantsEssence: true,
-        highDefensiveness: false,
-        userText,
-      };
-
-
-      const forcedRenderMode =
-        (metaForSave as any)?.renderMode ?? (metaForSave as any)?.extra?.renderMode ?? undefined;
-
-      const shouldRunRenderReply = forcedRenderMode === 'IT';
-
-      let renderedText = assistantText;
+    const out = toNonEmptyString(renderedText);
+    if (out) {
+      finalAssistantText = out;
 
       if (shouldRunRenderReply) {
-        renderedText = renderReply(vector as any, input as any, {
-          mode: 'transcend',
-          maxLines: 14,
-          ...({
-            renderMode: 'IT',
-            itDensity:
-              (metaForSave as any)?.extra?.itDensity ??
-              (((metaForSave as any)?.extra?.itTriggerKind ??
-                (metaForSave as any)?.itTriggerKind) === 'button'
-                ? 'normal'
-                : 'micro'),
-            spinLoop,
-            descentGate,
-            framePlan,
-            spinStep,
-          } as any),
-        } as any);
+        (metaForSave as any).extra = (metaForSave as any).extra ?? {};
+        (metaForSave as any).extra.renderedBy = 'renderReply';
+        (metaForSave as any).extra.renderedMode = 'IT';
       }
-
-      const out = toNonEmptyString(renderedText);
-      if (out) {
-        finalAssistantText = out;
-
-        if (shouldRunRenderReply) {
-          (metaForSave as any).extra = (metaForSave as any).extra ?? {};
-          (metaForSave as any).extra.renderedBy = 'renderReply';
-          (metaForSave as any).extra.renderedMode = 'IT';
-        }
-      }
-
-      console.log('[IROS/PostProcess] renderReply applied', {
-        userCode,
-        renderMode: (metaForSave as any)?.renderMode ?? null,
-        len: out ? out.length : 0,
-        spinLoop,
-        spinStep,
-        descentGate,
-        shouldRunRenderReply,
-      });
-    } catch (e) {
-      console.warn('[IROS/PostProcess] renderReply failed (fallback to assistantText)', e);
     }
-  }
 
-  return { assistantText: finalAssistantText, metaForSave };
+    console.log('[IROS/PostProcess] renderReply applied', {
+      userCode,
+      renderMode: (metaForSave as any)?.renderMode ?? null,
+      len: out ? out.length : 0,
+      spinLoop,
+      spinStep,
+      descentGate,
+      shouldRunRenderReply,
+    });
+  } catch (e) {
+    console.warn(
+      '[IROS/PostProcess] renderReply failed (fallback to assistantText)',
+      e,
+    );
+  }
+}
+
+// =========================================================
+// ✅ UnifiedAnalysis 保存（return の直前・postProcessReply 関数内）
+// ※ supabase/userCode/userText は再宣言しない（既にこの関数で使ってる前提）
+// =========================================================
+{
+  const conversationId = (args as any).conversationId;
+
+  // tenantId は args の実体に合わせて拾う（型に無い場合がある）
+  const tenantId =
+    (args as any).tenantId ?? (args as any).tenant_id ?? 'default';
+
+  try {
+    const analysis = await buildUnifiedAnalysis({
+      userText,
+      assistantText: finalAssistantText,
+      meta: metaForSave,
+    });
+
+    await saveUnifiedAnalysisInline(supabase, analysis, {
+      userCode,
+      tenantId,
+      agent: 'iros',
+    });
+
+    await applyAnalysisToLastUserMessage({
+      supabase,
+      conversationId,
+      analysis,
+    });
+  } catch (e) {
+    console.error('[UnifiedAnalysis] save failed (non-fatal)', {
+      userCode,
+      tenantId,
+      conversationId,
+      error: e,
+    });
+  }
+}
+
+// ✅ 既存（return は1回だけ）
+return { assistantText: finalAssistantText, metaForSave };
 }
