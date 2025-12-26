@@ -103,6 +103,11 @@ export async function verifyFirebaseAndAuthorize(
     bearerToken = authz.startsWith('Bearer ')
       ? authz.slice(7).trim()
       : null;
+// --- TEMP DEBUG (remove later) ---
+const authzLen = authz.length;
+const authzHead = authz.slice(0, 24);
+console.log('[authz][debug] header', { authzLen, authzHead });
+// --- TEMP DEBUG (remove later) ---
 
     const cookies = parseCookies(input.headers.get('cookie'));
     sessionCookie = cookies.__session || null;

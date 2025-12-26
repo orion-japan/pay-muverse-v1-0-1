@@ -1,7 +1,7 @@
 // src/ui/iroschat/lib/irosApiClient.ts
 'use client';
 
-import * as irosClientModule from './irosClient';
+import * as irosClientModule from './irosTransport';
 import { getAuth, type User } from 'firebase/auth';
 import type { ResonanceState, IntentPulse } from '@/lib/iros/config';
 import type { IrosConversation, IrosMessage, IrosUserInfo } from '../types';
@@ -39,9 +39,13 @@ export type IrosAPI = {
     conversationId: string;
     text: string;
     role?: 'user' | 'assistant';
-    meta?: any; // ★ 追加
+    meta?: any;
   }): Promise<{ ok: true }>;
 
+  /**
+   * /reply を叩くだけ（整形しない / 保存しない）
+   * - ここは「純粋にサーバ応答を返す」ことを保証する
+   */
   reply(args: {
     conversationId?: string;
     user_text: string;
@@ -51,10 +55,10 @@ export type IrosAPI = {
     intent?: IntentPulse;
     headers?: Record<string, string>; // 冪等キー付与用
 
-    // 🗣 追加：Iros の口調スタイル
+    // 🗣 Iros の口調スタイル
     style?: IrosStyle;
 
-    // ✅ 追加：会話履歴（LLMへ渡す）
+    // ✅ 会話履歴（LLMへ渡す）
     history?: IrosChatHistoryItem[];
 
     // ★ ギア選択から渡す情報（任意）
@@ -63,27 +67,23 @@ export type IrosAPI = {
       label: string;
       gear?: string | null;
     };
-  }): Promise<
-    | { ok: boolean; message?: { id?: string; content: string } } // 旧フォーマット
-    | {
-        ok: boolean;
-        assistant?: string;
-        mode?: string;
-        systemPrompt?: string;
-      } // 新フォーマット
-  >;
+  }): Promise<any>;
 
-  /** /reply の戻りを正規化し、未保存なら assistant を保存する */
+  /**
+   * /reply の戻りを正規化し、未保存なら assistant を保存する
+   * - assistantRaw: 保存向け（最低限trimのみ）
+   * - assistant: UI表示向け（句読点/🪔などの見栄え整形）
+   */
   replyAndStore(args: {
     conversationId: string;
     user_text: string;
     mode?: string;
     model?: string;
 
-    // 🗣 追加：Iros の口調スタイル
+    // 🗣 Iros の口調スタイル
     style?: IrosStyle;
 
-    // ✅ 追加：会話履歴（LLMへ渡す）
+    // ✅ 会話履歴（LLMへ渡す）
     history?: IrosChatHistoryItem[];
 
     // ★ ギア選択から渡す情報（任意）
@@ -92,7 +92,7 @@ export type IrosAPI = {
       label: string;
       gear?: string | null;
     };
-  }): Promise<{ assistant: string } & Record<string, any>>;
+  }): Promise<{ assistant: string; assistantRaw: string } & Record<string, any>>;
 
   getUserInfo(): Promise<IrosUserInfo | null>;
 };
@@ -195,6 +195,61 @@ export async function retryAuth<T>(
   throw lastErr;
 }
 
+/* =========================
+ * Reply helpers（責務境界の固定）
+ * ========================= */
+
+function toStr(v: any): string {
+  if (typeof v === 'string') return v;
+  if (v == null) return '';
+  return String(v);
+}
+
+/** サーバ応答から assistant 本文候補を抽出（保存用：最小限trimのみ） */
+function extractAssistantRaw(r: any): string {
+  const t =
+    r?.assistant ??
+    r?.message?.content ??
+    r?.choices?.[0]?.message?.content ??
+    r?.output_text ??
+    '';
+  return toStr(t).trim();
+}
+
+/** UI表示用の整形（※保存用には使わない） */
+function formatAssistantForUI(text: string): string {
+  let t = toStr(text).trim();
+
+  // 空は最小返答
+  if (!t) return 'はい。🪔';
+
+  // 末尾の句点がなければ補う（日本語想定）
+  if (!/[。！？!?]$/.test(t)) t += '。';
+
+  // 🪔を最後に1個だけ
+  t = t.replace(/🪔+/g, '').trim();
+  t += '🪔';
+
+  return t;
+}
+
+/** meta抽出（保存に使う） */
+function extractMeta(r: any): any {
+  return r?.meta ?? null;
+}
+
+/** サーバが保存したと判断できるフラグ */
+function isServerPersisted(r: any): boolean {
+  return !!(
+    r?.saved ||
+    r?.persisted ||
+    r?.db_saved ||
+    r?.message_id ||
+    r?.messageId ||
+    r?.message?.id
+  );
+}
+
 // ====== Person-Intent 状態ビュー取得 ======
 
 export type PersonIntentStateRow = {
@@ -215,9 +270,7 @@ export type PersonIntentStateRow = {
  * /api/intent/person-state を叩いて
  * 「ユーザーごとの意図状態（状況×対象）」一覧を取得する
  */
-export async function fetchPersonIntentState(): Promise<
-  PersonIntentStateRow[]
-> {
+export async function fetchPersonIntentState(): Promise<PersonIntentStateRow[]> {
   return retryAuth(async () => {
     const res = await authFetch('/api/intent/person-state', {
       method: 'GET',
@@ -228,8 +281,8 @@ export async function fetchPersonIntentState(): Promise<
     const rowsRaw = Array.isArray(j)
       ? j
       : Array.isArray(j?.rows)
-      ? j.rows
-      : [];
+        ? j.rows
+        : [];
 
     return rowsRaw.map((r: any) => ({
       user_code: String(r.user_code),
@@ -248,20 +301,20 @@ export async function fetchPersonIntentState(): Promise<
         typeof r.last_self_acceptance === 'number'
           ? r.last_self_acceptance
           : r.last_self_acceptance != null
-          ? Number(r.last_self_acceptance)
-          : null,
+            ? Number(r.last_self_acceptance)
+            : null,
       y_level:
         typeof r.y_level === 'number'
           ? r.y_level
           : r.y_level != null
-          ? Number(r.y_level)
-          : null,
+            ? Number(r.y_level)
+            : null,
       h_level:
         typeof r.h_level === 'number'
           ? r.h_level
           : r.h_level != null
-          ? Number(r.h_level)
-          : null,
+            ? Number(r.h_level)
+            : null,
     })) as PersonIntentStateRow[];
   });
 }
@@ -317,8 +370,8 @@ export const irosClient: IrosAPI = {
       role: (m.role === 'assistant'
         ? 'assistant'
         : m.role === 'system'
-        ? 'system'
-        : 'user') as IrosMessage['role'],
+          ? 'system'
+          : 'user') as IrosMessage['role'],
       text: String(m.content ?? m.text ?? ''),
       content: String(m.content ?? m.text ?? ''),
       created_at: m.created_at ?? null,
@@ -368,7 +421,6 @@ export const irosClient: IrosAPI = {
         conversation_id: args.conversationId,
         text: args.text,
         role: args.role ?? 'user',
-        // ★ ここで meta を渡す
         meta: args.meta ?? null,
       }),
     });
@@ -377,35 +429,36 @@ export const irosClient: IrosAPI = {
 
   async reply(args) {
     if (typeof _raw.reply === 'function') return _raw.reply(args);
+
     dbg('reply() fallback', {
       mode: args.mode,
       hasCid: !!args.conversationId,
       style: args.style,
       history_len: args.history?.length ?? 0,
     });
+
+    // reply() は「サーバへ投げるだけ」に固定（整形も保存もしない）
     const r = await authFetch('/api/agent/iros/reply', {
       method: 'POST',
       headers: args.headers ?? undefined,
       body: JSON.stringify({
         conversationId: args.conversationId,
-        text: args.user_text, // user_text → text
+        text: args.user_text,
         modeHint: args.mode ?? 'Light',
         mode: args.mode ?? 'Light',
 
-        // ✅ history をそのまま渡す（なければ空配列）
         history: Array.isArray(args.history) ? args.history : [],
 
         model: args.model,
         resonance: (window as any)?.__iros?.resonance ?? args.resonance,
         intent: (window as any)?.__iros?.intent ?? args.intent,
 
-        // 🗣 サーバー側へスタイルヒントとして渡す
         styleHint: args.style,
 
-        // ★ ギア選択（nextStep）情報をそのまま渡す
         nextStepChoice: args.nextStepChoice ?? undefined,
       }),
     });
+
     return r.json();
   },
 
@@ -419,51 +472,30 @@ export const irosClient: IrosAPI = {
       user_text: args.user_text,
       mode: args.mode ?? 'Light',
       model: args.model,
-
-      // 🗣 style
       style: args.style,
-
-      // ✅ history
       history: args.history,
-
-      // ★ nextStep
       nextStepChoice: args.nextStepChoice,
     });
 
-    // ★ 追加：orchestrator からの meta を拾う
-    const meta = r?.meta ?? null;
+    const assistantRaw = extractAssistantRaw(r);
+    const assistant = formatAssistantForUI(assistantRaw);
+    const meta = extractMeta(r);
 
-    // 正規化
-    let t =
-      r?.assistant ??
-      r?.message?.content ??
-      r?.choices?.[0]?.message?.content ??
-      r?.output_text ??
-      '';
-
-    if (typeof t !== 'string') t = String(t ?? '');
-    t = (t ?? '').trim();
-    if (t && !/[。！？!?🪔]$/.test(t)) t += '。';
-    if (t) t = t.replace(/🪔+/g, '') + '🪔';
-    const safe = t || 'はい。🪔';
-
-    const serverPersisted =
-      !!(r?.saved ||
-        r?.persisted ||
-        r?.db_saved ||
-        r?.message_id ||
-        r?.messageId);
-
-    if (!serverPersisted) {
+    // サーバ側が保存済みなら、二重保存しない
+    if (!isServerPersisted(r)) {
+      // 保存は “UI整形後” ではなく assistantRaw を使う（事故防止）
+      // ただし、空の場合はassistant（最小返答）で保存
+      const toSave = assistantRaw || assistant;
       await this.postMessage({
         conversationId: args.conversationId,
-        text: safe,
+        text: toSave,
         role: 'assistant',
-        // ★ meta も一緒に保存
         meta,
       });
     }
-    return { ...r, assistant: safe };
+
+    // 返すのは「UI表示用 + raw両方」
+    return { ...r, assistant, assistantRaw };
   },
 
   async getUserInfo() {

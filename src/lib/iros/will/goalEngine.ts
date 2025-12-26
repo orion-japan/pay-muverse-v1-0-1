@@ -48,13 +48,12 @@ export function deriveIrosGoal(args: {
   const text = normalize(raw);
 
   // 0) 「足踏み/繰り返し」検知 → enableAction を強制
-  // ここを先頭に置く（重要）：ユーザーが怒ってる/詰めてる時は、掘るより “手” を出す
   if (containsStuckLoopWords(text)) {
     const targetDepth = chooseActionDepth(lastDepth);
     return {
       kind: 'enableAction',
       targetDepth,
-      targetQ: lastQ,
+      targetQ: undefined,
       reason: '足踏み/繰り返しの不満が明示されたため、行動・選択を優先',
     };
   }
@@ -64,7 +63,7 @@ export function deriveIrosGoal(args: {
     return {
       kind: chooseGoalKindFromDepth(requestedDepth ?? lastDepth),
       targetDepth: requestedDepth ?? lastDepth,
-      targetQ: requestedQCode ?? lastQ,
+      targetQ: requestedQCode ?? undefined,
       reason: 'ユーザーから明示・暗示された深度／Qを優先した',
     };
   }
@@ -75,7 +74,7 @@ export function deriveIrosGoal(args: {
     return {
       kind: 'enableAction',
       targetDepth,
-      targetQ: lastQ,
+      targetQ: undefined,
       reason: 'ユーザーが判断を委ねたため、行動・選択の方向を優先',
     };
   }
@@ -83,7 +82,7 @@ export function deriveIrosGoal(args: {
   // 2) ネガティブ強め → stabilize
   if (sentiment === 'negative' || containsStressWords(text)) {
     const targetDepth = chooseStabilizeDepth(lastDepth);
-    const targetQ = (lastQ ?? 'Q3') as QCode;
+    const targetQ: QCode = 'Q3';
     return {
       kind: 'stabilize',
       targetDepth,
@@ -92,18 +91,18 @@ export function deriveIrosGoal(args: {
     };
   }
 
-  // 2.3) 恋愛/連絡不安は「関係テーマ」扱いに寄せる（ここが今弱かった）
+  // 2.3) 連絡/恋愛不安 → shiftRelation
   if (containsContactAnxietyWords(text)) {
     const targetDepth = chooseRelationDepth(lastDepth);
     return {
       kind: 'shiftRelation',
       targetDepth,
       targetQ: lastQ,
-      reason: '連絡/返信/既読など、関係の不確実性が主テーマと判断',
+      reason: '連絡/返信など、関係の不確実性が主テーマと判断',
     };
   }
 
-  // 2.5) 旧：回転バイアス（維持）
+  // 2.5) uncover 連続バイアス回避
   {
     const streak = uncoverStreak ?? (lastGoalKind === 'uncover' ? 1 : 0);
     if (lastDepth && lastDepth.startsWith('S') && lastQ === 'Q3' && streak >= 2) {
@@ -112,7 +111,7 @@ export function deriveIrosGoal(args: {
         kind: 'shiftRelation',
         targetDepth,
         targetQ: lastQ,
-        reason: 'S層でQ3かつuncoverが連続しているため、R層へ軸を回転',
+        reason: 'S層でQ3かつuncoverが連続しているため、R層へ回転',
       };
     }
   }
@@ -125,6 +124,17 @@ export function deriveIrosGoal(args: {
       targetDepth,
       targetQ: lastQ,
       reason: '他者・職場・家族との関係性が主テーマと判断',
+    };
+  }
+
+  // ★ 3.5) コミット宣言 → enableAction（今回の核心修正）
+  if (containsCommitmentWords(text)) {
+    const targetDepth = chooseActionDepth(lastDepth);
+    return {
+      kind: 'enableAction',
+      targetDepth,
+      targetQ: lastQ,
+      reason: '「選ぶ／決めた／理由はある」等のコミット宣言が検出されたため、次の一手を優先',
     };
   }
 
@@ -169,7 +179,6 @@ function normalize(s: string): string {
     .trim();
 }
 
-// 「同じ」「変わらない」「意味ない」「どうすれば」などの “足踏み検知”
 function containsStuckLoopWords(text: string): boolean {
   const words = [
     'さっきと同じ',
@@ -180,8 +189,7 @@ function containsStuckLoopWords(text: string): boolean {
     '意味がない',
     '退屈',
     'ループ',
-    '話わかってる',
-    'わかってる？',
+    'わかってる',
     'どうすれば',
     'どうしたら',
     '結局',
@@ -194,17 +202,10 @@ function containsStuckLoopWords(text: string): boolean {
 function containsDelegationWords(textRaw: string): boolean {
   const text = textRaw ?? '';
   const words = [
-    'この場の主はあなた',
-    'この場の主はきみ',
-    'この場の主は君',
-    'あなたの判断を実行して',
-    'あなたの判断を実行してください',
-    'あなたの決断を実行して',
-    'あなたが決めてください',
-    'あなたに任せます',
-    'あなたにまかせます',
-    '私に選択を委ねないで',
-    '私に選択をゆだねないで',
+    'あなたが決めて',
+    'あなたに任せる',
+    'あなたにまかせる',
+    '判断を委ねる',
   ];
   return words.some((w) => text.includes(w));
 }
@@ -217,52 +218,22 @@ function containsStressWords(text: string): boolean {
     'もう無理',
     '限界',
     '疲れた',
-    'やめたい',
-    '辞めたい',
     '不安',
-    'こわい',
     '怖い',
-    '怖く',
-    'パワハラ',
-    'いじめ',
+    'こわい',
   ];
   return words.some((w) => text.includes(w));
 }
 
-// ★ 追加：恋愛「連絡不安」を拾う
 function containsContactAnxietyWords(text: string): boolean {
-  const words = [
-    '連絡',
-    '返信',
-    '返事',
-    '既読',
-    '未読',
-    '既読無視',
-    'line',
-    'dm',
-    'メッセージ',
-    '音信不通',
-    '返ってこない',
-    '来ない',
-    'こない',
-    '待ってる',
-    '心配',
-  ];
-  // 「来ない」だけだと誤爆するので、連絡/返事系とセットで当てたい
-  const hasContact = ['連絡', '返信', '返事', '既読', '未読', 'line', 'dm', 'メッセージ', '音信不通'].some((w) =>
+  const hasContact = ['連絡', '返信', '既読', '未読', 'line', 'dm', 'メッセージ'].some((w) =>
     text.includes(w),
   );
-  if (hasContact) return true;
-
-  // 「彼/彼氏/彼女 + 来ない/返ってこない」でも拾う
-  const hasPartner =
-    text.includes('彼') || text.includes('彼氏') || text.includes('彼女');
   const hasNotComing =
     text.includes('来ない') ||
-    text.includes('こない') ||
     text.includes('返ってこない') ||
     text.includes('返事がない');
-  return hasPartner && hasNotComing && words.some((w) => text.includes(w));
+  return hasContact && hasNotComing;
 }
 
 function containsRelationWords(text: string): boolean {
@@ -274,12 +245,10 @@ function containsRelationWords(text: string): boolean {
     '親',
     '夫',
     '妻',
+    '彼',
     '彼氏',
     '彼女',
-    '彼',
     '人間関係',
-    'チーム',
-    '会社の人',
   ];
   return words.some((w) => text.includes(w));
 }
@@ -290,15 +259,11 @@ function containsActionWords(text: string): boolean {
     'タスク',
     'プロジェクト',
     '締め切り',
-    'デッドライン',
-    '進まない',
     '進めたい',
     'やりたい',
     'やるべき',
-    '効率',
-    'dx',
-    '改善',
     '計画',
+    '改善',
   ];
   return words.some((w) => text.includes(w));
 }
@@ -311,11 +276,37 @@ function containsIntentionWords(text: string): boolean {
     '生き方',
     '人生',
     '使命',
-    'ミッション',
     '目的',
     'ビジョン',
   ];
   return words.some((w) => text.includes(w));
+}
+
+// ★ 核心：コミット宣言検知
+function containsCommitmentWords(text: string): boolean {
+  const hasDecision =
+    text.includes('選ぶ') ||
+    text.includes('選び') ||
+    text.includes('決め') ||
+    text.includes('決ま');
+
+  const hasCommitSignal =
+    text.includes('やめない') ||
+    text.includes('止めない') ||
+    text.includes('続け') ||
+    text.includes('理由') ||
+    text.includes('覚悟') ||
+    text.includes('腹をくく') ||
+    text.includes('腹を括');
+
+  const reasonAndDecided =
+    text.includes('理由') && (text.includes('決め') || text.includes('決ま'));
+
+  const chooseAndNotStop =
+    (text.includes('選ぶ') || text.includes('選び')) &&
+    (text.includes('やめない') || text.includes('止めない'));
+
+  return (hasDecision && hasCommitSignal) || reasonAndDecided || chooseAndNotStop;
 }
 
 function chooseStabilizeDepth(lastDepth?: Depth): Depth {
@@ -346,7 +337,6 @@ function chooseIntentionDepth(lastDepth?: Depth): Depth {
   if (!lastDepth) return 'I1';
   if (lastDepth.startsWith('S') || lastDepth.startsWith('R')) return 'I1';
   if (lastDepth.startsWith('C')) return 'I1';
-  if (lastDepth.startsWith('T')) return lastDepth;
   return lastDepth;
 }
 

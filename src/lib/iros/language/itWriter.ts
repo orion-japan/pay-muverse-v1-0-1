@@ -315,11 +315,12 @@ function makeFutureStateLine(userText: string): string {
   const theme = detectThemeFromUserText(userText);
 
   if (theme.isReportOrBoss) {
-    return '未来は「目指すのは「怒られないこと」じゃなくて、短く報告して、次に進める形があること。」状態へ。';
+    return '未来は「怒られない」より、「短く報告できて次に進める形がある」状態へ。';
   }
 
   return '未来は「不安が消える」より、「迷っても進める足場がある」状態へ。';
 }
+
 
 function makeAutoActions(userText: string): { a1: string; a2?: string; a3?: string } {
   const t = norm(userText);

@@ -25,7 +25,10 @@ const DEEP_TRIGGER = [
   'T3',
 ];
 
-export function applyGoalContinuity(goal: IrosGoal, ctx: ContinuityContext): IrosGoal {
+export function applyGoalContinuity(
+  goal: IrosGoal,
+  ctx: ContinuityContext,
+): IrosGoal {
   const { lastDepth, lastQ, userText } = ctx;
 
   let adjusted: IrosGoal = { ...goal };
@@ -46,31 +49,39 @@ export function applyGoalContinuity(goal: IrosGoal, ctx: ContinuityContext): Iro
     adjusted = { ...adjusted, targetDepth: lastDepth };
   }
 
-  // ③ 前回の Q を引き継ぐ
-  if (!adjusted.targetQ && lastQ) {
-    adjusted = { ...adjusted, targetQ: lastQ };
-  }
+  // ③ Q の継続は "goal" では扱わない（analysis/applyQContinuity に一本化）
+  //    ここで lastQ を targetQ に入れると、currentQ が一瞬でも落ちたターンに
+  //    buildFinalMeta が goalQ を拾って「前回Qに戻る」経路が成立するため。
 
   if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
     console.log('[IROS/CONT continuity]', {
       lastDepth,
       lastQ,
       finalDepth: adjusted.targetDepth,
-      finalQ: adjusted.targetQ,
+      // finalQ は "goal.targetQ" の状態（継承しない）
+      finalQ: adjusted.targetQ ?? null,
     });
   }
 
   return adjusted;
 }
 
-
 /* ========= 内部：Depthジャンプのなだらか化 ========= */
 
 const DEPTH_SEQUENCE: Depth[] = [
-  'S1', 'S2', 'S3', 'S4',
-  'R1', 'R2', 'R3',
-  'C1', 'C2', 'C3',
-  'I1', 'I2', 'I3',
+  'S1',
+  'S2',
+  'S3',
+  'S4',
+  'R1',
+  'R2',
+  'R3',
+  'C1',
+  'C2',
+  'C3',
+  'I1',
+  'I2',
+  'I3',
 ];
 
 function softenDepthJump(last: Depth, target: Depth): Depth {

@@ -73,7 +73,7 @@ export function runItDemoGate(args: {
   // ★★ UI choiceId を直接受ける（it_ 判定をここでやる）
   choiceId?: string | null;
 
-  // 強制スイッチ（保険）
+  // 強制スイッチ（保険） ← ★ 今回は「ボタン以外IT禁止」なので使わない
   itForce?: boolean | null;
 }): ItDemoGateResult {
   const history = Array.isArray(args.history) ? args.history : [];
@@ -91,42 +91,32 @@ export function runItDemoGate(args: {
 
   // =========================================================
   // ★★ IT Trigger (single source of truth)
-  // 1) UI: choiceId startsWith it_
-  // 2) same text twice: EXACT_MATCH only
-  // 3) Q2 streak2: streakQ==='Q2' && streakLength>=2
+  // ✅ ボタン(choiceId it_*) のみで IT に入れる
   // =========================================================
 
   const choiceId = args.choiceId ?? null;
-
   const uiIT = !!(choiceId && String(choiceId).startsWith('it_'));
 
-  // ★★ 要件は「完全一致」なので EXACT_MATCH のみ採用
+  // 参考情報として残す（IT判定には使わない）
   const sameTextTwice =
     repeat.reason === 'EXACT_MATCH' && repeat.sameIntentStreak >= 2;
 
-  // ★★ qTrace が来ない経路があるので qTraceUpdated も拾う
   const qTraceEffective = args.qTrace ?? args.qTraceUpdated ?? null;
-
   const streakQ = qTraceEffective?.streakQ ?? null;
   const streakLength = qTraceEffective?.streakLength ?? null;
   const q2Streak2 = streakQ === 'Q2' && (streakLength ?? 0) >= 2;
 
-  const manual = !!(args.itForce ?? false);
+  // ★★ ここが最重要：IT強制はボタンのみ
+  const forceIT = uiIT;
 
-  const forceIT = manual || uiIT || sameTextTwice || q2Streak2;
+  const itReasons = [uiIT ? 'UI_IT_CHOICE' : null].filter(Boolean) as string[];
 
-  const itReasons = [
-    manual ? 'MANUAL_FORCE' : null,
-    uiIT ? 'UI_IT_CHOICE' : null,
-    sameTextTwice ? 'SAME_TEXT_TWICE' : null,
-    q2Streak2 ? 'Q2_STREAK2' : null,
-  ].filter(Boolean) as string[];
-
-  // ★★ 観客に「system切替じゃない」を説明できる証拠ログ
   console.log('[IROS/IT][itDemoGate]', {
     forceIT,
     itReasons,
     choiceId,
+
+    // ↓ これらは「観測ログ」だけ（IT判定には不使用）
     sameTextTwice,
     q2Streak2,
     streakQ,
@@ -134,14 +124,13 @@ export function runItDemoGate(args: {
     repeatReason: repeat.reason,
     sameIntentStreak: repeat.sameIntentStreak,
 
-    // 念のため、どっちを採用したかも残す
     hasQTrace: !!args.qTrace,
     hasQTraceUpdated: !!args.qTraceUpdated,
   });
 
   // =========================================================
-  // detectILayerForce は “I/T明示ワード” の補助として残す
-  // ★★ ただし ITが決まったら itForce として渡す（配線一箇所化）
+  // detectILayerForce は “深度/モード要求検出” だけに使う
+  // ✅ ITへ寄せる材料(itForce)は一切渡さない
   // =========================================================
 
   const forced = detectILayerForce({
@@ -152,34 +141,26 @@ export function runItDemoGate(args: {
     sameIntentStreak: repeat.sameIntentStreak,
     qTrace: qTraceEffective,
 
-    // ★★ IT確定なら常に true（ここで一箇所に収束）
-    itForce: forceIT ? true : null,
+    // ✅ ここ重要：ボタン以外でITに寄せない
+    itForce: null,
 
     itThreshold: 2,
   });
 
-  // ★★ renderMode はこのゲートが最終決定（唯一根拠）
-  const finalRenderMode: 'NORMAL' | 'IT' = forceIT ? 'IT' : forced.renderMode;
+  // ★★ renderMode は「ボタン」だけで決める（forced.renderMode は無視）
+  const finalRenderMode: 'NORMAL' | 'IT' = forceIT ? 'IT' : 'NORMAL';
 
   return {
     renderMode: finalRenderMode,
-    itReason: forceIT ? itReasons.join('|') : forced.itReason,
+    itReason: forceIT ? itReasons.join('|') : undefined,
     itEvidence: forceIT
       ? {
           choiceId,
           itReasons,
-          sameTextTwice,
-          q2Streak2,
-          streakQ,
-          streakLength,
-          repeat: {
-            reason: repeat.reason,
-            sameIntentStreak: repeat.sameIntentStreak,
-            detail: repeat.detail,
-          },
         }
-      : forced.itEvidence,
+      : undefined,
 
+    // 深度/モード要求は forced を使う（IT化はさせない）
     force: forced.force,
     dual: forced.dual,
     requestedDepth: forced.requestedDepth,

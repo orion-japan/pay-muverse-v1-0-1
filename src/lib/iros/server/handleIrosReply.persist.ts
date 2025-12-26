@@ -12,8 +12,11 @@ type SpinLoop = 'SRI' | 'TCF';
 type DescentGate = 'closed' | 'offered' | 'accepted';
 type AnchorEventType = 'none' | 'confirm' | 'set' | 'reset';
 
+// ✅ q_counts は「it_cooldown」等の付帯情報を含み得る（jsonb）
 type QCounts = {
   it_cooldown?: number; // 0/1 を想定（将来拡張OK）
+  q_trace?: any; // 観測用（DB列追加なしで調査できる）
+  [k: string]: any;
 };
 
 function toInt0to3(v: unknown): number | null {
@@ -63,13 +66,10 @@ function normalizeQCounts(v: unknown): QCounts {
   if (!v || typeof v !== 'object') return { it_cooldown: 0 };
   const obj = v as any;
 
-  const cd =
-    typeof obj.it_cooldown === 'number'
-      ? obj.it_cooldown
-      : 0;
+  const cd = typeof obj.it_cooldown === 'number' ? obj.it_cooldown : 0;
 
-  // ✅ 交互仕様：0 or 1 に固定
-  return { it_cooldown: cd > 0 ? 1 : 0 };
+  // ✅ 交互仕様：0 or 1 に固定（将来拡張するならここ）
+  return { ...(obj ?? {}), it_cooldown: cd > 0 ? 1 : 0 };
 }
 
 /** intent_anchor から text を安全に取り出す */
@@ -193,9 +193,7 @@ function normalizeQTraceForPersist(metaForSave: any): any {
   if (!metaForSave || typeof metaForSave !== 'object') return metaForSave;
 
   const qTrace =
-    metaForSave.qTrace && typeof metaForSave.qTrace === 'object'
-      ? metaForSave.qTrace
-      : null;
+    metaForSave.qTrace && typeof metaForSave.qTrace === 'object' ? metaForSave.qTrace : null;
 
   const qTraceUpdated =
     metaForSave.qTraceUpdated && typeof metaForSave.qTraceUpdated === 'object'
@@ -217,8 +215,7 @@ function normalizeQTraceForPersist(metaForSave: any): any {
       : null;
 
   // ✅ 重要：streakLength は “大きい方” を採用（1で潰される事故を防ぐ）
-  const streakLength =
-    lenQ == null && lenU == null ? undefined : Math.max(lenQ ?? 0, lenU ?? 0);
+  const streakLength = lenQ == null && lenU == null ? undefined : Math.max(lenQ ?? 0, lenU ?? 0);
 
   const mergedQTrace = {
     ...(qTrace ?? {}),
@@ -233,8 +230,8 @@ function normalizeQTraceForPersist(metaForSave: any): any {
       : 0;
 
   const uncoverNext =
-    typeof mergedQTrace.streakLength === 'number'
-      ? Math.max(uncoverPrev, mergedQTrace.streakLength)
+    typeof (mergedQTrace as any).streakLength === 'number'
+      ? Math.max(uncoverPrev, (mergedQTrace as any).streakLength)
       : uncoverPrev;
 
   return {
@@ -258,14 +255,8 @@ export async function persistAssistantMessage(args: {
   assistantText: string;
   metaForSave: any;
 }) {
-  const {
-    reqOrigin,
-    authorizationHeader,
-    conversationId,
-    userCode,
-    assistantText,
-    metaForSave,
-  } = args;
+  const { reqOrigin, authorizationHeader, conversationId, userCode, assistantText, metaForSave } =
+    args;
 
   try {
     const msgUrl = new URL('/api/agent/iros/messages', reqOrigin);
@@ -451,7 +442,7 @@ export async function persistMemoryStateIfAny(args: {
           'situation_summary',
           'situation_topic',
           'sentiment_level',
-        ].join(',')
+        ].join(','),
       )
       .eq('user_code', userCode)
       .maybeSingle();
@@ -465,143 +456,132 @@ export async function persistMemoryStateIfAny(args: {
     }
 
     // unified を最優先で使う（postProcessReply 後は必ず揃っている）
-    const unified: any = metaForSave.unified ?? {};
+    const unified: any = metaForSave?.unified ?? {};
 
-    const qCodeInput = unified?.q?.current ?? metaForSave.qCode ?? null;
-    const depthInput = unified?.depth?.stage ?? metaForSave.depth ?? null;
-
-    // --- IT発火の復元（引数 > meta.itTriggered > meta.extra.itTriggered > renderMode=IT）---
-    const itTriggeredRawFromMeta =
-      (metaForSave as any)?.itTriggered ??
-      (metaForSave as any)?.extra?.itTriggered ??
+    // ✅ q / depth の入力（取りこぼし防止）
+    // 優先順位：unified -> meta(qPrimary/q_code) -> meta(qCode) -> null
+    const qCodeInput =
+      unified?.q?.current ??
+      (metaForSave as any)?.qPrimary ??
+      (metaForSave as any)?.q_code ??
+      (metaForSave as any)?.qCode ??
       null;
 
-    const renderModeRaw =
-      (metaForSave as any)?.renderMode ??
-      (metaForSave as any)?.extra?.renderMode ??
-      (metaForSave as any)?.render_mode ??
-      (metaForSave as any)?.extra?.render_mode ??
+    const depthInput =
+      unified?.depth?.stage ??
+      (metaForSave as any)?.depth ??
+      (metaForSave as any)?.depth_stage ??
+      (metaForSave as any)?.depthStage ??
       null;
 
-    const renderModeNorm =
-      typeof renderModeRaw === 'string' ? renderModeRaw.trim().toUpperCase() : '';
-
-    const itTriggeredFinal: boolean | null =
+    // --- IT発火の復元（renderMode=IT から推定しない）---
+    // 優先順位：引数(itTriggered) > meta.itTriggered > meta.extra.itTriggered
+    // ※ forceIT は「強制レンダ」の意味で、ここでは “IT発火” と同一視しない（必要なら上流で itTriggered を明示）
+    const itTriggeredResolved: boolean | null =
       typeof itTriggered === 'boolean'
         ? itTriggered
-        : typeof itTriggeredRawFromMeta === 'boolean'
-          ? itTriggeredRawFromMeta
-          : renderModeNorm === 'IT'
-            ? true
+        : typeof (metaForSave as any)?.itTriggered === 'boolean'
+          ? (metaForSave as any).itTriggered
+          : typeof (metaForSave as any)?.extra?.itTriggered === 'boolean'
+            ? (metaForSave as any).extra.itTriggered
             : null;
 
-// =========================
-// QTrace 更新（persistでは“再計算しない”）
-// - 解析側で出た確定値を尊重
-// - ただし「1固定で巻き戻る事故」だけは防ぐ
-// =========================
-const prevQ = (previous as any)?.q_primary ?? null;
+    // cooldown 判定に使う確定値（ここだけ）
+    const itTriggeredForCounts = itTriggeredResolved === true;
 
-const qtu = metaForSave?.qTraceUpdated;
-const qtuLen =
-  typeof qtu?.streakLength === 'number' && Number.isFinite(qtu.streakLength)
-    ? Math.max(0, Math.floor(qtu.streakLength))
-    : null;
+    // =========================
+    // QTrace 更新（persistでは“再計算しない”）
+    // - persist層は metaForSave を mutate しない（表示・次ターンへ副作用を出さない）
+    // - 解析側の確定値(qTraceUpdated / qTrace)があれば “読むだけ”
+    // - 無い場合のみ fallback（同一Qなのに 1 に巻き戻る事故だけ防ぐ）
+    // - DB観測は q_counts.q_trace に入れる（列追加不要）
+    // =========================
+    const prevQ = (previous as any)?.q_primary ?? null;
 
-let streakQ: string | null = null;
-let streakLength = 1;
+    const qtu = (metaForSave as any)?.qTraceUpdated;
+    const qtuLen =
+      typeof qtu?.streakLength === 'number' && Number.isFinite(qtu.streakLength)
+        ? Math.max(0, Math.floor(qtu.streakLength))
+        : null;
 
-if (qCodeInput) {
-  const sameAsPrev = prevQ != null && prevQ === qCodeInput;
+    const qt = (metaForSave as any)?.qTrace;
+    const qtLen =
+      typeof qt?.streakLength === 'number' && Number.isFinite(qt.streakLength)
+        ? Math.max(0, Math.floor(qt.streakLength))
+        : null;
 
-  if (qtuLen != null) {
-    // ✅ 上流の値を尊重しつつ、同一Q連続なのに 1 に巻き戻るのだけ防ぐ
-    streakQ = qCodeInput;
-    streakLength = Math.max(qtuLen, sameAsPrev ? 2 : 1);
-  } else if (sameAsPrev) {
-    streakQ = qCodeInput;
-    streakLength = 2; // 最低限（前回と同じなら2）
-  } else {
-    streakQ = qCodeInput;
-    streakLength = 1;
-  }
-}
+    let streakQ: string | null = null;
+    let streakLength: number | null = null;
+    let streakFrom: 'qTraceUpdated' | 'qTrace' | 'fallback' | 'none' = 'none';
 
-// metaForSave に反映（次ターン以降が拾う）
-// 既に qTraceUpdated があるなら “上書きしない”
-metaForSave.qTrace = {
-  ...(metaForSave.qTrace ?? {}),
-  lastQ: qCodeInput,
-  dominantQ: qCodeInput,
-  ...(metaForSave.qTrace?.streakLength == null ? { streakQ, streakLength } : {}),
-};
+    if (qCodeInput) {
+      const sameAsPrev = prevQ != null && prevQ === qCodeInput;
 
-if (!metaForSave.qTraceUpdated) {
-  metaForSave.qTraceUpdated = {
-    lastQ: qCodeInput,
-    dominantQ: qCodeInput,
-    streakQ,
-    streakLength,
-    from: qtuLen != null ? 'qTraceUpdated' : 'fallback', // ★ これでDBで判定できる
-  };
-} else {
-  // ★ from を残す（DB調査用）
-  metaForSave.qTraceUpdated = {
-    ...(metaForSave.qTraceUpdated ?? {}),
-    from:
-      (metaForSave.qTraceUpdated as any)?.from ??
-      (qtuLen != null ? 'qTraceUpdated' : 'fallback'),
-  };
-}
+      if (qtuLen != null) {
+        streakQ = qCodeInput;
+        streakLength = Math.max(qtuLen, sameAsPrev ? 2 : 1);
+        streakFrom = 'qTraceUpdated';
+      } else if (qtLen != null) {
+        streakQ = qCodeInput;
+        streakLength = Math.max(qtLen, sameAsPrev ? 2 : 1);
+        streakFrom = 'qTrace';
+      } else {
+        streakQ = qCodeInput;
+        streakLength = sameAsPrev ? 2 : 1;
+        streakFrom = 'fallback';
+      }
+    } else {
+      streakFrom = 'none';
+    }
 
-console.log('[IROS/QTrace] persisted', {
-  prevQ,
-  qNow: qCodeInput,
-  streakQ,
-  streakLength,
-  from: qtuLen != null ? 'qTraceUpdated' : 'fallback',
-});
+    const qTraceForCounts =
+      qCodeInput
+        ? {
+            prevQ,
+            qNow: qCodeInput,
+            streakQ,
+            streakLength,
+            from: streakFrom,
+          }
+        : null;
 
+    console.log('[IROS/QTrace] persisted', {
+      prevQ,
+      qNow: qCodeInput,
+      streakQ,
+      streakLength,
+      from: streakFrom,
+    });
 
-
-console.log('[IROS/QTrace] persisted', {
-  prevQ,
-  qNow: qCodeInput,
-  streakQ,
-  streakLength,
-  from: qtuLen != null ? 'qTraceUpdated' : 'fallback',
-});
-
-
-    const phaseRawInput = metaForSave.phase ?? unified?.phase ?? null;
+    const phaseRawInput = (metaForSave as any)?.phase ?? unified?.phase ?? null;
     const phaseInput = normalizePhase(phaseRawInput);
 
     const selfAcceptanceInput =
-      metaForSave.selfAcceptance ??
+      (metaForSave as any)?.selfAcceptance ??
       unified?.selfAcceptance ??
       unified?.self_acceptance ??
       null;
 
     // y/h は DB が integer なので、必ず 0..3 に丸めて整数化する
-    const yIntInput = toInt0to3(metaForSave?.yLevel ?? unified?.yLevel);
-    const hIntInput = toInt0to3(metaForSave?.hLevel ?? unified?.hLevel);
+    const yIntInput = toInt0to3((metaForSave as any)?.yLevel ?? unified?.yLevel);
+    const hIntInput = toInt0to3((metaForSave as any)?.hLevel ?? unified?.hLevel);
 
     // situation
     const situationSummaryInput =
-      metaForSave.situationSummary ??
+      (metaForSave as any)?.situationSummary ??
       unified?.situation?.summary ??
-      metaForSave.situation_summary ??
+      (metaForSave as any)?.situation_summary ??
       null;
 
     const situationTopicInput =
-      metaForSave.situationTopic ??
+      (metaForSave as any)?.situationTopic ??
       unified?.situation?.topic ??
-      metaForSave.situation_topic ??
+      (metaForSave as any)?.situation_topic ??
       null;
 
     const sentimentLevelInput =
-      metaForSave.sentimentLevel ??
-      metaForSave.sentiment_level ??
+      (metaForSave as any)?.sentimentLevel ??
+      (metaForSave as any)?.sentiment_level ??
       unified?.sentiment_level ??
       null;
 
@@ -609,22 +589,22 @@ console.log('[IROS/QTrace] persisted', {
     // ✅ spin / descentGate は「normalize → merge」する（nullで潰さない）
     // --------
     const spinLoopRawInput =
-      metaForSave.spinLoop ??
-      metaForSave.spin_loop ??
+      (metaForSave as any)?.spinLoop ??
+      (metaForSave as any)?.spin_loop ??
       unified?.spin_loop ??
       unified?.spinLoop ??
       null;
 
     const spinStepRawInput =
-      metaForSave.spinStep ??
-      metaForSave.spin_step ??
+      (metaForSave as any)?.spinStep ??
+      (metaForSave as any)?.spin_step ??
       unified?.spin_step ??
       unified?.spinStep ??
       null;
 
     const descentGateRawInput =
-      metaForSave.descentGate ??
-      metaForSave.descent_gate ??
+      (metaForSave as any)?.descentGate ??
+      (metaForSave as any)?.descent_gate ??
       unified?.descent_gate ??
       unified?.descentGate ??
       null;
@@ -639,51 +619,35 @@ console.log('[IROS/QTrace] persisted', {
 
     const finalSpinLoop: SpinLoop | null = spinLoopNormInput ?? spinLoopNormPrev ?? null;
     const finalSpinStep: 0 | 1 | 2 | null = spinStepNormInput ?? spinStepNormPrev ?? null;
-    const finalDescentGate: DescentGate | null =
-      descentGateNormInput ?? descentGateNormPrev ?? null;
+    const finalDescentGate: DescentGate | null = descentGateNormInput ?? descentGateNormPrev ?? null;
 
-// q_counts（IT cooldown / reset を一本化）
-const prevQCounts = normalizeQCounts((previous as any)?.q_counts);
-const incomingQCounts = qCounts ? normalizeQCounts(qCounts) : null;
+    // =========================
+    // q_counts（IT cooldown / q_trace を一本化）
+    // - 変数の二重宣言をしない
+    // - nextCooldown を先に確定してから nextQCounts を作る
+    // =========================
+    const prevQCounts = normalizeQCounts((previous as any)?.q_counts);
+    const incomingQCounts = qCounts ? normalizeQCounts(qCounts) : null;
 
-// ✅ extra から ITリセットフラグを読む（名前揺れ対応）
-const itResetRequested =
-  Boolean((metaForSave as any)?.extra?.itReset) ||
-  Boolean((metaForSave as any)?.extra?.resetIT) ||
-  Boolean((metaForSave as any)?.extra?.resetItCooldown);
+    const itResetRequested =
+      Boolean((metaForSave as any)?.extra?.itReset) ||
+      Boolean((metaForSave as any)?.extra?.resetIT) ||
+      Boolean((metaForSave as any)?.extra?.resetItCooldown);
 
-const prevCooldown =
-  typeof prevQCounts.it_cooldown === 'number'
-    ? prevQCounts.it_cooldown
-    : 0;
+    // 方針：自動ITの“完全停止スイッチ”を開放する（cooldown無効化）
+    const nextCooldown = itResetRequested ? 0 : 0;
 
-// ✅ 「IT発火したか」の最終判定を cooldown 側でも使う
-// 優先順位：引数(itTriggered) > metaから復元(itTriggeredFinal)
-const itTriggeredForCounts =
-  typeof itTriggered === 'boolean' ? itTriggered : itTriggeredFinal === true;
-
-// ✅ 次の cooldown をここで確定させる
-let nextCooldown: number;
-
-if (itResetRequested) {
-  // ★ 最優先：必ず 0
-  nextCooldown = 0;
-} else if (itTriggeredForCounts) {
-  // IT発火したターンは「クールダウン開始」
-  nextCooldown = 1;
-} else {
-  // ✅ 交互仕様：非発火ターンは必ず 0（減衰しない）
-  nextCooldown = 0;
-}
-const nextQCounts: QCounts = {
-  ...(incomingQCounts ?? prevQCounts),
-  it_cooldown: nextCooldown,
-};
-
-
+    const nextQCounts: QCounts = {
+      ...(incomingQCounts ?? prevQCounts),
+      it_cooldown: nextCooldown,
+      ...(qTraceForCounts ? { q_trace: qTraceForCounts } : {}),
+      // 観測用：そのターンで IT が発火したか（DB調査の助け）
+      ...(itTriggeredResolved != null ? { it_triggered: itTriggeredResolved } : {}),
+      ...(itTriggeredForCounts ? { it_triggered_true: true } : {}),
+    };
 
     // intent_anchor（jsonb）
-    const intentAnchorRaw = metaForSave.intent_anchor ?? metaForSave.intentAnchor ?? null;
+    const intentAnchorRaw = (metaForSave as any)?.intent_anchor ?? (metaForSave as any)?.intentAnchor ?? null;
     const anchorText = extractAnchorText(intentAnchorRaw);
 
     // アンカー更新イベント
@@ -700,9 +664,7 @@ const nextQCounts: QCounts = {
     // 追加の安全策：メタ発話が紛れたら強制 keep
     const metaLike = anchorText ? isMetaAnchorText(anchorText) : false;
     const finalAnchorDecision =
-      metaLike && anchorDecision.action !== 'keep'
-        ? { action: 'keep' as const }
-        : anchorDecision;
+      metaLike && anchorDecision.action !== 'keep' ? { action: 'keep' as const } : anchorDecision;
 
     console.log('[IROS/STATE] persistMemoryStateIfAny start', {
       userCode,
@@ -713,8 +675,8 @@ const nextQCounts: QCounts = {
       phaseRawInput,
       phaseInput,
 
-      yLevelRaw: metaForSave?.yLevel ?? unified?.yLevel ?? null,
-      hLevelRaw: metaForSave?.hLevel ?? unified?.hLevel ?? null,
+      yLevelRaw: (metaForSave as any)?.yLevel ?? unified?.yLevel ?? null,
+      hLevelRaw: (metaForSave as any)?.hLevel ?? unified?.hLevel ?? null,
       yLevelInt: yIntInput,
       hLevelInt: hIntInput,
 
@@ -733,7 +695,7 @@ const nextQCounts: QCounts = {
       descentGateNormPrev,
       finalDescentGate,
 
-      itTriggered: itTriggeredFinal ?? null,
+      itTriggered: itTriggeredResolved ?? null,
       q_counts_prev: prevQCounts,
       q_counts_next: nextQCounts,
 
@@ -776,10 +738,10 @@ const nextQCounts: QCounts = {
        - ある時だけ保存（過去の summary は壊さない）
     */
     const rawUserText =
-      metaForSave?.userText ??
-      metaForSave?.user_text ??
-      metaForSave?.input_text ??
-      metaForSave?.text ??
+      (metaForSave as any)?.userText ??
+      (metaForSave as any)?.user_text ??
+      (metaForSave as any)?.input_text ??
+      (metaForSave as any)?.text ??
       null;
 
     const summaryCandidate =
@@ -810,9 +772,9 @@ const nextQCounts: QCounts = {
     }
 
     // 1回目 upsert
-    let { error } = await supabase
-      .from('iros_memory_state')
-      .upsert(upsertPayload, { onConflict: 'user_code' });
+    let { error } = await supabase.from('iros_memory_state').upsert(upsertPayload, {
+      onConflict: 'user_code',
+    });
 
     // 42703(未定義カラム) で descent_gate が原因なら、外して1回だけ再試行
     if (error) {
@@ -829,9 +791,9 @@ const nextQCounts: QCounts = {
 
         delete upsertPayload.descent_gate;
 
-        const retry = await supabase
-          .from('iros_memory_state')
-          .upsert(upsertPayload, { onConflict: 'user_code' });
+        const retry = await supabase.from('iros_memory_state').upsert(upsertPayload, {
+          onConflict: 'user_code',
+        });
 
         error = retry.error ?? null;
       }

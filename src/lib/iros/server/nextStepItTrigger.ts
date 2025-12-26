@@ -76,99 +76,28 @@ export type NaturalItTriggerResult = {
 };
 
 /**
- * 自然IT発火の中核判定
+ * 自然IT発火の中核判定（現在は無効化）
  *
- * デフォルト方針：
- * - Q2×2（= streakQ='Q2' & streakLength>=2）で発火
- * - sameIntent×2（sameIntentStreak>=2）でも発火
- * - stagnationHint=true も発火候補（ただし上の2つより弱い）
- * - cooldown 中は発火しない
+ * 方針（2025-12-25）：
+ * - IT層への遷移は「ボタン（choiceId）」のみで行う
+ * - 会話内容・Q連続・停滞などによる自然IT発火は行わない
+ *
+ * この関数は将来の再有効化に備えて「stub」として残す。
  */
 export function decideNaturalItTrigger(
   input: NaturalItTriggerInput,
 ): NaturalItTriggerResult {
-  const notes: string[] = [];
-
-  const cooldownTurns =
-    typeof input.cooldownTurns === 'number' && Number.isFinite(input.cooldownTurns)
-      ? Math.max(0, Math.round(input.cooldownTurns))
-      : 2;
-
-  const turnsSinceLast =
-    typeof input.turnsSinceLastNaturalIT === 'number' &&
-    Number.isFinite(input.turnsSinceLastNaturalIT)
-      ? Math.max(0, Math.round(input.turnsSinceLastNaturalIT))
-      : null;
-
-  if (turnsSinceLast != null && turnsSinceLast <= cooldownTurns) {
-    notes.push(
-      `cooldown active: turnsSinceLastNaturalIT=${turnsSinceLast} <= cooldownTurns=${cooldownTurns}`,
-    );
-    return {
-      forceIT: false,
-      density: 'compact',
-      reason: 'none',
-      notes,
-    };
-  }
-
-  const streakQ = (input.qTrace?.streakQ ?? null) ? String(input.qTrace?.streakQ) : null;
-  const streakLenRaw = input.qTrace?.streakLength ?? null;
-  const streakLength =
-    typeof streakLenRaw === 'number' && Number.isFinite(streakLenRaw)
-      ? Math.max(0, Math.round(streakLenRaw))
-      : 0;
-
-  const q2x2 = streakQ === 'Q2' && streakLength >= 2;
-  if (q2x2) {
-    notes.push(`Q2 streak: streakQ=${streakQ}, streakLength=${streakLength}`);
-    return {
-      forceIT: true,
-      density: 'compact',
-      reason: 'q2_streak',
-      notes,
-    };
-  }
-
-  const sameIntentStreakRaw = input.sameIntentStreak ?? null;
-  const sameIntentStreak =
-    typeof sameIntentStreakRaw === 'number' && Number.isFinite(sameIntentStreakRaw)
-      ? Math.max(0, Math.round(sameIntentStreakRaw))
-      : 0;
-
-  const sameIntentx2 = sameIntentStreak >= 2;
-  if (sameIntentx2) {
-    notes.push(`sameIntent streak: sameIntentStreak=${sameIntentStreak}`);
-    return {
-      forceIT: true,
-      density: 'compact',
-      reason: 'same_intent_streak',
-      notes,
-    };
-  }
-
-  const stagnationHint = !!input.stagnationHint;
-  if (stagnationHint) {
-    notes.push(`stagnationHint=true`);
-    return {
-      forceIT: true,
-      density: 'compact',
-      reason: 'stagnation_hint',
-      notes,
-    };
-  }
-
-  notes.push(
-    `no trigger: streakQ=${streakQ ?? 'null'}, streakLength=${streakLength}, sameIntentStreak=${sameIntentStreak}`,
-  );
-
   return {
     forceIT: false,
     density: 'compact',
     reason: 'none',
-    notes,
+    notes: [
+      'disabled: natural IT trigger is turned off',
+      'policy: IT entry is allowed only via explicit UI button (choiceId)',
+    ],
   };
 }
+
 
 /**
  * 便利関数：meta に自然ITの決定を “安全に追記” する

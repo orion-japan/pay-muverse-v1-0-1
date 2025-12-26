@@ -82,6 +82,9 @@ import { detectILayerForce } from './rotation/iLayerForce';
 import { selectFrame, type FrameKind } from './language/frameSelector';
 import { computeITTrigger } from '@/lib/iros/rotation/computeITTrigger';
 
+import { readIrosFeatureFlags } from './server/featureFlags';
+import { canUseFullAuto, shouldEnableFeature } from './server/fullAutoGuard';
+
 
 import { decideDescentGate } from './rotation/rotationLoop';
 // ==== 固定アンカー（北） ====
@@ -339,34 +342,37 @@ export async function runIrosTurn(
   // ----------------------------------------------------------------
   // 4. meta 初期化（解析結果を反映）
   // ----------------------------------------------------------------
-  let meta: IrosMeta = {
-    ...(mergedBaseMeta as IrosMeta),
+// ✅ meta 初期化（解析結果を反映）
+// ここだけ差し替え：depth が決まらないターンで depth_stage:null を量産しない
+let meta: IrosMeta = {
+  ...(mergedBaseMeta as IrosMeta),
 
-    // ★ 追加：今回ターンの unified を meta に載せる（生成・topic・後段が参照できるように）
-    unified: (unified as any) ?? (mergedBaseMeta as any).unified ?? null,
+  unified: (unified as any) ?? (mergedBaseMeta as any).unified ?? null,
 
-    // ★ 修正：analysis由来の depth を優先（S4は潰し済）
-    depth: analyzedDepth,
+  // ★ 修正：analysis由来 > 継続（前回） > 既定値（S2）
+  // これで depth_stage:null の大量発生を止める
+  depth: analyzedDepth ?? lastDepthForContinuity ?? ('S2' as Depth),
 
-    // ★優先順位：analysis（今回観測） > 明示指定 > 継続（lastQ） > null
-    qCode: resolvedQCode ?? normalizedQCode ?? lastQForContinuity ?? undefined,
+  // ★優先順位：analysis（今回観測） > 明示指定 > 継続（lastQ） > null
+  qCode: resolvedQCode ?? normalizedQCode ?? lastQForContinuity ?? undefined,
 
-    selfAcceptance:
-      typeof selfAcceptanceLine === 'number'
-        ? clampSelfAcceptance(selfAcceptanceLine)
-        : mergedBaseMeta.selfAcceptance ?? null,
-    yLevel:
-      typeof yLevel === 'number'
-        ? yLevel
-        : mergedBaseMeta.yLevel ?? null,
-    hLevel:
-      typeof hLevel === 'number'
-        ? hLevel
-        : mergedBaseMeta.hLevel ?? null,
-    intentLine: intentLine ?? mergedBaseMeta.intentLine ?? null,
-    tLayerHint: normalizedTLayer ?? mergedBaseMeta.tLayerHint ?? null,
-    hasFutureMemory,
-  };
+  selfAcceptance:
+    typeof selfAcceptanceLine === 'number'
+      ? clampSelfAcceptance(selfAcceptanceLine)
+      : mergedBaseMeta.selfAcceptance ?? null,
+  yLevel:
+    typeof yLevel === 'number'
+      ? yLevel
+      : mergedBaseMeta.yLevel ?? null,
+  hLevel:
+    typeof hLevel === 'number'
+      ? hLevel
+      : mergedBaseMeta.hLevel ?? null,
+  intentLine: intentLine ?? mergedBaseMeta.intentLine ?? null,
+  tLayerHint: normalizedTLayer ?? mergedBaseMeta.tLayerHint ?? null,
+  hasFutureMemory,
+};
+
 
   // ★ situation_topic を確実に付与（Training/集計/MemoryState の舵取り）
   // 優先：meta → snake_case → unified → extra.pastStateNoteText から抽出 → 既定値
@@ -541,70 +547,131 @@ export async function runIrosTurn(
   }
 
 
-  // ----------------------------------------------------------------
-  // 4.5 Iros Soul レイヤー（Silent Advisor）呼び出し
-  // ----------------------------------------------------------------
-  let soulNote: any = null;
-  try {
-    // ★ intentAnchorText を確実に作る（優先：meta.intent_anchor.text → intentLine.coreNeed）
-    const intentAnchorText: string | null =
-      (meta as any)?.intent_anchor?.text &&
-      typeof (meta as any).intent_anchor.text === 'string' &&
-      (meta as any).intent_anchor.text.trim().length > 0
-        ? (meta as any).intent_anchor.text.trim()
-        : intentLine && typeof (intentLine as any).coreNeed === 'string'
-        ? String((intentLine as any).coreNeed).trim() || null
-        : null;
+// ----------------------------------------------------------------
+// 4.5 Iros Soul レイヤー（Silent Advisor）呼び出し
+// ----------------------------------------------------------------
+let soulNote: any = null;
+try {
+  // ✅ meta が作られた直後〜SoulInput を作る前に置く
+  const thisTurnText = String(text ?? '').trim();
 
-    // ★ situationTopic を meta/unified/notes から拾う
-    const situationTopic: string | null = resolveSituationTopicFromMeta(meta);
+  if (thisTurnText) {
+    const s = String((meta as any)?.situationSummary ?? '').trim();
 
-    // ★ 追加：拾えた topic は meta にも保存（Training/MemoryState へ残す）
-    if (situationTopic) {
-      (meta as any).situationTopic = situationTopic;
-    }
-
-    const soulInput: IrosSoulInput = {
-      userText: text,
-      qCode: meta.qCode ?? null,
-      depthStage: meta.depth ?? null,
-      phase: (meta as any).phase ?? null,
-      selfAcceptance: meta.selfAcceptance ?? null,
-      yLevel: (meta as any).yLevel ?? null,
-      hLevel: (meta as any).hLevel ?? null,
-
-      // ★ 今回のターンは text を入れる（null にしない）
-      situationSummary:
-        typeof text === 'string' && text.trim().length > 0 ? text.trim() : null,
-
-      // ★ topic も供給
-      situationTopic,
-
-      // ★ Soul に意図アンカーを渡す
-      intentAnchorText,
-
-      intentNowLabel:
-        intentLine && typeof (intentLine as any).nowLabel === 'string'
-          ? (intentLine as any).nowLabel
-          : null,
-      intentGuidanceHint:
-        intentLine && typeof (intentLine as any).guidanceHint === 'string'
-          ? (intentLine as any).guidanceHint
-          : null,
-    };
-
-    if (shouldUseSoul(soulInput)) {
-      soulNote = await runIrosSoul(soulInput);
-    }
-  } catch (e) {
-    if (process.env.DEBUG_IROS_SOUL === '1') {
-      console.error('[IROS/Soul] error', e);
+    // ✅ 「未設定/空」のときだけ、このターンの入力で補完する
+    // （解析が作った summary を潰さない）
+    if (!s) {
+      (meta as any).situationSummary = thisTurnText;
     }
   }
 
-  if (soulNote) {
-    (meta as any).soulNote = soulNote;
+  // ★ intentAnchorText を確実に作る（優先：meta.intent_anchor.text → intentLine.coreNeed）
+  const intentAnchorText: string | null =
+    (meta as any)?.intent_anchor?.text &&
+    typeof (meta as any).intent_anchor.text === 'string' &&
+    (meta as any).intent_anchor.text.trim().length > 0
+      ? (meta as any).intent_anchor.text.trim()
+      : intentLine && typeof (intentLine as any).coreNeed === 'string'
+      ? String((intentLine as any).coreNeed).trim() || null
+      : null;
+
+  // ★ situationTopic を meta/unified/notes から拾う
+  const situationTopic: string | null = resolveSituationTopicFromMeta(meta);
+
+  // ★ 追加：拾えた topic は meta にも保存（Training/MemoryState へ残す）
+  if (situationTopic) {
+    (meta as any).situationTopic = situationTopic;
   }
+
+  const soulInput: IrosSoulInput = {
+    userText: text,
+    qCode: meta.qCode ?? null,
+    depthStage: meta.depth ?? null,
+    phase: (meta as any).phase ?? null,
+    selfAcceptance: meta.selfAcceptance ?? null,
+    yLevel: (meta as any).yLevel ?? null,
+    hLevel: (meta as any).hLevel ?? null,
+
+    // ★ 今回のターンは text を入れる（null にしない）
+    situationSummary:
+      typeof text === 'string' && text.trim().length > 0 ? text.trim() : null,
+
+    // ★ topic も供給
+    situationTopic,
+
+    // ★ Soul に意図アンカーを渡す
+    intentAnchorText,
+
+    intentNowLabel:
+      intentLine && typeof (intentLine as any).nowLabel === 'string'
+        ? (intentLine as any).nowLabel
+        : null,
+    intentGuidanceHint:
+      intentLine && typeof (intentLine as any).guidanceHint === 'string'
+        ? (intentLine as any).guidanceHint
+        : null,
+  };
+
+  if (shouldUseSoul(soulInput)) {
+    soulNote = await runIrosSoul(soulInput);
+  }
+} catch (e) {
+  if (process.env.DEBUG_IROS_SOUL === '1') {
+    console.error('[IROS/Soul] error', e);
+  }
+}
+
+if (soulNote) {
+  (meta as any).soulNote = soulNote;
+}
+
+// ---- full-auto flags / guard (env controlled) ----
+const ff = readIrosFeatureFlags();
+
+// qCode: 'Q1'..'Q5' -> number 1..5
+const qNum: number | null = (() => {
+  const qc = meta?.qCode ?? null;
+  if (!qc) return null;
+  const m = String(qc).match(/^Q([1-5])$/);
+  return m ? Number(m[1]) : null;
+})();
+
+const guardInputBase = {
+  userCode: userCode ?? null,
+  isDev: process.env.NODE_ENV !== 'production',
+
+  // ※この2つは後で繋ぐ（今は安全側）
+  consentGiven: false,
+  stability: null,
+
+  depth: meta?.depth ?? null,
+  q: qNum,
+
+  riskSignals: null,
+} as const;
+
+const fullAutoDecision = canUseFullAuto(guardInputBase);
+
+// 個別機能のON/OFF（fullautoDecision.ok=falseでも frameだけ例外など可能）
+const fullAutoFeatures = {
+  autonomousShift: shouldEnableFeature('autonomous_shift', guardInputBase).enabled,
+  intentTrigger: shouldEnableFeature('intent_trigger', guardInputBase).enabled,
+  frameAutoSwitch: shouldEnableFeature('frame_auto_switch', guardInputBase).enabled,
+  leapAllowed: shouldEnableFeature('leap_allowed', guardInputBase).enabled,
+  reframeMeaning: shouldEnableFeature('reframe_meaning', guardInputBase).enabled,
+  storytelling: shouldEnableFeature('storytelling', guardInputBase).enabled,
+  loopShake: shouldEnableFeature('loop_shake', guardInputBase).enabled,
+};
+
+// meta に乗せる（UI/ログで一望できる）
+(meta as any).fullAuto = {
+  flags: ff,
+  decision: fullAutoDecision,
+  features: fullAutoFeatures,
+};
+
+
+
 
   // ----------------------------------------------------------------
   // 5. Vision-Trigger 判定（ビジョンモードへの自動ジャンプ）
@@ -657,18 +724,22 @@ let { goal, priority } = computeGoalAndPriority({
     (typeof lastDescentGate !== 'undefined' ? lastDescentGate : null) ?? null,
 });
 
-
-// ✅ targetQ が undefined に落ちるケースを強制補完（ログで targetQ: undefined が出ていたため）
+// ----------------------------------------------------------------
+// targetQ が undefined に落ちるケースを補正
+// ----------------------------------------------------------------
 {
   const q = meta.qCode ?? null;
   if (q) {
     if (goal && (goal as any).targetQ == null) (goal as any).targetQ = q;
-    if (priority?.goal && (priority.goal as any).targetQ == null)
+    if (priority?.goal && (priority.goal as any).targetQ == null) {
       (priority.goal as any).targetQ = q;
+    }
   }
 }
 
-// ✅ meta.rotationState.reason が undefined になるのを潰す（ログ/デバッグの証拠を残す）
+// ----------------------------------------------------------------
+// meta.rotationState.reason の欠落防止
+// ----------------------------------------------------------------
 {
   const g: any = goal as any;
   const rs = g?.rotationState ?? null;
@@ -689,16 +760,24 @@ let { goal, priority } = computeGoalAndPriority({
   };
 }
 
-// delegate intent 上書き
-if (goal && priority) {
+// ----------------------------------------------------------------
+// delegate intent 上書き（※ デモ寄せ：フラグで制御）
+// ----------------------------------------------------------------
+const enableDelegateOverride =
+  process.env.IROS_ENABLE_DELEGATE_OVERRIDE === '1';
+
+if (enableDelegateOverride && goal && priority) {
   ({ goal, priority } = applyDelegateIntentOverride({
     goal,
     priority,
     text,
+    meta,
   }));
 }
 
+// ----------------------------------------------------------------
 // delegate intent → 問い返し抑制
+// ----------------------------------------------------------------
 const isDelegateIntent =
   !!(priority as any)?.debugNote &&
   String((priority as any).debugNote).includes('delegateIntent');
@@ -708,7 +787,9 @@ if (isDelegateIntent) {
   (meta as any).replyStyleHint = 'no-question-action-first';
 }
 
-// 「今日できること？」など
+// ----------------------------------------------------------------
+// 「今日できること？」などの行動要求
+// ----------------------------------------------------------------
 const isActionRequest = detectActionRequest(text);
 
 if (isActionRequest && priority) {
@@ -735,56 +816,6 @@ if (isActionRequest && priority) {
   }
 }
 
-
-// uncoverStreak 更新
-(meta as any).uncoverStreak =
-  goal && (goal as any).kind === 'uncover'
-    ? previousUncoverStreak + 1
-    : 0;
-
-(meta as any).goal = goal;
-(meta as any).priority = priority;
-
-// ----------------------------------------------------------------
-// 7.25 I層を「確実に」出す強制ゲート（presentation-critical）
-// - ユーザーが I層を要求したら、mode/depth/goal を I帯へ固定
-// - TCF 落下（descent）に入らないよう扉を閉じる
-// ----------------------------------------------------------------
-{
-  const iForce = detectILayerForce({
-    userText: text,
-    mode: (meta.mode ?? null) as any,
-    requestedDepth:
-      ((goal as any)?.targetDepth as any) ??
-      (requestedDepth ?? null) ??
-      ((meta.depth as any) ?? null),
-  });
-
-  // デバッグ保存（あとでログで「なぜI層になったか」追える）
-  (meta as any).iLayerForce = iForce;
-
-  if (iForce.force) {
-    // mode を vision に固定（I層返しの器）
-    meta.mode = (iForce.requestedMode ?? 'vision') as any;
-
-    // depth を I帯に固定（最終depth決定でブレさせない）
-    if (iForce.requestedDepth) {
-      meta.depth = iForce.requestedDepth as any;
-
-      if (goal) (goal as any).targetDepth = iForce.requestedDepth as any;
-      if (priority?.goal) (priority.goal as any).targetDepth = iForce.requestedDepth as any;
-    }
-
-    // TCF 落下は止める（I層プレゼン中は混線させない）
-    (meta as any).descentGate = 'closed';
-    (meta as any).descentGateReason = 'I-layer forced: lock descentGate=closed';
-  }
-
-  // 「上司のI層 / 自分のI層」両建てフラグ（slotBuilder側で使える）
-  if (iForce.dual) {
-    (meta as any).iLayerDual = true;
-  }
-}
 
 // ----------------------------------------------------------------
 // 7.5 DescentGate + Frame + Slots（唯一の決定点 / 正規化版）
@@ -825,7 +856,7 @@ if (isActionRequest && priority) {
   (meta as any).target_kind = targetKindNorm;
 
   // ----------------------------------------------------------------
-  // DescentGate 決定（※ I層強制でない限り自然回転）
+  // DescentGate 決定（自然回転）
   // ----------------------------------------------------------------
   const dg = decideDescentGate({
     qCode: meta.qCode ?? null,
@@ -838,16 +869,11 @@ if (isActionRequest && priority) {
     prevDescentGate: (mergedBaseMeta as any).descentGate ?? null,
   });
 
-  // ★ I層 force のときだけ descent を閉じる
-  const isILayerForced = (meta as any)?.iLayerForce?.force === true;
-
-  (meta as any).descentGate = isILayerForced ? 'closed' : dg.descentGate;
-  (meta as any).descentGateReason = isILayerForced
-    ? 'I-layer forced'
-    : dg.reason;
+  (meta as any).descentGate = dg.descentGate;
+  (meta as any).descentGateReason = dg.reason;
 
   // ----------------------------------------------------------------
-  // Frame 決定（I層強制時のみ I に固定）
+  // Frame 決定（自然選択）
   // ----------------------------------------------------------------
   const frameSelected = selectFrame(
     {
@@ -860,10 +886,13 @@ if (isActionRequest && priority) {
     inputKind
   );
 
-  const frame: FrameKind = isILayerForced ? 'I' : frameSelected;
+  const frame: FrameKind = frameSelected;
+  (meta as any).frame = frame;
 
   // ----------------------------------------------------------------
   // NO_DELTA 判定（slot 用）
+  // ここが強すぎると「動いてるのに stuck 扱い」になりがちなので、
+  // “短文だけ”で noDelta にしない（= 反応が止まりやすい）
   // ----------------------------------------------------------------
   const rotationReason = String((meta as any)?.rotationState?.reason ?? '');
   const spinStepNow =
@@ -879,8 +908,10 @@ if (isActionRequest && priority) {
         t
       );
 
-    const isShortLoop =
-      t.length <= 12 && (inputKind === 'chat' || inputKind === 'question');
+    // ✅ “短い＝noDelta” をやめる（短くても前進はある）
+    // 短文は noDelta の「補助条件」に落とす
+    const isVeryShort = t.length <= 8;
+    const isShortLoopContext = inputKind === 'chat' || inputKind === 'question';
 
     const looksStoppedByReason =
       rotationReason.length > 0 &&
@@ -891,16 +922,17 @@ if (isActionRequest && priority) {
     const looksStoppedByMeta =
       spinStepNow === 0 && rotationReason.length > 0;
 
+    // ✅ noDelta は “根拠がある停止” か “反復警告” を主因にする
     const noDelta =
       isRepeatWarning ||
-      isShortLoop ||
       looksStoppedByReason ||
-      looksStoppedByMeta;
+      looksStoppedByMeta ||
+      (isVeryShort && isShortLoopContext && looksStoppedByReason);
 
     let kind: NoDeltaKind | null = null;
     if (noDelta) {
       if (isRepeatWarning) kind = 'repeat-warning';
-      else if (isShortLoop) kind = 'short-loop';
+      else if (isVeryShort) kind = 'short-loop';
       else kind = 'stuck';
     }
 
@@ -927,47 +959,86 @@ if (isActionRequest && priority) {
 
 
 
-  // ----------------------------------------------------------------
-  // 7.75 IT Trigger（I→T の扉） + I語彙の表出許可（別レーン）
-  // ✅ 重要：generate より “前” に動かす（本文に反映させるため）
-  // ※注意：meta.iLayerForce は detectILayerForce の “オブジェクト” なので触らない
-  // ----------------------------------------------------------------
-  {
-    const it = computeITTrigger({
-      text,
-      // ✅ runIrosTurn の args から受け取った history を使う（なければ空配列）
-      history: Array.isArray(history) ? history : [],
-      meta: {
-        depthStage: meta.depth ?? null,
-        intentLine: (meta as any).intentLine ?? null,
-      },
+// ----------------------------------------------------------------
+// 7.75 IT Trigger（I→T の扉） + I語彙の表出許可（別レーン）
+// ✅ 重要：generate より “前” に動かす（本文に反映させるため）
+// ----------------------------------------------------------------
+{
+  const it = computeITTrigger({
+    text,
+    history: Array.isArray(history) ? history : [],
+    meta: {
+      depthStage: meta.depth ?? null,
+      intentLine: (meta as any).intentLine ?? null,
+    },
+  });
+
+  // ✅ iLexemeForce は「このターンの判定 + 手動固定(true)」のORだけ許可（stickyはtrueのみ）
+  (meta as any).iLexemeForce =
+    (meta as any).iLexemeForce === true || it.iLayerForce === true;
+
+  // ✅ Tレーン系は sticky禁止：毎ターン決定（成立しなければ必ず閉じる）
+  (meta as any).tLayerModeActive = it.ok && it.tLayerModeActive === true;
+  (meta as any).tLayerHint =
+    (meta as any).tLayerModeActive
+      ? (it.tLayerHint ?? 'T2')
+      : null;
+  (meta as any).tVector =
+    (meta as any).tLayerModeActive ? (it.tVector ?? null) : null;
+
+  if (typeof process !== 'undefined' && process.env.DEBUG_IROS_IT === '1') {
+    // eslint-disable-next-line no-console
+    console.log('[IROS/IT_TRIGGER]', {
+      ok: it.ok,
+      reason: it.reason,
+      flags: it.flags,
+      iLexemeForce: (meta as any).iLexemeForce ?? null,
+      tLayerModeActive: (meta as any).tLayerModeActive ?? null,
+      tLayerHint: (meta as any).tLayerHint ?? null,
+      tVector: (meta as any).tVector ?? null,
     });
-
-    // ✅ I語彙を本文に1行出す「別レーン」フラグ（衝突回避）
-    (meta as any).iLexemeForce =
-  (meta as any).iLexemeForce === true || it.iLayerForce === true;
-
-    // ✅ I→T が成立した時だけ Tを開く（未成立なら既存値を壊さない）
-    if (it.ok && it.tLayerModeActive) {
-      (meta as any).tLayerModeActive = true;
-      (meta as any).tLayerHint =
-        it.tLayerHint ?? (meta as any).tLayerHint ?? 'T2';
-      (meta as any).tVector = it.tVector;
-    }
-
-    if (typeof process !== 'undefined' && process.env.DEBUG_IROS_IT === '1') {
-      // eslint-disable-next-line no-console
-      console.log('[IROS/IT_TRIGGER]', {
-        ok: it.ok,
-        reason: it.reason,
-        flags: it.flags,
-        iLexemeForce: (meta as any).iLexemeForce ?? null,
-        tLayerModeActive: (meta as any).tLayerModeActive ?? null,
-        tLayerHint: (meta as any).tLayerHint ?? null,
-        tVector: (meta as any).tVector ?? null,
-      });
-    }
   }
+}
+
+// ----------------------------------------------------------------
+// DEBUG: IT決定がこのターンで確実に「閉じ/開き」されているか確認
+// - tLayerModeActive が true/false/null のまま残留していないか
+// - renderMode を使っていない（唯一の正は tLayerModeActive）
+// ----------------------------------------------------------------
+if (typeof process !== 'undefined' && process.env.DEBUG_IROS_IT === '1') {
+  // eslint-disable-next-line no-console
+  console.log('[IROS/IT_DECISION][orch]', {
+    // 入力
+    textLen: String(text ?? '').length,
+    hasHistory: Array.isArray(history) ? history.length : 0,
+
+    // ITレーン決定（唯一の正）
+    tLayerModeActive: (meta as any).tLayerModeActive ?? null,
+    tLayerHint: (meta as any).tLayerHint ?? null,
+    tVector: (meta as any).tVector ?? null,
+
+    // I語彙の許可（sticky trueのみ）
+    iLexemeForce: (meta as any).iLexemeForce ?? null,
+
+    // 参考：analysis由来（残骸チェック）
+    analysis_tLayerHint: (analysis as any)?.tLayerHint ?? null,
+    analysis_tLayerModeActive: (analysis as any)?.tLayerModeActive ?? null,
+
+    // 参考：前段の状態（安全確認）
+    mode: (meta as any).mode ?? null,
+    depth: (meta as any).depth ?? null,
+    qCode: (meta as any).qCode ?? null,
+
+    // 事故検出：renderMode が残っても “無視する” ための観測だけ
+    legacy_renderMode:
+      (meta as any)?.extra?.renderMode ??
+      (meta as any)?.renderMode ??
+      null,
+  });
+}
+
+
+
 
   // ----------------------------------------------------------------
   // 8. 本文生成（LLM 呼び出し）

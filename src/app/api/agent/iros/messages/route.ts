@@ -10,7 +10,7 @@ import {
   SERVICE_ROLE,
 } from '@/lib/authz';
 
-// ✅ 追加：NextStep タグ除去 & 意図メタ取得
+// ✅ NextStep タグ除去 & 意図メタ取得
 import {
   extractNextStepChoiceFromText,
   findNextStepOptionById,
@@ -29,7 +29,7 @@ const json = (data: any, status = 200) =>
     },
   });
 
-/** --- 追加: 計測ヘルパ --- */
+/** --- 計測ヘルパ --- */
 function msSince(t0: bigint) {
   return Number((process.hrtime.bigint() - t0) / BigInt(1e6));
 }
@@ -46,20 +46,22 @@ function isUpstreamTimeout(err: any) {
 async function trySelect<T>(
   supabase: ReturnType<typeof sb>,
   tables: readonly string[],
-  columns: string,
-  modify: (q: any) => any,
+  columnsByTable: Record<string, string>,
+  modify: (q: any, table: string) => any,
 ) {
   for (const table of tables) {
+    const columns = columnsByTable[table] ?? columnsByTable['*'] ?? '*';
     try {
       const { data, error } = await modify(
         (supabase as any).from(table).select(columns),
+        table,
       );
       if (!error) return { ok: true as const, data, table };
     } catch {
       // ignore and try next
     }
   }
-  return { ok: false, error: 'select_failed_all_candidates' };
+  return { ok: false as const, error: 'select_failed_all_candidates' as const };
 }
 
 /* ========= 型定義 ========= */
@@ -147,6 +149,22 @@ function sanitizeJsonDeep(value: any): any {
   return undefined;
 }
 
+function toNonEmptyTrimmedString(v: any): string | null {
+  if (typeof v !== 'string') return null;
+  const s = v.trim();
+  return s.length ? s : null;
+}
+
+function pickMetaValue(meta: any, keys: string[]): string | null {
+  if (!meta || typeof meta !== 'object') return null;
+  for (const k of keys) {
+    const v = (meta as any)[k];
+    const s = toNonEmptyTrimmedString(v);
+    if (s) return s;
+  }
+  return null;
+}
+
 /* ========= OPTIONS ========= */
 export async function OPTIONS() {
   return json({ ok: true }, 200);
@@ -166,7 +184,13 @@ export async function GET(req: NextRequest) {
         message: String(e?.message ?? e),
       });
       return json(
-        { ok: false, error: 'authz_throw', detail: String(e?.message ?? e), ms },
+        {
+          ok: false,
+          error: 'authz_throw',
+          error_code: 'authz_throw',
+          detail: String(e?.message ?? e),
+          ms,
+        },
         isUpstreamTimeout(e) ? 504 : 401,
       );
     }
@@ -180,7 +204,10 @@ export async function GET(req: NextRequest) {
         status,
         error: auth.error,
       });
-      return json({ ok: false, error: auth.error, ms }, status);
+      return json(
+        { ok: false, error: auth.error, error_code: 'authz_not_ok', ms },
+        status,
+      );
     }
 
     const userCode =
@@ -188,10 +215,22 @@ export async function GET(req: NextRequest) {
       (auth.user?.uid as string) ||
       (auth.userCode as string) ||
       '';
-    if (!userCode) return json({ ok: false, error: 'user_code_missing' }, 400);
+    if (!userCode)
+      return json(
+        { ok: false, error: 'user_code_missing', error_code: 'user_code_missing' },
+        400,
+      );
 
     const cid = req.nextUrl.searchParams.get('conversation_id') || '';
-    if (!cid) return json({ ok: false, error: 'missing_conversation_id' }, 400);
+    if (!cid)
+      return json(
+        {
+          ok: false,
+          error: 'missing_conversation_id',
+          error_code: 'missing_conversation_id',
+        },
+        400,
+      );
 
     const limitRaw = req.nextUrl.searchParams.get('limit');
     const limit = (() => {
@@ -211,7 +250,9 @@ export async function GET(req: NextRequest) {
     const conv = await trySelect<{ id: string; user_code?: string | null }>(
       supabase,
       CONV_TABLES,
-      'id,user_code',
+      {
+        '*': 'id,user_code',
+      },
       (q) => q.eq('id', cid).limit(1),
     );
     console.log('[IROS/messages][GET] conv select', {
@@ -220,6 +261,7 @@ export async function GET(req: NextRequest) {
       table: (conv as any).table,
     });
 
+    // owner mismatch は「存在可否を隠す」目的で ok:true + 空配列
     if (conv.ok && (conv as any).data?.[0]) {
       const owner = String((conv as any).data[0].user_code ?? '');
       if (owner && owner !== userCode) {
@@ -235,17 +277,33 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const columnsBase =
+    // テーブルごとに select カラムを分け、失敗回数を減らす
+    const columnsBaseForIros =
       'id,conversation_id,user_code,role,content,text,q_code,depth_stage,intent_layer,color,created_at,ts';
-    const columns = includeMeta ? `${columnsBase},meta` : columnsBase;
+    const columnsBaseForSofia =
+      'id,conversation_id,user_code,role,content,text,q_code,color,created_at,ts';
+    const columnsBaseForGeneric =
+      'id,conversation_id,role,content,text,created_at,ts';
+
+    const columnsByTable: Record<string, string> = {
+      iros_messages: includeMeta ? `${columnsBaseForIros},meta` : columnsBaseForIros,
+      'public.iros_messages': includeMeta
+        ? `${columnsBaseForIros},meta`
+        : columnsBaseForIros,
+      sofia_messages: includeMeta ? `${columnsBaseForSofia},meta` : columnsBaseForSofia,
+      messages: includeMeta ? `${columnsBaseForGeneric},meta` : columnsBaseForGeneric,
+      '*': includeMeta ? `${columnsBaseForIros},meta` : columnsBaseForIros,
+    };
 
     const tSel = process.hrtime.bigint();
     const res = await trySelect<any>(
       supabase,
       MSG_TABLES,
-      columns,
+      columnsByTable,
       (q) =>
-        q.eq('conversation_id', cid).order('created_at', { ascending: false }).limit(limit),
+        q.eq('conversation_id', cid)
+          .order('created_at', { ascending: false })
+          .limit(limit),
     );
     console.log('[IROS/messages][GET] msg select', {
       ms: msSince(tSel),
@@ -257,8 +315,15 @@ export async function GET(req: NextRequest) {
     });
 
     if (!res.ok) {
+      // ここは「異常」を明確に返す（UIが正常空と区別できるように）
       return json(
-        { ok: true, messages: [], llm_messages: [], note: 'messages_select_failed' },
+        {
+          ok: false,
+          error: 'messages_select_failed',
+          error_code: 'messages_select_failed',
+          messages: [],
+          llm_messages: [],
+        },
         200,
       );
     }
@@ -270,6 +335,7 @@ export async function GET(req: NextRequest) {
       return uc === userCode;
     });
 
+    // DBは desc で取ってるので UI用に asc に戻す
     filtered.reverse();
 
     const messages: OutMsg[] = filtered.map((m: any) => ({
@@ -306,10 +372,11 @@ export async function GET(req: NextRequest) {
     console.error('[IROS/messages][GET] exception', { ms, message: String(e?.message ?? e) });
     return json(
       {
-        ok: true,
+        ok: false,
+        error: 'exception',
+        error_code: 'exception',
         messages: [],
         llm_messages: [],
-        note: 'exception',
         detail: String(e?.message ?? e),
         ms,
       },
@@ -332,7 +399,13 @@ export async function POST(req: NextRequest) {
         message: String(e?.message ?? e),
       });
       return json(
-        { ok: false, error: 'authz_throw', detail: String(e?.message ?? e), ms },
+        {
+          ok: false,
+          error: 'authz_throw',
+          error_code: 'authz_throw',
+          detail: String(e?.message ?? e),
+          ms,
+        },
         isUpstreamTimeout(e) ? 504 : 401,
       );
     }
@@ -341,7 +414,10 @@ export async function POST(req: NextRequest) {
       const ms = msSince(t0);
       const status = isUpstreamTimeout(auth) ? 504 : auth.status || 401;
       console.warn('[IROS/messages][POST] authz not ok', { ms, status, error: auth.error });
-      return json({ ok: false, error: auth.error, ms }, status);
+      return json(
+        { ok: false, error: auth.error, error_code: 'authz_not_ok', ms },
+        status,
+      );
     }
 
     const userCode =
@@ -349,7 +425,11 @@ export async function POST(req: NextRequest) {
       (auth.user?.uid as string) ||
       (auth.userCode as string) ||
       '';
-    if (!userCode) return json({ ok: false, error: 'user_code_missing' }, 400);
+    if (!userCode)
+      return json(
+        { ok: false, error: 'user_code_missing', error_code: 'user_code_missing' },
+        400,
+      );
 
     let body: any = {};
     try {
@@ -360,96 +440,129 @@ export async function POST(req: NextRequest) {
       body?.conversation_id || body?.conversationId || '',
     ).trim();
 
-// ✅ raw を保持してから NextStep を剥がす
-const rawText: string = String(body?.text ?? body?.content ?? '');
+    // ✅ role は最初に確定（assistant 行に choiceId が混ざる事故防止）
+    const role: 'user' | 'assistant' =
+      String(body?.role ?? '').toLowerCase() === 'assistant' ? 'assistant' : 'user';
 
-// ✅ ① 本文から抽出（従来のタグ方式）
-const extracted = extractNextStepChoiceFromText(rawText);
+    // ✅ raw を保持（この時点ではまだ strip しない）
+    const rawText: string = String(body?.text ?? body?.content ?? '');
 
-// ✅ ② body / meta から choiceId を拾う（「タグを隠す」運用向け）
-const choiceIdFromBody: string | null = (() => {
-  const c1 = body?.choiceId ?? body?.extractedChoiceId ?? null;
-  if (typeof c1 === 'string' && c1.trim()) return c1.trim();
+    // ✅ 先に必須チェック（ここで落とす：後続処理を走らせない）
+    if (!conversation_id)
+      return json(
+        {
+          ok: false,
+          error: 'missing_conversation_id',
+          error_code: 'missing_conversation_id',
+        },
+        400,
+      );
 
-  const m = body?.meta;
-  if (m && typeof m === 'object' && !Array.isArray(m)) {
-    const c2 = (m as any).choiceId ?? (m as any).extractedChoiceId ?? null;
-    if (typeof c2 === 'string' && c2.trim()) return c2.trim();
+    // rawText はここでチェック（タグ除去前の “元入力” 基準）
+    if (!rawText || !String(rawText).trim())
+      return json({ ok: false, error: 'text_empty', error_code: 'text_empty' }, 400);
 
-    const ex = (m as any).extra;
-    if (ex && typeof ex === 'object' && !Array.isArray(ex)) {
-      const c3 = (ex as any).choiceId ?? (ex as any).extractedChoiceId ?? null;
-      if (typeof c3 === 'string' && c3.trim()) return c3.trim();
-    }
-  }
+    // ✅ ① 本文から抽出（従来のタグ方式）
+    const extracted = extractNextStepChoiceFromText(rawText);
 
-  return null;
-})();
+    // ✅ ② body / meta から choiceId を拾う（「タグを隠す」運用向け）
+    const choiceIdFromBody: string | null = (() => {
+      const c1 = body?.choiceId ?? body?.extractedChoiceId ?? null;
+      if (typeof c1 === 'string' && c1.trim()) return c1.trim();
 
-// ✅ 最終 choiceId は「body優先 → 本文抽出」
-const choiceId = choiceIdFromBody ?? extracted.choiceId ?? null;
+      const m = body?.meta;
+      if (m && typeof m === 'object' && !Array.isArray(m)) {
+        const c2 = (m as any).choiceId ?? (m as any).extractedChoiceId ?? null;
+        if (typeof c2 === 'string' && c2.trim()) return c2.trim();
 
-// ✅ cleanText は抽出結果を使う（タグが無いなら rawText のまま）
-const cleanText = extracted.cleanText;
-const finalText = (cleanText && cleanText.trim().length ? cleanText : rawText).trim();
+        const ex = (m as any).extra;
+        if (ex && typeof ex === 'object' && !Array.isArray(ex)) {
+          const c3 = (ex as any).choiceId ?? (ex as any).extractedChoiceId ?? null;
+          if (typeof c3 === 'string' && c3.trim()) return c3.trim();
+        }
+      }
+      return null;
+    })();
 
-const picked = choiceId ? findNextStepOptionById(choiceId) : null;
+    // ✅ 最終 choiceId は「user のときだけ」採用
+    const choiceId: string | null =
+      role === 'user' ? (choiceIdFromBody ?? extracted.choiceId ?? null) : null;
 
-const metaRaw = body?.meta ?? null;
+    // ✅ cleanText は抽出結果を使う（タグが無いなら rawText のまま）
+    const cleanText = extracted.cleanText;
+    const finalText = (cleanText && cleanText.trim().length ? cleanText : rawText).trim();
 
-// ✅ meta.extra に nextStep 情報を隠して残す（reply と messages で同じ思想）
-const baseMetaRaw =
-  metaRaw && typeof metaRaw === 'object' && !Array.isArray(metaRaw) ? metaRaw : {};
-const baseExtraRaw =
-  baseMetaRaw.extra &&
-  typeof baseMetaRaw.extra === 'object' &&
-  !Array.isArray(baseMetaRaw.extra)
-    ? baseMetaRaw.extra
-    : {};
+    // ✅ strip 後が空になるケースも弾く（念のため）
+    if (!finalText)
+      return json({ ok: false, error: 'text_empty', error_code: 'text_empty' }, 400);
 
-const metaAugRaw = {
-  ...baseMetaRaw,
-  extra: {
-    ...baseExtraRaw,
-    nextStepChoiceId: choiceId ?? null,
-    nextStepPickedMeta: picked?.meta ?? null,
-  },
-};
+    const picked = choiceId ? findNextStepOptionById(choiceId) : null;
 
-const q_code: string | null =
-  metaAugRaw && typeof metaAugRaw === 'object' && typeof (metaAugRaw as any).qCode === 'string'
-    ? (metaAugRaw as any).qCode
-    : null;
 
-const depth_stage: string | null =
-  metaAugRaw && typeof metaAugRaw === 'object' && typeof (metaAugRaw as any).depth === 'string'
-    ? (metaAugRaw as any).depth
-    : null;
 
-const intent_layer: string | null =
-  metaAugRaw &&
-  typeof metaAugRaw === 'object' &&
-  typeof (metaAugRaw as any).intentLayer === 'string'
-    ? (metaAugRaw as any).intentLayer
-    : null;
+    const metaRaw = body?.meta ?? null;
 
-const metaSanitized = sanitizeJsonDeep(metaAugRaw);
-const meta = metaSanitized === null || typeof metaSanitized === 'undefined' ? null : metaSanitized;
+    // ✅ meta.extra に nextStep 情報を隠して残す（肥大化防止：snapshotは最小）
+    const baseMetaRaw =
+      metaRaw && typeof metaRaw === 'object' && !Array.isArray(metaRaw) ? metaRaw : {};
+    const baseExtraRaw =
+      baseMetaRaw.extra &&
+      typeof baseMetaRaw.extra === 'object' &&
+      !Array.isArray(baseMetaRaw.extra)
+        ? baseMetaRaw.extra
+        : {};
 
-const role: 'user' | 'assistant' =
-  String(body?.role ?? '').toLowerCase() === 'assistant' ? 'assistant' : 'user';
+    const pickedSnapshot =
+      picked && typeof picked === 'object'
+        ? {
+            id: (picked as any).id ?? choiceId ?? null,
+            label:
+              (picked as any).label ??
+              (picked as any).title ??
+              (picked as any).name ??
+              null,
+          }
+        : null;
 
-if (!conversation_id) return json({ ok: false, error: 'missing_conversation_id' }, 400);
-if (!finalText) return json({ ok: false, error: 'text_empty' }, 400);
+    const metaAugRaw = {
+      ...baseMetaRaw,
+      extra: {
+        ...baseExtraRaw,
+        nextStepChoiceId: choiceId ?? null,
+        nextStepPicked: pickedSnapshot,
+      },
+    };
 
-const supabase = sb();
+    // ✅ meta key 揺れに耐える（最小のフォールバック）
+    const q_code: string | null =
+      pickMetaValue(metaAugRaw, ['qCode', 'q_code', 'q', 'qPrimary', 'q_code_primary']) ?? null;
+
+    const depth_stage: string | null =
+      pickMetaValue(metaAugRaw, ['depth', 'depthStage', 'depth_stage']) ?? null;
+
+    const intent_layer: string | null =
+      pickMetaValue(metaAugRaw, ['intentLayer', 'intent_layer']) ?? null;
+
+    const metaSanitized = sanitizeJsonDeep(metaAugRaw);
+    const meta = metaSanitized === null || typeof metaSanitized === 'undefined' ? null : metaSanitized;
+
+
+    if (!conversation_id)
+      return json(
+        { ok: false, error: 'missing_conversation_id', error_code: 'missing_conversation_id' },
+        400,
+      );
+    if (!finalText)
+      return json({ ok: false, error: 'text_empty', error_code: 'text_empty' }, 400);
+
+    const supabase = sb();
 
     // 所有確認
     const tConv = process.hrtime.bigint();
     const conv = await trySelect<{ id: string; user_code?: string | null }>(
       supabase,
       CONV_TABLES,
-      'id,user_code',
+      { '*': 'id,user_code' },
       (q) => q.eq('id', conversation_id).limit(1),
     );
     console.log('[IROS/messages][POST] conv select', {
@@ -459,11 +572,17 @@ const supabase = sb();
     });
 
     if (!conv.ok || !(conv as any).data?.[0]) {
-      return json({ ok: false, error: 'conversation_not_found' }, 404);
+      return json(
+        { ok: false, error: 'conversation_not_found', error_code: 'conversation_not_found' },
+        404,
+      );
     }
     const owner = String((conv as any).data[0].user_code ?? '');
     if (owner && owner !== userCode) {
-      return json({ ok: false, error: 'forbidden_owner_mismatch' }, 403);
+      return json(
+        { ok: false, error: 'forbidden_owner_mismatch', error_code: 'forbidden_owner_mismatch' },
+        403,
+      );
     }
 
     const nowIso = new Date().toISOString();
@@ -540,36 +659,43 @@ const supabase = sb();
 
     if (!inserted) {
       console.error('[IROS/messages][POST] insert failed all', { ms: msSince(t0) });
-      return json({ ok: false, error: 'insert_failed_all_candidates', ms: msSince(t0) }, 500);
+      return json(
+        {
+          ok: false,
+          error: 'insert_failed_all_candidates',
+          error_code: 'insert_failed_all_candidates',
+          ms: msSince(t0),
+        },
+        500,
+      );
     }
 
-// ✅ 先に strip の中身を出す（デバッグ情報）
-console.log('[IROS/messages][POST] nextStep strip', {
-  rawText,
-  choiceId,
-  cleanText,
-  finalText,
-});
+    // ✅ 先に strip の中身を出す（デバッグ情報）
+    console.log('[IROS/messages][POST] nextStep strip', {
+      rawText,
+      choiceId,
+      cleanText,
+      finalText,
+    });
 
-// ✅ 最後に done（終わりの印）
-console.log('[IROS/messages][POST] done', { ms: msSince(t0) });
+    // ✅ 最後に done（終わりの印）
+    console.log('[IROS/messages][POST] done', { ms: msSince(t0) });
 
-return json({
-  ok: true,
-  message: {
-    id: String(inserted.id),
-    conversation_id,
-    role,
-    content: finalText,
-    created_at: inserted.created_at,
-  },
-});
-
+    return json({
+      ok: true,
+      message: {
+        id: String(inserted.id),
+        conversation_id,
+        role,
+        content: finalText,
+        created_at: inserted.created_at,
+      },
+    });
   } catch (e: any) {
     const ms = msSince(t0);
     console.error('[IROS/messages][POST] exception', { ms, message: String(e?.message ?? e) });
     return json(
-      { ok: false, error: 'unhandled_error', detail: String(e?.message ?? e), ms },
+      { ok: false, error: 'unhandled_error', error_code: 'unhandled_error', detail: String(e?.message ?? e), ms },
       500,
     );
   }

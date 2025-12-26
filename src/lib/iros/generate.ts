@@ -9,6 +9,10 @@
 // 追加方針（2025-12-17）:
 // - 短文（超短い入力）には「芯」「回転」「制約」を文章に乗せない
 // - ただし “数値メタ” だけは必ず末尾に 1 行で付ける（説明は禁止）
+//
+// ✅ 2025-12-26 修正：IT判定の単一ソースを renderMode から meta.tLayerModeActive に統一
+// - orchestrator.ts の computeITTrigger が毎ターン決める tLayerModeActive を唯一の正にする
+// - generate 側では renderMode 参照を廃止（競合/ズレ防止）
 
 import OpenAI from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat';
@@ -18,7 +22,6 @@ import {
   decideQBrakeRelease,
   normalizeQ,
 } from '@/lib/iros/rotation/qBrakeRelease';
-import { runItDemoGate } from '@/lib/iros/rotation/itDemoGate';
 
 /** ✅ 旧/新ルートを全部受ける（型で落ちない） */
 export type GenerateArgs = {
@@ -133,25 +136,20 @@ function isShortTurn(userText: string): boolean {
 }
 
 /* =========================================================
-   RENDER MODE (IT / NORMAL)
-   - buildWriterProtocol / buildWriterHintsFromMeta で共通化
+   T-LAYER (IT) ACTIVE DETECTOR
+   - IT のトリガー根拠は orchestrator が決めた tLayerModeActive を唯一の正にする
+   - renderMode での IT 判定は廃止（競合の元）
    ========================================================= */
 
-// src/lib/iros/generate.ts
-// ✅ renderMode の単一ソースは「meta.extra.renderMode / meta.renderMode」
-// （どっちに立ってても IT を拾えるようにする）
-function getRenderMode(meta: any): 'IT' | 'NORMAL' {
-  const rmRaw =
-    (meta as any)?.extra?.renderMode ??
-    (meta as any)?.extra?.render_mode ??
-    (meta as any)?.renderMode ??
-    (meta as any)?.render_mode ??
-    '';
+function isTLayerActive(meta: any): boolean {
+  const on = meta?.tLayerModeActive === true;
 
-  const rm = String(rmRaw).trim().toUpperCase();
-  return rm === 'IT' ? 'IT' : 'NORMAL';
+  // 念のため hint も見る（どちらかが立っていればT扱い）
+  const hint = String(meta?.tLayerHint ?? '').trim().toUpperCase();
+  const hintOk = hint === 'T1' || hint === 'T2' || hint === 'T3';
+
+  return on || hintOk;
 }
-
 
 /* =========================================================
    NUMERIC FOOTER (numbers only)
@@ -319,7 +317,7 @@ function buildSafeSystemMessage(
 
 function buildWriterProtocol(meta: any, userText: string): string {
   const shortTurn = isShortTurn(userText);
-  const renderMode = getRenderMode(meta); // 'IT' | 'NORMAL'
+  const itActive = isTLayerActive(meta);
 
   const noQuestion = !!meta?.noQuestion;
 
@@ -387,8 +385,8 @@ function buildWriterProtocol(meta: any, userText: string): string {
       .join('\n');
   }
 
-  // ---- IT ----
-  if (renderMode === 'IT') {
+  // ---- IT (= T-layer active) ----
+  if (itActive) {
     const itReason = String(meta?.itReason ?? '');
     const sameIntentStreak = Number(meta?.sameIntentStreak ?? 0) || 0;
 
@@ -621,13 +619,9 @@ function buildWriterHintsFromMeta(meta: any): {
   const fp =
     meta?.framePlan && typeof meta.framePlan === 'object' ? meta.framePlan : null;
 
-  // ✅ renderMode は getRenderMode(meta) だけを見る（単一ソース）
-  //    ※ extra / 直下どちらに立っても IT を拾える
-  const rm = getRenderMode(meta); // 'IT' | 'NORMAL'
-
-  // ✅ whisper の採用条件は IT のみ（precision/stuck は排除）
-  const whisperApply = rm === 'IT';
-
+  // ✅ IT判定は tLayerModeActive を唯一の正にする
+  const itActive = isTLayerActive(meta);
+  const whisperApply = itActive;
 
   // --- debug: 入口で見えている meta/framePlan を固定観測 ---
   console.log('[IROS/frame-debug] input', {
@@ -640,6 +634,8 @@ function buildWriterHintsFromMeta(meta: any): {
       meta?.slotPlan && typeof meta.slotPlan === 'object'
         ? Object.keys(meta.slotPlan)
         : null,
+    itActive,
+    whisperApply,
   });
 
   // ① frame: framePlan.frame を“唯一の正”として採用
@@ -768,8 +764,6 @@ export async function generateIrosReply(
     (meta as any).q_counts = (meta as any).memoryState.q_counts;
   }
 
-
-
   // ==============================
   // Frame sticky を断つ（重要）
   // - args.meta は毎回 frame を含み得る（前ターン残骸）
@@ -798,20 +792,6 @@ export async function generateIrosReply(
      history から拾う
   --------------------------------- */
   recentUserQs = pickRecentUserQsFromHistory((args as any).history, 3);
-
-  /* ---------------------------------
-     qTrace を必ず合成（反復を作る）
-     ❌ ← これを削除（“疑似2連”を作ってしまう）
-  --------------------------------- */
-  // const streakQ = normalizeQ(qTrace?.streakQ ?? qTrace?.lastQ ?? null);
-  // if (streakQ) {
-  //   if (recentUserQs.length === 0) {
-  //     recentUserQs = [streakQ];
-  //   } else if (recentUserQs[recentUserQs.length - 1] === streakQ) {
-  //     recentUserQs = [...recentUserQs, streakQ];
-  //   }
-  //   recentUserQs = recentUserQs.slice(-3);
-  // }
 
   /* ---------------------------------
      “実ユーザー2連” 判定用の系列を作る（history + 今回）
@@ -853,12 +833,10 @@ export async function generateIrosReply(
     });
   }
 
-
-
   // ---------------------------------
   // IT Whisper: Always attach / Conditional apply
   // - whisper は毎回 messages に入れる（装着）
-  // - 採用するかは renderMode===IT のみ（単一根拠）
+  // - 採用するかは「tLayerModeActive が立っているか」だけ
   // ---------------------------------
 
   // whisper 本文は「上流で生成されて meta に載る」前提で拾う（まだ生成はしない）
@@ -871,15 +849,8 @@ export async function generateIrosReply(
           ? (meta as any).extra.whisper
           : '') ?? '';
 
-  // ✅ renderMode は itDemoGate の結果を唯一の正とする
-  const renderMode = String(
-    (meta as any)?.extra?.renderMode ?? (meta as any)?.renderMode ?? '',
-  )
-    .trim()
-    .toUpperCase();
-
-  // ✅ whisper の採用条件は IT のみ（precision/stuck は排除）
-  const whisperApply = renderMode === 'IT';
+  // ✅ 採用条件は meta.tLayerModeActive / tLayerHint のみ
+  const whisperApply = isTLayerActive(meta as any);
 
   // “毎回入れる”ため、本文が無い時も枠は残す（低ノイズ）
   const whisperLine = whisperTextRaw.trim();
@@ -959,7 +930,6 @@ export async function generateIrosReply(
     ...historyMessages,
     { role: 'user', content: userText },
   ];
-
 
   const res = await client.chat.completions.create({
     model: IROS_MODEL,

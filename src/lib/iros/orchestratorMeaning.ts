@@ -171,7 +171,7 @@ export function buildFinalMeta(args: {
   const finalDepth: Depth | null =
     currentDepth ?? goalDepth ?? previousDepth ?? null;
 
-  const finalQ: QCode | null = currentQ ?? goalQ ?? previousQ ?? null;
+    const finalQ: QCode | null = currentQ ?? previousQ ?? goalQ ?? null;
 
   const originalUnified =
     workingMeta.unified as UnifiedLikeAnalysis | undefined;

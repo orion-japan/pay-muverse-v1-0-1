@@ -10,18 +10,31 @@ type Phase = 'Inner' | 'Outer';
 
 /* ========= 型定義 ========= */
 
+/**
+ * ✅ q_counts は「Q1〜Q5の累積」だけでなく、運用上の付帯情報を内包し得る
+ * 例：
+ * - it_cooldown: number
+ * - q_trace: { prevQ, qNow, streakQ, streakLength, from }
+ * など（persist 層が追加しても壊れないようにする）
+ */
+export type QCounts = Record<QCode, number> & {
+  it_cooldown?: number;
+  q_trace?: any;
+  [k: string]: any;
+};
+
 /** DB テーブル iros_memory_state に対応する状態オブジェクト */
 export type IrosMemoryState = {
   userCode: string;
-  summary: string | null;      // ざっくりした最近3ヶ月の流れ
-  depthStage: Depth | null;    // いま主に滞在しているレイヤー（S1〜I3）
-  tone: string | null;         // 雰囲気・トーン（静けさ / 緊張 / 希望 など簡易ラベル）
-  theme: string | null;        // 主なテーマ（仕事 / 恋愛 / 自己 / 家族 / 創造 など）
-  lastKeyword: string | null;  // 直近のキーワード（会話のフックになる語）
-  qPrimary: QCode | null;      // 代表的な Q の色
-  qCounts: Record<QCode, number>; // Q1〜Q5 の累積カウント
-  phase: Phase | null;         // Inner / Outer （3軸意思決定用のフェーズ）
-  updatedAt?: string;          // ISO 文字列（DB の updated_at と対応）
+  summary: string | null; // ざっくりした最近3ヶ月の流れ
+  depthStage: Depth | null; // いま主に滞在しているレイヤー（S1〜I3）
+  tone: string | null; // 雰囲気・トーン（静けさ / 緊張 / 希望 など簡易ラベル）
+  theme: string | null; // 主なテーマ（仕事 / 恋愛 / 自己 / 家族 / 創造 など）
+  lastKeyword: string | null; // 直近のキーワード（会話のフックになる語）
+  qPrimary: QCode | null; // 代表的な Q の色
+  qCounts: QCounts; // Q1〜Q5 の累積カウント + 付帯情報（任意）
+  phase: Phase | null; // Inner / Outer （3軸意思決定用のフェーズ）
+  updatedAt?: string; // ISO 文字列（DB の updated_at と対応）
 };
 
 /** 1ターン分の入力（会話本文 + Iros メタ） */
@@ -33,6 +46,10 @@ export type MemoryTurnInput = {
 
 /* ========= 初期状態 ========= */
 
+function createBaseQCounts(): QCounts {
+  return { Q1: 0, Q2: 0, Q3: 0, Q4: 0, Q5: 0 };
+}
+
 export function createEmptyMemoryState(userCode: string): IrosMemoryState {
   return {
     userCode,
@@ -42,16 +59,61 @@ export function createEmptyMemoryState(userCode: string): IrosMemoryState {
     theme: null,
     lastKeyword: null,
     qPrimary: null,
-    qCounts: {
-      Q1: 0,
-      Q2: 0,
-      Q3: 0,
-      Q4: 0,
-      Q5: 0,
-    },
+    qCounts: createBaseQCounts(),
     phase: null,
     updatedAt: new Date().toISOString(),
   };
+}
+
+/* ========= 正規化ヘルパー ========= */
+
+function toFiniteInt(v: unknown, fallback = 0): number {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return fallback;
+  // DB / 集計用途なので、負数は落とす（0以上）
+  return Math.max(0, Math.floor(v));
+}
+
+function normalizePhase(v: unknown): Phase | null {
+  if (typeof v !== 'string') return null;
+  const p = v.trim().toLowerCase();
+  if (p === 'inner') return 'Inner';
+  if (p === 'outer') return 'Outer';
+  return null;
+}
+
+function coalescePhaseFromMeta(meta: any): Phase | null {
+  // camel / snake / 別名ゆれを拾う
+  const raw =
+    meta?.phase ??
+    meta?.phase_mode ??
+    meta?.phaseMode ??
+    meta?.unified?.phase ??
+    meta?.unified?.phase_mode ??
+    meta?.unified?.phaseMode ??
+    null;
+  return normalizePhase(raw);
+}
+
+function coalesceQFromMeta(meta: any, metrics: any): QCode | null {
+  return (
+    meta?.qCode ??
+    meta?.q_code ??
+    meta?.unified?.q?.current ??
+    meta?.unified?.q?.q_current ??
+    metrics?.q_primary ??
+    null
+  );
+}
+
+function coalesceDepthFromMeta(meta: any, metrics: any): Depth | null {
+  return (
+    meta?.depth ??
+    meta?.depth_stage ??
+    meta?.unified?.depth?.stage ??
+    meta?.unified?.depth?.depth_stage ??
+    (metrics?.depth as Depth | null) ??
+    null
+  );
 }
 
 /* ========= DB <-> Domain 変換ヘルパー ========= */
@@ -62,22 +124,29 @@ export function createEmptyMemoryState(userCode: string): IrosMemoryState {
 export function mapRowToMemoryState(row: any | null): IrosMemoryState | null {
   if (!row) return null;
 
-  const qCounts: Record<QCode, number> = {
-    Q1: 0,
-    Q2: 0,
-    Q3: 0,
-    Q4: 0,
-    Q5: 0,
+  const base = createBaseQCounts();
+  const raw = row.q_counts && typeof row.q_counts === 'object' ? row.q_counts : {};
+
+  // Q1〜Q5 の数値だけ厳密に拾う（その他の付帯情報は後で合成）
+  const qCountsCore: QCounts = {
+    ...base,
+    Q1: toFiniteInt(raw.Q1, 0),
+    Q2: toFiniteInt(raw.Q2, 0),
+    Q3: toFiniteInt(raw.Q3, 0),
+    Q4: toFiniteInt(raw.Q4, 0),
+    Q5: toFiniteInt(raw.Q5, 0),
   };
 
-  if (row.q_counts && typeof row.q_counts === 'object') {
-    for (const q of ['Q1', 'Q2', 'Q3', 'Q4', 'Q5'] as QCode[]) {
-      const v = row.q_counts[q];
-      if (typeof v === 'number' && Number.isFinite(v)) {
-        qCounts[q] = v;
-      }
-    }
-  }
+  // 付帯情報（it_cooldown / q_trace / その他）を保持
+  const qCountsExtra: Record<string, any> =
+    raw && typeof raw === 'object' ? { ...(raw as any) } : {};
+  delete qCountsExtra.Q1;
+  delete qCountsExtra.Q2;
+  delete qCountsExtra.Q3;
+  delete qCountsExtra.Q4;
+  delete qCountsExtra.Q5;
+
+  const qCounts: QCounts = { ...qCountsCore, ...qCountsExtra };
 
   return {
     userCode: row.user_code,
@@ -88,7 +157,7 @@ export function mapRowToMemoryState(row: any | null): IrosMemoryState | null {
     lastKeyword: row.last_keyword ?? null,
     qPrimary: (row.q_primary as QCode | null) ?? null,
     qCounts,
-    phase: (row.phase as Phase | null) ?? null,
+    phase: normalizePhase(row.phase) ?? null,
     updatedAt: row.updated_at ?? undefined,
   };
 }
@@ -118,6 +187,10 @@ export function serializeMemoryStateForDB(state: IrosMemoryState) {
  * 1ターン分の会話から MemoryState を更新するメイン関数
  * - DB 書き込みは行わず、純粋に「次の状態」を返す
  * - 実際の upsert は memory.adapter.ts 側で serializeMemoryStateForDB を使って行う想定
+ *
+ * ✅重要：
+ * - persist層が q_counts に付帯情報を入れる可能性があるため、
+ *   ここでは「Q1〜Q5だけを更新」し、それ以外のキーは温存する
  */
 export function updateMemoryStateFromTurn(
   prevState: IrosMemoryState | null,
@@ -133,33 +206,34 @@ export function updateMemoryStateFromTurn(
   // ★ テキストからの共鳴メトリクス（Phase / Depth / Q）を推定
   const metrics = inferMetrics(text);
 
-  // meta.phase（LLM推定）を最優先、その次に metrics.phase、最後に過去 state.phase
-  const phaseFromMeta: Phase | null =
-    (meta.phase as Phase | null) ?? null;
-  const phaseFromMetrics: Phase | null = metrics.phase ?? null;
+  // 6) フェーズ（Inner / Outer）の更新
+  const phaseFromMeta = coalescePhaseFromMeta(meta);
+  const phaseFromMetrics: Phase | null = normalizePhase(metrics?.phase ?? null);
+
+  const phase: Phase | null = phaseFromMeta ?? phaseFromMetrics ?? base.phase ?? null;
 
   // 1) Q の更新（カウント + 代表Q）
-  const qFromMeta: QCode | null =
-    meta.qCode ??
-    meta.unified?.q.current ??
-    metrics.q_primary ??
-    null;
+  const qFromMeta: QCode | null = coalesceQFromMeta(meta, metrics);
 
-  const nextQCounts = { ...base.qCounts };
+  // ✅ qCounts は「既存の付帯情報」も含めて温存しつつ、Q1〜Q5だけ更新する
+  const nextQCounts: QCounts = {
+    ...(base.qCounts ?? {}),
+    ...createBaseQCounts(), // 5キーを必ず揃える（足りないDB行でも落ちない）
+    Q1: toFiniteInt((base.qCounts as any)?.Q1, 0),
+    Q2: toFiniteInt((base.qCounts as any)?.Q2, 0),
+    Q3: toFiniteInt((base.qCounts as any)?.Q3, 0),
+    Q4: toFiniteInt((base.qCounts as any)?.Q4, 0),
+    Q5: toFiniteInt((base.qCounts as any)?.Q5, 0),
+  };
 
   if (qFromMeta) {
-    nextQCounts[qFromMeta] = (nextQCounts[qFromMeta] ?? 0) + 1;
+    nextQCounts[qFromMeta] = toFiniteInt(nextQCounts[qFromMeta], 0) + 1;
   }
 
   const qPrimary = decidePrimaryQ(qFromMeta, nextQCounts, base.qPrimary);
 
   // 2) 深度（Depth）の更新
-  const depthFromMeta: Depth | null =
-    meta.depth ??
-    meta.unified?.depth.stage ??
-    (metrics.depth as Depth | null) ??
-    null;
-
+  const depthFromMeta: Depth | null = coalesceDepthFromMeta(meta, metrics);
   const depthStage = depthFromMeta ?? base.depthStage ?? null;
 
   // 3) トーンの推定
@@ -177,10 +251,6 @@ export function updateMemoryStateFromTurn(
 
   // 5) last_keyword の更新
   const lastKeyword = extractLastKeyword(text) ?? base.lastKeyword;
-
-  // 6) フェーズ（Inner / Outer）の更新
-  const phase: Phase | null =
-    phaseFromMeta ?? phaseFromMetrics ?? base.phase ?? null;
 
   // 7) サマリーはここでは軽く更新フラグだけ
   //    本格的な要約は summarizeClient.ts など別モジュールで上書きする想定
@@ -275,29 +345,26 @@ function deriveTone(params: {
 
 /* ========= テーマ / キーワード推定ロジック ========= */
 
-function deriveTheme(params: {
-  text: string;
-  prevTheme: string | null;
-}): string | null {
+function deriveTheme(params: { text: string; prevTheme: string | null }): string | null {
   const { text, prevTheme } = params;
   const t = (text || '').trim();
-
   if (!t) return prevTheme ?? null;
 
-  // ごく簡単なキーワードベースでテーマ推定
-  if (/[仕事|会社|上司|部下|同僚|職場|プロジェクト]/.test(t)) {
+  // ✅ 正規表現の誤り修正：
+  // 以前の /[仕事|会社|...]/ は「文字クラス」なので意図どおり動かない
+  if (/(仕事|会社|上司|部下|同僚|職場|プロジェクト)/.test(t)) {
     return '仕事・キャリア';
   }
-  if (/[恋愛|彼氏|彼女|好きな人|パートナー|結婚]/.test(t)) {
+  if (/(恋愛|彼氏|彼女|好きな人|パートナー|結婚)/.test(t)) {
     return '恋愛・パートナーシップ';
   }
-  if (/[家族|親|子ども|夫|妻]/.test(t)) {
+  if (/(家族|親|子ども|夫|妻)/.test(t)) {
     return '家族・身近な人間関係';
   }
-  if (/[創りたい|つくりたい|表現|作品|アート|クリエイティブ]/.test(t)) {
+  if (/(創りたい|つくりたい|表現|作品|アート|クリエイティブ)/.test(t)) {
     return '創造・表現';
   }
-  if (/[自分らしく|本当の自分|生き方|在り方|自己理解]/.test(t)) {
+  if (/(自分らしく|本当の自分|生き方|在り方|自己理解)/.test(t)) {
     return '自己・在り方';
   }
 
@@ -319,7 +386,11 @@ function extractLastKeyword(text: string): string | null {
   const lastLine = lines.length > 0 ? lines[lines.length - 1] : t;
 
   // 句読点・記号でざっくり区切り、いちばん末尾の断片をキーワードとする
-  const parts = lastLine.split(/[。！？!?,，、]/).map((s) => s.trim()).filter(Boolean);
+  const parts = lastLine
+    .split(/[。！？!?,，、]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   if (parts.length === 0) return lastLine.slice(-20); // フォールバック
 
   const candidate = parts[parts.length - 1];
@@ -332,10 +403,7 @@ function extractLastKeyword(text: string): string | null {
 
 /* ========= サマリー初期値（本格要約クライアントとの連携前の仮置き） ========= */
 
-function buildInitialSummary(
-  theme: string | null,
-  depthStage: Depth | null,
-): string | null {
+function buildInitialSummary(theme: string | null, depthStage: Depth | null): string | null {
   if (!theme && !depthStage) return null;
 
   const themePart = theme ? `${theme} をめぐる流れの中で` : '最近の出来事の中で';

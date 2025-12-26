@@ -58,8 +58,9 @@ function shouldDropFromAchievementSummary(s: unknown): boolean {
   if (
     /(今日の目標|目標|ゴール).*(覚えてる|なんだっけ|何だっけ|教えて|\?|？)/.test(t) ||
     /^(今日の目標|目標|ゴール)\s*$/.test(t)
-  )
+  ) {
     return true;
+  }
 
   // 2) 開発・設計・プロンプト貼り付け系（進捗ではない）
   const devHints = [
@@ -78,17 +79,11 @@ function shouldDropFromAchievementSummary(s: unknown): boolean {
   if (devHints.some((k) => t.includes(k))) return true;
 
   // 3) コード／コマンド／パスっぽいもの
-  if (
-    /(^\s*\/\/|^\s*\/\*|\bimport\b|\bexport\b|src\/|npm run|tsc -p)/.test(t)
-  )
+  if (/(^\s*\/\/|^\s*\/\*|\bimport\b|\bexport\b|src\/|npm run|tsc -p)/.test(t))
     return true;
 
   // 4) 相談・質問・他者事例（進捗ではない）
-  if (
-    /(どう対応|どうしたら|どうすれば|どのように対応|アドバイス|教えてください)/.test(
-      t,
-    )
-  )
+  if (/(どう対応|どうしたら|どうすれば|どのように対応|アドバイス|教えてください)/.test(t))
     return true;
 
   // 他人主語が明確な相談
@@ -97,6 +92,7 @@ function shouldDropFromAchievementSummary(s: unknown): boolean {
 
   return false;
 }
+
 
 /* =========================
    Types
@@ -1163,6 +1159,7 @@ export async function handleIrosReply(
     });
     t.postprocess_ms = msSince(tp);
 
+
 // ✅ Frame/Slots single source of truth
 // - contextの framePlan は「計画」に過ぎないので、保存/描画は orch の確定値に統一する
 try {
@@ -1307,8 +1304,12 @@ try {
       });
 
       // ✅ IT本文スイッチ（single source）
-      // - metaForSave.renderMode が最終確定した後にだけ判定する
+      // - ensureMetaFilled を先に通して「null禁止」を担保してから IT を書く
       // - 差し替えた本文がそのまま Persist される（リロードしても変わらない）
+
+      // ✅ まず meta を埋める（IT writer が参照する前）
+      out.metaForSave = ensureMetaFilled({ meta: out.metaForSave, ctx, orch });
+
       if (out.metaForSave?.renderMode === 'IT') {
         try {
           const it = writeIT(
@@ -1349,6 +1350,219 @@ try {
       console.warn('[IROS/Reply] rotation bridge failed', e);
     }
 
+    // ❌ ここにはもう置かない（重複防止）
+    // out.metaForSave = ensureMetaFilled({ meta: out.metaForSave, ctx, orch });
+
+
+/* =========================
+  5.5 Helpers: meta fill (null禁止)
+========================= */
+
+type PhaseIO = 'Inner' | 'Outer';
+type SpinLoop2 = 'SRI' | 'TCF';
+type DescentGate2 = 'closed' | 'offered' | 'accepted';
+
+function normalizePhaseIO(v: any): PhaseIO | null {
+  if (typeof v !== 'string') return null;
+  const s = v.trim().toLowerCase();
+  if (s === 'inner') return 'Inner';
+  if (s === 'outer') return 'Outer';
+  return null;
+}
+
+function normalizeSpinLoop2(v: any): SpinLoop2 | null {
+  if (typeof v !== 'string') return null;
+  const s = v.trim().toUpperCase();
+  if (s === 'SRI' || s === 'TCF') return s as SpinLoop2;
+  return null;
+}
+
+function normalizeDescentGate2(v: any): DescentGate2 {
+  if (v == null) return 'closed';
+  if (typeof v === 'string') {
+    const s = v.trim().toLowerCase();
+    if (s === 'closed' || s === 'offered' || s === 'accepted') return s as any;
+    return 'closed';
+  }
+  if (typeof v === 'boolean') return v ? 'accepted' : 'closed';
+  return 'closed';
+}
+
+function pickFirstString(...cands: any[]): string | null {
+  for (const v of cands) {
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return null;
+}
+
+
+
+
+
+function ensureMetaFilled(args: {
+  meta: any;
+  ctx: any;
+  orch: any;
+}): any {
+  const m = args.meta ?? {};
+  const ctx = args.ctx ?? {};
+  const orch = args.orch ?? {};
+
+  // ==== Q（qPrimary / q_code を必ず埋める）====
+  const qFromMeta = pickFirstString(m.qPrimary, m.q_code, m.qCode, m.currentQ);
+  const qFromCtx = pickFirstString(
+    ctx?.baseMetaForTurn?.qPrimary,
+    ctx?.baseMetaForTurn?.q_code,
+    ctx?.baseMetaForTurn?.qCode,
+    ctx?.requestedQCode,
+  );
+  const qFinal = qFromMeta ?? qFromCtx ?? 'unknown';
+
+  if (!m.qPrimary) m.qPrimary = qFinal;
+  if (!m.q_code) m.q_code = qFinal;
+
+  // ==== Phase（Inner/Outer を必ず埋める）====
+  const phaseFromMeta = normalizePhaseIO(m.phase) ?? normalizePhaseIO(m.phaseIO);
+  const phaseFromCtx =
+    normalizePhaseIO(ctx?.baseMetaForTurn?.phase) ??
+    normalizePhaseIO(ctx?.baseMetaForTurn?.phaseIO);
+
+  // 型安全のため “unknown” は使わず Inner に寄せる（落ちないこと最優先）
+  const phaseFinal: PhaseIO = phaseFromMeta ?? phaseFromCtx ?? 'Inner';
+  if (!m.phase) m.phase = phaseFinal;
+
+  // ==== Depth（null禁止：文字列を必ず入れる）====
+  const depthFromMeta = pickFirstString(m.depth, m.depthStage, m.depthstage);
+  const depthFromCtx = pickFirstString(
+    ctx?.baseMetaForTurn?.depth,
+    ctx?.baseMetaForTurn?.depthStage,
+    ctx?.requestedDepth,
+  );
+  const depthFromOrch = pickFirstString(
+    orch?.meta?.depth,
+    orch?.meta?.depthStage,
+    orch?.result?.meta?.depth,
+    orch?.result?.meta?.depthStage,
+  );
+
+  const depthFinal = depthFromMeta ?? depthFromCtx ?? depthFromOrch ?? 'unknown';
+  if (!m.depth) m.depth = depthFinal;
+
+  // ==== Rotation（spinLoop / descentGate / depth を必ず埋める）====
+  const rot = m.rotationState ?? m.rotation ?? null;
+
+  const spinLoopFinal: SpinLoop2 =
+    normalizeSpinLoop2(rot?.spinLoop ?? rot?.loop) ??
+    normalizeSpinLoop2(m.spinLoop) ??
+    // ここは “null禁止” 方針によりデフォルトを置く（観測しやすい）
+    'SRI';
+
+  const descentGateFinal: DescentGate2 = normalizeDescentGate2(
+    rot?.descentGate ?? m.descentGate,
+  );
+
+  const rotDepthFinal =
+    pickFirstString(rot?.depth, m.depth) ??
+    // 回転側 depth も null 禁止（最低でも depthFinal を流用）
+    depthFinal;
+
+  m.spinLoop = spinLoopFinal;
+  m.descentGate = descentGateFinal;
+
+  m.rotationState = {
+    ...(typeof m.rotationState === 'object' ? m.rotationState : {}),
+    spinLoop: spinLoopFinal,
+    descentGate: descentGateFinal,
+    depth: rotDepthFinal,
+    // “埋めた” ことを後で追跡できるようにする（デバッグ用）
+    filled: true,
+  };
+
+  function ensureMetaFilled(args: {
+    meta: any;
+    ctx: any;
+    orch: any;
+  }): any {
+    const m = args.meta ?? {};
+    const ctx = args.ctx ?? {};
+    const orch = args.orch ?? {};
+
+    // ==== Q（qPrimary / q_code を必ず埋める）====
+    const qFromMeta = pickFirstString(m.qPrimary, m.q_code, m.qCode, m.currentQ);
+    const qFromCtx = pickFirstString(
+      ctx?.baseMetaForTurn?.qPrimary,
+      ctx?.baseMetaForTurn?.q_code,
+      ctx?.baseMetaForTurn?.qCode,
+      ctx?.requestedQCode,
+    );
+    const qFinal = qFromMeta ?? qFromCtx ?? 'unknown';
+
+    if (!m.qPrimary) m.qPrimary = qFinal;
+    if (!m.q_code) m.q_code = qFinal;
+
+    // ==== Phase（Inner/Outer を必ず埋める）====
+    const phaseFromMeta = normalizePhaseIO(m.phase) ?? normalizePhaseIO(m.phaseIO);
+    const phaseFromCtx =
+      normalizePhaseIO(ctx?.baseMetaForTurn?.phase) ??
+      normalizePhaseIO(ctx?.baseMetaForTurn?.phaseIO);
+
+    // 型安全のため “unknown” は使わず Inner に寄せる（落ちないこと最優先）
+    const phaseFinal: PhaseIO = phaseFromMeta ?? phaseFromCtx ?? 'Inner';
+    if (!m.phase) m.phase = phaseFinal;
+
+    // ==== Depth（null禁止：文字列を必ず入れる）====
+    const depthFromMeta = pickFirstString(m.depth, m.depthStage, m.depthstage);
+    const depthFromCtx = pickFirstString(
+      ctx?.baseMetaForTurn?.depth,
+      ctx?.baseMetaForTurn?.depthStage,
+      ctx?.requestedDepth,
+    );
+    const depthFromOrch = pickFirstString(
+      orch?.meta?.depth,
+      orch?.meta?.depthStage,
+      orch?.result?.meta?.depth,
+      orch?.result?.meta?.depthStage,
+    );
+
+    const depthFinal = depthFromMeta ?? depthFromCtx ?? depthFromOrch ?? 'unknown';
+    if (!m.depth) m.depth = depthFinal;
+
+    // ==== Rotation（spinLoop / descentGate / depth を必ず埋める）====
+    const rot = m.rotationState ?? m.rotation ?? null;
+
+    const spinLoopFinal: SpinLoop2 =
+      normalizeSpinLoop2(rot?.spinLoop ?? rot?.loop) ??
+      normalizeSpinLoop2(m.spinLoop) ??
+      'SRI';
+
+    const descentGateFinal: DescentGate2 = normalizeDescentGate2(
+      rot?.descentGate ?? m.descentGate,
+    );
+
+    const rotDepthFinal = pickFirstString(rot?.depth, m.depth) ?? depthFinal;
+
+    m.spinLoop = spinLoopFinal;
+    m.descentGate = descentGateFinal;
+
+    m.rotationState = {
+      ...(typeof m.rotationState === 'object' ? m.rotationState : {}),
+      spinLoop: spinLoopFinal,
+      descentGate: descentGateFinal,
+      depth: rotDepthFinal,
+      filled: true,
+    };
+
+    // ==== Bridge: framePlan / inputKind を必ず残す（writerHints 用）====
+    if (!(m as any).framePlan && (ctx?.baseMetaForTurn as any)?.framePlan) {
+      (m as any).framePlan = (ctx.baseMetaForTurn as any).framePlan;
+    }
+    if (!(m as any).inputKind && (ctx?.baseMetaForTurn as any)?.inputKind) {
+      (m as any).inputKind = (ctx.baseMetaForTurn as any).inputKind;
+    }
+
+    return m;
+  }
+}
 
     /* ---------------------------
        6) Persist (order fixed)

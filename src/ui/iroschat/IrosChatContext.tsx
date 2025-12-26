@@ -10,8 +10,8 @@ import React, {
   useState,
 } from 'react';
 
-import { irosClient } from './lib/irosApiClient';
-import type { IrosStyle } from './lib/irosApiClient';
+import { irosClient } from './lib/irosApi';
+import type { IrosStyle } from './lib/irosApi';
 import type { IrosMessage, IrosConversation, IrosUserInfo } from './types';
 import { auth } from '@/lib/firebase';
 

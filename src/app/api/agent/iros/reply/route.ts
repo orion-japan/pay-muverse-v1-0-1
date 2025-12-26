@@ -49,12 +49,11 @@ function parseChoiceTag(input: string): {
 
 /**
  * ★ IT強制トリガー（最小）
- * - soft_shift_future なら IT返しを強制
- * - it_* プレフィックスも強制
+ * - it_* プレフィックスのみ強制（UI明示のときだけ）
+ * - soft_shift_future は「未来寄せ」だが IT文体の強制はしない（文章エンジンで見守る）
  */
 function shouldForceIT(choiceId: string | null): boolean {
   if (!choiceId) return false;
-  if (choiceId === 'soft_shift_future') return true;
   if (choiceId.startsWith('it_')) return true;
   return false;
 }
@@ -389,61 +388,79 @@ const picked = effectiveChoiceId
   ? findNextStepOptionById(effectiveChoiceId)
   : null;
 
+// src/app/api/agent/iros/reply/route.ts
+
+/**
+ * ★ IT強制トリガー（最小）
+ * - it_* プレフィックスのみ強制（UI明示のときだけ）
+ * - soft_shift_future は「未来寄せ」だが IT文体の強制はしない（文章エンジンで見守る）
+ */
+function shouldForceIT(choiceId: string | null): boolean {
+  if (!choiceId) return false;
+  if (choiceId.startsWith('it_')) return true;
+  return false;
+}
+
+// ...（中略）...
+
 // ★ IT FORCE（effectiveChoiceId で判定）
 const forceIT = shouldForceIT(effectiveChoiceId);
-
-
 
 // ★ 下流へ渡す extra（body.extra を壊さず拡張）
 const extraMerged: Record<string, any> = {
   ...(extra ?? {}),
-  choiceId: effectiveChoiceId,        // ✅ 下流は常にこれを見る
-  extractedChoiceId: extractedChoiceId, // ✅ デバッグ用（任意だが超便利）
+  choiceId: effectiveChoiceId,          // ✅ 下流は常にこれを見る
+  extractedChoiceId: extractedChoiceId, // ✅ デバッグ用
   forceIT,
 
-  // ✅ これを追加：renderReply を確実に発火させる
+  // ✅ renderReply を確実に発火させる（IT明示時のみ）
   renderEngine: forceIT ? true : (extra as any)?.renderEngine,
 
-  // UIヘッダ用
+  // UIヘッダ用（IT明示時のみ）
   tLayerModeActive: forceIT ? true : undefined,
   tLayerHint: forceIT ? 'T2' : undefined,
 
-  // 回転を IT 側へ寄せる（最短で効かせる）
+  // 回転を IT 側へ寄せる（IT明示時のみ）
   spinLoop: forceIT ? 'TCF' : undefined,
 
-  // ✅ これを置換：'open' は潰れるので 'offered' にする
+  // 'open' は潰れるので 'offered' にする（IT明示時のみ）
   descentGate: forceIT ? 'offered' : undefined,
 
+  // ✅ ITは “文章エンジン側の条件” として渡す（system/モードは上書きしない）
   renderMode: forceIT ? 'IT' : undefined,
 };
 
+// ★ handleIrosReply に最短で効かせる：mode/hintText は上書きしない
+// （ITは extraMerged.forceIT / renderMode で伝える）
+const modeForHandle = mode;
+const hintTextForHandle = hintText;
 
-// ★ handleIrosReply に最短で効かせる：mode/hintText を上書き
-const modeForHandle = forceIT ? 'IT' : mode;
-const hintTextForHandle = forceIT ? 'IT' : hintText;
-
-const origin = req.nextUrl.origin;
-const authHeader = req.headers.get('authorization');
+// ✅ 追加：Node では origin が未定義なので、リクエストから取る
+const reqOrigin =
+  req.headers.get('origin') ??
+  req.headers.get('x-forwarded-origin') ??
+  req.nextUrl?.origin ??
+  '';
 
 const irosResult: HandleIrosReplyOutput = await handleIrosReply({
   conversationId,
-  text: finalText, // ★ タグ除去済み
+  text: finalText,
   hintText: hintTextForHandle,
   mode: modeForHandle,
 
   userCode,
   tenantId,
   rememberScope,
-  reqOrigin: origin,
-  authorizationHeader: authHeader,
+  reqOrigin, // ✅ ここを差し替え（origin を消す）
+  authorizationHeader: req.headers.get('authorization'),
   traceId,
   userProfile,
   style: styleInput ?? (userProfile?.style ?? null),
   history: chatHistory,
 
-  // ★ ここが効く（renderEngine / 文章層 / rotation bridge へ渡る）
   extra: extraMerged,
 });
+
 
 
     // 8.x) 生成失敗時
