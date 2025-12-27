@@ -65,11 +65,25 @@ export type IrosIntentMeta = {
 export type IrTargetType = 'self' | 'other' | 'situation';
 
 // orchestrator / meta 全体で共有するメタ型
+// orchestrator / meta 全体で共有するメタ型
 export type IrosMeta = {
   mode?: IrosMode;
 
   depth?: Depth;
   qCode?: QCode;
+
+  /**
+   * ✅ I層に入った理由（デバッグ用）
+   * 例: ['irTriggered', 'intentLine', 'hasFutureMemory']
+   */
+  iEnterReasons?: string[] | null;
+
+  /**
+   * ✅ I層に入った根拠（中身を見たいとき用・任意）
+   * - まずは ops / デバッグ用途
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  iEnterEvidence?: any | null;
 
   // 🗣 ここを IrosStyle ベースに
   style?: IrosStyle | string;
@@ -102,6 +116,7 @@ export type IrosMeta = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [key: string]: any;
 };
+
 
 /* ========= バリデーション用の配列 ========= */
 

@@ -61,6 +61,22 @@ export type OrchestratorAnalysisResult = {
   tLayerHint: string | null;
   hasFutureMemory: boolean | null;
   tLayerModeActive: boolean;
+
+  // ✅ 追加：I層に入った理由（デバッグ用）
+  iEnterReasons: string[] | null;
+  iEnterEvidence: {
+    from: Depth | null;
+    to: Depth | null;
+    phase: 'Inner' | 'Outer' | null;
+    irTriggered: boolean;
+    futureDirectionActive: boolean;
+    tLayerHint: string | null;
+    hasFutureMemory: boolean | null;
+    hasIntentLine: boolean;
+  } | null;
+
+
+
 };
 
 
@@ -412,26 +428,45 @@ export async function runOrchestratorAnalysis(args: {
 
   // =========================================================
   // ✅ I層への遷移ゲート（配線）
-  // - phaseがOuterでも「Iの言葉」は出せる（phase≠depth）
-  // - “意図をたぐるアドバイス”を I で返したいなら、ここで depth を確定させる
   // =========================================================
   const shouldEnterI =
-    // すでに I なら不要
     !(depth && String(depth).startsWith('I')) &&
     (
-      // ir は最優先で I
       irTriggered ||
-      // 意図ラインが立ったら I
       !!intentLine ||
-      // 未来方向モードが立ったら I
       futureDirectionActive === true ||
-      // Tヒントが出たら I
       !!tLayerHint ||
-      // FutureMemory が true なら I
       hasFutureMemory === true
     );
 
   const finalDepth: Depth | undefined = shouldEnterI ? 'I1' : depth;
+
+  // =========================================================
+  // ✅ I層に入った理由（デバッグ用）※ここで1回だけ作る
+  // =========================================================
+  const iEnterReasons: string[] | null = shouldEnterI ? [] : null;
+
+  if (iEnterReasons) {
+    if (irTriggered) iEnterReasons.push('irTriggered');
+    if (!!intentLine) iEnterReasons.push('intentLine');
+    if (futureDirectionActive === true) iEnterReasons.push('futureDirectionActive');
+    if (!!tLayerHint) iEnterReasons.push('tLayerHint');
+    if (hasFutureMemory === true) iEnterReasons.push('hasFutureMemory');
+    if (iEnterReasons.length === 0) iEnterReasons.push('unknown');
+  }
+
+  const iEnterEvidence = shouldEnterI
+    ? {
+        from: depth ?? null,
+        to: finalDepth ?? null,
+        phase,
+        irTriggered,
+        futureDirectionActive,
+        tLayerHint,
+        hasFutureMemory,
+        hasIntentLine: !!intentLine,
+      }
+    : null;
 
   // fixedUnified にも反映（保存/描画の single source of truth）
   if (finalDepth && finalDepth !== depth) {
@@ -448,26 +483,8 @@ export async function runOrchestratorAnalysis(args: {
     });
   }
 
-  // ---- Debug log（原因追跡に使う）----
-  // ---- Debug log（原因追跡に使う）----
-  console.log('[IROS/QDECIDE] ping');
-  console.log('[IROS/QDECIDE][analysis]', {
-    text: (text || '').slice(0, 60),
-    lastQ: (baseMeta as any)?.qCode ?? null,
-    unifiedQ: unifiedQ ?? null,
-    scanQ: (stabilizedQ ?? qCodeCandidate) ?? null,
-    explicitQ: explicitQ ?? null,
-    decidedQ: qCode ?? null,
-    depth: finalDepth ?? null, // ✅ finalDepth を出す
-    phase,
-  });
-
-  if (explicitQ) {
-    console.log('[IROS/QDECIDE][explicit]', { explicitQ, applied: true });
-  }
-
   return {
-    depth: finalDepth,          // ✅ finalDepth を返す
+    depth: finalDepth,
     qCode,
     phase,
     unified: fixedUnified,
@@ -484,9 +501,11 @@ export async function runOrchestratorAnalysis(args: {
     tLayerHint,
     hasFutureMemory,
     tLayerModeActive: futureDirectionActive,
-  };
-}
 
+    // ✅ 追加した2つ（ここで返す）
+    iEnterReasons,
+    iEnterEvidence,
+  };}
 /* ========= ローカルヘルパー ========= */
 
 function normalizeDepth(depth?: Depth): Depth | undefined {
