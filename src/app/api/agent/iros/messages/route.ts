@@ -42,6 +42,12 @@ function isUpstreamTimeout(err: any) {
   );
 }
 
+function asBool(v: string | null): boolean {
+  if (!v) return false;
+  const s = v.trim().toLowerCase();
+  return s === '1' || s === 'true' || s === 'yes' || s === 'on';
+}
+
 /** 汎用 select（候補テーブルを順に試す） */
 async function trySelect<T>(
   supabase: ReturnType<typeof sb>,
@@ -240,9 +246,15 @@ export async function GET(req: NextRequest) {
       return Math.min(n, 500);
     })();
 
+    // ✅ includeMeta:
+    // - 明示指定があればそれを使う
+    // - 無ければ admin は true（ops の SA/Y/H 等が消えない）
+    const includeMetaParam =
+      req.nextUrl.searchParams.get('include_meta') ??
+      req.nextUrl.searchParams.get('includeMeta');
+
     const includeMeta =
-      req.nextUrl.searchParams.get('include_meta') === '1' ||
-      req.nextUrl.searchParams.get('includeMeta') === '1';
+      includeMetaParam != null ? asBool(includeMetaParam) : auth.role === 'admin';
 
     const supabase = sb();
 
@@ -366,7 +378,7 @@ export async function GET(req: NextRequest) {
     }));
 
     console.log('[IROS/messages][GET] done', { ms: msSince(t0), count: messages.length });
-    return json({ ok: true, messages, llm_messages }, 200);
+    return json({ ok: true, messages, llm_messages, includeMeta }, 200);
   } catch (e: any) {
     const ms = msSince(t0);
     console.error('[IROS/messages][GET] exception', { ms, message: String(e?.message ?? e) });
@@ -498,8 +510,6 @@ export async function POST(req: NextRequest) {
 
     const picked = choiceId ? findNextStepOptionById(choiceId) : null;
 
-
-
     const metaRaw = body?.meta ?? null;
 
     // ✅ meta.extra に nextStep 情報を隠して残す（肥大化防止：snapshotは最小）
@@ -533,18 +543,49 @@ export async function POST(req: NextRequest) {
       },
     };
 
-    // ✅ meta key 揺れに耐える（最小のフォールバック）
+    // ✅ body直下の値も許可（assistant行は meta が付かないことがある）
+    const q_code_from_body =
+      toNonEmptyTrimmedString(body?.q_code) ??
+      toNonEmptyTrimmedString(body?.qCode) ??
+      toNonEmptyTrimmedString(body?.q_primary) ??
+      toNonEmptyTrimmedString(body?.qPrimary) ??
+      toNonEmptyTrimmedString((body as any)?.q) ??
+      null;
+
+    const depth_stage_from_body =
+      toNonEmptyTrimmedString(body?.depth_stage) ??
+      toNonEmptyTrimmedString(body?.depthStage) ??
+      toNonEmptyTrimmedString(body?.depth) ??
+      null;
+
+      const intent_layer_from_body =
+      toNonEmptyTrimmedString(body?.intent_layer) ??
+      toNonEmptyTrimmedString(body?.intentLayer) ??
+      null;
+
+    // ✅ meta key 揺れに耐える（最小のフォールバック）+ body直下フォールバック
     const q_code: string | null =
-      pickMetaValue(metaAugRaw, ['qCode', 'q_code', 'q', 'qPrimary', 'q_code_primary']) ?? null;
+      pickMetaValue(metaAugRaw, ['qCode', 'q_code', 'qPrimary', 'q_code_primary']) ??
+      q_code_from_body ??
+      null;
 
     const depth_stage: string | null =
-      pickMetaValue(metaAugRaw, ['depth', 'depthStage', 'depth_stage']) ?? null;
+      pickMetaValue(metaAugRaw, ['depth', 'depthStage', 'depth_stage']) ??
+      depth_stage_from_body ??
+      null;
 
+    // ★ ここが修正点：intent_layer の最終決定ロジック
+    //   meta → body → null の順で決定
     const intent_layer: string | null =
-      pickMetaValue(metaAugRaw, ['intentLayer', 'intent_layer']) ?? null;
+      pickMetaValue(metaAugRaw, ['intentLayer', 'intent_layer']) ??
+      intent_layer_from_body ??
+      null;
 
     const metaSanitized = sanitizeJsonDeep(metaAugRaw);
-    const meta = metaSanitized === null || typeof metaSanitized === 'undefined' ? null : metaSanitized;
+    const meta =
+      metaSanitized === null || typeof metaSanitized === 'undefined'
+        ? null
+        : metaSanitized;
 
 
     if (!conversation_id)
@@ -585,90 +626,176 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const nowIso = new Date().toISOString();
-    const nowTs = Date.now();
+// ============================
+// ✅ seed: insert 時点の null を潰す（MemoryState の最新を暫定値として入れる）
+// body/meta が持ってる値（q_code/depth_stage/intent_layer）が最優先。
+// それが無いときだけ MemoryState を使う。
+// ============================
+let seed: {
+  q_code: string | null;
+  depth_stage: string | null;
+  intent_layer: string | null;
+  phase: string | null;
+  spin_loop: string | null;
+  spin_step: number | null;        // ✅ 追加
+  descent_gate: string | null;
+} = {
+  q_code: null,
+  depth_stage: null,
+  intent_layer: null,
+  phase: null,
+  spin_loop: null,
+  spin_step: null,                 // ✅ 追加
+  descent_gate: null,
+};
 
-    // ✅ DBには必ず finalText（タグなし）
-    const baseRow = {
+try {
+  const memTables = ['iros_memory_state', 'public.iros_memory_state'] as const;
+
+  for (const mt of memTables) {
+    try {
+      const { data, error } = await (supabase as any)
+        .from(mt)
+        .select('q_primary, depth_stage, intent_layer, phase, spin_loop, spin_step, descent_gate') // ✅ spin_step 追加
+        .eq('user_code', userCode)
+        .maybeSingle();
+
+      if (!error && data) {
+        seed = {
+          q_code: toNonEmptyTrimmedString((data as any).q_primary) ?? null,
+          depth_stage: toNonEmptyTrimmedString((data as any).depth_stage) ?? null,
+          intent_layer: toNonEmptyTrimmedString((data as any).intent_layer) ?? null,
+          phase: toNonEmptyTrimmedString((data as any).phase) ?? null,
+          spin_loop: toNonEmptyTrimmedString((data as any).spin_loop) ?? null,
+          spin_step:
+            typeof (data as any).spin_step === 'number' &&
+            Number.isFinite((data as any).spin_step)
+              ? (data as any).spin_step
+              : null, // ✅ 追加
+          descent_gate: toNonEmptyTrimmedString((data as any).descent_gate) ?? null,
+        };
+        break;
+      }
+    } catch {
+      // try next
+    }
+  }
+} catch {
+  // seed は取れなくても続行（insert を止めない）
+}
+
+// ✅ 最終的に insert に使う値（body/meta 優先 → 無ければ seed）
+const q_code_final = q_code ?? seed.q_code;
+const depth_stage_final = depth_stage ?? seed.depth_stage;
+const intent_layer_final = intent_layer ?? seed.intent_layer;
+
+// ✅ ここが超重要：messages 側に “回転状態” を落とす
+const phase_final = seed.phase;
+const spin_loop_final = seed.spin_loop;
+const spin_step_final = seed.spin_step;      // ✅ 追加
+const descent_gate_final = seed.descent_gate;
+
+// ============================
+// ✅ insert 用のベース行（スコープ事故防止：ここで宣言）
+// ============================
+const nowIso = new Date().toISOString();
+const nowTs = Date.now();
+
+const baseRow = {
+  conversation_id,
+  user_code: userCode,
+  role,
+  content: finalText,
+  text: finalText,
+  created_at: nowIso,
+  ts: nowTs,
+};
+
+const baseRowWithQ = {
+  ...baseRow,
+  q_code: q_code_final,
+};
+
+let inserted: { id: string | number; created_at: string | null } | null = null;
+
+// ============================
+// ✅ テーブルごとに適した形で insert
+// ============================
+for (const table of MSG_TABLES) {
+  const tIns = process.hrtime.bigint();
+  let row: any;
+
+  if (table === 'iros_messages' || table === 'public.iros_messages') {
+    row = {
+      ...baseRowWithQ,
+      depth_stage: depth_stage_final,
+      intent_layer: intent_layer_final,
+
+      // ✅ ここは「そのカラムが実在するものだけ」入れる
+      // phase: phase_final,
+      // spin_loop: spin_loop_final,
+      // spin_step: spin_step_final,
+
+      // ❌ descent_gate は “無い” と確定したので入れない
+      // descent_gate: descent_gate_final,
+
+      meta,
+    };
+  } else if (table === 'sofia_messages') {
+    row = {
+      ...baseRowWithQ,
+      meta,
+    };
+  } else if (table === 'messages') {
+    // ✅ messages は text カラムが無いと確定。content だけにする
+    row = {
       conversation_id,
       user_code: userCode,
       role,
       content: finalText,
-      text: finalText,
       created_at: nowIso,
       ts: nowTs,
+      meta,
     };
-
-    const baseRowWithQ = {
+  } else {
+    row = {
       ...baseRow,
-      q_code,
+      meta,
     };
+  }
 
-    let inserted: { id: string | number; created_at: string | null } | null = null;
+  try {
+    const { data, error } = await (supabase as any)
+      .from(table)
+      .insert([row])
+      .select('id,created_at')
+      .single();
 
-    // テーブルごとに適した形で insert
-    for (const table of MSG_TABLES) {
-      const tIns = process.hrtime.bigint();
-      let row: any;
+    console.log('[IROS/messages][POST] insert tried', {
+      table,
+      ms: msSince(tIns),
+      ok: !error,
+      hasData: !!data,
+      q_code: (row as any)?.q_code ?? null,
+      depth_stage: (row as any)?.depth_stage ?? null,
+      intent_layer: (row as any)?.intent_layer ?? null,
+      err: error ? JSON.stringify(error) : null, // ✅ 中身を潰さず出す
+    });
 
-      if (table === 'iros_messages' || table === 'public.iros_messages') {
-        row = {
-          ...baseRowWithQ,
-          depth_stage,
-          intent_layer,
-          meta,
-        };
-      } else if (table === 'sofia_messages') {
-        row = baseRowWithQ;
-      } else if (table === 'messages') {
-        row = baseRow;
-      } else {
-        row = baseRow;
-      }
-
-      try {
-        const { data, error } = await (supabase as any)
-          .from(table)
-          .insert([row])
-          .select('id,created_at')
-          .single();
-
-        console.log('[IROS/messages][POST] insert tried', {
-          table,
-          ms: msSince(tIns),
-          ok: !error,
-          hasData: !!data,
-          err: error ? String(error.message ?? error) : null,
-        });
-
-        if (!error && data) {
-          inserted = {
-            id: data.id,
-            created_at: data.created_at ?? nowIso,
-          };
-          break;
-        }
-      } catch (e) {
-        console.log('[IROS/messages][POST] insert exception', {
-          table,
-          ms: msSince(tIns),
-          err: String((e as any)?.message ?? e),
-        });
-      }
+    if (!error && data) {
+      inserted = { id: (data as any).id, created_at: (data as any).created_at ?? nowIso };
+      break;
     }
+  } catch (e) {
+    console.log('[IROS/messages][POST] insert exception', {
+      table,
+      ms: msSince(tIns),
+      err: String((e as any)?.message ?? e),
+    });
+  }
+}
 
-    if (!inserted) {
-      console.error('[IROS/messages][POST] insert failed all', { ms: msSince(t0) });
-      return json(
-        {
-          ok: false,
-          error: 'insert_failed_all_candidates',
-          error_code: 'insert_failed_all_candidates',
-          ms: msSince(t0),
-        },
-        500,
-      );
-    }
+
 
     // ✅ 先に strip の中身を出す（デバッグ情報）
     console.log('[IROS/messages][POST] nextStep strip', {
@@ -678,24 +805,52 @@ export async function POST(req: NextRequest) {
       finalText,
     });
 
-    // ✅ 最後に done（終わりの印）
-    console.log('[IROS/messages][POST] done', { ms: msSince(t0) });
+// ✅ 最後に done（終わりの印）
+console.log('[IROS/messages][POST] done', { ms: msSince(t0) });
 
-    return json({
-      ok: true,
-      message: {
-        id: String(inserted.id),
-        conversation_id,
-        role,
-        content: finalText,
-        created_at: inserted.created_at,
-      },
-    });
+if (!inserted) {
+  console.error('[IROS/messages][POST] insert failed all', { ms: msSince(t0) });
+  return json(
+    {
+      ok: false,
+      error: 'insert_failed_all_candidates',
+      error_code: 'insert_failed_all_candidates',
+      ms: msSince(t0),
+    },
+    500,
+  );
+}
+
+// ✅ ここ（あなたが貼った return json ブロックの位置）
+return json({
+  ok: true,
+  message: {
+    id: String(inserted.id),
+    conversation_id,
+    role,
+    content: finalText,
+    created_at: inserted.created_at,
+
+    q_code: q_code_final,
+    depth_stage: depth_stage_final,
+    intent_layer: intent_layer_final,
+    meta,
+  },
+});
+
+
+
   } catch (e: any) {
     const ms = msSince(t0);
     console.error('[IROS/messages][POST] exception', { ms, message: String(e?.message ?? e) });
     return json(
-      { ok: false, error: 'unhandled_error', error_code: 'unhandled_error', detail: String(e?.message ?? e), ms },
+      {
+        ok: false,
+        error: 'unhandled_error',
+        error_code: 'unhandled_error',
+        detail: String(e?.message ?? e),
+        ms,
+      },
       500,
     );
   }

@@ -6,6 +6,8 @@
 // - 回転やフレームは「触らない・削らない」
 // ✅ 追加：history を受け取り、そのまま runIrosTurn に渡す（ITDemoGate 用）
 
+import type { SupabaseClient } from '@supabase/supabase-js';
+
 import { runIrosTurn } from '@/lib/iros/orchestrator';
 import type { IrosStyle } from '@/lib/iros/system';
 import type { IrosUserProfileRow } from './loadUserProfile';
@@ -28,6 +30,9 @@ export type RunOrchestratorTurnArgs = {
   /** ✅ NEW: ITDemoGate / repeat 判定用の履歴（handleIrosReply 側から渡す） */
   history?: unknown[];
 
+  /** ✅ NEW: MemoryState 読み書き用の Supabase admin client */
+  sb: SupabaseClient;
+
   userProfile: IrosUserProfileRow | null;
   effectiveStyle: IrosStyle | string | null;
 };
@@ -38,11 +43,7 @@ export type RunOrchestratorTurnArgs = {
 
 function pickIntentAnchorText(meta: any): string {
   const a = meta?.intentAnchor;
-  const t =
-    (a?.anchor_text ?? '') ||
-    (a?.anchorText ?? '') ||
-    (a?.text ?? '') ||
-    '';
+  const t = (a?.anchor_text ?? '') || (a?.anchorText ?? '') || (a?.text ?? '') || '';
   return String(t);
 }
 
@@ -57,10 +58,7 @@ function sanitizeIntentAnchor(meta: any): any {
 
   // DB 行っぽい形なら許可
   const looksLikeRow =
-    Boolean(a?.id) ||
-    Boolean(a?.user_id) ||
-    Boolean(a?.created_at) ||
-    Boolean(a?.updated_at);
+    Boolean(a?.id) || Boolean(a?.user_id) || Boolean(a?.created_at) || Boolean(a?.updated_at);
 
   // set/reset イベントなら許可
   const ev: string | null =
@@ -97,9 +95,7 @@ function sanitizeIntentAnchor(meta: any): any {
    main
 ========================= */
 
-export async function runOrchestratorTurn(
-  args: RunOrchestratorTurnArgs,
-): Promise<any> {
+export async function runOrchestratorTurn(args: RunOrchestratorTurnArgs): Promise<any> {
   const {
     conversationId,
     userCode,
@@ -109,7 +105,8 @@ export async function runOrchestratorTurn(
     requestedDepth,
     requestedQCode,
     baseMetaForTurn,
-    history, // ✅ 追加
+    history,
+    sb,
     userProfile,
     effectiveStyle,
   } = args;
@@ -121,15 +118,9 @@ export async function runOrchestratorTurn(
   // - intentAnchor 以外は触らない（= 値は変えず、clone だけ）
   // =========================================================
   const safeBaseMeta =
-    baseMetaForTurn && typeof baseMetaForTurn === 'object'
-      ? { ...baseMetaForTurn }
-      : {};
+    baseMetaForTurn && typeof baseMetaForTurn === 'object' ? { ...baseMetaForTurn } : {};
 
-  // ✅ 参照共有を切る（Context確定値を汚さないため）
-  if (
-    safeBaseMeta.rotationState &&
-    typeof safeBaseMeta.rotationState === 'object'
-  ) {
+  if (safeBaseMeta.rotationState && typeof safeBaseMeta.rotationState === 'object') {
     safeBaseMeta.rotationState = { ...safeBaseMeta.rotationState };
   }
   if (safeBaseMeta.framePlan && typeof safeBaseMeta.framePlan === 'object') {
@@ -142,22 +133,15 @@ export async function runOrchestratorTurn(
   // intentAnchor だけ検疫（回転・framePlan は絶対に触らない）
   sanitizeIntentAnchor(safeBaseMeta);
 
-  // デバッグ（必要最低限）
   console.log('[IROS/Orchestrator] input meta snapshot', {
     hasRotationState: Boolean(safeBaseMeta.rotationState),
     spinLoop: safeBaseMeta.rotationState?.spinLoop ?? safeBaseMeta.spinLoop ?? null,
-    descentGate:
-      safeBaseMeta.rotationState?.descentGate ?? safeBaseMeta.descentGate ?? null,
+    descentGate: safeBaseMeta.rotationState?.descentGate ?? safeBaseMeta.descentGate ?? null,
     depth: safeBaseMeta.rotationState?.depth ?? safeBaseMeta.depth ?? null,
     frame: safeBaseMeta.framePlan?.frame ?? null,
-    historyLen: Array.isArray(history) ? history.length : 0, // ✅ 追加
+    historyLen: Array.isArray(history) ? history.length : 0,
   });
 
-  // =========================================================
-  // runIrosTurn
-  // - requestedDepth / QCode は “補助”
-  // - 実質の判断は baseMeta（rotationState / framePlan）
-  // =========================================================
   const result = await runIrosTurn({
     conversationId,
     userCode,
@@ -170,17 +154,15 @@ export async function runOrchestratorTurn(
 
     baseMeta: safeBaseMeta,
 
-    // ✅ NEW: 履歴をそのまま Orchestrator → generate → ITDemoGate へ届ける
-    history: Array.isArray(history) ? history : [],
+    // ✅ ここが本丸：MemoryState ロードに使う
+    sb,
 
+    history: Array.isArray(history) ? history : [],
     userProfile,
     style: effectiveStyle as any,
   } as any);
 
-  // =========================================================
-  // ✅ 出力メタ：intentAnchor だけ再検疫
-  // - rotationState / framePlan は保持
-  // =========================================================
+  // 出力メタ：intentAnchor だけ再検疫
   try {
     if (result && typeof result === 'object') {
       const r: any = result;

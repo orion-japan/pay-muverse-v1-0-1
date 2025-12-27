@@ -1,5 +1,6 @@
 // src/lib/iros/wire.orchestrator.ts
 
+import { createClient } from '@supabase/supabase-js';
 import {
   runIrosTurn,
   type IrosOrchestratorArgs,
@@ -11,9 +12,18 @@ import {
   type QCode,
   type IrosMeta,
 } from './system';
-import { applyWillDepthDrift } from './willEngine'; // ★ ここはそのまま
+import { applyWillDepthDrift } from './willEngine';
+import { SUPABASE_URL, SERVICE_ROLE } from '@/lib/authz';
 
-// ==== 外部から受け取る想定のリクエスト型 ==== //
+// ------------------------------
+// Supabase client
+// ------------------------------
+const sb = () => createClient(SUPABASE_URL!, SERVICE_ROLE!);
+
+// ==============================
+// 型定義
+// ==============================
+
 export type IrosWireRequest = {
   userCode: string;
   conversationId?: string;
@@ -24,7 +34,6 @@ export type IrosWireRequest = {
   baseMeta?: Partial<IrosMeta>;
 };
 
-// ==== 外部に返すレスポンス型 ==== //
 export type IrosWireResponse = {
   content: string;
   meta: IrosMeta & {
@@ -32,6 +41,10 @@ export type IrosWireResponse = {
     conversationId?: string;
   };
 };
+
+// ==============================
+// メイン処理
+// ==============================
 
 export async function handleIrosRequest(
   req: IrosWireRequest,
@@ -46,8 +59,11 @@ export async function handleIrosRequest(
     baseMeta,
   } = req;
 
-  // ---- Iros Orchestrator 呼び出し ---- //
+  // ------------------------------
+  // Orchestrator 呼び出し
+  // ------------------------------
   const orchestratorArgs: IrosOrchestratorArgs = {
+    sb: sb(), // ★ ここが今回の修正ポイント
     conversationId,
     text,
     requestedMode: mode,
@@ -58,20 +74,22 @@ export async function handleIrosRequest(
 
   const result: IrosOrchestratorResult = await runIrosTurn(orchestratorArgs);
 
-  // ---- WILL（Depth drift／ボタン反映）を unified にだけ適用 ---- //
+  // ------------------------------
+  // WILL（意図ドリフト）の後処理
+  // ------------------------------
   const rawMeta: any = result.meta ?? {};
-  const unifiedBefore: any = rawMeta.unified;
+  const unifiedBefore = rawMeta?.unified;
 
   let metaAfterWill: any = rawMeta;
 
   if (unifiedBefore) {
-    const unifiedAfter = applyWillDepthDrift(unifiedBefore); // ★ unified だけ通す
+    const unifiedAfter = applyWillDepthDrift(unifiedBefore);
 
-    // ★ WILL の結果から depth を引き出して、上位の meta.depth にも反映する
-    const depthAfter =
-      (unifiedAfter?.depth?.stage as Depth | undefined) ??
-      (rawMeta?.depth as Depth | undefined);
-
+// ★ WILL の結果から depth を引き出して、上位の meta.depth にも反映する
+const depthAfter =
+  ((unifiedAfter as any)?.depth?.stage as Depth | null | undefined) ??
+  (rawMeta?.depth as Depth | undefined) ??
+  undefined;
     metaAfterWill = {
       ...rawMeta,
       unified: unifiedAfter,
@@ -79,27 +97,14 @@ export async function handleIrosRequest(
     };
   }
 
-  // ---- 将来のDB保存・メトリクス記録のための余白 ---- //
-  // 例:
-  // await saveIrosMessage({
-  //   userCode,
-  //   conversationId,
-  //   role: 'assistant',
-  //   content: result.content,
-  //   meta: metaAfterWill,
-  // });
-
+  // ------------------------------
+  // 返却
+  // ------------------------------
   const meta: IrosMeta & { userCode: string; conversationId?: string } = {
     ...(metaAfterWill as IrosMeta),
     userCode,
     conversationId,
   };
-
-  console.log('[WILL][after]', {
-    depthBefore: rawMeta?.unified?.depth,
-    depthAfter: metaAfterWill?.unified?.depth,
-    depthTopLevel: meta.depth,
-  });
 
   return {
     content: result.content,

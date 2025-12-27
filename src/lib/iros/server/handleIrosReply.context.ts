@@ -140,7 +140,9 @@ export async function buildTurnContext(
   if (effectiveStyle) baseMetaForTurn.style = effectiveStyle;
 
   // ✅ MemoryState を読み、baseMeta に合成（depth / qCode / selfAcceptance / y/h / spin）
+  // ★ 注意：loadBaseMetaFromMemoryState は sb 必須
   const { mergedBaseMeta } = await loadBaseMetaFromMemoryState({
+    sb: supabase,
     userCode,
     baseMeta: baseMetaForTurn,
   });
@@ -224,7 +226,6 @@ export async function buildTurnContext(
 
     // ✅ buildFramePlan のシグネチャ差を吸収（TS引数数チェック回避）
     const framePlan = buildFramePlan({ state: stateLite, inputKind });
-
 
     baseMetaForTurn.inputKind = inputKind;
     baseMetaForTurn.framePlan = framePlan;

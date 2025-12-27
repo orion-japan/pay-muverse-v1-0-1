@@ -241,16 +241,26 @@ function buildNumericFooter(meta: any): string | null {
  */
 function pickSafeTagFromMeta(meta: any): string | null {
   const sp = meta?.slotPlan;
-  if (!sp || typeof sp !== 'object') return null;
+  if (!sp) return null;
 
-  const safe = (sp as any).SAFE;
-  if (typeof safe === 'string' && safe.trim().length > 0) return safe.trim();
+  // ✅ 1) Record想定: { SAFE: '...' }
+  if (typeof sp === 'object' && !Array.isArray(sp)) {
+    const direct = (sp as any).SAFE;
+    if (typeof direct === 'string' && direct.trim()) return direct.trim();
+  }
 
-  // 念のため：SAFE が boolean / その他でも truthy なら拾う
-  if (!!safe) return String(safe);
+  // ✅ 2) SlotPlan想定: { frame, slots: { SAFE: '...' } }
+  const slots = (sp as any)?.slots;
+  if (slots && typeof slots === 'object' && !Array.isArray(slots)) {
+    const safe = (slots as any).SAFE;
+    if (typeof safe === 'string' && safe.trim()) return safe.trim();
+    if (!!safe) return String(safe);
+  }
 
+  // ✅ 3) arrayの場合は SAFE は拾えない（上流が直すべき）
   return null;
 }
+
 
 /**
  * SAFE 制御メッセージ（system）
@@ -386,32 +396,104 @@ function buildWriterProtocol(meta: any, userText: string): string {
   }
 
   // ---- IT (= T-layer active) ----
+  // ✅ IT を「I層言葉モード（意図をたぐる導線）」へ寄せる
   if (itActive) {
     const itReason = String(meta?.itReason ?? '');
     const sameIntentStreak = Number(meta?.sameIntentStreak ?? 0) || 0;
 
+    const framePlan = String(meta?.framePlan?.frame ?? '').trim().toUpperCase();
+    const forceIWords = framePlan === 'I';
+
+    const dg = String(meta?.descentGate ?? meta?.unified?.descentGate ?? '').trim();
+    const _spinLoop = String(meta?.spinLoop ?? meta?.unified?.spinLoop ?? '').trim();
+    const _spinStep = String(meta?.spinStep ?? meta?.unified?.spinStep ?? '').trim();
+    const _phase = String(meta?.phase ?? meta?.unified?.phase ?? '').trim();
+    const _depth = String(meta?.depth ?? meta?.unified?.depth ?? '').trim();
+    const _qCode = String(
+      meta?.qCode ?? meta?.unified?.qCode ?? meta?.unified?.q_code ?? '',
+    ).trim();
+
     return [
       base,
       '【TURN_MODE】IT',
-      'このターンは “視点の切替（再定義）” を行う。',
+      forceIWords ? '【SUBMODE】I_WORDS' : '',
+      'このターンは「意図をたぐる導線」を返す。',
+      '解決策の断定・結論化は禁止。代わりに「置ける視点」と「選べる一歩」を返す。',
+      '質問攻めは禁止。問いは最大1つ。基本は提案で差し出す。',
       '',
-      '必須：',
-      '- 1行目は「再定義」の一文で開始（短く、断定）',
-      '- 「焦点は〜ではなく〜」構文は禁止（テンプレ臭のため）',
-      '- “説明”ではなく “置き換え” を行う（守る条件 / 合意 / 境界 / 判断軸 / 期待値同期 等）',
-      '',
-      '出力：',
+      '出力要件：',
       '- 2〜3行ごとに改行。短く。',
-      '- “次の一歩” は1つだけ（実行できる最小設計）',
-      `- 質問は ${noQuestion ? '0' : '最大1'}（原則0、必要なら最後に1つだけ短く）`,
+      '- “次の一歩” は1つだけ（戻れる形）。',
+      `- 質問は ${noQuestion ? '0' : '最大1'}（原則0）。`,
+      '',
+      '3軸（根拠として内部で使う）：',
+      `- phase=${_phase} depth=${_depth} q=${_qCode}`,
+      `- spinLoop=${_spinLoop} spinStep=${_spinStep} descentGate=${dg}`,
+      '根拠の使い方：',
+      '- descentGate=closed → “確定”ではなく「選べる形で提示」',
+      '- descentGate=offered → 「候補を2つまで」出して比較させる（本文は短く）',
+      '- descentGate=accepted → 「反復できる最小ルール」を1つだけ固定する',
       '',
       '禁止：',
-      '- ありがちな一般論（「落ち着いて」「信頼できる人に」等）',
+      '- 「焦点は〜ではなく〜」構文（テンプレ臭）',
+      '- 一般論（落ち着いて等）',
       '- ToDo羅列が続く箇条書き',
-      '- 相手を断罪/診断する言い方',
-      '- “機能説明” を本文に出す（IT/反復/ゲート等の内部語も禁止）',
+      '- 内部語の露出（IT/ゲート/メタ/プロトコル/スロット/回転 等）',
+      '- 医療/法律/投資の断定助言',
       '',
       `IT_HINT: reason=${itReason} sameIntentStreak=${String(sameIntentStreak)}`,
+      '',
+      `USER_TEXT: ${String(userText)}`,
+      '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  // ---- I-FRAME (non-IT) ----
+  // 目的：ITではないが frame=I のときに「一般論テンプレ」に逃げない専用レーン
+  // - “意図をたぐる導線” で返す（結論・断定助言を避ける）
+  // - 一般論ワードを明示禁止して逃げ道を塞ぐ
+  const framePlanForI = String(meta?.framePlan?.frame ?? '')
+    .trim()
+    .toUpperCase();
+
+  if (framePlanForI === 'I') {
+    const dg = String(meta?.descentGate ?? meta?.unified?.descentGate ?? '').trim();
+    const _spinLoop = String(meta?.spinLoop ?? meta?.unified?.spinLoop ?? '').trim();
+    const _spinStep = String(meta?.spinStep ?? meta?.unified?.spinStep ?? '').trim();
+    const _phase = String(meta?.phase ?? meta?.unified?.phase ?? '').trim();
+    const _depth = String(meta?.depth ?? meta?.unified?.depth ?? '').trim();
+    const _qCode = String(
+      meta?.qCode ?? meta?.unified?.qCode ?? meta?.unified?.q_code ?? '',
+    ).trim();
+
+    return [
+      base,
+      '【TURN_MODE】I_FRAME',
+      'このターンは「意図を自分の選択として定着させる」ための導線を返す。',
+      '解決策の断定・結論化は禁止。代わりに「置ける視点」と「選べる一歩」を返す。',
+      '質問攻めは禁止。問いは最大1つ。基本は提案で差し出す。',
+      '',
+      '出力要件：',
+      '- 2〜3行ごとに改行。短く。',
+      '- 1行目は「定着」の断定から開始（短く、言い換えで）。',
+      '- “次の一歩” は1つだけ（戻れる形）。',
+      `- 質問は ${noQuestion ? '0' : '最大1'}（原則0）。`,
+      '',
+      '根拠として内部で使う：',
+      `- phase=${_phase} depth=${_depth} q=${_qCode}`,
+      `- spinLoop=${_spinLoop} spinStep=${_spinStep} descentGate=${dg}`,
+      '根拠の使い方：',
+      '- descentGate=closed → “確定”ではなく「置ける形で提示」',
+      '- descentGate=offered → 「候補を2つまで」出して比較させる（本文は短く）',
+      '- descentGate=accepted → 「反復できる最小ルール」を1つだけ固定する',
+      '',
+      '禁止（逃げ道を潰す）：',
+      '- 一般論テンプレ（「大切です」「〜すると良い」「日記」「信頼できる人」「落ち着いて」等）',
+      '- ToDo羅列が続く箇条書き',
+      '- 内部語の露出（IT/ゲート/メタ/プロトコル/スロット/回転 等）',
+      '- 医療/法律/投資の断定助言',
       '',
       `USER_TEXT: ${String(userText)}`,
       '',
@@ -500,6 +582,7 @@ function buildWriterProtocol(meta: any, userText: string): string {
     .filter(Boolean)
     .join('\n');
 }
+
 
 /* =========================================================
    HISTORY → MESSAGES（会話履歴を LLM に渡す）
@@ -592,7 +675,8 @@ function dedupeTailUser(
 // - meta.framePlan を最優先で拾い、meta.frame と同期する版（debug logs込み）
 // ==============================
 
-type FrameKind = 'S' | 'R' | 'C' | 'I' | 'T' | 'MICRO' | 'NONE';
+// ✅ FrameKind を拡張（framePlan が 'F' を返すため）
+type FrameKind = 'S' | 'R' | 'C' | 'I' | 'T' | 'F' | 'MICRO' | 'NONE';
 
 function normalizeFrameKind(v: unknown): FrameKind | null {
   if (typeof v !== 'string') return null;
@@ -603,12 +687,43 @@ function normalizeFrameKind(v: unknown): FrameKind | null {
     s === 'C' ||
     s === 'I' ||
     s === 'T' ||
+    s === 'F' ||
     s === 'MICRO' ||
     s === 'NONE'
   ) {
     return s as FrameKind;
   }
   return null;
+}
+
+// ✅ slots の key を「配列でもRecordでも」取り出す
+function extractSlotKeys(v: any): string[] {
+  if (!v) return [];
+
+  // 1) array: [{key:'OBS', ...}, ...] 形式
+  if (Array.isArray(v)) {
+    return v
+      .map((s: any) => (typeof s?.key === 'string' ? s.key : null))
+      .filter(Boolean);
+  }
+
+  // 2) record: { OBS: '...', SHIFT: null, ... }
+  if (typeof v === 'object') {
+    // { slots: {...} } 形式も救う
+    const maybeSlots = (v as any).slots;
+    if (maybeSlots && typeof maybeSlots === 'object' && !Array.isArray(maybeSlots)) {
+      return Object.entries(maybeSlots)
+        .filter(([, vv]) => !!vv)
+        .map(([k]) => k);
+    }
+
+    // そのまま record の場合
+    return Object.entries(v)
+      .filter(([, vv]) => !!vv)
+      .map(([k]) => k);
+  }
+
+  return [];
 }
 
 function buildWriterHintsFromMeta(meta: any): {
@@ -627,46 +742,34 @@ function buildWriterHintsFromMeta(meta: any): {
   console.log('[IROS/frame-debug] input', {
     meta_frame_before: meta?.frame ?? null,
     framePlan_frame: fp?.frame ?? null,
-    framePlan_slots_keys: Array.isArray(fp?.slots)
-      ? fp.slots.map((s: any) => s?.key).filter(Boolean)
-      : null,
-    slotPlan_keys:
-      meta?.slotPlan && typeof meta.slotPlan === 'object'
-        ? Object.keys(meta.slotPlan)
-        : null,
+
+    // ✅ fp.slots が array / record どちらでも keys を出す
+    framePlan_slots_keys: extractSlotKeys(fp?.slots),
+
+    // ✅ meta.slotPlan が array / record / {slots:{...}} どれでも keys を出す
+    slotPlan_keys: extractSlotKeys(meta?.slotPlan),
+
     itActive,
     whisperApply,
   });
 
-  // ① frame: framePlan.frame を“唯一の正”として採用
+  // ① frame: framePlan.frame を優先。ダメなら meta.frame。
   const frameFromPlan = normalizeFrameKind(fp?.frame);
   const frameFromMeta = normalizeFrameKind(meta?.frame);
 
   const frame: FrameKind | null = frameFromPlan ?? frameFromMeta ?? null;
 
-  // ✅ frame は「この関数内のローカル決定」だけで扱う（meta は汚さない）
   console.log('[IROS/frame-debug] decided', {
     frameFromPlan: frameFromPlan ?? null,
     meta_frame_before: meta?.frame ?? null,
     decided_frame: frame,
   });
 
-  // ② slots: framePlan.slots → meta.slotPlan の順で拾う
-  const slotKeysFromPlan: string[] = Array.isArray(fp?.slots)
-    ? fp.slots
-        .map((s: any) => (typeof s?.key === 'string' ? s.key : null))
-        .filter(Boolean)
-    : [];
+  // ② slots: framePlan.slots → meta.slotPlan の順で拾う（array/record両対応）
+  const slotKeysFromPlan = extractSlotKeys(fp?.slots);
+  const slotKeysFromMeta = extractSlotKeys(meta?.slotPlan);
 
-  const slotPlan: Record<string, any> =
-    meta?.slotPlan && typeof meta.slotPlan === 'object' ? meta.slotPlan : {};
-
-  const slotKeysFromMap = Object.entries(slotPlan)
-    .filter(([, v]) => !!v)
-    .map(([k]) => k);
-
-  const slotKeys =
-    slotKeysFromPlan.length > 0 ? slotKeysFromPlan : slotKeysFromMap;
+  const slotKeys = slotKeysFromPlan.length > 0 ? slotKeysFromPlan : slotKeysFromMeta;
 
   if (!frame && slotKeys.length === 0) {
     return { frame: null, slotKeys: [], hintText: null };
@@ -678,6 +781,8 @@ function buildWriterHintsFromMeta(meta: any): {
     C: '具体の実行案（手順/次の一歩）を中心に',
     I: '意図/軸（なぜ/何のため）を中心に',
     T: 'ひらめき/視点上昇（俯瞰→再定義）を中心に',
+    // ✅ F の意味は frameSelector 側の命名に合わせる（とりあえず“焦点化/問い”）
+    F: '焦点化（問いの器）を中心に',
     MICRO: '超短文でも崩れない最小返答（1〜3行）',
     NONE: '装飾少なめ、素の返答でOK',
   };
@@ -694,6 +799,7 @@ function buildWriterHintsFromMeta(meta: any): {
 
   return { frame, slotKeys, hintText };
 }
+
 
 // ===== history から Q を拾うユーティリティ =====
 // src/lib/iros/generate.ts

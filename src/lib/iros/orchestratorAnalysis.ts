@@ -41,13 +41,16 @@ type PierceDecision = ReturnType<typeof decidePierceMode>;
 export type OrchestratorAnalysisResult = {
   depth: Depth | undefined;
   qCode: QCode | undefined;
+
+  // ✅ 追加：Phase（Inner/Outer）を返す
+  phase: 'Inner' | 'Outer' | null;
+
   unified: UnifiedLikeAnalysis;
   selfAcceptanceLine: number | null;
   qTrace: QTrace;
   yLevel: number | null;
   hLevel: number | null;
 
-  // ★ 追加：Polarity / Stability
   polarityScore: number | null;
   polarityBand: PolarityBand;
   stabilityBand: StabilityBand;
@@ -59,6 +62,7 @@ export type OrchestratorAnalysisResult = {
   hasFutureMemory: boolean | null;
   tLayerModeActive: boolean;
 };
+
 
 /**
  * Iros の 1ターンに必要な「解析フェーズ」をまとめて実行する。
@@ -116,14 +120,21 @@ export async function runOrchestratorAnalysis(args: {
   const unifiedPhaseRaw: unknown = (unified as any).phase;
   if (unifiedPhaseRaw === 'Inner' || unifiedPhaseRaw === 'Outer') {
     phase = unifiedPhaseRaw;
-  } else if (memoryState?.phase === 'Inner' || memoryState?.phase === 'Outer') {
-    phase = memoryState.phase;
-  } else if (
-    baseMeta &&
-    ((baseMeta as any).phase === 'Inner' || (baseMeta as any).phase === 'Outer')
-  ) {
-    phase = (baseMeta as any).phase as 'Inner' | 'Outer';
+  } else {
+    // ✅ 追加：そのターンのテキストから推定（推定できないときだけ fallback）
+    const inferred = inferPhaseFromText(text);
+    if (inferred) {
+      phase = inferred;
+    } else if (memoryState?.phase === 'Inner' || memoryState?.phase === 'Outer') {
+      phase = memoryState.phase;
+    } else if (
+      baseMeta &&
+      ((baseMeta as any).phase === 'Inner' || (baseMeta as any).phase === 'Outer')
+    ) {
+      phase = (baseMeta as any).phase as 'Inner' | 'Outer';
+    }
   }
+
 
   /* =========================================================
      ir診断トリガー（Q候補生成の材料）
@@ -399,6 +410,45 @@ export async function runOrchestratorAnalysis(args: {
     }
   }
 
+  // =========================================================
+  // ✅ I層への遷移ゲート（配線）
+  // - phaseがOuterでも「Iの言葉」は出せる（phase≠depth）
+  // - “意図をたぐるアドバイス”を I で返したいなら、ここで depth を確定させる
+  // =========================================================
+  const shouldEnterI =
+    // すでに I なら不要
+    !(depth && String(depth).startsWith('I')) &&
+    (
+      // ir は最優先で I
+      irTriggered ||
+      // 意図ラインが立ったら I
+      !!intentLine ||
+      // 未来方向モードが立ったら I
+      futureDirectionActive === true ||
+      // Tヒントが出たら I
+      !!tLayerHint ||
+      // FutureMemory が true なら I
+      hasFutureMemory === true
+    );
+
+  const finalDepth: Depth | undefined = shouldEnterI ? 'I1' : depth;
+
+  // fixedUnified にも反映（保存/描画の single source of truth）
+  if (finalDepth && finalDepth !== depth) {
+    (fixedUnified as any).depth = { ...(fixedUnified as any).depth, stage: finalDepth };
+    console.log('[IROS][I-GATE] enter I', {
+      from: depth ?? null,
+      to: finalDepth,
+      phase,
+      irTriggered,
+      futureDirectionActive,
+      tLayerHint,
+      hasFutureMemory,
+      hasIntentLine: !!intentLine,
+    });
+  }
+
+  // ---- Debug log（原因追跡に使う）----
   // ---- Debug log（原因追跡に使う）----
   console.log('[IROS/QDECIDE] ping');
   console.log('[IROS/QDECIDE][analysis]', {
@@ -408,7 +458,7 @@ export async function runOrchestratorAnalysis(args: {
     scanQ: (stabilizedQ ?? qCodeCandidate) ?? null,
     explicitQ: explicitQ ?? null,
     decidedQ: qCode ?? null,
-    depth: depth ?? null,
+    depth: finalDepth ?? null, // ✅ finalDepth を出す
     phase,
   });
 
@@ -417,8 +467,9 @@ export async function runOrchestratorAnalysis(args: {
   }
 
   return {
-    depth,
+    depth: finalDepth,          // ✅ finalDepth を返す
     qCode,
+    phase,
     unified: fixedUnified,
     selfAcceptanceLine,
     qTrace,
@@ -506,6 +557,7 @@ function pickExplicitQCode(text: string): QCode | null {
   const q = `Q${m[1]}` as QCode;
   return q;
 }
+
 
 
 /**
@@ -677,4 +729,30 @@ function detectFutureDirectionMode(args: {
   }
 
   return false;
+}
+// orchestratorAnalysis.ts の一番下（ローカルヘルパー群の近く）に追加
+
+function inferPhaseFromText(text: string): 'Inner' | 'Outer' | null {
+  const s = String(text || '').trim();
+  if (!s) return null;
+
+  const compact = s.replace(/\s/g, '');
+
+  // Outer: 外に向けた実行/依頼/具体策/提案/教示
+  const outerRe =
+    /(教えて|教えてください|アドバイス|具体的|提案|やり方|方法|手順|どうすれば|どうしたら|進め方|設計|実装|修正|確認|レビュー|作って|作成|出して|まとめて|整理して|比較して|おすすめ|選び方|例を|例:|サンプル)/;
+
+  // Inner: 体感/感情/内省/未消化/自己状態の言語化
+  const innerRe =
+    /(つらい|苦しい|しんどい|怖い|不安|虚無|空虚|泣|怒り|焦り|モヤ|胸|喉|体が|固ま|震え|息|呼吸|浄化|受け止め|自分なんて|価値がない|消えたい|無理|限界|闇|未消化|トラウマ|痛み)/;
+
+  const isOuter = outerRe.test(compact);
+  const isInner = innerRe.test(compact);
+
+  // 両方ヒットしたら「内側が先（体感/感情）」を優先
+  if (isInner && !isOuter) return 'Inner';
+  if (isOuter && !isInner) return 'Outer';
+  if (isInner && isOuter) return 'Inner';
+
+  return null;
 }

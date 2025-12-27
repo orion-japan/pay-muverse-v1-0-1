@@ -2,36 +2,27 @@
 // Iros MemoryState（現在地レイヤー）読み書き
 //
 // ✅ 方針
-// - createClient() を 0引数で呼ばない（ts(2554) 回避）
-// - loadIrosMemoryState は「DB row → IrosMemoryState」へ必ず整形して返す（途中 return バグ除去）
-// - phase / spin_loop / spin_step / descent_gate も MemoryState として扱えるようにする
-// - 🆕 q_counts（it_cooldown 等）も MemoryState として扱う（ITデモのクールダウン土台）
+// - このファイルでは Supabase client を生成しない（呼び出し元から受け取る）
+// - load は必ず「DB row → IrosMemoryState」へ整形して返す
+// - phase / spin_loop / spin_step / descent_gate も MemoryState として扱う
+// - q_counts は「既存の構造（q_trace 等）を保持したまま it_cooldown だけ正規化」する
 
-import { createClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SERVICE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ??
-  process.env.SUPABASE_SERVICE_ROLE ??
-  // NOTE: どうしても service role が無い環境のための最後の逃げ道（本番では非推奨）
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+/* =========================
+ * Types
+ * ========================= */
 
-if (!SUPABASE_URL) {
-  throw new Error('[IROS/MemoryState] NEXT_PUBLIC_SUPABASE_URL is missing');
-}
-if (!SERVICE_KEY) {
-  throw new Error(
-    '[IROS/MemoryState] SUPABASE_SERVICE_ROLE_KEY (or fallback key) is missing',
-  );
-}
+export type Phase = 'Inner' | 'Outer';
+export type SpinLoop = 'SRI' | 'TCF';
+export type DescentGate = 'closed' | 'offered' | 'accepted';
 
-const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
-  auth: { persistSession: false },
-});
+export type QCounts = {
+  it_cooldown?: number;
+  // q_trace など、将来拡張フィールドを保持したいので open にする
+  [k: string]: any;
+};
 
-/**
- * DB ←→ Orchestrator で扱う MemoryState の統一型
- */
 export type IrosMemoryState = {
   userCode: string;
 
@@ -39,7 +30,7 @@ export type IrosMemoryState = {
   qPrimary: string | null;
   selfAcceptance: number | null;
 
-  phase: 'Inner' | 'Outer' | null;
+  phase: Phase | null;
 
   intentLayer: string | null;
   intentConfidence: number | null;
@@ -48,27 +39,21 @@ export type IrosMemoryState = {
   hLevel: number | null;
 
   // ★ 回転状態
-  spinLoop?: string | null;
-  spinStep?: number | null;
-  descentGate?: string | null;
+  spinLoop: SpinLoop | null;
+  spinStep: number | null;
+  descentGate: DescentGate | null;
 
   summary: string | null;
   updatedAt: string | null;
 
-  // 🆕 ネガポジ方向（high / low / neutral 想定）
   sentimentLevel: string | null;
 
-  // 🆕 場のテーマ保持用
-  situationSummary?: string | null;
-  situationTopic?: string | null;
+  situationSummary: string | null;
+  situationTopic: string | null;
 
-  // 🆕 クールダウン等（JSONB想定）
-  qCounts?: { it_cooldown?: number } | null;
+  qCounts: QCounts | null;
 };
 
-/**
- * 外から保存するときに使う入力型
- */
 export type UpsertMemoryStateInput = {
   userCode: string;
 
@@ -76,7 +61,7 @@ export type UpsertMemoryStateInput = {
   qPrimary: string | null;
   selfAcceptance: number | null;
 
-  phase: 'Inner' | 'Outer' | null;
+  phase: Phase | null;
 
   intentLayer: string | null;
   intentConfidence: number | null;
@@ -84,46 +69,94 @@ export type UpsertMemoryStateInput = {
   yLevel: number | null;
   hLevel: number | null;
 
-  // 🆕 unified.situation 由来
   situationSummary: string | null;
   situationTopic: string | null;
 
-  // 🆕 ネガポジ方向（'high' | 'low' | 'neutral' 想定）
-  sentiment_level: string | null;
+  sentimentLevel: string | null;
 
-  // ★ 回転状態（必要なら渡す。null なら潰さない）
-  spinLoop?: string | null;
-  spinStep?: number | null;
-  descentGate?: string | null;
+  spinLoop: SpinLoop | null;
+  spinStep: number | null;
+  descentGate: DescentGate | null;
 
-  // 🆕 q_counts（必要なら渡す。null/undefined なら潰さない）
-  qCounts?: { it_cooldown?: number } | null;
+  qCounts: QCounts | null;
 };
 
-// ---------------------------------------------------------
-// 🆕 q_counts normalize
-// ---------------------------------------------------------
-const normalizeQCounts = (v: any): { it_cooldown: number } | null => {
+/* =========================
+ * Normalizers
+ * ========================= */
+
+function normString(v: any): string | null {
+  return typeof v === 'string' && v.trim().length > 0 ? v : null;
+}
+
+function normNumber(v: any): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+function normPhase(v: any): Phase | null {
+  if (typeof v !== 'string') return null;
+  const s = v.trim();
+  return s === 'Inner' || s === 'Outer' ? (s as Phase) : null;
+}
+
+function normSpinLoop(v: any): SpinLoop | null {
+  if (typeof v !== 'string') return null;
+  const s = v.trim().toUpperCase();
+  return s === 'SRI' || s === 'TCF' ? (s as SpinLoop) : null;
+}
+
+function normSpinStep(v: any): number | null {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+  const n = Math.round(v);
+  // 上限は運用に合わせて調整（いまは 0..9）
+  return Math.max(0, Math.min(9, n));
+}
+
+function normDescentGate(v: any): DescentGate | null {
+  if (v == null) return null;
+
+  if (typeof v === 'string') {
+    const s = v.trim().toLowerCase();
+    if (s === 'closed' || s === 'offered' || s === 'accepted') return s as DescentGate;
+    return null;
+  }
+
+  // 互換：旧 boolean（true=accepted / false=closed）
+  if (typeof v === 'boolean') return v ? 'accepted' : 'closed';
+
+  return null;
+}
+
+function clampInt0to3(v: any): number | null {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+  return Math.max(0, Math.min(3, Math.round(v)));
+}
+
+/**
+ * q_counts は「構造を保持」しつつ it_cooldown だけ正規化
+ * - 既存の q_trace 等を落とさない
+ */
+function normalizeQCounts(v: any): QCounts | null {
   if (v == null) return null;
   if (typeof v !== 'object') return null;
 
-  const cdRaw = (v as any).it_cooldown;
-  const cd =
-    typeof cdRaw === 'number' && Number.isFinite(cdRaw)
-      ? Math.max(0, Math.min(3, Math.round(cdRaw)))
-      : 0;
+  const out: QCounts = { ...(v as any) };
 
-  return { it_cooldown: cd };
-};
+  const cd = clampInt0to3((v as any).it_cooldown);
+  out.it_cooldown = cd ?? 0;
 
-/* =========================================================
-   LOAD: iros_memory_state から 1行読み込む
-========================================================= */
+  return out;
+}
+
+/* =========================
+ * LOAD
+ * ========================= */
 
 export async function loadIrosMemoryState(
+  sb: SupabaseClient,
   userCode: string,
 ): Promise<IrosMemoryState | null> {
-  const { data, error } = await supabase
+  const { data, error } = await sb
     .from('iros_memory_state')
     .select(
       [
@@ -141,11 +174,9 @@ export async function loadIrosMemoryState(
         'sentiment_level',
         'situation_summary',
         'situation_topic',
-        // ★ 回転
         'spin_loop',
         'spin_step',
         'descent_gate',
-        // 🆕 q_counts
         'q_counts',
       ].join(','),
     )
@@ -155,53 +186,38 @@ export async function loadIrosMemoryState(
   if (error) throw error;
   if (!data) return null;
 
-  const qCountsNorm = normalizeQCounts((data as any).q_counts);
-
   const state: IrosMemoryState = {
-    userCode: data.user_code,
+    userCode: String((data as any).user_code),
 
-    depthStage: typeof data.depth_stage === 'string' ? data.depth_stage : null,
-    qPrimary: typeof data.q_primary === 'string' ? data.q_primary : null,
+    depthStage: normString((data as any).depth_stage),
+    qPrimary: normString((data as any).q_primary),
+    selfAcceptance: normNumber((data as any).self_acceptance),
 
-    selfAcceptance:
-      typeof data.self_acceptance === 'number' ? data.self_acceptance : null,
+    phase: normPhase((data as any).phase),
 
-    phase: data.phase === 'Inner' || data.phase === 'Outer' ? data.phase : null,
+    intentLayer: normString((data as any).intent_layer),
+    intentConfidence: normNumber((data as any).intent_confidence),
 
-    intentLayer:
-      typeof data.intent_layer === 'string' ? data.intent_layer : null,
-    intentConfidence:
-      typeof data.intent_confidence === 'number' ? data.intent_confidence : null,
+    yLevel: normNumber((data as any).y_level),
+    hLevel: normNumber((data as any).h_level),
 
-    yLevel: typeof data.y_level === 'number' ? data.y_level : null,
-    hLevel: typeof data.h_level === 'number' ? data.h_level : null,
+    spinLoop: normSpinLoop((data as any).spin_loop),
+    spinStep: normSpinStep((data as any).spin_step),
+    descentGate: normDescentGate((data as any).descent_gate),
 
-    // ★ 回転
-    spinLoop: typeof data.spin_loop === 'string' ? data.spin_loop : null,
-    spinStep: typeof data.spin_step === 'number' ? data.spin_step : null,
-    descentGate:
-      typeof data.descent_gate === 'string' ? data.descent_gate : null,
+    summary: normString((data as any).summary),
+    updatedAt: (data as any).updated_at ?? null,
 
-    summary: typeof data.summary === 'string' ? data.summary : null,
-    updatedAt: data.updated_at ?? null,
+    sentimentLevel: normString((data as any).sentiment_level),
 
-    sentimentLevel:
-      typeof data.sentiment_level === 'string' ? data.sentiment_level : null,
+    situationSummary: normString((data as any).situation_summary),
+    situationTopic: normString((data as any).situation_topic),
 
-    situationSummary:
-      typeof data.situation_summary === 'string' ? data.situation_summary : null,
-    situationTopic:
-      typeof data.situation_topic === 'string' ? data.situation_topic : null,
-
-    // 🆕 q_counts
-    qCounts: qCountsNorm,
+    qCounts: normalizeQCounts((data as any).q_counts),
   };
 
-  if (
-    typeof process !== 'undefined' &&
-    process.env.NODE_ENV !== 'production'
-  ) {
-    console.log('[IROS/ORCH v2] loaded MemoryState', {
+  if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
+    console.log('[IROS/STATE] loaded MemoryState', {
       userCode,
       hasMemory: true,
       depthStage: state.depthStage,
@@ -211,167 +227,91 @@ export async function loadIrosMemoryState(
       intentLayer: state.intentLayer,
       yLevel: state.yLevel,
       hLevel: state.hLevel,
-      spinLoop: state.spinLoop ?? null,
-      spinStep: state.spinStep ?? null,
-      descentGate: state.descentGate ?? null,
+      spinLoop: state.spinLoop,
+      spinStep: state.spinStep,
+      descentGate: state.descentGate,
       sentimentLevel: state.sentimentLevel,
       situationSummary: state.situationSummary,
       situationTopic: state.situationTopic,
-      qCounts: state.qCounts ?? null,
+      qCounts: state.qCounts,
     });
   }
 
   return state;
 }
 
-/* =========================================================
-   UPSERT: iros_memory_state に 1行 upsert する
-========================================================= */
+/* =========================
+ * UPSERT
+ * ========================= */
 
 export async function upsertIrosMemoryState(
+  sb: SupabaseClient,
   input: UpsertMemoryStateInput,
 ): Promise<void> {
-  const {
-    userCode,
-    depthStage,
-    qPrimary,
-    selfAcceptance,
-    phase,
-    intentLayer,
-    intentConfidence,
-    yLevel,
-    hLevel,
-    situationSummary,
-    situationTopic,
-    sentiment_level,
-    spinLoop,
-    spinStep,
-    descentGate,
-    qCounts,
-  } = input;
+  const prev = await loadIrosMemoryState(sb, input.userCode);
 
-  // ① 既存の状態を読み込み（あればマージに使う）
-  const previous = await loadIrosMemoryState(userCode);
-
-  // ② null/undefined で「潰さない」フィールドはここでマージ
-  const finalDepthStage = depthStage ?? previous?.depthStage ?? null;
-  const finalQPrimary = qPrimary ?? previous?.qPrimary ?? null;
+  // null なら潰さない（安定性優先）
+  const finalDepthStage = input.depthStage ?? prev?.depthStage ?? null;
+  const finalQPrimary = input.qPrimary ?? prev?.qPrimary ?? null;
 
   const finalSelfAcceptance =
-    typeof selfAcceptance === 'number'
-      ? selfAcceptance
-      : previous?.selfAcceptance ?? null;
+    typeof input.selfAcceptance === 'number'
+      ? input.selfAcceptance
+      : prev?.selfAcceptance ?? null;
 
-  const finalPhase: 'Inner' | 'Outer' | null = phase ?? previous?.phase ?? null;
+  const finalPhase = input.phase ?? prev?.phase ?? null;
 
-  const finalIntentLayer = intentLayer ?? previous?.intentLayer ?? null;
+  const finalIntentLayer = input.intentLayer ?? prev?.intentLayer ?? null;
 
   const finalIntentConfidence =
-    typeof intentConfidence === 'number'
-      ? intentConfidence
-      : previous?.intentConfidence ?? null;
+    typeof input.intentConfidence === 'number'
+      ? input.intentConfidence
+      : prev?.intentConfidence ?? null;
 
   const finalYLevel =
-    typeof yLevel === 'number' ? yLevel : previous?.yLevel ?? null;
+    typeof input.yLevel === 'number' ? input.yLevel : prev?.yLevel ?? null;
 
   const finalHLevel =
-    typeof hLevel === 'number' ? hLevel : previous?.hLevel ?? null;
+    typeof input.hLevel === 'number' ? input.hLevel : prev?.hLevel ?? null;
+
+  const yLevelInt = clampInt0to3(finalYLevel);
+  const hLevelInt = clampInt0to3(finalHLevel);
 
   const finalSentimentLevel =
-    typeof sentiment_level === 'string' && sentiment_level.length > 0
-      ? sentiment_level
-      : previous?.sentimentLevel ?? null;
+    (typeof input.sentimentLevel === 'string' && input.sentimentLevel.length > 0)
+      ? input.sentimentLevel
+      : prev?.sentimentLevel ?? null;
 
-  // ---------------------------------------------------------
-  // ★ normalize helpers（このブロック内だけで完結）
-  // ---------------------------------------------------------
-  const normalizeSpinLoop = (v: any): 'SRI' | 'TCF' | null => {
-    if (typeof v !== 'string') return null;
-    const s = v.trim().toUpperCase();
-    return s === 'SRI' || s === 'TCF' ? (s as any) : null;
-  };
-
-  const normalizeSpinStep = (v: any): number | null => {
-    if (typeof v !== 'number' || !Number.isFinite(v)) return null;
-    // spinStep は integer 前提（必要なら上限を変えてOK）
-    const n = Math.round(v);
-    return Math.max(0, Math.min(9, n)); // ← 上限は運用に合わせて調整可
-  };
-
-  const normalizeDescentGate = (
-    v: any,
-  ): 'closed' | 'offered' | 'accepted' | null => {
-    if (v == null) return null;
-
-    if (typeof v === 'string') {
-      const s = v.trim().toLowerCase();
-      if (s === 'closed' || s === 'offered' || s === 'accepted') return s as any;
-      return null;
-    }
-
-    // 互換：boolean のとき（旧）
-    if (typeof v === 'boolean') return v ? 'accepted' : 'closed';
-
-    return null;
-  };
-
-  // ★ 回転（null/undefined なら潰さない + “正規化” してから確定）
-  const finalSpinLoop =
-    normalizeSpinLoop(spinLoop) ??
-    normalizeSpinLoop(previous?.spinLoop) ??
-    null;
-
+  const finalSpinLoop = input.spinLoop ?? prev?.spinLoop ?? null;
   const finalSpinStep =
-    normalizeSpinStep(spinStep) ??
-    normalizeSpinStep(previous?.spinStep) ??
-    null;
+    typeof input.spinStep === 'number' ? normSpinStep(input.spinStep) : prev?.spinStep ?? null;
+  const finalDescentGate = input.descentGate ?? prev?.descentGate ?? null;
 
-  const finalDescentGate =
-    normalizeDescentGate(descentGate) ??
-    normalizeDescentGate(previous?.descentGate) ??
-    null;
-
-  // 🆕 q_counts（null/undefined なら潰さない + 正規化して確定）
+  // q_counts は構造維持しつつ it_cooldown 正規化
   const finalQCounts =
-    normalizeQCounts(qCounts) ?? normalizeQCounts(previous?.qCounts) ?? null;
+    normalizeQCounts(input.qCounts) ?? normalizeQCounts(prev?.qCounts) ?? null;
 
-  // ★ 0〜3 に丸めて integer 化（DB カラムは integer）
-  const yLevelInt =
-    typeof finalYLevel === 'number' && Number.isFinite(finalYLevel)
-      ? Math.max(0, Math.min(3, Math.round(finalYLevel)))
-      : null;
-
-  const hLevelInt =
-    typeof finalHLevel === 'number' && Number.isFinite(finalHLevel)
-      ? Math.max(0, Math.min(3, Math.round(finalHLevel)))
-      : null;
-
-  // Debug summary
   const summaryParts: string[] = [];
   if (finalDepthStage) summaryParts.push(`depth=${finalDepthStage}`);
   if (finalQPrimary) summaryParts.push(`q=${finalQPrimary}`);
-  if (typeof finalSelfAcceptance === 'number') {
+  if (typeof finalSelfAcceptance === 'number')
     summaryParts.push(`sa=${finalSelfAcceptance.toFixed(3)}`);
-  }
   if (typeof yLevelInt === 'number') summaryParts.push(`y=${yLevelInt}`);
   if (typeof hLevelInt === 'number') summaryParts.push(`h=${hLevelInt}`);
   if (finalPhase) summaryParts.push(`phase=${finalPhase}`);
   if (finalIntentLayer) summaryParts.push(`intent=${finalIntentLayer}`);
-  if (typeof finalIntentConfidence === 'number') {
+  if (typeof finalIntentConfidence === 'number')
     summaryParts.push(`ic=${finalIntentConfidence.toFixed(3)}`);
-  }
-  if (typeof finalSentimentLevel === 'string' && finalSentimentLevel.length > 0) {
-    summaryParts.push(`sent=${finalSentimentLevel}`);
-  }
+  if (finalSentimentLevel) summaryParts.push(`sent=${finalSentimentLevel}`);
   if (finalSpinLoop) summaryParts.push(`spin=${finalSpinLoop}`);
   if (typeof finalSpinStep === 'number') summaryParts.push(`step=${finalSpinStep}`);
   if (finalDescentGate) summaryParts.push(`descent=${finalDescentGate}`);
   if (finalQCounts?.it_cooldown != null) summaryParts.push(`it_cd=${finalQCounts.it_cooldown}`);
 
-  const summary = summaryParts.length > 0 ? summaryParts.join(',') : null;
+  const summary = summaryParts.length ? summaryParts.join(',') : null;
 
   const payload = {
-    user_code: userCode,
+    user_code: input.userCode,
     depth_stage: finalDepthStage,
     q_primary: finalQPrimary,
     self_acceptance: finalSelfAcceptance,
@@ -383,60 +323,36 @@ export async function upsertIrosMemoryState(
     summary,
     updated_at: new Date().toISOString(),
 
-    // 🆕 追加分
     sentiment_level: finalSentimentLevel,
-    situation_summary: situationSummary,
-    situation_topic: situationTopic,
+    situation_summary: input.situationSummary ?? prev?.situationSummary ?? null,
+    situation_topic: input.situationTopic ?? prev?.situationTopic ?? null,
 
-    // ★ 回転（正規化済み）
     spin_loop: finalSpinLoop,
     spin_step: finalSpinStep,
     descent_gate: finalDescentGate,
 
-    // 🆕 q_counts（正規化済み / null なら DB のままにしたいなら upsert しない運用でもOK）
     q_counts: finalQCounts,
   };
 
-  try {
-    const { error } = await supabase
-      .from('iros_memory_state')
-      .upsert(payload, { onConflict: 'user_code' });
+  const { error } = await sb
+    .from('iros_memory_state')
+    .upsert(payload, { onConflict: 'user_code' });
 
-    if (error) {
-      console.error('[IROS/MemoryState] upsert failed', {
-        userCode,
-        input,
-        payload,
-        error,
-      });
-    } else if (
-      typeof process !== 'undefined' &&
-      process.env.NODE_ENV !== 'production'
-    ) {
-      console.log('[IROS/MemoryState] upsert ok', {
-        userCode,
-        depthStage: finalDepthStage,
-        qPrimary: finalQPrimary,
-        selfAcceptance: finalSelfAcceptance,
-        phase: finalPhase,
-        intentLayer: finalIntentLayer,
-        intentConfidence: finalIntentConfidence,
-        yLevel: yLevelInt,
-        hLevel: hLevelInt,
-        sentiment_level: finalSentimentLevel,
-        situationSummary,
-        situationTopic,
-        spinLoop: finalSpinLoop,
-        spinStep: finalSpinStep,
-        descentGate: finalDescentGate,
-        qCounts: finalQCounts,
-      });
-    }
-  } catch (e) {
-    console.error('[IROS/MemoryState] unexpected upsert error', {
-      userCode,
-      input,
-      error: e,
+  if (error) {
+    console.error('[IROS/STATE] upsert failed', { userCode: input.userCode, payload, error });
+    throw error;
+  }
+
+  if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
+    console.log('[IROS/STATE] upsert ok', {
+      userCode: input.userCode,
+      depthStage: finalDepthStage,
+      qPrimary: finalQPrimary,
+      phase: finalPhase,
+      spinLoop: finalSpinLoop,
+      spinStep: finalSpinStep,
+      descentGate: finalDescentGate,
+      qCounts: finalQCounts,
     });
   }
 }

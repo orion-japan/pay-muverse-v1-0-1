@@ -45,7 +45,6 @@ import {
 } from '@/lib/iros/writers/microWriter';
 
 import { loadLatestGoalByUserCode } from '@/lib/iros/server/loadLatestGoalByUserCode';
-
 /* =========================
    Helpers: Achievement summary drop filter
 ========================= */
@@ -1098,95 +1097,134 @@ export async function handleIrosReply(
     });
     t.context_ms = msSince(tc);
 
-    /* ---------------------------
-       3) Orchestrator
-    ---------------------------- */
+/* ---------------------------
+   3) Orchestrator
+---------------------------- */
 
-    // ✅ baseMetaForTurn に extra を必ずマージ（ここが “消えない” 本体）
-    const baseMetaMergedForTurn: any = {
-      ...(ctx.baseMetaForTurn ?? {}),
-      extra: {
-        ...(((ctx.baseMetaForTurn as any)?.extra) ?? {}),
-        ...(extra ?? {}),
-      },
-    };
+// ✅ baseMetaForTurn に extra を必ずマージ（ここが “消えない” 本体）
+const baseMetaMergedForTurn: any = {
+  ...(ctx.baseMetaForTurn ?? {}),
+  extra: {
+    ...(((ctx.baseMetaForTurn as any)?.extra) ?? {}),
+    ...(extra ?? {}),
+  },
+};
 
-    console.log('[IROS/Reply] merged extra', {
-      keys: Object.keys(baseMetaMergedForTurn.extra ?? {}),
-      renderMode: baseMetaMergedForTurn.extra?.renderMode ?? null,
-      forceIT: baseMetaMergedForTurn.extra?.forceIT ?? null,
-    });
+// ✅ R -> I gate（入口で確定。途中上書き禁止）
+const prevDepthStage: string | null =
+  typeof (ctx?.baseMetaForTurn as any)?.depthStage === 'string'
+    ? (ctx.baseMetaForTurn as any).depthStage
+    : typeof (ctx?.baseMetaForTurn as any)?.depth === 'string'
+      ? (ctx.baseMetaForTurn as any).depth
+      : null;
 
-    const to = nowNs();
-    const orch = await (runOrchestratorTurn as any)({
-      conversationId,
-      userCode,
-      text,
-      isFirstTurn: ctx.isFirstTurn,
-      requestedMode: ctx.requestedMode,
-      requestedDepth: ctx.requestedDepth,
-      requestedQCode: ctx.requestedQCode,
+let requestedDepthFinal = ctx.requestedDepth;
 
-      // ✅ 差し替え：マージ済みを渡す
-      baseMetaForTurn: baseMetaMergedForTurn,
+// ルール：R -> C 直行を禁止して、R -> I1 を強制
+if (
+  prevDepthStage?.startsWith('R') &&
+  typeof requestedDepthFinal === 'string' &&
+  requestedDepthFinal.startsWith('C')
+) {
+  requestedDepthFinal = 'I1';
+}
 
-      userProfile: userProfile ?? null,
-      effectiveStyle: ctx.effectiveStyle,
-      history: historyForTurn,
+console.log('[IROS][DepthGate] R->I check', {
+  prevDepthStage,
+  requestedDepth_in: ctx.requestedDepth,
+  requestedDepth_out: requestedDepthFinal,
+});
 
-      // ✅ 追加：orch にも extra を渡す（受け側が拾えるように）
-      extra: extra ?? null,
-    });
-    t.orchestrator_ms = msSince(to);
+const to = nowNs();
+const orch = await (runOrchestratorTurn as any)({
+  conversationId,
+  userCode,
+  text,
+  isFirstTurn: ctx.isFirstTurn,
+  requestedMode: ctx.requestedMode,
+  requestedDepth: requestedDepthFinal, // ✅ ここだけ差し替える
+  requestedQCode: ctx.requestedQCode,
 
-    /* ---------------------------
-       4) PostProcess
-    ---------------------------- */
+  baseMetaForTurn: baseMetaMergedForTurn,
 
-    const tp = nowNs();
-    const out = await (postProcessReply as any)({
-      supabase,
-      userCode,
-      conversationId,
-      userText: text,
-      effectiveStyle: ctx.effectiveStyle,
-      requestedMode: ctx.requestedMode,
-      orchResult: orch,
-      history: historyForTurn,
+  userProfile: userProfile ?? null,
+  effectiveStyle: ctx.effectiveStyle,
+  history: historyForTurn,
 
-      // ✅ 追加：postprocess にも extra を渡す
-      extra: extra ?? null,
-    });
-    t.postprocess_ms = msSince(tp);
+  sb: supabase,
+});
+
+t.orchestrator_ms = msSince(to);
 
 
-// ✅ Frame/Slots single source of truth
-// - contextの framePlan は「計画」に過ぎないので、保存/描画は orch の確定値に統一する
+/* ---------------------------
+   4) PostProcess
+---------------------------- */
+
+const tp = nowNs();
+const out = await (postProcessReply as any)({
+  supabase,
+  userCode,
+  conversationId,
+  userText: text,
+  effectiveStyle: ctx.effectiveStyle,
+  requestedMode: ctx.requestedMode,
+  orchResult: orch,
+  history: historyForTurn,
+
+  // ✅ 追加：postprocess にも extra を渡す
+  extra: extra ?? null,
+});
+t.postprocess_ms = msSince(tp);
+
+// ✅ Frame/Slots single source of truth（暫定強化）
+// - 本命: orch.meta.frame / orch.meta.slotPlan
+// - ただし現状 orch.meta に入ってないので、orch の top-level も拾う
 try {
   const orchMeta: any =
     (orch as any)?.meta ??
     (orch as any)?.result?.meta ??
     null;
 
-  if (orchMeta) {
-    if (orchMeta.frame != null) out.metaForSave.frame = orchMeta.frame;
-    if (orchMeta.slotPlan != null) out.metaForSave.slotPlan = orchMeta.slotPlan;
-  } // ← ★これが抜けていた
+  // ★ 追加：orch の top-level fallback（ログ上こちらに frame がある可能性）
+  const orchFrame =
+    orchMeta?.frame ??
+    (orch as any)?.frame ??
+    (orch as any)?.result?.frame ??
+    null;
 
-  // 一旦コメントアウト or 削除（framePlan を殺さない）
-  // if ((out.metaForSave as any).framePlan) delete (out.metaForSave as any).framePlan;
-  // if ((out.metaForSave as any).frame_plan) delete (out.metaForSave as any).frame_plan;
+  const orchSlotPlan =
+    orchMeta?.slotPlan ??
+    (orch as any)?.slotPlan ??
+    (orch as any)?.result?.slotPlan ??
+    null;
 
-  console.log('[IROS/Reply] frame/slot fixed (from orch)', {
-    frame: out.metaForSave?.frame ?? null,
-    slotPlanLen: Array.isArray(out.metaForSave?.slotPlan)
-      ? out.metaForSave.slotPlan.length
-      : null,
+  // out.metaForSave が無いなら作る
+  if (!(out as any)?.metaForSave) (out as any).metaForSave = {};
+
+  // 最終的に out.metaForSave に確定値を戻す（persist はこれを使う）
+  if (orchFrame != null) (out as any).metaForSave.frame = orchFrame;
+  if (orchSlotPlan != null) (out as any).metaForSave.slotPlan = orchSlotPlan;
+
+  // debug
+  const meta = (out as any)?.metaForSave ?? null;
+
+  console.log('[IROS/Reply][frame-fix][debug]', {
+    orchFrame,
+    orchSlotPlanLen: Array.isArray(orchSlotPlan) ? orchSlotPlan.length : null,
+
+    meta_frame: meta?.frame ?? null,
+    meta_framePlan_frame: meta?.framePlan?.frame ?? null,
+    meta_slotPlan_type: Array.isArray(meta?.slotPlan)
+      ? 'array'
+      : meta?.slotPlan && typeof meta.slotPlan === 'object'
+        ? 'object'
+        : null,
+    meta_slotPlan_len: Array.isArray(meta?.slotPlan) ? meta.slotPlan.length : null,
   });
 } catch (e) {
   console.warn('[IROS/Reply] frame/slot fix failed', e);
 }
-
 
     /* ---------------------------
        5) Timing / Sanitize / Rotation bridge
@@ -1564,65 +1602,69 @@ function ensureMetaFilled(args: {
   }
 }
 
-    /* ---------------------------
-       6) Persist (order fixed)
-    ---------------------------- */
+/* ---------------------------
+   6) Persist (order fixed)
+---------------------------- */
 
-    {
-      const ts = nowNs();
+{
+  const ts = nowNs();
 
-      const t1 = nowNs();
-      await persistQCodeSnapshotIfAny({
-        userCode,
-        conversationId,
-        requestedMode: ctx.requestedMode,
-        metaForSave: out.metaForSave,
-      });
-      t.persist_ms.q_snapshot_ms = msSince(t1);
+  // ✅ stop-the-bleeding: meta 合流の最終フォールバック
+  const metaForSave = out.metaForSave ?? (orch as any)?.meta ?? null;
 
-      const t2 = nowNs();
-      await persistIntentAnchorIfAny({
-        supabase,
-        userCode,
-        metaForSave: out.metaForSave,
-      });
-      t.persist_ms.intent_anchor_ms = msSince(t2);
+  const t1 = nowNs();
+  await persistQCodeSnapshotIfAny({
+    userCode,
+    conversationId,
+    requestedMode: ctx.requestedMode,
+    metaForSave,
+  });
+  t.persist_ms.q_snapshot_ms = msSince(t1);
 
-      const t3 = nowNs();
-      await persistMemoryStateIfAny({
-        supabase,
-        userCode,
-        userText: text,
-        metaForSave: out.metaForSave,
-      });
-      t.persist_ms.memory_state_ms = msSince(t3);
+  const t2 = nowNs();
+  await persistIntentAnchorIfAny({
+    supabase,
+    userCode,
+    metaForSave,
+  });
+  t.persist_ms.intent_anchor_ms = msSince(t2);
 
-      const t4 = nowNs();
-      await persistUnifiedAnalysisIfAny({
-        supabase,
-        userCode,
-        tenantId,
-        userText: text,
-        assistantText: out.assistantText,
-        metaForSave: out.metaForSave,
-        conversationId,
-      });
-      t.persist_ms.unified_analysis_ms = msSince(t4);
+  const t3 = nowNs();
+  await persistMemoryStateIfAny({
+    supabase,
+    userCode,
+    userText: text,
+    metaForSave,
+  });
+  t.persist_ms.memory_state_ms = msSince(t3);
 
-      const t5 = nowNs();
-      await persistAssistantMessage({
-        supabase,
-        reqOrigin,
-        authorizationHeader,
-        conversationId,
-        userCode,
-        assistantText: out.assistantText,
-        metaForSave: out.metaForSave,
-      });
-      t.persist_ms.assistant_message_ms = msSince(t5);
+  const t4 = nowNs();
+  await persistUnifiedAnalysisIfAny({
+    supabase,
+    userCode,
+    tenantId,
+    userText: text,
+    assistantText: out.assistantText,
+    metaForSave,
+    conversationId,
+  });
+  t.persist_ms.unified_analysis_ms = msSince(t4);
 
-      t.persist_ms.total_ms = msSince(ts);
-    }
+  const t5 = nowNs();
+  await persistAssistantMessage({
+    supabase,
+    reqOrigin,
+    authorizationHeader,
+    conversationId,
+    userCode,
+    assistantText: out.assistantText,
+    metaForSave,
+  });
+  t.persist_ms.assistant_message_ms = msSince(t5);
+
+  t.persist_ms.total_ms = msSince(ts);
+}
+
 
     const finalMode =
       typeof (orch as any)?.mode === 'string'
