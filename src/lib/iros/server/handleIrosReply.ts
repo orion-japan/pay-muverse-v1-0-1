@@ -1177,17 +1177,107 @@ const out = await (postProcessReply as any)({
 });
 t.postprocess_ms = msSince(tp);
 
+
+
+
+/* ---------------------------
+   5) Timing / Sanitize / Rotation bridge
+---------------------------- */
+
+out.metaForSave = out.metaForSave ?? {};
+out.metaForSave.timing = t;
+
+// ✅ persist に必ず残す（postProcess が extra を作り直しても守る）
+out.metaForSave.extra = out.metaForSave.extra ?? {};
+
+// ✅ 1) route から来た extra を “最後に” 再注入（ただし undefined は上書きしない）
+if (extra && typeof extra === 'object') {
+  const prev = out.metaForSave.extra ?? {};
+  const next: any = { ...prev };
+
+  for (const [k, v] of Object.entries(extra as any)) {
+    if (v !== undefined) next[k] = v; // ✅ undefined は無視
+  }
+
+  out.metaForSave.extra = next;
+}
+
+console.log('[IROS/Reply][debug-extra-sources]', {
+  routeExtra: extra,
+  metaExtra_beforeMerge: out?.metaForSave?.extra ?? null,
+  orchMetaExtra: (orch as any)?.meta?.extra ?? (orch as any)?.result?.meta?.extra ?? null,
+  itResultExtraHint: {
+    // IT結果がどこに格納されてる想定かを見るため
+    tLayerModeActive_fromOrch:
+      (orch as any)?.meta?.tLayerModeActive ??
+      (orch as any)?.result?.meta?.tLayerModeActive ??
+      null,
+    tLayerHint_fromOrch:
+      (orch as any)?.meta?.tLayerHint ??
+      (orch as any)?.result?.meta?.tLayerHint ??
+      null,
+  },
+});
+
+console.log('[IROS/Reply][extra-merged]', out.metaForSave.extra);
+
+
+// ✅ IT結果を single source（metaForSave.extra）へ同期する（Frame判定より前に）
+if (!out.metaForSave) out.metaForSave = {};
+out.metaForSave.extra = out.metaForSave.extra ?? {};
+
+const orchMetaAny: any =
+  (orch as any)?.meta ?? (orch as any)?.result?.meta ?? null;
+
+const orchTL_tLayerModeActive =
+  typeof orchMetaAny?.tLayerModeActive === 'boolean'
+    ? orchMetaAny.tLayerModeActive
+    : undefined;
+
+const orchTL_tLayerHint =
+  typeof orchMetaAny?.tLayerHint === 'string' && orchMetaAny.tLayerHint.trim()
+    ? orchMetaAny.tLayerHint
+    : undefined;
+
+if (orchTL_tLayerModeActive !== undefined)
+  out.metaForSave.extra.tLayerModeActive = orchTL_tLayerModeActive;
+
+if (orchTL_tLayerHint !== undefined)
+  out.metaForSave.extra.tLayerHint = orchTL_tLayerHint;
+
+console.log('[IROS/Reply][it-sync-to-extra(pre-frame)]', {
+  orchTL_tLayerModeActive: orchTL_tLayerModeActive ?? null,
+  orchTL_tLayerHint: orchTL_tLayerHint ?? null,
+  extra_after: {
+    tLayerModeActive: out.metaForSave.extra.tLayerModeActive ?? null,
+    tLayerHint: out.metaForSave.extra.tLayerHint ?? null,
+  },
+});
+
+// ✅ ITが発火していたら renderMode を IT に確定（single source）
+const itActiveNow =
+  out.metaForSave?.extra?.tLayerModeActive === true ||
+  ['T1', 'T2', 'T3'].includes(String(out.metaForSave?.extra?.tLayerHint ?? ''));
+
+if (itActiveNow) {
+  out.metaForSave.extra.renderMode = 'IT';
+  out.metaForSave.renderMode = 'IT';
+}
+
+
 // ✅ Frame/Slots single source of truth（暫定強化）
-// - 本命: orch.meta.frame / orch.meta.slotPlan
-// - ただし現状 orch.meta に入ってないので、orch の top-level も拾う
+// - IT/T層が立っていたら frame='T' に固定
+// - 次に orch の frame / slotPlan を反映
+if (orchTL_tLayerModeActive !== undefined) out.metaForSave.extra.tLayerModeActive = orchTL_tLayerModeActive;
+if (orchTL_tLayerHint !== undefined) out.metaForSave.extra.tLayerHint = orchTL_tLayerHint;
+
 try {
   const orchMeta: any =
     (orch as any)?.meta ??
     (orch as any)?.result?.meta ??
     null;
 
-  // ★ 追加：orch の top-level fallback（ログ上こちらに frame がある可能性）
-  const orchFrame =
+  const orchFrameRaw =
     orchMeta?.frame ??
     (orch as any)?.frame ??
     (orch as any)?.result?.frame ??
@@ -1199,50 +1289,36 @@ try {
     (orch as any)?.result?.slotPlan ??
     null;
 
-  // out.metaForSave が無いなら作る
-  if (!(out as any)?.metaForSave) (out as any).metaForSave = {};
+  const meta: any = out.metaForSave;
 
-  // 最終的に out.metaForSave に確定値を戻す（persist はこれを使う）
-  if (orchFrame != null) (out as any).metaForSave.frame = orchFrame;
-  if (orchSlotPlan != null) (out as any).metaForSave.slotPlan = orchSlotPlan;
+  const tHint = String(meta?.extra?.tLayerHint ?? '').toUpperCase();
+  const itActive =
+    meta?.extra?.tLayerModeActive === true ||
+    tHint === 'T1' || tHint === 'T2' || tHint === 'T3';
 
-  // debug
-  const meta = (out as any)?.metaForSave ?? null;
+  const decidedFrame =
+    itActive
+      ? 'T'
+      : (typeof orchFrameRaw === 'string' && orchFrameRaw.trim()
+          ? orchFrameRaw
+          : null);
+
+  if (typeof decidedFrame === 'string') meta.frame = decidedFrame;
+  if (orchSlotPlan != null) meta.slotPlan = orchSlotPlan;
 
   console.log('[IROS/Reply][frame-fix][debug]', {
-    orchFrame,
+    itActive,
+    tLayerHint: tHint || null,
+    orchFrameRaw,
+    decidedFrame,
     orchSlotPlanLen: Array.isArray(orchSlotPlan) ? orchSlotPlan.length : null,
-
     meta_frame: meta?.frame ?? null,
     meta_framePlan_frame: meta?.framePlan?.frame ?? null,
-    meta_slotPlan_type: Array.isArray(meta?.slotPlan)
-      ? 'array'
-      : meta?.slotPlan && typeof meta.slotPlan === 'object'
-        ? 'object'
-        : null,
     meta_slotPlan_len: Array.isArray(meta?.slotPlan) ? meta.slotPlan.length : null,
   });
 } catch (e) {
   console.warn('[IROS/Reply] frame/slot fix failed', e);
 }
-
-    /* ---------------------------
-       5) Timing / Sanitize / Rotation bridge
-    ---------------------------- */
-
-    out.metaForSave = out.metaForSave ?? {};
-    out.metaForSave.timing = t;
-
-    // ✅ persist に必ず残す（postProcess が extra を作り直しても守る）
-    out.metaForSave.extra = out.metaForSave.extra ?? {};
-
-    // ✅ 1) route から来た extra を “最後に” 必ず再注入（single source）
-    if (extra && typeof extra === 'object') {
-      out.metaForSave.extra = {
-        ...(out.metaForSave.extra ?? {}),
-        ...(extra ?? {}),
-      };
-    }
 
     // ✅ 2) renderMode はトップレベル1本化（ここが最終固定点）
     const extraRenderMode =
@@ -1433,15 +1509,7 @@ function pickFirstString(...cands: any[]): string | null {
   return null;
 }
 
-
-
-
-
-function ensureMetaFilled(args: {
-  meta: any;
-  ctx: any;
-  orch: any;
-}): any {
+function ensureMetaFilled(args: { meta: any; ctx: any; orch: any }): any {
   const m = args.meta ?? {};
   const ctx = args.ctx ?? {};
   const orch = args.orch ?? {};
@@ -1516,90 +1584,83 @@ function ensureMetaFilled(args: {
     filled: true,
   };
 
-  function ensureMetaFilled(args: {
-    meta: any;
-    ctx: any;
-    orch: any;
-  }): any {
-    const m = args.meta ?? {};
-    const ctx = args.ctx ?? {};
-    const orch = args.orch ?? {};
-
-    // ==== Q（qPrimary / q_code を必ず埋める）====
-    const qFromMeta = pickFirstString(m.qPrimary, m.q_code, m.qCode, m.currentQ);
-    const qFromCtx = pickFirstString(
-      ctx?.baseMetaForTurn?.qPrimary,
-      ctx?.baseMetaForTurn?.q_code,
-      ctx?.baseMetaForTurn?.qCode,
-      ctx?.requestedQCode,
-    );
-    const qFinal = qFromMeta ?? qFromCtx ?? 'unknown';
-
-    if (!m.qPrimary) m.qPrimary = qFinal;
-    if (!m.q_code) m.q_code = qFinal;
-
-    // ==== Phase（Inner/Outer を必ず埋める）====
-    const phaseFromMeta = normalizePhaseIO(m.phase) ?? normalizePhaseIO(m.phaseIO);
-    const phaseFromCtx =
-      normalizePhaseIO(ctx?.baseMetaForTurn?.phase) ??
-      normalizePhaseIO(ctx?.baseMetaForTurn?.phaseIO);
-
-    // 型安全のため “unknown” は使わず Inner に寄せる（落ちないこと最優先）
-    const phaseFinal: PhaseIO = phaseFromMeta ?? phaseFromCtx ?? 'Inner';
-    if (!m.phase) m.phase = phaseFinal;
-
-    // ==== Depth（null禁止：文字列を必ず入れる）====
-    const depthFromMeta = pickFirstString(m.depth, m.depthStage, m.depthstage);
-    const depthFromCtx = pickFirstString(
-      ctx?.baseMetaForTurn?.depth,
-      ctx?.baseMetaForTurn?.depthStage,
-      ctx?.requestedDepth,
-    );
-    const depthFromOrch = pickFirstString(
-      orch?.meta?.depth,
-      orch?.meta?.depthStage,
-      orch?.result?.meta?.depth,
-      orch?.result?.meta?.depthStage,
-    );
-
-    const depthFinal = depthFromMeta ?? depthFromCtx ?? depthFromOrch ?? 'unknown';
-    if (!m.depth) m.depth = depthFinal;
-
-    // ==== Rotation（spinLoop / descentGate / depth を必ず埋める）====
-    const rot = m.rotationState ?? m.rotation ?? null;
-
-    const spinLoopFinal: SpinLoop2 =
-      normalizeSpinLoop2(rot?.spinLoop ?? rot?.loop) ??
-      normalizeSpinLoop2(m.spinLoop) ??
-      'SRI';
-
-    const descentGateFinal: DescentGate2 = normalizeDescentGate2(
-      rot?.descentGate ?? m.descentGate,
-    );
-
-    const rotDepthFinal = pickFirstString(rot?.depth, m.depth) ?? depthFinal;
-
-    m.spinLoop = spinLoopFinal;
-    m.descentGate = descentGateFinal;
-
-    m.rotationState = {
-      ...(typeof m.rotationState === 'object' ? m.rotationState : {}),
-      spinLoop: spinLoopFinal,
-      descentGate: descentGateFinal,
-      depth: rotDepthFinal,
-      filled: true,
-    };
-
-    // ==== Bridge: framePlan / inputKind を必ず残す（writerHints 用）====
-    if (!(m as any).framePlan && (ctx?.baseMetaForTurn as any)?.framePlan) {
-      (m as any).framePlan = (ctx.baseMetaForTurn as any).framePlan;
-    }
-    if (!(m as any).inputKind && (ctx?.baseMetaForTurn as any)?.inputKind) {
-      (m as any).inputKind = (ctx.baseMetaForTurn as any).inputKind;
-    }
-
-    return m;
+  // ==== Bridge: framePlan / inputKind を必ず残す（writerHints 用）====
+  if (!(m as any).framePlan && (ctx?.baseMetaForTurn as any)?.framePlan) {
+    (m as any).framePlan = (ctx.baseMetaForTurn as any).framePlan;
   }
+  if (!(m as any).inputKind && (ctx?.baseMetaForTurn as any)?.inputKind) {
+    (m as any).inputKind = (ctx.baseMetaForTurn as any).inputKind;
+  }
+
+  return m;
+}
+
+// ✅ IT結果を MemoryState 用 itx_*（トップレベル）に確定同期（Persist直前）
+try {
+  const m: any = out?.metaForSave ?? {};
+  const ex: any = m?.extra ?? {};
+
+  // ★同期元は「確定している入力値 → extra → 既存」の順で拾う
+  const stepIn =
+    (typeof (globalThis as any).transitionStepInput === 'string' && (globalThis as any).transitionStepInput) ||
+    ex?.tLayerHint ||
+    m?.tLayerHint ||
+    null;
+
+  const anchorIn =
+    (typeof (globalThis as any).anchorEventTypeInput === 'string' && (globalThis as any).anchorEventTypeInput) ||
+    ex?.itx_anchor_event_type ||
+    ex?.anchorEventType ||
+    m?.anchorEventType ||
+    null;
+
+  const reasonIn =
+    (typeof (globalThis as any).transitionReasonInput === 'string' && (globalThis as any).transitionReasonInput) ||
+    ex?.itReason ||
+    ex?.itx_reason ||
+    m?.itReason ||
+    m?.itx_reason ||
+    null;
+
+  const lastAtIn =
+    (typeof (globalThis as any).lastTransitionAtInput === 'string' && (globalThis as any).lastTransitionAtInput) ||
+    ex?.itx_last_at ||
+    m?.itx_last_at ||
+    null;
+
+  const tHint = typeof stepIn === 'string' ? stepIn.trim().toUpperCase() : '';
+  const itActive =
+    ex?.tLayerModeActive === true ||
+    tHint === 'T1' || tHint === 'T2' || tHint === 'T3' ||
+    m?.renderMode === 'IT';
+
+  if (itActive) {
+    m.itTriggered = true;
+
+    m.itx_step = (tHint === 'T1' || tHint === 'T2' || tHint === 'T3') ? tHint : null;
+
+    // reason
+    m.itx_reason = (typeof reasonIn === 'string' && reasonIn.trim().length > 0) ? reasonIn.trim() : 'IT_TRIGGER_OK';
+
+    // anchor event（none/confirm/set/reset だけ許可）
+    const a = typeof anchorIn === 'string' ? anchorIn.trim().toLowerCase() : '';
+    m.itx_anchor_event_type = (a === 'none' || a === 'confirm' || a === 'set' || a === 'reset') ? a : 'none';
+
+    // last_at（IT側の値を優先。無ければ nowIso）
+    m.itx_last_at = (typeof lastAtIn === 'string' && lastAtIn.trim().length > 0) ? lastAtIn.trim() : nowIso();
+  }
+
+  out.metaForSave = m;
+
+  console.log('[IROS/Reply][itx-sync-for-persist]', {
+    itActive,
+    itx_step: m.itx_step ?? null,
+    itx_anchor_event_type: m.itx_anchor_event_type ?? null,
+    itx_reason: m.itx_reason ?? null,
+    itx_last_at: m.itx_last_at ?? null,
+  });
+} catch (e) {
+  console.warn('[IROS/Reply][itx-sync-for-persist] failed', e);
 }
 
 /* ---------------------------
@@ -1608,6 +1669,9 @@ function ensureMetaFilled(args: {
 
 {
   const ts = nowNs();
+
+
+
 
   // ✅ stop-the-bleeding: meta 合流の最終フォールバック
   const metaForSave = out.metaForSave ?? (orch as any)?.meta ?? null;
@@ -1665,36 +1729,35 @@ function ensureMetaFilled(args: {
   t.persist_ms.total_ms = msSince(ts);
 }
 
+const finalMode =
+  typeof (orch as any)?.mode === 'string'
+    ? (orch as any).mode
+    : (ctx as any).finalMode ?? mode;
 
-    const finalMode =
-      typeof (orch as any)?.mode === 'string'
-        ? (orch as any).mode
-        : (ctx as any).finalMode ?? mode;
+t.finished_at = nowIso();
+t.total_ms = msSince(t0);
 
-    t.finished_at = nowIso();
-    t.total_ms = msSince(t0);
+return {
+  ok: true,
+  result: orch,
+  assistantText: out.assistantText,
+  metaForSave: out.metaForSave,
+  finalMode,
+};
+} catch (e) {
+console.error('[IROS/Reply] handleIrosReply failed', {
+  conversationId,
+  userCode,
+  error: e,
+});
 
-    return {
-      ok: true,
-      result: orch,
-      assistantText: out.assistantText,
-      metaForSave: out.metaForSave,
-      finalMode,
-    };
-  } catch (e) {
-    console.error('[IROS/Reply] handleIrosReply failed', {
-      conversationId,
-      userCode,
-      error: e,
-    });
+t.finished_at = nowIso();
+t.total_ms = msSince(t0);
 
-    t.finished_at = nowIso();
-    t.total_ms = msSince(t0);
-
-    return {
-      ok: false,
-      error: 'generation_failed',
-      detail: e instanceof Error ? e.message : String(e),
-    };
-  }
+return {
+  ok: false,
+  error: 'generation_failed',
+  detail: e instanceof Error ? e.message : String(e),
+};
+}
 }

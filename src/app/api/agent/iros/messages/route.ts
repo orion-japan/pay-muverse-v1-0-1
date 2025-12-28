@@ -628,8 +628,8 @@ export async function POST(req: NextRequest) {
 
 // ============================
 // ✅ seed: insert 時点の null を潰す（MemoryState の最新を暫定値として入れる）
-// body/meta が持ってる値（q_code/depth_stage/intent_layer）が最優先。
-// それが無いときだけ MemoryState を使う。
+// - body/meta が持ってる値（q_code/depth_stage/intent_layer）が最優先
+// - それが無いときだけ MemoryState を seed として使う
 // ============================
 let seed: {
   q_code: string | null;
@@ -637,7 +637,8 @@ let seed: {
   intent_layer: string | null;
   phase: string | null;
   spin_loop: string | null;
-  spin_step: number | null;        // ✅ 追加
+  spin_step: number | null;
+  // ※ messages 側に descent_gate カラムが無いなら、seedに持ってても insert には使わない
   descent_gate: string | null;
 } = {
   q_code: null,
@@ -645,7 +646,7 @@ let seed: {
   intent_layer: null,
   phase: null,
   spin_loop: null,
-  spin_step: null,                 // ✅ 追加
+  spin_step: null,
   descent_gate: null,
 };
 
@@ -656,7 +657,7 @@ try {
     try {
       const { data, error } = await (supabase as any)
         .from(mt)
-        .select('q_primary, depth_stage, intent_layer, phase, spin_loop, spin_step, descent_gate') // ✅ spin_step 追加
+        .select('q_primary, depth_stage, intent_layer, phase, spin_loop, spin_step, descent_gate')
         .eq('user_code', userCode)
         .maybeSingle();
 
@@ -668,10 +669,9 @@ try {
           phase: toNonEmptyTrimmedString((data as any).phase) ?? null,
           spin_loop: toNonEmptyTrimmedString((data as any).spin_loop) ?? null,
           spin_step:
-            typeof (data as any).spin_step === 'number' &&
-            Number.isFinite((data as any).spin_step)
+            typeof (data as any).spin_step === 'number' && Number.isFinite((data as any).spin_step)
               ? (data as any).spin_step
-              : null, // ✅ 追加
+              : null,
           descent_gate: toNonEmptyTrimmedString((data as any).descent_gate) ?? null,
         };
         break;
@@ -684,16 +684,29 @@ try {
   // seed は取れなくても続行（insert を止めない）
 }
 
+// ✅ 追加：depth_stage から intent_layer を正規化（DB保存の揺れ止め）
+// - depth_stage があるなら intent_layer を必ず同期（例：I1→I）
+// - depth_stage が無い場合だけ meta/body/seed を使う
+function normalizeIntentLayerFromDepth(depthStage: string | null): string | null {
+  if (!depthStage) return null;
+  const c = String(depthStage).trim().charAt(0).toUpperCase();
+  return c === 'S' || c === 'R' || c === 'C' || c === 'I' || c === 'T' ? c : null;
+}
+
 // ✅ 最終的に insert に使う値（body/meta 優先 → 無ければ seed）
 const q_code_final = q_code ?? seed.q_code;
 const depth_stage_final = depth_stage ?? seed.depth_stage;
-const intent_layer_final = intent_layer ?? seed.intent_layer;
 
-// ✅ ここが超重要：messages 側に “回転状態” を落とす
+// ★超重要：intent_layer は depth_stage に同期して固定（混入揺れを消す）
+const intent_layer_from_depth = normalizeIntentLayerFromDepth(depth_stage_final);
+const intent_layer_final = intent_layer_from_depth ?? (intent_layer ?? seed.intent_layer);
+
+// ✅ 回転状態（messages に落とすならここで拾う：ただし“カラムがある時だけ insert”）
 const phase_final = seed.phase;
 const spin_loop_final = seed.spin_loop;
-const spin_step_final = seed.spin_step;      // ✅ 追加
+const spin_step_final = seed.spin_step;
 const descent_gate_final = seed.descent_gate;
+
 
 // ============================
 // ✅ insert 用のベース行（スコープ事故防止：ここで宣言）

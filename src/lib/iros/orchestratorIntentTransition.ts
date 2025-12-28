@@ -142,6 +142,60 @@ export function applyIntentTransitionV1(
     }
   }
 
+  /* =========================================================
+   * [IROS_ANCHOR_APPLY_FROM_ITX] Tで意図アンカーを反映
+   * - itx.snapshot.anchorEventType を唯一の正とする
+   * - set のときだけ anchorText が必要（無ければ何もしない）
+   * ========================================================= */
+  {
+    const aType = itx.snapshot.anchorEventType as
+      | 'none'
+      | 'confirm'
+      | 'set'
+      | 'reset'
+      | undefined;
+
+    // 「Tで刺さった」時だけ反映したいなら、tGate/open を条件にする（任意）
+    const tGate = itx.nextTGate ?? itxState.tGate; // open/closed/undefined
+    const isTActive = tGate === 'open' || itx.snapshot.step === 't_open';
+
+    // ★ まず reset
+    if (isTActive && aType === 'reset') {
+      (meta as any).intent_anchor = null;
+    }
+
+    // ★ confirm は「書き換えない」（安全）
+    if (isTActive && aType === 'confirm') {
+      // ここでは intent_anchor を触らない
+    }
+
+    // ★ set は「アンカーテキストがある場合のみ」反映
+    if (isTActive && aType === 'set') {
+      const anchorTextRaw =
+        (itx.snapshot as any)?.anchorText ?? (signals as any)?.anchorText ?? null;
+
+      const anchorText =
+        typeof anchorTextRaw === 'string' && anchorTextRaw.trim().length > 0
+          ? anchorTextRaw.trim()
+          : null;
+
+      if (anchorText) {
+        (meta as any).intent_anchor = {
+          text: anchorText,
+          fixed: false,
+          strength: null,
+          y_level:
+            typeof (meta as any)?.yLevel === 'number' ? (meta as any).yLevel : null,
+          h_level:
+            typeof (meta as any)?.hLevel === 'number' ? (meta as any).hLevel : null,
+        };
+      }
+    }
+  }
+
+
+
+
   return {
     meta,
     goal,
@@ -157,3 +211,4 @@ export function applyIntentTransitionV1(
     },
   };
 }
+

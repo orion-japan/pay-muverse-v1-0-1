@@ -753,11 +753,11 @@ function buildWriterHintsFromMeta(meta: any): {
     whisperApply,
   });
 
-  // ① frame: framePlan.frame を優先。ダメなら meta.frame。
-  const frameFromPlan = normalizeFrameKind(fp?.frame);
-  const frameFromMeta = normalizeFrameKind(meta?.frame);
+// ① frame: IT(=T-layer active) の時は必ず T を優先。そうでなければ framePlan → meta の順。
+const frameFromPlan = itActive ? ('T' as FrameKind) : normalizeFrameKind(fp?.frame);
+const frameFromMeta = normalizeFrameKind(meta?.frame);
 
-  const frame: FrameKind | null = frameFromPlan ?? frameFromMeta ?? null;
+const frame: FrameKind | null = frameFromPlan ?? frameFromMeta ?? null;
 
   console.log('[IROS/frame-debug] decided', {
     frameFromPlan: frameFromPlan ?? null,

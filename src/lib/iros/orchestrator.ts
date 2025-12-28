@@ -353,18 +353,19 @@ const analyzedDepth: Depth | undefined =
     }
   }
 
-  // 固定アンカー（北）：太陽SUN を meta に固定反映（抽出はしない）
+    // =========================================================
+  // [IROS_FIXED_NORTH_BLOCK] 固定北（SUN）: meta.fixedNorth のみに保持
+  // - intent_anchor は「可変アンカー（Tで刺さる意図）」専用に空ける
+  // - これにより「Tで set したのに次ターンで SUN が上書き」事故を防ぐ
+  // =========================================================
   {
     (meta as any).fixedNorth = FIXED_NORTH;
-    (meta as any).intent_anchor = {
-      text: FIXED_NORTH.text,
-      strength: null,
-      y_level: typeof yLevel === 'number' ? yLevel : null,
-      h_level: typeof hLevel === 'number' ? hLevel : null,
-      fixed: true,
-      phrase: FIXED_NORTH.phrase,
-    };
+
+    // ▼重要：ここでは intent_anchor を触らない（上書き禁止）
+    // (meta as any).intent_anchor = ...  ← これは消す
   }
+
+
 
   // ----------------------------------------------------------------
   // C) 揺らぎ×ヒステリシス → 回転ギア確定（metaに反映）
@@ -531,11 +532,27 @@ const analyzedDepth: Depth | undefined =
       }
     }
   }
+  console.log('[IROS/IT][enter-7.75]', {
+    envDebugIt: typeof process !== 'undefined' ? process.env.DEBUG_IROS_IT : '(no process)',
+    nodeEnv: typeof process !== 'undefined' ? process.env.NODE_ENV : '(no process)',
+  });
 
   // ----------------------------------------------------------------
   // 7.75 IT Trigger（I→T の扉） + I語彙の表出許可
   // ----------------------------------------------------------------
   {
+    if (typeof process !== 'undefined' && process.env.DEBUG_IROS_IT === '1') {
+      console.log('[IROS/IT][probe] before', {
+        textHead: (text || '').slice(0, 80),
+        historyLen: Array.isArray(history) ? history.length : null,
+        last3: Array.isArray(history)
+          ? history.slice(-3).map((m: any) => m?.content ?? m?.text ?? null)
+          : null,
+        depth: meta.depth ?? null,
+        intentLine: (meta as any).intentLine ?? null,
+      });
+    }
+
     const it = computeITTrigger({
       text,
       history: Array.isArray(history) ? history : [],
@@ -544,6 +561,29 @@ const analyzedDepth: Depth | undefined =
         intentLine: (meta as any).intentLine ?? null,
       },
     });
+
+    console.log('[IROS/IT][result]', {
+      ok: it.ok,
+      reason: it.reason,
+      flags: it.flags,
+      tLayerModeActive: it.tLayerModeActive,
+      tLayerHint: it.tLayerHint,
+      tVector: it.tVector,
+    });
+
+
+    if (typeof process !== 'undefined' && process.env.DEBUG_IROS_IT === '1') {
+      console.log('[IROS/IT][probe] after', {
+        ok: it.ok,
+        reason: it.reason,
+        flags: it.flags,
+        tLayerModeActive: it.tLayerModeActive,
+        tLayerHint: it.tLayerHint,
+        tVector: it.tVector,
+        iLayerForce: it.iLayerForce,
+      });
+    }
+
 
     // iLexemeForce は sticky true のみ
     (meta as any).iLexemeForce =
@@ -591,34 +631,44 @@ const analyzedDepth: Depth | undefined =
     // itx は meta.intentTransition に載っている（必要なら r.itx をログで使える）
   }
 
-  // ----------------------------------------------------------------
-  // J) DescentGate + Frame + Slots（7.5）を切り出し
-  // ----------------------------------------------------------------
-  {
-    const rotationReason = String((meta as any)?.rotationState?.reason ?? '');
-    const spinStepNow =
-      typeof (meta as any).spinStep === 'number' ? (meta as any).spinStep : null;
+// ----------------------------------------------------------------
+// J) DescentGate + Frame + Slots（7.5）を切り出し
+// ----------------------------------------------------------------
+{
+  const rotationReason = String((meta as any)?.rotationState?.reason ?? '');
+  const spinStepNow =
+    typeof (meta as any).spinStep === 'number' ? (meta as any).spinStep : null;
 
-    const r = applyContainerDecision({
-      text,
-      meta,
-      prevDescentGate: lastDescentGate ?? null,
-      rotationReason,
-      spinStepNow,
-      goalKind: (goal as any)?.kind ?? null,
-    });
+  const r = applyContainerDecision({
+    text,
+    meta,
+    prevDescentGate: lastDescentGate ?? null,
+    rotationReason,
+    spinStepNow,
+    goalKind: (goal as any)?.kind ?? null,
+  });
 
-    meta = r.meta;
-    (meta as any).frame = r.frame;
-    (meta as any).slotPlan = r.slotPlan?.slots ?? (meta as any).slotPlan ?? null;
+  // ✅ applyContainerDecision の確定値を meta に焼き付ける（persistまで運ぶ）
+  meta = r.meta;
+  (meta as any).frame = r.frame;
+  (meta as any).slotPlan = r.slotPlan?.slots ?? (meta as any).slotPlan ?? null;
+
+  // ✅ IT/T層の根拠も meta に残す（handleIrosReply 側の frame-fix / 判定に使える）
+  if (typeof (r as any).tLayerModeActive === 'boolean') {
+    (meta as any).tLayerModeActive = (r as any).tLayerModeActive;
+  }
+  if (typeof (r as any).tLayerHint === 'string' && (r as any).tLayerHint.trim()) {
+    (meta as any).tLayerHint = (r as any).tLayerHint.trim();
   }
 
   console.log('[IROS/ORCH][after-container]', {
     frame: (meta as any).frame ?? null,
     descentGate: (meta as any).descentGate ?? null,
-    slotPlanLen: Array.isArray((meta as any).slotPlan) ? (meta as any).slotPlan.length : null,
+    slotPlanLen: Array.isArray((meta as any).slotPlan)
+      ? (meta as any).slotPlan.length
+      : null,
   });
-
+}
 
   // ----------------------------------------------------------------
   // 8. 本文生成（LLM 呼び出し）

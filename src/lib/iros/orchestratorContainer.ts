@@ -97,17 +97,35 @@ export function applyContainerDecision(
   (meta as any).descentGateReason = dg.reason;
 
   // frame
-  const frameSelected = selectFrame(
-    {
-      depth:
-        typeof meta.depth === 'string' && meta.depth.length > 0 ? meta.depth : null,
-      descentGate: (meta as any).descentGate ?? null,
-    },
-    inputKind,
-  );
+// frame
+const itActive =
+  (meta as any).tLayerModeActive === true ||
+  typeof (meta as any).tLayerHint === 'string'; // 保険
 
-  const frame: FrameKind = frameSelected;
-  (meta as any).frame = frame;
+const frameSelected = itActive
+  ? ('T' as FrameKind) // ★ IT発火時は必ずT
+  : selectFrame(
+      {
+        depth:
+          typeof meta.depth === 'string' && meta.depth.length > 0
+            ? meta.depth
+            : null,
+        descentGate: (meta as any).descentGate ?? null,
+      },
+      inputKind,
+    );
+
+const frame: FrameKind = frameSelected;
+(meta as any).frame = frame;
+
+// デバッグ
+console.log('[IROS/frame-debug][dump] containerDecision', {
+  inputKind,
+  itActive,
+  frameSelected,
+  meta_frame_after: (meta as any).frame,
+});
+
 
   // ✅ dump（ここが正しい）
   console.log('[IROS/frame-debug][dump] containerDecision', {
