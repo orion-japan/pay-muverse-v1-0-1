@@ -31,9 +31,7 @@ export type IrosAPI = {
     conversationId: string,
     title: string,
   ): Promise<{ ok: true } | void>;
-  deleteConversation(
-    conversationId: string,
-  ): Promise<{ ok: true } | void>;
+  deleteConversation(conversationId: string): Promise<{ ok: true } | void>;
   /** ※ 残すが UI 側では使わない（/messages 直叩きは二重化の原因になるため） */
   postMessage(args: {
     conversationId: string;
@@ -131,11 +129,8 @@ async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   const user = await waitForCurrentUser();
 
   if (!user) {
-    const err = new Error(
-      '401 not_authenticated: firebase currentUser is null',
-    );
-    if (__DEV__)
-      console.warn('[IROS/API] authFetch no currentUser', err.message);
+    const err = new Error('401 not_authenticated: firebase currentUser is null');
+    if (__DEV__) console.warn('[IROS/API] authFetch no currentUser', err.message);
     throw err;
   }
 
@@ -216,20 +211,15 @@ function extractAssistantRaw(r: any): string {
   return toStr(t).trim();
 }
 
-/** UI表示用の整形（※保存用には使わない） */
+/**
+ * UI表示用の整形（※保存用には使わない）
+ * ✅ 重要: UIが勝手に返答を「生成」しない
+ * - 空なら空を返す（沈黙を許す）
+ * - 句読点や🪔の自動付与はしない（サーバ出力を尊重）
+ */
 function formatAssistantForUI(text: string): string {
-  let t = toStr(text).trim();
-
-  // 空は最小返答
-  if (!t) return 'はい。🪔';
-
-  // 末尾の句点がなければ補う（日本語想定）
-  if (!/[。！？!?]$/.test(t)) t += '。';
-
-  // 🪔を最後に1個だけ
-  t = t.replace(/🪔+/g, '').trim();
-  t += '🪔';
-
+  const t = toStr(text).trim();
+  if (!t) return '';
   return t;
 }
 
@@ -286,17 +276,13 @@ export async function fetchPersonIntentState(): Promise<PersonIntentStateRow[]> 
 
     return rowsRaw.map((r: any) => ({
       user_code: String(r.user_code),
-      situation_topic:
-        r.situation_topic != null ? String(r.situation_topic) : null,
+      situation_topic: r.situation_topic != null ? String(r.situation_topic) : null,
       target_kind: r.target_kind != null ? String(r.target_kind) : null,
       target_label: r.target_label != null ? String(r.target_label) : null,
-      conversation_id:
-        r.conversation_id != null ? String(r.conversation_id) : null,
-      last_created_at:
-        r.last_created_at != null ? String(r.last_created_at) : null,
+      conversation_id: r.conversation_id != null ? String(r.conversation_id) : null,
+      last_created_at: r.last_created_at != null ? String(r.last_created_at) : null,
       last_q_code: r.last_q_code != null ? String(r.last_q_code) : null,
-      last_depth_stage:
-        r.last_depth_stage != null ? String(r.last_depth_stage) : null,
+      last_depth_stage: r.last_depth_stage != null ? String(r.last_depth_stage) : null,
       last_self_acceptance:
         typeof r.last_self_acceptance === 'number'
           ? r.last_self_acceptance
@@ -323,8 +309,7 @@ export async function fetchPersonIntentState(): Promise<PersonIntentStateRow[]> 
 
 export const irosClient: IrosAPI = {
   async createConversation() {
-    if (typeof _raw.createConversation === 'function')
-      return _raw.createConversation();
+    if (typeof _raw.createConversation === 'function') return _raw.createConversation();
     dbg('createConversation() fallback');
     const r = await authFetch('/api/agent/iros/conversations', {
       method: 'POST',
@@ -337,8 +322,7 @@ export const irosClient: IrosAPI = {
   },
 
   async listConversations() {
-    if (typeof _raw.listConversations === 'function')
-      return _raw.listConversations();
+    if (typeof _raw.listConversations === 'function') return _raw.listConversations();
     dbg('listConversations() fallback');
     const r = await authFetch('/api/agent/iros/conversations', {
       method: 'GET',
@@ -355,13 +339,10 @@ export const irosClient: IrosAPI = {
   },
 
   async fetchMessages(conversationId: string) {
-    if (typeof _raw.fetchMessages === 'function')
-      return _raw.fetchMessages(conversationId);
+    if (typeof _raw.fetchMessages === 'function') return _raw.fetchMessages(conversationId);
     dbg('fetchMessages() fallback', conversationId);
     const r = await authFetch(
-      `/api/agent/iros/messages?conversation_id=${encodeURIComponent(
-        conversationId,
-      )}`,
+      `/api/agent/iros/messages?conversation_id=${encodeURIComponent(conversationId)}`,
     );
     const j = await r.json();
     const rows = Array.isArray(j?.messages) ? j.messages : [];
@@ -375,9 +356,7 @@ export const irosClient: IrosAPI = {
       text: String(m.content ?? m.text ?? ''),
       content: String(m.content ?? m.text ?? ''),
       created_at: m.created_at ?? null,
-      ts: m.ts
-        ? Number(m.ts)
-        : new Date(m.created_at || Date.now()).getTime(),
+      ts: m.ts ? Number(m.ts) : new Date(m.created_at || Date.now()).getTime(),
       meta: m.meta ?? null,
     })) as IrosMessage[];
   },
@@ -394,8 +373,7 @@ export const irosClient: IrosAPI = {
   },
 
   async deleteConversation(conversationId: string) {
-    if (typeof _raw.deleteConversation === 'function')
-      return _raw.deleteConversation(conversationId);
+    if (typeof _raw.deleteConversation === 'function') return _raw.deleteConversation(conversationId);
     dbg('deleteConversation() fallback', conversationId);
     await authFetch('/api/agent/iros/conversations', {
       method: 'POST',
@@ -462,56 +440,63 @@ export const irosClient: IrosAPI = {
     return r.json();
   },
 
-  async replyAndStore(args) {
-    if (typeof _raw.replyAndStore === 'function') {
-      return _raw.replyAndStore(args);
-    }
+// src/ui/iroschat/lib/irosApiClient.ts
+// replyAndStore()：client-side の assistant 保存を撤去（single-writer: /reply のみ）
 
-    const r: any = await this.reply({
+async replyAndStore(args) {
+  if (typeof _raw.replyAndStore === 'function') {
+    return _raw.replyAndStore(args);
+  }
+
+  const r: any = await this.reply({
+    conversationId: args.conversationId,
+    user_text: args.user_text,
+    mode: args.mode ?? 'Light',
+    model: args.model,
+    style: args.style,
+    history: args.history,
+    nextStepChoice: args.nextStepChoice,
+  });
+
+  const assistantRaw = extractAssistantRaw(r);
+  const assistant = formatAssistantForUI(assistantRaw);
+  const meta = extractMeta(r);
+
+  // =========================================================
+  // ✅ single-writer 徹底
+  // - assistant の永続化はサーバ（/api/agent/iros/reply）だけが行う
+  // - クライアントから /api/agent/iros/messages に role='assistant' を POST しない
+  //   → /messages は user-only (assistant HARD-SKIP) なので、やると「リロードで消える」を再発させる
+  // =========================================================
+  const serverPersisted = isServerPersisted(r);
+  if (!serverPersisted) {
+    dbg('replyAndStore: server did not mark persisted (client will NOT persist assistant)', {
       conversationId: args.conversationId,
-      user_text: args.user_text,
-      mode: args.mode ?? 'Light',
-      model: args.model,
-      style: args.style,
-      history: args.history,
-      nextStepChoice: args.nextStepChoice,
+      assistantRawLen: String(assistantRaw ?? '').length,
+      hasMeta: !!meta,
     });
+  }
 
-    const assistantRaw = extractAssistantRaw(r);
-    const assistant = formatAssistantForUI(assistantRaw);
-    const meta = extractMeta(r);
+  // 返すのは「UI表示用 + raw」
+  return { ...r, assistant, assistantRaw };
+},
 
-    // サーバ側が保存済みなら、二重保存しない
-    if (!isServerPersisted(r)) {
-      // 保存は “UI整形後” ではなく assistantRaw を使う（事故防止）
-      // ただし、空の場合はassistant（最小返答）で保存
-      const toSave = assistantRaw || assistant;
-      await this.postMessage({
-        conversationId: args.conversationId,
-        text: toSave,
-        role: 'assistant',
-        meta,
-      });
-    }
 
-    // 返すのは「UI表示用 + raw両方」
-    return { ...r, assistant, assistantRaw };
-  },
-
-  async getUserInfo() {
-    if (typeof _raw.getUserInfo === 'function') return _raw.getUserInfo();
-    dbg('getUserInfo() fallback');
-    const r = await authFetch('/api/agent/iros/userinfo', {
-      method: 'GET',
-    });
-    const j = await r.json();
-    const u = j?.user;
-    if (!u) return { id: 'me', name: 'You', userType: 'member', credits: 0 };
-    return {
-      id: String(u.id ?? 'me'),
-      name: String(u.name ?? 'You'),
-      userType: String(u.userType ?? 'member'),
-      credits: Number(u.credits ?? 0),
-    };
-  },
+async getUserInfo() {
+  if (typeof _raw.getUserInfo === 'function') return _raw.getUserInfo();
+  dbg('getUserInfo() fallback');
+  const r = await authFetch('/api/agent/iros/userinfo', {
+    method: 'GET',
+  });
+  const j = await r.json();
+  const u = j?.user;
+  if (!u) return { id: 'me', name: 'You', userType: 'member', credits: 0 };
+  return {
+    id: String(u.id ?? 'me'),
+    name: String(u.name ?? 'You'),
+    userType: String(u.userType ?? 'member'),
+    credits: Number(u.credits ?? 0),
+  };
+},
 };
+

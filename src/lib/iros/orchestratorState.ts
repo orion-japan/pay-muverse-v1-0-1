@@ -37,9 +37,21 @@ function normalizeSpinStep(raw: unknown): 0 | 1 | 2 | null {
   return null;
 }
 
+// ★ 追加：intentLayer 正規化（IrosMeta の intentLayer 型に合わせる）
+type IntentLayer = Exclude<IrosMeta['intentLayer'], null | undefined>;
+
+function normalizeIntentLayer(raw: unknown): IntentLayer | null {
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim().toUpperCase();
+  if (s === 'S' || s === 'R' || s === 'C' || s === 'I' || s === 'T') {
+    return s as unknown as IntentLayer; // ← ここがポイント（型合わせ）
+  }
+  return null;
+}
+
 /**
  * userCode ごとの MemoryState を読み込み、
- * baseMeta に depth / qCode / selfAcceptance / Y / H / phase / spin を合成する。
+ * baseMeta に depth / qCode / selfAcceptance / Y / H / phase / spin / intentLayer を合成する。
  *
  * ✅ 注意：この関数は read only。保存は persist 側に集約。
  */
@@ -58,6 +70,46 @@ export async function loadBaseMetaFromMemoryState(args: {
   try {
     memoryState = await loadIrosMemoryState(sb, userCode);
 
+    // ★ 互換（camel/snake/別名）を吸収して読む
+    const msAny: any = memoryState as any;
+
+    const msPhaseRaw =
+      typeof msAny?.phase === 'string'
+        ? msAny.phase
+        : typeof msAny?.phase_mode === 'string'
+          ? msAny.phase_mode
+          : typeof msAny?.phaseMode === 'string'
+            ? msAny.phaseMode
+            : null;
+
+    const msSpinLoopRaw =
+      typeof msAny?.spinLoop === 'string'
+        ? msAny.spinLoop
+        : typeof msAny?.spin_loop === 'string'
+          ? msAny.spin_loop
+          : null;
+
+    const msSpinStepRaw =
+      typeof msAny?.spinStep === 'number'
+        ? msAny.spinStep
+        : typeof msAny?.spin_step === 'number'
+          ? msAny.spin_step
+          : null;
+
+    // ✅ 追加：intent_layer / intentLayer を拾う
+    const msIntentLayerRaw =
+      typeof msAny?.intentLayer === 'string'
+        ? msAny.intentLayer
+        : typeof msAny?.intent_layer === 'string'
+          ? msAny.intent_layer
+          : null;
+
+    // ★ 正規化（IrosMeta の型に合わせる）
+    const normalizedPhase = normalizePhase(msPhaseRaw);
+    const normalizedSpinLoop = normalizeSpinLoop(msSpinLoopRaw);
+    const normalizedSpinStep = normalizeSpinStep(msSpinStepRaw);
+    const normalizedIntentLayer = normalizeIntentLayer(msIntentLayerRaw);
+
     if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
       console.log('[IROS/STATE] loaded MemoryState', {
         userCode,
@@ -65,12 +117,13 @@ export async function loadBaseMetaFromMemoryState(args: {
         depthStage: memoryState?.depthStage ?? null,
         qPrimary: memoryState?.qPrimary ?? null,
         selfAcceptance: memoryState?.selfAcceptance ?? null,
-        phase: (memoryState as any)?.phase ?? null,
+        phase: msPhaseRaw ?? null,
+        intentLayer: msIntentLayerRaw ?? null,
         yLevel: memoryState?.yLevel ?? null,
         hLevel: memoryState?.hLevel ?? null,
-        spinLoop: (memoryState as any)?.spinLoop ?? null,
-        spinStep: (memoryState as any)?.spinStep ?? null,
-        descentGate: (memoryState as any)?.descentGate ?? null,
+        spinLoop: msSpinLoopRaw ?? null,
+        spinStep: msSpinStepRaw ?? null,
+        descentGate: msAny?.descentGate ?? msAny?.descent_gate ?? null,
       });
     }
 
@@ -79,37 +132,6 @@ export async function loadBaseMetaFromMemoryState(args: {
     const hasBaseSA =
       typeof (mergedBaseMeta as any)?.selfAcceptance === 'number' &&
       !Number.isNaN((mergedBaseMeta as any).selfAcceptance);
-
-    // ★ 互換（camel/snake/別名）を吸収して読む
-    const msAny: any = memoryState as any;
-
-    const msPhaseRaw =
-      typeof msAny.phase === 'string'
-        ? msAny.phase
-        : typeof msAny.phase_mode === 'string'
-          ? msAny.phase_mode
-          : typeof msAny.phaseMode === 'string'
-            ? msAny.phaseMode
-            : null;
-
-    const msSpinLoopRaw =
-      typeof msAny.spinLoop === 'string'
-        ? msAny.spinLoop
-        : typeof msAny.spin_loop === 'string'
-          ? msAny.spin_loop
-          : null;
-
-    const msSpinStepRaw =
-      typeof msAny.spinStep === 'number'
-        ? msAny.spinStep
-        : typeof msAny.spin_step === 'number'
-          ? msAny.spin_step
-          : null;
-
-    // ★ 正規化（IrosMeta の型に合わせる）
-    const normalizedPhase = normalizePhase(msPhaseRaw);
-    const normalizedSpinLoop = normalizeSpinLoop(msSpinLoopRaw);
-    const normalizedSpinStep = normalizeSpinStep(msSpinStepRaw);
 
     mergedBaseMeta = {
       ...(mergedBaseMeta ?? {}),
@@ -126,10 +148,13 @@ export async function loadBaseMetaFromMemoryState(args: {
           ? { qCode: memoryState.qPrimary as QCode }
           : {}),
 
-      // phase / spin：baseMeta 側に無いときだけ補完（正規化済み）
-      ...(!(mergedBaseMeta as any)?.phase && normalizedPhase
-        ? { phase: normalizedPhase }
+      // ✅ intentLayer：baseMeta が無いときだけ補完（正規化済み）
+      ...(!(mergedBaseMeta as any)?.intentLayer && normalizedIntentLayer
+        ? { intentLayer: normalizedIntentLayer }
         : {}),
+
+      // phase / spin：baseMeta 側に無いときだけ補完（正規化済み）
+      ...(!(mergedBaseMeta as any)?.phase && normalizedPhase ? { phase: normalizedPhase } : {}),
       ...(!(mergedBaseMeta as any)?.spinLoop && normalizedSpinLoop
         ? { spinLoop: normalizedSpinLoop }
         : {}),

@@ -231,7 +231,7 @@ function normalizeAssistantText(json: any): string {
     ]
       .filter(Boolean)
       .join(' / ');
-    t = hint ? `はい。${hint} を感じました。🪔` : 'はい。🪔';
+      t = hint ? `はい。${hint} を感じました。🪔` : '';
   }
 
   // 4) 最終安全化
@@ -419,7 +419,7 @@ export async function replyAndStore(args: {
 
   // ② テキスト正規化（[object Object] 対策＋🪔 付与）
   const assistantText = normalizeAssistantText(r);
-  const safe = assistantText || 'はい。🪔';
+  const safe = (assistantText ?? '').trim();
 
   // ③ orchestrator から返ってきた meta を拾う
   const meta = r?.meta ?? null;

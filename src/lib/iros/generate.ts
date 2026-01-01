@@ -13,15 +13,30 @@
 // ✅ 2025-12-26 修正：IT判定の単一ソースを renderMode から meta.tLayerModeActive に統一
 // - orchestrator.ts の computeITTrigger が毎ターン決める tLayerModeActive を唯一の正にする
 // - generate 側では renderMode 参照を廃止（競合/ズレ防止）
+//
+// ✅ 2025-12-30 追記：SpeechAct（LLM前確定）
+// - LLMを呼ぶ前に SpeechAct を確定（SILENCE/FORWARD/NAME/FLIP/COMMIT）
+// - systemで器(AllowSchema)を強制
+// - さらに enforceAllowSchema で最終出力を器に固定（二段ロック）
+//
+// ✅ 2025-12-30 修正：enforceAllowSchema が SILENCE を返しても、
+//   Decision が SILENCE でない限り “無言化” を絶対に許可しない（単一ソース）
+//
+// NOTE:
+// - 「コード1つずつ提示」方針に従い、このファイル全文のみ提示
 
 import OpenAI from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat';
 
 import { getSystemPrompt, type IrosMeta, type IrosMode } from './system';
-import {
-  decideQBrakeRelease,
-  normalizeQ,
-} from '@/lib/iros/rotation/qBrakeRelease';
+import { decideQBrakeRelease, normalizeQ } from '@/lib/iros/rotation/qBrakeRelease';
+
+// ✅ SpeechAct
+import { decideSpeechAct } from './speech/decideSpeechAct';
+import { applySpeechAct } from './speech/applySpeechAct';
+import { enforceAllowSchema } from './speech/enforceAllowSchema';
+import type { DecideSpeechActInput } from './speech/decideSpeechAct';
+import type { SpeechDecision } from './speech/types';
 
 /** ✅ 旧/新ルートを全部受ける（型で落ちない） */
 export type GenerateArgs = {
@@ -59,11 +74,14 @@ export type GenerateResult = {
   finalMode?: string | null;
   result?: any;
 
+  // ✅ SpeechAct debug（必要なら上流で参照）
+  speechAct?: string;
+  speechReason?: string;
+
   [k: string]: any;
 };
 
-const IROS_MODEL =
-  process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-4o';
+const IROS_MODEL = process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-4o';
 
 /* =========================================================
    CORE INTENT
@@ -91,19 +109,28 @@ function pickCoreIntent(meta: any): string | null {
       ? meta.unified.intent_anchor.text.trim()
       : null;
 
+  // ✅ 追加：MemoryState 由来の “状況要約” を core の補助として使う
+  const fromSituationSummary =
+    typeof meta?.situationSummary === 'string' && meta.situationSummary.trim()
+      ? meta.situationSummary.trim()
+      : typeof meta?.unified?.situationSummary === 'string' &&
+          meta.unified.situationSummary.trim()
+        ? meta.unified.situationSummary.trim()
+        : typeof meta?.unified?.situation_summary === 'string' &&
+            meta.unified.situation_summary.trim()
+          ? meta.unified.situation_summary.trim()
+          : null;
+
   const isThinQuestion = (s: string) => {
     const t = s.replace(/\s+/g, '');
     if (t.length <= 10) return true;
-    if (
-      /^(何が出来ますか|何ができますか|どうすればいい|どうしたらいい|どうすれば)$/.test(
-        t,
-      )
-    )
+    if (/^(何が出来ますか|何ができますか|どうすればいい|どうしたらいい|どうすれば)$/.test(t))
       return true;
     return false;
   };
 
-  const candidate = fromAnchor ?? fromCoreNeed ?? fromUnified ?? null;
+  // ✅ candidate の優先順に situationSummary を追加
+  const candidate = fromAnchor ?? fromCoreNeed ?? fromUnified ?? fromSituationSummary ?? null;
   if (!candidate) return null;
   if (isThinQuestion(candidate)) return null;
 
@@ -124,9 +151,7 @@ function normalizeUserText(s: string): string {
  * - ただし数値メタだけは末尾に付ける
  */
 function isShortTurn(userText: string): boolean {
-  const t = normalizeUserText(userText)
-    .replace(/[！!。．…]+$/g, '')
-    .trim();
+  const t = normalizeUserText(userText).replace(/[！!。．…]+$/g, '').trim();
   if (!t) return false;
 
   // 目安：10文字以下（記号だけ/1文字は除外）
@@ -196,13 +221,11 @@ function buildNumericFooter(meta: any): string | null {
     toIntLike(meta?.unified?.h_level) ??
     null;
 
-  const pol =
-    toNum(meta?.unified?.polarityScore) ?? toNum(meta?.polarityScore) ?? null;
+  const pol = toNum(meta?.unified?.polarityScore) ?? toNum(meta?.polarityScore) ?? null;
 
   // renderEngine の vector で計算されてることが多い想定だが、無いなら出さない
   const g = toNum(meta?.unified?.grounding) ?? toNum(meta?.grounding) ?? null;
-  const t =
-    toNum(meta?.unified?.transcendence) ?? toNum(meta?.transcendence) ?? null;
+  const t = toNum(meta?.unified?.transcendence) ?? toNum(meta?.transcendence) ?? null;
   const p = toNum(meta?.unified?.precision) ?? toNum(meta?.precision) ?? null;
 
   const parts: string[] = [];
@@ -261,16 +284,12 @@ function pickSafeTagFromMeta(meta: any): string | null {
   return null;
 }
 
-
 /**
  * SAFE 制御メッセージ（system）
  * - “警告文”を出すのではなく、LLMの生成姿勢を制動する
  * - SAFE / gate / meta 等の語は本文に出させない
  */
-function buildSafeSystemMessage(
-  meta: any,
-  userText: string,
-): ChatCompletionMessageParam | null {
+function buildSafeSystemMessage(meta: any, userText: string): ChatCompletionMessageParam | null {
   const safeTag = pickSafeTagFromMeta(meta);
   if (!safeTag) return null;
 
@@ -291,9 +310,7 @@ function buildSafeSystemMessage(
     '- 強い断定・決めつけ・診断っぽい言い回しを避ける（特に心身・医療・法律・金融）',
   );
   lines.push('- 危険行為/医療判断/法的判断/投資判断の具体助言はしない');
-  lines.push(
-    '- ユーザーの主権を保持：命令形の連発、詰問、圧の強い誘導は禁止',
-  );
+  lines.push('- ユーザーの主権を保持：命令形の連発、詰問、圧の強い誘導は禁止');
   lines.push('- 文章は短く（最大3〜5行）。必要なら改行して静かに。');
   lines.push('- 質問は0〜1（原則0）。問いが必要なら最後に1つだけ、短く。');
 
@@ -311,7 +328,6 @@ function buildSafeSystemMessage(
     lines.push('- 次の一歩は「いま守れる最小ルール」を1つだけ');
   }
 
-  // 念のため userText を参照（LLMに “いま何を返すか” を誤解させない）
   lines.push('');
   lines.push(`USER_TEXT: ${String(userText)}`);
 
@@ -320,9 +336,6 @@ function buildSafeSystemMessage(
 
 /* =========================================================
    WRITER PROTOCOL (full rewrite)
-   - Always attach / Conditional apply: WHISPER
-   - Short / IT / Normal
-   - No “template smell” while still deterministic
 ========================================================= */
 
 function buildWriterProtocol(meta: any, userText: string): string {
@@ -345,9 +358,7 @@ function buildWriterProtocol(meta: any, userText: string): string {
 
   const anchorEventType = meta?.anchorEvent?.type ?? null;
   const anchorConfirmQ = meta?.anchorEvent?.question ?? null;
-  const anchorConfirmOptions = Array.isArray(meta?.anchorEvent?.options)
-    ? meta.anchorEvent.options
-    : null;
+  const anchorConfirmOptions = Array.isArray(meta?.anchorEvent?.options) ? meta.anchorEvent.options : null;
 
   // ---- core intent ----
   const coreIntent = pickCoreIntent(meta);
@@ -396,7 +407,6 @@ function buildWriterProtocol(meta: any, userText: string): string {
   }
 
   // ---- IT (= T-layer active) ----
-  // ✅ IT を「I層言葉モード（意図をたぐる導線）」へ寄せる
   if (itActive) {
     const itReason = String(meta?.itReason ?? '');
     const sameIntentStreak = Number(meta?.sameIntentStreak ?? 0) || 0;
@@ -409,9 +419,7 @@ function buildWriterProtocol(meta: any, userText: string): string {
     const _spinStep = String(meta?.spinStep ?? meta?.unified?.spinStep ?? '').trim();
     const _phase = String(meta?.phase ?? meta?.unified?.phase ?? '').trim();
     const _depth = String(meta?.depth ?? meta?.unified?.depth ?? '').trim();
-    const _qCode = String(
-      meta?.qCode ?? meta?.unified?.qCode ?? meta?.unified?.q_code ?? '',
-    ).trim();
+    const _qCode = String(meta?.qCode ?? meta?.unified?.qCode ?? meta?.unified?.q_code ?? '').trim();
 
     return [
       base,
@@ -451,12 +459,7 @@ function buildWriterProtocol(meta: any, userText: string): string {
   }
 
   // ---- I-FRAME (non-IT) ----
-  // 目的：ITではないが frame=I のときに「一般論テンプレ」に逃げない専用レーン
-  // - “意図をたぐる導線” で返す（結論・断定助言を避ける）
-  // - 一般論ワードを明示禁止して逃げ道を塞ぐ
-  const framePlanForI = String(meta?.framePlan?.frame ?? '')
-    .trim()
-    .toUpperCase();
+  const framePlanForI = String(meta?.framePlan?.frame ?? '').trim().toUpperCase();
 
   if (framePlanForI === 'I') {
     const dg = String(meta?.descentGate ?? meta?.unified?.descentGate ?? '').trim();
@@ -464,9 +467,7 @@ function buildWriterProtocol(meta: any, userText: string): string {
     const _spinStep = String(meta?.spinStep ?? meta?.unified?.spinStep ?? '').trim();
     const _phase = String(meta?.phase ?? meta?.unified?.phase ?? '').trim();
     const _depth = String(meta?.depth ?? meta?.unified?.depth ?? '').trim();
-    const _qCode = String(
-      meta?.qCode ?? meta?.unified?.qCode ?? meta?.unified?.q_code ?? '',
-    ).trim();
+    const _qCode = String(meta?.qCode ?? meta?.unified?.qCode ?? meta?.unified?.q_code ?? '').trim();
 
     return [
       base,
@@ -521,11 +522,9 @@ function buildWriterProtocol(meta: any, userText: string): string {
       '- 断定は強めでよい（「〜してみるといい」より「〜を置く」）',
       '- 一般論/説教/説明口調は禁止',
       '',
-      `OBS_META: phase=${String(phase)} depth=${String(depth)} q=${String(
-        qCode,
-      )} spinLoop=${String(spinLoop)} spinStep=${String(
-        spinStep,
-      )} rank=${String(volatilityRank)} direction=${String(
+      `OBS_META: phase=${String(phase)} depth=${String(depth)} q=${String(qCode)} spinLoop=${String(
+        spinLoop,
+      )} spinStep=${String(spinStep)} rank=${String(volatilityRank)} direction=${String(
         spinDirection,
       )} promptStyle=${String(promptStyle)}`,
       '',
@@ -570,11 +569,11 @@ function buildWriterProtocol(meta: any, userText: string): string {
     '- 機能説明だけで終わる',
     '- ユーザーに丸投げ（“選んでみて” の連発）',
     '',
-    `ROTATION_META: spinLoop=${String(spinLoop)} spinStep=${String(
-      spinStep,
-    )} phase=${String(phase)} depth=${String(depth)} q=${String(qCode)} rank=${String(
-      volatilityRank,
-    )} direction=${String(spinDirection)} promptStyle=${String(promptStyle)}`,
+    `ROTATION_META: spinLoop=${String(spinLoop)} spinStep=${String(spinStep)} phase=${String(
+      phase,
+    )} depth=${String(depth)} q=${String(qCode)} rank=${String(volatilityRank)} direction=${String(
+      spinDirection,
+    )} promptStyle=${String(promptStyle)}`,
     '',
     `USER_TEXT: ${String(userText)}`,
     '',
@@ -582,7 +581,6 @@ function buildWriterProtocol(meta: any, userText: string): string {
     .filter(Boolean)
     .join('\n');
 }
-
 
 /* =========================================================
    HISTORY → MESSAGES（会話履歴を LLM に渡す）
@@ -594,10 +592,7 @@ function buildWriterProtocol(meta: any, userText: string): string {
  * - system は混ぜない（汚染防止）
  * - 直近 maxItems だけ送る（トークン暴発防止）
  */
-function normalizeHistoryToMessages(
-  history: unknown,
-  maxItems = 12,
-): ChatCompletionMessageParam[] {
+function normalizeHistoryToMessages(history: unknown, maxItems = 12): ChatCompletionMessageParam[] {
   const src = Array.isArray(history) ? history : [];
   const out: ChatCompletionMessageParam[] = [];
 
@@ -642,7 +637,6 @@ function normalizeHistoryToMessages(
     const text = pickText(item);
 
     if (!role || !text) continue;
-
     out.push({ role, content: text });
   }
 
@@ -652,10 +646,7 @@ function normalizeHistoryToMessages(
 /**
  * ✅ 末尾の「今回入力と同一の user 発話」を重複排除（保険）
  */
-function dedupeTailUser(
-  historyMessages: ChatCompletionMessageParam[],
-  userText: string,
-): ChatCompletionMessageParam[] {
+function dedupeTailUser(historyMessages: ChatCompletionMessageParam[], userText: string): ChatCompletionMessageParam[] {
   if (historyMessages.length === 0) return historyMessages;
 
   const last = historyMessages[historyMessages.length - 1];
@@ -664,15 +655,12 @@ function dedupeTailUser(
   const lastText = String((last as any).content ?? '').trim();
   if (!lastText) return historyMessages;
 
-  if (lastText === String(userText ?? '').trim()) {
-    return historyMessages.slice(0, -1);
-  }
+  if (lastText === String(userText ?? '').trim()) return historyMessages.slice(0, -1);
   return historyMessages;
 }
 
 // ==============================
 // Frame / Slots hint (Writer)
-// - meta.framePlan を最優先で拾い、meta.frame と同期する版（debug logs込み）
 // ==============================
 
 // ✅ FrameKind を拡張（framePlan が 'F' を返すため）
@@ -681,16 +669,7 @@ type FrameKind = 'S' | 'R' | 'C' | 'I' | 'T' | 'F' | 'MICRO' | 'NONE';
 function normalizeFrameKind(v: unknown): FrameKind | null {
   if (typeof v !== 'string') return null;
   const s = v.trim().toUpperCase();
-  if (
-    s === 'S' ||
-    s === 'R' ||
-    s === 'C' ||
-    s === 'I' ||
-    s === 'T' ||
-    s === 'F' ||
-    s === 'MICRO' ||
-    s === 'NONE'
-  ) {
+  if (s === 'S' || s === 'R' || s === 'C' || s === 'I' || s === 'T' || s === 'F' || s === 'MICRO' || s === 'NONE') {
     return s as FrameKind;
   }
   return null;
@@ -702,9 +681,7 @@ function extractSlotKeys(v: any): string[] {
 
   // 1) array: [{key:'OBS', ...}, ...] 形式
   if (Array.isArray(v)) {
-    return v
-      .map((s: any) => (typeof s?.key === 'string' ? s.key : null))
-      .filter(Boolean);
+    return v.map((s: any) => (typeof s?.key === 'string' ? s.key : null)).filter(Boolean);
   }
 
   // 2) record: { OBS: '...', SHIFT: null, ... }
@@ -731,33 +708,25 @@ function buildWriterHintsFromMeta(meta: any): {
   slotKeys: string[];
   hintText: string | null;
 } {
-  const fp =
-    meta?.framePlan && typeof meta.framePlan === 'object' ? meta.framePlan : null;
+  const fp = meta?.framePlan && typeof meta.framePlan === 'object' ? meta.framePlan : null;
 
   // ✅ IT判定は tLayerModeActive を唯一の正にする
   const itActive = isTLayerActive(meta);
   const whisperApply = itActive;
 
-  // --- debug: 入口で見えている meta/framePlan を固定観測 ---
   console.log('[IROS/frame-debug] input', {
     meta_frame_before: meta?.frame ?? null,
     framePlan_frame: fp?.frame ?? null,
-
-    // ✅ fp.slots が array / record どちらでも keys を出す
     framePlan_slots_keys: extractSlotKeys(fp?.slots),
-
-    // ✅ meta.slotPlan が array / record / {slots:{...}} どれでも keys を出す
     slotPlan_keys: extractSlotKeys(meta?.slotPlan),
-
     itActive,
     whisperApply,
   });
 
-// ① frame: IT(=T-layer active) の時は必ず T を優先。そうでなければ framePlan → meta の順。
-const frameFromPlan = itActive ? ('T' as FrameKind) : normalizeFrameKind(fp?.frame);
-const frameFromMeta = normalizeFrameKind(meta?.frame);
-
-const frame: FrameKind | null = frameFromPlan ?? frameFromMeta ?? null;
+  // ① frame: IT(=T-layer active) の時は必ず T を優先。そうでなければ framePlan → meta の順。
+  const frameFromPlan = itActive ? ('T' as FrameKind) : normalizeFrameKind(fp?.frame);
+  const frameFromMeta = normalizeFrameKind(meta?.frame);
+  const frame: FrameKind | null = frameFromPlan ?? frameFromMeta ?? null;
 
   console.log('[IROS/frame-debug] decided', {
     frameFromPlan: frameFromPlan ?? null,
@@ -768,7 +737,6 @@ const frame: FrameKind | null = frameFromPlan ?? frameFromMeta ?? null;
   // ② slots: framePlan.slots → meta.slotPlan の順で拾う（array/record両対応）
   const slotKeysFromPlan = extractSlotKeys(fp?.slots);
   const slotKeysFromMeta = extractSlotKeys(meta?.slotPlan);
-
   const slotKeys = slotKeysFromPlan.length > 0 ? slotKeysFromPlan : slotKeysFromMeta;
 
   if (!frame && slotKeys.length === 0) {
@@ -781,7 +749,6 @@ const frame: FrameKind | null = frameFromPlan ?? frameFromMeta ?? null;
     C: '具体の実行案（手順/次の一歩）を中心に',
     I: '意図/軸（なぜ/何のため）を中心に',
     T: 'ひらめき/視点上昇（俯瞰→再定義）を中心に',
-    // ✅ F の意味は frameSelector 側の命名に合わせる（とりあえず“焦点化/問い”）
     F: '焦点化（問いの器）を中心に',
     MICRO: '超短文でも崩れない最小返答（1〜3行）',
     NONE: '装飾少なめ、素の返答でOK',
@@ -800,9 +767,7 @@ const frame: FrameKind | null = frameFromPlan ?? frameFromMeta ?? null;
   return { frame, slotKeys, hintText };
 }
 
-
 // ===== history から Q を拾うユーティリティ =====
-// src/lib/iros/generate.ts
 
 function pickRecentUserQsFromHistory(history: any[], take = 3): string[] {
   const out: string[] = [];
@@ -825,7 +790,7 @@ function pickRecentUserQsFromHistory(history: any[], take = 3): string[] {
       (m.meta?.q_code ?? null) ??
       (m.meta?.q ?? null);
 
-    const q = normalizeQ(qRaw); // generate.ts 冒頭で import されている normalizeQ を使う
+    const q = normalizeQ(qRaw);
     if (!q) continue;
 
     out.push(q);
@@ -838,26 +803,82 @@ function pickRecentUserQsFromHistory(history: any[], take = 3): string[] {
 }
 
 /* =========================================================
+   SpeechAct input builder（LLM前確定の材料）
+   ========================================================= */
+
+function hasFixedAnchor(meta: any): boolean {
+  const t1 = typeof meta?.intent_anchor?.text === 'string' ? meta.intent_anchor.text.trim() : '';
+  const t2 = typeof meta?.unified?.intent_anchor?.text === 'string' ? meta.unified.intent_anchor.text.trim() : '';
+  const t3 = typeof meta?.intentAnchor?.text === 'string' ? meta.intentAnchor.text.trim() : '';
+  return !!(t1 || t2 || t3);
+}
+
+function pickInputKind(meta: any): string | null {
+  const v =
+    (typeof meta?.inputKind === 'string' && meta.inputKind) ||
+    (typeof meta?.framePlan?.frame === 'string' && meta.framePlan.frame.toUpperCase() === 'MICRO' ? 'micro' : '') ||
+    (typeof meta?.extra?.inputKind === 'string' && meta.extra.inputKind) ||
+    null;
+  return v ? String(v) : null;
+}
+
+function pickBrakeReason(meta: any): string | null {
+  const r =
+    (typeof meta?.extra?.brakeReleaseReason === 'string' && meta.extra.brakeReleaseReason) ||
+    (typeof meta?.extra?.brake_release_reason === 'string' && meta.extra.brake_release_reason) ||
+    null;
+  return r ? String(r) : null;
+}
+
+function computeSlotPlanLen(meta: any): number | null {
+  const fpSlots = extractSlotKeys(meta?.framePlan?.slots);
+  if (fpSlots.length > 0) return fpSlots.length;
+
+  const sp = extractSlotKeys(meta?.slotPlan);
+  if (sp.length > 0) return sp.length;
+
+  const fs = extractSlotKeys(meta?.frameSlots);
+  if (fs.length > 0) return fs.length;
+
+  return 0;
+}
+
+function buildDecideSpeechActInput(meta: any, userText: string): DecideSpeechActInput {
+  const shortTurn = isShortTurn(userText);
+
+  return {
+    inputKind: pickInputKind(meta),
+    brakeReleaseReason: pickBrakeReason(meta),
+    generalBrake:
+      (typeof meta?.extra?.generalBrake === 'string' && meta.extra.generalBrake) ||
+      (typeof meta?.extra?.general_brake === 'string' && meta.extra.general_brake) ||
+      null,
+    slotPlanLen: computeSlotPlanLen(meta),
+    itActive: isTLayerActive(meta),
+    tLayerModeActive: meta?.tLayerModeActive === true,
+    tLayerHint: typeof meta?.tLayerHint === 'string' ? meta.tLayerHint : null,
+    hasFixedAnchor: hasFixedAnchor(meta),
+    oneLineOnly: shortTurn || meta?.oneLineOnly === true,
+
+    // ✅ これを追加
+    userText,
+  };
+}
+
+/* =========================================================
    MAIN
    ========================================================= */
 
 /** ✅ 既存呼び出しが generateIrosReply を使っている前提でこの名前に揃える */
-export async function generateIrosReply(
-  args: GenerateArgs,
-): Promise<GenerateResult> {
+export async function generateIrosReply(args: GenerateArgs): Promise<GenerateResult> {
   const meta: IrosMeta = (args.meta ?? ({} as IrosMeta)) as IrosMeta;
   const userText = String((args as any).text ?? (args as any).userText ?? '');
 
   // =========================================================
   // MemoryState attach (generate side)
-  // - cooldown 判定が必ず効くように、args.memoryState を meta に取り込む
   // =========================================================
   const memoryStateFromArgs = (args as any)?.memoryState ?? null;
-  if (
-    memoryStateFromArgs &&
-    typeof memoryStateFromArgs === 'object' &&
-    !(meta as any)?.memoryState
-  ) {
+  if (memoryStateFromArgs && typeof memoryStateFromArgs === 'object' && !(meta as any)?.memoryState) {
     (meta as any).memoryState = memoryStateFromArgs;
   }
 
@@ -872,8 +893,6 @@ export async function generateIrosReply(
 
   // ==============================
   // Frame sticky を断つ（重要）
-  // - args.meta は毎回 frame を含み得る（前ターン残骸）
-  // - generate では毎ターン必ず一回クリアして、framePlan で決める
   // ==============================
   if (meta && typeof meta === 'object') {
     delete (meta as any).frame;
@@ -883,21 +902,18 @@ export async function generateIrosReply(
 
   /* ---------------------------------
      QTrace / QNow / recentUserQs
-     ※ すべて let。再宣言しない
   --------------------------------- */
 
-  let qTrace: any = (meta as any)?.qTrace ?? null;
+  const qTrace: any = (meta as any)?.qTrace ?? null;
 
-  let qNow: string | null = normalizeQ(
+  const qNow: string | null = normalizeQ(
     (meta as any)?.qPrimary ?? (meta as any)?.q_code ?? qTrace?.lastQ ?? null,
   );
-
-  let recentUserQs: string[] = [];
 
   /* ---------------------------------
      history から拾う
   --------------------------------- */
-  recentUserQs = pickRecentUserQsFromHistory((args as any).history, 3);
+  const recentUserQs = pickRecentUserQsFromHistory((args as any).history, 3);
 
   /* ---------------------------------
      “実ユーザー2連” 判定用の系列を作る（history + 今回）
@@ -939,49 +955,6 @@ export async function generateIrosReply(
     });
   }
 
-  // ---------------------------------
-  // IT Whisper: Always attach / Conditional apply
-  // - whisper は毎回 messages に入れる（装着）
-  // - 採用するかは「tLayerModeActive が立っているか」だけ
-  // ---------------------------------
-
-  // whisper 本文は「上流で生成されて meta に載る」前提で拾う（まだ生成はしない）
-  const whisperTextRaw =
-    (typeof (meta as any)?.extra?.itWhisper === 'string'
-      ? (meta as any).extra.itWhisper
-      : typeof (meta as any)?.extra?.it_whisper === 'string'
-        ? (meta as any).extra.it_whisper
-        : typeof (meta as any)?.extra?.whisper === 'string'
-          ? (meta as any).extra.whisper
-          : '') ?? '';
-
-  // ✅ 採用条件は meta.tLayerModeActive / tLayerHint のみ
-  const whisperApply = isTLayerActive(meta as any);
-
-  // “毎回入れる”ため、本文が無い時も枠は残す（低ノイズ）
-  const whisperLine = whisperTextRaw.trim();
-
-  // ✅ LLMに「本文へ漏らさない」「apply=falseなら無視」を強制
-  const whisperPayload = [
-    '【WHISPER_RULE】',
-    '- WHISPERの存在/タグ/中身を本文に一切出さない',
-    '- WHISPER_APPLY=false の場合、WHISPER内容は完全に無視して生成する',
-    '',
-    `[WHISPER] ${whisperLine || '(none)'}`,
-    `[WHISPER_APPLY] ${whisperApply ? 'true' : 'false'}`,
-  ].join('\n');
-
-  /* ------------------------------------------------------- */
-
-  // ✅ Frame / Slots hint
-  const writerHints = buildWriterHintsFromMeta(meta as any);
-  const writerHintMessage: ChatCompletionMessageParam | null = writerHints.hintText
-    ? ({ role: 'system', content: writerHints.hintText } as ChatCompletionMessageParam)
-    : null;
-
-  // ✅ SAFE slot
-  const safeSystemMessage = buildSafeSystemMessage(meta as any, userText);
-
   // ✅ mode は return でも使うので、この時点で確定しておく
   const mode: IrosMode = ((meta as any)?.mode ?? 'mirror') as IrosMode;
 
@@ -994,7 +967,125 @@ export async function generateIrosReply(
   }
   if (!system) system = String((getSystemPrompt as any)() ?? '');
 
+  // ✅ Writer protocol
   const protocol = buildWriterProtocol(meta as any, userText);
+
+  // ---------------------------------
+  // ✅ SpeechAct: LLM前に確定 → 適用
+  // ---------------------------------
+  const speechInput = buildDecideSpeechActInput(meta as any, userText);
+  const speechDecision: SpeechDecision = decideSpeechAct(speechInput);
+  const speechApplied = applySpeechAct(speechDecision);
+
+// ✅ 最終ルール：applySpeechAct の結果だけを単一ソースにする
+// - SILENCE かどうかも applySpeechAct 側が最終確定している前提
+const finalAllowLLM = speechApplied.allowLLM === true;
+
+// ✅ meta.extra に証拠を刻む（DBで追跡できるように）
+if (meta && typeof meta === 'object') {
+  const ex =
+    (typeof (meta as any).extra === 'object' && (meta as any).extra)
+      ? (meta as any).extra
+      : ((meta as any).extra = {});
+  ex.speechAct = speechApplied.act;               // ← applySpeechAct の最終act
+  ex.speechActReason = speechDecision.reason;     // decide理由は保持でOK
+  ex.speechActConfidence =
+    typeof (speechDecision as any).confidence === 'number'
+      ? (speechDecision as any).confidence
+      : null;
+  ex.speechAllowLLM = finalAllowLLM;
+  ex.speechInput = speechInput;
+}
+
+console.log('[IROS/SpeechAct] decided', {
+  act: speechApplied.act,
+  reason: speechDecision.reason,
+  confidence: (speechDecision as any).confidence ?? null,
+  input: speechInput,
+  allowLLM: finalAllowLLM,
+});
+
+// ✅ LLMを呼ばないと決めたら、即return（見出し/…を絶対入れない）
+// ✅ LLMを呼ばないと決めたら、即return
+if (!finalAllowLLM) {
+  // NOTE:
+  // - content='' だとUIが「メッセージ無し」と判定して描画しないケースがある
+  // - “LLMを呼ばない” は維持しつつ、UI表示のため最小トークンだけ返す
+  const silentText = '…';
+
+  // ✅ meta.extra に証拠を刻む（DBで追跡できるように）
+  if (meta && typeof meta === 'object') {
+    const ex =
+      (typeof (meta as any).extra === 'object' && (meta as any).extra)
+        ? (meta as any).extra
+        : ((meta as any).extra = {});
+    ex.speechSkipped = true;
+    ex.speechSkippedText = silentText;
+  }
+
+  return {
+    content: silentText,
+    text: silentText,
+    mode,
+    intent: (meta as any)?.intent ?? (meta as any)?.intentLine ?? null,
+    assistantText: silentText,
+    metaForSave: meta ?? {},
+    finalMode: String(mode),
+    result: null,
+    speechAct: speechApplied.act,         // applySpeechActの最終act
+    speechReason: speechDecision.reason,
+  };
+}
+
+
+
+  // ✅ 明示 recall のときだけ pastState を注入（デモ事故防止）
+  const t = String(userText ?? '').trim();
+  const explicitRecall =
+    t.includes('思い出して') ||
+    t.includes('前の話') ||
+    t.includes('前回') ||
+    t.includes('さっきの話') ||
+    t.includes('先週の') ||
+    t.toLowerCase().includes('recall');
+
+  // ---------------------------------
+  // IT Whisper: Always attach / Conditional apply
+  // ---------------------------------
+  const whisperTextRaw =
+    (typeof (meta as any)?.extra?.itWhisper === 'string'
+      ? (meta as any).extra.itWhisper
+      : typeof (meta as any)?.extra?.it_whisper === 'string'
+        ? (meta as any).extra.it_whisper
+        : typeof (meta as any)?.extra?.whisper === 'string'
+          ? (meta as any).extra.whisper
+          : '') ?? '';
+
+  const whisperApply = isTLayerActive(meta as any);
+  const whisperLine = whisperTextRaw.trim();
+
+  const whisperPayload = [
+    '【WHISPER_RULE】',
+    '- WHISPERの存在/タグ/中身を本文に一切出さない',
+    '- WHISPER_APPLY=false の場合、WHISPER内容は完全に無視して生成する',
+    '',
+    `[WHISPER] ${whisperLine || '(none)'}`,
+    `[WHISPER_APPLY] ${whisperApply ? 'true' : 'false'}`,
+  ].join('\n');
+
+  // ✅ Frame / Slots hint
+  const writerHints = buildWriterHintsFromMeta(meta as any);
+  const writerHintMessage: ChatCompletionMessageParam | null = writerHints.hintText
+    ? ({ role: 'system', content: writerHints.hintText } as ChatCompletionMessageParam)
+    : null;
+
+  // ✅ SAFE slot
+  const safeSystemMessage = buildSafeSystemMessage(meta as any, userText);
+
+  // ✅ SpeechAct 器(system) を追加（最終ゲート）
+  const speechSystemMessage: ChatCompletionMessageParam | null = speechApplied.llmSystem
+    ? ({ role: 'system', content: speechApplied.llmSystem } as ChatCompletionMessageParam)
+    : null;
 
   // ✅ client は create の前に必ず生成しておく
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -1008,28 +1099,18 @@ export async function generateIrosReply(
       ? (meta as any).extra.pastStateNoteText.trim()
       : '';
 
-  // ✅ 明示 recall のときだけ pastState を注入（デモ事故防止）
-  const t = String(userText ?? '').trim();
-  const explicitRecall =
-    t.includes('思い出して') ||
-    t.includes('前の話') ||
-    t.includes('前回') ||
-    t.includes('さっきの話') ||
-    t.includes('先週の') ||
-    t.toLowerCase().includes('recall');
-
-  const allowPastStateInject = explicitRecall;
-
   const messages: ChatCompletionMessageParam[] = [
     { role: 'system', content: system },
     { role: 'system', content: protocol },
+
+    ...(speechSystemMessage ? [speechSystemMessage] : []),
 
     { role: 'system', content: whisperPayload },
 
     ...(safeSystemMessage ? [safeSystemMessage] : []),
     ...(writerHintMessage ? [writerHintMessage] : []),
 
-    ...(allowPastStateInject && pastStateNoteText
+    ...(explicitRecall && pastStateNoteText
       ? ([{ role: 'system', content: pastStateNoteText }] as ChatCompletionMessageParam[])
       : []),
 
@@ -1040,24 +1121,67 @@ export async function generateIrosReply(
   const res = await client.chat.completions.create({
     model: IROS_MODEL,
     messages,
-    temperature: 0.7,
+    // ✅ COMMIT 以外では温度を下げ、出力の暴走を防ぐ
+    temperature: speechDecision.act === 'COMMIT' ? 0.7 : 0.35,
   });
 
-  let content =
-    res.choices?.[0]?.message?.content?.trim() ?? '……（応答生成に失敗しました）';
+  const raw = res.choices?.[0]?.message?.content ?? '';
+  let content = String(raw).trim() || '……（応答生成に失敗しました）';
+
+// ---------------------------------
+// ✅ Enforce AllowSchema（最終ゲート）
+// ---------------------------------
+const enforced = enforceAllowSchema(speechApplied.allow as any, content);
+
+// ✅ Decision が SILENCE でない限り、enforce の SILENCE は無効（act も含めて）
+let finalAct = enforced.act as any;
+
+if (speechDecision.act !== 'SILENCE' && enforced.act === 'SILENCE') {
+  const origin = String(content ?? '').trim();
+  const kept = String((enforced as any).text ?? '').trim();
+
+  const fallbackLine =
+    origin.split('\n').map((s) => s.trim()).filter(Boolean)[0] ||
+    kept.split('\n').map((s) => s.trim()).filter(Boolean)[0] ||
+    '…';
+
+  const originLooksSilent = origin === '…' || origin === '……' || origin === '';
+  content = originLooksSilent ? fallbackLine : origin;
+
+  // ✅ act も戻す（ここが重要）
+  finalAct = speechDecision.act as any;
+
+  console.log('[IROS/SpeechAct] enforce returned SILENCE but overridden (non-silence decision)', {
+    decisionAct: speechDecision.act,
+    enforcedAct: enforced.act,
+    allowAct: (speechApplied.allow as any)?.act,
+    used: originLooksSilent ? 'fallbackLine' : 'origin',
+    originLen: origin.length,
+    keptLen: kept.length,
+  });
+} else {
+ content = String((enforced as any).text ?? '').trim();
+  finalAct = enforced.act as any;
+}
+
+// ✅ ここで「最終act」を採用する（あなたの返却形式に合わせて差し込む）
+(enforced as any).act = finalAct;
+
+
 
   /* ---------------------------------
      Numeric footer
   --------------------------------- */
 
   const showNumericFooter =
-    process.env.IROS_NUMERIC_FOOTER === '1' ||
-    (meta as any)?.extra?.showNumericFooter === true;
+    process.env.IROS_NUMERIC_FOOTER === '1' || (meta as any)?.extra?.showNumericFooter === true;
 
   const hardHideNumericFooter =
     (meta as any)?.microOnly === true ||
     (meta as any)?.recallOnly === true ||
-    String(mode) === 'recall';
+    String(mode) === 'recall' ||
+    // ✅ COMMIT 以外では数値・評価表現を出さない（短文構造を守る）
+    speechDecision.act !== 'COMMIT';
 
   if (showNumericFooter && !hardHideNumericFooter) {
     content = content.replace(/\n*\s*[〔\[]sa[^\n]*[〕\]]\s*$/g, '').trim();
@@ -1069,7 +1193,7 @@ export async function generateIrosReply(
   }
 
   /* ---------------------------------
-     return
+     return（保存/返却は enforce 後の content に統一）
   --------------------------------- */
   return {
     content,
@@ -1080,5 +1204,7 @@ export async function generateIrosReply(
     metaForSave: meta ?? {},
     finalMode: String(mode),
     result: null,
+    speechAct: speechDecision.act,
+    speechReason: speechDecision.reason,
   };
 }

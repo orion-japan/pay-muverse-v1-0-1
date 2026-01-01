@@ -11,11 +11,8 @@ import type { Depth, QCode, IrosMeta } from './system';
 import type { IrosMemoryState } from './memoryState';
 
 import { analyzeUnifiedTurn, type UnifiedLikeAnalysis } from './unifiedAnalysis';
-
 import { updateQTrace, type QTrace } from './orchestratorCore';
-
 import { computeYH } from './analysis/computeYH';
-
 import { applyDepthContinuity, applyQContinuity } from './depthContinuity';
 
 // ★ 追加：Polarity & Stability 計算
@@ -26,7 +23,6 @@ import {
 } from './analysis/polarity';
 
 import { estimateSelfAcceptance, type SelfAcceptanceInput } from './sa/meter';
-
 import { clampSelfAcceptance } from './orchestratorMeaning';
 
 import {
@@ -74,11 +70,7 @@ export type OrchestratorAnalysisResult = {
     hasFutureMemory: boolean | null;
     hasIntentLine: boolean;
   } | null;
-
-
-
 };
-
 
 /**
  * Iros の 1ターンに必要な「解析フェーズ」をまとめて実行する。
@@ -150,7 +142,6 @@ export async function runOrchestratorAnalysis(args: {
       phase = (baseMeta as any).phase as 'Inner' | 'Outer';
     }
   }
-
 
   /* =========================================================
      ir診断トリガー（Q候補生成の材料）
@@ -316,6 +307,7 @@ export async function runOrchestratorAnalysis(args: {
   let intentAnchor:
     | {
         text: string;
+        fixed?: boolean; // ✅ container が見るので保持する
         strength?: number | null;
         y_level?: number | null;
         h_level?: number | null;
@@ -335,6 +327,7 @@ export async function runOrchestratorAnalysis(args: {
   ) {
     intentAnchor = {
       text: baseAnchor.text.trim(),
+      fixed: (baseAnchor as any).fixed === true, // ✅ ここが重要
       strength:
         typeof baseAnchor.strength === 'number'
           ? baseAnchor.strength
@@ -354,6 +347,7 @@ export async function runOrchestratorAnalysis(args: {
       if (anchorText.length > 0) {
         intentAnchor = {
           text: anchorText,
+          fixed: false, // ✅ 暫定導出は固定しない
           strength: selfAcceptanceLine,
           y_level: yLevel,
           h_level: hLevel,
@@ -431,13 +425,11 @@ export async function runOrchestratorAnalysis(args: {
   // =========================================================
   const shouldEnterI =
     !(depth && String(depth).startsWith('I')) &&
-    (
-      irTriggered ||
+    (irTriggered ||
       !!intentLine ||
       futureDirectionActive === true ||
       !!tLayerHint ||
-      hasFutureMemory === true
-    );
+      hasFutureMemory === true);
 
   const finalDepth: Depth | undefined = shouldEnterI ? 'I1' : depth;
 
@@ -470,7 +462,10 @@ export async function runOrchestratorAnalysis(args: {
 
   // fixedUnified にも反映（保存/描画の single source of truth）
   if (finalDepth && finalDepth !== depth) {
-    (fixedUnified as any).depth = { ...(fixedUnified as any).depth, stage: finalDepth };
+    (fixedUnified as any).depth = {
+      ...(fixedUnified as any).depth,
+      stage: finalDepth,
+    };
     console.log('[IROS][I-GATE] enter I', {
       from: depth ?? null,
       to: finalDepth,
@@ -505,7 +500,9 @@ export async function runOrchestratorAnalysis(args: {
     // ✅ 追加した2つ（ここで返す）
     iEnterReasons,
     iEnterEvidence,
-  };}
+  };
+}
+
 /* ========= ローカルヘルパー ========= */
 
 function normalizeDepth(depth?: Depth): Depth | undefined {
@@ -514,7 +511,13 @@ function normalizeDepth(depth?: Depth): Depth | undefined {
 }
 
 function normalizeQCode(qCode?: unknown): QCode | null {
-  if (qCode === 'Q1' || qCode === 'Q2' || qCode === 'Q3' || qCode === 'Q4' || qCode === 'Q5') {
+  if (
+    qCode === 'Q1' ||
+    qCode === 'Q2' ||
+    qCode === 'Q3' ||
+    qCode === 'Q4' ||
+    qCode === 'Q5'
+  ) {
     return qCode as QCode;
   }
   return null;
@@ -547,10 +550,6 @@ function pickExplicitQCode(text: string): QCode | null {
   const compact = normalized.replace(/\s+/g, '');
 
   // ❌ 先に“設計・説明”っぽい文脈を除外（ここに引っかかったら explicit としては扱わない）
-  // 例:
-  // - "RならQ2でいい"
-  // - "Q1に倒したい / Q2へ寄せる / Q3に戻す"
-  // - "Q2を優先 / Q1を採用 / Q3で固定"
   if (
     /ならQ[1-5]/.test(compact) ||
     /Q[1-5]で(?:いい|OK|よい)/.test(compact) ||
@@ -560,16 +559,9 @@ function pickExplicitQCode(text: string): QCode | null {
     return null;
   }
 
-  // ✅ “状態宣言”パターンを拾う（区切り文字が無くてもOK）
-  // - 単独/括弧: "Q2", "(Q2)", "（Q2）"
-  // - 連結: "Q5状態", "Q3の状態", "Q4状態で"
-  // - 口語: "今Q1", "現在Q2", "Q3です", "Q2だ", "Q5っぽい"
   const m = compact.match(
     /(?:^|[（(【\[]|[：:、,。.!?？])(?:今|いま|現在|現状)?Q([1-5])(?:です|だ|っぽい|寄り|と思う|状態(?:で|だ|です)?|の状態(?:だ|です)?|状態)?(?:$|[）)】\]]|[：:、,。.!?？])/,
   );
-
-  // ↑この正規表現は「Q5状態で」みたいな連結も拾えるように
-  //   "状態" / "状態で" / "の状態" を許容しているのがポイント
 
   if (!m) return null;
 
@@ -577,15 +569,8 @@ function pickExplicitQCode(text: string): QCode | null {
   return q;
 }
 
-
-
 /**
  * Q候補の生成（キーワード分類はしない）
- * - requestedQCode は初回のみ採用
- * - 以後は depth/phase/SA/YH/irTriggered など “構造シグナル” から候補を出す
- *
- * ✅ 重要：
- * - 「Outer だから Q2」みたいな固定化ロジックは入れない（名残を削除）
  */
 function proposeQFromSignals(args: {
   lastQ: QCode | null;
@@ -614,10 +599,8 @@ function proposeQFromSignals(args: {
     requestedQCode,
   } = args;
 
-
   // 0) 初回のみ：明示指定があれば採用（以後は固定化原因になるので使わない）
   if (isFirstTurn && requestedQCode) return requestedQCode;
-
 
   // 0.5) unified でQが明確なら “候補” として採用（最終決定は stabilize/continuity）
   if (unifiedQ && unifiedQ !== lastQ) return unifiedQ;
@@ -628,40 +611,38 @@ function proposeQFromSignals(args: {
       ? selfAcceptance - lastSelfAcceptance
       : 0;
 
-  // 2) 揺れ（Y）が強い：不安/恐怖帯域へ寄る（Q3/Q4）
+  // 2) 揺れ（Y）
   const y = typeof yLevel === 'number' ? yLevel : 0;
 
-  // 3) I層/ir は “深度上げ” の圧が強い → 中央化(Q3) / 再配列(Q1)
+  // 3) I層/ir
   const isI = depth === 'I1' || depth === 'I2' || depth === 'I3';
   if (irTriggered || isI) {
     if (deltaSA <= -0.03 || y >= 2) return 'Q3';
     return 'Q1';
   }
 
-  // 4) C寄り：上がってるなら情熱(Q5)、それ以外は変化推進(Q2)
+  // 4) C寄り
   const isC = depth === 'C1' || depth === 'C2' || depth === 'C3';
   if (isC) {
     if (deltaSA >= 0.03) return 'Q5';
     return 'Q2';
   }
 
-  // 5) R寄り：揺れてるなら中央(Q3)、それ以外は推進(Q2)
+  // 5) R寄り
   const isR = depth === 'R1' || depth === 'R2' || depth === 'R3';
   if (isR) {
     if (y >= 2) return 'Q3';
     return 'Q2';
   }
 
-  // 6) S寄り：揺れ/落差があればQ3、そうでなければQ1
+  // 6) S寄り
   const isS = depth === 'S1' || depth === 'S2' || depth === 'S3';
   if (isS) {
     if (y >= 2 || deltaSA <= -0.03) return 'Q3';
     return 'Q1';
   }
 
-  // 7) phaseしか材料がない場合：
-  //    - Inner: 整える(Q1) / 揺れが強いならQ3
-  //    - Outer: “固定”はしない。lastQ を基本に、揺れが強いときだけQ3へ寄せる
+  // 7) phaseしか材料がない場合
   if (phase === 'Inner') {
     if (y >= 2 || deltaSA <= -0.03) return 'Q3';
     return 'Q1';
@@ -677,7 +658,6 @@ function proposeQFromSignals(args: {
 
 /**
  * Qの安定化（固定化ではない）
- * - candidate が lastQ と違う場合でも “強いシグナル” があるときだけ切り替える
  */
 function stabilizeQ(args: {
   candidate: QCode | null;
@@ -702,9 +682,7 @@ function stabilizeQ(args: {
 
   const strength = Math.max(Math.min(1, deltaSA * 10), Math.min(1, y / 3));
 
-  // 強い時だけ切替（弱い時は lastQ を維持＝暴れ防止）
   if (strength >= 0.40) return candidate;
-
   return lastQ;
 }
 
@@ -749,7 +727,6 @@ function detectFutureDirectionMode(args: {
 
   return false;
 }
-// orchestratorAnalysis.ts の一番下（ローカルヘルパー群の近く）に追加
 
 function inferPhaseFromText(text: string): 'Inner' | 'Outer' | null {
   const s = String(text || '').trim();
@@ -757,18 +734,15 @@ function inferPhaseFromText(text: string): 'Inner' | 'Outer' | null {
 
   const compact = s.replace(/\s/g, '');
 
-  // Outer: 外に向けた実行/依頼/具体策/提案/教示
   const outerRe =
     /(教えて|教えてください|アドバイス|具体的|提案|やり方|方法|手順|どうすれば|どうしたら|進め方|設計|実装|修正|確認|レビュー|作って|作成|出して|まとめて|整理して|比較して|おすすめ|選び方|例を|例:|サンプル)/;
 
-  // Inner: 体感/感情/内省/未消化/自己状態の言語化
   const innerRe =
     /(つらい|苦しい|しんどい|怖い|不安|虚無|空虚|泣|怒り|焦り|モヤ|胸|喉|体が|固ま|震え|息|呼吸|浄化|受け止め|自分なんて|価値がない|消えたい|無理|限界|闇|未消化|トラウマ|痛み)/;
 
   const isOuter = outerRe.test(compact);
   const isInner = innerRe.test(compact);
 
-  // 両方ヒットしたら「内側が先（体感/感情）」を優先
   if (isInner && !isOuter) return 'Inner';
   if (isOuter && !isInner) return 'Outer';
   if (isInner && isOuter) return 'Inner';

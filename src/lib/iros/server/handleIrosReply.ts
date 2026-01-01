@@ -1177,6 +1177,44 @@ const out = await (postProcessReply as any)({
 });
 t.postprocess_ms = msSince(tp);
 
+// (postProcessReply の直後に追加)
+
+// ✅ stop-the-bleeding: FORWARD なのに本文が空なら、ここで必ず埋める
+try {
+  const allowLLM =
+    out?.metaForSave?.speechAllowLLM === true ||
+    out?.metaForSave?.extra?.speechAllowLLM === true;
+
+  const outText = String(out?.assistantText ?? '').trim();
+
+  if (allowLLM && outText.length === 0) {
+    const name = userProfile?.user_call_name || 'あなた';
+    const seed = `${conversationId}|${userCode}|empty_forward|${traceId ?? ''}|${Date.now()}`;
+
+    const mw = await runMicroWriter(microGenerate, {
+      name,
+      userText: text,
+      seed,
+    });
+
+    // micro が死んでも「…」には落とさない（FORWARDの意味が消えるため）
+    out.assistantText =
+      (mw?.ok && String(mw.text ?? '').trim().length > 0)
+        ? mw.text
+        : '了解。🪔';
+
+    out.metaForSave = out.metaForSave ?? {};
+    out.metaForSave.fallbackApplied = 'EMPTY_FORWARD_PATCHED';
+
+    console.warn('[IROS/Reply][patch] empty-but-forward patched', {
+      conversationId,
+      userCode,
+      fallbackLen: out.assistantText.length,
+    });
+  }
+} catch (e) {
+  console.warn('[IROS/Reply][patch] empty-forward patch failed', e);
+}
 
 
 

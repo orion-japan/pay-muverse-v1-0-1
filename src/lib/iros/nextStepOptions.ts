@@ -403,25 +403,8 @@ export function attachNextStepMeta(params: {
 
   const text = String(userText ?? '');
 
-  // ✅ ITデモ判定（このどれかが入ってたら固定3ボタンを出す）
-  const wantsItDemo =
-    text.includes('IT') ||
-    text.includes('IT層') ||
-    text.includes('ITトリガー') ||
-    text.includes('IT返し') ||
-    text.includes('T層') ||
-    text.includes('I層') ||
-    text.includes('C層');
-
-  if (wantsItDemo) {
-    return {
-      ...meta,
-      nextStep: {
-        gear: 'it-demo' as NextStepGear,
-        options: buildItDemoOptions(),
-      },
-    };
-  }
+  // ✅ ITデモは無効（ボタンを出さない）
+  const wantsItDemo = false;
 
   // 従来：相談入力でだけ nextStep を出す
   const shouldOfferNextStep =

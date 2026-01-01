@@ -650,8 +650,50 @@ const analyzedDepth: Depth | undefined =
 
   // ✅ applyContainerDecision の確定値を meta に焼き付ける（persistまで運ぶ）
   meta = r.meta;
-  (meta as any).frame = r.frame;
-  (meta as any).slotPlan = r.slotPlan?.slots ?? (meta as any).slotPlan ?? null;
+
+  // ★ slotPlan を WriterHints が読める形（record）に正規化
+  function toSlotRecord(v: any): Record<string, true> | null {
+    if (!v) return null;
+
+    // 例: ['OBSERVE','CORE'] → { OBSERVE:true, CORE:true }
+    if (Array.isArray(v)) {
+      const rec: Record<string, true> = {};
+      for (const k of v) {
+        if (typeof k === 'string' && k.trim()) rec[k.trim()] = true;
+      }
+      return Object.keys(rec).length ? rec : null;
+    }
+
+    // 例: { OBSERVE:true, CORE:true } はそのまま
+    if (typeof v === 'object') {
+      const rec: Record<string, true> = {};
+      for (const [k, val] of Object.entries(v)) {
+        if (typeof k === 'string' && k.trim() && val) rec[k.trim()] = true;
+      }
+      return Object.keys(rec).length ? rec : null;
+    }
+
+    return null;
+  }
+
+  const slotsRaw =
+    (r as any).slotPlan?.slots ?? (r as any).slotPlan ?? null;
+
+  const slotsRec = toSlotRecord(slotsRaw);
+
+  // ★重要：generate.ts が meta.frame を消すので、確定値は framePlan に載せる
+  // - buildWriterHintsFromMeta は framePlan を最優先で拾う
+  (meta as any).framePlan = {
+    frame: (r as any).frame ?? null,
+    // ✅ ここは record で統一（extractSlotKeys がキーを取れるように）
+    slots: slotsRec,
+  };
+
+  // 互換のため meta.frame も残す（ただし generate で消える想定）
+  (meta as any).frame = (r as any).frame ?? (meta as any).frame ?? null;
+
+  // slotPlan は SAFE 判定にも使うので record で統一
+  (meta as any).slotPlan = slotsRec;
 
   // ✅ IT/T層の根拠も meta に残す（handleIrosReply 側の frame-fix / 判定に使える）
   if (typeof (r as any).tLayerModeActive === 'boolean') {
@@ -663,12 +705,17 @@ const analyzedDepth: Depth | undefined =
 
   console.log('[IROS/ORCH][after-container]', {
     frame: (meta as any).frame ?? null,
+    framePlan_frame: (meta as any).framePlan?.frame ?? null,
     descentGate: (meta as any).descentGate ?? null,
-    slotPlanLen: Array.isArray((meta as any).slotPlan)
-      ? (meta as any).slotPlan.length
-      : null,
+
+    // ✅ record化したので len は keys で見る
+    slotPlanKeysLen:
+      (meta as any).slotPlan && typeof (meta as any).slotPlan === 'object'
+        ? Object.keys((meta as any).slotPlan).length
+        : null,
   });
 }
+
 
   // ----------------------------------------------------------------
   // 8. 本文生成（LLM 呼び出し）
@@ -701,6 +748,64 @@ const analyzedDepth: Depth | undefined =
     ...meta,
     depth: (resolvedDepth ?? fallbackDepth) ?? undefined,
   };
+
+// ----------------------------------------------------------------
+// 10.x T→C 遷移（行動証拠でのみ確定）
+// - IT/T層の「表示/語彙」トリガーは既存の tLayerModeActive に統一
+// - ここでは「選択ボタン等のコミット証拠」が出た時だけ、深度を C に送る
+// - 4軸が崩れないように：depth を確定→この後の unified sync / spin再計算に乗せる
+// ----------------------------------------------------------------
+function pickCommitEvidenceFromText(raw: string): { kind: 'nextStep'; id: string } | null {
+  const s = String(raw ?? '');
+
+  // 代表的な埋め込みタグ想定（UI側で混ざっても拾えるように広め）
+  // 例: [NextStep:foo] / 【NextStep:foo】 / (NextStep:foo)
+  const m =
+    s.match(/\[(?:NextStep|NEXTSTEP)\s*:\s*([^\]\n]+)\]/) ||
+    s.match(/【(?:NextStep|NEXTSTEP)\s*:\s*([^】\n]+)】/) ||
+    s.match(/\((?:NextStep|NEXTSTEP)\s*:\s*([^) \n]+)\)/);
+
+  const id = m?.[1]?.trim();
+  if (!id) return null;
+  return { kind: 'nextStep', id };
+}
+
+function isTDepth(d: any): boolean {
+  const s = typeof d === 'string' ? d.trim().toUpperCase() : '';
+  return s === 'T1' || s === 'T2' || s === 'T3';
+}
+
+{
+  const tActive = (finalMeta as any).tLayerModeActive === true;
+  const depthNow = (finalMeta as any).depth ?? null;
+
+  // “行動証拠”はテキストから拾う（UIが付与する NextStep タグを想定）
+  const commit = pickCommitEvidenceFromText(text);
+
+  // ✅ 条件：Tが立っていて、かつ “選択” があった時だけ C1 に送る
+  if (tActive && isTDepth(depthNow) && commit) {
+    // T→C の確定（最小）
+    (finalMeta as any).depth = 'C1';
+
+    // Tレーンは “確定後に解除” （sticky禁止方針）
+    (finalMeta as any).tLayerModeActive = false;
+    (finalMeta as any).tLayerHint = null;
+    (finalMeta as any).tVector = null;
+
+    // 監査用（内部）ログ
+    if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
+      // eslint-disable-next-line no-console
+      console.log('[IROS/T2C] committed', {
+        fromDepth: depthNow,
+        toDepth: (finalMeta as any).depth,
+        commit,
+      });
+    }
+  }
+}
+
+
+
 
   // 7.5で確定した “安全/器/枠” を finalMeta に確実に引き継ぐ
   (finalMeta as any).descentGate =

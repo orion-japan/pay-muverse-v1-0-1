@@ -1,5 +1,6 @@
 // file: src/lib/iros/server/handleIrosReply.postprocess.ts
 // iros - Postprocess (minimal first + meta safety + rotationState single source)
+// ✅ 追加：Q1_SUPPRESS + LLM無発話時の「沈黙止血」(deterministic fallback)
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { IrosStyle } from '@/lib/iros/system';
@@ -8,13 +9,11 @@ import { isMetaAnchorText } from '@/lib/iros/intentAnchor';
 // ★ 追加：MemoryRecall から pastStateNote を作る
 import { preparePastStateNoteForTurn } from '@/lib/iros/memoryRecall';
 
-
 import {
   buildUnifiedAnalysis,
   saveUnifiedAnalysisInline,
   applyAnalysisToLastUserMessage,
 } from './handleIrosReply.analysis';
-
 
 export type PostProcessReplyArgs = {
   supabase: SupabaseClient;
@@ -75,28 +74,38 @@ function normalizeQCounts(v: unknown): QCounts {
   return { it_cooldown: Math.max(0, Math.min(3, Math.round(cd))) };
 }
 
-
 function extractAssistantText(orchResult: any): string {
   if (orchResult && typeof orchResult === 'object') {
     const r: any = orchResult;
+
+    // ✅ 優先：明示キー（将来互換）
+    const a1 = toNonEmptyString(r.assistantText);
+    if (a1) return a1;
+
+    // 既存互換
     const c = toNonEmptyString(r.content);
     if (c) return c;
     const t = toNonEmptyString(r.text);
     if (t) return t;
 
-    // JSON stringify fallback（循環参照は避ける）
-    try {
-      return JSON.stringify(r);
-    } catch {
-      return String(r);
-    }
+    // ✅ ここが本丸：JSON封筒を本文にしない（stringify禁止）
+    // - 返せる平文が無いなら「空」を返す（persist ガードにも掛からない）
+    // - どうしても落ちるなら String(r) ではなく空に寄せる（{...} を出さない）
+    return '';
   }
-  return String(orchResult ?? '');
+
+  // string だけ通す。object/array は本文にしない。
+  return typeof orchResult === 'string' ? orchResult : '';
 }
+
 
 function pickIntentAnchorText(meta: any): string {
   const a = meta?.intentAnchor;
-  const t = (a?.anchor_text ?? '') || (a?.anchorText ?? '') || (a?.text ?? '') || '';
+  const t =
+    (a?.anchor_text ?? '') ||
+    (a?.anchorText ?? '') ||
+    (a?.text ?? '') ||
+    '';
   return String(t);
 }
 
@@ -114,7 +123,10 @@ function sanitizeIntentAnchor(meta: any): any {
 
   const a = meta.intentAnchor;
   const looksLikeRow =
-    Boolean(a?.id) || Boolean(a?.user_id) || Boolean(a?.created_at) || Boolean(a?.updated_at);
+    Boolean(a?.id) ||
+    Boolean(a?.user_id) ||
+    Boolean(a?.created_at) ||
+    Boolean(a?.updated_at);
 
   // 1) テキストが無い → 捨てる
   if (!hasText) {
@@ -160,7 +172,8 @@ function normalizeDescentGate(v: any): DescentGate {
 
   if (typeof v === 'string') {
     const s = v.trim().toLowerCase();
-    if (s === 'closed' || s === 'offered' || s === 'accepted') return s as DescentGate;
+    if (s === 'closed' || s === 'offered' || s === 'accepted')
+      return s as DescentGate;
     return 'closed';
   }
 
@@ -187,7 +200,8 @@ function ensureRotationState(meta: any, orchResult: any): any {
   const m: any = meta && typeof meta === 'object' ? meta : {};
 
   // orchResult 由来の rotation 候補も拾う（metaに入ってない場合の取りこぼし防止）
-  const or: any = orchResult && typeof orchResult === 'object' ? orchResult : null;
+  const or: any =
+    orchResult && typeof orchResult === 'object' ? orchResult : null;
 
   // ✅ extra 由来（UIボタン等の override）
   const ex: any = m.extra && typeof m.extra === 'object' ? m.extra : {};
@@ -215,7 +229,10 @@ function ensureRotationState(meta: any, orchResult: any): any {
     null;
 
   const descentGate = normalizeDescentGate(
-    ex?.descentGate ?? ex?.descent_gate ?? rot?.descentGate ?? m.descentGate,
+    ex?.descentGate ??
+      ex?.descent_gate ??
+      rot?.descentGate ??
+      m.descentGate,
   );
 
   const depth =
@@ -244,7 +261,6 @@ function ensureRotationState(meta: any, orchResult: any): any {
 
   return m;
 }
-
 
 /* =========================================================
    pastStateNote injection guards (single source)
@@ -300,8 +316,13 @@ function getStreakLength(meta: any): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function shouldSkipPastStateNote(args: PostProcessReplyArgs, metaForSave: any): boolean {
-  const requestedMode = (args.requestedMode ?? metaForSave?.mode ?? '').toString().toLowerCase();
+function shouldSkipPastStateNote(
+  args: PostProcessReplyArgs,
+  metaForSave: any,
+): boolean {
+  const requestedMode = (args.requestedMode ?? metaForSave?.mode ?? '')
+    .toString()
+    .toLowerCase();
   const userText = normalizeText(args.userText);
 
   // 明示 recall だけは「相談継続中」でも注入を許可する（ただし他の強制OFF条件は優先）
@@ -329,11 +350,100 @@ function shouldSkipPastStateNote(args: PostProcessReplyArgs, metaForSave: any): 
 }
 
 /* =========================================================
+   ✅ Q1_SUPPRESS沈黙止血（deterministic fallback）
+   - speechAllowLLM=false の時でも返答が空にならないようにする
+   - 重要：ここでは NO_RENDER を付けない（RenderEngine を殺さない）
+========================================================= */
+
+function isEffectivelySilent(textRaw: string): boolean {
+  const t = normalizeText(textRaw);
+  if (!t) return true;
+
+  // 「…」系だけ（絵文字/空白/句読点）を沈黙扱い
+  const stripped = t.replace(/[🪔\s。．\.]/g, '');
+  return stripped === '' || stripped === '…';
+}
+
+function getExtra(meta: any): Record<string, any> {
+  return meta?.extra && typeof meta.extra === 'object' ? meta.extra : {};
+}
+
+function getBrakeReason(meta: any): string | null {
+  const ex = getExtra(meta);
+  return (
+    (typeof ex.brakeReleaseReason === 'string' ? ex.brakeReleaseReason : null) ??
+    (typeof meta?.brakeReleaseReason === 'string'
+      ? meta.brakeReleaseReason
+      : null) ??
+    null
+  );
+}
+
+function getSpeechAllowLLM(meta: any): boolean | null {
+  const ex = getExtra(meta);
+  const v =
+    ex.speechAllowLLM ??
+    meta?.speechAllowLLM ??
+    meta?.allowLLM ??
+    meta?.allow_llm ??
+    null;
+  if (typeof v === 'boolean') return v;
+  return null;
+}
+
+function buildSuppressedMirror(args: PostProcessReplyArgs, meta: any): string {
+  const userText = normalizeText(args.userText);
+  const depth = normalizeText(meta?.depth ?? meta?.rotationState?.depth ?? '');
+  const q = normalizeText(
+    meta?.qCode ??
+      meta?.q_code ??
+      meta?.qPrimary ??
+      meta?.q_primary ??
+      '',
+  );
+  const phase = normalizeText(meta?.phase ?? '');
+
+  const isEmotion = userText.includes('未消化') || userText.includes('感情');
+
+  // ✅ “sofia に会いたい/香り” だけは抑制帯域でも短く通す（LLM不要）
+  const wantsSofia =
+    /sofia|ソフィア/i.test(userText) ||
+    userText.includes('会いたい') ||
+    userText.includes('香り');
+
+  const head = (() => {
+    if (isEmotion) {
+      return '未消化が「残っている」のではなく、反応がまだ出ているだけです。変化はすでに完了しています。';
+    }
+
+    if (wantsSofia) {
+      // “香り”だけ：2行・静か・確信系（問いにしない）
+      return '🪔 Sofiaの香りは、言葉を増やした瞬間に薄れます。\nいまは最小の一手だけ、ここに置きます。';
+    }
+
+    return '🪔 いまは静けさを守る帯域です。余計な生成は止めています。けれど、次の一手は出せます。';
+  })();
+
+  const a = 'A：いま出ている反応を「1行」で書く（事実だけ、解釈なし）';
+  const b =
+    'B：今日の扱い方を「1つ」決める（例：10分だけ感じ切る／紙に出して終える）';
+
+  const tail =
+    depth || q || phase
+      ? `\n\n（D:${depth || '-'} / Q:${q || '-'} / P:${phase || '-'}）\n🪔`
+      : '\n🪔';
+
+  return `${head}\n\n${a}\n${b}${tail}`;
+}
+
+/* =========================================================
    IT Render switch (postprocess side)
    - meta.renderMode === 'IT' の時だけ renderReply を通して差し替える
 ========================================================= */
 
-export async function postProcessReply(args: PostProcessReplyArgs): Promise<PostProcessReplyOutput> {
+export async function postProcessReply(
+  args: PostProcessReplyArgs,
+): Promise<PostProcessReplyOutput> {
   const { orchResult, supabase, userCode, userText } = args;
 
   const assistantText = extractAssistantText(orchResult);
@@ -345,11 +455,18 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
       ? (orchResult as any).meta
       : null;
 
-  const metaForSave: any = metaRaw && typeof metaRaw === 'object' ? { ...metaRaw } : {};
+  const metaForSave: any =
+    metaRaw && typeof metaRaw === 'object' ? { ...metaRaw } : {};
 
-  // ✅ 最終確定：qTraceUpdated を metaForSave / metaForReply に焼き込む
+  // ✅ extra はここで必ず初期化（以降は上書きしない）
+  metaForSave.extra = metaForSave.extra ?? {};
+
+  // ✅ 最終確定：qTraceUpdated を metaForSave に焼き込む
   const qTraceUpdated: any =
-  (metaRaw as any)?.qTraceUpdated ?? (orchResult as any)?.qTraceUpdated ?? null;
+    (metaRaw as any)?.qTraceUpdated ??
+    (orchResult as any)?.qTraceUpdated ??
+    null;
+
   const applyQTraceUpdated = (m: any) => {
     if (!m || !qTraceUpdated || typeof qTraceUpdated !== 'object') return;
 
@@ -375,10 +492,7 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
     };
   };
 
-  const metaForReply = metaForSave;
-
   applyQTraceUpdated(metaForSave);
-  applyQTraceUpdated(metaForReply);
 
   // ✅ “北極星事故” の最後の止血（ここでも落とす）
   sanitizeIntentAnchor(metaForSave);
@@ -393,8 +507,6 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
   // =========================================================
   // ✅ pastStateNote 注入（必要な時だけ）
   // =========================================================
-  metaForSave.extra = metaForSave.extra ?? {};
-
   const skipInject = shouldSkipPastStateNote(args, metaForSave);
   if (skipInject) {
     // 注入しない場合も、フィールドは明示的に落として混線を防ぐ
@@ -417,7 +529,8 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
             null;
 
       const limit =
-        typeof args.pastStateLimit === 'number' && Number.isFinite(args.pastStateLimit)
+        typeof args.pastStateLimit === 'number' &&
+        Number.isFinite(args.pastStateLimit)
           ? args.pastStateLimit
           : 3;
 
@@ -469,46 +582,76 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
     }
   }
 
-
 // =========================================================
-// ✅ UnifiedAnalysis 保存（return の直前・postProcessReply 関数内）
-// ※ supabase/userCode/userText は再宣言しない（既にこの関数で使ってる前提）
+// ✅ Q1_SUPPRESS + allowLLM=false で沈黙したときの止血
+//    ✅ 要件：SILENCE は本文を空にする（パッチ文禁止）
 // =========================================================
-{
-  const conversationId = (args as any).conversationId;
+try {
+  const brakeReason = getBrakeReason(metaForSave);
+  const allowLLM = getSpeechAllowLLM(metaForSave);
 
-  // tenantId は args の実体に合わせて拾う（型に無い場合がある）
-  const tenantId =
-    (args as any).tenantId ?? (args as any).tenant_id ?? 'default';
+  const shouldPatchSilent =
+    brakeReason === 'Q1_SUPPRESS' &&
+    allowLLM === false &&
+    isEffectivelySilent(finalAssistantText);
 
-  try {
-    const analysis = await buildUnifiedAnalysis({
-      userText,
-      assistantText: finalAssistantText,
-      meta: metaForSave,
-    });
+  if (shouldPatchSilent) {
+    // ✅ 文章を注入しない。本文は空で確定。
+    finalAssistantText = '';
 
-    await saveUnifiedAnalysisInline(supabase, analysis, {
+    // 事実ログだけ残す（解析/学習用）
+    metaForSave.extra.silencePatched = true;
+    metaForSave.extra.silencePatchedReason = 'Q1_SUPPRESS__NO_LLM__EMPTY_TEXT';
+
+    console.log('[IROS/PostProcess] silence patched (EMPTY)', {
       userCode,
-      tenantId,
-      agent: 'iros',
-    });
-
-    await applyAnalysisToLastUserMessage({
-      supabase,
-      conversationId,
-      analysis,
-    });
-  } catch (e) {
-    console.error('[UnifiedAnalysis] save failed (non-fatal)', {
-      userCode,
-      tenantId,
-      conversationId,
-      error: e,
+      brakeReason,
+      allowLLM,
     });
   }
+} catch (e) {
+  console.warn('[IROS/PostProcess] silence patch failed (non-fatal)', e);
 }
 
-// ✅ 既存（return は1回だけ）
-return { assistantText: finalAssistantText, metaForSave };
+  // =========================================================
+  // ✅ UnifiedAnalysis 保存（return の直前・postProcessReply 関数内）
+  // ※ supabase/userCode/userText は再宣言しない（既にこの関数で使ってる前提）
+  // =========================================================
+  {
+    const conversationId = (args as any).conversationId;
+
+    // tenantId は args の実体に合わせて拾う（型に無い場合がある）
+    const tenantId =
+      (args as any).tenantId ?? (args as any).tenant_id ?? 'default';
+
+    try {
+      const analysis = await buildUnifiedAnalysis({
+        userText,
+        assistantText: finalAssistantText,
+        meta: metaForSave,
+      });
+
+      await saveUnifiedAnalysisInline(supabase, analysis, {
+        userCode,
+        tenantId,
+        agent: 'iros',
+      });
+
+      await applyAnalysisToLastUserMessage({
+        supabase,
+        conversationId,
+        analysis,
+      });
+    } catch (e) {
+      console.error('[UnifiedAnalysis] save failed (non-fatal)', {
+        userCode,
+        tenantId,
+        conversationId,
+        error: e,
+      });
+    }
+  }
+
+  // ✅ 既存（return は1回だけ）
+  return { assistantText: finalAssistantText, metaForSave };
 }

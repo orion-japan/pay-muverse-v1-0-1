@@ -31,6 +31,10 @@ import {
   findNextStepOptionById,
 } from '@/lib/iros/nextStepOptions';
 
+import { applyRulebookCompat } from '@/lib/iros/policy/rulebook';
+
+import { persistAssistantMessageToIrosMessages } from '@/lib/iros/server/persistAssistantMessageToIrosMessages';
+
 /**
  * [choiceId] 形式のタグを除去したい場合のパーサ（保険）
  * ※ 今は extractNextStepChoiceFromText を使ってるので未使用でもOK
@@ -47,16 +51,10 @@ function parseChoiceTag(input: string): {
   return { choiceId, cleanText };
 }
 
-/**
- * ★ IT強制トリガー（最小）
- * - it_* プレフィックスのみ強制（UI明示のときだけ）
- * - soft_shift_future は「未来寄せ」だが IT文体の強制はしない（文章エンジンで見守る）
- */
-function shouldForceIT(choiceId: string | null): boolean {
-  if (!choiceId) return false;
-  if (choiceId.startsWith('it_')) return true;
-  return false;
-}
+// NOTE:
+// route.ts では IT強制（it_* choice / forceIT / renderMode 注入 等）を一切扱わない。
+// ITは 4軸（handleIrosReply → metaForSave.renderMode 等）だけで確定させる。
+// it_* choiceId は「選択ログ」扱い（IT確定には使わない）。
 
 /** 共通CORS（/api/me と同等ポリシー + x-credit-cost 追加） */
 const CORS_HEADERS = {
@@ -73,6 +71,11 @@ const CHAT_CREDIT_AMOUNT = Number(process.env.IROS_CHAT_CREDIT_AMOUNT ?? 5);
 const LOW_BALANCE_THRESHOLD = Number(
   process.env.IROS_LOW_BALANCE_THRESHOLD ?? 10,
 );
+
+// =========================================================
+// ✅ single-writer: assistant 保存は route.ts が唯一
+// =========================================================
+const PERSIST_POLICY = 'REPLY_SINGLE_WRITER' as const;
 
 // service-role で現在残高を読むための Supabase クライアント（残高チェック + 訓練用保存など）
 const supabase = createClient(
@@ -147,12 +150,83 @@ function finalizeQTrace(meta: any, metaForSave: any): any {
     streakLength: streakSafe,
   };
 
-  // 2回目以降判定に使うなら、ここでだけ同期（render helper では触らない）
   if (streakSafe > 0) {
     m.uncoverStreak = Math.max(Number(m.uncoverStreak ?? 0), streakSafe);
   }
 
   return m;
+}
+
+// =========================================================
+// ✅ UI向け「現在のモード」可視化（NORMAL / IR / SILENCE）
+// - silenceReason があっても「本文があるなら SILENCE にしない」
+// =========================================================
+type ReplyUIMode = 'NORMAL' | 'IR' | 'SILENCE';
+
+function isEffectivelyEmptyText(text: any): boolean {
+  const s = String(text ?? '').trim();
+  if (!s) return true;
+
+  // FAILSAFE/プレースホルダは「空」と同等扱い
+  const t = s.replace(/\s+/g, '');
+  return t === '…' || t === '…。🪔' || t === '...' || t === '....';
+}
+
+function pickSilenceReason(meta: any): string | null {
+  return (
+    meta?.silencePatchedReason ??
+    meta?.extra?.silencePatchedReason ??
+    meta?.silenceReason ??
+    meta?.extra?.silenceReason ??
+    null
+  );
+}
+
+
+function inferUIMode(args: {
+  modeHint?: string | null;
+  effectiveMode?: string | null;
+  meta?: any;
+  finalText?: string | null; // ★ 最終本文を渡す
+}): ReplyUIMode {
+  const { modeHint, effectiveMode, meta, finalText } = args;
+
+  const hint = String(modeHint ?? '').toUpperCase();
+  if (hint.includes('IR')) return 'IR';
+
+  const eff = String(effectiveMode ?? '').toUpperCase();
+  if (eff.includes('IR')) return 'IR';
+
+  const silenceReason = pickSilenceReason(meta);
+  const empty = isEffectivelyEmptyText(finalText);
+
+  // ★ ここが本丸：最終本文が“空”のときだけ SILENCE
+  if (silenceReason && empty) return 'SILENCE';
+
+  return 'NORMAL';
+}
+
+function inferUIModeReason(args: {
+  modeHint?: string | null;
+  effectiveMode?: string | null;
+  meta?: any;
+  finalText?: string | null; // ★ 最終本文を渡す
+}): string | null {
+  const { modeHint, effectiveMode, meta, finalText } = args;
+
+  const silenceReason = pickSilenceReason(meta);
+  const empty = isEffectivelyEmptyText(finalText);
+
+  // SILENCEのときだけ理由を返す（NORMALの時は返さない）
+  if (silenceReason && empty) return silenceReason;
+
+  const hint = String(modeHint ?? '').trim();
+  if (hint.length > 0) return `MODE_HINT:${hint}`;
+
+  const eff = String(effectiveMode ?? '').trim();
+  if (eff.length > 0) return `EFFECTIVE_MODE:${eff}`;
+
+  return null;
 }
 
 export async function OPTIONS() {
@@ -173,14 +247,12 @@ export async function POST(req: NextRequest) {
       hUserCode && hUserCode.trim().length > 0 ? hUserCode.trim() : null;
 
     if (DEV_BYPASS && bypassUserCode) {
-      // ★ DEV専用：curl 等で叩くための認証バイパス（x-user-code 必須）
       auth = { ok: true, userCode: bypassUserCode, uid: 'dev-bypass' };
 
       console.warn('[IROS/Reply] DEV_BYPASS_AUTH used', {
         userCode: bypassUserCode,
       });
     } else {
-      // ★ ブラウザ通常動作：Firebase 認証へフォールバック
       auth = await verifyFirebaseAndAuthorize(req);
       if (!auth?.ok) {
         return NextResponse.json(
@@ -351,119 +423,141 @@ export async function POST(req: NextRequest) {
       });
     }
 
-// =========================================================
-// 8) Iros 共通本体処理へ委譲
-// ★ NextStep + IT trigger（ここが “最短でIT返し” の中核）
-// =========================================================
+    // =========================================================
+    // 8) Iros 共通本体処理へ委譲
+    // ★ NextStep choiceId はログとして渡す（本文にタグは混ぜない）
+    // =========================================================
 
-// --- NextStep: ボタン押下タグの除去（保険） ---
-const rawText = String(text ?? '');
-const extracted = extractNextStepChoiceFromText(rawText);
+    // --- NextStep: ボタン押下タグの除去（保険） ---
+    const rawText = String(text ?? '');
+    const extracted = extractNextStepChoiceFromText(rawText);
 
-// ✅ UIが extra.choiceId を送ってくる前提に切り替える（本文にタグを混ぜない）
-// - まず extra.choiceId を優先
-// - 無ければ本文先頭の [id] から拾う（後方互換）
-const choiceIdFromExtra =
-  extra && typeof (extra as any).choiceId === 'string'
-    ? String((extra as any).choiceId).trim()
-    : null;
+    // ✅ UIが extra.choiceId を送ってくる前提に切り替える（本文にタグを混ぜない）
+    const choiceIdFromExtra =
+      extra && typeof (extra as any).choiceId === 'string'
+        ? String((extra as any).choiceId).trim()
+        : null;
 
-const extractedChoiceId =
-  extracted?.choiceId && String(extracted.choiceId).trim().length > 0
-    ? String(extracted.choiceId).trim()
-    : null;
+    const extractedChoiceId =
+      extracted?.choiceId && String(extracted.choiceId).trim().length > 0
+        ? String(extracted.choiceId).trim()
+        : null;
 
-const effectiveChoiceId = choiceIdFromExtra || extractedChoiceId || null;
+    const effectiveChoiceId = choiceIdFromExtra || extractedChoiceId || null;
 
-// ✅ 本文は「タグ除去済み」を優先（UIがタグ無しでも安全）
-const cleanText =
-  extracted?.cleanText && String(extracted.cleanText).trim().length > 0
-    ? String(extracted.cleanText).trim()
-    : '';
+    // ✅ 本文は「タグ除去済み」を優先（UIがタグ無しでも安全）
+    const cleanText =
+      extracted?.cleanText && String(extracted.cleanText).trim().length > 0
+        ? String(extracted.cleanText).trim()
+        : '';
 
-const finalText = cleanText.length ? cleanText : rawText;
+    const userTextClean = cleanText.length ? cleanText : rawText;
 
-// option（将来の意図ログ用：今は必須ではない）
-const picked = effectiveChoiceId
-  ? findNextStepOptionById(effectiveChoiceId)
-  : null;
+    // option（将来の意図ログ用：今は必須ではない）
+    const picked = effectiveChoiceId
+      ? findNextStepOptionById(effectiveChoiceId)
+      : null;
 
-// src/app/api/agent/iros/reply/route.ts
+    // =========================================================
+    // ✅ route.ts 側の IT強制を完全停止
+    // - extra.forceIT / renderMode / spinLoop / descentGate / tLayer* は必ず無効化
+    // - it_* choiceId は「選択ログ」扱い（IT確定には使わない）
+    // =========================================================
+    const rawExtra: Record<string, any> = (extra ?? {}) as any;
+    const sanitizedExtra: Record<string, any> = { ...rawExtra };
 
-/**
- * ★ IT強制トリガー（最小）
- * - it_* プレフィックスのみ強制（UI明示のときだけ）
- * - soft_shift_future は「未来寄せ」だが IT文体の強制はしない（文章エンジンで見守る）
- */
-function shouldForceIT(choiceId: string | null): boolean {
-  if (!choiceId) return false;
-  if (choiceId.startsWith('it_')) return true;
-  return false;
-}
+    delete (sanitizedExtra as any).forceIT;
+    delete (sanitizedExtra as any).renderMode;
+    delete (sanitizedExtra as any).spinLoop;
+    delete (sanitizedExtra as any).descentGate;
+    delete (sanitizedExtra as any).tLayerModeActive;
+    delete (sanitizedExtra as any).tLayerHint;
 
-// ...（中略）...
+    // ✅ 重要：renderEngine は delete しない（gateで確定して使うため）
 
-// ★ IT FORCE（effectiveChoiceId で判定）
-const forceIT = shouldForceIT(effectiveChoiceId);
+    let extraMerged: Record<string, any> = {
+      ...sanitizedExtra,
+      choiceId: effectiveChoiceId, // ✅ 下流は常にこれを見る
+      extractedChoiceId, // ✅ デバッグ用
+    };
 
-// ★ 下流へ渡す extra（body.extra を壊さず拡張）
-const extraMerged: Record<string, any> = {
-  ...(extra ?? {}),
-  choiceId: effectiveChoiceId,          // ✅ 下流は常にこれを見る
-  extractedChoiceId: extractedChoiceId, // ✅ デバッグ用
-  forceIT,
+    const modeForHandle = mode;
+    const hintTextForHandle = hintText;
 
-  // ✅ renderReply を確実に発火させる（IT明示時のみ）
-  renderEngine: forceIT ? true : (extra as any)?.renderEngine,
+    // ✅ 追加：Node では origin が未定義なので、リクエストから取る
+    const reqOrigin =
+      req.headers.get('origin') ??
+      req.headers.get('x-forwarded-origin') ??
+      req.nextUrl?.origin ??
+      '';
 
-  // UIヘッダ用（IT明示時のみ）
-  tLayerModeActive: forceIT ? true : undefined,
-  tLayerHint: forceIT ? 'T2' : undefined,
+    // =========================================================
+    // ✅ RenderEngine gate（single source）を handleIrosReply の「前」で確定する
+    // - strict: extra.renderEngine === true のみ許可
+    // - env: IROS_ENABLE_RENDER_ENGINE === '1' は「許可スイッチ」だが、強制ONはしない
+    // =========================================================
+    {
+      const extraRenderEngine = (extraMerged as any).renderEngine === true;
+      const envAllows = process.env.IROS_ENABLE_RENDER_ENGINE === '1';
 
-  // 回転を IT 側へ寄せる（IT明示時のみ）
-  spinLoop: forceIT ? 'TCF' : undefined,
+      const enableRenderEngine = envAllows && extraRenderEngine;
 
-  // 'open' は潰れるので 'offered' にする（IT明示時のみ）
-  descentGate: forceIT ? 'offered' : undefined,
+      extraMerged = {
+        ...extraMerged,
+        renderEngine: enableRenderEngine,
+      };
 
-  // ✅ ITは “文章エンジン側の条件” として渡す（system/モードは上書きしない）
-  renderMode: forceIT ? 'IT' : undefined,
-};
+      console.log('[IROS/Reply] renderEngine gate (PRE-HANDLE)', {
+        conversationId,
+        userCode,
+        enableRenderEngine,
+        envAllows: process.env.IROS_ENABLE_RENDER_ENGINE ?? null,
+        extraRenderEngine,
+        extraKeys: Object.keys(extraMerged ?? {}),
+      });
+    }
 
-// ★ handleIrosReply に最短で効かせる：mode/hintText は上書きしない
-// （ITは extraMerged.forceIT / renderMode で伝える）
-const modeForHandle = mode;
-const hintTextForHandle = hintText;
-
-// ✅ 追加：Node では origin が未定義なので、リクエストから取る
-const reqOrigin =
-  req.headers.get('origin') ??
-  req.headers.get('x-forwarded-origin') ??
-  req.nextUrl?.origin ??
-  '';
-
-const irosResult: HandleIrosReplyOutput = await handleIrosReply({
-  conversationId,
-  text: finalText,
-  hintText: hintTextForHandle,
-  mode: modeForHandle,
-
-  userCode,
-  tenantId,
-  rememberScope,
-  reqOrigin, // ✅ ここを差し替え（origin を消す）
-  authorizationHeader: req.headers.get('authorization'),
-  traceId,
-  userProfile,
-  style: styleInput ?? (userProfile?.style ?? null),
-  history: chatHistory,
-
-  extra: extraMerged,
-});
+    // =========================================================
+    // ✅ persist gate（single source）を handleIrosReply の「前」で確定する
+    // - route.ts が唯一の保存者であることを extra にも明示
+    // =========================================================
 
 
+    {
+      extraMerged = {
+        ...extraMerged,
+        persistedByRoute: true,
+        persistAssistantMessage: false, // ✅ 下流が勝手に保存しないための宣言
+      };
 
-    // 8.x) 生成失敗時
+      console.log('[IROS/Reply] persist gate (PRE-HANDLE)', {
+        conversationId,
+        userCode,
+        persistedByRoute: true,
+        persistAssistantMessage: false,
+      });
+    }
+
+    const irosResult: HandleIrosReplyOutput = await handleIrosReply({
+      conversationId,
+      text: userTextClean,
+      hintText: hintTextForHandle,
+      mode: modeForHandle,
+
+      userCode,
+      tenantId,
+      rememberScope,
+      reqOrigin,
+      authorizationHeader: req.headers.get('authorization'),
+      traceId,
+      userProfile,
+      style: styleInput ?? (userProfile?.style ?? null),
+      history: chatHistory,
+
+      extra: extraMerged,
+    });
+
+
     if (!irosResult.ok) {
       const headers: Record<string, string> = {
         ...CORS_HEADERS,
@@ -471,6 +565,31 @@ const irosResult: HandleIrosReplyOutput = await handleIrosReply({
         'x-credit-amount': String(CREDIT_AMOUNT),
       };
       if (traceId) headers['x-trace-id'] = String(traceId);
+
+// ✅ 決定(Orchestrator)直後の「空」発生箇所を特定するための確定ログ
+try {
+  const a: any = irosResult as any;
+  const metaAny: any = a?.meta ?? {};
+  const extraAny: any = metaAny?.extra ?? {};
+  console.log('[IROS/Reply][POST-HANDLE_SNAPSHOT]', {
+    conversationId,
+    userCode,
+    iros_ok: a?.ok,
+    out_assistantText_len: String(a?.assistantText ?? '').length,
+    out_content_len: String(a?.content ?? '').length,
+    speechAct: extraAny?.speechAct ?? metaAny?.speechAct ?? null,
+    speechAllowLLM: extraAny?.speechAllowLLM ?? metaAny?.speechAllowLLM ?? null,
+    brakeReleaseReason: extraAny?.brakeReleaseReason ?? metaAny?.brakeReleaseReason ?? null,
+    generalBrake: extraAny?.generalBrake ?? metaAny?.generalBrake ?? null,
+    renderEngine: extraAny?.renderEngine ?? metaAny?.renderEngine ?? null,
+    silencePatchedReason:
+      extraAny?.silencePatchedReason ??
+      metaAny?.silencePatchedReason ??
+      null,
+  });
+} catch {}
+
+
 
       return NextResponse.json(
         {
@@ -487,7 +606,89 @@ const irosResult: HandleIrosReplyOutput = await handleIrosReply({
       );
     }
 
-    const { result, finalMode, metaForSave, assistantText } = irosResult as any;
+// ★ assistantText は後から補正するので let にする
+let { result, finalMode, metaForSave, assistantText } = irosResult as any;
+
+// ✅ まず「本文」をどこからでも拾う（返却名ブレ吸収）
+{
+  const pick = (...vals: any[]) => {
+    for (const v of vals) {
+      const s = String(v ?? '').trim();
+      if (s) return s;
+    }
+    return '';
+  };
+
+  assistantText = pick(
+    assistantText,
+    (irosResult as any)?.assistantText,
+    (irosResult as any)?.text,
+    (irosResult as any)?.content,
+    (irosResult as any)?.resultText,
+    // result が string の場合だけ拾う（objectなら無視）
+    typeof result === 'string' ? result : '',
+  );
+
+  (irosResult as any).assistantText = assistantText;
+}
+
+// ✅ FAILSAFE: FORWARD & allowLLM=true なのに本文が空なら “異常” を確定ログ化
+{
+  const extra =
+    (metaForSave as any)?.extra ??
+    (irosResult as any)?.metaForSave?.extra ??
+    {};
+  const speechAct = extra?.speechAct ?? null;
+  const speechAllowLLM = extra?.speechAllowLLM ?? null;
+
+  const len_assistantText = String(assistantText ?? '').trim().length;
+  const len_result_content = String((result as any)?.content ?? '').trim().length;
+  const len_result_text = String((result as any)?.text ?? '').trim().length;
+
+  const isEmptyButForward =
+    speechAct === 'FORWARD' &&
+    speechAllowLLM === true &&
+    len_assistantText === 0 &&
+    len_result_content === 0 &&
+    len_result_text === 0;
+
+  if (isEmptyButForward) {
+    console.error('[IROS/Reply][BUG] empty-but-forward (allowLLM=true)', {
+      conversationId,
+      userCode,
+      speechAct,
+      speechAllowLLM,
+      lengths: {
+        assistantText: len_assistantText,
+        result_content: len_result_content,
+        result_text: len_result_text,
+      },
+      // ここが重要：どのフレーム/ブレーキで来てるか
+      brakeReleaseReason: extra?.brakeReleaseReason ?? null,
+      generalBrake: extra?.generalBrake ?? null,
+      frame: (metaForSave as any)?.frame ?? (metaForSave as any)?.framePlan_frame ?? null,
+      renderMode:
+        (metaForSave as any)?.renderMode ??
+        (metaForSave as any)?.extra?.renderMode ??
+        null,
+    });
+
+    // ✅ 開発中は 500 で落として原因箇所を特定した方が速い（推奨）
+    if (process.env.IROS_EMPTY_FORWARD_IS_FATAL === '1') {
+      throw new Error('IROS_BUG_EMPTY_BUT_FORWARD_ALLOW_LLM_TRUE');
+    }
+
+    // ✅ 本番寄り: とりあえず沈黙を返すが、異常フラグを残す
+    assistantText = '…';
+    (irosResult as any).assistantText = assistantText;
+
+    (metaForSave as any).extra = {
+      ...(extra ?? {}),
+      llmEmptyBug: true,
+      silencePatchedReason: 'FAILSAFE_EMPTY_BUT_FORWARD',
+    };
+  }
+}
 
     // 9) capture
     const capRes = await captureChat(req, userCode, CREDIT_AMOUNT, creditRef);
@@ -502,16 +703,24 @@ const irosResult: HandleIrosReplyOutput = await handleIrosReply({
     if (lowWarn) headers['x-warning'] = 'low_balance';
     if (traceId) headers['x-trace-id'] = String(traceId);
 
-// ★ effectiveMode は “metaForSave.renderMode” を最優先（renderReplyの結果とUI表示を同期）
-const effectiveMode =
-  (typeof metaForSave?.renderMode === 'string' && metaForSave.renderMode) ||
-  (typeof metaForSave?.extra?.renderedMode === 'string' && metaForSave.extra.renderedMode) ||
-  finalMode ||
-  (result &&
-  typeof result === 'object' &&
-  typeof (result as any).mode === 'string'
-    ? (result as any).mode
-    : modeForHandle);
+    // =========================================================
+    // ✅ route.ts 側で single-writer を宣言（重複防止）
+    // =========================================================
+    (metaForSave as any).extra = (metaForSave as any).extra ?? {};
+    (metaForSave as any).extra.persistedByRoute = true;
+    (metaForSave as any).extra.persistAssistantMessage = false;
+
+    // ★ effectiveMode は “metaForSave.renderMode” を最優先
+    const effectiveMode =
+      (typeof metaForSave?.renderMode === 'string' && metaForSave.renderMode) ||
+      (typeof metaForSave?.extra?.renderedMode === 'string' &&
+        metaForSave.extra.renderedMode) ||
+      finalMode ||
+      (result &&
+      typeof result === 'object' &&
+      typeof (result as any).mode === 'string'
+        ? (result as any).mode
+        : modeForHandle);
 
     const basePayload = {
       ok: true,
@@ -545,66 +754,47 @@ const effectiveMode =
 
           userCode: userCode ?? (metaForSave as any)?.extra?.userCode ?? null,
 
-          // ★ 上書き後の hintText/mode を追跡できるように
-          hintText: hintTextForHandle ?? (metaForSave as any)?.extra?.hintText ?? null,
+          hintText:
+            hintTextForHandle ?? (metaForSave as any)?.extra?.hintText ?? null,
           traceId: traceId ?? (metaForSave as any)?.extra?.traceId ?? null,
           historyLen: Array.isArray(chatHistory) ? chatHistory.length : 0,
 
-          // ★ NextStep/IT トリガー情報を meta.extra に合流（下流デバッグ用）
           choiceId: extraMerged.choiceId ?? null,
-          forceIT: extraMerged.forceIT ?? false,
-          renderMode: extraMerged.renderMode ?? null,
-          spinLoop: extraMerged.spinLoop ?? null,
-          descentGate: extraMerged.descentGate ?? null,
-          tLayerModeActive: extraMerged.tLayerModeActive ?? null,
-          tLayerHint: extraMerged.tLayerHint ?? null,
+          extractedChoiceId: extraMerged.extractedChoiceId ?? null,
         },
       };
 
-      // ★ content は handleIrosReply の assistantText を正にする（renderEngine 等の前提が安定）
-      if (typeof assistantText === 'string' && assistantText.trim().length > 0) {
-        (result as any).content = assistantText;
-      }
-
-      // ✅ QTrace 確定（ここだけでやる：helper内では触らない）
+      // qTrace は metaForSave の確定値を勝たせる
       meta = finalizeQTrace(meta, metaForSave);
 
+      // ★ content は handleIrosReply の assistantText を正にする（ただし空は空のまま）
+      if (typeof assistantText === 'string') {
+        const at = assistantText.trim();
+        if (at.length > 0) (result as any).content = at;
+      }
 
-// FIX: Q single source (route.ts minimal)
-{
-  const qFinal =
-    (typeof (metaForSave as any)?.qCode === 'string' && (metaForSave as any).qCode) ||
-    (typeof (metaForSave as any)?.q_code === 'string' && (metaForSave as any).q_code) ||
-    (typeof (metaForSave as any)?.unified?.q?.current === 'string' &&
-      (metaForSave as any).unified.q.current) ||
-    null;
-
-  if (qFinal) {
-    meta.qCode = qFinal;
-    meta.q_code = qFinal;
-    (meta as any).q = qFinal;
-
-    meta.unified = meta.unified ?? {};
-    meta.unified.q = meta.unified.q ?? {};
-    meta.unified.q.current = qFinal;
-  }
-}
-
-
-
+      // =========================================================
       // ★ 三軸「次の一歩」オプションを meta に付与
+      // - qCode/depth は “確定値だけ” を渡す
+      // =========================================================
       meta = attachNextStepMeta({
         meta,
+
         qCode:
-          (meta.qCode as any) ??
-          (meta.q_code as any) ??
-          (meta.unified?.q?.current as any) ??
-          'Q3',
+          (typeof (meta as any).qCode === 'string' && (meta as any).qCode) ||
+          (typeof (meta as any).q_code === 'string' && (meta as any).q_code) ||
+          (typeof (meta as any)?.unified?.q?.current === 'string' &&
+            (meta as any).unified.q.current) ||
+          null,
+
         depth:
-          (meta.depth as any) ??
-          (meta.depth_stage as any) ??
-          (meta.unified?.depth?.stage as any) ??
-          'S2',
+          (typeof (meta as any).depth === 'string' && (meta as any).depth) ||
+          (typeof (meta as any).depth_stage === 'string' &&
+            (meta as any).depth_stage) ||
+          (typeof (meta as any)?.unified?.depth?.stage === 'string' &&
+            (meta as any).unified.depth.stage) ||
+          null,
+
         selfAcceptance:
           typeof meta.selfAcceptance === 'number'
             ? meta.selfAcceptance
@@ -613,13 +803,13 @@ const effectiveMode =
             : typeof meta.unified?.self_acceptance === 'number'
             ? meta.unified.self_acceptance
             : null,
+
         hasQ5DepressRisk: false,
 
-        // ★ タグ無し本文で評価させる（UI/DB/Trainingの汚れを避ける）
-        userText: finalText,
+        userText: userTextClean,
       });
 
-      // ★ situation_topic を確実に付与（Training/集計の舵取り）
+      // ★ situation_topic を確実に付与
       const rawSituationTopic =
         typeof (meta as any).situationTopic === 'string' &&
         (meta as any).situationTopic.trim().length > 0
@@ -686,7 +876,7 @@ const effectiveMode =
       // ★★★ y/h を “整数に統一”
       meta = normalizeMetaLevels(meta);
 
-      // ★ unified.intent_anchor を “固定アンカー” に同期（ブレ防止）
+      // ★ unified.intent_anchor を “固定アンカー” に同期
       {
         const fixedText =
           typeof meta?.intent_anchor?.text === 'string' && meta.intent_anchor.text
@@ -746,9 +936,9 @@ const effectiveMode =
         }
       }
 
-      // ★★★ Render Engine の適用（ここで「適用箇所」を固定）
+      // ★★★ Render Engine の適用（適用箇所をここで固定）
       const effectiveStyle =
-        (typeof styleInput === 'string' && styleInput.trim().length > 0
+        typeof styleInput === 'string' && styleInput.trim().length > 0
           ? styleInput
           : typeof meta?.style === 'string' && meta.style.trim().length > 0
           ? meta.style
@@ -758,18 +948,15 @@ const effectiveMode =
           : typeof userProfile?.style === 'string' &&
             userProfile.style.trim().length > 0
           ? userProfile.style
-          : null);
+          : null;
 
       const applied = applyRenderEngineIfEnabled({
         conversationId,
         userCode,
 
-        // ★ タグ無し本文で判定させる（本質判定/ズバ判定などが汚れない）
-        userText: finalText,
-
+        userText: userTextClean,
         styleInput: effectiveStyle,
 
-        // ★ extraMerged を渡す（forceIT 等を render engine でも参照可能に）
         extra: extraMerged ?? null,
 
         meta,
@@ -777,51 +964,223 @@ const effectiveMode =
       });
 
       meta = applied.meta;
+      extraMerged = applied.extraForHandle;
 
-// ===============================
-// DEBUG: Q single-source check (route.ts)
-// - metaForSave（postprocess確定値） vs meta（マージ後/RenderEngine後）
-// - ここで差が出たら「route.ts 内で巻き戻し」確定
-// ===============================
+
+// ✅ FINAL sanitize: RenderEngine ON/OFF に関係なく「最終本文」から見出しを完全除去
 {
-  const qFromSave =
-    (typeof (metaForSave as any)?.qCode === 'string' && (metaForSave as any).qCode) ||
-    (typeof (metaForSave as any)?.q_code === 'string' && (metaForSave as any).q_code) ||
-    (typeof (metaForSave as any)?.unified?.q?.current === 'string' &&
-      (metaForSave as any).unified.q.current) ||
-    null;
+  const before = String((result as any)?.content ?? '');
+  const sanitized = sanitizeFinalContent(before);
 
-  const qFromMeta =
-    (typeof meta?.qCode === 'string' && meta.qCode) ||
-    (typeof meta?.q_code === 'string' && meta.q_code) ||
-    (typeof meta?.unified?.q?.current === 'string' && meta.unified.q.current) ||
-    null;
+  const next = sanitized.text.trim();
+  (result as any).content = next.length > 0 ? next : '';
 
-  const goalTargetQ =
-    (typeof meta?.goalTargetQ === 'string' && meta.goalTargetQ) ||
-    (typeof meta?.goal?.targetQ === 'string' && meta.goal.targetQ) ||
-    (typeof meta?.priority?.goal?.targetQ === 'string' && meta.priority.goal.targetQ) ||
-    null;
+  meta.extra = {
+    ...(meta.extra ?? {}),
+    finalHeaderStripped:
+      sanitized.removed.length > 0 ? sanitized.removed : null,
+  };
+}
 
-  console.log('[IROS/Reply][DEBUG][Q] compare', {
-    conversationId,
-    userCode,
-    modeForHandle,
+// =========================================================
+// ✅ FINAL本文の確定（UIに出すもの＝保存するもの）
+// - SILENCEで renderEngine/LLM を止めても、content を空にしない
+// - “画面表示” と “DB保存” を一致させる
+// - ★P0: assistantText は必ず最終本文に同期（FINAL_CONTENT_CHECK 前に確定）
+// =========================================================
+{
+  const cur = String((result as any)?.content ?? '').trim();
+
+  // UIが沈黙表示として使う文字（優先：speechSkippedText → fallback: '…'）
+  const fallbackSilence =
+    String(meta?.extra?.speechSkippedText ?? '').trim() || '…';
+
+  // ✅ 空なら必ず埋める（= 画面に出す本文を確定）
+  if (cur.length === 0) {
+    (result as any).content = fallbackSilence;
+  }
+
+  // ✅ 最終本文（trim済み）を確定
+  const finalText = String((result as any)?.content ?? '').trim();
+  (result as any).content = finalText;
+
+  // ✅ P0：assistantText を “必ず” final content に同期（SILENCE経路でもここを通る）
+  assistantText = finalText;
+
+  meta.extra = {
+    ...(meta.extra ?? {}),
+    finalAssistantTextSynced: true,
+    finalAssistantTextLen: finalText.length,
+  };
+}
+
+// =========================================================
+// ✅ UI MODE をここで確定（可視化の単一ソース）
+// - “最終本文(finalText)” を必ず渡す（本文ありSILENCE誤判定を潰す）
+// =========================================================
+{
+  const finalText = String((result as any)?.content ?? '').trim();
+
+  const uiMode = inferUIMode({
+    modeHint: modeForHandle,
     effectiveMode,
-    qFromSave,
-    qFromMeta,
-    unifiedCurrent: meta?.unified?.q?.current ?? null,
-    qCode: meta?.qCode ?? null,
-    q_code: meta?.q_code ?? null,
-    goalTargetQ,
-    hasAttachNextStepMeta: !!meta?.nextStepMeta || !!meta?.nextStep,
-    renderEngineGate: meta?.extra?.renderEngineGate ?? null,
-    renderedMode: meta?.extra?.renderedMode ?? null,
+    meta,
+    finalText,
   });
+
+  const uiReason = inferUIModeReason({
+    modeHint: modeForHandle,
+    effectiveMode,
+    meta,
+    finalText,
+  });
+
+  meta.mode = uiMode;
+  meta.modeReason = uiReason;
+  meta.persistPolicy = PERSIST_POLICY;
+
+  meta.extra = {
+    ...(meta.extra ?? {}),
+    uiMode,
+    uiModeReason: uiReason,
+    persistPolicy: PERSIST_POLICY,
+  };
 }
 
 
-      // ★ 訓練用サンプルを保存（失敗しても本処理は継続）
+
+// =========================================================
+// ✅ assistant 保存（single-writer: reply が唯一の writer）
+// - 保存する本文は「FINAL sanitize 後」のみ
+// - 判定は “本文の有無” を唯一の正にする（uiMode では止めない）
+// - 重要：'…'（沈黙表示）も保存する → リロードで消えない
+// - ✅ 追加：沈黙の連続 insert を防ぐ（2重3重対策）
+// - ✅ 追加：assistantText も finalAssistant に統一（ログ差を潰す）
+// =========================================================
+let persistedAssistantMessage: any = null;
+
+try {
+  const silenceReason = pickSilenceReason(meta); // 共通関数
+
+  // ✅ 最終本文（render / failsafe 後の result.content を唯一の正にする）
+  const finalAssistant = String((result as any)?.content ?? '').trim();
+
+  // ✅ これも最終本文に統一（ログや downstream が assistantText を参照してもズレない）
+  (result as any).assistantText = finalAssistant;
+
+  const empty = isEffectivelyEmptyText(finalAssistant);
+
+  // ✅ “沈黙表示” 判定（保存はする / フラグだけ残す）
+  const isSilenceText =
+    finalAssistant === '…' ||
+    finalAssistant === '...' ||
+    finalAssistant === '….' ||
+    finalAssistant.toLowerCase() === '(silence)' ||
+    // 既存の “…。🪔” も沈黙扱いに含める（過去資産との整合）
+    finalAssistant === '…。🪔';
+
+// ✅ ここが肝：沈黙が連続しているなら insert しない（2重3重を止める）
+// - 「会話の最後が assistant の沈黙」なら、今回の沈黙は skip（= 二重POST対策）
+// - 最後が user なら、今回の沈黙は “必要な返信” なので保存する
+let skipBecauseDupSilence = false;
+if (isSilenceText) {
+  // 最後の1件（roleも含めて）を取る
+  const { data: lastRows, error: lastErr } = await supabase
+    .from('iros_messages')
+    .select('id, role, content')
+    .eq('conversation_id', conversationId)
+    .order('id', { ascending: false })
+    .limit(1);
+
+  if (!lastErr) {
+    const last = lastRows?.[0];
+    const lastRole = String((last as any)?.role ?? '').trim();
+    const lastText = String((last as any)?.content ?? '').trim();
+
+    const lastIsSilence =
+      lastText === '…' ||
+      lastText === '...' ||
+      lastText === '….' ||
+      lastText.toLowerCase() === '(silence)' ||
+      lastText === '…。🪔';
+
+    // ✅ 「直前が assistant の沈黙」だけスキップする
+    if (lastRole === 'assistant' && lastIsSilence) {
+      skipBecauseDupSilence = true;
+    }
+  }
+}
+
+
+  // ✅ 保存判定：本文があるなら基本保存。ただし “沈黙の重複” は skip。
+  if (finalAssistant.length > 0 && !skipBecauseDupSilence) {
+    const saved = await persistAssistantMessageToIrosMessages({
+      supabase,
+      conversationId,
+      userCode,
+      content: finalAssistant,
+      meta: meta ?? null, // ✅ 統合後 meta
+    });
+
+    persistedAssistantMessage = {
+      ok: true,
+      inserted: true,
+      skipped: false,
+      len: finalAssistant.length,
+      reason: null,
+      saved,
+      isSilenceText,
+      skipBecauseDupSilence: false,
+    };
+
+    console.log('[IROS/reply][persist-assistant] inserted to iros_messages', {
+      conversationId,
+      userCode,
+      len: finalAssistant.length,
+      isSilenceText,
+    });
+  } else {
+    const reason =
+      finalAssistant.length === 0
+        ? 'EMPTY_CONTENT'
+        : 'DUP_SILENCE_SKIP';
+
+    persistedAssistantMessage = {
+      ok: true,
+      inserted: false,
+      skipped: true,
+      len: finalAssistant.length,
+      reason,
+      isSilenceText,
+      skipBecauseDupSilence,
+    };
+
+    console.log('[IROS/reply][persist-assistant] skipped', {
+      conversationId,
+      userCode,
+      reason,
+      len: finalAssistant.length,
+      isSilenceText,
+      skipBecauseDupSilence,
+    });
+  }
+} catch (e) {
+  console.log('[IROS/reply][persist-assistant] error', e);
+  persistedAssistantMessage = {
+    ok: false,
+    inserted: false,
+    skipped: true,
+    len: 0,
+    reason: 'EXCEPTION',
+    isSilenceText: false,
+  };
+}
+
+
+      // =========================================================
+      // ✅ assistant 保存方針（単一責任）
+      // - ここでは「訓練データとして保存するか」だけを制御
+      // =========================================================
       const skipTraining =
         meta?.skipTraining === true ||
         meta?.skip_training === true ||
@@ -836,10 +1195,9 @@ const effectiveMode =
           conversationId,
           messageId: null,
 
-          // ★ タグ無し本文で保存
-          inputText: finalText,
-
+          inputText: userTextClean,
           replyText: (result as any).content ?? '',
+
           meta,
           tags: ['iros', 'auto'],
         });
@@ -854,10 +1212,21 @@ const effectiveMode =
         };
       }
 
-      return NextResponse.json(
-        { ...basePayload, ...(result as any), meta },
-        { status: 200, headers },
-      );
+      // ✅ FIX: result 側の衝突キー（mode/meta/ok/credit）を除去してから返す
+      const resultObj = { ...(result as any) };
+      delete (resultObj as any).mode;
+      delete (resultObj as any).meta;
+      delete (resultObj as any).ok;
+      delete (resultObj as any).credit;
+
+      const payload = {
+        ...resultObj,
+        ...basePayload,
+        mode: effectiveMode,
+        meta,
+      };
+
+      return NextResponse.json(payload, { status: 200, headers });
     }
 
     // result が文字列等だった場合
@@ -866,19 +1235,52 @@ const effectiveMode =
       mode: effectiveMode,
     });
 
+    // ✅ string result でも UI mode を返す
+    const metaString: any = {
+      userProfile: userProfile ?? null,
+      extra: {
+        userCode,
+        hintText,
+        traceId,
+        historyLen: Array.isArray(chatHistory) ? chatHistory.length : 0,
+      },
+    };
+
+    {
+      // ★ string result の最終本文を渡す
+      const finalText = String(result ?? '').trim();
+
+      const uiMode = inferUIMode({
+        modeHint: modeForHandle,
+        effectiveMode,
+        meta: metaString,
+        finalText, // ✅ 追加
+      });
+
+      const uiReason = inferUIModeReason({
+        modeHint: modeForHandle,
+        effectiveMode,
+        meta: metaString,
+        finalText, // ✅ 追加
+      });
+
+      metaString.mode = uiMode;
+      metaString.modeReason = uiReason;
+      metaString.persistPolicy = PERSIST_POLICY;
+      metaString.extra = {
+        ...(metaString.extra ?? {}),
+        uiMode,
+        uiModeReason: uiReason,
+        persistPolicy: PERSIST_POLICY,
+      };
+    }
+
+
     return NextResponse.json(
       {
         ...basePayload,
         content: result,
-        meta: {
-          userProfile: userProfile ?? null,
-          extra: {
-            userCode,
-            hintText,
-            traceId,
-            historyLen: Array.isArray(chatHistory) ? chatHistory.length : 0,
-          },
-        },
+        meta: metaString,
       },
       { status: 200, headers },
     );
@@ -895,7 +1297,9 @@ const effectiveMode =
   }
 }
 
+// =========================================================
 // ===== render engine helper (do not place inside POST) =====
+// =========================================================
 
 function applyRenderEngineIfEnabled(params: {
   conversationId: string;
@@ -905,58 +1309,58 @@ function applyRenderEngineIfEnabled(params: {
   extra: Record<string, any> | null;
   meta: any;
   resultObj: any; // expects { content?: string }
-}): { meta: any } {
-  const {
-    conversationId,
-    userCode,
-    userText,
-    styleInput,
-    extra,
-    meta,
-    resultObj,
-  } = params;
+}): { meta: any; extraForHandle: Record<string, any> } {
+  const { conversationId, userCode, userText, extra, meta, resultObj } = params;
 
-  // strict gate（extra は boolean true のみ許可）
-  const extraRenderEngine = !!extra && (extra as any).renderEngine === true;
-  const envRenderEngine = process.env.IROS_ENABLE_RENDER_ENGINE === '1';
-  const enableRenderEngine = extraRenderEngine || envRenderEngine;
+  const extraForHandle: Record<string, any> = { ...(extra ?? {}) };
 
-  // ★ ゲート根拠を meta に残す（レスポンスだけで原因追跡できる）
+  // gate：RenderEngine（通常文の整形）は “extra.renderEngine===true” の時だけ
+  const enableRenderEngine = !!extra && (extra as any).renderEngine === true;
+
+  // ✅ IT は gate と無関係に “必ず renderReply を通す”
+  const hintedRenderMode =
+    (typeof (meta as any)?.renderMode === 'string' && (meta as any).renderMode) ||
+    (typeof (meta as any)?.extra?.renderMode === 'string' && (meta as any).extra.renderMode) ||
+    (typeof (meta as any)?.extra?.renderedMode === 'string' && (meta as any).extra.renderedMode) ||
+    '';
+
+  const isIT = String(hintedRenderMode).toUpperCase() === 'IT';
+
+  // ✅ renderReply を走らせる条件
+  const shouldRunRenderReply = enableRenderEngine || isIT;
+
+  // gate 情報（UI/ログ用）
   meta.extra = {
     ...(meta.extra ?? {}),
-    renderEngineGate: {
-      enableRenderEngine,
-      extraRenderEngine,
-      envRenderEngine,
-      envValue: process.env.IROS_ENABLE_RENDER_ENGINE ?? null,
-      extraKeys: extra ? Object.keys(extra) : [],
-    },
+    renderEngineGate: enableRenderEngine,      // “通常REの許可”
+    renderReplyForcedIT: isIT,                 // “ITは常時通す”
   };
 
-  console.log('[IROS/Reply] renderEngine gate', {
-    conversationId,
-    userCode,
-    enableRenderEngine,
-    envEnable: process.env.IROS_ENABLE_RENDER_ENGINE,
-    extraRenderEngine: extra ? (extra as any).renderEngine : undefined,
-    extraKeys: extra ? Object.keys(extra) : [],
-  });
-
-  // OFFなら何もせず帰る（renderEngineApplied も触らない）
-  if (!enableRenderEngine) {
-    return { meta };
+  // ✅ どちらも false なら今まで通り何もしない
+  if (!shouldRunRenderReply) {
+    return { meta, extraForHandle };
   }
+
+  // ここから下は “従来の try { ... }” をそのまま使ってOK。
+  // ただし renderReply に renderMode を渡せるよう、baseOpts に renderMode を足すのが安全：
+  // const baseOpts = { minimalEmoji: false, renderMode: isIT ? 'IT' : hintedRenderMode } as any;
+  // （このコメント行だけ、既存の baseOpts を差し替えてください）
+
 
   try {
     const contentBefore = String(resultObj?.content ?? '').trim();
-    if (contentBefore.length === 0) {
-      meta.extra = {
-        ...(meta.extra ?? {}),
-        renderEngineApplied: false,
-        renderEngineEmptyInput: true,
-      };
-      return { meta };
-    }
+
+    const fallbackFacts =
+      contentBefore.length > 0
+        ? contentBefore
+        : String(
+            (meta as any)?.situationSummary ??
+              (meta as any)?.situation_summary ??
+              meta?.unified?.situation?.summary ??
+              '',
+          ).trim() ||
+          String(userText ?? '').trim() ||
+          '';
 
     const vector = buildResonanceVector({
       qCode:
@@ -970,14 +1374,12 @@ function applyRenderEngineIfEnabled(params: {
         meta?.unified?.depth?.stage ??
         null,
       phase: (meta as any)?.phase ?? meta?.unified?.phase ?? null,
-
       selfAcceptance:
         (meta as any)?.selfAcceptance ??
         (meta as any)?.self_acceptance ??
         meta?.unified?.selfAcceptance ??
         meta?.unified?.self_acceptance ??
         null,
-
       yLevel:
         (meta as any)?.yLevel ??
         (meta as any)?.y_level ??
@@ -990,7 +1392,6 @@ function applyRenderEngineIfEnabled(params: {
         meta?.unified?.hLevel ??
         meta?.unified?.h_level ??
         null,
-
       polarityScore:
         (meta as any)?.polarityScore ??
         (meta as any)?.polarity_score ??
@@ -1009,7 +1410,6 @@ function applyRenderEngineIfEnabled(params: {
         meta?.unified?.stabilityBand ??
         meta?.unified?.stability_band ??
         null,
-
       situationSummary:
         (meta as any)?.situationSummary ??
         (meta as any)?.situation_summary ??
@@ -1020,7 +1420,6 @@ function applyRenderEngineIfEnabled(params: {
         (meta as any)?.situation_topic ??
         meta?.unified?.situation?.topic ??
         null,
-
       intentLayer:
         (meta as any)?.intentLayer ??
         (meta as any)?.intent_layer ??
@@ -1028,7 +1427,6 @@ function applyRenderEngineIfEnabled(params: {
         (meta as any)?.intent_line?.focusLayer ??
         meta?.unified?.intentLayer ??
         null,
-
       intentConfidence:
         (meta as any)?.intentConfidence ??
         (meta as any)?.intent_confidence ??
@@ -1037,146 +1435,41 @@ function applyRenderEngineIfEnabled(params: {
         null,
     });
 
-    // ★ spinLoop / spinStep は「最終 meta」を優先して vector に同期
-    const spinLoopFromMeta =
-      (meta as any)?.spinLoop ??
-      (meta as any)?.spin_loop ??
-      (meta as any)?.unified?.spinLoop ??
-      (meta as any)?.unified?.spin_loop ??
-      null;
+    const baseInput = {
+      facts: fallbackFacts,
+      insight: null,
+      nextStep: null,
+      userWantsEssence: false,
+      highDefensiveness: false,
+      seed: String(conversationId),
+      userText: String(userText ?? ''),
+    } as const;
 
-    const spinStepFromMeta =
-      (meta as any)?.spinStep ??
-      (meta as any)?.spin_step ??
-      (meta as any)?.unified?.spinStep ??
-      (meta as any)?.unified?.spin_step ??
-      null;
+    const baseOpts = {
+      minimalEmoji: false,
+      // ✅ IT は gate と無関係に “ITとして” renderReply に渡す
+      renderMode: isIT ? 'IT' : hintedRenderMode || undefined,
+      // density は既存互換（あるなら使う）
+      itDensity:
+        (meta as any)?.itDensity ??
+        (meta as any)?.density ??
+        (meta as any)?.extra?.itDensity ??
+        (meta as any)?.extra?.density ??
+        undefined,
+    } as any;
 
-    const vectorForRender = {
-      ...vector,
-      spinLoop: spinLoopFromMeta ?? (vector as any).spinLoop ?? null,
-      spinStep: spinStepFromMeta ?? (vector as any).spinStep ?? null,
-    };
-
-    const userWantsEssence = /本質|ズバ|はっきり|ハッキリ|意図|核心|要点/.test(
-      userText,
-    );
-
-    const qNow =
-      (meta.qCode as any) ??
-      (meta.q_code as any) ??
-      (meta.unified?.q?.current as any) ??
-      null;
-
-    const highDefensiveness = qNow === 'Q1' || qNow === 'Q4';
-
-    const coreNeed =
-      (meta.soulNote?.core_need as string) ??
-      (meta.core_need as string) ??
-      (meta.unified?.soulNote?.core_need as string) ??
-      null;
-
-    let insightCandidate: string | null =
-      coreNeed && String(coreNeed).trim().length > 0
-        ? String(coreNeed).trim()
-        : null;
-
-    const nextStepCandidate =
-      (meta.nextStep as any)?.text ??
-      (meta.next_step as any)?.text ??
-      (meta.nextStep as any)?.label ??
-      (meta.next_step as any)?.label ??
-      (meta.nextStepMeta as any)?.text ??
-      null;
-
-    // biz-soft / biz-formal は絵文字抑制
-    const minimalEmoji =
-      typeof styleInput === 'string' &&
-      (styleInput.includes('biz-formal') || styleInput.includes('biz-soft'));
-
-    // framePlan は route 側で meta に載せたものを拾う
-    const framePlan = (meta as any)?.framePlan ?? null;
-
-    // renderReply 側で slotPlan 判定に使えるように載せる（型は any でブリッジ）
-    (vectorForRender as any).slotPlan = (meta as any)?.slotPlan ?? null;
-
-    // --- Orientation Whisper（向き還り1文）: 2回目以降だけ ---
-    if (!insightCandidate) {
-      const noDelta = (meta as any)?.noDelta === true;
-      const noDeltaKind = (meta as any)?.noDeltaKind ?? null;
-
-      const uncoverStreak =
-        typeof (meta as any)?.uncoverStreak === 'number'
-          ? (meta as any).uncoverStreak
-          : Number((meta as any)?.qTrace?.streakLength ?? 0);
-
-      const volatilityRank = ((meta as any)?.volatilityRank as any) ?? null;
-
-      const allow =
-        noDelta &&
-        (noDeltaKind === 'stuck' || noDeltaKind === 'repeat-warning') &&
-        uncoverStreak >= 2 &&
-        (uncoverStreak === 2 ||
-          (uncoverStreak >= 3 && volatilityRank === 'high'));
-
-      if (allow) {
-        if (qNow === 'Q2') {
-          insightCandidate = '変えようとする力は十分ある。向きだけは嘘をついていない。';
-        } else if (qNow === 'Q3') {
-          insightCandidate = '決めなくていい。戻る方向だけ保てばいい。';
-        } else {
-          insightCandidate = '今日は答えを出す時間じゃない。向きだけ戻せばいい。';
-        }
-      }
-    }
-
-    console.log('[IROS/Reply][renderEngine] inputs', {
-      conversationId,
-      userCode,
-      styleInput,
-      minimalEmoji,
-      qNow,
-      userWantsEssence,
-      highDefensiveness,
-      insightCandidate,
-      nextStepCandidate,
-      framePlan,
-      slotPlan: (vectorForRender as any).slotPlan,
-      vector: vectorForRender,
-      forceIT: (extra as any)?.forceIT,
-      choiceId: (extra as any)?.choiceId,
-      renderMode: (extra as any)?.renderMode,
+    const patched = applyRulebookCompat({
+      vector,
+      input: baseInput,
+      opts: baseOpts,
+      meta,
+      extraForHandle,
     });
 
-    // meta.extra にデバッグ情報
-    meta.extra = {
-      ...(meta.extra ?? {}),
-      resonanceVector: vectorForRender,
-      renderEngine: {
-        userWantsEssence,
-        highDefensiveness,
-        minimalEmoji,
-        insightCandidate,
-        nextStepCandidate,
-      },
-    };
-
     const rendered = renderReply(
-      vectorForRender as any,
-      {
-        facts: String(resultObj?.content ?? '').trim(),
-        insight: insightCandidate,
-        nextStep: nextStepCandidate,
-        userWantsEssence,
-        highDefensiveness,
-        seed: String(conversationId),
-      },
-      {
-        minimalEmoji,
-        forceExposeInsight:
-          !!extra && (extra as any).forceExposeInsight === true,
-        framePlan: (meta as any)?.framePlan ?? null,
-      } as any,
+      (patched.vector ?? vector) as any,
+      (patched.input ?? baseInput) as any,
+      (patched.opts ?? baseOpts) as any,
     );
 
     const renderedText =
@@ -1186,43 +1479,56 @@ function applyRenderEngineIfEnabled(params: {
         ? String((rendered as any).text)
         : String(rendered ?? '');
 
-    if (renderedText.trim().length > 0) {
-      resultObj.content = renderedText;
-      meta.extra = {
-        ...(meta.extra ?? {}),
-        renderEngineApplied: true,
-      };
+    // ✅ 見出し除去（先頭だけ）→ 最終本文へ
+    const sanitized = sanitizeFinalContent(renderedText);
+    const nextContent = sanitized.text.trim().length > 0 ? sanitized.text : '';
 
-      console.log('[IROS/Reply][renderEngine] output', {
-        conversationId,
-        userCode,
-        len: renderedText.length,
-        head: renderedText.slice(0, 160),
-      });
-    } else {
-      meta.extra = {
-        ...(meta.extra ?? {}),
-        renderEngineApplied: false,
-        renderEngineEmptyOutput: true,
-      };
-    }
+    resultObj.content = nextContent;
 
-    return { meta };
+    const metaAfter = (patched.meta ?? meta) as any;
+    const extraForHandleAfter = (patched.extraForHandle ?? extraForHandle) as any;
+
+    metaAfter.extra = {
+      ...(metaAfter.extra ?? {}),
+      renderEngineApplied: nextContent.length > 0,
+      renderEngineFallbackUsed: contentBefore.length === 0,
+      headerStripped: sanitized.removed.length > 0 ? sanitized.removed : null,
+    };
+
+    return { meta: metaAfter, extraForHandle: extraForHandleAfter };
   } catch (e) {
-    console.warn('[IROS/Reply] renderEngine failed (ignored)', {
-      conversationId,
-      userCode,
-      error: String(e),
-    });
-
     meta.extra = {
       ...(meta.extra ?? {}),
       renderEngineApplied: false,
       renderEngineError: String(e),
     };
-
-    return { meta };
+    return { meta, extraForHandle };
   }
+}
+
+// ✅ helpers領域に置く（POSTの外 / applyRenderEngineIfEnabled の外）
+function sanitizeFinalContent(input: string): { text: string; removed: string[] } {
+  const raw = String(input ?? '');
+  const lines = raw.replace(/\r\n/g, '\n').split('\n');
+
+  const headerRe = /^\s*(Iros|IROS|Sofia|SOFIA|IT|✨|Q[1-5])\s*$/;
+  const removed: string[] = [];
+
+  while (lines.length > 0) {
+    const head = (lines[0] ?? '').trim();
+    if (head.length === 0 || headerRe.test(head)) {
+      removed.push(lines.shift() ?? '');
+      continue;
+    }
+    break;
+  }
+
+  while (lines.length > 0 && String(lines[0] ?? '').trim().length === 0) {
+    removed.push(lines.shift() ?? '');
+  }
+
+  const text = lines.join('\n').trimEnd();
+  return { text, removed };
 }
 
 /**
