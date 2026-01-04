@@ -49,9 +49,20 @@ function normalizeIntentLayer(raw: unknown): IntentLayer | null {
   return null;
 }
 
+// ★ 追加：descentGate 正規化（IrosMeta の descentGate 型に合わせる）
+type DescentGate = Exclude<IrosMeta['descentGate'], null | undefined>;
+
+function normalizeDescentGate(raw: unknown): DescentGate | null {
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim().toLowerCase();
+  if (s === 'open') return 'open' as DescentGate;
+  if (s === 'closed') return 'closed' as DescentGate;
+  return null;
+}
+
 /**
  * userCode ごとの MemoryState を読み込み、
- * baseMeta に depth / qCode / selfAcceptance / Y / H / phase / spin / intentLayer を合成する。
+ * baseMeta に depth / qCode / selfAcceptance / Y / H / phase / spin / intentLayer / descentGate を合成する。
  *
  * ✅ 注意：この関数は read only。保存は persist 側に集約。
  */
@@ -104,11 +115,20 @@ export async function loadBaseMetaFromMemoryState(args: {
           ? msAny.intent_layer
           : null;
 
+    // ✅ 追加：descentGate / descent_gate を拾う
+    const msDescentGateRaw =
+      typeof msAny?.descentGate === 'string'
+        ? msAny.descentGate
+        : typeof msAny?.descent_gate === 'string'
+          ? msAny.descent_gate
+          : null;
+
     // ★ 正規化（IrosMeta の型に合わせる）
     const normalizedPhase = normalizePhase(msPhaseRaw);
     const normalizedSpinLoop = normalizeSpinLoop(msSpinLoopRaw);
     const normalizedSpinStep = normalizeSpinStep(msSpinStepRaw);
     const normalizedIntentLayer = normalizeIntentLayer(msIntentLayerRaw);
+    const normalizedDescentGate = normalizeDescentGate(msDescentGateRaw);
 
     if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
       console.log('[IROS/STATE] loaded MemoryState', {
@@ -123,7 +143,7 @@ export async function loadBaseMetaFromMemoryState(args: {
         hLevel: memoryState?.hLevel ?? null,
         spinLoop: msSpinLoopRaw ?? null,
         spinStep: msSpinStepRaw ?? null,
-        descentGate: msAny?.descentGate ?? msAny?.descent_gate ?? null,
+        descentGate: msDescentGateRaw ?? null,
       });
     }
 
@@ -163,6 +183,28 @@ export async function loadBaseMetaFromMemoryState(args: {
         : normalizedSpinStep !== null
           ? { spinStep: normalizedSpinStep }
           : {}),
+
+      // ✅ descentGate：baseMeta 側に無いときだけ補完（正規化済み）
+      ...(!(mergedBaseMeta as any)?.descentGate && normalizedDescentGate
+        ? { descentGate: normalizedDescentGate }
+        : {}),
+
+      // ✅ rotationState：下流の取りこぼし防止（hasRotationState を true にする橋渡し）
+      ...(typeof (mergedBaseMeta as any)?.rotationState === 'object' &&
+      (mergedBaseMeta as any).rotationState
+        ? {}
+        : {
+            rotationState: {
+              spinLoop:
+                (mergedBaseMeta as any)?.spinLoop ?? normalizedSpinLoop ?? null,
+              spinStep:
+                typeof (mergedBaseMeta as any)?.spinStep === 'number'
+                  ? (mergedBaseMeta as any).spinStep
+                  : normalizedSpinStep ?? null,
+              descentGate:
+                (mergedBaseMeta as any)?.descentGate ?? normalizedDescentGate ?? null,
+            },
+          }),
 
       // selfAcceptance は baseMeta に無い場合のみ補完
       ...(!hasBaseSA && typeof memoryState.selfAcceptance === 'number'

@@ -13,6 +13,8 @@ import {
 import { generateIrosReply } from '@/lib/iros/generate';
 import type { IrosMeta, Depth, QCode } from '@/lib/iros/system';
 
+
+
 function json(data: any, init?: number | ResponseInit) {
   const status =
     typeof init === 'number'
@@ -28,6 +30,22 @@ function json(data: any, init?: number | ResponseInit) {
 }
 
 export async function POST(req: NextRequest) {
+  const DISABLED = true; // ✅ いま未使用なら true（将来使うとき false）
+
+  if (DISABLED) {
+    return json(
+      {
+        ok: false,
+        error: 'disabled',
+        detail: 'future-seed route is currently not in use',
+      },
+      404,
+    );
+  }
+
+  // =============================
+  // ✅ 以下、将来復活用（DISABLED=false のときだけ動く）
+  // =============================
   try {
     // --- 認証 ---
     const auth = await verifyFirebaseAndAuthorize(req as any);
@@ -43,8 +61,7 @@ export async function POST(req: NextRequest) {
 
     const rawText: string = String(body.text ?? body.message ?? '').trim();
     const baseText =
-      rawText ||
-      'いまの私の流れと、これから数ヶ月の未来Seedを教えてください。';
+      rawText || 'いまの私の流れと、これから数ヶ月の未来Seedを教えてください。';
 
     const user_code: string | null =
       (body.user_code as string | undefined) ??

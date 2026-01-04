@@ -76,16 +76,36 @@ function extractCore(meta: MetaLike | null, text: string): string {
   return '';
 }
 
+/* ============================
+   SUN / BLOCK 判定
+============================ */
+
 const SUN_WORDS = ['成長', '進化', '希望', '歓喜'];
+
+// 明示的な「太陽 / SUN」宣言も SUN 扱い
+const SUN_EXPLICIT_RE =
+  /(太陽\s*SUN|SUN\s*固定|SUN\s*に\s*する|北極星\s*(?:に|を)?\s*(?:固定|する)?)/i;
+
 const BLOCK_WORDS = ['怖い', '止まる', 'やめたい', '無理', '逃げたい'];
 
 function hasSun(text: string): boolean {
-  return SUN_WORDS.some(w => text.includes(w));
+  const t = String(text ?? '').trim();
+  if (!t) return false;
+
+  // 明示的 SUN 指定
+  if (SUN_EXPLICIT_RE.test(t)) return true;
+
+  // 抽象ワードによる判定
+  return SUN_WORDS.some(w => t.includes(w));
 }
 
 function hasBlock(text: string): boolean {
   return BLOCK_WORDS.some(w => text.includes(w));
 }
+
+/* ============================
+   宣言検出
+============================ */
 
 const DECLARE_RE = /(決めた|やる|続ける|進む|選ぶ)/;
 
@@ -96,6 +116,7 @@ function hasDeclaration(text: string): boolean {
 function hasAffirm(text: string): boolean {
   return /(はい|うん|そう|分かった|了解)/.test(text);
 }
+
 
 /* ============================================================
    メイン：ITトリガー

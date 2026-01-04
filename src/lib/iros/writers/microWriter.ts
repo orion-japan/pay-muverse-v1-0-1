@@ -108,7 +108,7 @@ export async function runMicroWriter(
   const core = userText.replace(/[?？]/g, '').replace(/\s+/g, '').trim();
   const isTiredMicro = /^(疲れた|休みたい|しんどい|つらい|無理|眠い)$/.test(core);
 
-  const system = `
+  const systemPrompt: string = `
 あなたは iros の「Micro Writer」。
 目的：短い入力に対して、“くどくない短文（1〜2行）”で返す。
 この応答は深い分析や制御ロジックの代替ではなく、会話の「間」を作る。
@@ -121,11 +121,20 @@ export async function runMicroWriter(
 - 質問は最大1つまで（必要なら最後に短く）
 - 絵文字は使ってよい（🪔は可）。ただし最大1個まで（それ以外は使わない）
 
+【テンプレ禁止（厳守）】
+- 「了解」「わかった」「承知」「OK」など“受領だけ”で終えない
+- 「大丈夫」「問題ない」だけで終えない
+- “定型の一言”に逃げない（入力依存の語を必ず含める）
+
+【入力から1語拾う（必須）】
+- 入力文から単語を1つだけ拾って、返答に自然に混ぜる（引用符は不要）
+- その単語は「整える/今日は/何から」などでもよい（とにかく入力由来であること）
+
 【ゆらぎ】
 - seed=${seed} を言い回しの軽い揺らぎに使う（毎回同じ言い方にしない）
 `.trim();
 
-  const prompt = `
+  const prompt: string = `
 入力: ${userText}
 
 トーン指示:
@@ -136,7 +145,7 @@ export async function runMicroWriter(
 
   try {
     const raw = await generate({
-      system,
+      system: systemPrompt,
       prompt,
       // 短文を崩さず、固定化もしすぎない
       temperature: 0.7,

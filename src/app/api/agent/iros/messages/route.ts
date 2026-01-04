@@ -161,14 +161,14 @@ type LlmMsg = {
 
 // ✅ iros の single source（混線/上書き防止）
 // - sofia_conversations / conversations は完全に排除
-const CONV_TABLES = [
-  'iros_conversations',
-  'public.iros_conversations',
-] as const;
+const CONV_TABLES = ['iros_conversations', 'public.iros_conversations'] as const;
 
-// ✅ iros の single source（混線/上書き防止）
-// - sofia_messages / messages は完全に排除
+// ✅ 読み取りは view 優先（“本文 text の確定” を最優先）
 const MSG_TABLES = [
+  'v_iros_messages',
+  'iros_messages_ui',
+  'iros_messages_normalized',
+  // fallback（テーブル直）
   'iros_messages',
   'public.iros_messages',
 ] as const;
@@ -271,7 +271,7 @@ export async function GET(req: NextRequest) {
 
     const supabase = sb();
 
-    // (C) Conversation owner check
+    // (C) Conversation owner check  ✅ FIX: 失敗/未取得のときはここで止める（漏洩防止）
     const tConv = process.hrtime.bigint();
     const conv = await trySelect<{ id: string; user_code?: string | null }>(
       supabase,
@@ -279,36 +279,147 @@ export async function GET(req: NextRequest) {
       { '*': 'id,user_code' },
       (q) => q.eq('id', cid).limit(1),
     );
+
+    const convRow = conv.ok ? (conv as any).data?.[0] ?? null : null;
+
     console.log('[IROS/messages][GET] conv select', {
       ms: msSince(tConv),
       ok: conv.ok,
       table: (conv as any).table,
+      hasRow: !!convRow,
     });
 
-    // owner mismatch は「存在可否を隠す」目的で ok:true + 空配列
-    if (conv.ok && (conv as any).data?.[0]) {
-      const owner = String((conv as any).data[0].user_code ?? '');
-      if (owner && owner !== userCode) {
-        return json(
-          {
-            ok: true,
-            messages: [],
-            llm_messages: [],
-            note: 'forbidden_owner_mismatch',
-          },
-          200,
-        );
-      }
+    // ✅ conv が取れない（select失敗/行なし）場合：
+    // - 「存在可否を隠す」方針で ok:true + 空配列で返す（= messages select に進まない）
+    if (!conv.ok || !convRow) {
+      return json(
+        {
+          ok: true,
+          messages: [],
+          llm_messages: [],
+          note: !conv.ok ? 'conv_select_failed_all_candidates' : 'conversation_not_found',
+        },
+        200,
+      );
+    }
+
+    // ✅ owner mismatch も同様に「存在可否を隠す」目的で ok:true + 空配列
+    const owner = String(convRow.user_code ?? '');
+    if (owner && owner !== userCode) {
+      return json(
+        {
+          ok: true,
+          messages: [],
+          llm_messages: [],
+          note: 'forbidden_owner_mismatch',
+        },
+        200,
+      );
     }
 
     // (D) Messages select
-    const columnsBaseForIros =
-      'id,conversation_id,user_code,role,content,text,q_code,depth_stage,intent_layer,color,created_at,ts,streak_q,streak_len,qtu_from';
+    const columnsForV = includeMeta
+      ? [
+          'message_id',
+          'conversation_id',
+          'user_code',
+          'role',
+          'text',
+          'created_at',
+          'sa',
+          'polarity',
+          'tension',
+          'warmth',
+          'clarity',
+          'q_primary',
+          'q_secondary',
+          'q_mix_ratio',
+          'layer',
+          'phase',
+          'intention_axis',
+          'analysis',
+          'exploration',
+        ].join(',')
+      : ['message_id', 'conversation_id', 'user_code', 'role', 'text', 'created_at'].join(',');
+
+    const columnsForUI = [
+      'id',
+      'conversation_id',
+      'user_code',
+      'role',
+      'text',
+      'created_at',
+    ].join(',');
+
+    const columnsForNormalized = includeMeta
+      ? [
+          'id',
+          'conversation_id',
+          'user_code',
+          'role',
+          'content',
+          'meta',
+          'created_at',
+          'ts',
+          'q_code',
+          'color',
+        ].join(',')
+      : [
+          'id',
+          'conversation_id',
+          'user_code',
+          'role',
+          'content',
+          'created_at',
+          'ts',
+          'q_code',
+          'color',
+        ].join(',');
+
+    const columnsForTable = includeMeta
+      ? [
+          'id',
+          'conversation_id',
+          'user_code',
+          'role',
+          'content',
+          'text',
+          'q_code',
+          'depth_stage',
+          'intent_layer',
+          'color',
+          'created_at',
+          'ts',
+          'streak_q',
+          'streak_len',
+          'qtu_from',
+          'meta',
+        ].join(',')
+      : [
+          'id',
+          'conversation_id',
+          'user_code',
+          'role',
+          'content',
+          'text',
+          'q_code',
+          'depth_stage',
+          'intent_layer',
+          'color',
+          'created_at',
+          'ts',
+          'streak_q',
+          'streak_len',
+          'qtu_from',
+        ].join(',');
 
     const columnsByTable: Record<string, string> = {
-      iros_messages: includeMeta ? `${columnsBaseForIros},meta` : columnsBaseForIros,
-      'public.iros_messages': includeMeta ? `${columnsBaseForIros},meta` : columnsBaseForIros,
-      '*': includeMeta ? `${columnsBaseForIros},meta` : columnsBaseForIros,
+      v_iros_messages: columnsForV,
+      iros_messages_ui: columnsForUI,
+      iros_messages_normalized: columnsForNormalized,
+      iros_messages: columnsForTable,
+      'public.iros_messages': columnsForTable,
+      '*': columnsForTable,
     };
 
     const tSel = process.hrtime.bigint();
@@ -316,11 +427,13 @@ export async function GET(req: NextRequest) {
       supabase,
       MSG_TABLES,
       columnsByTable,
-      (q) =>
-        q.eq('conversation_id', cid)
-          .order('created_at', { ascending: false })
-          .limit(limit),
+      (q) => {
+        const base = q.eq('conversation_id', cid);
+        // order は列が揃ってる created_at を優先（view も持ってる）
+        return base.order('created_at', { ascending: false }).limit(limit);
+      },
     );
+
     console.log('[IROS/messages][GET] msg select', {
       ms: msSince(tSel),
       ok: res.ok,
@@ -353,19 +466,28 @@ export async function GET(req: NextRequest) {
 
     filtered.reverse();
 
-    const messages: OutMsg[] = filtered.map((m: any) => ({
-      id: String(m.id),
-      conversation_id: String(m.conversation_id),
-      role: m.role === 'assistant' ? 'assistant' : 'user',
-      content: (m.content ?? m.text ?? '').toString(),
-      user_code: m.user_code ?? undefined,
-      created_at: m.created_at ?? null,
-      q: m.q_code ?? undefined,
-      color: m.color ?? undefined,
-      depth_stage: m.depth_stage ?? null,
-      intent_layer: m.intent_layer ?? null,
-      meta: includeMeta ? m.meta ?? undefined : undefined,
-    }));
+    const messages: OutMsg[] = filtered.map((m: any) => {
+      // view の場合 message_id が主キー、UI view の場合 id、テーブルの場合 id
+      const idVal = m.message_id ?? m.id ?? '';
+      const contentVal = (m.text ?? m.content ?? '').toString();
+
+      // q は v_iros_messages の q_primary を優先、無ければ q_code
+      const qAny = (m.q_primary ?? m.q_code ?? null) as any;
+
+      return {
+        id: String(idVal),
+        conversation_id: String(m.conversation_id),
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: contentVal,
+        user_code: m.user_code ?? undefined,
+        created_at: m.created_at ?? null,
+        q: qAny ?? undefined,
+        color: m.color ?? undefined,
+        depth_stage: m.depth_stage ?? null,
+        intent_layer: m.intent_layer ?? null,
+        meta: includeMeta ? (m.meta ?? undefined) : undefined,
+      };
+    });
 
     const llmLimitRaw = req.nextUrl.searchParams.get('llm_limit');
     const llmLimit = (() => {
@@ -380,11 +502,22 @@ export async function GET(req: NextRequest) {
       content: m.content,
     }));
 
-    console.log('[IROS/messages][GET] done', { ms: msSince(t0), count: messages.length });
-    return json({ ok: true, messages, llm_messages, includeMeta }, 200);
+    console.log('[IROS/messages][GET] done', {
+      ms: msSince(t0),
+      count: messages.length,
+      source: (res as any).table,
+    });
+
+    return json(
+      { ok: true, messages, llm_messages, includeMeta, source: (res as any).table },
+      200,
+    );
   } catch (e: any) {
     const ms = msSince(t0);
-    console.error('[IROS/messages][GET] exception', { ms, message: String(e?.message ?? e) });
+    console.error('[IROS/messages][GET] exception', {
+      ms,
+      message: String(e?.message ?? e),
+    });
     return json(
       {
         ok: false,
@@ -450,37 +583,37 @@ export async function POST(req: NextRequest) {
       );
     }
 
-// (B) Body
-let body: any = {};
-try {
-  body = await req.json();
-} catch {}
+    // (B) Body
+    let body: any = {};
+    try {
+      body = await req.json();
+    } catch {}
 
-const conversation_id: string = String(
-  body?.conversation_id || body?.conversationId || '',
-).trim();
+    const conversation_id: string = String(
+      body?.conversation_id || body?.conversationId || '',
+    ).trim();
 
-const role: 'user' | 'assistant' =
-  String(body?.role ?? '').toLowerCase() === 'assistant' ? 'assistant' : 'user';
+    const role: 'user' | 'assistant' =
+      String(body?.role ?? '').toLowerCase() === 'assistant' ? 'assistant' : 'user';
 
-const rawText: string = String(body?.text ?? body?.content ?? '');
+    const rawText: string = String(body?.text ?? body?.content ?? '');
 
-// ✅ single-writer: /messages は user だけ保存。assistant は絶対保存しない。
-if (role === 'assistant') {
-  console.log('[IROS/messages][POST] hard-skip assistant persist (single-writer)', {
-    conversation_id,
-  });
+    // ✅ single-writer: /messages は user だけ保存。assistant は絶対保存しない。
+    if (role === 'assistant') {
+      console.log('[IROS/messages][POST] hard-skip assistant persist (single-writer)', {
+        conversation_id,
+      });
 
-  return NextResponse.json({
-    ok: true,
-    skipped: true,
-    reason: 'ASSISTANT_ROLE_NEVER_PERSISTED_SINGLE_WRITER',
-  });
-}
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        reason: 'ASSISTANT_ROLE_NEVER_PERSISTED_SINGLE_WRITER',
+      });
+    }
 
-if (!rawText || !String(rawText).trim()) {
-  return json({ ok: false, error: 'text_empty', error_code: 'text_empty' }, 400);
-}
+    if (!rawText || !String(rawText).trim()) {
+      return json({ ok: false, error: 'text_empty', error_code: 'text_empty' }, 400);
+    }
 
     // (C) NextStep choiceId 抽出（user のときだけ採用）
     const extracted =
@@ -544,7 +677,6 @@ if (!rawText || !String(rawText).trim()) {
               null,
           }
         : null;
-
 
     // ✅ 追加：押したボタンの “効くmeta” を保存（renderMode/itTarget/requestedDepth...）
     const pickedMeta = picked && typeof picked === 'object' ? (picked as any).meta ?? null : null;
@@ -732,7 +864,8 @@ if (!rawText || !String(rawText).trim()) {
           phase: toNonEmptyTrimmedString((data as any).phase) ?? null,
           spin_loop: toNonEmptyTrimmedString((data as any).spin_loop) ?? null,
           spin_step:
-            typeof (data as any).spin_step === 'number' && Number.isFinite((data as any).spin_step)
+            typeof (data as any).spin_step === 'number' &&
+            Number.isFinite((data as any).spin_step)
               ? (data as any).spin_step
               : null,
           descent_gate: toNonEmptyTrimmedString((data as any).descent_gate) ?? null,
@@ -780,19 +913,19 @@ if (!rawText || !String(rawText).trim()) {
       typeof qtu?.streakLength === 'number' && Number.isFinite(qtu.streakLength)
         ? Math.max(0, Math.floor(qtu.streakLength))
         : seed.streak_len != null
-          ? seed.streak_len
-          : q_code_final
-            ? 1
-            : null;
+        ? seed.streak_len
+        : q_code_final
+        ? 1
+        : null;
 
     const qtuFrom: string | null =
       typeof qtu?.from === 'string' && qtu.from.trim().length > 0
         ? qtu.from.trim()
         : (meta as any)?.qTraceUpdated
-          ? 'qTraceUpdated'
-          : qtu
-            ? 'qTrace'
-            : seed.qtu_from ?? null;
+        ? 'qTraceUpdated'
+        : qtu
+        ? 'qTrace'
+        : seed.qtu_from ?? null;
 
     // ✅ FIX: seed（MemoryState由来）と矛盾しないように補正
     // - 同じQのときだけ
@@ -823,7 +956,6 @@ if (!rawText || !String(rawText).trim()) {
       }
     }
 
-
     /* =========================================================
      * (J) insert row base
      * ========================================================= */
@@ -851,7 +983,7 @@ if (!rawText || !String(rawText).trim()) {
      * (K) insert（候補テーブル順に試す）
      * - ✅ iros / public.iros のみ
      * ========================================================= */
-    for (const table of MSG_TABLES) {
+    for (const table of ['iros_messages', 'public.iros_messages'] as const) {
       const tIns = process.hrtime.bigint();
 
       const row = {

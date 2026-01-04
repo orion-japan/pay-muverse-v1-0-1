@@ -1,142 +1,70 @@
 // src/lib/iros/server/persistAssistantMessageToIrosMessages.ts
-// iros_messages に assistant 発話を保存する最小ユーティリティ（route.ts 用）
-//
-// ✅ 方針（確定）
-// - この関数が呼ばれたら「空でない限り必ず insert」する（ここで gate しない）
-// - gate/呼ぶ呼ばないの判断は呼び出し側（/reply/route.ts）に寄せる
-// - 失敗は握りつぶさず ok:false で返す（= 保存できてないのに成功扱いをしない）
-
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-type PersistParams = {
+export async function persistAssistantMessageToIrosMessages(args: {
   supabase: SupabaseClient;
   conversationId: string;
   userCode: string;
   content: string;
-  meta?: any;
-};
+  meta: any; // ★ route.ts が組んだ meta を必須にする（single-writer保証鍵）
+}) {
+  const supabase = args.supabase;
+  const conversationId = String(args.conversationId ?? '').trim();
+  const userCode = String(args.userCode ?? '').trim();
+  const content = String(args.content ?? '').trimEnd();
+  const meta = args.meta ?? null;
 
-type PersistResult =
-  | { ok: true; id: number; msg_uuid?: string | null; skipped?: false }
-  | { ok: true; skipped: true; reason: string }
-  | { ok: false; error: string; detail?: string };
+  // =========================
+  // ✅ single-writer guard
+  // - route.ts からの呼び出しのみ許可
+  // =========================
+  const persistedByRoute =
+    meta?.extra?.persistedByRoute === true &&
+    meta?.extra?.persistAssistantMessage === false;
 
-function pickString(...vals: any[]): string | null {
-  for (const v of vals) {
-    if (typeof v === 'string' && v.trim().length > 0) return v.trim();
+  if (!persistedByRoute) {
+    console.error('[IROS/persistAssistantMessageToIrosMessages] BLOCKED (not route writer)', {
+      conversationId,
+      userCode,
+      hasMeta: Boolean(meta),
+      metaExtraKeys: meta?.extra ? Object.keys(meta.extra) : [],
+    });
+
+    return {
+      ok: false,
+      inserted: false,
+      blocked: true,
+      reason: 'SINGLE_WRITER_GUARD_BLOCKED',
+    };
   }
-  return null;
-}
-
-function normalizeText(v: any): string {
-  return String(v ?? '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .trim();
-}
-
-function pickQ(meta: any): string | null {
-  return pickString(
-    meta?.qCode,
-    meta?.q_code,
-    meta?.q,
-    meta?.unified?.q?.current,
-    meta?.unified?.q?.now,
-  );
-}
-
-function pickPhase(meta: any): string | null {
-  return pickString(meta?.phase, meta?.unified?.phase);
-}
-
-function pickDepth(meta: any): string | null {
-  return pickString(meta?.depth, meta?.depth_stage, meta?.unified?.depth?.stage);
-}
-
-function pickIntentLayer(meta: any): string | null {
-  return pickString(
-    meta?.intentLayer,
-    meta?.intent_layer,
-    meta?.unified?.intentLayer,
-    meta?.intentLine?.focusLayer,
-    meta?.intent_line?.focusLayer,
-  );
-}
-
-function pickQPrimary(meta: any): string | null {
-  return pickString(meta?.q_primary, meta?.qPrimary, meta?.unified?.q_primary);
-}
-
-/**
- * assistant メッセージを iros_messages に保存する
- * - ✅ この関数内では gate しない（呼ばれたら保存する）
- * - 空本文はエラーにせず skipped 扱い（沈黙ターン等で落とさない）
- */
-export async function persistAssistantMessageToIrosMessages(
-  params: PersistParams,
-): Promise<PersistResult> {
-  const { supabase } = params;
-
-  const conversationId = String(params.conversationId ?? '').trim();
-  const userCode = String(params.userCode ?? '').trim();
 
   if (!conversationId || !userCode) {
-    return {
-      ok: false,
-      error: 'bad_params',
-      detail: 'conversationId and userCode are required',
-    };
+    return { ok: false, inserted: false, blocked: false, reason: 'BAD_ARGS' };
   }
 
-  const text = normalizeText(params.content);
-
-  // ✅ 空本文はエラーではなく「保存不要」で返す（沈黙ターン等）
-  if (!text) {
-    return { ok: true, skipped: true, reason: 'empty_content' };
+  // 空本文は保存しない（SILENCE等）
+  if (!content || content.trim().length === 0) {
+    return { ok: true, inserted: false, blocked: false, reason: 'EMPTY_CONTENT' };
   }
 
-  const meta = params.meta ?? null;
-
-  // 付帯情報（任意）
-  const q_code = pickQ(meta);
-  const phase = pickPhase(meta);
-  const depth_stage = pickDepth(meta);
-  const intent_layer = pickIntentLayer(meta);
-  const q_primary = pickQPrimary(meta);
-
-  const payload: Record<string, any> = {
+  const row = {
     conversation_id: conversationId,
     role: 'assistant',
-    content: text,
-    user_code: userCode,
-    meta,
+    content: content,
+    text: content,
+    meta: meta,
+    user_code: userCode, // ← もし列が無いならここは削除（あなたのschema次第）
   };
 
-  // 任意カラム（存在してるものだけ入れる運用：DB定義に合わせてOK）
-  if (q_code) payload.q_code = q_code;
-  if (phase) payload.phase = phase;
-  if (depth_stage) payload.depth_stage = depth_stage;
-  if (intent_layer) payload.intent_layer = intent_layer;
-  if (q_primary) payload.q_primary = q_primary;
-
-  const { data, error } = await supabase
-    .from('iros_messages')
-    .insert(payload)
-    .select('id, msg_uuid')
-    .single();
-
+  const { error } = await supabase.from('iros_messages').insert([row]);
   if (error) {
-    return {
-      ok: false,
-      error: 'db_insert_failed',
-      detail: `${error.code ?? ''} ${error.message ?? String(error)}`.trim(),
-    };
+    console.error('[IROS/persistAssistantMessageToIrosMessages] insert error', {
+      conversationId,
+      userCode,
+      error,
+    });
+    return { ok: false, inserted: false, blocked: false, reason: 'DB_ERROR', error };
   }
 
-  return {
-    ok: true,
-    id: Number((data as any)?.id),
-    msg_uuid: (data as any)?.msg_uuid ?? null,
-    skipped: false,
-  };
+  return { ok: true, inserted: true, blocked: false };
 }

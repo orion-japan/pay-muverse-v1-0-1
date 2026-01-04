@@ -1,7 +1,7 @@
 // file: src/lib/iros/orchestrator.ts
 // Iros Orchestrator — Will Engine（Goal / Priority）+ Continuity Engine 統合版
-// - 分割済みモジュール（A/C/D/E/I/J + Soul）を束ねる最終版
-// - 重要：挙動は変えない（metaの補完順・確定順・保存ルールを維持）
+// ✅ V2方針：Orchestrator は「判断（meta確定）」のみ。本文生成（LLM）は一切しない。
+// - 本文は handleIrosReply 側の render-v2（itWriter含む）が唯一の生成者。
 
 import {
   type IrosMode,
@@ -14,9 +14,9 @@ import {
   QCODE_VALUES,
 } from './system';
 
-import { generateIrosReply, type GenerateResult } from './generate';
 import { clampSelfAcceptance } from './orchestratorMeaning';
 import { computeSpinState } from './orchestratorSpin';
+import { buildNormalChatSlotPlan } from './slotPlans/normalChat';
 
 // 解析フェーズ（Unified / depth / Q / SA / YH / IntentLine / T層）
 import {
@@ -30,9 +30,6 @@ import {
   type IrosGoalType,
   type IrosPriorityType,
 } from './orchestratorWill';
-
-// 診断ヘッダー除去
-import { stripDiagnosticHeader } from './orchestratorPresentation';
 
 // モード決定（mirror / vision / diagnosis）
 import { applyModeToMeta } from './orchestratorMode';
@@ -74,39 +71,39 @@ const FORCE_I_LAYER =
   typeof process !== 'undefined' &&
   process.env.IROS_FORCE_I_LAYER === '1';
 
-  export type IrosOrchestratorArgs = {
-    conversationId?: string;
-    text: string;
+export type IrosOrchestratorArgs = {
+  conversationId?: string;
+  text: string;
 
-    requestedMode?: IrosMode;
-    requestedDepth?: Depth;
-    requestedQCode?: QCode;
+  requestedMode?: IrosMode;
+  requestedDepth?: Depth;
+  requestedQCode?: QCode;
 
-    baseMeta?: Partial<IrosMeta>;
+  baseMeta?: Partial<IrosMeta>;
 
-    /** ★ この会話の最初のターンかどうか（reply/route.ts から渡す） */
-    isFirstTurn?: boolean;
+  /** ★ この会話の最初のターンかどうか（reply/route.ts から渡す） */
+  isFirstTurn?: boolean;
 
-    /** ★ MemoryState 読み書き用：user_code */
-    userCode?: string;
+  /** ★ MemoryState 読み書き用：user_code */
+  userCode?: string;
 
-    // ✅ 追加：supabase client（変数名は sb で固定）
-    sb: any;
+  // ✅ 追加：supabase client（変数名は sb で固定）
+  sb: any;
 
-    /** ★ v. iros user_profile の行データ（任意） */
-    userProfile?: Record<string, any> | null;
+  /** ★ v. iros user_profile の行データ（任意） */
+  userProfile?: Record<string, any> | null;
 
-    /** ★ 口調スタイル（route / handleIrosReply から渡す） */
-    style?: IrosStyle | string | null;
+  /** ★ 口調スタイル（route / handleIrosReply から渡す） */
+  style?: IrosStyle | string | null;
 
-    /** ✅ NEW: LLM / ITDemoGate / repeat 用の履歴（handleIrosReply 側で渡せる） */
-    history?: unknown[];
-  };
-
+  /** ✅ NEW: ITDemoGate / repeat 用の履歴（handleIrosReply 側で渡せる） */
+  history?: unknown[];
+};
 
 // ==== Orchestrator から返す結果 ==== //
+// ✅ V2では content は render-v2 が作る。Orchestrator は空文字を返す（互換のため保持）
 export type IrosOrchestratorResult = {
-  content: string;
+  content: string; // V2では "" を返す
   meta: IrosMeta;
 };
 
@@ -152,9 +149,8 @@ export async function runIrosTurn(
   args: IrosOrchestratorArgs,
 ): Promise<IrosOrchestratorResult> {
   const {
-    conversationId,
     text,
-    sb, // ★ 追加
+    sb,
     requestedMode,
     requestedDepth,
     requestedQCode,
@@ -170,14 +166,13 @@ export async function runIrosTurn(
   // A) BaseMeta / Memory / Continuity 準備
   // ----------------------------------------------------------------
   const base = await resolveBaseMeta({
-    sb, // ★ これを追加（runIrosTurn のスコープに sb がある前提）
+    sb,
     userCode,
     baseMeta,
     style,
     normalizeDepthStrict,
     normalizeQCode,
   });
-
 
   const mergedBaseMeta: Partial<IrosMeta> = base.mergedBaseMeta;
   const memoryState: unknown = base.memoryState;
@@ -206,71 +201,67 @@ export async function runIrosTurn(
   const normalizedDepth = normalizeDepthStrict(initialDepth);
   const normalizedQCode = normalizeQCode(initialQCode);
 
-// ----------------------------------------------------------------
-// 3. 解析フェーズ（Unified / depth / Q / SA / YH / IntentLine / T層）
-// ----------------------------------------------------------------
-const analysis: OrchestratorAnalysisResult = await runOrchestratorAnalysis({
-  text,
-  requestedDepth: normalizedDepth,
-  requestedQCode: normalizedQCode,
-  baseMeta: mergedBaseMeta,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  memoryState: memoryState as any,
-  isFirstTurn: !!isFirstTurn,
-});
+  // ----------------------------------------------------------------
+  // 3. 解析フェーズ（Unified / depth / Q / SA / YH / IntentLine / T層）
+  // ----------------------------------------------------------------
+  const analysis: OrchestratorAnalysisResult = await runOrchestratorAnalysis({
+    text,
+    requestedDepth: normalizedDepth,
+    requestedQCode: normalizedQCode,
+    baseMeta: mergedBaseMeta,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    memoryState: memoryState as any,
+    isFirstTurn: !!isFirstTurn,
+  });
 
-// --- Iモード判定（ここで一度だけ） ---
-const iMode = detectIMode({
-  text,
-  force: false, // 将来 UI から切り替え可能
-});
+  // --- Iモード判定（ここで一度だけ） ---
+  const iMode = detectIMode({
+    text,
+    force: false,
+  });
 
-// --------------------------------------------------
-// 解析結果の展開
-// --------------------------------------------------
-let {
-  depth,
-  qCode: resolvedQCode,
-  selfAcceptanceLine,
-  unified,
-  yLevel,
-  hLevel,
-  intentLine,
-  tLayerHint,
-  hasFutureMemory,
-  qTrace,
-  tLayerModeActive,
-} = analysis;
+  // --------------------------------------------------
+  // 解析結果の展開
+  // --------------------------------------------------
+  let {
+    depth,
+    qCode: resolvedQCode,
+    selfAcceptanceLine,
+    unified,
+    yLevel,
+    hLevel,
+    intentLine,
+    tLayerHint,
+    hasFutureMemory,
+    qTrace,
+    tLayerModeActive,
+  } = analysis;
 
-// -------------------------------
-// Iモード時の上書き（※深度は変えない）
-// -------------------------------
-if (iMode.enabled) {
-  // 深度・Q は維持したまま
-  // 表現レイヤーのみ I モードに切り替える
-  (analysis as any).renderVoice = 'I';
-  (analysis as any).intentLock = true;
+  // -------------------------------
+  // Iモード時の上書き（※深度は変えない）
+  // -------------------------------
+  if (iMode.enabled) {
+    (analysis as any).renderVoice = 'I';
+    (analysis as any).intentLock = true;
 
-  // 明示的に「T層ではない」ことを保証
-  tLayerHint = null;
-  hasFutureMemory = false;
-}
+    // 明示的に「T層ではない」ことを保証
+    tLayerHint = null;
+    hasFutureMemory = false;
+  }
 
-// -------------------------------
-// 正規化
-// -------------------------------
-const normalizedTLayer: TLayer | null =
-  tLayerHint === 'T1' || tLayerHint === 'T2' || tLayerHint === 'T3'
-    ? (tLayerHint as TLayer)
-    : null;
+  // -------------------------------
+  // 正規化
+  // -------------------------------
+  const normalizedTLayer: TLayer | null =
+    tLayerHint === 'T1' || tLayerHint === 'T2' || tLayerHint === 'T3'
+      ? (tLayerHint as TLayer)
+      : null;
 
-const analyzedDepth: Depth | undefined =
-  normalizeDepthStrict(depth as Depth | undefined) ?? normalizedDepth;
-
+  const analyzedDepth: Depth | undefined =
+    normalizeDepthStrict(depth as Depth | undefined) ?? normalizedDepth;
 
   // ----------------------------------------------------------------
   // 4. meta 初期化（解析結果を反映）
-  // - depth が決まらないターンで depth_stage:null を量産しない
   // ----------------------------------------------------------------
   let meta: IrosMeta = {
     ...(mergedBaseMeta as IrosMeta),
@@ -353,19 +344,14 @@ const analyzedDepth: Depth | undefined =
     }
   }
 
-    // =========================================================
+  // =========================================================
   // [IROS_FIXED_NORTH_BLOCK] 固定北（SUN）: meta.fixedNorth のみに保持
   // - intent_anchor は「可変アンカー（Tで刺さる意図）」専用に空ける
-  // - これにより「Tで set したのに次ターンで SUN が上書き」事故を防ぐ
   // =========================================================
   {
     (meta as any).fixedNorth = FIXED_NORTH;
-
-    // ▼重要：ここでは intent_anchor を触らない（上書き禁止）
-    // (meta as any).intent_anchor = ...  ← これは消す
+    // intent_anchor は触らない（上書き禁止）
   }
-
-
 
   // ----------------------------------------------------------------
   // C) 揺らぎ×ヒステリシス → 回転ギア確定（metaに反映）
@@ -408,7 +394,6 @@ const analyzedDepth: Depth | undefined =
   {
     const vr = applyVisionTrigger({ text, meta });
     meta = vr.meta;
-    // 念のため：vision経由でS4が入っても潰す
     meta.depth = normalizeDepthStrict(meta.depth as any);
   }
 
@@ -532,10 +517,6 @@ const analyzedDepth: Depth | undefined =
       }
     }
   }
-  console.log('[IROS/IT][enter-7.75]', {
-    envDebugIt: typeof process !== 'undefined' ? process.env.DEBUG_IROS_IT : '(no process)',
-    nodeEnv: typeof process !== 'undefined' ? process.env.NODE_ENV : '(no process)',
-  });
 
   // ----------------------------------------------------------------
   // 7.75 IT Trigger（I→T の扉） + I語彙の表出許可
@@ -570,20 +551,6 @@ const analyzedDepth: Depth | undefined =
       tLayerHint: it.tLayerHint,
       tVector: it.tVector,
     });
-
-
-    if (typeof process !== 'undefined' && process.env.DEBUG_IROS_IT === '1') {
-      console.log('[IROS/IT][probe] after', {
-        ok: it.ok,
-        reason: it.reason,
-        flags: it.flags,
-        tLayerModeActive: it.tLayerModeActive,
-        tLayerHint: it.tLayerHint,
-        tVector: it.tVector,
-        iLayerForce: it.iLayerForce,
-      });
-    }
-
 
     // iLexemeForce は sticky true のみ
     (meta as any).iLexemeForce =
@@ -628,107 +595,146 @@ const analyzedDepth: Depth | undefined =
     meta = r.meta;
     goal = r.goal as any;
     priority = r.priority as any;
-    // itx は meta.intentTransition に載っている（必要なら r.itx をログで使える）
   }
 
-// ----------------------------------------------------------------
-// J) DescentGate + Frame + Slots（7.5）を切り出し
-// ----------------------------------------------------------------
-{
-  const rotationReason = String((meta as any)?.rotationState?.reason ?? '');
-  const spinStepNow =
-    typeof (meta as any).spinStep === 'number' ? (meta as any).spinStep : null;
+  // ----------------------------------------------------------------
+  // J) DescentGate + Frame + Slots（7.5）
+  // ----------------------------------------------------------------
+  {
+    const rotationReason = String((meta as any)?.rotationState?.reason ?? '');
+    const spinStepNow =
+      typeof (meta as any).spinStep === 'number' ? (meta as any).spinStep : null;
 
-  const r = applyContainerDecision({
-    text,
-    meta,
-    prevDescentGate: lastDescentGate ?? null,
-    rotationReason,
-    spinStepNow,
-    goalKind: (goal as any)?.kind ?? null,
-  });
+    const r = applyContainerDecision({
+      text,
+      meta,
+      prevDescentGate: lastDescentGate ?? null,
+      rotationReason,
+      spinStepNow,
+      goalKind: (goal as any)?.kind ?? null,
+    });
 
-  // ✅ applyContainerDecision の確定値を meta に焼き付ける（persistまで運ぶ）
-  meta = r.meta;
+    meta = r.meta;
 
-  // ★ slotPlan を WriterHints が読める形（record）に正規化
-  function toSlotRecord(v: any): Record<string, true> | null {
-    if (!v) return null;
+    // ★ slotPlan を record に正規化（WriterHints / SAFE がキーを拾える形）
+    function toSlotRecord(v: any): Record<string, true> | null {
+      if (!v) return null;
 
-    // 例: ['OBSERVE','CORE'] → { OBSERVE:true, CORE:true }
-    if (Array.isArray(v)) {
-      const rec: Record<string, true> = {};
-      for (const k of v) {
-        if (typeof k === 'string' && k.trim()) rec[k.trim()] = true;
+      if (Array.isArray(v)) {
+        const rec: Record<string, true> = {};
+        for (const k of v) {
+          if (typeof k === 'string' && k.trim()) rec[k.trim()] = true;
+        }
+        return Object.keys(rec).length ? rec : null;
       }
-      return Object.keys(rec).length ? rec : null;
+
+      if (typeof v === 'object') {
+        const rec: Record<string, true> = {};
+        for (const [k, val] of Object.entries(v)) {
+          if (typeof k === 'string' && k.trim() && val) rec[k.trim()] = true;
+        }
+        return Object.keys(rec).length ? rec : null;
+      }
+
+      return null;
     }
 
-    // 例: { OBSERVE:true, CORE:true } はそのまま
-    if (typeof v === 'object') {
-      const rec: Record<string, true> = {};
-      for (const [k, val] of Object.entries(v)) {
-        if (typeof k === 'string' && k.trim() && val) rec[k.trim()] = true;
-      }
-      return Object.keys(rec).length ? rec : null;
-    }
+// =========================================================
+// ✅ 非SILENCEの空slotPlan救済：normalChat を必ず差し込む（配列を保持）
+// - Record<string,true> に潰さない（render-v2 が本文を組めなくなる）
+// - meta.framePlan.slots は “slot objects 配列” を入れる
+// - slotPlanPolicy を meta / framePlan に必ず伝播
+// =========================================================
 
-    return null;
+const slotsRaw =
+  (r as any).slotPlan?.slots ??
+  (r as any).slotPlan ??
+  null;
+
+// slots は配列のまま扱う（toSlotRecord は使わない）
+let slotsArr: any[] | null = Array.isArray(slotsRaw) ? slotsRaw : null;
+
+// slotPlanPolicy を取得（postprocess / llmGate 用）
+const slotPlanPolicyRaw =
+  (r as any).slotPlan?.slotPlanPolicy ??
+  (r as any).slotPlanPolicy ??
+  null;
+
+let slotPlanPolicy: string | null =
+  typeof slotPlanPolicyRaw === 'string' && slotPlanPolicyRaw.trim()
+    ? slotPlanPolicyRaw.trim()
+    : null;
+
+// SILENCE 判定（このブロック内で完結させる）
+const speechAct = String((meta as any)?.speechAct ?? '').toUpperCase();
+const speechAllowLLM = (meta as any)?.speechAllowLLM;
+const isSilence = speechAct === 'SILENCE' || speechAllowLLM === false;
+
+// 非SILENCEで slots が空なら normalChat を差し込む
+if (
+  !isSilence &&
+  (!slotsArr || slotsArr.length === 0) &&
+  String(text ?? '').trim().length > 0
+) {
+  const fallback = buildNormalChatSlotPlan({ userText: text });
+
+  slotsArr = Array.isArray((fallback as any).slots)
+    ? (fallback as any).slots
+    : [];
+
+  // ✅ ここが本命：fallback を入れたなら policy も確定させる
+  const fp = (fallback as any).slotPlanPolicy;
+  if (typeof fp === 'string' && fp.trim()) {
+    slotPlanPolicy = fp.trim();
+  } else if (!slotPlanPolicy) {
+    slotPlanPolicy = 'SCAFFOLD';
   }
 
-  const slotsRaw =
-    (r as any).slotPlan?.slots ?? (r as any).slotPlan ?? null;
-
-  const slotsRec = toSlotRecord(slotsRaw);
-
-  // ★重要：generate.ts が meta.frame を消すので、確定値は framePlan に載せる
-  // - buildWriterHintsFromMeta は framePlan を最優先で拾う
-  (meta as any).framePlan = {
-    frame: (r as any).frame ?? null,
-    // ✅ ここは record で統一（extractSlotKeys がキーを取れるように）
-    slots: slotsRec,
-  };
-
-  // 互換のため meta.frame も残す（ただし generate で消える想定）
-  (meta as any).frame = (r as any).frame ?? (meta as any).frame ?? null;
-
-  // slotPlan は SAFE 判定にも使うので record で統一
-  (meta as any).slotPlan = slotsRec;
-
-  // ✅ IT/T層の根拠も meta に残す（handleIrosReply 側の frame-fix / 判定に使える）
-  if (typeof (r as any).tLayerModeActive === 'boolean') {
-    (meta as any).tLayerModeActive = (r as any).tLayerModeActive;
-  }
-  if (typeof (r as any).tLayerHint === 'string' && (r as any).tLayerHint.trim()) {
-    (meta as any).tLayerHint = (r as any).tLayerHint.trim();
-  }
-
-  console.log('[IROS/ORCH][after-container]', {
-    frame: (meta as any).frame ?? null,
-    framePlan_frame: (meta as any).framePlan?.frame ?? null,
-    descentGate: (meta as any).descentGate ?? null,
-
-    // ✅ record化したので len は keys で見る
-    slotPlanKeysLen:
-      (meta as any).slotPlan && typeof (meta as any).slotPlan === 'object'
-        ? Object.keys((meta as any).slotPlan).length
-        : null,
-  });
+  (meta as any).slotPlanFallback = 'normalChat';
 }
 
 
-  // ----------------------------------------------------------------
-  // 8. 本文生成（LLM 呼び出し）
-  // ----------------------------------------------------------------
-  const gen: GenerateResult = await generateIrosReply({
-    text,
-    meta,
-    history: Array.isArray(history) ? history : [],
-    memoryState,
-  });
 
-  let content = gen.content;
-  content = stripDiagnosticHeader(content);
+// framePlan は render-v2 が参照する唯一の正
+(meta as any).framePlan = {
+  frame: (r as any).frame ?? null,
+  slots: slotsArr,          // ✅ 配列
+  slotPlanPolicy,           // ✅ ここが本命
+};
+
+// 互換（V1 / llmGate / postprocess 用）
+(meta as any).frame =
+  (r as any).frame ?? (meta as any).frame ?? null;
+
+(meta as any).slotPlan = slotsArr;        // 配列のまま
+(meta as any).slotPlanPolicy = slotPlanPolicy;
+
+if (typeof (r as any).tLayerModeActive === 'boolean') {
+  (meta as any).tLayerModeActive = (r as any).tLayerModeActive;
+}
+if (
+  typeof (r as any).tLayerHint === 'string' &&
+  (r as any).tLayerHint.trim()
+) {
+  (meta as any).tLayerHint = (r as any).tLayerHint.trim();
+}
+
+
+    console.log('[IROS/ORCH][after-container]', {
+      frame: (meta as any).frame ?? null,
+      framePlan_frame: (meta as any).framePlan?.frame ?? null,
+      descentGate: (meta as any).descentGate ?? null,
+      slotPlanKeysLen:
+        (meta as any).slotPlan && typeof (meta as any).slotPlan === 'object'
+          ? Object.keys((meta as any).slotPlan).length
+          : null,
+    });
+  }
+
+  // ----------------------------------------------------------------
+  // ✅ V2: 本文生成はしない（render-v2 が唯一の生成者）
+  // ----------------------------------------------------------------
+  const content = '';
 
   // ----------------------------------------------------------------
   // 10. meta の最終調整：Goal.targetDepth を depth に反映
@@ -749,64 +755,6 @@ const analyzedDepth: Depth | undefined =
     depth: (resolvedDepth ?? fallbackDepth) ?? undefined,
   };
 
-// ----------------------------------------------------------------
-// 10.x T→C 遷移（行動証拠でのみ確定）
-// - IT/T層の「表示/語彙」トリガーは既存の tLayerModeActive に統一
-// - ここでは「選択ボタン等のコミット証拠」が出た時だけ、深度を C に送る
-// - 4軸が崩れないように：depth を確定→この後の unified sync / spin再計算に乗せる
-// ----------------------------------------------------------------
-function pickCommitEvidenceFromText(raw: string): { kind: 'nextStep'; id: string } | null {
-  const s = String(raw ?? '');
-
-  // 代表的な埋め込みタグ想定（UI側で混ざっても拾えるように広め）
-  // 例: [NextStep:foo] / 【NextStep:foo】 / (NextStep:foo)
-  const m =
-    s.match(/\[(?:NextStep|NEXTSTEP)\s*:\s*([^\]\n]+)\]/) ||
-    s.match(/【(?:NextStep|NEXTSTEP)\s*:\s*([^】\n]+)】/) ||
-    s.match(/\((?:NextStep|NEXTSTEP)\s*:\s*([^) \n]+)\)/);
-
-  const id = m?.[1]?.trim();
-  if (!id) return null;
-  return { kind: 'nextStep', id };
-}
-
-function isTDepth(d: any): boolean {
-  const s = typeof d === 'string' ? d.trim().toUpperCase() : '';
-  return s === 'T1' || s === 'T2' || s === 'T3';
-}
-
-{
-  const tActive = (finalMeta as any).tLayerModeActive === true;
-  const depthNow = (finalMeta as any).depth ?? null;
-
-  // “行動証拠”はテキストから拾う（UIが付与する NextStep タグを想定）
-  const commit = pickCommitEvidenceFromText(text);
-
-  // ✅ 条件：Tが立っていて、かつ “選択” があった時だけ C1 に送る
-  if (tActive && isTDepth(depthNow) && commit) {
-    // T→C の確定（最小）
-    (finalMeta as any).depth = 'C1';
-
-    // Tレーンは “確定後に解除” （sticky禁止方針）
-    (finalMeta as any).tLayerModeActive = false;
-    (finalMeta as any).tLayerHint = null;
-    (finalMeta as any).tVector = null;
-
-    // 監査用（内部）ログ
-    if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
-      // eslint-disable-next-line no-console
-      console.log('[IROS/T2C] committed', {
-        fromDepth: depthNow,
-        toDepth: (finalMeta as any).depth,
-        commit,
-      });
-    }
-  }
-}
-
-
-
-
   // 7.5で確定した “安全/器/枠” を finalMeta に確実に引き継ぐ
   (finalMeta as any).descentGate =
     (meta as any).descentGate ?? (finalMeta as any).descentGate ?? null;
@@ -816,86 +764,83 @@ function isTDepth(d: any): boolean {
   (finalMeta as any).inputKind =
     (meta as any).inputKind ?? (finalMeta as any).inputKind ?? null;
   (finalMeta as any).frame = (meta as any).frame ?? (finalMeta as any).frame ?? null;
+  (finalMeta as any).framePlan =
+    (meta as any).framePlan ?? (finalMeta as any).framePlan ?? null;
   (finalMeta as any).slotPlan =
     (meta as any).slotPlan ?? (finalMeta as any).slotPlan ?? null;
 
-  // unified.depth.stage にも同じものを流し込む（ここでもS4は残らない）
-// unified.depth.stage にも同じものを流し込む（ここでもS4は残らない）
-if ((finalMeta as any).unified) {
-  const unifiedAny = (finalMeta as any).unified || {};
-  const unifiedDepth = unifiedAny.depth || {};
-  const unifiedQ = unifiedAny.q || {};
+  // unified.depth.stage / unified.q.current 同期（S4除去済みの finalMeta に合わせる）
+  if ((finalMeta as any).unified) {
+    const unifiedAny = (finalMeta as any).unified || {};
+    const unifiedDepth = unifiedAny.depth || {};
+    const unifiedQ = unifiedAny.q || {};
 
-  // ★ finalMeta と必ず一致させる
-  const stage = (finalMeta as any).depth ?? null;
-  const qCurrent = (finalMeta as any).qCode ?? null;
-  const phase = (finalMeta as any).phase ?? null;
+    const stage = (finalMeta as any).depth ?? null;
+    const qCurrent = (finalMeta as any).qCode ?? null;
+    const phase = (finalMeta as any).phase ?? null;
 
-  (finalMeta as any).unified = {
-    ...unifiedAny,
-    depth: { ...unifiedDepth, stage },
-    q: { ...unifiedQ, current: qCurrent },
-    phase,
+    (finalMeta as any).unified = {
+      ...unifiedAny,
+      depth: { ...unifiedDepth, stage },
+      q: { ...unifiedQ, current: qCurrent },
+      phase,
 
-    // 解析確定値も unified に寄せて “取りこぼし” を防ぐ（persist側が unified 優先でも壊れない）
-    selfAcceptance:
-      typeof (finalMeta as any).selfAcceptance === 'number'
-        ? (finalMeta as any).selfAcceptance
-        : (unifiedAny as any).selfAcceptance ?? null,
-    self_acceptance:
-      typeof (finalMeta as any).selfAcceptance === 'number'
-        ? (finalMeta as any).selfAcceptance
-        : (unifiedAny as any).self_acceptance ?? null,
+      selfAcceptance:
+        typeof (finalMeta as any).selfAcceptance === 'number'
+          ? (finalMeta as any).selfAcceptance
+          : (unifiedAny as any).selfAcceptance ?? null,
+      self_acceptance:
+        typeof (finalMeta as any).selfAcceptance === 'number'
+          ? (finalMeta as any).selfAcceptance
+          : (unifiedAny as any).self_acceptance ?? null,
 
-    yLevel:
-      typeof (finalMeta as any).yLevel === 'number'
-        ? (finalMeta as any).yLevel
-        : (unifiedAny as any).yLevel ?? null,
-    hLevel:
-      typeof (finalMeta as any).hLevel === 'number'
-        ? (finalMeta as any).hLevel
-        : (unifiedAny as any).hLevel ?? null,
-  };
-}
+      yLevel:
+        typeof (finalMeta as any).yLevel === 'number'
+          ? (finalMeta as any).yLevel
+          : (unifiedAny as any).yLevel ?? null,
+      hLevel:
+        typeof (finalMeta as any).hLevel === 'number'
+          ? (finalMeta as any).hLevel
+          : (unifiedAny as any).hLevel ?? null,
+    };
+  }
 
-console.log('[IROS/META][final-sync]', {
-  meta_q: (finalMeta as any).qCode ?? null,
-  unified_q: (finalMeta as any).unified?.q?.current ?? null,
-  meta_depth: (finalMeta as any).depth ?? null,
-  unified_depth: (finalMeta as any).unified?.depth?.stage ?? null,
-});
-
-
-// ----------------------------------------------------------------
-// 10.2 Spin の最終確定（finalMeta.depth 決定後に再計算してブレを消す）
-// ----------------------------------------------------------------
-{
-  const spin = computeSpinState({
-    depthStage: (finalMeta as any).depth ?? null,
-    qCode: (finalMeta as any).qCode ?? null,
-    phase: (finalMeta as any).phase ?? null,
-    lastSpinLoop,
-    lastSpinStep,
-    lastPhase: lastPhaseForSpin,
+  console.log('[IROS/META][final-sync]', {
+    meta_q: (finalMeta as any).qCode ?? null,
+    unified_q: (finalMeta as any).unified?.q?.current ?? null,
+    meta_depth: (finalMeta as any).depth ?? null,
+    unified_depth: (finalMeta as any).unified?.depth?.stage ?? null,
   });
 
-  (finalMeta as any).spinLoop = spin.spinLoop;
-  (finalMeta as any).spinStep = spin.spinStep;
-}
+  // ----------------------------------------------------------------
+  // 10.2 Spin の最終確定（finalMeta.depth 決定後に再計算）
+  // ----------------------------------------------------------------
+  {
+    const spin = computeSpinState({
+      depthStage: (finalMeta as any).depth ?? null,
+      qCode: (finalMeta as any).qCode ?? null,
+      phase: (finalMeta as any).phase ?? null,
+      lastSpinLoop,
+      lastSpinStep,
+      lastPhase: lastPhaseForSpin,
+    });
 
-// 開発時ログ（ここで depth が見えるように）
-if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
-  // eslint-disable-next-line no-console
-  console.log('[IROS/Orchestrator] result.meta', {
-    depth: finalMeta.depth,
-    qCode: finalMeta.qCode,
-    goalKind: goal?.kind,
-    goalTargetDepth: (goal as any)?.targetDepth,
-    priorityTargetDepth: (priority as any)?.goal?.targetDepth,
-    uncoverStreak: (finalMeta as any).uncoverStreak ?? 0,
-  });
-}
+    (finalMeta as any).spinLoop = spin.spinLoop;
+    (finalMeta as any).spinStep = spin.spinStep;
+  }
 
+  // ----------------------------------------------------------------
+  // ✅ V2: “モデル生出力” はここでは絶対に作らない（追跡のため空を固定）
+  // ----------------------------------------------------------------
+  {
+    const ex =
+      typeof (finalMeta as any).extra === 'object' && (finalMeta as any).extra
+        ? (finalMeta as any).extra
+        : ((finalMeta as any).extra = {});
+
+    /* rawTextFromModel: do not blank here */
+ex.persistedBy = ex.persistedBy ?? 'route'; // 任意：single-writer の目印
+  }
 
   // ----------------------------------------------------------------
   // 11. MemoryState 保存（finalMeta ベース）
@@ -941,7 +886,7 @@ if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
   }
 
   // ----------------------------------------------------------------
-  // 12. Orchestrator 結果として返却
+  // 12. Orchestrator 結果として返却（V2：contentは空）
   // ----------------------------------------------------------------
   return {
     content,

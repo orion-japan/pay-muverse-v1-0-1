@@ -1,5 +1,9 @@
 // file: src/lib/iros/server/handleIrosReply.gates.ts
 // iros - Gates (Greeting / Micro)
+// 方針：
+// - ✅ single-writer：assistant 保存は route.ts だけが行う
+// - ✅ gates は「本文 + metaForSave を返すだけ」
+// - ❌ ここでは persistAssistantMessage を絶対に呼ばない（import もしない）
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type {
@@ -7,15 +11,16 @@ import type {
   HandleIrosReplyOutput,
 } from './handleIrosReply';
 
-// ✅ 追加：保存は persist.ts に一本化
-import { persistAssistantMessage } from './handleIrosReply.persist';
-
 export type GateBaseArgs = {
+  // NOTE: 互換のため受け取る（gates では保存しない）
   supabase: SupabaseClient;
+
   conversationId: string;
   userCode: string;
   text: string;
   userProfile?: { user_call_name?: string | null } | null;
+
+  // NOTE: 互換のため受け取る（gates では使わない）
   reqOrigin: string;
   authorizationHeader: string | null;
 };
@@ -88,19 +93,12 @@ function isMicroTurn(raw: string): boolean {
 
 /* =====================================================
    Greeting gate: 挨拶は「完全一致のみ」で返す（記憶・意図・深度に触れない）
+   - ✅ ここでは保存しない（route.ts が single-writer）
 ===================================================== */
 export async function runGreetingGate(
   args: GateBaseArgs,
 ): Promise<HandleIrosReplyOutput | null> {
-  const {
-    supabase,
-    conversationId,
-    text,
-    userCode,
-    userProfile,
-    reqOrigin,
-    authorizationHeader,
-  } = args;
+  const { conversationId, text, userCode, userProfile } = args;
 
   const greeting = normalizeTailPunct(text);
   const isGreeting = GREETINGS.has(greeting);
@@ -109,31 +107,29 @@ export async function runGreetingGate(
   const name = userProfile?.user_call_name || 'あなた';
   const assistantText = `${greeting}、${name}さん。`;
 
-  const metaForSave = {
+  const metaForSave: any = {
     mode: 'light',
     greetingOnly: true,
     skipMemory: true,
     skipTraining: true,
     nextStep: null,
     next_step: null,
+
+    // ✅ single-writer を尊重（route.ts が唯一の writer）
+    // ※ route.ts 側で persistedByRoute / persistAssistantMessage=false を最終確定する
+    extra: {
+      gate: 'GREETING',
+      persistPolicyHint: 'REPLY_SINGLE_WRITER',
+      persistAssistantMessage: false,
+    },
   };
 
-  const result = { content: assistantText, meta: metaForSave, mode: 'light' };
+  const result: any = { content: assistantText, meta: metaForSave, mode: 'light' };
 
   console.log('[IROS/GreetingGate] matched exact greeting', {
-    userCode,
-    greeting,
-  });
-
-  // ✅ 保存経路を統一（persist.ts）
-  await persistAssistantMessage({
-    supabase,
-    reqOrigin,
-    authorizationHeader,
     conversationId,
     userCode,
-    assistantText,
-    metaForSave,
+    greeting,
   });
 
   const out: HandleIrosReplySuccess = {
@@ -149,20 +145,12 @@ export async function runGreetingGate(
 
 /* =====================================================
    Micro gate: 超短文は「軽量・間の返し」で返す
+   - ✅ ここでは保存しない（route.ts が single-writer）
 ===================================================== */
 export async function runMicroGate(
   args: MicroGateArgs,
 ): Promise<HandleIrosReplyOutput | null> {
-  const {
-    supabase,
-    conversationId,
-    text,
-    userCode,
-    userProfile,
-    reqOrigin,
-    authorizationHeader,
-    traceId,
-  } = args;
+  const { conversationId, text, userCode, userProfile, traceId } = args;
 
   if (!isMicroTurn(text)) return null;
 
@@ -172,7 +160,7 @@ export async function runMicroGate(
   const isActionCore = /^(やる|やっちゃう|いく|いける|行く|行ける)$/.test(core);
   const isDecisionQuestion = /^(どうする|どうしよ|どうしよう)$/.test(core);
 
-  // 同じ入力でも“毎ターン揺らぐ”seed
+  // 同じ入力でも“毎ターン揺らぐ”seed（ただし micro は軽量なので Date.now は許容）
   const seed = `${conversationId}|${userCode}|${traceId ?? ''}|${Date.now()}`;
 
   const lead = pickVariant(seed, [
@@ -206,28 +194,31 @@ export async function runMicroGate(
 
   const assistantText = `${lead}\n${pickedOptions}\n${tail}`;
 
-  const metaForSave = {
+  const metaForSave: any = {
     mode: 'light',
     microOnly: true,
     skipMemory: true,
     skipTraining: true,
     nextStep: null,
     next_step: null,
+
+    // ✅ single-writer を尊重（route.ts が唯一の writer）
+    extra: {
+      gate: 'MICRO',
+      microCore: core,
+      microHasQuestion: hasQuestion,
+      persistPolicyHint: 'REPLY_SINGLE_WRITER',
+      persistAssistantMessage: false,
+    },
   };
 
-  const result = { content: assistantText, meta: metaForSave, mode: 'light' };
+  const result: any = { content: assistantText, meta: metaForSave, mode: 'light' };
 
-  console.log('[IROS/MicroGate] matched micro input', { userCode, text, core });
-
-  // ✅ 保存経路を統一（persist.ts）
-  await persistAssistantMessage({
-    supabase,
-    reqOrigin,
-    authorizationHeader,
+  console.log('[IROS/MicroGate] matched micro input', {
     conversationId,
     userCode,
-    assistantText,
-    metaForSave,
+    text,
+    core,
   });
 
   const out: HandleIrosReplySuccess = {

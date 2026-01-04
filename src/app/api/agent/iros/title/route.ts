@@ -57,7 +57,11 @@ export async function POST(req: NextRequest) {
     if (!userCode) return json({ ok: false, error: 'user_code_missing' }, 400);
 
     let body: any = {};
-    try { body = await req.json(); } catch { /* noop */ }
+    try {
+      body = await req.json();
+    } catch {
+      /* noop */
+    }
 
     const conversation_id: string = String(body?.conversation_id || body?.conversationId || '').trim();
     const model = String(body?.model || 'gpt-4o');
@@ -79,10 +83,10 @@ export async function POST(req: NextRequest) {
     if (String(conv.user_code) !== String(userCode))
       return json({ ok: false, error: 'forbidden_owner_mismatch' }, 403);
 
-    // 直近のメッセージを取得
+    // 直近のメッセージを取得（DBは text を正とする）
     const { data: msgs, error: msgErr } = await supabase
       .from('iros_messages')
-      .select('role,content,created_at')
+      .select('role,text,created_at')
       .eq('conversation_id', conversation_id)
       .in('role', ['user', 'assistant'])
       .order('created_at', { ascending: false })
@@ -108,13 +112,18 @@ export async function POST(req: NextRequest) {
 
     const userMsg = [
       '以下の会話ログから、要の意図を表すタイトルをひとつだけ返してください。',
-      ...history.map(m => `${m.role === 'user' ? 'ユーザー' : 'AI'}: ${String(m.content || '').replace(/\n+/g, ' ').slice(0, 600)}`),
+      ...history.map(
+        (m: any) =>
+          `${m.role === 'user' ? 'ユーザー' : 'AI'}: ${String(m.text || '')
+            .replace(/\n+/g, ' ')
+            .slice(0, 600)}`,
+      ),
     ].join('\n');
 
     const res = await fetch(CHAT_URL, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -139,6 +148,7 @@ export async function POST(req: NextRequest) {
       .replace(/[！!？?\[\]（）\(\)【】<>\-—_…・:：;；,，\.。]/g, '')
       .replace(/\s+/g, '')
       .slice(0, 14);
+
     if (title.length < 4) {
       // フォールバック
       title = (conv.title && conv.title.trim()) || '新規会話';
@@ -147,10 +157,7 @@ export async function POST(req: NextRequest) {
     // 会話に保存（列が無い環境では無視）
     try {
       const nowIso = new Date().toISOString();
-      await supabase
-        .from('iros_conversations')
-        .update({ title, updated_at: nowIso })
-        .eq('id', conversation_id);
+      await supabase.from('iros_conversations').update({ title, updated_at: nowIso }).eq('id', conversation_id);
     } catch {
       /* noop */
     }

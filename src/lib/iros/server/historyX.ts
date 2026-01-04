@@ -30,7 +30,16 @@ type MsgRow = {
   created_at: string | null;
 };
 
-const normText = (s: unknown) => String(s ?? '').replace(/\s+/g, ' ').trim();
+// ✅ 方針：跨ぎ履歴（Cross-conversation）は user のみを使う（assistant混入＝テンプレ汚染の根）
+const CROSS_CONV_USER_ONLY = true;
+
+const normText = (s: unknown) =>
+  String(s ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
 const makeKey = (role: unknown, text: unknown) => {
   const r = String(role ?? '').toLowerCase();
@@ -45,16 +54,10 @@ function isRoleUserOrAssistant(role: unknown): role is 'user' | 'assistant' {
 
 /* =========================================================
  * ✅ Silence filtering (History hygiene)
- * - DBに残っていても「履歴」に混ぜない
- * - 目的：LLMが `…。🪔` を参照して劣化しないようにする
  * ========================================================= */
 
 function normalizeDots(s: string): string {
-  return (s ?? '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .replace(/[ \t]+/g, ' ')
-    .trim();
+  return normText(s);
 }
 
 function isSilenceLikeText(text: string): boolean {
@@ -62,7 +65,6 @@ function isSilenceLikeText(text: string): boolean {
 
   if (!t) return true;
 
-  // 代表的な “沈黙” 文字列（UI/ログで混入しやすい）
   const exact = new Set([
     '…',
     '…。',
@@ -71,16 +73,13 @@ function isSilenceLikeText(text: string): boolean {
     '...',
     '....',
     '.....',
-    '…。',
     '… …',
   ]);
   if (exact.has(t)) return true;
 
-  // ほぼ記号だけ（句読点/絵文字だけ）なら沈黙扱い
-  // ※日本語の通常文が誤判定されにくいように「文字」を含むなら false
+  // 文字が無い（記号だけ）なら短いものは沈黙扱い
   const hasLetters = /[A-Za-z0-9\u3040-\u30FF\u4E00-\u9FFF]/.test(t);
   if (!hasLetters) {
-    // 記号・絵文字・句読点だけの短文は除外
     if (t.length <= 12) return true;
   }
 
@@ -90,10 +89,7 @@ function isSilenceLikeText(text: string): boolean {
 function isSilenceMeta(meta: any): boolean {
   if (!meta) return false;
 
-  // 明示フラグ優先
   if (meta?.isSilenceText === true) return true;
-
-  // 既存の沈黙系メタ（ログに出てるやつを拾う）
   if (meta?.silencePatched === true) return true;
   if (meta?.speechSkipped === true) return true;
 
@@ -108,7 +104,6 @@ function isSilenceMeta(meta: any): boolean {
       '',
   ).toUpperCase();
 
-  // 典型パターン
   if (reason.includes('SILENCE')) return true;
   if (reason.includes('NO_LLM') && reason.includes('EMPTY')) return true;
 
@@ -120,17 +115,73 @@ function isSilenceLike(text: string, meta?: any): boolean {
   return isSilenceLikeText(text);
 }
 
-/**
- * ✅ DB履歴ソース候補（まず統合ビューを優先）
- * ...
- */
+/* =========================================================
+ * ✅ Old assistant contamination filtering (History stop-bleed)
+ * - DBに残っていても「履歴」に混ぜない（旧assistant文を遮断）
+ * ========================================================= */
+
+function isHiddenFromHistory(meta: any): boolean {
+  return meta?.hiddenFromHistory === true || meta?.hidden_from_history === true;
+}
+
+// 旧assistant汚染の「核」だけ最小で持つ（必要に応じて拡張）
+const BANNED_ASSISTANT_HISTORY_PATTERNS: RegExp[] = [
+  /紙に書き出/,
+
+  // GPT一般論の典型
+  /書くことで少し整理/,
+  /整理されるかもしれません/,
+  /してみるのはどうでしょう/,
+  /少しずつ/,
+  /進めましょう/,
+
+  // ありがちな助言テンプレ（追加）
+  /〜してみてください/,
+  /すると良いでしょう/,
+  /かもしれません/,
+  /おすすめです/,
+  /まずは/,
+];
+
+function isBannedAssistantHistoryText(text: string): boolean {
+  const t = normText(text);
+  if (!t) return true;
+  for (const re of BANNED_ASSISTANT_HISTORY_PATTERNS) {
+    if (re.test(t)) return true;
+  }
+  return false;
+}
+
+function shouldExcludeFromHistory(args: {
+  role: 'user' | 'assistant';
+  content: string;
+  meta?: any;
+  crossConversation?: boolean;
+}): boolean {
+  const { role, content, meta, crossConversation } = args;
+
+  // metaで明示除外
+  if (isHiddenFromHistory(meta)) return true;
+
+  // 沈黙系は除外
+  if (isSilenceLike(content, meta)) return true;
+
+  // ✅ 跨ぎ履歴は user のみ（テンプレ汚染の根を断つ）
+  if (crossConversation && CROSS_CONV_USER_ONLY && role === 'assistant') return true;
+
+  // 旧assistant汚染（念のため）
+  if (role === 'assistant' && isBannedAssistantHistoryText(content)) return true;
+
+  return false;
+}
+
+/// ✅ DB履歴ソース候補（存在するものだけ / v_iros_messages を最優先）
 const HISTORY_TABLES = [
   'v_iros_messages',
-  'public.v_iros_messages',
-  'iros_messages',
-  'public.iros_messages',
   'iros_messages_ui',
   'iros_messages_normalized',
+  'iros_messages',
+  'public.iros_messages',
 ] as const;
 
 const SELECT_CANDIDATES = [
@@ -203,11 +254,21 @@ export async function loadRecentHistoryAcrossConversations(params: {
     .filter((r) => {
       if (!isRoleUserOrAssistant(r.role)) return false;
 
+      const role = String(r.role ?? '').toLowerCase() as 'user' | 'assistant';
       const content = normText(r.content ?? r.text);
       if (!content) return false;
 
-      // ✅ ここが追加：沈黙っぽい履歴は “跨ぎ履歴” に入れない
-      if (isSilenceLike(content, r.meta)) return false;
+      // ✅ ここ：沈黙＋hidden＋（跨ぎはassistant遮断）を適用
+      if (
+        shouldExcludeFromHistory({
+          role,
+          content,
+          meta: r.meta,
+          crossConversation: true,
+        })
+      ) {
+        return false;
+      }
 
       if (
         excludeConversationId &&
@@ -226,6 +287,7 @@ export async function loadRecentHistoryAcrossConversations(params: {
       rawCount: rows.length,
       filteredCount: filtered.length,
       excludeConversationId: excludeConversationId ?? null,
+      crossConvUserOnly: CROSS_CONV_USER_ONLY,
     });
   }
 
@@ -243,6 +305,7 @@ export async function loadRecentHistoryAcrossConversations(params: {
       meta: r.meta ?? null,
 
       text: r.text ?? null,
+      message: null,
     };
   });
 }
@@ -260,14 +323,26 @@ export function mergeHistoryForTurn(params: {
 
   // 1) DB履歴（跨ぎ）
   for (const m of dbHistory ?? []) {
+    const role = String(m?.role ?? '').toLowerCase() as 'user' | 'assistant';
+    if (role !== 'user' && role !== 'assistant') continue;
+
     const rawText = m?.content ?? m?.text ?? m?.message ?? '';
     const content = normText(rawText);
-
-    // ✅ ここが追加：DB跨ぎ履歴でも沈黙は除外
     if (!content) continue;
-    if (isSilenceLike(content, m?.meta)) continue;
 
-    const key = makeKey(m?.role, content);
+    // ✅ 跨ぎ履歴：沈黙＋hidden＋assistant遮断（ここが効く）
+    if (
+      shouldExcludeFromHistory({
+        role,
+        content,
+        meta: m?.meta,
+        crossConversation: true,
+      })
+    ) {
+      continue;
+    }
+
+    const key = makeKey(role, content);
     if (!key.endsWith('::') && !seen.has(key)) {
       seen.add(key);
 
@@ -294,17 +369,26 @@ export function mergeHistoryForTurn(params: {
     }
   }
 
-  // 2) 今会話の履歴
+  // 2) 今会話の履歴（ここは user/assistant どちらも保持：会話の整合性のため）
   for (const m of normTurn) {
-    const role = String(m?.role ?? '').toLowerCase();
+    const role = String(m?.role ?? '').toLowerCase() as 'user' | 'assistant';
     if (role !== 'user' && role !== 'assistant') continue;
 
     const rawText = m?.content ?? m?.text ?? (m as any)?.message ?? '';
     const text = normText(rawText);
     if (!text) continue;
 
-    // ✅ ここが追加：今会話側でも沈黙は除外（念のため）
-    if (isSilenceLike(text, m?.meta)) continue;
+    // ✅ 今会話側でも沈黙＋hidden＋（assistantテンプレ除外）を適用
+    if (
+      shouldExcludeFromHistory({
+        role,
+        content: text,
+        meta: m?.meta,
+        crossConversation: false,
+      })
+    ) {
+      continue;
+    }
 
     const key = makeKey(role, text);
     if (!key.endsWith('::') && !seen.has(key)) {

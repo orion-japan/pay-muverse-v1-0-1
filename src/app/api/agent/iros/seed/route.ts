@@ -12,7 +12,15 @@ import { generateIrosReply } from '@/lib/iros/generate';
  * - 入力テキストをもとに「T層モード」で Iros に未来Seedを生成させる
  * - まだ会話ログには保存せず、プレビュー的な位置づけ
  */
+
+
+
+
 export async function POST(req: NextRequest) {
+  return NextResponse.json(
+    { ok: false, error: 'disabled', detail: 'seed route is currently not in use' },
+    { status: 404 },
+  );
   try {
     // ---- 認証 ----
     const auth = await verifyFirebaseAndAuthorize(req as any);

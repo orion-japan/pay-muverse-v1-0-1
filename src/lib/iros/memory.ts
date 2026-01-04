@@ -26,7 +26,7 @@ function getSupabaseAdmin(): SupabaseClient {
 
   if (!url || !serviceRoleKey) {
     throw new Error(
-      '[IrosMemory] SUPABASE 環境変数が不足しています。NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY を確認してください。'
+      '[IrosMemory] SUPABASE 環境変数が不足しています。NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY を確認してください。',
     );
   }
 
@@ -78,14 +78,11 @@ function mapSnapshot(row: UserQNowRow | null): QSnapshot {
     };
   }
 
-  const currentQ =
-    (row.currentq ?? row.q ?? row.q_code ?? null) as QCode | null;
+  const currentQ = (row.currentq ?? row.q ?? row.q_code ?? null) as QCode | null;
 
-  const depthStage =
-    (row.depthstage ?? row.stage ?? null) as string | null;
+  const depthStage = (row.depthstage ?? row.stage ?? null) as string | null;
 
-  const updatedAt =
-    (row.updated_at ?? row.created_at ?? null) as string | null;
+  const updatedAt = (row.updated_at ?? row.created_at ?? null) as string | null;
 
   return {
     currentQ,
@@ -98,10 +95,7 @@ function mapSnapshot(row: UserQNowRow | null): QSnapshot {
  * q_code_timeline の配列とスナップショットから QTrace を構築する。
  * - rows は created_at の降順（新しい順）で渡される想定。
  */
-function buildQTraceFromRows(
-  snapshot: QSnapshot,
-  rows: QTimelineRow[]
-): QTrace {
+function buildQTraceFromRows(snapshot: QSnapshot, rows: QTimelineRow[]): QTrace {
   const counts: Partial<Record<QCode, number>> = {};
   let streakQ: QCode | null = null;
   let streakLength = 0;
@@ -118,7 +112,8 @@ function buildQTraceFromRows(
   const timelineIsStale =
     snapshot.currentQ !== null &&
     snapshot.updatedAt !== null &&
-    (timelineLast === null || (Number.isFinite(snapAt) && Number.isFinite(lastAt) && snapAt > lastAt));
+    (timelineLast === null ||
+      (Number.isFinite(snapAt) && Number.isFinite(lastAt) && snapAt > lastAt));
 
   if (timelineIsStale) {
     // ここが今回のログのケース：user_q_now は新しいのに timeline が古い
@@ -179,7 +174,6 @@ function buildQTraceFromRows(
   };
 }
 
-
 // ====================== 公開関数：読み出し ======================
 
 /**
@@ -192,10 +186,7 @@ function buildQTraceFromRows(
  * @param userCode - DB 上の user_code
  * @param limit    - 直近履歴の最大件数（デフォルト 50）
  */
-export async function loadIrosMemory(
-  userCode: string,
-  limit: number = 50
-): Promise<IrosMemory> {
+export async function loadIrosMemory(userCode: string, limit: number = 50): Promise<IrosMemory> {
   const sb = getSupabaseAdmin();
 
   // 1) user_q_now から最新スナップショットを取得
@@ -207,9 +198,9 @@ export async function loadIrosMemory(
 
   const snapRow = snapRowRaw as UserQNowRow | null;
 
-  if (snapError && snapError.code !== 'PGRST116') {
+  if (snapError && (snapError as any).code !== 'PGRST116') {
     // PGRST116 = Row not found (maybeSingle の「0件」) を許容
-    console.warn('[IrosMemory] user_q_now 取得時エラー:', snapError.message);
+    console.warn('[IrosMemory] user_q_now 取得時エラー:', (snapError as any).message);
   }
 
   const snapshot = mapSnapshot(snapRow ?? null);
@@ -223,10 +214,7 @@ export async function loadIrosMemory(
     .limit(limit);
 
   if (timelineError) {
-    console.warn(
-      '[IrosMemory] q_code_timeline 取得時エラー:',
-      timelineError.message
-    );
+    console.warn('[IrosMemory] q_code_timeline 取得時エラー:', (timelineError as any).message);
   }
 
   const timelineRows: QTimelineRow[] = (rows ?? []) as QTimelineRow[];
@@ -264,16 +252,13 @@ function createEmptyMemory(userCode: string): IrosMemory {
   };
 }
 
-
-
-
 /**
  * IrosMemory をそのまま返すヘルパー。
  * - 将来的に「メモリーのマージ」や「タグ付け」などを行うときの拡張ポイント。
  */
 export async function getIrosMemory(
   userCode: string,
-  options?: { limit?: number }
+  options?: { limit?: number },
 ): Promise<IrosMemory> {
   const limit = options?.limit ?? 50;
   try {
@@ -285,10 +270,7 @@ export async function getIrosMemory(
 }
 
 // 将来、QTrace だけ欲しいケース向けのショートカット
-export async function getQTrace(
-  userCode: string,
-  options?: { limit?: number }
-): Promise<QTrace> {
+export async function getQTrace(userCode: string, options?: { limit?: number }): Promise<QTrace> {
   const memory = await getIrosMemory(userCode, options);
   return memory.qTrace;
 }
@@ -298,31 +280,25 @@ export async function getQTrace(
 /**
  * saveIrosMemory
  *
- * 既存の route.ts との互換を保つため、
- * 引数は可変長 (...args) で受け取り、以下2パターンをサポートします。
+ * 🚫 NOTE: iros_memory_state への保存は停止（single-writer 化）
+ * - この関数は過去互換のために残すが、DB upsert は行わない。
+ * - iros_memory_state の writer は handleIrosReply.persist.ts / memoryState.ts 側に統一する。
  *
- *  1) saveIrosMemory(userCode, memory, qTrace?)
- *     - userCode: string
- *     - memory : src/lib/iros/memory/types.ts の IrosMemory 相当
- *     - qTrace : QTrace（省略可）
- *
- *  2) saveIrosMemory({ userCode, memory, qTrace })
- *     - 1つのオブジェクトで渡すパターン
- *
- * どちらでも最終的に userCode / summary / depth などに正規化して
- * iros_memory_state テーブルに UPSERT します。
+ * 理由：
+ * - ここで q_counts を qTrace.counts（Q1..だけ）で upsert すると、
+ *   q_trace / it_cooldown 等の付帯構造が消え、IT/沈黙/連続性が巻き戻る。
  */
 export async function saveIrosMemory(...args: any[]): Promise<void> {
   try {
     if (!args || args.length === 0) {
-      console.warn('[IrosMemory] saveIrosMemory called with no args');
+      console.warn('[IrosMemory] saveIrosMemory called with no args (noop)');
       return;
     }
 
-    // -------- 引数正規化 --------
+    // 引数だけは正規化してログに残す（デバッグ用）
     let userCode: string | undefined;
     let memory: any = {};
-    let qTrace: QTrace | undefined;
+    let qTrace: any | undefined;
 
     if (args.length === 1 && typeof args[0] === 'object') {
       // パターン 2) saveIrosMemory({ userCode, memory, qTrace })
@@ -337,53 +313,17 @@ export async function saveIrosMemory(...args: any[]): Promise<void> {
       qTrace = args[2];
     }
 
-    if (!userCode || typeof userCode !== 'string') {
-      console.warn(
-        '[IrosMemory] saveIrosMemory: userCode が取得できなかったため保存をスキップします'
-      );
-      return;
-    }
+    console.warn('[IrosMemory] saveIrosMemory NOOP (writer disabled)', {
+      userCode: typeof userCode === 'string' ? userCode : null,
+      hasSummary: !!memory?.summary,
+      depthStage: memory?.depth ?? memory?.depth_stage ?? qTrace?.snapshot?.depthStage ?? null,
+      qPrimary: qTrace?.snapshot?.currentQ ?? null,
+      qCountsKeys:
+        qTrace?.counts && typeof qTrace.counts === 'object' ? Object.keys(qTrace.counts) : null,
+    });
 
-    // -------- フィールド抽出 --------
-    const summary: string | null = memory.summary ?? null;
-    const depthStage: string | null =
-      memory.depth ??
-      memory.depth_stage ??
-      qTrace?.snapshot.depthStage ??
-      null;
-
-    const tone: string | null = memory.tone ?? null;
-    const theme: string | null = memory.theme ?? null;
-    const lastKeyword: string | null =
-      memory.last_keyword ?? memory.lastKeyword ?? null;
-
-    const qPrimary: string | null = qTrace?.snapshot.currentQ ?? null;
-    const qCounts: Record<string, number> | null =
-      (qTrace?.counts as Record<string, number> | undefined) ?? null;
-
-    const sb = getSupabaseAdmin();
-
-    const { error } = await sb
-      .from('iros_memory_state')
-      .upsert(
-        {
-          user_code: userCode,
-          summary,
-          depth_stage: depthStage,
-          tone,
-          theme,
-          last_keyword: lastKeyword,
-          q_primary: qPrimary,
-          q_counts: qCounts,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'user_code' } // user_code ごとに1行だけ維持
-      );
-
-    if (error) {
-      console.error('[IrosMemory] saveIrosMemory upsert error:', error);
-    }
+    return;
   } catch (e) {
-    console.error('[IrosMemory] saveIrosMemory exception:', e);
+    console.error('[IrosMemory] saveIrosMemory noop exception:', e);
   }
 }

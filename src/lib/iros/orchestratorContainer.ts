@@ -4,10 +4,49 @@
 
 import type { IrosMeta } from './system';
 
-import { buildSlots, type NoDeltaKind, type SlotKey } from './language/slotBuilder';
 import { classifyInputKind } from './language/inputKind';
 import { selectFrame, type FrameKind } from './language/frameSelector';
 import { decideDescentGate } from './rotation/rotationLoop';
+
+// =========================================================
+// RenderEngine v2 方針：Slot Planner は現状「無効」
+// ただし orchestratorContainer が slotPlan_keys 等を期待しているため、
+// buildSlots / SlotKey / NoDeltaKind を「互換スタブ」として提供する。
+// - 本文は作らない
+// - plan は常に空（= v2思想）
+// - 形だけ既存の下流に合わせる（Record<SlotKey, string|null>）
+// =========================================================
+
+type SlotKey = 'OBS' | 'SHIFT' | 'NEXT' | 'SAFE' | 'INSIGHT';
+
+type NoDeltaKind =
+  | 'repeat-warning'
+  | 'short-loop'
+  | 'stuck'
+  | 'NONE';
+
+function buildSlots(
+  _frame: FrameKind,
+  _ctx: {
+    descentGate?: any;
+    spinLoop?: any;
+    noDelta?: boolean;
+    noDeltaKind?: NoDeltaKind | null;
+    iLayerDual?: boolean;
+  },
+): { slots: Record<SlotKey, string | null> } {
+  return {
+    slots: {
+      OBS: null,
+      SHIFT: null,
+      NEXT: null,
+      SAFE: null,
+      INSIGHT: null,
+    },
+  };
+}
+
+
 
 export type ApplyContainerArgs = {
   text: string;

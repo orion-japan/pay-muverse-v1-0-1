@@ -6,14 +6,21 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyFirebaseAndAuthorize, normalizeAuthz } from '@/lib/authz';
 import { reserveAndSpendCredit } from '@/lib/mu/credits';
 import { runIrosChat } from '@/lib/iros/openai';
-import { saveIrosMemory } from '@/lib/iros/memory';
 import { SofiaTriggers } from '@/lib/iros/system';
 
 // ===== 最小ローカル型 =====
 type IrosMode = 'counsel' | 'structured' | 'diagnosis' | 'auto';
-type IrosChatRequestIn = { convo_id?: string; conversationId?: string; conversation_id?: string; text?: string; extra?: any; };
+type IrosChatRequestIn = {
+  convo_id?: string;
+  conversationId?: string;
+  conversation_id?: string;
+  text?: string;
+  extra?: any;
+};
 
-function json<T>(b: T, status = 200) { return NextResponse.json(b, { status }); }
+function json<T>(b: T, status = 200) {
+  return NextResponse.json(b, { status });
+}
 
 // ---- normalizeAuthz の差分吸収（userCode を安全に取り出す）
 function getUserCodeFromAuthz(a: any): string | null {
@@ -30,14 +37,14 @@ function getUserCodeFromAuthz(a: any): string | null {
 // ---- モード検出（LLMを増やさない）
 function includesAny(text: string, phrases: readonly string[]) {
   const t = (text || '').trim();
-  return phrases.some(p => t.includes(p));
+  return phrases.some((p) => t.includes(p));
 }
 function detectIntentMode(input: string): IrosMode {
   const t = (input || '').trim();
   if (includesAny(t, SofiaTriggers.diagnosis)) return 'diagnosis';
-  if (includesAny(t, SofiaTriggers.intent))    return 'counsel';
+  if (includesAny(t, SofiaTriggers.intent)) return 'counsel';
   if (/(整理|まとめ|レポート|要件|手順|設計|仕様)/.test(t)) return 'structured';
-  if (/(相談|悩み|どうしたら|助けて|迷って)/.test(t))       return 'counsel';
+  if (/(相談|悩み|どうしたら|助けて|迷って)/.test(t)) return 'counsel';
   return 'auto';
 }
 
@@ -83,15 +90,9 @@ export async function POST(req: NextRequest) {
       extra,
     } as any);
 
-    // 5) メモリ保存（ある場合のみ・互換）
-    const memory = await saveIrosMemory({
-      conversationId,
-      userCode,
-      input: text,
-      output: replyText,
-      layer: finalMode,
-      extra,
-    } as any);
+    // ✅ 5) ここでは保存しない（single-writer は /reply に統一）
+    // - iros_memory_state / iros_messages 等の保存は /reply 系に集約する
+    // - この route.ts は「旧互換の生成ルート」として返すだけにする
 
     // 6) メタ
     const meta = {
@@ -103,17 +104,19 @@ export async function POST(req: NextRequest) {
     };
 
     // 7) 応答（新旧互換 + jq用キー）
-    return json({
-      ok: true,
-      reply: replyText,     // 新
-      assistant: replyText, // 旧UI互換
-      text: replyText,      // jq '{mode, meta, text}'
-      mode: finalMode,
-      meta,
-      layer: finalMode,
-      credit,
-      memory,
-    }, 200);
+    return json(
+      {
+        ok: true,
+        reply: replyText, // 新
+        assistant: replyText, // 旧UI互換
+        text: replyText, // jq '{mode, meta, text}'
+        mode: finalMode,
+        meta,
+        layer: finalMode,
+        credit,
+      },
+      200,
+    );
   } catch (e: any) {
     return json({ ok: false, error: String(e?.message || e) }, 500);
   }

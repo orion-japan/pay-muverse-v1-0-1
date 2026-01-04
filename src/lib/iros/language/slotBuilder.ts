@@ -1,220 +1,327 @@
 // src/lib/iros/language/slotBuilder.ts
-// iros — Slot Builder（スロット生成）
-// - Frame（器）に対して「中身の枠（slot）」を用意する（本文はまだ作らない）
-// - DescentGateState は union を正とする（closed/offered/accepted）
+// iros — RenderEngine v2: Slot Planner (Plan + anti-repeat)
+// - 本文は作らない（slotを「選ぶ」だけ）
+// - userTextは禁止（入力に含めない）
+// - anti-repeat のため signature を生成し、衝突したら plan を変える
 
-import type { FrameKind, DescentGateState } from './frameSelector';
-import type { SpinLoop } from '../types';
+import type { FrameKind } from './frameSelector';
 
-export type SlotKey = 'OBS' | 'SHIFT' | 'NEXT' | 'SAFE';
+export type QCode = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
+export type Phase = 'Inner' | 'Outer';
 
-export type SlotPlan = {
+export type DepthStage =
+  | 'S1'
+  | 'S2'
+  | 'S3'
+  | 'R1'
+  | 'R2'
+  | 'R3'
+  | 'C1'
+  | 'C2'
+  | 'C3'
+  | 'F1'
+  | 'F2'
+  | 'F3'
+  | 'I1'
+  | 'I2'
+  | 'I3'
+  | 'T1'
+  | 'T2'
+  | 'T3'
+  | string; // 既存と揺れても落ちない
+
+export type GoalKind =
+  | 'uncover'
+  | 'stabilize'
+  | 'shiftRelation'
+  | 'commit'
+  | 'decideOne'
+  | 'repair'
+  | 'cooldown'
+  | string;
+
+export type SlotKey = 'OBS' | 'SHIFT' | 'NEXT' | 'SAFE' | 'INSIGHT';
+
+export type RenderFactsV2 = {
+  // ✅要約のみ（原文は禁止）
+  situation?: string | null;
+  riskHint?: string | null; // ブレーキ理由など（ある時だけ SAFE を許可）
+};
+
+export type HistoryDigestV2 = {
+  recentSignatures: string[]; // last N
+};
+
+export type SlotPlanV2 = {
   frame: FrameKind;
-  slots: Record<SlotKey, string | null>;
+  goalKind: GoalKind;
+  depthStage: DepthStage;
+  qCode: QCode;
+  phase: Phase;
+
+  slotsUsed: SlotKey[]; // 使うslotの順序（本文は別層）
+  lexKey: string; // topic tag（安定辞書ベース）
+  signature: string; // anti-repeatキー
 };
 
-// ✅ 追加：変化なし（No-Delta）の種別（上流で判定して渡す）
-export type NoDeltaKind = 'repeat-warning' | 'short-loop' | 'stuck' | 'unknown';
+/* -------------------------
+ * helpers
+ * ------------------------- */
 
-export type BuildSlotsContext = {
-  descentGate: DescentGateState | boolean | null | undefined; // 互換：旧booleanも許可
-  spinLoop?: SpinLoop | null | undefined; // ✅ 追加：回転ループ（TCF なら下降扱い）
-
-  // ✅ 追加：No-Delta シグナル（SlotBuilderは「タグを立てる」だけ）
-  // - true のとき、OBS に :no-delta を付与して Writer に「冒頭1文=状態翻訳」を強制させる
-  noDelta?: boolean | null | undefined;
-  noDeltaKind?: NoDeltaKind | null | undefined;
-
-  // ✅ 追加：I層プレゼン用（上司I層 + 自分I層など “両建て” を Writer に伝える）
-  // - slotBuilder 側では本文を作らず、タグだけ立てる
-  iLayerDual?: boolean | null | undefined;
-};
-
-function normalizeDescentGate(
-  v: DescentGateState | boolean | null | undefined
-): DescentGateState {
-  if (v === true) return 'accepted';
-  if (v === false) return 'closed';
-  if (v === 'closed' || v === 'offered' || v === 'accepted') return v;
-  return 'closed';
+function norm(s: unknown): string {
+  return String(s ?? '').trim();
 }
 
-function normalizeSpinLoop(v: unknown): SpinLoop | null {
-  if (typeof v !== 'string') return null;
-  const s = v.trim().toUpperCase();
-  if (s === 'SRI') return 'SRI';
-  if (s === 'TCF') return 'TCF';
-  return null;
+function depthHead(depthStage: string): string {
+  const d = norm(depthStage).toUpperCase();
+  if (!d) return '';
+  return d[0]; // 'S','R','C','F','I','T'...
 }
 
-function normalizeNoDeltaKind(v: unknown): NoDeltaKind | null {
-  if (typeof v !== 'string') return null;
-  const s = v.trim().toLowerCase();
-  if (s === 'repeat-warning' || s === 'repeat') return 'repeat-warning';
-  if (s === 'short-loop' || s === 'short') return 'short-loop';
-  if (s === 'stuck') return 'stuck';
-  if (s === 'unknown') return 'unknown';
-  return null;
+function isIorT(depthStage: string): boolean {
+  const h = depthHead(depthStage);
+  return h === 'I' || h === 'T';
 }
 
-function baseSlots(): Record<SlotKey, string | null> {
-  return {
-    OBS: null,
-    SHIFT: null,
-    NEXT: null,
-    SAFE: null,
-  };
+function hasText(s?: string | null): boolean {
+  return norm(s).length > 0;
 }
 
 /**
- * Slot を組み立てる
- * - 値は「Writer が参照する短い指示文（タグ）」として返す
- * - truthy / falsy でログに出せるよう null を使う
+ * lexKey: 小さな安定辞書（LLMに任せない）
+ * - ここを増やすほど anti-repeat が効きやすくなる
  */
-export function buildSlots(frame: FrameKind, ctx: BuildSlotsContext): SlotPlan {
-  const dg = normalizeDescentGate(ctx?.descentGate);
-  const loop = normalizeSpinLoop(ctx?.spinLoop);
+function buildLexKey(facts: RenderFactsV2): string {
+  const s = norm(facts?.situation).toLowerCase();
+  if (!s) return 'general';
 
-  const noDelta = ctx?.noDelta === true;
-  const noDeltaKind = normalizeNoDeltaKind(ctx?.noDeltaKind) ?? null;
+  if (s.includes('連絡') || s.includes('返信')) return 'contact';
+  if (s.includes('迷い') || s.includes('決め') || s.includes('選べ'))
+    return 'decision';
+  if (s.includes('不安') || s.includes('怖') || s.includes('恐'))
+    return 'anxiety';
+  if (s.includes('怒') || s.includes('苛') || s.includes('イラ'))
+    return 'anger';
+  if (s.includes('疲') || s.includes('眠') || s.includes('限界'))
+    return 'fatigue';
 
-  const iLayerDual = ctx?.iLayerDual === true;
-
-  const slots = baseSlots();
-
-  // --- 下降ゲート（安全・減速） ---
-  // offered/accepted のときは SAFE を必ず立てる（問いの圧を下げる/守る）
-  if (dg !== 'closed') {
-    slots.SAFE =
-      dg === 'offered' ? 'SAFE:descent-offered' : 'SAFE:descent-accepted';
-  } else {
-    // ✅ dg が closed でも「TCF(下降)」なら SAFE を立てる
-    if (loop === 'TCF') {
-      slots.SAFE = 'SAFE:spin-tcf';
-    }
-  }
-
-  // --- Frame ごとの最小スロット ---
-  switch (frame) {
-    case 'MICRO': {
-      slots.OBS = 'OBS:micro';
-      slots.NEXT = 'NEXT:one-step';
-      // SHIFT は入れない（短文崩れ防止）
-      break;
-    }
-
-    case 'NONE': {
-      // 基本スロット無し（素の返答）
-      // ただし SAFE は残りうる（下降 / 安全ギア）
-      break;
-    }
-
-    case 'S': {
-      slots.OBS = 'OBS:self';
-      slots.SHIFT = 'SHIFT:self';
-      slots.NEXT = 'NEXT:self';
-      break;
-    }
-
-    case 'R': {
-      slots.OBS = 'OBS:resonance';
-      slots.SHIFT = 'SHIFT:resonance';
-      slots.NEXT = 'NEXT:resonance';
-      break;
-    }
-
-    case 'C': {
-      slots.OBS = 'OBS:creation';
-      // C は “動ける形” 優先なので NEXT を強める
-      slots.NEXT = 'NEXT:action';
-      // SHIFT は任意だが、下降中以外なら入れて良い
-      if (dg === 'closed') slots.SHIFT = 'SHIFT:reframe';
-      break;
-    }
-
-    case 'F': {
-      // F = 定着・支える（落下や反発を抑え、足場を作る）
-      slots.OBS = 'OBS:stabilize';
-      slots.SHIFT = 'SHIFT:stabilize';
-      slots.NEXT = 'NEXT:small-step';
-      // SAFE は dg/loop 側で既に立つ。closed でも薄く保険を置きたい場合のみ上書き
-      if (dg === 'closed' && !slots.SAFE) slots.SAFE = 'SAFE:stabilize';
-      break;
-    }
-
-    case 'I': {
-      // I = 本質 / 意図 / 未来（刺す・確信・結論寄せの器）
-      slots.OBS = iLayerDual ? 'OBS:intention:dual' : 'OBS:intention';
-      slots.SHIFT = iLayerDual ? 'SHIFT:intention:dual' : 'SHIFT:intention';
-      slots.NEXT = iLayerDual ? 'NEXT:intention:align' : 'NEXT:intention';
-      // I層プレゼン中は SAFE を邪魔しない（あれば尊重）。無ければ薄く置く
-      if (!slots.SAFE) slots.SAFE = 'SAFE:intention';
-      break;
-    }
-
-    case 'T': {
-      slots.OBS = 'OBS:transcend';
-      // T は「気づき」優先、NEXT は控えめ
-      slots.SHIFT = 'SHIFT:insight';
-      slots.NEXT = 'NEXT:soft';
-      break;
-    }
-
-    default: {
-      // 将来拡張用：何もしない
-      break;
-    }
-  }
-
-  // ✅ NO_DELTA_OBS（最小で効く追加）
-  // - “本文”は作らない。Writer が「冒頭1文=状態翻訳」を必ず出せるようにタグを立てるだけ。
-  // - MICRO/NONE は崩れやすいのでここでは触らない（必要なら上流で frame を切り替える）
-  if (noDelta && frame !== 'NONE' && frame !== 'MICRO') {
-    // OBS に no-delta を必ず付与
-    slots.OBS = slots.OBS ? `${slots.OBS}:no-delta` : 'OBS:no-delta';
-
-    // ★追加：stuck は「深まり注入口」
-    // - ただし I層に落とさない（1行だけ刺す）
-    // - SAFEテンプレに吸われないよう、Writer が拾えるタグを立てる
-    if (noDeltaKind === 'stuck') {
-      // S/R/F 帯は「固定前提の確定」へ寄せる（断定は1行、圧は上げない）
-      if (frame === 'S' || frame === 'R' || frame === 'F') {
-        slots.SHIFT = 'SHIFT:nonchange-structure';
-        slots.NEXT = 'NEXT:probe-conditions';
-
-        // ここが本丸：INSIGHT を 1行だけ許可（テンプレではなく“入口”）
-        // ※ render 側で insightCandidate が null のままでも、slotPlan から拾えるようにする想定
-        // 既存キーがあるなら尊重し、無ければ付与
-        if (!(slots as any).INSIGHT) (slots as any).INSIGHT = 'INSIGHT:stuck:one-line';
-      }
-
-      // I層は「断定→一致点→次の一歩」へ寄せる（刺すが、圧は上げない）
-      if (frame === 'I') {
-        slots.SHIFT = iLayerDual ? 'SHIFT:intention:dual:pin' : 'SHIFT:intention:pin';
-        slots.NEXT = iLayerDual ? 'NEXT:intention:align:one-step' : 'NEXT:intention:one-step';
-
-        // Iフレームでも “1行だけ” は許可（長文化させない）
-        if (!(slots as any).INSIGHT) (slots as any).INSIGHT = 'INSIGHT:stuck:one-line';
-      }
-    }
-
-    // repeat-warning は従来どおり（責め→条件へ寄せる）
-    if (noDeltaKind === 'repeat-warning') {
-      if (frame === 'S' || frame === 'R' || frame === 'F') {
-        slots.SHIFT = 'SHIFT:nonchange-structure';
-        slots.NEXT = 'NEXT:probe-conditions';
-      }
-      if (frame === 'I') {
-        slots.SHIFT = iLayerDual ? 'SHIFT:intention:dual:pin' : 'SHIFT:intention:pin';
-        slots.NEXT = iLayerDual ? 'NEXT:intention:align:one-step' : 'NEXT:intention:one-step';
-      }
-    }
-
-    // SAFE が未設定なら薄い保険だけ置く（下降SAFEがある場合は尊重）
-    // ★ただし INSIGHT(stuck) がある場合は SAFE が主役にならないように「残すけど薄く」
-    if (!slots.SAFE) slots.SAFE = noDeltaKind === 'stuck' ? 'SAFE:thin' : 'SAFE:no-delta';
-  }
-
-  return { frame, slots };
+  return 'general';
 }
 
+function makeSignature(args: {
+  frame: FrameKind;
+  goalKind: GoalKind;
+  depthStage: DepthStage;
+  qCode: QCode;
+  phase: Phase;
+  slotsUsed: SlotKey[];
+  lexKey: string;
+}): string {
+  const { frame, goalKind, depthStage, qCode, phase, slotsUsed, lexKey } = args;
+  return [
+    frame,
+    String(goalKind ?? ''),
+    String(depthStage ?? ''),
+    String(qCode ?? ''),
+    String(phase ?? ''),
+    slotsUsed.join('+'),
+    lexKey,
+  ].join('|');
+}
+
+function isRepeat(sig: string, recent: string[]): boolean {
+  return Array.isArray(recent) ? recent.includes(sig) : false;
+}
+
+/* -------------------------
+ * plan rules
+ * ------------------------- */
+
+function basePlan(args: {
+  frame: FrameKind;
+  goalKind: GoalKind;
+  depthStage: DepthStage;
+  facts: RenderFactsV2;
+}): SlotKey[] {
+  const { frame, goalKind, depthStage, facts } = args;
+
+  const plan: SlotKey[] = [];
+
+  // OBS は situation がある時だけ
+  if (hasText(facts?.situation)) plan.push('OBS');
+
+  // SHIFT は基本入れる（視点を1段動かす）
+  plan.push('SHIFT');
+
+  // INSIGHT は I/T で入れる（ただし anti-repeat で抜くことがある）
+  if (isIorT(String(depthStage))) plan.push('INSIGHT');
+
+  // SAFE は riskHint がある時だけ（常駐禁止）
+  if (hasText(facts?.riskHint)) plan.push('SAFE');
+
+  // NEXT は cooldown 以外は基本入れる（最小の一手）
+  if (String(goalKind) !== 'cooldown') plan.push('NEXT');
+
+  // T は短く（OBSを落としても良い）
+  if (frame === 'T') {
+    return plan.filter((s) => s !== 'OBS');
+  }
+
+  // MICRO / NONE は lean
+  if (frame === 'MICRO' || frame === 'NONE') {
+    return plan.filter((s) => s !== 'INSIGHT' && s !== 'SAFE').slice(0, 2);
+  }
+
+  // dedupe (order kept)
+  return plan.filter((s, i) => plan.indexOf(s) === i);
+}
+
+/**
+ * anti-repeat:
+ * - signature が recent に衝突したら plan を変える
+ * - 変え方：slot構成→lexKey の順
+ */
+function resolveAntiRepeat(args: {
+  frame: FrameKind;
+  goalKind: GoalKind;
+  depthStage: DepthStage;
+  qCode: QCode;
+  phase: Phase;
+  facts: RenderFactsV2;
+  history: HistoryDigestV2;
+  slotsUsed: SlotKey[];
+  lexKey: string;
+}): { slotsUsed: SlotKey[]; lexKey: string; signature: string } {
+  const { frame, goalKind, depthStage, qCode, phase, history } = args;
+  let slotsUsed = [...args.slotsUsed];
+  let lexKey = args.lexKey;
+
+  let signature = makeSignature({
+    frame,
+    goalKind,
+    depthStage,
+    qCode,
+    phase,
+    slotsUsed,
+    lexKey,
+  });
+
+  if (!isRepeat(signature, history.recentSignatures)) {
+    return { slotsUsed, lexKey, signature };
+  }
+
+  // 1) slot構成を変える（まず INSIGHT を抜く／OBSを抜く等）
+  if (slotsUsed.includes('INSIGHT')) {
+    slotsUsed = slotsUsed.filter((s) => s !== 'INSIGHT');
+    signature = makeSignature({
+      frame,
+      goalKind,
+      depthStage,
+      qCode,
+      phase,
+      slotsUsed,
+      lexKey,
+    });
+    if (!isRepeat(signature, history.recentSignatures)) {
+      return { slotsUsed, lexKey, signature };
+    }
+  }
+
+  if (slotsUsed.includes('OBS')) {
+    slotsUsed = slotsUsed.filter((s) => s !== 'OBS');
+    signature = makeSignature({
+      frame,
+      goalKind,
+      depthStage,
+      qCode,
+      phase,
+      slotsUsed,
+      lexKey,
+    });
+    if (!isRepeat(signature, history.recentSignatures)) {
+      return { slotsUsed, lexKey, signature };
+    }
+  }
+
+  // 2) slot順序を変える（SHIFTとNEXT入替など）
+  const hasShift = slotsUsed.includes('SHIFT');
+  const hasNext = slotsUsed.includes('NEXT');
+  if (hasShift && hasNext) {
+    slotsUsed = slotsUsed.map((s) =>
+      s === 'SHIFT' ? 'NEXT' : s === 'NEXT' ? 'SHIFT' : s,
+    );
+    signature = makeSignature({
+      frame,
+      goalKind,
+      depthStage,
+      qCode,
+      phase,
+      slotsUsed,
+      lexKey,
+    });
+    if (!isRepeat(signature, history.recentSignatures)) {
+      return { slotsUsed, lexKey, signature };
+    }
+  }
+
+  // 3) lexKey を general に落とす
+  if (lexKey !== 'general') lexKey = 'general';
+  else lexKey = 'general2';
+
+  signature = makeSignature({
+    frame,
+    goalKind,
+    depthStage,
+    qCode,
+    phase,
+    slotsUsed,
+    lexKey,
+  });
+  return { slotsUsed, lexKey, signature };
+}
+
+/* -------------------------
+ * Public API
+ * ------------------------- */
+
+/**
+ * v2: slot計画（本文は作らない）
+ * - userText は受け取らない（混入事故を構造的に防ぐ）
+ */
+export function buildSlotPlanV2(args: {
+  frame: FrameKind;
+  goalKind: GoalKind;
+  depthStage: DepthStage;
+  qCode: QCode;
+  phase: Phase;
+  facts: RenderFactsV2;
+  history: HistoryDigestV2;
+}): SlotPlanV2 {
+  const { frame, goalKind, depthStage, qCode, phase, facts, history } = args;
+
+  const lexKey0 = buildLexKey(facts);
+  const slots0 = basePlan({ frame, goalKind, depthStage, facts });
+
+  const resolved = resolveAntiRepeat({
+    frame,
+    goalKind,
+    depthStage,
+    qCode,
+    phase,
+    facts,
+    history,
+    slotsUsed: slots0,
+    lexKey: lexKey0,
+  });
+
+  return {
+    frame,
+    goalKind,
+    depthStage,
+    qCode,
+    phase,
+    slotsUsed: resolved.slotsUsed,
+    lexKey: resolved.lexKey,
+    signature: resolved.signature,
+  };
+}

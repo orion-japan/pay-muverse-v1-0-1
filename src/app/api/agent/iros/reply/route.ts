@@ -19,21 +19,21 @@ import {
 import type { RememberScopeKind } from '@/lib/iros/remember/resolveRememberBundle';
 import { resolveModeHintFromText, resolveRememberScope } from './_mode';
 
-import { attachNextStepMeta } from '@/lib/iros/nextStepOptions';
+import {
+  attachNextStepMeta,
+  extractNextStepChoiceFromText,
+  findNextStepOptionById,
+} from '@/lib/iros/nextStepOptions';
 
 // ★★★ 文章エンジン（レンダリング層）
 import { buildResonanceVector } from '@lib/iros/language/resonanceVector';
 import { renderReply } from '@/lib/iros/language/renderReply';
 
-// NextStep（ボタンタグ除去）
-import {
-  extractNextStepChoiceFromText,
-  findNextStepOptionById,
-} from '@/lib/iros/nextStepOptions';
-
 import { applyRulebookCompat } from '@/lib/iros/policy/rulebook';
 
 import { persistAssistantMessageToIrosMessages } from '@/lib/iros/server/persistAssistantMessageToIrosMessages';
+import { renderGatewayAsReply } from '@/lib/iros/language/renderGateway';
+import { runNormalBase } from '@/lib/iros/conversation/normalBase';
 
 /**
  * [choiceId] 形式のタグを除去したい場合のパーサ（保険）
@@ -163,6 +163,16 @@ function finalizeQTrace(meta: any, metaForSave: any): any {
 // =========================================================
 type ReplyUIMode = 'NORMAL' | 'IR' | 'SILENCE';
 
+function pickSpeechAct(meta: any): string | null {
+  return (
+    meta?.speechAct ??
+    meta?.extra?.speechAct ??
+    meta?.speech_act ??
+    meta?.extra?.speech_act ??
+    null
+  );
+}
+
 function isEffectivelyEmptyText(text: any): boolean {
   const s = String(text ?? '').trim();
   if (!s) return true;
@@ -182,12 +192,11 @@ function pickSilenceReason(meta: any): string | null {
   );
 }
 
-
 function inferUIMode(args: {
   modeHint?: string | null;
   effectiveMode?: string | null;
   meta?: any;
-  finalText?: string | null; // ★ 最終本文を渡す
+  finalText?: string | null;
 }): ReplyUIMode {
   const { modeHint, effectiveMode, meta, finalText } = args;
 
@@ -197,11 +206,11 @@ function inferUIMode(args: {
   const eff = String(effectiveMode ?? '').toUpperCase();
   if (eff.includes('IR')) return 'IR';
 
-  const silenceReason = pickSilenceReason(meta);
+  const speechAct = String(pickSpeechAct(meta) ?? '').toUpperCase();
   const empty = isEffectivelyEmptyText(finalText);
 
-  // ★ ここが本丸：最終本文が“空”のときだけ SILENCE
-  if (silenceReason && empty) return 'SILENCE';
+  // ✅ SILENCE は speechAct が SILENCE かつ “最終本文が空” の時だけ
+  if (speechAct === 'SILENCE' && empty) return 'SILENCE';
 
   return 'NORMAL';
 }
@@ -210,15 +219,16 @@ function inferUIModeReason(args: {
   modeHint?: string | null;
   effectiveMode?: string | null;
   meta?: any;
-  finalText?: string | null; // ★ 最終本文を渡す
+  finalText?: string | null;
 }): string | null {
   const { modeHint, effectiveMode, meta, finalText } = args;
 
-  const silenceReason = pickSilenceReason(meta);
+  const speechAct = String(pickSpeechAct(meta) ?? '').toUpperCase();
   const empty = isEffectivelyEmptyText(finalText);
 
-  // SILENCEのときだけ理由を返す（NORMALの時は返さない）
-  if (silenceReason && empty) return silenceReason;
+  if (speechAct === 'SILENCE' && empty) {
+    return pickSilenceReason(meta) ?? 'SILENCE';
+  }
 
   const hint = String(modeHint ?? '').trim();
   if (hint.length > 0) return `MODE_HINT:${hint}`;
@@ -493,14 +503,15 @@ export async function POST(req: NextRequest) {
 
     // =========================================================
     // ✅ RenderEngine gate（single source）を handleIrosReply の「前」で確定する
-    // - strict: extra.renderEngine === true のみ許可
-    // - env: IROS_ENABLE_RENDER_ENGINE === '1' は「許可スイッチ」だが、強制ONはしない
+    // - env: IROS_ENABLE_RENDER_ENGINE === '1' が許可スイッチ
+    // - default ON: extra.renderEngine が false の時だけOFF（undefined/null/true はON）
     // =========================================================
     {
-      const extraRenderEngine = (extraMerged as any).renderEngine === true;
+      const extraRenderEngine = (extraMerged as any).renderEngine; // true/false/undefined
       const envAllows = process.env.IROS_ENABLE_RENDER_ENGINE === '1';
 
-      const enableRenderEngine = envAllows && extraRenderEngine;
+      // ✅ default ON（明示 false の時だけ落とす）
+      const enableRenderEngine = envAllows && extraRenderEngine !== false;
 
       extraMerged = {
         ...extraMerged,
@@ -521,8 +532,6 @@ export async function POST(req: NextRequest) {
     // ✅ persist gate（single source）を handleIrosReply の「前」で確定する
     // - route.ts が唯一の保存者であることを extra にも明示
     // =========================================================
-
-
     {
       extraMerged = {
         ...extraMerged,
@@ -557,6 +566,57 @@ export async function POST(req: NextRequest) {
       extra: extraMerged,
     });
 
+    // =========================================================
+    // ✅ NORMAL BASE fallback
+    // - SILENCE / FORWARD ではない
+    // - 本文が生成されていない（"…" も空扱い）
+    // - 通常会話として必ず返す
+    // =========================================================
+    if (irosResult.ok) {
+      const r: any = irosResult as any;
+
+      const metaAny = r?.metaForSave ?? r?.meta ?? {};
+      const extraAny = metaAny?.extra ?? {};
+
+      const speechAct = extraAny?.speechAct ?? metaAny?.speechAct ?? null;
+
+      const allowLLM =
+        extraAny?.speechAllowLLM ?? metaAny?.speechAllowLLM ?? true;
+
+      const candidateText = String(r?.assistantText ?? r?.content ?? '').trim();
+
+      const isSilenceOrForward = speechAct === 'SILENCE' || speechAct === 'FORWARD';
+
+      // ✅ "…" / "…。🪔" も「空」と同等にして fallback させる
+      const isEmptyLike = isEffectivelyEmptyText(candidateText);
+
+      if (!isSilenceOrForward && allowLLM && isEmptyLike) {
+        console.warn('[IROS/Reply] NORMAL_BASE_FALLBACK', {
+          conversationId,
+          userCode,
+          speechAct,
+          allowLLM,
+          candidateTextHead: candidateText.slice(0, 64),
+        });
+
+        const normal = await runNormalBase({
+          userText: userTextClean,
+        });
+
+        // 単一ソースで同期
+        r.assistantText = normal.text;
+        r.content = normal.text;
+        r.text = normal.text;
+
+        r.metaForSave = r.metaForSave ?? {};
+        r.metaForSave.extra = {
+          ...(r.metaForSave.extra ?? {}),
+          normalBaseApplied: true,
+          normalBaseSource: normal.meta.source,
+          normalBaseReason: 'EMPTY_LIKE_TEXT',
+        };
+      }
+    }
 
     if (!irosResult.ok) {
       const headers: Record<string, string> = {
@@ -566,30 +626,27 @@ export async function POST(req: NextRequest) {
       };
       if (traceId) headers['x-trace-id'] = String(traceId);
 
-// ✅ 決定(Orchestrator)直後の「空」発生箇所を特定するための確定ログ
-try {
-  const a: any = irosResult as any;
-  const metaAny: any = a?.meta ?? {};
-  const extraAny: any = metaAny?.extra ?? {};
-  console.log('[IROS/Reply][POST-HANDLE_SNAPSHOT]', {
-    conversationId,
-    userCode,
-    iros_ok: a?.ok,
-    out_assistantText_len: String(a?.assistantText ?? '').length,
-    out_content_len: String(a?.content ?? '').length,
-    speechAct: extraAny?.speechAct ?? metaAny?.speechAct ?? null,
-    speechAllowLLM: extraAny?.speechAllowLLM ?? metaAny?.speechAllowLLM ?? null,
-    brakeReleaseReason: extraAny?.brakeReleaseReason ?? metaAny?.brakeReleaseReason ?? null,
-    generalBrake: extraAny?.generalBrake ?? metaAny?.generalBrake ?? null,
-    renderEngine: extraAny?.renderEngine ?? metaAny?.renderEngine ?? null,
-    silencePatchedReason:
-      extraAny?.silencePatchedReason ??
-      metaAny?.silencePatchedReason ??
-      null,
-  });
-} catch {}
-
-
+      // ✅ 決定(Orchestrator)直後の「空」発生箇所を特定するための確定ログ
+      try {
+        const a: any = irosResult as any;
+        const metaAny: any = a?.meta ?? {};
+        const extraAny: any = metaAny?.extra ?? {};
+        console.log('[IROS/Reply][POST-HANDLE_SNAPSHOT]', {
+          conversationId,
+          userCode,
+          iros_ok: a?.ok,
+          out_assistantText_len: String(a?.assistantText ?? '').length,
+          out_content_len: String(a?.content ?? '').length,
+          speechAct: extraAny?.speechAct ?? metaAny?.speechAct ?? null,
+          speechAllowLLM: extraAny?.speechAllowLLM ?? metaAny?.speechAllowLLM ?? null,
+          brakeReleaseReason:
+            extraAny?.brakeReleaseReason ?? metaAny?.brakeReleaseReason ?? null,
+          generalBrake: extraAny?.generalBrake ?? metaAny?.generalBrake ?? null,
+          renderEngine: extraAny?.renderEngine ?? metaAny?.renderEngine ?? null,
+          silencePatchedReason:
+            extraAny?.silencePatchedReason ?? metaAny?.silencePatchedReason ?? null,
+        });
+      } catch {}
 
       return NextResponse.json(
         {
@@ -606,94 +663,118 @@ try {
       );
     }
 
-// ★ assistantText は後から補正するので let にする
-let { result, finalMode, metaForSave, assistantText } = irosResult as any;
+    // ★ assistantText は後から補正するので let にする
+    let { result, finalMode, metaForSave, assistantText } = irosResult as any;
 
-// ✅ まず「本文」をどこからでも拾う（返却名ブレ吸収）
-{
-  const pick = (...vals: any[]) => {
-    for (const v of vals) {
-      const s = String(v ?? '').trim();
-      if (s) return s;
-    }
-    return '';
-  };
+    // ✅ まず「本文」を拾う（確定前の irosResult.content は優先しない）
+    {
+      const pickText = (...vals: any[]) => {
+        for (const v of vals) {
+          const s = typeof v === 'string' ? v : String(v ?? '');
+          // ✅ 先頭の改行や🪔は保持したいので trimEnd のみにする
+          const t = s.replace(/\r\n/g, '\n').trimEnd();
+          if (t.length > 0) return t;
+        }
+        return '';
+      };
 
-  assistantText = pick(
-    assistantText,
-    (irosResult as any)?.assistantText,
-    (irosResult as any)?.text,
-    (irosResult as any)?.content,
-    (irosResult as any)?.resultText,
-    // result が string の場合だけ拾う（objectなら無視）
-    typeof result === 'string' ? result : '',
-  );
+      const r: any = result;
 
-  (irosResult as any).assistantText = assistantText;
-}
-
-// ✅ FAILSAFE: FORWARD & allowLLM=true なのに本文が空なら “異常” を確定ログ化
-{
-  const extra =
-    (metaForSave as any)?.extra ??
-    (irosResult as any)?.metaForSave?.extra ??
-    {};
-  const speechAct = extra?.speechAct ?? null;
-  const speechAllowLLM = extra?.speechAllowLLM ?? null;
-
-  const len_assistantText = String(assistantText ?? '').trim().length;
-  const len_result_content = String((result as any)?.content ?? '').trim().length;
-  const len_result_text = String((result as any)?.text ?? '').trim().length;
-
-  const isEmptyButForward =
-    speechAct === 'FORWARD' &&
-    speechAllowLLM === true &&
-    len_assistantText === 0 &&
-    len_result_content === 0 &&
-    len_result_text === 0;
-
-  if (isEmptyButForward) {
-    console.error('[IROS/Reply][BUG] empty-but-forward (allowLLM=true)', {
-      conversationId,
-      userCode,
-      speechAct,
-      speechAllowLLM,
-      lengths: {
-        assistantText: len_assistantText,
-        result_content: len_result_content,
-        result_text: len_result_text,
-      },
-      // ここが重要：どのフレーム/ブレーキで来てるか
-      brakeReleaseReason: extra?.brakeReleaseReason ?? null,
-      generalBrake: extra?.generalBrake ?? null,
-      frame: (metaForSave as any)?.frame ?? (metaForSave as any)?.framePlan_frame ?? null,
-      renderMode:
-        (metaForSave as any)?.renderMode ??
-        (metaForSave as any)?.extra?.renderMode ??
-        null,
-    });
-
-    // ✅ 開発中は 500 で落として原因箇所を特定した方が速い（推奨）
-    if (process.env.IROS_EMPTY_FORWARD_IS_FATAL === '1') {
-      throw new Error('IROS_BUG_EMPTY_BUT_FORWARD_ALLOW_LLM_TRUE');
+      // ✅ result が object の場合：ここが“候補の正”
+      if (r && typeof r === 'object') {
+        assistantText = pickText(r.assistantText, r.content, r.text, assistantText);
+        r.assistantText = assistantText;
+      } else {
+        // ✅ result が string の場合だけ：irosResult 側も拾う
+        assistantText = pickText(
+          assistantText,
+          (irosResult as any)?.assistantText,
+          (irosResult as any)?.text,
+          (irosResult as any)?.resultText,
+          typeof result === 'string' ? result : '',
+        );
+        (irosResult as any).assistantText = assistantText;
+      }
     }
 
-    // ✅ 本番寄り: とりあえず沈黙を返すが、異常フラグを残す
-    assistantText = '…';
-    (irosResult as any).assistantText = assistantText;
+    // ✅ FAILSAFE: FORWARD & allowLLM=true なのに本文が空なら “異常” を確定ログ化
+    {
+      const extraDbg =
+        (metaForSave as any)?.extra ??
+        (irosResult as any)?.metaForSave?.extra ??
+        {};
+      const speechAct = extraDbg?.speechAct ?? null;
+      const speechAllowLLM = extraDbg?.speechAllowLLM ?? null;
 
-    (metaForSave as any).extra = {
-      ...(extra ?? {}),
-      llmEmptyBug: true,
-      silencePatchedReason: 'FAILSAFE_EMPTY_BUT_FORWARD',
-    };
-  }
-}
+      const len_assistantText = String(assistantText ?? '').trim().length;
+      const len_result_content = String((result as any)?.content ?? '').trim().length;
+      const len_result_text = String((result as any)?.text ?? '').trim().length;
+
+      const isEmptyButForward =
+        speechAct === 'FORWARD' &&
+        speechAllowLLM === true &&
+        len_assistantText === 0 &&
+        len_result_content === 0 &&
+        len_result_text === 0;
+
+      if (isEmptyButForward) {
+        console.error('[IROS/Reply][BUG] empty-but-forward (allowLLM=true)', {
+          conversationId,
+          userCode,
+          speechAct,
+          speechAllowLLM,
+          lengths: {
+            assistantText: len_assistantText,
+            result_content: len_result_content,
+            result_text: len_result_text,
+          },
+          brakeReleaseReason: extraDbg?.brakeReleaseReason ?? null,
+          generalBrake: extraDbg?.generalBrake ?? null,
+          frame:
+            (metaForSave as any)?.frame ??
+            (metaForSave as any)?.framePlan_frame ??
+            null,
+          renderMode:
+            (metaForSave as any)?.renderMode ??
+            (metaForSave as any)?.extra?.renderMode ??
+            null,
+        });
+
+        // ★ ここで強制的に本文を補完する（empty-but-forward の安全装置）
+        if (!assistantText || assistantText.trim() === '') {
+          assistantText = '…。🪔';
+          if (result && typeof result === 'object') {
+            (result as any).content = assistantText;
+            (result as any).assistantText = assistantText;
+          }
+          (metaForSave as any).extra = {
+            ...(((metaForSave as any).extra ?? {}) as any),
+            renderEngineApplied: true,
+            renderEngineFallbackUsed: true,
+          };
+        }
+
+        if (process.env.IROS_EMPTY_FORWARD_IS_FATAL === '1') {
+          throw new Error('IROS_BUG_EMPTY_BUT_FORWARD_ALLOW_LLM_TRUE');
+        }
+
+        // ✅ 本番寄り: とりあえず沈黙を返すが、異常フラグを残す
+        assistantText = '…';
+        (irosResult as any).assistantText = assistantText;
+
+        // ✅ FIX: empty-but-forward failsafe の metaForSave.extra を破壊しない
+        (metaForSave as any).extra = {
+          ...(((metaForSave as any).extra ?? {}) as any),
+          llmEmptyBug: true,
+          silencePatchedReason: 'FAILSAFE_EMPTY_BUT_FORWARD',
+        };
+      }
+    }
 
     // 9) capture
     const capRes = await captureChat(req, userCode, CREDIT_AMOUNT, creditRef);
 
-    // 10) meta を統一し、credit情報を付与して返却
+    // 10) headers（以後の全 return で使う：ここで確定）
     const headers: Record<string, string> = {
       ...CORS_HEADERS,
       'x-handler': 'app/api/agent/iros/reply',
@@ -767,11 +848,31 @@ let { result, finalMode, metaForSave, assistantText } = irosResult as any;
       // qTrace は metaForSave の確定値を勝たせる
       meta = finalizeQTrace(meta, metaForSave);
 
+      // ✅ FINAL SYNC: assistantText が空なら content を採用（single-writer の最終整形）
+      {
+        const contentRaw = String((result as any)?.content ?? '');
+        const assistantRaw = String((result as any)?.assistantText ?? '');
+
+        if (contentRaw.trim().length > 0 && assistantRaw.trim().length === 0) {
+          (result as any).assistantText = contentRaw;
+        }
+      }
+
       // ★ content は handleIrosReply の assistantText を正にする（ただし空は空のまま）
       if (typeof assistantText === 'string') {
         const at = assistantText.trim();
         if (at.length > 0) (result as any).content = at;
       }
+
+      console.log('[IROS/Reply][after-handle]', {
+        hasContent: typeof (result as any)?.content === 'string',
+        hasAssistantText: typeof (result as any)?.assistantText === 'string',
+        contentLen: String((result as any)?.content ?? '').length,
+        assistantTextLen: String((result as any)?.assistantText ?? '').length,
+        fallbackApplied: (result as any)?.meta?.extra?.fallbackApplied ?? null,
+        fallbackLen: (result as any)?.meta?.extra?.fallbackLen ?? null,
+        renderEngineGate: (result as any)?.meta?.extra?.renderEngineGate ?? null,
+      });
 
       // =========================================================
       // ★ 三軸「次の一歩」オプションを meta に付与
@@ -966,220 +1067,261 @@ let { result, finalMode, metaForSave, assistantText } = irosResult as any;
       meta = applied.meta;
       extraMerged = applied.extraForHandle;
 
+      // ✅ FINAL sanitize: RenderEngine ON/OFF に関係なく「最終本文」から見出しを完全除去
+      {
+        const before = String((result as any)?.content ?? '');
+        const sanitized = sanitizeFinalContent(before);
 
-// ✅ FINAL sanitize: RenderEngine ON/OFF に関係なく「最終本文」から見出しを完全除去
-{
-  const before = String((result as any)?.content ?? '');
-  const sanitized = sanitizeFinalContent(before);
+        const next = sanitized.text.trim();
+        (result as any).content = next.length > 0 ? next : '';
 
-  const next = sanitized.text.trim();
-  (result as any).content = next.length > 0 ? next : '';
+        meta.extra = {
+          ...(meta.extra ?? {}),
+          finalHeaderStripped: sanitized.removed.length > 0 ? sanitized.removed : null,
+        };
+      }
 
-  meta.extra = {
-    ...(meta.extra ?? {}),
-    finalHeaderStripped:
-      sanitized.removed.length > 0 ? sanitized.removed : null,
-  };
-}
+      // =========================================================
+      // ✅ V2 FINAL確定直前ログ（空になった地点の確定用）
+      // =========================================================
+      const _s = (v: any) => (typeof v === 'string' ? v : v == null ? '' : String(v));
+      const _head = (v: any, n = 64) => {
+        const s = _s(v);
+        return s.length <= n ? s : s.slice(0, n) + '…';
+      };
+      const _len = (v: any) => _s(v).length;
 
-// =========================================================
-// ✅ FINAL本文の確定（UIに出すもの＝保存するもの）
-// - SILENCEで renderEngine/LLM を止めても、content を空にしない
-// - “画面表示” と “DB保存” を一致させる
-// - ★P0: assistantText は必ず最終本文に同期（FINAL_CONTENT_CHECK 前に確定）
-// =========================================================
-{
-  const cur = String((result as any)?.content ?? '').trim();
+      const rObj: any = result && typeof result === 'object' ? (result as any) : null;
 
-  // UIが沈黙表示として使う文字（優先：speechSkippedText → fallback: '…'）
-  const fallbackSilence =
-    String(meta?.extra?.speechSkippedText ?? '').trim() || '…';
+      console.log('[IROS/V2][FINAL-PRE]', {
+        conversationId,
+        userCode,
 
-  // ✅ 空なら必ず埋める（= 画面に出す本文を確定）
-  if (cur.length === 0) {
-    (result as any).content = fallbackSilence;
-  }
+        resultObj_content_len: _len(rObj?.content),
+        resultObj_assistantText_len: _len(rObj?.assistantText),
+        resultObj_text_len: _len(rObj?.text),
+        local_assistantText_len: _len(assistantText),
 
-  // ✅ 最終本文（trim済み）を確定
-  const finalText = String((result as any)?.content ?? '').trim();
-  (result as any).content = finalText;
+        resultObj_content_head: _head(rObj?.content),
+        resultObj_assistantText_head: _head(rObj?.assistantText),
+        resultObj_text_head: _head(rObj?.text),
+        local_assistantText_head: _head(assistantText),
 
-  // ✅ P0：assistantText を “必ず” final content に同期（SILENCE経路でもここを通る）
-  assistantText = finalText;
+        extra_renderEngineApplied: meta?.extra?.renderEngineApplied ?? null,
+        extra_renderEngineBy: meta?.extra?.renderEngineBy ?? null,
+        extra_finalTextPolicy: meta?.extra?.finalTextPolicy ?? null,
+        extra_emptyFinalPatched: meta?.extra?.emptyFinalPatched ?? null,
 
-  meta.extra = {
-    ...(meta.extra ?? {}),
-    finalAssistantTextSynced: true,
-    finalAssistantTextLen: finalText.length,
-  };
-}
+        speechAct: meta?.speechAct ?? meta?.extra?.speechAct ?? null,
+        speechAllowLLM: meta?.speechAllowLLM ?? meta?.extra?.speechAllowLLM ?? null,
+        silencePatched: meta?.silencePatched ?? meta?.extra?.silencePatched ?? null,
+        silencePatchedReason:
+          meta?.silencePatchedReason ??
+          meta?.extra?.silencePatchedReason ??
+          null,
+      });
 
-// =========================================================
-// ✅ UI MODE をここで確定（可視化の単一ソース）
-// - “最終本文(finalText)” を必ず渡す（本文ありSILENCE誤判定を潰す）
-// =========================================================
-{
-  const finalText = String((result as any)?.content ?? '').trim();
+      // =========================================================
+      // ✅ FINAL本文の確定（UIに出すもの＝保存するもの）
+      // =========================================================
+      {
+        const cur = String((result as any)?.content ?? '').trim();
 
-  const uiMode = inferUIMode({
-    modeHint: modeForHandle,
-    effectiveMode,
-    meta,
-    finalText,
-  });
+        const silenceReason = pickSilenceReason(meta);
 
-  const uiReason = inferUIModeReason({
-    modeHint: modeForHandle,
-    effectiveMode,
-    meta,
-    finalText,
-  });
+        // ✅ SILENCE判定は「SILENCE理由がある」かつ「本文が実質空」のときだけ
+        const isSilent = Boolean(silenceReason) && isEffectivelyEmptyText(cur);
 
-  meta.mode = uiMode;
-  meta.modeReason = uiReason;
-  meta.persistPolicy = PERSIST_POLICY;
+        if (isSilent) {
+          (result as any).content = '';
+          (result as any).text = '';
+          assistantText = '';
+          (result as any).assistantText = '';
 
-  meta.extra = {
-    ...(meta.extra ?? {}),
-    uiMode,
-    uiModeReason: uiReason,
-    persistPolicy: PERSIST_POLICY,
-  };
-}
+          meta.extra = {
+            ...(meta.extra ?? {}),
+            finalAssistantTextSynced: true,
+            finalAssistantTextLen: 0,
+            finalTextPolicy: 'SILENCE_EMPTY_BODY',
+            uiModePeek: 'SILENCE',
+            uiModePeekReason: silenceReason,
+          };
+        } else {
+          // ✅ 非SILENCEでは「…」を作らない
+          const finalText = isEffectivelyEmptyText(cur) ? '' : cur;
 
+          (result as any).content = finalText;
+          (result as any).text = finalText;
+          assistantText = finalText;
+          (result as any).assistantText = finalText;
 
+          meta.extra = {
+            ...(meta.extra ?? {}),
+            finalAssistantTextSynced: true,
+            finalAssistantTextLen: finalText.length,
 
-// =========================================================
-// ✅ assistant 保存（single-writer: reply が唯一の writer）
-// - 保存する本文は「FINAL sanitize 後」のみ
-// - 判定は “本文の有無” を唯一の正にする（uiMode では止めない）
-// - 重要：'…'（沈黙表示）も保存する → リロードで消えない
-// - ✅ 追加：沈黙の連続 insert を防ぐ（2重3重対策）
-// - ✅ 追加：assistantText も finalAssistant に統一（ログ差を潰す）
-// =========================================================
-let persistedAssistantMessage: any = null;
+            finalTextPolicy:
+              meta?.extra?.finalTextPolicy ??
+              (finalText.length > 0 ? 'NORMAL_BODY' : 'NORMAL_EMPTY_PASS'),
 
-try {
-  const silenceReason = pickSilenceReason(meta); // 共通関数
+            emptyFinalPatched:
+              meta?.extra?.emptyFinalPatched ??
+              (finalText.length === 0 ? true : undefined),
 
-  // ✅ 最終本文（render / failsafe 後の result.content を唯一の正にする）
-  const finalAssistant = String((result as any)?.content ?? '').trim();
+            emptyFinalPatchedReason:
+              meta?.extra?.emptyFinalPatchedReason ??
+              (finalText.length === 0 ? 'NON_SILENCE_EMPTY_CONTENT' : undefined),
 
-  // ✅ これも最終本文に統一（ログや downstream が assistantText を参照してもズレない）
-  (result as any).assistantText = finalAssistant;
+            uiModePeek: 'NORMAL',
+            uiModePeekReason: null,
+          };
+        }
+      }
 
-  const empty = isEffectivelyEmptyText(finalAssistant);
+      // =========================================================
+      // ✅ UI MODE をここで確定（可視化の単一ソース）
+      // =========================================================
+      {
+        const finalText = String((result as any)?.content ?? '').trim();
 
-  // ✅ “沈黙表示” 判定（保存はする / フラグだけ残す）
-  const isSilenceText =
-    finalAssistant === '…' ||
-    finalAssistant === '...' ||
-    finalAssistant === '….' ||
-    finalAssistant.toLowerCase() === '(silence)' ||
-    // 既存の “…。🪔” も沈黙扱いに含める（過去資産との整合）
-    finalAssistant === '…。🪔';
+        const uiMode = inferUIMode({
+          modeHint: modeForHandle,
+          effectiveMode,
+          meta,
+          finalText,
+        });
 
-// ✅ ここが肝：沈黙が連続しているなら insert しない（2重3重を止める）
-// - 「会話の最後が assistant の沈黙」なら、今回の沈黙は skip（= 二重POST対策）
-// - 最後が user なら、今回の沈黙は “必要な返信” なので保存する
-let skipBecauseDupSilence = false;
-if (isSilenceText) {
-  // 最後の1件（roleも含めて）を取る
-  const { data: lastRows, error: lastErr } = await supabase
-    .from('iros_messages')
-    .select('id, role, content')
-    .eq('conversation_id', conversationId)
-    .order('id', { ascending: false })
-    .limit(1);
+        const uiReason = inferUIModeReason({
+          modeHint: modeForHandle,
+          effectiveMode,
+          meta,
+          finalText,
+        });
 
-  if (!lastErr) {
-    const last = lastRows?.[0];
-    const lastRole = String((last as any)?.role ?? '').trim();
-    const lastText = String((last as any)?.content ?? '').trim();
+        meta.mode = uiMode;
+        meta.modeReason = uiReason;
+        meta.persistPolicy = PERSIST_POLICY;
 
-    const lastIsSilence =
-      lastText === '…' ||
-      lastText === '...' ||
-      lastText === '….' ||
-      lastText.toLowerCase() === '(silence)' ||
-      lastText === '…。🪔';
+        meta.extra = {
+          ...(meta.extra ?? {}),
+          uiMode,
+          uiModeReason: uiReason,
+          persistPolicy: PERSIST_POLICY,
+        };
+      }
 
-    // ✅ 「直前が assistant の沈黙」だけスキップする
-    if (lastRole === 'assistant' && lastIsSilence) {
-      skipBecauseDupSilence = true;
-    }
-  }
-}
+      // =========================================================
+      // ✅ assistant 保存（single-writer）
+      // =========================================================
+      let persistedAssistantMessage: any = null;
 
+      try {
+        const silenceReason = pickSilenceReason(meta);
 
-  // ✅ 保存判定：本文があるなら基本保存。ただし “沈黙の重複” は skip。
-  if (finalAssistant.length > 0 && !skipBecauseDupSilence) {
-    const saved = await persistAssistantMessageToIrosMessages({
-      supabase,
-      conversationId,
-      userCode,
-      content: finalAssistant,
-      meta: meta ?? null, // ✅ 統合後 meta
-    });
+        const finalAssistant = String((result as any)?.content ?? '').trim();
 
-    persistedAssistantMessage = {
-      ok: true,
-      inserted: true,
-      skipped: false,
-      len: finalAssistant.length,
-      reason: null,
-      saved,
-      isSilenceText,
-      skipBecauseDupSilence: false,
-    };
+        (result as any).assistantText = finalAssistant;
 
-    console.log('[IROS/reply][persist-assistant] inserted to iros_messages', {
-      conversationId,
-      userCode,
-      len: finalAssistant.length,
-      isSilenceText,
-    });
-  } else {
-    const reason =
-      finalAssistant.length === 0
-        ? 'EMPTY_CONTENT'
-        : 'DUP_SILENCE_SKIP';
+        const uiMode = inferUIMode({
+          modeHint: modeForHandle,
+          effectiveMode,
+          meta,
+          finalText: finalAssistant,
+        });
 
-    persistedAssistantMessage = {
-      ok: true,
-      inserted: false,
-      skipped: true,
-      len: finalAssistant.length,
-      reason,
-      isSilenceText,
-      skipBecauseDupSilence,
-    };
+        if (uiMode === 'SILENCE') {
+          persistedAssistantMessage = {
+            ok: true,
+            inserted: false,
+            skipped: true,
+            len: 0,
+            reason: 'UI_MODE_SILENCE_NO_INSERT',
+            silenceReason: silenceReason ?? null,
+          };
 
-    console.log('[IROS/reply][persist-assistant] skipped', {
-      conversationId,
-      userCode,
-      reason,
-      len: finalAssistant.length,
-      isSilenceText,
-      skipBecauseDupSilence,
-    });
-  }
-} catch (e) {
-  console.log('[IROS/reply][persist-assistant] error', e);
-  persistedAssistantMessage = {
-    ok: false,
-    inserted: false,
-    skipped: true,
-    len: 0,
-    reason: 'EXCEPTION',
-    isSilenceText: false,
-  };
-}
+          meta.extra = {
+            ...(meta.extra ?? {}),
+            persistedAssistantMessage,
+            silenceNoInsert: true,
+            silenceReason: silenceReason ?? null,
+          };
 
+          console.log(
+            '[IROS/reply][persist-assistant] skipped (SILENCE=no-insert)',
+            {
+              conversationId,
+              userCode,
+              uiMode,
+              silenceReason,
+            },
+          );
+        } else if (finalAssistant.length > 0) {
+          const saved = await persistAssistantMessageToIrosMessages({
+            supabase,
+            conversationId,
+            userCode,
+            content: finalAssistant,
+            meta: meta ?? null,
+          });
+
+          persistedAssistantMessage = {
+            ok: true,
+            inserted: true,
+            skipped: false,
+            len: finalAssistant.length,
+            reason: null,
+            saved,
+          };
+
+          meta.extra = {
+            ...(meta.extra ?? {}),
+            persistedAssistantMessage,
+          };
+
+          console.log('[IROS/reply][persist-assistant] inserted to iros_messages', {
+            conversationId,
+            userCode,
+            len: finalAssistant.length,
+          });
+        } else {
+          persistedAssistantMessage = {
+            ok: true,
+            inserted: false,
+            skipped: true,
+            len: 0,
+            reason: 'EMPTY_CONTENT',
+          };
+
+          meta.extra = {
+            ...(meta.extra ?? {}),
+            persistedAssistantMessage,
+          };
+
+          console.log('[IROS/reply][persist-assistant] skipped', {
+            conversationId,
+            userCode,
+            reason: 'EMPTY_CONTENT',
+          });
+        }
+      } catch (e) {
+        console.log('[IROS/reply][persist-assistant] error', e);
+
+        persistedAssistantMessage = {
+          ok: false,
+          inserted: false,
+          skipped: true,
+          len: 0,
+          reason: 'EXCEPTION',
+        };
+
+        meta.extra = {
+          ...(meta.extra ?? {}),
+          persistedAssistantMessage,
+        };
+      }
 
       // =========================================================
       // ✅ assistant 保存方針（単一責任）
-      // - ここでは「訓練データとして保存するか」だけを制御
       // =========================================================
       const skipTraining =
         meta?.skipTraining === true ||
@@ -1247,21 +1389,20 @@ if (isSilenceText) {
     };
 
     {
-      // ★ string result の最終本文を渡す
       const finalText = String(result ?? '').trim();
 
       const uiMode = inferUIMode({
         modeHint: modeForHandle,
         effectiveMode,
         meta: metaString,
-        finalText, // ✅ 追加
+        finalText,
       });
 
       const uiReason = inferUIModeReason({
         modeHint: modeForHandle,
         effectiveMode,
         meta: metaString,
-        finalText, // ✅ 追加
+        finalText,
       });
 
       metaString.mode = uiMode;
@@ -1274,7 +1415,6 @@ if (isSilenceText) {
         persistPolicy: PERSIST_POLICY,
       };
     }
-
 
     return NextResponse.json(
       {
@@ -1297,10 +1437,6 @@ if (isSilenceText) {
   }
 }
 
-// =========================================================
-// ===== render engine helper (do not place inside POST) =====
-// =========================================================
-
 function applyRenderEngineIfEnabled(params: {
   conversationId: string;
   userCode: string;
@@ -1314,38 +1450,76 @@ function applyRenderEngineIfEnabled(params: {
 
   const extraForHandle: Record<string, any> = { ...(extra ?? {}) };
 
-  // gate：RenderEngine（通常文の整形）は “extra.renderEngine===true” の時だけ
-  const enableRenderEngine = !!extra && (extra as any).renderEngine === true;
+  // ✅ gate は single source：上流で boolean に確定済みの renderEngine をそのまま使う
+  const enableRenderEngine = extraForHandle.renderEngine === true;
 
-  // ✅ IT は gate と無関係に “必ず renderReply を通す”
+  // ✅ IT は gate と無関係に “必ず renderReply を通す”（現行維持）
   const hintedRenderMode =
     (typeof (meta as any)?.renderMode === 'string' && (meta as any).renderMode) ||
-    (typeof (meta as any)?.extra?.renderMode === 'string' && (meta as any).extra.renderMode) ||
-    (typeof (meta as any)?.extra?.renderedMode === 'string' && (meta as any).extra.renderedMode) ||
+    (typeof (meta as any)?.extra?.renderMode === 'string' &&
+      (meta as any).extra.renderMode) ||
+    (typeof (meta as any)?.extra?.renderedMode === 'string' &&
+      (meta as any).extra.renderedMode) ||
     '';
 
   const isIT = String(hintedRenderMode).toUpperCase() === 'IT';
 
-  // ✅ renderReply を走らせる条件
-  const shouldRunRenderReply = enableRenderEngine || isIT;
-
-  // gate 情報（UI/ログ用）
   meta.extra = {
     ...(meta.extra ?? {}),
-    renderEngineGate: enableRenderEngine,      // “通常REの許可”
-    renderReplyForcedIT: isIT,                 // “ITは常時通す”
+    renderEngineGate: enableRenderEngine,
+    renderReplyForcedIT: isIT,
   };
 
-  // ✅ どちらも false なら今まで通り何もしない
+  // =========================================================
+  // ✅ v2: enableRenderEngine=true の場合は renderV2(format-only) を使う
+  // =========================================================
+  if (enableRenderEngine && !isIT) {
+    try {
+      const extraForRender = {
+        ...(meta?.extra ?? {}),
+        ...(extraForHandle ?? {}),
+      };
+
+      const out = renderGatewayAsReply({
+        extra: extraForRender,
+        content: (resultObj as any)?.content ?? null,
+        assistantText: (resultObj as any)?.assistantText ?? null,
+        text: (resultObj as any)?.text ?? null,
+        maxLines: 5,
+      });
+
+      const nextContent = String(out?.content ?? '').trimEnd();
+      resultObj.content = nextContent;
+      (resultObj as any).assistantText = nextContent;
+      (resultObj as any).text = nextContent;
+
+      meta.extra = {
+        ...(meta.extra ?? {}),
+        renderEngineApplied: true,
+        renderEngineBy: 'render-v2',
+        renderV2: out?.meta ?? null,
+      };
+
+      return { meta, extraForHandle };
+    } catch (e) {
+      meta.extra = {
+        ...(meta.extra ?? {}),
+        renderEngineApplied: false,
+        renderEngineBy: 'render-v2',
+        renderEngineError: String(e),
+      };
+      return { meta, extraForHandle };
+    }
+  }
+
+  // =========================================================
+  // ✅ IT は現行の renderReply を維持
+  // =========================================================
+  const shouldRunRenderReply = isIT;
+
   if (!shouldRunRenderReply) {
     return { meta, extraForHandle };
   }
-
-  // ここから下は “従来の try { ... }” をそのまま使ってOK。
-  // ただし renderReply に renderMode を渡せるよう、baseOpts に renderMode を足すのが安全：
-  // const baseOpts = { minimalEmoji: false, renderMode: isIT ? 'IT' : hintedRenderMode } as any;
-  // （このコメント行だけ、既存の baseOpts を差し替えてください）
-
 
   try {
     const contentBefore = String(resultObj?.content ?? '').trim();
@@ -1447,9 +1621,7 @@ function applyRenderEngineIfEnabled(params: {
 
     const baseOpts = {
       minimalEmoji: false,
-      // ✅ IT は gate と無関係に “ITとして” renderReply に渡す
-      renderMode: isIT ? 'IT' : hintedRenderMode || undefined,
-      // density は既存互換（あるなら使う）
+      renderMode: 'IT',
       itDensity:
         (meta as any)?.itDensity ??
         (meta as any)?.density ??
@@ -1479,19 +1651,37 @@ function applyRenderEngineIfEnabled(params: {
         ? String((rendered as any).text)
         : String(rendered ?? '');
 
-    // ✅ 見出し除去（先頭だけ）→ 最終本文へ
     const sanitized = sanitizeFinalContent(renderedText);
-    const nextContent = sanitized.text.trim().length > 0 ? sanitized.text : '';
-
-    resultObj.content = nextContent;
 
     const metaAfter = (patched.meta ?? meta) as any;
     const extraForHandleAfter = (patched.extraForHandle ?? extraForHandle) as any;
 
+    const speechActUpper = String(
+      metaAfter?.extra?.speechAct ??
+        metaAfter?.extra?.speech_act ??
+        extraForHandleAfter?.speechAct ??
+        extraForHandleAfter?.speech_act ??
+        '',
+    ).toUpperCase();
+
+    const isSilence = speechActUpper === 'SILENCE';
+
+    const fallbackText =
+      contentBefore.length > 0 ? contentBefore : String(fallbackFacts ?? '').trim();
+
+    const nextContent = isSilence
+      ? sanitized.text.trimEnd()
+      : sanitized.text.trim().length > 0
+        ? sanitized.text.trimEnd()
+        : fallbackText;
+
+    resultObj.content = nextContent;
+    (resultObj as any).assistantText = nextContent;
+    (resultObj as any).text = nextContent;
+
     metaAfter.extra = {
       ...(metaAfter.extra ?? {}),
       renderEngineApplied: nextContent.length > 0,
-      renderEngineFallbackUsed: contentBefore.length === 0,
       headerStripped: sanitized.removed.length > 0 ? sanitized.removed : null,
     };
 

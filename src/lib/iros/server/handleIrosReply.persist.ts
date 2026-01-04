@@ -3,6 +3,9 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+// ✅ アンカー汚染判定は「共通の唯一」を使う（重複定義しない）
+import { isMetaAnchorText } from '@/lib/iros/intentAnchor';
+
 /* =========================
  * Types
  * ========================= */
@@ -14,14 +17,39 @@ type AnchorEventType = 'none' | 'confirm' | 'set' | 'reset';
 
 // ✅ q_counts は「it_cooldown」等の付帯情報を含み得る（jsonb）
 type QCounts = {
-  it_cooldown?: number; // 0/1 を想定
+  it_cooldown?: number; // 0/1
   q_trace?: any; // 観測用（DB列追加なしで調査できる）
+  it_triggered?: boolean;
+  it_triggered_true?: boolean;
   [k: string]: any;
 };
+
+type PrevMemoryState = {
+  q_counts?: any;
+  depth_stage?: string | null;
+  q_primary?: string | null;
+  phase?: string | null;
+  intent_layer?: string | null;
+  self_acceptance?: number | null;
+  y_level?: number | null;
+  h_level?: number | null;
+  spin_loop?: string | null;
+  spin_step?: number | null;
+  descent_gate?: string | null;
+  intent_anchor?: any;
+  summary?: string | null;
+  situation_summary?: string | null;
+  situation_topic?: string | null;
+  sentiment_level?: any;
+} | null;
 
 /* =========================
  * Helpers (minimal / noUnusedLocals-safe)
  * ========================= */
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
 
 function toInt0to3(v: unknown): number | null {
   if (typeof v !== 'number' || !Number.isFinite(v)) return null;
@@ -69,11 +97,16 @@ function normalizeDescentGate(v: unknown): DescentGate | null {
 function normalizeQCounts(v: unknown): QCounts {
   if (!v || typeof v !== 'object') return { it_cooldown: 0 };
   const obj = v as any;
-
   const cd = typeof obj.it_cooldown === 'number' ? obj.it_cooldown : 0;
-
-  // ✅ 0/1 固定（将来拡張OK）
   return { ...(obj ?? {}), it_cooldown: cd > 0 ? 1 : 0 };
+}
+
+function normalizeAnchorText(text: string): string {
+  return String(text ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .trim();
 }
 
 /** intent_anchor から text を安全に取り出す */
@@ -81,14 +114,10 @@ function extractAnchorText(anchor: any): string | null {
   if (!anchor) return null;
   if (typeof anchor === 'string') return anchor.trim() || null;
   if (typeof anchor === 'object') {
-    const t = anchor.text;
+    const t = (anchor as any).text;
     if (typeof t === 'string') return t.trim() || null;
   }
   return null;
-}
-
-function normalizeAnchorText(text: string): string {
-  return (text ?? '').replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ').trim();
 }
 
 /**
@@ -107,44 +136,6 @@ function pickAnchorEventType(metaForSave: any): AnchorEventType {
 }
 
 /**
- * “メタ発話・会話制御” はアンカーにしない（固定ルール）
- * ※意味解釈ではなく、危険パターンを明示的に落とす
- */
-function isMetaAnchorText(text: string): boolean {
-  const s = normalizeAnchorText(text);
-  if (!s) return true;
-
-  // 典型メタ
-  if (/^覚えて(る|ます)?[？?]?$/.test(s)) return true;
-  if (/^何の話(し)?[？?]?$/.test(s)) return true;
-  if (/^さっき(話した|言った)(でしょ|よね)?/.test(s)) return true;
-
-  // 極端に短いものは北極星にならない
-  if (s.length <= 6) return true;
-
-  // テンプレ批評・AI批評系はアンカーにしない
-  const metaKeywords = [
-    'AI',
-    'iros',
-    'Iros',
-    'GPT',
-    'テンプレ',
-    '同じ',
-    '繰り返し',
-    '一般',
-    '違う',
-    'それ違う',
-    'その答え',
-    '足踏み',
-  ];
-  for (const k of metaKeywords) {
-    if (s.includes(k)) return true;
-  }
-
-  return false;
-}
-
-/**
  * ✅ intent_anchor 保存ゲート（合意仕様）
  * - DB上のアンカーは「北極星」なので、通常ターンでは更新しない
  * - 更新できるのは set/reset のときだけ
@@ -160,13 +151,8 @@ function shouldWriteIntentAnchorToMemoryState(args: {
 }): { action: 'keep' | 'set' | 'reset' } {
   const { anchorEventType, anchorText } = args;
 
-  if (anchorEventType === 'reset') {
-    return { action: 'reset' };
-  }
-
-  if (anchorEventType !== 'set') {
-    return { action: 'keep' };
-  }
+  if (anchorEventType === 'reset') return { action: 'reset' };
+  if (anchorEventType !== 'set') return { action: 'keep' };
 
   if (!anchorText) return { action: 'keep' };
   if (isMetaAnchorText(anchorText)) return { action: 'keep' };
@@ -174,43 +160,117 @@ function shouldWriteIntentAnchorToMemoryState(args: {
   return { action: 'set' };
 }
 
+function pickFirstString(...cands: any[]): string | null {
+  for (const v of cands) {
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return null;
+}
+
+/**
+ * ✅ previous memory_state を「環境差（列欠損）」に強く読む
+ * - 42703(未定義カラム) の場合、列を落として再試行
+ */
+async function safeLoadPreviousMemoryState(
+  supabase: SupabaseClient,
+  userCode: string,
+): Promise<PrevMemoryState> {
+  const baseCols = [
+    'q_counts',
+    'depth_stage',
+    'q_primary',
+    'phase',
+    'intent_layer',
+    'self_acceptance',
+    'y_level',
+    'h_level',
+    'spin_loop',
+    'spin_step',
+    'intent_anchor',
+    'summary',
+    'situation_summary',
+    'situation_topic',
+    'sentiment_level',
+  ];
+
+  const withDescent = [...baseCols, 'descent_gate'];
+
+  // 1st try (with descent_gate)
+  {
+    const { data, error } = await supabase
+      .from('iros_memory_state')
+      .select(withDescent.join(','))
+      .eq('user_code', userCode)
+      .maybeSingle();
+
+    if (!error) return (data as any) ?? null;
+
+    const code = (error as any)?.code;
+    const msg = String((error as any)?.message ?? '');
+
+    // 42703: drop descent_gate and retry
+    if (code === '42703' && /descent_gate/i.test(msg)) {
+      console.warn('[IROS/STATE] previous select missing descent_gate. retry without it.', {
+        userCode,
+        code,
+        message: msg,
+      });
+    } else {
+      console.warn('[IROS/STATE] load previous memory_state not ok (continue)', {
+        userCode,
+        code,
+        message: msg,
+      });
+      return null;
+    }
+  }
+
+  // retry (base)
+  {
+    const { data, error } = await supabase
+      .from('iros_memory_state')
+      .select(baseCols.join(','))
+      .eq('user_code', userCode)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('[IROS/STATE] load previous memory_state retry not ok (continue)', {
+        userCode,
+        code: (error as any)?.code,
+        message: (error as any)?.message,
+      });
+      return null;
+    }
+    return (data as any) ?? null;
+  }
+}
+
 /* =========================
  * Persist: messages
  * ========================= */
-// ✅ single-writer 固定：assistant は絶対に保存しない（/messages は user-only）
+// ✅ single-writer 固定：assistant は絶対に保存しない（route.ts が唯一の保存者）
 export async function persistAssistantMessage(args: {
-  supabase: SupabaseClient; // 使わないが、呼び出し側の統一のため受け取る
+  supabase: SupabaseClient; // 使わない（呼び出し統一のため受け取る）
   reqOrigin: string;
   authorizationHeader: string | null;
   conversationId: string;
   userCode: string;
   assistantText: string;
   metaForSave: any;
-
-  // ✅ renderEngine 後本文も受け取れるように（あってもなくてもOK）
   content?: string;
   renderedContent?: string;
 }) {
-  const { conversationId, userCode, metaForSave } = args;
+  const { conversationId, userCode } = args;
 
-  console.log('[IROS/persistAssistantMessage] HARD-SKIP (single-writer user-only)', {
+  console.log('[IROS/persistAssistantMessage] HARD-SKIP (single-writer route.ts)', {
     conversationId,
     userCode,
   });
 
-  // 呼び出し側が判定できるように “印” だけ残す（任意）
-  if (metaForSave && typeof metaForSave === 'object') {
-    metaForSave.extra = metaForSave.extra ?? {};
-    metaForSave.extra.persistAssistantMessage = false;
-    // ※ persistedByRoute は本来 route.ts が付与する印だが、
-    //   「二重保存を構造的に根絶」する目的でここでも true にしておく（安全側）
-    metaForSave.extra.persistedByRoute = true;
-  }
-
   return {
     ok: true,
     skipped: true,
-    reason: 'SINGLE_WRITER_USER_ONLY__ASSISTANT_NEVER_PERSIST',
+    reason: 'SINGLE_WRITER__ASSISTANT_PERSISTED_BY_ROUTE_ONLY',
   } as any;
 }
 
@@ -227,10 +287,10 @@ export async function persistQCodeSnapshotIfAny(args: {
   const { userCode, conversationId, requestedMode, metaForSave } = args;
 
   try {
-    const m: any = metaForSave ?? null;
+    const root: any = metaForSave ?? null;
 
     // metaForSave の形が複数あり得るので “実体” を探す
-    const core: any = m?.meta ?? m?.finalMeta ?? m;
+    const core: any = root?.meta ?? root?.finalMeta ?? root;
     const unified: any = core?.unified ?? null;
 
     // ---- Q を “絶対に拾う” 優先順 ----
@@ -248,11 +308,16 @@ export async function persistQCodeSnapshotIfAny(args: {
 
     // ---- Depth stage を拾う ----
     const stage: any =
-      core?.depth ?? core?.depth_stage ?? core?.depthStage ?? unified?.depth?.stage ?? null;
+      core?.depth ??
+      core?.depth_stage ??
+      core?.depthStage ??
+      unified?.depth?.stage ??
+      null;
 
-    // ここは将来 meta から取れるなら差し替え可
-    const layer: any = 'inner';
-    const polarity: any = 'now';
+    // layer/polarity（安全デフォルト）
+    const phase = normalizePhase(core?.phase ?? unified?.phase ?? null);
+    const layer: any = phase === 'Outer' ? 'outer' : 'inner';
+    const polarity: any = (unified as any)?.polarityBand ?? 'now';
 
     if (q) {
       const { writeQCodeWithEnv } = await import('@/lib/qcode/qcode-adapter');
@@ -266,7 +331,7 @@ export async function persistQCodeSnapshotIfAny(args: {
         layer,
         polarity,
         conversation_id: conversationId,
-        created_at: new Date().toISOString(),
+        created_at: nowIso(),
         extra: {
           _from: 'handleIrosReply.persist',
           _picked_from: {
@@ -333,66 +398,90 @@ export async function persistMemoryStateIfAny(args: {
   try {
     if (!metaForSave) return;
 
-    // unified を最優先で使う（postProcessReply 後は必ず揃っている）
-    const unified: any = metaForSave?.unified ?? {};
+    // =========================================================
+    // ✅ metaForSave の形ゆれを吸収
+    // =========================================================
+    const root: any = metaForSave ?? null;
+    const core: any = root?.meta ?? root?.finalMeta ?? root;
+    const unified: any = core?.unified ?? {};
+    const extra: any = root?.extra ?? core?.extra ?? null;
 
     // =========================================================
-    // ITX（Intent Transition）: metaForSave から確定値を拾う（トップ優先）
+    // previous（環境差に強い読み）
+    // =========================================================
+    const previous = await safeLoadPreviousMemoryState(supabase, userCode);
+
+    // =========================================================
+    // q / depth（取りこぼし防止：core/unified）
+    // =========================================================
+    const qCodeInput =
+      unified?.q?.current ?? core?.qPrimary ?? core?.q_code ?? core?.qCode ?? null;
+
+    const depthInput =
+      unified?.depth?.stage ?? core?.depth ?? core?.depth_stage ?? core?.depthStage ?? null;
+
+    // 保存する意味がある最低条件
+    if (!depthInput && !qCodeInput) {
+      console.warn('[IROS/STATE] skip persistMemoryStateIfAny (no depth/q)', { userCode });
+      return;
+    }
+
+    // =========================================================
+    // ITX（Intent Transition）: core/extra/unified から確定値を拾う
     // =========================================================
     const stepRaw =
-      (metaForSave as any)?.itx_step ??
-      (metaForSave as any)?.itxStep ??
-      (metaForSave as any)?.itx?.step ??
-      (metaForSave as any)?.extra?.itx_step ??
-      (metaForSave as any)?.extra?.itxStep ??
-      (metaForSave as any)?.extra?.itx?.step ??
-      (unified as any)?.itx_step ??
-      (unified as any)?.itxStep ??
-      (unified as any)?.itx?.step ??
+      core?.itx_step ??
+      core?.itxStep ??
+      core?.itx?.step ??
+      extra?.itx_step ??
+      extra?.itxStep ??
+      extra?.itx?.step ??
+      unified?.itx_step ??
+      unified?.itxStep ??
+      unified?.itx?.step ??
       null;
 
     const anchorRaw =
-      (metaForSave as any)?.itx_anchor_event_type ??
-      (metaForSave as any)?.itxAnchorEventType ??
-      (metaForSave as any)?.itx?.anchorEventType ??
-      (metaForSave as any)?.anchorEventType ??
-      (metaForSave as any)?.extra?.itx_anchor_event_type ??
-      (metaForSave as any)?.extra?.itxAnchorEventType ??
-      (metaForSave as any)?.extra?.itx?.anchorEventType ??
-      (metaForSave as any)?.extra?.anchorEventType ??
-      (unified as any)?.itx_anchor_event_type ??
-      (unified as any)?.itxAnchorEventType ??
-      (unified as any)?.itx?.anchorEventType ??
-      (unified as any)?.anchorEventType ??
+      core?.itx_anchor_event_type ??
+      core?.itxAnchorEventType ??
+      core?.itx?.anchorEventType ??
+      core?.anchorEventType ??
+      extra?.itx_anchor_event_type ??
+      extra?.itxAnchorEventType ??
+      extra?.itx?.anchorEventType ??
+      extra?.anchorEventType ??
+      unified?.itx_anchor_event_type ??
+      unified?.itxAnchorEventType ??
+      unified?.itx?.anchorEventType ??
+      unified?.anchorEventType ??
       null;
 
     const reasonRaw =
-      (metaForSave as any)?.itx_reason ??
-      (metaForSave as any)?.itxReason ??
-      (metaForSave as any)?.itx?.reason ??
-      (metaForSave as any)?.itReason ??
-      (metaForSave as any)?.extra?.itx_reason ??
-      (metaForSave as any)?.extra?.itxReason ??
-      (metaForSave as any)?.extra?.itx?.reason ??
-      (metaForSave as any)?.extra?.itReason ??
-      (unified as any)?.itx_reason ??
-      (unified as any)?.itxReason ??
-      (unified as any)?.itx?.reason ??
+      core?.itx_reason ??
+      core?.itxReason ??
+      core?.itx?.reason ??
+      core?.itReason ??
+      extra?.itx_reason ??
+      extra?.itxReason ??
+      extra?.itx?.reason ??
+      extra?.itReason ??
+      unified?.itx_reason ??
+      unified?.itxReason ??
+      unified?.itx?.reason ??
       null;
 
     const lastAtRaw =
-      (metaForSave as any)?.itx_last_at ??
-      (metaForSave as any)?.itxLastAt ??
-      (metaForSave as any)?.itx?.lastAt ??
-      (metaForSave as any)?.extra?.itx_last_at ??
-      (metaForSave as any)?.extra?.itxLastAt ??
-      (metaForSave as any)?.extra?.itx?.lastAt ??
-      (unified as any)?.itx_last_at ??
-      (unified as any)?.itxLastAt ??
-      (unified as any)?.itx?.lastAt ??
+      core?.itx_last_at ??
+      core?.itxLastAt ??
+      core?.itx?.lastAt ??
+      extra?.itx_last_at ??
+      extra?.itxLastAt ??
+      extra?.itx?.lastAt ??
+      unified?.itx_last_at ??
+      unified?.itxLastAt ??
+      unified?.itx?.lastAt ??
       null;
 
-    // 正規化（T1/T2/T3 だけを受け付ける）
     const tHint =
       typeof stepRaw === 'string'
         ? stepRaw.trim().toUpperCase()
@@ -403,81 +492,24 @@ export async function persistMemoryStateIfAny(args: {
     const stepFinal: 'T1' | 'T2' | 'T3' | null =
       tHint === 'T1' || tHint === 'T2' || tHint === 'T3' ? (tHint as any) : null;
 
-    // 正規化（none/confirm/set/reset だけ）
     const a = typeof anchorRaw === 'string' ? anchorRaw.trim().toLowerCase() : '';
-    const anchorFinal: 'none' | 'confirm' | 'set' | 'reset' | null =
+    const anchorFinal: AnchorEventType | null =
       a === 'none' || a === 'confirm' || a === 'set' || a === 'reset' ? (a as any) : null;
 
-    // 正規化（空文字は null）
     const reasonFinal =
       typeof reasonRaw === 'string' && reasonRaw.trim().length > 0 ? reasonRaw.trim() : null;
 
-    // 正規化（ISOを期待。とりあえず空でなければ通す）
     const lastAtFinal =
       typeof lastAtRaw === 'string' && lastAtRaw.trim().length > 0 ? lastAtRaw.trim() : null;
 
-    // =========================================================
-    // previous を先に取得（merge の土台）
-    // ※ ITX列は「未定義列で落ちるDBがある」ので select には入れない（安全）
-    // =========================================================
-    const { data: previous, error: prevErr } = await supabase
-      .from('iros_memory_state')
-      .select(
-        [
-          'q_counts',
-          'depth_stage',
-          'q_primary',
-          'phase',
-          'intent_layer',
-          'self_acceptance',
-          'y_level',
-          'h_level',
-          'spin_loop',
-          'spin_step',
-          'descent_gate',
-          'intent_anchor',
-          'summary',
-          'situation_summary',
-          'situation_topic',
-          'sentiment_level',
-        ].join(','),
-      )
-      .eq('user_code', userCode)
-      .maybeSingle();
-
-    if (prevErr) {
-      console.warn('[IROS/STATE] load previous memory_state not ok (continue)', {
-        userCode,
-        code: (prevErr as any)?.code,
-        message: (prevErr as any)?.message,
-      });
-    }
-
-    // =========================================================
-    // q / depth の入力（取りこぼし防止）
-    // =========================================================
-    const qCodeInput =
-      unified?.q?.current ??
-      (metaForSave as any)?.qPrimary ??
-      (metaForSave as any)?.q_code ??
-      (metaForSave as any)?.qCode ??
-      null;
-
-    const depthInput =
-      unified?.depth?.stage ??
-      (metaForSave as any)?.depth ??
-      (metaForSave as any)?.depth_stage ??
-      (metaForSave as any)?.depthStage ??
-      null;
-
-    // --- IT発火の復元（renderMode=IT から推定しない）---
+    // --- IT発火（renderModeから推定しない）---
     const itTriggeredResolved: boolean | null =
       typeof itTriggered === 'boolean'
         ? itTriggered
-        : typeof (metaForSave as any)?.itTriggered === 'boolean'
-          ? (metaForSave as any).itTriggered
-          : typeof (metaForSave as any)?.extra?.itTriggered === 'boolean'
-            ? (metaForSave as any).extra.itTriggered
+        : typeof core?.itTriggered === 'boolean'
+          ? core.itTriggered
+          : typeof extra?.itTriggered === 'boolean'
+            ? extra.itTriggered
             : null;
 
     const itTriggeredForCounts = itTriggeredResolved === true;
@@ -487,13 +519,13 @@ export async function persistMemoryStateIfAny(args: {
     // =========================================================
     const prevQ = (previous as any)?.q_primary ?? null;
 
-    const qtu = (metaForSave as any)?.qTraceUpdated;
+    const qtu = core?.qTraceUpdated;
     const qtuLen =
       typeof qtu?.streakLength === 'number' && Number.isFinite(qtu.streakLength)
         ? Math.max(0, Math.floor(qtu.streakLength))
         : null;
 
-    const qt = (metaForSave as any)?.qTrace;
+    const qt = core?.qTrace;
     const qtLen =
       typeof qt?.streakLength === 'number' && Number.isFinite(qt.streakLength)
         ? Math.max(0, Math.floor(qt.streakLength))
@@ -524,76 +556,42 @@ export async function persistMemoryStateIfAny(args: {
     }
 
     const qTraceForCounts = qCodeInput
-      ? {
-          prevQ,
-          qNow: qCodeInput,
-          streakQ,
-          streakLength,
-          from: streakFrom,
-        }
+      ? { prevQ, qNow: qCodeInput, streakQ, streakLength, from: streakFrom }
       : null;
 
-    console.log('[IROS/QTrace] persisted', {
-      prevQ,
-      qNow: qCodeInput,
-      streakQ,
-      streakLength,
-      from: streakFrom,
-    });
-
     // =========================================================
-    // 基本入力
+    // 基本入力（core/unified）
     // =========================================================
-    const phaseRawInput = (metaForSave as any)?.phase ?? unified?.phase ?? null;
+    const phaseRawInput = core?.phase ?? unified?.phase ?? null;
     const phaseInput = normalizePhase(phaseRawInput);
 
     const selfAcceptanceInput =
-      (metaForSave as any)?.selfAcceptance ??
-      unified?.selfAcceptance ??
-      unified?.self_acceptance ??
-      null;
+      core?.selfAcceptance ?? unified?.selfAcceptance ?? unified?.self_acceptance ?? null;
 
-    const yIntInput = toInt0to3((metaForSave as any)?.yLevel ?? unified?.yLevel);
-    const hIntInput = toInt0to3((metaForSave as any)?.hLevel ?? unified?.hLevel);
+    const yIntInput = toInt0to3(core?.yLevel ?? unified?.yLevel);
+    const hIntInput = toInt0to3(core?.hLevel ?? unified?.hLevel);
 
     const situationSummaryInput =
-      (metaForSave as any)?.situationSummary ??
-      unified?.situation?.summary ??
-      (metaForSave as any)?.situation_summary ??
-      null;
+      core?.situationSummary ?? unified?.situation?.summary ?? core?.situation_summary ?? null;
 
     const situationTopicInput =
-      (metaForSave as any)?.situationTopic ??
-      unified?.situation?.topic ??
-      (metaForSave as any)?.situation_topic ??
-      null;
+      core?.situationTopic ?? unified?.situation?.topic ?? core?.situation_topic ?? null;
 
     const sentimentLevelInput =
-      (metaForSave as any)?.sentimentLevel ??
-      (metaForSave as any)?.sentiment_level ??
-      unified?.sentiment_level ??
-      null;
+      core?.sentimentLevel ?? core?.sentiment_level ?? unified?.sentiment_level ?? null;
 
     // =========================================================
-    // spin / descentGate は「normalize → merge」する（nullで潰さない）
+    // spin / descentGate（normalize → merge）
     // =========================================================
     const spinLoopRawInput =
-      (metaForSave as any)?.spinLoop ??
-      (metaForSave as any)?.spin_loop ??
-      unified?.spin_loop ??
-      unified?.spinLoop ??
-      null;
+      core?.spinLoop ?? core?.spin_loop ?? unified?.spin_loop ?? unified?.spinLoop ?? null;
 
     const spinStepRawInput =
-      (metaForSave as any)?.spinStep ??
-      (metaForSave as any)?.spin_step ??
-      unified?.spin_step ??
-      unified?.spinStep ??
-      null;
+      core?.spinStep ?? core?.spin_step ?? unified?.spin_step ?? unified?.spinStep ?? null;
 
     const descentGateRawInput =
-      (metaForSave as any)?.descentGate ??
-      (metaForSave as any)?.descent_gate ??
+      core?.descentGate ??
+      core?.descent_gate ??
       unified?.descent_gate ??
       unified?.descentGate ??
       null;
@@ -608,10 +606,11 @@ export async function persistMemoryStateIfAny(args: {
 
     const finalSpinLoop: SpinLoop | null = spinLoopNormInput ?? spinLoopNormPrev ?? null;
     const finalSpinStep: 0 | 1 | 2 | null = spinStepNormInput ?? spinStepNormPrev ?? null;
-    const finalDescentGate: DescentGate | null = descentGateNormInput ?? descentGateNormPrev ?? null;
+    const finalDescentGate: DescentGate | null =
+      descentGateNormInput ?? descentGateNormPrev ?? null;
 
     // =========================================================
-    // q_counts（IT cooldown / q_trace を一本化）
+    // q_counts（IT cooldown / q_trace）
     // =========================================================
     const prevQCounts = normalizeQCounts((previous as any)?.q_counts);
     const incomingQCounts = qCounts ? normalizeQCounts(qCounts) : null;
@@ -631,22 +630,22 @@ export async function persistMemoryStateIfAny(args: {
     // Anchor candidate（ITの核を拾う）
     // =========================================================
     const itCoreRaw =
-      (metaForSave as any)?.tVector?.core ??
-      (metaForSave as any)?.itResult?.tVector?.core ??
-      (metaForSave as any)?.extra?.tVector?.core ??
-      (metaForSave as any)?.extra?.itResult?.tVector?.core ??
-      (unified as any)?.tVector?.core ??
+      core?.tVector?.core ??
+      core?.itResult?.tVector?.core ??
+      extra?.tVector?.core ??
+      extra?.itResult?.tVector?.core ??
+      unified?.tVector?.core ??
       null;
 
     const itCoreText = typeof itCoreRaw === 'string' ? itCoreRaw.trim() : null;
 
     const anchorEventTypeResolved: AnchorEventType =
-      (anchorFinal as any) ?? pickAnchorEventType(metaForSave);
+      (anchorFinal as any) ?? pickAnchorEventType(core);
 
     const anchorCandidate =
       itCoreText ??
-      extractAnchorText((metaForSave as any)?.intentAnchor) ??
-      extractAnchorText((metaForSave as any)?.intent_anchor) ??
+      extractAnchorText(core?.intentAnchor) ??
+      extractAnchorText(core?.intent_anchor) ??
       null;
 
     const anchorWrite = shouldWriteIntentAnchorToMemoryState({
@@ -656,62 +655,48 @@ export async function persistMemoryStateIfAny(args: {
 
     console.log('[IROS/STATE] persistMemoryStateIfAny start', {
       userCode,
-      userText: (userText ?? '').slice(0, 80),
-
+      userText: String(userText ?? '').slice(0, 80),
       depthInput,
       qCodeInput,
       phaseRawInput,
       phaseInput,
-
-      yLevelRaw: (metaForSave as any)?.yLevel ?? unified?.yLevel ?? null,
-      hLevelRaw: (metaForSave as any)?.hLevel ?? unified?.hLevel ?? null,
+      yLevelRaw: core?.yLevel ?? unified?.yLevel ?? null,
+      hLevelRaw: core?.hLevel ?? unified?.hLevel ?? null,
       yLevelInt: yIntInput,
       hLevelInt: hIntInput,
-
       spinLoopRawInput,
       finalSpinLoop,
       spinStepRawInput,
       finalSpinStep,
       descentGateRawInput,
       finalDescentGate,
-
       itTriggered: itTriggeredResolved ?? null,
       q_counts_prev: prevQCounts,
       q_counts_next: nextQCounts,
-
-      // ITX
       itx_step: stepFinal,
       itx_anchor_event_type: anchorFinal,
       itx_reason: reasonFinal,
       itx_last_at: lastAtFinal,
-
-      // Anchor gate
       anchor_event: anchorEventTypeResolved,
       anchor_write: anchorWrite.action,
     });
-
-    // 保存する意味がある最低条件
-    if (!depthInput && !qCodeInput) {
-      console.warn('[IROS/STATE] skip persistMemoryStateIfAny (no depth/q)', { userCode });
-      return;
-    }
 
     // =========================================================
     // upsertPayload：null は “保存しない”（過去の値を壊さない）
     // =========================================================
     const upsertPayload: any = {
       user_code: userCode,
-      updated_at: new Date().toISOString(),
+      updated_at: nowIso(),
     };
 
     // =========================================================
-    // ✅ intent_layer を必ず決めて保存する（宣言後に代入：ts2448対策）
+    // ✅ intent_layer（core / depth / prev の順で確定）
     // =========================================================
     const intentLayerRaw =
-      (metaForSave as any)?.intent_layer ??
-      (metaForSave as any)?.intentLayer ??
-      (unified as any)?.intent_layer ??
-      (unified as any)?.intentLayer ??
+      core?.intent_layer ??
+      core?.intentLayer ??
+      unified?.intent_layer ??
+      unified?.intentLayer ??
       null;
 
     const intentLayerFromDepth =
@@ -722,14 +707,13 @@ export async function persistMemoryStateIfAny(args: {
           })()
         : null;
 
-    const intentLayerPrev =
-      (previous as any)?.intent_layer ?? (previous as any)?.intentLayer ?? null;
+    const intentLayerPrev = (previous as any)?.intent_layer ?? (previous as any)?.intentLayer ?? null;
 
     const intentLayerFinal =
       typeof intentLayerRaw === 'string' &&
       ['S', 'R', 'C', 'I', 'T'].includes(intentLayerRaw.trim().toUpperCase())
         ? (intentLayerRaw.trim().toUpperCase() as any)
-        : (intentLayerFromDepth ?? intentLayerPrev ?? null);
+        : intentLayerFromDepth ?? intentLayerPrev ?? null;
 
     if (intentLayerFinal) upsertPayload.intent_layer = intentLayerFinal;
 
@@ -740,10 +724,7 @@ export async function persistMemoryStateIfAny(args: {
     if (qCodeInput) upsertPayload.q_primary = qCodeInput;
     if (phaseInput) upsertPayload.phase = phaseInput;
 
-    if (typeof selfAcceptanceInput === 'number') {
-      upsertPayload.self_acceptance = selfAcceptanceInput;
-    }
-
+    if (typeof selfAcceptanceInput === 'number') upsertPayload.self_acceptance = selfAcceptanceInput;
     if (typeof yIntInput === 'number') upsertPayload.y_level = yIntInput;
     if (typeof hIntInput === 'number') upsertPayload.h_level = hIntInput;
 
@@ -753,11 +734,7 @@ export async function persistMemoryStateIfAny(args: {
 
     // ✅ 文章メモリ（summary）：ある時だけ更新（過去を壊さない）
     const rawUserText =
-      (metaForSave as any)?.userText ??
-      (metaForSave as any)?.user_text ??
-      (metaForSave as any)?.input_text ??
-      (metaForSave as any)?.text ??
-      null;
+      core?.userText ?? core?.user_text ?? core?.input_text ?? core?.text ?? null;
 
     const summaryCandidate =
       (typeof situationSummaryInput === 'string' && situationSummaryInput.trim()) ||
@@ -773,7 +750,7 @@ export async function persistMemoryStateIfAny(args: {
     if (finalSpinLoop) upsertPayload.spin_loop = finalSpinLoop;
     if (typeof finalSpinStep === 'number') upsertPayload.spin_step = finalSpinStep;
 
-    // descent_gate は列がない環境があるので、まず入れて失敗なら外して再試行
+    // descent_gate は列がない環境があるので、入れて失敗なら外して再試行
     if (finalDescentGate) upsertPayload.descent_gate = finalDescentGate;
 
     // ✅ q_counts
@@ -789,29 +766,27 @@ export async function persistMemoryStateIfAny(args: {
 
     // =========================================================
     // ✅ intent_anchor 更新（北極星のルール）
-    // - set のときだけ上書き
-    // - reset は null（消す）
-    // - keep/confirm は触らない
     // =========================================================
     if (anchorWrite.action === 'set') {
       upsertPayload.intent_anchor = {
         text: normalizeAnchorText(anchorCandidate ?? ''),
-        at: new Date().toISOString(),
+        at: nowIso(),
         type: 'SUN',
       };
     } else if (anchorWrite.action === 'reset') {
       upsertPayload.intent_anchor = null;
     }
 
-    // 1回目 upsert
+    // =========================================================
+    // upsert（列欠損を許容して 1回だけ再試行）
+    // =========================================================
     let { error } = await supabase.from('iros_memory_state').upsert(upsertPayload, {
       onConflict: 'user_code',
     });
 
-    // 42703(未定義カラム) のとき、原因列を外して1回だけ再試行（descent_gate / ITX）
     if (error) {
       const code = (error as any)?.code;
-      const msg = (error as any)?.message ?? '';
+      const msg = String((error as any)?.message ?? '');
 
       const missing = (name: string) => code === '42703' && new RegExp(name, 'i').test(msg);
 

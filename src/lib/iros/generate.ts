@@ -1,29 +1,15 @@
 // src/lib/iros/generate.ts
-// iros — Writer: 1ターン返信生成コア（芯=coreIntent 強制 / 回転メタ注入）
+// iros — Writer: 1ターン返信生成コア（v2 / empty-body防止 / SpeechAct単一ソース / ITはtLayerModeActive単一）
 //
-// 互換方針：
-// - 呼び出し側が seed/chatCore/handleIrosReply で揺れていても型で落ちないようにする
-// - 返り値は content を正とし、text/assistantText など旧互換も同値で返す
-// - ✅ LLM へ会話履歴（history）を渡し、会話の流れを LLM が保持できるようにする
-//
-// 追加方針（2025-12-17）:
-// - 短文（超短い入力）には「芯」「回転」「制約」を文章に乗せない
-// - ただし “数値メタ” だけは必ず末尾に 1 行で付ける（説明は禁止）
-//
-// ✅ 2025-12-26 修正：IT判定の単一ソースを renderMode から meta.tLayerModeActive に統一
-// - orchestrator.ts の computeITTrigger が毎ターン決める tLayerModeActive を唯一の正にする
-// - generate 側では renderMode 参照を廃止（競合/ズレ防止）
-//
-// ✅ 2025-12-30 追記：SpeechAct（LLM前確定）
-// - LLMを呼ぶ前に SpeechAct を確定（SILENCE/FORWARD/NAME/FLIP/COMMIT）
-// - systemで器(AllowSchema)を強制
-// - さらに enforceAllowSchema で最終出力を器に固定（二段ロック）
-//
-// ✅ 2025-12-30 修正：enforceAllowSchema が SILENCE を返しても、
-//   Decision が SILENCE でない限り “無言化” を絶対に許可しない（単一ソース）
+// ✅ v2の最重要要件（今回の「content/text/assistantText が空」事故を潰す）
+// - 生成経路がどう揺れても「本文は必ず非空」で返す（… でもいいが "" は禁止）
+// - render-v2 は入力が空だと何も作れない → generate側で non-empty を保証
+// - SpeechAct は applySpeechAct の結果を単一ソースにする（allowLLM含む）
+// - IT判定は renderMode を見ない。meta.tLayerModeActive / tLayerHint のみ
+// - history は system汚染なしで渡す。末尾重複は除去
 //
 // NOTE:
-// - 「コード1つずつ提示」方針に従い、このファイル全文のみ提示
+// - 「コードは1つずつ提示」方針に従い、このファイル全文のみ提示
 
 import OpenAI from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat';
@@ -63,7 +49,7 @@ export type GenerateResult = {
   // 旧互換
   text: string;
 
-  // ✅ ここを “必須” + IrosMode に戻す（chatCore がこれを要求してる）
+  // ✅ 必須: chatCore がこれを要求してる
   mode: IrosMode;
 
   intent?: any;
@@ -74,7 +60,7 @@ export type GenerateResult = {
   finalMode?: string | null;
   result?: any;
 
-  // ✅ SpeechAct debug（必要なら上流で参照）
+  // ✅ SpeechAct debug
   speechAct?: string;
   speechReason?: string;
 
@@ -82,6 +68,48 @@ export type GenerateResult = {
 };
 
 const IROS_MODEL = process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-4o';
+
+/* =========================================================
+   Helpers (non-empty guarantee)
+   ========================================================= */
+
+function normalizeUserText(s: string): string {
+  return String(s ?? '').trim();
+}
+
+function normalizeOne(v: unknown): string {
+  return String(v ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+function normalizeText(v: unknown): string {
+  return normalizeOne(v).replace(/[ \t]+/g, ' ').trim();
+}
+
+function firstNonEmptyLine(s: string): string | null {
+  const lines = normalizeOne(s)
+    .split('\n')
+    .map((x) => x.trim())
+    .filter(Boolean);
+  return lines[0] ?? null;
+}
+
+/** ✅ どんな経路でも "" は返さない（最低でも "…"） */
+function ensureNonEmpty(s: unknown, fallback = '…'): string {
+  const t = normalizeText(s);
+  return t.length ? t : fallback;
+}
+
+/** v2: NORMAL の最低限fallback（空返し事故用） */
+function fallbackNormalBody(userText: string, meta: any): string {
+  const t = normalizeText(userText);
+  const phase = String(meta?.phase ?? '').toLowerCase();
+  const q = String(meta?.qCode ?? meta?.q ?? meta?.q_code ?? '').toUpperCase();
+
+  if (t.length <= 2) return '一点だけ決めて、増やさない。';
+  if (q === 'Q1') return '不足がどれくらいかを確認し、動かせる点を一つに絞る。';
+  if (phase === 'inner') return 'いま起きている一点を名指しして、迷いを終える。';
+  return '状況を一度整理し、調整できる部分を一つに絞る。';
+}
 
 /* =========================================================
    CORE INTENT
@@ -109,31 +137,25 @@ function pickCoreIntent(meta: any): string | null {
       ? meta.unified.intent_anchor.text.trim()
       : null;
 
-  // ✅ 追加：MemoryState 由来の “状況要約” を core の補助として使う
   const fromSituationSummary =
     typeof meta?.situationSummary === 'string' && meta.situationSummary.trim()
       ? meta.situationSummary.trim()
-      : typeof meta?.unified?.situationSummary === 'string' &&
-          meta.unified.situationSummary.trim()
+      : typeof meta?.unified?.situationSummary === 'string' && meta.unified.situationSummary.trim()
         ? meta.unified.situationSummary.trim()
-        : typeof meta?.unified?.situation_summary === 'string' &&
-            meta.unified.situation_summary.trim()
+        : typeof meta?.unified?.situation_summary === 'string' && meta.unified.situation_summary.trim()
           ? meta.unified.situation_summary.trim()
           : null;
 
   const isThinQuestion = (s: string) => {
     const t = s.replace(/\s+/g, '');
     if (t.length <= 10) return true;
-    if (/^(何が出来ますか|何ができますか|どうすればいい|どうしたらいい|どうすれば)$/.test(t))
-      return true;
+    if (/^(何が出来ますか|何ができますか|どうすればいい|どうしたらいい|どうすれば)$/.test(t)) return true;
     return false;
   };
 
-  // ✅ candidate の優先順に situationSummary を追加
   const candidate = fromAnchor ?? fromCoreNeed ?? fromUnified ?? fromSituationSummary ?? null;
   if (!candidate) return null;
   if (isThinQuestion(candidate)) return null;
-
   return candidate;
 }
 
@@ -141,35 +163,22 @@ function pickCoreIntent(meta: any): string | null {
    SHORT INPUT DETECTOR
    ========================================================= */
 
-function normalizeUserText(s: string): string {
-  return String(s ?? '').trim();
-}
-
-/**
- * “短文” 判定：
- * - かなり短い入力は、文章に「芯/回転/制約」を乗せない
- * - ただし数値メタだけは末尾に付ける
- */
 function isShortTurn(userText: string): boolean {
   const t = normalizeUserText(userText).replace(/[！!。．…]+$/g, '').trim();
   if (!t) return false;
 
-  // 目安：10文字以下（記号だけ/1文字は除外）
   const core = t.replace(/[?？]/g, '').replace(/\s+/g, '');
   if (core.length < 2) return true;
   return core.length <= 10;
 }
 
 /* =========================================================
-   T-LAYER (IT) ACTIVE DETECTOR
-   - IT のトリガー根拠は orchestrator が決めた tLayerModeActive を唯一の正にする
-   - renderMode での IT 判定は廃止（競合の元）
+   T-LAYER (IT) ACTIVE DETECTOR (single source)
    ========================================================= */
 
 function isTLayerActive(meta: any): boolean {
   const on = meta?.tLayerModeActive === true;
 
-  // 念のため hint も見る（どちらかが立っていればT扱い）
   const hint = String(meta?.tLayerHint ?? '').trim().toUpperCase();
   const hintOk = hint === 'T1' || hint === 'T2' || hint === 'T3';
 
@@ -197,11 +206,6 @@ function fmt(v: number | null, digits = 2): string | null {
   return v.toFixed(d);
 }
 
-/**
- * 末尾に付ける「数値だけ」行（説明禁止）
- * - 例：〔sa0.52 y2 h1 pol0.09 g0.52 t0.20 p0.50〕
- * - 無い値は出さない（空になったら null）
- */
 function buildNumericFooter(meta: any): string | null {
   const sa =
     toNum(meta?.selfAcceptance) ??
@@ -223,7 +227,6 @@ function buildNumericFooter(meta: any): string | null {
 
   const pol = toNum(meta?.unified?.polarityScore) ?? toNum(meta?.polarityScore) ?? null;
 
-  // renderEngine の vector で計算されてることが多い想定だが、無いなら出さない
   const g = toNum(meta?.unified?.grounding) ?? toNum(meta?.grounding) ?? null;
   const t = toNum(meta?.unified?.transcendence) ?? toNum(meta?.transcendence) ?? null;
   const p = toNum(meta?.unified?.precision) ?? toNum(meta?.precision) ?? null;
@@ -249,7 +252,6 @@ function buildNumericFooter(meta: any): string | null {
   if (pS) parts.push(`p${pS}`);
 
   if (!parts.length) return null;
-
   return `〔${parts.join(' ')}〕`;
 }
 
@@ -257,22 +259,15 @@ function buildNumericFooter(meta: any): string | null {
    SAFE SLOT → GENERATION CONTROL
    ========================================================= */
 
-/**
- * meta.slotPlan から SAFE タグを拾う
- * - slotBuilder は { OBS, SHIFT, NEXT, SAFE } の object を入れている想定
- * - truthy なら発火（本文には一切出さない）
- */
 function pickSafeTagFromMeta(meta: any): string | null {
   const sp = meta?.slotPlan;
   if (!sp) return null;
 
-  // ✅ 1) Record想定: { SAFE: '...' }
   if (typeof sp === 'object' && !Array.isArray(sp)) {
     const direct = (sp as any).SAFE;
     if (typeof direct === 'string' && direct.trim()) return direct.trim();
   }
 
-  // ✅ 2) SlotPlan想定: { frame, slots: { SAFE: '...' } }
   const slots = (sp as any)?.slots;
   if (slots && typeof slots === 'object' && !Array.isArray(slots)) {
     const safe = (slots as any).SAFE;
@@ -280,20 +275,13 @@ function pickSafeTagFromMeta(meta: any): string | null {
     if (!!safe) return String(safe);
   }
 
-  // ✅ 3) arrayの場合は SAFE は拾えない（上流が直すべき）
   return null;
 }
 
-/**
- * SAFE 制御メッセージ（system）
- * - “警告文”を出すのではなく、LLMの生成姿勢を制動する
- * - SAFE / gate / meta 等の語は本文に出させない
- */
 function buildSafeSystemMessage(meta: any, userText: string): ChatCompletionMessageParam | null {
   const safeTag = pickSafeTagFromMeta(meta);
   if (!safeTag) return null;
 
-  // 強度（offered は “減速”、accepted は “守り” を強める）
   const isOffered = safeTag.includes('offered');
   const isAccepted = safeTag.includes('accepted');
 
@@ -303,16 +291,12 @@ function buildSafeSystemMessage(meta: any, userText: string): ChatCompletionMess
   lines.push('このターンは安全制動が必要です。');
   lines.push('');
   lines.push('絶対条件：');
-  lines.push(
-    '- 本文に「SAFE」「安全」「ゲート」「メタ」「プロトコル」「スロット」等の内部語を出さない',
-  );
-  lines.push(
-    '- 強い断定・決めつけ・診断っぽい言い回しを避ける（特に心身・医療・法律・金融）',
-  );
+  lines.push('- 本文に内部語を出さない（SAFE/ゲート/メタ/プロトコル/スロット 等）');
+  lines.push('- 強い断定・決めつけを避ける（特に心身/医療/法律/金融）');
   lines.push('- 危険行為/医療判断/法的判断/投資判断の具体助言はしない');
-  lines.push('- ユーザーの主権を保持：命令形の連発、詰問、圧の強い誘導は禁止');
-  lines.push('- 文章は短く（最大3〜5行）。必要なら改行して静かに。');
-  lines.push('- 質問は0〜1（原則0）。問いが必要なら最後に1つだけ、短く。');
+  lines.push('- 主権を侵さない（命令形連発/詰問/圧の強い誘導 禁止）');
+  lines.push('- 文章は短く（最大3〜5行）。改行して静かに。');
+  lines.push('- 質問は0〜1（原則0）。必要なら最後に1つだけ短く。');
 
   if (isOffered) {
     lines.push('');
@@ -335,16 +319,14 @@ function buildSafeSystemMessage(meta: any, userText: string): ChatCompletionMess
 }
 
 /* =========================================================
-   WRITER PROTOCOL (full rewrite)
-========================================================= */
+   WRITER PROTOCOL
+   ========================================================= */
 
 function buildWriterProtocol(meta: any, userText: string): string {
   const shortTurn = isShortTurn(userText);
   const itActive = isTLayerActive(meta);
-
   const noQuestion = !!meta?.noQuestion;
 
-  // ---- shared meta (for debug only; never expose to user) ----
   const phase = meta?.phase ?? null;
   const depth = meta?.depth ?? null;
   const qCode = meta?.qCode ?? null;
@@ -360,10 +342,8 @@ function buildWriterProtocol(meta: any, userText: string): string {
   const anchorConfirmQ = meta?.anchorEvent?.question ?? null;
   const anchorConfirmOptions = Array.isArray(meta?.anchorEvent?.options) ? meta.anchorEvent.options : null;
 
-  // ---- core intent ----
   const coreIntent = pickCoreIntent(meta);
 
-  // ---- WHISPER: Always attach / Conditional apply ----
   const whisperRuleBlock = [
     '【WHISPER_RULE】',
     '- system 内に [WHISPER] が存在しても、[WHISPER_APPLY] が true の時だけ内容を採用する',
@@ -371,7 +351,6 @@ function buildWriterProtocol(meta: any, userText: string): string {
     '- 本文に [WHISPER] / [WHISPER_APPLY] / WHISPER という語を絶対に出さない',
   ].join('\n');
 
-  // ---- global writer posture ----
   const base = [
     '【WRITER_PROTOCOL】',
     'あなたは「意図フィールドOS」のWriterです。',
@@ -381,13 +360,12 @@ function buildWriterProtocol(meta: any, userText: string): string {
     whisperRuleBlock,
     '',
     '【INTERNAL_SAFETY】',
-    '- 本文に「メタ」「プロトコル」「ゲート」「スロット」「回転」など内部語を出さない',
-    '- 医療/法律/投資の断定助言は禁止（必要なら一般情報 + 受診/専門家相談の提案に留める）',
-    '- ユーザーの主権を侵さない（命令形の連発・詰問・圧は禁止）',
+    '- 本文に内部語を出さない（メタ/プロトコル/ゲート/スロット/回転 等）',
+    '- 医療/法律/投資の断定助言は禁止',
+    '- 主権を侵さない（命令形連発・詰問・圧 禁止）',
     '',
   ].join('\n');
 
-  // ---- SHORT ----
   if (shortTurn) {
     return [
       base,
@@ -397,7 +375,7 @@ function buildWriterProtocol(meta: any, userText: string): string {
       '- 1〜2行で終える（長文禁止）',
       `- 質問は ${noQuestion ? '0' : '最大1'}（必要なら最後に1つだけ短く）`,
       '- 「芯/北極星/意図/回転/数値」など概念説明は禁止',
-      '- 数値ブロック（〔sa...〕 / [sa...] など）を本文に出さない',
+      '- 数値ブロックを本文に出さない',
       '',
       `USER_TEXT: ${String(userText)}`,
       '',
@@ -406,7 +384,6 @@ function buildWriterProtocol(meta: any, userText: string): string {
       .join('\n');
   }
 
-  // ---- IT (= T-layer active) ----
   if (itActive) {
     const itReason = String(meta?.itReason ?? '');
     const sameIntentStreak = Number(meta?.sameIntentStreak ?? 0) || 0;
@@ -434,7 +411,7 @@ function buildWriterProtocol(meta: any, userText: string): string {
       '- “次の一歩” は1つだけ（戻れる形）。',
       `- 質問は ${noQuestion ? '0' : '最大1'}（原則0）。`,
       '',
-      '3軸（根拠として内部で使う）：',
+      '根拠として内部で使う：',
       `- phase=${_phase} depth=${_depth} q=${_qCode}`,
       `- spinLoop=${_spinLoop} spinStep=${_spinStep} descentGate=${dg}`,
       '根拠の使い方：',
@@ -458,9 +435,7 @@ function buildWriterProtocol(meta: any, userText: string): string {
       .join('\n');
   }
 
-  // ---- I-FRAME (non-IT) ----
   const framePlanForI = String(meta?.framePlan?.frame ?? '').trim().toUpperCase();
-
   if (framePlanForI === 'I') {
     const dg = String(meta?.descentGate ?? meta?.unified?.descentGate ?? '').trim();
     const _spinLoop = String(meta?.spinLoop ?? meta?.unified?.spinLoop ?? '').trim();
@@ -490,7 +465,7 @@ function buildWriterProtocol(meta: any, userText: string): string {
       '- descentGate=offered → 「候補を2つまで」出して比較させる（本文は短く）',
       '- descentGate=accepted → 「反復できる最小ルール」を1つだけ固定する',
       '',
-      '禁止（逃げ道を潰す）：',
+      '禁止：',
       '- 一般論テンプレ（「大切です」「〜すると良い」「日記」「信頼できる人」「落ち着いて」等）',
       '- ToDo羅列が続く箇条書き',
       '- 内部語の露出（IT/ゲート/メタ/プロトコル/スロット/回転 等）',
@@ -503,9 +478,6 @@ function buildWriterProtocol(meta: any, userText: string): string {
       .join('\n');
   }
 
-  // ---- NORMAL (non-IT) ----
-
-  // A) coreIntent missing → “北極星を1行で確定” して一歩
   if (!coreIntent) {
     return [
       base,
@@ -513,11 +485,11 @@ function buildWriterProtocol(meta: any, userText: string): string {
       'CORE_INTENT は未確定。',
       '',
       'やることは2つだけ：',
-      '- 1行目で「いま守りたい一点（北極星）」を “会話として自然な日本語” で確定する',
+      '- 1行目で「いま守りたい一点（北極星）」を自然な日本語で確定する',
       '- 2〜3行目以降で “次の一歩” を1つだけ置く（小さく、戻れる形）',
       '',
       '制約：',
-      '- 固定の見出し（例：北極星／いま置ける一歩／確認…）を毎回必ず出すのは禁止',
+      '- 固定の見出しを毎回必ず出すのは禁止',
       `- 質問は ${noQuestion ? '0' : '最大1'}（詰問禁止。必要なら最後に短く）`,
       '- 断定は強めでよい（「〜してみるといい」より「〜を置く」）',
       '- 一般論/説教/説明口調は禁止',
@@ -535,7 +507,6 @@ function buildWriterProtocol(meta: any, userText: string): string {
       .join('\n');
   }
 
-  // B) coreIntent present → “言い換え断定 → 一歩”
   const anchorConfirmBlock =
     anchorEventType === 'confirm' && typeof anchorConfirmQ === 'string'
       ? [
@@ -583,28 +554,18 @@ function buildWriterProtocol(meta: any, userText: string): string {
 }
 
 /* =========================================================
-   HISTORY → MESSAGES（会話履歴を LLM に渡す）
+   HISTORY → MESSAGES
    ========================================================= */
 
-/**
- * ✅ history を ChatCompletionMessageParam[] に正規化
- * - どんな shape が混ざっても落ちない
- * - system は混ぜない（汚染防止）
- * - 直近 maxItems だけ送る（トークン暴発防止）
- */
 function normalizeHistoryToMessages(history: unknown, maxItems = 12): ChatCompletionMessageParam[] {
   const src = Array.isArray(history) ? history : [];
   const out: ChatCompletionMessageParam[] = [];
 
   const pickRole = (v: any): 'user' | 'assistant' | null => {
     const r = v?.role ?? v?.sender ?? v?.from ?? v?.type ?? null;
-
-    // system は絶対に混ぜない
     if (r === 'system') return null;
-
     if (r === 'user' || r === 'human') return 'user';
     if (r === 'assistant' || r === 'ai' || r === 'bot') return 'assistant';
-
     return null;
   };
 
@@ -612,7 +573,6 @@ function normalizeHistoryToMessages(history: unknown, maxItems = 12): ChatComple
     if (typeof v === 'string') return v;
     if (!v) return null;
 
-    // よくあるキーを広めに救う
     const c =
       (typeof v.content === 'string' && v.content) ||
       (typeof v.text === 'string' && v.text) ||
@@ -622,20 +582,14 @@ function normalizeHistoryToMessages(history: unknown, maxItems = 12): ChatComple
       null;
 
     if (c) return c;
-
-    // 最低限救う（unknown が混ざっても会話が死なない）
     if (typeof v === 'number' || typeof v === 'boolean') return String(v);
-
     return null;
   };
 
-  // 後ろから maxItems 件だけ採る
   const tail = src.slice(Math.max(0, src.length - maxItems));
-
   for (const item of tail) {
     const role = pickRole(item);
     const text = pickText(item);
-
     if (!role || !text) continue;
     out.push({ role, content: text });
   }
@@ -643,9 +597,6 @@ function normalizeHistoryToMessages(history: unknown, maxItems = 12): ChatComple
   return out;
 }
 
-/**
- * ✅ 末尾の「今回入力と同一の user 発話」を重複排除（保険）
- */
 function dedupeTailUser(historyMessages: ChatCompletionMessageParam[], userText: string): ChatCompletionMessageParam[] {
   if (historyMessages.length === 0) return historyMessages;
 
@@ -663,7 +614,6 @@ function dedupeTailUser(historyMessages: ChatCompletionMessageParam[], userText:
 // Frame / Slots hint (Writer)
 // ==============================
 
-// ✅ FrameKind を拡張（framePlan が 'F' を返すため）
 type FrameKind = 'S' | 'R' | 'C' | 'I' | 'T' | 'F' | 'MICRO' | 'NONE';
 
 function normalizeFrameKind(v: unknown): FrameKind | null {
@@ -675,18 +625,14 @@ function normalizeFrameKind(v: unknown): FrameKind | null {
   return null;
 }
 
-// ✅ slots の key を「配列でもRecordでも」取り出す
 function extractSlotKeys(v: any): string[] {
   if (!v) return [];
 
-  // 1) array: [{key:'OBS', ...}, ...] 形式
   if (Array.isArray(v)) {
     return v.map((s: any) => (typeof s?.key === 'string' ? s.key : null)).filter(Boolean);
   }
 
-  // 2) record: { OBS: '...', SHIFT: null, ... }
   if (typeof v === 'object') {
-    // { slots: {...} } 形式も救う
     const maybeSlots = (v as any).slots;
     if (maybeSlots && typeof maybeSlots === 'object' && !Array.isArray(maybeSlots)) {
       return Object.entries(maybeSlots)
@@ -694,7 +640,6 @@ function extractSlotKeys(v: any): string[] {
         .map(([k]) => k);
     }
 
-    // そのまま record の場合
     return Object.entries(v)
       .filter(([, vv]) => !!vv)
       .map(([k]) => k);
@@ -710,7 +655,6 @@ function buildWriterHintsFromMeta(meta: any): {
 } {
   const fp = meta?.framePlan && typeof meta.framePlan === 'object' ? meta.framePlan : null;
 
-  // ✅ IT判定は tLayerModeActive を唯一の正にする
   const itActive = isTLayerActive(meta);
   const whisperApply = itActive;
 
@@ -723,7 +667,6 @@ function buildWriterHintsFromMeta(meta: any): {
     whisperApply,
   });
 
-  // ① frame: IT(=T-layer active) の時は必ず T を優先。そうでなければ framePlan → meta の順。
   const frameFromPlan = itActive ? ('T' as FrameKind) : normalizeFrameKind(fp?.frame);
   const frameFromMeta = normalizeFrameKind(meta?.frame);
   const frame: FrameKind | null = frameFromPlan ?? frameFromMeta ?? null;
@@ -734,7 +677,6 @@ function buildWriterHintsFromMeta(meta: any): {
     decided_frame: frame,
   });
 
-  // ② slots: framePlan.slots → meta.slotPlan の順で拾う（array/record両対応）
   const slotKeysFromPlan = extractSlotKeys(fp?.slots);
   const slotKeysFromMeta = extractSlotKeys(meta?.slotPlan);
   const slotKeys = slotKeysFromPlan.length > 0 ? slotKeysFromPlan : slotKeysFromMeta;
@@ -773,7 +715,6 @@ function pickRecentUserQsFromHistory(history: any[], take = 3): string[] {
   const out: string[] = [];
   const hs = Array.isArray(history) ? history : [];
 
-  // newest last を作りたいので「古い→新しい」で走査
   for (let i = 0; i < hs.length; i++) {
     const m = hs[i];
     if (!m) continue;
@@ -781,7 +722,6 @@ function pickRecentUserQsFromHistory(history: any[], take = 3): string[] {
     const role = String(m.role ?? '').toLowerCase();
     if (role !== 'user') continue;
 
-    // ✅ ここが重要：HistoryX / turnHistory / 旧互換のどれでも拾えるようにする
     const qRaw =
       (m.q_code ?? null) ??
       (m.q ?? null) ??
@@ -794,8 +734,6 @@ function pickRecentUserQsFromHistory(history: any[], take = 3): string[] {
     if (!q) continue;
 
     out.push(q);
-
-    // 直近だけ残す（サイズ管理）
     if (out.length > take) out.splice(0, out.length - take);
   }
 
@@ -803,7 +741,7 @@ function pickRecentUserQsFromHistory(history: any[], take = 3): string[] {
 }
 
 /* =========================================================
-   SpeechAct input builder（LLM前確定の材料）
+   SpeechAct input builder
    ========================================================= */
 
 function hasFixedAnchor(meta: any): boolean {
@@ -859,8 +797,6 @@ function buildDecideSpeechActInput(meta: any, userText: string): DecideSpeechAct
     tLayerHint: typeof meta?.tLayerHint === 'string' ? meta.tLayerHint : null,
     hasFixedAnchor: hasFixedAnchor(meta),
     oneLineOnly: shortTurn || meta?.oneLineOnly === true,
-
-    // ✅ これを追加
     userText,
   };
 }
@@ -869,10 +805,20 @@ function buildDecideSpeechActInput(meta: any, userText: string): DecideSpeechAct
    MAIN
    ========================================================= */
 
-/** ✅ 既存呼び出しが generateIrosReply を使っている前提でこの名前に揃える */
 export async function generateIrosReply(args: GenerateArgs): Promise<GenerateResult> {
   const meta: IrosMeta = (args.meta ?? ({} as IrosMeta)) as IrosMeta;
   const userText = String((args as any).text ?? (args as any).userText ?? '');
+
+  // ✅ v2: meta は常に object に正規化（null/undefined を許可しない）
+  // - 以降は meta / meta.extra を “必ず” 触れる前提にする
+  const _metaAny: any =
+    meta && typeof meta === 'object' && !Array.isArray(meta) ? meta : {};
+  (args as any).meta = _metaAny; // 念のため（参照が args 側のときもある）
+  const metaRef: any = _metaAny;
+
+  // meta 参照を metaRef に統一（この関数内でのみ）
+  // ※ TypeScript的に meta を const のまま維持するため別名で固定
+  metaRef.extra = metaRef.extra && typeof metaRef.extra === 'object' ? metaRef.extra : {};
 
   // =========================================================
   // MemoryState attach (generate side)
@@ -882,12 +828,7 @@ export async function generateIrosReply(args: GenerateArgs): Promise<GenerateRes
     (meta as any).memoryState = memoryStateFromArgs;
   }
 
-  // ついでに q_counts 直下も補助的に載せる（参照揺れ対策）
-  if (
-    !(meta as any)?.q_counts &&
-    (meta as any)?.memoryState?.q_counts &&
-    typeof (meta as any).memoryState.q_counts === 'object'
-  ) {
+  if (!(meta as any)?.q_counts && (meta as any)?.memoryState?.q_counts && typeof (meta as any).memoryState.q_counts === 'object') {
     (meta as any).q_counts = (meta as any).memoryState.q_counts;
   }
 
@@ -906,9 +847,7 @@ export async function generateIrosReply(args: GenerateArgs): Promise<GenerateRes
 
   const qTrace: any = (meta as any)?.qTrace ?? null;
 
-  const qNow: string | null = normalizeQ(
-    (meta as any)?.qPrimary ?? (meta as any)?.q_code ?? qTrace?.lastQ ?? null,
-  );
+  const qNow: string | null = normalizeQ((meta as any)?.qPrimary ?? (meta as any)?.q_code ?? qTrace?.lastQ ?? null);
 
   /* ---------------------------------
      history から拾う
@@ -940,19 +879,9 @@ export async function generateIrosReply(args: GenerateArgs): Promise<GenerateRes
     (meta as any).extra.brakeReleaseReason = qBrake.reason;
     (meta as any).extra.brakeReleaseDetail = qBrake.detail;
 
-    console.log('[IROS][QBrakeRelease][generate] ON', {
-      qNow,
-      reason: qBrake.reason,
-      detail: qBrake.detail,
-      recentUserQs,
-    });
+    console.log('[IROS][QBrakeRelease][generate] ON', { qNow, reason: qBrake.reason, detail: qBrake.detail, recentUserQs });
   } else {
-    console.log('[IROS][QBrakeRelease][generate] OFF', {
-      qNow,
-      reason: qBrake.reason,
-      detail: qBrake.detail,
-      recentUserQs,
-    });
+    console.log('[IROS][QBrakeRelease][generate] OFF', { qNow, reason: qBrake.reason, detail: qBrake.detail, recentUserQs });
   }
 
   // ✅ mode は return でも使うので、この時点で確定しておく
@@ -971,73 +900,68 @@ export async function generateIrosReply(args: GenerateArgs): Promise<GenerateRes
   const protocol = buildWriterProtocol(meta as any, userText);
 
   // ---------------------------------
-  // ✅ SpeechAct: LLM前に確定 → 適用
+  // ✅ SpeechAct: LLM前に確定 → 適用（単一ソース）
   // ---------------------------------
   const speechInput = buildDecideSpeechActInput(meta as any, userText);
   const speechDecision: SpeechDecision = decideSpeechAct(speechInput);
   const speechApplied = applySpeechAct(speechDecision);
 
-// ✅ 最終ルール：applySpeechAct の結果だけを単一ソースにする
-// - SILENCE かどうかも applySpeechAct 側が最終確定している前提
-const finalAllowLLM = speechApplied.allowLLM === true;
-
-// ✅ meta.extra に証拠を刻む（DBで追跡できるように）
-if (meta && typeof meta === 'object') {
-  const ex =
-    (typeof (meta as any).extra === 'object' && (meta as any).extra)
-      ? (meta as any).extra
-      : ((meta as any).extra = {});
-  ex.speechAct = speechApplied.act;               // ← applySpeechAct の最終act
-  ex.speechActReason = speechDecision.reason;     // decide理由は保持でOK
-  ex.speechActConfidence =
-    typeof (speechDecision as any).confidence === 'number'
-      ? (speechDecision as any).confidence
-      : null;
-  ex.speechAllowLLM = finalAllowLLM;
-  ex.speechInput = speechInput;
-}
-
-console.log('[IROS/SpeechAct] decided', {
-  act: speechApplied.act,
-  reason: speechDecision.reason,
-  confidence: (speechDecision as any).confidence ?? null,
-  input: speechInput,
-  allowLLM: finalAllowLLM,
-});
-
-// ✅ LLMを呼ばないと決めたら、即return（見出し/…を絶対入れない）
-// ✅ LLMを呼ばないと決めたら、即return
-if (!finalAllowLLM) {
-  // NOTE:
-  // - content='' だとUIが「メッセージ無し」と判定して描画しないケースがある
-  // - “LLMを呼ばない” は維持しつつ、UI表示のため最小トークンだけ返す
-  const silentText = '…';
+  // ✅ 最終ルール：applySpeechAct の結果だけを単一ソースにする
+  let finalAllowLLM = speechApplied.allowLLM === true;
 
   // ✅ meta.extra に証拠を刻む（DBで追跡できるように）
   if (meta && typeof meta === 'object') {
     const ex =
-      (typeof (meta as any).extra === 'object' && (meta as any).extra)
-        ? (meta as any).extra
-        : ((meta as any).extra = {});
-    ex.speechSkipped = true;
-    ex.speechSkippedText = silentText;
+      typeof (meta as any).extra === 'object' && (meta as any).extra ? (meta as any).extra : ((meta as any).extra = {});
+    ex.speechAct = speechApplied.act; // applySpeechAct の最終act
+    ex.speechActReason = speechDecision.reason; // decide理由
+    ex.speechActConfidence = typeof (speechDecision as any).confidence === 'number' ? (speechDecision as any).confidence : null;
+    ex.speechAllowLLM = finalAllowLLM;
+    ex.speechInput = speechInput;
   }
 
-  return {
-    content: silentText,
-    text: silentText,
-    mode,
-    intent: (meta as any)?.intent ?? (meta as any)?.intentLine ?? null,
-    assistantText: silentText,
-    metaForSave: meta ?? {},
-    finalMode: String(mode),
-    result: null,
-    speechAct: speechApplied.act,         // applySpeechActの最終act
-    speechReason: speechDecision.reason,
-  };
-}
+  console.log('[IROS/SpeechAct] decided', {
+    act: speechApplied.act,
+    reason: speechDecision.reason,
+    confidence: (speechDecision as any).confidence ?? null,
+    input: speechInput,
+    allowLLM: finalAllowLLM,
+  });
 
+  // ✅ LLMを呼ばない場合でも "" は返さない
+  if (!finalAllowLLM) {
+    const textOut = '…'; // ✅ v2: 本文空固定はやめる（下流が空に依存しない）
 
+    const safeMeta = typeof meta === 'object' && meta !== null ? meta : ({} as any);
+
+    const ex =
+      typeof (safeMeta as any).extra === 'object'
+        ? (safeMeta as any).extra
+        : ((safeMeta as any).extra = {});
+
+    ex.speechSkipped = true;
+    ex.speechSkippedText = textOut;
+
+    // v2: "LLMの生出力" は無いが、空文字固定はやめる（後段のレンダーやデバッグが空に依存しない）
+    ex.rawTextFromModel = textOut;
+
+    // LLM呼ばないときは履歴汚染を止める（任意）
+    ex._blockHistory = true;
+
+    return {
+      content: textOut,
+      text: textOut,
+      assistantText: textOut,
+
+      // ✅ ここが重要
+      mode: mode,
+      intent: null,
+
+      metaForSave: safeMeta,
+      result: null,
+      speechAct: speechApplied.act,
+    };
+  }
 
   // ✅ 明示 recall のときだけ pastState を注入（デモ事故防止）
   const t = String(userText ?? '').trim();
@@ -1082,22 +1006,18 @@ if (!finalAllowLLM) {
   // ✅ SAFE slot
   const safeSystemMessage = buildSafeSystemMessage(meta as any, userText);
 
-  // ✅ SpeechAct 器(system) を追加（最終ゲート）
+  // ✅ SpeechAct 器(system)（最終ゲート）
   const speechSystemMessage: ChatCompletionMessageParam | null = speechApplied.llmSystem
     ? ({ role: 'system', content: speechApplied.llmSystem } as ChatCompletionMessageParam)
     : null;
 
-  // ✅ client は create の前に必ず生成しておく
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
   // history → LLM
   const historyMessagesRaw = normalizeHistoryToMessages(args.history, 12);
   const historyMessages = dedupeTailUser(historyMessagesRaw, userText);
 
-  const pastStateNoteText =
-    typeof (meta as any)?.extra?.pastStateNoteText === 'string'
-      ? (meta as any).extra.pastStateNoteText.trim()
-      : '';
+  const pastStateNoteText = typeof (meta as any)?.extra?.pastStateNoteText === 'string' ? (meta as any).extra.pastStateNoteText.trim() : '';
 
   const messages: ChatCompletionMessageParam[] = [
     { role: 'system', content: system },
@@ -1110,77 +1030,100 @@ if (!finalAllowLLM) {
     ...(safeSystemMessage ? [safeSystemMessage] : []),
     ...(writerHintMessage ? [writerHintMessage] : []),
 
-    ...(explicitRecall && pastStateNoteText
-      ? ([{ role: 'system', content: pastStateNoteText }] as ChatCompletionMessageParam[])
-      : []),
+    ...(explicitRecall && pastStateNoteText ? ([{ role: 'system', content: pastStateNoteText }] as ChatCompletionMessageParam[]) : []),
 
     ...historyMessages,
     { role: 'user', content: userText },
   ];
 
+  // =========================================================
+  // ✅ GEN: LLM呼び出しの実行有無と、生出力が空になる理由の確定ログ
+  // =========================================================
+  const _s = (v: any) => (typeof v === 'string' ? v : v == null ? '' : String(v));
+  const _head = (v: any, n = 80) => {
+    const s = _s(v);
+    return s.length <= n ? s : s.slice(0, n) + '…';
+  };
+  const _len = (v: any) => _s(v).length;
+
+  // --- (1) LLM呼び出し直前
+  console.log('[IROS/GEN][LLM-PRE]', {
+    conversationId: String((args as any)?.conversationId ?? ''),
+    inputKind: (meta as any)?.inputKind ?? null,
+    speechAct: (meta as any)?.extra?.speechAct ?? null,
+    speechAllowLLM: (meta as any)?.extra?.speechAllowLLM ?? null,
+    userText_len: _len(userText),
+    userText_head: _head(userText),
+    history_len: Array.isArray((args as any)?.history) ? (args as any).history.length : null,
+    messages_len: Array.isArray(messages) ? messages.length : null,
+  });
+
+  // ---- LLM call（✅ 1回だけ）
   const res = await client.chat.completions.create({
     model: IROS_MODEL,
     messages,
-    // ✅ COMMIT 以外では温度を下げ、出力の暴走を防ぐ
     temperature: speechDecision.act === 'COMMIT' ? 0.7 : 0.35,
   });
 
-  const raw = res.choices?.[0]?.message?.content ?? '';
-  let content = String(raw).trim() || '……（応答生成に失敗しました）';
-
-// ---------------------------------
-// ✅ Enforce AllowSchema（最終ゲート）
-// ---------------------------------
-const enforced = enforceAllowSchema(speechApplied.allow as any, content);
-
-// ✅ Decision が SILENCE でない限り、enforce の SILENCE は無効（act も含めて）
-let finalAct = enforced.act as any;
-
-if (speechDecision.act !== 'SILENCE' && enforced.act === 'SILENCE') {
-  const origin = String(content ?? '').trim();
-  const kept = String((enforced as any).text ?? '').trim();
-
-  const fallbackLine =
-    origin.split('\n').map((s) => s.trim()).filter(Boolean)[0] ||
-    kept.split('\n').map((s) => s.trim()).filter(Boolean)[0] ||
-    '…';
-
-  const originLooksSilent = origin === '…' || origin === '……' || origin === '';
-  content = originLooksSilent ? fallbackLine : origin;
-
-  // ✅ act も戻す（ここが重要）
-  finalAct = speechDecision.act as any;
-
-  console.log('[IROS/SpeechAct] enforce returned SILENCE but overridden (non-silence decision)', {
-    decisionAct: speechDecision.act,
-    enforcedAct: enforced.act,
-    allowAct: (speechApplied.allow as any)?.act,
-    used: originLooksSilent ? 'fallbackLine' : 'origin',
-    originLen: origin.length,
-    keptLen: kept.length,
+  // --- (2) LLM呼び出し直後（rawを“ここで”確定）
+  const raw = res?.choices?.[0]?.message?.content ?? '';
+  console.log('[IROS/GEN][LLM-POST]', {
+    raw_len: _len(raw),
+    raw_head: _head(raw),
   });
-} else {
- content = String((enforced as any).text ?? '').trim();
-  finalAct = enforced.act as any;
-}
 
-// ✅ ここで「最終act」を採用する（あなたの返却形式に合わせて差し込む）
-(enforced as any).act = finalAct;
+  let content = ensureNonEmpty(raw, fallbackNormalBody(userText, meta));
 
+  // v2: rawTextFromModel は「LLMの生出力」を必ず保存（空は禁止）
+  if (meta && typeof meta === 'object') {
+    const ex = typeof (meta as any).extra === 'object' && (meta as any).extra ? (meta as any).extra : ((meta as any).extra = {});
+    ex.rawTextFromModel = ensureNonEmpty(raw, content);
+  }
 
+  // ---------------------------------
+  // ✅ Enforce AllowSchema（最終ゲート） + non-empty保証
+  // ---------------------------------
+  const enforced = enforceAllowSchema(speechApplied.allow as any, content);
+
+  // Decision が SILENCE でない限り、enforce の SILENCE は無効
+  let finalAct = (enforced as any).act;
+
+  if (speechDecision.act !== 'SILENCE' && (enforced as any).act === 'SILENCE') {
+    const origin = ensureNonEmpty(content, '…');
+    const kept = ensureNonEmpty((enforced as any).text, '');
+
+    const fallbackLine = firstNonEmptyLine(origin) ?? firstNonEmptyLine(kept) ?? '…';
+    content = ensureNonEmpty(fallbackLine, '…');
+
+    finalAct = speechDecision.act as any;
+
+    console.log('[IROS/SpeechAct] enforce returned SILENCE but overridden (non-silence decision)', {
+      decisionAct: speechDecision.act,
+      enforcedAct: (enforced as any).act,
+      allowAct: (speechApplied.allow as any)?.act,
+      used: 'fallbackLine',
+      originLen: origin.length,
+      keptLen: kept.length,
+    });
+  } else {
+    const enforcedText = ensureNonEmpty((enforced as any).text, '');
+    const origin = ensureNonEmpty(content, '…');
+    content = ensureNonEmpty(enforcedText || origin, '…');
+    finalAct = (enforced as any).act;
+  }
+
+  (enforced as any).act = finalAct;
 
   /* ---------------------------------
      Numeric footer
   --------------------------------- */
 
-  const showNumericFooter =
-    process.env.IROS_NUMERIC_FOOTER === '1' || (meta as any)?.extra?.showNumericFooter === true;
+  const showNumericFooter = process.env.IROS_NUMERIC_FOOTER === '1' || (meta as any)?.extra?.showNumericFooter === true;
 
   const hardHideNumericFooter =
     (meta as any)?.microOnly === true ||
     (meta as any)?.recallOnly === true ||
     String(mode) === 'recall' ||
-    // ✅ COMMIT 以外では数値・評価表現を出さない（短文構造を守る）
     speechDecision.act !== 'COMMIT';
 
   if (showNumericFooter && !hardHideNumericFooter) {
@@ -1188,23 +1131,23 @@ if (speechDecision.act !== 'SILENCE' && enforced.act === 'SILENCE') {
 
     const footer = buildNumericFooter(meta as any);
     if (footer) {
-      content = `${content}\n${footer}`;
+      content = `${ensureNonEmpty(content, '…')}\n${footer}`;
     }
   }
 
-  /* ---------------------------------
-     return（保存/返却は enforce 後の content に統一）
-  --------------------------------- */
+  // ✅ 最終ガード：返却本文は必ず非空
+  content = ensureNonEmpty(content, fallbackNormalBody(userText, meta));
+
   return {
     content,
     text: content,
+    assistantText: content,
     mode,
     intent: (meta as any)?.intent ?? (meta as any)?.intentLine ?? null,
-    assistantText: content,
     metaForSave: meta ?? {},
     finalMode: String(mode),
     result: null,
-    speechAct: speechDecision.act,
+    speechAct: speechApplied.act ?? speechDecision.act,
     speechReason: speechDecision.reason,
   };
 }

@@ -6,7 +6,6 @@
 // - 見出しラベル（核/反転/一手…）は出さない（render.ts 側で軽い整形は入るが、ここでも出さない）
 // - A/B案は出さない（1つに寄せる）
 // - “テンプレ臭” の固定文は極力避ける（最低限の補助だけ）
-// - ✅ 非SILENCEでは「空文字を返さない」（empty-but-forward再発防止）
 
 import type { ResonanceVector } from './resonanceVector';
 
@@ -126,14 +125,6 @@ function dedupeLines(lines: string[], limit: number): string[] {
   return deduped;
 }
 
-// ✅ 非SILENCEでは「空文字を返さない」最後の保険
-function ensureNonEmpty(text: string, minimalEmoji: boolean): string {
-  const s = String(text ?? '').trim();
-  if (s.length > 0) return s;
-  // テンプレ文を増やさず、最小の可視文字だけ返す
-  return minimalEmoji ? '…' : '…。🪔';
-}
-
 /* =========================
  * Public
  * ========================= */
@@ -146,7 +137,7 @@ export function renderReply(
   // ---------------------------------
   // 強制指定の回収
   // ---------------------------------
-  const forcedRenderModeRaw =
+  const forcedRenderMode =
     ((opts as any)?.renderMode ??
       (opts as any)?.meta?.renderMode ??
       (opts as any)?.extra?.renderMode ??
@@ -154,8 +145,6 @@ export function renderReply(
       (vector as any)?.meta?.renderMode ??
       (vector as any)?.meta?.extra?.renderMode ??
       (vector as any)?.extra?.renderMode) as string | undefined;
-
-  const forcedRenderMode = String(forcedRenderModeRaw ?? '').trim().toUpperCase(); // ✅ 大文字化
 
   const forcedItDensityRaw =
     (opts as any)?.itDensity ??
@@ -221,12 +210,9 @@ export function renderReply(
       density: densityForWriter,
     });
 
-    const itText = stripLeadingEllipsisLines(
+    return stripLeadingEllipsisLines(
       clampLines(out.text.trim(), Math.min(maxLines, 16)).trim(),
     );
-
-    // ✅ ITでも空は返さない（ここが空なら upstream が壊れてる）
-    return ensureNonEmpty(itText, Boolean(opts.minimalEmoji));
   }
 
   // =========================================================
@@ -257,12 +243,11 @@ export function renderReply(
     highDef: Boolean(input.highDefensiveness),
   });
 
-  const finalText = stripLeadingEllipsisLines(
-    clampLines(built.trim(), Math.min(maxLines, 8)).trim(),
-  );
+  const finalText = built;
 
-  // ✅ 非ITでも空は返さない（SILENCEは route.ts が空にする）
-  return ensureNonEmpty(finalText, Boolean(opts.minimalEmoji));
+  return stripLeadingEllipsisLines(
+    clampLines(finalText.trim(), Math.min(maxLines, 8)).trim(),
+  );
 }
 
 /* =========================================================
@@ -298,12 +283,9 @@ function buildSofiaLikeNonIT(params: {
           : `🌀 ${toOneLine(ins)}`
         : null;
 
-    // ✅ テスト文は 1行エコーで返す（空なら “…”）
-    const echo = toOneLine(s);
-    const echoSafe = echo.length > 0 ? echo : '…';
-
-    const out0 = joinNonEmpty([head, insLine, echoSafe]);
-    return out0; // ここは ensureNonEmpty が上で最終保証する
+    const out0 = joinNonEmpty([head, insLine]);
+    const visible0 = out0.replace(/[🪔\s]/g, '');
+    return visible0.length === 0 ? '' : out0;
   }
 
   // ---- 通常ルート ----
@@ -335,7 +317,14 @@ function buildSofiaLikeNonIT(params: {
     .filter((x) => x.length > 0);
 
   const lines = dedupeLines(lines0, 6);
-  return lines.join('\n').trim();
+
+  const out = lines.join('\n').trim();
+
+  // 🪔 だけ、または空白＋🪔 だけの場合は無効化
+  const visible = out.replace(/[🪔\s]/g, '');
+  if (visible.length === 0) return '';
+
+  return out;
 }
 
 /* =========================
@@ -435,7 +424,7 @@ function deriveFlipSofia(
     return '原因探しを止める。身体の安全を先に置く。';
   }
 
-  return '迷いは増やさない。\nいま、この一点に降ろす。';
+  return '迷いを増やさない。最初の一歩に落とす。';
 }
 
 // 次は “1つだけ” に固定（A/B禁止）

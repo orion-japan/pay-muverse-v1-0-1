@@ -1,10 +1,9 @@
 // file: src/lib/iros/server/handleIrosReply.orchestrator.ts
-// iros - Orchestrator wrapper
-// ✅ 役割：Context で確定した構造（rotationState / framePlan）を
-//    そのまま Orchestrator / Writer に届ける
-// - intentAnchor だけ検疫
-// - 回転やフレームは「触らない・削らない」
-// ✅ 追加：history を受け取り、そのまま runIrosTurn に渡す（ITDemoGate 用）
+// iros - Orchestrator wrapper (MIN)
+// ✅ 役割：Context で確定した baseMeta を「壊さずに」runIrosTurn へ渡す
+// - rotationState / framePlan は値を変えない（clone だけ）
+// - intentAnchor だけ検疫（メタ文言・偽アンカーの混入を防ぐ）
+// - history をそのまま runIrosTurn に渡す（ITDemoGate / repeat 判定用）
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -27,10 +26,10 @@ export type RunOrchestratorTurnArgs = {
   /** ✅ Context で確定した唯一の基礎メタ */
   baseMetaForTurn: any;
 
-  /** ✅ NEW: ITDemoGate / repeat 判定用の履歴（handleIrosReply 側から渡す） */
+  /** ✅ ITDemoGate / repeat 判定用の履歴（handleIrosReply 側から渡す） */
   history?: unknown[];
 
-  /** ✅ NEW: MemoryState 読み書き用の Supabase admin client */
+  /** ✅ MemoryState 読み書き用の Supabase admin client */
   sb: SupabaseClient;
 
   userProfile: IrosUserProfileRow | null;
@@ -39,63 +38,77 @@ export type RunOrchestratorTurnArgs = {
 
 /* =========================
    intentAnchor sanitize（最小）
+   - テキストが無い/メタ文言/偽アンカー → intentAnchor を落とす
+   - Rowっぽい形 or set/reset イベントなら許可
 ========================= */
 
-function pickIntentAnchorText(meta: any): string {
-  const a = meta?.intentAnchor;
-  const t = (a?.anchor_text ?? '') || (a?.anchorText ?? '') || (a?.text ?? '') || '';
-  return String(t);
+function pickAnchorText(intentAnchor: any): string {
+  if (!intentAnchor) return '';
+  if (typeof intentAnchor === 'string') return intentAnchor;
+  if (typeof intentAnchor === 'object') {
+    return (
+      String(
+        intentAnchor.anchor_text ??
+          intentAnchor.anchorText ??
+          intentAnchor.text ??
+          '',
+      ) || ''
+    );
+  }
+  return '';
 }
 
-function sanitizeIntentAnchor(meta: any): any {
-  if (!meta || typeof meta !== 'object') return meta;
-  if (!meta.intentAnchor) return meta;
+function pickAnchorEvent(meta: any): string | null {
+  const ev =
+    meta?.anchorEventType ??
+    meta?.intentAnchorEventType ??
+    meta?.anchor_event_type ??
+    meta?.intent_anchor_event_type ??
+    meta?.anchorEvent?.type ??
+    null;
+  return typeof ev === 'string' ? ev.trim().toLowerCase() : null;
+}
 
-  const text = pickIntentAnchorText(meta);
-  const hasText = Boolean(text && text.trim());
+function looksLikeDbRow(a: any): boolean {
+  if (!a || typeof a !== 'object') return false;
+  return Boolean(a.id || a.user_id || a.created_at || a.updated_at);
+}
+
+function sanitizeIntentAnchor(meta: any): void {
+  if (!meta || typeof meta !== 'object') return;
+  if (!meta.intentAnchor) return;
 
   const a = meta.intentAnchor;
-
-  // DB 行っぽい形なら許可
-  const looksLikeRow =
-    Boolean(a?.id) || Boolean(a?.user_id) || Boolean(a?.created_at) || Boolean(a?.updated_at);
-
-  // set/reset イベントなら許可
-  const ev: string | null =
-    meta.anchorEventType ??
-    meta.intentAnchorEventType ??
-    meta.anchor_event_type ??
-    meta.intent_anchor_event_type ??
-    null;
-
-  const shouldBeRealEvent = ev === 'set' || ev === 'reset';
+  const text = pickAnchorText(a).trim();
 
   // 1) テキストが無い → 捨てる
-  if (!hasText) {
+  if (!text) {
     delete meta.intentAnchor;
-    return meta;
+    return;
   }
 
   // 2) メタ文言 → 捨てる
   if (isMetaAnchorText(text)) {
     delete meta.intentAnchor;
-    return meta;
+    return;
   }
 
-  // 3) Row でも event でもない → 捨てる
-  if (!looksLikeRow && !shouldBeRealEvent) {
+  // 3) Row でも event(set/reset) でもない → 捨てる
+  const ev = pickAnchorEvent(meta);
+  const isRealEvent = ev === 'set' || ev === 'reset';
+  if (!looksLikeDbRow(a) && !isRealEvent) {
     delete meta.intentAnchor;
-    return meta;
+    return;
   }
-
-  return meta;
 }
 
 /* =========================
    main
 ========================= */
 
-export async function runOrchestratorTurn(args: RunOrchestratorTurnArgs): Promise<any> {
+export async function runOrchestratorTurn(
+  args: RunOrchestratorTurnArgs,
+): Promise<any> {
   const {
     conversationId,
     userCode,
@@ -112,13 +125,15 @@ export async function runOrchestratorTurn(args: RunOrchestratorTurnArgs): Promis
   } = args;
 
   // =========================================================
-  // ✅ 入力メタ：Context で確定した構造をそのまま使う
+  // ✅ baseMeta を壊さない
   // - top は shallow copy
-  // - rotationState / framePlan / intentAnchor は参照共有を切る（破壊的更新対策）
-  // - intentAnchor 以外は触らない（= 値は変えず、clone だけ）
+  // - rotationState / framePlan / intentAnchor は shallow clone（参照共有切り）
+  // - 値の変更は intentAnchor の削除のみ
   // =========================================================
   const safeBaseMeta =
-    baseMetaForTurn && typeof baseMetaForTurn === 'object' ? { ...baseMetaForTurn } : {};
+    baseMetaForTurn && typeof baseMetaForTurn === 'object'
+      ? { ...baseMetaForTurn }
+      : {};
 
   if (safeBaseMeta.rotationState && typeof safeBaseMeta.rotationState === 'object') {
     safeBaseMeta.rotationState = { ...safeBaseMeta.rotationState };
@@ -130,7 +145,7 @@ export async function runOrchestratorTurn(args: RunOrchestratorTurnArgs): Promis
     safeBaseMeta.intentAnchor = { ...safeBaseMeta.intentAnchor };
   }
 
-  // intentAnchor だけ検疫（回転・framePlan は絶対に触らない）
+  // intentAnchor だけ検疫（rotationState / framePlan は絶対に触らない）
   sanitizeIntentAnchor(safeBaseMeta);
 
   console.log('[IROS/Orchestrator] input meta snapshot', {
@@ -140,8 +155,12 @@ export async function runOrchestratorTurn(args: RunOrchestratorTurnArgs): Promis
     depth: safeBaseMeta.rotationState?.depth ?? safeBaseMeta.depth ?? null,
     frame: safeBaseMeta.framePlan?.frame ?? null,
     historyLen: Array.isArray(history) ? history.length : 0,
+    hasIntentAnchor: Boolean(safeBaseMeta.intentAnchor),
   });
 
+  // =========================================================
+  // ✅ そのまま Orchestrator へ
+  // =========================================================
   const result = await runIrosTurn({
     conversationId,
     userCode,
@@ -154,15 +173,16 @@ export async function runOrchestratorTurn(args: RunOrchestratorTurnArgs): Promis
 
     baseMeta: safeBaseMeta,
 
-    // ✅ ここが本丸：MemoryState ロードに使う
     sb,
-
     history: Array.isArray(history) ? history : [],
     userProfile,
     style: effectiveStyle as any,
   } as any);
 
-  // 出力メタ：intentAnchor だけ再検疫
+  // =========================================================
+  // ✅ 出力側も最小の安全策（intentAnchor だけ落とす）
+  // ※ output meta を信じない運用でも、混入事故をゼロにするため残す
+  // =========================================================
   try {
     if (result && typeof result === 'object') {
       const r: any = result;
@@ -171,9 +191,7 @@ export async function runOrchestratorTurn(args: RunOrchestratorTurnArgs): Promis
         sanitizeIntentAnchor(r.meta);
       }
     }
-  } catch (e) {
-    console.warn('[IROS/Orchestrator] output sanitize failed', e);
-  }
+  } catch {}
 
   return result;
 }

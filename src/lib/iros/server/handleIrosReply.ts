@@ -1,4 +1,11 @@
 // file: src/lib/iros/server/handleIrosReply.ts
+// iros — handleIrosReply (V2 / single-writer friendly)
+//
+// ✅ 方針（ここを徹底）
+// - /reply/route.ts が assistant 保存の single-writer（iros_messages insert）
+// - handleIrosReply.ts は assistant を **絶対に保存しない**
+// - ここは「判断・meta確定・補助テーブル更新（Q/anchor/state/unified）」だけ
+// - persistAssistantMessage は import もしない / 呼ばない
 
 import OpenAI from 'openai';
 
@@ -12,11 +19,12 @@ import { runGreetingGate } from './handleIrosReply.gates';
 import { buildTurnContext } from './handleIrosReply.context';
 import { runOrchestratorTurn } from './handleIrosReply.orchestrator';
 import { postProcessReply } from './handleIrosReply.postprocess';
+
 import { runGenericRecallGate } from '@/lib/iros/server/gates/genericRecallGate';
 import { writeIT } from '@/lib/iros/language/itWriter';
 
 import {
-  persistAssistantMessage,
+  // ✅ assistant保存はしない
   persistIntentAnchorIfAny,
   persistMemoryStateIfAny,
   persistUnifiedAnalysisIfAny,
@@ -45,6 +53,108 @@ import {
 } from '@/lib/iros/writers/microWriter';
 
 import { loadLatestGoalByUserCode } from '@/lib/iros/server/loadLatestGoalByUserCode';
+
+// ✅ LLM Gate（Policy -> Execute）
+// - ここでは “OpenAIを叩かない”
+// - route.ts が叩く直前に FINAL を通すのが最終理想だが、
+//   handleIrosReply 側では「metaに入口3通りを刻む」までをやる
+import { probeLlmGate, writeLlmGateToMeta, logLlmGate } from './llmGate';
+
+/* =========================
+   Types
+========================= */
+
+export type HandleIrosReplyInput = {
+  conversationId: string;
+  text: string;
+  hintText?: string;
+  mode: string;
+  userCode: string;
+  tenantId: string;
+  rememberScope: RememberScopeKind | null;
+  reqOrigin: string;
+  authorizationHeader: string | null;
+  traceId?: string | null;
+
+  userProfile?: IrosUserProfileRow | null;
+  style?: IrosStyle | string | null;
+
+  /** ✅ 会話履歴（Writer/LLMに渡すため） */
+  history?: unknown[];
+
+  /** ✅ route.ts から渡す拡張情報（NextStep / IT trigger / renderMode など） */
+  extra?: Record<string, any>;
+};
+
+export type HandleIrosReplySuccess = {
+  ok: true;
+  result: any;
+  assistantText: string;
+  metaForSave: any;
+  finalMode: string | null;
+};
+
+export type HandleIrosReplyError = {
+  ok: false;
+  error: 'generation_failed';
+  detail: string;
+};
+
+export type HandleIrosReplyOutput =
+  | HandleIrosReplySuccess
+  | HandleIrosReplyError;
+
+const supabase = getIrosSupabaseAdmin();
+const IROS_MODEL = process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-4o';
+
+/**
+ * ✅ Goal recall を完全に止めるフラグ
+ * - '1' のときだけ有効
+ * - それ以外は無効（デフォルトOFF）
+ */
+const enableGoalRecall = process.env.IROS_ENABLE_GOAL_RECALL === '1';
+
+/* =========================
+   Timing helpers
+========================= */
+
+function nowNs(): bigint {
+  return process.hrtime.bigint();
+}
+function msSince(startNs: bigint): number {
+  const diff = process.hrtime.bigint() - startNs;
+  return Number(diff) / 1_000_000;
+}
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+/* =========================
+   Helpers: extra merge (never lose)
+========================= */
+
+function mergeExtra(metaForSave: any, extra?: Record<string, any> | null): any {
+  const m = metaForSave ?? {};
+  const prev = m.extra && typeof m.extra === 'object' ? m.extra : {};
+  const ex = extra && typeof extra === 'object' ? extra : {};
+  return { ...m, extra: { ...prev, ...ex } };
+}
+
+/**
+ * ✅ single-writer stamp（必ず meta.extra に刻む）
+ * - gates / handleIrosReply / postprocess から “保存しない” を宣言
+ * - route.ts が最終保存者なので、下流が勝手に保存しないための統一フラグ
+ */
+function stampSingleWriter(metaForSave: any): any {
+  const m = metaForSave ?? {};
+  m.extra = m.extra && typeof m.extra === 'object' ? m.extra : {};
+  // route.ts が single-writer のときは常に false
+  m.extra.persistAssistantMessage = false;
+  // 追跡用（route.ts 側で merged される）
+  if (m.extra.persistPolicyHint == null) m.extra.persistPolicyHint = 'REPLY_SINGLE_WRITER';
+  return m;
+}
+
 /* =========================
    Helpers: Achievement summary drop filter
 ========================= */
@@ -92,62 +202,6 @@ function shouldDropFromAchievementSummary(s: unknown): boolean {
   return false;
 }
 
-
-/* =========================
-   Types
-========================= */
-
-export type HandleIrosReplyInput = {
-  conversationId: string;
-  text: string;
-  hintText?: string;
-  mode: string;
-  userCode: string;
-  tenantId: string;
-  rememberScope: RememberScopeKind | null;
-  reqOrigin: string;
-  authorizationHeader: string | null;
-  traceId?: string | null;
-
-  userProfile?: IrosUserProfileRow | null;
-  style?: IrosStyle | string | null;
-
-  /** ✅ 会話履歴（Writer/LLMに渡すため） */
-  history?: unknown[];
-
-  /** ✅ route.ts から渡す拡張情報（NextStep / IT trigger / renderMode など） */
-  extra?: Record<string, any>;
-};
-
-export type HandleIrosReplySuccess = {
-  ok: true;
-  result: any;
-  assistantText: string;
-  metaForSave: any;
-  finalMode: string | null;
-};
-
-export type HandleIrosReplyError = {
-  ok: false;
-  error: 'generation_failed';
-  detail: string;
-};
-
-export type HandleIrosReplyOutput =
-  | HandleIrosReplySuccess
-  | HandleIrosReplyError;
-
-const supabase = getIrosSupabaseAdmin();
-const IROS_MODEL =
-  process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-4o';
-
-/**
- * ✅ Goal recall を完全に止めるフラグ
- * - '1' のときだけ有効
- * - それ以外は無効（デフォルトOFF）
- */
-const enableGoalRecall = process.env.IROS_ENABLE_GOAL_RECALL === '1';
-
 /* =========================
    History loader (single source of truth)
 ========================= */
@@ -160,7 +214,6 @@ async function loadConversationHistory(
   try {
     const { data, error } = await supabaseClient
       .from('iros_messages')
-      // ✅ meta を必ず取る（qPrimary/qTrace/depthなどがここに入ってる想定）
       .select('role, text, content, meta, created_at')
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: false })
@@ -181,7 +234,6 @@ async function loadConversationHistory(
           : typeof m?.text === 'string'
             ? m.text
             : '',
-      // ✅ generate側が m.meta.qPrimary / m.meta.q_code を拾えるようにする
       meta: m?.meta && typeof m.meta === 'object' ? m.meta : undefined,
     }));
 
@@ -189,11 +241,7 @@ async function loadConversationHistory(
       conversationId,
       limit,
       returned: history.length,
-      metaSample: (history as any[]).find((x) => x?.meta)?.meta
-        ? 'has_meta'
-        : 'no_meta',
-      first: (history as any[])[0]?.content?.slice?.(0, 40),
-      last: (history as any[])[history.length - 1]?.content?.slice?.(0, 40),
+      metaSample: (history as any[]).find((x) => x?.meta)?.meta ? 'has_meta' : 'no_meta',
     });
 
     return history;
@@ -205,9 +253,6 @@ async function loadConversationHistory(
 
 /**
  * ✅ this turn の history を 1回だけ組み立てる（この関数の返り値を全段に渡す）
- * - params.history があればそれを優先（API層から渡す想定）
- * - なければ conversationId の messages をロード
- * - さらに user_code ベースの cross-conversation を必要に応じてマージ
  */
 async function buildHistoryForTurn(args: {
   supabaseClient: any;
@@ -265,25 +310,9 @@ async function buildHistoryForTurn(args: {
 }
 
 /* =========================
-   Timing helpers
+   Micro bypass / detect
 ========================= */
 
-function nowNs(): bigint {
-  return process.hrtime.bigint();
-}
-function msSince(startNs: bigint): number {
-  const diff = process.hrtime.bigint() - startNs;
-  return Number(diff) / 1_000_000;
-}
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
-/* =========================
-   Micro bypass
-========================= */
-
-// ✅ MicroGate をバイパスすべき “文脈参照クエリ” 判定
 function shouldBypassMicroGate(userText: string): boolean {
   const s = (userText ?? '').trim();
   if (!s) return false;
@@ -302,14 +331,8 @@ function shouldBypassMicroGate(userText: string): boolean {
     '言った',
   ];
 
-  if (keywords.some((k) => s.includes(k))) return true;
-
-  return false;
+  return keywords.some((k) => s.includes(k));
 }
-
-/* =========================
-   Micro turn detect (inline)
-========================= */
 
 function normalizeTailPunct(s: string): string {
   return (s ?? '').trim().replace(/[！!。．…]+$/g, '').trim();
@@ -332,22 +355,18 @@ function isMicroTurn(raw: string): boolean {
   if (/[A-Za-z0-9]/.test(core)) return false;
 
   if (
-    /(何|なに|どこ|いつ|だれ|誰|なぜ|どうして|どうやって|いくら|何色|色)/.test(
-      core,
-    )
+    /(何|なに|どこ|いつ|だれ|誰|なぜ|どうして|どうやって|いくら|何色|色)/.test(core)
   ) {
     return false;
   }
 
   if (len < 2 || len > 10) return false;
 
-  return /^(どうする|やる|やっちゃう|いく|いける|どうしよ|どうしよう|行く|行ける)$/.test(
-    core,
-  );
+  return /^(どうする|やる|やっちゃう|いく|いける|どうしよ|どうしよう|行く|行ける)$/.test(core);
 }
 
 /* =========================
-   Goal recall gate helpers
+   Goal recall helpers
 ========================= */
 
 function isGoalRecallQ(text: string): boolean {
@@ -360,7 +379,6 @@ function isGoalRecallQ(text: string): boolean {
 const norm = (v: any): string => {
   if (v == null) return '';
 
-  // OpenAI-style content parts
   if (Array.isArray(v)) {
     const parts = v
       .map((p) => {
@@ -561,953 +579,8 @@ function sanitizeIntentAnchorMeta(metaForSave: any): any {
   return m;
 }
 
-/* =========================================================
-   Micro Writer: generator（同じOpenAIで短文だけ作る）
-========================================================= */
-
-const microGenerate: MicroWriterGenerate = async (args) => {
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-  const res = await client.chat.completions.create({
-    model: IROS_MODEL,
-    messages: [
-      { role: 'system', content: String(args.system ?? '') },
-      { role: 'user', content: String(args.prompt ?? '') },
-    ],
-    temperature: typeof args.temperature === 'number' ? args.temperature : 0.6,
-    max_tokens: typeof args.maxTokens === 'number' ? args.maxTokens : 140,
-  });
-
-  return res.choices?.[0]?.message?.content ?? '';
-};
-
-/* =========================================================
-   main
-========================================================= */
-
-export async function handleIrosReply(
-  params: HandleIrosReplyInput,
-): Promise<HandleIrosReplyOutput> {
-  const t0 = nowNs();
-  const startedAt = nowIso();
-
-  const t: any = {
-    started_at: startedAt,
-    finished_at: startedAt,
-    total_ms: 0,
-
-    gate_ms: 0,
-    context_ms: 0,
-    orchestrator_ms: 0,
-    postprocess_ms: 0,
-
-    persist_ms: {
-      q_snapshot_ms: 0,
-      intent_anchor_ms: 0,
-      memory_state_ms: 0,
-      unified_analysis_ms: 0,
-      assistant_message_ms: 0,
-      total_ms: 0,
-    },
-  };
-
-  const {
-    conversationId,
-    text,
-    mode,
-    userCode,
-    tenantId,
-    rememberScope,
-    reqOrigin,
-    authorizationHeader,
-    traceId,
-    userProfile,
-    style,
-    history,
-    extra, // ✅ route.ts から渡される拡張情報（NextStep / IT trigger / renderMode 等）
-  } = params;
-
-  console.log('[IROS/Reply] handleIrosReply start', {
-    conversationId,
-    userCode,
-    mode,
-    tenantId,
-    rememberScope,
-    traceId,
-    style,
-    history_len: Array.isArray(history) ? history.length : null,
-  });
-
-  console.log('[IROS/Reply] extra keys', {
-    conversationId,
-    keys: Object.keys(extra ?? {}),
-    extra: extra ?? null,
-  });
-
-  try {
-    /* ---------------------------
-       0) Gates
-    ---------------------------- */
-
-    const tg = nowNs();
-
-    const gatedGreeting = await runGreetingGate({
-      supabase,
-      conversationId,
-      userCode,
-      text,
-      userProfile,
-      reqOrigin,
-      authorizationHeader,
-    });
-    if (gatedGreeting) return gatedGreeting;
-
-    const bypassMicro = shouldBypassMicroGate(text);
-
-    // ✅ Micro（独立ルート）
-    if (!bypassMicro && isMicroTurn(text)) {
-      const name = userProfile?.user_call_name || 'あなた';
-      const seed = `${conversationId}|${userCode}|${traceId ?? ''}|${Date.now()}`;
-
-      const mw = await runMicroWriter(microGenerate, {
-        name,
-        userText: text,
-        seed,
-      });
-
-      if (mw.ok) {
-        // ✅ single source of truth（microでも同じ historyForTurn を1回だけ作る）
-        const historyForTurn = await buildHistoryForTurn({
-          supabaseClient: supabase,
-          conversationId,
-          userCode,
-          providedHistory: history ?? null,
-          includeCrossConversation: false, // microは軽量優先（必要なら true にしてOK）
-          baseLimit: 30,
-        });
-
-        // 2) context（数値メタだけ欲しい）
-        const tc = nowNs();
-        const ctx = await (buildTurnContext as any)({
-          supabase,
-          conversationId,
-          userCode,
-          text,
-          mode,
-          traceId,
-          userProfile,
-          requestedStyle: style ?? null,
-          history: historyForTurn,
-          extra: extra ?? null,
-        });
-        t.context_ms = msSince(tc);
-
-        // 3) meta（短文用：数値だけは乗せる）
-        const metaForSave: any = {
-          ...(ctx?.baseMetaForTurn ?? {}),
-          style:
-            ctx?.effectiveStyle ??
-            style ??
-            (userProfile as any)?.style ??
-            'friendly',
-
-          mode: 'light',
-          microOnly: true,
-
-          skipMemory: true,
-          skipTraining: true,
-
-          nextStep: null,
-          next_step: null,
-          timing: t,
-        };
-
-        // ✅ extra を確実に残す（microでも統一）
-        metaForSave.extra = {
-          ...(metaForSave.extra ?? {}),
-          ...(extra ?? {}),
-        };
-
-        // SUN固定保護（念のため）
-        try {
-          const sanitized = sanitizeIntentAnchorMeta(metaForSave);
-          Object.assign(metaForSave, sanitized);
-        } catch {}
-
-        // 4) persist（最低限）
-        const ts = nowNs();
-
-        const t1 = nowNs();
-        await persistQCodeSnapshotIfAny({
-          userCode,
-          conversationId,
-          requestedMode: ctx?.requestedMode ?? mode,
-          metaForSave,
-        });
-        t.persist_ms.q_snapshot_ms = msSince(t1);
-
-        const t5 = nowNs();
-        await persistAssistantMessage({
-          supabase,
-          reqOrigin,
-          authorizationHeader,
-          conversationId,
-          userCode,
-          assistantText: mw.text,
-          metaForSave,
-        });
-        t.persist_ms.assistant_message_ms = msSince(t5);
-
-        t.persist_ms.total_ms = msSince(ts);
-
-        t.gate_ms = msSince(tg);
-        t.finished_at = nowIso();
-        t.total_ms = msSince(t0);
-
-        return {
-          ok: true,
-          result: { gate: 'micro_writer' },
-          assistantText: mw.text,
-          metaForSave,
-          finalMode: 'light',
-        };
-      }
-
-      console.warn('[IROS/MicroWriter] failed -> fallback to normal', {
-        reason: mw.reason,
-        detail: mw.detail,
-      });
-    } else if (bypassMicro) {
-      console.log('[IROS/Gate] bypass micro gate (context recall)', {
-        conversationId,
-        userCode,
-        text,
-      });
-    }
-
-    t.gate_ms = msSince(tg);
-
-    /* ---------------------------
-       1) History (single source of truth for this turn)
-       - ここで1回だけ作って、以後すべてに渡す
-    ---------------------------- */
-
-    const historyForTurn: unknown[] = await buildHistoryForTurn({
-      supabaseClient: supabase,
-      conversationId,
-      userCode,
-      providedHistory: history ?? null,
-      includeCrossConversation: true,
-      baseLimit: 30,
-      crossLimit: 60,
-      maxTotal: 80,
-    });
-
-    // デバッグ：直近3件だけ
-    console.log(
-      '[DEBUG][historyForTurn last3]',
-      (historyForTurn as any[]).slice(-3).map((m, i) => ({
-        idx: i,
-        role: m?.role,
-        contentType: typeof m?.content,
-        content: m?.content,
-        text: m?.text,
-      })),
-    );
-
-    /* ---------------------------
-       ✅ Goal recall: ここで確定回答してLLMへ流さない
-    ---------------------------- */
-
-    const goalRecallQ = isGoalRecallQ(text);
-
-    // ✅ デモ中の誤爆を止める：ENVが1のときだけ Goal recall を動かす
-    if (enableGoalRecall && goalRecallQ) {
-      let goalRaw: string | null = null;
-      let goalSource: 'db' | 'history' | 'none' = 'none';
-
-      // 1) DB（user_code基準）で最新goalを拾う（conversationId完全無視）
-      try {
-        const hit = await loadLatestGoalByUserCode(supabase, userCode, {
-          limit: 250,
-        });
-        if (hit?.goalText) {
-          goalRaw = hit.goalText;
-          goalSource = 'db';
-        }
-      } catch (e) {
-        console.warn(
-          '[goal_recall] loadLatestGoalByUserCode failed (fallback to history)',
-          e,
-        );
-      }
-
-      // 2) DBで取れなければ historyForTurn fallback
-      if (!goalRaw) {
-        goalRaw = extractGoalFromHistory(historyForTurn as any[]);
-        if (goalRaw) goalSource = 'history';
-      }
-
-      if (!goalRaw) goalSource = 'none';
-
-      function concretizeGoalOneLine(goal: string | null): string | null {
-        if (!goal) return null;
-        const g = String(goal).trim();
-        if (!g) return null;
-
-        const looksSpecific =
-          g.length >= 12 ||
-          /[0-9]/.test(g) ||
-          /（|\(|:|：|->|→|\/|・/.test(g) ||
-          /(修正|実装|確認|整理|分割|移行|追加|削除|テスト|直す|原因|調査|再現|通す)/.test(g);
-
-        if (looksSpecific) return g;
-
-        if (g === 'iros進') {
-          return 'irosを前に進める：goal recallの挙動を整えて、typecheckが通る状態にする';
-        }
-        if (/回転|3軸|スピン/.test(g)) {
-          return '3軸回転を前に進める：spinLoopの配線を整理し、renderまで一周させる';
-        }
-        if (/目標|goal/.test(g)) {
-          return '目標まわりを整える：抽出ロジックのノイズを直し、1行で返せるようにする';
-        }
-        if (/記憶|memory|recall/.test(g)) {
-          return '記憶／recallを整える：goal系をrecall gateに落とさず安定動作させる';
-        }
-
-        return `${g}を前に進める：今日の詰まりを1点直して確認まで行う`;
-      }
-
-      const goal1 = concretizeGoalOneLine(goalRaw);
-
-      const assistantText = goal1
-        ? `今日の目標は「${goal1}」です。🪔`
-        : `直近の履歴から「今日の目標」が見つかりませんでした。いまの目標を1行で置いてください。🪔`;
-
-      const metaForSave: any = {
-        style: style ?? (userProfile as any)?.style ?? 'friendly',
-        mode: 'light',
-        goalRecallOnly: true,
-        skipTraining: true,
-        skipMemory: true,
-        nextStep: null,
-        next_step: null,
-        timing: t,
-        extra: {
-          ...(extra ?? {}),
-        },
-      };
-
-      await persistAssistantMessage({
-        supabase,
-        reqOrigin,
-        authorizationHeader,
-        conversationId,
-        userCode,
-        assistantText,
-        metaForSave,
-      });
-
-      t.finished_at = nowIso();
-      t.total_ms = msSince(t0);
-
-      return {
-        ok: true,
-        result: { gate: 'goal_recall', found: Boolean(goal1), source: goalSource },
-        assistantText,
-        metaForSave,
-        finalMode: 'light',
-      };
-    }
-
-    /* ---------------------------
-       ✅ Achievement Summary Gate（明示トリガーがある時だけ）
-    ---------------------------- */
-
-    const wantsAchSummary =
-      /(?:達成|サマリ|進捗|振り返り|まとめ|総括|レビュー|できたこと|やったこと)/.test(text) &&
-      /(?:昨日|今日|先週|今週|最近|直近|\d+日|\d+週間|\d+週)/.test(text);
-
-    const period = wantsAchSummary ? detectAchievementSummaryPeriod(text) : null;
-
-    if (period) {
-      try {
-        const msgs = await loadNormalizedMessagesForPeriod({
-          supabase,
-          userCode,
-          startIso: period.startIso,
-          endIso: period.endIso,
-          limit: 200,
-        });
-
-        const allUser = (msgs ?? []).filter(
-          (m: any) => String(m?.role ?? '').toLowerCase() === 'user',
-        );
-
-        const dropped = allUser
-          .map((m: any) => String(m?.text ?? m?.content ?? ''))
-          .filter((s: string) => shouldDropFromAchievementSummary(s));
-
-        const kept = allUser
-          .map((m: any) => String(m?.text ?? m?.content ?? ''))
-          .filter((s: string) => !shouldDropFromAchievementSummary(s));
-
-        console.log('[IROS][AchSummary][debug]', {
-          kind: period.kind,
-          totalUser: allUser.length,
-          dropped: dropped.length,
-          kept: kept.length,
-          droppedHead: dropped.slice(0, 5),
-          keptHead: kept.slice(0, 5),
-        });
-
-        const userMsgs = (msgs ?? [])
-          .filter((m: any) => String(m?.role ?? '').toLowerCase() === 'user')
-          .filter(
-            (m: any) =>
-              !shouldDropFromAchievementSummary(String(m?.text ?? m?.content ?? '')),
-          );
-
-        const summary = buildAchievementSummary(userMsgs as any, period);
-        const assistantText = renderAchievementSummaryText(summary);
-
-        const metaForSave: any = {
-          style: style ?? (userProfile as any)?.style ?? 'friendly',
-          mode: 'light',
-          achievementSummaryOnly: true,
-          skipTraining: true,
-          skipMemory: true,
-          nextStep: null,
-          next_step: null,
-          timing: t,
-          extra: {
-            ...(extra ?? {}),
-          },
-        };
-
-        await persistAssistantMessage({
-          supabase,
-          reqOrigin,
-          authorizationHeader,
-          conversationId,
-          userCode,
-          assistantText,
-          metaForSave,
-        });
-
-        t.finished_at = nowIso();
-        t.total_ms = msSince(t0);
-
-        return {
-          ok: true,
-          result: { gate: 'achievement_summary', kind: period.kind },
-          assistantText,
-          metaForSave,
-          finalMode: 'light',
-        };
-      } catch (e) {
-        console.warn('[IROS][AchSummary] failed', e);
-      }
-    }
-
-    /* ---------------------------
-       1.3) Generic Recall Gate（会話の糊）
-    ---------------------------- */
-    try {
-      const recall = await runGenericRecallGate({
-        text,
-        history: (historyForTurn as any[])
-          .filter((m) => String(m?.role ?? '').toLowerCase() === 'user')
-          .filter((m) => {
-            const s = norm(m?.content ?? m?.text ?? (m as any)?.message ?? '');
-            if (!s) return false;
-
-            if (/^たぶんこれのことかな：/.test(s)) return false;
-            if (/^たぶんこれのことかな：「/.test(s)) return false;
-
-            return true;
-          }),
-      });
-
-      if (recall) {
-        const gateMetaForSave: any = {
-          style: style ?? (userProfile as any)?.style ?? 'friendly',
-          mode: 'recall',
-          recall: {
-            kind: recall.recallKind,
-            recalledText: recall.recalledText,
-          },
-          skipTraining: true,
-          skipMemory: true,
-          timing: t,
-          extra: {
-            ...(extra ?? {}),
-          },
-        };
-
-        const ts = nowNs();
-
-        const t5 = nowNs();
-        await persistAssistantMessage({
-          supabase,
-          reqOrigin,
-          authorizationHeader,
-          conversationId,
-          userCode,
-          assistantText: recall.assistantText,
-          metaForSave: gateMetaForSave,
-        });
-        t.persist_ms.assistant_message_ms = msSince(t5);
-
-        t.persist_ms.total_ms = msSince(ts);
-        t.finished_at = nowIso();
-        t.total_ms = msSince(t0);
-
-        return {
-          ok: true,
-          result: { gate: 'generic_recall', ...recall },
-          assistantText: recall.assistantText,
-          metaForSave: gateMetaForSave,
-          finalMode: 'recall',
-        };
-      }
-    } catch (e) {
-      console.warn('[IROS/Gate] genericRecallGate failed', e);
-    }
-
-    /* ---------------------------
-       2) Context
-    ---------------------------- */
-
-    const tc = nowNs();
-    const ctx = await (buildTurnContext as any)({
-      supabase,
-      conversationId,
-      userCode,
-      text,
-      mode,
-      traceId,
-      userProfile,
-      requestedStyle: style ?? null,
-      history: historyForTurn,
-
-      // ✅ 追加：route から来た extra を context に渡す
-      extra: extra ?? null,
-    });
-    t.context_ms = msSince(tc);
-
-/* ---------------------------
-   3) Orchestrator
----------------------------- */
-
-// ✅ baseMetaForTurn に extra を必ずマージ（ここが “消えない” 本体）
-const baseMetaMergedForTurn: any = {
-  ...(ctx.baseMetaForTurn ?? {}),
-  extra: {
-    ...(((ctx.baseMetaForTurn as any)?.extra) ?? {}),
-    ...(extra ?? {}),
-  },
-};
-
-// ✅ R -> I gate（入口で確定。途中上書き禁止）
-const prevDepthStage: string | null =
-  typeof (ctx?.baseMetaForTurn as any)?.depthStage === 'string'
-    ? (ctx.baseMetaForTurn as any).depthStage
-    : typeof (ctx?.baseMetaForTurn as any)?.depth === 'string'
-      ? (ctx.baseMetaForTurn as any).depth
-      : null;
-
-let requestedDepthFinal = ctx.requestedDepth;
-
-// ルール：R -> C 直行を禁止して、R -> I1 を強制
-if (
-  prevDepthStage?.startsWith('R') &&
-  typeof requestedDepthFinal === 'string' &&
-  requestedDepthFinal.startsWith('C')
-) {
-  requestedDepthFinal = 'I1';
-}
-
-console.log('[IROS][DepthGate] R->I check', {
-  prevDepthStage,
-  requestedDepth_in: ctx.requestedDepth,
-  requestedDepth_out: requestedDepthFinal,
-});
-
-const to = nowNs();
-const orch = await (runOrchestratorTurn as any)({
-  conversationId,
-  userCode,
-  text,
-  isFirstTurn: ctx.isFirstTurn,
-  requestedMode: ctx.requestedMode,
-  requestedDepth: requestedDepthFinal, // ✅ ここだけ差し替える
-  requestedQCode: ctx.requestedQCode,
-
-  baseMetaForTurn: baseMetaMergedForTurn,
-
-  userProfile: userProfile ?? null,
-  effectiveStyle: ctx.effectiveStyle,
-  history: historyForTurn,
-
-  sb: supabase,
-});
-
-t.orchestrator_ms = msSince(to);
-
-
-/* ---------------------------
-   4) PostProcess
----------------------------- */
-
-const tp = nowNs();
-const out = await (postProcessReply as any)({
-  supabase,
-  userCode,
-  conversationId,
-  userText: text,
-  effectiveStyle: ctx.effectiveStyle,
-  requestedMode: ctx.requestedMode,
-  orchResult: orch,
-  history: historyForTurn,
-
-  // ✅ 追加：postprocess にも extra を渡す
-  extra: extra ?? null,
-});
-t.postprocess_ms = msSince(tp);
-
-// (postProcessReply の直後に追加)
-
-// ✅ stop-the-bleeding: FORWARD なのに本文が空なら、ここで必ず埋める
-try {
-  const allowLLM =
-    out?.metaForSave?.speechAllowLLM === true ||
-    out?.metaForSave?.extra?.speechAllowLLM === true;
-
-  const outText = String(out?.assistantText ?? '').trim();
-
-  if (allowLLM && outText.length === 0) {
-    const name = userProfile?.user_call_name || 'あなた';
-    const seed = `${conversationId}|${userCode}|empty_forward|${traceId ?? ''}|${Date.now()}`;
-
-    const mw = await runMicroWriter(microGenerate, {
-      name,
-      userText: text,
-      seed,
-    });
-
-    // micro が死んでも「…」には落とさない（FORWARDの意味が消えるため）
-    out.assistantText =
-      (mw?.ok && String(mw.text ?? '').trim().length > 0)
-        ? mw.text
-        : '了解。🪔';
-
-    out.metaForSave = out.metaForSave ?? {};
-    out.metaForSave.fallbackApplied = 'EMPTY_FORWARD_PATCHED';
-
-    console.warn('[IROS/Reply][patch] empty-but-forward patched', {
-      conversationId,
-      userCode,
-      fallbackLen: out.assistantText.length,
-    });
-  }
-} catch (e) {
-  console.warn('[IROS/Reply][patch] empty-forward patch failed', e);
-}
-
-
-
-/* ---------------------------
-   5) Timing / Sanitize / Rotation bridge
----------------------------- */
-
-out.metaForSave = out.metaForSave ?? {};
-out.metaForSave.timing = t;
-
-// ✅ persist に必ず残す（postProcess が extra を作り直しても守る）
-out.metaForSave.extra = out.metaForSave.extra ?? {};
-
-// ✅ 1) route から来た extra を “最後に” 再注入（ただし undefined は上書きしない）
-if (extra && typeof extra === 'object') {
-  const prev = out.metaForSave.extra ?? {};
-  const next: any = { ...prev };
-
-  for (const [k, v] of Object.entries(extra as any)) {
-    if (v !== undefined) next[k] = v; // ✅ undefined は無視
-  }
-
-  out.metaForSave.extra = next;
-}
-
-console.log('[IROS/Reply][debug-extra-sources]', {
-  routeExtra: extra,
-  metaExtra_beforeMerge: out?.metaForSave?.extra ?? null,
-  orchMetaExtra: (orch as any)?.meta?.extra ?? (orch as any)?.result?.meta?.extra ?? null,
-  itResultExtraHint: {
-    // IT結果がどこに格納されてる想定かを見るため
-    tLayerModeActive_fromOrch:
-      (orch as any)?.meta?.tLayerModeActive ??
-      (orch as any)?.result?.meta?.tLayerModeActive ??
-      null,
-    tLayerHint_fromOrch:
-      (orch as any)?.meta?.tLayerHint ??
-      (orch as any)?.result?.meta?.tLayerHint ??
-      null,
-  },
-});
-
-console.log('[IROS/Reply][extra-merged]', out.metaForSave.extra);
-
-
-// ✅ IT結果を single source（metaForSave.extra）へ同期する（Frame判定より前に）
-if (!out.metaForSave) out.metaForSave = {};
-out.metaForSave.extra = out.metaForSave.extra ?? {};
-
-const orchMetaAny: any =
-  (orch as any)?.meta ?? (orch as any)?.result?.meta ?? null;
-
-const orchTL_tLayerModeActive =
-  typeof orchMetaAny?.tLayerModeActive === 'boolean'
-    ? orchMetaAny.tLayerModeActive
-    : undefined;
-
-const orchTL_tLayerHint =
-  typeof orchMetaAny?.tLayerHint === 'string' && orchMetaAny.tLayerHint.trim()
-    ? orchMetaAny.tLayerHint
-    : undefined;
-
-if (orchTL_tLayerModeActive !== undefined)
-  out.metaForSave.extra.tLayerModeActive = orchTL_tLayerModeActive;
-
-if (orchTL_tLayerHint !== undefined)
-  out.metaForSave.extra.tLayerHint = orchTL_tLayerHint;
-
-console.log('[IROS/Reply][it-sync-to-extra(pre-frame)]', {
-  orchTL_tLayerModeActive: orchTL_tLayerModeActive ?? null,
-  orchTL_tLayerHint: orchTL_tLayerHint ?? null,
-  extra_after: {
-    tLayerModeActive: out.metaForSave.extra.tLayerModeActive ?? null,
-    tLayerHint: out.metaForSave.extra.tLayerHint ?? null,
-  },
-});
-
-// ✅ ITが発火していたら renderMode を IT に確定（single source）
-const itActiveNow =
-  out.metaForSave?.extra?.tLayerModeActive === true ||
-  ['T1', 'T2', 'T3'].includes(String(out.metaForSave?.extra?.tLayerHint ?? ''));
-
-if (itActiveNow) {
-  out.metaForSave.extra.renderMode = 'IT';
-  out.metaForSave.renderMode = 'IT';
-}
-
-
-// ✅ Frame/Slots single source of truth（暫定強化）
-// - IT/T層が立っていたら frame='T' に固定
-// - 次に orch の frame / slotPlan を反映
-if (orchTL_tLayerModeActive !== undefined) out.metaForSave.extra.tLayerModeActive = orchTL_tLayerModeActive;
-if (orchTL_tLayerHint !== undefined) out.metaForSave.extra.tLayerHint = orchTL_tLayerHint;
-
-try {
-  const orchMeta: any =
-    (orch as any)?.meta ??
-    (orch as any)?.result?.meta ??
-    null;
-
-  const orchFrameRaw =
-    orchMeta?.frame ??
-    (orch as any)?.frame ??
-    (orch as any)?.result?.frame ??
-    null;
-
-  const orchSlotPlan =
-    orchMeta?.slotPlan ??
-    (orch as any)?.slotPlan ??
-    (orch as any)?.result?.slotPlan ??
-    null;
-
-  const meta: any = out.metaForSave;
-
-  const tHint = String(meta?.extra?.tLayerHint ?? '').toUpperCase();
-  const itActive =
-    meta?.extra?.tLayerModeActive === true ||
-    tHint === 'T1' || tHint === 'T2' || tHint === 'T3';
-
-  const decidedFrame =
-    itActive
-      ? 'T'
-      : (typeof orchFrameRaw === 'string' && orchFrameRaw.trim()
-          ? orchFrameRaw
-          : null);
-
-  if (typeof decidedFrame === 'string') meta.frame = decidedFrame;
-  if (orchSlotPlan != null) meta.slotPlan = orchSlotPlan;
-
-  console.log('[IROS/Reply][frame-fix][debug]', {
-    itActive,
-    tLayerHint: tHint || null,
-    orchFrameRaw,
-    decidedFrame,
-    orchSlotPlanLen: Array.isArray(orchSlotPlan) ? orchSlotPlan.length : null,
-    meta_frame: meta?.frame ?? null,
-    meta_framePlan_frame: meta?.framePlan?.frame ?? null,
-    meta_slotPlan_len: Array.isArray(meta?.slotPlan) ? meta.slotPlan.length : null,
-  });
-} catch (e) {
-  console.warn('[IROS/Reply] frame/slot fix failed', e);
-}
-
-    // ✅ 2) renderMode はトップレベル1本化（ここが最終固定点）
-    const extraRenderMode =
-      typeof out.metaForSave.extra?.renderMode === 'string'
-        ? out.metaForSave.extra.renderMode
-        : null;
-
-    if (!out.metaForSave.renderMode && extraRenderMode) {
-      out.metaForSave.renderMode = extraRenderMode;
-    }
-
-    // ✅ 3) forceIT が true なら renderMode を IT に落とす（最終補助）
-    if (out.metaForSave.extra?.forceIT === true) {
-      out.metaForSave.renderMode = 'IT';
-    }
-
-    try {
-      out.metaForSave = sanitizeIntentAnchorMeta(out.metaForSave);
-    } catch (e) {
-      console.warn('[IROS/Reply] sanitizeIntentAnchorMeta failed', e);
-    }
-
-    // rotation bridge（最低限・安定版）
-    // ✅ descentGate を boolean/unknown で持ち込ませない。必ず union に落とす。
-    // ✅ spinLoop / depth も rot 側優先で “取りこぼし” を防ぐ。
-    const normalizeDescentGateBridge = (
-      v: any,
-    ): 'closed' | 'offered' | 'accepted' => {
-      if (v == null) return 'closed';
-
-      if (typeof v === 'string') {
-        const s = v.trim().toLowerCase();
-        if (s === 'closed' || s === 'offered' || s === 'accepted') return s;
-        return 'closed';
-      }
-
-      // 互換：boolean のとき（旧）
-      if (typeof v === 'boolean') return v ? 'accepted' : 'closed';
-
-      return 'closed';
-    };
-
-    const normalizeSpinLoopBridge = (v: any): 'SRI' | 'TCF' | null => {
-      if (typeof v !== 'string') return null;
-      const s = v.trim().toUpperCase();
-      if (s === 'SRI' || s === 'TCF') return s as any;
-      return null;
-    };
-
-    const normalizeDepthBridge = (v: any): string | null => {
-      if (typeof v !== 'string') return null;
-      const s = v.trim();
-      return s ? s : null;
-    };
-
-    try {
-      const m: any = out.metaForSave ?? {};
-
-      const rot =
-        m.rotation ??
-        m.rotationState ??
-        m.spin ??
-        (m.will && (m.will.rotation ?? m.will.spin)) ??
-        null;
-
-      // ✅ descentGate: rot優先 → meta fallback → 最後は closed
-      m.descentGate = normalizeDescentGateBridge(
-        rot?.descentGate ?? m.descentGate,
-      );
-
-      // ✅ spinLoop: rot優先で拾う（無ければmeta）
-      m.spinLoop =
-        normalizeSpinLoopBridge(rot?.spinLoop ?? rot?.loop) ??
-        normalizeSpinLoopBridge(m.spinLoop) ??
-        null;
-
-      // ✅ depth: rotの nextDepth/depth を優先（無ければmeta）
-      m.depth =
-        normalizeDepthBridge(rot?.nextDepth ?? rot?.depth) ??
-        normalizeDepthBridge(m.depth) ??
-        null;
-
-      // ✅ persist が読む “正規化済み” の rotationState を再構成
-      m.rotationState = {
-        spinLoop: m.spinLoop,
-        descentGate: m.descentGate,
-        depth: m.depth,
-        reason: rot?.reason ?? undefined,
-      };
-
- out.metaForSave = m;
-
-      console.log('[IROS/Reply] rotation bridge', {
-        spinLoop: m.spinLoop,
-        descentGate: m.descentGate,
-        depth: m.depth,
-      });
-
-      // ✅ IT本文スイッチ（single source）
-      // - ensureMetaFilled を先に通して「null禁止」を担保してから IT を書く
-      // - 差し替えた本文がそのまま Persist される（リロードしても変わらない）
-
-      // ✅ まず meta を埋める（IT writer が参照する前）
-      out.metaForSave = ensureMetaFilled({ meta: out.metaForSave, ctx, orch });
-
-      if (out.metaForSave?.renderMode === 'IT') {
-        try {
-          const it = writeIT(
-            {
-              userText: text,
-              assistantText: out.assistantText,
-              metaForSave: out.metaForSave,
-              requestedMode: ctx.requestedMode,
-              tenantId,
-            } as any,
-          );
-
-          const itText =
-            typeof (it as any)?.text === 'string'
-              ? (it as any).text
-              : typeof (it as any)?.assistantText === 'string'
-                ? (it as any).assistantText
-                : typeof (it as any)?.content === 'string'
-                  ? (it as any).content
-                  : null;
-
-          if (itText) {
-            out.assistantText = itText;
-            console.log('[IROS/Reply] IT writer applied', {
-              renderMode: out.metaForSave.renderMode,
-              len: itText.length,
-            });
-          } else {
-            console.warn('[IROS/Reply] IT writer returned no text-like field', {
-              keys: it && typeof it === 'object' ? Object.keys(it as any) : null,
-            });
-          }
-        } catch (e) {
-          console.warn('[IROS/Reply] IT writer failed (kept original text)', e);
-        }
-      }
-    } catch (e) {
-      console.warn('[IROS/Reply] rotation bridge failed', e);
-    }
-
-    // ❌ ここにはもう置かない（重複防止）
-    // out.metaForSave = ensureMetaFilled({ meta: out.metaForSave, ctx, orch });
-
-
 /* =========================
-  5.5 Helpers: meta fill (null禁止)
+  Helpers: meta fill (null禁止)
 ========================= */
 
 type PhaseIO = 'Inner' | 'Outer';
@@ -1571,7 +644,6 @@ function ensureMetaFilled(args: { meta: any; ctx: any; orch: any }): any {
     normalizePhaseIO(ctx?.baseMetaForTurn?.phase) ??
     normalizePhaseIO(ctx?.baseMetaForTurn?.phaseIO);
 
-  // 型安全のため “unknown” は使わず Inner に寄せる（落ちないこと最優先）
   const phaseFinal: PhaseIO = phaseFromMeta ?? phaseFromCtx ?? 'Inner';
   if (!m.phase) m.phase = phaseFinal;
 
@@ -1598,17 +670,13 @@ function ensureMetaFilled(args: { meta: any; ctx: any; orch: any }): any {
   const spinLoopFinal: SpinLoop2 =
     normalizeSpinLoop2(rot?.spinLoop ?? rot?.loop) ??
     normalizeSpinLoop2(m.spinLoop) ??
-    // ここは “null禁止” 方針によりデフォルトを置く（観測しやすい）
     'SRI';
 
   const descentGateFinal: DescentGate2 = normalizeDescentGate2(
     rot?.descentGate ?? m.descentGate,
   );
 
-  const rotDepthFinal =
-    pickFirstString(rot?.depth, m.depth) ??
-    // 回転側 depth も null 禁止（最低でも depthFinal を流用）
-    depthFinal;
+  const rotDepthFinal = pickFirstString(rot?.depth, m.depth) ?? depthFinal;
 
   m.spinLoop = spinLoopFinal;
   m.descentGate = descentGateFinal;
@@ -1618,7 +686,6 @@ function ensureMetaFilled(args: { meta: any; ctx: any; orch: any }): any {
     spinLoop: spinLoopFinal,
     descentGate: descentGateFinal,
     depth: rotDepthFinal,
-    // “埋めた” ことを後で追跡できるようにする（デバッグ用）
     filled: true,
   };
 
@@ -1633,169 +700,1111 @@ function ensureMetaFilled(args: { meta: any; ctx: any; orch: any }): any {
   return m;
 }
 
-// ✅ IT結果を MemoryState 用 itx_*（トップレベル）に確定同期（Persist直前）
-try {
-  const m: any = out?.metaForSave ?? {};
-  const ex: any = m?.extra ?? {};
+/* =========================================================
+   Micro Writer: generator（同じOpenAIで短文だけ作る）
+========================================================= */
 
-  // ★同期元は「確定している入力値 → extra → 既存」の順で拾う
-  const stepIn =
-    (typeof (globalThis as any).transitionStepInput === 'string' && (globalThis as any).transitionStepInput) ||
-    ex?.tLayerHint ||
-    m?.tLayerHint ||
-    null;
+const microGenerate: MicroWriterGenerate = async (args) => {
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-  const anchorIn =
-    (typeof (globalThis as any).anchorEventTypeInput === 'string' && (globalThis as any).anchorEventTypeInput) ||
-    ex?.itx_anchor_event_type ||
-    ex?.anchorEventType ||
-    m?.anchorEventType ||
-    null;
-
-  const reasonIn =
-    (typeof (globalThis as any).transitionReasonInput === 'string' && (globalThis as any).transitionReasonInput) ||
-    ex?.itReason ||
-    ex?.itx_reason ||
-    m?.itReason ||
-    m?.itx_reason ||
-    null;
-
-  const lastAtIn =
-    (typeof (globalThis as any).lastTransitionAtInput === 'string' && (globalThis as any).lastTransitionAtInput) ||
-    ex?.itx_last_at ||
-    m?.itx_last_at ||
-    null;
-
-  const tHint = typeof stepIn === 'string' ? stepIn.trim().toUpperCase() : '';
-  const itActive =
-    ex?.tLayerModeActive === true ||
-    tHint === 'T1' || tHint === 'T2' || tHint === 'T3' ||
-    m?.renderMode === 'IT';
-
-  if (itActive) {
-    m.itTriggered = true;
-
-    m.itx_step = (tHint === 'T1' || tHint === 'T2' || tHint === 'T3') ? tHint : null;
-
-    // reason
-    m.itx_reason = (typeof reasonIn === 'string' && reasonIn.trim().length > 0) ? reasonIn.trim() : 'IT_TRIGGER_OK';
-
-    // anchor event（none/confirm/set/reset だけ許可）
-    const a = typeof anchorIn === 'string' ? anchorIn.trim().toLowerCase() : '';
-    m.itx_anchor_event_type = (a === 'none' || a === 'confirm' || a === 'set' || a === 'reset') ? a : 'none';
-
-    // last_at（IT側の値を優先。無ければ nowIso）
-    m.itx_last_at = (typeof lastAtIn === 'string' && lastAtIn.trim().length > 0) ? lastAtIn.trim() : nowIso();
-  }
-
-  out.metaForSave = m;
-
-  console.log('[IROS/Reply][itx-sync-for-persist]', {
-    itActive,
-    itx_step: m.itx_step ?? null,
-    itx_anchor_event_type: m.itx_anchor_event_type ?? null,
-    itx_reason: m.itx_reason ?? null,
-    itx_last_at: m.itx_last_at ?? null,
+  const res = await client.chat.completions.create({
+    model: IROS_MODEL,
+    messages: [
+      { role: 'system', content: String(args.system ?? '') },
+      { role: 'user', content: String(args.prompt ?? '') },
+    ],
+    temperature: typeof args.temperature === 'number' ? args.temperature : 0.6,
+    max_tokens: typeof args.maxTokens === 'number' ? args.maxTokens : 140,
   });
-} catch (e) {
-  console.warn('[IROS/Reply][itx-sync-for-persist] failed', e);
+
+  return res.choices?.[0]?.message?.content ?? '';
+};
+
+/* =========================================================
+   FORWARD fallback（テンプレ臭を消す：seed + userText で揺らす）
+========================================================= */
+
+function buildForwardFallbackText(seed: string, userText: string): string {
+  const normalize = (s: string) =>
+    String(s ?? '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const clip = (s: string, max = 18) => {
+    const t = normalize(s);
+    if (!t) return '';
+    return t.length > max ? t.slice(0, max) + '…' : t;
+  };
+
+  const hash32 = (s: string) => {
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) {
+      h = ((h << 5) + h) ^ s.charCodeAt(i);
+    }
+    return h >>> 0;
+  };
+
+  const u = clip(userText);
+  const key = `${seed}|${u}`;
+
+  const variants: Array<() => string> = [
+    () =>
+      u
+        ? `一手：「${u}」を1行に縮めて、いちばん軽い着手を1つだけ決める。🪔`
+        : `一手：一点だけ名指しして、いちばん軽い着手を1つだけ決める。🪔`,
+    () =>
+      u
+        ? `一手：候補は増やさず、「${u}」の最小の一歩を1つだけ書く。🪔`
+        : `一手：候補は増やさず、最小の一歩を1つだけ書く。🪔`,
+    () =>
+      u
+        ? `一手：「誰に／いつ／何を」を1つにして、「${u}」を“行動”に落とす。🪔`
+        : `一手：「誰に／いつ／何を」を1つにして、行動に落とす。🪔`,
+    () =>
+      u
+        ? `一手：「${u}」の対象を1つに絞り、今日の着手を1つだけやる。🪔`
+        : `一手：対象を1つに絞り、今日の着手を1つだけやる。🪔`,
+  ];
+
+  const idx = variants.length ? hash32(key) % variants.length : 0;
+  return variants[idx]();
 }
 
-/* ---------------------------
-   6) Persist (order fixed)
----------------------------- */
+/**
+ * ✅ slotPlanLen 推定（推測しない：手元にある meta からだけ）
+ */
+function inferSlotPlanLen(meta: any): number | null {
+  try {
+    const sp = meta?.slotPlan ?? null;
 
-{
-  const ts = nowNs();
+    if (Array.isArray(sp)) return sp.length;
 
+    const slots =
+      sp && typeof sp === 'object' && Array.isArray((sp as any).slots)
+        ? (sp as any).slots
+        : null;
+    if (slots) return slots.length;
 
+    if (sp && typeof sp === 'object') return Object.keys(sp).length;
 
+    const fpSlots = meta?.framePlan?.slots;
+    if (Array.isArray(fpSlots)) return fpSlots.length;
 
-  // ✅ stop-the-bleeding: meta 合流の最終フォールバック
-  const metaForSave = out.metaForSave ?? (orch as any)?.meta ?? null;
+    return null;
+  } catch {
+    return null;
+  }
+}
 
-  const t1 = nowNs();
-  await persistQCodeSnapshotIfAny({
-    userCode,
+// =========================================================
+// ✅ llmGate を「必ず通す」共通関数（candidate対応版）
+// - probeLlmGate へ “slotsを含む meta” を渡す（metaForCandidate 優先）
+// - hasSlots / slotPlanPolicy も “濃いmeta” を見る
+// - ✅ decision.resolvedText を返す（呼び出し側が本文採用できる）
+// =========================================================
+function runLlmGate(args: {
+  tag: 'PROBE' | 'FINAL';
+  conversationId: string;
+  userCode: string;
+  metaForSave: any;
+  metaForCandidate?: any;
+  allowLLM_final: boolean;
+  assistantTextNow: string;
+}): { llmEntry: string | null; resolvedText: string | null } {
+  const {
+    tag,
     conversationId,
-    requestedMode: ctx.requestedMode,
-    metaForSave,
-  });
-  t.persist_ms.q_snapshot_ms = msSince(t1);
-
-  const t2 = nowNs();
-  await persistIntentAnchorIfAny({
-    supabase,
     userCode,
     metaForSave,
-  });
-  t.persist_ms.intent_anchor_ms = msSince(t2);
+    metaForCandidate,
+    allowLLM_final,
+    assistantTextNow,
+  } = args;
 
-  const t3 = nowNs();
-  await persistMemoryStateIfAny({
-    supabase,
-    userCode,
-    userText: text,
-    metaForSave,
-  });
-  t.persist_ms.memory_state_ms = msSince(t3);
+  try {
+    const metaForProbe = metaForCandidate ?? metaForSave;
 
-  const t4 = nowNs();
-  await persistUnifiedAnalysisIfAny({
-    supabase,
+    const brakeReason =
+      metaForSave?.brakeReason ??
+      metaForSave?.speechInput?.brakeReleaseReason ??
+      metaForSave?.extra?.brakeReason ??
+      null;
+
+    const speechAct =
+      metaForSave?.speechAct ??
+      metaForSave?.extra?.speechAct ??
+      null;
+
+    let slotPlanLen: number | null =
+      metaForSave?.slotPlanLen ??
+      metaForSave?.speechInput?.slotPlanLen ??
+      metaForSave?.extra?.slotPlanLen ??
+      null;
+
+    // ✅ hasSlots: unknown を false に潰さない（分かる時だけ true/false を入れる）
+    const hasSlots: boolean | null = (() => {
+      if (typeof metaForSave?.hasSlots === 'boolean') return metaForSave.hasSlots;
+      if (typeof metaForProbe?.hasSlots === 'boolean') return metaForProbe.hasSlots;
+
+      const fpSlots = metaForProbe?.framePlan?.slots;
+      if (Array.isArray(fpSlots)) return fpSlots.length > 0;
+
+      const spSlots = metaForProbe?.slotPlan?.slots;
+      if (Array.isArray(spSlots)) return spSlots.length > 0;
+
+      const directSlots = metaForProbe?.slots;
+      if (Array.isArray(directSlots)) return directSlots.length > 0;
+
+      return null;
+    })();
+
+    // ✅ policy も “濃いmeta” も見る
+    const slotPlanPolicy =
+      metaForSave?.slotPlanPolicy ??
+      metaForProbe?.framePlan?.slotPlanPolicy ??
+      metaForProbe?.slotPlanPolicy ??
+      metaForSave?.framePlan?.slotPlanPolicy ??
+      metaForSave?.extra?.slotPlanPolicy ??
+      null;
+
+    const textNow = String(assistantTextNow ?? '').trim();
+
+    // ✅ slotPlanLen が無い場合は “濃いmeta” から推定して入れる
+    if (slotPlanLen == null) {
+      const slotsObj =
+        metaForProbe?.framePlan?.slots ??
+        metaForProbe?.framePlan?.framePlan?.slots ??
+        metaForProbe?.framePlan?.slotPlan?.slots ??
+        metaForProbe?.slotPlan?.slots ??
+        metaForProbe?.slots ??
+        metaForProbe?.extra?.framePlan?.slots ??
+        null;
+
+      if (Array.isArray(slotsObj)) {
+        if (slotsObj.length > 0) slotPlanLen = slotsObj.length;
+      } else if (slotsObj && typeof slotsObj === 'object') {
+        const n = Object.keys(slotsObj).length;
+        if (n > 0) slotPlanLen = n;
+      }
+    }
+
+    const probe = probeLlmGate({
+      conversationId,
+      userCode,
+      allowLLM_final,
+      brakeReason,
+      speechAct,
+      finalAssistantTextNow: textNow,
+      slotPlanLen,
+      hasSlots,
+      slotPlanPolicy,
+      meta: metaForProbe,
+    } as any);
+
+    writeLlmGateToMeta(metaForSave, probe.patch);
+    logLlmGate(tag, { conversationId, userCode, patch: probe.patch });
+
+    // ✅ resolvedText は decision 側が正（patchではない）
+    const resolvedTextRaw = (probe.decision as any)?.resolvedText;
+    const resolvedText =
+      resolvedTextRaw != null && String(resolvedTextRaw).trim().length > 0
+        ? String(resolvedTextRaw).trim()
+        : null;
+
+    return {
+      llmEntry: (probe.patch as any)?.llmEntry ?? null,
+      resolvedText,
+    };
+  } catch (e) {
+    console.warn('[IROS/LLM_GATE][FAILED]', { tag, conversationId, userCode, error: e });
+    return { llmEntry: null, resolvedText: null };
+  }
+}
+
+/* =========================================================
+   main
+========================================================= */
+
+export async function handleIrosReply(
+  params: HandleIrosReplyInput,
+): Promise<HandleIrosReplyOutput> {
+  const t0 = nowNs();
+  const startedAt = nowIso();
+
+  const t: any = {
+    started_at: startedAt,
+    finished_at: startedAt,
+    total_ms: 0,
+
+    gate_ms: 0,
+    context_ms: 0,
+    orchestrator_ms: 0,
+    postprocess_ms: 0,
+
+    persist_ms: {
+      q_snapshot_ms: 0,
+      intent_anchor_ms: 0,
+      memory_state_ms: 0,
+      unified_analysis_ms: 0,
+      total_ms: 0,
+    },
+  };
+
+  const {
+    conversationId,
+    text,
+    mode,
     userCode,
     tenantId,
-    userText: text,
-    assistantText: out.assistantText,
-    metaForSave,
-    conversationId,
-  });
-  t.persist_ms.unified_analysis_ms = msSince(t4);
-
-  const t5 = nowNs();
-  await persistAssistantMessage({
-    supabase,
+    rememberScope,
     reqOrigin,
     authorizationHeader,
+    traceId,
+    userProfile,
+    style,
+    history,
+    extra,
+  } = params;
+
+  console.log('[IROS/Reply] handleIrosReply start', {
     conversationId,
     userCode,
-    assistantText: out.assistantText,
-    metaForSave,
+    mode,
+    tenantId,
+    rememberScope,
+    traceId,
+    style,
+    history_len: Array.isArray(history) ? history.length : null,
+    // single-writer 前提なので常に false に寄せる
+    persistAssistantAllowed: false,
   });
-  t.persist_ms.assistant_message_ms = msSince(t5);
 
-  t.persist_ms.total_ms = msSince(ts);
-}
+  if (process.env.IROS_DEBUG_EXTRA === '1') {
+    console.log('[IROS/Reply] extra keys', {
+      conversationId,
+      keys: Object.keys(extra ?? {}),
+      extra: extra ?? null,
+    });
+  }
 
-const finalMode =
-  typeof (orch as any)?.mode === 'string'
-    ? (orch as any).mode
-    : (ctx as any).finalMode ?? mode;
+  try {
+    /* ---------------------------
+       0) Gates
+    ---------------------------- */
 
-t.finished_at = nowIso();
-t.total_ms = msSince(t0);
+    const tg = nowNs();
 
-return {
-  ok: true,
-  result: orch,
-  assistantText: out.assistantText,
-  metaForSave: out.metaForSave,
-  finalMode,
-};
-} catch (e) {
-console.error('[IROS/Reply] handleIrosReply failed', {
-  conversationId,
-  userCode,
-  error: e,
-});
+    const gatedGreeting = await runGreetingGate({
+      supabase,
+      conversationId,
+      userCode,
+      text,
+      userProfile,
+      reqOrigin,
+      authorizationHeader,
+    });
 
-t.finished_at = nowIso();
-t.total_ms = msSince(t0);
+    if (gatedGreeting) {
+      // ✅ ok: true のときだけ metaForSave を触る（union を正しく絞る）
+      if (gatedGreeting.ok) {
+        gatedGreeting.metaForSave = stampSingleWriter(
+          mergeExtra(gatedGreeting.metaForSave ?? {}, extra ?? null),
+        );
 
-return {
-  ok: false,
-  error: 'generation_failed',
-  detail: e instanceof Error ? e.message : String(e),
-};
-}
+        // ついでに result.meta も揃えておく（UI/後段参照のブレ防止）
+        if (gatedGreeting.result && typeof gatedGreeting.result === 'object') {
+          (gatedGreeting.result as any).meta = gatedGreeting.metaForSave;
+        }
+      }
+
+      return gatedGreeting;
+    }
+
+    const bypassMicro = shouldBypassMicroGate(text);
+
+    // ✅ Micro（独立ルート）
+    if (!bypassMicro && isMicroTurn(text)) {
+      const name = userProfile?.user_call_name || 'あなた';
+      const seed = `${conversationId}|${userCode}|${traceId ?? ''}|${Date.now()}`;
+
+      const mw = await runMicroWriter(microGenerate, {
+        name,
+        userText: text,
+        seed,
+      });
+
+      if (mw.ok) {
+        const historyForTurn = await buildHistoryForTurn({
+          supabaseClient: supabase,
+          conversationId,
+          userCode,
+          providedHistory: history ?? null,
+          includeCrossConversation: false,
+          baseLimit: 30,
+        });
+
+        const tc = nowNs();
+        const ctx = await (buildTurnContext as any)({
+          supabase,
+          conversationId,
+          userCode,
+          text,
+          mode,
+          traceId,
+          userProfile,
+          requestedStyle: style ?? null,
+          history: historyForTurn,
+          extra: extra ?? null,
+        });
+        t.context_ms = msSince(tc);
+
+        let metaForSave: any = {
+          ...(ctx?.baseMetaForTurn ?? {}),
+          style:
+            ctx?.effectiveStyle ??
+            style ??
+            (userProfile as any)?.style ??
+            'friendly',
+
+          mode: 'light',
+          microOnly: true,
+
+          skipMemory: true,
+          skipTraining: true,
+
+          nextStep: null,
+          next_step: null,
+          timing: t,
+        };
+
+        metaForSave = stampSingleWriter(mergeExtra(metaForSave, extra ?? null));
+
+        // SUN固定保護（念のため）
+        try {
+          metaForSave = sanitizeIntentAnchorMeta(metaForSave);
+        } catch {}
+
+        // persist（最低限：assistant保存はしない）
+        const ts = nowNs();
+
+        const t1 = nowNs();
+        await persistQCodeSnapshotIfAny({
+          userCode,
+          conversationId,
+          requestedMode: ctx?.requestedMode ?? mode,
+          metaForSave,
+        });
+        t.persist_ms.q_snapshot_ms = msSince(t1);
+
+        t.persist_ms.total_ms = msSince(ts);
+
+        t.gate_ms = msSince(tg);
+        t.finished_at = nowIso();
+        t.total_ms = msSince(t0);
+
+        return {
+          ok: true,
+          result: { gate: 'micro_writer' },
+          assistantText: mw.text,
+          metaForSave,
+          finalMode: 'light',
+        };
+      }
+
+      console.warn('[IROS/MicroWriter] failed -> fallback to normal', {
+        reason: mw.reason,
+        detail: mw.detail,
+      });
+    } else if (bypassMicro) {
+      console.log('[IROS/Gate] bypass micro gate (context recall)', {
+        conversationId,
+        userCode,
+        text,
+      });
+    }
+
+    t.gate_ms = msSince(tg);
+
+    /* ---------------------------
+       1) History (single source)
+    ---------------------------- */
+
+    const historyForTurn: unknown[] = await buildHistoryForTurn({
+      supabaseClient: supabase,
+      conversationId,
+      userCode,
+      providedHistory: history ?? null,
+      includeCrossConversation: true,
+      baseLimit: 30,
+      crossLimit: 60,
+      maxTotal: 80,
+    });
+
+    /* ---------------------------
+       1.1) Goal recall gate（ENV=1 かつ 質問一致のときだけ）
+    ---------------------------- */
+
+    const goalRecallQ = isGoalRecallQ(text);
+
+    if (enableGoalRecall && goalRecallQ) {
+      let goalRaw: string | null = null;
+      let goalSource: 'db' | 'history' | 'none' = 'none';
+
+      try {
+        const hit = await loadLatestGoalByUserCode(supabase, userCode, { limit: 250 });
+        if (hit?.goalText) {
+          goalRaw = hit.goalText;
+          goalSource = 'db';
+        }
+      } catch (e) {
+        console.warn('[goal_recall] loadLatestGoalByUserCode failed (fallback to history)', e);
+      }
+
+      if (!goalRaw) {
+        goalRaw = extractGoalFromHistory(historyForTurn as any[]);
+        if (goalRaw) goalSource = 'history';
+      }
+      if (!goalRaw) goalSource = 'none';
+
+      const assistantText = goalRaw
+        ? `今日の目標は「${String(goalRaw).trim()}」です。🪔`
+        : `直近の履歴から「今日の目標」が見つかりませんでした。いまの目標を1行で置いてください。🪔`;
+
+      let metaForSave: any = {
+        style: style ?? (userProfile as any)?.style ?? 'friendly',
+        mode: 'light',
+        goalRecallOnly: true,
+        skipTraining: true,
+        skipMemory: true,
+        nextStep: null,
+        next_step: null,
+        timing: t,
+      };
+      metaForSave = stampSingleWriter(mergeExtra(metaForSave, extra ?? null));
+
+      t.finished_at = nowIso();
+      t.total_ms = msSince(t0);
+
+      return {
+        ok: true,
+        result: { gate: 'goal_recall', found: Boolean(goalRaw), source: goalSource },
+        assistantText,
+        metaForSave,
+        finalMode: 'light',
+      };
+    }
+
+    /* ---------------------------
+       1.2) Achievement Summary Gate（明示トリガー時だけ）
+    ---------------------------- */
+
+    const wantsAchSummary =
+      /(?:達成|サマリ|進捗|振り返り|まとめ|総括|レビュー|できたこと|やったこと)/.test(text) &&
+      /(?:昨日|今日|先週|今週|最近|直近|\d+日|\d+週間|\d+週)/.test(text);
+
+    const period = wantsAchSummary ? detectAchievementSummaryPeriod(text) : null;
+
+    if (period) {
+      try {
+        const msgs = await loadNormalizedMessagesForPeriod({
+          supabase,
+          userCode,
+          startIso: period.startIso,
+          endIso: period.endIso,
+          limit: 200,
+        });
+
+        const userMsgs = (msgs ?? [])
+          .filter((m: any) => String(m?.role ?? '').toLowerCase() === 'user')
+          .filter((m: any) => !shouldDropFromAchievementSummary(String(m?.text ?? m?.content ?? '')));
+
+        const summary = buildAchievementSummary(userMsgs as any, period);
+        const assistantText = renderAchievementSummaryText(summary);
+
+        let metaForSave: any = {
+          style: style ?? (userProfile as any)?.style ?? 'friendly',
+          mode: 'light',
+          achievementSummaryOnly: true,
+          skipTraining: true,
+          skipMemory: true,
+          nextStep: null,
+          next_step: null,
+          timing: t,
+        };
+        metaForSave = stampSingleWriter(mergeExtra(metaForSave, extra ?? null));
+
+        t.finished_at = nowIso();
+        t.total_ms = msSince(t0);
+
+        return {
+          ok: true,
+          result: { gate: 'achievement_summary', kind: period.kind },
+          assistantText,
+          metaForSave,
+          finalMode: 'light',
+        };
+      } catch (e) {
+        console.warn('[IROS][AchSummary] failed', e);
+      }
+    }
+
+    /* ---------------------------
+       1.3) Generic Recall Gate（会話の糊）
+    ---------------------------- */
+
+    try {
+      const recall = await runGenericRecallGate({
+        text,
+        history: (historyForTurn as any[])
+          .filter((m) => String(m?.role ?? '').toLowerCase() === 'user')
+          .filter((m) => {
+            const s = norm(m?.content ?? m?.text ?? (m as any)?.message ?? '');
+            if (!s) return false;
+            if (/^たぶんこれのことかな：/.test(s)) return false;
+            if (/^たぶんこれのことかな：「/.test(s)) return false;
+            return true;
+          }),
+      });
+
+      if (recall) {
+        let metaForSave: any = {
+          style: style ?? (userProfile as any)?.style ?? 'friendly',
+          mode: 'recall',
+          recall: {
+            kind: recall.recallKind,
+            recalledText: recall.recalledText,
+          },
+          skipTraining: true,
+          skipMemory: true,
+          timing: t,
+        };
+        metaForSave = stampSingleWriter(mergeExtra(metaForSave, extra ?? null));
+
+        t.finished_at = nowIso();
+        t.total_ms = msSince(t0);
+
+        return {
+          ok: true,
+          result: { gate: 'generic_recall', ...recall },
+          assistantText: recall.assistantText,
+          metaForSave,
+          finalMode: 'recall',
+        };
+      }
+    } catch (e) {
+      console.warn('[IROS/Gate] genericRecallGate failed', e);
+    }
+
+    /* ---------------------------
+       2) Context
+    ---------------------------- */
+
+    const tc = nowNs();
+    const ctx = await (buildTurnContext as any)({
+      supabase,
+      conversationId,
+      userCode,
+      text,
+      mode,
+      traceId,
+      userProfile,
+      requestedStyle: style ?? null,
+      history: historyForTurn,
+      extra: extra ?? null,
+    });
+    t.context_ms = msSince(tc);
+
+    /* ---------------------------
+       3) Orchestrator
+    ---------------------------- */
+
+    // ✅ baseMeta は extra を絶対に落とさない（V2: route/ctx → orch へ橋渡し）
+    const baseMetaMergedForTurn: any = mergeExtra(
+      { ...(ctx.baseMetaForTurn ?? {}) },
+      extra ?? null,
+    );
+
+    // ✅ R -> I gate（入口で確定。途中上書き禁止）
+    const prevDepthStage: string | null =
+      typeof (ctx?.baseMetaForTurn as any)?.depthStage === 'string'
+        ? String((ctx.baseMetaForTurn as any).depthStage)
+        : typeof (ctx?.baseMetaForTurn as any)?.depth === 'string'
+          ? String((ctx.baseMetaForTurn as any).depth)
+          : typeof (baseMetaMergedForTurn as any)?.depthStage === 'string'
+            ? String((baseMetaMergedForTurn as any).depthStage)
+            : typeof (baseMetaMergedForTurn as any)?.depth === 'string'
+              ? String((baseMetaMergedForTurn as any).depth)
+              : null;
+
+    let requestedDepthFinal: string | undefined =
+      typeof ctx.requestedDepth === 'string' && ctx.requestedDepth.trim().length > 0
+        ? ctx.requestedDepth.trim()
+        : undefined;
+
+    if (
+      prevDepthStage?.startsWith('R') &&
+      typeof requestedDepthFinal === 'string' &&
+      requestedDepthFinal.startsWith('C')
+    ) {
+      requestedDepthFinal = 'I1';
+    }
+
+    console.log('[IROS][DepthGate] R->I check', {
+      prevDepthStage,
+      requestedDepth_in: ctx.requestedDepth ?? null,
+      requestedDepth_out: requestedDepthFinal ?? null,
+    });
+
+    // ✅ Orchestrator（V2: 判断のみ。本文生成はしない）
+    const to = nowNs();
+    const orch = await (runOrchestratorTurn as any)({
+      conversationId,
+      userCode,
+      text,
+      isFirstTurn: !!ctx.isFirstTurn,
+
+      requestedMode: ctx.requestedMode,
+      requestedDepth: requestedDepthFinal,
+      requestedQCode: ctx.requestedQCode,
+
+      baseMetaForTurn: baseMetaMergedForTurn,
+      userProfile: userProfile ?? null,
+      effectiveStyle: ctx.effectiveStyle,
+
+      history: historyForTurn,
+      sb: supabase,
+    });
+    t.orchestrator_ms = msSince(to);
+
+    /* ---------------------------
+       4) PostProcess
+    ---------------------------- */
+
+    const tp = nowNs();
+    const out = await (postProcessReply as any)({
+      supabase,
+      userCode,
+      conversationId,
+      userText: text,
+
+      effectiveStyle: ctx.effectiveStyle,
+      requestedMode: ctx.requestedMode,
+
+      orchResult: orch,
+      history: historyForTurn,
+      extra: extra ?? null,
+    });
+    t.postprocess_ms = msSince(tp);
+
+    /* ---------------------------
+       5) Timing / Extra / Sanitize / Rotation / IT apply
+    ---------------------------- */
+
+    out.metaForSave = out.metaForSave ?? {};
+    out.metaForSave.timing = t;
+
+    // ✅ extra を “最後に” 再注入（undefined は上書きしない）
+    out.metaForSave.extra = out.metaForSave.extra ?? {};
+    if (extra && typeof extra === 'object') {
+      const prev = out.metaForSave.extra ?? {};
+      const next: any = { ...prev };
+      for (const [k, v] of Object.entries(extra as any)) {
+        if (v !== undefined) next[k] = v;
+      }
+      out.metaForSave.extra = next;
+    }
+
+    // ✅ single-writer stamp（最後に確定）
+    out.metaForSave = stampSingleWriter(out.metaForSave);
+
+    if (process.env.IROS_DEBUG_EXTRA === '1') {
+      console.log('[IROS/Reply][extra-merged]', out.metaForSave.extra);
+    }
+
+    // =========================================================
+    // ✅ SpeechAct single-source stamp (ALWAYS write to metaForSave.extra)
+    // =========================================================
+    try {
+      out.metaForSave = out.metaForSave ?? {};
+      out.metaForSave.extra = out.metaForSave.extra ?? {};
+      const ex: any = out.metaForSave.extra;
+
+      const ctxAny: any = ctx as any;
+      const orchAny: any = orch as any;
+
+      const decision =
+        ctxAny?.speechDecision ??
+        ctxAny?.speechActDecision ??
+        ctxAny?.speech ??
+        orchAny?.speechDecision ??
+        orchAny?.speechActDecision ??
+        null;
+
+      const applied =
+        ctxAny?.speechApplied ??
+        ctxAny?.speechActApplied ??
+        orchAny?.speechApplied ??
+        orchAny?.speechActApplied ??
+        null;
+
+      const pickAct = (v: any): string | null => {
+        const a = v?.act ?? v?.actCandidate ?? v?.hardStop ?? null;
+        return typeof a === 'string' && a.trim() ? a.trim() : null;
+      };
+
+      const pickReason = (v: any): string | null => {
+        const r = v?.reason ?? v?.hardStopReason ?? v?.actReason ?? null;
+        return typeof r === 'string' && r.trim() ? r.trim() : null;
+      };
+
+      const pickConfidence = (v: any): number | null => {
+        const c = v?.confidence ?? v?.conf ?? null;
+        return typeof c === 'number' && Number.isFinite(c) ? c : null;
+      };
+
+      if (ex.speechAct === undefined) ex.speechAct = pickAct(applied) ?? pickAct(decision) ?? null;
+      if (ex.speechActReason === undefined) ex.speechActReason = pickReason(decision) ?? null;
+      if (ex.speechActConfidence === undefined) ex.speechActConfidence = pickConfidence(decision);
+
+      // ✅ allowLLM は “単一ソース” として必ず boolean
+      // - default = true（通常会話は喋れる）
+      const allowFromMeta =
+        typeof (out.metaForSave as any)?.speechAllowLLM === 'boolean'
+          ? (out.metaForSave as any).speechAllowLLM
+          : undefined;
+
+      const allowFromExtra =
+        typeof ex.speechAllowLLM === 'boolean'
+          ? ex.speechAllowLLM
+          : undefined;
+
+      const allowFromDecision =
+        typeof decision?.allowLLM === 'boolean'
+          ? decision.allowLLM
+          : typeof decision?.allow === 'boolean'
+            ? decision.allow
+            : undefined;
+
+      const allowFromApplied =
+        typeof applied?.allowLLM === 'boolean'
+          ? applied.allowLLM
+          : typeof applied?.allow === 'boolean'
+            ? applied.allow
+            : undefined;
+
+      const finalAllow =
+        typeof allowFromMeta === 'boolean'
+          ? allowFromMeta
+          : typeof allowFromExtra === 'boolean'
+            ? allowFromExtra
+            : typeof allowFromDecision === 'boolean'
+              ? allowFromDecision
+              : typeof allowFromApplied === 'boolean'
+                ? allowFromApplied
+                : true;
+
+      ex.speechAllowLLM = finalAllow;
+      (out.metaForSave as any).speechAllowLLM = finalAllow;
+
+      // rawTextFromModel が無ければ “現時点の本文” を入れておく（空は禁止）
+      if (ex.rawTextFromModel === undefined || ex.rawTextFromModel === null) {
+        const cur = String(out.assistantText ?? out.content ?? '').trim();
+        ex.rawTextFromModel = cur.length ? cur : '…';
+      }
+
+      if (ex.extractedTextFromModel === undefined) ex.extractedTextFromModel = '';
+    } catch (e) {
+      console.warn('[IROS/Reply] SpeechAct stamp failed', e);
+    }
+
+    // =========================================================
+    // ✅ LLM Gate PROBE（ここは “刻むだけ”）+ resolvedText採用（空のときだけ）
+    // - 重複ブロックは削除（ここ1箇所だけ）
+    // =========================================================
+    try {
+      const assistantTextNow = String(out?.assistantText ?? out?.content ?? out?.text ?? '').trim();
+      const allowLLM_final =
+      typeof out?.metaForSave?.speechAllowLLM === 'boolean'
+        ? out.metaForSave.speechAllowLLM
+        : true;
+
+      const metaForCandidate =
+        (orch as any)?.result?.meta ??
+        (orch as any)?.meta ??
+        null;
+
+      if ((out.metaForSave as any)?.slotPlanLen == null) {
+        const n = inferSlotPlanLen(metaForCandidate ?? out.metaForSave);
+        if (typeof n === 'number') (out.metaForSave as any).slotPlanLen = n;
+      }
+
+      const gate = runLlmGate({
+        tag: 'PROBE',
+        conversationId,
+        userCode,
+        metaForSave: out.metaForSave,
+        metaForCandidate,
+        allowLLM_final,
+        assistantTextNow,
+      });
+
+      // ✅ resolvedText は「本文が空のときだけ」採用
+      if (
+        String(out?.assistantText ?? out?.content ?? '').trim().length === 0 &&
+        gate.resolvedText
+      ) {
+        out.content = gate.resolvedText;
+        out.assistantText = gate.resolvedText;
+
+        out.metaForSave = out.metaForSave ?? {};
+        out.metaForSave.fallbackApplied = 'LLM_GATE_RESOLVED_TEXT_APPLIED';
+        (out.metaForSave as any).fallbackLen = gate.resolvedText.length;
+
+        out.metaForSave.extra = out.metaForSave.extra ?? {};
+        (out.metaForSave.extra as any).rawTextFromModel = gate.resolvedText;
+
+        console.warn('[IROS/Reply][patch] llmGate resolvedText applied', {
+          conversationId,
+          userCode,
+          len: gate.resolvedText.length,
+          llmEntry: gate.llmEntry,
+        });
+      }
+    } catch (e) {
+      console.warn('[IROS/LLM_GATE][PROBE] failed', e);
+    }
+
+    // ✅ rotation bridge（最低限・安定版：null に落とさない）
+    try {
+      const normalizeDescentGateBridge = (v: any): 'closed' | 'offered' | 'accepted' | null => {
+        if (v == null) return null;
+        if (typeof v === 'string') {
+          const s = v.trim().toLowerCase();
+          if (s === 'closed' || s === 'offered' || s === 'accepted') return s;
+          return null;
+        }
+        if (typeof v === 'boolean') return v ? 'accepted' : 'closed';
+        return null;
+      };
+
+      const normalizeSpinLoopBridge = (v: any): 'SRI' | 'TCF' | null => {
+        if (typeof v !== 'string') return null;
+        const s = v.trim().toUpperCase();
+        if (s === 'SRI' || s === 'TCF') return s as any;
+        return null;
+      };
+
+      const normalizeDepthBridge = (v: any): string | null => {
+        if (typeof v !== 'string') return null;
+        const s = v.trim();
+        return s ? s : null;
+      };
+
+      const m: any = out.metaForSave ?? {};
+      const rot =
+        m.rotation ??
+        m.rotationState ??
+        m.spin ??
+        (m.will && (m.will.rotation ?? m.will.spin)) ??
+        null;
+
+      const descent = normalizeDescentGateBridge(rot?.descentGate ?? m.descentGate);
+      const loop =
+        normalizeSpinLoopBridge(rot?.spinLoop ?? rot?.loop) ??
+        normalizeSpinLoopBridge(m.spinLoop);
+
+      const depth =
+        normalizeDepthBridge(rot?.nextDepth ?? rot?.depth) ??
+        normalizeDepthBridge(m.depth);
+
+      // ✅ 分かったものだけ上書き（分からない場合は現状維持）
+      if (descent) m.descentGate = descent;
+      if (loop) m.spinLoop = loop;
+      if (depth) m.depth = depth;
+
+      m.rotationState = {
+        ...(typeof m.rotationState === 'object' ? m.rotationState : {}),
+        spinLoop: m.spinLoop,
+        descentGate: m.descentGate,
+        depth: m.depth,
+        reason: rot?.reason ?? (m.rotationState?.reason ?? undefined),
+      };
+
+      out.metaForSave = m;
+
+      console.log('[IROS/Reply] rotation bridge', {
+        spinLoop: m.spinLoop,
+        descentGate: m.descentGate,
+        depth: m.depth,
+      });
+    } catch (e) {
+      console.warn('[IROS/Reply] rotation bridge failed', e);
+    }
+
+    // ✅ meta fill（IT writer 前に null 禁止を担保）
+    out.metaForSave = ensureMetaFilled({ meta: out.metaForSave, ctx, orch });
+
+    // ✅ IT writer（COMMIT のときだけ）
+    try {
+      const decidedAct =
+        (ctx as any)?.speechDecision?.act ??
+        (ctx as any)?.speechActDecision?.act ??
+        (ctx as any)?.speechAct?.act ??
+        (orch as any)?.speechDecision?.act ??
+        (orch as any)?.speechActDecision?.act ??
+        (out.metaForSave as any)?.speechAct ??
+        (out.metaForSave as any)?.speechActDecision?.act ??
+        null;
+
+      const allowIT = decidedAct === 'COMMIT';
+
+      if (out.metaForSave?.renderMode === 'IT' && !allowIT) {
+        out.metaForSave.renderMode = 'NORMAL';
+        out.metaForSave.extra = out.metaForSave.extra ?? {};
+        out.metaForSave.extra.renderMode = 'NORMAL';
+
+        (out.metaForSave as any).itActive = false;
+        (out.metaForSave as any).tLayerModeActive = false;
+        (out.metaForSave as any).tLayerHint = null;
+
+        (out.metaForSave as any).itx_step = null;
+        (out.metaForSave as any).itx_reason = null;
+        (out.metaForSave as any).itx_anchor_event_type = null;
+        (out.metaForSave as any).itx_last_at = null;
+
+        console.log('[IROS/Reply] IT writer skipped (act not COMMIT)', {
+          act: decidedAct,
+          renderMode: 'IT->NORMAL',
+        });
+      }
+
+      if (out.metaForSave?.renderMode === 'IT' && allowIT) {
+        const it = writeIT(
+          {
+            userText: text,
+            assistantText: out.assistantText,
+            metaForSave: out.metaForSave,
+            requestedMode: ctx.requestedMode,
+            tenantId,
+          } as any,
+        );
+
+        const itText =
+          typeof (it as any)?.text === 'string'
+            ? (it as any).text
+            : typeof (it as any)?.assistantText === 'string'
+              ? (it as any).assistantText
+              : typeof (it as any)?.content === 'string'
+                ? (it as any).content
+                : null;
+
+        if (itText) {
+          out.assistantText = itText;
+          (out as any).content = itText;
+          console.log('[IROS/Reply] IT writer applied', {
+            act: decidedAct,
+            len: itText.length,
+          });
+        } else {
+          console.warn('[IROS/Reply] IT writer returned no text-like field', {
+            act: decidedAct,
+            keys: it && typeof it === 'object' ? Object.keys(it as any) : null,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('[IROS/Reply] IT writer failed (kept original text)', e);
+    }
+
+    // SUN固定保護（最後にも念押し）
+    try {
+      out.metaForSave = sanitizeIntentAnchorMeta(out.metaForSave);
+    } catch {}
+
+    /* ---------------------------
+       6) Persist (assistant保存はしない)
+    ---------------------------- */
+
+    {
+      const ts = nowNs();
+
+      const metaForSave = out.metaForSave ?? (orch as any)?.meta ?? null;
+
+      const t1 = nowNs();
+      await persistQCodeSnapshotIfAny({
+        userCode,
+        conversationId,
+        requestedMode: ctx.requestedMode,
+        metaForSave,
+      });
+      t.persist_ms.q_snapshot_ms = msSince(t1);
+
+      const t2 = nowNs();
+      await persistIntentAnchorIfAny({
+        supabase,
+        userCode,
+        metaForSave,
+      });
+      t.persist_ms.intent_anchor_ms = msSince(t2);
+
+      const t3 = nowNs();
+      await persistMemoryStateIfAny({
+        supabase,
+        userCode,
+        userText: text,
+        metaForSave,
+      });
+      t.persist_ms.memory_state_ms = msSince(t3);
+
+      const t4 = nowNs();
+      await persistUnifiedAnalysisIfAny({
+        supabase,
+        userCode,
+        tenantId,
+        userText: text,
+        assistantText: out.assistantText,
+        metaForSave,
+        conversationId,
+      });
+      t.persist_ms.unified_analysis_ms = msSince(t4);
+
+      t.persist_ms.total_ms = msSince(ts);
+    }
+
+    const finalMode =
+      typeof (orch as any)?.mode === 'string'
+        ? (orch as any).mode
+        : (ctx as any).finalMode ?? mode;
+
+    t.finished_at = nowIso();
+    t.total_ms = msSince(t0);
+
+    // ✅ 最後に single-writer stamp を確定（念押し）
+    out.metaForSave = stampSingleWriter(out.metaForSave);
+
+    return {
+      ok: true,
+      result: orch,
+      assistantText: out.assistantText,
+      metaForSave: out.metaForSave,
+      finalMode,
+    };
+  } catch (e) {
+    console.error('[IROS/Reply] handleIrosReply failed', {
+      conversationId,
+      userCode,
+      error: e,
+    });
+
+    t.finished_at = nowIso();
+    t.total_ms = msSince(t0);
+
+    return {
+      ok: false,
+      error: 'generation_failed',
+      detail: e instanceof Error ? e.message : String(e),
+    };
+  }
 }

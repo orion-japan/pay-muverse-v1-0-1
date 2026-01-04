@@ -471,174 +471,199 @@ const qToShowSafe =
     ? (qToShowRaw as 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5')
     : null;
 
+const isVisionMode = !isUser && m.meta?.mode === 'vision';
+const isVisionHint =
+  !isUser && m.meta?.mode !== 'vision' && !!m.meta?.tLayerModeActive === true;
+const tHint = m.meta?.tLayerHint || 'T2';
 
-        const isVisionMode = !isUser && m.meta?.mode === 'vision';
-        const isVisionHint =
-          !isUser && m.meta?.mode !== 'vision' && !!m.meta?.tLayerModeActive === true;
-        const tHint = m.meta?.tLayerHint || 'T2';
+const nextStep = m.meta?.nextStep;
 
-        const nextStep = m.meta?.nextStep;
+// ✅ UIモード（SILENCE判定）: serverの meta.extra.uiMode を最優先で拾う
+const uiMode =
+  (m.meta?.extra?.uiMode as string | undefined) ??
+  ((m.meta as any)?.uiMode as string | undefined) ??
+  null;
 
-        return (
+const isSilence = !isUser && uiMode === 'SILENCE';
+
+return (
+  <div
+    key={m.id}
+    className={`message ${isUser ? 'is-user' : 'is-assistant'}`}
+  >
+    {/* ▼ アイコン＋Qバッジを横一列に並べるヘッダー行 ▼ */}
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: isUser ? 'flex-end' : 'flex-start',
+        gap: 6,
+        marginBottom: 4,
+      }}
+    >
+      {/* アバター */}
+      <div className="avatar" style={{ alignSelf: 'center' }}>
+        <img
+          src={iconSrc}
+          alt={isUser ? 'you' : 'Iros'}
+          width={AVATAR_SIZE}
+          height={AVATAR_SIZE}
+          onError={(e) => {
+            const el = e.currentTarget as HTMLImageElement & {
+              dataset: Record<string, string | undefined>;
+            };
+            if (!el.dataset.fallback1) {
+              el.dataset.fallback1 = '1';
+              el.src = FALLBACK_USER;
+              return;
+            }
+            if (!el.dataset.fallback2) {
+              el.dataset.fallback2 = '1';
+              el.src = FALLBACK_DATA;
+            }
+          }}
+          style={{
+            borderRadius: '50%',
+            objectFit: 'cover',
+            display: 'block',
+          }}
+        />
+      </div>
+
+      {/* Qバッジ：Iros（assistant）のときだけ */}
+      {!isUser && qToShowSafe && (
+        <div className="q-badge" style={qBadgeStyle}>
+          <span
+            style={{
+              width: 10,
+              height: 10,
+              borderRadius: 999,
+              background: m.color || 'rgba(129,140,248,0.85)',
+              display: 'inline-block',
+            }}
+          />
+          {qToShowSafe}
+        </div>
+      )}
+    </div>
+
+    {/* 吹き出し */}
+    <div
+      className={`bubble ${isUser ? 'is-user' : 'is-assistant'}`}
+      style={{
+        ...(isUser ? userBubbleStyle : assistantBubbleShellStyle),
+        alignSelf: isUser ? 'flex-end' : 'flex-start',
+        maxWidth: 'min(760px, 88%)',
+      }}
+    >
+      {/* Vision系ヘッダー（Mode / Hint） */}
+      {(isVisionMode || isVisionHint) && (
+        <div style={seedHeaderStyle}>
+          <div style={seedLabelStyle}>
+            {isVisionMode ? (
+              <>
+                <span>🌌 Vision Mode</span>
+                <span style={seedTLHintStyle}>{tHint}</span>
+                {m.meta?.tLayerModeActive && (
+                  <span style={{ marginLeft: 6, fontSize: 14 }}>✨</span>
+                )}
+              </>
+            ) : (
+              <span style={{ fontSize: 14, opacity: 0.9 }}>✨</span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 本文＋「次の一歩」ボタン */}
+      <div
+        className={`msgBody ${isVisionMode ? 'vision-theme' : ''} ${
+          isVisionHint ? 'vision-hint-theme' : ''
+        }`}
+        style={{ fontSize: 14, lineHeight: 1.9, color: '#111827' }}
+      >
+        {/* 本文 */}
+        {isSilence ? (
           <div
-            key={m.id}
-            className={`message ${isUser ? 'is-user' : 'is-assistant'}`}
+            className="assistant-silence"
+            style={{
+              opacity: 0.75,
+              letterSpacing: 2,
+              padding: '2px 0',
+              userSelect: 'none',
+            }}
+            aria-label="silence"
           >
-            {/* ▼ アイコン＋Qバッジを横一列に並べるヘッダー行 ▼ */}
+            …
+          </div>
+        ) : (
+          <ChatMarkdown text={safeText} />
+        )}
+
+        {/* ★ WILLエンジンの「次の一歩」オプション（必要なときだけ表示） */}
+        {!isUser &&
+          !isSilence &&
+          nextStep?.options &&
+          nextStep.options.length > 0 && (
             <div
               style={{
+                marginTop: 16,
                 display: 'flex',
-                alignItems: 'center',
-                justifyContent: isUser ? 'flex-end' : 'flex-start',
-                gap: 6,
-                marginBottom: 4,
+                flexWrap: 'wrap',
+                gap: 8,
               }}
             >
-              {/* アバター */}
-              <div className="avatar" style={{ alignSelf: 'center' }}>
-                <img
-                  src={iconSrc}
-                  alt={isUser ? 'you' : 'Iros'}
-                  width={AVATAR_SIZE}
-                  height={AVATAR_SIZE}
-                  onError={(e) => {
-                    const el = e.currentTarget as HTMLImageElement & {
-                      dataset: Record<string, string | undefined>;
-                    };
-                    if (!el.dataset.fallback1) {
-                      el.dataset.fallback1 = '1';
-                      el.src = FALLBACK_USER;
-                      return;
-                    }
-                    if (!el.dataset.fallback2) {
-                      el.dataset.fallback2 = '1';
-                      el.src = FALLBACK_DATA;
-                    }
-                  }}
-                  style={{
-                    borderRadius: '50%',
-                    objectFit: 'cover',
-                    display: 'block',
-                  }}
-                />
-              </div>
+              {nextStep.options.map((opt) => {
+                // ✅ 受け取り options が旧型でも新型でも動くように正規化
+                const normalized = {
+                  id: (opt as any).id ?? (opt as any).key ?? opt.key, // ← choiceId 本体
+                  key: (opt as any).key ?? opt.key,                  // ← A/B/C など表示用
+                  label: (opt as any).label ?? '',
+                  description: (opt as any).description,
+                };
 
-              {/* Qバッジ：Iros（assistant）のときだけ */}
-              {!isUser && qToShowSafe && (
-                <div className="q-badge" style={qBadgeStyle}>
-                  <span
-                    style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: 999,
-                      background: m.color || 'rgba(129,140,248,0.85)',
-                      display: 'inline-block',
+                return (
+                  <IrosButton
+                    key={String(normalized.id)}
+                    option={normalized as any}
+                    gear={nextStep.gear as IrosNextStepGear}
+                    pending={loading}
+                    onClick={async (option) => {
+                      const id = String((option as any).id ?? option.key ?? '');
+                      const displayLabel = String(option.label ?? '');
+
+                      const alreadyTagged =
+                        displayLabel.startsWith(`[${id}]`) || displayLabel.startsWith('[');
+
+                      const rawText = alreadyTagged
+                        ? displayLabel
+                        : `[${id}] ${displayLabel}`;
+
+                      console.log('[IROS UI] nextStep option clicked', {
+                        id,
+                        displayLabel,
+                        rawText,
+                        gear: nextStep.gear ?? null,
+                      });
+
+                      if (sendNextStepChoice) {
+                        await sendNextStepChoice({
+                          key: id,
+                          label: rawText,
+                          gear: (nextStep.gear ?? null) as string | null,
+                        });
+                      }
                     }}
                   />
-                  {qToShowSafe}
-                </div>
-              )}
+                );
+              })}
             </div>
+          )}
+      </div>
+    </div>
+  </div>
+);
 
-            {/* 吹き出し */}
-            <div
-              className={`bubble ${isUser ? 'is-user' : 'is-assistant'}`}
-              style={{
-                ...(isUser ? userBubbleStyle : assistantBubbleShellStyle),
-                alignSelf: isUser ? 'flex-end' : 'flex-start',
-                maxWidth: 'min(760px, 88%)',
-              }}
-            >
-              {/* Vision系ヘッダー（Mode / Hint） */}
-              {(isVisionMode || isVisionHint) && (
-                <div style={seedHeaderStyle}>
-                  <div style={seedLabelStyle}>
-                    {isVisionMode ? (
-                      <>
-                        <span>🌌 Vision Mode</span>
-                        <span style={seedTLHintStyle}>{tHint}</span>
-                        {m.meta?.tLayerModeActive && (
-                          <span style={{ marginLeft: 6, fontSize: 14 }}>✨</span>
-                        )}
-                      </>
-                    ) : (
-                      <span style={{ fontSize: 14, opacity: 0.9 }}>✨</span>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* 本文＋「次の一歩」ボタン */}
-              <div
-                className={`msgBody ${isVisionMode ? 'vision-theme' : ''} ${
-                  isVisionHint ? 'vision-hint-theme' : ''
-                }`}
-                style={{ fontSize: 14, lineHeight: 1.9, color: '#111827' }}
-              >
-                {/* 本文 */}
-                <ChatMarkdown text={safeText} />
-
-                {/* ★ WILLエンジンの「次の一歩」オプション（必要なときだけ表示） */}
-                {!isUser && nextStep?.options && nextStep.options.length > 0 && (
-                  <div
-                    style={{
-                      marginTop: 16,
-                      display: 'flex',
-                      flexWrap: 'wrap',
-                      gap: 8,
-                    }}
-                  >
-{nextStep.options.map((opt) => {
-  // ✅ 受け取り options が旧型でも新型でも動くように正規化
-  const normalized = {
-    id: (opt as any).id ?? opt.key,      // ← choiceId 本体
-    key: opt.key,                        // ← A/B/C など表示用（無くてもOK）
-    label: opt.label,
-    description: opt.description,
-  };
-
-  return (
-    <IrosButton
-      key={normalized.id}
-      option={normalized as any}
-      gear={nextStep.gear as IrosNextStepGear}
-      pending={loading}
-      onClick={async (option) => {
-        const id = (option as any).id ?? option.key ?? '';
-        const displayLabel = option.label;
-
-        // ✅ 送信本文だけ「タグ付き」にする（UI表示は server の strip が担当）
-        const alreadyTagged =
-        typeof displayLabel === 'string' && displayLabel.startsWith(`[${id}]`);
-
-      const rawText = alreadyTagged ? displayLabel : `[${id}] ${displayLabel}`;
-
-
-        console.log('[IROS UI] nextStep option clicked', {
-          id,
-          displayLabel,
-          rawText,
-          gear: nextStep.gear ?? null,
-        });
-
-        if (sendNextStepChoice) {
-          await sendNextStepChoice({
-            key: id,
-            label: rawText, // ★ここが重要：/reply に choiceId を届ける
-            gear: (nextStep.gear ?? null) as string | null,
-          });
-        }
-      }}
-    />
-  );
-})}
-
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        );
       })}
 
       {loading && <div className={styles.loadingRow}>...</div>}

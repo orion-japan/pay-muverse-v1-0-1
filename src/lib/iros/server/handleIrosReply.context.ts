@@ -14,6 +14,11 @@ import {
   type IrosStateLite,
 } from '@/lib/iros/language/frameSlots';
 
+function normOptString(v: unknown): string | undefined {
+  const s = String(v ?? '').trim();
+  return s.length > 0 ? s : undefined;
+}
+
 export type BuildTurnContextArgs = {
   supabase: SupabaseClient;
   conversationId: string;
@@ -24,8 +29,13 @@ export type BuildTurnContextArgs = {
   userProfile?: IrosUserProfileRow | null;
   requestedStyle: IrosStyle | string | null;
 
-  /** ✅ optional: caller may pass history (future use) */
+  // ✅ optional: caller may pass history (future use)
   history?: unknown[];
+
+  // ✅ route.ts / caller から明示的に渡す “希望”
+  // - NextStep choice 等から来る requestedDepth/requestedQCode はここに入れる
+  requestedDepth?: string | null;
+  requestedQCode?: string | null;
 };
 
 export type TurnContext = {
@@ -131,9 +141,14 @@ export async function buildTurnContext(
 
   const requestedMode = mode === 'auto' ? undefined : mode;
 
-  // ここは “後で” qTrace / will / depth 推定を入れる
-  const requestedDepth = undefined;
-  const requestedQCode = undefined;
+  // ✅ caller/route から来た “希望” をここで確定させて ctx に渡す
+  // - 空文字は undefined 扱い
+  const requestedDepth = normOptString(
+    (args as any)?.requestedDepth ?? (args as any)?.requested_depth,
+  );
+  const requestedQCode = normOptString(
+    (args as any)?.requestedQCode ?? (args as any)?.requested_q_code ?? (args as any)?.requested_qcode,
+  );
 
   // base meta
   let baseMetaForTurn: any = {};
@@ -239,6 +254,8 @@ export async function buildTurnContext(
       descentGate: descentGate ?? null,
       depthStage: (stateLite as any)?.depthStage ?? null,
       phase: (stateLite as any)?.phase ?? null,
+      requestedDepth: requestedDepth ?? null,
+      requestedQCode: requestedQCode ?? null,
     });
   } catch (e) {
     console.warn('[IROS/Context] framePlan build failed', e);
