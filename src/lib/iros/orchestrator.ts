@@ -52,6 +52,8 @@ import { applySoul } from './orchestratorSoul';
 // IT Trigger
 import { computeITTrigger } from '@/lib/iros/rotation/computeITTrigger';
 import { detectIMode } from './iMode';
+import { extractAnchorEvidence } from '@/lib/iros/anchor/extractAnchorEvidence';
+import { detectAnchorEntry } from '@/lib/iros/anchor/AnchorEntryDetector';
 
 // Person Intent Memory（ir診断）
 import { savePersonIntentState } from './memory/savePersonIntent';
@@ -142,6 +144,51 @@ function determineInitialDepth(
 function normalizeQCode(qCode?: QCode): QCode | undefined {
   if (!qCode) return undefined;
   return QCODE_VALUES.includes(qCode) ? qCode : undefined;
+}
+
+/* ============================================================================
+ * ✅ intent_anchor 正規化（camel/snake/文字列/オブジェクトの揺れを吸う）
+ * - 返すのは「metaに載せる正規形」だけ（persist側の期待に合わせるため）
+ * - ここでは “意味” を作らない。あるものを整形して渡すだけ。
+ * ========================================================================== */
+type IntentAnchorNormalized =
+  | { key: string; text?: string | null; phrase?: string | null }
+  | null;
+
+function normalizeIntentAnchor(raw: unknown): IntentAnchorNormalized {
+  if (raw == null) return null;
+
+  // 文字列（例：'SUN'）は {key:'SUN'} に正規化
+  if (typeof raw === 'string') {
+    const k = raw.trim();
+    if (!k) return null;
+    return { key: k };
+  }
+
+  // 既に {key:'SUN'} 形式
+  if (typeof raw === 'object') {
+    const any = raw as any;
+    const keyRaw = any?.key ?? any?.Key ?? any?.KEY ?? null;
+    const key =
+      typeof keyRaw === 'string' && keyRaw.trim().length > 0
+        ? keyRaw.trim()
+        : null;
+    if (!key) return null;
+
+    const text =
+      typeof any?.text === 'string' && any.text.trim().length > 0
+        ? any.text.trim()
+        : null;
+
+    const phrase =
+      typeof any?.phrase === 'string' && any.phrase.trim().length > 0
+        ? any.phrase.trim()
+        : null;
+
+    return { key, text, phrase };
+  }
+
+  return null;
 }
 
 // Iros Orchestrator — Will Engine（Goal / Priority）+ Continuity Engine 統合版
@@ -346,13 +393,58 @@ export async function runIrosTurn(
 
   // =========================================================
   // [IROS_FIXED_NORTH_BLOCK] 固定北（SUN）: meta.fixedNorth のみに保持
-  // - intent_anchor は「可変アンカー（Tで刺さる意図）」専用に空ける
   // =========================================================
   {
     (meta as any).fixedNorth = FIXED_NORTH;
-    // intent_anchor は触らない（上書き禁止）
   }
 
+// =========================================================
+// ✅ [PHASE11 FIX] intent_anchor を meta に「正式キー」として載せる（LLM/Writer/Orch観測用）
+// - DB/MemoryState に既に入っている intent_anchor を “metaへ反映” する
+// - 形ゆれ（string/object, snake/camel）を吸って「正規形」にする
+// - ここでは “固定北” と “intent_anchor” を混同しない（別キー）
+// - ✅ Orchestrator が見る camel キー（intentAnchorKey / hasIntentAnchor）も必ず張る
+// =========================================================
+{
+  const fromBase =
+    (mergedBaseMeta as any)?.intent_anchor ??
+    (mergedBaseMeta as any)?.intentAnchor ??
+    null;
+
+  const fromMemory =
+    (ms as any)?.intent_anchor ??
+    (ms as any)?.intentAnchor ??
+    (memoryState as any)?.intent_anchor ??
+    (memoryState as any)?.intentAnchor ??
+    null;
+
+  const already =
+    (meta as any)?.intent_anchor ??
+    (meta as any)?.intentAnchor ??
+    null;
+
+  const normalized =
+    normalizeIntentAnchor(already) ??
+    normalizeIntentAnchor(fromBase) ??
+    normalizeIntentAnchor(fromMemory) ??
+    null;
+
+  const key =
+    normalized && typeof (normalized as any).key === 'string'
+      ? (normalized as any).key
+      : null;
+
+  // ✅ single source of truth（camel + snake を同時に張る）
+  (meta as any).intent_anchor = normalized;
+  (meta as any).intentAnchor = normalized;
+
+  // ✅ key も camel + snake
+  (meta as any).intent_anchor_key = key;
+  (meta as any).intentAnchorKey = key;
+
+  // ✅ Orchestrator の観測用（ログの hasIntentAnchor を一致させる）
+  (meta as any).hasIntentAnchor = !!key;
+}
   // ----------------------------------------------------------------
   // C) 揺らぎ×ヒステリシス → 回転ギア確定（metaに反映）
   // ----------------------------------------------------------------
@@ -517,30 +609,113 @@ export async function runIrosTurn(
       }
     }
   }
+// =========================================================
+// ✅ [PHASE11 FIX] itx_* を meta に同期（prevIt_fromMeta を復活させる）
+// - 主ソースは MemoryState(ms) / memoryState
+// - “camel + snake” を同時に張る（矛盾ゼロ）
+// - ここでは意味生成しない：既にある値を meta に載せるだけ
+// - computeITTrigger の前に必ず実行する
+// =========================================================
+{
+  const fromMs =
+    (ms as any)?.itx_step ??
+    (ms as any)?.itxStep ??
+    (memoryState as any)?.itx_step ??
+    (memoryState as any)?.itxStep ??
+    null;
+
+  const fromReason =
+    (ms as any)?.itx_reason ??
+    (ms as any)?.itxReason ??
+    (memoryState as any)?.itx_reason ??
+    (memoryState as any)?.itxReason ??
+    null;
+
+  const fromLastAt =
+    (ms as any)?.itx_last_at ??
+    (ms as any)?.itxLastAt ??
+    (memoryState as any)?.itx_last_at ??
+    (memoryState as any)?.itxLastAt ??
+    null;
+
+  // すでに meta にあるなら meta 優先（ただし空は上書き）
+  const stepNow =
+    (meta as any)?.itx_step ??
+    (meta as any)?.itxStep ??
+    null;
+
+  const reasonNow =
+    (meta as any)?.itx_reason ??
+    (meta as any)?.itxReason ??
+    null;
+
+  const lastAtNow =
+    (meta as any)?.itx_last_at ??
+    (meta as any)?.itxLastAt ??
+    null;
+
+  const stepFinal = stepNow || fromMs || null;
+  const reasonFinal = reasonNow || fromReason || null;
+  const lastAtFinal = lastAtNow || fromLastAt || null;
+
+  // ✅ camel + snake で同期
+  (meta as any).itx_step = stepFinal;
+  (meta as any).itxStep = stepFinal;
+
+  (meta as any).itx_reason = reasonFinal;
+  (meta as any).itxReason = reasonFinal;
+
+  (meta as any).itx_last_at = lastAtFinal;
+  (meta as any).itxLastAt = lastAtFinal;
+
+  // ✅ prevIt_fromMeta.active の材料：IT_TRIGGER_OK が見えていれば active 扱い
+  const active =
+    typeof reasonFinal === 'string' && reasonFinal.includes('IT_TRIGGER_OK');
+
+  (meta as any).it_triggered = active;
+  (meta as any).itTriggered = active;
+}
 
   // ----------------------------------------------------------------
   // 7.75 IT Trigger（I→T の扉） + I語彙の表出許可
   // ----------------------------------------------------------------
   {
+    const historyArr = Array.isArray(history) ? (history as any[]) : [];
+
+    const userHistory = historyArr.filter((m) => {
+      const role = String(m?.role ?? '').toLowerCase();
+      return role === 'user';
+    });
+
+    const last3User = userHistory.slice(-3).map((m: any) => {
+      const v = m?.text ?? m?.content ?? null;
+      return typeof v === 'string' ? v : null;
+    });
+
     if (typeof process !== 'undefined' && process.env.DEBUG_IROS_IT === '1') {
       console.log('[IROS/IT][probe] before', {
         textHead: (text || '').slice(0, 80),
-        historyLen: Array.isArray(history) ? history.length : null,
-        last3: Array.isArray(history)
-          ? history.slice(-3).map((m: any) => m?.content ?? m?.text ?? null)
-          : null,
+        historyLen: historyArr.length,
+        historyUserLen: userHistory.length,
+        last3User,
         depth: meta.depth ?? null,
         intentLine: (meta as any).intentLine ?? null,
+        fixedNorth: (meta as any).fixedNorth ?? null,
+        intent_anchor: (meta as any).intent_anchor ?? null,
       });
     }
 
+    // =========================================================
+    // ✅ computeITTrigger 呼び出し（既存の const it は 1個だけ）
+    // - meta は「縮めない」：fixedNorth / intentLine / intent_anchor をそのまま渡す
+    // - prevIt は MemoryState が主ソースなので “metaへ詰め直し” はしない
+    // - computeITTrigger 側で camel/snake を吸う（入力側で二重定義しない）
+    // =========================================================
     const it = computeITTrigger({
       text,
-      history: Array.isArray(history) ? history : [],
-      meta: {
-        depthStage: meta.depth ?? null,
-        intentLine: (meta as any).intentLine ?? null,
-      },
+      history: historyArr, // ✅ full（assistant含む）
+      meta, // ✅ そのまま渡す（縮めない）
+      memoryState: (memoryState ?? null) as any, // ✅ 主ソース
     });
 
     console.log('[IROS/IT][result]', {
@@ -552,27 +727,49 @@ export async function runIrosTurn(
       tVector: it.tVector,
     });
 
-    // iLexemeForce は sticky true のみ
-    (meta as any).iLexemeForce =
-      (meta as any).iLexemeForce === true || it.iLayerForce === true;
+    // =========================================================
+    // ✅ Single source：IT結果を “camel + snake” に同時反映（矛盾ゼロ）
+    // =========================================================
+    const itOk = it.ok === true;
+    const itReason = it.reason ?? null;
 
-    // Tレーンは sticky禁止：毎ターン決定
-    (meta as any).tLayerModeActive = it.ok && it.tLayerModeActive === true;
-    (meta as any).tLayerHint =
-      (meta as any).tLayerModeActive ? (it.tLayerHint ?? 'T2') : null;
-    (meta as any).tVector =
-      (meta as any).tLayerModeActive ? (it.tVector ?? null) : null;
+    // ok/reason：camel + snake
+    (meta as any).itTriggered = itOk;
+    (meta as any).it_triggered = itOk;
+
+    (meta as any).itxReason = itReason;
+    (meta as any).itx_reason = itReason;
+
+    // iLexemeForce：sticky true（camel + snake）
+    const iLexemeForceNext =
+      (meta as any).iLexemeForce === true || (it as any).iLexemeForce === true;
+    (meta as any).iLexemeForce = iLexemeForceNext;
+    (meta as any).i_lexeme_force = iLexemeForceNext;
+
+    // Tレーン：sticky禁止（毎ターン決定）
+    const tActive = itOk && it.tLayerModeActive === true;
+    const tHint = tActive ? (it.tLayerHint ?? 'T2') : null;
+    const tVector = tActive ? (it.tVector ?? null) : null;
+
+    // camel + snake
+    (meta as any).tLayerModeActive = tActive;
+    (meta as any).t_layer_mode_active = tActive;
+
+    (meta as any).tLayerHint = tHint;
+    (meta as any).t_layer_hint = tHint;
+
+    (meta as any).tVector = tVector;
+    (meta as any).t_vector = tVector;
 
     if (typeof process !== 'undefined' && process.env.DEBUG_IROS_IT === '1') {
-      // eslint-disable-next-line no-console
       console.log('[IROS/IT_TRIGGER]', {
-        ok: it.ok,
-        reason: it.reason,
+        ok: itOk,
+        reason: itReason,
         flags: it.flags,
-        iLexemeForce: (meta as any).iLexemeForce ?? null,
-        tLayerModeActive: (meta as any).tLayerModeActive ?? null,
-        tLayerHint: (meta as any).tLayerHint ?? null,
-        tVector: (meta as any).tVector ?? null,
+        iLexemeForce: iLexemeForceNext,
+        tLayerModeActive: tActive,
+        tLayerHint: tHint,
+        tVector,
       });
     }
   }
@@ -616,121 +813,325 @@ export async function runIrosTurn(
 
     meta = r.meta;
 
-    // ★ slotPlan を record に正規化（WriterHints / SAFE がキーを拾える形）
-    function toSlotRecord(v: any): Record<string, true> | null {
-      if (!v) return null;
+    // =========================================================
+    // ✅ T3 Anchor Entry（証拠ベースでのみ開く）
+    // - UI証拠（nextStepChoiceId 等）が無い場合は、限定条件つきで「テキスト証拠」を生成する
+    //   - fixedNorth=SUN かつ itActive=true のときだけ
+    //   - COMMIT系 → action
+    //   - HOLD系（継続します等）→ intent_anchor が既にある場合だけ reconfirm
+    // - DBカラム追加なし：itx_step / itx_anchor_event_type / intent_anchor に刻む
+    // =========================================================
+    {
+      const norm = (s: unknown) => String(s ?? '').replace(/\s+/g, ' ').trim();
 
-      if (Array.isArray(v)) {
-        const rec: Record<string, true> = {};
-        for (const k of v) {
-          if (typeof k === 'string' && k.trim()) rec[k.trim()] = true;
+      const fixedNorthKey =
+        typeof (meta as any)?.fixedNorth?.key === 'string'
+          ? String((meta as any).fixedNorth.key)
+          : typeof (meta as any)?.fixedNorth === 'string'
+            ? String((meta as any).fixedNorth)
+            : null;
+
+      // ✅ “ITが生きているか” は「今回meta」優先 → 無ければ MemoryState を保険に
+      const itReasonNow = String(
+        (meta as any)?.itx_reason ?? (meta as any)?.itxReason ?? '',
+      );
+      const itReasonPrev = String(
+        (ms as any)?.itx_reason ?? (ms as any)?.itxReason ?? '',
+      );
+      const itActive =
+        itReasonNow.includes('IT_TRIGGER_OK') ||
+        itReasonPrev.includes('IT_TRIGGER_OK');
+
+      // ✅ intent_anchor の有無（MemoryStateを主として判定）
+      const hasAnchorAlready = Boolean(
+        normalizeIntentAnchor(
+          (ms as any)?.intent_anchor ?? (ms as any)?.intentAnchor ?? null,
+        ),
+      );
+
+      const COMMIT_RE =
+        /(ここにコミット|コミットする|これでいく|これで行く|決めた|決めました|固定する|固定します|北極星にする|SUNにする)/;
+
+      const HOLD_RE =
+        /^(継続する|継続します|続ける|続けます|やる|やります|進める|進みます|守る|守ります)$/u;
+
+      // 1) まずは既存の UI 証拠を拾う
+      let evidence = extractAnchorEvidence({
+        meta,
+        extra: meta && typeof meta === 'object' ? (meta as any).extra : null,
+      });
+
+      // 2) UI証拠が無ければ「テキスト証拠」を生成（※SUN固定 + IT active のときだけ）
+      const userT = norm(text);
+
+      const noUiEvidence = !evidence?.choiceId && !evidence?.actionId;
+
+      if (noUiEvidence && fixedNorthKey === 'SUN' && itActive) {
+        // 強いコミット → action（T3コミット候補）
+        if (COMMIT_RE.test(userT)) {
+          evidence = {
+            ...evidence,
+            // detectAnchorEntry が choiceId 前提でも落ちないように “合成ID” を入れる
+            choiceId: evidence?.choiceId ?? 'FN_SUN',
+            actionId: 'action',
+            source: 'text',
+          } as any;
         }
-        return Object.keys(rec).length ? rec : null;
+        // 短い継続宣言 → 既に anchor があるときだけ reconfirm（ダダ漏れ防止）
+        else if (hasAnchorAlready && HOLD_RE.test(userT)) {
+          evidence = {
+            ...evidence,
+            choiceId: evidence?.choiceId ?? 'FN_SUN',
+            actionId: 'reconfirm',
+            source: 'text',
+          } as any;
+        }
       }
 
-      if (typeof v === 'object') {
-        const rec: Record<string, true> = {};
-        for (const [k, val] of Object.entries(v)) {
-          if (typeof k === 'string' && k.trim() && val) rec[k.trim()] = true;
-        }
-        return Object.keys(rec).length ? rec : null;
-      }
+      const anchorDecision = detectAnchorEntry({
+        choiceId: evidence.choiceId,
+        actionId: evidence.actionId,
+        nowIso: new Date().toISOString(),
+        state: {
+          itx_step: (ms as any)?.itx_step ?? (ms as any)?.itxStep ?? null,
+          itx_last_at: (ms as any)?.itx_last_at ?? (ms as any)?.itxLastAt ?? null,
+          intent_anchor:
+            (ms as any)?.intent_anchor ?? (ms as any)?.intentAnchor ?? null,
+        },
+      });
 
-      return null;
+      const payload = {
+        evidence,
+        decision: {
+          tEntryOk: anchorDecision.tEntryOk,
+          anchorEvent: anchorDecision.anchorEvent,
+          anchorWrite: anchorDecision.anchorWrite,
+          reason: anchorDecision.reason,
+        },
+        fixedNorthKey,
+        itActive,
+        hasAnchorAlready,
+      };
+
+      console.log(
+        `[IROS/ANCHOR_ENTRY] ${JSON.stringify(payload, (_k, v) =>
+          v === undefined ? null : v,
+        )}`,
+      );
+
+      // ✅ persist 側が拾える形で meta に刻む（DB列はここを参照する）
+      (meta as any).anchorEntry = {
+        evidence,
+        decision: {
+          tEntryOk: anchorDecision.tEntryOk,
+          anchorEvent: anchorDecision.anchorEvent, // 'action' など
+          anchorWrite: anchorDecision.anchorWrite, // 'commit' など
+          reason: anchorDecision.reason,
+        },
+      };
+
+      // ✅ 形ゆれ対策（pickAnchorEntry が拾えるようにフラットも入れる）
+      (meta as any).anchor_event = anchorDecision.anchorEvent;
+      (meta as any).anchor_write = anchorDecision.anchorWrite;
+      (meta as any).anchorEvidenceSource = evidence.source;
+
+      if (anchorDecision.tEntryOk && anchorDecision.anchorWrite === 'commit') {
+        const p = anchorDecision.patch;
+
+        (meta as any).itx_step = p.itx_step; // 'T3'
+        (meta as any).itx_anchor_event_type = p.itx_anchor_event_type; // choice/action/reconfirm
+
+// ✅ intent_anchor は正規化して載せる（camel + snake）
+// patch が空でも “既存 or fixedNorthKey” を必ず保持する
+const ia =
+  normalizeIntentAnchor(
+    p.intent_anchor ??
+      (meta as any).intent_anchor ??
+      (meta as any).intentAnchor ??
+      (fixedNorthKey ? { key: fixedNorthKey } : null),
+  ) ?? null;
+
+(meta as any).intent_anchor = ia;
+(meta as any).intentAnchor = ia;
+(meta as any).intent_anchor_key =
+  ia && typeof (ia as any).key === 'string' ? (ia as any).key : null;
+
+
+        (meta as any).anchor_event_type = p.itx_anchor_event_type;
+        (meta as any).itx_last_at = new Date().toISOString();
+      }
+    }
+
+    // =========================================================
+    // ✅ 非SILENCEの空slotPlan救済：normalChat を必ず差し込む（配列を保持）
+    // - Record<string,true> に潰さない（render-v2 が本文を組めなくなる）
+    // - meta.framePlan.slots は “slot objects 配列” を入れる
+    // - slotPlanPolicy を meta / framePlan に必ず伝播
+    // - fallback は「slots が空」or「policy が空」のときだけ（必須）
+    // - ORCHログ用に meta.slotPlanPolicy を同期（null撲滅）
+    // =========================================================
+
+    const slotsRaw = (r as any).slotPlan?.slots ?? (r as any).slotPlan ?? null;
+
+    // 1) まず slots は “配列だけ” を採用（それ以外は null）
+    let slotsArr: any[] | null = Array.isArray(slotsRaw) ? slotsRaw : null;
+
+    // 2) policy 候補
+    const slotPlanPolicyRaw =
+      (r as any).slotPlan?.slotPlanPolicy ??
+      (r as any).slotPlanPolicy ??
+      (r as any)?.framePlan?.slotPlanPolicy ??
+      null;
+
+    let slotPlanPolicy: string | null =
+      typeof slotPlanPolicyRaw === 'string' && slotPlanPolicyRaw.trim()
+        ? slotPlanPolicyRaw.trim()
+        : null;
+
+    // 3) SILENCE 判定
+    const speechAct = String((meta as any)?.speechAct ?? '').toUpperCase();
+    const speechAllowLLM = (meta as any)?.speechAllowLLM;
+    const isSilence = speechAct === 'SILENCE' || speechAllowLLM === false;
+
+    // 4) ✅ fallback 発火条件を絞る（slots 空 OR policy 空 のときだけ）
+    const hasText = String(text ?? '').trim().length > 0;
+
+    const slotsEmpty = !Array.isArray(slotsArr) || slotsArr.length === 0;
+    const policyEmpty =
+      !slotPlanPolicy || String(slotPlanPolicy).trim().length === 0;
+
+    const shouldFallbackNormalChat =
+      !isSilence && hasText && (slotsEmpty || policyEmpty);
+
+    // 5) fallback（normalChat）
+    if (shouldFallbackNormalChat) {
+      const fallback = buildNormalChatSlotPlan({ userText: text });
+
+      const fbSlots = (fallback as any).slots;
+      slotsArr = Array.isArray(fbSlots) ? fbSlots : [];
+
+      const fp = (fallback as any).slotPlanPolicy;
+      slotPlanPolicy = typeof fp === 'string' && fp.trim() ? fp.trim() : 'FINAL';
+
+      (meta as any).slotPlanFallback = 'normalChat';
+    } else {
+      // ✅ fallback しなかった場合は “残骸” を消す（誤誘導防止）
+      if ((meta as any).slotPlanFallback === 'normalChat') {
+        delete (meta as any).slotPlanFallback;
+      }
+    }
+
+    // 6) 最終ガード：slots が配列でないなら null
+    if (slotsArr != null && !Array.isArray(slotsArr)) {
+      slotsArr = null;
+    }
+
+    // 7) ✅ 参照共有を切る（sameRef を false にする）
+    if (Array.isArray(slotsArr)) {
+      slotsArr = slotsArr.slice();
+    }
+
+    // 8) ✅ policy を最後に確定（slots があるなら null を残さない）
+    if (!slotPlanPolicy && Array.isArray(slotsArr) && slotsArr.length > 0) {
+      slotPlanPolicy = 'FINAL';
+    }
+
+    // 9) ✅ frame の正は framePlan.frame
+    const frameFinal =
+      (r as any)?.framePlan?.frame ??
+      (r as any)?.frame ??
+      (meta as any)?.framePlan?.frame ??
+      (meta as any)?.frame ??
+      null;
+
+    // 10) ✅ framePlan は render-v2 が参照する唯一の正（重複代入しない）
+    (meta as any).framePlan = {
+      frame: frameFinal,
+      slots: slotsArr, // ✅ render-v2 側はこれ（slot objects 配列）
+      slotPlanPolicy,
+    };
+
+    // 11) ✅ ORCHログ用 “互換キー” を同期（slotPlanPolicy:null を消す）
+    (meta as any).slotPlanPolicy = slotPlanPolicy;
+
+    // 12) 互換用 slotPlan は “必ず別参照” にする（sameRef事故を潰す）
+    (meta as any).slotPlan = Array.isArray(slotsArr)
+      ? slotsArr.slice()
+      : slotsArr;
+
+    // 13) T系の戻り値は meta に反映（あれば）
+    if (typeof (r as any).tLayerModeActive === 'boolean') {
+      (meta as any).tLayerModeActive = (r as any).tLayerModeActive;
+    }
+    if (
+      typeof (r as any).tLayerHint === 'string' &&
+      (r as any).tLayerHint.trim()
+    ) {
+      (meta as any).tLayerHint = (r as any).tLayerHint.trim();
     }
 
 // =========================================================
-// ✅ 非SILENCEの空slotPlan救済：normalChat を必ず差し込む（配列を保持）
-// - Record<string,true> に潰さない（render-v2 が本文を組めなくなる）
-// - meta.framePlan.slots は “slot objects 配列” を入れる
-// - slotPlanPolicy を meta / framePlan に必ず伝播
+// ✅ 観測ログ：slots がどこで崩れるかを “数値で” 固定
 // =========================================================
+const fpSlots = (meta as any).framePlan?.slots;
+const spSlots = (meta as any).slotPlan;
 
-const slotsRaw =
-  (r as any).slotPlan?.slots ??
-  (r as any).slotPlan ??
-  null;
+// ✅ Phase11観測：key を “直取り” で確定（normalizeに依存しない）
+const iaKey =
+  // 1) すでに key が別キーで入ってるなら最優先で採用
+  (typeof (meta as any).intent_anchor_key === 'string' && (meta as any).intent_anchor_key.trim())
+    ? (meta as any).intent_anchor_key.trim()
+    : (typeof (meta as any).intentAnchorKey === 'string' && (meta as any).intentAnchorKey.trim())
+      ? (meta as any).intentAnchorKey.trim()
+      : // 2) intent_anchor / intentAnchor が object なら key を拾う
+      (meta as any).intent_anchor && typeof (meta as any).intent_anchor === 'object' &&
+        typeof (meta as any).intent_anchor.key === 'string' && String((meta as any).intent_anchor.key).trim()
+        ? String((meta as any).intent_anchor.key).trim()
+        : (meta as any).intentAnchor && typeof (meta as any).intentAnchor === 'object' &&
+            typeof (meta as any).intentAnchor.key === 'string' && String((meta as any).intentAnchor.key).trim()
+          ? String((meta as any).intentAnchor.key).trim()
+          : // 3) まれに string 直入れケース
+          (typeof (meta as any).intent_anchor === 'string' && (meta as any).intent_anchor.trim())
+            ? (meta as any).intent_anchor.trim()
+            : (typeof (meta as any).intentAnchor === 'string' && (meta as any).intentAnchor.trim())
+              ? (meta as any).intentAnchor.trim()
+              : null;
 
-// slots は配列のまま扱う（toSlotRecord は使わない）
-let slotsArr: any[] | null = Array.isArray(slotsRaw) ? slotsRaw : null;
+// ✅ この時点で intent_anchor_key が無いなら補完（final-sync待ちにしない）
+if (!(meta as any).intent_anchor_key && iaKey) {
+  (meta as any).intent_anchor_key = iaKey;
+}
 
-// slotPlanPolicy を取得（postprocess / llmGate 用）
-const slotPlanPolicyRaw =
-  (r as any).slotPlan?.slotPlanPolicy ??
-  (r as any).slotPlanPolicy ??
-  null;
+console.log('[IROS/ORCH][after-container]', {
+  frame: (meta as any).frame ?? null,
+  framePlan_frame: (meta as any).framePlan?.frame ?? null,
+  descentGate: (meta as any).descentGate ?? null,
 
-let slotPlanPolicy: string | null =
-  typeof slotPlanPolicyRaw === 'string' && slotPlanPolicyRaw.trim()
-    ? slotPlanPolicyRaw.trim()
-    : null;
+  framePlan_slots_isArray: Array.isArray(fpSlots),
+  framePlan_slots_len: Array.isArray(fpSlots) ? fpSlots.length : null,
 
-// SILENCE 判定（このブロック内で完結させる）
-const speechAct = String((meta as any)?.speechAct ?? '').toUpperCase();
-const speechAllowLLM = (meta as any)?.speechAllowLLM;
-const isSilence = speechAct === 'SILENCE' || speechAllowLLM === false;
+  slotPlan_isArray: Array.isArray(spSlots),
+  slotPlan_len: Array.isArray(spSlots) ? spSlots.length : null,
 
-// 非SILENCEで slots が空なら normalChat を差し込む
-if (
-  !isSilence &&
-  (!slotsArr || slotsArr.length === 0) &&
-  String(text ?? '').trim().length > 0
-) {
-  const fallback = buildNormalChatSlotPlan({ userText: text });
+  framePlan_policy: (meta as any).framePlan?.slotPlanPolicy ?? null,
+  slotPlanPolicy: (meta as any).slotPlanPolicy ?? null,
 
-  slotsArr = Array.isArray((fallback as any).slots)
-    ? (fallback as any).slots
-    : [];
+  sameRef_framePlan_slotPlan: fpSlots === spSlots,
+  slotPlanFallback: (meta as any).slotPlanFallback ?? null,
 
-  // ✅ ここが本命：fallback を入れたなら policy も確定させる
-  const fp = (fallback as any).slotPlanPolicy;
-  if (typeof fp === 'string' && fp.trim()) {
-    slotPlanPolicy = fp.trim();
-  } else if (!slotPlanPolicy) {
-    slotPlanPolicy = 'SCAFFOLD';
+  // ✅ Phase11観測（確定版）
+  hasIntentAnchor: Boolean(iaKey),
+  intentAnchorKey: iaKey,
+
+  // ✅ 参照元の存在だけ観測（中身は見ない）
+  has_intent_anchor_obj: Boolean((meta as any).intent_anchor),
+  has_intentAnchor_obj: Boolean((meta as any).intentAnchor),
+  has_intent_anchor_key: Boolean((meta as any).intent_anchor_key),
+  has_intentAnchorKey: Boolean((meta as any).intentAnchorKey),
+});
+
+
   }
-
-  (meta as any).slotPlanFallback = 'normalChat';
-}
-
-
-
-// framePlan は render-v2 が参照する唯一の正
-(meta as any).framePlan = {
-  frame: (r as any).frame ?? null,
-  slots: slotsArr,          // ✅ 配列
-  slotPlanPolicy,           // ✅ ここが本命
-};
-
-// 互換（V1 / llmGate / postprocess 用）
-(meta as any).frame =
-  (r as any).frame ?? (meta as any).frame ?? null;
-
-(meta as any).slotPlan = slotsArr;        // 配列のまま
-(meta as any).slotPlanPolicy = slotPlanPolicy;
-
-if (typeof (r as any).tLayerModeActive === 'boolean') {
-  (meta as any).tLayerModeActive = (r as any).tLayerModeActive;
-}
-if (
-  typeof (r as any).tLayerHint === 'string' &&
-  (r as any).tLayerHint.trim()
-) {
-  (meta as any).tLayerHint = (r as any).tLayerHint.trim();
-}
-
-
-    console.log('[IROS/ORCH][after-container]', {
-      frame: (meta as any).frame ?? null,
-      framePlan_frame: (meta as any).framePlan?.frame ?? null,
-      descentGate: (meta as any).descentGate ?? null,
-      slotPlanKeysLen:
-        (meta as any).slotPlan && typeof (meta as any).slotPlan === 'object'
-          ? Object.keys((meta as any).slotPlan).length
-          : null,
-    });
-  }
-
   // ----------------------------------------------------------------
   // ✅ V2: 本文生成はしない（render-v2 が唯一の生成者）
   // ----------------------------------------------------------------
@@ -759,15 +1160,42 @@ if (
   (finalMeta as any).descentGate =
     (meta as any).descentGate ?? (finalMeta as any).descentGate ?? null;
   (finalMeta as any).descentGateReason =
-    (meta as any).descentGateReason ?? (finalMeta as any).descentGateReason ?? null;
+    (meta as any).descentGateReason ??
+    (finalMeta as any).descentGateReason ??
+    null;
 
   (finalMeta as any).inputKind =
     (meta as any).inputKind ?? (finalMeta as any).inputKind ?? null;
-  (finalMeta as any).frame = (meta as any).frame ?? (finalMeta as any).frame ?? null;
+  (finalMeta as any).frame =
+    (meta as any).frame ?? (finalMeta as any).frame ?? null;
   (finalMeta as any).framePlan =
     (meta as any).framePlan ?? (finalMeta as any).framePlan ?? null;
   (finalMeta as any).slotPlan =
     (meta as any).slotPlan ?? (finalMeta as any).slotPlan ?? null;
+
+// ✅ Phase11：intent_anchor を最終metaにも必ず残す（camel + snake）
+// - 途中で meta.intent_anchor が落ちても、MemoryState(ms) を正として復元する
+{
+  const iaRaw =
+    (finalMeta as any).intent_anchor ??
+    (finalMeta as any).intentAnchor ??
+    (ms as any)?.intent_anchor ??
+    (ms as any)?.intentAnchor ??
+    (memoryState as any)?.intent_anchor ??
+    (mergedBaseMeta as any)?.intent_anchor ??
+    null;
+
+  const ia = normalizeIntentAnchor(iaRaw);
+
+  (finalMeta as any).intent_anchor = ia;
+  (finalMeta as any).intentAnchor = ia;
+
+  (finalMeta as any).intent_anchor_key =
+    ia && typeof ia.key === 'string' && ia.key.trim().length > 0
+      ? ia.key.trim()
+      : null;
+}
+
 
   // unified.depth.stage / unified.q.current 同期（S4除去済みの finalMeta に合わせる）
   if ((finalMeta as any).unified) {
@@ -810,6 +1238,10 @@ if (
     unified_q: (finalMeta as any).unified?.q?.current ?? null,
     meta_depth: (finalMeta as any).depth ?? null,
     unified_depth: (finalMeta as any).unified?.depth?.stage ?? null,
+
+    // ✅ Phase11観測
+    intent_anchor: (finalMeta as any).intent_anchor ?? null,
+    intent_anchor_key: (finalMeta as any).intent_anchor_key ?? null,
   });
 
   // ----------------------------------------------------------------
@@ -839,7 +1271,7 @@ if (
         : ((finalMeta as any).extra = {});
 
     /* rawTextFromModel: do not blank here */
-ex.persistedBy = ex.persistedBy ?? 'route'; // 任意：single-writer の目印
+    ex.persistedBy = ex.persistedBy ?? 'route'; // 任意：single-writer の目印
   }
 
   // ----------------------------------------------------------------

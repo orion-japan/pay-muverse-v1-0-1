@@ -8,13 +8,13 @@
 // - COMMIT でも actions は最大2行、question は最大1行に制限
 //
 // ✅ 重要：最終出力からラベルを完全に消す。
-// ✅ 重要：フォールバックは存在させない（空は空のまま返す / “沈黙”を尊重する）
+// ✅ v2方針：SILENCE 以外は “空返し” をしない（最低1行を保証）
 
 import type { AllowSchema, SpeechAct } from './types';
 
 type EnforceResult = {
   act: SpeechAct;
-  text: string; // 最終出力（ラベルなし / 空は空で返す）
+  text: string; // 最終出力（ラベルなし）
   dropped: number;
   kept: number;
 };
@@ -29,19 +29,29 @@ const LABELS = {
   question: /^問い：\s*/u,
 };
 
-// 軽い危険語（“助言したい本能” の露出をカット）
+// “助言したい本能” の露出（※行を捨てない。語尾だけ削る）
 const ADVICE_LIKE = /(してみて|すると良い|おすすめ|べき|必要|まずは|焦らず|大丈夫|サポートします)/u;
 
 function normalizeLines(text: string): string[] {
   return String(text ?? '')
     .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
     .split('\n')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 }
 
-function allowedMap(allow: AllowSchema): Record<string, boolean> {
-  if (allow.act === 'SILENCE') return {};
+function allowedMap(allow: AllowSchema): Record<keyof typeof LABELS, boolean> {
+  if (allow.act === 'SILENCE') {
+    return {
+      observe: false,
+      name: false,
+      flip: false,
+      commit: false,
+      actions: false,
+      question: false,
+    };
+  }
   const f = (allow as any).fields ?? {};
   return {
     observe: !!f.observe,
@@ -68,11 +78,23 @@ function stripLabel(line: string, kind: keyof typeof LABELS): string {
   return line.replace(LABELS[kind], '').trim();
 }
 
-// ✅ “助言テンプレ” が混ざるなら中身を落とす（行ごと捨てる）
-function dropAdviceLikeContent(content: string): string {
-  if (!content) return '';
-  if (!ADVICE_LIKE.test(content)) return content;
-  return ''; // 危険なら丸ごと捨てる（穴埋めしない）
+// ✅ “助言テンプレ” を薄める（行は捨てない / 空にしない）
+function softenAdviceLikeContent(content: string): string {
+  const s = String(content ?? '').trim();
+  if (!s) return '';
+
+  if (!ADVICE_LIKE.test(s)) return s;
+
+  // 語尾の助言テンプレだけ除去（意味を残す）
+  const softened = s
+    .replace(/(してみて|すると良い|おすすめ|べき|必要|まずは|焦らず|大丈夫|サポートします)/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // 全部消えたら元を短縮して返す（空にしない）
+  if (!softened) return s.length > 80 ? s.slice(0, 80) : s;
+
+  return softened;
 }
 
 // ✅ 許可されるのは「ラベル付き行」だけ（器の言語）。ただし最終出力はラベル除去。
@@ -83,12 +105,21 @@ function extractAllowedLine(line0: string): { kind: keyof typeof LABELS; content
   return { kind, content };
 }
 
+function firstNonEmptyLine(text: string): string {
+  const lines = normalizeLines(text);
+  return lines[0] ?? '…';
+}
+
+function clampLines(text: string, maxLines: number): string {
+  const ls = normalizeLines(text);
+  return ls.slice(0, Math.max(1, maxLines)).join('\n');
+}
+
 export function enforceAllowSchema(allow: AllowSchema, rawText: string): EnforceResult {
   const act = allow.act;
   const maxLines = allow.maxLines ?? 2;
 
-  // ✅ SILENCE は必ず空（“…”禁止）
-  // 呼ばれない想定だが、最終ゲートとして「沈黙の秩序」を保証する
+  // ✅ SILENCE は必ず空（設計どおり）
   if (act === 'SILENCE') {
     return { act, text: '', dropped: 0, kept: 0 };
   }
@@ -111,7 +142,7 @@ export function enforceAllowSchema(allow: AllowSchema, rawText: string): Enforce
       continue;
     }
 
-    const safeContent = dropAdviceLikeContent(x.content);
+    const safeContent = softenAdviceLikeContent(x.content);
     if (!safeContent) {
       dropped++;
       continue;
@@ -145,10 +176,27 @@ export function enforceAllowSchema(allow: AllowSchema, rawText: string): Enforce
     if (out.length >= maxLines) break;
   }
 
-  // ✅ 3) 空になった場合：フォールバックを作らない（空は空）
-  // ここが「最後の強制整形（上書き）」の停止点
+  // 3) ✅ 空になった場合：SILENCE以外は最低1行を保証（v2要件）
   if (out.length === 0) {
-    return { act, text: '', dropped, kept: 0 };
+    const fallback = softenAdviceLikeContent(firstNonEmptyLine(rawText));
+
+    // actごとの最小成立を作る（ラベルは出さない）
+    if (act === 'NAME') {
+      return { act, text: clampLines(fallback, 1), dropped, kept: 1 };
+    }
+    if (act === 'FLIP') {
+      // “A→B” が含まれるならそれを優先
+      const arrow = fallback.match(/(.+?)→(.+?)(\s|$)/u);
+      const flip = arrow ? `${arrow[1].trim()}→${arrow[2].trim()}` : fallback;
+      return { act, text: clampLines(flip, 1), dropped, kept: 1 };
+    }
+    if (act === 'COMMIT') {
+      // 固定の最小：1行だけでも成立させる
+      return { act, text: clampLines(fallback, Math.min(2, maxLines)), dropped, kept: 1 };
+    }
+
+    // FORWARD など：最小の一手相当として1行返す
+    return { act, text: clampLines(fallback, 1), dropped, kept: 1 };
   }
 
   return { act, text: out.join('\n'), dropped, kept: out.length };

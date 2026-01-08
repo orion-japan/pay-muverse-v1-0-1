@@ -380,6 +380,14 @@ export function findNextStepOptionById(id: string): NextStepOption | null {
    Meta attach (offer buttons)
 ========================================================= */
 
+// ✅ NextStep(ボタン)は原則廃止。ただし復活できるように feature flag 化。
+// - 既定OFF（= 何も出さない）
+// - 復活したい時だけ IROS_ENABLE_NEXTSTEP=1 を付ける
+const ENABLE_NEXTSTEP =
+  typeof process !== 'undefined' &&
+  (process.env.IROS_ENABLE_NEXTSTEP === '1' ||
+    process.env.NEXT_PUBLIC_IROS_ENABLE_NEXTSTEP === '1');
+
 /**
  * meta に nextStep 情報を付け足すヘルパー
  *
@@ -397,6 +405,9 @@ export function attachNextStepMeta(params: {
 }): any {
   const { meta, qCode, depth, selfAcceptance, hasQ5DepressRisk, userText } =
     params;
+
+  // ✅ 既定：ボタンを一切出さない（復活は feature flag で）
+  if (!ENABLE_NEXTSTEP) return meta;
 
   // すでに nextStep があれば何もしない
   if (meta?.nextStep?.options?.length) return meta;

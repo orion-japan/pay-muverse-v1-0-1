@@ -1,28 +1,9 @@
 // src/lib/iros/memory/retrieval_vector.ts
 import { createClient } from '@supabase/supabase-js';
-import OpenAI from 'openai';
+import { embedTexts } from '@/lib/iros/llm/embeddings';
 
 export interface Embedder {
   embed(texts: string[]): Promise<number[][]>;
-}
-
-export class OpenAIEmbedder implements Embedder {
-  private openai: OpenAI;
-  private model: string;
-
-  constructor(model = (process.env.EMB_MODEL || 'text-embedding-3-large')!, apiKey = process.env.OPENAI_API_KEY!) {
-    if (!apiKey) throw new Error('OPENAI_API_KEY is missing');
-    this.openai = new OpenAI({ apiKey });
-    this.model = model;
-  }
-
-  async embed(texts: string[]): Promise<number[][]> {
-    const resp = await this.openai.embeddings.create({
-      model: this.model,
-      input: texts,
-    });
-    return resp.data.map(d => d.embedding as number[]);
-  }
 }
 
 export async function vectorSearch({
@@ -31,17 +12,37 @@ export async function vectorSearch({
   query,
   topK = 5,
   threshold = 0.6,
+
+  // ✅ 互換用：外から embedder を渡してる既存コードがあっても壊さない
+  // 方針としては、渡さない運用に寄せていく（embedTexts が単一出口）
   embedder,
+
+  // ✅ 追跡（必要なら呼び元で渡す）
+  trace,
 }: {
   supabaseUrl: string;
   supabaseKey: string;
   query: string;
   topK?: number;
   threshold?: number;
-  embedder: Embedder;
+
+  embedder?: Embedder;
+
+  trace?: {
+    traceId?: string | null;
+    conversationId?: string | null;
+    userCode?: string | null;
+  };
 }) {
   const sb = createClient(supabaseUrl, supabaseKey);
-  const [qv] = await embedder.embed([query]);
+
+  const [qv] = embedder
+    ? await embedder.embed([query])
+    : await embedTexts({
+        purpose: 'retrieval',
+        input: [query],
+        trace,
+      });
 
   const { data, error } = await sb.rpc('match_knowledge', {
     query_embedding: qv,

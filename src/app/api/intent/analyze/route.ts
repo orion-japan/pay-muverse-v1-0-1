@@ -65,6 +65,8 @@ export async function POST(req: NextRequest) {
       ],
       temperature: 0.4,
       max_tokens: 600,
+      purpose: 'judge',
+
     });
     return NextResponse.json({ ok: true, analysis: raw });
   } catch (e: any) {

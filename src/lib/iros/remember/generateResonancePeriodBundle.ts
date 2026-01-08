@@ -241,6 +241,7 @@ export async function generateResonancePeriodBundle(
         messages: messagesForLlm,
         temperature: 0.4,
         max_tokens: 800,
+        purpose: 'digest',
       });
     } catch (e: any) {
       console.error(

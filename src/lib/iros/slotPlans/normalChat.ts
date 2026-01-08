@@ -1,122 +1,88 @@
 // src/lib/iros/slotPlans/normalChat.ts
-// 通常会話（非SILENCE / 非IT / 非IR）専用 slotPlan
-// 目的：render-v2 に「空でない構造」を必ず渡す（かつ GPTっぽくしない）
+// iros — normal chat slot plan (FINAL-only)
 //
-// ✅ v2確定：normalChat は“床”
-// - LLMは使わない
-// - 常に空にならないslotPlanを返す
-// - Sofiaっぽい気配（短詩1行）は「条件付き・最大1行」だけ許可（任意）
+// 目的：
+// - 通常会話（normalChat）は必ず FINAL を返す（実装強制）
+// - SCAFFOLD は emergency / silence / special fallback 専用
+// - 「編集したファイルが本当に読まれているか」をログで証明する
+//
+// ⚠️ 重要
+// - normalChat では例外条件を一切持たない
+// - 例外は orchestrator 側で normalChat を選ばないことで表現する
 
-type SlotStyle = 'neutral' | 'soft' | 'firm' | 'poetic';
-type Slot = {
-  key: string;
+import type { SlotPlanPolicy } from '../server/llmGate';
+
+export type NormalChatSlot = {
+  key: 'OBS' | 'SHIFT' | 'NEXT' | 'SAFE';
   role: 'assistant';
-  style: SlotStyle;
+  style: 'neutral' | 'soft' | 'firm';
   content: string;
 };
 
-// src/lib/iros/slotPlans/normalChat.ts
-// 通常会話（非SILENCE / 非IT / 非IR）専用 slotPlan
-// 目的：render-v2 に「空でない構造」を必ず渡す（かつ GPTっぽくしない）
-// ✅ v2方針：ここは “最終本文” ではなく「足場（SCAFFOLD）」
-//            LLMが通るなら、後段で sofi a語りに置換してよい。
-
-function normalizeOneLine(s: string): string {
-  return String(s ?? '').replace(/\s+/g, ' ').trim();
-}
-
-function looksLikeGreeting(t: string): boolean {
-  const s = normalizeOneLine(t).toLowerCase();
-  return (
-    s === 'こんにちは' ||
-    s === 'こんばんは' ||
-    s === 'おはよう' ||
-    s.includes('はじめまして') ||
-    s.includes('よろしく')
-  );
-}
-
-function looksLikeInfoShare(t: string): boolean {
-  const s = normalizeOneLine(t);
-  return /^今日は/.test(s) || /^いま/.test(s) || s.includes('です');
-}
-
 export type NormalChatSlotPlan = {
   kind: 'normal-chat';
-  slots: Array<{
-    key: string;
-    role: 'assistant';
-    style: 'neutral' | 'soft';
-    content: string;
-  }>;
-
-  // ✅ 重要：normal-chat は足場（本文があっても LLM で置換可能）
-  slotPlanPolicy: 'SCAFFOLD';
+  slotPlanPolicy: SlotPlanPolicy;
+  slots: NormalChatSlot[];
 };
 
-export function buildNormalChatSlotPlan(args: { userText: string }): NormalChatSlotPlan {
-  const userText = normalizeOneLine(args.userText);
+// ✅ 実行時の照合用（ログに必ず出る）
+const NORMAL_CHAT_BUILD_STAMP = 'normalChat.ts@2026-01-06#FINAL';
 
-  // ===== LOG: entry =====
-  console.debug('[normalChat] enter', {
-    userText,
-    len: userText.length,
-  });
+// ✅ 実装強制：normalChat は常に FINAL（例外なし）
+const NORMAL_CHAT_POLICY: SlotPlanPolicy = 'FINAL';
 
-  let core = '了解。🪔';
-  let add = '';
-  let reason = 'default';
+const norm = (s: unknown) =>
+  String(s ?? '').replace(/\s+/g, ' ').trim();
 
-  if (looksLikeGreeting(userText)) {
-    core = 'こんにちは、orionさん。🪔';
-    add = 'ここはふつうに話して大丈夫です。';
-    reason = 'greeting';
-  } else if (looksLikeInfoShare(userText)) {
-    core = 'うん、届ろきました。🪔';
-    add = 'そのまま一言だけ続けてくれたら、流れを整えます。';
-    reason = 'info-share';
-  } else if (userText.length <= 8) {
-    core = '了解。🪔';
-    add = '続き、短くでいい。';
-    reason = 'short-text';
-  } else {
-    core = '受け取った。🪔';
-    add = 'いまの一番大事な一点だけ、残して進めます。';
-    reason = 'normal';
+function assertFinal(p: unknown): asserts p is 'FINAL' {
+  if (p !== 'FINAL') {
+    throw new Error(
+      `[normalChat] slotPlanPolicy must be FINAL, got: ${String(p)}`
+    );
   }
+}
 
-  const slots: NormalChatSlotPlan['slots'] = [
-    {
-      key: 'core',
-      role: 'assistant',
-      style: 'neutral',
-      content: core,
-    },
-    {
-      key: 'add',
-      role: 'assistant',
-      style: 'soft',
-      content: add,
-    },
+export function buildNormalChatSlotPlan(args: {
+  userText: string;
+}): NormalChatSlotPlan {
+  const fact = norm(args.userText);
+
+  const obs = `受け取った。🪔\nいま出ている言葉：「${fact}」`;
+  const shift = `いまの一番大事な一点だけ、残す。`;
+  const next = `次は、行動を一手に落とす（誰に／いつ／何を）。`;
+  const safe = `迷いを増やさない。`;
+
+  const slots: NormalChatSlot[] = [
+    { key: 'OBS', role: 'assistant', style: 'neutral', content: obs },
+    { key: 'SHIFT', role: 'assistant', style: 'soft', content: shift },
+    { key: 'NEXT', role: 'assistant', style: 'firm', content: next },
+    { key: 'SAFE', role: 'assistant', style: 'soft', content: safe },
   ];
 
-  // ===== LOG: before return =====
+  // ✅ FINAL 固定
+  const slotPlanPolicy: SlotPlanPolicy = NORMAL_CHAT_POLICY;
+  assertFinal(slotPlanPolicy);
+
+  // ✅ このファイルが確実に使われていることをログで証明
   console.debug('[normalChat] built slotPlan', {
-    reason,
-    slotPlanPolicy: 'SCAFFOLD',
+    stamp: NORMAL_CHAT_BUILD_STAMP,
+    reason: 'normal',
+    slotPlanPolicy,
     slotsLen: slots.length,
-    slotsPreview: slots.map((s) => ({
+    slotsPreview: slots.map(s => ({
       key: s.key,
       len: String(s.content ?? '').length,
-      head: String(s.content ?? '').slice(0, 20),
+      head: String(s.content ?? '').slice(0, 24),
     })),
-    hasEmptyContent: slots.some((s) => !String(s.content ?? '').trim()),
+    hasEmptyContent: slots.some(
+      s => !String(s.content ?? '').trim()
+    ),
+    factHead: fact,
   });
 
   return {
     kind: 'normal-chat',
-    slotPlanPolicy: 'SCAFFOLD',
+    slotPlanPolicy,
     slots,
   };
 }
-

@@ -19,11 +19,7 @@ import { decideDescentGate } from './rotation/rotationLoop';
 
 type SlotKey = 'OBS' | 'SHIFT' | 'NEXT' | 'SAFE' | 'INSIGHT';
 
-type NoDeltaKind =
-  | 'repeat-warning'
-  | 'short-loop'
-  | 'stuck'
-  | 'NONE';
+type NoDeltaKind = 'repeat-warning' | 'short-loop' | 'stuck' | 'NONE';
 
 function buildSlots(
   _frame: FrameKind,
@@ -45,8 +41,6 @@ function buildSlots(
     },
   };
 }
-
-
 
 export type ApplyContainerArgs = {
   text: string;
@@ -91,18 +85,23 @@ function normalizeTargetKind(v: unknown): TargetKind {
   return 'stabilize';
 }
 
-function toSlotKeys(plan: ReturnType<typeof buildSlots> | null | undefined): SlotKey[] {
+function toSlotKeys(
+  plan: ReturnType<typeof buildSlots> | null | undefined,
+): SlotKey[] {
   if (!plan) return [];
   const slots = (plan as any).slots;
   if (!slots || typeof slots !== 'object') return [];
 
   // Record<SlotKey, string|null> のうち、null でないものだけを採用
   const keys = Object.keys(slots) as SlotKey[];
-  return keys.filter((k) => slots[k] != null);
+  return keys.filter((k) => (slots as any)[k] != null);
 }
 
-export function applyContainerDecision(args: ApplyContainerArgs): ApplyContainerResult {
-  const { text, meta, prevDescentGate, rotationReason, spinStepNow, goalKind } = args;
+export function applyContainerDecision(
+  args: ApplyContainerArgs,
+): ApplyContainerResult {
+  const { text, meta, prevDescentGate, rotationReason, spinStepNow, goalKind } =
+    args;
 
   // inputKind
   const inputKind = classifyInputKind(text);
@@ -121,7 +120,8 @@ export function applyContainerDecision(args: ApplyContainerArgs): ApplyContainer
   const dg = decideDescentGate({
     qCode: meta.qCode ?? null,
     sa: typeof meta.selfAcceptance === 'number' ? meta.selfAcceptance : null,
-    depthStage: typeof meta.depth === 'string' && meta.depth.length > 0 ? meta.depth : null,
+    depthStage:
+      typeof meta.depth === 'string' && meta.depth.length > 0 ? meta.depth : null,
     targetKind: targetKindNorm,
     prevDescentGate: prevDescentGate ?? null,
   });
@@ -132,16 +132,21 @@ export function applyContainerDecision(args: ApplyContainerArgs): ApplyContainer
   // ---------------------------
   // frame（4軸運用）
   // - anchor無しの雑談 → S
-  // - IT発火 → T
+  // - IT発火 → 「T候補」になるが、実際にTへ入るのは committed（確定アンカー）時のみ
   // - anchorあり → C優先（意図に触れたい時だけ I 還り）
   // - それ以外 → 従来 selectFrame
+  //
+  // ✅ 重要：
+  // - fixedNorth(SUN) は「北極星の前提」であって「確定アンカー」ではない
+  // - IT成立(tLayerModeActive等) は「T候補」。T確定は hasCommittedAnchor が要る
   // ---------------------------
 
   const tText = String(text ?? '').trim();
 
+  // IT候補（Tレイヤーを“使いたい”兆し）
   const itActive =
     (meta as any).tLayerModeActive === true ||
-    typeof (meta as any).tLayerHint === 'string'; // 保険
+    typeof (meta as any).tLayerHint === 'string'; // 保険（tLayerHint が残る実装もあるため）
 
   // intentAnchor 判定：存在していれば「C優先」や「I還り」を許可（fixed:true までは要求しない）
   const anchor = (meta as any).intentAnchor ?? (meta as any).intent_anchor ?? null;
@@ -152,8 +157,24 @@ export function applyContainerDecision(args: ApplyContainerArgs): ApplyContainer
     typeof (anchor as any).text === 'string' &&
     String((anchor as any).text).trim().length > 0;
 
-  // 旧仕様も残す（必要ならログや追加条件に使える）
-  const hasFixedAnchor = hasAnchor && (anchor as any).fixed === true;
+  // ✅ 固定北（SUN）の判定は meta.fixedNorth を正とする（orchestrator.ts が唯一の投入元）
+  // - 旧仕様: anchor.fixed === true
+  // - 新仕様: meta.fixedNorth.key === 'SUN' / meta.fixedNorth === 'SUN' を優先
+  const fixedNorthKey =
+    typeof (meta as any)?.fixedNorth?.key === 'string'
+      ? String((meta as any).fixedNorth.key)
+      : typeof (meta as any)?.fixedNorth === 'string'
+        ? String((meta as any).fixedNorth)
+        : null;
+
+  // ✅ “確定アンカー”と“固定北(SUN)”は意味が違うので分離して保持する
+  const hasFixedNorthSUN = fixedNorthKey === 'SUN';
+
+  // ✅ 確定アンカー（commit）の定義：intentAnchor.fixed === true のみ（SUNでは true にしない）
+  const hasCommittedAnchor = hasAnchor && (anchor as any).fixed === true;
+
+  // 互換用：旧変数名 hasFixedAnchor は「確定アンカー」に寄せる（SUNでtrueにしない）
+  const hasFixedAnchor = hasCommittedAnchor;
 
   // 一般会話（挨拶・短文雑談）っぽい時は S へ落とす（anchor無しの時だけ）
   const looksSmallTalk =
@@ -169,9 +190,12 @@ export function applyContainerDecision(args: ApplyContainerArgs): ApplyContainer
   // anchorがあるなら基本C（I還り条件の時だけI）
   const preferCWhenAnchored = hasAnchor && !wantsIReturn;
 
+  // ✅ T入口ゲート：IT候補があっても、commitが無ければ T には入れない
+  const tEntryOk = itActive && hasCommittedAnchor;
+
   const frameSelected: FrameKind = forceS
     ? ('S' as FrameKind)
-    : itActive
+    : tEntryOk
       ? ('T' as FrameKind)
       : preferCWhenAnchored
         ? ('C' as FrameKind)
@@ -180,7 +204,9 @@ export function applyContainerDecision(args: ApplyContainerArgs): ApplyContainer
           : selectFrame(
               {
                 depth:
-                  typeof meta.depth === 'string' && meta.depth.length > 0 ? meta.depth : null,
+                  typeof meta.depth === 'string' && meta.depth.length > 0
+                    ? meta.depth
+                    : null,
                 descentGate: (meta as any).descentGate ?? null,
               },
               inputKind,
@@ -188,54 +214,92 @@ export function applyContainerDecision(args: ApplyContainerArgs): ApplyContainer
 
   (meta as any).frame = frameSelected;
 
+// dump（1回だけ）
+// console.log('[IROS/frame-debug][dump] containerDecision', {
+//   inputKind,
+//   rawTargetKind,
+//   targetKindNorm,
+//   dg,
+//   itActive,          // T候補
+//   tEntryOk,          // ✅ T確定
+//   hasFixedNorthSUN,  // 北極星（SUN）
+//   hasCommittedAnchor,// 確定アンカー（commit）
+//   hasFixedAnchor,    // = hasCommittedAnchor（互換）
+//   fixedNorthKey,
+//   forceS,
+//   wantsIReturn,
+//   frameSelected,
+//   meta_frame_after: (meta as any).frame,
+// });
 
-  // dump（1回だけ）
-  console.log('[IROS/frame-debug][dump] containerDecision', {
-    inputKind,
-    rawTargetKind,
-    targetKindNorm,
-    dg,
-    itActive,
-    hasFixedAnchor,
-    forceS,
-    wantsIReturn,
-    frameSelected,
-    meta_frame_after: (meta as any).frame,
-  });
+(meta as any).frameDebug_containerDecision = {
+  inputKind,
+  rawTargetKind,
+  targetKindNorm,
+  dg,
+  itActive, // T候補
+  // tEntryOk は “ANCHOR_ENTRY 確定後” に最終決定したいので、ここでは参考値扱いにする
+  tEntryOk_pre: tEntryOk,
+  hasFixedNorthSUN,
+  hasCommittedAnchor,
+  hasFixedAnchor,
+  fixedNorthKey,
+  forceS,
+  wantsIReturn,
+  frameSelected,
+  meta_frame_after: (meta as any).frame,
+};
 
-  // noDelta
-  const nd = (() => {
-    const t = String(text ?? '').trim();
 
-    const isRepeatWarning =
-      /同じ注意|何度も|繰り返し|変わらない|分かっている.*変わらない|わかっている.*変わらない/.test(t);
 
-    const isVeryShort = t.length <= 8;
-    const isShortLoopContext = inputKind === 'chat' || inputKind === 'question';
 
-    const looksStoppedByReason =
-      rotationReason.length > 0 &&
-      (rotationReason.includes('回転') ||
-        rotationReason.includes('満たしていない') ||
-        rotationReason.includes('起きない'));
+// noDelta
+const nd = (() => {
+  const t = String(text ?? '').trim();
 
-    const looksStoppedByMeta = spinStepNow === 0 && rotationReason.length > 0;
+  const isRepeatWarning =
+    /同じ注意|何度も|繰り返し|変わらない|分かっている.*変わらない|わかっている.*変わらない/.test(
+      t,
+    );
 
-    const noDelta =
-      isRepeatWarning ||
-      looksStoppedByReason ||
-      looksStoppedByMeta ||
-      (isVeryShort && isShortLoopContext && looksStoppedByReason);
+  // ✅「短いコミット宣言」は short-loop 扱いしない（＝停滞判定から除外）
+  // 必要なら辞書を増やす（or 正規化して揺れを吸収してもOK）
+  const isCommitShort =
+    /^(継続する|続ける|やる|やります|進める|進みます|守る|守ります|決めた|決めました)$/u.test(
+      t,
+    );
 
-    let kind: NoDeltaKind | null = null;
-    if (noDelta) {
-      if (isRepeatWarning) kind = 'repeat-warning';
-      else if (isVeryShort) kind = 'short-loop';
-      else kind = 'stuck';
-    }
+  const isVeryShort = t.length <= 8;
+  const isShortLoopContext = inputKind === 'chat' || inputKind === 'question';
 
-    return { noDelta, kind };
-  })();
+  const looksStoppedByReason =
+    rotationReason.length > 0 &&
+    (rotationReason.includes('回転') ||
+      rotationReason.includes('満たしていない') ||
+      rotationReason.includes('起きない'));
+
+  const looksStoppedByMeta = spinStepNow === 0 && rotationReason.length > 0;
+
+  // ✅ commitShort のときは “短文だから noDelta” を発生させない
+  const noDeltaByVeryShort =
+    isVeryShort && isShortLoopContext && looksStoppedByReason && !isCommitShort;
+
+  const noDelta =
+    isRepeatWarning ||
+    looksStoppedByReason ||
+    looksStoppedByMeta ||
+    noDeltaByVeryShort;
+
+  let kind: NoDeltaKind | null = null;
+  if (noDelta) {
+    if (isRepeatWarning) kind = 'repeat-warning';
+    else if (isVeryShort && !isCommitShort) kind = 'short-loop';
+    else kind = 'stuck';
+  }
+
+  return { noDelta, kind, isCommitShort };
+})();
+
 
   (meta as any).noDelta = nd.noDelta;
   (meta as any).noDeltaKind = nd.kind;

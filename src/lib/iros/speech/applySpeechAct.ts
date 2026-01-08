@@ -30,15 +30,7 @@
 import type { AllowSchema, SpeechDecision, SpeechAct } from './types';
 import { defaultAllowSchema } from './types';
 
-// ✅ ラベル(観測/核/反転/一手/問い)を “LLM出力に要求するか” のスイッチ
-// - 1: 従来通りラベル必須
-// - 0/未設定: ラベル禁止（中身だけ出す）
-const KEEP_SLOT_LABELS = process.env.IROS_KEEP_SLOT_LABELS === '1';
 
-console.log('[IROS/SpeechAct][env]', {
-  IROS_ALWAYS_SOFIA: process.env.IROS_ALWAYS_SOFIA,
-  IROS_KEEP_SLOT_LABELS: process.env.IROS_KEEP_SLOT_LABELS,
-});
 
 export type ApplySpeechActOutput = {
   act: SpeechAct;
@@ -85,23 +77,17 @@ function buildLLMSystemForAllow(allow: AllowSchema): string {
 
   const fieldRuleCommon = `出力できるフィールドは次のみ: ${fields.join(', ') || '(none)'}`;
 
-  // ✅ ラベル方針：KEEP_SLOT_LABELS=1 のときだけ「行頭ラベル」を要求
-  const fieldRule = KEEP_SLOT_LABELS
-    ? joinLines([
-        fieldRuleCommon,
-        'フォーマットは必ず以下のどれかの “行頭ラベル” を使うこと：',
-        '- observe: 「観測：...」',
-        '- name: 「核：...」',
-        '- flip: 「反転：A→B」',
-        '- commit: 「固定：...」',
-        '- actions: 「一手：...」(最大2行まで)',
-        '- question: 「問い：...」(任意)',
-      ])
-    : joinLines([
-        fieldRuleCommon,
-        'フォーマットはラベル禁止。行頭に「観測：/核：/反転：/固定：/一手：/問い：」を付けない。',
-        '各行は “中身だけ” を出力すること（例：一手の文だけ）。',
-      ]);
+  // ✅ 常にラベル必須（最終出力は enforceAllowSchema がラベル除去）
+  const fieldRule = joinLines([
+    fieldRuleCommon,
+    'フォーマットは必ず以下のどれかの “行頭ラベル” を使うこと：',
+    '- observe: 「観測：...」',
+    '- name: 「核：...」',
+    '- flip: 「反転：A→B」',
+    '- commit: 「固定：...」',
+    '- actions: 「一手：...」(最大2行まで)',
+    '- question: 「問い：...」(任意)',
+  ]);
 
   // actごとの追加縛り
   const actExtra: string[] = [];

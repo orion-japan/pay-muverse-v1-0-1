@@ -236,6 +236,7 @@ ${JSON.stringify(logSummaries, null, 2)}
   const rawText = await chatComplete({
     model: process.env.OPENAI_API_MODEL || 'gpt-4.1',
     messages,
+    purpose: 'digest',
   });
 
   let bundleJson: ResonancePeriodBundleJson;

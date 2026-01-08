@@ -2,20 +2,17 @@
 // iros — Natural IT Trigger Gate (server-side)
 //
 // 目的：
-// - 「ボタン押下」ではなく、会話の自然な連続性から IT 返しを発火させるための判定ゲート
-// - 例：Q2×2 / sameIntent×2 など
+// - 「ボタン押下」ではなく、会話の自然な連続性から IT 返しを“候補として”発火させる判定ゲート
+// - 例：Q2×2 / sameIntent×2 / stagnationHint など
 //
 // 前提（責務の分離）：
-// - ボタン提示/choiceId は src/lib/iros/nextStepOptions.ts（single source of truth）
 // - ここは “出力モード（renderMode='IT'）を自然に立てるか” だけを判断する
+// - T（刺さり確定）は別系統（computeITTrigger 等）でのみ開く
 //
-// 運用ルール（推奨）：
-// - 自然発火は「頻発しやすい」ので、原則 density='compact'（短め）
-// - 明示トリガー（ボタン等）より優先度は低い（ここでは扱わない）
-//
-// 使い方（想定）：
-// - handleIrosReply の gates/postprocess など “metaForSave を確定する場所” で呼び出し
-// - 既に renderMode が明示的に IT なら、このゲートは無視（外側で優先順位を制御）
+// 運用ルール：
+// - 自然発火は頻発しやすいので、原則 density='compact'（短め）
+// - cooldown を必ず入れる（デフォルト 2）
+// - 明示トリガーが存在する場合は外側で優先制御（ここでは扱わない）
 
 export type ItDensity = 'compact' | 'normal';
 
@@ -59,7 +56,6 @@ export type NaturalItTriggerInput = {
 
   /**
    * 任意：追加ヒント（停滞/詰まりの兆候）
-   * - 例：progressDelta=0 が続いている / goalが更新されない など
    * - true のとき “stagnation_hint” を理由に IT を出す余地を作る
    */
   stagnationHint?: boolean | null;
@@ -67,37 +63,103 @@ export type NaturalItTriggerInput = {
 
 export type NaturalItTriggerResult = {
   forceIT: boolean;
-  /** 自然発火は基本 short */
   density: ItDensity;
-  /** 発火理由（ログ/検証用） */
   reason: NaturalItTriggerReason;
-  /** デバッグ用の補足 */
   notes: string[];
 };
 
+function toInt(v: unknown): number | null {
+  if (typeof v !== 'number') return null;
+  if (!Number.isFinite(v)) return null;
+  return Math.trunc(v);
+}
+
+function isCooldownActive(turnsSinceLastNaturalIT: number | null, cooldownTurns: number): boolean {
+  // turnsSinceLastNaturalIT:
+  // 0 = 同ターン（二重呼び出し等）
+  // 1 = 直後
+  // 2 = 次の1回
+  // cooldownTurns=2 なら 0/1/2 を抑制、3 以降許可
+  if (turnsSinceLastNaturalIT == null) return false;
+  return turnsSinceLastNaturalIT <= cooldownTurns;
+}
+
 /**
- * 自然IT発火の中核判定（現在は無効化）
+ * 自然IT発火の中核判定（ボタン廃止版）
  *
- * 方針（2025-12-25）：
- * - IT層への遷移は「ボタン（choiceId）」のみで行う
- * - 会話内容・Q連続・停滞などによる自然IT発火は行わない
- *
- * この関数は将来の再有効化に備えて「stub」として残す。
+ * ポリシー：
+ * - 自然ITは「返答モードをIT候補にする」だけ（= Tを開かない）
+ * - q2_streak / same_intent_streak / stagnation_hint のどれかで候補を立てる
+ * - 頻発は cooldown で抑制
  */
 export function decideNaturalItTrigger(
   input: NaturalItTriggerInput,
 ): NaturalItTriggerResult {
+  const notes: string[] = [];
+
+  const qCode = typeof input.qCode === 'string' ? input.qCode : null;
+
+  const streakQ = input.qTrace?.streakQ ?? null;
+  const streakLength = toInt(input.qTrace?.streakLength ?? null);
+
+  const sameIntentStreak = toInt(input.sameIntentStreak ?? null);
+
+  const cooldownTurns =
+    toInt(input.cooldownTurns ?? null) != null ? (toInt(input.cooldownTurns ?? null) as number) : 2;
+
+  const turnsSinceLastNaturalIT = toInt(input.turnsSinceLastNaturalIT ?? null);
+
+  const cooldown = isCooldownActive(turnsSinceLastNaturalIT, cooldownTurns);
+  notes.push(`cooldownTurns=${cooldownTurns}`);
+  notes.push(`turnsSinceLastNaturalIT=${turnsSinceLastNaturalIT ?? 'null'}`);
+  notes.push(`cooldownActive=${cooldown}`);
+
+  if (cooldown) {
+    return { forceIT: false, density: 'compact', reason: 'none', notes: [...notes, 'blocked_by_cooldown'] };
+  }
+
+  // ① Q2 streak（Q2が続く＝背景掘り起こしが“続いている”）
+  if ((streakQ === 'Q2' || qCode === 'Q2') && (streakLength ?? 0) >= 2) {
+    return {
+      forceIT: true,
+      density: 'compact',
+      reason: 'q2_streak',
+      notes: [
+        ...notes,
+        `qCode=${qCode ?? 'null'}`,
+        `streakQ=${streakQ ?? 'null'}`,
+        `streakLength=${streakLength ?? 'null'}`,
+      ],
+    };
+  }
+
+  // ② same intent streak（同一テーマ/意図が続く＝詰まりの可能性）
+  if ((sameIntentStreak ?? 0) >= 2) {
+    return {
+      forceIT: true,
+      density: 'compact',
+      reason: 'same_intent_streak',
+      notes: [...notes, `sameIntentStreak=${sameIntentStreak}`],
+    };
+  }
+
+  // ③ stagnation hint（外側で詰まり検出できるなら）
+  if (input.stagnationHint === true) {
+    return {
+      forceIT: true,
+      density: 'compact',
+      reason: 'stagnation_hint',
+      notes: [...notes, 'stagnationHint=true'],
+    };
+  }
+
   return {
     forceIT: false,
     density: 'compact',
     reason: 'none',
-    notes: [
-      'disabled: natural IT trigger is turned off',
-      'policy: IT entry is allowed only via explicit UI button (choiceId)',
-    ],
+    notes: [...notes, 'no_trigger_conditions_matched'],
   };
 }
-
 
 /**
  * 便利関数：meta に自然ITの決定を “安全に追記” する
@@ -112,9 +174,10 @@ export function attachNaturalItToMeta(params: {
   meta: any;
   decision: NaturalItTriggerResult;
 }): any {
-  const meta = params.meta && typeof params.meta === 'object' && !Array.isArray(params.meta)
-    ? params.meta
-    : {};
+  const meta =
+    params.meta && typeof params.meta === 'object' && !Array.isArray(params.meta)
+      ? params.meta
+      : {};
 
   // 既に明示ITなら何もしない
   if ((meta as any).renderMode === 'IT') return meta;

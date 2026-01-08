@@ -9,10 +9,10 @@
 // - history は system汚染なしで渡す。末尾重複は除去
 //
 // NOTE:
+// - OpenAI直叩きは禁止。chatComplete（単一出口）を使う。
 // - 「コードは1つずつ提示」方針に従い、このファイル全文のみ提示
 
-import OpenAI from 'openai';
-import type { ChatCompletionMessageParam } from 'openai/resources/chat';
+import { chatComplete, type ChatMessage } from '@/lib/llm/chatComplete';
 
 import { getSystemPrompt, type IrosMeta, type IrosMode } from './system';
 import { decideQBrakeRelease, normalizeQ } from '@/lib/iros/rotation/qBrakeRelease';
@@ -278,7 +278,7 @@ function pickSafeTagFromMeta(meta: any): string | null {
   return null;
 }
 
-function buildSafeSystemMessage(meta: any, userText: string): ChatCompletionMessageParam | null {
+function buildSafeSystemMessage(meta: any, userText: string): ChatMessage | null {
   const safeTag = pickSafeTagFromMeta(meta);
   if (!safeTag) return null;
 
@@ -557,9 +557,9 @@ function buildWriterProtocol(meta: any, userText: string): string {
    HISTORY → MESSAGES
    ========================================================= */
 
-function normalizeHistoryToMessages(history: unknown, maxItems = 12): ChatCompletionMessageParam[] {
+function normalizeHistoryToMessages(history: unknown, maxItems = 12): ChatMessage[] {
   const src = Array.isArray(history) ? history : [];
-  const out: ChatCompletionMessageParam[] = [];
+  const out: ChatMessage[] = [];
 
   const pickRole = (v: any): 'user' | 'assistant' | null => {
     const r = v?.role ?? v?.sender ?? v?.from ?? v?.type ?? null;
@@ -597,7 +597,7 @@ function normalizeHistoryToMessages(history: unknown, maxItems = 12): ChatComple
   return out;
 }
 
-function dedupeTailUser(historyMessages: ChatCompletionMessageParam[], userText: string): ChatCompletionMessageParam[] {
+function dedupeTailUser(historyMessages: ChatMessage[], userText: string): ChatMessage[] {
   if (historyMessages.length === 0) return historyMessages;
 
   const last = historyMessages[historyMessages.length - 1];
@@ -801,6 +801,38 @@ function buildDecideSpeechActInput(meta: any, userText: string): DecideSpeechAct
   };
 }
 
+// =========================================================
+//   SpeechAct final sync (決定/適用/最終を一致させる)
+//   ✅ setSpeechActTrace はこの1個だけに統一する
+// =========================================================
+
+function setSpeechActTrace(
+  meta: any,
+  args: {
+    decisionAct?: any;
+    appliedAct?: any;
+    finalAct?: any;
+    reason?: any;
+    confidence?: any;
+  },
+) {
+  if (!meta || typeof meta !== 'object') return;
+  const ex =
+    typeof meta.extra === 'object' && meta.extra ? meta.extra : (meta.extra = {});
+
+  // ✅ legacy互換：speechAct は「final があれば final / なければ applied」
+  if (args.finalAct != null) ex.speechAct = args.finalAct;
+  else if (args.appliedAct != null) ex.speechAct = args.appliedAct;
+
+  // ✅ v2 trace（ズレ検知の本命）
+  if (args.decisionAct != null) ex.speechActDecision = args.decisionAct;
+  if (args.appliedAct != null) ex.speechActApplied = args.appliedAct;
+  if (args.finalAct != null) ex.speechActFinal = args.finalAct;
+
+  if (args.reason != null) ex.speechActReason = args.reason;
+  if (args.confidence != null) ex.speechActConfidence = args.confidence;
+}
+
 /* =========================================================
    MAIN
    ========================================================= */
@@ -824,22 +856,26 @@ export async function generateIrosReply(args: GenerateArgs): Promise<GenerateRes
   // MemoryState attach (generate side)
   // =========================================================
   const memoryStateFromArgs = (args as any)?.memoryState ?? null;
-  if (memoryStateFromArgs && typeof memoryStateFromArgs === 'object' && !(meta as any)?.memoryState) {
-    (meta as any).memoryState = memoryStateFromArgs;
+
+  // ✅ 代入は metaRef に統一（meta が object でない事故でも落ちない）
+  if (memoryStateFromArgs && typeof memoryStateFromArgs === 'object' && !metaRef.memoryState) {
+    metaRef.memoryState = memoryStateFromArgs;
   }
 
-  if (!(meta as any)?.q_counts && (meta as any)?.memoryState?.q_counts && typeof (meta as any).memoryState.q_counts === 'object') {
-    (meta as any).q_counts = (meta as any).memoryState.q_counts;
+  if (
+    !metaRef.q_counts &&
+    metaRef.memoryState?.q_counts &&
+    typeof metaRef.memoryState.q_counts === 'object'
+  ) {
+    metaRef.q_counts = metaRef.memoryState.q_counts;
   }
 
   // ==============================
   // Frame sticky を断つ（重要）
   // ==============================
-  if (meta && typeof meta === 'object') {
-    delete (meta as any).frame;
-    delete (meta as any).slots;
-    delete (meta as any).frameSlots;
-  }
+  delete metaRef.frame;
+  delete metaRef.slots;
+  delete metaRef.frameSlots;
 
   /* ---------------------------------
      QTrace / QNow / recentUserQs
@@ -910,56 +946,90 @@ export async function generateIrosReply(args: GenerateArgs): Promise<GenerateRes
   let finalAllowLLM = speechApplied.allowLLM === true;
 
   // ✅ meta.extra に証拠を刻む（DBで追跡できるように）
+  // - ※ finalAct はこの時点では未確定（enforce後に確定する）
+  setSpeechActTrace(meta as any, {
+    decisionAct: (speechDecision as any).act,
+    appliedAct: (speechApplied as any).act,
+    finalAct: null,
+    reason: (speechDecision as any).reason,
+    confidence: typeof (speechDecision as any).confidence === 'number' ? (speechDecision as any).confidence : null,
+  });
+
+  // allowLLM / input は従来どおり
   if (meta && typeof meta === 'object') {
     const ex =
       typeof (meta as any).extra === 'object' && (meta as any).extra ? (meta as any).extra : ((meta as any).extra = {});
-    ex.speechAct = speechApplied.act; // applySpeechAct の最終act
-    ex.speechActReason = speechDecision.reason; // decide理由
-    ex.speechActConfidence = typeof (speechDecision as any).confidence === 'number' ? (speechDecision as any).confidence : null;
     ex.speechAllowLLM = finalAllowLLM;
     ex.speechInput = speechInput;
   }
 
   console.log('[IROS/SpeechAct] decided', {
-    act: speechApplied.act,
-    reason: speechDecision.reason,
+    act: (speechApplied as any).act,
+    decisionAct: (speechDecision as any).act,
+    reason: (speechDecision as any).reason,
     confidence: (speechDecision as any).confidence ?? null,
     input: speechInput,
     allowLLM: finalAllowLLM,
   });
 
-  // ✅ LLMを呼ばない場合でも "" は返さない
+  // ✅ LLMを呼ばない場合（act別に返す）
   if (!finalAllowLLM) {
-    const textOut = '…'; // ✅ v2: 本文空固定はやめる（下流が空に依存しない）
-
     const safeMeta = typeof meta === 'object' && meta !== null ? meta : ({} as any);
-
     const ex =
       typeof (safeMeta as any).extra === 'object'
         ? (safeMeta as any).extra
         : ((safeMeta as any).extra = {});
 
+    // ✅ 最終actは「LLM非実行=applyのact」を採用（ここで確定）
+    const finalAct = (speechApplied as any).act;
+
+    // ---------------------------------------------------------
+    // act別の本文（v2）
+    // - SILENCE: "…" 禁止。見た目無出力の non-empty を返す（ゼロ幅）
+    // - FORWARD: 非LLMでも成立させる → fallbackNormalBody を返す
+    // ---------------------------------------------------------
+    const SILENT_BODY = '\u200B'; // 見た目は空、しかし "" ではない
+
+    let textOut: string;
+    if (finalAct === 'SILENCE') {
+      textOut = SILENT_BODY;
+    } else if (finalAct === 'FORWARD') {
+      textOut = ensureNonEmpty(fallbackNormalBody(userText, safeMeta), '…');
+    } else {
+      // 念のため（通常ここに来ない想定）：安全側の短文
+      textOut = ensureNonEmpty(fallbackNormalBody(userText, safeMeta), '…');
+    }
+
     ex.speechSkipped = true;
     ex.speechSkippedText = textOut;
 
-    // v2: "LLMの生出力" は無いが、空文字固定はやめる（後段のレンダーやデバッグが空に依存しない）
+    // v2: "LLMの生出力" は無いが、空文字固定はやめる（下流が空に依存しない）
     ex.rawTextFromModel = textOut;
 
     // LLM呼ばないときは履歴汚染を止める（任意）
     ex._blockHistory = true;
+
+    setSpeechActTrace(safeMeta as any, {
+      decisionAct: (speechDecision as any).act,
+      appliedAct: (speechApplied as any).act,
+      finalAct,
+      reason: (speechDecision as any).reason,
+      confidence: typeof (speechDecision as any).confidence === 'number' ? (speechDecision as any).confidence : null,
+    });
 
     return {
       content: textOut,
       text: textOut,
       assistantText: textOut,
 
-      // ✅ ここが重要
       mode: mode,
       intent: null,
 
       metaForSave: safeMeta,
       result: null,
-      speechAct: speechApplied.act,
+
+      speechAct: String(finalAct),
+      speechReason: String((speechDecision as any).reason ?? ''),
     };
   }
 
@@ -999,19 +1069,17 @@ export async function generateIrosReply(args: GenerateArgs): Promise<GenerateRes
 
   // ✅ Frame / Slots hint
   const writerHints = buildWriterHintsFromMeta(meta as any);
-  const writerHintMessage: ChatCompletionMessageParam | null = writerHints.hintText
-    ? ({ role: 'system', content: writerHints.hintText } as ChatCompletionMessageParam)
+  const writerHintMessage: ChatMessage | null = writerHints.hintText
+    ? ({ role: 'system', content: writerHints.hintText } as ChatMessage)
     : null;
 
   // ✅ SAFE slot
   const safeSystemMessage = buildSafeSystemMessage(meta as any, userText);
 
   // ✅ SpeechAct 器(system)（最終ゲート）
-  const speechSystemMessage: ChatCompletionMessageParam | null = speechApplied.llmSystem
-    ? ({ role: 'system', content: speechApplied.llmSystem } as ChatCompletionMessageParam)
+  const speechSystemMessage: ChatMessage | null = (speechApplied as any).llmSystem
+    ? ({ role: 'system', content: (speechApplied as any).llmSystem } as ChatMessage)
     : null;
-
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
   // history → LLM
   const historyMessagesRaw = normalizeHistoryToMessages(args.history, 12);
@@ -1019,7 +1087,7 @@ export async function generateIrosReply(args: GenerateArgs): Promise<GenerateRes
 
   const pastStateNoteText = typeof (meta as any)?.extra?.pastStateNoteText === 'string' ? (meta as any).extra.pastStateNoteText.trim() : '';
 
-  const messages: ChatCompletionMessageParam[] = [
+  const messages: ChatMessage[] = [
     { role: 'system', content: system },
     { role: 'system', content: protocol },
 
@@ -1030,7 +1098,7 @@ export async function generateIrosReply(args: GenerateArgs): Promise<GenerateRes
     ...(safeSystemMessage ? [safeSystemMessage] : []),
     ...(writerHintMessage ? [writerHintMessage] : []),
 
-    ...(explicitRecall && pastStateNoteText ? ([{ role: 'system', content: pastStateNoteText }] as ChatCompletionMessageParam[]) : []),
+    ...(explicitRecall && pastStateNoteText ? ([{ role: 'system', content: pastStateNoteText }] as ChatMessage[]) : []),
 
     ...historyMessages,
     { role: 'user', content: userText },
@@ -1051,6 +1119,7 @@ export async function generateIrosReply(args: GenerateArgs): Promise<GenerateRes
     conversationId: String((args as any)?.conversationId ?? ''),
     inputKind: (meta as any)?.inputKind ?? null,
     speechAct: (meta as any)?.extra?.speechAct ?? null,
+    speechActFinal: (meta as any)?.extra?.speechActFinal ?? null,
     speechAllowLLM: (meta as any)?.extra?.speechAllowLLM ?? null,
     userText_len: _len(userText),
     userText_head: _head(userText),
@@ -1058,15 +1127,16 @@ export async function generateIrosReply(args: GenerateArgs): Promise<GenerateRes
     messages_len: Array.isArray(messages) ? messages.length : null,
   });
 
-  // ---- LLM call（✅ 1回だけ）
-  const res = await client.chat.completions.create({
+  // ---- LLM call（✅ 1回だけ / ✅ chatComplete 経由）
+  const raw = await chatComplete({
+    apiKey: process.env.OPENAI_API_KEY!,
+    purpose: 'reply',
     model: IROS_MODEL,
     messages,
-    temperature: speechDecision.act === 'COMMIT' ? 0.7 : 0.35,
+    temperature: (speechDecision as any).act === 'COMMIT' ? 0.7 : 0.35,
   });
 
   // --- (2) LLM呼び出し直後（rawを“ここで”確定）
-  const raw = res?.choices?.[0]?.message?.content ?? '';
   console.log('[IROS/GEN][LLM-POST]', {
     raw_len: _len(raw),
     raw_head: _head(raw),
@@ -1083,24 +1153,25 @@ export async function generateIrosReply(args: GenerateArgs): Promise<GenerateRes
   // ---------------------------------
   // ✅ Enforce AllowSchema（最終ゲート） + non-empty保証
   // ---------------------------------
-  const enforced = enforceAllowSchema(speechApplied.allow as any, content);
+  const enforced = enforceAllowSchema((speechApplied as any).allow as any, content);
+
+  // ✅ 最終act（返却/保存/UIの単一ソース）
+  let finalAct: any = (enforced as any).act;
 
   // Decision が SILENCE でない限り、enforce の SILENCE は無効
-  let finalAct = (enforced as any).act;
-
-  if (speechDecision.act !== 'SILENCE' && (enforced as any).act === 'SILENCE') {
+  if ((speechDecision as any).act !== 'SILENCE' && (enforced as any).act === 'SILENCE') {
     const origin = ensureNonEmpty(content, '…');
     const kept = ensureNonEmpty((enforced as any).text, '');
 
     const fallbackLine = firstNonEmptyLine(origin) ?? firstNonEmptyLine(kept) ?? '…';
     content = ensureNonEmpty(fallbackLine, '…');
 
-    finalAct = speechDecision.act as any;
+    finalAct = (speechDecision as any).act;
 
     console.log('[IROS/SpeechAct] enforce returned SILENCE but overridden (non-silence decision)', {
-      decisionAct: speechDecision.act,
+      decisionAct: (speechDecision as any).act,
       enforcedAct: (enforced as any).act,
-      allowAct: (speechApplied.allow as any)?.act,
+      allowAct: (speechApplied as any)?.allow?.act ?? null,
       used: 'fallbackLine',
       originLen: origin.length,
       keptLen: kept.length,
@@ -1114,6 +1185,15 @@ export async function generateIrosReply(args: GenerateArgs): Promise<GenerateRes
 
   (enforced as any).act = finalAct;
 
+  // ✅ ここで「最終act」を meta に確定保存（ズレを潰す本命）
+  setSpeechActTrace(meta as any, {
+    decisionAct: (speechDecision as any).act,
+    appliedAct: (speechApplied as any).act,
+    finalAct,
+    reason: (speechDecision as any).reason,
+    confidence: typeof (speechDecision as any).confidence === 'number' ? (speechDecision as any).confidence : null,
+  });
+
   /* ---------------------------------
      Numeric footer
   --------------------------------- */
@@ -1124,7 +1204,7 @@ export async function generateIrosReply(args: GenerateArgs): Promise<GenerateRes
     (meta as any)?.microOnly === true ||
     (meta as any)?.recallOnly === true ||
     String(mode) === 'recall' ||
-    speechDecision.act !== 'COMMIT';
+    (speechDecision as any).act !== 'COMMIT';
 
   if (showNumericFooter && !hardHideNumericFooter) {
     content = content.replace(/\n*\s*[〔\[]sa[^\n]*[〕\]]\s*$/g, '').trim();
@@ -1147,7 +1227,9 @@ export async function generateIrosReply(args: GenerateArgs): Promise<GenerateRes
     metaForSave: meta ?? {},
     finalMode: String(mode),
     result: null,
-    speechAct: speechApplied.act ?? speechDecision.act,
-    speechReason: speechDecision.reason,
+
+    // ✅ 返却も「最終act」に統一（ここが修正の本丸）
+    speechAct: String(finalAct ?? (speechApplied as any).act ?? (speechDecision as any).act ?? ''),
+    speechReason: String((speechDecision as any).reason ?? ''),
   };
 }

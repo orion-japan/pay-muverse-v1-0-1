@@ -7,6 +7,7 @@
 // - phase / spin_loop / spin_step / descent_gate も MemoryState として扱う
 // - q_counts は「既存の構造（q_trace 等）を保持したまま it_cooldown だけ正規化」する
 // - itx_*（IT連続性）は読み書き対象に含める（将来の判定/UIに使う）
+// - intent_anchor（北極星/意図アンカー）は jsonb({key:'SUN', ...}) を想定し、state には key(string) で保持する
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -29,6 +30,9 @@ export type QCounts = {
 
 export type IrosMemoryState = {
   userCode: string;
+
+  // ★ 意図アンカー（SUN など）: state では key(string) で保持
+  intentAnchor: string | null;
 
   depthStage: string | null;
   qPrimary: string | null;
@@ -66,6 +70,9 @@ export type IrosMemoryState = {
 
 export type UpsertMemoryStateInput = {
   userCode: string;
+
+  // ★ 意図アンカー（SUN など）: 入力は任意（undefined/null は潰さない）
+  intentAnchor?: string | null;
 
   depthStage: string | null;
   qPrimary: string | null;
@@ -160,6 +167,18 @@ function clampInt0to3(v: any): number | null {
 }
 
 /**
+ * intent_anchor は jsonb({key:'SUN', ...}) を想定。
+ * state では key(string) に落として持つ。
+ * 互換: string('SUN') でも来る可能性があるので拾う。
+ */
+function normIntentAnchorKey(v: any): string | null {
+  if (v == null) return null;
+  if (typeof v === 'string') return normString(v);
+  if (typeof v === 'object') return normString((v as any).key);
+  return null;
+}
+
+/**
  * q_counts は「構造を保持」しつつ it_cooldown だけ正規化
  * - 既存の q_trace 等を落とさない
  */
@@ -189,6 +208,8 @@ export async function loadIrosMemoryState(
       [
         'user_code',
         'updated_at',
+        // ★ intent_anchor（jsonb）
+        'intent_anchor',
         'depth_stage',
         'q_primary',
         'self_acceptance',
@@ -220,6 +241,9 @@ export async function loadIrosMemoryState(
 
   const state: IrosMemoryState = {
     userCode: String((data as any).user_code),
+
+    // ★ jsonb → key(string)
+    intentAnchor: normIntentAnchorKey((data as any).intent_anchor),
 
     depthStage: normString((data as any).depth_stage),
     qPrimary: normString((data as any).q_primary),
@@ -257,6 +281,7 @@ export async function loadIrosMemoryState(
     console.log('[IROS/STATE] loaded MemoryState', {
       userCode,
       hasMemory: true,
+      intentAnchor: state.intentAnchor,
       depthStage: state.depthStage,
       qPrimary: state.qPrimary,
       selfAcceptance: state.selfAcceptance,
@@ -325,6 +350,9 @@ export async function upsertIrosMemoryState(
     typeof input.spinStep === 'number' ? normSpinStep(input.spinStep) : prev?.spinStep ?? null;
   const finalDescentGate = input.descentGate ?? prev?.descentGate ?? null;
 
+  // ★ intentAnchor（undefined/null は潰さない）
+  const finalIntentAnchor = input.intentAnchor ?? prev?.intentAnchor ?? null;
+
   // ★ IT 連続性（undefined/null は潰さない）
   const finalItxStep = input.itxStep ?? prev?.itxStep ?? null;
   const finalItxAnchorEventType = input.itxAnchorEventType ?? prev?.itxAnchorEventType ?? null;
@@ -335,6 +363,7 @@ export async function upsertIrosMemoryState(
   const finalQCounts = normalizeQCounts(input.qCounts) ?? normalizeQCounts(prev?.qCounts) ?? null;
 
   const summaryParts: string[] = [];
+  if (finalIntentAnchor) summaryParts.push(`ia=${finalIntentAnchor}`);
   if (finalDepthStage) summaryParts.push(`depth=${finalDepthStage}`);
   if (finalQPrimary) summaryParts.push(`q=${finalQPrimary}`);
   if (typeof finalSelfAcceptance === 'number')
@@ -356,6 +385,10 @@ export async function upsertIrosMemoryState(
 
   const payload = {
     user_code: input.userCode,
+
+    // ★ DBは jsonb を想定：{key:'SUN'} で保存（nullは明示的に消す）
+    intent_anchor: finalIntentAnchor ? { key: finalIntentAnchor } : null,
+
     depth_stage: finalDepthStage,
     q_primary: finalQPrimary,
     self_acceptance: finalSelfAcceptance,
@@ -394,6 +427,7 @@ export async function upsertIrosMemoryState(
   if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
     console.log('[IROS/STATE] upsert ok', {
       userCode: input.userCode,
+      intentAnchor: finalIntentAnchor,
       depthStage: finalDepthStage,
       qPrimary: finalQPrimary,
       phase: finalPhase,

@@ -11,11 +11,7 @@
 // - renderEngine は使わない
 // - 生成後の解析・分類は別レイヤで行う
 
-import OpenAI from 'openai';
-
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
+import { chatComplete } from '@/lib/llm/chatComplete';
 
 const SYSTEM_PROMPT = `
 あなたは IROS の「Normal Base」応答層です。
@@ -56,10 +52,10 @@ const SYSTEM_PROMPT = `
 `.trim();
 
 function normalizeOutput(text: string): string {
-  const lines = text
+  const lines = String(text ?? '')
     .replace(/\r\n/g, '\n')
     .split('\n')
-    .map(l => l.trim())
+    .map((l) => l.trim())
     .filter(Boolean);
 
   // 行数制限（最大4行）
@@ -89,27 +85,25 @@ export async function runNormalBase(args: {
     };
   }
 
-  const res = await client.chat.completions.create({
-    model: 'gpt-4.1', // ← ここはあなたの環境ポリシーに合わせて変更可
+  // ✅ OpenAI 直叩きは禁止：単一出口 chatComplete を使用
+  const raw = await chatComplete({
+    purpose: 'writer', // NormalBase は「生成」なので writer 扱いでOK
+    apiKey: process.env.OPENAI_API_KEY!,
+    model: process.env.IROS_NORMAL_BASE_MODEL || process.env.IROS_MODEL || 'gpt-4o',
     temperature: 0.7,
     max_tokens: 200,
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: userText },
     ],
+    // NormalBase は「必ず返す」層。空は許容しない（既定 false でOK）
   });
-
-  const raw =
-    res.choices?.[0]?.message?.content ??
-    '';
 
   const text = normalizeOutput(raw);
 
   // 最終保険：それでも空なら echo（異常系）
   const finalText =
-    text.trim().length > 0
-      ? text
-      : `受け取りました。\n言葉は、ここにあります。`;
+    text.trim().length > 0 ? text : `受け取りました。\n言葉は、ここにあります。`;
 
   return {
     text: finalText,

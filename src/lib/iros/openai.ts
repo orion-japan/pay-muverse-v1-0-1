@@ -1,33 +1,32 @@
 // /src/lib/iros/openai.ts
-// Iros 向け LLM 呼び出しの薄いラッパ
-// - 必ず string を返す
-// - route.ts 側が期待する `runIrosChat` を公開
+// Iros 向け LLM 呼び出しの互換ラッパ（※出口ではない）
+//
+// 方針：OpenAI へ出ていく「出口」は src/lib/llm/chatComplete.ts のみ。
+// ここは route.ts 等の既存呼び出し互換のために残すが、HTTP送信はしない。
+
+import {
+  chatComplete as chatCompleteExit,
+  type ChatMessage as ExitChatMessage,
+} from '@/lib/llm/chatComplete';
 
 export type ChatRole = 'system' | 'user' | 'assistant';
 export type ChatMessage = { role: ChatRole; content: string };
 
 type ChatArgs = {
-  apiKey?: string;                 // 省略時は process.env.OPENAI_API_KEY
-  model: string;                   // 例: 'gpt-4o-mini'
-  system?: string;                 // 先頭に挿入する system
-  history?: ChatMessage[];         // 既存履歴（system を含めないことを推奨）
-  user_text: string;               // 今回のユーザー発話
-  temperature?: number;            // 例: 0.4
-  max_tokens?: number;             // 例: 420
-  endpoint?: string;               // 既定: chat.completions
+  apiKey?: string; // 省略時は process.env.OPENAI_API_KEY
+  model: string; // 例: 'gpt-4o-mini'
+  system?: string; // 先頭に挿入する system
+  history?: ChatMessage[]; // 既存履歴（system を含めないことを推奨）
+  user_text: string; // 今回のユーザー発話
+  temperature?: number; // 例: 0.4
+  max_tokens?: number; // 例: 420
+  endpoint?: string; // 既定: chat.completions
   extraHeaders?: Record<string, string>;
 };
 
-// 低レベル: chat.completions 生ラッパ（常に string を返す）
-export async function chatComplete({
-  apiKey = process.env.OPENAI_API_KEY || '',
-  model,
-  messages,
-  temperature = 0.6,
-  max_tokens = 512,
-  endpoint = 'https://api.openai.com/v1/chat/completions',
-  extraHeaders = {},
-}: {
+// 互換: 以前の chatComplete を参照している箇所があっても壊さない。
+// ただし “出口” は llm/chatComplete のみ。
+export async function chatComplete(args: {
   apiKey?: string;
   model: string;
   messages: ChatMessage[];
@@ -36,37 +35,25 @@ export async function chatComplete({
   endpoint?: string;
   extraHeaders?: Record<string, string>;
 }): Promise<string> {
-  if (!apiKey) throw new Error('OPENAI_API_KEY is missing');
+  const { apiKey, model, messages, temperature, max_tokens, endpoint, extraHeaders } =
+    args;
 
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      ...extraHeaders,
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      temperature,
-      max_tokens,
-    }),
+  // 型を出口側に合わせる（role/content は同じ）
+  const msgs: ExitChatMessage[] = (messages ?? []).map((m) => ({
+    role: m.role,
+    content: String(m.content ?? ''),
+  }));
+
+  return chatCompleteExit({
+    purpose: 'writer', // ※互換呼び出しの既定。用途が分かる箇所は呼び元で purpose を使う方針へ移行。
+    apiKey,
+    model,
+    messages: msgs,
+    temperature,
+    max_tokens,
+    endpoint,
+    extraHeaders,
   });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`LLM HTTP ${res.status}: ${text}`);
-  }
-
-  const data = await res.json();
-  const raw = data?.choices?.[0]?.message?.content;
-
-  if (typeof raw !== 'string') {
-    throw new Error(`LLM returned non-string content: ${typeof raw}`);
-  }
-  const out = raw.toString().trim();
-  if (!out) throw new Error('LLM empty content');
-  return out;
 }
 
 // 高レベル: route.ts から呼ぶ想定のユーティリティ（必ず string を返す）
@@ -86,18 +73,20 @@ export async function runIrosChat({
   if (system && system.trim()) {
     msgs.push({ role: 'system', content: system.trim() });
   }
+
   if (Array.isArray(history) && history.length > 0) {
-    // role と content の最低限チェック
     for (const m of history) {
       if (!m || typeof m.content !== 'string') continue;
-      const role = (m.role as ChatRole) || 'user';
+      const role: ChatRole =
+        m.role === 'system' || m.role === 'user' || m.role === 'assistant'
+          ? m.role
+          : 'user';
       msgs.push({ role, content: m.content });
     }
   }
 
   msgs.push({ role: 'user', content: String(user_text ?? '') });
 
-  // string を必ず返す
   return chatComplete({
     apiKey,
     model,

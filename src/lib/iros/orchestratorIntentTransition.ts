@@ -159,9 +159,18 @@ export function applyIntentTransitionV1(
     const tGate = itx.nextTGate ?? itxState.tGate; // open/closed/undefined
     const isTActive = tGate === 'open' || itx.snapshot.step === 't_open';
 
-    // ★ まず reset
+    // ★ reset：固定北（key持ち）は絶対に消さない（予約キー保護）
     if (isTActive && aType === 'reset') {
-      (meta as any).intent_anchor = null;
+      const cur = (meta as any).intent_anchor ?? (meta as any).intentAnchor ?? null;
+      const hasKey =
+        cur &&
+        typeof cur === 'object' &&
+        typeof (cur as any).key === 'string' &&
+        (cur as any).key.trim().length > 0;
+
+      if (!hasKey) {
+        (meta as any).intent_anchor = null;
+      }
     }
 
     // ★ confirm は「書き換えない」（安全）
@@ -193,9 +202,6 @@ export function applyIntentTransitionV1(
     }
   }
 
-
-
-
   return {
     meta,
     goal,
@@ -211,4 +217,3 @@ export function applyIntentTransitionV1(
     },
   };
 }
-

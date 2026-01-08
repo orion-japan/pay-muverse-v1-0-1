@@ -127,17 +127,14 @@ function resolveTrainingTargetKind(meta: any): TargetKind {
   const fromGoalKind = pickString(meta?.goal?.kind);
   if (fromGoalKind) return normalizeTargetKind(fromGoalKind);
 
-  const fromMeta =
-    pickString(meta?.targetKind) ?? pickString(meta?.target_kind) ?? null;
+  const fromMeta = pickString(meta?.targetKind) ?? pickString(meta?.target_kind) ?? null;
   if (fromMeta) return normalizeTargetKind(fromMeta);
 
   const fromPriorityKind = pickString(meta?.priority?.goal?.kind);
   if (fromPriorityKind) return normalizeTargetKind(fromPriorityKind);
 
   const fromIntentDir =
-    pickString(meta?.intentLine?.direction) ??
-    pickString(meta?.intent_line?.direction) ??
-    null;
+    pickString(meta?.intentLine?.direction) ?? pickString(meta?.intent_line?.direction) ?? null;
   if (fromIntentDir) return normalizeTargetKind(fromIntentDir);
 
   return 'stabilize';
@@ -191,9 +188,91 @@ function buildFallbackAnalysisLabel(args: {
   return parts.join(' / ');
 }
 
-export async function saveIrosTrainingSample(
-  params: SaveIrosTrainingSampleParams
-) {
+/**
+ * Postgres json/jsonb が嫌う「壊れたUnicode（サロゲート片割れ）」や循環参照を除去し、
+ * かならず JSON として成立させる（PGRST102 / 22P02 の止血）。
+ */
+function sanitizeForJsonb(input: any): any {
+  const stripBrokenSurrogates = (s: string) => {
+    let out = '';
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charCodeAt(i);
+
+      // high surrogate: 0xD800..0xDBFF
+      if (c >= 0xd800 && c <= 0xdbff) {
+        const next = i + 1 < s.length ? s.charCodeAt(i + 1) : 0;
+
+        // valid pair with low surrogate: 0xDC00..0xDFFF
+        if (next >= 0xdc00 && next <= 0xdfff) {
+          out += s[i] + s[i + 1];
+          i++; // consume low surrogate too
+        } else {
+          // broken high surrogate -> drop
+        }
+        continue;
+      }
+
+      // low surrogate without preceding high surrogate -> drop
+      if (c >= 0xdc00 && c <= 0xdfff) {
+        continue;
+      }
+
+      out += s[i];
+    }
+    return out;
+  };
+
+  const seen = new WeakSet<object>();
+
+  const walk = (v: any): any => {
+    if (v == null) return v;
+
+    const t = typeof v;
+
+    if (t === 'string') return stripBrokenSurrogates(v);
+    if (t === 'number' || t === 'boolean') return v;
+    if (t === 'bigint') return String(v);
+    if (t !== 'object') return v;
+
+    if (v instanceof Date) return v.toISOString();
+
+    if (typeof Buffer !== 'undefined' && Buffer.isBuffer(v)) return v.toString('base64');
+    if (v instanceof Uint8Array) return Buffer.from(v).toString('base64');
+
+    if (seen.has(v)) return '[Circular]';
+    seen.add(v);
+
+    if (Array.isArray(v)) return v.map(walk);
+
+    const o: any = {};
+    for (const k of Object.keys(v)) {
+      const val = (v as any)[k];
+      if (val === undefined) continue; // JSON不可/不要
+      o[k] = walk(val);
+    }
+    return o;
+  };
+
+  try {
+    const cleaned = walk(input);
+    return JSON.parse(JSON.stringify(cleaned));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * json/jsonb に渡す値を安全化
+ * - "" / undefined は null に落とす（PGRST102回避）
+ * - object/array は sanitize して JSON確定
+ */
+function jsonbOrNull(v: any) {
+  if (v === '' || v === undefined || v == null) return null;
+  if (typeof v === 'object') return sanitizeForJsonb(v);
+  return null;
+}
+
+export async function saveIrosTrainingSample(params: SaveIrosTrainingSampleParams) {
   const {
     supabase,
     userCode,
@@ -271,8 +350,7 @@ export async function saveIrosTrainingSample(
   // target_kind（★ goal.kind を最優先にする）
   const targetKind = resolveTrainingTargetKind(meta);
 
-  const targetLabel =
-    pickString(meta?.targetLabel) ?? pickString(meta?.target_label) ?? null;
+  const targetLabel = pickString(meta?.targetLabel) ?? pickString(meta?.target_label) ?? null;
 
   /**
    * ★重要：analysis_text は「分析/メタ」専用
@@ -305,6 +383,16 @@ export async function saveIrosTrainingSample(
     sanitizeAnalysisTextForTraining(fallbackAnalysisLabel, replyText, inputText) ??
     '（内容なし）';
 
+  // ✅ json/jsonb 列の候補だけを安全化（PGRST102/22P02の止血）
+  const intentLineRaw = meta?.intentLine ?? meta?.intent_line ?? null;
+
+  const extraRaw = {
+    meta: meta ?? null,
+    replyText: replyText ?? null,
+    intentSummary: pickString(meta?.unified?.intentSummary) ?? pickString(meta?.unified?.intent_summary) ?? null,
+    analysisFallbackLabel: fallbackAnalysisLabel,
+  };
+
   const payload = {
     user_code: userCode,
     tenant_id: tenantId,
@@ -325,7 +413,9 @@ export async function saveIrosTrainingSample(
     h_level: hLevel,
 
     mirror_mode: pickString(meta?.mode) ?? null,
-    intent_line: meta?.intentLine ?? meta?.intent_line ?? null,
+
+    // ★ ここが PGRST102 の地雷になりやすい（json/jsonb想定）
+    intent_line: jsonbOrNull(intentLineRaw),
 
     situation_summary: situationSummary,
     situation_topic: situationTopic,
@@ -334,15 +424,9 @@ export async function saveIrosTrainingSample(
     target_label: targetLabel,
 
     tags,
-    extra: {
-      meta: meta ?? null,
-      replyText: replyText ?? null,
-      intentSummary:
-        pickString(meta?.unified?.intentSummary) ??
-        pickString(meta?.unified?.intent_summary) ??
-        null,
-      analysisFallbackLabel: fallbackAnalysisLabel,
-    },
+
+    // ★ ここも json/jsonb想定（meta を丸ごと持つので壊れUnicode/循環参照が混じりやすい）
+    extra: jsonbOrNull(extraRaw),
   };
 
   console.log('[IROS][Training] computed targetKind =', targetKind);

@@ -420,87 +420,100 @@ export async function runOrchestratorAnalysis(args: {
     }
   }
 
-  // =========================================================
-  // ✅ I層への遷移ゲート（配線）
-  // =========================================================
-  const shouldEnterI =
-    !(depth && String(depth).startsWith('I')) &&
-    (irTriggered ||
-      !!intentLine ||
-      futureDirectionActive === true ||
-      !!tLayerHint ||
-      hasFutureMemory === true);
+// =========================================================
+// ✅ I層への遷移ゲート（候補判定：intentLine は “strong” のみ採用）
+// =========================================================
 
-  const finalDepth: Depth | undefined = shouldEnterI ? 'I1' : depth;
+// intentLine が “空っぽオブジェクト” でも true にならないようにする
+const hasIntentLineStrong =
+  !!intentLine &&
+  (
+    // 未来メモリ/ヒントがある
+    (intentLine as any).hasFutureMemory === true ||
+    !!(intentLine as any).tLayerHint ||
+    // coreNeed が立っている（ITの前提に寄せる）
+    !!(intentLine as any).coreNeed ||
+    // nowLabel が空文字ではない
+    (typeof (intentLine as any).nowLabel === 'string' &&
+      String((intentLine as any).nowLabel).trim().length > 0)
+  );
 
-  // =========================================================
-  // ✅ I層に入った理由（デバッグ用）※ここで1回だけ作る
-  // =========================================================
-  const iEnterReasons: string[] | null = shouldEnterI ? [] : null;
+const shouldEnterI =
+  !(depth && String(depth).startsWith('I')) &&
+  (irTriggered ||
+    hasIntentLineStrong ||
+    futureDirectionActive === true ||
+    !!tLayerHint ||
+    hasFutureMemory === true);
 
-  if (iEnterReasons) {
-    if (irTriggered) iEnterReasons.push('irTriggered');
-    if (!!intentLine) iEnterReasons.push('intentLine');
-    if (futureDirectionActive === true) iEnterReasons.push('futureDirectionActive');
-    if (!!tLayerHint) iEnterReasons.push('tLayerHint');
-    if (hasFutureMemory === true) iEnterReasons.push('hasFutureMemory');
-    if (iEnterReasons.length === 0) iEnterReasons.push('unknown');
-  }
+// ✅ analysis は depth を書き換えない（候補だけ）
+const iCandidateDepth: Depth | null = shouldEnterI ? 'I1' : null;
+const finalDepth: Depth | undefined = depth;
 
-  const iEnterEvidence = shouldEnterI
-    ? {
-        from: depth ?? null,
-        to: finalDepth ?? null,
-        phase,
-        irTriggered,
-        futureDirectionActive,
-        tLayerHint,
-        hasFutureMemory,
-        hasIntentLine: !!intentLine,
-      }
-    : null;
+// =========================================================
+// ✅ I層に入った理由（デバッグ用）※ここで1回だけ作る
+// =========================================================
+const iEnterReasons: string[] | null = shouldEnterI ? [] : null;
 
-  // fixedUnified にも反映（保存/描画の single source of truth）
-  if (finalDepth && finalDepth !== depth) {
-    (fixedUnified as any).depth = {
-      ...(fixedUnified as any).depth,
-      stage: finalDepth,
-    };
-    console.log('[IROS][I-GATE] enter I', {
+if (iEnterReasons) {
+  if (irTriggered) iEnterReasons.push('irTriggered');
+  if (hasIntentLineStrong) iEnterReasons.push('intentLineStrong');
+  if (futureDirectionActive === true) iEnterReasons.push('futureDirectionActive');
+  if (!!tLayerHint) iEnterReasons.push('tLayerHint');
+  if (hasFutureMemory === true) iEnterReasons.push('hasFutureMemory');
+  if (iEnterReasons.length === 0) iEnterReasons.push('unknown');
+}
+
+const iEnterEvidence = shouldEnterI
+  ? {
       from: depth ?? null,
-      to: finalDepth,
+      to: iCandidateDepth, // ✅ 候補
       phase,
       irTriggered,
       futureDirectionActive,
       tLayerHint,
       hasFutureMemory,
-      hasIntentLine: !!intentLine,
-    });
-  }
+      hasIntentLine: hasIntentLineStrong, // ✅ strong に差し替え
+    }
+  : null;
 
-  return {
-    depth: finalDepth,
-    qCode,
+if (iCandidateDepth) {
+  console.log('[IROS][I-GATE][candidate]', {
+    from: depth ?? null,
+    to: iCandidateDepth,
     phase,
-    unified: fixedUnified,
-    selfAcceptanceLine,
-    qTrace,
-    yLevel,
-    hLevel,
-    polarityScore,
-    polarityBand,
-    stabilityBand,
     irTriggered,
-    pierceDecision,
-    intentLine,
+    futureDirectionActive,
     tLayerHint,
     hasFutureMemory,
-    tLayerModeActive: futureDirectionActive,
+    hasIntentLine: hasIntentLineStrong,
+  });
+}
 
-    // ✅ 追加した2つ（ここで返す）
-    iEnterReasons,
-    iEnterEvidence,
-  };
+
+return {
+  depth: finalDepth,
+  qCode,
+  phase,
+  unified: fixedUnified,
+  selfAcceptanceLine,
+  qTrace,
+  yLevel,
+  hLevel,
+  polarityScore,
+  polarityBand,
+  stabilityBand,
+  irTriggered,
+  pierceDecision,
+  intentLine,
+  tLayerHint,
+  hasFutureMemory,
+  tLayerModeActive: futureDirectionActive,
+
+  // ✅ 追加した2つ（ここで返す）
+  iEnterReasons,
+  iEnterEvidence,
+};
 }
 
 /* ========= ローカルヘルパー ========= */

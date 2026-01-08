@@ -1,19 +1,17 @@
 // src/lib/iros/q/detectQ.ts
 // iros — Q Detection Engine
 // - 概念シグナル（方向性/関連）ベースの一次判定（超軽量）
-// - GPTベースの補完判定（few-shot分類）
+// - LLMベースの補完判定（few-shot分類）
 // - （追加）Tシグナル（Transcend）を「フラグ」として併走（Qとは別軸）
 // - Q は Q1〜Q5 を返す / T は boolean で返す（必要なら別APIで利用）
+//
+// 方針：OpenAI直叩きは禁止。chatComplete（単一出口）を使う。
 
-import OpenAI from 'openai';
 import type { QCode } from '../system';
+import { chatComplete, type ChatMessage } from '@/lib/llm/chatComplete';
 
 // Q判定用モデル（なければ IROS_MODEL → gpt-4o）
 const Q_MODEL = process.env.IROS_Q_MODEL ?? process.env.IROS_MODEL ?? 'gpt-4o';
-
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
 
 export type QTDetectResult = {
   q: QCode | null;
@@ -23,7 +21,7 @@ export type QTDetectResult = {
 
 /**
  * 方向性（関連）を拾うため：概念シグナル中心の正規表現ベース
- * - 誤爆を避けるため「弱い単発」は決めない（null → GPTへ）
+ * - 誤爆を避けるため「弱い単発」は決めない（null → LLMへ）
  */
 export function detectQByKeywords(text: string): QCode | null {
   const raw = (text || '').trim();
@@ -115,7 +113,7 @@ export function detectQByKeywords(text: string): QCode | null {
       /(虚し|むなしい|空虚|空っぽ|意味がない|無意味|無価値)/,
       /(燃え尽き|燃えつき|やる気が出ない|何も感じない|感情が(ない|死んでる))/,
       /(喜び|歓喜|うれし|喜ぶ|情熱|意図|使命).*(湧かない|湧いてこない|出ない|感じない|ない)/,
-     /(燃え(てい)?ない|燃えては?いない|燃えない|熱が(ない|戻らない)|火が(つかない|戻らない))/,
+      /(燃え(てい)?ない|燃えては?いない|燃えない|熱が(ない|戻らない)|火が(つかない|戻らない))/,
       /(虚無|無感情|感情が動かない|心が動かない)/,
       // 火種（情熱側）
       /(情熱|ワクワク|本当はやりたい|本気でやりたい|やり直したい|熱が戻る)/,
@@ -123,7 +121,7 @@ export function detectQByKeywords(text: string): QCode | null {
   );
 
   // ----------------------------
-  // 弱い単発は「決めない」：GPTに回す
+  // 弱い単発は「決めない」：LLMに回す
   // ----------------------------
   const entries = (Object.keys(score) as QCode[]).map((q) => ({
     q,
@@ -136,10 +134,10 @@ export function detectQByKeywords(text: string): QCode | null {
 
   if (!best || best.s <= 0) return null;
 
-  // 閾値：弱いときは null（GPTへ）
+  // 閾値：弱いときは null（LLMへ）
   if (best.s < 4) return null;
 
-  // 競ってるときも null（GPTへ）
+  // 競ってるときも null（LLMへ）
   if (second && best.s - second.s <= 1) return null;
 
   return best.q;
@@ -183,7 +181,7 @@ export function detectTBySignals(text: string): boolean {
 }
 
 /**
- * GPTベースの Q 推定（few-shot分類）
+ * LLMベースの Q 推定（few-shot分類）
  * - キーワードで決め切れない場合にのみ呼ぶ
  */
 export async function detectQByGPT(text: string): Promise<QCode | null> {
@@ -192,7 +190,7 @@ export async function detectQByGPT(text: string): Promise<QCode | null> {
 }
 
 /**
- * GPTベースの Q + T 推定（few-shot分類）
+ * LLMベースの Q + T 推定（few-shot分類）
  * - Qが曖昧な時に「方向性で」補完
  * - Tは boolean（Qとは独立）
  */
@@ -233,50 +231,46 @@ export async function detectQTByGPT(text: string): Promise<QTDetectResult> {
     '}',
   ].join('\n');
 
-  const messages: OpenAI.ChatCompletionMessageParam[] = [
+  const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: trimmed },
   ];
 
   try {
-    const res = await client.chat.completions.create({
+    const rawText = await chatComplete({
+      purpose: 'judge',
       model: Q_MODEL,
-      messages,
       temperature: 0,
+      messages,
+      responseFormat: { type: 'json_object' },
     });
 
-    const raw = res.choices[0]?.message?.content ?? '';
-    const textOut = typeof raw === 'string' ? raw.trim() : String(raw).trim();
+    const textOut = String(rawText ?? '').trim();
     const parsed = safeParseJson(textOut);
 
     const qRaw = parsed && typeof parsed.q === 'string' ? parsed.q : null;
     const tRaw = parsed && typeof parsed.t === 'boolean' ? parsed.t : null;
-    const reason =
-      parsed && typeof parsed.reason === 'string' ? parsed.reason : null;
+    const reason = parsed && typeof parsed.reason === 'string' ? parsed.reason : null;
 
     const q: QCode | null =
-      qRaw === 'Q1' ||
-      qRaw === 'Q2' ||
-      qRaw === 'Q3' ||
-      qRaw === 'Q4' ||
-      qRaw === 'Q5'
+      qRaw === 'Q1' || qRaw === 'Q2' || qRaw === 'Q3' || qRaw === 'Q4' || qRaw === 'Q5'
         ? (qRaw as QCode)
         : null;
 
-    // Tは「軽量シグナル」も併用（GPTの誤爆/過小評価を補正）
+    // Tは「軽量シグナル」も併用（LLMの誤爆/過小評価を補正）
     const tBySignals = detectTBySignals(trimmed);
     const t = Boolean((tRaw ?? false) || tBySignals);
 
     return { q, t, reason };
   } catch (e) {
     console.warn('[IROS/Q] detectQTByGPT error', e);
-    // GPT失敗時もTは軽量で拾える
+    // LLM失敗時もTは軽量で拾える
     return { q: null, t: detectTBySignals(trimmed), reason: null };
   }
 }
 
 /**
- * 公開関数：概念シグナル（軽量）→ GPT の順に Q を推定する
+ * 公開関数：概念シグナル（軽量）→ LLM の順に Q を推定する
  */
 export async function detectQFromText(text: string): Promise<QCode | null> {
   const kw = detectQByKeywords(text);
@@ -287,7 +281,7 @@ export async function detectQFromText(text: string): Promise<QCode | null> {
 }
 
 /**
- * 公開関数：概念シグナル（軽量）→ GPT の順に Q と T を推定する
+ * 公開関数：概念シグナル（軽量）→ LLM の順に Q と T を推定する
  * - Qは null のままでもOK（後段の continuity / stabilize に任せる）
  * - Tは「方向性」フラグとして利用可能
  */
@@ -301,7 +295,7 @@ export async function detectQTFromText(text: string): Promise<QTDetectResult> {
   }
 
   const gpt = await detectQTByGPT(text);
-  // GPT結果に軽量Tを重ねる（detectQTByGPT側でもやるが保険）
+  // LLM結果に軽量Tを重ねる（detectQTByGPT側でもやるが保険）
   return { ...gpt, t: Boolean(gpt.t || tBySig) };
 }
 

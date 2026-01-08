@@ -8,11 +8,7 @@ import type { IrosUserProfileRow } from './loadUserProfile';
 import { loadBaseMetaFromMemoryState } from './handleIrosReply.state';
 
 // ✅ FramePlan（器＋スロット）(Layer C/D)
-import {
-  buildFramePlan,
-  type InputKind,
-  type IrosStateLite,
-} from '@/lib/iros/language/frameSlots';
+import { buildFramePlan, type InputKind, type IrosStateLite } from '@/lib/iros/language/frameSlots';
 
 function normOptString(v: unknown): string | undefined {
   const s = String(v ?? '').trim();
@@ -147,7 +143,9 @@ export async function buildTurnContext(
     (args as any)?.requestedDepth ?? (args as any)?.requested_depth,
   );
   const requestedQCode = normOptString(
-    (args as any)?.requestedQCode ?? (args as any)?.requested_q_code ?? (args as any)?.requested_qcode,
+    (args as any)?.requestedQCode ??
+      (args as any)?.requested_q_code ??
+      (args as any)?.requested_qcode,
   );
 
   // base meta
@@ -156,12 +154,61 @@ export async function buildTurnContext(
 
   // ✅ MemoryState を読み、baseMeta に合成（depth / qCode / selfAcceptance / y/h / spin）
   // ★ 注意：loadBaseMetaFromMemoryState は sb 必須
-  const { mergedBaseMeta } = await loadBaseMetaFromMemoryState({
+  // ★ ここで memoryState も受け取れる実装になっている場合があるので any で拾う
+  const loaded = await loadBaseMetaFromMemoryState({
     sb: supabase,
     userCode,
     baseMeta: baseMetaForTurn,
-  });
+  } as any);
+
+  // ★ depthStage を camelCase に寄せる（下流の取りこぼし防止）
+  // - ここで baseMetaForTurn.depthStage を確定させておく
+  // - snake_case への複製は「保存直前」でやる（Phase3方針）
+  {
+    const depthStage =
+      baseMetaForTurn?.depthStage ??
+      baseMetaForTurn?.depth_stage ??
+      baseMetaForTurn?.depth ??
+      null;
+
+    if (typeof depthStage === 'string' && depthStage.trim().length > 0) {
+      baseMetaForTurn.depthStage = depthStage.trim();
+    }
+  }
+
+
+
+  const mergedBaseMeta = (loaded as any)?.mergedBaseMeta;
+  const memoryState = (loaded as any)?.memoryState ?? (loaded as any)?.state ?? null;
+
   baseMetaForTurn = mergedBaseMeta ?? baseMetaForTurn;
+
+  // =========================================================
+  // ✅ depth_stage を “必ず” baseMetaForTurn のトップに同期する
+  // - DBでは memory_state に depth_stage があるのに、SCAFFOLD/CALL_LLM で meta.depth_stage が null になっていた
+  // - persistAssistantMessageToIrosMessages は meta.depth_stage / meta.depthStage を見て列 depth_stage を確定する
+  // - ここを single source にして、snake/camel を両方埋める
+  // =========================================================
+  {
+    const depthStageFromMemory =
+      (typeof memoryState?.depthStage === 'string' && String(memoryState.depthStage).trim()) ||
+      (typeof memoryState?.depth_stage === 'string' && String(memoryState.depth_stage).trim()) ||
+      null;
+
+    const depthStageTop =
+      (typeof baseMetaForTurn?.depth_stage === 'string' && String(baseMetaForTurn.depth_stage).trim()) ||
+      (typeof baseMetaForTurn?.depthStage === 'string' && String(baseMetaForTurn.depthStage).trim()) ||
+      (typeof baseMetaForTurn?.depth === 'string' && String(baseMetaForTurn.depth).trim()) ||
+      depthStageFromMemory ||
+      null;
+
+    if (depthStageTop) {
+      baseMetaForTurn.depth_stage = depthStageTop;
+      baseMetaForTurn.depthStage = depthStageTop;
+      // 保険：canonical 互換
+      if (!baseMetaForTurn.depth) baseMetaForTurn.depth = depthStageTop;
+    }
+  }
 
   // ★ spin/descent を camelCase に寄せる（下流の取りこぼし防止）
   const spinLoop =

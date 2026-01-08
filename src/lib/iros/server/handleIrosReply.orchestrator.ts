@@ -9,8 +9,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { runIrosTurn } from '@/lib/iros/orchestrator';
 import type { IrosStyle } from '@/lib/iros/system';
-import type { IrosUserProfileRow } from './loadUserProfile';
 import { isMetaAnchorText } from '@/lib/iros/intentAnchor';
+import type { IrosUserProfileRow } from './loadUserProfile';
 
 export type RunOrchestratorTurnArgs = {
   conversationId: string;
@@ -37,25 +37,45 @@ export type RunOrchestratorTurnArgs = {
 };
 
 /* =========================
-   intentAnchor sanitize（最小）
-   - テキストが無い/メタ文言/偽アンカー → intentAnchor を落とす
-   - Rowっぽい形 or set/reset イベントなら許可
+   intentAnchor sanitize（最小・Phase11対応）
+   - メタ文言/偽アンカー → intentAnchor を落とす
+   - ただし固定アンカーキー（例: 'SUN'）は許可（key-only を保持）
+   - meta.intentAnchor と meta.intent_anchor の両方を検疫・同期する
 ========================= */
+
+function isKeyOnlyAnchorText(s: string): boolean {
+  // ✅ 固定キー想定：短い / 空白なし / 記号少なめ
+  // 'SUN' / 'NORTH_STAR' / 'ANCHOR_01' などを許可
+  const t = String(s ?? '').trim();
+  if (!t) return false;
+  if (t.length < 2 || t.length > 24) return false;
+  if (/\s/.test(t)) return false;
+  return /^[A-Za-z0-9_-]+$/.test(t);
+}
 
 function pickAnchorText(intentAnchor: any): string {
   if (!intentAnchor) return '';
   if (typeof intentAnchor === 'string') return intentAnchor;
   if (typeof intentAnchor === 'object') {
-    return (
-      String(
-        intentAnchor.anchor_text ??
-          intentAnchor.anchorText ??
-          intentAnchor.text ??
-          '',
-      ) || ''
+    return String(
+      intentAnchor.anchor_text ??
+        intentAnchor.anchorText ??
+        intentAnchor.text ??
+        intentAnchor.key ?? // ✅ key-only も拾う
+        '',
     );
   }
   return '';
+}
+
+function pickAnchorKey(intentAnchor: any): string | null {
+  if (!intentAnchor) return null;
+  if (typeof intentAnchor === 'string') return intentAnchor.trim() || null;
+  if (typeof intentAnchor === 'object') {
+    const k = intentAnchor.key ?? intentAnchor.anchor_key ?? intentAnchor.anchorKey ?? null;
+    return typeof k === 'string' ? k.trim() || null : null;
+  }
+  return null;
 }
 
 function pickAnchorEvent(meta: any): string | null {
@@ -74,32 +94,66 @@ function looksLikeDbRow(a: any): boolean {
   return Boolean(a.id || a.user_id || a.created_at || a.updated_at);
 }
 
-function sanitizeIntentAnchor(meta: any): void {
+function sanitizeOneIntentAnchor(meta: any, field: 'intentAnchor' | 'intent_anchor'): void {
   if (!meta || typeof meta !== 'object') return;
-  if (!meta.intentAnchor) return;
+  if (!meta[field]) return;
 
-  const a = meta.intentAnchor;
+  const a = meta[field];
   const text = pickAnchorText(a).trim();
+  const key = pickAnchorKey(a);
 
-  // 1) テキストが無い → 捨てる
-  if (!text) {
-    delete meta.intentAnchor;
+  // 1) 空 → 捨てる
+  if (!text && !key) {
+    delete meta[field];
     return;
   }
 
-  // 2) メタ文言 → 捨てる
-  if (isMetaAnchorText(text)) {
-    delete meta.intentAnchor;
+  // 2) メタ文言っぽい文章 → 捨てる（※ key-only も含む）
+  //    ただし 'SUN' のような短いキーのみは許可
+  if (text && isMetaAnchorText(text) && !isKeyOnlyAnchorText(text)) {
+    delete meta[field];
     return;
   }
 
-  // 3) Row でも event(set/reset) でもない → 捨てる
+  // 3) key-only を許可（最重要：'SUN' を落とさない）
+  if (key && isKeyOnlyAnchorText(key)) {
+    return;
+  }
+  if (text && isKeyOnlyAnchorText(text)) {
+    return;
+  }
+
+  // 4) Row でも event(set/reset) でもない → 捨てる
   const ev = pickAnchorEvent(meta);
   const isRealEvent = ev === 'set' || ev === 'reset';
   if (!looksLikeDbRow(a) && !isRealEvent) {
-    delete meta.intentAnchor;
+    delete meta[field];
     return;
   }
+}
+
+function sanitizeIntentAnchor(meta: any): void {
+  if (!meta || typeof meta !== 'object') return;
+
+  // 両方検疫
+  sanitizeOneIntentAnchor(meta, 'intentAnchor');
+  sanitizeOneIntentAnchor(meta, 'intent_anchor');
+
+  // 両方同期（残ってる方を採用）
+  const ia =
+    meta.intentAnchor ??
+    meta.intent_anchor ??
+    null;
+
+  meta.intentAnchor = ia;
+  meta.intent_anchor = ia;
+
+  // key も同期（下流互換）
+  const key =
+    meta.intent_anchor_key ??
+    (typeof ia === 'string' ? ia : ia?.key ?? null);
+
+  meta.intent_anchor_key = typeof key === 'string' && key.trim() ? key.trim() : null;
 }
 
 /* =========================
@@ -128,21 +182,41 @@ export async function runOrchestratorTurn(
   // ✅ baseMeta を壊さない
   // - top は shallow copy
   // - rotationState / framePlan / intentAnchor は shallow clone（参照共有切り）
-  // - 値の変更は intentAnchor の削除のみ
+  // - 値の変更は intentAnchor の削除（検疫）とキー同期のみ
+  // - framePlan は “明示コピー（frame/slots/slotPlanPolicy）” で絶対に壊さない
   // =========================================================
   const safeBaseMeta =
     baseMetaForTurn && typeof baseMetaForTurn === 'object'
-      ? { ...baseMetaForTurn }
-      : {};
+      ? { ...(baseMetaForTurn as any) }
+      : ({} as any);
 
+  // rotationState：浅いコピーで参照共有を切る
   if (safeBaseMeta.rotationState && typeof safeBaseMeta.rotationState === 'object') {
-    safeBaseMeta.rotationState = { ...safeBaseMeta.rotationState };
+    safeBaseMeta.rotationState = { ...(safeBaseMeta.rotationState as any) };
   }
+
+  // framePlan：render-v2 の唯一の正なので “明示コピー”
+  // - slots は配列のまま保持（Record には潰さない）
+  // - 参照共有を切るため slots 配列だけ slice() する
   if (safeBaseMeta.framePlan && typeof safeBaseMeta.framePlan === 'object') {
-    safeBaseMeta.framePlan = { ...safeBaseMeta.framePlan };
+    const fp = safeBaseMeta.framePlan as any;
+
+    const slotsRaw = fp.slots ?? null;
+    const slotsArr = Array.isArray(slotsRaw) ? slotsRaw.slice() : null;
+
+    safeBaseMeta.framePlan = {
+      frame: fp.frame ?? null,
+      slots: slotsArr, // ✅ 配列
+      slotPlanPolicy: fp.slotPlanPolicy ?? null,
+    };
   }
+
+  // intentAnchor：浅いコピーで参照共有を切る（ここだけ検疫対象）
   if (safeBaseMeta.intentAnchor && typeof safeBaseMeta.intentAnchor === 'object') {
-    safeBaseMeta.intentAnchor = { ...safeBaseMeta.intentAnchor };
+    safeBaseMeta.intentAnchor = { ...(safeBaseMeta.intentAnchor as any) };
+  }
+  if (safeBaseMeta.intent_anchor && typeof safeBaseMeta.intent_anchor === 'object') {
+    safeBaseMeta.intent_anchor = { ...(safeBaseMeta.intent_anchor as any) };
   }
 
   // intentAnchor だけ検疫（rotationState / framePlan は絶対に触らない）
@@ -151,11 +225,17 @@ export async function runOrchestratorTurn(
   console.log('[IROS/Orchestrator] input meta snapshot', {
     hasRotationState: Boolean(safeBaseMeta.rotationState),
     spinLoop: safeBaseMeta.rotationState?.spinLoop ?? safeBaseMeta.spinLoop ?? null,
-    descentGate: safeBaseMeta.rotationState?.descentGate ?? safeBaseMeta.descentGate ?? null,
+    descentGate:
+      safeBaseMeta.rotationState?.descentGate ?? safeBaseMeta.descentGate ?? null,
     depth: safeBaseMeta.rotationState?.depth ?? safeBaseMeta.depth ?? null,
     frame: safeBaseMeta.framePlan?.frame ?? null,
+    slotPlanLen: Array.isArray(safeBaseMeta.framePlan?.slots)
+      ? safeBaseMeta.framePlan.slots.length
+      : null,
+    slotPlanPolicy: safeBaseMeta.framePlan?.slotPlanPolicy ?? null,
     historyLen: Array.isArray(history) ? history.length : 0,
-    hasIntentAnchor: Boolean(safeBaseMeta.intentAnchor),
+    hasIntentAnchor: Boolean(safeBaseMeta.intentAnchor ?? safeBaseMeta.intent_anchor ?? null),
+    intentAnchorKey: (safeBaseMeta as any)?.intent_anchor_key ?? null,
   });
 
   // =========================================================

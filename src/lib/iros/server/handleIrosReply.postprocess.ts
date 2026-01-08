@@ -537,15 +537,24 @@ export async function postProcessReply(
   // ✅ 以降で共通利用（宣言はここで1回だけ）
   const allowLLM = getSpeechAllowLLM(metaForSave);
 
+  // ✅ 6-B の値を catch 後やログで参照しても壊れないように、外で宣言しておく
+  let slotPlanLen: number | null = null;
+  let hasSlots: boolean = false;
+  let slotPlanExpected = false;
+  let isNonSilenceButEmpty = false;
+
   // 6-A) ✅ Q1_SUPPRESS沈黙止血：本文は必ず空
   try {
     const brakeReason = getBrakeReason(metaForSave);
 
     const shouldSilenceEmpty =
-      brakeReason === 'Q1_SUPPRESS' && allowLLM === false && isEffectivelySilent(finalAssistantText);
+      brakeReason === 'Q1_SUPPRESS' &&
+      allowLLM === false &&
+      isEffectivelySilent(finalAssistantText);
 
     if (shouldSilenceEmpty) {
       finalAssistantText = '';
+      metaForSave.extra = metaForSave.extra ?? {};
       metaForSave.extra.silencePatched = true;
       metaForSave.extra.silencePatchedReason = 'Q1_SUPPRESS__NO_LLM__EMPTY_TEXT';
     }
@@ -554,19 +563,28 @@ export async function postProcessReply(
   }
 
   // 6-B) ✅ 非SILENCEの空本文 stopgap：通常会話を壊さない
-  // - ただし slotPlan がある/LLM_GATE が SKIP_SLOTPLAN のときは「すり替え禁止」
+  // - ただし slotPlan がある/slotPlanExpected のときは「すり替え禁止」
   try {
     const bodyText = String(finalAssistantText ?? '').trim();
 
-    const { slotPlanLen, hasSlots } = pickSlotPlanInfo(metaForSave, orchResult);
-    const slotPlanExpected = hasSlots || (typeof slotPlanLen === 'number' && slotPlanLen > 0);
+    // ✅ ここで確定した値を外の変数へ
+    {
+      const info = pickSlotPlanInfo(metaForSave, orchResult);
+      slotPlanLen = info.slotPlanLen;
+      hasSlots = info.hasSlots;
+    }
 
-    const isNonSilenceButEmpty =
-      allowLLM !== false && bodyText.length === 0 && String(userText ?? '').trim().length > 0;
+    slotPlanExpected = hasSlots || (typeof slotPlanLen === 'number' && slotPlanLen > 0);
+
+    isNonSilenceButEmpty =
+      allowLLM !== false &&
+      bodyText.length === 0 &&
+      String(userText ?? '').trim().length > 0;
 
     // ------------------------------------------------------------
-    // ✅ slotPlanExpected なのに本文が空 → slotPlan を commit（v2の本命）
-    // - FINAL の slotPlan だけ commit（SCAFFOLD は LLM に渡す）
+    // ✅ slotPlanExpected なのに本文が空 → slotPlan を処理（v2の本命）
+    // - FINAL の slotPlan だけ commit（本文に採用）
+    // - SCAFFOLD は LLM に渡す seed として保存（本文は作らない＝PDF準拠）
     // - slotPlanPolicy は PostProcess で上書きしない（Orchestrator を唯一の正）
     // ------------------------------------------------------------
     if (isNonSilenceButEmpty && slotPlanExpected) {
@@ -605,31 +623,13 @@ export async function postProcessReply(
           slotPlanLen,
           hasSlots,
         });
-      } else if (!shouldCommitSlotPlanFinalOnly({ policy, slotText })) {
-        metaForSave.extra = {
-          ...(metaForSave.extra ?? {}),
-          finalTextPolicy: 'EMPTY_BUT_SLOTPLAN_EXPECTED__NONFINAL_SKIP_COMMIT',
-          slotPlanPolicy_detected: policy,
-          slotPlanPolicy_from: det.from,
-          slotPlanLen_detected: slotPlanLen,
-          hasSlots_detected: hasSlots,
-        };
-
-        console.log('[IROS/PostProcess] SLOTPLAN_EXPECTED but NONFINAL (skip commit)', {
-          conversationId,
-          userCode,
-          slotPlanPolicy: policy,
-          slotPlanPolicy_from: det.from,
-          slotPlanLen,
-          hasSlots,
-        });
-      } else {
-        // ✅ FINAL のときだけ commit
+      } else if (policy === 'FINAL') {
+        // ✅ FINAL：slotPlan を本文に採用（commit OK）
         finalAssistantText = slotText;
 
         metaForSave.extra = {
           ...(metaForSave.extra ?? {}),
-          finalTextPolicy: 'SLOTPLAN_COMMIT',
+          finalTextPolicy: 'SLOTPLAN_COMMIT_FINAL',
           slotPlanCommitted: true,
           slotPlanCommittedLen: slotText.length,
           slotPlanPolicy_detected: policy,
@@ -638,7 +638,7 @@ export async function postProcessReply(
           hasSlots_detected: hasSlots,
         };
 
-        console.log('[IROS/PostProcess] SLOTPLAN_COMMIT', {
+        console.log('[IROS/PostProcess] SLOTPLAN_COMMIT_FINAL', {
           conversationId,
           userCode,
           slotPlanPolicy: policy,
@@ -648,14 +648,45 @@ export async function postProcessReply(
           len: slotText.length,
           head: slotText.slice(0, 48),
         });
-      }
-    }
+      } else {
+// ✅ SCAFFOLD：本文に commit しない（PDF準拠）
+// - slotText は「LLMに渡す seed」として保存する
+// - 本文は空のまま（この後に LLM writer が本文を生成する）
+metaForSave.extra = {
+  ...(metaForSave.extra ?? {}),
+  finalTextPolicy: 'SLOTPLAN_SEED_SCAFFOLD',
+  slotPlanCommitted: false,
+  slotPlanSeedLen: slotText.length,
+  slotPlanPolicy_detected: policy,
+  slotPlanPolicy_from: det.from,
+  slotPlanLen_detected: slotPlanLen,
+  hasSlots_detected: hasSlots,
 
-    // ✅ slotPlanExpected じゃない「空」だけ ACK_FALLBACK
-    else if (isNonSilenceButEmpty && !slotPlanExpected) {
+  llmRewriteSeed: slotText,
+  llmRewriteSeedFrom: 'postprocess(slotPlan:SCAFFOLD)',
+  llmRewriteSeedAt: new Date().toISOString(),
+};
+
+console.log('[IROS/PostProcess] SLOTPLAN_SEED_SCAFFOLD (no commit)', {
+  conversationId,
+  userCode,
+  slotPlanPolicy: policy,
+  slotPlanPolicy_from: det.from,
+  slotPlanLen,
+  hasSlots,
+  seedLen: slotText.length,
+  seedHead: slotText.slice(0, 48),
+});
+
+
+        // ✅ ここでは本文を作らない（空のまま）
+        // finalAssistantText は変更しない
+      }
+    } else if (isNonSilenceButEmpty && !slotPlanExpected) {
+      // ✅ slotPlanExpected じゃない「空」だけ ACK_FALLBACK
       const callName =
         metaForSave?.userProfile?.user_call_name ??
-        metaForSave?.extra?.userProfile?.user_call_name ??
+        (metaForSave.extra as any)?.userProfile?.user_call_name ??
         'orion';
 
       const u = String(userText ?? '').replace(/\s+/g, ' ').trim();
@@ -668,7 +699,9 @@ export async function postProcessReply(
         ul.includes('はじめまして') ||
         ul.includes('よろしく');
 
-      finalAssistantText = looksLikeGreeting ? `こんにちは、${callName}さん。🪔` : 'うん、届きました。🪔';
+      finalAssistantText = looksLikeGreeting
+        ? `こんにちは、${callName}さん。🪔`
+        : 'うん、届きました。🪔';
 
       metaForSave.extra = {
         ...(metaForSave.extra ?? {}),
@@ -687,7 +720,7 @@ export async function postProcessReply(
   // =========================================================
   {
     const finalText = String(finalAssistantText ?? '').trim();
-    const prevRaw = String((metaForSave.extra as any).rawTextFromModel ?? '').trim();
+    const prevRaw = String((metaForSave.extra as any)?.rawTextFromModel ?? '').trim();
 
     (metaForSave.extra as any).extractedTextFromModel = finalText;
 

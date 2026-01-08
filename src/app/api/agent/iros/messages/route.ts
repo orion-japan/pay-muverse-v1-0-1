@@ -4,18 +4,12 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import {
-  verifyFirebaseAndAuthorize,
-  SUPABASE_URL,
-  SERVICE_ROLE,
-} from '@/lib/authz';
+import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/authz';
 
 // ✅ NextStep タグ除去 & 意図メタ取得
-import {
-  extractNextStepChoiceFromText,
-  findNextStepOptionById,
-} from '@/lib/iros/nextStepOptions';
+import { extractNextStepChoiceFromText, findNextStepOptionById } from '@/lib/iros/nextStepOptions';
 
+import crypto from 'crypto';
 const sb = () => createClient(SUPABASE_URL!, SERVICE_ROLE!);
 
 const json = (data: any, status = 200) =>
@@ -124,16 +118,26 @@ async function trySelect<T>(
   for (const table of tables) {
     const columns = columnsByTable[table] ?? columnsByTable['*'] ?? '*';
     try {
-      const { data, error } = await modify(
-        (supabase as any).from(table).select(columns),
-        table,
-      );
+      const { data, error } = await modify((supabase as any).from(table).select(columns), table);
       if (!error) return { ok: true as const, data, table };
     } catch {
       // ignore and try next
     }
   }
   return { ok: false as const, error: 'select_failed_all_candidates' as const };
+}
+
+// ✅ TS が「never」に落とす事故を避けつつ、text/number を安全に数値化
+function toIntOrNull(v: any): number | null {
+  if (v == null) return null;
+  if (typeof v === 'number' && Number.isFinite(v)) return Math.max(0, Math.floor(v));
+  if (typeof v === 'string') {
+    const s = v.trim();
+    if (!s) return null;
+    const n = Number(s);
+    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null;
+  }
+  return null;
 }
 
 /* =========================
@@ -216,10 +220,7 @@ export async function GET(req: NextRequest) {
         status,
         error: auth.error,
       });
-      return json(
-        { ok: false, error: auth.error, error_code: 'authz_not_ok', ms },
-        status,
-      );
+      return json({ ok: false, error: auth.error, error_code: 'authz_not_ok', ms }, status);
     }
 
     const userCode =
@@ -228,14 +229,7 @@ export async function GET(req: NextRequest) {
       (auth.userCode as string) ||
       '';
     if (!userCode) {
-      return json(
-        {
-          ok: false,
-          error: 'user_code_missing',
-          error_code: 'user_code_missing',
-        },
-        400,
-      );
+      return json({ ok: false, error: 'user_code_missing', error_code: 'user_code_missing' }, 400);
     }
 
     // (B) Params
@@ -263,11 +257,9 @@ export async function GET(req: NextRequest) {
     // - 明示指定があればそれを使う
     // - 無ければ admin は true（ops の SA/Y/H 等が消えない）
     const includeMetaParam =
-      req.nextUrl.searchParams.get('include_meta') ??
-      req.nextUrl.searchParams.get('includeMeta');
+      req.nextUrl.searchParams.get('include_meta') ?? req.nextUrl.searchParams.get('includeMeta');
 
-    const includeMeta =
-      includeMetaParam != null ? asBool(includeMetaParam) : auth.role === 'admin';
+    const includeMeta = includeMetaParam != null ? asBool(includeMetaParam) : auth.role === 'admin';
 
     const supabase = sb();
 
@@ -342,39 +334,17 @@ export async function GET(req: NextRequest) {
         ].join(',')
       : ['message_id', 'conversation_id', 'user_code', 'role', 'text', 'created_at'].join(',');
 
-    const columnsForUI = [
-      'id',
-      'conversation_id',
-      'user_code',
-      'role',
-      'text',
-      'created_at',
-    ].join(',');
+    const columnsForUI = ['id', 'conversation_id', 'user_code', 'role', 'text', 'created_at'].join(
+      ',',
+    );
 
     const columnsForNormalized = includeMeta
-      ? [
-          'id',
-          'conversation_id',
-          'user_code',
-          'role',
-          'content',
-          'meta',
-          'created_at',
-          'ts',
-          'q_code',
-          'color',
-        ].join(',')
-      : [
-          'id',
-          'conversation_id',
-          'user_code',
-          'role',
-          'content',
-          'created_at',
-          'ts',
-          'q_code',
-          'color',
-        ].join(',');
+      ? ['id', 'conversation_id', 'user_code', 'role', 'content', 'meta', 'created_at', 'ts', 'q_code', 'color'].join(
+          ',',
+        )
+      : ['id', 'conversation_id', 'user_code', 'role', 'content', 'created_at', 'ts', 'q_code', 'color'].join(
+          ',',
+        );
 
     const columnsForTable = includeMeta
       ? [
@@ -423,16 +393,11 @@ export async function GET(req: NextRequest) {
     };
 
     const tSel = process.hrtime.bigint();
-    const res = await trySelect<any>(
-      supabase,
-      MSG_TABLES,
-      columnsByTable,
-      (q) => {
-        const base = q.eq('conversation_id', cid);
-        // order は列が揃ってる created_at を優先（view も持ってる）
-        return base.order('created_at', { ascending: false }).limit(limit);
-      },
-    );
+    const res = await trySelect<any>(supabase, MSG_TABLES, columnsByTable, (q) => {
+      const base = q.eq('conversation_id', cid);
+      // order は列が揃ってる created_at を優先（view も持ってる）
+      return base.order('created_at', { ascending: false }).limit(limit);
+    });
 
     console.log('[IROS/messages][GET] msg select', {
       ms: msSince(tSel),
@@ -565,10 +530,7 @@ export async function POST(req: NextRequest) {
       const ms = msSince(t0);
       const status = isUpstreamTimeout(auth) ? 504 : auth.status || 401;
       console.warn('[IROS/messages][POST] authz not ok', { ms, status, error: auth.error });
-      return json(
-        { ok: false, error: auth.error, error_code: 'authz_not_ok', ms },
-        status,
-      );
+      return json({ ok: false, error: auth.error, error_code: 'authz_not_ok', ms }, status);
     }
 
     const userCode =
@@ -577,10 +539,7 @@ export async function POST(req: NextRequest) {
       (auth.userCode as string) ||
       '';
     if (!userCode) {
-      return json(
-        { ok: false, error: 'user_code_missing', error_code: 'user_code_missing' },
-        400,
-      );
+      return json({ ok: false, error: 'user_code_missing', error_code: 'user_code_missing' }, 400);
     }
 
     // (B) Body
@@ -589,30 +548,47 @@ export async function POST(req: NextRequest) {
       body = await req.json();
     } catch {}
 
-    const conversation_id: string = String(
-      body?.conversation_id || body?.conversationId || '',
-    ).trim();
+    // ✅ reqId: client優先 -> header -> server生成（/reply の [IROS/REQ] in と突き合わせるため）
+    const reqId: string =
+      (typeof body?.reqId === 'string' && body.reqId.trim()) ||
+      (typeof body?.requestId === 'string' && body.requestId.trim()) ||
+      (req.headers.get('x-request-id')?.trim() || '') ||
+      crypto.randomUUID();
+
+    const conversation_id: string = String(body?.conversation_id || body?.conversationId || '').trim();
 
     const role: 'user' | 'assistant' =
       String(body?.role ?? '').toLowerCase() === 'assistant' ? 'assistant' : 'user';
 
     const rawText: string = String(body?.text ?? body?.content ?? '');
 
+    // ✅ 入口ログ（/reply の [IROS/REQ] in と同じ軸）
+    console.log('[IROS/MSG] in', {
+      reqId,
+      conversationId: conversation_id,
+      userCode,
+      uid: auth.user?.uid ?? null,
+      role,
+      textHead: rawText.slice(0, 80),
+    });
+
     // ✅ single-writer: /messages は user だけ保存。assistant は絶対保存しない。
     if (role === 'assistant') {
       console.log('[IROS/messages][POST] hard-skip assistant persist (single-writer)', {
         conversation_id,
+        reqId,
       });
 
       return NextResponse.json({
         ok: true,
         skipped: true,
         reason: 'ASSISTANT_ROLE_NEVER_PERSISTED_SINGLE_WRITER',
+        reqId,
       });
     }
 
     if (!rawText || !String(rawText).trim()) {
-      return json({ ok: false, error: 'text_empty', error_code: 'text_empty' }, 400);
+      return json({ ok: false, error: 'text_empty', error_code: 'text_empty', reqId }, 400);
     }
 
     // (C) NextStep choiceId 抽出（user のときだけ採用）
@@ -639,14 +615,11 @@ export async function POST(req: NextRequest) {
       return null;
     })();
 
-    const choiceId: string | null =
-      role === 'user' ? (choiceIdFromBody ?? extracted.choiceId ?? null) : null;
+    const choiceId: string | null = role === 'user' ? (choiceIdFromBody ?? extracted.choiceId ?? null) : null;
 
     // user のときだけタグ剥がしされた cleanText を採用
     const cleanText = extracted.cleanText;
-    const finalText = (
-      role === 'user' && cleanText && cleanText.trim().length ? cleanText : rawText
-    ).trim();
+    const finalText = (role === 'user' && cleanText && cleanText.trim().length ? cleanText : rawText).trim();
 
     if (!finalText) {
       return json({ ok: false, error: 'text_empty', error_code: 'text_empty' }, 400);
@@ -657,12 +630,9 @@ export async function POST(req: NextRequest) {
     // (D) meta を組み立て（nextStep は meta.extra に隠す）
     const metaRaw = body?.meta ?? null;
 
-    const baseMetaRaw =
-      metaRaw && typeof metaRaw === 'object' && !Array.isArray(metaRaw) ? metaRaw : {};
+    const baseMetaRaw = metaRaw && typeof metaRaw === 'object' && !Array.isArray(metaRaw) ? metaRaw : {};
     const baseExtraRaw =
-      baseMetaRaw.extra &&
-      typeof baseMetaRaw.extra === 'object' &&
-      !Array.isArray(baseMetaRaw.extra)
+      baseMetaRaw.extra && typeof baseMetaRaw.extra === 'object' && !Array.isArray(baseMetaRaw.extra)
         ? baseMetaRaw.extra
         : {};
 
@@ -670,11 +640,7 @@ export async function POST(req: NextRequest) {
       picked && typeof picked === 'object'
         ? {
             id: (picked as any).id ?? choiceId ?? null,
-            label:
-              (picked as any).label ??
-              (picked as any).title ??
-              (picked as any).name ??
-              null,
+            label: (picked as any).label ?? (picked as any).title ?? (picked as any).name ?? null,
           }
         : null;
 
@@ -692,8 +658,7 @@ export async function POST(req: NextRequest) {
     };
 
     const metaSanitized = sanitizeJsonDeep(metaAugRaw);
-    const meta =
-      metaSanitized === null || typeof metaSanitized === 'undefined' ? null : metaSanitized;
+    const meta = metaSanitized === null || typeof metaSanitized === 'undefined' ? null : metaSanitized;
 
     // (E) q/depth/intent を body + meta から拾う（insert の primary）
     const q_code_from_body =
@@ -711,24 +676,16 @@ export async function POST(req: NextRequest) {
       null;
 
     const intent_layer_from_body =
-      toNonEmptyTrimmedString(body?.intent_layer) ??
-      toNonEmptyTrimmedString(body?.intentLayer) ??
-      null;
+      toNonEmptyTrimmedString(body?.intent_layer) ?? toNonEmptyTrimmedString(body?.intentLayer) ?? null;
 
     const q_code: string | null =
-      pickMetaValue(metaAugRaw, ['qCode', 'q_code', 'qPrimary', 'q_code_primary']) ??
-      q_code_from_body ??
-      null;
+      pickMetaValue(metaAugRaw, ['qCode', 'q_code', 'qPrimary', 'q_code_primary']) ?? q_code_from_body ?? null;
 
     const depth_stage: string | null =
-      pickMetaValue(metaAugRaw, ['depth', 'depthStage', 'depth_stage']) ??
-      depth_stage_from_body ??
-      null;
+      pickMetaValue(metaAugRaw, ['depth', 'depthStage', 'depth_stage']) ?? depth_stage_from_body ?? null;
 
     const intent_layer: string | null =
-      pickMetaValue(metaAugRaw, ['intentLayer', 'intent_layer']) ??
-      intent_layer_from_body ??
-      null;
+      pickMetaValue(metaAugRaw, ['intentLayer', 'intent_layer']) ?? intent_layer_from_body ?? null;
 
     // (F) Supabase + owner check
     const supabase = sb();
@@ -747,21 +704,11 @@ export async function POST(req: NextRequest) {
     });
 
     if (!conv.ok || !(conv as any).data?.[0]) {
-      return json(
-        { ok: false, error: 'conversation_not_found', error_code: 'conversation_not_found' },
-        404,
-      );
+      return json({ ok: false, error: 'conversation_not_found', error_code: 'conversation_not_found' }, 404);
     }
     const owner = String((conv as any).data[0].user_code ?? '');
     if (owner && owner !== userCode) {
-      return json(
-        {
-          ok: false,
-          error: 'forbidden_owner_mismatch',
-          error_code: 'forbidden_owner_mismatch',
-        },
-        403,
-      );
+      return json({ ok: false, error: 'forbidden_owner_mismatch', error_code: 'forbidden_owner_mismatch' }, 403);
     }
 
     /* =========================================================
@@ -806,9 +753,7 @@ export async function POST(req: NextRequest) {
       if (!trace || typeof trace !== 'object') return seedIn;
 
       const sQ =
-        typeof trace?.streakQ === 'string' && trace.streakQ.trim().length
-          ? trace.streakQ.trim()
-          : null;
+        typeof trace?.streakQ === 'string' && trace.streakQ.trim().length ? trace.streakQ.trim() : null;
 
       const sLen =
         typeof trace?.streakLength === 'number' && Number.isFinite(trace.streakLength)
@@ -819,8 +764,7 @@ export async function POST(req: NextRequest) {
             ? Math.max(0, Math.floor(Number(trace.streakLength)))
             : null;
 
-      const from =
-        typeof trace?.from === 'string' && trace.from.trim().length ? trace.from.trim() : null;
+      const from = typeof trace?.from === 'string' && trace.from.trim().length ? trace.from.trim() : null;
 
       return {
         ...seedIn,
@@ -833,9 +777,7 @@ export async function POST(req: NextRequest) {
 
     async function loadMemoryStateSeed() {
       const memTables = ['iros_memory_state', 'public.iros_memory_state'] as const;
-
-      const selectMin =
-        'q_primary, depth_stage, intent_layer, phase, spin_loop, spin_step, descent_gate, q_counts';
+      const selectMin = 'q_primary, depth_stage, intent_layer, phase, spin_loop, spin_step, descent_gate, q_counts';
 
       for (const mt of memTables) {
         try {
@@ -864,8 +806,7 @@ export async function POST(req: NextRequest) {
           phase: toNonEmptyTrimmedString((data as any).phase) ?? null,
           spin_loop: toNonEmptyTrimmedString((data as any).spin_loop) ?? null,
           spin_step:
-            typeof (data as any).spin_step === 'number' &&
-            Number.isFinite((data as any).spin_step)
+            typeof (data as any).spin_step === 'number' && Number.isFinite((data as any).spin_step)
               ? (data as any).spin_step
               : null,
           descent_gate: toNonEmptyTrimmedString((data as any).descent_gate) ?? null,
@@ -898,10 +839,78 @@ export async function POST(req: NextRequest) {
     const intent_layer_from_depth = normalizeIntentLayerFromDepth(depth_stage_final);
     const intent_layer_final = intent_layer_from_depth ?? (intent_layer ?? seed.intent_layer);
 
-    /* =========================================================
-     * (I) streak 決定（meta → seed → fallback）
-     * - ★重要: let（後で補正するため）
-     * ========================================================= */
+/* =========================================================
+ * (I) streak 決定（meta → seed → fallback）
+ * - ★重要: let（後で補正するため）
+ * - 追加: DBから「会話内の直近 user 投稿」を見て streak を確定（seed由来のズレ防止）
+ * - ✅ FIX: public 側に書かれていても拾えるように候補テーブルを試す
+ * ========================================================= */
+
+async function computeUserStreakFromDb(args: {
+  supabase: any;
+  conversationId: string;
+  userCode: string;
+  qCodeFinal: string | null;
+}): Promise<{ streak_q: string | null; streak_len: number | null; qtu_from: string | null }> {
+  const { supabase, conversationId, userCode, qCodeFinal } = args;
+
+  const qFinal = typeof qCodeFinal === 'string' ? qCodeFinal.trim() : '';
+  if (!qFinal) return { streak_q: null, streak_len: null, qtu_from: null };
+
+  const tables = ['iros_messages', 'public.iros_messages'] as const;
+
+  for (const table of tables) {
+    try {
+      // 直近の user 投稿だけ見る（現在の投稿はまだinsert前なので含まれない）
+      const { data, error } = await supabase
+        .from(table)
+        .select('q_code, role, created_at')
+        .eq('conversation_id', conversationId)
+        .eq('user_code', userCode)
+        .eq('role', 'user')
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (error) {
+        console.warn('[IROS/messages][streak-db] select failed', {
+          table,
+          message: error?.message ?? String(error),
+        });
+        continue;
+      }
+
+      const rows: any[] = Array.isArray(data) ? data : [];
+
+      // 直近から「同一q_codeの連続」を数える（prev streak）
+      let prevRun = 0;
+      for (const r of rows) {
+        const q = typeof r?.q_code === 'string' ? r.q_code.trim() : '';
+        if (!q) continue;
+        if (q === qFinal) prevRun += 1;
+        else break;
+      }
+
+      // 今回の投稿を加えた streak
+      const streakLen = prevRun + 1;
+
+      return {
+        streak_q: qFinal,
+        streak_len: streakLen,
+        qtu_from: `db:${table}`,
+      };
+    } catch (e: any) {
+      console.warn('[IROS/messages][streak-db] select exception', {
+        table,
+        message: String(e?.message ?? e),
+      });
+      continue;
+    }
+  }
+
+  // どの候補テーブルでも取れなかった
+  return { streak_q: null, streak_len: null, qtu_from: null };
+}
+
     const qtu: any = (meta as any)?.qTraceUpdated ?? (meta as any)?.qTrace ?? null;
 
     let streakQ: string | null =
@@ -909,16 +918,18 @@ export async function POST(req: NextRequest) {
         ? qtu.streakQ.trim()
         : seed.streak_q ?? (q_code_final ?? null);
 
+    const seedStreakLenNum = toIntOrNull((seed as any)?.streak_len);
+
     let streakLenNum: number | null =
       typeof qtu?.streakLength === 'number' && Number.isFinite(qtu.streakLength)
         ? Math.max(0, Math.floor(qtu.streakLength))
-        : seed.streak_len != null
-        ? seed.streak_len
+        : seedStreakLenNum != null
+        ? seedStreakLenNum
         : q_code_final
         ? 1
         : null;
 
-    const qtuFrom: string | null =
+    let qtuFrom: string | null =
       typeof qtu?.from === 'string' && qtu.from.trim().length > 0
         ? qtu.from.trim()
         : (meta as any)?.qTraceUpdated
@@ -927,9 +938,38 @@ export async function POST(req: NextRequest) {
         ? 'qTrace'
         : seed.qtu_from ?? null;
 
-    // ✅ FIX: seed（MemoryState由来）と矛盾しないように補正
-    // - 同じQのときだけ
-    // - streakLen は “小さくなる事故” を防ぐ（増やす方向のみ）
+    // ✅ 追加: DBで確定した streak を「増やす方向だけ」上書き（巻き戻り防止）
+    {
+      const db = await computeUserStreakFromDb({
+        supabase,
+        conversationId: conversation_id,
+        userCode,
+        qCodeFinal: q_code_final ?? null,
+      });
+
+      if (db.streak_q && db.streak_len != null) {
+        // q が確定できるなら、streak_q はDBを優先
+        streakQ = db.streak_q;
+
+        // len は「小さくなる事故」を防ぐ（増やす方向のみ）
+        const cur =
+          typeof streakLenNum === 'number' && Number.isFinite(streakLenNum) ? streakLenNum : 0;
+        if (db.streak_len > cur) {
+          console.warn('[IROS/messages][streak-db] bump streakLen', {
+            before: streakLenNum,
+            after: db.streak_len,
+            q: db.streak_q,
+            from: db.qtu_from,
+          });
+          streakLenNum = db.streak_len;
+          qtuFrom = db.qtu_from ?? qtuFrom;
+        } else {
+          // lenは増やさないが、「由来だけ」残すのは混乱するので、ここでは触らない
+        }
+      }
+    }
+
+    // ✅ FIX: seed（MemoryState由来）と矛盾しないように補正（増やす方向のみ）
     {
       const qFromSeed = seed.q_code ?? null;
       const streakLenFromSeed = seed.streak_len ?? null;
@@ -979,9 +1019,30 @@ export async function POST(req: NextRequest) {
 
     let inserted: { id: string | number; created_at: string | null } | null = null;
 
+    // ✅ streak の確定ルール：q_code_final を最優先（切替瞬間の巻き戻り防止）
+    // ✅ FIX: ただし DBで確定できている場合（qtuFrom が db:*）はここで壊さない
+    const qFinal =
+      typeof q_code_final === 'string' && q_code_final.trim().length ? q_code_final.trim() : null;
+
+    const isDbConfirmed = typeof qtuFrom === 'string' && qtuFrom.startsWith('db:');
+
+    if (qFinal && !isDbConfirmed) {
+      // streakQ は必ず qFinal に揃える
+      const prevStreakQ = streakQ;
+      streakQ = qFinal;
+
+      // qtu / seed が別Qの streak を持ってきた場合、連続は 1 から
+      if (prevStreakQ && prevStreakQ !== qFinal) {
+        streakLenNum = 1;
+      } else if (!prevStreakQ) {
+        streakLenNum = Math.max(1, Number(streakLenNum || 0));
+      }
+    }
+
     /* =========================================================
      * (K) insert（候補テーブル順に試す）
      * - ✅ iros / public.iros のみ
+     * - ✅ FIX: streak_len は text カラムなので string で入れる
      * ========================================================= */
     for (const table of ['iros_messages', 'public.iros_messages'] as const) {
       const tIns = process.hrtime.bigint();
@@ -991,17 +1052,13 @@ export async function POST(req: NextRequest) {
         depth_stage: depth_stage_final,
         intent_layer: intent_layer_final,
         streak_q: streakQ,
-        streak_len: streakLenNum,
+        streak_len: streakLenNum != null ? String(streakLenNum) : null, // ✅ textへ統一
         qtu_from: qtuFrom,
         meta,
       };
 
       try {
-        const { data, error } = await (supabase as any)
-          .from(table)
-          .insert([row])
-          .select('id,created_at')
-          .single();
+        const { data, error } = await (supabase as any).from(table).insert([row]).select('id,created_at').single();
 
         console.log('[IROS/messages][POST] insert tried', {
           table,
@@ -1066,7 +1123,7 @@ export async function POST(req: NextRequest) {
         intent_layer: intent_layer_final,
 
         streak_q: streakQ,
-        streak_len: streakLenNum,
+        streak_len: streakLenNum != null ? String(streakLenNum) : null, // ✅ 応答も text に揃える
         qtu_from: qtuFrom,
 
         meta,

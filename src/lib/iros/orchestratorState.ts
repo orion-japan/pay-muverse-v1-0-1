@@ -31,10 +31,10 @@ function normalizeSpinLoop(raw: unknown): 'SRI' | 'TCF' | null {
   return null;
 }
 
-function normalizeSpinStep(raw: unknown): 0 | 1 | 2 | null {
+function normalizeSpinStep(raw: unknown): number | null {
   if (typeof raw !== 'number' || Number.isNaN(raw)) return null;
-  if (raw === 0 || raw === 1 || raw === 2) return raw;
-  return null;
+  const n = Math.round(raw);
+  return Number.isFinite(n) ? n : null;
 }
 
 // ★ 追加：intentLayer 正規化（IrosMeta の intentLayer 型に合わせる）
@@ -44,7 +44,7 @@ function normalizeIntentLayer(raw: unknown): IntentLayer | null {
   if (typeof raw !== 'string') return null;
   const s = raw.trim().toUpperCase();
   if (s === 'S' || s === 'R' || s === 'C' || s === 'I' || s === 'T') {
-    return s as unknown as IntentLayer; // ← ここがポイント（型合わせ）
+    return s as unknown as IntentLayer;
   }
   return null;
 }
@@ -55,14 +55,38 @@ type DescentGate = Exclude<IrosMeta['descentGate'], null | undefined>;
 function normalizeDescentGate(raw: unknown): DescentGate | null {
   if (typeof raw !== 'string') return null;
   const s = raw.trim().toLowerCase();
-  if (s === 'open') return 'open' as DescentGate;
-  if (s === 'closed') return 'closed' as DescentGate;
+
+  // MemoryState（memoryState.ts）側：'closed' | 'offered' | 'accepted'
+  if (s === 'closed' || s === 'offered' || s === 'accepted') return s as unknown as DescentGate;
+
+  // 互換：旧 'open' が来たら offered として扱う（必要なら）
+  if (s === 'open') return 'offered' as unknown as DescentGate;
+
+  return null;
+}
+
+// ★ 追加：intentAnchor（SUNなど）正規化
+function normalizeIntentAnchorKey(raw: unknown): string | null {
+  if (raw == null) return null;
+
+  // string: 'SUN'
+  if (typeof raw === 'string') {
+    const s = raw.trim();
+    return s.length ? s : null;
+  }
+
+  // object: { key:'SUN' } or { intent_anchor:{key:'SUN'} } etc.
+  if (typeof raw === 'object') {
+    const k = (raw as any).key;
+    if (typeof k === 'string' && k.trim().length) return k.trim();
+  }
+
   return null;
 }
 
 /**
  * userCode ごとの MemoryState を読み込み、
- * baseMeta に depth / qCode / selfAcceptance / Y / H / phase / spin / intentLayer / descentGate を合成する。
+ * baseMeta に depth / qCode / selfAcceptance / Y / H / phase / spin / intentLayer / descentGate / intent_anchor を合成する。
  *
  * ✅ 注意：この関数は read only。保存は persist 側に集約。
  */
@@ -107,7 +131,7 @@ export async function loadBaseMetaFromMemoryState(args: {
           ? msAny.spin_step
           : null;
 
-    // ✅ 追加：intent_layer / intentLayer を拾う
+    // ✅ intent_layer / intentLayer を拾う
     const msIntentLayerRaw =
       typeof msAny?.intentLayer === 'string'
         ? msAny.intentLayer
@@ -115,12 +139,20 @@ export async function loadBaseMetaFromMemoryState(args: {
           ? msAny.intent_layer
           : null;
 
-    // ✅ 追加：descentGate / descent_gate を拾う
+    // ✅ descentGate / descent_gate を拾う
     const msDescentGateRaw =
       typeof msAny?.descentGate === 'string'
         ? msAny.descentGate
         : typeof msAny?.descent_gate === 'string'
           ? msAny.descent_gate
+          : null;
+
+    // ✅ intentAnchor（memoryState.ts で intentAnchor に詰めてる前提）
+    const msIntentAnchorRaw =
+      msAny?.intentAnchor != null
+        ? msAny.intentAnchor
+        : msAny?.intent_anchor != null
+          ? msAny.intent_anchor
           : null;
 
     // ★ 正規化（IrosMeta の型に合わせる）
@@ -130,10 +162,13 @@ export async function loadBaseMetaFromMemoryState(args: {
     const normalizedIntentLayer = normalizeIntentLayer(msIntentLayerRaw);
     const normalizedDescentGate = normalizeDescentGate(msDescentGateRaw);
 
+    const intentAnchorKey = normalizeIntentAnchorKey(msIntentAnchorRaw);
+
     if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
-      console.log('[IROS/STATE] loaded MemoryState', {
+      console.log('[IROS/STATE] loaded MemoryState (orchestratorState)', {
         userCode,
         hasMemory: !!memoryState,
+        intentAnchor: intentAnchorKey,
         depthStage: memoryState?.depthStage ?? null,
         qPrimary: memoryState?.qPrimary ?? null,
         selfAcceptance: memoryState?.selfAcceptance ?? null,
@@ -168,35 +203,42 @@ export async function loadBaseMetaFromMemoryState(args: {
           ? { qCode: memoryState.qPrimary as QCode }
           : {}),
 
-      // ✅ intentLayer：baseMeta が無いときだけ補完（正規化済み）
+      // ✅ intentLayer：baseMeta が無いときだけ補完
       ...(!(mergedBaseMeta as any)?.intentLayer && normalizedIntentLayer
         ? { intentLayer: normalizedIntentLayer }
         : {}),
 
-      // phase / spin：baseMeta 側に無いときだけ補完（正規化済み）
+      // phase / spin：baseMeta 側に無いときだけ補完
       ...(!(mergedBaseMeta as any)?.phase && normalizedPhase ? { phase: normalizedPhase } : {}),
-      ...(!(mergedBaseMeta as any)?.spinLoop && normalizedSpinLoop
+      ...metaMissing((mergedBaseMeta as any)?.spinLoop) && normalizedSpinLoop
         ? { spinLoop: normalizedSpinLoop }
-        : {}),
+        : {},
       ...(typeof (mergedBaseMeta as any)?.spinStep === 'number'
         ? {}
         : normalizedSpinStep !== null
           ? { spinStep: normalizedSpinStep }
           : {}),
 
-      // ✅ descentGate：baseMeta 側に無いときだけ補完（正規化済み）
+      // ✅ descentGate：baseMeta 側に無いときだけ補完
       ...(!(mergedBaseMeta as any)?.descentGate && normalizedDescentGate
         ? { descentGate: normalizedDescentGate }
         : {}),
 
-      // ✅ rotationState：下流の取りこぼし防止（hasRotationState を true にする橋渡し）
+      // ✅ intent_anchor：baseMeta に無いときだけ補完（LLM/IT用）
+      ...(!(mergedBaseMeta as any)?.intent_anchor && intentAnchorKey
+        ? { intent_anchor: { key: intentAnchorKey } as any }
+        : {}),
+      ...(!(mergedBaseMeta as any)?.intent_anchor_key && intentAnchorKey
+        ? { intent_anchor_key: intentAnchorKey as any }
+        : {}),
+
+      // ✅ rotationState：下流取りこぼし防止
       ...(typeof (mergedBaseMeta as any)?.rotationState === 'object' &&
       (mergedBaseMeta as any).rotationState
         ? {}
         : {
             rotationState: {
-              spinLoop:
-                (mergedBaseMeta as any)?.spinLoop ?? normalizedSpinLoop ?? null,
+              spinLoop: (mergedBaseMeta as any)?.spinLoop ?? normalizedSpinLoop ?? null,
               spinStep:
                 typeof (mergedBaseMeta as any)?.spinStep === 'number'
                   ? (mergedBaseMeta as any).spinStep
@@ -222,6 +264,10 @@ export async function loadBaseMetaFromMemoryState(args: {
   }
 
   return { mergedBaseMeta, memoryState };
+}
+
+function metaMissing(v: any) {
+  return v == null || (typeof v === 'string' && v.trim().length === 0);
 }
 
 /**

@@ -63,6 +63,8 @@ spiral, vortex, hard radial, sunburst, flame, water, leaf, cloud
       ],
       temperature: 0.45,
       max_tokens: 900,
+      purpose: 'judge',
+
     });
 
     // ===== Sofia の返答を JSON.parse =====

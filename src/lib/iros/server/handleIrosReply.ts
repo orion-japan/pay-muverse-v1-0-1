@@ -7,8 +7,7 @@
 // - ここは「判断・meta確定・補助テーブル更新（Q/anchor/state/unified）」だけ
 // - persistAssistantMessage は import もしない / 呼ばない
 
-import OpenAI from 'openai';
-
+import { chatComplete, type ChatMessage } from '@/lib/llm/chatComplete'; // ✅ 追加
 import type { IrosStyle } from '@/lib/iros/system';
 import type { RememberScopeKind } from '@/lib/iros/remember/resolveRememberBundle';
 import type { IrosUserProfileRow } from './loadUserProfile';
@@ -701,24 +700,33 @@ function ensureMetaFilled(args: { meta: any; ctx: any; orch: any }): any {
 }
 
 /* =========================================================
-   Micro Writer: generator（同じOpenAIで短文だけ作る）
+   Micro Writer: generator（短文だけ作る）
+   - ✅ OpenAI直呼び禁止
+   - ✅ chatComplete に統一
 ========================================================= */
 
 const microGenerate: MicroWriterGenerate = async (args) => {
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-  const res = await client.chat.completions.create({
-    model: IROS_MODEL,
-    messages: [
+  try {
+    const messages: ChatMessage[] = [
       { role: 'system', content: String(args.system ?? '') },
       { role: 'user', content: String(args.prompt ?? '') },
-    ],
-    temperature: typeof args.temperature === 'number' ? args.temperature : 0.6,
-    max_tokens: typeof args.maxTokens === 'number' ? args.maxTokens : 140,
-  });
+    ];
 
-  return res.choices?.[0]?.message?.content ?? '';
+    const out = await chatComplete({
+      purpose: 'writer', // ✅ micro は writer 扱い（短文だが “生成”）
+      model: IROS_MODEL,
+      messages,
+      temperature: typeof args.temperature === 'number' ? args.temperature : 0.6,
+      max_tokens: typeof args.maxTokens === 'number' ? args.maxTokens : 140,
+    });
+
+    return String(out ?? '').trim();
+  } catch (e) {
+    console.warn('[IROS/MicroWriter][llm] failed', e);
+    return '';
+  }
 };
+
 
 /* =========================================================
    FORWARD fallback（テンプレ臭を消す：seed + userText で揺らす）
@@ -904,8 +912,14 @@ function runLlmGate(args: {
     } as any);
 
     writeLlmGateToMeta(metaForSave, probe.patch);
-    logLlmGate(tag, { conversationId, userCode, patch: probe.patch });
 
+    // ✅ decision を渡す
+    logLlmGate(tag, {
+      conversationId,
+      userCode,
+      patch: probe.patch,
+      decision: probe.decision,
+    });
     // ✅ resolvedText は decision 側が正（patchではない）
     const resolvedTextRaw = (probe.decision as any)?.resolvedText;
     const resolvedText =
@@ -1518,63 +1532,144 @@ export async function handleIrosReply(
     } catch (e) {
       console.warn('[IROS/Reply] SpeechAct stamp failed', e);
     }
+// =========================================================
+// ✅ LLM Gate PROBE（ここは “刻む＋seed注入”）
+// - resolvedText を本文に採用してよいのは「SKIP系」だけ（維持）
+// - ✅ CALL_LLM のときは resolvedText を “LLM rewrite seed” として meta.extra に必ず渡す
+// =========================================================
+try {
+  // ✅ out.text は見ない（ここで拾うと “本文がある扱い” になって LLM が負ける）
+  const assistantTextNow = String(out?.assistantText ?? out?.content ?? '').trim();
 
-    // =========================================================
-    // ✅ LLM Gate PROBE（ここは “刻むだけ”）+ resolvedText採用（空のときだけ）
-    // - 重複ブロックは削除（ここ1箇所だけ）
-    // =========================================================
-    try {
-      const assistantTextNow = String(out?.assistantText ?? out?.content ?? out?.text ?? '').trim();
-      const allowLLM_final =
-      typeof out?.metaForSave?.speechAllowLLM === 'boolean'
-        ? out.metaForSave.speechAllowLLM
-        : true;
+  const allowLLM_final =
+    typeof out?.metaForSave?.speechAllowLLM === 'boolean'
+      ? out.metaForSave.speechAllowLLM
+      : true;
 
-      const metaForCandidate =
-        (orch as any)?.result?.meta ??
-        (orch as any)?.meta ??
-        null;
+  const metaForCandidate =
+    (orch as any)?.result?.meta ??
+    (orch as any)?.meta ??
+    null;
 
-      if ((out.metaForSave as any)?.slotPlanLen == null) {
-        const n = inferSlotPlanLen(metaForCandidate ?? out.metaForSave);
-        if (typeof n === 'number') (out.metaForSave as any).slotPlanLen = n;
+  if ((out.metaForSave as any)?.slotPlanLen == null) {
+    const n = inferSlotPlanLen(metaForCandidate ?? out.metaForSave);
+    if (typeof n === 'number') (out.metaForSave as any).slotPlanLen = n;
+  }
+
+  const gate = runLlmGate({
+    tag: 'PROBE',
+    conversationId,
+    userCode,
+    metaForSave: out.metaForSave,
+    metaForCandidate,
+    allowLLM_final,
+    assistantTextNow, // ✅ assistantText/content のみ
+  });
+
+  // ✅ resolvedText を本文に採用するのは SKIP 系のときだけ
+  const isSkip =
+    gate?.llmEntry === 'SKIP_POLICY' ||
+    gate?.llmEntry === 'SKIP_SILENCE' ||
+    gate?.llmEntry === 'SKIP_SLOTPLAN';
+
+  // ---------------------------------------------------------
+  // (1) SKIP系：本文が空のときだけ resolvedText を採用（現状維持）
+  // ---------------------------------------------------------
+  if (
+    isSkip &&
+    String(out?.assistantText ?? out?.content ?? '').trim().length === 0 &&
+    gate.resolvedText
+  ) {
+    out.content = gate.resolvedText;
+    out.assistantText = gate.resolvedText;
+
+    out.metaForSave = out.metaForSave ?? {};
+    out.metaForSave.fallbackApplied = 'LLM_GATE_RESOLVED_TEXT_APPLIED';
+    (out.metaForSave as any).fallbackLen = gate.resolvedText.length;
+
+    out.metaForSave.extra = out.metaForSave.extra ?? {};
+    (out.metaForSave.extra as any).rawTextFromModel = gate.resolvedText;
+
+    console.warn('[IROS/Reply][patch] llmGate resolvedText applied', {
+      conversationId,
+      userCode,
+      len: gate.resolvedText.length,
+      llmEntry: gate.llmEntry,
+    });
+  }
+
+  // ---------------------------------------------------------
+  // (2) seed注入：SCAFFOLDのときだけ “LLM rewrite seed” を meta.extra に注入
+  // - FINALは「本文採用」側に寄せるので、ここでseed運用にしない
+  // ---------------------------------------------------------
+  {
+    out.metaForSave = out.metaForSave ?? {};
+    out.metaForSave.extra = out.metaForSave.extra ?? {};
+    const ex: any = out.metaForSave.extra;
+
+    const policy = String((out.metaForSave?.framePlan as any)?.slotPlanPolicy ?? '')
+      .toUpperCase();
+    const isScaffold =
+      ex?.finalTextPolicy === 'SLOTPLAN_SEED_SCAFFOLD' || policy === 'SCAFFOLD';
+
+    // ✅ SCAFFOLDだけ seed を注入（CALL_LLM & resolvedText がある場合）
+    if (isScaffold && gate?.llmEntry === 'CALL_LLM' && gate.resolvedText) {
+      if (ex.llmRewriteSeed == null || String(ex.llmRewriteSeed).trim().length === 0) {
+        ex.llmRewriteSeed = gate.resolvedText;
+        ex.llmRewriteSeedFrom = 'llmGate';
+        ex.llmRewriteSeedAt = new Date().toISOString();
       }
+    }
+  }
 
-      const gate = runLlmGate({
-        tag: 'PROBE',
+  // =========================================================
+  // ✅ PDF 取締（最重要）
+  // - SCAFFOLD は本文にしない（seed専用）
+  // - FINAL では絶対に本文を空にしない（採用できるようにする）
+  // =========================================================
+  {
+    out.metaForSave = out.metaForSave ?? {};
+    out.metaForSave.extra = out.metaForSave.extra ?? {};
+    const ex: any = out.metaForSave.extra;
+
+    const policy = String((out.metaForSave?.framePlan as any)?.slotPlanPolicy ?? '')
+      .trim()
+      .toUpperCase();
+
+    const isScaffoldSeed =
+      ex?.finalTextPolicy === 'SLOTPLAN_SEED_SCAFFOLD' || policy === 'SCAFFOLD';
+
+    if (isScaffoldSeed) {
+      // ① SCAFFOLD時だけ本文を空に固定（seed→render-v2で出す）
+      out.assistantText = '';
+      (out as any).content = '';
+
+      // ② デバッグ用
+      ex.pdfScaffoldNoCommit = true;
+      ex.pdfScaffoldNoCommitAt = new Date().toISOString();
+      ex.pdfScaffoldNoCommitPolicy = policy || null;
+
+      const seed = String(ex?.slotPlanSeed ?? ex?.llmRewriteSeed ?? '').trim();
+
+      console.log('[SCAFFOLD][ENFORCE] policy=SCAFFOLD -> no commit (final text forced empty)', {
         conversationId,
         userCode,
-        metaForSave: out.metaForSave,
-        metaForCandidate,
-        allowLLM_final,
-        assistantTextNow,
+        policy,
+        finalTextPolicy: ex?.finalTextPolicy ?? null,
+        seedLen: seed.length,
+        seedHead: seed.slice(0, 60),
       });
-
-      // ✅ resolvedText は「本文が空のときだけ」採用
-      if (
-        String(out?.assistantText ?? out?.content ?? '').trim().length === 0 &&
-        gate.resolvedText
-      ) {
-        out.content = gate.resolvedText;
-        out.assistantText = gate.resolvedText;
-
-        out.metaForSave = out.metaForSave ?? {};
-        out.metaForSave.fallbackApplied = 'LLM_GATE_RESOLVED_TEXT_APPLIED';
-        (out.metaForSave as any).fallbackLen = gate.resolvedText.length;
-
-        out.metaForSave.extra = out.metaForSave.extra ?? {};
-        (out.metaForSave.extra as any).rawTextFromModel = gate.resolvedText;
-
-        console.warn('[IROS/Reply][patch] llmGate resolvedText applied', {
-          conversationId,
-          userCode,
-          len: gate.resolvedText.length,
-          llmEntry: gate.llmEntry,
-        });
-      }
-    } catch (e) {
-      console.warn('[IROS/LLM_GATE][PROBE] failed', e);
+    } else {
+      // ✅ FINAL：絶対に空にしない（もし空なら、ログで検出できるよう刻む）
+      ex.pdfFinalAllowsCommit = true;
+      ex.pdfFinalAllowsCommitAt = new Date().toISOString();
+      ex.pdfFinalAllowsCommitPolicy = policy || null;
     }
+  }
+} catch (e) {
+  console.warn('[IROS/LLM_GATE][PROBE] failed', e);
+}
+
 
     // ✅ rotation bridge（最低限・安定版：null に落とさない）
     try {
@@ -1723,63 +1818,86 @@ export async function handleIrosReply(
       out.metaForSave = sanitizeIntentAnchorMeta(out.metaForSave);
     } catch {}
 
-    /* ---------------------------
-       6) Persist (assistant保存はしない)
-    ---------------------------- */
+/* ---------------------------
+   6) Persist (assistant保存はしない)
+---------------------------- */
 
-    {
-      const ts = nowNs();
+{
+  const ts = nowNs();
 
-      const metaForSave = out.metaForSave ?? (orch as any)?.meta ?? null;
+  const metaForSave = out.metaForSave ?? (orch as any)?.meta ?? null;
 
-      const t1 = nowNs();
-      await persistQCodeSnapshotIfAny({
-        userCode,
-        conversationId,
-        requestedMode: ctx.requestedMode,
-        metaForSave,
-      });
-      t.persist_ms.q_snapshot_ms = msSince(t1);
+  const t1 = nowNs();
+  await persistQCodeSnapshotIfAny({
+    userCode,
+    conversationId,
+    requestedMode: ctx.requestedMode,
+    metaForSave,
+  });
+  t.persist_ms.q_snapshot_ms = msSince(t1);
 
-      const t2 = nowNs();
-      await persistIntentAnchorIfAny({
-        supabase,
-        userCode,
-        metaForSave,
-      });
-      t.persist_ms.intent_anchor_ms = msSince(t2);
+  const t2 = nowNs();
+  await persistIntentAnchorIfAny({
+    supabase,
+    userCode,
+    metaForSave,
+  });
+  t.persist_ms.intent_anchor_ms = msSince(t2);
 
-      const t3 = nowNs();
-      await persistMemoryStateIfAny({
-        supabase,
-        userCode,
-        userText: text,
-        metaForSave,
-      });
-      t.persist_ms.memory_state_ms = msSince(t3);
+  // =========================================================
+  // ✅ itTriggered は「boolean のときだけ渡す」
+  // - 不明(undefined/null)を false に丸めない
+  // - これで q_counts.it_triggered / it_triggered_true を壊さない
+  // =========================================================
+  const itTriggeredForPersist: boolean | undefined =
+    typeof (out as any)?.metaForSave?.itTriggered === 'boolean'
+      ? (out as any).metaForSave.itTriggered
+      : typeof (metaForSave as any)?.itTriggered === 'boolean'
+        ? (metaForSave as any).itTriggered
+        : typeof (orch as any)?.meta?.itTriggered === 'boolean'
+          ? (orch as any).meta.itTriggered
+          : undefined;
 
-      const t4 = nowNs();
-      await persistUnifiedAnalysisIfAny({
-        supabase,
-        userCode,
-        tenantId,
-        userText: text,
-        assistantText: out.assistantText,
-        metaForSave,
-        conversationId,
-      });
-      t.persist_ms.unified_analysis_ms = msSince(t4);
+  // ✅ 任意：q_counts も “あるときだけ” 渡す（persist側で最終mergeされる）
+  const qCountsForPersist: unknown | undefined =
+    (metaForSave as any)?.q_counts ??
+    (out as any)?.metaForSave?.q_counts ??
+    (orch as any)?.meta?.q_counts ??
+    undefined;
 
-      t.persist_ms.total_ms = msSince(ts);
-    }
+  const t3 = nowNs();
+  await persistMemoryStateIfAny({
+    supabase,
+    userCode,
+    userText: text,
+    metaForSave,
+    qCounts: qCountsForPersist,
+    itTriggered: itTriggeredForPersist, // ✅ ここが本命
+  });
+  t.persist_ms.memory_state_ms = msSince(t3);
 
-    const finalMode =
-      typeof (orch as any)?.mode === 'string'
-        ? (orch as any).mode
-        : (ctx as any).finalMode ?? mode;
+  const t4 = nowNs();
+  await persistUnifiedAnalysisIfAny({
+    supabase,
+    userCode,
+    tenantId,
+    userText: text,
+    assistantText: out.assistantText,
+    metaForSave,
+    conversationId,
+  });
+  t.persist_ms.unified_analysis_ms = msSince(t4);
 
-    t.finished_at = nowIso();
-    t.total_ms = msSince(t0);
+  t.persist_ms.total_ms = msSince(ts);
+}
+
+const finalMode =
+  typeof (orch as any)?.mode === 'string'
+    ? (orch as any).mode
+    : (ctx as any).finalMode ?? mode;
+
+t.finished_at = nowIso();
+t.total_ms = msSince(t0);
 
     // ✅ 最後に single-writer stamp を確定（念押し）
     out.metaForSave = stampSingleWriter(out.metaForSave);

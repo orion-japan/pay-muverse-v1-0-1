@@ -175,6 +175,53 @@ function shouldExcludeFromHistory(args: {
   return false;
 }
 
+/* =========================================================
+ * ✅ Phase3: q_code / depth_stage の読み取りを “列優先” に固定
+ * - column: q_code / depth_stage を最優先
+ * - meta: 古い行の救済だけ
+ * ========================================================= */
+
+const pickStr = (v: unknown): string | null => {
+  const s = String(v ?? '').trim();
+  return s ? s : null;
+};
+
+function pickQCode(row: any): string | null {
+  // ✅ column first
+  const col = pickStr(row?.q_code) ?? pickStr(row?.qCode) ?? null;
+  if (col) return col;
+
+  // ✅ meta fallback (old rows)
+  const m = row?.meta ?? null;
+  return (
+    pickStr(m?.q_code) ??
+    pickStr(m?.qCode) ??
+    pickStr(m?.qcode) ??
+    pickStr(m?.unified?.q?.current) ??
+    null
+  );
+}
+
+function pickDepthStage(row: any): string | null {
+  // ✅ column first
+  const col =
+    pickStr(row?.depth_stage) ??
+    pickStr(row?.depthStage) ??
+    pickStr(row?.depthstage) ??
+    null;
+  if (col) return col;
+
+  // ✅ meta fallback (old rows)
+  const m = row?.meta ?? null;
+  return (
+    pickStr(m?.depth_stage) ??
+    pickStr(m?.depthStage) ??
+    pickStr(m?.depthstage) ??
+    pickStr(m?.unified?.depth?.stage) ??
+    null
+  );
+}
+
 /// ✅ DB履歴ソース候補（存在するものだけ / v_iros_messages を最優先）
 const HISTORY_TABLES = [
   'v_iros_messages',
@@ -293,6 +340,11 @@ export async function loadRecentHistoryAcrossConversations(params: {
 
   return filtered.map((r) => {
     const content = normText(r.content ?? r.text);
+
+    // ✅ Phase3: 列優先で確定（metaは救済）
+    const q = pickQCode(r);
+    const ds = pickDepthStage(r);
+
     return {
       id: String(r.id ?? ''),
       conversation_id: String(r.conversation_id ?? ''),
@@ -300,8 +352,8 @@ export async function loadRecentHistoryAcrossConversations(params: {
       content,
       created_at: String(r.created_at ?? ''),
 
-      q_code: r.q_code ?? null,
-      depth_stage: r.depth_stage ?? null,
+      q_code: q,
+      depth_stage: ds,
       meta: r.meta ?? null,
 
       text: r.text ?? null,
@@ -346,8 +398,9 @@ export function mergeHistoryForTurn(params: {
     if (!key.endsWith('::') && !seen.has(key)) {
       seen.add(key);
 
-      const q = m.q_code ?? null;
-      const ds = m.depth_stage ?? null;
+      // ✅ Phase3: dbHistory 側も “列優先” で最終確定（meta救済）
+      const q = pickQCode(m);
+      const ds = pickDepthStage(m);
 
       out.push({
         id: m.id,

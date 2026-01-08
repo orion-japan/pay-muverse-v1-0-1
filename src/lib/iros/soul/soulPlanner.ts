@@ -1,37 +1,39 @@
 // src/lib/iros/soul/soulPlanner.ts
-import OpenAI from 'openai';
+import { chatComplete, type ChatMessage } from '@/lib/llm/chatComplete';
 
 export async function runSoulPlanner(args: {
   userText: string;
   history: unknown[];
   vector: any;
 }) {
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const model = process.env.IROS_MODEL ?? 'gpt-4o';
 
-  const res = await client.chat.completions.create({
-    model: process.env.IROS_MODEL ?? 'gpt-4o',
+  const payload = {
+    task: 'decide thinking plan',
+    userText: args.userText,
+    historySummary: Array.isArray(args.history) ? args.history.slice(-3) : [],
+    vector: args.vector,
+  };
+
+  const messages: ChatMessage[] = [
+    { role: 'system', content: SOUL_SYSTEM_PROMPT },
+    { role: 'user', content: JSON.stringify(payload) },
+  ];
+
+  // ✅ OpenAI出口はここ（chatComplete）だけ
+  const raw = await chatComplete({
+    purpose: 'soul',        // ✅ これを追加（必須）
+    model,
+    messages,
     temperature: 0,
-    messages: [
-      {
-        role: 'system',
-        content: SOUL_SYSTEM_PROMPT,
-      },
-      {
-        role: 'user',
-        content: JSON.stringify({
-          task: "decide thinking plan",
-          userText: args.userText,
-          historySummary: Array.isArray(args.history)
-            ? args.history.slice(-3)
-            : [],
-          vector: args.vector,
-        }),
-      },
-    ],
+    max_tokens: 256,
   });
 
+
+  // ✅ Soulは JSON 以外を許さない（parseできなければ null）
   try {
-    return JSON.parse(res.choices[0].message.content ?? '{}');
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
   } catch {
     return null;
   }

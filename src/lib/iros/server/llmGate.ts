@@ -4,14 +4,15 @@
 // 目的：
 // - 「LLMを呼ぶ資格（allowLLM_final）」と「実際に呼ぶか」を分離する
 // - 入口4通り（CALL_LLM / SKIP_SLOTPLAN / SKIP_SILENCE / SKIP_POLICY）を確定して meta に刻む
-// - slotPlan は「最終(FINAL)」と「足場(SCAFFOLD)」を分離し、SCAFFOLD は本文があっても LLM を呼べる
+// - slotPlan は「最終(FINAL)」と「足場(SCAFFOLD)」を分離する
 // - ここでは “OpenAIを叩かない”。叩く直前に finalize を呼ぶ運用
 //
-// ✅ 修正点（v2 fix）
-// - finalAssistantTextNow が空でも、slots から candidate を組み立てる
-// - SCAFFOLD + slotsOk でも「現時点本文が空」なら置換対象がないため SKIP_SLOTPLAN（LLM無駄打ち防止）
-// - ログの finalAssistantTextLen/Head は candidate を含めた “実質本文” を出す
-// - ✅ SKIP 系 decision に resolvedText を必ず載せ、呼び出し側が本文採用できるようにする
+// ✅ v2 方針（重要 / A案 正式）
+// - 「水増し」はしない
+// - LLM には必ず “下書き本文（effectiveText）” を渡す（CALL_LLM のとき）
+// - SCAFFOLD は “LLM自体を呼ばない”（混乱源「呼ぶのに採用しない」を構造で排除）
+// - SKIP 系 decision には resolvedText を必ず載せる
+// - CALL_LLM でも resolvedText を載せ、デバッグ/再利用に使えるようにする
 //
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -19,7 +20,7 @@ export type LlmGateDecision =
   | { entry: 'SKIP_POLICY'; reason: string; resolvedText?: string | null }
   | { entry: 'SKIP_SILENCE'; reason: string; resolvedText?: string | null }
   | { entry: 'SKIP_SLOTPLAN'; reason: string; resolvedText?: string | null }
-  | { entry: 'CALL_LLM'; reason: string; resolvedText?: null };
+  | { entry: 'CALL_LLM'; reason: string; resolvedText?: string | null };
 
 export type SlotPlanPolicy = 'FINAL' | 'SCAFFOLD' | 'UNKNOWN';
 
@@ -30,20 +31,17 @@ export type LlmGateProbeInput = {
   // 「資格」: handleIrosReply.ts で finalAllow を確定した値
   allowLLM_final: boolean;
 
-  // 周辺状況（推測しない。手元にある値だけ渡す）
-  brakeReason?: string | null; // ex.brakeReleaseReason 等
-  speechAct?: string | null; // SILENCE/FORWARD/COMMIT 等
-  finalAssistantTextNow?: string | null; // 現時点の本文（slotPlanが既にあるなら非空）
-  slotPlanLen?: number | null; // 計画スロット数
-  hasSlots?: boolean | null; // slotPlanの有無が分かるなら
+  // 周辺状況（推測しない）
+  brakeReason?: string | null;
+  speechAct?: string | null;
+  finalAssistantTextNow?: string | null;
+  slotPlanLen?: number | null;
+  hasSlots?: boolean | null;
 
-  // ✅ slotPlan の性質
-  // - FINAL: その本文を最終として返してよい（LLM不要）
-  // - SCAFFOLD: 会話を死なせない足場。本文があっても LLMで置換してよい
+  // slotPlan の性質
   slotPlanPolicy?: SlotPlanPolicy | null;
 
-  // ✅ 追加：slots から candidate を作るための meta（任意）
-  // - 呼び出し側で渡せるなら渡す（渡せないなら従来通り）
+  // slot から candidate を作るための meta
   meta?: any;
 };
 
@@ -57,20 +55,23 @@ export type LlmGateProbeOutput = {
     hasSlots: boolean | null;
     slotPlanPolicy: SlotPlanPolicy;
 
-    // ✅ ここは「実質本文（candidate含む）」の長さ/先頭に変更
+    // 実質本文（candidate含む）
     finalAssistantTextLen: number;
     finalAssistantTextHead: string;
 
     llmEntry: LlmGateDecision['entry'];
     llmSkipReason: string | null;
 
-    // ✅ デバッグ用（壊さないため任意）
+    // デバッグ用
     finalAssistantTextCandidateLen?: number | null;
     finalAssistantTextCandidateHead?: string | null;
   };
 };
 
-// 小さめ整形（ログ用）
+// ---------------------------------------------------------------------
+// utils
+// ---------------------------------------------------------------------
+
 function head(s: string, n = 48): string {
   const t = String(s ?? '').replace(/\s+/g, ' ').trim();
   return t.length <= n ? t : t.slice(0, n) + '…';
@@ -90,67 +91,124 @@ function normText(v: any): string {
     .trim();
 }
 
-// ✅ slots 抽出（metaの持ち方の揺れを吸収）
+// ---------------------------------------------------------------------
+// slots helpers
+// ---------------------------------------------------------------------
+
 function extractSlotsObj(meta: any): any | null {
   if (!meta || typeof meta !== 'object') return null;
 
-  // いま実際に slots が入り得る場所を優先順で拾う
   const candidates = [
-    meta?.framePlan?.slots, // ✅ まずここ（あなたのログの流れ的に最有力）
-    meta?.framePlan?.framePlan?.slots, // Orchestratorが二重に包んだ場合
-    meta?.framePlan?.slotPlan?.slots, // 旧/揺れ
-    meta?.slotPlan?.slots, // 旧/揺れ
-    meta?.slots, // 直下（古い形）
-    meta?.extra?.framePlan?.slots, // extra 側に入ってしまう揺れ対策
+    meta?.framePlan?.slots,
+    meta?.framePlan?.framePlan?.slots,
+    meta?.framePlan?.slotPlan?.slots,
+    meta?.slotPlan?.slots,
+    meta?.slots,
+    meta?.extra?.framePlan?.slots,
   ];
 
   for (const s of candidates) {
     if (!s) continue;
-
-    // array でも object でも buildTextFromSlots は処理できる（entries で回るため）
     if (Array.isArray(s) && s.length > 0) return s;
     if (typeof s === 'object' && Object.keys(s).length > 0) return s;
+  }
+  return null;
+}
+
+function buildTextFromSlots(slotsObj: any | null): string | null {
+  if (!slotsObj) return null;
+
+  // ✅ 両対応：object形式 / array形式
+  // - array: [{ key:'OBS', content:'...' }, ...]
+  // - object: { OBS:'...', SHIFT:'...', ... } または { core:{text:'...'} ... }
+
+  const ORDER = [
+    // structured
+    'OBS',
+    'SHIFT',
+    'NEXT',
+    'SAFE',
+    'INSIGHT',
+    // legacy / fallback
+    'core',
+    'add',
+    'one',
+    'two',
+    'three',
+    'close',
+    'ending',
+  ];
+
+  const pickText = (v: any): string => {
+    const t =
+      typeof v === 'string'
+        ? v
+        : typeof v?.text === 'string'
+          ? v.text
+          : typeof v?.content === 'string'
+            ? v.content
+            : typeof v?.value === 'string'
+              ? v.value
+              : typeof v?.message === 'string'
+                ? v.message
+                : typeof v?.out === 'string'
+                  ? v.out
+                  : '';
+    return normText(t);
+  };
+
+  // (1) Array slots
+  if (Array.isArray(slotsObj)) {
+    const items = slotsObj
+      .map((s: any) => {
+        const key = String(s?.key ?? s?.id ?? s?.slotId ?? s?.name ?? '').trim();
+        const text = pickText(s);
+        return { key, text };
+      })
+      .filter((x) => x.text.length > 0);
+
+    if (items.length === 0) return null;
+
+    // sort by ORDER
+    items.sort((a, b) => {
+      const ia = ORDER.indexOf(a.key);
+      const ib = ORDER.indexOf(b.key);
+      if (ia === -1 && ib === -1) return a.key.localeCompare(b.key);
+      if (ia === -1) return 1;
+      if (ib === -1) return -1;
+      return ia - ib;
+    });
+
+    const out = items.map((x) => x.text).join('\n');
+    return out.length ? out : null;
+  }
+
+  // (2) Object slots
+  if (typeof slotsObj === 'object') {
+    const keysAll = Object.keys(slotsObj);
+
+    const keys: string[] = [];
+    for (const k of ORDER) if (keysAll.includes(k)) keys.push(k);
+    for (const k of keysAll) if (!keys.includes(k)) keys.push(k);
+
+    const parts: string[] = [];
+    for (const k of keys) {
+      const v = (slotsObj as any)[k];
+      const s = pickText(v);
+      if (s) parts.push(s);
+    }
+
+    const out = parts.join('\n');
+    return out.length ? out : null;
   }
 
   return null;
 }
 
-function buildTextFromSlots(slotsObj: Record<string, any> | null): string | null {
-  if (!slotsObj) return null;
+// ---------------------------------------------------------------------
+// main
+// ---------------------------------------------------------------------
 
-  const preferred = ['core', 'add', 'one', 'two', 'three', 'close', 'ending'];
-  const keysAll = Object.keys(slotsObj);
-
-  const keys: string[] = [];
-  for (const k of preferred) if (keysAll.includes(k)) keys.push(k);
-  for (const k of keysAll) if (!keys.includes(k)) keys.push(k);
-
-  const parts: string[] = [];
-  for (const k of keys) {
-    const v = (slotsObj as any)[k];
-    if (!v) continue;
-
-    const t =
-      typeof v === 'string'
-        ? v
-        : typeof (v as any)?.text === 'string'
-          ? (v as any).text
-          : typeof (v as any)?.content === 'string'
-            ? (v as any).content
-            : '';
-
-    const s = normText(t);
-    if (s) parts.push(s);
-  }
-
-  const out = parts.join('\n');
-  return out.length ? out : null;
-}
-
-/**
- * PROBE: 「どの入口に行くつもりか」を確定して meta へ刻むための判定。
- * - ここでは LLM を叩かない
- */
 export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
   const {
     allowLLM_final,
@@ -168,22 +226,15 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
   const textNowRaw = normText(finalAssistantTextNow);
   const textNowLen = textNowRaw.length;
 
-  // ✅ candidate（slotPlanの足場本文）を組み立て
   const slotsObj = extractSlotsObj(meta);
   const candidateRaw = normText(buildTextFromSlots(slotsObj) ?? '');
   const candidateLen = candidateRaw.length;
 
-  // ✅ “実質本文” は textNow が優先。空なら candidate を採用。
+  // ✅ 実質本文：textNow 優先、なければ candidate
   const effectiveText = textNowLen > 0 ? textNowRaw : candidateRaw;
   const effectiveLen = effectiveText.length;
 
-  // (A) 資格なし → 100% SKIP_POLICY
-  if (!allowLLM_final) {
-    const decision: LlmGateDecision = {
-      entry: 'SKIP_POLICY',
-      reason: 'allowLLM_final=false',
-      resolvedText: effectiveText.length ? effectiveText : null,
-    };
+  const mkPatch = (decision: LlmGateDecision): LlmGateProbeOutput => {
     return {
       decision,
       patch: {
@@ -193,159 +244,126 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
         slotPlanLen,
         hasSlots,
         slotPlanPolicy: policy,
+
         finalAssistantTextLen: effectiveLen,
         finalAssistantTextHead: head(effectiveText),
+
         llmEntry: decision.entry,
-        llmSkipReason: decision.reason,
+        llmSkipReason: decision.entry === 'CALL_LLM' ? null : decision.reason,
+
         finalAssistantTextCandidateLen: candidateLen || null,
         finalAssistantTextCandidateHead: candidateLen ? head(candidateRaw) : null,
       },
     };
+  };
+
+  // (A) 資格なし
+  if (!allowLLM_final) {
+    return mkPatch({
+      entry: 'SKIP_POLICY',
+      reason: 'allowLLM_final=false',
+      resolvedText: effectiveLen ? effectiveText : null,
+    });
   }
 
-  // (B) 明示沈黙（例: Q1_SUPPRESS） → SKIP_SILENCE
+  // (B) 明示沈黙
   if (
     String(brakeReason ?? '') === 'Q1_SUPPRESS' ||
     String(speechAct ?? '').toUpperCase() === 'SILENCE'
   ) {
-    const decision: LlmGateDecision = {
+    return mkPatch({
       entry: 'SKIP_SILENCE',
       reason: 'brakeReason=Q1_SUPPRESS or speechAct=SILENCE',
-      resolvedText: effectiveText.length ? effectiveText : null,
-    };
-    return {
-      decision,
-      patch: {
-        allowLLM_final,
-        brakeReason,
-        speechAct,
-        slotPlanLen,
-        hasSlots,
-        slotPlanPolicy: policy,
-        finalAssistantTextLen: effectiveLen,
-        finalAssistantTextHead: head(effectiveText),
-        llmEntry: decision.entry,
-        llmSkipReason: decision.reason,
-        finalAssistantTextCandidateLen: candidateLen || null,
-        finalAssistantTextCandidateHead: candidateLen ? head(candidateRaw) : null,
-      },
-    };
+      resolvedText: effectiveLen ? effectiveText : null,
+    });
   }
 
-  // (C) slotPlan がある場合の扱い
   const slotsOk =
     (typeof slotPlanLen === 'number' && slotPlanLen > 0) || hasSlots === true;
 
-  // ✅ FINAL slotPlan は「最終本文」なので LLM不要 → SKIP_SLOTPLAN
-  // - textNow が空でも candidate が作れるなら “本文はある” 扱いにする
+  // (C) FINAL slotPlan → LLM不要（すでに本文がある）
   if (slotsOk && effectiveLen > 0 && policy === 'FINAL') {
-    const decision: LlmGateDecision = {
+    return mkPatch({
       entry: 'SKIP_SLOTPLAN',
-      reason: 'slotPlanPolicy=FINAL and produced non-empty text (effective)',
-      resolvedText: effectiveText.length ? effectiveText : null,
-    };
-    return {
-      decision,
-      patch: {
-        allowLLM_final,
-        brakeReason,
-        speechAct,
-        slotPlanLen,
-        hasSlots,
-        slotPlanPolicy: policy,
-        finalAssistantTextLen: effectiveLen,
-        finalAssistantTextHead: head(effectiveText),
-        llmEntry: decision.entry,
-        llmSkipReason: decision.reason,
-        finalAssistantTextCandidateLen: candidateLen || null,
-        finalAssistantTextCandidateHead: candidateLen ? head(candidateRaw) : null,
-      },
-    };
+      reason: 'slotPlanPolicy=FINAL and produced non-empty text',
+      resolvedText: effectiveText,
+    });
   }
 
-  // ✅ SCAFFOLD slotPlan は「足場」。
-  // - テンプレ固定を防ぐため、SCAFFOLD は「常に」CALL_LLM にする。
+  // (D) ✅ SCAFFOLD（正式/A案）：LLM自体を呼ばない
+  // - “呼ぶのに採用しない” という混乱の温床を構造的に消す
+  // - SCAFFOLD は slotPlan/seed を render-v2 側で表示する
   if (slotsOk && policy === 'SCAFFOLD') {
-    const decision: LlmGateDecision = {
-      entry: 'CALL_LLM',
-      reason: 'slotPlanPolicy=SCAFFOLD (always generate to avoid template lock)',
-      resolvedText: null,
-    };
-
-    return {
-      decision,
-      patch: {
-        allowLLM_final,
-        brakeReason,
-        speechAct,
-        slotPlanLen,
-        hasSlots,
-        slotPlanPolicy: policy,
-        finalAssistantTextLen: effectiveLen,
-        finalAssistantTextHead: head(effectiveText),
-        llmEntry: decision.entry,
-        llmSkipReason: null,
-        finalAssistantTextCandidateLen: candidateLen || null,
-        finalAssistantTextCandidateHead: candidateLen ? head(candidateRaw) : null,
-      },
-    };
+    return mkPatch({
+      entry: 'SKIP_SLOTPLAN',
+      reason: 'SCAFFOLD_POLICY__NO_LLM',
+      resolvedText: effectiveLen ? effectiveText : null,
+    });
   }
 
-  // (D) 資格あり + 沈黙ではない + slotPlanが本文を作れてない/不明 → CALL_LLM
-  const decision: LlmGateDecision = {
-    entry: 'CALL_LLM',
-    reason: 'eligible and no FINAL slotPlan output',
-    resolvedText: null,
-  };
+  // (E) slots があるが policy が UNKNOWN：守りで CALL_LLM（seed を渡す）
+  if (slotsOk) {
+    return mkPatch({
+      entry: 'CALL_LLM',
+      reason: 'slotsOk but slotPlanPolicy=UNKNOWN (fallback to CALL_LLM)',
+      resolvedText: effectiveLen ? effectiveText : null,
+    });
+  }
 
-  return {
-    decision,
-    patch: {
-      allowLLM_final,
-      brakeReason,
-      speechAct,
-      slotPlanLen,
-      hasSlots,
-      slotPlanPolicy: policy,
-      finalAssistantTextLen: effectiveLen,
-      finalAssistantTextHead: head(effectiveText),
-      llmEntry: decision.entry,
-      llmSkipReason: null,
-      finalAssistantTextCandidateLen: candidateLen || null,
-      finalAssistantTextCandidateHead: candidateLen ? head(candidateRaw) : null,
-    },
-  };
+  // (F) slots が無いが本文がある：そのまま返す（LLM不要）
+  if (effectiveLen > 0) {
+    return mkPatch({
+      entry: 'SKIP_SLOTPLAN',
+      reason: 'no slots but have non-empty text',
+      resolvedText: effectiveText,
+    });
+  }
+
+  // (G) 何も無い：最後の砦として CALL_LLM（空seedでも呼ぶ）
+  return mkPatch({
+    entry: 'CALL_LLM',
+    reason: 'no slots and empty text (last resort)',
+    resolvedText: null,
+  });
 }
 
-/**
- * meta.extra に gate 情報を刻む（必ず上書き）
- * - out.metaForSave.extra.llmGate を単一ソースにする
- */
+// ---------------------------------------------------------------------
+// meta write
+// ---------------------------------------------------------------------
+
 export function writeLlmGateToMeta(
   metaForSave: any,
   patch: LlmGateProbeOutput['patch'],
 ): void {
   if (!metaForSave || typeof metaForSave !== 'object') return;
   metaForSave.extra = metaForSave.extra ?? {};
+
+  // ✅ 既存：ネスト（詳細）
   (metaForSave.extra as any).llmGate = {
     ...(metaForSave.extra as any).llmGate,
     ...patch,
     at: new Date().toISOString(),
   };
+
+  // ✅ 追加：直下ミラー（DB検索用 / SQLをそのまま活かす）
+  (metaForSave.extra as any).llmEntry = patch.llmEntry;
+  (metaForSave.extra as any).llmSkipReason = patch.llmSkipReason;
 }
 
-/**
- * ログ（必ず出す）
- */
+// ---------------------------------------------------------------------
+// logging
+// ---------------------------------------------------------------------
+
 export function logLlmGate(
   tag: 'PROBE' | 'FINAL',
   args: {
     conversationId: string;
     userCode: string;
     patch: LlmGateProbeOutput['patch'];
+    decision?: LlmGateDecision;
   },
 ): void {
-  const { conversationId, userCode, patch } = args;
+  const { conversationId, userCode, patch, decision } = args;
   console.log(`[IROS/LLM_GATE][${tag}]`, {
     conversationId,
     userCode,
@@ -359,9 +377,10 @@ export function logLlmGate(
     slotPlanPolicy: patch.slotPlanPolicy,
     finalAssistantTextLen: patch.finalAssistantTextLen,
     finalAssistantTextHead: patch.finalAssistantTextHead,
-
-    // ✅ 追加（見たい時だけ）
     finalAssistantTextCandidateLen: patch.finalAssistantTextCandidateLen ?? null,
     finalAssistantTextCandidateHead: patch.finalAssistantTextCandidateHead ?? null,
+    resolvedTextLen: decision?.resolvedText
+      ? String(decision.resolvedText).length
+      : null,
   });
 }
