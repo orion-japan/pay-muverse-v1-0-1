@@ -1,18 +1,19 @@
 // src/lib/iros/language/rephraseEngine.ts
-// iros — Rephrase Engine (slot-preserving)
+// iros — Rephrase/Generate Engine (slot-preserving)
 //
 // 目的：
-// - FINALでも「表現だけ」をLLMに一度だけ貸す
-// - slotの key と順序は絶対に崩さない
+// - FINALでも「文章そのもの」をLLMに一度だけ生成させる
+// - slot の key と順序は絶対に崩さない
 // - ズレた出力は黙って破棄（null）
 // - render直前に1箇所だけ挿す想定
 //
 // 重要：
 // - ここは “判断しない / 意味を足さない”
-// - ただし「長すぎる引用を短くする」「テンプレ句を自然にする」は許可（意味を変えない範囲）
+// - ただし「テンプレ句を避ける」「引用を短くする」「自然会話にする」は許可（意味を変えない範囲）
 //
 // NOTE:
-// - 本当にテンプレ脱却したいなら、上流の slot本文（normalChat.ts 等）を可変にするのが本命。
+// - 「本当にテンプレ脱却」= 上流 slot 本文を可変にするのが本命だが、
+//   当面はこの層で “文章そのものを生成” してテンプレ感を消す。
 
 import { chatComplete, type ChatMessage } from '@/lib/llm/chatComplete';
 
@@ -61,7 +62,7 @@ function stableOrderKeys(keys: string[]) {
 
 /**
  * extractSlotBlocks() と同じ探索範囲から「key付き slots」を抽出する。
- * ※ここでは key を落とさない（rephraseに必須）。
+ * ※ここでは key を落とさない（LLM生成に必須）。
  */
 export function extractSlotsForRephrase(extra: any): ExtractedSlots {
   const framePlan =
@@ -110,7 +111,7 @@ export function extractSlotsForRephrase(extra: any): ExtractedSlots {
 type RephraseOptions = {
   model: string;
   temperature?: number;
-  maxLinesHint?: number; // “逸脱しない”ための補助
+  maxLinesHint?: number; // 全体行数の目安
 };
 
 type RephraseResult =
@@ -134,34 +135,69 @@ type RephraseResult =
       };
     };
 
-function buildRephraseSystem(opts?: { maxLinesHint?: number }) {
+function envFlagEnabled(raw: unknown, defaultEnabled: boolean) {
+  const v = String(raw ?? '').trim().toLowerCase();
+  if (!v) return defaultEnabled;
+  if (['0', 'false', 'off', 'no', 'disabled'].includes(v)) return false;
+  if (['1', 'true', 'on', 'yes', 'enabled'].includes(v)) return true;
+  return defaultEnabled;
+}
+
+/**
+ * OBSスロット内の「ユーザー文引用」を拾う
+ * 例：いま出ている言葉：「....」
+ */
+function extractQuotedUserTextFromObs(obsText: string): string | null {
+  const t = norm(obsText);
+  if (!t) return null;
+
+  const m1 = t.match(/「([^」]{1,600})」/);
+  if (m1?.[1]) return norm(m1[1]);
+
+  const m2 = t.match(/"([^"]{1,600})"/);
+  if (m2?.[1]) return norm(m2[1]);
+
+  return null;
+}
+
+function buildGenerateSystem(opts?: { maxLinesHint?: number }) {
   const maxLinesHint = typeof opts?.maxLinesHint === 'number' ? opts!.maxLinesHint : null;
 
   return [
-    'あなたの役割は「表現の整形（rephrase）」だけです。判断・助言・新しい意味の追加は禁止。',
+    'あなたは「理解された」と感じる文章に整える“表現担当”です。',
+    'ただし、判断・助言・新しい意味の追加は禁止されています。',
     '',
-    '入力slotsは「意味・順序・役割が確定済み」です。',
-    'あなたは“内容の追加”をせずに、読みやすい日本語へ整えてください。',
+    '入力には slot（OBS / SHIFT / NEXT / SAFE …）のキーと、元テキストが渡されます。',
+    'あなたは元テキストを言い換えるのではなく、',
+    '同じ意味・同じ役割を保ったまま、自然な会話文として新規に書き起こしてください。',
     '',
-    '【絶対禁止】',
-    '- 新しい助言・評価・説教・一般論・抽象化の追加',
-    '- 因果の捏造（だから/つまり/本当は等で意味を足す）',
-    '- スロットの増減、順序変更、キーの変更',
+    '【絶対条件】',
+    '- スロットの数・順序・キーは完全一致させる（増減・並び替え・キー変更は禁止）',
+    '- 事実・意味の追加は禁止（推測・一般論・評価・説教・診断・因果の捏造をしない）',
+    '- NEXT以外で新しい行動提案をしない',
     '',
-    '【強い許可（重要）】',
-    '- テンプレ感を減らすため、固定句（例：「受け取った。」「いま出ている言葉：」等）は自然な言い回しに置換してよい',
-    '- 長すぎる引用（「現在の状況：...」のような丸ごと貼り付け）は “意味を変えず短く” 圧縮してよい',
-    '- 同じ内容の繰り返しは1回にまとめてよい（意味は保持）',
+    '【テンプレ禁止（最重要）】',
+    '- 次のような決まり文句をそのまま使わない：',
+    '  「受け取った」「いま出ている言葉」「いまの一点だけ」',
+    '  「次は一手だけ」「迷いを増やさない」「呼吸を戻す」など',
+    '- 同じ意味でも、毎回必ず別の自然な言い回しにする',
     '',
-    '【守ること】',
-    '- 各slotは「元の役割」を保つ（OBS=観測、SHIFT=一点、NEXT=一手、SAFE=安全）',
-    '- 口調は自然な会話文。過剰に丁寧/硬くしない。',
+    '【スロット役割（厳守）】',
+    '- OBS：ユーザー発言の要点を“観測として”短く写す（1〜2文）',
+    '- SHIFT：いま残す焦点を1文で示す',
+    '- NEXT：行動を1つに落とす（誰に／いつ／何を）。不足は空欄のまま明示してよい',
+    '- SAFE：圧を下げる一言。評価しない',
+    '',
+    '【文章スタイル】',
+    '- 日本語の自然な会話',
+    '- 説明しすぎないが、抽象にも逃げない',
+    '- 記号（🪔など）へのこだわりは不要',
     '',
     '【出力形式（厳守）】',
     'JSONのみを出力してください。',
-    '{ "slots": [ { "key": "<入力と同じ>", "text": "<言い換え文>" }, ... ] }',
+    '{ "slots": [ { "key": "<入力と同じ>", "text": "<生成文>" }, ... ] }',
     '',
-    maxLinesHint != null ? `補助制約：全体の行数は概ね ${maxLinesHint} 行を超えないこと。` : '',
+    maxLinesHint != null ? `補助制約：全体の行数は概ね ${maxLinesHint} 行以内。` : '',
   ]
     .filter(Boolean)
     .join('\n');
@@ -171,14 +207,12 @@ function safeJsonParse(raw: string): any | null {
   const t = norm(raw);
   if (!t) return null;
 
-  // 先頭/末尾のゴミを落とす最小処理（LLMが余計な前置きをした場合）
   const firstBrace = t.indexOf('{');
   const lastBrace = t.lastIndexOf('}');
   if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) return null;
 
-  const sliced = t.slice(firstBrace, lastBrace + 1);
   try {
-    return JSON.parse(sliced);
+    return JSON.parse(t.slice(firstBrace, lastBrace + 1));
   } catch {
     return null;
   }
@@ -196,20 +230,17 @@ function validateOut(inKeys: string[], out: any): Slot[] | null {
     outSlots.push({ key, text });
   }
 
-  // キー集合の一致（完全一致・順序一致）
-  const outKeys = outSlots.map((x) => x.key);
-  if (outKeys.length !== inKeys.length) return null;
+  if (outSlots.length !== inKeys.length) return null;
 
   for (let i = 0; i < inKeys.length; i++) {
-    if (outKeys[i] !== inKeys[i]) return null;
+    if (outSlots[i].key !== inKeys[i]) return null;
   }
 
   return outSlots;
 }
 
 /**
- * FINAL用：slotを保ったまま表現だけ rephrase する。
- * - 失敗したら ok:false で返す（呼び元が黙って元slotを採用すればよい）
+ * FINAL用：slotを保ったまま “文章そのもの” をLLMに生成させる。
  */
 export async function rephraseSlotsFinal(
   extracted: ExtractedSlots,
@@ -223,19 +254,13 @@ export async function rephraseSlotsFinal(
     };
   }
 
-  // =========================================================
-  // ✅ rephrase final を env で即OFF（single switch）
-  // - IROS_REPHRASE_FINAL_ENABLED が '1' / 'true' のときだけ有効
-  // - OFFのときは ok:false を返し、呼び元が元slotを採用すればよい
-  // =========================================================
   {
     const rawFlag = process.env.IROS_REPHRASE_FINAL_ENABLED;
-    const enabled = rawFlag === '1' || rawFlag === 'true';
+    const enabled = envFlagEnabled(rawFlag, true);
 
     console.log('[IROS/REPHRASE_FLAG]', { raw: rawFlag, enabled });
 
     if (!enabled) {
-      console.log('[IROS/REPHRASE_FLAG] skipped');
       return {
         ok: false,
         reason: 'REPHRASE_DISABLED_BY_ENV',
@@ -246,8 +271,13 @@ export async function rephraseSlotsFinal(
 
   const inKeys = extracted.keys;
 
-  const system = buildRephraseSystem({ maxLinesHint: opts.maxLinesHint });
+  const obs = extracted.slots.find((s) => s.key === 'OBS')?.text ?? '';
+  const userQuoted = extractQuotedUserTextFromObs(obs);
+
+  const system = buildGenerateSystem({ maxLinesHint: opts.maxLinesHint });
+
   const payload = {
+    user_said: userQuoted,
     slots: extracted.slots.map((s) => ({ key: s.key, text: s.text })),
   };
 
@@ -257,11 +287,10 @@ export async function rephraseSlotsFinal(
   ];
 
   const raw = await chatComplete({
-    // いまは既存の型に合わせて reply のまま（必要なら後で 'rephrase' を追加）
-    purpose: 'reply',
+    purpose: 'writer',
     model: opts.model,
     messages,
-    temperature: typeof opts.temperature === 'number' ? opts.temperature : 0.2,
+    temperature: typeof opts.temperature === 'number' ? opts.temperature : 0.55,
     response_format: { type: 'json_object' },
   } as any);
 
