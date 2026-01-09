@@ -255,79 +255,119 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
     });
   }, []);
 
-  const sendMessage = useCallback(
-    async (text: string, mode: string = 'auto'): Promise<SendResult> => {
-      const cid = activeConversationIdRef.current;
-      if (!cid) return null;
+ // ✅ IrosChatContext.tsx 内（sendMessage の直前あたり）に追加
 
-      setLoading(true);
+function normalizeForSend(raw: string): { text: string; blockedReason: string | null } {
+  const s = String(raw ?? '');
 
-      const userMsg: IrosMessage = {
-        id: crypto.randomUUID(),
+  // NB: ZWSP / BOM / ㅤ(ハングルフィラー) を除去
+  const stripped = s
+    .replace(/\u200B/g, '') // ZWSP
+    .replace(/\uFEFF/g, '') // BOM
+    .replace(/\u3164/g, '') // ㅤ
+    .trim();
+
+  if (!stripped) return { text: '', blockedReason: 'empty' };
+
+  // 省略記号だけ
+  if (stripped === '…' || stripped === '……' || /^…+$/.test(stripped))
+    return { text: '', blockedReason: 'ellipsis' };
+
+  // ドットだけ
+  if (stripped === '...' || /^\.{3,}$/.test(stripped))
+    return { text: '', blockedReason: 'dots' };
+
+  return { text: stripped, blockedReason: null };
+}
+
+// ✅ sendMessage を差し替え（この1箇所だけ）
+const sendMessage = useCallback(
+  async (text: string, mode: string = 'auto'): Promise<SendResult> => {
+    const cid = activeConversationIdRef.current;
+    if (!cid) return null;
+
+    // ✅ 最終防衛（ここで止める）
+    const norm = normalizeForSend(text);
+    if (norm.blockedReason) {
+      console.warn('[IROS] sendMessage blocked', {
+        reason: norm.blockedReason,
+        head: String(text ?? '').slice(0, 40),
+        cid,
+      });
+
+      // ChatInput が理由表示に使えるよう返す（UIはメッセージ追加しない）
+      return {
+        assistant: '',
+        meta: { blocked: true, reason: norm.blockedReason },
+      };
+    }
+
+    setLoading(true);
+
+    const safeText = norm.text;
+
+    const userMsg: IrosMessage = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      text: safeText,
+      content: safeText,
+      created_at: new Date().toISOString(),
+      ts: Date.now(),
+    } as IrosMessage;
+
+    try {
+      // ① user メッセージをローカルに即反映
+      setMessages((m) => [...m, userMsg]);
+
+      // DB に user メッセージ保存
+      await irosClient.postMessage({
+        conversationId: cid,
+        text: safeText,
         role: 'user',
-        text,
-        content: text,
-        created_at: new Date().toISOString(),
-        ts: Date.now(),
-      } as IrosMessage;
+      });
 
-      try {
-        // ① user メッセージをローカルに即反映
-        setMessages((m) => [...m, userMsg]);
+      // ✅ LLM に渡す history
+      const history = buildHistoryForLLM(
+        [...(messagesRef.current || []), userMsg],
+        10,
+      );
 
-        // DB に user メッセージ保存
-        await irosClient.postMessage({
-          conversationId: cid,
-          text,
-          role: 'user',
-        });
+      const r: any = await irosClient.replyAndStore({
+        conversationId: cid,
+        user_text: safeText,
+        mode,
+        style,
+        history,
+      } as any);
 
-        // ✅ LLM に渡す history を作る（直近10ペア=最大20件）
-        const history = buildHistoryForLLM(
-          [...(messagesRef.current || []), userMsg],
-          10,
-        );
+      const assistant = normalizeText(r?.assistant ?? '');
+      const meta = r?.meta ?? null;
 
-        // ② LLM 返信＋必要なら server 側保存
-        const r: any = await irosClient.replyAndStore({
-          conversationId: cid,
-          user_text: text,
-          mode,
-          style, // ★ 現在の style をサーバーに渡す
-          history, // ✅ 追加（body.history として送る）
-        } as any);
+      setMessages((m) => [
+        ...m,
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          text: assistant,
+          content: assistant,
+          created_at: new Date().toISOString(),
+          ts: Date.now(),
+          meta,
+        } as IrosMessage,
+      ]);
 
-        const assistant = normalizeText(r?.assistant ?? '');
-        const meta = r?.meta ?? null;
+      await reloadConversations();
+      return { assistant, meta: meta ?? undefined };
+    } catch (e) {
+      console.error('[IROS] sendMessage failed', e);
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  },
+  [reloadConversations, style],
+);
 
-        // ③ assistant をローカル state に反映
-        setMessages((m) => [
-          ...m,
-          {
-            id: crypto.randomUUID(),
-            role: 'assistant',
-            text: assistant,
-            content: assistant,
-            created_at: new Date().toISOString(),
-            ts: Date.now(),
-            meta,
-          } as IrosMessage,
-        ]);
-
-        // ④ 会話一覧の updated_at を更新
-        await reloadConversations();
-
-        // ⑤ ChatInput へ meta を返す（インジケータ用）
-        return { assistant, meta: meta ?? undefined };
-      } catch (e) {
-        console.error('[IROS] sendMessage failed', e);
-        return null;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [reloadConversations, style],
-  );
 
   /* ========== NextStep（ギア選択） ========== */
 

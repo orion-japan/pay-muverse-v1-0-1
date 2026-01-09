@@ -415,30 +415,45 @@ export const irosClient: IrosAPI = {
       history_len: args.history?.length ?? 0,
     });
 
+    dbg('reply() body', {
+      conversationId: args.conversationId,
+      user_text: args.user_text,
+      style: args.style,
+      styleHint: args.style,
+      hasHistory: Array.isArray(args.history),
+      history_len: args.history?.length ?? 0,
+    });
+
+    const w = typeof window !== 'undefined' ? (window as any) : undefined;
+
     // reply() は「サーバへ投げるだけ」に固定（整形も保存もしない）
     const r = await authFetch('/api/agent/iros/reply', {
       method: 'POST',
       headers: args.headers ?? undefined,
       body: JSON.stringify({
         conversationId: args.conversationId,
-        text: args.user_text,
-        modeHint: args.mode ?? 'Light',
-        mode: args.mode ?? 'Light',
 
-        history: Array.isArray(args.history) ? args.history : [],
+        // ✅ 正規キー（サーバが確実に拾う）
+        user_text: args.user_text,
+        modeHint: args.mode ?? 'auto',
+        styleHint: args.style ?? undefined,
+        history: Array.isArray(args.history) ? args.history : undefined,
+
+        // ✅ 互換（残してOK）
+        text: args.user_text,
+        mode: args.mode ?? 'auto',
+        style: args.style ?? undefined,
 
         model: args.model,
-        resonance: (window as any)?.__iros?.resonance ?? args.resonance,
-        intent: (window as any)?.__iros?.intent ?? args.intent,
-
-        styleHint: args.style,
-
+        resonance: w?.__iros?.resonance ?? args.resonance,
+        intent: w?.__iros?.intent ?? args.intent,
         nextStepChoice: args.nextStepChoice ?? undefined,
       }),
     });
 
     return r.json();
   },
+
 
 // src/ui/iroschat/lib/irosApiClient.ts
 // replyAndStore()：client-side の assistant 保存を撤去（single-writer: /reply のみ）

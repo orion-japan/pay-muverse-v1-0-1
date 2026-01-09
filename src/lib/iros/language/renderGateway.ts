@@ -30,14 +30,31 @@ function stripInternalLabels(line: string): string {
   s = s.replace(/【[^】]{1,24}】/g, '').trim();
 
   // 2) writer hint / meta説明（例：FRAME= / SLOTS= / ROTATION_META: ...）
-  s = s.replace(/^writer hint[:：].*$/i, '').trim();
-  s = s.replace(/^FRAME\s*=\s*.*$/i, '').trim();
-  s = s.replace(/^SLOTS\s*=\s*.*$/i, '').trim();
+  //    ✅ 行が“混在”しても、自然文部分は残す（行ごと削除しない）
+  s = s.replace(/^writer hint[:：]\s*/i, '').trim();
+
+  // 2.5) 先頭の「… / ...」はノイズになりやすいので最初に落とす
+  //      （これを先にやらないと「... FRAME=R ...」で FRAME= 除去がスルーされる）
+  s = s.replace(/^(\.{3,}|…{1,})\s*/g, '').trim();
+  if (s === '...' || s === '…' || /^\.{3,}$/.test(s) || /^…+$/.test(s)) return '';
+
+  // FRAME= / SLOTS= は「単独行なら捨てる」「混在ならその部分だけ落とす」
+  if (/^FRAME\s*=\s*.*$/i.test(s) && !/[。！？!?]/.test(s)) return '';
+  if (/^SLOTS\s*=\s*.*$/i.test(s) && !/[。！？!?]/.test(s)) return '';
+
+  s = s.replace(/^FRAME\s*=\s*\S+\s*/i, '').trim();
+  s = s.replace(/^SLOTS\s*=\s*\S+\s*/i, '').trim();
+
+  // ROTATION_META: なども「単独行なら捨てる」「混在なら先頭ラベルだけ落とす」
+  if (
+    /^(OBS_META|ROTATION_META|IT_HINT|ANCHOR_CONFIRM|TURN_MODE|SUBMODE)\s*[:：].*$/i.test(s) &&
+    !/[。！？!?]/.test(s)
+  ) {
+    return '';
+  }
+
   s = s
-    .replace(
-      /^(OBS_META|ROTATION_META|IT_HINT|ANCHOR_CONFIRM|TURN_MODE|SUBMODE)\s*[:：].*$/i,
-      '',
-    )
+    .replace(/^(OBS_META|ROTATION_META|IT_HINT|ANCHOR_CONFIRM|TURN_MODE|SUBMODE)\s*[:：]\s*/i, '')
     .trim();
 
   // 3) 内部キー列（phase= depth= q= spinLoop= spinStep= descentGate= など）
@@ -60,6 +77,7 @@ function stripInternalLabels(line: string): string {
 
   return s;
 }
+
 
 function looksLikeSilence(text: string, extra: any) {
   const t = norm(text);
@@ -637,23 +655,8 @@ export function renderGatewayAsReply(args: {
     rev: IROS_RENDER_GATEWAY_REV,
   };
 
-  console.warn('[IROS/renderGateway][OK]', {
-    ...meta,
-    source: shouldUseSlots ? slotExtracted?.source ?? 'slots' : 'picked/fallback',
-    expand: expandAllowed,
-    scaffoldApplied,
-    isSilence,
-    isIR,
-    isMicro,
-    q1Suppress,
-    shortException,
-    hasAnySlots,
-    slotPlanPolicy: slotPlanPolicy ?? null,
-    profileMaxLines,
-    argMaxLines,
-    inputKind,
-    brakeReleaseReason,
-  });
+  console.warn('[IROS/renderGateway][OK]', JSON.stringify({ rev: IROS_RENDER_GATEWAY_REV, outLen: meta.outLen, pickedFrom: meta.pickedFrom, slotPlanPolicy }));
+
 
   return { content, meta };
 }

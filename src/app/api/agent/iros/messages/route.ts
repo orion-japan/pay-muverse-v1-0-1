@@ -617,13 +617,53 @@ export async function POST(req: NextRequest) {
 
     const choiceId: string | null = role === 'user' ? (choiceIdFromBody ?? extracted.choiceId ?? null) : null;
 
-    // user のときだけタグ剥がしされた cleanText を採用
-    const cleanText = extracted.cleanText;
-    const finalText = (role === 'user' && cleanText && cleanText.trim().length ? cleanText : rawText).trim();
+// =========================================================
+// ghost / ellipsis normalize
+// - 見えない空白（U+3164等）や、…/...... だけの入力を「空」とみなす
+// - NextStepタグ除去後の cleanText を優先しつつ、最終的に空判定する
+// =========================================================
+function normalizeGhostWhitespace(input: string): string {
+  const s = String(input ?? '');
+  // U+3164: Hangul Filler (ㅤ)
+  // U+200B..U+200D: ZWSP/ZWNJ/ZWJ
+  // U+2060: Word Joiner
+  // U+FEFF: BOM
+  // U+2800: Braille blank
+  const removed = s.replace(/[\u3164\u200B-\u200D\u2060\uFEFF\u2800]/g, '');
+  return removed.replace(/\r\n/g, '\n').trim();
+}
 
-    if (!finalText) {
-      return json({ ok: false, error: 'text_empty', error_code: 'text_empty' }, 400);
-    }
+function isEllipsisOnly(input: string): boolean {
+  const s = String(input ?? '').replace(/\s+/g, '').trim();
+  if (!s) return true;
+
+  // "…", "……", "..." "...." 等を空扱い
+  if (/^…+$/.test(s)) return true;
+  if (/^\.+$/.test(s)) return true;
+
+  // "…." 混在も空扱い（必要なら）
+  if (/^[.…]+$/.test(s)) return true;
+
+  return false;
+}
+
+// user のときだけタグ剥がしされた cleanText を採用
+const cleanTextRaw = extracted.cleanText;
+
+// 1) まず ghost 空白を消す
+const cleanText = normalizeGhostWhitespace(cleanTextRaw);
+const rawTextNorm = normalizeGhostWhitespace(rawText);
+
+// 2) cleanText 優先で finalText を作る
+let finalText = (role === 'user' && cleanText.length ? cleanText : rawTextNorm).trim();
+
+// 3) 「…だけ」「.だけ」は空に落とす
+if (isEllipsisOnly(finalText)) finalText = '';
+
+if (!finalText) {
+  return json({ ok: false, error: 'text_empty', error_code: 'text_empty', reqId }, 400);
+}
+
 
     const picked = choiceId ? findNextStepOptionById(choiceId) : null;
 

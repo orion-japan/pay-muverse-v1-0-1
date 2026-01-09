@@ -1822,74 +1822,94 @@ try {
    6) Persist (assistant保存はしない)
 ---------------------------- */
 
-{
-  const ts = nowNs();
+const ts = nowNs();
 
-  const metaForSave = out.metaForSave ?? (orch as any)?.meta ?? null;
+const metaForSave = out.metaForSave ?? (orch as any)?.meta ?? null;
 
-  const t1 = nowNs();
-  await persistQCodeSnapshotIfAny({
-    userCode,
-    conversationId,
-    requestedMode: ctx.requestedMode,
-    metaForSave,
-  });
-  t.persist_ms.q_snapshot_ms = msSince(t1);
+const t1 = nowNs();
+await persistQCodeSnapshotIfAny({
+  userCode,
+  conversationId,
+  requestedMode: ctx.requestedMode,
+  metaForSave,
+});
+t.persist_ms.q_snapshot_ms = msSince(t1);
 
-  const t2 = nowNs();
-  await persistIntentAnchorIfAny({
-    supabase,
-    userCode,
-    metaForSave,
-  });
-  t.persist_ms.intent_anchor_ms = msSince(t2);
+const t2 = nowNs();
+await persistIntentAnchorIfAny({
+  supabase,
+  userCode,
+  metaForSave,
+});
+t.persist_ms.intent_anchor_ms = msSince(t2);
 
-  // =========================================================
-  // ✅ itTriggered は「boolean のときだけ渡す」
-  // - 不明(undefined/null)を false に丸めない
-  // - これで q_counts.it_triggered / it_triggered_true を壊さない
-  // =========================================================
-  const itTriggeredForPersist: boolean | undefined =
-    typeof (out as any)?.metaForSave?.itTriggered === 'boolean'
-      ? (out as any).metaForSave.itTriggered
-      : typeof (metaForSave as any)?.itTriggered === 'boolean'
-        ? (metaForSave as any).itTriggered
-        : typeof (orch as any)?.meta?.itTriggered === 'boolean'
-          ? (orch as any).meta.itTriggered
-          : undefined;
+// =========================================================
+// ✅ itTriggered は「boolean のときだけ渡す」
+// - 不明(undefined/null)を false に丸めない
+// - これで q_counts.it_triggered / it_triggered_true を壊さない
+// =========================================================
+const itTriggeredForPersist: boolean | undefined =
+  typeof (out as any)?.metaForSave?.itTriggered === 'boolean'
+    ? (out as any).metaForSave.itTriggered
+    : typeof (metaForSave as any)?.itTriggered === 'boolean'
+      ? (metaForSave as any).itTriggered
+      : typeof (orch as any)?.meta?.itTriggered === 'boolean'
+        ? (orch as any).meta.itTriggered
+        : undefined;
 
-  // ✅ 任意：q_counts も “あるときだけ” 渡す（persist側で最終mergeされる）
-  const qCountsForPersist: unknown | undefined =
-    (metaForSave as any)?.q_counts ??
-    (out as any)?.metaForSave?.q_counts ??
-    (orch as any)?.meta?.q_counts ??
-    undefined;
+// ✅ 任意：q_counts も “あるときだけ” 渡す（persist側で最終mergeされる）
+const qCountsForPersist: unknown | undefined =
+  (metaForSave as any)?.q_counts ??
+  (out as any)?.metaForSave?.q_counts ??
+  (orch as any)?.meta?.q_counts ??
+  undefined;
 
-  const t3 = nowNs();
-  await persistMemoryStateIfAny({
-    supabase,
-    userCode,
-    userText: text,
-    metaForSave,
-    qCounts: qCountsForPersist,
-    itTriggered: itTriggeredForPersist, // ✅ ここが本命
-  });
-  t.persist_ms.memory_state_ms = msSince(t3);
+// =========================================================
+// ✅ anchorEntry decision を metaForSave から拾って persist に渡す
+// - このスコープには `meta` / `anchorDecision` は無いので使わない
+// - metaForSave に載っている anchorEntry / anchorEntry_decision を優先
+// =========================================================
+const metaAny = metaForSave as any;
 
-  const t4 = nowNs();
-  await persistUnifiedAnalysisIfAny({
-    supabase,
-    userCode,
-    tenantId,
-    userText: text,
-    assistantText: out.assistantText,
-    metaForSave,
-    conversationId,
-  });
-  t.persist_ms.unified_analysis_ms = msSince(t4);
+const anchorEntryFromMeta =
+  metaAny?.anchorEntry ??
+  metaAny?.extra?.anchorEntry ??
+  null;
 
-  t.persist_ms.total_ms = msSince(ts);
-}
+const anchorEntryDecisionForPersist =
+  anchorEntryFromMeta?.decision ??
+  metaAny?.anchorEntry_decision ??
+  metaAny?.anchorDecision ??
+  undefined;
+
+const t3 = nowNs();
+await persistMemoryStateIfAny({
+  supabase,
+  userCode,
+  userText: text,
+  metaForSave,
+  qCounts: qCountsForPersist,
+  itTriggered: itTriggeredForPersist, // ✅ ここが本命
+
+  // ✅ 型エラー回避：persist 側で受ける前提の拡張キー
+  anchorEntry_decision: anchorEntryDecisionForPersist,
+} as any); // ← ★ここだけ
+t.persist_ms.memory_state_ms = msSince(t3);
+
+const t4 = nowNs();
+await persistUnifiedAnalysisIfAny({
+  supabase,
+  userCode,
+  tenantId,
+  userText: text,
+  assistantText: out.assistantText,
+  metaForSave,
+  conversationId,
+});
+t.persist_ms.unified_analysis_ms = msSince(t4);
+
+t.persist_ms.total_ms = msSince(ts);
+
 
 const finalMode =
   typeof (orch as any)?.mode === 'string'

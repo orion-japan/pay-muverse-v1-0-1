@@ -402,6 +402,15 @@ export async function persistMemoryStateIfAny(args: {
   // ✅ 任意：そのターンで IT が発火したか（最優先）
   itTriggered?: boolean;
 
+  // ✅ 任意：anchorEntry decision を外から渡せる（handleIrosReply → persist の橋）
+  // - ここが来たら persist 内の再計算より優先
+  anchorEntry_decision?: {
+    anchorEvent?: AnchorEvent | null;
+    anchorWrite?: AnchorWrite | null;
+    reason?: string | null;
+    [k: string]: any;
+  } | null;
+
   // ✅ 任意：tenantId（Phase10 T3判定で prev を拾うため）
   tenantId?: string;
 
@@ -411,7 +420,15 @@ export async function persistMemoryStateIfAny(args: {
   phase10Cfg?: any;
   cfg?: any;
 }) {
-  const { supabase, userCode, userText, metaForSave, qCounts, itTriggered } = args;
+  const {
+    supabase,
+    userCode,
+    userText,
+    metaForSave,
+    qCounts,
+    itTriggered,
+    anchorEntry_decision: anchorEntryDecisionOverride,
+  } = args;
 
   try {
     if (!metaForSave) return;
@@ -503,9 +520,17 @@ export async function persistMemoryStateIfAny(args: {
     console.log('[IROS/STATE][fixed-by-meta]', fixedByMeta);
 
     // =========================================================
-    // 新：唯一の真実（AnchorEntry）
+    // AnchorEntry（persist内の再計算） + ✅ override（handleIrosReply優先）
     // =========================================================
     const anchorEntry = computeAnchorEntry(root);
+
+    // ✅ “最終決定（唯一の参照点）”
+    const anchorEntryDecisionFinal: any =
+      anchorEntryDecisionOverride ??
+      anchorEntry?.decision ??
+      core?.anchorEntry?.decision ??
+      extra?.anchorEntry?.decision ??
+      null;
 
     // =========================================================
     // previous（環境差に強い読み）
@@ -529,20 +554,19 @@ export async function persistMemoryStateIfAny(args: {
     // =========================================================
     // ✅ アンカー関連（set/reset以外はDB更新しない）
     // =========================================================
-    // ✅ anchorEventTypeResolved は meta(core) を優先しつつ、
-　　// ✅ AnchorEntry の decision（commit/action）も set 相当として扱う
-　const anchorEventTypeResolved: AnchorEventType = (() => {
-  const fromMeta = pickAnchorEventType(core);
-  if (fromMeta !== 'none') return fromMeta;
+    // anchorEventTypeResolved は meta(core) を優先しつつ、
+    // AnchorEntry decision（commit/action）も set 相当として扱う
+    const anchorEventTypeResolved: AnchorEventType = (() => {
+      const fromMeta = pickAnchorEventType(core);
+      if (fromMeta !== 'none') return fromMeta;
 
-  const aw = anchorEntry?.decision?.anchorWrite;
-  const ae = anchorEntry?.decision?.anchorEvent;
+      const aw = anchorEntryDecisionFinal?.anchorWrite ?? null;
+      const ae = anchorEntryDecisionFinal?.anchorEvent ?? null;
 
-  // commit/action は「北極星が確定した」扱い → set 相当
-  if (aw === 'commit' || ae === 'action') return 'set';
-
-  return 'none';
-})();
+      // commit/action は「北極星が確定した」扱い → set 相当
+      if (aw === 'commit' || ae === 'action') return 'set';
+      return 'none';
+    })();
 
     // key（最優先: fixed-by-meta / 既存DB / fixedNorth）
     const anchorKeyCandidate =
@@ -697,9 +721,9 @@ export async function persistMemoryStateIfAny(args: {
           itx_reason: effectiveItx ? effectiveItx.itx_reason : '(keep)',
           itx_last_at: effectiveItx ? effectiveItx.itx_last_at : '(keep)',
 
-          anchor_event_db: anchorEntry?.decision?.anchorEvent ?? null,
-          anchor_write_db: anchorEntry?.decision?.anchorWrite ?? null,
-          anchorEntry_decision: anchorEntry?.decision ?? null,
+          anchor_event_db: anchorEntryDecisionFinal?.anchorEvent ?? null,
+          anchor_write_db: anchorEntryDecisionFinal?.anchorWrite ?? null,
+          anchorEntry_decision: anchorEntryDecisionFinal ?? null,
 
           intent_anchor_key_candidate: anchorKeyCandidate ?? null,
           anchor_action: anchorWrite.action,
@@ -765,14 +789,14 @@ export async function persistMemoryStateIfAny(args: {
       extractIntentAnchorKey((previous as any)?.intent_anchor ?? null) ??
       null;
 
-    // T3判定用 nowForT3 は decision 配下を見る
+    // T3判定用 nowForT3 は decisionFinal を見る（override を確実に反映）
     const nowForT3: any = {
       itx_step: (fixedByMeta.itx_step ?? (effectiveItx ? effectiveItx.itx_step : null)) ?? null,
       itx_last_at:
         (fixedByMeta.itx_last_at ?? (effectiveItx ? effectiveItx.itx_last_at : null)) ?? null,
       intent_anchor: intentAnchorKeyForT3,
-      anchor_write: anchorEntry?.decision?.anchorWrite ?? null,
-      anchor_event: anchorEntry?.decision?.anchorEvent ?? null,
+      anchor_write: anchorEntryDecisionFinal?.anchorWrite ?? null,
+      anchor_event: anchorEntryDecisionFinal?.anchorEvent ?? null,
     };
 
     // ✅ evidence/cfg（呼び出し側が渡してきたら使う）
@@ -843,8 +867,9 @@ export async function persistMemoryStateIfAny(args: {
     }
 
     // ✅ anchor_event / anchor_write（DB列がある環境だけで使う。無い場合は retry で落とす）
-    if (anchorEntry?.decision?.anchorEvent) upsertPayload.anchor_event = anchorEntry.decision.anchorEvent;
-    if (anchorEntry?.decision?.anchorWrite) upsertPayload.anchor_write = anchorEntry.decision.anchorWrite;
+    // ✅ decisionFinal を参照（override が必ず効く）
+    if (anchorEntryDecisionFinal?.anchorEvent) upsertPayload.anchor_event = anchorEntryDecisionFinal.anchorEvent;
+    if (anchorEntryDecisionFinal?.anchorWrite) upsertPayload.anchor_write = anchorEntryDecisionFinal.anchorWrite;
 
     // ✅ ITX列：方針（effectiveItxをそのまま保存）
     // - null（keep）のときは payloadに列を入れない
@@ -871,7 +896,7 @@ export async function persistMemoryStateIfAny(args: {
         anchorWrite.action === 'set' ? (upsertPayload.intent_anchor ?? null) : '(no-touch)',
       anchorKeyCandidate,
       fixedByMeta_intent_anchor_key: fixedByMeta.intent_anchor_key ?? null,
-      anchorEntry_decision: anchorEntry?.decision ?? null,
+      anchorEntry_decision: anchorEntryDecisionFinal ?? null,
     });
 
     // =========================================================

@@ -1,16 +1,19 @@
 /* === ChatInput.css (GLOBAL) ===================================== */
-/* 置き場所例: src/ui/iroschat/IrosChat.css に統合して使う          */
-/* app/iros/layout.tsx で import '@/ui/iroschat/IrosChat.css'        */
+/* 目的:
+   - 送信ボタンが必ずクリックできる（textarea に覆われない）
+   - fixed compose の stacking を安定化（z-index を明確に）
+   - .sof-actions / .sof-compose の二重定義を排除して衝突をなくす
+*/
 
 /* ---- 変数定義（1回だけ） ---- */
 :root {
   --ui-max-width: 860px;     /* Sofia/Iros 共通の本文最大幅 */
-  --footer-safe-pad: 56px;   /* フッター安全域（ボトムNavなど） */
+  --footer-safe-pad: 56px;   /* 下部ナビ等の安全域 */
   --compose-gap: 12px;       /* 通常の上げ幅 */
-  --compose-max-gap: 100px;  /* 上昇の上限（最大でここまで上がる） */
+  --compose-max-gap: 100px;  /* 上昇の上限 */
 }
 
-/* ---- 入力バーの固定配置（中央寄せ＋フッター上） ---- */
+/* ---- 入力バー（固定配置） ---- */
 .sof-compose {
   position: fixed;
   left: 50%;
@@ -19,59 +22,84 @@
     calc(var(--footer-safe-pad) + var(--compose-gap)),
     var(--compose-max-gap)
   );
+
   width: 100%;
   max-width: var(--ui-max-width);
+
   background: #ffffff;
   border-top: 1px solid #e5e6eb;
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.05);
   border-radius: 10px 10px 0 0;
-  z-index: 20;
+
+  /* ★ここが重要：必ず前面へ */
+  z-index: 1000;
+
   padding: 8px 10px;
   box-sizing: border-box;
+
+  /* 念のため */
+  pointer-events: auto;
 }
 
-/* ---- 入力欄とアクション列のレイアウト ---- */
+/* ---- 入力欄とアクションの横並び（重なり禁止） ---- */
 .sof-inputWrap {
+  position: relative;
   display: flex;
-  justify-content: space-between;
   align-items: flex-end;
-  gap: 8px;
+  gap: 10px;
 }
 
-/* ---- テキストエリア ---- */
+/* ---- テキストエリア（左に伸びる。ボタン領域を覆わない） ---- */
 .sof-textarea {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+
   resize: none;
   border: 1px solid #d6d7dd;
   border-radius: 10px;
   padding: 8px 10px;
   font-size: 14px;
   line-height: 1.6;
+
   background: #fafafa;
   color: #333;
   outline: none;
   box-sizing: border-box;
+
+  /* ★ボタンより下の層 */
+  position: relative;
+  z-index: 1;
 }
 
-/* ---- アクションボタン列（縦並び） ---- */
+/* ---- アクション列（必ずボタンが上に来る） ---- */
 .sof-actions {
+  flex: 0 0 auto;
+
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+
+  position: relative;
+  z-index: 2;
+  pointer-events: auto;
 }
 
 /* ---- ボタン共通 ---- */
 .sof-actionBtn {
-  padding: 6px 12px;
-  font-size: 13px;
-  border-radius: 10px;
+  border-radius: 12px;
   border: 1px solid #d4d6de;
   background: #f8f9fc;
   cursor: pointer;
   user-select: none;
-  transition: background 0.15s ease, transform 0.06s ease;
+  transition: background 0.15s ease, transform 0.06s ease, opacity 0.15s ease, box-shadow 0.15s ease;
+
+  /* ★クリック優先 */
+  position: relative;
+  z-index: 3;
+  pointer-events: auto;
 }
+
 .sof-actionBtn:hover {
   background: #f2f5ff;
 }
@@ -79,97 +107,51 @@
   transform: translateY(1px);
 }
 .sof-actionBtn:disabled {
-  opacity: 0.6;
+  opacity: 0.55;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
-/* ---- 個別ボタン色 ---- */
+/* ---- 旧Q&Aボタンが残っても消す保険 ---- */
 .sof-actionBtn--qa {
-  background: #f6f8ff;
+  display: none !important;
 }
+
+/* ---- 送信ボタン（大きめ＆押しやすく） ---- */
 .sof-actionBtn--send {
-  background: #e7f0ff;
-  border-color: #c3d8ff;
+  background: linear-gradient(180deg, #5b7cff 0%, #3855ff 100%);
+  color: #fff;
+  border: 1px solid #3552ff;
+
+  font-weight: 600;
+  height: 44px;
+  min-width: 88px;
+  padding: 0 22px;
+  font-size: 16px;
+}
+
+.sof-actionBtn--send:hover:not(:disabled) {
+  opacity: 0.92;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(56, 85, 255, 0.18);
 }
 
 /* ---- モバイル微調整 ---- */
 @media (max-width: 480px) {
   .sof-compose {
     padding: 6px;
-    bottom: min(
-      calc(var(--footer-safe-pad) + var(--compose-gap)),
-      var(--compose-max-gap)
-    );
     max-width: 100%;
     border-radius: 0;
   }
-  .sof-actionBtn {
-    font-size: 12px;
-    padding: 5px 10px;
+
+  .sof-actionBtn--send {
+    height: 44px;
+    padding: 0 18px;
+    font-size: 15px;
+    min-width: 84px;
   }
 }
 
-
-
-/* 最下部の白い背景を、フッター＋入力バーの下に敷く */
-.mu-page::after {
-  content: "";
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  /* フッター高＋お好みの余白（入力バーの下に少し白を見せたい分） */
-  height: calc(var(--footer-safe-pad, 56px) + 12px + env(safe-area-inset-bottom, 0px));
-  background: #fff;          /* ここが“白い帯” */
-  z-index: 600;               /* 下敷き：フッター/入力より低く */
-  pointer-events: none;       /* クリック妨げない */
-}
-
-
-/* 入力ドック：境界線（左右いっぱい・常に見える） */
-.sof-compose-dock {
-  position: sticky; /* 既にfixed/stickyならそれでOK */
-  bottom: env(safe-area-inset-bottom, 0);
-  background: #fff;
-  z-index: 20; /* 下部ナビより上に */
-}
-
-/* 上端ライン（1px） */
-.sof-compose-dock::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: rgba(15, 23, 42, 0.14); /* 薄いグレー */
-  pointer-events: none;
-}
-
-/* 送信ボタン：大きめ＆押しやすく */
-.sof-actions {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px 8px; /* 上に少し余白 */
-}
-
-/* 万一、旧Q&Aボタンが残っていても非表示にする保険 */
-.sof-actionBtn--qa { display: none !important; }
-
-.sof-actionBtn--send {
-  background: linear-gradient(180deg, #5b7cff 0%, #3855ff 100%);
-  color: #fff;
-  border: 1px solid #3552ff;
-  border-radius: 12px;
-  font-weight: 600;
-  height: 44px;              /* タップ最適 */
-  min-width: 88px;           /* 視認性 */
-  padding: 0 22px;
-  font-size: 16px;
-  transition: transform .15s ease, opacity .15s ease, box-shadow .15s ease;
-}
 @media (min-width: 480px) {
   .sof-actionBtn--send {
     height: 48px;
@@ -177,48 +159,49 @@
     font-size: 17px;
   }
 }
-.sof-actionBtn--send:hover:not(:disabled) {
-  opacity: .92;
-  transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(56, 85, 255, .18);
-}
-.sof-actionBtn--send:disabled {
-  opacity: .55;
-  cursor: not-allowed;
-  box-shadow: none;
+
+/* ---- 最下部の白い背景（下敷き） ---- */
+/* ★z-index を入力バーより必ず下にする（1000より小さく） */
+.mu-page::after {
+  content: "";
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: calc(var(--footer-safe-pad, 56px) + 12px + env(safe-area-inset-bottom, 0px));
+  background: #fff;
+  z-index: 10;
+  pointer-events: none;
 }
 
-/* 本文との“間”を強める：気持ち広めの余白 */
-.sof-compose {
-  padding: 6px; /* ここはスクショの数値を尊重 */
-}
-
-
-/* 吹き出し内の箇条書きを内側にレイアウトする（はみ出し防止） */
+/* ---- 吹き出し内の箇条書き（はみ出し防止） ---- */
 .bubble .msgBody ul,
 .bubble .msgBody ol {
-  list-style: none;        /* 既定のマーカーを消す */
+  list-style: none;
   margin: 0.25rem 0 0.5rem;
-  padding: 0;              /* 左余白を一旦クリア */
+  padding: 0;
 }
 
 .bubble .msgBody li {
   position: relative;
-  padding-left: 1.1rem;    /* マーカー用の内側余白を確保 */
+  padding-left: 1.1rem;
   line-height: 1.6;
   word-break: break-word;
-  overflow-wrap: anywhere; /* 長い語でのはみ出しも防止 */
+  overflow-wrap: anywhere;
 }
 
 .bubble .msgBody li::before {
-  content: '•';            /* カスタムの黒丸 */
+  content: '•';
   position: absolute;
-  left: 0; top: 0;
+  left: 0;
+  top: 0;
 }
 
-/* 念のため吹き出し自体のはみ出しも抑止 */
 .bubble {
   overflow: hidden;
 }
 
-
+/* 注意:
+   以前のこれが残っていると事故りやすいので、絶対に入れない：
+   .sof-actions button { position: relative; top: 15px; }
+*/

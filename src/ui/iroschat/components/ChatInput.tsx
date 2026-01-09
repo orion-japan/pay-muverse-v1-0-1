@@ -1,21 +1,51 @@
-// src/ui/iroschat/components/ChatInput.tsx
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import './ChatInput.css';
 import { useIrosChat } from '../IrosChatContext';
 
 const DRAFT_KEY = 'iros_chat_draft';
-const QA_URL = '/api/iros/summary'; // ルートが異なる場合はここだけ変更
 
 type ChatInputProps = {
   /** /reply から返ってきた meta を上位（Shell）に渡すためのフック */
   onMeta?: (meta: any) => void;
 };
 
+//
+// =========================================================
+// ghost / ellipsis normalize（UI側）
+// =========================================================
+function normalizeGhostWhitespace(input: string): string {
+  const s = String(input ?? '');
+  const removed = s.replace(/[\u3164\u200B-\u200D\u2060\uFEFF\u2800]/g, '');
+  return removed.replace(/\r\n/g, '\n').trim();
+}
+
+function isEllipsisOnly(input: string): boolean {
+  const s = String(input ?? '').replace(/\s+/g, '').trim();
+  if (!s) return true;
+  if (/^…+$/.test(s)) return true;
+  if (/^\.+$/.test(s)) return true;
+  if (/^[.…]+$/.test(s)) return true;
+  return false;
+}
+
+function normalizeSendText(input: string): string {
+  const norm = normalizeGhostWhitespace(input);
+  if (isEllipsisOnly(norm)) return '';
+  return norm;
+}
+
 export default function ChatInput({ onMeta }: ChatInputProps) {
-  // ★ ここだけ変更：send → sendMessage
-  const { sendMessage, loading } = useIrosChat();
+  const chat = useIrosChat();
+  const sendMessage: any = (chat as any)?.sendMessage;
+  const loading: boolean = Boolean((chat as any)?.loading);
 
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -24,28 +54,25 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const sendLockRef = useRef(false);
 
-  // ▼ チャット末尾へスクロール（Sofiaと同等の候補セレクタ）
-  const scrollChatToBottom = useCallback(() => {
-    const el =
-      (document.querySelector('[data-sof-chat-scroll]') as HTMLElement) ||
-      (document.querySelector('.sof-chatScroll') as HTMLElement) ||
-      (document.querySelector('.sof-chatBody') as HTMLElement) ||
-      (document.scrollingElement as HTMLElement);
-
-    if (!el) return;
-    const doScroll = () => el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-    requestAnimationFrame(doScroll);
-    setTimeout(doScroll, 0);
-    setTimeout(doScroll, 120);
-  }, []);
+  // ▼ 送信可否（本番定義）
+  const disabled = loading || sending;
+  const normalizedForSend = useMemo(
+    () => normalizeSendText(text),
+    [text],
+  );
+  const canSend = !disabled && normalizedForSend.length > 0;
 
   // ▼ 下書きロード／保存
   useEffect(() => {
     try {
-      const saved = typeof window !== 'undefined' ? window.localStorage.getItem(DRAFT_KEY) : '';
+      const saved =
+        typeof window !== 'undefined'
+          ? window.localStorage.getItem(DRAFT_KEY)
+          : '';
       if (saved) setText(saved);
     } catch {}
   }, []);
+
   useEffect(() => {
     try {
       if (typeof window !== 'undefined') {
@@ -54,123 +81,79 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
     } catch {}
   }, [text]);
 
-  // ▼ 自動リサイズ（初期3行、上限は画面高の35%・最大180px）
+  // ▼ 自動リサイズ
   const autoSize = useCallback(() => {
     const ta = taRef.current;
     if (!ta) return;
-    // レイアウト安定のため2フレーム使って計測
     requestAnimationFrame(() => {
       ta.style.height = 'auto';
-      const minH = 66; // 3行相当
+      const minH = 66;
       const maxH = Math.min(180, Math.floor(window.innerHeight * 0.35));
       const next = Math.max(minH, Math.min(ta.scrollHeight, maxH));
-      ta.style.height = next + 'px';
+      ta.style.height = `${next}px`;
     });
   }, []);
+
   useEffect(() => {
     autoSize();
   }, [text, autoSize]);
-  useEffect(() => {
-    autoSize();
-  }, []); // mount
 
-  // ▼ 送信処理（Enter・ボタン共通）
-  const handleSend = useCallback(
-    async (overrideText?: string) => {
-      const value = (overrideText ?? text).trim();
-      if (!value) return;
-      if (loading || sending || sendLockRef.current) return;
+  // ▼ 送信処理
+  const handleSend = useCallback(async () => {
+    const value = normalizeSendText(text);
 
-      sendLockRef.current = true;
-      setSending(true);
+    if (!value) {
+      console.warn('[IrosChatInput] blocked: empty after normalize');
+      return;
+    }
+    if (disabled || sendLockRef.current) return;
+    if (typeof sendMessage !== 'function') {
+      console.error('[IrosChatInput] sendMessage missing');
+      return;
+    }
 
+    sendLockRef.current = true;
+    setSending(true);
+
+    try {
+      taRef.current?.blur();
+
+      setText('');
       try {
-        // 入力直後に上方向スクロール（GPT風演出）
-        taRef.current?.blur();
-        window.dispatchEvent(new Event('sof:scrollUp'));
+        window.localStorage.removeItem(DRAFT_KEY);
+      } catch {}
 
-        // 入力欄クリア＆draft消去
-        setText('');
-        try {
-          if (typeof window !== 'undefined') {
-            window.localStorage.removeItem(DRAFT_KEY);
-          }
-        } catch {}
+      const res: any = await sendMessage(value);
 
-        taRef.current?.focus();
-
-        // 既存コンテキストの sendMessage をそのまま利用
-        const res: any = await (sendMessage as any)(value);
-
-        // ★ meta を Shell 側に引き渡し（sendMessage は現状値を返さないので、ここは今後拡張用）
-        if (onMeta && res && typeof res === 'object') {
-          const meta = (res as any).meta ?? null;
-          if (meta) {
-            try {
-              onMeta(meta);
-            } catch (e) {
-              console.warn('[IrosChatInput] onMeta handler error:', e);
-            }
-          }
-        }
-      } catch (e) {
-        console.error('[IrosChatInput] send error:', e);
-      } finally {
-        setSending(false);
-        sendLockRef.current = false;
-
-        // 高さリセット
-        if (taRef.current) {
-          taRef.current.style.height = '66px';
-          autoSize();
-        }
-        // レイテンシ吸収して再スクロール
-        setTimeout(() => window.dispatchEvent(new Event('sof:scrollUp')), 80);
+      if (onMeta && res?.meta) {
+        onMeta(res.meta);
       }
-    },
-    [text, loading, sending, sendMessage, autoSize, onMeta],
-  );
+    } catch (e) {
+      console.error('[IrosChatInput] send error', e);
+    } finally {
+      setSending(false);
+      sendLockRef.current = false;
+      autoSize();
+    }
+  }, [text, disabled, sendMessage, onMeta, autoSize]);
 
-  // ▼ キー操作：Enter送信 / Shift+Enter改行 / IME中は無効
+  // ▼ キー操作
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
         e.preventDefault();
-        if (!sendLockRef.current) {
-          taRef.current?.blur();
-          scrollChatToBottom();
+        if (canSend) {
           void handleSend();
         }
       }
     },
-    [isComposing, handleSend, scrollChatToBottom],
+    [isComposing, canSend, handleSend],
   );
 
   // 初期フォーカス
   useEffect(() => {
     taRef.current?.focus();
   }, []);
-
-  // Q&A（30日分のQコード要約ページへ）
-  const openQA = () => {
-    // 入力欄と下書きをクリア
-    setText('');
-    try {
-      if (typeof window !== 'undefined') {
-        window.localStorage.removeItem(DRAFT_KEY);
-      }
-    } catch {}
-
-    const params = new URLSearchParams();
-    params.set('scope', 'qcode');
-    params.set('days', '30');
-    if (typeof window !== 'undefined') {
-      window.location.assign(`${QA_URL}?${params.toString()}`);
-    }
-  };
-
-  const disabled = loading || sending;
-  const canSend = !disabled && !!text.trim();
 
   return (
     <div className="sof-compose" aria-label="メッセージ入力エリア">
@@ -190,16 +173,13 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
           aria-label="Irosへメッセージ"
         />
 
-        {/* アクション列（送信のみ） */}
         <div className="sof-actions sof-actions--single">
           <button
             data-sof-send
             type="button"
             className="sof-actionBtn sof-actionBtn--send sof-actionBtn--lg"
             onClick={() => {
-              if (!sendLockRef.current) {
-                taRef.current?.blur();
-                scrollChatToBottom();
+              if (canSend) {
                 void handleSend();
               }
             }}
@@ -207,7 +187,7 @@ export default function ChatInput({ onMeta }: ChatInputProps) {
             aria-label="送信"
             title="送信（Enter）"
           >
-            送信
+            {sending ? '送信中…' : '送信'}
           </button>
         </div>
       </div>

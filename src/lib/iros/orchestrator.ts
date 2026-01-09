@@ -813,154 +813,153 @@ export async function runIrosTurn(
 
     meta = r.meta;
 
-    // =========================================================
-    // ✅ T3 Anchor Entry（証拠ベースでのみ開く）
-    // - UI証拠（nextStepChoiceId 等）が無い場合は、限定条件つきで「テキスト証拠」を生成する
-    //   - fixedNorth=SUN かつ itActive=true のときだけ
-    //   - COMMIT系 → action
-    //   - HOLD系（継続します等）→ intent_anchor が既にある場合だけ reconfirm
-    // - DBカラム追加なし：itx_step / itx_anchor_event_type / intent_anchor に刻む
-    // =========================================================
-    {
-      const norm = (s: unknown) => String(s ?? '').replace(/\s+/g, ' ').trim();
+// =========================================================
+// ✅ T3 Anchor Entry（証拠ベースでのみ開く）
+// - UI証拠（nextStepChoiceId 等）が無い場合は、限定条件つきで「テキスト証拠」を生成する
+//   - fixedNorth=SUN かつ itActive=true のときだけ
+//   - COMMIT系 → action
+//   - HOLD系（継続します等）→ intent_anchor が既にある場合だけ reconfirm
+// - DBカラム追加なし：itx_step / itx_anchor_event_type / intent_anchor に刻む
+// =========================================================
+{
+  const norm = (s: unknown) => String(s ?? '').replace(/\s+/g, ' ').trim();
 
-      const fixedNorthKey =
-        typeof (meta as any)?.fixedNorth?.key === 'string'
-          ? String((meta as any).fixedNorth.key)
-          : typeof (meta as any)?.fixedNorth === 'string'
-            ? String((meta as any).fixedNorth)
-            : null;
+  const fixedNorthKey =
+    typeof (meta as any)?.fixedNorth?.key === 'string'
+      ? String((meta as any).fixedNorth.key)
+      : typeof (meta as any)?.fixedNorth === 'string'
+        ? String((meta as any).fixedNorth)
+        : null;
 
-      // ✅ “ITが生きているか” は「今回meta」優先 → 無ければ MemoryState を保険に
-      const itReasonNow = String(
-        (meta as any)?.itx_reason ?? (meta as any)?.itxReason ?? '',
-      );
-      const itReasonPrev = String(
-        (ms as any)?.itx_reason ?? (ms as any)?.itxReason ?? '',
-      );
-      const itActive =
-        itReasonNow.includes('IT_TRIGGER_OK') ||
-        itReasonPrev.includes('IT_TRIGGER_OK');
+  // ✅ “ITが生きているか” は「今回meta」優先 → 無ければ MemoryState を保険に
+  const itReasonNow = String(
+    (meta as any)?.itx_reason ?? (meta as any)?.itxReason ?? '',
+  );
+  const itReasonPrev = String(
+    (ms as any)?.itx_reason ?? (ms as any)?.itxReason ?? '',
+  );
+  const itActive =
+    itReasonNow.includes('IT_TRIGGER_OK') || itReasonPrev.includes('IT_TRIGGER_OK');
 
-      // ✅ intent_anchor の有無（MemoryStateを主として判定）
-      const hasAnchorAlready = Boolean(
-        normalizeIntentAnchor(
-          (ms as any)?.intent_anchor ?? (ms as any)?.intentAnchor ?? null,
-        ),
-      );
+  // ✅ intent_anchor の有無（MemoryStateを主として判定）
+  const hasAnchorAlready = Boolean(
+    normalizeIntentAnchor((ms as any)?.intent_anchor ?? (ms as any)?.intentAnchor ?? null),
+  );
 
-      const COMMIT_RE =
-        /(ここにコミット|コミットする|これでいく|これで行く|決めた|決めました|固定する|固定します|北極星にする|SUNにする)/;
+  const COMMIT_RE =
+    /(ここにコミット|コミットする|これでいく|これで行く|決めた|決めました|固定する|固定します|北極星にする|SUNにする)/;
 
-      const HOLD_RE =
-        /^(継続する|継続します|続ける|続けます|やる|やります|進める|進みます|守る|守ります)$/u;
+  const HOLD_RE =
+    /^(継続する|継続します|続ける|続けます|やる|やります|進める|進みます|守る|守ります)$/u;
 
-      // 1) まずは既存の UI 証拠を拾う
-      let evidence = extractAnchorEvidence({
-        meta,
-        extra: meta && typeof meta === 'object' ? (meta as any).extra : null,
-      });
+  // 1) まずは既存の UI 証拠を拾う
+  const uiEvidence = extractAnchorEvidence({
+    meta,
+    extra: meta && typeof meta === 'object' ? (meta as any).extra : null,
+  });
 
-      // 2) UI証拠が無ければ「テキスト証拠」を生成（※SUN固定 + IT active のときだけ）
-      const userT = norm(text);
+  // evidence は「常にオブジェクト」にして downstream を安定させる
+  let evidence: { choiceId?: string | null; actionId?: string | null; source?: string | null } =
+    uiEvidence && typeof uiEvidence === 'object' ? (uiEvidence as any) : {};
 
-      const noUiEvidence = !evidence?.choiceId && !evidence?.actionId;
+  // 2) UI証拠が無ければ「テキスト証拠」を生成（※SUN固定 + IT active のときだけ）
+  const userT = norm(text);
+  const noUiEvidence = !evidence?.choiceId && !evidence?.actionId;
 
-      if (noUiEvidence && fixedNorthKey === 'SUN' && itActive) {
-        // 強いコミット → action（T3コミット候補）
-        if (COMMIT_RE.test(userT)) {
-          evidence = {
-            ...evidence,
-            // detectAnchorEntry が choiceId 前提でも落ちないように “合成ID” を入れる
-            choiceId: evidence?.choiceId ?? 'FN_SUN',
-            actionId: 'action',
-            source: 'text',
-          } as any;
-        }
-        // 短い継続宣言 → 既に anchor があるときだけ reconfirm（ダダ漏れ防止）
-        else if (hasAnchorAlready && HOLD_RE.test(userT)) {
-          evidence = {
-            ...evidence,
-            choiceId: evidence?.choiceId ?? 'FN_SUN',
-            actionId: 'reconfirm',
-            source: 'text',
-          } as any;
-        }
-      }
-
-      const anchorDecision = detectAnchorEntry({
-        choiceId: evidence.choiceId,
-        actionId: evidence.actionId,
-        nowIso: new Date().toISOString(),
-        state: {
-          itx_step: (ms as any)?.itx_step ?? (ms as any)?.itxStep ?? null,
-          itx_last_at: (ms as any)?.itx_last_at ?? (ms as any)?.itxLastAt ?? null,
-          intent_anchor:
-            (ms as any)?.intent_anchor ?? (ms as any)?.intentAnchor ?? null,
-        },
-      });
-
-      const payload = {
-        evidence,
-        decision: {
-          tEntryOk: anchorDecision.tEntryOk,
-          anchorEvent: anchorDecision.anchorEvent,
-          anchorWrite: anchorDecision.anchorWrite,
-          reason: anchorDecision.reason,
-        },
-        fixedNorthKey,
-        itActive,
-        hasAnchorAlready,
+  if (noUiEvidence && fixedNorthKey === 'SUN' && itActive) {
+    // 強いコミット → action（T3コミット候補）
+    if (COMMIT_RE.test(userT)) {
+      evidence = {
+        ...evidence,
+        // detectAnchorEntry が choiceId 前提でも落ちないように “合成ID” を入れる
+        choiceId: evidence?.choiceId ?? 'FN_SUN',
+        actionId: 'action',
+        source: 'text',
       };
-
-      console.log(
-        `[IROS/ANCHOR_ENTRY] ${JSON.stringify(payload, (_k, v) =>
-          v === undefined ? null : v,
-        )}`,
-      );
-
-      // ✅ persist 側が拾える形で meta に刻む（DB列はここを参照する）
-      (meta as any).anchorEntry = {
-        evidence,
-        decision: {
-          tEntryOk: anchorDecision.tEntryOk,
-          anchorEvent: anchorDecision.anchorEvent, // 'action' など
-          anchorWrite: anchorDecision.anchorWrite, // 'commit' など
-          reason: anchorDecision.reason,
-        },
-      };
-
-      // ✅ 形ゆれ対策（pickAnchorEntry が拾えるようにフラットも入れる）
-      (meta as any).anchor_event = anchorDecision.anchorEvent;
-      (meta as any).anchor_write = anchorDecision.anchorWrite;
-      (meta as any).anchorEvidenceSource = evidence.source;
-
-      if (anchorDecision.tEntryOk && anchorDecision.anchorWrite === 'commit') {
-        const p = anchorDecision.patch;
-
-        (meta as any).itx_step = p.itx_step; // 'T3'
-        (meta as any).itx_anchor_event_type = p.itx_anchor_event_type; // choice/action/reconfirm
-
-// ✅ intent_anchor は正規化して載せる（camel + snake）
-// patch が空でも “既存 or fixedNorthKey” を必ず保持する
-const ia =
-  normalizeIntentAnchor(
-    p.intent_anchor ??
-      (meta as any).intent_anchor ??
-      (meta as any).intentAnchor ??
-      (fixedNorthKey ? { key: fixedNorthKey } : null),
-  ) ?? null;
-
-(meta as any).intent_anchor = ia;
-(meta as any).intentAnchor = ia;
-(meta as any).intent_anchor_key =
-  ia && typeof (ia as any).key === 'string' ? (ia as any).key : null;
-
-
-        (meta as any).anchor_event_type = p.itx_anchor_event_type;
-        (meta as any).itx_last_at = new Date().toISOString();
-      }
     }
+    // 短い継続宣言 → 既に anchor があるときだけ reconfirm（ダダ漏れ防止）
+    else if (hasAnchorAlready && HOLD_RE.test(userT)) {
+      evidence = {
+        ...evidence,
+        choiceId: evidence?.choiceId ?? 'FN_SUN',
+        actionId: 'reconfirm',
+        source: 'text',
+      };
+    }
+  }
+
+  const anchorDecision = detectAnchorEntry({
+    choiceId: evidence?.choiceId ?? null,
+    actionId: evidence?.actionId ?? null,
+    nowIso: new Date().toISOString(),
+    state: {
+      itx_step: (ms as any)?.itx_step ?? (ms as any)?.itxStep ?? null,
+      itx_last_at: (ms as any)?.itx_last_at ?? (ms as any)?.itxLastAt ?? null,
+      intent_anchor: (ms as any)?.intent_anchor ?? (ms as any)?.intentAnchor ?? null,
+    },
+  });
+
+  const payload = {
+    evidence,
+    decision: {
+      tEntryOk: anchorDecision.tEntryOk,
+      anchorEvent: anchorDecision.anchorEvent,
+      anchorWrite: anchorDecision.anchorWrite,
+      reason: anchorDecision.reason,
+    },
+    fixedNorthKey,
+    itActive,
+    hasAnchorAlready,
+  };
+
+  console.log(
+    `[IROS/ANCHOR_ENTRY] ${JSON.stringify(payload, (_k, v) =>
+      v === undefined ? null : v,
+    )}`,
+  );
+
+  // ✅ persist 側が拾える形で meta に刻む（DB列はここを参照する）
+  (meta as any).anchorEntry = {
+    evidence,
+    decision: {
+      tEntryOk: anchorDecision.tEntryOk,
+      anchorEvent: anchorDecision.anchorEvent, // 'action' など
+      anchorWrite: anchorDecision.anchorWrite, // 'commit' など
+      reason: anchorDecision.reason,
+    },
+  };
+
+  // ✅ 形ゆれ対策（pickAnchorEntry が拾えるようにフラットも入れる）
+  (meta as any).anchor_event = anchorDecision.anchorEvent;
+  (meta as any).anchor_write = anchorDecision.anchorWrite;
+  (meta as any).anchorEvidenceSource = evidence?.source ?? null;
+
+  if (anchorDecision.tEntryOk && anchorDecision.anchorWrite === 'commit') {
+    const p = anchorDecision.patch;
+
+    (meta as any).itx_step = p.itx_step; // 'T3'
+    (meta as any).itx_anchor_event_type = p.itx_anchor_event_type; // choice/action/reconfirm
+
+    // ✅ intent_anchor は正規化して載せる（camel + snake）
+    // patch が空でも “既存 or fixedNorthKey” を必ず保持する
+    const ia =
+      normalizeIntentAnchor(
+        p.intent_anchor ??
+          (meta as any).intent_anchor ??
+          (meta as any).intentAnchor ??
+          (fixedNorthKey ? { key: fixedNorthKey } : null),
+      ) ?? null;
+
+    (meta as any).intent_anchor = ia;
+    (meta as any).intentAnchor = ia;
+    (meta as any).intent_anchor_key =
+      ia && typeof (ia as any).key === 'string' ? (ia as any).key : null;
+
+    (meta as any).anchor_event_type = p.itx_anchor_event_type;
+    (meta as any).itx_last_at = new Date().toISOString();
+  }
+}
+
 
     // =========================================================
     // ✅ 非SILENCEの空slotPlan救済：normalChat を必ず差し込む（配列を保持）
@@ -1232,6 +1231,45 @@ console.log('[IROS/ORCH][after-container]', {
           : (unifiedAny as any).hLevel ?? null,
     };
   }
+
+// orchestrator.ts （[IROS/META][final-sync] の直前あたり）
+// ✅ anchorEntry を meta に固定（後段の persist が参照できるように）
+if ((meta as any).anchorEntry == null && typeof (meta as any).anchorEntry === 'undefined') {
+  // 何もしない（安全）
+} else {
+  // 何もしない（既にある）
+}
+
+// ✅ final-sync では “存在する anchorEntry を見るだけ” にする（スコープ事故を防ぐ）
+const anchorEntryForLog =
+  (meta as any)?.anchorEntry ??
+  (meta as any)?.extra?.anchorEntry ??
+  null;
+
+// ✅ ついでに final-sync のログにも anchorEntry を出す（確認用）
+console.log('[IROS/META][final-sync]', {
+  meta_q: (meta as any)?.q ?? (meta as any)?.qCode,
+  unified_q: (meta as any)?.unified_q ?? (meta as any)?.unifiedQ,
+  meta_depth: (meta as any)?.depth ?? (meta as any)?.depthStage,
+  unified_depth: (meta as any)?.unified_depth ?? (meta as any)?.unifiedDepth,
+  intent_anchor: (meta as any)?.intent_anchor ?? (meta as any)?.intentAnchor,
+  intent_anchor_key: (meta as any)?.intent_anchor_key ?? (meta as any)?.intentAnchorKey,
+  anchorEntry: anchorEntryForLog, // ✅ ここが出れば “metaまで来てる” が証明できる
+});
+
+
+// ついでに final-sync のログにも anchorEntry を出す（確認用）
+console.log('[IROS/META][final-sync]', {
+  meta_q: (meta as any)?.q ?? (meta as any)?.qCode,
+  unified_q: (meta as any)?.unified_q ?? (meta as any)?.unifiedQ,
+  meta_depth: (meta as any)?.depth ?? (meta as any)?.depthStage,
+  unified_depth: (meta as any)?.unified_depth ?? (meta as any)?.unifiedDepth,
+  intent_anchor: (meta as any)?.intent_anchor ?? (meta as any)?.intentAnchor,
+  intent_anchor_key: (meta as any)?.intent_anchor_key ?? (meta as any)?.intentAnchorKey,
+  anchorEntry: (meta as any)?.anchorEntry, // ✅ 追加（ここが出れば勝ち）
+});
+
+
 
   console.log('[IROS/META][final-sync]', {
     meta_q: (finalMeta as any).qCode ?? null,

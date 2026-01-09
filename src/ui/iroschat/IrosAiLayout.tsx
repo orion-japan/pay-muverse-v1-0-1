@@ -9,27 +9,19 @@ import { auth } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import styles from './index.module.css';
 import LoginModal from '@/components/LoginModal';
-import { useIrosChat } from './IrosChatContext';
 
-export default function IrosAiLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function IrosAiLayout({ children }: { children: React.ReactNode }) {
   const [showLogin, setShowLogin] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
 
-  // そのまま使ってOK（renameは後で）
-  const [seedActive, setSeedActive] = useState(false);
-
   const { userCode } = useAuth();
-  const { sendMessage } = useIrosChat(); // ✅ ここを sendFutureSeed → sendMessage に
   const router = useRouter();
 
   const handleLogout = async () => {
     try {
       await fetch('/api/logout', { method: 'POST' }).catch(() => {});
     } catch {
+      // ignore
     } finally {
       try {
         await signOut(auth);
@@ -39,32 +31,9 @@ export default function IrosAiLayout({
     }
   };
 
-  // ✅ 右上ボタン：押したら「選択肢」を user 発話として送り、NextStep を出させる
-  const handleSeedClick = async () => {
-    if (seedActive) return;
-
-    if (!userCode) {
-      setShowLogin(true);
-      return;
-    }
-
-    setSeedActive(true);
-    try {
-      console.log('[IROS] 選択ボタン → 選択肢トリガー送信');
-      await sendMessage('選択肢', 'nextStep'); // ★ 演出の核
-    } catch (e) {
-      console.error('[IROS] 選択肢トリガー送信でエラー', e);
-    } finally {
-      setTimeout(() => setSeedActive(false), 600);
-    }
-  };
-
   return (
     <div className={styles.root}>
-      <header
-        aria-label="Iros-AI header"
-        style={{ position: 'sticky', top: 0, zIndex: 2000 }}
-      >
+      <header aria-label="Iros-AI header" style={{ position: 'sticky', top: 0, zIndex: 2000 }}>
         <div
           style={{
             display: 'flex',
@@ -90,8 +59,8 @@ export default function IrosAiLayout({
             </span>
           </div>
 
-          <nav style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-            {/* ⚙ メニュー（そのまま） */}
+          {/* ✅ 右端：メニューのみ（選択ボタンは削除） */}
+          <nav style={{ display: 'flex', alignItems: 'center' }}>
             <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
               <button
                 type="button"
@@ -152,7 +121,7 @@ export default function IrosAiLayout({
                   style={{
                     position: 'fixed',
                     top: 70,
-                    right: 24,
+                    right: 18, // ✅ 右端に寄せる
                     background: '#ffffff',
                     borderRadius: 12,
                     border: '1px solid rgba(0,0,0,0.08)',
@@ -237,40 +206,6 @@ export default function IrosAiLayout({
                 </div>
               )}
             </div>
-
-            {/* 動作中表示 */}
-            {seedActive && (
-              <span
-                style={{
-                  fontSize: '0.75rem',
-                  color: '#4F46E5',
-                  opacity: 0.9,
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                選択肢 準備中…
-              </span>
-            )}
-
-            {/* ✅ Seed → 選択 */}
-            <button
-              type="button"
-              onClick={handleSeedClick}
-              style={{
-                padding: '6px 16px',
-                borderRadius: 999,
-                border: 'none',
-                background: '#4F46E5',
-                color: '#ffffff',
-                cursor: seedActive ? 'default' : 'pointer',
-                fontSize: '0.85rem',
-                whiteSpace: 'nowrap',
-                opacity: seedActive ? 0.7 : 1,
-              }}
-              disabled={seedActive}
-            >
-              選択
-            </button>
           </nav>
         </div>
       </header>
