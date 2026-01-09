@@ -36,6 +36,12 @@ import { renderGatewayAsReply } from '@/lib/iros/language/renderGateway';
 import { runNormalBase } from '@/lib/iros/conversation/normalBase';
 import crypto from 'crypto';
 
+// ✅ 1) import を追加（既存 import 群の近くでOK）
+import {
+  extractSlotsForRephrase,
+  rephraseSlotsFinal,
+} from '@/lib/iros/language/rephraseEngine';
+
 /**
  * [choiceId] 形式のタグを除去したい場合のパーサ（保険）
  * ※ 今は extractNextStepChoiceFromText を使ってるので未使用でもOK
@@ -729,7 +735,6 @@ if (irosResult.ok) {
       );
     }
 
-    // ★ assistantText は後から補正するので let にする
 // ★ assistantText は後から補正するので let にする
 let { result, finalMode, metaForSave, assistantText } = irosResult as any;
 
@@ -1181,49 +1186,59 @@ let { result, finalMode, metaForSave, assistantText } = irosResult as any;
         }
       }
 
-      // ★★★ Render Engine の適用（適用箇所をここで固定）
-      const effectiveStyle =
-        typeof styleInput === 'string' && styleInput.trim().length > 0
-          ? styleInput
-          : typeof meta?.style === 'string' && meta.style.trim().length > 0
-          ? meta.style
-          : typeof meta?.userProfile?.style === 'string' &&
-            meta.userProfile.style.trim().length > 0
-          ? meta.userProfile.style
-          : typeof userProfile?.style === 'string' &&
-            userProfile.style.trim().length > 0
-          ? userProfile.style
-          : null;
 
-      const applied = applyRenderEngineIfEnabled({
-        conversationId,
-        userCode,
 
-        userText: userTextClean,
-        styleInput: effectiveStyle,
 
-        extra: extraMerged ?? null,
+// ★★★ Render Engine の適用（適用箇所をここで固定）
+const effectiveStyle =
+  typeof styleInput === 'string' && styleInput.trim().length > 0
+    ? styleInput
+    : typeof meta?.style === 'string' && meta.style.trim().length > 0
+    ? meta.style
+    : typeof meta?.userProfile?.style === 'string' &&
+      meta.userProfile.style.trim().length > 0
+    ? meta.userProfile.style
+    : typeof userProfile?.style === 'string' &&
+      userProfile.style.trim().length > 0
+    ? userProfile.style
+    : null;
 
-        meta,
-        resultObj: result as any,
-      });
+// ✅ ここで 1回だけ rephrase（render直前 / async 可能な地点）
+await maybeAttachRephraseForRenderV2({
+  conversationId,
+  userCode,
+  meta,
+  extraMerged,
+});
 
-      meta = applied.meta;
-      extraMerged = applied.extraForHandle;
+const applied = applyRenderEngineIfEnabled({
+  conversationId,
+  userCode,
+  userText: userTextClean,
+  styleInput: effectiveStyle,
+  extra: extraMerged ?? null,
+  meta,
+  resultObj: result as any,
+});
 
-      // ✅ FINAL sanitize: RenderEngine ON/OFF に関係なく「最終本文」から見出しを完全除去
-      {
-        const before = String((result as any)?.content ?? '');
-        const sanitized = sanitizeFinalContent(before);
+meta = applied.meta;
+extraMerged = applied.extraForHandle;
 
-        const next = sanitized.text.trim();
-        (result as any).content = next.length > 0 ? next : '';
+// ✅ FINAL sanitize: RenderEngine ON/OFF に関係なく「最終本文」から見出しを完全除去
+{
+  const before = String((result as any)?.content ?? '');
+  const sanitized = sanitizeFinalContent(before);
 
-        meta.extra = {
-          ...(meta.extra ?? {}),
-          finalHeaderStripped: sanitized.removed.length > 0 ? sanitized.removed : null,
-        };
-      }
+  // ✅ 先頭の改行や🪔は保持したいので trimEnd のみにする
+  const next = sanitized.text.trimEnd();
+  (result as any).content = next.length > 0 ? next : '';
+
+  meta.extra = {
+    ...(meta.extra ?? {}),
+    finalHeaderStripped: sanitized.removed.length > 0 ? sanitized.removed : null,
+  };
+}
+
 
       // =========================================================
       // ✅ V2 FINAL確定直前ログ（空になった地点の確定用）
@@ -1267,13 +1282,14 @@ let { result, finalMode, metaForSave, assistantText } = irosResult as any;
 
 // =========================================================
 // ✅ FINAL本文の確定（UIに出すもの＝保存するもの）
-// - SILENCEは「理由あり」かつ「本文が実質空」の時だけ本文=空にする
+// - SILENCEは「speechAct=SILENCE」かつ「本文が実質空」の時だけ本文=空
 // - 非SILENCEは「…系」を生成しない（空は空）
 // - ここで finalText を一度だけ確定し、下流はこれを信じる（single source）
 // =========================================================
 {
+  // ✅ 先頭改行は残しつつ、判定は trim した値で行う
   const curRaw = String((result as any)?.content ?? '');
-  const cur = curRaw.trim();
+  const curTrim = curRaw.trim();
 
   const speechAct = String(
     meta?.extra?.speechAct ?? meta?.speechAct ?? '',
@@ -1281,42 +1297,62 @@ let { result, finalMode, metaForSave, assistantText } = irosResult as any;
 
   const silenceReason = pickSilenceReason(meta);
 
-  // ✅ SILENCEは speechAct が SILENCE の時だけ。理由は “補助”
-  const isSilent = speechAct === 'SILENCE' && isEffectivelyEmptyText(cur);
+  // ✅ SILENCE判定：speechAct=SILENCE かつ “空同等”
+  const isSilent = speechAct === 'SILENCE' && isEffectivelyEmptyText(curTrim);
 
-  const finalText = isSilent ? '' : isEffectivelyEmptyText(cur) ? '' : cur;
+  // ✅ finalText：SILENCEかつ空同等→空 / それ以外→“空同等なら空” / 文字があればそのまま
+  // （非SILENCEで '…' を本文として残したくない設計）
+  const finalText = isSilent ? '' : isEffectivelyEmptyText(curTrim) ? '' : curRaw.trimEnd();
 
+  // ✅ 統一：result / assistantText を single source で同期
   (result as any).content = finalText;
   (result as any).text = finalText;
-  assistantText = finalText;
   (result as any).assistantText = finalText;
+  assistantText = finalText;
 
   meta.extra = {
     ...(meta.extra ?? {}),
     finalAssistantTextSynced: true,
     finalAssistantTextLen: finalText.length,
+
     finalTextPolicy: isSilent
       ? 'SILENCE_EMPTY_BODY'
       : meta?.extra?.finalTextPolicy ??
         (finalText.length > 0 ? 'NORMAL_BODY' : 'NORMAL_EMPTY_PASS'),
-    emptyFinalPatched:
-      meta?.extra?.emptyFinalPatched ??
-      (finalText.length === 0 ? true : undefined),
-    emptyFinalPatchedReason:
-      meta?.extra?.emptyFinalPatchedReason ??
-      (finalText.length === 0 ? 'NON_SILENCE_EMPTY_CONTENT' : undefined),
+
+// ✅ empty系は「既に埋まっていれば尊重」し、なければここで確定
+emptyFinalPatched:
+  meta?.extra?.emptyFinalPatched ??
+  (finalText.length === 0 ? true : undefined),
+
+emptyFinalPatchedReason:
+  meta?.extra?.emptyFinalPatchedReason ??
+  (finalText.length === 0
+    ? isSilent
+      ? (silenceReason ? `SILENCE:${silenceReason}` : 'SILENCE_EMPTY_BODY')
+      : 'NON_SILENCE_EMPTY_CONTENT'
+    : undefined),
+
+    // ✅ UI判定の参考（peek）
     uiModePeek: isSilent ? 'SILENCE' : 'NORMAL',
     uiModePeekReason: isSilent ? silenceReason : null,
+
+    // ✅ デバッグ用（どこで空になったか追える）
+    finalTextHead: finalText.length > 0 ? finalText.slice(0, 64) : '',
   };
 }
+
 
 
 // =========================================================
 // ✅ UI MODE をここで確定（可視化の単一ソース）
 // - 以後、persist などは meta.mode / meta.modeReason を信じるだけ
+// - NOTE: finalText は「確定済みの finalText（single source）」をそのまま使う
 // =========================================================
 {
-  const finalText = String((result as any)?.content ?? '').trim();
+  // ✅ 先頭改行は残しつつ、判定は trim でOK（空判定を安定させる）
+  const finalTextRaw = String((result as any)?.content ?? '');
+  const finalText = finalTextRaw.trim();
 
   const uiMode = inferUIMode({
     modeHint: modeForHandle,
@@ -1332,17 +1368,25 @@ let { result, finalMode, metaForSave, assistantText } = irosResult as any;
     finalText,
   });
 
+  // ✅ 単一ソース：meta.mode / meta.modeReason を確定
   meta.mode = uiMode;
   meta.modeReason = uiReason;
   meta.persistPolicy = PERSIST_POLICY;
 
+  // ✅ extra にも同期（UI/ログはここだけを見ればいい）
   meta.extra = {
     ...(meta.extra ?? {}),
     uiMode,
     uiModeReason: uiReason,
     persistPolicy: PERSIST_POLICY,
+
+    // ✅ デバッグ用（空判定の根拠を残す）
+    uiFinalTextLen: finalText.length,
+    uiFinalTextHead:
+      finalText.length > 0 ? finalText.slice(0, 64) : '',
   };
 }
+
 
 // =========================================================
 // ✅ assistant 保存（single-writer）
@@ -1607,6 +1651,8 @@ console.log('[IROS/reply][persist-assistant] q/depth final', {
     );
   }
 }
+
+
 
 function applyRenderEngineIfEnabled(params: {
   conversationId: string;
@@ -1877,6 +1923,97 @@ if (enableRenderEngine && !isIT) {
     };
     return { meta, extraForHandle };
   }
+}
+
+// =========================================================
+// ✅ 2) helper を追加（POST の外 / helpers領域でOK）
+// - FINALでも「表現だけ」を 1回だけ LLMに貸す
+// - slot key/順序がズレたら黙って破棄
+// - SILENCE/FORWARD は触らない
+// =========================================================
+async function maybeAttachRephraseForRenderV2(args: {
+  conversationId: string;
+  userCode: string;
+  meta: any;
+  extraMerged: Record<string, any>;
+}) {
+  const { conversationId, userCode, meta, extraMerged } = args;
+
+  // feature flag（即OFF可能）
+  const enabled = String(process.env.IROS_REPHRASE_FINAL_ENABLED ?? '1').trim() !== '0';
+  if (!enabled) return;
+
+  // renderEngine が OFF ならそもそもやらない（無駄撃ち防止）
+  if (extraMerged?.renderEngine !== true) return;
+
+  // IT は renderReply 側で別処理なので、ここでは触らない
+  const hintedRenderMode =
+    (typeof meta?.renderMode === 'string' && meta.renderMode) ||
+    (typeof meta?.extra?.renderMode === 'string' && meta.extra.renderMode) ||
+    (typeof meta?.extra?.renderedMode === 'string' && meta.extra.renderedMode) ||
+    '';
+  if (String(hintedRenderMode).toUpperCase() === 'IT') return;
+
+  // SILENCE / FORWARD は触らない
+  const speechAct = String(meta?.extra?.speechAct ?? meta?.speechAct ?? '').toUpperCase();
+  if (speechAct === 'SILENCE' || speechAct === 'FORWARD') return;
+
+  // slots を拾える形の extraForRender を作る（renderGatewayAsReply と同じ系統）
+  const extraForRender = {
+    ...(meta?.extra ?? {}),
+    ...(extraMerged ?? {}),
+    framePlan: (meta as any)?.framePlan ?? null,
+    slotPlan: (meta as any)?.slotPlan ?? null,
+  };
+
+  const extracted = extractSlotsForRephrase(extraForRender);
+  if (!extracted?.slots?.length) return;
+
+  const model =
+    process.env.IROS_REPHRASE_MODEL ??
+    process.env.IROS_MODEL ??
+    'gpt-4.1';
+
+  const res = await rephraseSlotsFinal(extracted, {
+    model,
+    temperature: 0.2,
+    // 6〜8段の “段数崩れ” 防止。未設定なら render maxLines or 8。
+    maxLinesHint: Number.isFinite(Number(process.env.IROS_RENDER_DEFAULT_MAXLINES))
+      ? Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)
+      : 8,
+  });
+
+  if (!res.ok) {
+    console.warn('[IROS/rephrase][SKIP]', {
+      conversationId,
+      userCode,
+      reason: res.reason,
+      inKeys: res.meta?.inKeys ?? [],
+      rawLen: res.meta?.rawLen ?? 0,
+      rawHead: res.meta?.rawHead ?? '',
+    });
+    return;
+  }
+  // ✅ renderGatewayAsReply が拾える形で載せる（RenderBlock[] 相当）
+  extraMerged.rephraseBlocks = res.slots.map((s) => ({ text: s.text }));
+
+  // デバッグ用：meta にも残す（保存したければ persist meta 経由で残る）
+  meta.extra = {
+    ...(meta.extra ?? {}),
+    rephraseApplied: true,
+    rephraseModel: model,
+    rephraseKeys: res.meta.outKeys,
+    rephraseRawLen: res.meta.rawLen,
+    rephraseRawHead: res.meta.rawHead,
+  };
+
+  console.warn('[IROS/rephrase][OK]', {
+    conversationId,
+    userCode,
+    keys: res.meta.outKeys,
+    rawLen: res.meta.rawLen,
+    rawHead: res.meta.rawHead,
+  });
 }
 
 // ✅ helpers領域に置く（POSTの外 / applyRenderEngineIfEnabled の外）

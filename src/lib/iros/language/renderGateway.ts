@@ -4,6 +4,23 @@ import { renderV2, type RenderBlock } from './renderV2';
 // ✅ Phase11 marker（「本当にこのファイルが読まれてるか」ログ証明用）
 const IROS_RENDER_GATEWAY_REV = 'phase11-open-close-v1';
 
+/**
+ * env flag helper（Phase11：入口/出口の判定ゆれを潰す）
+ * - true / 1 / on / yes / enabled だけを ON 扱い
+ * - false / 0 / off / no / disabled / 空 は OFF 扱い
+ * - 想定外の値は defaultEnabled に倒す（事故防止）
+ */
+function envFlagEnabled(raw: unknown, defaultEnabled = true) {
+  if (raw == null) return defaultEnabled;
+  const v = String(raw).trim().toLowerCase();
+  if (!v) return defaultEnabled;
+
+  if (v === '1' || v === 'true' || v === 'on' || v === 'yes' || v === 'enabled') return true;
+  if (v === '0' || v === 'false' || v === 'off' || v === 'no' || v === 'disabled') return false;
+
+  return defaultEnabled;
+}
+
 function head(s: string, n = 40) {
   const t = String(s ?? '').replace(/\s+/g, ' ').trim();
   return t.length > n ? t.slice(0, n) + '…' : t;
@@ -13,7 +30,6 @@ function norm(s: unknown) {
   return String(s ?? '').replace(/\r\n/g, '\n').trim();
 }
 
-
 /** =========================================================
  * ✅ フェーズ11の本丸：内部ラベル完全除去（最終責任）
  * - system/protocol/hint 由来のタグや、メタ説明行を本文から消す
@@ -21,31 +37,29 @@ function norm(s: unknown) {
  * ========================================================= */
 function stripInternalLabels(line: string): string {
   let s = norm(line);
-  // 0) 🪔 は表示上の“締め”に統一するため本文から除去（最後にだけ付ける）
-  s = s.replace(/🪔/g, '').trim();
+
+  // ❌ 0) 🪔除去はやめる（ユーザーが必要としている“締め”を保持）
+  // s = s.replace(/🪔/g, '').trim();
+
+  s = s.trim();
   if (!s) return '';
 
   // 1) 角括弧ラベル（例：【WRITER_PROTOCOL】など）
-  //    ※本文の見出しっぽい装飾はここで全消し
   s = s.replace(/【[^】]{1,24}】/g, '').trim();
 
-  // 2) writer hint / meta説明（例：FRAME= / SLOTS= / ROTATION_META: ...）
-  //    ✅ 行が“混在”しても、自然文部分は残す（行ごと削除しない）
+  // 2) writer hint / meta説明
   s = s.replace(/^writer hint[:：]\s*/i, '').trim();
 
-  // 2.5) 先頭の「… / ...」はノイズになりやすいので最初に落とす
-  //      （これを先にやらないと「... FRAME=R ...」で FRAME= 除去がスルーされる）
+  // 2.5) 先頭の「… / ...」はノイズ
   s = s.replace(/^(\.{3,}|…{1,})\s*/g, '').trim();
   if (s === '...' || s === '…' || /^\.{3,}$/.test(s) || /^…+$/.test(s)) return '';
 
-  // FRAME= / SLOTS= は「単独行なら捨てる」「混在ならその部分だけ落とす」
   if (/^FRAME\s*=\s*.*$/i.test(s) && !/[。！？!?]/.test(s)) return '';
   if (/^SLOTS\s*=\s*.*$/i.test(s) && !/[。！？!?]/.test(s)) return '';
 
   s = s.replace(/^FRAME\s*=\s*\S+\s*/i, '').trim();
   s = s.replace(/^SLOTS\s*=\s*\S+\s*/i, '').trim();
 
-  // ROTATION_META: なども「単独行なら捨てる」「混在なら先頭ラベルだけ落とす」
   if (
     /^(OBS_META|ROTATION_META|IT_HINT|ANCHOR_CONFIRM|TURN_MODE|SUBMODE)\s*[:：].*$/i.test(s) &&
     !/[。！？!?]/.test(s)
@@ -57,27 +71,19 @@ function stripInternalLabels(line: string): string {
     .replace(/^(OBS_META|ROTATION_META|IT_HINT|ANCHOR_CONFIRM|TURN_MODE|SUBMODE)\s*[:：]\s*/i, '')
     .trim();
 
-  // 3) 内部キー列（phase= depth= q= spinLoop= spinStep= descentGate= など）
-  //    行全体がメタ列なら消す（部分除去ではなく “行ごと削除” を優先）
   if (
     /(phase\s*=|depth\s*=|q\s*=|spinloop\s*=|spinstep\s*=|descentgate\s*=|tLayerHint\s*=|itx_|slotPlanPolicy|slotSeed|llmRewriteSeed)/i.test(
       s,
     )
   ) {
-    // ただし、自然文の中に “q=” が紛れた可能性は低いがゼロではないので、
-    // “= を含むメタ列” として雑に落とす
     if (s.includes('=') || s.includes(':') || s.includes('：')) return '';
   }
 
-  // 4) 数値フッター（〔sa0.53 y2 h1 ...〕）は本文に出さない（表示は別仕様）
   s = s.replace(/^[〔\[]sa[\w.\s-]+[〕\]]$/i, '').trim();
-
-  // 5) 連続スペース整理
   s = s.replace(/\s{2,}/g, ' ').trim();
 
   return s;
 }
-
 
 function looksLikeSilence(text: string, extra: any) {
   const t = norm(text);
@@ -227,6 +233,47 @@ function extractSlotBlocks(extra: any): SlotExtracted {
   };
 }
 
+/** ✅ rephrase済み blocks を extra から拾う（renderGatewayは同期なので、LLM呼び出しは上流で行う） */
+function pickRephrasedBlocks(extra: any): { blocks: RenderBlock[]; source: string } | null {
+  const raw =
+    extra?.rephraseBlocks ??
+    extra?.meta?.rephraseBlocks ??
+    extra?.extra?.rephraseBlocks ??
+    extra?.orch?.rephraseBlocks ??
+    null;
+
+  if (!raw) return null;
+
+  // 1) RenderBlock[]
+  if (Array.isArray(raw) && raw.length > 0 && typeof raw[0] === 'object' && raw[0] && 'text' in raw[0]) {
+    const blocks = (raw as any[])
+      .map((b) => ({ text: stripInternalLabels(String((b as any)?.text ?? '')) }))
+      .filter((b) => Boolean(norm(b.text)));
+    return blocks.length ? { blocks, source: 'extra.rephraseBlocks(RenderBlock[])' } : null;
+  }
+
+  // 2) string[]
+  if (Array.isArray(raw) && raw.length > 0 && typeof raw[0] === 'string') {
+    const blocks = (raw as string[])
+      .map((t) => stripInternalLabels(String(t)))
+      .filter((t) => Boolean(norm(t)))
+      .map((t) => ({ text: t }));
+    return blocks.length ? { blocks, source: 'extra.rephraseBlocks(string[])' } : null;
+  }
+
+  // 3) string（改行テキスト）
+  if (typeof raw === 'string') {
+    const lines = splitToLines(raw);
+    const blocks = lines
+      .map((t) => stripInternalLabels(t))
+      .filter((t) => Boolean(norm(t)))
+      .map((t) => ({ text: t }));
+    return blocks.length ? { blocks, source: 'extra.rephraseBlocks(string)' } : null;
+  }
+
+  return null;
+}
+
 /** ✅ 🪔 は “末尾の1行” に統一（本文に混ざっていても無視して最後に付ける） */
 function ensureEndSymbol(blocks: RenderBlock[], maxLines: number) {
   // 念のため本文中の🪔は落とす（最終行にだけ置く）
@@ -241,8 +288,6 @@ function ensureEndSymbol(blocks: RenderBlock[], maxLines: number) {
 
   blocks.push({ text: '🪔' });
 }
-
-
 
 /** ✅ expand filler は FINAL のみで使うが、内部語は絶対に混ぜない */
 function expandToMinLines(blocks: RenderBlock[], minLines: number) {
@@ -453,17 +498,14 @@ function applyOpenCloseForFinal(blocks: RenderBlock[], opts: { maxLinesFinal: nu
     blocks.unshift({ text: OPEN });
   }
 
-  // ③ CLOSE は余裕があるときだけ末尾に1つ
+  // ③ CLOSE は 🪔 用に1行残しているときだけ末尾に1つ
   const hasClose = blocks.some((b) => isCloseLike((b as any)?.text));
   const nonEmptyNow = blocks.map((b) => norm((b as any)?.text)).filter(Boolean);
 
-  // ③ CLOSE は 🪔 用に1行残しているときだけ末尾に1つ
   if (!hasClose && nonEmptyNow.length < maxLinesFinal - 1) {
     blocks.push({ text: CLOSE });
   }
 }
-
-
 
 export function renderGatewayAsReply(args: {
   extra?: any | null;
@@ -523,7 +565,8 @@ export function renderGatewayAsReply(args: {
     };
   }
 
-  const EXPAND_ENABLED = String(process.env.IROS_RENDER_EXPAND_ENABLED ?? '1').trim() !== '0';
+  // ✅ Phase11：'false' でも ON 扱いになる事故を潰す
+  const EXPAND_ENABLED = envFlagEnabled(process.env.IROS_RENDER_EXPAND_ENABLED, true);
 
   const TARGET_MIN_LINES =
     Number(process.env.IROS_RENDER_TARGET_MINLINES) > 0 ? Number(process.env.IROS_RENDER_TARGET_MINLINES) : 6;
@@ -599,7 +642,19 @@ export function renderGatewayAsReply(args: {
   let scaffoldApplied = false;
 
   if (shouldUseSlots) {
-    blocks = slotExtracted!.blocks;
+    // ✅ render直前1箇所：rephrase済み blocks があれば優先採用（ただし env で完全制御）
+    const REPHRASE_ENABLED = envFlagEnabled(process.env.IROS_REPHRASE_FINAL_ENABLED, true);
+    const pickedRe = REPHRASE_ENABLED ? pickRephrasedBlocks(extra) : null;
+
+    if (pickedRe?.blocks?.length) {
+      blocks = pickedRe.blocks;
+      console.warn(
+        '[IROS/renderGateway][rephrase][PICKED]',
+        JSON.stringify({ source: pickedRe.source, blocks: blocks.length }),
+      );
+    } else {
+      blocks = slotExtracted!.blocks;
+    }
   } else {
     const base = picked || fallbackText || '';
 
@@ -624,7 +679,6 @@ export function renderGatewayAsReply(args: {
 
     // ✅ expand filler（不足分だけ埋める）
     expandToMinLines(blocks, Math.min(TARGET_MIN_LINES, maxLinesFinal - 1));
-
 
     // ✅ 🪔 は “入るなら入れる”
     ensureEndSymbol(blocks, maxLinesFinal);
@@ -655,8 +709,17 @@ export function renderGatewayAsReply(args: {
     rev: IROS_RENDER_GATEWAY_REV,
   };
 
-  console.warn('[IROS/renderGateway][OK]', JSON.stringify({ rev: IROS_RENDER_GATEWAY_REV, outLen: meta.outLen, pickedFrom: meta.pickedFrom, slotPlanPolicy }));
-
+  console.warn(
+    '[IROS/renderGateway][OK]',
+    JSON.stringify({
+      rev: IROS_RENDER_GATEWAY_REV,
+      outLen: meta.outLen,
+      pickedFrom: meta.pickedFrom,
+      slotPlanPolicy,
+      scaffoldApplied,
+      expandAllowed,
+    }),
+  );
 
   return { content, meta };
 }
