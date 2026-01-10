@@ -52,7 +52,10 @@ function noQM(s: string) {
   return s.replace(/[？\?]/g, '');
 }
 
-function softAnchorLine(args: { intentLocked: boolean; intentAnchorKey?: string | null }) {
+function softAnchorLine(args: {
+  intentLocked: boolean;
+  intentAnchorKey?: string | null;
+}) {
   if (!args.intentLocked) return null;
   const k = norm(args.intentAnchorKey);
   if (!k) return '芯は保持する。';
@@ -66,12 +69,20 @@ function buildOpenSlots(input: {
   intentLocked: boolean;
   intentAnchorKey?: string | null;
   topic?: string | null;
+  lastSummary?: string | null;
 }): CounselSlot[] {
   const t = norm(input.userText);
-  const a = softAnchorLine({ intentLocked: input.intentLocked, intentAnchorKey: input.intentAnchorKey });
+  const a = softAnchorLine({
+    intentLocked: input.intentLocked,
+    intentAnchorKey: input.intentAnchorKey,
+  });
 
   const topic = norm(input.topic);
   const topicLine = topic ? `話題は「${clamp(topic, 14)}」として扱う。` : '';
+
+  const last = norm(input.lastSummary);
+  const lastLine =
+    last && last !== t ? `前回の要約：${clamp(last, 46)}` : '';
 
   // 質問禁止なので「教えて」で止める（?を使わない）
   return [
@@ -82,7 +93,8 @@ function buildOpenSlots(input: {
       content: noQM(
         `受け取った。${a ? ` ${a}` : ''}\n` +
           `${topicLine ? topicLine + '\n' : ''}` +
-          `いま出ている言葉：${t ? `「${clamp(t, 52)}」` : '（まだ言葉になっていない）'}`
+          `${lastLine ? lastLine + '\n' : ''}` +
+          `いま出ている言葉：${t ? `「${clamp(t, 52)}」` : '（まだ言葉になっていない）'}`,
       ),
     },
     {
@@ -99,8 +111,12 @@ function buildClarifySlots(input: {
   intentLocked: boolean;
   intentAnchorKey?: string | null;
   axis?: { S?: string | null; R?: string | null; I?: string | null } | null;
+  lastSummary?: string | null;
 }): CounselSlot[] {
-  const a = softAnchorLine({ intentLocked: input.intentLocked, intentAnchorKey: input.intentAnchorKey });
+  const a = softAnchorLine({
+    intentLocked: input.intentLocked,
+    intentAnchorKey: input.intentAnchorKey,
+  });
 
   const S = norm(input.axis?.S);
   const R = norm(input.axis?.R);
@@ -111,13 +127,16 @@ function buildClarifySlots(input: {
       ? `軸メモ：${S ? `S=${S} ` : ''}${R ? `R=${R} ` : ''}${I ? `I=${I}` : ''}`.trim()
       : '';
 
+  const last = norm(input.lastSummary);
+  const lastLine = last ? `前回の要約：${clamp(last, 52)}` : '';
+
   // ここも質問禁止：選択は「番号で返して」で止める（?を使わない）
   return [
     {
       key: 'OBS',
       role: 'assistant',
       style: 'soft',
-      content: noQM(`整理する。${a ? ` ${a}` : ''}${axisLine ? `\n${axisLine}` : ''}`),
+      content: noQM(`整理する。${a ? ` ${a}` : ''}${axisLine ? `\n${axisLine}` : ''}${lastLine ? `\n${lastLine}` : ''}`),
     },
     {
       key: 'CLARIFY',
@@ -127,7 +146,7 @@ function buildClarifySlots(input: {
         `いまの相談は、だいたい3つの束に分かれる。\n` +
           `①状況の事実（何が起きているか）\n` +
           `②心の反応（何が削られているか）\n` +
-          `③望み（どう在りたいか）`
+          `③望み（どう在りたいか）`,
       ),
     },
     {
@@ -143,10 +162,18 @@ function buildOptionsSlots(input: {
   intentLocked: boolean;
   intentAnchorKey?: string | null;
   topic?: string | null;
+  lastSummary?: string | null;
 }): CounselSlot[] {
-  const a = softAnchorLine({ intentLocked: input.intentLocked, intentAnchorKey: input.intentAnchorKey });
+  const a = softAnchorLine({
+    intentLocked: input.intentLocked,
+    intentAnchorKey: input.intentAnchorKey,
+  });
+
   const topic = norm(input.topic);
   const topicLine = topic ? `（話題：${clamp(topic, 16)}）` : '';
+
+  const last = norm(input.lastSummary);
+  const lastLine = last ? `（前回：${clamp(last, 18)}）` : '';
 
   // OPTIONS から質問解禁（ここで初めて ? を使ってよい）
   return [
@@ -154,7 +181,7 @@ function buildOptionsSlots(input: {
       key: 'OBS',
       role: 'assistant',
       style: 'soft',
-      content: `選択肢を出す。${a ? ` ${a}` : ''} ${topicLine}`.trim(),
+      content: `選択肢を出す。${a ? ` ${a}` : ''} ${topicLine} ${lastLine}`.trim(),
     },
     {
       key: 'OPTIONS',
@@ -178,8 +205,15 @@ function buildOptionsSlots(input: {
 function buildNextSlots(input: {
   intentLocked: boolean;
   intentAnchorKey?: string | null;
+  lastSummary?: string | null;
 }): CounselSlot[] {
-  const a = softAnchorLine({ intentLocked: input.intentLocked, intentAnchorKey: input.intentAnchorKey });
+  const a = softAnchorLine({
+    intentLocked: input.intentLocked,
+    intentAnchorKey: input.intentAnchorKey,
+  });
+
+  const last = norm(input.lastSummary);
+  const lastLine = last ? `（前回：${clamp(last, 28)}）` : '';
 
   // NEXT は「一手に落とす」。ここは “問い” より “宣言+手順” を優先する。
   return [
@@ -187,7 +221,7 @@ function buildNextSlots(input: {
       key: 'OBS',
       role: 'assistant',
       style: 'soft',
-      content: `${a ? a + '\n' : ''}次の一手に落とす。`.trim(),
+      content: `${a ? a + '\n' : ''}${lastLine ? lastLine + '\n' : ''}次の一手に落とす。`.trim(),
     },
     {
       key: 'NEXT',
@@ -213,19 +247,34 @@ function buildNextSlots(input: {
 
 export function buildCounselSlotPlan(args: {
   userText: string;
-
   stage: ConsultStage;
 
-  // Intent Lock（orchestrator で判定して渡す）
-  intentLocked: boolean;
+  // Intent Lock（orchestrator で判定して渡す）※任意（未指定でも動く）
+  intentLocked?: boolean;
   intentAnchorKey?: string | null;
 
-  // 3軸/話題（orchestrator で推定して渡す。ここでは語りに使うだけ）
+  // 3軸/話題（orchestrator で推定して渡す。ここでは語りに使うだけ）※任意
   axis?: { S?: string | null; R?: string | null; I?: string | null } | null;
   topic?: string | null;
+
+  // orchestrator から渡す（無ければ null）※任意
+  lastSummary?: string | null;
 }): CounselSlotPlan {
   const stamp = 'counsel.ts@2026-01-10#stage-v1';
+
   const userText = norm(args.userText);
+
+  const lastSummary =
+    typeof args.lastSummary === 'string' && args.lastSummary.trim().length > 0
+      ? args.lastSummary.trim()
+      : null;
+
+  const intentLocked = args.intentLocked === true;
+
+  const intentAnchorKey =
+    typeof args.intentAnchorKey === 'string' && args.intentAnchorKey.trim().length > 0
+      ? args.intentAnchorKey.trim()
+      : null;
 
   let slots: CounselSlot[] = [];
   let reason = 'default';
@@ -235,9 +284,10 @@ export function buildCounselSlotPlan(args: {
       reason = 'stage:OPEN';
       slots = buildOpenSlots({
         userText,
-        intentLocked: args.intentLocked,
-        intentAnchorKey: args.intentAnchorKey ?? null,
+        intentLocked,
+        intentAnchorKey,
         topic: args.topic ?? null,
+        lastSummary,
       });
       break;
 
@@ -245,26 +295,29 @@ export function buildCounselSlotPlan(args: {
       reason = 'stage:CLARIFY';
       slots = buildClarifySlots({
         userText,
-        intentLocked: args.intentLocked,
-        intentAnchorKey: args.intentAnchorKey ?? null,
+        intentLocked,
+        intentAnchorKey,
         axis: args.axis ?? null,
+        lastSummary,
       });
       break;
 
     case 'OPTIONS':
       reason = 'stage:OPTIONS';
       slots = buildOptionsSlots({
-        intentLocked: args.intentLocked,
-        intentAnchorKey: args.intentAnchorKey ?? null,
+        intentLocked,
+        intentAnchorKey,
         topic: args.topic ?? null,
+        lastSummary,
       });
       break;
 
     case 'NEXT':
       reason = 'stage:NEXT';
       slots = buildNextSlots({
-        intentLocked: args.intentLocked,
-        intentAnchorKey: args.intentAnchorKey ?? null,
+        intentLocked,
+        intentAnchorKey,
+        lastSummary,
       });
       break;
 
@@ -272,9 +325,10 @@ export function buildCounselSlotPlan(args: {
       reason = 'stage:fallback->OPEN';
       slots = buildOpenSlots({
         userText,
-        intentLocked: args.intentLocked,
-        intentAnchorKey: args.intentAnchorKey ?? null,
+        intentLocked,
+        intentAnchorKey,
         topic: args.topic ?? null,
+        lastSummary,
       });
       break;
   }
@@ -285,7 +339,7 @@ export function buildCounselSlotPlan(args: {
     reason,
     slotPlanPolicy: 'FINAL',
     stage: args.stage,
-    intentLocked: !!args.intentLocked,
+    intentLocked,
     slots,
   };
 }

@@ -169,6 +169,7 @@ function looksLikeRepair(text: string) {
       'それ言った',
       '同じこと',
       '繰り返し',
+      'ループ',
     ]) && hasQuestionMark(t)
   );
 }

@@ -80,7 +80,7 @@ export function resolveModeWithSA(
   const winner = (Object.entries(w) as [keyof ModeWeights, number][])
     .sort((a, b) => b[1] - a[1])[0]?.[0];
 
-  if (winner === 'counsel') return 'consult'; // 相談系モードにマッピング
+  if (winner === 'counsel') return 'counsel'; // mode名を slotPlan 側と統一（counsel.ts に到達させる）
   if (winner === 'mirror') return 'mirror';
   if (winner === 'resonate') return 'resonate'; // 「forward」イメージ
 

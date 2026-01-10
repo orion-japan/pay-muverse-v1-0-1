@@ -55,6 +55,9 @@ import { detectIMode } from './iMode';
 import { extractAnchorEvidence } from '@/lib/iros/anchor/extractAnchorEvidence';
 import { detectAnchorEntry } from '@/lib/iros/anchor/AnchorEntryDetector';
 
+import { buildCounselSlotPlan } from './slotPlans/counsel';
+
+
 // Person Intent Memory（ir診断）
 import { savePersonIntentState } from './memory/savePersonIntent';
 
@@ -985,50 +988,104 @@ if (typeof process !== 'undefined' && process.env.DEBUG_IROS_IT === '1') {
 }
 
 
-    // =========================================================
-    // ✅ 非SILENCEの空slotPlan救済：normalChat を必ず差し込む（配列を保持）
-    // - Record<string,true> に潰さない（render-v2 が本文を組めなくなる）
-    // - meta.framePlan.slots は “slot objects 配列” を入れる
-    // - slotPlanPolicy を meta / framePlan に必ず伝播
-    // - fallback は「slots が空」or「policy が空」のときだけ（必須）
-    // - ORCHログ用に meta.slotPlanPolicy を同期（null撲滅）
-    // =========================================================
+// =========================================================
+// ✅ slotPlan 配線（counsel → normalChat fallback）
+// - Record<string,true> に潰さない（render-v2 が本文を組めなくなる）
+// - meta.framePlan.slots は “slot objects 配列” を入れる
+// - slotPlanPolicy を meta / framePlan に必ず伝播
+// - fallback は「slots が空」or「policy が空」のときだけ
+// =========================================================
 
-    const slotsRaw = (r as any).slotPlan?.slots ?? (r as any).slotPlan ?? null;
+const slotsRaw = (r as any).slotPlan?.slots ?? (r as any).slotPlan ?? null;
 
-    // 1) まず slots は “配列だけ” を採用（それ以外は null）
-    let slotsArr: any[] | null = Array.isArray(slotsRaw) ? slotsRaw : null;
+// 1) まず slots は “配列だけ” を採用（それ以外は null）
+let slotsArr: any[] | null = Array.isArray(slotsRaw) ? slotsRaw : null;
 
-    // 2) policy 候補
-    const slotPlanPolicyRaw =
-      (r as any).slotPlan?.slotPlanPolicy ??
-      (r as any).slotPlanPolicy ??
-      (r as any)?.framePlan?.slotPlanPolicy ??
-      null;
+// 2) policy 候補
+const slotPlanPolicyRaw =
+  (r as any).slotPlan?.slotPlanPolicy ??
+  (r as any).slotPlanPolicy ??
+  (r as any)?.framePlan?.slotPlanPolicy ??
+  null;
 
-    let slotPlanPolicy: string | null =
-      typeof slotPlanPolicyRaw === 'string' && slotPlanPolicyRaw.trim()
-        ? slotPlanPolicyRaw.trim()
-        : null;
+let slotPlanPolicy: string | null =
+  typeof slotPlanPolicyRaw === 'string' && slotPlanPolicyRaw.trim()
+    ? slotPlanPolicyRaw.trim()
+    : null;
 
-    // 3) SILENCE 判定
-    const speechAct = String((meta as any)?.speechAct ?? '').toUpperCase();
-    const speechAllowLLM = (meta as any)?.speechAllowLLM;
-    const isSilence = speechAct === 'SILENCE' || speechAllowLLM === false;
+// 3) SILENCE 判定
+const speechAct = String((meta as any)?.speechAct ?? '').toUpperCase();
+const speechAllowLLM = (meta as any)?.speechAllowLLM;
+const isSilence = speechAct === 'SILENCE' || speechAllowLLM === false;
 
-    // 4) ✅ fallback 発火条件を絞る（slots 空 OR policy 空 のときだけ）
-    const hasText = String(text ?? '').trim().length > 0;
+// 4) 空判定
+const hasText = String(text ?? '').trim().length > 0;
 
-    const slotsEmpty = !Array.isArray(slotsArr) || slotsArr.length === 0;
-    const policyEmpty =
-      !slotPlanPolicy || String(slotPlanPolicy).trim().length === 0;
+const slotsEmpty = !Array.isArray(slotsArr) || slotsArr.length === 0;
+const policyEmpty = !slotPlanPolicy || String(slotPlanPolicy).trim().length === 0;
 
-    const shouldFallbackNormalChat =
-      !isSilence && hasText && (slotsEmpty || policyEmpty);
+// =========================================================
+// ✅ counsel 配線：normalChat fallback の前に差し込む
+// - mode名の揺れ：'counsel' / 'consult' を両方拾う
+// - stage はまず OPEN 固定（永続化は次工程）
+// =========================================================
+const modeRaw = String((meta as any)?.mode ?? '').toLowerCase();
+const isCounselMode = modeRaw === 'counsel' || modeRaw === 'consult';
 
+if (!isSilence && hasText && isCounselMode && (slotsEmpty || policyEmpty)) {
+  const lastSummary =
+    (ms as any)?.situation_summary ??
+    (ms as any)?.situationSummary ??
+    (memoryState as any)?.situation_summary ??
+    (memoryState as any)?.situationSummary ??
+    (mergedBaseMeta as any)?.situation_summary ??
+    (mergedBaseMeta as any)?.situationSummary ??
+    null;
+
+    console.log('[IROS/ORCH][counsel-picked]', {
+      stage: 'OPEN',
+      hasText: String(text ?? '').trim().length > 0,
+      isSilence,
+      slotsEmpty,
+      policyEmpty,
+      lastSummary_len: typeof lastSummary === 'string' ? lastSummary.length : null,
+    });
+
+
+
+  // ✅ stage はまず OPEN 固定（次に state 永続化を繋ぐ）
+  const counsel = buildCounselSlotPlan({
+    userText: text,
+    stage: 'OPEN',
+    lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
+  });
+
+
+  const cSlots = (counsel as any).slots;
+  slotsArr = Array.isArray(cSlots) ? cSlots : [];
+
+  const cPolicy = (counsel as any).slotPlanPolicy;
+  slotPlanPolicy =
+    typeof cPolicy === 'string' && cPolicy.trim() ? cPolicy.trim() : 'FINAL';
+
+  (meta as any).slotPlanFallback = 'counsel';
+
+  // ★ 観測用（counsel.ts を通った証拠）
+  console.log('[IROS/ORCH][counsel-picked]', {
+    stage: 'OPEN',
+    slotsLen: Array.isArray(slotsArr) ? slotsArr.length : null,
+    policy: slotPlanPolicy,
+  });
+}
+
+// =========================================================
 // 5) fallback（normalChat）
+// - counsel で埋まらなかった場合だけ実行
+// =========================================================
+const shouldFallbackNormalChat =
+  !isSilence && hasText && (slotsEmpty || policyEmpty) && !isCounselMode;
+
 if (shouldFallbackNormalChat) {
-  // ✅ normalChat の repair（取りこぼし復元）に lastSummary を渡す
   const lastSummary =
     (ms as any)?.situation_summary ??
     (ms as any)?.situationSummary ??
@@ -1053,50 +1110,47 @@ if (shouldFallbackNormalChat) {
 
   (meta as any).slotPlanFallback = 'normalChat';
 } else {
-  // ✅ fallback しなかった場合は “残骸” を消す（誤誘導防止）
   if ((meta as any).slotPlanFallback === 'normalChat') {
     delete (meta as any).slotPlanFallback;
   }
 }
 
+// 6) 最終ガード：slots が配列でないなら null
+if (slotsArr != null && !Array.isArray(slotsArr)) {
+  slotsArr = null;
+}
 
-    // 6) 最終ガード：slots が配列でないなら null
-    if (slotsArr != null && !Array.isArray(slotsArr)) {
-      slotsArr = null;
-    }
+// 7) ✅ 参照共有を切る（sameRef を false にする）
+if (Array.isArray(slotsArr)) {
+  slotsArr = slotsArr.slice();
+}
 
-    // 7) ✅ 参照共有を切る（sameRef を false にする）
-    if (Array.isArray(slotsArr)) {
-      slotsArr = slotsArr.slice();
-    }
+// 8) ✅ policy を最後に確定（slots があるなら null を残さない）
+if (!slotPlanPolicy && Array.isArray(slotsArr) && slotsArr.length > 0) {
+  slotPlanPolicy = 'FINAL';
+}
 
-    // 8) ✅ policy を最後に確定（slots があるなら null を残さない）
-    if (!slotPlanPolicy && Array.isArray(slotsArr) && slotsArr.length > 0) {
-      slotPlanPolicy = 'FINAL';
-    }
+// 9) ✅ frame の正は framePlan.frame
+const frameFinal =
+  (r as any)?.framePlan?.frame ??
+  (r as any)?.frame ??
+  (meta as any)?.framePlan?.frame ??
+  (meta as any)?.frame ??
+  null;
 
-    // 9) ✅ frame の正は framePlan.frame
-    const frameFinal =
-      (r as any)?.framePlan?.frame ??
-      (r as any)?.frame ??
-      (meta as any)?.framePlan?.frame ??
-      (meta as any)?.frame ??
-      null;
+// 10) ✅ framePlan は render-v2 が参照する唯一の正
+(meta as any).framePlan = {
+  frame: frameFinal,
+  slots: slotsArr,
+  slotPlanPolicy,
+};
 
-    // 10) ✅ framePlan は render-v2 が参照する唯一の正（重複代入しない）
-    (meta as any).framePlan = {
-      frame: frameFinal,
-      slots: slotsArr, // ✅ render-v2 側はこれ（slot objects 配列）
-      slotPlanPolicy,
-    };
+// 11) ✅ ORCHログ用 “互換キー” を同期（slotPlanPolicy:null を消す）
+(meta as any).slotPlanPolicy = slotPlanPolicy;
 
-    // 11) ✅ ORCHログ用 “互換キー” を同期（slotPlanPolicy:null を消す）
-    (meta as any).slotPlanPolicy = slotPlanPolicy;
+// 12) 互換用 slotPlan は “必ず別参照” にする
+(meta as any).slotPlan = Array.isArray(slotsArr) ? slotsArr.slice() : slotsArr;
 
-    // 12) 互換用 slotPlan は “必ず別参照” にする（sameRef事故を潰す）
-    (meta as any).slotPlan = Array.isArray(slotsArr)
-      ? slotsArr.slice()
-      : slotsArr;
 
     // 13) T系の戻り値は meta に反映（あれば）
     if (typeof (r as any).tLayerModeActive === 'boolean') {
