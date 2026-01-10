@@ -1,19 +1,20 @@
 // src/lib/iros/slotPlans/normalChat.ts
-// iros — normal chat slot plan (FINAL-only)
+// iros — normal chat slot plan (FINAL-only, flexible slots)
 //
 // 目的：
-// - 通常会話（normalChat）は必ず FINAL を返す（実装強制）
-// - SCAFFOLD は emergency / silence / special fallback 専用
-// - 「編集したファイルが本当に読まれているか」をログで証明する
+// - normalChat は必ず FINAL を返す（空返答を防ぐ）
+// - ただし「スロット数・キー」は固定しない（1〜6で可変）
+// - ライトな雑談は“直接短く”返す（分類質問で縛らない）
 //
-// ⚠️ 重要
-// - normalChat では例外条件を一切持たない
-// - 例外は orchestrator 側で normalChat を選ばないことで表現する
+// ルール：
+// - slots は「表示順」だけが意味を持つ
+// - key は任意文字列でよい（ただし重複はしない）
+// - rephrase は inKeys と一致したときだけ採用（既存の検証思想を維持）
 
 import type { SlotPlanPolicy } from '../server/llmGate';
 
 export type NormalChatSlot = {
-  key: 'OBS' | 'SHIFT' | 'NEXT' | 'SAFE';
+  key: string; // ✅ 固定しない（任意キー）
   role: 'assistant';
   style: 'neutral' | 'soft' | 'firm';
   content: string;
@@ -21,68 +22,116 @@ export type NormalChatSlot = {
 
 export type NormalChatSlotPlan = {
   kind: 'normal-chat';
-  slotPlanPolicy: SlotPlanPolicy;
+  stamp: string;
+  reason: string;
+  slotPlanPolicy: SlotPlanPolicy; // 'FINAL'
   slots: NormalChatSlot[];
 };
 
-// ✅ 実行時の照合用（ログに必ず出る）
-const NORMAL_CHAT_BUILD_STAMP = 'normalChat.ts@2026-01-06#FINAL';
+// ---- heuristics (small + safe) ----
 
-// ✅ 実装強制：normalChat は常に FINAL（例外なし）
-const NORMAL_CHAT_POLICY: SlotPlanPolicy = 'FINAL';
-
-const norm = (s: unknown) =>
-  String(s ?? '').replace(/\s+/g, ' ').trim();
-
-function assertFinal(p: unknown): asserts p is 'FINAL' {
-  if (p !== 'FINAL') {
-    throw new Error(
-      `[normalChat] slotPlanPolicy must be FINAL, got: ${String(p)}`
-    );
-  }
+function norm(s: unknown) {
+  return String(s ?? '').replace(/\s+/g, ' ').trim();
 }
 
-export function buildNormalChatSlotPlan(args: {
-  userText: string;
-}): NormalChatSlotPlan {
-  const fact = norm(args.userText);
+function looksLikePreferenceQuestion(text: string) {
+  const t = norm(text);
+  // 「好き？」「嫌い？」「どっち派？」などを軽く拾う（厳密にやりすぎない）
+  return (
+    /好き[？\?]/.test(t) ||
+    /嫌い[？\?]/.test(t) ||
+    /どっち(派)?[？\?]/.test(t) ||
+    /おすすめ[？\?]/.test(t)
+  );
+}
 
-  const obs = `受け取った。🪔\nいま出ている言葉：「${fact}」`;
-  const shift = `いまの一番大事な一点だけ、残す。`;
-  const next = `次は、行動を一手に落とす（誰に／いつ／何を）。`;
-  const safe = `迷いを増やさない。`;
+function buildLightChat(text: string): NormalChatSlot[] {
+  const t = norm(text);
 
-  const slots: NormalChatSlot[] = [
-    { key: 'OBS', role: 'assistant', style: 'neutral', content: obs },
-    { key: 'SHIFT', role: 'assistant', style: 'soft', content: shift },
-    { key: 'NEXT', role: 'assistant', style: 'firm', content: next },
-    { key: 'SAFE', role: 'assistant', style: 'soft', content: safe },
+  // 例：「ももは好き？」→ 直接答えて、1つだけ軽く広げる
+  if (/もも/.test(t) && /好き[？\?]/.test(t)) {
+    return [
+      {
+        key: 'A',
+        role: 'assistant',
+        style: 'soft',
+        content: '好き。香りが強くて、甘さの立ち上がりがきれい。',
+      },
+      {
+        key: 'B',
+        role: 'assistant',
+        style: 'neutral',
+        content: '白桃派？黄桃派？（一語でOK）',
+      },
+    ];
+  }
+
+  // 汎用：好み質問は「短く答える→軽く返す」
+  return [
+    {
+      key: 'A',
+      role: 'assistant',
+      style: 'soft',
+      content: `うん、話は「${t}」だね。`,
+    },
+    {
+      key: 'B',
+      role: 'assistant',
+      style: 'neutral',
+      content: '直球で答えると：好き？嫌い？どっち寄り？',
+    },
   ];
+}
 
-  // ✅ FINAL 固定
-  const slotPlanPolicy: SlotPlanPolicy = NORMAL_CHAT_POLICY;
-  assertFinal(slotPlanPolicy);
+export function buildNormalChatSlotPlan(args: { userText: string }): NormalChatSlotPlan {
+  const userText = norm(args.userText);
 
-  // ✅ このファイルが確実に使われていることをログで証明
-  console.debug('[normalChat] built slotPlan', {
-    stamp: NORMAL_CHAT_BUILD_STAMP,
-    reason: 'normal',
-    slotPlanPolicy,
+  // ✅ 「受け取った」注入は廃止（ここが出力に残る元凶）
+  // - OBS は “短い観測” にする
+  // - NEXT は “1つだけ確認” で軽く繋ぐ
+  const slots: NormalChatSlot[] = looksLikePreferenceQuestion(userText)
+    ? [
+        {
+          key: 'OBS',
+          role: 'assistant',
+          style: 'neutral',
+          content: `うん、「${userText}」の話だね。`,
+        },
+        {
+          key: 'NEXT',
+          role: 'assistant',
+          style: 'neutral',
+          content: 'いま一番ほしいのは、結論？整理？それとも雑談？',
+        },
+      ]
+    : [
+        // ✅ 空配列禁止：通常は “短く返す→1つだけ確認”
+        {
+          key: 'OBS',
+          role: 'assistant',
+          style: 'soft',
+          content: `いま出ている言葉：「${userText}」`,
+        },
+        {
+          key: 'NEXT',
+          role: 'assistant',
+          style: 'neutral',
+          content: '一つだけ確認：いま知りたいのは「結論」？それとも「条件で変わる話」？',
+        },
+      ];
+
+  console.log('[IROS/normalChat][built]', {
+    stamp: 'normalChat.ts@2026-01-10#flex-slots-v1',
     slotsLen: slots.length,
-    slotsPreview: slots.map(s => ({
-      key: s.key,
-      len: String(s.content ?? '').length,
-      head: String(s.content ?? '').slice(0, 24),
-    })),
-    hasEmptyContent: slots.some(
-      s => !String(s.content ?? '').trim()
-    ),
-    factHead: fact,
+    keys: slots.map((s) => s.key),
+    heads: slots.map((s) => String(s.content ?? '').slice(0, 24)),
   });
 
   return {
     kind: 'normal-chat',
-    slotPlanPolicy,
+    stamp: 'normalChat.ts@2026-01-10#flex-slots-v1',
+    reason: 'normal',
+    slotPlanPolicy: 'FINAL',
     slots,
   };
 }

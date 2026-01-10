@@ -463,23 +463,8 @@ function getSlotPlanPolicy(extra: any): string | null {
 function applyOpenCloseForFinal(blocks: RenderBlock[], opts: { maxLinesFinal: number }) {
   const maxLinesFinal = Math.max(1, Math.floor(opts.maxLinesFinal));
 
-  const OPEN = String(process.env.IROS_RENDER_OPEN_TEXT ?? '').trim();
-
-  // ✅ CLOSE は固定ではなく「お決まり候補」から選ぶ（意味を足さない終止符）
-  const CLOSE_POOL = [
-    'ここまででOK。',
-    'いまの地点でOK。',
-    'ここまでで良し。',
-    'このまま置いておこう。',
-    'いったん整った。',
-    'ここでOK。',
-    'ひと区切り。',
-    '余白を残す。',
-    '静かに戻る。',
-    'ここに止める。',
-    'ここで止める。',
-    'ここまで。',
-  ] as const;
+  const OPEN = '受け取った。';
+  const CLOSE = '呼吸を戻す。';
 
   const normalize = (t: unknown) =>
     norm(t)
@@ -487,18 +472,8 @@ function applyOpenCloseForFinal(blocks: RenderBlock[], opts: { maxLinesFinal: nu
       .replace(/\s+/g, '')
       .trim();
 
-  const isOpenLike = (t: unknown) => (OPEN ? normalize(t).startsWith(OPEN) : false);
-
-  // ✅ どれかの CLOSE 候補で始まっていれば「CLOSEが既にある」とみなす
-  const isCloseLike = (t: unknown) => {
-    const x = normalize(t);
-    return CLOSE_POOL.some((c) => x.startsWith(normalize(c)));
-  };
-
-  const pickClose = () => {
-    const i = Math.floor(Math.random() * CLOSE_POOL.length);
-    return CLOSE_POOL[i] ?? CLOSE_POOL[0];
-  };
+  const isOpenLike = (t: unknown) => normalize(t).startsWith(OPEN);
+  const isCloseLike = (t: unknown) => normalize(t).startsWith(CLOSE);
 
   // ① OPEN は先頭側の1つだけ残して、それ以外の重複を“その場で”削除
   let seenOpen = false;
@@ -515,24 +490,17 @@ function applyOpenCloseForFinal(blocks: RenderBlock[], opts: { maxLinesFinal: nu
 
   // ② OPEN が無ければ先頭に追加
   if (!seenOpen) {
-    if (OPEN) blocks.unshift({ text: OPEN });
+    blocks.unshift({ text: OPEN });
   }
 
-  // ③ CLOSE は “十分に長い返答” のときだけ、🪔 用に1行残しているとき末尾に1つ
+  // ③ CLOSE は 🪔 用に1行残しているときだけ末尾に1つ
   const hasClose = blocks.some((b) => isCloseLike((b as any)?.text));
   const nonEmptyNow = blocks.map((b) => norm((b as any)?.text)).filter(Boolean);
 
-  const MIN_LINES_FOR_CLOSE = 4;
-
-  if (
-    !hasClose &&
-    nonEmptyNow.length >= MIN_LINES_FOR_CLOSE &&
-    nonEmptyNow.length < maxLinesFinal - 1
-  ) {
-    blocks.push({ text: pickClose() });
+  if (!hasClose && nonEmptyNow.length < maxLinesFinal - 1) {
+    blocks.push({ text: CLOSE });
   }
 }
-
 
 export function renderGatewayAsReply(args: {
   extra?: any | null;

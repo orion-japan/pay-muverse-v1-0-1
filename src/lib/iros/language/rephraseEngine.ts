@@ -112,6 +112,20 @@ type RephraseOptions = {
   model: string;
   temperature?: number;
   maxLinesHint?: number; // 全体行数の目安
+
+  /**
+   * ✅ 追加：直前のユーザー入力（このターンの生テキスト）
+   * - これが入ると OBS の “引用” に頼らず「何に答えてるか」を固定できる
+   * - 未指定なら OBS から「ユーザー文引用」を抽出して使う（従来通り）
+   */
+  userText?: string | null;
+
+  /**
+   * ✅ 追加：直前user文脈メモ（1〜2行推奨）
+   * - “意味追加” ではなく、どの質問/主題へ答えるかのブレ止め
+   * - 未指定なら渡さない
+   */
+  userContext?: string | null;
 };
 
 type RephraseResult =
@@ -160,37 +174,114 @@ function extractQuotedUserTextFromObs(obsText: string): string | null {
   return null;
 }
 
+/* =========================================================
+ * ✅ “柔軟性” のためのヒント設計
+ * - ここは意味追加ではなく「書き方の幅」だけを与える
+ * ======================================================= */
+
+type LenTier = 'short' | 'medium' | 'long';
+type NextKind = 'action' | 'dialogue';
+
+type SlotHint = {
+  key: string;
+  len: LenTier;
+  // NEXTが毎回「行動」固定だと会話が死ぬので二系統にする
+  nextKind?: NextKind;
+};
+
+function guessLenTier(allText: string, opts?: { maxLinesHint?: number }): LenTier {
+  // maxLinesHint が低いなら短めに寄せる
+  const maxLinesHint = typeof opts?.maxLinesHint === 'number' ? opts!.maxLinesHint : null;
+  if (maxLinesHint != null && maxLinesHint <= 4) return 'short';
+
+  const n = norm(allText).length;
+  if (n <= 60) return 'short';
+  if (n <= 180) return 'medium';
+  return 'long';
+}
+
+function guessNextKindFromSeed(nextSeed: string): NextKind {
+  const t = norm(nextSeed);
+  // 「誰に／いつ／何を」系が含まれるなら行動スロットとして扱う
+  if (
+    t.includes('誰に') ||
+    t.includes('いつ') ||
+    t.includes('何を') ||
+    t.includes('一手') ||
+    t.includes('行動')
+  ) {
+    return 'action';
+  }
+  // それ以外は会話の次（確認/選択/質問）として扱う
+  return 'dialogue';
+}
+
+function buildSlotHints(slots: Slot[], opts?: { maxLinesHint?: number }): SlotHint[] {
+  const joined = slots.map((s) => s.text).join('\n');
+  const base = guessLenTier(joined, opts);
+
+  return slots.map((s) => {
+    const key = s.key;
+
+    // 基本はbaseに従うが、SAFEは短めに、OBSは状況で中〜短
+    let len: LenTier = base;
+    if (key === 'SAFE') len = base === 'long' ? 'medium' : 'short';
+    if (key === 'OBS' && base === 'long') len = 'medium';
+
+    const hint: SlotHint = { key, len };
+
+    if (key === 'NEXT') {
+      hint.nextKind = guessNextKindFromSeed(s.text);
+      // actionの時は長くしすぎると説教になるので最大medium
+      if (hint.nextKind === 'action' && len === 'long') hint.len = 'medium';
+    }
+
+    return hint;
+  });
+}
+
 function buildGenerateSystem(opts?: { maxLinesHint?: number }) {
   const maxLinesHint = typeof opts?.maxLinesHint === 'number' ? opts!.maxLinesHint : null;
 
   return [
     'あなたは「理解された」と感じる文章に整える“表現担当”です。',
-    'ただし、判断・助言・新しい意味の追加は禁止されています。',
+    'ただし、判断・助言・新しい意味の追加は禁止されています（推測・一般論・説教・診断は禁止）。',
     '',
-    '入力には slot（OBS / SHIFT / NEXT / SAFE …）のキーと、元テキストが渡されます。',
-    'あなたは元テキストを言い換えるのではなく、',
-    '同じ意味・同じ役割を保ったまま、自然な会話文として新規に書き起こしてください。',
+    '入力には slot（OBS / SHIFT / NEXT / SAFE …）のキーと元テキスト、そして slot_hints が渡されます。',
+    '必要なら user_said（直前ユーザー入力の要約/引用）と user_context（直前文脈メモ）が渡されます。',
+    'あなたは元テキストと同じ意味・同じ役割を保ったまま、自然な会話文として書き起こしてください。',
     '',
     '【絶対条件】',
-    '- スロットの数・順序・キーは完全一致させる（増減・並び替え・キー変更は禁止）',
-    '- 事実・意味の追加は禁止（推測・一般論・評価・説教・診断・因果の捏造をしない）',
-    '- NEXT以外で新しい行動提案をしない',
+    '- スロットの数・順序・キーは完全一致（増減・並び替え・キー変更は禁止）',
+    '- 事実・意味の追加は禁止（答えを捏造しない）',
+    '- 元テキストの意図を勝手に“強化/弱体化”しない',
+    '',
+    '【最重要：直答の保持】',
+    '- 元テキストが「質問への答え」になっている場合、OBSで必ず直答を保つ（例：時期/結論/定義/Yes/No）。',
+    '- OBSを「〜について知りたいんだね」「考えよう」などの観測語りに置き換えない。',
+    '- “質問→答え”の軸を壊さない。必要なら短い補足は可。ただし新情報の追加は禁止。',
     '',
     '【テンプレ禁止（最重要）】',
     '- 次のような決まり文句をそのまま使わない：',
     '  「受け取った」「いま出ている言葉」「いまの一点だけ」',
-    '  「次は一手だけ」「迷いを増やさない」「呼吸を戻す」など',
+    '  「次は一手だけ」「迷いを増やさない」「呼吸を戻す」「必要な情報だけ」など',
     '- 同じ意味でも、毎回必ず別の自然な言い回しにする',
     '',
     '【スロット役割（厳守）】',
-    '- OBS：ユーザー発言の要点を“観測として”短く写す（1〜2文）',
-    '- SHIFT：いま残す焦点を1文で示す',
-    '- NEXT：行動を1つに落とす（誰に／いつ／何を）。不足は空欄のまま明示してよい',
-    '- SAFE：圧を下げる一言。評価しない',
+    '- OBS：元テキストの役割を保持する。直答がある場合は直答を先頭に置く（1〜2文）。',
+    '- SHIFT：OBSを補助する“見る点”を1文で示す。新しい論点を作らない。',
+    '- NEXT：slot_hints.nextKind に従う。',
+    '  - nextKind="action"：行動を1つに落とす（誰に／いつ／何を）。不足は空欄のまま明示してよい。',
+    '  - nextKind="dialogue"：会話の次を1つに絞る（確認する/選ぶ/短い質問を返す）。行動提案はしない。',
+    '- SAFE：圧を下げる一言（評価しない/命令しない）。',
+    '',
+    '【長さの柔軟性】',
+    '- slot_hints.len に従い、短/中/長を調整する。',
+    '  - short: 1文中心 / medium: 1〜2文 / long: 2〜3文（だらだら説明しない）',
     '',
     '【文章スタイル】',
     '- 日本語の自然な会話',
-    '- 説明しすぎないが、抽象にも逃げない',
+    '- 抽象に逃げない。口調は落ち着いて、説得ではなく納得。',
     '- 記号（🪔など）へのこだわりは不要',
     '',
     '【出力形式（厳守）】',
@@ -230,10 +321,44 @@ function validateOut(inKeys: string[], out: any): Slot[] | null {
     outSlots.push({ key, text });
   }
 
-  if (outSlots.length !== inKeys.length) return null;
-
+  // キー集合の一致（完全一致・順序一致）
+  const outKeys = outSlots.map((x) => x.key);
+  if (outKeys.length !== inKeys.length) return null;
   for (let i = 0; i < inKeys.length; i++) {
-    if (outSlots[i].key !== inKeys[i]) return null;
+    if (outKeys[i] !== inKeys[i]) return null;
+  }
+
+  // =========================================================
+  // ✅ 禁句フィルタ：テンプレ臭が出たら “黙って破棄”
+  // =========================================================
+  const FORBIDDEN_PHRASES: string[] = [
+    '受け取った',
+    'いま出ている言葉',
+    'いまの一点だけ',
+    '次は一手だけ',
+    '迷いを増やさない',
+    '呼吸を戻す',
+    '必要な情報だけ',
+    '大丈夫だよ',
+    '気軽に考えて',
+  ];
+
+  const FORBIDDEN_PATTERNS: RegExp[] = [
+    /今のポイントは.+ということですね/,
+    /〜について(知ってる|知りたい|尋ねてる)ね/,
+    /大切だね$/,
+    /考えましょう$/,
+  ];
+
+  for (const s of outSlots) {
+    const t = norm(s.text);
+
+    for (const p of FORBIDDEN_PHRASES) {
+      if (p && t.includes(p)) return null;
+    }
+    for (const r of FORBIDDEN_PATTERNS) {
+      if (r.test(t)) return null;
+    }
   }
 
   return outSlots;
@@ -271,13 +396,26 @@ export async function rephraseSlotsFinal(
 
   const inKeys = extracted.keys;
 
+  // ✅ 直前user文脈（優先順位）
+  // 1) opts.userText（呼び出し側から渡される “このターンの user”）
+  // 2) OBS から抽出した引用
+  // 3) null
   const obs = extracted.slots.find((s) => s.key === 'OBS')?.text ?? '';
-  const userQuoted = extractQuotedUserTextFromObs(obs);
+  const userQuotedFromObs = extractQuotedUserTextFromObs(obs);
+  const user_said = norm(opts.userText ?? '') || userQuotedFromObs;
+
+  const user_context = norm(opts.userContext ?? '') || null;
+
+  const slot_hints = buildSlotHints(extracted.slots, { maxLinesHint: opts.maxLinesHint });
 
   const system = buildGenerateSystem({ maxLinesHint: opts.maxLinesHint });
 
   const payload = {
-    user_said: userQuoted,
+    // ✅ “何に答えるか”固定用（意味追加ではない）
+    user_said: user_said || null,
+    user_context,
+
+    slot_hints,
     slots: extracted.slots.map((s) => ({ key: s.key, text: s.text })),
   };
 
@@ -291,8 +429,11 @@ export async function rephraseSlotsFinal(
     model: opts.model,
     messages,
     temperature: typeof opts.temperature === 'number' ? opts.temperature : 0.55,
-    response_format: { type: 'json_object' },
-  } as any);
+
+    // ✅ chatComplete.ts 側の引数名は responseFormat
+    // （ここが response_format だと JSON強制が効かず VALIDATION_FAILED が増える）
+    responseFormat: { type: 'json_object' },
+  });
 
   const rawLen = norm(raw).length;
   const rawHead = head(raw);

@@ -10,7 +10,7 @@ function run(title: string, args: any) {
 
 // 1) 文中🪔が残るべきケース
 run('A: inline 🪔 should stay', {
-  content: '受け取った。🪔\n次は一手だけ。\n🪔',
+  content: 'OK。🪔\n次は一手だけ。\n🪔',
   extra: { renderEngine: true, framePlan: { slotPlanPolicy: 'FINAL' } },
   maxLines: 8,
 });

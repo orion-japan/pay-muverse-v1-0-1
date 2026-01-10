@@ -21,6 +21,7 @@ import { postProcessReply } from './handleIrosReply.postprocess';
 
 import { runGenericRecallGate } from '@/lib/iros/server/gates/genericRecallGate';
 import { writeIT } from '@/lib/iros/language/itWriter';
+import { resolveRememberBundle } from '@/lib/iros/remember/resolveRememberBundle';
 
 import {
   // ✅ assistant保存はしない
@@ -1155,6 +1156,34 @@ export async function handleIrosReply(
       crossLimit: 60,
       maxTotal: 80,
     });
+
+
+// --- 1.0) Remember (period bundle) ---
+let rememberTextForIros: string | null = null;
+
+if (rememberScope) {
+  try {
+    const resolved = await resolveRememberBundle({
+      supabase: supabase,
+      userCode,
+      tenantId,
+      scopeKind: rememberScope,
+      maxLogsForSummary: 80,
+    });
+
+    rememberTextForIros = resolved?.textForIros ?? null;
+
+    console.log('[IROS/Remember] resolved', {
+      userCode,
+      rememberScope,
+      hasText: Boolean(rememberTextForIros),
+      bundleId: resolved?.bundle?.id ?? null,
+    });
+  } catch (e) {
+    console.warn('[IROS/Remember] resolve failed', { userCode, rememberScope, error: e });
+  }
+}
+
 
     /* ---------------------------
        1.1) Goal recall gate（ENV=1 かつ 質問一致のときだけ）

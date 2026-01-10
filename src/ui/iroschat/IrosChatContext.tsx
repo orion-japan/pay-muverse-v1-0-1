@@ -255,7 +255,8 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
     });
   }, []);
 
- // ✅ IrosChatContext.tsx 内（sendMessage の直前あたり）に追加
+// ✅ IrosChatContext.tsx（IrosChatProvider 内）
+// fetchMessages の下あたりに追加（同一ファイル内ならどこでもOK）
 
 function normalizeForSend(raw: string): { text: string; blockedReason: string | null } {
   const s = String(raw ?? '');
@@ -270,79 +271,91 @@ function normalizeForSend(raw: string): { text: string; blockedReason: string | 
   if (!stripped) return { text: '', blockedReason: 'empty' };
 
   // 省略記号だけ
-  if (stripped === '…' || stripped === '……' || /^…+$/.test(stripped))
+  if (stripped === '…' || stripped === '……' || /^…+$/.test(stripped)) {
     return { text: '', blockedReason: 'ellipsis' };
+  }
 
   // ドットだけ
-  if (stripped === '...' || /^\.{3,}$/.test(stripped))
+  if (stripped === '...' || /^\.{3,}$/.test(stripped)) {
     return { text: '', blockedReason: 'dots' };
+  }
 
   return { text: stripped, blockedReason: null };
 }
 
-// ✅ sendMessage を差し替え（この1箇所だけ）
 const sendMessage = useCallback(
   async (text: string, mode: string = 'auto'): Promise<SendResult> => {
     const cid = activeConversationIdRef.current;
     if (!cid) return null;
 
-    // ✅ 最終防衛（ここで止める）
-    const norm = normalizeForSend(text);
-    if (norm.blockedReason) {
-      console.warn('[IROS] sendMessage blocked', {
-        reason: norm.blockedReason,
-        head: String(text ?? '').slice(0, 40),
-        cid,
-      });
+    console.log('[UI/sendMessage] outbound(raw)', {
+      cid,
+      mode,
+      textLen: text?.length ?? 0,
+      head: String(text ?? '').slice(0, 120),
+    });
 
-      // ChatInput が理由表示に使えるよう返す（UIはメッセージ追加しない）
-      return {
-        assistant: '',
-        meta: { blocked: true, reason: norm.blockedReason },
-      };
+    const norm = normalizeForSend(text);
+
+    if (norm.blockedReason) {
+      console.warn('[UI/sendMessage] blocked', {
+        cid,
+        mode,
+        reason: norm.blockedReason,
+        rawHead: String(text ?? '').slice(0, 120),
+      });
+      return { assistant: '', meta: { blocked: true, reason: norm.blockedReason } };
     }
+
+    console.log('[UI/sendMessage] outbound(norm)', {
+      cid,
+      mode,
+      textLen: norm.text.length,
+      head: norm.text.slice(0, 120),
+    });
 
     setLoading(true);
 
-    const safeText = norm.text;
-
+    // ① UIに user を即反映（ここが無いと「送ったのに増えない」になる）
     const userMsg: IrosMessage = {
       id: crypto.randomUUID(),
       role: 'user',
-      text: safeText,
-      content: safeText,
+      text: norm.text,
+      content: norm.text,
       created_at: new Date().toISOString(),
       ts: Date.now(),
     } as IrosMessage;
 
     try {
-      // ① user メッセージをローカルに即反映
       setMessages((m) => [...m, userMsg]);
 
-      // DB に user メッセージ保存
+      // ② DBへ保存
+      console.log('[UI/sendMessage] BEFORE postMessage', { cid });
       await irosClient.postMessage({
         conversationId: cid,
-        text: safeText,
+        text: norm.text,
         role: 'user',
       });
+      console.log('[UI/sendMessage] AFTER postMessage', { cid });
 
-      // ✅ LLM に渡す history
-      const history = buildHistoryForLLM(
-        [...(messagesRef.current || []), userMsg],
-        10,
-      );
+      // ③ LLM用 history を作る（既存の関数を使う）
+      const history = buildHistoryForLLM([...(messagesRef.current || []), userMsg], 10);
 
+      // ④ reply を生成＋保存（ここが無いと「iros返答が出ない」）
+      console.log('[UI/sendMessage] BEFORE replyAndStore', { cid, mode });
       const r: any = await irosClient.replyAndStore({
         conversationId: cid,
-        user_text: safeText,
+        user_text: norm.text,
         mode,
         style,
         history,
-      } as any);
+      });
+      console.log('[UI/sendMessage] AFTER replyAndStore', { cid });
 
       const assistant = normalizeText(r?.assistant ?? '');
       const meta = r?.meta ?? null;
 
+      // ⑤ UIに assistant を反映
       setMessages((m) => [
         ...m,
         {
@@ -357,9 +370,10 @@ const sendMessage = useCallback(
       ]);
 
       await reloadConversations();
+
       return { assistant, meta: meta ?? undefined };
     } catch (e) {
-      console.error('[IROS] sendMessage failed', e);
+      console.error('[UI/sendMessage] failed', e);
       return null;
     } finally {
       setLoading(false);

@@ -13,7 +13,10 @@
 
 import crypto from 'node:crypto';
 
-export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
+export type ChatMessage = {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+};
 
 export type ChatPurpose = 'writer' | 'judge' | 'digest' | 'title' | 'soul' | 'reply';
 
@@ -25,7 +28,7 @@ type ChatArgs = {
   // ✅ 必須（用途でログ/制御する）
   purpose: ChatPurpose;
 
-  // ✅ 必須
+  // ✅ 必須（会話履歴はここに全部入れて渡す）
   messages: ChatMessage[];
 
   // ✅ 推奨：envで統一（未指定なら fallback）
@@ -100,6 +103,36 @@ function makeCallId() {
   return crypto.randomBytes(6).toString('hex');
 }
 
+// ✅ 監査用：messagesの先頭/末尾断片を安全に出す（履歴が入ってるかの証拠）
+function head(s: string, n = 60) {
+  const t = String(s ?? '').replace(/\s+/g, ' ').trim();
+  return t.length > n ? t.slice(0, n) + '…' : t;
+}
+function tail(s: string, n = 60) {
+  const t = String(s ?? '').replace(/\s+/g, ' ').trim();
+  return t.length > n ? '…' + t.slice(-n) : t;
+}
+
+function validateMessages(messages: ChatMessage[]) {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    throw new Error('chatComplete: messages is required');
+  }
+  // 先頭 system 推奨（必須化はしないが、監査ログで見える）
+  // role と content は最低限の整合性のみ
+  for (let i = 0; i < messages.length; i++) {
+    const m: any = messages[i];
+    const r = String(m?.role ?? '');
+    const c = String(m?.content ?? '');
+    if (r !== 'system' && r !== 'user' && r !== 'assistant') {
+      throw new Error(`chatComplete: invalid role at messages[${i}] = ${r}`);
+    }
+    if (!c.trim()) {
+      // 空メッセージは原則禁止（履歴生成のバグを早期検知）
+      throw new Error(`chatComplete: empty content at messages[${i}] (${r})`);
+    }
+  }
+}
+
 export async function chatComplete(args: ChatArgs): Promise<string> {
   const {
     purpose,
@@ -119,14 +152,13 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
 
   if (!apiKey) throw new Error('OPENAI_API_KEY is missing');
   if (!purpose) throw new Error('chatComplete: purpose is required');
-  if (!Array.isArray(messages) || messages.length === 0) {
-    throw new Error('chatComplete: messages is required');
-  }
+
+  validateMessages(messages);
 
   const callId = makeCallId();
   const started = nowMs();
 
-  // ✅ 任意の強制ガード：SCAFFOLD で writer を呼ぶのは設計違反（最短方針A）
+  // ✅ 任意の強制ガード：SCAFFOLD で writer を呼ぶのは設計違反
   // - IROS_LLM_GUARD=0 で無効化（本番など）
   const guardOn = process.env.IROS_LLM_GUARD !== '0';
   if (guardOn && audit?.slotPlanPolicy === 'SCAFFOLD' && purpose === 'writer') {
@@ -150,7 +182,7 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
 
   const body: Record<string, any> = {
     model,
-    messages,
+    messages, // ✅ 会話履歴はここで確実に渡す
     temperature,
     max_tokens,
     ...extraBody,
@@ -162,32 +194,60 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
 
   // ✅ 監査ログ（CALLの事実を必ず残す）
   // - 「writer が一度も呼ばれていない」証拠化は、このログを grep するだけで成立する
-// ✅ 監査ログ（CALLの事実を必ず残す）
-try {
-  // 呼び出し元（1行だけ）を入れる
-  // stack例: "Error\n  at chatComplete (...)\n  at <CALLER> ..."
-  const caller =
-    new Error().stack?.split('\n')?.[2]?.trim() ?? null;
+  try {
+    const caller = new Error().stack?.split('\n')?.[2]?.trim() ?? null;
 
-  // eslint-disable-next-line no-console
-  console.log('[IROS/LLM][CALL]', {
-    callId,
-    purpose,
-    model,
-    temperature,
-    responseFormat: responseFormat?.type ?? 'text',
-    endpoint,
-    traceId: trace?.traceId ?? null,
-    conversationId: trace?.conversationId ?? null,
-    userCode: trace?.userCode ?? null,
-    slotPlanPolicy: audit?.slotPlanPolicy ?? null,
-    mode: audit?.mode ?? null,
-    qCode: audit?.qCode ?? null,
-    depthStage: audit?.depthStage ?? null,
-    msgCount: Array.isArray(messages) ? messages.length : 0,
-    caller,
-  });
-} catch {}
+    const first = messages?.[0];
+    const last = messages?.[messages.length - 1];
+
+    // ✅ 「履歴要約」や「状態キー」を system で渡せているか（雑でも良いので証拠）
+    const hasDigest =
+      messages?.some(
+        (m) =>
+          m.role === 'system' &&
+          /history(digest|summary)|situation[_\s-]?summary/i.test(m.content),
+      ) ?? false;
+
+    const hasAnchor =
+      messages?.some(
+        (m) =>
+          m.role === 'system' &&
+          /intent[_\s-]?anchor|fixedNorth|itx[_\s-]?step|itx[_\s-]?reason/i.test(m.content),
+      ) ?? false;
+
+    // eslint-disable-next-line no-console
+    console.log('[IROS/LLM][CALL]', {
+      callId,
+      purpose,
+      model,
+      temperature,
+      responseFormat: responseFormat?.type ?? 'text',
+      endpoint,
+      traceId: trace?.traceId ?? null,
+      conversationId: trace?.conversationId ?? null,
+      userCode: trace?.userCode ?? null,
+      slotPlanPolicy: audit?.slotPlanPolicy ?? null,
+      mode: audit?.mode ?? null,
+      qCode: audit?.qCode ?? null,
+      depthStage: audit?.depthStage ?? null,
+
+      // ✅ “履歴が入っているか”検証用（ここが今回の追加）
+      len: messages.length,
+      firstRole: first?.role ?? null,
+      lastRole: last?.role ?? null,
+      firstHead: first ? head(first.content) : null,
+      lastTail: last ? tail(last.content) : null,
+      hasDigest,
+      hasAnchor,
+
+      // 既存ログ（残す）
+      msgCount: messages.length,
+      roles: messages.map((m) => m.role),
+      lastUserHead:
+        [...messages].reverse().find((m) => m.role === 'user')?.content?.slice(0, 80) ?? null,
+      caller,
+    });
+  } catch {}
 
   const res = await fetch(endpoint, {
     method: 'POST',
@@ -203,8 +263,9 @@ try {
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    // ✅ ここで purpose/trace/audit を必ず残す（原因追跡）
-    const errMsg = `LLM HTTP ${res.status} (${purpose}) ${trace?.traceId ? `[trace:${trace.traceId}] ` : ''}${text}`;
+    const errMsg = `LLM HTTP ${res.status} (${purpose}) ${
+      trace?.traceId ? `[trace:${trace.traceId}] ` : ''
+    }${text}`;
     // eslint-disable-next-line no-console
     console.error('[IROS/LLM][ERR]', {
       callId,
@@ -270,9 +331,6 @@ try {
     });
     throw new Error(`LLM empty content (${purpose})`);
   }
-
-  const caller = new Error().stack?.split('\n')?.[2]?.trim() ?? null;
-
 
   // ✅ 観測ログ（必要十分）
   try {

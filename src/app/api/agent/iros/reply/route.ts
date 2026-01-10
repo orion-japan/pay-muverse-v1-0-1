@@ -1208,6 +1208,7 @@ await maybeAttachRephraseForRenderV2({
   conversationId,
   userCode,
   meta,
+  userText: text,   // ✅ ここで渡す
   extraMerged,
 });
 
@@ -1935,6 +1936,7 @@ async function maybeAttachRephraseForRenderV2(args: {
   conversationId: string;
   userCode: string;
   meta: any;
+  userText?: string;   // ✅ 追加
   extraMerged: Record<string, any>;
 }) {
   const { conversationId, userCode, meta, extraMerged } = args;
@@ -1974,14 +1976,19 @@ async function maybeAttachRephraseForRenderV2(args: {
     process.env.IROS_MODEL ??
     'gpt-4.1';
 
-  const res = await rephraseSlotsFinal(extracted, {
-    model,
-    temperature: 0.2,
-    // 6〜8段の “段数崩れ” 防止。未設定なら render maxLines or 8。
-    maxLinesHint: Number.isFinite(Number(process.env.IROS_RENDER_DEFAULT_MAXLINES))
-      ? Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)
-      : 8,
-  });
+    const res = await rephraseSlotsFinal(extracted, {
+      model,
+      temperature: 0.2,
+      maxLinesHint: Number.isFinite(Number(process.env.IROS_RENDER_DEFAULT_MAXLINES))
+        ? Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)
+        : 8,
+
+      // ✅ args から受け取る
+      userText: args.userText ?? null,
+      userContext: null,
+    });
+
+
 
   if (!res.ok) {
     console.warn('[IROS/rephrase][SKIP]', {

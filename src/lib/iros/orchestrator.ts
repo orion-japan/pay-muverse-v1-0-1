@@ -727,51 +727,75 @@ export async function runIrosTurn(
       tVector: it.tVector,
     });
 
-    // =========================================================
-    // ✅ Single source：IT結果を “camel + snake” に同時反映（矛盾ゼロ）
-    // =========================================================
-    const itOk = it.ok === true;
-    const itReason = it.reason ?? null;
+// =========================================================
+// ✅ Single source：IT結果を “camel + snake” に同時反映（矛盾ゼロ）
+// =========================================================
+const itOk = it.ok === true;
+const itReason = it.reason ?? null;
 
-    // ok/reason：camel + snake
-    (meta as any).itTriggered = itOk;
-    (meta as any).it_triggered = itOk;
+// ✅ T3確定（commit済み）なら：itTriggered / itx_reason を probe で上書きしない
+const committedStep =
+  (meta as any)?.itx_step ??
+  (meta as any)?.itxStep ??
+  (ms as any)?.itx_step ??
+  (ms as any)?.itxStep ??
+  null;
 
-    (meta as any).itxReason = itReason;
-    (meta as any).itx_reason = itReason;
+const isCommittedT3 = committedStep === 'T3';
 
-    // iLexemeForce：sticky true（camel + snake）
-    const iLexemeForceNext =
-      (meta as any).iLexemeForce === true || (it as any).iLexemeForce === true;
-    (meta as any).iLexemeForce = iLexemeForceNext;
-    (meta as any).i_lexeme_force = iLexemeForceNext;
+// ok/reason：camel + snake
+if (isCommittedT3) {
+  // そのターンの判定理由は “probe理由” として別枠に退避（確定状態は維持）
+  (meta as any).itx_probe_reason = itReason;
 
-    // Tレーン：sticky禁止（毎ターン決定）
-    const tActive = itOk && it.tLayerModeActive === true;
-    const tHint = tActive ? (it.tLayerHint ?? 'T2') : null;
-    const tVector = tActive ? (it.tVector ?? null) : null;
+  // 確定状態は維持（false に戻さない）
+  (meta as any).itTriggered = true;
+  (meta as any).it_triggered = true;
 
-    // camel + snake
-    (meta as any).tLayerModeActive = tActive;
-    (meta as any).t_layer_mode_active = tActive;
+  // itxReason / itx_reason は「確定値」を維持（ここでは代入しない）
+} else {
+  (meta as any).itTriggered = itOk;
+  (meta as any).it_triggered = itOk;
 
-    (meta as any).tLayerHint = tHint;
-    (meta as any).t_layer_hint = tHint;
+  (meta as any).itxReason = itReason;
+  (meta as any).itx_reason = itReason;
+}
 
-    (meta as any).tVector = tVector;
-    (meta as any).t_vector = tVector;
+// iLexemeForce：sticky true（camel + snake）
+const iLexemeForceNext =
+  (meta as any).iLexemeForce === true || (it as any).iLexemeForce === true;
+(meta as any).iLexemeForce = iLexemeForceNext;
+(meta as any).i_lexeme_force = iLexemeForceNext;
 
-    if (typeof process !== 'undefined' && process.env.DEBUG_IROS_IT === '1') {
-      console.log('[IROS/IT_TRIGGER]', {
-        ok: itOk,
-        reason: itReason,
-        flags: it.flags,
-        iLexemeForce: iLexemeForceNext,
-        tLayerModeActive: tActive,
-        tLayerHint: tHint,
-        tVector,
-      });
-    }
+// Tレーン：sticky禁止（毎ターン決定）
+const tActive = itOk && it.tLayerModeActive === true;
+const tHint = tActive ? (it.tLayerHint ?? 'T2') : null;
+const tVector = tActive ? (it.tVector ?? null) : null;
+
+// camel + snake
+(meta as any).tLayerModeActive = tActive;
+(meta as any).t_layer_mode_active = tActive;
+
+(meta as any).tLayerHint = tHint;
+(meta as any).t_layer_hint = tHint;
+
+(meta as any).tVector = tVector;
+(meta as any).t_vector = tVector;
+
+if (typeof process !== 'undefined' && process.env.DEBUG_IROS_IT === '1') {
+  console.log('[IROS/IT_TRIGGER]', {
+    ok: itOk,
+    reason: itReason,
+    flags: it.flags,
+    iLexemeForce: iLexemeForceNext,
+    tLayerModeActive: tActive,
+    tLayerHint: tHint,
+    tVector,
+    isCommittedT3,
+    committedStep,
+    itx_probe_reason: (meta as any).itx_probe_reason ?? null,
+  });
+}
   }
 
   // ----------------------------------------------------------------
