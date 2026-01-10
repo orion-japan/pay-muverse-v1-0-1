@@ -807,15 +807,22 @@ const metaForPick =
       ? (metaAugRaw as any)
       : {};
 
-// meta から拾う（filled 優先）
+// meta から拾う（filled 優先、なければ metaAugRaw）
 const q_code_from_meta_raw =
-  pickMetaValue(metaForPick, ['qCode', 'q_code', 'qPrimary', 'q_code_primary']) ?? null;
+  pickMetaValue(metaFilled as any, ['qCode', 'q_code', 'qPrimary', 'q_code_primary']) ??
+  pickMetaValue(metaAugRaw as any, ['qCode', 'q_code', 'qPrimary', 'q_code_primary']) ??
+  null;
 
 const depth_stage_from_meta_raw =
-  pickMetaValue(metaForPick, ['depth', 'depthStage', 'depth_stage']) ?? null;
+  pickMetaValue(metaFilled as any, ['depth', 'depthStage', 'depth_stage']) ??
+  pickMetaValue(metaAugRaw as any, ['depth', 'depthStage', 'depth_stage']) ??
+  null;
 
 const intent_layer_from_meta_raw =
-  pickMetaValue(metaForPick, ['intentLayer', 'intent_layer']) ?? null;
+  pickMetaValue(metaFilled as any, ['intentLayer', 'intent_layer']) ??
+  pickMetaValue(metaAugRaw as any, ['intentLayer', 'intent_layer']) ??
+  null;
+
 
 // ✅ バリデーション（壊れ値混入を減らす）
 const q_code_from_meta =
