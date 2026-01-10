@@ -700,36 +700,177 @@ if (!finalText) {
     const metaSanitized = sanitizeJsonDeep(metaAugRaw);
     const meta = metaSanitized === null || typeof metaSanitized === 'undefined' ? null : metaSanitized;
 
-    // (E) q/depth/intent を body + meta から拾う（insert の primary）
-    const q_code_from_body =
-      toNonEmptyTrimmedString(body?.q_code) ??
-      toNonEmptyTrimmedString(body?.qCode) ??
-      toNonEmptyTrimmedString(body?.q_primary) ??
-      toNonEmptyTrimmedString(body?.qPrimary) ??
-      toNonEmptyTrimmedString((body as any)?.q) ??
-      null;
-
-    const depth_stage_from_body =
-      toNonEmptyTrimmedString(body?.depth_stage) ??
-      toNonEmptyTrimmedString(body?.depthStage) ??
-      toNonEmptyTrimmedString(body?.depth) ??
-      null;
-
-    const intent_layer_from_body =
-      toNonEmptyTrimmedString(body?.intent_layer) ?? toNonEmptyTrimmedString(body?.intentLayer) ?? null;
-
-    const q_code: string | null =
-      pickMetaValue(metaAugRaw, ['qCode', 'q_code', 'qPrimary', 'q_code_primary']) ?? q_code_from_body ?? null;
-
-    const depth_stage: string | null =
-      pickMetaValue(metaAugRaw, ['depth', 'depthStage', 'depth_stage']) ?? depth_stage_from_body ?? null;
-
-    const intent_layer: string | null =
-      pickMetaValue(metaAugRaw, ['intentLayer', 'intent_layer']) ?? intent_layer_from_body ?? null;
-
-    // (F) Supabase + owner check
+    /* =========================================================
+     * (E0) Supabase client（metaFilled でも使うので先に作る）
+     * ========================================================= */
     const supabase = sb();
 
+    /* =========================================================
+     * (E1) metaFilled: memory_state から intent_anchor / itx_* を欠けてる時だけ補完
+     * - insert に載せる meta は metaFilled を使う
+     * ========================================================= */
+    const metaFilled = await (async () => {
+      const base = meta && typeof meta === 'object' && !Array.isArray(meta) ? (meta as any) : {};
+
+      const hasAnchorAlready =
+        base.intent_anchor != null ||
+        (typeof base.intent_anchor_key === 'string' && base.intent_anchor_key.trim()) ||
+        (typeof base.anchor_key === 'string' && base.anchor_key.trim());
+
+      const hasItxAlready =
+        (typeof base.itx_step === 'string' && base.itx_step.trim()) ||
+        base.itx_last_at != null ||
+        (typeof base.itx_reason === 'string' && base.itx_reason.trim());
+
+      if (hasAnchorAlready && hasItxAlready) return base;
+
+      const tMs = process.hrtime.bigint();
+      const memTables = ['iros_memory_state', 'public.iros_memory_state'] as const;
+
+      for (const mt of memTables) {
+        try {
+          const { data: msRow, error: msErr } = await (supabase as any)
+            .from(mt)
+            .select('intent_anchor,itx_step,itx_last_at,itx_reason')
+            .eq('user_code', userCode)
+            .maybeSingle();
+
+          console.log('[IROS/messages][metaFilled] memory_state select tried', {
+            table: mt,
+            ms: msSince(tMs),
+            ok: !msErr,
+            hasRow: !!msRow,
+            err: msErr ? JSON.stringify(msErr) : null,
+          });
+
+          if (msErr || !msRow) continue;
+
+          const anchorKeyFromState =
+            msRow.intent_anchor && (msRow.intent_anchor as any).key ? (msRow.intent_anchor as any).key : null;
+
+          return {
+            ...base,
+            ...(hasAnchorAlready
+              ? {}
+              : {
+                  intent_anchor: msRow.intent_anchor ?? null,
+                  intent_anchor_key: anchorKeyFromState,
+                  anchor_key: anchorKeyFromState,
+                }),
+            ...(hasItxAlready
+              ? {}
+              : {
+                  itx_step: msRow.itx_step ?? null,
+                  itx_last_at: msRow.itx_last_at ?? null,
+                  itx_reason: msRow.itx_reason ?? null,
+                }),
+          };
+        } catch (e: any) {
+          console.log('[IROS/messages][metaFilled] memory_state select exception', {
+            table: mt,
+            ms: msSince(tMs),
+            err: String(e?.message ?? e),
+          });
+          continue;
+        }
+      }
+
+      return base;
+    })();
+
+// (E) q/depth/intent を body + meta から拾う（insert の primary）
+// ✅ 方針：/messages は client meta が古い可能性があるので body 優先
+const q_code_from_body =
+  toNonEmptyTrimmedString(body?.q_code) ??
+  toNonEmptyTrimmedString(body?.qCode) ??
+  toNonEmptyTrimmedString(body?.q_primary) ??
+  toNonEmptyTrimmedString(body?.qPrimary) ??
+  toNonEmptyTrimmedString((body as any)?.q) ??
+  null;
+
+const depth_stage_from_body =
+  toNonEmptyTrimmedString(body?.depth_stage) ??
+  toNonEmptyTrimmedString(body?.depthStage) ??
+  toNonEmptyTrimmedString(body?.depth) ??
+  null;
+
+const intent_layer_from_body =
+  toNonEmptyTrimmedString(body?.intent_layer) ??
+  toNonEmptyTrimmedString(body?.intentLayer) ??
+  null;
+
+// ✅ meta pick は metaFilled 優先（なければ metaAugRaw）
+const metaForPick =
+  metaFilled && typeof metaFilled === 'object' && !Array.isArray(metaFilled)
+    ? (metaFilled as any)
+    : metaAugRaw && typeof metaAugRaw === 'object' && !Array.isArray(metaAugRaw)
+      ? (metaAugRaw as any)
+      : {};
+
+// meta から拾う（filled 優先）
+const q_code_from_meta_raw =
+  pickMetaValue(metaForPick, ['qCode', 'q_code', 'qPrimary', 'q_code_primary']) ?? null;
+
+const depth_stage_from_meta_raw =
+  pickMetaValue(metaForPick, ['depth', 'depthStage', 'depth_stage']) ?? null;
+
+const intent_layer_from_meta_raw =
+  pickMetaValue(metaForPick, ['intentLayer', 'intent_layer']) ?? null;
+
+// ✅ バリデーション（壊れ値混入を減らす）
+const q_code_from_meta =
+  q_code_from_meta_raw && /^Q[1-5]$/.test(String(q_code_from_meta_raw))
+    ? String(q_code_from_meta_raw)
+    : null;
+
+const depth_stage_from_meta =
+  depth_stage_from_meta_raw && /^[SRCIT][0-3]$/.test(String(depth_stage_from_meta_raw))
+    ? String(depth_stage_from_meta_raw)
+    : null;
+
+const intent_layer_from_meta =
+  intent_layer_from_meta_raw && /^[SRCIT]$/.test(String(intent_layer_from_meta_raw))
+    ? String(intent_layer_from_meta_raw)
+    : null;
+
+// ✅ 採用順：body → meta → null（ここが“最終確定”）
+const q_code: string | null = q_code_from_body ?? q_code_from_meta ?? null;
+const depth_stage: string | null = depth_stage_from_body ?? depth_stage_from_meta ?? null;
+const intent_layer: string | null = intent_layer_from_body ?? intent_layer_from_meta ?? null;
+
+// ✅ 追跡ログ（raw vs filled vs final）
+console.log('[IROS/messages][POST][pick-q-depth][src]', {
+  q_body: q_code_from_body,
+  q_meta_raw: pickMetaValue(metaAugRaw as any, ['qCode', 'q_code', 'qPrimary', 'q_code_primary']) ?? null,
+  q_meta_filled: q_code_from_meta_raw,
+  q_final: q_code,
+
+  depth_body: depth_stage_from_body,
+  depth_meta_raw: pickMetaValue(metaAugRaw as any, ['depth', 'depthStage', 'depth_stage']) ?? null,
+  depth_meta_filled: depth_stage_from_meta_raw,
+  depth_final: depth_stage,
+
+  layer_body: intent_layer_from_body,
+  layer_meta_raw: pickMetaValue(metaAugRaw as any, ['intentLayer', 'intent_layer']) ?? null,
+  layer_meta_filled: intent_layer_from_meta_raw,
+  layer_final: intent_layer,
+});
+
+// ✅ 既存のログ（必要なら残す）
+console.log('[IROS/messages][POST][pick-q-depth]', {
+  q_body: q_code_from_body,
+  q_meta: q_code_from_meta_raw,
+  q_final: q_code,
+  depth_body: depth_stage_from_body,
+  depth_meta: depth_stage_from_meta_raw,
+  depth_final: depth_stage,
+  layer_body: intent_layer_from_body,
+  layer_meta: intent_layer_from_meta_raw,
+  layer_final: intent_layer,
+});
+
+
+    // (F) Supabase + owner check
     const tConv = process.hrtime.bigint();
     const conv = await trySelect<{ id: string; user_code?: string | null }>(
       supabase,
@@ -1094,7 +1235,7 @@ async function computeUserStreakFromDb(args: {
         streak_q: streakQ,
         streak_len: streakLenNum != null ? String(streakLenNum) : null, // ✅ textへ統一
         qtu_from: qtuFrom,
-        meta,
+        meta: metaFilled,
       };
 
       try {
@@ -1166,7 +1307,7 @@ async function computeUserStreakFromDb(args: {
         streak_len: streakLenNum != null ? String(streakLenNum) : null, // ✅ 応答も text に揃える
         qtu_from: qtuFrom,
 
-        meta,
+        meta: metaFilled,
       },
     });
   } catch (e: any) {

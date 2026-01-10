@@ -825,10 +825,22 @@ export async function persistMemoryStateIfAny(args: {
 
     console.log('[IROS/Phase10] decideT3Upgrade result', t3Decision);
 
-    // upgrade した場合だけ、effectiveItx があるときに上書き
-    if (t3Decision.upgrade === true && t3Decision.nextItxStep === 'T3') {
-      if (effectiveItx) effectiveItx.itx_step = 'T3';
-    }
+// ✅ 修正版：T3 upgrade は itTriggered に依存せず “保存経路” を作る
+const itxForSave: EffectiveItx =
+  effectiveItx
+    ? effectiveItx
+    : t3Decision.upgrade === true && t3Decision.nextItxStep === 'T3'
+      ? {
+          itx_step: 'T3',
+          itx_anchor_event_type:
+            anchorEventTypeResolved && anchorEventTypeResolved !== 'none'
+              ? anchorEventTypeResolved
+              : null,
+          itx_reason: 'T3_UPGRADE',
+          itx_last_at: nowIso(),
+        }
+      : null;
+
 
     // =========================================================
     // ✅ upsert payload（“null は入れない” を徹底：keep を壊さない）
@@ -873,11 +885,11 @@ export async function persistMemoryStateIfAny(args: {
 
     // ✅ ITX列：方針（effectiveItxをそのまま保存）
     // - null（keep）のときは payloadに列を入れない
-    if (effectiveItx) {
-      upsertPayload.itx_step = effectiveItx.itx_step;
-      upsertPayload.itx_anchor_event_type = effectiveItx.itx_anchor_event_type;
-      upsertPayload.itx_reason = effectiveItx.itx_reason;
-      upsertPayload.itx_last_at = effectiveItx.itx_last_at;
+    if (itxForSave) {
+      upsertPayload.itx_step = itxForSave.itx_step;
+      upsertPayload.itx_anchor_event_type = itxForSave.itx_anchor_event_type;
+      upsertPayload.itx_reason = itxForSave.itx_reason;
+      upsertPayload.itx_last_at = itxForSave.itx_last_at;
     }
 
     // ✅ intent_anchor 更新（北極星ルール：set/reset以外は触らない）
@@ -898,6 +910,52 @@ export async function persistMemoryStateIfAny(args: {
       fixedByMeta_intent_anchor_key: fixedByMeta.intent_anchor_key ?? null,
       anchorEntry_decision: anchorEntryDecisionFinal ?? null,
     });
+
+// =========================================================
+// [PHASE11] persist直前：anchorEntry が「DB write パスまで来てる」証明
+// - core/meta から anchorEntry を拾う（extraも含む）
+// - decisionFinal / upsertPayload 側の anchor_* / itx_* / intent_anchor を同時に観測
+// =========================================================
+{
+  const ae =
+    (core as any)?.anchorEntry ??
+    (extra as any)?.anchorEntry ??
+    (root as any)?.anchorEntry ??
+    null;
+
+  console.log('[IROS/PERSIST][anchorEntry][before-upsert]', {
+    hasAnchorEntry: Boolean(ae),
+    ae_hasDecision: Boolean(ae?.decision),
+    ae_anchorWrite: ae?.decision?.anchorWrite ?? null,
+    ae_anchorEvent: ae?.decision?.anchorEvent ?? null,
+    ae_reason: ae?.decision?.reason ?? null,
+    ae_evidence_source: ae?.evidence?.source ?? null,
+
+    // ここが “最終決定” なので合わせて出す
+    decisionFinal: anchorEntryDecisionFinal ?? null,
+
+    // 実際にDBへ入れる予定の payload 側（ここが最重要）
+    payload_has_anchor_event: 'anchor_event' in upsertPayload,
+    payload_has_anchor_write: 'anchor_write' in upsertPayload,
+    payload_anchor_event: upsertPayload.anchor_event ?? null,
+    payload_anchor_write: upsertPayload.anchor_write ?? null,
+
+    payload_has_itx_step: 'itx_step' in upsertPayload,
+    payload_itx_step: upsertPayload.itx_step ?? null,
+    payload_itx_reason: upsertPayload.itx_reason ?? null,
+    payload_itx_last_at: upsertPayload.itx_last_at ?? null,
+    payload_itx_anchor_event_type: upsertPayload.itx_anchor_event_type ?? null,
+
+    payload_has_intent_anchor: 'intent_anchor' in upsertPayload,
+    payload_intent_anchor: 'intent_anchor' in upsertPayload ? upsertPayload.intent_anchor : '(no-touch)',
+
+    // 参考：meta側で見えてる key
+    meta_intent_anchor_key: fixedByMeta.intent_anchor_key ?? null,
+    anchorKeyCandidate: anchorKeyCandidate ?? null,
+    anchor_action: anchorWrite.action,
+  });
+}
+
 
     // =========================================================
     // upsert（列欠損を許容して 1回だけ再試行）

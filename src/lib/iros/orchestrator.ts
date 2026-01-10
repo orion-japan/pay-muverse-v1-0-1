@@ -1026,23 +1026,39 @@ if (typeof process !== 'undefined' && process.env.DEBUG_IROS_IT === '1') {
     const shouldFallbackNormalChat =
       !isSilence && hasText && (slotsEmpty || policyEmpty);
 
-    // 5) fallback（normalChat）
-    if (shouldFallbackNormalChat) {
-      const fallback = buildNormalChatSlotPlan({ userText: text });
+// 5) fallback（normalChat）
+if (shouldFallbackNormalChat) {
+  // ✅ normalChat の repair（取りこぼし復元）に lastSummary を渡す
+  const lastSummary =
+    (ms as any)?.situation_summary ??
+    (ms as any)?.situationSummary ??
+    (memoryState as any)?.situation_summary ??
+    (memoryState as any)?.situationSummary ??
+    (mergedBaseMeta as any)?.situation_summary ??
+    (mergedBaseMeta as any)?.situationSummary ??
+    null;
 
-      const fbSlots = (fallback as any).slots;
-      slotsArr = Array.isArray(fbSlots) ? fbSlots : [];
+  const fallback = buildNormalChatSlotPlan({
+    userText: text,
+    context: {
+      lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
+    },
+  });
 
-      const fp = (fallback as any).slotPlanPolicy;
-      slotPlanPolicy = typeof fp === 'string' && fp.trim() ? fp.trim() : 'FINAL';
+  const fbSlots = (fallback as any).slots;
+  slotsArr = Array.isArray(fbSlots) ? fbSlots : [];
 
-      (meta as any).slotPlanFallback = 'normalChat';
-    } else {
-      // ✅ fallback しなかった場合は “残骸” を消す（誤誘導防止）
-      if ((meta as any).slotPlanFallback === 'normalChat') {
-        delete (meta as any).slotPlanFallback;
-      }
-    }
+  const fp = (fallback as any).slotPlanPolicy;
+  slotPlanPolicy = typeof fp === 'string' && fp.trim() ? fp.trim() : 'FINAL';
+
+  (meta as any).slotPlanFallback = 'normalChat';
+} else {
+  // ✅ fallback しなかった場合は “残骸” を消す（誤誘導防止）
+  if ((meta as any).slotPlanFallback === 'normalChat') {
+    delete (meta as any).slotPlanFallback;
+  }
+}
+
 
     // 6) 最終ガード：slots が配列でないなら null
     if (slotsArr != null && !Array.isArray(slotsArr)) {
@@ -1256,72 +1272,53 @@ console.log('[IROS/ORCH][after-container]', {
     };
   }
 
-// orchestrator.ts （[IROS/META][final-sync] の直前あたり）
-// ✅ anchorEntry を meta に固定（後段の persist が参照できるように）
-if ((meta as any).anchorEntry == null && typeof (meta as any).anchorEntry === 'undefined') {
-  // 何もしない（安全）
-} else {
-  // 何もしない（既にある）
-}
+// orchestrator.ts — [IROS/META][final-sync] 直前（単一ログ化）
+//
+// 目的：
+// - anchorEntry が meta / finalMeta まで届いているかを “ログで証明”
+// - final-sync では「生成/移送」はしない（存在確認だけ）
+// - ログは 1回ずつにして検証をブレさせない
 
-// ✅ final-sync では “存在する anchorEntry を見るだけ” にする（スコープ事故を防ぐ）
-const anchorEntryForLog =
+// 1) meta 側 anchorEntry（meta優先、なければ extra）
+const anchorEntryForMetaLog =
   (meta as any)?.anchorEntry ??
   (meta as any)?.extra?.anchorEntry ??
   null;
 
-// ✅ ついでに final-sync のログにも anchorEntry を出す（確認用）
-console.log('[IROS/META][final-sync]', {
-  meta_q: (meta as any)?.q ?? (meta as any)?.qCode,
-  unified_q: (meta as any)?.unified_q ?? (meta as any)?.unifiedQ,
-  meta_depth: (meta as any)?.depth ?? (meta as any)?.depthStage,
-  unified_depth: (meta as any)?.unified_depth ?? (meta as any)?.unifiedDepth,
-  intent_anchor: (meta as any)?.intent_anchor ?? (meta as any)?.intentAnchor,
-  intent_anchor_key: (meta as any)?.intent_anchor_key ?? (meta as any)?.intentAnchorKey,
-  anchorEntry: anchorEntryForLog, // ✅ ここが出れば “metaまで来てる” が証明できる
+// 2) meta の観測（ここで出れば「orchestrator内のmetaには来てる」）
+console.log('[IROS/META][final-sync][meta]', {
+  meta_q: (meta as any)?.qCode ?? (meta as any)?.q ?? null,
+  unified_q: (meta as any)?.unified?.q?.current ?? (meta as any)?.unified_q ?? null,
+  meta_depth: (meta as any)?.depth ?? (meta as any)?.depthStage ?? null,
+  unified_depth: (meta as any)?.unified?.depth?.stage ?? (meta as any)?.unified_depth ?? null,
+
+  intent_anchor: (meta as any)?.intent_anchor ?? (meta as any)?.intentAnchor ?? null,
+  intent_anchor_key:
+    (meta as any)?.intent_anchor_key ?? (meta as any)?.intentAnchorKey ?? null,
+
+  anchorEntry: anchorEntryForMetaLog,
 });
 
+// 3) finalMeta 側 anchorEntry（finalMeta優先、なければ extra）
+const anchorEntryForFinalLog =
+  (finalMeta as any)?.anchorEntry ??
+  (finalMeta as any)?.extra?.anchorEntry ??
+  null;
 
-// ついでに final-sync のログにも anchorEntry を出す（確認用）
-console.log('[IROS/META][final-sync]', {
-  meta_q: (meta as any)?.q ?? (meta as any)?.qCode,
-  unified_q: (meta as any)?.unified_q ?? (meta as any)?.unifiedQ,
-  meta_depth: (meta as any)?.depth ?? (meta as any)?.depthStage,
-  unified_depth: (meta as any)?.unified_depth ?? (meta as any)?.unifiedDepth,
-  intent_anchor: (meta as any)?.intent_anchor ?? (meta as any)?.intentAnchor,
-  intent_anchor_key: (meta as any)?.intent_anchor_key ?? (meta as any)?.intentAnchorKey,
-  anchorEntry: (meta as any)?.anchorEntry, // ✅ 追加（ここが出れば勝ち）
+// 4) finalMeta の観測（ここで出れば「最終metaにも残っている」）
+console.log('[IROS/META][final-sync][finalMeta]', {
+  meta_q: (finalMeta as any)?.qCode ?? null,
+  unified_q: (finalMeta as any)?.unified?.q?.current ?? null,
+  meta_depth: (finalMeta as any)?.depth ?? null,
+  unified_depth: (finalMeta as any)?.unified?.depth?.stage ?? null,
+
+  intent_anchor: (finalMeta as any)?.intent_anchor ?? (finalMeta as any)?.intentAnchor ?? null,
+  intent_anchor_key:
+    (finalMeta as any)?.intent_anchor_key ?? (finalMeta as any)?.intentAnchorKey ?? null,
+
+  anchorEntry: anchorEntryForFinalLog,
 });
 
-
-
-  console.log('[IROS/META][final-sync]', {
-    meta_q: (finalMeta as any).qCode ?? null,
-    unified_q: (finalMeta as any).unified?.q?.current ?? null,
-    meta_depth: (finalMeta as any).depth ?? null,
-    unified_depth: (finalMeta as any).unified?.depth?.stage ?? null,
-
-    // ✅ Phase11観測
-    intent_anchor: (finalMeta as any).intent_anchor ?? null,
-    intent_anchor_key: (finalMeta as any).intent_anchor_key ?? null,
-  });
-
-  // ----------------------------------------------------------------
-  // 10.2 Spin の最終確定（finalMeta.depth 決定後に再計算）
-  // ----------------------------------------------------------------
-  {
-    const spin = computeSpinState({
-      depthStage: (finalMeta as any).depth ?? null,
-      qCode: (finalMeta as any).qCode ?? null,
-      phase: (finalMeta as any).phase ?? null,
-      lastSpinLoop,
-      lastSpinStep,
-      lastPhase: lastPhaseForSpin,
-    });
-
-    (finalMeta as any).spinLoop = spin.spinLoop;
-    (finalMeta as any).spinStep = spin.spinStep;
-  }
 
   // ----------------------------------------------------------------
   // ✅ V2: “モデル生出力” はここでは絶対に作らない（追跡のため空を固定）

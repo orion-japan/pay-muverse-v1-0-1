@@ -130,6 +130,8 @@ export async function POST(req: NextRequest) {
       profilesPatch.name = normStrOrNull(body.click_username);
     }
 
+
+
     if (Object.keys(profilesPatch).length) {
       const row = { user_code, ...profilesPatch };
       const { error } = await supabase.from('profiles').upsert(row, { onConflict: 'user_code' });
