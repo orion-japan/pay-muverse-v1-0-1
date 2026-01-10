@@ -18,7 +18,7 @@
 //    - 2) 削られる“瞬間”を聞く（どの場面で削られる？）
 //
 // C) 結論要求（「結論」「先に結論」）は “確認質問をやめて” まず結論の型で返す
-//    - 対象不明なら “名詞だけ” を求める（二択にしない）
+//    - 対象不明なら “テーマを1語” を求める（二択にしない）
 //
 // ✅ ルール
 // - slots は「表示順」だけが意味を持つ
@@ -281,11 +281,11 @@ function buildSoftSignature(opts: { userText: string; allow: boolean }): string 
 function buildConclusionFirstSlots(): NormalChatSlot[] {
   return [
     { key: 'A', role: 'assistant', style: 'soft', content: 'OK。先に結論からいく。' },
-    { key: 'B', role: 'assistant', style: 'neutral', content: '結論がほしいテーマは何？（名詞だけでOK）' },
+    { key: 'B', role: 'assistant', style: 'neutral', content: '結論がほしいテーマは何？（1語でOK）' },
   ];
 }
 
-function buildRepairSlots(userText: string, ctx?: { lastSummary?: string | null }): NormalChatSlot[] {
+function buildRepairSlots(_userText: string, ctx?: { lastSummary?: string | null }): NormalChatSlot[] {
   const last = norm(ctx?.lastSummary);
 
   // contextがあるなら “復元” を明示して戻す
@@ -348,7 +348,7 @@ function buildValueDeepenSlots(userText: string): NormalChatSlot[] {
       key: 'C',
       role: 'assistant',
       style: 'neutral',
-      content: `それが“削られる瞬間”はどこ？（例：朝/移動/会議/家事/通知/締切…）`,
+      content: 'それが“削られる瞬間”はどこ？（例：朝/移動/会議/家事/通知/締切…）',
     },
   ];
 }
@@ -448,7 +448,12 @@ function buildDefaultSlots(userText: string): NormalChatSlot[] {
   if (isTinyTalk(t)) {
     return [
       { key: 'A', role: 'assistant', style: 'soft', content: 'うん。' },
-      { key: 'B', role: 'assistant', style: 'neutral', content: 'いま一番ひっかかってる“名詞”だけ置いて。' },
+      {
+        key: 'B',
+        role: 'assistant',
+        style: 'neutral',
+        content: 'いまの焦点を1語だけ置いて。（例：仕事/人間関係/体調/お金/進路…）',
+      },
     ];
   }
 
@@ -470,7 +475,7 @@ export function buildNormalChatSlotPlan(args: {
     lastChoiceHint?: string | null;
   };
 }): NormalChatSlotPlan {
-  const stamp = 'normalChat.ts@2026-01-10#flex-slots-v5-depth-invariants-ab-consume';
+  const stamp = 'normalChat.ts@2026-01-11#flex-slots-v6-no-noun-loop';
   const userText = norm(args.userText);
   const ctx = args.context;
 
