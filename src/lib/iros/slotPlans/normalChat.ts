@@ -117,7 +117,7 @@ function isTinyTalk(text: string) {
   const t = norm(text);
   return (
     t.length <= 12 ||
-    /^(え|うん|そう|なるほど|まじ|ほんと|へぇ|はい|ok|OK|hai|konnbanha)[\!！\?？]*$/i.test(t) ||
+    /^(え|うん|そう|なるほど|まじ|ほんと|へぇ)[\!！\?？]*$/.test(t) ||
     /^(今日|今|さっき|だよね)[\!！\?？]*$/.test(t)
   );
 }
@@ -158,25 +158,39 @@ function looksLikeSmallTalkFact(text: string) {
 function looksLikeRepair(text: string) {
   const t = norm(text);
   if (!t) return false;
-  // ✅ 「? が無い」でも repair 扱いにする（ループ拒否を逃さない）
-  return containsAny(t, [
-    '今言った',
-    'いま言った',
-    'さっき言った',
-    'もう言った',
-    '言ったよね',
-    '言ったでしょ',
-    'それ言った',
-    '同じこと',
-    '繰り返し',
-    'またそれ',
-  ]);
+  return (
+    containsAny(t, [
+      '今言った',
+      'いま言った',
+      'さっき言った',
+      'もう言った',
+      '言ったよね',
+      '言ったでしょ',
+      'それ言った',
+      '同じこと',
+      '繰り返し',
+    ]) && hasQuestionMark(t)
+  );
 }
 
 // B) VALUE trigger: value words that usually need definition → friction point
 function extractValueKeyword(text: string): string | null {
   const t = norm(text);
-  const values = ['自由', '望み', '大事', '安心', '幸せ', '充実', '成長', '誇り', 'やりがい'];
+
+  // ✅ 重要：今回のケース（時間が欲しい）を確実に拾う
+  const values = [
+    '時間',
+    '自由',
+    '望み',
+    '大事',
+    '安心',
+    '幸せ',
+    '充実',
+    '成長',
+    '誇り',
+    'やりがい',
+  ];
+
   for (const v of values) {
     if (t.includes(v)) return v;
   }
@@ -187,10 +201,12 @@ function looksLikeValueStatement(text: string) {
   const t = norm(text);
   const v = extractValueKeyword(t);
   if (!v) return false;
+
   // “価値語っぽい”の最低条件：名詞で語っている or 望む/大事/したい が近い
   return (
-    t.length >= 6 &&
+    t.length >= 4 &&
     (t.includes('ほしい') ||
+      t.includes('欲しい') ||
       t.includes('望') ||
       t.includes('したい') ||
       t.includes('でいたい') ||
@@ -201,22 +217,18 @@ function looksLikeValueStatement(text: string) {
   );
 }
 
-// ---- identity / capability (micro FAQ) ----
-
-function looksLikeWhoAreYou(text: string) {
+// ---- NEW: simple AB choice detection ----
+// 目的：二択ループを切って “次の入力” に進める
+function looksLikeABChoice(text: string) {
   const t = norm(text);
-  return (
-    /あなたは誰|誰ですか|だれ|誰\?|\?誰|who are you/i.test(t) ||
-    /自己紹介/.test(t)
-  );
+  return /^(A|B|ａ|ｂ|a|b)$/.test(t);
 }
 
-function looksLikeWhatCanYouDo(text: string) {
-  const t = norm(text);
-  return (
-    /何ができ|何ができます|できること|what can you do/i.test(t) ||
-    /使い方|どう使う/.test(t)
-  );
+function normalizeAB(text: string): 'A' | 'B' | null {
+  const t = norm(text).toLowerCase();
+  if (t === 'a' || t === 'ａ') return 'A';
+  if (t === 'b' || t === 'ｂ') return 'B';
+  return null;
 }
 
 // ---- “echo gate” ----
@@ -226,6 +238,7 @@ function shouldEcho(userText: string) {
   const t = norm(userText);
   if (!t) return false;
 
+  if (looksLikeABChoice(t)) return false; // ✅ 選択はecho不要
   if (looksLikeRepair(t)) return false; // invariant優先
   if (looksLikeValueStatement(t)) return false; // invariant優先
 
@@ -271,26 +284,7 @@ function buildConclusionFirstSlots(): NormalChatSlot[] {
   ];
 }
 
-function buildWhoAreYouSlots(): NormalChatSlot[] {
-  return [
-    { key: 'A', role: 'assistant', style: 'soft', content: '私は iros。会話を「いまの一点」と「次の一手」に整える。' },
-    { key: 'B', role: 'assistant', style: 'neutral', content: 'まず、今日いちばん詰まってる一言だけ置いて。🪔' },
-  ];
-}
-
-function buildWhatCanYouDoSlots(): NormalChatSlot[] {
-  return [
-    {
-      key: 'A',
-      role: 'assistant',
-      style: 'soft',
-      content: 'できることは3つだけ。①一点を残す ②次の一手に落とす ③流れ（Q/深度/位相）を整える。',
-    },
-    { key: 'B', role: 'assistant', style: 'neutral', content: 'いま扱いたいテーマを一語で。🪔' },
-  ];
-}
-
-function buildRepairSlots(_userText: string, ctx?: { lastSummary?: string | null }): NormalChatSlot[] {
+function buildRepairSlots(userText: string, ctx?: { lastSummary?: string | null }): NormalChatSlot[] {
   const last = norm(ctx?.lastSummary);
 
   // contextがあるなら “復元” を明示して戻す
@@ -330,15 +324,45 @@ function buildValueDeepenSlots(userText: string): NormalChatSlot[] {
   const v = extractValueKeyword(t) ?? 'それ';
 
   // “定義→摩擦点” の最小保証
+  // ✅ 時間のときだけ、選択肢を “時間らしい” ラベルにする（質問は増やさない）
+  const kindLine =
+    v === '時間'
+      ? '時間って、どの種類？（集中 / 休息 / 家族 / 自由 / 仕事の前倒し）'
+      : `${v}って、どの種類？（時間 / 場所 / 裁量 / 人間関係 / お金）`;
+
   return [
-    { key: 'A', role: 'assistant', style: 'soft', content: `いい。いま出てる芯は「${v}」。` },
-    { key: 'B', role: 'assistant', style: 'neutral', content: `${v}って、どの種類？（時間 / 場所 / 裁量 / 人間関係 / お金）` },
+    {
+      key: 'A',
+      role: 'assistant',
+      style: 'soft',
+      content: `いい。いま出てる芯は「${v}」。`,
+    },
+    {
+      key: 'B',
+      role: 'assistant',
+      style: 'neutral',
+      content: kindLine,
+    },
     {
       key: 'C',
       role: 'assistant',
       style: 'neutral',
-      content: `それが仕事の“どの瞬間”で削られてる？（例：朝会/締切/上司/評価/通勤…）`,
+      content: `それが“削られる瞬間”はどこ？（例：朝/移動/会議/家事/通知/締切…）`,
     },
+  ];
+}
+
+// ✅ NEW: A/B choice is consumed here (break loop)
+function buildABConsumedSlots(choice: 'A' | 'B'): NormalChatSlot[] {
+  if (choice === 'A') {
+    return [
+      { key: 'A', role: 'assistant', style: 'soft', content: 'OK。状況からいこう。' },
+      { key: 'B', role: 'assistant', style: 'neutral', content: 'いまの状況を1行で。（いつ/どこで/何に追われてる？）' },
+    ];
+  }
+  return [
+    { key: 'A', role: 'assistant', style: 'soft', content: 'OK。気持ちからいこう。' },
+    { key: 'B', role: 'assistant', style: 'neutral', content: 'いまの気持ちを1行で。（焦り/疲れ/不満/罪悪感…どれ？）' },
   ];
 }
 
@@ -349,6 +373,14 @@ function buildPreferenceSlots(userText: string): NormalChatSlot[] {
     return [
       { key: 'A', role: 'assistant', style: 'soft', content: '好き。香りが強くて、甘さの立ち上がりがきれい。' },
       { key: 'B', role: 'assistant', style: 'neutral', content: '白桃派？黄桃派？（一語でOK）' },
+    ];
+  }
+
+  // ✅ 「どっち？」単体のとき：二択ループではなく “選択肢の意味” を短く返す
+  if (/^どっち[？\?]?$/.test(t)) {
+    return [
+      { key: 'A', role: 'assistant', style: 'soft', content: 'Aは「事実（状況）」、Bは「内側（気持ち）」。' },
+      { key: 'B', role: 'assistant', style: 'neutral', content: '迷うならBからでいい。いまの気持ちを1行で。' },
     ];
   }
 
@@ -389,23 +421,6 @@ function buildJustWonderingSlots(): NormalChatSlot[] {
   ];
 }
 
-function buildTinyTalkSlots(userText: string): NormalChatSlot[] {
-  const t = norm(userText);
-  // ✅ “名詞だけ置いて” 固定はやめる：tiny でも会話が進む最小二択
-  return [
-    { key: 'A', role: 'assistant', style: 'soft', content: 'うん。' },
-    {
-      key: 'B',
-      role: 'assistant',
-      style: 'neutral',
-      content:
-        hasQuestionMark(t)
-          ? '問いとして受け取った。いま欲しいのはどっち？（A:短い答え / B:整理して次の一手）🪔'
-          : '次はどっちでいく？（A:状況を1行 / B:気持ちを1行）🪔',
-    },
-  ];
-}
-
 function buildDefaultSlots(userText: string): NormalChatSlot[] {
   const t = norm(userText);
   const echo = shouldEcho(t);
@@ -428,8 +443,13 @@ function buildDefaultSlots(userText: string): NormalChatSlot[] {
     ];
   }
 
-  // tiny-talk でも “深まり停止” を避ける：固定誘導は禁止
-  if (isTinyTalk(t)) return buildTinyTalkSlots(t);
+  // tiny-talk でも “深まり停止” を避ける：最低1つだけ具体化へ寄せる
+  if (isTinyTalk(t)) {
+    return [
+      { key: 'A', role: 'assistant', style: 'soft', content: 'うん。' },
+      { key: 'B', role: 'assistant', style: 'neutral', content: 'いま一番ひっかかってる“名詞”だけ置いて。' },
+    ];
+  }
 
   return [
     { key: 'A', role: 'assistant', style: 'soft', content: isQ ? 'うん。短く返すね。' : 'うん。続けて。' },
@@ -443,9 +463,13 @@ export function buildNormalChatSlotPlan(args: {
   userText: string;
   context?: {
     lastSummary?: string | null;
+
+    // 任意（渡せるなら）：直前に提示した二択の種類
+    // 例: 'AB_STATUS_OR_FEEL'
+    lastChoiceHint?: string | null;
   };
 }): NormalChatSlotPlan {
-  const stamp = 'normalChat.ts@2026-01-10#flex-slots-v5-depth-invariants';
+  const stamp = 'normalChat.ts@2026-01-10#flex-slots-v5-depth-invariants-ab-consume';
   const userText = norm(args.userText);
   const ctx = args.context;
 
@@ -455,17 +479,25 @@ export function buildNormalChatSlotPlan(args: {
   if (!userText) {
     reason = 'empty';
     slots = [
-      { key: 'A', role: 'assistant', style: 'soft', content: 'うん。空でも大丈夫。いまの気配だけ、続けて。' },
+      {
+        key: 'A',
+        role: 'assistant',
+        style: 'soft',
+        content: 'うん。空でも大丈夫。いまの気配だけ、続けて。',
+      },
     ];
-  } else if (looksLikeWantsConclusion(userText)) {
+  }
+
+  // ✅ NEW: A/B 単体入力は “選択として消費” して次へ
+  else if (looksLikeABChoice(userText)) {
+    reason = 'ab-choice-consumed';
+    const ab = normalizeAB(userText) ?? 'B';
+    slots = buildABConsumedSlots(ab);
+  }
+
+  else if (looksLikeWantsConclusion(userText)) {
     reason = 'conclusion-first';
     slots = buildConclusionFirstSlots();
-  } else if (looksLikeWhoAreYou(userText)) {
-    reason = 'who-are-you';
-    slots = buildWhoAreYouSlots();
-  } else if (looksLikeWhatCanYouDo(userText)) {
-    reason = 'what-can-you-do';
-    slots = buildWhatCanYouDoSlots();
   } else if (looksLikeRepair(userText)) {
     reason = 'repair';
     slots = buildRepairSlots(userText, { lastSummary: ctx?.lastSummary ?? null });
@@ -504,7 +536,12 @@ export function buildNormalChatSlotPlan(args: {
   else if (looksLikeConsultComplaint(userText)) {
     reason = 'consult-complaint-break';
     slots = [
-      { key: 'A', role: 'assistant', style: 'soft', content: '了解。もう「続けて」には戻さない。相談として受け取る。' },
+      {
+        key: 'A',
+        role: 'assistant',
+        style: 'soft',
+        content: '了解。もう「続けて」には戻さない。相談として受け取る。',
+      },
       {
         key: 'B',
         role: 'assistant',
@@ -522,8 +559,18 @@ export function buildNormalChatSlotPlan(args: {
   else if (looksLikeNoEchoRequest(userText)) {
     reason = 'no-echo';
     slots = [
-      { key: 'A', role: 'assistant', style: 'soft', content: '了解。復唱もしないし、二択にも寄せない。' },
-      { key: 'B', role: 'assistant', style: 'neutral', content: 'じゃあ、そのまま話そう。いま何が一番ひっかかってる？' },
+      {
+        key: 'A',
+        role: 'assistant',
+        style: 'soft',
+        content: '了解。復唱もしないし、二択にも寄せない。',
+      },
+      {
+        key: 'B',
+        role: 'assistant',
+        style: 'neutral',
+        content: 'じゃあ、そのまま話そう。いま何が一番ひっかかってる？',
+      },
     ];
   } else if (looksLikePreferenceQuestion(userText)) {
     reason = 'preference';
@@ -541,13 +588,10 @@ export function buildNormalChatSlotPlan(args: {
     slots = buildDefaultSlots(userText);
   }
 
-  // ✅ 署名（ごく稀）
+  // optional soft signature (rare)
   const sig = buildSoftSignature({ userText, allow: true });
-  if (sig && slots.length >= 1) {
-    slots = [
-      { ...slots[0], content: `${sig}\n${slots[0].content}` },
-      ...slots.slice(1),
-    ];
+  if (sig) {
+    slots = [{ key: 'SIG', role: 'assistant', style: 'soft', content: sig }, ...slots];
   }
 
   const plan: NormalChatSlotPlan = {
@@ -575,7 +619,6 @@ function looksLikeQuitWorkConsult(userText: string) {
   const hasConsult =
     /どうしたら|どうすれば|相談|決められない|迷う|不安|悩|どう思う|意見|助けて/.test(t);
 
-  // 退職系は「会社+辞め」だけでも相談として扱う（ループ防止優先）
   return (hasWork && hasQuit) || (hasWork && hasQuit && hasConsult);
 }
 
