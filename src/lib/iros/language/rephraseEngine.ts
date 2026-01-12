@@ -1,21 +1,13 @@
 // src/lib/iros/language/rephraseEngine.ts
-// iros — Rephrase/Generate Engine (slot-preserving)
-//
-// 目的：
-// - FINALでも「文章そのもの」をLLMに一度だけ生成させる
-// - slot の key と順序は絶対に崩さない
-// - ズレた出力は黙って破棄（null）
-// - render直前に1箇所だけ挿す想定
-//
-// 重要：
-// - ここは “判断しない / 意味を足さない”
-// - ただし「テンプレ句を避ける」「引用を短くする」「自然会話にする」は許可（意味を変えない範囲）
-//
-// NOTE:
-// - 「本当にテンプレ脱却」= 上流 slot 本文を可変にするのが本命だが、
-//   当面はこの層で “文章そのものを生成” してテンプレ感を消す。
+// ✅ 追加/変更点：
+// - userContext を unknown で受け、JSONでも安全に文字列化
+// - opts.debug に traceId / conversationId / userCode を受けて、監査ログに載せる
+// - [IROS/rephraseEngine][OK] と [IROS/rephraseEngine][AFTER_ATTACH] をここで確実に出す
+// ✅ 追加：
+// - userContext から "履歴っぽいもの" を自動抽出して LLM に注入（露出禁止）
+//   → LLM が「履歴を感じない」問題の最短改善
 
-import { chatComplete, type ChatMessage } from '@/lib/llm/chatComplete';
+import { chatComplete } from '../../llm/chatComplete';
 
 type Slot = { key: string; text: string };
 
@@ -27,11 +19,6 @@ type ExtractedSlots = {
 
 function norm(s: unknown) {
   return String(s ?? '').replace(/\r\n/g, '\n').trim();
-}
-
-function head(s: string, n = 80) {
-  const t = norm(s).replace(/\s+/g, ' ');
-  return t.length <= n ? t : t.slice(0, n) + '…';
 }
 
 function stableOrderKeys(keys: string[]) {
@@ -62,7 +49,7 @@ function stableOrderKeys(keys: string[]) {
 
 /**
  * extractSlotBlocks() と同じ探索範囲から「key付き slots」を抽出する。
- * ※ここでは key を落とさない（LLM生成に必須）。
+ * ※ここでは key を落とさない（slot-preserving に必須）。
  */
 export function extractSlotsForRephrase(extra: any): ExtractedSlots {
   const framePlan =
@@ -108,27 +95,30 @@ export function extractSlotsForRephrase(extra: any): ExtractedSlots {
   };
 }
 
-type RephraseOptions = {
+export type RephraseOptions = {
   model: string;
   temperature?: number;
-  maxLinesHint?: number; // 全体行数の目安
+  maxLinesHint?: number;
 
-  /**
-   * ✅ 追加：直前のユーザー入力（このターンの生テキスト）
-   * - これが入ると OBS の “引用” に頼らず「何に答えてるか」を固定できる
-   * - 未指定なら OBS から「ユーザー文引用」を抽出して使う（従来通り）
-   */
+  /** 直前ユーザー入力（推奨） */
   userText?: string | null;
 
   /**
-   * ✅ 追加：直前user文脈メモ（1〜2行推奨）
-   * - “意味追加” ではなく、どの質問/主題へ答えるかのブレ止め
-   * - 未指定なら渡さない
+   * 3軸メタ/状態など（unknown で受ける）
+   * - LLMには見せるが、本文に露出させない（ルールで禁止）
    */
-  userContext?: string | null;
+  userContext?: unknown | null;
+
+  /** ✅ ログ用（chatComplete の trace に渡す） */
+  debug?: {
+    traceId?: string | null;
+    conversationId?: string | null;
+    userCode?: string | null;
+    renderEngine?: boolean | null; // 必要なら残す
+  } | null;
 };
 
-type RephraseResult =
+export type RephraseResult =
   | {
       ok: true;
       slots: Slot[];
@@ -157,215 +147,216 @@ function envFlagEnabled(raw: unknown, defaultEnabled: boolean) {
   return defaultEnabled;
 }
 
-/**
- * OBSスロット内の「ユーザー文引用」を拾う
- * 例：いま出ている言葉：「....」
- */
-function extractQuotedUserTextFromObs(obsText: string): string | null {
-  const t = norm(obsText);
-  if (!t) return null;
-
-  const m1 = t.match(/「([^」]{1,600})」/);
-  if (m1?.[1]) return norm(m1[1]);
-
-  const m2 = t.match(/"([^"]{1,600})"/);
-  if (m2?.[1]) return norm(m2[1]);
-
-  return null;
+function clampLines(text: string, maxLines: number): string {
+  const t = norm(text);
+  if (!t) return '';
+  const lines = t
+    .split('\n')
+    .map((x) => x.trim())
+    .filter(Boolean);
+  if (lines.length <= maxLines) return lines.join('\n');
+  return lines.slice(0, Math.max(1, maxLines - 1)).join('\n') + '\n🪔';
 }
 
-/* =========================================================
- * ✅ “柔軟性” のためのヒント設計
- * - ここは意味追加ではなく「書き方の幅」だけを与える
- * ======================================================= */
-
-type LenTier = 'short' | 'medium' | 'long';
-type NextKind = 'action' | 'dialogue';
-
-type SlotHint = {
-  key: string;
-  len: LenTier;
-  // NEXTが毎回「行動」固定だと会話が死ぬので二系統にする
-  nextKind?: NextKind;
-};
-
-function guessLenTier(allText: string, opts?: { maxLinesHint?: number }): LenTier {
-  // maxLinesHint が低いなら短めに寄せる
-  const maxLinesHint = typeof opts?.maxLinesHint === 'number' ? opts!.maxLinesHint : null;
-  if (maxLinesHint != null && maxLinesHint <= 4) return 'short';
-
-  const n = norm(allText).length;
-  if (n <= 60) return 'short';
-  if (n <= 180) return 'medium';
-  return 'long';
+function clampChars(text: string, maxChars: number): string {
+  const t = norm(text);
+  if (!t) return '';
+  if (t.length <= maxChars) return t;
+  return t.slice(0, Math.max(0, maxChars - 1)) + '…';
 }
 
-function guessNextKindFromSeed(nextSeed: string): NextKind {
-  const t = norm(nextSeed);
-  // 「誰に／いつ／何を」系が含まれるなら行動スロットとして扱う
-  if (
-    t.includes('誰に') ||
-    t.includes('いつ') ||
-    t.includes('何を') ||
-    t.includes('一手') ||
-    t.includes('行動')
-  ) {
-    return 'action';
+function tryGet(obj: any, path: string[]): any {
+  let cur = obj;
+  for (const k of path) {
+    if (!cur || typeof cur !== 'object') return undefined;
+    cur = cur[k];
   }
-  // それ以外は会話の次（確認/選択/質問）として扱う
-  return 'dialogue';
+  return cur;
 }
 
-function buildSlotHints(slots: Slot[], opts?: { maxLinesHint?: number }): SlotHint[] {
-  const joined = slots.map((s) => s.text).join('\n');
-  const base = guessLenTier(joined, opts);
+/**
+ * userContext から "履歴っぽいもの" を自動抽出して、LLM投入用のテキストに整形する。
+ * - 露出禁止（LLMの内部制約としてのみ使う）
+ * - 形式は "U: / A:" のみ（雑にでも可）
+ */
+function extractHistoryTextFromContext(userContext: unknown): string {
+  if (!userContext || typeof userContext !== 'object') return '';
+  const uc: any = userContext as any;
 
-  return slots.map((s) => {
-    const key = s.key;
+  const candidates = [
+    tryGet(uc, ['historyText']),
+    tryGet(uc, ['history_text']),
+    tryGet(uc, ['history']),
+    tryGet(uc, ['messages']),
+    tryGet(uc, ['historyMessages']),
+    tryGet(uc, ['historyX']),
+    tryGet(uc, ['ctxPack', 'history']),
+    tryGet(uc, ['ctx_pack', 'history']),
+    tryGet(uc, ['contextPack', 'history']),
+  ];
 
-    // 基本はbaseに従うが、SAFEは短めに、OBSは状況で中〜短
-    let len: LenTier = base;
-    if (key === 'SAFE') len = base === 'long' ? 'medium' : 'short';
-    if (key === 'OBS' && base === 'long') len = 'medium';
+  const raw = candidates.find((x) => x != null);
+  if (!raw) return '';
 
-    const hint: SlotHint = { key, len };
+  if (typeof raw === 'string') return clampChars(raw, 1800);
 
-    if (key === 'NEXT') {
-      hint.nextKind = guessNextKindFromSeed(s.text);
-      // actionの時は長くしすぎると説教になるので最大medium
-      if (hint.nextKind === 'action' && len === 'long') hint.len = 'medium';
-    }
+  if (Array.isArray(raw)) {
+    const items = raw
+      .filter(Boolean)
+      .slice(-12)
+      .map((m: any) => {
+        const role = String(m?.role ?? m?.speaker ?? m?.type ?? '').toLowerCase();
+        const body = norm(m?.text ?? m?.content ?? m?.message ?? '');
+        if (!body) return '';
+        const tag = role.startsWith('a') ? 'A' : role.startsWith('u') ? 'U' : 'M';
+        return `${tag}: ${body}`;
+      })
+      .filter(Boolean);
 
-    return hint;
+    return clampChars(items.join('\n'), 1800);
+  }
+
+  try {
+    return clampChars(JSON.stringify(raw), 1800);
+  } catch {
+    return clampChars(String(raw), 1800);
+  }
+}
+
+function extractHistoryMessagesFromContext(
+  userContext: unknown,
+): Array<{ role: 'user' | 'assistant'; content: string }> {
+  if (!userContext || typeof userContext !== 'object') return [];
+  const uc: any = userContext as any;
+
+  const raw =
+    tryGet(uc, ['historyMessages']) ??
+    tryGet(uc, ['history_messages']) ??
+    tryGet(uc, ['messages']) ??
+    tryGet(uc, ['history']) ??
+    null;
+
+  if (!Array.isArray(raw)) return [];
+
+  const mapped = raw
+    .filter(Boolean)
+    .slice(-12)
+    .map((m: any) => {
+      const roleRaw = String(m?.role ?? '').toLowerCase();
+      const body = norm(m?.content ?? m?.text ?? '');
+      if (!body) return null;
+      return {
+        role: roleRaw.startsWith('a') ? ('assistant' as const) : ('user' as const),
+        content: body,
+      };
+    });
+
+  return mapped.filter(
+    (x): x is { role: 'user' | 'assistant'; content: string } => x !== null,
+  );
+
+}
+
+function buildFixedBoxTexts(slotCount: number): string[] {
+  const ZWSP = '\u200b';
+  const full = [
+    'まず整理の箱を3つだけ置く。',
+    '事実：何が起きた（誰／どこ／いつ）',
+    '感情：いま一番きつい反応',
+    '望み：本当はどうなってほしい（短文でOK。うまく書かなくていい。）',
+    'ここで止める。',
+  ].join('\n');
+
+  if (slotCount <= 0) return [];
+  if (slotCount === 1) return [full];
+
+  const out = [full];
+  while (out.length < slotCount) out.push(ZWSP);
+  return out;
+}
+
+function buildSlotsWithFirstText(inKeys: string[], firstText: string): Slot[] {
+  const ZWSP = '\u200b';
+  if (inKeys.length === 0) return [];
+  const out: Slot[] = [{ key: inKeys[0], text: firstText }];
+  for (let i = 1; i < inKeys.length; i++) out.push({ key: inKeys[i], text: ZWSP });
+  return out;
+}
+
+function systemPromptForFullReply(): string {
+  return [
+    'あなたは iros の会話生成（reply）担当です。',
+    '',
+    '【目的】',
+    'ユーザーと “普通に会話する”。ChatGPT のように自然につなぐ。',
+    '',
+    '【制約（必須）】',
+    '1) 入力に含まれるメタ（phase/depth/q 等）は “内部制約” として尊重するが、本文にJSON/キー名/ラベルを露出しない。',
+    '2) 次のテンプレ口癖は禁止：',
+    '   - 「受け取った」「いま出ている言葉」「いまの一番大事な一点」「一手に落とす」「迷いを増やさない」「呼吸を戻す」「ここで止める」「核」「切る」',
+    '3) 二択誘導（A/Bで選ばせる）をしない。',
+    '4) 質問は最大1つ（本当に必要なときだけ）。',
+    '5) 4〜10行程度。最後は必ず「🪔」で閉じる。',
+    '6) 断定診断・過剰な助言は避け、ユーザーが話しやすい“つなぎ”を優先。',
+    '',
+    '【出力】',
+    '日本語の会話文のみ。箇条書き/JSON/コード/見出しは出さない。',
+  ].join('\n');
+}
+
+function safeHead(s: string, n = 80) {
+  const t = String(s ?? '');
+  return t.length <= n ? t : t.slice(0, n);
+}
+
+function safeContextToText(v: unknown): string {
+  if (v == null) return '';
+  if (typeof v === 'string') return norm(v);
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return norm(String(v));
+  }
+}
+
+function logRephraseOk(
+  debug: RephraseOptions['debug'],
+  outKeys: string[],
+  raw: string,
+  mode?: string,
+) {
+  if (!debug?.conversationId || !debug?.userCode) return;
+  console.log('[IROS/rephraseEngine][OK]', {
+    traceId: debug?.traceId ?? null,
+    conversationId: debug.conversationId,
+    userCode: debug.userCode,
+    mode: mode ?? null,
+    keys: outKeys,
+    rawLen: raw.length,
+    rawHead: safeHead(raw, 120),
   });
 }
 
-function buildGenerateSystem(opts?: { maxLinesHint?: number }) {
-  const maxLinesHint = typeof opts?.maxLinesHint === 'number' ? opts!.maxLinesHint : null;
-
-  return [
-    'あなたは「理解された」と感じる文章に整える“表現担当”です。',
-    'ただし、判断・助言・新しい意味の追加は禁止されています（推測・一般論・説教・診断は禁止）。',
-    '',
-    '入力には slot（OBS / SHIFT / NEXT / SAFE …）のキーと元テキスト、そして slot_hints が渡されます。',
-    '必要なら user_said（直前ユーザー入力の要約/引用）と user_context（直前文脈メモ）が渡されます。',
-    'あなたは元テキストと同じ意味・同じ役割を保ったまま、自然な会話文として書き起こしてください。',
-    '',
-    '【絶対条件】',
-    '- スロットの数・順序・キーは完全一致（増減・並び替え・キー変更は禁止）',
-    '- 事実・意味の追加は禁止（答えを捏造しない）',
-    '- 元テキストの意図を勝手に“強化/弱体化”しない',
-    '',
-    '【最重要：直答の保持】',
-    '- 元テキストが「質問への答え」になっている場合、OBSで必ず直答を保つ（例：時期/結論/定義/Yes/No）。',
-    '- OBSを「〜について知りたいんだね」「考えよう」などの観測語りに置き換えない。',
-    '- “質問→答え”の軸を壊さない。必要なら短い補足は可。ただし新情報の追加は禁止。',
-    '',
-    '【テンプレ禁止（最重要）】',
-    '- 次のような決まり文句をそのまま使わない：',
-    '  「受け取った」「いま出ている言葉」「いまの一点だけ」',
-    '  「次は一手だけ」「迷いを増やさない」「呼吸を戻す」「必要な情報だけ」など',
-    '- 同じ意味でも、毎回必ず別の自然な言い回しにする',
-    '',
-    '【スロット役割（厳守）】',
-    '- OBS：元テキストの役割を保持する。直答がある場合は直答を先頭に置く（1〜2文）。',
-    '- SHIFT：OBSを補助する“見る点”を1文で示す。新しい論点を作らない。',
-    '- NEXT：slot_hints.nextKind に従う。',
-    '  - nextKind="action"：行動を1つに落とす（誰に／いつ／何を）。不足は空欄のまま明示してよい。',
-    '  - nextKind="dialogue"：会話の次を1つに絞る（確認する/選ぶ/短い質問を返す）。行動提案はしない。',
-    '- SAFE：圧を下げる一言（評価しない/命令しない）。',
-    '',
-    '【長さの柔軟性】',
-    '- slot_hints.len に従い、短/中/長を調整する。',
-    '  - short: 1文中心 / medium: 1〜2文 / long: 2〜3文（だらだら説明しない）',
-    '',
-    '【文章スタイル】',
-    '- 日本語の自然な会話',
-    '- 抽象に逃げない。口調は落ち着いて、説得ではなく納得。',
-    '- 記号（🪔など）へのこだわりは不要',
-    '',
-    '【出力形式（厳守）】',
-    'JSONのみを出力してください。',
-    '{ "slots": [ { "key": "<入力と同じ>", "text": "<生成文>" }, ... ] }',
-    '',
-    maxLinesHint != null ? `補助制約：全体の行数は概ね ${maxLinesHint} 行以内。` : '',
-  ]
-    .filter(Boolean)
-    .join('\n');
-}
-
-function safeJsonParse(raw: string): any | null {
-  const t = norm(raw);
-  if (!t) return null;
-
-  const firstBrace = t.indexOf('{');
-  const lastBrace = t.lastIndexOf('}');
-  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) return null;
-
-  try {
-    return JSON.parse(t.slice(firstBrace, lastBrace + 1));
-  } catch {
-    return null;
-  }
-}
-
-function validateOut(inKeys: string[], out: any): Slot[] | null {
-  const slots = out?.slots;
-  if (!Array.isArray(slots) || slots.length === 0) return null;
-
-  const outSlots: Slot[] = [];
-  for (const s of slots) {
-    const key = String(s?.key ?? '').trim();
-    const text = norm(s?.text ?? '');
-    if (!key || !text) return null;
-    outSlots.push({ key, text });
-  }
-
-  // キー集合の一致（完全一致・順序一致）
-  const outKeys = outSlots.map((x) => x.key);
-  if (outKeys.length !== inKeys.length) return null;
-  for (let i = 0; i < inKeys.length; i++) {
-    if (outKeys[i] !== inKeys[i]) return null;
-  }
-
-  // =========================================================
-  // ✅ 禁句フィルタ：テンプレ臭が出たら “黙って破棄”
-  // =========================================================
-  const FORBIDDEN_PHRASES: string[] = [
-    '受け取った',
-    'いま出ている言葉',
-    'いまの一点だけ',
-    '次は一手だけ',
-    '迷いを増やさない',
-    '呼吸を戻す',
-    '必要な情報だけ',
-    '大丈夫だよ',
-    '気軽に考えて',
-  ];
-
-  const FORBIDDEN_PATTERNS: RegExp[] = [
-    /今のポイントは.+ということですね/,
-    /〜について(知ってる|知りたい|尋ねてる)ね/,
-    /大切だね$/,
-    /考えましょう$/,
-  ];
-
-  for (const s of outSlots) {
-    const t = norm(s.text);
-
-    for (const p of FORBIDDEN_PHRASES) {
-      if (p && t.includes(p)) return null;
-    }
-    for (const r of FORBIDDEN_PATTERNS) {
-      if (r.test(t)) return null;
-    }
-  }
-
-  return outSlots;
+function logRephraseAfterAttach(
+  debug: RephraseOptions['debug'],
+  outKeys: string[],
+  firstText: string,
+  mode?: string,
+) {
+  if (!debug?.conversationId || !debug?.userCode) return;
+  console.log('[IROS/rephraseEngine][AFTER_ATTACH]', {
+    traceId: debug?.traceId ?? null,
+    conversationId: debug.conversationId,
+    userCode: debug.userCode,
+    mode: mode ?? null,
+    renderEngine: debug?.renderEngine ?? true,
+    rephraseBlocksLen: outKeys.length,
+    rephraseHead: safeHead(firstText, 120),
+  });
 }
 
 /**
- * FINAL用：slotを保ったまま “文章そのもの” をLLMに生成させる。
+ * ✅ FINAL用：slotを保ったまま “会話本文” を作る
  */
 export async function rephraseSlotsFinal(
   extracted: ExtractedSlots,
@@ -379,84 +370,157 @@ export async function rephraseSlotsFinal(
     };
   }
 
-  {
-    const rawFlag = process.env.IROS_REPHRASE_FINAL_ENABLED;
-    const enabled = envFlagEnabled(rawFlag, true);
+  const rawFlag = process.env.IROS_REPHRASE_FINAL_ENABLED;
+  const enabled = envFlagEnabled(rawFlag, true);
+  console.log('[IROS/REPHRASE_FLAG]', { raw: rawFlag, enabled });
 
-    console.log('[IROS/REPHRASE_FLAG]', { raw: rawFlag, enabled });
-
-    if (!enabled) {
-      return {
-        ok: false,
-        reason: 'REPHRASE_DISABLED_BY_ENV',
-        meta: { inKeys: extracted.keys, rawLen: 0, rawHead: '' },
-      };
-    }
-  }
-
-  const inKeys = extracted.keys;
-
-  // ✅ 直前user文脈（優先順位）
-  // 1) opts.userText（呼び出し側から渡される “このターンの user”）
-  // 2) OBS から抽出した引用
-  // 3) null
-  const obs = extracted.slots.find((s) => s.key === 'OBS')?.text ?? '';
-  const userQuotedFromObs = extractQuotedUserTextFromObs(obs);
-  const user_said = norm(opts.userText ?? '') || userQuotedFromObs;
-
-  const user_context = norm(opts.userContext ?? '') || null;
-
-  const slot_hints = buildSlotHints(extracted.slots, { maxLinesHint: opts.maxLinesHint });
-
-  const system = buildGenerateSystem({ maxLinesHint: opts.maxLinesHint });
-
-  const payload = {
-    // ✅ “何に答えるか”固定用（意味追加ではない）
-    user_said: user_said || null,
-    user_context,
-
-    slot_hints,
-    slots: extracted.slots.map((s) => ({ key: s.key, text: s.text })),
-  };
-
-  const messages: ChatMessage[] = [
-    { role: 'system', content: system },
-    { role: 'user', content: JSON.stringify(payload) },
-  ];
-
-  const raw = await chatComplete({
-    purpose: 'writer',
-    model: opts.model,
-    messages,
-    temperature: typeof opts.temperature === 'number' ? opts.temperature : 0.55,
-
-    // ✅ chatComplete.ts 側の引数名は responseFormat
-    // （ここが response_format だと JSON強制が効かず VALIDATION_FAILED が増える）
-    responseFormat: { type: 'json_object' },
-  });
-
-  const rawLen = norm(raw).length;
-  const rawHead = head(raw);
-
-  const parsed = safeJsonParse(raw);
-  const validated = validateOut(inKeys, parsed);
-
-  if (!validated) {
+  if (!enabled) {
     return {
       ok: false,
-      reason: 'VALIDATION_FAILED',
-      meta: { inKeys, rawLen, rawHead },
+      reason: 'REPHRASE_DISABLED_BY_ENV',
+      meta: { inKeys: extracted.keys, rawLen: 0, rawHead: '' },
     };
   }
 
+  const mode = String(process.env.IROS_REPHRASE_FINAL_MODE ?? 'LLM').trim().toUpperCase();
+
+  const maxLines =
+    Number(process.env.IROS_REPHRASE_FINAL_MAXLINES) > 0
+      ? Math.floor(Number(process.env.IROS_REPHRASE_FINAL_MAXLINES))
+      : Math.max(4, Math.min(12, Math.floor(opts.maxLinesHint ?? 8)));
+
+  const inKeys = extracted.keys;
+
+  // (A) FIXED
+  if (mode === 'FIXED') {
+    const fixedTexts = buildFixedBoxTexts(inKeys.length);
+    const out: Slot[] = inKeys.map((k, i) => ({
+      key: k,
+      text: fixedTexts[i] ?? 'ここで止める。',
+    }));
+
+    // ✅ ログ（FIXEDでも出す）
+    logRephraseOk(opts.debug, out.map((x) => x.key), out[0]?.text ?? '', 'FIXED');
+    logRephraseAfterAttach(opts.debug, out.map((x) => x.key), out[0]?.text ?? '', 'FIXED');
+
+    return {
+      ok: true,
+      slots: out,
+      meta: {
+        inKeys,
+        outKeys: out.map((x) => x.key),
+        rawLen: 0,
+        rawHead: '',
+      },
+    };
+  }
+
+  // (B) LLM
+  const userText = norm(opts.userText ?? '');
+  const metaText = safeContextToText(opts.userContext ?? null);
+  const historyText = extractHistoryTextFromContext(opts.userContext ?? null);
+  const seedDraft = extracted.slots.map((s) => s.text).filter(Boolean).join('\n');
+
+  const historyMsgs = extractHistoryMessagesFromContext(opts.userContext ?? null);
+
+  const messages = [
+    { role: 'system' as const, content: systemPromptForFullReply() },
+
+    // ★ ここが本命：LLMに「会話」として渡る履歴
+    ...historyMsgs,
+
+    {
+      role: 'user' as const,
+      content: [
+        '【ユーザー入力】',
+        userText || '(空)',
+        '',
+        '【内部メタ（露出禁止）】',
+        metaText || '(なし)',
+        '',
+        '【下書きヒント（slot由来・露出禁止）】',
+        seedDraft || '(なし)',
+        '',
+        'この条件で、自然な会話文を生成して。',
+      ].join('\n'),
+    },
+  ];
+
+  console.log('[IROS/rephraseEngine][MSG_PACK]', {
+    historyMsgs: historyMsgs.length,
+    msgCount: messages.length,
+    roles: messages.map((m) => m.role),
+  });
+
+
+
+  let raw = '';
+  try {
+    const traceId = opts.debug?.traceId ?? null;
+    const conversationId = opts.debug?.conversationId ?? null;
+    const userCode = opts.debug?.userCode ?? null;
+
+    // ✅ chatComplete の型が追いついてなくても止まらないように any で渡す
+    raw = await chatComplete({
+      purpose: 'reply',
+      model: opts.model,
+      temperature: typeof opts.temperature === 'number' ? opts.temperature : 0.6,
+      max_tokens: 700,
+      messages,
+
+      // --- pass-through fields (ログ埋め) ---
+      traceId,
+      conversationId,
+      userCode,
+
+      // --- optional compat payloads (chatComplete 側が拾えるなら拾う) ---
+      trace: { traceId, conversationId, userCode },
+      audit: { slotPlanPolicy: 'FINAL' },
+    } as any);
+  } catch (e: any) {
+    console.error('[IROS/REPHRASE_FINAL][LLM] failed', { message: String(e?.message ?? e) });
+    return {
+      ok: false,
+      reason: 'LLM_CALL_FAILED',
+      meta: { inKeys, rawLen: 0, rawHead: '' },
+    };
+  }
+
+  // ✅ raw段階ログ（keysはslotPlan由来を明示）
+  logRephraseOk(opts.debug, extracted.keys, raw);
+
+  const cleaned = clampLines(raw, maxLines);
+  if (!cleaned) {
+    return {
+      ok: false,
+      reason: 'LLM_EMPTY',
+      meta: { inKeys, rawLen: 0, rawHead: '' },
+    };
+  }
+
+  const outSlots = buildSlotsWithFirstText(inKeys, cleaned);
+
+  // ✅ slotへ載せた後ログ
+  logRephraseAfterAttach(opts.debug, inKeys, outSlots[0]?.text ?? '');
+
   return {
     ok: true,
-    slots: validated,
+    slots: outSlots,
     meta: {
       inKeys,
-      outKeys: validated.map((x) => x.key),
-      rawLen,
-      rawHead,
+      outKeys: outSlots.map((x) => x.key),
+      rawLen: raw.length,
+      rawHead: raw.slice(0, 80),
     },
   };
 }
+
+/**
+ * ✅ 絶対ルール（幻覚/捏造 防止）
+ * - 入力に存在しない「過去の出来事」「前に言ってた」等を作らない
+ * - 「覚えてる」「前に話したよね」等の“記憶断言”は禁止
+ *   ただし、下書きヒント（slot由来）に明示で含まれている場合のみ言い換え可
+ * - ユーザーが「覚えてる？」と聞いた場合は、事実の断言ではなく
+ *   「いま出ている話題は◯◯だね」程度の現在要約で返す
+ * - 目的は“会話を自然にする”であり、ストーリー補完ではない
+ */

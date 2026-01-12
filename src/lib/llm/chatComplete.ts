@@ -49,6 +49,11 @@ type ChatArgs = {
   // JSON強制など
   responseFormat?: ResponseFormat;
 
+  // ✅ 互換：top-level でも受ける（rephrase / route から渡しやすい）
+  traceId?: string | null;
+  conversationId?: string | null;
+  userCode?: string | null;
+
   // 観測用（上位から traceId を渡せる）
   trace?: {
     traceId?: string | null;
@@ -148,12 +153,24 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
     trace,
     audit,
     allowEmpty = false,
+
+    // ✅ top-level trace fields（互換）
+    traceId: traceIdTop,
+    conversationId: conversationIdTop,
+    userCode: userCodeTop,
   } = args;
 
   if (!apiKey) throw new Error('OPENAI_API_KEY is missing');
   if (!purpose) throw new Error('chatComplete: purpose is required');
 
   validateMessages(messages);
+
+  // ✅ 最終 trace を確定（top-level を優先）
+  const traceFinal = {
+    traceId: traceIdTop ?? trace?.traceId ?? null,
+    conversationId: conversationIdTop ?? trace?.conversationId ?? null,
+    userCode: userCodeTop ?? trace?.userCode ?? null,
+  };
 
   const callId = makeCallId();
   const started = nowMs();
@@ -169,9 +186,9 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
       purpose,
       model,
       temperature,
-      traceId: trace?.traceId ?? null,
-      conversationId: trace?.conversationId ?? null,
-      userCode: trace?.userCode ?? null,
+      traceId: traceFinal.traceId,
+      conversationId: traceFinal.conversationId,
+      userCode: traceFinal.userCode,
       slotPlanPolicy: audit?.slotPlanPolicy ?? null,
       mode: audit?.mode ?? null,
       qCode: audit?.qCode ?? null,
@@ -193,14 +210,12 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
   }
 
   // ✅ 監査ログ（CALLの事実を必ず残す）
-  // - 「writer が一度も呼ばれていない」証拠化は、このログを grep するだけで成立する
   try {
     const caller = new Error().stack?.split('\n')?.[2]?.trim() ?? null;
 
     const first = messages?.[0];
     const last = messages?.[messages.length - 1];
 
-    // ✅ 「履歴要約」や「状態キー」を system で渡せているか（雑でも良いので証拠）
     const hasDigest =
       messages?.some(
         (m) =>
@@ -223,15 +238,15 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
       temperature,
       responseFormat: responseFormat?.type ?? 'text',
       endpoint,
-      traceId: trace?.traceId ?? null,
-      conversationId: trace?.conversationId ?? null,
-      userCode: trace?.userCode ?? null,
+      traceId: traceFinal.traceId,
+      conversationId: traceFinal.conversationId,
+      userCode: traceFinal.userCode,
       slotPlanPolicy: audit?.slotPlanPolicy ?? null,
       mode: audit?.mode ?? null,
       qCode: audit?.qCode ?? null,
       depthStage: audit?.depthStage ?? null,
 
-      // ✅ “履歴が入っているか”検証用（ここが今回の追加）
+      // ✅ “履歴が入っているか”検証用
       len: messages.length,
       firstRole: first?.role ?? null,
       lastRole: last?.role ?? null,
@@ -264,7 +279,7 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     const errMsg = `LLM HTTP ${res.status} (${purpose}) ${
-      trace?.traceId ? `[trace:${trace.traceId}] ` : ''
+      traceFinal.traceId ? `[trace:${traceFinal.traceId}] ` : ''
     }${text}`;
     // eslint-disable-next-line no-console
     console.error('[IROS/LLM][ERR]', {
@@ -273,9 +288,9 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
       model,
       ms: elapsed,
       ok: false,
-      traceId: trace?.traceId ?? null,
-      conversationId: trace?.conversationId ?? null,
-      userCode: trace?.userCode ?? null,
+      traceId: traceFinal.traceId,
+      conversationId: traceFinal.conversationId,
+      userCode: traceFinal.userCode,
       slotPlanPolicy: audit?.slotPlanPolicy ?? null,
       mode: audit?.mode ?? null,
       qCode: audit?.qCode ?? null,
@@ -297,9 +312,9 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
       model,
       ms: elapsed,
       ok: false,
-      traceId: trace?.traceId ?? null,
-      conversationId: trace?.conversationId ?? null,
-      userCode: trace?.userCode ?? null,
+      traceId: traceFinal.traceId,
+      conversationId: traceFinal.conversationId,
+      userCode: traceFinal.userCode,
       slotPlanPolicy: audit?.slotPlanPolicy ?? null,
       mode: audit?.mode ?? null,
       qCode: audit?.qCode ?? null,
@@ -320,9 +335,9 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
       model,
       ms: elapsed,
       ok: false,
-      traceId: trace?.traceId ?? null,
-      conversationId: trace?.conversationId ?? null,
-      userCode: trace?.userCode ?? null,
+      traceId: traceFinal.traceId,
+      conversationId: traceFinal.conversationId,
+      userCode: traceFinal.userCode,
       slotPlanPolicy: audit?.slotPlanPolicy ?? null,
       mode: audit?.mode ?? null,
       qCode: audit?.qCode ?? null,
@@ -343,9 +358,9 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
       ms: elapsed,
       ok: true,
       usage,
-      traceId: trace?.traceId ?? null,
-      conversationId: trace?.conversationId ?? null,
-      userCode: trace?.userCode ?? null,
+      traceId: traceFinal.traceId,
+      conversationId: traceFinal.conversationId,
+      userCode: traceFinal.userCode,
       slotPlanPolicy: audit?.slotPlanPolicy ?? null,
       mode: audit?.mode ?? null,
       qCode: audit?.qCode ?? null,
@@ -366,6 +381,11 @@ export async function chatCompleteJSON<T = any>(
   const raw = await chatComplete({
     ...args,
     responseFormat: args.responseFormat ?? { type: 'json_object' },
+
+    // ✅ JSON 側も top-level trace を拾えるように（上位が渡していれば維持）
+    traceId: (args as any).traceId ?? null,
+    conversationId: (args as any).conversationId ?? null,
+    userCode: (args as any).userCode ?? null,
   });
 
   try {

@@ -14,8 +14,11 @@
 
 import { chatComplete, type ChatMessage } from '@/lib/llm/chatComplete';
 
-import { getSystemPrompt, type IrosMeta, type IrosMode } from './system';
+import { getSystemPrompt, SofiaTriggers } from '../iros/system';
 import { decideQBrakeRelease, normalizeQ } from '@/lib/iros/rotation/qBrakeRelease';
+import { naturalClose } from '../iros/phrasing';
+import type { IntentMeta as IrosMeta } from './intentMeta';
+import type { IrosMode } from './memory/mode';
 
 // ✅ SpeechAct
 import { decideSpeechAct } from './speech/decideSpeechAct';
@@ -31,8 +34,11 @@ export type GenerateArgs = {
   /** 新: userText */
   userText?: string;
 
-  /** ✅ chatCore が undefined を渡すため optional */
-  meta?: IrosMeta;
+  /**
+   * ✅ chatCore/route が “欠けたmeta” を渡してくるので Partial を許容する
+   * - future-seed/seed などで layer/confidence/reason が無いことがある
+   */
+  meta?: Partial<IrosMeta> | null;
 
   /** ✅ seed/future-seed が渡している */
   conversationId?: string;
@@ -109,6 +115,19 @@ function fallbackNormalBody(userText: string, meta: any): string {
   if (q === 'Q1') return '不足がどれくらいかを確認し、動かせる点を一つに絞る。';
   if (phase === 'inner') return 'いま起きている一点を名指しして、迷いを終える。';
   return '状況を一度整理し、調整できる部分を一つに絞る。';
+}
+
+/* =========================================================
+   meta normalizer (Partial -> IntentMeta)
+   ========================================================= */
+
+function normalizeIntentMeta(m?: Partial<IrosMeta> | null): IrosMeta {
+  const base: any = m && typeof m === 'object' && !Array.isArray(m) ? { ...m } : {};
+  // ✅ 欠損しがちな必須キーを埋める（route側が IrosMeta でも落ちない）
+  if (!('layer' in base)) base.layer = null;
+  if (!('confidence' in base)) base.confidence = null;
+  if (!('reason' in base)) base.reason = null;
+  return base as IrosMeta;
 }
 
 /* =========================================================
@@ -838,7 +857,8 @@ function setSpeechActTrace(
    ========================================================= */
 
 export async function generateIrosReply(args: GenerateArgs): Promise<GenerateResult> {
-  const meta: IrosMeta = (args.meta ?? ({} as IrosMeta)) as IrosMeta;
+  // ✅ Partial meta を IntentMeta に正規化してから使う
+  const meta: IrosMeta = normalizeIntentMeta(args.meta);
   const userText = String((args as any).text ?? (args as any).userText ?? '');
 
   // ✅ v2: meta は常に object に正規化（null/undefined を許可しない）

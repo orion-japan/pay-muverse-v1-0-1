@@ -14,6 +14,11 @@
 // - SKIP 系 decision には resolvedText を必ず載せる
 // - CALL_LLM でも resolvedText を載せ、デバッグ/再利用に使えるようにする
 //
+// ✅ Phase11 重要（今回の修正ポイント）
+// - FINAL slotPlan は「テンプレ固定化」を防ぐため、原則 CALL_LLM にする
+//   （slotPlan が non-empty でも SKIP しない）
+// - 例外：資格なし / 明示沈黙 / SCAFFOLD / slotsが無い通常テキストは従来通り
+//
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 export type LlmGateDecision =
@@ -65,6 +70,10 @@ export type LlmGateProbeOutput = {
     // デバッグ用
     finalAssistantTextCandidateLen?: number | null;
     finalAssistantTextCandidateHead?: string | null;
+
+    // ✅ Phase11: 強制CALL（log証拠用）
+    finalForceCall?: boolean | null;
+    finalForceCallReason?: string | null;
   };
 };
 
@@ -211,6 +220,8 @@ function buildTextFromSlots(slotsObj: any | null): string | null {
 
 export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
   const {
+    conversationId,
+    userCode,
     allowLLM_final,
     brakeReason = null,
     speechAct = null,
@@ -234,7 +245,14 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
   const effectiveText = textNowLen > 0 ? textNowRaw : candidateRaw;
   const effectiveLen = effectiveText.length;
 
-  const mkPatch = (decision: LlmGateDecision): LlmGateProbeOutput => {
+  const slotsOk =
+    (typeof slotPlanLen === 'number' && slotPlanLen > 0) || hasSlots === true;
+
+  // patch builder（Phase11フラグ追加）
+  const mkPatch = (
+    decision: LlmGateDecision,
+    extras?: { finalForceCall?: boolean; finalForceCallReason?: string },
+  ): LlmGateProbeOutput => {
     return {
       decision,
       patch: {
@@ -253,6 +271,9 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
 
         finalAssistantTextCandidateLen: candidateLen || null,
         finalAssistantTextCandidateHead: candidateLen ? head(candidateRaw) : null,
+
+        finalForceCall: extras?.finalForceCall ?? null,
+        finalForceCallReason: extras?.finalForceCallReason ?? null,
       },
     };
   };
@@ -278,19 +299,7 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
     });
   }
 
-  const slotsOk =
-    (typeof slotPlanLen === 'number' && slotPlanLen > 0) || hasSlots === true;
-
-  // (C) FINAL slotPlan → LLM不要（すでに本文がある）
-  if (slotsOk && effectiveLen > 0 && policy === 'FINAL') {
-    return mkPatch({
-      entry: 'SKIP_SLOTPLAN',
-      reason: 'slotPlanPolicy=FINAL and produced non-empty text',
-      resolvedText: effectiveText,
-    });
-  }
-
-  // (D) ✅ SCAFFOLD（正式/A案）：LLM自体を呼ばない
+  // (C) ✅ SCAFFOLD（正式/A案）：LLM自体を呼ばない
   // - “呼ぶのに採用しない” という混乱の温床を構造的に消す
   // - SCAFFOLD は slotPlan/seed を render-v2 側で表示する
   if (slotsOk && policy === 'SCAFFOLD') {
@@ -299,6 +308,30 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
       reason: 'SCAFFOLD_POLICY__NO_LLM',
       resolvedText: effectiveLen ? effectiveText : null,
     });
+  }
+
+  // (D) ✅ Phase11：FINAL slotPlan は原則 CALL_LLM（テンプレ固定化を防ぐ）
+  // - effectiveText が non-empty でも SKIP しない
+  // - LLMには “下書き本文（effectiveText）” を必ず渡す（上流が利用）
+  if (slotsOk && policy === 'FINAL') {
+    console.warn('[IROS/LLM_GATE][FINAL_FORCE_CALL]', {
+      conversationId,
+      userCode,
+      slotPlanPolicy: policy,
+      slotPlanLen,
+      hasSlots,
+      effectiveLen,
+      head: head(effectiveText, 80),
+    });
+
+    return mkPatch(
+      {
+        entry: 'CALL_LLM',
+        reason: 'FINAL_FORCE_CALL (avoid template lock)',
+        resolvedText: effectiveLen ? effectiveText : null,
+      },
+      { finalForceCall: true, finalForceCallReason: 'FINAL_FORCE_CALL' },
+    );
   }
 
   // (E) slots があるが policy が UNKNOWN：守りで CALL_LLM（seed を渡す）
@@ -348,6 +381,10 @@ export function writeLlmGateToMeta(
   // ✅ 追加：直下ミラー（DB検索用 / SQLをそのまま活かす）
   (metaForSave.extra as any).llmEntry = patch.llmEntry;
   (metaForSave.extra as any).llmSkipReason = patch.llmSkipReason;
+
+  // ✅ 追加：FINAL強制CALLの証拠（SQLで追える）
+  (metaForSave.extra as any).finalForceCall = patch.finalForceCall ?? null;
+  (metaForSave.extra as any).finalForceCallReason = patch.finalForceCallReason ?? null;
 }
 
 // ---------------------------------------------------------------------
@@ -379,6 +416,8 @@ export function logLlmGate(
     finalAssistantTextHead: patch.finalAssistantTextHead,
     finalAssistantTextCandidateLen: patch.finalAssistantTextCandidateLen ?? null,
     finalAssistantTextCandidateHead: patch.finalAssistantTextCandidateHead ?? null,
+    finalForceCall: patch.finalForceCall ?? null,
+    finalForceCallReason: patch.finalForceCallReason ?? null,
     resolvedTextLen: decision?.resolvedText
       ? String(decision.resolvedText).length
       : null,

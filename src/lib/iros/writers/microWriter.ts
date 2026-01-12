@@ -6,6 +6,11 @@ export type MicroWriterGenerate = (args: {
   prompt: string;
   temperature?: number;
   maxTokens?: number;
+
+  // ✅ 追加：監査/追跡用（chatComplete に渡す）
+  traceId?: string | null;
+  conversationId?: string | null;
+  userCode?: string | null;
 }) => Promise<string>;
 
 export type MicroWriterInput = {
@@ -15,6 +20,11 @@ export type MicroWriterInput = {
   userText: string;
   /** 揺らぎ用seed（会話IDなどを混ぜる） */
   seed: string;
+
+  // ✅ 追加：runMicroWriter → generate に引き継ぐ
+  traceId?: string | null;
+  conversationId?: string | null;
+  userCode?: string | null;
 };
 
 export type MicroWriterOutput =
@@ -100,6 +110,10 @@ export async function runMicroWriter(
   const userText = normalizeMicro(userTextRaw);
   const seed = String(input?.seed ?? '').trim();
 
+  const traceId = input?.traceId ?? null;
+  const conversationId = input?.conversationId ?? null;
+  const userCode = input?.userCode ?? null;
+
   if (!userText) {
     return { ok: false, reason: 'empty_input' };
   }
@@ -138,38 +152,36 @@ export async function runMicroWriter(
 入力: ${userText}
 
 トーン指示:
-- 余白を作る（短く）
-- でも投げっぱなしにしない
-- ${isTiredMicro ? '疲労系なので「休む/整える」に自然に寄せてよい' : '決断/着手系なら「今の一点」を静かに受け止める'}
+- 名前: ${name || 'user'}
+- 疲労系: ${isTiredMicro ? 'yes' : 'no'}
+
+上のルールで、短い返答だけを生成して。
 `.trim();
 
+  let raw = '';
   try {
-    const raw = await generate({
+    raw = await generate({
       system: systemPrompt,
       prompt,
-      // 短文を崩さず、固定化もしすぎない
-      temperature: 0.7,
-      maxTokens: 90,
+      temperature: isTiredMicro ? 0.35 : 0.6,
+      maxTokens: 140,
+
+      // ✅ 追加：trace を generate に引き継ぐ
+      traceId,
+      conversationId,
+      userCode,
     });
-
-    const coerced = coerceToTwoLines(raw);
-    if (!coerced) {
-      return {
-        ok: false,
-        reason: 'format_invalid',
-        detail: 'LLM output did not match 1-2 line no-menu format',
-      };
-    }
-
-    // ✅ 🪔だけ許可（最大1個）
-    const sanitized = sanitizeMicroEmoji(coerced);
-
-    return { ok: true, text: sanitized };
-  } catch (e) {
-    return {
-      ok: false,
-      reason: 'generation_failed',
-      detail: e instanceof Error ? e.message : String(e),
-    };
+  } catch (e: any) {
+    return { ok: false, reason: 'generation_failed', detail: String(e?.message ?? e) };
   }
+
+  const two = coerceToTwoLines(raw);
+  if (!two) return { ok: false, reason: 'format_invalid' };
+
+  const cleaned = sanitizeMicroEmoji(two);
+  const finalText = cleaned.trim();
+
+  if (!finalText) return { ok: false, reason: 'format_invalid' };
+
+  return { ok: true, text: finalText };
 }

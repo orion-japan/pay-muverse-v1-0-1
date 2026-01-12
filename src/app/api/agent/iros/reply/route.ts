@@ -42,6 +42,8 @@ import {
   rephraseSlotsFinal,
 } from '@/lib/iros/language/rephraseEngine';
 
+
+
 /**
  * [choiceId] 形式のタグを除去したい場合のパーサ（保険）
  * ※ 今は extractNextStepChoiceFromText を使ってるので未使用でもOK
@@ -644,15 +646,23 @@ if (irosResult.ok) {
     String(userTextClean ?? '').trim().length > 0 &&
     isEmptyLike;
 
-  // ✅ slotPlanExpected のときは fallback 禁止
-  if (isNonSilenceButEmpty && slotPlanExpected) {
+  // ✅ slot（FINAL）を守る：slot の気配が1つでもあれば NormalBase fallback を禁止
+  const hasAnySlotsSignal =
+    Boolean(slotPlanExpected) ||
+    Boolean(hasSlotsDetected) ||
+    Boolean(hasSlotsFromMeta) ||
+    Number(slotPlanLenDetected ?? 0) > 0 ||
+    Number(slotLenFromMeta ?? 0) > 0;
+
+  if (isNonSilenceButEmpty && hasAnySlotsSignal) {
     console.log(
-      '[IROS/Reply] NORMAL_BASE_FALLBACK_SKIPPED__SLOTPLAN_EXPECTED',
+      '[IROS/Reply] NORMAL_BASE_FALLBACK_SKIPPED__SLOTS_PRESENT',
       {
         conversationId,
         userCode,
         speechAct,
         allowLLM,
+        isEmptyLike,
         candidateTextHead: String(candidateText ?? '').slice(0, 80),
         hasSlotsDetected,
         slotPlanLenDetected,
@@ -667,6 +677,7 @@ if (irosResult.ok) {
       userCode,
       speechAct,
       allowLLM,
+      isEmptyLike,
       candidateTextHead: String(candidateText ?? '').slice(0, 80),
     });
 
@@ -1186,6 +1197,57 @@ let { result, finalMode, metaForSave, assistantText } = irosResult as any;
         }
       }
 
+// =========================================================
+// ✅ Context Pack fetcher（LLM注入用）
+// - Evidence Logger の ios_context_pack_latest_conv を呼ぶ
+// - 失敗しても null を返す（会話を止めない）
+// =========================================================
+async function fetchContextPackForLLM(args: {
+  supabase: any;
+  userCode: string;
+  conversationId: string;
+  limit?: number;
+}): Promise<any | null> {
+  const { supabase, userCode, conversationId } = args;
+  const pLimit = Number.isFinite(args.limit as any) ? Number(args.limit) : 200;
+
+  try {
+    const { data, error } = await supabase.rpc('ios_context_pack_latest_conv', {
+      p_owner_user_code: String(userCode),
+      p_limit: pLimit,
+    });
+
+    if (error) {
+      console.warn('[IROS/CTX_PACK][ERR]', {
+        userCode,
+        conversationId,
+        message: String(error?.message ?? error),
+      });
+      return null;
+    }
+
+    // data が { counts, last_state, pattern_hint, conversation_id } の想定
+    const pack = data ?? null;
+
+    console.log('[IROS/CTX_PACK][OK]', {
+      userCode,
+      conversationId,
+      conv: pack?.conversation_id ?? null,
+      counts: pack?.counts ?? null,
+      last_state: pack?.last_state ?? null,
+      pattern_hint: pack?.pattern_hint ?? null,
+    });
+
+    return pack;
+  } catch (e: any) {
+    console.warn('[IROS/CTX_PACK][EX]', {
+      userCode,
+      conversationId,
+      message: String(e?.message ?? e),
+    });
+    return null;
+  }
+}
 
 
 
@@ -1194,23 +1256,254 @@ const effectiveStyle =
   typeof styleInput === 'string' && styleInput.trim().length > 0
     ? styleInput
     : typeof meta?.style === 'string' && meta.style.trim().length > 0
-    ? meta.style
-    : typeof meta?.userProfile?.style === 'string' &&
-      meta.userProfile.style.trim().length > 0
-    ? meta.userProfile.style
-    : typeof userProfile?.style === 'string' &&
-      userProfile.style.trim().length > 0
-    ? userProfile.style
-    : null;
+      ? meta.style
+      : typeof meta?.userProfile?.style === 'string' &&
+          meta.userProfile.style.trim().length > 0
+        ? meta.userProfile.style
+        : typeof userProfile?.style === 'string' &&
+            userProfile.style.trim().length > 0
+          ? userProfile.style
+          : null;
 
-// ✅ ここで 1回だけ rephrase（render直前 / async 可能な地点）
+// 1) 呼び出し側：text → userTextClean にする
 await maybeAttachRephraseForRenderV2({
   conversationId,
   userCode,
   meta,
-  userText: text,   // ✅ ここで渡す
+  userText: userTextClean,
   extraMerged,
+  historyMessages: Array.isArray(chatHistory) ? chatHistory : null,
+  traceId,
+  reqId,
 });
+
+
+// 2) helper：destructure に userText を含める（args.userText をやめる）
+async function maybeAttachRephraseForRenderV2(args: {
+  conversationId: string;
+  userCode: string;
+  meta: any;
+  userText?: string;
+  extraMerged: Record<string, any>;
+  historyMessages?: any[] | string | null; // ✅ 追加
+  traceId?: string | null;
+  reqId?: string | null;
+}) {
+  const {
+    conversationId,
+    userCode,
+    meta,
+    extraMerged,
+    userText,
+    historyMessages, // ✅ 追加
+    traceId,
+    reqId,
+  } = args;
+
+  // ✅ ここが「冒頭」：二重実行の確定ログ + idempotent ガード
+  {
+    const already =
+      Array.isArray((extraMerged as any)?.rephraseBlocks) &&
+      (extraMerged as any).rephraseBlocks.length > 0;
+
+    const reqKey = `${reqId ?? 'no-reqId'}|${traceId ?? 'no-traceId'}|${conversationId}|${userCode}`;
+
+    const g = globalThis as any;
+    g.__IROS_REPHRASE_CALLCOUNT = g.__IROS_REPHRASE_CALLCOUNT ?? new Map();
+    const prev = Number(g.__IROS_REPHRASE_CALLCOUNT.get(reqKey) ?? 0);
+    const next = prev + 1;
+    g.__IROS_REPHRASE_CALLCOUNT.set(reqKey, next);
+
+    console.warn('[IROS/rephrase][ENTER]', {
+      reqKey,
+      callCount: next,
+      alreadyAttached: already,
+    });
+
+    if (already) {
+      console.warn('[IROS/rephrase][SKIP_ALREADY_ATTACHED]', {
+        reqKey,
+        rephraseBlocksLen: (extraMerged as any).rephraseBlocks.length,
+      });
+      return;
+    }
+  }
+
+  const enabled =
+    String(process.env.IROS_REPHRASE_FINAL_ENABLED ?? '1').trim() !== '0';
+  if (!enabled) return;
+  if (extraMerged?.renderEngine !== true) return;
+
+  const hintedRenderMode =
+    (typeof meta?.renderMode === 'string' && meta.renderMode) ||
+    (typeof meta?.extra?.renderMode === 'string' && meta.extra.renderMode) ||
+    (typeof meta?.extra?.renderedMode === 'string' &&
+      meta.extra.renderedMode) ||
+    '';
+  if (String(hintedRenderMode).toUpperCase() === 'IT') return;
+
+  const speechAct = String(
+    meta?.extra?.speechAct ?? meta?.speechAct ?? '',
+  ).toUpperCase();
+  if (speechAct === 'SILENCE' || speechAct === 'FORWARD') return;
+
+  const extraForRender = {
+    ...(meta?.extra ?? {}),
+    ...(extraMerged ?? {}),
+    framePlan: (meta as any)?.framePlan ?? null,
+    slotPlan: (meta as any)?.slotPlan ?? null,
+  };
+
+  const extracted = extractSlotsForRephrase(extraForRender);
+  if (!extracted?.slots?.length) return;
+
+// ✅ ここは「1回だけ」残す（重複してる方は消す）
+const model =
+  process.env.IROS_REPHRASE_MODEL ?? process.env.IROS_MODEL ?? 'gpt-4.1';
+
+// traceId は reqId をフォールバックにする
+const traceIdFinal =
+  traceId && String(traceId).trim()
+    ? String(traceId).trim()
+    : reqId ?? null;
+
+// =========================================================
+// ✅ Context Pack を取得して LLM(userContext) に注入する
+// =========================================================
+const contextPack = await fetchContextPackForLLM({
+  supabase, // ★ route.ts 上部の service-role client を使う
+  userCode,
+  conversationId,
+  limit: 200,
+});
+
+// meta にも保持（監査＆後段参照用）
+meta.extra = {
+  ...(meta.extra ?? {}),
+  hasContextPackForLLM: !!contextPack,
+  contextPackCounts: contextPack?.counts ?? null,
+  contextPackLastState: contextPack?.last_state ?? null,
+};
+
+// ✅ ここで「注入される」ことを確定ログ化
+console.log('[IROS/rephrase][CTX_INJECT]', {
+  conversationId,
+  userCode,
+  hasContextPack: !!contextPack,
+  counts: contextPack?.counts ?? null,
+  last_state: contextPack?.last_state ?? null,
+});
+
+// ✅ 追加：LLM に渡す userContext に「直近会話」を合成する
+// - historyXMerged / mergedHistory / historyMerged 等、ここにある実変数名に合わせて1つだけ使う
+// - どれも無ければ `null` のままでもOK（落ちない）
+
+// 形式を揃える（rephraseEngine 側で拾えるキー）
+const contextPackWithHistory = {
+  ...(contextPack ?? {}),
+  historyMessages: Array.isArray(historyMessages) ? historyMessages : undefined,
+  historyText: typeof historyMessages === 'string' ? historyMessages : undefined,
+};
+
+// ✅ 合成後ログ（ここが true になれば勝ち）
+console.log('[IROS/rephrase][CTX_INJECT][WITH_HISTORY]', {
+  conversationId,
+  userCode,
+  hasHistoryMessages: Array.isArray((contextPackWithHistory as any).historyMessages),
+  historyLen: Array.isArray((contextPackWithHistory as any).historyMessages)
+    ? (contextPackWithHistory as any).historyMessages.length
+    : null,
+});
+
+console.log('[IROS/rephrase][USERCTX_KEYS]', {
+  conversationId,
+  userCode,
+  userContextType: typeof contextPackWithHistory,
+  userContextKeys: contextPackWithHistory ? Object.keys(contextPackWithHistory) : null,
+  hasHistoryMessages: Array.isArray((contextPackWithHistory as any)?.historyMessages),
+  historyLen: Array.isArray((contextPackWithHistory as any)?.historyMessages)
+    ? (contextPackWithHistory as any).historyMessages.length
+    : null,
+  hasHistoryText: typeof (contextPackWithHistory as any)?.historyText === 'string',
+  historyTextLen:
+    typeof (contextPackWithHistory as any)?.historyText === 'string'
+      ? (contextPackWithHistory as any).historyText.length
+      : null,
+});
+
+
+// ↓↓↓ 以降、rephrase 呼び出しに渡す opts.userContext はこれを使う
+// 例：rephraseSlotsFinal(extracted, { ...opts, userContext: contextPackWithHistory, ... })
+
+
+// =========================================================
+// ✅ rephraseSlotsFinal に userContext を渡す（これがLLM注入）
+// =========================================================
+const res = await rephraseSlotsFinal(extracted, {
+  model,
+  temperature: 0.2,
+  maxLinesHint: Number.isFinite(Number(process.env.IROS_RENDER_DEFAULT_MAXLINES))
+    ? Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)
+    : 8,
+  userText: userText ?? null,
+
+  // ★★★ ここが変更点：null → contextPack
+  userContext: contextPackWithHistory,
+  debug: {
+    traceId: traceIdFinal,
+    conversationId: conversationId ?? null,
+    userCode: userCode ?? null,
+    renderEngine: true,
+  },
+});
+
+
+  if (!res.ok) {
+    console.warn('[IROS/rephrase][SKIP]', {
+      conversationId,
+      userCode,
+      reason: res.reason,
+      inKeys: res.meta?.inKeys ?? [],
+      rawLen: res.meta?.rawLen ?? 0,
+      rawHead: res.meta?.rawHead ?? '',
+    });
+    return;
+  }
+
+  // attach（mutate）
+  (extraMerged as any).rephraseBlocks = res.slots.map((s) => ({ text: s.text }));
+
+  meta.extra = {
+    ...(meta.extra ?? {}),
+    rephraseApplied: true,
+    rephraseModel: model,
+    rephraseKeys: res.meta.outKeys,
+    rephraseRawLen: res.meta.rawLen,
+    rephraseRawHead: res.meta.rawHead,
+  };
+
+  console.warn('[IROS/rephrase][OK]', {
+    conversationId,
+    userCode,
+    keys: res.meta.outKeys,
+    rawLen: res.meta.rawLen,
+    rawHead: res.meta.rawHead,
+  });
+
+  console.warn('[IROS/rephrase][AFTER_ATTACH]', {
+    conversationId,
+    userCode,
+    renderEngine: (extraMerged as any)?.renderEngine === true,
+    rephraseBlocksLen: Array.isArray((extraMerged as any)?.rephraseBlocks)
+      ? (extraMerged as any).rephraseBlocks.length
+      : 0,
+    rephraseHead: Array.isArray((extraMerged as any)?.rephraseBlocks)
+      ? String((extraMerged as any).rephraseBlocks?.[0]?.text ?? '').slice(0, 80)
+      : '',
+  });
+}
+
+
 
 const applied = applyRenderEngineIfEnabled({
   conversationId,
@@ -1702,6 +1995,56 @@ if (enableRenderEngine && !isIT) {
       slotPlan: (meta as any)?.slotPlan ?? null,
     };
 
+// ✅ EvidenceLogger 用の最小パックを必ず付与（U!:no_ctx_summary を潰す）
+// ※ extraForRender がスコープ内の「ここ」に置く
+{
+  const ms =
+    (extraForHandle as any)?.memoryState ?? (meta as any)?.memoryState ?? null;
+
+  const convId =
+    (extraForHandle as any)?.conversationId ??
+    (meta as any)?.conversationId ??
+    (meta as any)?.extra?.conversationId ??
+    null;
+
+  const uCode =
+    (extraForHandle as any)?.userCode ??
+    (meta as any)?.userCode ??
+    (meta as any)?.extra?.userCode ??
+    null;
+
+  const uText =
+    (extraForHandle as any)?.userText ??
+    (meta as any)?.userText ??
+    (meta as any)?.extra?.userText ??
+    userText ??
+    null;
+
+  const shortSummary =
+    (ms?.situation_summary ??
+      ms?.situationSummary ??
+      ms?.summary ??
+      (meta as any)?.situationSummary ??
+      null) as string | null;
+
+  const topic =
+    (ms?.situation_topic ??
+      ms?.situationTopic ??
+      (meta as any)?.situationTopic ??
+      null) as string | null;
+
+  (extraForRender as any).conversationId = convId;
+  (extraForRender as any).userCode = uCode;
+  (extraForRender as any).userText = typeof uText === 'string' ? uText : null;
+  (extraForRender as any).ctxPack = {
+    shortSummary: typeof shortSummary === 'string' ? shortSummary : null,
+    topic: typeof topic === 'string' ? topic : null,
+    lastUser: null,
+    lastAssistant: null,
+  };
+}
+
+
     // ✅ 6〜8段化：maxLines は env → 未設定なら 8
     const maxLines =
       Number.isFinite(Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)) &&
@@ -1932,96 +2275,7 @@ if (enableRenderEngine && !isIT) {
 // - slot key/順序がズレたら黙って破棄
 // - SILENCE/FORWARD は触らない
 // =========================================================
-async function maybeAttachRephraseForRenderV2(args: {
-  conversationId: string;
-  userCode: string;
-  meta: any;
-  userText?: string;   // ✅ 追加
-  extraMerged: Record<string, any>;
-}) {
-  const { conversationId, userCode, meta, extraMerged } = args;
 
-  // feature flag（即OFF可能）
-  const enabled = String(process.env.IROS_REPHRASE_FINAL_ENABLED ?? '1').trim() !== '0';
-  if (!enabled) return;
-
-  // renderEngine が OFF ならそもそもやらない（無駄撃ち防止）
-  if (extraMerged?.renderEngine !== true) return;
-
-  // IT は renderReply 側で別処理なので、ここでは触らない
-  const hintedRenderMode =
-    (typeof meta?.renderMode === 'string' && meta.renderMode) ||
-    (typeof meta?.extra?.renderMode === 'string' && meta.extra.renderMode) ||
-    (typeof meta?.extra?.renderedMode === 'string' && meta.extra.renderedMode) ||
-    '';
-  if (String(hintedRenderMode).toUpperCase() === 'IT') return;
-
-  // SILENCE / FORWARD は触らない
-  const speechAct = String(meta?.extra?.speechAct ?? meta?.speechAct ?? '').toUpperCase();
-  if (speechAct === 'SILENCE' || speechAct === 'FORWARD') return;
-
-  // slots を拾える形の extraForRender を作る（renderGatewayAsReply と同じ系統）
-  const extraForRender = {
-    ...(meta?.extra ?? {}),
-    ...(extraMerged ?? {}),
-    framePlan: (meta as any)?.framePlan ?? null,
-    slotPlan: (meta as any)?.slotPlan ?? null,
-  };
-
-  const extracted = extractSlotsForRephrase(extraForRender);
-  if (!extracted?.slots?.length) return;
-
-  const model =
-    process.env.IROS_REPHRASE_MODEL ??
-    process.env.IROS_MODEL ??
-    'gpt-4.1';
-
-    const res = await rephraseSlotsFinal(extracted, {
-      model,
-      temperature: 0.2,
-      maxLinesHint: Number.isFinite(Number(process.env.IROS_RENDER_DEFAULT_MAXLINES))
-        ? Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)
-        : 8,
-
-      // ✅ args から受け取る
-      userText: args.userText ?? null,
-      userContext: null,
-    });
-
-
-
-  if (!res.ok) {
-    console.warn('[IROS/rephrase][SKIP]', {
-      conversationId,
-      userCode,
-      reason: res.reason,
-      inKeys: res.meta?.inKeys ?? [],
-      rawLen: res.meta?.rawLen ?? 0,
-      rawHead: res.meta?.rawHead ?? '',
-    });
-    return;
-  }
-  // ✅ renderGatewayAsReply が拾える形で載せる（RenderBlock[] 相当）
-  extraMerged.rephraseBlocks = res.slots.map((s) => ({ text: s.text }));
-
-  // デバッグ用：meta にも残す（保存したければ persist meta 経由で残る）
-  meta.extra = {
-    ...(meta.extra ?? {}),
-    rephraseApplied: true,
-    rephraseModel: model,
-    rephraseKeys: res.meta.outKeys,
-    rephraseRawLen: res.meta.rawLen,
-    rephraseRawHead: res.meta.rawHead,
-  };
-
-  console.warn('[IROS/rephrase][OK]', {
-    conversationId,
-    userCode,
-    keys: res.meta.outKeys,
-    rawLen: res.meta.rawLen,
-    rawHead: res.meta.rawHead,
-  });
-}
 
 // ✅ helpers領域に置く（POSTの外 / applyRenderEngineIfEnabled の外）
 function sanitizeFinalContent(input: string): { text: string; removed: string[] } {

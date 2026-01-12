@@ -84,6 +84,37 @@ function buildOpenSlots(input: {
   const lastLine =
     last && last !== t ? `前回の要約：${clamp(last, 46)}` : '';
 
+  // OPENは「問い」を出さず、まず“整理の枠”だけ渡す（質問ループをここで作らない）
+  const obs = [
+    `しんどさが続いていて、毎日消耗している。`,
+    t ? `いま出ている要点：${clamp(t, 62)}` : '',
+    a ?? '',
+    topicLine,
+    lastLine,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const shift = [
+    `まず整理の箱を3つだけ置く。`,
+    `1) 事実：何が起きた（誰／どこ／いつ）`,
+    `2) 感情：いま一番きつい反応`,
+    `3) 望み：本当はどうなってほしい`,
+    `短文でOK。うまく書かなくていい。`,
+  ].join('\n');
+
+  const safe = [
+    `急がなくていい。`,
+    `いまは“材料を出す”だけで前に進む。`,
+  ].join('\n');
+
+  return [
+    { key: 'OBS', role: 'assistant', style: 'soft', content: noQM(obs) },
+    { key: 'SHIFT', role: 'assistant', style: 'neutral', content: noQM(shift) },
+    { key: 'SAFE', role: 'assistant', style: 'soft', content: noQM(safe) },
+  ];
+
+
   // 質問禁止なので「教えて」で止める（?を使わない）
   return [
     {
@@ -103,8 +134,17 @@ function buildOpenSlots(input: {
       style: 'neutral',
       content: noQM('まず整理に入る。材料を3つだけ置いて。事実 / 感情 / 望み（短文でOK）'),
     },
+    // ✅ OPENでも締めをSAFEに隔離（SHIFTに混ざるのを防ぐ）
+    {
+      key: 'SAFE',
+      role: 'assistant',
+      style: 'soft',
+      content: noQM('急がなくていい。いまは書き出すだけで十分。🪔'),
+    },
   ];
 }
+
+
 
 function buildClarifySlots(input: {
   userText: string;

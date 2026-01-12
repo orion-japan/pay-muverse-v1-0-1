@@ -825,21 +825,22 @@ export async function persistMemoryStateIfAny(args: {
 
     console.log('[IROS/Phase10] decideT3Upgrade result', t3Decision);
 
-// ✅ 修正版：T3 upgrade は itTriggered に依存せず “保存経路” を作る
+// ✅ 修正版：T3 upgrade を最優先（effectiveItx より上）
 const itxForSave: EffectiveItx =
-  effectiveItx
-    ? effectiveItx
-    : t3Decision.upgrade === true && t3Decision.nextItxStep === 'T3'
-      ? {
-          itx_step: 'T3',
-          itx_anchor_event_type:
-            anchorEventTypeResolved && anchorEventTypeResolved !== 'none'
-              ? anchorEventTypeResolved
-              : null,
-          itx_reason: 'T3_UPGRADE',
-          itx_last_at: nowIso(),
-        }
+  t3Decision.upgrade === true && t3Decision.nextItxStep === 'T3'
+    ? {
+        itx_step: 'T3',
+        itx_anchor_event_type:
+          anchorEventTypeResolved && anchorEventTypeResolved !== 'none'
+            ? anchorEventTypeResolved
+            : null,
+        itx_reason: 'T3_UPGRADE',
+        itx_last_at: nowIso(),
+      }
+    : effectiveItx
+      ? effectiveItx
       : null;
+
 
 
     // =========================================================

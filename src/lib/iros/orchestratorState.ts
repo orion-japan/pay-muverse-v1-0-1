@@ -185,8 +185,16 @@ export async function loadBaseMetaFromMemoryState(args: {
     if (!memoryState) return { mergedBaseMeta, memoryState };
 
     const hasBaseSA =
-      typeof (mergedBaseMeta as any)?.selfAcceptance === 'number' &&
-      !Number.isNaN((mergedBaseMeta as any).selfAcceptance);
+    typeof (mergedBaseMeta as any)?.selfAcceptance === 'number' &&
+    !Number.isNaN((mergedBaseMeta as any).selfAcceptance);
+
+    // ✅ ここから下（rotationState〜selfAcceptance〜y/h）は
+    // “mergedBaseMeta = { ... }” の **中** に入ってないとダメです。
+    // いま画面だと 266 行目あたりで `};` を先に閉じちゃっていて、
+    // その後の `...(` が「オブジェクト外」に出て構文エラーになっています。
+    //
+    // ↓ このブロックを **「mergedBaseMeta = { ...(mergedBaseMeta ?? {}), ...」の末尾」** として
+    // そのまま貼り替えてください（= rotationState 以降〜最後の `};` までを置換）
 
     mergedBaseMeta = {
       ...(mergedBaseMeta ?? {}),
@@ -210,9 +218,9 @@ export async function loadBaseMetaFromMemoryState(args: {
 
       // phase / spin：baseMeta 側に無いときだけ補完
       ...(!(mergedBaseMeta as any)?.phase && normalizedPhase ? { phase: normalizedPhase } : {}),
-      ...metaMissing((mergedBaseMeta as any)?.spinLoop) && normalizedSpinLoop
+      ...(metaMissing((mergedBaseMeta as any)?.spinLoop) && normalizedSpinLoop
         ? { spinLoop: normalizedSpinLoop }
-        : {},
+        : {}),
       ...(typeof (mergedBaseMeta as any)?.spinStep === 'number'
         ? {}
         : normalizedSpinStep !== null
@@ -232,7 +240,7 @@ export async function loadBaseMetaFromMemoryState(args: {
         ? { intent_anchor_key: intentAnchorKey as any }
         : {}),
 
-      // ✅ rotationState：下流取りこぼし防止
+      // ✅ rotationState：下流取りこぼし防止（無ければ作る）
       ...(typeof (mergedBaseMeta as any)?.rotationState === 'object' &&
       (mergedBaseMeta as any).rotationState
         ? {}
@@ -243,19 +251,28 @@ export async function loadBaseMetaFromMemoryState(args: {
                 typeof (mergedBaseMeta as any)?.spinStep === 'number'
                   ? (mergedBaseMeta as any).spinStep
                   : normalizedSpinStep ?? null,
-              descentGate:
-                (mergedBaseMeta as any)?.descentGate ?? normalizedDescentGate ?? null,
+              descentGate: (mergedBaseMeta as any)?.descentGate ?? normalizedDescentGate ?? null,
             },
           }),
 
-      // selfAcceptance は baseMeta に無い場合のみ補完
+      // ✅ selfAcceptance は baseMeta に無い場合のみ補完
       ...(!hasBaseSA && typeof memoryState.selfAcceptance === 'number'
         ? { selfAcceptance: memoryState.selfAcceptance }
         : {}),
 
-      ...(typeof memoryState.yLevel === 'number' ? { yLevel: memoryState.yLevel } : {}),
-      ...(typeof memoryState.hLevel === 'number' ? { hLevel: memoryState.hLevel } : {}),
+      // ✅ y/h は baseMeta に無いときだけ補完（上書きしない）
+      ...(typeof (mergedBaseMeta as any)?.yLevel === 'number'
+        ? {}
+        : typeof memoryState.yLevel === 'number'
+          ? { yLevel: memoryState.yLevel }
+          : {}),
+      ...(typeof (mergedBaseMeta as any)?.hLevel === 'number'
+        ? {}
+        : typeof memoryState.hLevel === 'number'
+          ? { hLevel: memoryState.hLevel }
+          : {}),
     };
+
   } catch (e) {
     console.error('[IROS/STATE] loadIrosMemoryState failed', {
       userCode,
@@ -265,10 +282,10 @@ export async function loadBaseMetaFromMemoryState(args: {
 
   return { mergedBaseMeta, memoryState };
 }
-
 function metaMissing(v: any) {
   return v == null || (typeof v === 'string' && v.trim().length === 0);
 }
+
 
 /**
  * 互換のため残すが、ここではDB保存しない。

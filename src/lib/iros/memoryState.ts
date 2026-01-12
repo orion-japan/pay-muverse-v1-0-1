@@ -8,6 +8,16 @@
 // - q_counts は「既存の構造（q_trace 等）を保持したまま it_cooldown だけ正規化」する
 // - itx_*（IT連続性）は読み書き対象に含める（将来の判定/UIに使う）
 // - intent_anchor（北極星/意図アンカー）は jsonb({key:'SUN', ...}) を想定し、state には key(string) で保持する
+//
+// ✅ 今回の修正ポイント（“会話の流れが読めてない”の根治寄り）
+// - upsert の「undefined / null を潰さない」設計を厳密化（?? の罠を避ける）
+//   - intentAnchor / itx* は undefined の時だけ prev を採用
+//   - null を渡した場合は「明示的に消す」扱いにできる（= caller が意図している時だけ）
+// - situationSummary / situationTopic / sentimentLevel も “空文字/薄い入力” で上書きしない
+// - intent_anchor の保存形式を統一し、load 側は互換を広く拾う（{key}, {fixedNorthKey}, string）
+// - 重要ログを一箇所で整形（diff が追える）
+//
+// ※ 既存DBや他ファイルの変更は不要（このファイル内で完結）
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -71,9 +81,10 @@ export type IrosMemoryState = {
 export type UpsertMemoryStateInput = {
   userCode: string;
 
-  // ★ 意図アンカー（SUN など）: 入力は任意（undefined/null は潰さない）
+  // ★ 意図アンカー（SUN など）: 入力は任意（undefined は維持 / null は明示消去）
   intentAnchor?: string | null;
 
+  // ★ null 許容：ここは “空文字で上書きしない” だけ担保する
   depthStage: string | null;
   qPrimary: string | null;
   selfAcceptance: number | null;
@@ -95,7 +106,7 @@ export type UpsertMemoryStateInput = {
   spinStep: number | null;
   descentGate: DescentGate | null;
 
-  // ★ IT 連続性（必要なときだけ渡せばOK。null は潰さない）
+  // ★ IT 連続性（必要なときだけ渡せばOK。undefined は維持 / null は明示消去）
   itxStep?: string | null;
   itxAnchorEventType?: string | null;
   itxReason?: string | null;
@@ -105,8 +116,12 @@ export type UpsertMemoryStateInput = {
 };
 
 /* =========================
- * Normalizers
+ * Small utils
  * ========================= */
+
+function isObj(v: unknown): v is Record<string, any> {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
 
 function normString(v: any): string | null {
   if (typeof v !== 'string') return null;
@@ -167,14 +182,32 @@ function clampInt0to3(v: any): number | null {
 }
 
 /**
+ * 空文字・薄い文で上書きしない（会話の流れを壊す“ノイズ保存”を防ぐ）
+ * - input が null の場合は「消す」意思なので許可
+ * - input が '' / '   ' は prev を維持
+ */
+function preferNonEmptyString(input: any, prev: string | null): string | null {
+  if (input === null) return null; // 明示消去
+  const s = normString(input);
+  if (s) return s;
+  return prev ?? null;
+}
+
+/**
  * intent_anchor は jsonb({key:'SUN', ...}) を想定。
  * state では key(string) に落として持つ。
- * 互換: string('SUN') でも来る可能性があるので拾う。
+ * 互換:
+ * - string('SUN')
+ * - {key:'SUN'}
+ * - {fixedNorthKey:'SUN'}（過去ログ互換）
  */
 function normIntentAnchorKey(v: any): string | null {
   if (v == null) return null;
   if (typeof v === 'string') return normString(v);
-  if (typeof v === 'object') return normString((v as any).key);
+  if (typeof v === 'object') {
+    const o = v as any;
+    return normString(o.key) ?? normString(o.fixedNorthKey) ?? null;
+  }
   return null;
 }
 
@@ -192,6 +225,16 @@ function normalizeQCounts(v: any): QCounts | null {
   out.it_cooldown = cd ?? 0;
 
   return out;
+}
+
+/**
+ * “undefined のときだけ prev を採用” を徹底するためのヘルパ
+ * - input が undefined: prev
+ * - input が null: null（明示消去）
+ * - input が値: 値
+ */
+function pickOptional<T>(input: T | undefined, prev: T): T {
+  return input === undefined ? prev : input;
 }
 
 /* =========================
@@ -316,51 +359,79 @@ export async function upsertIrosMemoryState(
 ): Promise<void> {
   const prev = await loadIrosMemoryState(sb, input.userCode);
 
-  // null なら潰さない（安定性優先）
-  const finalDepthStage = input.depthStage ?? prev?.depthStage ?? null;
-  const finalQPrimary = input.qPrimary ?? prev?.qPrimary ?? null;
+  // 初回（prevが無い）でも落ちないように “空の prev” を用意
+  const prevSafe: IrosMemoryState = prev ?? {
+    userCode: input.userCode,
+    intentAnchor: null,
+    depthStage: null,
+    qPrimary: null,
+    selfAcceptance: null,
+    phase: null,
+    intentLayer: null,
+    intentConfidence: null,
+    yLevel: null,
+    hLevel: null,
+    spinLoop: null,
+    spinStep: null,
+    descentGate: null,
+    itxStep: null,
+    itxAnchorEventType: null,
+    itxReason: null,
+    itxLastAt: null,
+    summary: null,
+    updatedAt: null,
+    sentimentLevel: null,
+    situationSummary: null,
+    situationTopic: null,
+    qCounts: null,
+  };
+
+  // null なら潰さない（安定性優先）：ただし “空文字” は prev を維持
+  const finalDepthStage = preferNonEmptyString(input.depthStage, prevSafe.depthStage);
+  const finalQPrimary = preferNonEmptyString(input.qPrimary, prevSafe.qPrimary);
 
   const finalSelfAcceptance =
     typeof input.selfAcceptance === 'number'
       ? input.selfAcceptance
-      : prev?.selfAcceptance ?? null;
+      : prevSafe.selfAcceptance ?? null;
 
-  const finalPhase = input.phase ?? prev?.phase ?? null;
+  const finalPhase = input.phase ?? prevSafe.phase ?? null;
 
-  const finalIntentLayer = input.intentLayer ?? prev?.intentLayer ?? null;
+  const finalIntentLayer = input.intentLayer ?? prevSafe.intentLayer ?? null;
 
   const finalIntentConfidence =
     typeof input.intentConfidence === 'number'
       ? input.intentConfidence
-      : prev?.intentConfidence ?? null;
+      : prevSafe.intentConfidence ?? null;
 
-  const finalYLevel = typeof input.yLevel === 'number' ? input.yLevel : prev?.yLevel ?? null;
-  const finalHLevel = typeof input.hLevel === 'number' ? input.hLevel : prev?.hLevel ?? null;
+  const finalYLevel = typeof input.yLevel === 'number' ? input.yLevel : prevSafe.yLevel ?? null;
+  const finalHLevel = typeof input.hLevel === 'number' ? input.hLevel : prevSafe.hLevel ?? null;
 
   const yLevelInt = clampInt0to3(finalYLevel);
   const hLevelInt = clampInt0to3(finalHLevel);
 
-  const finalSentimentLevel =
-    typeof input.sentimentLevel === 'string' && input.sentimentLevel.trim().length > 0
-      ? input.sentimentLevel.trim()
-      : prev?.sentimentLevel ?? null;
+  const finalSentimentLevel = preferNonEmptyString(input.sentimentLevel, prevSafe.sentimentLevel);
 
-  const finalSpinLoop = input.spinLoop ?? prev?.spinLoop ?? null;
+  const finalSpinLoop = input.spinLoop ?? prevSafe.spinLoop ?? null;
   const finalSpinStep =
-    typeof input.spinStep === 'number' ? normSpinStep(input.spinStep) : prev?.spinStep ?? null;
-  const finalDescentGate = input.descentGate ?? prev?.descentGate ?? null;
+    typeof input.spinStep === 'number' ? normSpinStep(input.spinStep) : prevSafe.spinStep ?? null;
+  const finalDescentGate = input.descentGate ?? prevSafe.descentGate ?? null;
 
-  // ★ intentAnchor（undefined/null は潰さない）
-  const finalIntentAnchor = input.intentAnchor ?? prev?.intentAnchor ?? null;
+  // ★ intentAnchor（undefined のときだけ prev を採用 / null は明示消去）
+  const finalIntentAnchor = pickOptional(input.intentAnchor, prevSafe.intentAnchor);
 
-  // ★ IT 連続性（undefined/null は潰さない）
-  const finalItxStep = input.itxStep ?? prev?.itxStep ?? null;
-  const finalItxAnchorEventType = input.itxAnchorEventType ?? prev?.itxAnchorEventType ?? null;
-  const finalItxReason = input.itxReason ?? prev?.itxReason ?? null;
-  const finalItxLastAt = input.itxLastAt ?? prev?.itxLastAt ?? null;
+  // ★ IT 連続性（undefined のときだけ prev を採用 / null は明示消去）
+  const finalItxStep = pickOptional(input.itxStep, prevSafe.itxStep);
+  const finalItxAnchorEventType = pickOptional(input.itxAnchorEventType, prevSafe.itxAnchorEventType);
+  const finalItxReason = pickOptional(input.itxReason, prevSafe.itxReason);
+  const finalItxLastAt = pickOptional(input.itxLastAt, prevSafe.itxLastAt);
+
+  // situation は “空文字/薄い入力” で上書きしない
+  const finalSituationSummary = preferNonEmptyString(input.situationSummary, prevSafe.situationSummary);
+  const finalSituationTopic = preferNonEmptyString(input.situationTopic, prevSafe.situationTopic);
 
   // q_counts は構造維持しつつ it_cooldown 正規化
-  const finalQCounts = normalizeQCounts(input.qCounts) ?? normalizeQCounts(prev?.qCounts) ?? null;
+  const finalQCounts = normalizeQCounts(input.qCounts) ?? normalizeQCounts(prevSafe.qCounts) ?? null;
 
   const summaryParts: string[] = [];
   if (finalIntentAnchor) summaryParts.push(`ia=${finalIntentAnchor}`);
@@ -386,7 +457,8 @@ export async function upsertIrosMemoryState(
   const payload = {
     user_code: input.userCode,
 
-    // ★ DBは jsonb を想定：{key:'SUN'} で保存（nullは明示的に消す）
+    // ★ DBは jsonb を想定：{key:'SUN'} で保存
+    // - finalIntentAnchor が null の場合は null（明示消去）
     intent_anchor: finalIntentAnchor ? { key: finalIntentAnchor } : null,
 
     depth_stage: finalDepthStage,
@@ -401,8 +473,8 @@ export async function upsertIrosMemoryState(
     updated_at: new Date().toISOString(),
 
     sentiment_level: finalSentimentLevel,
-    situation_summary: input.situationSummary ?? prev?.situationSummary ?? null,
-    situation_topic: input.situationTopic ?? prev?.situationTopic ?? null,
+    situation_summary: finalSituationSummary,
+    situation_topic: finalSituationTopic,
 
     spin_loop: finalSpinLoop,
     spin_step: finalSpinStep,
@@ -416,6 +488,26 @@ export async function upsertIrosMemoryState(
 
     q_counts: finalQCounts,
   };
+
+  if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
+    console.log('[IROS/STATE] upsert will write', {
+      userCode: input.userCode,
+      prev: {
+        intentAnchor: prevSafe.intentAnchor,
+        depthStage: prevSafe.depthStage,
+        qPrimary: prevSafe.qPrimary,
+        phase: prevSafe.phase,
+        itxStep: prevSafe.itxStep,
+      },
+      next: {
+        intentAnchor: finalIntentAnchor,
+        depthStage: finalDepthStage,
+        qPrimary: finalQPrimary,
+        phase: finalPhase,
+        itxStep: finalItxStep,
+      },
+    });
+  }
 
   const { error } = await sb.from('iros_memory_state').upsert(payload, { onConflict: 'user_code' });
 
@@ -438,7 +530,19 @@ export async function upsertIrosMemoryState(
       itxAnchorEventType: finalItxAnchorEventType,
       itxReason: finalItxReason,
       itxLastAt: finalItxLastAt,
+      sentimentLevel: finalSentimentLevel,
+      situationSummary: finalSituationSummary,
+      situationTopic: finalSituationTopic,
       qCounts: finalQCounts,
     });
   }
+}
+
+// src/lib/iros/system.ts
+
+// --- compatibility export ---
+// mirra/generate.ts から import されるが、実装は用途ごとに後で詰められる。
+// いまは「存在すること」が目的（typecheck を通す）。
+export function naturalClose(..._args: any[]): string {
+  return '';
 }

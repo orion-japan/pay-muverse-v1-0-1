@@ -1,7 +1,9 @@
 // src/lib/iros/generate.ts
 // Iros：モード検出 → テンプレ生成 → OpenAI 呼び出し → 軽整形（polish）
 
-import { getSystemPrompt, SofiaTriggers, naturalClose } from '../iros/system';
+import { getSystemPrompt, SofiaTriggers } from '../iros/system';
+import { naturalClose } from '../iros/phrasing';
+
 import * as MIRRA_TEMPLATES from './templates';
 
 const TEMPLATES: any =

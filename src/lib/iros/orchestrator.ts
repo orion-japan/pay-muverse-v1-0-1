@@ -1024,6 +1024,38 @@ const hasText = String(text ?? '').trim().length > 0;
 const slotsEmpty = !Array.isArray(slotsArr) || slotsArr.length === 0;
 const policyEmpty = !slotPlanPolicy || String(slotPlanPolicy).trim().length === 0;
 
+function shouldUseCounselByStructure(meta: any, text: string) {
+  const t = String(text ?? '').trim();
+  if (!t) return false;
+
+  // 1) 「相談の構造」＝ will が uncover/stabilize/repair 系に寄っている
+  const goalKind = String(meta?.goal?.kind ?? meta?.priority?.goal?.kind ?? '').toLowerCase();
+
+  // 2) 「情報質問の構造」＝ factoid/lookup に寄っている（これは counsel にしない）
+  const inputKind = String(meta?.inputKind ?? '').toLowerCase(); // applyContainerDecision が入れてる想定
+
+  // inputKind が入ってない場合でも、質問文 + 名詞1語ループを回避したいので軽く保険
+  const looksLikeJustNoun = t.length <= 6 && !/[？\?]/.test(t);
+
+  const consultish =
+    goalKind === 'uncover' ||
+    goalKind === 'stabilize' ||
+    goalKind === 'repair' ||
+    goalKind === 'counsel';
+
+  const factish =
+    inputKind === 'fact' ||
+    inputKind === 'lookup' ||
+    inputKind === 'qa' ||
+    inputKind === 'howto';
+
+  // ✅ 相談っぽいなら counsel
+  // ✅ ただし factish は除外
+  // ✅ さらに「名詞だけ連投」で迷子になってる時も counsel で受け止めて進行に戻す
+  return (consultish && !factish) || looksLikeJustNoun;
+}
+
+
 // =========================================================
 // ✅ counsel 配線：normalChat fallback の前に差し込む
 // - mode名の揺れ：'counsel' / 'consult' を両方拾う
@@ -1032,7 +1064,8 @@ const policyEmpty = !slotPlanPolicy || String(slotPlanPolicy).trim().length === 
 const modeRaw = String((meta as any)?.mode ?? '').toLowerCase();
 const isCounselMode = modeRaw === 'counsel' || modeRaw === 'consult';
 
-if (!isSilence && hasText && isCounselMode && (slotsEmpty || policyEmpty)) {
+// ✅ slotsEmpty / policyEmpty を条件から外す
+if (!isSilence && hasText && isCounselMode) {
   const lastSummary =
     (ms as any)?.situation_summary ??
     (ms as any)?.situationSummary ??
@@ -1042,24 +1075,22 @@ if (!isSilence && hasText && isCounselMode && (slotsEmpty || policyEmpty)) {
     (mergedBaseMeta as any)?.situationSummary ??
     null;
 
-    console.log('[IROS/ORCH][counsel-picked]', {
-      stage: 'OPEN',
-      hasText: String(text ?? '').trim().length > 0,
-      isSilence,
-      slotsEmpty,
-      policyEmpty,
-      lastSummary_len: typeof lastSummary === 'string' ? lastSummary.length : null,
-    });
+  console.log('[IROS/ORCH][counsel-picked]', {
+    stage: 'OPEN',
+    modeRaw,
+    hasText: String(text ?? '').trim().length > 0,
+    isSilence,
+    // 参考観測として残す（ただし条件には使わない）
+    slotsEmpty,
+    policyEmpty,
+    lastSummary_len: typeof lastSummary === 'string' ? lastSummary.length : null,
+  });
 
-
-
-  // ✅ stage はまず OPEN 固定（次に state 永続化を繋ぐ）
   const counsel = buildCounselSlotPlan({
     userText: text,
     stage: 'OPEN',
     lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
   });
-
 
   const cSlots = (counsel as any).slots;
   slotsArr = Array.isArray(cSlots) ? cSlots : [];
@@ -1070,13 +1101,13 @@ if (!isSilence && hasText && isCounselMode && (slotsEmpty || policyEmpty)) {
 
   (meta as any).slotPlanFallback = 'counsel';
 
-  // ★ 観測用（counsel.ts を通った証拠）
   console.log('[IROS/ORCH][counsel-picked]', {
     stage: 'OPEN',
     slotsLen: Array.isArray(slotsArr) ? slotsArr.length : null,
     policy: slotPlanPolicy,
   });
 }
+
 
 // =========================================================
 // 5) fallback（normalChat）

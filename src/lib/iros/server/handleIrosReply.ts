@@ -22,6 +22,7 @@ import { postProcessReply } from './handleIrosReply.postprocess';
 import { runGenericRecallGate } from '@/lib/iros/server/gates/genericRecallGate';
 import { writeIT } from '@/lib/iros/language/itWriter';
 import { resolveRememberBundle } from '@/lib/iros/remember/resolveRememberBundle';
+import { logConvEvidence } from '@/lib/iros/conversation/evidenceLog';
 
 import {
   // ✅ assistant保存はしない
@@ -714,12 +715,18 @@ const microGenerate: MicroWriterGenerate = async (args) => {
     ];
 
     const out = await chatComplete({
-      purpose: 'writer', // ✅ micro は writer 扱い（短文だが “生成”）
+      purpose: 'writer',
       model: IROS_MODEL,
       messages,
       temperature: typeof args.temperature === 'number' ? args.temperature : 0.6,
       max_tokens: typeof args.maxTokens === 'number' ? args.maxTokens : 140,
+
+      // ✅ 追加：top-level trace fields
+      traceId: (args as any).traceId ?? null,
+      conversationId: (args as any).conversationId ?? null,
+      userCode: (args as any).userCode ?? null,
     });
+
 
     return String(out ?? '').trim();
   } catch (e) {
@@ -833,20 +840,30 @@ function runLlmGate(args: {
   } = args;
 
   try {
+    // ✅ “濃いmeta” を優先（candidateがあればそれ）
     const metaForProbe = metaForCandidate ?? metaForSave;
 
     const brakeReason =
+      metaForProbe?.brakeReason ??
+      metaForProbe?.speechInput?.brakeReleaseReason ??
+      metaForProbe?.extra?.brakeReason ??
       metaForSave?.brakeReason ??
       metaForSave?.speechInput?.brakeReleaseReason ??
       metaForSave?.extra?.brakeReason ??
       null;
 
     const speechAct =
+      metaForProbe?.speechAct ??
+      metaForProbe?.extra?.speechAct ??
       metaForSave?.speechAct ??
       metaForSave?.extra?.speechAct ??
       null;
 
+    // ✅ slotPlanLen も “濃いmeta” を優先して拾う
     let slotPlanLen: number | null =
+      metaForProbe?.slotPlanLen ??
+      metaForProbe?.speechInput?.slotPlanLen ??
+      metaForProbe?.extra?.slotPlanLen ??
       metaForSave?.slotPlanLen ??
       metaForSave?.speechInput?.slotPlanLen ??
       metaForSave?.extra?.slotPlanLen ??
@@ -854,8 +871,8 @@ function runLlmGate(args: {
 
     // ✅ hasSlots: unknown を false に潰さない（分かる時だけ true/false を入れる）
     const hasSlots: boolean | null = (() => {
-      if (typeof metaForSave?.hasSlots === 'boolean') return metaForSave.hasSlots;
       if (typeof metaForProbe?.hasSlots === 'boolean') return metaForProbe.hasSlots;
+      if (typeof metaForSave?.hasSlots === 'boolean') return metaForSave.hasSlots;
 
       const fpSlots = metaForProbe?.framePlan?.slots;
       if (Array.isArray(fpSlots)) return fpSlots.length > 0;
@@ -869,11 +886,13 @@ function runLlmGate(args: {
       return null;
     })();
 
-    // ✅ policy も “濃いmeta” も見る
+    // ✅ policy も “濃いmeta” 優先で拾う
     const slotPlanPolicy =
-      metaForSave?.slotPlanPolicy ??
-      metaForProbe?.framePlan?.slotPlanPolicy ??
       metaForProbe?.slotPlanPolicy ??
+      metaForProbe?.framePlan?.slotPlanPolicy ??
+      metaForProbe?.framePlan?.framePlan?.slotPlanPolicy ??
+      metaForProbe?.slotPlan?.slotPlanPolicy ??
+      metaForSave?.slotPlanPolicy ??
       metaForSave?.framePlan?.slotPlanPolicy ??
       metaForSave?.extra?.slotPlanPolicy ??
       null;
@@ -909,18 +928,20 @@ function runLlmGate(args: {
       slotPlanLen,
       hasSlots,
       slotPlanPolicy,
-      meta: metaForProbe,
+      meta: metaForProbe, // ✅ slots含む濃いmeta
     } as any);
 
+    // ✅ patchは保存側（metaForSave）へ寄せて一元化
     writeLlmGateToMeta(metaForSave, probe.patch);
 
-    // ✅ decision を渡す
+    // ✅ decision をログに残す
     logLlmGate(tag, {
       conversationId,
       userCode,
       patch: probe.patch,
       decision: probe.decision,
     });
+
     // ✅ resolvedText は decision 側が正（patchではない）
     const resolvedTextRaw = (probe.decision as any)?.resolvedText;
     const resolvedText =
@@ -937,6 +958,7 @@ function runLlmGate(args: {
     return { llmEntry: null, resolvedText: null };
   }
 }
+
 
 /* =========================================================
    main
@@ -1561,6 +1583,32 @@ if (rememberScope) {
     } catch (e) {
       console.warn('[IROS/Reply] SpeechAct stamp failed', e);
     }
+
+// ✅ writer入力用の “このターン確定データ” を meta.extra に刻む（route.ts が拾う）
+try {
+  out.metaForSave = out.metaForSave ?? {};
+  out.metaForSave.extra = out.metaForSave.extra ?? {};
+
+  // history は巨大化し得るので “必要最小限” の形にして渡す
+  // （role/content/meta のみ）
+  (out.metaForSave.extra as any).historyForWriter = Array.isArray(historyForTurn)
+    ? (historyForTurn as any[]).map((m) => ({
+        role: m?.role,
+        content: m?.content ?? m?.text ?? '',
+        meta: m?.meta,
+      }))
+    : [];
+
+  (out.metaForSave.extra as any).rememberTextForIros =
+    typeof rememberTextForIros === 'string' ? rememberTextForIros : null;
+
+  (out.metaForSave.extra as any).historyForWriterAt = new Date().toISOString();
+} catch (e) {
+  console.warn('[IROS/Reply] failed to stamp history/remember for writer', e);
+}
+
+
+
 // =========================================================
 // ✅ LLM Gate PROBE（ここは “刻む＋seed注入”）
 // - resolvedText を本文に採用してよいのは「SKIP系」だけ（維持）
@@ -1668,32 +1716,62 @@ try {
     const isScaffoldSeed =
       ex?.finalTextPolicy === 'SLOTPLAN_SEED_SCAFFOLD' || policy === 'SCAFFOLD';
 
-    if (isScaffoldSeed) {
-      // ① SCAFFOLD時だけ本文を空に固定（seed→render-v2で出す）
-      out.assistantText = '';
-      (out as any).content = '';
+      if (isScaffoldSeed) {
+        const seed = String(ex?.slotPlanSeed ?? ex?.llmRewriteSeed ?? '').trim();
 
-      // ② デバッグ用
-      ex.pdfScaffoldNoCommit = true;
-      ex.pdfScaffoldNoCommitAt = new Date().toISOString();
-      ex.pdfScaffoldNoCommitPolicy = policy || null;
+        // ✅ 下流で本文を作れる条件が揃ってる時だけ “空固定” を許可
+        const rephraseEnabled =
+          String(process.env.IROS_REPHRASE_FINAL_ENABLED ?? '1').trim() !== '0';
 
-      const seed = String(ex?.slotPlanSeed ?? ex?.llmRewriteSeed ?? '').trim();
+        const canRenderFromSeed =
+          seed.length > 0 && allowLLM_final !== false && rephraseEnabled;
 
-      console.log('[SCAFFOLD][ENFORCE] policy=SCAFFOLD -> no commit (final text forced empty)', {
-        conversationId,
-        userCode,
-        policy,
-        finalTextPolicy: ex?.finalTextPolicy ?? null,
-        seedLen: seed.length,
-        seedHead: seed.slice(0, 60),
-      });
-    } else {
-      // ✅ FINAL：絶対に空にしない（もし空なら、ログで検出できるよう刻む）
-      ex.pdfFinalAllowsCommit = true;
-      ex.pdfFinalAllowsCommitAt = new Date().toISOString();
-      ex.pdfFinalAllowsCommitPolicy = policy || null;
-    }
+        if (canRenderFromSeed) {
+          // ① seed がある → SCAFFOLD時だけ本文を空に固定（seed→render-v2で出す）
+          out.assistantText = '';
+          (out as any).content = '';
+
+          ex.pdfScaffoldNoCommit = true;
+          ex.pdfScaffoldNoCommitAt = new Date().toISOString();
+          ex.pdfScaffoldNoCommitPolicy = policy || null;
+
+          console.log('[SCAFFOLD][ENFORCE] canRenderFromSeed=1 -> final text forced empty', {
+            conversationId,
+            userCode,
+            policy,
+            finalTextPolicy: ex?.finalTextPolicy ?? null,
+            seedLen: seed.length,
+            seedHead: seed.slice(0, 60),
+            allowLLM_final,
+            rephraseEnabled,
+          });
+        } else {
+          // ❌ seed が無い/再生成できない → 空にしない（無反応防止）
+          ex.pdfScaffoldNoCommit = false;
+          ex.pdfScaffoldNoCommitAt = new Date().toISOString();
+          ex.pdfScaffoldNoCommitPolicy = policy || null;
+          ex.pdfScaffoldNoCommitBlockedReason = {
+            seedLen: seed.length,
+            allowLLM_final,
+            rephraseEnabled,
+          };
+
+          console.warn('[SCAFFOLD][ENFORCE] blocked -> keep existing assistantText (no empty force)', {
+            conversationId,
+            userCode,
+            policy,
+            finalTextPolicy: ex?.finalTextPolicy ?? null,
+            seedLen: seed.length,
+            allowLLM_final,
+            rephraseEnabled,
+          });
+        }
+      } else {
+        ex.pdfFinalAllowsCommit = true;
+        ex.pdfFinalAllowsCommitAt = new Date().toISOString();
+        ex.pdfFinalAllowsCommitPolicy = policy || null;
+      }
+
   }
 } catch (e) {
   console.warn('[IROS/LLM_GATE][PROBE] failed', e);

@@ -1,40 +1,25 @@
 // src/lib/iros/slotPlans/normalChat.ts
-// iros — normal chat slot plan (FINAL-only, flexible slots, depth-invariants)
+// iros — normal chat slot plan (FINAL-only, conversation-first)
 //
-// ─────────────────────────────────────────────────────────────
-// ✅ このファイルの責務（normalChat）
-// - “雑談の最終保険”：空返答を防ぎ、会話の呼吸を止めない
-// - ただし「深まらない」を放置しないため、最低限の深掘り不変条件を持つ
-//
-// ✅ 深まる不変条件（INVARIANTS）
-// A) REPAIR（取りこぼし/ループ指摘）が来たら必ず「復元→具体化」へ進める
-//    例: 「今言ったよね？」「さっき言った」「もう言った」など
-//    - 1) 取りこぼしを認める（短く）
-//    - 2) 直前要点を復元（context があれば提示。なければ“今の要点”を聞く）
-//    - 3) “場面/瞬間” を聞く（どの瞬間に起きてる？）
-//
-// B) 価値語（自由/望み/大事/安心…）が出たら必ず「定義→摩擦点」へ進める
-//    - 1) 価値の種類を1語で選ばせる（時間/場所/裁量/人間関係/お金 など）
-//    - 2) 削られる“瞬間”を聞く（どの場面で削られる？）
-//
-// C) 結論要求（「結論」「先に結論」）は “確認質問をやめて” まず結論の型で返す
-//    - 対象不明なら “テーマを1語” を求める（二択にしない）
-//
-// ✅ ルール
-// - slots は「表示順」だけが意味を持つ
-// - key は任意文字列でよい（ただし重複はしない）
-// - slotPlanPolicy は常に FINAL
-// - rephrase は inKeys と一致したときだけ採用（既存の検証思想を維持）
-//
-// 注意：
-// - 深い判断/診断は orchestrator 側で plan を切り替える。
-// - ここは“深掘りの最低保証”まで。過剰な分類質問はしない。
-// ─────────────────────────────────────────────────────────────
+// 方針（2026-01-11 改）
+// - normalChat は「普通に会話する」最低ラインを保証する
+// - 箱テンプレは禁止（事実/感情/望み 等の固定枠を出さない）
+// - 口癖テンプレは禁止（核/切る/受け取った/呼吸 等）
+// - 二択誘導は禁止（A/B で選ばせない）
+// - 質問は最大1つ（会話が進むための“必要最小”だけ / 0問もOK）
+// - 質問で掘り続けない：必要なら「短い解説（見方の変更）」で自然に次が湧く状態を作る
+// - I-line（方向の問い）は “他の質問を止めて” 1本で出す（= 質問連打を止める）
 
 import type { SlotPlanPolicy } from '../server/llmGate';
+import { detectExpansionMoment } from '../language/expansionMoment';
+
+// ✅ phase11 conversation modules
+import { buildContextPack } from '../conversation/contextPack';
+import { computeConvSignals } from '../conversation/signals';
+import { decideConversationBranch } from '../conversation/branchPolicy';
 
 export type NormalChatSlot = {
-  key: string; // ✅ 固定しない（任意キー）
+  key: string;
   role: 'assistant';
   style: 'neutral' | 'soft' | 'firm';
   content: string;
@@ -48,7 +33,7 @@ export type NormalChatSlotPlan = {
   slots: NormalChatSlot[];
 };
 
-// ---- helpers (small + safe) ----
+// ---- helpers ----
 
 function norm(s: unknown) {
   return String(s ?? '').replace(/\s+/g, ' ').trim();
@@ -59,407 +44,478 @@ function clamp(s: string, n: number) {
   return s.slice(0, Math.max(0, n - 1)) + '…';
 }
 
-function hasQuestionMark(t: string) {
-  return /[？\?]/.test(t);
-}
-
 function containsAny(t: string, words: string[]) {
   return words.some((w) => t.includes(w));
 }
 
-// ---- heuristics ----
+function scoreText(t: string) {
+  // 簡易な決定的スコア（ランダム禁止 / テンプレ固定を避けるための分岐に使う）
+  let s = 0;
+  for (let i = 0; i < t.length; i++) s = (s + t.charCodeAt(i) * (i + 1)) % 9973;
+  return s;
+}
 
-function looksLikeWantsConclusion(text: string) {
+function pickOne<T>(t: string, xs: T[]): T {
+  if (!xs.length) throw new Error('pickOne: empty');
+  const idx = scoreText(t) % xs.length;
+  return xs[idx]!;
+}
+
+function looksLikeInnerConcern(text: string) {
   const t = norm(text);
-  if (/^(結論|結論です|結論だけ|結論を|先に結論)$/.test(t)) return true;
-  if (t.includes('先に結論')) return true;
-  if (t.includes('結論だけ')) return true;
-  if (t.includes('結論')) return true;
+  if (!t) return false;
+
+  // ✅ 内的相談（迷い/不安/方向/責任/意味/可能性…）
+  // → ここで “場面/相手” を聞くと質問攻め化しやすいので、Q を止める
+  return containsAny(t, [
+    '迷',
+    '不安',
+    '怖',
+    '心配',
+    '重',
+    '責任',
+    '可能性',
+    '方向',
+    '意味',
+    '在り方',
+    'この先',
+    'どうなる',
+    'どうして',
+    'なぜ',
+    '自分',
+    '考え',
+    '感じ',
+    'しんど',
+    'つら',
+    'きつ',
+    '苦',
+    'モヤ',
+    'もや',
+    '違和感',
+  ]);
+}
+
+// “薄い返答” を検出（例：日常です、まだです、わからない、可能性の話です）
+function looksLikeThinReply(text: string) {
+  const t = norm(text);
+  if (!t) return false;
+
+  if (
+    t === '日常です' ||
+    t === '日常' ||
+    t === 'まだです' ||
+    t === 'まだ' ||
+    t === '分からない' ||
+    t === 'わからない' ||
+    t === '可能性の話です' ||
+    t === '可能性' ||
+    t === 'そうかも' ||
+    t === 'そうですね'
+  ) {
+    return true;
+  }
+
+  // 短文は薄い扱い（質問攻め回避）
+  if (t.length <= 8) return true;
+
   return false;
 }
 
-function looksLikeNoEchoRequest(text: string) {
+// ---- triggers ----
+
+function looksLikeEndConversation(text: string) {
   const t = norm(text);
+  if (!t) return false;
   return (
-    t.includes('オウム返し') ||
-    t.includes('復唱') ||
-    t.includes('二択') ||
-    t.includes('ただ話して') ||
-    t.includes('雑談して') ||
-    t.includes('質問しないで') ||
-    t.includes('確認しないで')
+    /^(終わり|終了|おわり|やめる|やめます|ストップ|中断|解散)$/.test(t) ||
+    t.includes('今日はここまで') ||
+    t === 'ここまで' ||
+    t === '以上'
   );
 }
 
-function looksLikePreferenceQuestion(text: string) {
-  const t = norm(text);
-  return (
-    /好き[？\?]/.test(t) ||
-    /嫌い[？\?]/.test(t) ||
-    /どっち(派)?[？\?]/.test(t) ||
-    /おすすめ[？\?]/.test(t) ||
-    /どれ(が|を)[？\?]/.test(t)
-  );
-}
-
-function looksLikeJustWondering(text: string) {
-  const t = norm(text);
-  return (
-    t.includes('ただの疑問') ||
-    t.includes('なんとなく') ||
-    t.includes('気がする') ||
-    t.includes('ふと思った') ||
-    t.includes('気になるだけ')
-  );
-}
-
-function isTinyTalk(text: string) {
-  const t = norm(text);
-  return (
-    t.length <= 12 ||
-    /^(え|うん|そう|なるほど|まじ|ほんと|へぇ)[\!！\?？]*$/.test(t) ||
-    /^(今日|今|さっき|だよね)[\!！\?？]*$/.test(t)
-  );
-}
-
-function looksLikeWeatherSmallTalk(text: string) {
-  const t = norm(text);
-  return (
-    t.includes('風が強い') ||
-    t.includes('寒い') ||
-    t.includes('暑い') ||
-    t.includes('雨') ||
-    t.includes('雪') ||
-    t.includes('台風') ||
-    t.includes('花粉') ||
-    t.includes('この時期') ||
-    t.includes('毎年') ||
-    t.includes('季節')
-  );
-}
-
-function looksLikeSmallTalkFact(text: string) {
-  const t = norm(text);
-  return (
-    /春一番/.test(t) ||
-    /いつ(頃|ごろ)/.test(t) ||
-    /何月/.test(t) ||
-    /何日/.test(t) ||
-    /何回/.test(t) ||
-    /今日は/.test(t) ||
-    /今は/.test(t) ||
-    /1月|2月|3月|4月|5月|6月|7月|8月|9月|10月|11月|12月/.test(t)
-  );
-}
-
-// ---- NEW: depth invariants triggers ----
-
-// A) REPAIR trigger: “言ったよね/さっき/もう言った/それ今言った” etc
+// REPAIR（取りこぼし/ループ指摘）
 function looksLikeRepair(text: string) {
   const t = norm(text);
   if (!t) return false;
-  return (
-    containsAny(t, [
-      '今言った',
-      'いま言った',
-      'さっき言った',
-      'もう言った',
-      '言ったよね',
-      '言ったでしょ',
-      'それ言った',
-      '同じこと',
-      '繰り返し',
-      'ループ',
-    ]) && hasQuestionMark(t)
-  );
-}
 
-// B) VALUE trigger: value words that usually need definition → friction point
-function extractValueKeyword(text: string): string | null {
-  const t = norm(text);
+  // ✅ まずは強い正規化ワード（部分一致想定）
+  const repairWords = [
+    // 言った系
+    'ゆったよね',
+    '言ったよね',
+    '言ったでしょ',
+    'さっき言った',
+    'もう言った',
+    '今言った',
+    'それ言った',
+    '前も言った',
+    '前にも言った',
+    'さっきも言った',
 
-  // ✅ 重要：今回のケース（時間が欲しい）を確実に拾う
-  const values = [
-    '時間',
-    '自由',
-    '望み',
-    '大事',
-    '安心',
-    '幸せ',
-    '充実',
-    '成長',
-    '誇り',
-    'やりがい',
+    // 話した系（今回の「さっき話しましたよ？」を拾う）
+    'さっき話した',
+    'さっき話しました',
+    'もう話した',
+    '今話した',
+    'それ話した',
+    '話しましたよ',
+    '話したよ',
+    'さっき言いました',
+    'もう言いました',
+    '今言いました',
+
+    // ループ/同じ系
+    '同じこと',
+    '同じ話',
+    '繰り返し',
+    '繰り返してる',
+    'ループ',
+    'また？',
+    'またか',
+    'またそれ',
+    '話が変わってない',
+    '変わってない',
+    '変わらない',
   ];
 
-  for (const v of values) {
-    if (t.includes(v)) return v;
-  }
-  return null;
+  if (containsAny(t, repairWords)) return true;
+  if (/(さっき|もう|今|前も?)\s*(言|い|話)/.test(t)) return true;
+  if (/^また[?？]?$/.test(t)) return true;
+
+  return false;
 }
 
-function looksLikeValueStatement(text: string) {
+// HOW_TO（どうしたらいい系）
+function looksLikeHowTo(text: string) {
   const t = norm(text);
-  const v = extractValueKeyword(t);
-  if (!v) return false;
+  if (!t) return false;
 
-  // “価値語っぽい”の最低条件：名詞で語っている or 望む/大事/したい が近い
   return (
-    t.length >= 4 &&
-    (t.includes('ほしい') ||
-      t.includes('欲しい') ||
-      t.includes('望') ||
-      t.includes('したい') ||
-      t.includes('でいたい') ||
-      t.includes('が大事') ||
-      t.endsWith('かな') ||
-      t.endsWith('です') ||
-      t.endsWith('だ'))
+    t === 'どうしたらいい？' ||
+    t === 'どうしたらいい' ||
+    t === 'どうすればいい？' ||
+    t === 'どうすればいい' ||
+    t === '何したらいい？' ||
+    t === '何したらいい' ||
+    t.includes('どうしたら') ||
+    t.includes('どうすれば') ||
+    t.includes('何したら')
   );
 }
 
-// ---- NEW: simple AB choice detection ----
-// 目的：二択ループを切って “次の入力” に進める
-function looksLikeABChoice(text: string) {
+// I-line（方向へ）
+function looksLikeILineMoment(text: string, ctx?: { lastSummary?: string | null }) {
   const t = norm(text);
-  return /^(A|B|ａ|ｂ|a|b)$/.test(t);
-}
+  const last = norm(ctx?.lastSummary);
 
-function normalizeAB(text: string): 'A' | 'B' | null {
-  const t = norm(text).toLowerCase();
-  if (t === 'a' || t === 'ａ') return 'A';
-  if (t === 'b' || t === 'ｂ') return 'B';
-  return null;
-}
+  const keys = [
+    '本当は',
+    '望み',
+    'どんな状態',
+    'どう在りたい',
+    'なりたい',
+    '好きな状態',
+    'これから',
+    '完成したら',
+    '完成後',
+    'そのあと',
+    '未来',
+    '責任',
+    '主権',
+    '任せたら',
+    '任せる',
+    '怖い',
+    '不安',
+    '安心',
+  ];
 
-// ---- “echo gate” ----
-// オウム返しは “理解の担保” になる時だけ。
-// ただし A/B のトリガー時は、echo より invariant を優先する。
-function shouldEcho(userText: string) {
-  const t = norm(userText);
-  if (!t) return false;
+  if (containsAny(t, keys)) return true;
 
-  if (looksLikeABChoice(t)) return false; // ✅ 選択はecho不要
-  if (looksLikeRepair(t)) return false; // invariant優先
-  if (looksLikeValueStatement(t)) return false; // invariant優先
+  if (looksLikeHowTo(t) && containsAny(last, ['完成', 'そのあと', '未来', '方向', '責任', '主権', '安心', '不安'])) {
+    return true;
+  }
 
-  if (looksLikeNoEchoRequest(t)) return false;
-  if (isTinyTalk(t)) return false;
-  if (looksLikeSmallTalkFact(t)) return false;
-  if (looksLikeWeatherSmallTalk(t)) return false;
-  if (looksLikeWantsConclusion(t)) return false;
-  if (looksLikePreferenceQuestion(t)) return false;
-  if (looksLikeJustWondering(t)) return false;
-
-  const hasQM = hasQuestionMark(t);
-  const longer = t.length >= 18;
-  return hasQM && longer;
-}
-
-// ---- optional soft signature (rare) ----
-
-function buildSoftSignature(opts: { userText: string; allow: boolean }): string | null {
-  if (!opts.allow) return null;
-  const r = Math.random();
-  if (r > 0.22) return null; // 78%は出さない
-
-  const t = norm(opts.userText);
-  const candidates: string[] = [];
-
-  if (looksLikeWantsConclusion(t)) candidates.push('先に結論からいく。');
-  if (looksLikeJustWondering(t)) candidates.push('そのままの疑問で大丈夫。');
-  if (looksLikeWeatherSmallTalk(t)) candidates.push('体感の違和感って、けっこう当たってる。');
-
-  candidates.push('迷いを増やさない。');
-  candidates.push('静かにいこう。');
-
-  return candidates[Math.floor(Math.random() * candidates.length)] ?? null;
+  return false;
 }
 
 // ---- slot builders ----
 
-function buildConclusionFirstSlots(): NormalChatSlot[] {
+function buildEndSlots(): NormalChatSlot[] {
   return [
-    { key: 'A', role: 'assistant', style: 'soft', content: 'OK。先に結論からいく。' },
-    { key: 'B', role: 'assistant', style: 'neutral', content: '結論がほしいテーマは何？（1語でOK）' },
+    { key: 'A', role: 'assistant', style: 'soft', content: '了解。ここで終わりにします。' },
+    { key: 'B', role: 'assistant', style: 'neutral', content: 'また必要になったら、続きだけ置いてください。' },
   ];
 }
 
-function buildRepairSlots(_userText: string, ctx?: { lastSummary?: string | null }): NormalChatSlot[] {
-  const last = norm(ctx?.lastSummary);
+function buildEmptySlots(): NormalChatSlot[] {
+  return [
+    {
+      key: 'A',
+      role: 'assistant',
+      style: 'soft',
+      content: '大丈夫。いま困ってることを短く一言だけでいいよ。',
+    },
+  ];
+}
 
-  // contextがあるなら “復元” を明示して戻す
+function buildILineSlots(ctx?: { lastSummary?: string | null }, seedText?: string): NormalChatSlot[] {
+  const last = norm(ctx?.lastSummary);
+  const seed = norm(seedText ?? last);
+
+  const slots: NormalChatSlot[] = [];
+
   if (last) {
-    return [
-      { key: 'A', role: 'assistant', style: 'soft', content: 'ごめん、取りこぼした。戻すね。' },
-      { key: 'B', role: 'assistant', style: 'neutral', content: `いま残す一点はこれ：${clamp(last, 54)}` },
+    slots.push({
+      key: 'A',
+      role: 'assistant',
+      style: 'soft',
+      content: `いまの話：${clamp(last, 80)}`,
+    });
+  } else {
+    slots.push({
+      key: 'A',
+      role: 'assistant',
+      style: 'soft',
+      content: 'わかった。方向だけ合わせよう。',
+    });
+  }
+
+  slots.push({
+    key: 'B',
+    role: 'assistant',
+    style: 'neutral',
+    content: pickOne(seed, [
+      '手段の話は一回止めて、方向だけ見るね。',
+      'ここで「やり方」に寄ると、同じ所を回りやすい。いったん方向。',
+      '結論を急ぐより、まず“向き”を揃える方が早い。',
+    ]),
+  });
+
+  slots.push({
+    key: 'I',
+    role: 'assistant',
+    style: 'neutral',
+    content: 'もし少し先のあなたがこれを見てたら、何を大事にしたいって言いそう？',
+  });
+
+  return slots;
+}
+
+// REPAIR：責めない / 直前を“復元” → 見方を変えて前へ
+function buildRepairSlots(userText: string, ctx?: { lastSummary?: string | null }): NormalChatSlot[] {
+  const last = norm(ctx?.lastSummary);
+  const u = norm(userText);
+
+  if (last) {
+    const base: NormalChatSlot[] = [
+      { key: 'A', role: 'assistant', style: 'soft', content: 'ごめん、取りこぼした。' },
+      { key: 'B', role: 'assistant', style: 'neutral', content: `いま残す：${clamp(last, 80)}` },
       {
         key: 'C',
         role: 'assistant',
         style: 'neutral',
-        content: 'それが“削られる瞬間”はどこ？（仕事のどの場面？）',
+        content: pickOne(last + u, [
+          'ここで壊れやすいのは、中身じゃなくて“切り口が固定されること”。いまは原因探しより、見方を一段変える。',
+          '同じ感じに聞こえる時は、話が浅いのではなく、角度が固定されてるだけ。角度を変えると、自然に次が出る。',
+          'ループして見えるのは、問いが悪いというより切り口が一定になりがちだから。ここからは解説で前に進める。',
+        ]),
       },
     ];
+
+    return base;
   }
 
-  // contextがない時：復元できないので“今の要点”を一語で出させて復元する
   return [
-    { key: 'A', role: 'assistant', style: 'soft', content: 'ごめん、取りこぼした。' },
+    { key: 'A', role: 'assistant', style: 'soft', content: 'ごめん、聞き直す。' },
     {
       key: 'B',
       role: 'assistant',
       style: 'neutral',
-      content: '今あなたが言った“一点”を、もう一回だけ置いて。（短文でOK）',
-    },
-    {
-      key: 'C',
-      role: 'assistant',
-      style: 'neutral',
-      content: 'それが削られる“瞬間”はどこ？（仕事のどの場面？）',
+      content: '直前の要点を“一言だけ”置いて。そこから先はこっちで広げる。',
     },
   ];
 }
 
-function buildValueDeepenSlots(userText: string): NormalChatSlot[] {
-  const t = norm(userText);
-  const v = extractValueKeyword(t) ?? 'それ';
+function buildHowToSlots(userText: string, ctx?: { lastSummary?: string | null }): NormalChatSlot[] {
+  const last = norm(ctx?.lastSummary);
 
-  // “定義→摩擦点” の最小保証
-  // ✅ 時間のときだけ、選択肢を “時間らしい” ラベルにする（質問は増やさない）
-  const kindLine =
-    v === '時間'
-      ? '時間って、どの種類？（集中 / 休息 / 家族 / 自由 / 仕事の前倒し）'
-      : `${v}って、どの種類？（時間 / 場所 / 裁量 / 人間関係 / お金）`;
-
-  return [
-    {
-      key: 'A',
-      role: 'assistant',
-      style: 'soft',
-      content: `いい。いま出てる芯は「${v}」。`,
-    },
-    {
-      key: 'B',
-      role: 'assistant',
-      style: 'neutral',
-      content: kindLine,
-    },
-    {
-      key: 'C',
-      role: 'assistant',
-      style: 'neutral',
-      content: 'それが“削られる瞬間”はどこ？（例：朝/移動/会議/家事/通知/締切…）',
-    },
-  ];
-}
-
-// ✅ NEW: A/B choice is consumed here (break loop)
-function buildABConsumedSlots(choice: 'A' | 'B'): NormalChatSlot[] {
-  if (choice === 'A') {
-    return [
-      { key: 'A', role: 'assistant', style: 'soft', content: 'OK。状況からいこう。' },
-      { key: 'B', role: 'assistant', style: 'neutral', content: 'いまの状況を1行で。（いつ/どこで/何に追われてる？）' },
-    ];
-  }
-  return [
-    { key: 'A', role: 'assistant', style: 'soft', content: 'OK。気持ちからいこう。' },
-    { key: 'B', role: 'assistant', style: 'neutral', content: 'いまの気持ちを1行で。（焦り/疲れ/不満/罪悪感…どれ？）' },
-  ];
-}
-
-function buildPreferenceSlots(userText: string): NormalChatSlot[] {
-  const t = norm(userText);
-
-  if (/もも/.test(t) && /好き[？\?]/.test(t)) {
-    return [
-      { key: 'A', role: 'assistant', style: 'soft', content: '好き。香りが強くて、甘さの立ち上がりがきれい。' },
-      { key: 'B', role: 'assistant', style: 'neutral', content: '白桃派？黄桃派？（一語でOK）' },
-    ];
+  if (looksLikeILineMoment(userText, ctx)) {
+    return buildILineSlots({ lastSummary: last }, userText);
   }
 
-  // ✅ 「どっち？」単体のとき：二択ループではなく “選択肢の意味” を短く返す
-  if (/^どっち[？\?]?$/.test(t)) {
-    return [
-      { key: 'A', role: 'assistant', style: 'soft', content: 'Aは「事実（状況）」、Bは「内側（気持ち）」。' },
-      { key: 'B', role: 'assistant', style: 'neutral', content: '迷うならBからでいい。いまの気持ちを1行で。' },
-    ];
-  }
-
-  return [
-    { key: 'A', role: 'assistant', style: 'soft', content: '直球で答えるよ。' },
-    { key: 'B', role: 'assistant', style: 'neutral', content: `いま聞いてるのは：${clamp(t, 28)}` },
-  ];
-}
-
-function buildSmallTalkFactSlots(userText: string): NormalChatSlot[] {
-  const t = norm(userText);
-
-  if (/春一番/.test(t) && /いつ(頃|ごろ)|何月/.test(t)) {
-    return [
-      { key: 'A', role: 'assistant', style: 'soft', content: '春一番は、だいたい2〜3月に吹くことが多い（年や地域で前後する）。' },
-      { key: 'B', role: 'assistant', style: 'neutral', content: 'いま1月なら「まだ先」って感覚は合ってる。' },
-    ];
-  }
-
-  return [{ key: 'A', role: 'assistant', style: 'soft', content: '目安はあるけど、年や場所で前後するよ。' }];
-}
-
-function buildWeatherSmallTalkSlots(): NormalChatSlot[] {
-  return [
-    {
-      key: 'A',
-      role: 'assistant',
-      style: 'soft',
-      content: '体感としては合ってる。この時期は寒気の入り方で風が強まって「毎年この感じ」になりやすい。',
-    },
-  ];
-}
-
-function buildJustWonderingSlots(): NormalChatSlot[] {
-  return [
-    { key: 'A', role: 'assistant', style: 'soft', content: 'うん、そのままの疑問で大丈夫。' },
-    { key: 'B', role: 'assistant', style: 'neutral', content: 'もし続けるなら：その疑問が出た“きっかけ”だけ教えて。' },
-  ];
-}
-
-function buildDefaultSlots(userText: string): NormalChatSlot[] {
-  const t = norm(userText);
-  const echo = shouldEcho(t);
-  const isQ = hasQuestionMark(t);
-
-  if (echo) {
-    return [
-      {
-        key: 'A',
-        role: 'assistant',
-        style: 'neutral',
-        content: isQ ? `うん、「${clamp(t, 38)}」の問いだね。` : `うん、「${clamp(t, 38)}」だね。`,
-      },
+  if (last) {
+    const base: NormalChatSlot[] = [
+      { key: 'A', role: 'assistant', style: 'soft', content: `いま話してること：${clamp(last, 80)}` },
       {
         key: 'B',
+        role: 'assistant',
+        style: 'neutral',
+        content: pickOne(last, [
+          '「どうしたらいい？」が出るのは、やり方が無いからじゃなくて、優先順位がまだ揺れてる時が多い。',
+          'ここで手段を増やすと迷いが増える。まず“守りたいもの”と“増やしたいもの”を分けると進む。',
+          'いま必要なのは完璧な正解より、選び直しの基準。基準が決まると手段は勝手に集まる。',
+        ]),
+      },
+    ];
+
+    return base;
+  }
+
+  return [
+    { key: 'A', role: 'assistant', style: 'soft', content: 'わかった。まず要点だけ掴む。' },
+    {
+      key: 'Q',
+      role: 'assistant',
+      style: 'neutral',
+      content: 'いま扱いたい話を“一言だけ”で置いて。',
+    },
+  ];
+}
+
+function buildDefaultSlots(userText: string, ctx?: { lastSummary?: string | null }): NormalChatSlot[] {
+  const t = norm(userText);
+  if (!t) return buildEmptySlots();
+
+  if (looksLikeILineMoment(t, { lastSummary: ctx?.lastSummary ?? null })) {
+    return buildILineSlots({ lastSummary: ctx?.lastSummary ?? null }, t);
+  }
+
+  if (t.length <= 10) {
+    const base: NormalChatSlot[] = [
+      { key: 'A', role: 'assistant', style: 'soft', content: `いまの言葉：${clamp(t, 60)}` },
+      {
+        key: 'B',
+        role: 'assistant',
+        style: 'neutral',
+        content: pickOne(t, [
+          '短い言葉の時は、説明できない“違和感”が先に出てることがある。',
+          '短いほど、芯がそのまま出てることが多い。',
+          'いまの一言、焦点だけ残して進めよう。',
+        ]),
+      },
+    ];
+
+    if (looksLikeInnerConcern(t)) return base;
+
+    base.push({
+      key: 'Q',
+      role: 'assistant',
+      style: 'neutral',
+      content: 'それが一番強く出るのは、どの瞬間？（一言でOK）',
+    });
+
+    return base;
+  }
+
+  const base: NormalChatSlot[] = [
+    { key: 'A', role: 'assistant', style: 'soft', content: `いまの話：${clamp(t, 90)}` },
+    {
+      key: 'B',
+      role: 'assistant',
+      style: 'neutral',
+      content: pickOne(t, [
+        'ここで大事なのは、正解探しより「反応が強くなる点」を押さえること。',
+        'この手の迷いは、内容より“スイッチが入る瞬間”を掴むと進む。',
+        '問題は“どこで強くなるか”に隠れてることが多い。まず輪郭を出そう。',
+      ]),
+    },
+  ];
+
+  return base;
+}
+
+// ---- expansion ----
+
+function buildExpansionSlots(userText: string, ctx?: { lastSummary?: string | null }): NormalChatSlot[] {
+  const t = norm(userText);
+
+  if (looksLikeILineMoment(t, { lastSummary: ctx?.lastSummary ?? null })) {
+    return buildILineSlots({ lastSummary: ctx?.lastSummary ?? null }, t);
+  }
+
+  const seed = norm(ctx?.lastSummary) || t;
+
+  if (looksLikeThinReply(t) || looksLikeInnerConcern(seed + ' ' + t)) {
+    return [
+      { key: 'A', role: 'assistant', style: 'soft', content: `いまの話：${clamp(t, 90)}` },
+      {
+        key: 'EXPLAIN',
+        role: 'assistant',
+        style: 'neutral',
+        content: pickOne(seed + t, [
+          'ここで情報を増やすより、見方を一段変える方が早い。いま出てるのは“出来事”というより内側の重さの方。',
+          '「日常」と言える時点で、問題は一点じゃなく“じわっと続く構造”になってる。だから質問で絞るより輪郭を先に出す。',
+          'いまは結論を急がなくていい。まず“何が引っかかってるか”が言語化できると、次が勝手に湧く。',
+        ]),
+      },
+      {
+        key: 'NEXT',
         role: 'assistant',
         style: 'soft',
-        content: isQ ? '短く答える。必要な条件だけ、あとで聞く。' : 'そのまま進めていい。続けて。',
+        content: pickOne(seed + t, [
+          '続けて話していい。短い一言のままでも大丈夫。',
+          'このまま、頭に浮かんだ順で置いてください。',
+        ]),
       },
     ];
   }
 
-  // tiny-talk でも “深まり停止” を避ける：最低1つだけ具体化へ寄せる
-  if (isTinyTalk(t)) {
-    return [
-      { key: 'A', role: 'assistant', style: 'soft', content: 'うん。' },
-      {
-        key: 'B',
-        role: 'assistant',
-        style: 'neutral',
-        content: 'いまの焦点を1語だけ置いて。（例：仕事/人間関係/体調/お金/進路…）',
-      },
-    ];
+  const base: NormalChatSlot[] = [
+    { key: 'A', role: 'assistant', style: 'soft', content: `いまの話：${clamp(t, 90)}` },
+    {
+      key: 'B',
+      role: 'assistant',
+      style: 'neutral',
+      content: pickOne(t, [
+        'いまは判断より、引っかかりを一度だけ言語化する方が早い。',
+        'ここは結論を急がなくていい。引っかかりの正体を言葉にすると進む。',
+        '分岐は正解探しじゃなくて、「反応が強くなる点」を押さえるだけで整う。',
+      ]),
+    },
+  ];
+
+  const alreadyHasIrritation = containsAny(t, ['嫌', '無理', '怖い', '不安', 'しんどい', 'つらい', 'きつい', 'モヤ', '違和感']);
+  if (!alreadyHasIrritation) {
+    base.push({
+      key: 'Q',
+      role: 'assistant',
+      style: 'neutral',
+      content: 'いま一番引っかかってるのは、どこ？（一言でOK）',
+    });
   }
+
+  return base;
+}
+
+// ✅ phase11 branch helpers (minimal)
+function buildStabilizeSlots(userText: string, ctx?: { lastSummary?: string | null }): NormalChatSlot[] {
+  const t = norm(userText);
+  const last = norm(ctx?.lastSummary);
+
+  const seed = last || t;
 
   return [
-    { key: 'A', role: 'assistant', style: 'soft', content: isQ ? 'うん。短く返すね。' : 'うん。続けて。' },
-    { key: 'B', role: 'assistant', style: 'neutral', content: isQ ? '必要な条件だけ聞く。' : 'いまの温度感のまま話して。' },
+    { key: 'A', role: 'assistant', style: 'soft', content: last ? `いまの流れ：${clamp(last, 90)}` : `いまの言葉：${clamp(t, 90)}` },
+    {
+      key: 'B',
+      role: 'assistant',
+      style: 'neutral',
+      content: pickOne(seed, [
+        'ここは詰めない。いま出てるのは整理不足じゃなくて、負荷が先に立ってる感じ。',
+        '進め方の工夫より、いったん“負荷の位置”を落ち着かせた方が会話が動く。',
+        '同じ所を回る時は、情報不足じゃなくて圧が先にある。まず圧を薄くする。',
+      ]),
+    },
+    {
+      key: 'NEXT',
+      role: 'assistant',
+      style: 'soft',
+      content: pickOne(seed, [
+        '続けて置いていい。短くてもいい。',
+        '途切れても大丈夫。いま浮かぶ順で。',
+      ]),
+    },
   ];
 }
 
@@ -469,168 +525,97 @@ export function buildNormalChatSlotPlan(args: {
   userText: string;
   context?: {
     lastSummary?: string | null;
-
-    // 任意（渡せるなら）：直前に提示した二択の種類
-    // 例: 'AB_STATUS_OR_FEEL'
-    lastChoiceHint?: string | null;
+    recentUserTexts?: string[];
   };
 }): NormalChatSlotPlan {
-  const stamp = 'normalChat.ts@2026-01-11#flex-slots-v6-no-noun-loop';
+  const stamp = 'normalChat.ts@2026-01-11#conversation-first-no-box-no-choices-v2.2';
   const userText = norm(args.userText);
   const ctx = args.context;
+
+  // ✅ Build a usable “lastSummary” even when ctx.lastSummary is null
+  // recentUserTexts は「過去ユーザー発話」想定（最大3つ使う）
+  const recent = (ctx?.recentUserTexts ?? []).map((x) => String(x ?? '')).filter(Boolean);
+  const prevUser = recent.length >= 1 ? recent[recent.length - 1] : null;
+  const prevPrevUser = recent.length >= 2 ? recent[recent.length - 2] : null;
+
+  const pack = buildContextPack({
+    lastUser: userText || null,
+    prevUser,
+    prevPrevUser,
+    lastAssistant: null,
+    shortSummaryFromState: ctx?.lastSummary ?? null,
+    topicFromState: null,
+  });
+
+  const effectiveLastSummary = pack.shortSummary ?? ctx?.lastSummary ?? null;
+
+  // ✅ signals/branch
+  const signals = userText ? computeConvSignals(userText) : null;
+  const branch = userText
+    ? decideConversationBranch({
+        userText,
+        signals,
+        ctx: pack,
+        depthStage: null,
+        phase: null,
+      })
+    : 'UNKNOWN';
 
   let slots: NormalChatSlot[] = [];
   let reason = 'default';
 
   if (!userText) {
     reason = 'empty';
-    slots = [
-      {
-        key: 'A',
-        role: 'assistant',
-        style: 'soft',
-        content: 'うん。空でも大丈夫。いまの気配だけ、続けて。',
-      },
-    ];
-  }
-
-  // ✅ NEW: A/B 単体入力は “選択として消費” して次へ
-  else if (looksLikeABChoice(userText)) {
-    reason = 'ab-choice-consumed';
-    const ab = normalizeAB(userText) ?? 'B';
-    slots = buildABConsumedSlots(ab);
-  }
-
-  else if (looksLikeWantsConclusion(userText)) {
-    reason = 'conclusion-first';
-    slots = buildConclusionFirstSlots();
-  } else if (looksLikeRepair(userText)) {
+    slots = buildEmptySlots();
+  } else if (looksLikeEndConversation(userText)) {
+    reason = 'end';
+    slots = buildEndSlots();
+  } else if (branch === 'REPAIR' || looksLikeRepair(userText)) {
+    // ✅ branch優先（signals由来のrepairも拾う）
     reason = 'repair';
-    slots = buildRepairSlots(userText, { lastSummary: ctx?.lastSummary ?? null });
-  } else if (looksLikeValueStatement(userText)) {
-    reason = 'value-deepen';
-    slots = buildValueDeepenSlots(userText);
-  }
-
-  // ✅ X) 退職/仕事の相談は「続けて」ループを起こしやすいので二択に固定（←早めに判定）
-  else if (looksLikeQuitWorkConsult(userText)) {
-    reason = 'quit-work-two-choice';
-    const last = (ctx?.lastSummary ?? '').trim();
-    slots = [
-      {
-        key: 'A',
-        role: 'assistant',
-        style: 'soft',
-        content:
-          `受け取った。${last ? `いまの一点：「${last}」` : 'いまの一点は残す。'}\n` +
-          `「意図に合ってない」と「生活」の両方が同時にある。ここが本題だね。`,
-      },
-      {
-        key: 'B',
-        role: 'assistant',
-        style: 'neutral',
-        content:
-          `次は二択だけに絞る。\n` +
-          `①辞める前提で「生活の設計」（期限/貯金/収入/次の仕事）を作る\n` +
-          `②残る前提で「条件変更」（役割/時間/部署/副業）を試す\n` +
-          `まずどっちを先にやる？`,
-      },
-    ];
-  }
-
-  // ✅ 追加：ユーザーが「相談してるんだけど？」と“ループ拒否”を明示したら、必ず二択に戻す
-  else if (looksLikeConsultComplaint(userText)) {
-    reason = 'consult-complaint-break';
-    slots = [
-      {
-        key: 'A',
-        role: 'assistant',
-        style: 'soft',
-        content: '了解。もう「続けて」には戻さない。相談として受け取る。',
-      },
-      {
-        key: 'B',
-        role: 'assistant',
-        style: 'neutral',
-        content:
-          `いまは二択で進める。\n` +
-          `①「辞める前提」で設計（期限/貯金/収入/次の手）\n` +
-          `②「残る前提」で条件変更（役割/時間/部署/副業）\n` +
-          `どっちで進める？`,
-      },
-    ];
-  }
-
-  // 明示的に「オウム返し/確認やめて」
-  else if (looksLikeNoEchoRequest(userText)) {
-    reason = 'no-echo';
-    slots = [
-      {
-        key: 'A',
-        role: 'assistant',
-        style: 'soft',
-        content: '了解。復唱もしないし、二択にも寄せない。',
-      },
-      {
-        key: 'B',
-        role: 'assistant',
-        style: 'neutral',
-        content: 'じゃあ、そのまま話そう。いま何が一番ひっかかってる？',
-      },
-    ];
-  } else if (looksLikePreferenceQuestion(userText)) {
-    reason = 'preference';
-    slots = buildPreferenceSlots(userText);
-  } else if (looksLikeSmallTalkFact(userText)) {
-    reason = 'small-fact';
-    slots = buildSmallTalkFactSlots(userText);
-  } else if (looksLikeWeatherSmallTalk(userText)) {
-    reason = 'weather';
-    slots = buildWeatherSmallTalkSlots();
-  } else if (looksLikeJustWondering(userText)) {
-    reason = 'just-wondering';
-    slots = buildJustWonderingSlots();
+    slots = buildRepairSlots(userText, { lastSummary: effectiveLastSummary });
+  } else if (branch === 'STABILIZE') {
+    reason = 'stabilize';
+    slots = buildStabilizeSlots(userText, { lastSummary: effectiveLastSummary });
+  } else if (branch === 'DETAIL') {
+    // detail は expansion に寄せる（質問攻めを防ぐ）
+    reason = 'detail';
+    slots = buildExpansionSlots(userText, { lastSummary: effectiveLastSummary });
+  } else if (looksLikeHowTo(userText)) {
+    reason = 'how-to';
+    slots = buildHowToSlots(userText, { lastSummary: effectiveLastSummary });
   } else {
-    slots = buildDefaultSlots(userText);
+    const expansion = detectExpansionMoment({
+      userText,
+      recentUserTexts: (ctx?.recentUserTexts ?? []).map((x) => String(x ?? '')),
+    });
+
+    console.log('[IROS/EXPANSION]', { kind: expansion.kind, userHead: userText.slice(0, 40) });
+
+    if (expansion.kind === 'BRANCH' || expansion.kind === 'TENTATIVE') {
+      reason = `expansion-${expansion.kind.toLowerCase()}`;
+      slots = buildExpansionSlots(userText, { lastSummary: effectiveLastSummary });
+    } else {
+      reason = 'default';
+      slots = buildDefaultSlots(userText, { lastSummary: effectiveLastSummary });
+    }
   }
 
-  // optional soft signature (rare)
-  const sig = buildSoftSignature({ userText, allow: true });
-  if (sig) {
-    slots = [{ key: 'SIG', role: 'assistant', style: 'soft', content: sig }, ...slots];
-  }
+  console.log('[IROS/NORMAL_CHAT][PLAN]', {
+    stamp,
+    reason,
+    branch,
+    topicHint: signals?.topicHint ?? null,
+    userHead: userText.slice(0, 40),
+    lastSummary: effectiveLastSummary ? effectiveLastSummary.slice(0, 80) : null,
+    slots: slots.map((s) => ({ key: s.key, len: s.content.length, head: s.content.slice(0, 22) })),
+  });
 
-  const plan: NormalChatSlotPlan = {
+  return {
     kind: 'normal-chat',
     slotPlanPolicy: 'FINAL',
     stamp,
     reason,
     slots,
   };
-
-  return plan;
-}
-
-// ---- helpers ----
-
-// ✅ X) 退職/仕事の相談検出（強化版）
-function looksLikeQuitWorkConsult(userText: string) {
-  const t = String(userText ?? '').trim();
-  if (!t) return false;
-
-  const hasWork = /会社|仕事|職場|上司|部署|勤務|働/.test(t);
-  const hasQuit = /辞め|辞めよう|辞めたい|退職|転職|合ってない|向いてない|限界/.test(t);
-
-  // ✅ 「どう思う？」も consult 扱いにする（ここが効く）
-  const hasConsult =
-    /どうしたら|どうすれば|相談|決められない|迷う|不安|悩|どう思う|意見|助けて/.test(t);
-
-  return (hasWork && hasQuit) || (hasWork && hasQuit && hasConsult);
-}
-
-// ✅ 追加：ループ拒否/相談の明示
-function looksLikeConsultComplaint(userText: string) {
-  const t = String(userText ?? '').trim();
-  if (!t) return false;
-  return /相談してる|相談なんだけど|答えて|結論|もういいから/.test(t);
 }
