@@ -149,23 +149,32 @@ export function applyContainerDecision(
     typeof (meta as any).tLayerHint === 'string'; // 保険（tLayerHint が残る実装もあるため）
 
   // intentAnchor 判定：存在していれば「C優先」や「I還り」を許可（fixed:true までは要求しない）
-  const anchor = (meta as any).intentAnchor ?? (meta as any).intent_anchor ?? null;
+// intentAnchor 判定：存在していれば「C優先」や「I還り」を許可（fixed:true までは要求しない）
+const anchor = (meta as any).intentAnchor ?? (meta as any).intent_anchor ?? null;
 
-  const hasAnchor =
-    !!anchor &&
-    typeof anchor === 'object' &&
-    typeof (anchor as any).text === 'string' &&
-    String((anchor as any).text).trim().length > 0;
+// ✅ hasAnchor: {key:"SUN"} / {text:"..."} の両対応
+const anchorKey =
+  anchor && typeof anchor === 'object' && typeof (anchor as any).key === 'string'
+    ? String((anchor as any).key).trim()
+    : null;
 
-  // ✅ 固定北（SUN）の判定は meta.fixedNorth を正とする（orchestrator.ts が唯一の投入元）
-  // - 旧仕様: anchor.fixed === true
-  // - 新仕様: meta.fixedNorth.key === 'SUN' / meta.fixedNorth === 'SUN' を優先
-  const fixedNorthKey =
-    typeof (meta as any)?.fixedNorth?.key === 'string'
-      ? String((meta as any).fixedNorth.key)
-      : typeof (meta as any)?.fixedNorth === 'string'
-        ? String((meta as any).fixedNorth)
-        : null;
+const anchorText =
+  anchor && typeof anchor === 'object' && typeof (anchor as any).text === 'string'
+    ? String((anchor as any).text).trim()
+    : null;
+
+const hasAnchor = Boolean(
+  (anchorKey && anchorKey.length > 0) || (anchorText && anchorText.length > 0),
+);
+
+// ✅ 固定北（SUN）の判定は meta.fixedNorth を正とする
+const fixedNorthKey =
+  typeof (meta as any)?.fixedNorth?.key === 'string'
+    ? String((meta as any).fixedNorth.key)
+    : typeof (meta as any)?.fixedNorth === 'string'
+      ? String((meta as any).fixedNorth)
+      : null;
+
 
   // ✅ “確定アンカー”と“固定北(SUN)”は意味が違うので分離して保持する
   const hasFixedNorthSUN = fixedNorthKey === 'SUN';

@@ -1201,12 +1201,16 @@ let { result, finalMode, metaForSave, assistantText } = irosResult as any;
 // ✅ Context Pack fetcher（LLM注入用）
 // - Evidence Logger の ios_context_pack_latest_conv を呼ぶ
 // - 失敗しても null を返す（会話を止めない）
+// ✅ 追加：historyMessages を pack に混ぜて返す（rephraseEngine が拾える形）
 // =========================================================
 async function fetchContextPackForLLM(args: {
   supabase: any;
   userCode: string;
   conversationId: string;
   limit?: number;
+
+  // ✅ 追加：直近会話（LLM入力用の現物）
+  historyMessages?: any[] | string | null;
 }): Promise<any | null> {
   const { supabase, userCode, conversationId } = args;
   const pLimit = Number.isFinite(args.limit as any) ? Number(args.limit) : 200;
@@ -1229,16 +1233,33 @@ async function fetchContextPackForLLM(args: {
     // data が { counts, last_state, pattern_hint, conversation_id } の想定
     const pack = data ?? null;
 
+    // ✅ 履歴を正規化して pack に合成（rephraseEngine が拾えるキーに寄せる）
+    const normalized = normalizeHistoryMessages(args.historyMessages);
+    const historyText = buildHistoryText(normalized);
+
+    const enriched = {
+      ...(pack ?? {}),
+      conversation_id: pack?.conversation_id ?? conversationId,
+
+      // rephraseEngine.ts が拾う候補キー
+      historyMessages: normalized.length ? normalized : undefined,
+      historyText: historyText ? historyText : undefined,
+    };
+
     console.log('[IROS/CTX_PACK][OK]', {
       userCode,
       conversationId,
-      conv: pack?.conversation_id ?? null,
-      counts: pack?.counts ?? null,
-      last_state: pack?.last_state ?? null,
-      pattern_hint: pack?.pattern_hint ?? null,
+      conv: enriched?.conversation_id ?? null,
+      counts: enriched?.counts ?? null,
+      last_state: enriched?.last_state ?? null,
+      pattern_hint: enriched?.pattern_hint ?? null,
+      hasHistoryMessages: Array.isArray(enriched?.historyMessages),
+      historyLen: Array.isArray(enriched?.historyMessages) ? enriched.historyMessages.length : 0,
+      hasHistoryText: typeof enriched?.historyText === 'string',
+      historyTextLen: typeof enriched?.historyText === 'string' ? enriched.historyText.length : 0,
     });
 
-    return pack;
+    return enriched;
   } catch (e: any) {
     console.warn('[IROS/CTX_PACK][EX]', {
       userCode,
@@ -1248,6 +1269,74 @@ async function fetchContextPackForLLM(args: {
     return null;
   }
 }
+
+// ==============================
+// ✅ helpers（LLM注入用）
+// ==============================
+function normalizeHistoryMessages(
+  raw: any[] | string | null | undefined,
+): Array<{ role: 'user' | 'assistant'; content: string }> {
+  if (!raw) return [];
+
+  // string は最小限に分割して user 扱い（保険）
+  if (typeof raw === 'string') {
+    const lines = String(raw)
+      .replace(/\r\n/g, '\n')
+      .split('\n')
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .slice(-24);
+
+    return lines
+      .map((s) => ({ role: 'user' as const, content: s }))
+      .slice(-12);
+  }
+
+  if (!Array.isArray(raw)) return [];
+
+  const mapped = raw
+    .filter(Boolean)
+    .slice(-24)
+    .map((m: any) => {
+      const roleRaw = String(m?.role ?? m?.speaker ?? m?.type ?? '').toLowerCase();
+      const body = String(m?.content ?? m?.text ?? m?.message ?? '')
+        .replace(/\r\n/g, '\n')
+        .trim();
+      if (!body) return null;
+
+      const isAssistant =
+        roleRaw === 'assistant' ||
+        roleRaw === 'bot' ||
+        roleRaw === 'system' ||
+        roleRaw.startsWith('a');
+
+      return {
+        role: (isAssistant ? 'assistant' : 'user') as 'assistant' | 'user',
+        content: body,
+      };
+    })
+    .filter(
+      (x): x is { role: 'user' | 'assistant'; content: string } => x !== null,
+    )
+    .slice(-12);
+
+  return mapped;
+}
+
+
+function buildHistoryText(
+  msgs: Array<{ role: 'user' | 'assistant'; content: string }>,
+): string {
+  if (!msgs.length) return '';
+  const joined = msgs
+    .slice(-12)
+    .map((m) => `${m.role === 'assistant' ? 'A' : 'U'}: ${m.content}`)
+    .join('\n');
+
+  if (joined.length <= 1800) return joined;
+  return joined.slice(0, 1799) + '…';
+}
+
 
 
 
@@ -1375,6 +1464,7 @@ const contextPack = await fetchContextPackForLLM({
   userCode,
   conversationId,
   limit: 200,
+  historyMessages: historyMessages ?? null, // ✅ 追加（ここが本命）
 });
 
 // meta にも保持（監査＆後段参照用）
@@ -1398,12 +1488,13 @@ console.log('[IROS/rephrase][CTX_INJECT]', {
 // - historyXMerged / mergedHistory / historyMerged 等、ここにある実変数名に合わせて1つだけ使う
 // - どれも無ければ `null` のままでもOK（落ちない）
 
-// 形式を揃える（rephraseEngine 側で拾えるキー）
+// ✅ 合成：pack が持ってる historyText を “undefined 上書き” で消さない
 const contextPackWithHistory = {
   ...(contextPack ?? {}),
-  historyMessages: Array.isArray(historyMessages) ? historyMessages : undefined,
-  historyText: typeof historyMessages === 'string' ? historyMessages : undefined,
+  ...(Array.isArray(historyMessages) ? { historyMessages } : {}),
+  ...(typeof historyMessages === 'string' ? { historyText: historyMessages } : {}),
 };
+
 
 // ✅ 合成後ログ（ここが true になれば勝ち）
 console.log('[IROS/rephrase][CTX_INJECT][WITH_HISTORY]', {
@@ -1431,10 +1522,58 @@ console.log('[IROS/rephrase][USERCTX_KEYS]', {
       : null,
 });
 
+// route.ts（[IROS/rephrase][USERCTX_KEYS] の直後に追加）
 
-// ↓↓↓ 以降、rephrase 呼び出しに渡す opts.userContext はこれを使う
-// 例：rephraseSlotsFinal(extracted, { ...opts, userContext: contextPackWithHistory, ... })
+const PREVIEW = String(process.env.IROS_REPHRASE_HISTORY_PREVIEW ?? '').trim();
+const PREVIEW_ON = PREVIEW === '1' || PREVIEW.toLowerCase() === 'true';
 
+function clamp(s: any, n: number) {
+  const t = String(s ?? '');
+  return t.length <= n ? t : t.slice(0, n) + '…';
+}
+
+function headTail(s: any, head = 240, tail = 240) {
+  const t = String(s ?? '');
+  if (t.length <= head + tail + 10) return t;
+  return t.slice(0, head) + '\n…(snip)…\n' + t.slice(Math.max(0, t.length - tail));
+}
+
+if (PREVIEW_ON) {
+  // このスコープに userContext / historyText / historyMessages がある前提
+  const uc: any = (extraMerged as any)?.userContext ?? null;
+
+  const ht = uc?.historyText;
+  const hm = uc?.historyMessages;
+
+  console.log('[IROS/rephrase][HISTORY_PREVIEW]', {
+    conversationId,
+    userCode,
+    hasHistoryText: typeof ht === 'string' && ht.length > 0,
+    historyTextLen: typeof ht === 'string' ? ht.length : 0,
+    historyMessagesLen: Array.isArray(hm) ? hm.length : 0,
+  });
+
+  if (typeof ht === 'string' && ht.length) {
+    console.log('[IROS/rephrase][HISTORY_TEXT][HEAD_TAIL]\n' + headTail(ht));
+  }
+
+  if (Array.isArray(hm) && hm.length) {
+    // 先頭〜末尾の “どの発話が入ったか” を見たいので、最大12件だけ出す
+    const max = 12;
+    const slice =
+      hm.length <= max ? hm : [...hm.slice(0, Math.ceil(max / 2)), ...hm.slice(-Math.floor(max / 2))];
+
+    console.log(
+      '[IROS/rephrase][HISTORY_MESSAGES][SAMPLE]',
+      slice.map((m: any, i: number) => ({
+        i,
+        role: m?.role,
+        // content/ text どっちでも拾えるように
+        head: clamp(m?.content ?? m?.text ?? '', 140),
+      }))
+    );
+  }
+}
 
 // =========================================================
 // ✅ rephraseSlotsFinal に userContext を渡す（これがLLM注入）

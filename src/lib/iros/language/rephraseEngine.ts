@@ -6,6 +6,15 @@
 // ✅ 追加：
 // - userContext から "履歴っぽいもの" を自動抽出して LLM に注入（露出禁止）
 //   → LLM が「履歴を感じない」問題の最短改善
+//
+// ✅ 重要改善（今回の肝）
+// - LLMに渡す履歴は「直近2往復」だけ（最大4メッセージ）に固定
+//   → 長い履歴（12件など）を入れると、逆に“流れ”が薄くなる/迷うことが多い
+//
+// ✅ ITは条件が揃ってから：
+// - ここ（writer）は “判断” をしない
+// - ただし userContext 側に「ITが成立した証拠（IT_TRIGGER_OK / tLayerModeActive 等）」があり、
+//   かつ intentBand/tLayerHint が I* のときだけ「Iっぽい1文」を“表現ルールとして”許可する（露出禁止）
 
 import { chatComplete } from '../../llm/chatComplete';
 
@@ -165,6 +174,13 @@ function clampChars(text: string, maxChars: number): string {
   return t.slice(0, Math.max(0, maxChars - 1)) + '…';
 }
 
+function ensureLampEnd(text: string): string {
+  const t = norm(text);
+  if (!t) return '';
+  if (t.endsWith('🪔')) return t;
+  return t + '\n🪔';
+}
+
 function tryGet(obj: any, path: string[]): any {
   let cur = obj;
   for (const k of path) {
@@ -240,13 +256,16 @@ function extractHistoryMessagesFromContext(
 
   const mapped = raw
     .filter(Boolean)
-    .slice(-12)
     .map((m: any) => {
-      const roleRaw = String(m?.role ?? '').toLowerCase();
-      const body = norm(m?.content ?? m?.text ?? '');
+      const roleRaw = String(m?.role ?? m?.speaker ?? m?.type ?? '').toLowerCase();
+      const body = norm(m?.content ?? m?.text ?? m?.message ?? '');
       if (!body) return null;
+
+      const isAssistant =
+        roleRaw.startsWith('a') || roleRaw === 'assistant' || roleRaw === 'bot';
+
       return {
-        role: roleRaw.startsWith('a') ? ('assistant' as const) : ('user' as const),
+        role: isAssistant ? ('assistant' as const) : ('user' as const),
         content: body,
       };
     });
@@ -254,7 +273,62 @@ function extractHistoryMessagesFromContext(
   return mapped.filter(
     (x): x is { role: 'user' | 'assistant'; content: string } => x !== null,
   );
+}
 
+function readIntEnv(name: string, fallback: number, min: number, max: number) {
+  const raw = String(process.env[name] ?? '').trim();
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  const v = Math.floor(n);
+  if (v < min) return min;
+  if (v > max) return max;
+  return v;
+}
+
+/**
+ * ✅ 直近Nメッセージを抽出（デフォルト: 4 = 直近2往復）
+ * - 明示キー lastUser / lastAssistant があればそれを優先
+ * - 無ければ historyMessages から最後のN件
+ *
+ * ENV:
+ * - IROS_REPHRASE_LAST_MSGS=4 (default) / 8 / 12 ...
+ */
+function extractLastTurnsFromContext(
+  userContext: unknown,
+): Array<{ role: 'user' | 'assistant'; content: string }> {
+  const MAX_LAST_MSGS = readIntEnv('IROS_REPHRASE_LAST_MSGS', 4, 2, 8);
+
+  if (!userContext || typeof userContext !== 'object') return [];
+  const uc: any = userContext as any;
+
+  // 1) 明示キー優先
+  const lastUser =
+    tryGet(uc, ['lastUser']) ??
+    tryGet(uc, ['last_user']) ??
+    tryGet(uc, ['ctxPack', 'lastUser']) ??
+    tryGet(uc, ['ctx_pack', 'lastUser']) ??
+    null;
+
+  const lastAssistant =
+    tryGet(uc, ['lastAssistant']) ??
+    tryGet(uc, ['last_assistant']) ??
+    tryGet(uc, ['ctxPack', 'lastAssistant']) ??
+    tryGet(uc, ['ctx_pack', 'lastAssistant']) ??
+    null;
+
+  const out: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  const u = norm(lastUser);
+  const a = norm(lastAssistant);
+  if (u) out.push({ role: 'user', content: u });
+  if (a) out.push({ role: 'assistant', content: a });
+
+  if (out.length > 0) return out;
+
+  // 2) historyMessages から抽出（最後のN件）
+  const historyMsgs = extractHistoryMessagesFromContext(userContext);
+  if (historyMsgs.length === 0) return [];
+
+  return historyMsgs.slice(-MAX_LAST_MSGS);
 }
 
 function buildFixedBoxTexts(slotCount: number): string[] {
@@ -283,8 +357,101 @@ function buildSlotsWithFirstText(inKeys: string[], firstText: string): Slot[] {
   return out;
 }
 
-function systemPromptForFullReply(): string {
-  return [
+// -------------------------------
+// ✅ IT成立（条件が揃った証拠）を userContext から読む
+// -------------------------------
+function readItOkFromContext(userContext: unknown): boolean {
+  if (!userContext || typeof userContext !== 'object') return false;
+  const uc: any = userContext as any;
+
+  // いろんな場所に混ざり得るので広めに探索
+  const reason =
+    norm(
+      tryGet(uc, ['itxReason']) ??
+        tryGet(uc, ['itx_reason']) ??
+        tryGet(uc, ['meta', 'itxReason']) ??
+        tryGet(uc, ['meta', 'itx_reason']) ??
+        tryGet(uc, ['ctxPack', 'itxReason']) ??
+        tryGet(uc, ['ctxPack', 'itx_reason']) ??
+        tryGet(uc, ['ctx_pack', 'itxReason']) ??
+        tryGet(uc, ['ctx_pack', 'itx_reason']) ??
+        '',
+    ) || '';
+
+  const tLayerModeActive =
+    Boolean(
+      tryGet(uc, ['tLayerModeActive']) ??
+        tryGet(uc, ['meta', 'tLayerModeActive']) ??
+        tryGet(uc, ['ctxPack', 'tLayerModeActive']) ??
+        tryGet(uc, ['ctx_pack', 'tLayerModeActive']) ??
+        false,
+    ) === true;
+
+  // IT_TRIGGER_OK / IT_HOLD を “成立の証拠” として扱う（writer判断ではない）
+  if (reason.includes('IT_TRIGGER_OK')) return true;
+  if (reason.includes('IT_HOLD')) return true;
+  if (tLayerModeActive) return true;
+
+  return false;
+}
+
+// -------------------------------
+// ✅ intentBand / tLayerHint を userContext から抽出（Iは成立後のみ使う）
+// -------------------------------
+function extractIntentBandFromContext(userContext: unknown): {
+  intentBand: string | null;
+  tLayerHint: string | null;
+} {
+  if (!userContext || typeof userContext !== 'object') {
+    return { intentBand: null, tLayerHint: null };
+  }
+  const uc: any = userContext as any;
+
+  const intentBand =
+    norm(
+      tryGet(uc, ['intentBand']) ??
+        tryGet(uc, ['intent_band']) ??
+        tryGet(uc, ['ctxPack', 'intentBand']) ??
+        tryGet(uc, ['ctxPack', 'intent_band']) ??
+        tryGet(uc, ['ctx_pack', 'intentBand']) ??
+        tryGet(uc, ['ctx_pack', 'intent_band']) ??
+        '',
+    ) || null;
+
+  const tLayerHint =
+    norm(
+      tryGet(uc, ['tLayerHint']) ??
+        tryGet(uc, ['t_layer_hint']) ??
+        tryGet(uc, ['ctxPack', 'tLayerHint']) ??
+        tryGet(uc, ['ctxPack', 't_layer_hint']) ??
+        tryGet(uc, ['ctx_pack', 'tLayerHint']) ??
+        tryGet(uc, ['ctx_pack', 't_layer_hint']) ??
+        '',
+    ) || null;
+
+  const bandOk = intentBand && /^[SRICT][123]$/u.test(intentBand) ? intentBand : null;
+  const hintOk = tLayerHint && /^[SRICT][123]$/u.test(tLayerHint) ? tLayerHint : null;
+
+  return { intentBand: bandOk, tLayerHint: hintOk };
+}
+
+function systemPromptForFullReply(args?: {
+  directTask?: boolean;
+  itOk?: boolean;
+  band?: { intentBand: string | null; tLayerHint: string | null } | null;
+}): string {
+  const directTask = Boolean(args?.directTask);
+  const itOk = Boolean(args?.itOk);
+  const band = args?.band ?? null;
+
+  const b = band?.intentBand ?? null;
+  const h = band?.tLayerHint ?? null;
+
+  // ✅ ITが成立していて、かつ I* 指定のときだけ I文を「必須」にする
+  const isIRequested = (b && b.startsWith('I')) || (h && h.startsWith('I'));
+  const allowForceI = itOk && isIRequested;
+
+  const base = [
     'あなたは iros の会話生成（reply）担当です。',
     '',
     '【目的】',
@@ -294,14 +461,55 @@ function systemPromptForFullReply(): string {
     '1) 入力に含まれるメタ（phase/depth/q 等）は “内部制約” として尊重するが、本文にJSON/キー名/ラベルを露出しない。',
     '2) 次のテンプレ口癖は禁止：',
     '   - 「受け取った」「いま出ている言葉」「いまの一番大事な一点」「一手に落とす」「迷いを増やさない」「呼吸を戻す」「ここで止める」「核」「切る」',
+    '   - 「この流れだと」「この流れでは」「いまの流れだと」',
     '3) 二択誘導（A/Bで選ばせる）をしない。',
     '4) 質問は最大1つ（本当に必要なときだけ）。',
     '5) 4〜10行程度。最後は必ず「🪔」で閉じる。',
     '6) 断定診断・過剰な助言は避け、ユーザーが話しやすい“つなぎ”を優先。',
+    '7) 「覚えてる／前に言ってたよね」等の“記憶断言”は禁止。言うなら「この入力にある範囲だと…」の形にする。',
+    '8) 状況の受け止めを言いたいときは「この流れだと」を使わず、次のどれかに置き換える：',
+    '   - 「いまは」',
+    '   - 「いま必要なのは」',
+    '   - 「やりたいのはこれだね」',
+    '   - 「ポイントはここ」',
     '',
     '【出力】',
     '日本語の会話文のみ。箇条書き/JSON/コード/見出しは出さない。',
+    '',
+    '【追加ルール】',
+    '- 「この流れだと」「いまの話だと」「〜なんですね」等の会話追従フレーズは禁止。',
+    '- タスクが明確な場合、質問はしない。',
+    directTask
+      ? '- ユーザーが「本文だけ」「文面を作って」「短文を出して」等を要求している場合、前置き・状況整理・共感・要約を一切書かず、成果物のみを出力する。'
+      : '- ユーザーが成果物を求めていない場合は、短い受け止め→次へ繋ぐ、の順で自然につなぐ。',
+    '',
+    '【履歴の使い方（重要）】',
+    '- 上で渡される直近メッセージ（lastTurns）が最優先。',
+    '- それ以外の履歴ヒント（historyText / seedDraft）は “内部の連続性” にだけ使い、本文で「前に言ってた」等の断言はしない。',
+  ].filter(Boolean);
+
+  const bandInfo = [
+    '',
+    '【内部制約：帯域ヒント（露出禁止）】',
+    `itOk=${itOk ? 'true' : 'false'} / intentBand=${b ?? '(null)'} / tLayerHint=${h ?? '(null)'}`,
   ].join('\n');
+
+  const iRule = allowForceI
+    ? [
+        '',
+        '【I層の返し（必須：IT成立後のみ）】',
+        '- 本文のどこかに “価値/生き方/何のため/譲れないもの/大事にしたいこと” に触れる1文を必ず入れる。',
+        '- ただし「意図」という単語は使わない。',
+        '- 説教にしない。短い1文でよい。',
+      ].join('\n')
+    : [
+        '',
+        '【I層の返し（未発火）】',
+        '- ITが成立していない限り、I層を“強制”しない。',
+        '- ただし目標/将来/数字（年収など）が出た場合、可能なら価値に触れる1文を混ぜてよい（任意）。',
+      ].join('\n');
+
+  return base.join('\n') + bandInfo + iRule;
 }
 
 function safeHead(s: string, n = 80) {
@@ -311,11 +519,11 @@ function safeHead(s: string, n = 80) {
 
 function safeContextToText(v: unknown): string {
   if (v == null) return '';
-  if (typeof v === 'string') return norm(v);
+  if (typeof v === 'string') return clampChars(norm(v), 1800);
   try {
-    return JSON.stringify(v);
+    return clampChars(JSON.stringify(v), 1800);
   } catch {
-    return norm(String(v));
+    return clampChars(norm(String(v)), 1800);
   }
 }
 
@@ -382,7 +590,9 @@ export async function rephraseSlotsFinal(
     };
   }
 
-  const mode = String(process.env.IROS_REPHRASE_FINAL_MODE ?? 'LLM').trim().toUpperCase();
+  const mode = String(process.env.IROS_REPHRASE_FINAL_MODE ?? 'LLM')
+    .trim()
+    .toUpperCase();
 
   const maxLines =
     Number(process.env.IROS_REPHRASE_FINAL_MAXLINES) > 0
@@ -416,18 +626,33 @@ export async function rephraseSlotsFinal(
   }
 
   // (B) LLM
-  const userText = norm(opts.userText ?? '');
-  const metaText = safeContextToText(opts.userContext ?? null);
-  const historyText = extractHistoryTextFromContext(opts.userContext ?? null);
+  const userText = norm(opts?.userText ?? '');
+  const metaText = safeContextToText(opts?.userContext ?? null);
+
+  // ✅ GPT寄り：成果物タスク判定（SYSTEMで使う）
+  const isDirectTask = /(本文だけ|文面|短文|そのまま使える|作って|出して)/.test(userText);
+
+  // 長めの“履歴テキスト”は保険としてだけ使う（露出禁止）
+  const historyText = extractHistoryTextFromContext(opts?.userContext ?? null);
+
+  // ★ 本命：直近2往復だけ
+  const lastTurns = extractLastTurnsFromContext(opts?.userContext ?? null);
+
+  // slot由来の下書き（露出禁止）
   const seedDraft = extracted.slots.map((s) => s.text).filter(Boolean).join('\n');
 
-  const historyMsgs = extractHistoryMessagesFromContext(opts.userContext ?? null);
+  // ✅ ITは条件が揃ってから（証拠があるときだけI表現ルールを許可）
+  const itOk = readItOkFromContext(opts?.userContext ?? null);
+  const band = extractIntentBandFromContext(opts?.userContext ?? null);
 
   const messages = [
-    { role: 'system' as const, content: systemPromptForFullReply() },
+    {
+      role: 'system' as const,
+      content: systemPromptForFullReply({ directTask: isDirectTask, itOk, band }),
+    },
 
-    // ★ ここが本命：LLMに「会話」として渡る履歴
-    ...historyMsgs,
+    // ★ 直近2往復（最大4メッセージ）
+    ...lastTurns,
 
     {
       role: 'user' as const,
@@ -438,6 +663,9 @@ export async function rephraseSlotsFinal(
         '【内部メタ（露出禁止）】',
         metaText || '(なし)',
         '',
+        '【履歴ヒント（露出禁止）】',
+        lastTurns.length > 0 ? '(直近2往復を上で投入済み)' : historyText || '(なし)',
+        '',
         '【下書きヒント（slot由来・露出禁止）】',
         seedDraft || '(なし)',
         '',
@@ -447,12 +675,15 @@ export async function rephraseSlotsFinal(
   ];
 
   console.log('[IROS/rephraseEngine][MSG_PACK]', {
-    historyMsgs: historyMsgs.length,
+    lastTurns: lastTurns.length,
+    hasHistoryText: Boolean(historyText),
     msgCount: messages.length,
     roles: messages.map((m) => m.role),
+    itOk,
+    intentBand: band.intentBand,
+    tLayerHint: band.tLayerHint,
+    directTask: isDirectTask,
   });
-
-
 
   let raw = '';
   try {
@@ -464,7 +695,7 @@ export async function rephraseSlotsFinal(
     raw = await chatComplete({
       purpose: 'reply',
       model: opts.model,
-      temperature: typeof opts.temperature === 'number' ? opts.temperature : 0.6,
+      temperature: typeof opts.temperature === 'number' ? opts.temperature : 0.2,
       max_tokens: 700,
       messages,
 
@@ -489,7 +720,7 @@ export async function rephraseSlotsFinal(
   // ✅ raw段階ログ（keysはslotPlan由来を明示）
   logRephraseOk(opts.debug, extracted.keys, raw);
 
-  const cleaned = clampLines(raw, maxLines);
+  const cleaned = ensureLampEnd(clampLines(raw, maxLines));
   if (!cleaned) {
     return {
       ok: false,
@@ -519,8 +750,8 @@ export async function rephraseSlotsFinal(
  * ✅ 絶対ルール（幻覚/捏造 防止）
  * - 入力に存在しない「過去の出来事」「前に言ってた」等を作らない
  * - 「覚えてる」「前に話したよね」等の“記憶断言”は禁止
- *   ただし、下書きヒント（slot由来）に明示で含まれている場合のみ言い換え可
+ *   ただし、入力（history/messages/seedDraft）に明示で含まれている範囲の要約は可
  * - ユーザーが「覚えてる？」と聞いた場合は、事実の断言ではなく
- *   「いま出ている話題は◯◯だね」程度の現在要約で返す
+ *   「この入力にある限りでは◯◯」の現在要約で返す
  * - 目的は“会話を自然にする”であり、ストーリー補完ではない
  */
