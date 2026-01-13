@@ -8,7 +8,7 @@
 // - ここでは “OpenAIを叩かない”。叩く直前に finalize を呼ぶ運用
 //
 // ✅ v2 方針（重要 / A案 正式）
-// - 「水増し」はしない
+// - 「水増し」はしない（expand/filler は render 側の責務）
 // - LLM には必ず “下書き本文（effectiveText）” を渡す（CALL_LLM のとき）
 // - SCAFFOLD は “LLM自体を呼ばない”（混乱源「呼ぶのに採用しない」を構造で排除）
 // - SKIP 系 decision には resolvedText を必ず載せる
@@ -39,14 +39,18 @@ export type LlmGateProbeInput = {
   // 周辺状況（推測しない）
   brakeReason?: string | null;
   speechAct?: string | null;
+
+  // 既に本文がある（slotをレンダ済み等）。無ければ slot から candidate を作る
   finalAssistantTextNow?: string | null;
+
+  // slotPlan の有無ヒント（呼び出し側が持っている値）
   slotPlanLen?: number | null;
   hasSlots?: boolean | null;
 
-  // slotPlan の性質
+  // slotPlan の性質（FINAL/SCAFFOLD）
   slotPlanPolicy?: SlotPlanPolicy | null;
 
-  // slot から candidate を作るための meta
+  // slot から candidate を作るための meta（複数パスに対応）
   meta?: any;
 };
 
@@ -74,6 +78,10 @@ export type LlmGateProbeOutput = {
     // ✅ Phase11: 強制CALL（log証拠用）
     finalForceCall?: boolean | null;
     finalForceCallReason?: string | null;
+
+    // ✅ 将来のデバッグ用（上流が使うなら）
+    // resolvedText は decision 側に載るが、patch だけ見て追えるように残したい場合に使う
+    // resolvedTextLen?: number | null;
   };
 };
 
@@ -100,6 +108,10 @@ function normText(v: any): string {
     .trim();
 }
 
+function isNonEmptyText(v: any): boolean {
+  return normText(v).length > 0;
+}
+
 // ---------------------------------------------------------------------
 // slots helpers
 // ---------------------------------------------------------------------
@@ -107,6 +119,12 @@ function normText(v: any): string {
 function extractSlotsObj(meta: any): any | null {
   if (!meta || typeof meta !== 'object') return null;
 
+  // ✅ 実際に現場で出てくる “あり得る場所” を列挙
+  // - meta.framePlan.slots : 基本
+  // - meta.framePlan.framePlan.slots : 二重ラップ
+  // - meta.framePlan.slotPlan.slots : 旧構造
+  // - meta.slotPlan.slots / meta.slots : さらに旧
+  // - meta.extra.framePlan.slots : extra に入ってるケース
   const candidates = [
     meta?.framePlan?.slots,
     meta?.framePlan?.framePlan?.slots,
@@ -234,9 +252,11 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
 
   const policy = normPolicy(slotPlanPolicy);
 
+  // 現在本文（既に生成済み/レンダ済みで入ってくることがある）
   const textNowRaw = normText(finalAssistantTextNow);
   const textNowLen = textNowRaw.length;
 
+  // slots から組み立てた候補文
   const slotsObj = extractSlotsObj(meta);
   const candidateRaw = normText(buildTextFromSlots(slotsObj) ?? '');
   const candidateLen = candidateRaw.length;
@@ -245,6 +265,8 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
   const effectiveText = textNowLen > 0 ? textNowRaw : candidateRaw;
   const effectiveLen = effectiveText.length;
 
+  // slots 有無の判定
+  // - slotPlanLen が無い実装もあるので hasSlots も見る
   const slotsOk =
     (typeof slotPlanLen === 'number' && slotPlanLen > 0) || hasSlots === true;
 
@@ -288,6 +310,8 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
   }
 
   // (B) 明示沈黙
+  // - Q1_SUPPRESS は “抑制” なので生成しない
+  // - speechAct=SILENCE は明示沈黙
   if (
     String(brakeReason ?? '') === 'Q1_SUPPRESS' ||
     String(speechAct ?? '').toUpperCase() === 'SILENCE'
@@ -299,9 +323,9 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
     });
   }
 
-  // (C) ✅ SCAFFOLD（正式/A案）：LLM自体を呼ばない
-  // - “呼ぶのに採用しない” という混乱の温床を構造的に消す
-  // - SCAFFOLD は slotPlan/seed を render-v2 側で表示する
+  // (C) ✅ SCAFFOLD：LLM自体を呼ばない（正式/A案）
+  // - “呼ぶのに採用しない” という混乱を構造的に排除
+  // - SCAFFOLD は slotPlan/seed を render 側で表示する
   if (slotsOk && policy === 'SCAFFOLD') {
     return mkPatch({
       entry: 'SKIP_SLOTPLAN',
@@ -310,9 +334,10 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
     });
   }
 
-  // (D) ✅ Phase11：FINAL slotPlan は原則 CALL_LLM（テンプレ固定化を防ぐ）
-  // - effectiveText が non-empty でも SKIP しない
+  // (D) ✅ Phase11：FINAL slotPlan は原則 CALL_LLM
+  // - slot が non-empty でも SKIP しない（テンプレ固定化を防ぐ）
   // - LLMには “下書き本文（effectiveText）” を必ず渡す（上流が利用）
+  // - effectiveText が空でも CALL（slots がある＝seed があるので生成できる）
   if (slotsOk && policy === 'FINAL') {
     console.warn('[IROS/LLM_GATE][FINAL_FORCE_CALL]', {
       conversationId,
@@ -344,6 +369,7 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
   }
 
   // (F) slots が無いが本文がある：そのまま返す（LLM不要）
+  // - ここは「slotPlanを使ってない通常返信」想定
   if (effectiveLen > 0) {
     return mkPatch({
       entry: 'SKIP_SLOTPLAN',
@@ -353,6 +379,7 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
   }
 
   // (G) 何も無い：最後の砦として CALL_LLM（空seedでも呼ぶ）
+  // - 上流が “空でも呼ぶ” を許可しているときの最終保険
   return mkPatch({
     entry: 'CALL_LLM',
     reason: 'no slots and empty text (last resort)',
@@ -384,7 +411,8 @@ export function writeLlmGateToMeta(
 
   // ✅ 追加：FINAL強制CALLの証拠（SQLで追える）
   (metaForSave.extra as any).finalForceCall = patch.finalForceCall ?? null;
-  (metaForSave.extra as any).finalForceCallReason = patch.finalForceCallReason ?? null;
+  (metaForSave.extra as any).finalForceCallReason =
+    patch.finalForceCallReason ?? null;
 }
 
 // ---------------------------------------------------------------------
@@ -401,23 +429,31 @@ export function logLlmGate(
   },
 ): void {
   const { conversationId, userCode, patch, decision } = args;
+
   console.log(`[IROS/LLM_GATE][${tag}]`, {
     conversationId,
     userCode,
+
     llmEntry: patch.llmEntry,
     llmSkipReason: patch.llmSkipReason,
+
     allowLLM_final: patch.allowLLM_final,
     brakeReason: patch.brakeReason,
     speechAct: patch.speechAct,
+
     slotPlanLen: patch.slotPlanLen,
     hasSlots: patch.hasSlots,
     slotPlanPolicy: patch.slotPlanPolicy,
+
     finalAssistantTextLen: patch.finalAssistantTextLen,
     finalAssistantTextHead: patch.finalAssistantTextHead,
+
     finalAssistantTextCandidateLen: patch.finalAssistantTextCandidateLen ?? null,
     finalAssistantTextCandidateHead: patch.finalAssistantTextCandidateHead ?? null,
+
     finalForceCall: patch.finalForceCall ?? null,
     finalForceCallReason: patch.finalForceCallReason ?? null,
+
     resolvedTextLen: decision?.resolvedText
       ? String(decision.resolvedText).length
       : null,

@@ -9,6 +9,11 @@
 // - 質問は最大1つ（会話が進むための“必要最小”だけ / 0問もOK）
 // - 質問で掘り続けない：必要なら「短い解説（見方の変更）」で自然に次が湧く状態を作る
 // - I-line（方向の問い）は “他の質問を止めて” 1本で出す（= 質問連打を止める）
+//
+// ✅ Phase11重要：slotPlan から “文章” を追放する
+// - content は user-facing 文ではなく「writer入力用のメタ」を入れる
+// - writer が毎回生成（CALL_LLM）して初めて「会話」が成立する
+// - ここは “意味の骨格/合図/素材” だけを返す（自然言語は書かない）
 
 import type { SlotPlanPolicy } from '../server/llmGate';
 import { detectExpansionMoment } from '../language/expansionMoment';
@@ -22,7 +27,7 @@ export type NormalChatSlot = {
   key: string;
   role: 'assistant';
   style: 'neutral' | 'soft' | 'firm';
-  content: string;
+  content: string; // ✅ writer入力用メタ（ユーザー表示文ではない）
 };
 
 export type NormalChatSlotPlan = {
@@ -48,25 +53,17 @@ function containsAny(t: string, words: string[]) {
   return words.some((w) => t.includes(w));
 }
 
-function scoreText(t: string) {
-  // 簡易な決定的スコア（ランダム禁止 / テンプレ固定を避けるための分岐に使う）
-  let s = 0;
-  for (let i = 0; i < t.length; i++) s = (s + t.charCodeAt(i) * (i + 1)) % 9973;
-  return s;
-}
-
-function pickOne<T>(t: string, xs: T[]): T {
-  if (!xs.length) throw new Error('pickOne: empty');
-  const idx = scoreText(t) % xs.length;
-  return xs[idx]!;
+// ✅ meta builder（文章禁止：短いタグ＋最小payloadだけ）
+function m(tag: string, payload?: Record<string, any>) {
+  if (!payload || Object.keys(payload).length === 0) return `@${tag}`;
+  // payload は writer が読む前提。可読性より “壊れにくさ” 優先で JSON に寄せる。
+  return `@${tag} ${JSON.stringify(payload)}`;
 }
 
 function looksLikeInnerConcern(text: string) {
   const t = norm(text);
   if (!t) return false;
 
-  // ✅ 内的相談（迷い/不安/方向/責任/意味/可能性…）
-  // → ここで “場面/相手” を聞くと質問攻め化しやすいので、Q を止める
   return containsAny(t, [
     '迷',
     '不安',
@@ -95,7 +92,6 @@ function looksLikeInnerConcern(text: string) {
   ]);
 }
 
-// “薄い返答” を検出（例：日常です、まだです、わからない、可能性の話です）
 function looksLikeThinReply(text: string) {
   const t = norm(text);
   if (!t) return false;
@@ -115,9 +111,7 @@ function looksLikeThinReply(text: string) {
     return true;
   }
 
-  // 短文は薄い扱い（質問攻め回避）
   if (t.length <= 8) return true;
-
   return false;
 }
 
@@ -134,14 +128,11 @@ function looksLikeEndConversation(text: string) {
   );
 }
 
-// REPAIR（取りこぼし/ループ指摘）
 function looksLikeRepair(text: string) {
   const t = norm(text);
   if (!t) return false;
 
-  // ✅ まずは強い正規化ワード（部分一致想定）
   const repairWords = [
-    // 言った系
     'ゆったよね',
     '言ったよね',
     '言ったでしょ',
@@ -153,7 +144,6 @@ function looksLikeRepair(text: string) {
     '前にも言った',
     'さっきも言った',
 
-    // 話した系（今回の「さっき話しましたよ？」を拾う）
     'さっき話した',
     'さっき話しました',
     'もう話した',
@@ -165,7 +155,6 @@ function looksLikeRepair(text: string) {
     'もう言いました',
     '今言いました',
 
-    // ループ/同じ系
     '同じこと',
     '同じ話',
     '繰り返し',
@@ -186,7 +175,6 @@ function looksLikeRepair(text: string) {
   return false;
 }
 
-// HOW_TO（どうしたらいい系）
 function looksLikeHowTo(text: string) {
   const t = norm(text);
   if (!t) return false;
@@ -204,7 +192,6 @@ function looksLikeHowTo(text: string) {
   );
 }
 
-// I-line（方向へ）
 function looksLikeILineMoment(text: string, ctx?: { lastSummary?: string | null }) {
   const t = norm(text);
   const last = norm(ctx?.lastSummary);
@@ -239,23 +226,18 @@ function looksLikeILineMoment(text: string, ctx?: { lastSummary?: string | null 
   return false;
 }
 
-// ---- slot builders ----
+// ---- slot builders（文章禁止：@TAG JSON のみ） ----
 
 function buildEndSlots(): NormalChatSlot[] {
   return [
-    { key: 'A', role: 'assistant', style: 'soft', content: '了解。ここで終わりにします。' },
-    { key: 'B', role: 'assistant', style: 'neutral', content: 'また必要になったら、続きだけ置いてください。' },
+    { key: 'END', role: 'assistant', style: 'soft', content: m('END') },
+    { key: 'NEXT', role: 'assistant', style: 'neutral', content: m('NEXT_HINT', { mode: 'resume_anytime' }) },
   ];
 }
 
 function buildEmptySlots(): NormalChatSlot[] {
   return [
-    {
-      key: 'A',
-      role: 'assistant',
-      style: 'soft',
-      content: '大丈夫。いま困ってることを短く一言だけでいいよ。',
-    },
+    { key: 'EMPTY', role: 'assistant', style: 'soft', content: m('EMPTY', { ask: 'user_one_liner' }) },
   ];
 }
 
@@ -263,77 +245,31 @@ function buildILineSlots(ctx?: { lastSummary?: string | null }, seedText?: strin
   const last = norm(ctx?.lastSummary);
   const seed = norm(seedText ?? last);
 
-  const slots: NormalChatSlot[] = [];
-
-  if (last) {
-    slots.push({
-      key: 'A',
-      role: 'assistant',
-      style: 'soft',
-      content: `いまの話：${clamp(last, 80)}`,
-    });
-  } else {
-    slots.push({
-      key: 'A',
-      role: 'assistant',
-      style: 'soft',
-      content: 'わかった。方向だけ合わせよう。',
-    });
-  }
-
-  slots.push({
-    key: 'B',
-    role: 'assistant',
-    style: 'neutral',
-    content: pickOne(seed, [
-      '手段の話は一回止めて、方向だけ見るね。',
-      'ここで「やり方」に寄ると、同じ所を回りやすい。いったん方向。',
-      '結論を急ぐより、まず“向き”を揃える方が早い。',
-    ]),
-  });
-
-  slots.push({
-    key: 'I',
-    role: 'assistant',
-    style: 'neutral',
-    content: 'もし少し先のあなたがこれを見てたら、何を大事にしたいって言いそう？',
-  });
-
-  return slots;
+  // I-line は「他の質問を止めて」1本だけ
+  return [
+    { key: 'OBS', role: 'assistant', style: 'soft', content: m('OBS', { last: last ? clamp(last, 120) : null, seed: seed ? clamp(seed, 120) : null }) },
+    { key: 'SHIFT', role: 'assistant', style: 'neutral', content: m('SHIFT', { kind: 'direction_only' }) },
+    { key: 'I', role: 'assistant', style: 'neutral', content: m('Q', { kind: 'i_line', ask: 'future_priority_one_phrase' }) },
+  ];
 }
 
-// REPAIR：責めない / 直前を“復元” → 見方を変えて前へ
 function buildRepairSlots(userText: string, ctx?: { lastSummary?: string | null }): NormalChatSlot[] {
   const last = norm(ctx?.lastSummary);
   const u = norm(userText);
 
   if (last) {
-    const base: NormalChatSlot[] = [
-      { key: 'A', role: 'assistant', style: 'soft', content: 'ごめん、取りこぼした。' },
-      { key: 'B', role: 'assistant', style: 'neutral', content: `いま残す：${clamp(last, 80)}` },
-      {
-        key: 'C',
-        role: 'assistant',
-        style: 'neutral',
-        content: pickOne(last + u, [
-          'ここで壊れやすいのは、中身じゃなくて“切り口が固定されること”。いまは原因探しより、見方を一段変える。',
-          '同じ感じに聞こえる時は、話が浅いのではなく、角度が固定されてるだけ。角度を変えると、自然に次が出る。',
-          'ループして見えるのは、問いが悪いというより切り口が一定になりがちだから。ここからは解説で前に進める。',
-        ]),
-      },
+    return [
+      { key: 'ACK', role: 'assistant', style: 'soft', content: m('ACK', { kind: 'repair' }) },
+      { key: 'RESTORE', role: 'assistant', style: 'neutral', content: m('RESTORE', { last: clamp(last, 160) }) },
+      { key: 'SHIFT', role: 'assistant', style: 'neutral', content: m('SHIFT', { kind: 'angle_change', avoid: ['question_loop', 'binary_choice'] }) },
+      // ✅ 質問は出さない（repair は “復元→角度変更” で前へ）
+      { key: 'NEXT', role: 'assistant', style: 'soft', content: m('NEXT_HINT', { mode: 'continue_free' }) },
     ];
-
-    return base;
   }
 
   return [
-    { key: 'A', role: 'assistant', style: 'soft', content: 'ごめん、聞き直す。' },
-    {
-      key: 'B',
-      role: 'assistant',
-      style: 'neutral',
-      content: '直前の要点を“一言だけ”置いて。そこから先はこっちで広げる。',
-    },
+    { key: 'ACK', role: 'assistant', style: 'soft', content: m('ACK', { kind: 'repair' }) },
+    { key: 'Q', role: 'assistant', style: 'neutral', content: m('Q', { kind: 'restore_last_one_liner' }) },
   ];
 }
 
@@ -344,32 +280,18 @@ function buildHowToSlots(userText: string, ctx?: { lastSummary?: string | null }
     return buildILineSlots({ lastSummary: last }, userText);
   }
 
+  // how-to は “手段を増やさず、基準/優先の整理” に寄せる（質問は0〜1）
   if (last) {
-    const base: NormalChatSlot[] = [
-      { key: 'A', role: 'assistant', style: 'soft', content: `いま話してること：${clamp(last, 80)}` },
-      {
-        key: 'B',
-        role: 'assistant',
-        style: 'neutral',
-        content: pickOne(last, [
-          '「どうしたらいい？」が出るのは、やり方が無いからじゃなくて、優先順位がまだ揺れてる時が多い。',
-          'ここで手段を増やすと迷いが増える。まず“守りたいもの”と“増やしたいもの”を分けると進む。',
-          'いま必要なのは完璧な正解より、選び直しの基準。基準が決まると手段は勝手に集まる。',
-        ]),
-      },
+    return [
+      { key: 'OBS', role: 'assistant', style: 'soft', content: m('OBS', { last: clamp(last, 160) }) },
+      { key: 'SHIFT', role: 'assistant', style: 'neutral', content: m('SHIFT', { kind: 'criteria_first', avoid: ['more_options'] }) },
+      // ✅ 質問は無しでもOK（writer が自然に進める）
     ];
-
-    return base;
   }
 
   return [
-    { key: 'A', role: 'assistant', style: 'soft', content: 'わかった。まず要点だけ掴む。' },
-    {
-      key: 'Q',
-      role: 'assistant',
-      style: 'neutral',
-      content: 'いま扱いたい話を“一言だけ”で置いて。',
-    },
+    { key: 'OBS', role: 'assistant', style: 'soft', content: m('OBS', { user: clamp(norm(userText), 120) }) },
+    { key: 'Q', role: 'assistant', style: 'neutral', content: m('Q', { kind: 'topic_one_liner' }) },
   ];
 }
 
@@ -381,51 +303,30 @@ function buildDefaultSlots(userText: string, ctx?: { lastSummary?: string | null
     return buildILineSlots({ lastSummary: ctx?.lastSummary ?? null }, t);
   }
 
+  // 短文：質問攻めを避け、必要なら “1問だけ”
   if (t.length <= 10) {
     const base: NormalChatSlot[] = [
-      { key: 'A', role: 'assistant', style: 'soft', content: `いまの言葉：${clamp(t, 60)}` },
-      {
-        key: 'B',
-        role: 'assistant',
-        style: 'neutral',
-        content: pickOne(t, [
-          '短い言葉の時は、説明できない“違和感”が先に出てることがある。',
-          '短いほど、芯がそのまま出てることが多い。',
-          'いまの一言、焦点だけ残して進めよう。',
-        ]),
-      },
+      { key: 'OBS', role: 'assistant', style: 'soft', content: m('OBS', { user: clamp(t, 80), short: true }) },
+      { key: 'SHIFT', role: 'assistant', style: 'neutral', content: m('SHIFT', { kind: 'keep_focus' }) },
     ];
 
-    if (looksLikeInnerConcern(t)) return base;
+    // 内的相談は Q を止める
+    if (looksLikeInnerConcern(t)) {
+      base.push({ key: 'NEXT', role: 'assistant', style: 'soft', content: m('NEXT_HINT', { mode: 'continue_free' }) });
+      return base;
+    }
 
-    base.push({
-      key: 'Q',
-      role: 'assistant',
-      style: 'neutral',
-      content: 'それが一番強く出るのは、どの瞬間？（一言でOK）',
-    });
-
+    // ✅ 質問は最大1つ
+    base.push({ key: 'Q', role: 'assistant', style: 'neutral', content: m('Q', { kind: 'peak_moment_one_liner' }) });
     return base;
   }
 
-  const base: NormalChatSlot[] = [
-    { key: 'A', role: 'assistant', style: 'soft', content: `いまの話：${clamp(t, 90)}` },
-    {
-      key: 'B',
-      role: 'assistant',
-      style: 'neutral',
-      content: pickOne(t, [
-        'ここで大事なのは、正解探しより「反応が強くなる点」を押さえること。',
-        'この手の迷いは、内容より“スイッチが入る瞬間”を掴むと進む。',
-        '問題は“どこで強くなるか”に隠れてることが多い。まず輪郭を出そう。',
-      ]),
-    },
+  // 通常：OBS + SHIFT。Q は “必要時だけ” （ここではデフォルトは出さない）
+  return [
+    { key: 'OBS', role: 'assistant', style: 'soft', content: m('OBS', { user: clamp(t, 200) }) },
+    { key: 'SHIFT', role: 'assistant', style: 'neutral', content: m('SHIFT', { kind: 'find_trigger_point' }) },
   ];
-
-  return base;
 }
-
-// ---- expansion ----
 
 function buildExpansionSlots(userText: string, ctx?: { lastSummary?: string | null }): NormalChatSlot[] {
   const t = norm(userText);
@@ -436,86 +337,38 @@ function buildExpansionSlots(userText: string, ctx?: { lastSummary?: string | nu
 
   const seed = norm(ctx?.lastSummary) || t;
 
+  // “薄い/内的” は質問を止めて「解説＋次を置ける」へ
   if (looksLikeThinReply(t) || looksLikeInnerConcern(seed + ' ' + t)) {
     return [
-      { key: 'A', role: 'assistant', style: 'soft', content: `いまの話：${clamp(t, 90)}` },
-      {
-        key: 'EXPLAIN',
-        role: 'assistant',
-        style: 'neutral',
-        content: pickOne(seed + t, [
-          'ここで情報を増やすより、見方を一段変える方が早い。いま出てるのは“出来事”というより内側の重さの方。',
-          '「日常」と言える時点で、問題は一点じゃなく“じわっと続く構造”になってる。だから質問で絞るより輪郭を先に出す。',
-          'いまは結論を急がなくていい。まず“何が引っかかってるか”が言語化できると、次が勝手に湧く。',
-        ]),
-      },
-      {
-        key: 'NEXT',
-        role: 'assistant',
-        style: 'soft',
-        content: pickOne(seed + t, [
-          '続けて話していい。短い一言のままでも大丈夫。',
-          'このまま、頭に浮かんだ順で置いてください。',
-        ]),
-      },
+      { key: 'OBS', role: 'assistant', style: 'soft', content: m('OBS', { user: clamp(t, 160), seed: clamp(seed, 160) }) },
+      { key: 'SHIFT', role: 'assistant', style: 'neutral', content: m('SHIFT', { kind: 'explain_angle_change', q: 0 }) },
+      { key: 'NEXT', role: 'assistant', style: 'soft', content: m('NEXT_HINT', { mode: 'continue_free' }) },
     ];
   }
 
+  // それ以外：OBS + SHIFT + （必要なら1問）
   const base: NormalChatSlot[] = [
-    { key: 'A', role: 'assistant', style: 'soft', content: `いまの話：${clamp(t, 90)}` },
-    {
-      key: 'B',
-      role: 'assistant',
-      style: 'neutral',
-      content: pickOne(t, [
-        'いまは判断より、引っかかりを一度だけ言語化する方が早い。',
-        'ここは結論を急がなくていい。引っかかりの正体を言葉にすると進む。',
-        '分岐は正解探しじゃなくて、「反応が強くなる点」を押さえるだけで整う。',
-      ]),
-    },
+    { key: 'OBS', role: 'assistant', style: 'soft', content: m('OBS', { user: clamp(t, 200) }) },
+    { key: 'SHIFT', role: 'assistant', style: 'neutral', content: m('SHIFT', { kind: 'normalize_then_nudge' }) },
   ];
 
   const alreadyHasIrritation = containsAny(t, ['嫌', '無理', '怖い', '不安', 'しんどい', 'つらい', 'きつい', 'モヤ', '違和感']);
   if (!alreadyHasIrritation) {
-    base.push({
-      key: 'Q',
-      role: 'assistant',
-      style: 'neutral',
-      content: 'いま一番引っかかってるのは、どこ？（一言でOK）',
-    });
+    base.push({ key: 'Q', role: 'assistant', style: 'neutral', content: m('Q', { kind: 'what_sticks_one_liner' }) });
   }
 
   return base;
 }
 
-// ✅ phase11 branch helpers (minimal)
 function buildStabilizeSlots(userText: string, ctx?: { lastSummary?: string | null }): NormalChatSlot[] {
   const t = norm(userText);
   const last = norm(ctx?.lastSummary);
-
   const seed = last || t;
 
   return [
-    { key: 'A', role: 'assistant', style: 'soft', content: last ? `いまの流れ：${clamp(last, 90)}` : `いまの言葉：${clamp(t, 90)}` },
-    {
-      key: 'B',
-      role: 'assistant',
-      style: 'neutral',
-      content: pickOne(seed, [
-        'ここは詰めない。いま出てるのは整理不足じゃなくて、負荷が先に立ってる感じ。',
-        '進め方の工夫より、いったん“負荷の位置”を落ち着かせた方が会話が動く。',
-        '同じ所を回る時は、情報不足じゃなくて圧が先にある。まず圧を薄くする。',
-      ]),
-    },
-    {
-      key: 'NEXT',
-      role: 'assistant',
-      style: 'soft',
-      content: pickOne(seed, [
-        '続けて置いていい。短くてもいい。',
-        '途切れても大丈夫。いま浮かぶ順で。',
-      ]),
-    },
+    { key: 'OBS', role: 'assistant', style: 'soft', content: m('OBS', { last: last ? clamp(last, 200) : null, user: clamp(t, 200) }) },
+    { key: 'SHIFT', role: 'assistant', style: 'neutral', content: m('SHIFT', { kind: 'reduce_pressure', seed: clamp(seed, 160) }) },
+    { key: 'NEXT', role: 'assistant', style: 'soft', content: m('NEXT_HINT', { mode: 'continue_free' }) },
   ];
 }
 
@@ -528,12 +381,10 @@ export function buildNormalChatSlotPlan(args: {
     recentUserTexts?: string[];
   };
 }): NormalChatSlotPlan {
-  const stamp = 'normalChat.ts@2026-01-11#conversation-first-no-box-no-choices-v2.2';
+  const stamp = 'normalChat.ts@2026-01-13#phase11-no-user-facing-text-v3.0';
   const userText = norm(args.userText);
   const ctx = args.context;
 
-  // ✅ Build a usable “lastSummary” even when ctx.lastSummary is null
-  // recentUserTexts は「過去ユーザー発話」想定（最大3つ使う）
   const recent = (ctx?.recentUserTexts ?? []).map((x) => String(x ?? '')).filter(Boolean);
   const prevUser = recent.length >= 1 ? recent[recent.length - 1] : null;
   const prevPrevUser = recent.length >= 2 ? recent[recent.length - 2] : null;
@@ -549,7 +400,6 @@ export function buildNormalChatSlotPlan(args: {
 
   const effectiveLastSummary = pack.shortSummary ?? ctx?.lastSummary ?? null;
 
-  // ✅ signals/branch
   const signals = userText ? computeConvSignals(userText) : null;
   const branch = userText
     ? decideConversationBranch({
@@ -571,14 +421,12 @@ export function buildNormalChatSlotPlan(args: {
     reason = 'end';
     slots = buildEndSlots();
   } else if (branch === 'REPAIR' || looksLikeRepair(userText)) {
-    // ✅ branch優先（signals由来のrepairも拾う）
     reason = 'repair';
     slots = buildRepairSlots(userText, { lastSummary: effectiveLastSummary });
   } else if (branch === 'STABILIZE') {
     reason = 'stabilize';
     slots = buildStabilizeSlots(userText, { lastSummary: effectiveLastSummary });
   } else if (branch === 'DETAIL') {
-    // detail は expansion に寄せる（質問攻めを防ぐ）
     reason = 'detail';
     slots = buildExpansionSlots(userText, { lastSummary: effectiveLastSummary });
   } else if (looksLikeHowTo(userText)) {
@@ -608,7 +456,7 @@ export function buildNormalChatSlotPlan(args: {
     topicHint: signals?.topicHint ?? null,
     userHead: userText.slice(0, 40),
     lastSummary: effectiveLastSummary ? effectiveLastSummary.slice(0, 80) : null,
-    slots: slots.map((s) => ({ key: s.key, len: s.content.length, head: s.content.slice(0, 22) })),
+    slots: slots.map((s) => ({ key: s.key, len: s.content.length, head: s.content.slice(0, 40) })),
   });
 
   return {

@@ -15,6 +15,11 @@
 // - ここ（writer）は “判断” をしない
 // - ただし userContext 側に「ITが成立した証拠（IT_TRIGGER_OK / tLayerModeActive 等）」があり、
 //   かつ intentBand/tLayerHint が I* のときだけ「Iっぽい1文」を“表現ルールとして”許可する（露出禁止）
+//
+// ✅ 追加（今回の肝2：I-Line 改変禁止）
+// - 入力に [[ILINE]]...[[/ILINE]] が含まれている場合、その中身は一字一句改変禁止
+// - LLM出力にその固定文が完全一致で含まれない場合、rephrase を破棄（ok=false）
+// - 制御マーカー自体は本文に絶対露出させない（混入したら破棄）
 
 import { chatComplete } from '../../llm/chatComplete';
 
@@ -59,6 +64,8 @@ function stableOrderKeys(keys: string[]) {
 /**
  * extractSlotBlocks() と同じ探索範囲から「key付き slots」を抽出する。
  * ※ここでは key を落とさない（slot-preserving に必須）。
+ *
+ * ✅ 追加: slots が無い場合でも、content/assistantText から疑似slot(OBS)を作る
  */
 export function extractSlotsForRephrase(extra: any): ExtractedSlots {
   const framePlan =
@@ -75,7 +82,26 @@ export function extractSlotsForRephrase(extra: any): ExtractedSlots {
     extra?.meta?.slotPlan?.slots ??
     null;
 
-  if (!slotsRaw) return null;
+  // ✅ slotsが無いケース（microGenerateなど）を救う：contentから疑似slotを作る
+  if (!slotsRaw) {
+    const fallbackText = norm(
+      extra?.assistantText ??
+        extra?.content ??
+        extra?.meta?.assistantText ??
+        extra?.meta?.content ??
+        extra?.text ??
+        extra?.meta?.text ??
+        '',
+    );
+
+    if (!fallbackText) return null;
+
+    return {
+      slots: [{ key: 'OBS', text: fallbackText }],
+      keys: ['OBS'],
+      source: 'fallback:content',
+    };
+  }
 
   const out: Slot[] = [];
 
@@ -103,6 +129,7 @@ export function extractSlotsForRephrase(extra: any): ExtractedSlots {
     source: 'framePlan.slots',
   };
 }
+
 
 export type RephraseOptions = {
   model: string;
@@ -164,7 +191,7 @@ function clampLines(text: string, maxLines: number): string {
     .map((x) => x.trim())
     .filter(Boolean);
   if (lines.length <= maxLines) return lines.join('\n');
-  return lines.slice(0, Math.max(1, maxLines - 1)).join('\n') + '\n🪔';
+  return lines.slice(0, Math.max(1, maxLines)).join('\n');
 }
 
 function clampChars(text: string, maxChars: number): string {
@@ -177,8 +204,9 @@ function clampChars(text: string, maxChars: number): string {
 function ensureLampEnd(text: string): string {
   const t = norm(text);
   if (!t) return '';
-  if (t.endsWith('🪔')) return t;
-  return t + '\n🪔';
+  // 末尾の🪔は1回に正規化
+  const stripped = t.replace(/\n?🪔\s*$/u, '').trim();
+  return stripped + '\n🪔';
 }
 
 function tryGet(obj: any, path: string[]): any {
@@ -257,12 +285,74 @@ function extractHistoryMessagesFromContext(
   const mapped = raw
     .filter(Boolean)
     .map((m: any) => {
-      const roleRaw = String(m?.role ?? m?.speaker ?? m?.type ?? '').toLowerCase();
-      const body = norm(m?.content ?? m?.text ?? m?.message ?? '');
+      // --- 本文候補（in/out 系も含めて広めに拾う）---
+      const body = norm(
+        m?.content ??
+          m?.text ??
+          m?.message ??
+          m?.in_text ??
+          m?.inText ??
+          m?.in_head ??
+          m?.inHead ??
+          m?.out_text ??
+          m?.outText ??
+          m?.out_head ??
+          m?.outHead ??
+          m?.out ??
+          m?.assistantText ??
+          m?.assistant_text ??
+          '',
+      );
       if (!body) return null;
 
+      // --- role 推定材料（role/agent/from/kind など）---
+      const roleRaw = norm(m?.role ?? m?.speaker ?? m?.type ?? '').toLowerCase();
+      const agentRaw = norm(m?.agent ?? m?.provider ?? m?.source ?? '').toLowerCase();
+      const fromRaw = norm(m?.from ?? m?.author ?? m?.kind ?? '').toLowerCase();
+
+      // --- “out系” があるなら assistant とみなす（role欠損の最頻パターン対策）---
+      const hasOutLike =
+        m?.out_text != null ||
+        m?.outText != null ||
+        m?.out_head != null ||
+        m?.outHead != null ||
+        m?.assistantText != null ||
+        m?.assistant_text != null;
+
+      // --- “in系” があるなら user とみなす（補助）---
+      const hasInLike =
+        m?.in_text != null ||
+        m?.inText != null ||
+        m?.in_head != null ||
+        m?.inHead != null;
+
+      const isAssistantByRole =
+        roleRaw === 'assistant' ||
+        roleRaw === 'bot' ||
+        roleRaw === 'ai' ||
+        roleRaw.startsWith('assistant') ||
+        roleRaw === 'a';
+
+      const isAssistantByFrom =
+        fromRaw === 'assistant' ||
+        fromRaw === 'bot' ||
+        fromRaw === 'ai' ||
+        fromRaw.startsWith('assistant') ||
+        fromRaw === 'a';
+
+      const isAssistantByAgent =
+        agentRaw === 'iros' ||
+        agentRaw === 'assistant' ||
+        agentRaw === 'bot' ||
+        agentRaw === 'ai';
+
+      // ✅ 最終判定
       const isAssistant =
-        roleRaw.startsWith('a') || roleRaw === 'assistant' || roleRaw === 'bot';
+        isAssistantByRole ||
+        isAssistantByFrom ||
+        isAssistantByAgent ||
+        // role等が無い場合は out/in で推定（out優先）
+        (!roleRaw && !fromRaw && !agentRaw && (hasOutLike ? true : hasInLike ? false : false));
 
       return {
         role: isAssistant ? ('assistant' as const) : ('user' as const),
@@ -291,7 +381,7 @@ function readIntEnv(name: string, fallback: number, min: number, max: number) {
  * - 無ければ historyMessages から最後のN件
  *
  * ENV:
- * - IROS_REPHRASE_LAST_MSGS=4 (default) / 8 / 12 ...
+ * - IROS_REPHRASE_LAST_MSGS=4 (default) / 8 ...
  */
 function extractLastTurnsFromContext(
   userContext: unknown,
@@ -435,83 +525,6 @@ function extractIntentBandFromContext(userContext: unknown): {
   return { intentBand: bandOk, tLayerHint: hintOk };
 }
 
-function systemPromptForFullReply(args?: {
-  directTask?: boolean;
-  itOk?: boolean;
-  band?: { intentBand: string | null; tLayerHint: string | null } | null;
-}): string {
-  const directTask = Boolean(args?.directTask);
-  const itOk = Boolean(args?.itOk);
-  const band = args?.band ?? null;
-
-  const b = band?.intentBand ?? null;
-  const h = band?.tLayerHint ?? null;
-
-  // ✅ ITが成立していて、かつ I* 指定のときだけ I文を「必須」にする
-  const isIRequested = (b && b.startsWith('I')) || (h && h.startsWith('I'));
-  const allowForceI = itOk && isIRequested;
-
-  const base = [
-    'あなたは iros の会話生成（reply）担当です。',
-    '',
-    '【目的】',
-    'ユーザーと “普通に会話する”。ChatGPT のように自然につなぐ。',
-    '',
-    '【制約（必須）】',
-    '1) 入力に含まれるメタ（phase/depth/q 等）は “内部制約” として尊重するが、本文にJSON/キー名/ラベルを露出しない。',
-    '2) 次のテンプレ口癖は禁止：',
-    '   - 「受け取った」「いま出ている言葉」「いまの一番大事な一点」「一手に落とす」「迷いを増やさない」「呼吸を戻す」「ここで止める」「核」「切る」',
-    '   - 「この流れだと」「この流れでは」「いまの流れだと」',
-    '3) 二択誘導（A/Bで選ばせる）をしない。',
-    '4) 質問は最大1つ（本当に必要なときだけ）。',
-    '5) 4〜10行程度。最後は必ず「🪔」で閉じる。',
-    '6) 断定診断・過剰な助言は避け、ユーザーが話しやすい“つなぎ”を優先。',
-    '7) 「覚えてる／前に言ってたよね」等の“記憶断言”は禁止。言うなら「この入力にある範囲だと…」の形にする。',
-    '8) 状況の受け止めを言いたいときは「この流れだと」を使わず、次のどれかに置き換える：',
-    '   - 「いまは」',
-    '   - 「いま必要なのは」',
-    '   - 「やりたいのはこれだね」',
-    '   - 「ポイントはここ」',
-    '',
-    '【出力】',
-    '日本語の会話文のみ。箇条書き/JSON/コード/見出しは出さない。',
-    '',
-    '【追加ルール】',
-    '- 「この流れだと」「いまの話だと」「〜なんですね」等の会話追従フレーズは禁止。',
-    '- タスクが明確な場合、質問はしない。',
-    directTask
-      ? '- ユーザーが「本文だけ」「文面を作って」「短文を出して」等を要求している場合、前置き・状況整理・共感・要約を一切書かず、成果物のみを出力する。'
-      : '- ユーザーが成果物を求めていない場合は、短い受け止め→次へ繋ぐ、の順で自然につなぐ。',
-    '',
-    '【履歴の使い方（重要）】',
-    '- 上で渡される直近メッセージ（lastTurns）が最優先。',
-    '- それ以外の履歴ヒント（historyText / seedDraft）は “内部の連続性” にだけ使い、本文で「前に言ってた」等の断言はしない。',
-  ].filter(Boolean);
-
-  const bandInfo = [
-    '',
-    '【内部制約：帯域ヒント（露出禁止）】',
-    `itOk=${itOk ? 'true' : 'false'} / intentBand=${b ?? '(null)'} / tLayerHint=${h ?? '(null)'}`,
-  ].join('\n');
-
-  const iRule = allowForceI
-    ? [
-        '',
-        '【I層の返し（必須：IT成立後のみ）】',
-        '- 本文のどこかに “価値/生き方/何のため/譲れないもの/大事にしたいこと” に触れる1文を必ず入れる。',
-        '- ただし「意図」という単語は使わない。',
-        '- 説教にしない。短い1文でよい。',
-      ].join('\n')
-    : [
-        '',
-        '【I層の返し（未発火）】',
-        '- ITが成立していない限り、I層を“強制”しない。',
-        '- ただし目標/将来/数字（年収など）が出た場合、可能なら価値に触れる1文を混ぜてよい（任意）。',
-      ].join('\n');
-
-  return base.join('\n') + bandInfo + iRule;
-}
-
 function safeHead(s: string, n = 80) {
   const t = String(s ?? '');
   return t.length <= n ? t : t.slice(0, n);
@@ -527,21 +540,71 @@ function safeContextToText(v: unknown): string {
   }
 }
 
+// -------------------------------
+// ✅ I-LINE ロック（改変禁止）サポート
+// -------------------------------
+const ILINE_OPEN = '[[ILINE]]';
+const ILINE_CLOSE = '[[/ILINE]]';
+
+function extractLockedILines(text: string): { locked: string[]; cleanedForModel: string } {
+  const locked: string[] = [];
+  let cleaned = String(text ?? '');
+
+  const re = new RegExp(
+    ILINE_OPEN.replace(/[[\]]/g, '\\$&') + '([\\s\\S]*?)' + ILINE_CLOSE.replace(/[[\]]/g, '\\$&'),
+    'g',
+  );
+
+  cleaned = cleaned.replace(re, (_m, p1) => {
+    const exact = String(p1 ?? '').replace(/\r\n/g, '\n');
+    if (exact.trim().length > 0) locked.push(exact);
+    // モデルには “中身だけ” を見せる（マーカーは露出禁止）
+    return exact;
+  });
+
+  return { locked, cleanedForModel: cleaned.replace(/\r\n/g, '\n') };
+}
+
+function verifyLockedILinesPreserved(output: string, locked: string[]): boolean {
+  if (!locked.length) return true;
+
+  // マーカー混入は即アウト（露出禁止）
+  if (output.includes(ILINE_OPEN) || output.includes(ILINE_CLOSE)) return false;
+
+  const out = String(output ?? '').replace(/\r\n/g, '\n');
+  return locked.every((s) => out.includes(String(s ?? '').replace(/\r\n/g, '\n')));
+}
+
+function buildLockRuleText(locked: string[]): string {
+  if (!locked.length) return '';
+  return [
+    '',
+    '【改変禁止行（最重要）】',
+    '次の各行は、一字一句そのまま本文に含めてください（句読点・助詞・改行も維持）。',
+    'ただし制御マーカー（[[ILINE]] など）は出力に絶対に含めないでください。',
+    '改変禁止行：',
+    ...locked.map((s, i) => `- (${i + 1}) ${s}`),
+    '',
+  ].join('\n');
+}
+
+// -------------------------------
+// ✅ ログ（ここで確実に出す）
+// -------------------------------
 function logRephraseOk(
   debug: RephraseOptions['debug'],
   outKeys: string[],
   raw: string,
   mode?: string,
 ) {
-  if (!debug?.conversationId || !debug?.userCode) return;
   console.log('[IROS/rephraseEngine][OK]', {
     traceId: debug?.traceId ?? null,
-    conversationId: debug.conversationId,
-    userCode: debug.userCode,
+    conversationId: debug?.conversationId ?? null,
+    userCode: debug?.userCode ?? null,
     mode: mode ?? null,
     keys: outKeys,
-    rawLen: raw.length,
-    rawHead: safeHead(raw, 120),
+    rawLen: String(raw ?? '').length,
+    rawHead: safeHead(String(raw ?? ''), 120),
   });
 }
 
@@ -551,16 +614,94 @@ function logRephraseAfterAttach(
   firstText: string,
   mode?: string,
 ) {
-  if (!debug?.conversationId || !debug?.userCode) return;
   console.log('[IROS/rephraseEngine][AFTER_ATTACH]', {
     traceId: debug?.traceId ?? null,
-    conversationId: debug.conversationId,
-    userCode: debug.userCode,
+    conversationId: debug?.conversationId ?? null,
+    userCode: debug?.userCode ?? null,
     mode: mode ?? null,
     renderEngine: debug?.renderEngine ?? true,
     rephraseBlocksLen: outKeys.length,
-    rephraseHead: safeHead(firstText, 120),
+    rephraseHead: safeHead(String(firstText ?? ''), 120),
   });
+}
+
+function systemPromptForFullReply(args?: {
+  directTask?: boolean;
+  itOk?: boolean;
+  band?: { intentBand: string | null; tLayerHint: string | null } | null;
+  lockedILines?: string[] | null;
+}): string {
+  const directTask = Boolean(args?.directTask);
+  const itOk = Boolean(args?.itOk);
+  const band = args?.band ?? null;
+
+  const b = band?.intentBand ?? null;
+  const h = band?.tLayerHint ?? null;
+
+  // ✅ ITが成立していて、かつ I* 指定のときだけ “Iっぽい1文” を許可（強制はしない）
+  const isIRequested = (b && b.startsWith('I')) || (h && h.startsWith('I'));
+  const allowIStyle = itOk && isIRequested;
+
+  const base = [
+    'あなたは iros の会話生成（reply）担当です。',
+    '',
+    '【目的】',
+    'ユーザーの内側ですでに起きていることを、',
+    '解説せず・距離を取らず・本人の言葉より一段深い地点で言語化する。',
+    '',
+    '【最重要方針】',
+    'あなたは「説明者」ではない。',
+    'ユーザーの感情や状態を“説明・要約・評価”する返答は禁止。',
+    '本人が薄々わかっているが、まだ言い切れていない一点を、',
+    '事実として短く差し出す役割を担う。',
+    '',
+    '【制約（必須）】',
+    '1) 入力に含まれるメタ（phase/depth/q 等）は内部制約としてのみ使い、本文にJSON/キー名/ラベルを露出しない。',
+    '2) 次のテンプレ口癖は禁止：',
+    '   - 「受け取った」「いま出ている言葉」「いまの一番大事な一点」「一手に落とす」「迷いを増やさない」「呼吸を戻す」「核」「切る」',
+    '   - 「この流れだと」「この流れでは」「いまの流れだと」',
+    '3) 二択誘導（A/Bで選ばせる）をしない。',
+    '4) 質問は最大1つ。本当に必要な場合のみ。',
+    '5) 3〜6行程度。最後は必ず「🪔」で閉じる。',
+    '6) 励まし・一般論・ポジティブ誘導は禁止。',
+    '7) 「〜と感じているんですね」「〜ようです」「〜かもしれません」等の',
+    '   解説・推定・距離を取る表現は禁止。',
+    '8) 「前に言っていた」「覚えている」などの記憶断言は禁止。',
+    '',
+    '【出力】',
+    '日本語の会話文のみ。箇条書き・見出し・解説文・メタ言及は禁止。',
+    '',
+    '【履歴の使い方】',
+    '- 直近の発話（lastTurns）を最優先。',
+    '- 履歴は連続性の補助にのみ使い、本文で過去を説明しない。',
+  ].filter(Boolean);
+
+  const bandInfo = [
+    '',
+    '【内部制約：帯域ヒント（露出禁止）】',
+    `directTask=${directTask ? 'true' : 'false'} / itOk=${itOk ? 'true' : 'false'} / intentBand=${
+      b ?? '(null)'
+    } / tLayerHint=${h ?? '(null)'}`,
+  ].join('\n');
+
+  const iStyleRule = allowIStyle
+    ? [
+        '',
+        '【I層の言い回し（許可）】',
+        '- ここ（writer）は判断をしない。I層に踏み込む内容判断は禁止。',
+        '- ただし “言い切り” の文体（短く、断定的、説明しない）は許可される。',
+        '- 「本当は〜」の説教や助言は禁止。Iっぽい一文を置くなら、その後に解説を足さない。',
+      ].join('\n')
+    : [
+        '',
+        '【I層の言い回し（未許可）】',
+        '- I層の言い切り（本当に引っかかっているのは〜 等）は出さない。',
+        '- 入口の会話は短い受け止め→次へつなぐ（必要なら質問1つ）に留める。',
+      ].join('\n');
+
+  const lockRule = buildLockRuleText(args?.lockedILines ?? []);
+
+  return base.join('\n') + bandInfo + lockRule + iStyleRule;
 }
 
 /**
@@ -571,6 +712,8 @@ export async function rephraseSlotsFinal(
   opts: RephraseOptions,
 ): Promise<RephraseResult> {
   if (!extracted) {
+    // ✅ ここでもログは出す（監査）
+    logRephraseOk(opts.debug, [], '', 'NO_SLOTS');
     return {
       ok: false,
       reason: 'NO_SLOTS',
@@ -583,6 +726,7 @@ export async function rephraseSlotsFinal(
   console.log('[IROS/REPHRASE_FLAG]', { raw: rawFlag, enabled });
 
   if (!enabled) {
+    logRephraseOk(opts.debug, extracted.keys, '', 'DISABLED');
     return {
       ok: false,
       reason: 'REPHRASE_DISABLED_BY_ENV',
@@ -609,7 +753,7 @@ export async function rephraseSlotsFinal(
       text: fixedTexts[i] ?? 'ここで止める。',
     }));
 
-    // ✅ ログ（FIXEDでも出す）
+    // ✅ ログ（FIXEDでも確実に出す）
     logRephraseOk(opts.debug, out.map((x) => x.key), out[0]?.text ?? '', 'FIXED');
     logRephraseAfterAttach(opts.debug, out.map((x) => x.key), out[0]?.text ?? '', 'FIXED');
 
@@ -629,7 +773,7 @@ export async function rephraseSlotsFinal(
   const userText = norm(opts?.userText ?? '');
   const metaText = safeContextToText(opts?.userContext ?? null);
 
-  // ✅ GPT寄り：成果物タスク判定（SYSTEMで使う）
+  // ✅ 依頼文っぽさ（SYSTEMで使う）
   const isDirectTask = /(本文だけ|文面|短文|そのまま使える|作って|出して)/.test(userText);
 
   // 長めの“履歴テキスト”は保険としてだけ使う（露出禁止）
@@ -639,23 +783,31 @@ export async function rephraseSlotsFinal(
   const lastTurns = extractLastTurnsFromContext(opts?.userContext ?? null);
 
   // slot由来の下書き（露出禁止）
-  const seedDraft = extracted.slots.map((s) => s.text).filter(Boolean).join('\n');
+  const seedDraftRaw = extracted.slots.map((s) => s.text).filter(Boolean).join('\n');
+
+  // ✅ ILINE抽出（slot由来に含まれるのが主ルート）
+  const { locked: lockedILines, cleanedForModel: seedDraft } = extractLockedILines(seedDraftRaw);
 
   // ✅ ITは条件が揃ってから（証拠があるときだけI表現ルールを許可）
   const itOk = readItOkFromContext(opts?.userContext ?? null);
   const band = extractIntentBandFromContext(opts?.userContext ?? null);
 
-  const messages = [
+  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
     {
-      role: 'system' as const,
-      content: systemPromptForFullReply({ directTask: isDirectTask, itOk, band }),
+      role: 'system',
+      content: systemPromptForFullReply({
+        directTask: isDirectTask,
+        itOk,
+        band,
+        lockedILines,
+      }),
     },
 
     // ★ 直近2往復（最大4メッセージ）
     ...lastTurns,
 
     {
-      role: 'user' as const,
+      role: 'user',
       content: [
         '【ユーザー入力】',
         userText || '(空)',
@@ -675,6 +827,9 @@ export async function rephraseSlotsFinal(
   ];
 
   console.log('[IROS/rephraseEngine][MSG_PACK]', {
+    traceId: opts.debug?.traceId ?? null,
+    conversationId: opts.debug?.conversationId ?? null,
+    userCode: opts.debug?.userCode ?? null,
     lastTurns: lastTurns.length,
     hasHistoryText: Boolean(historyText),
     msgCount: messages.length,
@@ -683,6 +838,7 @@ export async function rephraseSlotsFinal(
     intentBand: band.intentBand,
     tLayerHint: band.tLayerHint,
     directTask: isDirectTask,
+    lockedILines: lockedILines.length,
   });
 
   let raw = '';
@@ -710,6 +866,7 @@ export async function rephraseSlotsFinal(
     } as any);
   } catch (e: any) {
     console.error('[IROS/REPHRASE_FINAL][LLM] failed', { message: String(e?.message ?? e) });
+    logRephraseOk(opts.debug, extracted.keys, '', 'LLM_FAIL');
     return {
       ok: false,
       reason: 'LLM_CALL_FAILED',
@@ -718,10 +875,41 @@ export async function rephraseSlotsFinal(
   }
 
   // ✅ raw段階ログ（keysはslotPlan由来を明示）
-  logRephraseOk(opts.debug, extracted.keys, raw);
+  logRephraseOk(opts.debug, extracted.keys, raw, 'LLM');
 
+  // ✅ ILINE改変禁止：検証（不一致なら破棄）
+  if (!verifyLockedILinesPreserved(raw, lockedILines)) {
+    console.log('[IROS/REPHRASE][VERIFY]', {
+      traceId: opts.debug?.traceId ?? null,
+      conversationId: opts.debug?.conversationId ?? null,
+      userCode: opts.debug?.userCode ?? null,
+      iLine_preserved: false,
+      lockedCount: lockedILines.length,
+    });
+
+    return {
+      ok: false,
+      reason: 'ILINE_NOT_PRESERVED',
+      meta: {
+        inKeys,
+        rawLen: String(raw ?? '').length,
+        rawHead: safeHead(String(raw ?? ''), 80),
+      },
+    };
+  }
+
+  console.log('[IROS/REPHRASE][VERIFY]', {
+    traceId: opts.debug?.traceId ?? null,
+    conversationId: opts.debug?.conversationId ?? null,
+    userCode: opts.debug?.userCode ?? null,
+    iLine_preserved: true,
+    lockedCount: lockedILines.length,
+  });
+
+  // ✅ 仕上げ：行数制限→🪔正規化
   const cleaned = ensureLampEnd(clampLines(raw, maxLines));
   if (!cleaned) {
+    logRephraseOk(opts.debug, extracted.keys, '', 'LLM_EMPTY');
     return {
       ok: false,
       reason: 'LLM_EMPTY',
@@ -729,10 +917,24 @@ export async function rephraseSlotsFinal(
     };
   }
 
+  // ✅ 出力にマーカーが混入した場合は破棄（露出禁止の最終安全）
+  if (cleaned.includes(ILINE_OPEN) || cleaned.includes(ILINE_CLOSE)) {
+    logRephraseOk(opts.debug, extracted.keys, cleaned, 'ILINE_MARKER_LEAKED');
+    return {
+      ok: false,
+      reason: 'ILINE_MARKER_LEAKED',
+      meta: {
+        inKeys,
+        rawLen: cleaned.length,
+        rawHead: safeHead(cleaned, 80),
+      },
+    };
+  }
+
   const outSlots = buildSlotsWithFirstText(inKeys, cleaned);
 
   // ✅ slotへ載せた後ログ
-  logRephraseAfterAttach(opts.debug, inKeys, outSlots[0]?.text ?? '');
+  logRephraseAfterAttach(opts.debug, inKeys, outSlots[0]?.text ?? '', 'LLM');
 
   return {
     ok: true,
@@ -740,8 +942,8 @@ export async function rephraseSlotsFinal(
     meta: {
       inKeys,
       outKeys: outSlots.map((x) => x.key),
-      rawLen: raw.length,
-      rawHead: raw.slice(0, 80),
+      rawLen: String(raw ?? '').length,
+      rawHead: safeHead(String(raw ?? ''), 80),
     },
   };
 }

@@ -9,7 +9,12 @@
 //
 // 追加（監査）：
 // - 呼び出しの事実を [IROS/LLM][CALL] に必ず残す（writer が呼ばれていない証拠化）
+// - 失敗時も trace 情報を [IROS/LLM][ERR] に必ず残す
 // - 任意の強制ガード：SCAFFOLD で writer を呼んだら例外（IROS_LLM_GUARD!=0 のとき）
+//
+// 注意：
+// - ここは「文章の品質」ではなく、"呼び出し/監査/安全" が責務
+// - trace は「top-level優先 → args.trace 互換 → null」で統一する
 
 import crypto from 'node:crypto';
 
@@ -20,48 +25,35 @@ export type ChatMessage = {
 
 export type ChatPurpose = 'writer' | 'judge' | 'digest' | 'title' | 'soul' | 'reply';
 
-export type ResponseFormat =
-  | { type: 'text' }
-  | { type: 'json_object' }; // Chat Completions の response_format
+export type ResponseFormat = { type: 'text' } | { type: 'json_object' };
 
 type ChatArgs = {
-  // ✅ 必須（用途でログ/制御する）
   purpose: ChatPurpose;
-
-  // ✅ 必須（会話履歴はここに全部入れて渡す）
   messages: ChatMessage[];
 
-  // ✅ 推奨：envで統一（未指定なら fallback）
   model?: string;
-
-  // ✅ 省略可
   apiKey?: string;
   temperature?: number;
   max_tokens?: number;
-
-  // 既定: chat.completions
   endpoint?: string;
 
-  // 追加ヘッダ / body 拡張
   extraHeaders?: Record<string, string>;
   extraBody?: Record<string, any>;
-
-  // JSON強制など
   responseFormat?: ResponseFormat;
 
-  // ✅ 互換：top-level でも受ける（rephrase / route から渡しやすい）
+  // ✅ pass-through trace fields
   traceId?: string | null;
   conversationId?: string | null;
   userCode?: string | null;
 
-  // 観測用（上位から traceId を渡せる）
+  // ✅ 互換：古い呼び出しが trace を渡す場合
   trace?: {
     traceId?: string | null;
     conversationId?: string | null;
     userCode?: string | null;
   };
 
-  // ✅ 監査用（上位の状態を渡せる：証拠強化 / ガード条件に使用）
+  // ✅ 監査の補助情報（上位が決めた結果だけ渡す）
   audit?: {
     slotPlanPolicy?: 'FINAL' | 'SCAFFOLD' | string | null;
     mode?: string | null;
@@ -69,7 +61,6 @@ type ChatArgs = {
     depthStage?: string | null;
   };
 
-  // 空を許容するか（基本 false。例外が必要なら呼び元で明示）
   allowEmpty?: boolean;
 };
 
@@ -78,8 +69,6 @@ function nowMs() {
 }
 
 function pickDefaultModel() {
-  // ✅ “推測で進めない”ため、最終的には ENV で揃える前提。
-  // ただし実行不能になるのを避けるため fallback は置く。
   return (
     process.env.IROS_MODEL ||
     process.env.OPENAI_MODEL ||
@@ -89,13 +78,9 @@ function pickDefaultModel() {
 }
 
 function defaultTempByPurpose(purpose: ChatPurpose): number {
-  // ✅ soul は JSON司令なので 0 固定を推奨
   if (purpose === 'soul') return 0;
-  // ✅ judge/digest/title は揺れを抑える
   if (purpose === 'judge' || purpose === 'digest' || purpose === 'title') return 0.2;
-  // ✅ reply は用途が混ざりやすいので揺れを抑え目
   if (purpose === 'reply') return 0.35;
-  // ✅ writer は少しだけ息を入れる（ただし上位で制御可）
   return 0.6;
 }
 
@@ -103,12 +88,14 @@ function safeTrimEnd(s: unknown): string {
   return String(s ?? '').replace(/\r\n/g, '\n').trimEnd();
 }
 
+function norm(s: unknown): string {
+  return String(s ?? '').replace(/\r\n/g, '\n').trim();
+}
+
 function makeCallId() {
-  // Node なら randomUUID があるが、互換のため short id を採用
   return crypto.randomBytes(6).toString('hex');
 }
 
-// ✅ 監査用：messagesの先頭/末尾断片を安全に出す（履歴が入ってるかの証拠）
 function head(s: string, n = 60) {
   const t = String(s ?? '').replace(/\s+/g, ' ').trim();
   return t.length > n ? t.slice(0, n) + '…' : t;
@@ -122,8 +109,6 @@ function validateMessages(messages: ChatMessage[]) {
   if (!Array.isArray(messages) || messages.length === 0) {
     throw new Error('chatComplete: messages is required');
   }
-  // 先頭 system 推奨（必須化はしないが、監査ログで見える）
-  // role と content は最低限の整合性のみ
   for (let i = 0; i < messages.length; i++) {
     const m: any = messages[i];
     const r = String(m?.role ?? '');
@@ -132,105 +117,136 @@ function validateMessages(messages: ChatMessage[]) {
       throw new Error(`chatComplete: invalid role at messages[${i}] = ${r}`);
     }
     if (!c.trim()) {
-      // 空メッセージは原則禁止（履歴生成のバグを早期検知）
       throw new Error(`chatComplete: empty content at messages[${i}] (${r})`);
     }
   }
 }
 
-export async function chatComplete(args: ChatArgs): Promise<string> {
-  const {
-    purpose,
-    messages,
-    model = pickDefaultModel(),
-    apiKey = process.env.OPENAI_API_KEY || '',
-    temperature = defaultTempByPurpose(purpose),
-    max_tokens = 512,
-    endpoint = 'https://api.openai.com/v1/chat/completions',
-    extraHeaders = {},
-    extraBody = {},
-    responseFormat,
-    trace,
-    audit,
-    allowEmpty = false,
+function pickTrace(args: ChatArgs) {
+  return {
+    traceId: args.traceId ?? args.trace?.traceId ?? null,
+    conversationId: args.conversationId ?? args.trace?.conversationId ?? null,
+    userCode: args.userCode ?? args.trace?.userCode ?? null,
+  };
+}
 
-    // ✅ top-level trace fields（互換）
-    traceId: traceIdTop,
-    conversationId: conversationIdTop,
-    userCode: userCodeTop,
-  } = args;
+function envGuardOn(): boolean {
+  const v = String(process.env.IROS_LLM_GUARD ?? '').trim().toLowerCase();
+  if (!v) return true; // デフォルトON（安全側）
+  if (['0', 'false', 'off', 'no', 'disabled'].includes(v)) return false;
+  if (['1', 'true', 'on', 'yes', 'enabled'].includes(v)) return true;
+  return true;
+}
+
+function normalizeMessages(messages: ChatMessage[]): ChatMessage[] {
+  return messages.map((m) => ({
+    role: m.role,
+    content: safeTrimEnd(m.content),
+  }));
+}
+
+function safeCaller(): string | null {
+  try {
+    const s = new Error().stack?.split('\n') ?? [];
+    // 0:Error, 1:this fn, 2:chatComplete, 3:caller...
+    const line = s[3] ?? s[2] ?? '';
+    const t = String(line).trim();
+    return t || null;
+  } catch {
+    return null;
+  }
+}
+
+function detectHasDigest(messages: ChatMessage[]): boolean {
+  try {
+    return (
+      messages.some((m) =>
+        /history(digest|summary)|situation[_\s-]?summary/i.test(m.content),
+      ) ?? false
+    );
+  } catch {
+    return false;
+  }
+}
+
+function detectHasAnchorHints(messages: ChatMessage[]): boolean {
+  try {
+    return (
+      messages.some((m) =>
+        /intent[_\s-]?anchor|fixedNorth|itx[_\s-]?step|itx[_\s-]?reason/i.test(m.content),
+      ) ?? false
+    );
+  } catch {
+    return false;
+  }
+}
+
+function lastUserHead(messages: ChatMessage[]): string | null {
+  try {
+    const m = [...messages].reverse().find((x) => x.role === 'user');
+    return m ? head(m.content, 80) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function chatComplete(args: ChatArgs): Promise<string> {
+  const purpose = args.purpose;
+  const model = args.model ?? pickDefaultModel();
+  const apiKey = args.apiKey ?? process.env.OPENAI_API_KEY ?? '';
+  const temperature =
+    typeof args.temperature === 'number' ? args.temperature : defaultTempByPurpose(purpose);
+  const max_tokens = typeof args.max_tokens === 'number' ? args.max_tokens : 512;
+  const endpoint = args.endpoint ?? 'https://api.openai.com/v1/chat/completions';
+  const extraHeaders = args.extraHeaders ?? {};
+  const extraBody = args.extraBody ?? {};
+  const responseFormat = args.responseFormat;
+  const audit = args.audit;
+  const allowEmpty = Boolean(args.allowEmpty);
 
   if (!apiKey) throw new Error('OPENAI_API_KEY is missing');
   if (!purpose) throw new Error('chatComplete: purpose is required');
 
-  validateMessages(messages);
+  validateMessages(args.messages);
 
-  // ✅ 最終 trace を確定（top-level を優先）
-  const traceFinal = {
-    traceId: traceIdTop ?? trace?.traceId ?? null,
-    conversationId: conversationIdTop ?? trace?.conversationId ?? null,
-    userCode: userCodeTop ?? trace?.userCode ?? null,
-  };
-
+  const traceFinal = pickTrace(args);
   const callId = makeCallId();
   const started = nowMs();
 
-  // ✅ 任意の強制ガード：SCAFFOLD で writer を呼ぶのは設計違反
-  // - IROS_LLM_GUARD=0 で無効化（本番など）
-  const guardOn = process.env.IROS_LLM_GUARD !== '0';
-  if (guardOn && audit?.slotPlanPolicy === 'SCAFFOLD' && purpose === 'writer') {
+  // ✅ Guard：SCAFFOLDでwriterを呼ぶのは設計違反（任意で遮断）
+  if (envGuardOn() && audit?.slotPlanPolicy === 'SCAFFOLD' && purpose === 'writer') {
     const msg = `[IROS/LLM][GUARD] writer called under SCAFFOLD (callId=${callId})`;
-    // eslint-disable-next-line no-console
     console.error(msg, {
       callId,
       purpose,
       model,
-      temperature,
       traceId: traceFinal.traceId,
       conversationId: traceFinal.conversationId,
       userCode: traceFinal.userCode,
       slotPlanPolicy: audit?.slotPlanPolicy ?? null,
-      mode: audit?.mode ?? null,
-      qCode: audit?.qCode ?? null,
-      depthStage: audit?.depthStage ?? null,
     });
     throw new Error(msg);
   }
 
+  const messages = normalizeMessages(args.messages);
+
   const body: Record<string, any> = {
     model,
-    messages, // ✅ 会話履歴はここで確実に渡す
+    messages,
     temperature,
     max_tokens,
     ...extraBody,
   };
 
   if (responseFormat && responseFormat.type !== 'text') {
-    body.response_format = responseFormat; // { type: 'json_object' }
+    body.response_format = responseFormat;
   }
 
-  // ✅ 監査ログ（CALLの事実を必ず残す）
+  // ===== 監査ログ（CALL）=====
   try {
-    const caller = new Error().stack?.split('\n')?.[2]?.trim() ?? null;
+    const first = messages[0];
+    const last = messages[messages.length - 1];
 
-    const first = messages?.[0];
-    const last = messages?.[messages.length - 1];
-
-    const hasDigest =
-      messages?.some(
-        (m) =>
-          m.role === 'system' &&
-          /history(digest|summary)|situation[_\s-]?summary/i.test(m.content),
-      ) ?? false;
-
-    const hasAnchor =
-      messages?.some(
-        (m) =>
-          m.role === 'system' &&
-          /intent[_\s-]?anchor|fixedNorth|itx[_\s-]?step|itx[_\s-]?reason/i.test(m.content),
-      ) ?? false;
-
-    // eslint-disable-next-line no-console
     console.log('[IROS/LLM][CALL]', {
       callId,
       purpose,
@@ -238,133 +254,174 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
       temperature,
       responseFormat: responseFormat?.type ?? 'text',
       endpoint,
+
       traceId: traceFinal.traceId,
       conversationId: traceFinal.conversationId,
       userCode: traceFinal.userCode,
+
       slotPlanPolicy: audit?.slotPlanPolicy ?? null,
       mode: audit?.mode ?? null,
       qCode: audit?.qCode ?? null,
       depthStage: audit?.depthStage ?? null,
 
-      // ✅ “履歴が入っているか”検証用
-      len: messages.length,
+      msgCount: messages.length,
       firstRole: first?.role ?? null,
       lastRole: last?.role ?? null,
       firstHead: first ? head(first.content) : null,
       lastTail: last ? tail(last.content) : null,
-      hasDigest,
-      hasAnchor,
+      lastUserHead: lastUserHead(messages),
 
-      // 既存ログ（残す）
-      msgCount: messages.length,
+      hasDigest: detectHasDigest(messages),
+      hasAnchor: detectHasAnchorHints(messages),
+
       roles: messages.map((m) => m.role),
-      lastUserHead:
-        [...messages].reverse().find((m) => m.role === 'user')?.content?.slice(0, 80) ?? null,
-      caller,
+      caller: safeCaller(),
     });
   } catch {}
 
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      ...extraHeaders,
-    },
-    body: JSON.stringify(body),
-  });
+  let res: Response | null = null;
+  let elapsed = 0;
 
-  const elapsed = nowMs() - started;
+  try {
+    res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        ...extraHeaders,
+      },
+      body: JSON.stringify(body),
+    });
+
+    elapsed = nowMs() - started;
+  } catch (e: any) {
+    // ✅ fetchレベル失敗も trace を残す
+    try {
+      console.error('[IROS/LLM][ERR]', {
+        callId,
+        purpose,
+        model,
+        ms: nowMs() - started,
+        traceId: traceFinal.traceId,
+        conversationId: traceFinal.conversationId,
+        userCode: traceFinal.userCode,
+        stage: 'fetch',
+        message: String(e?.message ?? e),
+      });
+    } catch {}
+    throw e;
+  }
+
+  if (!res) {
+    const err = new Error(`LLM fetch returned null response (${purpose})`);
+    try {
+      console.error('[IROS/LLM][ERR]', {
+        callId,
+        purpose,
+        model,
+        ms: nowMs() - started,
+        traceId: traceFinal.traceId,
+        conversationId: traceFinal.conversationId,
+        userCode: traceFinal.userCode,
+        stage: 'fetch',
+        message: err.message,
+      });
+    } catch {}
+    throw err;
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    const errMsg = `LLM HTTP ${res.status} (${purpose}) ${
-      traceFinal.traceId ? `[trace:${traceFinal.traceId}] ` : ''
-    }${text}`;
-    // eslint-disable-next-line no-console
-    console.error('[IROS/LLM][ERR]', {
-      callId,
-      purpose,
-      model,
-      ms: elapsed,
-      ok: false,
-      traceId: traceFinal.traceId,
-      conversationId: traceFinal.conversationId,
-      userCode: traceFinal.userCode,
-      slotPlanPolicy: audit?.slotPlanPolicy ?? null,
-      mode: audit?.mode ?? null,
-      qCode: audit?.qCode ?? null,
-      depthStage: audit?.depthStage ?? null,
-      status: res.status,
-      bodyHead: String(text ?? '').slice(0, 400),
-    });
-    throw new Error(errMsg);
+    const err = new Error(`LLM HTTP ${res.status} (${purpose}) ${text}`);
+    try {
+      console.error('[IROS/LLM][ERR]', {
+        callId,
+        purpose,
+        model,
+        ms: elapsed,
+        traceId: traceFinal.traceId,
+        conversationId: traceFinal.conversationId,
+        userCode: traceFinal.userCode,
+        stage: 'http',
+        status: res.status,
+        bodyHead: head(text, 240),
+      });
+    } catch {}
+    throw err;
   }
 
-  const data = await res.json();
+  let data: any = null;
+  try {
+    data = await res.json();
+  } catch (e: any) {
+    const err = new Error(`LLM JSON parse failed (${purpose}): ${String(e?.message ?? e)}`);
+    try {
+      console.error('[IROS/LLM][ERR]', {
+        callId,
+        purpose,
+        model,
+        ms: elapsed,
+        traceId: traceFinal.traceId,
+        conversationId: traceFinal.conversationId,
+        userCode: traceFinal.userCode,
+        stage: 'json',
+        message: err.message,
+      });
+    } catch {}
+    throw err;
+  }
+
   const raw = data?.choices?.[0]?.message?.content;
 
   if (typeof raw !== 'string') {
-    // eslint-disable-next-line no-console
-    console.error('[IROS/LLM][ERR]', {
-      callId,
-      purpose,
-      model,
-      ms: elapsed,
-      ok: false,
-      traceId: traceFinal.traceId,
-      conversationId: traceFinal.conversationId,
-      userCode: traceFinal.userCode,
-      slotPlanPolicy: audit?.slotPlanPolicy ?? null,
-      mode: audit?.mode ?? null,
-      qCode: audit?.qCode ?? null,
-      depthStage: audit?.depthStage ?? null,
-      err: `non-string content: ${typeof raw}`,
-    });
-    throw new Error(`LLM returned non-string content (${purpose}): ${typeof raw}`);
+    const err = new Error(`LLM returned non-string content (${purpose})`);
+    try {
+      console.error('[IROS/LLM][ERR]', {
+        callId,
+        purpose,
+        model,
+        ms: elapsed,
+        traceId: traceFinal.traceId,
+        conversationId: traceFinal.conversationId,
+        userCode: traceFinal.userCode,
+        stage: 'content',
+        contentType: typeof raw,
+      });
+    } catch {}
+    throw err;
   }
 
   const out = safeTrimEnd(raw);
 
-  // ✅ “空”は原則バグとして扱う（黙らせ制御をしないため）
   if (!allowEmpty && out.trim().length === 0) {
-    // eslint-disable-next-line no-console
-    console.error('[IROS/LLM][ERR]', {
-      callId,
-      purpose,
-      model,
-      ms: elapsed,
-      ok: false,
-      traceId: traceFinal.traceId,
-      conversationId: traceFinal.conversationId,
-      userCode: traceFinal.userCode,
-      slotPlanPolicy: audit?.slotPlanPolicy ?? null,
-      mode: audit?.mode ?? null,
-      qCode: audit?.qCode ?? null,
-      depthStage: audit?.depthStage ?? null,
-      err: 'empty content',
-    });
-    throw new Error(`LLM empty content (${purpose})`);
+    const err = new Error(`LLM empty content (${purpose})`);
+    try {
+      console.error('[IROS/LLM][ERR]', {
+        callId,
+        purpose,
+        model,
+        ms: elapsed,
+        traceId: traceFinal.traceId,
+        conversationId: traceFinal.conversationId,
+        userCode: traceFinal.userCode,
+        stage: 'empty',
+      });
+    } catch {}
+    throw err;
   }
 
-  // ✅ 観測ログ（必要十分）
+  // ✅ OKログ
   try {
-    const usage = data?.usage ?? null;
-    // eslint-disable-next-line no-console
     console.log('[IROS/LLM][OK]', {
       callId,
       purpose,
       model,
       ms: elapsed,
       ok: true,
-      usage,
+      usage: data?.usage ?? null,
       traceId: traceFinal.traceId,
       conversationId: traceFinal.conversationId,
       userCode: traceFinal.userCode,
-      slotPlanPolicy: audit?.slotPlanPolicy ?? null,
-      mode: audit?.mode ?? null,
-      qCode: audit?.qCode ?? null,
-      depthStage: audit?.depthStage ?? null,
       outLen: out.length,
       outHead: out.slice(0, 80),
     });
@@ -373,8 +430,6 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
   return out;
 }
 
-// ✅ soul/digest 等で JSON を返す用途（JSON.parse 前提）
-// - “自然文禁止”は system prompt 側で縛る
 export async function chatCompleteJSON<T = any>(
   args: Omit<ChatArgs, 'responseFormat'> & { responseFormat?: ResponseFormat },
 ): Promise<T> {
@@ -382,30 +437,15 @@ export async function chatCompleteJSON<T = any>(
     ...args,
     responseFormat: args.responseFormat ?? { type: 'json_object' },
 
-    // ✅ JSON 側も top-level trace を拾えるように（上位が渡していれば維持）
-    traceId: (args as any).traceId ?? null,
-    conversationId: (args as any).conversationId ?? null,
-    userCode: (args as any).userCode ?? null,
+    // ✅ 互換：ここでも top-level を優先して確実に渡す
+    traceId: (args as any).traceId ?? (args as any)?.trace?.traceId ?? null,
+    conversationId: (args as any).conversationId ?? (args as any)?.trace?.conversationId ?? null,
+    userCode: (args as any).userCode ?? (args as any)?.trace?.userCode ?? null,
   });
 
   try {
     return JSON.parse(raw) as T;
   } catch (e) {
-    // eslint-disable-next-line no-console
-    console.error('[IROS/LLM][JSON_ERR]', {
-      purpose: args.purpose,
-      traceId: args.trace?.traceId ?? null,
-      conversationId: args.trace?.conversationId ?? null,
-      userCode: args.trace?.userCode ?? null,
-      slotPlanPolicy: args.audit?.slotPlanPolicy ?? null,
-      mode: args.audit?.mode ?? null,
-      qCode: args.audit?.qCode ?? null,
-      depthStage: args.audit?.depthStage ?? null,
-      head: raw.slice(0, 200),
-      err: String(e),
-    });
-    throw new Error(
-      `LLM JSON parse failed (${args.purpose}): ${String(e)} | head=${raw.slice(0, 120)}`,
-    );
+    throw new Error(`LLM JSON parse failed (${(args as any)?.purpose}): ${String(e)}`);
   }
 }

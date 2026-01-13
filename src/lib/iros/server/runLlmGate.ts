@@ -1,9 +1,14 @@
 // src/lib/iros/server/runLlmGate.ts
 // iros — runLlmGate (always-pass wrapper)
+//
 // 目的：
 // - probeLlmGate を必ず通し、meta.extra.llmGate に刻む
 // - textNow が空でも slots から candidate を作り、resolvedText として返す
 // - 呼び出し側（handleIrosReply / route.ts）が本文採用できるようにする
+//
+// ✅ Phase11 注意：FINAL では slot の content は user-facing 文ではない（@TAG/JSON メタ）
+// → SKIP系で candidate/resolvedText を採用すると @TAG が漏れる可能性がある
+// → runLlmGate では「FINAL なら resolvedText を返さない」を徹底し、漏洩経路を遮断する
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import {
@@ -35,6 +40,7 @@ export type RunLlmGateResult = {
   llmEntry: 'CALL_LLM' | 'SKIP_POLICY' | 'SKIP_SILENCE' | 'SKIP_SLOTPLAN' | null;
 
   // ✅ SKIP系のときに採用すべき本文（slots candidate含む）
+  // ⚠️ Phase11 FINAL では slot/candidate は user-facing ではないため null に落とす（漏洩防止）
   resolvedText: string | null;
 
   // デバッグ可視化（任意）
@@ -89,10 +95,7 @@ export function runLlmGate(args: RunLlmGateArgs): RunLlmGateResult {
     metaForSave?.extra?.brakeReason ??
     null;
 
-  const speechAct =
-    metaForSave?.speechAct ??
-    metaForSave?.extra?.speechAct ??
-    null;
+  const speechAct = metaForSave?.speechAct ?? metaForSave?.extra?.speechAct ?? null;
 
   let slotPlanLen: number | null =
     metaForSave?.slotPlanLen ??
@@ -110,7 +113,7 @@ export function runLlmGate(args: RunLlmGateArgs): RunLlmGateResult {
     null;
 
   // policy も “濃いmeta” を見る（save側だけに寄せない）
-  const slotPlanPolicy =
+  const slotPlanPolicy: SlotPlanPolicy | null =
     metaForSave?.slotPlanPolicy ??
     metaForProbe?.framePlan?.slotPlanPolicy ??
     metaForProbe?.slotPlanPolicy ??
@@ -151,10 +154,19 @@ export function runLlmGate(args: RunLlmGateArgs): RunLlmGateResult {
   logLlmGate(tag, { conversationId, userCode, patch: probe.patch });
 
   // ✅ decision.resolvedText を優先して返す（patchではなくdecisionが正）
-  const resolvedText =
+  // ただし Phase11 の FINAL では「slot内容は user-facing ではない」ため、
+  // SKIP系で slot/candidate 由来の本文を採用すると @TAG が漏れる。
+  // → resolvedText の採用は SCAFFOLD 専用に制限する。
+  const resolvedTextRaw =
     (probe.decision as any)?.resolvedText != null
       ? String((probe.decision as any).resolvedText ?? '').trim() || null
       : null;
+
+  const effectiveSlotPlanPolicy: SlotPlanPolicy | null =
+    (probe.patch as any)?.slotPlanPolicy ?? slotPlanPolicy ?? null;
+
+  // ✅ FINAL では resolvedText を返さない（=採用させない）
+  const resolvedText = effectiveSlotPlanPolicy === 'FINAL' ? null : resolvedTextRaw;
 
   const candidateLen =
     typeof (probe.patch as any)?.finalAssistantTextCandidateLen === 'number'
