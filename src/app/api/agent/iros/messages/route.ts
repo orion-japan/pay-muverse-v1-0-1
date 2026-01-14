@@ -431,10 +431,33 @@ export async function GET(req: NextRequest) {
 
     filtered.reverse();
 
+    // =========================================================
+    // directives / internal tags strip (API-level)
+    // - DBに残っていても「返す時点で」必ず消す
+    // =========================================================
+    function stripDirectivesForApi(input: string): string {
+      let s = String(input ?? '');
+
+      // 行頭ディレクティブ（例: "@ACK ..." 等）を行ごと削除
+      s = s.replace(/^\s*@[A-Z0-9_-]{2,}.*(?:\r?\n|$)/gm, '');
+
+      // iLine検証タグ等（露出禁止）
+      s = s.replace(/\[\[ILINE\]\]/g, '');
+      s = s.replace(/\[\[\/ILINE\]\]/g, '');
+
+      // 空行だけ残る事故を圧縮
+      s = s.replace(/\n{3,}/g, '\n\n').trim();
+
+      return s;
+    }
+
     const messages: OutMsg[] = filtered.map((m: any) => {
       // view の場合 message_id が主キー、UI view の場合 id、テーブルの場合 id
       const idVal = m.message_id ?? m.id ?? '';
-      const contentVal = (m.text ?? m.content ?? '').toString();
+
+      // ✅ ここだけが本質：本文を取って → stripして → contentに入れる
+      const rawContent = (m.text ?? m.content ?? '').toString();
+      const contentVal = stripDirectivesForApi(rawContent);
 
       // q は v_iros_messages の q_primary を優先、無ければ q_code
       const qAny = (m.q_primary ?? m.q_code ?? null) as any;
@@ -466,6 +489,7 @@ export async function GET(req: NextRequest) {
       role: m.role,
       content: m.content,
     }));
+
 
     console.log('[IROS/messages][GET] done', {
       ms: msSince(t0),
@@ -579,13 +603,17 @@ export async function POST(req: NextRequest) {
         reqId,
       });
 
-      return NextResponse.json({
-        ok: true,
-        skipped: true,
-        reason: 'ASSISTANT_ROLE_NEVER_PERSISTED_SINGLE_WRITER',
-        reqId,
-      });
+      return json(
+        {
+          ok: true,
+          skipped: true,
+          reason: 'ASSISTANT_ROLE_NEVER_PERSISTED_SINGLE_WRITER',
+          reqId,
+        },
+        200,
+      );
     }
+
 
     if (!rawText || !String(rawText).trim()) {
       return json({ ok: false, error: 'text_empty', error_code: 'text_empty', reqId }, 400);
@@ -1209,23 +1237,33 @@ async function computeUserStreakFromDb(args: {
 
     // ✅ streak の確定ルール：q_code_final を最優先（切替瞬間の巻き戻り防止）
     // ✅ FIX: ただし DBで確定できている場合（qtuFrom が db:*）はここで壊さない
-    const qFinal =
-      typeof q_code_final === 'string' && q_code_final.trim().length ? q_code_final.trim() : null;
+// ✅ streak の確定ルール（ハード不変条件）
+// - q_code_final があるなら streak_q は必ず同じ値
+// - streak_len は最低 1（0/null を許さない）
+// - ただし「Qが切り替わった瞬間」は 1 にリセット（巻き戻りではなく“切替の正規化”）
+const qFinal =
+  typeof q_code_final === 'string' && q_code_final.trim().length ? q_code_final.trim() : null;
 
-    const isDbConfirmed = typeof qtuFrom === 'string' && qtuFrom.startsWith('db:');
+if (!qFinal) {
+  // Qが取れないなら streak も持たない（不一致を根絶）
+  streakQ = null;
+  streakLenNum = null;
+} else {
+  const prevStreakQ = streakQ;
 
-    if (qFinal && !isDbConfirmed) {
-      // streakQ は必ず qFinal に揃える
-      const prevStreakQ = streakQ;
-      streakQ = qFinal;
+  // ✅ ここで必ず一致させる（不一致が起きようがない）
+  streakQ = qFinal;
 
-      // qtu / seed が別Qの streak を持ってきた場合、連続は 1 から
-      if (prevStreakQ && prevStreakQ !== qFinal) {
-        streakLenNum = 1;
-      } else if (!prevStreakQ) {
-        streakLenNum = Math.max(1, Number(streakLenNum || 0));
-      }
-    }
+  // Qが変わったなら今回から新しい連続として 1
+  if (prevStreakQ && prevStreakQ !== qFinal) {
+    streakLenNum = 1;
+  }
+
+  // どんな経路でも 1 未満は許さない
+  const cur = typeof streakLenNum === 'number' && Number.isFinite(streakLenNum) ? streakLenNum : 0;
+  if (cur < 1) streakLenNum = 1;
+}
+
 
     /* =========================================================
      * (K) insert（候補テーブル順に試す）

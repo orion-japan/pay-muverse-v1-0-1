@@ -539,11 +539,36 @@ export async function persistMemoryStateIfAny(args: {
 
     // =========================================================
     // q / depth（取りこぼし防止：core/unified）
+    // - qTraceUpdated を最優先で拾う（streak巻き戻り防止の本丸）
     // =========================================================
-    const qCodeInput = unified?.q?.current ?? core?.qPrimary ?? core?.q_code ?? core?.qCode ?? null;
 
-    const depthInput =
-      unified?.depth?.stage ?? core?.depth ?? core?.depth_stage ?? core?.depthStage ?? null;
+    const qTraceEffective: any =
+      core?.qTraceUpdated ??
+      unified?.qTraceUpdated ??
+      core?.qTrace ??
+      unified?.qTrace ??
+      core?.q_counts?.q_trace ??
+      unified?.q_counts?.q_trace ??
+      null;
+
+    const qCodeInput: any =
+      unified?.q?.current ??
+      unified?.qCode ??
+      core?.qPrimary ??
+      core?.q_now ??
+      core?.q_code ??
+      core?.qCode ??
+      qTraceEffective?.qNow ??
+      qTraceEffective?.q_now ??
+      null;
+
+    const depthInput: any =
+      unified?.depth?.stage ??
+      unified?.depthStage ??
+      core?.depth ??
+      core?.depth_stage ??
+      core?.depthStage ??
+      null;
 
     // 保存する意味がある最低条件
     if (!depthInput && !qCodeInput) {
@@ -727,6 +752,12 @@ export async function persistMemoryStateIfAny(args: {
 
           intent_anchor_key_candidate: anchorKeyCandidate ?? null,
           anchor_action: anchorWrite.action,
+
+          // ★ 観測：qTraceUpdated を拾えてるか
+          qTracePickedFrom: qTraceEffective ? 'qTraceEffective' : null,
+          qTrace_qNow: qTraceEffective?.qNow ?? null,
+          qTrace_streakQ: qTraceEffective?.streakQ ?? null,
+          qTrace_streakLength: qTraceEffective?.streakLength ?? null,
         },
         null,
         0,
@@ -825,59 +856,105 @@ export async function persistMemoryStateIfAny(args: {
 
     console.log('[IROS/Phase10] decideT3Upgrade result', t3Decision);
 
-// ✅ 修正版：T3 upgrade を最優先（effectiveItx より上）
-const itxForSave: EffectiveItx =
-  t3Decision.upgrade === true && t3Decision.nextItxStep === 'T3'
-    ? {
-        itx_step: 'T3',
-        itx_anchor_event_type:
-          anchorEventTypeResolved && anchorEventTypeResolved !== 'none'
-            ? anchorEventTypeResolved
-            : null,
-        itx_reason: 'T3_UPGRADE',
-        itx_last_at: nowIso(),
-      }
-    : effectiveItx
-      ? effectiveItx
-      : null;
+    // ✅ 修正版：T3 upgrade を最優先（effectiveItx より上）
+    const itxForSave: EffectiveItx =
+      t3Decision.upgrade === true && t3Decision.nextItxStep === 'T3'
+        ? {
+            itx_step: 'T3',
+            itx_anchor_event_type:
+              anchorEventTypeResolved && anchorEventTypeResolved !== 'none'
+                ? anchorEventTypeResolved
+                : null,
+            itx_reason: 'T3_UPGRADE',
+            itx_last_at: nowIso(),
+          }
+        : effectiveItx
+          ? effectiveItx
+          : null;
 
+// =========================================================
+// ✅ upsert payload（“null は入れない” を徹底：keep を壊さない）
+// =========================================================
+const upsertPayload: Record<string, any> = {
+  user_code: userCode,
+  updated_at: nowIso(),
+};
 
+if (depthInput != null) upsertPayload.depth_stage = depthInput;
+if (qCodeInput != null) upsertPayload.q_primary = qCodeInput;
+if (phaseInput != null) upsertPayload.phase = phaseInput;
 
-    // =========================================================
-    // ✅ upsert payload（“null は入れない” を徹底：keep を壊さない）
-    // =========================================================
-    const upsertPayload: Record<string, any> = {
-      user_code: userCode,
-      updated_at: nowIso(),
+if (typeof selfAcceptanceInput === 'number' && Number.isFinite(selfAcceptanceInput)) {
+  upsertPayload.self_acceptance = selfAcceptanceInput;
+}
+
+if (typeof yIntInput === 'number') upsertPayload.y_level = yIntInput;
+if (typeof hIntInput === 'number') upsertPayload.h_level = hIntInput;
+
+if (finalSpinLoop != null) upsertPayload.spin_loop = finalSpinLoop;
+if (finalSpinStep != null) upsertPayload.spin_step = finalSpinStep;
+if (finalDescentGate != null) upsertPayload.descent_gate = finalDescentGate;
+
+if (situationSummaryInput != null) upsertPayload.situation_summary = situationSummaryInput;
+if (situationTopicInput != null) upsertPayload.situation_topic = situationTopicInput;
+if (sentimentLevelInput != null) upsertPayload.sentiment_level = sentimentLevelInput;
+
+// =========================================================
+// ✅ q_counts（外部優先 → core優先 → previousは“触らない”）
+// - 追加：qTraceEffective を qc.q_trace に合流（streakの巻き戻り防止）
+// =========================================================
+const qCountsPicked = qCounts ?? core?.q_counts ?? null;
+
+if (qCountsPicked != null) {
+  const qc = normalizeQCounts(qCountsPicked);
+  console.log('[IROS/PERSIST][q_counts][pick]', {
+    has_qCounts_arg: qCounts != null,
+    has_core_q_counts: core?.q_counts != null,
+    has_unified_q_counts: (unified as any)?.q_counts != null,
+    picked_null: qCountsPicked == null,
+    picked_type: qCountsPicked == null ? null : typeof qCountsPicked,
+    picked_keys: qCountsPicked && typeof qCountsPicked === 'object' ? Object.keys(qCountsPicked as any).slice(0, 12) : null,
+  });
+
+  // ★ IT観測
+  qc.it_triggered_true = itTriggeredResolved === true;
+  if (typeof itTriggeredResolved === 'boolean') qc.it_triggered = itTriggeredResolved;
+
+  // ★ qTrace 合流（streak の巻き戻り防止）
+  if (qTraceEffective && typeof qTraceEffective === 'object') {
+    const prevTrace =
+      (qc as any).q_trace && typeof (qc as any).q_trace === 'object' ? (qc as any).q_trace : null;
+
+    (qc as any).q_trace = {
+      ...(prevTrace ?? {}),
+      qNow: qTraceEffective.qNow ?? prevTrace?.qNow ?? null,
+      lastQ: qTraceEffective.lastQ ?? prevTrace?.lastQ ?? null,
+      streakQ: qTraceEffective.streakQ ?? prevTrace?.streakQ ?? null,
+      dominantQ: qTraceEffective.dominantQ ?? prevTrace?.dominantQ ?? null,
+      streakLength: qTraceEffective.streakLength ?? prevTrace?.streakLength ?? null,
+      from: qTraceEffective.from ?? prevTrace?.from ?? 'qTraceEffective',
     };
-
-    if (depthInput != null) upsertPayload.depth_stage = depthInput;
-    if (qCodeInput != null) upsertPayload.q_primary = qCodeInput;
-    if (phaseInput != null) upsertPayload.phase = phaseInput;
-
-    if (typeof selfAcceptanceInput === 'number' && Number.isFinite(selfAcceptanceInput)) {
-      upsertPayload.self_acceptance = selfAcceptanceInput;
-    }
-
-    if (typeof yIntInput === 'number') upsertPayload.y_level = yIntInput;
-    if (typeof hIntInput === 'number') upsertPayload.h_level = hIntInput;
-
-    if (finalSpinLoop != null) upsertPayload.spin_loop = finalSpinLoop;
-    if (finalSpinStep != null) upsertPayload.spin_step = finalSpinStep;
-    if (finalDescentGate != null) upsertPayload.descent_gate = finalDescentGate;
-
-    if (situationSummaryInput != null) upsertPayload.situation_summary = situationSummaryInput;
-    if (situationTopicInput != null) upsertPayload.situation_topic = situationTopicInput;
-    if (sentimentLevelInput != null) upsertPayload.sentiment_level = sentimentLevelInput;
-
-    // ✅ q_counts（外部優先 → core優先 → previousは“触らない”）
-    const qCountsPicked = qCounts ?? core?.q_counts ?? null;
-    if (qCountsPicked != null) {
-      const qc = normalizeQCounts(qCountsPicked);
+  }
+      // ★ IT観測
       qc.it_triggered_true = itTriggeredResolved === true;
       if (typeof itTriggeredResolved === 'boolean') qc.it_triggered = itTriggeredResolved;
+
+      // ★ qTrace 合流（あれば必ず勝たせる）
+      if (qTraceEffective && typeof qTraceEffective === 'object') {
+        const prevTrace = (qc as any).q_trace && typeof (qc as any).q_trace === 'object' ? (qc as any).q_trace : {};
+        (qc as any).q_trace = {
+          ...prevTrace,
+          qNow: qTraceEffective.qNow ?? prevTrace.qNow ?? null,
+          lastQ: qTraceEffective.lastQ ?? prevTrace.lastQ ?? null,
+          streakQ: qTraceEffective.streakQ ?? prevTrace.streakQ ?? null,
+          dominantQ: qTraceEffective.dominantQ ?? prevTrace.dominantQ ?? null,
+          streakLength: qTraceEffective.streakLength ?? prevTrace.streakLength ?? null,
+        };
+      }
+
       upsertPayload.q_counts = qc;
     }
+
 
     // ✅ anchor_event / anchor_write（DB列がある環境だけで使う。無い場合は retry で落とす）
     // ✅ decisionFinal を参照（override が必ず効く）

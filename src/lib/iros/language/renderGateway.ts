@@ -43,10 +43,15 @@ function norm(s: unknown) {
  * - “意味を壊さず短く” を優先
  * ========================================================= */
 function stripInternalLabels(line: string): string {
-  let s = norm(line);
+  let s = norm(line).trim();
+  if (!s) return '';
 
-  // 🪔は残す（ただし本文中に混ざってたら ensureEndSymbol で末尾に統一する）
-  s = s.trim();
+  // 0幅文字（UIで「空行に見える」やつ）を先に除去
+  s = s.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+  if (!s) return '';
+
+  // 🪔は本文から除去（renderEngine=true では絶対に出さない）
+  s = s.replace(/🪔/g, '').trim();
   if (!s) return '';
 
   // 1) 角括弧ラベル（例：【WRITER_PROTOCOL】など）
@@ -59,23 +64,24 @@ function stripInternalLabels(line: string): string {
   s = s.replace(/^(\.{3,}|…{1,})\s*/g, '').trim();
   if (s === '...' || s === '…' || /^\.{3,}$/.test(s) || /^…+$/.test(s)) return '';
 
+  // 3) FRAME / SLOTS 系のメタ行（記号だけ/文末なしは捨てる）
   if (/^FRAME\s*=\s*.*$/i.test(s) && !/[。！？!?]/.test(s)) return '';
   if (/^SLOTS\s*=\s*.*$/i.test(s) && !/[。！？!?]/.test(s)) return '';
-
   s = s.replace(/^FRAME\s*=\s*\S+\s*/i, '').trim();
   s = s.replace(/^SLOTS\s*=\s*\S+\s*/i, '').trim();
 
+  // 4) known meta labels（文末なしは捨てる）
   if (
     /^(OBS_META|ROTATION_META|IT_HINT|ANCHOR_CONFIRM|TURN_MODE|SUBMODE)\s*[:：].*$/i.test(s) &&
     !/[。！？!?]/.test(s)
   ) {
     return '';
   }
-
   s = s
     .replace(/^(OBS_META|ROTATION_META|IT_HINT|ANCHOR_CONFIRM|TURN_MODE|SUBMODE)\s*[:：]\s*/i, '')
     .trim();
 
+  // 5) =/: を含む内部キーっぽい行は捨てる（本文に残す価値が薄い）
   if (
     /(phase\s*=|depth\s*=|q\s*=|spinloop\s*=|spinstep\s*=|descentgate\s*=|tLayerHint\s*=|itx_|slotPlanPolicy|slotSeed|llmRewriteSeed)/i.test(
       s,
@@ -84,8 +90,14 @@ function stripInternalLabels(line: string): string {
     if (s.includes('=') || s.includes(':') || s.includes('：')) return '';
   }
 
+  // 6) [sa ...] などのタグ単体行
   s = s.replace(/^[〔\[]sa[\w.\s-]+[〕\]]$/i, '').trim();
+
+  // 7) 空白正規化
   s = s.replace(/\s{2,}/g, ' ').trim();
+
+  // ✅ 追加：句読点/記号だけの“残骸行”は捨てる（「。」だけ等）
+  if (/^[\u3000\s]*[。．\.、,・:：;；!！\?？…]+[\u3000\s]*$/.test(s)) return '';
 
   return s;
 }
@@ -197,7 +209,21 @@ function extractSlotBlocks(extra: any): SlotExtracted {
       out.push({ key, text });
     }
   } else if (typeof slotsRaw === 'object') {
-    const ORDER = ['OBS', 'SHIFT', 'NEXT', 'SAFE', 'INSIGHT', 'opener', 'facts', 'mirror', 'elevate', 'move', 'ask', 'core', 'add'];
+    const ORDER = [
+      'OBS',
+      'SHIFT',
+      'NEXT',
+      'SAFE',
+      'INSIGHT',
+      'opener',
+      'facts',
+      'mirror',
+      'elevate',
+      'move',
+      'ask',
+      'core',
+      'add',
+    ];
 
     const keys = Object.keys(slotsRaw);
     keys.sort((a, b) => {
@@ -272,43 +298,29 @@ function extractSlotsForEvidence(extra: any): Array<{ key: string; content: stri
   return out.length ? out : null;
 }
 
-/** ✅ 🪔 は “末尾の1行” に統一（本文に混ざっていても無視して最後に付ける）
- * - maxLines に達していても「最後の行を🪔に置換」して必ず残す
- */
-function ensureEndSymbol(blocks: RenderBlock[], maxLines: number) {
-  // 本文中の🪔は落とす（最終行にだけ置く）
-  for (const b of blocks) {
-    const t = norm((b as any)?.text ?? '');
-    if (!t) continue;
-    (b as any).text = t.replace(/🪔/g, '').trim();
-  }
+// ✅ renderEngine=true では 🪔 を絶対に出さない（本文混入も含めて落とす）
+function stripLampEverywhere(text: string): string {
+  const t = String(text ?? '').replace(/\r\n/g, '\n');
+  return t
+    .replace(/^\s*🪔\s*$(\r?\n)?/gm, '')
+    .replace(/[ \t]*🪔[ \t]*$/gm, '')
+    .replace(/\n[ \t]*🪔[ \t]*(\n|$)/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trimEnd();
+}
 
-  // 空行を除いた現在行数
-  const nonEmptyIdx: number[] = [];
-  for (let i = 0; i < blocks.length; i++) {
-    if (norm(blocks[i]?.text)) nonEmptyIdx.push(i);
-  }
+/** ✅ SCAFFOLD は“定型句を足さない”。渡された本文を短く整形するだけ */
+function minimalScaffold(baseText: string): RenderBlock[] {
+  const lines = splitToLines(baseText);
+  const out: RenderBlock[] = [];
 
-  // そもそも何もない場合は🪔だけ
-  if (nonEmptyIdx.length === 0) {
-    blocks.push({ text: '🪔' });
-    return;
-  }
+  const a = stripInternalLabels(lines[0] ?? '');
+  const b = stripInternalLabels(lines[1] ?? '');
 
-  const lastIdx = nonEmptyIdx[nonEmptyIdx.length - 1];
-  const lastText = norm(blocks[lastIdx]?.text);
+  if (a) out.push({ text: a });
+  if (b) out.push({ text: b });
 
-  // すでに末尾が🪔ならOK
-  if (lastText === '🪔') return;
-
-  // 行数に余裕があるなら追加
-  if (nonEmptyIdx.length < maxLines) {
-    blocks.push({ text: '🪔' });
-    return;
-  }
-
-  // 行数が上限なら「最後の非空行を🪔に置換」
-  blocks[lastIdx] = { text: '🪔' };
+  return out.slice(0, 2);
 }
 
 function getReplyProfileMaxLines(extra: any): number | null {
@@ -361,7 +373,11 @@ function getSpeechInputLite(extra: any): {
 
 function getSlotPlanPolicy(extra: any): string | null {
   const framePlan =
-    extra?.framePlan ?? extra?.meta?.framePlan ?? extra?.extra?.framePlan ?? extra?.orch?.framePlan ?? null;
+    extra?.framePlan ??
+    extra?.meta?.framePlan ??
+    extra?.extra?.framePlan ??
+    extra?.orch?.framePlan ??
+    null;
 
   const raw =
     framePlan?.slotPlanPolicy ??
@@ -405,27 +421,164 @@ function pickRephraseText(extra: any): string {
   return '';
 }
 
-/** ✅ SCAFFOLD は“定型句を足さない”。渡された本文を短く整形するだけ */
-function minimalScaffold(baseText: string): RenderBlock[] {
-  const lines = splitToLines(baseText);
-  const out: RenderBlock[] = [];
+// src/lib/iros/language/renderGateway.ts
+// ✅ slot directives をUIに漏らさない最終ガード（pickedFrom=slotDirectives / LLM落ち でも人間文にする）
 
-  const a = stripInternalLabels(lines[0] ?? '');
-  const b = stripInternalLabels(lines[1] ?? '');
+function looksLikeSlotDirectives(s: string): boolean {
+  if (!s) return false;
+  return /(^|\s)@(?:ACK|RESTORE|SHIFT|Q)\s*\{/.test(s);
+}
 
-  if (a) out.push({ text: a });
-  if (b) out.push({ text: b });
+function extractFirstJsonObjectAfterTag(text: string, tag: string): string | null {
+  const re = new RegExp(`(?:^|\\s)@${tag}\\s*\\{`, 'm');
+  const m = re.exec(text);
+  if (!m) return null;
 
-  // 2行 + 🪔（最大3行想定）
-  ensureEndSymbol(out, 3);
+  const start = m.index + m[0].lastIndexOf('{');
+  let i = start;
+  let depth = 0;
 
-  // 念のためクリーニング
-  const cleaned = out
-    .map((x) => ({ text: stripInternalLabels(String((x as any)?.text ?? '')) }))
-    .filter((x) => Boolean(norm(x.text)));
+  for (; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        return text.slice(start, i + 1);
+      }
+    }
+  }
+  return null;
+}
 
-  if (cleaned.length <= 3) return cleaned;
-  return cleaned.slice(0, 2).concat({ text: '🪔' });
+function safeJsonParse(jsonStr: string): any | null {
+  try {
+    return JSON.parse(jsonStr);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ✅ JSON.parse が死んでも「必要な1フィールドだけ」は拾う保険
+ * - "ask":"..." / "last":"..." / "user":"..."
+ */
+function extractFieldFromTagFallback(text: string, tag: string, field: string): string {
+  const re = new RegExp(
+    String.raw`(?:^|\s)@${tag}\s*\{[\s\S]*?"${field}"\s*:\s*"([^"]*)"`,
+    'm'
+  );
+  const m = re.exec(text);
+  if (!m) return '';
+  return (m[1] ?? '').trim();
+}
+
+function extractFieldAfterTag(text: string, tag: string, field: string): string {
+  const jsonObjStr = extractFirstJsonObjectAfterTag(text, tag);
+  if (jsonObjStr) {
+    const obj = safeJsonParse(jsonObjStr);
+    const v = typeof obj?.[field] === 'string' ? obj[field].trim() : '';
+    if (v) return v;
+  }
+  // ✅ fallback: parse失敗でも拾う
+  return extractFieldFromTagFallback(text, tag, field);
+}
+
+function renderSlotDirectivesToHuman(directives: string): string {
+  const user = extractFieldAfterTag(directives, 'ACK', 'user');
+  const last = extractFieldAfterTag(directives, 'RESTORE', 'last');
+  const ask = extractFieldAfterTag(directives, 'Q', 'ask');
+
+  const lines: string[] = [];
+
+  // ACK
+  lines.push(user ? 'うん、覚えてる。' : 'うん。');
+
+  // RESTORE
+  if (last) {
+    lines.push('');
+    lines.push(`いまの焦点は「${last}」だね。`);
+  }
+
+  // Q（1問だけ）
+  lines.push('');
+  lines.push(ask || 'どの場面を指してる？');
+
+  return lines.join('\n');
+}
+
+/**
+ * ✅ renderGateway の最終出力に対する最終防衛
+ */
+function finalizeNoDirectiveLeak(outText: string): string {
+  if (!looksLikeSlotDirectives(outText)) return outText;
+  return renderSlotDirectivesToHuman(outText);
+}
+
+
+
+
+/**
+ * ✅ 追加：renderGateway の「選択元(pickedFrom)」をログと一致させるためのフォールバック取得
+ * - rephrase が RECALL_GUARD で弾かれた場合など、route 側が slotPlanFallbackText を入れてくることがある
+ * - ここを拾わないと、pickedFrom が "none/content/assistantText/text" に偽装される
+ */
+function pickSlotPlanFallbackText(extra: any): string {
+  const nrm = (s: any) => String(s ?? '').replace(/\r\n/g, '\n').trim();
+
+  const t =
+    nrm((extra as any)?.slotPlanFallbackText) ||
+    nrm((extra as any)?.meta?.slotPlanFallbackText) ||
+    nrm((extra as any)?.extra?.slotPlanFallbackText) ||
+    nrm((extra as any)?.orch?.slotPlanFallbackText);
+
+  if (t) return t;
+
+  // 保険：slotPlanFallback がオブジェクトで来る系
+  const o =
+    (extra as any)?.slotPlanFallback ??
+    (extra as any)?.meta?.slotPlanFallback ??
+    (extra as any)?.extra?.slotPlanFallback ??
+    (extra as any)?.orch?.slotPlanFallback ??
+    null;
+
+  if (o && typeof o === 'object') {
+    const t2 = nrm((o as any)?.text ?? (o as any)?.content ?? (o as any)?.assistantText ?? '');
+    if (t2) return t2;
+  }
+
+  return '';
+}
+
+function sanitizeVisibleText(raw: string, opts?: { appendLamp?: boolean }): string {
+  let s = String(raw ?? '');
+
+  // 1) ゼロ幅文字を除去（「空行に見える謎の行」の主因）
+  s = s.replace(/[\u200B-\u200D\uFEFF]/g, '');
+
+  // 2) 句読点/記号だけの行を削除（「。」だけ等）
+  const isPunctOnlyLine = (line: string) =>
+    /^[\u3000\s]*[。．\.、,・:：;；!！\?？…]+[\u3000\s]*$/.test(line);
+
+  s = s
+    .split('\n')
+    .map((line) => line.replace(/\s+$/g, '')) // 行末の余計な空白
+    .filter((line) => !isPunctOnlyLine(line))
+    .join('\n');
+
+  // 3) 🪔は本文から全削除（混入事故の吸収）
+  s = s.replace(/🪔/g, '').trimEnd();
+
+  // 改行暴れ防止（任意）
+  s = s.replace(/\n{3,}/g, '\n\n');
+
+  // 4) 互換モード（renderEngine=false）だけ末尾に🪔を付ける
+  if (opts?.appendLamp) {
+    if (!s.endsWith('\n') && s.length > 0) s += '\n';
+    s += '🪔';
+  }
+
+  return s;
 }
 
 export function renderGatewayAsReply(args: {
@@ -465,12 +618,103 @@ export function renderGatewayAsReply(args: {
 
   // ✅ rephrase があるなら、それを最優先（slotplan由来のテンプレを上書き）
   const r0 = pickRephraseText(extra);
-  const picked = r0 || c1 || c2 || c3 || '';
-  const pickedFrom = r0 ? 'rephrase' : c1 ? 'content' : c2 ? 'assistantText' : c3 ? 'text' : 'none';
 
+  // ✅ 追加：rephrase が弾かれたとき等の「slotPlanFallbackText」を拾う（ログ整合）
+  const sf0 = pickSlotPlanFallbackText(extra);
+
+  // =========================================================
+  // ✅ slotPlan 内部指示（@ACK/@RESTORE/@Q...）の“露出事故”を表示用に変換
+  // - extra に slots が無いケースでも、最低限「人が読める文」に戻す
+  // =========================================================
+  const looksLikeSlotDirectives = (t: string) => {
+    const s = String(t ?? '');
+    if (!s) return false;
+    if (/^\s*@\w+\s*\{/.test(s)) return true;
+    if (s.includes('\n@ACK ') || s.includes('\n@RESTORE ') || s.includes('\n@Q ')) return true;
+    return false;
+  };
+
+  const parseDirectiveLine = (line: string): { key: string; obj: any } | null => {
+    const m = line.trim().match(/^@([A-Z_]+)\s+(\{.*\})\s*$/);
+    if (!m) return null;
+    const key = m[1];
+    const json = m[2];
+    try {
+      const obj = JSON.parse(json);
+      return { key, obj };
+    } catch {
+      return null;
+    }
+  };
+
+  const renderFromDirectives = (raw: string): string | null => {
+    const lines = norm(raw)
+      .split('\n')
+      .map((x) => x.trim())
+      .filter(Boolean);
+
+    const ds: Record<string, any> = {};
+    for (const ln of lines) {
+      const d = parseDirectiveLine(ln);
+      if (d) ds[d.key] = d.obj;
+    }
+
+    // 主要3つだけ使う（余計な付加はしない）
+    const out: string[] = [];
+
+    // ACK（recall_check のときだけ固定文）
+    if (ds.ACK?.kind === 'recall_check') out.push('うん、覚えてる。');
+
+    // RESTORE（last をそのまま復元）
+    const last = typeof ds.RESTORE?.last === 'string' ? ds.RESTORE.last.trim() : '';
+    if (last) out.push(`いまの焦点は「${last}」だね。`);
+
+    // Q（ask をそのまま出す）
+    const ask = typeof ds.Q?.ask === 'string' ? ds.Q.ask.trim() : '';
+    if (ask) out.push(ask);
+
+    if (out.length === 0) return null;
+    return out.join('\n');
+  };
+
+  // ---- pick order（rephrase > content > assistantText > text > slotPlanFallback）
+  let picked = r0 || c1 || c2 || c3 || sf0 || '';
+  let pickedFrom = r0
+    ? 'rephrase'
+    : c1
+      ? 'content'
+      : c2
+        ? 'assistantText'
+        : c3
+          ? 'text'
+          : sf0
+            ? 'slotPlanFallback'
+            : 'none';
+
+  // ✅ content/assistantText が “@指示文” っぽいなら、人が読む文に変換して差し替え
+  if (picked && looksLikeSlotDirectives(picked)) {
+    const rendered = renderFromDirectives(picked);
+    if (rendered) {
+      picked = rendered;
+      pickedFrom = 'slotDirectives';
+    } else {
+      // 変換できないなら、@行は落として空にする（露出はさせない）
+      picked = picked
+        .split('\n')
+        .filter((ln) => !ln.trim().startsWith('@'))
+        .join('\n')
+        .trim();
+      pickedFrom = picked ? 'slotDirectives_stripped' : 'slotDirectives_empty';
+    }
+  }
+
+
+  // renderEngine 無効時は「触らず返す」（ただし互換のため末尾 🪔 は付ける）
   if (!enable) {
+    const visible = sanitizeVisibleText(picked, { appendLamp: true });
+
     return {
-      content: picked,
+      content: visible,
       meta: {
         blocksCount: 0,
         maxLines: 0,
@@ -481,15 +725,14 @@ export function renderGatewayAsReply(args: {
         fallbackFrom: 'n/a',
         fallbackLen: 0,
         fallbackHead: '',
-        outLen: picked.length,
-        outHead: head(picked),
+        outLen: visible.length,
+        outHead: head(visible),
         rev: IROS_RENDER_GATEWAY_REV,
       },
     };
   }
 
   const EXPAND_ENABLED = envFlagEnabled(process.env.IROS_RENDER_EXPAND_ENABLED, true);
-
   const DEFAULT_MAX_LINES =
     Number(process.env.IROS_RENDER_DEFAULT_MAXLINES) > 0 ? Number(process.env.IROS_RENDER_DEFAULT_MAXLINES) : 8;
 
@@ -575,65 +818,46 @@ export function renderGatewayAsReply(args: {
       phase: extra?.phase ?? extra?.meta?.phase ?? extra?.extra?.phase ?? null,
     };
 
-// renderGateway.ts（あなたが貼った try { ... } 内）
-// logConvEvidence() の直前に追加して、ctx を補強する
+    // ✅ ctx.shortSummary を「確実に」埋める（evidenceLog.ts の判定を満たす）
+    const rawCtx = evCtx as any;
 
-const rawCtx = evCtx as any;
+    const ms: any =
+      (extra as any)?.memoryState ??
+      (extra as any)?.meta?.memoryState ??
+      (extra as any)?.orch?.memoryState ??
+      (extra as any)?.extra?.memoryState ??
+      null;
 
-// memoryState / situationSummary が extra のどこに居ても拾えるようにする（推測じゃなく「保険」）
-const ms: any =
-  (extra as any)?.memoryState ??
-  (extra as any)?.meta?.memoryState ??
-  (extra as any)?.orch?.memoryState ??
-  (extra as any)?.extra?.memoryState ??
-  null;
+    const situationSummaryText =
+      (extra as any)?.situationSummary ??
+      (extra as any)?.meta?.situationSummary ??
+      (extra as any)?.orch?.situationSummary ??
+      ms?.situation_summary ??
+      ms?.situationSummary ??
+      null;
 
-const situationSummaryText =
-  (extra as any)?.situationSummary ??
-  (extra as any)?.meta?.situationSummary ??
-  (extra as any)?.orch?.situationSummary ??
-  ms?.situation_summary ??
-  ms?.situationSummary ??
-  null;
+    const summaryText =
+      (extra as any)?.summary ?? (extra as any)?.meta?.summary ?? (extra as any)?.orch?.summary ?? ms?.summary ?? null;
 
-const summaryText =
-  (extra as any)?.summary ??
-  (extra as any)?.meta?.summary ??
-  (extra as any)?.orch?.summary ??
-  ms?.summary ??
-  null;
+    const derivedShortSummary =
+      (typeof situationSummaryText === 'string' && situationSummaryText.trim()) ||
+      (typeof summaryText === 'string' && summaryText.trim()) ||
+      '';
 
-// evidenceLog.ts が見るキー名は shortSummary（ここを確実に満たす）
-const derivedShortSummary =
-  (typeof situationSummaryText === 'string' && situationSummaryText.trim()) ||
-  (typeof summaryText === 'string' && summaryText.trim()) ||
-  '';
-
-const evCtxFixed = {
-  // ctxPack が null の可能性もあるので、最低限オブジェクト化
-  ...(rawCtx && typeof rawCtx === 'object' ? rawCtx : {}),
-  shortSummary:
-    (rawCtx?.shortSummary && String(rawCtx.shortSummary).trim()) ? rawCtx.shortSummary : derivedShortSummary || null,
-};
-
-logConvEvidence({
-  conversationId: evConversationId,
-  userCode: evUserCode,
-  userText: typeof evUserText === 'string' ? evUserText : null,
-  signals: evSignals,
-  ctx: evCtxFixed, // ← ここだけ差し替え
-  branch: evBranch,
-  slots: evSlots,
-  meta: evMeta,
-});
-
+    const evCtxFixed = {
+      ...(rawCtx && typeof rawCtx === 'object' ? rawCtx : {}),
+      shortSummary:
+        rawCtx?.shortSummary && String(rawCtx.shortSummary).trim()
+          ? rawCtx.shortSummary
+          : derivedShortSummary || null,
+    };
 
     logConvEvidence({
       conversationId: evConversationId,
       userCode: evUserCode,
       userText: typeof evUserText === 'string' ? evUserText : null,
       signals: evSignals,
-      ctx: evCtx,
+      ctx: evCtxFixed,
       branch: evBranch,
       slots: evSlots,
       meta: evMeta,
@@ -695,12 +919,8 @@ logConvEvidence({
   }
 
   // ✅ expand は “水増し生成” をしない（行数が少ないままでも良い）
-  // - 末尾 🪔 だけ統一
   const expandAllowed = EXPAND_ENABLED && !isSilence && !isIR;
-
-  // 現状 expandAllowed による分岐は“追加生成”がないので同一動作でOK（将来拡張用）
-  ensureEndSymbol(blocks, maxLinesFinal);
-
+  void expandAllowed; //（現状はログ用途のみ。将来分岐で使う）
 
   let content = renderV2({
     blocks,
@@ -709,8 +929,16 @@ logConvEvidence({
     allowUnder5: shortException,
   });
 
-  // ✅ 🪔直前の「空行が増える」事故を潰す（\n\n\n🪔 → \n🪔）
-  content = content.replace(/\n{2,}(?=🪔\s*$)/g, '\n');
+  // ✅ renderEngine=true のときは 🪔 を一切出さない（本文混入も含めて除去）
+  content = stripLampEverywhere(content);
+
+  // ✅ 最終表示テキストをサニタイズ（ゼロ幅/句読点だけ行/🪔混入を除去）
+  // - renderEngine=true(enable=true) のときは 🪔 を復活させない
+  // - renderEngine=false(enable=false) の互換用途だけ末尾 🪔 を付ける
+  content = sanitizeVisibleText(content);
+
+  // ✅ 最終防衛：directive を人間文に変換（LLM落ち・rephrase reject 含む）
+  content = finalizeNoDirectiveLeak(content);
 
   const meta = {
     blocksCount: blocks.length,

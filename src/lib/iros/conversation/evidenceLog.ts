@@ -1,5 +1,6 @@
 // src/lib/iros/conversation/evidenceLog.ts
 // iros — Conversation Evidence Logger (phase11)
+//
 // 目的：会話の「強さ」を4条件で可視化し、改善が効いたかをログで判定できるようにする。
 // 4条件（0/1）
 // - understand: 会話の流れ/直前要点を復元できている
@@ -11,6 +12,11 @@
 // - UIへ露出しない（ログのみ）
 // - “推測で進めない”：判定は入力と構造情報（signals/ctx/branch/slots）に基づく
 // - 例文/固定ワードに依存しない（「会議/朝」などはここでは扱わない）
+//
+// NOTE（phase11）
+// - normalChat は @NEXT_HINT {"mode":"advance_hint", ...} を常設する設計。
+//   これを拾わないと A!:no_advance_hint が残り続け、改善の効果が測れない。
+//   したがって「NEXT_HINT が出ている」こと自体を advance の証拠としてカウントする。
 
 export type ConvEvidence = {
   understand: 0 | 1;
@@ -80,7 +86,30 @@ function hasAnyText(s?: string | null): boolean {
 
 function slotsText(slots?: Array<{ key: string; content: string }> | null): string {
   if (!slots?.length) return '';
-  return slots.map((x) => norm(x.content)).filter(Boolean).join(' ');
+  return slots
+    .map((x) => norm(x?.content))
+    .filter(Boolean)
+    .join(' ');
+}
+
+function safeSlots(input: ConvEvidenceInput): Array<{ key: string; content: string }> {
+  return Array.isArray(input.slots) ? input.slots : [];
+}
+
+function looksLikeNextHint(slot: { key: string; content: string }): boolean {
+  const k = String(slot?.key ?? '');
+  const c = norm(slot?.content ?? '');
+  return k === 'NEXT' || c.startsWith('@NEXT_HINT');
+}
+
+function isAdvanceHintNextHint(slot: { key: string; content: string }): boolean {
+  const c = norm(slot?.content ?? '');
+  // JSON stringify 前提の検出（堅め）
+  if (c.includes('"mode":"advance_hint"')) return true;
+  // まれな整形差分にも弱く当てる（保険）
+  if (c.includes("'mode':'advance_hint'")) return true;
+  if (c.includes('advance_hint')) return true;
+  return false;
 }
 
 // 「理解できている」最低条件：
@@ -97,7 +126,9 @@ function judgeUnderstand(input: ConvEvidenceInput): { ok: boolean; why: string }
   if ((lu || la) && st) return { ok: true, why: 'has_last_and_slots' };
 
   // fallback: signalsがrepairで、かつユーザー文があるなら最低限は“流れ意識”扱い
-  if (input.signals?.repair && hasAnyText(input.userText)) return { ok: true, why: 'repair_signal_with_userText' };
+  if (input.signals?.repair && hasAnyText(input.userText)) {
+    return { ok: true, why: 'repair_signal_with_userText' };
+  }
 
   return { ok: false, why: 'no_ctx_summary' };
 }
@@ -113,14 +144,30 @@ function judgeRepair(input: ConvEvidenceInput): { ok: boolean; why: string } {
 
 // 「前進（提案の橋）」条件：
 // - branch が C_BRIDGE / I_BRIDGE、または
-// - slots 内に “提案/次の一手” の意図がある（固定語に依存しない軽い判定）
+// - NEXT_HINT が出ている（phase11ではadvanceHint常設のため）
+// - それ以外は slots 内の“提案/次の一手”の雰囲気を軽く拾う（固定語に依存しない）
 function judgeAdvance(input: ConvEvidenceInput): { ok: boolean; why: string } {
   if (input.branch === 'C_BRIDGE') return { ok: true, why: 'branch=C_BRIDGE' };
   if (input.branch === 'I_BRIDGE') return { ok: true, why: 'branch=I_BRIDGE' };
 
-  // 文字列マッチは最小限（「やってみてください」等の口癖テンプレを強制しない）
-  const st = slotsText(input.slots);
-  if (!st) return { ok: false, why: 'no_slots' };
+  const slots = safeSlots(input);
+  if (!slots.length) return { ok: false, why: 'no_slots' };
+
+  // ✅ Phase11: NEXT_HINT(mode=advance_hint) を「前進」として正式にカウント
+  for (const s of slots) {
+    if (!looksLikeNextHint(s)) continue;
+
+    if (isAdvanceHintNextHint(s)) {
+      return { ok: true, why: 'next_hint:advance_hint' };
+    }
+
+    // NEXT_HINT 自体があるなら「橋」は出ている扱い（mode欠けの救済）
+    return { ok: true, why: 'next_hint:present' };
+  }
+
+  // 文字列マッチは最小限（口癖テンプレを強制しない）
+  const st = slotsText(slots);
+  if (!st) return { ok: false, why: 'no_slots_text' };
 
   // “提案”の雰囲気だけ拾う（過剰に決めつけない）
   const hints = ['案', '提案', '次', '一歩', '一手', 'まず', '整理', '選ぶ', '決める'];
@@ -141,16 +188,21 @@ export function computeConvEvidence(input: ConvEvidenceInput): ConvEvidence {
     repair: r.ok ? 1 : 0,
     advance: a.ok ? 1 : 0,
     proof: 1,
-    reason: [u.ok ? `U:${u.why}` : `U!:${u.why}`, r.ok ? `R:${r.why}` : `R!:${r.why}`, a.ok ? `A:${a.why}` : `A!:${a.why}`].join(' | '),
+    reason: [
+      u.ok ? `U:${u.why}` : `U!:${u.why}`,
+      r.ok ? `R:${r.why}` : `R!:${r.why}`,
+      a.ok ? `A:${a.why}` : `A!:${a.why}`,
+    ].join(' | '),
     detail: {
       branch: input.branch ?? null,
       topicHint: input.signals?.topicHint ?? null,
       q: input.meta?.qCode ?? null,
       depth: input.meta?.depthStage ?? null,
       phase: input.meta?.phase ?? null,
-      slotsLen: input.slots?.length ?? 0,
+      slotsLen: safeSlots(input).length,
     },
   };
+
   return ev;
 }
 

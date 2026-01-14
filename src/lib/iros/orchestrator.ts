@@ -17,6 +17,8 @@ import {
 import { clampSelfAcceptance } from './orchestratorMeaning';
 import { computeSpinState } from './orchestratorSpin';
 import { buildNormalChatSlotPlan } from './slotPlans/normalChat';
+import { buildCounselSlotPlan } from './slotPlans/counsel';
+import { buildFlagReplySlots } from './slotPlans/flagReply';
 
 // 解析フェーズ（Unified / depth / Q / SA / YH / IntentLine / T層）
 import {
@@ -52,11 +54,9 @@ import { applySoul } from './orchestratorSoul';
 // IT Trigger
 import { computeITTrigger } from '@/lib/iros/rotation/computeITTrigger';
 import { detectIMode } from './iMode';
+
 import { extractAnchorEvidence } from '@/lib/iros/anchor/extractAnchorEvidence';
 import { detectAnchorEntry } from '@/lib/iros/anchor/AnchorEntryDetector';
-
-import { buildCounselSlotPlan } from './slotPlans/counsel';
-
 
 // Person Intent Memory（ir診断）
 import { savePersonIntentState } from './memory/savePersonIntent';
@@ -401,53 +401,52 @@ export async function runIrosTurn(
     (meta as any).fixedNorth = FIXED_NORTH;
   }
 
-// =========================================================
-// ✅ [PHASE11 FIX] intent_anchor を meta に「正式キー」として載せる（LLM/Writer/Orch観測用）
-// - DB/MemoryState に既に入っている intent_anchor を “metaへ反映” する
-// - 形ゆれ（string/object, snake/camel）を吸って「正規形」にする
-// - ここでは “固定北” と “intent_anchor” を混同しない（別キー）
-// - ✅ Orchestrator が見る camel キー（intentAnchorKey / hasIntentAnchor）も必ず張る
-// =========================================================
-{
-  const fromBase =
-    (mergedBaseMeta as any)?.intent_anchor ??
-    (mergedBaseMeta as any)?.intentAnchor ??
-    null;
+  // =========================================================
+  // ✅ [PHASE11 FIX] intent_anchor を meta に「正式キー」として載せる（LLM/Writer/Orch観測用）
+  // - DB/MemoryState に既に入っている intent_anchor を “metaへ反映” する
+  // - 形ゆれ（string/object, snake/camel）を吸って「正規形」にする
+  // - ここでは “固定北” と “intent_anchor” を混同しない（別キー）
+  // - ✅ Orchestrator が見る camel キー（intentAnchorKey / hasIntentAnchor）も必ず張る
+  // =========================================================
+  {
+    const fromBase =
+      (mergedBaseMeta as any)?.intent_anchor ??
+      (mergedBaseMeta as any)?.intentAnchor ??
+      null;
 
-  const fromMemory =
-    (ms as any)?.intent_anchor ??
-    (ms as any)?.intentAnchor ??
-    (memoryState as any)?.intent_anchor ??
-    (memoryState as any)?.intentAnchor ??
-    null;
+    const fromMemory =
+      (ms as any)?.intent_anchor ??
+      (ms as any)?.intentAnchor ??
+      (memoryState as any)?.intent_anchor ??
+      (memoryState as any)?.intentAnchor ??
+      null;
 
-  const already =
-    (meta as any)?.intent_anchor ??
-    (meta as any)?.intentAnchor ??
-    null;
+    const already =
+      (meta as any)?.intent_anchor ?? (meta as any)?.intentAnchor ?? null;
 
-  const normalized =
-    normalizeIntentAnchor(already) ??
-    normalizeIntentAnchor(fromBase) ??
-    normalizeIntentAnchor(fromMemory) ??
-    null;
+    const normalized =
+      normalizeIntentAnchor(already) ??
+      normalizeIntentAnchor(fromBase) ??
+      normalizeIntentAnchor(fromMemory) ??
+      null;
 
-  const key =
-    normalized && typeof (normalized as any).key === 'string'
-      ? (normalized as any).key
-      : null;
+    const key =
+      normalized && typeof (normalized as any).key === 'string'
+        ? (normalized as any).key
+        : null;
 
-  // ✅ single source of truth（camel + snake を同時に張る）
-  (meta as any).intent_anchor = normalized;
-  (meta as any).intentAnchor = normalized;
+    // ✅ single source of truth（camel + snake を同時に張る）
+    (meta as any).intent_anchor = normalized;
+    (meta as any).intentAnchor = normalized;
 
-  // ✅ key も camel + snake
-  (meta as any).intent_anchor_key = key;
-  (meta as any).intentAnchorKey = key;
+    // ✅ key も camel + snake
+    (meta as any).intent_anchor_key = key;
+    (meta as any).intentAnchorKey = key;
 
-  // ✅ Orchestrator の観測用（ログの hasIntentAnchor を一致させる）
-  (meta as any).hasIntentAnchor = !!key;
-}
+    // ✅ Orchestrator の観測用（ログの hasIntentAnchor を一致させる）
+    (meta as any).hasIntentAnchor = !!key;
+  }
+
   // ----------------------------------------------------------------
   // C) 揺らぎ×ヒステリシス → 回転ギア確定（metaに反映）
   // ----------------------------------------------------------------
@@ -523,7 +522,8 @@ export async function runIrosTurn(
     lastGoalKind: (lastGoalKind ?? undefined) as any,
     previousUncoverStreak,
     phase: (meta as any).phase ?? null,
-    spinLoop: (typeof lastSpinLoop !== 'undefined' ? lastSpinLoop : null) ?? null,
+    spinLoop:
+      (typeof lastSpinLoop !== 'undefined' ? lastSpinLoop : null) ?? null,
     descentGate:
       (typeof lastDescentGate !== 'undefined' ? lastDescentGate : null) ?? null,
   });
@@ -612,72 +612,66 @@ export async function runIrosTurn(
       }
     }
   }
-// =========================================================
-// ✅ [PHASE11 FIX] itx_* を meta に同期（prevIt_fromMeta を復活させる）
-// - 主ソースは MemoryState(ms) / memoryState
-// - “camel + snake” を同時に張る（矛盾ゼロ）
-// - ここでは意味生成しない：既にある値を meta に載せるだけ
-// - computeITTrigger の前に必ず実行する
-// =========================================================
-{
-  const fromMs =
-    (ms as any)?.itx_step ??
-    (ms as any)?.itxStep ??
-    (memoryState as any)?.itx_step ??
-    (memoryState as any)?.itxStep ??
-    null;
 
-  const fromReason =
-    (ms as any)?.itx_reason ??
-    (ms as any)?.itxReason ??
-    (memoryState as any)?.itx_reason ??
-    (memoryState as any)?.itxReason ??
-    null;
+  // =========================================================
+  // ✅ [PHASE11 FIX] itx_* を meta に同期（prevIt_fromMeta を復活させる）
+  // - 主ソースは MemoryState(ms) / memoryState
+  // - “camel + snake” を同時に張る（矛盾ゼロ）
+  // - ここでは意味生成しない：既にある値を meta に載せるだけ
+  // - computeITTrigger の前に必ず実行する
+  // =========================================================
+  {
+    const fromMs =
+      (ms as any)?.itx_step ??
+      (ms as any)?.itxStep ??
+      (memoryState as any)?.itx_step ??
+      (memoryState as any)?.itxStep ??
+      null;
 
-  const fromLastAt =
-    (ms as any)?.itx_last_at ??
-    (ms as any)?.itxLastAt ??
-    (memoryState as any)?.itx_last_at ??
-    (memoryState as any)?.itxLastAt ??
-    null;
+    const fromReason =
+      (ms as any)?.itx_reason ??
+      (ms as any)?.itxReason ??
+      (memoryState as any)?.itx_reason ??
+      (memoryState as any)?.itxReason ??
+      null;
 
-  // すでに meta にあるなら meta 優先（ただし空は上書き）
-  const stepNow =
-    (meta as any)?.itx_step ??
-    (meta as any)?.itxStep ??
-    null;
+    const fromLastAt =
+      (ms as any)?.itx_last_at ??
+      (ms as any)?.itxLastAt ??
+      (memoryState as any)?.itx_last_at ??
+      (memoryState as any)?.itxLastAt ??
+      null;
 
-  const reasonNow =
-    (meta as any)?.itx_reason ??
-    (meta as any)?.itxReason ??
-    null;
+    // すでに meta にあるなら meta 優先（ただし空は上書き）
+    const stepNow = (meta as any)?.itx_step ?? (meta as any)?.itxStep ?? null;
 
-  const lastAtNow =
-    (meta as any)?.itx_last_at ??
-    (meta as any)?.itxLastAt ??
-    null;
+    const reasonNow =
+      (meta as any)?.itx_reason ?? (meta as any)?.itxReason ?? null;
 
-  const stepFinal = stepNow || fromMs || null;
-  const reasonFinal = reasonNow || fromReason || null;
-  const lastAtFinal = lastAtNow || fromLastAt || null;
+    const lastAtNow =
+      (meta as any)?.itx_last_at ?? (meta as any)?.itxLastAt ?? null;
 
-  // ✅ camel + snake で同期
-  (meta as any).itx_step = stepFinal;
-  (meta as any).itxStep = stepFinal;
+    const stepFinal = stepNow || fromMs || null;
+    const reasonFinal = reasonNow || fromReason || null;
+    const lastAtFinal = lastAtNow || fromLastAt || null;
 
-  (meta as any).itx_reason = reasonFinal;
-  (meta as any).itxReason = reasonFinal;
+    // ✅ camel + snake で同期
+    (meta as any).itx_step = stepFinal;
+    (meta as any).itxStep = stepFinal;
 
-  (meta as any).itx_last_at = lastAtFinal;
-  (meta as any).itxLastAt = lastAtFinal;
+    (meta as any).itx_reason = reasonFinal;
+    (meta as any).itxReason = reasonFinal;
 
-  // ✅ prevIt_fromMeta.active の材料：IT_TRIGGER_OK が見えていれば active 扱い
-  const active =
-    typeof reasonFinal === 'string' && reasonFinal.includes('IT_TRIGGER_OK');
+    (meta as any).itx_last_at = lastAtFinal;
+    (meta as any).itxLastAt = lastAtFinal;
 
-  (meta as any).it_triggered = active;
-  (meta as any).itTriggered = active;
-}
+    // ✅ prevIt_fromMeta.active の材料：IT_TRIGGER_OK が見えていれば active 扱い
+    const active =
+      typeof reasonFinal === 'string' && reasonFinal.includes('IT_TRIGGER_OK');
+
+    (meta as any).it_triggered = active;
+    (meta as any).itTriggered = active;
+  }
 
   // ----------------------------------------------------------------
   // 7.75 IT Trigger（I→T の扉） + I語彙の表出許可
@@ -730,75 +724,75 @@ export async function runIrosTurn(
       tVector: it.tVector,
     });
 
-// =========================================================
-// ✅ Single source：IT結果を “camel + snake” に同時反映（矛盾ゼロ）
-// =========================================================
-const itOk = it.ok === true;
-const itReason = it.reason ?? null;
+    // =========================================================
+    // ✅ Single source：IT結果を “camel + snake” に同時反映（矛盾ゼロ）
+    // =========================================================
+    const itOk = it.ok === true;
+    const itReason = it.reason ?? null;
 
-// ✅ T3確定（commit済み）なら：itTriggered / itx_reason を probe で上書きしない
-const committedStep =
-  (meta as any)?.itx_step ??
-  (meta as any)?.itxStep ??
-  (ms as any)?.itx_step ??
-  (ms as any)?.itxStep ??
-  null;
+    // ✅ T3確定（commit済み）なら：itTriggered / itx_reason を probe で上書きしない
+    const committedStep =
+      (meta as any)?.itx_step ??
+      (meta as any)?.itxStep ??
+      (ms as any)?.itx_step ??
+      (ms as any)?.itxStep ??
+      null;
 
-const isCommittedT3 = committedStep === 'T3';
+    const isCommittedT3 = committedStep === 'T3';
 
-// ok/reason：camel + snake
-if (isCommittedT3) {
-  // そのターンの判定理由は “probe理由” として別枠に退避（確定状態は維持）
-  (meta as any).itx_probe_reason = itReason;
+    // ok/reason：camel + snake
+    if (isCommittedT3) {
+      // そのターンの判定理由は “probe理由” として別枠に退避（確定状態は維持）
+      (meta as any).itx_probe_reason = itReason;
 
-  // 確定状態は維持（false に戻さない）
-  (meta as any).itTriggered = true;
-  (meta as any).it_triggered = true;
+      // 確定状態は維持（false に戻さない）
+      (meta as any).itTriggered = true;
+      (meta as any).it_triggered = true;
 
-  // itxReason / itx_reason は「確定値」を維持（ここでは代入しない）
-} else {
-  (meta as any).itTriggered = itOk;
-  (meta as any).it_triggered = itOk;
+      // itxReason / itx_reason は「確定値」を維持（ここでは代入しない）
+    } else {
+      (meta as any).itTriggered = itOk;
+      (meta as any).it_triggered = itOk;
 
-  (meta as any).itxReason = itReason;
-  (meta as any).itx_reason = itReason;
-}
+      (meta as any).itxReason = itReason;
+      (meta as any).itx_reason = itReason;
+    }
 
-// iLexemeForce：sticky true（camel + snake）
-const iLexemeForceNext =
-  (meta as any).iLexemeForce === true || (it as any).iLexemeForce === true;
-(meta as any).iLexemeForce = iLexemeForceNext;
-(meta as any).i_lexeme_force = iLexemeForceNext;
+    // iLexemeForce：sticky true（camel + snake）
+    const iLexemeForceNext =
+      (meta as any).iLexemeForce === true || (it as any).iLexemeForce === true;
+    (meta as any).iLexemeForce = iLexemeForceNext;
+    (meta as any).i_lexeme_force = iLexemeForceNext;
 
-// Tレーン：sticky禁止（毎ターン決定）
-const tActive = itOk && it.tLayerModeActive === true;
-const tHint = tActive ? (it.tLayerHint ?? 'T2') : null;
-const tVector = tActive ? (it.tVector ?? null) : null;
+    // Tレーン：sticky禁止（毎ターン決定）
+    const tActive = itOk && it.tLayerModeActive === true;
+    const tHint = tActive ? (it.tLayerHint ?? 'T2') : null;
+    const tVector = tActive ? (it.tVector ?? null) : null;
 
-// camel + snake
-(meta as any).tLayerModeActive = tActive;
-(meta as any).t_layer_mode_active = tActive;
+    // camel + snake
+    (meta as any).tLayerModeActive = tActive;
+    (meta as any).t_layer_mode_active = tActive;
 
-(meta as any).tLayerHint = tHint;
-(meta as any).t_layer_hint = tHint;
+    (meta as any).tLayerHint = tHint;
+    (meta as any).t_layer_hint = tHint;
 
-(meta as any).tVector = tVector;
-(meta as any).t_vector = tVector;
+    (meta as any).tVector = tVector;
+    (meta as any).t_vector = tVector;
 
-if (typeof process !== 'undefined' && process.env.DEBUG_IROS_IT === '1') {
-  console.log('[IROS/IT_TRIGGER]', {
-    ok: itOk,
-    reason: itReason,
-    flags: it.flags,
-    iLexemeForce: iLexemeForceNext,
-    tLayerModeActive: tActive,
-    tLayerHint: tHint,
-    tVector,
-    isCommittedT3,
-    committedStep,
-    itx_probe_reason: (meta as any).itx_probe_reason ?? null,
-  });
-}
+    if (typeof process !== 'undefined' && process.env.DEBUG_IROS_IT === '1') {
+      console.log('[IROS/IT_TRIGGER]', {
+        ok: itOk,
+        reason: itReason,
+        flags: it.flags,
+        iLexemeForce: iLexemeForceNext,
+        tLayerModeActive: tActive,
+        tLayerHint: tHint,
+        tVector,
+        isCommittedT3,
+        committedStep,
+        itx_probe_reason: (meta as any).itx_probe_reason ?? null,
+      });
+    }
   }
 
   // ----------------------------------------------------------------
@@ -840,348 +834,438 @@ if (typeof process !== 'undefined' && process.env.DEBUG_IROS_IT === '1') {
 
     meta = r.meta;
 
-// =========================================================
-// ✅ T3 Anchor Entry（証拠ベースでのみ開く）
-// - UI証拠（nextStepChoiceId 等）が無い場合は、限定条件つきで「テキスト証拠」を生成する
-//   - fixedNorth=SUN かつ itActive=true のときだけ
-//   - COMMIT系 → action
-//   - HOLD系（継続します等）→ intent_anchor が既にある場合だけ reconfirm
-// - DBカラム追加なし：itx_step / itx_anchor_event_type / intent_anchor に刻む
-// =========================================================
-{
-  const norm = (s: unknown) => String(s ?? '').replace(/\s+/g, ' ').trim();
+    // =========================================================
+    // ✅ T3 Anchor Entry（証拠ベースでのみ開く）
+    // - UI証拠（nextStepChoiceId 等）が無い場合は、限定条件つきで「テキスト証拠」を生成する
+    //   - fixedNorth=SUN かつ itActive=true のときだけ
+    //   - COMMIT系 → action
+    //   - HOLD系（継続します等）→ intent_anchor が既にある場合だけ reconfirm
+    // - DBカラム追加なし：itx_step / itx_anchor_event_type / intent_anchor に刻む
+    // =========================================================
+    {
+      const norm = (s: unknown) => String(s ?? '').replace(/\s+/g, ' ').trim();
 
-  const fixedNorthKey =
-    typeof (meta as any)?.fixedNorth?.key === 'string'
-      ? String((meta as any).fixedNorth.key)
-      : typeof (meta as any)?.fixedNorth === 'string'
-        ? String((meta as any).fixedNorth)
+      const fixedNorthKey =
+        typeof (meta as any)?.fixedNorth?.key === 'string'
+          ? String((meta as any).fixedNorth.key)
+          : typeof (meta as any)?.fixedNorth === 'string'
+            ? String((meta as any).fixedNorth)
+            : null;
+
+      // ✅ “ITが生きているか” は「今回meta」優先 → 無ければ MemoryState を保険に
+      const itReasonNow = String(
+        (meta as any)?.itx_reason ?? (meta as any)?.itxReason ?? '',
+      );
+      const itReasonPrev = String(
+        (ms as any)?.itx_reason ?? (ms as any)?.itxReason ?? '',
+      );
+      const itActive =
+        itReasonNow.includes('IT_TRIGGER_OK') ||
+        itReasonPrev.includes('IT_TRIGGER_OK');
+
+      // ✅ intent_anchor の有無（MemoryStateを主として判定）
+      const hasAnchorAlready = Boolean(
+        normalizeIntentAnchor(
+          (ms as any)?.intent_anchor ?? (ms as any)?.intentAnchor ?? null,
+        ),
+      );
+
+      const COMMIT_RE =
+        /(ここにコミット|コミットする|これでいく|これで行く|決めた|決めました|固定する|固定します|北極星にする|SUNにする)/;
+
+      const HOLD_RE =
+        /^(継続する|継続します|続ける|続けます|やる|やります|進める|進みます|守る|守ります)$/u;
+
+      // 1) まずは既存の UI 証拠を拾う
+      const uiEvidence = extractAnchorEvidence({
+        meta,
+        extra: meta && typeof meta === 'object' ? (meta as any).extra : null,
+      });
+
+      // evidence は「常にオブジェクト」にして downstream を安定させる
+      let evidence: {
+        choiceId?: string | null;
+        actionId?: string | null;
+        source?: string | null;
+      } = uiEvidence && typeof uiEvidence === 'object' ? (uiEvidence as any) : {};
+
+      // 2) UI証拠が無ければ「テキスト証拠」を生成（※SUN固定 + IT active のときだけ）
+      const userT = norm(text);
+      const noUiEvidence = !evidence?.choiceId && !evidence?.actionId;
+
+      if (noUiEvidence && fixedNorthKey === 'SUN' && itActive) {
+        // 強いコミット → action（T3コミット候補）
+        if (COMMIT_RE.test(userT)) {
+          evidence = {
+            ...evidence,
+            // detectAnchorEntry が choiceId 前提でも落ちないように “合成ID” を入れる
+            choiceId: evidence?.choiceId ?? 'FN_SUN',
+            actionId: 'action',
+            source: 'text',
+          };
+        }
+        // 短い継続宣言 → 既に anchor があるときだけ reconfirm（ダダ漏れ防止）
+        else if (hasAnchorAlready && HOLD_RE.test(userT)) {
+          evidence = {
+            ...evidence,
+            choiceId: evidence?.choiceId ?? 'FN_SUN',
+            actionId: 'reconfirm',
+            source: 'text',
+          };
+        }
+      }
+
+      const anchorDecision = detectAnchorEntry({
+        choiceId: evidence?.choiceId ?? null,
+        actionId: evidence?.actionId ?? null,
+        nowIso: new Date().toISOString(),
+        state: {
+          itx_step: (ms as any)?.itx_step ?? (ms as any)?.itxStep ?? null,
+          itx_last_at:
+            (ms as any)?.itx_last_at ?? (ms as any)?.itxLastAt ?? null,
+          intent_anchor:
+            (ms as any)?.intent_anchor ?? (ms as any)?.intentAnchor ?? null,
+        },
+      });
+
+      const payload = {
+        evidence,
+        decision: {
+          tEntryOk: anchorDecision.tEntryOk,
+          anchorEvent: anchorDecision.anchorEvent,
+          anchorWrite: anchorDecision.anchorWrite,
+          reason: anchorDecision.reason,
+        },
+        fixedNorthKey,
+        itActive,
+        hasAnchorAlready,
+      };
+
+      console.log(
+        `[IROS/ANCHOR_ENTRY] ${JSON.stringify(payload, (_k, v) =>
+          v === undefined ? null : v,
+        )}`,
+      );
+
+      // ✅ persist 側が拾える形で meta に刻む（DB列はここを参照する）
+      (meta as any).anchorEntry = {
+        evidence,
+        decision: {
+          tEntryOk: anchorDecision.tEntryOk,
+          anchorEvent: anchorDecision.anchorEvent, // 'action' など
+          anchorWrite: anchorDecision.anchorWrite, // 'commit' など
+          reason: anchorDecision.reason,
+        },
+      };
+
+      // ✅ 形ゆれ対策（pickAnchorEntry が拾えるようにフラットも入れる）
+      (meta as any).anchor_event = anchorDecision.anchorEvent;
+      (meta as any).anchor_write = anchorDecision.anchorWrite;
+      (meta as any).anchorEvidenceSource = evidence?.source ?? null;
+
+      if (anchorDecision.tEntryOk && anchorDecision.anchorWrite === 'commit') {
+        const p = anchorDecision.patch;
+
+        (meta as any).itx_step = p.itx_step; // 'T3'
+        (meta as any).itx_anchor_event_type = p.itx_anchor_event_type; // choice/action/reconfirm
+
+        // ✅ intent_anchor は正規化して載せる（camel + snake）
+        // patch が空でも “既存 or fixedNorthKey” を必ず保持する
+        const ia =
+          normalizeIntentAnchor(
+            p.intent_anchor ??
+              (meta as any).intent_anchor ??
+              (meta as any).intentAnchor ??
+              (fixedNorthKey ? { key: fixedNorthKey } : null),
+          ) ?? null;
+
+        (meta as any).intent_anchor = ia;
+        (meta as any).intentAnchor = ia;
+        (meta as any).intent_anchor_key =
+          ia && typeof (ia as any).key === 'string' ? (ia as any).key : null;
+
+        (meta as any).anchor_event_type = p.itx_anchor_event_type;
+        (meta as any).itx_last_at = new Date().toISOString();
+      }
+    }
+
+    // =========================================================
+    // ✅ slotPlan 配線（flagReply → counsel → normalChat fallback）
+    // - Record<string,true> に潰さない（render-v2 が本文を組めなくなる）
+    // - meta.framePlan.slots は “slot objects 配列” を入れる
+    // - slotPlanPolicy を meta / framePlan に必ず伝播
+    // - fallback は「slots が空」or「policy が空」のときだけ
+    // =========================================================
+
+    const slotsRaw = (r as any).slotPlan?.slots ?? (r as any).slotPlan ?? null;
+
+    // 1) まず slots は “配列だけ” を採用（それ以外は null）
+    let slotsArr: any[] | null = Array.isArray(slotsRaw) ? slotsRaw : null;
+
+    // 2) policy 候補
+    const slotPlanPolicyRaw =
+      (r as any).slotPlan?.slotPlanPolicy ??
+      (r as any).slotPlanPolicy ??
+      (r as any)?.framePlan?.slotPlanPolicy ??
+      null;
+
+    let slotPlanPolicy: string | null =
+      typeof slotPlanPolicyRaw === 'string' && slotPlanPolicyRaw.trim()
+        ? slotPlanPolicyRaw.trim()
         : null;
 
-  // ✅ “ITが生きているか” は「今回meta」優先 → 無ければ MemoryState を保険に
-  const itReasonNow = String(
-    (meta as any)?.itx_reason ?? (meta as any)?.itxReason ?? '',
-  );
-  const itReasonPrev = String(
-    (ms as any)?.itx_reason ?? (ms as any)?.itxReason ?? '',
-  );
-  const itActive =
-    itReasonNow.includes('IT_TRIGGER_OK') || itReasonPrev.includes('IT_TRIGGER_OK');
+    // 3) SILENCE 判定
+    const speechAct = String((meta as any)?.speechAct ?? '').toUpperCase();
+    const speechAllowLLM = (meta as any)?.speechAllowLLM;
+    const isSilence = speechAct === 'SILENCE' || speechAllowLLM === false;
 
-  // ✅ intent_anchor の有無（MemoryStateを主として判定）
-  const hasAnchorAlready = Boolean(
-    normalizeIntentAnchor((ms as any)?.intent_anchor ?? (ms as any)?.intentAnchor ?? null),
-  );
+    // 4) 空判定
+    const hasText = String(text ?? '').trim().length > 0;
 
-  const COMMIT_RE =
-    /(ここにコミット|コミットする|これでいく|これで行く|決めた|決めました|固定する|固定します|北極星にする|SUNにする)/;
+    const slotsEmpty0 = !Array.isArray(slotsArr) || slotsArr.length === 0;
+    const policyEmpty0 =
+      !slotPlanPolicy || String(slotPlanPolicy).trim().length === 0;
 
-  const HOLD_RE =
-    /^(継続する|継続します|続ける|続けます|やる|やります|進める|進みます|守る|守ります)$/u;
+    // =========================================================
+    // ✅ flagReply 条件（ここだけで “いつ立つか” を調整）
+    // - fact/lookup は除外（答えが必要な質問は normalChat 側）
+    // =========================================================
+    function shouldUseFlagReply(metaLike: any, t0: string) {
+      const t = String(t0 ?? '').trim();
+      if (!t) return false;
 
-  // 1) まずは既存の UI 証拠を拾う
-  const uiEvidence = extractAnchorEvidence({
-    meta,
-    extra: meta && typeof meta === 'object' ? (meta as any).extra : null,
-  });
+      const inputKind = String(metaLike?.inputKind ?? '').toLowerCase();
+      const factish =
+        inputKind === 'fact' ||
+        inputKind === 'lookup' ||
+        inputKind === 'qa' ||
+        inputKind === 'howto';
+      if (factish) return false;
 
-  // evidence は「常にオブジェクト」にして downstream を安定させる
-  let evidence: { choiceId?: string | null; actionId?: string | null; source?: string | null } =
-    uiEvidence && typeof uiEvidence === 'object' ? (uiEvidence as any) : {};
+      const goalKind = String(
+        metaLike?.goal?.kind ?? metaLike?.priority?.goal?.kind ?? '',
+      ).toLowerCase();
 
-  // 2) UI証拠が無ければ「テキスト証拠」を生成（※SUN固定 + IT active のときだけ）
-  const userT = norm(text);
-  const noUiEvidence = !evidence?.choiceId && !evidence?.actionId;
+      const consultish =
+        goalKind === 'uncover' ||
+        goalKind === 'stabilize' ||
+        goalKind === 'repair' ||
+        goalKind === 'counsel';
 
-  if (noUiEvidence && fixedNorthKey === 'SUN' && itActive) {
-    // 強いコミット → action（T3コミット候補）
-    if (COMMIT_RE.test(userT)) {
-      evidence = {
-        ...evidence,
-        // detectAnchorEntry が choiceId 前提でも落ちないように “合成ID” を入れる
-        choiceId: evidence?.choiceId ?? 'FN_SUN',
-        actionId: 'action',
-        source: 'text',
-      };
+      const directTask =
+        /(文面|文章|手順|要点|まとめ|作って|書いて|整えて|テンプレ|仕様|設計)/.test(t);
+
+      const wantsStructure =
+        /(どれ|どっち|どう|どうしたら|どうすれば|何から|決められない|迷う|悩む|整理|要点|まとめ|結論|モヤ|引っかか|進まない|止まる)/.test(
+          t,
+        );
+
+      // “短い内的相談” は flagReply の DYNAMICS/DEBLAME が効く
+      const innerShort =
+        t.length <= 40 &&
+        /(しんど|つら|怖|不安|モヤ|やる気|止ま|進ま|わから)/.test(t);
+
+      return consultish || directTask || wantsStructure || innerShort;
     }
-    // 短い継続宣言 → 既に anchor があるときだけ reconfirm（ダダ漏れ防止）
-    else if (hasAnchorAlready && HOLD_RE.test(userT)) {
-      evidence = {
-        ...evidence,
-        choiceId: evidence?.choiceId ?? 'FN_SUN',
-        actionId: 'reconfirm',
-        source: 'text',
-      };
+
+    // =========================================================
+    // ✅ counsel 条件（モード or 構造）
+    // =========================================================
+    function shouldUseCounselByStructure(metaLike: any, t0: string) {
+      const t = String(t0 ?? '').trim();
+      if (!t) return false;
+
+      const goalKind = String(
+        metaLike?.goal?.kind ?? metaLike?.priority?.goal?.kind ?? '',
+      ).toLowerCase();
+
+      const inputKind = String(metaLike?.inputKind ?? '').toLowerCase();
+
+      const looksLikeJustNoun = t.length <= 6 && !/[？\?]/.test(t);
+
+      const consultish =
+        goalKind === 'uncover' ||
+        goalKind === 'stabilize' ||
+        goalKind === 'repair' ||
+        goalKind === 'counsel';
+
+      const factish =
+        inputKind === 'fact' ||
+        inputKind === 'lookup' ||
+        inputKind === 'qa' ||
+        inputKind === 'howto';
+
+      return (consultish && !factish) || looksLikeJustNoun;
     }
-  }
 
-  const anchorDecision = detectAnchorEntry({
-    choiceId: evidence?.choiceId ?? null,
-    actionId: evidence?.actionId ?? null,
-    nowIso: new Date().toISOString(),
-    state: {
-      itx_step: (ms as any)?.itx_step ?? (ms as any)?.itxStep ?? null,
-      itx_last_at: (ms as any)?.itx_last_at ?? (ms as any)?.itxLastAt ?? null,
-      intent_anchor: (ms as any)?.intent_anchor ?? (ms as any)?.intentAnchor ?? null,
-    },
-  });
+    // =========================================================
+    // ✅ flagReply 配線：counsel/normalChat より “前”
+    // - すでに slots が入っていても「相談/構造」なら上書きしてよい（強制はここだけ）
+    // - ただし SILENCE は除外
+    // =========================================================
+    const historyArr = Array.isArray(history) ? (history as any[]) : [];
+    const hasHistory = historyArr.length > 0;
 
-  const payload = {
-    evidence,
-    decision: {
-      tEntryOk: anchorDecision.tEntryOk,
-      anchorEvent: anchorDecision.anchorEvent,
-      anchorWrite: anchorDecision.anchorWrite,
-      reason: anchorDecision.reason,
-    },
-    fixedNorthKey,
-    itActive,
-    hasAnchorAlready,
-  };
+    if (!isSilence && hasText && shouldUseFlagReply(meta as any, text)) {
+      const directTask =
+        /(文面|文章|手順|要点|まとめ|作って|書いて|整えて|テンプレ|仕様|設計)/.test(
+          String(text ?? ''),
+        );
 
-  console.log(
-    `[IROS/ANCHOR_ENTRY] ${JSON.stringify(payload, (_k, v) =>
-      v === undefined ? null : v,
-    )}`,
-  );
+      const flagSlots = buildFlagReplySlots({
+        userText: text,
+        hasHistory,
+        questionAlreadyPlanned: false,
+        directTask,
+      });
 
-  // ✅ persist 側が拾える形で meta に刻む（DB列はここを参照する）
-  (meta as any).anchorEntry = {
-    evidence,
-    decision: {
-      tEntryOk: anchorDecision.tEntryOk,
-      anchorEvent: anchorDecision.anchorEvent, // 'action' など
-      anchorWrite: anchorDecision.anchorWrite, // 'commit' など
-      reason: anchorDecision.reason,
-    },
-  };
+      slotsArr = Array.isArray(flagSlots) ? flagSlots : [];
+      slotPlanPolicy = 'FINAL';
+      (meta as any).slotPlanFallback = 'flagReply';
 
-  // ✅ 形ゆれ対策（pickAnchorEntry が拾えるようにフラットも入れる）
-  (meta as any).anchor_event = anchorDecision.anchorEvent;
-  (meta as any).anchor_write = anchorDecision.anchorWrite;
-  (meta as any).anchorEvidenceSource = evidence?.source ?? null;
+      console.log('[IROS/ORCH][flagReply-picked]', {
+        slotsLen: Array.isArray(slotsArr) ? slotsArr.length : null,
+        policy: slotPlanPolicy,
+        directTask,
+        hasHistory,
+        prev_slotsEmpty: slotsEmpty0,
+        prev_policyEmpty: policyEmpty0,
+      });
+    }
 
-  if (anchorDecision.tEntryOk && anchorDecision.anchorWrite === 'commit') {
-    const p = anchorDecision.patch;
+    // =========================================================
+    // ✅ counsel 配線：normalChat fallback の前に差し込む
+    // - mode名の揺れ：'counsel' / 'consult' を両方拾う
+    // - stage はまず OPEN 固定（永続化は次工程）
+    // - 相談モードでなくても、構造が counsel を要求するなら拾う
+    // =========================================================
+    const modeRaw = String((meta as any)?.mode ?? '').toLowerCase();
+    const isCounselMode = modeRaw === 'counsel' || modeRaw === 'consult';
 
-    (meta as any).itx_step = p.itx_step; // 'T3'
-    (meta as any).itx_anchor_event_type = p.itx_anchor_event_type; // choice/action/reconfirm
+    const shouldUseCounsel =
+      isCounselMode || shouldUseCounselByStructure(meta as any, text);
 
-    // ✅ intent_anchor は正規化して載せる（camel + snake）
-    // patch が空でも “既存 or fixedNorthKey” を必ず保持する
-    const ia =
-      normalizeIntentAnchor(
-        p.intent_anchor ??
-          (meta as any).intent_anchor ??
-          (meta as any).intentAnchor ??
-          (fixedNorthKey ? { key: fixedNorthKey } : null),
-      ) ?? null;
+    if (!isSilence && hasText && shouldUseCounsel) {
+      const lastSummary =
+        (ms as any)?.situation_summary ??
+        (ms as any)?.situationSummary ??
+        (memoryState as any)?.situation_summary ??
+        (memoryState as any)?.situationSummary ??
+        (mergedBaseMeta as any)?.situation_summary ??
+        (mergedBaseMeta as any)?.situationSummary ??
+        null;
 
-    (meta as any).intent_anchor = ia;
-    (meta as any).intentAnchor = ia;
-    (meta as any).intent_anchor_key =
-      ia && typeof (ia as any).key === 'string' ? (ia as any).key : null;
+      console.log('[IROS/ORCH][counsel-picked]', {
+        stage: 'OPEN',
+        modeRaw,
+        shouldUseCounselByStructure: !isCounselMode,
+        hasText: String(text ?? '').trim().length > 0,
+        isSilence,
+        lastSummary_len:
+          typeof lastSummary === 'string' ? lastSummary.length : null,
+      });
 
-    (meta as any).anchor_event_type = p.itx_anchor_event_type;
-    (meta as any).itx_last_at = new Date().toISOString();
-  }
-}
+      const counsel = buildCounselSlotPlan({
+        userText: text,
+        stage: 'OPEN',
+        lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
+      });
 
+      const cSlots = (counsel as any).slots;
+      const cPolicy = (counsel as any).slotPlanPolicy;
 
-// =========================================================
-// ✅ slotPlan 配線（counsel → normalChat fallback）
-// - Record<string,true> に潰さない（render-v2 が本文を組めなくなる）
-// - meta.framePlan.slots は “slot objects 配列” を入れる
-// - slotPlanPolicy を meta / framePlan に必ず伝播
-// - fallback は「slots が空」or「policy が空」のときだけ
-// =========================================================
+      // ✅ flagReply が既に入っている場合でも counsel を優先する（相談の進行を守る）
+      slotsArr = Array.isArray(cSlots) ? cSlots : [];
+      slotPlanPolicy =
+        typeof cPolicy === 'string' && cPolicy.trim() ? cPolicy.trim() : 'FINAL';
 
-const slotsRaw = (r as any).slotPlan?.slots ?? (r as any).slotPlan ?? null;
+      // flagReply 既存なら “上書き元” を残す
+      (meta as any).slotPlanFallback =
+        (meta as any).slotPlanFallback ?? 'counsel';
 
-// 1) まず slots は “配列だけ” を採用（それ以外は null）
-let slotsArr: any[] | null = Array.isArray(slotsRaw) ? slotsRaw : null;
+      console.log('[IROS/ORCH][counsel-picked]', {
+        stage: 'OPEN',
+        slotsLen: Array.isArray(slotsArr) ? slotsArr.length : null,
+        policy: slotPlanPolicy,
+      });
+    }
 
-// 2) policy 候補
-const slotPlanPolicyRaw =
-  (r as any).slotPlan?.slotPlanPolicy ??
-  (r as any).slotPlanPolicy ??
-  (r as any)?.framePlan?.slotPlanPolicy ??
-  null;
+    // 5) fallback（normalChat）
+    // - slots が空 or policy が空 のときだけ
+    // - counsel で埋まっていれば実行しない
+    const slotsEmpty =
+      !Array.isArray(slotsArr) || (Array.isArray(slotsArr) && slotsArr.length === 0);
+    const policyEmpty =
+      !slotPlanPolicy || String(slotPlanPolicy).trim().length === 0;
 
-let slotPlanPolicy: string | null =
-  typeof slotPlanPolicyRaw === 'string' && slotPlanPolicyRaw.trim()
-    ? slotPlanPolicyRaw.trim()
-    : null;
+    const shouldFallbackNormalChat =
+      !isSilence && hasText && (slotsEmpty || policyEmpty) && !shouldUseCounsel;
 
-// 3) SILENCE 判定
-const speechAct = String((meta as any)?.speechAct ?? '').toUpperCase();
-const speechAllowLLM = (meta as any)?.speechAllowLLM;
-const isSilence = speechAct === 'SILENCE' || speechAllowLLM === false;
+    if (shouldFallbackNormalChat) {
+      const lastSummary =
+        (ms as any)?.situation_summary ??
+        (ms as any)?.situationSummary ??
+        (memoryState as any)?.situation_summary ??
+        (memoryState as any)?.situationSummary ??
+        (mergedBaseMeta as any)?.situation_summary ??
+        (mergedBaseMeta as any)?.situationSummary ??
+        null;
 
-// 4) 空判定
-const hasText = String(text ?? '').trim().length > 0;
+      const fallback = buildNormalChatSlotPlan({
+        userText: text,
+        context: {
+          lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
+        },
+      });
 
-const slotsEmpty = !Array.isArray(slotsArr) || slotsArr.length === 0;
-const policyEmpty = !slotPlanPolicy || String(slotPlanPolicy).trim().length === 0;
+      const fbSlots = (fallback as any).slots;
+      slotsArr = Array.isArray(fbSlots) ? fbSlots : [];
 
-function shouldUseCounselByStructure(meta: any, text: string) {
-  const t = String(text ?? '').trim();
-  if (!t) return false;
+      const fp = (fallback as any).slotPlanPolicy;
+      slotPlanPolicy = typeof fp === 'string' && fp.trim() ? fp.trim() : 'FINAL';
 
-  // 1) 「相談の構造」＝ will が uncover/stabilize/repair 系に寄っている
-  const goalKind = String(meta?.goal?.kind ?? meta?.priority?.goal?.kind ?? '').toLowerCase();
+      (meta as any).slotPlanFallback = 'normalChat';
+    } else {
+      if ((meta as any).slotPlanFallback === 'normalChat') {
+        delete (meta as any).slotPlanFallback;
+      }
+    }
 
-  // 2) 「情報質問の構造」＝ factoid/lookup に寄っている（これは counsel にしない）
-  const inputKind = String(meta?.inputKind ?? '').toLowerCase(); // applyContainerDecision が入れてる想定
+    // 6) 最終ガード：slots が配列でないなら null
+    if (slotsArr != null && !Array.isArray(slotsArr)) {
+      slotsArr = null;
+    }
 
-  // inputKind が入ってない場合でも、質問文 + 名詞1語ループを回避したいので軽く保険
-  const looksLikeJustNoun = t.length <= 6 && !/[？\?]/.test(t);
+    // 7) ✅ 参照共有を切る（sameRef を false にする）
+    if (Array.isArray(slotsArr)) {
+      slotsArr = slotsArr.slice();
+    }
 
-  const consultish =
-    goalKind === 'uncover' ||
-    goalKind === 'stabilize' ||
-    goalKind === 'repair' ||
-    goalKind === 'counsel';
+    // 8) ✅ policy を最後に確定（slots があるなら null を残さない）
+    if (!slotPlanPolicy && Array.isArray(slotsArr) && slotsArr.length > 0) {
+      slotPlanPolicy = 'FINAL';
+    }
 
-  const factish =
-    inputKind === 'fact' ||
-    inputKind === 'lookup' ||
-    inputKind === 'qa' ||
-    inputKind === 'howto';
+    // 9) ✅ frame の正は framePlan.frame
+    const frameFinal =
+      (r as any)?.framePlan?.frame ??
+      (r as any)?.frame ??
+      (meta as any)?.framePlan?.frame ??
+      (meta as any)?.frame ??
+      null;
 
-  // ✅ 相談っぽいなら counsel
-  // ✅ ただし factish は除外
-  // ✅ さらに「名詞だけ連投」で迷子になってる時も counsel で受け止めて進行に戻す
-  return (consultish && !factish) || looksLikeJustNoun;
-}
+    // 10) ✅ framePlan は render-v2 が参照する唯一の正
+    (meta as any).framePlan = {
+      frame: frameFinal,
+      slots: slotsArr,
+      slotPlanPolicy,
+    };
 
+    // 11) ✅ ORCHログ用 “互換キー” を同期（slotPlanPolicy:null を消す）
+    (meta as any).slotPlanPolicy = slotPlanPolicy;
 
-// =========================================================
-// ✅ counsel 配線：normalChat fallback の前に差し込む
-// - mode名の揺れ：'counsel' / 'consult' を両方拾う
-// - stage はまず OPEN 固定（永続化は次工程）
-// =========================================================
-const modeRaw = String((meta as any)?.mode ?? '').toLowerCase();
-const isCounselMode = modeRaw === 'counsel' || modeRaw === 'consult';
-
-// ✅ slotsEmpty / policyEmpty を条件から外す
-if (!isSilence && hasText && isCounselMode) {
-  const lastSummary =
-    (ms as any)?.situation_summary ??
-    (ms as any)?.situationSummary ??
-    (memoryState as any)?.situation_summary ??
-    (memoryState as any)?.situationSummary ??
-    (mergedBaseMeta as any)?.situation_summary ??
-    (mergedBaseMeta as any)?.situationSummary ??
-    null;
-
-  console.log('[IROS/ORCH][counsel-picked]', {
-    stage: 'OPEN',
-    modeRaw,
-    hasText: String(text ?? '').trim().length > 0,
-    isSilence,
-    // 参考観測として残す（ただし条件には使わない）
-    slotsEmpty,
-    policyEmpty,
-    lastSummary_len: typeof lastSummary === 'string' ? lastSummary.length : null,
-  });
-
-  const counsel = buildCounselSlotPlan({
-    userText: text,
-    stage: 'OPEN',
-    lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
-  });
-
-  const cSlots = (counsel as any).slots;
-  slotsArr = Array.isArray(cSlots) ? cSlots : [];
-
-  const cPolicy = (counsel as any).slotPlanPolicy;
-  slotPlanPolicy =
-    typeof cPolicy === 'string' && cPolicy.trim() ? cPolicy.trim() : 'FINAL';
-
-  (meta as any).slotPlanFallback = 'counsel';
-
-  console.log('[IROS/ORCH][counsel-picked]', {
-    stage: 'OPEN',
-    slotsLen: Array.isArray(slotsArr) ? slotsArr.length : null,
-    policy: slotPlanPolicy,
-  });
-}
-
-
-// =========================================================
-// 5) fallback（normalChat）
-// - counsel で埋まらなかった場合だけ実行
-// =========================================================
-const shouldFallbackNormalChat =
-  !isSilence && hasText && (slotsEmpty || policyEmpty) && !isCounselMode;
-
-if (shouldFallbackNormalChat) {
-  const lastSummary =
-    (ms as any)?.situation_summary ??
-    (ms as any)?.situationSummary ??
-    (memoryState as any)?.situation_summary ??
-    (memoryState as any)?.situationSummary ??
-    (mergedBaseMeta as any)?.situation_summary ??
-    (mergedBaseMeta as any)?.situationSummary ??
-    null;
-
-  const fallback = buildNormalChatSlotPlan({
-    userText: text,
-    context: {
-      lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
-    },
-  });
-
-  const fbSlots = (fallback as any).slots;
-  slotsArr = Array.isArray(fbSlots) ? fbSlots : [];
-
-  const fp = (fallback as any).slotPlanPolicy;
-  slotPlanPolicy = typeof fp === 'string' && fp.trim() ? fp.trim() : 'FINAL';
-
-  (meta as any).slotPlanFallback = 'normalChat';
-} else {
-  if ((meta as any).slotPlanFallback === 'normalChat') {
-    delete (meta as any).slotPlanFallback;
-  }
-}
-
-// 6) 最終ガード：slots が配列でないなら null
-if (slotsArr != null && !Array.isArray(slotsArr)) {
-  slotsArr = null;
-}
-
-// 7) ✅ 参照共有を切る（sameRef を false にする）
-if (Array.isArray(slotsArr)) {
-  slotsArr = slotsArr.slice();
-}
-
-// 8) ✅ policy を最後に確定（slots があるなら null を残さない）
-if (!slotPlanPolicy && Array.isArray(slotsArr) && slotsArr.length > 0) {
-  slotPlanPolicy = 'FINAL';
-}
-
-// 9) ✅ frame の正は framePlan.frame
-const frameFinal =
-  (r as any)?.framePlan?.frame ??
-  (r as any)?.frame ??
-  (meta as any)?.framePlan?.frame ??
-  (meta as any)?.frame ??
-  null;
-
-// 10) ✅ framePlan は render-v2 が参照する唯一の正
-(meta as any).framePlan = {
-  frame: frameFinal,
-  slots: slotsArr,
-  slotPlanPolicy,
-};
-
-// 11) ✅ ORCHログ用 “互換キー” を同期（slotPlanPolicy:null を消す）
-(meta as any).slotPlanPolicy = slotPlanPolicy;
-
-// 12) 互換用 slotPlan は “必ず別参照” にする
-(meta as any).slotPlan = Array.isArray(slotsArr) ? slotsArr.slice() : slotsArr;
-
+    // 12) 互換用 slotPlan は “必ず別参照” にする
+    (meta as any).slotPlan = Array.isArray(slotsArr) ? slotsArr.slice() : slotsArr;
 
     // 13) T系の戻り値は meta に反映（あれば）
     if (typeof (r as any).tLayerModeActive === 'boolean') {
@@ -1194,68 +1278,72 @@ const frameFinal =
       (meta as any).tLayerHint = (r as any).tLayerHint.trim();
     }
 
-// =========================================================
-// ✅ 観測ログ：slots がどこで崩れるかを “数値で” 固定
-// =========================================================
-const fpSlots = (meta as any).framePlan?.slots;
-const spSlots = (meta as any).slotPlan;
+    // =========================================================
+    // ✅ 観測ログ：slots がどこで崩れるかを “数値で” 固定
+    // =========================================================
+    const fpSlots = (meta as any).framePlan?.slots;
+    const spSlots = (meta as any).slotPlan;
 
-// ✅ Phase11観測：key を “直取り” で確定（normalizeに依存しない）
-const iaKey =
-  // 1) すでに key が別キーで入ってるなら最優先で採用
-  (typeof (meta as any).intent_anchor_key === 'string' && (meta as any).intent_anchor_key.trim())
-    ? (meta as any).intent_anchor_key.trim()
-    : (typeof (meta as any).intentAnchorKey === 'string' && (meta as any).intentAnchorKey.trim())
-      ? (meta as any).intentAnchorKey.trim()
-      : // 2) intent_anchor / intentAnchor が object なら key を拾う
-      (meta as any).intent_anchor && typeof (meta as any).intent_anchor === 'object' &&
-        typeof (meta as any).intent_anchor.key === 'string' && String((meta as any).intent_anchor.key).trim()
-        ? String((meta as any).intent_anchor.key).trim()
-        : (meta as any).intentAnchor && typeof (meta as any).intentAnchor === 'object' &&
-            typeof (meta as any).intentAnchor.key === 'string' && String((meta as any).intentAnchor.key).trim()
-          ? String((meta as any).intentAnchor.key).trim()
-          : // 3) まれに string 直入れケース
-          (typeof (meta as any).intent_anchor === 'string' && (meta as any).intent_anchor.trim())
-            ? (meta as any).intent_anchor.trim()
-            : (typeof (meta as any).intentAnchor === 'string' && (meta as any).intentAnchor.trim())
-              ? (meta as any).intentAnchor.trim()
-              : null;
+    // ✅ Phase11観測：key を “直取り” で確定（normalizeに依存しない）
+    const iaKey =
+      typeof (meta as any).intent_anchor_key === 'string' &&
+      (meta as any).intent_anchor_key.trim()
+        ? (meta as any).intent_anchor_key.trim()
+        : typeof (meta as any).intentAnchorKey === 'string' &&
+            (meta as any).intentAnchorKey.trim()
+          ? (meta as any).intentAnchorKey.trim()
+          : (meta as any).intent_anchor &&
+              typeof (meta as any).intent_anchor === 'object' &&
+              typeof (meta as any).intent_anchor.key === 'string' &&
+              String((meta as any).intent_anchor.key).trim()
+            ? String((meta as any).intent_anchor.key).trim()
+            : (meta as any).intentAnchor &&
+                typeof (meta as any).intentAnchor === 'object' &&
+                typeof (meta as any).intentAnchor.key === 'string' &&
+                String((meta as any).intentAnchor.key).trim()
+              ? String((meta as any).intentAnchor.key).trim()
+              : typeof (meta as any).intent_anchor === 'string' &&
+                  (meta as any).intent_anchor.trim()
+                ? (meta as any).intent_anchor.trim()
+                : typeof (meta as any).intentAnchor === 'string' &&
+                    (meta as any).intentAnchor.trim()
+                  ? (meta as any).intentAnchor.trim()
+                  : null;
 
-// ✅ この時点で intent_anchor_key が無いなら補完（final-sync待ちにしない）
-if (!(meta as any).intent_anchor_key && iaKey) {
-  (meta as any).intent_anchor_key = iaKey;
-}
+    // ✅ この時点で intent_anchor_key が無いなら補完（final-sync待ちにしない）
+    if (!(meta as any).intent_anchor_key && iaKey) {
+      (meta as any).intent_anchor_key = iaKey;
+    }
 
-console.log('[IROS/ORCH][after-container]', {
-  frame: (meta as any).frame ?? null,
-  framePlan_frame: (meta as any).framePlan?.frame ?? null,
-  descentGate: (meta as any).descentGate ?? null,
+    console.log('[IROS/ORCH][after-container]', {
+      frame: (meta as any).frame ?? null,
+      framePlan_frame: (meta as any).framePlan?.frame ?? null,
+      descentGate: (meta as any).descentGate ?? null,
 
-  framePlan_slots_isArray: Array.isArray(fpSlots),
-  framePlan_slots_len: Array.isArray(fpSlots) ? fpSlots.length : null,
+      framePlan_slots_isArray: Array.isArray(fpSlots),
+      framePlan_slots_len: Array.isArray(fpSlots) ? fpSlots.length : null,
 
-  slotPlan_isArray: Array.isArray(spSlots),
-  slotPlan_len: Array.isArray(spSlots) ? spSlots.length : null,
+      slotPlan_isArray: Array.isArray(spSlots),
+      slotPlan_len: Array.isArray(spSlots) ? spSlots.length : null,
 
-  framePlan_policy: (meta as any).framePlan?.slotPlanPolicy ?? null,
-  slotPlanPolicy: (meta as any).slotPlanPolicy ?? null,
+      framePlan_policy: (meta as any).framePlan?.slotPlanPolicy ?? null,
+      slotPlanPolicy: (meta as any).slotPlanPolicy ?? null,
 
-  sameRef_framePlan_slotPlan: fpSlots === spSlots,
-  slotPlanFallback: (meta as any).slotPlanFallback ?? null,
+      sameRef_framePlan_slotPlan: fpSlots === spSlots,
+      slotPlanFallback: (meta as any).slotPlanFallback ?? null,
 
-  // ✅ Phase11観測（確定版）
-  hasIntentAnchor: Boolean(iaKey),
-  intentAnchorKey: iaKey,
+      // ✅ Phase11観測（確定版）
+      hasIntentAnchor: Boolean(iaKey),
+      intentAnchorKey: iaKey,
 
-  // ✅ 参照元の存在だけ観測（中身は見ない）
-  has_intent_anchor_obj: Boolean((meta as any).intent_anchor),
-  has_intentAnchor_obj: Boolean((meta as any).intentAnchor),
-  has_intent_anchor_key: Boolean((meta as any).intent_anchor_key),
-  has_intentAnchorKey: Boolean((meta as any).intentAnchorKey),
-});
-
-
+      // ✅ 参照元の存在だけ観測（中身は見ない）
+      has_intent_anchor_obj: Boolean((meta as any).intent_anchor),
+      has_intentAnchor_obj: Boolean((meta as any).intentAnchor),
+      has_intent_anchor_key: Boolean((meta as any).intent_anchor_key),
+      has_intentAnchorKey: Boolean((meta as any).intentAnchorKey),
+    });
   }
+
   // ----------------------------------------------------------------
   // ✅ V2: 本文生成はしない（render-v2 が唯一の生成者）
   // ----------------------------------------------------------------
@@ -1297,29 +1385,28 @@ console.log('[IROS/ORCH][after-container]', {
   (finalMeta as any).slotPlan =
     (meta as any).slotPlan ?? (finalMeta as any).slotPlan ?? null;
 
-// ✅ Phase11：intent_anchor を最終metaにも必ず残す（camel + snake）
-// - 途中で meta.intent_anchor が落ちても、MemoryState(ms) を正として復元する
-{
-  const iaRaw =
-    (finalMeta as any).intent_anchor ??
-    (finalMeta as any).intentAnchor ??
-    (ms as any)?.intent_anchor ??
-    (ms as any)?.intentAnchor ??
-    (memoryState as any)?.intent_anchor ??
-    (mergedBaseMeta as any)?.intent_anchor ??
-    null;
+  // ✅ Phase11：intent_anchor を最終metaにも必ず残す（camel + snake）
+  // - 途中で meta.intent_anchor が落ちても、MemoryState(ms) を正として復元する
+  {
+    const iaRaw =
+      (finalMeta as any).intent_anchor ??
+      (finalMeta as any).intentAnchor ??
+      (ms as any)?.intent_anchor ??
+      (ms as any)?.intentAnchor ??
+      (memoryState as any)?.intent_anchor ??
+      (mergedBaseMeta as any)?.intent_anchor ??
+      null;
 
-  const ia = normalizeIntentAnchor(iaRaw);
+    const ia = normalizeIntentAnchor(iaRaw);
 
-  (finalMeta as any).intent_anchor = ia;
-  (finalMeta as any).intentAnchor = ia;
+    (finalMeta as any).intent_anchor = ia;
+    (finalMeta as any).intentAnchor = ia;
 
-  (finalMeta as any).intent_anchor_key =
-    ia && typeof ia.key === 'string' && ia.key.trim().length > 0
-      ? ia.key.trim()
-      : null;
-}
-
+    (finalMeta as any).intent_anchor_key =
+      ia && typeof ia.key === 'string' && ia.key.trim().length > 0
+        ? ia.key.trim()
+        : null;
+  }
 
   // unified.depth.stage / unified.q.current 同期（S4除去済みの finalMeta に合わせる）
   if ((finalMeta as any).unified) {
@@ -1357,53 +1444,55 @@ console.log('[IROS/ORCH][after-container]', {
     };
   }
 
-// orchestrator.ts — [IROS/META][final-sync] 直前（単一ログ化）
-//
-// 目的：
-// - anchorEntry が meta / finalMeta まで届いているかを “ログで証明”
-// - final-sync では「生成/移送」はしない（存在確認だけ）
-// - ログは 1回ずつにして検証をブレさせない
+  // orchestrator.ts — [IROS/META][final-sync] 直前（単一ログ化）
+  //
+  // 目的：
+  // - anchorEntry が meta / finalMeta まで届いているかを “ログで証明”
+  // - final-sync では「生成/移送」はしない（存在確認だけ）
+  // - ログは 1回ずつにして検証をブレさせない
 
-// 1) meta 側 anchorEntry（meta優先、なければ extra）
-const anchorEntryForMetaLog =
-  (meta as any)?.anchorEntry ??
-  (meta as any)?.extra?.anchorEntry ??
-  null;
+  // 1) meta 側 anchorEntry（meta優先、なければ extra）
+  const anchorEntryForMetaLog =
+    (meta as any)?.anchorEntry ?? (meta as any)?.extra?.anchorEntry ?? null;
 
-// 2) meta の観測（ここで出れば「orchestrator内のmetaには来てる」）
-console.log('[IROS/META][final-sync][meta]', {
-  meta_q: (meta as any)?.qCode ?? (meta as any)?.q ?? null,
-  unified_q: (meta as any)?.unified?.q?.current ?? (meta as any)?.unified_q ?? null,
-  meta_depth: (meta as any)?.depth ?? (meta as any)?.depthStage ?? null,
-  unified_depth: (meta as any)?.unified?.depth?.stage ?? (meta as any)?.unified_depth ?? null,
+  // 2) meta の観測（ここで出れば「orchestrator内のmetaには来てる」）
+  console.log('[IROS/META][final-sync][meta]', {
+    meta_q: (meta as any)?.qCode ?? (meta as any)?.q ?? null,
+    unified_q:
+      (meta as any)?.unified?.q?.current ?? (meta as any)?.unified_q ?? null,
+    meta_depth: (meta as any)?.depth ?? (meta as any)?.depthStage ?? null,
+    unified_depth:
+      (meta as any)?.unified?.depth?.stage ??
+      (meta as any)?.unified_depth ??
+      null,
 
-  intent_anchor: (meta as any)?.intent_anchor ?? (meta as any)?.intentAnchor ?? null,
-  intent_anchor_key:
-    (meta as any)?.intent_anchor_key ?? (meta as any)?.intentAnchorKey ?? null,
+    intent_anchor: (meta as any)?.intent_anchor ?? (meta as any)?.intentAnchor ?? null,
+    intent_anchor_key:
+      (meta as any)?.intent_anchor_key ?? (meta as any)?.intentAnchorKey ?? null,
 
-  anchorEntry: anchorEntryForMetaLog,
-});
+    anchorEntry: anchorEntryForMetaLog,
+  });
 
-// 3) finalMeta 側 anchorEntry（finalMeta優先、なければ extra）
-const anchorEntryForFinalLog =
-  (finalMeta as any)?.anchorEntry ??
-  (finalMeta as any)?.extra?.anchorEntry ??
-  null;
+  // 3) finalMeta 側 anchorEntry（finalMeta優先、なければ extra）
+  const anchorEntryForFinalLog =
+    (finalMeta as any)?.anchorEntry ??
+    (finalMeta as any)?.extra?.anchorEntry ??
+    null;
 
-// 4) finalMeta の観測（ここで出れば「最終metaにも残っている」）
-console.log('[IROS/META][final-sync][finalMeta]', {
-  meta_q: (finalMeta as any)?.qCode ?? null,
-  unified_q: (finalMeta as any)?.unified?.q?.current ?? null,
-  meta_depth: (finalMeta as any)?.depth ?? null,
-  unified_depth: (finalMeta as any)?.unified?.depth?.stage ?? null,
+  // 4) finalMeta の観測（ここで出れば「最終metaにも残っている」）
+  console.log('[IROS/META][final-sync][finalMeta]', {
+    meta_q: (finalMeta as any)?.qCode ?? null,
+    unified_q: (finalMeta as any)?.unified?.q?.current ?? null,
+    meta_depth: (finalMeta as any)?.depth ?? null,
+    unified_depth: (finalMeta as any)?.unified?.depth?.stage ?? null,
 
-  intent_anchor: (finalMeta as any)?.intent_anchor ?? (finalMeta as any)?.intentAnchor ?? null,
-  intent_anchor_key:
-    (finalMeta as any)?.intent_anchor_key ?? (finalMeta as any)?.intentAnchorKey ?? null,
+    intent_anchor:
+      (finalMeta as any)?.intent_anchor ?? (finalMeta as any)?.intentAnchor ?? null,
+    intent_anchor_key:
+      (finalMeta as any)?.intent_anchor_key ?? (finalMeta as any)?.intentAnchorKey ?? null,
 
-  anchorEntry: anchorEntryForFinalLog,
-});
-
+    anchorEntry: anchorEntryForFinalLog,
+  });
 
   // ----------------------------------------------------------------
   // ✅ V2: “モデル生出力” はここでは絶対に作らない（追跡のため空を固定）

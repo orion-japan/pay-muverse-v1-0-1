@@ -17,6 +17,7 @@
 // - trace は「top-level優先 → args.trace 互換 → null」で統一する
 
 import crypto from 'node:crypto';
+import { judgeFlagship } from '@/lib/iros/quality/flagshipGuard';
 
 export type ChatMessage = {
   role: 'system' | 'user' | 'assistant';
@@ -25,7 +26,22 @@ export type ChatMessage = {
 
 export type ChatPurpose = 'writer' | 'judge' | 'digest' | 'title' | 'soul' | 'reply';
 
-export type ResponseFormat = { type: 'text' } | { type: 'json_object' };
+/**
+ * ✅ response_format 拡張
+ * - text / json_object に加えて json_schema を正式対応
+ * - 将来の拡張を壊さないため、body へはそのまま passthrough する
+ */
+export type ResponseFormat =
+  | { type: 'text' }
+  | { type: 'json_object' }
+  | {
+      type: 'json_schema';
+      json_schema: {
+        name: string;
+        schema: Record<string, any>;
+        strict?: boolean;
+      };
+    };
 
 type ChatArgs = {
   purpose: ChatPurpose;
@@ -138,6 +154,14 @@ function envGuardOn(): boolean {
   return true;
 }
 
+function envFlagshipRewriteOn(): boolean {
+  const v = String(process.env.IROS_FLAGSHIP_REWRITE ?? '').trim().toLowerCase();
+  if (!v) return false; // デフォルトOFF（必要なときだけONにする）
+  if (['0', 'false', 'off', 'no', 'disabled'].includes(v)) return false;
+  if (['1', 'true', 'on', 'yes', 'enabled'].includes(v)) return true;
+  return false;
+}
+
 function normalizeMessages(messages: ChatMessage[]): ChatMessage[] {
   return messages.map((m) => ({
     role: m.role,
@@ -238,6 +262,7 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
     ...extraBody,
   };
 
+  // ✅ response_format passthrough（text は送らない / json_* はそのまま送る）
   if (responseFormat && responseFormat.type !== 'text') {
     body.response_format = responseFormat;
   }
@@ -392,6 +417,71 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
   }
 
   const out = safeTrimEnd(raw);
+
+  // ─────────────────────────────────────────────
+  // ✅ 旗印REWRITE（purpose=reply のときだけ / 1回だけ）
+  // - IROS_FLAGSHIP_REWRITE=1 で有効化
+  // - extraBody.__flagship_pass が付いている場合は再実行しない（無限ループ防止）
+  const flagshipEnabled =
+    envFlagshipRewriteOn() &&
+    purpose === 'reply' &&
+    !(extraBody as any)?.__flagship_pass;
+
+  if (flagshipEnabled) {
+    const v1 = judgeFlagship(out);
+
+    if (!v1.ok) {
+      const rewriteSystem =
+        [
+          'あなたは iros の会話生成（reply）担当です。',
+          '',
+          '【旗印】この文章は「答えを渡す」ためではなく、読み手が“自分で答えを出せる場所”に立てるための文章。',
+          '',
+          '【必須ルール】',
+          '- 断定・指示・結論の押し付けをしない（〜すべき、必ず、絶対、結論、正解、答えは、等を避ける）',
+          '- 判断を急がせない（今すぐ、急いで、今日中、等を避ける）',
+          '- 質問は最大1つ（0でもOK）',
+          '- 箇条書き・番号・A/B などで「増やさない」（文章で）',
+          '- 励まし/評価で押さない（大丈夫、あなたならできる、等を主にしない）',
+          '- “足場”だけを短く置く（観察→許可→一歩、の順でよい）',
+          '',
+          '【検出された違反】',
+          `- 判定: ${v1.level}`,
+          `- 理由: ${v1.reasons.join(' / ')}`,
+          '',
+          'これから出すのは「書き直した本文のみ」。',
+        ].join('\n');
+
+      // v2: 1回だけ書き直し（同じ chatComplete を再利用）
+      const rewritten = await chatComplete({
+        ...args,
+        // 既存 messages に “書き直しルール” を追加して実行
+        messages: [
+          ...messages,
+          { role: 'system', content: rewriteSystem },
+          { role: 'user', content: out },
+        ],
+        // 無限ループ防止フラグ
+        extraBody: { ...(extraBody ?? {}), __flagship_pass: 1 },
+        // 過度に創作させない
+        temperature: Math.min(0.35, temperature),
+        allowEmpty: false,
+      });
+
+      const v2 = judgeFlagship(rewritten);
+
+      // “よりマシ”を採用（両方NGでもスコアが低い方）
+      const score = (v: ReturnType<typeof judgeFlagship>) =>
+        v.score.fatal * 10 + v.score.warn * 3 + v.score.qCount + v.score.bulletLike;
+
+      const pick = score(v2) <= score(v1) ? rewritten : out;
+
+      // ここで out を差し替える
+      // 以降の [IROS/LLM][OK] ログにも反映される
+      return pick;
+    }
+  }
+  // ─────────────────────────────────────────────
 
   if (!allowEmpty && out.trim().length === 0) {
     const err = new Error(`LLM empty content (${purpose})`);

@@ -1,8 +1,4 @@
 // file: src/lib/iros/orchestratorSpinControl.ts
-// C) 揺らぎ×ヒステリシス → 回転ギア確定（behavior-preserving）
-// - orchestrator.ts の SpinControl ブロックを関数化
-// - decideSpinControl / decideAnchorEvent の結果を meta に反映するだけ
-// - 重要：meta.intent_anchor.text の扱い、devログ条件も維持
 
 import type { IrosMeta } from './system';
 import { decideSpinControl } from './spin/decideSpinControl';
@@ -30,10 +26,16 @@ export function applySpinControlAndAnchorEvent(
     prevRank: lastVolatilityRank,
   });
 
+  // ✅ 旗印：二択誘導を全モードで殺す（萎えポイントの根）
+  // - decideSpinControl の挙動は温存（rank/direction 等はそのまま）
+  // - promptStyle だけ “two-choice → one-step” に正規化して meta に刻む
+  const normalizedPromptStyle =
+    spinCtl.promptStyle === 'two-choice' ? 'one-step' : spinCtl.promptStyle;
+
   // meta 保存（Writer/MemoryState が読む）
   (meta as any).volatilityRank = spinCtl.rank;              // 'low'|'mid'|'high'
-  (meta as any).spinDirection = spinCtl.direction;          // 'forward'|'brake' (相生/相克)
-  (meta as any).promptStyle = spinCtl.promptStyle;          // 'one-step'|'two-choice'|'safety-brake'
+  (meta as any).spinDirection = spinCtl.direction;          // 'forward'|'brake'
+  (meta as any).promptStyle = normalizedPromptStyle;        // 'one-step'|'safety-brake'
   (meta as any).shouldConfirmAnchor = spinCtl.shouldConfirmAnchor;
 
   // ★ High の時だけ：アンカー確認イベントを生成
@@ -53,7 +55,8 @@ export function applySpinControlAndAnchorEvent(
     console.log('[IROS/SpinControl]', {
       rank: spinCtl.rank,
       direction: spinCtl.direction,
-      promptStyle: spinCtl.promptStyle,
+      promptStyle: normalizedPromptStyle,
+      promptStyle_raw: spinCtl.promptStyle, // ← raw も残す（追跡用）
       phase: (meta as any).phase,
       anchorEventType: (anchorEvent as any)?.type,
       hysteresis: spinCtl.debug?.hysteresisApplied,

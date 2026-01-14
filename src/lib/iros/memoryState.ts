@@ -214,6 +214,7 @@ function normIntentAnchorKey(v: any): string | null {
 /**
  * q_counts は「構造を保持」しつつ it_cooldown だけ正規化
  * - 既存の q_trace 等を落とさない
+ * - persist 側と仕様を合わせる：it_cooldown は 0/1（boolean互換）
  */
 function normalizeQCounts(v: any): QCounts | null {
   if (v == null) return null;
@@ -221,11 +222,25 @@ function normalizeQCounts(v: any): QCounts | null {
 
   const out: QCounts = { ...(v as any) };
 
-  const cd = clampInt0to3((v as any).it_cooldown);
-  out.it_cooldown = cd ?? 0;
+  // it_cooldown: number/boolean/string を 0/1 に正規化
+  const raw = (v as any).it_cooldown;
+  let cd = 0;
+
+  if (typeof raw === 'boolean') cd = raw ? 1 : 0;
+  else if (typeof raw === 'number' && Number.isFinite(raw)) cd = raw > 0 ? 1 : 0;
+  else if (typeof raw === 'string') {
+    const s = raw.trim().toLowerCase();
+    if (s === '1' || s === 'true' || s === 'yes' || s === 'on') cd = 1;
+    else cd = 0;
+  } else {
+    cd = 0;
+  }
+
+  out.it_cooldown = cd;
 
   return out;
 }
+
 
 /**
  * “undefined のときだけ prev を採用” を徹底するためのヘルパ
@@ -431,7 +446,36 @@ export async function upsertIrosMemoryState(
   const finalSituationTopic = preferNonEmptyString(input.situationTopic, prevSafe.situationTopic);
 
   // q_counts は構造維持しつつ it_cooldown 正規化
-  const finalQCounts = normalizeQCounts(input.qCounts) ?? normalizeQCounts(prevSafe.qCounts) ?? null;
+  // - input が null のときは “keep” 扱い（prev を維持）
+  // - input が来たときは prev と合流し、q_trace は shallow-merge で保護する
+  const prevQC = normalizeQCounts(prevSafe.qCounts);
+  const inQC = normalizeQCounts(input.qCounts);
+
+  const finalQCounts: QCounts | null = (() => {
+    if (!prevQC && !inQC) return null;
+    if (prevQC && !inQC) return prevQC;
+
+    // inQC がある場合：prev を土台に上書き
+    const merged: QCounts = { ...(prevQC ?? {}), ...(inQC ?? {}) };
+
+    // q_trace は object のときだけ合流（streak巻き戻り/欠落防止）
+    const prevTrace =
+      prevQC && typeof (prevQC as any).q_trace === 'object' && (prevQC as any).q_trace
+        ? (prevQC as any).q_trace
+        : null;
+
+    const inTrace =
+      inQC && typeof (inQC as any).q_trace === 'object' && (inQC as any).q_trace
+        ? (inQC as any).q_trace
+        : null;
+
+    if (prevTrace || inTrace) {
+      (merged as any).q_trace = { ...(prevTrace ?? {}), ...(inTrace ?? {}) };
+    }
+
+    return merged;
+  })();
+
 
   const summaryParts: string[] = [];
   if (finalIntentAnchor) summaryParts.push(`ia=${finalIntentAnchor}`);

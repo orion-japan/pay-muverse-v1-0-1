@@ -402,6 +402,16 @@ async function fetchContextPackForLLM(args: {
   const { supabase, userCode, conversationId } = args;
   const pLimit = Number.isFinite(args.limit as any) ? Number(args.limit) : 200;
 
+  // ✅ まず「最低限」パックを組む（mismatch時もこれだけは返す）
+  const normalized = normalizeHistoryMessages(args.historyMessages ?? null);
+  const historyText = buildHistoryText(normalized);
+  const basePack = {
+    conversation_id: String(conversationId),
+    last_state: (args.memoryState ?? null) ?? null,
+    historyMessages: normalized.length ? normalized : undefined,
+    historyText: historyText ? historyText : undefined,
+  };
+
   try {
     const { data, error } = await supabase.rpc('ios_context_pack_latest_conv', {
       p_owner_user_code: String(userCode),
@@ -414,22 +424,21 @@ async function fetchContextPackForLLM(args: {
         conversationId,
         message: String(error?.message ?? error),
       });
-      return null;
+      // ✅ RPC失敗でも basePack は返す（会話を止めない / 履歴は拾う）
+      return basePack;
     }
 
     const pack = data ?? null;
 
-    const normalized = normalizeHistoryMessages(args.historyMessages);
-    const historyText = buildHistoryText(normalized);
-
+    // last_state は「引数 memoryState」を最優先（DBメモリを勝たせる）
     const lastStateFixed = (args.memoryState ?? null) ?? (pack as any)?.last_state ?? null;
 
     const enriched = {
       ...(pack ?? {}),
       conversation_id: (pack as any)?.conversation_id ?? conversationId,
       last_state: lastStateFixed,
-      historyMessages: normalized.length ? normalized : undefined,
-      historyText: historyText ? historyText : undefined,
+      historyMessages: basePack.historyMessages,
+      historyText: basePack.historyText,
     };
 
     console.log('[IROS/CTX_PACK][OK]', {
@@ -446,15 +455,23 @@ async function fetchContextPackForLLM(args: {
         typeof enriched?.historyText === 'string' ? enriched.historyText.length : 0,
     });
 
+    // ✅ mismatch は「捨てない」：basePack だけ返して継続
     const packConv = String(enriched?.conversation_id ?? '').trim();
     const curConv = String(conversationId ?? '').trim();
     if (packConv && curConv && packConv !== curConv) {
-      console.warn('[IROS/CTX_PACK][MISMATCH_SKIP]', {
+      console.warn('[IROS/CTX_PACK][MISMATCH_FALLBACK]', {
         userCode,
         conversationId: curConv,
         packConversationId: packConv,
       });
-      return null;
+
+      // enriched を丸ごと返すと別会話の evidence が混入する。
+      // ここでは「履歴注入の最低限」だけ返す。
+      return {
+        ...basePack,
+        // 監査だけ残す（userContext内で露出しても害が少ない）
+        ctxPackMismatch: { packConversationId: packConv, conversationId: curConv },
+      };
     }
 
     return enriched;
@@ -464,15 +481,169 @@ async function fetchContextPackForLLM(args: {
       conversationId,
       message: String(e?.message ?? e),
     });
-    return null;
+    // ✅ 例外でも basePack は返す（会話を止めない）
+    return basePack;
   }
 }
+
 
 // =========================================================
 // ✅ rephrase attach (Render-v2向け)
 // - renderEngine=true & IT以外 & SILENCE/FORWARD以外
 // - slot抽出できた場合のみ、1回だけ LLM に「表現」を貸す
 // =========================================================
+
+type FlagDecision = {
+  shouldRaiseFlag: boolean;
+  reasons: Array<'POSITION_DRIFT' | 'STALL' | 'SAFETY_OK' | 'SAFETY_BAD'>;
+  signals: {
+    // 1) drift
+    hasWhy: boolean;
+    hasDontKnow: boolean;
+    hasLoopWords: boolean;
+    shortText: boolean;
+
+    // 2) stall
+    historyLen: number;
+    repeatedLike: boolean;
+
+    // 3) safety
+    isSilenceLike: boolean;
+    highHeat: boolean;
+
+    // context
+    q: string | null;
+    depth: string | null;
+    spinLoop: string | null;
+    phase: string | null;
+  };
+  version: 'flag-v1';
+};
+
+function normForSignal(s: string): string {
+  return String(s ?? '')
+    .replace(/\r\n/g, '\n')
+    .trim();
+}
+
+/**
+ * ✅ 旗印判定（メタ判定）
+ * - 意味判断はしない
+ * - “位置が揺れている / 進行が止まっている / いま刺しても安全” を見るだけ
+ */
+function inferFlagDecision(args: {
+  userText: string;
+  historyMessages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  metaLike?: any;
+  memoryState?: any | null;
+}): FlagDecision {
+  const userText = normForSignal(args.userText);
+  const hm = Array.isArray(args.historyMessages) ? args.historyMessages : [];
+
+  const metaLike = args.metaLike ?? {};
+  const ms = args.memoryState ?? null;
+
+  const q =
+    (typeof metaLike?.unified?.q?.current === 'string' && metaLike.unified.q.current) ||
+    (typeof metaLike?.qCode === 'string' && metaLike.qCode) ||
+    (typeof metaLike?.q_code === 'string' && metaLike.q_code) ||
+    (typeof ms?.q_primary === 'string' && ms.q_primary) ||
+    null;
+
+  const depth =
+    (typeof metaLike?.unified?.depth?.stage === 'string' && metaLike.unified.depth.stage) ||
+    (typeof metaLike?.depthStage === 'string' && metaLike.depthStage) ||
+    (typeof metaLike?.depth_stage === 'string' && metaLike.depth_stage) ||
+    (typeof metaLike?.depth === 'string' && metaLike.depth) ||
+    (typeof ms?.depth_stage === 'string' && ms.depth_stage) ||
+    null;
+
+  const spinLoop =
+    (typeof metaLike?.spinLoop === 'string' && metaLike.spinLoop) ||
+    (typeof metaLike?.spin_loop === 'string' && metaLike.spin_loop) ||
+    (typeof ms?.spin_loop === 'string' && ms.spin_loop) ||
+    null;
+
+  const phase =
+    (typeof metaLike?.phase === 'string' && metaLike.phase) ||
+    (typeof metaLike?.unified?.phase === 'string' && metaLike.unified.phase) ||
+    (typeof ms?.phase === 'string' && ms.phase) ||
+    null;
+
+  // ---------------------------
+  // 1) Position Drift
+  // ---------------------------
+  const hasWhy = /なんで|なぜ|理由|意味|どうして/.test(userText);
+  const hasDontKnow = /わからない|分からない|どうしたら|どうすれば|どうすんの/.test(userText);
+  const hasLoopWords = /同じ|また|さっき|ループ|変わらない|もう一回/.test(userText);
+  const shortText = userText.replace(/\s+/g, '').length <= 12;
+
+  const positionDrift = hasWhy || hasDontKnow || hasLoopWords || shortText;
+
+  // ---------------------------
+  // 2) Stall（進行停滞のシグナル）
+  // - “同じ種類のユーザー文が続く” を簡易に見る
+  // ---------------------------
+  const historyLen = hm.length;
+
+  const lastUserLines = hm
+    .filter((m) => m.role === 'user')
+    .slice(-4)
+    .map((m) => normForSignal(m.content))
+    .filter(Boolean);
+
+  const tail2 = lastUserLines.slice(-2);
+  const repeatedLike =
+    tail2.length === 2 &&
+    tail2[0].length > 0 &&
+    tail2[1].length > 0 &&
+    (tail2[0] === tail2[1] ||
+      (tail2[0].length >= 8 &&
+        tail2[1].length >= 8 &&
+        (tail2[0].includes(tail2[1]) || tail2[1].includes(tail2[0]))));
+
+  const stall = hasLoopWords || repeatedLike || historyLen >= 8;
+
+  // ---------------------------
+  // 3) Safety（いま刺しても受け取れるか）
+  // - 強い怒り/罵倒/攻撃が強いときは “旗印” を控える（圧になる）
+  // - SILENCE っぽい（空）も控える
+  // ---------------------------
+  const isSilenceLike = userText.length === 0 || isEffectivelyEmptyText(userText);
+  const highHeat =
+    /死ね|消えろ|ふざけるな|最悪|クソ|殺す|ぶっ殺/.test(userText) ||
+    /!{3,}|！{3,}/.test(userText);
+
+  const safetyOk = !isSilenceLike && !highHeat;
+
+  const reasons: FlagDecision['reasons'] = [];
+  if (positionDrift) reasons.push('POSITION_DRIFT');
+  if (stall) reasons.push('STALL');
+  reasons.push(safetyOk ? 'SAFETY_OK' : 'SAFETY_BAD');
+
+  const shouldRaiseFlag = Boolean(positionDrift && stall && safetyOk);
+
+  return {
+    shouldRaiseFlag,
+    reasons,
+    signals: {
+      hasWhy,
+      hasDontKnow,
+      hasLoopWords,
+      shortText,
+      historyLen,
+      repeatedLike,
+      isSilenceLike,
+      highHeat,
+      q,
+      depth,
+      spinLoop,
+      phase,
+    },
+    version: 'flag-v1',
+  };
+}
+
 async function maybeAttachRephraseForRenderV2(args: {
   supabase: any;
   conversationId: string;
@@ -500,6 +671,8 @@ async function maybeAttachRephraseForRenderV2(args: {
 
   // idempotent guard
   {
+  // idempotent guard
+  {
     const already =
       Array.isArray((extraMerged as any)?.rephraseBlocks) &&
       (extraMerged as any).rephraseBlocks.length > 0;
@@ -507,6 +680,23 @@ async function maybeAttachRephraseForRenderV2(args: {
     const reqKey = `${reqId ?? 'no-reqId'}|${traceId ?? 'no-traceId'}|${conversationId}|${userCode}`;
     const g = globalThis as any;
     g.__IROS_REPHRASE_CALLCOUNT = g.__IROS_REPHRASE_CALLCOUNT ?? new Map();
+
+    // ✅ leak防止：Mapが増えすぎたら古いものから間引く（順序は保証されないので簡易）
+    if (g.__IROS_REPHRASE_CALLCOUNT.size > 2000) {
+      let dropped = 0;
+      for (const k of g.__IROS_REPHRASE_CALLCOUNT.keys()) {
+        g.__IROS_REPHRASE_CALLCOUNT.delete(k);
+        dropped++;
+        if (dropped >= 500) break;
+      }
+      console.warn('[IROS/rephrase][CALLCOUNT_PRUNE]', {
+        conversationId,
+        userCode,
+        sizeAfter: g.__IROS_REPHRASE_CALLCOUNT.size,
+        dropped,
+      });
+    }
+
     const prev = Number(g.__IROS_REPHRASE_CALLCOUNT.get(reqKey) ?? 0);
     const next = prev + 1;
     g.__IROS_REPHRASE_CALLCOUNT.set(reqKey, next);
@@ -524,6 +714,7 @@ async function maybeAttachRephraseForRenderV2(args: {
       });
       return;
     }
+  }
   }
 
   const enabled =
@@ -557,12 +748,24 @@ async function maybeAttachRephraseForRenderV2(args: {
   const traceIdFinal =
     traceId && String(traceId).trim() ? String(traceId).trim() : reqId ?? null;
 
+  // ✅ history normalize（旗印判定にも rephrase にも使う）
+  const normalizedHistory = normalizeHistoryMessages(historyMessages ?? null);
+
+  // ✅ ContextPack fetch
   const contextPack = await fetchContextPackForLLM({
     supabase,
     userCode,
     conversationId,
     limit: 200,
-    historyMessages: historyMessages ?? null,
+    historyMessages: normalizedHistory,
+    memoryState: memoryStateForCtx ?? null,
+  });
+
+  // ✅ 旗印判定（メタ判定）を作成して userContext に混ぜる
+  const flagDecision = inferFlagDecision({
+    userText: userText ?? '',
+    historyMessages: normalizedHistory,
+    metaLike: meta ?? null,
     memoryState: memoryStateForCtx ?? null,
   });
 
@@ -572,17 +775,27 @@ async function maybeAttachRephraseForRenderV2(args: {
     hasContextPackForLLM: !!contextPack,
     contextPackCounts: contextPack?.counts ?? null,
     contextPackLastState: contextPack?.last_state ?? null,
+
+    // ✅ flag audit
+    flagDecision,
+    shouldRaiseFlag: flagDecision.shouldRaiseFlag,
   };
 
-  // attach to extraMerged.userContext (do not overwrite if exists)
-  if (!(extraMerged as any)?.userContext) {
-    (extraMerged as any).userContext = contextPack ?? null;
-  }
+  // ✅ attach to extraMerged.userContext (merge; do not overwrite)
+  const mergedUserContext = {
+    ...(typeof (extraMerged as any)?.userContext === 'object'
+      ? ((extraMerged as any).userContext ?? {})
+      : {}),
+    ...(contextPack ?? {}),
+    flagDecision,
+  };
+
+  (extraMerged as any).userContext = mergedUserContext;
 
   meta.extra = {
     ...(meta.extra ?? {}),
     userContextInjected: true,
-    userContextInjectedKeys: contextPack ? Object.keys(contextPack) : null,
+    userContextInjectedKeys: mergedUserContext ? Object.keys(mergedUserContext) : null,
   };
 
   const res = await rephraseSlotsFinal(extracted, {
@@ -592,7 +805,7 @@ async function maybeAttachRephraseForRenderV2(args: {
       ? Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)
       : 8,
     userText: userText ?? null,
-    userContext: contextPack ?? null,
+    userContext: mergedUserContext ?? null,
     debug: {
       traceId: traceIdFinal ?? null,
       conversationId: conversationId ?? null,
@@ -600,7 +813,6 @@ async function maybeAttachRephraseForRenderV2(args: {
       renderEngine: true,
     },
   });
-
 
   if (!res.ok) {
     console.warn('[IROS/rephrase][SKIP]', {
@@ -610,6 +822,8 @@ async function maybeAttachRephraseForRenderV2(args: {
       inKeys: res.meta?.inKeys ?? [],
       rawLen: res.meta?.rawLen ?? 0,
       rawHead: res.meta?.rawHead ?? '',
+      shouldRaiseFlag: flagDecision.shouldRaiseFlag,
+      flagReasons: flagDecision.reasons,
     });
     return;
   }
@@ -624,6 +838,10 @@ async function maybeAttachRephraseForRenderV2(args: {
     rephraseKeys: res.meta.outKeys,
     rephraseRawLen: res.meta.rawLen,
     rephraseRawHead: res.meta.rawHead,
+
+    // ✅ flag trace
+    flagDecision,
+    shouldRaiseFlag: flagDecision.shouldRaiseFlag,
   };
 
   console.warn('[IROS/rephrase][OK]', {
@@ -632,6 +850,8 @@ async function maybeAttachRephraseForRenderV2(args: {
     keys: res.meta.outKeys,
     rawLen: res.meta.rawLen,
     rawHead: res.meta.rawHead,
+    shouldRaiseFlag: flagDecision.shouldRaiseFlag,
+    flagReasons: flagDecision.reasons,
   });
 
   console.warn('[IROS/rephrase][AFTER_ATTACH]', {
@@ -644,8 +864,10 @@ async function maybeAttachRephraseForRenderV2(args: {
     rephraseHead: Array.isArray((extraMerged as any)?.rephraseBlocks)
       ? String((extraMerged as any).rephraseBlocks?.[0]?.text ?? '').slice(0, 80)
       : '',
+    shouldRaiseFlag: flagDecision.shouldRaiseFlag,
   });
 }
+
 
 /** NORMAL / IR / SILENCE の OPTIONS */
 export async function OPTIONS() {
@@ -1514,26 +1736,33 @@ export async function POST(req: NextRequest) {
 
         const uiMode = (meta as any)?.mode as ReplyUIMode | undefined;
 
-        // ✅ persist 用に q_code / depth_stage を snake_case に同期
-        const qCodeFinal =
-          (typeof (meta as any)?.q_code === 'string' && (meta as any).q_code) ||
-          (typeof (meta as any)?.qCode === 'string' && (meta as any).qCode) ||
-          (typeof (meta as any)?.unified?.q?.current === 'string' &&
-            (meta as any).unified.q.current) ||
-          null;
+// ✅ persist 用に q_code / depth_stage を snake_case に同期
+// - unified を最優先（meta は古い値が混ざることがあるため）
+// - 空文字は null 扱い
+const pickString = (v: any): string | null => {
+  if (typeof v !== 'string') return null;
+  const s = v.trim();
+  return s ? s : null;
+};
 
-        const depthStageFinal =
-          (typeof (meta as any)?.depth_stage === 'string' &&
-            (meta as any).depth_stage) ||
-          (typeof (meta as any)?.unified?.depth?.stage === 'string' &&
-            (meta as any).unified.depth.stage) ||
-          (typeof (meta as any)?.depthStage === 'string' && (meta as any).depthStage) ||
-          null;
+const qCodeFinal =
+  pickString((meta as any)?.unified?.q?.code) ??
+  pickString((meta as any)?.unified?.q?.current) ??
+  pickString((meta as any)?.q_code) ??
+  pickString((meta as any)?.qCode) ??
+  null;
 
-        (meta as any).q_code = qCodeFinal;
-        (meta as any).depth_stage = depthStageFinal;
-        if (qCodeFinal) (meta as any).qCode = qCodeFinal;
-        if (depthStageFinal) (meta as any).depthStage = depthStageFinal;
+const depthStageFinal =
+  pickString((meta as any)?.unified?.depth?.stage) ??
+  pickString((meta as any)?.depth_stage) ??
+  pickString((meta as any)?.depthStage) ??
+  pickString((meta as any)?.depth) ??
+  null;
+
+(meta as any).q_code = qCodeFinal;
+(meta as any).depth_stage = depthStageFinal;
+if (qCodeFinal) (meta as any).qCode = qCodeFinal;
+if (depthStageFinal) (meta as any).depthStage = depthStageFinal;
 
         console.log('[IROS/reply][persist-assistant] q/depth final', {
           conversationId,
