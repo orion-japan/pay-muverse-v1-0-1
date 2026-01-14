@@ -24,7 +24,8 @@ import { computeConvSignals } from '../conversation/signals';
 import { decideConversationBranch } from '../conversation/branchPolicy';
 
 export type NormalChatSlot = {
-  key: string;
+  key: string; // ✅ key は “カテゴリ” （識別子ではない）
+  slotId?: string; // ✅ 重複 key 許容のための安定識別子（framePlan/writer/log の追跡用）
   role: 'assistant';
   style: 'neutral' | 'soft' | 'firm';
   content: string; // ✅ writer入力用メタ（ユーザー表示文ではない）
@@ -64,6 +65,55 @@ function m(tag: string, payload?: Record<string, any>) {
   } catch {
     return `@${tag} ${JSON.stringify({ _fallback: String(payload) })}`;
   }
+}
+
+/**
+ * ✅ slots を「配列」に統一し、重複 key を許容したまま追跡できるよう slotId を付与する。
+ * - key は “カテゴリ” として扱い、識別は slotId で行う。
+ * - 既に slotId / slot_id があれば尊重する。
+ * - upstream が object を作ってしまった場合でも array に正規化（ただし重複はこの時点で失われ得る）。
+ *
+ * 🔧 使い方：
+ *   const slotsNormalized = normalizeSlotsForFramePlan(slots, { idPrefix: 'N' });
+ *   // framePlan に渡す直前（= return 直前）に必ず噛ませる
+ */
+export function normalizeSlotsForFramePlan(
+  slots: NormalChatSlot[] | Record<string, any> | null | undefined,
+  opts?: { idPrefix?: string }
+): NormalChatSlot[] {
+  const idPrefix = String(opts?.idPrefix ?? 'N');
+  const out: NormalChatSlot[] = [];
+  if (!slots) return out;
+
+  const arr: any[] = Array.isArray(slots)
+    ? slots
+    : Object.keys(slots).map((k) => ({ key: k, content: (slots as any)[k], role: 'assistant', style: 'neutral' }));
+
+  let seq = 0;
+
+  for (const s of arr) {
+    if (!s) continue;
+
+    const key = String(s.key ?? '').trim();
+    const role = (s.role ?? 'assistant') as 'assistant';
+    const style = (s.style ?? 'neutral') as 'neutral' | 'soft' | 'firm';
+    const content = String(s.content ?? s.text ?? s.value ?? '').trim();
+
+    if (!key || !content) continue;
+
+    const existingId = String(s.slotId ?? s.slot_id ?? '').trim();
+    const slotId = existingId || `${idPrefix}${++seq}`;
+
+    out.push({
+      key,
+      slotId,
+      role,
+      style,
+      content,
+    });
+  }
+
+  return out;
 }
 
 // ✅ 「評価/指摘/フィードバック」検出：ここは“質問で返すと逃げ”になりやすいので q=0 を強制する
@@ -477,15 +527,28 @@ function buildComposeSlots(userText: string, ctx?: { lastSummary?: string | null
 }
 
 /**
- * ✅ STABILIZE: “薄い/内的/詰まり” を前へ進めるスロット
- * - 質問で追わない（q=0）
- * - 角度変更（SHIFT）＋「次が湧く足場（NEXT_HINT）」で前へ
+ * ✅ STABILIZE: “薄い/内的/詰まり（分からない含む）” を前へ進めるスロット
+ * - 質問で追わない（Qスロットは出さない / writer側も原則 q=0）
+ * - 「分からなさ」を “どこで詰まってるか” に分解して足場を渡す
+ * - 旗印：「読み手が自分で答えを出せる場所」に立たせる
  * - 文章は書かない（writerへのメタのみ）
  */
 function buildStabilizeSlots(userText: string, ctx?: { lastSummary?: string | null }): NormalChatSlot[] {
   const t = norm(userText);
   const last = norm(ctx?.lastSummary);
   const seed = last || t;
+
+  // ✅ ここで unknownish を確定してメタに刻む（writer が逃げないようにする）
+  const unknownish =
+    /分からない|わからない|よく分からない|意味が分からない|ピンとこない|何言ってるか分からない|理解できない/.test(t);
+
+  // ✅ STABILIZE の足場（cuts）＝「説明のあとの“指差し”」
+  // - ここは “質問” ではない（ユーザーが自分で選べる材料）
+  const cuts = [
+    { id: 'which_part', label: '分からないのは「言葉」？「狙い」？「手順」？' },
+    { id: 'expected', label: 'あなたが欲しいのは「設計の地図」？「1つの修正」？「動作の証拠」？' },
+    { id: 'blocker', label: '止まってるのは「理解」？「実装」？「検証」？' },
+  ];
 
   return [
     {
@@ -495,15 +558,40 @@ function buildStabilizeSlots(userText: string, ctx?: { lastSummary?: string | nu
       content: m('OBS', {
         last: last ? clamp(last, 200) : null,
         user: clamp(t, 200),
+        unknownish,
       }),
     },
     {
       key: 'SHIFT',
       role: 'assistant',
       style: 'neutral',
-      content: m('SHIFT', { kind: 'reduce_pressure', seed: clamp(seed, 160) }),
+      content: m('SHIFT', {
+        // ✅ unknownish は「整理しろ」ではなく「何が不明瞭かの形」を2-3文で描写させる
+        kind: 'explain_unknown_shape',
+        seed: clamp(seed, 160),
+        q: 0,
+        // ✅ 一般論に逃げるのを禁止（writer への強いメタ）
+        avoid: ['general_advice', 'cheer_up', 'tell_user_to_think_more', 'ask_for_details_first'],
+        // ✅ 文体条件：短く、観測→角度→足場、に寄せる
+        shape: { lines: [4, 10], no_checklist: true, no_bullets: false },
+      }),
     },
-    { key: 'NEXT', role: 'assistant', style: 'soft', content: m('NEXT_HINT', { mode: 'continue_free' }) },
+    {
+      key: 'NEXT',
+      role: 'assistant',
+      style: 'soft',
+      content: m('NEXT_HINT', {
+        mode: 'advance_hint',
+        // ✅ ここが肝：cuts を必ず本文に出す（最低1つは“そのまま”使う）
+        hint: {
+          kind: 'pick_one_cut',
+          cuts,
+          must_include_one_cut_label: true,
+          questions_max: 1, // 0でもOKだが、出すなら最大1問
+          avoid: ['general_advice', 'cheer_up'],
+        },
+      }),
+    },
   ];
 }
 
@@ -538,7 +626,7 @@ function buildRepairSlots(userText: string, ctx?: { lastSummary?: string | null 
 
   if (last) {
     return [
-      { key: 'ACK', role: 'assistant', style: 'soft', content: m('ACK', { kind: 'repair' }) },
+      { key: 'ACK', role: 'assistant', style: 'soft', content: m('ACK', { kind: 'repair', user: clamp(u, 80) }) },
       { key: 'RESTORE', role: 'assistant', style: 'neutral', content: m('RESTORE', { last: clamp(last, 160) }) },
       {
         key: 'SHIFT',
@@ -552,7 +640,7 @@ function buildRepairSlots(userText: string, ctx?: { lastSummary?: string | null 
   }
 
   return [
-    { key: 'ACK', role: 'assistant', style: 'soft', content: m('ACK', { kind: 'repair' }) },
+    { key: 'ACK', role: 'assistant', style: 'soft', content: m('ACK', { kind: 'repair', user: clamp(u, 80) }) },
     { key: 'Q', role: 'assistant', style: 'neutral', content: m('Q', { kind: 'restore_last_one_liner' }) },
   ];
 }
@@ -568,7 +656,12 @@ function buildHowToSlots(userText: string, ctx?: { lastSummary?: string | null }
   if (last) {
     return [
       { key: 'OBS', role: 'assistant', style: 'soft', content: m('OBS', { last: clamp(last, 160) }) },
-      { key: 'SHIFT', role: 'assistant', style: 'neutral', content: m('SHIFT', { kind: 'criteria_first', avoid: ['more_options'] }) },
+      {
+        key: 'SHIFT',
+        role: 'assistant',
+        style: 'neutral',
+        content: m('SHIFT', { kind: 'criteria_first', avoid: ['more_options'] }),
+      },
       // ✅ 質問は無しでもOK（writer が自然に進める）
     ];
   }
@@ -578,7 +671,6 @@ function buildHowToSlots(userText: string, ctx?: { lastSummary?: string | null }
     { key: 'Q', role: 'assistant', style: 'neutral', content: m('Q', { kind: 'topic_one_liner' }) },
   ];
 }
-
 
 function buildDefaultSlots(userText: string, ctx?: { lastSummary?: string | null }): NormalChatSlot[] {
   const t = norm(userText);
@@ -683,7 +775,6 @@ function buildExpansionSlots(userText: string, ctx?: { lastSummary?: string | nu
   ];
 }
 
-
 // ---- main ----
 
 type BranchKind =
@@ -695,49 +786,61 @@ type BranchKind =
   | 'I_BRIDGE'
   | 'UNKNOWN';
 
-function normalizeBranch(args: {
-  raw: BranchKind | null | undefined;
-  signals?: {
-    repair?: boolean;
-    stuck?: boolean;
-    detail?: boolean;
-    topicHint?: string | null;
-  } | null;
-  expansionKind?: 'NONE' | 'TENTATIVE' | 'BRANCH' | null;
-  userText: string;
-  recallCheck: boolean;
-}): BranchKind {
-  const raw = (args.raw ?? 'UNKNOWN') as BranchKind;
+  function normalizeBranch(args: {
+    raw: BranchKind | null | undefined;
+    signals?: {
+      repair?: boolean;
+      stuck?: boolean;
+      detail?: boolean;
+      topicHint?: string | null;
+    } | null;
+    expansionKind?: 'NONE' | 'TENTATIVE' | 'BRANCH' | null;
+    userText: string;
+    recallCheck: boolean;
+  }): BranchKind {
+    const raw = (args.raw ?? 'UNKNOWN') as BranchKind;
+    const t = norm(args.userText);
 
-  // ✅ recallCheck は REPAIR より強い（誤爆を止める）
-  // - branchPolicy/signals が repair を立てても、ここで無効化する
-  if (args.recallCheck) {
-    // recall は “展開” 扱いに寄せる（質問1本で指差し→継続へ）
-    return 'DETAIL';
+    // ✅ recallCheck は最優先…だが、この関数の “branch判定” には混ぜない
+    // - recallCheck の実処理は main 側で先に分岐している（reason='recall-check'）
+    // - ここで DETAIL に寄せると「意味」とログがズレるので、判定に影響ゼロにする
+    //   （repair誤爆は main 側で防げている）
+    if (args.recallCheck) {
+      // raw が強いなら尊重、なければ UNKNOWN のまま
+      return raw && raw !== 'UNKNOWN' ? raw : 'UNKNOWN';
+    }
+
+    // ✅ 空は保険
+    if (!t) return raw && raw !== 'UNKNOWN' ? raw : 'UNKNOWN';
+
+    // ✅ “分からない/よく分からない” は展開じゃない（ここを確定で STABILIZE）
+    // - looksLikeThinReply の漏れをここで潰す
+    const unknownish =
+      /分からない|わからない|よく分からない|意味が分からない|ピンとこない|何言ってるか分からない|理解できない/.test(t);
+
+    // ✅ 薄返答/内的相談は expansionMoment より強い（DETAIL吸い込み事故を止める）
+    if (unknownish || looksLikeThinReply(t) || looksLikeInnerConcern(t)) {
+      return 'STABILIZE';
+    }
+
+    // raw が強いなら尊重
+    if (raw && raw !== 'UNKNOWN') return raw;
+
+    const s = args.signals ?? null;
+
+    // signals から確定（branchPolicy 未導入でもログが死なない）
+    if (s?.repair) return 'REPAIR';
+    if (s?.stuck) return 'STABILIZE';
+    if (s?.detail) return 'DETAIL';
+
+    // expansionMoment は最後に使う（＝安易にDETAILへ吸わない）
+    if (args.expansionKind === 'BRANCH' || args.expansionKind === 'TENTATIVE') {
+      return 'DETAIL';
+    }
+
+    return 'UNKNOWN';
   }
 
-  // まず raw が強いなら尊重
-  if (raw && raw !== 'UNKNOWN') return raw;
-
-  const s = args.signals ?? null;
-
-  // signals から確定（branchPolicy 未導入/未整備でもログが死なない）
-  if (s?.repair) return 'REPAIR';
-  if (s?.stuck) return 'STABILIZE';
-  if (s?.detail) return 'DETAIL';
-
-  // expansionMoment が出ているなら「DETAIL（展開）」として扱う
-  if (args.expansionKind === 'BRANCH' || args.expansionKind === 'TENTATIVE') {
-    return 'DETAIL';
-  }
-
-  // 最後の保険：短文/薄返答/内的相談が強いなら STABILIZE へ寄せる
-  const t = norm(args.userText);
-  if (!t) return 'UNKNOWN';
-  if (looksLikeThinReply(t) || looksLikeInnerConcern(t)) return 'STABILIZE';
-
-  return 'UNKNOWN';
-}
 
 export function buildNormalChatSlotPlan(args: {
   userText: string;
@@ -746,7 +849,7 @@ export function buildNormalChatSlotPlan(args: {
     recentUserTexts?: string[];
   };
 }): NormalChatSlotPlan {
-  const stamp = 'normalChat.ts@2026-01-14#phase11-compose-v1.0';
+  const stamp = 'normalChat.ts@2026-01-15#phase11-slots-v1.1';
   const userText = norm(args.userText);
   const ctx = args.context;
 
@@ -839,6 +942,28 @@ export function buildNormalChatSlotPlan(args: {
     }
   }
 
+  // ✅ 最終保険：どの分岐でも必ず slots を返す（空/未定義を潰す）
+  // - build* が想定外で [] を返してもここで復旧する
+  // - 例外は投げない（会話を止めない）
+  if (!Array.isArray(slots) || slots.length === 0) {
+    const fallbackReason = reason;
+    reason = `fallback(${fallbackReason})`;
+    slots = userText
+      ? buildDefaultSlots(userText, { lastSummary: effectiveLastSummary })
+      : buildEmptySlots();
+
+    // さらに保険：それでも空なら end
+    if (!Array.isArray(slots) || slots.length === 0) {
+      reason = `fallback-end(${fallbackReason})`;
+      slots = buildEndSlots();
+    }
+  }
+
+  // ✅ framePlan に渡す直前（= return 直前）に “正規化” を必ず噛ませる
+  // - 重複 key を許容できる形（配列）を保証
+  // - slotId を付与してログ/ガードの追跡を安定化
+  const slotsNormalized = normalizeSlotsForFramePlan(slots, { idPrefix: 'N' });
+
   console.log('[IROS/NORMAL_CHAT][PLAN]', {
     stamp,
     reason,
@@ -849,7 +974,12 @@ export function buildNormalChatSlotPlan(args: {
     topicHint: signals?.topicHint ?? null,
     userHead: userText.slice(0, 40),
     lastSummary: effectiveLastSummary ? effectiveLastSummary.slice(0, 80) : null,
-    slots: slots.map((s) => ({ key: s.key, len: s.content.length, head: s.content.slice(0, 40) })),
+    slots: slotsNormalized.map((s) => ({
+      slotId: s.slotId ?? null,
+      key: s.key,
+      len: String(s.content ?? '').length,
+      head: String(s.content ?? '').slice(0, 40),
+    })),
   });
 
   return {
@@ -857,6 +987,6 @@ export function buildNormalChatSlotPlan(args: {
     slotPlanPolicy: 'FINAL',
     stamp,
     reason,
-    slots,
+    slots: slotsNormalized,
   };
 }

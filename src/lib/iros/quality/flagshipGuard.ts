@@ -92,73 +92,89 @@ const P_WARN_PRAISE_LECTURE: RegExp[] = [
   /安心して/g,
 ];
 
-export function judgeFlagship(text: string): FlagshipVerdict {
+// --- 判定本体 ---
+// 方針：
+// - FATAL は ok=false として REWRITE へ
+// - WARN は ok=true（ただし reasons/score で上位が書き直し判断できる）
+// - 「質問は最大1つ」を FATAL で強制（qCount > 1）
+
+export function flagshipGuard(text: string): FlagshipVerdict {
   const t = (text ?? '').trim();
 
   const qCount = countQuestionMarks(t);
   const bulletLike = countBulletLikeLines(t);
 
-  const fatalAnswer = countMatches(t, P_FATAL_ANSWER_GIVING);
-  const fatalRush = countMatches(t, P_FATAL_RUSH);
+  const fatal_answer = countMatches(t, P_FATAL_ANSWER_GIVING);
+  const fatal_rush = countMatches(t, P_FATAL_RUSH);
+  const warn_interrog = countMatches(t, P_WARN_INTERROGATION);
+  const warn_options = countMatches(t, P_WARN_MORE_OPTIONS);
+  const warn_praise = countMatches(t, P_WARN_PRAISE_LECTURE);
 
-  const warnInterrogation = countMatches(t, P_WARN_INTERROGATION);
-  const warnOptions = countMatches(t, P_WARN_MORE_OPTIONS);
-  const warnPraise = countMatches(t, P_WARN_PRAISE_LECTURE);
-
-  // ---- スコア設計（最小）----
-  // FATAL: 「答えを渡す」or「急がせる」が一定以上
-  // WARN : 質問過多 / 選択肢増 / 説教・持ち上げ が一定以上
   let fatal = 0;
   let warn = 0;
   const reasons: string[] = [];
 
-  if (fatalAnswer >= 2) {
-    fatal += 2;
-    reasons.push('答えを渡す/断定/指示が強い（旗印NG-A）');
-  } else if (fatalAnswer >= 1) {
-    warn += 1;
-    reasons.push('断定/助言が混ざる（NG-A予備軍）');
+  // ✅ 質問は最大1つ（2つ以上は REWRITE）
+  if (qCount > 1) {
+    fatal += 1;
+    reasons.push('TOO_MANY_QUESTIONS');
   }
 
-  if (fatalRush >= 1) {
-    fatal += 2;
-    reasons.push('判断を急がせている（旗印NG-B）');
+  if (fatal_answer > 0) {
+    fatal += fatal_answer;
+    reasons.push('ANSWER_GIVING');
   }
 
-  if (qCount >= 2) {
-    warn += 2;
-    reasons.push('質問が多い（旗印NG-C）');
-  } else if (qCount === 1 && warnInterrogation >= 2) {
-    warn += 1;
-    reasons.push('詰問寄り（NG-C）');
+  if (fatal_rush > 0) {
+    fatal += fatal_rush;
+    reasons.push('RUSHING_DECISION');
   }
 
-  if (bulletLike >= 3 || warnOptions >= 1) {
-    warn += 2;
-    reasons.push('選択肢を増やしている（旗印NG-D）');
+  // WARN群（必要なら上位で REWRITE へ回せる情報として残す）
+  if (warn_interrog > 0) {
+    warn += warn_interrog;
+    reasons.push('INTERROGATION_TONE');
   }
 
-  if (warnPraise >= 2) {
-    warn += 1;
-    reasons.push('励まし/評価が主になっている（旗印NG-E）');
+  if (warn_options > 0) {
+    warn += warn_options;
+    reasons.push('MORE_OPTIONS_SIGNAL');
   }
 
-  // 最終判定
-  let level: FlagshipVerdict['level'] = 'OK';
-  let ok = true;
-
-  if (fatal >= 2) {
-    level = 'FATAL';
-    ok = false;
-  } else if (warn >= 2) {
-    level = 'WARN';
-    ok = false; // WARNでも「書き直し」に回す運用推奨
+  if (warn_praise > 0) {
+    warn += warn_praise;
+    reasons.push('PRAISE_LECTURE');
   }
+
+  // 箇条書きっぽさ（増やす圧）も warn に加点
+  if (bulletLike > 0) {
+    warn += bulletLike;
+    reasons.push('BULLET_LIKE');
+  }
+
+  const level: FlagshipVerdict['level'] = fatal > 0 ? 'FATAL' : warn > 0 ? 'WARN' : 'OK';
 
   return {
-    ok,
+    ok: level !== 'FATAL',
     level,
-    reasons: reasons.length ? reasons : ['旗印に対して大きな違反は検出されませんでした'],
-    score: { fatal, warn, qCount, bulletLike },
+    reasons: uniq(reasons),
+    score: {
+      fatal,
+      warn,
+      qCount,
+      bulletLike,
+    },
   };
+}
+
+function uniq(arr: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const x of arr) {
+    if (!x) continue;
+    if (seen.has(x)) continue;
+    seen.add(x);
+    out.push(x);
+  }
+  return out;
 }

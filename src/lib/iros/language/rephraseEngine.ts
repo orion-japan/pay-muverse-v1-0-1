@@ -44,10 +44,141 @@ export type ExtractedSlots =
     }
   | null;
 
+export type RephraseOptions = {
+  model: string;
+  temperature?: number;
+  maxLinesHint?: number;
+
+  /** 直前ユーザー入力（推奨） */
+  userText?: string | null;
+
+  /**
+   * 3軸メタ/状態など（unknown で受ける）
+   * - LLMには見せるが、本文に露出させない（systemで抑制）
+   */
+  userContext?: unknown | null;
+
+  /** ✅ ログ用（chatComplete の trace に渡す） */
+  debug?: {
+    traceId?: string | null;
+    conversationId?: string | null;
+    userCode?: string | null;
+    renderEngine?: boolean | null;
+
+    // ✅ 互換/拡張：ここに何が来ても捨てない（recall-check 等が使う）
+    [k: string]: any;
+  } | null;
+};
+
+export type DebugFinal = {
+  traceId: string;
+  conversationId?: string | null;
+  userCode?: string | null;
+  renderEngine?: boolean | null;
+
+  // ✅ 互換/拡張：追加キー保持
+  [k: string]: any;
+};
+
+export type RephraseResult =
+  | {
+      ok: true;
+      slots: Slot[];
+      meta: {
+        inKeys: string[];
+        outKeys: string[];
+        rawLen: number;
+        rawHead: string;
+      };
+    }
+  | {
+      ok: false;
+      reason: string;
+      meta: {
+        inKeys: string[];
+        rawLen: number;
+        rawHead: string;
+      };
+    };
+
+// -------------------------------
+// basics
+// -------------------------------
 function norm(s: unknown) {
   return String(s ?? '').replace(/\r\n/g, '\n').trim();
 }
 
+function safeHead(s: string, n = 80) {
+  const t = String(s ?? '');
+  return t.length <= n ? t : t.slice(0, n);
+}
+
+function clampLines(text: string, maxLines: number): string {
+  const t = norm(text);
+  if (!t) return '';
+  const lines = t
+    .split('\n')
+    .map((x) => x.trim())
+    .filter(Boolean);
+  if (lines.length <= maxLines) return lines.join('\n');
+  return lines.slice(0, Math.max(1, maxLines)).join('\n');
+}
+
+function clampChars(text: string, maxChars: number): string {
+  const t = norm(text);
+  if (!t) return '';
+  if (t.length <= maxChars) return t;
+  return t.slice(0, Math.max(0, maxChars - 1)) + '…';
+}
+
+function envFlagEnabled(raw: unknown, defaultEnabled: boolean) {
+  const v = String(raw ?? '').trim().toLowerCase();
+  if (!v) return defaultEnabled;
+  if (['0', 'false', 'off', 'no', 'disabled'].includes(v)) return false;
+  if (['1', 'true', 'on', 'yes', 'enabled'].includes(v)) return true;
+  return defaultEnabled;
+}
+
+function tryGet(obj: any, path: string[]): any {
+  let cur = obj;
+  for (const k of path) {
+    if (!cur || typeof cur !== 'object') return undefined;
+    cur = cur[k];
+  }
+  return cur;
+}
+
+function safeContextToText(v: unknown): string {
+  if (v == null) return '';
+  if (typeof v === 'string') return clampChars(norm(v), 1800);
+  try {
+    return clampChars(JSON.stringify(v), 1800);
+  } catch {
+    return clampChars(norm(String(v)), 1800);
+  }
+}
+
+function ensureDebugFinal(debug?: RephraseOptions['debug'] | null): DebugFinal {
+  const base =
+    debug && typeof debug === 'object'
+      ? { ...(debug as Record<string, any>) }
+      : ({} as Record<string, any>);
+
+  const traceIdRaw = String(base.traceId ?? '').trim();
+  const traceId = traceIdRaw || crypto.randomUUID(); // ✅ ここで必ず確定
+
+  return {
+    ...base,
+    traceId,
+    conversationId: base.conversationId ?? null,
+    userCode: base.userCode ?? null,
+    renderEngine: base.renderEngine ?? true,
+  };
+}
+
+// -------------------------------
+// slot extraction (slot-preserving)
+// -------------------------------
 function stableOrderKeys(keys: string[]) {
   const ORDER = [
     'OBS',
@@ -143,108 +274,9 @@ export function extractSlotsForRephrase(extra: any): ExtractedSlots {
   };
 }
 
-export type RephraseOptions = {
-  model: string;
-  temperature?: number;
-  maxLinesHint?: number;
-
-  /** 直前ユーザー入力（推奨） */
-  userText?: string | null;
-
-  /**
-   * 3軸メタ/状態など（unknown で受ける）
-   * - LLMには見せるが、本文に露出させない（systemで抑制）
-   */
-  userContext?: unknown | null;
-
-  /** ✅ ログ用（chatComplete の trace に渡す） */
-  debug?: {
-    traceId?: string | null;
-    conversationId?: string | null;
-    userCode?: string | null;
-    renderEngine?: boolean | null;
-
-    // ✅ 互換/拡張：ここに何が来ても捨てない（recall-check 等が使う）
-    [k: string]: any;
-  } | null;
-};
-
-export type DebugFinal = {
-  traceId: string;
-  conversationId?: string | null;
-  userCode?: string | null;
-  renderEngine?: boolean | null;
-
-  // ✅ 互換/拡張：追加キー保持
-  [k: string]: any;
-};
-
-function ensureDebugFinal(debug?: RephraseOptions['debug'] | null): DebugFinal {
-  const base =
-    debug && typeof debug === 'object'
-      ? { ...(debug as Record<string, any>) }
-      : ({} as Record<string, any>);
-
-  const traceIdRaw = String(base.traceId ?? '').trim();
-  const traceId = traceIdRaw || crypto.randomUUID(); // ✅ ここで必ず確定
-
-  return {
-    ...base,
-    traceId,
-    conversationId: base.conversationId ?? null,
-    userCode: base.userCode ?? null,
-    renderEngine: base.renderEngine ?? true,
-  };
-}
-
-export type RephraseResult =
-  | {
-      ok: true;
-      slots: Slot[];
-      meta: {
-        inKeys: string[];
-        outKeys: string[];
-        rawLen: number;
-        rawHead: string;
-      };
-    }
-  | {
-      ok: false;
-      reason: string;
-      meta: {
-        inKeys: string[];
-        rawLen: number;
-        rawHead: string;
-      };
-    };
-
-function envFlagEnabled(raw: unknown, defaultEnabled: boolean) {
-  const v = String(raw ?? '').trim().toLowerCase();
-  if (!v) return defaultEnabled;
-  if (['0', 'false', 'off', 'no', 'disabled'].includes(v)) return false;
-  if (['1', 'true', 'on', 'yes', 'enabled'].includes(v)) return true;
-  return defaultEnabled;
-}
-
-function clampLines(text: string, maxLines: number): string {
-  const t = norm(text);
-  if (!t) return '';
-  const lines = t
-    .split('\n')
-    .map((x) => x.trim())
-    .filter(Boolean);
-  if (lines.length <= maxLines) return lines.join('\n');
-  return lines.slice(0, Math.max(1, maxLines)).join('\n');
-}
-
-function clampChars(text: string, maxChars: number): string {
-  const t = norm(text);
-  if (!t) return '';
-  if (t.length <= maxChars) return t;
-  return t.slice(0, Math.max(0, maxChars - 1)) + '…';
-}
-
-// --- 🪔を完全に除去するユーティリティ（renderGateway一元化用） ---
+// -------------------------------
+// 🪔 normalization (renderGateway unification)
+// -------------------------------
 function stripLampEverywhere(text: string): string {
   let t = String(text ?? '');
 
@@ -281,35 +313,9 @@ function finalizeLamp(text: string, renderEngine: boolean): string {
   return stripped + '\n🪔';
 }
 
-function tryGet(obj: any, path: string[]): any {
-  let cur = obj;
-  for (const k of path) {
-    if (!cur || typeof cur !== 'object') return undefined;
-    cur = cur[k];
-  }
-  return cur;
-}
-
-function safeHead(s: string, n = 80) {
-  const t = String(s ?? '');
-  return t.length <= n ? t : t.slice(0, n);
-}
-
-function safeContextToText(v: unknown): string {
-  if (v == null) return '';
-  if (typeof v === 'string') return clampChars(norm(v), 1800);
-  try {
-    return clampChars(JSON.stringify(v), 1800);
-  } catch {
-    return clampChars(norm(String(v)), 1800);
-  }
-}
-
-/**
- * userContext から "履歴っぽいもの" を自動抽出して、LLM投入用のテキストに整形する。
- * - 露出禁止（LLMの内部制約としてのみ使う）
- * - 形式は "U: / A:" のみ（雑にでも可）
- */
+// -------------------------------
+// history extraction (for LLM only / non-exposed)
+// -------------------------------
 function extractHistoryTextFromContext(userContext: unknown): string {
   if (!userContext || typeof userContext !== 'object') return '';
   const uc: any = userContext as any;
@@ -438,99 +444,6 @@ function extractHistoryMessagesFromContext(
       if (hasOutLike && hasInLike) return true;
     }
 
-// src/lib/iros/language/renderGateway.ts
-// ✅ slot directives をUIに漏らさない最終ガード（pickedFrom=slotDirectives / LLM落ち でも人間文にする）
-
-function looksLikeSlotDirectives(s: string): boolean {
-  if (!s) return false;
-  // @ACK/@RESTORE/@SHIFT/@Q などが1つでもあれば directive とみなす
-  return /(^|\s)@(?:ACK|RESTORE|SHIFT|Q)\s*\{/.test(s);
-}
-
-function extractFirstJsonAfterTag(text: string, tag: string): any | null {
-  const re = new RegExp(`(?:^|\\s)@${tag}\\s*\\{`, 'm');
-  const m = re.exec(text);
-  if (!m) return null;
-
-  const start = m.index + m[0].lastIndexOf('{');
-  // brace balance で JSON 範囲を切る（単純で壊れにくい）
-  let i = start;
-  let depth = 0;
-  for (; i < text.length; i++) {
-    const ch = text[i];
-    if (ch === '{') depth++;
-    else if (ch === '}') {
-      depth--;
-      if (depth === 0) {
-        const jsonStr = text.slice(start, i + 1);
-        try {
-          return JSON.parse(jsonStr);
-        } catch {
-          return null;
-        }
-      }
-    }
-  }
-  return null;
-}
-
-function renderSlotDirectivesToHuman(directives: string): string {
-  // 期待する形：
-  // @ACK {...} @RESTORE {...} @SHIFT {...} @Q {...}
-  const ack = extractFirstJsonAfterTag(directives, 'ACK');
-  const restore = extractFirstJsonAfterTag(directives, 'RESTORE');
-  const q = extractFirstJsonAfterTag(directives, 'Q');
-
-  const user = typeof ack?.user === 'string' ? ack.user.trim() : '';
-  const last = typeof restore?.last === 'string' ? restore.last.trim() : '';
-  const ask = typeof q?.ask === 'string' ? q.ask.trim() : '';
-
-  // ✅ directive内容から“言える範囲”だけで構成（新しい助言や判断を足さない）
-  // ✅ max1question を守る（質問は最後の1つだけ）
-  const lines: string[] = [];
-
-  // ACK
-  if (user) lines.push('うん、覚えてる。');
-  else lines.push('うん。');
-
-  // RESTORE
-  if (last) {
-    lines.push('');
-    lines.push(`いまの焦点は「${last}」だね。`);
-  }
-
-  // Q（1問だけ）
-  if (ask) {
-    lines.push('');
-    lines.push(ask);
-  } else {
-    // ask が取れない場合でも directive を露出させない
-    lines.push('');
-    lines.push('どの場面を指してる？');
-  }
-
-  return lines.join('\n');
-}
-
-/**
- * ✅ renderGateway 内の return 直前にこれを挿入してください
- *
- * 例：
- *   let outText = pickedText; // 既存
- *   outText = finalizeNoDirectiveLeak(outText); // 追加
- *   return outText;
- */
-function finalizeNoDirectiveLeak(outText: string): string {
-  if (!looksLikeSlotDirectives(outText)) return outText;
-  return renderSlotDirectivesToHuman(outText);
-}
-
-// ------------------------------
-// ✅ あなたの renderGateway(...) の「返す直前」にこれを1行追加
-// outText = finalizeNoDirectiveLeak(outText);
-// ------------------------------
-
-
     return false;
   };
 
@@ -651,6 +564,9 @@ function extractLastTurnsFromContext(
   return tail;
 }
 
+// -------------------------------
+// fixed fallback (for FIXED mode)
+// -------------------------------
 function buildFixedBoxTexts(slotCount: number): string[] {
   const ZWSP = '\u200b';
   const full = [
@@ -754,7 +670,7 @@ function extractIntentBandFromContext(userContext: unknown): {
 }
 
 // ---------------------------------------------
-// ✅ helpers: metaText から inputKind を拾う / seedDraft を writer 用に整形
+// meta / inputKind
 // ---------------------------------------------
 function extractInputKindFromMetaText(metaText: string): string | null {
   const t = String(metaText ?? '');
@@ -798,6 +714,7 @@ function adaptSeedDraftHintForWriter(seedDraft: string, directTask: boolean): st
 
   let out = s;
 
+  // ※ seedDraft に find_trigger_point の痕跡が混ざる場合の保険
   if (/find_trigger_point/i.test(out)) {
     out = out.replace(/.*find_trigger_point.*(\n|$)/gi, '');
     out = out.trim();
@@ -863,9 +780,14 @@ function buildLockRuleText(locked: string[]): string {
 }
 
 // -------------------------------
-// ✅ ログ（ここで確実に出す）
+// ✅ logs
 // -------------------------------
-function logRephraseOk(debug: DebugFinal | null | undefined, outKeys: string[], raw: string, mode?: string) {
+function logRephraseOk(
+  debug: DebugFinal | null | undefined,
+  outKeys: string[],
+  raw: string,
+  mode?: string,
+) {
   console.log('[IROS/rephraseEngine][OK]', {
     traceId: debug?.traceId ?? null,
     conversationId: debug?.conversationId ?? null,
@@ -1043,271 +965,9 @@ function containsForbiddenLeakText(output: string): boolean {
   return false;
 }
 
-/**
- * ✅ FINAL用：slotを保ったまま “会話本文” を作る
- */
-export async function rephraseSlotsFinal(
-  extracted: ExtractedSlots,
-  opts: RephraseOptions,
-): Promise<RephraseResult> {
-  // ✅ traceId をこのファイルで確定（統一）
-  const debug = ensureDebugFinal(opts.debug);
-
-  if (!extracted) {
-    logRephraseOk(debug, [], '', 'NO_SLOTS');
-    return {
-      ok: false,
-      reason: 'NO_SLOTS',
-      meta: { inKeys: [], rawLen: 0, rawHead: '' },
-    };
-  }
-
-  const rawFlag = process.env.IROS_REPHRASE_FINAL_ENABLED;
-  const enabled = envFlagEnabled(rawFlag, true);
-  console.log('[IROS/REPHRASE_FLAG]', { raw: rawFlag, enabled });
-
-  if (!enabled) {
-    logRephraseOk(debug, extracted.keys, '', 'DISABLED');
-    return {
-      ok: false,
-      reason: 'REPHRASE_DISABLED_BY_ENV',
-      meta: { inKeys: extracted.keys, rawLen: 0, rawHead: '' },
-    };
-  }
-
-  const mode = String(process.env.IROS_REPHRASE_FINAL_MODE ?? 'LLM')
-    .trim()
-    .toUpperCase();
-
-  const maxLines =
-    Number(process.env.IROS_REPHRASE_FINAL_MAXLINES) > 0
-      ? Math.floor(Number(process.env.IROS_REPHRASE_FINAL_MAXLINES))
-      : Math.max(4, Math.min(12, Math.floor(opts.maxLinesHint ?? 8)));
-
-  const inKeys = extracted.keys;
-
-  // (A) FIXED
-  if (mode === 'FIXED') {
-    const fixedTexts = buildFixedBoxTexts(inKeys.length);
-    const out: Slot[] = inKeys.map((k, i) => ({
-      key: k,
-      text: fixedTexts[i] ?? 'ここで止める。',
-    }));
-
-    logRephraseOk(debug, out.map((x) => x.key), out[0]?.text ?? '', 'FIXED');
-    logRephraseAfterAttach(debug, out.map((x) => x.key), out[0]?.text ?? '', 'FIXED');
-
-    return {
-      ok: true,
-      slots: out,
-      meta: {
-        inKeys,
-        outKeys: out.map((x) => x.key),
-        rawLen: 0,
-        rawHead: '',
-      },
-    };
-  }
-
-  // (B) LLM
-  const userText = norm(opts?.userText ?? '');
-  const metaText = safeContextToText(opts?.userContext ?? null);
-
-  const inputKindFromCtx = extractInputKindFromContext(opts?.userContext ?? null);
-  const inputKindFromMeta = extractInputKindFromMetaText(metaText);
-  const inputKind = inputKindFromCtx ?? inputKindFromMeta;
-
-  // ✅ 「まとめて/要約/整理して」も “直接タスク” として扱う（要約吸い込みを防ぐ）
-  const isDirectTaskByPhrase =
-    /(本文だけ|文面|短文|そのまま使える|作って|出して|まとめて|要約|要約して|整理して|箇条書き|要点|ポイント|結論)/.test(
-      userText,
-    );
-
-  const isHowtoLike =
-    /(教えて|教えてください|アドバイス|具体的|提案|やり方|方法|手順|どうやって|どうしたら|進め方|コツ|秘技|tips|howto|おすすめ|選び方|例を|例:|サンプル)/i.test(
-      userText,
-    );
-
-  const isDirectTaskByKind =
-    inputKind === 'howto' ||
-    inputKind === 'task' ||
-    inputKind === 'request' ||
-    inputKind === 'qa';
-
-  const isDirectTask = isDirectTaskByPhrase || isDirectTaskByKind || isHowtoLike;
-
-  const historyText = extractHistoryTextFromContext(opts?.userContext ?? null);
-  const lastTurns = extractLastTurnsFromContext(opts?.userContext ?? null);
-
-  // slot由来の下書き（露出禁止）
-  const seedDraftRaw = extracted.slots.map((s) => s.text).filter(Boolean).join('\n');
-
-  // ✅ ILINE抽出（slot由来に含まれるのが主ルート）
-  const { locked: lockedILines, cleanedForModel: seedDraft } = extractLockedILines(seedDraftRaw);
-
-  // ✅ SHIFT(kind=find_trigger_point) を “読める内部ヒント” に変換（露出禁止）
-  const seedDraftHint = adaptSeedDraftHintForWriter(seedDraft, isDirectTask);
-
-  // ✅ ITは条件が揃ってから（証拠があるときだけI文体を許可）
-  const itOk = readItOkFromContext(opts?.userContext ?? null);
-  const band = extractIntentBandFromContext(opts?.userContext ?? null);
-
-  // ✅ lastTurns は「assistantで終わる」形に正規化する
-  // - 末尾userが残ると、最後に userText を足したとき user が二重になる
-  const lastTurnsSafe = (() => {
-    const t = Array.isArray(lastTurns) ? [...lastTurns] : [];
-    // 末尾が user なら無条件で落とす（重複判定はしない）
-    while (t.length > 0 && t[t.length - 1]?.role === 'user') t.pop();
-    return t;
-  })();
-
-  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-    {
-      role: 'system',
-      content: systemPromptForFullReply({
-        directTask: isDirectTask,
-        itOk,
-        band,
-        lockedILines,
-      }),
-    },
-
-    // ✅ 内部パック（履歴要約やメタ）
-    {
-      role: 'system',
-      content: buildInternalPackText({
-        metaText,
-        historyText,
-        seedDraftHint,
-        lastTurnsCount: lastTurnsSafe.length,
-        itOk,
-        band,
-        directTask: isDirectTask,
-        inputKind,
-        lockedCount: lockedILines.length,
-      }),
-    },
-
-    // ✅ seedDraft は “素材” として system で渡す（露出禁止）
-    ...(seedDraft
-      ? ([
-          {
-            role: 'system' as const,
-            content: `【内部素材：下書き（露出禁止）】\n${seedDraft}`,
-          },
-        ] as const)
-      : []),
-
-    // ★ 直近2往復（最大4メッセージ）※ここは上流で lastTurns を 4件に切ってる前提
-    ...lastTurnsSafe,
-
-    // ★ ユーザー入力は純度高く（メタを混ぜない）
-    {
-      role: 'user',
-      content: userText || '(空)',
-    },
-  ];
-
-  console.log('[IROS/rephraseEngine][MSG_PACK]', {
-    traceId: debug.traceId,
-    conversationId: debug.conversationId,
-    userCode: debug.userCode,
-    lastTurns: lastTurns.length,
-    hasHistoryText: Boolean(historyText),
-    msgCount: messages.length,
-    roles: messages.map((m) => m.role),
-    itOk,
-    intentBand: band.intentBand,
-    tLayerHint: band.tLayerHint,
-    directTask: isDirectTask,
-    inputKind,
-    inputKindFromMeta,
-    inputKindFromCtx,
-    lockedILines: lockedILines.length,
-  });
-
-  let raw = '';
-  try {
-    raw = await chatComplete({
-      purpose: 'reply',
-      model: opts.model,
-      temperature: typeof opts.temperature === 'number' ? opts.temperature : 0.2,
-      max_tokens: 700,
-      messages,
-
-      // ✅ traceId 統一
-      traceId: debug.traceId,
-      conversationId: debug.conversationId,
-      userCode: debug.userCode,
-
-      // compat payloads
-      trace: {
-        traceId: debug.traceId,
-        conversationId: debug.conversationId,
-        userCode: debug.userCode,
-      },
-      audit: { slotPlanPolicy: 'FINAL' },
-    } as any);
-  } catch (e: any) {
-    console.error('[IROS/REPHRASE_FINAL][LLM] failed', {
-      traceId: debug.traceId,
-      conversationId: debug.conversationId,
-      userCode: debug.userCode,
-      message: String(e?.message ?? e),
-    });
-    logRephraseOk(debug, extracted.keys, '', 'LLM_FAIL');
-    return {
-      ok: false,
-      reason: 'LLM_CALL_FAILED',
-      meta: { inKeys, rawLen: 0, rawHead: '' },
-    };
-  }
-
-  // ✅ raw段階ログ（keysはslotPlan由来を明示）
-  logRephraseOk(debug, extracted.keys, raw, 'LLM');
-
-  // ✅ 出力に internal pack ラベル等が混入した場合は破棄（露出禁止）
-  if (containsForbiddenLeakText(raw)) {
-    logRephraseOk(debug, extracted.keys, raw, 'INTERNAL_MARKER_LEAKED');
-    return {
-      ok: false,
-      reason: 'INTERNAL_MARKER_LEAKED',
-      meta: {
-        inKeys,
-        rawLen: String(raw ?? '').length,
-        rawHead: safeHead(String(raw ?? ''), 80),
-      },
-    };
-  }
-
-// ✅ ILINE改変禁止:検証（不一致なら破棄）
-const iLineOk = verifyLockedILinesPreserved(raw, lockedILines);
-
-console.log('[IROS/REPHRASE][VERIFY]', {
-  traceId: debug.traceId,
-  conversationId: debug.conversationId,
-  userCode: debug.userCode,
-  iLine_preserved: iLineOk,
-  lockedCount: lockedILines.length,
-});
-
-if (!iLineOk) {
-  return {
-    ok: false,
-    reason: 'ILINE_NOT_PRESERVED',
-    meta: {
-      inKeys,
-      rawLen: String(raw ?? '').length,
-      rawHead: safeHead(String(raw ?? ''), 80),
-    },
-  };
-}
-
-// ================================
-// ✅ Recall-check hard guard (Phase11)
-// - RESTORE + Q を含む slotPlan（recall-check / REPAIR系）だけ強制
-// - LLM出力が「復元(RESTORE)」か「質問(Q)」の要件を落としたら破棄（フォールバックさせる）
-// ================================
+// -------------------------------
+// Recall-check hard guard (Phase11)
+// -------------------------------
 function normLite(s: any): string {
   return String(s ?? '')
     .replace(/\r\n/g, '\n')
@@ -1343,7 +1003,9 @@ function getRecallMustHaveFromSlots(
   const restore = byKey('RESTORE');
   const q = byKey('Q');
 
-  const restoreText = normLite((restore as any)?.text ?? (restore as any)?.content ?? (restore as any)?.value ?? '');
+  const restoreText = normLite(
+    (restore as any)?.text ?? (restore as any)?.content ?? (restore as any)?.value ?? '',
+  );
   const qText = normLite((q as any)?.text ?? (q as any)?.content ?? (q as any)?.value ?? '');
 
   // RESTORE: JSONが取れれば last / summary 系を優先
@@ -1355,8 +1017,7 @@ function getRecallMustHaveFromSlots(
   // Q: JSONが取れれば ask を優先
   const qj = extractJsonTail(qText);
   const questionNeedleRaw =
-    normLite(qj?.ask ?? qj?.q ?? qj?.question ?? '') ||
-    normLite(qText.replace(/^@Q\s*/i, ''));
+    normLite(qj?.ask ?? qj?.q ?? qj?.question ?? '') || normLite(qText.replace(/^@Q\s*/i, ''));
 
   // needle が短すぎると誤判定するので最低長を持たせる
   // ✅ ただし “取れない” 場合に備えて、先頭40字フォールバックを入れておく
@@ -1470,40 +1131,296 @@ function recallGuardOk(args: {
     needles: { restore: restoreNeedle, q: questionNeedle },
   };
 }
+// ✅ writer guard (minimal)
+// - DRAFT.output_only: bullets / extra commentary を拒否
+// - questions_max: ? / ？ を数えて超過を拒否
+// - NG のときは理由コードを返す（ログ用）
 
+type WriterGuardRules = {
+  output_only?: boolean;
+  questions_max?: number;
+  no_bullets?: boolean; // DRAFT.rules.no_bullets を尊重
+};
 
+export function checkWriterGuardsMinimal(args: {
+  text: string;
+  rules?: WriterGuardRules | null;
+}): { ok: true } | { ok: false; reason: string; detail?: any } {
+  const text = String(args.text ?? '');
+  const rules = args.rules ?? null;
 
-// ✅ 差し込み（raw採用の前）
-{
-  const recallCheck = recallGuardOk({
-    slotKeys: inKeys,
-    slotsForGuard: (extracted?.slots ?? null) as any,
-    llmOut: raw,
-  });
+  if (!text.trim()) return { ok: false, reason: 'WG:OUT_EMPTY' };
 
-  console.log('[IROS/REPHRASE][RECALL_GUARD]', {
+  const outputOnly = !!rules?.output_only;
+  const noBullets = rules?.no_bullets !== false; // デフォ true 扱い
+  const qMax = typeof rules?.questions_max === 'number' ? rules?.questions_max : null;
+
+  // 1) questions_max
+  if (qMax != null) {
+    const qCount = (text.match(/[?？]/g) ?? []).length;
+    if (qCount > qMax) return { ok: false, reason: 'WG:Q_OVER', detail: { qCount, qMax } };
+  }
+
+  // 2) output_only
+  // 「本文だけ」を要求しているのに、箇条書き・見出し・解説っぽい前置きが混ざる事故を止める
+  if (outputOnly) {
+    // bullets
+    if (noBullets) {
+      const hasBullets =
+        /(^|\n)\s*[-*•●▪︎◦]\s+/.test(text) || /(^|\n)\s*\d+\.\s+/.test(text);
+      if (hasBullets) return { ok: false, reason: 'WG:BULLETS' };
+    }
+
+    // “解説します/ポイント/以下/まとめ/結論から” などのメタ文章（強すぎない範囲で最小）
+    const hasMeta =
+      /解説|ポイント|まとめ|結論から|要約|箇条書き|チェックリスト|手順|まずは|次に|以下/.test(text);
+
+    // output_only でも「短い導入1行」までは許容したいが、
+    // 2行以上のメタ構造になっている場合だけ落とす（最小）
+    if (hasMeta) {
+      const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+      const metaLines = lines.filter((l) => /解説|ポイント|まとめ|結論から|要約|以下/.test(l));
+      if (metaLines.length >= 1 && lines.length >= 5) {
+        return { ok: false, reason: 'WG:OUTPUT_ONLY_META', detail: { metaLines: metaLines.slice(0, 2) } };
+      }
+    }
+  }
+
+  return { ok: true };
+}
+
+// ---------------------------------------------
+// leak safety
+// ---------------------------------------------
+function extractDirectTask(userText: string, inputKind: string | null): boolean {
+  // ✅ 「まとめて/要約/整理して」も “直接タスク” として扱う（要約吸い込みを防ぐ）
+  const isDirectTaskByPhrase =
+    /(本文だけ|文面|短文|そのまま使える|作って|出して|まとめて|要約|要約して|整理して|箇条書き|要点|ポイント|結論)/.test(
+      userText,
+    );
+
+  const isHowtoLike =
+    /(教えて|教えてください|アドバイス|具体的|提案|やり方|方法|手順|どうやって|どうしたら|進め方|コツ|秘技|tips|howto|おすすめ|選び方|例を|例:|サンプル)/i.test(
+      userText,
+    );
+
+  const isDirectTaskByKind =
+    inputKind === 'howto' || inputKind === 'task' || inputKind === 'request' || inputKind === 'qa';
+
+  return Boolean(isDirectTaskByPhrase || isDirectTaskByKind || isHowtoLike);
+}
+
+// ---------------------------------------------
+// ✅ FINAL用：slotを保ったまま “会話本文” を作る
+// ---------------------------------------------
+export async function rephraseSlotsFinal(
+  extracted: ExtractedSlots,
+  opts: RephraseOptions,
+): Promise<RephraseResult> {
+  // ✅ traceId をこのファイルで確定（統一）
+  const debug = ensureDebugFinal(opts.debug);
+
+  if (!extracted) {
+    logRephraseOk(debug, [], '', 'NO_SLOTS');
+    return {
+      ok: false,
+      reason: 'NO_SLOTS',
+      meta: { inKeys: [], rawLen: 0, rawHead: '' },
+    };
+  }
+
+  const rawFlag = process.env.IROS_REPHRASE_FINAL_ENABLED;
+  const enabled = envFlagEnabled(rawFlag, true);
+  console.log('[IROS/REPHRASE_FLAG]', { raw: rawFlag, enabled });
+
+  if (!enabled) {
+    logRephraseOk(debug, extracted.keys, '', 'DISABLED');
+    return {
+      ok: false,
+      reason: 'REPHRASE_DISABLED_BY_ENV',
+      meta: { inKeys: extracted.keys, rawLen: 0, rawHead: '' },
+    };
+  }
+
+  const mode = String(process.env.IROS_REPHRASE_FINAL_MODE ?? 'LLM')
+    .trim()
+    .toUpperCase();
+
+  const maxLines =
+    Number(process.env.IROS_REPHRASE_FINAL_MAXLINES) > 0
+      ? Math.floor(Number(process.env.IROS_REPHRASE_FINAL_MAXLINES))
+      : Math.max(4, Math.min(12, Math.floor(opts.maxLinesHint ?? 8)));
+
+  const inKeys = extracted.keys;
+
+  // (A) FIXED
+  if (mode === 'FIXED') {
+    const fixedTexts = buildFixedBoxTexts(inKeys.length);
+    const out: Slot[] = inKeys.map((k, i) => ({
+      key: k,
+      text: fixedTexts[i] ?? 'ここで止める。',
+    }));
+
+    logRephraseOk(debug, out.map((x) => x.key), out[0]?.text ?? '', 'FIXED');
+    logRephraseAfterAttach(debug, out.map((x) => x.key), out[0]?.text ?? '', 'FIXED');
+
+    return {
+      ok: true,
+      slots: out,
+      meta: {
+        inKeys,
+        outKeys: out.map((x) => x.key),
+        rawLen: 0,
+        rawHead: '',
+      },
+    };
+  }
+
+  // (B) LLM
+  const userText = norm(opts?.userText ?? '');
+  const metaText = safeContextToText(opts?.userContext ?? null);
+
+  const inputKindFromCtx = extractInputKindFromContext(opts?.userContext ?? null);
+  const inputKindFromMeta = extractInputKindFromMetaText(metaText);
+  const inputKind = inputKindFromCtx ?? inputKindFromMeta;
+
+  const isDirectTask = extractDirectTask(userText, inputKind);
+
+  const historyText = extractHistoryTextFromContext(opts?.userContext ?? null);
+  const lastTurns = extractLastTurnsFromContext(opts?.userContext ?? null);
+
+  // slot由来の下書き（露出禁止）
+  const seedDraftRaw = extracted.slots.map((s) => s.text).filter(Boolean).join('\n');
+
+  // ✅ ILINE抽出（slot由来に含まれるのが主ルート）
+  const { locked: lockedILines, cleanedForModel: seedDraft } = extractLockedILines(seedDraftRaw);
+
+  // ✅ SHIFT(kind=find_trigger_point) を “読める内部ヒント” に変換（露出禁止）
+  const seedDraftHint = adaptSeedDraftHintForWriter(seedDraft, isDirectTask);
+
+  // ✅ ITは条件が揃ってから（証拠があるときだけI文体を許可）
+  const itOk = readItOkFromContext(opts?.userContext ?? null);
+  const band = extractIntentBandFromContext(opts?.userContext ?? null);
+
+  // ✅ lastTurns は「assistantで終わる」形に正規化する
+  // - 末尾userが残ると、最後に userText を足したとき user が二重になる
+  const lastTurnsSafe = (() => {
+    const t = Array.isArray(lastTurns) ? [...lastTurns] : [];
+    while (t.length > 0 && t[t.length - 1]?.role === 'user') t.pop();
+    return t;
+  })();
+
+  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+    {
+      role: 'system',
+      content: systemPromptForFullReply({
+        directTask: isDirectTask,
+        itOk,
+        band,
+        lockedILines,
+      }),
+    },
+
+    // ✅ 内部パック（履歴要約やメタ）
+    {
+      role: 'system',
+      content: buildInternalPackText({
+        metaText,
+        historyText,
+        seedDraftHint,
+        lastTurnsCount: lastTurnsSafe.length,
+        itOk,
+        band,
+        directTask: isDirectTask,
+        inputKind,
+        lockedCount: lockedILines.length,
+      }),
+    },
+
+    // ✅ seedDraft は “素材” として system で渡す（露出禁止）
+    ...(seedDraft
+      ? [
+          {
+            role: 'system' as const,
+            content: `【内部素材：下書き（露出禁止）】\n${seedDraft}`,
+          },
+        ]
+      : []),
+
+    // ★ 直近2往復（最大4メッセージ）
+    ...(lastTurnsSafe as Array<{ role: 'user' | 'assistant'; content: string }>),
+
+    // ★ ユーザー入力は純度高く（メタを混ぜない）
+    {
+      role: 'user',
+      content: userText || '(空)',
+    },
+  ];
+
+  console.log('[IROS/rephraseEngine][MSG_PACK]', {
     traceId: debug.traceId,
     conversationId: debug.conversationId,
     userCode: debug.userCode,
-    enforced: shouldEnforceRecallGuard(inKeys),
-    ok: recallCheck.ok,
-    missing: recallCheck.missing,
-    needles: recallCheck.needles,
+    lastTurns: lastTurns.length,
+    hasHistoryText: Boolean(historyText),
+    msgCount: messages.length,
+    roles: messages.map((m) => m.role),
+    itOk,
+    intentBand: band.intentBand,
+    tLayerHint: band.tLayerHint,
+    directTask: isDirectTask,
+    inputKind,
+    inputKindFromMeta,
+    inputKindFromCtx,
+    lockedILines: lockedILines.length,
   });
 
-  if (!recallCheck.ok) {
-    console.warn('[IROS/REPHRASE][RECALL_GUARD_REJECT]', {
+  let raw = '';
+  try {
+    raw = await chatComplete({
+      purpose: 'reply',
+      model: opts.model,
+      temperature: typeof opts.temperature === 'number' ? opts.temperature : 0.2,
+      max_tokens: 700,
+      messages,
+
+      // ✅ traceId 統一
       traceId: debug.traceId,
       conversationId: debug.conversationId,
       userCode: debug.userCode,
-      missing: recallCheck.missing,
-      needles: recallCheck.needles,
-      outHead: normLite(raw).slice(0, 120),
-    });
 
+      // compat payloads
+      trace: {
+        traceId: debug.traceId,
+        conversationId: debug.conversationId,
+        userCode: debug.userCode,
+      },
+      audit: { slotPlanPolicy: 'FINAL' },
+    } as any);
+  } catch (e: any) {
+    console.error('[IROS/REPHRASE_FINAL][LLM] failed', {
+      traceId: debug.traceId,
+      conversationId: debug.conversationId,
+      userCode: debug.userCode,
+      message: String(e?.message ?? e),
+    });
+    logRephraseOk(debug, extracted.keys, '', 'LLM_FAIL');
     return {
       ok: false,
-      reason: 'RECALL_GUARD_REJECT',
+      reason: 'LLM_CALL_FAILED',
+      meta: { inKeys, rawLen: 0, rawHead: '' },
+    };
+  }
+
+  // ✅ raw段階ログ（keysはslotPlan由来を明示）
+  logRephraseOk(debug, extracted.keys, raw, 'LLM');
+
+  // ✅ 出力に internal pack ラベル等が混入した場合は破棄（露出禁止）
+  if (containsForbiddenLeakText(raw)) {
+    logRephraseOk(debug, extracted.keys, raw, 'INTERNAL_MARKER_LEAKED');
+    return {
+      ok: false,
+      reason: 'INTERNAL_MARKER_LEAKED',
       meta: {
         inKeys,
         rawLen: String(raw ?? '').length,
@@ -1511,8 +1428,113 @@ function recallGuardOk(args: {
       },
     };
   }
-}
 
+  // ✅ ILINE改変禁止:検証（不一致なら破棄）
+  const iLineOk = verifyLockedILinesPreserved(raw, lockedILines);
+
+  console.log('[IROS/REPHRASE][VERIFY]', {
+    traceId: debug.traceId,
+    conversationId: debug.conversationId,
+    userCode: debug.userCode,
+    iLine_preserved: iLineOk,
+    lockedCount: lockedILines.length,
+  });
+
+  if (!iLineOk) {
+    return {
+      ok: false,
+      reason: 'ILINE_NOT_PRESERVED',
+      meta: {
+        inKeys,
+        rawLen: String(raw ?? '').length,
+        rawHead: safeHead(String(raw ?? ''), 80),
+      },
+    };
+  }
+
+  // ================================
+  // ✅ Recall-check hard guard (Phase11)
+  // ================================
+  {
+    const recallCheck = recallGuardOk({
+      slotKeys: inKeys,
+      slotsForGuard: (extracted?.slots ?? null) as any,
+      llmOut: raw,
+    });
+
+    console.log('[IROS/REPHRASE][RECALL_GUARD]', {
+      traceId: debug.traceId,
+      conversationId: debug.conversationId,
+      userCode: debug.userCode,
+      enforced: shouldEnforceRecallGuard(inKeys),
+      ok: recallCheck.ok,
+      missing: recallCheck.missing,
+      needles: recallCheck.needles,
+    });
+
+    if (!recallCheck.ok) {
+      console.warn('[IROS/REPHRASE][RECALL_GUARD_REJECT]', {
+        traceId: debug.traceId,
+        conversationId: debug.conversationId,
+        userCode: debug.userCode,
+        missing: recallCheck.missing,
+        needles: recallCheck.needles,
+        outHead: normLite(raw).slice(0, 120),
+      });
+
+      return {
+        ok: false,
+        reason: 'RECALL_GUARD_REJECT',
+        meta: {
+          inKeys,
+          rawLen: String(raw ?? '').length,
+          rawHead: safeHead(String(raw ?? ''), 80),
+        },
+      };
+    }
+  }
+
+  // ================================
+  // ✅ writer guard (minimal)
+  // ================================
+  {
+    const rules: WriterGuardRules = isDirectTask
+      ? { output_only: true, no_bullets: true, questions_max: 1 }
+      : { output_only: false, no_bullets: true, questions_max: 1 };
+
+    const wg = checkWriterGuardsMinimal({ text: raw, rules });
+
+    console.log('[IROS/REPHRASE][WRITER_GUARD]', {
+      traceId: debug.traceId,
+      conversationId: debug.conversationId,
+      userCode: debug.userCode,
+      ok: wg.ok,
+      reason: (wg as any).reason ?? null,
+      detail: (wg as any).detail ?? null,
+      directTask: isDirectTask,
+    });
+
+    if (!wg.ok) {
+      console.warn('[IROS/REPHRASE][WRITER_GUARD_REJECT]', {
+        traceId: debug.traceId,
+        conversationId: debug.conversationId,
+        userCode: debug.userCode,
+        reason: (wg as any).reason,
+        detail: (wg as any).detail ?? null,
+        outHead: normLite(raw).slice(0, 160),
+      });
+
+      return {
+        ok: false,
+        reason: 'WRITER_GUARD_REJECT',
+        meta: {
+          inKeys,
+          rawLen: String(raw ?? '').length,
+          rawHead: safeHead(String(raw ?? ''), 80),
+        },
+      };
+    }
+  }
 
   // ✅ 仕上げ：行数制限→🪔正規化
   const renderEngine = Boolean(debug.renderEngine ?? true);
