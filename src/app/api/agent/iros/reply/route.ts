@@ -956,6 +956,43 @@ async function maybeAttachRephraseForRenderV2(args: {
       renderEngine: true,
     },
   });
+  // =========================================================
+  // ✅ 介入（このターンで発火させる）
+  // - flagDecision が POSITION_DRIFT / STALL を立てたら
+  //   LLM生成に行かず “seed（slotPlan）へ戻す”
+  // - これで「崩れ検出が生成に反映されない」問題が消える
+  // =========================================================
+  if (flagDecision?.shouldRaiseFlag === true) {
+    // ✅ seed(raw slot) を renderGateway に渡すと "@OBS ..." が剥がれて空になりやすい。
+    // なので「このターンに出す短文」を確定で1つ作る（=落ちない）
+    const safeText =
+      `今日はここまででOK。\n` +
+`いま残ってるのは「${String(userText ?? '').slice(0, 40)}」という感触。\n` +
+      `次は “どこが一番変わってないと感じるか” だけ、1点だけ拾えば続きが動く。`;
+
+    // ✅ renderGateway は rephraseBlocks を優先して拾うので、ここに「文章」を入れる
+    (extraMerged as any).rephraseBlocks = [{ text: safeText }];
+
+    // ✅ 監査ログ（DB meta.extra）にも刻む
+    meta.extra = {
+      ...(meta.extra ?? {}),
+      rephraseApplied: true,
+      rephraseModel: '(raise-to-seed)',
+      shouldRaiseFlag: true,
+      flagDecision,
+      flagIntervene: { kind: 'RAISE_TO_SAFE_TEXT', source: 'flagDecision' },
+    };
+
+    console.warn('[IROS/FLAGSHIP][RAISE_TO_SEED]', {
+      conversationId,
+      userCode,
+      reasons: Array.isArray(flagDecision?.reasons) ? flagDecision.reasons : [],
+    });
+
+    return;
+  }
+
+
 
   // =========================================================
   // ✅ rephrase 結果の「崩れ検出（flagshipGuard側）」を確定値として回収
