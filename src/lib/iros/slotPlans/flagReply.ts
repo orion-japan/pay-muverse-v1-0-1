@@ -189,16 +189,21 @@ function decideCounts(t: string, args: BuildFlagReplyArgs): {
   deblame: number;
   invitation: number;
 } {
-  // ✅ “自由”に増やすが、暴れないように上限は持つ（8〜10を狙うなら上流合体か別カテゴリ追加で）
   const conclusion = 1;
 
-  const dynamics = hasInnerFriction(t) || wantsClarity(t) ? 2 : 1; // 1〜2
+  const strong = hasInnerFriction(t) && wantsClarity(t); // ← 2本目を出す“強い条件”
+  const dynamics = strong ? 2 : 1;
+
   const deblame =
-    selfBlameOrCollapse(t) || overloadOrPanic(t) || hasInnerFriction(t) ? 2 : wantsClarity(t) ? 1 : 1; // 1〜2
-  const invitation = args.directTask ? 2 : 1; // 1〜2
+    selfBlameOrCollapse(t) || overloadOrPanic(t) ? 2 :
+    hasInnerFriction(t) ? 1 :
+    1;
+
+  const invitation = args.directTask ? 2 : 1;
 
   return { conclusion, dynamics, deblame, invitation };
 }
+
 
 /**
  * 旗印ブロックを「可変」で組む

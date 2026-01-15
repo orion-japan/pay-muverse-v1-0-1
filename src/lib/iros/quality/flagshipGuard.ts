@@ -1,180 +1,224 @@
 // src/lib/iros/quality/flagshipGuard.ts
-// 旗印ガード：
-// 「答えを渡さない / 判断を急がせない / 読み手が自分で答えを出せる場所をつくる」
-// を破る出力を検出して REWRITE（書き直し）へ回すための最小判定。
+// iros — Flagship Quality Guard
+//
+// 目的：
+// - 旗印「読み手が“自分で答えを出せる場所”」から外れる“汎用応援文”を落とす
+// - 「励まし＋一般質問」「〜かもしれません連発」「中身が薄い」などを WARN/FATAL
+//
+// 返すもの：
+// { ok, level, score, reasons, qCount, bulletLike, shouldRaiseFlag }
+// - ok=false なら rephraseEngine が reject する想定
+//
+// 注意：ここは“安全・汎用”ではなく “旗印” のための品質ゲート。
 
 export type FlagshipVerdict = {
   ok: boolean;
   level: 'OK' | 'WARN' | 'FATAL';
-  reasons: string[];
+  qCount: number;
   score: {
     fatal: number;
     warn: number;
     qCount: number;
     bulletLike: number;
+    hedge: number;
+    cheer: number;
+    generic: number;
   };
+  reasons: string[];
+
+  // ✅ WARNでも“停滞/体験崩れ”なら、上位で介入させるためのフラグ
+  // 例：HEDGE/GENERIC/汎用応援が強いのに、視点転換の兆候が弱い
+  shouldRaiseFlag: boolean;
 };
 
-function countMatches(text: string, patterns: RegExp[]): number {
-  let n = 0;
-  for (const re of patterns) {
-    const m = text.match(re);
-    if (m) n += m.length;
+function norm(s: string) {
+  return String(s ?? '')
+    .replace(/\r/g, '')
+    .replace(/[ \t]+/g, ' ')
+    .trim();
+}
+
+function countMatches(text: string, patterns: RegExp[]) {
+  let c = 0;
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m) c += m.length;
   }
-  return n;
+  return c;
 }
 
-function countQuestionMarks(text: string): number {
-  // 全角/半角を拾う
-  const m = text.match(/[？?]/g);
-  return m ? m.length : 0;
+function hasAny(text: string, patterns: RegExp[]) {
+  return patterns.some((p) => p.test(text));
 }
 
-function countBulletLikeLines(text: string): number {
-  // 箇条書き・番号付き・A/B などを “増やす” シグナルとして軽く検出
-  const lines = text.split('\n').map(s => s.trim());
-  let n = 0;
-  for (const line of lines) {
-    if (!line) continue;
-    if (/^[-・•*]/.test(line)) n++;
-    else if (/^\d+[.)]/.test(line)) n++;
-    else if (/^[A-DＡ-Ｄ][：:]/.test(line)) n++;
-    else if (/^(選択肢|パターン|案|方法)\s*[:：]/.test(line)) n++;
-  }
-  return n;
-}
+export function flagshipGuard(input: string): FlagshipVerdict {
+  const t = norm(input);
 
-const P_FATAL_ANSWER_GIVING: RegExp[] = [
-  /結論[:：]/g,
-  /正解は/g,
-  /答えは/g,
-  /つまり[:：]/g,
-  /あなたは(.*)だ/g, // 強い断定（雑に効くので運用で調整可）
-  /必ず/g,
-  /絶対/g,
-  /～すべき/g,
-  /すべき/g,
-  /した方がいい/g,
-  /しなさい/g,
-  /やれ/g,
-  /決めろ/g,
-];
+  const reasons: string[] = [];
+  const qCount = (t.match(/[？?]/g) ?? []).length;
 
-const P_FATAL_RUSH: RegExp[] = [
-  /今すぐ/g,
-  /今日中/g,
-  /早く/g,
-  /急いで/g,
-  /迷うな/g,
-  /まず決めて/g,
-  /先に決めて/g,
-];
+  // 箇条書きっぽさ（旗印というより“助言テンプレ”になりがち）
+  const bulletLike =
+    /(^|\n)\s*[-*•]\s+/.test(t) || /(^|\n)\s*\d+\.\s+/.test(t) ? 1 : 0;
 
-const P_WARN_INTERROGATION: RegExp[] = [
-  /(いつ|どこ|誰|何|なに|どうして|なぜ)[:：]?/g,
-];
+  // “汎用応援”の語彙（これが多いほど危険）
+  const CHEER = [
+    /ワクワク/g,
+    /素晴らしい/g,
+    /いいですね/g,
+    /応援/g,
+    /大丈夫/g,
+    /少しずつ/g,
+    /焦らなくていい/g,
+    /前向き/g,
+    /きっと/g,
+    /新しい発見/g,
 
-const P_WARN_MORE_OPTIONS: RegExp[] = [
-  /選択肢/g,
-  /A\/B/g,
-  /AとB/g,
-  /次の(3|４|4)つ/g,
-  /以下の通り/g,
-];
+    // ✅ よくある“励まし締め”系
+    /一歩/g,
+    /進展/g,
+    /大きな一歩/g,
+    /積み重ね/g,
+    /無理しない/g,
+    /安心して/g,
+  ];
 
-const P_WARN_PRAISE_LECTURE: RegExp[] = [
-  /大丈夫/g,
-  /あなたならできる/g,
-  /素晴らしい/g,
-  /立派/g,
-  /正しい/g,
-  /間違いない/g,
-  /安心して/g,
-];
+  // “ぼかし/逃げ”の語彙（これが多いと「判断の責任を文章が回避」しやすい）
+  const HEDGE = [
+    /かもしれません/g,
+    /かもしれない/g,
+    /(?:見えて|分かって)くるかもしれない/g,
+    /感じ(ています|ます)か/g,
+    /〜?すると(?:.*)?(良い|上がる|見える|変わる)/g,
+    /と思います/g,
+    /ように/g,
+    /できるかもしれ/g,
+  ];
 
-// --- 判定本体 ---
-// 方針：
-// - FATAL は ok=false として REWRITE へ
-// - WARN は ok=true（ただし reasons/score で上位が書き直し判断できる）
-// - 「質問は最大1つ」を FATAL で強制（qCount > 1）
+  // “一般化しすぎ”を示す語彙（誰にでも当てはまる）
+  const GENERIC = [
+    /全体の完成度/g,
+    /鍵になる/g,
+    /考えると/g,
+    /役に立つ/g,
+    /良くなる/g,
+    /高まる/g,
+    /上がる/g,
 
-export function flagshipGuard(text: string): FlagshipVerdict {
-  const t = (text ?? '').trim();
+    // ✅ “抽象まとめ”系
+    /全体像/g,
+    /ステップ/g,
+    /要素/g,
+  ];
 
-  const qCount = countQuestionMarks(t);
-  const bulletLike = countBulletLikeLines(t);
+  // 旗印側の「視点を一段変える」「読み手の位置を作る」っぽい語彙
+  // ※これがゼロで、かつ CHEER/HEDGE/GENERIC が多いと “汎用文” と判定する
+  const FLAGSHIP_SIGNS = [
+    /見方/g,
+    /視点/g,
+    /角度/g,
+    /言い換えると/g,
+    /いま大事なのは/g,
+    /ここでやることは/g,
+    /まず切り分ける/g,
+    /焦点/g,
+    /輪郭/g,
+  ];
 
-  const fatal_answer = countMatches(t, P_FATAL_ANSWER_GIVING);
-  const fatal_rush = countMatches(t, P_FATAL_RUSH);
-  const warn_interrog = countMatches(t, P_WARN_INTERROGATION);
-  const warn_options = countMatches(t, P_WARN_MORE_OPTIONS);
-  const warn_praise = countMatches(t, P_WARN_PRAISE_LECTURE);
+  const cheer = countMatches(t, CHEER);
+  const hedge = countMatches(t, HEDGE);
+  const generic = countMatches(t, GENERIC);
+  const hasFlagshipSign = hasAny(t, FLAGSHIP_SIGNS);
 
+  // スコア化
   let fatal = 0;
   let warn = 0;
-  const reasons: string[] = [];
 
-  // ✅ 質問は最大1つ（2つ以上は REWRITE）
-  if (qCount > 1) {
-    fatal += 1;
-    reasons.push('TOO_MANY_QUESTIONS');
+  // ルール1: 質問は最大1（既存ポリシーと整合）
+  if (qCount >= 2) {
+    fatal += 2;
+    reasons.push('QCOUNT_TOO_MANY');
+  } else if (qCount === 1) {
+    // 単体の質問でも“汎用質問”に寄りやすいので軽く加点
+    warn += 1;
+    reasons.push('QCOUNT_ONE');
   }
 
-  if (fatal_answer > 0) {
-    fatal += fatal_answer;
-    reasons.push('ANSWER_GIVING');
+  // ルール2: 汎用応援＋ぼかしが多いほど危険
+  if (cheer >= 2) {
+    warn += 2;
+    reasons.push('CHEER_MANY');
+  } else if (cheer === 1) {
+    warn += 1;
+    reasons.push('CHEER_PRESENT');
   }
 
-  if (fatal_rush > 0) {
-    fatal += fatal_rush;
-    reasons.push('RUSHING_DECISION');
+  if (hedge >= 2) {
+    warn += 2;
+    reasons.push('HEDGE_MANY');
+  } else if (hedge === 1) {
+    warn += 1;
+    reasons.push('HEDGE_PRESENT');
   }
 
-  // WARN群（必要なら上位で REWRITE へ回せる情報として残す）
-  if (warn_interrog > 0) {
-    warn += warn_interrog;
-    reasons.push('INTERROGATION_TONE');
+  // ルール3: “誰にでも言える”語彙が多い
+  if (generic >= 2) {
+    warn += 2;
+    reasons.push('GENERIC_MANY');
+  } else if (generic === 1) {
+    warn += 1;
+    reasons.push('GENERIC_PRESENT');
   }
 
-  if (warn_options > 0) {
-    warn += warn_options;
-    reasons.push('MORE_OPTIONS_SIGNAL');
-  }
-
-  if (warn_praise > 0) {
-    warn += warn_praise;
-    reasons.push('PRAISE_LECTURE');
-  }
-
-  // 箇条書きっぽさ（増やす圧）も warn に加点
-  if (bulletLike > 0) {
-    warn += bulletLike;
+  // ルール4: 箇条書きテンプレは warn
+  if (bulletLike) {
+    warn += 1;
     reasons.push('BULLET_LIKE');
   }
 
-  const level: FlagshipVerdict['level'] = fatal > 0 ? 'FATAL' : warn > 0 ? 'WARN' : 'OK';
+  // ルール5（重要）:
+  // 「CHEER/HEDGE/GENERIC が強いのに、旗印シグナルがゼロ」なら “汎用応援文” として落とす
+  const blandPressure = cheer + hedge + generic;
+  if (!hasFlagshipSign && blandPressure >= 4) {
+    fatal += 2;
+    reasons.push('NO_FLAGSHIP_SIGN_WITH_BLAND_PRESSURE');
+  }
+
+  // ルール6:
+  // 短文で「励まし＋一般質問」だけの形は “会話が進まない” ので落とす
+  if (t.length <= 160 && qCount === 1 && !hasFlagshipSign && cheer + hedge >= 2) {
+    fatal += 2;
+    reasons.push('SHORT_GENERIC_CHEER_WITH_QUESTION');
+  }
+
+  // 最終判定
+  let level: FlagshipVerdict['level'] = 'OK';
+  if (fatal >= 2) level = 'FATAL';
+  else if (warn >= 3) level = 'WARN';
+
+  const ok = level !== 'FATAL';
+
+  // ✅ WARNでも“停滞/体験崩れ”なら上位で介入させたい
+  // - FATAL は当然 raise
+  // - WARN は「ぼかし/汎用が強い」「旗印シグナルが弱い」などで raise
+  const shouldRaiseFlag =
+    level === 'FATAL' ||
+    (level === 'WARN' && (hedge >= 3 || generic >= 2 || (!hasFlagshipSign && blandPressure >= 3)));
 
   return {
-    ok: level !== 'FATAL',
+    ok,
     level,
-    reasons: uniq(reasons),
+    qCount,
     score: {
       fatal,
       warn,
       qCount,
       bulletLike,
+      hedge,
+      cheer,
+      generic,
     },
+    reasons,
+    shouldRaiseFlag,
   };
-}
-
-function uniq(arr: string[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const x of arr) {
-    if (!x) continue;
-    if (seen.has(x)) continue;
-    seen.add(x);
-    out.push(x);
-  }
-  return out;
 }

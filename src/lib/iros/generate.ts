@@ -1104,6 +1104,12 @@ export async function generateIrosReply(args: GenerateArgs): Promise<GenerateRes
   // history → LLM
   const historyMessagesRaw = normalizeHistoryToMessages(args.history, 12);
   const historyMessages = dedupeTailUser(historyMessagesRaw, userText);
+  console.log('[IROS/HISTORY][PASS]', {
+    rawLen: historyMessagesRaw.length,
+    len: historyMessages.length,
+    roles: historyMessages.map((m) => m.role),
+    lastHead: historyMessages.length ? String(historyMessages[historyMessages.length - 1].content ?? '').slice(0, 60) : null,
+  });
 
   const pastStateNoteText = typeof (meta as any)?.extra?.pastStateNoteText === 'string' ? (meta as any).extra.pastStateNoteText.trim() : '';
 

@@ -83,6 +83,33 @@ function safeParseDate(s: unknown): Date | null {
 }
 
 // -----------------------------------------
+// FixedNorth util（meta / memoryState 両対応）
+// -----------------------------------------
+function getFixedNorthKey(src: any | null): string | null {
+  if (!src) return null;
+
+  const key =
+    typeof src?.fixedNorth?.key === 'string'
+      ? String(src.fixedNorth.key)
+      : typeof src?.fixedNorth === 'string'
+        ? String(src.fixedNorth)
+        : null;
+
+  return key ? norm(key) : null;
+}
+
+function hasFixedNorthSUN(meta: MetaLike | null, ms: MemoryStateLike | null): boolean {
+  // ✅ 主：MemoryState（無ければmeta）
+  const msKey = getFixedNorthKey(ms);
+  if (msKey) return msKey === 'SUN';
+
+  const metaKey = getFixedNorthKey(meta);
+  if (metaKey) return metaKey === 'SUN';
+
+  return false;
+}
+
+// -----------------------------------------
 // History utilities
 // -----------------------------------------
 function pickRecentUserTexts(history: any[], n: number): string[] {
@@ -149,22 +176,6 @@ function isCommitShortText(text: string): boolean {
 }
 
 // -----------------------------------------
-// FixedNorth (SUN)
-// -----------------------------------------
-function metaHasFixedNorthSUN(meta: MetaLike | null): boolean {
-  if (!meta) return false;
-
-  const fixedNorthKey =
-    typeof (meta as any)?.fixedNorth?.key === 'string'
-      ? String((meta as any).fixedNorth.key)
-      : typeof (meta as any)?.fixedNorth === 'string'
-        ? String((meta as any).fixedNorth)
-        : null;
-
-  return fixedNorthKey === 'SUN';
-}
-
-// -----------------------------------------
 // Prev IT state
 // - 主：MemoryState
 // - 補：meta（同一ターン内の補助）
@@ -179,32 +190,28 @@ function readPrevItActiveFromMemoryState(ms: MemoryStateLike | null): {
 } {
   if (!ms) return { active: false, step: null, reason: null, lastAt: null };
 
-  const step = norm(
-    (ms as any)?.itxStep ??
-      (ms as any)?.itx_step ??
-      (ms as any)?.itx_step_db ??
-      '',
-  );
+  const step = norm((ms as any)?.itxStep ?? (ms as any)?.itx_step ?? (ms as any)?.itx_step_db ?? '');
   const reason = norm(
-    (ms as any)?.itxReason ??
-      (ms as any)?.itx_reason ??
-      (ms as any)?.itx_reason_db ??
-      '',
+    (ms as any)?.itxReason ?? (ms as any)?.itx_reason ?? (ms as any)?.itx_reason_db ?? '',
   );
   const lastAt = safeParseDate(
-    (ms as any)?.itxLastAt ??
-      (ms as any)?.itx_last_at ??
-      (ms as any)?.itx_last_at_db ??
-      '',
+    (ms as any)?.itxLastAt ?? (ms as any)?.itx_last_at ?? (ms as any)?.itx_last_at_db ?? '',
   );
 
   let active = false;
 
+  // step があれば基本 active
   if (step) active = true;
+
+  // reason で補強
   if (!active && reason.includes('IT_TRIGGER_OK')) active = true;
   if (!active && reason.includes('IT_HOLD')) active = true;
 
-  if (active && lastAt) {
+  // ✅ T3 は「コミット済み」扱い：時間で失効させない
+  const isCommittedT3 = step === 'T3' && reason.includes('IT_TRIGGER_OK');
+
+  // lastAt が取れる場合は “古すぎる保持” を切る（ただしT3コミットは除外）
+  if (active && lastAt && !isCommittedT3) {
     const age = Date.now() - lastAt.getTime();
     if (age > IT_HOLD_WINDOW_MS) active = false;
   }
@@ -236,8 +243,11 @@ function readPrevItActiveFromMeta(meta: MetaLike | null): {
   // tLayerModeActive が来てるケースも保険
   if (!active && (meta as any)?.tLayerModeActive === true) active = true;
 
-  // lastAt が取れる場合は “古すぎる保持” を切る
-  if (active && lastAt) {
+  // ✅ T3 は「コミット済み」扱い：時間で失効させない
+  const isCommittedT3 = step === 'T3' && reason.includes('IT_TRIGGER_OK');
+
+  // lastAt が取れる場合は “古すぎる保持” を切る（ただしT3コミットは除外）
+  if (active && lastAt && !isCommittedT3) {
     const age = Date.now() - lastAt.getTime();
     if (age > IT_HOLD_WINDOW_MS) active = false;
   }
@@ -269,7 +279,7 @@ function extractCore(meta: MetaLike | null, text: string): string | null {
   const mProg1 = t.match(/(.{2,24})で進むと決め(?:た|ました)/);
   if (mProg1?.[1]) return norm(mProg1[1] + 'で進む');
 
-  // 3.1) ✅ 「Xで進む。」系
+  // 3.1) 「Xで進む。」系
   const mProg2 = t.match(/(.{2,24})で進む(?:。|！|!|$)/);
   if (mProg2?.[1]) {
     const c = norm(mProg2[1]);
@@ -338,9 +348,8 @@ function hasBlock(text: string): boolean {
 }
 
 function hasSunByWords(text: string): boolean {
-  const t = text;
-  if (SUN_EXPLICIT_RE.test(t)) return true;
-  return SUN_WORDS.some(w => t.includes(w));
+  if (SUN_EXPLICIT_RE.test(text)) return true;
+  return SUN_WORDS.some(w => text.includes(w));
 }
 
 /**
@@ -352,7 +361,8 @@ function hasSunByWords(text: string): boolean {
  * ※ HOLD の救済はメインで別途やる
  */
 function sunGateOkEnter(meta: MetaLike | null, text: string, historyTexts: string[]): boolean {
-  const hasNorth = metaHasFixedNorthSUN(meta);
+  // ✅ ここは ENTER用なので meta（同一ターン文脈）基準でOK
+  const hasNorth = getFixedNorthKey(meta) === 'SUN';
   if (!hasNorth) return false;
 
   if (hasSunByWords(text) || hasBlock(text)) return true;
@@ -381,37 +391,30 @@ export function computeITTrigger(args: {
   const text = norm(args.text);
   const history = Array.isArray(args.history) ? args.history : [];
   const meta = args.meta ?? null;
-  const memoryState = (args as any).memoryState ?? null;
+  const memoryState = args.memoryState ?? null;
 
   const historyTexts = pickRecentUserTexts(history, 8);
-
-  // ✅ DEBUG: fixedNorth が computeITTrigger に届いているか
-  const dbgFixedNorthKey =
-    typeof (meta as any)?.fixedNorth?.key === 'string'
-      ? String((meta as any).fixedNorth.key)
-      : typeof (meta as any)?.fixedNorth === 'string'
-        ? String((meta as any).fixedNorth)
-        : null;
 
   // ✅ 主：MemoryState / 補：meta / 保険：history
   const prevFromMemoryState = readPrevItActiveFromMemoryState(memoryState);
   const prevFromMeta = readPrevItActiveFromMeta(meta);
   const prevFromHistory = findPrevItOkFromHistory(history);
 
+  // ✅ ここは「一箇所だけ」：二重宣言させない
+  const hasNorth = hasFixedNorthSUN(meta, memoryState);
+
   console.log('[IROS/IT][probe][fixedNorth]', {
     hasMeta: Boolean(meta),
-    fixedNorthRaw: (meta as any)?.fixedNorth ?? null,
-    fixedNorthKey: dbgFixedNorthKey,
+    fixedNorth_meta: getFixedNorthKey(meta),
+    fixedNorth_ms: getFixedNorthKey(memoryState),
+    hasNorth,
     prevIt_fromMemoryState: prevFromMemoryState,
     prevIt_fromMeta: prevFromMeta,
     prevIt_fromHistory: prevFromHistory,
   });
 
-  const hasNorth = metaHasFixedNorthSUN(meta);
-
   // “短い繋ぎ文”判定
   const isVeryShort = text.length > 0 && text.length <= 14;
-  const isCommitShort = isCommitShortText(text);
 
   // ---- 1. 核抽出 ----
   let core = extractCore(meta, text);
@@ -434,12 +437,16 @@ export function computeITTrigger(args: {
 
   // ---- 3. “前回ITが生きているか” ----
   // ✅ MemoryState を主に判定し、meta/historyは補助
-  const prevItActive =
-    hasNorth &&
-    (prevFromMemoryState.active || prevFromMeta.active || prevFromHistory);
+  const prevItActive = hasNorth && (prevFromMemoryState.active || prevFromMeta.active || prevFromHistory);
 
-  // ✅ HOLD 条件：前回ITが生きていて、短い繋ぎ文（肯定/継続）なら維持
-  const holdOk = prevItActive && isVeryShort && (affirmed || isCommitShort);
+   // ✅ HOLD 条件：前回ITが生きていて、短い繋ぎ文なら維持
+  // - affirmed / commitShort は従来通り
+  // - 追加：SUN語彙 or BLOCK を含む短文（例:「希望で進む」）も HOLD として扱う
+  const holdOk =
+    prevItActive &&
+    isVeryShort &&
+    (affirmed || isCommitShortText(text) || hasSunByWords(text) || hasBlock(text));
+
 
   // ---- 4. SUNゲート ----
   // ENTERは厳密、HOLDは“前回ITが生きている”こと自体でSUN維持とみなす
@@ -447,8 +454,7 @@ export function computeITTrigger(args: {
   if (!sunOk && holdOk) sunOk = true;
 
   // ---- 5. deepenOk ----
-  const deepenOk =
-    declaredNow || affirmed || (hasCore && coreRepeated && hasNarrow(text)) || holdOk;
+  const deepenOk = declaredNow || affirmed || (hasCore && coreRepeated && hasNarrow(text)) || holdOk;
 
   // ---- 6. ENTER判定 ----
   const enterOk = hasCore && sunOk && deepenOk;
@@ -477,9 +483,9 @@ export function computeITTrigger(args: {
   if (holdOk && hasNorth) {
     // ✅ step は MemoryState を最優先（なければ meta）
     const keepStepRaw =
-      (prevFromMemoryState.step && /^T[123]$/u.test(prevFromMemoryState.step))
+      prevFromMemoryState.step && /^T[123]$/u.test(prevFromMemoryState.step)
         ? prevFromMemoryState.step
-        : (prevFromMeta.step && /^T[123]$/u.test(prevFromMeta.step))
+        : prevFromMeta.step && /^T[123]$/u.test(prevFromMeta.step)
           ? prevFromMeta.step
           : null;
 

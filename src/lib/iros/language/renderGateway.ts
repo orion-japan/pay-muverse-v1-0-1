@@ -866,6 +866,40 @@ export function renderGatewayAsReply(args: {
     rev: IROS_RENDER_GATEWAY_REV,
   };
 
+// ✅ meta 拡張（破壊せず・型衝突させず）
+(meta as any).slotPlanPolicy =
+  (args as any)?.slotPlanPolicy ??
+  (args as any)?.meta?.slotPlanPolicy ??
+  null;
+
+(meta as any).extra =
+  (args as any)?.extra ??
+  (args as any)?.meta?.extra ??
+  null;
+
+
+// ✅ render-v2 通電ランプ：rephraseBlocks が入っているか毎回見える化（スコープ/型安全版）
+try {
+  const extraAny = (meta as any)?.extra;
+  const rephraseLen = Array.isArray(extraAny?.rephraseBlocks) ? extraAny.rephraseBlocks.length : 0;
+
+  if (rephraseLen === 0) {
+    console.warn('[IROS/renderGateway][WARN_NO_REPHRASE_BLOCKS]', {
+      rev: meta.rev,
+      hasExtra: !!extraAny,
+      extraKeys: extraAny ? Object.keys(extraAny) : [],
+      outLen: meta.outLen,
+    });
+  } else {
+    console.info('[IROS/renderGateway][HAS_REPHRASE_BLOCKS]', {
+      rev: meta.rev,
+      rephraseBlocksLen: rephraseLen,
+      outLen: meta.outLen,
+    });
+  }
+} catch {}
+
+
   console.warn(
     '[IROS/renderGateway][OK]',
     JSON.stringify({

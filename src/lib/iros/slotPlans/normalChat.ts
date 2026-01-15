@@ -55,7 +55,7 @@ function containsAny(t: string, words: string[]) {
 }
 
 // ✅ meta builder（文章禁止：短いタグ＋最小payloadだけ）
-function m(tag: string, payload?: Record<string, any>) {
+function m(tag: string, payload?: Record<string, unknown>) {
   if (!payload || Object.keys(payload).length === 0) return `@${tag}`;
 
   // payload は writer が読む前提。可読性より “壊れにくさ” 優先で JSON に寄せる。
@@ -78,7 +78,7 @@ function m(tag: string, payload?: Record<string, any>) {
  *   // framePlan に渡す直前（= return 直前）に必ず噛ませる
  */
 export function normalizeSlotsForFramePlan(
-  slots: NormalChatSlot[] | Record<string, any> | null | undefined,
+  slots: NormalChatSlot[] | Record<string, unknown> | null | undefined,
   opts?: { idPrefix?: string }
 ): NormalChatSlot[] {
   const idPrefix = String(opts?.idPrefix ?? 'N');
@@ -87,7 +87,12 @@ export function normalizeSlotsForFramePlan(
 
   const arr: any[] = Array.isArray(slots)
     ? slots
-    : Object.keys(slots).map((k) => ({ key: k, content: (slots as any)[k], role: 'assistant', style: 'neutral' }));
+    : Object.keys(slots).map((k) => ({
+        key: k,
+        content: (slots as any)[k],
+        role: 'assistant',
+        style: 'neutral',
+      }));
 
   let seq = 0;
 
@@ -104,13 +109,7 @@ export function normalizeSlotsForFramePlan(
     const existingId = String(s.slotId ?? s.slot_id ?? '').trim();
     const slotId = existingId || `${idPrefix}${++seq}`;
 
-    out.push({
-      key,
-      slotId,
-      role,
-      style,
-      content,
-    });
+    out.push({ key, slotId, role, style, content });
   }
 
   return out;
@@ -121,7 +120,6 @@ function looksLikeFeedback(text: string) {
   const t = norm(text);
   if (!t) return false;
 
-  // 「説得力ない」「弱い」「足りない」「違う」「生意気」「それじゃ」など
   return containsAny(t, [
     '説得力',
     '弱い',
@@ -176,7 +174,6 @@ function looksLikeThinReply(text: string) {
   const t = norm(text);
   if (!t) return false;
 
-  // 明示的な薄返答
   if (
     t === '日常です' ||
     t === '日常' ||
@@ -192,7 +189,6 @@ function looksLikeThinReply(text: string) {
     return true;
   }
 
-  // ✅ 「どうしよう」「うーん」など “迷いの独り言” は薄い扱い（質問で追わない）
   if (
     /^(どうしよ|どうしよう|どうする|どうしたら|どうすれば)(.*)?$/.test(t) ||
     /^(うーん|うーむ|んー|ん〜|う〜ん|えーと|えっと)$/.test(t) ||
@@ -201,11 +197,9 @@ function looksLikeThinReply(text: string) {
     return true;
   }
 
-  // ✅ 記号だらけ・語尾伸ばしだけ等も薄い扱い
   const stripped = t.replace(/[〜~ー…\.\,\!\?！？、。]/g, '').trim();
   if (stripped.length <= 6) return true;
 
-  // 従来の短文判定（少し緩める）
   if (t.length <= 12) return true;
 
   return false;
@@ -226,14 +220,11 @@ function looksLikeEndConversation(text: string) {
 
 /**
  * ✅ Recall check（記憶確認）検出
- * - 「覚えてる？」「前の話覚えてる？」は REPAIR ではない
- * - ここが REPAIR に落ちると、RESTORE が“別トピック”を復元してズレる
  */
 function looksLikeRecallCheck(text: string) {
   const t = norm(text);
   if (!t) return false;
 
-  // “覚えてる？” 系
   const hasRemember =
     t.includes('覚えて') ||
     t.includes('記憶') ||
@@ -247,8 +238,6 @@ function looksLikeRecallCheck(text: string) {
 
   if (!hasRemember) return false;
 
-  // ただし、抗議/指摘（本来の repair）っぽい言い回しは除外
-  // 例：「さっき言ったよね」「同じこと」「ループ」など
   const protest = containsAny(t, [
     '言ったよね',
     '言ったでしょ',
@@ -263,10 +252,7 @@ function looksLikeRecallCheck(text: string) {
   ]);
   if (protest) return false;
 
-  // 質問形（？）か「ですか/ますか」っぽい確認であれば recall と見る
   if (/[?？]$/.test(t) || /(ですか|ますか|かな)$/.test(t)) return true;
-
-  // それ以外でも「覚えてる」単体は recall 扱いに寄せる
   return true;
 }
 
@@ -321,7 +307,7 @@ function looksLikeHowTo(text: string) {
   const t = norm(text);
   if (!t) return false;
 
-  return (
+  if (
     t === 'どうしたらいい？' ||
     t === 'どうしたらいい' ||
     t === 'どうすればいい？' ||
@@ -331,7 +317,36 @@ function looksLikeHowTo(text: string) {
     t.includes('どうしたら') ||
     t.includes('どうすれば') ||
     t.includes('何したら')
-  );
+  ) {
+    return true;
+  }
+
+  const nextStepLike =
+    t.includes('次のステップ') ||
+    t.includes('この先') ||
+    t.includes('進め方') ||
+    t.includes('進める方法') ||
+    t.includes('やり方') ||
+    t.includes('手順') ||
+    t.includes('方法');
+
+  const asksMethods =
+    t.includes('どんな方法') ||
+    t.includes('どういう方法') ||
+    t.includes('どんなやり方') ||
+    t.includes('どういうやり方') ||
+    t.includes('どう進め') ||
+    t.includes('何から') ||
+    t.includes('手段') ||
+    t.includes('方法がありますか') ||
+    t.includes('方法ある') ||
+    t.includes('やり方ある');
+
+  if (nextStepLike && asksMethods) return true;
+  if (asksMethods) return true;
+  if (/(次(のステップ)|この先).*(方法|やり方|進め方|手順)/.test(t)) return true;
+
+  return false;
 }
 
 function looksLikeILineMoment(text: string, ctx?: { lastSummary?: string | null }) {
@@ -361,10 +376,7 @@ function looksLikeILineMoment(text: string, ctx?: { lastSummary?: string | null 
 
   if (containsAny(t, keys)) return true;
 
-  if (
-    looksLikeHowTo(t) &&
-    containsAny(last, ['完成', 'そのあと', '未来', '方向', '責任', '主権', '安心', '不安'])
-  ) {
+  if (looksLikeHowTo(t) && containsAny(last, ['完成', 'そのあと', '未来', '方向', '責任', '主権', '安心', '不安'])) {
     return true;
   }
 
@@ -373,14 +385,11 @@ function looksLikeILineMoment(text: string, ctx?: { lastSummary?: string | null 
 
 /**
  * ✅ COMPOSE（文章生成）検出
- * - 「送る文章を作って」系は “相談” ではなく “成果物作成” に切り替える
- * - ここで slot を TASK/DRAFT にし、writer に「完成文のみ」を強制する前提のメタを渡す
  */
 function looksLikeComposeTask(text: string) {
   const t = norm(text);
   if (!t) return false;
 
-  // 「送る文章」「返信文」「メール文」「DM」「文章を作って」など
   if (
     containsAny(t, [
       '送る文章',
@@ -402,7 +411,6 @@ function looksLikeComposeTask(text: string) {
     return true;
   }
 
-  // 「〜に送る」「〜へ送る」＋「作って/書いて」系
   const hasSend = /(に|へ)\s*送(る|りたい|るため)/.test(t) || t.includes('送信');
   const hasMake = /(作って|書いて|作成して|まとめて|整えて)/.test(t);
   if (hasSend && hasMake) return true;
@@ -413,8 +421,25 @@ function looksLikeComposeTask(text: string) {
 // ---- slot builders（文章禁止：@TAG JSON のみ） ----
 
 function buildEndSlots(): NormalChatSlot[] {
+  // ✅ END を「薄くしない」ための 3ブロック：
+  // END（終了合図）→ RESTORE(mini)（再開の足場）→ NEXT（いつでも再開）
   return [
     { key: 'END', role: 'assistant', style: 'soft', content: m('END') },
+    {
+      key: 'RESTORE',
+      role: 'assistant',
+      style: 'neutral',
+      content: m('RESTORE', {
+        mode: 'mini_resume_scaffold',
+        // ✅ 断言しない・文章は writer に任せる（“再開の入り口”だけ渡す）
+        hint: {
+          kind: 'resume_index',
+          candidates: ['最後の要点', '詰まってた点', '次にやる一手', '確認したいログ/証拠'],
+          avoid: ['general_advice', 'cheer_up'],
+          questions_max: 0,
+        },
+      }),
+    },
     { key: 'NEXT', role: 'assistant', style: 'neutral', content: m('NEXT_HINT', { mode: 'resume_anytime' }) },
   ];
 }
@@ -423,12 +448,6 @@ function buildEmptySlots(): NormalChatSlot[] {
   return [{ key: 'EMPTY', role: 'assistant', style: 'soft', content: m('EMPTY', { ask: 'user_one_liner' }) }];
 }
 
-/**
- * ✅ Recall check: “覚えてる？” を前へ進める
- * - 覚えてる/覚えてないを断言しない
- * - こちら側に残っている“手がかり”を短く提示し、ユーザーが特定できる足場を作る
- * - 質問は最大1つ（指差しのための1問）
- */
 function buildRecallCheckSlots(userText: string, ctx?: { lastSummary?: string | null }): NormalChatSlot[] {
   const t = norm(userText);
   const last = norm(ctx?.lastSummary);
@@ -445,7 +464,6 @@ function buildRecallCheckSlots(userText: string, ctx?: { lastSummary?: string | 
       role: 'assistant',
       style: 'neutral',
       content: m('RESTORE', {
-        // 「最後の要点」を“候補”として出す（断言しない）
         last: last ? clamp(last, 180) : null,
         mode: 'candidate_hint',
       }),
@@ -465,7 +483,6 @@ function buildRecallCheckSlots(userText: string, ctx?: { lastSummary?: string | 
       style: 'neutral',
       content: m('Q', {
         kind: 'pointing_one_liner',
-        // “どれを指してる？” の1問だけ（ユーザーが答えを出せる場所）
         ask: 'どの場面を指してる？（辞めたい理由／次の職場像／人間関係／条件など）',
         questions_max: 1,
       }),
@@ -473,12 +490,6 @@ function buildRecallCheckSlots(userText: string, ctx?: { lastSummary?: string | 
   ];
 }
 
-/**
- * ✅ COMPOSE: “送れる完成文” を必ず作らせるスロット
- * - ここでは文章は書かない（writerへのメタのみ）
- * - DRAFT は「完成文を出せ」という命令を含む（箇条書き/助言/診断を禁止）
- * - “答えを渡す” ではなく “相手が自分で答えを出せる場所” を DRAFT の型として渡す
- */
 function buildComposeSlots(userText: string, ctx?: { lastSummary?: string | null }): NormalChatSlot[] {
   const t = norm(userText);
   const last = norm(ctx?.lastSummary);
@@ -490,10 +501,8 @@ function buildComposeSlots(userText: string, ctx?: { lastSummary?: string | null
       style: 'neutral',
       content: m('TASK', {
         kind: 'compose_message',
-        // ユーザー入力の原文を最大限保持（writerが素材として使う）
         user: clamp(t, 260),
         last: last ? clamp(last, 180) : null,
-        // ✅ 成果物の媒体/用途が不明でも “本文を作る” を優先する
         output: 'copy_paste_ready',
       }),
     },
@@ -503,14 +512,11 @@ function buildComposeSlots(userText: string, ctx?: { lastSummary?: string | null
       style: 'soft',
       content: m('DRAFT', {
         rules: {
-          // ✅ ここが重要：相談AIに戻るのを防ぐ
           no_bullets: true,
           no_general_advice: true,
           no_diagnosis: true,
           no_checklist: true,
-          // ✅ 完成文だけ（解説は出さない）
           output_only: true,
-          // ✅ “相手が自分で答えを出せる場所” を最後に1つの問いで作る
           end_with_one_question: true,
           questions_max: 1,
         },
@@ -526,24 +532,14 @@ function buildComposeSlots(userText: string, ctx?: { lastSummary?: string | null
   ];
 }
 
-/**
- * ✅ STABILIZE: “薄い/内的/詰まり（分からない含む）” を前へ進めるスロット
- * - 質問で追わない（Qスロットは出さない / writer側も原則 q=0）
- * - 「分からなさ」を “どこで詰まってるか” に分解して足場を渡す
- * - 旗印：「読み手が自分で答えを出せる場所」に立たせる
- * - 文章は書かない（writerへのメタのみ）
- */
 function buildStabilizeSlots(userText: string, ctx?: { lastSummary?: string | null }): NormalChatSlot[] {
   const t = norm(userText);
   const last = norm(ctx?.lastSummary);
   const seed = last || t;
 
-  // ✅ ここで unknownish を確定してメタに刻む（writer が逃げないようにする）
   const unknownish =
     /分からない|わからない|よく分からない|意味が分からない|ピンとこない|何言ってるか分からない|理解できない/.test(t);
 
-  // ✅ STABILIZE の足場（cuts）＝「説明のあとの“指差し”」
-  // - ここは “質問” ではない（ユーザーが自分で選べる材料）
   const cuts = [
     { id: 'which_part', label: '分からないのは「言葉」？「狙い」？「手順」？' },
     { id: 'expected', label: 'あなたが欲しいのは「設計の地図」？「1つの修正」？「動作の証拠」？' },
@@ -566,13 +562,10 @@ function buildStabilizeSlots(userText: string, ctx?: { lastSummary?: string | nu
       role: 'assistant',
       style: 'neutral',
       content: m('SHIFT', {
-        // ✅ unknownish は「整理しろ」ではなく「何が不明瞭かの形」を2-3文で描写させる
         kind: 'explain_unknown_shape',
         seed: clamp(seed, 160),
         q: 0,
-        // ✅ 一般論に逃げるのを禁止（writer への強いメタ）
         avoid: ['general_advice', 'cheer_up', 'tell_user_to_think_more', 'ask_for_details_first'],
-        // ✅ 文体条件：短く、観測→角度→足場、に寄せる
         shape: { lines: [4, 10], no_checklist: true, no_bullets: false },
       }),
     },
@@ -582,12 +575,11 @@ function buildStabilizeSlots(userText: string, ctx?: { lastSummary?: string | nu
       style: 'soft',
       content: m('NEXT_HINT', {
         mode: 'advance_hint',
-        // ✅ ここが肝：cuts を必ず本文に出す（最低1つは“そのまま”使う）
         hint: {
           kind: 'pick_one_cut',
           cuts,
           must_include_one_cut_label: true,
-          questions_max: 1, // 0でもOKだが、出すなら最大1問
+          questions_max: 1,
           avoid: ['general_advice', 'cheer_up'],
         },
       }),
@@ -599,7 +591,6 @@ function buildILineSlots(ctx?: { lastSummary?: string | null }, seedText?: strin
   const last = norm(ctx?.lastSummary);
   const seed = norm(seedText ?? last);
 
-  // I-line は「他の質問を止めて」1本だけ
   return [
     {
       key: 'OBS',
@@ -628,13 +619,7 @@ function buildRepairSlots(userText: string, ctx?: { lastSummary?: string | null 
     return [
       { key: 'ACK', role: 'assistant', style: 'soft', content: m('ACK', { kind: 'repair', user: clamp(u, 80) }) },
       { key: 'RESTORE', role: 'assistant', style: 'neutral', content: m('RESTORE', { last: clamp(last, 160) }) },
-      {
-        key: 'SHIFT',
-        role: 'assistant',
-        style: 'neutral',
-        content: m('SHIFT', { kind: 'angle_change', avoid: ['question_loop', 'binary_choice'] }),
-      },
-      // ✅ 質問は出さない（repair は “復元→角度変更” で前へ）
+      { key: 'SHIFT', role: 'assistant', style: 'neutral', content: m('SHIFT', { kind: 'angle_change', avoid: ['question_loop', 'binary_choice'] }) },
       { key: 'NEXT', role: 'assistant', style: 'soft', content: m('NEXT_HINT', { mode: 'continue_free' }) },
     ];
   }
@@ -652,17 +637,10 @@ function buildHowToSlots(userText: string, ctx?: { lastSummary?: string | null }
     return buildILineSlots({ lastSummary: last }, userText);
   }
 
-  // how-to は “手段を増やさず、基準/優先の整理” に寄せる（質問は0〜1）
   if (last) {
     return [
       { key: 'OBS', role: 'assistant', style: 'soft', content: m('OBS', { last: clamp(last, 160) }) },
-      {
-        key: 'SHIFT',
-        role: 'assistant',
-        style: 'neutral',
-        content: m('SHIFT', { kind: 'criteria_first', avoid: ['more_options'] }),
-      },
-      // ✅ 質問は無しでもOK（writer が自然に進める）
+      { key: 'SHIFT', role: 'assistant', style: 'neutral', content: m('SHIFT', { kind: 'criteria_first', avoid: ['more_options'] }) },
     ];
   }
 
@@ -680,25 +658,21 @@ function buildDefaultSlots(userText: string, ctx?: { lastSummary?: string | null
     return buildILineSlots({ lastSummary: ctx?.lastSummary ?? null }, t);
   }
 
-  // 短文：質問攻めを避け、必要なら “1問だけ”
   if (t.length <= 10) {
     const base: NormalChatSlot[] = [
       { key: 'OBS', role: 'assistant', style: 'soft', content: m('OBS', { user: clamp(t, 80), short: true }) },
       { key: 'SHIFT', role: 'assistant', style: 'neutral', content: m('SHIFT', { kind: 'keep_focus' }) },
     ];
 
-    // 内的相談は Q を止める
     if (looksLikeInnerConcern(t)) {
       base.push({ key: 'NEXT', role: 'assistant', style: 'soft', content: m('NEXT_HINT', { mode: 'continue_free' }) });
       return base;
     }
 
-    // ✅ 質問は最大1つ
     base.push({ key: 'Q', role: 'assistant', style: 'neutral', content: m('Q', { kind: 'peak_moment_one_liner' }) });
     return base;
   }
 
-  // 通常：OBS + SHIFT。Q は “必要時だけ” （ここではデフォルトは出さない）
   return [
     { key: 'OBS', role: 'assistant', style: 'soft', content: m('OBS', { user: clamp(t, 200) }) },
     { key: 'SHIFT', role: 'assistant', style: 'neutral', content: m('SHIFT', { kind: 'find_trigger_point' }) },
@@ -714,13 +688,7 @@ function buildExpansionSlots(userText: string, ctx?: { lastSummary?: string | nu
 
   const seed = norm(ctx?.lastSummary) || t;
 
-  // ✅ “次の一手” は「質問」ではなく「観察点（足場）」を渡す
-  // - writer はここから 0〜1問を選んでよいが、slot 側は “質問を前提にしない”
-  // - 一般論・励まし・助言に逃げるのを防ぐ
   const baseAvoid = ['general_advice', 'distance_tips', 'communication_tips', 'cheer_up', 'dictionary_explain'];
-
-  // ✅ 入力によって “足場（cuts）” を差し替える
-  // - 「旗印」系は “定義” に行かず「使われ方/働き方」を見せる
   const isFlagWord = t.includes('旗印');
 
   const cutsDefault = [
@@ -730,18 +698,9 @@ function buildExpansionSlots(userText: string, ctx?: { lastSummary?: string | nu
   ];
 
   const cutsFlag = [
-    {
-      id: 'usecase',
-      label: '「旗印」と言いたくなるのは、いま“言葉の定義”じゃなく“運用”が欲しい時。',
-    },
-    {
-      id: 'function',
-      label: 'その運用はどれに近い？「迷いを止める／判断の軸を揃える／書き手を矯正する」',
-    },
-    {
-      id: 'proof',
-      label: '“答えを出せる位置”に立ったサインは何？（迷いが減る／一手が出る／読後に手が動く 等）',
-    },
+    { id: 'usecase', label: '「旗印」と言いたくなるのは、いま“言葉の定義”じゃなく“運用”が欲しい時。' },
+    { id: 'function', label: 'その運用はどれに近い？「迷いを止める／判断の軸を揃える／書き手を矯正する」' },
+    { id: 'proof', label: '“答えを出せる位置”に立ったサインは何？（迷いが減る／一手が出る／読後に手が動く 等）' },
   ];
 
   const advanceHint = {
@@ -751,23 +710,14 @@ function buildExpansionSlots(userText: string, ctx?: { lastSummary?: string | nu
     cuts: isFlagWord ? cutsFlag : cutsDefault,
   };
 
-  // ✅ “薄い/内的” は質問を止める：角度変更＋足場だけで前へ
   if (looksLikeThinReply(t) || looksLikeInnerConcern(seed + ' ' + t) || looksLikeFeedback(t)) {
     return [
-      {
-        key: 'OBS',
-        role: 'assistant',
-        style: 'soft',
-        content: m('OBS', { user: clamp(t, 200), seed: clamp(seed, 200) }),
-      },
-      // ✅ 角度変更（解説）を示すだけ：本文は writer が作る
+      { key: 'OBS', role: 'assistant', style: 'soft', content: m('OBS', { user: clamp(t, 200), seed: clamp(seed, 200) }) },
       { key: 'SHIFT', role: 'assistant', style: 'neutral', content: m('SHIFT', { kind: 'explain_angle_change', q: 0 }) },
-      // ✅ NEXT は常に “足場” を入れる（A!:no_advance_hint を潰す）
       { key: 'NEXT', role: 'assistant', style: 'soft', content: m('NEXT_HINT', { mode: 'advance_hint', hint: advanceHint }) },
     ];
   }
 
-  // ✅ 通常の展開も「OBS + SHIFT + NEXT」を固定（Qはデフォで出さない）
   return [
     { key: 'OBS', role: 'assistant', style: 'soft', content: m('OBS', { user: clamp(t, 240), seed: clamp(seed, 160) }) },
     { key: 'SHIFT', role: 'assistant', style: 'neutral', content: m('SHIFT', { kind: 'explain_angle_change', q: 0 }) },
@@ -777,70 +727,44 @@ function buildExpansionSlots(userText: string, ctx?: { lastSummary?: string | nu
 
 // ---- main ----
 
-type BranchKind =
-  | 'REPAIR'
-  | 'DETAIL'
-  | 'STABILIZE'
-  | 'OPTIONS'
-  | 'C_BRIDGE'
-  | 'I_BRIDGE'
-  | 'UNKNOWN';
+type BranchKind = 'REPAIR' | 'DETAIL' | 'STABILIZE' | 'OPTIONS' | 'C_BRIDGE' | 'I_BRIDGE' | 'UNKNOWN';
 
-  function normalizeBranch(args: {
-    raw: BranchKind | null | undefined;
-    signals?: {
-      repair?: boolean;
-      stuck?: boolean;
-      detail?: boolean;
-      topicHint?: string | null;
-    } | null;
-    expansionKind?: 'NONE' | 'TENTATIVE' | 'BRANCH' | null;
-    userText: string;
-    recallCheck: boolean;
-  }): BranchKind {
-    const raw = (args.raw ?? 'UNKNOWN') as BranchKind;
-    const t = norm(args.userText);
+function normalizeBranch(args: {
+  raw: BranchKind | null | undefined;
+  signals?: { repair?: boolean; stuck?: boolean; detail?: boolean; topicHint?: string | null } | null;
+  expansionKind?: 'NONE' | 'TENTATIVE' | 'BRANCH' | null;
+  userText: string;
+  recallCheck: boolean;
+}): BranchKind {
+  const raw = (args.raw ?? 'UNKNOWN') as BranchKind;
+  const t = norm(args.userText);
 
-    // ✅ recallCheck は最優先…だが、この関数の “branch判定” には混ぜない
-    // - recallCheck の実処理は main 側で先に分岐している（reason='recall-check'）
-    // - ここで DETAIL に寄せると「意味」とログがズレるので、判定に影響ゼロにする
-    //   （repair誤爆は main 側で防げている）
-    if (args.recallCheck) {
-      // raw が強いなら尊重、なければ UNKNOWN のまま
-      return raw && raw !== 'UNKNOWN' ? raw : 'UNKNOWN';
-    }
-
-    // ✅ 空は保険
-    if (!t) return raw && raw !== 'UNKNOWN' ? raw : 'UNKNOWN';
-
-    // ✅ “分からない/よく分からない” は展開じゃない（ここを確定で STABILIZE）
-    // - looksLikeThinReply の漏れをここで潰す
-    const unknownish =
-      /分からない|わからない|よく分からない|意味が分からない|ピンとこない|何言ってるか分からない|理解できない/.test(t);
-
-    // ✅ 薄返答/内的相談は expansionMoment より強い（DETAIL吸い込み事故を止める）
-    if (unknownish || looksLikeThinReply(t) || looksLikeInnerConcern(t)) {
-      return 'STABILIZE';
-    }
-
-    // raw が強いなら尊重
-    if (raw && raw !== 'UNKNOWN') return raw;
-
-    const s = args.signals ?? null;
-
-    // signals から確定（branchPolicy 未導入でもログが死なない）
-    if (s?.repair) return 'REPAIR';
-    if (s?.stuck) return 'STABILIZE';
-    if (s?.detail) return 'DETAIL';
-
-    // expansionMoment は最後に使う（＝安易にDETAILへ吸わない）
-    if (args.expansionKind === 'BRANCH' || args.expansionKind === 'TENTATIVE') {
-      return 'DETAIL';
-    }
-
-    return 'UNKNOWN';
+  if (args.recallCheck) {
+    return raw && raw !== 'UNKNOWN' ? raw : 'UNKNOWN';
   }
 
+  if (!t) return raw && raw !== 'UNKNOWN' ? raw : 'UNKNOWN';
+
+  const unknownish =
+    /分からない|わからない|よく分からない|意味が分からない|ピンとこない|何言ってるか分からない|理解できない/.test(t);
+
+  if (unknownish || looksLikeThinReply(t) || looksLikeInnerConcern(t)) {
+    return 'STABILIZE';
+  }
+
+  if (raw && raw !== 'UNKNOWN') return raw;
+
+  const s = args.signals ?? null;
+  if (s?.repair) return 'REPAIR';
+  if (s?.stuck) return 'STABILIZE';
+  if (s?.detail) return 'DETAIL';
+
+  if (args.expansionKind === 'BRANCH' || args.expansionKind === 'TENTATIVE') {
+    return 'DETAIL';
+  }
+
+  return 'UNKNOWN';
+}
 
 export function buildNormalChatSlotPlan(args: {
   userText: string;
@@ -849,7 +773,7 @@ export function buildNormalChatSlotPlan(args: {
     recentUserTexts?: string[];
   };
 }): NormalChatSlotPlan {
-  const stamp = 'normalChat.ts@2026-01-15#phase11-slots-v1.1';
+  const stamp = 'normalChat.ts@2026-01-15#phase11-slots-v1.2';
   const userText = norm(args.userText);
   const ctx = args.context;
 
@@ -868,7 +792,7 @@ export function buildNormalChatSlotPlan(args: {
 
   const effectiveLastSummary = pack.shortSummary ?? ctx?.lastSummary ?? null;
 
-  const signals = userText ? computeConvSignals(userText) : null;
+  const signals: any = userText ? computeConvSignals(userText) : null;
 
   const rawBranch: BranchKind = userText
     ? (decideConversationBranch({
@@ -880,7 +804,6 @@ export function buildNormalChatSlotPlan(args: {
       }) as BranchKind)
     : 'UNKNOWN';
 
-  // ✅ expansionMoment は「UNKNOWN を確定する」ためにも使う
   let expansionKind: 'NONE' | 'TENTATIVE' | 'BRANCH' | null = null;
   if (userText) {
     const exp = detectExpansionMoment({
@@ -891,7 +814,6 @@ export function buildNormalChatSlotPlan(args: {
     console.log('[IROS/EXPANSION]', { kind: exp.kind, userHead: userText.slice(0, 40) });
   }
 
-  // ✅ 先に判定して、branch/repair 誤爆を止める
   const recallCheck = userText ? looksLikeRecallCheck(userText) : false;
 
   const branch: BranchKind = normalizeBranch({
@@ -912,11 +834,9 @@ export function buildNormalChatSlotPlan(args: {
     reason = 'end';
     slots = buildEndSlots();
   } else if (looksLikeComposeTask(userText)) {
-    // ✅ 生成タスクは “相談ムーブ” に落とさない
     reason = 'compose';
     slots = buildComposeSlots(userText, { lastSummary: effectiveLastSummary });
   } else if (recallCheck) {
-    // ✅ 「覚えてる？」は repair ではなく recallCheck
     reason = 'recall-check';
     slots = buildRecallCheckSlots(userText, { lastSummary: effectiveLastSummary });
   } else if (branch === 'REPAIR' || looksLikeRepair(userText)) {
@@ -925,14 +845,13 @@ export function buildNormalChatSlotPlan(args: {
   } else if (branch === 'STABILIZE') {
     reason = 'stabilize';
     slots = buildStabilizeSlots(userText, { lastSummary: effectiveLastSummary });
-  } else if (branch === 'DETAIL') {
-    reason = 'detail';
-    slots = buildExpansionSlots(userText, { lastSummary: effectiveLastSummary });
   } else if (looksLikeHowTo(userText)) {
     reason = 'how-to';
     slots = buildHowToSlots(userText, { lastSummary: effectiveLastSummary });
+  } else if (branch === 'DETAIL') {
+    reason = 'detail';
+    slots = buildExpansionSlots(userText, { lastSummary: effectiveLastSummary });
   } else {
-    // expansionKind が出ているなら展開側へ
     if (expansionKind === 'BRANCH' || expansionKind === 'TENTATIVE') {
       reason = `expansion-${String(expansionKind).toLowerCase()}`;
       slots = buildExpansionSlots(userText, { lastSummary: effectiveLastSummary });
@@ -942,26 +861,17 @@ export function buildNormalChatSlotPlan(args: {
     }
   }
 
-  // ✅ 最終保険：どの分岐でも必ず slots を返す（空/未定義を潰す）
-  // - build* が想定外で [] を返してもここで復旧する
-  // - 例外は投げない（会話を止めない）
   if (!Array.isArray(slots) || slots.length === 0) {
     const fallbackReason = reason;
     reason = `fallback(${fallbackReason})`;
-    slots = userText
-      ? buildDefaultSlots(userText, { lastSummary: effectiveLastSummary })
-      : buildEmptySlots();
+    slots = userText ? buildDefaultSlots(userText, { lastSummary: effectiveLastSummary }) : buildEmptySlots();
 
-    // さらに保険：それでも空なら end
     if (!Array.isArray(slots) || slots.length === 0) {
       reason = `fallback-end(${fallbackReason})`;
       slots = buildEndSlots();
     }
   }
 
-  // ✅ framePlan に渡す直前（= return 直前）に “正規化” を必ず噛ませる
-  // - 重複 key を許容できる形（配列）を保証
-  // - slotId を付与してログ/ガードの追跡を安定化
   const slotsNormalized = normalizeSlotsForFramePlan(slots, { idPrefix: 'N' });
 
   console.log('[IROS/NORMAL_CHAT][PLAN]', {
@@ -971,7 +881,7 @@ export function buildNormalChatSlotPlan(args: {
     rawBranch,
     expansionKind,
     recallCheck,
-    topicHint: signals?.topicHint ?? null,
+    topicHint: (signals?.topicHint as string | null) ?? null,
     userHead: userText.slice(0, 40),
     lastSummary: effectiveLastSummary ? effectiveLastSummary.slice(0, 80) : null,
     slots: slotsNormalized.map((s) => ({

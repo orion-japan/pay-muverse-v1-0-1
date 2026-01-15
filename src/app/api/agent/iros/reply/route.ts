@@ -404,6 +404,58 @@ async function fetchContextPackForLLM(args: {
 
   // ✅ まず「最低限」パックを組む（mismatch時もこれだけは返す）
   const normalized = normalizeHistoryMessages(args.historyMessages ?? null);
+  // =========================================================
+// ✅ 前ターン(out) → 今ターン(input) 運搬：history の assistant.meta.extra から拾う
+// - クライアントが history に meta を含めて送ってくる前提で効く
+// - meta が無い場合は null（何もしない）
+// =========================================================
+function pickPrevFlagFromRawHistory(
+  rawHistory: any[] | string | null | undefined,
+): { shouldRaiseFlag?: boolean; flagReasons?: string[]; flagSource?: string } | null {
+  if (!rawHistory) return null;
+  if (typeof rawHistory === 'string') return null; // 文字列履歴には meta が無い
+
+  if (!Array.isArray(rawHistory)) return null;
+
+  for (let i = rawHistory.length - 1; i >= 0; i--) {
+    const m = rawHistory[i];
+    if (!m) continue;
+
+    const role = String(m?.role ?? m?.speaker ?? '').toLowerCase();
+    if (role !== 'assistant' && role !== 'bot' && !role.startsWith('a')) continue;
+
+    const extra =
+      m?.meta?.extra ??
+      m?.meta_extra ??
+      m?.extra ??
+      null;
+
+    const on =
+      typeof extra?.shouldRaiseFlag === 'boolean'
+        ? extra.shouldRaiseFlag
+        : typeof extra?.shouldRaiseFlag_out === 'boolean'
+          ? extra.shouldRaiseFlag_out
+          : null;
+
+    const reasons =
+      Array.isArray(extra?.flagReasons)
+        ? extra.flagReasons
+        : Array.isArray(extra?.flagReasons_out)
+          ? extra.flagReasons_out
+          : null;
+
+    if (on === true || (Array.isArray(reasons) && reasons.length > 0)) {
+      return {
+        ...(on === true ? { shouldRaiseFlag: true } : {}),
+        ...(reasons && reasons.length ? { flagReasons: reasons.map((x) => String(x ?? '').trim()).filter(Boolean) } : {}),
+        flagSource: 'prev_assistant_meta_extra',
+      };
+    }
+  }
+
+  return null;
+}
+
   const historyText = buildHistoryText(normalized);
   const basePack = {
     conversation_id: String(conversationId),
@@ -621,7 +673,10 @@ function inferFlagDecision(args: {
   if (stall) reasons.push('STALL');
   reasons.push(safetyOk ? 'SAFETY_OK' : 'SAFETY_BAD');
 
-  const shouldRaiseFlag = Boolean(positionDrift && stall && safetyOk);
+// ✅ 旗印介入：安全なら「停滞」または「位置揺れ」があれば raise
+// - STALL 単体でも介入する（現状ログのズレを解消）
+const shouldRaiseFlag = Boolean(safetyOk && (stall || positionDrift));
+
 
   return {
     shouldRaiseFlag,
@@ -671,8 +726,6 @@ async function maybeAttachRephraseForRenderV2(args: {
 
   // idempotent guard
   {
-  // idempotent guard
-  {
     const already =
       Array.isArray((extraMerged as any)?.rephraseBlocks) &&
       (extraMerged as any).rephraseBlocks.length > 0;
@@ -715,10 +768,8 @@ async function maybeAttachRephraseForRenderV2(args: {
       return;
     }
   }
-  }
 
-  const enabled =
-    String(process.env.IROS_REPHRASE_FINAL_ENABLED ?? '1').trim() !== '0';
+  const enabled = String(process.env.IROS_REPHRASE_FINAL_ENABLED ?? '1').trim() !== '0';
   if (!enabled) return;
   if ((extraMerged as any)?.renderEngine !== true) return;
 
@@ -735,6 +786,14 @@ async function maybeAttachRephraseForRenderV2(args: {
   const extraForRender = {
     ...(meta?.extra ?? {}),
     ...(extraMerged ?? {}),
+
+    // ✅ renderGateway が参照できる “確定値” をここで一本化して載せる
+    slotPlanPolicy:
+      (meta as any)?.framePlan?.slotPlanPolicy ??
+      (meta as any)?.slotPlanPolicy ??
+      (meta as any)?.extra?.slotPlanPolicy ??
+      null,
+
     framePlan: (meta as any)?.framePlan ?? null,
     slotPlan: (meta as any)?.slotPlan ?? null,
   };
@@ -742,14 +801,72 @@ async function maybeAttachRephraseForRenderV2(args: {
   const extracted = extractSlotsForRephrase(extraForRender);
   if (!extracted?.slots?.length) return;
 
-  const model =
-    process.env.IROS_REPHRASE_MODEL ?? process.env.IROS_MODEL ?? 'gpt-4.1';
+  const model = process.env.IROS_REPHRASE_MODEL ?? process.env.IROS_MODEL ?? 'gpt-4.1';
 
   const traceIdFinal =
     traceId && String(traceId).trim() ? String(traceId).trim() : reqId ?? null;
 
-  // ✅ history normalize（旗印判定にも rephrase にも使う）
+  // =========================================================
+  // ✅ ここが今回の1点目：normalizedHistory をこの関数内で必ず作る
+  // - ContextPack fetch / inferFlagDecision が参照しているので必須
+  // =========================================================
   const normalizedHistory = normalizeHistoryMessages(historyMessages ?? null);
+
+  // =========================================================
+  // ✅ ここが今回の2点目：前ターン(out)を raw history から拾って input(userContext) に運ぶ
+  // - historyMessages が string の場合は拾えない（null）
+  // - 配線が効く条件：クライアント/サーバが history に assistant.meta.extra を含めて渡していること
+  // =========================================================
+  const pickPrevFlagFromRawHistory = (
+    rawHistory: any[] | string | null | undefined,
+  ): { shouldRaiseFlag?: boolean; flagReasons?: string[]; flagSource?: string } | null => {
+    if (!rawHistory) return null;
+    if (typeof rawHistory === 'string') return null;
+    if (!Array.isArray(rawHistory)) return null;
+
+    for (let i = rawHistory.length - 1; i >= 0; i--) {
+      const m = rawHistory[i];
+      if (!m) continue;
+
+      const role = String(m?.role ?? m?.speaker ?? '').toLowerCase();
+      if (role !== 'assistant' && role !== 'bot' && !role.startsWith('a')) continue;
+
+      const extra =
+        m?.meta?.extra ??
+        m?.meta_extra ??
+        m?.extra ??
+        null;
+
+      const on =
+        typeof extra?.shouldRaiseFlag === 'boolean'
+          ? extra.shouldRaiseFlag
+          : typeof extra?.shouldRaiseFlag_out === 'boolean'
+            ? extra.shouldRaiseFlag_out
+            : null;
+
+      const reasons =
+        Array.isArray(extra?.flagReasons)
+          ? extra.flagReasons
+          : Array.isArray(extra?.flagReasons_out)
+            ? extra.flagReasons_out
+            : null;
+
+      const rs = Array.isArray(reasons)
+        ? reasons.map((x: any) => String(x ?? '').trim()).filter(Boolean)
+        : null;
+
+      if (on === true || (rs && rs.length > 0)) {
+        return {
+          ...(on === true ? { shouldRaiseFlag: true } : {}),
+          ...(rs && rs.length ? { flagReasons: rs } : {}),
+          flagSource: 'prev_assistant_meta_extra',
+        };
+      }
+    }
+    return null;
+  };
+
+  const prevFlagCarry = pickPrevFlagFromRawHistory(historyMessages ?? null);
 
   // ✅ ContextPack fetch
   const contextPack = await fetchContextPackForLLM({
@@ -776,18 +893,44 @@ async function maybeAttachRephraseForRenderV2(args: {
     contextPackCounts: contextPack?.counts ?? null,
     contextPackLastState: contextPack?.last_state ?? null,
 
-    // ✅ flag audit
+    // ✅ flag audit（signals由来）
     flagDecision,
     shouldRaiseFlag: flagDecision.shouldRaiseFlag,
+
+    // ✅ 次ターン input 用の運搬が入ったか（デバッグ）
+    prevFlagCarry: prevFlagCarry ?? null,
   };
 
   // ✅ attach to extraMerged.userContext (merge; do not overwrite)
-  const mergedUserContext = {
-    ...(typeof (extraMerged as any)?.userContext === 'object'
+  const baseUserContext =
+    typeof (extraMerged as any)?.userContext === 'object'
       ? ((extraMerged as any).userContext ?? {})
-      : {}),
+      : {};
+
+  // ✅ 前ターン(out)を meta.extra に注入（次ターンで readShouldRaiseFlagFromContext が拾える形）
+  const baseMeta = typeof (baseUserContext as any)?.meta === 'object' ? (baseUserContext as any).meta : {};
+  const baseExtra = typeof (baseMeta as any)?.extra === 'object' ? (baseMeta as any).extra : {};
+
+  const mergedUserContext = {
+    ...baseUserContext,
     ...(contextPack ?? {}),
     flagDecision,
+
+    ...(prevFlagCarry
+      ? {
+          meta: {
+            ...baseMeta,
+            extra: {
+              ...baseExtra,
+              ...(prevFlagCarry.shouldRaiseFlag === true ? { shouldRaiseFlag: true } : {}),
+              ...(Array.isArray(prevFlagCarry.flagReasons) && prevFlagCarry.flagReasons.length
+                ? { flagReasons: prevFlagCarry.flagReasons }
+                : {}),
+              ...(prevFlagCarry.flagSource ? { flagSource: prevFlagCarry.flagSource } : {}),
+            },
+          },
+        }
+      : {}),
   };
 
   (extraMerged as any).userContext = mergedUserContext;
@@ -814,6 +957,47 @@ async function maybeAttachRephraseForRenderV2(args: {
     },
   });
 
+  // =========================================================
+  // ✅ rephrase 結果の「崩れ検出（flagshipGuard側）」を確定値として回収
+  // - flagDecision（signals由来）とは別系統
+  // - 次ターンで拾えるように meta.extra / userContext の両方へ同期
+  // =========================================================
+  const pickBool = (...vals: any[]): boolean | null => {
+    for (const v of vals) {
+      if (typeof v === 'boolean') return v;
+    }
+    return null;
+  };
+
+  const pickReasons = (...vals: any[]): string[] | null => {
+    for (const v of vals) {
+      if (Array.isArray(v)) {
+        const xs = v.map((x) => String(x ?? '').trim()).filter(Boolean);
+        if (xs.length) return xs;
+      }
+    }
+    return null;
+  };
+
+  // rephrase(=flagshipGuard) の “出力側” を最優先で拾う
+  const shouldRaiseFlag_out =
+    pickBool(
+      (res as any)?.shouldRaiseFlag,
+      (res as any)?.meta?.shouldRaiseFlag,
+      (res as any)?.meta?.extra?.shouldRaiseFlag,
+      (res as any)?.meta?.flag?.shouldRaiseFlag,
+      (res as any)?.meta?.flags?.shouldRaiseFlag,
+    ) ?? null;
+
+  const flagReasons_out =
+    pickReasons(
+      (res as any)?.flagReasons,
+      (res as any)?.meta?.flagReasons,
+      (res as any)?.meta?.extra?.flagReasons,
+      (res as any)?.meta?.flag?.reasons,
+      (res as any)?.meta?.flags?.reasons,
+    ) ?? null;
+
   if (!res.ok) {
     console.warn('[IROS/rephrase][SKIP]', {
       conversationId,
@@ -822,14 +1006,37 @@ async function maybeAttachRephraseForRenderV2(args: {
       inKeys: res.meta?.inKeys ?? [],
       rawLen: res.meta?.rawLen ?? 0,
       rawHead: res.meta?.rawHead ?? '',
+      // signals由来（入力側の暫定判定）
       shouldRaiseFlag: flagDecision.shouldRaiseFlag,
       flagReasons: flagDecision.reasons,
+      // rephrase(出力側) 由来（拾えた場合）
+      shouldRaiseFlag_out,
+      flagReasons_out,
     });
+
+    // ✅ “失敗ターン”でも out が拾えていたら meta.extra にだけ残す（次ターン拾いの保険）
+    if (shouldRaiseFlag_out != null || (flagReasons_out && flagReasons_out.length > 0)) {
+      meta.extra = {
+        ...(meta.extra ?? {}),
+        shouldRaiseFlag_out: shouldRaiseFlag_out ?? undefined,
+        flagReasons_out: flagReasons_out ?? undefined,
+        flagSource: 'rephrase_meta',
+        flagOutCapturedEvenWhenSkip: true,
+      };
+    }
+
     return;
   }
 
   // attach
   (extraMerged as any).rephraseBlocks = res.slots.map((s) => ({ text: s.text }));
+
+  // ✅ ここが “配線の本体”
+  const flagOut = {
+    shouldRaiseFlag: shouldRaiseFlag_out,
+    flagReasons: flagReasons_out,
+    source: 'rephrase_meta' as const,
+  };
 
   meta.extra = {
     ...(meta.extra ?? {}),
@@ -839,9 +1046,33 @@ async function maybeAttachRephraseForRenderV2(args: {
     rephraseRawLen: res.meta.rawLen,
     rephraseRawHead: res.meta.rawHead,
 
-    // ✅ flag trace
+    // ✅ signals由来（入力側）も残す：比較用
     flagDecision,
     shouldRaiseFlag: flagDecision.shouldRaiseFlag,
+
+    // ✅ rephrase由来（出力側）を保持
+    shouldRaiseFlag_out: shouldRaiseFlag_out ?? undefined,
+    flagReasons_out: flagReasons_out ?? undefined,
+    flagOut,
+  };
+
+  // ✅ 次の rephrase 入力で拾える形に寄せる（meta.extra 経由）
+  (extraMerged as any).userContext = {
+    ...(mergedUserContext ?? {}),
+    meta: {
+      ...(typeof (mergedUserContext as any)?.meta === 'object'
+        ? ((mergedUserContext as any).meta ?? {})
+        : {}),
+      extra: {
+        ...(typeof (mergedUserContext as any)?.meta?.extra === 'object'
+          ? ((mergedUserContext as any).meta.extra ?? {})
+          : {}),
+        // ✅ 次ターン用の“運搬データ”
+        ...(shouldRaiseFlag_out === true ? { shouldRaiseFlag: true } : {}),
+        ...(flagReasons_out && flagReasons_out.length ? { flagReasons: flagReasons_out } : {}),
+        flagSource: 'rephrase_meta',
+      },
+    },
   };
 
   console.warn('[IROS/rephrase][OK]', {
@@ -850,8 +1081,12 @@ async function maybeAttachRephraseForRenderV2(args: {
     keys: res.meta.outKeys,
     rawLen: res.meta.rawLen,
     rawHead: res.meta.rawHead,
+    // signals（入力側）
     shouldRaiseFlag: flagDecision.shouldRaiseFlag,
     flagReasons: flagDecision.reasons,
+    // rephrase（出力側）
+    shouldRaiseFlag_out,
+    flagReasons_out,
   });
 
   console.warn('[IROS/rephrase][AFTER_ATTACH]', {
@@ -864,9 +1099,12 @@ async function maybeAttachRephraseForRenderV2(args: {
     rephraseHead: Array.isArray((extraMerged as any)?.rephraseBlocks)
       ? String((extraMerged as any).rephraseBlocks?.[0]?.text ?? '').slice(0, 80)
       : '',
-    shouldRaiseFlag: flagDecision.shouldRaiseFlag,
+    // rephrase（出力側）を明示
+    shouldRaiseFlag_out,
+    flagReasons_out,
   });
 }
+
 
 
 /** NORMAL / IR / SILENCE の OPTIONS */
@@ -1114,25 +1352,39 @@ export async function POST(req: NextRequest) {
       req.nextUrl?.origin ??
       '';
 
-    // =========================================================
-    // ✅ RenderEngine gate（single source）を handleIrosReply の「前」で確定する
-    // =========================================================
-    {
-      const extraRenderEngine = (extraMerged as any).renderEngine; // true/false/undefined
-      const envAllows = process.env.IROS_ENABLE_RENDER_ENGINE === '1';
-      const enableRenderEngine = envAllows && extraRenderEngine !== false;
+// =========================================================
+// ✅ RenderEngine gate（single source）を handleIrosReply の「前」で確定する
+// =========================================================
+{
+  const extraIn = extraMerged ?? {};
+  const envAllows = process.env.IROS_ENABLE_RENDER_ENGINE === '1';
 
-      extraMerged = { ...extraMerged, renderEngine: enableRenderEngine };
+  // ✅ 入力側が「明示 false」で落としたい場合だけ落とす（true/undefined は許可）
+  const extraRenderEngineIn =
+    (extraIn as any).renderEngineGate === true ||
+    (extraIn as any).renderEngine === true ||
+    undefined;
 
-      console.log('[IROS/Reply] renderEngine gate (PRE-HANDLE)', {
-        conversationId,
-        userCode,
-        enableRenderEngine,
-        envAllows: process.env.IROS_ENABLE_RENDER_ENGINE ?? null,
-        extraRenderEngine,
-        extraKeys: Object.keys(extraMerged ?? {}),
-      });
-    }
+  const enableRenderEngine =
+    envAllows && (extraIn as any).renderEngine !== false && (extraIn as any).renderEngineGate !== false;
+
+  // ✅ 観測用：gate と renderEngine を必ず同値で同期して書く
+  extraMerged = {
+    ...extraIn,
+    renderEngineGate: enableRenderEngine,
+    renderEngine: enableRenderEngine,
+  };
+
+  console.log('[IROS/Reply] renderEngine gate (PRE-HANDLE)', {
+    conversationId,
+    userCode,
+    enableRenderEngine,
+    envAllows: process.env.IROS_ENABLE_RENDER_ENGINE ?? null,
+    extraRenderEngineIn,
+    extraKeys: Object.keys(extraMerged ?? {}),
+  });
+}
+
 
     // =========================================================
     // ✅ persist gate（single source）を handleIrosReply の「前」で確定する
@@ -1499,13 +1751,30 @@ export async function POST(req: NextRequest) {
         if (at.length > 0) (result as any).content = at;
       }
 
-      console.log('[IROS/Reply][after-handle]', {
-        hasContent: typeof (result as any)?.content === 'string',
-        hasAssistantText: typeof (result as any)?.assistantText === 'string',
-        contentLen: String((result as any)?.content ?? '').length,
-        assistantTextLen: String((result as any)?.assistantText ?? '').length,
-        renderEngineGate: (result as any)?.meta?.extra?.renderEngineGate ?? null,
-      });
+// ✅ renderEngineGate を「確定値」で観測する（このスコープで存在するものだけ使う）
+const renderEngineGateFinal =
+  (result as any)?.meta?.extra?.renderEngineGate === true ||
+  (result as any)?.meta?.extra?.renderEngine === true ||
+  (meta as any)?.extra?.renderEngineGate === true ||
+  (meta as any)?.extra?.renderEngine === true ||
+  false;
+
+console.log('[IROS/Reply][after-handle]', {
+  hasContent: typeof (result as any)?.content === 'string',
+  hasAssistantText: typeof (result as any)?.assistantText === 'string',
+  contentLen: String((result as any)?.content ?? '').length,
+  assistantTextLen: String((result as any)?.assistantText ?? '').length,
+
+  // ✅ “最終判定”
+  renderEngineGate: renderEngineGateFinal,
+
+  // ✅ どこに入ってるか確認（後で消してOK）
+  gate_from_result_meta: (result as any)?.meta?.extra?.renderEngineGate ?? null,
+  gate_from_meta: (meta as any)?.extra?.renderEngineGate ?? null,
+  renderEngine_from_result_meta: (result as any)?.meta?.extra?.renderEngine ?? null,
+  renderEngine_from_meta: (meta as any)?.extra?.renderEngine ?? null,
+});
+
 
       // =========================================================
       // ★ 三軸「次の一歩」オプションを meta に付与
@@ -2005,9 +2274,19 @@ function applyRenderEngineIfEnabled(params: {
       const extraForRender = {
         ...(meta?.extra ?? {}),
         ...(extraForHandle ?? {}),
+
+        // ✅ renderGateway が参照できる“確定値”を一本化
+        slotPlanPolicy:
+          (meta as any)?.framePlan?.slotPlanPolicy ??
+          (meta as any)?.slotPlanPolicy ??
+          (meta as any)?.extra?.slotPlanPolicy ??
+          null,
+
         framePlan: (meta as any)?.framePlan ?? null,
         slotPlan: (meta as any)?.slotPlan ?? null,
       };
+
+
 
       // ✅ EvidenceLogger 用の最小パック
       {

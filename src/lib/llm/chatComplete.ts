@@ -17,7 +17,8 @@
 // - trace は「top-level優先 → args.trace 互換 → null」で統一する
 
 import crypto from 'node:crypto';
-import { judgeFlagship } from '@/lib/iros/quality/flagshipGuard';
+import { flagshipGuard as judgeFlagship } from '@/lib/iros/quality/flagshipGuard';
+
 
 export type ChatMessage = {
   role: 'system' | 'user' | 'assistant';
@@ -214,6 +215,26 @@ function lastUserHead(messages: ChatMessage[]): string | null {
   }
 }
 
+// --- ここから追加（envFlagshipRewriteOn の下あたりに置く） ---
+function stripInternalExtraBody(input: Record<string, any>): Record<string, any> {
+  try {
+    const out: Record<string, any> = {};
+    const src = input && typeof input === 'object' ? input : {};
+    for (const [k, v] of Object.entries(src)) {
+      // ✅ "__" で始まるものは「内部フラグ」扱い → OpenAI には送らない
+      if (k.startsWith('__')) continue;
+      // undefined は落とす（JSON stringify の意図しない差を避ける）
+      if (typeof v === 'undefined') continue;
+      out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+// --- 追加ここまで ---
+
+
 export async function chatComplete(args: ChatArgs): Promise<string> {
   const purpose = args.purpose;
   const model = args.model ?? pickDefaultModel();
@@ -223,7 +244,15 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
   const max_tokens = typeof args.max_tokens === 'number' ? args.max_tokens : 512;
   const endpoint = args.endpoint ?? 'https://api.openai.com/v1/chat/completions';
   const extraHeaders = args.extraHeaders ?? {};
-  const extraBody = args.extraBody ?? {};
+
+  // ✅ extraBody は「内部フラグが混ざる」ので、送信用と内部判定用を分ける
+  const extraBodyRaw = (args.extraBody ?? {}) as Record<string, any>;
+
+  // 内部判定用（OpenAIへは送らない）
+  const internalFlagshipPass = Boolean(extraBodyRaw?.__flagship_pass);
+
+  // 送信用（__ で始まるキーは全部落とす）
+  const extraBody: Record<string, any> = stripInternalExtraBody(extraBodyRaw);
   const responseFormat = args.responseFormat;
   const audit = args.audit;
   const allowEmpty = Boolean(args.allowEmpty);
@@ -267,42 +296,52 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
     body.response_format = responseFormat;
   }
 
-  // ===== 監査ログ（CALL）=====
-  try {
-    const first = messages[0];
-    const last = messages[messages.length - 1];
+// ===== 監査ログ（CALL）=====
+try {
+  const first = messages[0];
+  const last = messages[messages.length - 1];
 
-    console.log('[IROS/LLM][CALL]', {
-      callId,
-      purpose,
-      model,
-      temperature,
-      responseFormat: responseFormat?.type ?? 'text',
-      endpoint,
+  // ✅ 送信bodyの最上位キーだけ監査（内部フラグ混入検知）
+  const bodyKeys = Object.keys(body ?? {}).sort();
+  const extraBodyKeys = Object.keys(extraBody ?? {}).sort();
 
-      traceId: traceFinal.traceId,
-      conversationId: traceFinal.conversationId,
-      userCode: traceFinal.userCode,
+  console.log('[IROS/LLM][CALL]', {
+    callId,
+    purpose,
+    model,
+    temperature,
+    responseFormat: responseFormat?.type ?? 'text',
+    endpoint,
 
-      slotPlanPolicy: audit?.slotPlanPolicy ?? null,
-      mode: audit?.mode ?? null,
-      qCode: audit?.qCode ?? null,
-      depthStage: audit?.depthStage ?? null,
+    traceId: traceFinal.traceId,
+    conversationId: traceFinal.conversationId,
+    userCode: traceFinal.userCode,
 
-      msgCount: messages.length,
-      firstRole: first?.role ?? null,
-      lastRole: last?.role ?? null,
-      firstHead: first ? head(first.content) : null,
-      lastTail: last ? tail(last.content) : null,
-      lastUserHead: lastUserHead(messages),
+    slotPlanPolicy: audit?.slotPlanPolicy ?? null,
+    mode: audit?.mode ?? null,
+    qCode: audit?.qCode ?? null,
+    depthStage: audit?.depthStage ?? null,
 
-      hasDigest: detectHasDigest(messages),
-      hasAnchor: detectHasAnchorHints(messages),
+    msgCount: messages.length,
+    firstRole: first?.role ?? null,
+    lastRole: last?.role ?? null,
+    firstHead: first ? head(first.content) : null,
+    lastTail: last ? tail(last.content) : null,
+    lastUserHead: lastUserHead(messages),
 
-      roles: messages.map((m) => m.role),
-      caller: safeCaller(),
-    });
-  } catch {}
+    hasDigest: detectHasDigest(messages),
+    hasAnchor: detectHasAnchorHints(messages),
+
+    roles: messages.map((m) => m.role),
+    caller: safeCaller(),
+
+    // ✅ 追加：混入検知
+    bodyKeys,
+    extraBodyKeys,
+    hasInternalKeys: bodyKeys.some((k) => k.startsWith('__')) || extraBodyKeys.some((k) => k.startsWith('__')),
+  });
+} catch {}
+
 
   let res: Response | null = null;
   let elapsed = 0;
@@ -422,10 +461,8 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
   // ✅ 旗印REWRITE（purpose=reply のときだけ / 1回だけ）
   // - IROS_FLAGSHIP_REWRITE=1 で有効化
   // - extraBody.__flagship_pass が付いている場合は再実行しない（無限ループ防止）
-  const flagshipEnabled =
-    envFlagshipRewriteOn() &&
-    purpose === 'reply' &&
-    !(extraBody as any)?.__flagship_pass;
+  const flagshipEnabled = envFlagshipRewriteOn() && purpose === 'reply' && !internalFlagshipPass;
+
 
   if (flagshipEnabled) {
     const v1 = judgeFlagship(out);
