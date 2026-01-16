@@ -183,13 +183,75 @@ function buildNextInvitationParts(t: string, args: BuildFlagReplyArgs): string[]
   return out;
 }
 
+function shouldUseOnePointScaffold(t: string, args: BuildFlagReplyArgs) {
+  // ✅ “仮置き一点セット”を出す条件（まずはシンプルに）
+  // - 内的摩擦（進みたいのに止まる/引き返す）がある
+  // - もしくは「薄い/進まない/同じ」等の停滞が露出している
+  // ※ hasHistory は “確信” ではなく、背中押しの弱い補助としてのみ使う
+  const stagnation = hasAny(t, /(薄い|進まない|変わらない|同じ|テンプレ|オウム返し|分からない|狙いが見えない)/);
+  return hasInnerFriction(t) || stagnation || (!!args.hasHistory && wantsClarity(t));
+}
+
+function buildScaffoldPreface(): string {
+  // ✅ 押し付け回避：確定ではなく“仮置き”宣言を先に置く
+  // ※「受け取った」「呼吸」系は使わない
+  return 'いまの足場として一つだけ置く。違ったら捨てていい。';
+}
+
+function buildScaffoldPurpose(): string {
+  // ✅ 旗印の一文（あなた指定の“冒頭に足す一文”）
+  return 'この文章は“答えを渡す”ためじゃなく、あなたが答えを出すための足場を置く。';
+}
+
+function buildOnePointLine(t: string): string {
+  // ✅ “一点”は新しい解釈を足さず、今この会話で既に出ている素材の並べ替えだけで言う
+  if (hasInnerFriction(t)) {
+    // 既存の見取り図1行目を「一点」に昇格
+    return '進みたい気持ちはあるのに、決めた瞬間に失うものが見えて、身体の方がブレーキを踏んでる感じがある。';
+  }
+  if (wantsClarity(t)) {
+    return '決めたいのに決められないのは、情報が足りないというより、判断の軸が揺れて止まっている感じがある。';
+  }
+  return 'いま起きてるのは、結論の問題というより「動きが止まる一点」が残っている感じがある。';
+}
+
+function buildPoints3Lines(t: string): string[] {
+  // ✅ “見るべき3点”＝助言ではなく、視点（観察点）だけを渡す
+  if (hasInnerFriction(t)) {
+    return ['失うものとして浮かんでいるもの（何を手放すのが怖いか）', '守ろうとしている境界（何を守りたい反応か）', '引き返す合図（いつ/どこでブレーキが入るか）'];
+  }
+  if (wantsClarity(t)) {
+    return ['判断の軸（何を優先したいか）', '譲れない条件（最低限これがいる、の一点）', '怖いコスト（決めた瞬間に失う気がするもの）'];
+  }
+  return ['いま止めている一点（何が引っかかっているか）', 'その一点が出るタイミング（前/最中/後）', 'その一点を守る理由っぽいもの（失いたくない何か）'];
+}
+
+function buildPoints3Block(t: string): string {
+  const lines = buildPoints3Lines(t);
+  return `見る場所は3つだけ。\n・${lines[0]}\n・${lines[1]}\n・${lines[2]}`;
+}
+
+function buildNext1Line(t: string, args: BuildFlagReplyArgs): string {
+  // ✅ “今できる一手”＝行動命令になりすぎない、軽い確認/言語化
+  if (args.directTask) {
+    return 'いま出来る一手は1つ：相手に「最初の一文」だけ書いてみて。そこから整える。';
+  }
+  if (hasInnerFriction(t)) {
+    return 'いま出来る一手は1つ：失う側に見えているものを、名詞で1個だけ書いて終わりでいい。';
+  }
+  return 'いま出来る一手は1つ：引っかかっている一点を、短い言葉で1つだけ置いてみて。';
+}
+
 function decideCounts(t: string, args: BuildFlagReplyArgs): {
   conclusion: number;
   dynamics: number;
   deblame: number;
   invitation: number;
 } {
-  const conclusion = 1;
+  // ✅ “仮置き一点セット”が出るときは、CONCLUSIONを2本にする（宣言→軸）
+  const useScaffold = shouldUseOnePointScaffold(t, args);
+
+  const conclusion = useScaffold ? 2 : 1;
 
   const strong = hasInnerFriction(t) && wantsClarity(t); // ← 2本目を出す“強い条件”
   const dynamics = strong ? 2 : 1;
@@ -199,7 +261,8 @@ function decideCounts(t: string, args: BuildFlagReplyArgs): {
     hasInnerFriction(t) ? 1 :
     1;
 
-  const invitation = args.directTask ? 2 : 1;
+  // ✅ scaffold時は NEXT_INVITATION を2本にして「3点→一手」を必ず入れる
+  const invitation = useScaffold ? 2 : args.directTask ? 2 : 1;
 
   return { conclusion, dynamics, deblame, invitation };
 }
@@ -213,18 +276,100 @@ function decideCounts(t: string, args: BuildFlagReplyArgs): {
 export function buildFlagReplySlots(args: BuildFlagReplyArgs): FlagReplySlot[] {
   const t = norm(args.userText);
 
+  const useScaffold = shouldUseOnePointScaffold(t, args);
+
   const q = buildTrueQuestion(t, args);
   const counts = decideCounts(t, args);
 
-  const conclusionParts = buildConclusionParts(t).slice(0, counts.conclusion);
+  // --- 既存生成 ---
+  let conclusionParts = buildConclusionParts(t).slice(0, Math.max(1, counts.conclusion));
   const dynamicsParts = buildDynamicsParts(t).slice(0, counts.dynamics);
   const deblameParts = buildDeblameParts(t).slice(0, counts.deblame);
-  const invitationParts = buildNextInvitationParts(t, args).slice(0, counts.invitation);
+  let invitationParts = buildNextInvitationParts(t, args).slice(0, counts.invitation);
 
+  // --- ✅ ここが今回の追加：仮置き一点セット ---
+  // カテゴリは増やせないので、既存カテゴリ内で「順番と中身」を固定する
+  // CONCLUSION: 先頭2本（仮置き宣言 → 旗印一文）を差し込む（counts.conclusion=2のとき）
+  // DYNAMICS: 先頭を“一点”に置き換える（見取り図の中で一点を立てる）
+  // NEXT_INVITATION: 1本目を「見る3点」、2本目を「今できる一手」にする
+  if (useScaffold) {
+    conclusionParts = [buildScaffoldPreface(), buildScaffoldPurpose()];
+
+    // “一点”はDYNAMICS_1に置く（既存の見取り図と役割が近い／露出も自然）
+    const onePoint = buildOnePointLine(t);
+    const dyn = [onePoint, ...dynamicsParts].slice(0, counts.dynamics);
+
+    // invitationは「3点→一手」を固定（ここが“足場の順番”）
+    invitationParts = [buildPoints3Block(t), buildNext1Line(t, args)];
+    // dynamicsParts を上書きするため、以降で dyn を使う
+    const slots: FlagReplySlot[] = [];
+
+    // 1) CONCLUSION（仮置き→旗印）(2)
+    conclusionParts.forEach((content, i) => {
+      slots.push({
+        key: keyOf('CONCLUSION', i + 1),
+        kind: 'CONCLUSION',
+        role: 'assistant',
+        style: 'neutral',
+        content,
+      });
+    });
+
+    // 2) DYNAMICS（一点→必要なら補助見取り図）(1〜2)
+    dyn.forEach((content, i) => {
+      slots.push({
+        key: keyOf('DYNAMICS', i + 1),
+        kind: 'DYNAMICS',
+        role: 'assistant',
+        style: 'neutral',
+        content,
+      });
+    });
+
+    // 3) DEBLAME（矢印を外す）(1〜2)
+    deblameParts.forEach((content, i) => {
+      slots.push({
+        key: keyOf('DEBLAME', i + 1),
+        kind: 'DEBLAME',
+        role: 'assistant',
+        style: 'soft',
+        content,
+      });
+    });
+
+    // 4) TRUE_QUESTION（0–1）
+    if (q) {
+      slots.push({
+        key: keyOf('TRUE_QUESTION', 1),
+        kind: 'TRUE_QUESTION',
+        role: 'assistant',
+        style: 'neutral',
+        content: q,
+      });
+    }
+
+    // 5) NEXT_INVITATION（3点→一手）(2固定)
+    invitationParts.forEach((content, i) => {
+      slots.push({
+        key: keyOf('NEXT_INVITATION', i + 1),
+        kind: 'NEXT_INVITATION',
+        role: 'assistant',
+        style: 'soft',
+        content,
+      });
+    });
+
+    // 最終セーフ：空が混ざらないように / 1ブロックの暴走を抑える
+    return slots
+      .map((s) => ({ ...s, content: clamp(s.content, 220) }))
+      .filter((s) => !!norm(s.content));
+  }
+
+  // --- 既存ルート（scaffoldなし） ---
   const slots: FlagReplySlot[] = [];
 
   // 1) CONCLUSION（軸）(1)
-  conclusionParts.forEach((content, i) => {
+  conclusionParts.slice(0, counts.conclusion).forEach((content, i) => {
     slots.push({
       key: keyOf('CONCLUSION', i + 1),
       kind: 'CONCLUSION',

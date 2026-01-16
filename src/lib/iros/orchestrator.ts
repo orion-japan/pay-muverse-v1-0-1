@@ -57,6 +57,7 @@ import { detectIMode } from './iMode';
 
 import { extractAnchorEvidence } from '@/lib/iros/anchor/extractAnchorEvidence';
 import { detectAnchorEntry } from '@/lib/iros/anchor/AnchorEntryDetector';
+import { observeFlow } from '@/lib/iros/input/flowObserver';
 
 // Person Intent Memory（ir診断）
 import { savePersonIntentState } from './memory/savePersonIntent';
@@ -1098,40 +1099,48 @@ export async function runIrosTurn(
       return (consultish && !factish) || looksLikeJustNoun;
     }
 
-    // =========================================================
-    // ✅ flagReply 配線：counsel/normalChat より “前”
-    // - すでに slots が入っていても「相談/構造」なら上書きしてよい（強制はここだけ）
-    // - ただし SILENCE は除外
-    // =========================================================
-    const historyArr = Array.isArray(history) ? (history as any[]) : [];
-    const hasHistory = historyArr.length > 0;
+// =========================================================
+// ✅ Flow Observation（入口エンジン）
+// - 意味を作らない
+// - 解釈しない
+// - 分岐に使わない
+// - meta に「流れ」だけを置く
+// =========================================================
 
-    if (!isSilence && hasText && shouldUseFlagReply(meta as any, text)) {
-      const directTask =
-        /(文面|文章|手順|要点|まとめ|作って|書いて|整えて|テンプレ|仕様|設計)/.test(
-          String(text ?? ''),
-        );
+{
+  const historyArr = Array.isArray(history) ? (history as any[]) : [];
 
-      const flagSlots = buildFlagReplySlots({
-        userText: text,
-        hasHistory,
-        questionAlreadyPlanned: false,
-        directTask,
-      });
-
-      slotsArr = Array.isArray(flagSlots) ? flagSlots : [];
-      slotPlanPolicy = 'FINAL';
-      (meta as any).slotPlanFallback = 'flagReply';
-
-      console.log('[IROS/ORCH][flagReply-picked]', {
-        slotsLen: Array.isArray(slotsArr) ? slotsArr.length : null,
-        policy: slotPlanPolicy,
-        directTask,
-        hasHistory,
-        prev_slotsEmpty: slotsEmpty0,
-        prev_policyEmpty: policyEmpty0,
-      });
+  // 直前の user 発話のみ取得（assistant は見ない）
+  const lastUserText = (() => {
+    for (let i = historyArr.length - 1; i >= 0; i--) {
+      const m = historyArr[i];
+      if (String(m?.role ?? '').toLowerCase() === 'user') {
+        const v = m?.text ?? m?.content ?? null;
+        return typeof v === 'string' ? v : null;
+      }
     }
+    return null;
+  })();
+
+  if (typeof text === 'string' && text.trim().length > 0) {
+    const flow = observeFlow({
+      currentText: text,
+      lastUserText,
+    });
+
+    // 🔑 使わない。判断しない。meta に置くだけ。
+    (meta as any).flow = flow;
+
+    // 観測ログ（最初は必須）
+    console.log('[IROS/FLOW][observe]', {
+      delta: flow.delta,
+      confidence: flow.confidence,
+      hasLastUserText: Boolean(lastUserText),
+    });
+  }
+}
+
+
 
     // =========================================================
     // ✅ counsel 配線：normalChat fallback の前に差し込む

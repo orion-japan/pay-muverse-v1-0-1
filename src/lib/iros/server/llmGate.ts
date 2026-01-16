@@ -71,17 +71,13 @@ export type LlmGateProbeOutput = {
     llmEntry: LlmGateDecision['entry'];
     llmSkipReason: string | null;
 
-    // デバッグ用
+    // デバッグ用（候補文がある時だけ埋まる）
     finalAssistantTextCandidateLen?: number | null;
     finalAssistantTextCandidateHead?: string | null;
 
     // ✅ Phase11: 強制CALL（log証拠用）
     finalForceCall?: boolean | null;
     finalForceCallReason?: string | null;
-
-    // ✅ 将来のデバッグ用（上流が使うなら）
-    // resolvedText は decision 側に載るが、patch だけ見て追えるように残したい場合に使う
-    // resolvedTextLen?: number | null;
   };
 };
 
@@ -89,8 +85,8 @@ export type LlmGateProbeOutput = {
 // utils
 // ---------------------------------------------------------------------
 
-function head(s: string, n = 48): string {
-  const t = String(s ?? '').replace(/\s+/g, ' ').trim();
+function head(v: any, n = 48): string {
+  const t = String(v ?? '').replace(/\s+/g, ' ').trim();
   return t.length <= n ? t : t.slice(0, n) + '…';
 }
 
@@ -102,14 +98,13 @@ function normPolicy(v: any): SlotPlanPolicy {
 }
 
 function normText(v: any): string {
-  return String(v ?? '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .trim();
+  return String(v ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
 }
 
-function isNonEmptyText(v: any): boolean {
-  return normText(v).length > 0;
+function slotsOkFromHints(args: { slotPlanLen: number | null; hasSlots: boolean | null }) {
+  const { slotPlanLen, hasSlots } = args;
+  if (typeof slotPlanLen === 'number') return slotPlanLen > 0;
+  return hasSlots === true;
 }
 
 // ---------------------------------------------------------------------
@@ -119,19 +114,14 @@ function isNonEmptyText(v: any): boolean {
 function extractSlotsObj(meta: any): any | null {
   if (!meta || typeof meta !== 'object') return null;
 
-  // ✅ 実際に現場で出てくる “あり得る場所” を列挙
-  // - meta.framePlan.slots : 基本
-  // - meta.framePlan.framePlan.slots : 二重ラップ
-  // - meta.framePlan.slotPlan.slots : 旧構造
-  // - meta.slotPlan.slots / meta.slots : さらに旧
-  // - meta.extra.framePlan.slots : extra に入ってるケース
+  // ✅ 現場で “あり得る場所” を列挙
   const candidates = [
     meta?.framePlan?.slots,
-    meta?.framePlan?.framePlan?.slots,
-    meta?.framePlan?.slotPlan?.slots,
-    meta?.slotPlan?.slots,
-    meta?.slots,
-    meta?.extra?.framePlan?.slots,
+    meta?.framePlan?.framePlan?.slots, // 二重ラップ
+    meta?.framePlan?.slotPlan?.slots, // 旧
+    meta?.slotPlan?.slots, // さらに旧
+    meta?.slots, // 最旧
+    meta?.extra?.framePlan?.slots, // extraに入るケース
   ];
 
   for (const s of candidates) {
@@ -142,15 +132,29 @@ function extractSlotsObj(meta: any): any | null {
   return null;
 }
 
+function pickSlotText(v: any): string {
+  const t =
+    typeof v === 'string'
+      ? v
+      : typeof v?.text === 'string'
+        ? v.text
+        : typeof v?.content === 'string'
+          ? v.content
+          : typeof v?.value === 'string'
+            ? v.value
+            : typeof v?.message === 'string'
+              ? v.message
+              : typeof v?.out === 'string'
+                ? v.out
+                : '';
+  return normText(t);
+}
+
 function buildTextFromSlots(slotsObj: any | null): string | null {
   if (!slotsObj) return null;
 
-  // ✅ 両対応：object形式 / array形式
-  // - array: [{ key:'OBS', content:'...' }, ...]
-  // - object: { OBS:'...', SHIFT:'...', ... } または { core:{text:'...'} ... }
-
+  // ✅ structured の優先順（seedとして扱いやすい順）
   const ORDER = [
-    // structured
     'OBS',
     'SHIFT',
     'NEXT',
@@ -166,37 +170,18 @@ function buildTextFromSlots(slotsObj: any | null): string | null {
     'ending',
   ];
 
-  const pickText = (v: any): string => {
-    const t =
-      typeof v === 'string'
-        ? v
-        : typeof v?.text === 'string'
-          ? v.text
-          : typeof v?.content === 'string'
-            ? v.content
-            : typeof v?.value === 'string'
-              ? v.value
-              : typeof v?.message === 'string'
-                ? v.message
-                : typeof v?.out === 'string'
-                  ? v.out
-                  : '';
-    return normText(t);
-  };
-
-  // (1) Array slots
+  // (1) Array slots: [{ key, content }, ...]
   if (Array.isArray(slotsObj)) {
     const items = slotsObj
       .map((s: any) => {
         const key = String(s?.key ?? s?.id ?? s?.slotId ?? s?.name ?? '').trim();
-        const text = pickText(s);
-        return { key, text };
+        return { key, text: pickSlotText(s) };
       })
       .filter((x) => x.text.length > 0);
 
     if (items.length === 0) return null;
 
-    // sort by ORDER
+    // sort by ORDER (unknown keys keep stable-ish alphabetical)
     items.sort((a, b) => {
       const ia = ORDER.indexOf(a.key);
       const ib = ORDER.indexOf(b.key);
@@ -210,18 +195,17 @@ function buildTextFromSlots(slotsObj: any | null): string | null {
     return out.length ? out : null;
   }
 
-  // (2) Object slots
+  // (2) Object slots: { OBS:'...', SHIFT:'...' } / { core:{text:'...'} }
   if (typeof slotsObj === 'object') {
     const keysAll = Object.keys(slotsObj);
-
     const keys: string[] = [];
+
     for (const k of ORDER) if (keysAll.includes(k)) keys.push(k);
     for (const k of keysAll) if (!keys.includes(k)) keys.push(k);
 
     const parts: string[] = [];
     for (const k of keys) {
-      const v = (slotsObj as any)[k];
-      const s = pickText(v);
+      const s = pickSlotText((slotsObj as any)[k]);
       if (s) parts.push(s);
     }
 
@@ -237,41 +221,33 @@ function buildTextFromSlots(slotsObj: any | null): string | null {
 // ---------------------------------------------------------------------
 
 export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
-  const {
-    conversationId,
-    userCode,
-    allowLLM_final,
-    brakeReason = null,
-    speechAct = null,
-    finalAssistantTextNow = null,
-    slotPlanLen = null,
-    hasSlots = null,
-    slotPlanPolicy = null,
-    meta = null,
-  } = input;
+  const conversationId = input.conversationId;
+  const userCode = input.userCode;
 
-  const policy = normPolicy(slotPlanPolicy);
+  const allowLLM_final = input.allowLLM_final;
+  const brakeReason = input.brakeReason ?? null;
+  const speechAct = input.speechAct ?? null;
+
+  const slotPlanLen = input.slotPlanLen ?? null;
+  const hasSlots = input.hasSlots ?? null;
+  const policy = normPolicy(input.slotPlanPolicy);
 
   // 現在本文（既に生成済み/レンダ済みで入ってくることがある）
-  const textNowRaw = normText(finalAssistantTextNow);
-  const textNowLen = textNowRaw.length;
+  const textNow = normText(input.finalAssistantTextNow);
+  const textNowLen = textNow.length;
 
-  // slots から組み立てた候補文
-  const slotsObj = extractSlotsObj(meta);
-  const candidateRaw = normText(buildTextFromSlots(slotsObj) ?? '');
-  const candidateLen = candidateRaw.length;
+  // slots から組み立てた候補文（seed）
+  const slotsObj = extractSlotsObj(input.meta ?? null);
+  const candidate = normText(buildTextFromSlots(slotsObj) ?? '');
+  const candidateLen = candidate.length;
 
   // ✅ 実質本文：textNow 優先、なければ candidate
-  const effectiveText = textNowLen > 0 ? textNowRaw : candidateRaw;
+  const effectiveText = textNowLen > 0 ? textNow : candidate;
   const effectiveLen = effectiveText.length;
 
-  // slots 有無の判定
-  // - slotPlanLen が無い実装もあるので hasSlots も見る
-  const slotsOk =
-    (typeof slotPlanLen === 'number' && slotPlanLen > 0) || hasSlots === true;
+  const slotsOk = slotsOkFromHints({ slotPlanLen, hasSlots });
 
-  // patch builder（Phase11フラグ追加）
-  const mkPatch = (
+  const mk = (
     decision: LlmGateDecision,
     extras?: { finalForceCall?: boolean; finalForceCallReason?: string },
   ): LlmGateProbeOutput => {
@@ -291,8 +267,8 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
         llmEntry: decision.entry,
         llmSkipReason: decision.entry === 'CALL_LLM' ? null : decision.reason,
 
-        finalAssistantTextCandidateLen: candidateLen || null,
-        finalAssistantTextCandidateHead: candidateLen ? head(candidateRaw) : null,
+        finalAssistantTextCandidateLen: candidateLen > 0 ? candidateLen : null,
+        finalAssistantTextCandidateHead: candidateLen > 0 ? head(candidate) : null,
 
         finalForceCall: extras?.finalForceCall ?? null,
         finalForceCallReason: extras?.finalForceCallReason ?? null,
@@ -302,7 +278,7 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
 
   // (A) 資格なし
   if (!allowLLM_final) {
-    return mkPatch({
+    return mk({
       entry: 'SKIP_POLICY',
       reason: 'allowLLM_final=false',
       resolvedText: effectiveLen ? effectiveText : null,
@@ -310,24 +286,19 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
   }
 
   // (B) 明示沈黙
-  // - Q1_SUPPRESS は “抑制” なので生成しない
-  // - speechAct=SILENCE は明示沈黙
-  if (
-    String(brakeReason ?? '') === 'Q1_SUPPRESS' ||
-    String(speechAct ?? '').toUpperCase() === 'SILENCE'
-  ) {
-    return mkPatch({
+  const brake = String(brakeReason ?? '');
+  const act = String(speechAct ?? '').toUpperCase();
+  if (brake === 'Q1_SUPPRESS' || act === 'SILENCE') {
+    return mk({
       entry: 'SKIP_SILENCE',
       reason: 'brakeReason=Q1_SUPPRESS or speechAct=SILENCE',
       resolvedText: effectiveLen ? effectiveText : null,
     });
   }
 
-  // (C) ✅ SCAFFOLD：LLM自体を呼ばない（正式/A案）
-  // - “呼ぶのに採用しない” という混乱を構造的に排除
-  // - SCAFFOLD は slotPlan/seed を render 側で表示する
+  // (C) ✅ SCAFFOLD：LLMを呼ばない
   if (slotsOk && policy === 'SCAFFOLD') {
-    return mkPatch({
+    return mk({
       entry: 'SKIP_SLOTPLAN',
       reason: 'SCAFFOLD_POLICY__NO_LLM',
       resolvedText: effectiveLen ? effectiveText : null,
@@ -335,9 +306,6 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
   }
 
   // (D) ✅ Phase11：FINAL slotPlan は原則 CALL_LLM
-  // - slot が non-empty でも SKIP しない（テンプレ固定化を防ぐ）
-  // - LLMには “下書き本文（effectiveText）” を必ず渡す（上流が利用）
-  // - effectiveText が空でも CALL（slots がある＝seed があるので生成できる）
   if (slotsOk && policy === 'FINAL') {
     console.warn('[IROS/LLM_GATE][FINAL_FORCE_CALL]', {
       conversationId,
@@ -349,7 +317,7 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
       head: head(effectiveText, 80),
     });
 
-    return mkPatch(
+    return mk(
       {
         entry: 'CALL_LLM',
         reason: 'FINAL_FORCE_CALL (avoid template lock)',
@@ -361,7 +329,7 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
 
   // (E) slots があるが policy が UNKNOWN：守りで CALL_LLM（seed を渡す）
   if (slotsOk) {
-    return mkPatch({
+    return mk({
       entry: 'CALL_LLM',
       reason: 'slotsOk but slotPlanPolicy=UNKNOWN (fallback to CALL_LLM)',
       resolvedText: effectiveLen ? effectiveText : null,
@@ -369,9 +337,8 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
   }
 
   // (F) slots が無いが本文がある：そのまま返す（LLM不要）
-  // - ここは「slotPlanを使ってない通常返信」想定
   if (effectiveLen > 0) {
-    return mkPatch({
+    return mk({
       entry: 'SKIP_SLOTPLAN',
       reason: 'no slots but have non-empty text',
       resolvedText: effectiveText,
@@ -379,8 +346,7 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
   }
 
   // (G) 何も無い：最後の砦として CALL_LLM（空seedでも呼ぶ）
-  // - 上流が “空でも呼ぶ” を許可しているときの最終保険
-  return mkPatch({
+  return mk({
     entry: 'CALL_LLM',
     reason: 'no slots and empty text (last resort)',
     resolvedText: null,
@@ -391,28 +357,24 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
 // meta write
 // ---------------------------------------------------------------------
 
-export function writeLlmGateToMeta(
-  metaForSave: any,
-  patch: LlmGateProbeOutput['patch'],
-): void {
+export function writeLlmGateToMeta(metaForSave: any, patch: LlmGateProbeOutput['patch']): void {
   if (!metaForSave || typeof metaForSave !== 'object') return;
   metaForSave.extra = metaForSave.extra ?? {};
 
-  // ✅ 既存：ネスト（詳細）
+  // ✅ ネスト（詳細）
   (metaForSave.extra as any).llmGate = {
     ...(metaForSave.extra as any).llmGate,
     ...patch,
     at: new Date().toISOString(),
   };
 
-  // ✅ 追加：直下ミラー（DB検索用 / SQLをそのまま活かす）
+  // ✅ 直下ミラー（DB検索用）
   (metaForSave.extra as any).llmEntry = patch.llmEntry;
   (metaForSave.extra as any).llmSkipReason = patch.llmSkipReason;
 
-  // ✅ 追加：FINAL強制CALLの証拠（SQLで追える）
+  // ✅ FINAL強制CALLの証拠（SQLで追える）
   (metaForSave.extra as any).finalForceCall = patch.finalForceCall ?? null;
-  (metaForSave.extra as any).finalForceCallReason =
-    patch.finalForceCallReason ?? null;
+  (metaForSave.extra as any).finalForceCallReason = patch.finalForceCallReason ?? null;
 }
 
 // ---------------------------------------------------------------------
@@ -454,8 +416,6 @@ export function logLlmGate(
     finalForceCall: patch.finalForceCall ?? null,
     finalForceCallReason: patch.finalForceCallReason ?? null,
 
-    resolvedTextLen: decision?.resolvedText
-      ? String(decision.resolvedText).length
-      : null,
+    resolvedTextLen: decision?.resolvedText ? String(decision.resolvedText).length : null,
   });
 }

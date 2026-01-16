@@ -1,63 +1,35 @@
 // src/lib/iros/language/rephraseEngine.ts
 // iros — Rephrase/Generate Engine (slot-preserving)
 //
-// ✅ 追加/変更点：
-// - userContext を unknown で受け、JSONでも安全に文字列化
-// - opts.debug に traceId / conversationId / userCode を受けて、監査ログに載せる
-// - [IROS/rephraseEngine][OK] と [IROS/rephraseEngine][AFTER_ATTACH] をここで確実に出す
-// ✅ 追加：
-// - userContext から "履歴っぽいもの" を自動抽出して LLM に注入（露出禁止）
-//   → LLM が「履歴を感じない」問題の最短改善
+// 目的：
+// - LLMは「文章整形/表現」だけ（判断はしない）
+// - slot key を落とさずに “送れる完成文” を生成する（slot-preserving）
+// - 露出禁止（内部パック/メタ/JSON/キー名/制御マーカー）を確実に遮断
+// - 直近2往復（最大4メッセージ）だけを LLM に渡す（薄まり防止）
 //
-// ✅ 重要改善（今回の肝）
-// - LLMに渡す履歴は「直近2往復」だけ（最大4メッセージ）に固定
-//   → 長い履歴を入れると、逆に“流れ”が薄くなる/迷うことが多い
-//
-// ✅ ITは条件が揃ってから：
-// - ここ（writer）は “判断” をしない
-// - ただし userContext 側に「ITが成立した証拠（IT_TRIGGER_OK / IT_HOLD / tLayerModeActive 等）」があり、
-//   かつ intentBand/tLayerHint が I* のときだけ「Iっぽい文体」を“表現ルールとして”許可（露出禁止）
-//
-// ✅ 追加（今回の肝2：I-Line 改変禁止）
-// - 入力に [[ILINE]]...[[/ILINE]] が含まれている場合、その中身は一字一句改変禁止
-// - LLM出力にその固定文が完全一致で含まれない場合、rephrase を破棄（ok=false）
-// - 制御マーカー自体は本文に絶対露出させない（混入したら破棄）
-//
-// ✅ 重要（今回の肝3：traceId 統一）
-// - opts.debug.traceId が null でも、このファイル内で traceId を確定する
-// - MSG_PACK / chatComplete / VERIFY / OK / AFTER_ATTACH の traceId を必ず一致させる
-//
-// ✅ 重要（実装上のバグ修正ポイント）
-// - ensureDebugFinal で debug の「追加キー」を捨てない（lastUserHead 等の互換フィールドを保持）
-//   → recall-check の判定が死なないようにする
-//
-// ✅ 重要（今回のバグ修正：複数スロット対応）
-// - buildSlotsWithFirstText は「先頭スロット1個に全集約」をやめ、段落ブロックを keys に順番に割り当てる
-//   → flagReply の “同カテゴリ複数” が UI で消える事故を止める
+// 実装方針：
+// - debug.traceId はこのファイルで必ず確定し、ログ/LLM呼び出しで統一
+// - [[ILINE]]...[[/ILINE]] は改変禁止（漏れたら破棄）
+// - recall-guard（must include）がある場合、落ちたら破棄（ok=false）
+// - FlagshipGuard は採用ゲート（FATALなら1回だけ再生成、ダメなら最小fallback採用）
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import crypto from 'node:crypto';
 import { chatComplete } from '../../llm/chatComplete';
 
-import {
-  recallGuardOk,
-  shouldEnforceRecallGuard,
-  checkWriterGuardsMinimal,
-  type WriterGuardRules,
-} from './rephrase/guards';
-
+import { recallGuardOk, shouldEnforceRecallGuard } from './rephrase/guards';
 import { containsForbiddenLeakText, extractDirectTask } from './rephrase/leak';
-
 import {
-  ILINE_OPEN,
-  ILINE_CLOSE,
   extractLockedILines,
   verifyLockedILinesPreserved,
   buildLockRuleText,
 } from './rephrase/ilineLock';
-
-import { stripLampEverywhere, finalizeLamp } from './rephrase/lamp';
-
-import { extractHistoryTextFromContext, extractLastTurnsFromContext } from './rephrase/history';
+import { finalizeLamp } from './rephrase/lamp';
+import {
+  extractHistoryTextFromContext,
+  extractLastTurnsFromContext,
+} from './rephrase/history';
 
 import { flagshipGuard } from '../quality/flagshipGuard';
 
@@ -116,9 +88,8 @@ export type RephraseResult =
         outKeys: string[];
         rawLen: number;
         rawHead: string;
-
-        // ✅ 追加：FLAGSHIP / RETRY / FALLBACK などの採用メモ
         note?: string;
+        extra?: any;
       };
     }
   | {
@@ -135,15 +106,13 @@ export type RephraseResult =
 // basics
 // -------------------------------
 function norm(s: unknown) {
-  return String(s ?? '').replace(/\r\n/g, '\n').trim();
+  return String(s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
 }
 
-// -------------------------------
-// tiny normalize (for logs only)
-// -------------------------------
 function normLiteForLog(s: any): string {
   return String(s ?? '')
     .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
     .replace(/[\u200B-\u200D\uFEFF]/g, '')
     .trim();
 }
@@ -208,7 +177,7 @@ function ensureDebugFinal(debug?: RephraseOptions['debug'] | null): DebugFinal {
   const traceId = traceIdRaw || crypto.randomUUID(); // ✅ ここで必ず確定
 
   return {
-    ...base,
+    ...base, // ✅ 追加キーを捨てない
     traceId,
     conversationId: base.conversationId ?? null,
     userCode: base.userCode ?? null,
@@ -226,6 +195,7 @@ function stableOrderKeys(keys: string[]) {
     'NEXT',
     'SAFE',
     'INSIGHT',
+    // legacy-ish
     'opener',
     'facts',
     'mirror',
@@ -246,10 +216,8 @@ function stableOrderKeys(keys: string[]) {
 }
 
 /**
- * extractSlotBlocks() と同じ探索範囲から「key付き slots」を抽出する。
- * ※ここでは key を落とさない（slot-preserving に必須）。
- *
- * ✅ 追加: slots が無い場合でも、content/assistantText から疑似slot(OBS)を作る
+ * extractSlotBlocks() と同等レンジから「key付き slots」を抽出する。
+ * ✅ slotsが無い場合でも、content/assistantText から疑似slot(OBS)を作る
  */
 export function extractSlotsForRephrase(extra: any): ExtractedSlots {
   const framePlan =
@@ -266,7 +234,7 @@ export function extractSlotsForRephrase(extra: any): ExtractedSlots {
     extra?.meta?.slotPlan?.slots ??
     null;
 
-  // ✅ slotsが無いケース（microGenerateなど）を救う：contentから疑似slotを作る
+  // ✅ slotsが無いケース（microGenerate等）を救う：contentから疑似slotを作る
   if (!slotsRaw) {
     const fallbackText = norm(
       extra?.assistantText ??
@@ -299,7 +267,14 @@ export function extractSlotsForRephrase(extra: any): ExtractedSlots {
   } else if (typeof slotsRaw === 'object' && slotsRaw) {
     const keys = stableOrderKeys(Object.keys(slotsRaw));
     for (const k of keys) {
-      const text = norm((slotsRaw as any)[k]);
+      const v = (slotsRaw as any)[k];
+
+      // object slots の値が {text/content/value...} 形式で来る可能性にも対応
+      const text = norm(
+        typeof v === 'string'
+          ? v
+          : v?.text ?? v?.content ?? v?.value ?? v?.message ?? v?.out ?? '',
+      );
       if (!text) continue;
       out.push({ key: String(k), text });
     }
@@ -315,7 +290,7 @@ export function extractSlotsForRephrase(extra: any): ExtractedSlots {
 }
 
 // -------------------------------
-// fixed fallback (for FIXED mode)
+// FIXED fallback (for FIXED mode)
 // -------------------------------
 function buildFixedBoxTexts(slotCount: number): string[] {
   const ZWSP = '\u200b';
@@ -346,8 +321,12 @@ function buildSlotsWithFirstText(inKeys: string[], firstText: string): Slot[] {
   if (inKeys.length === 0) return [];
 
   const full = norm(firstText);
+
   if (!full) {
-    return [{ key: inKeys[0], text: '' }, ...inKeys.slice(1).map((k) => ({ key: k, text: ZWSP }))];
+    return [
+      { key: inKeys[0], text: '' },
+      ...inKeys.slice(1).map((k) => ({ key: k, text: ZWSP })),
+    ];
   }
 
   // 2行以上の空行で段落分割（1改行は文中改行として残す）
@@ -366,9 +345,7 @@ function buildSlotsWithFirstText(inKeys: string[], firstText: string): Slot[] {
   const out: Slot[] = [];
   const takeN = Math.min(inKeys.length, blocks.length);
 
-  for (let i = 0; i < takeN; i++) {
-    out.push({ key: inKeys[i], text: blocks[i] });
-  }
+  for (let i = 0; i < takeN; i++) out.push({ key: inKeys[i], text: blocks[i] });
 
   // blocks が余ったら最後に連結して落とさない
   if (blocks.length > inKeys.length && inKeys.length > 0) {
@@ -387,9 +364,7 @@ function buildSlotsWithFirstText(inKeys: string[], firstText: string): Slot[] {
 }
 
 // -------------------------------
-// ✅ recall-guard “must include” 抽出（@RESTORE.last / @Q.ask）
-// - LLM に「この文字列を本文にそのまま入れろ」を強制するための素材
-// - ここで取れなくても recallGuardOk が最終的に落とす（＝保険ではなく改善）
+// recall-must-include（@RESTORE.last / @Q.ask）抽出
 // -------------------------------
 function extractRecallMustIncludeFromSeed(seedDraftRaw: string): {
   restoreNeedle: string | null;
@@ -397,8 +372,6 @@ function extractRecallMustIncludeFromSeed(seedDraftRaw: string): {
 } {
   const t = String(seedDraftRaw ?? '');
 
-  // @RESTORE {"last":"..."}
-  // - JSONが途中で切れても拾えるように、最小の "last":"..."" だけ抜く
   let restoreNeedle: string | null = null;
   {
     const m =
@@ -407,7 +380,6 @@ function extractRecallMustIncludeFromSeed(seedDraftRaw: string): {
     if (m?.[1]) restoreNeedle = String(m[1]).trim();
   }
 
-  // @Q {"ask":"..."}
   let questionNeedle: string | null = null;
   {
     const m =
@@ -419,13 +391,21 @@ function extractRecallMustIncludeFromSeed(seedDraftRaw: string): {
   return { restoreNeedle, questionNeedle };
 }
 
-function buildMustIncludeRuleText(args: { restoreNeedle: string | null; questionNeedle: string | null }): string {
-  const a = args.restoreNeedle ? `- 次の文を本文に**一字一句そのまま**含める：\n  ${args.restoreNeedle}` : '';
-  const b = args.questionNeedle ? `- 次の問い（文）を本文に**一字一句そのまま**含める：\n  ${args.questionNeedle}` : '';
+function buildMustIncludeRuleText(args: {
+  restoreNeedle: string | null;
+  questionNeedle: string | null;
+}): string {
+  const a = args.restoreNeedle
+    ? `- 次の文を本文に**一字一句そのまま**含める：\n  ${args.restoreNeedle}`
+    : '';
+  const b = args.questionNeedle
+    ? `- 次の問い（文）を本文に**一字一句そのまま**含める：\n  ${args.questionNeedle}`
+    : '';
   const body = [a, b].filter(Boolean).join('\n');
 
   if (!body) return '';
-  return ['',
+  return [
+    '',
     '【改変禁止（recall-must-include）】',
     '以下は“復元の足場”なので、削除・言い換え・要約は禁止。',
     body,
@@ -433,9 +413,8 @@ function buildMustIncludeRuleText(args: { restoreNeedle: string | null; question
   ].join('\n');
 }
 
-
 // -------------------------------
-// ✅ IT成立（条件が揃った証拠）を userContext から読む（MemoryState補完あり）
+// IT成立（証拠）を userContext から読む
 // -------------------------------
 function readItOkFromContext(userContext: unknown): boolean {
   if (!userContext || typeof userContext !== 'object') return false;
@@ -463,7 +442,6 @@ function readItOkFromContext(userContext: unknown): boolean {
         false,
     ) === true;
 
-  // ✅ MemoryState / orchestratorState / last_state など “実体” から itxStep を拾う
   const itxStep =
     norm(
       tryGet(uc, ['itxStep']) ??
@@ -494,7 +472,7 @@ function readItOkFromContext(userContext: unknown): boolean {
 }
 
 // -------------------------------
-// ✅ intentBand / tLayerHint を userContext から抽出（MemoryState補完あり）
+// intentBand / tLayerHint を userContext から抽出
 // -------------------------------
 function extractIntentBandFromContext(userContext: unknown): {
   intentBand: string | null;
@@ -522,7 +500,6 @@ function extractIntentBandFromContext(userContext: unknown): {
         '',
     ) || null;
 
-  // ✅ tLayerHint が無いときは itxStep(T1/T2/T3) を補完として使う
   const tLayerHintRaw =
     norm(
       tryGet(uc, ['tLayerHint']) ??
@@ -556,15 +533,13 @@ function extractIntentBandFromContext(userContext: unknown): {
   const tLayerHint = tLayerHintRaw || (itxStep ? itxStep : null);
 
   const bandOk = intentBand && /^[SRICT][123]$/u.test(intentBand) ? intentBand : null;
-  // ✅ tLayerHint は T1/T2/T3 も許可
   const hintOk = tLayerHint && /^(?:[SRICT][123]|T[123])$/u.test(tLayerHint) ? tLayerHint : null;
 
   return { intentBand: bandOk, tLayerHint: hintOk };
 }
+
 // -------------------------------
-// ✅ shouldRaiseFlag（POSITION_DRIFT / STALL 等の“介入要求”）を userContext から読む
-// - 上位（orchestrator/quality）で立った「介入してほしい」フラグを writer 側で確実に拾う
-// - reason は flagReason（単数）よりも flagReasons（配列）を優先して拾う
+// shouldRaiseFlag（POSITION_DRIFT / STALL 等）を userContext から読む
 // -------------------------------
 function readShouldRaiseFlagFromContext(
   userContext: unknown,
@@ -572,52 +547,48 @@ function readShouldRaiseFlagFromContext(
   if (!userContext || typeof userContext !== 'object') return { on: false, reason: null };
   const uc: any = userContext as any;
 
-  // ✅ on: よく入る経路を“深めに”拾う
   const on =
     (Boolean(
       tryGet(uc, ['shouldRaiseFlag']) ??
         tryGet(uc, ['meta', 'shouldRaiseFlag']) ??
-        tryGet(uc, ['meta', 'extra', 'shouldRaiseFlag']) ?? // ✅ 追加（ここが多い）
+        tryGet(uc, ['meta', 'extra', 'shouldRaiseFlag']) ??
         tryGet(uc, ['extra', 'shouldRaiseFlag']) ??
         tryGet(uc, ['ctxPack', 'shouldRaiseFlag']) ??
-        tryGet(uc, ['ctxPack', 'meta', 'extra', 'shouldRaiseFlag']) ?? // ✅ 追加
+        tryGet(uc, ['ctxPack', 'meta', 'extra', 'shouldRaiseFlag']) ??
         tryGet(uc, ['ctx_pack', 'shouldRaiseFlag']) ??
-        tryGet(uc, ['ctx_pack', 'meta', 'extra', 'shouldRaiseFlag']) ?? // ✅ 追加
+        tryGet(uc, ['ctx_pack', 'meta', 'extra', 'shouldRaiseFlag']) ??
         tryGet(uc, ['memoryState', 'shouldRaiseFlag']) ??
         tryGet(uc, ['orchestratorState', 'shouldRaiseFlag']) ??
         false,
     ) === true);
 
-  // ✅ reasons: まず配列(flagReasons)を拾う → 先頭を reason にする
   const reasonsRaw =
     (tryGet(uc, ['flagReasons']) ??
       tryGet(uc, ['flag_reasons']) ??
       tryGet(uc, ['meta', 'flagReasons']) ??
       tryGet(uc, ['meta', 'flag_reasons']) ??
-      tryGet(uc, ['meta', 'extra', 'flagReasons']) ?? // ✅ 追加
-      tryGet(uc, ['meta', 'extra', 'flag_reasons']) ?? // ✅ 追加
+      tryGet(uc, ['meta', 'extra', 'flagReasons']) ??
+      tryGet(uc, ['meta', 'extra', 'flag_reasons']) ??
       tryGet(uc, ['extra', 'flagReasons']) ??
       tryGet(uc, ['extra', 'flag_reasons']) ??
       tryGet(uc, ['ctxPack', 'flagReasons']) ??
       tryGet(uc, ['ctxPack', 'flag_reasons']) ??
-      tryGet(uc, ['ctxPack', 'meta', 'extra', 'flagReasons']) ?? // ✅ 追加
-      tryGet(uc, ['ctxPack', 'meta', 'extra', 'flag_reasons']) ?? // ✅ 追加
+      tryGet(uc, ['ctxPack', 'meta', 'extra', 'flagReasons']) ??
+      tryGet(uc, ['ctxPack', 'meta', 'extra', 'flag_reasons']) ??
       tryGet(uc, ['ctx_pack', 'flagReasons']) ??
       tryGet(uc, ['ctx_pack', 'flag_reasons']) ??
-      tryGet(uc, ['ctx_pack', 'meta', 'extra', 'flagReasons']) ?? // ✅ 追加
-      tryGet(uc, ['ctx_pack', 'meta', 'extra', 'flag_reasons']) ?? // ✅ 追加
+      tryGet(uc, ['ctx_pack', 'meta', 'extra', 'flagReasons']) ??
+      tryGet(uc, ['ctx_pack', 'meta', 'extra', 'flag_reasons']) ??
       null) as any;
 
   let reasonFromArray: string | null = null;
   if (Array.isArray(reasonsRaw) && reasonsRaw.length > 0) {
     reasonFromArray = norm(String(reasonsRaw[0] ?? '')) || null;
   } else if (typeof reasonsRaw === 'string') {
-    // たまに "STALL,SAFETY_OK" みたいに文字列で来るケース
     const first = reasonsRaw.split(/[,\s|]+/).filter(Boolean)[0];
     reasonFromArray = norm(String(first ?? '')) || null;
   }
 
-  // ✅ 単数理由も保険で拾う（配列が無ければこっち）
   const reasonSingle =
     norm(
       String(
@@ -625,18 +596,18 @@ function readShouldRaiseFlagFromContext(
           tryGet(uc, ['flag_reason']) ??
           tryGet(uc, ['meta', 'flagReason']) ??
           tryGet(uc, ['meta', 'flag_reason']) ??
-          tryGet(uc, ['meta', 'extra', 'flagReason']) ?? // ✅ 追加
-          tryGet(uc, ['meta', 'extra', 'flag_reason']) ?? // ✅ 追加
+          tryGet(uc, ['meta', 'extra', 'flagReason']) ??
+          tryGet(uc, ['meta', 'extra', 'flag_reason']) ??
           tryGet(uc, ['extra', 'flagReason']) ??
           tryGet(uc, ['extra', 'flag_reason']) ??
           tryGet(uc, ['ctxPack', 'flagReason']) ??
           tryGet(uc, ['ctxPack', 'flag_reason']) ??
-          tryGet(uc, ['ctxPack', 'meta', 'extra', 'flagReason']) ?? // ✅ 追加
-          tryGet(uc, ['ctxPack', 'meta', 'extra', 'flag_reason']) ?? // ✅ 追加
+          tryGet(uc, ['ctxPack', 'meta', 'extra', 'flagReason']) ??
+          tryGet(uc, ['ctxPack', 'meta', 'extra', 'flag_reason']) ??
           tryGet(uc, ['ctx_pack', 'flagReason']) ??
           tryGet(uc, ['ctx_pack', 'flag_reason']) ??
-          tryGet(uc, ['ctx_pack', 'meta', 'extra', 'flagReason']) ?? // ✅ 追加
-          tryGet(uc, ['ctx_pack', 'meta', 'extra', 'flag_reason']) ?? // ✅ 追加
+          tryGet(uc, ['ctx_pack', 'meta', 'extra', 'flagReason']) ??
+          tryGet(uc, ['ctx_pack', 'meta', 'extra', 'flag_reason']) ??
           '',
       ),
     ) || null;
@@ -647,7 +618,7 @@ function readShouldRaiseFlagFromContext(
 }
 
 // ---------------------------------------------
-// meta / inputKind
+// inputKind
 // ---------------------------------------------
 function extractInputKindFromMetaText(metaText: string): string | null {
   const t = String(metaText ?? '');
@@ -691,32 +662,23 @@ function adaptSeedDraftHintForWriter(seedDraft: string, directTask: boolean): st
 
   let out = s;
 
-  // ※ seedDraft に find_trigger_point の痕跡が混ざる場合の保険
+  // seedDraft に find_trigger_point の痕跡が混ざる場合の保険
   if (/find_trigger_point/i.test(out)) {
-    out = out.replace(/.*find_trigger_point.*(\n|$)/gi, '');
-    out = out.trim();
+    out = out.replace(/.*find_trigger_point.*(\n|$)/gi, '').trim();
     const hint = directTask
       ? '（内部ヒント：ユーザーは「具体的なコツ/手順」を求めている。最初に使える具体策を短く出す）'
       : '（内部ヒント：ユーザーが求めている一点を「軸」として置く）';
     return [hint, out].filter(Boolean).join('\n');
   }
 
-  if (directTask) {
-    return ['（内部ヒント：具体策を先に。一般論は足さない）', out].join('\n');
-  }
-
+  if (directTask) return ['（内部ヒント：具体策を先に。一般論は足さない）', out].join('\n');
   return out;
 }
 
 // -------------------------------
-// ✅ logs
+// logs
 // -------------------------------
-function logRephraseOk(
-  debug: DebugFinal | null | undefined,
-  outKeys: string[],
-  raw: string,
-  mode?: string,
-) {
+function logRephraseOk(debug: DebugFinal | null | undefined, outKeys: string[], raw: string, mode?: string) {
   console.log('[IROS/rephraseEngine][OK]', {
     traceId: debug?.traceId ?? null,
     conversationId: debug?.conversationId ?? null,
@@ -746,7 +708,7 @@ function logRephraseAfterAttach(
 }
 
 // -------------------------------
-// ✅ system prompt（伸びしろ設計 / “禁止で縛る”ではなく“方向づけ”）
+// system prompt（方向づけ / 露出禁止）
 // -------------------------------
 function systemPromptForFullReply(args?: {
   directTask?: boolean;
@@ -809,7 +771,7 @@ function systemPromptForFullReply(args?: {
         '- 終端記号（🪔など）は出さない（上位レンダーが付ける）。',
       ].join('\n');
 
-  // ✅ 旗印ガード：励まし定型/推測逃げを抑える（FATAL回避）
+  // ✅ 旗印ガード：励まし定型/推測逃げを抑える
   const flagshipHardNo = [
     '',
     '【禁止（旗印ガード）】',
@@ -897,7 +859,7 @@ function buildInternalPackText(args: {
 }
 
 // ---------------------------------------------
-// ✅ FINAL用：slotを保ったまま “会話本文” を作る
+// FINAL用：slotを保ったまま “会話本文” を作る
 // ---------------------------------------------
 export async function rephraseSlotsFinal(
   extracted: ExtractedSlots,
@@ -908,16 +870,11 @@ export async function rephraseSlotsFinal(
 
   if (!extracted) {
     logRephraseOk(debug, [], '', 'NO_SLOTS');
-    return {
-      ok: false,
-      reason: 'NO_SLOTS',
-      meta: { inKeys: [], rawLen: 0, rawHead: '' },
-    };
+    return { ok: false, reason: 'NO_SLOTS', meta: { inKeys: [], rawLen: 0, rawHead: '' } };
   }
 
-  const rawFlag = process.env.IROS_REPHRASE_FINAL_ENABLED;
-  const enabled = envFlagEnabled(rawFlag, true);
-  console.log('[IROS/REPHRASE_FLAG]', { raw: rawFlag, enabled });
+  const enabled = envFlagEnabled(process.env.IROS_REPHRASE_FINAL_ENABLED, true);
+  console.log('[IROS/REPHRASE_FLAG]', { raw: process.env.IROS_REPHRASE_FINAL_ENABLED, enabled });
 
   if (!enabled) {
     logRephraseOk(debug, extracted.keys, '', 'DISABLED');
@@ -928,9 +885,7 @@ export async function rephraseSlotsFinal(
     };
   }
 
-  const mode = String(process.env.IROS_REPHRASE_FINAL_MODE ?? 'LLM')
-    .trim()
-    .toUpperCase();
+  const mode = String(process.env.IROS_REPHRASE_FINAL_MODE ?? 'LLM').trim().toUpperCase();
 
   const maxLines =
     Number(process.env.IROS_REPHRASE_FINAL_MAXLINES) > 0
@@ -953,12 +908,7 @@ export async function rephraseSlotsFinal(
     return {
       ok: true,
       slots: out,
-      meta: {
-        inKeys,
-        outKeys: out.map((x) => x.key),
-        rawLen: 0,
-        rawHead: '',
-      },
+      meta: { inKeys, outKeys: out.map((x) => x.key), rawLen: 0, rawHead: '' },
     };
   }
 
@@ -977,31 +927,29 @@ export async function rephraseSlotsFinal(
 
   // slot由来の下書き（露出禁止）
   const seedDraftRaw = extracted.slots.map((s) => s.text).filter(Boolean).join('\n');
-  // ✅ recall-guard の “必須文字列” を seedDraft から抽出して system に強制する
+
+  // recall-guard の “必須文字列” を seedDraft から抽出して system に強制する
   const recallMust = extractRecallMustIncludeFromSeed(seedDraftRaw);
   const mustIncludeRuleText = buildMustIncludeRuleText(recallMust);
 
-  // ✅ ILINE抽出（穴塞ぎ）
-  // - ロック対象は「slot由来 + userText」両方から拾う（将来 userText 側に ILINE が来ても守る）
-  // - ただし LLM に渡す “素材” は slot由来のみ（ユーザー入力を素材に混ぜると二重化しやすい）
+  // ILINE抽出：slot + userText 両方から拾う（将来 userText 側でも守る）
   const lockSourceRaw = [seedDraftRaw, userText].filter(Boolean).join('\n');
-
   const { locked: lockedFromAll } = extractLockedILines(lockSourceRaw);
+
+  // LLMに渡す素材は slot 由来のみ（重複/二重化防止）
   const { cleanedForModel: seedDraft } = extractLockedILines(seedDraftRaw);
 
-  // ✅ 重複除去（同一ILINEが両側にあっても1回扱い）
+  // 重複除去
   const lockedILines = Array.from(new Set(lockedFromAll));
 
-
-  // ✅ SHIFT(kind=find_trigger_point) を “読める内部ヒント” に変換（露出禁止）
+  // seedDraft の find_trigger_point を “読める内部ヒント” に変換（露出禁止）
   const seedDraftHint = adaptSeedDraftHintForWriter(seedDraft, isDirectTask);
 
-  // ✅ ITは条件が揃ってから（証拠があるときだけI文体を許可）
+  // ITは条件が揃ってから（証拠があるときだけ I 文体を許可）
   const itOk = readItOkFromContext(opts?.userContext ?? null);
   const band = extractIntentBandFromContext(opts?.userContext ?? null);
 
-  // ✅ lastTurns は「assistantで終わる」形に正規化する
-  // - 末尾userが残ると、最後に userText を足したとき user が二重になる
+  // lastTurns は「assistantで終わる」形に正規化（末尾userを落とす）
   const lastTurnsSafe = (() => {
     const t = Array.isArray(lastTurns) ? [...lastTurns] : [];
     while (t.length > 0 && t[t.length - 1]?.role === 'user') t.pop();
@@ -1012,16 +960,11 @@ export async function rephraseSlotsFinal(
     {
       role: 'system',
       content:
-        systemPromptForFullReply({
-          directTask: isDirectTask,
-          itOk,
-          band,
-          lockedILines,
-        }) + mustIncludeRuleText,
+        systemPromptForFullReply({ directTask: isDirectTask, itOk, band, lockedILines }) +
+        mustIncludeRuleText,
     },
 
-
-    // ✅ 内部パック（履歴要約やメタ）
+    // 内部パック（履歴要約/メタ）
     {
       role: 'system',
       content: buildInternalPackText({
@@ -1037,7 +980,7 @@ export async function rephraseSlotsFinal(
       }),
     },
 
-    // ✅ seedDraft は “素材” として system で渡す（露出禁止）
+    // seedDraft は素材として system で渡す（露出禁止）
     ...(seedDraft
       ? [
           {
@@ -1047,50 +990,41 @@ export async function rephraseSlotsFinal(
         ]
       : []),
 
-    // ★ 直近2往復（最大4メッセージ）
+    // 直近2往復（最大4メッセージ）
     ...(lastTurnsSafe as Array<{ role: 'user' | 'assistant'; content: string }>),
 
-    // ★ ユーザー入力は純度高く（メタを混ぜない）
-    {
-      role: 'user',
-      content: userText || '(空)',
-    },
+    // ユーザー入力は純度高く
+    { role: 'user', content: userText || '(空)' },
   ];
 
   console.log('[IROS/rephraseEngine][MSG_PACK]', {
     traceId: debug.traceId,
     conversationId: debug.conversationId,
     userCode: debug.userCode,
-
     lastTurns: lastTurnsSafe.length,
     hasHistoryText: Boolean(historyText),
     msgCount: messages.length,
     roles: messages.map((m) => m.role),
-
     msgHeads: messages.map((m, i) => ({
       i,
       role: m.role,
       len: String(m.content ?? '').length,
       head: safeHead(String(m.content ?? ''), 120),
     })),
-
     seedDraftLen: seedDraft.length,
     seedDraftHead: safeHead(seedDraft, 120),
-
     itOk,
     intentBand: band.intentBand,
     tLayerHint: band.tLayerHint,
     directTask: isDirectTask,
-
     inputKind,
     inputKindFromMeta,
     inputKindFromCtx,
-
     lockedILines: lockedILines.length,
   });
 
   // ---------------------------------------------
-  // ✅ LLM call
+  // LLM call
   // ---------------------------------------------
   let raw = '';
   try {
@@ -1101,19 +1035,24 @@ export async function rephraseSlotsFinal(
       max_tokens: 700,
       messages,
 
-      // ✅ traceId 統一
+      // ✅ chatComplete.ts 側の「旗印REWRITE（二重実行）」を止める
+      extraBody: { __flagship_pass: 1 },
+
+      // traceId 統一
       traceId: debug.traceId,
       conversationId: debug.conversationId,
       userCode: debug.userCode,
 
-      // compat payloads
-      trace: {
-        traceId: debug.traceId,
-        conversationId: debug.conversationId,
-        userCode: debug.userCode,
+      // compat
+      trace: { traceId: debug.traceId, conversationId: debug.conversationId, userCode: debug.userCode },
+      audit: {
+        slotPlanPolicy: 'FINAL',
+        mode: (debug as any)?.mode ?? null,
+        qCode: (debug as any)?.qCode ?? null,
+        depthStage: (debug as any)?.depthStage ?? null,
       },
-      audit: { slotPlanPolicy: 'FINAL' },
     } as any);
+
   } catch (e: any) {
     console.error('[IROS/REPHRASE_FINAL][LLM] failed', {
       traceId: debug.traceId,
@@ -1122,17 +1061,12 @@ export async function rephraseSlotsFinal(
       message: String(e?.message ?? e),
     });
     logRephraseOk(debug, extracted.keys, '', 'LLM_FAIL');
-    return {
-      ok: false,
-      reason: 'LLM_CALL_FAILED',
-      meta: { inKeys, rawLen: 0, rawHead: '' },
-    };
+    return { ok: false, reason: 'LLM_CALL_FAILED', meta: { inKeys, rawLen: 0, rawHead: '' } };
   }
 
-  // ✅ raw段階ログ
   logRephraseOk(debug, extracted.keys, raw, 'LLM');
 
-  // ✅ 出力に internal pack ラベル等が混入した場合は破棄（露出禁止）
+  // 内部ラベル等が混入したら破棄（露出禁止）
   if (containsForbiddenLeakText(raw)) {
     logRephraseOk(debug, extracted.keys, raw, 'INTERNAL_MARKER_LEAKED');
     return {
@@ -1142,9 +1076,8 @@ export async function rephraseSlotsFinal(
     };
   }
 
-  // ✅ ILINE改変禁止:検証（不一致なら破棄）
+  // ILINE改変禁止：検証
   const iLineOk = verifyLockedILinesPreserved(raw, lockedILines);
-
   console.log('[IROS/REPHRASE][VERIFY]', {
     traceId: debug.traceId,
     conversationId: debug.conversationId,
@@ -1161,9 +1094,7 @@ export async function rephraseSlotsFinal(
     };
   }
 
-  // ================================
-  // ✅ Recall-check hard guard (Phase11)
-  // ================================
+  // recall-guard hard（落ちたら破棄）
   {
     const recallCheck = recallGuardOk({
       slotKeys: inKeys,
@@ -1199,64 +1130,17 @@ export async function rephraseSlotsFinal(
     }
   }
 
-
-  // ✅ STABILIZE(OBS/SHIFT/NEXT)も救う：この3点セットは薄い逃げが出やすい
-  const isStabilizePack =
-    Array.isArray(inKeys) &&
-    inKeys.includes('OBS' as any) &&
-    inKeys.includes('SHIFT' as any) &&
-    inKeys.includes('NEXT' as any);
-
-  // ✅ WARNでも“薄い逃げ”なら採用しない（seedへ戻す）
-  // - flagReplyだけでなく、STABILIZEパックにも効かせる
-  const shouldRejectWarnToSeed = (verdict: any) => {
-    const level = String(verdict?.level ?? '').toUpperCase();
-    if (level !== 'WARN') return false;
-
-    const reasons = new Set((verdict?.reasons ?? []).map((x: any) => String(x)));
-
-    // flagReply向け（以前の意図を保持）
-    const isFlagReplyLike = Array.isArray(inKeys) && inKeys.every((k: any) => String(k).startsWith('FLAG_'));
-    if (isFlagReplyLike) {
-      return (
-        reasons.has('HEDGE_MANY') ||
-        reasons.has('HEDGE_PRESENT') ||
-        reasons.has('GENERIC_PRESENT') ||
-        reasons.has('GENERIC_MANY')
-      );
-    }
-
-    // STABILIZE向け（今回ここが刺さる）
-    if (isStabilizePack) {
-      // 「汎用化 + ぼかし」セットは即seedに戻す
-      const genericBad = reasons.has('GENERIC_MANY') || reasons.has('GENERIC_PRESENT');
-      const hedgeBad = reasons.has('HEDGE_PRESENT') || reasons.has('HEDGE_MANY');
-      const cheerBad = reasons.has('CHEER_PRESENT');
-      return genericBad && (hedgeBad || cheerBad);
-    }
-
-    return false;
-  };
-
-
-  // ================================
-  // ✅ Flagship Guard（採用ゲート）
-  // - 対象は採用本文（clampLines → finalizeLamp後）
-  // - FATAL なら 1回だけ再生成
-  // - 再生成も FATAL なら「最小安全文」を採用（巻き戻らない）
-  // ================================
+  // ---------------------------------------------
+  // Flagship Guard（採用ゲート）
+  // ---------------------------------------------
   const guardEnabled = envFlagEnabled(process.env.IROS_FLAGSHIP_GUARD_ENABLED, true);
-
   const renderEngine = Boolean(debug.renderEngine ?? true);
+
   const candidate = finalizeLamp(clampLines(raw, maxLines), renderEngine);
 
   if (!candidate) {
     logRephraseOk(debug, extracted.keys, '', 'LLM_EMPTY_AFTER_CLAMP');
-    return {
-      ok: false,
-      reason: 'LLM_EMPTY',
-      meta: { inKeys, rawLen: 0, rawHead: '' },
-    };
+    return { ok: false, reason: 'LLM_EMPTY', meta: { inKeys, rawLen: 0, rawHead: '' } };
   }
 
   if (containsForbiddenLeakText(candidate)) {
@@ -1268,14 +1152,51 @@ export async function rephraseSlotsFinal(
     };
   }
 
-  // ✅ 最終採用（candidate / retryCandidate）の verdict を meta.extra に運ぶための保持箱
+  // seed（slot由来）へ戻すための準備
+  const seedFromSlotsRaw = (extracted?.slots ?? [])
+    .map((s: any) => String(s?.text ?? ''))
+    .filter((s: string) => s.trim())
+    .join('\n');
+  const seedFromSlots = seedFromSlotsRaw
+    ? finalizeLamp(clampLines(seedFromSlotsRaw, maxLines), renderEngine)
+    : '';
+
+  // WARN薄逃げを seed へ戻す（FLAG_* と STABILIZE pack だけ厳しめ）
+  const isFlagReplyLike = Array.isArray(inKeys) && inKeys.every((k) => String(k).startsWith('FLAG_'));
+  const isStabilizePack =
+    Array.isArray(inKeys) && inKeys.includes('OBS') && inKeys.includes('SHIFT') && inKeys.includes('NEXT');
+
+  const shouldRejectWarnToSeed = (verdict: any) => {
+    const level = String(verdict?.level ?? '').toUpperCase();
+    if (level !== 'WARN') return false;
+
+    const reasons = new Set((verdict?.reasons ?? []).map((x: any) => String(x)));
+
+    if (isFlagReplyLike) {
+      return (
+        reasons.has('HEDGE_MANY') ||
+        reasons.has('HEDGE_PRESENT') ||
+        reasons.has('GENERIC_PRESENT') ||
+        reasons.has('GENERIC_MANY')
+      );
+    }
+
+    if (isStabilizePack) {
+      const genericBad = reasons.has('GENERIC_MANY') || reasons.has('GENERIC_PRESENT');
+      const hedgeBad = reasons.has('HEDGE_PRESENT') || reasons.has('HEDGE_MANY');
+      const cheerBad = reasons.has('CHEER_PRESENT');
+      return genericBad && (hedgeBad || cheerBad);
+    }
+
+    return false;
+  };
+
+  // verdict 保持（meta.extra に運ぶ）
   let lastFlagshipVerdict: any = null;
   let lastFlagshipHead: string | null = null;
 
   const runFlagship = (text: string) => {
     const v = flagshipGuard(text);
-
-    // ✅ “最後に判定したverdict” を保持（採用経路がどれでも meta.extra に積める）
     lastFlagshipVerdict = {
       level: v.level,
       ok: v.ok,
@@ -1302,32 +1223,23 @@ export async function rephraseSlotsFinal(
   const adoptAsSlots = (text: string, note?: string): RephraseResult => {
     const outSlots = buildSlotsWithFirstText(inKeys, text);
 
-    // ✅ 入力側（opts.userContext）由来の raise は “true のときだけ” 付ける（falseは書かない）
     const raiseIn = readShouldRaiseFlagFromContext(opts?.userContext ?? null);
 
-    // ✅ meta.extra は「空でも作らない」。ただし flagshipVerdict は “out” として常に載せる
-    //   → 手順4（次ターン運搬）の核
     const extra: any = {};
 
-    // (A) raiseIn（入力側）: true のときだけ載せる（ノイズ禁止）
+    // 入力側 raise は true のときだけ
     if (raiseIn.on === true) {
       extra.shouldRaiseFlag = true;
       extra.flagReasons = raiseIn.reason ? [raiseIn.reason] : [];
     }
 
-    // (B) flagshipVerdict（出力側）: 常に載せる（out の証跡）
-    // runFlagship() が保持しているならそれを使う。無い場合は最低限だけ詰める。
-    if (typeof lastFlagshipVerdict !== 'undefined' && lastFlagshipVerdict) {
+    // 出力側 verdict は常に載せる
+    if (lastFlagshipVerdict) {
       extra.flagshipVerdict = lastFlagshipVerdict;
-      if (typeof lastFlagshipHead !== 'undefined' && lastFlagshipHead) {
-        extra.flagshipHead = lastFlagshipHead;
-      }
+      if (lastFlagshipHead) extra.flagshipHead = lastFlagshipHead;
     } else {
-      // 保険：保持箱が無い構成でも out が null にならないようにする
       extra.flagshipVerdict = { level: null, ok: null, reasons: [] as string[], score: null };
     }
-
-    const hasExtra = Object.keys(extra).length > 0;
 
     logRephraseAfterAttach(debug, inKeys, outSlots[0]?.text ?? '', note ?? 'LLM');
 
@@ -1337,94 +1249,73 @@ export async function rephraseSlotsFinal(
       meta: {
         inKeys,
         outKeys: outSlots.map((x) => x.key),
-
-        // ✅ 採用本文（text）を raw として扱う（採用同期）
         rawLen: String(text ?? '').length,
         rawHead: safeHead(String(text ?? ''), 80),
-
         note,
-        ...(hasExtra ? ({ extra } as any) : {}),
-      } as any,
+        extra,
+      },
     };
   };
 
-
-  // ✅ slotPlan由来の seed（= LLMが薄く逃げたときに戻る場所）
-  const seedFromSlotsRaw = (extracted?.slots ?? [])
-    .map((s: any) => String(s?.text ?? ''))
-    .filter((s: string) => s.trim())
-    .join('\n');
-  const seedFromSlots = seedFromSlotsRaw
-    ? finalizeLamp(clampLines(seedFromSlotsRaw, maxLines), renderEngine)
-    : '';
-
-  // ✅ flagReply系（FLAG_*）のときだけ、WARNでも薄い逃げは採用しない
-  const isFlagReplyLike = inKeys.every((k) => String(k).startsWith('FLAG_'));
-  const shouldRejectWarn = (verdict: any) => {
-    if (!isFlagReplyLike) return false;
-    const level = String(verdict?.level ?? '').toUpperCase();
-    if (level !== 'WARN') return false;
-
-    const reasons = new Set((verdict?.reasons ?? []).map((x: any) => String(x)));
-    return reasons.has('HEDGE_MANY') || reasons.has('GENERIC_PRESENT');
-  };
-
   if (!guardEnabled) {
-    return adoptAsSlots(candidate);
+    return adoptAsSlots(candidate, 'FLAGSHIP_DISABLED');
   }
 
-// ✅ 置き換え範囲：
-// rephraseSlotsFinal 内の「v = runFlagship(candidate) の直後〜 最後の return adoptAsSlots(candidate); まで」を
-// まるごとこのブロックに置き換えてください。
-// ※前提：このスコープで seedFromSlots / lockedILines / extracted / inKeys / messages / maxLines / renderEngine / opts / debug が生きていること
-// ※重要：v を上書きするので `const v = ...` ではなく `let v = ...` にしてください。
+  // ------------------------
+  // 採用判定
+  // ------------------------
+  let v = runFlagship(candidate);
 
-let v = runFlagship(candidate);
+  // ✅ 上位からの“介入要求”が立っているなら、OKでも握り潰さない
+  const raise = readShouldRaiseFlagFromContext(opts?.userContext ?? null);
+  const forceIntervene = raise.on === true;
 
-// ================================
-// ✅ 上位からの“介入要求”が立っているなら、OKでも強制で介入
-// - STALL / POSITION_DRIFT のような「体験が崩れている」サインは writer 側で握り潰さない
-// ================================
-const raise = readShouldRaiseFlagFromContext(opts?.userContext ?? null);
-const forceIntervene = raise.on === true;
-
-if (forceIntervene) {
-  console.warn('[IROS/FLAGSHIP][FORCE_INTERVENE]', {
-    traceId: debug.traceId,
-    conversationId: debug.conversationId,
-    userCode: debug.userCode,
-    reason: raise.reason,
-    verdictLevel: v.level,
-    verdictReasons: v.reasons,
-    head: safeHead(candidate, 160),
-  });
-
-  // ✅ 介入の種類で分岐：
-  // - STALL / POSITION_DRIFT は「RETRYで喋らせ直す」より、seed（構造側の下書き）へ即戻しが最短
-  const reasonText = String(raise.reason ?? '');
-  const isStallOrDrift = /STALL|POSITION_DRIFT/i.test(reasonText);
-
-  if (isStallOrDrift) {
-    console.warn('[IROS/FLAGSHIP][RAISE_TO_SEED]', {
+  if (forceIntervene) {
+    console.warn('[IROS/FLAGSHIP][FORCE_INTERVENE]', {
       traceId: debug.traceId,
       conversationId: debug.conversationId,
       userCode: debug.userCode,
       reason: raise.reason,
+      verdictLevel: v.level,
+      verdictReasons: v.reasons,
+      head: safeHead(candidate, 160),
     });
-    return adoptAsSlots(seedFromSlots, 'FLAGSHIP_RAISE_TO_SEED');
+
+    const reasonText = String(raise.reason ?? '');
+    const isStallOrDrift = /STALL|POSITION_DRIFT/i.test(reasonText);
+
+    // STALL/DRIFT は retry より seed へ戻す方が “構造で直る”
+    if (isStallOrDrift && seedFromSlots) {
+      return adoptAsSlots(seedFromSlots, 'FLAGSHIP_RAISE_TO_SEED');
+    }
+
+    // それ以外は従来通り FATAL として retry に入れる
+    v = {
+      ...v,
+      ok: false,
+      level: 'FATAL',
+      reasons: Array.from(new Set([...(v.reasons ?? []), 'FORCE_INTERVENE'])),
+    } as any;
   }
 
-  // ✅ それ以外（安全/倫理/品質の崩れ）は従来通り「RETRY/FALLBACK」へ入れる
-  v = {
-    ...v,
-    ok: false,
-    level: 'FATAL',
-    reasons: Array.from(new Set([...(v.reasons ?? []), 'FORCE_INTERVENE'])),
-  } as any;
-}
+  // WARN薄逃げ → seedへ戻す（対象だけ）
+  if (v && String(v.level ?? '').toUpperCase() === 'WARN' && shouldRejectWarnToSeed(v) && seedFromSlots) {
+    console.warn('[IROS/FLAGSHIP][REJECT_WARN_TO_SEED]', {
+      traceId: debug.traceId,
+      conversationId: debug.conversationId,
+      userCode: debug.userCode,
+      level: v.level,
+      reasons: v.reasons,
+    });
+    return adoptAsSlots(seedFromSlots, 'FLAGSHIP_WARN_REJECT_TO_SEED');
+  }
 
-// 2) FATAL のときだけ 1回だけ再生成（OKならここには入らない）
-if (!v.ok) {
+  // OKなら採用
+  if (v?.ok) return adoptAsSlots(candidate, 'FLAGSHIP_OK');
+
+  // ------------------------
+  // FATAL → 1回だけ再生成
+  // ------------------------
   let raw2 = '';
 
   const retryMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
@@ -1435,11 +1326,11 @@ if (!v.ok) {
         '【再生成（旗印）】\n' +
         '- 目的：読み手が“自分で答えを出せる場所”を作る。\n' +
         '- やること：視点/角度/切り分け/輪郭を1段だけ提示し、読者の足場を作る。\n' +
-        '- 必須：入力（userText / lastTurns / historyText / seedDraft）に含まれる具体語を最低1つ、本文に自然に入れる（固有名詞/場所/条件/役割など）。\n' +
+        '- 必須：入力（userText / lastTurns / historyText / seedDraft）に含まれる具体語を最低1つ、本文に自然に入れる。\n' +
         '- 禁止：汎用応援（大丈夫/応援/きっと/焦らなくていい/少しずつ 等）、ぼかし（かもしれません/と思います 連発）、箇条書き。\n' +
-        '- 禁止：入力に無い背景を“共鳴で補完”しない（推測で物語を足さない）。\n' +
+        '- 禁止：入力に無い背景を推測で足さない。\n' +
         '- 質問：0〜1個まで（できれば0）。\n' +
-        '- 行数：directTaskのルールに従う（directTask=FALSEなら4〜10行）。\n' +
+        '- 行数：directTaskのルールに従う。\n' +
         '- 会話文のみ。内部情報は出さない。',
     },
   ];
@@ -1448,7 +1339,7 @@ if (!v.ok) {
     traceId: debug.traceId,
     conversationId: debug.conversationId,
     userCode: debug.userCode,
-    reason: v.reasons,
+    reason: v?.reasons,
   });
 
   try {
@@ -1462,12 +1353,14 @@ if (!v.ok) {
       traceId: debug.traceId,
       conversationId: debug.conversationId,
       userCode: debug.userCode,
-      trace: {
-        traceId: debug.traceId,
-        conversationId: debug.conversationId,
-        userCode: debug.userCode,
+      trace: { traceId: debug.traceId, conversationId: debug.conversationId, userCode: debug.userCode },
+      audit: {
+        slotPlanPolicy: 'FINAL',
+        mode: (debug as any)?.mode ?? null,
+        qCode: (debug as any)?.qCode ?? null,
+        depthStage: (debug as any)?.depthStage ?? null,
+        note: 'FLAGSHIP_RETRY',
       },
-      audit: { slotPlanPolicy: 'FINAL', note: 'FLAGSHIP_RETRY' },
     } as any);
   } catch (e: any) {
     console.error('[IROS/FLAGSHIP][RETRY] failed', {
@@ -1479,10 +1372,9 @@ if (!v.ok) {
     raw2 = '';
   }
 
-  // ---- retry 後の各種ガード ----
+  // retry の各種ガード
   if (raw2 && containsForbiddenLeakText(raw2)) raw2 = '';
   if (raw2 && !verifyLockedILinesPreserved(raw2, lockedILines)) raw2 = '';
-
   if (raw2) {
     const recall2 = recallGuardOk({
       slotKeys: inKeys,
@@ -1494,12 +1386,11 @@ if (!v.ok) {
 
   if (raw2) {
     const retryCandidate = finalizeLamp(clampLines(raw2, maxLines), renderEngine);
-
     if (retryCandidate && !containsForbiddenLeakText(retryCandidate)) {
       const v2 = runFlagship(retryCandidate);
 
-      // ✅ retry も WARN薄逃げなら seed に戻す（flagReplyだけ）
-      if (shouldRejectWarn(v2) && seedFromSlots) {
+      // retry でも WARN薄逃げ → seedへ
+      if (v2 && String(v2.level ?? '').toUpperCase() === 'WARN' && shouldRejectWarnToSeed(v2) && seedFromSlots) {
         console.warn('[IROS/FLAGSHIP][REJECT_WARN_TO_SEED][RETRY]', {
           traceId: debug.traceId,
           conversationId: debug.conversationId,
@@ -1510,15 +1401,13 @@ if (!v.ok) {
         return adoptAsSlots(seedFromSlots, 'FLAGSHIP_WARN_REJECT_TO_SEED_RETRY');
       }
 
-      if (v2.ok) {
-        return adoptAsSlots(retryCandidate, 'FLAGSHIP_RETRY_ADOPTED');
-      }
+      if (v2?.ok) return adoptAsSlots(retryCandidate, 'FLAGSHIP_RETRY_ADOPTED');
     }
   }
 
-  // ================================
-  // ✅ FALLBACK（巻き戻らず、最小の“旗印”安全文を採用）
-  // ================================
+  // ------------------------
+  // FALLBACK（最小の“旗印”安全文）
+  // ------------------------
   const userTextRaw = String(opts?.userText ?? '').trim();
   const userHead = userTextRaw ? safeHead(userTextRaw, 56) : '';
 
@@ -1541,15 +1430,11 @@ if (!v.ok) {
     traceId: debug.traceId,
     conversationId: debug.conversationId,
     userCode: debug.userCode,
-    reasons: v.reasons,
+    reasons: v?.reasons,
     outHead: safeHead(cleanedFallback, 120),
   });
 
   return adoptAsSlots(cleanedFallback, 'FLAGSHIP_FALLBACK_ADOPTED');
-}
-
-// ✅ OK → そのまま採用
-return adoptAsSlots(candidate);
 }
 
 /**
