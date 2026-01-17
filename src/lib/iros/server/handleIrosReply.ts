@@ -254,7 +254,43 @@ async function loadConversationHistory(
 
 /**
  * ✅ this turn の history を 1回だけ組み立てる（この関数の返り値を全段に渡す）
+ * - 返す前に sanitize して [object Object] 混入を根絶する
  */
+function sanitizeHistoryForTurn(history: unknown[], maxTotal: number): unknown[] {
+  if (!Array.isArray(history) || history.length === 0) return [];
+
+  const out: any[] = [];
+
+  for (const m of history) {
+    if (m == null || typeof m !== 'object') continue;
+
+    const roleRaw = (m as any)?.role;
+    const role = typeof roleRaw === 'string' ? roleRaw.toLowerCase().trim() : '';
+
+    // role が壊れてる行は落とす（orchestrator 側の filter を安定させる）
+    if (!role || (role !== 'user' && role !== 'assistant' && role !== 'system')) continue;
+
+    const v = (m as any)?.text ?? (m as any)?.content ?? null;
+
+    // ✅ 文字列以外は絶対に stringify しない（[object Object] を作らない）
+    if (typeof v !== 'string') continue;
+
+    const text = v.trim();
+    if (!text) continue;
+
+    // text を正に統一（content が object の可能性を潰す）
+    const mm: any = { ...(m as any), role, text };
+
+    // content が残っていても良いが、誤混入を防ぐなら消す
+    if (typeof mm.content !== 'string') delete mm.content;
+
+    out.push(mm);
+    if (out.length >= maxTotal) break;
+  }
+
+  return out;
+}
+
 async function buildHistoryForTurn(args: {
   supabaseClient: any;
   conversationId: string;
@@ -284,12 +320,31 @@ async function buildHistoryForTurn(args: {
   // 2) cross-conversation
   if (includeCrossConversation) {
     try {
-      const dbHistory = await loadRecentHistoryAcrossConversations({
-        supabase: supabaseClient,
-        userCode,
-        limit: crossLimit,
-        excludeConversationId: conversationId,
-      });
+// ✅ Phase1: 同一conversation の直近を “まず流す”
+// - 旧設計では excludeConversationId を渡して同一conversationを除外していた
+// - いまは「会話が成立すること」が最優先なので、まず除外しない
+// - 汚染対策（crossConvUserOnly / silence / hidden / banned assistant）は HistoryX 側で維持される
+const dbHistory = await loadRecentHistoryAcrossConversations({
+  supabase: supabaseClient,
+  userCode,
+
+  // cross-conv 全体の取得上限（historyX側で same/cross に切り分けて絞る）
+  limit: 120,
+
+  // ✅ これが “sameConvId” のキーになる（無いと same は作れない）
+  excludeConversationId: conversationId,
+
+  // ✅ Phase1: 同一conversationを混ぜる
+  includeSameConversation: true,
+
+  // ✅ Phase1: 同一conversationの直近
+  sameConversationLimit: 8,
+
+  // ✅ Phase1: cross-conv は補助
+  crossConversationLimit: 60,
+});
+
+
 
       turnHistory = mergeHistoryForTurn({
         dbHistory,
@@ -306,6 +361,9 @@ async function buildHistoryForTurn(args: {
       console.warn('[IROS][HistoryX] merge failed', e);
     }
   }
+
+  // ✅ 最後に sanitize（ここが本修正）
+  turnHistory = sanitizeHistoryForTurn(turnHistory, maxTotal);
 
   return turnHistory;
 }
@@ -1043,21 +1101,32 @@ export async function handleIrosReply(
       authorizationHeader,
     });
 
-    if (gatedGreeting) {
-      // ✅ ok: true のときだけ metaForSave を触る（union を正しく絞る）
-      if (gatedGreeting.ok) {
-        gatedGreeting.metaForSave = stampSingleWriter(
-          mergeExtra(gatedGreeting.metaForSave ?? {}, extra ?? null),
-        );
+if (gatedGreeting) {
+  // gatedGreeting: { ok: boolean; result: string | null; metaForSave?: any } 前提
 
-        // ついでに result.meta も揃えておく（UI/後段参照のブレ防止）
-        if (gatedGreeting.result && typeof gatedGreeting.result === 'object') {
-          (gatedGreeting.result as any).meta = gatedGreeting.metaForSave;
-        }
-      }
+  if (gatedGreeting.ok) {
+    const metaForSave = stampSingleWriter(
+      mergeExtra(gatedGreeting.metaForSave ?? {}, extra ?? null),
+    );
 
-      return gatedGreeting;
-    }
+    return {
+      ok: true,
+      result: {
+        text: gatedGreeting.result ?? '',
+        meta: metaForSave,
+      },
+      assistantText: gatedGreeting.result ?? '',
+      finalMode: 'NORMAL',
+      metaForSave,
+    };
+
+  }
+
+  // ok=false の場合は「ゲート不成立」扱いで通常フローに戻す
+}
+
+
+
 
     const bypassMicro = shouldBypassMicroGate(text);
 

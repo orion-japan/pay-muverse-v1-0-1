@@ -4,12 +4,12 @@
 // 目的：
 // - counsel（相談）を「進行段階 stage」で前へ進める
 // - 相談 → 共感 → 質問 → 共感 → 質問… のループを構造で遮断する
-// - 3軸（S/R/I）や intent_anchor は “判断” ではなく “語り” の入力として受け取る（表現層で使う）
+// - ただし “箱テンプレ / A/B/C / 口癖テンプレ” を出さず、通常会話（GPTっぽい）で進める
 //
-// 設計ルール（レポート準拠）
+// 設計ルール（更新）
 // - stage: OPEN → CLARIFY → OPTIONS → NEXT
-// - 1 stage は最大2ターン（stage遷移ガードは orchestrator 側）
-// - OPEN/CLARIFY は「質問記号（? / ？）」を使わない（質問は OPTIONS まで禁止）
+// - OPEN/CLARIFY は「? / ？」を使わない（質問記号は禁止）
+// - 質問は最大1つ（出す場合は OPTIONS でのみ）
 // - slotPlanPolicy は常に FINAL
 //
 // このファイルは「話し方（slot配置）」のみ。
@@ -39,30 +39,58 @@ export type CounselSlotPlan = {
 // ---- helpers ----
 
 function norm(s: unknown) {
-  return String(s ?? '').replace(/\s+/g, ' ').trim();
+  return String(s ?? '').replace(/\r\n/g, '\n').trim();
 }
 
 function clamp(s: string, n: number) {
-  if (s.length <= n) return s;
-  return s.slice(0, Math.max(0, n - 1)) + '…';
+  const t = norm(s);
+  if (t.length <= n) return t;
+  return t.slice(0, Math.max(0, n - 1)) + '…';
 }
 
 // OPEN/CLARIFY で「？」を出さない（禁止を破ると stage 設計が崩れる）
 function noQM(s: string) {
-  return s.replace(/[？\?]/g, '');
+  return norm(s).replace(/[？\?]/g, '');
 }
 
-function softAnchorLine(args: {
-  intentLocked: boolean;
-  intentAnchorKey?: string | null;
-}) {
+function isShortOrThin(t: string) {
+  const s = norm(t);
+  if (!s) return true;
+  if (s.length <= 8) return true;
+  return /^(うん|はい|そう|なるほど|わかった|OK|了解|たしかに|えー|まじ)+[。！？!?…]*$/.test(s);
+}
+
+function looksLikeQuestion(t: string) {
+  const s = norm(t);
+  if (!s) return false;
+  return /[？?]/.test(s) || /(どう(すれば|したら)|なぜ|なんで|何が|何を|どこ|いつ|どれ)/.test(s);
+}
+
+function softAnchorLine(args: { intentLocked: boolean; intentAnchorKey?: string | null }) {
   if (!args.intentLocked) return null;
   const k = norm(args.intentAnchorKey);
-  if (!k) return '芯は保持する。';
-  return `芯（${k}）に戻りながら進める。`;
+  if (!k) return '芯は保持して進める。';
+  return `芯（${clamp(k, 10)}）は保ったまま進める。`;
+}
+
+function topicLine(topic?: string | null) {
+  const t = norm(topic);
+  return t ? `話題は「${clamp(t, 18)}」として扱う。` : '';
+}
+
+function lastLine(lastSummary?: string | null, userText?: string | null) {
+  const last = norm(lastSummary);
+  const now = norm(userText);
+  if (!last) return '';
+  if (now && last === now) return '';
+  return `前回の要約：${clamp(last, 64)}`;
 }
 
 // ---- slot builders ----
+//
+// ここでは「箱」や「A/B/C」などの固定テンプレを出さない。
+// GPTっぽく：拾う → 置く → 次に渡す（必要なら1問）
+// ただし質問ループを避けるため、OPEN/CLARIFY は “促し” で止める（?は使わない）。
 
 function buildOpenSlots(input: {
   userText: string;
@@ -72,216 +100,139 @@ function buildOpenSlots(input: {
   lastSummary?: string | null;
 }): CounselSlot[] {
   const t = norm(input.userText);
-  const a = softAnchorLine({
-    intentLocked: input.intentLocked,
-    intentAnchorKey: input.intentAnchorKey,
-  });
+  const a = softAnchorLine({ intentLocked: input.intentLocked, intentAnchorKey: input.intentAnchorKey });
+  const tp = topicLine(input.topic);
+  const ls = lastLine(input.lastSummary, t);
 
-  const topic = norm(input.topic);
-  const topicLine = topic ? `話題は「${clamp(topic, 14)}」として扱う。` : '';
-
-  const last = norm(input.lastSummary);
-  const lastLine =
-    last && last !== t ? `前回の要約：${clamp(last, 46)}` : '';
-
-  // OPENは「問い」を出さず、まず“整理の枠”だけ渡す（質問ループをここで作らない）
+  // OPEN：共感テンプレに逃げない（「消耗してるんだね」等の固定句を置かない）
+  // 代わりに：いま出ている言葉をそのまま拾って「続けていい」を渡す
   const obs = [
-    `しんどさが続いていて、毎日消耗している。`,
-    t ? `いま出ている要点：${clamp(t, 62)}` : '',
+    t ? `いま出ている言葉：${clamp(t, 70)}` : 'まだ言葉になっていない感じも含めて大丈夫。',
     a ?? '',
-    topicLine,
-    lastLine,
+    tp,
+    ls,
   ]
     .filter(Boolean)
     .join('\n');
 
-  const shift = [
-    `まず整理の箱を3つだけ置く。`,
-    `1) 事実：何が起きた（誰／どこ／いつ）`,
-    `2) 感情：いま一番きつい反応`,
-    `3) 望み：本当はどうなってほしい`,
-    `短文でOK。うまく書かなくていい。`,
-  ].join('\n');
+  const shift = isShortOrThin(t)
+    ? '短い一言でも足りる。続きだけ、そのまま投げて。'
+    : 'うまくまとめなくていい。出ている順で、そのまま続けて。';
 
-  const safe = [
-    `急がなくていい。`,
-    `いまは“材料を出す”だけで前に進む。`,
-  ].join('\n');
+  const safe = '急がない。ここはまず、状況が見えるところまで並べる。';
 
   return [
     { key: 'OBS', role: 'assistant', style: 'soft', content: noQM(obs) },
     { key: 'SHIFT', role: 'assistant', style: 'neutral', content: noQM(shift) },
     { key: 'SAFE', role: 'assistant', style: 'soft', content: noQM(safe) },
   ];
-
-
-  // 質問禁止なので「教えて」で止める（?を使わない）
-  return [
-    {
-      key: 'OBS',
-      role: 'assistant',
-      style: 'soft',
-      content: noQM(
-        `受け取った。${a ? ` ${a}` : ''}\n` +
-          `${topicLine ? topicLine + '\n' : ''}` +
-          `${lastLine ? lastLine + '\n' : ''}` +
-          `いま出ている言葉：${t ? `「${clamp(t, 52)}」` : '（まだ言葉になっていない）'}`,
-      ),
-    },
-    {
-      key: 'SHIFT',
-      role: 'assistant',
-      style: 'neutral',
-      content: noQM('まず整理に入る。材料を3つだけ置いて。事実 / 感情 / 望み（短文でOK）'),
-    },
-    // ✅ OPENでも締めをSAFEに隔離（SHIFTに混ざるのを防ぐ）
-    {
-      key: 'SAFE',
-      role: 'assistant',
-      style: 'soft',
-      content: noQM('急がなくていい。いまは書き出すだけで十分。🪔'),
-    },
-  ];
 }
-
-
 
 function buildClarifySlots(input: {
   userText: string;
   intentLocked: boolean;
   intentAnchorKey?: string | null;
   axis?: { S?: string | null; R?: string | null; I?: string | null } | null;
+  topic?: string | null;
   lastSummary?: string | null;
 }): CounselSlot[] {
-  const a = softAnchorLine({
-    intentLocked: input.intentLocked,
-    intentAnchorKey: input.intentAnchorKey,
-  });
+  const t = norm(input.userText);
+  const a = softAnchorLine({ intentLocked: input.intentLocked, intentAnchorKey: input.intentAnchorKey });
+  const tp = topicLine(input.topic);
+  const ls = lastLine(input.lastSummary, t);
 
   const S = norm(input.axis?.S);
   const R = norm(input.axis?.R);
   const I = norm(input.axis?.I);
+  const axisLine = S || R || I ? `メモ：${[S ? `S=${clamp(S, 14)}` : '', R ? `R=${clamp(R, 14)}` : '', I ? `I=${clamp(I, 14)}` : ''].filter(Boolean).join(' ')}` : '';
 
-  const axisLine =
-    S || R || I
-      ? `軸メモ：${S ? `S=${S} ` : ''}${R ? `R=${R} ` : ''}${I ? `I=${I}` : ''}`.trim()
-      : '';
+  // CLARIFY：質問はしない（?禁止）
+  // 代わりに：「いま何を先に扱うか」を “選択” ではなく “指差し” で返してもらう
+  const obs = [a ?? '', tp, ls, axisLine].filter(Boolean).join('\n');
 
-  const last = norm(input.lastSummary);
-  const lastLine = last ? `前回の要約：${clamp(last, 52)}` : '';
+  const clarify = [
+    'いまの相談は、焦点を一つに寄せたほうが早い。',
+    '先に触る場所だけ決める。',
+  ].join('\n');
 
-  // ここも質問禁止：選択は「番号で返して」で止める（?を使わない）
+  const pick = looksLikeQuestion(t)
+    ? 'いまの「どうしたらいい」は、どの種類の困り方に近いかだけ置いて。状況／人／自分の反応／今後の選択'
+    : 'いま一番つらいのが「出来事」なのか「反応」なのか「これからの選択」なのかだけ、言葉で置いて。';
+
   return [
-    {
-      key: 'OBS',
-      role: 'assistant',
-      style: 'soft',
-      content: noQM(`整理する。${a ? ` ${a}` : ''}${axisLine ? `\n${axisLine}` : ''}${lastLine ? `\n${lastLine}` : ''}`),
-    },
-    {
-      key: 'CLARIFY',
-      role: 'assistant',
-      style: 'neutral',
-      content: noQM(
-        `いまの相談は、だいたい3つの束に分かれる。\n` +
-          `①状況の事実（何が起きているか）\n` +
-          `②心の反応（何が削られているか）\n` +
-          `③望み（どう在りたいか）`,
-      ),
-    },
-    {
-      key: 'PICK',
-      role: 'assistant',
-      style: 'neutral',
-      content: noQM('いま一番先に扱う束を、①②③の番号で返して。'),
-    },
+    { key: 'OBS', role: 'assistant', style: 'soft', content: noQM(obs || '整理する。') },
+    { key: 'CLARIFY', role: 'assistant', style: 'neutral', content: noQM(clarify) },
+    { key: 'PICK', role: 'assistant', style: 'neutral', content: noQM(pick) },
   ];
 }
 
 function buildOptionsSlots(input: {
+  userText: string;
   intentLocked: boolean;
   intentAnchorKey?: string | null;
   topic?: string | null;
   lastSummary?: string | null;
 }): CounselSlot[] {
-  const a = softAnchorLine({
-    intentLocked: input.intentLocked,
-    intentAnchorKey: input.intentAnchorKey,
-  });
+  const t = norm(input.userText);
+  const a = softAnchorLine({ intentLocked: input.intentLocked, intentAnchorKey: input.intentAnchorKey });
+  const tp = topicLine(input.topic);
+  const ls = lastLine(input.lastSummary, t);
 
-  const topic = norm(input.topic);
-  const topicLine = topic ? `（話題：${clamp(topic, 16)}）` : '';
+  // OPTIONS：ここでだけ 0-1問まで許可（? OK）
+  // A/B/Cの記号は禁止に寄せる（番号はOKだが、強制選択に見えない形で）
+  const obs = [a ?? '', tp, ls].filter(Boolean).join('\n');
 
-  const last = norm(input.lastSummary);
-  const lastLine = last ? `（前回：${clamp(last, 18)}）` : '';
+  const options = [
+    'いま取れる手は、大きく3つに分けられる。',
+    '1) 現状の中で負荷を減らす（境界線／役割／時間の切り分け）',
+    '2) いったん距離を取って回復を優先する（休む／減らす／逃がす）',
+    '3) 方向転換の準備に入る（期限／代替案／小さな試し）',
+  ].join('\n');
 
-  // OPTIONS から質問解禁（ここで初めて ? を使ってよい）
+  const pick = 'どれがいまの実感に一番近い？（1/2/3でOK）';
+
   return [
-    {
-      key: 'OBS',
-      role: 'assistant',
-      style: 'soft',
-      content: `選択肢を出す。${a ? ` ${a}` : ''} ${topicLine} ${lastLine}`.trim(),
-    },
-    {
-      key: 'OPTIONS',
-      role: 'assistant',
-      style: 'neutral',
-      content:
-        `次は3択で十分。\n` +
-        `A) そのまま維持しつつ、条件を1つ変える（役割 / 時間 / 境界線）\n` +
-        `B) いったん距離を取り、回復を優先する（休む /切る / 減らす）\n` +
-        `C) 方向転換の設計に入る（期限 / 代替案 / 小さな実験）`,
-    },
-    {
-      key: 'PICK',
-      role: 'assistant',
-      style: 'neutral',
-      content: 'A/B/C どれを先にやる？（1文字でOK）',
-    },
+    { key: 'OBS', role: 'assistant', style: 'soft', content: norm(obs || '選択肢を出す。') },
+    { key: 'OPTIONS', role: 'assistant', style: 'neutral', content: norm(options) },
+    { key: 'PICK', role: 'assistant', style: 'neutral', content: norm(pick) },
   ];
 }
 
 function buildNextSlots(input: {
+  userText: string;
   intentLocked: boolean;
   intentAnchorKey?: string | null;
   lastSummary?: string | null;
 }): CounselSlot[] {
+  const t = norm(input.userText);
   const a = softAnchorLine({
     intentLocked: input.intentLocked,
     intentAnchorKey: input.intentAnchorKey,
   });
+  const ls = lastLine(input.lastSummary, t);
 
-  const last = norm(input.lastSummary);
-  const lastLine = last ? `（前回：${clamp(last, 28)}）` : '';
+  // NEXT：口癖テンプレ禁止（「呼吸を戻す」等は出さない）
+  // “命令”ではなく “次に出す材料” を軽く指定する
+  const obs = [a ?? '', ls].filter(Boolean).join('\n');
 
-  // NEXT は「一手に落とす」。ここは “問い” より “宣言+手順” を優先する。
-  return [
-    {
-      key: 'OBS',
-      role: 'assistant',
-      style: 'soft',
-      content: `${a ? a + '\n' : ''}${lastLine ? lastLine + '\n' : ''}次の一手に落とす。`.trim(),
-    },
-    {
-      key: 'NEXT',
-      role: 'assistant',
-      style: 'firm',
-      content:
-        `このあとやるのは1つだけ。\n` +
-        `- 期限：今日（または24時間以内）\n` +
-        `- 行動：メモ1枚に「事実 / 感情 / 望み」を各1行\n` +
-        `- 送る文：その3行をそのまま貼る\n` +
-        `これで次のターンで決定に入れる。`,
-    },
-    {
-      key: 'SAFE',
-      role: 'assistant',
-      style: 'soft',
-      content: '呼吸を戻す。🪔',
-    },
+  const next = [
+    '次は、材料を一つだけ足す。',
+    '・いま一番削られているもの（体力／時間／尊厳／安心／関係）',
+    'これが分かると、選ぶ手が決まる。',
+  ].join('\n');
+
+  const safe = '無理に整えなくていい。短文で十分。';
+
+  const slots: CounselSlot[] = [
+    { key: 'OBS', role: 'assistant', style: 'soft', content: norm(obs || '') },
+    { key: 'NEXT', role: 'assistant', style: 'firm', content: norm(next) },
+    { key: 'SAFE', role: 'assistant', style: 'soft', content: norm(safe) },
   ];
+
+  // 型を落とさずに空を除去
+  return slots.filter((s): s is CounselSlot => !!norm(s.content));
 }
+
 
 // ---- main ----
 
@@ -300,7 +251,7 @@ export function buildCounselSlotPlan(args: {
   // orchestrator から渡す（無ければ null）※任意
   lastSummary?: string | null;
 }): CounselSlotPlan {
-  const stamp = 'counsel.ts@2026-01-10#stage-v1';
+  const stamp = 'counsel.ts@2026-01-17#stage-v2-gptlike';
 
   const userText = norm(args.userText);
 
@@ -338,6 +289,7 @@ export function buildCounselSlotPlan(args: {
         intentLocked,
         intentAnchorKey,
         axis: args.axis ?? null,
+        topic: args.topic ?? null,
         lastSummary,
       });
       break;
@@ -345,6 +297,7 @@ export function buildCounselSlotPlan(args: {
     case 'OPTIONS':
       reason = 'stage:OPTIONS';
       slots = buildOptionsSlots({
+        userText,
         intentLocked,
         intentAnchorKey,
         topic: args.topic ?? null,
@@ -355,6 +308,7 @@ export function buildCounselSlotPlan(args: {
     case 'NEXT':
       reason = 'stage:NEXT';
       slots = buildNextSlots({
+        userText,
         intentLocked,
         intentAnchorKey,
         lastSummary,

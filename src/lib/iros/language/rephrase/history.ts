@@ -215,6 +215,10 @@ export function extractLastTurnsFromContext(
   if (!userContext || typeof userContext !== 'object') return [];
   const ctx: any = userContext as any;
 
+  // ✅ 最大メッセージ数（既定: 6 = 3往復）
+  const maxMsgsRaw = Number(process.env.IROS_REPHRASE_LAST_TURNS_MAX);
+  const maxMsgs = maxMsgsRaw > 0 ? Math.floor(maxMsgsRaw) : 6;
+
   const rawTurns =
     pickArray(ctx?.turns) ||
     pickArray(ctx?.chat) ||
@@ -250,15 +254,18 @@ export function extractLastTurnsFromContext(
   if (normalized.length === 0) normalized = extractHistoryMessagesFromContext(ctx);
   if (normalized.length === 0) return [];
 
-  let tail = normalized.slice(Math.max(0, normalized.length - 4));
+  // ✅ 基本は末尾 maxMsgs を採用
+  let tail = normalized.slice(Math.max(0, normalized.length - maxMsgs));
 
+  // ✅ 片側しかない（userだけ / assistantだけ）なら少し広げて救済
   const hasAssistant = tail.some((m) => m.role === 'assistant');
   const hasUser = tail.some((m) => m.role === 'user');
-
   if (!(hasAssistant && hasUser)) {
-    tail = normalized.slice(Math.max(0, normalized.length - 6));
+    const expand = Math.min(normalized.length, maxMsgs + 2); // 既定なら 8
+    tail = normalized.slice(Math.max(0, normalized.length - expand));
   }
 
+  // ✅ 1メッセージあたりの上限
   tail = tail.map((m) => ({ ...m, content: clampChars(m.content, 600) }));
 
   return tail;

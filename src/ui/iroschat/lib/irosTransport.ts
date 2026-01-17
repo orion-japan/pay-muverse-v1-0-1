@@ -117,12 +117,15 @@ async function getIdTokenSafe(timeoutMs = 5000): Promise<string> {
 const AUTH_FETCH_TIMEOUT_MS = 60_000; // ★ 必要なら延長（例: 90_000）
 
 async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+  // ✅ TDZ/循環importの影響を避けるため、__DEV__ を参照しない
+  const DEV = process.env.NODE_ENV !== 'production';
+
   const headers = new Headers(init.headers || {});
   const credentials = init.credentials ?? 'include';
 
   // ---- Firebase ID トークン取得（ユーザー準備待ち）----
   const token = await getIdTokenSafe().catch((err) => {
-    if (__DEV__) console.warn('[IROS/API] authFetch getIdTokenSafe error', err);
+    if (DEV) console.warn('[IROS/API] authFetch getIdTokenSafe error', err);
     throw err;
   });
 
@@ -148,7 +151,7 @@ async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
 
     if (!res.ok) {
       const t = await res.text().catch(() => '');
-      if (__DEV__) console.warn('[IROS/API] authFetch error', res.status, t);
+      if (DEV) console.warn('[IROS/API] authFetch error', res.status, t);
 
       // ★ timeout が body に混ざって 401 になってるケースを識別しやすくする
       if (res.status === 401 && /timeout of 25000ms exceeded/i.test(t)) {
@@ -163,7 +166,7 @@ async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
     // AbortError を明示的に timeout 扱い
     if (e?.name === 'AbortError') {
       const msg = `HTTP 408 client_timeout: exceeded ${AUTH_FETCH_TIMEOUT_MS}ms`;
-      if (__DEV__) console.warn('[IROS/API] authFetch abort', { input: String(input), msg });
+      if (DEV) console.warn('[IROS/API] authFetch abort', { input: String(input), msg });
       throw new Error(msg);
     }
     throw e;
@@ -171,7 +174,6 @@ async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
     clearTimeout(timer);
   }
 }
-
 
 /* ========= helper: URL の cid 取得 ========= */
 function getCidFromLocation(): string | null {

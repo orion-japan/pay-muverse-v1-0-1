@@ -354,16 +354,13 @@ function hasSunByWords(text: string): boolean {
 
 /**
  * SUNゲート（ENTER用）
- * - fixedNorth=SUN が前提
+ * - fixedNorth=SUN が前提（※ここは meta を基準にする）
  * - 本文に SUN語彙 or BLOCK があるときだけ成立
  * - 短いコミット文は “直近ユーザーがSUNを言っている” ときだけ救済
- *
- * ※ HOLD の救済はメインで別途やる
  */
 function sunGateOkEnter(meta: MetaLike | null, text: string, historyTexts: string[]): boolean {
-  // ✅ ここは ENTER用なので meta（同一ターン文脈）基準でOK
-  const hasNorth = getFixedNorthKey(meta) === 'SUN';
-  if (!hasNorth) return false;
+  const northMeta = getFixedNorthKey(meta);
+  if (northMeta !== 'SUN') return false;
 
   if (hasSunByWords(text) || hasBlock(text)) return true;
 
@@ -400,7 +397,7 @@ export function computeITTrigger(args: {
   const prevFromMeta = readPrevItActiveFromMeta(meta);
   const prevFromHistory = findPrevItOkFromHistory(history);
 
-  // ✅ ここは「一箇所だけ」：二重宣言させない
+  // ✅ fixedNorth(SUN) はここで一本化（以後これだけ使う）
   const hasNorth = hasFixedNorthSUN(meta, memoryState);
 
   console.log('[IROS/IT][probe][fixedNorth]', {
@@ -412,6 +409,12 @@ export function computeITTrigger(args: {
     prevIt_fromMeta: prevFromMeta,
     prevIt_fromHistory: prevFromHistory,
   });
+
+  // ✅ コミット済みT3（T3 + IT_TRIGGER_OK）は “毎ターンSUN語彙を要求しない”
+  const committedT3 =
+    hasNorth &&
+    prevFromMemoryState.step === 'T3' &&
+    String(prevFromMemoryState.reason ?? '').includes('IT_TRIGGER_OK');
 
   // “短い繋ぎ文”判定
   const isVeryShort = text.length > 0 && text.length <= 14;
@@ -439,22 +442,20 @@ export function computeITTrigger(args: {
   // ✅ MemoryState を主に判定し、meta/historyは補助
   const prevItActive = hasNorth && (prevFromMemoryState.active || prevFromMeta.active || prevFromHistory);
 
-   // ✅ HOLD 条件：前回ITが生きていて、短い繋ぎ文なら維持
-  // - affirmed / commitShort は従来通り
-  // - 追加：SUN語彙 or BLOCK を含む短文（例:「希望で進む」）も HOLD として扱う
-  const holdOk =
+  // ✅ HOLD 条件：前回ITが生きていて、短い繋ぎ文なら維持
+  const holdOkShort =
     prevItActive &&
     isVeryShort &&
     (affirmed || isCommitShortText(text) || hasSunByWords(text) || hasBlock(text));
 
-
   // ---- 4. SUNゲート ----
-  // ENTERは厳密、HOLDは“前回ITが生きている”こと自体でSUN維持とみなす
+  // ENTERは厳密（meta fixedNorth=SUN + 本文にSUN語彙/BLOCK）
+  // HOLDは “前回ITが生きている” なら救済
   let sunOk = sunGateOkEnter(meta, text, historyTexts);
-  if (!sunOk && holdOk) sunOk = true;
+  if (!sunOk && holdOkShort) sunOk = true;
 
   // ---- 5. deepenOk ----
-  const deepenOk = declaredNow || affirmed || (hasCore && coreRepeated && hasNarrow(text)) || holdOk;
+  const deepenOk = declaredNow || affirmed || (hasCore && coreRepeated && hasNarrow(text)) || holdOkShort;
 
   // ---- 6. ENTER判定 ----
   const enterOk = hasCore && sunOk && deepenOk;
@@ -479,8 +480,29 @@ export function computeITTrigger(args: {
     };
   }
 
-  // ---- 7. HOLD判定（ENTERは満たさないが、維持は許す） ----
-  if (holdOk && hasNorth) {
+  // ✅ 6.5 コミット済みT3は常時HOLD（今回の本丸）
+  if (committedT3) {
+    return {
+      ok: true,
+      mode: 'HOLD',
+      reason: 'IT_ALREADY_COMMITTED',
+      flags: {
+        hasCore,
+        coreRepeated,
+        sunOk: true,
+        declarationOk: declaredNow,
+        deepenOk: true,
+      },
+      iLexemeForce: false,
+      tLayerModeActive: true,
+      tLayerHint: 'T3',
+      tVector: null,
+      core,
+    };
+  }
+
+  // ---- 7. HOLD判定（短い繋ぎのみ） ----
+  if (holdOkShort && hasNorth) {
     // ✅ step は MemoryState を最優先（なければ meta）
     const keepStepRaw =
       prevFromMemoryState.step && /^T[123]$/u.test(prevFromMemoryState.step)

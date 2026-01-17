@@ -107,12 +107,15 @@ function extractAssistantText(orchResult: any): string {
 }
 
 /* =========================
- * slotPlanPolicy detect (NO-UNKNOWN) + source
- * - UNKNOWN を作らない（null にする）
- * - 見つからない場合、slots があれば SCAFFOLD 推定
+ * slotPlanPolicy detect + source
+ * - UNKNOWN を握りつぶさない（見えたら UNKNOWN のまま保持）
+ * - ただし commit 判定では「UNKNOWN/null は FINAL 扱い」に倒すための下準備をする
+ * - 見つからない場合：
+ *    - slots が scaffold っぽければ SCAFFOLD
+ *    - それ以外で slots があれば FINAL（デフォルト）
  * ========================= */
 
-type SlotPlanPolicyNorm = 'SCAFFOLD' | 'FINAL';
+type SlotPlanPolicyNorm = 'SCAFFOLD' | 'FINAL' | 'UNKNOWN';
 
 function normSlotPlanPolicy(v: unknown): SlotPlanPolicyNorm | null {
   if (typeof v !== 'string') return null;
@@ -120,6 +123,7 @@ function normSlotPlanPolicy(v: unknown): SlotPlanPolicyNorm | null {
   const s = v.trim().toUpperCase();
   if (s === 'SCAFFOLD') return 'SCAFFOLD';
   if (s === 'FINAL') return 'FINAL';
+  if (s === 'UNKNOWN') return 'UNKNOWN';
 
   return null;
 }
@@ -129,7 +133,7 @@ function detectSlotPlanPolicy(args: {
   orchResult?: any;
   slotPlanLen?: number | null;
   hasSlots?: boolean | null;
-}): { policy: SlotPlanPolicyNorm | null; from: string; raw: unknown } {
+}): { policy: SlotPlanPolicyNorm; from: string; raw: unknown } {
   const metaForSave = args.metaForSave ?? null;
   const orchResult = args.orchResult ?? null;
 
@@ -139,7 +143,7 @@ function detectSlotPlanPolicy(args: {
     ['metaForSave.slotPlanPolicy', metaForSave?.slotPlanPolicy],
     ['metaForSave.extra.slotPlanPolicy', metaForSave?.extra?.slotPlanPolicy],
 
-    // orchResult 側（入っていれば拾う）
+    // orchResult 側
     ['orchResult.slotPlanPolicy', orchResult?.slotPlanPolicy],
     ['orchResult.framePlan.slotPlanPolicy', orchResult?.framePlan?.slotPlanPolicy],
     ['orchResult.meta.framePlan.slotPlanPolicy', orchResult?.meta?.framePlan?.slotPlanPolicy],
@@ -175,33 +179,73 @@ function detectSlotPlanPolicy(args: {
 
   const hasSlots =
     args.hasSlots ??
-    Boolean(
-      slotsA ?? slotsB ?? slotsC, // 「slots プロパティがあるか」を優先（[] でも true）
-    );
+    Boolean(slotsA ?? slotsB ?? slotsC); // 「slots プロパティがあるか」を優先（[] でも true）
 
+  const pickSlots = (): any[] | null => {
+    if (Array.isArray(slotsA)) return slotsA;
+    if (Array.isArray(slotsB)) return slotsB;
+    if (Array.isArray(slotsC)) return slotsC;
+    return null;
+  };
+
+  const looksLikeScaffold = (slots: any[] | null): boolean => {
+    if (!Array.isArray(slots) || slots.length === 0) return false;
+    return slots.some((s) => {
+      const k = String(s?.key ?? '').toUpperCase();
+      return (
+        k.startsWith('FLAG_') ||
+        k.includes('ONE_POINT') ||
+        k.includes('SCAFFOLD') ||
+        k === 'FLAG_PREFACE' ||
+        k === 'FLAG_PURPOSE' ||
+        k === 'FLAG_POINTS_3'
+      );
+    });
+  };
+
+  // slots があるなら「scaffoldっぽいか」で分岐
   if (hasSlots && slotPlanLen > 0) {
-    const inferred: SlotPlanPolicyNorm = 'SCAFFOLD';
+    const slotsPicked = pickSlots();
+    if (looksLikeScaffold(slotsPicked)) {
+      const policy: SlotPlanPolicyNorm = 'SCAFFOLD';
+      if (metaForSave?.framePlan && metaForSave.framePlan.slotPlanPolicy == null) {
+        metaForSave.framePlan = { ...metaForSave.framePlan, slotPlanPolicy: policy };
+      }
+      if (metaForSave && metaForSave.slotPlanPolicy == null) {
+        metaForSave.slotPlanPolicy = policy;
+      }
+      return { policy, from: 'inferred(scaffold-like-slots)', raw: null };
+    }
 
-    // 欠損補完だけ（上書きしない）
+    // ✅ それ以外は FINAL をデフォルト（ここが今回の肝）
+    const policy: SlotPlanPolicyNorm = 'FINAL';
     if (metaForSave?.framePlan && metaForSave.framePlan.slotPlanPolicy == null) {
-      metaForSave.framePlan = { ...metaForSave.framePlan, slotPlanPolicy: inferred };
+      metaForSave.framePlan = { ...metaForSave.framePlan, slotPlanPolicy: policy };
     }
     if (metaForSave && metaForSave.slotPlanPolicy == null) {
-      metaForSave.slotPlanPolicy = inferred;
+      metaForSave.slotPlanPolicy = policy;
     }
-
-    return { policy: inferred, from: 'inferred(hasSlots&&len>0)', raw: null };
+    return { policy, from: 'default(has-slots->FINAL)', raw: null };
   }
 
-  return { policy: null, from: 'none', raw: null };
+  // slots が無いなら UNKNOWN（ただし後段は text の有無で処理される）
+  return { policy: 'UNKNOWN', from: 'none', raw: null };
 }
+
 
 function shouldCommitSlotPlanFinalOnly(args: {
   policy: SlotPlanPolicyNorm | null;
   slotText: string;
 }): boolean {
-  return args.policy === 'FINAL' && String(args.slotText ?? '').trim().length > 0;
+  const textOk = String(args.slotText ?? '').trim().length > 0;
+
+  // ✅ commit しないのは SCAFFOLD だけ（PDF準拠）
+  // - UNKNOWN/null は「scaffold判定できていない」なので、normalChat等の slots を本文として commit する
+  if (args.policy === 'SCAFFOLD') return false;
+
+  return textOk;
 }
+
 
 /* =========================
  * intentAnchor sanitize (MIN)

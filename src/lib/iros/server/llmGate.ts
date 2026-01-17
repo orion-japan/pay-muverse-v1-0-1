@@ -232,11 +232,9 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
   const hasSlots = input.hasSlots ?? null;
   const policy = normPolicy(input.slotPlanPolicy);
 
-  // 現在本文（既に生成済み/レンダ済みで入ってくることがある）
   const textNow = normText(input.finalAssistantTextNow);
   const textNowLen = textNow.length;
 
-  // slots から組み立てた候補文（seed）
   const slotsObj = extractSlotsObj(input.meta ?? null);
   const candidate = normText(buildTextFromSlots(slotsObj) ?? '');
   const candidateLen = candidate.length;
@@ -352,6 +350,7 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
     resolvedText: null,
   });
 }
+
 
 // ---------------------------------------------------------------------
 // meta write

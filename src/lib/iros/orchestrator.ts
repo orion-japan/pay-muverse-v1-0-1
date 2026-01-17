@@ -1240,6 +1240,77 @@ export async function runIrosTurn(
       }
     }
 
+// =========================================================
+// ✅ A) normalChat → flagReply 自動切替（仮置き一点の安全装置）
+// 役割：
+//   - normalChat は通常入口（OBS/SHIFTで流れを受ける）
+//   - flagReply は「停滞の根拠がある時だけ」仮置き一点を置く
+// =========================================================
+{
+  const reason = String(
+    (meta as any)?.flow?.reason ?? (meta as any)?.convEvidence?.reason ?? '',
+  );
+
+  const hasNoAdvanceHint = /A!:no_advance_hint/.test(reason);
+  const hasNoCtxSummary = /U!:no_ctx_summary/.test(reason);
+
+  // 直前が normalChat 由来かどうか（＝通常入口で組めている）
+  const cameFromNormalChat = (meta as any)?.slotPlanFallback === 'normalChat';
+
+  // ✅ 切替条件（非常用）
+  // - 「normalChat で入ってきたのに」停滞シグナルが立っている時だけ
+  // - normalChat 以外（counsel/flagReply等）から来た場合は “切替しない”
+  const shouldSwitchToFlagReply =
+    cameFromNormalChat && (hasNoAdvanceHint || hasNoCtxSummary);
+
+  // 直前 assistant 本文（one-shot 判定用）
+  const historyArr = Array.isArray(history) ? (history as any[]) : [];
+  let lastAssistantText = '';
+
+  for (let i = historyArr.length - 1; i >= 0; i--) {
+    const m = historyArr[i];
+    if (String(m?.role ?? '').toLowerCase() !== 'assistant') continue;
+    const v = m?.text ?? m?.content ?? '';
+    if (typeof v === 'string' && v.trim()) {
+      lastAssistantText = v;
+      break;
+    }
+  }
+
+  const prevUsedOnePoint =
+    typeof lastAssistantText === 'string' && /いまの一点：/.test(lastAssistantText);
+
+  if (
+    !isSilence &&
+    hasText &&
+    !shouldUseCounsel &&
+    shouldSwitchToFlagReply &&
+    !prevUsedOnePoint
+  ) {
+    const flagSlots = buildFlagReplySlots({
+      userText: text,
+      hasHistory: true,
+      questionAlreadyPlanned: false,
+      directTask: false,
+      forceOnePoint: false,
+    });
+
+    slotsArr = Array.isArray(flagSlots) ? flagSlots : [];
+    slotPlanPolicy = slotPlanPolicy || 'FINAL';
+    (meta as any).slotPlanFallback = 'flagReply';
+
+    console.log('[IROS/ORCH][flagReply-picked]', {
+      cameFromNormalChat,
+      hasNoCtxSummary,
+      hasNoAdvanceHint,
+      prevUsedOnePoint,
+      reasonHead: reason.slice(0, 120),
+    });
+  }
+}
+
+
+
     // 6) 最終ガード：slots が配列でないなら null
     if (slotsArr != null && !Array.isArray(slotsArr)) {
       slotsArr = null;
@@ -1264,28 +1335,37 @@ export async function runIrosTurn(
       null;
 
     // 10) ✅ framePlan は render-v2 が参照する唯一の正
+    // - policy は FINAL/SCAFFOLD 以外を許さない
+    // - slots があるなら policy は必ず FINAL を入れる（UNKNOWN/空は残さない）
+    const normPolicy = (v: unknown): 'FINAL' | 'SCAFFOLD' | null => {
+      if (typeof v !== 'string') return null;
+      const s = v.trim().toUpperCase();
+      if (s === 'FINAL') return 'FINAL';
+      if (s === 'SCAFFOLD') return 'SCAFFOLD';
+      return null;
+    };
+
+    const policyNorm0 = normPolicy(slotPlanPolicy);
+
+    const slotsLen =
+      Array.isArray(slotsArr) ? (slotsArr.length as number) : 0;
+
+    const slotPlanPolicyFinal: 'FINAL' | 'SCAFFOLD' | null =
+      policyNorm0 ?? (slotsLen > 0 ? 'FINAL' : null);
+
+    // 11) ✅ framePlan は render-v2 が参照する唯一の正
     (meta as any).framePlan = {
       frame: frameFinal,
       slots: slotsArr,
-      slotPlanPolicy,
+      slotPlanPolicy: slotPlanPolicyFinal,
     };
 
-    // 11) ✅ ORCHログ用 “互換キー” を同期（slotPlanPolicy:null を消す）
-    (meta as any).slotPlanPolicy = slotPlanPolicy;
+    // 12) ✅ ORCHログ用 “互換キー” を同期（必ず framePlan と同値）
+    (meta as any).slotPlanPolicy = slotPlanPolicyFinal;
 
-    // 12) 互換用 slotPlan は “必ず別参照” にする
-    (meta as any).slotPlan = Array.isArray(slotsArr) ? slotsArr.slice() : slotsArr;
-
-    // 13) T系の戻り値は meta に反映（あれば）
-    if (typeof (r as any).tLayerModeActive === 'boolean') {
-      (meta as any).tLayerModeActive = (r as any).tLayerModeActive;
-    }
-    if (
-      typeof (r as any).tLayerHint === 'string' &&
-      (r as any).tLayerHint.trim()
-    ) {
-      (meta as any).tLayerHint = (r as any).tLayerHint.trim();
-    }
+    // 13) 互換用 slotPlan は “必ず別参照” にする
+    (meta as any).slotPlan =
+      Array.isArray(slotsArr) ? slotsArr.slice() : slotsArr;
 
     // =========================================================
     // ✅ 観測ログ：slots がどこで崩れるかを “数値で” 固定

@@ -147,7 +147,6 @@ async function maybeAttachRephraseForRenderV2(args: {
   // ✅ 追加：routeで確定した最終mode（UI modeより先に使える）
   effectiveMode?: string | null;
 }) {
-
   const {
     conversationId,
     userCode,
@@ -160,35 +159,98 @@ async function maybeAttachRephraseForRenderV2(args: {
     effectiveMode,
   } = args;
 
+  // ---- helpers (no-throw) ----
+  const setSkip = (reason: string, detail?: Record<string, any>) => {
+    try {
+      const payload = { reason, ...(detail ?? {}) };
 
-  // 1) gate
+      // ✅ “黙って止まる” をゼロにする：必ず meta.extra に残す
+      meta.extra = {
+        ...(meta.extra ?? {}),
+        rephraseApplied: false,
+        rephraseAttachSkipped: true,
+        rephraseAttachReason: reason,
+        rephraseAttachDetail: payload,
+      };
+
+      // ✅ renderGateway 側でも拾えるように extraMerged にも残す（露出禁止前提の内部meta）
+      (extraMerged as any).rephraseAttachSkipped = true;
+      (extraMerged as any).rephraseAttachReason = reason;
+
+      // ✅ ログ1行（本文/JWTは出さない）
+      console.log('[IROS/rephraseAttach][SKIP]', {
+        conversationId,
+        userCode,
+        reason,
+        effectiveMode: effectiveMode ?? null,
+        hintedRenderMode:
+          (typeof meta?.renderMode === 'string' && meta.renderMode) ||
+          (typeof meta?.extra?.renderMode === 'string' && meta.extra.renderMode) ||
+          (typeof meta?.extra?.renderedMode === 'string' && meta.extra.renderedMode) ||
+          null,
+        speechAct: String(pickSpeechAct(meta) ?? '').toUpperCase() || null,
+      });
+    } catch {
+      // no-op
+    }
+  };
+
+
+  const upper = (v: any) => String(v ?? '').trim().toUpperCase();
+
+  // ---- 1) gate ----
   const enabled =
     String(process.env.IROS_REPHRASE_FINAL_ENABLED ?? '1').trim() !== '0';
-  if (!enabled) return;
+  if (!enabled) {
+    setSkip('DISABLED_BY_ENV', { env: 'IROS_REPHRASE_FINAL_ENABLED' });
+    return;
+  }
 
-  if (extraMerged?.renderEngine !== true) return;
-  // ✅ UI mode確定より前でも、route最終modeがITなら止める
-  if (String(effectiveMode ?? '').toUpperCase() === 'IT') return;
+  // render-v2 only
+  if (extraMerged?.renderEngine !== true) {
+    setSkip('RENDER_ENGINE_OFF', { renderEngine: extraMerged?.renderEngine });
+    return;
+  }
+
+  // ITでも attach を許可するスイッチ（デフォは止める＝現状維持）
+  const allowIT =
+    String(process.env.IROS_REPHRASE_ALLOW_IT ?? '0').trim() === '1';
+
+  // ✅ UI mode確定より前でも、route最終modeがITなら通常は止める（ただし allowIT=1 なら通す）
+  if (!allowIT && upper(effectiveMode) === 'IT') {
+    setSkip('SKIP_BY_EFFECTIVE_MODE_IT', { effectiveMode });
+    return;
+  }
 
   const hintedRenderMode =
     (typeof meta?.renderMode === 'string' && meta.renderMode) ||
     (typeof meta?.extra?.renderMode === 'string' && meta.extra.renderMode) ||
     (typeof meta?.extra?.renderedMode === 'string' && meta.extra.renderedMode) ||
     '';
-  if (String(hintedRenderMode).toUpperCase() === 'IT') return;
 
-  const speechAct = String(pickSpeechAct(meta) ?? '').toUpperCase();
-  if (speechAct === 'SILENCE' || speechAct === 'FORWARD') return;
+  if (!allowIT && upper(hintedRenderMode) === 'IT') {
+    setSkip('SKIP_BY_HINTED_RENDER_MODE_IT', { hintedRenderMode });
+    return;
+  }
 
-  // 2) idempotent
+  const speechAct = upper(pickSpeechAct(meta));
+  if (speechAct === 'SILENCE' || speechAct === 'FORWARD') {
+    setSkip('SKIP_BY_SPEECH_ACT', { speechAct });
+    return;
+  }
+
+  // ---- 2) idempotent ----
   if (
     Array.isArray((extraMerged as any)?.rephraseBlocks) &&
     (extraMerged as any).rephraseBlocks.length > 0
   ) {
+    setSkip('ALREADY_HAS_REPHRASE_BLOCKS', {
+      blocksLen: (extraMerged as any)?.rephraseBlocks?.length ?? 0,
+    });
     return;
   }
 
-  // 3) slots
+  // ---- 3) slots ----
   const extraForRender = {
     ...(meta?.extra ?? {}),
     ...(extraMerged ?? {}),
@@ -202,9 +264,12 @@ async function maybeAttachRephraseForRenderV2(args: {
   };
 
   const extracted = extractSlotsForRephrase(extraForRender);
-  if (!extracted?.slots?.length) return;
+  if (!extracted?.slots?.length) {
+    setSkip('NO_SLOTS_FOR_REPHRASE');
+    return;
+  }
 
-  // 4) minimal userContext（直近履歴 + last_state）
+  // ---- 4) minimal userContext（直近履歴 + last_state） ----
   const normalizedHistory = normalizeHistoryMessages(historyMessages ?? null);
 
   const userContext = {
@@ -213,76 +278,85 @@ async function maybeAttachRephraseForRenderV2(args: {
     historyMessages: normalizedHistory.length ? normalizedHistory : undefined,
   };
 
-// 5) call LLM
-const model =
-  process.env.IROS_REPHRASE_MODEL ?? process.env.IROS_MODEL ?? 'gpt-4.1';
+  // ---- 5) call LLM ----
+  try {
+    const model =
+      process.env.IROS_REPHRASE_MODEL ?? process.env.IROS_MODEL ?? 'gpt-4.1';
 
-// ✅ q/depth を “確定済みmeta” から拾う（LLM_CALLログ/内部packに載せる）
-// ルール：snake_case（列と同期される）を最優先 → camel/unified は保険
-const qCodeForLLM =
-  (typeof (meta as any)?.q_code === 'string' && String((meta as any).q_code).trim()) ||
-  (typeof (meta as any)?.qCode === 'string' && String((meta as any).qCode).trim()) ||
-  (typeof (meta as any)?.qPrimary === 'string' && String((meta as any).qPrimary).trim()) ||
-  (typeof (meta as any)?.unified?.q?.current === 'string' && String((meta as any).unified.q.current).trim()) ||
-  null;
+    // ✅ q/depth を “確定済みmeta” から拾う（LLM_CALLログ/内部packに載せる）
+    const qCodeForLLM =
+      (typeof (meta as any)?.q_code === 'string' && String((meta as any).q_code).trim()) ||
+      (typeof (meta as any)?.qCode === 'string' && String((meta as any).qCode).trim()) ||
+      (typeof (meta as any)?.qPrimary === 'string' && String((meta as any).qPrimary).trim()) ||
+      (typeof (meta as any)?.unified?.q?.current === 'string' && String((meta as any).unified.q.current).trim()) ||
+      null;
 
-const depthForLLM =
-  (typeof (meta as any)?.depth_stage === 'string' && String((meta as any).depth_stage).trim()) ||
-  (typeof (meta as any)?.depthStage === 'string' && String((meta as any).depthStage).trim()) ||
-  (typeof (meta as any)?.depth === 'string' && String((meta as any).depth).trim()) ||
-  (typeof (meta as any)?.unified?.depth?.stage === 'string' && String((meta as any).unified.depth.stage).trim()) ||
-  null;
+    const depthForLLM =
+      (typeof (meta as any)?.depth_stage === 'string' && String((meta as any).depth_stage).trim()) ||
+      (typeof (meta as any)?.depthStage === 'string' && String((meta as any).depthStage).trim()) ||
+      (typeof (meta as any)?.depth === 'string' && String((meta as any).depth).trim()) ||
+      (typeof (meta as any)?.unified?.depth?.stage === 'string' && String((meta as any).unified.depth.stage).trim()) ||
+      null;
 
-const res = await rephraseSlotsFinal(extracted, {
-  model,
-  temperature: 0.2,
-  maxLinesHint: Number.isFinite(Number(process.env.IROS_RENDER_DEFAULT_MAXLINES))
-    ? Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)
-    : 8,
-  userText: userText ?? null,
-  userContext,
-  debug: {
-    traceId: traceId ?? null,
-    conversationId,
-    userCode,
-    renderEngine: true,
+    const res = await rephraseSlotsFinal(extracted, {
+      model,
+      temperature: 0.2,
+      maxLinesHint: Number.isFinite(Number(process.env.IROS_RENDER_DEFAULT_MAXLINES))
+        ? Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)
+        : 8,
+      userText: userText ?? null,
+      userContext,
+      debug: {
+        traceId: traceId ?? null,
+        conversationId,
+        userCode,
+        renderEngine: true,
+        mode: effectiveMode ?? null, // route最終決定
+        qCode: qCodeForLLM,
+        depthStage: depthForLLM,
+      },
+    });
 
-    // ✅ 追加：LLM_CALL監査ログの mode を埋める（route最終決定）
-    mode: effectiveMode ?? null,
+    if (!res.ok) {
+      meta.extra = {
+        ...(meta.extra ?? {}),
+        rephraseApplied: false,
+        rephraseAttachSkipped: false,
+        rephraseReason: res.reason ?? 'unknown',
+      };
+      (extraMerged as any).rephraseAttachSkipped = false;
+      (extraMerged as any).rephraseAttachReason = null;
+      return;
+    }
 
-    // ✅ 既存：q/depth
-    qCode: qCodeForLLM,
-    depthStage: depthForLLM,
-  },
+    (extraMerged as any).rephraseBlocks = (res as any).slots.map((s: any) => ({
+      text: s.text,
+    }));
 
-});
-
-if (!res.ok) {
-  meta.extra = {
-    ...(meta.extra ?? {}),
-    rephraseApplied: false,
-    rephraseReason: res.reason ?? 'unknown',
-  };
-  return;
+    meta.extra = {
+      ...(meta.extra ?? {}),
+      rephraseApplied: true,
+      rephraseAttachSkipped: false,
+      rephraseModel: model,
+      rephraseKeys: (res as any).meta?.outKeys ?? null,
+      rephraseRawLen: (res as any).meta?.rawLen ?? null,
+      rephraseRawHead: (res as any).meta?.rawHead ?? null,
+      rephraseQ: qCodeForLLM,
+      rephraseDepth: depthForLLM,
+    };
+  } catch (e) {
+    // 例外でも route を落とさない
+    meta.extra = {
+      ...(meta.extra ?? {}),
+      rephraseApplied: false,
+      rephraseAttachSkipped: false,
+      rephraseReason: 'EXCEPTION',
+      rephraseError: String((e as any)?.message ?? e),
+    };
+  }
 }
 
-(extraMerged as any).rephraseBlocks = (res as any).slots.map((s: any) => ({
-  text: s.text,
-}));
 
-meta.extra = {
-  ...(meta.extra ?? {}),
-  rephraseApplied: true,
-  rephraseModel: model,
-  rephraseKeys: (res as any).meta?.outKeys ?? null,
-  rephraseRawLen: (res as any).meta?.rawLen ?? null,
-  rephraseRawHead: (res as any).meta?.rawHead ?? null,
-
-  // ✅ 追跡しやすいように mirror（任意だけどおすすめ）
-  rephraseQ: qCodeForLLM,
-  rephraseDepth: depthForLLM,
-};
-}
 // =========================================================
 // OPTIONS
 // =========================================================

@@ -160,17 +160,22 @@ function shouldExcludeFromHistory(args: {
 }): boolean {
   const { role, content, meta, crossConversation } = args;
 
-  // metaで明示除外
+  // ① metaで明示除外
   if (isHiddenFromHistory(meta)) return true;
 
-  // 沈黙系は除外
+  // ② 沈黙系は常に除外
   if (isSilenceLike(content, meta)) return true;
 
-  // ✅ 跨ぎ履歴は user のみ（テンプレ汚染の根を断つ）
-  if (crossConversation && CROSS_CONV_USER_ONLY && role === 'assistant') return true;
+  // ③ cross-conversation は user のみ（assistant遮断）
+  if (crossConversation && CROSS_CONV_USER_ONLY && role === 'assistant') {
+    return true;
+  }
 
-  // 旧assistant汚染（念のため）
-  if (role === 'assistant' && isBannedAssistantHistoryText(content)) return true;
+  // ④ cross-conversation の assistant だけ、旧テンプレ汚染を遮断
+  //    same-conversation では「流れ」を守るため適用しない
+  if (crossConversation && role === 'assistant') {
+    if (isBannedAssistantHistoryText(content)) return true;
+  }
 
   return false;
 }
@@ -279,15 +284,41 @@ export async function loadRecentHistoryAcrossConversations(params: {
   supabase: SupabaseClient;
   userCode: string;
   limit?: number;
-  excludeConversationId?: string;
-}): Promise<HistoryXMsg[]> {
-  const { supabase, userCode, limit = 60, excludeConversationId } = params;
 
+  /**
+   * これまでは「跨ぎ履歴」専用で、同一conversationは excludeConversationId で除外していた。
+   * Phase1: 同一conversationの直近流れを LLM に見せるため、
+   * includeSameConversation=true のときは “同一conversation” も混ぜて返せるようにする。
+   */
+  excludeConversationId?: string;
+
+  // ✅ Phase1: 同一conversationを含める（デフォルトfalseで既存互換）
+  includeSameConversation?: boolean;
+
+  // ✅ Phase1: 同一conversationから取る件数（直近 N）
+  sameConversationLimit?: number;
+
+  // ✅ Phase1: cross-conv 側の最大件数（同一conversation優先のため別枠）
+  crossConversationLimit?: number;
+}): Promise<HistoryXMsg[]> {
+  const {
+    supabase,
+    userCode,
+    limit = 60,
+    excludeConversationId,
+    includeSameConversation = false,
+    sameConversationLimit = 8,
+    crossConversationLimit = 60,
+  } = params;
+
+  // ✅ 取得は広めに。あとで same/cross を分けて切り詰める
+  // - includeSameConversation=false の従来挙動では excludeConversationId で除外したい
+  // - includeSameConversation=true の場合は “いったん全部取り”、後段で same/cross 分離
   const picked = await tryLoadRows({
     supabase,
     userCode,
-    limit,
-    excludeConversationId,
+    limit: Math.max(limit, crossConversationLimit + sameConversationLimit + 20),
+    excludeConversationId: includeSameConversation ? undefined : excludeConversationId,
   });
 
   if (!picked.table) {
@@ -297,29 +328,58 @@ export async function loadRecentHistoryAcrossConversations(params: {
 
   const rows = picked.rows ?? [];
 
-  const filtered = rows
-    .filter((r) => {
-      if (!isRoleUserOrAssistant(r.role)) return false;
+  // 1) 正規化して role/content を作る
+  const normalized = rows
+    .map((r) => {
+      if (!isRoleUserOrAssistant(r.role)) return null;
 
       const role = String(r.role ?? '').toLowerCase() as 'user' | 'assistant';
       const content = normText(r.content ?? r.text);
-      if (!content) return false;
+      if (!content) return null;
 
-      // ✅ ここ：沈黙＋hidden＋（跨ぎはassistant遮断）を適用
+      const convId = String(r.conversation_id ?? '');
+      return { r, role, content, convId };
+    })
+    .filter(Boolean) as Array<{ r: MsgRow; role: 'user' | 'assistant'; content: string; convId: string }>;
+
+  // 2) same / cross に分離
+  const sameConvId = excludeConversationId ? String(excludeConversationId) : null;
+
+  const same = sameConvId
+    ? normalized.filter((x) => x.convId === sameConvId)
+    : [];
+
+  const cross = sameConvId
+    ? normalized.filter((x) => x.convId !== sameConvId)
+    : normalized;
+
+  // 3) フィルタ（same は crossConversation=false、cross は true）
+  const sameFiltered = same
+    .filter((x) => {
       if (
         shouldExcludeFromHistory({
-          role,
-          content,
-          meta: r.meta,
-          crossConversation: true,
+          role: x.role,
+          content: x.content,
+          meta: (x.r as any)?.meta,
+          crossConversation: false,
         })
       ) {
         return false;
       }
+      return true;
+    })
+    // DBは created_at desc で取ってるので、ここも “末尾が最新” になるよう reverse してから slice
+    .reverse();
 
+  const crossFiltered = cross
+    .filter((x) => {
       if (
-        excludeConversationId &&
-        String(r.conversation_id ?? '') === String(excludeConversationId)
+        shouldExcludeFromHistory({
+          role: x.role,
+          content: x.content,
+          meta: (x.r as any)?.meta,
+          crossConversation: true,
+        })
       ) {
         return false;
       }
@@ -327,19 +387,40 @@ export async function loadRecentHistoryAcrossConversations(params: {
     })
     .reverse();
 
+  // 4) 件数制御（同一conversationを最優先）
+  const samePicked =
+    includeSameConversation && sameConvId
+      ? sameFiltered.slice(Math.max(0, sameFiltered.length - Math.max(1, sameConversationLimit)))
+      : [];
+
+  const crossPicked = crossFiltered.slice(
+    Math.max(0, crossFiltered.length - Math.max(1, crossConversationLimit)),
+  );
+
+  // 5) 返却用に結合
+  // ✅ LLMに「直近の流れ」を見せたいので、same を最後に置く（末尾が最新）
+  const merged = includeSameConversation ? [...crossPicked, ...samePicked] : crossPicked;
+
   if (process.env.NODE_ENV !== 'production') {
     console.log('[IROS][HistoryX] loaded', {
       userCode,
       table: picked.table,
       rawCount: rows.length,
-      filteredCount: filtered.length,
+      normalizedCount: normalized.length,
+
+      // ✅ Phase1 判定用ログ
+      sameConversationIncluded: Boolean(includeSameConversation && sameConvId),
+      sameConvCount: samePicked.length,
+      crossConvCount: crossPicked.length,
+
       excludeConversationId: excludeConversationId ?? null,
       crossConvUserOnly: CROSS_CONV_USER_ONLY,
     });
   }
 
-  return filtered.map((r) => {
-    const content = normText(r.content ?? r.text);
+  return merged.map((x) => {
+    const r = x.r;
+    const content = x.content;
 
     // ✅ Phase3: 列優先で確定（metaは救済）
     const q = pickQCode(r);
@@ -348,19 +429,20 @@ export async function loadRecentHistoryAcrossConversations(params: {
     return {
       id: String(r.id ?? ''),
       conversation_id: String(r.conversation_id ?? ''),
-      role: String(r.role ?? '').toLowerCase() as 'user' | 'assistant',
+      role: x.role,
       content,
       created_at: String(r.created_at ?? ''),
 
       q_code: q,
       depth_stage: ds,
-      meta: r.meta ?? null,
+      meta: (r as any)?.meta ?? null,
 
-      text: r.text ?? null,
+      text: (r as any)?.text ?? null,
       message: null,
     };
   });
 }
+
 
 export function mergeHistoryForTurn(params: {
   dbHistory: HistoryXMsg[];

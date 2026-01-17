@@ -1,15 +1,11 @@
 // src/lib/iros/quality/flagshipGuard.ts
 // iros — Flagship Quality Guard
 //
-// 目的：
-// - 旗印「読み手が“自分で答えを出せる場所”」から外れる“汎用応援文”を落とす
-// - 「励まし＋一般質問」「〜かもしれません連発」「中身が薄い」などを WARN/FATAL
-//
-// 返すもの：
-// { ok, level, score, reasons, qCount, bulletLike, shouldRaiseFlag }
-// - ok=false なら rephraseEngine が reject する想定
-//
-// 注意：ここは“安全・汎用”ではなく “旗印” のための品質ゲート。
+// ✅方針（今回の変更）
+// - normalChat は「浅い会話/GPTっぽい」ことを許す（LLMの自然文を通す）
+// - flagReply / scaffoldLike は従来どおり厳しく（must-have / 汎用逃げを落とす）
+// - “質問っぽい” の数え方が normalChat で過敏すぎて FATAL になるのを止める
+//   → normalChat の qCount は「? / ？」の数だけにする（疑問文推定はしない）
 
 export type FlagshipVerdict = {
   ok: boolean;
@@ -23,12 +19,27 @@ export type FlagshipVerdict = {
     hedge: number;
     cheer: number;
     generic: number;
+
+    // 既存ログ互換（今は未使用でも0で返す）
+    runaway: number;
+    exaggeration: number;
+    mismatch: number;
+    retrySame: number;
   };
   reasons: string[];
 
   // ✅ WARNでも“停滞/体験崩れ”なら、上位で介入させるためのフラグ
-  // 例：HEDGE/GENERIC/汎用応援が強いのに、視点転換の兆候が弱い
   shouldRaiseFlag: boolean;
+};
+
+type GuardSlot = { key?: string; text?: string; content?: string; value?: string };
+
+export type FlagshipGuardContext = {
+  // ✅ slotKeys（inKeys）
+  slotKeys?: string[] | null;
+
+  // ✅ extracted.slots 等（ONE_POINT/PURPOSE/POINTS_3 の素材を拾う）
+  slotsForGuard?: GuardSlot[] | null;
 };
 
 function norm(s: string) {
@@ -38,10 +49,15 @@ function norm(s: string) {
     .trim();
 }
 
+function normLite(s: string) {
+  return norm(s).toLowerCase();
+}
+
 function countMatches(text: string, patterns: RegExp[]) {
   let c = 0;
   for (const p of patterns) {
-    const m = text.match(p);
+    const re = p.global ? p : new RegExp(p.source, p.flags + 'g');
+    const m = text.match(re);
     if (m) c += m.length;
   }
   return c;
@@ -51,17 +67,172 @@ function hasAny(text: string, patterns: RegExp[]) {
   return patterns.some((p) => p.test(text));
 }
 
-export function flagshipGuard(input: string): FlagshipVerdict {
+function toSlotText(s: GuardSlot | null | undefined): string {
+  if (!s) return '';
+  return String(s.text ?? s.content ?? s.value ?? '').trim();
+}
+
+function keyHas(k: string, word: string) {
+  return String(k ?? '').toUpperCase().includes(word.toUpperCase());
+}
+
+// ✅ “構造 must-have” を needle に落とす（完全一致要求はしない）
+function makeNeedle(raw: string, opts?: { min?: number; max?: number }): string | null {
+  const min = Math.max(6, Number(opts?.min ?? 10));
+  const max = Math.min(40, Math.max(min, Number(opts?.max ?? 18)));
+
+  const t = norm(raw)
+    .replace(/[「」『』【】\[\]（）\(\)"'’‘]/g, '')
+    .replace(/[、,。\.]/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .trim();
+
+  if (!t) return null;
+  if (t.length < min) return null;
+
+  return t.slice(0, Math.min(max, t.length));
+}
+
+function includesNeedle(out: string, needle: string | null): boolean {
+  if (!needle) return false;
+  const o = normLite(out);
+  const n = normLite(needle);
+  if (!o || !n) return false;
+  return o.includes(n);
+}
+
+// ✅ slots から must-have（purpose / one-point / points3）を抽出
+function extractScaffoldMustHave(ctx?: FlagshipGuardContext | null): {
+  scaffoldLike: boolean;
+  purposeNeedle: string | null;
+  onePointNeedle: string | null;
+  points3Needles: string[];
+} {
+  const slotKeys = Array.isArray(ctx?.slotKeys) ? ctx!.slotKeys!.map((x) => String(x)) : [];
+  const slots = Array.isArray(ctx?.slotsForGuard) ? (ctx!.slotsForGuard as GuardSlot[]) : [];
+
+  const scaffoldLike =
+    slotKeys.some((k) => keyHas(k, 'ONE_POINT')) ||
+    slotKeys.some((k) => keyHas(k, 'POINTS_3')) ||
+    slotKeys.some((k) => keyHas(k, 'PURPOSE')) ||
+    (slotKeys.length > 0 && slotKeys.every((k) => String(k).startsWith('FLAG_')));
+
+  let purposeNeedle: string | null = null;
+  let onePointNeedle: string | null = null;
+  const points3Needles: string[] = [];
+
+  for (const s of slots) {
+    const k = String(s?.key ?? '').toUpperCase();
+    const txt = toSlotText(s);
+    if (!txt) continue;
+
+    if (!purposeNeedle && (k.includes('PURPOSE') || k.includes('FLAG_PURPOSE'))) {
+      purposeNeedle = makeNeedle(txt, { min: 10, max: 20 });
+      continue;
+    }
+
+    if (!onePointNeedle && (k.includes('ONE_POINT') || k.includes('FLAG_ONE_POINT'))) {
+      onePointNeedle = makeNeedle(txt, { min: 10, max: 22 });
+      continue;
+    }
+
+    if (k.includes('POINTS_3') || k.includes('FLAG_POINTS_3')) {
+      const lines = norm(txt)
+        .split('\n')
+        .map((x) => x.replace(/^\s*[-*•]\s+/, '').trim())
+        .filter(Boolean);
+
+      for (const line of lines) {
+        const nd = makeNeedle(line, { min: 8, max: 20 });
+        if (nd && points3Needles.length < 3) points3Needles.push(nd);
+      }
+    }
+  }
+
+  return { scaffoldLike, purposeNeedle, onePointNeedle, points3Needles };
+}
+
+// ✅ 「?」だけでなく、?なし疑問文もカウント（flag/scaffold用）
+function countQuestionLike(text: string): number {
+  const t = norm(String(text ?? ''));
+
+  const markCount = (t.match(/[？?]/g) ?? []).length;
+
+  const lines = t
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  let likeCount = 0;
+
+  for (const line of lines) {
+    const s = line;
+
+    const hasWh =
+      /(どう(すれば|したら)?|なぜ|なんで|何(が|を|の)?|どこ|いつ|どれ|どんな|誰|誰が|誰に)/.test(s);
+
+    const endsLikeQuestion =
+      /(ですか|ますか|でしょうか|かな|か\W*$|の\W*$)/.test(s);
+
+    const askLike =
+      /(教えて|教えてください|聞かせて|聞かせてください|話して|話してみて|詳しく)/.test(s);
+
+    if (hasWh || endsLikeQuestion || askLike) likeCount += 1;
+  }
+
+  return markCount + likeCount;
+}
+
+// ✅ normalChat 判定（キーで判断）
+function isNormalChatLite(ctx?: FlagshipGuardContext | null): boolean {
+  const keys = Array.isArray(ctx?.slotKeys) ? ctx!.slotKeys!.map(String) : [];
+  if (keys.length === 0) return false;
+
+  // normalChat: SEED_TEXT / OBS / SHIFT が並ぶ（あなたの現行 normalChat.ts 構成）
+  const hasSeed = keys.includes('SEED_TEXT');
+  const hasObs = keys.includes('OBS');
+  const hasShift = keys.includes('SHIFT');
+
+  // flagReply は FLAG_ だらけ
+  const isFlag = keys.every((k) => String(k).startsWith('FLAG_'));
+
+  return !isFlag && hasSeed && hasObs && hasShift;
+}
+
+export function flagshipGuard(input: string, ctx?: FlagshipGuardContext | null): FlagshipVerdict {
   const t = norm(input);
 
   const reasons: string[] = [];
-  const qCount = (t.match(/[？?]/g) ?? []).length;
+  const normalLite = isNormalChatLite(ctx);
 
-  // 箇条書きっぽさ（旗印というより“助言テンプレ”になりがち）
+  // ✅ qCount: normalChat は「?の数だけ」/ それ以外は従来の “疑問文推定込み”
+  const qCountMark = (t.match(/[？?]/g) ?? []).length;
+  const qCountStrict = countQuestionLike(t);
+  const qCount = normalLite ? qCountMark : qCountStrict;
+
   const bulletLike =
     /(^|\n)\s*[-*•]\s+/.test(t) || /(^|\n)\s*\d+\.\s+/.test(t) ? 1 : 0;
 
-  // “汎用応援”の語彙（これが多いほど危険）
+  // ---------------------------------------------
+  // ✅ 構造（must-have）ベース判定（flag/scaffold向け）
+  // ---------------------------------------------
+  const mh = extractScaffoldMustHave(ctx);
+  const hasPurpose = includesNeedle(t, mh.purposeNeedle);
+  const hasOnePoint = includesNeedle(t, mh.onePointNeedle);
+  const hasPoints3 =
+    mh.points3Needles.length === 0 ? true : mh.points3Needles.every((nd) => includesNeedle(t, nd));
+
+  // normalChat では scaffoldMustHave を強く当てない（浅い会話を通す）
+  if (!normalLite && mh.scaffoldLike) {
+    if (mh.purposeNeedle && !hasPurpose) reasons.push('SCAFFOLD_PURPOSE_MISSING');
+    if (mh.onePointNeedle && !hasOnePoint) reasons.push('SCAFFOLD_ONE_POINT_MISSING');
+    if (mh.points3Needles.length > 0 && !hasPoints3) reasons.push('SCAFFOLD_POINTS3_NOT_PRESERVED');
+  }
+
+  // ---------------------------------------------
+  // 文字列判定（最後の保険）
+  // normalChat は “多少のGPTっぽさ” を許すので弱めにする
+  // ---------------------------------------------
   const CHEER = [
     /ワクワク/g,
     /素晴らしい/g,
@@ -73,8 +244,6 @@ export function flagshipGuard(input: string): FlagshipVerdict {
     /前向き/g,
     /きっと/g,
     /新しい発見/g,
-
-    // ✅ よくある“励まし締め”系
     /一歩/g,
     /進展/g,
     /大きな一歩/g,
@@ -83,36 +252,34 @@ export function flagshipGuard(input: string): FlagshipVerdict {
     /安心して/g,
   ];
 
-  // “ぼかし/逃げ”の語彙（これが多いと「判断の責任を文章が回避」しやすい）
   const HEDGE = [
     /かもしれません/g,
     /かもしれない/g,
     /(?:見えて|分かって)くるかもしれない/g,
-    /感じ(ています|ます)か/g,
-    /〜?すると(?:.*)?(良い|上がる|見える|変わる)/g,
     /と思います/g,
     /ように/g,
     /できるかもしれ/g,
   ];
 
-  // “一般化しすぎ”を示す語彙（誰にでも当てはまる）
   const GENERIC = [
-    /全体の完成度/g,
-    /鍵になる/g,
-    /考えると/g,
-    /役に立つ/g,
-    /良くなる/g,
-    /高まる/g,
-    /上がる/g,
-
-    // ✅ “抽象まとめ”系
-    /全体像/g,
-    /ステップ/g,
-    /要素/g,
+    /ことがある/u,
+    /一つの手/u,
+    /整理してみる/u,
+    /きっかけになる/u,
+    /自然に/u,
+    /考えてみると/u,
+    /見えてくる/u,
+    /明確にする/u,
+    /〜?みると/u,
+    /〜?かもしれ/u,
+    /〜?と思い/u,
+    /〜?でしょう/u,
+    /〜?可能性/u,
+    /感じがある/u,
+    /感じがする/u,
+    /感じがします/u,
   ];
 
-  // 旗印側の「視点を一段変える」「読み手の位置を作る」っぽい語彙
-  // ※これがゼロで、かつ CHEER/HEDGE/GENERIC が多いと “汎用文” と判定する
   const FLAGSHIP_SIGNS = [
     /見方/g,
     /視点/g,
@@ -130,80 +297,122 @@ export function flagshipGuard(input: string): FlagshipVerdict {
   const generic = countMatches(t, GENERIC);
   const hasFlagshipSign = hasAny(t, FLAGSHIP_SIGNS);
 
+  // ---------------------------------------------
   // スコア化
+  // ---------------------------------------------
   let fatal = 0;
   let warn = 0;
 
-  // ルール1: 質問は最大1（既存ポリシーと整合）
-  if (qCount >= 2) {
-    fatal += 2;
-    reasons.push('QCOUNT_TOO_MANY');
-  } else if (qCount === 1) {
-    // 単体の質問でも“汎用質問”に寄りやすいので軽く加点
-    warn += 1;
-    reasons.push('QCOUNT_ONE');
+  // ✅ ルール: 質問の扱い
+  //
+  // - normalChat: 1〜2は許す（会話の自然さを優先）
+  // - flag/scaffold: 従来どおり最大1（2以上はFATAL）
+  if (normalLite) {
+    if (qCount >= 3) {
+      fatal += 2;
+      reasons.push('QCOUNT_TOO_MANY');
+    } else if (qCount === 2) {
+      warn += 1;
+      reasons.push('QCOUNT_TWO');
+    } else if (qCount === 1) {
+      // normalChatは “会話をつなぐ1問” を普通に許す
+      reasons.push('QCOUNT_ONE');
+    }
+  } else {
+    if (qCount >= 2) {
+      fatal += 2;
+      reasons.push('QCOUNT_TOO_MANY');
+    } else if (qCount === 1) {
+      warn += 1;
+      reasons.push('QCOUNT_ONE');
+    }
   }
 
-  // ルール2: 汎用応援＋ぼかしが多いほど危険
-  if (cheer >= 2) {
-    warn += 2;
-    reasons.push('CHEER_MANY');
-  } else if (cheer === 1) {
-    warn += 1;
-    reasons.push('CHEER_PRESENT');
+  // ✅ scaffoldLike で must-have が欠けたら FATAL（ただし normalChat では発火させない）
+  if (!normalLite && mh.scaffoldLike) {
+    const missingMustHave =
+      reasons.includes('SCAFFOLD_PURPOSE_MISSING') ||
+      reasons.includes('SCAFFOLD_ONE_POINT_MISSING') ||
+      reasons.includes('SCAFFOLD_POINTS3_NOT_PRESERVED');
+
+    if (missingMustHave) {
+      fatal += 2;
+      reasons.push('SCAFFOLD_MUST_HAVE_BROKEN');
+    }
   }
 
-  if (hedge >= 2) {
-    warn += 2;
-    reasons.push('HEDGE_MANY');
-  } else if (hedge === 1) {
-    warn += 1;
-    reasons.push('HEDGE_PRESENT');
-  }
+  // 補助ルール（normalChatは弱め、flag/scaffoldは従来どおり）
+  if (!normalLite) {
+    if (cheer >= 2) {
+      warn += 2;
+      reasons.push('CHEER_MANY');
+    } else if (cheer === 1) {
+      warn += 1;
+      reasons.push('CHEER_PRESENT');
+    }
 
-  // ルール3: “誰にでも言える”語彙が多い
-  if (generic >= 2) {
-    warn += 2;
-    reasons.push('GENERIC_MANY');
-  } else if (generic === 1) {
-    warn += 1;
-    reasons.push('GENERIC_PRESENT');
-  }
+    if (hedge >= 2) {
+      warn += 2;
+      reasons.push('HEDGE_MANY');
+    } else if (hedge === 1) {
+      warn += 1;
+      reasons.push('HEDGE_PRESENT');
+    }
 
-  // ルール4: 箇条書きテンプレは warn
-  if (bulletLike) {
-    warn += 1;
-    reasons.push('BULLET_LIKE');
-  }
+    if (generic >= 2) {
+      warn += 2;
+      reasons.push('GENERIC_MANY');
+    } else if (generic === 1) {
+      warn += 1;
+      reasons.push('GENERIC_PRESENT');
+    }
 
-  // ルール5（重要）:
-  // 「CHEER/HEDGE/GENERIC が強いのに、旗印シグナルがゼロ」なら “汎用応援文” として落とす
-  const blandPressure = cheer + hedge + generic;
-  if (!hasFlagshipSign && blandPressure >= 4) {
-    fatal += 2;
-    reasons.push('NO_FLAGSHIP_SIGN_WITH_BLAND_PRESSURE');
-  }
+    if (bulletLike) {
+      warn += 1;
+      reasons.push('BULLET_LIKE');
+    }
 
-  // ルール6:
-  // 短文で「励まし＋一般質問」だけの形は “会話が進まない” ので落とす
-  if (t.length <= 160 && qCount === 1 && !hasFlagshipSign && cheer + hedge >= 2) {
-    fatal += 2;
-    reasons.push('SHORT_GENERIC_CHEER_WITH_QUESTION');
+    // 重要：汎用圧が高いのに視点兆候ゼロ
+    const blandPressure = cheer + hedge + generic;
+    if (!mh.scaffoldLike && !hasFlagshipSign && blandPressure >= 4) {
+      fatal += 2;
+      reasons.push('NO_FLAGSHIP_SIGN_WITH_BLAND_PRESSURE');
+    }
+
+    // 短文で「励まし＋一般質問」だけ
+    if (!mh.scaffoldLike && t.length <= 160 && qCount === 1 && !hasFlagshipSign && cheer + hedge >= 2) {
+      fatal += 2;
+      reasons.push('SHORT_GENERIC_CHEER_WITH_QUESTION');
+    }
   }
 
   // 最終判定
+  const slotKeys = Array.isArray(ctx?.slotKeys) ? ctx!.slotKeys!.map(String) : [];
+  const isFlagReplyLike = slotKeys.length > 0 && slotKeys.every((k) => String(k).startsWith('FLAG_'));
+
   let level: FlagshipVerdict['level'] = 'OK';
+
+  const warnThreshold = (!normalLite && (mh.scaffoldLike || isFlagReplyLike)) ? 2 : 3;
+
   if (fatal >= 2) level = 'FATAL';
-  else if (warn >= 3) level = 'WARN';
+  else if (warn >= warnThreshold) level = 'WARN';
 
   const ok = level !== 'FATAL';
 
-  // ✅ WARNでも“停滞/体験崩れ”なら上位で介入させたい
-  // - FATAL は当然 raise
-  // - WARN は「ぼかし/汎用が強い」「旗印シグナルが弱い」などで raise
-  const shouldRaiseFlag =
-    level === 'FATAL' ||
-    (level === 'WARN' && (hedge >= 3 || generic >= 2 || (!hasFlagshipSign && blandPressure >= 3)));
+  // ✅ shouldRaiseFlag
+  // normalChatは “体験崩れ” でも軽く流す（上位介入しない）
+  let shouldRaiseFlag = false;
+  if (!normalLite) {
+    const blandPressure = cheer + hedge + generic;
+    shouldRaiseFlag =
+      level === 'FATAL' ||
+      (level === 'WARN' &&
+        (reasons.includes('SCAFFOLD_POINTS3_NOT_PRESERVED') ||
+          reasons.includes('SCAFFOLD_PURPOSE_MISSING') ||
+          hedge >= 3 ||
+          generic >= 2 ||
+          (!hasFlagshipSign && blandPressure >= 3)));
+  }
 
   return {
     ok,
@@ -217,6 +426,12 @@ export function flagshipGuard(input: string): FlagshipVerdict {
       hedge,
       cheer,
       generic,
+
+      // 互換: 今回はカウントしないので0
+      runaway: 0,
+      exaggeration: 0,
+      mismatch: 0,
+      retrySame: 0,
     },
     reasons,
     shouldRaiseFlag,

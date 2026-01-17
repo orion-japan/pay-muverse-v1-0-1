@@ -87,6 +87,15 @@ function detectInputKind(userText: string): InputKind {
   const s = String(userText ?? '').trim();
   if (!s) return 'unknown';
 
+  // ✅ recall-check（会話を覚えてる？系）: 質問扱いにすると frame=R でテンプレ化しやすいので chat 扱いに落とす
+  // 例: 「会社の話し覚えてる？」「前の話覚えてる？」「さっきの話覚えてる？」「覚えてますか？」
+  if (
+    /(覚えて(る|ます)|覚えてますか|覚えてる\?|覚えてる？)/.test(s) &&
+    /(話|こと|件|それ|この件|前|さっき|昨日|先週|会社)/.test(s)
+  ) {
+    return 'chat';
+  }
+
   if (/(達成|サマリ|進捗|振り返り|まとめ|総括|レビュー|できたこと|やったこと)/.test(s)) {
     return 'review';
   }
@@ -105,6 +114,7 @@ function detectInputKind(userText: string): InputKind {
 
   return 'chat';
 }
+
 
 export async function buildTurnContext(
   args: BuildTurnContextArgs,

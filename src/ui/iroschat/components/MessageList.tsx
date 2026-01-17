@@ -556,110 +556,29 @@ return (
         maxWidth: 'min(760px, 88%)',
       }}
     >
-      {/* Vision系ヘッダー（Mode / Hint） */}
-      {(isVisionMode || isVisionHint) && (
-        <div style={seedHeaderStyle}>
-          <div style={seedLabelStyle}>
-            {isVisionMode ? (
-              <>
-                <span>🌌 Vision Mode</span>
-                <span style={seedTLHintStyle}>{tHint}</span>
-                {m.meta?.tLayerModeActive && (
-                  <span style={{ marginLeft: 6, fontSize: 14 }}>✨</span>
-                )}
-              </>
-            ) : (
-              <span style={{ fontSize: 14, opacity: 0.9 }}>✨</span>
-            )}
-          </div>
-        </div>
-      )}
+{/* 本文 */}
+<div
+  className="msgBody"
+  style={{ fontSize: 14, lineHeight: 1.9, color: '#111827' }}
+>
+  {isSilence ? (
+    <div
+      className="assistant-silence"
+      style={{
+        opacity: 0.75,
+        letterSpacing: 2,
+        padding: '2px 0',
+        userSelect: 'none',
+      }}
+      aria-label="silence"
+    >
+      …
+    </div>
+  ) : (
+    <ChatMarkdown text={safeText} />
+  )}
+</div>
 
-      {/* 本文＋「次の一歩」ボタン */}
-      <div
-        className={`msgBody ${isVisionMode ? 'vision-theme' : ''} ${
-          isVisionHint ? 'vision-hint-theme' : ''
-        }`}
-        style={{ fontSize: 14, lineHeight: 1.9, color: '#111827' }}
-      >
-        {/* 本文 */}
-        {isSilence ? (
-          <div
-            className="assistant-silence"
-            style={{
-              opacity: 0.75,
-              letterSpacing: 2,
-              padding: '2px 0',
-              userSelect: 'none',
-            }}
-            aria-label="silence"
-          >
-            …
-          </div>
-        ) : (
-          <ChatMarkdown text={safeText} />
-        )}
-
-        {/* ★ WILLエンジンの「次の一歩」オプション（必要なときだけ表示） */}
-        {!isUser &&
-          !isSilence &&
-          nextStep?.options &&
-          nextStep.options.length > 0 && (
-            <div
-              style={{
-                marginTop: 16,
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: 8,
-              }}
-            >
-              {nextStep.options.map((opt) => {
-                // ✅ 受け取り options が旧型でも新型でも動くように正規化
-                const normalized = {
-                  id: (opt as any).id ?? (opt as any).key ?? opt.key, // ← choiceId 本体
-                  key: (opt as any).key ?? opt.key,                  // ← A/B/C など表示用
-                  label: (opt as any).label ?? '',
-                  description: (opt as any).description,
-                };
-
-                return (
-                  <IrosButton
-                    key={String(normalized.id)}
-                    option={normalized as any}
-                    gear={nextStep.gear as IrosNextStepGear}
-                    pending={loading}
-                    onClick={async (option) => {
-                      const id = String((option as any).id ?? option.key ?? '');
-                      const displayLabel = String(option.label ?? '');
-
-                      const alreadyTagged =
-                        displayLabel.startsWith(`[${id}]`) || displayLabel.startsWith('[');
-
-                      const rawText = alreadyTagged
-                        ? displayLabel
-                        : `[${id}] ${displayLabel}`;
-
-                      console.log('[IROS UI] nextStep option clicked', {
-                        id,
-                        displayLabel,
-                        rawText,
-                        gear: nextStep.gear ?? null,
-                      });
-
-                      if (sendNextStepChoice) {
-                        await sendNextStepChoice({
-                          key: id,
-                          label: rawText,
-                          gear: (nextStep.gear ?? null) as string | null,
-                        });
-                      }
-                    }}
-                  />
-                );
-              })}
-            </div>
-          )}
-      </div>
     </div>
   </div>
 );
