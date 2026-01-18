@@ -1394,11 +1394,28 @@ const historyText = extractHistoryTextFromContext(opts?.userContext ?? null);
 const lastTurns = extractLastTurnsFromContext(opts?.userContext ?? null);
 
 // slot由来の下書き（露出禁止）
-const seedDraftRaw = extracted.slots.map((s) => s.text).filter(Boolean).join('\n');
+// - seedDraft は「露出してもいい本文素材」だけを集める（TASK/CONSTRAINTS などのメタは禁止）
+// - recallMust は “全量” から拾って system で強制する（seedDraft とは分離）
+const seedDraftRawAll = extracted.slots.map((s) => s.text).filter(Boolean).join('\n');
 
-// recall-guard must include を seedDraft から抽出して system に強制する
-const recallMust = extractRecallMustIncludeFromSeed(seedDraftRaw);
+const seedDraftRaw = extracted.slots
+  .filter((s) => {
+    const k = String((s as any)?.key ?? '');
+    // ✅ seed に残してよいものだけ
+    if (k === 'OBS') return true;
+    if (k === 'DRAFT') return true;
+    if (k.startsWith('FLAG_')) return true;
+    // （必要ならここに 'END' / 'NEXT_HINT' 等を追加）
+    return false;
+  })
+  .map((s) => s.text)
+  .filter(Boolean)
+  .join('\n');
+
+// recall-guard must include を “全量” から抽出して system に強制する
+const recallMust = extractRecallMustIncludeFromSeed(seedDraftRawAll);
 const mustIncludeRuleText = buildMustIncludeRuleText(recallMust);
+
 
 // ILINE抽出：slot + userText 両方から拾う
 const lockSourceRaw = [seedDraftRaw, userText].filter(Boolean).join('\n');
@@ -1546,6 +1563,60 @@ const seedFromSlots = seedFromSlotsRaw
       slotsForGuard: (extracted?.slots ?? null) as any,
       llmOut: raw,
     });
+
+// ✅ counsel: 「相談ですが」みたいな“相談入口だけ”のターンは、LLMに上書きさせない。
+// - FINAL_FORCE_CALL でも、最終テキストは DRAFT を採用して会話を噛ませる
+// - ここで質問/説明が出ると「テンプレ質問」に戻るので強制的に塞ぐ
+function forceDraftForCounselConsultOpen(args: {
+  slotKeys: string[];
+  slotsForGuard: Array<{ key?: string; text?: string; content?: string; value?: string }> | null;
+  llmOut: string;
+}): { used: boolean; text: string } {
+  const keys = Array.isArray(args.slotKeys) ? args.slotKeys : [];
+  const slots = Array.isArray(args.slotsForGuard) ? args.slotsForGuard : [];
+
+  // counsel 4スロット構成を検知（OBS/TASK/CONSTRAINTS/DRAFT）
+  const isCounselPack =
+    keys.includes('OBS') && keys.includes('TASK') && keys.includes('CONSTRAINTS') && keys.includes('DRAFT');
+
+  if (!isCounselPack) return { used: false, text: args.llmOut };
+
+  // OBS から userText を取る（@OBS JSON）
+  const obs = slots.find((s) => String(s?.key ?? '') === 'OBS');
+  const obsText = String(obs?.content ?? obs?.text ?? obs?.value ?? '');
+
+  // userText 抽出（安全側に：失敗したら空）
+  let userText = '';
+  try {
+    const m = obsText.match(/@OBS\s+(\{.*\})/);
+    if (m && m[1]) {
+      const j = JSON.parse(m[1]);
+      userText = String(j?.userText ?? '');
+    }
+  } catch {
+    userText = '';
+  }
+
+  const t = String(userText ?? '').replace(/\r\n/g, '\n').trim();
+
+  // 「相談ですが / ちょっと相談 / 相談です」等の“入口だけ”かつ短文
+  const isConsultOpenShort =
+    t.length > 0 &&
+    t.length <= 12 &&
+    /(相談(ですが|です)?|ちょっと相談|相談なんだけど|相談したい)/.test(t);
+
+  if (!isConsultOpenShort) return { used: false, text: args.llmOut };
+
+  // DRAFT を最終採用
+  const draft = slots.find((s) => String(s?.key ?? '') === 'DRAFT');
+  const draftText = String(draft?.content ?? draft?.text ?? draft?.value ?? '').trim();
+
+  if (!draftText) return { used: false, text: args.llmOut };
+
+  return { used: true, text: draftText };
+}
+
+
 
     console.log('[IROS/REPHRASE][RECALL_GUARD]', {
       traceId: debug.traceId,

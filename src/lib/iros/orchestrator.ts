@@ -1068,6 +1068,22 @@ export async function runIrosTurn(
 
       return consultish || directTask || wantsStructure || innerShort;
     }
+// =========================================================
+// ✅ counsel 明示トリガー（テスト用）
+// - 先頭に /counsel を付けたら強制で counsel にする
+// - ついでに /consult も許可（手癖用）
+// - 本文は strip して meta に残すのは caller（ここ）側でやる
+// =========================================================
+function detectCounselCommand(raw: unknown): { forced: boolean; strippedText: string } {
+  const t = String(raw ?? '').replace(/\r\n/g, '\n');
+
+  // 先頭コマンドのみを対象（本文中の /counsel は誤爆させない）
+  const m = t.match(/^\s*\/(counsel|consult)\b[ \t]*\n?([\s\S]*)$/i);
+  if (!m) return { forced: false, strippedText: t.trim() };
+
+  const rest = String(m[2] ?? '').trim();
+  return { forced: true, strippedText: rest };
+}
 
     // =========================================================
     // ✅ counsel 条件（モード or 構造）
@@ -1142,103 +1158,113 @@ export async function runIrosTurn(
 
 
 
-    // =========================================================
-    // ✅ counsel 配線：normalChat fallback の前に差し込む
-    // - mode名の揺れ：'counsel' / 'consult' を両方拾う
-    // - stage はまず OPEN 固定（永続化は次工程）
-    // - 相談モードでなくても、構造が counsel を要求するなら拾う
-    // =========================================================
-    const modeRaw = String((meta as any)?.mode ?? '').toLowerCase();
-    const isCounselMode = modeRaw === 'counsel' || modeRaw === 'consult';
+// =========================================================
+// ✅ counsel 配線：normalChat fallback の前に差し込む
+// - mode名の揺れ：'counsel' / 'consult' を両方拾う
+// - stage はまず OPEN 固定（永続化は次工程）
+// - 相談モードでなくても、構造が counsel を要求するなら拾う
+// - ✅ テスト用：/counsel コマンドで強制（本文は strip 後を使う）
+// =========================================================
+const modeRaw = String((meta as any)?.mode ?? '').toLowerCase();
+const isCounselMode = modeRaw === 'counsel' || modeRaw === 'consult';
 
-    const shouldUseCounsel =
-      isCounselMode || shouldUseCounselByStructure(meta as any, text);
+// ✅ /counsel（/consult）明示トリガー
+const { forced: forcedCounsel, strippedText } = detectCounselCommand(text);
 
-    if (!isSilence && hasText && shouldUseCounsel) {
-      const lastSummary =
-        (ms as any)?.situation_summary ??
-        (ms as any)?.situationSummary ??
-        (memoryState as any)?.situation_summary ??
-        (memoryState as any)?.situationSummary ??
-        (mergedBaseMeta as any)?.situation_summary ??
-        (mergedBaseMeta as any)?.situationSummary ??
-        null;
+// ✅ 以降の判定・slot生成に使う「本文」（/counsel は混ぜない）
+const textForCounsel = forcedCounsel ? strippedText : text;
+const hasTextForCounsel = String(textForCounsel ?? '').trim().length > 0;
 
-      console.log('[IROS/ORCH][counsel-picked]', {
-        stage: 'OPEN',
-        modeRaw,
-        shouldUseCounselByStructure: !isCounselMode,
-        hasText: String(text ?? '').trim().length > 0,
-        isSilence,
-        lastSummary_len:
-          typeof lastSummary === 'string' ? lastSummary.length : null,
-      });
+// ✅ “counselに入るか” 判定（強制 → counsel）
+const shouldUseCounsel =
+  !!forcedCounsel || isCounselMode || shouldUseCounselByStructure(meta as any, textForCounsel);
 
-      const counsel = buildCounselSlotPlan({
-        userText: text,
-        stage: 'OPEN',
-        lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
-      });
+if (!isSilence && hasTextForCounsel && shouldUseCounsel) {
+  const lastSummary =
+    (ms as any)?.situation_summary ??
+    (ms as any)?.situationSummary ??
+    (memoryState as any)?.situation_summary ??
+    (memoryState as any)?.situationSummary ??
+    (mergedBaseMeta as any)?.situation_summary ??
+    (mergedBaseMeta as any)?.situationSummary ??
+    null;
 
-      const cSlots = (counsel as any).slots;
-      const cPolicy = (counsel as any).slotPlanPolicy;
+  console.log('[IROS/ORCH][counsel-picked]', {
+    stage: 'OPEN',
+    modeRaw,
+    forcedCounsel,
+    shouldUseCounselByStructure: !forcedCounsel && !isCounselMode,
+    hasText: hasTextForCounsel,
+    isSilence,
+    strippedLen: forcedCounsel ? String(strippedText ?? '').length : null,
+    lastSummary_len: typeof lastSummary === 'string' ? lastSummary.length : null,
+  });
 
-      // ✅ flagReply が既に入っている場合でも counsel を優先する（相談の進行を守る）
-      slotsArr = Array.isArray(cSlots) ? cSlots : [];
-      slotPlanPolicy =
-        typeof cPolicy === 'string' && cPolicy.trim() ? cPolicy.trim() : 'FINAL';
+  const counsel = buildCounselSlotPlan({
+    userText: textForCounsel, // ✅ strip後
+    stage: 'OPEN',
+    lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
+  });
 
-      // flagReply 既存なら “上書き元” を残す
-      (meta as any).slotPlanFallback =
-        (meta as any).slotPlanFallback ?? 'counsel';
+  const cSlots = (counsel as any).slots;
+  const cPolicy = (counsel as any).slotPlanPolicy;
 
-      console.log('[IROS/ORCH][counsel-picked]', {
-        stage: 'OPEN',
-        slotsLen: Array.isArray(slotsArr) ? slotsArr.length : null,
-        policy: slotPlanPolicy,
-      });
-    }
+  // ✅ flagReply が既に入っている場合でも counsel を優先する（相談の進行を守る）
+  slotsArr = Array.isArray(cSlots) ? cSlots : [];
+  slotPlanPolicy =
+    typeof cPolicy === 'string' && cPolicy.trim() ? cPolicy.trim() : 'FINAL';
 
-    // 5) fallback（normalChat）
-    // - slots が空 or policy が空 のときだけ
-    // - counsel で埋まっていれば実行しない
-    const slotsEmpty =
-      !Array.isArray(slotsArr) || (Array.isArray(slotsArr) && slotsArr.length === 0);
-    const policyEmpty =
-      !slotPlanPolicy || String(slotPlanPolicy).trim().length === 0;
+  // flagReply 既存なら “上書き元” を残す
+  (meta as any).slotPlanFallback =
+    (meta as any).slotPlanFallback ?? 'counsel';
 
-    const shouldFallbackNormalChat =
-      !isSilence && hasText && (slotsEmpty || policyEmpty) && !shouldUseCounsel;
+  console.log('[IROS/ORCH][counsel-picked]', {
+    stage: 'OPEN',
+    slotsLen: Array.isArray(slotsArr) ? slotsArr.length : null,
+    policy: slotPlanPolicy,
+  });
+}
 
-    if (shouldFallbackNormalChat) {
-      const lastSummary =
-        (ms as any)?.situation_summary ??
-        (ms as any)?.situationSummary ??
-        (memoryState as any)?.situation_summary ??
-        (memoryState as any)?.situationSummary ??
-        (mergedBaseMeta as any)?.situation_summary ??
-        (mergedBaseMeta as any)?.situationSummary ??
-        null;
+// 5) fallback（normalChat）
+// - slots が空 or policy が空 のときだけ
+// - counsel で埋まっていれば実行しない
+const slotsEmpty =
+  !Array.isArray(slotsArr) || (Array.isArray(slotsArr) && slotsArr.length === 0);
+const policyEmpty =
+  !slotPlanPolicy || String(slotPlanPolicy).trim().length === 0;
 
-      const fallback = buildNormalChatSlotPlan({
-        userText: text,
-        context: {
-          lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
-        },
-      });
+const shouldFallbackNormalChat =
+  !isSilence && hasTextForCounsel && (slotsEmpty || policyEmpty) && !shouldUseCounsel;
 
-      const fbSlots = (fallback as any).slots;
-      slotsArr = Array.isArray(fbSlots) ? fbSlots : [];
+if (shouldFallbackNormalChat) {
+  const lastSummary =
+    (ms as any)?.situation_summary ??
+    (ms as any)?.situationSummary ??
+    (memoryState as any)?.situation_summary ??
+    (memoryState as any)?.situationSummary ??
+    (mergedBaseMeta as any)?.situation_summary ??
+    (mergedBaseMeta as any)?.situationSummary ??
+    null;
 
-      const fp = (fallback as any).slotPlanPolicy;
-      slotPlanPolicy = typeof fp === 'string' && fp.trim() ? fp.trim() : 'FINAL';
+  const fallback = buildNormalChatSlotPlan({
+    userText: textForCounsel, // ✅ strip後（/counsel が混ざらない）
+    context: {
+      lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
+    },
+  });
 
-      (meta as any).slotPlanFallback = 'normalChat';
-    } else {
-      if ((meta as any).slotPlanFallback === 'normalChat') {
-        delete (meta as any).slotPlanFallback;
-      }
-    }
+  const fbSlots = (fallback as any).slots;
+  slotsArr = Array.isArray(fbSlots) ? fbSlots : [];
+
+  const fp = (fallback as any).slotPlanPolicy;
+  slotPlanPolicy = typeof fp === 'string' && fp.trim() ? fp.trim() : 'FINAL';
+
+  (meta as any).slotPlanFallback = 'normalChat';
+} else {
+  if ((meta as any).slotPlanFallback === 'normalChat') {
+    delete (meta as any).slotPlanFallback;
+  }
+}
 
 // =========================================================
 // ✅ A) normalChat → flagReply 自動切替（仮置き一点の安全装置）
