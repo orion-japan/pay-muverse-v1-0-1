@@ -318,7 +318,7 @@ function transformIrTemplateToMarkdown(input: string): string {
   const out: string[] = [];
 
   if (data.target) {
-    out.push('**🧿 観測対象**', '', data.target, '');
+    out.push('### 🧿 観測対象', '', data.target, '');
   }
 
   if (data.depth || data.phase) {
@@ -326,22 +326,23 @@ function transformIrTemplateToMarkdown(input: string): string {
     if (data.depth) meta.push(`深度：${data.depth}`);
     if (data.phase) meta.push(`位相：${data.phase}`);
     if (meta.length) {
-      out.push('**構造メモ**', '', meta.join(' / '), '');
+      out.push('### 構造メモ', '', meta.join(' / '), '');
     }
   }
 
   out.push('---', '');
 
   if (stateText) {
-    out.push('', '**🌀 意識状態**', '', stateText, '');
+    out.push('### 🌀 意識状態', '', stateText, '');
   }
 
   if (messageText) {
-    out.push('', '**🌱 メッセージ**', '', messageText, '');
+    out.push('### 🌱 メッセージ', '', messageText, '');
   }
 
   return out.join('\n');
 }
+
 
 /**
  * 太字まわりのゆらぎを正規化する

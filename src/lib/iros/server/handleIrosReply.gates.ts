@@ -420,6 +420,7 @@ export async function runGreetingGate(args: any): Promise<{
 
   const userText = norm(args?.userText ?? args?.text ?? args?.input_text ?? args?.lastUserText ?? '');
 
+  // 記号・空白・絵文字を落として「挨拶だけ」かを見る
   const core = userText
     .replace(/[。．.!！?？\s]+/g, '')
     .replace(/[\u{1F300}-\u{1FAFF}]/gu, '');
@@ -436,9 +437,20 @@ export async function runGreetingGate(args: any): Promise<{
 
   if (!hit) return { ok: false, result: null, metaForSave: null };
 
+  // ✅ 固定テンプレを避ける：ここは「素材」だけ返す（判断しない）
+  // - 「続けてどうぞ。」は機械っぽいので撤去
+  // - 質問は 0〜1 に収める（今回は 1）
+  // - iros語は出しすぎず、Sofia寄せの余白で
+  const seed = `${hit}\n今日はどんなところから始めます？🪔`;
+
   return {
     ok: true,
-    result: `${hit}\n続けてどうぞ。`,
-    metaForSave: null,
+    result: seed,
+    metaForSave: {
+      gate: 'greeting',
+      // 上位で「このターンもLLM整形に流す」判定に使えるよう、印だけ残す
+      prefer_llm_writer: true,
+    },
   };
 }
+

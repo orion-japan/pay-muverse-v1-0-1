@@ -18,6 +18,9 @@
 import type { SlotPlanPolicy } from '../server/llmGate';
 import { observeFlow } from '../input/flowObserver';
 
+// ✅ 追加：HowTo/方法質問を「立ち位置」へ変換する slots
+import { shouldUseQuestionSlots, buildQuestionSlots } from './QuestionSlots';
+
 // --------------------------------------------------
 // types
 // --------------------------------------------------
@@ -26,7 +29,7 @@ export type NormalChatSlot = {
   key: string;
   slotId?: string;
   role: 'assistant';
-  style: 'neutral' | 'soft';
+  style: 'neutral' | 'soft' | 'friendly';
   content: string; // writer 向けメタ（or seed text）
 };
 
@@ -99,15 +102,15 @@ function isCompose(text: string) {
 }
 
 // ✅ 確認・ツッコミ・意味質問（会話の噛み合わせ優先）
-// - ここは “意味に答える” を最優先にする（LLMに任せる）
-// - キーワードはゆるめに拾う（誤検知しても害が少ない）
 function isClarify(text: string) {
   const t = norm(text);
   if (!t) return false;
 
   // 例: 何が強いの / それってどういう意味 / 何を出すの / どこが / なんでそう言った
   if (
-    /^(何が|なにが|どこが|どれが|それって|それは|どういう意味|つまり|具体的に|なぜ|なんで|何で)\b/.test(t)
+    /^(何が|なにが|どこが|どれが|それって|それは|どういう意味|つまり|具体的に|なぜ|なんで|何で)\b/.test(
+      t,
+    )
   ) {
     return true;
   }
@@ -163,16 +166,9 @@ function buildCompose(userText: string): NormalChatSlot[] {
 }
 
 // ✅ clarify 用：テンプレで答えない。LLMに “意味に答える許可” を出す。
-// - seed は短く（LLMが落ちたときだけ最低限の噛み合わせ）
-// - メタ禁止を減らす（flow語り固定をやめる）
-// ✅ 追加：clarify 用（まず質問に答えて会話を噛ませる）
 function buildClarify(userText: string): NormalChatSlot[] {
   const t = norm(userText);
 
-  // ✅ seedFallback：最初の1行で「質問に答える」
-  // - 質問に質問で返さない
-  // - 流れ講義に逃げない
-  // - 強制タスク（1つだけ/時間指定など）は出さない
   const seedFallbacks = [
     `いま聞いてるのは、「さっきの言い方が何を指してたか」だよね。\nここで言った「正解」は、“正しい答えを決める”じゃなくて“結論を確定させる”って意味。\n今は結論を作る前に、ズレた点を残したほうが会話が噛むと思った。`,
     `「何を出すの？」は、「次に何を言えば会話になる？」って意味だよね。\nここで“出す”のは、結論じゃなくて「いまズレたと感じたポイント」そのもの。\nズレの中でも、いちばん嫌だった一言はどれ？`,
@@ -210,9 +206,6 @@ function buildClarify(userText: string): NormalChatSlot[] {
 }
 
 // LLMが落ちても UI に出せる “自然な seed” を作る（通常会話用）
-// - 数/時間/形式の強制をしない（「1つだけ」「一行」「5分で」禁止）
-// - 「軽くでいい」など曖昧な評価語を使わない
-// - 説教/構造語（足場/結論/意味づけ）を使わない
 function buildSeedText(args: {
   userText: string;
   flowDelta: string;
@@ -276,20 +269,37 @@ function buildSeedText(args: {
   return join3(opener, middle, exit);
 }
 
-// --- buildFlowReply を置き換え ---
-// ✅ normalChat は文章を持たない（テンプレ運転を防ぐ）
-// - ここでは “意味の方針” だけを writer(LLM) に渡す
-// - UIフォールバック文は極小（別レイヤで対応するのが理想）
+// ✅ HowTo/方法質問（QuestionSlots）を normalChat に合わせて正規化
+function buildQuestion(userText: string): NormalChatSlot[] {
+  const slots = buildQuestionSlots({ userText });
+  return slots.map((s) => ({
+    key: s.key,
+    role: 'assistant',
+    style: (s.style ?? 'neutral') as any,
+    content: s.content,
+  }));
+}
+
+// ✅ normalChat の通常フロー：意味にあった返答を最優先で書かせる
 function buildFlowReply(
   userText: string,
   flow: { delta: string; confidence?: number } | null,
-  lastUserText?: string | null
+  lastUserText?: string | null,
 ): NormalChatSlot[] {
   const t = norm(userText);
   const delta = flow?.delta ? String(flow.delta) : 'FORWARD';
   const conf = typeof flow?.confidence === 'number' ? flow!.confidence : undefined;
 
+  // UIフォールバック（LLMが落ちたときだけ出る想定）
+  const seedText = buildSeedText({
+    userText: t,
+    flowDelta: delta,
+    lastUserText,
+  });
+
   return [
+    { key: 'SEED_TEXT', role: 'assistant', style: 'soft', content: seedText },
+
     {
       key: 'OBS',
       role: 'assistant',
@@ -302,10 +312,6 @@ function buildFlowReply(
       }),
     },
 
-    // ✅ “意味にあった返答” を最優先で書かせる
-    // - ユーザーの質問には質問として答える
-    // - 断定や講釈ではなく「噛み合わせ」を作る
-    // - テンプレ褒め / 抽象メタ / 進行指示 を避ける
     {
       key: 'SHIFT',
       role: 'assistant',
@@ -339,7 +345,7 @@ export function buildNormalChatSlotPlan(args: {
     lastSummary?: string | null; // orchestrator互換（ここでは使わない）
   };
 }): NormalChatSlotPlan {
-  const stamp = 'normalChat@light-gptlike-v2-semantic';
+  const stamp = 'normalChat@light-gptlike-v2+questionSlots';
   const userText = norm(args.userText);
 
   const recentRaw = Array.isArray(args.context?.recentUserTexts) ? args.context!.recentUserTexts! : [];
@@ -366,12 +372,16 @@ export function buildNormalChatSlotPlan(args: {
     reason = 'end';
     slots = buildEnd();
   } else if (isClarify(userText)) {
-    // ✅ compose より前で噛ませる（意味に答えるのが最優先）
+    // ✅ まず噛ませる（意味に答える）
     reason = 'clarify';
     slots = buildClarify(userText);
   } else if (isCompose(userText)) {
     reason = 'compose';
     slots = buildCompose(userText);
+  } else if (shouldUseQuestionSlots(userText)) {
+    // ✅ HowTo/方法質問 → 立ち位置（QuestionSlots）
+    reason = 'questionSlots';
+    slots = buildQuestion(userText);
   } else {
     const d = flow?.delta ? String(flow.delta) : 'FORWARD';
     reason = `flow:${d}`;
@@ -384,10 +394,9 @@ export function buildNormalChatSlotPlan(args: {
     reason,
 
     // ✅ normalChat は浅くていい：基本 UNKNOWN
-    // - end / compose / clarify は “噛み合わせ優先” なので FINAL を推奨
-    //   （UNKNOWN だと seed がそのまま出て、LLMが返せないケースが出る）
-  // --- return の slotPlanPolicy を置き換え ---
-slotPlanPolicy: reason === 'empty' ? 'UNKNOWN' : 'FINAL',
+    // - empty は UNKNOWN（何も返さない/出せないを許す）
+    // - それ以外は FINAL（LLM通して噛ませる）
+    slotPlanPolicy: reason === 'empty' ? 'UNKNOWN' : 'FINAL',
 
     slots: normalizeSlots(slots),
   };

@@ -130,51 +130,67 @@ function looksLikeIR(text: string, extra: any) {
 }
 
 function splitToLines(text: string): string[] {
-  const t = norm(text);
+  const t = String(text ?? '').replace(/\r\n/g, '\n');
   if (!t) return [];
 
-  const rawLines = t
-    .split('\n')
-    .map((x) => x.trim())
-    .filter(Boolean);
+  // ✅ 余白を殺さない：行は trim しない（右端の空白だけ落とす）
+  // ✅ 空行も保持する（UIで“余白”として効く）
+  const rawLines = t.split('\n').map((x) => x.replace(/\s+$/g, ''));
 
+  // 1行しかない場合だけ「読みやすく分割」するが、
+  // ✅ Markdown/装飾が含まれるときは絶対に分割しない（太字/括弧/絵文字が崩れるため）
   if (rawLines.length === 1) {
-    const one = rawLines[0];
+    const one = rawLines[0] ?? '';
+    const oneTrim = one.trim();
 
-    const parts0 = one
-      .split(/(?<=[。！？!?])/)
-      .map((x) => x.trim())
-      .filter(Boolean);
+    const hasDecoration =
+      one.includes('**') ||
+      one.includes('__') ||
+      one.includes('```') ||
+      one.includes('[[') || // [[ILINE]] など
+      one.includes(']]') ||
+      /[🌀🌱🪷🪔🌸✨🔥💧🌊🌌⭐️⚡️✅❌]/.test(one); // ざっくり絵文字検知
 
-    // ✅ 「？（…）」みたいな注釈は同じ行に戻す
-    const parts: string[] = [];
-    for (const p of parts0) {
-      if (parts.length > 0 && /^[（(［\[]/.test(p)) {
-        parts[parts.length - 1] = `${parts[parts.length - 1]}${p}`;
-      } else {
-        parts.push(p);
+    if (!hasDecoration) {
+      const parts0 = oneTrim
+        .split(/(?<=[。！？!?])/)
+        .map((x) => x.trim())
+        .filter(Boolean);
+
+      // ✅ 「？（…）」みたいな注釈は同じ行に戻す
+      const parts: string[] = [];
+      for (const p of parts0) {
+        if (parts.length > 0 && /^[（(［\[]/.test(p)) {
+          parts[parts.length - 1] = `${parts[parts.length - 1]}${p}`;
+        } else {
+          parts.push(p);
+        }
+      }
+
+      if (parts.length >= 2) return parts;
+
+      if (oneTrim.length >= 26 && oneTrim.includes('、')) {
+        const i = oneTrim.indexOf('、');
+        const a = oneTrim.slice(0, i + 1).trim();
+        const b = oneTrim.slice(i + 1).trim();
+        return [a, b].filter(Boolean);
+      }
+
+      if (oneTrim.length >= 34) {
+        const mid = Math.min(22, Math.floor(oneTrim.length / 2));
+        const a = oneTrim.slice(0, mid).trim();
+        const b = oneTrim.slice(mid).trim();
+        return [a, b].filter(Boolean);
       }
     }
 
-    if (parts.length >= 2) return parts;
-
-    if (one.length >= 26 && one.includes('、')) {
-      const i = one.indexOf('、');
-      const a = one.slice(0, i + 1).trim();
-      const b = one.slice(i + 1).trim();
-      return [a, b].filter(Boolean);
-    }
-
-    if (one.length >= 34) {
-      const mid = Math.min(22, Math.floor(one.length / 2));
-      const a = one.slice(0, mid).trim();
-      const b = one.slice(mid).trim();
-      return [a, b].filter(Boolean);
-    }
+    // 装飾あり/分割不要 → そのまま返す（空行保持の方針に合わせて）
+    return [one];
   }
 
   return rawLines;
 }
+
 
 type SlotExtracted = { blocks: RenderBlock[]; source: string; keys: string[] } | null;
 
@@ -830,10 +846,11 @@ export function renderGatewayAsReply(args: {
     }
   }
 
-  // ✅ expand は “水増し生成” をしない（行数が少ないままでも良い）
   const expandAllowed = EXPAND_ENABLED && !isSilence && !isIR;
   void expandAllowed; //（現状はログ用途のみ。将来分岐で使う）
 
+  // ✅ 重要：rephrase は "picked" が最優先で拾っているので、
+  // ここで extractedTextFromModel を直採用しない（directive漏れの温床になる）
   let content = renderV2({
     blocks,
     maxLines: maxLinesFinal,
@@ -841,15 +858,81 @@ export function renderGatewayAsReply(args: {
     allowUnder5: shortException,
   });
 
+  // ✅ 念のため：slot directive 行は最終表示に出さない（@OBS/@SHIFT/...）
+  content = String(content ?? '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .filter((line) => {
+      const t = line.trim();
+      if (!t) return true;
+      if (/^@(?:OBS|SHIFT|NEXT|SAFE|ACK|RESTORE|Q)\b/.test(t)) return false;
+      return true;
+    })
+    .join('\n');
+
+
+
+
   // ✅ renderEngine=true のときは 🪔 を一切出さない（本文混入も含めて除去）
   content = stripLampEverywhere(content);
 
-  // ✅ 最終表示テキストをサニタイズ（ゼロ幅/句読点だけ行/改行暴れを除去）
-  // - renderEngine=true(enable=true) では末尾🪔は付けない
+  // ✅ writer向け注釈を表示に出さない（整形のみ）
+  // - [[/ILINE]] がある場合：そこ以降は全カット（writer注釈が後ろに付く前提）
+  {
+    const s = String(content ?? '').replace(/\r\n/g, '\n');
+
+    const endTag = '[[/ILINE]]';
+    const endIdx = s.indexOf(endTag);
+    const cut = endIdx >= 0 ? s.slice(0, endIdx + endTag.length) : s;
+
+    const lines = cut.split('\n');
+    const filtered = lines.filter((line) => {
+      const t = String(line ?? '').trim();
+      if (!t) return true;
+      if (t.startsWith('（writer向け）')) return false;
+      if (t.includes('writer向け')) return false;
+      if (t.includes('上の ILINE')) return false;
+      return true;
+    });
+
+    while (filtered.length > 0 && String(filtered[filtered.length - 1] ?? '').trim() === '') {
+      filtered.pop();
+    }
+
+    content = filtered.join('\n');
+  }
+
+  // ✅ ILINEタグは最終表示に出さない（整形のみ）
+  // - ここは sanitize の前にやる（タグが残ると directive 検知に引っかかるため）
+  content = String(content ?? '')
+    .replace(/\[\[ILINE\]\]\s*\n?/g, '')
+    .replace(/\n?\s*\[\[\/ILINE\]\]/g, '')
+    .trim();
+
+  // ✅ 最終表示テキストをサニタイズ（ゼロ幅/句読点だけ行/改行暴れ）
+  // - renderEngine=true では末尾🪔は付けない
   content = sanitizeVisibleText(content);
 
   // ✅ 最終防衛：directive を人間文に変換（LLM落ち・rephrase reject 含む）
-  content = finalizeNoDirectiveLeak(content);
+  // - ILINEタグは既に除去済みなので、ここでは「writer向け」や内部トークンだけを見る
+  const hasDirectiveLeak =
+    /\b(TASK|MODE|SLOT|META)\b/.test(content) ||
+    /IROS\//.test(content) ||
+    /（writer向け）/.test(content) ||
+    /(^|\s)@(?:ACK|RESTORE|SHIFT|Q)\s*\{/.test(content);
+
+  if (hasDirectiveLeak) {
+    content = finalizeNoDirectiveLeak(content);
+    content = sanitizeVisibleText(content); // 変換後の最低限整形
+  }
+
+  // ✅ 念のため最後にもう一回 🪔 を全除去（renderEngine=true の契約）
+  content = stripLampEverywhere(content);
+
+  // ✅ 末尾の空行を落とす
+  content = String(content ?? '').replace(/(\n\s*)+$/g, '').trim();
+
+
 
   const meta = {
     blocksCount: blocks.length,
@@ -866,16 +949,25 @@ export function renderGatewayAsReply(args: {
     rev: IROS_RENDER_GATEWAY_REV,
   };
 
-// ✅ meta 拡張（破壊せず・型衝突させず）
-(meta as any).slotPlanPolicy =
-  (args as any)?.slotPlanPolicy ??
-  (args as any)?.meta?.slotPlanPolicy ??
-  null;
+  // ✅ meta 拡張（破壊せず・型衝突させず）
+  (meta as any).slotPlanPolicy =
+    (args as any)?.slotPlanPolicy ??
+    (args as any)?.meta?.slotPlanPolicy ??
+    (meta as any)?.slotPlanPolicy ??
+    null;
 
-(meta as any).extra =
-  (args as any)?.extra ??
-  (args as any)?.meta?.extra ??
-  null;
+  // ✅ extra は「上書き」ではなく「合成」する（renderGateway内で足した値を消さない）
+  {
+    const extraFromArgs = (args as any)?.extra;
+    const extraFromMeta = (args as any)?.meta?.extra;
+    const extraPrev = (meta as any)?.extra;
+
+    (meta as any).extra = {
+      ...(typeof extraPrev === 'object' && extraPrev ? extraPrev : {}),
+      ...(typeof extraFromMeta === 'object' && extraFromMeta ? extraFromMeta : {}),
+      ...(typeof extraFromArgs === 'object' && extraFromArgs ? extraFromArgs : {}),
+    };
+  }
 
 
 // ✅ render-v2 通電ランプ：rephraseBlocks が入っているか毎回見える化（スコープ/型安全版）

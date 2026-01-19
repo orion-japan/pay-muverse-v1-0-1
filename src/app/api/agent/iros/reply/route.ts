@@ -324,10 +324,110 @@ async function maybeAttachRephraseForRenderV2(args: {
         rephraseAttachSkipped: false,
         rephraseReason: res.reason ?? 'unknown',
       };
+      // ✅ renderGateway が見ている extra 側にも残す
+      (extraMerged as any).rephraseApplied = false;
       (extraMerged as any).rephraseAttachSkipped = false;
-      (extraMerged as any).rephraseAttachReason = null;
+      (extraMerged as any).rephraseReason = res.reason ?? 'unknown';
       return;
     }
+
+    // =========================================================
+    // ✅ splitToLines を統合して rephraseBlocks を確実に作る
+    // =========================================================
+    function splitToLines(text: string): string[] {
+      const t = String(text ?? '').replace(/\r\n/g, '\n');
+      if (!t) return [];
+
+      const rawLines = t.split('\n').map((x) => x.replace(/\s+$/g, ''));
+
+      if (rawLines.length === 1) {
+        const one = rawLines[0] ?? '';
+        const oneTrim = one.trim();
+
+        const hasDecoration =
+          one.includes('**') ||
+          one.includes('__') ||
+          one.includes('```') ||
+          one.includes('[[') ||
+          one.includes(']]') ||
+          /[🌀🌱🪷🪔🌸✨🔥💧🌊🌌⭐️⚡️✅❌]/.test(one);
+
+        if (!hasDecoration) {
+          const parts0 = oneTrim
+            .split(/(?<=[。！？!?])/)
+            .map((x) => x.trim())
+            .filter(Boolean);
+
+          const parts: string[] = [];
+          for (const p of parts0) {
+            if (parts.length > 0 && /^[（(［\[]/.test(p)) {
+              parts[parts.length - 1] = `${parts[parts.length - 1]}${p}`;
+            } else {
+              parts.push(p);
+            }
+          }
+
+          if (parts.length >= 2) return parts;
+
+          if (oneTrim.length >= 26 && oneTrim.includes('、')) {
+            const i = oneTrim.indexOf('、');
+            const a = oneTrim.slice(0, i + 1).trim();
+            const b = oneTrim.slice(i + 1).trim();
+            return [a, b].filter(Boolean);
+          }
+
+          if (oneTrim.length >= 34) {
+            const mid = Math.min(22, Math.floor(oneTrim.length / 2));
+            const a = oneTrim.slice(0, mid).trim();
+            const b = oneTrim.slice(mid).trim();
+            return [a, b].filter(Boolean);
+          }
+        }
+
+        return [one];
+      }
+
+      return rawLines;
+    }
+
+    const textOut = String((res as any)?.text ?? (res as any)?.content ?? '').trimEnd();
+    const fromBlocks = Array.isArray((res as any)?.blocks) ? (res as any).blocks : null;
+    const fromSlots = Array.isArray((res as any)?.slots) ? (res as any).slots : null;
+
+    const normalizedBlocks: Array<{ text: string; lines: string[] }> =
+      (fromBlocks && fromBlocks.length > 0
+        ? fromBlocks.map((b: any) => {
+            const t = String(b?.text ?? b?.content ?? b ?? '').trimEnd();
+            return { text: t, lines: splitToLines(t) };
+          })
+        : fromSlots && fromSlots.length > 0
+          ? fromSlots.map((s: any) => {
+              const t = String(s?.text ?? s?.content ?? s?.value ?? '').trimEnd();
+              return { text: t, lines: splitToLines(t) };
+            })
+          : textOut.length > 0
+            ? [{ text: textOut, lines: splitToLines(textOut) }]
+            : []);
+
+    // ✅ renderGateway が見ている extra（= extraMerged）に “必ず” attach
+    (extraMerged as any).rephraseHead = textOut || null;
+    (extraMerged as any).rephraseText = textOut || null;
+    (extraMerged as any).rephraseBlocks = normalizedBlocks;
+    (extraMerged as any).rephraseApplied = true;
+    (extraMerged as any).rephraseAttachSkipped = false;
+    (extraMerged as any).rephraseReason = null;
+
+    // ✅ meta.extra にも残す（監査/デバッグ用）
+    meta.extra = {
+      ...(meta.extra ?? {}),
+      rephraseApplied: true,
+      rephraseAttachSkipped: false,
+      rephraseReason: null,
+      rephraseHead: textOut || null,
+      rephraseText: textOut || null,
+      rephraseBlocks: normalizedBlocks,
+    };
+
 
     (extraMerged as any).rephraseBlocks = (res as any).slots.map((s: any) => ({
       text: s.text,
@@ -687,12 +787,42 @@ export async function POST(req: NextRequest) {
     let { result, finalMode, metaForSave, assistantText } = irosResult as any;
 
     // =========================================================
-    // ✅ SpeechPolicy: SILENCE/FORWARD は即 return
+    // ✅ Meta/Extra: SpeechPolicy early-return + render-v2 gate clamp
+    // - metaForSave / result.meta の参照を1回に統合（重複回避）
+    // - expandAllowed=true のとき maxLines を上書きして「5行固定」を潰す
     // =========================================================
     {
       const metaAny: any = metaForSave ?? (result as any)?.meta ?? {};
       const extraAny: any = metaAny?.extra ?? {};
 
+      // -----------------------------------------
+      // ✅ render-v2 maxLines fix (route-side gate clamp)
+      // -----------------------------------------
+      const expandAllowed = extraAny?.expandAllowed === true;
+      if (expandAllowed) {
+        const expandedMax = 16;
+
+        // ✅ renderEngineGate は boolean なので触らない
+        // ✅ renderGateway が読む maxLinesHint だけ確実に上げる
+        extraAny.maxLinesHint =
+          typeof extraAny?.maxLinesHint === 'number'
+            ? Math.max(extraAny.maxLinesHint, expandedMax)
+            : expandedMax;
+
+        console.log('[DBG][route][maxLinesHintClamp]', {
+          expandAllowed,
+          expandedMax,
+          maxLinesHint: extraAny.maxLinesHint ?? null,
+        });
+
+        metaAny.extra = { ...(metaAny.extra ?? {}), ...extraAny };
+        metaForSave = metaAny;
+      }
+
+
+      // -----------------------------------------
+      // ✅ SpeechPolicy: SILENCE/FORWARD は即 return
+      // -----------------------------------------
       const speechAct = String(extraAny?.speechAct ?? metaAny?.speechAct ?? '').toUpperCase();
       const shouldEarlyReturn = speechAct === 'SILENCE' || speechAct === 'FORWARD';
 
@@ -779,6 +909,7 @@ export async function POST(req: NextRequest) {
       },
       ...(lowWarn ? { warning: lowWarn } : {}),
     };
+
 
     // =========================================================
     // result が object のとき
@@ -872,15 +1003,19 @@ export async function POST(req: NextRequest) {
                 : null;
 
 // ✅ 置き換え3：applyRenderEngineIfEnabled 呼び出しから styleInput を外す
+const enableRenderEngine = Boolean((meta as any)?.extra?.renderEngine);
+const isIT = Boolean((meta as any)?.extra?.renderReplyForcedIT);
+
 const applied = applyRenderEngineIfEnabled({
+  enableRenderEngine,
+  isIT,
   conversationId,
   userCode,
   userText: userTextClean,
-  extra: extraMerged ?? null,
+  extraForHandle: extraMerged ?? null,
   meta,
   resultObj: result as any,
 });
-
 
       meta = applied.meta;
       extraMerged = applied.extraForHandle;
@@ -1126,246 +1261,354 @@ const applied = applyRenderEngineIfEnabled({
 // =========================================================
 // ✅ RenderEngine 適用（single entry）
 // - enableRenderEngine=true の場合は render-v2 (renderGatewayAsReply)
-// - IT の場合のみ renderReply を維持
+// - IT の場合のみ renderReply（従来）を維持
 // =========================================================
 function applyRenderEngineIfEnabled(params: {
-  conversationId: string;
-  userCode: string;
-  userText: string;
-  extra: Record<string, any> | null;
+  enableRenderEngine: boolean;
+  isIT: boolean;
   meta: any;
-  resultObj: any; // expects { content?: string }
-}): { meta: any; extraForHandle: Record<string, any> } {
-  const { conversationId, userCode, userText, extra, meta, resultObj } = params;
+  extraForHandle: any;
+  resultObj: any;
+  conversationId: string | null;
+  userCode: string | null;
+  userText: string | null;
+}): { meta: any; extraForHandle: any } {
+  const {
+    enableRenderEngine,
+    isIT,
+    meta,
+    extraForHandle,
+    resultObj,
+    conversationId,
+    userCode,
+    userText,
+  } = params;
 
-  const extraForHandle: Record<string, any> = { ...(extra ?? {}) };
-  const enableRenderEngine = extraForHandle.renderEngine === true;
-
-  const hintedRenderMode =
-    (typeof (meta as any)?.renderMode === 'string' && (meta as any).renderMode) ||
-    (typeof (meta as any)?.extra?.renderMode === 'string' && (meta as any).extra.renderMode) ||
-    (typeof (meta as any)?.extra?.renderedMode === 'string' && (meta as any).extra.renderedMode) ||
-    '';
-
-  const isIT = String(hintedRenderMode).toUpperCase() === 'IT';
-
-  meta.extra = {
-    ...(meta.extra ?? {}),
-    renderEngineGate: enableRenderEngine,
-    renderReplyForcedIT: isIT,
-  };
-
-  // v2 render（format-only）
-  if (enableRenderEngine && !isIT) {
+  // =========================
+  // IT は従来render（renderReply）
+  // =========================
+  if (isIT) {
     try {
-      const extraForRender = {
-        ...(meta?.extra ?? {}),
-        ...(extraForHandle ?? {}),
-        slotPlanPolicy:
-          (meta as any)?.framePlan?.slotPlanPolicy ??
-          (meta as any)?.slotPlanPolicy ??
-          (meta as any)?.extra?.slotPlanPolicy ??
+      const contentBefore = String(resultObj?.content ?? '').trim();
+
+      const fallbackFacts =
+        contentBefore.length > 0
+          ? contentBefore
+          : String(
+              (meta as any)?.situationSummary ??
+                (meta as any)?.situation_summary ??
+                meta?.unified?.situation?.summary ??
+                '',
+            ).trim() ||
+            String(userText ?? '').trim() ||
+            '';
+
+      const vector = buildResonanceVector({
+        qCode: (meta as any)?.qCode ?? (meta as any)?.q_code ?? meta?.unified?.q?.current ?? null,
+        depth:
+          (meta as any)?.depth ??
+          (meta as any)?.depth_stage ??
+          meta?.unified?.depth?.stage ??
           null,
-        framePlan: (meta as any)?.framePlan ?? null,
-        slotPlan: (meta as any)?.slotPlan ?? null,
-
-        // EvidenceLogger最小
-        conversationId,
-        userCode,
-        userText: typeof userText === 'string' ? userText : null,
-      };
-
-      const maxLines =
-        Number.isFinite(Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)) &&
-        Number(process.env.IROS_RENDER_DEFAULT_MAXLINES) > 0
-          ? Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)
-          : 8;
-
-      const out = renderGatewayAsReply({
-        extra: extraForRender,
-        content: (resultObj as any)?.content ?? null,
-        assistantText: (resultObj as any)?.assistantText ?? null,
-        text: (resultObj as any)?.text ?? null,
-        maxLines,
+        phase: (meta as any)?.phase ?? meta?.unified?.phase ?? null,
+        selfAcceptance:
+          (meta as any)?.selfAcceptance ??
+          (meta as any)?.self_acceptance ??
+          meta?.unified?.selfAcceptance ??
+          meta?.unified?.self_acceptance ??
+          null,
+        yLevel:
+          (meta as any)?.yLevel ??
+          (meta as any)?.y_level ??
+          meta?.unified?.yLevel ??
+          meta?.unified?.y_level ??
+          null,
+        hLevel:
+          (meta as any)?.hLevel ??
+          (meta as any)?.h_level ??
+          meta?.unified?.hLevel ??
+          meta?.unified?.h_level ??
+          null,
+        polarityScore:
+          (meta as any)?.polarityScore ??
+          (meta as any)?.polarity_score ??
+          meta?.unified?.polarityScore ??
+          meta?.unified?.polarity_score ??
+          null,
+        polarityBand:
+          (meta as any)?.polarityBand ??
+          (meta as any)?.polarity_band ??
+          meta?.unified?.polarityBand ??
+          meta?.unified?.polarity_band ??
+          null,
+        stabilityBand:
+          (meta as any)?.stabilityBand ??
+          (meta as any)?.stability_band ??
+          meta?.unified?.stabilityBand ??
+          meta?.unified?.stability_band ??
+          null,
+        situationSummary:
+          (meta as any)?.situationSummary ??
+          (meta as any)?.situation_summary ??
+          meta?.unified?.situation?.summary ??
+          null,
+        situationTopic:
+          (meta as any)?.situationTopic ??
+          (meta as any)?.situation_topic ??
+          meta?.unified?.situation?.topic ??
+          null,
+        intentLayer:
+          (meta as any)?.intentLayer ??
+          (meta as any)?.intent_layer ??
+          (meta as any)?.intentLine?.focusLayer ??
+          (meta as any)?.intent_line?.focusLayer ??
+          meta?.unified?.intentLayer ??
+          null,
+        intentConfidence:
+          (meta as any)?.intentConfidence ??
+          (meta as any)?.intent_confidence ??
+          (meta as any)?.intentLine?.confidence ??
+          (meta as any)?.intent_line?.confidence ??
+          null,
       });
 
-      const nextContent = String(out?.content ?? '').trimEnd();
+      const baseInput = {
+        facts: fallbackFacts,
+        insight: null,
+        nextStep: null,
+        userWantsEssence: false,
+        highDefensiveness: false,
+        seed: String(conversationId ?? ''),
+        userText: String(userText ?? ''),
+      } as const;
+
+      const baseOpts = {
+        minimalEmoji: false,
+        renderMode: 'IT',
+        itDensity:
+          (meta as any)?.itDensity ??
+          (meta as any)?.density ??
+          (meta as any)?.extra?.itDensity ??
+          (meta as any)?.extra?.density ??
+          undefined,
+      } as any;
+
+      const patched = applyRulebookCompat({
+        vector,
+        input: baseInput,
+        opts: baseOpts,
+        meta,
+        extraForHandle,
+      });
+
+      const rendered = renderReply(
+        (patched.vector ?? vector) as any,
+        (patched.input ?? baseInput) as any,
+        (patched.opts ?? baseOpts) as any,
+      );
+
+      const renderedText =
+        typeof rendered === 'string'
+          ? rendered
+          : (rendered as any)?.text
+            ? String((rendered as any).text)
+            : String(rendered ?? '');
+
+      const sanitized = sanitizeFinalContent(renderedText);
+
+      const speechActUpper = String(
+        (patched.meta as any)?.extra?.speechAct ??
+          (patched.meta as any)?.speechAct ??
+          '',
+      ).toUpperCase();
+
+      const isSilence = speechActUpper === 'SILENCE';
+
+      const nextContent = isSilence
+        ? sanitized.text.trimEnd()
+        : sanitized.text.trim().length > 0
+          ? sanitized.text.trimEnd()
+          : contentBefore.length > 0
+            ? contentBefore
+            : String(fallbackFacts ?? '').trim();
+
       resultObj.content = nextContent;
       (resultObj as any).assistantText = nextContent;
       (resultObj as any).text = nextContent;
 
-      meta.extra = {
-        ...(meta.extra ?? {}),
-        renderEngineApplied: true,
-        renderEngineBy: 'render-v2',
-        renderV2: out?.meta ?? null,
+      const metaAfter = (patched.meta ?? meta) as any;
+      metaAfter.extra = {
+        ...(metaAfter.extra ?? {}),
+        renderEngineApplied: nextContent.length > 0,
+        headerStripped: sanitized.removed.length ? sanitized.removed : null,
       };
 
-      return { meta, extraForHandle };
+      return {
+        meta: metaAfter,
+        extraForHandle: (patched.extraForHandle ?? extraForHandle) as any,
+      };
     } catch (e) {
       meta.extra = {
-        ...(meta.extra ?? {}),
+        ...(meta?.extra ?? {}),
         renderEngineApplied: false,
-        renderEngineBy: 'render-v2',
         renderEngineError: String((e as any)?.message ?? e),
       };
       return { meta, extraForHandle };
     }
   }
 
-  // IT は従来render
-  if (!isIT) return { meta, extraForHandle };
+  // render無効なら何もしない
+  if (!enableRenderEngine) return { meta, extraForHandle };
 
+  // =========================
+  // render-v2（renderGatewayAsReply）
+  // =========================
   try {
-    const contentBefore = String(resultObj?.content ?? '').trim();
+    const extraForRender = {
+      ...(meta?.extra ?? {}),
+      ...(extraForHandle ?? {}),
+      slotPlanPolicy:
+        (meta as any)?.framePlan?.slotPlanPolicy ??
+        (meta as any)?.slotPlanPolicy ??
+        (meta as any)?.extra?.slotPlanPolicy ??
+        null,
+      framePlan: (meta as any)?.framePlan ?? null,
+      slotPlan: (meta as any)?.slotPlan ?? null,
 
-    const fallbackFacts =
-      contentBefore.length > 0
-        ? contentBefore
-        : String(
-            (meta as any)?.situationSummary ??
-              (meta as any)?.situation_summary ??
-              meta?.unified?.situation?.summary ??
-              '',
-          ).trim() ||
-          String(userText ?? '').trim() ||
-          '';
+      // EvidenceLogger最小
+      conversationId,
+      userCode,
+      userText: typeof userText === 'string' ? userText : null,
+    };
 
-    const vector = buildResonanceVector({
-      qCode: (meta as any)?.qCode ?? (meta as any)?.q_code ?? meta?.unified?.q?.current ?? null,
-      depth:
-        (meta as any)?.depth ??
-        (meta as any)?.depth_stage ??
-        meta?.unified?.depth?.stage ??
-        null,
-      phase: (meta as any)?.phase ?? meta?.unified?.phase ?? null,
-      selfAcceptance:
-        (meta as any)?.selfAcceptance ??
-        (meta as any)?.self_acceptance ??
-        meta?.unified?.selfAcceptance ??
-        meta?.unified?.self_acceptance ??
-        null,
-      yLevel: (meta as any)?.yLevel ?? (meta as any)?.y_level ?? meta?.unified?.yLevel ?? meta?.unified?.y_level ?? null,
-      hLevel: (meta as any)?.hLevel ?? (meta as any)?.h_level ?? meta?.unified?.hLevel ?? meta?.unified?.h_level ?? null,
-      polarityScore:
-        (meta as any)?.polarityScore ??
-        (meta as any)?.polarity_score ??
-        meta?.unified?.polarityScore ??
-        meta?.unified?.polarity_score ??
-        null,
-      polarityBand:
-        (meta as any)?.polarityBand ??
-        (meta as any)?.polarity_band ??
-        meta?.unified?.polarityBand ??
-        meta?.unified?.polarity_band ??
-        null,
-      stabilityBand:
-        (meta as any)?.stabilityBand ??
-        (meta as any)?.stability_band ??
-        meta?.unified?.stabilityBand ??
-        meta?.unified?.stability_band ??
-        null,
-      situationSummary:
-        (meta as any)?.situationSummary ??
-        (meta as any)?.situation_summary ??
-        meta?.unified?.situation?.summary ??
-        null,
-      situationTopic:
-        (meta as any)?.situationTopic ??
-        (meta as any)?.situation_topic ??
-        meta?.unified?.situation?.topic ??
-        null,
-      intentLayer:
-        (meta as any)?.intentLayer ??
-        (meta as any)?.intent_layer ??
-        (meta as any)?.intentLine?.focusLayer ??
-        (meta as any)?.intent_line?.focusLayer ??
-        meta?.unified?.intentLayer ??
-        null,
-      intentConfidence:
-        (meta as any)?.intentConfidence ??
-        (meta as any)?.intent_confidence ??
-        (meta as any)?.intentLine?.confidence ??
-        (meta as any)?.intent_line?.confidence ??
-        null,
+    const maxLines =
+      Number.isFinite(Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)) &&
+      Number(process.env.IROS_RENDER_DEFAULT_MAXLINES) > 0
+        ? Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)
+        : 8;
+
+    // ✅ meta.extra があるなら必ずマージしてから渡す
+    const extraMerged = {
+      ...(meta?.extra ?? {}),
+      ...extraForRender,
+    };
+
+// --- BEGIN: ensure rephraseBlocks for render-v2 (RenderBlock[] fallback from final text) ---
+
+type RenderBlock = { text: string | null | undefined; kind?: string };
+
+function buildFallbackRenderBlocksFromFinalText(finalText: string): RenderBlock[] {
+  const t = String(finalText ?? '').trim();
+  if (!t) return [];
+
+  const blocksText: string[] = [];
+
+  // 1) [[ILINE]] ... [[/ILINE]] がある場合は、それを先頭ブロックに固定
+  const start = t.indexOf('[[ILINE]]');
+  const end = t.indexOf('[[/ILINE]]');
+
+  if (start === 0 && end > start) {
+    const ilineBlock = t.slice(0, end + '[[/ILINE]]'.length).trim();
+    if (ilineBlock) blocksText.push(ilineBlock);
+
+    const rest = t.slice(end + '[[/ILINE]]'.length).trim();
+    if (rest) {
+      blocksText.push(...rest.split(/\n{2,}/g).map((s) => s.trim()).filter(Boolean));
+    }
+    return blocksText.map((text) => ({ text }));
+  }
+
+  // 2) [[ILINE]] だけ（閉じ無し）：最初の段落を ILINE ブロック扱い
+  if (start === 0 && end < 0) {
+    const parts = t.split(/\n{2,}/g).map((s) => s.trim()).filter(Boolean);
+    if (parts.length >= 1) {
+      blocksText.push(parts[0]);
+      blocksText.push(...parts.slice(1));
+      return blocksText.map((text) => ({ text }));
+    }
+  }
+
+  // 3) 通常：段落（空行区切り）でブロック化
+  return t
+    .split(/\n{2,}/g)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((text) => ({ text }));
+}
+
+(() => {
+  const ex: any = extraMerged as any;
+
+  // 既に RenderBlock[] が入ってるなら触らない
+  const hasBlocks =
+    Array.isArray(ex?.rephraseBlocks) &&
+    ex.rephraseBlocks.length > 0 &&
+    ex.rephraseBlocks.every((b: any) => b && typeof b === 'object' && 'text' in b);
+
+  const finalTextForBlocks = String(
+    ex?.finalAssistantText ??
+      ex?.finalAssistantTextCandidate ??
+      ex?.resolvedText ??
+      ex?.extractedTextFromModel ??
+      ''
+  ).trim();
+
+  if (!hasBlocks) {
+    const fb = buildFallbackRenderBlocksFromFinalText(finalTextForBlocks);
+    if (fb.length > 0) {
+      ex.rephraseBlocks = fb;
+      ex.rephraseApplied = true;
+      ex.rephraseReason = ex.rephraseReason ?? 'fallback_blocks_from_final_text';
+      ex.rephraseAttachSkipped = false;
+    }
+  }
+
+  const blocksLen = Array.isArray(ex?.rephraseBlocks) ? ex.rephraseBlocks.length : 0;
+  const blocksHead = blocksLen > 0 ? String(ex.rephraseBlocks[0]?.text ?? '').slice(0, 60) : '';
+
+  console.log('[DBG][before-renderGateway][rephraseBlocks]', {
+    hasBlocks:
+      Array.isArray(ex?.rephraseBlocks) &&
+      blocksLen > 0 &&
+      ex.rephraseBlocks.every((b: any) => b && typeof b === 'object' && 'text' in b),
+    blocksLen,
+    blocksHead,
+    rephraseApplied: ex?.rephraseApplied ?? null,
+    rephraseReason: ex?.rephraseReason ?? null,
+  });
+})();
+
+// --- END: ensure rephraseBlocks for render-v2 (RenderBlock[] fallback from final text) ---
+
+
+
+    console.warn('[DBG][before-renderGateway] extraKeys', Object.keys(extraMerged ?? {}));
+
+    const out = renderGatewayAsReply({
+      extra: extraMerged,
+      content: (resultObj as any)?.content ?? null,
+      assistantText: (resultObj as any)?.assistantText ?? null,
+      text: (resultObj as any)?.text ?? null,
+      maxLines,
     });
 
-    const baseInput = {
-      facts: fallbackFacts,
-      insight: null,
-      nextStep: null,
-      userWantsEssence: false,
-      highDefensiveness: false,
-      seed: String(conversationId),
-      userText: String(userText ?? ''),
-    } as const;
-
-    const baseOpts = {
-      minimalEmoji: false,
-      renderMode: 'IT',
-      itDensity:
-        (meta as any)?.itDensity ??
-        (meta as any)?.density ??
-        (meta as any)?.extra?.itDensity ??
-        (meta as any)?.extra?.density ??
-        undefined,
-    } as any;
-
-    const patched = applyRulebookCompat({
-      vector,
-      input: baseInput,
-      opts: baseOpts,
-      meta,
-      extraForHandle,
-    });
-
-    const rendered = renderReply(
-      (patched.vector ?? vector) as any,
-      (patched.input ?? baseInput) as any,
-      (patched.opts ?? baseOpts) as any,
-    );
-
-    const renderedText =
-      typeof rendered === 'string'
-        ? rendered
-        : (rendered as any)?.text
-          ? String((rendered as any).text)
-          : String(rendered ?? '');
-
-    const sanitized = sanitizeFinalContent(renderedText);
-    const speechActUpper = String(
-      (patched.meta as any)?.extra?.speechAct ??
-        (patched.meta as any)?.speechAct ??
-        '',
-    ).toUpperCase();
-
-    const isSilence = speechActUpper === 'SILENCE';
-    const nextContent = isSilence
-      ? sanitized.text.trimEnd()
-      : sanitized.text.trim().length > 0
-        ? sanitized.text.trimEnd()
-        : contentBefore.length > 0
-          ? contentBefore
-          : String(fallbackFacts ?? '').trim();
-
+    const nextContent = String(out?.content ?? '').trimEnd();
     resultObj.content = nextContent;
     (resultObj as any).assistantText = nextContent;
     (resultObj as any).text = nextContent;
 
-    const metaAfter = (patched.meta ?? meta) as any;
-    metaAfter.extra = {
-      ...(metaAfter.extra ?? {}),
-      renderEngineApplied: nextContent.length > 0,
-      headerStripped: sanitized.removed.length ? sanitized.removed : null,
+    meta.extra = {
+      ...(meta?.extra ?? {}),
+      renderEngineApplied: true,
+      renderEngineBy: 'render-v2',
+      renderV2: out?.meta ?? null,
     };
 
-    return { meta: metaAfter, extraForHandle: (patched.extraForHandle ?? extraForHandle) as any };
+    return { meta, extraForHandle };
   } catch (e) {
-    meta.extra = {
-      ...(meta.extra ?? {}),
-      renderEngineApplied: false,
-      renderEngineError: String((e as any)?.message ?? e),
-    };
+    console.warn('[IROS/render-v2][ERROR]', {
+      message: String((e as any)?.message ?? e),
+    });
     return { meta, extraForHandle };
   }
 }

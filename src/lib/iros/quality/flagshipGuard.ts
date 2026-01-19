@@ -152,12 +152,14 @@ function extractScaffoldMustHave(ctx?: FlagshipGuardContext | null): {
   return { scaffoldLike, purposeNeedle, onePointNeedle, points3Needles };
 }
 
-// ✅ 「?」だけでなく、?なし疑問文もカウント（flag/scaffold用）
+// ✅ 「?」だけでなく、?なし疑問文も qCount に入れる（ただし二重カウントしない）
 function countQuestionLike(text: string): number {
-  const t = norm(String(text ?? ''));
+  const t = norm(text);
 
+  // 1) 記号（? / ？）はそのまま数える
   const markCount = (t.match(/[？?]/g) ?? []).length;
 
+  // 2) ?なし疑問文（日本語）を検出して加算（※ただし「?がある行」は除外して二重カウント防止）
   const lines = t
     .split('\n')
     .map((s) => s.trim())
@@ -168,11 +170,13 @@ function countQuestionLike(text: string): number {
   for (const line of lines) {
     const s = line;
 
+    // ✅ この行に ? / ？ があるなら、すでに markCount で数えているので “疑問っぽさ” 判定はしない
+    if (/[？?]/.test(s)) continue;
+
     const hasWh =
       /(どう(すれば|したら)?|なぜ|なんで|何(が|を|の)?|どこ|いつ|どれ|どんな|誰|誰が|誰に)/.test(s);
 
-    const endsLikeQuestion =
-      /(ですか|ますか|でしょうか|かな|か\W*$|の\W*$)/.test(s);
+    const endsLikeQuestion = /(ですか|ますか|でしょうか|かな|か\W*$|の\W*$)/.test(s);
 
     const askLike =
       /(教えて|教えてください|聞かせて|聞かせてください|話して|話してみて|詳しく)/.test(s);
@@ -182,6 +186,7 @@ function countQuestionLike(text: string): number {
 
   return markCount + likeCount;
 }
+
 
 // ✅ normalChat 判定（キーで判断）
 function isNormalChatLite(ctx?: FlagshipGuardContext | null): boolean {

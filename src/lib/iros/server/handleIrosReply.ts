@@ -767,31 +767,101 @@ function ensureMetaFilled(args: { meta: any; ctx: any; orch: any }): any {
 
 const microGenerate: MicroWriterGenerate = async (args) => {
   try {
-    const messages: ChatMessage[] = [
-      { role: 'system', content: String(args.system ?? '') },
-      { role: 'user', content: String(args.prompt ?? '') },
+    const baseSystem = String(args.system ?? '').trim();
+    const userPrompt = String(args.prompt ?? '').trim();
+
+    // ✅ 追加：micro用 writer制約（短い・判断しない・応援テンプレにしない）
+    // - “くどさ回避”を壊さないため、ここでは短く・禁止系だけを足す
+    const microWriterConstraints = `
+# Micro Writer Constraints（必須）
+- 1〜2行で終える。長くしない。
+- 判断・分析・助言・診断をしない（決めつけない）。
+- 「大丈夫/素晴らしい/楽しみですね/ワクワク/きっと」などの応援テンプレを使わない。
+- 「かもしれない/と思います/〜してみると」などのhedge・一般論を使わない。
+- 質問は原則0（入れるなら最大1つまで、短く）。
+- 相手の語尾や勢いを軽く受けて、“場を進める一言”だけ返す。
+`.trim();
+
+    // 1st try
+    const messages1: ChatMessage[] = [
+      { role: 'system', content: `${baseSystem}\n\n${microWriterConstraints}`.trim() },
+      { role: 'user', content: userPrompt },
     ];
 
-    const out = await chatComplete({
-      purpose: 'writer',
-      model: IROS_MODEL,
-      messages,
-      temperature: typeof args.temperature === 'number' ? args.temperature : 0.6,
-      max_tokens: typeof args.maxTokens === 'number' ? args.maxTokens : 140,
+    const callLLM = async (messages: ChatMessage[], temperature: number) => {
+      const out = await chatComplete({
+        purpose: 'writer',
+        model: IROS_MODEL,
+        messages,
+        temperature,
+        max_tokens: typeof (args as any).maxTokens === 'number' ? (args as any).maxTokens : 140,
+        traceId: (args as any).traceId ?? null,
+        conversationId: (args as any).conversationId ?? null,
+        userCode: (args as any).userCode ?? null,
+      });
+      return String(out ?? '').trim();
+    };
 
-      // ✅ 追加：top-level trace fields
-      traceId: (args as any).traceId ?? null,
-      conversationId: (args as any).conversationId ?? null,
-      userCode: (args as any).userCode ?? null,
-    });
+    const judgeMicro = async (text: string) => {
+      const t = String(text ?? '').trim();
+      if (!t) return { ok: false as const, reason: 'EMPTY' };
 
+      // ✅ 旗印ゲートを“後付け”で通す（回路は変えない）
+      const { flagshipGuard } = await import('@/lib/iros/quality/flagshipGuard');
+      const v = flagshipGuard(t, null);
 
-    return String(out ?? '').trim();
+      // microは短いので、WARNでも「応援/無難/hedge」理由が入るなら落とす
+      const badWarnReasons = new Set([
+        'CHEER_PRESENT',
+        'CHEER_MANY',
+        'GENERIC_PRESENT',
+        'GENERIC_MANY',
+        'HEDGE_PRESENT',
+        'HEDGE_MANY',
+        'SHORT_GENERIC_CHEER_WITH_QUESTION',
+        'NO_FLAGSHIP_SIGN_WITH_BLAND_PRESSURE',
+      ]);
+
+      const hasBadWarn = (v.reasons ?? []).some((r: string) => badWarnReasons.has(r));
+
+      if (!v.ok) return { ok: false as const, reason: `FATAL:${(v.reasons ?? []).join('|')}` };
+      if (v.level === 'WARN' && hasBadWarn)
+        return { ok: false as const, reason: `WARN_BAD:${(v.reasons ?? []).join('|')}` };
+
+      return { ok: true as const, reason: v.level };
+    };
+
+    let out1 = await callLLM(messages1, typeof args.temperature === 'number' ? args.temperature : 0.6);
+    let j1 = await judgeMicro(out1);
+    if (j1.ok) return out1;
+
+    // 2nd try（1回だけ）：さらに短く、質問0を強制
+    const retryConstraints = `
+# Retry Hard Constraints（再生成）
+- 1行で返す（最大でも2行にしない）。
+- 質問は0。
+- 応援テンプレ/hedge/一般論は禁止（上と同じ）。
+`.trim();
+
+    const messages2: ChatMessage[] = [
+      { role: 'system', content: `${baseSystem}\n\n${microWriterConstraints}\n\n${retryConstraints}`.trim() },
+      { role: 'user', content: userPrompt },
+    ];
+
+    const out2 = await callLLM(messages2, 0.2);
+    const j2 = await judgeMicro(out2);
+    if (j2.ok) return out2;
+
+    // ✅ まだダメなら「空文字」で返す：
+    // - 回路は維持
+    // - 上位（handleIrosReply側）の forward fallback / seed fallback に任せる
+    return '';
   } catch (e) {
     console.warn('[IROS/MicroWriter][llm] failed', e);
     return '';
   }
 };
+
 
 
 /* =========================================================

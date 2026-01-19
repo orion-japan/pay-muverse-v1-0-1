@@ -513,6 +513,15 @@ try {
 
       const pick = score(v2) <= score(v1) ? rewritten : out;
 
+// ✅ “maxQuestions:0” を守れなかったら FATAL
+function constraintsDemandZeroQuestions(text: string): boolean {
+  // ここは “出力に @CONSTRAINTS が露出しない前提” なので、
+  // constraints は slot 側から meta で渡されている想定。
+  // もしここで参照できないなら、judgeFlagship の引数に constraints を渡す。
+  return false;
+}
+
+
       // ここで out を差し替える
       // 以降の [IROS/LLM][OK] ログにも反映される
       return pick;
