@@ -187,7 +187,6 @@ function countQuestionLike(text: string): number {
   return markCount + likeCount;
 }
 
-
 // ✅ normalChat 判定（キーで判断）
 function isNormalChatLite(ctx?: FlagshipGuardContext | null): boolean {
   const keys = Array.isArray(ctx?.slotKeys) ? ctx!.slotKeys!.map(String) : [];
@@ -215,8 +214,7 @@ export function flagshipGuard(input: string, ctx?: FlagshipGuardContext | null):
   const qCountStrict = countQuestionLike(t);
   const qCount = normalLite ? qCountMark : qCountStrict;
 
-  const bulletLike =
-    /(^|\n)\s*[-*•]\s+/.test(t) || /(^|\n)\s*\d+\.\s+/.test(t) ? 1 : 0;
+  const bulletLike = /(^|\n)\s*[-*•]\s+/.test(t) || /(^|\n)\s*\d+\.\s+/.test(t) ? 1 : 0;
 
   // ---------------------------------------------
   // ✅ 構造（must-have）ベース判定（flag/scaffold向け）
@@ -255,6 +253,10 @@ export function flagshipGuard(input: string, ctx?: FlagshipGuardContext | null):
     /積み重ね/g,
     /無理しない/g,
     /安心して/g,
+
+    // ✅ “薄い安心/小さく促す” も cheer として拾う
+    /少しだけ/g,
+    /ちょっとだけ/g,
   ];
 
   const HEDGE = [
@@ -269,12 +271,18 @@ export function flagshipGuard(input: string, ctx?: FlagshipGuardContext | null):
   const GENERIC = [
     /ことがある/u,
     /一つの手/u,
+    /一つの道/u, // ✅ 追加（今回の典型）
     /整理してみる/u,
     /きっかけになる/u,
     /自然に/u,
     /考えてみると/u,
     /見えてくる/u,
     /明確にする/u,
+
+    // ✅ “〜てみる” 系（今回の「取ってみる」を拾う）
+    /(?:して|やって|取って|試して|見つめて|眺めて|置いて)みる/u,
+
+    // 既存
     /〜?みると/u,
     /〜?かもしれ/u,
     /〜?と思い/u,
@@ -346,50 +354,78 @@ export function flagshipGuard(input: string, ctx?: FlagshipGuardContext | null):
     }
   }
 
-  // 補助ルール（normalChatは弱め、flag/scaffoldは従来どおり）
-  if (!normalLite) {
-    if (cheer >= 2) {
-      warn += 2;
-      reasons.push('CHEER_MANY');
-    } else if (cheer === 1) {
-      warn += 1;
-      reasons.push('CHEER_PRESENT');
-    }
+  // 補助ルール
+  // - normalChat（normalLite=true）は「会話の自然さ」を優先するが、
+  //   “短文の薄逃げ（汎用+ヘッジ）だけ” は最低WARNに落とす
+  // - flag/scaffold（normalLite=false）は従来どおり強め（FATALも使う）
+  {
+// ===== BEGIN replace: short-generic rule =====
+const blandPressure = cheer + hedge + generic;
 
-    if (hedge >= 2) {
-      warn += 2;
-      reasons.push('HEDGE_MANY');
-    } else if (hedge === 1) {
-      warn += 1;
-      reasons.push('HEDGE_PRESENT');
-    }
+// ✅ 短文で「励まし/汎用」だけ（質問0でも落とす）
+// - normalChat: 視点語が入っていても “短文薄逃げ” は WARN に落とす
+// - 非normalChat: 従来どおり「視点兆候ゼロ」のときだけ FATAL
+if (!mh.scaffoldLike && t.length <= 160 && qCount === 0 && blandPressure >= 2) {
+  if (normalLite) {
+    // normalChat は「視点語」が混ざっても短文薄逃げは WARN に落とす
+    warn += 2;
+    reasons.push('NORMAL_SHORT_GENERIC_NO_QUESTION');
+  } else if (!hasFlagshipSign) {
+    // 非normalChat は従来どおり「視点兆候ゼロ」のときだけ FATAL
+    fatal += 2;
+    reasons.push('SHORT_GENERIC_NO_QUESTION');
+  }
+}
 
-    if (generic >= 2) {
-      warn += 2;
-      reasons.push('GENERIC_MANY');
-    } else if (generic === 1) {
-      warn += 1;
-      reasons.push('GENERIC_PRESENT');
-    }
 
-    if (bulletLike) {
-      warn += 1;
-      reasons.push('BULLET_LIKE');
-    }
+// ===== END replace: short-generic rule =====
 
-    // 重要：汎用圧が高いのに視点兆候ゼロ
-    const blandPressure = cheer + hedge + generic;
-    if (!mh.scaffoldLike && !hasFlagshipSign && blandPressure >= 4) {
-      fatal += 2;
-      reasons.push('NO_FLAGSHIP_SIGN_WITH_BLAND_PRESSURE');
-    }
 
-    // 短文で「励まし＋一般質問」だけ
-    if (!mh.scaffoldLike && t.length <= 160 && qCount === 1 && !hasFlagshipSign && cheer + hedge >= 2) {
-      fatal += 2;
-      reasons.push('SHORT_GENERIC_CHEER_WITH_QUESTION');
+    // 以下は非normalChatのみ（強めの品質ゲート）
+    if (!normalLite) {
+      if (cheer >= 2) {
+        warn += 2;
+        reasons.push('CHEER_MANY');
+      } else if (cheer === 1) {
+        warn += 1;
+        reasons.push('CHEER_PRESENT');
+      }
+
+      if (hedge >= 2) {
+        warn += 2;
+        reasons.push('HEDGE_MANY');
+      } else if (hedge === 1) {
+        warn += 1;
+        reasons.push('HEDGE_PRESENT');
+      }
+
+      if (generic >= 2) {
+        warn += 2;
+        reasons.push('GENERIC_MANY');
+      } else if (generic === 1) {
+        warn += 1;
+        reasons.push('GENERIC_PRESENT');
+      }
+
+      if (bulletLike) {
+        warn += 1;
+        reasons.push('BULLET_LIKE');
+      }
+
+      // 重要：汎用圧が高いのに視点兆候ゼロ
+      if (!mh.scaffoldLike && !hasFlagshipSign && blandPressure >= 4) {
+        fatal += 2;
+        reasons.push('NO_FLAGSHIP_SIGN_WITH_BLAND_PRESSURE');
+      }
+
+      // 短文で「励まし＋一般質問」だけ
+      if (!mh.scaffoldLike && t.length <= 160 && qCount === 1 && !hasFlagshipSign && cheer + hedge >= 2) {
+        fatal += 2;
+        reasons.push('SHORT_GENERIC_CHEER_WITH_QUESTION');
+      }
     }
   }
+
 
   // 最終判定
   const slotKeys = Array.isArray(ctx?.slotKeys) ? ctx!.slotKeys!.map(String) : [];
@@ -397,7 +433,9 @@ export function flagshipGuard(input: string, ctx?: FlagshipGuardContext | null):
 
   let level: FlagshipVerdict['level'] = 'OK';
 
-  const warnThreshold = (!normalLite && (mh.scaffoldLike || isFlagReplyLike)) ? 2 : 3;
+  // ✅ normalChat（normalLite=true）は短文薄逃げを「必ずWARN」まで落とすため閾値を下げる
+  // - NORMAL_SHORT_GENERIC_NO_QUESTION は warn += 2 で積まれるので、threshold=2 で確実に WARN
+  const warnThreshold = normalLite ? 2 : !normalLite && (mh.scaffoldLike || isFlagReplyLike) ? 2 : 3;
 
   if (fatal >= 2) level = 'FATAL';
   else if (warn >= warnThreshold) level = 'WARN';

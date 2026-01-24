@@ -442,8 +442,23 @@ function isMicroTurn(raw: string): boolean {
   const { rawTrim, core, len } = buildMicroCore(raw);
   if (!rawTrim) return false;
 
-  // ✅ 追加：単語（1トークン）を最優先で micro に含める
-  // - これを len チェックより前に置かないと、len<2 で弾かれて到達できない
+  // 英数混じりは micro にしない（誤爆防止）
+  if (/[A-Za-z0-9]/.test(core)) return false;
+
+  // 疑問語は micro では扱わない（通常フローへ）
+  if (
+    /(何|なに|どこ|いつ|だれ|誰|なぜ|どうして|どうやって|いくら|何色|色)/.test(core)
+  ) {
+    return false;
+  }
+
+  // 長すぎ/短すぎは micro では扱わない
+  if (len < 2 || len > 10) return false;
+
+  // ✅ 追加：単語（1トークン）も micro に含める
+  // - main側で isSingleToken の固定DRAFT注入が既にあるので、
+  //   ここで “入口” だけ開ける
+  // - 記号や句読点は除外（既存の固定DRAFT注入と同じ基準）
   const isSingleToken =
     rawTrim.length > 0 &&
     !/\s/.test(rawTrim) &&
@@ -451,21 +466,9 @@ function isMicroTurn(raw: string): boolean {
 
   if (isSingleToken) return true;
 
-  // 英数混じりは micro にしない（誤爆防止）
-  if (/[A-Za-z0-9]/.test(core)) return false;
-
-  // 疑問語は micro では扱わない（通常フローへ）
-  if (/(何|なに|どこ|いつ|だれ|誰|なぜ|どうして|どうやって|いくら|何色|色)/.test(core)) {
-    return false;
-  }
-
-  // 長すぎ/短すぎは micro では扱わない
-  if (len < 2 || len > 10) return false;
-
   // 既存：短い「動詞系 micro」
   return /^(どうする|やる|やっちゃう|いく|いける|どうしよ|どうしよう|行く|行ける)$/.test(core);
 }
-
 
 /* =========================
    Goal recall helpers

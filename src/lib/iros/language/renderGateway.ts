@@ -719,6 +719,8 @@ export function renderGatewayAsReply(args: {
   const c3 = norm(args?.text ?? '');
 
   // ✅ rephrase があるなら、それを最優先（slotplan由来のテンプレを上書き）
+  // ✅ rephraseText(r0) は「本文入力」ではなく “最終保険のfallback” として扱う
+  // - render-v2 の本文は blocks（rephraseBlocks / splitToLines）で決める
   const r0 = pickRephraseText(extra);
 
   // ✅ 追加：rephrase が弾かれたとき等に [slotPlanFallbackText] を拾う（ログ整合）
@@ -728,11 +730,10 @@ export function renderGatewayAsReply(args: {
   const r0s = r0 ? sanitizeVisibleText(r0, { appendLamp: false }) : '';
   const sf0s = sf0 ? sanitizeVisibleText(sf0, { appendLamp: false }) : '';
 
-  // --- pick order (rephrase > content > assistantText > text > slotPlanFallback)
-  let picked = r0s || c1 || c2 || c3 || sf0s || '';
-  let pickedFrom = r0s
-    ? 'rephrase'
-    : c1
+  // --- pick order (content > assistantText > text > slotPlanFallback)
+  // ✅ 重要：本文は blocks 側で決めるため、ここで r0s を最優先にしない
+  let picked = c1 || c2 || c3 || sf0s || '';
+  let pickedFrom = c1
     ? 'content'
     : c2
     ? 'assistantText'
@@ -745,7 +746,9 @@ export function renderGatewayAsReply(args: {
   // renderEngine 無効時は「触らず返す」（ただし互換のため末尾 🪔 は付ける）
   if (!enable) {
     // ※この分岐では renderV2 を通さず “そのまま見える文” に整えるだけ
-    let visible = sanitizeVisibleText(picked, { appendLamp: true });
+    // ✅ 互換：rephraseText がある場合は、ここでは従来どおり優先してよい（v2未使用）
+    const basePicked = r0s || picked || '';
+    let visible = sanitizeVisibleText(basePicked, { appendLamp: true });
 
     // ✅ ガード/サニタイズで “空” になった場合は、rephraseBlocks から復旧する
     if (!visible && Array.isArray((extra as any)?.rephraseBlocks) && (extra as any).rephraseBlocks.length > 0) {
@@ -763,9 +766,9 @@ export function renderGatewayAsReply(args: {
         blocksCount: 0,
         maxLines: 0,
         enable: false,
-        pickedFrom,
-        pickedLen: picked.length,
-        pickedHead: head(picked),
+        pickedFrom: r0s ? 'rephrase' : pickedFrom,
+        pickedLen: basePicked.length,
+        pickedHead: head(basePicked),
         fallbackFrom: 'n/a',
         fallbackLen: 0,
         fallbackHead: '',
@@ -902,8 +905,8 @@ export function renderGatewayAsReply(args: {
     console.warn('[IROS/CONV_EVIDENCE][FAILED]', { error: e });
   }
 
-  // fallbackText は “LLMが空のとき” の保険
-  let fallbackText = picked || s4 || s5 || s6 || '';
+  // fallbackText は “LLMが空のとき” の保険（r0s は最後尾保険）
+  let fallbackText = picked || s4 || s5 || s6 || r0s || '';
   let fallbackFrom = picked
     ? pickedFrom
     : s4
@@ -912,6 +915,8 @@ export function renderGatewayAsReply(args: {
     ? 'rawTextFromModel'
     : s6
     ? 'extractedTextFromModel'
+    : r0s
+    ? 'rephrase'
     : 'none';
 
   const isIR = looksLikeIR(fallbackText, extra);
@@ -939,19 +944,21 @@ export function renderGatewayAsReply(args: {
     const isScaffoldLike = slotPlanPolicy === 'SCAFFOLD' || (slotPlanPolicy == null && hasAnySlots && !picked);
 
     // ✅ rephraseBlocks は block 意図を持つので splitToLines で潰さない
-    const rephraseBlocks = extraAny?.rephraseBlocks ?? extraAny?.rephrase?.blocks ?? extraAny?.rephrase?.rephraseBlocks ?? null;
+    const rephraseBlocks =
+      extraAny?.rephraseBlocks ?? extraAny?.rephrase?.blocks ?? extraAny?.rephrase?.rephraseBlocks ?? null;
 
-    if (pickedFrom === 'rephrase' && Array.isArray(rephraseBlocks) && rephraseBlocks.length > 0) {
-      const isBadBlock = (t0: string) => {
-        const t = String(t0 ?? '').trim();
-        if (!t) return true;
-        // 先頭が @CONSTRAINTS/@OBS/... 系は “内部ディレクティブ”
-        if (/^@(?:CONSTRAINTS|OBS|SHIFT|NEXT|SAFE|ACK|RESTORE|Q)\b/.test(t)) return true;
-        // JSONっぽい塊も UI には出さない（だいたい directive の副産物）
-        if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) return true;
-        return false;
-      };
+    const isBadBlock = (t0: string) => {
+      const t = String(t0 ?? '').trim();
+      if (!t) return true;
+      // 先頭が @CONSTRAINTS/@OBS/... 系は “内部ディレクティブ”
+      if (/^@(?:CONSTRAINTS|OBS|SHIFT|NEXT|SAFE|ACK|RESTORE|Q)\b/.test(t)) return true;
+      // JSONっぽい塊も UI には出さない（だいたい directive の副産物）
+      if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) return true;
+      return false;
+    };
 
+    // ✅ 一本化：rephraseBlocks があれば常に blocks 経由で本文を組む（pickedFrom に依存しない）
+    if (Array.isArray(rephraseBlocks) && rephraseBlocks.length > 0) {
       const cleanedBlocks = rephraseBlocks
         .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim())
         .filter((t: string) => !isBadBlock(t))
@@ -961,9 +968,10 @@ export function renderGatewayAsReply(args: {
 
       if (cleanedBlocks.length > 0) {
         blocks = cleanedBlocks;
+        pickedFrom = 'rephraseBlocks';
       } else {
-        // ✅ blocks が全部ダメなら、rephraseText(r0) を通常ルートで使う（短文化防止）
-        const base2 = r0s || base || fallbackText || '';
+        // ✅ blocks が全部ダメなら通常ルート（最後尾の保険として r0s）
+        const base2 = base || fallbackText || r0s || '';
         const lines = splitToLines(base2);
         blocks = lines
           .map((t) => stripInternalLabels(t))
@@ -985,6 +993,7 @@ export function renderGatewayAsReply(args: {
       scaffoldApplied = true;
     }
   }
+
 
   const expandAllowed = EXPAND_ENABLED && !isSilence && !isIR;
   void expandAllowed; //（現状はログ用途のみ。将来分岐で使う）

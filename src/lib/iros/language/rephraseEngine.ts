@@ -1518,21 +1518,33 @@ const seedDraftRaw = extracted.slots
     const k = String((s as any)?.key ?? '');
 
     // -----------------------------------------
+    // -----------------------------------------
     // ✅ userText から ACK/一言を判定（inputKindがnullでも効く）
     // -----------------------------------------
     const ut = String(userText ?? '').trim();
     const isVeryShort = ut.length > 0 && ut.length <= 10;
 
-    const isAckWord =
-      /^(ありがとう|ありがとうございます|どうも|感謝|了解|りょうかい|わかった|分かった|OK|ok|おけ|オケ|承知|了解です|了解しました|お願いします|よろしく|宜しく)\b/.test(ut);
+    const isGreeting =
+      /^(こんにちは|こんばんは|おはよう|もしもし|やあ|ハロー|hello|hi|hey|おつかれ|お疲れ)\b/i.test(ut);
 
-    const isAckLike = isAckWord || isVeryShort;
+    const isAckWord =
+      /^(ありがとう|ありがとうございます|どうも|感謝|了解|りょうかい|わかった|分かった|OK|ok|おけ|オケ|承知|了解です|了解しました|お願いします|よろしく|宜しく)\b/.test(
+        ut,
+      );
+
+    // ✅ 「短い」だけでACK扱いにしない（挨拶は除外）
+    const isAckLike = isAckWord || (isVeryShort && !isGreeting);
+
+    // ✅ extracted に OBS が無いケース（SEED_TEXTだけ等）を救済
+    const hasOBS = extracted.slots.some((x) => String((x as any)?.key ?? '') === 'OBS');
 
     // ACK寄りは “素材” を最小に（相談テンプレ混入を止める）
     if (isAckLike) {
-      // ✅ ACK/一言は “相談テンプレ混入” を止めるため OBS のみに絞る
-      return k === 'OBS';
+      // OBS があるなら OBS のみ、無いなら SEED_TEXT/DRAFT を素材に含める
+      if (hasOBS) return k === 'OBS';
+      return k === 'SEED_TEXT' || k === 'DRAFT' || k === 'OBS';
     }
+
 
 
     // -----------------------------------------
@@ -1969,8 +1981,7 @@ if (blocks.length <= 1) {
     const raw = String(text ?? '');
     // ✅ scaffold中は must-have を壊さないため整形しない（形だけで落とす事故が起きやすい）
     // ✅ 通常チャットは hedge を軽く削ってから採点にかける
-    const textForGuard = scaffoldActive ? raw : stripHedgeLite(raw);
-
+    const textForGuard = raw;
     let v = flagshipGuard(textForGuard, {
       slotKeys: Array.isArray(inKeys) ? inKeys : null,
       slotsForGuard: Array.isArray(slotsForGuard) ? slotsForGuard : null,
@@ -2265,8 +2276,65 @@ if (forceIntervene) {
     return adoptAsSlots(seedFromSlots, 'FLAGSHIP_WARN_REJECT_TO_SEED', { scaffoldActive });
   }
 
-  // OKなら採用
-  if (v?.ok) return adoptAsSlots(candidate, 'FLAGSHIP_OK', { scaffoldActive });
+  // ✅ OKでも「短すぎる」場合は薄逃げとして 2nd PASS（編集）へ回す
+  // - ここでは一般論を足すのではなく、seed/candidate を材料に整形させるために FATAL 扱いに落とす
+  // - scaffoldActive / directTask のときは「短くて良い」ことがあるので対象外
+  const vLevelPre = String((v as any)?.level ?? '').toUpperCase();
+  const candidateLen = (candidate ?? '').trim().length;
+
+  const MIN_OK_LEN = 80; // 46文字が通っているので、まずはこの床で止める
+  const shouldOkTooShortToRetry =
+    !scaffoldActive &&
+    !isDirectTask &&
+    v?.ok &&
+    vLevelPre === 'OK' &&
+    candidateLen > 0 &&
+    candidateLen < MIN_OK_LEN;
+
+  if (shouldOkTooShortToRetry) {
+    console.warn('[IROS/FLAGSHIP][OK_TOO_SHORT_TO_RETRY]', {
+      traceId: debug.traceId,
+      conversationId: debug.conversationId,
+      userCode: debug.userCode,
+      level: (v as any)?.level,
+      len: candidateLen,
+      min: MIN_OK_LEN,
+      head: safeHead(candidate, 160),
+    });
+
+    v = {
+      ...(v as any),
+      ok: false,
+      level: 'FATAL',
+      reasons: Array.from(new Set([...(v.reasons ?? []), 'OK_TOO_SHORT_TO_RETRY'])),
+    } as any;
+  }
+
+
+  // OKなら採用（※WARNは採用しない：2nd PASSへ落として厚みを取り戻す）
+  const vLevel = String((v as any)?.level ?? '').toUpperCase();
+
+  if (v?.ok && vLevel === 'OK') {
+    return adoptAsSlots(candidate, 'FLAGSHIP_OK', { scaffoldActive });
+  }
+
+  // WARN は seedへ戻す対象以外でも「薄いまま通る」ので、ここで2nd PASSへ回す
+  if (vLevel === 'WARN') {
+    console.warn('[IROS/FLAGSHIP][WARN_TO_RETRY]', {
+      traceId: debug.traceId,
+      conversationId: debug.conversationId,
+      userCode: debug.userCode,
+      level: (v as any)?.level,
+      reasons: (v as any)?.reasons,
+    });
+
+    v = {
+      ...(v as any),
+      ok: false,
+      level: 'FATAL',
+      reasons: Array.from(new Set([...(((v as any)?.reasons ?? []) as any[]), 'WARN_TO_RETRY'])),
+    } as any;
+  }
 
 // ---------------------------------------------
 // FATAL → 1回だけ再生成（2ndは“再作文”ではなく“編集/復元+整形”）
@@ -2275,15 +2343,30 @@ if (forceIntervene) {
 const baseDraftForRepair: string = (() => {
   const a = (seedFromSlots && seedFromSlots.trim()) ? seedFromSlots.trim() : '';
   const b = (candidate && candidate.trim()) ? candidate.trim() : '';
+  const c = (seedDraft && seedDraft.trim()) ? seedDraft.trim() : '';
+
+  // ✅ WARN→RETRY で “薄いcandidate” を編集対象にすると同文リピートになりやすい
+  // → seedDraft（slot下書き）を優先して編集素材にする
+  const reasons = new Set((((v as any)?.reasons ?? []) as any[]).map((x) => String(x)));
+  const preferSeedDraft =
+    reasons.has('NORMAL_SHORT_GENERIC_NO_QUESTION') ||
+    reasons.has('OK_TOO_SHORT_TO_RETRY') ||
+    candidateLen < MIN_OK_LEN;
 
   if (isDirectTask) {
     // 直依頼は「送れる文面」を優先。コピー源（seedDraft）は断つ。
-    // どちらも無いなら空でよい（2nd PASS は system 指示で整える）
     return a || b || '';
   }
 
-  return a || b || seedDraft;
+  if (preferSeedDraft) {
+    // ✅ ここが肝：slotの下書き（or seedFromSlots）を土台にして“編集”させる
+    return a || c || b || '';
+  }
+
+  // 通常は candidate 優先でOK
+  return a || b || c || '';
 })();
+
 
 const retryMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
   // ✅ 1回目の system を流用しつつ、2回目は「編集タスク」に切り替える
@@ -2459,32 +2542,49 @@ console.log('[IROS/FLAGSHIP][RETRY_VERDICT]', {
   head: safeHead(retryCandidate, 160),
 });
 
-// OKなら採用
-if (vRetry?.ok) return adoptAsSlots(retryCandidate, 'FLAGSHIP_RETRY_OK', { scaffoldActive });
+// OKなら採用（※ level===OK だけ）
+{
+  const retryText = String(retryCandidate ?? '').trim();
+  const retryLen = retryText.length;
+  const retryLevel = String((vRetry as any)?.level ?? '').toUpperCase();
+  const retryReasons = Array.from(
+    new Set((((vRetry as any)?.reasons ?? []) as any[]).map((x) => String(x))),
+  );
 
-// retryでもWARN薄逃げ → seed
-if (
-  vRetry &&
-  String(vRetry.level ?? '').toUpperCase() === 'WARN' &&
-  shouldRejectWarnToSeed(vRetry) &&
-  seedFromSlots
-) {
-  return adoptAsSlots(seedFromSlots, 'FLAGSHIP_RETRY_WARN_TO_SEED', { scaffoldActive });
-}
+  const acceptRetry =
+    !!vRetry?.ok &&
+    retryLevel === 'OK' &&
+    retryLen >= MIN_OK_LEN &&
+    !retryReasons.includes('NORMAL_SHORT_GENERIC_NO_QUESTION');
 
-// ✅ ここが肝：retryでFATALなら “必ず seed優先” に戻す（薄い局面を安定させる）
-if (seedFromSlots) return adoptAsSlots(seedFromSlots, 'FLAGSHIP_RETRY_FATAL_TO_SEED', { scaffoldActive });
+  if (acceptRetry) {
+    return adoptAsSlots(retryText, 'FLAGSHIP_RETRY_OK', { scaffoldActive });
+  }
 
-// seedが無い時だけ候補を返す
-return adoptAsSlots(candidate, 'FLAGSHIP_RETRY_FATAL_USE_CANDIDATE', { scaffoldActive });
+  // retryでもWARN薄逃げ → seed（seedがある時だけ）
+  if (vRetry && retryLevel === 'WARN' && seedFromSlots) {
+    const mustSeed =
+      shouldRejectWarnToSeed(vRetry) ||
+      retryLen < MIN_OK_LEN ||
+      retryReasons.includes('NORMAL_SHORT_GENERIC_NO_QUESTION');
 
+    if (mustSeed) {
+      return adoptAsSlots(seedFromSlots, 'FLAGSHIP_RETRY_WARN_TO_SEED', { scaffoldActive });
+    }
+  }
 
-  // ✅ retryでも WARN/FATAL で seed に戻さない（LLMは落とさない）
-  // - meta に「FATAL採用」を残して追跡できるようにする
-  return adoptAsSlots(retryCandidate, 'FLAGSHIP_RETRY_FATAL_ACCEPT', {
+  // ✅ ここが肝：retryでFATAL/未達なら “必ず seed優先” に戻す（薄い局面を安定させる）
+  if (seedFromSlots) {
+    return adoptAsSlots(seedFromSlots, 'FLAGSHIP_RETRY_FATAL_TO_SEED', { scaffoldActive });
+  }
+
+  // seedが無い時だけ retry を返す（追跡メタを残す）
+  const fallbackText = retryText || String(candidate ?? '').trim();
+  return adoptAsSlots(fallbackText, 'FLAGSHIP_RETRY_FATAL_ACCEPT', {
     scaffoldActive,
     flagshipFatal: true,
-    flagshipLevel: vRetry?.level ?? 'FATAL',
-    flagshipReasons: Array.isArray(vRetry?.reasons) ? vRetry.reasons : [],
+    flagshipLevel: (vRetry as any)?.level ?? 'FATAL',
+    flagshipReasons: Array.isArray((vRetry as any)?.reasons) ? (vRetry as any).reasons : [],
   });
+}
 }

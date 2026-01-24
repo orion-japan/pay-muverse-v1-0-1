@@ -68,6 +68,11 @@
     "src/components/mui/useMuiDrop.ts",
     "src/lib/email/**",
     "src/lib/payjp/**",
-    "src/lib/qcode/kyomeikai.ts"
+    "src/lib/qcode/kyomeikai.ts",
+
+    "**/*.bak",
+    "**/*.bak.*",
+    "**/*.ts.bak.*",
+    "**/*.tsx.bak.*"
   ]
 }

@@ -50,41 +50,62 @@ function normalizeMicro(s: string): string {
 function sanitizeMicroEmoji(raw: string): string {
   const s = String(raw ?? '');
 
-  // Unicode絵文字（おおむね）を拾う：Extended_Pictographic
   // ※ 🪔 は許可するので、いったん🪔だけプレースホルダ退避
   const PLACEHOLDER = '__IROS_LAMP__';
   const escaped = s.replace(/🪔/g, PLACEHOLDER);
 
-  // 絵文字っぽい文字を除去
+  // 絵文字っぽい文字（Extended_Pictographic）を除去
   const removed = escaped.replace(/\p{Extended_Pictographic}/gu, '');
 
   // 🪔を戻す
   const restored = removed.replace(new RegExp(PLACEHOLDER, 'g'), '🪔');
 
-  // 🪔が複数あれば先頭1個だけ残す
-  const firstIdx = restored.indexOf('🪔');
-  if (firstIdx === -1) return restored;
+  // 🪔が複数あれば先頭1個だけ残す（コードポイントで安全に）
+  const chars = Array.from(restored);
+  const first = chars.indexOf('🪔');
+  if (first === -1) return restored.trim();
 
-  const before = restored.slice(0, firstIdx + 2); // 🪔はサロゲートなので+2
-  const after = restored.slice(firstIdx + 2).replace(/🪔/g, '');
-  return (before + after).replace(/\s+$/g, '').trimEnd();
+  const out = chars
+    .map((c, i) => (c === '🪔' && i !== first ? '' : c))
+    .join('')
+    .replace(/\s+$/g, '')
+    .trimEnd();
+
+  return out.trim();
 }
 
 /**
- * LLM出力を「1〜2行」に丸める。
+ * LLM出力を「1〜2行」に丸める（フォーマット揺れに強くする）。
+ * - "\\n"（バックスラッシュn）を実改行に復元
+ * - Markdown hard break（"  \n"）を普通の改行扱いに寄せる
  * - 空行除去
  * - 3行以上なら先頭2行だけ採用
  * - 極端な長文は軽く切る（安全弁）
+ * - “メニュー/選択肢”っぽい形は拒否
  */
 function coerceToTwoLines(raw: string): string | null {
-  const lines = String(raw ?? '')
-    .replace(/\r\n/g, '\n')
+  const normalize = (s: string) =>
+    String(s ?? '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      // LLMが "\\n" をテキストとして返すケースを救う
+      .replace(/\\n/g, '\n')
+      // Markdown hard break（2スペ+改行）を普通の改行に寄せる
+      .replace(/[ \t]{2,}\n/g, '\n')
+      .trim();
+
+  const text = normalize(raw);
+  if (!text) return null;
+
+  // 行に分解（空行は落とす）
+  const lines = text
     .split('\n')
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
 
   if (lines.length === 0) return null;
 
+  // 3行以上なら先頭2行へ
   const first2 = lines.slice(0, 2);
 
   // “メニュー/選択肢”っぽい行頭を弾く（くどさ防止）
@@ -93,7 +114,7 @@ function coerceToTwoLines(raw: string): string | null {
   );
   if (looksLikeMenu) return null;
 
-  // 2行を超える長さになりがちなときの安全弁（目安）
+  // 2行合計が伸びすぎるときの安全弁
   const joined = first2.join('\n');
   const hardMax = 220; // UIで“短文”に見える範囲の上限
   const clipped = joined.length > hardMax ? joined.slice(0, hardMax).trim() : joined;
@@ -153,7 +174,6 @@ export async function runMicroWriter(
 【ゆらぎ】
 - seed=${seed} を言い回しの軽い揺らぎに使う（毎回同じ言い方にしない）
 `.trim();
-
 
   const prompt: string = `
 入力: ${userText}

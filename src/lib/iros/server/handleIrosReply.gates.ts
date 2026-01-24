@@ -23,6 +23,12 @@ export type FlagshipVerdict = {
     hedge: number;
     cheer: number;
     generic: number;
+
+    // ✅ 既存ログ/参照互換（使っていなくても0で返す）
+    runaway: number;
+    exaggeration: number;
+    mismatch: number;
+    retrySame: number;
   };
   reasons: string[];
 
@@ -55,7 +61,8 @@ function countMatches(text: string, patterns: RegExp[]) {
   let c = 0;
   for (const p of patterns) {
     // /g が無い場合もあるので、安全に global 化して match
-    const re = p.global ? p : new RegExp(p.source, p.flags + 'g');
+    const flags = p.flags.includes('g') ? p.flags : `${p.flags}g`;
+    const re = p.global ? p : new RegExp(p.source, flags);
     const m = text.match(re);
     if (m) c += m.length;
   }
@@ -160,6 +167,7 @@ function extractScaffoldMustHave(ctx?: FlagshipGuardContext | null): {
 // ✅ 「?」だけでなく、?なし疑問文も qCount に入れる
 // - 旗印上「質問逃げ」を拾うのが目的（厳密な日本語解析はしない）
 // - “1行=1疑問” くらいの粗さで十分（ループを止めるため）
+// ✅ 二重カウント防止：その行に ?/？ があるなら like 判定しない
 function countQuestionLike(text: string): number {
   const t = norm(text);
 
@@ -167,9 +175,6 @@ function countQuestionLike(text: string): number {
   const markCount = (t.match(/[？?]/g) ?? []).length;
 
   // 2) ?なし疑問文（日本語）を検出して加算
-  // - 「ですか/ますか/でしょうか/かな/か/の」など
-  // - WH語（どう/なぜ/何/どこ/いつ/どれ/どんな/誰）
-  // - 「教えて/聞かせて/話して」系（質問逃げになりやすい）
   const lines = t
     .split('\n')
     .map((s) => s.trim())
@@ -179,6 +184,9 @@ function countQuestionLike(text: string): number {
 
   for (const line of lines) {
     const s = line;
+
+    // ✅ この行に ? / ？ があるなら、すでに markCount で数えているので二重カウントしない
+    if (/[？?]/.test(s)) continue;
 
     const hasWh =
       /(どう(すれば|したら)?|なぜ|なんで|何(が|を|の)?|どこ|いつ|どれ|どんな|誰|誰が|誰に)/.test(s);
@@ -194,11 +202,32 @@ function countQuestionLike(text: string): number {
   return markCount + likeCount;
 }
 
+// ✅ normalChat 判定（キーで判断）
+// - normalChat: SEED_TEXT / OBS / SHIFT が並ぶ（あなたの現行 normalChat.ts 構成）
+// - flagReply は FLAG_ だらけ
+function isNormalChatLite(ctx?: FlagshipGuardContext | null): boolean {
+  const keys = Array.isArray(ctx?.slotKeys) ? ctx!.slotKeys!.map(String) : [];
+  if (keys.length === 0) return false;
+
+  const hasSeed = keys.includes('SEED_TEXT');
+  const hasObs = keys.includes('OBS');
+  const hasShift = keys.includes('SHIFT');
+
+  const isFlag = keys.every((k) => String(k).startsWith('FLAG_'));
+
+  return !isFlag && hasSeed && hasObs && hasShift;
+}
+
 export function flagshipGuard(input: string, ctx?: FlagshipGuardContext | null): FlagshipVerdict {
   const t = norm(input);
 
   const reasons: string[] = [];
-  const qCount = countQuestionLike(t);
+  const normalLite = isNormalChatLite(ctx);
+
+  // ✅ qCount: normalChat は「?の数だけ」/ それ以外は “疑問文推定込み”
+  const qCountMark = (t.match(/[？?]/g) ?? []).length;
+  const qCountStrict = countQuestionLike(t);
+  const qCount = normalLite ? qCountMark : qCountStrict;
 
   // 箇条書きっぽさ（旗印というより“助言テンプレ”になりがち）
   const bulletLike = /(^|\n)\s*[-*•]\s+/.test(t) || /(^|\n)\s*\d+\.\s+/.test(t) ? 1 : 0;
@@ -212,9 +241,8 @@ export function flagshipGuard(input: string, ctx?: FlagshipGuardContext | null):
   const hasPoints3 =
     mh.points3Needles.length === 0 ? true : mh.points3Needles.every((nd) => includesNeedle(t, nd));
 
-  // scaffoldLike なのに must-have が欠けたら「汎用化/薄逃げ」として落とす
-  // ※ これが “文字判断じゃなく構造で修復” の中核
-  if (mh.scaffoldLike) {
+  // ✅ normalChat は scaffoldMustHave を強く当てない（浅い会話を通す）
+  if (!normalLite && mh.scaffoldLike) {
     if (mh.purposeNeedle && !hasPurpose) reasons.push('SCAFFOLD_PURPOSE_MISSING');
     if (mh.onePointNeedle && !hasOnePoint) reasons.push('SCAFFOLD_ONE_POINT_MISSING');
     if (mh.points3Needles.length > 0 && !hasPoints3) reasons.push('SCAFFOLD_POINTS3_NOT_PRESERVED');
@@ -222,7 +250,6 @@ export function flagshipGuard(input: string, ctx?: FlagshipGuardContext | null):
 
   // ---------------------------------------------
   // 補助：文字列判定（最後の手段）
-  // - 構造判定が弱い/slotsが無い時の保険
   // ---------------------------------------------
   const CHEER = [
     /ワクワク/g,
@@ -246,38 +273,46 @@ export function flagshipGuard(input: string, ctx?: FlagshipGuardContext | null):
   const HEDGE = [
     /かもしれません/g,
     /かもしれない/g,
-    /(?:見えて|分かって)くるかもしれない/g,
+    /(?:^|[^\p{L}\p{N}])かも(?:$|[^\p{L}\p{N}])/gu,
+    /可能性(?:がある|あります|があります)?/gu,
+    /だろう/gu,
+    /でしょう/gu,
+    /気がする/gu,
+    /気がします/gu,
+    /と思う/gu,
     /と思います/g,
+    /(?:見えて|分かって)くるかもしれない/g,
     /ように/g,
     /できるかもしれ/g,
+    /してみて/gu,
+    /してみる/gu,
+    /してみると/gu,
+    /考えてみて/gu,
+    /考えてみる/gu,
+    /考えてみると/gu,
+    /見つめてみて/gu,
+    /見つめてみる/gu,
   ];
 
-  // 日本語 “無難テンプレ” の最小セット（slotsが無い時に効く）
   const GENERIC = [
-    // --- “無難テンプレ” （今回の実例を確実に拾う） ---
-    /ことがある/u, // 「〜ことがある」
-    /一つの手/u, // 「一つの手だ」
-    /整理してみる/u, // 「整理してみると」
-    /きっかけになる/u, // 「きっかけになる」
-    /自然に/u, // 「自然に〜」
-    /考えてみると/u, // 「考えてみると」
-
-    // --- 似た逃げ口上（今後も出やすい） ---
-    /見えてくる/u, // 「見えてくる」
-    /明確にする/u, // 「明確にする」
-    /〜?みると/u, // 「〜してみると」（雑に増えやすい）
-    /〜?かもしれ/u, // 「かもしれません」系（hedgeと別でも拾う）
-    /〜?と思い/u, // 「と思います」系
-    /〜?でしょう/u, // 「でしょう」系
-    /〜?可能性/u, // 「可能性」系
-
-    // --- “感じがある”系（あなたが潰したい口癖） ---
+    /ことがある/u,
+    /一つの手/u,
+    /整理してみる/u,
+    /きっかけになる/u,
+    /自然に/u,
+    /考えてみると/u,
+    /見えてくる/u,
+    /明確にする/u,
+    /〜?みると/u,
+    /〜?かもしれ/u,
+    /〜?と思い/u,
+    /〜?でしょう/u,
+    /〜?可能性/u,
     /感じがある/u,
     /感じがする/u,
     /感じがします/u,
   ];
 
-  // 旗印側の「視点を一段変える」兆候（補助）
   const FLAGSHIP_SIGNS = [
     /見方/g,
     /視点/g,
@@ -301,17 +336,29 @@ export function flagshipGuard(input: string, ctx?: FlagshipGuardContext | null):
   let fatal = 0;
   let warn = 0;
 
-  // ルール1: 質問は最大1（既存ポリシーと整合）
-  if (qCount >= 2) {
-    fatal += 2;
-    reasons.push('QCOUNT_TOO_MANY');
-  } else if (qCount === 1) {
-    warn += 1;
-    reasons.push('QCOUNT_ONE');
+  // ✅ 質問の扱い
+  if (normalLite) {
+    if (qCount >= 3) {
+      fatal += 2;
+      reasons.push('QCOUNT_TOO_MANY');
+    } else if (qCount === 2) {
+      warn += 1;
+      reasons.push('QCOUNT_TWO');
+    } else if (qCount === 1) {
+      reasons.push('QCOUNT_ONE');
+    }
+  } else {
+    if (qCount >= 2) {
+      fatal += 2;
+      reasons.push('QCOUNT_TOO_MANY');
+    } else if (qCount === 1) {
+      warn += 1;
+      reasons.push('QCOUNT_ONE');
+    }
   }
 
-  // ✅ ルール2: scaffoldLike で must-have が欠けたら FATAL（構造維持失敗）
-  if (mh.scaffoldLike) {
+  // ✅ scaffoldLike で must-have が欠けたら FATAL（構造維持失敗）
+  if (!normalLite && mh.scaffoldLike) {
     const missingMustHave =
       reasons.includes('SCAFFOLD_PURPOSE_MISSING') ||
       reasons.includes('SCAFFOLD_ONE_POINT_MISSING') ||
@@ -323,7 +370,7 @@ export function flagshipGuard(input: string, ctx?: FlagshipGuardContext | null):
     }
   }
 
-  // 補助ルール（最後の保険）
+  // --- 補助ルール ---
   if (cheer >= 2) {
     warn += 2;
     reasons.push('CHEER_MANY');
@@ -333,6 +380,7 @@ export function flagshipGuard(input: string, ctx?: FlagshipGuardContext | null):
   }
 
   if (hedge >= 2) {
+    if (!normalLite) fatal += 2;
     warn += 2;
     reasons.push('HEDGE_MANY');
   } else if (hedge === 1) {
@@ -353,39 +401,43 @@ export function flagshipGuard(input: string, ctx?: FlagshipGuardContext | null):
     reasons.push('BULLET_LIKE');
   }
 
-  // 重要：汎用圧が高いのに視点兆候ゼロ（slotsが無い時の保険）
+  // ✅ hedge + generic の同居は “汎用逃げ”（normalChatは除外）
+  if (!normalLite && hedge >= 1 && generic >= 1) {
+    fatal += 2;
+    reasons.push('HEDGE_GENERIC_PAIR');
+  }
+
   const blandPressure = cheer + hedge + generic;
+
   if (!mh.scaffoldLike && !hasFlagshipSign && blandPressure >= 4) {
     fatal += 2;
     reasons.push('NO_FLAGSHIP_SIGN_WITH_BLAND_PRESSURE');
   }
 
-  // 短文で「励まし＋一般質問」だけ（slotsが無い時の保険）
   if (!mh.scaffoldLike && t.length <= 160 && qCount === 1 && !hasFlagshipSign && cheer + hedge >= 2) {
     fatal += 2;
     reasons.push('SHORT_GENERIC_CHEER_WITH_QUESTION');
   }
 
-  // 最終判定（FLAG_* / scaffoldLike は “薄さ” に敏感にする）
   const slotKeys = Array.isArray(ctx?.slotKeys) ? ctx!.slotKeys!.map(String) : [];
   const isFlagReplyLike = slotKeys.length > 0 && slotKeys.every((k) => String(k).startsWith('FLAG_'));
 
   let level: FlagshipVerdict['level'] = 'OK';
 
-  // ✅ FLAG_* / scaffoldLike は “warn>=2” で WARN に上げる（＝HEDGE_MANY単独でも拾う）
-  const warnThreshold = mh.scaffoldLike || isFlagReplyLike ? 2 : 3;
+  const warnThreshold = normalLite ? 4 : mh.scaffoldLike || isFlagReplyLike ? 2 : 3;
 
   if (fatal >= 2) level = 'FATAL';
   else if (warn >= warnThreshold) level = 'WARN';
 
   const ok = level !== 'FATAL';
 
-  // ✅ WARNでも“停滞/体験崩れ”なら上位で介入させたい
   const shouldRaiseFlag =
     level === 'FATAL' ||
     (level === 'WARN' &&
       (reasons.includes('SCAFFOLD_POINTS3_NOT_PRESERVED') ||
         reasons.includes('SCAFFOLD_PURPOSE_MISSING') ||
+        reasons.includes('SCAFFOLD_ONE_POINT_MISSING') ||
+        reasons.includes('HEDGE_GENERIC_PAIR') ||
         hedge >= 3 ||
         generic >= 2 ||
         (!hasFlagshipSign && blandPressure >= 3)));
@@ -402,23 +454,33 @@ export function flagshipGuard(input: string, ctx?: FlagshipGuardContext | null):
       hedge,
       cheer,
       generic,
+
+      // ✅ 互換: 今は数えないので0
+      runaway: 0,
+      exaggeration: 0,
+      mismatch: 0,
+      retrySame: 0,
     },
     reasons,
     shouldRaiseFlag,
   };
 }
+// --- greeting gate -------------------------------------------------
+// ✅ greeting-only input を “素材” に変換する（判断しない）
+// - ここは gate 層（handleIrosReply.gates.ts）に置く
+// - 上位で「このターンもLLM整形に流す」ための印も返す
 export async function runGreetingGate(args: any): Promise<{
   ok: boolean;
   result: string | null;
   metaForSave: any | null;
 }> {
-  const norm = (s: any) =>
+  const norm2 = (s: any) =>
     String(s ?? '')
       .replace(/\r/g, '')
       .replace(/[ \t]+/g, ' ')
       .trim();
 
-  const userText = norm(args?.userText ?? args?.text ?? args?.input_text ?? args?.lastUserText ?? '');
+  const userText = norm2(args?.userText ?? args?.text ?? args?.input_text ?? args?.lastUserText ?? '');
 
   // 記号・空白・絵文字を落として「挨拶だけ」かを見る
   const core = userText
@@ -432,25 +494,78 @@ export async function runGreetingGate(args: any): Promise<{
     (/^(こんにちは)$/u.test(core) && 'こんにちは。') ||
     (/^(おはよう|おはようございます)$/u.test(core) && 'おはようございます。') ||
     (/^(はじめまして|初めまして)$/u.test(core) && 'はじめまして。') ||
+    (/^(よろしく|宜しく)$/u.test(core) && 'よろしく。') ||
+    (/^(よろしくお願いします|宜しくお願いします)$/u.test(core) && 'よろしくお願いします。') ||
+    (/^(よろしくお願いいたします|宜しくお願いいたします)$/u.test(core) && 'よろしくお願いいたします。') ||
     (/^(hi|hello)$/iu.test(core) && 'こんにちは。') ||
     null;
 
-  if (!hit) return { ok: false, result: null, metaForSave: null };
 
+  if (!hit) return { ok: false, result: null, metaForSave: null };
   // ✅ 固定テンプレを避ける：ここは「素材」だけ返す（判断しない）
-  // - 「続けてどうぞ。」は機械っぽいので撤去
-  // - 質問は 0〜1 に収める（今回は 1）
-  // - iros語は出しすぎず、Sofia寄せの余白で
-  const seed = `${hit}\n今日はどんなところから始めます？🪔`;
+  // - 挨拶は “短文になりがち” なので、最小の厚みを gate 側で担保する
+  // - ここで一般論は足さない（=会話を前に進めるための「入り口」だけ）
+  // - split が効くように段落ブレイク（\n\n）を必ず入れる
+  const seed =
+    `${hit}\n\n` +
+    `いまは「ひとこと」だけでも、テーマからでも始められます。🪔\n\n` +
+    `そのまま続けて、いま出せる言葉を置いてください。`;
+
+  // ✅ 重要：slots を 2つ以上にする（keys が SEED_TEXT のみになるのを防ぐ）
+  // - OBS は “入口の受領” として短く（意味は足さない）
+  const slots = [
+    { key: 'OBS', role: 'assistant', style: 'soft', content: hit },
+    { key: 'SEED_TEXT', role: 'assistant', style: 'soft', content: seed },
+  ];
+
+  const framePlan = {
+    slotPlanPolicy: 'FINAL',
+    slots,
+  };
+
 
   return {
     ok: true,
     result: seed,
     metaForSave: {
       gate: 'greeting',
-      // 上位で「このターンもLLM整形に流す」判定に使えるよう、印だけ残す
       prefer_llm_writer: true,
+
+      // ✅ understand判定（no_ctx_summary）を潰す：初手greetingでも shortSummary を必ず持たせる
+      // - UIには出さない（ログ用）
+      ctxPack: {
+        shortSummary: 'greeting',
+      },
+
+      // ✅ rephraseAttach / conv evidence / postprocess が拾う “濃いmeta”
+      framePlan,
+
+      // ✅ framePlan だけだと拾い漏れる経路があるので slotPlan も併記（確実化）
+      slotPlan: {
+        slotPlanPolicy: 'FINAL',
+        slots,
+      },
+
+      slotPlanPolicy: 'FINAL',
+      slotPlanLen: slots.length,
+
+      // ✅ extra 側も “濃いmeta” として埋める（merge/pick 互換）
+      extra: {
+        slotPlanPolicy: 'FINAL',
+        slotPlanLen: slots.length,
+
+        // ✅ renderGateway は extra.ctxPack / meta.ctxPack / orch.ctxPack を見る経路がある
+        ctxPack: {
+          shortSummary: 'greeting',
+        },
+
+        framePlan,
+        slotPlan: {
+          slotPlanPolicy: 'FINAL',
+          slots,
+        },
+      },
     },
+
   };
 }
-

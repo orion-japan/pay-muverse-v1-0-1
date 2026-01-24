@@ -242,8 +242,20 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
   const temperature =
     typeof args.temperature === 'number' ? args.temperature : defaultTempByPurpose(purpose);
   const max_tokens = typeof args.max_tokens === 'number' ? args.max_tokens : 512;
+
+  if (process.env.IROS_DEBUG_LLM_MAXTOKENS === '1') {
+    console.info('[LLM][MAXTOKENS_TRACE]', {
+      purpose: args.purpose,
+      model,
+      max_tokens,
+      temperature,
+      msgCount: Array.isArray(args.messages) ? args.messages.length : null,
+    });
+  }
+
   const endpoint = args.endpoint ?? 'https://api.openai.com/v1/chat/completions';
   const extraHeaders = args.extraHeaders ?? {};
+
 
   // ✅ extraBody は「内部フラグが混ざる」ので、送信用と内部判定用を分ける
   const extraBodyRaw = (args.extraBody ?? {}) as Record<string, any>;
