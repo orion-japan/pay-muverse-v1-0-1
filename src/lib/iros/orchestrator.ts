@@ -59,6 +59,8 @@ import { extractAnchorEvidence } from '@/lib/iros/anchor/extractAnchorEvidence';
 import { detectAnchorEntry } from '@/lib/iros/anchor/AnchorEntryDetector';
 import { observeFlow } from '@/lib/iros/input/flowObserver';
 
+import { shouldUseQuestionSlots } from './slotPlans/QuestionSlots';
+
 // Person Intent Memory（ir診断）
 import { savePersonIntentState } from './memory/savePersonIntent';
 
@@ -1040,8 +1042,9 @@ export async function runIrosTurn(
         inputKind === 'fact' ||
         inputKind === 'lookup' ||
         inputKind === 'qa' ||
-        inputKind === 'howto';
-      if (factish) return false;
+        inputKind === 'howto' ||
+        inputKind === 'question';
+
 
       const goalKind = String(
         metaLike?.goal?.kind ?? metaLike?.priority?.goal?.kind ?? '',
@@ -1233,8 +1236,16 @@ const slotsEmpty =
 const policyEmpty =
   !slotPlanPolicy || String(slotPlanPolicy).trim().length === 0;
 
+// ✅ QuestionSlots（HowTo/方法質問）は framePlan.slots が入っていても normalChat を優先して上書きする
+const forceQuestionSlots =
+  !isSilence && hasTextForCounsel && !shouldUseCounsel && shouldUseQuestionSlots(textForCounsel);
+
 const shouldFallbackNormalChat =
-  !isSilence && hasTextForCounsel && (slotsEmpty || policyEmpty) && !shouldUseCounsel;
+  !isSilence &&
+  hasTextForCounsel &&
+  !shouldUseCounsel &&
+  (forceQuestionSlots || slotsEmpty || policyEmpty);
+
 
 if (shouldFallbackNormalChat) {
   const lastSummary =

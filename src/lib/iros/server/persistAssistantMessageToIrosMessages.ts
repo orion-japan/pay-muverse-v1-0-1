@@ -162,6 +162,21 @@ export async function persistAssistantMessageToIrosMessages(args: {
   try {
     const m: any = finalMeta ?? {};
 
+    // =========================
+    // ✅ rephrase系を root にも同期（DB集計/将来互換のため）
+    // - meta.extra にだけ入っている場合に root へ昇格
+    // =========================
+    const ex: any = m.extra ?? null;
+    if (ex && typeof ex === 'object') {
+      if (m.rephraseBlocks == null && Array.isArray(ex.rephraseBlocks)) m.rephraseBlocks = ex.rephraseBlocks;
+      if (m.rephraseHead == null && typeof ex.rephraseHead === 'string') m.rephraseHead = ex.rephraseHead;
+      if (m.rephraseApplied == null && typeof ex.rephraseApplied === 'boolean') m.rephraseApplied = ex.rephraseApplied;
+      if (m.rephraseReason == null && typeof ex.rephraseReason === 'string') m.rephraseReason = ex.rephraseReason;
+      if (m.rephraseBlocksAttached == null && typeof ex.rephraseBlocksAttached === 'boolean')
+        m.rephraseBlocksAttached = ex.rephraseBlocksAttached;
+    }
+
+
     if (typeof qCodeFinal === 'string' && qCodeFinal.trim()) {
       const q = qCodeFinal.trim();
       m.qCode = q;

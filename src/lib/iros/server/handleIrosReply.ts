@@ -135,11 +135,26 @@ function nowIso(): string {
 ========================= */
 
 function mergeExtra(metaForSave: any, extra?: Record<string, any> | null): any {
-  const m = metaForSave ?? {};
-  const prev = m.extra && typeof m.extra === 'object' ? m.extra : {};
+  const m0 = metaForSave ?? {};
+  const prev = m0.extra && typeof m0.extra === 'object' ? m0.extra : {};
   const ex = extra && typeof extra === 'object' ? extra : {};
-  return { ...m, extra: { ...prev, ...ex } };
+
+  const pid =
+    (typeof (ex as any).personaId === 'string' && (ex as any).personaId.trim()) ||
+    (typeof (ex as any).persona_id === 'string' && (ex as any).persona_id.trim()) ||
+    (typeof (ex as any).persona === 'string' && (ex as any).persona.trim()) ||
+    null;
+
+  const hasRoot =
+    (typeof (m0 as any).personaId === 'string' && (m0 as any).personaId.trim().length > 0) ||
+    (typeof (m0 as any).persona_id === 'string' && (m0 as any).persona_id.trim().length > 0) ||
+    (typeof (m0 as any).persona === 'string' && (m0 as any).persona.trim().length > 0);
+
+  const rootPatch = pid && !hasRoot ? { personaId: pid } : {};
+
+  return { ...m0, ...rootPatch, extra: { ...prev, ...ex } };
 }
+
 
 /**
  * ✅ single-writer stamp（必ず meta.extra に刻む）
@@ -147,13 +162,17 @@ function mergeExtra(metaForSave: any, extra?: Record<string, any> | null): any {
  * - route.ts が最終保存者なので、下流が勝手に保存しないための統一フラグ
  */
 function stampSingleWriter(metaForSave: any): any {
-  const m = metaForSave ?? {};
-  m.extra = m.extra && typeof m.extra === 'object' ? m.extra : {};
-  // route.ts が single-writer のときは常に false
-  m.extra.persistAssistantMessage = false;
-  // 追跡用（route.ts 側で merged される）
-  if (m.extra.persistPolicyHint == null) m.extra.persistPolicyHint = 'REPLY_SINGLE_WRITER';
-  return m;
+  const m0 = metaForSave ?? {};
+  const prevExtra = m0.extra && typeof m0.extra === 'object' ? m0.extra : {};
+
+  return {
+    ...m0,
+    extra: {
+      ...prevExtra,
+      persistAssistantMessage: false,
+      persistPolicyHint: prevExtra.persistPolicyHint ?? 'REPLY_SINGLE_WRITER',
+    },
+  };
 }
 
 /* =========================
@@ -411,16 +430,31 @@ function isMicroTurn(raw: string): boolean {
   const { rawTrim, core, len } = buildMicroCore(raw);
   if (!rawTrim) return false;
 
+  // 英数混じりは micro にしない（誤爆防止）
   if (/[A-Za-z0-9]/.test(core)) return false;
 
+  // 疑問語は micro では扱わない（通常フローへ）
   if (
     /(何|なに|どこ|いつ|だれ|誰|なぜ|どうして|どうやって|いくら|何色|色)/.test(core)
   ) {
     return false;
   }
 
+  // 長すぎ/短すぎは micro では扱わない
   if (len < 2 || len > 10) return false;
 
+  // ✅ 追加：単語（1トークン）も micro に含める
+  // - main側で isSingleToken の固定DRAFT注入が既にあるので、
+  //   ここで “入口” だけ開ける
+  // - 記号や句読点は除外（既存の固定DRAFT注入と同じ基準）
+  const isSingleToken =
+    rawTrim.length > 0 &&
+    !/\s/.test(rawTrim) &&
+    /^[\p{L}\p{N}ー・]+$/u.test(rawTrim);
+
+  if (isSingleToken) return true;
+
+  // 既存：短い「動詞系 micro」
   return /^(どうする|やる|やっちゃう|いく|いける|どうしよ|どうしよう|行く|行ける)$/.test(core);
 }
 
@@ -1201,13 +1235,32 @@ if (gatedGreeting) {
     const bypassMicro = shouldBypassMicroGate(text);
 
     // ✅ Micro（独立ルート）
+    // ✅ Micro（独立ルート）
     if (!bypassMicro && isMicroTurn(text)) {
       const name = userProfile?.user_call_name || 'あなた';
       const seed = `${conversationId}|${userCode}|${traceId ?? ''}|${Date.now()}`;
 
+      // ✅ 単語入力は “型なし” だと汎用逃げしやすいので、ここで固定DRAFTを注入する
+      // - 意味づけはしない
+      // - 続け方は2つだけ（連想3語 / 場面1つ）
+      // - 質問は1つだけ（microWriterConstraints に合わせる）
+      const s0 = String(text ?? '').trim();
+      const isSingleToken =
+        s0.length > 0 &&
+        !/\s/.test(s0) &&
+        /^[\p{L}\p{N}ー・]+$/u.test(s0); // 日本語/英数/長音/中点（句読点などは除外）
+
+        const microUserText = isSingleToken
+        ? `${s0}
+
+意味づけはしない。
+次は2つだけ：
+・連想を3語
+・浮かんだ場面を1つ`
+        : text;
       const mw = await runMicroWriter(microGenerate, {
         name,
-        userText: text,
+        userText: microUserText,
         seed,
       });
 
@@ -1300,6 +1353,7 @@ if (gatedGreeting) {
         text,
       });
     }
+
 
     t.gate_ms = msSince(tg);
 

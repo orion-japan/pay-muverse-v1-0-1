@@ -191,7 +191,6 @@ function splitToLines(text: string): string[] {
   return rawLines;
 }
 
-
 type SlotExtracted = { blocks: RenderBlock[]; source: string; keys: string[] } | null;
 
 function extractSlotBlocks(extra: any): SlotExtracted {
@@ -540,7 +539,7 @@ function pickSlotPlanFallbackText(extra: any): string {
     null;
 
   if (o && typeof o === 'object') {
-    const t2 = nrm((o as any)?.text ?? (o as any)?.content ?? (o as any)?.assistantText ?? '');
+    const t2 = nrm((o as any)?.hintText ?? (o as any)?.text ?? (o as any)?.content ?? (o as any)?.assistantText ?? '');
     if (t2) return t2;
   }
 
@@ -554,40 +553,132 @@ function pickSlotPlanFallbackText(extra: any): string {
  * - 重要：本文中の🪔は必ず除去し、付けるなら末尾だけ
  */
 function sanitizeVisibleText(raw: string, opts?: { appendLamp?: boolean }): string {
-  let s = String(raw ?? '').replace(/\r\n/g, '\n');
+  let s = String(raw ?? '');
 
-  // 1) ゼロ幅文字を除去（「空行に見える謎の行」の主因）
-  s = s.replace(/[\u200B-\u200D\uFEFF]/g, '');
+  // 1) 改行統一
+  s = s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
-  // 2) 🪔は本文から全削除（混入事故を吸収）
-  //    - enable=true でも false でも “本文に残さない”
+  // ✅ 重要：本文中の🪔は必ず除去（付けるなら末尾だけ）
   s = s.replace(/🪔/g, '');
 
-  // 3) 行末空白除去
-  s = s
-    .split('\n')
-    .map((line) => line.replace(/\s+$/g, ''))
-    .join('\n');
+  // 2) Markdown見出し（### 等）を落とす：UIの見出し化を止める
+  s = s.replace(/^\s{0,3}#{1,6}\s+/gm, '');
 
-  // 4) 句読点/記号だけの行を削除（「。」だけ等）
-  const isPunctOnlyLine = (line: string) =>
-    /^[\u3000\s]*[。．\.、,・:：;；!！\?？…]+[\u3000\s]*$/.test(line);
+  // 3) 「**見出しだけ**」の行も “強調だけ” に落とす（UIで見出し扱いされるのを避ける）
+  s = s.replace(/^\s*\*\*(.+?)\*\*\s*$/gm, '$1');
 
-  s = s
-    .split('\n')
-    .filter((line) => !isPunctOnlyLine(line))
-    .join('\n');
+// ✅ iros の内部指示（slot directives）を UI に漏らさない最終ガード
+// - 行内に @... が出た行は丸ごと落とす
+function stripIrosDirectives(s0: string): string {
+  const lines = String(s0 ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n');
 
-  // 5) 改行暴れ防止
+  const kept: string[] = [];
+  for (const line0 of lines) {
+    const line = String(line0 ?? '');
+    // ✅ renderEngine=false 側でも漏れないように ACK/RESTORE/Q まで含める
+    if (/@(?:OBS|CONSTRAINTS|SHIFT|NEXT|SAFE|ACK|RESTORE|Q)\b/.test(line)) continue;
+    kept.push(line);
+  }
+  return kept.join('\n');
+}
+
+
+  // 3.5) iros 内部指示を落とす（UIに漏らさない）
+  s = stripIrosDirectives(s);
+
+  // 4) 行単位で整形：段落（空行）は残すが、連続空行は1個に潰す
+  const isPunctOnly = (line: string) => {
+    const t = line.trim();
+    if (!t) return false;
+    return /^[\p{P}\p{S}]+$/u.test(t);
+  };
+
+  const inLines = s.split('\n').map((line) => line.trimEnd());
+  const outLines: string[] = [];
+
+  for (const line of inLines) {
+    const t = line.trim();
+
+    if (isPunctOnly(line)) continue;
+
+    if (!t) {
+      if (outLines.length > 0 && outLines[outLines.length - 1] !== '') outLines.push('');
+      continue;
+    }
+
+    outLines.push(line);
+  }
+
+  while (outLines.length > 0 && outLines[0] === '') outLines.shift();
+  while (outLines.length > 0 && outLines[outLines.length - 1] === '') outLines.pop();
+
+  s = outLines.join('\n');
+
+  // 5) 改行暴れ防止（保険：3連以上は2連に）
   s = s.replace(/\n{3,}/g, '\n\n').trimEnd();
 
-  // 6) 互換モードだけ末尾に🪔を付ける（末尾のみ）
+  // 6) 互換モードだけ末尾に 🪔 を付ける（末尾のみ）
   if (opts?.appendLamp) {
     if (s.length > 0 && !s.endsWith('\n')) s += '\n';
     s += '🪔';
   }
 
   return s;
+}
+
+/** =========================================================
+ * ✅ renderEngine=true 側の最終整形を “1本化” する
+ * - 先に [[/ILINE]] 以降を切る（writer注釈が後ろに付く前提を生かす）
+ * - slot directive 行を落とす
+ * - ILINE タグを落とす（ここでだけ）
+ * - sanitize でゼロ幅/句読点だけ行/🪔などを整える
+ * ========================================================= */
+function cutAfterIlineAndDropWriterNotes(text: string): string {
+  const s = String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+  const endTag = '[[/ILINE]]';
+  const endIdx = s.indexOf(endTag);
+  const cut = endIdx >= 0 ? s.slice(0, endIdx + endTag.length) : s;
+
+  const lines = cut.split('\n');
+  const kept = lines.filter((line) => {
+    const t = String(line ?? '').trim();
+    if (!t) return true;
+    if (t.startsWith('（writer向け）')) return false;
+    if (t.includes('writer向け')) return false;
+    if (t.includes('上の ILINE')) return false;
+    return true;
+  });
+
+  while (kept.length > 0 && String(kept[kept.length - 1] ?? '').trim() === '') kept.pop();
+  return kept.join('\n');
+}
+
+function stripDirectiveLines(text: string): string {
+  return String(text ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .filter((line) => {
+      const t = String(line ?? '').trim();
+      if (!t) return true;
+      // ✅ @OBS/@SHIFT/... だけでなく @ACK/@RESTORE/@Q も落とす（UI漏れ防止）
+      if (/^@(?:CONSTRAINTS|OBS|SHIFT|NEXT|SAFE|ACK|RESTORE|Q)\b/.test(t)) return false;
+      return true;
+    })
+    .join('\n');
+}
+
+function stripILINETags(text: string): string {
+  return String(text ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\[\[ILINE\]\]\s*\n?/g, '')
+    .replace(/\n?\s*\[\[\/ILINE\]\]/g, '')
+    .trim();
 }
 
 export function renderGatewayAsReply(args: {
@@ -618,7 +709,9 @@ export function renderGatewayAsReply(args: {
     rev: string;
   };
 } {
-  const extra = args?.extra ?? {};
+  const extraAny = (args?.extra ?? {}) as any;
+  const extra = extraAny;
+
   const enable = extra?.renderEngine === true || String(extra?.renderEngine ?? '').toLowerCase() === 'true';
 
   const c1 = norm(args?.content ?? '');
@@ -628,28 +721,41 @@ export function renderGatewayAsReply(args: {
   // ✅ rephrase があるなら、それを最優先（slotplan由来のテンプレを上書き）
   const r0 = pickRephraseText(extra);
 
-  // ✅ 追加：rephrase が弾かれたとき等の「slotPlanFallbackText」を拾う（ログ整合）
+  // ✅ 追加：rephrase が弾かれたとき等に [slotPlanFallbackText] を拾う（ログ整合）
   const sf0 = pickSlotPlanFallbackText(extra);
 
-  // ---- pick order（rephrase > content > assistantText > text > slotPlanFallback）
-  let picked = r0 || c1 || c2 || c3 || sf0 || '';
-  let pickedFrom = r0
+  // ✅ UI側の見出し化を避けるため、表示前に sanitize（見出し/段落の整形もここで）
+  const r0s = r0 ? sanitizeVisibleText(r0, { appendLamp: false }) : '';
+  const sf0s = sf0 ? sanitizeVisibleText(sf0, { appendLamp: false }) : '';
+
+  // --- pick order (rephrase > content > assistantText > text > slotPlanFallback)
+  let picked = r0s || c1 || c2 || c3 || sf0s || '';
+  let pickedFrom = r0s
     ? 'rephrase'
     : c1
-      ? 'content'
-      : c2
-        ? 'assistantText'
-        : c3
-          ? 'text'
-          : sf0
-            ? 'slotPlanFallback'
-            : 'none';
-
+    ? 'content'
+    : c2
+    ? 'assistantText'
+    : c3
+    ? 'text'
+    : sf0s
+    ? 'slotPlanFallback'
+    : 'none';
 
   // renderEngine 無効時は「触らず返す」（ただし互換のため末尾 🪔 は付ける）
   if (!enable) {
     // ※この分岐では renderV2 を通さず “そのまま見える文” に整えるだけ
-    const visible = sanitizeVisibleText(picked, { appendLamp: true });
+    let visible = sanitizeVisibleText(picked, { appendLamp: true });
+
+    // ✅ ガード/サニタイズで “空” になった場合は、rephraseBlocks から復旧する
+    if (!visible && Array.isArray((extra as any)?.rephraseBlocks) && (extra as any).rephraseBlocks.length > 0) {
+      const blocksJoined = (extra as any).rephraseBlocks
+        .map((b: any) => String((b as any)?.text ?? b ?? '').trim())
+        .filter(Boolean)
+        .join('\n\n');
+
+      if (blocksJoined) visible = sanitizeVisibleText(blocksJoined, { appendLamp: true });
+    }
 
     return {
       content: visible,
@@ -707,11 +813,9 @@ export function renderGatewayAsReply(args: {
       extra?.orch?.conversationId ??
       null;
 
-    const evUserCode =
-      extra?.userCode ?? extra?.meta?.userCode ?? extra?.extra?.userCode ?? extra?.orch?.userCode ?? null;
+    const evUserCode = extra?.userCode ?? extra?.meta?.userCode ?? extra?.extra?.userCode ?? extra?.orch?.userCode ?? null;
 
-    const evUserText =
-      extra?.userText ?? extra?.meta?.userText ?? extra?.extra?.userText ?? extra?.orch?.userText ?? null;
+    const evUserText = extra?.userText ?? extra?.meta?.userText ?? extra?.extra?.userText ?? extra?.orch?.userText ?? null;
 
     const evSignals =
       extra?.convSignals ??
@@ -767,7 +871,11 @@ export function renderGatewayAsReply(args: {
       null;
 
     const summaryText =
-      (extra as any)?.summary ?? (extra as any)?.meta?.summary ?? (extra as any)?.orch?.summary ?? ms?.summary ?? null;
+      (extra as any)?.summary ??
+      (extra as any)?.meta?.summary ??
+      (extra as any)?.orch?.summary ??
+      ms?.summary ??
+      null;
 
     const derivedShortSummary =
       (typeof situationSummaryText === 'string' && situationSummaryText.trim()) ||
@@ -777,9 +885,7 @@ export function renderGatewayAsReply(args: {
     const evCtxFixed = {
       ...(rawCtx && typeof rawCtx === 'object' ? rawCtx : {}),
       shortSummary:
-        rawCtx?.shortSummary && String(rawCtx.shortSummary).trim()
-          ? rawCtx.shortSummary
-          : derivedShortSummary || null,
+        rawCtx?.shortSummary && String(rawCtx.shortSummary).trim() ? rawCtx.shortSummary : derivedShortSummary || null,
     };
 
     logConvEvidence({
@@ -801,21 +907,19 @@ export function renderGatewayAsReply(args: {
   let fallbackFrom = picked
     ? pickedFrom
     : s4
-      ? 'speechSkippedText'
-      : s5
-        ? 'rawTextFromModel'
-        : s6
-          ? 'extractedTextFromModel'
-          : 'none';
+    ? 'speechSkippedText'
+    : s5
+    ? 'rawTextFromModel'
+    : s6
+    ? 'extractedTextFromModel'
+    : 'none';
 
   const isIR = looksLikeIR(fallbackText, extra);
   const isSilence = looksLikeSilence(fallbackText, extra);
 
   const shortException = isSilence || isMicro || q1Suppress;
 
-  const maxLinesFinal = shortException
-    ? 3
-    : Math.max(1, Math.floor(profileMaxLines ?? argMaxLines ?? DEFAULT_MAX_LINES));
+  const maxLinesFinal = shortException ? 3 : Math.max(1, Math.floor(profileMaxLines ?? argMaxLines ?? DEFAULT_MAX_LINES));
 
   // ✅ slots を本文に使うのは “LLM本文が完全に空” のときだけ（最終フォールバック）
   const shouldUseSlotsAsLastResort = !picked && hasAnySlots && !isSilence && !isIR && slotPlanPolicy === 'FINAL';
@@ -834,15 +938,51 @@ export function renderGatewayAsReply(args: {
 
     const isScaffoldLike = slotPlanPolicy === 'SCAFFOLD' || (slotPlanPolicy == null && hasAnySlots && !picked);
 
-    if (!isSilence && !isIR && isScaffoldLike) {
-      blocks = minimalScaffold(base);
-      scaffoldApplied = true;
+    // ✅ rephraseBlocks は block 意図を持つので splitToLines で潰さない
+    const rephraseBlocks = extraAny?.rephraseBlocks ?? extraAny?.rephrase?.blocks ?? extraAny?.rephrase?.rephraseBlocks ?? null;
+
+    if (pickedFrom === 'rephrase' && Array.isArray(rephraseBlocks) && rephraseBlocks.length > 0) {
+      const isBadBlock = (t0: string) => {
+        const t = String(t0 ?? '').trim();
+        if (!t) return true;
+        // 先頭が @CONSTRAINTS/@OBS/... 系は “内部ディレクティブ”
+        if (/^@(?:CONSTRAINTS|OBS|SHIFT|NEXT|SAFE|ACK|RESTORE|Q)\b/.test(t)) return true;
+        // JSONっぽい塊も UI には出さない（だいたい directive の副産物）
+        if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) return true;
+        return false;
+      };
+
+      const cleanedBlocks = rephraseBlocks
+        .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim())
+        .filter((t: string) => !isBadBlock(t))
+        .map((t: string) => stripInternalLabels(t))
+        .filter(Boolean)
+        .map((t: string) => ({ text: t as string }));
+
+      if (cleanedBlocks.length > 0) {
+        blocks = cleanedBlocks;
+      } else {
+        // ✅ blocks が全部ダメなら、rephraseText(r0) を通常ルートで使う（短文化防止）
+        const base2 = r0s || base || fallbackText || '';
+        const lines = splitToLines(base2);
+        blocks = lines
+          .map((t) => stripInternalLabels(t))
+          .filter(Boolean)
+          .map((t) => ({ text: t }));
+      }
     } else {
+      // 通常ルート
       const lines = splitToLines(base);
       blocks = lines
         .map((t) => stripInternalLabels(t))
         .filter(Boolean)
         .map((t) => ({ text: t }));
+    }
+
+    // ✅ SCAFFOLD は“定型句を足さない”。渡された本文を短く整形するだけ
+    if (isScaffoldLike && blocks.length === 0) {
+      blocks = minimalScaffold(base);
+      scaffoldApplied = true;
     }
   }
 
@@ -858,63 +998,33 @@ export function renderGatewayAsReply(args: {
     allowUnder5: shortException,
   });
 
-  // ✅ 念のため：slot directive 行は最終表示に出さない（@OBS/@SHIFT/...）
-  content = String(content ?? '')
-    .replace(/\r\n/g, '\n')
-    .split('\n')
-    .filter((line) => {
-      const t = line.trim();
-      if (!t) return true;
-      if (/^@(?:OBS|SHIFT|NEXT|SAFE|ACK|RESTORE|Q)\b/.test(t)) return false;
-      return true;
-    })
-    .join('\n');
+  // ✅ renderV2 が空文字を返すケースを救済（blocks があるのに outLen=0 になる事故防止）
+  if (String(content ?? '').trim() === '') {
+    const blocksJoined = Array.isArray(blocks)
+      ? blocks
+          .map((b) => String((b as any)?.text ?? ''))
+          .filter(Boolean)
+          .join('\n')
+      : '';
 
-
-
-
-  // ✅ renderEngine=true のときは 🪔 を一切出さない（本文混入も含めて除去）
-  content = stripLampEverywhere(content);
-
-  // ✅ writer向け注釈を表示に出さない（整形のみ）
-  // - [[/ILINE]] がある場合：そこ以降は全カット（writer注釈が後ろに付く前提）
-  {
-    const s = String(content ?? '').replace(/\r\n/g, '\n');
-
-    const endTag = '[[/ILINE]]';
-    const endIdx = s.indexOf(endTag);
-    const cut = endIdx >= 0 ? s.slice(0, endIdx + endTag.length) : s;
-
-    const lines = cut.split('\n');
-    const filtered = lines.filter((line) => {
-      const t = String(line ?? '').trim();
-      if (!t) return true;
-      if (t.startsWith('（writer向け）')) return false;
-      if (t.includes('writer向け')) return false;
-      if (t.includes('上の ILINE')) return false;
-      return true;
-    });
-
-    while (filtered.length > 0 && String(filtered[filtered.length - 1] ?? '').trim() === '') {
-      filtered.pop();
-    }
-
-    content = filtered.join('\n');
+    const base = blocksJoined || fallbackText || r0s || picked || '';
+    content = base;
+    fallbackFrom = 'renderV2-empty';
   }
 
-  // ✅ ILINEタグは最終表示に出さない（整形のみ）
-  // - ここは sanitize の前にやる（タグが残ると directive 検知に引っかかるため）
-  content = String(content ?? '')
-    .replace(/\[\[ILINE\]\]\s*\n?/g, '')
-    .replace(/\n?\s*\[\[\/ILINE\]\]/g, '')
-    .trim();
-
-  // ✅ 最終表示テキストをサニタイズ（ゼロ幅/句読点だけ行/改行暴れ）
-  // - renderEngine=true では末尾🪔は付けない
+  // =========================================================
+  // ✅ 最終表示の整形（重複排除版）
+  // - 1) [[/ILINE]] 以降を切る（writer注釈対策）
+  // - 2) directive 行を落とす（@ACK/@RESTORE/@Q含む）
+  // - 3) ILINE タグを落とす（ここでだけ）
+  // - 4) sanitize（ゼロ幅/句読点だけ行/改行暴れ/🪔除去）
+  // =========================================================
+  content = cutAfterIlineAndDropWriterNotes(content);
+  content = stripDirectiveLines(content);
+  content = stripILINETags(content);
   content = sanitizeVisibleText(content);
 
   // ✅ 最終防衛：directive を人間文に変換（LLM落ち・rephrase reject 含む）
-  // - ILINEタグは既に除去済みなので、ここでは「writer向け」や内部トークンだけを見る
   const hasDirectiveLeak =
     /\b(TASK|MODE|SLOT|META)\b/.test(content) ||
     /IROS\//.test(content) ||
@@ -923,7 +1033,7 @@ export function renderGatewayAsReply(args: {
 
   if (hasDirectiveLeak) {
     content = finalizeNoDirectiveLeak(content);
-    content = sanitizeVisibleText(content); // 変換後の最低限整形
+    content = sanitizeVisibleText(content);
   }
 
   // ✅ 念のため最後にもう一回 🪔 を全除去（renderEngine=true の契約）
@@ -931,8 +1041,6 @@ export function renderGatewayAsReply(args: {
 
   // ✅ 末尾の空行を落とす
   content = String(content ?? '').replace(/(\n\s*)+$/g, '').trim();
-
-
 
   const meta = {
     blocksCount: blocks.length,
@@ -969,28 +1077,56 @@ export function renderGatewayAsReply(args: {
     };
   }
 
+  console.info('[IROS/renderGateway][LEN_TRACE]', {
+    rev: IROS_RENDER_GATEWAY_REV,
+    len_before: String(content ?? '').length,
+    head_before: head(String(content ?? '')),
+  });
 
-// ✅ render-v2 通電ランプ：rephraseBlocks が入っているか毎回見える化（スコープ/型安全版）
-try {
-  const extraAny = (meta as any)?.extra;
-  const rephraseLen = Array.isArray(extraAny?.rephraseBlocks) ? extraAny.rephraseBlocks.length : 0;
 
-  if (rephraseLen === 0) {
-    console.warn('[IROS/renderGateway][WARN_NO_REPHRASE_BLOCKS]', {
-      rev: meta.rev,
-      hasExtra: !!extraAny,
-      extraKeys: extraAny ? Object.keys(extraAny) : [],
-      outLen: meta.outLen,
-    });
-  } else {
-    console.info('[IROS/renderGateway][HAS_REPHRASE_BLOCKS]', {
-      rev: meta.rev,
-      rephraseBlocksLen: rephraseLen,
-      outLen: meta.outLen,
-    });
-  }
-} catch {}
+// ✅ 最終保険：最終整形で空になったら、必ず復旧して返す（ILINE/指示行は落とした状態で）
+if (String(content ?? '').trim() === '') {
+  const rescueBase = picked || fallbackText || r0 || c1 || c2 || c3 || '';
 
+  let rescued = rescueBase;
+
+  // renderEngine=true の契約（ILINE/指示/🪔/writer注釈を落とす）を守って復旧
+  rescued = cutAfterIlineAndDropWriterNotes(rescued);
+  rescued = stripDirectiveLines(rescued);
+  rescued = stripILINETags(rescued);
+  rescued = sanitizeVisibleText(rescued);
+  rescued = stripLampEverywhere(rescued);
+
+  content = String(rescued ?? '').replace(/(\n\s*)+$/g, '').trim();
+
+  console.warn('[IROS/renderGateway][RESCUED_EMPTY]', {
+    rev: IROS_RENDER_GATEWAY_REV,
+    rescueLen: content.length,
+    rescueHead: head(content),
+  });
+}
+
+
+  // ✅ render-v2 通電ランプ：rephraseBlocks が入っているか毎回見える化（スコープ/型安全版）
+  try {
+    const extraAny2 = (meta as any)?.extra;
+    const rephraseLen = Array.isArray(extraAny2?.rephraseBlocks) ? extraAny2.rephraseBlocks.length : 0;
+
+    if (rephraseLen === 0) {
+      console.warn('[IROS/renderGateway][WARN_NO_REPHRASE_BLOCKS]', {
+        rev: meta.rev,
+        hasExtra: !!extraAny2,
+        extraKeys: extraAny2 ? Object.keys(extraAny2) : [],
+        outLen: meta.outLen,
+      });
+    } else {
+      console.info('[IROS/renderGateway][HAS_REPHRASE_BLOCKS]', {
+        rev: meta.rev,
+        rephraseBlocksLen: rephraseLen,
+        outLen: meta.outLen,
+      });
+    }
+  } catch {}
 
   console.warn(
     '[IROS/renderGateway][OK]',
