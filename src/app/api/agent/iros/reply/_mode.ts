@@ -18,7 +18,32 @@ export function resolveModeHintFromText(input?: {
   if (hint.includes('structured')) return 'structured';
   if (hint.includes('diagnosis') || hint.includes('ir診断') || hint.includes('診断')) return 'diagnosis';
 
-  const t = (input?.text ?? '').toLowerCase();
+  const rawText = String(input?.text ?? '');
+  const t = rawText.toLowerCase();
+
+  // ✅ ir診断コマンド（text 本文からも拾う）
+  // - "ir", "ir診断", "ir 診断", "irで見て", "irお願いします", "ir共鳴フィードバック" など
+  // - iros 側の trigger と齟齬が出ないよう、ここでは diagnosis に寄せる
+  // - 単語途中の "ir"（例: "mirror"）誤爆を避けるため行頭判定＋日本語パターン中心
+  const trimmed = rawText.trim();
+  const compact = trimmed.replace(/\s/g, ''); // 全空白除去（"ir 診断" → "ir診断"）
+  const lowerCompact = compact.toLowerCase();
+
+  // 代表コマンド（行頭）
+  if (
+    lowerCompact === 'ir' ||
+    lowerCompact === 'ir診断' ||
+    lowerCompact.startsWith('ir診断') ||
+    /^ir[　\s]+/i.test(trimmed) || // "ir 自分" / "ir　自分"
+    /^(?:ir|ｉｒ)\s*(?:診断)?(?:[:：\s　]+)?/i.test(trimmed) || // "ir: 自分" / "ir 診断: 自分"
+    trimmed.includes('irで見て') ||
+    trimmed.includes('irでみて') ||
+    trimmed.includes('irお願いします') ||
+    trimmed.includes('ir 共鳴') ||
+    trimmed.includes('ir共鳴フィードバック')
+  ) {
+    return 'diagnosis';
+  }
 
   // 日本語の“構造化/レポート系”キーワードで structured 扱い
   const structuredJa = [

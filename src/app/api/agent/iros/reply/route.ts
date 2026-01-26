@@ -699,320 +699,411 @@ if (!extracted?.slots?.length) {
         String((meta as any).unified.depth.stage).trim()) ||
       null;
 
-    const res = await rephraseSlotsFinal(extracted, {
-      model,
-      temperature: 0.2,
-      maxLinesHint: Number.isFinite(Number(process.env.IROS_RENDER_DEFAULT_MAXLINES))
-        ? Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)
-        : 8,
-      userText: userText ?? null,
-      userContext,
-      debug: {
-        traceId: traceId ?? null,
-        conversationId,
-        userCode,
-        renderEngine: true,
-        mode: effectiveMode ?? null,
-        qCode: qCodeForLLM,
-        depthStage: depthForLLM,
-      },
-    });
+      // ✅ inputKind をここで確定（rephraseEngine の MIN_OK_KIND 判定に渡す）
+      const inputKindForLLM = String(
+        (meta as any)?.framePlan?.inputKind ??
+          (meta as any)?.inputKind ??
+          (userContext as any)?.framePlan?.inputKind ??
+          '',
+      ).toLowerCase();
 
-// DEBUG: rephraseSlotsFinal の返却 "res" の形を確定（blocks がどこにあるか）
-// - IROS_DEBUG_REPHRASE_PIPE=1 のときだけ出す
-if (String(process.env.IROS_DEBUG_REPHRASE_PIPE ?? '0').trim() === '1') {
-  const safeKeys = (obj: any) => (obj && typeof obj === 'object' ? Object.keys(obj) : []);
-  const typeOf = (v: any) =>
-    Array.isArray(v) ? `array(len=${v.length})` : v === null ? 'null' : typeof v;
+      // ✅ 追加：rephraseEngine の seed relevance 判定に渡す「直前 user 発話」
+      const lastUserTextForDebug: string | null = (() => {
+        const arr: any[] = Array.isArray(normalizedHistory) ? (normalizedHistory as any[]) : [];
+        const now = typeof userText === 'string' ? userText.trim() : '';
+        for (let i = arr.length - 1; i >= 0; i--) {
+          const m = arr[i] ?? {};
+          const role = String(m?.role ?? m?.r ?? '').toLowerCase();
+          if (role !== 'user') continue;
+          const v = m?.text ?? m?.content ?? m?.message ?? null;
+          const t = typeof v === 'string' ? v.trim() : '';
+          if (!t) continue;
 
-  const extra = (res as any)?.extra;
-  const rephrase = (res as any)?.rephrase;
+          // history に “今ターンの userText” が混ざってても 1つ前を拾えるようにする
+          if (now && t === now) continue;
+          return t;
+        }
+        return null;
+      })();
 
-  const candidates: Record<string, any> = {
-    'res.blocks': (res as any)?.blocks,
-    'res.rephraseBlocks': (res as any)?.rephraseBlocks,
-    'res.rephrase.blocks': rephrase?.blocks,
-    'res.rephrase.rephraseBlocks': rephrase?.rephraseBlocks,
-    'res.extra.rephraseBlocks': extra?.rephraseBlocks,
-    'res.extra.rephrase.blocks': extra?.rephrase?.blocks,
-    'res.extra.rephrase.rephraseBlocks': extra?.rephrase?.rephraseBlocks,
-    'res.extra.blocks': extra?.blocks,
-  };
-
-  const candSummary = Object.entries(candidates).map(([k, v]) => ({
-    k,
-    t: typeOf(v),
-    keys: !Array.isArray(v) && v && typeof v === 'object' ? Object.keys(v).slice(0, 8) : null,
-  }));
-
-  const samplePick =
-    (res as any)?.rephraseHead ??
-    (res as any)?.rephrase?.head ??
-    (res as any)?.extra?.rephraseHead ??
-    null;
-
-  console.info('[IROS/rephraseAttach][RES_SHAPE]', {
-    conversationId,
-    userCode,
-    resKeys: safeKeys(res as any).slice(0, 30),
-    resExtraKeys: safeKeys(extra).slice(0, 30),
-    resRephraseKeys: safeKeys(rephrase).slice(0, 30),
-    candidateSummary: candSummary,
-    sampleHead: typeof samplePick === 'string' ? samplePick.slice(0, 120) : samplePick,
-  });
-}
+      console.info('[IROS/rephraseAttach][INPUT_KIND_CHECK]', {
+        inputKindForLLM,
+        meta_inputKind: (meta as any)?.inputKind ?? null,
+        meta_framePlan_inputKind: (meta as any)?.framePlan?.inputKind ?? null,
+      });
 
 
+      const res = await rephraseSlotsFinal(
+        extracted,
+        ({
+          model,
+          temperature: 0.2,
+          maxLinesHint: Number.isFinite(Number(process.env.IROS_RENDER_DEFAULT_MAXLINES))
+            ? Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)
+            : 8,
+          userText: userText ?? null,
+          userContext,
 
-    if (!res.ok) {
+          // ✅ 追加：rephraseEngine 側の MIN_OK_KIND 判定に効かせる
+          inputKind: inputKindForLLM,
+
+          debug: {
+            traceId: traceId ?? null,
+            conversationId,
+            userCode,
+            renderEngine: true,
+            mode: effectiveMode ?? null,
+            qCode: qCodeForLLM,
+            depthStage: depthForLLM,
+
+            // ✅ 追加：debug 経由でも拾えるように（二重に入れておく）
+            inputKind: inputKindForLLM,
+
+            // ✅ 重要：rephraseEngine の relevance 判定がここを見てる
+            userText: userText ?? null,
+            lastUserText: lastUserTextForDebug,
+            lastUserHead: lastUserTextForDebug ? lastUserTextForDebug.slice(0, 120) : null,
+          },
+        } as any),
+      );
+
+
+
+      // DEBUG: rephraseSlotsFinal の返却 "res" の形を確定（blocks がどこにあるか）
+      // - IROS_DEBUG_REPHRASE_PIPE=1 のときだけ出す
+      if (String(process.env.IROS_DEBUG_REPHRASE_PIPE ?? '0').trim() === '1') {
+        const safeKeys = (obj: any) => (obj && typeof obj === 'object' ? Object.keys(obj) : []);
+        const typeOf = (v: any) =>
+          Array.isArray(v) ? `array(len=${v.length})` : v === null ? 'null' : typeof v;
+
+        const extra = (res as any)?.extra;
+        const rephrase = (res as any)?.rephrase;
+
+        const candidates: Record<string, any> = {
+          'res.blocks': (res as any)?.blocks,
+          'res.rephraseBlocks': (res as any)?.rephraseBlocks,
+          'res.rephrase.blocks': rephrase?.blocks,
+          'res.rephrase.rephraseBlocks': rephrase?.rephraseBlocks,
+          'res.extra.rephraseBlocks': extra?.rephraseBlocks,
+          'res.extra.rephrase.blocks': extra?.rephrase?.blocks,
+          'res.extra.rephrase.rephraseBlocks': extra?.rephrase?.rephraseBlocks,
+          'res.extra.blocks': extra?.blocks,
+        };
+
+        const candSummary = Object.entries(candidates).map(([k, v]) => ({
+          k,
+          t: typeOf(v),
+          keys: !Array.isArray(v) && v && typeof v === 'object' ? Object.keys(v).slice(0, 8) : null,
+        }));
+
+        const samplePick =
+          (res as any)?.rephraseHead ?? (res as any)?.rephrase?.head ?? (res as any)?.extra?.rephraseHead ?? null;
+
+        console.info('[IROS/rephraseAttach][RES_SHAPE]', {
+          conversationId,
+          userCode,
+          resKeys: safeKeys(res as any).slice(0, 30),
+          resExtraKeys: safeKeys(extra).slice(0, 30),
+          resRephraseKeys: safeKeys(rephrase).slice(0, 30),
+          candidateSummary: candSummary,
+          sampleHead: typeof samplePick === 'string' ? samplePick.slice(0, 120) : samplePick,
+        });
+      }
+
+      if (!res.ok) {
+        meta.extra = {
+          ...(meta.extra ?? {}),
+          rephraseAttachSkipped: false,
+          rephraseBlocksAttached: false,
+          rephraseLLMApplied: false,
+          rephraseApplied: false,
+          rephraseReason: res.reason ?? 'unknown',
+        };
+
+        (extraMerged as any).rephraseAttachSkipped = false;
+        (extraMerged as any).rephraseBlocksAttached = false;
+        (extraMerged as any).rephraseLLMApplied = false;
+        (extraMerged as any).rephraseApplied = false;
+        (extraMerged as any).rephraseReason = res.reason ?? 'unknown';
+
+        // 失敗でもUIブロックだけは付ける
+        const fallbackText = pickFallbackAssistantText({
+          allowUserTextAsLastResort: true,
+          userText,
+          candidates: [
+            // ✅ rephrase の head は “最低限の本文” なので fallback に必ず入れる
+            (extraMerged as any)?.rephraseHead,
+            (meta as any)?.extra?.rephraseHead,
+            (res as any)?.rephraseHead,
+
+            (extraMerged as any)?.extractedTextFromModel,
+            (extraMerged as any)?.rawTextFromModel,
+            (extraMerged as any)?.finalAssistantText,
+            (extraMerged as any)?.finalAssistantTextCandidate,
+            (extraMerged as any)?.resolvedText,
+            (extraMerged as any)?.assistantText,
+            (extraMerged as any)?.content,
+            (extraMerged as any)?.text,
+          ],
+        });
+
+        attachFallbackBlocksFromText(fallbackText, 'FALLBACK_REPHRASE_FAIL');
+        return;
+      }
+
+      const blocks =
+        Array.isArray((res as any)?.blocks)
+          ? (res as any).blocks
+          : Array.isArray((res as any)?.rephraseBlocks)
+            ? (res as any).rephraseBlocks
+            : Array.isArray((res as any)?.rephrase?.rephraseBlocks)
+              ? (res as any).rephrase.rephraseBlocks
+              : Array.isArray((res as any)?.rephrase?.blocks)
+                ? (res as any).rephrase.blocks
+
+                // ✅ 追加：rephraseEngine は res.meta.extra に付けて返す（ここが本命）
+                : Array.isArray((res as any)?.meta?.extra?.rephraseBlocks)
+                  ? (res as any).meta.extra.rephraseBlocks
+                  : Array.isArray((res as any)?.meta?.extra?.rephrase?.rephraseBlocks)
+                    ? (res as any).meta.extra.rephrase.rephraseBlocks
+                    : Array.isArray((res as any)?.meta?.extra?.rephrase?.blocks)
+                      ? (res as any).meta.extra.rephrase.blocks
+
+                      // 互換：res.extra は古い経路
+                      : Array.isArray((res as any)?.extra?.rephraseBlocks)
+                        ? (res as any).extra.rephraseBlocks
+                        : Array.isArray((res as any)?.extra?.rephrase?.rephraseBlocks)
+                          ? (res as any).extra.rephrase.rephraseBlocks
+                          : Array.isArray((res as any)?.extra?.rephrase?.blocks)
+                            ? (res as any).extra.rephrase.blocks
+                            : [];
+
+// ✅ 0) ok なのに blocks が無い経路の救済：res.meta.rawHead/rawText を blocks に昇格
+{
+  const rawFromMeta = String(
+    (res as any)?.meta?.rawText ??
+      (res as any)?.meta?.raw ??
+      (res as any)?.meta?.rawHead ??
+      '',
+  ).trim();
+
+  if (rawFromMeta) {
+    const fb = buildFallbackRenderBlocksFromFinalText(rawFromMeta);
+
+    if (Array.isArray(fb) && fb.length > 0) {
+      // extraMerged（renderGateway が拾う本命）
+      (extraMerged as any).rephraseBlocks = fb;
+      (extraMerged as any).rephraseBlocksAttached = true;
+      (extraMerged as any).rephraseApplied = true;
+      (extraMerged as any).rephraseLLMApplied = true;
+      (extraMerged as any).rephraseAttachSkipped = false;
+      (extraMerged as any).rephraseReason = (res as any)?.reason ?? 'ok';
+
+      // meta.extra（保存/デバッグ用）
       meta.extra = {
         ...(meta.extra ?? {}),
         rephraseAttachSkipped: false,
-        rephraseBlocksAttached: false,
-        rephraseLLMApplied: false,
-        rephraseApplied: false,
-        rephraseReason: res.reason ?? 'unknown',
+        rephraseBlocksAttached: true,
+        rephraseLLMApplied: true,
+        rephraseApplied: true,
+        rephraseReason: (res as any)?.reason ?? 'ok',
+        rephraseBlocks: fb,
       };
 
-      (extraMerged as any).rephraseAttachSkipped = false;
-      (extraMerged as any).rephraseBlocksAttached = false;
-      (extraMerged as any).rephraseLLMApplied = false;
-      (extraMerged as any).rephraseApplied = false;
-      (extraMerged as any).rephraseReason = res.reason ?? 'unknown';
-
-      // 失敗でもUIブロックだけは付ける
-      const fallbackText = pickFallbackAssistantText({
-        allowUserTextAsLastResort: true,
-        userText,
-        candidates: [
-          // ✅ rephrase の head は “最低限の本文” なので fallback に必ず入れる
-          (extraMerged as any)?.rephraseHead,
-          (meta as any)?.extra?.rephraseHead,
-          (res as any)?.rephraseHead,
-
-          (extraMerged as any)?.extractedTextFromModel,
-          (extraMerged as any)?.rawTextFromModel,
-          (extraMerged as any)?.finalAssistantText,
-          (extraMerged as any)?.finalAssistantTextCandidate,
-          (extraMerged as any)?.resolvedText,
-          (extraMerged as any)?.assistantText,
-          (extraMerged as any)?.content,
-          (extraMerged as any)?.text,
-        ],
-
+      console.log('[IROS/rephraseAttach][FROM_META_RAW]', {
+        conversationId,
+        userCode,
+        rawLen: rawFromMeta.length,
+        blocksLen: fb.length,
       });
 
-      attachFallbackBlocksFromText(fallbackText, 'FALLBACK_REPHRASE_FAIL');
       return;
     }
-
-    const blocks =
-      Array.isArray((res as any)?.blocks)
-        ? (res as any).blocks
-        : Array.isArray((res as any)?.rephraseBlocks)
-          ? (res as any).rephraseBlocks
-          : Array.isArray((res as any)?.rephrase?.rephraseBlocks)
-            ? (res as any).rephrase.rephraseBlocks
-            : Array.isArray((res as any)?.rephrase?.blocks)
-              ? (res as any).rephrase.blocks
-
-              // ✅ 追加：rephraseEngine は res.meta.extra に付けて返す（ここが本命）
-              : Array.isArray((res as any)?.meta?.extra?.rephraseBlocks)
-                ? (res as any).meta.extra.rephraseBlocks
-                : Array.isArray((res as any)?.meta?.extra?.rephrase?.rephraseBlocks)
-                  ? (res as any).meta.extra.rephrase.rephraseBlocks
-                  : Array.isArray((res as any)?.meta?.extra?.rephrase?.blocks)
-                    ? (res as any).meta.extra.rephrase.blocks
-
-                    // 互換：res.extra は古い経路
-                    : Array.isArray((res as any)?.extra?.rephraseBlocks)
-                      ? (res as any).extra.rephraseBlocks
-                      : Array.isArray((res as any)?.extra?.rephrase?.rephraseBlocks)
-                        ? (res as any).extra.rephrase.rephraseBlocks
-                        : Array.isArray((res as any)?.extra?.rephrase?.blocks)
-                          ? (res as any).extra.rephrase.blocks
-                          : [];
-
-
-                    if (!blocks.length) {
-                      // ✅ 1) res 側の “形ズレ” を吸収して拾う（route 内で blocks が空でも、res に入ってる可能性がある）
-                      const blocksFromRes =
-                        (res as any)?.blocks ??
-                        (res as any)?.rephraseBlocks ??
-                        (res as any)?.rephrase?.blocks ??
-                        (res as any)?.rephrase?.rephraseBlocks ??
-                        null;
-
-                      if (Array.isArray(blocksFromRes) && blocksFromRes.length > 0) {
-                        (extraMerged as any).rephraseBlocks = blocksFromRes;
-
-                        meta.extra = {
-                          ...(meta.extra ?? {}),
-                          rephraseAttachSkipped: false,
-                          rephraseBlocksAttached: true,
-                          rephraseLLMApplied: true,
-                          rephraseApplied: true,
-                          rephraseReason: (res as any)?.reason ?? 'ok',
-                          rephraseBlocks: blocksFromRes,
-                        };
-
-                        (extraMerged as any).rephraseBlocksAttached = true;
-                        (extraMerged as any).rephraseApplied = true;
-                        (extraMerged as any).rephraseLLMApplied = true;
-                        (extraMerged as any).rephraseAttachSkipped = false;
-                        (extraMerged as any).rephraseReason = (res as any)?.reason ?? 'ok';
-
-                        console.log('[IROS/rephraseAttach][FROM_RES_BLOCKS]', {
-                          conversationId,
-                          userCode,
-                          blocksLen: blocksFromRes.length,
-                        });
-
-                        return;
-                      }
-
-// ✅ 2) rephraseEngine が extraMerged/meta.extra に既に付けた blocks を “採用”する（ここが本命）
-// さらに：res 側に blocks が載っているケースも拾う（attach 前に extraMerged に反映されてない事故を吸収）
-const blocksFromExtra =
-  // res 側（最優先で拾う）
-  (res as any)?.rephraseBlocks ??
-  (res as any)?.rephrase?.rephraseBlocks ??
-  (res as any)?.rephrase?.blocks ??
-  (res as any)?.blocks ??
-
-  // extraMerged 側
-  (extraMerged as any)?.rephraseBlocks ??
-  (extraMerged as any)?.rephrase?.rephraseBlocks ??
-  (extraMerged as any)?.rephrase?.blocks ??
-  (extraMerged as any)?.rephrase_blocks ??
-
-  // meta.extra 側
-  (meta as any)?.extra?.rephraseBlocks ??
-  (meta as any)?.extra?.rephrase?.rephraseBlocks ??
-  (meta as any)?.extra?.rephrase?.blocks ??
-  (meta as any)?.extra?.rephrase_blocks ??
-  null;
-
-// blocks 先頭から head を安全に作る（string/obj 両対応）
-const getBlockHeadText = (b: any): string => {
-  if (b == null) return '';
-  if (typeof b === 'string') return b;
-  if (typeof b === 'object') {
-    // よくある形：{ text } / { content } / { t }
-    const t = (b as any).text ?? (b as any).content ?? (b as any).t ?? null;
-    if (typeof t === 'string') return t;
   }
-  return String(b);
-};
-
-if (Array.isArray(blocksFromExtra) && blocksFromExtra.length > 0) {
-  // head は「見つかったソース由来の rephraseHead」を優先し、無ければ blocks 先頭から作る
-  const headFromExtra =
-    String(
-      // res 由来 head
-      (res as any)?.meta?.extra?.rephraseHead ??
-        (res as any)?.meta?.rephraseHead ??
-        (res as any)?.rephraseHead ??
-
-        // extraMerged/meta.extra 由来 head
-        (extraMerged as any)?.rephraseHead ??
-        (meta as any)?.extra?.rephraseHead ??
-        '',
-    ).trim() ||
-    // 予備：blocks 先頭から作る（空を許さない）
-    getBlockHeadText(blocksFromExtra[0]).trim();
-
-  // ✅ 採用（renderGateway が拾う “本命” の置き場）
-  (extraMerged as any).rephraseBlocks = blocksFromExtra;
-  (extraMerged as any).rephraseHead = headFromExtra;
-
-  // ✅ meta.extra にも同値を入れておく（後段が meta 側だけ参照しても耐える）
-  meta.extra = {
-    ...(meta.extra ?? {}),
-    rephraseAttachSkipped: false,
-    rephraseBlocksAttached: true,
-    rephraseLLMApplied: true,
-    rephraseApplied: true,
-    rephraseReason: (res as any)?.reason ?? 'ok',
-    rephraseBlocks: blocksFromExtra,
-    rephraseHead: headFromExtra,
-  };
-
-  // ✅ merged のフラグ群も同期（デバッグ・互換用）
-  (extraMerged as any).rephraseBlocksAttached = true;
-  (extraMerged as any).rephraseApplied = true;
-  (extraMerged as any).rephraseLLMApplied = true;
-  (extraMerged as any).rephraseAttachSkipped = false;
-  (extraMerged as any).rephraseReason = (res as any)?.reason ?? 'ok';
-
-  console.log('[IROS/rephraseAttach][ADOPT_EXISTING_BLOCKS]', {
-    conversationId,
-    userCode,
-    blocksLen: blocksFromExtra.length,
-    headLen: String(headFromExtra ?? '').length,
-    pickedFrom:
-      (res as any)?.rephraseBlocks != null ||
-      (res as any)?.rephrase?.rephraseBlocks != null ||
-      (res as any)?.rephrase?.blocks != null ||
-      (res as any)?.blocks != null
-        ? 'res'
-        : (extraMerged as any)?.rephraseBlocks != null ||
-            (extraMerged as any)?.rephrase?.rephraseBlocks != null ||
-            (extraMerged as any)?.rephrase?.blocks != null ||
-            (extraMerged as any)?.rephrase_blocks != null
-          ? 'extraMerged'
-          : 'meta.extra',
-  });
-
-  return;
 }
 
-// ✅ 3) ここで “SKIP” しない（SKIP すると renderGateway 側で拾えず WARN_NO_REPHRASE_BLOCKS になりやすい）
-console.warn('[IROS/rephraseAttach][NO_BLOCKS_ANYWHERE] -> FALLBACK_ATTACH', {
-  conversationId,
-  userCode,
-  resReason: (res as any)?.reason ?? null,
-});
 
-const fallbackText = pickFallbackAssistantText({
-  allowUserTextAsLastResort: true,
-  userText,
-  candidates: [
-    // ✅ rephrase の head は “最低限の本文” なので fallback に必ず入れる
-    (extraMerged as any)?.rephraseHead,
-    (meta as any)?.extra?.rephraseHead,
-    (res as any)?.rephraseHead,
 
-    (extraMerged as any)?.extractedTextFromModel,
-    (extraMerged as any)?.rawTextFromModel,
-    (extraMerged as any)?.finalAssistantText,
-    (extraMerged as any)?.finalAssistantTextCandidate,
-    (extraMerged as any)?.resolvedText,
-    (extraMerged as any)?.assistantText,
-    (extraMerged as any)?.content,
-    (extraMerged as any)?.text,
-  ],
-});
+      if (!blocks.length) {
+        // ✅ 1) res 側の “形ズレ” を吸収して拾う（route 内で blocks が空でも、res に入ってる可能性がある）
+        const blocksFromRes =
+          (res as any)?.blocks ??
+          (res as any)?.rephraseBlocks ??
+          (res as any)?.rephrase?.blocks ??
+          (res as any)?.rephrase?.rephraseBlocks ??
+          null;
 
-attachFallbackBlocksFromText(fallbackText, 'FALLBACK_NO_BLOCKS');
+        if (Array.isArray(blocksFromRes) && blocksFromRes.length > 0) {
+          (extraMerged as any).rephraseBlocks = blocksFromRes;
 
-meta.extra = {
-  ...(meta.extra ?? {}),
-  rephraseAttachSkipped: false,
-  rephraseBlocksAttached: true,
-  rephraseLLMApplied: true,
-  rephraseApplied: true,
-  rephraseReason: 'FALLBACK_NO_BLOCKS',
-};
+          meta.extra = {
+            ...(meta.extra ?? {}),
+            rephraseAttachSkipped: false,
+            rephraseBlocksAttached: true,
+            rephraseLLMApplied: true,
+            rephraseApplied: true,
+            rephraseReason: (res as any)?.reason ?? 'ok',
+            rephraseBlocks: blocksFromRes,
+          };
 
-(extraMerged as any).rephraseBlocksAttached = true;
-(extraMerged as any).rephraseLLMApplied = true;
-(extraMerged as any).rephraseApplied = true;
-(extraMerged as any).rephraseAttachSkipped = false;
-(extraMerged as any).rephraseReason = 'FALLBACK_NO_BLOCKS';
+          (extraMerged as any).rephraseBlocksAttached = true;
+          (extraMerged as any).rephraseApplied = true;
+          (extraMerged as any).rephraseLLMApplied = true;
+          (extraMerged as any).rephraseAttachSkipped = false;
+          (extraMerged as any).rephraseReason = (res as any)?.reason ?? 'ok';
 
-return;
-                    }
+          console.log('[IROS/rephraseAttach][FROM_RES_BLOCKS]', {
+            conversationId,
+            userCode,
+            blocksLen: blocksFromRes.length,
+          });
+
+          return;
+        }
+
+        // ✅ 2) rephraseEngine が extraMerged/meta.extra に既に付けた blocks を “採用”する（ここが本命）
+        const blocksFromExtra =
+          // res 側（最優先で拾う）
+          (res as any)?.rephraseBlocks ??
+          (res as any)?.rephrase?.rephraseBlocks ??
+          (res as any)?.rephrase?.blocks ??
+          (res as any)?.blocks ??
+
+          // extraMerged 側
+          (extraMerged as any)?.rephraseBlocks ??
+          (extraMerged as any)?.rephrase?.rephraseBlocks ??
+          (extraMerged as any)?.rephrase?.blocks ??
+          (extraMerged as any)?.rephrase_blocks ??
+
+          // meta.extra 側
+          (meta as any)?.extra?.rephraseBlocks ??
+          (meta as any)?.extra?.rephrase?.rephraseBlocks ??
+          (meta as any)?.extra?.rephrase?.blocks ??
+          (meta as any)?.extra?.rephrase_blocks ??
+          null;
+
+        const getBlockHeadText = (b: any): string => {
+          if (b == null) return '';
+          if (typeof b === 'string') return b;
+          if (typeof b === 'object') {
+            const t = (b as any).text ?? (b as any).content ?? (b as any).t ?? null;
+            if (typeof t === 'string') return t;
+          }
+          return String(b);
+        };
+
+        if (Array.isArray(blocksFromExtra) && blocksFromExtra.length > 0) {
+          const headFromExtra =
+            String(
+              (res as any)?.meta?.extra?.rephraseHead ??
+                (res as any)?.meta?.rephraseHead ??
+                (res as any)?.rephraseHead ??
+                (extraMerged as any)?.rephraseHead ??
+                (meta as any)?.extra?.rephraseHead ??
+                '',
+            ).trim() || getBlockHeadText(blocksFromExtra[0]).trim();
+
+          (extraMerged as any).rephraseBlocks = blocksFromExtra;
+          (extraMerged as any).rephraseHead = headFromExtra;
+
+          meta.extra = {
+            ...(meta.extra ?? {}),
+            rephraseAttachSkipped: false,
+            rephraseBlocksAttached: true,
+            rephraseLLMApplied: true,
+            rephraseApplied: true,
+            rephraseReason: (res as any)?.reason ?? 'ok',
+            rephraseBlocks: blocksFromExtra,
+            rephraseHead: headFromExtra,
+          };
+
+          (extraMerged as any).rephraseBlocksAttached = true;
+          (extraMerged as any).rephraseApplied = true;
+          (extraMerged as any).rephraseLLMApplied = true;
+          (extraMerged as any).rephraseAttachSkipped = false;
+          (extraMerged as any).rephraseReason = (res as any)?.reason ?? 'ok';
+
+          console.log('[IROS/rephraseAttach][ADOPT_EXISTING_BLOCKS]', {
+            conversationId,
+            userCode,
+            blocksLen: blocksFromExtra.length,
+            headLen: String(headFromExtra ?? '').length,
+          });
+
+          return;
+        }
+
+        // ✅ 3) ここで “SKIP” しない（SKIP すると renderGateway 側で拾えず WARN_NO_REPHRASE_BLOCKS になりやすい）
+        console.warn('[IROS/rephraseAttach][NO_BLOCKS_ANYWHERE] -> FALLBACK_ATTACH', {
+          conversationId,
+          userCode,
+          resReason: (res as any)?.reason ?? null,
+        });
+
+        // ⚠️ ここは fallbackText という名前を使わない（他スコープと衝突しやすい）
+        const fallbackTextNoBlocks = pickFallbackAssistantText({
+          allowUserTextAsLastResort: true,
+          userText,
+          candidates: [
+            (extraMerged as any)?.rephraseHead,
+            (meta as any)?.extra?.rephraseHead,
+            (res as any)?.rephraseHead,
+
+            (extraMerged as any)?.extractedTextFromModel,
+            (extraMerged as any)?.rawTextFromModel,
+            (extraMerged as any)?.finalAssistantText,
+            (extraMerged as any)?.finalAssistantTextCandidate,
+            (extraMerged as any)?.resolvedText,
+            (extraMerged as any)?.assistantText,
+            (extraMerged as any)?.content,
+            (extraMerged as any)?.text,
+          ],
+        });
+
+        attachFallbackBlocksFromText(fallbackTextNoBlocks, 'FALLBACK_NO_BLOCKS');
+
+        meta.extra = {
+          ...(meta.extra ?? {}),
+          rephraseAttachSkipped: false,
+          rephraseBlocksAttached: true,
+          rephraseLLMApplied: true,
+          rephraseApplied: true,
+          rephraseReason: 'FALLBACK_NO_BLOCKS',
+        };
+
+        (extraMerged as any).rephraseBlocksAttached = true;
+        (extraMerged as any).rephraseLLMApplied = true;
+        (extraMerged as any).rephraseApplied = true;
+        (extraMerged as any).rephraseAttachSkipped = false;
+        (extraMerged as any).rephraseReason = 'FALLBACK_NO_BLOCKS';
+
+        return;
+      }
+
+      meta.extra = {
+        ...(meta.extra ?? {}),
+        rephraseAttachSkipped: false,
+        rephraseBlocksAttached: true,
+        rephraseLLMApplied: true,
+
+        // 互換：LLM rephrase成功 = true
+        rephraseApplied: true,
+        rephraseReason: (res as any)?.reason ?? 'ok',
+      };
+
+      (extraMerged as any).rephraseBlocks = blocks;
+      (extraMerged as any).rephraseBlocksAttached = true;
+      (extraMerged as any).rephraseLLMApplied = true;
+      (extraMerged as any).rephraseApplied = true;
+      (extraMerged as any).rephraseAttachSkipped = false;
+      (extraMerged as any).rephraseReason = (res as any)?.reason ?? 'ok';
+
+      console.log('[IROS/rephraseAttach][OK]', {
+        conversationId,
+        userCode,
+        blocksLen: blocks.length,
+      });
+
 
     meta.extra = {
       ...(meta.extra ?? {}),
@@ -1340,6 +1431,18 @@ export async function POST(req: NextRequest) {
       const speechAct = String(extraAny?.speechAct ?? metaAny?.speechAct ?? '').toUpperCase();
       const allowLLM = extraAny?.speechAllowLLM ?? metaAny?.speechAllowLLM ?? true;
 
+      // ✅ SCAFFOLD(no-commit) は「本文を空にする」のが仕様。
+      // ここで NormalBase を当てると seed→render-v2 の回路を壊すので必ずスキップする。
+      const slotPlanPolicy = String((metaAny?.framePlan as any)?.slotPlanPolicy ?? '')
+        .trim()
+        .toUpperCase();
+      const finalTextPolicy = String(extraAny?.finalTextPolicy ?? '').trim().toUpperCase();
+
+      const isPdfScaffoldNoCommit =
+        extraAny?.pdfScaffoldNoCommit === true ||
+        finalTextPolicy === 'SLOTPLAN_SEED_SCAFFOLD' ||
+        slotPlanPolicy === 'SCAFFOLD';
+
       const candidateText = pickText(r?.assistantText, r?.content);
       const isSilenceOrForward = speechAct === 'SILENCE' || speechAct === 'FORWARD';
       const isEmptyLike = isEffectivelyEmptyText(candidateText);
@@ -1348,7 +1451,8 @@ export async function POST(req: NextRequest) {
         !isSilenceOrForward &&
         allowLLM !== false &&
         String(userTextClean ?? '').trim().length > 0 &&
-        isEmptyLike;
+        isEmptyLike &&
+        !isPdfScaffoldNoCommit;
 
       if (isNonSilenceButEmpty) {
         const normal = await runNormalBase({ userText: userTextClean });
@@ -1363,8 +1467,19 @@ export async function POST(req: NextRequest) {
           normalBaseSource: normal.meta.source,
           normalBaseReason: 'EMPTY_LIKE_TEXT',
         };
+      } else if (isPdfScaffoldNoCommit && isEmptyLike) {
+        // DEBUG 用（必要なら ENV でON/OFFしてもいいが、まずは常時ログでもOK）
+        console.log('[IROS/NormalBase][SKIP] scaffold no-commit (expected empty body)', {
+          conversationId,
+          userCode,
+          speechAct,
+          slotPlanPolicy: slotPlanPolicy || null,
+          finalTextPolicy: finalTextPolicy || null,
+          pdfScaffoldNoCommit: extraAny?.pdfScaffoldNoCommit ?? null,
+        });
       }
     }
+
 
     if (!irosResult.ok) {
       const headers: Record<string, string> = {
@@ -1396,17 +1511,33 @@ export async function POST(req: NextRequest) {
       const extraAny: any = metaAny?.extra ?? {};
 
       // render-v2 maxLines fix
-      const expandAllowed = extraAny?.expandAllowed === true;
+      // ✅ expandAllowed が “どこでもセットされていない” ため、ここで確定して extra に書き込む
+      const env = String(process.env.IROS_RENDER_EXPAND_ENABLED ?? 'true').toLowerCase().trim();
+      const EXPAND_ENABLED = ['1', 'true', 'on', 'yes', 'enabled'].includes(env);
+
+      const speechAct0 = String(extraAny?.speechAct ?? metaAny?.speechAct ?? '').toUpperCase();
+      const isSilenceOrForward0 = speechAct0 === 'SILENCE' || speechAct0 === 'FORWARD';
+
+      // ✅ IR は拡張しない（ir診断/IR系モードはここでは広げない）
+      const mode0 = String(finalMode ?? metaAny?.mode ?? '').toLowerCase();
+      const isIR0 = mode0.includes('ir');
+
+      const expandAllowed = EXPAND_ENABLED && !isSilenceOrForward0 && !isIR0;
+
+      // ✅ “見るだけ” ではなく、必ず extra に刻む
+      extraAny.expandAllowed = expandAllowed;
+
       if (expandAllowed) {
         const expandedMax = 16;
         extraAny.maxLinesHint =
           typeof extraAny?.maxLinesHint === 'number'
             ? Math.max(extraAny.maxLinesHint, expandedMax)
             : expandedMax;
-
-        metaAny.extra = { ...(metaAny.extra ?? {}), ...extraAny };
-        metaForSave = metaAny;
       }
+
+      metaAny.extra = { ...(metaAny.extra ?? {}), ...extraAny };
+      metaForSave = metaAny;
+
 
       // SpeechPolicy: SILENCE/FORWARD は即 return
       const speechAct = String(extraAny?.speechAct ?? metaAny?.speechAct ?? '').toUpperCase();
@@ -1812,14 +1943,20 @@ export async function POST(req: NextRequest) {
     console.warn('[IROS/pipe][META_EXTRA_MERGED][ERROR]', e);
   }
 
-
+      // ✅ enable判定は routeで確定した extraMerged をソースにする（metaの欠落でOFFにならない）
       // render engine apply（single entry）
       {
+        const upperMode = String(effectiveMode ?? '').toUpperCase();
+
+        // ✅ diagnosis は render-v2 に通さない（診断フォーマットが崩れるため）
+        const isDiagnosis =
+          upperMode === 'DIAGNOSIS' || upperMode === 'DIAG' || upperMode === 'IR';
+
         // ✅ enable判定は routeで確定した extraMerged をソースにする（metaの欠落でOFFにならない）
+        // ✅ ここを「diagnosis でもON」にする（ir診断が directive のまま出るのを止める）
         const enableRenderEngine =
           extraMerged?.renderEngine === true || extraMerged?.renderEngineGate === true;
 
-        const upperMode = String(effectiveMode ?? '').toUpperCase();
         const isIT =
           upperMode === 'IT' || Boolean((meta as any)?.extra?.renderReplyForcedIT);
 
@@ -1827,6 +1964,8 @@ export async function POST(req: NextRequest) {
         const extraBefore: any = extraMerged ?? null;
 
         const applied = applyRenderEngineIfEnabled({
+          // （ここ以下は既存のまま）
+
           enableRenderEngine,
           isIT,
           conversationId,
@@ -1871,6 +2010,44 @@ try {
   let beforeHead: string | null = null;
   let beforeCtx: any = null;
 
+// ✅ carry 確定：blocks が無い場合のみ、拾えた自然文を rephraseBlocks に昇格
+for (const src of carryCandidates) {
+  if (!beforeBlocks) {
+    const b = pickBlocks(src);
+    if (Array.isArray(b) && b.length > 0) beforeBlocks = b;
+  }
+  if (!beforeHead) {
+    const h = pickHead(src);
+    if (h) beforeHead = h;
+  }
+  if (!beforeCtx) {
+    const c = pickCtxPack(src);
+    if (c) beforeCtx = c;
+  }
+}
+
+// ✅ 最終保険：rephraseBlocks が未設定で、carry が取れている場合のみ確定代入
+if (
+  (!Array.isArray((extraMerged as any)?.rephraseBlocks) ||
+    (extraMerged as any).rephraseBlocks.length === 0) &&
+  Array.isArray(beforeBlocks) &&
+  beforeBlocks.length > 0
+) {
+  extraMerged = {
+    ...(extraMerged ?? {}),
+    rephraseBlocks: beforeBlocks,
+    ...(beforeHead ? { rephraseHead: beforeHead } : {}),
+    ...(beforeCtx ? { ctxPack: beforeCtx } : {}),
+  };
+
+  console.info('[IROS/pipe][CARRY_REPHRASE_BLOCKS_APPLIED]', {
+    blocksLen: beforeBlocks.length,
+    hasHead: Boolean(beforeHead),
+    hasCtx: Boolean(beforeCtx),
+  });
+}
+
+
   for (const c of carryCandidates) {
     if (!beforeBlocks) beforeBlocks = pickBlocks(c);
     if (!beforeHead) beforeHead = pickHead(c);
@@ -1880,21 +2057,39 @@ try {
 
 // ✅ 保存側(metaForSave.extra)にも同期：META_EXTRA_MERGED が blocks を拾えるようにする
 if (extraMerged && typeof extraMerged === 'object') {
-  const hasBlocks =
-    Array.isArray((extraMerged as any).rephraseBlocks) &&
-    (extraMerged as any).rephraseBlocks.length > 0;
+  const ex: any = extraMerged as any;
 
-  const hasHead = typeof (extraMerged as any).rephraseHead === 'string' && (extraMerged as any).rephraseHead.length > 0;
+  const mergedBlocks =
+    Array.isArray(ex?.rephraseBlocks) && ex.rephraseBlocks.length > 0 ? ex.rephraseBlocks : null;
 
-  const hasCtx = (extraMerged as any).ctxPack && typeof (extraMerged as any).ctxPack === 'object';
+  const mergedHeadRaw = String(ex?.rephraseHead ?? '').trim();
+  const mergedHead = mergedHeadRaw.length > 0 ? mergedHeadRaw : null;
+
+  const mergedCtx = ex?.ctxPack && typeof ex.ctxPack === 'object' ? ex.ctxPack : null;
+
+  const hasBlocks = Boolean(mergedBlocks);
+  const hasHead = Boolean(mergedHead);
+  const hasCtx = Boolean(mergedCtx);
 
   if (hasBlocks || hasHead || hasCtx) {
+    const prev: any = (metaForSave as any).extra ?? {};
+
+    // ✅ 重要：null/空で既存を潰さない（head落ち防止）
     (metaForSave as any).extra = {
-      ...((metaForSave as any).extra ?? {}),
-      ...extraMerged,
+      ...prev,
+      ...ex,
+      ...(hasBlocks ? { rephraseBlocks: mergedBlocks } : {}),
+      ...(hasHead ? { rephraseHead: mergedHead } : {}),
+      ...(hasCtx ? { ctxPack: mergedCtx } : {}),
     };
+
+    // ✅ 念のため：ex が null で持ってきた場合は復旧（上書き防止）
+    if (!String((metaForSave as any).extra?.rephraseHead ?? '').trim() && String(prev?.rephraseHead ?? '').trim()) {
+      (metaForSave as any).extra.rephraseHead = prev.rephraseHead;
+    }
   }
 }
+
 
 
 
@@ -1952,7 +2147,10 @@ if (extraMerged && typeof extraMerged === 'object') {
         const silentAllowed = !userNonEmpty;
         const isSilent = speechAct === 'SILENCE' && emptyLike && silentAllowed;
 
-        // ✅ ここが本丸：renderGateway が outLen=0 を返しても、
+        // ✅ スロット指示が本文に漏れているか（@OBS/@SHIFT/...）
+        const hasSlotDirectives = /(^|\n)\s*@(OBS|SHIFT|NEXT|SAFE|DRAFT|SEED_TEXT)\b/.test(curRaw);
+
+        // ✅ renderGateway が outLen=0 を返しても、
         // extraMerged に rephraseHead / rephraseBlocks が残っているなら本文を復元する
         const ex: any = extraMerged as any;
         const head = String(ex?.rephraseHead ?? '').trim();
@@ -1968,13 +2166,34 @@ if (extraMerged && typeof extraMerged === 'object') {
         const recoveredFromBlocks = blocks.length > 0 ? blocksToText(blocks) : '';
         const recoveredText = head || recoveredFromBlocks;
 
+        // ✅ 非SILENCEで (空っぽ or スロット漏れ) の場合、rephrase から復元できるなら置換
+        const needRecover = !isSilent && (emptyLike || hasSlotDirectives);
+
+        // ✅ slot指示だけを落とした「最低限の救済」
+        // - recovered が無い場合でも “空” に落とさない（無言化防止）
+        const stripSlotDirectives = (s: string) => {
+          const raw = String(s ?? '');
+          if (!raw) return raw;
+          const out = raw
+            .replace(/(^|\n)\s*@(OBS|SHIFT|NEXT|SAFE|DRAFT|SEED_TEXT)\b[^\n]*\n?/g, '$1')
+            .replace(/\n{3,}/g, '\n\n')
+            .trimEnd();
+          return out;
+        };
+
+        const curNoSlots = hasSlotDirectives ? stripSlotDirectives(curRaw) : curRaw.trimEnd();
+        const curNoSlotsTrim = curNoSlots.trim();
+
         // 1) SILENCE → 常に空
-        // 2) 非SILENCEで emptyLike だが復元できる → 復元を採用
-        // 3) それ以外 → curRaw を採用
+        // 2) needRecover で recovered がある → recovered を採用
+        // 3) needRecover だが recovered が無い → slot指示だけ除去した curNoSlots を採用（それも空なら最後に curRaw）
+        // 4) それ以外 → curRaw
         const finalText = isSilent
           ? ''
-          : emptyLike
-            ? (recoveredText ? recoveredText : '')
+          : needRecover
+            ? (recoveredText
+                ? recoveredText
+                : (curNoSlotsTrim.length > 0 ? curNoSlots : curRaw.trimEnd()))
             : curRaw.trimEnd();
 
         // DEBUG: 必要な時だけ確証ログ
@@ -1989,6 +2208,7 @@ if (extraMerged && typeof extraMerged === 'object') {
             curRawLen: curRaw.length,
             curTrimLen: curTrim.length,
             emptyLike,
+            hasSlotDirectives,
             mergedExtraHasBlocks: Array.isArray(ex?.rephraseBlocks),
             mergedExtraBlocksLen: Array.isArray(ex?.rephraseBlocks) ? ex.rephraseBlocks.length : null,
             mergedHeadLen: head ? head.length : 0,
@@ -1996,8 +2216,10 @@ if (extraMerged && typeof extraMerged === 'object') {
             finalTextLen: finalText.length,
             finalTextPolicyCandidate: isSilent
               ? (silenceReason ? `SILENCE:${silenceReason}` : 'SILENCE_EMPTY_BODY')
-              : emptyLike
-                ? (recoveredText ? 'RECOVERED_FROM_EXTRA' : 'NON_SILENCE_EMPTY_CONTENT')
+              : needRecover
+                ? (recoveredText
+                    ? 'RECOVERED_FROM_EXTRA'
+                    : (curNoSlotsTrim.length > 0 ? 'STRIPPED_SLOT_DIRECTIVES' : 'NEED_RECOVER_BUT_FALLBACK_CURRAW'))
                 : 'NORMAL_BODY',
           });
         }
@@ -2011,24 +2233,35 @@ if (extraMerged && typeof extraMerged === 'object') {
           ...(meta.extra ?? {}),
           finalAssistantTextSynced: true,
           finalAssistantTextLen: finalText.length,
-          finalTextRecoveredFromExtra: emptyLike && !isSilent && Boolean(recoveredText) ? true : undefined,
+
+          // ✅ 復元したかどうか（空だけでなく slot漏れでも立つ）
+          finalTextRecoveredFromExtra: needRecover && Boolean(recoveredText) ? true : undefined,
           finalTextRecoveredSource:
-            emptyLike && !isSilent && Boolean(recoveredText)
+            needRecover && Boolean(recoveredText)
               ? (head ? 'rephraseHead' : 'rephraseBlocks')
               : undefined,
+
+          // ✅ slot漏れ検知もメタに残す
+          finalTextHadSlotDirectives: hasSlotDirectives ? true : undefined,
+
+          // ✅ slot除去フォールバックを使ったか
+          finalTextStrippedSlotDirectives:
+            needRecover && !recoveredText && hasSlotDirectives && curNoSlotsTrim.length > 0 ? true : undefined,
+
           finalTextPolicy: isSilent
             ? 'SILENCE_EMPTY_BODY'
-            : meta?.extra?.finalTextPolicy ??
-              (finalText.length > 0 ? 'NORMAL_BODY' : 'NORMAL_EMPTY_PASS'),
+            : meta?.extra?.finalTextPolicy ?? (finalText.length > 0 ? 'NORMAL_BODY' : 'NORMAL_EMPTY_PASS'),
+
           emptyFinalPatched: finalText.length === 0 ? true : undefined,
           emptyFinalPatchedReason:
             finalText.length === 0
               ? isSilent
                 ? (silenceReason ? `SILENCE:${silenceReason}` : 'SILENCE_EMPTY_BODY')
-                : 'NON_SILENCE_EMPTY_CONTENT'
+                : (needRecover ? 'NEED_RECOVER_BUT_EMPTY' : 'NON_SILENCE_EMPTY_CONTENT')
               : undefined,
         };
       }
+
 
 
 

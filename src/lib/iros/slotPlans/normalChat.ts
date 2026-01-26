@@ -309,16 +309,15 @@ function buildSeedText(args: {
 
 
 // ✅ HowTo/方法質問（QuestionSlots）を normalChat に合わせて正規化
-function buildQuestion(userText: string): NormalChatSlot[] {
- const slots = buildQuestionSlots({ userText });
- return slots.map((s) => ({
-   key: s.key,
-   role: 'assistant',
-   style: (s.style ?? 'neutral') as any,
-   content: s.content,
- }));
+function buildQuestion(userText: string, contextText?: string): NormalChatSlot[] {
+  const slots = buildQuestionSlots({ userText, contextText });
+  return slots.map((s) => ({
+    key: s.key,
+    role: 'assistant',
+    style: (s.style ?? 'neutral') as any,
+    content: s.content,
+  }));
 }
-
 
 // ✅ normalChat の通常フロー：意味にあった返答を最優先で書かせる
 function buildFlowReply(
@@ -340,42 +339,34 @@ function buildFlowReply(
 
 
  return [
-   { key: 'SEED_TEXT', role: 'assistant', style: 'soft', content: seedText },
-
-
-   {
-     key: 'OBS',
-     role: 'assistant',
-     style: 'soft',
-     content: m('OBS', {
-       user: clamp(t, 240),
-       lastUser: lastUserText ? clamp(norm(lastUserText), 180) : null,
-       flow: delta,
-       conf,
-     }),
-   },
-
-
-   {
-     key: 'SHIFT',
-     role: 'assistant',
-     style: 'neutral',
-     content: m('SHIFT', {
-       kind: 'meaning_first',
-       rules: {
-         answer_user_meaning: true,
-         avoid_template_praise: true,
-         avoid_meta_flow_talk: true,
-         avoid_generic_cheer: true,
-         questions_max: 1,
-       },
-       allow: {
-         concrete_reply: true,
-         short_reply_ok: true,
-       },
-     }),
-   },
- ];
+  {
+    key: 'OBS',
+    role: 'assistant',
+    style: 'soft',
+    content: m('OBS', {
+      user: clamp(t, 240),
+    }),
+  },
+  {
+    key: 'SHIFT',
+    role: 'assistant',
+    style: 'neutral',
+    content: m('SHIFT', {
+      kind: 'meaning_first',
+      rules: {
+        answer_user_meaning: true,
+        avoid_template_praise: true,
+        avoid_meta_flow_talk: true,
+        avoid_generic_cheer: true,
+        questions_max: 1,
+      },
+      allow: {
+        concrete_reply: true,
+        short_reply_ok: true,
+      },
+    }),
+  },
+];
 }
 
 
@@ -424,8 +415,9 @@ export function buildNormalChatSlotPlan(args: {
 } else if (shouldUseQuestionSlots(userText)) {
   // ✅ HowTo/方法質問 → 立ち位置（QuestionSlots）を最優先（短縮要求に吸われない）
   reason = 'questionSlots';
-  slots = buildQuestion(userText);
+  slots = buildQuestion(userText, lastUserText ?? undefined);
 } else if (isClarify(userText)) {
+
   // ✅ まず噛ませる（意味に答える）
   reason = 'clarify';
   slots = buildClarify(userText);

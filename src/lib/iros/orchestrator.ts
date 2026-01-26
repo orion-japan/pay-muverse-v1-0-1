@@ -1179,172 +1179,215 @@ const textForCounsel = forcedCounsel ? strippedText : text;
 const hasTextForCounsel = String(textForCounsel ?? '').trim().length > 0;
 
 // ✅ “counselに入るか” 判定（強制 → counsel）
-const shouldUseCounsel =
-  !!forcedCounsel || isCounselMode || shouldUseCounselByStructure(meta as any, textForCounsel);
+// ※重要：ir診断ターンは slotPlan を上書きしない（counsel/normalChat/flagReply を通さない）
+const isIrDiagnosisTurn_here =
+  Boolean((meta as any)?.isIrDiagnosisTurn) ||
+  String((meta as any)?.presentationKind ?? '').toLowerCase() === 'diagnosis' ||
+  String(modeRaw ?? '').toLowerCase() === 'diagnosis';
 
-if (!isSilence && hasTextForCounsel && shouldUseCounsel) {
-  const lastSummary =
-    (ms as any)?.situation_summary ??
-    (ms as any)?.situationSummary ??
-    (memoryState as any)?.situation_summary ??
-    (memoryState as any)?.situationSummary ??
-    (mergedBaseMeta as any)?.situation_summary ??
-    (mergedBaseMeta as any)?.situationSummary ??
-    null;
+if (!isIrDiagnosisTurn_here) {
+  const shouldUseCounsel =
+    !!forcedCounsel || isCounselMode || shouldUseCounselByStructure(meta as any, textForCounsel);
 
-  console.log('[IROS/ORCH][counsel-picked]', {
-    stage: 'OPEN',
-    modeRaw,
-    forcedCounsel,
-    shouldUseCounselByStructure: !forcedCounsel && !isCounselMode,
-    hasText: hasTextForCounsel,
-    isSilence,
-    strippedLen: forcedCounsel ? String(strippedText ?? '').length : null,
-    lastSummary_len: typeof lastSummary === 'string' ? lastSummary.length : null,
-  });
+  if (!isSilence && hasTextForCounsel && shouldUseCounsel) {
+    const lastSummary =
+      (ms as any)?.situation_summary ??
+      (ms as any)?.situationSummary ??
+      (memoryState as any)?.situation_summary ??
+      (memoryState as any)?.situationSummary ??
+      (mergedBaseMeta as any)?.situation_summary ??
+      (mergedBaseMeta as any)?.situationSummary ??
+      null;
 
-  const counsel = buildCounselSlotPlan({
-    userText: textForCounsel, // ✅ strip後
-    stage: 'OPEN',
-    lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
-  });
+    console.log('[IROS/ORCH][counsel-picked]', {
+      stage: 'OPEN',
+      modeRaw,
+      forcedCounsel,
+      shouldUseCounselByStructure: !forcedCounsel && !isCounselMode,
+      hasText: hasTextForCounsel,
+      isSilence,
+      strippedLen: forcedCounsel ? String(strippedText ?? '').length : null,
+      lastSummary_len: typeof lastSummary === 'string' ? lastSummary.length : null,
+    });
 
-  const cSlots = (counsel as any).slots;
-  const cPolicy = (counsel as any).slotPlanPolicy;
-
-  // ✅ flagReply が既に入っている場合でも counsel を優先する（相談の進行を守る）
-  slotsArr = Array.isArray(cSlots) ? cSlots : [];
-  slotPlanPolicy =
-    typeof cPolicy === 'string' && cPolicy.trim() ? cPolicy.trim() : 'FINAL';
-
-  // flagReply 既存なら “上書き元” を残す
-  (meta as any).slotPlanFallback =
-    (meta as any).slotPlanFallback ?? 'counsel';
-
-  console.log('[IROS/ORCH][counsel-picked]', {
-    stage: 'OPEN',
-    slotsLen: Array.isArray(slotsArr) ? slotsArr.length : null,
-    policy: slotPlanPolicy,
-  });
-}
-
-// 5) fallback（normalChat）
-// - slots が空 or policy が空 のときだけ
-// - counsel で埋まっていれば実行しない
-const slotsEmpty =
-  !Array.isArray(slotsArr) || (Array.isArray(slotsArr) && slotsArr.length === 0);
-const policyEmpty =
-  !slotPlanPolicy || String(slotPlanPolicy).trim().length === 0;
-
-// ✅ QuestionSlots（HowTo/方法質問）は framePlan.slots が入っていても normalChat を優先して上書きする
-const forceQuestionSlots =
-  !isSilence && hasTextForCounsel && !shouldUseCounsel && shouldUseQuestionSlots(textForCounsel);
-
-const shouldFallbackNormalChat =
-  !isSilence &&
-  hasTextForCounsel &&
-  !shouldUseCounsel &&
-  (forceQuestionSlots || slotsEmpty || policyEmpty);
-
-
-if (shouldFallbackNormalChat) {
-  const lastSummary =
-    (ms as any)?.situation_summary ??
-    (ms as any)?.situationSummary ??
-    (memoryState as any)?.situation_summary ??
-    (memoryState as any)?.situationSummary ??
-    (mergedBaseMeta as any)?.situation_summary ??
-    (mergedBaseMeta as any)?.situationSummary ??
-    null;
-
-  const fallback = buildNormalChatSlotPlan({
-    userText: textForCounsel, // ✅ strip後（/counsel が混ざらない）
-    context: {
+    const counsel = buildCounselSlotPlan({
+      userText: textForCounsel, // ✅ strip後
+      stage: 'OPEN',
       lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
-    },
-  });
+    });
 
-  const fbSlots = (fallback as any).slots;
-  slotsArr = Array.isArray(fbSlots) ? fbSlots : [];
+    const cSlots = (counsel as any).slots;
+    const cPolicy = (counsel as any).slotPlanPolicy;
 
-  const fp = (fallback as any).slotPlanPolicy;
-  slotPlanPolicy = typeof fp === 'string' && fp.trim() ? fp.trim() : 'FINAL';
+    // ✅ flagReply が既に入っている場合でも counsel を優先する（相談の進行を守る）
+    slotsArr = Array.isArray(cSlots) ? cSlots : [];
+    slotPlanPolicy =
+      typeof cPolicy === 'string' && cPolicy.trim() ? cPolicy.trim() : 'FINAL';
 
-  (meta as any).slotPlanFallback = 'normalChat';
-} else {
-  if ((meta as any).slotPlanFallback === 'normalChat') {
-    delete (meta as any).slotPlanFallback;
+    // flagReply 既存なら “上書き元” を残す
+    (meta as any).slotPlanFallback =
+      (meta as any).slotPlanFallback ?? 'counsel';
+
+    console.log('[IROS/ORCH][counsel-picked]', {
+      stage: 'OPEN',
+      slotsLen: Array.isArray(slotsArr) ? slotsArr.length : null,
+      policy: slotPlanPolicy,
+    });
   }
-}
 
-// =========================================================
-// ✅ A) normalChat → flagReply 自動切替（仮置き一点の安全装置）
-// 役割：
-//   - normalChat は通常入口（OBS/SHIFTで流れを受ける）
-//   - flagReply は「停滞の根拠がある時だけ」仮置き一点を置く
-// =========================================================
-{
-  const reason = String(
-    (meta as any)?.flow?.reason ?? (meta as any)?.convEvidence?.reason ?? '',
-  );
+  // 5) fallback（normalChat）
+  // - slots が空 or policy が空 のときだけ
+  // - counsel で埋まっていれば実行しない
+  const slotsEmpty =
+    !Array.isArray(slotsArr) || (Array.isArray(slotsArr) && slotsArr.length === 0);
+  const policyEmpty =
+    !slotPlanPolicy || String(slotPlanPolicy).trim().length === 0;
 
-  const hasNoAdvanceHint = /A!:no_advance_hint/.test(reason);
-  const hasNoCtxSummary = /U!:no_ctx_summary/.test(reason);
+  // ✅ QuestionSlots（HowTo/方法質問）は framePlan.slots が入っていても normalChat を優先して上書きする
+  const forceQuestionSlots =
+    !isSilence && hasTextForCounsel && !shouldUseCounsel && shouldUseQuestionSlots(textForCounsel);
 
-  // 直前が normalChat 由来かどうか（＝通常入口で組めている）
-  const cameFromNormalChat = (meta as any)?.slotPlanFallback === 'normalChat';
+  const shouldFallbackNormalChat =
+    !isSilence &&
+    hasTextForCounsel &&
+    !shouldUseCounsel &&
+    (forceQuestionSlots || slotsEmpty || policyEmpty);
 
-  // ✅ 切替条件（非常用）
-  // - 「normalChat で入ってきたのに」停滞シグナルが立っている時だけ
-  // - normalChat 以外（counsel/flagReply等）から来た場合は “切替しない”
-  const shouldSwitchToFlagReply =
-    cameFromNormalChat && (hasNoAdvanceHint || hasNoCtxSummary);
+  if (shouldFallbackNormalChat) {
+    const lastSummary =
+      (ms as any)?.situation_summary ??
+      (ms as any)?.situationSummary ??
+      (memoryState as any)?.situation_summary ??
+      (memoryState as any)?.situationSummary ??
+      (mergedBaseMeta as any)?.situation_summary ??
+      (mergedBaseMeta as any)?.situationSummary ??
+      null;
 
-  // 直前 assistant 本文（one-shot 判定用）
-  const historyArr = Array.isArray(history) ? (history as any[]) : [];
-  let lastAssistantText = '';
+    const fallback = buildNormalChatSlotPlan({
+      userText: textForCounsel, // ✅ strip後（/counsel が混ざらない）
+      context: {
+        lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
+      },
+    });
 
-  for (let i = historyArr.length - 1; i >= 0; i--) {
-    const m = historyArr[i];
-    if (String(m?.role ?? '').toLowerCase() !== 'assistant') continue;
-    const v = m?.text ?? m?.content ?? '';
-    if (typeof v === 'string' && v.trim()) {
-      lastAssistantText = v;
-      break;
+    const fbSlots = (fallback as any).slots;
+    slotsArr = Array.isArray(fbSlots) ? fbSlots : [];
+
+    const fp = (fallback as any).slotPlanPolicy;
+    slotPlanPolicy = typeof fp === 'string' && fp.trim() ? fp.trim() : 'FINAL';
+
+    (meta as any).slotPlanFallback = 'normalChat';
+  } else {
+    if ((meta as any).slotPlanFallback === 'normalChat') {
+      delete (meta as any).slotPlanFallback;
     }
   }
 
-  const prevUsedOnePoint =
-    typeof lastAssistantText === 'string' && /いまの一点：/.test(lastAssistantText);
+  // =========================================================
+  // ✅ A) normalChat → flagReply 自動切替（仮置き一点の安全装置）
+  // =========================================================
+  {
+    const reason = String(
+      (meta as any)?.flow?.reason ?? (meta as any)?.convEvidence?.reason ?? '',
+    );
 
-  if (
-    !isSilence &&
-    hasText &&
-    !shouldUseCounsel &&
-    shouldSwitchToFlagReply &&
-    !prevUsedOnePoint
-  ) {
-    const flagSlots = buildFlagReplySlots({
-      userText: text,
-      hasHistory: true,
-      questionAlreadyPlanned: false,
-      directTask: false,
-      forceOnePoint: false,
-    });
+    const hasNoAdvanceHint = /A!:no_advance_hint/.test(reason);
+    const hasNoCtxSummary = /U!:no_ctx_summary/.test(reason);
 
-    slotsArr = Array.isArray(flagSlots) ? flagSlots : [];
-    slotPlanPolicy = slotPlanPolicy || 'FINAL';
-    (meta as any).slotPlanFallback = 'flagReply';
+    // 直前が normalChat 由来かどうか（＝通常入口で組めている）
+    const cameFromNormalChat = (meta as any)?.slotPlanFallback === 'normalChat';
 
-    console.log('[IROS/ORCH][flagReply-picked]', {
-      cameFromNormalChat,
-      hasNoCtxSummary,
-      hasNoAdvanceHint,
-      prevUsedOnePoint,
-      reasonHead: reason.slice(0, 120),
+    // ✅ 切替条件（非常用）
+    const shouldSwitchToFlagReply =
+      cameFromNormalChat && (hasNoAdvanceHint || hasNoCtxSummary);
+
+    // 直前 assistant 本文（one-shot 判定用）
+    const historyArr = Array.isArray(history) ? (history as any[]) : [];
+    let lastAssistantText = '';
+
+    for (let i = historyArr.length - 1; i >= 0; i--) {
+      const m = historyArr[i];
+      if (String(m?.role ?? '').toLowerCase() !== 'assistant') continue;
+      const v = m?.text ?? m?.content ?? '';
+      if (typeof v === 'string' && v.trim()) {
+        lastAssistantText = v;
+        break;
+      }
+    }
+
+    const prevUsedOnePoint =
+      typeof lastAssistantText === 'string' && /いまの一点：/.test(lastAssistantText);
+
+    if (
+      !isSilence &&
+      hasText &&
+      !shouldUseCounsel &&
+      shouldSwitchToFlagReply &&
+      !prevUsedOnePoint
+    ) {
+      const flagSlots = buildFlagReplySlots({
+        userText: text,
+        hasHistory: true,
+        questionAlreadyPlanned: false,
+        directTask: false,
+        forceOnePoint: false,
+      });
+
+      slotsArr = Array.isArray(flagSlots) ? flagSlots : [];
+      slotPlanPolicy = slotPlanPolicy || 'FINAL';
+      (meta as any).slotPlanFallback = 'flagReply';
+
+      console.log('[IROS/ORCH][flagReply-picked]', {
+        cameFromNormalChat,
+        hasNoCtxSummary,
+        hasNoAdvanceHint,
+        prevUsedOnePoint,
+        reasonHead: reason.slice(0, 120),
+      });
+    }
+  }
+} else {
+  // ✅ ir診断ターン：normalChat/flagReply/counsel で上書きしない
+  // ただし upstream が slot を返さない場合があるので、最低限の seed slot をここで補完する
+  const slotsEmpty_ir = !Array.isArray(slotsArr) || slotsArr.length === 0;
+  const policyEmpty_ir = !slotPlanPolicy || String(slotPlanPolicy).trim().length === 0;
+
+  if (slotsEmpty_ir) {
+    const raw = String(text ?? '').trim();
+
+    // "ir診断 自分" / "ir診断 ひろみの母" などからラベルを拾う（無ければ self）
+    let label = 'self';
+    if (raw.startsWith('ir診断')) {
+      const rest = raw.slice('ir診断'.length).trim();
+      if (rest) label = rest;
+    }
+
+    // ✅ seed は必ず非空（LLM_GATE/NormalBase 落下防止）
+    const seed = [
+      `ir診断 ${label}`,
+      '',
+      `観測対象：${label}`,
+      '出力：フェーズ／位相／深度（S/R/C/I/T）＋短い意識状態＋短いメッセージ',
+      '',
+      `入力：${raw || '(none)'}`,
+    ].join('\n');
+
+    slotsArr = [{ key: 'SEED_TEXT', text: seed }];
+    slotPlanPolicy = 'FINAL';
+
+    console.log('[IROS/ORCH][irDiagnosis-seed]', {
+      label,
+      slotsLen: Array.isArray(slotsArr) ? slotsArr.length : null,
+      policy: slotPlanPolicy,
+      rawLen: raw.length,
     });
   }
+
+  // ✅ ir診断ターン：fallback 表示は残さない
+  if ((meta as any).slotPlanFallback) delete (meta as any).slotPlanFallback;
 }
+
+
 
 
 

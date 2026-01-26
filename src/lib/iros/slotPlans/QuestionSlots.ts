@@ -1,10 +1,18 @@
 // file: src/lib/iros/slotPlans/QuestionSlots.ts
-// iros — Question Slots (HowTo → stance / observation frame)
+// iros — Question Slots (HowTo → observation frame)
 //
 // 目的：
-// - 「どうしたら？」系の質問を、答え/方法提示にしない
-// - OBS / SHIFT / NEXT / SAFE で“立ち位置が生まれる文章”を作る
-// - ただし今回の要求は「完成文を完全固定」なので、本文は ILINE でロックする
+// - 「どうしたら？」系を、即・方法の羅列にしない
+// - 固定文は置かない（ILINE ロックしない）
+// - LLM が “状況に噛み合う自然文” を書けるよう、slot は「指示」と「軽い seed」だけ置く
+//
+// 方針：
+// - OBS: LLM が書くための自然な seed（短い・具体寄り・テンプレ語を避ける）
+// - SHIFT/NEXT/SAFE: @TAG(JSON) で writer 向け制約（render 側で非表示になる前提）
+//
+// 注意：
+// - seed に「質問文」「？」「どうしたら…」を入れると echo して劣化する
+// - seed は “断定・提示” に寄せ、最低80字は確保（短文弾きフォールバックでも破綻させない）
 
 export type IrosSlot = {
   key: 'OBS' | 'SHIFT' | 'NEXT' | 'SAFE';
@@ -17,87 +25,145 @@ function norm(s: string): string {
   return String(s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
 }
 
+function stripQMarks(s: string): string {
+  return String(s ?? '').replace(/[?？]+/g, '').trim();
+}
+
+function clampLen(s: string, max = 120): string {
+  const t = String(s ?? '').trim();
+  if (t.length <= max) return t;
+  return t.slice(0, max).trim();
+}
+
+function isHowToOnly(s: string): boolean {
+  const t = stripQMarks(norm(s));
+  if (!t) return true;
+  // 「どうしたら良いですか」「方法は？」など “問いだけ” を topic として採用しない
+  return /^(どうしたら|どうすれば|どうやって|方法|やり方|コツ|ためには)(.*)?$/.test(t) && t.length <= 18;
+}
+
+// normalChat.ts と同型の @TAG 生成（render 側で落とせる形）
+function m(tag: string, payload?: Record<string, unknown>) {
+  if (!payload || Object.keys(payload).length === 0) return `@${tag}`;
+  try {
+    return `@${tag} ${JSON.stringify(payload)}`;
+  } catch {
+    return `@${tag}`;
+  }
+}
+
+function pickSeedLines(topicRaw: string): string[] {
+  const topic = String(topicRaw ?? '').trim();
+
+  // 恋愛/連絡待ち
+  if (/彼女|彼氏|恋愛|パートナー|連絡|返信|既読|未読|メッセージ|LINE|DM|返事|音沙汰/.test(topic)) {
+    return [
+      '連絡がない時間が伸びるほど、頭の中で不安の説明が勝手に増えていく。',
+      'いまは相手を動かす手順より、あなたの中の揺れを止める一点を決める。🪔',
+      '重いのは「待つ不安」「温度が読めない」「軽く扱われた感じ」のどれか――その一つだけを固定する。',
+    ];
+  }
+
+  // 仕事/職場
+  if (/会社|職場|上司|同僚|退職|辞め|異動|評価|面談|威圧|ハラスメント/.test(topic)) {
+    return [
+      '状況が続くと、体が先に緊張を覚えてしまう。',
+      'いまは結論より、緊張が起きる一点を言葉に固定して揺れを減らす。🪔',
+      '重いのは「相手の圧」「自分の居場所の薄さ」「続く未来の不安」のどれか――一つだけを固定する。',
+    ];
+  }
+
+  // 既定（短いが80字は確保）
+  return [
+    'いま必要なのは正解の手順ではなく、状況の重心を一文で固定すること。',
+    '重心が定まると、次の一手は自然に一つに絞れる。🪔',
+    '重いのは「待つ不安」「読めない温度」「軽く扱われた感覚」のどれか――一つだけを固定する。',
+  ];
+}
+
 /**
- * HowTo質問かどうかの軽い判定
- * - 「どうしたら」「方法」「には？」など
- * - テーマは問わない（お金/仕事/人間関係 など全部ここに入る）
+ * HowTo質問かどうかの判定（誤爆防止版）
+ * - 「どうしたら」「どうすれば」「方法」「やり方」など
+ * - 末尾「？」だけでは発火させない
  */
 export function shouldUseQuestionSlots(userText: string): boolean {
   const t = norm(userText);
   if (!t) return false;
-
-  const looksHowTo =
-    /どうしたら|どうすれば|方法|には|ためには/.test(t) ||
-    /[?？]$/.test(t);
-
-  return looksHowTo;
+  return /どうしたら|どうすれば|どうやって|方法|やり方|コツ|ためには/.test(t);
 }
 
 /**
- * Question Slots（完成文固定版）
- * - 完成文は [[ILINE]]...[[/ILINE]] で完全固定（LLMに改変させない）
- * - ここでは「方法の羅列」「実践ステップの提示」「断定的な行動指示」をしない
- * - “見る場所（観測軸）”と“未完了の問い”だけを残す
+ * Question Slots（LLMに書かせる版）
+ * - 固定文（ILINE）なし
+ * - “方法の羅列” に行かないための観測フレームだけを渡す
  */
-export function buildQuestionSlots(args: { userText: string }): IrosSlot[] {
+export function buildQuestionSlots(args: { userText: string; contextText?: string }): IrosSlot[] {
   const userText = norm(args.userText);
+  const contextText = norm(args.contextText ?? '');
 
-  // ✅ 完成文（完全固定）
-  // - ここを変えたい時は、この文字列を編集する
-  // - 必ず [[ILINE]] と [[/ILINE]] を含める（locked ILINE 用）
-  const fixed = `[[ILINE]]
-とても大きな質問なので、
-いちばんシンプルな原理だけ置きます。
+  // ✅ topic は基本 contextText から取る（userText が問いだけの場合は採用しない）
+  const topicCandidate =
+    contextText && !isHowToOnly(contextText) ? contextText : !isHowToOnly(userText) ? userText : '';
+  const topicLine = topicCandidate ? clampLen(stripQMarks(topicCandidate), 120) : '';
 
-お金は
-「誰かの困りごと／欲しい未来」が
-軽くなった方向へ流れる。
-川が低い方へ流れるように、
-お金も “価値が生まれた方向へ動くだけ” です。
+  const seedLines = pickSeedLines(topicLine);
 
-だから今は、方法を並べません。
-代わりに「どこで価値が生まれているか」を見ます。
-
-見る場所は3つだけ。
-・誰が困っているか（誰の“重さ”がそこにあるか）
-・何が軽くなるか（何が減る／増えると前に進むか）
-・それが起きる場面はどこか（いつ／どこで／どんな状況か）
-
-想像しづらいなら、イメージの取っ掛かりを置きます。
-たとえば──
-時間がない人が多い場面／やり方が分からない場面／不安が強い場面。
-あなたの周りで「これが軽くなったら助かる」が出る場所が、
-たぶん入口です。
-
-この質問が浮かんだ瞬間、
-あなたの周りで “少し動いたもの” は何でしたか？🪔
-[[/ILINE]]`;
+  // seed は “質問ゼロ / 80字以上” を満たす
+  const seed = [topicLine ? topicLine : '', ...seedLines].filter(Boolean).join('\n');
 
   return [
-    // ✅ 本文は OBS に一本化して固定（locked ILINE）
-    { key: 'OBS', role: 'assistant', style: 'neutral', content: fixed },
+    { key: 'OBS', role: 'assistant', style: 'soft', content: seed },
 
-    // ✅ 残りは “骨格” として保持（将来ブロック展開するならここを使う）
     {
       key: 'SHIFT',
       role: 'assistant',
       style: 'neutral',
-      content:
-        '（writer向け）上の ILINE 本文は改変しない。方法提案に広げない。観測の向きだけ保つ。',
+      content: m('SHIFT', {
+        kind: 'howto_to_observation',
+        rules: {
+          // 禁止：方法の列挙・チェックリスト・断定指示
+          no_checklist: true,
+          no_step_by_step: true,
+          no_imperative: true,
+
+          // ✅ 質問癖を切る（疑問文/疑問詞/？を禁止）
+          no_questions: true,
+          forbid_question_marks: true,
+          forbid_interrogatives: true, // 何が/どんな/なぜ/どうして 等の誘発を抑止
+
+          // 必須：状況に噛む
+          stay_on_topic: true,
+          use_concrete_words: true,
+
+          // 文字数（短文弾き回避。内容追加ではなく“言い切りを増やす”方向で）
+          min_chars: 90,
+
+          // テンプレ抑止
+          avoid_meta_talk: true,
+          avoid_generic_cheer: true,
+          avoid_hedge_loops: true,
+        },
+      }),
     },
+
     {
       key: 'NEXT',
       role: 'assistant',
       style: 'friendly',
-      content:
-        '（writer向け）最後の問いはそのまま。答えを急がせないが、問いは濁さない。',
+      content: m('NEXT', {
+        questions_max: 0,
+        question_style: 'none',
+      }),
     },
+
     {
       key: 'SAFE',
       role: 'assistant',
       style: 'soft',
-      content:
-        '（writer向け）締めの温度は静かに。励ましテンプレ（かもしれない／一つの手）に逃げない。',
+      content: m('SAFE', {
+        tone: 'quiet',
+        forbid: ['励ましテンプレ', '一般論', '価値論への飛躍', '疑問形の誘発', '問い返し'],
+      }),
     },
   ];
 }

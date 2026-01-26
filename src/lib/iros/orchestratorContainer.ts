@@ -104,7 +104,21 @@ export function applyContainerDecision(
     args;
 
   // inputKind
-  const inputKind = classifyInputKind(text);
+  // ✅ 既に meta.inputKind がある場合は尊重する（context側の判定を潰さない）
+  // - 無い/unknown のときだけ classifyInputKind(text) で補完
+  const classified = classifyInputKind(text);
+  const existingRaw = (meta as any).inputKind;
+  const existing =
+    typeof existingRaw === 'string' ? existingRaw.trim().toLowerCase() : '';
+
+  // ✅ ここで「この関数内で使う inputKind」を確定させる（後続で参照される）
+  const inputKind: any =
+    existing && existing !== 'unknown' ? existingRaw : classified;
+
+  // デバッグ用：container側の分類は別名で保持（比較できる）
+  (meta as any).inputKind_classified = classified;
+
+  // 正式値
   (meta as any).inputKind = inputKind;
 
   // targetKind 正規化（優先：meta → goalKind）
@@ -115,6 +129,7 @@ export function applyContainerDecision(
 
   (meta as any).targetKind = targetKindNorm;
   (meta as any).target_kind = targetKindNorm;
+
 
   // descentGate
   const dg = decideDescentGate({

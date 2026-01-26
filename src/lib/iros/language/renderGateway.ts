@@ -666,7 +666,7 @@ function stripDirectiveLines(text: string): string {
       const t = String(line ?? '').trim();
       if (!t) return true;
       // ✅ @OBS/@SHIFT/... だけでなく @ACK/@RESTORE/@Q も落とす（UI漏れ防止）
-      if (/^@(?:CONSTRAINTS|OBS|SHIFT|NEXT|SAFE|ACK|RESTORE|Q)\b/.test(t)) return false;
+      if (/^@(?:CONSTRAINTS|OBS|TASK|SHIFT|NEXT|SAFE|ACK|RESTORE|Q)\b/.test(t)) return false;
       return true;
     })
     .join('\n');
@@ -717,6 +717,26 @@ export function renderGatewayAsReply(args: {
   const c1 = norm(args?.content ?? '');
   const c2 = norm(args?.assistantText ?? '');
   const c3 = norm(args?.text ?? '');
+
+  // ✅ debug pipe（任意ログ）
+  // - デフォルトOFF（環境変数でON）
+  // - content の「長さ」と「先頭(head)」だけを出す（本文を丸ごと出さない）
+  const PIPE_ENABLED =
+    process.env.IROS_RENDER_GATEWAY_PIPE === '1' ||
+    process.env.IROS_RENDER_GATEWAY_PIPE === 'true' ||
+    process.env.IROS_RENDER_GATEWAY_PIPE === 'on';
+
+  const pipe = (label: string, s0: string) => {
+    if (!PIPE_ENABLED) return;
+    const s = String(s0 ?? '');
+    console.info('[IROS/renderGateway][PIPE]', {
+      label,
+      len: s.length,
+      head: head(s),
+    });
+  };
+
+
 
   // ✅ rephrase があるなら、それを最優先（slotplan由来のテンプレを上書き）
   // ✅ rephraseText(r0) は「本文入力」ではなく “最終保険のfallback” として扱う
@@ -934,8 +954,29 @@ export function renderGatewayAsReply(args: {
   let scaffoldApplied = false;
 
   if (shouldUseSlotsAsLastResort) {
-    blocks = slotExtracted!.blocks;
+    // ✅ slots last resort でも、内部ディレクティブ（@TASK/@CONSTRAINTS/...）を落としてから使う
+    // - ここは isBadBlock/stripDirectiveLines の経路を通らないため、同等の安全化をここで行う
+    const isBadDirective = (t0: string) => {
+      const t = String(t0 ?? '').trim();
+      if (!t) return true;
+      if (/^@(?:CONSTRAINTS|TASK|OBS|SHIFT|NEXT|SAFE|ACK|RESTORE|Q)\b/.test(t)) return true;
+      if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) return true;
+      return false;
+    };
+
+    const cleaned = (slotExtracted!.blocks ?? [])
+      .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim())
+      .filter((t: string) => !isBadDirective(t))
+      .map((t: string) => stripDirectiveLines(t))
+      .map((t: string) => stripInternalLabels(t))
+      .map((t: string) => cutAfterIlineAndDropWriterNotes(t))
+      .map((t: string) => String(t ?? '').trim())
+      .filter(Boolean)
+      .map((t: string) => ({ text: t }));
+
+    blocks = cleaned.length > 0 ? cleaned : slotExtracted!.blocks;
     usedSlots = true;
+
     fallbackText = fallbackText || blocks.map((b) => b.text).join('\n');
     fallbackFrom = fallbackFrom !== 'none' ? fallbackFrom : slotExtracted!.source;
   } else {
@@ -951,7 +992,7 @@ export function renderGatewayAsReply(args: {
       const t = String(t0 ?? '').trim();
       if (!t) return true;
       // 先頭が @CONSTRAINTS/@OBS/... 系は “内部ディレクティブ”
-      if (/^@(?:CONSTRAINTS|OBS|SHIFT|NEXT|SAFE|ACK|RESTORE|Q)\b/.test(t)) return true;
+      if (/^@(?:CONSTRAINTS|TASK|OBS|SHIFT|NEXT|SAFE|ACK|RESTORE|Q)\b/.test(t)) return true;
       // JSONっぽい塊も UI には出さない（だいたい directive の副産物）
       if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) return true;
       return false;
@@ -964,7 +1005,11 @@ export function renderGatewayAsReply(args: {
         .filter((t: string) => !isBadBlock(t))
         .map((t: string) => stripInternalLabels(t))
         .filter(Boolean)
+        // ✅ 追加：renderV2 に渡す前に ILINE 末尾の writer 注釈を除去して “末尾切り事故” を防ぐ
+        .map((t: string) => cutAfterIlineAndDropWriterNotes(t))
+        .filter(Boolean)
         .map((t: string) => ({ text: t as string }));
+
 
       if (cleanedBlocks.length > 0) {
         blocks = cleanedBlocks;
@@ -1006,6 +1051,7 @@ export function renderGatewayAsReply(args: {
     fallbackText,
     allowUnder5: shortException,
   });
+  pipe('after_renderV2', content);
 
   // ✅ renderV2 が空文字を返すケースを救済（blocks があるのに outLen=0 になる事故防止）
   if (String(content ?? '').trim() === '') {
@@ -1020,6 +1066,7 @@ export function renderGatewayAsReply(args: {
     content = base;
     fallbackFrom = 'renderV2-empty';
   }
+  pipe('after_renderV2_empty_rescue', content);
 
   // =========================================================
   // ✅ 最終表示の整形（重複排除版）
@@ -1029,9 +1076,16 @@ export function renderGatewayAsReply(args: {
   // - 4) sanitize（ゼロ幅/句読点だけ行/改行暴れ/🪔除去）
   // =========================================================
   content = cutAfterIlineAndDropWriterNotes(content);
+  pipe('after_cutAfterIlineAndDropWriterNotes', content);
+
   content = stripDirectiveLines(content);
+  pipe('after_stripDirectiveLines', content);
+
   content = stripILINETags(content);
+  pipe('after_stripILINETags', content);
+
   content = sanitizeVisibleText(content);
+  pipe('after_sanitizeVisibleText', content);
 
   // ✅ 最終防衛：directive を人間文に変換（LLM落ち・rephrase reject 含む）
   const hasDirectiveLeak =
@@ -1040,16 +1094,22 @@ export function renderGatewayAsReply(args: {
     /（writer向け）/.test(content) ||
     /(^|\s)@(?:ACK|RESTORE|SHIFT|Q)\s*\{/.test(content);
 
+  pipe('directiveLeak_check', content);
+
   if (hasDirectiveLeak) {
     content = finalizeNoDirectiveLeak(content);
     content = sanitizeVisibleText(content);
+    pipe('after_finalizeNoDirectiveLeak', content);
   }
 
   // ✅ 念のため最後にもう一回 🪔 を全除去（renderEngine=true の契約）
   content = stripLampEverywhere(content);
+  pipe('after_stripLampEverywhere', content);
 
   // ✅ 末尾の空行を落とす
   content = String(content ?? '').replace(/(\n\s*)+$/g, '').trim();
+  pipe('after_trim', content);
+
 
   const meta = {
     blocksCount: blocks.length,

@@ -442,14 +442,22 @@ function isMicroTurn(raw: string): boolean {
   const { rawTrim, core, len } = buildMicroCore(raw);
   if (!rawTrim) return false;
 
-  // ✅ 追加：単語（1トークン）を最優先で micro に含める
-  // - これを len チェックより前に置かないと、len<2 で弾かれて到達できない
+  // ✅ 単語（1トークン）micro は「単語っぽい」ものだけに限定する
+  // - 無スペースでも「文」になっている入力（助詞/数字入り）は除外
+  // - 長い無スペース文の誤爆を止めるため len 上限も必須
   const isSingleToken =
     rawTrim.length > 0 &&
     !/\s/.test(rawTrim) &&
     /^[\p{L}\p{N}ー・]+$/u.test(rawTrim);
 
-  if (isSingleToken) return true;
+  const hasDigit = /[0-9０-９]/.test(rawTrim);
+
+  // 「文」になりやすい助詞/接続（最小セット）
+  const hasSentenceParticle = /[がをにへでとものは]|から|まで|より|ので|のに/.test(rawTrim);
+
+  if (isSingleToken && len >= 2 && len <= 10 && !hasDigit && !hasSentenceParticle) {
+    return true;
+  }
 
   // 英数混じりは micro にしない（誤爆防止）
   if (/[A-Za-z0-9]/.test(core)) return false;

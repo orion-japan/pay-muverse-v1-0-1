@@ -182,14 +182,23 @@ function pickCoreIntent(meta: any): string | null {
    SHORT INPUT DETECTOR
    ========================================================= */
 
-function isShortTurn(userText: string): boolean {
-  const t = normalizeUserText(userText).replace(/[！!。．…]+$/g, '').trim();
-  if (!t) return false;
+   function isShortTurn(userText: string): boolean {
+    // “SHORT” は micro/挨拶/単発リアクション級だけに寄せる
+    // - 10文字は日本語では通常会話になりやすいので広すぎた
+    const t = normalizeUserText(userText).replace(/[！!。．…]+$/g, '').trim();
+    if (!t) return false;
 
-  const core = t.replace(/[?？]/g, '').replace(/\s+/g, '');
-  if (core.length < 2) return true;
-  return core.length <= 10;
-}
+    // 記号・スペース・末尾? は無視して “実質” だけを見る
+    const core = t.replace(/[?？]/g, '').replace(/\s+/g, '');
+
+    // 1文字以下は短文扱い（ノイズ/単語）
+    if (core.length < 2) return true;
+
+    // ✅ ここが本命：SHORT を “超短文” に限定
+    // - micro（<=8）と役割が被らないよう、さらに狭くする
+    return core.length <= 6;
+  }
+
 
 /* =========================================================
    T-LAYER (IT) ACTIVE DETECTOR (single source)

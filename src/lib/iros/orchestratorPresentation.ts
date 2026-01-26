@@ -24,21 +24,16 @@ export function decidePresentationKind(args: {
   irTriggered: boolean;
   requestedDepth?: Depth;
 }): PresentationKind {
-  const { text, irTriggered } = args;
+  const { irTriggered } = args;
 
-  const normalizedText = text.replace(/\s/g, '');
-
-  // 「ir診断」「ir診断上司」などを判定
-  const isIrCommand =
-    irTriggered && normalizedText.includes('ir診断');
-
-  if (isIrCommand) {
-    return 'irOnly';
-  }
+  // ✅ 起動ワード検知（detectIrTrigger）を信頼して、irTriggered なら無条件で irOnly
+  // - ir診断 / ir / irで見て / 意図診断 / 意図トリガー などをすべて irOnly 扱いに統一
+  if (irTriggered) return 'irOnly';
 
   // 通常はすべてプレーン（LLM本文のみ）
   return 'plain';
 }
+
 
 /* ========= 構図ヘッダー生成 ========= */
 

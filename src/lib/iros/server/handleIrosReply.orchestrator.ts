@@ -11,6 +11,7 @@ import { runIrosTurn } from '@/lib/iros/orchestrator';
 import type { IrosStyle } from '@/lib/iros/system';
 import { isMetaAnchorText } from '@/lib/iros/intentAnchor';
 import type { IrosUserProfileRow } from './loadUserProfile';
+import { detectIrTrigger } from '@/lib/iros/orchestratorPierce';
 
 export type RunOrchestratorTurnArgs = {
   conversationId: string;
@@ -219,8 +220,42 @@ export async function runOrchestratorTurn(
     safeBaseMeta.intent_anchor = { ...(safeBaseMeta.intent_anchor as any) };
   }
 
-  // intentAnchor だけ検疫（rotationState / framePlan は絶対に触らない）
-  sanitizeIntentAnchor(safeBaseMeta);
+ // =========================================================
+// ✅ ir診断：テキストでトリガー検知 → meta に “診断線路” を刻む
+// - orchestrator.ts は meta.isIrDiagnosisTurn を見て ir-diagnosis 分岐に入る
+// - render 側は meta.presentationKind / meta.mode / meta.extra.* を参照できる
+// =========================================================
+const irTriggeredNow = detectIrTrigger(text);
+const isDiagnosisMode = String(requestedMode ?? '').toLowerCase() === 'diagnosis';
+
+if (irTriggeredNow || isDiagnosisMode) {
+  // ✅ これが “線路” ：orchestrator.ts の isIrDiagnosisTurn 判定を確実に ON
+  (safeBaseMeta as any).isIrDiagnosisTurn = true;
+
+  // ✅ mode も diagnosis に寄せる（applyModeToMeta が prev を継承するため）
+  // ※ ir 起動時だけなので副作用を限定できる
+  (safeBaseMeta as any).mode = 'diagnosis';
+
+  // 既存互換（表示ヒント）
+  (safeBaseMeta as any).presentationKind = 'diagnosis';
+  (safeBaseMeta as any).irTriggered = true;
+
+  const ex0 =
+    (safeBaseMeta as any).extra && typeof (safeBaseMeta as any).extra === 'object'
+      ? (safeBaseMeta as any).extra
+      : {};
+
+  (safeBaseMeta as any).extra = {
+    ...ex0,
+    irTriggered: true,
+    isIrDiagnosisTurn: true,
+    presentationKind: 'diagnosis',
+    // ✅ renderGateway.ts の looksLikeIR が拾えるヒント（本文依存にしない保険）
+    modeHint: 'IR',
+  };
+}
+
+
 
   console.log('[IROS/Orchestrator] input meta snapshot', {
     hasRotationState: Boolean(safeBaseMeta.rotationState),
@@ -236,6 +271,9 @@ export async function runOrchestratorTurn(
     historyLen: Array.isArray(history) ? history.length : 0,
     hasIntentAnchor: Boolean(safeBaseMeta.intentAnchor ?? safeBaseMeta.intent_anchor ?? null),
     intentAnchorKey: (safeBaseMeta as any)?.intent_anchor_key ?? null,
+    isIrDiagnosisTurn: (safeBaseMeta as any).isIrDiagnosisTurn ?? null,
+mode: (safeBaseMeta as any).mode ?? null,
+
   });
 
   // =========================================================

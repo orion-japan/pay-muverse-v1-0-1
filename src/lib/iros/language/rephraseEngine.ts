@@ -43,31 +43,38 @@ export type ExtractedSlots =
     }
   | null;
 
-export type RephraseOptions = {
-  model: string;
-  temperature?: number;
-  maxLinesHint?: number;
+  export type RephraseOptions = {
+    model: string;
+    temperature?: number;
+    maxLinesHint?: number;
 
-  /** 直前ユーザー入力（推奨） */
-  userText?: string | null;
+    /** 直前ユーザー入力（推奨） */
+    userText?: string | null;
 
-  /**
-   * 3軸メタ/状態など（unknown で受ける）
-   * - LLMには見せるが、本文に露出させない（systemで抑制）
-   */
-  userContext?: unknown | null;
+    /**
+     * 3軸メタ/状態など（unknown で受ける）
+     * - LLMには見せるが、本文に露出させない（systemで抑制）
+     */
+    userContext?: unknown | null;
 
-  /** ✅ ログ用（chatComplete の trace に渡す） */
-  debug?: {
-    traceId?: string | null;
-    conversationId?: string | null;
-    userCode?: string | null;
-    renderEngine?: boolean | null;
+    /**
+     * ✅ 入力種別（route 側で確定して渡す）
+     * 例: 'micro' | 'greeting' | 'chat' | 'question' ...
+     * - rephraseEngine 側の MIN_OK_KIND / directTask 判定などに使う
+     */
+    inputKind?: string | null;
 
-    // 互換/拡張：追加キーを落とさない
-    [k: string]: any;
-  } | null;
-};
+    /** ✅ ログ用（chatComplete の trace に渡す） */
+    debug?: {
+      traceId?: string | null;
+      conversationId?: string | null;
+      userCode?: string | null;
+      renderEngine?: boolean | null;
+
+      // 互換/拡張：追加キーを落とさない
+      [k: string]: any;
+    } | null;
+  };
 
 export type DebugFinal = {
   traceId: string;
@@ -1485,6 +1492,7 @@ export async function rephraseSlotsFinal(extracted: ExtractedSlots, opts: Rephra
   const inKeys = extracted.keys;
 
   // (A) FIXED
+  // (A) FIXED
   if (mode === 'FIXED') {
     const fixedTexts = buildFixedBoxTexts(inKeys.length);
     const out: Slot[] = inKeys.map((k, i) => ({ key: k, text: fixedTexts[i] ?? 'ここで止める。' }));
@@ -1492,18 +1500,47 @@ export async function rephraseSlotsFinal(extracted: ExtractedSlots, opts: Rephra
     logRephraseOk(debug, out.map((x) => x.key), out[0]?.text ?? '', 'FIXED');
     logRephraseAfterAttach(debug, out.map((x) => x.key), out[0]?.text ?? '', 'FIXED');
 
-    return { ok: true, slots: out, meta: { inKeys, outKeys: out.map((x) => x.key), rawLen: 0, rawHead: '' } };
+    // ✅ FIXEDでも meta.extra を返す（ただし opts.extra は存在しないので参照しない）
+    // - 最小の blocks をここで生成して運ぶ（renderGateway/route の拾い先を統一）
+    const text0 = String(out[0]?.text ?? '').trim();
+    const metaExtra: any = {
+      rephraseBlocks: text0 ? [text0] : [],
+      rephraseHead: text0 ? safeHead(text0, 120) : null,
+    };
+
+    return {
+      ok: true,
+      slots: out,
+      meta: {
+        inKeys,
+        outKeys: out.map((x) => x.key),
+        rawLen: 0,
+        rawHead: '',
+        extra: metaExtra,
+      },
+    };
   }
+
 
 // (B) LLM
 const userText = norm(opts?.userText ?? '');
 const metaText = safeContextToText(opts?.userContext ?? null);
 
+const inputKindFromOpts = String(opts?.inputKind ?? '').trim().toLowerCase();
+const inputKindFromDebug = String((opts as any)?.debug?.inputKind ?? '').trim().toLowerCase();
+
 const inputKindFromCtx = extractInputKindFromContext(opts?.userContext ?? null);
 const inputKindFromMeta = extractInputKindFromMetaText(metaText);
-const inputKind = inputKindFromCtx ?? inputKindFromMeta;
+
+// ✅ 優先順位：opts.inputKind → debug.inputKind → userContext → metaText
+const inputKind =
+  (inputKindFromOpts || null) ??
+  (inputKindFromDebug || null) ??
+  inputKindFromCtx ??
+  inputKindFromMeta;
 
 const isDirectTask = extractDirectTask(userText, inputKind);
+
 
 const historyText = extractHistoryTextFromContext(opts?.userContext ?? null);
 const lastTurns = extractLastTurnsFromContext(opts?.userContext ?? null);
@@ -1572,17 +1609,34 @@ const seedDraftRaw = extracted.slots
 const recallMust = extractRecallMustIncludeFromSeed(seedDraftRawAll);
 const mustIncludeRuleText = buildMustIncludeRuleText(recallMust);
 
+// ✅ “内部マーカー” だけ落とす（ユーザーの @mention 等は落とさない）
+const INTERNAL_LINE_MARKER = /^@(OBS|SHIFT|SH|RESTORE|Q|SAFE|NEXT|END|TASK)\b/;
 
-// ILINE抽出：slot + userText 両方から拾う
-const lockSourceRaw = [seedDraftRaw, userText].filter(Boolean).join('\n');
+// ✅ ILINE抽出用：内部マーカー行だけ除外（ILINEタグは保持する）
+const stripInternalMarkersForLock = (s: string) => {
+  const lines = String(s ?? '')
+    .split('\n')
+    .map((x) => String(x ?? '').trimEnd());
+  const kept = lines.filter((line) => {
+    const t = String(line ?? '').trim();
+    if (!t) return false;
+    if (INTERNAL_LINE_MARKER.test(t)) return false; // ← ここだけ落とす
+    return true; // ILINEタグは保持
+  });
+  return kept.join('\n').trim();
+};
+
+// ILINE抽出：slot + userText 両方から拾う（ただし seed 側は内部マーカー除外）
+const seedForLock = stripInternalMarkersForLock(seedDraftRaw);
+const lockSourceRaw = [seedForLock, userText].filter(Boolean).join('\n');
 
 // 🔎 ILINE 抽出前ログ
 console.info('[IROS/ILINE][LOCK_SOURCE]', {
-  hasSeed: !!seedDraftRaw,
+  hasSeed: !!seedForLock,
   hasUser: !!userText,
-  seedLen: String(seedDraftRaw ?? '').length,
+  seedLen: String(seedForLock ?? '').length,
   userLen: String(userText ?? '').length,
-  hasILINE_seed: /\[\[ILINE\]\]/.test(String(seedDraftRaw ?? '')),
+  hasILINE_seed: /\[\[ILINE\]\]/.test(String(seedForLock ?? '')),
   hasILINE_user: /\[\[ILINE\]\]/.test(String(userText ?? '')),
   hasILINE_any: /\[\[ILINE\]\]/.test(String(lockSourceRaw ?? '')),
   hasILINE_END_any: /\[\[\/ILINE\]\]/.test(String(lockSourceRaw ?? '')),
@@ -1593,7 +1647,8 @@ console.info('[IROS/ILINE][LOCK_SOURCE]', {
 const { locked: lockedFromAll } = extractLockedILines(lockSourceRaw);
 
 // ✅ LLMに渡す素材は slot 由来のみ（重複防止）
-const { cleanedForModel: seedDraft0 } = extractLockedILines(seedDraftRaw);
+// （ここも seedForLock を使う：内部マーカーを seed 側で除外した状態で ILINE を外す）
+const { cleanedForModel: seedDraft0 } = extractLockedILines(seedForLock);
 
 const lockedILines = Array.from(new Set(lockedFromAll));
 
@@ -1603,10 +1658,6 @@ console.info('[IROS/ILINE][LOCK_EXTRACT]', {
   lockedUniqueLen: lockedILines.length,
   lockedUniqueHead200: String(lockedILines?.[0] ?? '').slice(0, 200),
 });
-
-
-// ✅ “内部マーカー” だけ落とす（ユーザーの @mention 等は落とさない）
-const INTERNAL_LINE_MARKER = /^@(OBS|SHIFT|SH|RESTORE|Q|SAFE|NEXT|END|TASK)\b/;
 
 const sanitizeSeedDraftForLLM = (s: string) => {
   const lines = String(s ?? '')
@@ -1629,7 +1680,36 @@ const sanitizeSeedDraftForLLM = (s: string) => {
   return kept.join('\n').trim();
 };
 
+// seedDraftSanitized は「slot 由来の素材」。
+// ただし、入力と無関係な一般文が混ざると、LLM がそっちに吸われて薄くなる。
+// → 入力との関連が弱いときは、seed を userText に切り替える（意味は足さない）
+const chooseSeedForLLM = (seed: string, userText: string) => {
+  const s = String(seed ?? '').trim();
+  const u = String(userText ?? '').trim();
+  if (!u) return s;
+
+  // seed が空なら userText
+  if (!s) return u;
+
+  // 超簡易の関連判定：user の “名詞っぽい塊” が seed に一切無いならズレ扱い
+  // （日本語なので厳密形態素解析はしない。安全側に倒す）
+  const tokens = Array.from(
+    new Set(u.split(/[^\p{L}\p{N}一-龥ぁ-んァ-ヶー]+/u).filter(Boolean)),
+  );
+  const keyTokens = tokens.filter((t) => t.length >= 2).slice(0, 8);
+  const hit = keyTokens.some((t) => s.includes(t));
+
+  // さらに、seed が “抽象ガイダンス語” ばかりで具体語が薄い場合も userText 優先
+  const abstractish = /見失わなければ|ここからは|整えなくていい|進む|動いてる|止まった/u.test(s);
+
+  if (!hit || abstractish) return u;
+  return s;
+};
+
 const seedDraftSanitized = sanitizeSeedDraftForLLM(seedDraft0);
+const seedFinal = chooseSeedForLLM(seedDraftSanitized, userText);
+
+
 
 // ✅ directives しか無い/残ってない場合に、人間文の「素材」に変換して渡す
 function humanizeDirectivesForSeed(seedDraft0: string, userText: string): string {
@@ -1666,7 +1746,7 @@ function humanizeDirectivesForSeed(seedDraft0: string, userText: string): string
 
 // ✅ sanitizeで “素材ゼロ” になる場合だけ、directivesを素材化して渡す
 const seedDraft =
-  seedDraftSanitized ||
+  seedFinal ||
   (/@(OBS|SHIFT|SH|RESTORE|Q|SAFE|NEXT|END|TASK)\b/m.test(String(seedDraft0 ?? ''))
     ? humanizeDirectivesForSeed(String(seedDraft0 ?? ''), userText)
     : '');
@@ -1678,22 +1758,30 @@ const band = extractIntentBandFromContext(opts?.userContext ?? null);
 
 // lastTurns は「assistantで終わる」形に正規化
 // ✅ directTask=true のときは assistant 履歴を渡さない（コピー源を断つ）
+// ✅ 直近2往復（最大4メッセージ）に必ずクランプ（薄まり/テンプレ回帰防止）
 const lastTurnsSafe = (() => {
-  const t = Array.isArray(lastTurns) ? [...lastTurns] : [];
-  while (t.length > 0 && t[t.length - 1]?.role === 'user') t.pop();
+  const t0 = Array.isArray(lastTurns) ? [...lastTurns] : [];
 
-  // ✅ 直依頼は user-only（assistant を除外）
+  // 末尾が user で終わっているなら落として「assistantで終わる」形へ
+  while (t0.length > 0 && t0[t0.length - 1]?.role === 'user') t0.pop();
+
+  // ✅ 直依頼は user-only（assistant を除外） + 直近2件まで
   if (isDirectTask) {
-    return t
+    const users = t0
       .filter((m: any) => m?.role === 'user')
-      .map((m: any) => ({
-        role: 'user' as const,
-        content: String(m?.content ?? ''),
-      }))
+      .map((m: any) => ({ role: 'user' as const, content: String(m?.content ?? '') }))
       .filter((m: any) => m.content.trim().length > 0);
+
+    return users.slice(-2); // user-only なので 2件で十分
   }
 
-  return t;
+  // ✅ 通常は最大4件（2往復）に制限
+  // ここで「古いテンプレっぽいassistant」を参照元にさせない
+  const t = t0
+    .filter((m: any) => (m?.role === 'user' || m?.role === 'assistant') && String(m?.content ?? '').trim())
+    .map((m: any) => ({ role: m.role as 'user' | 'assistant', content: String(m.content ?? '') }));
+
+  return t.slice(-4);
 })();
 
 const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
@@ -1905,7 +1993,6 @@ function forceDraftForCounselConsultOpen(args: {
     }
 
     // ✅ rephraseBlocks を生成して attach（ログ用 + 搬送用）
-// ✅ rephraseBlocks を生成して attach（ログ用 + 搬送用）
 const toRephraseBlocks = (s: string) => {
   const raw = String(s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
   if (!raw) return [];
@@ -2282,7 +2369,22 @@ if (forceIntervene) {
   const vLevelPre = String((v as any)?.level ?? '').toUpperCase();
   const candidateLen = (candidate ?? '').trim().length;
 
-  const MIN_OK_LEN = 80; // 46文字が通っているので、まずはこの床で止める
+  // ✅ MIN_OK_LEN は inputKind で切り替える
+  // - chat は短文でも「薄すぎ」を許可しない（厚み確保）
+  // - micro/greeting だけ短くてOK（床を外す）
+  const inputKindNow = String((debug as any)?.inputKind ?? (opts as any)?.inputKind ?? '').toLowerCase();
+  const isMicroOrGreetingNow = inputKindNow === 'micro' || inputKindNow === 'greeting';
+
+  const MIN_OK_LEN = isMicroOrGreetingNow ? 0 : 80;
+
+  // （任意）確認ログ：一旦だけ入れてOK
+  console.warn('[IROS/rephraseEngine][MIN_OK_KIND]', {
+    inputKindNow,
+    isMicroOrGreetingNow,
+    MIN_OK_LEN,
+  });
+
+
   const shouldOkTooShortToRetry =
     !scaffoldActive &&
     !isDirectTask &&
@@ -2301,6 +2403,14 @@ if (forceIntervene) {
       min: MIN_OK_LEN,
       head: safeHead(candidate, 160),
     });
+    console.warn('[IROS/rephraseEngine][MIN_OK_DEBUG]', {
+      scaffoldActive,
+      isDirectTask,
+      v_ok: v?.ok,
+      vLevelPre,
+      candidateLen,
+      MIN_OK_LEN,
+    });
 
     v = {
       ...(v as any),
@@ -2311,14 +2421,34 @@ if (forceIntervene) {
   }
 
 
-  // OKなら採用（※WARNは採用しない：2nd PASSへ落として厚みを取り戻す）
+  // OKなら採用（※自然文が成立している場合ここで確定させる）
   const vLevel = String((v as any)?.level ?? '').toUpperCase();
 
+  // ✅ “自然文OK” 判定（未定義の rephraseBlocks/rawLen を使わない）
+  // - 目的：WARN でも「十分な厚み」があり、2nd PASS が逆効果になりやすいケースは確定採用
+  // - 条件：長さOK（MIN_OK_LEN以上）かつ 段落（空行） or 複数行 を含む
+  const naturalTextReady =
+    !scaffoldActive &&
+    !isDirectTask &&
+    candidateLen >= MIN_OK_LEN &&
+    (/\n{2,}/.test(candidate) || candidate.split('\n').filter(Boolean).length >= 3);
+
+  // (1) OK はそのまま採用
   if (v?.ok && vLevel === 'OK') {
     return adoptAsSlots(candidate, 'FLAGSHIP_OK', { scaffoldActive });
   }
 
-  // WARN は seedへ戻す対象以外でも「薄いまま通る」ので、ここで2nd PASSへ回す
+  // (2) ✅ WARN でも “自然文OK” なら確定採用（2nd PASSへ落とさない）
+  //     ❌ FATAL は理由が品質NG（QCOUNT/CHEER等）なので、ここで確定採用しない
+  if (vLevel === 'WARN' && naturalTextReady) {
+    return adoptAsSlots(candidate, 'FLAGSHIP_ACCEPT_AS_FINAL', {
+      scaffoldActive,
+      flagshipLevel: vLevel,
+      retrySuppressed: true,
+    });
+  }
+
+  // (3) WARN は 2nd PASS へ
   if (vLevel === 'WARN') {
     console.warn('[IROS/FLAGSHIP][WARN_TO_RETRY]', {
       traceId: debug.traceId,
@@ -2332,9 +2462,33 @@ if (forceIntervene) {
       ...(v as any),
       ok: false,
       level: 'FATAL',
-      reasons: Array.from(new Set([...(((v as any)?.reasons ?? []) as any[]), 'WARN_TO_RETRY'])),
+      reasons: Array.from(
+        new Set([ ...(((v as any)?.reasons ?? []) as any[]), 'WARN_TO_RETRY' ]),
+      ),
     } as any;
   }
+
+
+  // (3) WARN は 2nd PASS へ
+  if (vLevel === 'WARN') {
+    console.warn('[IROS/FLAGSHIP][WARN_TO_RETRY]', {
+      traceId: debug.traceId,
+      conversationId: debug.conversationId,
+      userCode: debug.userCode,
+      level: (v as any)?.level,
+      reasons: (v as any)?.reasons,
+    });
+
+    v = {
+      ...(v as any),
+      ok: false,
+      level: 'FATAL',
+      reasons: Array.from(
+        new Set([ ...(((v as any)?.reasons ?? []) as any[]), 'WARN_TO_RETRY' ]),
+      ),
+    } as any;
+  }
+
 
 // ---------------------------------------------
 // FATAL → 1回だけ再生成（2ndは“再作文”ではなく“編集/復元+整形”）
@@ -2348,24 +2502,54 @@ const baseDraftForRepair: string = (() => {
   // ✅ WARN→RETRY で “薄いcandidate” を編集対象にすると同文リピートになりやすい
   // → seedDraft（slot下書き）を優先して編集素材にする
   const reasons = new Set((((v as any)?.reasons ?? []) as any[]).map((x) => String(x)));
+
+  // ✅ 「短いだけ」は seedDraft 優先の理由にしない
+  // - OK_TOO_SHORT_TO_RETRY は「文脈は合ってるのに短い」ケースが多いので candidate を核にする
+  // ⚠️ ただし現状は candidate が短文固定化して戻るので、obs(=このターン)を核にした安全draftへ寄せる
+  const preferCandidateBecauseTooShort = reasons.has('OK_TOO_SHORT_TO_RETRY');
+
+  // ✅ seedDraft を優先して良いのは「薄い/汎用」判定が明示的に出たときだけ
   const preferSeedDraft =
     reasons.has('NORMAL_SHORT_GENERIC_NO_QUESTION') ||
-    reasons.has('OK_TOO_SHORT_TO_RETRY') ||
-    candidateLen < MIN_OK_LEN;
+    reasons.has('WARN_TO_RETRY');
 
   if (isDirectTask) {
     // 直依頼は「送れる文面」を優先。コピー源（seedDraft）は断つ。
     return a || b || '';
   }
 
+  if (preferCandidateBecauseTooShort) {
+    // ✅ “短いだけ” の救済は candidate を核にしない（短文が固定化して戻るのを防ぐ）
+    // - 観測（このターンの userText）を核に「2〜4文・質問なし」で安全に増補した draft を土台にする
+    const u0 = String(userText ?? '').trim();
+    const u = u0.length ? u0 : String((debug as any)?.lastUserHead ?? '').trim();
+
+    const safeExpandFromObs = (s: string): string => {
+      const x = String(s ?? '').trim();
+      if (!x) return '';
+      // 新情報を足さず、言い換えで厚みだけ作る（質問禁止）
+      // 80未満になりやすい入力でも、最低2段落にする
+      return [
+        `${x}。`,
+        `いまはそれだけで、場の重さが伝わる。`,
+        ``,
+        `同じ一言でも、どこがいちばん引っかかっているかだけ残しておきたい。`,
+      ].join('\n');
+    };
+
+    const obsDraft = safeExpandFromObs(u);
+    return obsDraft || a || c || b || '';
+  }
+
   if (preferSeedDraft) {
-    // ✅ ここが肝：slotの下書き（or seedFromSlots）を土台にして“編集”させる
+    // ✅ 薄い/汎用のときだけ、slot下書き（or seedFromSlots）を土台にして“編集”させる
     return a || c || b || '';
   }
 
-  // 通常は candidate 優先でOK
-  return a || b || c || '';
+  // 通常は candidate 優先でOK（seedFromSlots を先にしない）
+  return b || a || c || '';
 })();
+
 
 
 const retryMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
@@ -2382,54 +2566,66 @@ const retryMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: str
       mustIncludeRuleText +
       [
         '',
-        '【2nd PASS: 編集モード（重要）】',
-        '- これは「新規に書く」ではなく「下書き本文を壊さずに整える」タスク。',
-        '- 下書きに無い新しい背景・助言・一般論は足さない。',
-        '- 下書きの“具体語”は必ず残す（減らさない）。',
-        '- 旗印NG（応援定型/推量逃げ/便利テンプレ/薄い質問逃げ）だけを除去し、読み手が考えられる足場に寄せる。',
-        '- 質問は0〜1個（できれば0）。',
+        '【2nd PASS: 増補モード（重要）】',
+        '- 目的：同じ内容のまま、短すぎる文を「2〜4文」に増やして厚みを作る。',
+        '- 新しい背景・助言・一般論は足さない（事実追加禁止）。',
+        '- ただし「同じことを別の言い方で言い換える」のはOK。',
+        '- 下書きの“具体語”（大雪 / 60センチ / とまらない 等）は必ず残す。',
+        '- 出力は必ず80文字以上。80文字未満は失敗。満たすまで言い換えて増やす。',
+        '- 必ず2段落以上（空行区切りを1回入れる）。',
+        '- 質問は0個。',
         '',
       ].join('\n'),
+
   },
 
   // ✅ 内部パックも「編集」に寄せる（露出禁止のまま）
-  {
-    role: 'system',
-    content: buildInternalPackText({
-      metaText,
-      historyText,
-      seedDraftHint,
-      lastTurnsCount: lastTurnsSafe.length,
-      itOk,
-      directTask: isDirectTask,
-      inputKind,
-      intentBand: band?.intentBand ?? null,
-      tLayerHint: band?.tLayerHint ?? null,
-    }),
-  },
+    // ✅ 内部パックも「編集」に寄せる（露出禁止のまま）
+    {
+      role: 'system',
+      content: buildInternalPackText({
+        metaText,
+        historyText,
+        seedDraftHint,
+        lastTurnsCount: 0,
+        itOk,
+        directTask: isDirectTask,
+        inputKind,
+        intentBand: band?.intentBand ?? null,
+        tLayerHint: band?.tLayerHint ?? null,
 
-  // ✅ 2回目は「固定下書き」を“編集対象”として明示
-  {
-    role: 'system',
-    content:
-      [
-        '【編集対象（この本文をベースに、壊さずに整える。露出禁止）】',
-        '---BEGIN_DRAFT---',
-        baseDraftForRepair || '(empty)',
-        '---END_DRAFT---',
-        '',
-        '【出力ルール】',
-        '- 出力は「整えた完成文のみ」。BEGIN/END や見出し、内部情報は出さない。',
-        '- 下書きの構造を保持する（削り過ぎない）。',
-      ].join('\n'),
-  },
+        // ✅ 追加：obsPick の唯一ソース（2nd PASS でも必ず渡す）
+        userText,
 
-  // lastTurns は残してOK（ただし“新規生成”ではなく“編集”に従う）
-  ...(lastTurnsSafe as Array<{ role: 'user' | 'assistant'; content: string }>),
+        // ✅ 可能なら補助も渡す（現状は null でOK）
+        onePointText: null,
+        situationSummary: null,
+        depthStage: null,
+        phase: null,
+        qCode: null,
+      }),
+    },
+
+
+  // ✅ 2回目は「固定下書き」を“編集対象”として明示（※user で渡す）
+  {
+    role: 'user',
+    content: [
+      '【編集対象（この本文をベースに、壊さずに整える。露出禁止）】',
+      '---BEGIN_DRAFT---',
+      baseDraftForRepair || '(empty)',
+      '---END_DRAFT---',
+      '',
+      '【出力ルール】',
+      '- 出力は「整えた完成文のみ」。BEGIN/END や見出し、内部情報は出さない。',
+      '- 下書きの構造を保持する（削り過ぎない）。',
+    ].join('\n'),
+  },
 
   // ユーザーの直前入力は保持（編集の方向づけ）
   { role: 'user', content: userText || '（空）' },
 ];
+
 
 console.log('[IROS/FLAGSHIP][RETRY]', {
   traceId: debug.traceId,
@@ -2477,8 +2673,96 @@ try {
     if (seedFromSlots) return adoptAsSlots(seedFromSlots, `RETRY_${v2.reason}_TO_SEED`, { scaffoldActive });
     return adoptAsSlots(candidate, `RETRY_${v2.reason}_USE_CANDIDATE`, { scaffoldActive });
   }
-}
 
+  // ✅ 追加：2nd pass でも「短すぎる」ものは通さない（chat で厚みが死ぬのを防ぐ）
+  // - micro/greeting は短文OK
+  // - directTask は短文でもOK（メール等）
+  const retryLen = String(raw2 ?? '').trim().length;
+  if (!isDirectTask && !isMicroOrGreetingNow && retryLen > 0 && retryLen < MIN_OK_LEN) {
+    // seed 採用は「関係があるときだけ」に制限する
+    const norm = (s: string) =>
+      String(s ?? '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        // ✅ 句読点/代表的な記号を落として、"大雪がとまらない60センチ" と "大雪がとまらない、60センチ" を一致させる
+        .replace(/[、。．，,.!！?？:：;；"“”'‘’（）()［］\[\]{}「」『』<>＜＞]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+
+        const seedSeemsRelevant = (seed: string, userText: string): boolean => {
+          const stripDirectives = (v: string) =>
+            String(v ?? '')
+              .split('\n')
+              // @OBS/@SHIFT/@NEXT/@SAFE 行を relevance 判定から除外
+              .filter((line) => !/^@(OBS|SHIFT|NEXT|SAFE)\b/i.test(line.trim()))
+              .join('\n');
+
+          const s0 = stripDirectives(seed);
+          const s = norm(s0);
+          const u = norm(userText);
+          if (!s || !u) return false;
+
+          // ユーザー入力が短いときは、包含一致だけ許可（誤採用を避ける）
+          if (u.length <= 10) return s.includes(u);
+
+          // 日本語/英数の“まとまり”トークンで重なりを見る（軽量）
+          const re = /[一-龥ぁ-ゖァ-ヺA-Za-z0-9]{2,}/g;
+          const ut = (u.match(re) ?? []).slice(0, 20);
+          const st = (s.match(re) ?? []).slice(0, 80);
+          if (!ut.length || !st.length) return false;
+
+          for (const t of ut) {
+            for (const x of st) {
+              if (!t || !x) continue;
+              if (x === t) return true;
+              if (x.includes(t) || t.includes(x)) return true;
+            }
+          }
+          return false;
+        };
+
+    const userTextForRelevance = String(
+      (debug as any)?.lastUserHead ??
+        (debug as any)?.lastUserText ??
+        (debug as any)?.userText ??
+        opts.userText ??
+        '',
+    ).trim();
+
+    const seedRelevant = seedFromSlots
+      ? seedSeemsRelevant(String(seedFromSlots), userTextForRelevance)
+      : false;
+
+      console.warn('[IROS/FLAGSHIP][RETRY_TOO_SHORT_FORCE_SEED]', {
+        traceId: debug.traceId,
+        conversationId: debug.conversationId,
+        userCode: debug.userCode,
+        retryLen,
+        min: MIN_OK_LEN,
+        head: safeHead(String(raw2 ?? ''), 160),
+        hasSeed: !!seedFromSlots,
+        seedRelevant,
+        userHead: safeHead(userTextForRelevance, 80),
+
+        // ✅ 追加：seedFromSlots の“実体”を見える化（連結表示の誤認を潰す）
+        seedLen: String(seedFromSlots ?? '').length,
+        seedHead: safeHead(String(seedFromSlots ?? ''), 160),
+        userLen: String(userTextForRelevance ?? '').length,
+      });
+
+
+    // ✅ 短文化の“確定”を止める：candidate には戻さない
+    // - userText が取れているなら relevance 判定で採用
+    // - userText が取れない（判定不能）なら seed を優先採用して thin fix を止める
+    if (seedFromSlots && String(seedFromSlots).trim() && (!userTextForRelevance || seedRelevant)) {
+      return adoptAsSlots(seedFromSlots, 'RETRY_TOO_SHORT_FORCE_USE_SEED', { scaffoldActive });
+    }
+
+    // seed が無い場合は、編集素材（baseDraftForRepair）を返して thin fix を避ける
+    const fallbackDraft = String(baseDraftForRepair ?? '').trim() || String(candidate ?? '').trim();
+    return adoptAsSlots(fallbackDraft, 'RETRY_TOO_SHORT_FORCE_USE_DRAFT', { scaffoldActive });
+  }}
 // scaffold復元（retryでも同様）
 let raw2Guarded = raw2;
 if (scaffoldActive) {
@@ -2498,37 +2782,57 @@ if (scaffoldActive) {
 let retryCandidate = makeCandidate(raw2Guarded, maxLines, renderEngine);
 
 
-  if (!retryCandidate || !retryCandidate.trim()) {
-    // ✅ retryCandidate が空になるのは clamp 等の副作用なので、ここは candidate を返す（seedへ落とさない）
-    console.warn('[IROS/FLAGSHIP][RETRY_EMPTY_AFTER_CLAMP]', {
+// ✅ 2nd PASS が空ではないが、まだ短い → seed があるなら seed を優先（短文確定を止める）
+{
+  const retryLenNow = String(retryCandidate ?? '').trim().length;
+  if (retryLenNow > 0 && retryLenNow < MIN_OK_LEN) {
+    console.warn('[IROS/FLAGSHIP][RETRY_STILL_TOO_SHORT]', {
       traceId: debug.traceId,
       conversationId: debug.conversationId,
       userCode: debug.userCode,
+      retryLen: retryLenNow,
+      min: MIN_OK_LEN,
+      head: safeHead(retryCandidate, 160),
+      hasSeed: !!seedFromSlots,
     });
-    return adoptAsSlots(candidate, 'FLAGSHIP_RETRY_EMPTY_USE_CANDIDATE', { scaffoldActive });
+
+    const fallbackText = String(seedFromSlots ?? '').trim() || String(candidate ?? '').trim();
+    const reason = seedFromSlots
+      ? 'FLAGSHIP_RETRY_STILL_TOO_SHORT_USE_SEED'
+      : 'FLAGSHIP_RETRY_STILL_TOO_SHORT_USE_CANDIDATE';
+
+    return adoptAsSlots(fallbackText, reason, { scaffoldActive });
   }
+}
 
-  if (scaffoldActive && retryCandidate) {
-    const mhAfterClamp = scaffoldMustHaveOk({ slotKeys: inKeys, slotsForGuard, llmOut: retryCandidate });
-    if (!mhAfterClamp.ok) {
-      const restored = restoreScaffoldMustHaveInOutput({
-        llmOut: retryCandidate,
-        slotsForGuard,
-        missing: mhAfterClamp.missing,
+
+
+if (scaffoldActive && retryCandidate) {
+  const mhAfterClamp = scaffoldMustHaveOk({ slotKeys: inKeys, slotsForGuard, llmOut: retryCandidate });
+  if (!mhAfterClamp.ok) {
+    const restored = restoreScaffoldMustHaveInOutput({
+      llmOut: retryCandidate,
+      slotsForGuard,
+      missing: mhAfterClamp.missing,
+    });
+    retryCandidate = makeCandidate(restored, maxLines, renderEngine);
+
+    // 復元→再clamp で空になった場合も baseDraftForRepair を優先して返す（無ければ candidate）
+    if (!retryCandidate || !retryCandidate.trim()) {
+      console.warn('[IROS/FLAGSHIP][RETRY_EMPTY_AFTER_RESTORE_CLAMP]', {
+        traceId: debug.traceId,
+        conversationId: debug.conversationId,
+        userCode: debug.userCode,
       });
-      retryCandidate = makeCandidate(restored, maxLines, renderEngine);
 
-      // 復元→再clamp で空になった場合も candidate を返す（seedへ落とさない）
-      if (!retryCandidate || !retryCandidate.trim()) {
-        console.warn('[IROS/FLAGSHIP][RETRY_EMPTY_AFTER_RESTORE_CLAMP]', {
-          traceId: debug.traceId,
-          conversationId: debug.conversationId,
-          userCode: debug.userCode,
-        });
-        return adoptAsSlots(candidate, 'FLAGSHIP_RETRY_EMPTY_AFTER_RESTORE_USE_CANDIDATE', { scaffoldActive });
-      }
+      const fallback = (baseDraftForRepair && baseDraftForRepair.trim())
+        ? baseDraftForRepair
+        : candidate;
+
+      return adoptAsSlots(fallback, 'FLAGSHIP_RETRY_EMPTY_AFTER_RESTORE_USE_BASE_DRAFT', { scaffoldActive });
     }
   }
+}
 
 // verdict（retry）
 const vRetry = runFlagship(retryCandidate, slotsForGuard, scaffoldActive);
@@ -2572,19 +2876,40 @@ console.log('[IROS/FLAGSHIP][RETRY_VERDICT]', {
       return adoptAsSlots(seedFromSlots, 'FLAGSHIP_RETRY_WARN_TO_SEED', { scaffoldActive });
     }
   }
+}
 
-  // ✅ ここが肝：retryでFATAL/未達なら “必ず seed優先” に戻す（薄い局面を安定させる）
+
+  // ✅ retryでFATAL/未達の場合のフォールバック方針
+  // - 「短すぎる」系（OK_TOO_SHORT_TO_RETRY / WARN_TO_RETRY）は、seedFromSlots がテンプレ化しやすい
+  // - その場合は seed ではなく candidate（ユーザー文脈）を優先して返す
+  const fatalReasons = new Set(
+    Array.from(new Set((((v as any)?.reasons ?? []) as any[]).map((x) => String(x)))),
+  );
+
+  const shouldPreferCandidateOnFatal =
+    fatalReasons.has('OK_TOO_SHORT_TO_RETRY') || fatalReasons.has('WARN_TO_RETRY');
+
+  if (shouldPreferCandidateOnFatal) {
+    const fallback = String(candidate ?? '').trim() || String(seedFromSlots ?? '').trim();
+    return adoptAsSlots(fallback, 'FLAGSHIP_RETRY_FATAL_PREFER_CANDIDATE', {
+      scaffoldActive,
+      flagshipFatal: true,
+      flagshipLevel: (vRetry as any)?.level ?? 'FATAL',
+      flagshipReasons: Array.isArray((vRetry as any)?.reasons) ? (vRetry as any).reasons : [],
+    });
+  }
+
+  // それ以外は従来通り：seedがあるなら seed を優先
   if (seedFromSlots) {
     return adoptAsSlots(seedFromSlots, 'FLAGSHIP_RETRY_FATAL_TO_SEED', { scaffoldActive });
   }
 
-  // seedが無い時だけ retry を返す（追跡メタを残す）
-  const fallbackText = retryText || String(candidate ?? '').trim();
-  return adoptAsSlots(fallbackText, 'FLAGSHIP_RETRY_FATAL_ACCEPT', {
-    scaffoldActive,
-    flagshipFatal: true,
-    flagshipLevel: (vRetry as any)?.level ?? 'FATAL',
-    flagshipReasons: Array.isArray((vRetry as any)?.reasons) ? (vRetry as any).reasons : [],
-  });
-}
+// seedが無い時だけ retry を返す（追跡メタを残す）
+const fallbackText = String(retryCandidate ?? '').trim() || String(candidate ?? '').trim();
+return adoptAsSlots(fallbackText, 'FLAGSHIP_RETRY_FATAL_ACCEPT', {
+  scaffoldActive,
+  flagshipFatal: true,
+  flagshipLevel: (vRetry as any)?.level ?? 'FATAL',
+  flagshipReasons: Array.isArray((vRetry as any)?.reasons) ? (vRetry as any).reasons : [],
+});
 }
