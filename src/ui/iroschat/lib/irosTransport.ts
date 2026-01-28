@@ -399,7 +399,25 @@ export async function reply(params: {
     body: JSON.stringify(payload),
   });
 
+  // ✅ サーバが付けた traceId をヘッダから回収
+  const traceId = res.headers.get('x-trace-id') || null;
+
   const json = await res.json().catch(() => ({}));
+
+  // ✅ デバッグ用：UIで追えるように返却オブジェクトへ混ぜる（破壊的変更は避ける）
+  if (traceId && json && typeof json === 'object') {
+    (json as any).traceId = (json as any).traceId ?? traceId;
+    (json as any).meta = (json as any).meta ?? {};
+    (json as any).meta.extra = (json as any).meta.extra ?? {};
+    (json as any).meta.extra.traceId = (json as any).meta.extra.traceId ?? traceId;
+  }
+
+  console.log('[IROS][client] /reply response', {
+    status: res.status,
+    traceId,
+    hasJson: !!json,
+  });
+
   return json;
 }
 

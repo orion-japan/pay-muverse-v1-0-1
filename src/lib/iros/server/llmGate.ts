@@ -304,20 +304,27 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
   }
 
   // (D) ✅ Phase11：FINAL slotPlan は原則 CALL_LLM
-  // ただし ir診断は「診断フォーマット保持」が最優先なので FINAL_FORCE_CALL を無効化する
+  // ただし ir診断は「診断フォーマット保持」が最優先なので、以前は FINAL_FORCE_CALL を無効化していた
+  // ✅ 今回：診断FINALも “デフォルトで CALL_LLM” に寄せる（テンプレ固定回避）
+  // ✅ 差し込み口：IROS_DIAGNOSIS_ALLOW_FINAL_FORCE_CALL=0 のときだけ SKIP を許可する（緊急退避用）
   const isIrDiagnosisTurn =
     input?.meta?.isIrDiagnosisTurn === true ||
     input?.meta?.mode === 'diagnosis' ||
     input?.meta?.framePlan?.isIrDiagnosisTurn === true ||
     input?.meta?.framePlan?.mode === 'diagnosis';
 
-  if (slotsOk && policy === 'FINAL' && isIrDiagnosisTurn) {
+  // デフォルトは "許可"（= CALL_LLM）。0 のときだけ無効化。
+  const allowDiagnosisFinalForceCall =
+    String(process.env.IROS_DIAGNOSIS_ALLOW_FINAL_FORCE_CALL ?? '1').trim() !== '0';
+
+  if (slotsOk && policy === 'FINAL' && isIrDiagnosisTurn && !allowDiagnosisFinalForceCall) {
     return mk({
       entry: 'SKIP_SLOTPLAN',
-      reason: 'DIAGNOSIS_FINAL__SKIP_FORCE_CALL',
+      reason: 'DIAGNOSIS_FINAL__SKIP_FORCE_CALL (disabled by env=0)',
       resolvedText: effectiveLen ? effectiveText : null,
     });
   }
+
 
   if (slotsOk && policy === 'FINAL') {
     console.warn('[IROS/LLM_GATE][FINAL_FORCE_CALL]', {

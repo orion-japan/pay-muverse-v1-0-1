@@ -213,7 +213,13 @@ export async function persistAssistantMessageToIrosMessages(args: {
     user_code: userCode,
   };
 
-  const { error } = await supabase.from('iros_messages').insert([row]);
+  // ✅ inserted row の id を返す（route.ts 側で message_id として使う）
+  const { data, error } = await supabase
+    .from('iros_messages')
+    .insert([row])
+    .select('id')
+    .single();
+
   if (error) {
     console.error('[IROS/persistAssistantMessageToIrosMessages] insert error', {
       conversationId,
@@ -223,5 +229,12 @@ export async function persistAssistantMessageToIrosMessages(args: {
     return { ok: false, inserted: false, blocked: false, reason: 'DB_ERROR', error };
   }
 
-  return { ok: true, inserted: true, blocked: false };
+  const messageId =
+    data && typeof (data as any).id === 'number'
+      ? (data as any).id
+      : data && typeof (data as any).id === 'string'
+        ? Number((data as any).id)
+        : null;
+
+  return { ok: true, inserted: true, blocked: false, messageId };
 }

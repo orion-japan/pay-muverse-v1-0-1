@@ -990,7 +990,13 @@ export async function generateIrosReply(args: GenerateArgs): Promise<GenerateRes
       typeof (meta as any).extra === 'object' && (meta as any).extra ? (meta as any).extra : ((meta as any).extra = {});
     ex.speechAllowLLM = finalAllowLLM;
     ex.speechInput = speechInput;
+
+    // ✅ 追加：writerAssert（灯台に沿って “言い切ってよい” 許可）
+    // - 最初はゆるく：LLMが許可されるなら ALLOW（制約は後から足す）
+    ex.writerAssert = finalAllowLLM ? 'ALLOW' : 'DENY';
+    ex.writerAssertReason = 'SPEECH_ALLOW_LLM_SINGLE_SOURCE';
   }
+
 
   console.log('[IROS/SpeechAct] decided', {
     act: (speechApplied as any).act,
@@ -999,7 +1005,12 @@ export async function generateIrosReply(args: GenerateArgs): Promise<GenerateRes
     confidence: (speechDecision as any).confidence ?? null,
     input: speechInput,
     allowLLM: finalAllowLLM,
+
+    // ✅ 追加：灯台フラグの証明（meta.extra と一致するはず）
+    writerAssert: finalAllowLLM ? 'ALLOW' : 'DENY',
+    writerAssertReason: 'SPEECH_ALLOW_LLM_SINGLE_SOURCE',
   });
+
 
   // ✅ LLMを呼ばない場合（act別に返す）
   if (!finalAllowLLM) {

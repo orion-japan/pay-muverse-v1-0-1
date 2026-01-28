@@ -203,13 +203,26 @@ function toStr(v: any): string {
 /** サーバ応答から assistant 本文候補を抽出（保存用：最小限trimのみ） */
 function extractAssistantRaw(r: any): string {
   const t =
+    // ✅ 新 iros の代表キー（最優先）
+    r?.assistantText ??
+    r?.text ??
+    r?.content ??
+
+    // 旧互換
     r?.assistant ??
+    r?.reply ??
+    r?.reply_text ??
+    r?.message ??
+
+    // OpenAI系
     r?.message?.content ??
     r?.choices?.[0]?.message?.content ??
     r?.output_text ??
     '';
+
   return toStr(t).trim();
 }
+
 
 /**
  * UI表示用の整形（※保存用には使わない）

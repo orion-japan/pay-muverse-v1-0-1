@@ -10,6 +10,8 @@ type ChatMarkdownProps = {
   className?: string;
 };
 
+
+
 // 見出しごとのアイコン対応表（必要ならあとで増やす）
 const HEADING_ICONS: Record<string, string> = {
   'ステップとして考えられること': '📌',

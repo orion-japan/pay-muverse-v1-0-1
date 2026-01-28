@@ -858,8 +858,14 @@ const microGenerate: MicroWriterGenerate = async (args) => {
       if (!t) return { ok: false as const, reason: 'EMPTY' };
 
       // ✅ 旗印ゲートを“後付け”で通す（回路は変えない）
+      // micro は slotKeys を持たないので ctx=null だと strict qCount になり、
+      // 「?なし疑問推定（の$ / かな / ですか 等）」で誤って QCOUNT_TOO_MANY に落ちる。
+      // → micro の採点だけ normalChatLite 扱いの slotKeys を渡して qCount を「?数」に固定する。
       const { flagshipGuard } = await import('@/lib/iros/quality/flagshipGuard');
-      const v = flagshipGuard(t, null);
+      const v = flagshipGuard(t, {
+        slotKeys: ['SEED_TEXT', 'OBS', 'SHIFT'],
+        slotsForGuard: null,
+      });
 
       // microは短いので、WARNでも「応援/無難/hedge」理由が入るなら落とす
       const badWarnReasons = new Set([
@@ -881,6 +887,7 @@ const microGenerate: MicroWriterGenerate = async (args) => {
 
       return { ok: true as const, reason: v.level };
     };
+
 
     let out1 = await callLLM(messages1, typeof args.temperature === 'number' ? args.temperature : 0.6);
     let j1 = await judgeMicro(out1);
@@ -1869,30 +1876,64 @@ try {
     gate?.llmEntry === 'SKIP_SLOTPLAN';
 
   // ---------------------------------------------------------
-  // (1) SKIP系：本文が空のときだけ resolvedText を採用（現状維持）
+  // (1) resolvedText の採用ルール
+  // - SKIP系：本文が空なら resolvedText を採用（現状維持）
+  // - DIAGNOSIS_FINAL__SEED_FOR_LLM：CALL_LLM の resolvedText を本文に採用（重要）
   // ---------------------------------------------------------
-  if (
-    isSkip &&
-    String(out?.assistantText ?? out?.content ?? '').trim().length === 0 &&
-    gate.resolvedText
-  ) {
-    out.content = gate.resolvedText;
-    out.assistantText = gate.resolvedText;
+  const finalTextPolicyNow = String((out.metaForSave as any)?.extra?.finalTextPolicy ?? '')
+    .trim()
+    .toUpperCase();
 
-    out.metaForSave = out.metaForSave ?? {};
-    out.metaForSave.fallbackApplied = 'LLM_GATE_RESOLVED_TEXT_APPLIED';
-    (out.metaForSave as any).fallbackLen = gate.resolvedText.length;
+  const isDiagnosisFinalSeed =
+    finalTextPolicyNow === 'DIAGNOSIS_FINAL__SEED_FOR_LLM';
 
-    out.metaForSave.extra = out.metaForSave.extra ?? {};
-    (out.metaForSave.extra as any).rawTextFromModel = gate.resolvedText;
+  if (gate?.resolvedText && String(gate.resolvedText).trim().length > 0) {
+    const bodyIsEmpty = String(out?.assistantText ?? out?.content ?? '').trim().length === 0;
 
-    console.warn('[IROS/Reply][patch] llmGate resolvedText applied', {
-      conversationId,
-      userCode,
-      len: gate.resolvedText.length,
-      llmEntry: gate.llmEntry,
-    });
+    // ✅ 1) DIAGNOSIS_FINAL__SEED_FOR_LLM は “LLM本文” を採用する（seed運用の目的）
+    if (isDiagnosisFinalSeed && gate.llmEntry === 'CALL_LLM') {
+      out.content = gate.resolvedText;
+      out.assistantText = gate.resolvedText;
+
+      out.metaForSave = out.metaForSave ?? {};
+      out.metaForSave.extra = out.metaForSave.extra ?? {};
+      (out.metaForSave.extra as any).finalTextPolicy = 'DIAGNOSIS_FINAL__LLM_COMMIT';
+      (out.metaForSave.extra as any).finalTextFrom = 'llmGate.resolvedText';
+      (out.metaForSave.extra as any).finalTextLen = gate.resolvedText.length;
+
+      console.warn('[IROS/Reply][patch] diagnosis FINAL seed -> LLM commit applied', {
+        conversationId,
+        userCode,
+        len: gate.resolvedText.length,
+        llmEntry: gate.llmEntry,
+      });
+    }
+
+    // ✅ 2) SKIP系：本文が空のときだけ resolvedText を採用（従来通り）
+    if (
+      isSkip &&
+      bodyIsEmpty &&
+      !isDiagnosisFinalSeed
+    ) {
+      out.content = gate.resolvedText;
+      out.assistantText = gate.resolvedText;
+
+      out.metaForSave = out.metaForSave ?? {};
+      out.metaForSave.fallbackApplied = 'LLM_GATE_RESOLVED_TEXT_APPLIED';
+      (out.metaForSave as any).fallbackLen = gate.resolvedText.length;
+
+      out.metaForSave.extra = out.metaForSave.extra ?? {};
+      (out.metaForSave.extra as any).rawTextFromModel = gate.resolvedText;
+
+      console.warn('[IROS/Reply][patch] llmGate resolvedText applied', {
+        conversationId,
+        userCode,
+        len: gate.resolvedText.length,
+        llmEntry: gate.llmEntry,
+      });
+    }
   }
+
 
   // ---------------------------------------------------------
   // (2) seed注入：SCAFFOLDのときだけ “LLM rewrite seed” を meta.extra に注入

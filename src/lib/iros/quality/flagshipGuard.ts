@@ -8,6 +8,17 @@
 //   → normalChat の qCount は「? / ？」の数だけ（疑問文推定はしない）
 //
 // 注意：このガードは “意味の判断” をしない。品質/体験維持のための表現ゲートのみ。
+//
+// ✅ 追加（2026-01-28）
+// - 「とにかく会話を流す」優先で、normalChat の WARN/FATAL をさらに弱める
+// - 採点の内訳ログ（hedge等）と、WARN加点後ログを固定して “版ズレ/反映漏れ” を即発見できるようにする
+
+// ✅ 実行ファイル同一性の証明（.next の別チャンク / 古い版混入を潰す）
+const IROS_FLAGSHIP_GUARD_REV = 'guard-rev-2026-01-28-b';
+console.warn('[IROS/FLAGSHIP_GUARD][MODULE_LOADED]', {
+  rev: IROS_FLAGSHIP_GUARD_REV,
+  at: new Date().toISOString(),
+});
 
 export type FlagshipVerdict = {
   ok: boolean;
@@ -165,7 +176,14 @@ function extractScaffoldMustHave(ctx?: FlagshipGuardContext | null): {
 // qCount
 // ------------------------------------------------------------
 
-// ?なし疑問文も qCount に入れる（strict only）
+/**
+ * strict: ?なし疑問文も数える（ただし「何かが〜」等の “something” を疑問扱いしない）
+ *
+ * 重要：
+ * - WH語だけで増やさない（「何かが…」を誤爆するため）
+ * - 末尾の疑問終端（ですか/ますか/でしょうか/かな 等）と、
+ *   “依頼/質問動詞” のみで加算する
+ */
 function countQuestionLikeStrict(text: string): number {
   const t = norm(text);
 
@@ -181,36 +199,65 @@ function countQuestionLikeStrict(text: string): number {
 
   let likeCount = 0;
 
+  // 末尾が疑問っぽい（文末で判断：誤爆を減らす）
+  // - 「か」単体は誤爆しやすいので “文末の か” だけに限定（助詞の途中「何かが」は拾わない）
+  const reEndsLikeQuestion = /(ですか|ますか|でしょうか|かな|の\W*$|か\W*$)$/;
+
+  // “質問/依頼” の明示（文末でなくても質問として成立しやすい）
+  const reAskLike =
+    /(教えて(ください)?|聞かせて(ください)?|どう思う|どう思いますか|説明して(ください)?|理由を|根拠を|意味を)/;
+
+  // WH語（参考）：単体では加算しない。末尾疑問 or askLike と組み合わせたときだけ。
+  const reWh =
+    /(どう(すれば|したら)?|なぜ|なんで|どこ|いつ|どれ|どんな|誰|誰が|誰に|何(が|を|の)?)/;
+
   for (const line of lines) {
     if (/[？?]/.test(line)) continue;
 
-    const hasWh =
-      /(どう(すれば|したら)?|なぜ|なんで|何(が|を|の)?|どこ|いつ|どれ|どんな|誰|誰が|誰に)/.test(line);
+    const endsLikeQuestion = reEndsLikeQuestion.test(line);
+    const askLike = reAskLike.test(line);
+    const hasWh = reWh.test(line);
 
-    const endsLikeQuestion = /(ですか|ますか|でしょうか|かな|か\W*$|の\W*$)/.test(line);
+    // ✅ 誤爆防止：
+    // - hasWh だけでは数えない（例:「何かが解けていく」）
+    // - endsLikeQuestion / askLike がある場合だけ加算
+    if (askLike) {
+      likeCount += 1;
+      continue;
+    }
+    if (endsLikeQuestion) {
+      // endsLikeQuestion がある時点で質問として成立しているので加算（WH語の有無で分岐しない）
+      likeCount += 1;
+      continue;
+    }
 
-    const askLike = /(教えて|教えてください|聞かせて|聞かせてください|話して|話してみて|詳しく)/.test(line);
-
-    if (hasWh || endsLikeQuestion || askLike) likeCount += 1;
+    // hasWh のみは加算しない（意図的）
+    void hasWh;
   }
 
   return markCount + likeCount;
 }
 
-// normalChat 判定（キーで判断）
+/**
+ * normalChat 判定（キーで判断）
+ *
+ * ✅ 重要：rephrase最終の inKeys が [OBS, SHIFT] の形でも normalChat とみなす
+ * （SEED_TEXT が guard に渡らないケースがあるため）
+ */
 function isNormalChatLite(ctx?: FlagshipGuardContext | null): boolean {
   const keys = Array.isArray(ctx?.slotKeys) ? ctx!.slotKeys!.map(String) : [];
   if (keys.length === 0) return false;
 
-  // normalChat: SEED_TEXT / OBS / SHIFT が並ぶ（現行 normalChat.ts 構成）
-  const hasSeed = keys.includes('SEED_TEXT');
+  // flagReply は FLAG_ だらけ
+  const isFlag = keys.every((k) => String(k).startsWith('FLAG_'));
+  if (isFlag) return false;
+
+  // normalChat: OBS / SHIFT が中心（SEED_TEXT はある時もない時もある）
   const hasObs = keys.includes('OBS');
   const hasShift = keys.includes('SHIFT');
 
-  // flagReply は FLAG_ だらけ
-  const isFlag = keys.every((k) => String(k).startsWith('FLAG_'));
-
-  return !isFlag && hasSeed && hasObs && hasShift;
+  // ※最小条件：OBS+SHIFT が揃っていれば normalChat 寄りとして扱う
+  return hasObs && hasShift;
 }
 
 // ------------------------------------------------------------
@@ -284,8 +331,16 @@ const FLAGSHIP_SIGNS = [
 // ------------------------------------------------------------
 export function flagshipGuard(input: string, ctx?: FlagshipGuardContext | null): FlagshipVerdict {
   const t = norm(input);
-  const reasons: string[] = [];
 
+  // ✅ 何を採点しているかをログで固定（「headと実体が違う」事故も潰す）
+  console.log('[IROS/FLAGSHIP_GUARD][DEBUG_IN]', {
+    rev: IROS_FLAGSHIP_GUARD_REV,
+    inputLen: String(input ?? '').length,
+    inputHead: String(input ?? '').slice(0, 120),
+    slotKeys: Array.isArray(ctx?.slotKeys) ? ctx?.slotKeys : null,
+  });
+
+  const reasons: string[] = [];
   const normalLite = isNormalChatLite(ctx);
 
   // qCount: normalChat は「? / ？」のみ。strict は疑問文推定込み。
@@ -315,6 +370,22 @@ export function flagshipGuard(input: string, ctx?: FlagshipGuardContext | null):
   const hasFlagshipSign = hasAny(t, FLAGSHIP_SIGNS);
   const blandPressure = cheer + hedge + generic;
 
+  // ✅ 採点内訳ログ（版ズレ・反映漏れを即発見）
+  console.log('[IROS/FLAGSHIP_GUARD][DEBUG_SCORE]', {
+    rev: IROS_FLAGSHIP_GUARD_REV,
+    normalLite,
+    scaffoldLike: mh.scaffoldLike,
+    len: t.length,
+    qCount,
+    qCountMark,
+    cheer,
+    hedge,
+    generic,
+    blandPressure,
+    bulletLike,
+    hasFlagshipSign,
+  });
+
   // slot keys (flagReply 判定)
   const slotKeys = Array.isArray(ctx?.slotKeys) ? ctx!.slotKeys!.map(String) : [];
   const isFlagReplyLike = slotKeys.length > 0 && slotKeys.every((k) => String(k).startsWith('FLAG_'));
@@ -325,21 +396,19 @@ export function flagshipGuard(input: string, ctx?: FlagshipGuardContext | null):
   let fatal = 0;
   let warn = 0;
 
-  // 1) 質問の扱い
+  // 1) 質問の扱い（✅さらに緩める）
   if (normalLite) {
-    // normalChat: 1〜2問は普通に許す（自然さ優先）
-    if (qCount >= 4) {
+    // “まず会話を流す”：1〜2問は完全に素通し（warnも理由も付けない）
+    if (qCount >= 5) {
       fatal += 2;
       reasons.push('QCOUNT_TOO_MANY');
-    } else if (qCount === 3) {
-      warn += 2;
-      reasons.push('QCOUNT_THREE');
-    } else if (qCount === 2) {
+    } else if (qCount === 4) {
       warn += 1;
-      reasons.push('QCOUNT_TWO');
-    } else if (qCount === 1) {
-      // 許容（ログ互換で理由だけ残す）
-      reasons.push('QCOUNT_ONE');
+      reasons.push('QCOUNT_FOUR');
+    } else if (qCount === 3) {
+      // 3問でも warn 1 に留める（会話流し優先）
+      warn += 1;
+      reasons.push('QCOUNT_THREE');
     }
   } else {
     // strict: 2以上は強め
@@ -365,22 +434,27 @@ export function flagshipGuard(input: string, ctx?: FlagshipGuardContext | null):
     }
   }
 
-  // 3) 短文薄逃げ（normalChatは WARN に落とす / strict は状況で FATAL）
-  // - “会話を流す”ため、normalChatは FATAL にしにくい（WARN止まり）
+  // 3) 短文薄逃げ（✅ normalChat は “ほぼ介入しない”）
+  // - ここで normalChat を過敏にすると「会話が止まる」ので、相当悪い時だけ WARN
   if (!mh.scaffoldLike && t.length > 0 && t.length <= 160) {
-    if (qCount === 0 && blandPressure >= 2) {
-      if (normalLite) {
-        warn += 2;
-        reasons.push('NORMAL_SHORT_GENERIC_NO_QUESTION');
-      } else if (!hasFlagshipSign) {
-        fatal += 2;
-        reasons.push('SHORT_GENERIC_NO_QUESTION');
+    if (!normalLite) {
+      // strict 側のみ従来寄り
+      if (qCount === 0 && blandPressure >= 2) {
+        if (!hasFlagshipSign) {
+          fatal += 2;
+          reasons.push('SHORT_GENERIC_NO_QUESTION');
+        }
       }
-    }
-
-    if (!normalLite && qCount === 1 && !hasFlagshipSign && cheer + hedge >= 2) {
-      fatal += 2;
-      reasons.push('SHORT_GENERIC_CHEER_WITH_QUESTION');
+      if (qCount === 1 && !hasFlagshipSign && cheer + hedge >= 2) {
+        fatal += 2;
+        reasons.push('SHORT_GENERIC_CHEER_WITH_QUESTION');
+      }
+    } else {
+      // normalLite: blandPressure が極端（>=4）で短文（<=120）なら WARN 1
+      if (t.length <= 120 && qCount === 0 && blandPressure >= 4) {
+        warn += 1;
+        reasons.push('NORMAL_SHORT_BLAND_PRESSURE');
+      }
     }
   }
 
@@ -401,6 +475,14 @@ export function flagshipGuard(input: string, ctx?: FlagshipGuardContext | null):
       warn += 1;
       reasons.push('HEDGE_PRESENT');
     }
+
+    // ✅ hedge 加点後ログ（今回の “hedge=1 なのに warn=0” を一発で潰す）
+    console.log('[IROS/FLAGSHIP_GUARD][DEBUG_AFTER_HEDGE]', {
+      rev: IROS_FLAGSHIP_GUARD_REV,
+      warn,
+      fatal,
+      reasons: reasons.slice(0, 12),
+    });
 
     if (generic >= 2) {
       warn += 2;
@@ -446,6 +528,7 @@ export function flagshipGuard(input: string, ctx?: FlagshipGuardContext | null):
       (level === 'WARN' &&
         (reasons.includes('SCAFFOLD_POINTS3_NOT_PRESERVED') ||
           reasons.includes('SCAFFOLD_PURPOSE_MISSING') ||
+          reasons.includes('SCAFFOLD_ONE_POINT_MISSING') ||
           hedge >= 3 ||
           generic >= 2 ||
           (!hasFlagshipSign && blandPressure >= 3)));

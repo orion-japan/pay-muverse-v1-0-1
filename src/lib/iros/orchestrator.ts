@@ -19,6 +19,7 @@ import { computeSpinState } from './orchestratorSpin';
 import { buildNormalChatSlotPlan } from './slotPlans/normalChat';
 import { buildCounselSlotPlan } from './slotPlans/counsel';
 import { buildFlagReplySlots } from './slotPlans/flagReply';
+import { buildIrDiagnosisSlotPlan } from './slotPlans/irDiagnosis';
 
 // 解析フェーズ（Unified / depth / Q / SA / YH / IntentLine / T層）
 import {
@@ -63,6 +64,7 @@ import { shouldUseQuestionSlots } from './slotPlans/QuestionSlots';
 
 // Person Intent Memory（ir診断）
 import { savePersonIntentState } from './memory/savePersonIntent';
+import { diagnosisEngine } from './diagnosis/diagnosisEngine';
 
 // ==== 固定アンカー（北） ====
 // - ユーザー発話から抽出しない
@@ -1159,8 +1161,6 @@ function detectCounselCommand(raw: unknown): { forced: boolean; strippedText: st
   }
 }
 
-
-
 // =========================================================
 // ✅ counsel 配線：normalChat fallback の前に差し込む
 // - mode名の揺れ：'counsel' / 'consult' を両方拾う
@@ -1347,49 +1347,72 @@ if (!isIrDiagnosisTurn_here) {
     }
   }
 } else {
-  // ✅ ir診断ターン：normalChat/flagReply/counsel で上書きしない
-  // ただし upstream が slot を返さない場合があるので、最低限の seed slot をここで補完する
-  const slotsEmpty_ir = !Array.isArray(slotsArr) || slotsArr.length === 0;
-  const policyEmpty_ir = !slotPlanPolicy || String(slotPlanPolicy).trim().length === 0;
+// ✅ ir診断ターン：normalChat/flagReply/counsel で上書きしない
+// ただし upstream が slot を返さない場合があるので、最低限の seed slot をここで補完する
+const slotsEmpty_ir = !Array.isArray(slotsArr) || slotsArr.length === 0;
+const policyEmpty_ir = !slotPlanPolicy || String(slotPlanPolicy).trim().length === 0;
 
-  if (slotsEmpty_ir) {
-    const raw = String(text ?? '').trim();
+if (slotsEmpty_ir) {
+  const raw = String(text ?? '').trim();
 
-    // "ir診断 自分" / "ir診断 ひろみの母" などからラベルを拾う（無ければ self）
-    let label = 'self';
-    if (raw.startsWith('ir診断')) {
-      const rest = raw.slice('ir診断'.length).trim();
-      if (rest) label = rest;
-    }
-
-    // ✅ seed は必ず非空（LLM_GATE/NormalBase 落下防止）
-    const seed = [
-      `ir診断 ${label}`,
-      '',
-      `観測対象：${label}`,
-      '出力：フェーズ／位相／深度（S/R/C/I/T）＋短い意識状態＋短いメッセージ',
-      '',
-      `入力：${raw || '(none)'}`,
-    ].join('\n');
-
-    slotsArr = [{ key: 'SEED_TEXT', text: seed }];
-    slotPlanPolicy = 'FINAL';
-
-    console.log('[IROS/ORCH][irDiagnosis-seed]', {
-      label,
-      slotsLen: Array.isArray(slotsArr) ? slotsArr.length : null,
-      policy: slotPlanPolicy,
-      rawLen: raw.length,
-    });
+  // "ir診断 自分" / "ir診断 ひろみの母" などからラベルを拾う（無ければ self）
+  let label = 'self';
+  if (raw.startsWith('ir診断')) {
+    const rest = raw.slice('ir診断'.length).trim();
+    if (rest) label = rest;
   }
+
+  // ✅ irDiagnosis: diagnosisEngine に接続（src/lib/iros/diagnosis/* を通す）
+  const diag = diagnosisEngine({
+    targetLabel: label,
+    meta: meta as any,
+    slots: null,
+    conversationId: null,
+    userCode: (userCode as any) ?? null,
+    traceId: null,
+  });
+
+  const seedText =
+    diag.ok
+      ? diag.text
+      : [
+          `ir診断 ${label}`,
+          '',
+          '観測対象：' + label,
+          '出力：フェーズ／位相／深度（S/R/C/I/T）＋短い意識状態＋短いメッセージ',
+          '',
+          '入力：' + (raw || `(none)`),
+          '',
+          `※diagnosisEngine失敗: ${diag.reason}`,
+        ].join('\n');
+
+// ✅ 重要：API本文を空にしない（NormalBase fallback を回避）
+// content は後段で const 定義されるため、ここでは代入しない。
+// 代わりに meta.extra に “本文候補” を退避しておく（後段で拾う）。
+{
+  const ex =
+    (meta as any).extra && typeof (meta as any).extra === 'object'
+      ? (meta as any).extra
+      : ((meta as any).extra = {});
+  ex.contentOverride = seedText;
+}
+
+  slotsArr = [{ key: 'SEED_TEXT', text: seedText }];
+  slotPlanPolicy = 'FINAL';
+
+  console.log('[IROS/ORCH][irDiagnosis-diagnosisEngine]', {
+    label,
+    ok: diag.ok,
+    head: diag.ok ? diag.head : null,
+    slotsLen: Array.isArray(slotsArr) ? slotsArr.length : null,
+    policy: slotPlanPolicy,
+    rawLen: raw.length,
+  });
+}
 
   // ✅ ir診断ターン：fallback 表示は残さない
   if ((meta as any).slotPlanFallback) delete (meta as any).slotPlanFallback;
 }
-
-
-
-
 
     // 6) 最終ガード：slots が配列でないなら null
     if (slotsArr != null && !Array.isArray(slotsArr)) {
@@ -1516,7 +1539,15 @@ if (!isIrDiagnosisTurn_here) {
   // ----------------------------------------------------------------
   // ✅ V2: 本文生成はしない（render-v2 が唯一の生成者）
   // ----------------------------------------------------------------
-  const content = '';
+  const content = (() => {
+    const ex: any = (meta as any)?.extra ?? null;
+    const override =
+      ex && typeof ex === 'object' && typeof ex.contentOverride === 'string'
+        ? ex.contentOverride
+        : '';
+
+    return override.trim().length > 0 ? override : '';
+  })();
 
   // ----------------------------------------------------------------
   // 10. meta の最終調整：Goal.targetDepth を depth に反映
@@ -1682,42 +1713,59 @@ if (!isIrDiagnosisTurn_here) {
   (finalMeta as any).situationSummary =
     typeof text === 'string' && text.trim().length > 0 ? text.trim() : null;
 
-  // ----------------------------------------------------------------
-  // 11.5 Person Intent Memory 保存（ir診断ターンのみ）
-  // ----------------------------------------------------------------
-  if (userCode && finalMeta) {
-    const anyMeta = finalMeta as any;
-    const isIrDiagnosisTurn = !!anyMeta.isIrDiagnosisTurn;
+// ----------------------------------------------------------------
+// 11.5 Person Intent Memory 保存（ir診断ターンのみ）
+// ----------------------------------------------------------------
+if (userCode && finalMeta) {
+  const anyMeta = finalMeta as any;
+  const isIrDiagnosisTurn = !!anyMeta.isIrDiagnosisTurn;
 
-    if (isIrDiagnosisTurn) {
-      let label = 'self';
-      const trimmed = (text || '').trim();
+  if (isIrDiagnosisTurn) {
+    let label = 'self';
+    const trimmed = (text || '').trim();
 
-      if (trimmed.startsWith('ir診断')) {
-        const rest = trimmed.slice('ir診断'.length).trim();
-        if (rest.length > 0) label = rest;
-      }
+    if (trimmed.startsWith('ir診断')) {
+      const rest = trimmed.slice('ir診断'.length).trim();
+      if (rest.length > 0) label = rest;
+    }
 
-      try {
-        await savePersonIntentState({
-          ownerUserCode: userCode,
-          targetType: 'ir-diagnosis',
-          targetLabel: label,
-          qPrimary: finalMeta.qCode ?? null,
-          depthStage: (finalMeta as any).depth ?? null,
-          phase: (finalMeta as any).phase ?? null,
-          tLayerHint: (finalMeta as any).tLayerHint ?? null,
-          selfAcceptance:
-            typeof finalMeta.selfAcceptance === 'number'
-              ? finalMeta.selfAcceptance
-              : null,
-        });
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error('[IROS/Orchestrator] savePersonIntentState error', e);
-      }
+    // ✅ core_need を meta から拾う（intentLine 優先 → soulNote → unified.soulNote）
+    const il = (anyMeta.intentLine ?? anyMeta.intent_line ?? null) as any;
+    const sn = (anyMeta.soulNote ?? anyMeta.soul_note ?? anyMeta.unified?.soulNote ?? anyMeta.unified?.soul_note ?? null) as any;
+
+    const coreNeedRaw =
+      (typeof il?.coreNeed === 'string' ? il.coreNeed : null) ??
+      (typeof il?.core_need === 'string' ? il.core_need : null) ??
+      (typeof sn?.core_need === 'string' ? sn.core_need : null) ??
+      (typeof sn?.coreNeed === 'string' ? sn.coreNeed : null) ??
+      null;
+
+    const coreNeed =
+      typeof coreNeedRaw === 'string' && coreNeedRaw.trim().length > 0
+        ? coreNeedRaw.trim()
+        : null;
+
+    try {
+      await savePersonIntentState({
+        ownerUserCode: userCode,
+        targetType: 'ir-diagnosis',
+        targetLabel: label,
+        qPrimary: finalMeta.qCode ?? null,
+        depthStage: (finalMeta as any).depth ?? null,
+        phase: (finalMeta as any).phase ?? null,
+        tLayerHint: (finalMeta as any).tLayerHint ?? null,
+        selfAcceptance:
+          typeof finalMeta.selfAcceptance === 'number' ? finalMeta.selfAcceptance : null,
+
+        // ✅ 追加：core_need を保存
+        coreNeed,
+      });
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[IROS/Orchestrator] savePersonIntentState error', e);
     }
   }
+}
 
   // ----------------------------------------------------------------
   // 12. Orchestrator 結果として返却（V2：contentは空）

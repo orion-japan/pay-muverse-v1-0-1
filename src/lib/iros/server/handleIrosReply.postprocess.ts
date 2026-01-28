@@ -668,31 +668,104 @@ export async function postProcessReply(
           hasSlots,
         });
       } else if (policy === 'FINAL') {
-        // ✅ FINAL：slotPlan を本文に採用（commit OK）
-        finalAssistantText = slotText;
+        // ✅ FINAL：通常は slotPlan を本文に採用（commit OK）
+        // ただし slotText が @OBS/@SHIFT など「内部マーカー」を含む場合は本文として不正なので浄化する
 
-        metaForSave.extra = {
-          ...(metaForSave.extra ?? {}),
-          finalTextPolicy: 'SLOTPLAN_COMMIT_FINAL',
-          slotPlanCommitted: true,
-          slotPlanCommittedLen: slotText.length,
-          slotPlanPolicy_detected: policy,
-          slotPlanPolicy_from: det.from,
-          slotPlanLen_detected: slotPlanLen,
-          hasSlots_detected: hasSlots,
-        };
+        const isIrDiagnosisTurn =
+          (metaForSave as any)?.isIrDiagnosisTurn === true ||
+          String((metaForSave as any)?.mode ?? '').toLowerCase() === 'diagnosis' ||
+          String((metaForSave as any)?.presentationKind ?? '').toLowerCase() === 'diagnosis' ||
+          (metaForSave as any)?.framePlan?.isIrDiagnosisTurn === true ||
+          String((metaForSave as any)?.framePlan?.mode ?? '').toLowerCase() === 'diagnosis';
 
-        console.log('[IROS/PostProcess] SLOTPLAN_COMMIT_FINAL', {
-          conversationId,
-          userCode,
-          slotPlanPolicy: policy,
-          slotPlanPolicy_from: det.from,
-          slotPlanLen,
-          hasSlots,
-          len: slotText.length,
-          head: slotText.slice(0, 48),
-        });
+        // ✅ slotText の本文化：行頭 @ を落とす（@OBS/@SHIFT/@NEXT 等）
+        const rawLines = String(slotText ?? '').split('\n');
+        const cleanedLines = rawLines
+          .map((l) => String(l ?? '').trim())
+          .filter((l) => l.length > 0 && !l.startsWith('@'));
+        const cleanedSlotText = cleanedLines.join('\n').trim();
+
+        const hadInternalMarkers = /(^|\n)\s*@/m.test(String(slotText ?? ''));
+        const cleanedApplied = hadInternalMarkers && cleanedSlotText.length !== String(slotText ?? '').trim().length;
+
+        if (cleanedSlotText.length === 0) {
+          // ✅ 本文として成立しない（内部行しかない）→ 空commit禁止：ACKへ
+          const callName =
+            metaForSave?.userProfile?.user_call_name ??
+            (metaForSave.extra as any)?.userProfile?.user_call_name ??
+            'orion';
+
+          finalAssistantText = `うん、届きました。🪔`;
+
+          metaForSave.extra = {
+            ...(metaForSave.extra ?? {}),
+            finalTextPolicy: isIrDiagnosisTurn
+              ? 'DIAGNOSIS_FINAL__SLOT_TEXT_INTERNAL_ONLY__ACK_FALLBACK'
+              : 'SLOTPLAN_FINAL__SLOT_TEXT_INTERNAL_ONLY__ACK_FALLBACK',
+            slotPlanCommitted: false,
+            slotPlanCommittedLen: 0,
+            slotPlanPolicy_detected: policy,
+            slotPlanPolicy_from: det.from,
+            slotPlanLen_detected: slotPlanLen,
+            hasSlots_detected: hasSlots,
+            slotTextHadInternalMarkers: hadInternalMarkers,
+            slotTextCleanedApplied: cleanedApplied,
+            slotTextRawLen: String(slotText ?? '').length,
+            slotTextCleanedLen: cleanedSlotText.length,
+            slotTextDroppedLines: Math.max(0, rawLines.length - cleanedLines.length),
+          };
+
+          console.log('[IROS/PostProcess] SLOTPLAN_FINAL_INTERNAL_ONLY -> ACK_FALLBACK', {
+            conversationId,
+            userCode,
+            isIrDiagnosisTurn,
+            slotPlanPolicy: policy,
+            slotPlanPolicy_from: det.from,
+            slotPlanLen,
+            hasSlots,
+            hadInternalMarkers,
+            rawLen: String(slotText ?? '').length,
+            cleanedLen: cleanedSlotText.length,
+          });
+        } else {
+          // ✅ 浄化した本文を commit
+          finalAssistantText = cleanedSlotText;
+
+          metaForSave.extra = {
+            ...(metaForSave.extra ?? {}),
+            finalTextPolicy: isIrDiagnosisTurn
+              ? 'DIAGNOSIS_FINAL__COMMIT_SLOT_TEXT_CLEANED'
+              : 'SLOTPLAN_COMMIT_FINAL_CLEANED',
+            slotPlanCommitted: true,
+            slotPlanCommittedLen: cleanedSlotText.length,
+            slotPlanPolicy_detected: policy,
+            slotPlanPolicy_from: det.from,
+            slotPlanLen_detected: slotPlanLen,
+            hasSlots_detected: hasSlots,
+            slotTextHadInternalMarkers: hadInternalMarkers,
+            slotTextCleanedApplied: cleanedApplied,
+            slotTextRawLen: String(slotText ?? '').length,
+            slotTextCleanedLen: cleanedSlotText.length,
+            slotTextDroppedLines: Math.max(0, rawLines.length - cleanedLines.length),
+          };
+
+          console.log('[IROS/PostProcess] SLOTPLAN_FINAL_COMMIT_CLEANED', {
+            conversationId,
+            userCode,
+            isIrDiagnosisTurn,
+            slotPlanPolicy: policy,
+            slotPlanPolicy_from: det.from,
+            slotPlanLen,
+            hasSlots,
+            hadInternalMarkers,
+            rawLen: String(slotText ?? '').length,
+            cleanedLen: cleanedSlotText.length,
+            head: cleanedSlotText.slice(0, 64),
+          });
+        }
       } else {
+
+
 // ✅ SCAFFOLD：本文に commit しない（PDF準拠）
 // - slotText は「LLMに渡す seed」として保存する
 // - 本文は空のまま（この後に LLM writer が本文を生成する）

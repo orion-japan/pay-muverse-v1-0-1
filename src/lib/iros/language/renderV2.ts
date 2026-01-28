@@ -48,7 +48,9 @@ function normalizeLines(raw: string, opts?: { keepOneBlank?: boolean }): string[
   let blankAdded = false;
 
   for (const x of lines0) {
-    const t = String(x ?? '').replace(/\u3000/g, ''); // 行頭/行末の全角空白は事故りやすい
+    // ✅ 全角空白は「行頭/行末」だけ落とす（本文中の全角スペースは保持）
+    // - 以前の replace(/\u3000/g,'') は本文中の空白まで消してしまい事故る
+    const t = String(x ?? '').replace(/^\u3000+|\u3000+$/g, '');
     const trimmed = t.trim();
 
     if (!trimmed) {
@@ -66,6 +68,7 @@ function normalizeLines(raw: string, opts?: { keepOneBlank?: boolean }): string[
 
   return out;
 }
+
 
 function shouldSkipDedupe(line: string): boolean {
   // ✅ “固定句”は重複除去しない（SAFE/INSIGHTなどが消えるのを防ぐ）

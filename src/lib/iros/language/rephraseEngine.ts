@@ -1491,7 +1491,16 @@ export async function rephraseSlotsFinal(extracted: ExtractedSlots, opts: Rephra
 
   const inKeys = extracted.keys;
 
-  // (A) FIXED
+  const shiftSlot = Array.isArray((extracted as any)?.slots)
+  ? (extracted as any).slots.find((s: any) => String(s?.key) === 'SHIFT')
+  : null;
+
+console.log('[IROS/rephraseEngine][SHIFT_SLOT_HEAD]', {
+  hasShiftSlot: !!shiftSlot,
+  shiftSlotLen: shiftSlot?.text ? String(shiftSlot.text).length : 0,
+  shiftSlotHead: shiftSlot?.text ? safeHead(String(shiftSlot.text), 220) : null,
+});
+
   // (A) FIXED
   if (mode === 'FIXED') {
     const fixedTexts = buildFixedBoxTexts(inKeys.length);
@@ -2369,126 +2378,168 @@ if (forceIntervene) {
   const vLevelPre = String((v as any)?.level ?? '').toUpperCase();
   const candidateLen = (candidate ?? '').trim().length;
 
-  // ✅ MIN_OK_LEN は inputKind で切り替える
-  // - chat は短文でも「薄すぎ」を許可しない（厚み確保）
-  // - micro/greeting だけ短くてOK（床を外す）
-  const inputKindNow = String((debug as any)?.inputKind ?? (opts as any)?.inputKind ?? '').toLowerCase();
-  const isMicroOrGreetingNow = inputKindNow === 'micro' || inputKindNow === 'greeting';
+// ============================================================
+// ✅ MIN_OK_LEN 制御（2026-01-28 / まず会話を流す）
+// ============================================================
+//
+// 目的：
+// - chat で短文が出ても OK_TOO_SHORT_TO_RETRY を出さない
+// - allow.short_reply_ok=true を最優先で尊重
+// - micro / greeting は常に 0
+//
+// ============================================================
 
-  const MIN_OK_LEN = isMicroOrGreetingNow ? 0 : 80;
+// 入力種別の最終確定
+const inputKindNow = String(inputKind ?? inputKindFromMeta ?? inputKindFromCtx ?? 'chat');
+const isMicroOrGreetingNow = inputKindNow === 'micro' || inputKindNow === 'greeting';
 
-  // （任意）確認ログ：一旦だけ入れてOK
-  console.warn('[IROS/rephraseEngine][MIN_OK_KIND]', {
-    inputKindNow,
-    isMicroOrGreetingNow,
+// ------------------------------------------------------------
+// SHIFT slot は上で 1回だけ取得済み（ここでは再定義しない）
+// ------------------------------------------------------------
+
+// SHIFT.text から JSON 部分を抽出して parse（失敗したら null）
+// - 例: '@SHIFT {...}' / '{...}' のどちらも対応
+const parseShiftJson = (t?: string | null): any | null => {
+  const raw = String(t ?? '').trim();
+  if (!raw) return null;
+
+  // 先頭に @SHIFT 等が付くケースを想定して、最初の { と最後の } を拾う
+  const i0 = raw.indexOf('{');
+  const i1 = raw.lastIndexOf('}');
+  if (i0 < 0 || i1 < 0 || i1 <= i0) return null;
+
+  const jsonText = raw.slice(i0, i1 + 1).trim();
+  try {
+    return JSON.parse(jsonText);
+  } catch {
+    return null;
+  }
+};
+
+const shiftObj = parseShiftJson(shiftSlot?.text);
+
+// ------------------------------------------------------------
+// allow.short_reply_ok 判定
+// ------------------------------------------------------------
+const shortReplyOk =
+  Boolean(shiftObj?.allow?.short_reply_ok) ||
+  Boolean(shiftObj?.allow?.shortReplyOk) ||
+  Boolean((opts as any)?.allow?.short_reply_ok) ||
+  Boolean((opts as any)?.allow?.shortReplyOk) ||
+  false;
+
+// ------------------------------------------------------------
+// MIN_OK_LEN 決定
+// ------------------------------------------------------------
+// - micro / greeting : 0
+// - chat + short_reply_ok : 0
+// - chat : 40（従来80は強すぎ）
+// - その他 : 80
+const MIN_OK_LEN = isMicroOrGreetingNow
+  ? 0
+  : inputKindNow === 'chat'
+    ? (shortReplyOk ? 0 : 40)
+    : 80;
+
+// ------------------------------------------------------------
+// ログ（1回に統一）
+// ------------------------------------------------------------
+console.log('[IROS/rephraseEngine][MIN_OK_KIND]', {
+  inputKindNow,
+  isMicroOrGreetingNow,
+  shortReplyOk,
+  MIN_OK_LEN,
+  reason: isMicroOrGreetingNow
+    ? 'micro_or_greeting'
+    : inputKindNow === 'chat'
+      ? (shortReplyOk ? 'chat_short_reply_ok' : 'chat_relaxed_40')
+      : 'default_80',
+  shiftTextHead: shiftSlot?.text ? safeHead(String(shiftSlot.text), 140) : null,
+  shiftObjHasAllow: Boolean(shiftObj?.allow),
+});
+
+
+const shouldOkTooShortToRetry =
+  !scaffoldActive &&
+  !isDirectTask &&
+  v?.ok &&
+  vLevelPre === 'OK' &&
+  candidateLen > 0 &&
+  candidateLen < MIN_OK_LEN;
+
+if (shouldOkTooShortToRetry) {
+  console.warn('[IROS/FLAGSHIP][OK_TOO_SHORT_TO_RETRY]', {
+    traceId: debug.traceId,
+    conversationId: debug.conversationId,
+    userCode: debug.userCode,
+    level: (v as any)?.level,
+    len: candidateLen,
+    min: MIN_OK_LEN,
+    head: safeHead(candidate, 160),
+  });
+  console.warn('[IROS/rephraseEngine][MIN_OK_DEBUG]', {
+    scaffoldActive,
+    isDirectTask,
+    v_ok: v?.ok,
+    vLevelPre,
+    candidateLen,
     MIN_OK_LEN,
   });
 
+  v = {
+    ...(v as any),
+    ok: false,
+    level: 'FATAL',
+    reasons: Array.from(new Set([...(v.reasons ?? []), 'OK_TOO_SHORT_TO_RETRY'])),
+  } as any;
+}
 
-  const shouldOkTooShortToRetry =
-    !scaffoldActive &&
-    !isDirectTask &&
-    v?.ok &&
-    vLevelPre === 'OK' &&
-    candidateLen > 0 &&
-    candidateLen < MIN_OK_LEN;
+// OKなら採用（※自然文が成立している場合ここで確定させる）
+const vLevel = String((v as any)?.level ?? '').toUpperCase();
 
-  if (shouldOkTooShortToRetry) {
-    console.warn('[IROS/FLAGSHIP][OK_TOO_SHORT_TO_RETRY]', {
-      traceId: debug.traceId,
-      conversationId: debug.conversationId,
-      userCode: debug.userCode,
-      level: (v as any)?.level,
-      len: candidateLen,
-      min: MIN_OK_LEN,
-      head: safeHead(candidate, 160),
-    });
-    console.warn('[IROS/rephraseEngine][MIN_OK_DEBUG]', {
-      scaffoldActive,
-      isDirectTask,
-      v_ok: v?.ok,
-      vLevelPre,
-      candidateLen,
-      MIN_OK_LEN,
-    });
+// ✅ “自然文OK” 判定（未定義の rephraseBlocks/rawLen を使わない）
+// - 目的：WARN でも「十分な厚み」があり、2nd PASS が逆効果になりやすいケースは確定採用
+// - 条件：長さOK（MIN_OK_LEN以上）かつ 段落（空行） or 複数行 を含む
+const naturalTextReady =
+  !scaffoldActive &&
+  !isDirectTask &&
+  candidateLen >= MIN_OK_LEN &&
+  (/\n{2,}/.test(candidate) || candidate.split('\n').filter(Boolean).length >= 3);
 
-    v = {
-      ...(v as any),
-      ok: false,
-      level: 'FATAL',
-      reasons: Array.from(new Set([...(v.reasons ?? []), 'OK_TOO_SHORT_TO_RETRY'])),
-    } as any;
-  }
+// (1) OK はそのまま採用
+if (v?.ok && vLevel === 'OK') {
+  return adoptAsSlots(candidate, 'FLAGSHIP_OK', { scaffoldActive });
+}
 
+// (2) ✅ WARN でも “自然文OK” なら確定採用（2nd PASSへ落とさない）
+//     ❌ FATAL は理由が品質NG（QCOUNT/CHEER等）なので、ここで確定採用しない
+if (vLevel === 'WARN' && naturalTextReady) {
+  return adoptAsSlots(candidate, 'FLAGSHIP_ACCEPT_AS_FINAL', {
+    scaffoldActive,
+    flagshipLevel: vLevel,
+    retrySuppressed: true,
+  });
+}
 
-  // OKなら採用（※自然文が成立している場合ここで確定させる）
-  const vLevel = String((v as any)?.level ?? '').toUpperCase();
+// (3) WARN は 2nd PASS へ
+if (vLevel === 'WARN') {
+  console.warn('[IROS/FLAGSHIP][WARN_TO_RETRY]', {
+    traceId: debug.traceId,
+    conversationId: debug.conversationId,
+    userCode: debug.userCode,
+    level: (v as any)?.level,
+    reasons: (v as any)?.reasons,
+  });
 
-  // ✅ “自然文OK” 判定（未定義の rephraseBlocks/rawLen を使わない）
-  // - 目的：WARN でも「十分な厚み」があり、2nd PASS が逆効果になりやすいケースは確定採用
-  // - 条件：長さOK（MIN_OK_LEN以上）かつ 段落（空行） or 複数行 を含む
-  const naturalTextReady =
-    !scaffoldActive &&
-    !isDirectTask &&
-    candidateLen >= MIN_OK_LEN &&
-    (/\n{2,}/.test(candidate) || candidate.split('\n').filter(Boolean).length >= 3);
-
-  // (1) OK はそのまま採用
-  if (v?.ok && vLevel === 'OK') {
-    return adoptAsSlots(candidate, 'FLAGSHIP_OK', { scaffoldActive });
-  }
-
-  // (2) ✅ WARN でも “自然文OK” なら確定採用（2nd PASSへ落とさない）
-  //     ❌ FATAL は理由が品質NG（QCOUNT/CHEER等）なので、ここで確定採用しない
-  if (vLevel === 'WARN' && naturalTextReady) {
-    return adoptAsSlots(candidate, 'FLAGSHIP_ACCEPT_AS_FINAL', {
-      scaffoldActive,
-      flagshipLevel: vLevel,
-      retrySuppressed: true,
-    });
-  }
-
-  // (3) WARN は 2nd PASS へ
-  if (vLevel === 'WARN') {
-    console.warn('[IROS/FLAGSHIP][WARN_TO_RETRY]', {
-      traceId: debug.traceId,
-      conversationId: debug.conversationId,
-      userCode: debug.userCode,
-      level: (v as any)?.level,
-      reasons: (v as any)?.reasons,
-    });
-
-    v = {
-      ...(v as any),
-      ok: false,
-      level: 'FATAL',
-      reasons: Array.from(
-        new Set([ ...(((v as any)?.reasons ?? []) as any[]), 'WARN_TO_RETRY' ]),
-      ),
-    } as any;
-  }
-
-
-  // (3) WARN は 2nd PASS へ
-  if (vLevel === 'WARN') {
-    console.warn('[IROS/FLAGSHIP][WARN_TO_RETRY]', {
-      traceId: debug.traceId,
-      conversationId: debug.conversationId,
-      userCode: debug.userCode,
-      level: (v as any)?.level,
-      reasons: (v as any)?.reasons,
-    });
-
-    v = {
-      ...(v as any),
-      ok: false,
-      level: 'FATAL',
-      reasons: Array.from(
-        new Set([ ...(((v as any)?.reasons ?? []) as any[]), 'WARN_TO_RETRY' ]),
-      ),
-    } as any;
-  }
-
+  v = {
+    ...(v as any),
+    ok: false,
+    level: 'FATAL',
+    reasons: Array.from(
+      new Set([ ...(((v as any)?.reasons ?? []) as any[]), 'WARN_TO_RETRY' ]),
+    ),
+  } as any;
+}
 
 // ---------------------------------------------
 // FATAL → 1回だけ再生成（2ndは“再作文”ではなく“編集/復元+整形”）
@@ -2519,26 +2570,11 @@ const baseDraftForRepair: string = (() => {
   }
 
   if (preferCandidateBecauseTooShort) {
-    // ✅ “短いだけ” の救済は candidate を核にしない（短文が固定化して戻るのを防ぐ）
-    // - 観測（このターンの userText）を核に「2〜4文・質問なし」で安全に増補した draft を土台にする
-    const u0 = String(userText ?? '').trim();
-    const u = u0.length ? u0 : String((debug as any)?.lastUserHead ?? '').trim();
-
-    const safeExpandFromObs = (s: string): string => {
-      const x = String(s ?? '').trim();
-      if (!x) return '';
-      // 新情報を足さず、言い換えで厚みだけ作る（質問禁止）
-      // 80未満になりやすい入力でも、最低2段落にする
-      return [
-        `${x}。`,
-        `いまはそれだけで、場の重さが伝わる。`,
-        ``,
-        `同じ一言でも、どこがいちばん引っかかっているかだけ残しておきたい。`,
-      ].join('\n');
-    };
-
-    const obsDraft = safeExpandFromObs(u);
-    return obsDraft || a || c || b || '';
+    // ✅ “短いだけ” で固定テンプレを生成しない
+    // - OK_TOO_SHORT_TO_RETRY は 2nd PASS（編集）に回すための理由
+    // - ここで固定文（「場の重さ〜」等）を生成すると、短文が永続固定化する
+    // - 素材は candidate / seedDraft / seedFromSlots に限定し、増補は LLM（2nd PASS）側に任せる
+    return b || a || c || '';
   }
 
   if (preferSeedDraft) {

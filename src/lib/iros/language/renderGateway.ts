@@ -120,14 +120,21 @@ function looksLikeSilence(text: string, extra: any) {
 
 function looksLikeIR(text: string, extra: any) {
   const t = norm(text);
+
+  // 1) 本文に IR の構造ラベルが含まれるなら IR 本文
   if (t.includes('観測対象') && t.includes('フェーズ')) return true;
   if (t.includes('位相') && t.includes('深度')) return true;
 
-  const hint = String(extra?.requestedMode ?? extra?.modeHint ?? extra?.mode ?? '').toUpperCase();
-  if (hint.includes('IR')) return true;
+  // 2) ✅ hint(IR) は「本文が空/ほぼ空」のときだけ補助的に使う
+  //    （rephraseBlocks の詩文判定で hint が暴発して IR 扱いになるのを防ぐ）
+  if (!t) {
+    const hint = String(extra?.requestedMode ?? extra?.modeHint ?? extra?.mode ?? '').toUpperCase();
+    if (hint.includes('IR')) return true;
+  }
 
   return false;
 }
+
 
 function splitToLines(text: string): string[] {
   const t = String(text ?? '').replace(/\r\n/g, '\n');
@@ -939,19 +946,44 @@ export function renderGatewayAsReply(args: {
     ? 'rephrase'
     : 'none';
 
-  const isIR = looksLikeIR(fallbackText, extra);
-  const isSilence = looksLikeSilence(fallbackText, extra);
+    const isIR = looksLikeIR(fallbackText, extra);
+    const isSilence = looksLikeSilence(fallbackText, extra);
 
-  const shortException = isSilence || isMicro || q1Suppress;
+    const shortException = isSilence || isMicro || q1Suppress;
 
-  const maxLinesFinal = shortException ? 3 : Math.max(1, Math.floor(profileMaxLines ?? argMaxLines ?? DEFAULT_MAX_LINES));
+    // ✅ ir診断は「本文を切らない」方針（render-v2 の maxLines で80字付近に落ちるのを防ぐ）
+    // - profile/args が 16以上を指定していればそれを尊重
+    // - 指定が無ければ最低16行は許可（DEFAULT_MAX_LINES=8 を上書き）
+    const baseMaxLines = Math.floor(profileMaxLines ?? argMaxLines ?? DEFAULT_MAX_LINES);
+    const maxLinesFinal = isIR
+      ? Math.max(16, Number.isFinite(baseMaxLines) && baseMaxLines > 0 ? baseMaxLines : 16)
+      : shortException
+      ? 3
+      : Math.max(1, Number.isFinite(baseMaxLines) && baseMaxLines > 0 ? baseMaxLines : DEFAULT_MAX_LINES);
 
-  // ✅ slots を本文に使うのは “LLM本文が完全に空” のときだけ（最終フォールバック）
-  const shouldUseSlotsAsLastResort = !picked && hasAnySlots && !isSilence && !isIR && slotPlanPolicy === 'FINAL';
 
-  let blocks: RenderBlock[] = [];
-  let usedSlots = false;
-  let scaffoldApplied = false;
+    // ✅ ir診断(seed-only) は LLM を呼ばない設計なので、
+    //    SEED_TEXT がある場合のみ slots last resort を許可する
+    const hasSeedText =
+      Array.isArray((slotExtracted as any)?.keys) &&
+      (slotExtracted as any).keys.some(
+        (k: any) => String(k ?? '').toUpperCase() === 'SEED_TEXT',
+      );
+
+    // ✅ slots を本文に使うのは “LLM本文が完全に空” のときだけ（最終フォールバック）
+    // - 通常は IR を除外（診断フォーマット混入を防ぐ）
+    // - ただし IR でも SEED_TEXT のみは例外で許可（seed-only を画面に出すため）
+    const shouldUseSlotsAsLastResort =
+      !picked &&
+      hasAnySlots &&
+      !isSilence &&
+      slotPlanPolicy === 'FINAL' &&
+      (!isIR || hasSeedText);
+
+    let blocks: RenderBlock[] = [];
+    let usedSlots = false;
+    let scaffoldApplied = false;
+
 
   if (shouldUseSlotsAsLastResort) {
     // ✅ slots last resort でも、内部ディレクティブ（@TASK/@CONSTRAINTS/...）を落としてから使う
@@ -998,8 +1030,66 @@ export function renderGatewayAsReply(args: {
       return false;
     };
 
-    // ✅ 一本化：rephraseBlocks があれば常に blocks 経由で本文を組む（pickedFrom に依存しない）
-    if (Array.isArray(rephraseBlocks) && rephraseBlocks.length > 0) {
+    // ✅ IR（診断）では “診断フォーマット” を最優先で守る
+    // - rephraseBlocks は本文を置換して短文化しやすい（今回 outLen=80 が発生）
+    // - IR時は「短すぎる rephraseBlocks」を採用禁止にし、commit本文（base側）を勝たせる
+    //
+    // ✅ ただし「IRフォーマットを保持し、かつ短文化していない rephraseBlocks」なら採用してよい。
+    // - route 側の fallback blocks（rephraseAttachSkipped=true）はもちろんOK
+    // - それ以外でも、blocks 自体が IR 形式を保ち、かつ base本文に対して十分な長さならOK
+    const blocksJoinedForIRCheck =
+      Array.isArray(rephraseBlocks) && rephraseBlocks.length > 0
+        ? rephraseBlocks
+            .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim())
+            .filter(Boolean)
+            .join('\n')
+        : '';
+
+    // ✅ IRの“基準本文”は extra.finalAssistantText（commit本文）があればそれを最優先
+    // - これがあると「短い rephrase に負ける」事故を防げる
+    const irBaseTextCandidate =
+      (extraAny && typeof (extraAny as any).finalAssistantText === 'string' && (extraAny as any).finalAssistantText) ||
+      (extraAny && typeof (extraAny as any).resolvedText === 'string' && (extraAny as any).resolvedText) ||
+      base ||
+      '';
+
+    const irBaseText = isIR ? String(irBaseTextCandidate ?? '') : String(base ?? '');
+    const irBaseLen = norm(irBaseText).length;
+    const irJoinedLen = norm(blocksJoinedForIRCheck).length;
+
+    // ✅ IR時の rephraseBlocks 採用条件：
+    // 1) attachSkipped なら無条件でOK（route側の安全なfallback想定）
+    // 2) それ以外は looksLikeIR を満たし、かつ「短文化していない」こと
+    //    - 基準：base本文の 90% 以上（かつ最低120文字）
+    const allowRephraseBlocksInIR =
+      (Boolean((extraAny as any)?.rephraseAttachSkipped) &&
+        Array.isArray(rephraseBlocks) &&
+        rephraseBlocks.length > 0) ||
+      (Array.isArray(rephraseBlocks) &&
+        rephraseBlocks.length > 0 &&
+        looksLikeIR(blocksJoinedForIRCheck, extra) &&
+        irJoinedLen >= Math.max(120, Math.floor(irBaseLen * 0.9)));
+
+    if (isIR && !allowRephraseBlocksInIR) {
+      const lines = splitToLines(irBaseText);
+      blocks = lines
+        .map((t) => stripInternalLabels(t))
+        .filter(Boolean)
+        .map((t) => ({ text: t }));
+
+      console.warn('[DEBUG/IR_BLOCK_PICK]', {
+        isIR,
+        rephraseAttachSkipped: Boolean((extraAny as any)?.rephraseAttachSkipped),
+        rephraseBlocksLen: Array.isArray(rephraseBlocks) ? rephraseBlocks.length : 0,
+        allowRephraseBlocksInIR,
+        irBaseLen,
+        irJoinedLen,
+        baseHead: irBaseText.slice(0, 140),
+        joinedHead: blocksJoinedForIRCheck.slice(0, 140),
+      });
+    } else if (Array.isArray(rephraseBlocks) && rephraseBlocks.length > 0) {
+
+      // ✅ 一本化：rephraseBlocks があれば常に blocks 経由で本文を組む（pickedFrom に依存しない）
       const cleanedBlocks = rephraseBlocks
         .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim())
         .filter((t: string) => !isBadBlock(t))
@@ -1009,7 +1099,6 @@ export function renderGatewayAsReply(args: {
         .map((t: string) => cutAfterIlineAndDropWriterNotes(t))
         .filter(Boolean)
         .map((t: string) => ({ text: t as string }));
-
 
       if (cleanedBlocks.length > 0) {
         blocks = cleanedBlocks;
@@ -1037,8 +1126,8 @@ export function renderGatewayAsReply(args: {
       blocks = minimalScaffold(base);
       scaffoldApplied = true;
     }
-  }
 
+  }
 
   const expandAllowed = EXPAND_ENABLED && !isSilence && !isIR;
   void expandAllowed; //（現状はログ用途のみ。将来分岐で使う）

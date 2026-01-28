@@ -15,21 +15,21 @@ export type RelationTone = 'harmony' | 'discord' | 'neutral' | null;
 
 /** 過去〜現在を集約した 1 点の「共鳴スナップショット」 */
 export type ResonanceSnapshot = {
-  q: QCode | null;                // 現在の Q（なければ null）
-  depth: Depth | null;            // 現在の深度レイヤ（なければ null）
-  phase: PhaseFlag;               // Inner / Outer / null
-  selfAcceptance: number | null;  // SelfAcceptance（0.0〜1.0想定・null可）
-  relationTone?: RelationTone;    // 関係性トーン（任意）
+  q: QCode | null; // 現在の Q（なければ null）
+  depth: Depth | null; // 現在の深度レイヤ（なければ null）
+  phase: PhaseFlag; // Inner / Outer / null
+  selfAcceptance: number | null; // SelfAcceptance（0.0〜1.0想定・null可）
+  relationTone?: RelationTone; // 関係性トーン（任意）
   /** 直近の Q の履歴（古い→新しい順） */
   historyQ?: QCode[];
 };
 
 /** 意図ラインの方向性（未来の動き方） */
 export type IntentDirection =
-  | 'stabilize'   // まず安全を確保・安定させる
-  | 'expand'      // 行動や創造を広げていく
-  | 'cutOff'      // 手放し・分離・距離を取る
-  | 'reconnect'   // 関係を整え直す
+  | 'stabilize' // まず安全を確保・安定させる
+  | 'expand' // 行動や創造を広げていく
+  | 'cutOff' // 手放し・分離・距離を取る
+  | 'reconnect' // 関係を整え直す
   | 'unknown';
 
 /** 意図ラインが主にどの帯域を触れているか（I層ラベル互換） */
@@ -167,8 +167,8 @@ export function deriveIntentLine(snapshot: ResonanceSnapshot): IntentLineAnalysi
   const hasFutureMemory = tLayerHint != null;
 
   // ---------- 8) nowLabel / guidanceHint はテンプレを排除 ----------
-  const nowLabel = '';       // LLM が meta を見て自分の言葉で語る想定
-  const guidanceHint = '';   // 同上
+  const nowLabel = ''; // LLM が meta を見て自分の言葉で語る想定
+  const guidanceHint = ''; // 同上
 
   // coreNeed も、いったん構造だけ残して later refinement 可能
   const coreNeed: string | null = null;

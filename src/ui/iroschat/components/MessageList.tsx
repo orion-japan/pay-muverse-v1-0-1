@@ -39,11 +39,16 @@ type IrosMessage = {
 
     // ★ WILLエンジンから返ってくる「次の一歩」候補
     nextStep?: {
-      gear?: 'safety' | 'soft-rotate' | 'full-rotate' | string;
+      gear?: 'safety' | 'soft-rotate' | 'full-rotate' | 'it-demo' | string;
       options?: {
-        key: string; // A / B / C / D など
-        label: string; // ボタンに表示する短い文
-        description?: string; // （あれば）説明文
+        /** ✅ choiceId（IrosButton側で必須） */
+        id: string;
+        /** 表示用キー（A/B/C など） */
+        key?: string;
+        /** ボタンに表示する短い文 */
+        label: string;
+        /** （あれば）説明文 */
+        description?: string;
       }[];
     };
 
@@ -114,37 +119,6 @@ const qBadgeStyle: React.CSSProperties = {
   color: '#4338ca',
 };
 
-/** Vision / Hint 用のヘッダーバー */
-const seedHeaderStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: 8,
-  padding: '6px 10px 4px',
-  marginBottom: 6,
-  borderRadius: 10,
-  background:
-    'linear-gradient(135deg, rgba(56, 189, 248, 0.1), rgba(129, 140, 248, 0.15))',
-  border: '1px solid rgba(59, 130, 246, 0.35)',
-};
-
-const seedLabelStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 6,
-  fontSize: 11,
-  fontWeight: 600,
-  color: '#0f172a',
-};
-
-const seedTLHintStyle: React.CSSProperties = {
-  padding: '2px 8px',
-  borderRadius: 999,
-  fontSize: 10,
-  background: 'rgba(37, 99, 235, 0.08)',
-  color: '#1d4ed8',
-};
-
 /** [object Object]対策：本文として使える文字列が無い object は「表示しない」 */
 function toSafeString(v: unknown): string {
   if (typeof v === 'string') return v;
@@ -180,19 +154,15 @@ function toSafeString(v: unknown): string {
 function stripIrosMetaHeader(raw: string): string {
   if (!raw) return '';
 
-  // 1) まず「先頭行」にタグがあるケース
   const lines = raw.split('\n');
   const first = lines[0]?.trimStart() ?? '';
 
   if (!first.startsWith('【IROS_STATE_META】')) return raw;
 
-  // 1-a) 先頭行が「タグだけ」のケース → 次行以降へ
+  // 先頭行が「タグだけ」のケース → 次行以降へ
   if (first === '【IROS_STATE_META】') {
-    // JSONが数行に渡る可能性があるので、最初の行が「{」から始まるなら
-    // その JSON ブロックをざっくり飛ばして、残りを返す
     let i = 1;
     if ((lines[i] ?? '').trimStart().startsWith('{')) {
-      // 簡易：括弧の深さで JSON ブロック終端を探す（失敗しても安全に進む）
       let depth = 0;
       for (; i < lines.length; i++) {
         const s = lines[i];
@@ -209,9 +179,14 @@ function stripIrosMetaHeader(raw: string): string {
     return lines.slice(i).join('\n').trimStart();
   }
 
-  // 1-b) 先頭行が「タグ + JSON + もしかして本文」になってるケース
-  // 例: 【IROS_STATE_META】{"qCode":"Q3"}\n本文...
+  // 先頭行が「タグ + JSON」で、本文は次行以降にある想定
   return lines.slice(1).join('\n').trimStart();
+}
+
+/** NextStepタグを表示から消す（先頭に複数ついてても全部落とす） */
+function stripNextStepTagsForDisplay(raw: string): string {
+  if (!raw) return '';
+  return raw.replace(/^\s*(\[[a-zA-Z0-9_\-]+\]\s*)+/g, '').trimStart();
 }
 
 /* ========= I層テンプレ → GPT風Markdown 変換 ========= */
@@ -343,7 +318,6 @@ function transformIrTemplateToMarkdown(input: string): string {
   return out.join('\n');
 }
 
-
 /**
  * 太字まわりのゆらぎを正規化する
  * - "** 〜 **" → "**〜**"（先頭/末尾の空白を削る）
@@ -369,7 +343,7 @@ export default function MessageList() {
       loading: boolean;
       error?: string | null;
       sendNextStepChoice?: (opt: {
-        key: string;
+        key: string; // ✅ ここは choiceId を渡す
         label: string;
         gear?: string | null;
       }) => Promise<unknown>;
@@ -447,143 +421,180 @@ export default function MessageList() {
         const isUser = m.role === 'user';
         const iconSrc = isUser ? resolveUserAvatar(m) : '/ir.png';
 
-        // ★ メタを本文から隠す：toSafeString → stripIrosMetaHeader → transform → normalize
+        // ★ メタを本文から隠す：toSafeString → stripIrosMetaHeader → stripNextStepTags → transform → normalize
         const rawText = stripIrosMetaHeader(toSafeString(m.text));
         const displayText = stripNextStepTagsForDisplay(rawText);
-        const safeText = normalizeBoldMarks(transformIrTemplateToMarkdown(displayText));
-        /** NextStepタグを表示から消す（先頭に複数ついてても全部落とす） */
-function stripNextStepTagsForDisplay(raw: string): string {
-  if (!raw) return '';
-  return raw.replace(/^\s*(\[[a-zA-Z0-9_\-]+\]\s*)+/g, '').trimStart();
-}
+        const safeText = normalizeBoldMarks(
+          transformIrTemplateToMarkdown(displayText),
+        );
 
-// ✅ 表示用Qコードは「現在Q」を優先して拾う（targetQ / goalTargetQ は表示に使わない）
-const qToShowRaw =
-  (m.meta?.qCode as any) ??
-  (m.meta?.q as any) ??
-  (m.meta?.unified?.q?.current as any) ??
-  ((m as any)?.q_code as any) ??
-  ((m as any)?.q as any) ??
-  null;
+        // ✅ UIモード（SILENCE判定）: serverの meta.extra.uiMode を最優先で拾う
+        const uiMode =
+          (m.meta?.extra?.uiMode as string | undefined) ??
+          ((m.meta as any)?.uiMode as string | undefined) ??
+          null;
 
-// 安全弁：Q1〜Q5 以外は出さない
-const qToShowSafe =
-  typeof qToShowRaw === 'string' && /^Q[1-5]$/.test(qToShowRaw)
-    ? (qToShowRaw as 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5')
-    : null;
+        const isSilence = !isUser && uiMode === 'SILENCE';
 
-const isVisionMode = !isUser && m.meta?.mode === 'vision';
-const isVisionHint =
-  !isUser && m.meta?.mode !== 'vision' && !!m.meta?.tLayerModeActive === true;
-const tHint = m.meta?.tLayerHint || 'T2';
+        console.log('[IROS UI][MessageList]', {
+          id: m.id,
+          role: m.role,
+          textType: typeof m.text,
+          textRaw: m.text,
+          toSafeString: toSafeString(m.text),
+          rawText,
+          displayText,
+          safeText,
+          uiMode,
+          isSilence,
+          nextStep: m.meta?.nextStep
+            ? {
+                gear: m.meta.nextStep.gear,
+                optionsLen: m.meta.nextStep.options?.length ?? 0,
+              }
+            : null,
+        });
 
-const nextStep = m.meta?.nextStep;
+        // ✅ 表示用Qコードは「現在Q」を優先して拾う（targetQ / goalTargetQ は表示に使わない）
+        const qToShowRaw =
+          (m.meta?.qCode as any) ??
+          (m.meta?.q as any) ??
+          (m.meta?.unified?.q?.current as any) ??
+          ((m as any)?.q_code as any) ??
+          ((m as any)?.q as any) ??
+          null;
 
-// ✅ UIモード（SILENCE判定）: serverの meta.extra.uiMode を最優先で拾う
-const uiMode =
-  (m.meta?.extra?.uiMode as string | undefined) ??
-  ((m.meta as any)?.uiMode as string | undefined) ??
-  null;
+        // 安全弁：Q1〜Q5 以外は出さない
+        const qToShowSafe =
+          typeof qToShowRaw === 'string' && /^Q[1-5]$/.test(qToShowRaw)
+            ? (qToShowRaw as 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5')
+            : null;
 
-const isSilence = !isUser && uiMode === 'SILENCE';
+        const nextStep = m.meta?.nextStep;
+        const nextStepGear = (nextStep?.gear as IrosNextStepGear) ?? 'safety';
+        const nextStepOptions = (nextStep?.options ?? []).filter(
+          (x) => x && typeof x.id === 'string' && x.id.trim().length > 0,
+        );
 
-return (
-  <div
-    key={m.id}
-    className={`message ${isUser ? 'is-user' : 'is-assistant'}`}
-  >
-    {/* ▼ アイコン＋Qバッジを横一列に並べるヘッダー行 ▼ */}
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: isUser ? 'flex-end' : 'flex-start',
-        gap: 6,
-        marginBottom: 4,
-      }}
-    >
-      {/* アバター */}
-      <div className="avatar" style={{ alignSelf: 'center' }}>
-        <img
-          src={iconSrc}
-          alt={isUser ? 'you' : 'Iros'}
-          width={AVATAR_SIZE}
-          height={AVATAR_SIZE}
-          onError={(e) => {
-            const el = e.currentTarget as HTMLImageElement & {
-              dataset: Record<string, string | undefined>;
-            };
-            if (!el.dataset.fallback1) {
-              el.dataset.fallback1 = '1';
-              el.src = FALLBACK_USER;
-              return;
-            }
-            if (!el.dataset.fallback2) {
-              el.dataset.fallback2 = '1';
-              el.src = FALLBACK_DATA;
-            }
-          }}
-          style={{
-            borderRadius: '50%',
-            objectFit: 'cover',
-            display: 'block',
-          }}
-        />
-      </div>
+        return (
+          <div
+            key={m.id}
+            className={`message ${isUser ? 'is-user' : 'is-assistant'}`}
+          >
+            {/* ▼ アイコン＋Qバッジを横一列に並べるヘッダー行 ▼ */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: isUser ? 'flex-end' : 'flex-start',
+                gap: 6,
+                marginBottom: 4,
+              }}
+            >
+              {/* アバター */}
+              <div className="avatar" style={{ alignSelf: 'center' }}>
+                <img
+                  src={iconSrc}
+                  alt={isUser ? 'you' : 'Iros'}
+                  width={AVATAR_SIZE}
+                  height={AVATAR_SIZE}
+                  onError={(e) => {
+                    const el = e.currentTarget as HTMLImageElement & {
+                      dataset: Record<string, string | undefined>;
+                    };
+                    if (!el.dataset.fallback1) {
+                      el.dataset.fallback1 = '1';
+                      el.src = FALLBACK_USER;
+                      return;
+                    }
+                    if (!el.dataset.fallback2) {
+                      el.dataset.fallback2 = '1';
+                      el.src = FALLBACK_DATA;
+                    }
+                  }}
+                  style={{
+                    borderRadius: '50%',
+                    objectFit: 'cover',
+                    display: 'block',
+                  }}
+                />
+              </div>
 
-      {/* Qバッジ：Iros（assistant）のときだけ */}
-      {!isUser && qToShowSafe && (
-        <div className="q-badge" style={qBadgeStyle}>
-          <span
-            style={{
-              width: 10,
-              height: 10,
-              borderRadius: 999,
-              background: m.color || 'rgba(129,140,248,0.85)',
-              display: 'inline-block',
-            }}
-          />
-          {qToShowSafe}
-        </div>
-      )}
-    </div>
+              {/* Qバッジ：Iros（assistant）のときだけ */}
+              {!isUser && qToShowSafe && (
+                <div className="q-badge" style={qBadgeStyle}>
+                  <span
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: 999,
+                      background: m.color || 'rgba(129,140,248,0.85)',
+                      display: 'inline-block',
+                    }}
+                  />
+                  {qToShowSafe}
+                </div>
+              )}
+            </div>
 
-    {/* 吹き出し */}
-    <div
-      className={`bubble ${isUser ? 'is-user' : 'is-assistant'}`}
-      style={{
-        ...(isUser ? userBubbleStyle : assistantBubbleShellStyle),
-        alignSelf: isUser ? 'flex-end' : 'flex-start',
-        maxWidth: 'min(760px, 88%)',
-      }}
-    >
-{/* 本文 */}
-<div
-  className="msgBody"
-  style={{ fontSize: 14, lineHeight: 1.9, color: '#111827' }}
->
-  {isSilence ? (
-    <div
-      className="assistant-silence"
-      style={{
-        opacity: 0.75,
-        letterSpacing: 2,
-        padding: '2px 0',
-        userSelect: 'none',
-      }}
-      aria-label="silence"
-    >
-      …
-    </div>
-  ) : (
-    <ChatMarkdown text={safeText} />
-  )}
-</div>
+            {/* 吹き出し */}
+            <div
+              className={`bubble ${isUser ? 'is-user' : 'is-assistant'}`}
+              style={{
+                ...(isUser ? userBubbleStyle : assistantBubbleShellStyle),
+                alignSelf: isUser ? 'flex-end' : 'flex-start',
+                maxWidth: 'min(760px, 88%)',
+              }}
+            >
+              {/* 本文 */}
+              <div
+                className="msgBody"
+                style={{ fontSize: 14, lineHeight: 1.9, color: '#111827' }}
+              >
+                {isSilence ? (
+                  <div
+                    className="assistant-silence"
+                    style={{
+                      opacity: 0.75,
+                      letterSpacing: 2,
+                      padding: '2px 0',
+                      userSelect: 'none',
+                    }}
+                    aria-label="silence"
+                  >
+                    …
+                  </div>
+                ) : (
+                  <ChatMarkdown text={safeText} />
+                )}
+              </div>
 
-    </div>
-  </div>
-);
-
+              {/* NextStep ボタン（必要なら表示） */}
+              {!isUser &&
+                !isSilence &&
+                nextStepOptions.length > 0 &&
+                typeof sendNextStepChoice === 'function' && (
+                  <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {nextStepOptions.map((opt) => (
+                      <IrosButton
+                        key={opt.id}
+                        gear={nextStepGear}
+                        option={opt}
+                        onClick={(picked) => {
+                          // ✅ sendNextStepChoice は choiceId を key に載せて送る（hook側の既存仕様に合わせる）
+                          void sendNextStepChoice({
+                            key: picked.id,
+                            label: picked.label,
+                            gear: nextStepGear ?? null,
+                          });
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+            </div>
+          </div>
+        );
       })}
 
       {loading && <div className={styles.loadingRow}>...</div>}
