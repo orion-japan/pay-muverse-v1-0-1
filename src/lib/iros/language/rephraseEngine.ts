@@ -18,6 +18,18 @@
 //
 // NOTE：このファイルは “運用上の安全” のため、判定と復元を分離し、
 //       最終的に「採用できる本文」を slot へ attach する責務に絞る。
+// ---------------------------------------------
+// IMPORTANT — DESIGN GUARD (DO NOT REDEFINE)
+//
+// This module is responsible ONLY for expression shaping (writer).
+// It must NOT:
+// - make decisions on behalf of the user
+// - change philosophical/safety stance (user agency, SUN/north-star)
+// - introduce new “diagnosis/decision” logic
+//
+// Meta values are constraints/background, not answers.
+// Preserve user agency at all times.
+// ---------------------------------------------
 
 import crypto from 'node:crypto';
 import { chatComplete } from '../../llm/chatComplete';
