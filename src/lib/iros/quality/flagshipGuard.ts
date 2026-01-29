@@ -12,6 +12,17 @@
 // ✅ 追加（2026-01-28）
 // - 「とにかく会話を流す」優先で、normalChat の WARN/FATAL をさらに弱める
 // - 採点の内訳ログ（hedge等）と、WARN加点後ログを固定して “版ズレ/反映漏れ” を即発見できるようにする
+// ---------------------------------------------
+// IMPORTANT — DESIGN GUARD (DO NOT REDEFINE)
+//
+// This guard must NOT judge meaning, intent, or make decisions.
+// It ONLY protects UX quality (thin/hedge/generic) and stability.
+//
+// It must NOT:
+// - introduce decision-making or “correct answer” behavior
+// - change Sofia/Iros philosophical stance (user agency)
+// - add meta leakage into output
+// ---------------------------------------------
 
 // ✅ 実行ファイル同一性の証明（.next の別チャンク / 古い版混入を潰す）
 const IROS_FLAGSHIP_GUARD_REV = 'guard-rev-2026-01-28-b';

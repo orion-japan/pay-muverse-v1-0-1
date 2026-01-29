@@ -1,6 +1,17 @@
 // src/lib/iros/language/renderGateway.ts
 import { renderV2, type RenderBlock } from './renderV2';
 import { logConvEvidence } from '../conversation/evidenceLog';
+// ---------------------------------------------
+// IMPORTANT — DESIGN GUARD (DO NOT REDEFINE)
+//
+// This module is the final renderer for user-visible text.
+// It must NOT:
+// - leak internal labels/meta/protocol into user text
+// - change philosophical/safety stance (user agency, SUN/north-star)
+// - add “decision/diagnosis” behavior
+//
+// Render is responsible for presentation safety only.
+// ---------------------------------------------
 
 // ✅ Phase11 marker（「本当にこのファイルが読まれてるか」ログ証明用）
 const IROS_RENDER_GATEWAY_REV = 'phase11-open-close-v2-LOADED';
