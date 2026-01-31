@@ -10,19 +10,12 @@ import { authorizeChat, captureChat, makeIrosRef } from '@/lib/credits/auto';
 
 import { loadIrosUserProfile } from '@/lib/iros/server/loadUserProfile';
 import { saveIrosTrainingSample } from '@/lib/iros/server/saveTrainingSample';
-import {
-  handleIrosReply,
-  type HandleIrosReplyOutput,
-} from '@/lib/iros/server/handleIrosReply';
+import { handleIrosReply, type HandleIrosReplyOutput } from '@/lib/iros/server/handleIrosReply';
 
 import type { RememberScopeKind } from '@/lib/iros/remember/resolveRememberBundle';
 import { resolveModeHintFromText, resolveRememberScope } from './_mode';
 
-import {
-  attachNextStepMeta,
-  extractNextStepChoiceFromText,
-  findNextStepOptionById,
-} from '@/lib/iros/nextStepOptions';
+import { attachNextStepMeta, extractNextStepChoiceFromText, findNextStepOptionById } from '@/lib/iros/nextStepOptions';
 
 import { buildResonanceVector } from '@/lib/iros/language/resonanceVector';
 import { renderReply } from '@/lib/iros/language/renderReply';
@@ -32,6 +25,7 @@ import { applyRulebookCompat } from '@/lib/iros/policy/rulebook';
 import { persistAssistantMessageToIrosMessages } from '@/lib/iros/server/persistAssistantMessageToIrosMessages';
 import { runNormalBase } from '@/lib/iros/conversation/normalBase';
 import { loadIrosMemoryState } from '@/lib/iros/memoryState';
+import { maybeAttachRephraseForRenderV2 } from './_impl/rephrase';
 
 import {
   pickUserCode,
@@ -59,17 +53,14 @@ import {
 const CORS_HEADERS = {
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'GET, POST, OPTIONS',
-  'access-control-allow-headers':
-    'Content-Type, Authorization, x-user-code, x-credit-cost',
+  'access-control-allow-headers': 'Content-Type, Authorization, x-user-code, x-credit-cost',
 } as const;
 
 // 既定：1往復 = 5pt（ENVで上書き可）
 const CHAT_CREDIT_AMOUNT = Number(process.env.IROS_CHAT_CREDIT_AMOUNT ?? 5);
 
 // 残高しきい値（ENVで上書き可）
-const LOW_BALANCE_THRESHOLD = Number(
-  process.env.IROS_LOW_BALANCE_THRESHOLD ?? 10,
-);
+const LOW_BALANCE_THRESHOLD = Number(process.env.IROS_LOW_BALANCE_THRESHOLD ?? 10);
 
 const PERSIST_POLICY = 'REPLY_SINGLE_WRITER' as const;
 
@@ -117,8 +108,7 @@ export async function POST(req: NextRequest) {
     // 1) auth
     const DEV_BYPASS = process.env.IROS_DEV_BYPASS_AUTH === '1';
     const hUserCode = req.headers.get('x-user-code');
-    const bypassUserCode =
-      hUserCode && hUserCode.trim().length > 0 ? hUserCode.trim() : null;
+    const bypassUserCode = hUserCode && hUserCode.trim().length > 0 ? hUserCode.trim() : null;
 
     let auth: any = null;
     if (DEV_BYPASS && bypassUserCode) {
@@ -127,12 +117,8 @@ export async function POST(req: NextRequest) {
       auth = await verifyFirebaseAndAuthorize(req);
       if (!auth?.ok) {
         const headers: Record<string, string> = { ...CORS_HEADERS };
-        if (traceIdEarly) headers['x-trace-id'] = String(traceIdEarly);
-
-        return NextResponse.json(
-          { ok: false, error: 'unauthorized' },
-          { status: 401, headers },
-        );
+        headers['x-trace-id'] = String(traceIdEarly);
+        return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401, headers });
       }
     }
 
@@ -142,18 +128,16 @@ export async function POST(req: NextRequest) {
     const text: string | undefined = body?.text;
     const hintText: string | undefined = body?.hintText ?? body?.modeHintText;
     const modeHintInput: string | undefined = body?.modeHint;
-    const extra: Record<string, any> | undefined = body?.extra;
+    const extraReq: Record<string, any> | undefined = body?.extra;
 
     // ✅ body側の traceId があれば優先し、無ければ early を使う（ここで確定）
     const traceId = (() => {
-      const fromExtra = extra?.traceId ?? extra?.trace_id ?? null;
+      const fromExtra = extraReq?.traceId ?? extraReq?.trace_id ?? null;
       const s = String(fromExtra ?? traceIdEarly ?? '').trim();
       return s || String(traceIdEarly);
     })();
 
-    const chatHistory: unknown[] | undefined = Array.isArray(body?.history)
-      ? (body.history as unknown[])
-      : undefined;
+    const chatHistory: unknown[] | undefined = Array.isArray(body?.history) ? (body.history as unknown[]) : undefined;
 
     const styleInput: string | undefined =
       typeof body?.style === 'string'
@@ -164,14 +148,9 @@ export async function POST(req: NextRequest) {
 
     if (!conversationId || !text) {
       const headers: Record<string, string> = { ...CORS_HEADERS };
-      if (traceId) headers['x-trace-id'] = String(traceId);
-
+      headers['x-trace-id'] = String(traceId);
       return NextResponse.json(
-        {
-          ok: false,
-          error: 'bad_request',
-          detail: 'conversationId and text are required',
-        },
+        { ok: false, error: 'bad_request', detail: 'conversationId and text are required' },
         { status: 400, headers },
       );
     }
@@ -184,26 +163,13 @@ export async function POST(req: NextRequest) {
           : 'default';
 
     // 3) mode
-    const mode = resolveModeHintFromText({
-      modeHint: modeHintInput,
-      hintText,
-      text,
-    });
-
-    const rememberScope: RememberScopeKind | null = resolveRememberScope({
-      modeHint: modeHintInput,
-      hintText,
-      text,
-    });
+    const mode = resolveModeHintFromText({ modeHint: modeHintInput, hintText, text });
+    const rememberScope: RememberScopeKind | null = resolveRememberScope({ modeHint: modeHintInput, hintText, text });
 
     // 4) ids
     const userCode = pickUserCode(req, auth);
-
     if (!userCode) {
-      return NextResponse.json(
-        { ok: false, error: 'unauthorized_user_code_missing' },
-        { status: 401, headers: CORS_HEADERS },
-      );
+      return NextResponse.json({ ok: false, error: 'unauthorized_user_code_missing' }, { status: 401, headers: CORS_HEADERS });
     }
 
     // 5) credit amount（body.cost → header → default）
@@ -218,43 +184,27 @@ export async function POST(req: NextRequest) {
             ? Number(headerCost)
             : NaN;
 
-    const CREDIT_AMOUNT =
-      Number.isFinite(parsed) && parsed > 0 ? Number(parsed) : CHAT_CREDIT_AMOUNT;
-
+    const CREDIT_AMOUNT = Number.isFinite(parsed) && parsed > 0 ? Number(parsed) : CHAT_CREDIT_AMOUNT;
     const creditRef = makeIrosRef(conversationId, startedAt);
 
     // 6) authorize
-    const authRes = await authorizeChat(
-      req,
-      userCode,
-      CREDIT_AMOUNT,
-      creditRef,
-      conversationId,
-    );
-
+    const authRes = await authorizeChat(req, userCode, CREDIT_AMOUNT, creditRef, conversationId);
     if (!authRes.ok) {
       const errCode = (authRes as any).error ?? 'credit_authorize_failed';
       const res = NextResponse.json(
-        {
-          ok: false,
-          error: errCode,
-          credit: { ref: creditRef, amount: CREDIT_AMOUNT, authorize: authRes },
-        },
+        { ok: false, error: errCode, credit: { ref: creditRef, amount: CREDIT_AMOUNT, authorize: authRes } },
         { status: 402, headers: CORS_HEADERS },
       );
       res.headers.set('x-reason', String(errCode));
       res.headers.set('x-user-code', userCode);
       res.headers.set('x-credit-ref', creditRef);
       res.headers.set('x-credit-amount', String(CREDIT_AMOUNT));
-      if (traceId) res.headers.set('x-trace-id', String(traceId));
+      res.headers.set('x-trace-id', String(traceId));
       return res;
     }
 
     // 7) low balance warn
-    let lowWarn:
-      | null
-      | { code: 'low_balance'; balance: number; threshold: number } = null;
-
+    let lowWarn: null | { code: 'low_balance'; balance: number; threshold: number } = null;
     if (Number.isFinite(LOW_BALANCE_THRESHOLD) && LOW_BALANCE_THRESHOLD > 0) {
       const { data: balRow, error: balErr } = await supabase
         .from('users')
@@ -265,11 +215,7 @@ export async function POST(req: NextRequest) {
       if (!balErr && balRow && balRow.sofia_credit != null) {
         const balance = Number(balRow.sofia_credit) || 0;
         if (balance < LOW_BALANCE_THRESHOLD) {
-          lowWarn = {
-            code: 'low_balance',
-            balance,
-            threshold: LOW_BALANCE_THRESHOLD,
-          };
+          lowWarn = { code: 'low_balance', balance, threshold: LOW_BALANCE_THRESHOLD };
         }
       }
     }
@@ -287,21 +233,15 @@ export async function POST(req: NextRequest) {
     const extracted = extractNextStepChoiceFromText(rawText);
 
     const choiceIdFromExtra =
-      extra && typeof (extra as any).choiceId === 'string'
-        ? String((extra as any).choiceId).trim()
-        : null;
+      extraReq && typeof (extraReq as any).choiceId === 'string' ? String((extraReq as any).choiceId).trim() : null;
 
     const extractedChoiceId =
-      extracted?.choiceId && String(extracted.choiceId).trim().length > 0
-        ? String(extracted.choiceId).trim()
-        : null;
+      extracted?.choiceId && String(extracted.choiceId).trim().length > 0 ? String(extracted.choiceId).trim() : null;
 
     const effectiveChoiceId = choiceIdFromExtra || extractedChoiceId || null;
 
     const cleanText =
-      extracted?.cleanText && String(extracted.cleanText).trim().length > 0
-        ? String(extracted.cleanText).trim()
-        : '';
+      extracted?.cleanText && String(extracted.cleanText).trim().length > 0 ? String(extracted.cleanText).trim() : '';
 
     const userTextClean = cleanText.length ? cleanText : rawText;
 
@@ -310,7 +250,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 10) extra sanitize（route.tsでIT強制は扱わない）
-    const rawExtra: Record<string, any> = (extra ?? {}) as any;
+    const rawExtra: Record<string, any> = (extraReq ?? {}) as any;
     const sanitizedExtra: Record<string, any> = { ...rawExtra };
 
     delete (sanitizedExtra as any).forceIT;
@@ -320,42 +260,34 @@ export async function POST(req: NextRequest) {
     delete (sanitizedExtra as any).tLayerModeActive;
     delete (sanitizedExtra as any).tLayerHint;
 
-    let extraMerged: Record<string, any> = {
+    // ✅ route.ts の SoT extra（この変数だけを “正” とする）
+    let extraSoT: Record<string, any> = {
       ...sanitizedExtra,
       choiceId: effectiveChoiceId,
       extractedChoiceId,
       traceId, // route.ts が source-of-truth の traceId
     };
 
-    const reqOrigin =
-      req.headers.get('origin') ??
-      req.headers.get('x-forwarded-origin') ??
-      req.nextUrl?.origin ??
-      '';
+    const reqOrigin = req.headers.get('origin') ?? req.headers.get('x-forwarded-origin') ?? req.nextUrl?.origin ?? '';
 
-    // ✅ RenderEngine gate（PREで1回だけ確定し、同期して書く）
+    // ✅ RenderEngine gate（PREで1回だけ確定し、以降はSoTに同期）
     {
       const envAllows = process.env.IROS_ENABLE_RENDER_ENGINE === '1';
-      const enableRenderEngine =
-        envAllows &&
-        extraMerged.renderEngine !== false &&
-        extraMerged.renderEngineGate !== false;
+      const enableRenderEngine = envAllows && extraSoT.renderEngine !== false && extraSoT.renderEngineGate !== false;
 
-      extraMerged = {
-        ...extraMerged,
+      extraSoT = {
+        ...extraSoT,
         renderEngineGate: enableRenderEngine,
         renderEngine: enableRenderEngine,
       };
     }
 
     // ✅ persist gate（single-writer）
-    {
-      extraMerged = {
-        ...extraMerged,
-        persistedByRoute: true,
-        persistAssistantMessage: false,
-      };
-    }
+    extraSoT = {
+      ...extraSoT,
+      persistedByRoute: true,
+      persistAssistantMessage: false,
+    };
 
     // 11) handle
     const irosResult: HandleIrosReplyOutput = await handleIrosReply({
@@ -363,7 +295,6 @@ export async function POST(req: NextRequest) {
       text: userTextClean,
       hintText,
       mode,
-
       userCode,
       tenantId,
       rememberScope,
@@ -373,8 +304,7 @@ export async function POST(req: NextRequest) {
       userProfile,
       style: styleInput ?? (userProfile?.style ?? null),
       history: chatHistory,
-
-      extra: extraMerged,
+      extra: extraSoT,
     });
 
     // 11.5) NORMAL BASE fallback（非SILENCE/FORWARDで本文が空に近い場合）
@@ -385,19 +315,21 @@ export async function POST(req: NextRequest) {
       const speechAct = String(extraAny?.speechAct ?? metaAny?.speechAct ?? '').toUpperCase();
       const allowLLM = extraAny?.speechAllowLLM ?? metaAny?.speechAllowLLM ?? true;
 
-      const slotPlanPolicy = String((metaAny?.framePlan as any)?.slotPlanPolicy ?? '')
-        .trim()
-        .toUpperCase();
+      const slotPlanPolicy = String((metaAny?.framePlan as any)?.slotPlanPolicy ?? '').trim().toUpperCase();
       const finalTextPolicy = String(extraAny?.finalTextPolicy ?? '').trim().toUpperCase();
+
+      const treatAsScaffoldSeed = finalTextPolicy.includes('TREAT_AS_SCAFFOLD_SEED') || finalTextPolicy.includes('SCAFFOLD_SEED');
 
       const isPdfScaffoldNoCommit =
         extraAny?.pdfScaffoldNoCommit === true ||
         finalTextPolicy === 'SLOTPLAN_SEED_SCAFFOLD' ||
-        slotPlanPolicy === 'SCAFFOLD';
+        slotPlanPolicy === 'SCAFFOLD' ||
+        treatAsScaffoldSeed;
 
       const llmRewriteSeedLen = String(extraAny?.llmRewriteSeed ?? '').trim().length;
-      const isDiagnosisFinalSeed =
-        finalTextPolicy === 'DIAGNOSIS_FINAL__SEED_FOR_LLM' || llmRewriteSeedLen > 0;
+
+      // ✅ SKIPは「診断で明示されたseed運用」のときだけ
+      const isDiagnosisFinalSeed = finalTextPolicy === 'DIAGNOSIS_FINAL__SEED_FOR_LLM';
 
       const candidateText = pickText(r?.assistantText, r?.content);
       const isSilenceOrForward = speechAct === 'SILENCE' || speechAct === 'FORWARD';
@@ -450,16 +382,11 @@ export async function POST(req: NextRequest) {
         ...CORS_HEADERS,
         'x-credit-ref': creditRef,
         'x-credit-amount': String(CREDIT_AMOUNT),
+        'x-trace-id': String(traceId),
       };
-      if (traceId) headers['x-trace-id'] = String(traceId);
 
       return NextResponse.json(
-        {
-          ok: false,
-          error: (irosResult as any).error,
-          detail: (irosResult as any).detail,
-          credit: { ref: creditRef, amount: CREDIT_AMOUNT, authorize: authRes },
-        },
+        { ok: false, error: (irosResult as any).error, detail: (irosResult as any).detail, credit: { ref: creditRef, amount: CREDIT_AMOUNT, authorize: authRes } },
         { status: 500, headers },
       );
     }
@@ -512,9 +439,9 @@ export async function POST(req: NextRequest) {
           'x-handler': 'app/api/agent/iros/reply',
           'x-credit-ref': creditRef,
           'x-credit-amount': String(CREDIT_AMOUNT),
+          ...(lowWarn ? { 'x-warning': 'low_balance' } : {}),
+          'x-trace-id': String(traceId),
         };
-        if (lowWarn) headers['x-warning'] = 'low_balance';
-        if (traceId) headers['x-trace-id'] = String(traceId);
 
         return NextResponse.json(
           {
@@ -542,7 +469,6 @@ export async function POST(req: NextRequest) {
       const r: any = result;
       const final = pickText(r?.assistantText, r?.content, r?.text, assistantText);
       assistantText = final;
-
       if (r && typeof r === 'object') {
         r.content = final;
         r.assistantText = final;
@@ -550,758 +476,657 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ✅ rephraseAttach の fallback 材料は extraMerged を参照するため、最終本文を同期
+    // ✅ render-v2 の fallback 材料は SoT extra を参照するため、最終本文を同期（SoTを満たす）
     {
       const final = String(assistantText ?? '').trim();
 
-      (extraMerged as any).finalAssistantText = final;
-      (extraMerged as any).finalAssistantTextCandidate =
-        (extraMerged as any).finalAssistantTextCandidate ?? final;
+      (extraSoT as any).finalAssistantText = final;
+      (extraSoT as any).finalAssistantTextCandidate = (extraSoT as any).finalAssistantTextCandidate ?? final;
 
-      (extraMerged as any).assistantText =
-        (extraMerged as any).assistantText ?? final;
-      (extraMerged as any).resolvedText =
-        (extraMerged as any).resolvedText ?? final;
+      (extraSoT as any).assistantText = (extraSoT as any).assistantText ?? final;
+      (extraSoT as any).resolvedText = (extraSoT as any).resolvedText ?? final;
 
-      (extraMerged as any).rawTextFromModel =
-        (extraMerged as any).rawTextFromModel ?? final;
-      (extraMerged as any).extractedTextFromModel =
-        (extraMerged as any).extractedTextFromModel ?? final;
+      (extraSoT as any).rawTextFromModel = (extraSoT as any).rawTextFromModel ?? final;
+      (extraSoT as any).extractedTextFromModel = (extraSoT as any).extractedTextFromModel ?? final;
 
       if (metaForSave && typeof metaForSave === 'object') {
         metaForSave.extra = {
           ...(metaForSave.extra ?? {}),
           finalAssistantText: (metaForSave.extra as any)?.finalAssistantText ?? final,
           rawTextFromModel: (metaForSave.extra as any)?.rawTextFromModel ?? final,
-          extractedTextFromModel:
-            (metaForSave.extra as any)?.extractedTextFromModel ?? final,
-          finalAssistantTextSyncedToExtraMerged: true,
+          extractedTextFromModel: (metaForSave.extra as any)?.extractedTextFromModel ?? final,
+          finalAssistantTextSyncedToExtraSoT: true,
           finalAssistantTextLen: final.length,
         };
       }
     }
 
+    // capture
+    const capRes = await captureChat(req, userCode, CREDIT_AMOUNT, creditRef);
 
-// capture
-const capRes = await captureChat(req, userCode, CREDIT_AMOUNT, creditRef);
+    // headers
+    const headers: Record<string, string> = {
+      ...CORS_HEADERS,
+      'x-handler': 'app/api/agent/iros/reply',
+      'x-credit-ref': creditRef,
+      'x-credit-amount': String(CREDIT_AMOUNT),
+      ...(lowWarn ? { 'x-warning': 'low_balance' } : {}),
+      'x-trace-id': String(traceId),
+    };
 
-// headers
-const headers: Record<string, string> = {
-  ...CORS_HEADERS,
-  'x-handler': 'app/api/agent/iros/reply',
-  'x-credit-ref': creditRef,
-  'x-credit-amount': String(CREDIT_AMOUNT),
-};
-if (lowWarn) headers['x-warning'] = 'low_balance';
-if (traceId) headers['x-trace-id'] = String(traceId);
+    // effectiveMode（metaForSave.renderMode優先）
+    const effectiveMode =
+      (typeof metaForSave?.renderMode === 'string' && metaForSave.renderMode) ||
+      (typeof metaForSave?.extra?.renderedMode === 'string' && metaForSave.extra.renderedMode) ||
+      finalMode ||
+      (result && typeof result === 'object' && typeof (result as any).mode === 'string'
+        ? (result as any).mode
+        : mode);
 
-// effectiveMode（metaForSave.renderMode優先）
-const effectiveMode =
-  (typeof metaForSave?.renderMode === 'string' && metaForSave.renderMode) ||
-  (typeof metaForSave?.extra?.renderedMode === 'string' && metaForSave.extra.renderedMode) ||
-  finalMode ||
-  (result && typeof result === 'object' && typeof (result as any).mode === 'string'
-    ? (result as any).mode
-    : mode);
+    const basePayload = {
+      ok: true,
+      mode: effectiveMode,
+      credit: {
+        ref: creditRef,
+        amount: CREDIT_AMOUNT,
+        authorize: authRes,
+        capture: capRes,
+        ...(lowWarn ? { warning: lowWarn } : {}),
+      },
+      ...(lowWarn ? { warning: lowWarn } : {}),
+    };
 
-const basePayload = {
-  ok: true,
-  mode: effectiveMode,
-  credit: {
-    ref: creditRef,
-    amount: CREDIT_AMOUNT,
-    authorize: authRes,
-    capture: capRes,
-    ...(lowWarn ? { warning: lowWarn } : {}),
-  },
-  ...(lowWarn ? { warning: lowWarn } : {}),
-};
+    // =========================================================
+    // result が object のとき
+    // =========================================================
+    if (result && typeof result === 'object') {
+      // meta 組み立て（✅ metaForSave優先：result.meta → metaForSave の順で上書き）
+      let meta: any = {
+        ...(((result as any).meta) ?? {}),
+        ...(metaForSave ?? {}),
+        userProfile: (metaForSave as any)?.userProfile ?? (result as any)?.meta?.userProfile ?? userProfile ?? null,
+        extra: {
+          ...(((result as any).meta?.extra) ?? {}),
+          ...(((metaForSave as any)?.extra) ?? {}),
 
-// =========================================================
-// result が object のとき
-// =========================================================
-if (result && typeof result === 'object') {
-  // meta 組み立て（✅ metaForSave優先：result.meta → metaForSave の順で上書き）
-  let meta: any = {
-    ...(((result as any).meta) ?? {}),
-    ...(metaForSave ?? {}),
-    userProfile:
-      (metaForSave as any)?.userProfile ??
-      (result as any)?.meta?.userProfile ??
-      userProfile ??
-      null,
-    extra: {
-      ...(((result as any).meta?.extra) ?? {}),
-      ...(((metaForSave as any)?.extra) ?? {}),
+          userCode: userCode ?? null,
+          hintText: hintText ?? null,
+          traceId: traceId ?? null,
+          historyLen: Array.isArray(chatHistory) ? chatHistory.length : 0,
+          choiceId: extraSoT?.choiceId ?? null,
+          extractedChoiceId: extraSoT?.extractedChoiceId ?? null,
 
-      userCode: userCode ?? null,
-      hintText: hintText ?? null,
-      traceId: traceId ?? null,
-      historyLen: Array.isArray(chatHistory) ? chatHistory.length : 0,
-      choiceId: extraMerged?.choiceId ?? null,
-      extractedChoiceId: extraMerged?.extractedChoiceId ?? null,
+          // ✅ routeで確定した gate を meta にも同期（判定ブレ防止）
+          renderEngineGate: extraSoT?.renderEngineGate === true,
+          renderEngine: extraSoT?.renderEngine === true,
 
-      // ✅ routeで確定した gate を meta にも同期（判定ブレ防止）
-      renderEngineGate: extraMerged?.renderEngineGate === true,
-      renderEngine: extraMerged?.renderEngine === true,
-
-      persistedByRoute: true,
-      persistAssistantMessage: false,
-    },
-  };
-
-  // 三軸 next step
-  meta = attachNextStepMeta({
-    meta,
-    qCode:
-      (typeof (meta as any)?.qCode === 'string' && (meta as any).qCode) ||
-      (typeof (meta as any)?.q_code === 'string' && (meta as any).q_code) ||
-      (typeof (meta as any)?.unified?.q?.current === 'string' && (meta as any).unified.q.current) ||
-      null,
-    depth:
-      (typeof (meta as any)?.depth === 'string' && (meta as any).depth) ||
-      (typeof (meta as any)?.depth_stage === 'string' && (meta as any).depth_stage) ||
-      (typeof (meta as any)?.unified?.depth?.stage === 'string' && (meta as any).unified.depth.stage) ||
-      null,
-    selfAcceptance:
-      typeof meta.selfAcceptance === 'number'
-        ? meta.selfAcceptance
-        : typeof meta.self_acceptance === 'number'
-          ? meta.self_acceptance
-          : typeof meta.unified?.self_acceptance === 'number'
-            ? meta.unified.self_acceptance
-            : null,
-    hasQ5DepressRisk: false,
-    userText: userTextClean,
-  });
-
-  // y/h 整数化
-  meta = normalizeMetaLevels(meta);
-
-  // rephrase 前に memoryState を読む（last_state）
-  let memoryStateForCtx: any | null = null;
-  try {
-    memoryStateForCtx = await loadIrosMemoryState(supabase as any, userCode);
-  } catch {
-    memoryStateForCtx = null;
-  }
-
-  // rephrase attach（render-v2向け / 1回）
-  // ✅ ここは _impl/rephrase.ts の attach を呼ぶ入口だったが、いったん無効化
-  // （render-v2 は後段の FINAL_FALLBACK_BLOCKS で blocks を確保できる）
-
-
-  // ✅ 重要：attach 直後に「meta.extra ↔ extraMerged」へ最小同期する
-  try {
-    (meta as any).extra = (meta as any).extra ?? {};
-    const metaEx: any = (meta as any).extra;
-
-    const mergedBlocks =
-      (extraMerged as any)?.rephraseBlocks ??
-      (extraMerged as any)?.rephrase?.blocks ??
-      (extraMerged as any)?.rephrase?.rephraseBlocks ??
-      null;
-
-    // 1) blocks は meta.extra にも置く（既存があれば壊さない）
-    if (Array.isArray(mergedBlocks) && mergedBlocks.length > 0 && !Array.isArray(metaEx?.rephraseBlocks)) {
-      metaEx.rephraseBlocks = mergedBlocks;
-    }
-
-    // 2) head は meta.extra を優先（attach 側が meta.extra に置いてくるケースが多い）
-    const headFromMeta = String(metaEx?.rephraseHead ?? '').trim();
-    const headFromMerged = String(
-      (extraMerged as any)?.rephraseHead ?? (extraMerged as any)?.rephrase?.head ?? '',
-    ).trim();
-
-    const finalHead = headFromMeta || headFromMerged;
-
-    // meta.extra に head が無い場合だけ補完
-    if (finalHead && !headFromMeta) metaEx.rephraseHead = finalHead;
-
-    // 3) 逆方向：extraMerged に head が無いなら meta.extra から戻す
-    if (finalHead && !String((extraMerged as any)?.rephraseHead ?? '').trim()) {
-      (extraMerged as any).rephraseHead = finalHead;
-    }
-
-    // 4) blocks の先頭 text 空対策：head を text に埋める（mergedHead 空事故を止める）
-    if (Array.isArray(mergedBlocks) && mergedBlocks.length > 0 && finalHead) {
-      const b0: any = mergedBlocks[0];
-      const t0 = String(b0?.text ?? '').trim();
-      if (!t0) b0.text = finalHead;
-    }
-
-    // 付随フラグも “存在するものだけ” 反映（壊さない）
-    const keysToCarry = [
-      'rephraseBlocksAttached',
-      'rephraseAttachSkipped',
-      'rephraseLLMApplied',
-      'rephraseApplied',
-      'rephraseReason',
-      'rephraseAttachReason',
-    ] as const;
-
-    for (const k of keysToCarry) {
-      if (metaEx[k] == null && (extraMerged as any)?.[k] != null) metaEx[k] = (extraMerged as any)[k];
-      if ((extraMerged as any)[k] == null && metaEx[k] != null) (extraMerged as any)[k] = metaEx[k];
-    }
-  } catch (e) {
-    console.warn('[IROS/pipe][AFTER_ATTACH][SYNC_META_EXTRA_BIDIR][ERROR]', e);
-  }
-
-  // DEBUG: attach直後に rephraseBlocks がどこにあるか確証
-  if (String(process.env.IROS_DEBUG_REPHRASE_PIPE ?? '0').trim() === '1') {
-    const bMeta =
-      (meta as any)?.extra?.rephraseBlocks ??
-      (meta as any)?.extra?.rephrase?.blocks ??
-      (meta as any)?.extra?.rephrase?.rephraseBlocks ??
-      null;
-
-    const bMerged =
-      (extraMerged as any)?.rephraseBlocks ??
-      (extraMerged as any)?.rephrase?.blocks ??
-      (extraMerged as any)?.rephrase?.rephraseBlocks ??
-      null;
-
-    console.info('[IROS/pipe][AFTER_ATTACH]', {
-      conversationId,
-      userCode,
-      metaExtraHasBlocks: Array.isArray(bMeta),
-      metaExtraBlocksLen: Array.isArray(bMeta) ? bMeta.length : null,
-      mergedExtraHasBlocks: Array.isArray(bMerged),
-      mergedExtraBlocksLen: Array.isArray(bMerged) ? bMerged.length : null,
-      mergedHead: Array.isArray(bMerged) ? String(bMerged[0]?.text ?? '').slice(0, 80) : null,
-    });
-  }
-
-  // ✅ handleIrosReply 側で attach された meta / extra を route の extraMerged に吸収する
-  // （render-v2 の source-of-truth は route の extraMerged）
-  try {
-    const metaAny = (irosResult as any)?.metaForSave ?? (irosResult as any)?.meta ?? null;
-
-    const metaExtraA = (metaAny as any)?.extra ?? null; // meta.extra
-    const metaExtraB = (irosResult as any)?.extraForHandle ?? null; // handleIrosReply 由来（blocks が来やすい）
-    const metaExtraC = (irosResult as any)?.extra ?? null; // result.extra
-    const metaExtraD = (irosResult as any)?.metaExtra ?? null; // metaExtra
-
-    const hasObj = (x: any) => x && typeof x === 'object';
-
-    // ✅ 衝突時は既存優先（extraMerged を最後に）
-    const mergedFromMeta =
-      (hasObj(metaExtraA) || hasObj(metaExtraB) || hasObj(metaExtraC) || hasObj(metaExtraD))
-        ? {
-            ...(hasObj(metaExtraA) ? metaExtraA : {}),
-            ...(hasObj(metaExtraB) ? metaExtraB : {}),
-            ...(hasObj(metaExtraC) ? metaExtraC : {}),
-            ...(hasObj(metaExtraD) ? metaExtraD : {}),
-            ...(extraMerged ?? {}),
-          }
-        : null;
-
-    if (mergedFromMeta) {
-      extraMerged = mergedFromMeta;
-
-      // blocks/head は明示的に拾っておく（extraMerged に無い場合だけ）
-      const blocks =
-        (metaExtraB as any)?.rephraseBlocks ??
-        (metaExtraB as any)?.rephrase?.blocks ??
-        (metaExtraB as any)?.rephrase?.rephraseBlocks ??
-        (metaExtraA as any)?.rephraseBlocks ??
-        (metaExtraA as any)?.rephrase?.blocks ??
-        (metaExtraA as any)?.rephrase?.rephraseBlocks ??
-        (metaExtraC as any)?.rephraseBlocks ??
-        (metaExtraC as any)?.rephrase?.blocks ??
-        (metaExtraC as any)?.rephrase?.rephraseBlocks ??
-        (metaExtraD as any)?.rephraseBlocks ??
-        (metaExtraD as any)?.rephrase?.blocks ??
-        (metaExtraD as any)?.rephrase?.rephraseBlocks ??
-        null;
-
-      if (!Array.isArray((extraMerged as any).rephraseBlocks) && Array.isArray(blocks) && blocks.length > 0) {
-        (extraMerged as any).rephraseBlocks = blocks;
-      }
-
-      const head =
-        (metaExtraB as any)?.rephraseHead ??
-        (metaExtraB as any)?.rephrase?.head ??
-        (metaExtraA as any)?.rephraseHead ??
-        (metaExtraA as any)?.rephrase?.head ??
-        (metaExtraC as any)?.rephraseHead ??
-        (metaExtraC as any)?.rephrase?.head ??
-        (metaExtraD as any)?.rephraseHead ??
-        (metaExtraD as any)?.rephrase?.head ??
-        null;
-
-      if (!(extraMerged as any).rephraseHead && head) (extraMerged as any).rephraseHead = head;
-
-      console.info('[IROS/pipe][META_EXTRA_MERGED]', {
-        metaSource: (irosResult as any)?.metaForSave ? 'metaForSave' : ((irosResult as any)?.meta ? 'meta' : 'none'),
-        metaExtraSources: {
-          meta_extra: hasObj(metaExtraA),
-          extraForHandle: hasObj(metaExtraB),
-          result_extra: hasObj(metaExtraC),
-          metaExtra: hasObj(metaExtraD),
+          persistedByRoute: true,
+          persistAssistantMessage: false,
         },
-        mergedExtraHasBlocks: Array.isArray((extraMerged as any).rephraseBlocks),
-        mergedExtraBlocksLen: (extraMerged as any).rephraseBlocks?.length ?? null,
-        mergedHead: (extraMerged as any).rephraseHead ? String((extraMerged as any).rephraseHead).slice(0, 80) : null,
-      });
-    } else {
-      console.info('[IROS/pipe][META_EXTRA_MERGED][NO_META_EXTRA]', {
-        hasMeta: Boolean(metaAny),
-        metaKeys: metaAny ? Object.keys(metaAny) : [],
-      });
-    }
-  } catch (e) {
-    console.warn('[IROS/pipe][META_EXTRA_MERGED][ERROR]', e);
-  }
-
-  // ✅ enable判定は routeで確定した extraMerged をソースにする（metaの欠落でOFFにならない）
-  // render engine apply（single entry）
-  {
-    const upperMode = String(effectiveMode ?? '').toUpperCase();
-
-    // diagnosis は render-v2 に通さない…の旧方針を撤回して「diagnosisもON」にする意図なら isDiagnosis は残すだけにする
-    // const isDiagnosis = upperMode === 'DIAGNOSIS' || upperMode === 'DIAG' || upperMode === 'IR';
-
-    const enableRenderEngine =
-      extraMerged?.renderEngine === true || extraMerged?.renderEngineGate === true;
-
-    const isIT = upperMode === 'IT' || Boolean((meta as any)?.extra?.renderReplyForcedIT);
-
-    // apply前の extra を退避（apply 側が extra を作り直しても落とさない）
-    const extraBefore: any = extraMerged ?? null;
-
-    const applied = applyRenderEngineIfEnabled({
-      enableRenderEngine,
-      isIT,
-      conversationId,
-      userCode,
-      userText: userTextClean,
-      extraForHandle: extraMerged ?? null,
-      meta,
-      resultObj: result as any,
-    });
-
-    meta = applied.meta;
-    extraMerged = applied.extraForHandle;
-
-    // ✅ apply 後に rephraseBlocks/head/ctxPack が落ちた場合、必ず carry する（配線の最終保険）
-    try {
-      const pickBlocks = (x: any) => x?.rephraseBlocks ?? x?.rephrase?.blocks ?? x?.rephrase?.rephraseBlocks ?? null;
-      const pickHead = (x: any) => {
-        const h = String(x?.rephraseHead ?? x?.rephrase?.head ?? '').trim();
-        return h ? h : null;
       };
-      const pickCtxPack = (x: any) =>
-        x?.ctxPack ??
-        x?.contextPack ??
-        x?.meta?.ctxPack ??
-        x?.meta?.contextPack ??
-        x?.extra?.ctxPack ??
-        x?.extra?.contextPack ??
-        null;
 
-      const carryCandidates = [
-        applied?.extraForHandle,
-        extraBefore,
-        (meta as any)?.extra,
+      // 三軸 next step
+      meta = attachNextStepMeta({
         meta,
-      ];
+        qCode:
+          (typeof (meta as any)?.qCode === 'string' && (meta as any).qCode) ||
+          (typeof (meta as any)?.q_code === 'string' && (meta as any).q_code) ||
+          (typeof (meta as any)?.unified?.q?.current === 'string' && (meta as any).unified.q.current) ||
+          null,
+        depth:
+          (typeof (meta as any)?.depth === 'string' && (meta as any).depth) ||
+          (typeof (meta as any)?.depth_stage === 'string' && (meta as any).depth_stage) ||
+          (typeof (meta as any)?.unified?.depth?.stage === 'string' && (meta as any).unified.depth.stage) ||
+          null,
+        selfAcceptance:
+          typeof meta.selfAcceptance === 'number'
+            ? meta.selfAcceptance
+            : typeof meta.self_acceptance === 'number'
+              ? meta.self_acceptance
+              : typeof meta.unified?.self_acceptance === 'number'
+                ? meta.unified.self_acceptance
+                : null,
+        hasQ5DepressRisk: false,
+        userText: userTextClean,
+      });
 
-      let beforeBlocks: any[] | null = null;
-      let beforeHead: string | null = null;
-      let beforeCtx: any = null;
+      // y/h 整数化
+      meta = normalizeMetaLevels(meta);
 
-      for (const src of carryCandidates) {
-        if (!beforeBlocks) {
-          const b = pickBlocks(src);
-          if (Array.isArray(b) && b.length > 0) beforeBlocks = b;
-        }
-        if (!beforeHead) {
-          const h = pickHead(src);
-          if (h) beforeHead = h;
-        }
-        if (!beforeCtx) {
-          const c = pickCtxPack(src);
-          if (c) beforeCtx = c;
-        }
-        if (beforeBlocks && beforeHead && beforeCtx) break;
+      // rephrase 前に memoryState を読む（last_state）
+      let memoryStateForCtx: any | null = null;
+      try {
+        memoryStateForCtx = await loadIrosMemoryState(supabase as any, userCode);
+      } catch {
+        memoryStateForCtx = null;
       }
 
-      const ex0: any = extraMerged as any;
-      const mergedHasBlocks = Array.isArray(ex0?.rephraseBlocks) && ex0.rephraseBlocks.length > 0;
+      // ✅ handleIrosReply 側で付いた meta.extra / extra を SoT に吸収（SoT優先で壊さない）
+      // - ただし “SoTの上書き” はしない：SoTを最後にマージする
+      try {
+        const metaAny = (irosResult as any)?.metaForSave ?? (irosResult as any)?.meta ?? null;
 
-      if (!mergedHasBlocks && Array.isArray(beforeBlocks) && beforeBlocks.length > 0) {
-        extraMerged = {
-          ...(extraMerged ?? {}),
-          rephraseBlocks: beforeBlocks,
-          ...(beforeHead ? { rephraseHead: beforeHead } : {}),
-          ...(beforeCtx ? { ctxPack: beforeCtx } : {}),
+        const metaExtraA = (metaAny as any)?.extra ?? null;
+        const metaExtraB = (irosResult as any)?.extraForHandle ?? null;
+        const metaExtraC = (irosResult as any)?.extra ?? null;
+        const metaExtraD = (irosResult as any)?.metaExtra ?? null;
+
+        const hasObj = (x: any) => x && typeof x === 'object';
+
+        const mergedFromMeta =
+          (hasObj(metaExtraA) || hasObj(metaExtraB) || hasObj(metaExtraC) || hasObj(metaExtraD))
+            ? {
+                ...(hasObj(metaExtraA) ? metaExtraA : {}),
+                ...(hasObj(metaExtraB) ? metaExtraB : {}),
+                ...(hasObj(metaExtraC) ? metaExtraC : {}),
+                ...(hasObj(metaExtraD) ? metaExtraD : {}),
+                ...(extraSoT ?? {}),
+              }
+            : null;
+
+        if (mergedFromMeta) {
+          extraSoT = mergedFromMeta;
+
+          const blocks =
+            (metaExtraB as any)?.rephraseBlocks ??
+            (metaExtraB as any)?.rephrase?.blocks ??
+            (metaExtraB as any)?.rephrase?.rephraseBlocks ??
+            (metaExtraA as any)?.rephraseBlocks ??
+            (metaExtraA as any)?.rephrase?.blocks ??
+            (metaExtraA as any)?.rephrase?.rephraseBlocks ??
+            (metaExtraC as any)?.rephraseBlocks ??
+            (metaExtraC as any)?.rephrase?.blocks ??
+            (metaExtraC as any)?.rephrase?.rephraseBlocks ??
+            (metaExtraD as any)?.rephraseBlocks ??
+            (metaExtraD as any)?.rephrase?.blocks ??
+            (metaExtraD as any)?.rephrase?.rephraseBlocks ??
+            null;
+
+          if (!Array.isArray((extraSoT as any).rephraseBlocks) && Array.isArray(blocks) && blocks.length > 0) {
+            (extraSoT as any).rephraseBlocks = blocks;
+          }
+
+          const head =
+            (metaExtraB as any)?.rephraseHead ??
+            (metaExtraB as any)?.rephrase?.head ??
+            (metaExtraA as any)?.rephraseHead ??
+            (metaExtraA as any)?.rephrase?.head ??
+            (metaExtraC as any)?.rephraseHead ??
+            (metaExtraC as any)?.rephrase?.head ??
+            (metaExtraD as any)?.rephraseHead ??
+            (metaExtraD as any)?.rephrase?.head ??
+            null;
+
+          if (!(extraSoT as any).rephraseHead && head) (extraSoT as any).rephraseHead = head;
+
+          console.info('[IROS/pipe][META_EXTRA_MERGED]', {
+            metaSource: (irosResult as any)?.metaForSave ? 'metaForSave' : ((irosResult as any)?.meta ? 'meta' : 'none'),
+            metaExtraSources: {
+              meta_extra: hasObj(metaExtraA),
+              extraForHandle: hasObj(metaExtraB),
+              result_extra: hasObj(metaExtraC),
+              metaExtra: hasObj(metaExtraD),
+            },
+            mergedExtraHasBlocks: Array.isArray((extraSoT as any).rephraseBlocks),
+            mergedExtraBlocksLen: (extraSoT as any).rephraseBlocks?.length ?? null,
+            mergedHead: (extraSoT as any).rephraseHead ? String((extraSoT as any).rephraseHead).slice(0, 80) : null,
+          });
+        } else {
+          console.info('[IROS/pipe][META_EXTRA_MERGED][NO_META_EXTRA]', {
+            hasMeta: Boolean(metaAny),
+            metaKeys: metaAny ? Object.keys(metaAny) : [],
+          });
+        }
+      } catch (e) {
+        console.warn('[IROS/pipe][META_EXTRA_MERGED][ERROR]', e);
+      }
+
+      // ✅ enable判定は SoT をソースにする（metaの欠落でOFFにならない）
+      // render engine apply（single entry）
+      {
+        const upperMode = String(effectiveMode ?? '').toUpperCase();
+        const enableRenderEngine = extraSoT?.renderEngine === true || extraSoT?.renderEngineGate === true;
+
+        const isIT = upperMode === 'IT' || Boolean((meta as any)?.extra?.renderReplyForcedIT);
+
+        const applied = await applyRenderEngineIfEnabled({
+          enableRenderEngine,
+          isIT,
+          conversationId,
+          userCode,
+          userText: userTextClean,
+          extraForHandle: extraSoT ?? null,
+          meta,
+          resultObj: result as any,
+        });
+
+        meta = applied.meta;
+        // ✅ SoT の参照を維持しつつ、返ってきた extra を SoT に差し替える
+        extraSoT = applied.extraForHandle ?? extraSoT;
+
+
+        // ✅ 保存側(metaForSave.extra)にも最小同期（null/空で潰さない）
+        try {
+          if (metaForSave && typeof metaForSave === 'object') {
+            (metaForSave as any).extra = { ...((metaForSave as any).extra ?? {}) };
+
+            const ex: any = extraSoT as any;
+            const mergedBlocks2 = Array.isArray(ex?.rephraseBlocks) && ex.rephraseBlocks.length > 0 ? ex.rephraseBlocks : null;
+            const mergedHead2 = String(ex?.rephraseHead ?? '').trim() || null;
+            const mergedCtx2 = ex?.ctxPack && typeof ex.ctxPack === 'object' ? ex.ctxPack : null;
+
+            if (mergedBlocks2 && !Array.isArray((metaForSave as any).extra?.rephraseBlocks)) {
+              (metaForSave as any).extra.rephraseBlocks = mergedBlocks2;
+            }
+            if (mergedHead2 && !String((metaForSave as any).extra?.rephraseHead ?? '').trim()) {
+              (metaForSave as any).extra.rephraseHead = mergedHead2;
+            }
+            if (mergedCtx2 && !(metaForSave as any).extra?.ctxPack) {
+              (metaForSave as any).extra.ctxPack = mergedCtx2;
+            }
+          }
+
+          // ✅ meta.extra 側も満たす（renderGateway が meta.extra 経由で見る経路）
+          if (meta && typeof meta === 'object') {
+            (meta as any).extra = { ...((meta as any).extra ?? {}) };
+            const ex: any = extraSoT as any;
+
+            if (!Array.isArray((meta as any).extra?.rephraseBlocks) && Array.isArray(ex?.rephraseBlocks) && ex.rephraseBlocks.length > 0) {
+              (meta as any).extra.rephraseBlocks = ex.rephraseBlocks;
+              (meta as any).extra.rephraseBlocksAttached = true;
+            }
+            if (!String((meta as any).extra?.rephraseHead ?? '').trim() && String(ex?.rephraseHead ?? '').trim()) {
+              (meta as any).extra.rephraseHead = String(ex.rephraseHead).trim();
+            }
+            if (!(meta as any).extra?.ctxPack && ex?.ctxPack && typeof ex.ctxPack === 'object') {
+              (meta as any).extra.ctxPack = ex.ctxPack;
+            }
+          }
+        } catch (e) {
+          console.warn('[IROS/pipe][APPLY_RENDER_ENGINE][SYNC_META_EXTRA][ERROR]', e);
+        }
+      }
+
+      // sanitize header
+      {
+        const before = String((result as any)?.content ?? '');
+        const sanitized = sanitizeFinalContent(before);
+        (result as any).content = sanitized.text.trimEnd();
+        meta.extra = { ...(meta.extra ?? {}), finalHeaderStripped: sanitized.removed.length ? sanitized.removed : null };
+      }
+
+      // FINAL本文の確定（ここでは “生成しない”／あくまで strip + recover（既存資材から）だけ）
+      {
+        const curRaw = String((result as any)?.content ?? '');
+        const curTrim = curRaw.trim();
+
+        const speechAct = String(meta?.extra?.speechAct ?? meta?.speechAct ?? '').toUpperCase();
+        const silenceReason = pickSilenceReason(meta);
+
+        const emptyLike = isEffectivelyEmptyText(curTrim);
+        const userNonEmpty = String(userTextClean ?? '').trim().length > 0;
+
+        // ✅ SILENCE は「空入力専用」を原則にする（誤SILENCEで無言化させない）
+        const silentAllowed = !userNonEmpty;
+        const isSilent = speechAct === 'SILENCE' && emptyLike && silentAllowed;
+
+        // ✅ スロット指示が本文に漏れているか（@OBS/@SHIFT/...）
+        const hasSlotDirectives = /(^|\n)\s*@(OBS|SHIFT|NEXT|SAFE|DRAFT|SEED_TEXT)\b/.test(curRaw);
+
+        // ✅ recover材料（SoTから）
+        const ex: any = extraSoT as any;
+        const head = String(ex?.rephraseHead ?? '').trim();
+        const blocks: any[] = Array.isArray(ex?.rephraseBlocks) ? ex.rephraseBlocks : [];
+
+        const blocksToText = (bs: any[]) => {
+          const lines = bs
+            .map((b) => String(b?.text ?? b?.content ?? b?.value ?? b?.body ?? '').trimEnd())
+            .filter((s) => s.trim().length > 0);
+          return lines.join('\n\n').trimEnd();
         };
 
-        console.info('[IROS/pipe][CARRY_REPHRASE_BLOCKS_APPLIED]', {
-          blocksLen: beforeBlocks.length,
-          hasHead: Boolean(beforeHead),
-          hasCtx: Boolean(beforeCtx),
-        });
-      }
+        const recoveredFromBlocks = blocks.length > 0 ? blocksToText(blocks) : '';
+        const recoveredText = head || recoveredFromBlocks;
 
-      // ✅ 保存側(metaForSave.extra)にも同期（null/空で潰さない）
-      if (metaForSave && typeof metaForSave === 'object') {
-        (metaForSave as any).extra = { ...((metaForSave as any).extra ?? {}) };
+        // ✅ 非SILENCEで (空っぽ or スロット漏れ) の場合、既存資材から復元できるなら置換
+        const needRecover = !isSilent && (emptyLike || hasSlotDirectives);
 
-        const ex: any = extraMerged as any;
-        const mergedBlocks2 =
-          Array.isArray(ex?.rephraseBlocks) && ex.rephraseBlocks.length > 0 ? ex.rephraseBlocks : null;
-        const mergedHead2 = String(ex?.rephraseHead ?? '').trim() || null;
-        const mergedCtx2 = ex?.ctxPack && typeof ex.ctxPack === 'object' ? ex.ctxPack : null;
+        const stripSlotDirectives = (s: string) => {
+          const raw = String(s ?? '');
+          if (!raw) return raw;
+          const out = raw
+            .replace(/(^|\n)\s*@(OBS|SHIFT|NEXT|SAFE|DRAFT|SEED_TEXT)\b[^\n]*\n?/g, '$1')
+            .replace(/\n{3,}/g, '\n\n')
+            .trimEnd();
+          return out;
+        };
 
-        if (mergedBlocks2 && !Array.isArray((metaForSave as any).extra?.rephraseBlocks)) {
-          (metaForSave as any).extra.rephraseBlocks = mergedBlocks2;
-        }
-        if (mergedHead2 && !String((metaForSave as any).extra?.rephraseHead ?? '').trim()) {
-          (metaForSave as any).extra.rephraseHead = mergedHead2;
-        }
-        if (mergedCtx2 && !(metaForSave as any).extra?.ctxPack) {
-          (metaForSave as any).extra.ctxPack = mergedCtx2;
-        }
-      }
+        const curNoSlots = hasSlotDirectives ? stripSlotDirectives(curRaw) : curRaw.trimEnd();
+        const curNoSlotsTrim = curNoSlots.trim();
 
-      // ✅ meta.extra 側も満たす（renderGateway が meta.extra 経由で見る経路）
-      if (meta && typeof meta === 'object') {
-        (meta as any).extra = { ...((meta as any).extra ?? {}) };
-
-        const metaBlocks = pickBlocks((meta as any).extra);
-        const metaHead = pickHead((meta as any).extra);
-        const metaCtx = pickCtxPack((meta as any).extra);
-
-        if (!Array.isArray(metaBlocks) && beforeBlocks) {
-          (meta as any).extra.rephraseBlocks = beforeBlocks;
-          (meta as any).extra.rephraseBlocksAttached = true;
-        }
-        if (!metaHead && beforeHead) (meta as any).extra.rephraseHead = beforeHead;
-        if (!metaCtx && beforeCtx && typeof beforeCtx === 'object') (meta as any).extra.ctxPack = beforeCtx;
-      }
-    } catch (e) {
-      console.warn('[IROS/pipe][APPLY_RENDER_ENGINE][CARRY_REPHRASE][ERROR]', e);
-    }
-  }
-
-  // sanitize header
-  {
-    const before = String((result as any)?.content ?? '');
-    const sanitized = sanitizeFinalContent(before);
-    (result as any).content = sanitized.text.trimEnd();
-    meta.extra = {
-      ...(meta.extra ?? {}),
-      finalHeaderStripped: sanitized.removed.length ? sanitized.removed : null,
-    };
-  }
-
-  // FINAL本文の確定
-  {
-    const curRaw = String((result as any)?.content ?? '');
-    const curTrim = curRaw.trim();
-
-    const speechAct = String(meta?.extra?.speechAct ?? meta?.speechAct ?? '').toUpperCase();
-    const silenceReason = pickSilenceReason(meta);
-
-    const emptyLike = isEffectivelyEmptyText(curTrim);
-    const userNonEmpty = String(userTextClean ?? '').trim().length > 0;
-
-    // ✅ SILENCE は「空入力専用」を原則にする（誤SILENCEで無言化させない）
-    const silentAllowed = !userNonEmpty;
-    const isSilent = speechAct === 'SILENCE' && emptyLike && silentAllowed;
-
-    // ✅ スロット指示が本文に漏れているか（@OBS/@SHIFT/...）
-    const hasSlotDirectives = /(^|\n)\s*@(OBS|SHIFT|NEXT|SAFE|DRAFT|SEED_TEXT)\b/.test(curRaw);
-
-    // ✅ renderGateway が outLen=0 を返しても、
-    // extraMerged に rephraseHead / rephraseBlocks が残っているなら本文を復元する
-    const ex: any = extraMerged as any;
-    const head = String(ex?.rephraseHead ?? '').trim();
-
-    const blocks: any[] = Array.isArray(ex?.rephraseBlocks) ? ex.rephraseBlocks : [];
-    const blocksToText = (bs: any[]) => {
-      const lines = bs
-        .map((b) => String(b?.text ?? b?.content ?? b?.value ?? b?.body ?? '').trimEnd())
-        .filter((s) => s.trim().length > 0);
-      return lines.join('\n\n').trimEnd();
-    };
-
-    const recoveredFromBlocks = blocks.length > 0 ? blocksToText(blocks) : '';
-    const recoveredText = head || recoveredFromBlocks;
-
-    // ✅ 非SILENCEで (空っぽ or スロット漏れ) の場合、rephrase から復元できるなら置換
-    const needRecover = !isSilent && (emptyLike || hasSlotDirectives);
-
-    // ✅ slot指示だけを落とした「最低限の救済」
-    const stripSlotDirectives = (s: string) => {
-      const raw = String(s ?? '');
-      if (!raw) return raw;
-      const out = raw
-        .replace(/(^|\n)\s*@(OBS|SHIFT|NEXT|SAFE|DRAFT|SEED_TEXT)\b[^\n]*\n?/g, '$1')
-        .replace(/\n{3,}/g, '\n\n')
-        .trimEnd();
-      return out;
-    };
-
-    const curNoSlots = hasSlotDirectives ? stripSlotDirectives(curRaw) : curRaw.trimEnd();
-    const curNoSlotsTrim = curNoSlots.trim();
-
-    const finalText = isSilent
-      ? ''
-      : needRecover
-        ? (recoveredText
-            ? recoveredText
-            : (curNoSlotsTrim.length > 0 ? curNoSlots : curRaw.trimEnd()))
-        : curRaw.trimEnd();
-
-    if (String(process.env.IROS_DEBUG_SILENCE_PIPE ?? '0').trim() === '1') {
-      console.info('[IROS/pipe][FINAL_TEXT]', {
-        conversationId,
-        userCode,
-        speechAct,
-        silenceReason: silenceReason ?? null,
-        userNonEmpty,
-        silentAllowed,
-        curRawLen: curRaw.length,
-        curTrimLen: curTrim.length,
-        emptyLike,
-        hasSlotDirectives,
-        mergedExtraHasBlocks: Array.isArray(ex?.rephraseBlocks),
-        mergedExtraBlocksLen: Array.isArray(ex?.rephraseBlocks) ? ex.rephraseBlocks.length : null,
-        mergedHeadLen: head ? head.length : 0,
-        recoveredFromBlocksLen: recoveredFromBlocks.length,
-        finalTextLen: finalText.length,
-        finalTextPolicyCandidate: isSilent
-          ? (silenceReason ? `SILENCE:${silenceReason}` : 'SILENCE_EMPTY_BODY')
+        const finalText = isSilent
+          ? ''
           : needRecover
-            ? (recoveredText
-                ? 'RECOVERED_FROM_EXTRA'
-                : (curNoSlotsTrim.length > 0 ? 'STRIPPED_SLOT_DIRECTIVES' : 'NEED_RECOVER_BUT_FALLBACK_CURRAW'))
-            : 'NORMAL_BODY',
-      });
-    }
+            ? recoveredText
+              ? recoveredText
+              : curNoSlotsTrim.length > 0
+                ? curNoSlots
+                : curRaw.trimEnd()
+            : curRaw.trimEnd();
 
-    (result as any).content = finalText;
-    (result as any).text = finalText;
-    (result as any).assistantText = finalText;
-    assistantText = finalText;
+        if (String(process.env.IROS_DEBUG_SILENCE_PIPE ?? '0').trim() === '1') {
+          console.info('[IROS/pipe][FINAL_TEXT]', {
+            conversationId,
+            userCode,
+            speechAct,
+            silenceReason: silenceReason ?? null,
+            userNonEmpty,
+            silentAllowed,
+            curRawLen: curRaw.length,
+            curTrimLen: curTrim.length,
+            emptyLike,
+            hasSlotDirectives,
+            sotHasBlocks: Array.isArray(ex?.rephraseBlocks),
+            sotBlocksLen: Array.isArray(ex?.rephraseBlocks) ? ex.rephraseBlocks.length : null,
+            sotHeadLen: head ? head.length : 0,
+            recoveredFromBlocksLen: recoveredFromBlocks.length,
+            finalTextLen: finalText.length,
+            finalTextPolicyCandidate: isSilent
+              ? silenceReason
+                ? `SILENCE:${silenceReason}`
+                : 'SILENCE_EMPTY_BODY'
+              : needRecover
+                ? recoveredText
+                  ? 'RECOVERED_FROM_SOT'
+                  : curNoSlotsTrim.length > 0
+                    ? 'STRIPPED_SLOT_DIRECTIVES'
+                    : 'NEED_RECOVER_BUT_FALLBACK_CURRAW'
+                : 'NORMAL_BODY',
+          });
+        }
 
-    meta.extra = {
-      ...(meta.extra ?? {}),
-      finalAssistantTextSynced: true,
-      finalAssistantTextLen: finalText.length,
-      finalTextRecoveredFromExtra: needRecover && Boolean(recoveredText) ? true : undefined,
-      finalTextRecoveredSource:
-        needRecover && Boolean(recoveredText) ? (head ? 'rephraseHead' : 'rephraseBlocks') : undefined,
-      finalTextHadSlotDirectives: hasSlotDirectives ? true : undefined,
-      finalTextStrippedSlotDirectives:
-        needRecover && !recoveredText && hasSlotDirectives && curNoSlotsTrim.length > 0 ? true : undefined,
-      finalTextPolicy: isSilent
-        ? 'SILENCE_EMPTY_BODY'
-        : meta?.extra?.finalTextPolicy ?? (finalText.length > 0 ? 'NORMAL_BODY' : 'NORMAL_EMPTY_PASS'),
-      emptyFinalPatched: finalText.length === 0 ? true : undefined,
-      emptyFinalPatchedReason:
-        finalText.length === 0
-          ? isSilent
-            ? (silenceReason ? `SILENCE:${silenceReason}` : 'SILENCE_EMPTY_BODY')
-            : (needRecover ? 'NEED_RECOVER_BUT_EMPTY' : 'NON_SILENCE_EMPTY_CONTENT')
-          : undefined,
-    };
-  }
+        (result as any).content = finalText;
+        (result as any).text = finalText;
+        (result as any).assistantText = finalText;
+        assistantText = finalText;
 
-  // UI MODE確定
-  {
-    const finalText = String((result as any)?.content ?? '').trim();
-    const uiMode = inferUIMode({ modeHint: mode, effectiveMode, meta, finalText });
-    const uiReason = inferUIModeReason({ modeHint: mode, effectiveMode, meta, finalText });
+        meta.extra = {
+          ...(meta.extra ?? {}),
+          finalAssistantTextSynced: true,
+          finalAssistantTextLen: finalText.length,
+          finalTextRecoveredFromSoT: needRecover && Boolean(recoveredText) ? true : undefined,
+          finalTextRecoveredSource: needRecover && Boolean(recoveredText) ? (head ? 'rephraseHead' : 'rephraseBlocks') : undefined,
+          finalTextHadSlotDirectives: hasSlotDirectives ? true : undefined,
+          finalTextStrippedSlotDirectives: needRecover && !recoveredText && hasSlotDirectives && curNoSlotsTrim.length > 0 ? true : undefined,
+          finalTextPolicy: isSilent ? 'SILENCE_EMPTY_BODY' : meta?.extra?.finalTextPolicy ?? (finalText.length > 0 ? 'NORMAL_BODY' : 'NORMAL_EMPTY_PASS'),
+          emptyFinalPatched: finalText.length === 0 ? true : undefined,
+          emptyFinalPatchedReason:
+            finalText.length === 0
+              ? isSilent
+                ? silenceReason
+                  ? `SILENCE:${silenceReason}`
+                  : 'SILENCE_EMPTY_BODY'
+                : needRecover
+                  ? 'NEED_RECOVER_BUT_EMPTY'
+                  : 'NON_SILENCE_EMPTY_CONTENT'
+              : undefined,
+        };
+      }
 
-    meta.mode = uiMode;
-    meta.modeReason = uiReason;
-    meta.persistPolicy = PERSIST_POLICY;
+      // UI MODE確定
+      {
+        const finalText = String((result as any)?.content ?? '').trim();
+        const uiMode = inferUIMode({ modeHint: mode, effectiveMode, meta, finalText });
+        const uiReason = inferUIModeReason({ modeHint: mode, effectiveMode, meta, finalText });
 
-    meta.extra = {
-      ...(meta.extra ?? {}),
-      uiMode,
-      uiModeReason: uiReason,
-      persistPolicy: PERSIST_POLICY,
-      uiFinalTextLen: finalText.length,
-    };
-  }
+        meta.mode = uiMode;
+        meta.modeReason = uiReason;
+        meta.persistPolicy = PERSIST_POLICY;
 
-  // assistant 保存（single-writer）
-  try {
-    const finalAssistant =
-      String((result as any)?.text ?? '').trim() ||
-      String((result as any)?.assistantText ?? '').trim() ||
-      String((result as any)?.content ?? '').trim();
+        meta.extra = {
+          ...(meta.extra ?? {}),
+          uiMode,
+          uiModeReason: uiReason,
+          persistPolicy: PERSIST_POLICY,
+          uiFinalTextLen: finalText.length,
+        };
+      }
 
-    const uiMode = (meta as any)?.mode as ReplyUIMode | undefined;
-    const silenceReason = pickSilenceReason(meta);
+      // assistant 保存（single-writer）
+      try {
+        // NOTE: ここは「保存の最終防衛線」。
+        // finalAssistant が空のままだと EMPTY_CONTENT で persist が必ずスキップされ、UIが …… に落ちる。
+        // まずは seed を “commit本文” に昇格させて止血する（配線追加なし）。
 
-    const pickString = (v: any): string | null => {
-      if (typeof v !== 'string') return null;
-      const s = v.trim();
-      return s ? s : null;
-    };
+        let finalAssistant =
+          String((result as any)?.content ?? '').trim() ||
+          String((result as any)?.text ?? '').trim() ||
+          String((result as any)?.assistantText ?? '').trim();
 
-    const qCodeFinal =
-      pickString((meta as any)?.unified?.q?.code) ??
-      pickString((meta as any)?.unified?.q?.current) ??
-      pickString((meta as any)?.q_code) ??
-      pickString((meta as any)?.qCode) ??
-      null;
+        const uiMode = (meta as any)?.mode as ReplyUIMode | undefined;
+        const silenceReason = pickSilenceReason(meta);
 
-    const depthStageFinal =
-      pickString((meta as any)?.unified?.depth?.stage) ??
-      pickString((meta as any)?.depth_stage) ??
-      pickString((meta as any)?.depthStage) ??
-      pickString((meta as any)?.depth) ??
-      null;
+        // seed 候補（postprocess / handle で仕込まれている想定）
+        const seedForPersist =
+          String(((meta as any)?.extra as any)?.llmRewriteSeed ?? '').trim() ||
+          String(((meta as any)?.extra as any)?.slotPlanSeed ?? '').trim() ||
+          '';
 
-    (meta as any).q_code = qCodeFinal;
-    (meta as any).depth_stage = depthStageFinal;
-    if (qCodeFinal) (meta as any).qCode = qCodeFinal;
-    if (depthStageFinal) (meta as any).depthStage = depthStageFinal;
+        // ✅ 非SILENCE なのに本文が空なら、seed を本文に昇格して EMPTY_CONTENT を潰す
+        // （Q1_SUPPRESS の “沈黙止血” は uiMode === 'SILENCE' 側で守られる）
+// ✅ 非SILENCE なのに本文が空なら、seed を本文に昇格して EMPTY_CONTENT を潰す
+// ただし seed が「@OBS/@SHIFT など内部マーカーだけ」の場合は昇格しない（昇格→strip→空→…… の自爆を防ぐ）
+const emptyBefore = finalAssistant.length === 0;
 
-    if (uiMode === 'SILENCE') {
-      meta.extra = {
-        ...(meta.extra ?? {}),
-        persistedAssistantMessage: {
-          ok: true,
-          inserted: false,
-          skipped: true,
-          reason: 'UI_MODE_SILENCE_NO_INSERT',
-          silenceReason: silenceReason ?? null,
-        },
-      };
-    } else if (finalAssistant.length > 0) {
-      const saved = await persistAssistantMessageToIrosMessages({
-        supabase,
-        conversationId,
-        userCode,
-        content: finalAssistant,
-        meta: meta ?? null,
-      });
+const stripInternalDirectiveLines = (raw: string): string => {
+  const lines = String(raw ?? '')
+    .split('\n')
+    .map((l) => String(l ?? '').trim())
+    .filter(Boolean);
 
-      meta.extra = {
-        ...(meta.extra ?? {}),
-        persistedAssistantMessage: {
-          ok: true,
-          inserted: true,
-          skipped: false,
-          len: finalAssistant.length,
-          saved,
-        },
-      };
-    } else {
-      meta.extra = {
-        ...(meta.extra ?? {}),
-        persistedAssistantMessage: {
-          ok: true,
-          inserted: false,
-          skipped: true,
-          reason: 'EMPTY_CONTENT',
-        },
-      };
-    }
-  } catch (e) {
-    meta.extra = {
-      ...(meta.extra ?? {}),
-      persistedAssistantMessage: {
-        ok: false,
-        inserted: false,
-        skipped: true,
-        reason: 'EXCEPTION',
-        error: String((e as any)?.message ?? e),
-      },
-    };
-  }
+  // @ で始まる行を除去
+  const cleaned = lines.filter((l) => !l.startsWith('@')).join('\n').trim();
+  return cleaned;
+};
 
-  // training sample
-  const skipTraining =
-    meta?.skipTraining === true ||
-    meta?.skip_training === true ||
-    meta?.recallOnly === true ||
-    meta?.recall_only === true;
+const seedCleanedForPersist = stripInternalDirectiveLines(seedForPersist);
 
-  if (!skipTraining) {
-    const replyText =
-      (typeof (result as any)?.text === 'string' && (result as any).text.trim()) ||
-      (typeof (result as any)?.assistantText === 'string' && (result as any).assistantText.trim()) ||
-      ((result as any).content ?? '');
+// ✅ seed が directives のみなら「昇格しない」
+// - directives だけを昇格すると、その後の strip で必ず空になり、normalBase の "……" に落ちる
+const seedIsDirectiveOnly = seedForPersist.length > 0 && seedCleanedForPersist.length === 0;
 
-    await saveIrosTrainingSample({
-      supabase,
-      userCode,
-      tenantId,
-      conversationId,
-      messageId: null,
-      inputText: userTextClean,
-      replyText,
-      meta,
-      tags: ['iros', 'auto'],
-    });
-  } else {
-    meta.extra = {
-      ...(meta.extra ?? {}),
-      trainingSkipped: true,
-      trainingSkipReason:
-        meta?.skipTraining === true || meta?.skip_training === true ? 'skipTraining' : 'recallOnly',
-    };
-  }
+if (uiMode !== 'SILENCE' && emptyBefore && seedForPersist && !seedIsDirectiveOnly) {
+  finalAssistant = seedCleanedForPersist || seedForPersist;
 
-  // result 側の衝突キー除去
-  const resultObj = { ...(result as any) };
-  delete (resultObj as any).mode;
-  delete (resultObj as any).meta;
-  delete (resultObj as any).ok;
-  delete (resultObj as any).credit;
+  meta.extra = {
+    ...(meta.extra ?? {}),
+    persistRecoveredFromSeed: true,
+    persistRecoveredSeedLen: seedForPersist.length,
+    persistRecoveredSeedCleanedLen: seedCleanedForPersist.length,
+    persistRecoveredSeedDirectiveOnly: false,
+  };
 
-  return NextResponse.json(
-    { ...resultObj, ...basePayload, mode: effectiveMode, meta },
-    { status: 200, headers },
-  );
+  console.warn('[IROS/persist][RECOVER_FROM_SEED]', {
+    conversationId,
+    userCode,
+    recoveredLen: finalAssistant.length,
+    seedLen: seedForPersist.length,
+    seedCleanedLen: seedCleanedForPersist.length,
+    seedHead: seedForPersist.slice(0, 120),
+  });
+} else if (uiMode !== 'SILENCE' && emptyBefore && seedForPersist && seedIsDirectiveOnly) {
+  // 昇格を抑止したことをログに残す（原因追跡用）
+  meta.extra = {
+    ...(meta.extra ?? {}),
+    persistRecoverFromSeedSkipped: true,
+    persistRecoverSkipReason: 'SEED_DIRECTIVE_ONLY',
+    persistRecoverSeedLen: seedForPersist.length,
+  };
+
+  console.warn('[IROS/persist][RECOVER_FROM_SEED_SKIPPED]', {
+    conversationId,
+    userCode,
+    reason: 'SEED_DIRECTIVE_ONLY',
+    seedLen: seedForPersist.length,
+    seedHead: seedForPersist.slice(0, 120),
+  });
 }
 
-// =========================================================
-// result が string等
-// =========================================================
-{
-  const metaString: any = {
-    userProfile: userProfile ?? null,
-    extra: {
-      userCode,
-      hintText,
-      traceId,
-      historyLen: Array.isArray(chatHistory) ? chatHistory.length : 0,
-      persistedByRoute: true,
-      persistAssistantMessage: false,
-      renderEngineGate: extraMerged?.renderEngineGate === true,
-      renderEngine: extraMerged?.renderEngine === true,
-    },
-  };
 
-  const finalText = String(result ?? '').trim();
-  const uiMode = inferUIMode({ modeHint: mode, effectiveMode, meta: metaString, finalText });
-  const uiReason = inferUIModeReason({ modeHint: mode, effectiveMode, meta: metaString, finalText });
+        const pickString = (v: any): string | null => {
+          if (typeof v !== 'string') return null;
+          const s = v.trim();
+          return s ? s : null;
+        };
 
-  metaString.mode = uiMode;
-  metaString.modeReason = uiReason;
-  metaString.persistPolicy = PERSIST_POLICY;
-  metaString.extra = {
-    ...(metaString.extra ?? {}),
-    uiMode,
-    uiModeReason: uiReason,
-    persistPolicy: PERSIST_POLICY,
-  };
+        const qCodeFinal =
+          pickString((meta as any)?.unified?.q?.code) ??
+          pickString((meta as any)?.unified?.q?.current) ??
+          pickString((meta as any)?.q_code) ??
+          pickString((meta as any)?.qCode) ??
+          null;
 
-  return NextResponse.json(
-    { ...basePayload, content: finalText, meta: metaString },
-    { status: 200, headers },
-  );
+        const depthStageFinal =
+          pickString((meta as any)?.unified?.depth?.stage) ??
+          pickString((meta as any)?.depth_stage) ??
+          pickString((meta as any)?.depthStage) ??
+          pickString((meta as any)?.depth) ??
+          null;
+
+        (meta as any).q_code = qCodeFinal;
+        (meta as any).depth_stage = depthStageFinal;
+        if (qCodeFinal) (meta as any).qCode = qCodeFinal;
+        if (depthStageFinal) (meta as any).depthStage = depthStageFinal;
+
+        if (uiMode === 'SILENCE') {
+          meta.extra = {
+            ...(meta.extra ?? {}),
+            persistedAssistantMessage: {
+              ok: true,
+              inserted: false,
+              skipped: true,
+              reason: 'UI_MODE_SILENCE_NO_INSERT',
+              silenceReason: silenceReason ?? null,
+            },
+          };
+        } else if (finalAssistant.length > 0) {
+          const saved = await persistAssistantMessageToIrosMessages({
+            supabase,
+            conversationId,
+            userCode,
+            content: finalAssistant,
+            meta: meta ?? null,
+          });
+
+          meta.extra = {
+            ...(meta.extra ?? {}),
+            persistedAssistantMessage: {
+              ok: true,
+              inserted: true,
+              skipped: false,
+              len: finalAssistant.length,
+              saved,
+            },
+          };
+        } else {
+          meta.extra = {
+            ...(meta.extra ?? {}),
+            persistedAssistantMessage: { ok: true, inserted: false, skipped: true, reason: 'EMPTY_CONTENT' },
+          };
+        }
+      } catch (e) {
+        meta.extra = {
+          ...(meta.extra ?? {}),
+          persistedAssistantMessage: {
+            ok: false,
+            inserted: false,
+            skipped: true,
+            reason: 'EXCEPTION',
+            error: String((e as any)?.message ?? e),
+          },
+        };
+      }
+
+      // training sample
+      const skipTraining = meta?.skipTraining === true || meta?.skip_training === true || meta?.recallOnly === true || meta?.recall_only === true;
+
+      if (!skipTraining) {
+        const replyText =
+          (typeof (result as any)?.text === 'string' && (result as any).text.trim()) ||
+          (typeof (result as any)?.assistantText === 'string' && (result as any).assistantText.trim()) ||
+          ((result as any).content ?? '');
+
+        await saveIrosTrainingSample({
+          supabase,
+          userCode,
+          tenantId,
+          conversationId,
+          messageId: null,
+          inputText: userTextClean,
+          replyText,
+          meta,
+          tags: ['iros', 'auto'],
+        });
+      } else {
+        meta.extra = {
+          ...(meta.extra ?? {}),
+          trainingSkipped: true,
+          trainingSkipReason: meta?.skipTraining === true || meta?.skip_training === true ? 'skipTraining' : 'recallOnly',
+        };
+      }
+
+      // result 側の衝突キー除去
+      const resultObj = { ...(result as any) };
+      delete (resultObj as any).mode;
+      delete (resultObj as any).meta;
+      delete (resultObj as any).ok;
+      delete (resultObj as any).credit;
+
+      return NextResponse.json({ ...resultObj, ...basePayload, mode: effectiveMode, meta }, { status: 200, headers });
+    }
+
+    // =========================================================
+    // result が string等
+    // =========================================================
+    {
+      const metaString: any = {
+        userProfile: userProfile ?? null,
+        extra: {
+          userCode,
+          hintText,
+          traceId,
+          historyLen: Array.isArray(chatHistory) ? chatHistory.length : 0,
+          persistedByRoute: true,
+          persistAssistantMessage: false,
+          renderEngineGate: extraSoT?.renderEngineGate === true,
+          renderEngine: extraSoT?.renderEngine === true,
+        },
+      };
+
+      const finalText = String(result ?? '').trim();
+      const uiMode = inferUIMode({ modeHint: mode, effectiveMode, meta: metaString, finalText });
+      const uiReason = inferUIModeReason({ modeHint: mode, effectiveMode, meta: metaString, finalText });
+
+      metaString.mode = uiMode;
+      metaString.modeReason = uiReason;
+      metaString.persistPolicy = PERSIST_POLICY;
+      metaString.extra = {
+        ...(metaString.extra ?? {}),
+        uiMode,
+        uiModeReason: uiReason,
+        persistPolicy: PERSIST_POLICY,
+      };
+
+      return NextResponse.json({ ...basePayload, content: finalText, meta: metaString }, { status: 200, headers });
+    }
+  } catch (err: any) {
+    const headers: Record<string, string> = { ...CORS_HEADERS };
+    headers['x-trace-id'] = String(traceIdEarly);
+    return NextResponse.json(
+      { ok: false, error: 'internal_error', detail: String(err?.message ?? err) },
+      { status: 500, headers },
+    );
+  }
 }
 
 // =========================================================
@@ -1309,27 +1134,20 @@ if (result && typeof result === 'object') {
 // - enableRenderEngine=true の場合は render-v2 (renderGatewayAsReply)
 // - IT の場合のみ renderReply（従来）を維持
 // - 返り値は必ず { meta, extraForHandle } に統一
+// - rephraseBlocks の生成（fallback）は “ここだけ” で行う
 // =========================================================
-function applyRenderEngineIfEnabled(params: {
+async function applyRenderEngineIfEnabled(params: {
   enableRenderEngine: boolean;
   isIT: boolean;
   meta: any;
   extraForHandle: any;
   resultObj: any;
-  conversationId: string | null;
-  userCode: string | null;
-  userText: string | null;
-}): { meta: any; extraForHandle: any } {
-  const {
-    enableRenderEngine,
-    isIT,
-    meta,
-    extraForHandle,
-    resultObj,
-    conversationId,
-    userCode,
-    userText,
-  } = params;
+  conversationId: string; // ✅ null にしない
+  userCode: string;       // ✅ null にしない
+  userText: string;       // ✅ null にしない
+}): Promise<{ meta: any; extraForHandle: any }> {
+
+  const { enableRenderEngine, isIT, meta, extraForHandle, resultObj, conversationId, userCode, userText } = params;
 
   // =========================
   // IT は従来render（renderReply）
@@ -1428,11 +1246,7 @@ function applyRenderEngineIfEnabled(params: {
         extraForHandle,
       });
 
-      const rendered = renderReply(
-        (patched.vector ?? vector) as any,
-        (patched.input ?? baseInput) as any,
-        (patched.opts ?? baseOpts) as any,
-      );
+      const rendered = renderReply((patched.vector ?? vector) as any, (patched.input ?? baseInput) as any, (patched.opts ?? baseOpts) as any);
 
       const renderedText =
         typeof rendered === 'string'
@@ -1443,10 +1257,7 @@ function applyRenderEngineIfEnabled(params: {
 
       const sanitized = sanitizeFinalContent(renderedText);
 
-      const speechActUpper = String(
-        (patched.meta as any)?.extra?.speechAct ?? (patched.meta as any)?.speechAct ?? '',
-      ).toUpperCase();
-
+      const speechActUpper = String((patched.meta as any)?.extra?.speechAct ?? (patched.meta as any)?.speechAct ?? '').toUpperCase();
       const isSilence = speechActUpper === 'SILENCE';
 
       const nextContent = isSilence
@@ -1469,10 +1280,7 @@ function applyRenderEngineIfEnabled(params: {
         headerStripped: sanitized.removed.length ? sanitized.removed : null,
       };
 
-      return {
-        meta: metaAfter,
-        extraForHandle: (patched.extraForHandle ?? extraForHandle) as any,
-      };
+      return { meta: metaAfter, extraForHandle: (patched.extraForHandle ?? extraForHandle) as any };
     } catch (e) {
       meta.extra = {
         ...(meta?.extra ?? {}),
@@ -1486,11 +1294,7 @@ function applyRenderEngineIfEnabled(params: {
 
   // render無効なら何もしない
   if (!enableRenderEngine) {
-    meta.extra = {
-      ...(meta?.extra ?? {}),
-      renderEngineApplied: false,
-      renderEngineKind: 'OFF',
-    };
+    meta.extra = { ...(meta?.extra ?? {}), renderEngineApplied: false, renderEngineKind: 'OFF' };
     return { meta, extraForHandle };
   }
 
@@ -1498,6 +1302,7 @@ function applyRenderEngineIfEnabled(params: {
   // render-v2（renderGatewayAsReply）
   // =========================
   try {
+    // ✅ render入力は “読み取り専用合成” にし、SoT(extraForHandle)を書き換えない
     const extraForRender: any = {
       ...(meta?.extra ?? {}),
       ...(extraForHandle ?? {}),
@@ -1516,96 +1321,64 @@ function applyRenderEngineIfEnabled(params: {
     };
 
     const maxLines =
-      Number.isFinite(Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)) &&
-      Number(process.env.IROS_RENDER_DEFAULT_MAXLINES) > 0
+      Number.isFinite(Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)) && Number(process.env.IROS_RENDER_DEFAULT_MAXLINES) > 0
         ? Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)
         : 8;
 
-    const baseText = String(
-      (resultObj as any)?.assistantText ??
-        (resultObj as any)?.content ??
-        (resultObj as any)?.text ??
-        '',
-    ).trimEnd();
+    const baseText = String((resultObj as any)?.assistantText ?? (resultObj as any)?.content ?? (resultObj as any)?.text ?? '').trimEnd();
 
-    // ✅ ここで使う “extraMerged” は、この関数入力 extraForHandle を「最終実態」として扱う
-    const extraMerged: any = extraForHandle ?? null;
+    // ✅ SoT（この関数が返す extraForHandle）：
+    // - ここでは “必要なら埋める” が、なるべく最小にする
+    const extraSoT: any = extraForHandle ?? {};
 
-    // ✅ 最終保険：renderGateway に渡す直前に rephraseBlocks を必ず持たせる
-    const hasBlocks = Array.isArray(extraMerged?.rephraseBlocks) && extraMerged.rephraseBlocks.length > 0;
-    if (!hasBlocks) {
-      const best =
-        String(extraMerged?.rephraseHead ?? '').trim() ||
-        String(extraMerged?.extractedTextFromModel ?? '').trim() ||
-        String(extraMerged?.rawTextFromModel ?? '').trim() ||
-        String(extraMerged?.finalAssistantText ?? '').trim() ||
-        String(extraMerged?.resolvedText ?? '').trim() ||
-        String(extraMerged?.assistantText ?? '').trim() ||
-        String(extraMerged?.content ?? '').trim() ||
-        String(extraMerged?.text ?? '').trim() ||
-        String(baseText ?? '').trim();
+// ===================== (2) 置き換え：route.ts 1290〜1328 =====================
+// ↓↓↓ いまある “✅ rephraseBlocks の fallback 生成は ここだけ” ブロック全体を
+//（1290〜1328）丸ごと削除して、代わりにこのブロックを貼ってください ↓↓↓
 
-      if (best) {
-        const fb = buildFallbackRenderBlocksFromFinalText(best);
-        extraMerged.rephraseBlocks = fb;
-        extraMerged.rephraseBlocksAttached = true;
-        extraMerged.rephraseAttachSkipped = true;
-        extraMerged.rephraseLLMApplied = Boolean(extraMerged?.rephraseLLMApplied);
-        extraMerged.rephraseApplied = Boolean(extraMerged?.rephraseApplied);
-        extraMerged.rephraseReason = extraMerged?.rephraseReason ?? 'final_fallback_blocks_from_best_text';
-        extraMerged.rephraseHead = extraMerged?.rephraseHead ?? best;
+    // ✅ rephraseBlocks の生成/付与は _impl/rephrase.ts に一本化
+    // - extraSoT（SoT）と meta.extra をそこで更新する
+    // - ここでは “fallback生成” をしない
+    await maybeAttachRephraseForRenderV2({
+      conversationId,
+      userCode,
+      userText: typeof userText === 'string' ? userText : String(userText ?? ''),
+      meta,
+      extraMerged: extraSoT,
+      // 任意（無くても動く）
+      traceId: (meta as any)?.traceId ?? null,
+      effectiveMode:
+        (extraSoT as any)?.effectiveMode ??
+        (meta as any)?.extra?.effectiveMode ??
+        null,
+    });
 
-        console.warn('[IROS/rephraseAttach][FINAL_FALLBACK_BLOCKS]', {
-          blocksLen: fb.length,
-          head: String(best).slice(0, 120),
-        });
-      } else {
-        console.warn('[IROS/rephraseAttach][FINAL_FALLBACK_BLOCKS][NO_TEXT]', {
-          hasRephraseHead: Boolean(extraMerged?.rephraseHead),
-          hasExtracted: Boolean(extraMerged?.extractedTextFromModel),
-          hasRaw: Boolean(extraMerged?.rawTextFromModel),
-          hasFinal: Boolean(extraMerged?.finalAssistantText),
-        });
-      }
-    }
+// ↑↑↑ ここまでを 1290〜1328 の代わりに貼る ↑↑↑
 
-    // ✅ 最終確定した blocks/head を render 入力へ同期（壊さない）
-    if (Array.isArray(extraMerged?.rephraseBlocks) && extraMerged.rephraseBlocks.length > 0 && !Array.isArray(extraForRender?.rephraseBlocks)) {
-      extraForRender.rephraseBlocks = extraMerged.rephraseBlocks;
+    // ✅ SoTの blocks/head を render input に同期（render input は読み取り専用）
+    if (Array.isArray(extraSoT?.rephraseBlocks) && extraSoT.rephraseBlocks.length > 0 && !Array.isArray(extraForRender?.rephraseBlocks)) {
+      extraForRender.rephraseBlocks = extraSoT.rephraseBlocks;
     }
     {
-      const mergedHead = String(extraMerged?.rephraseHead ?? '').trim();
+      const mergedHead = String(extraSoT?.rephraseHead ?? '').trim();
       if (mergedHead && !String(extraForRender?.rephraseHead ?? '').trim()) extraForRender.rephraseHead = mergedHead;
     }
 
     // ✅ IRの基準本文（短文化ガード用）を renderGateway に渡す
     {
-      const mergedFinal =
-        String(extraMerged?.finalAssistantText ?? '').trim() ||
-        String(extraMerged?.finalAssistantTextCandidate ?? '').trim() ||
-        '';
+      const mergedFinal = String(extraSoT?.finalAssistantText ?? '').trim() || String(extraSoT?.finalAssistantTextCandidate ?? '').trim() || '';
       if (mergedFinal && !String(extraForRender?.finalAssistantText ?? '').trim()) {
         extraForRender.finalAssistantText = mergedFinal;
       }
 
-      const mergedResolved = String(extraMerged?.resolvedText ?? '').trim();
+      const mergedResolved = String(extraSoT?.resolvedText ?? '').trim();
       if (mergedResolved && !String(extraForRender?.resolvedText ?? '').trim()) {
         extraForRender.resolvedText = mergedResolved;
       }
     }
 
-    const keysToCarry = [
-      'rephraseBlocksAttached',
-      'rephraseAttachSkipped',
-      'rephraseLLMApplied',
-      'rephraseApplied',
-      'rephraseReason',
-    ] as const;
-
+    const keysToCarry = ['rephraseBlocksAttached', 'rephraseAttachSkipped', 'rephraseLLMApplied', 'rephraseApplied', 'rephraseReason'] as const;
     for (const k of keysToCarry) {
-      if ((extraForRender as any)[k] == null && (extraMerged as any)?.[k] != null) {
-        (extraForRender as any)[k] = (extraMerged as any)[k];
-      }
+      if ((extraForRender as any)[k] == null && (extraSoT as any)?.[k] != null) (extraForRender as any)[k] = (extraSoT as any)[k];
     }
 
     console.info('[DEBUG/RENDERGW_CALL]', {
@@ -1613,9 +1386,7 @@ function applyRenderEngineIfEnabled(params: {
       baseTextHead: typeof baseText === 'string' ? baseText.slice(0, 80) : null,
       renderEngine: (extraForRender as any)?.renderEngine ?? null,
       hasRephraseBlocks: Array.isArray((extraForRender as any)?.rephraseBlocks),
-      rephraseBlocksLen: Array.isArray((extraForRender as any)?.rephraseBlocks)
-        ? (extraForRender as any).rephraseBlocks.length
-        : null,
+      rephraseBlocksLen: Array.isArray((extraForRender as any)?.rephraseBlocks) ? (extraForRender as any).rephraseBlocks.length : null,
       rephraseBlocksHead:
         Array.isArray((extraForRender as any)?.rephraseBlocks) && (extraForRender as any).rephraseBlocks[0]
           ? String((extraForRender as any).rephraseBlocks[0]?.text ?? '').slice(0, 120)
@@ -1624,11 +1395,7 @@ function applyRenderEngineIfEnabled(params: {
       rephraseObjKeys: (extraForRender as any)?.rephrase ? Object.keys((extraForRender as any).rephrase) : null,
     });
 
-    const out = renderGatewayAsReply({
-      text: baseText,
-      extra: extraForRender,
-      maxLines,
-    }) as any;
+    const out = renderGatewayAsReply({ text: baseText, extra: extraForRender, maxLines }) as any;
 
     console.info('[DEBUG/RENDERGW_OUT]', {
       outType: typeof out,
@@ -1639,42 +1406,7 @@ function applyRenderEngineIfEnabled(params: {
       meta: out?.meta ?? null,
     });
 
-    if (String(process.env.IROS_DEBUG_REPHRASE_PIPE ?? '0').trim() === '1') {
-      const metaBlocks =
-        (meta as any)?.extra?.rephraseBlocks ??
-        (meta as any)?.extra?.rephrase?.blocks ??
-        (meta as any)?.extra?.rephrase?.rephraseBlocks ??
-        null;
-
-      const handleBlocks =
-        (extraForHandle as any)?.rephraseBlocks ??
-        (extraForHandle as any)?.rephrase?.blocks ??
-        (extraForHandle as any)?.rephrase?.rephraseBlocks ??
-        null;
-
-      const mergedBlocks =
-        (extraForRender as any)?.rephraseBlocks ??
-        (extraForRender as any)?.rephrase?.blocks ??
-        (extraForRender as any)?.rephrase?.rephraseBlocks ??
-        null;
-
-      console.info('[IROS/pipe][BEFORE_RENDER_V2]', {
-        conversationId,
-        userCode,
-        metaExtraHasBlocks: Array.isArray(metaBlocks),
-        metaExtraBlocksLen: Array.isArray(metaBlocks) ? metaBlocks.length : null,
-        handleExtraHasBlocks: Array.isArray(handleBlocks),
-        handleExtraBlocksLen: Array.isArray(handleBlocks) ? handleBlocks.length : null,
-        mergedExtraHasBlocks: Array.isArray(mergedBlocks),
-        mergedExtraBlocksLen: Array.isArray(mergedBlocks) ? mergedBlocks.length : null,
-        mergedHead: Array.isArray(mergedBlocks) ? String(mergedBlocks[0]?.text ?? '').slice(0, 80) : null,
-      });
-    }
-
-    const outText = String(
-      (typeof out === 'string' ? out : out?.text ?? out?.content ?? out?.assistantText ?? baseText) ?? '',
-    ).trimEnd();
-
+    const outText = String((typeof out === 'string' ? out : out?.text ?? out?.content ?? out?.assistantText ?? baseText) ?? '').trimEnd();
     const sanitized = sanitizeFinalContent(outText);
 
     resultObj.content = sanitized.text.trimEnd();
@@ -1690,7 +1422,8 @@ function applyRenderEngineIfEnabled(params: {
       renderV2OutLen: sanitized.text.length,
     };
 
-    return { meta, extraForHandle: extraMerged };
+    // ✅ SoTを返す（render input は返さない）
+    return { meta, extraForHandle: extraSoT };
   } catch (e) {
     console.error('[IROS/render-v2][EXCEPTION]', e);
     meta.extra = {
@@ -1701,14 +1434,4 @@ function applyRenderEngineIfEnabled(params: {
     };
     return { meta, extraForHandle };
   }
-}
-} catch (err: any) {
-  const headers: Record<string, string> = { ...CORS_HEADERS };
-  headers['x-trace-id'] = String(traceIdEarly);
-
-  return NextResponse.json(
-    { ok: false, error: 'internal_error', detail: String(err?.message ?? err) },
-    { status: 500, headers },
-  );
-}
 }

@@ -1,24 +1,23 @@
 // src/lib/llm/chatComplete.ts
 // iros — Single LLM Exit (chat.completions)
 //
-// 方針：
-// - OpenAI への「出口」はここだけ
-// - 用途は purpose で切り替える（writer/judge/digest/title/soul/reply）
-// - 「黙らせる」はしない。生成は常に行い、採用/不採用は上位で決める。
-//   ※ただし「SCAFFOLDでwriterを呼ぶ」など“設計違反”は、任意でガードできる（後述）
+// 憲法（このファイルの憲章）
+// - OpenAI への「出口」はここだけ（Single LLM Exit）
+// - ここは「文章の品質」を決めない。責務は "呼び出し / 監査 / 安全" のみ
+// - 「黙らせる」はしない：生成は常に行い、採用/不採用は上位が決める
+// - ただし “設計違反の呼び出し” は、任意でガードできる（例：SCAFFOLDでwriterを呼ぶ）
+// - trace は「top-level優先 → args.trace互換 → null」で統一
 //
-// 追加（監査）：
-// - 呼び出しの事実を [IROS/LLM][CALL] に必ず残す（writer が呼ばれていない証拠化）
-// - 失敗時も trace 情報を [IROS/LLM][ERR] に必ず残す
-// - 任意の強制ガード：SCAFFOLD で writer を呼んだら例外（IROS_LLM_GUARD!=0 のとき）
+// 監査（必須）
+// - 呼び出しは必ず [IROS/LLM][CALL] に残す（writer が呼ばれていない証拠化）
+// - 失敗時も trace を [IROS/LLM][ERR] に残す
 //
-// 注意：
-// - ここは「文章の品質」ではなく、"呼び出し/監査/安全" が責務
-// - trace は「top-level優先 → args.trace 互換 → null」で統一する
+// 注意
+// - "__" で始まるキーは “内部フラグ” であり、OpenAI へは送らない（監査用に保持はOK）
+// - 本文の採否・編集・slotの扱いは上位の責務（ここで方針を増やさない）
 
 import crypto from 'node:crypto';
 import { flagshipGuard as judgeFlagship } from '@/lib/iros/quality/flagshipGuard';
-
 
 export type ChatMessage = {
   role: 'system' | 'user' | 'assistant';
@@ -105,10 +104,6 @@ function safeTrimEnd(s: unknown): string {
   return String(s ?? '').replace(/\r\n/g, '\n').trimEnd();
 }
 
-function norm(s: unknown): string {
-  return String(s ?? '').replace(/\r\n/g, '\n').trim();
-}
-
 function makeCallId() {
   return crypto.randomBytes(6).toString('hex');
 }
@@ -185,9 +180,8 @@ function safeCaller(): string | null {
 function detectHasDigest(messages: ChatMessage[]): boolean {
   try {
     return (
-      messages.some((m) =>
-        /history(digest|summary)|situation[_\s-]?summary/i.test(m.content),
-      ) ?? false
+      messages.some((m) => /history(digest|summary)|situation[_\s-]?summary/i.test(m.content)) ??
+      false
     );
   } catch {
     return false;
@@ -215,15 +209,17 @@ function lastUserHead(messages: ChatMessage[]): string | null {
   }
 }
 
-// --- ここから追加（envFlagshipRewriteOn の下あたりに置く） ---
+/**
+ * ✅ OpenAIへ送る extraBody は内部フラグを排除する
+ * - "__" で始まるキーは「内部フラグ」扱い → OpenAI には送らない
+ * - undefined は落とす
+ */
 function stripInternalExtraBody(input: Record<string, any>): Record<string, any> {
   try {
     const out: Record<string, any> = {};
     const src = input && typeof input === 'object' ? input : {};
     for (const [k, v] of Object.entries(src)) {
-      // ✅ "__" で始まるものは「内部フラグ」扱い → OpenAI には送らない
       if (k.startsWith('__')) continue;
-      // undefined は落とす（JSON stringify の意図しない差を避ける）
       if (typeof v === 'undefined') continue;
       out[k] = v;
     }
@@ -232,8 +228,6 @@ function stripInternalExtraBody(input: Record<string, any>): Record<string, any>
     return {};
   }
 }
-// --- 追加ここまで ---
-
 
 export async function chatComplete(args: ChatArgs): Promise<string> {
   const purpose = args.purpose;
@@ -256,7 +250,6 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
   const endpoint = args.endpoint ?? 'https://api.openai.com/v1/chat/completions';
   const extraHeaders = args.extraHeaders ?? {};
 
-
   // ✅ extraBody は「内部フラグが混ざる」ので、送信用と内部判定用を分ける
   const extraBodyRaw = (args.extraBody ?? {}) as Record<string, any>;
 
@@ -265,6 +258,7 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
 
   // 送信用（__ で始まるキーは全部落とす）
   const extraBody: Record<string, any> = stripInternalExtraBody(extraBodyRaw);
+
   const responseFormat = args.responseFormat;
   const audit = args.audit;
   const allowEmpty = Boolean(args.allowEmpty);
@@ -308,52 +302,57 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
     body.response_format = responseFormat;
   }
 
-// ===== 監査ログ（CALL）=====
-try {
-  const first = messages[0];
-  const last = messages[messages.length - 1];
+  // ===== 監査ログ（CALL）=====
+  try {
+    const first = messages[0];
+    const last = messages[messages.length - 1];
 
-  // ✅ 送信bodyの最上位キーだけ監査（内部フラグ混入検知）
-  const bodyKeys = Object.keys(body ?? {}).sort();
-  const extraBodyKeys = Object.keys(extraBody ?? {}).sort();
+    // ✅ 送信bodyの最上位キーだけ監査（内部フラグ混入検知は “raw” を見る）
+    const bodyKeys = Object.keys(body ?? {}).sort();
+    const extraBodyKeys = Object.keys(extraBody ?? {}).sort();
+    const extraBodyRawKeys = Object.keys(extraBodyRaw ?? {}).sort();
 
-  console.log('[IROS/LLM][CALL]', {
-    callId,
-    purpose,
-    model,
-    temperature,
-    responseFormat: responseFormat?.type ?? 'text',
-    endpoint,
+    const hasInternalKeys =
+      extraBodyRawKeys.some((k) => k.startsWith('__')) ||
+      bodyKeys.some((k) => k.startsWith('__')) ||
+      extraBodyKeys.some((k) => k.startsWith('__'));
 
-    traceId: traceFinal.traceId,
-    conversationId: traceFinal.conversationId,
-    userCode: traceFinal.userCode,
+    console.log('[IROS/LLM][CALL]', {
+      callId,
+      purpose,
+      model,
+      temperature,
+      responseFormat: responseFormat?.type ?? 'text',
+      endpoint,
 
-    slotPlanPolicy: audit?.slotPlanPolicy ?? null,
-    mode: audit?.mode ?? null,
-    qCode: audit?.qCode ?? null,
-    depthStage: audit?.depthStage ?? null,
+      traceId: traceFinal.traceId,
+      conversationId: traceFinal.conversationId,
+      userCode: traceFinal.userCode,
 
-    msgCount: messages.length,
-    firstRole: first?.role ?? null,
-    lastRole: last?.role ?? null,
-    firstHead: first ? head(first.content) : null,
-    lastTail: last ? tail(last.content) : null,
-    lastUserHead: lastUserHead(messages),
+      slotPlanPolicy: audit?.slotPlanPolicy ?? null,
+      mode: audit?.mode ?? null,
+      qCode: audit?.qCode ?? null,
+      depthStage: audit?.depthStage ?? null,
 
-    hasDigest: detectHasDigest(messages),
-    hasAnchor: detectHasAnchorHints(messages),
+      msgCount: messages.length,
+      firstRole: first?.role ?? null,
+      lastRole: last?.role ?? null,
+      firstHead: first ? head(first.content) : null,
+      lastTail: last ? tail(last.content) : null,
+      lastUserHead: lastUserHead(messages),
 
-    roles: messages.map((m) => m.role),
-    caller: safeCaller(),
+      hasDigest: detectHasDigest(messages),
+      hasAnchor: detectHasAnchorHints(messages),
 
-    // ✅ 追加：混入検知
-    bodyKeys,
-    extraBodyKeys,
-    hasInternalKeys: bodyKeys.some((k) => k.startsWith('__')) || extraBodyKeys.some((k) => k.startsWith('__')),
-  });
-} catch {}
+      roles: messages.map((m) => m.role),
+      caller: safeCaller(),
 
+      bodyKeys,
+      extraBodyKeys,
+      extraBodyRawKeys,
+      hasInternalKeys,
+    });
+  } catch {}
 
   let res: Response | null = null;
   let elapsed = 0;
@@ -467,80 +466,9 @@ try {
     throw err;
   }
 
-  const out = safeTrimEnd(raw);
+  let out = safeTrimEnd(raw);
 
-  // ─────────────────────────────────────────────
-  // ✅ 旗印REWRITE（purpose=reply のときだけ / 1回だけ）
-  // - IROS_FLAGSHIP_REWRITE=1 で有効化
-  // - extraBody.__flagship_pass が付いている場合は再実行しない（無限ループ防止）
-  const flagshipEnabled = envFlagshipRewriteOn() && purpose === 'reply' && !internalFlagshipPass;
-
-
-  if (flagshipEnabled) {
-    const v1 = judgeFlagship(out);
-
-    if (!v1.ok) {
-      const rewriteSystem =
-        [
-          'あなたは iros の会話生成（reply）担当です。',
-          '',
-          '【旗印】この文章は「答えを渡す」ためではなく、読み手が“自分で答えを出せる場所”に立てるための文章。',
-          '',
-          '【必須ルール】',
-          '- 断定・指示・結論の押し付けをしない（〜すべき、必ず、絶対、結論、正解、答えは、等を避ける）',
-          '- 判断を急がせない（今すぐ、急いで、今日中、等を避ける）',
-          '- 質問は最大1つ（0でもOK）',
-          '- 箇条書き・番号・A/B などで「増やさない」（文章で）',
-          '- 励まし/評価で押さない（大丈夫、あなたならできる、等を主にしない）',
-          '- “足場”だけを短く置く（観察→許可→一歩、の順でよい）',
-          '',
-          '【検出された違反】',
-          `- 判定: ${v1.level}`,
-          `- 理由: ${v1.reasons.join(' / ')}`,
-          '',
-          'これから出すのは「書き直した本文のみ」。',
-        ].join('\n');
-
-      // v2: 1回だけ書き直し（同じ chatComplete を再利用）
-      const rewritten = await chatComplete({
-        ...args,
-        // 既存 messages に “書き直しルール” を追加して実行
-        messages: [
-          ...messages,
-          { role: 'system', content: rewriteSystem },
-          { role: 'user', content: out },
-        ],
-        // 無限ループ防止フラグ
-        extraBody: { ...(extraBody ?? {}), __flagship_pass: 1 },
-        // 過度に創作させない
-        temperature: Math.min(0.35, temperature),
-        allowEmpty: false,
-      });
-
-      const v2 = judgeFlagship(rewritten);
-
-      // “よりマシ”を採用（両方NGでもスコアが低い方）
-      const score = (v: ReturnType<typeof judgeFlagship>) =>
-        v.score.fatal * 10 + v.score.warn * 3 + v.score.qCount + v.score.bulletLike;
-
-      const pick = score(v2) <= score(v1) ? rewritten : out;
-
-// ✅ “maxQuestions:0” を守れなかったら FATAL
-function constraintsDemandZeroQuestions(text: string): boolean {
-  // ここは “出力に @CONSTRAINTS が露出しない前提” なので、
-  // constraints は slot 側から meta で渡されている想定。
-  // もしここで参照できないなら、judgeFlagship の引数に constraints を渡す。
-  return false;
-}
-
-
-      // ここで out を差し替える
-      // 以降の [IROS/LLM][OK] ログにも反映される
-      return pick;
-    }
-  }
-  // ─────────────────────────────────────────────
-
+  // ✅ 空許可が無いのに空はエラー（出口層の安全）
   if (!allowEmpty && out.trim().length === 0) {
     const err = new Error(`LLM empty content (${purpose})`);
     try {
@@ -557,6 +485,66 @@ function constraintsDemandZeroQuestions(text: string): boolean {
     } catch {}
     throw err;
   }
+
+  // ─────────────────────────────────────────────
+  // ✅ 旗印REWRITE（任意機能 / 出口層は“呼び出し”として扱い、採否は最小に）
+  // - IROS_FLAGSHIP_REWRITE=1 で有効化
+  // - purpose=reply のときだけ
+  // - extraBodyRaw.__flagship_pass が付いている場合は再実行しない（無限ループ防止）
+  //
+  // 注意：ここで “正しさ” を決めない。あくまで 1回だけ整形の再試行。
+  const flagshipEnabled = envFlagshipRewriteOn() && purpose === 'reply' && !internalFlagshipPass;
+
+  if (flagshipEnabled) {
+    const v1 = judgeFlagship(out);
+
+    if (!v1.ok) {
+      const rewriteSystem = [
+        'あなたは iros の会話生成（reply）担当です。',
+        '',
+        '【旗印】この文章は「答えを渡す」ためではなく、読み手が“自分で答えを出せる場所”に立てるための文章。',
+        '',
+        '【必須ルール】',
+        '- 断定・指示・結論の押し付けをしない（〜すべき、必ず、絶対、結論、正解、答えは、等を避ける）',
+        '- 判断を急がせない（今すぐ、急いで、今日中、等を避ける）',
+        '- 質問は最大1つ（0でもOK）',
+        '- 箇条書き・番号・A/B などで「増やさない」（文章で）',
+        '- 励まし/評価で押さない（大丈夫、あなたならできる、等を主にしない）',
+        '- “足場”だけを短く置く（観察→許可→一歩、の順でよい）',
+        '',
+        '【検出された違反】',
+        `- 判定: ${v1.level}`,
+        `- 理由: ${v1.reasons.join(' / ')}`,
+        '',
+        'これから出すのは「書き直した本文のみ」。',
+      ].join('\n');
+
+      // v2: 1回だけ書き直し（同じ出口を再利用）
+      const rewritten = await chatComplete({
+        ...args,
+        messages: [
+          ...messages,
+          { role: 'system', content: rewriteSystem },
+          { role: 'user', content: out },
+        ],
+        // 無限ループ防止フラグ（OpenAIへは送られない）
+        extraBody: { ...(extraBodyRaw ?? {}), __flagship_pass: 1 },
+        // 過度に創作させない
+        temperature: Math.min(0.35, temperature),
+        allowEmpty: false,
+      });
+
+      const v2 = judgeFlagship(rewritten);
+
+      // “よりマシ”を採用（両方NGでもスコアが低い方）
+      const score = (v: ReturnType<typeof judgeFlagship>) =>
+        v.score.fatal * 10 + v.score.warn * 3 + v.score.qCount + v.score.bulletLike;
+
+      const pick = score(v2) <= score(v1) ? rewritten : out;
+      out = safeTrimEnd(pick);
+    }
+  }
+  // ─────────────────────────────────────────────
 
   // ✅ OKログ
   try {

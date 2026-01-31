@@ -14,9 +14,9 @@
 // - llmSystem: LLMに渡す「器」制約（systemに足す想定）
 // - maxLines: UI/後段での行数制限
 //
-// ✅ 重要：SILENCE は「完全無出力」。
-// - silentText（"…"）は禁止
-// - allowLLM=false だからといって必ず SILENCE に落とさない（FORWARD を非LLMで成立させる）
+// ✅ 重要：SILENCE は「LLMからの生成ゼロ」。
+// - LLMに "…" を生成させない（silentText 生成は禁止）
+// - 固定本文（…）を出すかどうかは policy/metaPatch 側の責務（single source）
 //
 // ルール：
 // - actCandidate === 'SILENCE' → 必ず沈黙（LLM呼ばない）
@@ -149,8 +149,8 @@ function normAct(v: unknown): SpeechAct {
  * - それ以外は安全側で SILENCE
  */
 export function applySpeechAct(decision: SpeechDecision): ApplySpeechActOutput {
-  // ✅ Sofia 常時固定（最短・最終ゲート）
-  // ※ここは “必ず沈黙” として固定（設計どおり）
+  // ✅ Sofia 常時固定（デバッグ/緊急遮断）
+  // ※ここは環境スイッチとして残す（運用でOFF前提）
   if (process.env.IROS_ALWAYS_SOFIA === '1') {
     const act: SpeechAct = 'SILENCE';
     const allow = defaultAllowSchema(act);
@@ -166,107 +166,83 @@ export function applySpeechAct(decision: SpeechDecision): ApplySpeechActOutput {
   let actCandidate: SpeechAct = normAct((decision as any)?.act);
 
   // =========================================================
-  // ✅ Q1_SUPPRESS 検出（ここが本丸）
-  // - 実際のログでは speechInput.brakeReleaseReason に入っている
-  // - decision.input / decision.speechInput 等も拾う
+  // ✅ Q1_SUPPRESS 検出（single source）
   // =========================================================
   const brakeReleaseReason =
-    // hint / meta / 直下
     (decision as any)?.hint?.brakeReleaseReason ??
     (decision as any)?.hint?.brake_reason ??
     (decision as any)?.brakeReleaseReason ??
     (decision as any)?.brake_reason ??
     (decision as any)?.meta?.brakeReleaseReason ??
     (decision as any)?.meta?.brake_reason ??
-    // input
     (decision as any)?.input?.brakeReleaseReason ??
     (decision as any)?.input?.brake_reason ??
-    // speechInput
     (decision as any)?.speechInput?.brakeReleaseReason ??
     (decision as any)?.speechInput?.brake_reason ??
     (decision as any)?.hint?.speechInput?.brakeReleaseReason ??
     (decision as any)?.hint?.speechInput?.brake_reason ??
     null;
 
-  const forcedOffByQ1Suppress = brakeReleaseReason === 'Q1_SUPPRESS';
+  const forcedByQ1Suppress = brakeReleaseReason === 'Q1_SUPPRESS';
 
   // =========================================================
-  // ✅ 強制OFF 判定（hint.allowLLM / Q1_SUPPRESS）
+  // ✅ 新方針：SILENCEを基本廃止（= LLMは止めない）
+  // - 乱れ/抑制があっても「LLMは呼ぶ」
+  // - 代わりに “器(AllowSchema)” を最小化して暴走を防ぐ
   // =========================================================
-  const forcedOffByHint = decision.hint?.allowLLM === false;
-  const forcedOff = forcedOffByHint || forcedOffByQ1Suppress;
 
-  // Q1_SUPPRESS のときは “沈黙ループ回避” のため act は FORWARD 優先（非LLM）
-  if (forcedOffByQ1Suppress && actCandidate !== 'SILENCE') {
+  // SILENCE 判定が来ても、原則は FORWARD に丸める（最低1行を返す）
+  if (actCandidate === 'SILENCE') {
     actCandidate = 'FORWARD';
   }
 
+  // 抑制時（Q1_SUPPRESS / hint.allowLLM=false）でも LLM は呼ぶ。
+  // ただし “器” を FORWARD の最小（1行）に固定する。
+  const hintAllow = (decision as any)?.hint?.allowLLM;
+  const forcedByHint = hintAllow === false;
+
+  const isSuppressed = forcedByQ1Suppress || forcedByHint;
+
   // allowCandidate（器）を actCandidate に基づいて決める
-  const allowCandidate = defaultAllowSchema(actCandidate);
+  // 抑制時は FORWARD を最小器に固定して、説明・観測・共感を抑える
+  const allowCandidateBase = defaultAllowSchema(isSuppressed ? ('FORWARD' as any) : actCandidate);
 
-  // 最終 allowLLM
-  const allowLLM = !forcedOff && allowCandidate.allowLLM === true;
+  // 非LLMルートを廃止するため、allowLLM は原則 true
+  // ※ defaultAllowSchema 側が allowLLM:false を返しても、ここでは上書きして呼ぶ
+  const allowLLM = true;
 
-  // =========================================================
-  // ✅ actCandidate が SILENCE は常に沈黙
-  // =========================================================
-  if (actCandidate === 'SILENCE') {
-    const act: SpeechAct = 'SILENCE';
-    const allow = defaultAllowSchema(act);
-    return {
-      act,
-      allow,
-      allowLLM: false,
-      maxLines: 1,
-    };
-  }
+  // 抑制時の maxLines は 1 に固定（短文でも “人間語の1行” を作らせる）
+  const maxLines = isSuppressed ? 1 : Math.max(allowCandidateBase.maxLines ?? 1, 1);
 
-  // =========================================================
-  // ✅ allowLLM=false の扱い（ここが今回の仕様）
-  // - FORWARD は非LLMで成立させる（SILENCEに潰さない）
-  // - それ以外は安全側で SILENCE
-  // =========================================================
-  if (allowLLM === false) {
-    if (actCandidate === 'FORWARD') {
-      const act: SpeechAct = 'FORWARD';
-
-      // 非LLMの最小器（UI/後段の解釈が安定するように maxLines を固定）
-      const allow: AllowSchema = {
-        ...(defaultAllowSchema(act) as any),
-        act,
-        allowLLM: false,
-        maxLines: 1,
-      } as AllowSchema;
-
-      return {
-        act,
-        allow,
-        allowLLM: false,
-        maxLines: 1,
-      };
-    }
-
-    // それ以外は SILENCE（安全側）
-    const act: SpeechAct = 'SILENCE';
-    const allow = defaultAllowSchema(act);
-    return {
-      act,
-      allow,
-      allowLLM: false,
-      maxLines: 1,
-    };
-  }
+  // allow を上書き（maxLines を確実に反映）
+  const allow: AllowSchema = {
+    ...(allowCandidateBase as any),
+    allowLLM: true,
+    maxLines,
+  } as any;
 
   // =========================================================
   // ✅ LLM を呼ぶ場合は器の system 文を返す
+  // - 抑制時は “言い切り寄り/テンプレ禁止” を追加で強くする
   // =========================================================
-  const llmSystem = buildLLMSystemForAllow(allowCandidate);
+  const baseSystem = buildLLMSystemForAllow(allow);
+
+  const extraSuppressed = isSuppressed
+    ? joinLines([
+        '【抑制モード】いまは乱れを増やさないため、1行で返してください。',
+        '「かもしれない」「たぶん」などの曖昧化は最大1回まで。できるだけ言い切りで。',
+        '共感テンプレ（「大変でしたね」等）・一般論・未来予測・質問は出さない。',
+        '結論は「一手」または「次の操作」だけにしてください。',
+      ])
+    : '';
+
+  const llmSystem = extraSuppressed ? joinLines([baseSystem, extraSuppressed]) : baseSystem;
 
   return {
-    act: actCandidate,
-    allow: allowCandidate,
-    allowLLM: true,
-    maxLines: allowCandidate.maxLines,
+    act: isSuppressed ? ('FORWARD' as any) : actCandidate,
+    allow,
+    allowLLM,
+    maxLines,
     llmSystem,
   };
 }

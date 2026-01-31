@@ -1255,7 +1255,26 @@ export function renderGatewayAsReply(args: {
 
 // ✅ 最終保険：最終整形で空になったら、必ず復旧して返す（ILINE/指示行は落とした状態で）
 if (String(content ?? '').trim() === '') {
-  const rescueBase = picked || fallbackText || r0 || c1 || c2 || c3 || '';
+  // まずは従来の救出素材
+  let rescueBase = picked || fallbackText || r0 || c1 || c2 || c3 || '';
+
+  // ✅ 追加：rephraseBlocks があるのに “pickedFrom:'text' で空” を救えないケースの止血
+  // - ただし @OBS/@SHIFT 等の内部ディレクティブは UI に出さない（stripDirectiveLines で落とす）
+  if (String(rescueBase ?? '').trim() === '') {
+    try {
+      const extraAny2 = (meta as any)?.extra as any;
+      const rephraseBlocks = extraAny2?.rephraseBlocks ?? null;
+
+      if (Array.isArray(rephraseBlocks) && rephraseBlocks.length > 0) {
+        const joined = rephraseBlocks
+          .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim())
+          .filter(Boolean)
+          .join('\n');
+
+        rescueBase = joined || rescueBase;
+      }
+    } catch {}
+  }
 
   let rescued = rescueBase;
 
@@ -1268,12 +1287,18 @@ if (String(content ?? '').trim() === '') {
 
   content = String(rescued ?? '').replace(/(\n\s*)+$/g, '').trim();
 
+  // ✅ それでも空なら「空返しだけは防ぐ」最終ACK
+  if (String(content ?? '').trim() === '') {
+    content = 'うん、届きました。🪔';
+  }
+
   console.warn('[IROS/renderGateway][RESCUED_EMPTY]', {
     rev: IROS_RENDER_GATEWAY_REV,
     rescueLen: content.length,
     rescueHead: head(content),
   });
 }
+
 
 
   // ✅ render-v2 通電ランプ：rephraseBlocks が入っているか毎回見える化（スコープ/型安全版）

@@ -84,6 +84,33 @@ function shouldSkipDedupe(line: string): boolean {
 export function renderV2(input: RenderV2Input): string {
   const blocks = Array.isArray(input?.blocks) ? input.blocks : [];
 
+  console.warn('[IROS/renderV2][PROBE]', {
+    disable: (() => {
+      const v = String(process.env.IROS_RENDER_V2_DISABLE ?? '').toLowerCase();
+      return v === '1' || v === 'true' || v === 'on' || v === 'yes';
+    })(),
+    blocksLen: Array.isArray(input?.blocks) ? input.blocks.length : null,
+    fallbackLen: String(input?.fallbackText ?? '').length,
+    maxLines: input?.maxLines ?? null,
+    allowUnder5: input?.allowUnder5 ?? null,
+  });
+
+
+  // ✅ 実験用：renderV2 の整形を完全に無効化（素通し）
+  // env: IROS_RENDER_V2_DISABLE = "1" | "true" | "on" | "yes"
+  const disableRaw = String(process.env.IROS_RENDER_V2_DISABLE ?? '').toLowerCase();
+  const disable = disableRaw === '1' || disableRaw === 'true' || disableRaw === 'on' || disableRaw === 'yes';
+  if (disable) {
+    // blocks があれば blocks をそのまま結合（trim/dedupe/行制限なし）
+    const joined = blocks
+      .map((b) => String((b as any)?.text ?? ''))
+      .filter((s) => s.length > 0)
+      .join('\n');
+
+    // blocks が空なら fallbackText をそのまま返す
+    return joined.length > 0 ? joined : String(input?.fallbackText ?? '');
+  }
+
   const maxLinesRaw = Number(input?.maxLines);
   const requested =
     Number.isFinite(maxLinesRaw) && maxLinesRaw > 0 ? Math.floor(maxLinesRaw) : 5;
@@ -149,3 +176,4 @@ export function renderV2(input: RenderV2Input): string {
 
   return out.slice(0, maxLines).join('\n');
 }
+

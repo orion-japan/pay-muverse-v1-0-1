@@ -208,8 +208,7 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
   const { userCode, idToken, loading } = useAuth();
   const isMuAI =
     pathname?.startsWith('/mu_ai') === true || pathname?.startsWith('/mu_full') === true;
-  const isIros = pathname?.startsWith('/iros') === true;
-  const isSofia = pathname?.startsWith('/sofia') === true;
+
 
   // 監視記録（テレメトリ）
   useEffect(() => {

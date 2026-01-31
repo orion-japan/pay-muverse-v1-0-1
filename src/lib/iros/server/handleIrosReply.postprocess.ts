@@ -7,6 +7,12 @@
 // - Q1_SUPPRESS + allowLLM=false + 無発話 → 本文は必ず空（沈黙止血）
 // - pastStateNote 注入（条件一致のみ）
 // - UnifiedAnalysis の保存（失敗しても返信は落とさない）
+//
+// 【憲法準拠ポイント】
+// - 正本は meta.framePlan のみ（extra.framePlan を参照しない）
+// - slotPlanPolicy を postprocess で推定/上書きしない（Orchestrator/判断レイヤーが唯一の正）
+// - SA_OK（= meta.extra.saDecision === 'OK'）かつ FINAL のとき、writerHints を注入（不足時のみの保険）
+// - 本文 commit は「allowLLM=false で writer を呼べない」等の必要時に限定し、通常は LLM(writer) に回す
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { IrosStyle } from '@/lib/iros/system';
@@ -86,6 +92,17 @@ function getSpeechAllowLLM(meta: any): boolean | null {
   return typeof v === 'boolean' ? v : null;
 }
 
+function getSaDecision(meta: any): string | null {
+  const ex = getExtra(meta);
+  const v =
+    ex.saDecision ??
+    ex.sa_decision ??
+    meta?.saDecision ??
+    meta?.sa_decision ??
+    null;
+  return typeof v === 'string' ? v.trim().toUpperCase() : null;
+}
+
 function extractAssistantText(orchResult: any): string {
   if (orchResult && typeof orchResult === 'object') {
     const r: any = orchResult;
@@ -107,145 +124,35 @@ function extractAssistantText(orchResult: any): string {
 }
 
 /* =========================
- * slotPlanPolicy detect + source
- * - UNKNOWN を握りつぶさない（見えたら UNKNOWN のまま保持）
- * - ただし commit 判定では「UNKNOWN/null は FINAL 扱い」に倒すための下準備をする
- * - 見つからない場合：
- *    - slots が scaffold っぽければ SCAFFOLD
- *    - それ以外で slots があれば FINAL（デフォルト）
+ * slotPlanPolicy (read-only)
+ * - postprocess では推定/上書きしない
+ * - 正本は meta.framePlan.slotPlanPolicy（または meta.slotPlanPolicy）に限定
  * ========================= */
 
 type SlotPlanPolicyNorm = 'SCAFFOLD' | 'FINAL' | 'UNKNOWN';
 
 function normSlotPlanPolicy(v: unknown): SlotPlanPolicyNorm | null {
   if (typeof v !== 'string') return null;
-
   const s = v.trim().toUpperCase();
   if (s === 'SCAFFOLD') return 'SCAFFOLD';
   if (s === 'FINAL') return 'FINAL';
   if (s === 'UNKNOWN') return 'UNKNOWN';
-
   return null;
 }
 
-function detectSlotPlanPolicy(args: {
-  metaForSave?: any;
-  orchResult?: any;
-  slotPlanLen?: number | null;
-  hasSlots?: boolean | null;
-}): { policy: SlotPlanPolicyNorm; from: string; raw: unknown } {
-  const metaForSave = args.metaForSave ?? null;
-  const orchResult = args.orchResult ?? null;
-
+function readSlotPlanPolicy(metaForSave: any): { policy: SlotPlanPolicyNorm | null; from: string; raw: unknown } {
   const candidates: Array<[string, unknown]> = [
-    // meta 側
     ['metaForSave.framePlan.slotPlanPolicy', metaForSave?.framePlan?.slotPlanPolicy],
     ['metaForSave.slotPlanPolicy', metaForSave?.slotPlanPolicy],
-    ['metaForSave.extra.slotPlanPolicy', metaForSave?.extra?.slotPlanPolicy],
-
-    // orchResult 側
-    ['orchResult.slotPlanPolicy', orchResult?.slotPlanPolicy],
-    ['orchResult.framePlan.slotPlanPolicy', orchResult?.framePlan?.slotPlanPolicy],
-    ['orchResult.meta.framePlan.slotPlanPolicy', orchResult?.meta?.framePlan?.slotPlanPolicy],
-    ['orchResult.meta.slotPlanPolicy', orchResult?.meta?.slotPlanPolicy],
+    // ✅ extra.slotPlanPolicy は正本ではないので参照しない（憲法：正本一本化）
   ];
 
   for (const [from, raw] of candidates) {
-    const policy = normSlotPlanPolicy(raw);
-    if (policy) {
-      // 欠損補完だけ（上書きしない）
-      if (metaForSave?.framePlan && metaForSave.framePlan.slotPlanPolicy == null) {
-        metaForSave.framePlan = { ...metaForSave.framePlan, slotPlanPolicy: policy };
-      }
-      if (metaForSave && metaForSave.slotPlanPolicy == null) {
-        metaForSave.slotPlanPolicy = policy;
-      }
-      return { policy, from, raw };
-    }
+    const p = normSlotPlanPolicy(raw);
+    if (p) return { policy: p, from, raw };
   }
-
-  // --- 推定（slots があるのに policy が無いケースを埋める） ---
-  const slotsA = metaForSave?.framePlan?.slots;
-  const slotsB = orchResult?.meta?.framePlan?.slots;
-  const slotsC = orchResult?.framePlan?.slots;
-
-  const slotPlanLen =
-    args.slotPlanLen ??
-    Math.max(
-      Array.isArray(slotsA) ? slotsA.length : 0,
-      Array.isArray(slotsB) ? slotsB.length : 0,
-      Array.isArray(slotsC) ? slotsC.length : 0,
-    );
-
-  const hasSlots =
-    args.hasSlots ??
-    Boolean(slotsA ?? slotsB ?? slotsC); // 「slots プロパティがあるか」を優先（[] でも true）
-
-  const pickSlots = (): any[] | null => {
-    if (Array.isArray(slotsA)) return slotsA;
-    if (Array.isArray(slotsB)) return slotsB;
-    if (Array.isArray(slotsC)) return slotsC;
-    return null;
-  };
-
-  const looksLikeScaffold = (slots: any[] | null): boolean => {
-    if (!Array.isArray(slots) || slots.length === 0) return false;
-    return slots.some((s) => {
-      const k = String(s?.key ?? '').toUpperCase();
-      return (
-        k.startsWith('FLAG_') ||
-        k.includes('ONE_POINT') ||
-        k.includes('SCAFFOLD') ||
-        k === 'FLAG_PREFACE' ||
-        k === 'FLAG_PURPOSE' ||
-        k === 'FLAG_POINTS_3'
-      );
-    });
-  };
-
-  // slots があるなら「scaffoldっぽいか」で分岐
-  if (hasSlots && slotPlanLen > 0) {
-    const slotsPicked = pickSlots();
-    if (looksLikeScaffold(slotsPicked)) {
-      const policy: SlotPlanPolicyNorm = 'SCAFFOLD';
-      if (metaForSave?.framePlan && metaForSave.framePlan.slotPlanPolicy == null) {
-        metaForSave.framePlan = { ...metaForSave.framePlan, slotPlanPolicy: policy };
-      }
-      if (metaForSave && metaForSave.slotPlanPolicy == null) {
-        metaForSave.slotPlanPolicy = policy;
-      }
-      return { policy, from: 'inferred(scaffold-like-slots)', raw: null };
-    }
-
-    // ✅ それ以外は FINAL をデフォルト（ここが今回の肝）
-    const policy: SlotPlanPolicyNorm = 'FINAL';
-    if (metaForSave?.framePlan && metaForSave.framePlan.slotPlanPolicy == null) {
-      metaForSave.framePlan = { ...metaForSave.framePlan, slotPlanPolicy: policy };
-    }
-    if (metaForSave && metaForSave.slotPlanPolicy == null) {
-      metaForSave.slotPlanPolicy = policy;
-    }
-    return { policy, from: 'default(has-slots->FINAL)', raw: null };
-  }
-
-  // slots が無いなら UNKNOWN（ただし後段は text の有無で処理される）
-  return { policy: 'UNKNOWN', from: 'none', raw: null };
+  return { policy: null, from: 'none', raw: null };
 }
-
-
-function shouldCommitSlotPlanFinalOnly(args: {
-  policy: SlotPlanPolicyNorm | null;
-  slotText: string;
-}): boolean {
-  const textOk = String(args.slotText ?? '').trim().length > 0;
-
-  // ✅ commit しないのは SCAFFOLD だけ（PDF準拠）
-  // - UNKNOWN/null は「scaffold判定できていない」なので、normalChat等の slots を本文として commit する
-  if (args.policy === 'SCAFFOLD') return false;
-
-  return textOk;
-}
-
 
 /* =========================
  * intentAnchor sanitize (MIN)
@@ -411,57 +318,22 @@ function shouldSkipPastStateNote(args: PostProcessReplyArgs, metaForSave: any): 
 
 /* =========================
  * slotPlan utilities (postprocess-local)
+ * - 正本は metaForSave.framePlan のみ
  * ========================= */
 
-function pickSlotPlanInfo(
-  metaForSave: any,
-  orchResult: any,
-): { slotPlanLen: number | null; hasSlots: boolean } {
-  const candidates = [
-    metaForSave?.framePlan,
-    metaForSave?.extra?.framePlan,
-    orchResult?.framePlan,
-    orchResult?.meta?.framePlan,
-    orchResult?.slotPlan,
-    orchResult?.meta?.slotPlan,
-  ];
-
-  for (const c of candidates) {
-    if (!c || typeof c !== 'object') continue;
-
-    // framePlan.slots: “slots プロパティがあるか” を hasSlots とする（[] でも true）
-    if (Object.prototype.hasOwnProperty.call(c as any, 'slots')) {
-      const slots = (c as any).slots;
-      if (Array.isArray(slots)) {
-        const len = slots.length;
-        return { slotPlanLen: len, hasSlots: true };
-      }
-      // slots が配列でないなら、この候補は無効
-    }
-
-    // slotPlan (array)
-    if (Array.isArray(c)) {
-      const len = c.length;
-      return { slotPlanLen: len, hasSlots: true };
-    }
+function pickSlotPlanLenAndPresence(metaForSave: any): { slotPlanLen: number | null; hasSlots: boolean } {
+  const fp = metaForSave?.framePlan;
+  if (fp && typeof fp === 'object' && Object.prototype.hasOwnProperty.call(fp, 'slots')) {
+    const slots = (fp as any).slots;
+    if (Array.isArray(slots)) return { slotPlanLen: slots.length, hasSlots: true };
   }
-
   return { slotPlanLen: null, hasSlots: false };
 }
 
-function pickSlotPlanArray(metaForSave: any, orchResult: any): any[] {
-  const candidates = [
-    (orchResult as any)?.slotPlan,
-    (orchResult as any)?.framePlan?.slots,
-    (metaForSave as any)?.framePlan?.slots,
-    (metaForSave as any)?.extra?.slotPlan,
-    (metaForSave as any)?.extra?.framePlan?.slots,
-  ];
-
-  for (const c of candidates) {
-    if (Array.isArray(c)) return c; // ✅ 空配列でも返す（存在が重要）
-  }
-  return [];
+function pickSlotPlanArray(metaForSave: any): any[] {
+  const fp = metaForSave?.framePlan;
+  const slots = fp && typeof fp === 'object' ? (fp as any).slots : null;
+  return Array.isArray(slots) ? slots : [];
 }
 
 function renderSlotPlanText(slotPlan: any[]): string {
@@ -476,8 +348,7 @@ function renderSlotPlanText(slotPlan: any[]): string {
       continue;
     }
 
-    const content =
-      typeof (s as any).content === 'string' ? (s as any).content.trim() : '';
+    const content = typeof (s as any).content === 'string' ? (s as any).content.trim() : '';
     const text = typeof (s as any).text === 'string' ? (s as any).text.trim() : '';
     const lns = Array.isArray((s as any).lines) ? (s as any).lines : null;
 
@@ -492,6 +363,59 @@ function renderSlotPlanText(slotPlan: any[]): string {
   }
 
   return lines.join('\n').trim();
+}
+
+/* =========================
+ * writerHints injection (MIN, backup only)
+ * - handleIrosReply 側が主担当だが、欠損時の保険として postprocess でも刻む
+ * ========================= */
+
+type WriterHints = {
+  final?: boolean;
+  allowAssertive?: boolean;
+  avoidHedge?: boolean;
+  avoidQuestions?: boolean;
+};
+
+function ensureWriterHints(metaForSave: any, args: { conversationId: string; userCode: string }): void {
+  if (!metaForSave || typeof metaForSave !== 'object') return;
+
+  const ex = getExtra(metaForSave);
+  const { policy } = readSlotPlanPolicy(metaForSave);
+
+  // ✅ 解放条件（憲法A）
+  // - 判定源: meta.framePlan.slotPlanPolicy === 'FINAL'
+  // - 解放条件: meta.extra.saDecision === 'OK'（既存SA判定を正）
+  const sa = getSaDecision(metaForSave);
+  const assertOk = policy === 'FINAL' && sa === 'OK';
+
+  // 既に上位で入っているなら尊重（上書きしない）
+  const current = (ex.writerHints && typeof ex.writerHints === 'object') ? (ex.writerHints as WriterHints) : null;
+
+  if (!assertOk) return;
+
+  const next: WriterHints = {
+    final: true,
+    allowAssertive: true,
+    avoidHedge: true,
+    avoidQuestions: true,
+    ...(current ?? {}),
+  };
+
+  // 欠損補完のみ
+  metaForSave.extra = metaForSave.extra ?? {};
+  metaForSave.extra.writerHints = next;
+
+  // 監査ログ（憲法E）
+  try {
+    console.log('[IROS/FINAL/ASSERTIVE_ALLOWED]', {
+      conversationId: args.conversationId,
+      userCode: args.userCode,
+      slotPlanPolicy: policy,
+      saDecision: sa,
+      writerHints: next,
+    });
+  } catch {}
 }
 
 /* =========================
@@ -516,6 +440,16 @@ export async function postProcessReply(
 
   // extra は必ず存在
   metaForSave.extra = metaForSave.extra ?? {};
+
+  // ✅ 正本一本化（D）
+  // - render/後段の唯一の正は metaForSave.framePlan
+  // - orchResult.framePlan からの転写は「欠損補完（形だけ）」のみ
+  if (metaForSave.framePlan == null) {
+    const orFp = orchResult && typeof orchResult === 'object' ? (orchResult as any).framePlan : null;
+    if (orFp && typeof orFp === 'object') {
+      metaForSave.framePlan = { ...orFp };
+    }
+  }
 
   // 3) intentAnchor 検疫
   sanitizeIntentAnchor(metaForSave);
@@ -606,14 +540,13 @@ export async function postProcessReply(
     console.warn('[IROS/PostProcess] silence patch failed (non-fatal)', e);
   }
 
-  // 6-B) ✅ 非SILENCEの空本文 stopgap：通常会話を壊さない
-  // - ただし slotPlan がある/slotPlanExpected のときは「すり替え禁止」
+  // 6-B) ✅ 非SILENCEの空本文 stopgap（ただし憲法準拠で “seed→writer” を優先）
   try {
     const bodyText = String(finalAssistantText ?? '').trim();
 
-    // ✅ ここで確定した値を外の変数へ
+    // ✅ meta.framePlan（正本）だけを見る
     {
-      const info = pickSlotPlanInfo(metaForSave, orchResult);
+      const info = pickSlotPlanLenAndPresence(metaForSave);
       slotPlanLen = info.slotPlanLen;
       hasSlots = info.hasSlots;
     }
@@ -626,23 +559,20 @@ export async function postProcessReply(
       String(userText ?? '').trim().length > 0;
 
     // ------------------------------------------------------------
-    // ✅ slotPlanExpected なのに本文が空 → slotPlan を処理（v2の本命）
-    // - FINAL の slotPlan だけ commit（本文に採用）
-    // - SCAFFOLD は LLM に渡す seed として保存（本文は作らない＝PDF準拠）
-    // - slotPlanPolicy は PostProcess で上書きしない（Orchestrator を唯一の正）
+    // ✅ slotPlanExpected なのに本文が空
+    // - 憲法方針：通常は seed を作って writer（LLM）に回す
+    // - 例外：allowLLM=false（writer を呼べない）時は deterministic に commit して会話停止を防ぐ
     // ------------------------------------------------------------
     if (isNonSilenceButEmpty && slotPlanExpected) {
-      const slotPlanMaybe = pickSlotPlanArray(metaForSave, orchResult);
+      const slotPlanMaybe = pickSlotPlanArray(metaForSave);
       const slotText = renderSlotPlanText(slotPlanMaybe);
 
-      // ✅ policy 検出（UNKNOWN禁止）+ from を確定
-      const det = detectSlotPlanPolicy({ metaForSave, orchResult, slotPlanLen, hasSlots });
-      const policy: SlotPlanPolicyNorm | null = det.policy;
+      const det = readSlotPlanPolicy(metaForSave);
 
       console.log('[IROS/PostProcess][SLOTPLAN_POLICY]', {
         conversationId,
         userCode,
-        slotPlanPolicy_detected: policy,
+        slotPlanPolicy_detected: det.policy,
         slotPlanPolicy_from: det.from,
         slotPlanPolicy_raw: det.raw,
         slotPlanLen,
@@ -653,32 +583,22 @@ export async function postProcessReply(
         metaForSave.extra = {
           ...(metaForSave.extra ?? {}),
           finalTextPolicy: 'SLOTPLAN_EXPECTED__SLOT_TEXT_EMPTY__SKIP_COMMIT',
-          slotPlanPolicy_detected: policy,
+          slotPlanPolicy_detected: det.policy,
           slotPlanPolicy_from: det.from,
           slotPlanLen_detected: slotPlanLen,
           hasSlots_detected: hasSlots,
         };
 
-        console.log('[IROS/PostProcess] SLOTPLAN_EXPECTED but SLOT_TEXT_EMPTY (skip commit)', {
+        console.log('[IROS/PostProcess] SLOTPLAN_EXPECTED but SLOT_TEXT_EMPTY (skip)', {
           conversationId,
           userCode,
-          slotPlanPolicy: policy,
+          slotPlanPolicy: det.policy,
           slotPlanPolicy_from: det.from,
           slotPlanLen,
           hasSlots,
         });
-      } else if (policy === 'FINAL') {
-        // ✅ FINAL：通常は slotPlan を本文に採用（commit OK）
-        // ただし slotText が @OBS/@SHIFT など「内部マーカー」を含む場合は本文として不正なので浄化する
-
-        const isIrDiagnosisTurn =
-          (metaForSave as any)?.isIrDiagnosisTurn === true ||
-          String((metaForSave as any)?.mode ?? '').toLowerCase() === 'diagnosis' ||
-          String((metaForSave as any)?.presentationKind ?? '').toLowerCase() === 'diagnosis' ||
-          (metaForSave as any)?.framePlan?.isIrDiagnosisTurn === true ||
-          String((metaForSave as any)?.framePlan?.mode ?? '').toLowerCase() === 'diagnosis';
-
-        // ✅ slotText の本文化：行頭 @ を落とす（@OBS/@SHIFT/@NEXT 等）
+      } else {
+        // ✅ slotText の浄化（内部マーカー @OBS/@SHIFT 等を落とす）
         const rawLines = String(slotText ?? '').split('\n');
         const cleanedLines = rawLines
           .map((l) => String(l ?? '').trim())
@@ -686,148 +606,128 @@ export async function postProcessReply(
         const cleanedSlotText = cleanedLines.join('\n').trim();
 
         const hadInternalMarkers = /(^|\n)\s*@/m.test(String(slotText ?? ''));
-        const cleanedApplied = hadInternalMarkers && cleanedSlotText.length !== String(slotText ?? '').trim().length;
+        const cleanedApplied =
+          hadInternalMarkers && cleanedSlotText.length !== String(slotText ?? '').trim().length;
 
-        if (cleanedSlotText.length === 0) {
-          // ✅ 本文として成立しない（内部行しかない）→ 空commit禁止：ACKへ
-          const callName =
-            metaForSave?.userProfile?.user_call_name ??
-            (metaForSave.extra as any)?.userProfile?.user_call_name ??
-            'orion';
+        // ✅ LLMへ渡す seed は “生の slotText” を維持（writer側で整形する）
+        metaForSave.extra = {
+          ...(metaForSave.extra ?? {}),
+          slotPlanPolicy_detected: det.policy,
+          slotPlanPolicy_from: det.from,
+          slotPlanLen_detected: slotPlanLen,
+          hasSlots_detected: hasSlots,
 
-          finalAssistantText = `うん、届きました。🪔`;
+          slotTextHadInternalMarkers: hadInternalMarkers,
+          slotTextCleanedApplied: cleanedApplied,
+          slotTextRawLen: String(slotText ?? '').length,
+          slotTextCleanedLen: cleanedSlotText.length,
+          slotTextDroppedLines: Math.max(0, rawLines.length - cleanedLines.length),
 
-          metaForSave.extra = {
-            ...(metaForSave.extra ?? {}),
-            finalTextPolicy: isIrDiagnosisTurn
-              ? 'DIAGNOSIS_FINAL__SLOT_TEXT_INTERNAL_ONLY__ACK_FALLBACK'
-              : 'SLOTPLAN_FINAL__SLOT_TEXT_INTERNAL_ONLY__ACK_FALLBACK',
-            slotPlanCommitted: false,
-            slotPlanCommittedLen: 0,
-            slotPlanPolicy_detected: policy,
-            slotPlanPolicy_from: det.from,
-            slotPlanLen_detected: slotPlanLen,
-            hasSlots_detected: hasSlots,
-            slotTextHadInternalMarkers: hadInternalMarkers,
-            slotTextCleanedApplied: cleanedApplied,
-            slotTextRawLen: String(slotText ?? '').length,
-            slotTextCleanedLen: cleanedSlotText.length,
-            slotTextDroppedLines: Math.max(0, rawLines.length - cleanedLines.length),
-          };
+          // ✅ seed 保存（writerへ）
+          llmRewriteSeed: slotText,
+          llmRewriteSeedFrom: 'postprocess(slotPlan->writer-seed)',
+          llmRewriteSeedAt: new Date().toISOString(),
+        };
 
-          console.log('[IROS/PostProcess] SLOTPLAN_FINAL_INTERNAL_ONLY -> ACK_FALLBACK', {
-            conversationId,
-            userCode,
-            isIrDiagnosisTurn,
-            slotPlanPolicy: policy,
-            slotPlanPolicy_from: det.from,
-            slotPlanLen,
-            hasSlots,
-            hadInternalMarkers,
-            rawLen: String(slotText ?? '').length,
-            cleanedLen: cleanedSlotText.length,
-          });
-        } else {
-          // ✅ 浄化した本文を commit
+        // ✅ allowLLM=false のときだけ deterministic commit（会話停止を防ぐ）
+        // - それ以外は本文をここで作らず、writerへ回す（憲法の「航海士」）
+        if (allowLLM === false) {
+          // commit 用の本文は “cleaned” を使用（内部マーカーは出さない）
           finalAssistantText = cleanedSlotText;
 
           metaForSave.extra = {
             ...(metaForSave.extra ?? {}),
-            finalTextPolicy: isIrDiagnosisTurn
-              ? 'DIAGNOSIS_FINAL__COMMIT_SLOT_TEXT_CLEANED'
-              : 'SLOTPLAN_COMMIT_FINAL_CLEANED',
+            finalTextPolicy: 'SLOTPLAN_COMMIT_FINAL__NO_LLM',
             slotPlanCommitted: true,
             slotPlanCommittedLen: cleanedSlotText.length,
-            slotPlanPolicy_detected: policy,
-            slotPlanPolicy_from: det.from,
-            slotPlanLen_detected: slotPlanLen,
-            hasSlots_detected: hasSlots,
-            slotTextHadInternalMarkers: hadInternalMarkers,
-            slotTextCleanedApplied: cleanedApplied,
-            slotTextRawLen: String(slotText ?? '').length,
-            slotTextCleanedLen: cleanedSlotText.length,
-            slotTextDroppedLines: Math.max(0, rawLines.length - cleanedLines.length),
           };
 
-          console.log('[IROS/PostProcess] SLOTPLAN_FINAL_COMMIT_CLEANED', {
+          console.log('[IROS/PostProcess] SLOTPLAN_COMMIT_FINAL__NO_LLM', {
             conversationId,
             userCode,
-            isIrDiagnosisTurn,
-            slotPlanPolicy: policy,
+            slotPlanPolicy: det.policy,
             slotPlanPolicy_from: det.from,
             slotPlanLen,
             hasSlots,
-            hadInternalMarkers,
-            rawLen: String(slotText ?? '').length,
-            cleanedLen: cleanedSlotText.length,
             head: cleanedSlotText.slice(0, 64),
           });
+        } else {
+          // ✅ 本文は空のまま維持して writer を走らせる
+          // （route/handleIrosReply 側の LLM 呼び出しが “seed” を見て本文生成する）
+          finalAssistantText = '';
+
+          // finalTextPolicy は「writer に本文生成させる」意図を明示
+          metaForSave.extra = {
+            ...(metaForSave.extra ?? {}),
+            finalTextPolicy: 'FINAL__LLM_COMMIT',
+            slotPlanCommitted: false,
+          };
+
+          console.log('[IROS/PostProcess] SLOTPLAN_SEED_TO_WRITER (keep empty)', {
+            conversationId,
+            userCode,
+            slotPlanPolicy: det.policy,
+            slotPlanPolicy_from: det.from,
+            slotPlanLen,
+            hasSlots,
+            seedLen: String(slotText ?? '').length,
+            seedHead: String(slotText ?? '').slice(0, 48),
+          });
         }
-      } else {
-
-
-// ✅ SCAFFOLD：本文に commit しない（PDF準拠）
-// - slotText は「LLMに渡す seed」として保存する
-// - 本文は空のまま（この後に LLM writer が本文を生成する）
-metaForSave.extra = {
-  ...(metaForSave.extra ?? {}),
-  finalTextPolicy: 'SLOTPLAN_SEED_SCAFFOLD',
-  slotPlanCommitted: false,
-  slotPlanSeedLen: slotText.length,
-  slotPlanPolicy_detected: policy,
-  slotPlanPolicy_from: det.from,
-  slotPlanLen_detected: slotPlanLen,
-  hasSlots_detected: hasSlots,
-
-  llmRewriteSeed: slotText,
-  llmRewriteSeedFrom: 'postprocess(slotPlan:SCAFFOLD)',
-  llmRewriteSeedAt: new Date().toISOString(),
-};
-
-console.log('[IROS/PostProcess] SLOTPLAN_SEED_SCAFFOLD (no commit)', {
-  conversationId,
-  userCode,
-  slotPlanPolicy: policy,
-  slotPlanPolicy_from: det.from,
-  slotPlanLen,
-  hasSlots,
-  seedLen: slotText.length,
-  seedHead: slotText.slice(0, 48),
-});
-
-
-        // ✅ ここでは本文を作らない（空のまま）
-        // finalAssistantText は変更しない
       }
     } else if (isNonSilenceButEmpty && !slotPlanExpected) {
-      // ✅ slotPlanExpected じゃない「空」だけ ACK_FALLBACK
-      const callName =
-        metaForSave?.userProfile?.user_call_name ??
-        (metaForSave.extra as any)?.userProfile?.user_call_name ??
-        'orion';
+      // ✅ seed があるなら ACK_FALLBACK で潰さない
+      const fp = String((metaForSave.extra as any)?.finalTextPolicy ?? '').trim();
+      const seed = String((metaForSave.extra as any)?.llmRewriteSeed ?? '').trim();
+      const hasSeed = seed.length > 0;
 
-      const u = String(userText ?? '').replace(/\s+/g, ' ').trim();
-      const ul = u.toLowerCase();
+      if (fp === 'FINAL__LLM_COMMIT' || hasSeed) {
+        console.log('[IROS/PostProcess] ACK_FALLBACK skipped (seed present)', {
+          conversationId,
+          userCode,
+          finalTextPolicy: fp,
+          seedLen: seed.length,
+        });
+      } else {
+        // ✅ slotPlanExpected じゃない「空」だけ ACK_FALLBACK
+        const callName =
+          metaForSave?.userProfile?.user_call_name ??
+          (metaForSave.extra as any)?.userProfile?.user_call_name ??
+          'orion';
 
-      const looksLikeGreeting =
-        ul === 'こんにちは' ||
-        ul === 'こんばんは' ||
-        ul === 'おはよう' ||
-        ul.includes('はじめまして') ||
-        ul.includes('よろしく');
+        const u = String(userText ?? '').replace(/\s+/g, ' ').trim();
+        const ul = u.toLowerCase();
 
-      finalAssistantText = looksLikeGreeting
-        ? `こんにちは、${callName}さん。🪔`
-        : 'うん、届きました。🪔';
+        const looksLikeGreeting =
+          ul === 'こんにちは' ||
+          ul === 'こんばんは' ||
+          ul === 'おはよう' ||
+          ul.includes('はじめまして') ||
+          ul.includes('よろしく');
 
-      metaForSave.extra = {
-        ...(metaForSave.extra ?? {}),
-        finalTextPolicy: 'ACK_FALLBACK',
-        emptyFinalPatched: true,
-      };
+        finalAssistantText = looksLikeGreeting
+          ? `こんにちは、${callName}さん。🪔`
+          : 'うん、届きました。🪔';
+
+        metaForSave.extra = {
+          ...(metaForSave.extra ?? {}),
+          finalTextPolicy: 'ACK_FALLBACK',
+          emptyFinalPatched: true,
+        };
+      }
     }
   } catch (e) {
     console.warn('[IROS/PostProcess] non-silence empty patch failed', e);
+  }
+
+  // =========================================================
+  // ✅ writerHints の欠損補完（憲法A/B/E）
+  // - handleIrosReply が主担当だが、欠損時だけ postprocess で注入
+  // =========================================================
+  try {
+    ensureWriterHints(metaForSave, { conversationId, userCode });
+  } catch (e) {
+    console.warn('[IROS/PostProcess] ensureWriterHints failed (non-fatal)', e);
   }
 
   // =========================================================

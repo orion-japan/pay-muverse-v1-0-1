@@ -753,11 +753,20 @@ export async function persistMemoryStateIfAny(args: {
           intent_anchor_key_candidate: anchorKeyCandidate ?? null,
           anchor_action: anchorWrite.action,
 
-          // ★ 観測：qTraceUpdated を拾えてるか
+          // ★ 観測：qTraceUpdated を拾えてるか（フィールド差分も見る）
           qTracePickedFrom: qTraceEffective ? 'qTraceEffective' : null,
+          qTrace_keys:
+            qTraceEffective && typeof qTraceEffective === 'object' ? Object.keys(qTraceEffective).slice(0, 20) : null,
+
           qTrace_qNow: qTraceEffective?.qNow ?? null,
-          qTrace_streakQ: qTraceEffective?.streakQ ?? null,
-          qTrace_streakLength: qTraceEffective?.streakLength ?? null,
+          qTrace_q_now: (qTraceEffective as any)?.q_now ?? null,
+          qTrace_currentQ: (qTraceEffective as any)?.currentQ ?? null,
+          qTrace_snapshot_currentQ: (qTraceEffective as any)?.snapshot?.currentQ ?? null,
+
+          qTrace_streakQ: qTraceEffective?.streakQ ?? (qTraceEffective as any)?.streak_q ?? null,
+          qTrace_streakLength:
+            qTraceEffective?.streakLength ?? (qTraceEffective as any)?.streak_length ?? null,
+
         },
         null,
         0,

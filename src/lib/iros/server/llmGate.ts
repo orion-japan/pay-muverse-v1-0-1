@@ -7,12 +7,12 @@
 // - slotPlan は「最終(FINAL)」と「足場(SCAFFOLD)」を分離する
 // - ここでは “OpenAIを叩かない”。叩く直前に finalize を呼ぶ運用
 //
-// ✅ v2 方針（重要 / A案 正式）
+// ✅ v2 方針（重要 / 新憲法 正式）
 // - 「水増し」はしない（expand/filler は render 側の責務）
-// - LLM には必ず “下書き本文（effectiveText）” を渡す（CALL_LLM のとき）
-// - SCAFFOLD は “LLM自体を呼ばない”（混乱源「呼ぶのに採用しない」を構造で排除）
-// - SKIP 系 decision には resolvedText を必ず載せる
-// - CALL_LLM でも resolvedText を載せ、デバッグ/再利用に使えるようにする
+// - LLM に渡すのは「seed（rewriteSeed）」であり、本文採用用（resolvedText）とは分離する
+// - SCAFFOLD は “LLM自体を呼ばない”（「呼ぶのに採用しない」混乱を構造で排除）
+// - SKIP 系 decision には resolvedText を必ず載せる（本文採用OK）
+// - CALL_LLM decision では resolvedText を **原則 null**（本文採用禁止）、rewriteSeed にのみ載せる
 //
 // ✅ Phase11 重要（今回の修正ポイント）
 // - FINAL slotPlan は「テンプレ固定化」を防ぐため、原則 CALL_LLM にする
@@ -22,10 +22,34 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 export type LlmGateDecision =
-  | { entry: 'SKIP_POLICY'; reason: string; resolvedText?: string | null }
-  | { entry: 'SKIP_SILENCE'; reason: string; resolvedText?: string | null }
-  | { entry: 'SKIP_SLOTPLAN'; reason: string; resolvedText?: string | null }
-  | { entry: 'CALL_LLM'; reason: string; resolvedText?: string | null };
+  | {
+      entry: 'SKIP_POLICY';
+      reason: string;
+      // ✅ 本文採用OK（route/handle側が本文として採用してよい）
+      resolvedText: string | null;
+      // ✅ seed（LLM用）。SKIPでもデバッグ/将来用に載せてよい
+      rewriteSeed: string | null;
+    }
+  | {
+      entry: 'SKIP_SILENCE';
+      reason: string;
+      resolvedText: string | null;
+      rewriteSeed: string | null;
+    }
+  | {
+      entry: 'SKIP_SLOTPLAN';
+      reason: string;
+      resolvedText: string | null;
+      rewriteSeed: string | null;
+    }
+  | {
+      entry: 'CALL_LLM';
+      reason: string;
+      // ✅ CALL_LLM では本文採用を禁止（採用すると directive/@TAG 漏洩や短文化の温床になる）
+      resolvedText: null;
+      // ✅ LLM に渡す seed（@OBS/@SHIFT 等を含んでいてよい）
+      rewriteSeed: string | null;
+    };
 
 export type SlotPlanPolicy = 'FINAL' | 'SCAFFOLD' | 'UNKNOWN';
 
@@ -75,6 +99,10 @@ export type LlmGateProbeOutput = {
     finalAssistantTextCandidateLen?: number | null;
     finalAssistantTextCandidateHead?: string | null;
 
+    // ✅ 新憲法：seed と本文採用を分離してログに残す（SQLで追える）
+    resolvedTextLen?: number | null;
+    rewriteSeedLen?: number | null;
+
     // ✅ Phase11: 強制CALL（log証拠用）
     finalForceCall?: boolean | null;
     finalForceCallReason?: string | null;
@@ -106,6 +134,106 @@ function slotsOkFromHints(args: { slotPlanLen: number | null; hasSlots: boolean 
   if (typeof slotPlanLen === 'number') return slotPlanLen > 0;
   return hasSlots === true;
 }
+
+// --- ADD: rewriteSeed builder (SHIFT + CTX + OBS + SEED_TEXT) ---
+// ✅ 目的：LLMが迷わない seed を固定で作る（本文採用とは分離）
+// - @SHIFT: 出力契約（semantic_answer）
+// - @CTX  : メタの短い要約（JSONは渡さず短文化）
+// - @OBS  : ユーザー生文（必須）
+// - SEED_TEXT: slots 由来の本文（あれば）
+function buildWriterRewriteSeed(args: {
+  userText: string;
+  seedText: string;
+  meta?: any;
+}): string {
+  const n = (s: any) =>
+    String(s ?? '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .trim();
+
+  const user = n(args.userText);
+  const seed = n(args.seedText);
+  const meta = args.meta ?? {};
+
+  // ✅ “メタは背景”として短く（LLMが迷わない程度）
+  const q =
+    meta?.qCode ??
+    meta?.q_primary ??
+    meta?.qPrimary ??
+    meta?.memoryState?.qPrimary ??
+    meta?.memoryState?.q_primary ??
+    null;
+
+  const depth =
+    meta?.depthStage ??
+    meta?.depth_stage ??
+    meta?.memoryState?.depthStage ??
+    meta?.memoryState?.depth_stage ??
+    null;
+
+  const phase =
+    meta?.phase ??
+    meta?.memoryState?.phase ??
+    null;
+
+  const layer =
+    meta?.intentLayer ??
+    meta?.intent_layer ??
+    meta?.memoryState?.intentLayer ??
+    meta?.memoryState?.intent_layer ??
+    null;
+
+  const summary =
+    meta?.situationSummary ??
+    meta?.situation_summary ??
+    meta?.memoryState?.situationSummary ??
+    meta?.memoryState?.situation_summary ??
+    meta?.summary ??
+    meta?.memoryState?.summary ??
+    null;
+
+  const ctxParts: string[] = [];
+  if (q) ctxParts.push(`Q=${String(q)}`);
+  if (depth) ctxParts.push(`Depth=${String(depth)}`);
+  if (phase) ctxParts.push(`Phase=${String(phase)}`);
+  if (layer) ctxParts.push(`Layer=${String(layer)}`);
+  if (summary && String(summary).trim()) ctxParts.push(`Summary=${String(summary).trim()}`);
+
+  const ctxLine = ctxParts.length ? ctxParts.join(' / ') : '';
+
+  // ✅ SHIFT（出力契約）— あなたの指定を固定で入れる
+  const shift = [
+    '@SHIFT {',
+    '  "kind":"semantic_answer",',
+    '  "output_contract":[',
+    '    "1行目：Yes/No か核心",',
+    '    "2行目：短い理由"',
+    '  ],',
+    '  "rules":[',
+    '    "テンプレ/ボイラープレート禁止",',
+    '    "平易な言葉",',
+    '    "質問で逃げない（最大1個まで）"',
+    '  ],',
+    '  "forbid":["diagnosis","preach","hard_guidance","forced_task"],',
+    '  "questions_max":1',
+    '}',
+  ].join('\n');
+
+  const obs = user ? `@OBS {"user":${JSON.stringify(user)}}` : '';
+  const ctx = ctxLine ? `@CTX ${JSON.stringify(ctxLine)}` : '';
+
+  // ✅ seedText は「最後」に置く（契約→背景→入力→素材の順）
+  const out: string[] = [];
+  out.push(shift);
+  if (ctx) out.push(ctx);
+  if (obs) out.push(obs);
+  if (seed) out.push(seed);
+
+  return out.filter(Boolean).join('\n\n').trim();
+}
+
+
 
 // ---------------------------------------------------------------------
 // slots helpers
@@ -239,7 +367,7 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
   const candidate = normText(buildTextFromSlots(slotsObj) ?? '');
   const candidateLen = candidate.length;
 
-  // ✅ 実質本文：textNow 優先、なければ candidate
+  // ✅ 実質本文（raw seed source）：textNow 優先、なければ candidate
   const effectiveText = textNowLen > 0 ? textNow : candidate;
   const effectiveLen = effectiveText.length;
 
@@ -249,6 +377,10 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
     decision: LlmGateDecision,
     extras?: { finalForceCall?: boolean; finalForceCallReason?: string },
   ): LlmGateProbeOutput => {
+    const resolvedLen =
+      decision.entry === 'CALL_LLM' ? null : decision.resolvedText ? String(decision.resolvedText).length : null;
+    const seedLen = decision.rewriteSeed ? String(decision.rewriteSeed).length : null;
+
     return {
       decision,
       patch: {
@@ -268,6 +400,9 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
         finalAssistantTextCandidateLen: candidateLen > 0 ? candidateLen : null,
         finalAssistantTextCandidateHead: candidateLen > 0 ? head(candidate) : null,
 
+        resolvedTextLen: resolvedLen,
+        rewriteSeedLen: seedLen,
+
         finalForceCall: extras?.finalForceCall ?? null,
         finalForceCallReason: extras?.finalForceCallReason ?? null,
       },
@@ -279,7 +414,8 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
     return mk({
       entry: 'SKIP_POLICY',
       reason: 'allowLLM_final=false',
-      resolvedText: effectiveLen ? effectiveText : null,
+      resolvedText: effectiveLen ? effectiveText : null, // ✅ 本文採用OK
+      rewriteSeed: effectiveLen ? effectiveText : null, // （LLM呼ばないのでそのまま保持）
     });
   }
 
@@ -290,7 +426,8 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
     return mk({
       entry: 'SKIP_SILENCE',
       reason: 'brakeReason=Q1_SUPPRESS or speechAct=SILENCE',
-      resolvedText: effectiveLen ? effectiveText : null,
+      resolvedText: effectiveLen ? effectiveText : null, // ✅ 本文採用OK
+      rewriteSeed: effectiveLen ? effectiveText : null, // （LLM呼ばないのでそのまま保持）
     });
   }
 
@@ -299,14 +436,12 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
     return mk({
       entry: 'SKIP_SLOTPLAN',
       reason: 'SCAFFOLD_POLICY__NO_LLM',
-      resolvedText: effectiveLen ? effectiveText : null,
+      resolvedText: effectiveLen ? effectiveText : null, // ✅ 本文採用OK（ただし seed/タグ混入は上位で扱う）
+      rewriteSeed: effectiveLen ? effectiveText : null, // （LLM呼ばないのでそのまま保持）
     });
   }
 
-  // (D) ✅ Phase11：FINAL slotPlan は原則 CALL_LLM
-  // ただし ir診断は「診断フォーマット保持」が最優先なので、以前は FINAL_FORCE_CALL を無効化していた
-  // ✅ 今回：診断FINALも “デフォルトで CALL_LLM” に寄せる（テンプレ固定回避）
-  // ✅ 差し込み口：IROS_DIAGNOSIS_ALLOW_FINAL_FORCE_CALL=0 のときだけ SKIP を許可する（緊急退避用）
+  // (D) ✅ Phase11：診断FINALのみ「強制CALL無効化」の緊急退避口を残す
   const isIrDiagnosisTurn =
     input?.meta?.isIrDiagnosisTurn === true ||
     input?.meta?.mode === 'diagnosis' ||
@@ -321,11 +456,12 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
     return mk({
       entry: 'SKIP_SLOTPLAN',
       reason: 'DIAGNOSIS_FINAL__SKIP_FORCE_CALL (disabled by env=0)',
-      resolvedText: effectiveLen ? effectiveText : null,
+      resolvedText: effectiveLen ? effectiveText : null, // ✅ 本文採用OK（旧挙動）
+      rewriteSeed: effectiveLen ? effectiveText : null, // （LLM呼ばないのでそのまま保持）
     });
   }
 
-
+  // (E) ✅ Phase11：FINAL slotPlan は原則 CALL_LLM（本文採用は禁止、seedのみ渡す）
   if (slotsOk && policy === 'FINAL') {
     console.warn('[IROS/LLM_GATE][FINAL_FORCE_CALL]', {
       conversationId,
@@ -337,42 +473,72 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
       head: head(effectiveText, 80),
     });
 
+    // ✅ CALL_LLM のときだけ：SHIFT + CTX + OBS + SEED_TEXT を組んで rewriteSeed に渡す
+    const userTextForSeed =
+      (input as any)?.meta?.userTextClean ??
+      (input as any)?.meta?.userText ??
+      '';
+
+    const rewriteSeedFinal = effectiveLen
+      ? buildWriterRewriteSeed({
+          userText: userTextForSeed,
+          seedText: effectiveText,
+          meta: input.meta,
+        })
+      : null;
+
     return mk(
       {
         entry: 'CALL_LLM',
         reason: 'FINAL_FORCE_CALL (avoid template lock)',
-        resolvedText: effectiveLen ? effectiveText : null,
+        resolvedText: null, // ✅ 新憲法：CALL_LLM は本文採用禁止
+        rewriteSeed: rewriteSeedFinal,
       },
       { finalForceCall: true, finalForceCallReason: 'FINAL_FORCE_CALL' },
     );
   }
 
-  // (E) slots があるが policy が UNKNOWN：守りで CALL_LLM（seed を渡す）
+  // (F) slots があるが policy が UNKNOWN：守りで CALL_LLM（seed を渡す）
   if (slotsOk) {
+    const userTextForSeed =
+      (input as any)?.meta?.userTextClean ??
+      (input as any)?.meta?.userText ??
+      '';
+
+    const rewriteSeedUnknown = effectiveLen
+      ? buildWriterRewriteSeed({
+          userText: userTextForSeed,
+          seedText: effectiveText,
+          meta: input.meta,
+        })
+      : null;
+
     return mk({
       entry: 'CALL_LLM',
       reason: 'slotsOk but slotPlanPolicy=UNKNOWN (fallback to CALL_LLM)',
-      resolvedText: effectiveLen ? effectiveText : null,
+      resolvedText: null, // ✅ 新憲法：CALL_LLM は本文採用禁止
+      rewriteSeed: rewriteSeedUnknown,
     });
   }
 
-  // (F) slots が無いが本文がある：そのまま返す（LLM不要）
+  // (G) slots が無いが本文がある：そのまま返す（LLM不要）
   if (effectiveLen > 0) {
     return mk({
       entry: 'SKIP_SLOTPLAN',
       reason: 'no slots but have non-empty text',
-      resolvedText: effectiveText,
+      resolvedText: effectiveText, // ✅ 本文採用OK
+      rewriteSeed: effectiveText, // （LLM呼ばないのでそのまま保持）
     });
   }
 
-  // (G) 何も無い：最後の砦として CALL_LLM（空seedでも呼ぶ）
+  // (H) 何も無い：最後の砦として CALL_LLM（空seedでも呼ぶ）
   return mk({
     entry: 'CALL_LLM',
     reason: 'no slots and empty text (last resort)',
-    resolvedText: null,
+    resolvedText: null, // ✅ 本文採用禁止
+    rewriteSeed: null,
   });
 }
-
 
 // ---------------------------------------------------------------------
 // meta write
@@ -396,6 +562,10 @@ export function writeLlmGateToMeta(metaForSave: any, patch: LlmGateProbeOutput['
   // ✅ FINAL強制CALLの証拠（SQLで追える）
   (metaForSave.extra as any).finalForceCall = patch.finalForceCall ?? null;
   (metaForSave.extra as any).finalForceCallReason = patch.finalForceCallReason ?? null;
+
+  // ✅ 新憲法：seed/本文の長さを直下にも残す（調査の1手短縮）
+  (metaForSave.extra as any).resolvedTextLen = patch.resolvedTextLen ?? null;
+  (metaForSave.extra as any).rewriteSeedLen = patch.rewriteSeedLen ?? null;
 }
 
 // ---------------------------------------------------------------------
@@ -437,6 +607,15 @@ export function logLlmGate(
     finalForceCall: patch.finalForceCall ?? null,
     finalForceCallReason: patch.finalForceCallReason ?? null,
 
-    resolvedTextLen: decision?.resolvedText ? String(decision.resolvedText).length : null,
+    // ✅ 新憲法：本文採用(resolved)とseed(rewrite)を分けて追う
+    resolvedTextLen: patch.resolvedTextLen ?? null,
+    rewriteSeedLen: patch.rewriteSeedLen ?? null,
+
+    // 参考：decision側（あれば）
+    decisionResolvedLen:
+      decision && decision.entry !== 'CALL_LLM' && decision.resolvedText
+        ? String(decision.resolvedText).length
+        : null,
+    decisionRewriteSeedLen: decision?.rewriteSeed ? String(decision.rewriteSeed).length : null,
   });
 }

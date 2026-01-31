@@ -18,6 +18,7 @@ import { runGreetingGate } from './handleIrosReply.gates';
 import { buildTurnContext } from './handleIrosReply.context';
 import { runOrchestratorTurn } from './handleIrosReply.orchestrator';
 import { postProcessReply } from './handleIrosReply.postprocess';
+import { extractSlotsForRephrase, rephraseSlotsFinal } from '@/lib/iros/language/rephraseEngine';
 
 import { runGenericRecallGate } from '@/lib/iros/server/gates/genericRecallGate';
 import { writeIT } from '@/lib/iros/language/itWriter';
@@ -1011,81 +1012,64 @@ function runLlmGate(args: {
   conversationId: string;
   userCode: string;
   metaForSave: any;
-  metaForCandidate?: any;
+  metaForCandidate: any;
   allowLLM_final: boolean;
   assistantTextNow: string;
-}): { llmEntry: string | null; resolvedText: string | null } {
-  const {
-    tag,
-    conversationId,
-    userCode,
-    metaForSave,
-    metaForCandidate,
-    allowLLM_final,
-    assistantTextNow,
-  } = args;
+}): {
+  llmEntry: string | null;
+  resolvedText: string | null;
+  rewriteSeed: string | null;
+} {
+  const { tag, conversationId, userCode, metaForSave, metaForCandidate, allowLLM_final, assistantTextNow } = args;
 
   try {
-    // ✅ “濃いmeta” を優先（candidateがあればそれ）
-    const metaForProbe = metaForCandidate ?? metaForSave;
+    const allowLLM_final0 = typeof allowLLM_final === 'boolean' ? allowLLM_final : true;
 
-    const brakeReason =
-      metaForProbe?.brakeReason ??
-      metaForProbe?.speechInput?.brakeReleaseReason ??
-      metaForProbe?.extra?.brakeReason ??
-      metaForSave?.brakeReason ??
-      metaForSave?.speechInput?.brakeReleaseReason ??
-      metaForSave?.extra?.brakeReason ??
-      null;
+    const metaForProbe = metaForCandidate ?? metaForSave ?? null;
 
-    const speechAct =
-      metaForProbe?.speechAct ??
-      metaForProbe?.extra?.speechAct ??
-      metaForSave?.speechAct ??
-      metaForSave?.extra?.speechAct ??
-      null;
+    const hasSlots =
+      Boolean(metaForProbe?.framePlan?.slots) ||
+      Boolean(metaForProbe?.framePlan?.framePlan?.slots) ||
+      Boolean(metaForProbe?.slotPlan?.slots) ||
+      Boolean(metaForProbe?.slots);
 
-    // ✅ slotPlanLen も “濃いmeta” を優先して拾う
     let slotPlanLen: number | null =
+      metaForProbe?.framePlan?.slotPlanLen ??
+      metaForProbe?.framePlan?.framePlan?.slotPlanLen ??
+      metaForProbe?.slotPlan?.slotPlanLen ??
       metaForProbe?.slotPlanLen ??
-      metaForProbe?.speechInput?.slotPlanLen ??
-      metaForProbe?.extra?.slotPlanLen ??
       metaForSave?.slotPlanLen ??
-      metaForSave?.speechInput?.slotPlanLen ??
-      metaForSave?.extra?.slotPlanLen ??
       null;
 
-    // ✅ hasSlots: unknown を false に潰さない（分かる時だけ true/false を入れる）
-    const hasSlots: boolean | null = (() => {
-      if (typeof metaForProbe?.hasSlots === 'boolean') return metaForProbe.hasSlots;
-      if (typeof metaForSave?.hasSlots === 'boolean') return metaForSave.hasSlots;
-
-      const fpSlots = metaForProbe?.framePlan?.slots;
-      if (Array.isArray(fpSlots)) return fpSlots.length > 0;
-
-      const spSlots = metaForProbe?.slotPlan?.slots;
-      if (Array.isArray(spSlots)) return spSlots.length > 0;
-
-      const directSlots = metaForProbe?.slots;
-      if (Array.isArray(directSlots)) return directSlots.length > 0;
-
-      return null;
-    })();
-
-    // ✅ policy も “濃いmeta” 優先で拾う
-    const slotPlanPolicy =
-      metaForProbe?.slotPlanPolicy ??
+    const slotPlanPolicy: any =
       metaForProbe?.framePlan?.slotPlanPolicy ??
       metaForProbe?.framePlan?.framePlan?.slotPlanPolicy ??
       metaForProbe?.slotPlan?.slotPlanPolicy ??
+      metaForProbe?.slotPlanPolicy ??
       metaForSave?.slotPlanPolicy ??
       metaForSave?.framePlan?.slotPlanPolicy ??
       metaForSave?.extra?.slotPlanPolicy ??
       null;
 
-    const textNow = String(assistantTextNow ?? '').trim();
+    const exProbe: any = metaForProbe?.extra ?? null;
+    const exSave: any = metaForSave?.extra ?? null;
 
-    // ✅ slotPlanLen が無い場合は “濃いmeta” から推定して入れる
+    const seedFallbackRaw =
+      exProbe?.slotPlanSeed ??
+      exProbe?.llmRewriteSeed ??
+      exSave?.slotPlanSeed ??
+      exSave?.llmRewriteSeed ??
+      null;
+
+    const seedFallback =
+      seedFallbackRaw != null && String(seedFallbackRaw).trim().length > 0
+        ? String(seedFallbackRaw).trim()
+        : '';
+
+    const textNowRaw = String(assistantTextNow ?? '').trim();
+    const textNow = textNowRaw.length > 0 ? textNowRaw : seedFallback;
+
+    // slotPlanLen 推定（既存ロジックを保持）
     if (slotPlanLen == null) {
       const slotsObj =
         metaForProbe?.framePlan?.slots ??
@@ -1107,20 +1091,18 @@ function runLlmGate(args: {
     const probe = probeLlmGate({
       conversationId,
       userCode,
-      allowLLM_final,
-      brakeReason,
-      speechAct,
+      allowLLM_final: allowLLM_final0,
+      brakeReason: (metaForProbe as any)?.speechBrakeReason ?? null,
+      speechAct: (metaForProbe as any)?.speechAct ?? null,
       finalAssistantTextNow: textNow,
       slotPlanLen,
       hasSlots,
       slotPlanPolicy,
-      meta: metaForProbe, // ✅ slots含む濃いmeta
+      meta: metaForProbe,
     } as any);
 
-    // ✅ patchは保存側（metaForSave）へ寄せて一元化
     writeLlmGateToMeta(metaForSave, probe.patch);
 
-    // ✅ decision をログに残す
     logLlmGate(tag, {
       conversationId,
       userCode,
@@ -1128,20 +1110,27 @@ function runLlmGate(args: {
       decision: probe.decision,
     });
 
-    // ✅ resolvedText は decision 側が正（patchではない）
     const resolvedTextRaw = (probe.decision as any)?.resolvedText;
     const resolvedText =
       resolvedTextRaw != null && String(resolvedTextRaw).trim().length > 0
         ? String(resolvedTextRaw).trim()
         : null;
 
+    // ✅ 追加：CALL_LLM の “本命” は rewriteSeed
+    const rewriteSeedRaw = (probe.decision as any)?.rewriteSeed;
+    const rewriteSeed =
+      rewriteSeedRaw != null && String(rewriteSeedRaw).trim().length > 0
+        ? String(rewriteSeedRaw).trim()
+        : null;
+
     return {
       llmEntry: (probe.patch as any)?.llmEntry ?? null,
       resolvedText,
+      rewriteSeed,
     };
   } catch (e) {
     console.warn('[IROS/LLM_GATE][FAILED]', { tag, conversationId, userCode, error: e });
-    return { llmEntry: null, resolvedText: null };
+    return { llmEntry: null, resolvedText: null, rewriteSeed: null };
   }
 }
 
@@ -1190,6 +1179,8 @@ export async function handleIrosReply(
     history,
     extra,
   } = params;
+// ✅ extra は const のままなので、ローカルで更新して回す（関数スコープで宣言）
+let extraLocal: any = extra ?? null;
 
   console.log('[IROS/Reply] handleIrosReply start', {
     conversationId,
@@ -1208,7 +1199,7 @@ export async function handleIrosReply(
     console.log('[IROS/Reply] extra keys', {
       conversationId,
       keys: Object.keys(extra ?? {}),
-      extra: extra ?? null,
+      extra: extraLocal ?? null,
     });
   }
 
@@ -1219,33 +1210,47 @@ export async function handleIrosReply(
 
     const tg = nowNs();
 
-    // ✅ extra は const のままなので、ローカルで更新して回す
-    let extraLocal: any = extra ?? null;
+// ✅ extra は const のままなので、ローカルで更新して回す
+let extraLocal: any = extra ?? null;
 
-    const gatedGreeting = await runGreetingGate({
-      supabase,
-      conversationId,
-      userCode,
-      text,
-      userProfile,
-      reqOrigin,
-      authorizationHeader,
-    });
+const gatedGreeting = await runGreetingGate({
+  supabase,
+  conversationId,
+  userCode,
+  text,
+  userProfile,
+  reqOrigin,
+  authorizationHeader,
+});
 
-    if (gatedGreeting?.ok) {
-      // ✅ greeting gate は「ここで返して終わり」にしない
-      // - gate が作った slotPlan/framePlan を extraLocal に注入して、
-      //   以降の通常フロー（LLM writer / rephrase / render）へ流す
-      extraLocal = mergeExtra(extraLocal, gatedGreeting.metaForSave ?? {}) as any;
+if (gatedGreeting?.ok) {
+  // ✅ gate の metaForSave は「rootメタ」なので、extra に注入するのは metaForSave.extra のみ
+  const gateExtra =
+    gatedGreeting?.metaForSave &&
+    typeof gatedGreeting.metaForSave === 'object' &&
+    (gatedGreeting.metaForSave as any).extra &&
+    typeof (gatedGreeting.metaForSave as any).extra === 'object'
+      ? (gatedGreeting.metaForSave as any).extra
+      : null;
 
-      // 保険：後段のデバッグ用（無くてもOK）
-      (extraLocal as any).gatedGreeting = {
-        ok: true,
-        result: gatedGreeting.result ?? null,
-      };
+  if (gateExtra) {
+    const prev = extraLocal && typeof extraLocal === 'object' ? extraLocal : {};
+    extraLocal = { ...prev, ...gateExtra };
+  }
 
-      // ✅ ここで return しない。下へ続行させる。
-    }
+  // 保険：後段のデバッグ用（無くてもOK）
+  const prev2 = extraLocal && typeof extraLocal === 'object' ? extraLocal : {};
+  extraLocal = {
+    ...prev2,
+    gatedGreeting: {
+      ok: true,
+      result: gatedGreeting.result ?? null,
+    },
+  };
+
+  // ✅ ここで return しない。下へ続行させる。
+}
+
     // ok=false / gate不成立はそのまま下へ
 
     const bypassMicro = shouldBypassMicroGate(text);
@@ -1298,7 +1303,7 @@ export async function handleIrosReply(
           userProfile,
           requestedStyle: style ?? null,
           history: historyForTurn,
-          extra: extra ?? null,
+          extra: extraLocal ?? null,
         });
         t.context_ms = msSince(tc);
 
@@ -1322,7 +1327,7 @@ export async function handleIrosReply(
           timing: t,
         };
 
-        metaForSave = stampSingleWriter(mergeExtra(metaForSave, extra ?? null));
+        metaForSave = stampSingleWriter(mergeExtra(metaForSave, extraLocal ?? null));
 
         // SUN固定保護（念のため）
         try {
@@ -1603,7 +1608,7 @@ if (rememberScope) {
       userProfile,
       requestedStyle: style ?? null,
       history: historyForTurn,
-      extra: extra ?? null,
+      extra: extraLocal ?? null,
     });
     t.context_ms = msSince(tc);
 
@@ -1612,10 +1617,7 @@ if (rememberScope) {
     ---------------------------- */
 
     // ✅ baseMeta は extra を絶対に落とさない（V2: route/ctx → orch へ橋渡し）
-    const baseMetaMergedForTurn: any = mergeExtra(
-      { ...(ctx.baseMetaForTurn ?? {}) },
-      extra ?? null,
-    );
+    const baseMetaMergedForTurn: any = mergeExtra({ ...(ctx.baseMetaForTurn ?? {}) }, extraLocal ?? null);
 
     // ✅ R -> I gate（入口で確定。途中上書き禁止）
     const prevDepthStage: string | null =
@@ -1685,7 +1687,7 @@ if (rememberScope) {
 
       orchResult: orch,
       history: historyForTurn,
-      extra: extra ?? null,
+      extra: extraLocal ?? null,
     });
     t.postprocess_ms = msSince(tp);
 
@@ -1696,16 +1698,18 @@ if (rememberScope) {
     out.metaForSave = out.metaForSave ?? {};
     out.metaForSave.timing = t;
 
-    // ✅ extra を “最後に” 再注入（undefined は上書きしない）
+    // ✅ extra を “最後に” 再注入（undefined / null は上書きしない）
     out.metaForSave.extra = out.metaForSave.extra ?? {};
     if (extra && typeof extra === 'object') {
       const prev = out.metaForSave.extra ?? {};
       const next: any = { ...prev };
       for (const [k, v] of Object.entries(extra as any)) {
-        if (v !== undefined) next[k] = v;
+        // ✅ null も「値なし」とみなし、postprocess側の確定値を潰さない
+        if (v !== undefined && v !== null) next[k] = v;
       }
       out.metaForSave.extra = next;
     }
+
 
     // ✅ single-writer stamp（最後に確定）
     out.metaForSave = stampSingleWriter(out.metaForSave);
@@ -1815,9 +1819,11 @@ try {
   out.metaForSave = out.metaForSave ?? {};
   out.metaForSave.extra = out.metaForSave.extra ?? {};
 
+  const exAny: any = out.metaForSave.extra;
+
   // history は巨大化し得るので “必要最小限” の形にして渡す
   // （role/content/meta のみ）
-  (out.metaForSave.extra as any).historyForWriter = Array.isArray(historyForTurn)
+  exAny.historyForWriter = Array.isArray(historyForTurn)
     ? (historyForTurn as any[]).map((m) => ({
         role: m?.role,
         content: m?.content ?? m?.text ?? '',
@@ -1825,10 +1831,83 @@ try {
       }))
     : [];
 
-  (out.metaForSave.extra as any).rememberTextForIros =
-    typeof rememberTextForIros === 'string' ? rememberTextForIros : null;
+  exAny.rememberTextForIros = typeof rememberTextForIros === 'string' ? rememberTextForIros : null;
+  exAny.historyForWriterAt = new Date().toISOString();
 
-  (out.metaForSave.extra as any).historyForWriterAt = new Date().toISOString();
+  // =========================================================
+  // ✅ FlowTape / FlowDigest（LLM-facing tiny continuity）
+  // - “禁止/縛り” は入れない（ログとして素直に刻むだけ）
+  // - metaForSave.extra に正本一本化（route.ts が拾える）
+  // =========================================================
+  try {
+    // 依存を増やして import 衝突させないため、ここでは動的 import にする
+    const { appendFlowTape } = await import('../flow/flowTape');
+    const { buildFlowDigest } = await import('../flow/flowDigest');
+
+    const prevTape = typeof exAny.flowTape === 'string' ? exAny.flowTape : null;
+
+    // 1) META:coord
+    const coord = {
+      depthStage:
+        (out.metaForSave as any)?.depthStage ??
+        (out.metaForSave as any)?.depth_stage ??
+        (out.metaForSave as any)?.unified?.depth?.stage ??
+        null,
+      phase:
+        (out.metaForSave as any)?.phase ??
+        (out.metaForSave as any)?.unified?.phase ??
+        null,
+      intentLayer:
+        (out.metaForSave as any)?.intentLayer ??
+        (out.metaForSave as any)?.intent_layer ??
+        (out.metaForSave as any)?.unified?.layer ??
+        null,
+      itxStep:
+        (out.metaForSave as any)?.itxStep ??
+        (out.metaForSave as any)?.itx_step ??
+        (out.metaForSave as any)?.unified?.itx?.step ??
+        null,
+      anchor:
+        (out.metaForSave as any)?.intentAnchor ??
+        (out.metaForSave as any)?.intent_anchor ??
+        (out.metaForSave as any)?.unified?.intent_anchor ??
+        null,
+    };
+
+    let tape = prevTape;
+
+    // coord が全部 null でも META は刻まない（ノイズ削減）
+    const hasAnyCoord =
+      coord.depthStage != null || coord.phase != null || coord.intentLayer != null || coord.itxStep != null || coord.anchor != null;
+
+    if (hasAnyCoord) {
+      tape = appendFlowTape(tape, { t: 'META', k: 'coord', v: coord });
+    }
+
+    // 2) OBS:（会話の芯として “このターンのユーザー本文” を短く刻む）
+    const userObs = String(text ?? '').trim();
+
+    if (userObs) {
+      tape = appendFlowTape(tape, { t: 'OBS', k: 'user', v: userObs });
+    }
+
+    // 正本保存
+    exAny.flowTape = tape;
+
+    // 3) digest（最大3行）
+    exAny.flowDigest = buildFlowDigest(tape, { maxLines: 3 });
+
+    // 4) ctxPack にも “読む側の入口” を作る（rephraseEngine 側が拾える）
+    exAny.ctxPack = exAny.ctxPack && typeof exAny.ctxPack === 'object' ? exAny.ctxPack : {};
+    exAny.ctxPack.flow = {
+      digest: exAny.flowDigest ?? null,
+      hasTape: Boolean(tape && String(tape).trim().length > 0),
+      at: new Date().toISOString(),
+    };
+  } catch (e) {
+    // Flow は非必須：失敗しても会話を止めない
+    console.warn('[IROS/FlowTape] stamp failed (non-fatal)', e);
+  }
 } catch (e) {
   console.warn('[IROS/Reply] failed to stamp history/remember for writer', e);
 }
@@ -1876,21 +1955,28 @@ try {
     gate?.llmEntry === 'SKIP_SLOTPLAN';
 
   // ---------------------------------------------------------
-  // (1) resolvedText の採用ルール
+  // (1) resolvedText の採用ルール（憲法改正：rephraseEngineに依存しない）
   // - SKIP系：本文が空なら resolvedText を採用（現状維持）
-  // - DIAGNOSIS_FINAL__SEED_FOR_LLM：CALL_LLM の resolvedText を本文に採用（重要）
+  // - DIAGNOSIS_FINAL__SEED_FOR_LLM：CALL_LLM の resolvedText を本文に採用（現状維持）
+  // - ✅ TREAT_AS_SCAFFOLD_SEED / SLOTPLAN_SEED_SCAFFOLD：
+  //    resolvedText は「seed専用」。ここでは本文に採用しない（漏れ防止・設計どおり）
   // ---------------------------------------------------------
   const finalTextPolicyNow = String((out.metaForSave as any)?.extra?.finalTextPolicy ?? '')
     .trim()
     .toUpperCase();
 
-  const isDiagnosisFinalSeed =
-    finalTextPolicyNow === 'DIAGNOSIS_FINAL__SEED_FOR_LLM';
+  const isDiagnosisFinalSeed = finalTextPolicyNow === 'DIAGNOSIS_FINAL__SEED_FOR_LLM';
+
+  // ✅ SCAFFOLD_SEED 系（FINAL_INTERNAL_ONLY->SCAFFOLD_SEED / SCAFFOLD seed運用）
+  //    -> 本文には採用しない（seed専用）
+  const isScaffoldSeedLike =
+    finalTextPolicyNow.includes('TREAT_AS_SCAFFOLD_SEED') ||
+    finalTextPolicyNow === 'SLOTPLAN_SEED_SCAFFOLD';
 
   if (gate?.resolvedText && String(gate.resolvedText).trim().length > 0) {
     const bodyIsEmpty = String(out?.assistantText ?? out?.content ?? '').trim().length === 0;
 
-    // ✅ 1) DIAGNOSIS_FINAL__SEED_FOR_LLM は “LLM本文” を採用する（seed運用の目的）
+    // ✅ 1) DIAGNOSIS_FINAL__SEED_FOR_LLM は “LLM本文” を採用する（従来通り）
     if (isDiagnosisFinalSeed && gate.llmEntry === 'CALL_LLM') {
       out.content = gate.resolvedText;
       out.assistantText = gate.resolvedText;
@@ -1909,12 +1995,21 @@ try {
       });
     }
 
-    // ✅ 2) SKIP系：本文が空のときだけ resolvedText を採用（従来通り）
-    if (
-      isSkip &&
-      bodyIsEmpty &&
-      !isDiagnosisFinalSeed
-    ) {
+    // ✅ 2) SCAFFOLD_SEED 系は本文に採用しない（seed専用）
+    // - postprocess が “本文空のまま” を明示しているので尊重する
+    // - 本文を埋めると internal seed の漏れ経路になる
+    if (isScaffoldSeedLike && gate.llmEntry === 'CALL_LLM' && bodyIsEmpty && !isDiagnosisFinalSeed) {
+      console.log('[IROS/Reply][patch] scaffold seed: keep empty (seed-only)', {
+        conversationId,
+        userCode,
+        llmEntry: gate.llmEntry,
+        finalTextPolicyNow,
+        resolvedLen: String(gate.resolvedText ?? '').length,
+      });
+    }
+
+    // ✅ 3) SKIP系：本文が空のときだけ resolvedText を採用（従来通り）
+    if (isSkip && bodyIsEmpty && !isDiagnosisFinalSeed && !isScaffoldSeedLike) {
       out.content = gate.resolvedText;
       out.assistantText = gate.resolvedText;
 
@@ -1934,30 +2029,28 @@ try {
     }
   }
 
+// ---------------------------------------------------------
+// (2) seed注入：CALL_LLM の rewriteSeed/resolvedText を meta.extra に注入（FINALでも）
+// - 露出はしない（下流の writer/rephrase 用の材料）
+// ---------------------------------------------------------
+{
+  out.metaForSave = out.metaForSave ?? {};
+  out.metaForSave.extra = out.metaForSave.extra ?? {};
+  const ex: any = out.metaForSave.extra;
 
-  // ---------------------------------------------------------
-  // (2) seed注入：SCAFFOLDのときだけ “LLM rewrite seed” を meta.extra に注入
-  // - FINALは「本文採用」側に寄せるので、ここでseed運用にしない
-  // ---------------------------------------------------------
-  {
-    out.metaForSave = out.metaForSave ?? {};
-    out.metaForSave.extra = out.metaForSave.extra ?? {};
-    const ex: any = out.metaForSave.extra;
+  // ✅ seed の単一ソース：CALL_LLM は rewriteSeed、SKIP系などは resolvedText もあり得る
+  const seedFromGate = String((gate as any)?.rewriteSeed ?? (gate as any)?.resolvedText ?? '').trim();
 
-    const policy = String((out.metaForSave?.framePlan as any)?.slotPlanPolicy ?? '')
-      .toUpperCase();
-    const isScaffold =
-      ex?.finalTextPolicy === 'SLOTPLAN_SEED_SCAFFOLD' || policy === 'SCAFFOLD';
-
-    // ✅ SCAFFOLDだけ seed を注入（CALL_LLM & resolvedText がある場合）
-    if (isScaffold && gate?.llmEntry === 'CALL_LLM' && gate.resolvedText) {
-      if (ex.llmRewriteSeed == null || String(ex.llmRewriteSeed).trim().length === 0) {
-        ex.llmRewriteSeed = gate.resolvedText;
-        ex.llmRewriteSeedFrom = 'llmGate';
-        ex.llmRewriteSeedAt = new Date().toISOString();
-      }
+  // ✅ CALL_LLM で seed があるなら、FINAL/SCAFFOLD問わず “必ず” 運ぶ
+  if (gate?.llmEntry === 'CALL_LLM' && seedFromGate.length > 0) {
+    if (ex.llmRewriteSeed == null || String(ex.llmRewriteSeed).trim().length === 0) {
+      ex.llmRewriteSeed = seedFromGate;
+      ex.llmRewriteSeedFrom = 'llmGate(rewriteSeed)';
+      ex.llmRewriteSeedAt = new Date().toISOString();
     }
   }
+}
+
 
   // =========================================================
   // ✅ PDF 取締（最重要）
@@ -1973,66 +2066,100 @@ try {
       .trim()
       .toUpperCase();
 
-    const isScaffoldSeed =
-      ex?.finalTextPolicy === 'SLOTPLAN_SEED_SCAFFOLD' || policy === 'SCAFFOLD';
+    // ✅ “空強制” は policy=SCAFFOLD のときだけ許可する
+    //    finalTextPolicy が SLOTPLAN_SEED_SCAFFOLD でも、policy=FINAL の場合は本文を保持する
+    const isScaffoldPolicy = policy === 'SCAFFOLD';
 
-      if (isScaffoldSeed) {
-        const seed = String(ex?.slotPlanSeed ?? ex?.llmRewriteSeed ?? '').trim();
+    if (isScaffoldPolicy) {
+      const seedRaw = String(ex?.slotPlanSeed ?? ex?.llmRewriteSeed ?? '').trim();
 
-        // ✅ 下流で本文を作れる条件が揃ってる時だけ “空固定” を許可
-        const rephraseEnabled =
-          String(process.env.IROS_REPHRASE_FINAL_ENABLED ?? '1').trim() !== '0';
+      // ✅ 下流で本文を作れる条件が揃ってる時だけ “空固定” を許可
+      const rephraseEnabled =
+        String(process.env.IROS_REPHRASE_FINAL_ENABLED ?? '1').trim() !== '0';
 
-        const canRenderFromSeed =
-          seed.length > 0 && allowLLM_final !== false && rephraseEnabled;
+      // ✅ seed が「内部行(@〜)だけ」だと、render-v2 は何も出せないので空強制は禁止
+      const seedRenderable = seedRaw
+        .split('\n')
+        .filter((l) => !String(l ?? '').trim().startsWith('@'))
+        .join('\n')
+        .trim();
 
-        if (canRenderFromSeed) {
-          // ① seed がある → SCAFFOLD時だけ本文を空に固定（seed→render-v2で出す）
-          out.assistantText = '';
-          (out as any).content = '';
+      // ✅ rephraseBlocks があるなら render-v2 で出せる（空固定OK）
+      const hasRephraseBlocks = Array.isArray((ex as any)?.rephraseBlocks) && (ex as any).rephraseBlocks.length > 0;
 
-          ex.pdfScaffoldNoCommit = true;
-          ex.pdfScaffoldNoCommitAt = new Date().toISOString();
-          ex.pdfScaffoldNoCommitPolicy = policy || null;
+      const canRenderFromSeed =
+        (hasRephraseBlocks || seedRenderable.length > 0) &&
+        seedRaw.length > 0 &&
+        allowLLM_final !== false &&
+        rephraseEnabled;
 
-          console.log('[SCAFFOLD][ENFORCE] canRenderFromSeed=1 -> final text forced empty', {
-            conversationId,
-            userCode,
-            policy,
-            finalTextPolicy: ex?.finalTextPolicy ?? null,
-            seedLen: seed.length,
-            seedHead: seed.slice(0, 60),
-            allowLLM_final,
-            rephraseEnabled,
-          });
-        } else {
-          // ❌ seed が無い/再生成できない → 空にしない（無反応防止）
-          ex.pdfScaffoldNoCommit = false;
-          ex.pdfScaffoldNoCommitAt = new Date().toISOString();
-          ex.pdfScaffoldNoCommitPolicy = policy || null;
-          ex.pdfScaffoldNoCommitBlockedReason = {
-            seedLen: seed.length,
-            allowLLM_final,
-            rephraseEnabled,
-          };
+      if (canRenderFromSeed) {
+        // ① seed がある → SCAFFOLD時だけ本文を空に固定（seed→render-v2で出す）
+        out.assistantText = '';
+        (out as any).content = '';
 
-          console.warn('[SCAFFOLD][ENFORCE] blocked -> keep existing assistantText (no empty force)', {
-            conversationId,
-            userCode,
-            policy,
-            finalTextPolicy: ex?.finalTextPolicy ?? null,
-            seedLen: seed.length,
-            allowLLM_final,
-            rephraseEnabled,
-          });
-        }
+        ex.pdfScaffoldNoCommit = true;
+        ex.pdfScaffoldNoCommitAt = new Date().toISOString();
+        ex.pdfScaffoldNoCommitPolicy = policy || null;
+
+        console.log('[SCAFFOLD][ENFORCE] canRenderFromSeed=1 -> final text forced empty', {
+          conversationId,
+          userCode,
+          policy,
+          finalTextPolicy: ex?.finalTextPolicy ?? null,
+          seedLen: seedRaw.length,
+          seedHead: seedRaw.slice(0, 60),
+          seedRenderableLen: seedRenderable.length,
+          hasRephraseBlocks,
+          allowLLM_final,
+          rephraseEnabled,
+        });
       } else {
-        ex.pdfFinalAllowsCommit = true;
-        ex.pdfFinalAllowsCommitAt = new Date().toISOString();
-        ex.pdfFinalAllowsCommitPolicy = policy || null;
-      }
+        // ❌ 下流で出せない条件（= 無言になる） → 空にしない（無反応防止）
+        ex.pdfScaffoldNoCommit = false;
+        ex.pdfScaffoldNoCommitAt = new Date().toISOString();
+        ex.pdfScaffoldNoCommitPolicy = policy || null;
+        ex.pdfScaffoldNoCommitBlockedReason = {
+          seedLen: seedRaw.length,
+          seedRenderableLen: seedRenderable.length,
+          hasRephraseBlocks,
+          allowLLM_final,
+          rephraseEnabled,
+        };
 
+        console.warn('[SCAFFOLD][ENFORCE] blocked -> keep existing assistantText (no empty force)', {
+          conversationId,
+          userCode,
+          policy,
+          finalTextPolicy: ex?.finalTextPolicy ?? null,
+          seedLen: seedRaw.length,
+          seedRenderableLen: seedRenderable.length,
+          hasRephraseBlocks,
+          allowLLM_final,
+          rephraseEnabled,
+        });
+      }
+    } else {
+
+      // ✅ FINALなど：本文を保持（ここで空にしない）
+      ex.pdfFinalAllowsCommit = true;
+      ex.pdfFinalAllowsCommitAt = new Date().toISOString();
+      ex.pdfFinalAllowsCommitPolicy = policy || null;
+
+      // 観測用：FINALなのにSLOTPLAN_SEED_SCAFFOLDが立っているケースを可視化
+      if (String(ex?.finalTextPolicy ?? '').trim().toUpperCase() === 'SLOTPLAN_SEED_SCAFFOLD') {
+        ex.pdfFinalKeepsBodyEvenIfSeedScaffold = true;
+        ex.pdfFinalKeepsBodyEvenIfSeedScaffoldAt = new Date().toISOString();
+        console.warn('[SCAFFOLD][ENFORCE] FINAL policy -> keep body (ignore finalTextPolicy=SLOTPLAN_SEED_SCAFFOLD)', {
+          conversationId,
+          userCode,
+          policy,
+          finalTextPolicy: ex?.finalTextPolicy ?? null,
+        });
+      }
+    }
   }
+
 } catch (e) {
   console.warn('[IROS/LLM_GATE][PROBE] failed', e);
 }
@@ -2107,6 +2234,259 @@ try {
 
     // ✅ meta fill（IT writer 前に null 禁止を担保）
     out.metaForSave = ensureMetaFilled({ meta: out.metaForSave, ctx, orch });
+
+// ========= handleIrosReply.ts 変更点 =========
+//
+// 1) import 追加（ファイル先頭の import 群に追加）
+//
+//   import { extractSlotsForRephrase, rephraseSlotsFinal } from '@/lib/iros/language/rephraseEngine';
+//
+// 2) 以下のブロックを、あなたが貼った箇所の
+//    「out.metaForSave = ensureMetaFilled({ meta: out.metaForSave, ctx, orch });」直後
+//    かつ 「// ✅ IT writer（COMMIT のときだけ）」の直前 に “挿入”
+//
+// ============================================
+
+// ✅ FINAL writer bridge（SCAFFOLD/FINAL の “本文空” を LLM で可視化する）
+// - slotTextCleanedLen=0 は正常（本文は空のまま）
+// - ここで rephraseBlocks を生成して route.ts/render-v2 に渡す
+{
+  // ✅ ログ用は先に退避（catch で out/ctx がスコープ外でも死なない）
+  const _conversationId =
+    (typeof conversationId === 'string' ? conversationId : null) ?? (ctx as any)?.conversationId ?? null;
+  const _userCode = (typeof userCode === 'string' ? userCode : null) ?? (ctx as any)?.userCode ?? null;
+
+  // ✅ dots-only 判定（'…' / '……' / '...' 等は “空扱い”）
+  const isDotsOnly = (s0: unknown) => {
+    const s = String(s0 ?? '').trim();
+    if (!s) return true;
+    // 句点/三点リーダ/ピリオド/全角ピリオドだけ
+    return /^[\.\uFF0E\u3002\u2026]+$/.test(s);
+  };
+
+  try {
+    if (!out || typeof out !== 'object') {
+      console.warn('[IROS/rephraseBridge][SKIP_OR_FAIL]', {
+        conversationId: _conversationId,
+        userCode: _userCode,
+        policy: null,
+        reason: 'out_is_not_object',
+      });
+    } else {
+      out.metaForSave = out.metaForSave ?? {};
+      out.metaForSave.extra = out.metaForSave.extra ?? {};
+      const ex: any = out.metaForSave.extra;
+
+      const policy = String((out.metaForSave as any)?.framePlan?.slotPlanPolicy ?? '').trim().toUpperCase();
+
+      // ✅ “本文空” 判定（FINAL でも slotTextCleanedLen=0 を拾う）
+      const slotTextCleanedLen = Number((ex as any)?.slotTextCleanedLen ?? NaN);
+      const slotTextRawLen = Number((ex as any)?.slotTextRawLen ?? NaN);
+
+      // 現時点の本文（最終的に '……' になっているケースがあるので、これだけに依存しない）
+      const bodyNow = String(out.assistantText ?? (out as any)?.content ?? '').trim();
+
+      const alreadyHasBlocks = Array.isArray(ex?.rephraseBlocks) && ex.rephraseBlocks.length > 0;
+
+      // ✅ allowLLM_final のローカル確定（このブロック内で必ず定義する）
+      const allowLLM_final_local: boolean = (() => {
+        const v =
+          (ctx as any)?.allowLLM_final ??
+          (ctx as any)?.allowLLMFinal ??
+          (out.metaForSave as any)?.allowLLM_final ??
+          (out.metaForSave as any)?.allowLLMFinal ??
+          (out.metaForSave as any)?.extra?.allowLLM_final ??
+          null;
+
+        if (typeof v === 'boolean') return v;
+        return true; // デフォルトは許可（false のときだけ止める）
+      })();
+
+      // ✅ “空扱い” 判定：
+      // - bodyNow が空
+      // - または bodyNow が点だけ（……）
+      // - または slotTextCleanedLen=0 かつ slotTextRawLen>0（内部マーカー削除で空になった）
+      const emptyLikeNow =
+        !bodyNow ||
+        isDotsOnly(bodyNow) ||
+        (Number.isFinite(slotTextCleanedLen) &&
+          slotTextCleanedLen === 0 &&
+          Number.isFinite(slotTextRawLen) &&
+          slotTextRawLen > 0);
+
+      // ✅ 走らせる条件：
+      // - SCAFFOLD または FINAL
+      // - emptyLikeNow
+      // - blocks が無い
+      // - allowLLM_final が false なら触らない
+      const shouldRunWriter =
+        (policy === 'SCAFFOLD' || policy === 'FINAL') &&
+        emptyLikeNow &&
+        !alreadyHasBlocks &&
+        allowLLM_final_local !== false;
+
+      // ✅ 追跡用（ENTER）
+      if (emptyLikeNow) {
+        console.log('[IROS/rephraseBridge][ENTER]', {
+          conversationId: _conversationId,
+          userCode: _userCode,
+          policy,
+          emptyLikeNow,
+          allowLLM_final: allowLLM_final_local,
+          alreadyHasBlocks,
+          slotTextCleanedLen: Number.isFinite(slotTextCleanedLen) ? slotTextCleanedLen : null,
+          slotTextRawLen: Number.isFinite(slotTextRawLen) ? slotTextRawLen : null,
+          bodyNowLen: bodyNow.length,
+          bodyNowHead: bodyNow.slice(0, 40),
+          shouldRunWriter,
+        });
+      }
+
+      if (shouldRunWriter) {
+        const extracted = extractSlotsForRephrase({
+          meta: out.metaForSave,
+          framePlan: (out.metaForSave as any)?.framePlan ?? null,
+          slotPlan: (out.metaForSave as any)?.slotPlan ?? null,
+          assistantText: out.assistantText ?? null,
+          content: (out as any)?.content ?? null,
+          text: (out as any)?.text ?? null,
+          extra: out.metaForSave.extra,
+          orch: { framePlan: (out.metaForSave as any)?.framePlan ?? null },
+        });
+
+        const model = String(process.env.IROS_REPHRASE_FINAL_MODEL ?? process.env.IROS_MODEL ?? 'gpt-4o').trim();
+
+        const rr = await rephraseSlotsFinal(extracted, {
+          model,
+          temperature: 0.7,
+          maxLinesHint: 8,
+          userText: typeof text === 'string' ? text : null,
+          userContext: {
+            inputKind: (ctx as any)?.inputKind ?? null,
+            turns: Array.isArray((out.metaForSave as any)?.extra?.historyForWriter)
+              ? (out.metaForSave as any).extra.historyForWriter
+                  .map((m: any) => ({
+                    role: m?.role,
+                    content: m?.content ?? m?.text ?? '',
+                  }))
+                  .filter(
+                    (m: any) =>
+                      (m?.role === 'user' || m?.role === 'assistant') &&
+                      String(m?.content ?? '').trim().length > 0,
+                  )
+              : [],
+            meta: {
+              q: (out.metaForSave as any)?.q ?? (out.metaForSave as any)?.q_code ?? null,
+              depth: (out.metaForSave as any)?.depth ?? (out.metaForSave as any)?.depth_stage ?? null,
+              phase: (out.metaForSave as any)?.phase ?? null,
+              layer: (out.metaForSave as any)?.intentLayer ?? (out.metaForSave as any)?.intent_layer ?? null,
+              renderMode: (out.metaForSave as any)?.renderMode ?? null,
+              slotPlanPolicy: policy,
+            },
+          },
+          inputKind: (ctx as any)?.inputKind ?? null,
+          debug: {
+            traceId: (ctx as any)?.traceId ?? null,
+            conversationId: (ctx as any)?.conversationId ?? null,
+            userCode: (ctx as any)?.userCode ?? null,
+            renderEngine: true,
+            inputKind: (ctx as any)?.inputKind ?? null,
+          },
+        });
+
+        if (rr && rr.ok) {
+          // ✅ ここが重要：戻りの持ち方が複数あり得るので全部拾う
+          const mx = (rr as any)?.meta?.extra ?? {};
+          const blocksCandidate =
+            (rr as any)?.rephraseBlocks ??
+            (rr as any)?.blocks ??
+            mx?.rephraseBlocks ??
+            mx?.rephrase?.blocks ??
+            mx?.rephrase?.rephraseBlocks ??
+            null;
+
+          const headCandidate =
+            (rr as any)?.rephraseHead ??
+            (rr as any)?.head ??
+            mx?.rephraseHead ??
+            mx?.rephrase?.head ??
+            null;
+
+          if (Array.isArray(blocksCandidate) && blocksCandidate.length > 0) {
+            ex.rephraseBlocks = blocksCandidate;
+          }
+          if (typeof headCandidate === 'string' && headCandidate.trim()) {
+            ex.rephraseHead = headCandidate.trim();
+          }
+
+          ex.rephraseApplied = true;
+          ex.rephraseLLMApplied = true;
+          ex.rephraseReason = ex.rephraseReason ?? 'rephraseSlotsFinal(emptyLike_seed_to_blocks)';
+          ex.rephraseAt = new Date().toISOString();
+
+          console.log('[IROS/rephraseBridge][OK]', {
+            conversationId: _conversationId,
+            userCode: _userCode,
+            policy,
+            emptyLikeNow,
+            blocksLen: Array.isArray(ex.rephraseBlocks) ? ex.rephraseBlocks.length : null,
+            head: String(ex.rephraseHead ?? '').slice(0, 120),
+          });
+        } else {
+          ex.rephraseApplied = false;
+          ex.rephraseLLMApplied = false;
+          ex.rephraseReason = rr?.reason ?? 'rephraseSlotsFinal:failed';
+
+          console.warn('[IROS/rephraseBridge][SKIP_OR_FAIL]', {
+            conversationId: _conversationId,
+            userCode: _userCode,
+            policy,
+            emptyLikeNow,
+            reason: rr?.reason ?? null,
+          });
+        }
+      } else {
+        // 観測用（なぜ走らないか）
+        if (emptyLikeNow) {
+          console.log('[IROS/rephraseBridge][SKIP]', {
+            conversationId: _conversationId,
+            userCode: _userCode,
+            policy,
+            emptyLikeNow,
+            allowLLM_final: allowLLM_final_local,
+            alreadyHasBlocks,
+            slotTextCleanedLen: Number.isFinite(slotTextCleanedLen) ? slotTextCleanedLen : null,
+            slotTextRawLen: Number.isFinite(slotTextRawLen) ? slotTextRawLen : null,
+            bodyNowLen: bodyNow.length,
+            bodyNowHead: bodyNow.slice(0, 40),
+          });
+        }
+      }
+    }
+  } catch (e) {
+    const errText = String((e as any)?.message ?? e);
+
+    try {
+      if (out && typeof out === 'object') {
+        (out as any).metaForSave = (out as any).metaForSave ?? {};
+        (out as any).metaForSave.extra = (out as any).metaForSave.extra ?? {};
+        const ex: any = (out as any).metaForSave.extra;
+
+        ex.rephraseApplied = false;
+        ex.rephraseLLMApplied = false;
+        ex.rephraseReason = 'rephraseBridge:error';
+        ex.rephraseError = errText;
+      }
+    } catch {}
+
+    console.warn('[IROS/rephraseBridge][ERROR]', {
+      conversationId: _conversationId,
+      userCode: _userCode,
+      err: errText,
+    });
+  }
+}
+
 
     // ✅ IT writer（COMMIT のときだけ）
     try {
