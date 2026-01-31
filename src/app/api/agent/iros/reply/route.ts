@@ -705,46 +705,77 @@ export async function POST(req: NextRequest) {
         extraSoT = applied.extraForHandle ?? extraSoT;
 
 
-        // ✅ 保存側(metaForSave.extra)にも最小同期（null/空で潰さない）
-        try {
-          if (metaForSave && typeof metaForSave === 'object') {
-            (metaForSave as any).extra = { ...((metaForSave as any).extra ?? {}) };
+// ✅ 保存側(metaForSave.extra)にも最小同期（null/空で潰さない）
+try {
+  const ex: any = extraSoT as any;
 
-            const ex: any = extraSoT as any;
-            const mergedBlocks2 = Array.isArray(ex?.rephraseBlocks) && ex.rephraseBlocks.length > 0 ? ex.rephraseBlocks : null;
-            const mergedHead2 = String(ex?.rephraseHead ?? '').trim() || null;
-            const mergedCtx2 = ex?.ctxPack && typeof ex.ctxPack === 'object' ? ex.ctxPack : null;
+  const mergedBlocks2 =
+    Array.isArray(ex?.rephraseBlocks) && ex.rephraseBlocks.length > 0 ? ex.rephraseBlocks : null;
 
-            if (mergedBlocks2 && !Array.isArray((metaForSave as any).extra?.rephraseBlocks)) {
-              (metaForSave as any).extra.rephraseBlocks = mergedBlocks2;
-            }
-            if (mergedHead2 && !String((metaForSave as any).extra?.rephraseHead ?? '').trim()) {
-              (metaForSave as any).extra.rephraseHead = mergedHead2;
-            }
-            if (mergedCtx2 && !(metaForSave as any).extra?.ctxPack) {
-              (metaForSave as any).extra.ctxPack = mergedCtx2;
-            }
-          }
+  const mergedHead2 = String(ex?.rephraseHead ?? '').trim() || null;
 
-          // ✅ meta.extra 側も満たす（renderGateway が meta.extra 経由で見る経路）
-          if (meta && typeof meta === 'object') {
-            (meta as any).extra = { ...((meta as any).extra ?? {}) };
-            const ex: any = extraSoT as any;
+  const mergedCtx2 = ex?.ctxPack && typeof ex.ctxPack === 'object' ? ex.ctxPack : null;
 
-            if (!Array.isArray((meta as any).extra?.rephraseBlocks) && Array.isArray(ex?.rephraseBlocks) && ex.rephraseBlocks.length > 0) {
-              (meta as any).extra.rephraseBlocks = ex.rephraseBlocks;
-              (meta as any).extra.rephraseBlocksAttached = true;
-            }
-            if (!String((meta as any).extra?.rephraseHead ?? '').trim() && String(ex?.rephraseHead ?? '').trim()) {
-              (meta as any).extra.rephraseHead = String(ex.rephraseHead).trim();
-            }
-            if (!(meta as any).extra?.ctxPack && ex?.ctxPack && typeof ex.ctxPack === 'object') {
-              (meta as any).extra.ctxPack = ex.ctxPack;
-            }
-          }
-        } catch (e) {
-          console.warn('[IROS/pipe][APPLY_RENDER_ENGINE][SYNC_META_EXTRA][ERROR]', e);
-        }
+  // ✅ 追加：flowDigest / flowTape を carry（空で潰さない）
+  // - flowDigest は ctxPack.flow.digest も互換ソースとして拾う（ただし上書きしない）
+  const mergedFlowDigest2 =
+    String(ex?.flowDigest ?? ex?.ctxPack?.flow?.digest ?? '').trim() || null;
+
+  const mergedFlowTape2 = typeof ex?.flowTape === 'string' ? String(ex.flowTape).trim() || null : null;
+
+  // metaForSave.extra に反映（既存があるなら尊重）
+  (metaForSave as any).extra = (metaForSave as any).extra ?? {};
+
+  if (mergedBlocks2 && !Array.isArray((metaForSave as any).extra?.rephraseBlocks)) {
+    (metaForSave as any).extra.rephraseBlocks = mergedBlocks2;
+  }
+
+  if (mergedHead2 && !String((metaForSave as any).extra?.rephraseHead ?? '').trim()) {
+    (metaForSave as any).extra.rephraseHead = mergedHead2;
+  }
+
+  if (mergedCtx2 && !(metaForSave as any).extra?.ctxPack) {
+    (metaForSave as any).extra.ctxPack = mergedCtx2;
+  }
+
+  if (mergedFlowDigest2 && !String((metaForSave as any).extra?.flowDigest ?? '').trim()) {
+    (metaForSave as any).extra.flowDigest = mergedFlowDigest2;
+  }
+
+  if (mergedFlowTape2 && !String((metaForSave as any).extra?.flowTape ?? '').trim()) {
+    (metaForSave as any).extra.flowTape = mergedFlowTape2;
+  }
+
+  // meta.extra にも最小同期（render 側が拾うケース）
+  (meta as any).extra = (meta as any).extra ?? {};
+
+  if (
+    !Array.isArray((meta as any).extra?.rephraseBlocks) &&
+    Array.isArray(ex?.rephraseBlocks) &&
+    ex.rephraseBlocks.length > 0
+  ) {
+    (meta as any).extra.rephraseBlocks = ex.rephraseBlocks;
+    (meta as any).extra.rephraseBlocksAttached = true;
+  }
+
+  if (!String((meta as any).extra?.rephraseHead ?? '').trim() && mergedHead2) {
+    (meta as any).extra.rephraseHead = mergedHead2;
+  }
+
+  if (!(meta as any).extra?.ctxPack && mergedCtx2) {
+    (meta as any).extra.ctxPack = mergedCtx2;
+  }
+
+  if (!String((meta as any).extra?.flowDigest ?? '').trim() && mergedFlowDigest2) {
+    (meta as any).extra.flowDigest = mergedFlowDigest2;
+  }
+
+  if (!String((meta as any).extra?.flowTape ?? '').trim() && mergedFlowTape2) {
+    (meta as any).extra.flowTape = mergedFlowTape2;
+  }
+} catch (e) {
+  console.warn('[IROS/route] extra minimal sync failed', e);
+}
       }
 
       // sanitize header
@@ -892,160 +923,94 @@ export async function POST(req: NextRequest) {
         };
       }
 
-      // assistant 保存（single-writer）
-      try {
-        // NOTE: ここは「保存の最終防衛線」。
-        // finalAssistant が空のままだと EMPTY_CONTENT で persist が必ずスキップされ、UIが …… に落ちる。
-        // まずは seed を “commit本文” に昇格させて止血する（配線追加なし）。
-
-        let finalAssistant =
-          String((result as any)?.content ?? '').trim() ||
-          String((result as any)?.text ?? '').trim() ||
-          String((result as any)?.assistantText ?? '').trim();
-
-        const uiMode = (meta as any)?.mode as ReplyUIMode | undefined;
-        const silenceReason = pickSilenceReason(meta);
-
-        // seed 候補（postprocess / handle で仕込まれている想定）
-        const seedForPersist =
-          String(((meta as any)?.extra as any)?.llmRewriteSeed ?? '').trim() ||
-          String(((meta as any)?.extra as any)?.slotPlanSeed ?? '').trim() ||
-          '';
-
-        // ✅ 非SILENCE なのに本文が空なら、seed を本文に昇格して EMPTY_CONTENT を潰す
-        // （Q1_SUPPRESS の “沈黙止血” は uiMode === 'SILENCE' 側で守られる）
-// ✅ 非SILENCE なのに本文が空なら、seed を本文に昇格して EMPTY_CONTENT を潰す
-// ただし seed が「@OBS/@SHIFT など内部マーカーだけ」の場合は昇格しない（昇格→strip→空→…… の自爆を防ぐ）
-const emptyBefore = finalAssistant.length === 0;
-
-const stripInternalDirectiveLines = (raw: string): string => {
-  const lines = String(raw ?? '')
-    .split('\n')
-    .map((l) => String(l ?? '').trim())
-    .filter(Boolean);
-
-  // @ で始まる行を除去
-  const cleaned = lines.filter((l) => !l.startsWith('@')).join('\n').trim();
-  return cleaned;
+// ✅ DB保存は「表示に採用される本文」を優先する
+// - internal（@OBS/@SHIFT/...）は content/text に絶対入れない
+// - rephraseBlocks は object 想定で正しく join する（[object Object] を防ぐ）
+// - 最終的に空なら '……' に落とす（空保存でUI/学習が壊れるのを防ぐ）
+const isEmptyLike = (s: string) => {
+  const t = String(s ?? '').trim();
+  return t === '……' || t === '...' || t === '…' || t.length <= 2;
 };
 
-const seedCleanedForPersist = stripInternalDirectiveLines(seedForPersist);
-
-// ✅ seed が directives のみなら「昇格しない」
-// - directives だけを昇格すると、その後の strip で必ず空になり、normalBase の "……" に落ちる
-const seedIsDirectiveOnly = seedForPersist.length > 0 && seedCleanedForPersist.length === 0;
-
-if (uiMode !== 'SILENCE' && emptyBefore && seedForPersist && !seedIsDirectiveOnly) {
-  finalAssistant = seedCleanedForPersist || seedForPersist;
-
-  meta.extra = {
-    ...(meta.extra ?? {}),
-    persistRecoveredFromSeed: true,
-    persistRecoveredSeedLen: seedForPersist.length,
-    persistRecoveredSeedCleanedLen: seedCleanedForPersist.length,
-    persistRecoveredSeedDirectiveOnly: false,
-  };
-
-  console.warn('[IROS/persist][RECOVER_FROM_SEED]', {
-    conversationId,
-    userCode,
-    recoveredLen: finalAssistant.length,
-    seedLen: seedForPersist.length,
-    seedCleanedLen: seedCleanedForPersist.length,
-    seedHead: seedForPersist.slice(0, 120),
+const stripInternalLines = (s0: string) => {
+  const s = String(s0 ?? '');
+  const lines = s.split('\n').filter((ln) => {
+    const t = ln.trim();
+    if (!t) return false;
+    if (t.startsWith('@OBS')) return false;
+    if (t.startsWith('@SHIFT')) return false;
+    if (t.startsWith('@NEXT')) return false;
+    if (t.startsWith('@SAFE')) return false;
+    if (t.startsWith('@DRAFT')) return false;
+    if (t.startsWith('@SEED_TEXT')) return false;
+    if (t.startsWith('INTERNAL PACK')) return false;
+    return true;
   });
-} else if (uiMode !== 'SILENCE' && emptyBefore && seedForPersist && seedIsDirectiveOnly) {
-  // 昇格を抑止したことをログに残す（原因追跡用）
-  meta.extra = {
-    ...(meta.extra ?? {}),
-    persistRecoverFromSeedSkipped: true,
-    persistRecoverSkipReason: 'SEED_DIRECTIVE_ONLY',
-    persistRecoverSeedLen: seedForPersist.length,
-  };
+  return lines.join('\n').trim();
+};
 
-  console.warn('[IROS/persist][RECOVER_FROM_SEED_SKIPPED]', {
-    conversationId,
-    userCode,
-    reason: 'SEED_DIRECTIVE_ONLY',
-    seedLen: seedForPersist.length,
-    seedHead: seedForPersist.slice(0, 120),
-  });
-}
+      // --- blocks を “本文” に戻す (object対応) ---
+      const extraAny: any = (meta as any)?.extra ?? {};
+      const blocksAny: unknown =
+        extraAny?.rephraseBlocks ?? extraAny?.rephrase?.blocks ?? extraAny?.rephrase?.rephraseBlocks ?? null;
+
+      const blocksToText = (bs: any[]) => {
+        const parts = bs
+          .map((b) => String(b?.text ?? b?.content ?? b?.value ?? b?.body ?? '').trimEnd())
+          .filter((s) => s.trim().length > 0);
+        return parts.join('\n\n').trimEnd();
+      };
+
+      const blocksJoined = Array.isArray(blocksAny) ? blocksToText(blocksAny as any[]) : '';
+
+      // --- ✅ このスコープで確実に存在する “候補本文” を作る（finalAssistant 参照をやめる） ---
+      // ここは「保存に採用される本文」を決めるための raw 候補
+      const finalAssistantRaw =
+        String((result as any)?.content ?? '').trim() ||
+        String((result as any)?.text ?? '').trim() ||
+        String((result as any)?.assistantText ?? '').trim();
+
+      // --- ✅ internal除去（保存用） ---
+      const finalAssistantClean = stripInternalLines(finalAssistantRaw);
+      const blocksJoinedCleaned = stripInternalLines(blocksJoined);
+
+      // --- ✅ 採用優先順位 ---
+      // 1) finalAssistantClean（ただし emptyLike / internal除去で空なら次へ）
+      // 2) blocksJoinedCleaned（objectから復元）
+      // 3) 最後に ……（ただし本当に最終手段）
+      const contentForPersist = (() => {
+        if (!isEffectivelyEmptyText(finalAssistantClean) && finalAssistantClean.length > 0) return finalAssistantClean;
+        if (blocksJoinedCleaned.length > 0) return blocksJoinedCleaned;
+        return '……';
+      })();
 
 
-        const pickString = (v: any): string | null => {
-          if (typeof v !== 'string') return null;
-          const s = v.trim();
-          return s ? s : null;
-        };
+const saved = await persistAssistantMessageToIrosMessages({
+  supabase,
+  conversationId,
+  userCode,
+  content: contentForPersist,
+  meta: meta ?? null,
+});
 
-        const qCodeFinal =
-          pickString((meta as any)?.unified?.q?.code) ??
-          pickString((meta as any)?.unified?.q?.current) ??
-          pickString((meta as any)?.q_code) ??
-          pickString((meta as any)?.qCode) ??
-          null;
+meta.extra = {
+  ...(meta.extra ?? {}),
+  persistedAssistantMessage: {
+    ok: true,
+    inserted: true,
+    skipped: false,
+    len: contentForPersist.length,
+    saved,
+    pickedFrom:
+    !isEffectivelyEmptyText(finalAssistantClean) && finalAssistantClean.length > 0
+      ? 'finalAssistant(clean)'
+      : blocksJoinedCleaned.length > 0
+        ? 'rephraseBlocks(clean)'
+        : 'fallbackDots',
 
-        const depthStageFinal =
-          pickString((meta as any)?.unified?.depth?.stage) ??
-          pickString((meta as any)?.depth_stage) ??
-          pickString((meta as any)?.depthStage) ??
-          pickString((meta as any)?.depth) ??
-          null;
+  },
+};
 
-        (meta as any).q_code = qCodeFinal;
-        (meta as any).depth_stage = depthStageFinal;
-        if (qCodeFinal) (meta as any).qCode = qCodeFinal;
-        if (depthStageFinal) (meta as any).depthStage = depthStageFinal;
-
-        if (uiMode === 'SILENCE') {
-          meta.extra = {
-            ...(meta.extra ?? {}),
-            persistedAssistantMessage: {
-              ok: true,
-              inserted: false,
-              skipped: true,
-              reason: 'UI_MODE_SILENCE_NO_INSERT',
-              silenceReason: silenceReason ?? null,
-            },
-          };
-        } else if (finalAssistant.length > 0) {
-          const saved = await persistAssistantMessageToIrosMessages({
-            supabase,
-            conversationId,
-            userCode,
-            content: finalAssistant,
-            meta: meta ?? null,
-          });
-
-          meta.extra = {
-            ...(meta.extra ?? {}),
-            persistedAssistantMessage: {
-              ok: true,
-              inserted: true,
-              skipped: false,
-              len: finalAssistant.length,
-              saved,
-            },
-          };
-        } else {
-          meta.extra = {
-            ...(meta.extra ?? {}),
-            persistedAssistantMessage: { ok: true, inserted: false, skipped: true, reason: 'EMPTY_CONTENT' },
-          };
-        }
-      } catch (e) {
-        meta.extra = {
-          ...(meta.extra ?? {}),
-          persistedAssistantMessage: {
-            ok: false,
-            inserted: false,
-            skipped: true,
-            reason: 'EXCEPTION',
-            error: String((e as any)?.message ?? e),
-          },
-        };
-      }
 
       // training sample
       const skipTraining = meta?.skipTraining === true || meta?.skip_training === true || meta?.recallOnly === true || meta?.recall_only === true;

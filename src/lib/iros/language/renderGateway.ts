@@ -676,19 +676,32 @@ function cutAfterIlineAndDropWriterNotes(text: string): string {
 }
 
 function stripDirectiveLines(text: string): string {
-  return String(text ?? '')
+  const s = String(text ?? '')
     .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
+    .replace(/\r/g, '\n');
+
+  // ✅ “行ごと”落とす（先頭だけ消えてJSON尻尾が残る事故を防ぐ）
+  // - @TASK/@DRAFT などの directive 行は丸ごと削除
+  // - INTERNAL PACK 行も丸ごと削除
+  return s
     .split('\n')
     .filter((line) => {
       const t = String(line ?? '').trim();
       if (!t) return true;
-      // ✅ @OBS/@SHIFT/... だけでなく @ACK/@RESTORE/@Q も落とす（UI漏れ防止）
-      if (/^@(?:CONSTRAINTS|OBS|TASK|SHIFT|NEXT|SAFE|ACK|RESTORE|Q)\b/.test(t)) return false;
+
+      // ✅ directive line: drop whole line
+      if (/^@(?:CONSTRAINTS|OBS|TASK|SHIFT|NEXT|SAFE|ACK|RESTORE|Q|DRAFT)\b/.test(t)) return false;
+
+      // ✅ internal pack: drop whole line
+      if (/^INTERNAL PACK\b/i.test(t)) return false;
+
       return true;
     })
-    .join('\n');
+    .join('\n')
+    .trim();
 }
+
+
 
 function stripILINETags(text: string): string {
   return String(text ?? '')
@@ -1143,15 +1156,19 @@ export function renderGatewayAsReply(args: {
   const expandAllowed = EXPAND_ENABLED && !isSilence && !isIR;
   void expandAllowed; //（現状はログ用途のみ。将来分岐で使う）
 
+  // ✅ blocks が用意できているなら "3行制限" は掛けない（silence判定のねじれを防ぐ）
+  const allowUnder5Final = shortException && !(Array.isArray(blocks) && blocks.length >= 2);
+
   // ✅ 重要：rephrase は "picked" が最優先で拾っているので、
   // ここで extractedTextFromModel を直採用しない（directive漏れの温床になる）
   let content = renderV2({
     blocks,
-    maxLines: maxLinesFinal,
+    maxLines: allowUnder5Final ? 3 : maxLinesFinal,
     fallbackText,
-    allowUnder5: shortException,
+    allowUnder5: allowUnder5Final,
   });
   pipe('after_renderV2', content);
+
 
   // ✅ renderV2 が空文字を返すケースを救済（blocks があるのに outLen=0 になる事故防止）
   if (String(content ?? '').trim() === '') {

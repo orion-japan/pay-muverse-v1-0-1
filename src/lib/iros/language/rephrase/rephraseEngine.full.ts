@@ -960,7 +960,7 @@ function restoreScaffoldMustHaveInOutput(args: {
 }
 
 // ---------------------------------------------
-// IT成立（証拠）/ intentBand / shouldRaiseFlag を userContext から読む
+// IT成立（証拠）/ intentBand / shouldRaiseFlag / continuityGate を userContext から読む
 // ---------------------------------------------
 function readItOkFromContext(userContext: unknown): boolean {
   if (!userContext || typeof userContext !== 'object') return false;
@@ -1081,9 +1081,7 @@ function extractIntentBandFromContext(userContext: unknown): {
   return { intentBand: bandOk, tLayerHint: hintOk };
 }
 
-function readShouldRaiseFlagFromContext(
-  userContext: unknown,
-): { on: boolean; reason: string | null } {
+function readShouldRaiseFlagFromContext(userContext: unknown): { on: boolean; reason: string | null } {
   if (!userContext || typeof userContext !== 'object') return { on: false, reason: null };
   const uc: any = userContext as any;
 
@@ -1153,9 +1151,101 @@ function readShouldRaiseFlagFromContext(
     ) || null;
 
   const reason = reasonFromArray ?? reasonSingle;
-
   return { on, reason };
 }
+
+// ---------------------------------------------
+// continuity gate（鮮度ゲート / 合意）を userContext から読む
+// - 続き口調を “許可する条件” をここで取り出せるようにする
+// - 内部事情は本文に出さない（制御だけに使う）
+// ---------------------------------------------
+function readContinuityGateFromContext(userContext: unknown): {
+  fresh: boolean | null;
+  sessionBreak: boolean | null;
+  breakReason: string | null;
+  ageSec: number | null;
+  userAckOk: boolean | null;
+  userAckReason: string | null;
+} {
+  if (!userContext || typeof userContext !== 'object') {
+    return {
+      fresh: null,
+      sessionBreak: null,
+      breakReason: null,
+      ageSec: null,
+      userAckOk: null,
+      userAckReason: null,
+    };
+  }
+  const uc: any = userContext as any;
+
+  const freshRaw =
+    tryGet(uc, ['ctxPack', 'flow', 'fresh']) ??
+    tryGet(uc, ['ctx_pack', 'flow', 'fresh']) ??
+    tryGet(uc, ['ctxPack', 'flow', 'isFresh']) ??
+    tryGet(uc, ['ctx_pack', 'flow', 'isFresh']) ??
+    null;
+
+  const sessionBreakRaw =
+    tryGet(uc, ['ctxPack', 'flow', 'sessionBreak']) ??
+    tryGet(uc, ['ctx_pack', 'flow', 'sessionBreak']) ??
+    tryGet(uc, ['ctxPack', 'flow', 'session_break']) ??
+    tryGet(uc, ['ctx_pack', 'flow', 'session_break']) ??
+    null;
+
+  const breakReason =
+    norm(
+      String(
+        tryGet(uc, ['ctxPack', 'flow', 'breakReason']) ??
+          tryGet(uc, ['ctx_pack', 'flow', 'breakReason']) ??
+          tryGet(uc, ['ctxPack', 'flow', 'break_reason']) ??
+          tryGet(uc, ['ctx_pack', 'flow', 'break_reason']) ??
+          '',
+      ),
+    ) || null;
+
+  const ageSecRaw =
+    tryGet(uc, ['ctxPack', 'flow', 'ageSec']) ??
+    tryGet(uc, ['ctx_pack', 'flow', 'ageSec']) ??
+    tryGet(uc, ['ctxPack', 'flow', 'age_sec']) ??
+    tryGet(uc, ['ctx_pack', 'flow', 'age_sec']) ??
+    null;
+
+  const userAckOkRaw =
+    tryGet(uc, ['ctxPack', 'flow', 'userAck', 'ok']) ??
+    tryGet(uc, ['ctx_pack', 'flow', 'userAck', 'ok']) ??
+    tryGet(uc, ['ctxPack', 'flow', 'user_ack', 'ok']) ??
+    tryGet(uc, ['ctx_pack', 'flow', 'user_ack', 'ok']) ??
+    null;
+
+  const userAckReason =
+    norm(
+      String(
+        tryGet(uc, ['ctxPack', 'flow', 'userAck', 'reason']) ??
+          tryGet(uc, ['ctx_pack', 'flow', 'userAck', 'reason']) ??
+          tryGet(uc, ['ctxPack', 'flow', 'user_ack', 'reason']) ??
+          tryGet(uc, ['ctx_pack', 'flow', 'user_ack', 'reason']) ??
+          '',
+      ),
+    ) || null;
+
+  const fresh = typeof freshRaw === 'boolean' ? freshRaw : freshRaw == null ? null : Boolean(freshRaw);
+  const sessionBreak =
+    typeof sessionBreakRaw === 'boolean' ? sessionBreakRaw : sessionBreakRaw == null ? null : Boolean(sessionBreakRaw);
+
+  const ageSec =
+    typeof ageSecRaw === 'number'
+      ? ageSecRaw
+      : typeof ageSecRaw === 'string' && ageSecRaw.trim() && Number.isFinite(Number(ageSecRaw))
+        ? Number(ageSecRaw)
+        : null;
+
+  const userAckOk =
+    typeof userAckOkRaw === 'boolean' ? userAckOkRaw : userAckOkRaw == null ? null : Boolean(userAckOkRaw);
+
+  return { fresh, sessionBreak, breakReason, ageSec, userAckOk, userAckReason };
+}
+
 
 // ---------------------------------------------
 // inputKind
@@ -1588,59 +1678,64 @@ export async function rephraseSlotsFinal(extracted: ExtractedSlots, opts: Rephra
   const band = extractIntentBandFromContext(opts?.userContext ?? null);
 
 
-  const lastTurnsSafe = (() => {
-    const t0 = Array.isArray(lastTurns) ? [...lastTurns] : [];
-    while (t0.length > 0 && t0[t0.length - 1]?.role === 'user') t0.pop();
+// 既存の `lastTurns` をそのまま使い、再宣言しない
+const lastTurnsSafe = (() => {
+  const t0 = Array.isArray(lastTurns) ? lastTurns : []; // lastTurns が配列でない場合、空配列に初期化
 
-    if (isDirectTask) {
-      const users = t0
-        .filter((m: any) => m?.role === 'user')
-        .map((m: any) => ({ role: 'user' as const, content: String(m?.content ?? '') }))
-        .filter((m: any) => m.content.trim().length > 0);
-      return users.slice(-2);
-    }
+  while (t0.length > 0 && t0[t0.length - 1]?.role === 'user') t0.pop();
 
-    const t = t0
-      .filter((m: any) => (m?.role === 'user' || m?.role === 'assistant') && String(m?.content ?? '').trim())
-      .map((m: any) => ({ role: m.role as 'user' | 'assistant', content: String(m.content ?? '') }));
+  if (isDirectTask) {
+    const users = t0
+      .filter((m: any) => m?.role === 'user')
+      .map((m: any) => ({ role: 'user' as const, content: String(m?.content ?? '') }))
+      .filter((m: any) => m.content.trim().length > 0);
+    return users.slice(-2);  // 最後の2件を返す
+  }
 
-    return t.slice(-4);
-  })();
+  const t = t0
+    .filter((m: any) => (m?.role === 'user' || m?.role === 'assistant') && String(m?.content ?? '').trim())
+    .map((m: any) => ({ role: m.role as 'user' | 'assistant', content: String(m.content ?? '') }));
+
+  return t.slice(-4);  // 最後の4件を返す
+})();
+
+
+
+
   const flowDigest = readFlowDigest(opts?.userContext ?? null);
   const flowTape = readFlowTape(opts?.userContext ?? null);
 
   const systemPrompt =
-  systemPromptForFullReply({
-    directTask: isDirectTask,
+    systemPromptForFullReply({
+      directTask: isDirectTask,
+      itOk,
+      band,
+      lockedILines,
+    }) + mustIncludeRuleText;
+
+  const internalPack = buildInternalPackText({
+    metaText,
+    historyText,
+    seedDraftHint,
+    lastTurnsCount: lastTurnsSafe.length,
     itOk,
-    band,
-    lockedILines,
-  }) + mustIncludeRuleText;
+    directTask: isDirectTask,
+    inputKind,
+    intentBand: band.intentBand,
+    tLayerHint: band.tLayerHint,
+    userText,
+    onePointText: null,
+    situationSummary: null,
+    depthStage: null,
+    phase: null,
+    qCode: null,
+    flowDigest,
+    flowTape,
+  });
 
-const internalPack = buildInternalPackText({
-  metaText,
-  historyText,
-  seedDraftHint,
-  lastTurnsCount: lastTurnsSafe.length,
-  itOk,
-  directTask: isDirectTask,
-  inputKind,
-  intentBand: band.intentBand,
-  tLayerHint: band.tLayerHint,
-  userText,
-  onePointText: null,
-  situationSummary: null,
-  depthStage: null,
-  phase: null,
-  qCode: null,
-  flowDigest,
-  flowTape,
-});
+  const messages = buildFirstPassMessages({ systemPrompt, internalPack });
 
-const messages = buildFirstPassMessages({ systemPrompt, internalPack });
-
-
-
+  // ログ確認
   console.log('[IROS/rephraseEngine][MSG_PACK]', {
     traceId: debug.traceId,
     conversationId: debug.conversationId,
@@ -1660,6 +1755,7 @@ const messages = buildFirstPassMessages({ systemPrompt, internalPack });
     inputKindFromCtx,
     lockedILines: lockedILines.length,
   });
+
 
   // ---------------------------------------------
   // seedFromSlots（fallback用）
@@ -2281,11 +2377,42 @@ const messages = buildFirstPassMessages({ systemPrompt, internalPack });
     }
   }
 
-  const fatalReasons = new Set(Array.from(new Set((((v as any)?.reasons ?? []) as any[]).map((x) => String(x)))));
-  const shouldPreferCandidateOnFatal = fatalReasons.has('OK_TOO_SHORT_TO_RETRY') || fatalReasons.has('WARN_TO_RETRY');
+  const reasonsArr = (((vRetry as any)?.reasons ?? (v as any)?.reasons ?? []) as any[]).map((x) => String(x));
+  const fatalReasons = new Set(Array.from(new Set(reasonsArr)));
+
+  // ✅ soft-fatal（危険ではなく “文章品質” で落ちた）なら seed 退避をしない
+  // ✅ さらに seedFromSlots が directive-only（@TASK/@DRAFT だけ）なら採用すると UI が空になるので必ず避ける
+  const softFatalReasons = new Set(['QCOUNT_TOO_MANY', 'HEDGE_PRESENT', 'GENERIC_PRESENT']);
+  const isSoftFatalOnly = fatalReasons.size > 0 && Array.from(fatalReasons).every((r) => softFatalReasons.has(String(r)));
+  // ✅ このブロック内だけで使う：directive-only 判定（外部依存なし）
+  const isDirectiveOnly = (s0: any): boolean => {
+    const lines = String(s0 ?? '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .split('\n')
+      .map((x) => String(x ?? '').trim())
+      .filter(Boolean);
+
+    if (lines.length === 0) return true;
+    return lines.every((t) => /^@(?:CONSTRAINTS|OBS|TASK|SHIFT|NEXT|SAFE|ACK|RESTORE|Q|DRAFT)\b/.test(t));
+  };
+
+  const seedDirectiveOnly = seedFromSlots ? isDirectiveOnly(seedFromSlots) : false;
+
+  // 既存の prefer 条件に、soft-fatal と directive-only seed 回避を追加
+  const shouldPreferCandidateOnFatal =
+    seedDirectiveOnly ||
+    isSoftFatalOnly ||
+    fatalReasons.has('OK_TOO_SHORT_TO_RETRY') ||
+    fatalReasons.has('WARN_TO_RETRY');
 
   if (shouldPreferCandidateOnFatal) {
-    const fallback = String(candidate ?? '').trim() || String(seedFromSlots ?? '').trim();
+    const fallback =
+      String(retryCandidate ?? '').trim() ||
+      String(candidate ?? '').trim() ||
+      // seed が directive-only の場合は絶対に使わない（空になる）
+      (!seedDirectiveOnly ? String(seedFromSlots ?? '').trim() : '');
+
     return adoptAsSlots(fallback, 'FLAGSHIP_RETRY_FATAL_PREFER_CANDIDATE', {
       scaffoldActive,
       flagshipFatal: true,
@@ -2294,10 +2421,12 @@ const messages = buildFirstPassMessages({ systemPrompt, internalPack });
     });
   }
 
-  if (seedFromSlots) {
+  // ✅ seedFromSlots を採用するのは「directive-only ではない」場合だけ
+  if (seedFromSlots && !seedDirectiveOnly) {
     return adoptAsSlots(seedFromSlots, 'FLAGSHIP_RETRY_FATAL_TO_SEED', { scaffoldActive });
   }
 
+  // seed が使えない（directive-only 等）ときは通常のフォールバックへ
   const fallbackText = String(retryCandidate ?? '').trim() || String(candidate ?? '').trim();
   return adoptAsSlots(fallbackText, 'FLAGSHIP_RETRY_FATAL_ACCEPT', {
     scaffoldActive,
@@ -2306,3 +2435,4 @@ const messages = buildFirstPassMessages({ systemPrompt, internalPack });
     flagshipReasons: Array.isArray((vRetry as any)?.reasons) ? (vRetry as any).reasons : [],
   });
 }
+

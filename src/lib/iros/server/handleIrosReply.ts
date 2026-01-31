@@ -1897,13 +1897,68 @@ try {
     // 3) digest（最大3行）
     exAny.flowDigest = buildFlowDigest(tape, { maxLines: 3 });
 
-    // 4) ctxPack にも “読む側の入口” を作る（rephraseEngine 側が拾える）
-    exAny.ctxPack = exAny.ctxPack && typeof exAny.ctxPack === 'object' ? exAny.ctxPack : {};
-    exAny.ctxPack.flow = {
-      digest: exAny.flowDigest ?? null,
-      hasTape: Boolean(tape && String(tape).trim().length > 0),
-      at: new Date().toISOString(),
-    };
+// 3.5) metaForSave.extra にも保存（下流: userContext / 保存 / 復元の正規ルート）
+{
+  const mf: any = (out as any)?.metaForSave;
+  if (mf && typeof mf === 'object') {
+    if (!mf.extra || typeof mf.extra !== 'object') mf.extra = {};
+    (mf.extra as any).flowTape = tape ?? null;
+    (mf.extra as any).flowDigest = exAny.flowDigest ?? null;
+  }
+}
+
+// 4) ctxPack にも “読む側の入口” を作る（rephraseEngine 側が拾える）
+//    NOTE: exAny は metaForSave.extra だが、ctxPack が未初期化のケースがあるため必ず用意する
+
+// エラーハンドリングとログ出力を追加
+console.log("[DEBUG] Before initializing ctxPack:", exAny.ctxPack);
+
+if (!exAny.ctxPack || typeof exAny.ctxPack !== 'object') {
+  console.warn("[WARNING] Initializing exAny.ctxPack as an empty object...");
+  exAny.ctxPack = {};  // ctxPackの初期化処理
+}
+
+console.log("[DEBUG] After initializing ctxPack:", exAny.ctxPack);
+
+// flow に関する処理
+console.log("[DEBUG] Before assigning flow to ctxPack:", exAny.ctxPack.flow);
+
+exAny.ctxPack.flow = (() => {
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const dayKey = nowIso.slice(0, 10);
+
+  // 既存 flow があれば “前回の at” を拾って鮮度判定する（無ければ null）
+  const prevFlow = (exAny.ctxPack as any)?.flow ?? null;
+  const prevAtIso = typeof prevFlow?.at === 'string' ? prevFlow.at : null;
+
+  // prevAtIso の有無とその時刻をログに出力
+  console.log("[DEBUG] prevFlow and prevAtIso:", prevFlow, prevAtIso);
+
+  const prevAtMs = (() => {
+    if (!prevAtIso) return null;
+    const ms = Date.parse(prevAtIso);
+    return Number.isFinite(ms) ? ms : null;
+  })();
+
+  // prevAtMs（前回のタイムスタンプ）をログに出力
+  console.log("[DEBUG] prevAtMs (timestamp of previous flow):", prevAtMs);
+
+  const ageSec = prevAtMs != null ? Math.max(0, Math.floor((now.getTime() - prevAtMs) / 1000)) : null;
+  const sessionBreak = false;  // 仮設定
+
+  console.log("[DEBUG] ageSec and sessionBreak:", ageSec, sessionBreak);
+
+  return {
+    at: nowIso,     // “このターンの刻み”
+    prevAtIso,
+    ageSec,
+    sessionBreak,  // セッションブレイクの判定（仮設定）
+    fresh: !sessionBreak, // fresh状態の確認
+  };
+})();
+console.log("[DEBUG] After assigning flow to ctxPack:", exAny.ctxPack.flow);
+
   } catch (e) {
     // Flow は非必須：失敗しても会話を止めない
     console.warn('[IROS/FlowTape] stamp failed (non-fatal)', e);
@@ -2302,17 +2357,28 @@ try {
         return true; // デフォルトは許可（false のときだけ止める）
       })();
 
-      // ✅ “空扱い” 判定：
-      // - bodyNow が空
-      // - または bodyNow が点だけ（……）
-      // - または slotTextCleanedLen=0 かつ slotTextRawLen>0（内部マーカー削除で空になった）
-      const emptyLikeNow =
-        !bodyNow ||
-        isDotsOnly(bodyNow) ||
-        (Number.isFinite(slotTextCleanedLen) &&
-          slotTextCleanedLen === 0 &&
-          Number.isFinite(slotTextRawLen) &&
-          slotTextRawLen > 0);
+// ✅ “空扱い” 判定：
+// - bodyNow が空
+// - または slotTextRawLen > 0 だが cleanedLen = 0
+//   （= 内部マーカーのみで、整形後に本文が消えた状態）
+//
+// ※ policy が FINAL / hasSlots の場合でも、
+//    「本文として空」は異常なので emptyLike 扱いにする
+const hasSlotsLocal =
+  Array.isArray((out.metaForSave as any)?.slotPlan) &&
+  (out.metaForSave as any).slotPlan.length > 0;
+
+const internalMarkersOnly =
+  Number.isFinite(slotTextCleanedLen) &&
+  Number.isFinite(slotTextRawLen) &&
+  slotTextRawLen > 0 &&
+  slotTextCleanedLen === 0;
+
+const emptyLikeNow =
+  !bodyNow ||
+  internalMarkersOnly;
+
+
 
       // ✅ 走らせる条件：
       // - SCAFFOLD または FINAL
@@ -2361,8 +2427,18 @@ try {
           temperature: 0.7,
           maxLinesHint: 8,
           userText: typeof text === 'string' ? text : null,
+
+          // ✅ LLM-facing context（writerが読む入口）
+          // - ctxPack / flowDigest / flowTape を必ず userContext に載せる
           userContext: {
             inputKind: (ctx as any)?.inputKind ?? null,
+
+            // ✅ Flow continuity
+            ctxPack: (out.metaForSave as any)?.extra?.ctxPack ?? null,
+            flowDigest: (out.metaForSave as any)?.extra?.flowDigest ?? null,
+            flowTape: (out.metaForSave as any)?.extra?.flowTape ?? null,
+
+
             turns: Array.isArray((out.metaForSave as any)?.extra?.historyForWriter)
               ? (out.metaForSave as any).extra.historyForWriter
                   .map((m: any) => ({
@@ -2375,6 +2451,7 @@ try {
                       String(m?.content ?? '').trim().length > 0,
                   )
               : [],
+
             meta: {
               q: (out.metaForSave as any)?.q ?? (out.metaForSave as any)?.q_code ?? null,
               depth: (out.metaForSave as any)?.depth ?? (out.metaForSave as any)?.depth_stage ?? null,
@@ -2384,15 +2461,19 @@ try {
               slotPlanPolicy: policy,
             },
           },
+
           inputKind: (ctx as any)?.inputKind ?? null,
+
+          // ✅ debug は ctx ではなく “確実にある値” を優先する
           debug: {
             traceId: (ctx as any)?.traceId ?? null,
-            conversationId: (ctx as any)?.conversationId ?? null,
-            userCode: (ctx as any)?.userCode ?? null,
+            conversationId: _conversationId ?? (ctx as any)?.conversationId ?? null,
+            userCode: _userCode ?? (ctx as any)?.userCode ?? null,
             renderEngine: true,
             inputKind: (ctx as any)?.inputKind ?? null,
           },
         });
+
 
         if (rr && rr.ok) {
           // ✅ ここが重要：戻りの持ち方が複数あり得るので全部拾う

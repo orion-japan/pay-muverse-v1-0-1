@@ -730,21 +730,62 @@ export async function postProcessReply(
     console.warn('[IROS/PostProcess] ensureWriterHints failed (non-fatal)', e);
   }
 
-  // =========================================================
   // ✅ extractedTextFromModel / rawTextFromModel の同期は “最後に1回だけ”
   // - extractedTextFromModel: 常に最終本文
   // - rawTextFromModel: 空で上書き禁止（prev が空で final が非空なら救済で入れる）
-  // =========================================================
-  {
+  // 重要:
+  // - UI は renderGateway で rephraseBlocks を採用するが、
+  //   postprocess 側の finalAssistantText が '……' に固定されるケースがある。
+  // - その場合は blocks/head から “可視本文” を救済して同期する（本文単一ソースの整合）。
+  if (metaForSave && typeof metaForSave === 'object') {
+    metaForSave.extra = (metaForSave as any).extra ?? {};
+    const ex: any = (metaForSave as any).extra;
+
+    const isDotsOnlyLocal = (t0: unknown) => {
+      const t = String(t0 ?? '').trim();
+      return t === '…' || t === '...' || t === '……';
+    };
+
+    const pickFromRephrase = () => {
+      const head = String(ex?.rephraseHead ?? '').trim();
+      if (head && !isDotsOnlyLocal(head)) return head;
+
+      const blocks = ex?.rephraseBlocks;
+      if (!Array.isArray(blocks) || blocks.length === 0) return '';
+
+      // blocks は UI で採用される可視本文候補。長すぎない範囲で結合。
+      const joined = blocks
+        .map((b: any) => String(b ?? '').trim())
+        .filter((s: string) => s && !isDotsOnlyLocal(s))
+        .slice(0, 3)
+        .join('\n')
+        .trim();
+
+      return joined;
+    };
+
+    // --- (A) finalAssistantText が点/空なら、rephraseBlocks/head から救済して “最終本文” を揃える
+    const cur = String(finalAssistantText ?? '').trim();
+    if (!cur || isDotsOnlyLocal(cur)) {
+      const rescued = pickFromRephrase();
+      if (rescued) {
+        finalAssistantText = rescued;
+        ex.finalAssistantTextRescuedFromRephrase = true;
+      }
+    }
+
+    // --- (B) 同期（ここから先は “最終本文” を使う）
     const finalText = String(finalAssistantText ?? '').trim();
-    const prevRaw = String((metaForSave.extra as any)?.rawTextFromModel ?? '').trim();
+    const prevRaw = String(ex?.rawTextFromModel ?? '').trim();
 
-    (metaForSave.extra as any).extractedTextFromModel = finalText;
+    ex.extractedTextFromModel = finalText;
 
-    if (prevRaw.length === 0 && finalText.length > 0) {
-      (metaForSave.extra as any).rawTextFromModel = finalText;
+    // rawTextFromModel は「空で上書き禁止」：空なら入れない。prev が空で final が非空なら救済で入れる
+    if (!prevRaw && finalText) {
+      ex.rawTextFromModel = finalText;
     }
   }
+
 
   // 7) UnifiedAnalysis 保存（失敗しても落とさない）
   try {

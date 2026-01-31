@@ -25,28 +25,26 @@ function pickLabelFromUserText(userText: string): string {
 
 export function buildIrDiagnosisSlotPlan(args: {
   userText: string;
-  // meta 由来を入れたい場合に備えて optional（今は最小で使う）
   targetLabel?: string | null;
-}): IrDiagnosisSlotPlan {
+}) {
   const raw = String(args.userText ?? '').trim();
   const label = String(args.targetLabel ?? '').trim() || pickLabelFromUserText(raw);
 
   // ✅ “seed” は必ず非空にする（LLM_GATE が空seedで normalBase へ落ちるのを防ぐ）
   const seed = [
-    `ir診断 ${label}`,
-    '',
-    // ここは「形式の骨格」だけ。判断や一般論を増やさない。
-    '観測対象：' + label,
-    '出力：フェーズ／位相／深度（S/R/C/I/T）＋短い意識状態＋短いメッセージ',
-    '',
-    '入力：' + (raw || `(none)`),
+     `ir診断 ${label}`,
+     '',
+     '観測対象：' + label,
+     '出力：フェーズ／位相／深度（S/R/C/I/T）＋短い意識状態＋短いメッセージ',
+     '',
+     '入力：' + (raw || `(none)`),
   ].join('\n');
 
   return {
-    slotPlanPolicy: 'FINAL',
-    slots: [
-      // render/rephrase 側が拾いやすいように “SEED_TEXT” で一本化
-      { key: 'SEED_TEXT', text: seed },
-    ],
+     slotPlanPolicy: 'FINAL',
+     slots: [
+        { key: 'SEED_TEXT', text: seed },
+     ],
   };
 }
+

@@ -1012,66 +1012,71 @@ export async function generateIrosReply(args: GenerateArgs): Promise<GenerateRes
   });
 
 
-  // ✅ LLMを呼ばない場合（act別に返す）
-  if (!finalAllowLLM) {
-    const safeMeta = typeof meta === 'object' && meta !== null ? meta : ({} as any);
-    const ex =
-      typeof (safeMeta as any).extra === 'object'
-        ? (safeMeta as any).extra
-        : ((safeMeta as any).extra = {});
+// ✅ 置き換え対象：src/lib/iros/generate.ts のこのブロック
+// 1015〜1041行あたり（あなたが貼った範囲の「// ✅ LLMを呼ばない場合（act別に返す）」〜 textOut 決定部）
+//
+// 目的：
+// - 非LLM本文の生成を廃止（SILENCE専用）
+// - finalAllowLLM=false の場合は、actが何であっても “無音(ゼロ幅)” を返す
+// - fallbackNormalBody をここから完全排除
 
-    // ✅ 最終actは「LLM非実行=applyのact」を採用（ここで確定）
-    const finalAct = (speechApplied as any).act;
+// ✅ LLMを呼ばない場合（SILENCE専用で返す）
+if (!finalAllowLLM) {
+  const safeMeta = typeof meta === 'object' && meta !== null ? meta : ({} as any);
+  const ex =
+    typeof (safeMeta as any).extra === 'object'
+      ? (safeMeta as any).extra
+      : ((safeMeta as any).extra = {});
 
-    // ---------------------------------------------------------
-    // act別の本文（v2）
-    // - SILENCE: "…" 禁止。見た目無出力の non-empty を返す（ゼロ幅）
-    // - FORWARD: 非LLMでも成立させる → fallbackNormalBody を返す
-    // ---------------------------------------------------------
-    const SILENT_BODY = '\u200B'; // 見た目は空、しかし "" ではない
+  const SILENT_BODY = '\u200B'; // 見た目は空、しかし "" ではない
 
-    let textOut: string;
-    if (finalAct === 'SILENCE') {
-      textOut = SILENT_BODY;
-    } else if (finalAct === 'FORWARD') {
-      textOut = ensureNonEmpty(fallbackNormalBody(userText, safeMeta), '…');
-    } else {
-      // 念のため（通常ここに来ない想定）：安全側の短文
-      textOut = ensureNonEmpty(fallbackNormalBody(userText, safeMeta), '…');
-    }
+  // ✅ 非LLMで本文を返すのは禁止（Phase1：SILENCE専用）
+  // act が FORWARD 等でも、ここでは無音に潰して “テンプレ混入経路” を遮断する
+  const finalAct = 'SILENCE';
+  const textOut = SILENT_BODY;
 
-    ex.speechSkipped = true;
-    ex.speechSkippedText = textOut;
+  ex.speechSkipped = true;
+  ex.speechSkippedText = textOut;
+  ex.rawTextFromModel = textOut;
 
-    // v2: "LLMの生出力" は無いが、空文字固定はやめる（下流が空に依存しない）
-    ex.rawTextFromModel = textOut;
+  // LLM呼ばないときは履歴汚染を止める（任意）
+  ex._blockHistory = true;
 
-    // LLM呼ばないときは履歴汚染を止める（任意）
-    ex._blockHistory = true;
+  setSpeechActTrace(safeMeta as any, {
+    decisionAct: (speechDecision as any).act,
+    appliedAct: (speechApplied as any).act,
+    finalAct,
+    reason: (speechDecision as any).reason,
+    confidence: typeof (speechDecision as any).confidence === 'number' ? (speechDecision as any).confidence : null,
+  });
 
-    setSpeechActTrace(safeMeta as any, {
-      decisionAct: (speechDecision as any).act,
-      appliedAct: (speechApplied as any).act,
-      finalAct,
-      reason: (speechDecision as any).reason,
-      confidence: typeof (speechDecision as any).confidence === 'number' ? (speechDecision as any).confidence : null,
-    });
+  return {
+    content: textOut,
+    text: textOut,
+    assistantText: textOut,
+    mode: mode,
+    intent: (safeMeta as any)?.intent ?? (safeMeta as any)?.intentLine ?? null,
+    metaForSave: safeMeta ?? {},
+    finalMode: String(mode),
+    result: null,
+    speechAct: String(finalAct),
+    speechReason: String((speechDecision as any).reason ?? ''),
+  };
+}
 
-    return {
-      content: textOut,
-      text: textOut,
-      assistantText: textOut,
+/*
+✅ 修正後の確認コマンド（短い出力だけ）
 
-      mode: mode,
-      intent: null,
+1) FORWARD + 非LLM本文が消えたか（fallbackNormalBody がこの分岐に無いか）
+rg -n "finalAllowLLM\\)\\s*\\{|finalAct === 'FORWARD'|fallbackNormalBody\\s*\\(" src/lib/iros/generate.ts -S | tail -n 30
 
-      metaForSave: safeMeta,
-      result: null,
+2) fallbackNormalBody の参照数（次に潰す残りがいくつか）
+rg -n "fallbackNormalBody\\s*\\(" src -S | wc -l
 
-      speechAct: String(finalAct),
-      speechReason: String((speechDecision as any).reason ?? ''),
-    };
-  }
+3) 型チェック（短い）
+pnpm -s tsc --noEmit
+*/
+
 
   // ✅ 明示 recall のときだけ pastState を注入（デモ事故防止）
   const t = String(userText ?? '').trim();
@@ -1188,13 +1193,20 @@ export async function generateIrosReply(args: GenerateArgs): Promise<GenerateRes
     raw_head: _head(raw),
   });
 
-  let content = ensureNonEmpty(raw, fallbackNormalBody(userText, meta));
+  // ✅ Phase1: LLM経路では非LLM本文(fallbackNormalBody)を混ぜない
+  // - 空のときは最小プレースホルダ '…' のみで non-empty を保証する
+  let content = ensureNonEmpty(raw, '…');
 
   // v2: rawTextFromModel は「LLMの生出力」を必ず保存（空は禁止）
+  // - raw が空なら '…' を入れる（content 参照で fallback が混ざる余地を消す）
   if (meta && typeof meta === 'object') {
-    const ex = typeof (meta as any).extra === 'object' && (meta as any).extra ? (meta as any).extra : ((meta as any).extra = {});
-    ex.rawTextFromModel = ensureNonEmpty(raw, content);
+    const ex =
+      typeof (meta as any).extra === 'object' && (meta as any).extra
+        ? (meta as any).extra
+        : ((meta as any).extra = {});
+    ex.rawTextFromModel = ensureNonEmpty(raw, '…');
   }
+
 
   // ---------------------------------
   // ✅ Enforce AllowSchema（最終ゲート） + non-empty保証
@@ -1261,8 +1273,12 @@ export async function generateIrosReply(args: GenerateArgs): Promise<GenerateRes
     }
   }
 
-  // ✅ 最終ガード：返却本文は必ず非空
-  content = ensureNonEmpty(content, fallbackNormalBody(userText, meta));
+  // ✅ 最終ガード：返却本文は必ず非空（Phase1）
+  // - LLM経路では非LLM本文（fallbackNormalBody）を混ぜない
+  // - 空なら最小プレースホルダ '…' のみ
+  // - SILENCE は上流（finalAllowLLM=false 分岐）でゼロ幅に潰している
+  content = ensureNonEmpty(content, '…');
+
 
   return {
     content,

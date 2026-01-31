@@ -1718,16 +1718,21 @@ if (slotsEmpty_ir) {
 // ----------------------------------------------------------------
 if (userCode && finalMeta) {
   const anyMeta = finalMeta as any;
-  const isIrDiagnosisTurn = !!anyMeta.isIrDiagnosisTurn;
+  const trimmed = (text || '').trim();
+
+  // ir診断モードをトリガーしないように、'ir診断'のテキストが含まれていても診断モードに入らないように
+  const isIrDiagnosisTurn =
+    !!anyMeta.isIrDiagnosisTurn &&
+    !/^(iros|Iros|IROS)/i.test(trimmed) &&  // "Iros" や "iros" を除外
+    !trimmed.startsWith('ir診断'); // 'ir診断' で始まるテキストを除外
 
   if (isIrDiagnosisTurn) {
     let label = 'self';
-    const trimmed = (text || '').trim();
 
-    if (trimmed.startsWith('ir診断')) {
-      const rest = trimmed.slice('ir診断'.length).trim();
-      if (rest.length > 0) label = rest;
-    }
+    // 'ir診断'のテキストに基づいて処理を変更
+    const rest = trimmed.slice('ir診断'.length).trim();
+    if (rest.length > 0) label = rest;
+
 
     // ✅ core_need を meta から拾う（intentLine 優先 → soulNote → unified.soulNote）
     const il = (anyMeta.intentLine ?? anyMeta.intent_line ?? null) as any;

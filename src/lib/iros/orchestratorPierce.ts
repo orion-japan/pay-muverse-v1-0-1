@@ -24,6 +24,11 @@ export function detectIrTrigger(text: string): boolean {
   const trimmed = text.trim();
   const lower = trimmed.toLowerCase();
 
+  // "iros", "Iros", "IROS" の場合は除外
+  if (/^(iros|Iros|IROS)/i.test(trimmed)) {
+    return false;
+  }
+
   // 単独 "ir" 入力
   if (lower === 'ir') return true;
 
