@@ -416,6 +416,10 @@ export async function reply(params: {
     status: res.status,
     traceId,
     hasJson: !!json,
+    gate: (json as any)?.gate ?? (json as any)?.result?.gate ?? null,
+    microOnly: (json as any)?.meta?.microOnly ?? null,
+    mode: (json as any)?.mode ?? (json as any)?.meta?.mode ?? null,
+    finalTextPolicy: (json as any)?.meta?.extra?.finalTextPolicy ?? null,
   });
 
   return json;

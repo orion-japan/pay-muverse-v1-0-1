@@ -496,7 +496,8 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
   const flagshipEnabled = envFlagshipRewriteOn() && purpose === 'reply' && !internalFlagshipPass;
 
   if (flagshipEnabled) {
-    const v1 = judgeFlagship(out);
+    // ✅ ctx を渡して normalLite 判定へ（QCOUNT_TOO_MANY の誤爆を止める）
+    const v1 = judgeFlagship(out, { slotKeys: ['SEED_TEXT', 'OBS', 'SHIFT'] });
 
     if (!v1.ok) {
       const rewriteSystem = [
@@ -534,7 +535,7 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
         allowEmpty: false,
       });
 
-      const v2 = judgeFlagship(rewritten);
+      const v2 = judgeFlagship(rewritten, { slotKeys: ['SEED_TEXT', 'OBS', 'SHIFT'] });
 
       // “よりマシ”を採用（両方NGでもスコアが低い方）
       const score = (v: ReturnType<typeof judgeFlagship>) =>
@@ -544,6 +545,7 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
       out = safeTrimEnd(pick);
     }
   }
+
   // ─────────────────────────────────────────────
 
   // ✅ OKログ

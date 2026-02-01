@@ -263,12 +263,20 @@ function isNormalChatLite(ctx?: FlagshipGuardContext | null): boolean {
   const isFlag = keys.every((k) => String(k).startsWith('FLAG_'));
   if (isFlag) return false;
 
-  // normalChat: OBS / SHIFT が中心（SEED_TEXT はある時もない時もある）
+  // normalChat: OBS があり、SHIFT か writer系キー（TASK/DRAFT/CONSTRAINTS）が同居するケースを許可
+  // - rephrase最終で SHIFT が落ちる/渡らないケースが実ログで発生しているため
   const hasObs = keys.includes('OBS');
+  if (!hasObs) return false;
+
   const hasShift = keys.includes('SHIFT');
 
-  // ※最小条件：OBS+SHIFT が揃っていれば normalChat 寄りとして扱う
-  return hasObs && hasShift;
+  // writer系キー（今回のログで出ている構成）
+  const hasTask = keys.includes('TASK');
+  const hasDraft = keys.includes('DRAFT');
+  const hasConstraints = keys.includes('CONSTRAINTS');
+
+  // ※最小条件：OBS + (SHIFT or TASK/DRAFT/CONSTRAINTS)
+  return hasShift || hasTask || hasDraft || hasConstraints;
 }
 
 // ------------------------------------------------------------
@@ -356,7 +364,14 @@ export function flagshipGuard(input: string, ctx?: FlagshipGuardContext | null):
 
   // qCount: normalChat は「? / ？」のみ。strict は疑問文推定込み。
   const qCountMark = (t.match(/[？?]/g) ?? []).length;
-  const qCount = normalLite ? qCountMark : countQuestionLikeStrict(t);
+
+  // qCount は「?の数」を一次情報として尊重する。
+  // strict 側の “疑問推定” は、日本語の語尾（ですか/かな/ください 等）で暴発しやすいので、
+  // ? が 0 の場合は「質問として数えない」に倒す（誤FATAL防止）。
+  const qCountRaw = normalLite ? qCountMark : countQuestionLikeStrict(t);
+  const qCount = qCountMark === 0 ? 0 : qCountRaw;
+
+
 
   // bulletLike（箇条書き寄り）
   const bulletLike = /(^|\n)\s*[-*•]\s+/.test(t) || /(^|\n)\s*\d+\.\s+/.test(t) ? 1 : 0;

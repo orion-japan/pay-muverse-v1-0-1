@@ -1733,7 +1733,8 @@ const lastTurnsSafe = (() => {
     flowTape,
   });
 
-  const messages = buildFirstPassMessages({ systemPrompt, internalPack });
+  const messages = buildFirstPassMessages({ systemPrompt, internalPack, turns: lastTurnsSafe });
+
 
   // ログ確認
   console.log('[IROS/rephraseEngine][MSG_PACK]', {
@@ -1864,10 +1865,13 @@ const lastTurnsSafe = (() => {
     const raw = String(text ?? '');
     const textForGuard = raw;
 
+    const slotKeysForGuard = Array.isArray(inKeys) ? inKeys : ['SEED_TEXT', 'OBS', 'SHIFT'];
+
     let v = flagshipGuard(textForGuard, {
-      slotKeys: Array.isArray(inKeys) ? inKeys : null,
+      slotKeys: slotKeysForGuard,
       slotsForGuard: Array.isArray(slotsForGuard) ? slotsForGuard : null,
     });
+
 
     // ✅ scaffold中は scaffold系欠落理由を “構造must-have” と整合させる
     if (scaffoldActive && Array.isArray(slotsForGuard)) {

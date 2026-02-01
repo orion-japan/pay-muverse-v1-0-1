@@ -204,7 +204,13 @@ export async function writeFlagshipSafeReply(
   args: FlagshipSafeWriteArgs,
 ): Promise<FlagshipSafeWriteResult> {
   const seedText = norm(args.seedText);
-  const ctx = args.ctx ?? null;
+  // ctx が無い場合、safe-writer の採点は normalLite 扱いに固定する
+  // （ctx=null だと strict 疑問推定が入り、短文でも QCOUNT_TOO_MANY 誤爆が起きる）
+  const ctx = args.ctx ?? {
+    slotKeys: ['SEED_TEXT', 'OBS', 'SHIFT'],
+    slotsForGuard: null,
+  };
+
 
   const model = args.model ?? 'gpt-4o';
   const maxRetries = Math.max(0, Math.min(4, Number(args.maxRetries ?? 2)));

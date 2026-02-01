@@ -164,9 +164,9 @@ function extractScaffoldMustHave(ctx?: FlagshipGuardContext | null): {
   return { scaffoldLike, purposeNeedle, onePointNeedle, points3Needles };
 }
 
-// ✅ 「?」だけでなく、?なし疑問文も qCount に入れる
-// - 旗印上「質問逃げ」を拾うのが目的（厳密な日本語解析はしない）
-// - “1行=1疑問” くらいの粗さで十分（ループを止めるため）
+// ✅ 「?」だけでなく、?なし疑問文も qCount に入れる（ただし暴発しないように厳密化）
+// - JS の \W は日本語で暴発するので使わない
+// - “文末” を正規化してから末尾だけを見る
 // ✅ 二重カウント防止：その行に ?/？ があるなら like 判定しない
 function countQuestionLike(text: string): number {
   const t = norm(text);
@@ -183,24 +183,37 @@ function countQuestionLike(text: string): number {
   let likeCount = 0;
 
   for (const line of lines) {
-    const s = line;
+    // ✅ この行に ? / ？ があるなら二重カウントしない
+    if (/[？?]/.test(line)) continue;
 
-    // ✅ この行に ? / ？ があるなら、すでに markCount で数えているので二重カウントしない
-    if (/[？?]/.test(s)) continue;
+    // ✅ 文末を正規化：句読点/感嘆/三点/全角半角スペース/絵文字っぽい記号を落とす
+    const tail = line
+      .replace(/[。．\.！!…]+$/g, '')
+      .replace(/[ \t\u3000]+$/g, '')
+      .replace(/[\u{1F300}-\u{1FAFF}]+$/gu, '') // 絵文字レンジ（ざっくり）
+      .trim();
+
+    if (!tail) continue;
 
     const hasWh =
-      /(どう(すれば|したら)?|なぜ|なんで|何(が|を|の)?|どこ|いつ|どれ|どんな|誰|誰が|誰に)/.test(s);
+      /(どう(すれば|したら)?|なぜ|なんで|何(が|を|の)?|どこ|いつ|どれ|どんな|誰|誰が|誰に)/.test(tail);
 
-    const endsLikeQuestion = /(ですか|ますか|でしょうか|かな|か\W*$|の\W*$)/.test(s);
+    // ✅ “末尾だけ” で判定（\W を使わない）
+    const endsLikeQuestion =
+      /(ですか|ますか|でしょうか)$/.test(tail) ||
+      /かな$/.test(tail) ||
+      /か$/.test(tail) ||
+      /の$/.test(tail);
 
     const askLike =
-      /(教えて|教えてください|聞かせて|聞かせてください|話して|話してみて|詳しく)/.test(s);
+      /(教えて|教えてください|聞かせて|聞かせてください|話して|話してみて|詳しく)/.test(tail);
 
     if (hasWh || endsLikeQuestion || askLike) likeCount += 1;
   }
 
   return markCount + likeCount;
 }
+
 
 // ✅ normalChat 判定（キーで判断）
 // - normalChat: SEED_TEXT / OBS / SHIFT が並ぶ（あなたの現行 normalChat.ts 構成）

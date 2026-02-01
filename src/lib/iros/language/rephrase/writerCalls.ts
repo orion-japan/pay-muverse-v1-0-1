@@ -4,31 +4,64 @@ import { chatComplete } from '../../../llm/chatComplete';
 
 export type WriterMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 
+type TurnMsg = { role: 'user' | 'assistant'; content: string };
+
+function norm(s: unknown) {
+  return String(s ?? '').replace(/\r\n/g, '\n').trim();
+}
+
+function turnsToMessages(turns?: TurnMsg[] | null): WriterMessage[] {
+  if (!Array.isArray(turns) || turns.length === 0) return [];
+  return turns
+    .map((t) => {
+      const role = t?.role === 'assistant' ? 'assistant' : t?.role === 'user' ? 'user' : null;
+      const content = norm((t as any)?.content);
+      if (!role || !content) return null;
+      return { role, content } as WriterMessage;
+    })
+    .filter(Boolean) as WriterMessage[];
+}
+
+/**
+ * ✅ 1st pass: system + turns + (internalPack as user)
+ * - internalPack は常に user（system にしない）
+ */
 export function buildFirstPassMessages(args: {
   systemPrompt: string;
   internalPack: string;
+  turns?: TurnMsg[] | null;
 }): WriterMessage[] {
+  const systemPrompt = String(args.systemPrompt ?? '');
+  const internalPack = String(args.internalPack ?? '');
+
   return [
-    { role: 'system', content: String(args.systemPrompt ?? '') },
-    // ✅ internalPack は「ユーザー入力」として渡す（lastUserHead が null にならない）
-    { role: 'user', content: String(args.internalPack ?? '') },
+    { role: 'system', content: systemPrompt },
+    ...turnsToMessages(args.turns),
+    { role: 'user', content: internalPack },
   ];
 }
 
-
-
+/**
+ * ✅ retry/repair: system + turns + (internalPack as user) + repair-instruction + userText
+ * - internalPack を system にしない（system 増殖を止める）
+ * - “編集タスク” は user で渡す
+ */
 export function buildRetryMessages(args: {
   systemPrompt: string;
   internalPack: string;
+  turns?: TurnMsg[] | null;
   baseDraftForRepair: string;
   userText: string;
 }): WriterMessage[] {
-  const baseDraft = String(args.baseDraftForRepair ?? '').trim() || '(empty)';
-  const userText = String(args.userText ?? '').trim() || '（空）';
+  const systemPrompt = String(args.systemPrompt ?? '');
+  const internalPack = String(args.internalPack ?? '');
+  const baseDraft = norm(args.baseDraftForRepair) || '(empty)';
+  const userText = norm(args.userText) || '（空）';
 
   return [
-    { role: 'system', content: String(args.systemPrompt ?? '') },
-    { role: 'system', content: String(args.internalPack ?? '') },
+    { role: 'system', content: systemPrompt },
+    ...turnsToMessages(args.turns),
+    { role: 'user', content: internalPack },
     {
       role: 'user',
       content: [

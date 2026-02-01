@@ -425,9 +425,65 @@ function shouldBypassMicroGate(userText: string): boolean {
   return keywords.some((k) => s.includes(k));
 }
 
+/**
+ * 相づち系（そうですね/はい/うん等）が、
+ * 直前の assistant 発話（質問・続き要求）に対する返答なら micro を避ける。
+ * ※ 「履歴や時間のたった繋がりが入るとおかしくなる」問題を避けつつ、
+ *    「続きが必要な相づち」は通常フローへ通す。
+ */
+function shouldBypassMicroGateByHistory(args: {
+  userText: string;
+  history: any[] | null | undefined;
+}): boolean {
+  const s = (args.userText ?? '').trim();
+  if (!s) return false;
+
+  // ✅ 相づち（必要なら増やす）
+  const ack = new Set([
+    'そう',
+    'そうだね',
+    'そうですね',
+    'うん',
+    'うんうん',
+    'はい',
+    '了解',
+    'なるほど',
+    'たしかに',
+    'よし',
+    'ok',
+    'OK',
+    'おーけー',
+  ]);
+
+  const core = normalizeTailPunct(s).replace(/[?？]/g, '').trim();
+  if (!ack.has(core)) return false;
+
+  const h = Array.isArray(args.history) ? args.history : [];
+  if (h.length <= 0) return false;
+
+  // 直前の assistant 発話を拾う
+  let lastA: string | null = null;
+  for (let i = h.length - 1; i >= 0; i--) {
+    const m = h[i];
+    if (m && m.role === 'assistant') {
+      lastA = String(m.content ?? '').trim();
+      break;
+    }
+  }
+  if (!lastA) return false;
+
+  // ✅「続きが来る前提」なら bypass（質問/選択/続き要求）
+  if (/[?？]$/.test(lastA)) return true;
+  if (/(どれ|どこ|いつ|なに|何|どう|なぜ|どうして|教えて|選んで|どっち)/.test(lastA)) return true;
+  if (/(話して|聞かせて|続けて|もう少し|そのまま|どこからでも)/.test(lastA)) return true;
+
+  return false;
+}
+
 function normalizeTailPunct(s: string): string {
   return (s ?? '').trim().replace(/[！!。．…]+$/g, '').trim();
 }
+
 function buildMicroCore(raw: string) {
   const rawTrim = (raw ?? '').trim();
   const hasQuestion = /[?？]$/.test(rawTrim);
@@ -439,6 +495,7 @@ function buildMicroCore(raw: string) {
 
   return { rawTrim, hasQuestion, core, len: core.length };
 }
+
 function isMicroTurn(raw: string): boolean {
   const { rawTrim, core, len } = buildMicroCore(raw);
   if (!rawTrim) return false;
@@ -449,7 +506,7 @@ function isMicroTurn(raw: string): boolean {
   const isSingleToken =
     rawTrim.length > 0 &&
     !/\s/.test(rawTrim) &&
-    /^[\p{L}\p{N}ー・]+$/u.test(rawTrim);
+    /^[\p{L}\p{N}ー・]+$/u.test(rawTrim); // 日本語/英数/長音/中点（句読点などは除外）
 
   const hasDigit = /[0-9０-９]/.test(rawTrim);
 
@@ -1253,7 +1310,10 @@ if (gatedGreeting?.ok) {
 
     // ok=false / gate不成立はそのまま下へ
 
-    const bypassMicro = shouldBypassMicroGate(text);
+    const bypassMicro =
+    shouldBypassMicroGate(text) ||
+    shouldBypassMicroGateByHistory({ userText: text, history });
+
 
     // ✅ Micro（独立ルート）
     if (!bypassMicro && isMicroTurn(text)) {
@@ -2430,16 +2490,12 @@ const emptyLikeNow =
 
           // ✅ LLM-facing context（writerが読む入口）
           // - ctxPack / flowDigest / flowTape を必ず userContext に載せる
-          userContext: {
-            inputKind: (ctx as any)?.inputKind ?? null,
-
-            // ✅ Flow continuity
-            ctxPack: (out.metaForSave as any)?.extra?.ctxPack ?? null,
-            flowDigest: (out.metaForSave as any)?.extra?.flowDigest ?? null,
-            flowTape: (out.metaForSave as any)?.extra?.flowTape ?? null,
-
-
-            turns: Array.isArray((out.metaForSave as any)?.extra?.historyForWriter)
+          // ✅ LLM-facing context（writerが読む入口）
+          // - ctxPack / flowDigest / flowTape を必ず userContext に載せる
+          userContext: (() => {
+            const turns: Array<{ role: 'user' | 'assistant'; content: string }> = Array.isArray(
+              (out.metaForSave as any)?.extra?.historyForWriter,
+            )
               ? (out.metaForSave as any).extra.historyForWriter
                   .map((m: any) => ({
                     role: m?.role,
@@ -2450,17 +2506,56 @@ const emptyLikeNow =
                       (m?.role === 'user' || m?.role === 'assistant') &&
                       String(m?.content ?? '').trim().length > 0,
                   )
-              : [],
+              : [];
 
-            meta: {
-              q: (out.metaForSave as any)?.q ?? (out.metaForSave as any)?.q_code ?? null,
-              depth: (out.metaForSave as any)?.depth ?? (out.metaForSave as any)?.depth_stage ?? null,
-              phase: (out.metaForSave as any)?.phase ?? null,
-              layer: (out.metaForSave as any)?.intentLayer ?? (out.metaForSave as any)?.intent_layer ?? null,
-              renderMode: (out.metaForSave as any)?.renderMode ?? null,
-              slotPlanPolicy: policy,
-            },
-          },
+            const historyText = turns.length
+              ? turns
+                  .slice(-12)
+                  .map((m) => `${m.role === 'assistant' ? 'A' : 'U'}: ${String(m.content ?? '').trim()}`)
+                  .join('\n')
+              : '';
+
+            const inputKindRaw = (ctx as any)?.inputKind ?? null;
+
+            return {
+              // ✅ ここを入れる：MSG_PACK 側の null を潰す
+              conversationId: _conversationId ?? (ctx as any)?.conversationId ?? null,
+              userCode: _userCode ?? (ctx as any)?.userCode ?? null,
+
+              // inputKind は「未指定なら null」のまま（勝手に task に倒さない）
+              inputKind: inputKindRaw,
+
+              // ✅ Flow continuity
+              ctxPack: {
+                ...(((out.metaForSave as any)?.extra?.ctxPack ?? null) as any),
+
+                // ✅ writer が拾うキー名に寄せる（互換）
+                turns,
+                chat: turns,
+                history: turns,
+              },
+
+              flowDigest: (out.metaForSave as any)?.extra?.flowDigest ?? null,
+              flowTape: (out.metaForSave as any)?.extra?.flowTape ?? null,
+
+              // ✅ writer が拾う候補キーを埋める（互換レイヤ）
+              turns, // 現状維持（デバッグ用）
+              messages: turns,
+              history: turns,
+              historyMessages: turns,
+              historyText,
+
+              meta: {
+                q: (out.metaForSave as any)?.q ?? (out.metaForSave as any)?.q_code ?? null,
+                depth: (out.metaForSave as any)?.depth ?? (out.metaForSave as any)?.depth_stage ?? null,
+                phase: (out.metaForSave as any)?.phase ?? null,
+                layer: (out.metaForSave as any)?.intentLayer ?? (out.metaForSave as any)?.intent_layer ?? null,
+                renderMode: (out.metaForSave as any)?.renderMode ?? null,
+                slotPlanPolicy: policy,
+              },
+            };
+          })(),
+
 
           inputKind: (ctx as any)?.inputKind ?? null,
 

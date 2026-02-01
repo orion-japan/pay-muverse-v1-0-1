@@ -599,17 +599,37 @@ export async function postProcessReply(
         });
       } else {
         // ✅ slotText の浄化（内部マーカー @OBS/@SHIFT 等を落とす）
-        const rawLines = String(slotText ?? '').split('\n');
+        // 目的：
+        // - cleanedLen=0 → 本文"……"化の根を断つ
+        // - seed には @OBS/@SHIFT を残してOK。ただし「露出OKの核1行」を必ず混ぜる
+        const slotTextStr = String(slotText ?? '').trim();
+
+        // 露出OKの核：まずは userText をそのまま1行（deterministic / 憶測なし）
+        const coreLine = String(userText ?? '').replace(/\s+/g, ' ').trim();
+
+        // ✅ seed（writerへ）:
+        // - 通常：slotText のまま
+        // - cleaned が空になりそうなケース：@行の後ろに coreLine を1行だけ足す
+        const seedForWriter =
+          coreLine.length > 0 && /(^|\n)\s*@/m.test(slotTextStr) && /^\s*@/m.test(slotTextStr) &&
+          slotTextStr
+            .split('\n')
+            .map((l) => String(l ?? '').trim())
+            .filter(Boolean)
+            .every((l) => l.startsWith('@'))
+            ? `${slotTextStr}\n${coreLine}`
+            : slotTextStr;
+
+        const rawLines = seedForWriter.split('\n');
         const cleanedLines = rawLines
           .map((l) => String(l ?? '').trim())
           .filter((l) => l.length > 0 && !l.startsWith('@'));
         const cleanedSlotText = cleanedLines.join('\n').trim();
 
-        const hadInternalMarkers = /(^|\n)\s*@/m.test(String(slotText ?? ''));
-        const cleanedApplied =
-          hadInternalMarkers && cleanedSlotText.length !== String(slotText ?? '').trim().length;
+        const hadInternalMarkers = /(^|\n)\s*@/m.test(seedForWriter);
+        const cleanedApplied = hadInternalMarkers && cleanedSlotText.length !== seedForWriter.length;
 
-        // ✅ LLMへ渡す seed は “生の slotText” を維持（writer側で整形する）
+        // ✅ LLMへ渡す seed を保存（writerへ）
         metaForSave.extra = {
           ...(metaForSave.extra ?? {}),
           slotPlanPolicy_detected: det.policy,
@@ -619,15 +639,16 @@ export async function postProcessReply(
 
           slotTextHadInternalMarkers: hadInternalMarkers,
           slotTextCleanedApplied: cleanedApplied,
-          slotTextRawLen: String(slotText ?? '').length,
+          slotTextRawLen: seedForWriter.length,
           slotTextCleanedLen: cleanedSlotText.length,
           slotTextDroppedLines: Math.max(0, rawLines.length - cleanedLines.length),
 
           // ✅ seed 保存（writerへ）
-          llmRewriteSeed: slotText,
+          llmRewriteSeed: seedForWriter,
           llmRewriteSeedFrom: 'postprocess(slotPlan->writer-seed)',
           llmRewriteSeedAt: new Date().toISOString(),
         };
+
 
         // ✅ allowLLM=false のときだけ deterministic commit（会話停止を防ぐ）
         // - それ以外は本文をここで作らず、writerへ回す（憲法の「航海士」）

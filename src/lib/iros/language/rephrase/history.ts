@@ -1,8 +1,12 @@
 // src/lib/iros/language/rephrase/history.ts
 // iros — history extraction helpers (for LLM only / non-exposed)
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+export type TurnMsg = { role: 'user' | 'assistant'; content: string };
+
 function norm(s: unknown) {
-  return String(s ?? '').replace(/\r\n/g, '\n').trim();
+  return String(s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
 }
 
 function clampChars(text: string, maxChars: number): string {
@@ -25,19 +29,86 @@ function pickArray(v: any): any[] | null {
   return Array.isArray(v) ? v : null;
 }
 
+function normalizeRole(raw: any): 'user' | 'assistant' | null {
+  const r = String(raw ?? '').trim().toLowerCase();
+  if (r === 'assistant' || r === 'a' || r === 'ai' || r === 'bot' || r === 'iros') return 'assistant';
+  if (r === 'user' || r === 'u' || r === 'human') return 'user';
+  return null;
+}
+
+function isSystemish(m: any): boolean {
+  const roleRaw = norm(m?.role ?? m?.speaker ?? m?.type ?? '').toLowerCase();
+  const fromRaw = norm(m?.from ?? m?.author ?? m?.kind ?? '').toLowerCase();
+  return roleRaw === 'system' || fromRaw === 'system';
+}
+
+function compressSameRoleSeq(msgs: TurnMsg[]): TurnMsg[] {
+  if (!Array.isArray(msgs) || msgs.length === 0) return [];
+  const out: TurnMsg[] = [];
+  for (const m of msgs) {
+    if (!m?.content) continue;
+    const last = out[out.length - 1];
+    if (last && last.role === m.role) {
+      // 同一roleが連続したら「後勝ち」で1つに圧縮（assistant連打の抑制）
+      out[out.length - 1] = m;
+    } else {
+      out.push(m);
+    }
+  }
+  return out;
+}
+
+function takeTailWithBalance(msgs: TurnMsg[], maxMsgs: number): TurnMsg[] {
+  if (!Array.isArray(msgs) || msgs.length === 0) return [];
+
+  // まず圧縮してから tail
+  const compact = compressSameRoleSeq(msgs);
+  let tail = compact.slice(Math.max(0, compact.length - maxMsgs));
+
+  // 片側しかないなら少し広げる
+  const hasA = tail.some((m) => m.role === 'assistant');
+  const hasU = tail.some((m) => m.role === 'user');
+  if (!(hasA && hasU)) {
+    const expand = Math.min(compact.length, maxMsgs + 2);
+    tail = compact.slice(Math.max(0, compact.length - expand));
+  }
+
+  // 1メッセージ上限
+  tail = tail.map((m) => ({ ...m, content: clampChars(m.content, 600) })).filter((m) => !!m.content);
+
+  // もう一回圧縮（expandで連続が復活し得るので）
+  return compressSameRoleSeq(tail);
+}
+
 /**
  * internal context から "履歴っぽいテキスト" を抽出（LLM用 / 露出禁止）
+ * - turns/chat/historyForWriter/historyMessages 等を広く拾う
  */
 export function extractHistoryTextFromContext(userContext: unknown): string {
   if (!userContext || typeof userContext !== 'object') return '';
   const uc: any = userContext as any;
 
   const candidates = [
+    // 近傍履歴
+    tryGet(uc, ['turns']),
+    tryGet(uc, ['chat']),
+    tryGet(uc, ['ctxPack', 'turns']),
+    tryGet(uc, ['ctxPack', 'chat']),
+    tryGet(uc, ['ctx_pack', 'turns']),
+    tryGet(uc, ['ctx_pack', 'chat']),
+
+    // writer向けに刻んだ最小履歴（handleIrosReply 由来）
+    tryGet(uc, ['historyForWriter']),
+    tryGet(uc, ['ctxPack', 'historyForWriter']),
+    tryGet(uc, ['ctx_pack', 'historyForWriter']),
+
+    // 従来の候補
     tryGet(uc, ['historyText']),
     tryGet(uc, ['history_text']),
     tryGet(uc, ['history']),
     tryGet(uc, ['messages']),
     tryGet(uc, ['historyMessages']),
+    tryGet(uc, ['history_messages']),
     tryGet(uc, ['historyX']),
     tryGet(uc, ['ctxPack', 'history']),
     tryGet(uc, ['ctx_pack', 'history']),
@@ -53,12 +124,13 @@ export function extractHistoryTextFromContext(userContext: unknown): string {
     const items = raw
       .filter(Boolean)
       .slice(-12)
-      .map((m: any) => {
-        const role = String(m?.role ?? m?.speaker ?? m?.type ?? '').toLowerCase();
-        const body = norm(m?.text ?? m?.content ?? m?.message ?? '');
-        if (!body) return '';
-        const tag = role.startsWith('a') ? 'A' : role.startsWith('u') ? 'U' : 'M';
-        return `${tag}: ${body}`;
+      .flatMap((m: any) => {
+        if (isSystemish(m)) return [];
+        const role = normalizeRole(m?.role ?? m?.r ?? m?.speaker ?? m?.type ?? m?.from) ?? 'user';
+        const body = norm(m?.text ?? m?.content ?? m?.message ?? m?.in_text ?? m?.out_text ?? '');
+        if (!body) return [];
+        const tag = role === 'assistant' ? 'A' : 'U';
+        return [`${tag}: ${body}`];
       })
       .filter(Boolean);
 
@@ -72,9 +144,11 @@ export function extractHistoryTextFromContext(userContext: unknown): string {
   }
 }
 
-export function extractHistoryMessagesFromContext(
-  userContext: unknown,
-): Array<{ role: 'user' | 'assistant'; content: string }> {
+/**
+ * historyMessages/messages から role/content 配列を抽出
+ * - 旧い形（in/out）にも対応
+ */
+export function extractHistoryMessagesFromContext(userContext: unknown): TurnMsg[] {
   if (!userContext || typeof userContext !== 'object') return [];
   const uc: any = userContext as any;
 
@@ -114,12 +188,6 @@ export function extractHistoryMessagesFromContext(
 
   const pickGeneric = (m: any) => norm(m?.content ?? m?.text ?? m?.message ?? '');
 
-  const isSystemish = (m: any) => {
-    const roleRaw = norm(m?.role ?? m?.speaker ?? m?.type ?? '').toLowerCase();
-    const fromRaw = norm(m?.from ?? m?.author ?? m?.kind ?? '').toLowerCase();
-    return roleRaw === 'system' || fromRaw === 'system';
-  };
-
   const inferIsAssistant = (m: any, hasOutLike: boolean, hasInLike: boolean) => {
     const roleRaw = norm(m?.role ?? m?.speaker ?? m?.type ?? '').toLowerCase();
     const agentRaw = norm(m?.agent ?? m?.provider ?? m?.source ?? '').toLowerCase();
@@ -148,6 +216,7 @@ export function extractHistoryMessagesFromContext(
 
     if (isAssistantByRole || isAssistantByFrom || isAssistantByAgent) return true;
 
+    // role/from/agent が空なら、in/out の存在で推定
     if (!roleRaw && !fromRaw && !agentRaw) {
       if (hasOutLike && !hasInLike) return true;
       if (!hasOutLike && hasInLike) return false;
@@ -159,8 +228,15 @@ export function extractHistoryMessagesFromContext(
 
   const out = raw
     .filter(Boolean)
-    .flatMap((m: any) => {
+    .flatMap((m: any): TurnMsg[] => {
       if (isSystemish(m)) return [];
+
+      // ✅ role が明示されている場合は最優先
+      const explicitRole = normalizeRole(m?.role ?? m?.r ?? m?.speaker ?? m?.type ?? m?.from);
+      if (explicitRole) {
+        const content = norm(m?.content ?? m?.text ?? m?.message ?? '');
+        return content ? [{ role: explicitRole, content }] : [];
+      }
 
       const hasOutLike =
         m?.out_text != null ||
@@ -181,41 +257,40 @@ export function extractHistoryMessagesFromContext(
         m?.userText != null ||
         m?.user_text != null;
 
+      // ✅ 1レコードに in/out が両方ある形
       if (hasInLike && hasOutLike) {
         const inBody = pickIn(m);
         const outBody = pickOut(m);
-
-        const res: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+        const res: TurnMsg[] = [];
         if (inBody) res.push({ role: 'user', content: inBody });
         if (outBody) res.push({ role: 'assistant', content: outBody });
         return res;
       }
 
+      // ✅ それ以外は推定
       const isAssistant = inferIsAssistant(m, hasOutLike, hasInLike);
-
       const body = isAssistant
         ? pickOut(m) || (!hasOutLike ? pickGeneric(m) : '')
         : pickIn(m) || (!hasInLike ? pickGeneric(m) : '');
 
-      if (!body) return [];
-      return [{ role: isAssistant ? ('assistant' as const) : ('user' as const), content: body }];
-    });
+      return body ? [{ role: isAssistant ? 'assistant' : 'user', content: body }] : [];
+    })
+    .filter((x) => !!x?.content);
 
-  return out.filter((x) => !!x?.content);
+  return out;
 }
 
 /**
- * ✅ 直近2往復（最大4メッセージ）を抽出（固定）
- * - turns/chat があれば優先
- * - 無ければ historyMessages/messages から組み立てる
+ * ✅ 直近2〜3往復（最大Nメッセージ）を抽出
+ * 優先順:
+ * 1) turns/chat (ctx/ctxPack/ctx_pack)
+ * 2) historyForWriter (ctx/ctxPack/ctx_pack)
+ * 3) historyMessages/messages/history
  */
-export function extractLastTurnsFromContext(
-  userContext: unknown,
-): Array<{ role: 'user' | 'assistant'; content: string }> {
+export function extractLastTurnsFromContext(userContext: unknown): TurnMsg[] {
   if (!userContext || typeof userContext !== 'object') return [];
   const ctx: any = userContext as any;
 
-  // ✅ 最大メッセージ数（既定: 6 = 3往復）
   const maxMsgsRaw = Number(process.env.IROS_REPHRASE_LAST_TURNS_MAX);
   const maxMsgs = maxMsgsRaw > 0 ? Math.floor(maxMsgsRaw) : 6;
 
@@ -228,45 +303,48 @@ export function extractLastTurnsFromContext(
     pickArray(ctx?.ctx_pack?.chat) ||
     null;
 
-  const normalizeTurnsArray = (
-    raw: any[],
-  ): Array<{ role: 'user' | 'assistant'; content: string }> => {
-    return raw
-      .map((m) => {
-        const roleRaw = String(m?.role ?? m?.r ?? '').trim().toLowerCase();
-        const role =
-          roleRaw === 'assistant' || roleRaw === 'a'
-            ? ('assistant' as const)
-            : roleRaw === 'user' || roleRaw === 'u'
-              ? ('user' as const)
-              : null;
+  const rawHistoryForWriter =
+    pickArray(ctx?.historyForWriter) ||
+    pickArray(ctx?.ctxPack?.historyForWriter) ||
+    pickArray(ctx?.ctx_pack?.historyForWriter) ||
+    null;
 
+  const normalizeRoleContentArray = (raw: any[]): TurnMsg[] => {
+    return raw
+      .filter(Boolean)
+      .flatMap((m: any): TurnMsg[] => {
+        if (isSystemish(m)) return [];
+        const role = normalizeRole(m?.role ?? m?.r ?? m?.speaker ?? m?.type ?? m?.from);
         const content = norm(m?.content ?? m?.text ?? m?.message ?? '');
-        if (!role || !content) return null;
-        return { role, content };
-      })
-      .filter(Boolean) as Array<{ role: 'user' | 'assistant'; content: string }>;
+        if (!role || !content) return [];
+        return [{ role, content }];
+      });
   };
 
-  let normalized: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  const hasBothRoles = (arr: TurnMsg[]) => {
+    const hasA = arr.some((m) => m.role === 'assistant');
+    const hasU = arr.some((m) => m.role === 'user');
+    return hasA && hasU;
+  };
 
-  if (rawTurns) normalized = normalizeTurnsArray(rawTurns);
+  let normalized: TurnMsg[] = [];
+
+  // 1) turns/chat（ただし片側しか無いなら採用しない）
+  if (rawTurns) {
+    const n = normalizeRoleContentArray(rawTurns);
+    if (n.length > 0 && hasBothRoles(n)) normalized = n;
+  }
+
+  // 2) historyForWriter
+  if (normalized.length === 0 && rawHistoryForWriter) {
+    const n = normalizeRoleContentArray(rawHistoryForWriter);
+    if (n.length > 0) normalized = n;
+  }
+
+  // 3) historyMessages/messages/history
   if (normalized.length === 0) normalized = extractHistoryMessagesFromContext(ctx);
   if (normalized.length === 0) return [];
 
-  // ✅ 基本は末尾 maxMsgs を採用
-  let tail = normalized.slice(Math.max(0, normalized.length - maxMsgs));
-
-  // ✅ 片側しかない（userだけ / assistantだけ）なら少し広げて救済
-  const hasAssistant = tail.some((m) => m.role === 'assistant');
-  const hasUser = tail.some((m) => m.role === 'user');
-  if (!(hasAssistant && hasUser)) {
-    const expand = Math.min(normalized.length, maxMsgs + 2); // 既定なら 8
-    tail = normalized.slice(Math.max(0, normalized.length - expand));
-  }
-
-  // ✅ 1メッセージあたりの上限
-  tail = tail.map((m) => ({ ...m, content: clampChars(m.content, 600) }));
-
-  return tail;
+  return takeTailWithBalance(normalized, maxMsgs);
 }
+
