@@ -5,7 +5,7 @@
 // - 明示トリガー（explicit）と、ふわっとしたビジョン系キーワード（implicit）を分けて扱う
 // - 実際の LLM 呼び出しは generateIrosReply 側で行う前提
 
-import type { IrosMeta, IrosMode } from './system';
+import type { IrosMeta, IrosMode } from '@/lib/iros/system';
 
 export type VisionTriggerInput = {
   /** 直近ユーザーの入力テキスト */

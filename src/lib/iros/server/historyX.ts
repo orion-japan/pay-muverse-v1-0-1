@@ -314,11 +314,19 @@ export async function loadRecentHistoryAcrossConversations(params: {
   // ✅ 取得は広めに。あとで same/cross を分けて切り詰める
   // - includeSameConversation=false の従来挙動では excludeConversationId で除外したい
   // - includeSameConversation=true の場合は “いったん全部取り”、後段で same/cross 分離
+  //
+  // ⚠️ 重要:
+  // - excludeConversationId は「DBで除外するためのID」と「sameConvIdのためのID」を兼ねてしまうと壊れる
+  // - includeSameConversation=true のときは DB除外を止める（undefined）一方で、
+  //   sameConvId 用の “現在のconversationId” は別で保持しておく
+  const currentConversationId = excludeConversationId ? String(excludeConversationId) : null;
+  const queryExcludeConversationId = includeSameConversation ? undefined : excludeConversationId;
+
   const picked = await tryLoadRows({
     supabase,
     userCode,
     limit: Math.max(limit, crossConversationLimit + sameConversationLimit + 20),
-    excludeConversationId: includeSameConversation ? undefined : excludeConversationId,
+    excludeConversationId: queryExcludeConversationId,
   });
 
   if (!picked.table) {
@@ -327,6 +335,7 @@ export async function loadRecentHistoryAcrossConversations(params: {
   }
 
   const rows = picked.rows ?? [];
+
 
   // 1) 正規化して role/content を作る
   const normalized = rows
@@ -343,7 +352,8 @@ export async function loadRecentHistoryAcrossConversations(params: {
     .filter(Boolean) as Array<{ r: MsgRow; role: 'user' | 'assistant'; content: string; convId: string }>;
 
   // 2) same / cross に分離
-  const sameConvId = excludeConversationId ? String(excludeConversationId) : null;
+  const sameConvId = currentConversationId;
+
 
   const same = sameConvId
     ? normalized.filter((x) => x.convId === sameConvId)

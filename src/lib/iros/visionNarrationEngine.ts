@@ -4,7 +4,7 @@
 // Bトーン＝意志誘導強め（「一緒にここまで行こう」寄り）
 // レベル設計：いまは Level1（完了からの映像）が主役
 
-import type { IrosMeta } from './system';
+import type { IrosMeta } from '@/lib/iros/system';
 
 export type VisionLevel = 1 | 2 | 3;
 

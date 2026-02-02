@@ -7,7 +7,7 @@
 // - ir診断トリガー / I層ピアス判定
 // - IntentLine / T層ヒント / 未来方向モード
 
-import type { Depth, QCode, IrosMeta } from './system';
+import type { Depth, QCode, IrosMeta } from '@/lib/iros/system';
 import type { IrosMemoryState } from './memoryState';
 
 import { analyzeUnifiedTurn, type UnifiedLikeAnalysis } from './unifiedAnalysis';

@@ -8,7 +8,7 @@ import {
   type IrosMode,
   type IrosMeta,
   type TLayer,
-} from './system';
+} from '@/lib/iros/system';
 import type { IntentLineAnalysis } from './intent/intentLineEngine';
 
 /* ========= オプション型 ========= */

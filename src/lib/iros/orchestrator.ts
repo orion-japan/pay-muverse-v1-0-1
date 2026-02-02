@@ -12,7 +12,7 @@ import {
   type IrosStyle,
   DEPTH_VALUES,
   QCODE_VALUES,
-} from './system';
+} from '@/lib/iros/system';
 
 import { clampSelfAcceptance } from './orchestratorMeaning';
 import { computeSpinState } from './orchestratorSpin';
@@ -49,6 +49,8 @@ import { applySpinControlAndAnchorEvent } from './orchestratorSpinControl';
 import { applyFullAuto } from './orchestratorFullAuto';
 import { applyVisionTrigger } from './orchestratorVisionTrigger';
 import { applyIntentTransitionV1 } from './orchestratorIntentTransition';
+import { applyIntentBridge } from './intentTransition/intentBridge';
+import { decidePlaceholderGate } from './intentTransition/placeholderGate';
 import { applyContainerDecision } from './orchestratorContainer';
 import { applySoul } from './orchestratorSoul';
 
@@ -1643,6 +1645,107 @@ if (slotsEmpty_ir) {
           : (unifiedAny as any).hLevel ?? null,
     };
   }
+
+  // ----------------------------------------------------------------
+  // IntentBridge（R→I explicit / I→T reconfirm）※補助のみ
+  // - 既存のIT/transition/policy決定を置換しない
+  // - meta.extra に「観測可能な補助フラグ」だけを載せる
+  // ----------------------------------------------------------------
+
+    const depthStageNow =
+      (meta as any)?.depthStage ?? (meta as any)?.depth ?? (finalMeta as any)?.depth ?? null;
+
+    const phaseNow =
+      (meta as any)?.phase ?? (finalMeta as any)?.phase ?? null;
+
+      const fixedNorthKeyNow =
+      (meta as any)?.intent_anchor_key ??
+      (meta as any)?.intentAnchorKey ??
+      (finalMeta as any)?.intent_anchor_key ??
+      (finalMeta as any)?.intentAnchorKey ??
+      FIXED_NORTH.key ??
+      null;
+
+    // deepenOk は「取れれば渡す」。取れない場合は undefined（intentBridge 側で保守的に扱う）
+    const deepenOkNow =
+      (meta as any)?.itTrigger?.flags?.deepenOk ??
+      (meta as any)?.it?.flags?.deepenOk ??
+      (meta as any)?.itx?.flags?.deepenOk ??
+      (meta as any)?.deepenOk ??
+      undefined;
+
+    const bridge = applyIntentBridge({
+      depthStage: typeof depthStageNow === 'string' ? depthStageNow : null,
+      phase: typeof phaseNow === 'string' ? phaseNow : null,
+      deepenOk: typeof deepenOkNow === 'boolean' ? deepenOkNow : undefined,
+      fixedNorthKey: typeof fixedNorthKeyNow === 'string' ? fixedNorthKeyNow : null,
+      userText: text, // orchestrator の入力テキスト（userTextをログに出さない方針は intentBridge 側が担保）
+    });
+
+    // meta.extra / finalMeta.extra に載せる（上書きはしない）
+    {
+      const exMeta =
+        typeof (meta as any).extra === 'object' && (meta as any).extra
+          ? (meta as any).extra
+          : ((meta as any).extra = {});
+      const exFinal =
+        typeof (finalMeta as any).extra === 'object' && (finalMeta as any).extra
+          ? (finalMeta as any).extra
+          : ((finalMeta as any).extra = {});
+
+      // IntentBridge（上書きしない）
+      if (bridge && (bridge.intentEntered || bridge.itReconfirmed)) {
+        exMeta.intentBridge = exMeta.intentBridge ?? bridge;
+        exFinal.intentBridge = exFinal.intentBridge ?? bridge;
+      }
+
+    // ------------------------------------------------------------
+    // PlaceholderGate（仮置き解除 + 方向候補）— 補助のみ / 上書きしない
+    // ------------------------------------------------------------
+    const placeholderGate = decidePlaceholderGate({
+      depthStage: typeof depthStageNow === 'string' ? depthStageNow : null,
+
+      // targetKind -> goalKindHint（nextStepOptions の語彙に寄せる）
+      goalKindHint: (() => {
+        const raw =
+          (meta as any)?.targetKind ??
+          (meta as any)?.target_kind ??
+          null;
+
+        const s = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+        if (s === 'uncover') return 'uncover';
+        if (s === 'stabilize') return 'stabilize';
+        // expand / pierce / その他は forward として扱う（保守）
+        return 'forward';
+      })(),
+
+      // computeITTrigger.flags 互換（存在する方を拾う）
+      itFlags:
+        (meta as any)?.itTrigger?.flags ??
+        (meta as any)?.it?.flags ??
+        (meta as any)?.itx?.flags ??
+        null,
+
+      // intentBridge（bridge が空なら null）
+      intentBridge:
+        bridge && (bridge.intentEntered || bridge.itReconfirmed) ? bridge : null,
+    });
+
+    // meta.extra / finalMeta.extra に載せる（上書きしない / release時だけ）
+    if (placeholderGate?.placeholderReleased) {
+      const exMeta =
+        typeof (meta as any).extra === 'object' && (meta as any).extra
+          ? (meta as any).extra
+          : ((meta as any).extra = {});
+      exMeta.placeholderGate = exMeta.placeholderGate ?? placeholderGate;
+
+      const exFinal =
+        typeof (finalMeta as any).extra === 'object' && (finalMeta as any).extra
+          ? (finalMeta as any).extra
+          : ((finalMeta as any).extra = {});
+      exFinal.placeholderGate = exFinal.placeholderGate ?? placeholderGate;
+    }
+    }
 
   // orchestrator.ts — [IROS/META][final-sync] 直前（単一ログ化）
   //

@@ -1,10 +1,10 @@
 // src/lib/iros/orchestratorMeaning.ts
 // Iros Orchestrator 補助：SelfAcceptance / 数値メタ / 意味づけブロック
 
-import type { Depth, QCode, IrosMeta } from './system';
+import type { Depth, QCode, IrosMeta } from '@/lib/iros/system';
 import type { UnifiedLikeAnalysis } from './unifiedAnalysis';
 import type { IntentLineAnalysis } from './intent/intentLineEngine';
-import type { IrosMode } from './system';
+import type { IrosMode } from '@/lib/iros/system';
 
 // ★ 追加：ネガ/ポジ＋安定度の解析
 import {

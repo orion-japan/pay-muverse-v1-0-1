@@ -23,8 +23,9 @@ function turnsToMessages(turns?: TurnMsg[] | null): WriterMessage[] {
 }
 
 /**
- * ✅ 1st pass: system + turns + (internalPack as user)
+ * ✅ 1st pass: system + (internalPack as user) + turns
  * - internalPack は常に user（system にしない）
+ * - internalPack を最後に置かない（user,user 連投や会話崩れを防ぐ）
  */
 export function buildFirstPassMessages(args: {
   systemPrompt: string;
@@ -32,13 +33,18 @@ export function buildFirstPassMessages(args: {
   turns?: TurnMsg[] | null;
 }): WriterMessage[] {
   const systemPrompt = String(args.systemPrompt ?? '');
-  const internalPack = String(args.internalPack ?? '');
+  const internalPack = norm(args.internalPack ?? '');
+  const turns = turnsToMessages(args.turns);
 
-  return [
-    { role: 'system', content: systemPrompt },
-    ...turnsToMessages(args.turns),
-    { role: 'user', content: internalPack },
-  ];
+  const out: WriterMessage[] = [{ role: 'system', content: systemPrompt }];
+
+  // internalPack は system の直後に置く（最後にしない）
+  if (internalPack) out.push({ role: 'user', content: internalPack });
+
+  // 直近ターン（会話の流れ）
+  out.push(...turns);
+
+  return out;
 }
 
 /**

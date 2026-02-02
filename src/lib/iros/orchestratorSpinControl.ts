@@ -1,6 +1,6 @@
 // file: src/lib/iros/orchestratorSpinControl.ts
 
-import type { IrosMeta } from './system';
+import type { IrosMeta } from '@/lib/iros/system';
 import { decideSpinControl } from './spin/decideSpinControl';
 import { decideAnchorEvent } from './intentAnchor/anchorEvent';
 

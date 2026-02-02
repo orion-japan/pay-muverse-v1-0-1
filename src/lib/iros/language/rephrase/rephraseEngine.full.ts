@@ -1437,7 +1437,12 @@ export async function rephraseSlotsFinal(extracted: ExtractedSlots, opts: Rephra
   };
 
   // ✅ “内部マーカー” だけ落とす（ユーザーの @mention 等は落とさない）
-  const INTERNAL_LINE_MARKER = /^@(OBS|SHIFT|SH|RESTORE|Q|SAFE|NEXT|END|TASK)\b/;
+  // NOTE:
+  // - writer に渡す seedDraft から internal directive を確実に除去するためのマーカー
+  // - @Q_SLOT などの @*_SLOT を必ず落とす（seed 混入防止）
+  const INTERNAL_LINE_MARKER = /^@(OBS|SHIFT|SH|RESTORE|Q|Q_SLOT|SAFE|NEXT|END|TASK|SEED_TEXT)\b/;
+
+
 
   // ✅ ILINE抽出用：内部マーカー行だけ除外（ILINEタグは保持する）
   const stripInternalMarkersForLock = (s: string) => {
@@ -1624,17 +1629,29 @@ export async function rephraseSlotsFinal(extracted: ExtractedSlots, opts: Rephra
     if (!u) return s;
     if (!s) return u;
 
-    const tokens = Array.from(
-      new Set(u.split(/[^\p{L}\p{N}一-龥ぁ-んァ-ヶー]+/u).filter(Boolean)),
-    );
+    // ✅ 短文（同意/感想/短い呼びかけ）では userText 退避しない
+    // - seed を捨てると、writer が材料不足で抽象テンプレに寄りやすい
+    const isVeryShort = u.length <= 30;
+
+    const isAckLike =
+      /^(ありがとう|ありがとうございます|どうも|感謝|了解|りょうかい|わかった|分かった|OK|ok|承知|お願いします|よろしく|宜しく)/u.test(
+        u,
+      ) ||
+      /^(楽しみ|良さそう|いいね|なるほど|たしかに|そうだね|それで|それなら)/u.test(u);
+
+    if (isVeryShort || isAckLike) return s;
+
+    const tokens = Array.from(new Set(u.split(/[^\p{L}\p{N}一-龥ぁ-んァ-ヶー]+/u).filter(Boolean)));
     const keyTokens = tokens.filter((t) => t.length >= 2).slice(0, 8);
     const hit = keyTokens.some((t) => s.includes(t));
 
     const abstractish = /見失わなければ|ここからは|整えなくていい|進む|動いてる|止まった/u.test(s);
 
+    // ✅ userText を優先するのは「長文かつseedが噛み合わない」時だけ
     if (!hit || abstractish) return u;
     return s;
   };
+
 
   const seedDraftSanitized = sanitizeSeedDraftForLLM(seedDraft0);
   const seedFinal = chooseSeedForLLM(seedDraftSanitized, userText);
@@ -1678,27 +1695,28 @@ export async function rephraseSlotsFinal(extracted: ExtractedSlots, opts: Rephra
   const band = extractIntentBandFromContext(opts?.userContext ?? null);
 
 
-// 既存の `lastTurns` をそのまま使い、再宣言しない
+// 既存の `lastTurns` をそのまま使い、会話が「assistant始まり」になるように整える
 const lastTurnsSafe = (() => {
-  const t0 = Array.isArray(lastTurns) ? lastTurns : []; // lastTurns が配列でない場合、空配列に初期化
+  const t = (Array.isArray(lastTurns) ? lastTurns : [])
+    .filter((m: any) => m && (m.role === 'user' || m.role === 'assistant'))
+    .map((m: any) => ({
+      role: m.role as 'user' | 'assistant',
+      content: String(m.content ?? '').trim(),
+    }))
+    .filter((m: any) => m.content.length > 0);
 
-  while (t0.length > 0 && t0[t0.length - 1]?.role === 'user') t0.pop();
+  // 直近を少し広めに取る
+  let tail = t.slice(-6);
 
-  if (isDirectTask) {
-    const users = t0
-      .filter((m: any) => m?.role === 'user')
-      .map((m: any) => ({ role: 'user' as const, content: String(m?.content ?? '') }))
-      .filter((m: any) => m.content.trim().length > 0);
-    return users.slice(-2);  // 最後の2件を返す
+  // internalPack が user 固定なので、turns の先頭が user だと user,user 連投になる。
+  // 先頭が user で、後ろに assistant がいるなら、先頭側の user を落として assistant 始まりへ寄せる。
+  while (tail.length > 0 && tail[0].role === 'user' && tail.some((x) => x.role === 'assistant')) {
+    tail.shift();
   }
 
-  const t = t0
-    .filter((m: any) => (m?.role === 'user' || m?.role === 'assistant') && String(m?.content ?? '').trim())
-    .map((m: any) => ({ role: m.role as 'user' | 'assistant', content: String(m.content ?? '') }));
-
-  return t.slice(-4);  // 最後の4件を返す
+  // 最終的に最大4メッセージ
+  return tail.slice(-4);
 })();
-
 
 
 
@@ -1741,21 +1759,32 @@ const lastTurnsSafe = (() => {
     traceId: debug.traceId,
     conversationId: debug.conversationId,
     userCode: debug.userCode,
+
     lastTurns: lastTurnsSafe.length,
     hasHistoryText: Boolean(historyText),
+    historyTextLen: String(historyText ?? '').length,
+
     msgCount: messages.length,
     roles: messages.map((m) => m.role),
+
+    internalPackLen: String(internalPack ?? '').length,
+    internalPackHasHistoryHint: /HISTORY_HINT\s*\(DO NOT OUTPUT\)/i.test(String(internalPack ?? '')),
+
     seedDraftLen: seedDraft.length,
     seedDraftHead: safeHead(seedDraft, 120),
+
     itOk,
     intentBand: band.intentBand,
     tLayerHint: band.tLayerHint,
+
     directTask: isDirectTask,
     inputKind,
     inputKindFromMeta,
     inputKindFromCtx,
+
     lockedILines: lockedILines.length,
   });
+
 
 
   // ---------------------------------------------
@@ -1785,6 +1814,9 @@ const lastTurnsSafe = (() => {
     if (!raw.trim()) return { ok: false, reason: 'OUT_EMPTY' };
     if (containsForbiddenLeakText(raw)) return { ok: false, reason: 'INTERNAL_MARKER_LEAKED' };
 
+    // slot系（@XXX_SLOT）が混ざってたら leak 扱いにする
+    if (/@[A-Z_]+_SLOT\b/.test(raw)) return { ok: false, reason: 'INTERNAL_MARKER_LEAKED' };
+
     const iLineOk = verifyLockedILinesPreserved(raw, lockedILines);
     if (!iLineOk) return { ok: false, reason: 'ILINE_NOT_PRESERVED' };
 
@@ -1808,6 +1840,7 @@ const lastTurnsSafe = (() => {
 
     return { ok: true };
   };
+
 
   // ---------------------------------------------
   // adopt helper（slot attach + meta）

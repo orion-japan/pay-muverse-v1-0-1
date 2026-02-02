@@ -6,7 +6,7 @@
 //   実際の差異にはある程度耐えられるマッピングにしている。
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { QCode } from './system';
+import type { QCode } from '@/lib/iros/system';
 import type { QSnapshot, QTrace, IrosMemory } from './memory/types';
 
 // ====================== Supabase Admin Client ======================

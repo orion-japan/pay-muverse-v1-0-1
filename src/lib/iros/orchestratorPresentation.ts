@@ -5,7 +5,7 @@
 //
 // ★ テンプレゼロ版：構図ヘッダー文章は一切生成しない
 
-import type { Depth, QCode, IrosMeta } from './system';
+import type { Depth, QCode, IrosMeta } from '@/lib/iros/system';
 
 /* ========= 表示モード種別 ========= */
 

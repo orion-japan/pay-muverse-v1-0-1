@@ -4,7 +4,7 @@
 // - 重要：ms の key揺れ吸収 / meta への確定反映 / goal/priority の C 抑制 までを保持
 // - normalizeDepthStrict は orchestrator 側の同実装を注入（単一ソース）
 
-import type { IrosMeta } from './system';
+import type { IrosMeta } from '@/lib/iros/system';
 
 import { extractIntentSignals } from './intentTransition/signals';
 import { runIntentTransition } from './intentTransition/transitionEngine';

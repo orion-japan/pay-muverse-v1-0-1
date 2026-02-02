@@ -954,12 +954,20 @@ const stripInternalLines = (s0: string) => {
       const blocksAny: unknown =
         extraAny?.rephraseBlocks ?? extraAny?.rephrase?.blocks ?? extraAny?.rephrase?.rephraseBlocks ?? null;
 
-      const blocksToText = (bs: any[]) => {
-        const parts = bs
-          .map((b) => String(b?.text ?? b?.content ?? b?.value ?? b?.body ?? '').trimEnd())
-          .filter((s) => s.trim().length > 0);
-        return parts.join('\n\n').trimEnd();
-      };
+        const blocksToText = (bs: any[]) => {
+          const parts = bs
+            .map((b) => {
+              // ✅ stringブロック対応（最重要）
+              if (typeof b === 'string') return b.trimEnd();
+
+              // ✅ objectブロック対応（既存）
+              return String(b?.text ?? b?.content ?? b?.value ?? b?.body ?? '').trimEnd();
+            })
+            .filter((s) => s.trim().length > 0);
+
+          return parts.join('\n\n').trimEnd();
+        };
+
 
       const blocksJoined = Array.isArray(blocksAny) ? blocksToText(blocksAny as any[]) : '';
 
@@ -984,32 +992,45 @@ const stripInternalLines = (s0: string) => {
         return '……';
       })();
 
+      // ✅ ここが本丸：保存本文と meta.extra.finalAssistantText を同期（“……”残存防止）
+      meta.extra = {
+        ...(meta.extra ?? {}),
+        finalAssistantText: contentForPersist,
+        finalAssistantTextCandidate: (meta.extra as any)?.finalAssistantTextCandidate ?? contentForPersist,
+      };
 
-const saved = await persistAssistantMessageToIrosMessages({
-  supabase,
-  conversationId,
-  userCode,
-  content: contentForPersist,
-  meta: meta ?? null,
-});
+      const saved = await persistAssistantMessageToIrosMessages({
+        supabase,
+        conversationId,
+        userCode,
+        content: contentForPersist,
+        meta: meta ?? null,
+      });
 
-meta.extra = {
-  ...(meta.extra ?? {}),
-  persistedAssistantMessage: {
-    ok: true,
-    inserted: true,
-    skipped: false,
-    len: contentForPersist.length,
-    saved,
-    pickedFrom:
-    !isEffectivelyEmptyText(finalAssistantClean) && finalAssistantClean.length > 0
-      ? 'finalAssistant(clean)'
-      : blocksJoinedCleaned.length > 0
-        ? 'rephraseBlocks(clean)'
-        : 'fallbackDots',
+      meta.extra = {
+        ...(meta.extra ?? {}),
 
-  },
-};
+        // ✅ ここが本命：UI/DB が参照している finalAssistantText を “保存本文” に同期
+        finalAssistantText: contentForPersist,
+        finalAssistantTextLen: contentForPersist.length,
+        finalAssistantTextCandidate: contentForPersist,
+
+        persistedAssistantMessage: {
+          ok: true,
+          inserted: true,
+          skipped: false,
+          len: contentForPersist.length,
+          saved,
+          pickedFrom:
+            !isEffectivelyEmptyText(finalAssistantClean) && finalAssistantClean.length > 0
+              ? 'finalAssistant(clean)'
+              : blocksJoinedCleaned.length > 0
+                ? 'rephraseBlocks(clean)'
+                : 'fallbackDots',
+        },
+      };
+
+
 
 
       // training sample

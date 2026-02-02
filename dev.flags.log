@@ -1,0 +1,265 @@
+
+> sofia_register_flow_v1@0.1.0 dev
+> next dev --turbopack
+
+▲ Next.js 16.1.4 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.2.109:3000
+- Environments: .env.local
+- Experiments (use with caution):
+  · serverActions
+
+✓ Starting...
+✓ Ready in 602ms
+[firebase] DEBUG_LOCAL=1 → Firebase SDK log level set to "debug"
+ GET /iros-ai 200 in 573ms (compile: 215ms, render: 358ms)
+ POST /api/telemetry 204 in 65ms (compile: 51ms, render: 14ms)
+[firebase-admin] initialized with ServiceAccount
+[authz] 358ef6ed-d20c-4f06-a4b2-8a56e4d9c56c start { path: 'http://localhost:3000/api/agent/iros/userinfo' }
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+ POST /api/register-push 200 in 208ms (compile: 25ms, render: 183ms)
+[authz] 358ef6ed-d20c-4f06-a4b2-8a56e4d9c56c verify firebase: 445.199ms
+[authz] 358ef6ed-d20c-4f06-a4b2-8a56e4d9c56c fetch user: 52.076ms
+[authz] 358ef6ed-d20c-4f06-a4b2-8a56e4d9c56c ok { user: '669933', role: 'admin', provider: 'password', ms: 501 }
+[IROS/UserInfo] authz = {
+  ok: true,
+  allowed: true,
+  status: 200,
+  pgJwt: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njk5MzMiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInVzZXJfY29kZSI6IjY2OTkzMyIsImZpcmViYXNlX3VpZCI6Ikt2UDFQNHNpZnRTRUZkTGtka1lqcVY0aE12MDIiLCJleHAiOjE3NzAwMDc1NjYsImlhdCI6MTc3MDAwNjY2Nn0.RlheoZW0FxEccZKaAZidazESAFR_ED4S8em72Efe5A4',
+  userCode: '669933',
+  role: 'admin',
+  user: { uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02', user_code: '669933' },
+  uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02'
+}
+ GET /api/agent/iros/userinfo 200 in 747ms (compile: 186ms, render: 561ms)
+[authz] 76fa33ea-dc00-42bc-822a-76400795673f start { path: 'http://localhost:3000/api/agent/iros/conversations' }
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] 146b778e-28f8-4006-a7bd-f16ed67556e8 start { path: 'http://localhost:3000/api/q/unified?user_code=669933' }
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] 76fa33ea-dc00-42bc-822a-76400795673f verify firebase: 254.859ms
+[authz] 76fa33ea-dc00-42bc-822a-76400795673f fetch user: 69.841ms
+[authz] 76fa33ea-dc00-42bc-822a-76400795673f ok { user: '669933', role: 'admin', provider: 'password', ms: 327 }
+[IROS/Conversations] auth = {
+  ok: true,
+  allowed: true,
+  status: 200,
+  pgJwt: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njk5MzMiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInVzZXJfY29kZSI6IjY2OTkzMyIsImZpcmViYXNlX3VpZCI6Ikt2UDFQNHNpZnRTRUZkTGtka1lqcVY0aE12MDIiLCJleHAiOjE3NzAwMDc1NjYsImlhdCI6MTc3MDAwNjY2Nn0.RlheoZW0FxEccZKaAZidazESAFR_ED4S8em72Efe5A4',
+  userCode: '669933',
+  role: 'admin',
+  user: { uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02', user_code: '669933' },
+  uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02'
+}
+[IROS/Conversations] Query target user_code = 669933
+ POST /api/register-push 200 in 74ms (compile: 1388µs, render: 72ms)
+[IROS/Conversations] ✅ 100 rows fetched for user_code=669933
+ GET /api/agent/iros/conversations 200 in 413ms (compile: 22ms, render: 391ms)
+[authz] 0bc1acf9-78fa-4c46-89bc-61c3018e77da start {
+  path: 'http://localhost:3000/api/agent/iros/messages?conversation_id=9487a82a-76d6-4c97-a3fe-4f8e6816effc'
+}
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] 0340a8f6-cf0f-45c3-b171-08836498d09c start {
+  path: 'http://localhost:3000/api/agent/iros/messages?conversation_id=9487a82a-76d6-4c97-a3fe-4f8e6816effc'
+}
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] 146b778e-28f8-4006-a7bd-f16ed67556e8 verify firebase: 257.92ms
+[authz] 146b778e-28f8-4006-a7bd-f16ed67556e8 fetch user: 51.216ms
+[authz] 146b778e-28f8-4006-a7bd-f16ed67556e8 ok { user: '669933', role: 'admin', provider: 'password', ms: 311 }
+[authz] 0bc1acf9-78fa-4c46-89bc-61c3018e77da verify firebase: 248.689ms
+[authz] 0bc1acf9-78fa-4c46-89bc-61c3018e77da fetch user: 33.95ms
+[authz] 0bc1acf9-78fa-4c46-89bc-61c3018e77da ok { user: '669933', role: 'admin', provider: 'password', ms: 285 }
+[authz] 0340a8f6-cf0f-45c3-b171-08836498d09c verify firebase: 290.932ms
+[IROS/messages][GET] conv select { ms: 39, ok: true, table: 'iros_conversations', hasRow: true }
+[authz] 0340a8f6-cf0f-45c3-b171-08836498d09c fetch user: 53.485ms
+[authz] 0340a8f6-cf0f-45c3-b171-08836498d09c ok { user: '669933', role: 'admin', provider: 'password', ms: 346 }
+[IROS/messages][GET] msg select {
+  ms: 54,
+  ok: true,
+  table: 'v_iros_messages',
+  rows: 127,
+  includeMeta: true,
+  limit: 200
+}
+[IROS/messages][GET] done { ms: 380, count: 127, source: 'v_iros_messages' }
+ GET /api/agent/iros/messages?conversation_id=9487a82a-76d6-4c97-a3fe-4f8e6816effc 200 in 408ms (compile: 24ms, render: 384ms)
+[IROS/messages][GET] conv select { ms: 32, ok: true, table: 'iros_conversations', hasRow: true }
+[IROS/messages][GET] msg select {
+  ms: 59,
+  ok: true,
+  table: 'v_iros_messages',
+  rows: 127,
+  includeMeta: true,
+  limit: 200
+}
+[IROS/messages][GET] done { ms: 439, count: 127, source: 'v_iros_messages' }
+ GET /api/agent/iros/messages?conversation_id=9487a82a-76d6-4c97-a3fe-4f8e6816effc 200 in 470ms (compile: 27ms, render: 443ms)
+ GET /api/q/unified?user_code=669933 200 in 4.0s (compile: 22ms, render: 4.0s)
+ POST /api/register-push 200 in 125ms (compile: 4ms, render: 121ms)
+[authz] 40cfa6a4-b40b-411b-9cdb-6df03a8b917d start { path: 'http://localhost:3000/api/agent/iros/messages' }
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] 40cfa6a4-b40b-411b-9cdb-6df03a8b917d verify firebase: 274.524ms
+[authz] 40cfa6a4-b40b-411b-9cdb-6df03a8b917d fetch user: 78.426ms
+[authz] 40cfa6a4-b40b-411b-9cdb-6df03a8b917d ok { user: '669933', role: 'admin', provider: 'password', ms: 355 }
+[IROS/MSG] in {
+  reqId: '863d6552-0eeb-4650-b4d9-f4926cd1e5f5',
+  conversationId: '9487a82a-76d6-4c97-a3fe-4f8e6816effc',
+  userCode: '669933',
+  uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02',
+  role: 'user',
+  textHead: '一回会話を投げます'
+}
+[IROS/messages][metaFilled] memory_state select tried {
+  table: 'iros_memory_state',
+  ms: 66,
+  ok: true,
+  hasRow: true,
+  err: null
+}
+[IROS/messages][POST][pick-q-depth][src] {
+  q_body: null,
+  q_meta_raw: null,
+  q_meta_filled: null,
+  q_final: null,
+  depth_body: null,
+  depth_meta_raw: null,
+  depth_meta_filled: null,
+  depth_final: null,
+  layer_body: null,
+  layer_meta_raw: null,
+  layer_meta_filled: null,
+  layer_final: null
+}
+[IROS/messages][POST][pick-q-depth] {
+  q_body: null,
+  q_meta: null,
+  q_final: null,
+  depth_body: null,
+  depth_meta: null,
+  depth_final: null,
+  layer_body: null,
+  layer_meta: null,
+  layer_final: null
+}
+[IROS/messages][POST] conv select { ms: 60, ok: true, table: 'iros_conversations' }
+[IROS/messages][streak-db] bump streakLen { before: 2, after: 51, q: 'Q2', from: 'db:iros_messages' }
+[IROS/messages][POST] insert tried {
+  table: 'iros_messages',
+  ms: 80,
+  ok: true,
+  hasData: true,
+  q_code: 'Q2',
+  depth_stage: 'C1',
+  intent_layer: 'C',
+  streak_q: 'Q2',
+  streak_len: '1',
+  qtu_from: 'db:iros_messages',
+  err: null
+}
+[IROS/messages][POST] nextStep strip {
+  rawText: '一回会話を投げます',
+  choiceId: null,
+  cleanText: '一回会話を投げます',
+  finalText: '一回会話を投げます'
+}
+[IROS/messages][POST] done { ms: 668 }
+ POST /api/agent/iros/messages 200 in 676ms (compile: 3ms, render: 674ms)
+⨯ ./src/lib/iros/orchestratorMode.ts:6:1
+Export IROS_MODES doesn't exist in target module
+[0m [90m  4 |[39m [90m// - ついでに「レポート寄り」のプレゼンヒントも meta に付与[39m
+ [90m  5 |[39m
+[31m[1m>[22m[39m[90m  6 |[39m [36mimport[39m {
+ [90m    |[39m [31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m
+[31m[1m>[22m[39m[90m  7 |[39m   [33mIROS_MODES[39m[33m,[39m
+ [90m    |[39m [31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m
+[31m[1m>[22m[39m[90m  8 |[39m   type [33mIrosMode[39m[33m,[39m
+ [90m    |[39m [31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m
+[31m[1m>[22m[39m[90m  9 |[39m   type [33mIrosMeta[39m[33m,[39m
+ [90m    |[39m [31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m
+[31m[1m>[22m[39m[90m 10 |[39m   type [33mTLayer[39m[33m,[39m
+ [90m    |[39m [31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m
+[31m[1m>[22m[39m[90m 11 |[39m } [36mfrom[39m [32m'./system'[39m[33m;[39m
+ [90m    |[39m [31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m
+ [90m 12 |[39m [36mimport[39m type { [33mIntentLineAnalysis[39m } [36mfrom[39m [32m'./intent/intentLineEngine'[39m[33m;[39m
+ [90m 13 |[39m
+ [90m 14 |[39m [90m/* ========= オプション型 ========= */[39m[0m
+
+The export IROS_MODES was not found in module [project]/src/lib/iros/system.ts [app-route] (ecmascript).
+Did you mean to import QCODE_VALUES?
+All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+
+Import trace:
+  App Route:
+    ./src/lib/iros/orchestratorMode.ts
+    ./src/lib/iros/orchestrator.ts
+    ./src/lib/iros/server/handleIrosReply.orchestrator.ts
+    ./src/lib/iros/server/handleIrosReply.ts
+    ./src/app/api/agent/iros/reply/route.ts
+
+
+ POST /api/agent/iros/reply 500 in 1198ms (compile: 1105ms, render: 93ms)
+ GET /iros-ai 200 in 79ms (compile: 5ms, render: 74ms)
+ POST /api/telemetry 500 in 17ms (compile: 6ms, render: 11ms)
+ GET /api/agent/iros/userinfo 500 in 47ms (compile: 20ms, render: 27ms)
+ POST /api/register-push 500 in 25ms (compile: 9ms, render: 16ms)
+ GET /api/agent/iros/conversations 500 in 25ms (compile: 15ms, render: 10ms)
+ GET /api/q/unified?user_code=669933 500 in 12ms (compile: 4ms, render: 8ms)
+ POST /api/register-push 500 in 10ms (compile: 4ms, render: 6ms)
+ POST /api/register-push 500 in 13ms (compile: 5ms, render: 7ms)
+ POST /api/register-push 500 in 12ms (compile: 4ms, render: 8ms)
+ GET /iros-ai 200 in 65ms (compile: 2ms, render: 63ms)
+ POST /api/telemetry 500 in 17ms (compile: 8ms, render: 9ms)
+ GET /api/agent/iros/userinfo 500 in 15ms (compile: 4ms, render: 11ms)
+ POST /api/register-push 500 in 17ms (compile: 9ms, render: 8ms)
+ GET /api/agent/iros/conversations 500 in 19ms (compile: 13ms, render: 6ms)
+ GET /api/q/unified?user_code=669933 500 in 12ms (compile: 5ms, render: 7ms)
+ POST /api/register-push 500 in 10ms (compile: 3ms, render: 7ms)
+ GET /iros-ai 200 in 54ms (compile: 1608µs, render: 53ms)
+ POST /api/telemetry 500 in 16ms (compile: 8ms, render: 9ms)
+ GET /api/agent/iros/userinfo 500 in 15ms (compile: 6ms, render: 9ms)
+ POST /api/register-push 500 in 14ms (compile: 7ms, render: 8ms)
+ GET /api/agent/iros/conversations 500 in 17ms (compile: 11ms, render: 6ms)
+ GET /api/q/unified?user_code=669933 500 in 16ms (compile: 6ms, render: 10ms)
+ POST /api/register-push 500 in 11ms (compile: 4ms, render: 6ms)
+ GET /iros-ai 200 in 38ms (compile: 1458µs, render: 36ms)
+ POST /api/telemetry 500 in 12ms (compile: 4ms, render: 8ms)
+ GET /api/agent/iros/userinfo 500 in 15ms (compile: 4ms, render: 11ms)
+ POST /api/register-push 500 in 47ms (compile: 13ms, render: 34ms)
+ GET /api/agent/iros/conversations 500 in 47ms (compile: 32ms, render: 15ms)
+ GET /api/q/unified?user_code=669933 500 in 11ms (compile: 5ms, render: 6ms)
+ POST /api/register-push 500 in 9ms (compile: 3ms, render: 6ms)
+ GET /iros-ai 200 in 78ms (compile: 1772µs, render: 76ms)
+ POST /api/telemetry 500 in 22ms (compile: 14ms, render: 8ms)
+ GET /api/agent/iros/userinfo 500 in 12ms (compile: 4ms, render: 8ms)
+ POST /api/register-push 500 in 15ms (compile: 9ms, render: 7ms)
+ GET /api/agent/iros/conversations 500 in 18ms (compile: 11ms, render: 7ms)
+ GET /api/q/unified?user_code=669933 500 in 10ms (compile: 4ms, render: 7ms)
+ POST /api/register-push 500 in 9ms (compile: 3ms, render: 6ms)
+ GET /iros-ai 200 in 56ms (compile: 4ms, render: 53ms)
+ GET /iros-ai 200 in 46ms (compile: 3ms, render: 44ms)
+ POST /api/telemetry 500 in 14ms (compile: 6ms, render: 8ms)
+ GET /api/agent/iros/userinfo 500 in 10ms (compile: 4ms, render: 6ms)
+ GET /api/agent/iros/conversations 500 in 20ms (compile: 12ms, render: 8ms)
+ POST /api/register-push 500 in 30ms (compile: 14ms, render: 16ms)
+ GET /api/q/unified?user_code=669933 500 in 11ms (compile: 3ms, render: 8ms)
+ POST /api/register-push 500 in 10ms (compile: 4ms, render: 6ms)
+ POST /api/register-push 500 in 25ms (compile: 10ms, render: 15ms)
+ GET /iros-ai 200 in 71ms (compile: 8ms, render: 63ms)
+ POST /api/telemetry 500 in 16ms (compile: 8ms, render: 8ms)
+ GET /api/agent/iros/userinfo 500 in 36ms (compile: 17ms, render: 19ms)
+ GET /api/agent/iros/conversations 500 in 13ms (compile: 7ms, render: 6ms)
+ POST /api/register-push 500 in 16ms (compile: 10ms, render: 6ms)
+ GET /api/q/unified?user_code=669933 500 in 34ms (compile: 15ms, render: 19ms)
+ POST /api/register-push 500 in 15ms (compile: 7ms, render: 8ms)
+ GET /iros-ai 200 in 70ms (compile: 6ms, render: 64ms)
+ POST /api/telemetry 500 in 14ms (compile: 8ms, render: 7ms)
+ GET /api/agent/iros/userinfo 500 in 32ms (compile: 15ms, render: 17ms)
+ GET /api/agent/iros/conversations 500 in 12ms (compile: 6ms, render: 6ms)
+ POST /api/register-push 500 in 17ms (compile: 9ms, render: 7ms)
+ GET /api/q/unified?user_code=669933 500 in 11ms (compile: 3ms, render: 7ms)
+ POST /api/register-push 500 in 13ms (compile: 4ms, render: 8ms)
+ GET /iros-ai 200 in 77ms (compile: 6ms, render: 71ms)
+ POST /api/telemetry 500 in 12ms (compile: 5ms, render: 7ms)
+ GET /api/agent/iros/userinfo 500 in 10ms (compile: 4ms, render: 6ms)
+ GET /api/agent/iros/conversations 500 in 12ms (compile: 4ms, render: 8ms)
+ POST /api/register-push 500 in 15ms (compile: 10ms, render: 6ms)
+ GET /api/q/unified?user_code=669933 500 in 9ms (compile: 3ms, render: 7ms)
+ POST /api/register-push 500 in 10ms (compile: 4ms, render: 6ms)

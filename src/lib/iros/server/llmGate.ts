@@ -21,6 +21,8 @@
 //
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import { IROS_FLAGS } from '@/lib/iros/config/flags';
+
 export type LlmGateDecision =
   | {
       entry: 'SKIP_POLICY';
@@ -463,15 +465,9 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
 
   // (E) ✅ Phase11：FINAL slotPlan は原則 CALL_LLM（本文採用は禁止、seedのみ渡す）
   if (slotsOk && policy === 'FINAL') {
-    console.warn('[IROS/LLM_GATE][FINAL_FORCE_CALL]', {
-      conversationId,
-      userCode,
-      slotPlanPolicy: policy,
-      slotPlanLen,
-      hasSlots,
-      effectiveLen,
-      head: head(effectiveText, 80),
-    });
+    // ✅ feature flag（import重複事故を避けるため dynamic import）
+    const retryFinalForceCall = IROS_FLAGS.retryFinalForceCall;
+
 
     // ✅ CALL_LLM のときだけ：SHIFT + CTX + OBS + SEED_TEXT を組んで rewriteSeed に渡す
     const userTextForSeed =
@@ -487,6 +483,43 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
         })
       : null;
 
+    // --- ここがスイッチ ---
+    // retryFinalForceCall=false のとき：
+    // - “FINAL_FORCE_CALL” 扱い（finalForceCall:true）をやめる
+    // - ただし CALL_LLM は維持して会話停止を増やさない
+    if (!retryFinalForceCall) {
+      console.warn('[IROS/LLM_GATE][FINAL_CALL][NO_FORCE]', {
+        conversationId,
+        userCode,
+        slotPlanPolicy: policy,
+        slotPlanLen,
+        hasSlots,
+        effectiveLen,
+        head: head(effectiveText, 80),
+      });
+
+      return mk(
+        {
+          entry: 'CALL_LLM',
+          reason: 'FINAL_CALL (force disabled by IROS_RETRY_FINAL_FORCE_CALL=false)',
+          resolvedText: null, // ✅ 新憲法：CALL_LLM は本文採用禁止
+          rewriteSeed: rewriteSeedFinal,
+        },
+        { finalForceCall: false, finalForceCallReason: 'FINAL_CALL_NO_FORCE' },
+      );
+    }
+
+    // ✅ 既存挙動：FINAL_FORCE_CALL（従来通り）
+    console.warn('[IROS/LLM_GATE][FINAL_FORCE_CALL]', {
+      conversationId,
+      userCode,
+      slotPlanPolicy: policy,
+      slotPlanLen,
+      hasSlots,
+      effectiveLen,
+      head: head(effectiveText, 80),
+    });
+
     return mk(
       {
         entry: 'CALL_LLM',
@@ -497,6 +530,7 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
       { finalForceCall: true, finalForceCallReason: 'FINAL_FORCE_CALL' },
     );
   }
+
 
   // (F) slots があるが policy が UNKNOWN：守りで CALL_LLM（seed を渡す）
   if (slotsOk) {

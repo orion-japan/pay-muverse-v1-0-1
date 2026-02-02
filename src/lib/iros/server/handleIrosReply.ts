@@ -259,16 +259,41 @@ async function loadConversationHistory(
 
     const rows = (data ?? []).slice().reverse();
 
-    const history = rows.map((m: any) => ({
-      role: m?.role,
-      content:
-        typeof m?.content === 'string' && m.content.trim().length > 0
-          ? m.content
-          : typeof m?.text === 'string'
-            ? m.text
-            : '',
-      meta: m?.meta && typeof m.meta === 'object' ? m.meta : undefined,
-    }));
+    const pickTextFromRow = (m: any): string => {
+      // 1) content が文字列なら最優先
+      if (typeof m?.content === 'string' && m.content.trim().length > 0) return m.content.trim();
+
+      // 2) text が文字列なら採用
+      if (typeof m?.text === 'string' && m.text.trim().length > 0) return m.text.trim();
+
+      // 3) content が object の場合：安全に “中の文字列候補” だけ拾う（stringifyは禁止）
+      const c = m?.content;
+      if (c && typeof c === 'object') {
+        const cText =
+          (typeof (c as any)?.text === 'string' && (c as any).text.trim().length > 0
+            ? (c as any).text
+            : null) ??
+          (typeof (c as any)?.content === 'string' && (c as any).content.trim().length > 0
+            ? (c as any).content
+            : null) ??
+          null;
+
+        if (cText) return String(cText).trim();
+      }
+
+      return '';
+    };
+
+    const history = rows
+      .map((m: any) => {
+        const text = pickTextFromRow(m);
+        return {
+          role: m?.role,
+          text, // ✅ sanitizeHistoryForTurn が最優先で見る正本
+          meta: m?.meta && typeof m.meta === 'object' ? m.meta : undefined,
+        };
+      })
+      .filter((x: any) => typeof x?.text === 'string' && x.text.trim().length > 0);
 
     console.log('[IROS/History] loaded', {
       conversationId,
@@ -360,19 +385,14 @@ const dbHistory = await loadRecentHistoryAcrossConversations({
   supabase: supabaseClient,
   userCode,
 
-  // cross-conv 全体の取得上限（historyX側で same/cross に切り分けて絞る）
   limit: 120,
 
-  // ✅ これが “sameConvId” のキーになる（無いと same は作れない）
-  excludeConversationId: conversationId,
+  // ❌ ここは Phase1 では渡さない（same を混ぜるのに除外すると矛盾する）
+  // excludeConversationId: conversationId,
 
-  // ✅ Phase1: 同一conversationを混ぜる
   includeSameConversation: true,
-
-  // ✅ Phase1: 同一conversationの直近
   sameConversationLimit: 8,
 
-  // ✅ Phase1: cross-conv は補助
   crossConversationLimit: 60,
 });
 
@@ -2428,15 +2448,22 @@ const hasSlotsLocal =
   Array.isArray((out.metaForSave as any)?.slotPlan) &&
   (out.metaForSave as any).slotPlan.length > 0;
 
-const internalMarkersOnly =
-  Number.isFinite(slotTextCleanedLen) &&
-  Number.isFinite(slotTextRawLen) &&
-  slotTextRawLen > 0 &&
-  slotTextCleanedLen === 0;
 
+
+
+const internalMarkersOnly =
+Number.isFinite(slotTextCleanedLen) &&
+Number.isFinite(slotTextRawLen) &&
+slotTextRawLen > 0 &&
+slotTextCleanedLen === 0;
+
+// ✅ dots-only（'…' / '……' / '...'）も “空扱い” に含める
+// - これが無いと bodyNow='……' の瞬間に emptyLikeNow=false になり、writer/blocks が走らず “……” が残る
 const emptyLikeNow =
-  !bodyNow ||
-  internalMarkersOnly;
+!bodyNow ||
+isDotsOnly(bodyNow) ||
+internalMarkersOnly;
+
 
 
 

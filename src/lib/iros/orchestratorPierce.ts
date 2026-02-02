@@ -1,7 +1,7 @@
 // src/lib/iros/orchestratorPierce.ts
 // I層 Piercing 判定 + SelfAcceptance による Priority 補正
 
-import type { Depth } from './system';
+import type { Depth } from '@/lib/iros/system';
 import { deriveIrosPriority } from './will/priorityEngine';
 import { classifySelfAcceptance } from './orchestratorMeaning';
 

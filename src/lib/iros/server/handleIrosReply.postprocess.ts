@@ -607,29 +607,113 @@ export async function postProcessReply(
         // 露出OKの核：まずは userText をそのまま1行（deterministic / 憶測なし）
         const coreLine = String(userText ?? '').replace(/\s+/g, ' ').trim();
 
-        // ✅ seed（writerへ）:
-        // - 通常：slotText のまま
-        // - cleaned が空になりそうなケース：@行の後ろに coreLine を1行だけ足す
-        const seedForWriter =
-          coreLine.length > 0 && /(^|\n)\s*@/m.test(slotTextStr) && /^\s*@/m.test(slotTextStr) &&
-          slotTextStr
-            .split('\n')
-            .map((l) => String(l ?? '').trim())
-            .filter(Boolean)
-            .every((l) => l.startsWith('@'))
-            ? `${slotTextStr}\n${coreLine}`
-            : slotTextStr;
 
-        const rawLines = seedForWriter.split('\n');
-        const cleanedLines = rawLines
-          .map((l) => String(l ?? '').trim())
-          .filter((l) => l.length > 0 && !l.startsWith('@'));
-        const cleanedSlotText = cleanedLines.join('\n').trim();
+// ✅ seed（writerへ）:
+// - 目的：clean後が極小（例: 13文字）になる状態を避ける
+// - 方針：核（coreLine）は「生行」では混ぜない。@SEED_TEXT として混ぜて “cleaned=0” を維持する
+const seedForWriter = (() => {
+  const base = String(slotTextStr ?? '');
 
-        const hadInternalMarkers = /(^|\n)\s*@/m.test(seedForWriter);
-        const cleanedApplied = hadInternalMarkers && cleanedSlotText.length !== seedForWriter.length;
+  const core = String(coreLine ?? '').trim();
+  if (!core) return base;
+
+  const rawLines0 = base.split('\n');
+  const cleanedLines0 = rawLines0
+    .map((l) => String(l ?? '').trim())
+    .filter((l) => l.length > 0 && !l.startsWith('@'));
+  const cleaned0 = cleanedLines0.join('\n').trim();
+
+  // ✅ 閾値：cleaned が短いと writer seed が薄くなる（今回: 13）
+  const CLEAN_MIN = 48;
+
+  // 既に coreLine 相当が含まれているなら二重に入れない
+  // ※ 生行としては混ぜないので、@SEED_TEXT の JSON に入った core を検出する
+  const coreEscapedForJson = core.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const alreadyHasCore =
+    base.includes(`"text":"${coreEscapedForJson}"`) || cleaned0.includes(core);
+
+  if (alreadyHasCore) return base;
+
+  if (cleaned0.length < CLEAN_MIN) {
+    // core は @行として1行だけ追記（commit露出防止）
+    const seedLine = `@SEED_TEXT ${JSON.stringify({ text: core })}`;
+    return `${base}\n${seedLine}`.trim();
+  }
+
+  return base;
+})();
+
+const rawLines = String(seedForWriter ?? '').split('\n');
+const cleanedLines = rawLines
+  .map((l) => String(l ?? '').trim())
+  .filter((l) => l.length > 0 && !l.startsWith('@'));
+const cleanedSlotText = cleanedLines.join('\n').trim();
+
+const hadInternalMarkers = /(^|\n)\s*@/m.test(seedForWriter);
+const cleanedApplied = hadInternalMarkers && cleanedSlotText.length !== seedForWriter.length;
+
+// ✅ 観測ログ（seedForWriter / cleanedSlotText 確定後なのでTS安全）
+{
+  const core = String(coreLine ?? '').trim();
+  console.log('[IROS/PostProcess][SEED_CORE]', {
+    coreLineLen: core.length,
+    seedHasCore: core ? seedForWriter.includes(core) : false,
+    seedLen: seedForWriter.length,
+    cleanedLen: cleanedSlotText.length,
+    cleanedApplied,
+    hadInternalMarkers,
+  });
+}
+
 
         // ✅ LLMへ渡す seed を保存（writerへ）
+        // - @Q_SLOT / @OBS などの内部ラッパが混入すると writer の seedDraftHead に出てしまうため
+        //   ここで “本文seed” に正規化して保存する
+        function sanitizeLlmRewriteSeed(seedRaw: unknown): string {
+          const s = String(seedRaw ?? '').trim();
+          if (!s) return '';
+
+          // 1) @Q_SLOT {...} を拾って seed_text / content を抜く（複数行もOK）
+          const parts: string[] = [];
+          const reQ = /@Q_SLOT\s+(\{.*?\})(?:\n|$)/gms;
+          let m: RegExpExecArray | null = null;
+          while ((m = reQ.exec(s))) {
+            try {
+              const obj = JSON.parse(m[1]);
+              const t = String(obj?.seed_text ?? obj?.content ?? '').trim();
+              if (t) parts.push(t);
+            } catch {
+              // ignore
+            }
+          }
+          if (parts.length > 0) return parts.join('\n').trim();
+
+          // 2) @OBS {...} なら user を抜く
+          const mObs = s.match(/^@OBS\s+(\{.*\})\s*$/s);
+          if (mObs) {
+            try {
+              const obj = JSON.parse(mObs[1]);
+              const t = String(obj?.user ?? obj?.text ?? '').trim();
+              if (t) return t;
+            } catch {
+              // ignore
+            }
+          }
+
+          // 3) 最後の保険：@で始まる行（内部マーカー）を落としてプレーン化
+          const plain = s
+            .split('\n')
+            .map((x) => x.trimEnd())
+            .filter((line) => line.trim().length > 0 && !line.trim().startsWith('@'))
+            .join('\n')
+            .trim();
+
+          return plain;
+        }
+
+        const seedForWriterRaw = seedForWriter;
+        const seedForWriterSanitized = sanitizeLlmRewriteSeed(seedForWriterRaw);
+
         metaForSave.extra = {
           ...(metaForSave.extra ?? {}),
           slotPlanPolicy_detected: det.policy,
@@ -644,11 +728,11 @@ export async function postProcessReply(
           slotTextDroppedLines: Math.max(0, rawLines.length - cleanedLines.length),
 
           // ✅ seed 保存（writerへ）
-          llmRewriteSeed: seedForWriter,
+          llmRewriteSeed: seedForWriterSanitized,
+          llmRewriteSeedRaw: seedForWriterRaw, // デバッグ用（必要なら後で消す）
           llmRewriteSeedFrom: 'postprocess(slotPlan->writer-seed)',
           llmRewriteSeedAt: new Date().toISOString(),
         };
-
 
         // ✅ allowLLM=false のときだけ deterministic commit（会話停止を防ぐ）
         // - それ以外は本文をここで作らず、writerへ回す（憲法の「航海士」）

@@ -4,7 +4,7 @@
 // - 目的：orchestrator の肥大化を止め、ログ差し込み点を固定する
 // - 重要：挙動は変えない（meta の補完・soulNote の格納ルールを保持）
 
-import type { Depth, QCode, IrosMeta } from './system';
+import type { Depth, QCode, IrosMeta } from '@/lib/iros/system';
 
 import { shouldUseSoul } from './soul/shouldUseSoul';
 import { runIrosSoul } from './soul/runIrosSoul';

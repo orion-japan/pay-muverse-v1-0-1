@@ -5,7 +5,7 @@
 // - 重要：normalizeDepthStrict / normalizeQCode は orchestrator.ts 側の同実装を使う（単一ソース）
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Depth, QCode, IrosMeta, IrosStyle } from './system';
+import type { Depth, QCode, IrosMeta, IrosStyle } from '@/lib/iros/system';
 import { loadBaseMetaFromMemoryState, type LoadStateResult } from './orchestratorState';
 import type { SpinLoop, SpinStep } from './types';
 

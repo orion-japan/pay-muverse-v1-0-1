@@ -135,7 +135,13 @@ function buildCompose(userText: string): NormalChatSlot[] {
       key: 'TASK',
       role: 'assistant',
       style: 'neutral',
-      content: m('TASK', { kind: 'compose', user: clamp(t, 240) }),
+      content: m('TASK', {
+        kind: 'compose',
+        user: clamp(t, 240),
+
+        // ✅ writer専用の“核”をpayloadに埋める（自然文は混ぜない＝commit露出しない）
+        seed_text: clamp(t, 240),
+      }),
     },
     {
       key: 'DRAFT',
@@ -152,6 +158,7 @@ function buildCompose(userText: string): NormalChatSlot[] {
     },
   ];
 }
+
 
 // ✅ clarify：テンプレ自然文を出さない。LLMに “意味に答える” を許可するだけ。
 function buildClarify(userText: string): NormalChatSlot[] {
@@ -180,22 +187,24 @@ function buildClarify(userText: string): NormalChatSlot[] {
 
   return [
     {
-      key: 'OBS',
-      role: 'assistant',
-      style: 'soft',
-      content: m('OBS', { user: clamp(t, 240), kind: 'clarify', intent: 'answer_the_question' }),
-    },
-    {
       key: 'SHIFT',
       role: 'assistant',
       style: 'neutral',
       content: m('SHIFT', {
-        kind: 'semantic_answer',
-        output_contract: pickRandom(contracts),
-        forbid: ['diagnosis', 'preach', 'hard_guidance', 'forced_task'],
-        questions_max: 1,
+        kind: 'clarify',
+        intent: 'answer_the_question',
+        rules: {
+          answer_user_meaning: true,
+          keep_it_simple: true,
+          questions_max: 1,
+        },
+        allow: { concrete_reply: true, short_reply_ok: true },
+
+        // ✅ writer専用の“核”を @行payloadに埋める（自然文は混ぜない＝commit露出しない）
+        seed_text: clamp(norm(userText), 240),
       }),
     },
+
   ];
 }
 
@@ -203,14 +212,24 @@ function buildClarify(userText: string): NormalChatSlot[] {
 function buildQuestion(userText: string, contextText?: string): NormalChatSlot[] {
   const slots = buildQuestionSlots({ userText, contextText });
 
+  // ✅ writer専用の“核”（自然文は混ぜない＝commit露出しない）
+  const seedText = clamp(norm(userText), 240);
+  const ctxText = contextText ? clamp(norm(contextText), 240) : null;
+
   return slots.map((s) => {
     const raw = String((s as any)?.content ?? '');
+
     // QuestionSlots 側が自然文を返しても、ここで必ず @ 化して本文commitを防ぐ
-    const payload = {
+    const payload: Record<string, unknown> = {
       key: String((s as any)?.key ?? 'Q'),
       style: String((s as any)?.style ?? 'neutral'),
       content: clamp(norm(raw), 400),
+
+      // ✅ writer seed 用（@payloadの中なので cleaned では落ちるが、writer が拾える）
+      seed_text: seedText,
+      context_text: ctxText,
     };
+
     return {
       key: String((s as any)?.key ?? 'Q'),
       role: 'assistant',
@@ -219,6 +238,7 @@ function buildQuestion(userText: string, contextText?: string): NormalChatSlot[]
     };
   });
 }
+
 
 // ✅ normalChat の通常フロー：意味にあった返答を最優先で書かせる（本文はLLM）
 function buildFlowReply(
@@ -278,9 +298,17 @@ function buildFlowReply(
       key: 'SHIFT',
       role: 'assistant',
       style: 'neutral',
-      content: m('SHIFT', pickRandom(shiftVariants)),
+      content: m('SHIFT', {
+        ...pickRandom(shiftVariants),
+
+        // ✅ writer専用の“核”を @行に埋める（自然文は混ぜない＝commit露出しない）
+        // - 目的：slotTextCleanedLen が極小になって writer seed が薄くなるのを防ぐ
+        // - 憶測しない：ユーザー原文をそのまま短く渡すだけ
+        seed_text: clamp(norm(t), 240),
+      }),
     },
   ];
+
 }
 
 // --------------------------------------------------

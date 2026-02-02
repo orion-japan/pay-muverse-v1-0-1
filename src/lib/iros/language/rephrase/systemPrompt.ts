@@ -19,32 +19,6 @@ export function systemPromptForFullReply(args?: {
   // - 'GUIDE_I'：I許可（短い言い切り）
   personaMode?: 'GROUND' | 'DELIVER' | 'GUIDE_I';
 }): string {
-  // =========================================================
-  // 実行確認ログ（systemPrompt が「実際に呼ばれた」証拠）
-  // =========================================================
-  try {
-    console.log('[IROS/systemPrompt][CALLED]', {
-      directTask: Boolean(args?.directTask),
-      itOk: Boolean(args?.itOk),
-      personaMode: args?.personaMode ?? null,
-      intentBand: args?.band?.intentBand ?? null,
-      tLayerHint: args?.band?.tLayerHint ?? null,
-      lockedILinesLen: Array.isArray(args?.lockedILines)
-        ? args!.lockedILines!.length
-        : 0,
-    });
-  } catch {}
-
-  console.log('[IROS/systemPrompt][CALLED]', {
-    directTask: Boolean(args?.directTask),
-    itOk: Boolean(args?.itOk),
-    personaMode: args?.personaMode ?? null,
-    intentBand: args?.band?.intentBand ?? null,
-    tLayerHint: args?.band?.tLayerHint ?? null,
-    lockedILinesLen: Array.isArray(args?.lockedILines) ? args?.lockedILines.length : null,
-  });
-
-
   const directTask = Boolean(args?.directTask);
   const itOk = Boolean(args?.itOk);
   const band = args?.band ?? null;
@@ -58,6 +32,20 @@ export function systemPromptForFullReply(args?: {
   const personaMode: 'GROUND' | 'DELIVER' | 'GUIDE_I' =
     args?.personaMode ??
     (directTask ? 'DELIVER' : allowIStyle ? 'GUIDE_I' : 'GROUND');
+
+  // =========================================================
+  // 実行確認ログ（systemPrompt が「実際に呼ばれた」証拠）
+  // =========================================================
+  try {
+    console.log('[IROS/systemPrompt][CALLED]', {
+      directTask,
+      itOk,
+      personaMode,
+      intentBand: b,
+      tLayerHint: h,
+      lockedILinesLen: Array.isArray(args?.lockedILines) ? args!.lockedILines!.length : 0,
+    });
+  } catch {}
 
   // =========================================================
   // 上位人格定義：Sofia（露出禁止）
@@ -178,14 +166,7 @@ export function systemPromptForFullReply(args?: {
       ].join('\n')
     : '';
 
-  return [
-    sofiaPersona,
-    base,
-    bandInfo,
-    lockRule,
-    iStyleRule,
-    persona,
-  ]
+  return [sofiaPersona, base, bandInfo, lockRule, iStyleRule, persona]
     .filter(Boolean)
     .join('\n');
 }

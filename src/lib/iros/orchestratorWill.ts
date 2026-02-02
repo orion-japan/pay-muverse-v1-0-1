@@ -2,8 +2,8 @@
 // iros Orchestrator — Will パート集約
 // - Goal / Continuity / Priority / SA補正 をまとめて扱うヘルパー
 
-import type { Depth, QCode, IrosMode } from './system';
-import { DEPTH_VALUES } from './system';
+import type { Depth, QCode, IrosMode } from '@/lib/iros/system';
+import { DEPTH_VALUES } from '@/lib/iros/system';
 
 import { deriveIrosGoal } from './will/goalEngine';
 import type { IrosGoalKind } from './will/goalEngine';

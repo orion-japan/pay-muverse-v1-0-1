@@ -2,7 +2,7 @@
 // J) DescentGate + Frame + Slots（7.5）を切り出し（behavior-preserving）
 // + 4軸運用：T→C / C優先 / I還りは条件付き / anchor無しの雑談はSへ
 
-import type { IrosMeta } from './system';
+import type { IrosMeta } from '@/lib/iros/system';
 
 import { classifyInputKind } from './language/inputKind';
 import { selectFrame, type FrameKind } from './language/frameSelector';

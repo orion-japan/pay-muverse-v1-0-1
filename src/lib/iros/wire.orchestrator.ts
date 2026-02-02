@@ -11,7 +11,7 @@ import {
   type Depth,
   type QCode,
   type IrosMeta,
-} from './system';
+} from '@/lib/iros/system';
 import { applyWillDepthDrift } from './willEngine';
 import { SUPABASE_URL, SERVICE_ROLE } from '@/lib/authz';
 

@@ -5,7 +5,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import type { Depth, QCode, IrosMeta } from './system';
+import type { Depth, QCode, IrosMeta } from '@/lib/iros/system';
 import { loadIrosMemoryState, type IrosMemoryState } from './memoryState';
 
 export type LoadStateResult = {

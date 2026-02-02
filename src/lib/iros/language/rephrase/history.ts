@@ -328,23 +328,62 @@ export function extractLastTurnsFromContext(userContext: unknown): TurnMsg[] {
   };
 
   let normalized: TurnMsg[] = [];
+  let pickedFrom: 'turns' | 'historyForWriter' | 'historyMessages' | 'none' = 'none';
 
   // 1) turns/chat（ただし片側しか無いなら採用しない）
   if (rawTurns) {
     const n = normalizeRoleContentArray(rawTurns);
-    if (n.length > 0 && hasBothRoles(n)) normalized = n;
+    if (n.length > 0 && hasBothRoles(n)) {
+      normalized = n;
+      pickedFrom = 'turns';
+    }
   }
 
   // 2) historyForWriter
   if (normalized.length === 0 && rawHistoryForWriter) {
     const n = normalizeRoleContentArray(rawHistoryForWriter);
-    if (n.length > 0) normalized = n;
+    if (n.length > 0) {
+      normalized = n;
+      pickedFrom = 'historyForWriter';
+    }
   }
 
   // 3) historyMessages/messages/history
-  if (normalized.length === 0) normalized = extractHistoryMessagesFromContext(ctx);
-  if (normalized.length === 0) return [];
+  if (normalized.length === 0) {
+    const n = extractHistoryMessagesFromContext(ctx);
+    if (n.length > 0) {
+      normalized = n;
+      pickedFrom = 'historyMessages';
+    }
+  }
 
-  return takeTailWithBalance(normalized, maxMsgs);
+  if (normalized.length === 0) {
+    console.log('[IROS/rephraseHistory][LAST_TURNS_PICK]', {
+      pickedFrom: 'none',
+      maxMsgs,
+      hasTurns: Array.isArray(rawTurns) ? rawTurns.length : 0,
+      hasHistoryForWriter: Array.isArray(rawHistoryForWriter) ? rawHistoryForWriter.length : 0,
+    });
+    return [];
+  }
+
+  // ここが “最終採用”
+  const picked = takeTailWithBalance(normalized, maxMsgs);
+
+  // ✅ 追加ログ：どこから採ったか／role が壊れてないか
+  console.log('[IROS/rephraseHistory][LAST_TURNS_PICK]', {
+    pickedFrom,
+    maxMsgs,
+    rawTurnsLen: Array.isArray(rawTurns) ? rawTurns.length : 0,
+    rawHistoryForWriterLen: Array.isArray(rawHistoryForWriter) ? rawHistoryForWriter.length : 0,
+    normalizedLen: normalized.length,
+    pickedLen: picked.length,
+    roles: picked.map((x) => x.role),
+    tailHeads: picked.slice(-3).map((x) => String(x?.content ?? '').slice(0, 60)),
+
+  });
+
+  return picked;
 }
+
 

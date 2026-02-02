@@ -5,7 +5,7 @@
 // - QCode(Q1〜Q5)
 // をざっくり推定する軽量アルゴリズム
 
-import type { Depth, QCode } from './system';
+import type { Depth, QCode } from '@/lib/iros/system';
 
 export type DeepScanResult = {
   depth: Depth | null;

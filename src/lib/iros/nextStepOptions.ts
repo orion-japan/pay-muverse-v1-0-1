@@ -9,7 +9,7 @@
 //    「押したら IT言語を出す」の実体は renderReply 側（renderMode='IT'）責務。
 //    ここは “ボタン定義と付与meta” だけ。
 
-import type { Depth, IrosMode } from './system';
+import type { Depth, IrosMode } from '@/lib/iros/system';
 
 /**
  * 三軸ギアのレベル

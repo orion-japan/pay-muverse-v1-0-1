@@ -10,7 +10,7 @@ import {
   type QCode,
   DEPTH_VALUES,
   QCODE_VALUES,
-} from './system';
+} from '@/lib/iros/system';
 
 /* ========= 型定義 ========= */
 

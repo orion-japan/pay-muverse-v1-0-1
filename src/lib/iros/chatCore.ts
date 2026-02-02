@@ -16,7 +16,7 @@ import type {
   IrosCredit,
 } from './types';
 
-import type { IrosMode, Depth } from './system';
+import type { IrosMode, Depth } from '@/lib/iros/system';
 import { runIrosTurn } from './orchestrator';
 
 // 旧コード互換用の別名

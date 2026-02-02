@@ -1355,5 +1355,47 @@ if (String(content ?? '').trim() === '') {
   // ✅ Phase11 marker（ロード証明）
   console.warn('[IROS/renderGateway][REV]', JSON.stringify({ rev: IROS_RENDER_GATEWAY_REV }));
 
+  // ✅ 重要：pickedFrom=rephraseBlocks のとき、commit本文（extra.finalAssistantText）が “……” のまま残ると
+  // route 側の永続化が “……” を選んでしまう。ここで確定本文を同期して止血する。
+  try {
+    const extraAny = (meta as any)?.extra as any;
+    const pickedFrom = String((meta as any)?.pickedFrom ?? '');
+    const c = String(content ?? '').trim();
+
+    if (extraAny && pickedFrom === 'rephraseBlocks' && c) {
+      const prev = String(extraAny.finalAssistantText ?? '').trim();
+
+      const prevLooksEmptyLike =
+        prev === '' ||
+        prev === '…' ||
+        prev === '……' ||
+        prev === '...' ||
+        prev === '..' ||
+        prev.length <= 2;
+
+      if (prevLooksEmptyLike) {
+        // 永続化で参照されがちなキー群を “確定本文” に寄せる（directive は content 側で既に除去済み）
+        extraAny.finalAssistantText = c;
+        extraAny.finalAssistantTextCandidate = c;
+        extraAny.assistantText = c;
+        extraAny.resolvedText = c;
+        extraAny.rawTextFromModel = c;
+        extraAny.extractedTextFromModel = c;
+
+        // ✅ 追加：Len 系も同期（finalAssistantTextLen が 2 のまま残る事故を止血）
+        extraAny.finalAssistantTextLen = c.length;
+        extraAny.finalAssistantTextCandidateLen = c.length;
+        extraAny.assistantTextLen = c.length;
+        extraAny.resolvedTextLen = c.length;
+        extraAny.rawTextFromModelLen = c.length;
+        extraAny.extractedTextFromModelLen = c.length;
+
+        // 追跡用（既存の分析には影響しない文字列フラグ）
+        extraAny.finalTextPolicy = 'RENDERGW__SYNC_FROM_REPHRASE';
+      }
+    }
+  } catch {}
+
   return { content, meta };
 }
+

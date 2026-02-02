@@ -4,7 +4,7 @@
 // - 「どのレイヤーで応答するか」を決める
 // - LLM呼び出しはここでは行わず、上位の orchestrator.ts に委ねる
 
-import type { Depth, QCode } from './system';
+import type { Depth, QCode } from '@/lib/iros/system';
 
 /**
  * Iros がどのレイヤーで応答したか

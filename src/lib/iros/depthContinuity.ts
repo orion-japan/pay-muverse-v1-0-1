@@ -1,7 +1,7 @@
 // src/lib/iros/depthContinuity.ts
 // Depth / Q の連続性補正ロジックを単独モジュールに分離
 
-import type { Depth, QCode } from './system';
+import type { Depth, QCode } from '@/lib/iros/system';
 
 // Depth の順序マップ（S1 → I3 を 0〜11 として扱う）
 const DEPTH_ORDER: Depth[] = [
