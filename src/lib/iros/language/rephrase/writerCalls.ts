@@ -1,3 +1,8 @@
+// =============================================
+// file: src/lib/iros/language/rephrase/writerCalls.ts
+// ✅ buildFirstPassMessages を「最後 user で終わる」ように拡張
+// =============================================
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { chatComplete } from '../../../llm/chatComplete';
@@ -23,18 +28,23 @@ function turnsToMessages(turns?: TurnMsg[] | null): WriterMessage[] {
 }
 
 /**
- * ✅ 1st pass: system + (internalPack as user) + turns
+ * ✅ 1st pass: system + (internalPack as user) + turns + (finalUserText as user)
  * - internalPack は常に user（system にしない）
  * - internalPack を最後に置かない（user,user 連投や会話崩れを防ぐ）
+ * - ✅ 最後は必ず user で終わらせる（ChatCompletions の基本形を保証）
  */
 export function buildFirstPassMessages(args: {
   systemPrompt: string;
   internalPack: string;
   turns?: TurnMsg[] | null;
+
+  // ✅ 追加：最後に user として置く本文（通常は userText or seedDraft）
+  finalUserText?: string | null;
 }): WriterMessage[] {
   const systemPrompt = String(args.systemPrompt ?? '');
   const internalPack = norm(args.internalPack ?? '');
   const turns = turnsToMessages(args.turns);
+  const finalUserText = norm(args.finalUserText ?? '');
 
   const out: WriterMessage[] = [{ role: 'system', content: systemPrompt }];
 
@@ -43,6 +53,13 @@ export function buildFirstPassMessages(args: {
 
   // 直近ターン（会話の流れ）
   out.push(...turns);
+
+  // ✅ 最後を user で終わらせる
+  if (finalUserText) {
+    const last = out[out.length - 1];
+    const sameAsLastUser = last?.role === 'user' && norm(last?.content) === finalUserText;
+    if (!sameAsLastUser) out.push({ role: 'user', content: finalUserText });
+  }
 
   return out;
 }
@@ -115,3 +132,23 @@ export async function callWriterLLM(args: {
 
   return String(out ?? '');
 }
+
+
+// =============================================
+// file: src/lib/iros/language/rephrase/rephraseEngine.full.ts
+// ✅ buildFirstPassMessages 呼び出しに finalUserText を渡す
+// （該当1行だけ置き換え）
+// =============================================
+//
+// 変更前：
+// const messages = buildFirstPassMessages({ systemPrompt, internalPack, turns: lastTurnsSafe });
+//
+// 変更後：
+/*
+const messages = buildFirstPassMessages({
+  systemPrompt,
+  internalPack,
+  turns: lastTurnsSafe,
+  finalUserText: seedDraft || userText,
+});
+*/
