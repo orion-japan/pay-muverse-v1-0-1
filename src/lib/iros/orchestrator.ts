@@ -1021,10 +1021,23 @@ export async function runIrosTurn(
         ? slotPlanPolicyRaw.trim()
         : null;
 
-    // 3) SILENCE 判定
-    const speechAct = String((meta as any)?.speechAct ?? '').toUpperCase();
-    const speechAllowLLM = (meta as any)?.speechAllowLLM;
-    const isSilence = speechAct === 'SILENCE' || speechAllowLLM === false;
+// 3) SILENCE 判定（extra を単一ソース寄りに優先）
+const ex =
+  meta && typeof meta === 'object' && (meta as any).extra && typeof (meta as any).extra === 'object'
+    ? (meta as any).extra
+    : null;
+
+const speechAct = String(ex?.speechAct ?? (meta as any)?.speechAct ?? '').toUpperCase();
+
+const speechAllowLLM =
+  typeof ex?.speechAllowLLM === 'boolean'
+    ? ex.speechAllowLLM
+    : typeof (meta as any)?.speechAllowLLM === 'boolean'
+      ? (meta as any).speechAllowLLM
+      : null;
+
+const isSilence = speechAct === 'SILENCE' || speechAllowLLM === false;
+
 
     // 4) 空判定
     const hasText = String(text ?? '').trim().length > 0;
@@ -1201,22 +1214,23 @@ if (!isIrDiagnosisTurn_here) {
       (mergedBaseMeta as any)?.situationSummary ??
       null;
 
-    console.log('[IROS/ORCH][counsel-picked]', {
-      stage: 'OPEN',
-      modeRaw,
-      forcedCounsel,
-      shouldUseCounselByStructure: !forcedCounsel && !isCounselMode,
-      hasText: hasTextForCounsel,
-      isSilence,
-      strippedLen: forcedCounsel ? String(strippedText ?? '').length : null,
-      lastSummary_len: typeof lastSummary === 'string' ? lastSummary.length : null,
-    });
+      console.log('[IROS/ORCH][counsel-picked]', {
+        stage: 'OPEN',
+        modeRaw,
+        forcedCounsel,
+        shouldUseCounselByStructure: !forcedCounsel && !isCounselMode,
+        hasText: hasTextForCounsel,
+        isSilence,
+        strippedLen: forcedCounsel ? String(strippedText ?? '').length : null,
+        lastSummary_len: typeof lastSummary === 'string' ? lastSummary.length : null,
+      });
 
-    const counsel = buildCounselSlotPlan({
-      userText: textForCounsel, // ✅ strip後
-      stage: 'OPEN',
-      lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
-    });
+      const counsel = buildCounselSlotPlan({
+        userText: textForCounsel, // ✅ strip後
+        stage: 'OPEN',
+        lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
+      });
+
 
     const cSlots = (counsel as any).slots;
     const cPolicy = (counsel as any).slotPlanPolicy;
@@ -1265,12 +1279,96 @@ if (!isIrDiagnosisTurn_here) {
       (mergedBaseMeta as any)?.situationSummary ??
       null;
 
+// ✅ IntentBridge laneKey を確定させてから normalChat fallback に渡す
+// - ここは「slotPlan を組む直前」なので downstream（normalChat）が確実に拾える
+// - userText はログに出さない（intentBridge 側が担保）
+// - fixedNorth と intent_anchor を混線させない：fixedNorth.key を優先
+{
+  const ex =
+    meta && typeof meta === 'object' && (meta as any).extra && typeof (meta as any).extra === 'object'
+      ? (meta as any).extra
+      : ((meta as any).extra = {});
+
+  const depthStageNow =
+    (meta as any)?.depthStage ?? (meta as any)?.depth ?? null;
+
+  const phaseNow =
+    (meta as any)?.phase ?? null;
+
+  const fixedNorthKeyNow =
+    typeof (meta as any)?.fixedNorth?.key === 'string'
+      ? String((meta as any).fixedNorth.key)
+      : typeof (meta as any)?.fixedNorth === 'string'
+        ? String((meta as any).fixedNorth)
+        : null;
+
+  // deepenOk は取れれば渡す（取れない場合は undefined）
+  const deepenOkNow =
+    (meta as any)?.itTrigger?.flags?.deepenOk ??
+    (meta as any)?.it?.flags?.deepenOk ??
+    (meta as any)?.itx?.flags?.deepenOk ??
+    (meta as any)?.deepenOk ??
+    undefined;
+
+  // lane判定入力（存在する値だけ拾う／無ければ false）
+  const hasCoreNow =
+    (meta as any)?.flags?.hasCore ??
+    (meta as any)?.it?.flags?.hasCore ??
+    (meta as any)?.itTrigger?.flags?.hasCore ??
+    (meta as any)?.core?.hasCore ??
+    (meta as any)?.hasCore ??
+    false;
+
+  const declarationOkNow =
+    (meta as any)?.flags?.declarationOk ??
+    (meta as any)?.it?.flags?.declarationOk ??
+    (meta as any)?.itTrigger?.flags?.declarationOk ??
+    (meta as any)?.declarationOk ??
+    false;
+
+  // 入力を meta.extra.intentBridge に集約（laneKey は後で足す）
+  ex.intentBridge = {
+    ...(ex.intentBridge ?? {}),
+    deepenOk: typeof deepenOkNow === 'boolean' ? deepenOkNow : (ex.intentBridge as any)?.deepenOk,
+    hasCore: !!hasCoreNow,
+    declarationOk: !!declarationOkNow,
+  };
+
+  const bridge = applyIntentBridge({
+    depthStage: typeof depthStageNow === 'string' ? depthStageNow : null,
+    phase: typeof phaseNow === 'string' ? phaseNow : null,
+    deepenOk: typeof deepenOkNow === 'boolean' ? deepenOkNow : undefined,
+    fixedNorthKey: typeof fixedNorthKeyNow === 'string' ? fixedNorthKeyNow : null,
+    userText: text,
+
+    hasCore: !!hasCoreNow,
+    declarationOk: !!declarationOkNow,
+  });
+
+  if (bridge && typeof (bridge as any).laneKey === 'string') {
+    ex.intentBridge = {
+      ...(ex.intentBridge ?? {}),
+      laneKey: (ex.intentBridge as any)?.laneKey ?? (bridge as any).laneKey,
+    };
+  }
+}
+
+// ✅ IntentBridge laneKey を拾う（ここでは確実に meta.extra.intentBridge に入っている）
+const laneKeyNow =
+  (meta as any)?.extra?.intentBridge?.laneKey ??
+  (meta as any)?.intentBridge?.laneKey ?? // 念のため互換（あれば）
+  null;
+
+
     const fallback = buildNormalChatSlotPlan({
       userText: textForCounsel, // ✅ strip後（/counsel が混ざらない）
+      laneKey: laneKeyNow === 'T_CONCRETIZE' ? 'T_CONCRETIZE' : 'IDEA_BAND',
       context: {
         lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
       },
     });
+
+
 
     const fbSlots = (fallback as any).slots;
     slotsArr = Array.isArray(fbSlots) ? fbSlots : [];
@@ -1514,6 +1612,25 @@ if (slotsEmpty_ir) {
       framePlan_frame: (meta as any).framePlan?.frame ?? null,
       descentGate: (meta as any).descentGate ?? null,
 
+      // framePlan 識別
+      framePlan_kind: (meta as any).framePlan?.kind ?? null,
+      framePlan_stamp: (meta as any).framePlan?.stamp ?? null,
+
+      // ✅ IntentBridge 観測
+      intentBridge_laneKey:
+        (meta as any)?.extra?.intentBridge?.laneKey ??
+        (meta as any)?.intentBridge?.laneKey ??
+        null,
+
+      intentBridge_inputs: {
+        deepenOk:
+          (meta as any)?.extra?.intentBridge?.deepenOk ?? null,
+        hasCore:
+          (meta as any)?.extra?.intentBridge?.hasCore ?? null,
+        declarationOk:
+          (meta as any)?.extra?.intentBridge?.declarationOk ?? null,
+      },
+
       framePlan_slots_isArray: Array.isArray(fpSlots),
       framePlan_slots_len: Array.isArray(fpSlots) ? fpSlots.length : null,
 
@@ -1525,7 +1642,6 @@ if (slotsEmpty_ir) {
 
       sameRef_framePlan_slotPlan: fpSlots === spSlots,
       slotPlanFallback: (meta as any).slotPlanFallback ?? null,
-
       // ✅ Phase11観測（確定版）
       hasIntentAnchor: Boolean(iaKey),
       intentAnchorKey: iaKey,
@@ -1536,6 +1652,7 @@ if (slotsEmpty_ir) {
       has_intent_anchor_key: Boolean((meta as any).intent_anchor_key),
       has_intentAnchorKey: Boolean((meta as any).intentAnchorKey),
     });
+
   }
 
   // ----------------------------------------------------------------
@@ -1646,11 +1763,11 @@ if (slotsEmpty_ir) {
     };
   }
 
-  // ----------------------------------------------------------------
-  // IntentBridge（R→I explicit / I→T reconfirm）※補助のみ
-  // - 既存のIT/transition/policy決定を置換しない
-  // - meta.extra に「観測可能な補助フラグ」だけを載せる
-  // ----------------------------------------------------------------
+    // ----------------------------------------------------------------
+    // IntentBridge（R→I explicit / I→T reconfirm）※補助のみ
+    // - 既存のIT/transition/policy決定を置換しない
+    // - meta.extra に「観測可能な補助フラグ」だけを載せる
+    // ----------------------------------------------------------------
 
     const depthStageNow =
       (meta as any)?.depthStage ?? (meta as any)?.depth ?? (finalMeta as any)?.depth ?? null;
@@ -1659,20 +1776,63 @@ if (slotsEmpty_ir) {
       (meta as any)?.phase ?? (finalMeta as any)?.phase ?? null;
 
       const fixedNorthKeyNow =
-      (meta as any)?.intent_anchor_key ??
-      (meta as any)?.intentAnchorKey ??
-      (finalMeta as any)?.intent_anchor_key ??
-      (finalMeta as any)?.intentAnchorKey ??
+      // ✅ fixedNorth と intent_anchor を混線させない：fixedNorth.key を優先
+      (typeof (meta as any)?.fixedNorth?.key === 'string'
+        ? String((meta as any).fixedNorth.key)
+        : typeof (meta as any)?.fixedNorth === 'string'
+          ? String((meta as any).fixedNorth)
+          : null) ??
+      (typeof (finalMeta as any)?.fixedNorth?.key === 'string'
+        ? String((finalMeta as any).fixedNorth.key)
+        : typeof (finalMeta as any)?.fixedNorth === 'string'
+          ? String((finalMeta as any).fixedNorth)
+          : null) ??
       FIXED_NORTH.key ??
       null;
 
-    // deepenOk は「取れれば渡す」。取れない場合は undefined（intentBridge 側で保守的に扱う）
-    const deepenOkNow =
-      (meta as any)?.itTrigger?.flags?.deepenOk ??
-      (meta as any)?.it?.flags?.deepenOk ??
-      (meta as any)?.itx?.flags?.deepenOk ??
-      (meta as any)?.deepenOk ??
-      undefined;
+
+// deepenOk は「取れれば渡す」。取れない場合は undefined（intentBridge 側で保守的に扱う）
+const deepenOkNow =
+  (meta as any)?.itTrigger?.flags?.deepenOk ??
+  (meta as any)?.it?.flags?.deepenOk ??
+  (meta as any)?.itx?.flags?.deepenOk ??
+  (meta as any)?.deepenOk ??
+  undefined;
+
+// ✅ lane判定入力（存在する値だけ拾う／無ければ false）
+const hasCoreNow =
+  (meta as any)?.flags?.hasCore ??
+  (meta as any)?.it?.flags?.hasCore ??
+  (meta as any)?.itTrigger?.flags?.hasCore ??
+  (meta as any)?.core?.hasCore ??
+  (meta as any)?.hasCore ??
+  (finalMeta as any)?.flags?.hasCore ??
+  (finalMeta as any)?.hasCore ??
+  false;
+
+const declarationOkNow =
+  (meta as any)?.flags?.declarationOk ??
+  (meta as any)?.it?.flags?.declarationOk ??
+  (meta as any)?.itTrigger?.flags?.declarationOk ??
+  (meta as any)?.declarationOk ??
+  (finalMeta as any)?.flags?.declarationOk ??
+  (finalMeta as any)?.declarationOk ??
+  false;
+
+// --------------------------------------------------
+// ✅ intentBridge 入力を meta.extra.intentBridge に集約
+//    （laneKey を downstream に必ず流す）
+// --------------------------------------------------
+(meta as any).extra = (meta as any).extra || {};
+(meta as any).extra.intentBridge = {
+  ...(meta as any).extra.intentBridge,
+
+  // intentBridge が見る入力
+  deepenOk: deepenOkNow,
+  hasCore: hasCoreNow,
+  declarationOk: declarationOkNow,
+};
+
 
     const bridge = applyIntentBridge({
       depthStage: typeof depthStageNow === 'string' ? depthStageNow : null,
@@ -1680,6 +1840,10 @@ if (slotsEmpty_ir) {
       deepenOk: typeof deepenOkNow === 'boolean' ? deepenOkNow : undefined,
       fixedNorthKey: typeof fixedNorthKeyNow === 'string' ? fixedNorthKeyNow : null,
       userText: text, // orchestrator の入力テキスト（userTextをログに出さない方針は intentBridge 側が担保）
+
+      // ✅ Lane 判定の入力（渡せない場合でも false 扱いで保守）
+      hasCore: !!hasCoreNow,
+      declarationOk: !!declarationOkNow,
     });
 
     // meta.extra / finalMeta.extra に載せる（上書きはしない）
@@ -1693,11 +1857,24 @@ if (slotsEmpty_ir) {
           ? (finalMeta as any).extra
           : ((finalMeta as any).extra = {});
 
-      // IntentBridge（上書きしない）
-      if (bridge && (bridge.intentEntered || bridge.itReconfirmed)) {
-        exMeta.intentBridge = exMeta.intentBridge ?? bridge;
-        exFinal.intentBridge = exFinal.intentBridge ?? bridge;
-      }
+// IntentBridge（上書きしない）
+// laneKey は downstream のために必ず流す（既存値があれば尊重）
+if (bridge && typeof (bridge as any).laneKey === 'string') {
+  // meta.extra 側：入力(deepenOk/hasCore/declarationOk) は既に入っている前提なので
+  // laneKey だけを “足す”
+  exMeta.intentBridge = {
+    ...(exMeta.intentBridge ?? {}),
+    laneKey: (exMeta.intentBridge as any)?.laneKey ?? (bridge as any).laneKey,
+  };
+
+  // finalMeta.extra 側：無ければ bridge を入れる / あれば laneKey だけ足す
+  exFinal.intentBridge = exFinal.intentBridge ?? bridge;
+  exFinal.intentBridge = {
+    ...(exFinal.intentBridge ?? {}),
+    laneKey: (exFinal.intentBridge as any)?.laneKey ?? (bridge as any).laneKey,
+  };
+}
+
 
     // ------------------------------------------------------------
     // PlaceholderGate（仮置き解除 + 方向候補）— 補助のみ / 上書きしない

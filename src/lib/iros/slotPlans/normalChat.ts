@@ -1,7 +1,7 @@
 // src/lib/iros/slotPlans/normalChat.ts
 // iros — normal chat slot plan (FINAL-only, flow-first, sofia-aligned)
 //
-// ✅ 新憲法（今回の全文修正）
+// ✅ 新憲法（全文整理）
 // - slotPlan は「本文（自然文）」を絶対に書かない（= seed文がUIに出ない）
 // - slotPlan は @OBS/@SHIFT など “内部マーカーのみ” を生成し、LLM writer に本文を作らせる
 // - ランダムは許可：偶然の気付きのために「内部ヒントの揺らぎ」にのみ使う（本文はLLM）
@@ -10,13 +10,24 @@
 // 重要：postprocess は slotText を cleaned して commit する。
 // - @行だけ → cleanedSlotText が空 → commitされず writer が本文生成
 // - 自然文が混ざる → commitされる（seed露出）
-//  لذلك：このファイルは「@行のみ」に固定する。
+// よって：このファイルは「@行のみ」に固定する。
+//
+// ✅ レーン（目的）を導入（IntentBridgeが上流で確定）
+// - IDEA_BAND: R→I 候補生成（核なし）
+// - T_CONCRETIZE: I→C→T 具体化（核あり/宣言あり）
+// ※ normalChat は両方レーンを扱う（ただし“強度/テンプレ”はレーンで分ける）
 
 import type { SlotPlanPolicy } from '../server/llmGate';
 import { observeFlow } from '../input/flowObserver';
 
 // ✅ 追加：HowTo/方法質問を「立ち位置」へ変換する slots
 import { shouldUseQuestionSlots, buildQuestionSlots } from './QuestionSlots';
+
+// ✅ レーン型（IntentBridgeと同じ定義を使う）
+import type { LaneKey } from '../intentTransition/intentBridge';
+
+// ✅ SHIFT preset（ルールをここに寄せる）
+import { SHIFT_PRESET_C_SENSE_HINT, SHIFT_PRESET_T_CONCRETIZE } from '../language/shiftPresets';
 
 // --------------------------------------------------
 // types
@@ -76,6 +87,10 @@ function pickRandom<T>(arr: T[]): T {
   return arr[idx]!;
 }
 
+function safeLaneKey(v: unknown): LaneKey {
+  return v === 'T_CONCRETIZE' ? 'T_CONCRETIZE' : 'IDEA_BAND';
+}
+
 // --------------------------------------------------
 // minimal detectors（意味判定はしない）
 // --------------------------------------------------
@@ -95,11 +110,7 @@ function isClarify(text: string) {
   const t = norm(text);
   if (!t) return false;
 
-  if (
-    /^(何が|なにが|どこが|どれが|それって|それは|どういう意味|つまり|具体的に|なぜ|なんで|何で)\b/.test(
-      t,
-    )
-  ) {
+  if (/^(何が|なにが|どこが|どれが|それって|それは|どういう意味|つまり|具体的に|なぜ|なんで|何で)\b/.test(t)) {
     return true;
   }
 
@@ -159,11 +170,8 @@ function buildCompose(userText: string): NormalChatSlot[] {
   ];
 }
 
-
 // ✅ clarify：テンプレ自然文を出さない。LLMに “意味に答える” を許可するだけ。
 function buildClarify(userText: string): NormalChatSlot[] {
-  const t = norm(userText);
-
   const contracts = [
     [
       'first_line_must_answer_question_directly',
@@ -171,18 +179,8 @@ function buildClarify(userText: string): NormalChatSlot[] {
       'plain_words',
       'no_flow_lecture',
     ],
-    [
-      'answer_in_one_shot',
-      'first_line_is_definition_or_pointing',
-      'no_meta_explain',
-      'plain_words',
-    ],
-    [
-      'first_line_is_yes_no_or_core',
-      'then_short_reason',
-      'no_boilerplate',
-      'plain_words',
-    ],
+    ['answer_in_one_shot', 'first_line_is_definition_or_pointing', 'no_meta_explain', 'plain_words'],
+    ['first_line_is_yes_no_or_core', 'then_short_reason', 'no_boilerplate', 'plain_words'],
   ];
 
   return [
@@ -193,6 +191,7 @@ function buildClarify(userText: string): NormalChatSlot[] {
       content: m('SHIFT', {
         kind: 'clarify',
         intent: 'answer_the_question',
+        contract: pickRandom(contracts),
         rules: {
           answer_user_meaning: true,
           keep_it_simple: true,
@@ -200,11 +199,10 @@ function buildClarify(userText: string): NormalChatSlot[] {
         },
         allow: { concrete_reply: true, short_reply_ok: true },
 
-        // ✅ writer専用の“核”を @行payloadに埋める（自然文は混ぜない＝commit露出しない）
+        // ✅ writer専用の“核”（@payload内なので露出しない）
         seed_text: clamp(norm(userText), 240),
       }),
     },
-
   ];
 }
 
@@ -212,20 +210,18 @@ function buildClarify(userText: string): NormalChatSlot[] {
 function buildQuestion(userText: string, contextText?: string): NormalChatSlot[] {
   const slots = buildQuestionSlots({ userText, contextText });
 
-  // ✅ writer専用の“核”（自然文は混ぜない＝commit露出しない）
   const seedText = clamp(norm(userText), 240);
   const ctxText = contextText ? clamp(norm(contextText), 240) : null;
 
   return slots.map((s) => {
     const raw = String((s as any)?.content ?? '');
 
-    // QuestionSlots 側が自然文を返しても、ここで必ず @ 化して本文commitを防ぐ
     const payload: Record<string, unknown> = {
       key: String((s as any)?.key ?? 'Q'),
       style: String((s as any)?.style ?? 'neutral'),
       content: clamp(norm(raw), 400),
 
-      // ✅ writer seed 用（@payloadの中なので cleaned では落ちるが、writer が拾える）
+      // ✅ writer seed 用（@payloadの中）
       seed_text: seedText,
       context_text: ctxText,
     };
@@ -239,49 +235,88 @@ function buildQuestion(userText: string, contextText?: string): NormalChatSlot[]
   });
 }
 
+// --------------------------------------------------
+// Lane-specific SHIFT builders（自然文禁止）
+// - ルールは shiftPresets に寄せる
+// --------------------------------------------------
 
-// ✅ normalChat の通常フロー：意味にあった返答を最優先で書かせる（本文はLLM）
-function buildFlowReply(
-  userText: string,
-  flow: { delta: string; confidence?: number } | null,
-  lastUserText?: string | null,
-): NormalChatSlot[] {
-  const t = norm(userText);
-  const delta = flow?.delta ? String(flow.delta) : 'FORWARD';
-  const conf = typeof flow?.confidence === 'number' ? flow!.confidence : undefined;
-
-  const shiftVariants = [
+function buildShiftIdeaBand(seedText: string) {
+  const variants = [
     {
-      kind: 'meaning_first',
+      // 候補生成（核なし）
+      kind: 'idea_band',
+      intent: 'propose_candidates',
       rules: {
-        answer_user_meaning: true,
-        avoid_template_praise: true,
-        avoid_meta_flow_talk: true,
-        avoid_generic_cheer: true,
-        questions_max: 1,
+        ...SHIFT_PRESET_C_SENSE_HINT.rules,
+        no_decision: true,
+        no_action_commit: true,
+        candidates_min: 2,
+        candidates_max: 4,
       },
-      allow: { concrete_reply: true, short_reply_ok: true },
+      tone: SHIFT_PRESET_C_SENSE_HINT.tone ?? undefined,
+      allow: SHIFT_PRESET_C_SENSE_HINT.allow ?? undefined,
     },
     {
-      kind: 'meaning_first',
+      kind: 'idea_band',
+      intent: 'propose_candidates',
       rules: {
-        answer_user_meaning: true,
-        no_lecture: true,
-        no_checklist: true,
-        questions_max: 1,
+        ...SHIFT_PRESET_C_SENSE_HINT.rules,
+        no_decision: true,
+        no_action_commit: true,
+        candidates_min: 2,
+        candidates_max: 4,
       },
-      allow: { concrete_reply: true, short_reply_ok: true },
-    },
-    {
-      kind: 'meaning_first',
-      rules: {
-        answer_user_meaning: true,
-        keep_it_simple: true,
-        questions_max: 1,
-      },
-      allow: { concrete_reply: true, short_reply_ok: true },
+      tone: SHIFT_PRESET_C_SENSE_HINT.tone ?? undefined,
+      allow: { ...(SHIFT_PRESET_C_SENSE_HINT.allow ?? {}), concrete_reply: true, short_reply_ok: true },
     },
   ];
+
+  const picked = pickRandom(variants);
+  return m('SHIFT', {
+    ...picked,
+    seed_text: clamp(seedText, 240),
+  });
+}
+
+function buildShiftTConcretize(seedText: string) {
+  // ✅ 3行固定テンプレ（核→次の一手→反復条件）
+  // ※自然文は書かない。writer に“形式”を強制する。
+  return m('SHIFT', {
+    kind: 't_concretize',
+    intent: 'implement_next_step',
+    // preset: T具体化の禁則はここに寄せる
+    rules: {
+      ...(SHIFT_PRESET_T_CONCRETIZE.rules ?? {}),
+      questions_max: 0,
+      no_checklist: true,
+      keep_small: true,
+      repeatable: true,
+    },
+    tone: SHIFT_PRESET_T_CONCRETIZE.tone ?? undefined,
+    allow: SHIFT_PRESET_T_CONCRETIZE.allow ?? { concrete_reply: true, short_reply_ok: true },
+    format: {
+      lines: 3,
+      schema: ['focus(core_short)', 'next_step(<=10min)', 'repeat_condition(proof_of_stick)'],
+    },
+    seed_text: clamp(seedText, 240),
+  });
+}
+
+// ✅ normalChat の通常フロー：レーンに応じて SHIFT を切り替える（本文はLLM）
+function buildFlowReply(args: {
+  userText: string;
+  laneKey: LaneKey;
+  flow: { delta: string; confidence?: number } | null;
+  lastUserText?: string | null;
+}): NormalChatSlot[] {
+  const t = norm(args.userText);
+  const laneKey = safeLaneKey(args.laneKey);
+
+  const delta = args.flow?.delta ? String(args.flow.delta) : 'FORWARD';
+  const conf = typeof args.flow?.confidence === 'number' ? args.flow!.confidence : undefined;
+
+  const seedText = clamp(t, 240);
+  const shift = laneKey === 'T_CONCRETIZE' ? buildShiftTConcretize(seedText) : buildShiftIdeaBand(seedText);
 
   return [
     {
@@ -289,26 +324,19 @@ function buildFlowReply(
       role: 'assistant',
       style: 'soft',
       content: m('OBS', {
+        laneKey,
         user: clamp(t, 240),
         flow: { delta, confidence: conf },
-        lastUserText: lastUserText ? clamp(norm(lastUserText), 140) : null,
+        lastUserText: args.lastUserText ? clamp(norm(args.lastUserText), 140) : null,
       }),
     },
     {
       key: 'SHIFT',
       role: 'assistant',
       style: 'neutral',
-      content: m('SHIFT', {
-        ...pickRandom(shiftVariants),
-
-        // ✅ writer専用の“核”を @行に埋める（自然文は混ぜない＝commit露出しない）
-        // - 目的：slotTextCleanedLen が極小になって writer seed が薄くなるのを防ぐ
-        // - 憶測しない：ユーザー原文をそのまま短く渡すだけ
-        seed_text: clamp(norm(t), 240),
-      }),
+      content: shift,
     },
   ];
-
 }
 
 // --------------------------------------------------
@@ -317,12 +345,19 @@ function buildFlowReply(
 
 export function buildNormalChatSlotPlan(args: {
   userText: string;
+
+  // ✅ 上流（orchestrator/postprocess）が決めたレーンを受け取る
+  // 未指定でも壊れない（保守的に IDEA_BAND）
+  laneKey?: LaneKey;
+
   context?: {
     recentUserTexts?: string[];
     lastSummary?: string | null; // orchestrator互換（ここでは使わない）
   };
 }): NormalChatSlotPlan {
-  const stamp = 'normalChat@no-seed-text+random-hints+questionSlots';
+  const laneKey = safeLaneKey(args.laneKey);
+
+  const stamp = `normalChat@lane:${laneKey}@no-seed-text+random-hints+questionSlots`;
   const userText = norm(args.userText);
 
   const recentRaw = Array.isArray(args.context?.recentUserTexts) ? args.context!.recentUserTexts! : [];
@@ -360,7 +395,7 @@ export function buildNormalChatSlotPlan(args: {
   } else {
     const d = flow?.delta ? String(flow.delta) : 'FORWARD';
     reason = `flow:${d}`;
-    slots = buildFlowReply(userText, flow, lastUserText);
+    slots = buildFlowReply({ userText, laneKey, flow, lastUserText });
   }
 
   return {

@@ -1,9 +1,10 @@
 // src/lib/iros/intentTransition/intentBridge.ts
-// iros — Intent Bridge (R→I explicit / I→T reconfirm)
+// iros — Intent Bridge (R→I explicit / I→T reconfirm + Lane decision)
 //
 // 目的：
 // - 「意図入口」を明示化する（R→I）
 // - 「今回の会話でTを使ってよい」を再同期する（I→T）
+// - 返信の“目的レーン”を確定して返す（IDEA_BAND / T_CONCRETIZE）
 // - 既存のIT/transitionEngine/Policyの決定を置換しない（補助のみ）
 //
 // 制約：
@@ -18,7 +19,15 @@
 
 export type IntentBand = 'I';
 
+// レーンは“常に確定して返す”前提（下流の迷いを消す）
+export type LaneKey =
+  | 'IDEA_BAND' // R→I 候補生成（核なし）
+  | 'T_CONCRETIZE'; // I→C→T 具体化（核あり/宣言あり）
+
 export type IntentBridgeResult = {
+  // ✅ レーン確定（必ず入る）
+  laneKey: LaneKey;
+
   // “Iに入った”を明示する補助
   intentBand?: IntentBand;
   intentEntered?: true;
@@ -37,12 +46,23 @@ export function applyIntentBridge(args: {
   deepenOk?: boolean; // 渡せない場合があるので optional
   fixedNorthKey?: string | null; // 例: 'SUN'
   userText: string;
+
+  // ✅ レーン判定の入力（渡せない場合もあるので optional）
+  // 方針：未提供なら false 扱い（保守的に IDEA_BAND）
+  hasCore?: boolean;
+  declarationOk?: boolean;
 }): IntentBridgeResult {
   const depth = safeStr(args.depthStage);
   const phase = safeStr(args.phase);
   const deepenOk = args.deepenOk === true; // 渡せない/不明なら false（保守）
   const fixedNorthKey = safeStr(args.fixedNorthKey);
   const text = normalizeJapanese(args.userText);
+
+  const hasCore = args.hasCore === true;
+  const declarationOk = args.declarationOk === true;
+
+  // --- 0) Lane decision（最重要：常に確定して返す）
+  const laneKey = decideLaneKey({ hasCore, declarationOk });
 
   // --- 1) R→I（入口の明示）
   // 方針：誤爆を避ける（保守的）
@@ -67,7 +87,9 @@ export function applyIntentBridge(args: {
     fixedNorthKey === 'SUN' &&
     rePolicyReconfirm(text);
 
-  const out: IntentBridgeResult = {};
+  // ✅ out は laneKey を必ず持つ（下流の迷い消し）
+  const out: IntentBridgeResult = { laneKey };
+
   if (enterI) {
     out.intentBand = 'I';
     out.intentEntered = true;
@@ -81,9 +103,12 @@ export function applyIntentBridge(args: {
   if (shouldDebug()) {
     // userTextは出さない
     console.log('[IROS/IntentBridge]', {
+      laneKey,
       enterI,
       reconfirmT,
       deepenOk,
+      hasCore,
+      declarationOk,
       depth: depth || null,
       phase: phase || null,
       fixedNorthKey: fixedNorthKey || null,
@@ -91,6 +116,19 @@ export function applyIntentBridge(args: {
   }
 
   return out;
+}
+
+/* -----------------------------
+   lane
+----------------------------- */
+
+export function decideLaneKey(params: {
+  hasCore: boolean;
+  declarationOk: boolean;
+}): LaneKey {
+  const { hasCore, declarationOk } = params;
+  if (hasCore || declarationOk) return 'T_CONCRETIZE';
+  return 'IDEA_BAND';
 }
 
 /* -----------------------------

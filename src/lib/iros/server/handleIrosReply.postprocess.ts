@@ -553,10 +553,25 @@ export async function postProcessReply(
 
     slotPlanExpected = hasSlots || (typeof slotPlanLen === 'number' && slotPlanLen > 0);
 
+    // ✅ 非SILENCEの空本文 stopgap
+    // - SILENCE/FORWARD は silencePolicy 側で扱う（ここでは触らない）
+    const ex2 = getExtra(metaForSave);
+    const speechActNow = String(ex2.speechAct ?? (metaForSave as any)?.speechAct ?? '')
+      .trim()
+      .toUpperCase();
+
+    const isSpeechSilenceLike =
+      speechActNow === 'SILENCE' ||
+      speechActNow === 'FORWARD' ||
+      ex2.speechSkipped === true ||
+      ex2.renderEngineSilenceBypass === true ||
+      ex2.renderEngineForwardBypass === true;
+
     isNonSilenceButEmpty =
-      allowLLM !== false &&
+      !isSpeechSilenceLike &&
       bodyText.length === 0 &&
       String(userText ?? '').trim().length > 0;
+
 
     // ------------------------------------------------------------
     // ✅ slotPlanExpected なのに本文が空
@@ -635,10 +650,12 @@ const seedForWriter = (() => {
   if (alreadyHasCore) return base;
 
   if (cleaned0.length < CLEAN_MIN) {
-    // core は @行として1行だけ追記（commit露出防止）
+    // core は「露出OKの生行」を1行だけ混ぜる（@ではない）
+    // 目的：cleanedSlotText を >0 にして emptyLikeNow を回避する
     const seedLine = `@SEED_TEXT ${JSON.stringify({ text: core })}`;
-    return `${base}\n${seedLine}`.trim();
+    return `${base}\n${core}\n${seedLine}`.trim();
   }
+
 
   return base;
 })();
@@ -673,22 +690,57 @@ const cleanedApplied = hadInternalMarkers && cleanedSlotText.length !== seedForW
           const s = String(seedRaw ?? '').trim();
           if (!s) return '';
 
-          // 1) @Q_SLOT {...} を拾って seed_text / content を抜く（複数行もOK）
           const parts: string[] = [];
-          const reQ = /@Q_SLOT\s+(\{.*?\})(?:\n|$)/gms;
-          let m: RegExpExecArray | null = null;
-          while ((m = reQ.exec(s))) {
-            try {
-              const obj = JSON.parse(m[1]);
-              const t = String(obj?.seed_text ?? obj?.content ?? '').trim();
-              if (t) parts.push(t);
-            } catch {
-              // ignore
+
+          // 0) 行ベースで拾う（正規表現より安全：JSON内に } が入っても壊れにくい）
+          const lines = s.split('\n');
+
+          for (const line0 of lines) {
+            const line = String(line0 ?? '').trim();
+            if (!line) continue;
+
+            // ✅ @SEED_TEXT {"text":"..."} を拾う（coreLine）
+            if (line.startsWith('@SEED_TEXT ')) {
+              const json = line.slice('@SEED_TEXT '.length).trim();
+              try {
+                const obj = JSON.parse(json);
+                const t = String(obj?.text ?? obj?.content ?? '').trim();
+                if (t) parts.push(t);
+              } catch {
+                // ignore
+              }
+              continue;
+            }
+
+            // 1) @Q_SLOT {...} を拾って seed_text / content を抜く
+            if (line.startsWith('@Q_SLOT ')) {
+              const json = line.slice('@Q_SLOT '.length).trim();
+              try {
+                const obj = JSON.parse(json);
+                const t = String(obj?.seed_text ?? obj?.seedText ?? obj?.content ?? obj?.text ?? '').trim();
+                if (t) parts.push(t);
+              } catch {
+                // ignore
+              }
+              continue;
             }
           }
-          if (parts.length > 0) return parts.join('\n').trim();
 
-          // 2) @OBS {...} なら user を抜く
+          // 取れたら重複を軽く落として返す
+          if (parts.length > 0) {
+            const uniq: string[] = [];
+            const seen = new Set<string>();
+            for (const p of parts) {
+              const t = String(p ?? '').trim();
+              if (!t) continue;
+              if (seen.has(t)) continue;
+              seen.add(t);
+              uniq.push(t);
+            }
+            return uniq.join('\n').trim();
+          }
+
+          // 2) @OBS {...} なら user を抜く（単体行のケース）
           const mObs = s.match(/^@OBS\s+(\{.*\})\s*$/s);
           if (mObs) {
             try {
@@ -703,7 +755,7 @@ const cleanedApplied = hadInternalMarkers && cleanedSlotText.length !== seedForW
           // 3) 最後の保険：@で始まる行（内部マーカー）を落としてプレーン化
           const plain = s
             .split('\n')
-            .map((x) => x.trimEnd())
+            .map((x) => String(x ?? '').trimEnd())
             .filter((line) => line.trim().length > 0 && !line.trim().startsWith('@'))
             .join('\n')
             .trim();
@@ -734,28 +786,37 @@ const cleanedApplied = hadInternalMarkers && cleanedSlotText.length !== seedForW
           llmRewriteSeedAt: new Date().toISOString(),
         };
 
-        // ✅ allowLLM=false のときだけ deterministic commit（会話停止を防ぐ）
-        // - それ以外は本文をここで作らず、writerへ回す（憲法の「航海士」）
-        if (allowLLM === false) {
-          // commit 用の本文は “cleaned” を使用（内部マーカーは出さない）
-          finalAssistantText = cleanedSlotText;
+// ✅ allowLLM=false のときだけ deterministic commit（会話停止を防ぐ）
+// - それ以外は本文をここで作らず、writerへ回す（憲法の「航海士」）
+if (allowLLM === false) {
+  // commit 用の本文は “cleaned” だけに依存しない（@行のみだと空になり得る）
+  // - seedForWriterSanitized は @SEED_TEXT / @Q_SLOT 由来の本文を抽出済み
+  // - 最後に coreLine（ユーザー原文1行）へフォールバック
+  const commitText =
+    String(seedForWriterSanitized ?? '').trim() ||
+    String(cleanedSlotText ?? '').trim() ||
+    String(coreLine ?? '').trim() ||
+    '';
 
-          metaForSave.extra = {
-            ...(metaForSave.extra ?? {}),
-            finalTextPolicy: 'SLOTPLAN_COMMIT_FINAL__NO_LLM',
-            slotPlanCommitted: true,
-            slotPlanCommittedLen: cleanedSlotText.length,
-          };
+  finalAssistantText = commitText;
 
-          console.log('[IROS/PostProcess] SLOTPLAN_COMMIT_FINAL__NO_LLM', {
-            conversationId,
-            userCode,
-            slotPlanPolicy: det.policy,
-            slotPlanPolicy_from: det.from,
-            slotPlanLen,
-            hasSlots,
-            head: cleanedSlotText.slice(0, 64),
-          });
+  metaForSave.extra = {
+    ...(metaForSave.extra ?? {}),
+    finalTextPolicy: 'SLOTPLAN_COMMIT_FINAL__NO_LLM',
+    slotPlanCommitted: true,
+    slotPlanCommittedLen: commitText.length,
+  };
+
+  console.log('[IROS/PostProcess] SLOTPLAN_COMMIT_FINAL__NO_LLM', {
+    conversationId,
+    userCode,
+    slotPlanPolicy: det.policy,
+    slotPlanPolicy_from: det.from,
+    slotPlanLen,
+    hasSlots,
+    head: commitText.slice(0, 64),
+  });
+
         } else {
           // ✅ 本文は空のまま維持して writer を走らせる
           // （route/handleIrosReply 側の LLM 呼び出しが “seed” を見て本文生成する）

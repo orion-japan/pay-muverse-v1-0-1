@@ -1007,20 +1007,35 @@ const stripInternalLines = (s0: string) => {
         meta: meta ?? null,
       });
 
+      // ✅ 保存が失敗/blocked のときだけ短いログ（長くならない）
+      if (!saved?.ok || saved?.blocked || !saved?.inserted) {
+        console.error('[IROS/PERSIST][ASSISTANT][NG]', {
+          conversationId,
+          userCode,
+          ok: saved?.ok ?? null,
+          inserted: saved?.inserted ?? null,
+          blocked: saved?.blocked ?? null,
+          reason: saved?.reason ?? null,
+          len: contentForPersist.length,
+          head: contentForPersist.slice(0, 40),
+        });
+      }
+
       meta.extra = {
         ...(meta.extra ?? {}),
 
-        // ✅ ここが本命：UI/DB が参照している finalAssistantText を “保存本文” に同期
+        // ✅ UI/DB が参照している finalAssistantText を “保存本文” に同期
         finalAssistantText: contentForPersist,
         finalAssistantTextLen: contentForPersist.length,
         finalAssistantTextCandidate: contentForPersist,
 
+        // ✅ “捏造” をやめて saved をそのまま反映（SoT）
         persistedAssistantMessage: {
-          ok: true,
-          inserted: true,
-          skipped: false,
+          ok: Boolean(saved?.ok),
+          inserted: Boolean(saved?.inserted),
+          blocked: Boolean(saved?.blocked),
+          reason: String(saved?.reason ?? ''),
           len: contentForPersist.length,
-          saved,
           pickedFrom:
             !isEffectivelyEmptyText(finalAssistantClean) && finalAssistantClean.length > 0
               ? 'finalAssistant(clean)'
@@ -1029,9 +1044,6 @@ const stripInternalLines = (s0: string) => {
                 : 'fallbackDots',
         },
       };
-
-
-
 
       // training sample
       const skipTraining = meta?.skipTraining === true || meta?.skip_training === true || meta?.recallOnly === true || meta?.recall_only === true;
@@ -1133,7 +1145,8 @@ async function applyRenderEngineIfEnabled(params: {
   userText: string;       // ✅ null にしない
 }): Promise<{ meta: any; extraForHandle: any }> {
 
-  const { enableRenderEngine, isIT, meta, extraForHandle, resultObj, conversationId, userCode, userText } = params;
+  let { enableRenderEngine, isIT, meta, extraForHandle, resultObj, conversationId, userCode, userText } = params;
+
 
   // =========================
   // IT は従来render（renderReply）
@@ -1315,28 +1328,36 @@ async function applyRenderEngineIfEnabled(params: {
 
     // ✅ SoT（この関数が返す extraForHandle）：
     // - ここでは “必要なら埋める” が、なるべく最小にする
-    const extraSoT: any = extraForHandle ?? {};
-
-// ===================== (2) 置き換え：route.ts 1290〜1328 =====================
-// ↓↓↓ いまある “✅ rephraseBlocks の fallback 生成は ここだけ” ブロック全体を
-//（1290〜1328）丸ごと削除して、代わりにこのブロックを貼ってください ↓↓↓
+    let extraSoT: any = extraForHandle ?? {};
 
     // ✅ rephraseBlocks の生成/付与は _impl/rephrase.ts に一本化
     // - extraSoT（SoT）と meta.extra をそこで更新する
     // - ここでは “fallback生成” をしない
-    await maybeAttachRephraseForRenderV2({
+    const attachRes: any = await maybeAttachRephraseForRenderV2({
       conversationId,
       userCode,
       userText: typeof userText === 'string' ? userText : String(userText ?? ''),
       meta,
       extraMerged: extraSoT,
       // 任意（無くても動く）
-      traceId: (meta as any)?.traceId ?? null,
-      effectiveMode:
-        (extraSoT as any)?.effectiveMode ??
-        (meta as any)?.extra?.effectiveMode ??
-        null,
+      traceId: String((meta as any)?.extra?.traceId ?? (meta as any)?.traceId ?? '').trim() || null,
+      effectiveMode: (extraSoT as any)?.effectiveMode ?? (meta as any)?.extra?.effectiveMode ?? null,
     });
+
+    // ✅ 返り値がある実装にも対応（voidでもOK）
+    if (attachRes && typeof attachRes === 'object') {
+      if (attachRes.meta && typeof attachRes.meta === 'object') meta = attachRes.meta;
+
+      const ex =
+        attachRes.extraMerged ??
+        attachRes.extraSoT ??
+        attachRes.extraForHandle ??
+        attachRes.extra ??
+        null;
+
+      if (ex && typeof ex === 'object') extraSoT = ex;
+    }
+
 
 // ↑↑↑ ここまでを 1290〜1328 の代わりに貼る ↑↑↑
 

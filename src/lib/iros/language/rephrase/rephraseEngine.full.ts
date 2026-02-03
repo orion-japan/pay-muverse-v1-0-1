@@ -1444,19 +1444,68 @@ export async function rephraseSlotsFinal(extracted: ExtractedSlots, opts: Rephra
 
 
 
-  // ✅ ILINE抽出用：内部マーカー行だけ除外（ILINEタグは保持する）
-  const stripInternalMarkersForLock = (s: string) => {
-    const lines = String(s ?? '')
-      .split('\n')
-      .map((x) => String(x ?? '').trimEnd());
-    const kept = lines.filter((line) => {
-      const t = String(line ?? '').trim();
-      if (!t) return false;
-      if (INTERNAL_LINE_MARKER.test(t)) return false;
-      return true;
-    });
-    return kept.join('\n').trim();
+// ✅ ILINE抽出用：内部マーカー行は「捨てる」のではなく、必要な本文だけ抽出して残す
+// - 基本は @SEED_TEXT の text を優先して seed を作る
+// - それ以外の内部行は、[[ILINE]] を含む場合だけ “本文候補” として残す（重複/ノイズ防止）
+// ✅ ILINE抽出用：内部マーカー行は “捨てる” のではなく “本文だけ抜く”
+// - @OBS/@SEED_TEXT などの JSON から text/user/seed_text/content/message を拾う
+// - ユーザーの @mention 等は落とさない（INTERNAL_LINE_MARKER にだけ反応）
+// ✅ ILINE抽出用：内部マーカー行は「捨てずに」JSONから本文候補だけ抜く（ILINEタグは保持される）
+const stripInternalMarkersForLock = (s: string) => {
+  const lines = String(s ?? '')
+    .split('\n')
+    .map((x) => String(x ?? '').trimEnd());
+
+  const out: string[] = [];
+  const pushUnique = (t: string) => {
+    const v = String(t ?? '').trim();
+    if (!v) return;
+    if (!out.includes(v)) out.push(v);
   };
+
+  for (const line of lines) {
+    const t0 = String(line ?? '');
+    const t = t0.trim();
+    if (!t) continue;
+
+    // 非内部行（= [[ILINE]] を素で書いている等）はそのまま残す
+    if (!INTERNAL_LINE_MARKER.test(t)) {
+      pushUnique(t0.trim());
+      continue;
+    }
+
+    // 内部行：JSONから「本文っぽい字段」だけ抜く
+    const i0 = t.indexOf('{');
+    const i1 = t.lastIndexOf('}');
+    if (i0 < 0 || i1 <= i0) continue;
+
+    const jsonText = t.slice(i0, i1 + 1).trim();
+    let obj: any = null;
+    try {
+      obj = JSON.parse(jsonText);
+    } catch {
+      continue;
+    }
+    if (!obj || typeof obj !== 'object') continue;
+
+    const marker = (t.match(/^@([A-Z_]+)/i)?.[1] ?? '').toUpperCase();
+
+    const cand =
+      (marker === 'SEED_TEXT' && typeof (obj as any).text === 'string' && (obj as any).text) ||
+      (marker === 'OBS' && typeof (obj as any).user === 'string' && (obj as any).user) ||
+      (marker === 'SHIFT' && typeof (obj as any).seed_text === 'string' && (obj as any).seed_text) ||
+      (typeof (obj as any).text === 'string' && (obj as any).text) ||
+      (typeof (obj as any).seed_text === 'string' && (obj as any).seed_text) ||
+      (typeof (obj as any).user === 'string' && (obj as any).user) ||
+      (typeof (obj as any).content === 'string' && (obj as any).content) ||
+      (typeof (obj as any).message === 'string' && (obj as any).message) ||
+      null;
+
+    if (typeof cand === 'string' && cand.trim()) pushUnique(cand.trim());
+  }
+
+  return out.join('\n').trim();
+};
 
   // ✅ blocks 生成（renderGateway が block 意図で拾える形）
   // NOTE: ここは "string[]" を返す。{text,kind} 化は adoptAsSlots 側で 1 回だけ行う。
@@ -1578,9 +1627,18 @@ export async function rephraseSlotsFinal(extracted: ExtractedSlots, opts: Rephra
   const recallMust = extractRecallMustIncludeFromSeed(seedDraftRawAll);
   const mustIncludeRuleText = buildMustIncludeRuleText(recallMust);
 
-  // ILINE抽出：slot + userText 両方から拾う（seed 側は内部マーカー除外）
-  const seedForLock = stripInternalMarkersForLock(seedDraftRaw);
-  const lockSourceRaw = [seedForLock, userText].filter(Boolean).join('\n');
+// ILINE抽出：slot + userText 両方から拾う（seed 側は内部マーカー除外）
+const seedForLock = stripInternalMarkersForLock(seedDraftRawAll);
+const lockSourceRaw = [seedForLock, userText].filter(Boolean).join('\n');
+
+
+  console.info('[IROS/ILINE][LOCK_PARTS]', {
+    partsLen: [seedForLock, userText].filter(Boolean).length,
+    seedEqUser: String(seedForLock ?? '') === String(userText ?? ''),
+    lockHasNewline: String(lockSourceRaw ?? '').includes('\n'),
+    lockLen: String(lockSourceRaw ?? '').length,
+  });
+
 
   console.info('[IROS/ILINE][LOCK_SOURCE]', {
     hasSeed: !!seedForLock,
@@ -1809,7 +1867,15 @@ const lastTurnsSafe = (() => {
   // shared validators
   // ---------------------------------------------
   const validateOutput = (rawText: string): { ok: boolean; reason?: string } => {
-    const raw = String(rawText ?? '');
+    // ✅ ILINEマーカーは “露出禁止” なので、まず除去してから検証する
+    // - モデルが [[ILINE]]...[[/ILINE]] を出してしまう実例が dev.log で確認済み
+    // - ここで除去すれば INTERNAL_MARKER_LEAKED / ILINE_NOT_PRESERVED を同時に回避できる
+    const stripILineMarkers = (s0: string) => {
+      const s = String(s0 ?? '');
+      return s.replace(/\[\[ILINE\]\]/g, '').replace(/\[\[\/ILINE\]\]/g, '');
+    };
+
+    const raw = stripILineMarkers(String(rawText ?? ''));
 
     if (!raw.trim()) return { ok: false, reason: 'OUT_EMPTY' };
     if (containsForbiddenLeakText(raw)) return { ok: false, reason: 'INTERNAL_MARKER_LEAKED' };

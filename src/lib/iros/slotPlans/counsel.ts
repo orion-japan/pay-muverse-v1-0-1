@@ -352,6 +352,8 @@ export function buildCounselSlotPlan(args: {
   // orchestrator から渡す（無ければ null）※任意
   lastSummary?: string | null;
 }): CounselSlotPlan {
+
+
   const stamp = 'counsel.ts@2026-01-18#task-v3';
 
   const userText = norm(args.userText);

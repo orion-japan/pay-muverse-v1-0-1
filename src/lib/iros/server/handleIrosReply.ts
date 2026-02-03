@@ -448,8 +448,6 @@ function shouldBypassMicroGate(userText: string): boolean {
 /**
  * 相づち系（そうですね/はい/うん等）が、
  * 直前の assistant 発話（質問・続き要求）に対する返答なら micro を避ける。
- * ※ 「履歴や時間のたった繋がりが入るとおかしくなる」問題を避けつつ、
- *    「続きが必要な相づち」は通常フローへ通す。
  */
 function shouldBypassMicroGateByHistory(args: {
   userText: string;
@@ -471,22 +469,50 @@ function shouldBypassMicroGateByHistory(args: {
     'たしかに',
     'よし',
     'ok',
-    'OK',
     'おーけー',
   ]);
 
-  const core = normalizeTailPunct(s).replace(/[?？]/g, '').trim();
+  const core = normalizeTailPunct(s)
+    .replace(/[?？]/g, '')
+    .trim()
+    .toLowerCase();
+
   if (!ack.has(core)) return false;
 
   const h = Array.isArray(args.history) ? args.history : [];
   if (h.length <= 0) return false;
 
-  // 直前の assistant 発話を拾う
+  const pickText = (v: any): string => {
+    if (typeof v === 'string') return v;
+    if (v == null) return '';
+    if (Array.isArray(v)) {
+      return v
+        .map((p) => {
+          if (typeof p === 'string') return p;
+          if (p?.type === 'text' && typeof p?.text === 'string') return p.text;
+          if (typeof p?.text === 'string') return p.text;
+          if (typeof p?.content === 'string') return p.content;
+          return '';
+        })
+        .filter(Boolean)
+        .join(' ');
+    }
+    if (typeof v === 'object') {
+      if (typeof v.text === 'string') return v.text;
+      if (typeof v.content === 'string') return v.content;
+      if (typeof v.message === 'string') return v.message;
+    }
+    return '';
+  };
+
+  // 直前の assistant 発話を拾う（content/text/message 全対応）
   let lastA: string | null = null;
   for (let i = h.length - 1; i >= 0; i--) {
     const m = h[i];
-    if (m && m.role === 'assistant') {
-      lastA = String(m.content ?? '').trim();
+    const role = String(m?.role ?? '').toLowerCase();
+    if (role === 'assistant') {
+      const t = pickText(m?.content ?? m?.text ?? m?.message ?? null).trim();
+      if (t) lastA = t;
       break;
     }
   }
@@ -2460,12 +2486,15 @@ slotTextCleanedLen === 0;
 // ✅ dots-only（'…' / '……' / '...'）も “空扱い” に含める
 // - これが無いと bodyNow='……' の瞬間に emptyLikeNow=false になり、writer/blocks が走らず “……” が残る
 const emptyLikeNow =
-!bodyNow ||
-isDotsOnly(bodyNow) ||
-internalMarkersOnly;
-
-
-
+  !bodyNow ||
+  isDotsOnly(bodyNow) ||
+  (
+    // internalMarkersOnly をこの場で安全に再計算
+    Number.isFinite(Number((out.metaForSave as any)?.extra?.slotTextCleanedLen)) &&
+    Number.isFinite(Number((out.metaForSave as any)?.extra?.slotTextRawLen)) &&
+    Number((out.metaForSave as any)?.extra?.slotTextRawLen) > 0 &&
+    Number((out.metaForSave as any)?.extra?.slotTextCleanedLen) === 0
+  );
 
       // ✅ 走らせる条件：
       // - SCAFFOLD または FINAL
@@ -2473,9 +2502,12 @@ internalMarkersOnly;
       // - blocks が無い
       // - allowLLM_final が false なら触らない
       const shouldRunWriter =
-        (policy === 'SCAFFOLD' || policy === 'FINAL') &&
+        (
+          String((out.metaForSave as any)?.framePlan?.slotPlanPolicy ?? '').toUpperCase() === 'SCAFFOLD' ||
+          String((out.metaForSave as any)?.framePlan?.slotPlanPolicy ?? '').toUpperCase() === 'FINAL'
+        ) &&
         emptyLikeNow &&
-        !alreadyHasBlocks &&
+        !Array.isArray((out.metaForSave as any)?.extra?.rephraseBlocks) &&
         allowLLM_final_local !== false;
 
       // ✅ 追跡用（ENTER）
@@ -2483,12 +2515,12 @@ internalMarkersOnly;
         console.log('[IROS/rephraseBridge][ENTER]', {
           conversationId: _conversationId,
           userCode: _userCode,
-          policy,
+          policy: String((out.metaForSave as any)?.framePlan?.slotPlanPolicy ?? '').toUpperCase(),
           emptyLikeNow,
           allowLLM_final: allowLLM_final_local,
-          alreadyHasBlocks,
-          slotTextCleanedLen: Number.isFinite(slotTextCleanedLen) ? slotTextCleanedLen : null,
-          slotTextRawLen: Number.isFinite(slotTextRawLen) ? slotTextRawLen : null,
+          alreadyHasBlocks: Array.isArray((out.metaForSave as any)?.extra?.rephraseBlocks),
+          slotTextCleanedLen: Number((out.metaForSave as any)?.extra?.slotTextCleanedLen ?? null),
+          slotTextRawLen: Number((out.metaForSave as any)?.extra?.slotTextRawLen ?? null),
           bodyNowLen: bodyNow.length,
           bodyNowHead: bodyNow.slice(0, 40),
           shouldRunWriter,
@@ -2507,18 +2539,17 @@ internalMarkersOnly;
           orch: { framePlan: (out.metaForSave as any)?.framePlan ?? null },
         });
 
-        const model = String(process.env.IROS_REPHRASE_FINAL_MODEL ?? process.env.IROS_MODEL ?? 'gpt-4o').trim();
+        const model = String(
+          process.env.IROS_REPHRASE_FINAL_MODEL ??
+          process.env.IROS_MODEL ??
+          'gpt-4o'
+        ).trim();
 
         const rr = await rephraseSlotsFinal(extracted, {
           model,
           temperature: 0.7,
           maxLinesHint: 8,
           userText: typeof text === 'string' ? text : null,
-
-          // ✅ LLM-facing context（writerが読む入口）
-          // - ctxPack / flowDigest / flowTape を必ず userContext に載せる
-          // ✅ LLM-facing context（writerが読む入口）
-          // - ctxPack / flowDigest / flowTape を必ず userContext に載せる
           userContext: (() => {
             const turns: Array<{ role: 'user' | 'assistant'; content: string }> = Array.isArray(
               (out.metaForSave as any)?.extra?.historyForWriter,
@@ -2542,127 +2573,61 @@ internalMarkersOnly;
                   .join('\n')
               : '';
 
-            const inputKindRaw = (ctx as any)?.inputKind ?? null;
-
             return {
-              // ✅ ここを入れる：MSG_PACK 側の null を潰す
-              conversationId: _conversationId ?? (ctx as any)?.conversationId ?? null,
-              userCode: _userCode ?? (ctx as any)?.userCode ?? null,
-
-              // inputKind は「未指定なら null」のまま（勝手に task に倒さない）
-              inputKind: inputKindRaw,
-
-              // ✅ Flow continuity
+              conversationId: _conversationId ?? null,
+              userCode: _userCode ?? null,
+              inputKind: (ctx as any)?.inputKind ?? null,
               ctxPack: {
                 ...(((out.metaForSave as any)?.extra?.ctxPack ?? null) as any),
-
-                // ✅ writer が拾うキー名に寄せる（互換）
                 turns,
                 chat: turns,
                 history: turns,
               },
-
               flowDigest: (out.metaForSave as any)?.extra?.flowDigest ?? null,
               flowTape: (out.metaForSave as any)?.extra?.flowTape ?? null,
-
-              // ✅ writer が拾う候補キーを埋める（互換レイヤ）
-              turns, // 現状維持（デバッグ用）
+              turns,
               messages: turns,
               history: turns,
               historyMessages: turns,
               historyText,
-
               meta: {
-                q: (out.metaForSave as any)?.q ?? (out.metaForSave as any)?.q_code ?? null,
-                depth: (out.metaForSave as any)?.depth ?? (out.metaForSave as any)?.depth_stage ?? null,
+                q: (out.metaForSave as any)?.q ?? null,
+                depth: (out.metaForSave as any)?.depth ?? null,
                 phase: (out.metaForSave as any)?.phase ?? null,
-                layer: (out.metaForSave as any)?.intentLayer ?? (out.metaForSave as any)?.intent_layer ?? null,
+                layer: (out.metaForSave as any)?.intentLayer ?? null,
                 renderMode: (out.metaForSave as any)?.renderMode ?? null,
-                slotPlanPolicy: policy,
+                slotPlanPolicy: String((out.metaForSave as any)?.framePlan?.slotPlanPolicy ?? '').toUpperCase(),
               },
             };
           })(),
-
-
           inputKind: (ctx as any)?.inputKind ?? null,
-
-          // ✅ debug は ctx ではなく “確実にある値” を優先する
           debug: {
             traceId: (ctx as any)?.traceId ?? null,
-            conversationId: _conversationId ?? (ctx as any)?.conversationId ?? null,
-            userCode: _userCode ?? (ctx as any)?.userCode ?? null,
+            conversationId: _conversationId ?? null,
+            userCode: _userCode ?? null,
             renderEngine: true,
             inputKind: (ctx as any)?.inputKind ?? null,
           },
         });
 
-
         if (rr && rr.ok) {
-          // ✅ ここが重要：戻りの持ち方が複数あり得るので全部拾う
           const mx = (rr as any)?.meta?.extra ?? {};
           const blocksCandidate =
             (rr as any)?.rephraseBlocks ??
-            (rr as any)?.blocks ??
             mx?.rephraseBlocks ??
             mx?.rephrase?.blocks ??
-            mx?.rephrase?.rephraseBlocks ??
-            null;
-
-          const headCandidate =
-            (rr as any)?.rephraseHead ??
-            (rr as any)?.head ??
-            mx?.rephraseHead ??
-            mx?.rephrase?.head ??
             null;
 
           if (Array.isArray(blocksCandidate) && blocksCandidate.length > 0) {
-            ex.rephraseBlocks = blocksCandidate;
-          }
-          if (typeof headCandidate === 'string' && headCandidate.trim()) {
-            ex.rephraseHead = headCandidate.trim();
+            (out.metaForSave as any).extra.rephraseBlocks = blocksCandidate;
           }
 
-          ex.rephraseApplied = true;
-          ex.rephraseLLMApplied = true;
-          ex.rephraseReason = ex.rephraseReason ?? 'rephraseSlotsFinal(emptyLike_seed_to_blocks)';
-          ex.rephraseAt = new Date().toISOString();
-
-          console.log('[IROS/rephraseBridge][OK]', {
-            conversationId: _conversationId,
-            userCode: _userCode,
-            policy,
-            emptyLikeNow,
-            blocksLen: Array.isArray(ex.rephraseBlocks) ? ex.rephraseBlocks.length : null,
-            head: String(ex.rephraseHead ?? '').slice(0, 120),
-          });
-        } else {
-          ex.rephraseApplied = false;
-          ex.rephraseLLMApplied = false;
-          ex.rephraseReason = rr?.reason ?? 'rephraseSlotsFinal:failed';
-
-          console.warn('[IROS/rephraseBridge][SKIP_OR_FAIL]', {
-            conversationId: _conversationId,
-            userCode: _userCode,
-            policy,
-            emptyLikeNow,
-            reason: rr?.reason ?? null,
-          });
-        }
-      } else {
-        // 観測用（なぜ走らないか）
-        if (emptyLikeNow) {
-          console.log('[IROS/rephraseBridge][SKIP]', {
-            conversationId: _conversationId,
-            userCode: _userCode,
-            policy,
-            emptyLikeNow,
-            allowLLM_final: allowLLM_final_local,
-            alreadyHasBlocks,
-            slotTextCleanedLen: Number.isFinite(slotTextCleanedLen) ? slotTextCleanedLen : null,
-            slotTextRawLen: Number.isFinite(slotTextRawLen) ? slotTextRawLen : null,
-            bodyNowLen: bodyNow.length,
-            bodyNowHead: bodyNow.slice(0, 40),
-          });
+          (out.metaForSave as any).extra.rephraseApplied = true;
+          (out.metaForSave as any).extra.rephraseLLMApplied = true;
+          (out.metaForSave as any).extra.rephraseReason =
+            (out.metaForSave as any).extra.rephraseReason ??
+            'rephraseSlotsFinal(emptyLike)';
+          (out.metaForSave as any).extra.rephraseAt = new Date().toISOString();
         }
       }
     }

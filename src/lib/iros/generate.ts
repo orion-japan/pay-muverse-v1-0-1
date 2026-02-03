@@ -1193,19 +1193,49 @@ pnpm -s tsc --noEmit
     raw_head: _head(raw),
   });
 
-  // ✅ Phase1: LLM経路では非LLM本文(fallbackNormalBody)を混ぜない
-  // - 空のときは最小プレースホルダ '…' のみで non-empty を保証する
-  let content = ensureNonEmpty(raw, '…');
+// ✅ Phase1: LLM経路では非LLM本文(fallbackNormalBody)を混ぜない
+// - ただし “……/...” のような記号だけ出力は「有効な本文」ではないので coreLine に差し替える
+const isDotsOnly = (s0: unknown) => {
+  const s = String(s0 ?? '').trim();
+  if (!s) return true;
+  // 句点/三点リーダ/ピリオド/全角ピリオドだけ
+  return /^[\.\uFF0E\u3002\u2026]+$/.test(s);
+};
 
-  // v2: rawTextFromModel は「LLMの生出力」を必ず保存（空は禁止）
-  // - raw が空なら '…' を入れる（content 参照で fallback が混ざる余地を消す）
-  if (meta && typeof meta === 'object') {
-    const ex =
-      typeof (meta as any).extra === 'object' && (meta as any).extra
-        ? (meta as any).extra
-        : ((meta as any).extra = {});
-    ex.rawTextFromModel = ensureNonEmpty(raw, '…');
+const rawStr = typeof raw === 'string' ? raw : String(raw ?? '');
+const rawDotsOnly = isDotsOnly(rawStr);
+
+// coreLine（userText由来の最短の土台）
+const userTextStr = String(userText ?? '').trim();
+const coreLine = ensureNonEmpty(firstNonEmptyLine(userTextStr) ?? '', '…');
+
+// ✅ 本文 content は “……” を採用しない
+let content = rawDotsOnly ? coreLine : ensureNonEmpty(rawStr, '…');
+
+// ✅ 観測：rawTextFromModel は raw のまま保存（本文と切り離す）
+if (meta && typeof meta === 'object') {
+  const ex =
+    typeof (meta as any).extra === 'object' && (meta as any).extra
+      ? (meta as any).extra
+      : ((meta as any).extra = {});
+
+  ex.rawTextFromModel = ensureNonEmpty(rawStr, '…');
+  ex.rawTextWasDotsOnly = rawDotsOnly;
+
+  if (rawDotsOnly) {
+    ex.rawDotsOnlyFallback = 'coreLine(userText)';
+    ex.rawDotsOnlyFallbackAt = new Date().toISOString();
+
+    console.log('[IROS/GEN][RAW_DOTS_ONLY_FALLBACK]', {
+      conversationId: String((args as any)?.conversationId ?? ''),
+      raw_len: rawStr.trim().length,
+      raw_head: rawStr.trim().slice(0, 40),
+      coreLineLen: coreLine.length,
+      coreLineHead: coreLine.slice(0, 40),
+    });
   }
+}
+
 
 
   // ---------------------------------

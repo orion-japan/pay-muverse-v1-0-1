@@ -1156,18 +1156,22 @@ export function renderGatewayAsReply(args: {
   const expandAllowed = EXPAND_ENABLED && !isSilence && !isIR;
   void expandAllowed; //（現状はログ用途のみ。将来分岐で使う）
 
-  // ✅ blocks が用意できているなら "3行制限" は掛けない（silence判定のねじれを防ぐ）
-  const allowUnder5Final = shortException && !(Array.isArray(blocks) && blocks.length >= 2);
+// ❌ 以前はここで「短くしてよいか」を判断していたが、これは renderGateway の責務ではない
+// - 行数・長さの判断は slotPlan / orchestrator の単一正に集約する
+// - 下流（render）は一切判断しないことで、LLMが迷わない状態を保証する
 
-  // ✅ 重要：rephrase は "picked" が最優先で拾っているので、
-  // ここで extractedTextFromModel を直採用しない（directive漏れの温床になる）
-  let content = renderV2({
-    blocks,
-    maxLines: allowUnder5Final ? 3 : maxLinesFinal,
-    fallbackText,
-    allowUnder5: allowUnder5Final,
-  });
-  pipe('after_renderV2', content);
+// ✅ renderV2 は「整形のみ」
+// - blocks に含まれる内容を、そのまま安全に整形して返す
+// - 勝手な短文化・行数制限・意味判断は一切行わない
+// - 長文（将来の Sofia 10ブロック構成）にもそのまま対応できる
+let content = renderV2({
+  blocks,
+  maxLines: maxLinesFinal,
+  fallbackText,
+});
+
+pipe('after_renderV2', content);
+
 
 
   // ✅ renderV2 が空文字を返すケースを救済（blocks があるのに outLen=0 になる事故防止）
