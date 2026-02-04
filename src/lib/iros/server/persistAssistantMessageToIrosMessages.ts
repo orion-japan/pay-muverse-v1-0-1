@@ -130,9 +130,18 @@ export async function persistAssistantMessageToIrosMessages(args: {
   }
 
   // 空本文は保存しない（SILENCE等）
-  if (!content || content.trim().length === 0) {
+  // - 「……」「...」「・・・・」のような “ellipsis-only” は空扱いにする（DB汚染止血）
+  const isEllipsisOnly = (s: string) => {
+    const t = String(s ?? '').replace(/\s+/g, '').trim();
+    if (!t) return true;
+    // …(U+2026), ⋯(U+22EF), ‥(U+2025), . , ・(U+30FB)
+    return /^[\u2026\u22ef\u2025\.\u30fb]+$/.test(t);
+  };
+
+  if (isEllipsisOnly(content)) {
     return { ok: true, inserted: false, blocked: false, reason: 'EMPTY_CONTENT' };
   }
+
 
   // =========================
   // ✅ jsonb(meta) の止血

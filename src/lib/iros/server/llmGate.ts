@@ -424,10 +424,10 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
   // (B) 明示沈黙
   const brake = String(brakeReason ?? '');
   const act = String(speechAct ?? '').toUpperCase();
-  if (brake === 'Q1_SUPPRESS' || act === 'SILENCE') {
+  if (brake === 'Q1_SUPPRESS' || act === '無言アクト') {
     return mk({
       entry: 'SKIP_SILENCE',
-      reason: 'brakeReason=Q1_SUPPRESS or speechAct=SILENCE',
+      reason: 'brakeReason=Q1_SUPPRESS or speechAct=無言アクト',
       resolvedText: effectiveLen ? effectiveText : null, // ✅ 本文採用OK
       rewriteSeed: effectiveLen ? effectiveText : null, // （LLM呼ばないのでそのまま保持）
     });

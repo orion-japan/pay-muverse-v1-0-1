@@ -94,7 +94,7 @@ function isSilenceMeta(meta: any): boolean {
   if (meta?.speechSkipped === true) return true;
 
   const sa = String(meta?.speechAct ?? meta?.speech_act ?? '').toUpperCase();
-  if (sa === 'SILENCE') return true;
+  if (sa === '無言アクト') return true;
 
   const reason = String(
     meta?.silencePatchedReason ??
@@ -104,7 +104,7 @@ function isSilenceMeta(meta: any): boolean {
       '',
   ).toUpperCase();
 
-  if (reason.includes('SILENCE')) return true;
+  if (reason.includes('無言アクト')) return true;
   if (reason.includes('NO_LLM') && reason.includes('EMPTY')) return true;
 
   return false;
@@ -411,22 +411,22 @@ export async function loadRecentHistoryAcrossConversations(params: {
   // ✅ LLMに「直近の流れ」を見せたいので、same を最後に置く（末尾が最新）
   const merged = includeSameConversation ? [...crossPicked, ...samePicked] : crossPicked;
 
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('[IROS][HistoryX] loaded', {
-      userCode,
-      table: picked.table,
-      rawCount: rows.length,
-      normalizedCount: normalized.length,
+  console.log('[IROS][HistoryX] loaded', {
+    userCode,
+    table: picked.table,
+    rawCount: rows.length,
+    normalizedCount: normalized.length,
 
-      // ✅ Phase1 判定用ログ
-      sameConversationIncluded: Boolean(includeSameConversation && sameConvId),
-      sameConvCount: samePicked.length,
-      crossConvCount: crossPicked.length,
+    includeSameConversation,
+    currentConversationId,
+    queryExcludeConversationId: queryExcludeConversationId ?? null,
 
-      excludeConversationId: excludeConversationId ?? null,
-      crossConvUserOnly: CROSS_CONV_USER_ONLY,
-    });
-  }
+    sameConversationIncluded: Boolean(includeSameConversation && sameConvId),
+    sameConvCount: samePicked.length,
+    crossConvCount: crossPicked.length,
+
+    crossConvUserOnly: CROSS_CONV_USER_ONLY,
+  });
 
   return merged.map((x) => {
     const r = x.r;

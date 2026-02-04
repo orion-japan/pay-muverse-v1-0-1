@@ -14,14 +14,14 @@
 // - llmSystem: LLMに渡す「器」制約（systemに足す想定）
 // - maxLines: UI/後段での行数制限
 //
-// ✅ 重要：SILENCE は「LLMからの生成ゼロ」。
+// ✅ 重要：無言アクト は「LLMからの生成ゼロ」。
 // - LLMに "…" を生成させない（silentText 生成は禁止）
 // - 固定本文（…）を出すかどうかは policy/metaPatch 側の責務（single source）
 //
 // ルール：
-// - actCandidate === 'SILENCE' → 必ず沈黙（LLM呼ばない）
+// - actCandidate === '無言アクト' → 必ず沈黙（LLM呼ばない）
 // - allowLLM=false かつ actCandidate==='FORWARD' → FORWARD のまま（非LLM）
-// - allowLLM=false かつ それ以外 → 安全側で SILENCE
+// - allowLLM=false かつ それ以外 → 安全側で 無言アクト
 //
 // ✅ Q1_SUPPRESS:
 // - 原則 allowLLM を強制OFF
@@ -58,11 +58,6 @@ function buildLLMSystemForAllow(allow: AllowSchema): string {
     '指定されたフィールド以外の文章を追加しないでください。',
     `最大行数は ${allow.maxLines} 行です。`,
   ];
-
-  if (allow.act === 'SILENCE') {
-    // ここは通常使われない（LLM呼ばない）
-    return joinLines([...base, 'SILENCE: 何も生成しないでください。']);
-  }
 
   // act別：許可フィールド
   const fields: string[] = [];
@@ -126,8 +121,7 @@ function normAct(v: unknown): SpeechAct {
   if (s === 'NORMAL') return 'FORWARD';
   if (s === 'IR') return 'FORWARD';
 
-  // ✅ types.ts の union に確実にあるものだけ返す
-  if (s === 'SILENCE') return 'SILENCE';
+  // “無言アクト” は使わない：来ても FORWARD に吸収
   if (s === 'FORWARD') return 'FORWARD';
 
   // これらが union に “ある構成” の場合だけ有効（無い構成でもコンパイルを止めない）
@@ -138,6 +132,8 @@ function normAct(v: unknown): SpeechAct {
   return 'FORWARD';
 }
 
+
+
 /**
  * decideSpeechAct の結果を最終適用する。
  * - hint.allowLLM が false なら actCandidate が何でも LLM を止められる保険
@@ -146,21 +142,24 @@ function normAct(v: unknown): SpeechAct {
  * ✅ 重要：
  * allowLLM=false のとき、
  * - actCandidate==='FORWARD' は FORWARD のまま（非LLMで成立）
- * - それ以外は安全側で SILENCE
+ * - それ以外は安全側で 無言アクト
  */
 export function applySpeechAct(decision: SpeechDecision): ApplySpeechActOutput {
   // ✅ Sofia 常時固定（デバッグ/緊急遮断）
   // ※ここは環境スイッチとして残す（運用でOFF前提）
   if (process.env.IROS_ALWAYS_SOFIA === '1') {
-    const act: SpeechAct = 'SILENCE';
+    // 緊急固定は “無言アクト” ではなく、FORWARD の最小器で抑える
+    const act: SpeechAct = 'FORWARD';
     const allow = defaultAllowSchema(act);
     return {
       act,
       allow,
-      allowLLM: false,
+      allowLLM: true,
       maxLines: 1,
     };
   }
+
+
 
   // actCandidate を正規化（undefined/揺れ対策）
   let actCandidate: SpeechAct = normAct((decision as any)?.act);
@@ -186,15 +185,11 @@ export function applySpeechAct(decision: SpeechDecision): ApplySpeechActOutput {
   const forcedByQ1Suppress = brakeReleaseReason === 'Q1_SUPPRESS';
 
   // =========================================================
-  // ✅ 新方針：SILENCEを基本廃止（= LLMは止めない）
+  // ✅ 新方針：無言アクトを基本廃止（= LLMは止めない）
   // - 乱れ/抑制があっても「LLMは呼ぶ」
   // - 代わりに “器(AllowSchema)” を最小化して暴走を防ぐ
   // =========================================================
 
-  // SILENCE 判定が来ても、原則は FORWARD に丸める（最低1行を返す）
-  if (actCandidate === 'SILENCE') {
-    actCandidate = 'FORWARD';
-  }
 
   // 抑制時（Q1_SUPPRESS / hint.allowLLM=false）でも LLM は呼ぶ。
   // ただし “器” を FORWARD の最小（1行）に固定する。

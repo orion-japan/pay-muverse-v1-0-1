@@ -509,7 +509,7 @@ export async function postProcessReply(
 
   // =========================================================
   // 6) ✅ Q1_SUPPRESS沈黙止血：本文は必ず空
-  //    + 非SILENCEの空本文 stopgap：通常会話を壊さない
+  //    + 非無言アクトの空本文 stopgap：通常会話を壊さない
   // =========================================================
 
   // ✅ 以降で共通利用（宣言はここで1回だけ）
@@ -540,7 +540,7 @@ export async function postProcessReply(
     console.warn('[IROS/PostProcess] silence patch failed (non-fatal)', e);
   }
 
-  // 6-B) ✅ 非SILENCEの空本文 stopgap（ただし憲法準拠で “seed→writer” を優先）
+  // 6-B) ✅ 非無言アクトの空本文 stopgap（ただし憲法準拠で “seed→writer” を優先）
   try {
     const bodyText = String(finalAssistantText ?? '').trim();
 
@@ -553,15 +553,15 @@ export async function postProcessReply(
 
     slotPlanExpected = hasSlots || (typeof slotPlanLen === 'number' && slotPlanLen > 0);
 
-    // ✅ 非SILENCEの空本文 stopgap
-    // - SILENCE/FORWARD は silencePolicy 側で扱う（ここでは触らない）
+    // ✅ 非無言アクトの空本文 stopgap
+    // - 無言アクト/FORWARD は silencePolicy 側で扱う（ここでは触らない）
     const ex2 = getExtra(metaForSave);
     const speechActNow = String(ex2.speechAct ?? (metaForSave as any)?.speechAct ?? '')
       .trim()
       .toUpperCase();
 
     const isSpeechSilenceLike =
-      speechActNow === 'SILENCE' ||
+      speechActNow === '無言アクト' ||
       speechActNow === 'FORWARD' ||
       ex2.speechSkipped === true ||
       ex2.renderEngineSilenceBypass === true ||
@@ -817,29 +817,38 @@ if (allowLLM === false) {
     head: commitText.slice(0, 64),
   });
 
-        } else {
-          // ✅ 本文は空のまま維持して writer を走らせる
-          // （route/handleIrosReply 側の LLM 呼び出しが “seed” を見て本文生成する）
-          finalAssistantText = '';
+} else {
+  // ✅ writer に本文生成させる（FINAL__LLM_COMMIT）: ただし base は空にしない
+  // - base が空だと下流で "……"(len=2) に落ちるため、最低1行だけ可視テキストを残す
+  // - seed / policy は維持し、writer は通常通り走る
+  const baseVisible =
+    String(coreLine ?? '').trim() ||
+    String(cleanedSlotText ?? '').trim() ||
+    '';
 
-          // finalTextPolicy は「writer に本文生成させる」意図を明示
-          metaForSave.extra = {
-            ...(metaForSave.extra ?? {}),
-            finalTextPolicy: 'FINAL__LLM_COMMIT',
-            slotPlanCommitted: false,
-          };
+  finalAssistantText = baseVisible;
 
-          console.log('[IROS/PostProcess] SLOTPLAN_SEED_TO_WRITER (keep empty)', {
-            conversationId,
-            userCode,
-            slotPlanPolicy: det.policy,
-            slotPlanPolicy_from: det.from,
-            slotPlanLen,
-            hasSlots,
-            seedLen: String(slotText ?? '').length,
-            seedHead: String(slotText ?? '').slice(0, 48),
-          });
-        }
+  metaForSave.extra = {
+    ...(metaForSave.extra ?? {}),
+    finalTextPolicy: 'FINAL__LLM_COMMIT',
+    slotPlanCommitted: false,
+    baseVisibleLen: baseVisible.length,
+    baseVisibleHead: baseVisible.slice(0, 64),
+  };
+
+  console.log('[IROS/PostProcess] SLOTPLAN_SEED_TO_WRITER (base visible)', {
+    conversationId,
+    userCode,
+    slotPlanPolicy: det.policy,
+    slotPlanPolicy_from: det.from,
+    slotPlanLen,
+    hasSlots,
+    baseVisibleLen: baseVisible.length,
+    baseVisibleHead: baseVisible.slice(0, 48),
+    seedLen: String(slotText ?? '').length,
+    seedHead: String(slotText ?? '').slice(0, 48),
+  });
+}
       }
     } else if (isNonSilenceButEmpty && !slotPlanExpected) {
       // ✅ seed があるなら ACK_FALLBACK で潰さない

@@ -1,8 +1,8 @@
 // src/lib/iros/policy/rulebook.ts
 // Iros Policy Rulebook v1 — 全体ルール（決定権の集約）
-// 目的：SILENCE を本当の無出力にし、後段の「勝手な生成/整形/保存」を禁止する。
+// 目的：無言アクト を本当の無出力にし、後段の「勝手な生成/整形/保存」を禁止する。
 
-export type SpeechAct = 'SILENCE' | 'FORWARD' | 'RENDER' | 'BLOCK' | 'ERROR';
+export type SpeechAct = 'FORWARD' | 'RENDER' | 'BLOCK' | 'ERROR';
 
 export type PolicyReasonCode =
   | 'HARD_STOP__SILENCE'
@@ -29,7 +29,7 @@ export type PolicyDecision = Readonly<{
   // 保存するか（DB message を作るか）
   shouldPersist: boolean;
 
-  // 確定テキスト（SILENCEのときは '' を強制）
+  // 確定テキスト（無言アクトのときは '' を強制）
   text: string;
 
   // デバッグ・監査用
@@ -53,7 +53,7 @@ export type PolicyInput = {
   allowRender?: boolean | null;
 
   // すでに「沈黙にしたい」などのハードな意図
-  hardStop?: SpeechAct | null; // 'SILENCE' | 'BLOCK' | 'ERROR' を想定
+  hardStop?: SpeechAct | null; // '無言アクト' | 'BLOCK' | 'ERROR' を想定
 
   // デバッグ用（任意）
   debugLabel?: string | null;
@@ -86,21 +86,6 @@ export function evaluatePolicy(input: PolicyInput): PolicyDecision {
 
   if (input.debugLabel) reasons.push({ code: 'DEBUG', detail: input.debugLabel });
 
-  // =========================================================
-  // 1) HARD STOP（最上位の秩序）— 以後、誰も触れない
-  // =========================================================
-  if (act0 === 'SILENCE') {
-    reasons.push({ code: 'HARD_STOP__SILENCE' });
-    return freezeDecision({
-      act: 'SILENCE',
-      allowLLM: false,
-      allowRender: false,
-      shouldDisplay: false,
-      shouldPersist: false,
-      text: '', // ★ “…” を絶対に返さない
-      reasons,
-    });
-  }
 
   if (act0 === 'BLOCK') {
     reasons.push({ code: 'HARD_STOP__BLOCK' });
@@ -140,14 +125,14 @@ export function evaluatePolicy(input: PolicyInput): PolicyDecision {
   if (!allowRender) reasons.push({ code: 'NO_RENDER' });
 
   // =========================================================
-  // 3) 空文字は “沈黙扱い”（表示/保存しない）
-  //    ※ ここが DB 汚染の止血点
+  // 3) 空文字は “DROP”（表示/保存しない）
+  //    ※ 1:1 では 無言アクト を使わない。空は静かに捨てる。
   // =========================================================
   const trimmed = (text0 ?? '').trim();
   if (!trimmed) {
     reasons.push({ code: 'EMPTY_TEXT__DROP' });
     return freezeDecision({
-      act: 'SILENCE', // 空は沈黙として扱う（UI/DB を静かにする）
+      act: 'FORWARD',      // ★ 無言アクトを返さない
       allowLLM: false,
       allowRender: false,
       shouldDisplay: false,
@@ -156,6 +141,7 @@ export function evaluatePolicy(input: PolicyInput): PolicyDecision {
       reasons,
     });
   }
+
 
   // =========================================================
   // 4) 通常（ここで初めて「出してよい」状態）

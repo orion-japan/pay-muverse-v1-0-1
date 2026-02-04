@@ -1627,9 +1627,17 @@ const stripInternalMarkersForLock = (s: string) => {
   const recallMust = extractRecallMustIncludeFromSeed(seedDraftRawAll);
   const mustIncludeRuleText = buildMustIncludeRuleText(recallMust);
 
-// ILINE抽出：slot + userText 両方から拾う（seed 側は内部マーカー除外）
-const seedForLock = stripInternalMarkersForLock(seedDraftRawAll);
-const lockSourceRaw = [seedForLock, userText].filter(Boolean).join('\n');
+  // ILINE抽出：slot + userText 両方から拾う（seed 側は内部マーカー除外）
+  const seedForLock = stripInternalMarkersForLock(seedDraftRawAll);
+
+  // ✅ seedForLock と userText が同一になるケースがあるため、重複連結を防ぐ
+  const lockParts = [seedForLock, userText]
+    .filter((x): x is string => Boolean(String(x ?? '').trim()))
+    .map((x) => String(x));
+
+  const lockSourceRaw =
+    lockParts.length === 2 && lockParts[0] === lockParts[1] ? lockParts[0] : lockParts.join('\n');
+
 
 
   console.info('[IROS/ILINE][LOCK_PARTS]', {
@@ -1932,8 +1940,66 @@ const lastTurnsSafe = (() => {
       metaExtra.flagshipVerdict = { level: null, ok: null, reasons: [] as string[], score: null };
     }
 
-    const blocksText = toRephraseBlocks(text);
+    // --- blocks (default: paragraph-ish) ---
+    const safeParseJson = (s0: any): any | null => {
+      try {
+        return JSON.parse(String(s0 ?? '').trim());
+      } catch {
+        return null;
+      }
+    };
+
+    const detectIdeaBandPropose = (): boolean => {
+      const slots = (extracted as any)?.slots;
+      if (!Array.isArray(slots)) return false;
+
+      const shift = slots.find((x: any) => String(x?.key ?? '').toUpperCase().includes('SHIFT'));
+      const shiftText = String(shift?.text ?? shift?.value ?? '').trim();
+      if (!shiftText.startsWith('@SHIFT')) return false;
+
+      const jsonPart = shiftText.replace(/^@SHIFT\b/, '').trim();
+      const obj = safeParseJson(jsonPart);
+      const kind = String(obj?.kind ?? '').toLowerCase();
+      const intent = String(obj?.intent ?? '').toLowerCase();
+      return kind === 'idea_band' && intent === 'propose_candidates';
+    };
+
+    const makeIdeaBandCandidates = (s0: string): string[] => {
+      const s = String(s0 ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+      if (!s) return [];
+
+      // 1) まずは「空行区切り」で段落化（番号/箇条書きは付けない）
+      let parts = s
+        .split(/\n\s*\n+/)
+        .map((x) => x.trim())
+        .filter(Boolean);
+
+      // 2) 段落が少なすぎる時は、句点で“ゆるく”分割して 2〜4 を狙う（過剰分割しない）
+      if (parts.length < 2) {
+        const sentences = s
+          .split(/。+/)
+          .map((x) => x.trim())
+          .filter(Boolean);
+
+        if (sentences.length >= 2) {
+          parts = sentences.slice(0, 4).map((x) => (x.endsWith('。') ? x : `${x}。`));
+        }
+      }
+
+      // 3) 最終クランプ：2〜4（足りない時は“元のまま”に戻す）
+      if (parts.length < 2) return [];
+      return parts.slice(0, 4);
+    };
+
+    const isIdeaBand = detectIdeaBandPropose();
+
+    const blocksText = isIdeaBand
+      ? makeIdeaBandCandidates(text)
+      : toRephraseBlocks(text);
+
     const blocks = blocksText.map((t) => ({ text: t, kind: 'p' }));
+
+    metaExtra.rephraseBlocks = blocks;
 
     metaExtra.rephraseBlocks = blocks;
     metaExtra.rephraseHead =
@@ -2370,13 +2436,33 @@ const lastTurnsSafe = (() => {
     }
 
     const retryLen0 = String(raw2 ?? '').trim().length;
+
+    // ✅ QCOUNT_TOO_MANY で落ちた retry は「短い」だけでは捨てない
+    //    （疑問推定の誤爆対策：短く自然な返答が最適解になり得る）
+    const fatalReasons = new Set((((v as any)?.reasons ?? []) as any[]).map((x) => String(x)));
+    const relaxTooShortOnQCount = fatalReasons.has('QCOUNT_TOO_MANY');
+
     if (!isDirectTask && !isMicroOrGreetingNow && retryLen0 > 0 && retryLen0 < MIN_OK_LEN) {
-      const fallbackDraft = String(baseDraftForRepair ?? '').trim() || String(candidate ?? '').trim();
-      if (seedFromSlots && String(seedFromSlots).trim()) {
-        return adoptAsSlots(seedFromSlots, 'RETRY_TOO_SHORT_FORCE_USE_SEED', { scaffoldActive });
+      if (!relaxTooShortOnQCount) {
+        const fallbackDraft = String(baseDraftForRepair ?? '').trim() || String(candidate ?? '').trim();
+        if (seedFromSlots && String(seedFromSlots).trim()) {
+          return adoptAsSlots(seedFromSlots, 'RETRY_TOO_SHORT_FORCE_USE_SEED', { scaffoldActive });
+        }
+        return adoptAsSlots(fallbackDraft, 'RETRY_TOO_SHORT_FORCE_USE_DRAFT', { scaffoldActive });
       }
-      return adoptAsSlots(fallbackDraft, 'RETRY_TOO_SHORT_FORCE_USE_DRAFT', { scaffoldActive });
+
+      console.warn('[IROS/FLAGSHIP][RETRY_TOO_SHORT_BUT_ACCEPTED_DUE_TO_QCOUNT]', {
+        traceId: debug.traceId,
+        conversationId: debug.conversationId,
+        userCode: debug.userCode,
+        retryLen: retryLen0,
+        min: MIN_OK_LEN,
+        reasons: Array.from(fatalReasons),
+        head: safeHead(String(raw2 ?? ''), 160),
+      });
+      // fallthrough: accept raw2 as-is
     }
+
   }
 
   // scaffold復元（retryでも同様）

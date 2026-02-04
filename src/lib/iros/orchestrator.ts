@@ -737,6 +737,36 @@ export async function runIrosTurn(
     const itOk = it.ok === true;
     const itReason = it.reason ?? null;
 
+        // ✅ IT flags を meta に露出（IntentBridge の lane 判定入力に使う）
+    // - ここが無いと hasCore/deepenOk が downstream で常に false/null になる
+    {
+      const flagsNow = (it as any)?.flags ?? null;
+
+      const itTriggerObj =
+        typeof (meta as any).itTrigger === 'object' && (meta as any).itTrigger
+          ? (meta as any).itTrigger
+          : ((meta as any).itTrigger = {});
+      itTriggerObj.flags = flagsNow;
+
+      const itTriggerObjSnake =
+        typeof (meta as any).it_trigger === 'object' && (meta as any).it_trigger
+          ? (meta as any).it_trigger
+          : ((meta as any).it_trigger = {});
+      itTriggerObjSnake.flags = flagsNow;
+    }
+
+
+    // ✅ IntentBridge が拾う入力（meta.itTrigger.flags）をここで必ず供給する
+    // - これが無いと IntentBridge 側で hasCore/deepenOk が常に false 扱いになる（断線）
+    (meta as any).itTrigger = {
+      ok: itOk,
+      reason: itReason,
+      flags: (it as any).flags ?? null,
+      tLayerModeActive: (it as any).tLayerModeActive === true,
+      tLayerHint: (it as any).tLayerHint ?? null,
+      tVector: (it as any).tVector ?? null,
+    };
+
     // ✅ T3確定（commit済み）なら：itTriggered / itx_reason を probe で上書きしない
     const committedStep =
       (meta as any)?.itx_step ??
@@ -744,6 +774,7 @@ export async function runIrosTurn(
       (ms as any)?.itx_step ??
       (ms as any)?.itxStep ??
       null;
+
 
     const isCommittedT3 = committedStep === 'T3';
 
@@ -1021,7 +1052,7 @@ export async function runIrosTurn(
         ? slotPlanPolicyRaw.trim()
         : null;
 
-// 3) SILENCE 判定（extra を単一ソース寄りに優先）
+// 3) 無言アクト 判定（extra を単一ソース寄りに優先）
 const ex =
   meta && typeof meta === 'object' && (meta as any).extra && typeof (meta as any).extra === 'object'
     ? (meta as any).extra
@@ -1036,7 +1067,7 @@ const speechAllowLLM =
       ? (meta as any).speechAllowLLM
       : null;
 
-const isSilence = speechAct === 'SILENCE' || speechAllowLLM === false;
+const isSilence = speechAct === '無言アクト' || speechAllowLLM === false;
 
 
     // 4) 空判定
@@ -1310,21 +1341,39 @@ if (!isIrDiagnosisTurn_here) {
     (meta as any)?.deepenOk ??
     undefined;
 
+
+    if (typeof process !== 'undefined' && process.env.DEBUG_IROS_INTENTBRIDGE === '1') {
+      console.log('[IROS/IntentBridge][RAW_INPUTS]', {
+        itTrigger_flags: (meta as any)?.itTrigger?.flags ?? null,
+        it_trigger_flags: (meta as any)?.it_trigger?.flags ?? null,
+        meta_flags: (meta as any)?.flags ?? null,
+        it_flags: (meta as any)?.it?.flags ?? null,
+        itx_flags: (meta as any)?.itx?.flags ?? null,
+        meta_deepenOk: (meta as any)?.deepenOk ?? null,
+      });
+    }
+
+
   // lane判定入力（存在する値だけ拾う／無ければ false）
+  // ✅ 優先順位：IT_TRIGGER(itTrigger) → it → itx → flags → その他
+  // ※ flags が先だと「false が先に拾われ」IT_TRIGGER の true を潰す
   const hasCoreNow =
-    (meta as any)?.flags?.hasCore ??
-    (meta as any)?.it?.flags?.hasCore ??
     (meta as any)?.itTrigger?.flags?.hasCore ??
+    (meta as any)?.it?.flags?.hasCore ??
+    (meta as any)?.itx?.flags?.hasCore ??
+    (meta as any)?.flags?.hasCore ??
     (meta as any)?.core?.hasCore ??
     (meta as any)?.hasCore ??
     false;
 
   const declarationOkNow =
-    (meta as any)?.flags?.declarationOk ??
-    (meta as any)?.it?.flags?.declarationOk ??
     (meta as any)?.itTrigger?.flags?.declarationOk ??
+    (meta as any)?.it?.flags?.declarationOk ??
+    (meta as any)?.itx?.flags?.declarationOk ??
+    (meta as any)?.flags?.declarationOk ??
     (meta as any)?.declarationOk ??
     false;
+
 
   // 入力を meta.extra.intentBridge に集約（laneKey は後で足す）
   ex.intentBridge = {
@@ -1801,23 +1850,21 @@ const deepenOkNow =
 
 // ✅ lane判定入力（存在する値だけ拾う／無ければ false）
 const hasCoreNow =
-  (meta as any)?.flags?.hasCore ??
-  (meta as any)?.it?.flags?.hasCore ??
-  (meta as any)?.itTrigger?.flags?.hasCore ??
-  (meta as any)?.core?.hasCore ??
-  (meta as any)?.hasCore ??
-  (finalMeta as any)?.flags?.hasCore ??
-  (finalMeta as any)?.hasCore ??
-  false;
+(meta as any)?.itTrigger?.flags?.hasCore ??
+(meta as any)?.it?.flags?.hasCore ??
+(meta as any)?.itx?.flags?.hasCore ??
+(meta as any)?.flags?.hasCore ??
+(meta as any)?.core?.hasCore ??
+(meta as any)?.hasCore ??
+false;
 
 const declarationOkNow =
-  (meta as any)?.flags?.declarationOk ??
-  (meta as any)?.it?.flags?.declarationOk ??
-  (meta as any)?.itTrigger?.flags?.declarationOk ??
-  (meta as any)?.declarationOk ??
-  (finalMeta as any)?.flags?.declarationOk ??
-  (finalMeta as any)?.declarationOk ??
-  false;
+(meta as any)?.itTrigger?.flags?.declarationOk ??
+(meta as any)?.it?.flags?.declarationOk ??
+(meta as any)?.itx?.flags?.declarationOk ??
+(meta as any)?.flags?.declarationOk ??
+(meta as any)?.declarationOk ??
+false;
 
 // --------------------------------------------------
 // ✅ intentBridge 入力を meta.extra.intentBridge に集約

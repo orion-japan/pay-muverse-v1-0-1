@@ -1,27 +1,17 @@
 // file: src/lib/iros/speech/decideSpeechAct.ts
 // iros — SpeechAct Decider
 //
-// ✅ 目的：LLMを呼ぶ前に SpeechAct を確定する（= “助言したい本能” を封じる）
+// 方針（v2）
+// - “無言アクト” は使わない（無言アクト を返さない）
+// - LLM を止めたい状況でも「LLMは呼ぶ」前提で、hint によって “器(AllowSchema)” を最小化する
+// - ここは「決めるだけ」：最終の allow/maxLines/抑制は applySpeechAct/enforceAllowSchema が担う
+//
+// 目的：
 // - 入力/メタ/状態から deterministic に act を決める
-// - act が SILENCE のときは LLM を絶対に呼ばない
-//
-// ✅ 最重要：SILENCE / FORWARD の最終仕様は speechPolicy.ts（single source）で確定する
-// - FORWARD は本文固定（🪔）+ LLM禁止 + assistant保存禁止（汚染を止める）
-// - SILENCE は本文固定（…）+ LLM禁止 + assistant保存禁止（UI消失を防ぐ）
-//
-// ✅ 重要：SpeechAct の decision は「top-level に allowLLM/oneLineOnly/allow を持つ」
-// - handleIrosReply 側の stamp は decision.allowLLM / decision.allow を参照するため
-// - hint.allowLLM だけだと meta に刻めず、空返答の原因になる
-//
-// ✅ NEW：decision.metaLite（requestedMode / mode / qCode）を添付できるようにする
-// - applySpeechAct が any で decision.meta を読むため、「上流が添付すれば届く」を確実化する
-//
-// ✅ 注意：このファイルは “決めるだけ”
-// - 本文固定（🪔/…）や bypassFallback などの詳細は speechPolicy.ts 側の metaPatch に刻まれる
-// - route / handleIrosReply / postprocess は「ここで決まった結果に従うだけ」
+// - act: FORWARD or COMMIT（必要なら将来 NAME/FLIP を追加）
+// - top-level に allowLLM/oneLineOnly/allow を必ず付与（stamp/互換のため）
 
 import type { SpeechDecision } from './types';
-import { decideSilence, decideSpeechPolicy } from './silencePolicy';
 
 export type DecideSpeechActInput = {
   inputKind?: string | null; // 'micro' など（大小文字や揺れを吸収）
@@ -49,7 +39,7 @@ export type DecideSpeechActInput = {
   // generate 側で userText 空判定したい時のため（任意）
   userText?: string | null;
 
-  // ✅ NEW：applySpeechAct に渡したい最小文脈（型は増やすが判定はここでは使わない）
+  // applySpeechAct に渡したい最小文脈（判定はここでは使わない）
   requestedMode?: string | null; // consult / vision / mirror / recall など
   mode?: string | null; // meta.mode の実効値（requestedMode が無い場合の保険）
   qCode?: string | null; // Q1..Q5（正規化済み推奨）
@@ -86,31 +76,25 @@ function tCommitPossible(i: DecideSpeechActInput): boolean {
   const hintOk = hint === 'T1' || hint === 'T2' || hint === 'T3';
   if (hintOk) return true;
 
-  // hasFixedAnchor は “候補” に過ぎないので、ここでは commit 条件に使わない（暴発防止）
+  // hasFixedAnchor は “候補” なので commit 条件に使わない（暴発防止）
   return false;
 }
 
 /**
- * ✅ 年始/挨拶/雑談 bypass（安全側）
+ * 挨拶/雑談 bypass（安全側）
  * - 挨拶のみを自然言語で返すのはOK
- * - 相談/問題が混じるなら bypass しない（通常分岐に任せる）
- *
- * 注意：
- * - ここは “SILENCE/FORWARD固定” の汚染対策とは別枠
- * - 例：挨拶は LLM を許可して自然言語を返して良い
+ * - 相談/問題が混じるなら bypass しない
  */
 function isSmalltalkBypass(userText?: string | null): boolean {
   const t = normStr(userText ?? '');
   if (!t) return false;
 
-  // 相談/問題っぽい語が少しでも入っていたら bypass しない
   const looksLikeHelp =
     /(どうしたら|どうすれば|助けて|困って|不安|怖い|決められない|選択肢|教えて|相談|つらい|しんどい|無理|やめたい|連絡が来ない|返信がない|別れ|喧嘩|不倫|お金|借金|病院|薬|法律|訴え|投資)/.test(
       t,
     );
   if (looksLikeHelp) return false;
 
-  // 「挨拶/雑談として完結している」ものだけ bypass
   const isGreetingOnly =
     /^(こんばんは|こんにちは|おはよう(ございます)?|ことよろ|よろしく(お願いします)?|あけましておめでとう|新年(になりました|です)?|おめでとう|元気|調子どう)[!！。．…\s]*$/.test(
       t,
@@ -124,8 +108,6 @@ function buildMetaLite(input: DecideSpeechActInput): any {
   const mode = normStr(input.mode) || null;
   const qCode = normStr(input.qCode) || null;
 
-  // requestedMode が無い場合でも、mode は残す（デバッグ/分岐の保険）
-  // 空は落とす（余計な汚染を避ける）
   const meta: any = {};
   if (requestedMode) meta.requestedMode = requestedMode;
   if (mode) meta.mode = mode;
@@ -135,36 +117,36 @@ function buildMetaLite(input: DecideSpeechActInput): any {
 }
 
 /**
- * ✅ SpeechDecision を返す時は top-level allowLLM/oneLineOnly/allow を必ず持つ
- * - handleIrosReply の stamp が参照するため（hint だけだと欠落する）
+ * SpeechDecision を返す時は top-level allowLLM/oneLineOnly/allow を必ず持つ
+ * - stamp が参照するため（hint だけだと欠落する）
  *
- * ✅ decision.meta（metaLite）を添付できる
- * - applySpeechAct が any で読みに行く “meta” を確実に渡す
+ * ※ act は 'FORWARD' or 'COMMIT' のみ返す（無言アクト禁止）
  */
-function makeDecision(
-  d: {
-    act: 'SILENCE' | 'FORWARD' | 'COMMIT';
-    reason: string;
-    confidence: number;
-    allowLLM: boolean;
-    oneLineOnly: boolean;
-    shouldPersistAssistant?: boolean;
+function makeDecision(d: {
+  act: 'FORWARD' | 'COMMIT';
+  reason: string;
+  confidence: number;
 
-    // meta は “最小文脈 + policy metaPatch” を合成して入れる
-    meta?: any | null;
-  },
-): SpeechDecision {
+  // v2 方針：LLM は基本呼ぶ。抑制は hint で渡して “器” を縮める。
+  // stamp 互換のため top-level allowLLM/allow は必ず持つ
+  allowLLM: boolean;
+  oneLineOnly: boolean;
+
+  // assistant 保存は原則 true（汚染止血は postprocess/policy 側で行う）
+  // 必要なときだけ明示 false にできるよう残す
+  shouldPersistAssistant?: boolean;
+
+  // hint は applySpeechAct が参照（抑制のトリガ）
+  hint?: { allowLLM?: boolean; oneLineOnly?: boolean };
+
+  // applySpeechAct が any で読みに行く “meta”
+  meta?: any | null;
+}): SpeechDecision {
   const shouldPersistAssistant =
-    typeof d.shouldPersistAssistant === 'boolean'
-      ? d.shouldPersistAssistant
-      : // SILENCE は汚染防止で保存しない、その他は既存仕様に任せる
-        d.act === 'SILENCE'
-        ? false
-        : true;
+    typeof d.shouldPersistAssistant === 'boolean' ? d.shouldPersistAssistant : true;
 
   const metaLite = d.meta ?? null;
 
-  // 型が追随してなくても「実体を meta に刻む」ことを優先（as any）
   return {
     act: d.act,
     reason: d.reason,
@@ -172,14 +154,13 @@ function makeDecision(
 
     // ✅ stamp が見るキー
     allowLLM: d.allowLLM,
-    allow: d.allowLLM, // 互換（stamp は allow も見る）
+    allow: d.allowLLM, // 互換
     oneLineOnly: d.oneLineOnly,
     shouldPersistAssistant,
 
-    // ✅ 既存互換（UI側が hint を見てる可能性がある）
-    hint: { allowLLM: d.allowLLM, oneLineOnly: d.oneLineOnly },
+    // ✅ applySpeechAct が見るキー（抑制トリガ）
+    hint: { ...(d.hint ?? {}), oneLineOnly: d.oneLineOnly },
 
-    // ✅ applySpeechAct が any で読みに行く “meta”
     ...(metaLite ? { meta: metaLite } : {}),
   } as any;
 }
@@ -187,61 +168,8 @@ function makeDecision(
 export function decideSpeechAct(input: DecideSpeechActInput): SpeechDecision {
   const oneLineOnly = input.oneLineOnly === true;
 
-  // ✅ metaLite は「入口で一度だけ」作る（分岐で漏れない）
+  // ✅ metaLite は入口で一度だけ作る（分岐で漏れない）
   const metaLite = buildMetaLite(input);
-
-  // ✅ SINGLE SOURCE（最優先）：
-  // SILENCE / FORWARD を speechPolicy.ts（silencePolicy.ts 経由）で確定する。
-  // - FORWARD: 🪔 固定 + allowLLM=false + shouldPersistAssistant=false
-  // - SILENCE: … 固定 + allowLLM=false + shouldPersistAssistant=false
-  // ※ act/reason/confidence は policy 側の決定を信頼する
-  const sp = decideSpeechPolicy({
-    inputKind: input.inputKind ?? null,
-    brakeReleaseReason: input.brakeReleaseReason ?? null,
-
-    // decideSpeechAct の段階では “候補 act” はまだ無いので null
-    act: null,
-    reason: null,
-    confidence: null,
-
-    userText: input.userText ?? null,
-    oneLineOnly: input.oneLineOnly ?? null,
-  });
-
-  if (sp.ok) {
-    const mergedMeta =
-      metaLite || sp.output.metaPatch
-        ? { ...(metaLite ?? {}), ...(sp.output.metaPatch ?? {}) }
-        : null;
-
-    // ✅ 型安全に絞る（policy が ok:true を返すのは SILENCE/FORWARD のみ、という前提をコード化）
-    const act: 'SILENCE' | 'FORWARD' = sp.output.act === 'SILENCE' ? 'SILENCE' : 'FORWARD';
-
-    return makeDecision({
-      act,
-      reason: sp.output.reason,
-      confidence: sp.output.confidence,
-      allowLLM: sp.output.allowLLM,
-      oneLineOnly: true, // SILENCE/FORWARD は policy 側で固定本文運用
-      shouldPersistAssistant: sp.output.shouldPersistAssistant,
-      meta: mergedMeta,
-    });
-  }
-
-  // 1) / 2) ✅ SILENCE 判定は 1箇所（speechPolicy の decideSilence）に委譲（互換）
-  // ※ decideSpeechPolicy が {ok:false} の場合のみ通る
-  const sil = decideSilence(input);
-  if (sil.shouldSilence) {
-    return makeDecision({
-      act: 'SILENCE',
-      reason: sil.reason,
-      confidence: sil.confidence,
-      allowLLM: false,
-      oneLineOnly: true,
-      shouldPersistAssistant: false,
-      meta: metaLite,
-    });
-  }
 
   const suppress = isQBrakeSuppress(input.brakeReleaseReason);
   const itActive = input.itActive === true;
@@ -249,7 +177,7 @@ export function decideSpeechAct(input: DecideSpeechActInput): SpeechDecision {
   const micro = isMicroInput(input.inputKind);
   const slotsOk = hasSlots(input.slotPlanLen);
 
-  // 3) 年始/挨拶/雑談 bypass（自然言語を許可）
+  // 1) 挨拶/雑談 bypass（自然言語を許可）
   if (isSmalltalkBypass(input.userText ?? null)) {
     return makeDecision({
       act: 'FORWARD',
@@ -261,22 +189,7 @@ export function decideSpeechAct(input: DecideSpeechActInput): SpeechDecision {
     });
   }
 
-  // 4) Qブレーキ suppress：MIRRORは禁止 → FORWARD（最小の一手）
-  // ※ decideSpeechPolicy が {ok:false} の場合の保険。
-  //    ここで allowLLM=true にすると “🪔+userText混入/保存汚染” が復活するので禁止。
-  if (suppress) {
-    return makeDecision({
-      act: 'FORWARD',
-      reason: 'Q_BRAKE_SUPPRESS__NO_MIRROR',
-      confidence: 0.9,
-      allowLLM: false,
-      oneLineOnly: true,
-      shouldPersistAssistant: false,
-      meta: metaLite,
-    });
-  }
-
-  // 5) IT がアクティブ：COMMIT（= IT Writer / IT書式）
+  // 2) IT/T条件：COMMIT
   if (itActive) {
     return makeDecision({
       act: 'COMMIT',
@@ -288,7 +201,6 @@ export function decideSpeechAct(input: DecideSpeechActInput): SpeechDecision {
     });
   }
 
-  // 6) T条件の痕跡：COMMIT
   if (tCommit) {
     return makeDecision({
       act: 'COMMIT',
@@ -300,9 +212,21 @@ export function decideSpeechAct(input: DecideSpeechActInput): SpeechDecision {
     });
   }
 
-  // 7) MICRO入力：SILENCEにしない → 1行FORWARD
-  // ※ ここは “空入力” ではない micro を想定（短文）
-  //    ただし LLM を無制限に許可すると汚染しやすいので、基本は 1行運用。
+  // 3) 抑制（Q1_SUPPRESS等）：LLMは呼ぶが、器を最小化（1行）に誘導
+  if (suppress) {
+    return makeDecision({
+      act: 'FORWARD',
+      reason: 'Q_BRAKE_SUPPRESS__NO_MIRROR',
+      confidence: 0.9,
+      allowLLM: true,
+      oneLineOnly: true,
+      // hint.allowLLM=false を立てると applySpeechAct 側で isSuppressed 扱いになる（ただし LLM は呼ぶ）
+      hint: { allowLLM: false, oneLineOnly: true },
+      meta: metaLite,
+    });
+  }
+
+  // 4) micro入力：1行FORWARD（短文化）
   if (micro) {
     return makeDecision({
       act: 'FORWARD',
@@ -310,11 +234,12 @@ export function decideSpeechAct(input: DecideSpeechActInput): SpeechDecision {
       confidence: 0.88,
       allowLLM: true,
       oneLineOnly: true,
+      hint: { oneLineOnly: true },
       meta: metaLite,
     });
   }
 
-  // 8) slotPlanが無い → FORWARD
+  // 5) slotPlanが無い → FORWARD（通常生成）
   if (!slotsOk) {
     return makeDecision({
       act: 'FORWARD',
@@ -326,7 +251,7 @@ export function decideSpeechAct(input: DecideSpeechActInput): SpeechDecision {
     });
   }
 
-  // 9) default：FORWARD
+  // 6) default：FORWARD
   return makeDecision({
     act: 'FORWARD',
     reason: 'DEFAULT__NO_MIRROR',

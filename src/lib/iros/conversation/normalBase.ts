@@ -14,7 +14,7 @@
 // - user-facing は短く、未決にしないが、誘導もしない
 //
 // 注意
-// - SILENCE / FORWARD の判断はここではしない（上位の SpeechPolicy / Gate の責務）
+// - 無言アクト / FORWARD の判断はここではしない（上位の SpeechPolicy / Gate の責務）
 // - renderEngine / rephraseEngine は使わない
 // - 生成後の解析・分類は別レイヤで行う
 

@@ -6,11 +6,11 @@
 // - 旧 reason（Q_BRAKE_SUPPRESS 等）は互換で残しつつ、新 reason も追加
 
 export type SpeechAct =
-  | 'SILENCE' // 返さない / 1行だけ（LLMを呼ばない）
   | 'FORWARD' // ✅ MIRRORの完全置換（最小の一手へ）
   | 'NAME'    // 核の命名（助言禁止）
   | 'FLIP'    // 反転（助言禁止）
   | 'COMMIT'; // T条件成立時のみ固定（ここだけ最小の一手OK）
+
 
 export type SpeechDecisionReason =
   | 'MICRO_INPUT'
@@ -44,11 +44,8 @@ export type SpeechDecision = {
 // - NAME/FLIP：助言系は封じる
 // - COMMIT：固定 + 一手（最大2） + 問い(最大1) まで（enforce側で最終制限）
 export type AllowSchema =
-  | {
-      act: 'SILENCE';
-      allowLLM: false;
-      maxLines: 1;
-    }
+
+
   | {
       act: 'FORWARD';
       allowLLM: true;
@@ -108,9 +105,6 @@ export type AllowSchema =
 // SpeechAct → AllowSchema の最小デフォルト
 export function defaultAllowSchema(act: SpeechAct): AllowSchema {
   switch (act) {
-    case 'SILENCE':
-      return { act, allowLLM: false, maxLines: 1 };
-
     case 'FORWARD':
       return {
         act,

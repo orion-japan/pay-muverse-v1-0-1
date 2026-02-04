@@ -387,11 +387,15 @@ const dbHistory = await loadRecentHistoryAcrossConversations({
 
   limit: 120,
 
-  // ❌ ここは Phase1 では渡さない（same を混ぜるのに除外すると矛盾する）
-  // excludeConversationId: conversationId,
+  // ✅ 同一conversationの識別は渡す（ログ・将来拡張にも使える）
+  excludeConversationId: conversationId,
 
+  // ✅ 最速の違和感修正：同一conversationは混ぜない（重複を断つ）
   includeSameConversation: true,
-  sameConversationLimit: 8,
+
+
+  // sameConversationLimit は使われないが、残しても害はない
+  sameConversationLimit: 0,
 
   crossConversationLimit: 60,
 });
@@ -2463,69 +2467,65 @@ try {
         return true; // デフォルトは許可（false のときだけ止める）
       })();
 
-// ✅ “空扱い” 判定：
-// - bodyNow が空
-// - または slotTextRawLen > 0 だが cleanedLen = 0
-//   （= 内部マーカーのみで、整形後に本文が消えた状態）
-//
-// ※ policy が FINAL / hasSlots の場合でも、
-//    「本文として空」は異常なので emptyLike 扱いにする
-const hasSlotsLocal =
-  Array.isArray((out.metaForSave as any)?.slotPlan) &&
-  (out.metaForSave as any).slotPlan.length > 0;
+      // ✅ “空扱い” 判定：
+      // - bodyNow が空 / dots-only
+      // - または internalMarkersOnly（raw>0 かつ cleaned=0）
+      //
+      // ✅ 重要：seed があるのに本文が空なだけの状態は “緊急” ではない
+      // → seed-only（本文未生成）として writer を走らせ、流れ生成を優先する
 
+      const hasSlotsLocal =
+        Array.isArray((out.metaForSave as any)?.slotPlan) &&
+        (out.metaForSave as any).slotPlan.length > 0;
 
+      const internalMarkersOnly =
+        Number.isFinite(slotTextCleanedLen) &&
+        Number.isFinite(slotTextRawLen) &&
+        slotTextRawLen > 0 &&
+        slotTextCleanedLen === 0;
 
+      const hasSeedText =
+        Number.isFinite(slotTextCleanedLen) && slotTextCleanedLen > 0;
 
-const internalMarkersOnly =
-Number.isFinite(slotTextCleanedLen) &&
-Number.isFinite(slotTextRawLen) &&
-slotTextRawLen > 0 &&
-slotTextCleanedLen === 0;
+      // ✅ dots-only（'…' / '……' / '...'）も “本文未生成” 扱いに含める
+      // - これが無いと bodyNow='……' の瞬間に writer/blocks が走らず “……” が残る
+      const bodyEmptyLike = !bodyNow || isDotsOnly(bodyNow) || internalMarkersOnly;
 
-// ✅ dots-only（'…' / '……' / '...'）も “空扱い” に含める
-// - これが無いと bodyNow='……' の瞬間に emptyLikeNow=false になり、writer/blocks が走らず “……” が残る
-const emptyLikeNow =
-  !bodyNow ||
-  isDotsOnly(bodyNow) ||
-  (
-    // internalMarkersOnly をこの場で安全に再計算
-    Number.isFinite(Number((out.metaForSave as any)?.extra?.slotTextCleanedLen)) &&
-    Number.isFinite(Number((out.metaForSave as any)?.extra?.slotTextRawLen)) &&
-    Number((out.metaForSave as any)?.extra?.slotTextRawLen) > 0 &&
-    Number((out.metaForSave as any)?.extra?.slotTextCleanedLen) === 0
-  );
+      // ✅ 緊急(emptyLike) と seed-only(本文未生成) を分離
+      // - seed があるなら emptyLikeNow にはしない（緊急計に渡さない）
+      const seedOnlyNow = bodyEmptyLike && hasSeedText;
+      const emptyLikeNow = bodyEmptyLike && !hasSeedText;
 
       // ✅ 走らせる条件：
       // - SCAFFOLD または FINAL
-      // - emptyLikeNow
-      // - blocks が無い
+      // - seed-only または emptyLike
+      // - blocks が無い（len>0 のときだけ “ある” 扱い）
       // - allowLLM_final が false なら触らない
       const shouldRunWriter =
-        (
-          String((out.metaForSave as any)?.framePlan?.slotPlanPolicy ?? '').toUpperCase() === 'SCAFFOLD' ||
-          String((out.metaForSave as any)?.framePlan?.slotPlanPolicy ?? '').toUpperCase() === 'FINAL'
-        ) &&
-        emptyLikeNow &&
-        !Array.isArray((out.metaForSave as any)?.extra?.rephraseBlocks) &&
+        (policy === 'SCAFFOLD' || policy === 'FINAL') &&
+        (seedOnlyNow || emptyLikeNow) &&
+        !alreadyHasBlocks &&
         allowLLM_final_local !== false;
 
       // ✅ 追跡用（ENTER）
-      if (emptyLikeNow) {
+      if (seedOnlyNow || emptyLikeNow) {
         console.log('[IROS/rephraseBridge][ENTER]', {
           conversationId: _conversationId,
           userCode: _userCode,
-          policy: String((out.metaForSave as any)?.framePlan?.slotPlanPolicy ?? '').toUpperCase(),
+          policy,
+          seedOnlyNow,
           emptyLikeNow,
           allowLLM_final: allowLLM_final_local,
-          alreadyHasBlocks: Array.isArray((out.metaForSave as any)?.extra?.rephraseBlocks),
+          alreadyHasBlocks,
           slotTextCleanedLen: Number((out.metaForSave as any)?.extra?.slotTextCleanedLen ?? null),
           slotTextRawLen: Number((out.metaForSave as any)?.extra?.slotTextRawLen ?? null),
           bodyNowLen: bodyNow.length,
           bodyNowHead: bodyNow.slice(0, 40),
           shouldRunWriter,
+          hasSlotsLocal,
         });
       }
+
 
       if (shouldRunWriter) {
         const extracted = extractSlotsForRephrase({
@@ -2566,30 +2566,22 @@ const emptyLikeNow =
                   )
               : [];
 
-            const historyText = turns.length
-              ? turns
-                  .slice(-12)
-                  .map((m) => `${m.role === 'assistant' ? 'A' : 'U'}: ${String(m.content ?? '').trim()}`)
-                  .join('\n')
-              : '';
-
+            // ✅ turns/chat/messages/history/historyText を作らない（多重注入を止める）
             return {
               conversationId: _conversationId ?? null,
               userCode: _userCode ?? null,
               inputKind: (ctx as any)?.inputKind ?? null,
+
+              // ✅ writer側は historyForWriter を拾えば十分
+              historyForWriter: turns,
               ctxPack: {
                 ...(((out.metaForSave as any)?.extra?.ctxPack ?? null) as any),
-                turns,
-                chat: turns,
-                history: turns,
+                historyForWriter: turns,
               },
+
               flowDigest: (out.metaForSave as any)?.extra?.flowDigest ?? null,
               flowTape: (out.metaForSave as any)?.extra?.flowTape ?? null,
-              turns,
-              messages: turns,
-              history: turns,
-              historyMessages: turns,
-              historyText,
+
               meta: {
                 q: (out.metaForSave as any)?.q ?? null,
                 depth: (out.metaForSave as any)?.depth ?? null,
@@ -2600,6 +2592,7 @@ const emptyLikeNow =
               },
             };
           })(),
+
           inputKind: (ctx as any)?.inputKind ?? null,
           debug: {
             traceId: (ctx as any)?.traceId ?? null,

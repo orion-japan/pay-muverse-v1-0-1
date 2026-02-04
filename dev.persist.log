@@ -1,0 +1,1269 @@
+▲ Next.js 16.1.4 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.2.109:3000
+- Environments: .env.local
+- Experiments (use with caution):
+  · serverActions
+
+✓ Starting...
+✓ Ready in 588ms
+[firebase] DEBUG_LOCAL=1 → Firebase SDK log level set to "debug"
+ GET /iros-ai 200 in 508ms (compile: 205ms, render: 303ms)
+ POST /api/telemetry 204 in 69ms (compile: 56ms, render: 13ms)
+[firebase-admin] initialized with ServiceAccount
+[authz] 6cd4cdae-4df8-429a-8023-8e525d44c3c5 start { path: 'http://localhost:3000/api/agent/iros/userinfo' }
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] 6cc787a8-1cdd-449e-9cac-9509197b9a82 start { path: 'http://localhost:3000/api/q/unified?user_code=669933' }
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] 6cc787a8-1cdd-449e-9cac-9509197b9a82 verify firebase: 409.167ms
+[authz] 6cd4cdae-4df8-429a-8023-8e525d44c3c5 verify firebase: 527.712ms
+ POST /api/register-push 200 in 867ms (compile: 117ms, render: 750ms)
+ POST /api/register-push 200 in 664ms (compile: 1663µs, render: 663ms)
+[authz] 6cd4cdae-4df8-429a-8023-8e525d44c3c5 fetch user: 308.086ms
+[authz] 6cd4cdae-4df8-429a-8023-8e525d44c3c5 ok { user: '669933', role: 'admin', provider: 'password', ms: 847 }
+[IROS/UserInfo] authz = {
+  ok: true,
+  allowed: true,
+  status: 200,
+  pgJwt: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njk5MzMiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInVzZXJfY29kZSI6IjY2OTkzMyIsImZpcmViYXNlX3VpZCI6Ikt2UDFQNHNpZnRTRUZkTGtka1lqcVY0aE12MDIiLCJleHAiOjE3NzAxNzkyMzMsImlhdCI6MTc3MDE3ODMzM30.f6mUu6GBAeUtwZAxuWiprsB7D6tGvJuXhVVDgE1lWBY',
+  userCode: '669933',
+  role: 'admin',
+  user: { uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02', user_code: '669933' },
+  uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02'
+}
+[authz] 6cc787a8-1cdd-449e-9cac-9509197b9a82 fetch user: 333.814ms
+[authz] 6cc787a8-1cdd-449e-9cac-9509197b9a82 ok { user: '669933', role: 'admin', provider: 'password', ms: 749 }
+ GET /api/agent/iros/userinfo 200 in 1099ms (compile: 163ms, render: 937ms)
+[authz] 72a8ca11-a8fe-42fc-89d1-f7758830b408 start { path: 'http://localhost:3000/api/agent/iros/conversations' }
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] 72a8ca11-a8fe-42fc-89d1-f7758830b408 verify firebase: 272.544ms
+[authz] 72a8ca11-a8fe-42fc-89d1-f7758830b408 fetch user: 66.511ms
+[authz] 72a8ca11-a8fe-42fc-89d1-f7758830b408 ok { user: '669933', role: 'admin', provider: 'password', ms: 345 }
+[IROS/Conversations] auth = {
+  ok: true,
+  allowed: true,
+  status: 200,
+  pgJwt: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njk5MzMiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInVzZXJfY29kZSI6IjY2OTkzMyIsImZpcmViYXNlX3VpZCI6Ikt2UDFQNHNpZnRTRUZkTGtka1lqcVY0aE12MDIiLCJleHAiOjE3NzAxNzkyMzQsImlhdCI6MTc3MDE3ODMzNH0.SqYgqUYB4NePOGUl4YQg61oGrHa-vJG_fggD0rlnlWQ',
+  userCode: '669933',
+  role: 'admin',
+  user: { uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02', user_code: '669933' },
+  uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02'
+}
+[IROS/Conversations] Query target user_code = 669933
+[IROS/Conversations] ✅ 100 rows fetched for user_code=669933
+ GET /api/agent/iros/conversations 200 in 558ms (compile: 53ms, render: 505ms)
+[authz] 9b8a5058-5ba7-4a76-a096-303cc0333968 start {
+  path: 'http://localhost:3000/api/agent/iros/messages?conversation_id=a3568c09-b758-45c8-9804-f3248ad36288'
+}
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] 7e3cff4c-f26d-4b66-b5ac-f8e4e6dd3dd7 start {
+  path: 'http://localhost:3000/api/agent/iros/messages?conversation_id=a3568c09-b758-45c8-9804-f3248ad36288'
+}
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] 9b8a5058-5ba7-4a76-a096-303cc0333968 verify firebase: 262.882ms
+[authz] 7e3cff4c-f26d-4b66-b5ac-f8e4e6dd3dd7 verify firebase: 270.765ms
+[authz] 9b8a5058-5ba7-4a76-a096-303cc0333968 fetch user: 63.218ms
+[authz] 9b8a5058-5ba7-4a76-a096-303cc0333968 ok { user: '669933', role: 'admin', provider: 'password', ms: 333 }
+[authz] 7e3cff4c-f26d-4b66-b5ac-f8e4e6dd3dd7 fetch user: 82.11ms
+[authz] 7e3cff4c-f26d-4b66-b5ac-f8e4e6dd3dd7 ok { user: '669933', role: 'admin', provider: 'password', ms: 361 }
+[IROS/messages][GET] conv select { ms: 64, ok: true, table: 'iros_conversations', hasRow: true }
+[IROS/messages][GET] conv select { ms: 53, ok: true, table: 'iros_conversations', hasRow: true }
+[IROS/messages][GET] msg select {
+  ms: 168,
+  ok: true,
+  table: 'v_iros_messages',
+  rows: 24,
+  includeMeta: true,
+  limit: 200
+}
+[IROS/messages][GET] done { ms: 573, count: 24, source: 'v_iros_messages' }
+ GET /api/agent/iros/messages?conversation_id=a3568c09-b758-45c8-9804-f3248ad36288 200 in 626ms (compile: 43ms, render: 583ms)
+[IROS/messages][GET] msg select {
+  ms: 159,
+  ok: true,
+  table: 'v_iros_messages',
+  rows: 24,
+  includeMeta: true,
+  limit: 200
+}
+[IROS/messages][GET] done { ms: 577, count: 24, source: 'v_iros_messages' }
+ GET /api/agent/iros/messages?conversation_id=a3568c09-b758-45c8-9804-f3248ad36288 200 in 626ms (compile: 45ms, render: 581ms)
+ GET /api/q/unified?user_code=669933 200 in 5.3s (compile: 20ms, render: 5.3s)
+[authz] f71b9927-c9a8-4b4b-b2c6-4a96ce8255ac start { path: 'http://localhost:3000/api/agent/iros/messages' }
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] f71b9927-c9a8-4b4b-b2c6-4a96ce8255ac verify firebase: 306.988ms
+[authz] f71b9927-c9a8-4b4b-b2c6-4a96ce8255ac fetch user: 111.343ms
+[authz] f71b9927-c9a8-4b4b-b2c6-4a96ce8255ac ok { user: '669933', role: 'admin', provider: 'password', ms: 427 }
+[IROS/MSG] in {
+  reqId: 'b55f94ac-2253-4d4e-900b-bbe47fc70871',
+  conversationId: 'a3568c09-b758-45c8-9804-f3248ad36288',
+  userCode: '669933',
+  uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02',
+  role: 'user',
+  textHead: 'では、無言終了でしょうか？'
+}
+[IROS/messages][metaFilled] memory_state select tried {
+  table: 'iros_memory_state',
+  ms: 67,
+  ok: true,
+  hasRow: true,
+  err: null
+}
+[IROS/messages][POST][pick-q-depth][src] {
+  q_body: null,
+  q_meta_raw: null,
+  q_meta_filled: null,
+  q_final: null,
+  depth_body: null,
+  depth_meta_raw: null,
+  depth_meta_filled: null,
+  depth_final: null,
+  layer_body: null,
+  layer_meta_raw: null,
+  layer_meta_filled: null,
+  layer_final: null
+}
+[IROS/messages][POST][pick-q-depth] {
+  q_body: null,
+  q_meta: null,
+  q_final: null,
+  depth_body: null,
+  depth_meta: null,
+  depth_final: null,
+  layer_body: null,
+  layer_meta: null,
+  layer_final: null
+}
+[IROS/messages][POST] conv select { ms: 42, ok: true, table: 'iros_conversations' }
+[IROS/messages][streak-db] bump streakLen { before: 2, after: 13, q: 'Q2', from: 'db:iros_messages' }
+[IROS/messages][POST] insert tried {
+  table: 'iros_messages',
+  ms: 145,
+  ok: true,
+  hasData: true,
+  q_code: 'Q2',
+  depth_stage: 'C3',
+  intent_layer: 'C',
+  streak_q: 'Q2',
+  streak_len: '1',
+  qtu_from: 'db:iros_messages',
+  err: null
+}
+[IROS/messages][POST] nextStep strip {
+  rawText: 'では、無言終了でしょうか？',
+  choiceId: null,
+  cleanText: 'では、無言終了でしょうか？',
+  finalText: 'では、無言終了でしょうか？'
+}
+[IROS/messages][POST] done { ms: 812 }
+ POST /api/agent/iros/messages 200 in 826ms (compile: 3ms, render: 823ms)
+[IROS/FLAGSHIP_GUARD][MODULE_LOADED] { rev: 'guard-rev-2026-01-28-b', at: '2026-02-04T04:12:25.478Z' }
+[IROS/FLAGS_ENV_HEAD] {
+  IROS_RETRY_FINAL_FORCE_CALL: '0',
+  IROS_FLAGSHIP_REWRITE: '1',
+  IROS_LOG_FLAGS: 'true'
+}
+[IROS/FLAGS] {
+  retryFinalForceCall: false,
+  flagshipRewrite: true,
+  guardEnabled: true,
+  guardSkipShort: false,
+  guardShortMaxLen: 80,
+  logFlags: true
+}
+[IROS/renderGateway][MODULE_LOADED] { rev: 'phase11-open-close-v2-LOADED', at: '2026-02-04T04:12:25.495Z' }
+[authz] fb59bec8-67a1-4c9d-9cec-0179db9d2ac1 start { path: 'http://localhost:3000/api/agent/iros/reply' }
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] fb59bec8-67a1-4c9d-9cec-0179db9d2ac1 verify firebase: 276.358ms
+[authz] fb59bec8-67a1-4c9d-9cec-0179db9d2ac1 fetch user: 45.457ms
+[authz] fb59bec8-67a1-4c9d-9cec-0179db9d2ac1 ok { user: '669933', role: 'admin', provider: 'password', ms: 327 }
+ POST /api/credits/authorize 200 in 146ms (compile: 31ms, render: 115ms)
+[IROS/UserProfile] load ok {
+  userCode: '669933',
+  hasIrosRow: true,
+  sofia_credit: 195,
+  style: 'friendly',
+  user_call_name: 'orion',
+  plan_status: null
+}
+[IROS/Reply] handleIrosReply start {
+  conversationId: 'a3568c09-b758-45c8-9804-f3248ad36288',
+  userCode: '669933',
+  mode: 'auto',
+  tenantId: 'default',
+  rememberScope: null,
+  traceId: '07cfbf8c-6326-411e-a98f-18b1796010c9',
+  style: 'friendly',
+  history_len: 12,
+  persistAssistantAllowed: false
+}
+[IROS][HistoryX] loaded {
+  userCode: '669933',
+  table: 'iros_messages_ui',
+  rawCount: 120,
+  normalizedCount: 120,
+  sameConversationIncluded: false,
+  sameConvCount: 0,
+  crossConvCount: 60,
+  excludeConversationId: null,
+  crossConvUserOnly: true
+}
+[IROS][HistoryX] merged { userCode: '669933', dbCount: 60, mergedCount: 33 }
+[IROS/STATE] loaded MemoryState {
+  userCode: '669933',
+  hasMemory: true,
+  intentAnchor: 'SUN',
+  depthStage: 'C3',
+  qPrimary: 'Q2',
+  selfAcceptance: 0.7292499999999996,
+  phase: 'Outer',
+  intentLayer: 'C',
+  yLevel: 1,
+  hLevel: 2,
+  spinLoop: 'SRI',
+  spinStep: 2,
+  descentGate: 'closed',
+  itxStep: 'T3',
+  itxAnchorEventType: null,
+  itxReason: 'IT_TRIGGER_OK',
+  itxLastAt: '2026-01-08T12:26:08.007+00:00',
+  sentimentLevel: null,
+  situationSummary: 'では、無言終了でしょうか？',
+  situationTopic: 'その他・ライフ全般',
+  qCounts: {
+    q_trace: {
+      from: 'qTraceUpdated',
+      qNow: 'Q1',
+      prevQ: 'Q1',
+      streakQ: 'Q1',
+      streakLength: 2
+    },
+    it_cooldown: 0,
+    it_triggered: false,
+    it_triggered_true: false
+  }
+}
+[IROS/STATE] loaded MemoryState (orchestratorState) {
+  userCode: '669933',
+  hasMemory: true,
+  intentAnchor: 'SUN',
+  depthStage: 'C3',
+  qPrimary: 'Q2',
+  selfAcceptance: 0.7292499999999996,
+  phase: 'Outer',
+  intentLayer: 'C',
+  yLevel: 1,
+  hLevel: 2,
+  spinLoop: 'SRI',
+  spinStep: 2,
+  descentGate: 'closed'
+}
+[IROS/Context] framePlan built {
+  userCode: '669933',
+  inputKind: 'question',
+  frame: 'C',
+  hasSlots: true,
+  spinLoop: 'SRI',
+  descentGate: 'closed',
+  depthStage: 'C3',
+  phase: 'Outer',
+  requestedDepth: null,
+  requestedQCode: null
+}
+[IROS][DepthGate] R->I check {
+  prevDepthStage: 'C3',
+  requestedDepth_in: null,
+  requestedDepth_out: null
+}
+[IROS/Orchestrator] input meta snapshot {
+  hasRotationState: true,
+  spinLoop: 'SRI',
+  descentGate: 'closed',
+  depth: 'C3',
+  frame: 'C',
+  slotPlanLen: 4,
+  slotPlanPolicy: null,
+  historyLen: 33,
+  hasIntentAnchor: true,
+  intentAnchorKey: 'SUN',
+  isIrDiagnosisTurn: null,
+  mode: null
+}
+[IROS/STATE] loaded MemoryState {
+  userCode: '669933',
+  hasMemory: true,
+  intentAnchor: 'SUN',
+  depthStage: 'C3',
+  qPrimary: 'Q2',
+  selfAcceptance: 0.7292499999999996,
+  phase: 'Outer',
+  intentLayer: 'C',
+  yLevel: 1,
+  hLevel: 2,
+  spinLoop: 'SRI',
+  spinStep: 2,
+  descentGate: 'closed',
+  itxStep: 'T3',
+  itxAnchorEventType: null,
+  itxReason: 'IT_TRIGGER_OK',
+  itxLastAt: '2026-01-08T12:26:08.007+00:00',
+  sentimentLevel: null,
+  situationSummary: 'では、無言終了でしょうか？',
+  situationTopic: 'その他・ライフ全般',
+  qCounts: {
+    q_trace: {
+      from: 'qTraceUpdated',
+      qNow: 'Q1',
+      prevQ: 'Q1',
+      streakQ: 'Q1',
+      streakLength: 2
+    },
+    it_cooldown: 0,
+    it_triggered: false,
+    it_triggered_true: false
+  }
+}
+[IROS/STATE] loaded MemoryState (orchestratorState) {
+  userCode: '669933',
+  hasMemory: true,
+  intentAnchor: 'SUN',
+  depthStage: 'C3',
+  qPrimary: 'Q2',
+  selfAcceptance: 0.7292499999999996,
+  phase: 'Outer',
+  intentLayer: 'C',
+  yLevel: 1,
+  hLevel: 2,
+  spinLoop: 'SRI',
+  spinStep: 2,
+  descentGate: 'closed'
+}
+[IROS/SA] estimateSelfAcceptance v2 (line) {
+  input: {
+    qCode: null,
+    depthStage: 'C3',
+    phase: 'Outer',
+    hasHistoryDigest: false,
+    lastSelfAcceptance: 0.7292499999999996
+  },
+  result: {
+    base: 0.7292499999999996,
+    deltaFromWords: 0,
+    value: 0.7292499999999996
+  },
+  notes: [
+    'base = lastSelfAcceptance（ライン） → 0.729',
+    'C層 intensity=1.15',
+    'deltaTextRaw=0.000, intensity=1.15, deltaWithIntensity=0.000',
+    'deltaWithIntensity=0 → effectiveDelta=0',
+    'value=0.729 (raw=0.729)'
+  ]
+}
+[IROS/SpinControl] {
+  rank: 'low',
+  direction: 'forward',
+  promptStyle: 'one-step',
+  promptStyle_raw: 'one-step',
+  phase: 'Outer',
+  anchorEventType: 'none',
+  hysteresis: false
+}
+[IROS/GOAL_CONT] applyGoalContinuity {
+  goal_in: {
+    kind: 'uncover',
+    targetDepth: 'C3',
+    targetQ: 'Q2',
+    reason: '明確な方向性はまだ決めず、まずは背景をやわらかく掘り起こす',
+    detail: { ventWill: [Object] }
+  },
+  ctx: { lastQ: 'Q2', lastDepth: 'C3', qTrace: null, memoryQ: null }
+}
+[IROS/CONT continuity] { lastDepth: 'C3', lastQ: 'Q2', finalDepth: 'C3', finalQ: 'Q2' }
+[IROS/GOAL_CONT]  result {
+  goal_out: {
+    kind: 'uncover',
+    targetDepth: 'C3',
+    targetQ: 'Q2',
+    reason: '明確な方向性はまだ決めず、まずは背景をやわらかく掘り起こす',
+    detail: { ventWill: [Object] }
+  }
+}
+[IROS/WILL priority] {
+  goalKind: 'uncover',
+  depth: 'C3',
+  phase: 'Outer',
+  targetDepth: 'C3',
+  qCode: 'Q2',
+  targetQ: 'Q2',
+  weights: {
+    mirror: 0.7920000000000001,
+    insight: 0.5,
+    forward: 0.345,
+    question: 0.34
+  }
+}
+[IROS/IT][probe] before {
+  textHead: 'では、無言終了でしょうか？',
+  historyLen: 33,
+  historyUserLen: 28,
+  last3User: [ '無言撲滅成功です', '会話一回します', 'では、無言終了でしょうか？' ],
+  depth: 'C3',
+  intentLine: {
+    nowLabel: '',
+    coreNeed: null,
+    intentBand: 'I2',
+    direction: 'expand',
+    focusLayer: 'C',
+    riskHint: null,
+    guidanceHint: '',
+    tLayerHint: null,
+    hasFutureMemory: false
+  },
+  fixedNorth: { key: 'SUN', text: '太陽SUN', phrase: '成長 / 進化 / 希望 / 歓喜' },
+  intent_anchor: { key: 'SUN', text: null, phrase: null }
+}
+[IROS/IT][probe][fixedNorth] {
+  hasMeta: true,
+  fixedNorth_meta: 'SUN',
+  fixedNorth_ms: null,
+  hasNorth: true,
+  prevIt_fromMemoryState: {
+    active: true,
+    step: 'T3',
+    reason: 'IT_TRIGGER_OK',
+    lastAt: 2026-01-08T12:26:08.007Z
+  },
+  prevIt_fromMeta: {
+    active: true,
+    step: 'T3',
+    reason: 'IT_TRIGGER_OK',
+    lastAt: 2026-01-08T12:26:08.007Z
+  },
+  prevIt_fromHistory: false
+}
+[IROS/IT][result] {
+  ok: true,
+  reason: 'IT_ALREADY_COMMITTED',
+  flags: {
+    hasCore: true,
+    coreRepeated: true,
+    sunOk: true,
+    declarationOk: false,
+    deepenOk: true
+  },
+  tLayerModeActive: true,
+  tLayerHint: 'T3',
+  tVector: null
+}
+[IROS/IT_TRIGGER] {
+  ok: true,
+  reason: 'IT_ALREADY_COMMITTED',
+  flags: {
+    hasCore: true,
+    coreRepeated: true,
+    sunOk: true,
+    declarationOk: false,
+    deepenOk: true
+  },
+  iLexemeForce: false,
+  tLayerModeActive: true,
+  tLayerHint: 'T3',
+  tVector: null,
+  isCommittedT3: true,
+  committedStep: 'T3',
+  itx_probe_reason: 'IT_ALREADY_COMMITTED'
+}
+[IROS/ANCHOR_ENTRY] {"evidence":{"choiceId":null,"actionId":null,"source":"none"},"decision":{"tEntryOk":false,"anchorEvent":"none","anchorWrite":"keep","reason":"ALREADY_COMMITTED"},"fixedNorthKey":"SUN","itActive":true,"hasAnchorAlready":true}
+[IROS/FLOW][observe] { delta: 'RETURN', confidence: 0.7, hasLastUserText: true }
+[IROS/IntentBridge] {
+  laneKey: 'IDEA_BAND',
+  enterI: false,
+  reconfirmT: false,
+  deepenOk: false,
+  hasCore: false,
+  declarationOk: false,
+  depth: 'C3',
+  phase: 'Outer',
+  fixedNorthKey: 'SUN'
+}
+[IROS/ORCH][after-container] {
+  frame: 'C',
+  framePlan_frame: 'C',
+  descentGate: 'closed',
+  framePlan_kind: null,
+  framePlan_stamp: null,
+  intentBridge_laneKey: 'IDEA_BAND',
+  intentBridge_inputs: { deepenOk: null, hasCore: false, declarationOk: false },
+  framePlan_slots_isArray: true,
+  framePlan_slots_len: 1,
+  slotPlan_isArray: true,
+  slotPlan_len: 1,
+  framePlan_policy: 'FINAL',
+  slotPlanPolicy: 'FINAL',
+  sameRef_framePlan_slotPlan: false,
+  slotPlanFallback: 'normalChat',
+  hasIntentAnchor: true,
+  intentAnchorKey: 'SUN',
+  has_intent_anchor_obj: true,
+  has_intentAnchor_obj: true,
+  has_intent_anchor_key: true,
+  has_intentAnchorKey: true
+}
+[IROS/IntentBridge] {
+  laneKey: 'IDEA_BAND',
+  enterI: false,
+  reconfirmT: false,
+  deepenOk: false,
+  hasCore: false,
+  declarationOk: false,
+  depth: 'C3',
+  phase: 'Outer',
+  fixedNorthKey: 'SUN'
+}
+[IROS/META][final-sync][meta] {
+  meta_q: 'Q2',
+  unified_q: 'Q2',
+  meta_depth: 'C3',
+  unified_depth: 'C3',
+  intent_anchor: { key: 'SUN', text: null, phrase: null },
+  intent_anchor_key: 'SUN',
+  anchorEntry: {
+    evidence: { choiceId: null, actionId: null, source: 'none' },
+    decision: {
+      tEntryOk: false,
+      anchorEvent: 'none',
+      anchorWrite: 'keep',
+      reason: 'ALREADY_COMMITTED'
+    }
+  }
+}
+[IROS/META][final-sync][finalMeta] {
+  meta_q: 'Q2',
+  unified_q: 'Q2',
+  meta_depth: 'C3',
+  unified_depth: 'C3',
+  intent_anchor: { key: 'SUN', text: null, phrase: null },
+  intent_anchor_key: 'SUN',
+  anchorEntry: {
+    evidence: { choiceId: null, actionId: null, source: 'none' },
+    decision: {
+      tEntryOk: false,
+      anchorEvent: 'none',
+      anchorWrite: 'keep',
+      reason: 'ALREADY_COMMITTED'
+    }
+  }
+}
+[IROS/PostProcess][SLOTPLAN_POLICY] {
+  conversationId: 'a3568c09-b758-45c8-9804-f3248ad36288',
+  userCode: '669933',
+  slotPlanPolicy_detected: 'FINAL',
+  slotPlanPolicy_from: 'metaForSave.framePlan.slotPlanPolicy',
+  slotPlanPolicy_raw: 'FINAL',
+  slotPlanLen: 1,
+  hasSlots: true
+}
+[IROS/PostProcess][SEED_CORE] {
+  coreLineLen: 13,
+  seedHasCore: true,
+  seedLen: 386,
+  cleanedLen: 13,
+  cleanedApplied: true,
+  hadInternalMarkers: true
+}
+[IROS/PostProcess] SLOTPLAN_SEED_TO_WRITER (keep empty) {
+  conversationId: 'a3568c09-b758-45c8-9804-f3248ad36288',
+  userCode: '669933',
+  slotPlanPolicy: 'FINAL',
+  slotPlanPolicy_from: 'metaForSave.framePlan.slotPlanPolicy',
+  slotPlanLen: 1,
+  hasSlots: true,
+  seedLen: 336,
+  seedHead: '@SHIFT {"kind":"clarify","intent":"answer_the_qu'
+}
+[IROS][ResonanceState] upsert ok {
+  userCode: '669933',
+  tenantId: 'default',
+  qCode: 'Q2',
+  depthStage: 'C3',
+  phase: 'Outer'
+}
+[UnifiedAnalysis] user message q_code/depth_stage updated {
+  conversationId: 'a3568c09-b758-45c8-9804-f3248ad36288',
+  messageId: 13416,
+  q_code: 'Q2',
+  depth_stage: 'C3'
+}
+[DEBUG] Before initializing ctxPack: undefined
+[WARNING] Initializing exAny.ctxPack as an empty object...
+[DEBUG] After initializing ctxPack: {}
+[DEBUG] Before assigning flow to ctxPack: undefined
+[DEBUG] prevFlow and prevAtIso: null null
+[DEBUG] prevAtMs (timestamp of previous flow): null
+[DEBUG] ageSec and sessionBreak: null false
+[DEBUG] After assigning flow to ctxPack: {
+  at: '2026-02-04T04:12:27.498Z',
+  prevAtIso: null,
+  ageSec: null,
+  sessionBreak: false,
+  fresh: true
+}
+[IROS/LLM_GATE][FINAL_CALL][NO_FORCE] {
+  conversationId: 'a3568c09-b758-45c8-9804-f3248ad36288',
+  userCode: '669933',
+  slotPlanPolicy: 'FINAL',
+  slotPlanLen: 1,
+  hasSlots: true,
+  effectiveLen: 13,
+  head: 'では、無言終了でしょうか？'
+}
+[IROS/LLM_GATE][PROBE] {
+  conversationId: 'a3568c09-b758-45c8-9804-f3248ad36288',
+  userCode: '669933',
+  llmEntry: 'CALL_LLM',
+  llmSkipReason: null,
+  allowLLM_final: true,
+  brakeReason: null,
+  speechAct: null,
+  slotPlanLen: 1,
+  hasSlots: true,
+  slotPlanPolicy: 'FINAL',
+  finalAssistantTextLen: 13,
+  finalAssistantTextHead: 'では、無言終了でしょうか？',
+  finalAssistantTextCandidateLen: 336,
+  finalAssistantTextCandidateHead: '@SHIFT {"kind":"clarify","intent":"answer_the_qu…',
+  finalForceCall: false,
+  finalForceCallReason: 'FINAL_CALL_NO_FORCE',
+  resolvedTextLen: null,
+  rewriteSeedLen: 349,
+  decisionResolvedLen: null,
+  decisionRewriteSeedLen: 349
+}
+[IROS/Reply] rotation bridge { spinLoop: 'SRI', descentGate: 'closed', depth: 'C3' }
+[IROS/rephraseBridge][ENTER] {
+  conversationId: 'a3568c09-b758-45c8-9804-f3248ad36288',
+  userCode: '669933',
+  policy: 'FINAL',
+  seedOnlyNow: true,
+  emptyLikeNow: false,
+  allowLLM_final: true,
+  alreadyHasBlocks: false,
+  slotTextCleanedLen: 13,
+  slotTextRawLen: 386,
+  bodyNowLen: 0,
+  bodyNowHead: '',
+  shouldRunWriter: true,
+  hasSlotsLocal: true
+}
+[IROS/REPHRASE_FLAG] { raw: 'true', enabled: true }
+[IROS/rephraseEngine][SHIFT_SLOT_HEAD] {
+  hasShiftSlot: true,
+  shiftSlotLen: 336,
+  shiftSlotHead: '@SHIFT {"kind":"clarify","intent":"answer_the_question","contract":["first_line_must_answer_question_directly","no_question_back_as_first_line","plain_words","no_flow_lecture"],"rules":{"answer_user_meaning":true,"keep_i'
+}
+[IROS/rephraseHistory][LAST_TURNS_PICK] {
+  pickedFrom: 'turns',
+  maxMsgs: 6,
+  rawTurnsLen: 33,
+  rawHistoryForWriterLen: 0,
+  normalizedLen: 33,
+  pickedLen: 2,
+  roles: [ 'user', 'assistant' ],
+  tailHeads: [
+    'では、無言終了でしょうか？',
+    '無言の中にあっても、そこで終わるわけではない。\n静けさの中で、新たな響きが生まれる瞬間がある。\nその響きが、新たな道を開'
+  ]
+}
+[IROS/ILINE][LOCK_PARTS] { partsLen: 2, seedEqUser: true, lockHasNewline: true, lockLen: 27 }
+[IROS/ILINE][LOCK_SOURCE] {
+  hasSeed: true,
+  hasUser: true,
+  seedLen: 13,
+  userLen: 13,
+  hasILINE_seed: false,
+  hasILINE_user: false,
+  hasILINE_any: false,
+  hasILINE_END_any: false,
+  head200: 'では、無言終了でしょうか？\nでは、無言終了でしょうか？',
+  tail200: 'では、無言終了でしょうか？\nでは、無言終了でしょうか？'
+}
+[IROS/ILINE][LOCK_EXTRACT] { lockedFromAllLen: 0, lockedUniqueLen: 0, lockedUniqueHead200: '' }
+[IROS/systemPrompt][CALLED] {
+  directTask: false,
+  itOk: false,
+  personaMode: 'GROUND',
+  intentBand: null,
+  tLayerHint: null,
+  lockedILinesLen: 0
+}
+[IROS/rephraseEngine][MSG_PACK] {
+  traceId: '4d3a6d70-8aca-4202-b46c-786b27466191',
+  conversationId: 'a3568c09-b758-45c8-9804-f3248ad36288',
+  userCode: '669933',
+  lastTurns: 1,
+  hasHistoryText: true,
+  historyTextLen: 392,
+  msgCount: 3,
+  roles: [ 'system', 'user', 'assistant' ],
+  internalPackLen: 1661,
+  internalPackHasHistoryHint: true,
+  seedDraftLen: 13,
+  seedDraftHead: 'では、無言終了でしょうか？',
+  itOk: false,
+  intentBand: null,
+  tLayerHint: null,
+  directTask: false,
+  inputKind: null,
+  inputKindFromMeta: null,
+  inputKindFromCtx: null,
+  lockedILines: 0
+}
+[IROS/LLM][CALL] {
+  callId: '23a1df240075',
+  purpose: 'reply',
+  model: 'gpt-4o',
+  temperature: 0.7,
+  responseFormat: 'text',
+  endpoint: 'https://api.openai.com/v1/chat/completions',
+  traceId: '4d3a6d70-8aca-4202-b46c-786b27466191',
+  conversationId: 'a3568c09-b758-45c8-9804-f3248ad36288',
+  userCode: '669933',
+  slotPlanPolicy: null,
+  mode: null,
+  qCode: null,
+  depthStage: null,
+  msgCount: 3,
+  firstRole: 'system',
+  lastRole: 'assistant',
+  firstHead: '【上位人格定義：Sofia（DO NOT OUTPUT / 露出禁止）】 あなたは「Sofia」――存在の奥深くと響き合…',
+  lastTail: '…も、そこで終わるわけではない。 静けさの中で、新たな響きが生まれる瞬間がある。 その響きが、新たな道を開く鍵となる。🌱',
+  lastUserHead: 'INTERNAL PACK (DO NOT OUTPUT): lastTurnsCount=1 directTask=false inputKind=(null…',
+  hasDigest: false,
+  hasAnchor: true,
+  roles: [ 'system', 'user', 'assistant' ],
+  caller: 'at callWriterLLM (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_65df3207._.js:15335:175)',
+  bodyKeys: [ 'max_tokens', 'messages', 'model', 'temperature' ],
+  extraBodyKeys: [],
+  extraBodyRawKeys: [],
+  hasInternalKeys: false
+}
+[IROS/FLAGSHIP_GUARD][DEBUG_IN] {
+  rev: 'guard-rev-2026-01-28-b',
+  inputLen: 68,
+  inputHead: '無言の中にあっても、そこで終わるわけではない。\n静けさの中で、新たな響きが生まれる瞬間がある。\nその響きが、次なる道を開く鍵となる。🌱',
+  slotKeys: [ 'SEED_TEXT', 'OBS', 'SHIFT' ]
+}
+[IROS/FLAGSHIP_GUARD][DEBUG_SCORE] {
+  rev: 'guard-rev-2026-01-28-b',
+  normalLite: true,
+  scaffoldLike: false,
+  len: 68,
+  qCount: 0,
+  qCountMark: 0,
+  cheer: 0,
+  hedge: 0,
+  generic: 0,
+  blandPressure: 0,
+  bulletLike: 0,
+  hasFlagshipSign: false
+}
+[IROS/LLM][OK] {
+  callId: '23a1df240075',
+  purpose: 'reply',
+  model: 'gpt-4o',
+  ms: 1956,
+  ok: true,
+  usage: {
+    prompt_tokens: 1998,
+    completion_tokens: 55,
+    total_tokens: 2053,
+    prompt_tokens_details: { cached_tokens: 0, audio_tokens: 0 },
+    completion_tokens_details: {
+      reasoning_tokens: 0,
+      audio_tokens: 0,
+      accepted_prediction_tokens: 0,
+      rejected_prediction_tokens: 0
+    }
+  },
+  traceId: '4d3a6d70-8aca-4202-b46c-786b27466191',
+  conversationId: 'a3568c09-b758-45c8-9804-f3248ad36288',
+  userCode: '669933',
+  outLen: 68,
+  outHead: '無言の中にあっても、そこで終わるわけではない。\n静けさの中で、新たな響きが生まれる瞬間がある。\nその響きが、次なる道を開く鍵となる。🌱'
+}
+[IROS/rephraseEngine][OK] {
+  traceId: '4d3a6d70-8aca-4202-b46c-786b27466191',
+  conversationId: 'a3568c09-b758-45c8-9804-f3248ad36288',
+  userCode: '669933',
+  mode: 'LLM',
+  keys: [ 'SHIFT' ],
+  rawLen: 68,
+  rawHead: '無言の中にあっても、そこで終わるわけではない。\n静けさの中で、新たな響きが生まれる瞬間がある。\nその響きが、次なる道を開く鍵となる。🌱'
+}
+[IROS/REPHRASE][RECALL_GUARD] {
+  traceId: '4d3a6d70-8aca-4202-b46c-786b27466191',
+  conversationId: 'a3568c09-b758-45c8-9804-f3248ad36288',
+  userCode: '669933',
+  enforced: false,
+  ok: true,
+  missing: [],
+  needles: { restore: null, q: null }
+}
+[IROS/FLAGSHIP_GUARD][DEBUG_IN] {
+  rev: 'guard-rev-2026-01-28-b',
+  inputLen: 68,
+  inputHead: '無言の中にあっても、そこで終わるわけではない。\n静けさの中で、新たな響きが生まれる瞬間がある。\nその響きが、次なる道を開く鍵となる。🌱',
+  slotKeys: [ 'SHIFT' ]
+}
+[IROS/FLAGSHIP_GUARD][DEBUG_SCORE] {
+  rev: 'guard-rev-2026-01-28-b',
+  normalLite: false,
+  scaffoldLike: false,
+  len: 68,
+  qCount: 0,
+  qCountMark: 0,
+  cheer: 0,
+  hedge: 0,
+  generic: 0,
+  blandPressure: 0,
+  bulletLike: 0,
+  hasFlagshipSign: false
+}
+[IROS/FLAGSHIP_GUARD][DEBUG_AFTER_HEDGE] { rev: 'guard-rev-2026-01-28-b', warn: 0, fatal: 0, reasons: [] }
+[IROS/FLAGSHIP][VERDICT] {
+  traceId: '4d3a6d70-8aca-4202-b46c-786b27466191',
+  conversationId: 'a3568c09-b758-45c8-9804-f3248ad36288',
+  userCode: '669933',
+  level: 'OK',
+  ok: true,
+  qCount: 0,
+  score: {
+    fatal: 0,
+    warn: 0,
+    qCount: 0,
+    bulletLike: 0,
+    hedge: 0,
+    cheer: 0,
+    generic: 0,
+    runaway: 0,
+    exaggeration: 0,
+    mismatch: 0,
+    retrySame: 0
+  },
+  reasons: [],
+  head: '無言の中にあっても、そこで終わるわけではない。\n静けさの中で、新たな響きが生まれる瞬間がある。\nその響きが、次なる道を開く鍵となる。🌱'
+}
+[IROS/rephraseEngine][MIN_OK_KIND] {
+  inputKindNow: 'chat',
+  isMicroOrGreetingNow: false,
+  shortReplyOk: true,
+  MIN_OK_LEN: 0,
+  reason: 'chat_short_reply_ok',
+  shiftTextHead: '@SHIFT {"kind":"clarify","intent":"answer_the_question","contract":["first_line_must_answer_question_directly","no_question_back_as_first_li',
+  shiftObjHasAllow: true
+}
+[IROS/rephraseEngine][AFTER_ATTACH] {
+  traceId: '4d3a6d70-8aca-4202-b46c-786b27466191',
+  conversationId: 'a3568c09-b758-45c8-9804-f3248ad36288',
+  userCode: '669933',
+  mode: 'FLAGSHIP_OK',
+  renderEngine: true,
+  outKeysLen: 1,
+  rephraseBlocksLen: 3,
+  rephraseHead: '無言の中にあっても、そこで終わるわけではない。\n静けさの中で、新たな響きが生まれる瞬間がある。\nその響きが、次なる道を開く鍵となる。🌱'
+}
+[IROS/STATE][anchor-root] { userTextHead: 'では、無言終了でしょうか？' }
+[IROS/STATE][fixed-by-meta] {
+  intent_anchor_obj: { key: 'SUN', text: null, phrase: null },
+  intent_anchor_key: 'SUN',
+  itx_step: 'T3',
+  itx_reason: 'IT_TRIGGER_OK',
+  itx_last_at: '2026-01-08T12:26:08.007+00:00'
+}
+[IROS/STATE] persistMemoryStateIfAny start {"userCode":"669933","userText":"では、無言終了でしょうか？","depthInput":"C3","qCodeInput":"Q2","phaseInput":"Outer","yLevelInt":1,"hLevelInt":2,"finalSpinLoop":"SRI","finalSpinStep":2,"finalDescentGate":"closed","itTriggered":true,"clearItxExplicit":false,"shouldClearItx":false,"itx_step":"T3","itx_anchor_event_type":null,"itx_reason":"IT_TRIGGER_OK","itx_last_at":"2026-01-08T12:26:08.007+00:00","anchor_event_db":"none","anchor_write_db":"keep","anchorEntry_decision":{"tEntryOk":false,"anchorEvent":"none","anchorWrite":"keep","reason":"ALREADY_COMMITTED"},"intent_anchor_key_candidate":"SUN","anchor_action":"keep","qTracePickedFrom":"qTraceEffective","qTrace_keys":["lastQ","dominantQ","streakQ","streakLength","volatility"],"qTrace_qNow":null,"qTrace_q_now":null,"qTrace_currentQ":null,"qTrace_snapshot_currentQ":null,"qTrace_streakQ":"Q2","qTrace_streakLength":1}
+[IROS/Phase10] decideT3Upgrade enter {
+  now_itx_step: 'T3',
+  now_anchor_write: 'keep',
+  now_anchor_event: 'none',
+  now_intent_anchor_key: 'SUN',
+  hasPrev: true,
+  prev_itx_step: 'T3',
+  prev_itx_last_at: '2026-01-08T12:26:08.007+00:00',
+  prev_intent_anchor_key: 'SUN',
+  prev_intent_anchor_raw: { key: 'SUN' },
+  now_intent_anchor_raw: 'SUN'
+}
+[IROS/Phase10] decideT3Upgrade enter {
+  now_itx_step: 'T3',
+  now_anchor_write: 'keep',
+  now_anchor_event: 'none',
+  now_intent_anchor_key: 'SUN',
+  hasPrev: true,
+  prev_itx_step: 'T3',
+  prev_itx_last_at: '2026-01-08T12:26:08.007+00:00',
+  prev_intent_anchor_key: 'SUN',
+  prev_intent_anchor_raw: { key: 'SUN' },
+  now_intent_anchor_raw: 'SUN'
+}
+[IROS/Phase10] decideT3Upgrade result { upgrade: false, nextItxStep: null, reason: 'NO_COMMIT' }
+[IROS/STATE] upsert payload (intent_anchor check) {
+  userCode: '669933',
+  anchor_action: 'keep',
+  intent_anchor_will_set: '(no-touch)',
+  anchorKeyCandidate: 'SUN',
+  fixedByMeta_intent_anchor_key: 'SUN',
+  anchorEntry_decision: {
+    tEntryOk: false,
+    anchorEvent: 'none',
+    anchorWrite: 'keep',
+    reason: 'ALREADY_COMMITTED'
+  }
+}
+[IROS/PERSIST][anchorEntry][before-upsert] {
+  hasAnchorEntry: true,
+  ae_hasDecision: true,
+  ae_anchorWrite: 'keep',
+  ae_anchorEvent: 'none',
+  ae_reason: 'ALREADY_COMMITTED',
+  ae_evidence_source: 'none',
+  decisionFinal: {
+    tEntryOk: false,
+    anchorEvent: 'none',
+    anchorWrite: 'keep',
+    reason: 'ALREADY_COMMITTED'
+  },
+  payload_has_anchor_event: true,
+  payload_has_anchor_write: true,
+  payload_anchor_event: 'none',
+  payload_anchor_write: 'keep',
+  payload_has_itx_step: true,
+  payload_itx_step: 'T3',
+  payload_itx_reason: 'IT_TRIGGER_OK',
+  payload_itx_last_at: '2026-01-08T12:26:08.007+00:00',
+  payload_itx_anchor_event_type: null,
+  payload_has_intent_anchor: false,
+  payload_intent_anchor: '(no-touch)',
+  meta_intent_anchor_key: 'SUN',
+  anchorKeyCandidate: 'SUN',
+  anchor_action: 'keep'
+}
+[IROS/STATE] persistMemoryStateIfAny ok {
+  userCode: '669933',
+  saved: [
+    'user_code',             'updated_at',
+    'depth_stage',           'q_primary',
+    'phase',                 'self_acceptance',
+    'y_level',               'h_level',
+    'spin_loop',             'spin_step',
+    'descent_gate',          'situation_summary',
+    'situation_topic',       'anchor_event',
+    'anchor_write',          'itx_step',
+    'itx_anchor_event_type', 'itx_reason',
+    'itx_last_at'
+  ],
+  depthStage: 'C3',
+  qPrimary: 'Q2',
+  spinLoop: 'SRI',
+  spinStep: 2,
+  descentGate: 'closed',
+  qCounts: '(kept)',
+  itx_step: 'T3',
+  itx_last_at: '2026-01-08T12:26:08.007+00:00',
+  anchor_action: 'keep',
+  anchor_event: 'none',
+  anchor_write: 'keep',
+  intent_anchor: '(no-touch)'
+}
+ POST /api/credits/capture 200 in 98ms (compile: 21ms, render: 77ms)
+[IROS/STATE] loaded MemoryState {
+  userCode: '669933',
+  hasMemory: true,
+  intentAnchor: 'SUN',
+  depthStage: 'C3',
+  qPrimary: 'Q2',
+  selfAcceptance: 0.7292499999999996,
+  phase: 'Outer',
+  intentLayer: 'C',
+  yLevel: 1,
+  hLevel: 2,
+  spinLoop: 'SRI',
+  spinStep: 2,
+  descentGate: 'closed',
+  itxStep: 'T3',
+  itxAnchorEventType: null,
+  itxReason: 'IT_TRIGGER_OK',
+  itxLastAt: '2026-01-08T12:26:08.007+00:00',
+  sentimentLevel: null,
+  situationSummary: 'では、無言終了でしょうか？',
+  situationTopic: 'その他・ライフ全般',
+  qCounts: {
+    q_trace: {
+      from: 'qTraceUpdated',
+      qNow: 'Q1',
+      prevQ: 'Q1',
+      streakQ: 'Q1',
+      streakLength: 2
+    },
+    it_cooldown: 0,
+    it_triggered: false,
+    it_triggered_true: false
+  }
+}
+[IROS/pipe][META_EXTRA_MERGED] {
+  metaSource: 'metaForSave',
+  metaExtraSources: {
+    meta_extra: true,
+    extraForHandle: null,
+    result_extra: null,
+    metaExtra: null
+  },
+  mergedExtraHasBlocks: true,
+  mergedExtraBlocksLen: 3,
+  mergedHead: null
+}
+[IROS/rephraseAttach][SKIP] {
+  conversationId: 'a3568c09-b758-45c8-9804-f3248ad36288',
+  userCode: '669933',
+  reason: 'ALREADY_HAS_REPHRASE_BLOCKS',
+  effectiveMode: null,
+  hintedRenderMode: null,
+  speechAct: null,
+  traceId: '07cfbf8c-6326-411e-a98f-18b1796010c9',
+  detail: { reason: 'ALREADY_HAS_REPHRASE_BLOCKS', blocksLen: 3 }
+}
+[DEBUG/RENDERGW_CALL] {
+  baseTextLen: 2,
+  baseTextHead: '……',
+  renderEngine: true,
+  hasRephraseBlocks: true,
+  rephraseBlocksLen: 3,
+  rephraseBlocksHead: '無言の中にあっても、そこで終わるわけではない。',
+  hasRephraseObj: false,
+  rephraseObjKeys: null
+}
+[IROS/CONV_EVIDENCE] {
+  conversationId: 'a3568c09-b758-45c8-9804-f3248ad36288',
+  userCode: '669933',
+  understand: 0,
+  repair: 0,
+  advance: 0,
+  proof: 1,
+  reason: 'U!:no_ctx_summary | R!:no_repair | A!:no_advance_hint',
+  head: 'では、無言終了でしょうか？',
+  detail: {
+    branch: null,
+    topicHint: null,
+    q: null,
+    depth: null,
+    phase: null,
+    slotsLen: 1
+  }
+}
+[IROS/renderGateway][LEN_TRACE] {
+  rev: 'phase11-open-close-v2-LOADED',
+  len_before: 68,
+  head_before: '無言の中にあっても、そこで終わるわけではない。 静けさの中で、新たな響きが生まれ…'
+}
+[IROS/renderGateway][HAS_REPHRASE_BLOCKS] {
+  rev: 'phase11-open-close-v2-LOADED',
+  rephraseBlocksLen: 3,
+  outLen: 68
+}
+[IROS/renderGateway][OK] {"rev":"phase11-open-close-v2-LOADED","outLen":68,"pickedFrom":"rephraseBlocks","slotPlanPolicy":"FINAL","usedSlots":false,"scaffoldApplied":false,"expandAllowed":false}
+[IROS/renderGateway][REV] {"rev":"phase11-open-close-v2-LOADED"}
+[DEBUG/RENDERGW_OUT] {
+  outType: 'object',
+  outKeys: [ 'content', 'meta' ],
+  contentType: 'string',
+  contentLen: 68,
+  contentHead: '無言の中にあっても、そこで終わるわけではない。\n静けさの中で、新たな響きが生まれる瞬間がある。\nその響きが、次なる道を開く鍵となる。🌱',
+  meta: {
+    blocksCount: 3,
+    maxLines: 3,
+    enable: true,
+    pickedFrom: 'rephraseBlocks',
+    pickedLen: 2,
+    pickedHead: '……',
+    fallbackFrom: 'text',
+    fallbackLen: 2,
+    fallbackHead: '……',
+    outLen: 68,
+    outHead: '無言の中にあっても、そこで終わるわけではない。 静けさの中で、新たな響きが生まれ…',
+    rev: 'phase11-open-close-v2-LOADED',
+    slotPlanPolicy: null,
+    extra: {
+      choiceId: null,
+      extractedChoiceId: null,
+      traceId: '07cfbf8c-6326-411e-a98f-18b1796010c9',
+      renderEngineGate: true,
+      renderEngine: true,
+      persistedByRoute: true,
+      persistAssistantMessage: false,
+      intentBridge: [Object],
+      persistedBy: 'route',
+      pastStateNoteText: null,
+      pastStateTriggerKind: null,
+      pastStateKeyword: null,
+      slotPlanPolicy_detected: 'FINAL',
+      slotPlanPolicy_from: 'metaForSave.framePlan.slotPlanPolicy',
+      slotPlanLen_detected: 1,
+      hasSlots_detected: true,
+      slotTextHadInternalMarkers: true,
+      slotTextCleanedApplied: true,
+      slotTextRawLen: 386,
+      slotTextCleanedLen: 13,
+      slotTextDroppedLines: 2,
+      llmRewriteSeed: 'では、無言終了でしょうか？',
+      llmRewriteSeedRaw: '@SHIFT {"kind":"clarify","intent":"answer_the_question","contract":["first_line_must_answer_question_directly","no_question_back_as_first_line","plain_words","no_flow_lecture"],"rules":{"answer_user_meaning":true,"keep_it_simple":true,"questions_max":1},"allow":{"concrete_reply":true,"short_reply_ok":true},"seed_text":"では、無言終了でしょうか？"}\n' +
+        'では、無言終了でしょうか？\n' +
+        '@SEED_TEXT {"text":"では、無言終了でしょうか？"}',
+      llmRewriteSeedFrom: 'postprocess(slotPlan->writer-seed)',
+      llmRewriteSeedAt: '2026-02-04T04:12:27.245Z',
+      finalTextPolicy: 'RENDERGW__SYNC_FROM_REPHRASE',
+      slotPlanCommitted: false,
+      extractedTextFromModel: '無言の中にあっても、そこで終わるわけではない。\n静けさの中で、新たな響きが生まれる瞬間がある。\nその響きが、次なる道を開く鍵となる。🌱',
+      persistPolicyHint: 'REPLY_SINGLE_WRITER',
+      speechAct: null,
+      speechActReason: null,
+      speechActConfidence: null,
+      speechAllowLLM: true,
+      rawTextFromModel: '無言の中にあっても、そこで終わるわけではない。\n静けさの中で、新たな響きが生まれる瞬間がある。\nその響きが、次なる道を開く鍵となる。🌱',
+      historyForWriter: [Array],
+      rememberTextForIros: null,
+      historyForWriterAt: '2026-02-04T04:12:27.487Z',
+      flowTape: '{"t":"META","k":"coord","v":{"depthStage":"C3","phase":"Outer","intentLayer":"C","itxStep":"T3","anchor":{"key":"SUN","text":null,"phrase":null}},"at":"2026-02-04T04:12:27.493Z"}\n' +
+        '{"t":"OBS","k":"user","v":"では、無言終了でしょうか？","at":"2026-02-04T04:12:27.493Z"}',
+      flowDigest: '【確定】Depth:C3 / Phase:Outer / Layer:C / T:T3 / Anchor:[object Object]\n' +
+        '【観測】user:では、無言終了でしょうか？',
+      ctxPack: [Object],
+      llmGate: [Object],
+      llmEntry: 'CALL_LLM',
+      llmSkipReason: null,
+      finalForceCall: false,
+      finalForceCallReason: 'FINAL_CALL_NO_FORCE',
+      resolvedTextLen: 68,
+      rewriteSeedLen: 349,
+      pdfFinalAllowsCommit: true,
+      pdfFinalAllowsCommitAt: '2026-02-04T04:12:27.509Z',
+      pdfFinalAllowsCommitPolicy: 'FINAL',
+      rephraseBlocks: [Array],
+      rephraseApplied: true,
+      rephraseLLMApplied: true,
+      rephraseReason: 'rephraseSlotsFinal(emptyLike)',
+      rephraseAt: '2026-02-04T04:12:29.499Z',
+      normalBaseApplied: true,
+      normalBaseSource: 'normal_base',
+      normalBaseReason: 'EMPTY_LIKE_TEXT',
+      expandAllowed: true,
+      maxLinesHint: 16,
+      finalAssistantText: '無言の中にあっても、そこで終わるわけではない。\n静けさの中で、新たな響きが生まれる瞬間がある。\nその響きが、次なる道を開く鍵となる。🌱',
+      finalAssistantTextSyncedToExtraSoT: true,
+      finalAssistantTextLen: 68,
+      userCode: '669933',
+      hintText: null,
+      historyLen: 12,
+      normalizedLevels: [Object],
+      finalAssistantTextCandidate: '無言の中にあっても、そこで終わるわけではない。\n静けさの中で、新たな響きが生まれる瞬間がある。\nその響きが、次なる道を開く鍵となる。🌱',
+      assistantText: '無言の中にあっても、そこで終わるわけではない。\n静けさの中で、新たな響きが生まれる瞬間がある。\nその響きが、次なる道を開く鍵となる。🌱',
+      resolvedText: '無言の中にあっても、そこで終わるわけではない。\n静けさの中で、新たな響きが生まれる瞬間がある。\nその響きが、次なる道を開く鍵となる。🌱',
+      slotPlanPolicy: 'FINAL',
+      framePlan: [Object],
+      slotPlan: [Array],
+      conversationId: 'a3568c09-b758-45c8-9804-f3248ad36288',
+      userText: 'では、無言終了でしょうか？',
+      rephraseAttachSkipped: true,
+      finalAssistantTextCandidateLen: 68,
+      assistantTextLen: 68,
+      rawTextFromModelLen: 68,
+      extractedTextFromModelLen: 68
+    }
+  }
+}
+[IROS/PERSIST][ASSISTANT] {
+  conversationId: 'a3568c09-b758-45c8-9804-f3248ad36288',
+  userCode: '669933',
+  ok: true,
+  inserted: true,
+  blocked: false,
+  reason: null,
+  len: 68,
+  head: '無言の中にあっても、そこで終わるわけではない。\n静けさの中で、新たな響きが生まれ',
+  pickedFrom: 'resultObj.content(final)'
+}
+[IROS][Training] computed targetKind = uncover
+[IROS][Training] insert sample {
+  user_code: '669933',
+  conversation_id: 'a3568c09-b758-45c8-9804-f3248ad36288',
+  message_id: null,
+  input_text: 'では、無言終了でしょうか？',
+  analysis_text: 'Q:Q2 / D:C3 / P:Outer / K:uncover / T:その他・ライフ全般',
+  q_code: 'Q2',
+  depth_stage: 'C3',
+  phase: 'Outer',
+  self_acceptance: 0.7292499999999996,
+  situation_summary: 'では、無言終了でしょうか？',
+  situation_topic: 'その他・ライフ全般',
+  target_kind: 'uncover',
+  target_label: null,
+  y_level: 1,
+  h_level: 2
+}
+[IROS][Training] insert ok
+ POST /api/agent/iros/reply 200 in 4.9s (compile: 145ms, render: 4.8s)
+[authz] e4a8c154-14b2-4ad6-869d-264ad7923bb0 start { path: 'http://localhost:3000/api/agent/iros/conversations' }
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] e4a8c154-14b2-4ad6-869d-264ad7923bb0 verify firebase: 252.555ms
+[authz] e4a8c154-14b2-4ad6-869d-264ad7923bb0 fetch user: 46.593ms
+[authz] e4a8c154-14b2-4ad6-869d-264ad7923bb0 ok { user: '669933', role: 'admin', provider: 'password', ms: 307 }
+[IROS/Conversations] auth = {
+  ok: true,
+  allowed: true,
+  status: 200,
+  pgJwt: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njk5MzMiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInVzZXJfY29kZSI6IjY2OTkzMyIsImZpcmViYXNlX3VpZCI6Ikt2UDFQNHNpZnRTRUZkTGtka1lqcVY0aE12MDIiLCJleHAiOjE3NzAxNzkyNTAsImlhdCI6MTc3MDE3ODM1MH0.F4z00LIbxEmbfeQSTmJp-gXKCbJvk7bvy3qA8PJlhec',
+  userCode: '669933',
+  role: 'admin',
+  user: { uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02', user_code: '669933' },
+  uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02'
+}
+[IROS/Conversations] Query target user_code = 669933
+[IROS/Conversations] ✅ 100 rows fetched for user_code=669933
+ GET /api/agent/iros/conversations 200 in 401ms (compile: 8ms, render: 393ms)
+[IROS/FLAGSHIP_GUARD][MODULE_LOADED] { rev: 'guard-rev-2026-01-28-b', at: '2026-02-04T04:16:01.327Z' }
+[IROS/FLAGS_ENV_HEAD] {
+  IROS_RETRY_FINAL_FORCE_CALL: '0',
+  IROS_FLAGSHIP_REWRITE: '1',
+  IROS_LOG_FLAGS: 'true'
+}
+[IROS/FLAGS] {
+  retryFinalForceCall: false,
+  flagshipRewrite: true,
+  guardEnabled: true,
+  guardSkipShort: false,
+  guardShortMaxLen: 80,
+  logFlags: true
+}
+[IROS/renderGateway][MODULE_LOADED] { rev: 'phase11-open-close-v2-LOADED', at: '2026-02-04T04:16:01.348Z' }
+[authz] ba34a099-476b-40cc-8b02-e81b1b9147dd start { path: 'http://localhost:3000/api/agent/iros/reply' }
+[authz][debug] header { authzLen: 0, authzHead: '' }
+[authz] ba34a099-476b-40cc-8b02-e81b1b9147dd no credentials
+ POST /api/agent/iros/reply 401 in 185ms (compile: 177ms, render: 8ms)
+[IROS/FLAGSHIP_GUARD][MODULE_LOADED] { rev: 'guard-rev-2026-01-28-b', at: '2026-02-04T04:41:05.715Z' }
+[IROS/FLAGS_ENV_HEAD] {
+  IROS_RETRY_FINAL_FORCE_CALL: '0',
+  IROS_FLAGSHIP_REWRITE: '1',
+  IROS_LOG_FLAGS: 'true'
+}
+[IROS/FLAGS] {
+  retryFinalForceCall: false,
+  flagshipRewrite: true,
+  guardEnabled: true,
+  guardSkipShort: false,
+  guardShortMaxLen: 80,
+  logFlags: true
+}
+[IROS/renderGateway][MODULE_LOADED] { rev: 'phase11-open-close-v2-LOADED', at: '2026-02-04T04:41:05.735Z' }
+[authz] fe60f99f-6220-48f2-9451-87956d7b45cc start { path: 'http://localhost:3000/api/agent/iros/reply' }
+[authz][debug] header { authzLen: 0, authzHead: '' }
+[authz] fe60f99f-6220-48f2-9451-87956d7b45cc no credentials
+ POST /api/agent/iros/reply 401 in 174ms (compile: 166ms, render: 8ms)
+ POST /api/register-push 200 in 980ms (compile: 2ms, render: 978ms)

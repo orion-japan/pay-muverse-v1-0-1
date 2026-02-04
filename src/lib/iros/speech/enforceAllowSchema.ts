@@ -8,7 +8,7 @@
 // - COMMIT でも actions は最大2行、question は最大1行に制限
 //
 // ✅ 重要：最終出力からラベルを完全に消す。
-// ✅ v2方針：SILENCE 以外は “空返し” をしない（最低1行を保証）
+// ✅ v2方針：無言アクト 以外は “空返し” をしない（最低1行を保証）
 
 import type { AllowSchema, SpeechAct } from './types';
 
@@ -42,16 +42,7 @@ function normalizeLines(text: string): string[] {
 }
 
 function allowedMap(allow: AllowSchema): Record<keyof typeof LABELS, boolean> {
-  if (allow.act === 'SILENCE') {
-    return {
-      observe: false,
-      name: false,
-      flip: false,
-      commit: false,
-      actions: false,
-      question: false,
-    };
-  }
+  // 無言アクト は廃止。AllowSchema に定義された fields のみを信頼する
   const f = (allow as any).fields ?? {};
   return {
     observe: !!f.observe,
@@ -62,6 +53,7 @@ function allowedMap(allow: AllowSchema): Record<keyof typeof LABELS, boolean> {
     question: !!f.question,
   };
 }
+
 
 function detectKind(line: string): keyof typeof LABELS | null {
   if (LABELS.observe.test(line)) return 'observe';
@@ -119,11 +111,6 @@ export function enforceAllowSchema(allow: AllowSchema, rawText: string): Enforce
   const act = allow.act;
   const maxLines = allow.maxLines ?? 2;
 
-  // ✅ SILENCE は必ず空（設計どおり）
-  if (act === 'SILENCE') {
-    return { act, text: '', dropped: 0, kept: 0 };
-  }
-
   const allowF = allowedMap(allow);
   const lines = normalizeLines(rawText);
 
@@ -176,7 +163,7 @@ export function enforceAllowSchema(allow: AllowSchema, rawText: string): Enforce
     if (out.length >= maxLines) break;
   }
 
-  // 3) ✅ 空になった場合：SILENCE以外は最低1行を保証（v2要件）
+  // 3) ✅ 空になった場合：無言アクト以外は最低1行を保証（v2要件）
   if (out.length === 0) {
     const fallback = softenAdviceLikeContent(firstNonEmptyLine(rawText));
 

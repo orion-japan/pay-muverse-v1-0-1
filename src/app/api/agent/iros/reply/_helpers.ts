@@ -43,7 +43,7 @@ export function pickUid(auth: any): string | null {
 }
 
 // =========================================================
-// ✅ speech helpers
+// ✅ speech helpers（互換のため残す）
 // =========================================================
 
 export function pickSpeechAct(meta: any): string | null {
@@ -56,6 +56,10 @@ export function pickSpeechAct(meta: any): string | null {
   );
 }
 
+/**
+ * route.ts が import しているため互換で残す。
+ * ※SILENCE自体は UIモードとしては使わない（inferUIModeでは返さない）
+ */
 export function pickSilenceReason(meta: any): string | null {
   return (
     meta?.silencePatchedReason ??
@@ -66,20 +70,23 @@ export function pickSilenceReason(meta: any): string | null {
   );
 }
 
+/**
+ * 「無言表現を作る」ためではなく、
+ * “空っぽ扱いにしてフォールバックやブロック判定を成立させる”ための判定。
+ */
 export function isEffectivelyEmptyText(text: any): boolean {
   const s = String(text ?? '').trim();
   if (!s) return true;
 
   const t = s.replace(/\s+/g, '');
-  return t === '…' || t === '…。🪔' || t === '...' || t === '....';
+  return t === '…' || t === '……' || t === '…。🪔' || t === '...' || t === '....';
 }
 
 // =========================================================
-// ✅ UI向け「現在のモード」可視化（NORMAL / IR / SILENCE）
-// - silenceReason があっても「本文があるなら SILENCE にしない」
+// ✅ UI向け「現在のモード」可視化（NORMAL / IR のみ）
 // =========================================================
 
-export type ReplyUIMode = 'NORMAL' | 'IR' | 'SILENCE';
+export type ReplyUIMode = 'NORMAL' | 'IR';
 
 export function inferUIMode(args: {
   modeHint?: string | null;
@@ -87,7 +94,7 @@ export function inferUIMode(args: {
   meta?: any;
   finalText?: string | null;
 }): ReplyUIMode {
-  const { modeHint, effectiveMode, meta, finalText } = args;
+  const { modeHint, effectiveMode } = args;
 
   const hint = String(modeHint ?? '').toUpperCase();
   if (hint.includes('IR')) return 'IR';
@@ -95,10 +102,6 @@ export function inferUIMode(args: {
   const eff = String(effectiveMode ?? '').toUpperCase();
   if (eff.includes('IR')) return 'IR';
 
-  const speechAct = String(pickSpeechAct(meta) ?? '').toUpperCase();
-  const empty = isEffectivelyEmptyText(finalText);
-
-  if (speechAct === 'SILENCE' && empty) return 'SILENCE';
   return 'NORMAL';
 }
 
@@ -108,14 +111,7 @@ export function inferUIModeReason(args: {
   meta?: any;
   finalText?: string | null;
 }): string | null {
-  const { modeHint, effectiveMode, meta, finalText } = args;
-
-  const speechAct = String(pickSpeechAct(meta) ?? '').toUpperCase();
-  const empty = isEffectivelyEmptyText(finalText);
-
-  if (speechAct === 'SILENCE' && empty) {
-    return pickSilenceReason(meta) ?? 'SILENCE';
-  }
+  const { modeHint, effectiveMode } = args;
 
   const hint = String(modeHint ?? '').trim();
   if (hint.length > 0) return `MODE_HINT:${hint}`;

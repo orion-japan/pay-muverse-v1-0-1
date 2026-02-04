@@ -1016,11 +1016,11 @@ export async function generateIrosReply(args: GenerateArgs): Promise<GenerateRes
 // 1015〜1041行あたり（あなたが貼った範囲の「// ✅ LLMを呼ばない場合（act別に返す）」〜 textOut 決定部）
 //
 // 目的：
-// - 非LLM本文の生成を廃止（SILENCE専用）
+// - 非LLM本文の生成を廃止（無言アクト専用）
 // - finalAllowLLM=false の場合は、actが何であっても “無音(ゼロ幅)” を返す
 // - fallbackNormalBody をここから完全排除
 
-// ✅ LLMを呼ばない場合（SILENCE専用で返す）
+// ✅ LLMを呼ばない場合（1:1では無言アクトを使わない → “DROP” で終了）
 if (!finalAllowLLM) {
   const safeMeta = typeof meta === 'object' && meta !== null ? meta : ({} as any);
   const ex =
@@ -1028,18 +1028,15 @@ if (!finalAllowLLM) {
       ? (safeMeta as any).extra
       : ((safeMeta as any).extra = {});
 
-  const SILENT_BODY = '\u200B'; // 見た目は空、しかし "" ではない
-
-  // ✅ 非LLMで本文を返すのは禁止（Phase1：SILENCE専用）
-  // act が FORWARD 等でも、ここでは無音に潰して “テンプレ混入経路” を遮断する
-  const finalAct = 'SILENCE';
-  const textOut = SILENT_BODY;
+  // 1:1方針：非LLM時に本文を作らない。空は静かに捨てる（ただし 無言アクト は返さない）
+  const finalAct = 'FORWARD';
+  const textOut = ''; // ★ ゼロ幅文字も使わない
 
   ex.speechSkipped = true;
   ex.speechSkippedText = textOut;
   ex.rawTextFromModel = textOut;
 
-  // LLM呼ばないときは履歴汚染を止める（任意）
+  // 履歴汚染は止める（任意）
   ex._blockHistory = true;
 
   setSpeechActTrace(safeMeta as any, {
@@ -1058,11 +1055,9 @@ if (!finalAllowLLM) {
     intent: (safeMeta as any)?.intent ?? (safeMeta as any)?.intentLine ?? null,
     metaForSave: safeMeta ?? {},
     finalMode: String(mode),
-    result: null,
-    speechAct: String(finalAct),
-    speechReason: String((speechDecision as any).reason ?? ''),
-  };
+  } as any;
 }
+
 
 /*
 ✅ 修正後の確認コマンド（短い出力だけ）
@@ -1244,34 +1239,17 @@ if (meta && typeof meta === 'object') {
   const enforced = enforceAllowSchema((speechApplied as any).allow as any, content);
 
   // ✅ 最終act（返却/保存/UIの単一ソース）
-  let finalAct: any = (enforced as any).act;
+  // 方針：無言アクト（旧SILENCE）を特別扱いして上書きしない。
+  // - enforceAllowSchema の結果をそのまま採用する
+  // - 本文は「enforced.text が空なら origin」を採用する（non-empty 保証のみ）
+  const enforcedText = ensureNonEmpty((enforced as any).text, '');
+  const origin = ensureNonEmpty(content, '…');
 
-  // Decision が SILENCE でない限り、enforce の SILENCE は無効
-  if ((speechDecision as any).act !== 'SILENCE' && (enforced as any).act === 'SILENCE') {
-    const origin = ensureNonEmpty(content, '…');
-    const kept = ensureNonEmpty((enforced as any).text, '');
+  content = ensureNonEmpty(enforcedText || origin, '…');
 
-    const fallbackLine = firstNonEmptyLine(origin) ?? firstNonEmptyLine(kept) ?? '…';
-    content = ensureNonEmpty(fallbackLine, '…');
-
-    finalAct = (speechDecision as any).act;
-
-    console.log('[IROS/SpeechAct] enforce returned SILENCE but overridden (non-silence decision)', {
-      decisionAct: (speechDecision as any).act,
-      enforcedAct: (enforced as any).act,
-      allowAct: (speechApplied as any)?.allow?.act ?? null,
-      used: 'fallbackLine',
-      originLen: origin.length,
-      keptLen: kept.length,
-    });
-  } else {
-    const enforcedText = ensureNonEmpty((enforced as any).text, '');
-    const origin = ensureNonEmpty(content, '…');
-    content = ensureNonEmpty(enforcedText || origin, '…');
-    finalAct = (enforced as any).act;
-  }
-
+  const finalAct: any = (enforced as any).act;
   (enforced as any).act = finalAct;
+
 
   // ✅ ここで「最終act」を meta に確定保存（ズレを潰す本命）
   setSpeechActTrace(meta as any, {
@@ -1306,7 +1284,7 @@ if (meta && typeof meta === 'object') {
   // ✅ 最終ガード：返却本文は必ず非空（Phase1）
   // - LLM経路では非LLM本文（fallbackNormalBody）を混ぜない
   // - 空なら最小プレースホルダ '…' のみ
-  // - SILENCE は上流（finalAllowLLM=false 分岐）でゼロ幅に潰している
+  // - 無言アクト は上流（finalAllowLLM=false 分岐）でゼロ幅に潰している
   content = ensureNonEmpty(content, '…');
 
 

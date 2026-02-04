@@ -114,7 +114,7 @@ function looksLikeSilence(text: string, extra: any) {
   if (!t) return false;
 
   if (
-    extra?.speechAct === 'SILENCE' ||
+    extra?.speechAct === '無言アクト' ||
     extra?.silencePatched === true ||
     String(extra?.silencePatchedReason ?? '').trim().length > 0 ||
     extra?.speechSkipped === true

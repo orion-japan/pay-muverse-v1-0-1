@@ -332,7 +332,7 @@ export async function POST(req: NextRequest) {
       const isDiagnosisFinalSeed = finalTextPolicy === 'DIAGNOSIS_FINAL__SEED_FOR_LLM';
 
       const candidateText = pickText(r?.assistantText, r?.content);
-      const isSilenceOrForward = speechAct === 'SILENCE' || speechAct === 'FORWARD';
+      const isSilenceOrForward = speechAct === 'FORWARD'; // SILENCE廃止
       const isEmptyLike = isEffectivelyEmptyText(candidateText);
 
       const isNonSilenceButEmpty =
@@ -405,7 +405,7 @@ export async function POST(req: NextRequest) {
       const EXPAND_ENABLED = ['1', 'true', 'on', 'yes', 'enabled'].includes(env);
 
       const speechAct0 = String(extraAny?.speechAct ?? metaAny?.speechAct ?? '').toUpperCase();
-      const isSilenceOrForward0 = speechAct0 === 'SILENCE' || speechAct0 === 'FORWARD';
+      const isSilenceOrForward0 = speechAct0 === 'FORWARD'; // SILENCE廃止
 
       const mode0 = String(finalMode ?? metaAny?.mode ?? '').toLowerCase();
       const isIR0 = mode0.includes('ir');
@@ -426,7 +426,7 @@ export async function POST(req: NextRequest) {
       metaForSave = metaAny;
 
       const speechAct = String(extraAny?.speechAct ?? metaAny?.speechAct ?? '').toUpperCase();
-      const shouldEarlyReturn = speechAct === 'SILENCE' || speechAct === 'FORWARD';
+      const shouldEarlyReturn = speechAct === 'FORWARD'; // SILENCE廃止
 
       if (shouldEarlyReturn) {
         const finalText = pickText((result as any)?.content, assistantText);
@@ -786,152 +786,132 @@ try {
         meta.extra = { ...(meta.extra ?? {}), finalHeaderStripped: sanitized.removed.length ? sanitized.removed : null };
       }
 
-      // FINAL本文の確定（ここでは “生成しない”／あくまで strip + recover（既存資材から）だけ）
-      {
-        const curRaw = String((result as any)?.content ?? '');
-        const curTrim = curRaw.trim();
+// FINAL本文の確定（ここでは “生成しない”／あくまで strip + recover（既存資材から）だけ）
+{
+  const curRaw = String((result as any)?.content ?? '');
+  const curTrim = curRaw.trim();
 
-        const speechAct = String(meta?.extra?.speechAct ?? meta?.speechAct ?? '').toUpperCase();
-        const silenceReason = pickSilenceReason(meta);
+  const emptyLike = isEffectivelyEmptyText(curTrim);
 
-        const emptyLike = isEffectivelyEmptyText(curTrim);
-        const userNonEmpty = String(userTextClean ?? '').trim().length > 0;
+  // ✅ スロット指示が本文に漏れているか（@OBS/@SHIFT/...）
+  const hasSlotDirectives = /(^|\n)\s*@(OBS|SHIFT|NEXT|SAFE|DRAFT|SEED_TEXT)\b/.test(curRaw);
 
-        // ✅ SILENCE は「空入力専用」を原則にする（誤SILENCEで無言化させない）
-        const silentAllowed = !userNonEmpty;
-        const isSilent = speechAct === 'SILENCE' && emptyLike && silentAllowed;
+  // ✅ recover材料（SoTから）
+  const ex: any = extraSoT as any;
+  const head = String(ex?.rephraseHead ?? '').trim();
+  const blocks: any[] = Array.isArray(ex?.rephraseBlocks) ? ex.rephraseBlocks : [];
 
-        // ✅ スロット指示が本文に漏れているか（@OBS/@SHIFT/...）
-        const hasSlotDirectives = /(^|\n)\s*@(OBS|SHIFT|NEXT|SAFE|DRAFT|SEED_TEXT)\b/.test(curRaw);
+  const blocksToText = (bs: any[]) => {
+    const lines = bs
+      .map((b) => String(b?.text ?? b?.content ?? b?.value ?? b?.body ?? '').trimEnd())
+      .filter((s) => s.trim().length > 0);
+    return lines.join('\n\n').trimEnd();
+  };
 
-        // ✅ recover材料（SoTから）
-        const ex: any = extraSoT as any;
-        const head = String(ex?.rephraseHead ?? '').trim();
-        const blocks: any[] = Array.isArray(ex?.rephraseBlocks) ? ex.rephraseBlocks : [];
+  const recoveredFromBlocks = blocks.length > 0 ? blocksToText(blocks) : '';
+  const recoveredText = head || recoveredFromBlocks;
 
-        const blocksToText = (bs: any[]) => {
-          const lines = bs
-            .map((b) => String(b?.text ?? b?.content ?? b?.value ?? b?.body ?? '').trimEnd())
-            .filter((s) => s.trim().length > 0);
-          return lines.join('\n\n').trimEnd();
-        };
+  // ✅ (空っぽ or スロット漏れ) の場合、既存資材から復元できるなら置換
+  // ✅ SILENCE は廃止：常に通常の本文確定へ寄せる
+  const needRecover = emptyLike || hasSlotDirectives;
 
-        const recoveredFromBlocks = blocks.length > 0 ? blocksToText(blocks) : '';
-        const recoveredText = head || recoveredFromBlocks;
+  const stripSlotDirectives = (s: string) => {
+    const raw = String(s ?? '');
+    if (!raw) return raw;
+    const out = raw
+      .replace(/(^|\n)\s*@(OBS|SHIFT|NEXT|SAFE|DRAFT|SEED_TEXT)\b[^\n]*\n?/g, '$1')
+      .replace(/\n{3,}/g, '\n\n')
+      .trimEnd();
+    return out;
+  };
 
-        // ✅ 非SILENCEで (空っぽ or スロット漏れ) の場合、既存資材から復元できるなら置換
-        const needRecover = !isSilent && (emptyLike || hasSlotDirectives);
+  const curNoSlots = hasSlotDirectives ? stripSlotDirectives(curRaw) : curRaw.trimEnd();
+  const curNoSlotsTrim = curNoSlots.trim();
 
-        const stripSlotDirectives = (s: string) => {
-          const raw = String(s ?? '');
-          if (!raw) return raw;
-          const out = raw
-            .replace(/(^|\n)\s*@(OBS|SHIFT|NEXT|SAFE|DRAFT|SEED_TEXT)\b[^\n]*\n?/g, '$1')
-            .replace(/\n{3,}/g, '\n\n')
-            .trimEnd();
-          return out;
-        };
+  const finalText = needRecover
+    ? recoveredText
+      ? recoveredText
+      : hasSlotDirectives && curNoSlotsTrim.length > 0
+        ? curNoSlots
+        : curRaw.trimEnd()
+    : curRaw.trimEnd();
 
-        const curNoSlots = hasSlotDirectives ? stripSlotDirectives(curRaw) : curRaw.trimEnd();
-        const curNoSlotsTrim = curNoSlots.trim();
+  if (String(process.env.IROS_DEBUG_SILENCE_PIPE ?? '0').trim() === '1') {
+    console.info('[IROS/pipe][FINAL_TEXT]', {
+      conversationId,
+      userCode,
+      curRawLen: curRaw.length,
+      curTrimLen: curTrim.length,
+      emptyLike,
+      hasSlotDirectives,
+      sotHasBlocks: Array.isArray(ex?.rephraseBlocks),
+      sotBlocksLen: Array.isArray(ex?.rephraseBlocks) ? ex.rephraseBlocks.length : null,
+      sotHeadLen: head ? head.length : 0,
+      recoveredFromBlocksLen: recoveredFromBlocks.length,
+      finalTextLen: finalText.length,
+      finalTextPolicyCandidate: needRecover
+        ? recoveredText
+          ? 'RECOVERED_FROM_SOT'
+          : hasSlotDirectives && curNoSlotsTrim.length > 0
+            ? 'STRIPPED_SLOT_DIRECTIVES'
+            : 'NEED_RECOVER_BUT_FALLBACK_CURRAW'
+        : 'NORMAL_BODY',
+    });
+  }
 
-        const finalText = isSilent
-          ? ''
-          : needRecover
-            ? recoveredText
-              ? recoveredText
-              : curNoSlotsTrim.length > 0
-                ? curNoSlots
-                : curRaw.trimEnd()
-            : curRaw.trimEnd();
+  (result as any).content = finalText;
+  (result as any).text = finalText;
+  (result as any).assistantText = finalText;
+  assistantText = finalText;
 
-        if (String(process.env.IROS_DEBUG_SILENCE_PIPE ?? '0').trim() === '1') {
-          console.info('[IROS/pipe][FINAL_TEXT]', {
-            conversationId,
-            userCode,
-            speechAct,
-            silenceReason: silenceReason ?? null,
-            userNonEmpty,
-            silentAllowed,
-            curRawLen: curRaw.length,
-            curTrimLen: curTrim.length,
-            emptyLike,
-            hasSlotDirectives,
-            sotHasBlocks: Array.isArray(ex?.rephraseBlocks),
-            sotBlocksLen: Array.isArray(ex?.rephraseBlocks) ? ex.rephraseBlocks.length : null,
-            sotHeadLen: head ? head.length : 0,
-            recoveredFromBlocksLen: recoveredFromBlocks.length,
-            finalTextLen: finalText.length,
-            finalTextPolicyCandidate: isSilent
-              ? silenceReason
-                ? `SILENCE:${silenceReason}`
-                : 'SILENCE_EMPTY_BODY'
-              : needRecover
-                ? recoveredText
-                  ? 'RECOVERED_FROM_SOT'
-                  : curNoSlotsTrim.length > 0
-                    ? 'STRIPPED_SLOT_DIRECTIVES'
-                    : 'NEED_RECOVER_BUT_FALLBACK_CURRAW'
-                : 'NORMAL_BODY',
-          });
-        }
+  meta.extra = {
+    ...(meta.extra ?? {}),
+    finalAssistantTextSynced: true,
+    finalAssistantTextLen: finalText.length,
+    finalTextRecoveredFromSoT: needRecover && Boolean(recoveredText) ? true : undefined,
+    finalTextRecoveredSource: needRecover && Boolean(recoveredText) ? (head ? 'rephraseHead' : 'rephraseBlocks') : undefined,
+    finalTextHadSlotDirectives: hasSlotDirectives ? true : undefined,
+    finalTextStrippedSlotDirectives:
+      needRecover && !recoveredText && hasSlotDirectives && curNoSlotsTrim.length > 0 ? true : undefined,
+    finalTextPolicy: meta?.extra?.finalTextPolicy ?? (finalText.length > 0 ? 'NORMAL_BODY' : 'NORMAL_EMPTY_PASS'),
+    emptyFinalPatched: finalText.length === 0 ? true : undefined,
+    emptyFinalPatchedReason:
+      finalText.length === 0
+        ? needRecover
+          ? 'NEED_RECOVER_BUT_EMPTY'
+          : 'EMPTY_CONTENT'
+        : undefined,
+  };
+}
 
-        (result as any).content = finalText;
-        (result as any).text = finalText;
-        (result as any).assistantText = finalText;
-        assistantText = finalText;
+// UI MODE確定（SILENCE廃止：IR以外は常にNORMAL）
+{
+  const hint = String(mode ?? '').toUpperCase();
+  const eff = String(effectiveMode ?? '').toUpperCase();
 
-        meta.extra = {
-          ...(meta.extra ?? {}),
-          finalAssistantTextSynced: true,
-          finalAssistantTextLen: finalText.length,
-          finalTextRecoveredFromSoT: needRecover && Boolean(recoveredText) ? true : undefined,
-          finalTextRecoveredSource: needRecover && Boolean(recoveredText) ? (head ? 'rephraseHead' : 'rephraseBlocks') : undefined,
-          finalTextHadSlotDirectives: hasSlotDirectives ? true : undefined,
-          finalTextStrippedSlotDirectives: needRecover && !recoveredText && hasSlotDirectives && curNoSlotsTrim.length > 0 ? true : undefined,
-          finalTextPolicy: isSilent ? 'SILENCE_EMPTY_BODY' : meta?.extra?.finalTextPolicy ?? (finalText.length > 0 ? 'NORMAL_BODY' : 'NORMAL_EMPTY_PASS'),
-          emptyFinalPatched: finalText.length === 0 ? true : undefined,
-          emptyFinalPatchedReason:
-            finalText.length === 0
-              ? isSilent
-                ? silenceReason
-                  ? `SILENCE:${silenceReason}`
-                  : 'SILENCE_EMPTY_BODY'
-                : needRecover
-                  ? 'NEED_RECOVER_BUT_EMPTY'
-                  : 'NON_SILENCE_EMPTY_CONTENT'
-              : undefined,
-        };
-      }
+  const uiMode: 'NORMAL' | 'IR' = hint.includes('IR') || eff.includes('IR') ? 'IR' : 'NORMAL';
+  const uiReason =
+    uiMode === 'IR'
+      ? (hint.includes('IR') ? `MODE_HINT:${String(mode ?? '').trim()}` : `EFFECTIVE_MODE:${String(effectiveMode ?? '').trim()}`)
+      : null;
 
-      // UI MODE確定
-      {
-        const finalText = String((result as any)?.content ?? '').trim();
-        const uiMode = inferUIMode({ modeHint: mode, effectiveMode, meta, finalText });
-        const uiReason = inferUIModeReason({ modeHint: mode, effectiveMode, meta, finalText });
+  meta.mode = uiMode;
+  meta.modeReason = uiReason;
+  meta.persistPolicy = PERSIST_POLICY;
 
-        meta.mode = uiMode;
-        meta.modeReason = uiReason;
-        meta.persistPolicy = PERSIST_POLICY;
+  meta.extra = {
+    ...(meta.extra ?? {}),
+    uiMode,
+    uiModeReason: uiReason,
+    persistPolicy: PERSIST_POLICY,
+    uiFinalTextLen: String((result as any)?.content ?? '').trim().length,
+  };
+}
 
-        meta.extra = {
-          ...(meta.extra ?? {}),
-          uiMode,
-          uiModeReason: uiReason,
-          persistPolicy: PERSIST_POLICY,
-          uiFinalTextLen: finalText.length,
-        };
-      }
 
-// ✅ DB保存は「表示に採用される本文」を優先する
-// - internal（@OBS/@SHIFT/...）は content/text に絶対入れない
-// - rephraseBlocks は object 想定で正しく join する（[object Object] を防ぐ）
-// - 最終的に空なら '……' に落とす（空保存でUI/学習が壊れるのを防ぐ）
-const isEmptyLike = (s: string) => {
-  const t = String(s ?? '').trim();
-  return t === '……' || t === '...' || t === '…' || t.length <= 2;
-};
-
+// ✅ DB保存は「最終的に UI に返す本文（resultObj.content）」を正本にする
+// - renderGateway 後の out.content を resultObj.content に反映しているため、これが “表示に採用される本文”
+// - ここで persist することで、DBに '……' が残る事故を止める
 const stripInternalLines = (s0: string) => {
   const s = String(s0 ?? '');
   const lines = s.split('\n').filter((ln) => {
@@ -949,117 +929,163 @@ const stripInternalLines = (s0: string) => {
   return lines.join('\n').trim();
 };
 
-      // --- blocks を “本文” に戻す (object対応) ---
-      const extraAny: any = (meta as any)?.extra ?? {};
-      const blocksAny: unknown =
-        extraAny?.rephraseBlocks ?? extraAny?.rephrase?.blocks ?? extraAny?.rephrase?.rephraseBlocks ?? null;
+// --- blocks を “本文” に戻す (string/object対応) ---
+// ✅ fallback 候補としてだけ使う（正本は resultObj.content）
+const extraAny: any = (meta as any)?.extra ?? {};
+const sotAny: any = extraSoT as any;
 
-        const blocksToText = (bs: any[]) => {
-          const parts = bs
-            .map((b) => {
-              // ✅ stringブロック対応（最重要）
-              if (typeof b === 'string') return b.trimEnd();
+const blocksAny: unknown =
+  (Array.isArray(sotAny?.rephraseBlocks) && sotAny.rephraseBlocks.length > 0
+    ? sotAny.rephraseBlocks
+    : extraAny?.rephraseBlocks ??
+      extraAny?.rephrase?.blocks ??
+      extraAny?.rephrase?.rephraseBlocks ??
+      extraAny?.rephrase?.rephraseBlocks) ?? null;
 
-              // ✅ objectブロック対応（既存）
-              return String(b?.text ?? b?.content ?? b?.value ?? b?.body ?? '').trimEnd();
-            })
-            .filter((s) => s.trim().length > 0);
+const blocksToText = (bs: any[]) => {
+  const parts = bs
+    .map((b) => {
+      if (typeof b === 'string') return b.trimEnd();
+      return String(b?.text ?? b?.content ?? b?.value ?? b?.body ?? '').trimEnd();
+    })
+    .filter((s) => s.trim().length > 0);
+  return parts.join('\n\n').trimEnd();
+};
 
-          return parts.join('\n\n').trimEnd();
-        };
+const blocksJoined = Array.isArray(blocksAny) ? blocksToText(blocksAny as any[]) : '';
+
+/// --- ✅ 最終本文を確定（renderGateway反映後の resultObj を正本として保存） ---
+const metaExtraAny: any = (meta as any)?.extra ?? {};
+
+const resultObjFinalRaw =
+  String((result as any)?.content ?? '').trim() ||
+  String((result as any)?.text ?? '').trim() ||
+  String((result as any)?.assistantText ?? '').trim() ||
+  '';
+
+  const displayPreferredRaw =
+  String(metaExtraAny?.resolvedText ?? '').trim() ||
+  String(metaExtraAny?.assistantText ?? '').trim() ||
+  String(metaExtraAny?.finalAssistantText ?? '').trim() ||
+  '';
+
+const blocksJoinedCleaned = stripInternalLines(blocksJoined);
+
+// ✅ 正本：resultObj.content（＝返す本文）
+// ✅ fallback：rephraseBlocks(clean) → meta.extra(確定本文) → 最終手段 '……'
+const contentForPersist = (() => {
+  const fromResultObj = stripInternalLines(
+    String((result as any)?.content ?? (result as any)?.assistantText ?? (result as any)?.text ?? '').trimEnd(),
+  );
+  if (!isEffectivelyEmptyText(fromResultObj) && fromResultObj.length > 0) return fromResultObj;
+
+  // ✅ rephraseBlocks があるなら、meta.extra.finalAssistantText(短文化)より優先
+  if (blocksJoinedCleaned.length > 0) return blocksJoinedCleaned;
+
+  const fromMeta = stripInternalLines(displayPreferredRaw);
+  if (!isEffectivelyEmptyText(fromMeta) && fromMeta.length > 0) return fromMeta;
+
+  const fromResultFallback = stripInternalLines(resultObjFinalRaw);
+  if (!isEffectivelyEmptyText(fromResultFallback) && fromResultFallback.length > 0) return fromResultFallback;
+
+  return '……';
+})();
 
 
-      const blocksJoined = Array.isArray(blocksAny) ? blocksToText(blocksAny as any[]) : '';
+// ✅ 保存本文と meta.extra.finalAssistantText を同期（UI/DB の “正本” を揃える）
+meta.extra = {
+  ...(meta.extra ?? {}),
+  finalAssistantText: contentForPersist,
+  finalAssistantTextLen: contentForPersist.length,
+  finalAssistantTextCandidate: (meta.extra as any)?.finalAssistantTextCandidate ?? contentForPersist,
+};
 
-      // --- ✅ このスコープで確実に存在する “候補本文” を作る（finalAssistant 参照をやめる） ---
-      // ここは「保存に採用される本文」を決めるための raw 候補
-      const finalAssistantRaw =
-        String((result as any)?.content ?? '').trim() ||
-        String((result as any)?.text ?? '').trim() ||
-        String((result as any)?.assistantText ?? '').trim();
+// ✅ DB保存（最終確定本文）
+const saved = await persistAssistantMessageToIrosMessages({
+  supabase,
+  conversationId,
+  userCode,
+  content: contentForPersist,
+  meta: meta ?? null,
+});
 
-      // --- ✅ internal除去（保存用） ---
-      const finalAssistantClean = stripInternalLines(finalAssistantRaw);
-      const blocksJoinedCleaned = stripInternalLines(blocksJoined);
+// ✅ 保存ログ（OK/NGを短く。env か request header で有効化）
+const debugPersist =
+  String(process.env.IROS_DEBUG_PERSIST ?? '0').trim() === '1' ||
+  String(req.headers.get('x-iros-debug-persist') ?? '').trim() === '1';
 
-      // --- ✅ 採用優先順位 ---
-      // 1) finalAssistantClean（ただし emptyLike / internal除去で空なら次へ）
-      // 2) blocksJoinedCleaned（objectから復元）
-      // 3) 最後に ……（ただし本当に最終手段）
-      const contentForPersist = (() => {
-        if (!isEffectivelyEmptyText(finalAssistantClean) && finalAssistantClean.length > 0) return finalAssistantClean;
-        if (blocksJoinedCleaned.length > 0) return blocksJoinedCleaned;
-        return '……';
-      })();
+if (debugPersist) {
+  console.info('[IROS/PERSIST][ASSISTANT]', {
+    conversationId,
+    userCode,
+    ok: saved?.ok ?? null,
+    inserted: saved?.inserted ?? null,
+    blocked: saved?.blocked ?? null,
+    reason: saved?.reason ?? null,
+    len: contentForPersist.length,
+    head: contentForPersist.slice(0, 40),
+    pickedFrom:
+      !isEffectivelyEmptyText(stripInternalLines(String((result as any)?.content ?? '').trimEnd())) &&
+      stripInternalLines(String((result as any)?.content ?? '').trimEnd()).length > 0
+        ? 'resultObj.content(final)'
+        : !isEffectivelyEmptyText(stripInternalLines(displayPreferredRaw)) && stripInternalLines(displayPreferredRaw).length > 0
+          ? 'meta.extra(finalAssistantText/resolvedText)'
+          : blocksJoinedCleaned.length > 0
+            ? 'rephraseBlocks(clean)'
+            : 'fallbackDots',
+  });
+}
 
-      // ✅ ここが本丸：保存本文と meta.extra.finalAssistantText を同期（“……”残存防止）
-      meta.extra = {
-        ...(meta.extra ?? {}),
-        finalAssistantText: contentForPersist,
-        finalAssistantTextCandidate: (meta.extra as any)?.finalAssistantTextCandidate ?? contentForPersist,
-      };
 
-      const saved = await persistAssistantMessageToIrosMessages({
-        supabase,
-        conversationId,
-        userCode,
-        content: contentForPersist,
-        meta: meta ?? null,
-      });
+// ✅ 保存が失敗/blocked のときだけ短いログ（長くならない）
+if (!saved?.ok || saved?.blocked || !saved?.inserted) {
+  console.error('[IROS/PERSIST][ASSISTANT][NG]', {
+    conversationId,
+    userCode,
+    ok: saved?.ok ?? null,
+    inserted: saved?.inserted ?? null,
+    blocked: saved?.blocked ?? null,
+    reason: saved?.reason ?? null,
+    len: contentForPersist.length,
+    head: contentForPersist.slice(0, 40),
+  });
+}
 
-      // ✅ 保存が失敗/blocked のときだけ短いログ（長くならない）
-      if (!saved?.ok || saved?.blocked || !saved?.inserted) {
-        console.error('[IROS/PERSIST][ASSISTANT][NG]', {
-          conversationId,
-          userCode,
-          ok: saved?.ok ?? null,
-          inserted: saved?.inserted ?? null,
-          blocked: saved?.blocked ?? null,
-          reason: saved?.reason ?? null,
-          len: contentForPersist.length,
-          head: contentForPersist.slice(0, 40),
-        });
-      }
-
-      meta.extra = {
-        ...(meta.extra ?? {}),
-
-        // ✅ UI/DB が参照している finalAssistantText を “保存本文” に同期
-        finalAssistantText: contentForPersist,
-        finalAssistantTextLen: contentForPersist.length,
-        finalAssistantTextCandidate: contentForPersist,
-
-        // ✅ “捏造” をやめて saved をそのまま反映（SoT）
-        persistedAssistantMessage: {
-          ok: Boolean(saved?.ok),
-          inserted: Boolean(saved?.inserted),
-          blocked: Boolean(saved?.blocked),
-          reason: String(saved?.reason ?? ''),
-          len: contentForPersist.length,
-          pickedFrom:
-            !isEffectivelyEmptyText(finalAssistantClean) && finalAssistantClean.length > 0
-              ? 'finalAssistant(clean)'
-              : blocksJoinedCleaned.length > 0
-                ? 'rephraseBlocks(clean)'
-                : 'fallbackDots',
-        },
-      };
+// ✅ “捏造” をやめて saved をそのまま反映（SoT）
+meta.extra = {
+  ...(meta.extra ?? {}),
+  persistedAssistantMessage: {
+    ok: Boolean(saved?.ok),
+    inserted: Boolean(saved?.inserted),
+    blocked: Boolean(saved?.blocked),
+    reason: String(saved?.reason ?? ''),
+    len: contentForPersist.length,
+    pickedFrom:
+      contentForPersist === '……'
+        ? 'fallbackDots'
+        : blocksJoinedCleaned.length > 0 && contentForPersist === blocksJoinedCleaned
+          ? 'rephraseBlocks(clean)'
+          : 'resultObjOrMetaPreferred',
+  },
+};
 
       // training sample
-      const skipTraining = meta?.skipTraining === true || meta?.skip_training === true || meta?.recallOnly === true || meta?.recall_only === true;
+      const skipTraining =
+        meta?.skipTraining === true ||
+        meta?.skip_training === true ||
+        meta?.recallOnly === true ||
+        meta?.recall_only === true;
 
       if (!skipTraining) {
-        const replyText =
-          (typeof (result as any)?.text === 'string' && (result as any).text.trim()) ||
-          (typeof (result as any)?.assistantText === 'string' && (result as any).assistantText.trim()) ||
-          ((result as any).content ?? '');
+        // ✅ 学習サンプルも “確定本文” を使う（result.content が '……' のまま残る事故を避ける）
+        const replyText = contentForPersist;
 
         await saveIrosTrainingSample({
           supabase,
           userCode,
           tenantId,
           conversationId,
-          messageId: null,
+          messageId: saved?.messageId ?? null,
           inputText: userTextClean,
           replyText,
           meta,
@@ -1069,7 +1095,8 @@ const stripInternalLines = (s0: string) => {
         meta.extra = {
           ...(meta.extra ?? {}),
           trainingSkipped: true,
-          trainingSkipReason: meta?.skipTraining === true || meta?.skip_training === true ? 'skipTraining' : 'recallOnly',
+          trainingSkipReason:
+            meta?.skipTraining === true || meta?.skip_training === true ? 'skipTraining' : 'recallOnly',
         };
       }
 
@@ -1257,7 +1284,7 @@ async function applyRenderEngineIfEnabled(params: {
       const sanitized = sanitizeFinalContent(renderedText);
 
       const speechActUpper = String((patched.meta as any)?.extra?.speechAct ?? (patched.meta as any)?.speechAct ?? '').toUpperCase();
-      const isSilence = speechActUpper === 'SILENCE';
+      const isSilence = false; // SILENCE廃止
 
       const nextContent = isSilence
         ? sanitized.text.trimEnd()
@@ -1370,64 +1397,117 @@ async function applyRenderEngineIfEnabled(params: {
       if (mergedHead && !String(extraForRender?.rephraseHead ?? '').trim()) extraForRender.rephraseHead = mergedHead;
     }
 
-    // ✅ IRの基準本文（短文化ガード用）を renderGateway に渡す
-    {
-      const mergedFinal = String(extraSoT?.finalAssistantText ?? '').trim() || String(extraSoT?.finalAssistantTextCandidate ?? '').trim() || '';
-      if (mergedFinal && !String(extraForRender?.finalAssistantText ?? '').trim()) {
-        extraForRender.finalAssistantText = mergedFinal;
-      }
+// ✅ IRの基準本文（短文化ガード用）を renderGateway に渡す
+{
+  const mergedFinal =
+    String(extraSoT?.finalAssistantText ?? '').trim() ||
+    String(extraSoT?.finalAssistantTextCandidate ?? '').trim() ||
+    '';
+  if (mergedFinal && !String(extraForRender?.finalAssistantText ?? '').trim()) {
+    extraForRender.finalAssistantText = mergedFinal;
+  }
 
-      const mergedResolved = String(extraSoT?.resolvedText ?? '').trim();
-      if (mergedResolved && !String(extraForRender?.resolvedText ?? '').trim()) {
-        extraForRender.resolvedText = mergedResolved;
-      }
-    }
+  const mergedResolved = String(extraSoT?.resolvedText ?? '').trim();
+  if (mergedResolved && !String(extraForRender?.resolvedText ?? '').trim()) {
+    extraForRender.resolvedText = mergedResolved;
+  }
+}
 
-    const keysToCarry = ['rephraseBlocksAttached', 'rephraseAttachSkipped', 'rephraseLLMApplied', 'rephraseApplied', 'rephraseReason'] as const;
-    for (const k of keysToCarry) {
-      if ((extraForRender as any)[k] == null && (extraSoT as any)?.[k] != null) (extraForRender as any)[k] = (extraSoT as any)[k];
-    }
+const keysToCarry = ['rephraseBlocksAttached', 'rephraseAttachSkipped', 'rephraseLLMApplied', 'rephraseApplied', 'rephraseReason'] as const;
+for (const k of keysToCarry) {
+  if ((extraForRender as any)[k] == null && (extraSoT as any)?.[k] != null) (extraForRender as any)[k] = (extraSoT as any)[k];
+}
 
-    console.info('[DEBUG/RENDERGW_CALL]', {
-      baseTextLen: typeof baseText === 'string' ? baseText.length : null,
-      baseTextHead: typeof baseText === 'string' ? baseText.slice(0, 80) : null,
-      renderEngine: (extraForRender as any)?.renderEngine ?? null,
-      hasRephraseBlocks: Array.isArray((extraForRender as any)?.rephraseBlocks),
-      rephraseBlocksLen: Array.isArray((extraForRender as any)?.rephraseBlocks) ? (extraForRender as any).rephraseBlocks.length : null,
-      rephraseBlocksHead:
-        Array.isArray((extraForRender as any)?.rephraseBlocks) && (extraForRender as any).rephraseBlocks[0]
-          ? String((extraForRender as any).rephraseBlocks[0]?.text ?? '').slice(0, 120)
-          : null,
-      hasRephraseObj: !!(extraForRender as any)?.rephrase,
-      rephraseObjKeys: (extraForRender as any)?.rephrase ? Object.keys((extraForRender as any).rephrase) : null,
-    });
+// ✅ “……” で止まらないための注釈付きログ
+{
+  const hasRephraseBlocks = Array.isArray((extraForRender as any)?.rephraseBlocks) && (extraForRender as any).rephraseBlocks.length > 0;
+  const baseTextLen = typeof baseText === 'string' ? baseText.length : null;
+  const baseTextHeadRaw = typeof baseText === 'string' ? baseText.slice(0, 80) : null;
 
-    const out = renderGatewayAsReply({ text: baseText, extra: extraForRender, maxLines }) as any;
+  console.info('[DEBUG/RENDERGW_CALL]', {
+    baseTextLen: typeof baseText === 'string' ? baseText.length : null,
+    baseTextHead:
+    typeof baseText === 'string'
+      ? (Array.isArray((extraForRender as any)?.rephraseBlocks) && (extraForRender as any).rephraseBlocks.length > 0
+          ? '(base omitted: rephraseBlocks present)'
+          : baseText.slice(0, 80))
+      : null,
 
-    console.info('[DEBUG/RENDERGW_OUT]', {
-      outType: typeof out,
-      outKeys: out && typeof out === 'object' ? Object.keys(out) : null,
-      contentType: typeof out?.content,
-      contentLen: typeof out?.content === 'string' ? out.content.length : null,
-      contentHead: typeof out?.content === 'string' ? out.content.slice(0, 120) : null,
-      meta: out?.meta ?? null,
-    });
 
-    const outText = String((typeof out === 'string' ? out : out?.text ?? out?.content ?? out?.assistantText ?? baseText) ?? '').trimEnd();
-    const sanitized = sanitizeFinalContent(outText);
+    // ✅ “……” が見えても rephraseBlocks があれば正常（本文は blocks から復元される）
+    baseLooksEmptyLike:
+      typeof baseText === 'string'
+        ? (() => {
+            const t = baseText.trim();
+            return t === '' || t === '…' || t === '……' || t === '...' || t === '..' || t.length <= 2;
+          })()
+        : null,
 
-    resultObj.content = sanitized.text.trimEnd();
-    (resultObj as any).assistantText = sanitized.text.trimEnd();
-    (resultObj as any).text = sanitized.text.trimEnd();
+    renderEngine: (extraForRender as any)?.renderEngine ?? null,
 
-    meta.extra = {
-      ...(meta?.extra ?? {}),
-      renderEngineApplied: true,
-      renderEngineKind: 'V2',
-      headerStripped: sanitized.removed.length ? sanitized.removed : null,
-      renderV2PickedFrom: out?.pickedFrom ?? null,
-      renderV2OutLen: sanitized.text.length,
-    };
+    hasRephraseBlocks: Array.isArray((extraForRender as any)?.rephraseBlocks),
+    rephraseBlocksLen: Array.isArray((extraForRender as any)?.rephraseBlocks) ? (extraForRender as any).rephraseBlocks.length : null,
+    rephraseBlocksHead:
+      Array.isArray((extraForRender as any)?.rephraseBlocks) && (extraForRender as any).rephraseBlocks[0]
+        ? String((extraForRender as any).rephraseBlocks[0]?.text ?? '').slice(0, 120)
+        : null,
+
+    // ✅ 注釈：これが true なら “……” は問題ない
+    note_okEvenIfBaseIsDots:
+      Array.isArray((extraForRender as any)?.rephraseBlocks) && (extraForRender as any).rephraseBlocks.length > 0
+        ? true
+        : false,
+
+    hasRephraseObj: !!(extraForRender as any)?.rephrase,
+    rephraseObjKeys: (extraForRender as any)?.rephrase ? Object.keys((extraForRender as any).rephrase) : null,
+  });
+
+}
+
+const out = renderGatewayAsReply({ text: baseText, extra: extraForRender, maxLines }) as any;
+
+// ✅ “……はfallbackで、rephraseBlocks採用なら正常” をログに明示
+{
+  const pickedFrom = String(out?.meta?.pickedFrom ?? out?.pickedFrom ?? '');
+  const outContent = typeof out?.content === 'string' ? out.content : null;
+  const baseTextHeadRaw = typeof baseText === 'string' ? baseText.slice(0, 2) : '';
+  const baseWasDots = baseTextHeadRaw === '……' || baseTextHeadRaw === '...';
+  const okByRephrase = pickedFrom === 'rephraseBlocks';
+
+  console.info('[DEBUG/RENDERGW_OUT]', {
+    outType: typeof out,
+    outKeys: out && typeof out === 'object' ? Object.keys(out) : null,
+    contentType: typeof out?.content,
+    contentLen: outContent ? outContent.length : null,
+    contentHead: outContent ? outContent.slice(0, 120) : null,
+
+    // ✅ meta全部は重い＆“……”論争の火種になるので要点だけ
+    pickedFrom: pickedFrom || null,
+    baseTextWasFallbackDots: Boolean(baseWasDots),
+    note: okByRephrase ? 'OK: baseText is fallback; output picked from rephraseBlocks' : null,
+  });
+}
+
+const outText = String((typeof out === 'string' ? out : out?.text ?? out?.content ?? out?.assistantText ?? baseText) ?? '').trimEnd();
+const sanitized = sanitizeFinalContent(outText);
+
+resultObj.content = sanitized.text.trimEnd();
+(resultObj as any).assistantText = sanitized.text.trimEnd();
+(resultObj as any).text = sanitized.text.trimEnd();
+
+meta.extra = {
+  ...(meta?.extra ?? {}),
+  renderEngineApplied: true,
+  renderEngineKind: 'V2',
+  headerStripped: sanitized.removed.length ? sanitized.removed : null,
+  renderV2PickedFrom: out?.pickedFrom ?? out?.meta?.pickedFrom ?? null,
+  renderV2OutLen: sanitized.text.length,
+
+  // ✅ ここが今回の“注釈”（UI/解析側で見ても「問題なし」が分かる）
+  renderV2FallbackWasDots: typeof baseText === 'string' && baseText.trim() === '……',
+  renderV2OkByRephrase: String(out?.meta?.pickedFrom ?? out?.pickedFrom ?? '') === 'rephraseBlocks',
+};
+
 
     // ✅ SoTを返す（render input は返さない）
     return { meta, extraForHandle: extraSoT };

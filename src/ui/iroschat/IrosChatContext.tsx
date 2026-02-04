@@ -270,15 +270,10 @@ function normalizeForSend(raw: string): { text: string; blockedReason: string | 
 
   if (!stripped) return { text: '', blockedReason: 'empty' };
 
-  // 省略記号だけ
-  if (stripped === '…' || stripped === '……' || /^…+$/.test(stripped)) {
-    return { text: '', blockedReason: 'ellipsis' };
-  }
-
-  // ドットだけ
-  if (stripped === '...' || /^\.{3,}$/.test(stripped)) {
-    return { text: '', blockedReason: 'dots' };
-  }
+  // ✅ 「無言なし」方針：
+  // 省略記号だけ / ドットだけ でも “送信は許可” する。
+  // （空扱いにするとサーバ側の SILENCE/FORWARD 連鎖や UI 側のブロックが起きやすい）
+  // どうしても誤送信が気になるなら、UIで警告表示に留める（blockedにしない）。
 
   return { text: stripped, blockedReason: null };
 }
