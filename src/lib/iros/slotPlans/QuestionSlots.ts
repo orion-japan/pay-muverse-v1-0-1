@@ -97,13 +97,24 @@ export function shouldUseQuestionSlots(userText: string): boolean {
  * - 固定文（ILINE）なし
  * - “方法の羅列” に行かないための観測フレームだけを渡す
  */
-export function buildQuestionSlots(args: { userText: string; contextText?: string }): IrosSlot[] {
+export function buildQuestionSlots(
+  args: { userText: string; contextText?: string; laneKey?: 'IDEA_BAND' | 'T_CONCRETIZE' }
+): IrosSlot[] {
   const userText = norm(args.userText);
   const contextText = norm(args.contextText ?? '');
 
+  // 🚫 T_CONCRETIZE では QuestionSlots を使わない
+  if (args.laneKey === 'T_CONCRETIZE') {
+    return [];
+  }
+
   // ✅ topic は基本 contextText から取る（userText が問いだけの場合は採用しない）
   const topicCandidate =
-    contextText && !isHowToOnly(contextText) ? contextText : !isHowToOnly(userText) ? userText : '';
+    contextText && !isHowToOnly(contextText)
+      ? contextText
+      : !isHowToOnly(userText)
+      ? userText
+      : '';
   const topicLine = topicCandidate ? clampLen(stripQMarks(topicCandidate), 120) : '';
 
   const seedLines = pickSeedLines(topicLine);
@@ -121,24 +132,15 @@ export function buildQuestionSlots(args: { userText: string; contextText?: strin
       content: m('SHIFT', {
         kind: 'howto_to_observation',
         rules: {
-          // 禁止：方法の列挙・チェックリスト・断定指示
           no_checklist: true,
           no_step_by_step: true,
           no_imperative: true,
-
-          // ✅ 質問癖を切る（疑問文/疑問詞/？を禁止）
           no_questions: true,
           forbid_question_marks: true,
-          forbid_interrogatives: true, // 何が/どんな/なぜ/どうして 等の誘発を抑止
-
-          // 必須：状況に噛む
+          forbid_interrogatives: true,
           stay_on_topic: true,
           use_concrete_words: true,
-
-          // 文字数（短文弾き回避。内容追加ではなく“言い切りを増やす”方向で）
           min_chars: 90,
-
-          // テンプレ抑止
           avoid_meta_talk: true,
           avoid_generic_cheer: true,
           avoid_hedge_loops: true,

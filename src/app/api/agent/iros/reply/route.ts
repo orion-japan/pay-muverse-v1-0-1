@@ -689,16 +689,21 @@ export async function POST(req: NextRequest) {
 
         const isIT = upperMode === 'IT' || Boolean((meta as any)?.extra?.renderReplyForcedIT);
 
-        const applied = await applyRenderEngineIfEnabled({
-          enableRenderEngine,
-          isIT,
-          conversationId,
-          userCode,
-          userText: userTextClean,
-          extraForHandle: extraSoT ?? null,
-          meta,
-          resultObj: result as any,
-        });
+// ✅ 3) 呼び出し側：chatHistory をそのまま渡す
+const applied = await applyRenderEngineIfEnabled({
+  enableRenderEngine,
+  isIT,
+  conversationId,
+  userCode,
+  userText: userTextClean,
+  extraForHandle: extraSoT ?? null,
+  meta,
+  resultObj: result as any,
+
+  // ✅ 追加
+  historyMessages: Array.isArray(chatHistory) ? chatHistory : null,
+});
+
 
         meta = applied.meta;
         // ✅ SoT の参照を維持しつつ、返ってきた extra を SoT に差し替える
@@ -971,34 +976,48 @@ const resultObjFinalRaw =
 
 const blocksJoinedCleaned = stripInternalLines(blocksJoined);
 
-// ✅ 正本：resultObj.content（＝返す本文）
-// ✅ fallback：rephraseBlocks(clean) → meta.extra(確定本文) → 最終手段 '……'
-const contentForPersist = (() => {
-  const fromResultObj = stripInternalLines(
-    String((result as any)?.content ?? (result as any)?.assistantText ?? (result as any)?.text ?? '').trimEnd(),
-  );
+
+let contentForPersist = (() => {
+  // ✅ 正本：resultObj.content（＝返す本文）
+  const fromResultObj = stripInternalLines(resultObjFinalRaw);
   if (!isEffectivelyEmptyText(fromResultObj) && fromResultObj.length > 0) return fromResultObj;
 
-  // ✅ rephraseBlocks があるなら、meta.extra.finalAssistantText(短文化)より優先
+  // ✅ rephraseBlocks(clean) があるなら採用（表示側に寄せる）
   if (blocksJoinedCleaned.length > 0) return blocksJoinedCleaned;
 
   const fromMeta = stripInternalLines(displayPreferredRaw);
   if (!isEffectivelyEmptyText(fromMeta) && fromMeta.length > 0) return fromMeta;
 
+  // fallback（必要なら残す）
   const fromResultFallback = stripInternalLines(resultObjFinalRaw);
   if (!isEffectivelyEmptyText(fromResultFallback) && fromResultFallback.length > 0) return fromResultFallback;
 
   return '……';
 })();
 
+// ✅ P0: ECHO止血（assistant保存本文が「今回のユーザー入力」と完全一致なら、rephraseBlocks を優先）
+const userEcho = String(userTextClean ?? '').trim();
+const persistCandidate = String(contentForPersist).trim();
+
+if (userEcho && persistCandidate && persistCandidate === userEcho) {
+  if (blocksJoinedCleaned.length > 0 && blocksJoinedCleaned.trim() !== persistCandidate) {
+    contentForPersist = blocksJoinedCleaned;
+  }
+}
 
 // ✅ 保存本文と meta.extra.finalAssistantText を同期（UI/DB の “正本” を揃える）
 meta.extra = {
   ...(meta.extra ?? {}),
+
+  // ✅ single-writer guard を確実に通す（route.ts が唯一の writer）
+  persistedByRoute: true,
+  persistAssistantMessage: false,
+
   finalAssistantText: contentForPersist,
   finalAssistantTextLen: contentForPersist.length,
   finalAssistantTextCandidate: (meta.extra as any)?.finalAssistantTextCandidate ?? contentForPersist,
 };
+
 
 // ✅ DB保存（最終確定本文）
 const saved = await persistAssistantMessageToIrosMessages({
@@ -1161,18 +1180,33 @@ meta.extra = {
 // - 返り値は必ず { meta, extraForHandle } に統一
 // - rephraseBlocks の生成（fallback）は “ここだけ” で行う
 // =========================================================
+// ✅ 1) 型に historyMessages を追加
 async function applyRenderEngineIfEnabled(params: {
   enableRenderEngine: boolean;
   isIT: boolean;
   meta: any;
   extraForHandle: any;
   resultObj: any;
-  conversationId: string; // ✅ null にしない
-  userCode: string;       // ✅ null にしない
-  userText: string;       // ✅ null にしない
-}): Promise<{ meta: any; extraForHandle: any }> {
+  conversationId: string;
+  userCode: string;
+  userText: string;
 
-  let { enableRenderEngine, isIT, meta, extraForHandle, resultObj, conversationId, userCode, userText } = params;
+  // ✅ 追加：route.ts 側で持ってる履歴を渡す
+  historyMessages?: unknown[] | null;
+}): Promise<{ meta: any; extraForHandle: any }> {
+  // ✅ 2) destructuring に historyMessages を追加
+  let {
+    enableRenderEngine,
+    isIT,
+    meta,
+    extraForHandle,
+    resultObj,
+    conversationId,
+    userCode,
+    userText,
+    historyMessages,
+  } = params;
+
 
 
   // =========================
@@ -1366,10 +1400,14 @@ async function applyRenderEngineIfEnabled(params: {
       userText: typeof userText === 'string' ? userText : String(userText ?? ''),
       meta,
       extraMerged: extraSoT,
-      // 任意（無くても動く）
+
+      // ✅ ここは params から渡されたものを使う（chatHistory は参照しない）
+      historyMessages: Array.isArray(historyMessages) ? historyMessages : undefined,
+
       traceId: String((meta as any)?.extra?.traceId ?? (meta as any)?.traceId ?? '').trim() || null,
       effectiveMode: (extraSoT as any)?.effectiveMode ?? (meta as any)?.extra?.effectiveMode ?? null,
     });
+
 
     // ✅ 返り値がある実装にも対応（voidでもOK）
     if (attachRes && typeof attachRes === 'object') {

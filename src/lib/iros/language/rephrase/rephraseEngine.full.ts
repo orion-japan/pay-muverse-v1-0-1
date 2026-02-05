@@ -168,29 +168,36 @@ function buildInternalPackText(args: {
           ? obsSummary
           : '';
 
+  // ✅ internalPack に userText を“全文で入れる”と復唱/一般化逃げを誘発する
+  // → 露出は短い head のみに制限して、素材としては保持する
+  const head = (s: string, n = 80) => {
+    const t = String(s ?? '').replace(/\r\n/g, '\n').trim();
+    return t.length <= n ? t : t.slice(0, n) + '…';
+  };
+
   const obsCard = [
-    '【観測ルール（重要 / 背景禁止）】',
-    '- obsPick は「このターンの userText（=いまの発話）から取れた観測」だけ。seedDraft/過去文/ONE_POINT/背景は材料にしない。',
-    '- seedDraft の文言（例:「とても大きな質問なので…」）を本文に再利用するのは禁止。引用・再掲・言い換えも禁止。',
-    '- 長期履歴・Q遷移・深度・IT/T・Anchor・RETURN 等の“背景”はここでは使わない（混ぜない）。',
+    '【観測の扱い方（ガイド）】',
+    '- obsPick は、基本的に「このターンの userText（=いまの発話）」から拾える観測を使う。',
+    '- seedDraft や過去文は、必要があれば背景理解として参照してよいが、そのまま本文に再掲する必要はない。',
+    '- 長期履歴・Q遷移・深度・IT/T・Anchor などの内部情報は、説明として前面に出さず、文章の自然さを優先する。',
     '',
-    `obsUser=${obsUser || '(none)'}`,
-    `obsOnePoint=${obsOnePoint || '(none)'}`,
-    `obsSummary=${obsSummary || '(none)'}`,
-    `obsPick=${obsPick || '(none)'}`,
+    `obsUserHead=${obsUser ? head(obsUser, 120) : '(none)'}`,
+    `obsOnePointHead=${obsOnePoint ? head(obsOnePoint, 120) : '(none)'}`,
+    `obsSummaryHead=${obsSummary ? head(obsSummary, 120) : '(none)'}`,
+    `obsPickHead=${obsPick ? head(obsPick, 120) : '(none)'}`,
     '',
-    '【obsPick の入れ方（必須）】',
-    '- 出力本文の冒頭〜中盤に、obsPick の語彙を含む「短い1文」を必ず入れる。',
-    '- その1文は “見出し/タグ” を付けない（例：今の状況：/焦点：/ワンポイント：/入口： などは禁止）。',
-    '- その1文は「説明」ではなく、観測をそのまま言い切る（余計な一般論を足さない）。',
+    '【obsPick の使い方】',
+    '- 出力本文の冒頭〜中盤に、obsPick に含まれる語彙やニュアンスを自然に織り込む。',
+    '- 見出しやタグを付ける必要はなく、会話文として自然な1文で十分。',
+    '- 説明しすぎず、「今そう見えている」というトーンで言い切ってよい。',
     '',
-    '【禁止（失敗判定）】',
-    '- 推量語で濁す：かもしれません / 〜と思います / 〜でしょう / 可能性 / もし',
-    '- 便利テンプレ：ことがある / 一つの手 / 自然に / きっかけになる / 整理してみると / 考えてみると',
-    '- 見出しラベル：今の状況：/ 今ここで扱う焦点：/ まず一点：/ ワンポイント：/ 入口：',
+    '【文体の目安】',
+    '- 推量表現は使ってもよいが、連続させず、主文はなるべく断定寄りにする。',
+    '- 一般論や励ましテンプレは控えめにし、具体的な語感・場面感を優先する。',
     '',
-    '【観測が無い場合】',
-    '- 観測が無い場合のみ「仮置き」で1文に留める（推量で埋めない）。',
+    '【観測が弱い／無い場合】',
+    '- 無理に埋めず、短い仮置きの1文で留めてよい。',
+    '- その場合も、問い返しや講義調にはせず、静かな一言でまとめる。',
   ].join('\n');
 
   const flowDigest = String(args.flowDigest ?? '').trim();
@@ -1381,7 +1388,13 @@ function shouldRejectWarnToSeedFactory(args: {
 // FINAL用：slotを保ったまま “会話本文” を作る
 // ---------------------------------------------
 export async function rephraseSlotsFinal(extracted: ExtractedSlots, opts: RephraseOptions): Promise<RephraseResult> {
-  const debug = ensureDebugFinal(opts.debug);
+  // ✅ opts のトップレベル（conversationId/userCode/traceId）を debug に確実に反映
+  const debug = ensureDebugFinal({
+    ...(opts?.debug ?? {}),
+    traceId: (opts as any)?.traceId ?? (opts as any)?.debug?.traceId ?? null,
+    conversationId: (opts as any)?.conversationId ?? (opts as any)?.debug?.conversationId ?? null,
+    userCode: (opts as any)?.userCode ?? (opts as any)?.debug?.userCode ?? null,
+  } as any);
 
   if (!extracted) {
     logRephraseOk(debug, [], '', 'NO_SLOTS');
@@ -1463,18 +1476,34 @@ const stripInternalMarkersForLock = (s: string) => {
     if (!out.includes(v)) out.push(v);
   };
 
+  // JSONから拾う候補キー（LOCK用：本文系のみ）
+  const PICK_KEYS = [
+    'text',
+    'user',
+    'seed_text',
+    'seedText',
+    'content',
+    'message',
+    'body',
+    'value',
+  ];
+
   for (const line of lines) {
     const t0 = String(line ?? '');
     const t = t0.trim();
     if (!t) continue;
 
-    // 非内部行（= [[ILINE]] を素で書いている等）はそのまま残す
+    // 非内部行（= ユーザーが素で書いた本文等）はそのまま残す
     if (!INTERNAL_LINE_MARKER.test(t)) {
       pushUnique(t0.trim());
       continue;
     }
 
-    // 内部行：JSONから「本文っぽい字段」だけ抜く
+    // ✅ NEXT_HINT は LOCK の材料にしない（本文ではなく内部ヒント）
+    // ここで確実に落とすことで、LOCK_SOURCE への混入を止める
+    if (/^@NEXT_HINT\b/.test(t)) continue;
+
+    // 内部行：JSON部分を抽出
     const i0 = t.indexOf('{');
     const i1 = t.lastIndexOf('}');
     if (i0 < 0 || i1 <= i0) continue;
@@ -1488,20 +1517,35 @@ const stripInternalMarkersForLock = (s: string) => {
     }
     if (!obj || typeof obj !== 'object') continue;
 
-    const marker = (t.match(/^@([A-Z_]+)/i)?.[1] ?? '').toUpperCase();
+    // ✅ ILINEタグが含まれる場合だけ、本文候補として優先的に保持
+    const dump = JSON.stringify(obj);
+    const hasILineTag = /\[\[ILINE\]\]/.test(dump) || /\[\[\/ILINE\]\]/.test(dump);
 
-    const cand =
-      (marker === 'SEED_TEXT' && typeof (obj as any).text === 'string' && (obj as any).text) ||
-      (marker === 'OBS' && typeof (obj as any).user === 'string' && (obj as any).user) ||
-      (marker === 'SHIFT' && typeof (obj as any).seed_text === 'string' && (obj as any).seed_text) ||
-      (typeof (obj as any).text === 'string' && (obj as any).text) ||
-      (typeof (obj as any).seed_text === 'string' && (obj as any).seed_text) ||
-      (typeof (obj as any).user === 'string' && (obj as any).user) ||
-      (typeof (obj as any).content === 'string' && (obj as any).content) ||
-      (typeof (obj as any).message === 'string' && (obj as any).message) ||
-      null;
+    // 本文候補を拾う（LOCK用途なので「ヒント系」は拾わない）
+    let pickedAny = false;
 
-    if (typeof cand === 'string' && cand.trim()) pushUnique(cand.trim());
+    for (const k of PICK_KEYS) {
+      const v = (obj as any)?.[k];
+      if (typeof v === 'string' && v.trim()) {
+        // ILINEタグがあるならそのまま。無い場合は本文っぽいキーのみ採用。
+        pushUnique(v.trim());
+        pickedAny = true;
+      }
+    }
+
+    // ILINEタグがあるのに上で拾えてない場合は、文字列っぽい値を浅く探索して救済
+    if (hasILineTag && !pickedAny) {
+      for (const [k, v] of Object.entries(obj)) {
+        if (typeof v === 'string' && v.trim()) {
+          if (/\[\[ILINE\]\]/.test(v) || /\[\[\/ILINE\]\]/.test(v)) {
+            pushUnique(v.trim());
+            pickedAny = true;
+          }
+        }
+      }
+    }
+
+    // それでも拾えない内部行は無視（LOCKに不要）
   }
 
   return out.join('\n').trim();
@@ -1612,9 +1656,13 @@ const stripInternalMarkersForLock = (s: string) => {
       if (k === 'SEED_TEXT') return true;
 
       if (k === 'SHIFT') return true;
-      if (k === 'NEXT') return true;
+
+      // 🚫 NEXT は「内部ヒント」なので writer 素材に混ぜない
+      // if (k === 'NEXT') return true;
+
       if (k === 'END') return true;
       if (k === 'ONE_POINT') return true;
+
 
       if (k.startsWith('FLAG_')) return true;
 
@@ -1628,15 +1676,45 @@ const stripInternalMarkersForLock = (s: string) => {
   const mustIncludeRuleText = buildMustIncludeRuleText(recallMust);
 
   // ILINE抽出：slot + userText 両方から拾う（seed 側は内部マーカー除外）
-  const seedForLock = stripInternalMarkersForLock(seedDraftRawAll);
+  const seedForLock = stripInternalMarkersForLock(seedDraftRaw);
 
-  // ✅ seedForLock と userText が同一になるケースがあるため、重複連結を防ぐ
-  const lockParts = [seedForLock, userText]
+  // ✅ seedForLock が userText を “含んでいる” ケースがある（SEED_TEXT が userText を内包する等）
+  //    → その場合に userText を追加連結すると「同文2回」になって LLM がオウム返ししやすい。
+  const seedStr = String(seedForLock ?? '').trim();
+  const userStr = String(userText ?? '').trim();
+
+  const normForDup = (s: string) => {
+    // 既存：軽い正規化（改行は残る）
+    return s.replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+  };
+
+  // ✅ 追加：改行差を潰して「同文」を検出できるようにする
+  const normForDupFlat = (s: string) => {
+    return String(s ?? '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\n+/g, ' ')      // 改行 → スペース
+      .replace(/[ \t]+/g, ' ')   // 連続空白を潰す
+      .trim();
+  };
+
+  const seedNorm = normForDup(seedStr);
+  const userNorm = normForDup(userStr);
+
+  const seedFlat = normForDupFlat(seedStr);
+  const userFlat = normForDupFlat(userStr);
+
+  const seedHasUser =
+    (!!seedNorm && !!userNorm && (seedNorm === userNorm || seedNorm.includes(userNorm))) ||
+    (!!seedFlat && !!userFlat && (seedFlat === userFlat || seedFlat.includes(userFlat)));
+
+
+  // ✅ userText が seed に入っているなら、lockSource は seed のみ（重複防止）
+  const lockParts = seedHasUser ? [seedStr] : [seedStr, userStr]
     .filter((x): x is string => Boolean(String(x ?? '').trim()))
     .map((x) => String(x));
 
-  const lockSourceRaw =
-    lockParts.length === 2 && lockParts[0] === lockParts[1] ? lockParts[0] : lockParts.join('\n');
+  const lockSourceRaw = lockParts.join('\n');
+
 
 
 
@@ -1789,13 +1867,35 @@ const lastTurnsSafe = (() => {
   const flowDigest = readFlowDigest(opts?.userContext ?? null);
   const flowTape = readFlowTape(opts?.userContext ?? null);
 
+  const shiftTextForMode = String((shiftSlot as any)?.text ?? '');
+  const wantsTConcretize =
+    /"kind"\s*:\s*"t_concretize"/.test(shiftTextForMode) || /\bt_concretize\b/.test(shiftTextForMode);
+
+  // ✅ T_CONCRETIZE の“圧”を下げて会話を壊さない（復唱/抽象テンプレ逃げを抑制）
+  const tConcretizeHeader = wantsTConcretize
+    ? [
+        '【T_CONCRETIZE（優先）】',
+        '- 本文は2〜4行まで（読みやすく）。',
+        '- 冒頭でユーザー文をそのまま復唱しない（短く言い換えて言い切る）。',
+        '- “次の一歩”は1つだけ。抽象語で逃げず、具体行動を1つ（例示OK）。',
+        '- 質問は0〜1個まで可（必要なときだけ）。',
+        '- 講義/一般論/人生訓は書かない。',
+        '',
+      ].join('\n')
+    : '';
+
   const systemPrompt =
+    tConcretizeHeader +
     systemPromptForFullReply({
       directTask: isDirectTask,
       itOk,
       band,
       lockedILines,
-    }) + mustIncludeRuleText;
+
+      // ✅ ここが核心：T_CONCRETIZE でも DELIVER にしない（GUIDE_I に落とす）
+      ...(wantsTConcretize ? { personaMode: 'GUIDE_I' as const } : {}),
+    }) +
+    mustIncludeRuleText;
 
   const internalPack = buildInternalPackText({
     metaText,
@@ -1818,6 +1918,7 @@ const lastTurnsSafe = (() => {
   });
 
   const messages = buildFirstPassMessages({ systemPrompt, internalPack, turns: lastTurnsSafe });
+
 
 
   // ログ確認
@@ -2296,7 +2397,13 @@ const lastTurnsSafe = (() => {
     Boolean((opts as any)?.allow?.shortReplyOk) ||
     false;
 
-  const MIN_OK_LEN = isMicroOrGreetingNow ? 0 : inputKindNow === 'chat' ? (shortReplyOk ? 0 : 40) : 80;
+  // ✅ MIN_OK_LEN 制御（shift allow.short_reply_ok 対応）
+  const MIN_OK_LEN =
+    isMicroOrGreetingNow ? 0
+    : shortReplyOk ? 0
+    : inputKindNow === 'chat' ? 40
+    : 80;
+
 
   console.log('[IROS/rephraseEngine][MIN_OK_KIND]', {
     inputKindNow,
@@ -2312,8 +2419,18 @@ const lastTurnsSafe = (() => {
     shiftObjHasAllow: Boolean(shiftObj?.allow),
   });
 
-  const shouldOkTooShortToRetry =
-    !scaffoldActive && !isDirectTask && v?.ok && vLevelPre === 'OK' && candidateLen > 0 && candidateLen < MIN_OK_LEN;
+  const hasAdvanceHint =
+  /NEXT|次の|一歩|やってみる|進める|試す/.test(candidate);
+
+const shouldOkTooShortToRetry =
+  !scaffoldActive &&
+  !isDirectTask &&
+  v?.ok &&
+  vLevelPre === 'OK' &&
+  candidateLen > 0 &&
+  candidateLen < MIN_OK_LEN &&
+  !hasAdvanceHint;
+
 
   if (shouldOkTooShortToRetry) {
     console.warn('[IROS/FLAGSHIP][OK_TOO_SHORT_TO_RETRY]', {
@@ -2583,9 +2700,10 @@ const lastTurnsSafe = (() => {
       .filter(Boolean);
 
     if (lines.length === 0) return true;
-    return lines.every((t) => /^@(?:CONSTRAINTS|OBS|TASK|SHIFT|NEXT|SAFE|ACK|RESTORE|Q|DRAFT)\b/.test(t));
-  };
-
+    return lines.every((t) =>
+      /^@(?:CONSTRAINTS|OBS|TASK|SHIFT|NEXT(?:_HINT)?|SAFE|ACK|RESTORE|Q|DRAFT)\b/.test(t),
+    );
+  }
   const seedDirectiveOnly = seedFromSlots ? isDirectiveOnly(seedFromSlots) : false;
 
   // 既存の prefer 条件に、soft-fatal と directive-only seed 回避を追加

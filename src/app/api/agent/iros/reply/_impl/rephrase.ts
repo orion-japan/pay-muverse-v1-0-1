@@ -466,35 +466,65 @@ export async function maybeAttachRephraseForRenderV2(args: {
     return parts.join(' | ') || null;
   };
 
+  const metaAny: any = meta as any;
+
+  // itx は MemoryState を最優先。無い場合は meta も見る（確実に rephraseEngine に届かせる）
+  const itxStepForCtx =
+    pickStr(memoryStateForCtx?.itxStep) ||
+    pickStr(metaAny?.itx_step) ||
+    pickStr(metaAny?.itxStep) ||
+    null;
+
+  const itxReasonForCtx =
+    pickStr(memoryStateForCtx?.itxReason) ||
+    pickStr(metaAny?.itx_reason) ||
+    pickStr(metaAny?.itxReason) ||
+    null;
+
+  // intentBand は depthStage ではなく「意図帯域」を最優先（例: I2）
+  // 無い場合だけ depthStage 等へフォールバック
+  const intentBandForCtx =
+    pickStr(metaAny?.intentLine?.intentBand) ||
+    pickStr(metaAny?.intent_line?.intentBand) ||
+    pickStr(metaAny?.intentBand) ||
+    pickStr(metaAny?.intent_band) ||
+    pickStr(memoryStateForCtx?.intentBand) ||
+    pickStr(memoryStateForCtx?.intent_band) ||
+    pickStr(memoryStateForCtx?.depthStage) ||
+    pickStr(metaAny?.depth_stage) ||
+    pickStr(metaAny?.depthStage) ||
+    null;
+
+  const tLayerModeActiveForCtx = Boolean(itxStepForCtx && /^T[123]$/u.test(String(itxStepForCtx)));
+
   const userContext = {
     conversation_id: String(conversationId),
 
     // 互換（既存）
     last_state: memoryStateForCtx ?? null,
-    itxStep: memoryStateForCtx?.itxStep ?? null,
-    itxReason: memoryStateForCtx?.itxReason ?? null,
-    intentBand:
-      (memoryStateForCtx?.depthStage ?? null) ||
-      (typeof (meta as any)?.depth_stage === 'string' ? String((meta as any).depth_stage).trim() : null) ||
-      (typeof (meta as any)?.depthStage === 'string' ? String((meta as any).depthStage).trim() : null) ||
-      null,
+    itxStep: itxStepForCtx,
+    itxReason: itxReasonForCtx,
+    intentBand: intentBandForCtx,
+
     flowDigest: buildFlowDigest(),
 
     // ✅ rephraseHistory が最優先で拾う入口
     turns: normalizedHistory.length ? normalizedHistory : undefined,
 
-    // ✅ rephraseEngine.full.ts 側が読むのは ctxPack.*（itOk / intentBand / turns 等）
+    // ✅ rephraseEngine.full.ts 側が読むのは ctxPack.*
     ctxPack: {
       turns: normalizedHistory.length ? normalizedHistory : undefined,
       historyForWriter: normalizedHistory.length ? normalizedHistory : undefined,
 
-      itxStep: memoryStateForCtx?.itxStep ?? null,
-      itxReason: memoryStateForCtx?.itxReason ?? null,
-      intentBand:
-        (memoryStateForCtx?.depthStage ?? null) ||
-        (typeof (meta as any)?.depth_stage === 'string' ? String((meta as any).depth_stage).trim() : null) ||
-        (typeof (meta as any)?.depthStage === 'string' ? String((meta as any).depthStage).trim() : null) ||
-        null,
+      itxStep: itxStepForCtx,
+      itxReason: itxReasonForCtx,
+
+      // rephraseEngine の extractIntentBandFromContext が最優先で拾う
+      intentBand: intentBandForCtx,
+
+      // tLayerHint / tLayerModeActive も明示（itOk/tLayerHint の確実化）
+      tLayerHint: itxStepForCtx,
+      tLayerModeActive: tLayerModeActiveForCtx,
     },
 
     // 互換のため残す

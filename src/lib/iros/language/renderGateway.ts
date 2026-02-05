@@ -1116,6 +1116,8 @@ export function renderGatewayAsReply(args: {
       // ✅ 一本化：rephraseBlocks があれば常に blocks 経由で本文を組む（pickedFrom に依存しない）
       const cleanedBlocks = rephraseBlocks
         .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim())
+        // ✅ 追加：advance計測用の内部ブロックは UI に出さない
+        .filter((t: string) => !t.trimStart().startsWith('@NEXT_HINT'))
         .filter((t: string) => !isBadBlock(t))
         .map((t: string) => stripInternalLabels(t))
         .filter(Boolean)
@@ -1123,6 +1125,7 @@ export function renderGatewayAsReply(args: {
         .map((t: string) => cutAfterIlineAndDropWriterNotes(t))
         .filter(Boolean)
         .map((t: string) => ({ text: t as string }));
+
 
       if (cleanedBlocks.length > 0) {
         blocks = cleanedBlocks;

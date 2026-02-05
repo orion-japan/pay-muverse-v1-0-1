@@ -145,6 +145,7 @@ function judgeRepair(input: ConvEvidenceInput): { ok: boolean; why: string } {
 // 「前進（提案の橋）」条件：
 // - branch が C_BRIDGE / I_BRIDGE、または
 // - NEXT_HINT が出ている（phase11ではadvanceHint常設のため）
+// - ✅ それ以外でも T_CONCRETIZE（SHIFT kind=t_concretize / intent=implement_next_step）があれば「前進」扱い
 // - それ以外は slots 内の“提案/次の一手”の雰囲気を軽く拾う（固定語に依存しない）
 function judgeAdvance(input: ConvEvidenceInput): { ok: boolean; why: string } {
   if (input.branch === 'C_BRIDGE') return { ok: true, why: 'branch=C_BRIDGE' };
@@ -152,6 +153,33 @@ function judgeAdvance(input: ConvEvidenceInput): { ok: boolean; why: string } {
 
   const slots = safeSlots(input);
   if (!slots.length) return { ok: false, why: 'no_slots' };
+
+  // ✅ T_CONCRETIZE を「前進」扱い（口癖テンプレに依存しない）
+  //  - normalChat の SHIFT は '@SHIFT {"kind":"t_concretize","intent":"implement_next_step", ...}' 形式が多い
+  for (const s of slots as any[]) {
+    const key = String(s?.key ?? '');
+    const raw = s?.content ?? s?.text ?? s?.value ?? s?.body ?? null;
+
+    // object 形式が来ても拾えるように（将来の変更に耐える）
+    const objKind =
+      raw && typeof raw === 'object' ? String((raw as any)?.kind ?? '') : '';
+    const objIntent =
+      raw && typeof raw === 'object' ? String((raw as any)?.intent ?? '') : '';
+
+    const str = typeof raw === 'string' ? raw : '';
+
+    const hit =
+      objKind === 't_concretize' ||
+      objIntent === 'implement_next_step' ||
+      str.includes('"kind":"t_concretize"') ||
+      str.includes('"intent":"implement_next_step"') ||
+      str.includes('t_concretize') ||
+      str.includes('implement_next_step') ||
+      (key === 'SHIFT' &&
+        (str.includes('t_concretize') || str.includes('implement_next_step')));
+
+    if (hit) return { ok: true, why: 'shift:t_concretize' };
+  }
 
   // ✅ Phase11: NEXT_HINT(mode=advance_hint) を「前進」として正式にカウント
   for (const s of slots) {
@@ -176,6 +204,7 @@ function judgeAdvance(input: ConvEvidenceInput): { ok: boolean; why: string } {
 
   return { ok: false, why: 'no_advance_hint' };
 }
+
 
 export function computeConvEvidence(input: ConvEvidenceInput): ConvEvidence {
   const u = judgeUnderstand(input);

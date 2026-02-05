@@ -91,6 +91,36 @@ function safeLaneKey(v: unknown): LaneKey {
   return v === 'T_CONCRETIZE' ? 'T_CONCRETIZE' : 'IDEA_BAND';
 }
 
+// ✅ Phase11: advance判定のための “橋” を必ず出す
+// - evidenceLog.ts は key==='NEXT' または content.startsWith('@NEXT_HINT') を検出し、
+//   さらに mode==='advance_hint' を拾えれば advance=1 になる。
+function buildNextHintSlot(args: { userText: string; laneKey?: LaneKey; flowDelta?: string | null }): NormalChatSlot {
+  const laneKey = safeLaneKey(args.laneKey);
+  const delta = args.flowDelta ? String(args.flowDelta) : null;
+
+  // ⚠️ advance 判定専用：
+  // - userText は seed に入れない（重複注入＝同文エコー防止）
+  // - 意味生成は SHIFT / TASK / Q_SLOT 側の seed_text に一任する
+  const hint =
+    laneKey === 'T_CONCRETIZE'
+      ? '次の一手を1つに絞って実行'
+      : '候補を2〜3に並べて選びやすくする';
+
+  return {
+    key: 'NEXT',
+    role: 'assistant',
+    style: 'neutral',
+    content: `@NEXT_HINT ${JSON.stringify({
+      mode: 'advance_hint',
+      laneKey,
+      delta,
+      hint: clamp(hint, 80),
+      // seed_text intentionally omitted
+    })}`,
+  };
+}
+
+
 // --------------------------------------------------
 // minimal detectors（意味判定はしない）
 // --------------------------------------------------
@@ -139,7 +169,7 @@ function buildEnd(): NormalChatSlot[] {
   ];
 }
 
-function buildCompose(userText: string): NormalChatSlot[] {
+function buildCompose(userText: string, laneKey?: LaneKey, flowDelta?: string | null): NormalChatSlot[] {
   const t = norm(userText);
   return [
     {
@@ -167,11 +197,14 @@ function buildCompose(userText: string): NormalChatSlot[] {
         },
       }),
     },
+
+    // ✅ Phase11 advance測定用の橋
+    buildNextHintSlot({ userText, laneKey, flowDelta }),
   ];
 }
 
 // ✅ clarify：テンプレ自然文を出さない。LLMに “意味に答える” を許可するだけ。
-function buildClarify(userText: string): NormalChatSlot[] {
+function buildClarify(userText: string, laneKey?: LaneKey, flowDelta?: string | null): NormalChatSlot[] {
   const contracts = [
     [
       'first_line_must_answer_question_directly',
@@ -203,17 +236,25 @@ function buildClarify(userText: string): NormalChatSlot[] {
         seed_text: clamp(norm(userText), 240),
       }),
     },
+
+    // ✅ Phase11 advance測定用の橋（clarifyでも必ず出す）
+    buildNextHintSlot({ userText, laneKey, flowDelta }),
   ];
 }
 
 // ✅ HowTo/方法質問（QuestionSlots）を normalChat に合わせて「@行だけ」に正規化
-function buildQuestion(userText: string, contextText?: string): NormalChatSlot[] {
-  const slots = buildQuestionSlots({ userText, contextText });
+function buildQuestion(
+  userText: string,
+  contextText?: string,
+  laneKey?: LaneKey,
+  flowDelta?: string | null
+): NormalChatSlot[] {
+  const slots = buildQuestionSlots({ userText, contextText, laneKey });
 
   const seedText = clamp(norm(userText), 240);
   const ctxText = contextText ? clamp(norm(contextText), 240) : null;
 
-  return slots.map((s) => {
+  const mapped: NormalChatSlot[] = slots.map((s) => {
     const raw = String((s as any)?.content ?? '');
 
     const payload: Record<string, unknown> = {
@@ -226,14 +267,37 @@ function buildQuestion(userText: string, contextText?: string): NormalChatSlot[]
       context_text: ctxText,
     };
 
-    return {
+    const style =
+      (String((s as any)?.style ?? 'neutral') as NormalChatSlot['style']) ||
+      'neutral';
+
+    const out: NormalChatSlot = {
       key: String((s as any)?.key ?? 'Q'),
-      role: 'assistant',
-      style: ((s as any)?.style ?? 'neutral') as any,
+      role: 'assistant', // ✅ リテラル固定（string widen防止）
+      style,
       content: m('Q_SLOT', payload),
     };
+
+    return out;
   });
+
+  // 🚑 T_CONCRETIZE で QuestionSlots が空の場合は、必ず具体化SHIFTを補填
+  if (laneKey === 'T_CONCRETIZE' && mapped.length === 0) {
+    mapped.push({
+      key: 'SHIFT',
+      role: 'assistant',
+      style: 'neutral',
+      content: m('SHIFT', {
+        text: buildShiftTConcretize(seedText),
+      }),
+
+    });
+  }
+
+  return mapped;
 }
+
+
 
 // --------------------------------------------------
 // Lane-specific SHIFT builders（自然文禁止）
@@ -336,6 +400,9 @@ function buildFlowReply(args: {
       style: 'neutral',
       content: shift,
     },
+
+    // ✅ Phase11 advance測定用の橋（通常フローでも必ず出す）
+    buildNextHintSlot({ userText: t, laneKey, flowDelta: delta }),
   ];
 }
 
@@ -357,7 +424,7 @@ export function buildNormalChatSlotPlan(args: {
 }): NormalChatSlotPlan {
   const laneKey = safeLaneKey(args.laneKey);
 
-  const stamp = `normalChat@lane:${laneKey}@no-seed-text+random-hints+questionSlots`;
+  const stamp = `normalChat@lane:${laneKey}@no-seed-text+random-hints+questionSlots+nextHint`;
   const userText = norm(args.userText);
 
   const recentRaw = Array.isArray(args.context?.recentUserTexts) ? args.context!.recentUserTexts! : [];
@@ -374,6 +441,8 @@ export function buildNormalChatSlotPlan(args: {
     flow = { delta: 'FORWARD' };
   }
 
+  const flowDelta = flow?.delta ? String(flow.delta) : null;
+
   let reason = 'flow';
   let slots: NormalChatSlot[] = [];
 
@@ -385,13 +454,13 @@ export function buildNormalChatSlotPlan(args: {
     slots = buildEnd();
   } else if (shouldUseQuestionSlots(userText)) {
     reason = 'questionSlots';
-    slots = buildQuestion(userText, lastUserText ?? undefined);
+    slots = buildQuestion(userText, lastUserText ?? undefined, laneKey, flowDelta);
   } else if (isClarify(userText)) {
     reason = 'clarify';
-    slots = buildClarify(userText);
+    slots = buildClarify(userText, laneKey, flowDelta);
   } else if (isCompose(userText)) {
     reason = 'compose';
-    slots = buildCompose(userText);
+    slots = buildCompose(userText, laneKey, flowDelta);
   } else {
     const d = flow?.delta ? String(flow.delta) : 'FORWARD';
     reason = `flow:${d}`;

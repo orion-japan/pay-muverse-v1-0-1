@@ -1069,6 +1069,20 @@ const speechAllowLLM =
 
 const isSilence = speechAct === '無言アクト' || speechAllowLLM === false;
 
+// ✅ framePlan 由来の slots/policy を fallback 判定の前に反映する
+// - slotPlan が未設定/空のときでも、framePlan があるなら fallback を誤発火させない
+{
+  const fpSlots = (meta as any)?.framePlan?.slots;
+  if ((!Array.isArray(slotsArr) || slotsArr.length === 0) && Array.isArray(fpSlots) && fpSlots.length > 0) {
+    slotsArr = fpSlots;
+  }
+
+  const fpPolicy = (meta as any)?.framePlan?.slotPlanPolicy;
+  if ((!slotPlanPolicy || String(slotPlanPolicy).trim().length === 0) && typeof fpPolicy === 'string' && fpPolicy.trim()) {
+    slotPlanPolicy = fpPolicy.trim();
+  }
+}
+
 
     // 4) 空判定
     const hasText = String(text ?? '').trim().length > 0;
@@ -1285,6 +1299,36 @@ if (!isIrDiagnosisTurn_here) {
   // 5) fallback（normalChat）
   // - slots が空 or policy が空 のときだけ
   // - counsel で埋まっていれば実行しない
+
+  // ✅ seedFromFramePlan: framePlan が持つ slots/policy を slotPlan 側へ反映してから fallback 判定する
+  {
+    const fpSlots = (meta as any)?.framePlan?.slots;
+    const fpPolicy = (meta as any)?.framePlan?.slotPlanPolicy;
+
+    const fpSlotsOk = Array.isArray(fpSlots) && fpSlots.length > 0;
+    const fpPolicyOk = typeof fpPolicy === 'string' && fpPolicy.trim().length > 0;
+
+    // seed（空のときだけ埋める）
+    if (fpSlotsOk && (!Array.isArray(slotsArr) || slotsArr.length === 0)) {
+      slotsArr = fpSlots as any[];
+    }
+    if (fpPolicyOk && (!slotPlanPolicy || String(slotPlanPolicy).trim().length === 0)) {
+      slotPlanPolicy = fpPolicy.trim();
+    }
+
+    if (typeof process !== 'undefined' && process.env.DEBUG_IROS_FALLBACK_DIAG === '1') {
+      console.log('[IROS/FallbackDiag][seedFromFramePlan]', {
+        fpSlotsOk,
+        fpSlotsLen: fpSlotsOk ? fpSlots.length : 0,
+        fpPolicy: fpPolicyOk ? fpPolicy.trim() : null,
+        slotsLen_afterSeed: Array.isArray(slotsArr) ? slotsArr.length : null,
+        policy_afterSeed: slotPlanPolicy ? String(slotPlanPolicy) : null,
+      });
+    }
+  }
+
+
+
   const slotsEmpty =
     !Array.isArray(slotsArr) || (Array.isArray(slotsArr) && slotsArr.length === 0);
   const policyEmpty =
@@ -1299,6 +1343,23 @@ if (!isIrDiagnosisTurn_here) {
     hasTextForCounsel &&
     !shouldUseCounsel &&
     (forceQuestionSlots || slotsEmpty || policyEmpty);
+
+
+// --- DEBUG: why normalChat fallback fired (no user text) ---
+if (typeof process !== 'undefined' && process.env.DEBUG_IROS_FALLBACK_DIAG === '1') {
+  console.log('[IROS/FallbackDiag][normalChat]', {
+    isSilence,
+    hasTextForCounsel,
+    shouldUseCounsel,
+    forceQuestionSlots,
+    slotsEmpty,
+    policyEmpty,
+    slotsLen_before: Array.isArray(slotsArr) ? slotsArr.length : null,
+    slotPlanPolicy_before: slotPlanPolicy ? String(slotPlanPolicy) : null,
+    shouldFallbackNormalChat,
+  });
+}
+
 
   if (shouldFallbackNormalChat) {
     const lastSummary =

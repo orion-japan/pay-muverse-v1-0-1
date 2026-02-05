@@ -210,17 +210,20 @@ function buildWriterRewriteSeed(args: {
     '  "kind":"semantic_answer",',
     '  "output_contract":[',
     '    "1行目：Yes/No か核心",',
-    '    "2行目：短い理由"',
+    '    "2行目：短い理由",',
+    '    "3行目：次の一歩（1点だけ。計測/確認/選択など具体動作）"',
     '  ],',
     '  "rules":[',
     '    "テンプレ/ボイラープレート禁止",',
     '    "平易な言葉",',
+    '    "次の一歩は必ず1点だけ",',
     '    "質問で逃げない（最大1個まで）"',
     '  ],',
     '  "forbid":["diagnosis","preach","hard_guidance","forced_task"],',
     '  "questions_max":1',
     '}',
   ].join('\n');
+
 
   const obs = user ? `@OBS {"user":${JSON.stringify(user)}}` : '';
   const ctx = ctxLine ? `@CTX ${JSON.stringify(ctxLine)}` : '';
