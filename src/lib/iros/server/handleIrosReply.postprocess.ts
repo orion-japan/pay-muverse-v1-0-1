@@ -595,24 +595,42 @@ export async function postProcessReply(
       });
 
       if (slotText.trim().length === 0) {
+        // ✅ slotText が空でも "……" に落とさない（deterministic）
+        // - 露出OKの核：userText を1行だけ（憶測なし）
+        const coreLine = String(userText ?? '').replace(/\s+/g, ' ').trim();
+
         metaForSave.extra = {
           ...(metaForSave.extra ?? {}),
-          finalTextPolicy: 'SLOTPLAN_EXPECTED__SLOT_TEXT_EMPTY__SKIP_COMMIT',
+          finalTextPolicy: 'SLOTPLAN_EXPECTED__SLOT_TEXT_EMPTY__COMMIT_CORELINE',
           slotPlanPolicy_detected: det.policy,
           slotPlanPolicy_from: det.from,
           slotPlanLen_detected: slotPlanLen,
           hasSlots_detected: hasSlots,
+          coreLine_len: coreLine.length,
         };
 
-        console.log('[IROS/PostProcess] SLOTPLAN_EXPECTED but SLOT_TEXT_EMPTY (skip)', {
+        console.log('[IROS/PostProcess] SLOTPLAN_EXPECTED but SLOT_TEXT_EMPTY (commit coreLine)', {
           conversationId,
           userCode,
           slotPlanPolicy: det.policy,
           slotPlanPolicy_from: det.from,
           slotPlanLen,
           hasSlots,
+          coreLine_len: coreLine.length,
         });
+
+// ✅ 本文を確定（空を許さない）
+// bodyText は const の可能性があるため再代入しない。
+// ここで deterministic に抜けて、後段の "……" 化チェーンを断つ。
+const commitText = coreLine.length > 0 ? coreLine : '（受信しました）';
+
+return {
+  assistantText: commitText,
+  metaForSave,
+};
+
       } else {
+
         // ✅ slotText の浄化（内部マーカー @OBS/@SHIFT 等を落とす）
         // 目的：
         // - cleanedLen=0 → 本文"……"化の根を断つ

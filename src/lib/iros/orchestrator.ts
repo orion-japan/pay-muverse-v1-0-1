@@ -1227,8 +1227,13 @@ function detectCounselCommand(raw: unknown): { forced: boolean; strippedText: st
 // - stage はまず OPEN 固定（永続化は次工程）
 // - 相談モードでなくても、構造が counsel を要求するなら拾う
 // - ✅ テスト用：/counsel コマンドで強制（本文は strip 後を使う）
+// - ✅ 追加：GreetingGate 成立ターンは counsel に落とさない（新規チャット誤爆防止）
 // =========================================================
-const modeRaw = String((meta as any)?.mode ?? '').toLowerCase();
+
+// ※このファイルでは meta ではなく mergedBaseMeta を使う（meta が無いスコープ対策）
+const metaLike: any = (mergedBaseMeta ?? {}) as any;
+
+const modeRaw = String(metaLike?.mode ?? '').toLowerCase();
 const isCounselMode = modeRaw === 'counsel' || modeRaw === 'consult';
 
 // ✅ /counsel（/consult）明示トリガー
@@ -1238,16 +1243,25 @@ const { forced: forcedCounsel, strippedText } = detectCounselCommand(text);
 const textForCounsel = forcedCounsel ? strippedText : text;
 const hasTextForCounsel = String(textForCounsel ?? '').trim().length > 0;
 
-// ✅ “counselに入るか” 判定（強制 → counsel）
+// ✅ GreetingGate 成立ターン判定（ここで counsel 誤爆を遮断）
+const isGreetingTurn =
+  !!metaLike?.gatedGreeting?.ok ||
+  !!metaLike?.extra?.gatedGreeting?.ok ||
+  String(metaLike?.ctxPack?.shortSummary ?? '') === 'greeting' ||
+  String(metaLike?.extra?.ctxPack?.shortSummary ?? '') === 'greeting';
+
+// ✅ この下（QuestionSlots / normalChat fallback）が参照するので outer scope に置く
+let shouldUseCounsel = false;
+
 // ※重要：ir診断ターンは slotPlan を上書きしない（counsel/normalChat/flagReply を通さない）
 const isIrDiagnosisTurn_here =
-  Boolean((meta as any)?.isIrDiagnosisTurn) ||
-  String((meta as any)?.presentationKind ?? '').toLowerCase() === 'diagnosis' ||
+  Boolean(metaLike?.isIrDiagnosisTurn) ||
+  String(metaLike?.presentationKind ?? '').toLowerCase() === 'diagnosis' ||
   String(modeRaw ?? '').toLowerCase() === 'diagnosis';
 
-if (!isIrDiagnosisTurn_here) {
-  const shouldUseCounsel =
-    !!forcedCounsel || isCounselMode || shouldUseCounselByStructure(meta as any, textForCounsel);
+if (!isIrDiagnosisTurn_here && !isGreetingTurn) {
+  shouldUseCounsel =
+    !!forcedCounsel || isCounselMode || shouldUseCounselByStructure(metaLike, textForCounsel);
 
   if (!isSilence && hasTextForCounsel && shouldUseCounsel) {
     const lastSummary =
@@ -1255,27 +1269,27 @@ if (!isIrDiagnosisTurn_here) {
       (ms as any)?.situationSummary ??
       (memoryState as any)?.situation_summary ??
       (memoryState as any)?.situationSummary ??
-      (mergedBaseMeta as any)?.situation_summary ??
-      (mergedBaseMeta as any)?.situationSummary ??
+      metaLike?.situation_summary ??
+      metaLike?.situationSummary ??
       null;
 
-      console.log('[IROS/ORCH][counsel-picked]', {
-        stage: 'OPEN',
-        modeRaw,
-        forcedCounsel,
-        shouldUseCounselByStructure: !forcedCounsel && !isCounselMode,
-        hasText: hasTextForCounsel,
-        isSilence,
-        strippedLen: forcedCounsel ? String(strippedText ?? '').length : null,
-        lastSummary_len: typeof lastSummary === 'string' ? lastSummary.length : null,
-      });
+    console.log('[IROS/ORCH][counsel-picked]', {
+      stage: 'OPEN',
+      modeRaw,
+      forcedCounsel,
+      shouldUseCounselByStructure: !forcedCounsel && !isCounselMode,
+      hasText: hasTextForCounsel,
+      isSilence,
+      strippedLen: forcedCounsel ? String(strippedText ?? '').length : null,
+      lastSummary_len: typeof lastSummary === 'string' ? lastSummary.length : null,
+      isGreetingTurn,
+    });
 
-      const counsel = buildCounselSlotPlan({
-        userText: textForCounsel, // ✅ strip後
-        stage: 'OPEN',
-        lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
-      });
-
+    const counsel = buildCounselSlotPlan({
+      userText: textForCounsel, // ✅ strip後
+      stage: 'OPEN',
+      lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
+    });
 
     const cSlots = (counsel as any).slots;
     const cPolicy = (counsel as any).slotPlanPolicy;
@@ -1285,9 +1299,9 @@ if (!isIrDiagnosisTurn_here) {
     slotPlanPolicy =
       typeof cPolicy === 'string' && cPolicy.trim() ? cPolicy.trim() : 'FINAL';
 
-    // flagReply 既存なら “上書き元” を残す
-    (meta as any).slotPlanFallback =
-      (meta as any).slotPlanFallback ?? 'counsel';
+    // 既存なら “上書き元” を残す
+    (metaLike as any).slotPlanFallback =
+      (metaLike as any).slotPlanFallback ?? 'counsel';
 
     console.log('[IROS/ORCH][counsel-picked]', {
       stage: 'OPEN',
@@ -1295,6 +1309,7 @@ if (!isIrDiagnosisTurn_here) {
       policy: slotPlanPolicy,
     });
   }
+
 
   // 5) fallback（normalChat）
   // - slots が空 or policy が空 のときだけ

@@ -644,11 +644,22 @@ export async function maybeAttachRephraseForRenderV2(args: {
       (res as any)?.extra ??
       null;
 
+    // ✅ blocks が空でも head だけは先に反映しておく（fallbackで user seed を拾わせない）
+    const resHead = String((resExtra as any)?.rephraseHead ?? '').trim();
+    if (resHead) {
+      (extraMerged as any).rephraseHead = String((extraMerged as any).rephraseHead ?? '').trim() || resHead;
+      meta.extra = {
+        ...(meta.extra ?? {}),
+        rephraseHead: String((meta as any)?.extra?.rephraseHead ?? '').trim() || resHead,
+      };
+    }
+
+    // ✅ blocks 探索：res.meta.extra（正本）→ meta/out 互換 → 直下互換
     const blocksAny =
-      resExtra?.rephraseBlocks ??
-      resExtra?.rephrase?.blocks ??
-      resExtra?.rephrase?.rephraseBlocks ??
-      (res as any)?.meta?.blocks ??
+      (resExtra as any)?.rephraseBlocks ??
+      (resExtra as any)?.rephrase?.blocks ??
+      (res as any)?.meta?.extra?.rephraseBlocks ??
+      (res as any)?.meta?.extra?.rephrase?.blocks ??
       (res as any)?.meta?.rephraseBlocks ??
       (res as any)?.meta?.out?.blocks ??
       (res as any)?.meta?.out?.rephraseBlocks ??
@@ -657,6 +668,7 @@ export async function maybeAttachRephraseForRenderV2(args: {
       (res as any)?.out?.blocks ??
       (res as any)?.out?.rephraseBlocks ??
       null;
+
 
     const blocks: any[] | null = Array.isArray(blocksAny) ? blocksAny : null;
 

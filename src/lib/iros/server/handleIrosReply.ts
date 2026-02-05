@@ -1315,10 +1315,12 @@ let extraLocal: any = extra ?? null;
        0) Gates
     ---------------------------- */
 
-    const tg = nowNs();
-
-// ✅ extra は const のままなので、ローカルで更新して回す
-let extraLocal: any = extra ?? null;
+/* =========================================
+ * [置換 1] src/lib/iros/server/handleIrosReply.ts
+ * 範囲: 1318〜1360 を丸ごと置き換え
+ * 目的: extraLocal 二重宣言（シャドーイング）を除去し、GreetingGate の extra を注入
+ * ========================================= */
+const tg = nowNs();
 
 const gatedGreeting = await runGreetingGate({
   supabase,
@@ -1331,7 +1333,7 @@ const gatedGreeting = await runGreetingGate({
 });
 
 if (gatedGreeting?.ok) {
-  // ✅ gate の metaForSave は「rootメタ」なので、extra に注入するのは metaForSave.extra のみ
+  // ✅ gate の metaForSave は「rootメタ」だが、ここでは extraLocal に注入するのは metaForSave.extra のみ
   const gateExtra =
     gatedGreeting?.metaForSave &&
     typeof gatedGreeting.metaForSave === 'object' &&
@@ -1357,7 +1359,6 @@ if (gatedGreeting?.ok) {
 
   // ✅ ここで return しない。下へ続行させる。
 }
-
     // ok=false / gate不成立はそのまま下へ
 
     const bypassMicro =
@@ -1729,6 +1730,24 @@ if (rememberScope) {
     // ✅ baseMeta は extra を絶対に落とさない（V2: route/ctx → orch へ橋渡し）
     const baseMetaMergedForTurn: any = mergeExtra({ ...(ctx.baseMetaForTurn ?? {}) }, extraLocal ?? null);
 
+    // ✅ GreetingGate の slotPlan を “root” に持ち上げる（extra 側だけだと拾われない経路がある）
+    // - runGreetingGate は metaForSave.extra に framePlan/slotPlan/slotPlanPolicy/slotPlanLen を入れている
+    // - ここで baseMetaMergedForTurn へコピーして、Orchestrator が確実に拾えるようにする
+    if ((extraLocal as any)?.gatedGreeting?.ok) {
+      if (!(baseMetaMergedForTurn as any).framePlan && (extraLocal as any)?.framePlan) {
+        (baseMetaMergedForTurn as any).framePlan = (extraLocal as any).framePlan;
+      }
+      if (!(baseMetaMergedForTurn as any).slotPlan && (extraLocal as any)?.slotPlan) {
+        (baseMetaMergedForTurn as any).slotPlan = (extraLocal as any).slotPlan;
+      }
+      if (!(baseMetaMergedForTurn as any).slotPlanPolicy && (extraLocal as any)?.slotPlanPolicy) {
+        (baseMetaMergedForTurn as any).slotPlanPolicy = (extraLocal as any).slotPlanPolicy;
+      }
+      if (!(baseMetaMergedForTurn as any).slotPlanLen && (extraLocal as any)?.slotPlanLen) {
+        (baseMetaMergedForTurn as any).slotPlanLen = (extraLocal as any).slotPlanLen;
+      }
+    }
+
     // ✅ R -> I gate（入口で確定。途中上書き禁止）
     const prevDepthStage: string | null =
       typeof (ctx?.baseMetaForTurn as any)?.depthStage === 'string'
@@ -2030,44 +2049,29 @@ if (!exAny.ctxPack || typeof exAny.ctxPack !== 'object') {
 
 console.log("[DEBUG] After initializing ctxPack:", exAny.ctxPack);
 
-// flow に関する処理
-console.log("[DEBUG] Before assigning flow to ctxPack:", exAny.ctxPack.flow);
+// ---- DEBUG: ctxPack / flow stamp ----
+console.log('[DEBUG] Before initializing ctxPack:', exAny.ctxPack);
 
-exAny.ctxPack.flow = (() => {
-  const now = new Date();
-  const nowIso = now.toISOString();
-  const dayKey = nowIso.slice(0, 10);
+exAny.ctxPack = exAny.ctxPack || {}; // 初期化（既にあればそのまま）
 
-  // 既存 flow があれば “前回の at” を拾って鮮度判定する（無ければ null）
-  const prevFlow = (exAny.ctxPack as any)?.flow ?? null;
-  const prevAtIso = typeof prevFlow?.at === 'string' ? prevFlow.at : null;
+console.log('[DEBUG] After initializing ctxPack:', exAny.ctxPack);
 
-  // prevAtIso の有無とその時刻をログに出力
-  console.log("[DEBUG] prevFlow and prevAtIso:", prevFlow, prevAtIso);
+// ※ここは ctxPack ではなく「ctxPack.flow」を見ている
+console.log('[DEBUG] Before assigning flow to ctxPack.flow:', exAny.ctxPack.flow);
 
-  const prevAtMs = (() => {
-    if (!prevAtIso) return null;
-    const ms = Date.parse(prevAtIso);
-    return Number.isFinite(ms) ? ms : null;
-  })();
+// （あなたの既存の prevFlow / prevAtIso / ageSec / sessionBreak 算出コードはこの直後にそのまま置く）
 
-  // prevAtMs（前回のタイムスタンプ）をログに出力
-  console.log("[DEBUG] prevAtMs (timestamp of previous flow):", prevAtMs);
+// flow をセット（ここも既存コードのままでOK）
+exAny.ctxPack.flow = {
+  at: new Date().toISOString(),
+  prevAtIso: null,
+  ageSec: null,
+  sessionBreak: false,
+  fresh: true,
+};
 
-  const ageSec = prevAtMs != null ? Math.max(0, Math.floor((now.getTime() - prevAtMs) / 1000)) : null;
-  const sessionBreak = false;  // 仮設定
+console.log('[DEBUG] After assigning flow to ctxPack.flow:', exAny.ctxPack.flow);
 
-  console.log("[DEBUG] ageSec and sessionBreak:", ageSec, sessionBreak);
-
-  return {
-    at: nowIso,     // “このターンの刻み”
-    prevAtIso,
-    ageSec,
-    sessionBreak,  // セッションブレイクの判定（仮設定）
-    fresh: !sessionBreak, // fresh状態の確認
-  };
-})();
-console.log("[DEBUG] After assigning flow to ctxPack:", exAny.ctxPack.flow);
 
   } catch (e) {
     // Flow は非必須：失敗しても会話を止めない

@@ -801,14 +801,31 @@ try {
   // ✅ スロット指示が本文に漏れているか（@OBS/@SHIFT/...）
   const hasSlotDirectives = /(^|\n)\s*@(OBS|SHIFT|NEXT|SAFE|DRAFT|SEED_TEXT)\b/.test(curRaw);
 
-  // ✅ recover材料（SoTから）
-  const ex: any = extraSoT as any;
-  const head = String(ex?.rephraseHead ?? '').trim();
-  const blocks: any[] = Array.isArray(ex?.rephraseBlocks) ? ex.rephraseBlocks : [];
+  // ✅ recover材料（metaForSave / meta / SoT の順で拾う）
+  const exMeta: any = (metaForSave as any)?.extra ?? {};
+  const exMeta2: any = (meta as any)?.extra ?? {};
+  const exSoT: any = (extraSoT as any) ?? {};
+
+  // 旧ログ参照用（ex?.rephraseBlocks など）を壊さない
+  const ex: any = exSoT;
+
+  // head / blocks は「metaForSave → meta → SoT」の順で拾う
+  const head = String(exMeta?.rephraseHead ?? exMeta2?.rephraseHead ?? exSoT?.rephraseHead ?? '').trim();
+
+  const blocks: any[] = Array.isArray(exMeta?.rephraseBlocks)
+    ? exMeta.rephraseBlocks
+    : Array.isArray(exMeta2?.rephraseBlocks)
+      ? exMeta2.rephraseBlocks
+      : Array.isArray(exSoT?.rephraseBlocks)
+        ? exSoT.rephraseBlocks
+        : [];
 
   const blocksToText = (bs: any[]) => {
     const lines = bs
-      .map((b) => String(b?.text ?? b?.content ?? b?.value ?? b?.body ?? '').trimEnd())
+      .map((b) => {
+        if (typeof b === 'string') return b.trimEnd();
+        return String(b?.text ?? b?.content ?? b?.value ?? b?.body ?? '').trimEnd();
+      })
       .filter((s) => s.trim().length > 0);
     return lines.join('\n\n').trimEnd();
   };
@@ -988,12 +1005,21 @@ let contentForPersist = (() => {
   const fromMeta = stripInternalLines(displayPreferredRaw);
   if (!isEffectivelyEmptyText(fromMeta) && fromMeta.length > 0) return fromMeta;
 
-  // fallback（必要なら残す）
-  const fromResultFallback = stripInternalLines(resultObjFinalRaw);
-  if (!isEffectivelyEmptyText(fromResultFallback) && fromResultFallback.length > 0) return fromResultFallback;
+  // ✅ 最終fallback：ユーザー入力があるなら “……” ではなくそれを保存（沈黙化防止）
+  const userEcho = String(userTextClean ?? '').trim();
+  if (userEcho.length > 0) return userEcho;
 
   return '……';
 })();
+console.info('[IROS/PERSIST_PICK]', {
+  pickedLen: contentForPersist.length,
+  pickedHead: String(contentForPersist).slice(0, 40),
+  fromResultObjLen: stripInternalLines(resultObjFinalRaw).length,
+  blocksJoinedCleanedLen: blocksJoinedCleaned.length,
+  fromMetaLen: stripInternalLines(displayPreferredRaw).length,
+  isPickedDots: contentForPersist === '……',
+});
+
 
 // ✅ P0: ECHO止血（assistant保存本文が「今回のユーザー入力」と完全一致なら、rephraseBlocks を優先）
 const userEcho = String(userTextClean ?? '').trim();
