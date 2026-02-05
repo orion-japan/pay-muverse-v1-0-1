@@ -1425,11 +1425,22 @@ export async function rephraseSlotsFinal(extracted: ExtractedSlots, opts: Rephra
     ? (extracted as any).slots.find((s: any) => String(s?.key) === 'SHIFT')
     : null;
 
-  console.log('[IROS/rephraseEngine][SHIFT_SLOT_HEAD]', {
-    hasShiftSlot: !!shiftSlot,
-    shiftSlotLen: shiftSlot?.text ? String(shiftSlot.text).length : 0,
-    shiftSlotHead: shiftSlot?.text ? safeHead(String(shiftSlot.text), 220) : null,
-  });
+    console.log('[IROS/rephraseEngine][SHIFT_SLOT_HEAD]', {
+      hasShiftSlot: !!shiftSlot,
+      shiftSlotLen: shiftSlot?.text ? String(shiftSlot.text).length : 0,
+      shiftSlotHead: shiftSlot?.text ? safeHead(String(shiftSlot.text), 220) : null,
+    });
+
+    // ✅ FULL dump (opt-in): node inspect / safeHead の切り捨てを回避して SHIFT を全文で出す
+    // 使い方: IROS_DEBUG_SHIFT_FULL=1 を付けて dev 起動
+    if (process.env.IROS_DEBUG_SHIFT_FULL === '1' && shiftSlot?.text) {
+      const full = String(shiftSlot.text);
+      console.log('[IROS/rephraseEngine][SHIFT_SLOT_FULL_LEN]', full.length);
+      console.log('[IROS/rephraseEngine][SHIFT_SLOT_FULL_BEGIN]');
+      console.log(full);
+      console.log('[IROS/rephraseEngine][SHIFT_SLOT_FULL_END]');
+    }
+
 
   // SHIFT.text から JSON 部分を抽出して parse（失敗したら null）
   // - 例: '@SHIFT {...}' / '{...}' のどちらも対応
@@ -1715,16 +1726,20 @@ const stripInternalMarkersForLock = (s: string) => {
 
   const lockSourceRaw = lockParts.join('\n');
 
-
-
-
   console.info('[IROS/ILINE][LOCK_PARTS]', {
-    partsLen: [seedForLock, userText].filter(Boolean).length,
+    seedLen: String(seedForLock ?? '').length,
+    userLen: String(userText ?? '').length,
+
     seedEqUser: String(seedForLock ?? '') === String(userText ?? ''),
+    seedHasUser,
+
+    // ✅ “実際に採用される lockParts” の長さを出す
+    lockPartsLen: lockParts.length,
+
     lockHasNewline: String(lockSourceRaw ?? '').includes('\n'),
     lockLen: String(lockSourceRaw ?? '').length,
+    lockHead120: String(lockSourceRaw ?? '').slice(0, 120),
   });
-
 
   console.info('[IROS/ILINE][LOCK_SOURCE]', {
     hasSeed: !!seedForLock,
