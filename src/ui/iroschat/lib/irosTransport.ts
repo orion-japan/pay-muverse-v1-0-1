@@ -319,18 +319,23 @@ export async function fetchMessages(conversationId: string): Promise<IrosMessage
     const created = m?.created_at
       ? new Date(m.created_at).getTime()
       : typeof m?.ts === 'number'
-      ? m.ts
-      : Date.now();
+        ? m.ts
+        : Date.now();
+
+    const text = String(m.content ?? m.text ?? '');
+
     return {
       id: String(m.id),
       role: m.role === 'assistant' ? 'assistant' : 'user',
-      text: String(m.content ?? m.text ?? ''),
+      text,
       ts: created,
+      meta: m.meta ?? null,
       q: (m.q ?? m.q_code ?? undefined) as any,
       color: (m.color ?? undefined) as any,
     } satisfies IrosMessage;
   });
 }
+
 
 export async function postMessage(args: {
   conversationId: string;

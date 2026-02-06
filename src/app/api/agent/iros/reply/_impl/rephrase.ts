@@ -266,9 +266,12 @@ export async function maybeAttachRephraseForRenderV2(args: {
     console.log('[IROS/rephraseAttach][FALLBACK]', {
       conversationId,
       userCode,
+      attachReason,
       blocksLen: fb.length,
       head: String(fb[0]?.text ?? '').slice(0, 80),
+      pickedLen: t.length,
     });
+
 
     return true;
   };

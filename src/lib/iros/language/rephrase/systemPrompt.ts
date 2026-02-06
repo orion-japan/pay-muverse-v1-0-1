@@ -18,7 +18,8 @@ export function systemPromptForFullReply(args?: {
   // - 'GROUND'：入口（観測＋一手）
   // - 'DELIVER'：直依頼（完成文）
   // - 'GUIDE_I'：I許可（短い言い切り）
-  personaMode?: 'GROUND' | 'DELIVER' | 'GUIDE_I';
+  // - 'ASSESS'：見立て（状況主語・提案なし・短い断定）
+  personaMode?: 'GROUND' | 'DELIVER' | 'GUIDE_I' | 'ASSESS';
 }): string {
   const directTask = Boolean(args?.directTask);
   const itOk = Boolean(args?.itOk);
@@ -27,18 +28,22 @@ export function systemPromptForFullReply(args?: {
   const b = band?.intentBand ?? null;
   const h = band?.tLayerHint ?? null;
 
-  const isIRequested = (b && b.startsWith('I')) || (h && h.startsWith('I'));
-  const allowIStyle = itOk && isIRequested;
+// NOTE: intentBand(I1/I2/I3) は “要求” ではなく “帯域” なので、GUIDE_I 判定には使わない。
+// Iスタイル許可は tLayerHint（I系/T系）など “要求” 側の信号に限定する。
+const isIRequested = Boolean(h && h.startsWith('I'));
+const allowIStyle = itOk && isIRequested;
 
-  const personaMode: 'GROUND' | 'DELIVER' | 'GUIDE_I' =
-    args?.personaMode ??
-    (directTask ? 'DELIVER' : allowIStyle ? 'GUIDE_I' : 'GROUND');
+const personaMode: 'GROUND' | 'DELIVER' | 'GUIDE_I' | 'ASSESS' =
+  args?.personaMode ??
+  (directTask ? 'DELIVER' : allowIStyle ? 'GUIDE_I' : 'GROUND');
+
 
   // =========================================================
   // 実行確認ログ（systemPrompt が「実際に呼ばれた」証拠）
   // =========================================================
   try {
     console.log('[IROS/systemPrompt][CALLED]', {
+      __file: __filename,
       directTask,
       itOk,
       personaMode,
@@ -122,6 +127,19 @@ export function systemPromptForFullReply(args?: {
         '- 追加ヒアリングで引き延ばさない。',
         '- 必要なら前提を一文だけ仮置きして進める。',
         '- 最大2案まで可。どちらも主権が残る終わり方にする。',
+        '- 「どんな情報が必要ですか？」は禁止。',
+      ].join('\n');
+    }
+
+    if (personaMode === 'ASSESS') {
+      return [
+        '',
+        '【構造人格（最優先）】personaMode=ASSESS',
+        '- 「見立て」を最優先する（主語は“状況”。ユーザーを断定しない）。',
+        '- 提案しない／解決しない／評価しない。',
+        '- 1〜3行で短く言い切る（間を作ってよい）。',
+        '- 励まし・応援・一般論（〜ものです/〜大切です）で埋めない。',
+        '- 質問で進めない（質問は0、最大でも1）。',
         '- 「どんな情報が必要ですか？」は禁止。',
       ].join('\n');
     }

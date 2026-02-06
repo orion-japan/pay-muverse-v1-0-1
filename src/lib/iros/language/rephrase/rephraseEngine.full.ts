@@ -1882,9 +1882,31 @@ const lastTurnsSafe = (() => {
   const flowDigest = readFlowDigest(opts?.userContext ?? null);
   const flowTape = readFlowTape(opts?.userContext ?? null);
 
-  const shiftTextForMode = String((shiftSlot as any)?.text ?? '');
+  const shiftTextForMode = String(
+    (shiftSlot as any)?.text ??
+      (shiftSlot as any)?.content ??
+      (shiftSlot as any)?.value ??
+      (shiftSlot as any)?.body ??
+      (shiftSlot as any) ??
+      ''
+  );
+
   const wantsTConcretize =
     /"kind"\s*:\s*"t_concretize"/.test(shiftTextForMode) || /\bt_concretize\b/.test(shiftTextForMode);
+
+  const wantsIdeaBand =
+    /"kind"\s*:\s*"idea_band"/.test(shiftTextForMode) || /\bidea_band\b/.test(shiftTextForMode);
+
+  try {
+    console.log('[IROS/rephraseEngine][LANE_DETECT]', {
+      wantsTConcretize,
+      wantsIdeaBand,
+      shiftTextForModeHead: shiftTextForMode.slice(0, 120),
+      shiftSlotType: typeof (shiftSlot as any),
+      shiftSlotKeys:
+        shiftSlot && typeof shiftSlot === 'object' ? Object.keys(shiftSlot as any).slice(0, 12) : null,
+    });
+  } catch {}
 
   // ✅ T_CONCRETIZE の“圧”を下げて会話を壊さない（復唱/抽象テンプレ逃げを抑制）
   const tConcretizeHeader = wantsTConcretize
@@ -1899,20 +1921,34 @@ const lastTurnsSafe = (() => {
       ].join('\n')
     : '';
 
+  // ✅ IDEA_BAND（候補生成）でも “薄い1行” に寄らないように契約を明示
+  const ideaBandHeader = wantsIdeaBand
+    ? [
+        '【IDEA_BAND（候補）】',
+        '- 本文は2〜4行まで（1行で終わらせない）。',
+        '- 冒頭でユーザー文をそのまま復唱しない（短く言い換える）。',
+        '- 候補は2〜4個。各候補は短く（1行以内）でOK。',
+        '- 質問は0個（必要なら最後に「次に見る観点」を1つ提示）。',
+        '- 講義/一般論/人生訓は書かない。',
+        '',
+      ].join('\n')
+    : '';
+
   const systemPrompt =
     tConcretizeHeader +
+    ideaBandHeader +
     systemPromptForFullReply({
       directTask: isDirectTask,
       itOk,
       band,
       lockedILines,
 
-      // ✅ ここが核心：T_CONCRETIZE でも DELIVER にしない（GUIDE_I に落とす）
-      ...(wantsTConcretize ? { personaMode: 'GUIDE_I' as const } : {}),
+      // ✅ T_CONCRETIZE は “次の一歩を短く” であり、I許可(GUIDE_I)ではない
+      ...(wantsTConcretize ? { personaMode: 'DELIVER' as const } : {}),
     }) +
     mustIncludeRuleText;
 
-  const internalPack = buildInternalPackText({
+    const internalPack = buildInternalPackText({
     metaText,
     historyText,
     seedDraftHint,
@@ -2109,9 +2145,13 @@ const lastTurnsSafe = (() => {
 
     const isIdeaBand = detectIdeaBandPropose();
 
-    const blocksText = isIdeaBand
-      ? makeIdeaBandCandidates(text)
-      : toRephraseBlocks(text);
+    // idea_band は「2ブロック以上」が取れないと [] になることがある。
+    // その場合は通常の段落/改行分割にフォールバックして、最低でも 1 block を作る。
+    let blocksText = isIdeaBand ? makeIdeaBandCandidates(text) : toRephraseBlocks(text);
+    if (!Array.isArray(blocksText) || blocksText.length === 0) {
+      blocksText = toRephraseBlocks(text);
+    }
+
 
     const blocks = blocksText.map((t) => ({ text: t, kind: 'p' }));
 
@@ -2148,7 +2188,8 @@ const lastTurnsSafe = (() => {
 
     const slotKeysForGuard = Array.isArray(inKeys) ? inKeys : ['SEED_TEXT', 'OBS', 'SHIFT'];
 
-    let v = flagshipGuard(textForGuard, {
+    let v = flagshipGuard(stripHedgeLite(textForGuard), {
+
       slotKeys: slotKeysForGuard,
       slotsForGuard: Array.isArray(slotsForGuard) ? slotsForGuard : null,
     });
@@ -2395,7 +2436,7 @@ const lastTurnsSafe = (() => {
   // ✅ MIN_OK_LEN 制御（shift allow.short_reply_ok 対応）
   // ------------------------------------------------------------
   const vLevelPre = String((v as any)?.level ?? '').toUpperCase();
-  const candidateLen = (candidate ?? '').trim().length;
+  let candidateLen = (candidate ?? '').trim().length;
 
   const inputKindNow = String(inputKind ?? inputKindFromMeta ?? inputKindFromCtx ?? 'chat')
     .trim()
@@ -2405,20 +2446,29 @@ const lastTurnsSafe = (() => {
 
   const shiftObj = parseShiftJson(shiftSlot?.text);
 
-  const shortReplyOk =
-    Boolean(shiftObj?.allow?.short_reply_ok) ||
-    Boolean(shiftObj?.allow?.shortReplyOk) ||
-    Boolean((opts as any)?.allow?.short_reply_ok) ||
-    Boolean((opts as any)?.allow?.shortReplyOk) ||
-    false;
+  // ✅ short_reply_ok は「存在するなら false も尊重」する（Boolean OR は禁止）
+  const shortReplyOkRaw =
+    (shiftObj?.allow?.short_reply_ok ?? shiftObj?.allow?.shortReplyOk ?? null) ??
+    ((opts as any)?.allow?.short_reply_ok ?? (opts as any)?.allow?.shortReplyOk ?? null);
 
-  // ✅ MIN_OK_LEN 制御（shift allow.short_reply_ok 対応）
+  const shortReplyOk = shortReplyOkRaw === null ? false : Boolean(shortReplyOkRaw);
+
+  // ✅ T_CONCRETIZE 判定（shift kind / 生テキストのどちらでも拾う）
+  const shiftKind = String((shiftObj as any)?.kind ?? '').trim().toLowerCase();
+  const isTConcretize =
+    shiftKind === 't_concretize' ||
+    /"kind"\s*:\s*"t_concretize"/.test(String(shiftSlot?.text ?? ''));
+
+  // ✅ MIN_OK_LEN（T_CONCRETIZE を chat より優先）
+  // - micro/greeting は短文許可（0）
+  // - T_CONCRETIZE は 24（短くても成立し得るが、薄さを抑える）
+  // - それ以外: short_reply_ok 明示なら 0 / chat は 40 / default 80
   const MIN_OK_LEN =
-    isMicroOrGreetingNow ? 0
-    : shortReplyOk ? 0
-    : inputKindNow === 'chat' ? 40
-    : 80;
-
+    isMicroOrGreetingNow ? 0 :
+    isTConcretize ? 24 :
+    shortReplyOk ? 0 :
+    inputKindNow === 'chat' ? 40 :
+    80;
 
   console.log('[IROS/rephraseEngine][MIN_OK_KIND]', {
     inputKindNow,
@@ -2427,25 +2477,44 @@ const lastTurnsSafe = (() => {
     MIN_OK_LEN,
     reason: isMicroOrGreetingNow
       ? 'micro_or_greeting'
-      : inputKindNow === 'chat'
-        ? (shortReplyOk ? 'chat_short_reply_ok' : 'chat_relaxed_40')
-        : 'default_80',
+      : isTConcretize
+        ? 't_concretize_24'
+        : inputKindNow === 'chat'
+          ? (shortReplyOk ? 'chat_short_reply_ok' : 'chat_relaxed_40')
+          : (shortReplyOk ? 'short_reply_ok' : 'default_80'),
     shiftTextHead: shiftSlot?.text ? safeHead(String(shiftSlot.text), 140) : null,
     shiftObjHasAllow: Boolean(shiftObj?.allow),
+    isTConcretize,
+    shiftKind: shiftKind || null,
   });
 
-  const hasAdvanceHint =
-  /NEXT|次の|一歩|やってみる|進める|試す/.test(candidate);
+  // ✅ “前に進む気配” がある短文は retry を抑制
+  const hasAdvanceHint = /NEXT|次の|一歩|やってみる|進める|試す|始め|着手|手を付け/.test(
+    String(candidate ?? '')
+  );
 
-const shouldOkTooShortToRetry =
-  !scaffoldActive &&
-  !isDirectTask &&
-  v?.ok &&
-  vLevelPre === 'OK' &&
-  candidateLen > 0 &&
-  candidateLen < MIN_OK_LEN &&
-  !hasAdvanceHint;
+  // ✅ T_CONCRETIZE で 1行だけなら、2行目に“具体の次の一手”を自動添付（そっけなさ止血）
+  if (!scaffoldActive && !isDirectTask && isTConcretize) {
+    const lines = String(candidate ?? '')
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean);
 
+    if (lines.length <= 1 && String(candidate ?? '').trim().length > 0) {
+      candidate = `${String(candidate).trim()}\n\nいま、気になっている1つの事にだけ、そっと意識を向けてみてください。`;
+
+      candidateLen = String(candidate).trim().length; // 再計算
+    }
+  }
+
+  const shouldOkTooShortToRetry =
+    !scaffoldActive &&
+    !isDirectTask &&
+    v?.ok &&
+    vLevelPre === 'OK' &&
+    candidateLen > 0 &&
+    candidateLen < MIN_OK_LEN &&
+    !hasAdvanceHint;
 
   if (shouldOkTooShortToRetry) {
     console.warn('[IROS/FLAGSHIP][OK_TOO_SHORT_TO_RETRY]', {
@@ -2464,6 +2533,8 @@ const shouldOkTooShortToRetry =
       vLevelPre,
       candidateLen,
       MIN_OK_LEN,
+      isTConcretize,
+      hasAdvanceHint,
     });
 
     v = {
@@ -2510,6 +2581,7 @@ const shouldOkTooShortToRetry =
       reasons: Array.from(new Set([ ...(((v as any)?.reasons ?? []) as any[]), 'WARN_TO_RETRY' ])),
     } as any;
   }
+
 
   // ---------------------------------------------
   // FATAL → 1回だけ再生成（2ndは“編集/復元+整形”）
@@ -2576,11 +2648,15 @@ const shouldOkTooShortToRetry =
 
     if (!isDirectTask && !isMicroOrGreetingNow && retryLen0 > 0 && retryLen0 < MIN_OK_LEN) {
       if (!relaxTooShortOnQCount) {
-        const fallbackDraft = String(baseDraftForRepair ?? '').trim() || String(candidate ?? '').trim();
-        if (seedFromSlots && String(seedFromSlots).trim()) {
-          return adoptAsSlots(seedFromSlots, 'RETRY_TOO_SHORT_FORCE_USE_SEED', { scaffoldActive });
-        }
-        return adoptAsSlots(fallbackDraft, 'RETRY_TOO_SHORT_FORCE_USE_DRAFT', { scaffoldActive });
+        // ✅ retry後も短いなら「seed強制」ではなく「OK本文」を採用する
+        // - seedFromSlots は @NEXT_HINT を拾って renderGateway 側で事故る
+        // - ここでは raw2（= retryText）を優先し、空なら baseDraft/candidate に落とす
+        const chosenText =
+          String(raw2 ?? '').trim() ||
+          String(baseDraftForRepair ?? '').trim() ||
+          String(candidate ?? '').trim();
+
+        return adoptAsSlots(chosenText, 'OK_TOO_SHORT_ACCEPT', { scaffoldActive });
       }
 
       console.warn('[IROS/FLAGSHIP][RETRY_TOO_SHORT_BUT_ACCEPTED_DUE_TO_QCOUNT]', {
@@ -2615,7 +2691,23 @@ const shouldOkTooShortToRetry =
 
   let retryCandidate = makeCandidate(raw2Guarded, maxLines, renderEngine);
 
-  // ✅ 2nd PASS が空ではないが、まだ短い → seed があるなら seed を優先
+  // ✅ T_CONCRETIZE: 1行で終わる“そっけなさ”を禁止（決定的に2行へ補う）
+  if (wantsTConcretize && retryCandidate) {
+    const lines = String(retryCandidate)
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (lines.length < 2) {
+      retryCandidate = [
+        String(retryCandidate).trim(),
+        '',
+        '10分だけ：デスク上の「捨てる/戻す」を5個だけやる（迷ったら紙から）。',
+      ].join('\n');
+    }
+  }
+
+  // ✅ 2nd PASS が短い場合も seed には逃げない（retryCandidate をそのまま採用）
   {
     const retryLenNow = String(retryCandidate ?? '').trim().length;
     if (retryLenNow > 0 && retryLenNow < MIN_OK_LEN) {
@@ -2629,12 +2721,9 @@ const shouldOkTooShortToRetry =
         hasSeed: !!seedFromSlots,
       });
 
-      const fallbackText = String(seedFromSlots ?? '').trim() || String(candidate ?? '').trim();
-      const reason = seedFromSlots
-        ? 'FLAGSHIP_RETRY_STILL_TOO_SHORT_USE_SEED'
-        : 'FLAGSHIP_RETRY_STILL_TOO_SHORT_USE_CANDIDATE';
-
-      return adoptAsSlots(fallbackText, reason, { scaffoldActive });
+      return adoptAsSlots(String(retryCandidate ?? '').trim(), 'FLAGSHIP_RETRY_STILL_TOO_SHORT_ACCEPT', {
+        scaffoldActive,
+      });
     }
   }
 

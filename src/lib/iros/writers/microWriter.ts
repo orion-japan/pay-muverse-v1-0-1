@@ -7,7 +7,7 @@ export type MicroWriterGenerate = (args: {
   temperature?: number;
   maxTokens?: number;
 
-  // ✅ 追加：監査/追跡用（chatComplete に渡す）
+  // ✅ 監査/追跡用（chatComplete に渡す）
   traceId?: string | null;
   conversationId?: string | null;
   userCode?: string | null;
@@ -21,7 +21,7 @@ export type MicroWriterInput = {
   /** 揺らぎ用seed（会話IDなどを混ぜる） */
   seed: string;
 
-  // ✅ 追加：runMicroWriter → generate に引き継ぐ
+  // ✅ runMicroWriter → generate に引き継ぐ
   traceId?: string | null;
   conversationId?: string | null;
   userCode?: string | null;
@@ -35,11 +35,50 @@ export type MicroWriterOutput =
       detail?: string;
     };
 
-function normalizeMicro(s: string): string {
+function normalizeMicroInput(s: string): string {
   return String(s ?? '')
-    .trim()
-    .replace(/[！!。．…]+$/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
     .trim();
+}
+
+/**
+ * MicroWriter に渡ってくる userText に、内部指示（「意味づけはしない」「次は2つだけ」等）が混ざることがある。
+ * それを取り除いて、ユーザーの“生文”だけを取り出す。
+ */
+function extractUserUtterance(raw: string): string {
+  const s = normalizeMicroInput(raw);
+  if (!s) return '';
+
+  // 1) まず最初の行だけで十分（Microは短文前提）
+  const firstLine = s.split('\n')[0]?.trim() ?? '';
+  if (!firstLine) return '';
+
+  // 2) 典型の内部指示を含む場合は、そこ以降を切る
+  //   例: 「そうしましょう 意味づけはしない。 次は2つだけ： ...」
+  const cutMarks = [
+    '意味づけはしない',
+    '次は2つだけ',
+    '次は２つだけ',
+    '・連想を',
+    '・浮かんだ場面',
+    '連想を3語',
+    '浮かんだ場面を1つ',
+  ];
+
+  let out = firstLine;
+  for (const m of cutMarks) {
+    const idx = out.indexOf(m);
+    if (idx >= 0) out = out.slice(0, idx).trim();
+  }
+
+  // 3) 句読点の後ろにくっついた余計なスペースを軽く整える
+  out = out.replace(/\s+/g, ' ').trim();
+
+  // 4) 末尾の記号を軽く落として短文化（過剰な終端記号だけ）
+  out = out.replace(/[！!。．…]+$/g, '').trim();
+
+  return out;
 }
 
 /**
@@ -50,7 +89,6 @@ function normalizeMicro(s: string): string {
 function sanitizeMicroEmoji(raw: string): string {
   const s = String(raw ?? '');
 
-  // ※ 🪔 は許可するので、いったん🪔だけプレースホルダ退避
   const PLACEHOLDER = '__IROS_LAMP__';
   const escaped = s.replace(/🪔/g, PLACEHOLDER);
 
@@ -60,7 +98,7 @@ function sanitizeMicroEmoji(raw: string): string {
   // 🪔を戻す
   const restored = removed.replace(new RegExp(PLACEHOLDER, 'g'), '🪔');
 
-  // 🪔が複数あれば先頭1個だけ残す（コードポイントで安全に）
+  // 🪔が複数あれば先頭1個だけ残す
   const chars = Array.from(restored);
   const first = chars.indexOf('🪔');
   if (first === -1) return restored.trim();
@@ -75,12 +113,41 @@ function sanitizeMicroEmoji(raw: string): string {
 }
 
 /**
- * LLM出力を「1〜2行」に丸める（フォーマット揺れに強くする）。
- * - "\\n"（バックスラッシュn）を実改行に復元
- * - Markdown hard break（"  \n"）を普通の改行扱いに寄せる
+ * LLM出力の「ラベル」を剥がす保険。
+ * - 「連想:」「場面:」のようなテンプレを返してきた場合でも、短文として読める形に直す。
+ */
+function stripMicroLabels(s: string): string {
+  const text = String(s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  if (!text) return '';
+
+  const lines = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(0, 2);
+
+  if (lines.length === 0) return '';
+
+  const unlabel = (l: string) =>
+    l
+      .replace(/^連想\s*[:：]\s*/u, '')
+      .replace(/^場面\s*[:：]\s*/u, '')
+      .trim();
+
+  const a = unlabel(lines[0]);
+  const b = lines[1] ? unlabel(lines[1]) : '';
+
+  // 両方あるなら「。」「\n」で繋ぐ（短文のまま）
+  if (a && b) return `${a}\n${b}`;
+  return (a || b).trim();
+}
+
+/**
+ * LLM出力を「1〜2行」に丸める。
+ * - "\\n" を実改行に復元
+ * - Markdown hard break を普通の改行に寄せる
  * - 空行除去
- * - 3行以上なら先頭2行だけ採用
- * - 極端な長文は軽く切る（安全弁）
+ * - 3行以上なら先頭2行
  * - “メニュー/選択肢”っぽい形は拒否
  */
 function coerceToTwoLines(raw: string): string | null {
@@ -88,16 +155,13 @@ function coerceToTwoLines(raw: string): string | null {
     String(s ?? '')
       .replace(/\r\n/g, '\n')
       .replace(/\r/g, '\n')
-      // LLMが "\\n" をテキストとして返すケースを救う
       .replace(/\\n/g, '\n')
-      // Markdown hard break（2スペ+改行）を普通の改行に寄せる
       .replace(/[ \t]{2,}\n/g, '\n')
       .trim();
 
   const text = normalize(raw);
   if (!text) return null;
 
-  // 行に分解（空行は落とす）
   const lines = text
     .split('\n')
     .map((l) => l.trim())
@@ -105,18 +169,18 @@ function coerceToTwoLines(raw: string): string | null {
 
   if (lines.length === 0) return null;
 
-  // 3行以上なら先頭2行へ
   const first2 = lines.slice(0, 2);
 
-  // “メニュー/選択肢”っぽい行頭を弾く（くどさ防止）
+  // “メニュー/選択肢”っぽい行頭を弾く
   const looksLikeMenu = first2.some((l) =>
     /^(①|②|③|A[\s　]|B[\s　]|C[\s　]|・|-|\*|\d+\.)/.test(l),
   );
   if (looksLikeMenu) return null;
 
-  // 2行合計が伸びすぎるときの安全弁
   const joined = first2.join('\n');
-  const hardMax = 220; // UIで“短文”に見える範囲の上限
+
+  // UIで“短文”に見える範囲の上限
+  const hardMax = 180;
   const clipped = joined.length > hardMax ? joined.slice(0, hardMax).trim() : joined;
 
   return clipped;
@@ -127,60 +191,53 @@ export async function runMicroWriter(
   input: MicroWriterInput,
 ): Promise<MicroWriterOutput> {
   const name = String(input?.name ?? '').trim();
-  const userTextRaw = String(input?.userText ?? '');
-  const userText = normalizeMicro(userTextRaw);
   const seed = String(input?.seed ?? '').trim();
 
   const traceId = input?.traceId ?? null;
   const conversationId = input?.conversationId ?? null;
   const userCode = input?.userCode ?? null;
 
+  // ✅ ここが最重要：内部指示混入を除去して“生文”だけを使う
+  const userText = extractUserUtterance(input?.userText ?? '');
+
   if (!userText) {
     return { ok: false, reason: 'empty_input' };
   }
 
-  // ざっくり分類（疲労系だけは“休む/整える”に寄せやすくする）
+  // ざっくり分類（疲労系だけは“整える”寄せ）
   const core = userText.replace(/[?？]/g, '').replace(/\s+/g, '').trim();
   const isTiredMicro = /^(疲れた|休みたい|しんどい|つらい|無理|眠い)$/.test(core);
 
   const systemPrompt: string = `
 あなたは iros の「Micro Writer」。
-目的：短い入力に対して、“くどくない短文（1〜2行）”で返す。
-この応答は「判断」ではなく、「会話の間」と「次の一歩の余白」を作る。
+目的：短い入力に対して、“会話が前に進む短文”を1〜2行で返す。
+判断・分析・説教・テンプレ応援をしない。余白を残す。
 
 【出力ルール（厳守）】
 - 出力は1〜2行のみ（3行以上は禁止）
-- 判断しない（原因/結論/評価を作らない）
-- 説明・一般論・助言・分析は禁止（長くなるのでやらない）
 - 選択肢（①②③/A/B/C/箇条書き/メニュー）を出さない
-- 質問は原則0（入れるなら最大1つ、短く、最後に）
+- ラベル（「連想:」「場面:」などの項目出し）をしない
+- 質問は原則0（入れるなら最大1つ。最後に短く）
 - 絵文字は 🪔 のみ可（最大1個）
 
 【テンプレ禁止（厳守）】
-- 「了解」「わかった」「承知」「OK」など“受領だけ”で終えない
-- 「大丈夫」「素晴らしい」「いいですね」「楽しみですね」「ワクワク」「きっと」などの応援テンプレを使わない
-- 「〜してみると」「〜かもしれない」「と思います」などの hedging（逃げ）を使わない
-- “定型の一言”に逃げない（入力依存の語を必ず含める）
+- 「了解」「わかった」「承知」「OK」だけで終えない
+- 「大丈夫」「素晴らしい」「いいですね」「ワクワク」「きっと」などの応援テンプレを使わない
+- 「〜してみると」「〜かもしれない」「と思います」などの hedging を多用しない
+- 一般論・講義・長い共感はしない
 
-【入力から1語拾う（必須）】
-- 入力文から単語を1つだけ拾って、返答に自然に混ぜる（引用符は不要）
-- その単語が短すぎる場合は、入力の勢い（語尾/熱量）を1フレーズで拾う
-
-【sofia寄せ（短く静かに）】
-- 温度は上げない（煽らない/盛らない）
-- 受け止めは“軽く一回”で止める
-- 刺さりは「一言」で十分。長い共感はしない
+【入力依存（必須）】
+- 入力の語を1つだけ自然に混ぜる（引用符は不要）
+- 返答は“次の一歩の形”がうっすら見える程度で止める
 
 【ゆらぎ】
-- seed=${seed} を言い回しの軽い揺らぎに使う（毎回同じ言い方にしない）
+- seed=${seed} は言い回しの軽い揺らぎに使う（毎回同じ言い方に固定しない）
 `.trim();
 
   const prompt: string = `
 入力: ${userText}
-
-トーン指示:
-- 名前: ${name || 'user'}
-- 疲労系: ${isTiredMicro ? 'yes' : 'no'}
+呼び名: ${name || 'user'}
+疲労系: ${isTiredMicro ? 'yes' : 'no'}
 
 上のルールで、短い返答だけを生成して。
 `.trim();
@@ -190,10 +247,10 @@ export async function runMicroWriter(
     raw = await generate({
       system: systemPrompt,
       prompt,
-      temperature: isTiredMicro ? 0.35 : 0.6,
-      maxTokens: 140,
+      temperature: isTiredMicro ? 0.35 : 0.55,
+      maxTokens: 110,
 
-      // ✅ 追加：trace を generate に引き継ぐ
+      // ✅ trace を generate に必ず引き継ぐ（ログで null になっていたのを防ぐ）
       traceId,
       conversationId,
       userCode,
@@ -205,8 +262,11 @@ export async function runMicroWriter(
   const two = coerceToTwoLines(raw);
   if (!two) return { ok: false, reason: 'format_invalid' };
 
-  const cleaned = sanitizeMicroEmoji(two);
-  const finalText = cleaned.trim();
+  // ✅ 「連想/場面」テンプレを返された場合の保険で剥がす
+  const stripped = stripMicroLabels(two);
+
+  const cleanedEmoji = sanitizeMicroEmoji(stripped);
+  const finalText = cleanedEmoji.trim();
 
   if (!finalText) return { ok: false, reason: 'format_invalid' };
 

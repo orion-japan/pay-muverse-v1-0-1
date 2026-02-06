@@ -237,8 +237,7 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
         return rows;
       }
 
-      // 同じ会話IDのままリロードされた場合、
-      // フロント専用の Future-Seed メッセージだけを残してマージする
+      // フロント専用の Future-Seed メッセージだけを拾う
       const seedMsgs = (prev || []).filter(
         (m) =>
           m &&
@@ -251,8 +250,16 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
         return rows;
       }
 
-      return [...rows, ...seedMsgs];
+      // rows 側に既にある id は重ねない（React key 重複防止）
+      const rowIdSet = new Set((rows || []).map((m) => String((m as any)?.id ?? '')));
+      const seedOnly = seedMsgs.filter((m) => {
+        const id = String((m as any)?.id ?? '');
+        return id && !rowIdSet.has(id);
+      });
+
+      return seedOnly.length ? [...rows, ...seedOnly] : rows;
     });
+
   }, []);
 
 // ✅ IrosChatContext.tsx（IrosChatProvider 内）

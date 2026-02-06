@@ -1110,16 +1110,33 @@ pnpm -s tsc --noEmit
   // ✅ Frame / Slots hint
   const writerHints = buildWriterHintsFromMeta(meta as any);
   const writerHintMessage: ChatMessage | null = writerHints.hintText
-    ? ({ role: 'system', content: writerHints.hintText } as ChatMessage)
+    ? ({ role: 'user', content: writerHints.hintText } as ChatMessage)
     : null;
 
-  // ✅ SAFE slot
-  const safeSystemMessage = buildSafeSystemMessage(meta as any, userText);
+// ✅ SAFE slot
+const safeSystemMessage = buildSafeSystemMessage(meta as any, userText);
 
-  // ✅ SpeechAct 器(system)（最終ゲート）
-  const speechSystemMessage: ChatMessage | null = (speechApplied as any).llmSystem
-    ? ({ role: 'system', content: (speechApplied as any).llmSystem } as ChatMessage)
-    : null;
+// buildSafeSystemMessage は ChatMessage を返すことがあるので、content を取り出して user hint に落とす
+const safeHintMessage: ChatMessage | null = safeSystemMessage
+  ? ({
+      role: 'user',
+      content:
+        typeof (safeSystemMessage as any)?.content === 'string'
+          ? String((safeSystemMessage as any).content)
+          : String(safeSystemMessage),
+    } as ChatMessage)
+  : null;
+
+// ✅ SpeechAct 器（露出禁止の hint として user に落とす）
+const speechHintMessage: ChatMessage | null = (speechApplied as any).llmSystem
+  ? ({
+      role: 'user',
+      content:
+        typeof (speechApplied as any).llmSystem === 'string'
+          ? String((speechApplied as any).llmSystem)
+          : String((speechApplied as any).llmSystem?.content ?? ''),
+    } as ChatMessage)
+  : null;
 
   // history → LLM
   const historyMessagesRaw = normalizeHistoryToMessages(args.history, 12);
@@ -1131,24 +1148,35 @@ pnpm -s tsc --noEmit
     lastHead: historyMessages.length ? String(historyMessages[historyMessages.length - 1].content ?? '').slice(0, 60) : null,
   });
 
-  const pastStateNoteText = typeof (meta as any)?.extra?.pastStateNoteText === 'string' ? (meta as any).extra.pastStateNoteText.trim() : '';
+  const pastStateNoteText =
+    typeof (meta as any)?.extra?.pastStateNoteText === 'string' ? (meta as any).extra.pastStateNoteText.trim() : '';
+
+  const pastStateHintMessage: ChatMessage | null =
+    explicitRecall && pastStateNoteText ? ({ role: 'user', content: pastStateNoteText } as ChatMessage) : null;
+
+  // ✅ protocol / whisper は “system 札”にせず user hint に落とす（system の圧を抜く）
+  const protocolHintMessage: ChatMessage | null = protocol
+    ? ({ role: 'user', content: protocol } as ChatMessage)
+    : null;
+
+  const whisperHintMessage: ChatMessage = { role: 'user', content: whisperPayload };
 
   const messages: ChatMessage[] = [
+    // ✅ system は 1枚だけ
     { role: 'system', content: system },
-    { role: 'system', content: protocol },
 
-    ...(speechSystemMessage ? [speechSystemMessage] : []),
-
-    { role: 'system', content: whisperPayload },
-
-    ...(safeSystemMessage ? [safeSystemMessage] : []),
+    // ✅ 以降は全部 “露出禁止の内部ヒント(user)” として渡す
+    ...(protocolHintMessage ? [protocolHintMessage] : []),
+    ...(speechHintMessage ? [speechHintMessage] : []),
+    whisperHintMessage,
+    ...(safeHintMessage ? [safeHintMessage] : []),
     ...(writerHintMessage ? [writerHintMessage] : []),
-
-    ...(explicitRecall && pastStateNoteText ? ([{ role: 'system', content: pastStateNoteText }] as ChatMessage[]) : []),
+    ...(pastStateHintMessage ? [pastStateHintMessage] : []),
 
     ...historyMessages,
     { role: 'user', content: userText },
   ];
+
 
   // =========================================================
   // ✅ GEN: LLM呼び出しの実行有無と、生出力が空になる理由の確定ログ

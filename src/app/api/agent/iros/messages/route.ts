@@ -6,10 +6,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { verifyFirebaseAndAuthorize, SUPABASE_URL, SERVICE_ROLE } from '@/lib/authz';
 
-// ✅ NextStep タグ除去 & 意図メタ取得
-import { extractNextStepChoiceFromText, findNextStepOptionById } from '@/lib/iros/nextStepOptions';
+import {
+  extractNextStepChoiceFromText,
+  findNextStepOptionById,
+} from '@/lib/iros/nextStepOptions';
 
 import crypto from 'crypto';
+
 const sb = () => createClient(SUPABASE_URL!, SERVICE_ROLE!);
 
 const json = (data: any, status = 200) =>
@@ -58,6 +61,19 @@ function pickMetaValue(meta: any, keys: string[]): string | null {
     const v = (meta as any)[k];
     const s = toNonEmptyTrimmedString(v);
     if (s) return s;
+  }
+  return null;
+}
+
+// ✅ TS が「never」に落とす事故を避けつつ、text/number を安全に数値化
+function toIntOrNull(v: any): number | null {
+  if (v == null) return null;
+  if (typeof v === 'number' && Number.isFinite(v)) return Math.max(0, Math.floor(v));
+  if (typeof v === 'string') {
+    const s = v.trim();
+    if (!s) return null;
+    const n = Number(s);
+    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null;
   }
   return null;
 }
@@ -127,17 +143,45 @@ async function trySelect<T>(
   return { ok: false as const, error: 'select_failed_all_candidates' as const };
 }
 
-// ✅ TS が「never」に落とす事故を避けつつ、text/number を安全に数値化
-function toIntOrNull(v: any): number | null {
-  if (v == null) return null;
-  if (typeof v === 'number' && Number.isFinite(v)) return Math.max(0, Math.floor(v));
-  if (typeof v === 'string') {
-    const s = v.trim();
-    if (!s) return null;
-    const n = Number(s);
-    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null;
-  }
-  return null;
+/* =========================
+ * Text normalizers
+ * ========================= */
+
+function normalizeGhostWhitespace(input: string): string {
+  const s = String(input ?? '');
+  // U+3164: Hangul Filler (ㅤ)
+  // U+200B..U+200D: ZWSP/ZWNJ/ZWJ
+  // U+2060: Word Joiner
+  // U+FEFF: BOM
+  // U+2800: Braille blank
+  const removed = s.replace(/[\u3164\u200B-\u200D\u2060\uFEFF\u2800]/g, '');
+  return removed.replace(/\r\n/g, '\n').trim();
+}
+
+function isEllipsisOnly(input: string): boolean {
+  const s = String(input ?? '').replace(/\s+/g, '').trim();
+  if (!s) return true;
+  if (/^…+$/.test(s)) return true;
+  if (/^\.+$/.test(s)) return true;
+  if (/^[.…]+$/.test(s)) return true;
+  return false;
+}
+
+/** directives / internal tags strip (API-level) */
+function stripDirectivesForApi(input: string): string {
+  let s = String(input ?? '');
+
+  // 行頭ディレクティブ（例: "@ACK ..." 等）を行ごと削除
+  s = s.replace(/^\s*@[A-Z0-9_-]{2,}.*(?:\r?\n|$)/gm, '');
+
+  // iLine検証タグ等（露出禁止）
+  s = s.replace(/\[\[ILINE\]\]/g, '');
+  s = s.replace(/\[\[\/ILINE\]\]/g, '');
+
+  // 空行圧縮
+  s = s.replace(/\n{3,}/g, '\n\n').trim();
+
+  return s;
 }
 
 /* =========================
@@ -164,7 +208,6 @@ type LlmMsg = {
 };
 
 // ✅ iros の single source（混線/上書き防止）
-// - sofia_conversations / conversations は完全に排除
 const CONV_TABLES = ['iros_conversations', 'public.iros_conversations'] as const;
 
 // ✅ 読み取りは view 優先（“本文 text の確定” を最優先）
@@ -172,14 +215,107 @@ const MSG_TABLES = [
   'v_iros_messages',
   'iros_messages_ui',
   'iros_messages_normalized',
-  // fallback（テーブル直）
   'iros_messages',
   'public.iros_messages',
 ] as const;
 
+const MEM_TABLES = ['iros_memory_state', 'public.iros_memory_state'] as const;
+
+/* =========================
+ * Memory helpers
+ * ========================= */
+
+async function loadMemoryState(supabase: any, userCode: string) {
+  const selectMin = [
+    'intent_anchor',
+    'itx_step',
+    'itx_last_at',
+    'itx_reason',
+    'q_primary',
+    'depth_stage',
+    'intent_layer',
+    'phase',
+    'spin_loop',
+    'spin_step',
+    'descent_gate',
+    'q_counts',
+  ].join(',');
+
+  for (const mt of MEM_TABLES) {
+    try {
+      const { data, error } = await supabase.from(mt).select(selectMin).eq('user_code', userCode).maybeSingle();
+      if (!error && data) return data;
+    } catch {
+      // ignore
+    }
+  }
+  return null;
+}
+
+function extractQTraceFromQCounts(qCounts: any): any | null {
+  if (!qCounts || typeof qCounts !== 'object') return null;
+  const qt = (qCounts as any).q_trace;
+  if (!qt || typeof qt !== 'object') return null;
+  return qt;
+}
+
+function normalizeIntentLayerFromDepth(depthStage: string | null): string | null {
+  if (!depthStage) return null;
+  const c = String(depthStage).trim().charAt(0).toUpperCase();
+  return c === 'S' || c === 'R' || c === 'C' || c === 'I' || c === 'T' ? c : null;
+}
+
+/* =========================
+ * streak: DB confirm (optional but safer)
+ * ========================= */
+
+async function computeUserStreakFromDb(args: {
+  supabase: any;
+  conversationId: string;
+  userCode: string;
+  qCodeFinal: string | null;
+}): Promise<{ streak_q: string | null; streak_len: number | null; qtu_from: string | null }> {
+  const { supabase, conversationId, userCode, qCodeFinal } = args;
+
+  const qFinal = typeof qCodeFinal === 'string' ? qCodeFinal.trim() : '';
+  if (!qFinal) return { streak_q: null, streak_len: null, qtu_from: null };
+
+  for (const table of ['iros_messages', 'public.iros_messages'] as const) {
+    try {
+      const { data, error } = await supabase
+        .from(table)
+        .select('q_code, created_at')
+        .eq('conversation_id', conversationId)
+        .eq('user_code', userCode)
+        .eq('role', 'user')
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (error) continue;
+
+      const rows: any[] = Array.isArray(data) ? data : [];
+      let prevRun = 0;
+
+      for (const r of rows) {
+        const q = typeof r?.q_code === 'string' ? r.q_code.trim() : '';
+        if (!q) continue;
+        if (q === qFinal) prevRun += 1;
+        else break;
+      }
+
+      return { streak_q: qFinal, streak_len: prevRun + 1, qtu_from: `db:${table}` };
+    } catch {
+      continue;
+    }
+  }
+
+  return { streak_q: null, streak_len: null, qtu_from: null };
+}
+
 /* =========================
  * OPTIONS
  * ========================= */
+
 export async function OPTIONS() {
   return json({ ok: true }, 200);
 }
@@ -187,8 +323,10 @@ export async function OPTIONS() {
 /* =========================
  * GET
  * ========================= */
+
 export async function GET(req: NextRequest) {
   const t0 = process.hrtime.bigint();
+
   try {
     // (A) Authz
     let auth: any;
@@ -196,18 +334,8 @@ export async function GET(req: NextRequest) {
       auth = await verifyFirebaseAndAuthorize(req);
     } catch (e: any) {
       const ms = msSince(t0);
-      console.error('[IROS/messages][GET] authz throw', {
-        ms,
-        message: String(e?.message ?? e),
-      });
       return json(
-        {
-          ok: false,
-          error: 'authz_throw',
-          error_code: 'authz_throw',
-          detail: String(e?.message ?? e),
-          ms,
-        },
+        { ok: false, error: 'authz_throw', error_code: 'authz_throw', detail: String(e?.message ?? e), ms },
         isUpstreamTimeout(e) ? 504 : 401,
       );
     }
@@ -215,34 +343,17 @@ export async function GET(req: NextRequest) {
     if (!auth.ok) {
       const ms = msSince(t0);
       const status = isUpstreamTimeout(auth) ? 504 : auth.status || 401;
-      console.warn('[IROS/messages][GET] authz not ok', {
-        ms,
-        status,
-        error: auth.error,
-      });
       return json({ ok: false, error: auth.error, error_code: 'authz_not_ok', ms }, status);
     }
 
     const userCode =
-      (auth.user?.user_code as string) ||
-      (auth.user?.uid as string) ||
-      (auth.userCode as string) ||
-      '';
-    if (!userCode) {
-      return json({ ok: false, error: 'user_code_missing', error_code: 'user_code_missing' }, 400);
-    }
+      (auth.user?.user_code as string) || (auth.user?.uid as string) || (auth.userCode as string) || '';
+    if (!userCode) return json({ ok: false, error: 'user_code_missing', error_code: 'user_code_missing' }, 400);
 
     // (B) Params
     const cid = req.nextUrl.searchParams.get('conversation_id') || '';
     if (!cid) {
-      return json(
-        {
-          ok: false,
-          error: 'missing_conversation_id',
-          error_code: 'missing_conversation_id',
-        },
-        400,
-      );
+      return json({ ok: false, error: 'missing_conversation_id', error_code: 'missing_conversation_id' }, 400);
     }
 
     const limitRaw = req.nextUrl.searchParams.get('limit');
@@ -253,18 +364,13 @@ export async function GET(req: NextRequest) {
       return Math.min(n, 500);
     })();
 
-    // ✅ includeMeta:
-    // - 明示指定があればそれを使う
-    // - 無ければ admin は true（ops の SA/Y/H 等が消えない）
     const includeMetaParam =
       req.nextUrl.searchParams.get('include_meta') ?? req.nextUrl.searchParams.get('includeMeta');
-
     const includeMeta = includeMetaParam != null ? asBool(includeMetaParam) : auth.role === 'admin';
 
     const supabase = sb();
 
-    // (C) Conversation owner check  ✅ FIX: 失敗/未取得のときはここで止める（漏洩防止）
-    const tConv = process.hrtime.bigint();
+    // (C) Conversation owner check
     const conv = await trySelect<{ id: string; user_code?: string | null }>(
       supabase,
       CONV_TABLES,
@@ -274,39 +380,18 @@ export async function GET(req: NextRequest) {
 
     const convRow = conv.ok ? (conv as any).data?.[0] ?? null : null;
 
-    console.log('[IROS/messages][GET] conv select', {
-      ms: msSince(tConv),
-      ok: conv.ok,
-      table: (conv as any).table,
-      hasRow: !!convRow,
-    });
-
-    // ✅ conv が取れない（select失敗/行なし）場合：
-    // - 「存在可否を隠す」方針で ok:true + 空配列で返す（= messages select に進まない）
+    // ✅ conv が取れない場合：存在可否を隠す（空で返して messages select に進まない）
     if (!conv.ok || !convRow) {
       return json(
-        {
-          ok: true,
-          messages: [],
-          llm_messages: [],
-          note: !conv.ok ? 'conv_select_failed_all_candidates' : 'conversation_not_found',
-        },
+        { ok: true, messages: [], llm_messages: [], note: !conv.ok ? 'conv_select_failed' : 'conversation_not_found' },
         200,
       );
     }
 
-    // ✅ owner mismatch も同様に「存在可否を隠す」目的で ok:true + 空配列
+    // ✅ owner mismatch も存在可否を隠す
     const owner = String(convRow.user_code ?? '');
     if (owner && owner !== userCode) {
-      return json(
-        {
-          ok: true,
-          messages: [],
-          llm_messages: [],
-          note: 'forbidden_owner_mismatch',
-        },
-        200,
-      );
+      return json({ ok: true, messages: [], llm_messages: [], note: 'forbidden_owner_mismatch' }, 200);
     }
 
     // (D) Messages select
@@ -318,70 +403,31 @@ export async function GET(req: NextRequest) {
           'role',
           'text',
           'created_at',
-          'sa',
-          'polarity',
-          'tension',
-          'warmth',
-          'clarity',
           'q_primary',
-          'q_secondary',
-          'q_mix_ratio',
-          'layer',
-          'phase',
-          'intention_axis',
-          'analysis',
-          'exploration',
+          'color',
+          'depth_stage',
+          'intent_layer',
+          'meta',
         ].join(',')
-      : ['message_id', 'conversation_id', 'user_code', 'role', 'text', 'created_at'].join(',');
-
-    const columnsForUI = ['id', 'conversation_id', 'user_code', 'role', 'text', 'created_at'].join(
-      ',',
-    );
-
-    const columnsForNormalized = includeMeta
-      ? ['id', 'conversation_id', 'user_code', 'role', 'content', 'meta', 'created_at', 'ts', 'q_code', 'color'].join(
-          ',',
-        )
-      : ['id', 'conversation_id', 'user_code', 'role', 'content', 'created_at', 'ts', 'q_code', 'color'].join(
+      : ['message_id', 'conversation_id', 'user_code', 'role', 'text', 'created_at', 'q_primary', 'color', 'depth_stage', 'intent_layer'].join(
           ',',
         );
 
+    const columnsForUI = includeMeta
+      ? ['id', 'conversation_id', 'user_code', 'role', 'text', 'created_at', 'q_code', 'color', 'depth_stage', 'intent_layer', 'meta'].join(',')
+      : ['id', 'conversation_id', 'user_code', 'role', 'text', 'created_at', 'q_code', 'color', 'depth_stage', 'intent_layer'].join(',');
+
+    const columnsForNormalized = includeMeta
+      ? ['id', 'conversation_id', 'user_code', 'role', 'content', 'created_at', 'q_code', 'color', 'depth_stage', 'intent_layer', 'meta'].join(
+          ',',
+        )
+      : ['id', 'conversation_id', 'user_code', 'role', 'content', 'created_at', 'q_code', 'color', 'depth_stage', 'intent_layer'].join(',');
+
     const columnsForTable = includeMeta
-      ? [
-          'id',
-          'conversation_id',
-          'user_code',
-          'role',
-          'content',
-          'text',
-          'q_code',
-          'depth_stage',
-          'intent_layer',
-          'color',
-          'created_at',
-          'ts',
-          'streak_q',
-          'streak_len',
-          'qtu_from',
-          'meta',
-        ].join(',')
-      : [
-          'id',
-          'conversation_id',
-          'user_code',
-          'role',
-          'content',
-          'text',
-          'q_code',
-          'depth_stage',
-          'intent_layer',
-          'color',
-          'created_at',
-          'ts',
-          'streak_q',
-          'streak_len',
-          'qtu_from',
-        ].join(',');
+      ? ['id', 'conversation_id', 'user_code', 'role', 'content', 'text', 'q_code', 'color', 'depth_stage', 'intent_layer', 'created_at', 'meta'].join(
+          ',',
+        )
+      : ['id', 'conversation_id', 'user_code', 'role', 'content', 'text', 'q_code', 'color', 'depth_stage', 'intent_layer', 'created_at'].join(',');
 
     const columnsByTable: Record<string, string> = {
       v_iros_messages: columnsForV,
@@ -392,31 +438,13 @@ export async function GET(req: NextRequest) {
       '*': columnsForTable,
     };
 
-    const tSel = process.hrtime.bigint();
-    const res = await trySelect<any>(supabase, MSG_TABLES, columnsByTable, (q) => {
-      const base = q.eq('conversation_id', cid);
-      // order は列が揃ってる created_at を優先（view も持ってる）
-      return base.order('created_at', { ascending: false }).limit(limit);
-    });
-
-    console.log('[IROS/messages][GET] msg select', {
-      ms: msSince(tSel),
-      ok: res.ok,
-      table: (res as any).table,
-      rows: Array.isArray((res as any).data) ? (res as any).data.length : 0,
-      includeMeta,
-      limit,
-    });
+    const res = await trySelect<any>(supabase, MSG_TABLES, columnsByTable, (q) =>
+      q.eq('conversation_id', cid).order('created_at', { ascending: false }).limit(limit),
+    );
 
     if (!res.ok) {
       return json(
-        {
-          ok: false,
-          error: 'messages_select_failed',
-          error_code: 'messages_select_failed',
-          messages: [],
-          llm_messages: [],
-        },
+        { ok: false, error: 'messages_select_failed', error_code: 'messages_select_failed', messages: [], llm_messages: [] },
         200,
       );
     }
@@ -431,35 +459,10 @@ export async function GET(req: NextRequest) {
 
     filtered.reverse();
 
-    // =========================================================
-    // directives / internal tags strip (API-level)
-    // - DBに残っていても「返す時点で」必ず消す
-    // =========================================================
-    function stripDirectivesForApi(input: string): string {
-      let s = String(input ?? '');
-
-      // 行頭ディレクティブ（例: "@ACK ..." 等）を行ごと削除
-      s = s.replace(/^\s*@[A-Z0-9_-]{2,}.*(?:\r?\n|$)/gm, '');
-
-      // iLine検証タグ等（露出禁止）
-      s = s.replace(/\[\[ILINE\]\]/g, '');
-      s = s.replace(/\[\[\/ILINE\]\]/g, '');
-
-      // 空行だけ残る事故を圧縮
-      s = s.replace(/\n{3,}/g, '\n\n').trim();
-
-      return s;
-    }
-
     const messages: OutMsg[] = filtered.map((m: any) => {
-      // view の場合 message_id が主キー、UI view の場合 id、テーブルの場合 id
       const idVal = m.message_id ?? m.id ?? '';
-
-      // ✅ ここだけが本質：本文を取って → stripして → contentに入れる
       const rawContent = (m.text ?? m.content ?? '').toString();
       const contentVal = stripDirectivesForApi(rawContent);
-
-      // q は v_iros_messages の q_primary を優先、無ければ q_code
       const qAny = (m.q_primary ?? m.q_code ?? null) as any;
 
       return {
@@ -485,38 +488,13 @@ export async function GET(req: NextRequest) {
       return Math.min(n, 100);
     })();
 
-    const llm_messages: LlmMsg[] = messages.slice(-llmLimit).map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
+    const llm_messages: LlmMsg[] = messages.slice(-llmLimit).map((m) => ({ role: m.role, content: m.content }));
 
-
-    console.log('[IROS/messages][GET] done', {
-      ms: msSince(t0),
-      count: messages.length,
-      source: (res as any).table,
-    });
-
-    return json(
-      { ok: true, messages, llm_messages, includeMeta, source: (res as any).table },
-      200,
-    );
+    return json({ ok: true, messages, llm_messages, includeMeta, source: (res as any).table }, 200);
   } catch (e: any) {
     const ms = msSince(t0);
-    console.error('[IROS/messages][GET] exception', {
-      ms,
-      message: String(e?.message ?? e),
-    });
     return json(
-      {
-        ok: false,
-        error: 'exception',
-        error_code: 'exception',
-        messages: [],
-        llm_messages: [],
-        detail: String(e?.message ?? e),
-        ms,
-      },
+      { ok: false, error: 'exception', error_code: 'exception', messages: [], llm_messages: [], detail: String(e?.message ?? e), ms },
       200,
     );
   }
@@ -525,8 +503,10 @@ export async function GET(req: NextRequest) {
 /* =========================
  * POST
  * ========================= */
+
 export async function POST(req: NextRequest) {
   const t0 = process.hrtime.bigint();
+
   try {
     // (A) Authz
     let auth: any;
@@ -534,18 +514,8 @@ export async function POST(req: NextRequest) {
       auth = await verifyFirebaseAndAuthorize(req);
     } catch (e: any) {
       const ms = msSince(t0);
-      console.error('[IROS/messages][POST] authz throw', {
-        ms,
-        message: String(e?.message ?? e),
-      });
       return json(
-        {
-          ok: false,
-          error: 'authz_throw',
-          error_code: 'authz_throw',
-          detail: String(e?.message ?? e),
-          ms,
-        },
+        { ok: false, error: 'authz_throw', error_code: 'authz_throw', detail: String(e?.message ?? e), ms },
         isUpstreamTimeout(e) ? 504 : 401,
       );
     }
@@ -553,18 +523,12 @@ export async function POST(req: NextRequest) {
     if (!auth.ok) {
       const ms = msSince(t0);
       const status = isUpstreamTimeout(auth) ? 504 : auth.status || 401;
-      console.warn('[IROS/messages][POST] authz not ok', { ms, status, error: auth.error });
       return json({ ok: false, error: auth.error, error_code: 'authz_not_ok', ms }, status);
     }
 
     const userCode =
-      (auth.user?.user_code as string) ||
-      (auth.user?.uid as string) ||
-      (auth.userCode as string) ||
-      '';
-    if (!userCode) {
-      return json({ ok: false, error: 'user_code_missing', error_code: 'user_code_missing' }, 400);
-    }
+      (auth.user?.user_code as string) || (auth.user?.uid as string) || (auth.userCode as string) || '';
+    if (!userCode) return json({ ok: false, error: 'user_code_missing', error_code: 'user_code_missing' }, 400);
 
     // (B) Body
     let body: any = {};
@@ -572,7 +536,6 @@ export async function POST(req: NextRequest) {
       body = await req.json();
     } catch {}
 
-    // ✅ reqId: client優先 -> header -> server生成（/reply の [IROS/REQ] in と突き合わせるため）
     const reqId: string =
       (typeof body?.reqId === 'string' && body.reqId.trim()) ||
       (typeof body?.requestId === 'string' && body.requestId.trim()) ||
@@ -586,118 +549,84 @@ export async function POST(req: NextRequest) {
 
     const rawText: string = String(body?.text ?? body?.content ?? '');
 
-    // ✅ 入口ログ（/reply の [IROS/REQ] in と同じ軸）
-    console.log('[IROS/MSG] in', {
-      reqId,
-      conversationId: conversation_id,
-      userCode,
-      uid: auth.user?.uid ?? null,
-      role,
-      textHead: rawText.slice(0, 80),
-    });
-
     // ✅ single-writer: /messages は user だけ保存。assistant は絶対保存しない。
     if (role === 'assistant') {
-      console.log('[IROS/messages][POST] hard-skip assistant persist (single-writer)', {
-        conversation_id,
-        reqId,
-      });
-
-      return json(
-        {
-          ok: true,
-          skipped: true,
-          reason: 'ASSISTANT_ROLE_NEVER_PERSISTED_SINGLE_WRITER',
-          reqId,
-        },
-        200,
-      );
+      return json({ ok: true, skipped: true, reason: 'ASSISTANT_ROLE_NEVER_PERSISTED_SINGLE_WRITER', reqId }, 200);
     }
-
 
     if (!rawText || !String(rawText).trim()) {
       return json({ ok: false, error: 'text_empty', error_code: 'text_empty', reqId }, 400);
     }
 
-    // (C) NextStep choiceId 抽出（user のときだけ採用）
-    const extracted =
-      role === 'user'
-        ? extractNextStepChoiceFromText(rawText)
-        : { choiceId: null, cleanText: String(rawText ?? '') };
+    const supabase = sb();
+
+    // (C) Conversation owner check
+    const conv = await trySelect<{ id: string; user_code?: string | null }>(
+      supabase,
+      CONV_TABLES,
+      { '*': 'id,user_code' },
+      (q) => q.eq('id', conversation_id).limit(1),
+    );
+
+    if (!conv.ok || !(conv as any).data?.[0]) {
+      return json({ ok: false, error: 'conversation_not_found', error_code: 'conversation_not_found', reqId }, 404);
+    }
+
+    const owner = String((conv as any).data[0].user_code ?? '');
+    if (owner && owner !== userCode) {
+      return json({ ok: false, error: 'forbidden_owner_mismatch', error_code: 'forbidden_owner_mismatch', reqId }, 403);
+    }
+
+    // (D) NextStep + text normalize
+    const extracted = extractNextStepChoiceFromText(rawText);
 
     const choiceIdFromBody: string | null = (() => {
-      const c1 = body?.choiceId ?? body?.extractedChoiceId ?? null;
-      if (typeof c1 === 'string' && c1.trim()) return c1.trim();
+      const b0 =
+        body?.choiceId ??
+        body?.extractedChoiceId ??
+        body?.nextStepChoiceId ??
+        body?.nextStepChoiceID ??
+        null;
+      if (typeof b0 === 'string' && b0.trim()) return b0.trim();
 
       const m = body?.meta;
       if (m && typeof m === 'object' && !Array.isArray(m)) {
-        const c2 = (m as any).choiceId ?? (m as any).extractedChoiceId ?? null;
-        if (typeof c2 === 'string' && c2.trim()) return c2.trim();
+        const m0 =
+          (m as any).choiceId ??
+          (m as any).extractedChoiceId ??
+          (m as any).nextStepChoiceId ??
+          (m as any).nextStepChoiceID ??
+          null;
+        if (typeof m0 === 'string' && m0.trim()) return m0.trim();
 
         const ex = (m as any).extra;
         if (ex && typeof ex === 'object' && !Array.isArray(ex)) {
-          const c3 = (ex as any).choiceId ?? (ex as any).extractedChoiceId ?? null;
-          if (typeof c3 === 'string' && c3.trim()) return c3.trim();
+          const ex0 =
+            (ex as any).nextStepChoiceId ??
+            (ex as any).nextStepChoiceID ??
+            (ex as any).choiceId ??
+            (ex as any).extractedChoiceId ??
+            null;
+          if (typeof ex0 === 'string' && ex0.trim()) return ex0.trim();
         }
       }
+
       return null;
     })();
 
-    const choiceId: string | null = role === 'user' ? (choiceIdFromBody ?? extracted.choiceId ?? null) : null;
+    const choiceId: string | null = choiceIdFromBody ?? extracted.choiceId ?? null;
 
-// =========================================================
-// ghost / ellipsis normalize
-// - 見えない空白（U+3164等）や、…/...... だけの入力を「空」とみなす
-// - NextStepタグ除去後の cleanText を優先しつつ、最終的に空判定する
-// =========================================================
-function normalizeGhostWhitespace(input: string): string {
-  const s = String(input ?? '');
-  // U+3164: Hangul Filler (ㅤ)
-  // U+200B..U+200D: ZWSP/ZWNJ/ZWJ
-  // U+2060: Word Joiner
-  // U+FEFF: BOM
-  // U+2800: Braille blank
-  const removed = s.replace(/[\u3164\u200B-\u200D\u2060\uFEFF\u2800]/g, '');
-  return removed.replace(/\r\n/g, '\n').trim();
-}
+    const cleanTextAfterTagStrip = normalizeGhostWhitespace(extracted.cleanText);
+    const rawTextNorm = normalizeGhostWhitespace(rawText);
 
-function isEllipsisOnly(input: string): boolean {
-  const s = String(input ?? '').replace(/\s+/g, '').trim();
-  if (!s) return true;
+    let finalText = (cleanTextAfterTagStrip.length ? cleanTextAfterTagStrip : rawTextNorm).trim();
+    if (isEllipsisOnly(finalText)) finalText = '';
+    if (!finalText) return json({ ok: false, error: 'text_empty', error_code: 'text_empty', reqId }, 400);
 
-  // "…", "……", "..." "...." 等を空扱い
-  if (/^…+$/.test(s)) return true;
-  if (/^\.+$/.test(s)) return true;
-
-  // "…." 混在も空扱い（必要なら）
-  if (/^[.…]+$/.test(s)) return true;
-
-  return false;
-}
-
-// user のときだけタグ剥がしされた cleanText を採用
-const cleanTextRaw = extracted.cleanText;
-
-// 1) まず ghost 空白を消す
-const cleanText = normalizeGhostWhitespace(cleanTextRaw);
-const rawTextNorm = normalizeGhostWhitespace(rawText);
-
-// 2) cleanText 優先で finalText を作る
-let finalText = (role === 'user' && cleanText.length ? cleanText : rawTextNorm).trim();
-
-// 3) 「…だけ」「.だけ」は空に落とす
-if (isEllipsisOnly(finalText)) finalText = '';
-
-if (!finalText) {
-  return json({ ok: false, error: 'text_empty', error_code: 'text_empty', reqId }, 400);
-}
-
-
+    // (E) meta build + sanitize (+ memory fill)
     const picked = choiceId ? findNextStepOptionById(choiceId) : null;
 
-    // (D) meta を組み立て（nextStep は meta.extra に隠す）
     const metaRaw = body?.meta ?? null;
-
     const baseMetaRaw = metaRaw && typeof metaRaw === 'object' && !Array.isArray(metaRaw) ? metaRaw : {};
     const baseExtraRaw =
       baseMetaRaw.extra && typeof baseMetaRaw.extra === 'object' && !Array.isArray(baseMetaRaw.extra)
@@ -712,7 +641,6 @@ if (!finalText) {
           }
         : null;
 
-    // ✅ 追加：押したボタンの “効くmeta” を保存（renderMode/itTarget/requestedDepth...）
     const pickedMeta = picked && typeof picked === 'object' ? (picked as any).meta ?? null : null;
 
     const metaAugRaw = {
@@ -721,504 +649,172 @@ if (!finalText) {
         ...baseExtraRaw,
         nextStepChoiceId: choiceId ?? null,
         nextStepPicked: pickedSnapshot,
-        nextStepPickedMeta: pickedMeta, // ✅ 追加
+        nextStepPickedMeta: pickedMeta,
       },
     };
 
     const metaSanitized = sanitizeJsonDeep(metaAugRaw);
-    const meta = metaSanitized === null || typeof metaSanitized === 'undefined' ? null : metaSanitized;
+    const metaBase =
+      metaSanitized && typeof metaSanitized === 'object' && !Array.isArray(metaSanitized) ? metaSanitized : {};
 
-    /* =========================================================
-     * (E0) Supabase client（metaFilled でも使うので先に作る）
-     * ========================================================= */
-    const supabase = sb();
+    // memory_state (single read)
+    const msRow = await loadMemoryState(supabase as any, userCode);
 
-    /* =========================================================
-     * (E1) metaFilled: memory_state から intent_anchor / itx_* を欠けてる時だけ補完
-     * - insert に載せる meta は metaFilled を使う
-     * ========================================================= */
-    const metaFilled = await (async () => {
-      const base = meta && typeof meta === 'object' && !Array.isArray(meta) ? (meta as any) : {};
+    const hasAnchorAlready =
+      metaBase.intent_anchor != null ||
+      (typeof metaBase.intent_anchor_key === 'string' && metaBase.intent_anchor_key.trim()) ||
+      (typeof metaBase.anchor_key === 'string' && metaBase.anchor_key.trim());
 
-      const hasAnchorAlready =
-        base.intent_anchor != null ||
-        (typeof base.intent_anchor_key === 'string' && base.intent_anchor_key.trim()) ||
-        (typeof base.anchor_key === 'string' && base.anchor_key.trim());
+    const hasItxAlready =
+      (typeof metaBase.itx_step === 'string' && metaBase.itx_step.trim()) ||
+      metaBase.itx_last_at != null ||
+      (typeof metaBase.itx_reason === 'string' && metaBase.itx_reason.trim());
 
-      const hasItxAlready =
-        (typeof base.itx_step === 'string' && base.itx_step.trim()) ||
-        base.itx_last_at != null ||
-        (typeof base.itx_reason === 'string' && base.itx_reason.trim());
+    const anchorKeyFromState =
+      msRow?.intent_anchor && (msRow.intent_anchor as any)?.key ? (msRow.intent_anchor as any).key : null;
 
-      if (hasAnchorAlready && hasItxAlready) return base;
-
-      const tMs = process.hrtime.bigint();
-      const memTables = ['iros_memory_state', 'public.iros_memory_state'] as const;
-
-      for (const mt of memTables) {
-        try {
-          const { data: msRow, error: msErr } = await (supabase as any)
-            .from(mt)
-            .select('intent_anchor,itx_step,itx_last_at,itx_reason')
-            .eq('user_code', userCode)
-            .maybeSingle();
-
-          console.log('[IROS/messages][metaFilled] memory_state select tried', {
-            table: mt,
-            ms: msSince(tMs),
-            ok: !msErr,
-            hasRow: !!msRow,
-            err: msErr ? JSON.stringify(msErr) : null,
-          });
-
-          if (msErr || !msRow) continue;
-
-          const anchorKeyFromState =
-            msRow.intent_anchor && (msRow.intent_anchor as any).key ? (msRow.intent_anchor as any).key : null;
-
-          return {
-            ...base,
-            ...(hasAnchorAlready
-              ? {}
-              : {
-                  intent_anchor: msRow.intent_anchor ?? null,
-                  intent_anchor_key: anchorKeyFromState,
-                  anchor_key: anchorKeyFromState,
-                }),
-            ...(hasItxAlready
-              ? {}
-              : {
-                  itx_step: msRow.itx_step ?? null,
-                  itx_last_at: msRow.itx_last_at ?? null,
-                  itx_reason: msRow.itx_reason ?? null,
-                }),
-          };
-        } catch (e: any) {
-          console.log('[IROS/messages][metaFilled] memory_state select exception', {
-            table: mt,
-            ms: msSince(tMs),
-            err: String(e?.message ?? e),
-          });
-          continue;
-        }
-      }
-
-      return base;
-    })();
-
-// (E) q/depth/intent を body + meta から拾う（insert の primary）
-// ✅ 方針：/messages は client meta が古い可能性があるので body 優先
-const q_code_from_body =
-  toNonEmptyTrimmedString(body?.q_code) ??
-  toNonEmptyTrimmedString(body?.qCode) ??
-  toNonEmptyTrimmedString(body?.q_primary) ??
-  toNonEmptyTrimmedString(body?.qPrimary) ??
-  toNonEmptyTrimmedString((body as any)?.q) ??
-  null;
-
-const depth_stage_from_body =
-  toNonEmptyTrimmedString(body?.depth_stage) ??
-  toNonEmptyTrimmedString(body?.depthStage) ??
-  toNonEmptyTrimmedString(body?.depth) ??
-  null;
-
-const intent_layer_from_body =
-  toNonEmptyTrimmedString(body?.intent_layer) ??
-  toNonEmptyTrimmedString(body?.intentLayer) ??
-  null;
-
-// ✅ meta pick は metaFilled 優先（なければ metaAugRaw）
-const metaForPick =
-  metaFilled && typeof metaFilled === 'object' && !Array.isArray(metaFilled)
-    ? (metaFilled as any)
-    : metaAugRaw && typeof metaAugRaw === 'object' && !Array.isArray(metaAugRaw)
-      ? (metaAugRaw as any)
-      : {};
-
-// meta から拾う（filled 優先、なければ metaAugRaw）
-const q_code_from_meta_raw =
-  pickMetaValue(metaFilled as any, ['qCode', 'q_code', 'qPrimary', 'q_code_primary']) ??
-  pickMetaValue(metaAugRaw as any, ['qCode', 'q_code', 'qPrimary', 'q_code_primary']) ??
-  null;
-
-const depth_stage_from_meta_raw =
-  pickMetaValue(metaFilled as any, ['depth', 'depthStage', 'depth_stage']) ??
-  pickMetaValue(metaAugRaw as any, ['depth', 'depthStage', 'depth_stage']) ??
-  null;
-
-const intent_layer_from_meta_raw =
-  pickMetaValue(metaFilled as any, ['intentLayer', 'intent_layer']) ??
-  pickMetaValue(metaAugRaw as any, ['intentLayer', 'intent_layer']) ??
-  null;
-
-
-// ✅ バリデーション（壊れ値混入を減らす）
-const q_code_from_meta =
-  q_code_from_meta_raw && /^Q[1-5]$/.test(String(q_code_from_meta_raw))
-    ? String(q_code_from_meta_raw)
-    : null;
-
-const depth_stage_from_meta =
-  depth_stage_from_meta_raw && /^[SRCIT][0-3]$/.test(String(depth_stage_from_meta_raw))
-    ? String(depth_stage_from_meta_raw)
-    : null;
-
-const intent_layer_from_meta =
-  intent_layer_from_meta_raw && /^[SRCIT]$/.test(String(intent_layer_from_meta_raw))
-    ? String(intent_layer_from_meta_raw)
-    : null;
-
-// ✅ 採用順：body → meta → null（ここが“最終確定”）
-const q_code: string | null = q_code_from_body ?? q_code_from_meta ?? null;
-const depth_stage: string | null = depth_stage_from_body ?? depth_stage_from_meta ?? null;
-const intent_layer: string | null = intent_layer_from_body ?? intent_layer_from_meta ?? null;
-
-// ✅ 追跡ログ（raw vs filled vs final）
-console.log('[IROS/messages][POST][pick-q-depth][src]', {
-  q_body: q_code_from_body,
-  q_meta_raw: pickMetaValue(metaAugRaw as any, ['qCode', 'q_code', 'qPrimary', 'q_code_primary']) ?? null,
-  q_meta_filled: q_code_from_meta_raw,
-  q_final: q_code,
-
-  depth_body: depth_stage_from_body,
-  depth_meta_raw: pickMetaValue(metaAugRaw as any, ['depth', 'depthStage', 'depth_stage']) ?? null,
-  depth_meta_filled: depth_stage_from_meta_raw,
-  depth_final: depth_stage,
-
-  layer_body: intent_layer_from_body,
-  layer_meta_raw: pickMetaValue(metaAugRaw as any, ['intentLayer', 'intent_layer']) ?? null,
-  layer_meta_filled: intent_layer_from_meta_raw,
-  layer_final: intent_layer,
-});
-
-// ✅ 既存のログ（必要なら残す）
-console.log('[IROS/messages][POST][pick-q-depth]', {
-  q_body: q_code_from_body,
-  q_meta: q_code_from_meta_raw,
-  q_final: q_code,
-  depth_body: depth_stage_from_body,
-  depth_meta: depth_stage_from_meta_raw,
-  depth_final: depth_stage,
-  layer_body: intent_layer_from_body,
-  layer_meta: intent_layer_from_meta_raw,
-  layer_final: intent_layer,
-});
-
-
-    // (F) Supabase + owner check
-    const tConv = process.hrtime.bigint();
-    const conv = await trySelect<{ id: string; user_code?: string | null }>(
-      supabase,
-      CONV_TABLES,
-      { '*': 'id,user_code' },
-      (q) => q.eq('id', conversation_id).limit(1),
-    );
-    console.log('[IROS/messages][POST] conv select', {
-      ms: msSince(tConv),
-      ok: conv.ok,
-      table: (conv as any).table,
-    });
-
-    if (!conv.ok || !(conv as any).data?.[0]) {
-      return json({ ok: false, error: 'conversation_not_found', error_code: 'conversation_not_found' }, 404);
-    }
-    const owner = String((conv as any).data[0].user_code ?? '');
-    if (owner && owner !== userCode) {
-      return json({ ok: false, error: 'forbidden_owner_mismatch', error_code: 'forbidden_owner_mismatch' }, 403);
-    }
-
-    /* =========================================================
-     * (G) seed: MemoryState の値を “暫定補完” にだけ使う
-     * - ★重要: このファイルでは memoryState 変数を使わない
-     * ========================================================= */
-    let seed: {
-      q_code: string | null;
-      depth_stage: string | null;
-      intent_layer: string | null;
-      phase: string | null;
-      spin_loop: string | null;
-      spin_step: number | null;
-      descent_gate: string | null;
-
-      q_trace: any | null;
-      streak_q: string | null;
-      streak_len: number | null;
-      qtu_from: string | null;
-    } = {
-      q_code: null,
-      depth_stage: null,
-      intent_layer: null,
-      phase: null,
-      spin_loop: null,
-      spin_step: null,
-      descent_gate: null,
-      q_trace: null,
-      streak_q: null,
-      streak_len: null,
-      qtu_from: null,
+    const metaFilled = {
+      ...metaBase,
+      ...(msRow && !hasAnchorAlready
+        ? { intent_anchor: msRow.intent_anchor ?? null, intent_anchor_key: anchorKeyFromState, anchor_key: anchorKeyFromState }
+        : {}),
+      ...(msRow && !hasItxAlready
+        ? { itx_step: msRow.itx_step ?? null, itx_last_at: msRow.itx_last_at ?? null, itx_reason: msRow.itx_reason ?? null }
+        : {}),
     };
 
-    function extractQTraceFromQCounts(qCounts: any): any | null {
-      if (!qCounts || typeof qCounts !== 'object') return null;
-      const qt = (qCounts as any).q_trace;
-      if (!qt || typeof qt !== 'object') return null;
-      return qt;
-    }
+    // (F) q/depth/intent pick (body first)
+    const q_code_from_body =
+      toNonEmptyTrimmedString(body?.q_code) ??
+      toNonEmptyTrimmedString(body?.qCode) ??
+      toNonEmptyTrimmedString(body?.q_primary) ??
+      toNonEmptyTrimmedString(body?.qPrimary) ??
+      toNonEmptyTrimmedString((body as any)?.q) ??
+      null;
 
-    function applyTraceToSeed(trace: any, seedIn: typeof seed): typeof seed {
-      if (!trace || typeof trace !== 'object') return seedIn;
+    const depth_stage_from_body =
+      toNonEmptyTrimmedString(body?.depth_stage) ??
+      toNonEmptyTrimmedString(body?.depthStage) ??
+      toNonEmptyTrimmedString(body?.depth) ??
+      null;
 
-      const sQ =
-        typeof trace?.streakQ === 'string' && trace.streakQ.trim().length ? trace.streakQ.trim() : null;
+    const intent_layer_from_body =
+      toNonEmptyTrimmedString(body?.intent_layer) ??
+      toNonEmptyTrimmedString(body?.intentLayer) ??
+      null;
 
-      const sLen =
-        typeof trace?.streakLength === 'number' && Number.isFinite(trace.streakLength)
-          ? Math.max(0, Math.floor(trace.streakLength))
-          : typeof trace?.streakLength === 'string' &&
-              trace.streakLength.trim().length &&
-              Number.isFinite(Number(trace.streakLength))
-            ? Math.max(0, Math.floor(Number(trace.streakLength)))
-            : null;
+    const q_code_from_meta_raw =
+      pickMetaValue(metaFilled as any, ['qCode', 'q_code', 'qPrimary', 'q_code_primary']) ??
+      pickMetaValue(metaAugRaw as any, ['qCode', 'q_code', 'qPrimary', 'q_code_primary']) ??
+      null;
 
-      const from = typeof trace?.from === 'string' && trace.from.trim().length ? trace.from.trim() : null;
+    const depth_stage_from_meta_raw =
+      pickMetaValue(metaFilled as any, ['depth', 'depthStage', 'depth_stage']) ??
+      pickMetaValue(metaAugRaw as any, ['depth', 'depthStage', 'depth_stage']) ??
+      null;
 
-      return {
-        ...seedIn,
-        q_trace: trace,
-        streak_q: sQ ?? seedIn.streak_q,
-        streak_len: sLen ?? seedIn.streak_len,
-        qtu_from: from ?? seedIn.qtu_from,
-      };
-    }
+    const intent_layer_from_meta_raw =
+      pickMetaValue(metaFilled as any, ['intentLayer', 'intent_layer']) ??
+      pickMetaValue(metaAugRaw as any, ['intentLayer', 'intent_layer']) ??
+      null;
 
-    async function loadMemoryStateSeed() {
-      const memTables = ['iros_memory_state', 'public.iros_memory_state'] as const;
-      const selectMin = 'q_primary, depth_stage, intent_layer, phase, spin_loop, spin_step, descent_gate, q_counts';
+    const q_code_from_meta =
+      q_code_from_meta_raw && /^Q[1-5]$/.test(String(q_code_from_meta_raw)) ? String(q_code_from_meta_raw) : null;
 
-      for (const mt of memTables) {
-        try {
-          const { data, error } = await (supabase as any)
-            .from(mt)
-            .select(selectMin)
-            .eq('user_code', userCode)
-            .maybeSingle();
-          if (!error && data) return data;
-        } catch {}
-      }
-      return null;
-    }
-
-    try {
-      const data = await loadMemoryStateSeed();
-      if (data) {
-        const qPrimary = toNonEmptyTrimmedString((data as any).q_primary) ?? null;
-        const depthStage = toNonEmptyTrimmedString((data as any).depth_stage) ?? null;
-        const intentLayer = toNonEmptyTrimmedString((data as any).intent_layer) ?? null;
-
-        seed = {
-          q_code: qPrimary,
-          depth_stage: depthStage,
-          intent_layer: intentLayer,
-          phase: toNonEmptyTrimmedString((data as any).phase) ?? null,
-          spin_loop: toNonEmptyTrimmedString((data as any).spin_loop) ?? null,
-          spin_step:
-            typeof (data as any).spin_step === 'number' && Number.isFinite((data as any).spin_step)
-              ? (data as any).spin_step
-              : null,
-          descent_gate: toNonEmptyTrimmedString((data as any).descent_gate) ?? null,
-
-          q_trace: null,
-          streak_q: null,
-          streak_len: null,
-          qtu_from: null,
-        };
-
-        const qTraceFromCounts = extractQTraceFromQCounts((data as any).q_counts);
-        seed = applyTraceToSeed(qTraceFromCounts, seed);
-      }
-    } catch {
-      // seed は取れなくても続行
-    }
-
-    /* =========================================================
-     * (H) intent_layer 正規化（depth_stage → intent_layer 同期）
-     * ========================================================= */
-    function normalizeIntentLayerFromDepth(depthStage: string | null): string | null {
-      if (!depthStage) return null;
-      const c = String(depthStage).trim().charAt(0).toUpperCase();
-      return c === 'S' || c === 'R' || c === 'C' || c === 'I' || c === 'T' ? c : null;
-    }
-
-    const q_code_final = q_code ?? seed.q_code;
-    const depth_stage_final = depth_stage ?? seed.depth_stage;
-
-    const intent_layer_from_depth = normalizeIntentLayerFromDepth(depth_stage_final);
-    const intent_layer_final = intent_layer_from_depth ?? (intent_layer ?? seed.intent_layer);
-
-/* =========================================================
- * (I) streak 決定（meta → seed → fallback）
- * - ★重要: let（後で補正するため）
- * - 追加: DBから「会話内の直近 user 投稿」を見て streak を確定（seed由来のズレ防止）
- * - ✅ FIX: public 側に書かれていても拾えるように候補テーブルを試す
- * ========================================================= */
-
-async function computeUserStreakFromDb(args: {
-  supabase: any;
-  conversationId: string;
-  userCode: string;
-  qCodeFinal: string | null;
-}): Promise<{ streak_q: string | null; streak_len: number | null; qtu_from: string | null }> {
-  const { supabase, conversationId, userCode, qCodeFinal } = args;
-
-  const qFinal = typeof qCodeFinal === 'string' ? qCodeFinal.trim() : '';
-  if (!qFinal) return { streak_q: null, streak_len: null, qtu_from: null };
-
-  const tables = ['iros_messages', 'public.iros_messages'] as const;
-
-  for (const table of tables) {
-    try {
-      // 直近の user 投稿だけ見る（現在の投稿はまだinsert前なので含まれない）
-      const { data, error } = await supabase
-        .from(table)
-        .select('q_code, role, created_at')
-        .eq('conversation_id', conversationId)
-        .eq('user_code', userCode)
-        .eq('role', 'user')
-        .order('created_at', { ascending: false })
-        .limit(50);
-
-      if (error) {
-        console.warn('[IROS/messages][streak-db] select failed', {
-          table,
-          message: error?.message ?? String(error),
-        });
-        continue;
-      }
-
-      const rows: any[] = Array.isArray(data) ? data : [];
-
-      // 直近から「同一q_codeの連続」を数える（prev streak）
-      let prevRun = 0;
-      for (const r of rows) {
-        const q = typeof r?.q_code === 'string' ? r.q_code.trim() : '';
-        if (!q) continue;
-        if (q === qFinal) prevRun += 1;
-        else break;
-      }
-
-      // 今回の投稿を加えた streak
-      const streakLen = prevRun + 1;
-
-      return {
-        streak_q: qFinal,
-        streak_len: streakLen,
-        qtu_from: `db:${table}`,
-      };
-    } catch (e: any) {
-      console.warn('[IROS/messages][streak-db] select exception', {
-        table,
-        message: String(e?.message ?? e),
-      });
-      continue;
-    }
-  }
-
-  // どの候補テーブルでも取れなかった
-  return { streak_q: null, streak_len: null, qtu_from: null };
-}
-
-    const qtu: any = (meta as any)?.qTraceUpdated ?? (meta as any)?.qTrace ?? null;
-
-    let streakQ: string | null =
-      typeof qtu?.streakQ === 'string' && qtu.streakQ.trim().length > 0
-        ? qtu.streakQ.trim()
-        : seed.streak_q ?? (q_code_final ?? null);
-
-    const seedStreakLenNum = toIntOrNull((seed as any)?.streak_len);
-
-    let streakLenNum: number | null =
-      typeof qtu?.streakLength === 'number' && Number.isFinite(qtu.streakLength)
-        ? Math.max(0, Math.floor(qtu.streakLength))
-        : seedStreakLenNum != null
-        ? seedStreakLenNum
-        : q_code_final
-        ? 1
+    const depth_stage_from_meta =
+      depth_stage_from_meta_raw && /^[SRCIT][0-3]$/.test(String(depth_stage_from_meta_raw))
+        ? String(depth_stage_from_meta_raw)
         : null;
 
-    let qtuFrom: string | null =
-      typeof qtu?.from === 'string' && qtu.from.trim().length > 0
-        ? qtu.from.trim()
-        : (meta as any)?.qTraceUpdated
-        ? 'qTraceUpdated'
-        : qtu
-        ? 'qTrace'
-        : seed.qtu_from ?? null;
+    const intent_layer_from_meta =
+      intent_layer_from_meta_raw && /^[SRCIT]$/.test(String(intent_layer_from_meta_raw))
+        ? String(intent_layer_from_meta_raw)
+        : null;
 
-    // ✅ 追加: DBで確定した streak を「増やす方向だけ」上書き（巻き戻り防止）
+    // memory fallback (last resort)
+    const q_from_state = msRow ? (toNonEmptyTrimmedString(msRow.q_primary) ?? null) : null;
+    const depth_from_state = msRow ? (toNonEmptyTrimmedString(msRow.depth_stage) ?? null) : null;
+    const layer_from_state = msRow ? (toNonEmptyTrimmedString(msRow.intent_layer) ?? null) : null;
+
+    const q_code_final = q_code_from_body ?? q_code_from_meta ?? q_from_state ?? null;
+    const depth_stage_final = depth_stage_from_body ?? depth_stage_from_meta ?? depth_from_state ?? null;
+
+    const intent_layer_from_depth = normalizeIntentLayerFromDepth(depth_stage_final);
+    const intent_layer_final = intent_layer_from_depth ?? (intent_layer_from_body ?? intent_layer_from_meta ?? layer_from_state ?? null);
+
+    // (G) streak (metaFilled → state → db confirm)
+    const qtu: any = (metaFilled as any)?.qTraceUpdated ?? (metaFilled as any)?.qTrace ?? null;
+
+    const qTraceFromCounts = msRow ? extractQTraceFromQCounts(msRow.q_counts) : null;
+
+    const streakQ_from_qtu =
+      typeof qtu?.streakQ === 'string' && qtu.streakQ.trim().length ? qtu.streakQ.trim() : null;
+    const streakLen_from_qtu =
+      typeof qtu?.streakLength === 'number' && Number.isFinite(qtu.streakLength)
+        ? Math.max(0, Math.floor(qtu.streakLength))
+        : toIntOrNull(qtu?.streakLength);
+
+    const streakQ_from_state =
+      typeof qTraceFromCounts?.streakQ === 'string' && qTraceFromCounts.streakQ.trim().length
+        ? qTraceFromCounts.streakQ.trim()
+        : null;
+
+    const streakLen_from_state = (() => {
+      const n = toIntOrNull(qTraceFromCounts?.streakLength);
+      return n != null ? n : null;
+    })();
+
+    let streakQ: string | null = streakQ_from_qtu ?? streakQ_from_state ?? q_code_final ?? null;
+
+    let streakLenNum: number | null =
+      (streakLen_from_qtu != null ? streakLen_from_qtu : null) ??
+      (streakLen_from_state != null ? streakLen_from_state : null) ??
+      (q_code_final ? 1 : null);
+
+    let qtuFrom: string | null =
+      (typeof qtu?.from === 'string' && qtu.from.trim().length ? qtu.from.trim() : null) ??
+      ((metaFilled as any)?.qTraceUpdated ? 'qTraceUpdated' : qtu ? 'qTrace' : qTraceFromCounts ? 'q_counts.q_trace' : null);
+
+    // DB confirm (bump only)
     {
       const db = await computeUserStreakFromDb({
         supabase,
         conversationId: conversation_id,
         userCode,
-        qCodeFinal: q_code_final ?? null,
+        qCodeFinal: q_code_final,
       });
 
       if (db.streak_q && db.streak_len != null) {
-        // q が確定できるなら、streak_q はDBを優先
-        streakQ = db.streak_q;
-
-        // len は「小さくなる事故」を防ぐ（増やす方向のみ）
-        const cur =
-          typeof streakLenNum === 'number' && Number.isFinite(streakLenNum) ? streakLenNum : 0;
+        const cur = typeof streakLenNum === 'number' && Number.isFinite(streakLenNum) ? streakLenNum : 0;
         if (db.streak_len > cur) {
-          console.warn('[IROS/messages][streak-db] bump streakLen', {
-            before: streakLenNum,
-            after: db.streak_len,
-            q: db.streak_q,
-            from: db.qtu_from,
-          });
+          streakQ = db.streak_q;
           streakLenNum = db.streak_len;
           qtuFrom = db.qtu_from ?? qtuFrom;
-        } else {
-          // lenは増やさないが、「由来だけ」残すのは混乱するので、ここでは触らない
         }
       }
     }
 
-    // ✅ FIX: seed（MemoryState由来）と矛盾しないように補正（増やす方向のみ）
-    {
-      const qFromSeed = seed.q_code ?? null;
-      const streakLenFromSeed = seed.streak_len ?? null;
-      const streakQFromSeed = seed.streak_q ?? null;
+    // Hard invariants
+    const qFinal = typeof q_code_final === 'string' && q_code_final.trim().length ? q_code_final.trim() : null;
 
-      if (q_code_final && qFromSeed && q_code_final === qFromSeed) {
-        if (streakLenFromSeed != null) {
-          if (typeof streakLenNum === 'number' && streakLenNum < streakLenFromSeed) {
-            console.warn('[IROS/messages][streak-fix] bump streakLen', {
-              before: streakLenNum,
-              after: streakLenFromSeed,
-              q_code: q_code_final,
-              from: 'seed(memory_state)',
-            });
-            streakLenNum = streakLenFromSeed;
-          } else if (streakLenNum == null) {
-            streakLenNum = streakLenFromSeed;
-          }
-        }
+    if (!qFinal) {
+      streakQ = null;
+      streakLenNum = null;
+    } else {
+      const prevStreakQ = streakQ;
+      streakQ = qFinal;
 
-        if (streakQFromSeed && (!streakQ || streakQ !== streakQFromSeed)) {
-          streakQ = streakQFromSeed;
-        }
-      }
+      if (prevStreakQ && prevStreakQ !== qFinal) streakLenNum = 1;
+
+      const cur = typeof streakLenNum === 'number' && Number.isFinite(streakLenNum) ? streakLenNum : 0;
+      if (cur < 1) streakLenNum = 1;
     }
 
-    /* =========================================================
-     * (J) insert row base
-     * ========================================================= */
+    // (H) insert
     const nowIso = new Date().toISOString();
     const nowTs = Date.now();
 
-    const baseRow = {
+    const row = {
       conversation_id,
       user_code: userCode,
       role,
@@ -1226,117 +822,41 @@ async function computeUserStreakFromDb(args: {
       text: finalText,
       created_at: nowIso,
       ts: nowTs,
-    };
 
-    const baseRowWithQ = {
-      ...baseRow,
       q_code: q_code_final,
+      depth_stage: depth_stage_final,
+      intent_layer: intent_layer_final,
+
+      streak_q: streakQ,
+      streak_len: streakLenNum != null ? String(streakLenNum) : null, // text
+      qtu_from: qtuFrom,
+      meta: metaFilled,
     };
 
     let inserted: { id: string | number; created_at: string | null } | null = null;
 
-    // ✅ streak の確定ルール：q_code_final を最優先（切替瞬間の巻き戻り防止）
-    // ✅ FIX: ただし DBで確定できている場合（qtuFrom が db:*）はここで壊さない
-// ✅ streak の確定ルール（ハード不変条件）
-// - q_code_final があるなら streak_q は必ず同じ値
-// - streak_len は最低 1（0/null を許さない）
-// - ただし「Qが切り替わった瞬間」は 1 にリセット（巻き戻りではなく“切替の正規化”）
-const qFinal =
-  typeof q_code_final === 'string' && q_code_final.trim().length ? q_code_final.trim() : null;
-
-if (!qFinal) {
-  // Qが取れないなら streak も持たない（不一致を根絶）
-  streakQ = null;
-  streakLenNum = null;
-} else {
-  const prevStreakQ = streakQ;
-
-  // ✅ ここで必ず一致させる（不一致が起きようがない）
-  streakQ = qFinal;
-
-  // Qが変わったなら今回から新しい連続として 1
-  if (prevStreakQ && prevStreakQ !== qFinal) {
-    streakLenNum = 1;
-  }
-
-  // どんな経路でも 1 未満は許さない
-  const cur = typeof streakLenNum === 'number' && Number.isFinite(streakLenNum) ? streakLenNum : 0;
-  if (cur < 1) streakLenNum = 1;
-}
-
-
-    /* =========================================================
-     * (K) insert（候補テーブル順に試す）
-     * - ✅ iros / public.iros のみ
-     * - ✅ FIX: streak_len は text カラムなので string で入れる
-     * ========================================================= */
     for (const table of ['iros_messages', 'public.iros_messages'] as const) {
-      const tIns = process.hrtime.bigint();
-
-      const row = {
-        ...baseRowWithQ,
-        depth_stage: depth_stage_final,
-        intent_layer: intent_layer_final,
-        streak_q: streakQ,
-        streak_len: streakLenNum != null ? String(streakLenNum) : null, // ✅ textへ統一
-        qtu_from: qtuFrom,
-        meta: metaFilled,
-      };
-
       try {
         const { data, error } = await (supabase as any).from(table).insert([row]).select('id,created_at').single();
-
-        console.log('[IROS/messages][POST] insert tried', {
-          table,
-          ms: msSince(tIns),
-          ok: !error,
-          hasData: !!data,
-          q_code: row?.q_code ?? null,
-          depth_stage: row?.depth_stage ?? null,
-          intent_layer: row?.intent_layer ?? null,
-          streak_q: row?.streak_q ?? null,
-          streak_len: row?.streak_len ?? null,
-          qtu_from: row?.qtu_from ?? null,
-          err: error ? JSON.stringify(error) : null,
-        });
-
         if (!error && data) {
           inserted = { id: (data as any).id, created_at: (data as any).created_at ?? nowIso };
           break;
         }
-      } catch (e) {
-        console.log('[IROS/messages][POST] insert exception', {
-          table,
-          ms: msSince(tIns),
-          err: String((e as any)?.message ?? e),
-        });
+      } catch {
+        // ignore
       }
     }
 
-    console.log('[IROS/messages][POST] nextStep strip', {
-      rawText,
-      choiceId,
-      cleanText,
-      finalText,
-    });
-
-    console.log('[IROS/messages][POST] done', { ms: msSince(t0) });
-
     if (!inserted) {
-      console.error('[IROS/messages][POST] insert failed all', { ms: msSince(t0) });
       return json(
-        {
-          ok: false,
-          error: 'insert_failed_all_candidates',
-          error_code: 'insert_failed_all_candidates',
-          ms: msSince(t0),
-        },
+        { ok: false, error: 'insert_failed_all_candidates', error_code: 'insert_failed_all_candidates', ms: msSince(t0), reqId },
         500,
       );
     }
 
     return json({
       ok: true,
+      reqId,
       message: {
         id: String(inserted.id),
         conversation_id,
@@ -1349,25 +869,15 @@ if (!qFinal) {
         intent_layer: intent_layer_final,
 
         streak_q: streakQ,
-        streak_len: streakLenNum != null ? String(streakLenNum) : null, // ✅ 応答も text に揃える
+        streak_len: streakLenNum != null ? String(streakLenNum) : null,
         qtu_from: qtuFrom,
 
         meta: metaFilled,
       },
     });
   } catch (e: any) {
-    console.error('[IROS/messages][POST] exception', {
-      ms: msSince(t0),
-      message: String(e?.message ?? e),
-    });
     return json(
-      {
-        ok: false,
-        error: 'unhandled_error',
-        error_code: 'unhandled_error',
-        detail: String(e?.message ?? e),
-        ms: msSince(t0),
-      },
+      { ok: false, error: 'unhandled_error', error_code: 'unhandled_error', detail: String(e?.message ?? e), ms: msSince(t0) },
       500,
     );
   }

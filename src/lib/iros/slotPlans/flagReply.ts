@@ -1,20 +1,19 @@
 // src/lib/iros/slotPlans/flagReply.ts
-// iros — flag reply slot plan (GPT-like normal conversation)
+// iros — flag reply slot plan (GPT-like normal conversation / constitution-ready)
 //
-// 目的：
-// - テンプレ（箱/整理/手順/観察点）を一切出さず、通常会話として成立させる
-// - 返答は「短い会話文」(1–2段落) に寄せる
+// 目的（新憲法）
+// - writer は「自然文の生成」だけ（判断・診断・整理箱は禁止）
+// - 内部の合図/材料は @TAG メタで渡す（露出しても事故らない）
+// - ただし “最後の保険” として、ユーザーに出して成立する自然文 DRAFT を必ず1つ含める
+//
+// 方針
+// - scaffold（PREFACE/PURPOSE/ONE_POINT/POINTS_3/NEXT_1）は型として残すが出力しない
+// - 出力は 1〜2段落の短い会話文に寄せる
 // - 質問は最大1つ（0でもOK）
-// - A/B二択は禁止
-//
-// 方針：
-// - scaffold（PREFACE/PURPOSE/ONE_POINT/POINTS_3/NEXT_1）は **型として残すが出力しない**
-//   （既存の依存を壊さず、テンプレ暴発を止める）
-// - “旗印”の骨格（CONCLUSION/DYNAMICS/DEBLAME/TRUE_QUESTION/NEXT_INVITATION）も
-//   会話文として自然に見えるように最小限にする（説明口調を避ける）
+// - A/B二択は禁止（「どっち？」の形にしない）
 
 export type FlagCategory =
-  // --- flagship ---
+  // --- visible-ish (but still safe) ---
   | 'CONCLUSION'
   | 'DYNAMICS'
   | 'DEBLAME'
@@ -45,7 +44,7 @@ export type BuildFlagReplyArgs = {
   // 既に別スロットで質問を使う予定があるなら true（質問0に寄せる）
   questionAlreadyPlanned?: boolean;
 
-  // 直タスク（文面作成/手順/要点）なら true（“問い”を減らしやすい）
+  // 直タスク（文面作成/要約など）なら true（“問い”を減らす）
   directTask?: boolean;
 
   // legacy: 受け取るが、このファイルでは使わない（テンプレ暴発源）
@@ -90,7 +89,7 @@ function pushOne(
 
 function finalizeSlots(slots: FlagReplySlot[]) {
   return slots
-    .map((s) => ({ ...s, content: clamp(s.content, 240) }))
+    .map((s) => ({ ...s, content: clamp(s.content, 320) }))
     .filter((s) => !!norm(s.content));
 }
 
@@ -102,6 +101,19 @@ function pickOne(seed: string, list: string[]) {
   const s = String(seed ?? '');
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
   return arr[h % arr.length]!;
+}
+
+// ----------------------------------------------------
+// Meta packers（露出しても事故らない・読ませない）
+// ----------------------------------------------------
+function m(tag: string, payload: Record<string, unknown>) {
+  let body = '';
+  try {
+    body = JSON.stringify(payload);
+  } catch {
+    body = JSON.stringify({ _err: 'stringify_failed' });
+  }
+  return `@${tag} ${body}`;
 }
 
 // -----------------------------
@@ -144,44 +156,71 @@ function wantsClarity(t: string) {
 }
 
 // -----------------------------
-// Build parts (GPT-like conversational prose)
-// - NO boxes / NO steps / NO bullet points
-// - NO “まず整理しよう”
-// - Keep it short, human, forward
+// Build parts (constitution-ready)
+// - Visible output MUST remain conversational
+// - Internal hints go into @TAG meta
+// - Always include a natural DRAFT somewhere (final insurance)
 // -----------------------------
 
-function buildConclusion(t: string, args: BuildFlagReplyArgs): string {
-  const seed = `c:${t}:${args.directTask ? 'task' : 'chat'}`;
+function buildObsMeta(t: string, args: BuildFlagReplyArgs) {
+  return m('OBS', {
+    stamp: 'flagReply.ts@2026-02-06#constitution-v1',
+    userText: clamp(t, 240),
+    hasHistory: !!args.hasHistory,
+    directTask: !!args.directTask,
+    signals: {
+      short: isShortOrThin(t),
+      question: looksLikeQuestion(t),
+      friction: hasInnerFriction(t),
+      overload: overloadOrPanic(t),
+      selfBlame: selfBlameOrCollapse(t),
+      wantsClarity: wantsClarity(t),
+    },
+  });
+}
+
+function buildConstraintsMeta(args: BuildFlagReplyArgs) {
+  return m('CONSTRAINTS', {
+    avoid: ['boxes', 'steps', 'bullet_points', 'teacher_tone', 'meta_explaining', 'two_choice'],
+    maxQuestions: args.questionAlreadyPlanned || args.directTask ? 0 : 1,
+    maxParagraphs: 2,
+    lengthGuide: 'short_conversation',
+  });
+}
+
+// “最後の保険”：ユーザーに出して成立する自然文（ここは @TAG にしない）
+function buildDraft(t: string, args: BuildFlagReplyArgs): string {
+  const seed = `draft:${t}:${args.directTask ? 'task' : 'chat'}`;
 
   if (args.directTask) {
     return pickOne(seed, [
-      'わかった。いまの内容で、外に出せる形に整える。',
-      'OK。言い方を自然な文にして、送れる形に寄せよう。',
-      '了解。目的に合わせて、ちゃんと使える文にする。',
+      'OK。いまの内容で、そのまま送れる文に整える。',
+      '了解。用途に合わせて、外に出せる言い方に寄せよう。',
+      'わかった。使える形にして返すね。',
     ]);
   }
 
   if (isShortOrThin(t)) {
     return pickOne(seed, [
-      'うん、短くて十分。',
-      '了解。いまの一言だけでも拾える。',
-      'OK。まずはその一言を起点にする。',
+      'うん、その一言で十分。',
+      '了解。そこからでいける。',
+      'OK。まずはその感触を起点にしよう。',
     ]);
   }
 
   if (overloadOrPanic(t)) {
     return pickOne(seed, [
-      'いまは頭で片づけようとすると、余計に固まるやつだね。',
-      'その感じだと、整理より先に“重さ”が前に出てる。',
-      '今は頑張って結論を作らなくていい。',
+      'いまは結論を作ろうとしなくていい。重さが先に出てる。',
+      'その感じだと、整理より先に負荷を下げた方が早い。',
+      '今は“正しく考える”より、まず固まりをゆるめよう。',
     ]);
   }
 
   if (wantsClarity(t)) {
     return pickOne(seed, [
-      '決めたいのに決まらない感じ、そこがいまの中心だね。',
-      '迷いが増える方向じゃなくて、いったん核を小さくしたい。',
-      'いまは選択肢を増やすより、迷いの芯を拾う方が早い。',
+      '決めたいのに決まらない、その一点がいまの中心だね。',
+      '選択肢を増やすより、迷いの芯を小さくしたい。',
+      'いまは答え探しより、迷いの核を拾う方が早い。',
     ]);
   }
 
@@ -189,7 +228,7 @@ function buildConclusion(t: string, args: BuildFlagReplyArgs): string {
     return pickOne(seed, [
       '進もうとした瞬間にブレーキが入る、その感じが見えてる。',
       '動きたいのに止まる…その“止まり方”が鍵になってる。',
-      '答えより先に、止まる地点を見た方が前に進む。',
+      '答えより先に、止まる地点を一つだけ見よう。',
     ]);
   }
 
@@ -200,11 +239,10 @@ function buildConclusion(t: string, args: BuildFlagReplyArgs): string {
   ]);
 }
 
-function buildDynamics(t: string, args: BuildFlagReplyArgs): string | null {
-  const seed = `d:${t}:${args.hasHistory ? 'hist' : 'nohist'}`;
-
-  // “見取り図”は短く、説明口調にしない。不要なら出さない。
+function buildDynamicsLine(t: string, args: BuildFlagReplyArgs): string | null {
   if (args.directTask) return null;
+
+  const seed = `dyn:${t}:${args.hasHistory ? 'hist' : 'nohist'}`;
 
   if (hasInnerFriction(t)) {
     return pickOne(seed, [
@@ -216,24 +254,23 @@ function buildDynamics(t: string, args: BuildFlagReplyArgs): string | null {
 
   if (wantsClarity(t)) {
     return pickOne(seed, [
-      '迷いが“情報不足”じゃなくて“優先の揺れ”っぽい。',
-      '決め手が見つからないというより、軸が揺れてる感じ。',
+      '迷いが“情報不足”じゃなくて“軸の揺れ”っぽい。',
+      '決め手がないというより、優先が揺れてる感じ。',
       '選べるのに決められない、そこに引っかかりがある。',
     ]);
   }
 
-  // 何でもかんでも出さない（テンプレ臭を避ける）
   return null;
 }
 
-function buildDeblame(t: string): string | null {
-  const seed = `b:${t}`;
+function buildDeblameLine(t: string): string | null {
+  const seed = `de:${t}`;
 
   if (selfBlameOrCollapse(t)) {
     return pickOne(seed, [
       'それを“自分の欠陥”にすると、話が進まなくなるやつだよ。',
-      'いまは能力の判定にしない方がいい。まず起きてることを扱おう。',
-      '自分を責める方向に寄せなくていい。状況の切り分けからで大丈夫。',
+      'いまは能力の判定にしない方がいい。起きてることを扱おう。',
+      '自分を責める方向に寄せなくていい。まず状況の切り分けで大丈夫。',
     ]);
   }
 
@@ -248,107 +285,102 @@ function buildDeblame(t: string): string | null {
   return null;
 }
 
-function buildQuestion(t: string, args: BuildFlagReplyArgs): string | null {
+function buildQuestionLine(t: string, args: BuildFlagReplyArgs): string | null {
   if (args.questionAlreadyPlanned) return null;
   if (args.directTask) return null;
 
-  // 短文 or 質問入力には追い質問しすぎない
-  if (isShortOrThin(t)) return pickOne(`qthin:${t}`, [
-    'どんな相談？',
-    '何について？',
-    'いま一番ひっかかってるのはどこ？',
-  ]);
+  // ユーザーが質問してるなら、追い質問しない
+  if (looksLikeQuestion(t)) return null;
 
-  if (looksLikeQuestion(t)) {
-    // ユーザーが質問している時は、こちらの質問を控えめに
-    return null;
+  const seed = `q:${t}`;
+
+  // 短文は “二択” にせず一点だけ
+  if (isShortOrThin(t)) {
+    return pickOne(seed, [
+      'いま一番ひっかかってる語だけ、ひとつ教えて。',
+      'いま残したいところを、一点だけ指して。',
+      'どこが引っかかってる？一点だけでいい。',
+    ]);
   }
 
   if (wantsClarity(t)) {
-    return pickOne(`qclar:${t}`, [
-      'いま「決めたいこと」は何？（一言でOK）',
-      'いま決めたいのは、方向？条件？それとも期限？',
-      'いま一番迷ってる点だけ、短く教えて。',
+    return pickOne(seed, [
+      'いま「決めたいこと」を一言だけ置いて。',
+      'いま迷ってる点を一点だけ、短く教えて。',
+      'いま動けない理由を一点だけ、言葉にすると何？',
     ]);
   }
 
   if (hasInnerFriction(t)) {
-    return pickOne(`qfric:${t}`, [
-      '止まるのって、どの瞬間？（直前／最中／直後）',
-      'ブレーキが入るのは、何をしようとした時？',
-      'いちばん重くなる場面だけ教えて。',
+    return pickOne(seed, [
+      'ブレーキが入るのって、どの瞬間？一点だけで。',
+      '止まるのは、何をしようとした時？一点だけ。',
+      'いちばん重くなる場面だけ、短く教えて。',
     ]);
   }
 
-  // 基本は質問しない（テンプレ質問地獄を避ける）
   return null;
 }
 
-function buildNextInvitation(t: string, args: BuildFlagReplyArgs): string | null {
-  const seed = t;
+function buildNextInvitationLine(t: string, args: BuildFlagReplyArgs): string | null {
+  // 行動指示にしない／箱にしない／箇条書き誘導しない
+  const seed = `next:${t}`;
 
-  // ✅ “推量”を誘発しない。質問テンプレにも寄せない。
-  // ✅ ユーザー発話に含まれる要素から「一点だけ」返させる足場を置く。
-  // - 目的：HEDGE（〜かもしれない）を出させない
-  // - 目的：GENERIC（汎用テンプレ）を避ける
-  //
-  // ここでの「次へ」は “行動指示” ではなく “観測の固定” にする。
-
-  // すでに十分具体なら、短く返す
-  if (seed.length >= 18 && /[。！？]/.test(seed)) {
+  if (args.directTask) {
     return pickOne(seed, [
-      'いまの文の中で、いちばん引っかかってる語だけ残して。',
-      'いま言った内容のうち「残る一語」だけ指定して。',
-      'いまの言い方の中で、気になる部分を一つだけ切り出して。',
+      '用途（誰に／どこで）だけ教えて。そこに合わせる。',
+      '出したい先（相手 or 場面）だけ教えて。そこに寄せる。',
+      'この文を使う場面だけ置いて。そこに合わせる。',
     ]);
   }
 
-  // 短文・確認系（例：覚えてる？）は、具体化を“促す”のではなく“選ばせる”
-  // ここで「具体的な出来事〜」のような誘導をすると generic/hedge を踏みやすい。
-  if (seed.length < 18) {
+  if (t.length >= 18 && /[。！？]/.test(t)) {
     return pickOne(seed, [
-      'いまの一文の中で、引っかかりはどの語？（一語だけ）',
-      'その言い方のまま、引っかかる部分を一つだけ指して。',
-      'いまの文で、残したいところを一つだけ選んで。',
+      'いまの文の中で、残る一点だけ抜き出して。',
+      'いま言った中で、いちばん引っかかる部分を一点だけ。',
+      'その言い方のまま、残したいところを一点だけ。',
     ]);
   }
 
-  // デフォルト：観測一点
   return pickOne(seed, [
-    'いま言った中で、引っかかりを一つだけ置いて。',
-    'いまの文の中から、残る一点だけ抜き出して。',
-    'そのまま、気になる箇所を一つだけ指定して。',
+    'いまの一文の中で、引っかかりを一点だけ置いて。',
+    'そのまま、残るところを一点だけ指して。',
+    'いまの言い方で、残したいところを一点だけ選んで。',
   ]);
 }
 
 /**
- * 旗印ブロックを「通常会話」に寄せて組む
- * - scaffoldは出力しない（テンプレ排除）
- * - 1〜4ブロック程度に抑える
+ * flagReply slots（新憲法）
+ * - 内部材料は @TAG で渡す
+ * - ただし DRAFT は自然文で必ず1つ残す（空/削除事故を避ける）
  */
 export function buildFlagReplySlots(args: BuildFlagReplyArgs): FlagReplySlot[] {
   const t = norm(args.userText);
 
   const slots: FlagReplySlot[] = [];
 
-  // 1) まず会話として受ける（短い）
-  pushOne(slots, 'CONCLUSION', 'neutral', buildConclusion(t, args));
+  // 0) 内部メタ（露出しても事故らない）
+  pushOne(slots, 'PREFACE', 'neutral', buildObsMeta(t, args));
+  pushOne(slots, 'PURPOSE', 'neutral', buildConstraintsMeta(args));
 
-  // 2) 必要な時だけ、短い見取り図（説明しない）
-  const dyn = buildDynamics(t, args);
+  // 1) 自然文の保険（必ず）
+  pushOne(slots, 'CONCLUSION', 'neutral', buildDraft(t, args));
+
+  // 2) 必要な時だけ短い補助（会話文として成立する短文）
+  const dyn = buildDynamicsLine(t, args);
   if (dyn) pushOne(slots, 'DYNAMICS', 'neutral', dyn);
 
-  // 3) 必要な時だけ、責めを外す（慰めで閉じない）
-  const de = buildDeblame(t);
+  const de = buildDeblameLine(t);
   if (de) pushOne(slots, 'DEBLAME', 'soft', de);
 
-  // 4) 質問は0-1（最小）
-  const q = buildQuestion(t, args);
+  // 3) 質問は最大1（0でもOK）
+  const q = buildQuestionLine(t, args);
   if (q) pushOne(slots, 'TRUE_QUESTION', 'neutral', q);
 
-  // 5) 次へ（命令しない）
-  const next = buildNextInvitation(t, args);
+  // 4) 次へ（命令しない）
+  const next = buildNextInvitationLine(t, args);
   if (next) pushOne(slots, 'NEXT_INVITATION', 'soft', next);
 
+  // scaffold（ONE_POINT/POINTS_3/NEXT_1）は出さない（型は残すがスロットを作らない）
   return finalizeSlots(slots);
 }

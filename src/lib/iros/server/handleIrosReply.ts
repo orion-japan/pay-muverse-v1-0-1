@@ -1377,20 +1377,21 @@ if (gatedGreeting?.ok) {
         !/\s/.test(s0) &&
         /^[\p{L}\p{N}ー・]+$/u.test(s0); // 日本語/英数/長音/中点（句読点などは除外）
 
-      const microUserText = isSingleToken
-        ? `${s0}
+      // ✅ 新憲法：MicroWriter に「内部指示（演習・メニュー）」を混ぜない
+      // - LLMは表現担当。指示文を渡すと「連想/場面」テンプレを生成し始める
+      // - MicroWriter 側で入力を短文化/抽出するが、ここでも汚染を作らない
+      const microUserText = isSingleToken ? s0 : text;
 
-意味づけはしない。
-次は2つだけ：
-・連想を3語
-・浮かんだ場面を1つ`
-        : text;
 
       const mw = await runMicroWriter(microGenerate, {
         name,
         userText: microUserText,
         seed,
+        traceId,
+        conversationId,
+        userCode,
       });
+
 
       // ✅ micro 成功 → このブロック内で完結して return（t1/ts/metaForSave を漏らさない）
       if (mw.ok) {

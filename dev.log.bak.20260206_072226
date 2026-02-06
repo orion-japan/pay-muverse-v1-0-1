@@ -1,0 +1,1171 @@
+
+> sofia_register_flow_v1@0.1.0 dev
+> next dev --turbopack
+
+▲ Next.js 16.1.4 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.2.109:3000
+- Environments: .env.local
+- Experiments (use with caution):
+  · serverActions
+
+✓ Starting...
+✓ Ready in 577ms
+[firebase] DEBUG_LOCAL=1 → Firebase SDK log level set to "debug"
+ GET /iros-ai?cid=2f95c114-3b3f-4f92-afb1-408d4f1a6641&agent=iros 200 in 555ms (compile: 210ms, render: 345ms)
+ POST /api/telemetry 204 in 66ms (compile: 52ms, render: 14ms)
+[firebase-admin] initialized with ServiceAccount
+[authz] 1ac404ff-538c-4bcb-95bc-f4acff84bd0f start { path: 'http://localhost:3000/api/agent/iros/userinfo' }
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] 348fe3e0-a8ba-4280-b187-09bb4d79411c start { path: 'http://localhost:3000/api/q/unified?user_code=669933' }
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+ POST /api/register-push 200 in 198ms (compile: 29ms, render: 169ms)
+ POST /api/register-push 200 in 50ms (compile: 4ms, render: 46ms)
+[authz] 1ac404ff-538c-4bcb-95bc-f4acff84bd0f verify firebase: 449.887ms
+[authz] 348fe3e0-a8ba-4280-b187-09bb4d79411c verify firebase: 402.856ms
+[authz] 1ac404ff-538c-4bcb-95bc-f4acff84bd0f fetch user: 51.17ms
+[authz] 1ac404ff-538c-4bcb-95bc-f4acff84bd0f ok { user: '669933', role: 'admin', provider: 'password', ms: 511 }
+[IROS/UserInfo] authz = {
+  ok: true,
+  allowed: true,
+  status: 200,
+  pgJwt: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njk5MzMiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInVzZXJfY29kZSI6IjY2OTkzMyIsImZpcmViYXNlX3VpZCI6Ikt2UDFQNHNpZnRTRUZkTGtka1lqcVY0aE12MDIiLCJleHAiOjE3NzAyNDY4MDIsImlhdCI6MTc3MDI0NTkwMn0.ote39i2ucY9slqlG-_quuPHik3g9Y0XRveZoDu70eB4',
+  userCode: '669933',
+  role: 'admin',
+  user: { uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02', user_code: '669933' },
+  uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02'
+}
+[authz] 348fe3e0-a8ba-4280-b187-09bb4d79411c fetch user: 69.376ms
+[authz] 348fe3e0-a8ba-4280-b187-09bb4d79411c ok { user: '669933', role: 'admin', provider: 'password', ms: 478 }
+ GET /api/agent/iros/userinfo 200 in 784ms (compile: 205ms, render: 580ms)
+[authz] 11e5062b-126e-4770-919c-eab1e2abd983 start { path: 'http://localhost:3000/api/agent/iros/conversations' }
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] 11e5062b-126e-4770-919c-eab1e2abd983 verify firebase: 259.661ms
+[authz] 11e5062b-126e-4770-919c-eab1e2abd983 fetch user: 38.969ms
+[authz] 11e5062b-126e-4770-919c-eab1e2abd983 ok { user: '669933', role: 'admin', provider: 'password', ms: 304 }
+[IROS/Conversations] auth = {
+  ok: true,
+  allowed: true,
+  status: 200,
+  pgJwt: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njk5MzMiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInVzZXJfY29kZSI6IjY2OTkzMyIsImZpcmViYXNlX3VpZCI6Ikt2UDFQNHNpZnRTRUZkTGtka1lqcVY0aE12MDIiLCJleHAiOjE3NzAyNDY4MDMsImlhdCI6MTc3MDI0NTkwM30.5TzgBEtliJ-ciBWW-lAVcAflvJX3aNGuDvtwW4mOtNQ',
+  userCode: '669933',
+  role: 'admin',
+  user: { uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02', user_code: '669933' },
+  uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02'
+}
+[IROS/Conversations] Query target user_code = 669933
+[IROS/Conversations] ✅ 100 rows fetched for user_code=669933
+ GET /api/agent/iros/conversations 200 in 423ms (compile: 50ms, render: 373ms)
+[authz] 37f7d31b-0024-4685-9e47-e56dd3c7a6e8 start {
+  path: 'http://localhost:3000/api/agent/iros/messages?conversation_id=2f95c114-3b3f-4f92-afb1-408d4f1a6641'
+}
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] 381c4232-bf8c-4bb5-978a-bb1d6f52dc7e start {
+  path: 'http://localhost:3000/api/agent/iros/messages?conversation_id=2f95c114-3b3f-4f92-afb1-408d4f1a6641'
+}
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] 37f7d31b-0024-4685-9e47-e56dd3c7a6e8 verify firebase: 247.212ms
+[authz] 381c4232-bf8c-4bb5-978a-bb1d6f52dc7e verify firebase: 256.387ms
+[authz] 37f7d31b-0024-4685-9e47-e56dd3c7a6e8 fetch user: 44.047ms
+[authz] 37f7d31b-0024-4685-9e47-e56dd3c7a6e8 ok { user: '669933', role: 'admin', provider: 'password', ms: 299 }
+[authz] 381c4232-bf8c-4bb5-978a-bb1d6f52dc7e fetch user: 73.367ms
+[authz] 381c4232-bf8c-4bb5-978a-bb1d6f52dc7e ok { user: '669933', role: 'admin', provider: 'password', ms: 335 }
+[IROS/messages][GET] conv select { ms: 42, ok: true, table: 'iros_conversations', hasRow: true }
+[IROS/messages][GET] msg select {
+  ms: 38,
+  ok: true,
+  table: 'v_iros_messages',
+  rows: 68,
+  includeMeta: true,
+  limit: 200
+}
+[IROS/messages][GET] done { ms: 383, count: 68, source: 'v_iros_messages' }
+ GET /api/agent/iros/messages?conversation_id=2f95c114-3b3f-4f92-afb1-408d4f1a6641 200 in 427ms (compile: 40ms, render: 387ms)
+[IROS/messages][GET] conv select { ms: 48, ok: true, table: 'iros_conversations', hasRow: true }
+[IROS/messages][GET] msg select {
+  ms: 52,
+  ok: true,
+  table: 'v_iros_messages',
+  rows: 68,
+  includeMeta: true,
+  limit: 200
+}
+[IROS/messages][GET] done { ms: 436, count: 68, source: 'v_iros_messages' }
+ GET /api/agent/iros/messages?conversation_id=2f95c114-3b3f-4f92-afb1-408d4f1a6641 200 in 479ms (compile: 39ms, render: 440ms)
+ GET /api/q/unified?user_code=669933 200 in 4.3s (compile: 21ms, render: 4.3s)
+[authz] b7c8bccb-0d7c-46df-90ae-cb37f57c55cb start { path: 'http://localhost:3000/api/agent/iros/messages' }
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] b7c8bccb-0d7c-46df-90ae-cb37f57c55cb verify firebase: 298.441ms
+[authz] b7c8bccb-0d7c-46df-90ae-cb37f57c55cb fetch user: 109.351ms
+[authz] b7c8bccb-0d7c-46df-90ae-cb37f57c55cb ok { user: '669933', role: 'admin', provider: 'password', ms: 415 }
+[IROS/MSG] in {
+  reqId: 'a2803cd8-f44c-4568-b00a-4fcda3875008',
+  conversationId: '2f95c114-3b3f-4f92-afb1-408d4f1a6641',
+  userCode: '669933',
+  uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02',
+  role: 'user',
+  textHead: '進めたい気持ちはあるけど、決めきるのはまだ怖い'
+}
+[IROS/messages][metaFilled] memory_state select tried {
+  table: 'iros_memory_state',
+  ms: 43,
+  ok: true,
+  hasRow: true,
+  err: null
+}
+[IROS/messages][POST][pick-q-depth][src] {
+  q_body: null,
+  q_meta_raw: null,
+  q_meta_filled: null,
+  q_final: null,
+  depth_body: null,
+  depth_meta_raw: null,
+  depth_meta_filled: null,
+  depth_final: null,
+  layer_body: null,
+  layer_meta_raw: null,
+  layer_meta_filled: null,
+  layer_final: null
+}
+[IROS/messages][POST][pick-q-depth] {
+  q_body: null,
+  q_meta: null,
+  q_final: null,
+  depth_body: null,
+  depth_meta: null,
+  depth_final: null,
+  layer_body: null,
+  layer_meta: null,
+  layer_final: null
+}
+[IROS/messages][POST] conv select { ms: 35, ok: true, table: 'iros_conversations' }
+[IROS/messages][streak-db] bump streakLen { before: 2, after: 35, q: 'Q2', from: 'db:iros_messages' }
+[IROS/messages][POST] insert tried {
+  table: 'iros_messages',
+  ms: 116,
+  ok: true,
+  hasData: true,
+  q_code: 'Q2',
+  depth_stage: 'C1',
+  intent_layer: 'C',
+  streak_q: 'Q2',
+  streak_len: '1',
+  qtu_from: 'db:iros_messages',
+  err: null
+}
+[IROS/messages][POST] nextStep strip {
+  rawText: '進めたい気持ちはあるけど、決めきるのはまだ怖い',
+  choiceId: null,
+  cleanText: '進めたい気持ちはあるけど、決めきるのはまだ怖い',
+  finalText: '進めたい気持ちはあるけど、決めきるのはまだ怖い'
+}
+[IROS/messages][POST] done { ms: 703 }
+ POST /api/agent/iros/messages 200 in 713ms (compile: 3ms, render: 710ms)
+[IROS/FLAGSHIP_GUARD][MODULE_LOADED] { rev: 'guard-rev-2026-01-28-b', at: '2026-02-04T22:58:46.436Z' }
+[IROS/FLAGS_ENV_HEAD] {
+  IROS_RETRY_FINAL_FORCE_CALL: '0',
+  IROS_FLAGSHIP_REWRITE: '1',
+  IROS_LOG_FLAGS: 'true'
+}
+[IROS/FLAGS] {
+  retryFinalForceCall: false,
+  flagshipRewrite: true,
+  guardEnabled: true,
+  guardSkipShort: false,
+  guardShortMaxLen: 80,
+  logFlags: true
+}
+[IROS/renderGateway][MODULE_LOADED] { rev: 'phase11-open-close-v2-LOADED', at: '2026-02-04T22:58:46.456Z' }
+[authz] 28f0226e-2e14-443d-bb67-b594085eeb70 start { path: 'http://localhost:3000/api/agent/iros/reply' }
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] 28f0226e-2e14-443d-bb67-b594085eeb70 verify firebase: 245.131ms
+[authz] 28f0226e-2e14-443d-bb67-b594085eeb70 fetch user: 35.61ms
+[authz] 28f0226e-2e14-443d-bb67-b594085eeb70 ok { user: '669933', role: 'admin', provider: 'password', ms: 286 }
+ POST /api/credits/authorize 200 in 180ms (compile: 63ms, render: 116ms)
+[IROS/UserProfile] load ok {
+  userCode: '669933',
+  hasIrosRow: true,
+  sofia_credit: 134,
+  style: 'friendly',
+  user_call_name: 'orion',
+  plan_status: null
+}
+[IROS/Reply] handleIrosReply start {
+  conversationId: '2f95c114-3b3f-4f92-afb1-408d4f1a6641',
+  userCode: '669933',
+  mode: 'auto',
+  tenantId: 'default',
+  rememberScope: null,
+  traceId: '43791964-cc90-4720-b9a2-a660cae11fd5',
+  style: 'friendly',
+  history_len: 12,
+  persistAssistantAllowed: false
+}
+[IROS][HistoryX] loaded {
+  userCode: '669933',
+  table: 'iros_messages_ui',
+  rawCount: 120,
+  normalizedCount: 120,
+  includeSameConversation: true,
+  currentConversationId: '2f95c114-3b3f-4f92-afb1-408d4f1a6641',
+  queryExcludeConversationId: null,
+  sameConversationIncluded: true,
+  sameConvCount: 1,
+  crossConvCount: 25,
+  crossConvUserOnly: true
+}
+[IROS][HistoryX] merged { userCode: '669933', dbCount: 26, mergedCount: 35 }
+[IROS/STATE] loaded MemoryState {
+  userCode: '669933',
+  hasMemory: true,
+  intentAnchor: 'SUN',
+  depthStage: 'C1',
+  qPrimary: 'Q2',
+  selfAcceptance: 0.7292499999999996,
+  phase: 'Inner',
+  intentLayer: 'C',
+  yLevel: 1,
+  hLevel: 2,
+  spinLoop: 'SRI',
+  spinStep: 2,
+  descentGate: 'closed',
+  itxStep: 'T3',
+  itxAnchorEventType: null,
+  itxReason: 'IT_TRIGGER_OK',
+  itxLastAt: '2026-01-08T12:26:08.007+00:00',
+  sentimentLevel: null,
+  situationSummary: '全体像を見たいのに、細かいところばかり気になってしまう',
+  situationTopic: 'その他・ライフ全般',
+  qCounts: {
+    q_trace: {
+      from: 'qTraceUpdated',
+      qNow: 'Q1',
+      prevQ: 'Q1',
+      streakQ: 'Q1',
+      streakLength: 2
+    },
+    it_cooldown: 0,
+    it_triggered: false,
+    it_triggered_true: false
+  }
+}
+[IROS/STATE] loaded MemoryState (orchestratorState) {
+  userCode: '669933',
+  hasMemory: true,
+  intentAnchor: 'SUN',
+  depthStage: 'C1',
+  qPrimary: 'Q2',
+  selfAcceptance: 0.7292499999999996,
+  phase: 'Inner',
+  intentLayer: 'C',
+  yLevel: 1,
+  hLevel: 2,
+  spinLoop: 'SRI',
+  spinStep: 2,
+  descentGate: 'closed'
+}
+[IROS/Context] framePlan built {
+  userCode: '669933',
+  inputKind: 'chat',
+  frame: 'C',
+  hasSlots: true,
+  spinLoop: 'SRI',
+  descentGate: 'closed',
+  depthStage: 'C1',
+  phase: 'Inner',
+  requestedDepth: null,
+  requestedQCode: null
+}
+[IROS][DepthGate] R->I check {
+  prevDepthStage: 'C1',
+  requestedDepth_in: null,
+  requestedDepth_out: null
+}
+[IROS/Orchestrator] input meta snapshot {
+  hasRotationState: true,
+  spinLoop: 'SRI',
+  descentGate: 'closed',
+  depth: 'C1',
+  frame: 'C',
+  slotPlanLen: 4,
+  slotPlanPolicy: null,
+  historyLen: 35,
+  hasIntentAnchor: true,
+  intentAnchorKey: 'SUN',
+  isIrDiagnosisTurn: null,
+  mode: null
+}
+[IROS/STATE] loaded MemoryState {
+  userCode: '669933',
+  hasMemory: true,
+  intentAnchor: 'SUN',
+  depthStage: 'C1',
+  qPrimary: 'Q2',
+  selfAcceptance: 0.7292499999999996,
+  phase: 'Inner',
+  intentLayer: 'C',
+  yLevel: 1,
+  hLevel: 2,
+  spinLoop: 'SRI',
+  spinStep: 2,
+  descentGate: 'closed',
+  itxStep: 'T3',
+  itxAnchorEventType: null,
+  itxReason: 'IT_TRIGGER_OK',
+  itxLastAt: '2026-01-08T12:26:08.007+00:00',
+  sentimentLevel: null,
+  situationSummary: '全体像を見たいのに、細かいところばかり気になってしまう',
+  situationTopic: 'その他・ライフ全般',
+  qCounts: {
+    q_trace: {
+      from: 'qTraceUpdated',
+      qNow: 'Q1',
+      prevQ: 'Q1',
+      streakQ: 'Q1',
+      streakLength: 2
+    },
+    it_cooldown: 0,
+    it_triggered: false,
+    it_triggered_true: false
+  }
+}
+[IROS/STATE] loaded MemoryState (orchestratorState) {
+  userCode: '669933',
+  hasMemory: true,
+  intentAnchor: 'SUN',
+  depthStage: 'C1',
+  qPrimary: 'Q2',
+  selfAcceptance: 0.7292499999999996,
+  phase: 'Inner',
+  intentLayer: 'C',
+  yLevel: 1,
+  hLevel: 2,
+  spinLoop: 'SRI',
+  spinStep: 2,
+  descentGate: 'closed'
+}
+[IROS/SA] estimateSelfAcceptance v2 (line) {
+  input: {
+    qCode: null,
+    depthStage: 'C1',
+    phase: 'Inner',
+    hasHistoryDigest: false,
+    lastSelfAcceptance: 0.7292499999999996
+  },
+  result: {
+    base: 0.7292499999999996,
+    deltaFromWords: 0,
+    value: 0.7292499999999996
+  },
+  notes: [
+    'base = lastSelfAcceptance（ライン） → 0.729',
+    'C層 intensity=1.15',
+    'deltaTextRaw=0.000, intensity=1.15, deltaWithIntensity=0.000',
+    'deltaWithIntensity=0 → effectiveDelta=0',
+    'value=0.729 (raw=0.729)'
+  ]
+}
+[IROS/SpinControl] {
+  rank: 'mid',
+  direction: 'forward',
+  promptStyle: 'one-step',
+  promptStyle_raw: 'two-choice',
+  phase: 'Inner',
+  anchorEventType: 'none',
+  hysteresis: false
+}
+[IROS/GOAL_CONT] applyGoalContinuity {
+  goal_in: {
+    kind: 'stabilize',
+    targetDepth: 'S3',
+    targetQ: 'Q3',
+    reason: 'ストレス・しんどさ系の兆候が強いため、安定を最優先',
+    detail: { ventWill: [Object] }
+  },
+  ctx: { lastQ: 'Q2', lastDepth: 'C1', qTrace: null, memoryQ: null }
+}
+[IROS/CONT continuity] { lastDepth: 'C1', lastQ: 'Q2', finalDepth: 'R3', finalQ: 'Q3' }
+[IROS/GOAL_CONT]  result {
+  goal_out: {
+    kind: 'stabilize',
+    targetDepth: 'R3',
+    targetQ: 'Q3',
+    reason: 'ストレス・しんどさ系の兆候が強いため、安定を最優先',
+    detail: { ventWill: [Object] }
+  }
+}
+[IROS/WILL priority] {
+  goalKind: 'stabilize',
+  depth: 'C1',
+  phase: 'Inner',
+  targetDepth: 'R3',
+  qCode: 'Q2',
+  targetQ: 'Q3',
+  weights: {
+    mirror: 1,
+    insight: 0.44000000000000006,
+    forward: 0.14489999999999997,
+    question: 0.15
+  }
+}
+[IROS/IT][probe] before {
+  textHead: '進めたい気持ちはあるけど、決めきるのはまだ怖い',
+  historyLen: 35,
+  historyUserLen: 30,
+  last3User: [
+    'これは今、整えているのか、止まっているのか分からない',
+    'やりたいことはあるのに、言葉にすると急に軽くなる',
+    '全体像を見たいのに、細かいところばかり気になってしまう'
+  ],
+  depth: 'C1',
+  intentLine: {
+    nowLabel: '',
+    coreNeed: null,
+    intentBand: 'I2',
+    direction: 'expand',
+    focusLayer: 'C',
+    riskHint: null,
+    guidanceHint: '',
+    tLayerHint: null,
+    hasFutureMemory: false
+  },
+  fixedNorth: { key: 'SUN', text: '太陽SUN', phrase: '成長 / 進化 / 希望 / 歓喜' },
+  intent_anchor: { key: 'SUN', text: null, phrase: null }
+}
+[IROS/IT][probe][fixedNorth] {
+  hasMeta: true,
+  fixedNorth_meta: 'SUN',
+  fixedNorth_ms: null,
+  hasNorth: true,
+  prevIt_fromMemoryState: {
+    active: true,
+    step: 'T3',
+    reason: 'IT_TRIGGER_OK',
+    lastAt: 2026-01-08T12:26:08.007Z
+  },
+  prevIt_fromMeta: {
+    active: true,
+    step: 'T3',
+    reason: 'IT_TRIGGER_OK',
+    lastAt: 2026-01-08T12:26:08.007Z
+  },
+  prevIt_fromHistory: false
+}
+[IROS/IT][result] {
+  ok: true,
+  reason: 'IT_ALREADY_COMMITTED',
+  flags: {
+    hasCore: true,
+    coreRepeated: true,
+    sunOk: true,
+    declarationOk: false,
+    deepenOk: true
+  },
+  tLayerModeActive: true,
+  tLayerHint: 'T3',
+  tVector: null
+}
+[IROS/IT_TRIGGER] {
+  ok: true,
+  reason: 'IT_ALREADY_COMMITTED',
+  flags: {
+    hasCore: true,
+    coreRepeated: true,
+    sunOk: true,
+    declarationOk: false,
+    deepenOk: true
+  },
+  iLexemeForce: false,
+  tLayerModeActive: true,
+  tLayerHint: 'T3',
+  tVector: null,
+  isCommittedT3: true,
+  committedStep: 'T3',
+  itx_probe_reason: 'IT_ALREADY_COMMITTED'
+}
+[IROS/ANCHOR_ENTRY] {"evidence":{"choiceId":null,"actionId":null,"source":"none"},"decision":{"tEntryOk":false,"anchorEvent":"none","anchorWrite":"keep","reason":"ALREADY_COMMITTED"},"fixedNorthKey":"SUN","itActive":true,"hasAnchorAlready":true}
+[IROS/FLOW][observe] { delta: 'FORWARD', confidence: 0.6, hasLastUserText: true }
+[IROS/FallbackDiag][normalChat] {
+  isSilence: false,
+  hasTextForCounsel: true,
+  shouldUseCounsel: false,
+  forceQuestionSlots: false,
+  slotsEmpty: true,
+  policyEmpty: true,
+  slotsLen_before: 0,
+  slotPlanPolicy_before: null,
+  shouldFallbackNormalChat: true
+}
+[IROS/IntentBridge] {
+  laneKey: 'T_CONCRETIZE',
+  enterI: false,
+  reconfirmT: false,
+  deepenOk: true,
+  hasCore: true,
+  declarationOk: false,
+  depth: 'C1',
+  phase: 'Inner',
+  fixedNorthKey: 'SUN'
+}
+[IROS/ORCH][after-container] {
+  frame: 'C',
+  framePlan_frame: 'C',
+  descentGate: 'closed',
+  framePlan_kind: null,
+  framePlan_stamp: null,
+  intentBridge_laneKey: 'T_CONCRETIZE',
+  intentBridge_inputs: { deepenOk: true, hasCore: true, declarationOk: false },
+  framePlan_slots_isArray: true,
+  framePlan_slots_len: 2,
+  slotPlan_isArray: true,
+  slotPlan_len: 2,
+  framePlan_policy: 'FINAL',
+  slotPlanPolicy: 'FINAL',
+  sameRef_framePlan_slotPlan: false,
+  slotPlanFallback: 'normalChat',
+  hasIntentAnchor: true,
+  intentAnchorKey: 'SUN',
+  has_intent_anchor_obj: true,
+  has_intentAnchor_obj: true,
+  has_intent_anchor_key: true,
+  has_intentAnchorKey: true
+}
+[IROS/IntentBridge] {
+  laneKey: 'T_CONCRETIZE',
+  enterI: false,
+  reconfirmT: false,
+  deepenOk: true,
+  hasCore: true,
+  declarationOk: false,
+  depth: 'C1',
+  phase: 'Inner',
+  fixedNorthKey: 'SUN'
+}
+[IROS/META][final-sync][meta] {
+  meta_q: 'Q2',
+  unified_q: 'Q2',
+  meta_depth: 'C1',
+  unified_depth: 'C1',
+  intent_anchor: { key: 'SUN', text: null, phrase: null },
+  intent_anchor_key: 'SUN',
+  anchorEntry: {
+    evidence: { choiceId: null, actionId: null, source: 'none' },
+    decision: {
+      tEntryOk: false,
+      anchorEvent: 'none',
+      anchorWrite: 'keep',
+      reason: 'ALREADY_COMMITTED'
+    }
+  }
+}
+[IROS/META][final-sync][finalMeta] {
+  meta_q: 'Q2',
+  unified_q: 'Q2',
+  meta_depth: 'R3',
+  unified_depth: 'R3',
+  intent_anchor: { key: 'SUN', text: null, phrase: null },
+  intent_anchor_key: 'SUN',
+  anchorEntry: {
+    evidence: { choiceId: null, actionId: null, source: 'none' },
+    decision: {
+      tEntryOk: false,
+      anchorEvent: 'none',
+      anchorWrite: 'keep',
+      reason: 'ALREADY_COMMITTED'
+    }
+  }
+}
+[IROS/PostProcess][SLOTPLAN_POLICY] {
+  conversationId: '2f95c114-3b3f-4f92-afb1-408d4f1a6641',
+  userCode: '669933',
+  slotPlanPolicy_detected: 'FINAL',
+  slotPlanPolicy_from: 'metaForSave.framePlan.slotPlanPolicy',
+  slotPlanPolicy_raw: 'FINAL',
+  slotPlanLen: 2,
+  hasSlots: true
+}
+[IROS/PostProcess][SEED_CORE] {
+  coreLineLen: 23,
+  seedHasCore: true,
+  seedLen: 816,
+  cleanedLen: 23,
+  cleanedApplied: true,
+  hadInternalMarkers: true
+}
+[IROS/PostProcess] SLOTPLAN_SEED_TO_WRITER (base visible) {
+  conversationId: '2f95c114-3b3f-4f92-afb1-408d4f1a6641',
+  userCode: '669933',
+  slotPlanPolicy: 'FINAL',
+  slotPlanPolicy_from: 'metaForSave.framePlan.slotPlanPolicy',
+  slotPlanLen: 2,
+  hasSlots: true,
+  baseVisibleLen: 23,
+  baseVisibleHead: '進めたい気持ちはあるけど、決めきるのはまだ怖い',
+  seedLen: 746,
+  seedHead: '@OBS {"laneKey":"T_CONCRETIZE","user":"進めたい気持ちはあ'
+}
+[IROS][ResonanceState] upsert ok {
+  userCode: '669933',
+  tenantId: 'default',
+  qCode: 'Q2',
+  depthStage: 'R3',
+  phase: 'Inner'
+}
+[UnifiedAnalysis] user message q_code/depth_stage updated {
+  conversationId: '2f95c114-3b3f-4f92-afb1-408d4f1a6641',
+  messageId: 13537,
+  q_code: 'Q2',
+  depth_stage: 'R3'
+}
+[DEBUG] Before initializing ctxPack: undefined
+[WARNING] Initializing exAny.ctxPack as an empty object...
+[DEBUG] After initializing ctxPack: {}
+[DEBUG] Before assigning flow to ctxPack: undefined
+[DEBUG] prevFlow and prevAtIso: null null
+[DEBUG] prevAtMs (timestamp of previous flow): null
+[DEBUG] ageSec and sessionBreak: null false
+[DEBUG] After assigning flow to ctxPack: {
+  at: '2026-02-04T22:58:48.001Z',
+  prevAtIso: null,
+  ageSec: null,
+  sessionBreak: false,
+  fresh: true
+}
+[IROS/LLM_GATE][FINAL_CALL][NO_FORCE] {
+  conversationId: '2f95c114-3b3f-4f92-afb1-408d4f1a6641',
+  userCode: '669933',
+  slotPlanPolicy: 'FINAL',
+  slotPlanLen: 2,
+  hasSlots: true,
+  effectiveLen: 23,
+  head: '進めたい気持ちはあるけど、決めきるのはまだ怖い'
+}
+[IROS/LLM_GATE][PROBE] {
+  conversationId: '2f95c114-3b3f-4f92-afb1-408d4f1a6641',
+  userCode: '669933',
+  llmEntry: 'CALL_LLM',
+  llmSkipReason: null,
+  allowLLM_final: true,
+  brakeReason: null,
+  speechAct: null,
+  slotPlanLen: 2,
+  hasSlots: true,
+  slotPlanPolicy: 'FINAL',
+  finalAssistantTextLen: 23,
+  finalAssistantTextHead: '進めたい気持ちはあるけど、決めきるのはまだ怖い',
+  finalAssistantTextCandidateLen: 746,
+  finalAssistantTextCandidateHead: '@OBS {"laneKey":"T_CONCRETIZE","user":"進めたい気持ちはあ…',
+  finalForceCall: false,
+  finalForceCallReason: 'FINAL_CALL_NO_FORCE',
+  resolvedTextLen: null,
+  rewriteSeedLen: 369,
+  decisionResolvedLen: null,
+  decisionRewriteSeedLen: 369
+}
+[IROS/Reply] rotation bridge { spinLoop: 'SRI', descentGate: 'closed', depth: 'R3' }
+[IROS/STATE][anchor-root] { userTextHead: '進めたい気持ちはあるけど、決めきるのはまだ怖い' }
+[IROS/STATE][fixed-by-meta] {
+  intent_anchor_obj: { key: 'SUN', text: null, phrase: null },
+  intent_anchor_key: 'SUN',
+  itx_step: 'T3',
+  itx_reason: 'IT_TRIGGER_OK',
+  itx_last_at: '2026-01-08T12:26:08.007+00:00'
+}
+[IROS/STATE] persistMemoryStateIfAny start {"userCode":"669933","userText":"進めたい気持ちはあるけど、決めきるのはまだ怖い","depthInput":"R3","qCodeInput":"Q2","phaseInput":"Inner","yLevelInt":2,"hLevelInt":2,"finalSpinLoop":"SRI","finalSpinStep":2,"finalDescentGate":"closed","itTriggered":true,"clearItxExplicit":false,"shouldClearItx":false,"itx_step":"T3","itx_anchor_event_type":null,"itx_reason":"IT_TRIGGER_OK","itx_last_at":"2026-01-08T12:26:08.007+00:00","anchor_event_db":"none","anchor_write_db":"keep","anchorEntry_decision":{"tEntryOk":false,"anchorEvent":"none","anchorWrite":"keep","reason":"ALREADY_COMMITTED"},"intent_anchor_key_candidate":"SUN","anchor_action":"keep","qTracePickedFrom":"qTraceEffective","qTrace_keys":["lastQ","dominantQ","streakQ","streakLength","volatility"],"qTrace_qNow":null,"qTrace_q_now":null,"qTrace_currentQ":null,"qTrace_snapshot_currentQ":null,"qTrace_streakQ":"Q2","qTrace_streakLength":1}
+[IROS/Phase10] decideT3Upgrade enter {
+  now_itx_step: 'T3',
+  now_anchor_write: 'keep',
+  now_anchor_event: 'none',
+  now_intent_anchor_key: 'SUN',
+  hasPrev: true,
+  prev_itx_step: 'T3',
+  prev_itx_last_at: '2026-01-08T12:26:08.007+00:00',
+  prev_intent_anchor_key: 'SUN',
+  prev_intent_anchor_raw: { key: 'SUN' },
+  now_intent_anchor_raw: 'SUN'
+}
+[IROS/Phase10] decideT3Upgrade enter {
+  now_itx_step: 'T3',
+  now_anchor_write: 'keep',
+  now_anchor_event: 'none',
+  now_intent_anchor_key: 'SUN',
+  hasPrev: true,
+  prev_itx_step: 'T3',
+  prev_itx_last_at: '2026-01-08T12:26:08.007+00:00',
+  prev_intent_anchor_key: 'SUN',
+  prev_intent_anchor_raw: { key: 'SUN' },
+  now_intent_anchor_raw: 'SUN'
+}
+[IROS/Phase10] decideT3Upgrade result { upgrade: false, nextItxStep: null, reason: 'NO_COMMIT' }
+[IROS/STATE] upsert payload (intent_anchor check) {
+  userCode: '669933',
+  anchor_action: 'keep',
+  intent_anchor_will_set: '(no-touch)',
+  anchorKeyCandidate: 'SUN',
+  fixedByMeta_intent_anchor_key: 'SUN',
+  anchorEntry_decision: {
+    tEntryOk: false,
+    anchorEvent: 'none',
+    anchorWrite: 'keep',
+    reason: 'ALREADY_COMMITTED'
+  }
+}
+[IROS/PERSIST][anchorEntry][before-upsert] {
+  hasAnchorEntry: true,
+  ae_hasDecision: true,
+  ae_anchorWrite: 'keep',
+  ae_anchorEvent: 'none',
+  ae_reason: 'ALREADY_COMMITTED',
+  ae_evidence_source: 'none',
+  decisionFinal: {
+    tEntryOk: false,
+    anchorEvent: 'none',
+    anchorWrite: 'keep',
+    reason: 'ALREADY_COMMITTED'
+  },
+  payload_has_anchor_event: true,
+  payload_has_anchor_write: true,
+  payload_anchor_event: 'none',
+  payload_anchor_write: 'keep',
+  payload_has_itx_step: true,
+  payload_itx_step: 'T3',
+  payload_itx_reason: 'IT_TRIGGER_OK',
+  payload_itx_last_at: '2026-01-08T12:26:08.007+00:00',
+  payload_itx_anchor_event_type: null,
+  payload_has_intent_anchor: false,
+  payload_intent_anchor: '(no-touch)',
+  meta_intent_anchor_key: 'SUN',
+  anchorKeyCandidate: 'SUN',
+  anchor_action: 'keep'
+}
+[IROS/STATE] persistMemoryStateIfAny ok {
+  userCode: '669933',
+  saved: [
+    'user_code',             'updated_at',
+    'depth_stage',           'q_primary',
+    'phase',                 'self_acceptance',
+    'y_level',               'h_level',
+    'spin_loop',             'spin_step',
+    'descent_gate',          'situation_summary',
+    'situation_topic',       'anchor_event',
+    'anchor_write',          'itx_step',
+    'itx_anchor_event_type', 'itx_reason',
+    'itx_last_at'
+  ],
+  depthStage: 'R3',
+  qPrimary: 'Q2',
+  spinLoop: 'SRI',
+  spinStep: 2,
+  descentGate: 'closed',
+  qCounts: '(kept)',
+  itx_step: 'T3',
+  itx_last_at: '2026-01-08T12:26:08.007+00:00',
+  anchor_action: 'keep',
+  anchor_event: 'none',
+  anchor_write: 'keep',
+  intent_anchor: '(no-touch)'
+}
+ POST /api/credits/capture 200 in 100ms (compile: 20ms, render: 79ms)
+[IROS/STATE] loaded MemoryState {
+  userCode: '669933',
+  hasMemory: true,
+  intentAnchor: 'SUN',
+  depthStage: 'R3',
+  qPrimary: 'Q2',
+  selfAcceptance: 0.7292499999999996,
+  phase: 'Inner',
+  intentLayer: 'C',
+  yLevel: 2,
+  hLevel: 2,
+  spinLoop: 'SRI',
+  spinStep: 2,
+  descentGate: 'closed',
+  itxStep: 'T3',
+  itxAnchorEventType: null,
+  itxReason: 'IT_TRIGGER_OK',
+  itxLastAt: '2026-01-08T12:26:08.007+00:00',
+  sentimentLevel: null,
+  situationSummary: '進めたい気持ちはあるけど、決めきるのはまだ怖い',
+  situationTopic: 'その他・ライフ全般',
+  qCounts: {
+    q_trace: {
+      from: 'qTraceUpdated',
+      qNow: 'Q1',
+      prevQ: 'Q1',
+      streakQ: 'Q1',
+      streakLength: 2
+    },
+    it_cooldown: 0,
+    it_triggered: false,
+    it_triggered_true: false
+  }
+}
+[IROS/pipe][META_EXTRA_MERGED] {
+  metaSource: 'metaForSave',
+  metaExtraSources: {
+    meta_extra: true,
+    extraForHandle: null,
+    result_extra: null,
+    metaExtra: null
+  },
+  mergedExtraHasBlocks: false,
+  mergedExtraBlocksLen: null,
+  mergedHead: null
+}
+[IROS/_impl/rephrase.ts][USERCTX_KEYS] {
+  hasTurns: true,
+  turnsLen: 12,
+  hasCtxPack: true,
+  ctxPackKeys: [
+    'turns',
+    'historyForWriter',
+    'itxStep',
+    'itxReason',
+    'intentBand',
+    'tLayerHint',
+    'tLayerModeActive'
+  ],
+  conversationId: '2f95c114-3b3f-4f92-afb1-408d4f1a6641',
+  userCode: '669933'
+}
+[IROS/REPHRASE_FLAG] { raw: 'true', enabled: true }
+[IROS/rephraseEngine][SHIFT_SLOT_HEAD] {
+  hasShiftSlot: true,
+  shiftSlotLen: 617,
+  shiftSlotHead: '@SHIFT {"kind":"t_concretize","intent":"implement_next_step","rules":{"no_definition":true,"no_naming":true,"no_future_instruction":false,"no_lecture":true,"no_checklist":true,"questions_max":0,"lines_max":3,"require_foc'
+}
+[IROS/rephraseHistory][LAST_TURNS_PICK] {
+  pickedFrom: 'turns',
+  maxMsgs: 6,
+  rawTurnsLen: 12,
+  rawHistoryForWriterLen: 12,
+  normalizedLen: 12,
+  pickedLen: 6,
+  roles: [ 'assistant', 'user', 'assistant', 'user', 'assistant', 'user' ],
+  tailHeads: [
+    '全体像を見たいのに、細かいところばかり気になってしまう',
+    '全体像を見たいのに、細かいところばかり気になってしまう。\nその細部の輝きもまた、全体の一部を形作っています。\n小さな点を',
+    '進めたい気持ちはあるけど、決めきるのはまだ怖い'
+  ]
+}
+[IROS/ILINE][LOCK_PARTS] { partsLen: 2, seedEqUser: true, lockHasNewline: false, lockLen: 23 }
+[IROS/ILINE][LOCK_SOURCE] {
+  hasSeed: true,
+  hasUser: true,
+  seedLen: 23,
+  userLen: 23,
+  hasILINE_seed: false,
+  hasILINE_user: false,
+  hasILINE_any: false,
+  hasILINE_END_any: false,
+  head200: '進めたい気持ちはあるけど、決めきるのはまだ怖い',
+  tail200: '進めたい気持ちはあるけど、決めきるのはまだ怖い'
+}
+[IROS/ILINE][LOCK_EXTRACT] { lockedFromAllLen: 0, lockedUniqueLen: 0, lockedUniqueHead200: '' }
+[IROS/systemPrompt][CALLED] {
+  directTask: false,
+  itOk: true,
+  personaMode: 'DELIVER',
+  intentBand: 'I2',
+  tLayerHint: 'T3',
+  lockedILinesLen: 0
+}
+[IROS/rephraseEngine][MSG_PACK] {
+  traceId: '43791964-cc90-4720-b9a2-a660cae11fd5',
+  conversationId: '2f95c114-3b3f-4f92-afb1-408d4f1a6641',
+  userCode: '669933',
+  lastTurns: 4,
+  hasHistoryText: true,
+  historyTextLen: 621,
+  msgCount: 6,
+  roles: [ 'system', 'user', 'assistant', 'user', 'assistant', 'user' ],
+  internalPackLen: 1635,
+  internalPackHasHistoryHint: true,
+  seedDraftLen: 23,
+  seedDraftHead: '進めたい気持ちはあるけど、決めきるのはまだ怖い',
+  itOk: true,
+  intentBand: 'I2',
+  tLayerHint: 'T3',
+  directTask: false,
+  inputKind: 'chat',
+  inputKindFromMeta: null,
+  inputKindFromCtx: null,
+  lockedILines: 0
+}
+[IROS/LLM][CALL] {
+  callId: '83621f8dffee',
+  purpose: 'reply',
+  model: 'gpt-4o',
+  temperature: 0.7,
+  responseFormat: 'text',
+  endpoint: 'https://api.openai.com/v1/chat/completions',
+  traceId: '43791964-cc90-4720-b9a2-a660cae11fd5',
+  conversationId: '2f95c114-3b3f-4f92-afb1-408d4f1a6641',
+  userCode: '669933',
+  slotPlanPolicy: null,
+  mode: null,
+  qCode: null,
+  depthStage: null,
+  msgCount: 6,
+  firstRole: 'system',
+  lastRole: 'user',
+  firstHead: '【T_CONCRETIZE（最優先）】 - 本文は3行のみ（改行は2回まで）。 - 箇条書き・番号・見出し・質問は一切禁…',
+  lastTail: '進めたい気持ちはあるけど、決めきるのはまだ怖い',
+  lastUserHead: '進めたい気持ちはあるけど、決めきるのはまだ怖い',
+  hasDigest: false,
+  hasAnchor: false,
+  roles: [ 'system', 'user', 'assistant', 'user', 'assistant', 'user' ],
+  caller: 'at callWriterLLM (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_65df3207._.js:15385:175)',
+  bodyKeys: [ 'max_tokens', 'messages', 'model', 'temperature' ],
+  extraBodyKeys: [],
+  extraBodyRawKeys: [],
+  hasInternalKeys: false
+}
+[IROS/FLAGSHIP_GUARD][DEBUG_IN] {
+  rev: 'guard-rev-2026-01-28-b',
+  inputLen: 78,
+  inputHead: '進めたい気持ちはあるけど、決めきるのはまだ怖い。\n' +
+    '\n' +
+    'まずは一つ、小さな選択を試みてみましょう。\n' +
+    '\n' +
+    'その選択がもたらす小さな変化を感じ取れたら、進んだ証です。',
+  slotKeys: [ 'SEED_TEXT', 'OBS', 'SHIFT' ]
+}
+[IROS/FLAGSHIP_GUARD][DEBUG_SCORE] {
+  rev: 'guard-rev-2026-01-28-b',
+  normalLite: true,
+  scaffoldLike: false,
+  len: 78,
+  qCount: 0,
+  qCountMark: 0,
+  cheer: 0,
+  hedge: 0,
+  generic: 0,
+  blandPressure: 0,
+  bulletLike: 0,
+  hasFlagshipSign: false
+}
+[IROS/LLM][OK] {
+  callId: '83621f8dffee',
+  purpose: 'reply',
+  model: 'gpt-4o',
+  ms: 2943,
+  ok: true,
+  usage: {
+    prompt_tokens: 2405,
+    completion_tokens: 63,
+    total_tokens: 2468,
+    prompt_tokens_details: { cached_tokens: 0, audio_tokens: 0 },
+    completion_tokens_details: {
+      reasoning_tokens: 0,
+      audio_tokens: 0,
+      accepted_prediction_tokens: 0,
+      rejected_prediction_tokens: 0
+    }
+  },
+  traceId: '43791964-cc90-4720-b9a2-a660cae11fd5',
+  conversationId: '2f95c114-3b3f-4f92-afb1-408d4f1a6641',
+  userCode: '669933',
+  outLen: 78,
+  outHead: '進めたい気持ちはあるけど、決めきるのはまだ怖い。\n' +
+    '\n' +
+    'まずは一つ、小さな選択を試みてみましょう。\n' +
+    '\n' +
+    'その選択がもたらす小さな変化を感じ取れたら、進んだ証です。'
+}
+[IROS/rephraseEngine][OK] {
+  traceId: '43791964-cc90-4720-b9a2-a660cae11fd5',
+  conversationId: '2f95c114-3b3f-4f92-afb1-408d4f1a6641',
+  userCode: '669933',
+  mode: 'LLM',
+  keys: [ 'OBS', 'SHIFT' ],
+  rawLen: 78,
+  rawHead: '進めたい気持ちはあるけど、決めきるのはまだ怖い。\n' +
+    '\n' +
+    'まずは一つ、小さな選択を試みてみましょう。\n' +
+    '\n' +
+    'その選択がもたらす小さな変化を感じ取れたら、進んだ証です。'
+}
+[IROS/REPHRASE][RECALL_GUARD] {
+  traceId: '43791964-cc90-4720-b9a2-a660cae11fd5',
+  conversationId: '2f95c114-3b3f-4f92-afb1-408d4f1a6641',
+  userCode: '669933',
+  enforced: false,
+  ok: true,
+  missing: [],
+  needles: { restore: null, q: null }
+}
+[IROS/FLAGSHIP_GUARD][DEBUG_IN] {
+  rev: 'guard-rev-2026-01-28-b',
+  inputLen: 76,
+  inputHead: '進めたい気持ちはあるけど、決めきるのはまだ怖い。\n' +
+    'まずは一つ、小さな選択を試みてみましょう。\n' +
+    'その選択がもたらす小さな変化を感じ取れたら、進んだ証です。',
+  slotKeys: [ 'OBS', 'SHIFT' ]
+}
+[IROS/FLAGSHIP_GUARD][DEBUG_SCORE] {
+  rev: 'guard-rev-2026-01-28-b',
+  normalLite: true,
+  scaffoldLike: false,
+  len: 76,
+  qCount: 0,
+  qCountMark: 0,
+  cheer: 0,
+  hedge: 0,
+  generic: 0,
+  blandPressure: 0,
+  bulletLike: 0,
+  hasFlagshipSign: false
+}
+[IROS/FLAGSHIP][VERDICT] {
+  traceId: '43791964-cc90-4720-b9a2-a660cae11fd5',
+  conversationId: '2f95c114-3b3f-4f92-afb1-408d4f1a6641',
+  userCode: '669933',
+  level: 'OK',
+  ok: true,
+  qCount: 0,
+  score: {
+    fatal: 0,
+    warn: 0,
+    qCount: 0,
+    bulletLike: 0,
+    hedge: 0,
+    cheer: 0,
+    generic: 0,
+    runaway: 0,
+    exaggeration: 0,
+    mismatch: 0,
+    retrySame: 0
+  },
+  reasons: [],
+  head: '進めたい気持ちはあるけど、決めきるのはまだ怖い。\n' +
+    'まずは一つ、小さな選択を試みてみましょう。\n' +
+    'その選択がもたらす小さな変化を感じ取れたら、進んだ証です。'
+}
+[IROS/rephraseEngine][MIN_OK_KIND] {
+  inputKindNow: 'chat',
+  isMicroOrGreetingNow: false,
+  shortReplyOk: true,
+  MIN_OK_LEN: 0,
+  reason: 'chat_short_reply_ok',
+  shiftTextHead: '@SHIFT {"kind":"t_concretize","intent":"implement_next_step","rules":{"no_definition":true,"no_naming":true,"no_future_instruction":false,"n',
+  shiftObjHasAllow: true
+}
+[IROS/rephraseEngine][AFTER_ATTACH] {
+  traceId: '43791964-cc90-4720-b9a2-a660cae11fd5',
+  conversationId: '2f95c114-3b3f-4f92-afb1-408d4f1a6641',
+  userCode: '669933',
+  mode: 'FLAGSHIP_OK',
+  renderEngine: true,
+  outKeysLen: 2,
+  rephraseBlocksLen: 3,
+  rephraseHead: '進めたい気持ちはあるけど、決めきるのはまだ怖い。\n' +
+    'まずは一つ、小さな選択を試みてみましょう。\n' +
+    'その選択がもたらす小さな変化を感じ取れたら、進んだ証です。'
+}
+[IROS/rephraseAttach][RES_KEYS] {
+  resKeys: [ 'ok', 'slots', 'meta' ],
+  metaKeys: [ 'inKeys', 'outKeys', 'rawLen', 'rawHead', 'note', 'extra' ],
+  outKeys: [],
+  metaOutKeys: []
+}
+[IROS/rephraseAttach][OK] {
+  conversationId: '2f95c114-3b3f-4f92-afb1-408d4f1a6641',
+  userCode: '669933',
+  blocksLen: 3,
+  head: '進めたい気持ちはあるけど、決めきるのはまだ怖い。'
+}
+[DEBUG/RENDERGW_CALL] {
+  baseTextLen: 23,
+  baseTextHead: '(base omitted: rephraseBlocks present)',
+  baseLooksEmptyLike: false,
+  renderEngine: true,
+  hasRephraseBlocks: true,
+  rephraseBlocksLen: 3,
+  rephraseBlocksHead: '進めたい気持ちはあるけど、決めきるのはまだ怖い。',
+  note_okEvenIfBaseIsDots: true,
+  hasRephraseObj: false,
+  rephraseObjKeys: null
+}
+[IROS/CONV_EVIDENCE] {
+  conversationId: '2f95c114-3b3f-4f92-afb1-408d4f1a6641',
+  userCode: '669933',
+  understand: 0,
+  repair: 0,
+  advance: 1,
+  proof: 1,
+  reason: 'U!:no_ctx_summary | R!:no_repair | A:shift:t_concretize',
+  head: '進めたい気持ちはあるけど、決めきるのはまだ怖い',
+  detail: {
+    branch: null,
+    topicHint: null,
+    q: null,
+    depth: null,
+    phase: null,
+    slotsLen: 2
+  }
+}
+[IROS/renderGateway][LEN_TRACE] {
+  rev: 'phase11-open-close-v2-LOADED',
+  len_before: 76,
+  head_before: '進めたい気持ちはあるけど、決めきるのはまだ怖い。 まずは一つ、小さな選択を試みて…'
+}
+[IROS/renderGateway][HAS_REPHRASE_BLOCKS] {
+  rev: 'phase11-open-close-v2-LOADED',
+  rephraseBlocksLen: 3,
+  outLen: 76
+}
+[IROS/renderGateway][OK] {"rev":"phase11-open-close-v2-LOADED","outLen":76,"pickedFrom":"rephraseBlocks","slotPlanPolicy":"FINAL","usedSlots":false,"scaffoldApplied":false,"expandAllowed":true}
+[IROS/renderGateway][REV] {"rev":"phase11-open-close-v2-LOADED"}
+[DEBUG/RENDERGW_OUT] {
+  outType: 'object',
+  outKeys: [ 'content', 'meta' ],
+  contentType: 'string',
+  contentLen: 76,
+  contentHead: '進めたい気持ちはあるけど、決めきるのはまだ怖い。\n' +
+    'まずは一つ、小さな選択を試みてみましょう。\n' +
+    'その選択がもたらす小さな変化を感じ取れたら、進んだ証です。',
+  pickedFrom: 'rephraseBlocks',
+  baseTextWasFallbackDots: false,
+  note: 'OK: baseText is fallback; output picked from rephraseBlocks'
+}
+[IROS][Training] computed targetKind = stabilize
+[IROS][Training] insert sample {
+  user_code: '669933',
+  conversation_id: '2f95c114-3b3f-4f92-afb1-408d4f1a6641',
+  message_id: 13538,
+  input_text: '進めたい気持ちはあるけど、決めきるのはまだ怖い',
+  analysis_text: 'Q:Q2 / D:C1 / P:Inner / K:stabilize / T:その他・ライフ全般',
+  q_code: 'Q2',
+  depth_stage: 'C1',
+  phase: 'Inner',
+  self_acceptance: 0.7292499999999996,
+  situation_summary: '進めたい気持ちはあるけど、決めきるのはまだ怖い',
+  situation_topic: 'その他・ライフ全般',
+  target_kind: 'stabilize',
+  target_label: null,
+  y_level: 2,
+  h_level: 2
+}
+[IROS][Training] insert ok
+ POST /api/agent/iros/reply 200 in 5.4s (compile: 112ms, render: 5.2s)
+[authz] 31d1a873-b60d-4c64-bcad-80d34282a4c9 start { path: 'http://localhost:3000/api/agent/iros/conversations' }
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] 31d1a873-b60d-4c64-bcad-80d34282a4c9 verify firebase: 286.76ms
+[authz] 31d1a873-b60d-4c64-bcad-80d34282a4c9 fetch user: 38.647ms
+[authz] 31d1a873-b60d-4c64-bcad-80d34282a4c9 ok { user: '669933', role: 'admin', provider: 'password', ms: 332 }
+[IROS/Conversations] auth = {
+  ok: true,
+  allowed: true,
+  status: 200,
+  pgJwt: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njk5MzMiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInVzZXJfY29kZSI6IjY2OTkzMyIsImZpcmViYXNlX3VpZCI6Ikt2UDFQNHNpZnRTRUZkTGtka1lqcVY0aE12MDIiLCJleHAiOjE3NzAyNDY4MzIsImlhdCI6MTc3MDI0NTkzMn0.1vuiybfBvMlZ4jh6YEbu1LTx7dyZWClQqBbLxYfhYQU',
+  userCode: '669933',
+  role: 'admin',
+  user: { uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02', user_code: '669933' },
+  uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02'
+}
+[IROS/Conversations] Query target user_code = 669933
+[IROS/Conversations] ✅ 100 rows fetched for user_code=669933
+ GET /api/agent/iros/conversations 200 in 393ms (compile: 1542µs, render: 391ms)
+ POST /api/register-push 200 in 874ms (compile: 1460µs, render: 872ms)
+ POST /api/register-push 200 in 495ms (compile: 3ms, render: 492ms)

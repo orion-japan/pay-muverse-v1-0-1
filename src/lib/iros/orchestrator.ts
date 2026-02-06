@@ -1484,15 +1484,20 @@ const laneKeyNow =
   (meta as any)?.intentBridge?.laneKey ?? // 念のため互換（あれば）
   null;
 
+  const fallback = buildNormalChatSlotPlan({
+    userText: textForCounsel,
+    laneKey: laneKeyNow === 'T_CONCRETIZE' ? 'T_CONCRETIZE' : 'IDEA_BAND',
 
-    const fallback = buildNormalChatSlotPlan({
-      userText: textForCounsel, // ✅ strip後（/counsel が混ざらない）
-      laneKey: laneKeyNow === 'T_CONCRETIZE' ? 'T_CONCRETIZE' : 'IDEA_BAND',
-      context: {
-        lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
-      },
-    });
+    // 🔽 ここを差し替え
+    focusLabel:
+      laneKeyNow === 'T_CONCRETIZE'
+        ? '短文化の成立条件'
+        : undefined,
 
+    context: {
+      lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
+    },
+  });
 
 
     const fbSlots = (fallback as any).slots;
