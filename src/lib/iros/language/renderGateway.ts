@@ -1235,18 +1235,29 @@ pipe('after_renderV2', content);
   pipe('after_trim', content);
 
 
+  // ✅ meta は「実際に採用された見える本文」に合わせる
+  // - pickedFrom='rephraseBlocks' のとき、picked/baseText が省略文字や短いダミーになることがある
+  // - その場合 meta の pickedHead/pickedLen がズレて解析が誤読するので、常に content 優先で補正する
+  const pickedRaw = String(picked ?? '');
+  const contentRaw = String(content ?? '');
+
+  const pickedForMeta =
+    String(pickedFrom ?? '') === 'rephraseBlocks' && norm(contentRaw).length > 0
+      ? contentRaw
+      : pickedRaw;
+
   const meta = {
     blocksCount: blocks.length,
     maxLines: maxLinesFinal,
     enable: true,
     pickedFrom,
-    pickedLen: picked.length,
-    pickedHead: head(picked),
+    pickedLen: norm(pickedForMeta).length,
+    pickedHead: head(pickedForMeta),
     fallbackFrom,
-    fallbackLen: fallbackText.length,
+    fallbackLen: norm(fallbackText).length,
     fallbackHead: head(fallbackText),
-    outLen: norm(content).length,
-    outHead: head(content),
+    outLen: norm(contentRaw).length,
+    outHead: head(contentRaw),
     rev: IROS_RENDER_GATEWAY_REV,
   };
 
@@ -1270,10 +1281,27 @@ pipe('after_renderV2', content);
     };
   }
 
+  // ✅ 追跡ログ：meta の picked が content に同期されているか確認
+  {
+    const fixed = pickedForMeta !== pickedRaw;
+    if (fixed) {
+      console.info('[IROS/renderGW][META_PICKED_FIX]', {
+        rev: IROS_RENDER_GATEWAY_REV,
+        pickedFrom,
+        pickedLen_raw: norm(pickedRaw).length,
+        pickedHead_raw: head(pickedRaw),
+        pickedLen_meta: norm(pickedForMeta).length,
+        pickedHead_meta: head(pickedForMeta),
+        outLen: norm(contentRaw).length,
+        outHead: head(contentRaw),
+      });
+    }
+  }
+
   console.info('[IROS/renderGateway][LEN_TRACE]', {
     rev: IROS_RENDER_GATEWAY_REV,
-    len_before: String(content ?? '').length,
-    head_before: head(String(content ?? '')),
+    len_before: String(contentRaw).length,
+    head_before: head(String(contentRaw)),
   });
 
 

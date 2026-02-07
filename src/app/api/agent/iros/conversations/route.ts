@@ -27,13 +27,14 @@ export async function GET(req: NextRequest) {
     // user_code は auth から直接採用（users.user_key などには一切依存しない）
     const headerUserCode = req.headers.get('x-user-code');
     const queryUserCode = new URL(req.url).searchParams.get('user_code');
+
+    // ✅ iros の owner は「数値 user_code」のみを許可（uid を user_code として使うのは禁止）
     const userCode =
       headerUserCode ||
       queryUserCode ||
       (auth as any)?.user?.user_code ||
       (auth as any)?.userCode ||
       (auth as any)?.jwt?.sub ||
-      (auth as any)?.user?.uid ||
       '';
 
     console.log('[IROS/Conversations] Query target user_code =', userCode);
@@ -83,14 +84,16 @@ export async function POST(req: NextRequest) {
 
     const headerUserCode = req.headers.get('x-user-code');
     const queryUserCode = new URL(req.url).searchParams.get('user_code');
+
+    // ✅ iros の owner は「数値 user_code」のみを許可（uid を user_code として使うのは禁止）
     const userCode =
       headerUserCode ||
       queryUserCode ||
       (auth as any)?.user?.user_code ||
       (auth as any)?.userCode ||
       (auth as any)?.jwt?.sub ||
-      (auth as any)?.user?.uid ||
       '';
+
 
     if (!userCode) {
       return NextResponse.json({ ok: false, error: 'no user_code' }, { status: 400 });

@@ -343,7 +343,7 @@ function buildShiftIdeaBand(seedText: string) {
         lines_max: 4,
 
         // 質問で進めない（提示で進める）
-        questions_max: 0,
+        questions_max: 1,
       },
       tone: SHIFT_PRESET_C_SENSE_HINT.tone ?? undefined,
       allow: { ...(SHIFT_PRESET_C_SENSE_HINT.allow ?? {}), short_reply_ok: true },
@@ -374,7 +374,7 @@ function buildShiftTConcretize(seedText: string, focusLabel?: string) {
     // preset: T具体化の禁則はここに寄せる
     rules: {
       ...(SHIFT_PRESET_T_CONCRETIZE.rules ?? {}),
-      questions_max: 0,
+      questions_max: 1,
       no_checklist: true,
       keep_small: true,
       repeatable: true,

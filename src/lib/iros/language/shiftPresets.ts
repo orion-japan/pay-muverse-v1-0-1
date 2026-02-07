@@ -10,83 +10,85 @@ export type ShiftPreset = {
 /**
  * C_SENSE_HINT
  * - C層の「手触り/観測」だけを返すためのレーン
- * - “意味確定 / 次の指示 / 結論” を避け、曖昧さと比喩は許可
+ * - （条件m）禁止6つを解除し、会話が止まらないようにする
  */
 export const SHIFT_PRESET_C_SENSE_HINT: ShiftPreset = {
   kind: 'sense_hint',
 
   rules: {
-    // ❌ 意味を確定しない
-    no_definition: true,
-    no_naming: true,
+    // ✅（条件m）解禁
+    no_definition: false,
+    no_naming: false,
+    no_conclusion: false,
 
-    // ❌ 結論・答え・未来誘導をしない
-    no_conclusion: true,
-    no_future_instruction: true,
+    // ✅（条件m）“選択肢提示”を許可するため解禁
+    // - ここは「命令」まで許す/許さないは writer 側の語りで抑える前提
+    no_future_instruction: false,
 
-    // ❌ 教える・説明する構文を禁止
-    no_lecture: true,
+    // ✅（条件m）解禁
+    no_lecture: false,
+
+    // ✅（条件m）質問は1個まで可（毎回は☓：運用は writer 側）
+    questions_max: 1,
+
+    // （現状維持）チェックリスト抑制は残す
     no_checklist: true,
-
-    // ❌ 質問で前に進めない（C層保持）
-    questions_max: 0,
 
     // ✅ 形式：短くてよい（薄い一言でもOKなレーン）
     lines_max: 3,
   },
 
   tone: {
-    tentative: true, // 意味は断定しない
-    observational: true, // 観測語りのみ
+    tentative: true,
+    observational: true,
   },
 
   allow: {
-    metaphor: true, // 比喩OK
-    ambiguity: true, // 曖昧さOK
-    short_reply_ok: true, // 短文OK（Cは許可）
+    metaphor: true,
+    ambiguity: true,
+    short_reply_ok: true,
   },
 };
 
 /**
  * T_CONCRETIZE
  * - T層の「実装・検証・次の一手」レーン
- * - “意味の断定”はしないが、“行動の断定”はしてよい
- * - 薄い1行を禁止し、最低2行以上の厚みを保証する
+ * - （条件m）禁止6つを解除し、会話が“進む”言葉を許可する
  */
 export const SHIFT_PRESET_T_CONCRETIZE: ShiftPreset = {
   kind: 't_concretize',
 
   rules: {
-    // ❌ 意味を確定しない（核は上流で前提として固定する）
-    no_definition: true,
-
-    // ✅ 固有名詞/キー名は出してよい（抽象逃げを防ぐ）
+    // ✅（条件m）解禁
+    no_definition: false,
     no_naming: false,
+    no_conclusion: false,
 
-    // ✅ 未来誘導はしない（行動・時間の指示を抑える）
-    no_future_instruction: true,
+    // ✅（条件m）“選択肢提示”を許可
+    no_future_instruction: false,
 
-    // ❌ 教える・説明する構文を抑制（説教化防止）
-    no_lecture: true,
+    // ✅（条件m）解禁
+    no_lecture: false,
+
+    // ✅（条件m）質問は最大1（毎回は出さない）
+    questions_max: 1,
+
+    // （現状維持）チェックリスト抑制は残す
     no_checklist: true,
 
-    // ✅ 質問で進めない（提示で進める）
-    questions_max: 0,
-
-    // ✅ 形式：上限は短く、薄さは抑える
-    lines_max: 4,
+    // ✅ 形式：短く縛り過ぎない
+    lines_max: 8,
     min_lines: 2,
 
-    // ✅ “対象1点” を必須化（行動は必須にしない）
+    // ✅ T_CONCRETIZE らしさ：対象1点
     require_focus_line: true,
 
-    // ❌ 時間/行動/反復の強制は廃止
+    // ❌ 強制は廃止
     require_next_step_10min: false,
     require_repeat_condition: false,
   },
 
   tone: {
-    // ✅ 命令口調に倒れないように戻す
     tentative: true,
     observational: true,
   },
@@ -95,11 +97,10 @@ export const SHIFT_PRESET_T_CONCRETIZE: ShiftPreset = {
     metaphor: false,
     ambiguity: false,
 
-    // ✅ 短文OK（MIN_OK_LEN=24 と整合）
-    short_reply_ok: true,
+    // ❌ 「短文OK」を外す（ここが短文化のトリガーになる）
+    short_reply_ok: false,
 
-    // ❌ 具体行動を“要求する”レーンではない
+    // ❌ 具体行動を“要求する”レーンではない（現状維持）
     concrete_reply: false,
   },
 };
-

@@ -114,9 +114,12 @@ export async function fetchWithIdToken(
     if (DEV) log('token error', (e as any)?.message ?? e);
   }
 
-  // --- ここが追加ポイント：開発フォールバック（x-user-code / x-mu-user） ---
-  // Bearer が付かない場合でも dev では user_code をヘッダで渡して通す
-  if (DEV && !hadBearer) {
+  // --- 開発フォールバック（x-user-code / x-mu-user） ---
+  // 方針:
+  // - Bearer が取れている（logged-in）なら user_code はサーバ側で確定できるので、ヘッダ注入しない
+  // - 明示指定（URL/Storage）があるときだけ注入する
+  // - デフォルト '669933' は廃止（混線の原因になる）
+  if (DEV) {
     try {
       const fromUrl =
         new URL(window.location.href).searchParams.get('user_code') ||
@@ -124,12 +127,16 @@ export async function fetchWithIdToken(
       const fromStorage =
         window.localStorage.getItem('mu_dev_user_code') ||
         window.localStorage.getItem('DEV_USER_CODE');
-      const fallback = fromUrl || fromStorage || '669933';
 
-      if (!base.has('x-user-code')) base.set('x-user-code', fallback);
-      if (!base.has('x-mu-user')) base.set('x-mu-user', fallback);
+      const explicit = (fromUrl || fromStorage || '').trim();
+      const shouldAttach = explicit.length > 0 && !hadBearer;
 
-      log('dev-fallback headers attached', { user_code: fallback });
+      if (shouldAttach) {
+        if (!base.has('x-user-code')) base.set('x-user-code', explicit);
+        if (!base.has('x-mu-user')) base.set('x-mu-user', explicit);
+      }
+
+      log('dev headers check', { explicit: explicit || null, hadBearer, attached: shouldAttach });
     } catch {
       /* noop */
     }

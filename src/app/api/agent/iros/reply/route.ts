@@ -75,7 +75,57 @@ if (!SUPABASE_SERVICE_ROLE_KEY) {
   throw new Error('SUPABASE_SERVICE_ROLE_KEY is missing (service-role required)');
 }
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  global: {
+    fetch: async (input: any, init?: any) => {
+      const controller = new AbortController();
+      const timeoutMs = 20_000;
+
+      const t = setTimeout(() => controller.abort(), timeoutMs);
+
+      try {
+        const res = await fetch(input, {
+          ...(init ?? {}),
+          signal: controller.signal,
+        });
+
+        const status = res.status;
+        const ct = String(res.headers.get('content-type') ?? '').toLowerCase();
+
+        const looksLikeHtml = ct.includes('text/html') || ct.includes('application/xhtml+xml');
+        const isUpstreamBad = status >= 520;
+
+        if (!res.ok && (looksLikeHtml || isUpstreamBad)) {
+          let head = '';
+          try {
+            const txt = await res.text();
+            head = txt.slice(0, 400); // ✅ ログ汚染防止（先頭だけ）
+          } catch {}
+
+          const cfRay =
+            res.headers.get('cf-ray') ||
+            res.headers.get('x-amz-cf-id') ||
+            res.headers.get('x-request-id') ||
+            '';
+
+          throw new Error(
+            `[SUPABASE_UPSTREAM_BAD] status=${status} ct=${ct || '(none)'} cfRay=${cfRay || '(none)'} head=${head || '(empty)'}`
+          );
+        }
+
+        return res;
+      } catch (e: any) {
+        if (e?.name === 'AbortError') {
+          throw new Error(`[SUPABASE_FETCH_TIMEOUT] ${timeoutMs}ms`);
+        }
+        throw e;
+      } finally {
+        clearTimeout(t);
+      }
+    },
+  },
+});
+
 
 // =========================================================
 // OPTIONS
@@ -89,6 +139,7 @@ export async function OPTIONS() {
 // =========================================================
 export async function POST(req: NextRequest) {
   const startedAt = Date.now();
+  let auth: any = null;
 
   // ✅ 早期returnでも必ず traceId を返す（body未読でも使える）
   const traceIdEarly = (() => {
@@ -105,23 +156,6 @@ export async function POST(req: NextRequest) {
   })();
 
   try {
-    // 1) auth
-    const DEV_BYPASS = process.env.IROS_DEV_BYPASS_AUTH === '1';
-    const hUserCode = req.headers.get('x-user-code');
-    const bypassUserCode = hUserCode && hUserCode.trim().length > 0 ? hUserCode.trim() : null;
-
-    let auth: any = null;
-    if (DEV_BYPASS && bypassUserCode) {
-      auth = { ok: true, userCode: bypassUserCode, uid: 'dev-bypass' };
-    } else {
-      auth = await verifyFirebaseAndAuthorize(req);
-      if (!auth?.ok) {
-        const headers: Record<string, string> = { ...CORS_HEADERS };
-        headers['x-trace-id'] = String(traceIdEarly);
-        return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401, headers });
-      }
-    }
-
     // 2) body
     const body = await req.json().catch(() => ({} as any));
     const conversationId: string | undefined = body?.conversationId;
@@ -137,6 +171,22 @@ export async function POST(req: NextRequest) {
       return s || String(traceIdEarly);
     })();
 
+    // ✅ TRACE用（auth前なので header/body から暫定で出す）
+    const userCodeHint =
+      (req.headers.get('x-user-code')?.trim() ||
+        (typeof body?.userCode === 'string' ? body.userCode.trim() : '') ||
+        '');
+
+    // ✅ 追跡用：このリクエストの traceId を必ずログに残す（調査の基点）
+    console.info('[IROS/pipe][TRACE]', {
+      traceId,
+      conversationId: String(conversationId ?? ''),
+      userCode: userCodeHint || null,
+      modeHint: modeHintInput ?? null,
+      hasHeaderUserCode: !!req.headers.get('x-user-code'),
+      devBypass: process.env.IROS_DEV_BYPASS_AUTH === '1',
+    });
+
     const chatHistory: unknown[] | undefined = Array.isArray(body?.history) ? (body.history as unknown[]) : undefined;
 
     const styleInput: string | undefined =
@@ -145,6 +195,40 @@ export async function POST(req: NextRequest) {
         : typeof body?.styleHint === 'string'
           ? body.styleHint
           : undefined;
+
+    // 1) auth
+    const DEV_BYPASS = process.env.IROS_DEV_BYPASS_AUTH === '1';
+
+    // ✅ header優先（従来どおり）
+    const hUserCode = req.headers.get('x-user-code');
+    const bypassUserCodeFromHeader = hUserCode && hUserCode.trim().length > 0 ? hUserCode.trim() : null;
+
+    // ✅ 開発だけ：headerが無い場合のフォールバック
+    // - body.userCode が来ていればそれを使う
+    // - それも無ければ IROS_DEV_BYPASS_USER_CODE（無ければ 669933）
+    // ※ production では絶対に動かさない
+    const allowDevFallback = DEV_BYPASS && process.env.NODE_ENV !== 'production';
+
+    if (DEV_BYPASS && bypassUserCodeFromHeader) {
+      auth = { ok: true, userCode: bypassUserCodeFromHeader, uid: 'dev-bypass' };
+    } else if (allowDevFallback) {
+      const bodyAny = (body ?? {}) as any;
+      const bypassUserCodeFromBody =
+        typeof bodyAny?.userCode === 'string' && bodyAny.userCode.trim().length > 0 ? bodyAny.userCode.trim() : null;
+
+      const fallbackUserCode = String(process.env.IROS_DEV_BYPASS_USER_CODE ?? '669933').trim();
+
+      const chosen = bypassUserCodeFromBody ?? fallbackUserCode;
+      auth = { ok: true, userCode: chosen, uid: 'dev-bypass' };
+    } else {
+      auth = await verifyFirebaseAndAuthorize(req);
+      if (!auth?.ok) {
+        const headers: Record<string, string> = { ...CORS_HEADERS };
+        // ✅ body.traceId が来ていればそれを返す（調査の基点を揃える）
+        headers['x-trace-id'] = String(traceId);
+        return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401, headers });
+      }
+    }
 
     if (!conversationId || !text) {
       const headers: Record<string, string> = { ...CORS_HEADERS };
@@ -166,10 +250,23 @@ export async function POST(req: NextRequest) {
     const mode = resolveModeHintFromText({ modeHint: modeHintInput, hintText, text });
     const rememberScope: RememberScopeKind | null = resolveRememberScope({ modeHint: modeHintInput, hintText, text });
 
+    // ...（この続きは元のまま）
+
     // 4) ids
-    const userCode = pickUserCode(req, auth);
+    // ✅ Bearer 認証で userCode が確定している場合は、それを絶対採用する（x-user-code で上書きさせない）
+    const userCodeFromAuth =
+      typeof (auth as any)?.userCode === 'string' && String((auth as any).userCode).trim().length > 0
+        ? String((auth as any).userCode).trim()
+        : null;
+
+    // ✅ dev-bypass のときだけ header/body フォールバックを許す（従来互換）
+    const userCode = userCodeFromAuth ?? pickUserCode(req, auth);
+
     if (!userCode) {
-      return NextResponse.json({ ok: false, error: 'unauthorized_user_code_missing' }, { status: 401, headers: CORS_HEADERS });
+      return NextResponse.json(
+        { ok: false, error: 'unauthorized_user_code_missing' },
+        { status: 401, headers: CORS_HEADERS },
+      );
     }
 
     // 5) credit amount（body.cost → header → default）
@@ -704,11 +801,9 @@ const applied = await applyRenderEngineIfEnabled({
   historyMessages: Array.isArray(chatHistory) ? chatHistory : null,
 });
 
-
-        meta = applied.meta;
-        // ✅ SoT の参照を維持しつつ、返ってきた extra を SoT に差し替える
-        extraSoT = applied.extraForHandle ?? extraSoT;
-
+meta = applied.meta;
+// ✅ SoT の参照を維持しつつ、返ってきた extra を SoT に差し替える
+extraSoT = applied.extraForHandle ?? extraSoT;
 
 // ✅ 保存側(metaForSave.extra)にも最小同期（null/空で潰さない）
 try {
@@ -721,12 +816,13 @@ try {
 
   const mergedCtx2 = ex?.ctxPack && typeof ex.ctxPack === 'object' ? ex.ctxPack : null;
 
-  // ✅ 追加：flowDigest / flowTape を carry（空で潰さない）
-  // - flowDigest は ctxPack.flow.digest も互換ソースとして拾う（ただし上書きしない）
-  const mergedFlowDigest2 =
-    String(ex?.flowDigest ?? ex?.ctxPack?.flow?.digest ?? '').trim() || null;
-
+  // ✅ flowDigest / flowTape を carry（空で潰さない）
+  const mergedFlowDigest2 = String(ex?.flowDigest ?? ex?.ctxPack?.flow?.digest ?? '').trim() || null;
   const mergedFlowTape2 = typeof ex?.flowTape === 'string' ? String(ex.flowTape).trim() || null : null;
+
+  // ✅ goalText を carry（空で潰さない）
+  const mergedGoalText2 =
+    String(ex?.goalText ?? ex?.goal ?? ex?.ctxPack?.goalText ?? ex?.ctxPack?.goal ?? '').trim() || null;
 
   // metaForSave.extra に反映（既存があるなら尊重）
   (metaForSave as any).extra = (metaForSave as any).extra ?? {};
@@ -734,21 +830,20 @@ try {
   if (mergedBlocks2 && !Array.isArray((metaForSave as any).extra?.rephraseBlocks)) {
     (metaForSave as any).extra.rephraseBlocks = mergedBlocks2;
   }
-
   if (mergedHead2 && !String((metaForSave as any).extra?.rephraseHead ?? '').trim()) {
     (metaForSave as any).extra.rephraseHead = mergedHead2;
   }
-
   if (mergedCtx2 && !(metaForSave as any).extra?.ctxPack) {
     (metaForSave as any).extra.ctxPack = mergedCtx2;
   }
-
   if (mergedFlowDigest2 && !String((metaForSave as any).extra?.flowDigest ?? '').trim()) {
     (metaForSave as any).extra.flowDigest = mergedFlowDigest2;
   }
-
   if (mergedFlowTape2 && !String((metaForSave as any).extra?.flowTape ?? '').trim()) {
     (metaForSave as any).extra.flowTape = mergedFlowTape2;
+  }
+  if (mergedGoalText2 && !String((metaForSave as any).extra?.goalText ?? '').trim()) {
+    (metaForSave as any).extra.goalText = mergedGoalText2;
   }
 
   // meta.extra にも最小同期（render 側が拾うケース）
@@ -762,27 +857,25 @@ try {
     (meta as any).extra.rephraseBlocks = ex.rephraseBlocks;
     (meta as any).extra.rephraseBlocksAttached = true;
   }
-
   if (!String((meta as any).extra?.rephraseHead ?? '').trim() && mergedHead2) {
     (meta as any).extra.rephraseHead = mergedHead2;
   }
-
   if (!(meta as any).extra?.ctxPack && mergedCtx2) {
     (meta as any).extra.ctxPack = mergedCtx2;
   }
-
   if (!String((meta as any).extra?.flowDigest ?? '').trim() && mergedFlowDigest2) {
     (meta as any).extra.flowDigest = mergedFlowDigest2;
   }
-
   if (!String((meta as any).extra?.flowTape ?? '').trim() && mergedFlowTape2) {
     (meta as any).extra.flowTape = mergedFlowTape2;
+  }
+  if (!String((meta as any).extra?.goalText ?? '').trim() && mergedGoalText2) {
+    (meta as any).extra.goalText = mergedGoalText2;
   }
 } catch (e) {
   console.warn('[IROS/route] extra minimal sync failed', e);
 }
       }
-
       // sanitize header
       {
         const before = String((result as any)?.content ?? '');

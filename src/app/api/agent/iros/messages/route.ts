@@ -351,10 +351,20 @@ export async function GET(req: NextRequest) {
     if (!userCode) return json({ ok: false, error: 'user_code_missing', error_code: 'user_code_missing' }, 400);
 
     // (B) Params
-    const cid = req.nextUrl.searchParams.get('conversation_id') || '';
-    if (!cid) {
-      return json({ ok: false, error: 'missing_conversation_id', error_code: 'missing_conversation_id' }, 400);
-    }
+    const cid =
+    req.nextUrl.searchParams.get('conversation_id') ||
+    req.nextUrl.searchParams.get('conversationId') ||
+    req.nextUrl.searchParams.get('id') ||
+    '';
+
+  if (!cid) {
+    return json({
+      ok: false,
+      error: 'missing_conversation_id',
+      error_code: 'missing_conversation_id',
+    }, 400);
+  }
+
 
     const limitRaw = req.nextUrl.searchParams.get('limit');
     const limit = (() => {

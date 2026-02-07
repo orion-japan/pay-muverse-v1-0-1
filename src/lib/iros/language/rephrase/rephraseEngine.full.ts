@@ -152,10 +152,19 @@ function buildInternalPackText(args: {
   // ✅ 追加：flowDigest / flowTape（会話の“流れ”の短い要約とテープ）
   flowDigest?: string | null;
   flowTape?: string | null;
+
+  // ✅ 追加：会話が流れるための3点セット（topic / goal / 反復）
+  topicDigest?: string | null;
+  replyGoal?: string | null;
+  repeatSignal?: string | null;
 }): string {
   const obsUser = String(args.userText ?? '').trim();
   const obsOnePoint = String(args.onePointText ?? '').trim();
   const obsSummary = String(args.situationSummary ?? '').trim();
+  const obsTopic = String(args.topicDigest ?? '').trim();
+  const obsGoal = String(args.replyGoal ?? '').trim();
+  const obsRepeat = String(args.repeatSignal ?? '').trim();
+
 
   // ✅ 観測は “このターンの userText” が最優先
   // - onePoint/summary は補助（ただし過去文が混ざり得るので最後）
@@ -185,6 +194,12 @@ function buildInternalPackText(args: {
     `obsOnePointHead=${obsOnePoint ? head(obsOnePoint, 120) : '(none)'}`,
     `obsSummaryHead=${obsSummary ? head(obsSummary, 120) : '(none)'}`,
     `obsPickHead=${obsPick ? head(obsPick, 120) : '(none)'}`,
+
+    // ✅ 会話が流れるための3点（あれば必ず優先して吸収）
+    `TOPIC_DIGEST: ${obsTopic ? head(obsTopic, 220) : '(none)'}`,
+    `REPLY_GOAL: ${obsGoal ? head(obsGoal, 220) : '(none)'}`,
+    `REPEAT_SIGNAL: ${obsRepeat ? head(obsRepeat, 220) : '(none)'}`,
+
     '',
     '【obsPick の使い方】',
     '- 出力本文の冒頭〜中盤に、obsPick に含まれる語彙やニュアンスを自然に織り込む。',
@@ -196,8 +211,11 @@ function buildInternalPackText(args: {
     '- 一般論や励ましテンプレは控えめにし、具体的な語感・場面感を優先する。',
     '',
     '【観測が弱い／無い場合】',
-    '- 無理に埋めず、短い仮置きの1文で留めてよい。',
-    '- その場合も、問い返しや講義調にはせず、静かな一言でまとめる。',
+    '- 逃げの比喩や「かもしれません」連発に寄せず、短くても“言い切り”を1つ置く。',
+    '- 定義・命名・結論はOK（ただし断定が外れる可能性がある時は、言い切り＋但し書き1つまで）。',
+    '- 未来の指示は禁止しないが、「命令」ではなく“選択肢提示（2〜3個）”で出す。',
+    '- 質問は最大1つまで（毎回は出さない）。',
+
   ].join('\n');
 
   const flowDigest = String(args.flowDigest ?? '').trim();
@@ -215,6 +233,10 @@ function buildInternalPackText(args: {
     '',
     'FLOW_HINT (DO NOT OUTPUT):',
     `flowDigest=${flowDigest || '(none)'}`,
+    `topicDigest=${String(args.topicDigest ?? '').trim() || '(none)'}`,
+    `replyGoal=${String(args.replyGoal ?? '').trim() || '(none)'}`,
+    `repeatSignal=${String(args.repeatSignal ?? '').trim() || '(none)'}`,
+
     `flowTape=${flowTape || '(none)'}`,
     '',
     'HISTORY_HINT (DO NOT OUTPUT):',
@@ -1420,16 +1442,45 @@ export async function rephraseSlotsFinal(extracted: ExtractedSlots, opts: Rephra
 
   // ------------------------------------------------------------
   // SHIFT slot はこの関数で 1回だけ取得して使い回す
+  // - key が 'SHIFT' 固定じゃないケース（@SHIFT / shift / kind側）も拾う
   // ------------------------------------------------------------
-  const shiftSlot = Array.isArray((extracted as any)?.slots)
-    ? (extracted as any).slots.find((s: any) => String(s?.key) === 'SHIFT')
-    : null;
+  const slotsAny: any[] = Array.isArray((extracted as any)?.slots) ? ((extracted as any).slots as any[]) : [];
 
-    console.log('[IROS/rephraseEngine][SHIFT_SLOT_HEAD]', {
-      hasShiftSlot: !!shiftSlot,
-      shiftSlotLen: shiftSlot?.text ? String(shiftSlot.text).length : 0,
-      shiftSlotHead: shiftSlot?.text ? safeHead(String(shiftSlot.text), 220) : null,
-    });
+  const normKey = (v: any) => String(v ?? '').trim();
+  const upperKey = (v: any) => normKey(v).toUpperCase();
+
+  const isShiftKey = (k: any) => {
+    const u = upperKey(k);
+    // 厳密：SHIFT / @SHIFT のみ
+    return u === 'SHIFT' || u === '@SHIFT';
+  };
+
+  const isShiftKind = (k: any) => {
+    const u = upperKey(k);
+    // kind 側に shift が入る場合
+    return u === 'SHIFT' || u === 'SHIFT_PRESET';
+  };
+
+  const shiftSlot =
+    slotsAny.find((s: any) => isShiftKey(s?.key)) ??
+    slotsAny.find((s: any) => isShiftKind(s?.kind)) ??
+    null;
+
+  console.log('[IROS/rephraseEngine][SHIFT_SLOT_HEAD]', {
+    hasShiftSlot: !!shiftSlot,
+    shiftSlotKey: shiftSlot ? normKey((shiftSlot as any)?.key) : null,
+    shiftSlotKind: shiftSlot ? normKey((shiftSlot as any)?.kind) : null,
+    shiftSlotLen: (shiftSlot as any)?.text ? String((shiftSlot as any).text).length : 0,
+    shiftSlotHead: (shiftSlot as any)?.text ? safeHead(String((shiftSlot as any).text), 220) : null,
+    // デバッグ用：slots の key/kind 先頭だけ（長くしない）
+    slotsKeysSample: slotsAny
+      .slice(0, 20)
+      .map((s: any) => ({
+        key: normKey(s?.key),
+        kind: normKey(s?.kind),
+      })),
+  });
+
 
     // ✅ FULL dump (opt-in): node inspect / safeHead の切り捨てを回避して SHIFT を全文で出す
     // 使い方: IROS_DEBUG_SHIFT_FULL=1 を付けて dev 起動
@@ -1879,9 +1930,37 @@ const lastTurnsSafe = (() => {
 
 
 
+  // =========================================================
+  // Flow / Context Digest
+  // =========================================================
   const flowDigest = readFlowDigest(opts?.userContext ?? null);
   const flowTape = readFlowTape(opts?.userContext ?? null);
 
+  // topic / goal / repeat（存在すれば拾う・なければ null）
+  const topicDigest = String(
+    (opts?.userContext as any)?.topicDigest ??
+      (opts?.userContext as any)?.meta?.topicDigest ??
+      (opts?.userContext as any)?.extra?.topicDigest ??
+      (opts?.userContext as any)?.ctxPack?.topicDigest ??
+      (opts?.userContext as any)?.orch?.topicDigest ??
+      ''
+  ).trim() || null;
+
+  const replyGoal = String(
+    (opts?.userContext as any)?.replyGoal ??
+      (opts?.userContext as any)?.ctxPack?.replyGoal ??
+      ''
+  ).trim() || null;
+
+  const repeatSignal = String(
+    (opts?.userContext as any)?.repeatSignal ??
+      (opts?.userContext as any)?.ctxPack?.repeatSignal ??
+      ''
+  ).trim() || null;
+
+  // =========================================================
+  // Shift slot text（既存）
+  // =========================================================
   const shiftTextForMode = String(
     (shiftSlot as any)?.text ??
       (shiftSlot as any)?.content ??
@@ -1894,13 +1973,21 @@ const lastTurnsSafe = (() => {
   const wantsTConcretize =
     /"kind"\s*:\s*"t_concretize"/.test(shiftTextForMode) || /\bt_concretize\b/.test(shiftTextForMode);
 
+    const repeatSignalSame =
+    ((opts as any)?.userContext?.ctxPack?.repeatSignal ??
+      (opts as any)?.userContext?.repeatSignal ??
+      null) === 'same_phrase';
+
   const wantsIdeaBand =
-    /"kind"\s*:\s*"idea_band"/.test(shiftTextForMode) || /\bidea_band\b/.test(shiftTextForMode);
+    !repeatSignalSame &&
+    (/"kind"\s*:\s*"idea_band"/.test(shiftTextForMode) || /\bidea_band\b/.test(shiftTextForMode));
+
 
   try {
     console.log('[IROS/rephraseEngine][LANE_DETECT]', {
       wantsTConcretize,
       wantsIdeaBand,
+      repeatSignalSame,
       shiftTextForModeHead: shiftTextForMode.slice(0, 120),
       shiftSlotType: typeof (shiftSlot as any),
       shiftSlotKeys:
@@ -1911,28 +1998,32 @@ const lastTurnsSafe = (() => {
   // ✅ T_CONCRETIZE の“圧”を下げて会話を壊さない（復唱/抽象テンプレ逃げを抑制）
   const tConcretizeHeader = wantsTConcretize
     ? [
-        '【T_CONCRETIZE（優先）】',
-        '- 本文は2〜4行まで（読みやすく）。',
-        '- 冒頭でユーザー文をそのまま復唱しない（短く言い換えて言い切る）。',
-        '- “次の一歩”は1つだけ。抽象語で逃げず、具体行動を1つ（例示OK）。',
-        '- 質問は0〜1個まで可（必要なときだけ）。',
-        '- 講義/一般論/人生訓は書かない。',
-        '',
+      '【T_CONCRETIZE（優先）】',
+      '- 本文は短め（2〜8行目安）。',
+      '- 冒頭でユーザー文をそのまま復唱しない（短く言い換えて言い切る）。',
+      '- “次の一歩”は1つだけ。抽象語で逃げず、対象/操作点を1つに絞る（例示OK）。',
+      '- 未来の指示は「命令」ではなく“選択肢提示”で出す（例：A/B/C）。',
+      '- 質問は最大1つまで（必要なときだけ）。',
+      '',
+
       ].join('\n')
     : '';
 
   // ✅ IDEA_BAND（候補生成）でも “薄い1行” に寄らないように契約を明示
   const ideaBandHeader = wantsIdeaBand
     ? [
-        '【IDEA_BAND（候補）】',
-        '- 本文は2〜4行まで（1行で終わらせない）。',
-        '- 冒頭でユーザー文をそのまま復唱しない（短く言い換える）。',
-        '- 候補は2〜4個。各候補は短く（1行以内）でOK。',
-        '- 質問は0個（必要なら最後に「次に見る観点」を1つ提示）。',
-        '- 講義/一般論/人生訓は書かない。',
-        '',
+      '【IDEA_BAND（候補）】',
+      '- 本文は短め（2〜8行目安）。',
+      '- 冒頭でユーザー文をそのまま復唱しない（短く言い換えて言い切る）。',
+      '- 候補は2〜4個。各候補は短く（1行以内）でOK。',
+      '- 候補には“名前を付けてよい”（例：A:○○ / B:○○）。',
+      '- 未来の指示は「命令」ではなく“選択肢提示”で出す（例：次はA/B/Cのどれ）。',
+      '- 質問は最大1つまで（毎回は出さない）。',
+      '',
+
       ].join('\n')
     : '';
+
 
   const systemPrompt =
     tConcretizeHeader +
@@ -1949,24 +2040,30 @@ const lastTurnsSafe = (() => {
     mustIncludeRuleText;
 
     const internalPack = buildInternalPackText({
-    metaText,
-    historyText,
-    seedDraftHint,
-    lastTurnsCount: lastTurnsSafe.length,
-    itOk,
-    directTask: isDirectTask,
-    inputKind,
-    intentBand: band.intentBand,
-    tLayerHint: band.tLayerHint,
-    userText,
-    onePointText: null,
-    situationSummary: null,
-    depthStage: null,
-    phase: null,
-    qCode: null,
-    flowDigest,
-    flowTape,
-  });
+      metaText,
+      historyText,
+      seedDraftHint,
+      lastTurnsCount: lastTurnsSafe.length,
+      itOk,
+      directTask: isDirectTask,
+      inputKind,
+      intentBand: band.intentBand,
+      tLayerHint: band.tLayerHint,
+      userText,
+      onePointText: null,
+      situationSummary: null,
+      depthStage: null,
+      phase: null,
+      qCode: null,
+      flowDigest,
+      flowTape,
+
+      // ✅ 会話が流れるための3点（topic / goal / 反復）
+      topicDigest,
+      replyGoal,
+      repeatSignal,
+    });
+
 
   const messages = buildFirstPassMessages({ systemPrompt, internalPack, turns: lastTurnsSafe });
 
@@ -2493,19 +2590,17 @@ const lastTurnsSafe = (() => {
     String(candidate ?? '')
   );
 
-  // ✅ T_CONCRETIZE で 1行だけなら、2行目に“具体の次の一手”を自動添付（そっけなさ止血）
-  if (!scaffoldActive && !isDirectTask && isTConcretize) {
-    const lines = String(candidate ?? '')
-      .split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean);
+/* =========================================================
+ * 置換1：rephraseEngine.full.ts の 2496〜2508 行を丸ごと置換
+ * 目的：T_CONCRETIZE の「2行目テンプレ自動添付」を完全停止
+ * ========================================================= */
 
-    if (lines.length <= 1 && String(candidate ?? '').trim().length > 0) {
-      candidate = `${String(candidate).trim()}\n\nいま、気になっている1つの事にだけ、そっと意識を向けてみてください。`;
-
-      candidateLen = String(candidate).trim().length; // 再計算
-    }
-  }
+// ✅ T_CONCRETIZE で 1行だけなら、2行目に“具体の次の一手”を自動添付（そっけなさ止血）
+// ↑ このポリシーはテンプレ固定文が全返信に混入しやすいので廃止。
+// - 短文は短文のまま成立させる
+// - 伸ばす必要がある場合は「seed側を厚くする」か「別のロジック（品質/ガード）」で行う
+// - ここでは一切の自動追記をしない
+// （no-op）
 
   const shouldOkTooShortToRetry =
     !scaffoldActive &&
@@ -2691,21 +2786,16 @@ const lastTurnsSafe = (() => {
 
   let retryCandidate = makeCandidate(raw2Guarded, maxLines, renderEngine);
 
-  // ✅ T_CONCRETIZE: 1行で終わる“そっけなさ”を禁止（決定的に2行へ補う）
-  if (wantsTConcretize && retryCandidate) {
-    const lines = String(retryCandidate)
-      .split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean);
+/* =========================================================
+ * 置換2：rephraseEngine.full.ts の 2694〜2708 行を丸ごと置換
+ * 目的：retry でも「強制2行＋10分テンプレ」を完全停止
+ * ========================================================= */
 
-    if (lines.length < 2) {
-      retryCandidate = [
-        String(retryCandidate).trim(),
-        '',
-        '10分だけ：デスク上の「捨てる/戻す」を5個だけやる（迷ったら紙から）。',
-      ].join('\n');
-    }
-  }
+// ✅ T_CONCRETIZE: 1行で終わる“そっけなさ”を禁止（決定的に2行へ補う）
+// ↑ ここも固定テンプレが混入する主因なので廃止。
+// - retryCandidate はそのまま採用（短くてもOK）
+// - 伸ばす必要がある場合は上流（seed/slots）で材料を足す
+// （no-op）
 
   // ✅ 2nd PASS が短い場合も seed には逃げない（retryCandidate をそのまま採用）
   {

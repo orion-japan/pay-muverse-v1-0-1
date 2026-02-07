@@ -428,6 +428,24 @@ export async function maybeAttachRephraseForRenderV2(args: {
   };
 
   const buildFlowDigest = () => {
+    // ✅ 1) “流れ”の要約（tape由来）を最優先で使う
+    // - route.ts が meta.extra.flowDigest に carry している想定
+    const metaAnyLocal: any = meta as any;
+
+    const carriedFlowDigest = pickStr(
+      metaAnyLocal?.extra?.flowDigest,
+      metaAnyLocal?.extra?.flow_digest,
+      metaAnyLocal?.framePlan?.extra?.flowDigest,
+      metaAnyLocal?.framePlan?.extra?.flow_digest,
+      metaAnyLocal?.ctxPack?.flow?.digest,
+      metaAnyLocal?.ctx_pack?.flow?.digest,
+      metaAnyLocal?.orch?.flowDigest,
+      metaAnyLocal?.orch?.flow_digest,
+    );
+
+    if (carriedFlowDigest) return carriedFlowDigest;
+
+    // ✅ 2) フォールバック：状態ダイジェスト（現状維持）
     const ms = memoryStateForCtx ?? null;
 
     const depthStage = pickStr(
@@ -469,6 +487,7 @@ export async function maybeAttachRephraseForRenderV2(args: {
     return parts.join(' | ') || null;
   };
 
+
   const metaAny: any = meta as any;
 
   // itx は MemoryState を最優先。無い場合は meta も見る（確実に rephraseEngine に届かせる）
@@ -500,8 +519,77 @@ export async function maybeAttachRephraseForRenderV2(args: {
 
   const tLayerModeActiveForCtx = Boolean(itxStepForCtx && /^T[123]$/u.test(String(itxStepForCtx)));
 
+  // ✅ 返信の目的（goalSteering）：結論ではなく「守るべき姿勢」
+  const buildReplyGoal = () => {
+    // Tレイヤー（接触/成立）は濃度を上げる
+    if (tLayerModeActiveForCtx) return 'permit_density';
+
+    // 反復/停滞っぽいときは散らかり抑制
+    // - history が薄い/取れない時は無理に判定しない（安全側）
+    const turns = normalizedHistory ?? [];
+    const lastUserTurns = turns.filter((m: any) => String(m?.role ?? '') === 'user');
+    const last2 = lastUserTurns
+      .slice(-2)
+      .map((m: any) => String(m?.content ?? '').trim())
+      .filter(Boolean);
+
+    // 同一文に近い（雑にでOK）：同じ話を繰り返してる可能性
+    if (last2.length === 2 && last2[0] === last2[1]) return 'reduce_scatter';
+
+    // ふつうは位置を映す
+    return 'reflect_position';
+  };
+
+  const replyGoalForCtx = buildReplyGoal();
+
+  // ✅ 追加（会話を散らさない3点セット）
+  // - ここでは「配線を確実に通す」ため、まずは null で置く（ロジックは次ステップで実装）
+  const topicDigestForCtx: string | null = null;
+  // repeatSignal：同趣旨反復の検出（writer の姿勢制御用）
+  const repeatSignalForCtx: string | null = (() => {
+    const turns = normalizedHistory ?? [];
+    const userTurns = turns.filter((m) => m?.role === 'user');
+
+    if (userTurns.length < 2) return null;
+
+    const last = String(userTurns[userTurns.length - 1]?.content ?? '').trim();
+    const prev = String(userTurns[userTurns.length - 2]?.content ?? '').trim();
+
+    if (!last || !prev) return null;
+
+    // 完全一致（コピペ・言い直し）
+    if (last === prev) return 'same_phrase';
+
+    // 軽い正規化（空白・句読点差）
+    const normalize = (s: string) =>
+      s.replace(/[、。,.!?！？\s]/g, '').toLowerCase();
+
+    if (normalize(last) === normalize(prev)) return 'same_phrase';
+
+    return null;
+  })();
+
+
+  // =========================================================
+  // slotPlanPolicy（FINAL 等）を userContext / ctxPack / rephraseSlotsFinal に確実に通す
+  // =========================================================
+  const slotPlanPolicyForCtx = String(
+    (extraMerged as any)?.slotPlanPolicy ??
+      (meta as any)?.framePlan?.slotPlanPolicy ??
+      (meta as any)?.slotPlanPolicy ??
+      '',
+  ).toUpperCase() || null;
+
   const userContext = {
     conversation_id: String(conversationId),
+
+    // ✅ 追加：policy を必ず通す（rephraseEngine.full.ts 側にも見せる）
+    slotPlanPolicy: slotPlanPolicyForCtx,
+
+    // ✅ 追加（3点セット）
+    topicDigest: topicDigestForCtx,
+    replyGoal: replyGoalForCtx,
+    repeatSignal: repeatSignalForCtx,
 
     // 互換（既存）
     last_state: memoryStateForCtx ?? null,
@@ -519,6 +607,9 @@ export async function maybeAttachRephraseForRenderV2(args: {
       turns: normalizedHistory.length ? normalizedHistory : undefined,
       historyForWriter: normalizedHistory.length ? normalizedHistory : undefined,
 
+      // ✅ 追加：policy を確実に通す
+      slotPlanPolicy: slotPlanPolicyForCtx,
+
       itxStep: itxStepForCtx,
       itxReason: itxReasonForCtx,
 
@@ -528,11 +619,73 @@ export async function maybeAttachRephraseForRenderV2(args: {
       // tLayerHint / tLayerModeActive も明示（itOk/tLayerHint の確実化）
       tLayerHint: itxStepForCtx,
       tLayerModeActive: tLayerModeActiveForCtx,
+
+      // ✅ 追加（3点セット：writer が必ず拾える入口）
+      topicDigest: topicDigestForCtx,
+      replyGoal: replyGoalForCtx,
+      repeatSignal: repeatSignalForCtx,
     },
 
     // 互換のため残す
     historyMessages: normalizedHistory.length ? normalizedHistory : undefined,
   };
+
+// =========================================================
+// 診断 FINAL(IR) は LLM rephrase を呼ばない（崩れ防止）
+// ただしブロック化は「assistant側テキストのみ」から行う
+// =========================================================
+const modeNow = String(effectiveMode ?? '').toLowerCase();
+const presentationKindNow = String((extraMerged as any)?.presentationKind ?? '').toLowerCase();
+
+// ✅ ここでは「再計算しない」
+// 上で確定させた policy を使う
+const slotPlanPolicyNow = slotPlanPolicyForCtx;
+
+const isDiagnosisTurn =
+  modeNow === 'diagnosis' ||
+  presentationKindNow === 'diagnosis' ||
+  Boolean((extraMerged as any)?.isIrDiagnosisTurn);
+
+const allowDiagnosisFinalRephrase = (() => {
+  const v = String(process.env.IROS_REPHRASE_ALLOW_DIAGNOSIS_FINAL ?? '')
+    .trim()
+    .toLowerCase();
+  return v === '1' || v === 'true' || v === 'on' || v === 'yes' || v === 'enabled';
+})();
+
+const shouldSkipRephraseLLMForDiagnosisFinal =
+  isDiagnosisTurn &&
+  slotPlanPolicyNow === 'FINAL' &&
+  !allowDiagnosisFinalRephrase;
+
+if (shouldSkipRephraseLLMForDiagnosisFinal) {
+  const finalText = pickSafeAssistantText({
+    candidates: [
+      (extraMerged as any)?.finalAssistantTextCandidate,
+      (extraMerged as any)?.finalAssistantText,
+      (extraMerged as any)?.assistantText,
+      (extraMerged as any)?.resolvedText,
+      (extraMerged as any)?.extractedTextFromModel,
+      (extraMerged as any)?.rawTextFromModel,
+      (extraMerged as any)?.content,
+      (extraMerged as any)?.text,
+    ],
+  });
+
+  attachBlocksFromTextOrSkip(finalText, 'DIAGNOSIS_FINAL_SEED_ONLY');
+
+  meta.extra = {
+    ...(meta.extra ?? {}),
+    rephraseAttachSkipped: true,
+    rephraseBlocksAttached: Boolean((extraMerged as any)?.rephraseBlocksAttached ?? false),
+    rephraseLLMApplied: false,
+    rephraseApplied: false,
+    rephraseReason: 'diagnosis_final_seed_only',
+  };
+
+  (extraMerged as any).rephraseAttachSkipped = true;
+  return;
+}
 
 
   // ---- 5) call LLM ----
@@ -563,59 +716,6 @@ export async function maybeAttachRephraseForRenderV2(args: {
     conversationId,
     userCode,
   });
-
-  // =========================================================
-  // 診断 FINAL(IR) は LLM rephrase を呼ばない（崩れ防止）
-  // ただしブロック化は「assistant側テキストのみ」から行う
-  // =========================================================
-  const modeNow = String(effectiveMode ?? '').toLowerCase();
-  const presentationKindNow = String((extraMerged as any)?.presentationKind ?? '').toLowerCase();
-  const slotPlanPolicyNow = String(
-    (extraMerged as any)?.slotPlanPolicy ??
-      (meta as any)?.framePlan?.slotPlanPolicy ??
-      (meta as any)?.slotPlanPolicy ??
-      '',
-  ).toUpperCase();
-
-  const isDiagnosisTurn =
-    modeNow === 'diagnosis' || presentationKindNow === 'diagnosis' || Boolean((extraMerged as any)?.isIrDiagnosisTurn);
-
-  const allowDiagnosisFinalRephrase = (() => {
-    const v = String(process.env.IROS_REPHRASE_ALLOW_DIAGNOSIS_FINAL ?? '').trim().toLowerCase();
-    return v === '1' || v === 'true' || v === 'on' || v === 'yes' || v === 'enabled';
-  })();
-
-  const shouldSkipRephraseLLMForDiagnosisFinal =
-    isDiagnosisTurn && slotPlanPolicyNow === 'FINAL' && !allowDiagnosisFinalRephrase;
-
-  if (shouldSkipRephraseLLMForDiagnosisFinal) {
-    const finalText = pickSafeAssistantText({
-      candidates: [
-        (extraMerged as any)?.finalAssistantTextCandidate,
-        (extraMerged as any)?.finalAssistantText,
-        (extraMerged as any)?.assistantText,
-        (extraMerged as any)?.resolvedText,
-        (extraMerged as any)?.extractedTextFromModel,
-        (extraMerged as any)?.rawTextFromModel,
-        (extraMerged as any)?.content,
-        (extraMerged as any)?.text,
-      ],
-    });
-
-    attachBlocksFromTextOrSkip(finalText, 'DIAGNOSIS_FINAL_SEED_ONLY');
-
-    meta.extra = {
-      ...(meta.extra ?? {}),
-      rephraseAttachSkipped: true,
-      rephraseBlocksAttached: Boolean((extraMerged as any)?.rephraseBlocksAttached ?? false),
-      rephraseLLMApplied: false,
-      rephraseApplied: false,
-      rephraseReason: 'diagnosis_final_seed_only',
-    };
-
-    (extraMerged as any).rephraseAttachSkipped = true;
-    return;
-  }
 
   // =========================================================
   // 通常: rephraseSlotsFinal を呼ぶ

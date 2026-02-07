@@ -126,10 +126,12 @@ export function decideLaneKey(params: {
   hasCore: boolean;
   declarationOk: boolean;
 }): LaneKey {
-  const { hasCore, declarationOk } = params;
-  if (hasCore || declarationOk) return 'T_CONCRETIZE';
+  // ✅ 暫定：非Tユーザーでは T_CONCRETIZE に落とさない
+  // - 現状は hasCore/declarationOk が広すぎて、ほぼ常に T_CONCRETIZE が発火してしまう。
+  // - REMAKE レーン導入までは、通常会話は IDEA_BAND に固定して “かもしれません連発” の圧を下げる。
   return 'IDEA_BAND';
 }
+
 
 /* -----------------------------
    helpers

@@ -25,19 +25,29 @@ export function useIrosSidebar() {
     try {
       const auth = getAuth();
       const token = await auth.currentUser?.getIdToken().catch(() => null);
+
+      // dev only: if NEXT_PUBLIC_IROS_DEV_BYPASS_USER_CODE is set, send it.
+      // (no implicit default like '669933')
+      const devBypassUser =
+        process.env.NODE_ENV !== 'production'
+          ? process.env.NEXT_PUBLIC_IROS_DEV_BYPASS_USER_CODE
+          : undefined;
+
       const res = await fetch('/api/agent/iros/sidebar', {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(process.env.NODE_ENV !== 'production' ? { 'X-Debug-User': '669933' } : {}),
+          ...(devBypassUser ? { 'X-Debug-User': String(devBypassUser) } : {}),
         },
         cache: 'no-store',
       });
+
       const data = await res.json();
       if (!res.ok || data?.ok === false) {
         throw new Error(data?.error || `HTTP ${res.status}`);
       }
+
       setState({
         loading: false,
         error: null,

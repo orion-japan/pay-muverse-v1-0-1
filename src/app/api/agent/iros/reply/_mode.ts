@@ -5,6 +5,38 @@ import type { RememberScopeKind } from '@/lib/iros/remember/resolveRememberBundl
 
 export type IrosModeHint = 'structured' | 'diagnosis' | 'counsel' | 'auto';
 
+function isIrDiagnosisCommand(rawText: string): boolean {
+  const trimmed = String(rawText ?? '').trim();
+  if (!trimmed) return false;
+
+  const lower = trimmed.toLowerCase();
+
+  // ✅ "iros" は絶対に除外（先頭一致で弾く）
+  if (lower.startsWith('iros')) return false;
+
+  // ✅ 空白除去で "ir 診断" → "ir診断" を吸収
+  const compact = trimmed.replace(/\s/g, '');
+  const lowerCompact = compact.toLowerCase();
+
+  // ✅ 代表コマンド（行頭）
+  // - "ir"
+  // - "ir診断..."
+  // - "ir: ..." / "ir：..." / "ir ..." など（ただし "iros" は上で除外済み）
+  if (lowerCompact === 'ir') return true;
+  if (lowerCompact === 'ir診断' || lowerCompact.startsWith('ir診断')) return true;
+
+  // "ir " / "ir　" / "ir:" / "ir：" / "ir\t" / "ir\n" など（行頭のみ）
+  if (/^(?:ir|ｉｒ)(?:[　\s]+|[:：]|$)/i.test(trimmed)) return true;
+
+  // 日本語フレーズ（行頭以外に含まれてもOKにしたいものだけ）
+  // ※誤爆を避けたいので、ここは必要最小限
+  if (lower.includes('irで見て') || lower.includes('irでみて')) return true;
+  if (lower.includes('irお願いします')) return true;
+  if (lower.includes('ir共鳴フィードバック')) return true;
+
+  return false;
+}
+
 /** テキストなどから Iros のモードヒントを推定する */
 export function resolveModeHintFromText(input?: {
   modeHint?: string | null;
@@ -14,55 +46,18 @@ export function resolveModeHintFromText(input?: {
   const direct = (input?.modeHint ?? '').toLowerCase().trim();
   if (direct === 'structured' || direct === 'diagnosis' || direct === 'counsel') return direct;
 
-  const hint = (input?.hintText ?? '').toLowerCase();
-  if (hint.includes('structured')) return 'structured';
-  if (hint.includes('diagnosis') || hint.includes('ir診断') || hint.includes('診断')) return 'diagnosis';
+  // ✅ hintText は “自動でモードを決めない”
+  // - ここがあると中途半端に structured/diagnosis に入りやすい
+  // - 専用ターンが無い限り、入口判定を増やさない
 
   const rawText = String(input?.text ?? '');
   const t = rawText.toLowerCase();
 
-  // ✅ ir診断コマンド（text 本文からも拾う）
-  // - "ir", "ir診断", "ir 診断", "irで見て", "irお願いします", "ir共鳴フィードバック" など
-  // - iros 側の trigger と齟齬が出ないよう、ここでは diagnosis に寄せる
-  // - 単語途中の "ir"（例: "mirror"）誤爆を避けるため行頭判定＋日本語パターン中心
-  const trimmed = rawText.trim();
-  const compact = trimmed.replace(/\s/g, ''); // 全空白除去（"ir 診断" → "ir診断"）
-  const lowerCompact = compact.toLowerCase();
+  // ✅ ir診断コマンドだけは text から拾って diagnosis
+  // - "iros" は除外済み
+  if (isIrDiagnosisCommand(rawText)) return 'diagnosis';
 
-  // 代表コマンド（行頭）
-  if (
-    lowerCompact === 'ir' ||
-    lowerCompact === 'ir診断' ||
-    lowerCompact.startsWith('ir診断') ||
-    /^ir[　\s]+/i.test(trimmed) || // "ir 自分" / "ir　自分"
-    /^(?:ir|ｉｒ)\s*(?:診断)?(?:[:：\s　]+)?/i.test(trimmed) || // "ir: 自分" / "ir 診断: 自分"
-    trimmed.includes('irで見て') ||
-    trimmed.includes('irでみて') ||
-    trimmed.includes('irお願いします') ||
-    trimmed.includes('ir 共鳴') ||
-    trimmed.includes('ir共鳴フィードバック')
-  ) {
-    return 'diagnosis';
-  }
-
-  // 日本語の“構造化/レポート系”キーワードで structured 扱い
-  const structuredJa = [
-    'レポート形式',
-    'レポートで',
-    'レポートを',
-    '構造化',
-    'フェーズ立て',
-    '箇条書き',
-    '要件をまとめ',
-    '要件整理',
-    '要約して',
-    '表にして',
-    '一覧化',
-    '整理して出して',
-    'レポートとしてまとめ',
-  ];
-  if (structuredJa.some((k) => t.includes(k))) return 'structured';
-
+  // counsel は軽いキーワードのみ（必要なら後で専用ターン化）
   if (t.includes('相談') || t.includes('悩み') || t.includes('困って')) return 'counsel';
 
   return 'auto';
