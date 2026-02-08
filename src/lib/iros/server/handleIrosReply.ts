@@ -1289,18 +1289,19 @@ export async function handleIrosReply(
 // ✅ extra は const のままなので、ローカルで更新して回す（関数スコープで宣言）
 let extraLocal: any = extra ?? null;
 
-  console.log('[IROS/Reply] handleIrosReply start', {
-    conversationId,
-    userCode,
-    mode,
-    tenantId,
-    rememberScope,
-    traceId,
-    style,
-    history_len: Array.isArray(history) ? history.length : null,
-    // single-writer 前提なので常に false に寄せる
-    persistAssistantAllowed: false,
-  });
+console.log('[IROS/Reply] handleIrosReply start', {
+  conversationId,
+  userCode,
+  mode,
+  tenantId,
+  rememberScope,
+  traceId,
+  style,
+  history_len: Array.isArray(history) ? history.length : null,
+  // ✅ assistant も保存する（single-writer は route.ts 側の責務）
+  persistAssistantAllowed: true,
+});
+
 
   if (process.env.IROS_DEBUG_EXTRA === '1') {
     console.log('[IROS/Reply] extra keys', {

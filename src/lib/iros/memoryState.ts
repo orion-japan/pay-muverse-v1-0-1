@@ -336,7 +336,8 @@ export async function loadIrosMemoryState(
   };
 
   if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
-    console.log('[IROS/STATE] loaded MemoryState', {
+    console.log(`[IROS][user:${userCode ?? 'unknown'}][STATE] loaded MemoryState`, {
+
       userCode,
       hasMemory: true,
       intentAnchor: state.intentAnchor,
@@ -436,10 +437,16 @@ export async function upsertIrosMemoryState(
   const finalIntentAnchor = pickOptional(input.intentAnchor, prevSafe.intentAnchor);
 
   // ★ IT 連続性（undefined のときだけ prev を採用 / null は明示消去）
-  const finalItxStep = pickOptional(input.itxStep, prevSafe.itxStep);
-  const finalItxAnchorEventType = pickOptional(input.itxAnchorEventType, prevSafe.itxAnchorEventType);
-  const finalItxReason = pickOptional(input.itxReason, prevSafe.itxReason);
-  const finalItxLastAt = pickOptional(input.itxLastAt, prevSafe.itxLastAt);
+  // ★ IT 連続性（undefined のときだけ prev を採用 / null は明示消去）
+  // ✅ 重要：itxStep が null/空 の場合は、ITX の付随情報も必ず一緒に落とす（表示矛盾を防ぐ）
+  const pickedItxStep = pickOptional(input.itxStep, prevSafe.itxStep);
+  const hasItxStep = typeof pickedItxStep === 'string' ? pickedItxStep.trim().length > 0 : Boolean(pickedItxStep);
+
+  const finalItxStep = hasItxStep ? pickedItxStep : null;
+  const finalItxAnchorEventType = hasItxStep ? pickOptional(input.itxAnchorEventType, prevSafe.itxAnchorEventType) : null;
+  const finalItxReason = hasItxStep ? pickOptional(input.itxReason, prevSafe.itxReason) : null;
+  const finalItxLastAt = hasItxStep ? pickOptional(input.itxLastAt, prevSafe.itxLastAt) : null;
+
 
   // situation は “空文字/薄い入力” で上書きしない
   const finalSituationSummary = preferNonEmptyString(input.situationSummary, prevSafe.situationSummary);

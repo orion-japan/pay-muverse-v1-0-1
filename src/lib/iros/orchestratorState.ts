@@ -165,7 +165,8 @@ export async function loadBaseMetaFromMemoryState(args: {
     const intentAnchorKey = normalizeIntentAnchorKey(msIntentAnchorRaw);
 
     if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
-      console.log('[IROS/STATE] loaded MemoryState (orchestratorState)', {
+      console.log(`[IROS][user:${userCode ?? 'unknown'}][STATE] loaded MemoryState (orchestratorState)`, {
+
         userCode,
         hasMemory: !!memoryState,
         intentAnchor: intentAnchorKey,

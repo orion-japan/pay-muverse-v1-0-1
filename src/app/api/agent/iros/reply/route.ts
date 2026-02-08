@@ -79,7 +79,14 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   global: {
     fetch: async (input: any, init?: any) => {
       const controller = new AbortController();
-      const timeoutMs = 20_000;
+
+      // ✅ 20s だと「DBのstatement_timeout等の本当の原因」を受け取る前に abort してしまう
+      // - デフォルト 60s
+      // - env で上書き可: SUPABASE_FETCH_TIMEOUT_MS
+      const timeoutMs = Math.max(
+        5_000,
+        Number(process.env.SUPABASE_FETCH_TIMEOUT_MS ?? '60000') || 60_000
+      );
 
       const t = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -125,6 +132,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     },
   },
 });
+
 
 
 // =========================================================
@@ -1114,38 +1122,56 @@ console.info('[IROS/PERSIST_PICK]', {
 });
 
 
-// ✅ P0: ECHO止血（assistant保存本文が「今回のユーザー入力」と完全一致なら、rephraseBlocks を優先）
-const userEcho = String(userTextClean ?? '').trim();
-const persistCandidate = String(contentForPersist).trim();
+// ✅ DB保存（最終確定本文）
+const persistStrict =
+  String(process.env.IROS_PERSIST_STRICT ?? '').trim() === '1' ||
+  String(process.env.NODE_ENV ?? '').trim() === 'production';
 
-if (userEcho && persistCandidate && persistCandidate === userEcho) {
-  if (blocksJoinedCleaned.length > 0 && blocksJoinedCleaned.trim() !== persistCandidate) {
-    contentForPersist = blocksJoinedCleaned;
+let saved: any = null;
+
+try {
+  saved = await persistAssistantMessageToIrosMessages({
+    supabase,
+    conversationId,
+    userCode,
+    content: contentForPersist,
+    meta: metaForSave,
+  });
+} catch (e) {
+  saved = { ok: false, error: e };
+}
+
+// ✅ 失敗時の扱い：prod は 500（strict）/ dev は 200（non-fatal）で継続
+if (!saved || saved.ok !== true) {
+  const err: any = (saved as any)?.error ?? saved ?? null;
+
+  console.error('[IROS/persistAssistantMessageToIrosMessages] insert error', {
+    conversationId,
+    userCode,
+    persistStrict,
+    error: err,
+  });
+
+  // ✅ UI/後追い調査用フラグ（保存に失敗したことは明示する）
+  meta.extra = {
+    ...(meta.extra ?? {}),
+    persist_failed: true,
+    persist_failed_strict: persistStrict,
+    persist_failed_message: String(err?.message ?? '')?.slice(0, 240) || 'persist_failed',
+  };
+
+  if (persistStrict) {
+    const msg =
+      String(err?.message ?? '') ||
+      String((saved as any)?.reason ?? '') ||
+      'persist_failed';
+    throw new Error(msg);
   }
 }
 
-// ✅ 保存本文と meta.extra.finalAssistantText を同期（UI/DB の “正本” を揃える）
-meta.extra = {
-  ...(meta.extra ?? {}),
+// messageId が必要ならここで使う（null の可能性は既存仕様に合わせる）
+const messageId = (saved as any).messageId ?? null;
 
-  // ✅ single-writer guard を確実に通す（route.ts が唯一の writer）
-  persistedByRoute: true,
-  persistAssistantMessage: false,
-
-  finalAssistantText: contentForPersist,
-  finalAssistantTextLen: contentForPersist.length,
-  finalAssistantTextCandidate: (meta.extra as any)?.finalAssistantTextCandidate ?? contentForPersist,
-};
-
-
-// ✅ DB保存（最終確定本文）
-const saved = await persistAssistantMessageToIrosMessages({
-  supabase,
-  conversationId,
-  userCode,
-  content: contentForPersist,
-  meta: meta ?? null,
-});
 
 // ✅ 保存ログ（OK/NGを短く。env か request header で有効化）
 const debugPersist =

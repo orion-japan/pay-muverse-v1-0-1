@@ -28,15 +28,13 @@ export function systemPromptForFullReply(args?: {
   const b = band?.intentBand ?? null;
   const h = band?.tLayerHint ?? null;
 
-// NOTE: intentBand(I1/I2/I3) は “要求” ではなく “帯域” なので、GUIDE_I 判定には使わない。
-// Iスタイル許可は tLayerHint（I系/T系）など “要求” 側の信号に限定する。
-const isIRequested = Boolean(h && h.startsWith('I'));
-const allowIStyle = itOk && isIRequested;
+  // NOTE: intentBand(I1/I2/I3) は “要求” ではなく “帯域” なので、GUIDE_I 判定には使わない。
+  // Iスタイル許可は tLayerHint（I系/T系）など “要求” 側の信号に限定する。
+  const isIRequested = Boolean(h && h.startsWith('I'));
+  const allowIStyle = itOk && isIRequested;
 
-const personaMode: 'GROUND' | 'DELIVER' | 'GUIDE_I' | 'ASSESS' =
-  args?.personaMode ??
-  (directTask ? 'DELIVER' : allowIStyle ? 'GUIDE_I' : 'GROUND');
-
+  const personaMode: 'GROUND' | 'DELIVER' | 'GUIDE_I' | 'ASSESS' =
+    args?.personaMode ?? (directTask ? 'DELIVER' : allowIStyle ? 'GUIDE_I' : 'GROUND');
 
   // =========================================================
   // 実行確認ログ（systemPrompt が「実際に呼ばれた」証拠）
@@ -159,11 +157,14 @@ const personaMode: 'GROUND' | 'DELIVER' | 'GUIDE_I' | 'ASSESS' =
     return [
       '',
       '【構造人格（最優先）】personaMode=GROUND',
-      '- 入口は“地面”に立つ。前に運ばない。',
-      '- まず一文の観測を置く。',
-      '- 次に「扱い方の一手」を1つだけ置く。',
-      '- 聞き返しで進めない（質問は0、最大1）。',
-      '- 一般論・選択肢列挙は禁止。',
+      '- 入口は“地面”。比喩で包まない。抽象語を増やさない。',
+      '- 1行目：ユーザーの最後の文を、短く言い換えて鏡にする（同じ話題・同じ粒度）。',
+      '- 2行目：いまの詰まりを「Aしたい/でもBが嫌」の1文で構造化する（断定形）。',
+      '- 3行目：次の一手は“最小単位”で1つだけ提示する（例：準備1個 / 1行だけ書く / 1ファイルだけ開く 等）。',
+      '- 語尾は「〜です/〜します/〜なら…こうなる」のいずれかで着地する（曖昧語で締めない）。',
+      '- 詩語彙（波/輪郭/静けさ/響き/旅 など）より、具体名詞（紙/メモ/1行/見出し/ファイル名 等）を優先する。',
+      '- 聞き返しで進めない（質問は0、最大でも1）。',
+      '- 一般論・選択肢列挙に逃げない。',
       '- 「どんな情報が必要ですか？」は禁止。',
     ].join('\n');
   })();
@@ -179,6 +180,27 @@ const personaMode: 'GROUND' | 'DELIVER' | 'GUIDE_I' | 'ASSESS' =
   ].join('\n');
 
   // =========================================================
+  // REMAKE 出力骨格（露出禁止）
+  // - REMAKE が GROUND の「一手」テンプレに吸われる事故を止める
+  // - “禁止”ではなく「これを書く」という契約
+  // =========================================================
+  const remakeSkeleton = [
+    '',
+    '【REMAKE 出力骨格（DO NOT OUTPUT / 露出禁止）】',
+    '- 対象: shift.kind=remake / intent=remake のとき最優先で適用する。',
+    '- 目的: REMAKE を “GROUND(入口の観測＋一手)” と分離し、常に骨格を保つ。',
+    '',
+    '✅ REMAKE の本文骨格（原則 2行、任意で 3行）',
+    '1行目：状態の短い言い換え（鏡）。ユーザー発話の具体語を最低1つ残す。',
+    '2行目：この深度で「よく起きる事実」を1つ置く（一般論ではなく、この発話に接続する事実）。',
+    '3行目（任意）：ズレの再定義 / 見方の更新（行動ではない）。',
+    '',
+    '🚫 REMAKE では書かない（絶対）',
+    '- 一手・行動・ToDo・手順・やり方・時間・タイマー・宿題',
+    '- GROUND の “扱い方の一手” に落ちる文（〜してみる/〜するとよい/次は…等）',
+  ].join('\n');
+
+  // =========================================================
   // Iスタイル許可
   // =========================================================
   const iStyleRule = allowIStyle
@@ -190,7 +212,7 @@ const personaMode: 'GROUND' | 'DELIVER' | 'GUIDE_I' | 'ASSESS' =
       ].join('\n')
     : '';
 
-  return [sofiaPersona, base, bandInfo, lockRule, iStyleRule, persona]
+  return [sofiaPersona, base, bandInfo, lockRule, iStyleRule, remakeSkeleton, persona]
     .filter(Boolean)
     .join('\n');
 }

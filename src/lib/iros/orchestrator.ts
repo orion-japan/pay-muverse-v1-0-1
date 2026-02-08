@@ -672,12 +672,20 @@ export async function runIrosTurn(
     (meta as any).itx_last_at = lastAtFinal;
     (meta as any).itxLastAt = lastAtFinal;
 
-    // ✅ prevIt_fromMeta.active の材料：IT_TRIGGER_OK が見えていれば active 扱い
-    const active =
-      typeof reasonFinal === 'string' && reasonFinal.includes('IT_TRIGGER_OK');
+    // ✅ ログ用：persistReason を“確定値”から必ず作る（誤読不能化）
+    (meta as any).itxPersistReason = reasonFinal;
+    (meta as any).itx_persist_reason = reasonFinal;
 
-    (meta as any).it_triggered = active;
-    (meta as any).itTriggered = active;
+    // ✅ prevIt_fromMeta.active の材料：IT_TRIGGER_OK が見えていれば active 扱い
+// ✅ prevIt_fromMeta.active の材料：IT_TRIGGER_OK が見えていれば「過去由来の active」扱い
+const prevActive =
+  typeof reasonFinal === 'string' && reasonFinal.includes('IT_TRIGGER_OK');
+
+// 🔒 ここでは itTriggered を上書きしない（このターンの itOk が担当）
+// - 代わりに「過去由来」を明示名で保持して誤読不能化
+(meta as any).prevItTriggered = prevActive;
+(meta as any).prev_it_triggered = prevActive;
+
   }
 
   // ----------------------------------------------------------------
@@ -696,7 +704,14 @@ export async function runIrosTurn(
       return typeof v === 'string' ? v : null;
     });
 
-    if (typeof process !== 'undefined' && process.env.DEBUG_IROS_IT === '1') {
+    if (
+      typeof process !== 'undefined' &&
+      process.env.DEBUG_IROS_IT === '1' &&
+      (!process.env.DEBUG_USER ||
+        process.env.DEBUG_USER ===
+          String((meta as any)?.userCode ?? (meta as any)?.user_code ?? ''))
+    ) {
+
       console.log('[IROS/IT][probe] before', {
         textHead: (text || '').slice(0, 80),
         historyLen: historyArr.length,
@@ -780,8 +795,16 @@ export async function runIrosTurn(
 
     // ok/reason：camel + snake
     if (isCommittedT3) {
-      // そのターンの判定理由は “probe理由” として別枠に退避（確定状態は維持）
+      // ✅ 再発防止ログ用：そのターンの判定理由（確定状態は維持）
+      (meta as any).itxDecisionReason = itReason;
+      (meta as any).itx_decision_reason = itReason;
+
+      // 既存キー（互換）：probe理由として退避
       (meta as any).itx_probe_reason = itReason;
+
+      // ✅ 再発防止ログ用：このターンの itx 扱い（確定済みT3なので keep）
+      (meta as any).itxWriteMode = 'keep';
+      (meta as any).itx_write_mode = 'keep';
 
       // 確定状態は維持（false に戻さない）
       (meta as any).itTriggered = true;
@@ -789,12 +812,27 @@ export async function runIrosTurn(
 
       // itxReason / itx_reason は「確定値」を維持（ここでは代入しない）
     } else {
+      // ✅ 再発防止ログ用：そのターンの判定理由
+      (meta as any).itxDecisionReason = itReason;
+      (meta as any).itx_decision_reason = itReason;
+
+      // ✅ 再発防止ログ用：このターンの itx 扱い
+      // - itOk が true のときだけ commit（扉が開いた）
+      // - itOk が false のときは keep（確定領域に触らない）
+      const writeMode = itOk ? 'commit' : 'keep';
+      (meta as any).itxWriteMode = writeMode;
+      (meta as any).itx_write_mode = writeMode;
+
       (meta as any).itTriggered = itOk;
       (meta as any).it_triggered = itOk;
 
-      (meta as any).itxReason = itReason;
-      (meta as any).itx_reason = itReason;
+      // ✅ “確定値(itx_reason)” は commit のときだけ更新（keep のときは触らない）
+      if (itOk) {
+        (meta as any).itxReason = itReason;
+        (meta as any).itx_reason = itReason;
+      }
     }
+
 
     // iLexemeForce：sticky true（camel + snake）
     const iLexemeForceNext =
@@ -817,10 +855,30 @@ export async function runIrosTurn(
     (meta as any).tVector = tVector;
     (meta as any).t_vector = tVector;
 
-    if (typeof process !== 'undefined' && process.env.DEBUG_IROS_IT === '1') {
+    if (
+      typeof process !== 'undefined' &&
+      process.env.DEBUG_IROS_IT === '1' &&
+      (!process.env.DEBUG_USER ||
+        process.env.DEBUG_USER ===
+          String((meta as any)?.userCode ?? (meta as any)?.user_code ?? ''))
+    ) {
+
       console.log('[IROS/IT_TRIGGER]', {
         ok: itOk,
-        reason: itReason,
+
+        // ✅ 再発防止：reason を必ず分離して表示（誤読不能化）
+        itxWriteMode: (meta as any).itxWriteMode ?? (meta as any).itx_write_mode ?? null,
+        itxPersistReason:
+          (meta as any).itxPersistReason ??
+          (meta as any).itx_persist_reason ??
+          null,
+
+        itxDecisionReason:
+          (meta as any).itxDecisionReason ??
+          (meta as any).itx_decision_reason ??
+          itReason ??
+          null,
+
         flags: it.flags,
         iLexemeForce: iLexemeForceNext,
         tLayerModeActive: tActive,
@@ -828,9 +886,12 @@ export async function runIrosTurn(
         tVector,
         isCommittedT3,
         committedStep,
+
+        // 既存互換：probe理由
         itx_probe_reason: (meta as any).itx_probe_reason ?? null,
       });
     }
+
   }
 
   // ----------------------------------------------------------------
@@ -909,7 +970,7 @@ export async function runIrosTurn(
       );
 
       const COMMIT_RE =
-        /(ここにコミット|コミットする|これでいく|これで行く|決めた|決めました|固定する|固定します|北極星にする|SUNにする)/;
+        /(ここにコミット|コミットする|これでいく|これで行く|決めた|決めました|方針確定|仕様確定|採用する|採用します|固定する|固定します|北極星にする|SUNにする|.+?(を)?(やる|やります|進める|進めます|やってみる|着手する|着手します))/u;
 
       const HOLD_RE =
         /^(継続する|継続します|続ける|続けます|やる|やります|進める|進みます|守る|守ります)$/u;
@@ -952,6 +1013,27 @@ export async function runIrosTurn(
           };
         }
       }
+
+// --- DEBUG: detectAnchorEntry に渡す state の実体を確定する（暫定ログ） ---
+const _ia_raw =
+  (ms as any)?.intent_anchor ?? (ms as any)?.intentAnchor ?? null;
+
+const _ia_obj =
+  _ia_raw && typeof _ia_raw === 'object' ? (_ia_raw as any) : null;
+
+const _ia_fixed = Boolean(_ia_obj && _ia_obj.fixed === true);
+
+console.log('[IROS/ANCHOR_DEBUG][before-detect]', {
+  ms_intent_anchor_raw: _ia_raw,
+  ms_intent_anchor_fixed_true: _ia_fixed,
+  itx_step_ms: (ms as any)?.itx_step ?? (ms as any)?.itxStep ?? null,
+  evidence_choiceId: evidence?.choiceId ?? null,
+  evidence_actionId: evidence?.actionId ?? null,
+  evidence_source: evidence?.source ?? null,
+});
+// --- DEBUG end ---
+
+
 
       const anchorDecision = detectAnchorEntry({
         choiceId: evidence?.choiceId ?? null,
@@ -1001,32 +1083,42 @@ export async function runIrosTurn(
       (meta as any).anchor_write = anchorDecision.anchorWrite;
       (meta as any).anchorEvidenceSource = evidence?.source ?? null;
 
-      if (anchorDecision.tEntryOk && anchorDecision.anchorWrite === 'commit') {
-        const p = anchorDecision.patch;
+// patch は union 的に無い可能性があるので、存在ガードしてから使う
+const patch =
+  (anchorDecision as any)?.patch && typeof (anchorDecision as any).patch === 'object'
+    ? ((anchorDecision as any).patch as {
+        itx_step: 'T3';
+        itx_anchor_event_type: string;
+        intent_anchor: Record<string, any>;
+      })
+    : null;
 
-        (meta as any).itx_step = p.itx_step; // 'T3'
-        (meta as any).itx_anchor_event_type = p.itx_anchor_event_type; // choice/action/reconfirm
+// ✅ T3許可（tEntryOk）の刻印は commit を要求しない
+// - commit は「fixed を立てる」ための別条件として温存
+if (anchorDecision.tEntryOk && patch) {
+  (meta as any).itx_step = patch.itx_step; // 'T3'
+  (meta as any).itx_anchor_event_type = patch.itx_anchor_event_type; // choice/action/reconfirm
 
-        // ✅ intent_anchor は正規化して載せる（camel + snake）
-        // patch が空でも “既存 or fixedNorthKey” を必ず保持する
-        const ia =
-          normalizeIntentAnchor(
-            p.intent_anchor ??
-              (meta as any).intent_anchor ??
-              (meta as any).intentAnchor ??
-              (fixedNorthKey ? { key: fixedNorthKey } : null),
-          ) ?? null;
+  // ✅ intent_anchor は正規化して載せる（camel + snake）
+  // patch が空でも “既存 or fixedNorthKey” を必ず保持する
+  const ia =
+    normalizeIntentAnchor(
+      patch.intent_anchor ??
+        (meta as any).intent_anchor ??
+        (meta as any).intentAnchor ??
+        (fixedNorthKey ? { key: fixedNorthKey } : null),
+    ) ?? null;
 
-        (meta as any).intent_anchor = ia;
-        (meta as any).intentAnchor = ia;
-        (meta as any).intent_anchor_key =
-          ia && typeof (ia as any).key === 'string' ? (ia as any).key : null;
+  (meta as any).intent_anchor = ia;
+  (meta as any).intentAnchor = ia;
+  (meta as any).intent_anchor_key =
+    ia && typeof (ia as any).key === 'string' ? (ia as any).key : null;
 
-        (meta as any).anchor_event_type = p.itx_anchor_event_type;
-        (meta as any).itx_last_at = new Date().toISOString();
-      }
+  (meta as any).anchor_event_type = patch.itx_anchor_event_type;
+  (meta as any).itx_last_at = new Date().toISOString();
+}
+
     }
-
     // =========================================================
     // ✅ slotPlan 配線（flagReply → counsel → normalChat fallback）
     // - Record<string,true> に潰さない（render-v2 が本文を組めなくなる）

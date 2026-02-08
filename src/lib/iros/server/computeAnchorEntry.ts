@@ -91,14 +91,23 @@ function pickFixedNorthKey(root: any): string | null {
 function pickItActive(root: any): boolean {
   const core = root?.meta ?? root?.finalMeta ?? root ?? {};
   const extra = root?.extra ?? core?.extra ?? {};
-  // ITが有効/作動中のフラグ（ゆれ許容）
+
+  // ✅ itActive は “派生値” が混ざりやすいので参照しない
+  // - この関数が返す itActive は「このターンでTレイヤーが有効か」の一次情報だけに限定する
+  // - 一次情報：tLayerModeActive / itTrigger.tLayerModeActive / itTrigger.ok
+  const coreIt = core?.itTrigger ?? null;
+  const extraIt = extra?.itTrigger ?? null;
+
   return (
     core?.tLayerModeActive === true ||
-    core?.itActive === true ||
     extra?.tLayerModeActive === true ||
-    extra?.itActive === true
+    (coreIt?.tLayerModeActive === true) ||
+    (extraIt?.tLayerModeActive === true) ||
+    (coreIt?.ok === true) ||
+    (extraIt?.ok === true)
   );
 }
+
 
 function pickHasAnchorAlready(root: any): boolean {
   const core = root?.meta ?? root?.finalMeta ?? root ?? {};

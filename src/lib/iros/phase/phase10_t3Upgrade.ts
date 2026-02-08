@@ -245,18 +245,21 @@ export function decideT3Upgrade(
   const prevAnchorKey = normAnchorKey(prev?.intent_anchor);
   const nowAnchorKey = normAnchorKey(now?.intent_anchor);
 
-  console.log('[IROS/Phase10] decideT3Upgrade enter', {
-    now_itx_step: now?.itx_step ?? null,
-    now_anchor_write: now?.anchor_write ?? null,
-    now_anchor_event: now?.anchor_event ?? null,
-    now_intent_anchor_key: nowAnchorKey,
-    hasPrev: Boolean(prev),
-    prev_itx_step: prev?.itx_step ?? null,
-    prev_itx_last_at: prev?.itx_last_at ?? null,
-    prev_intent_anchor_key: prevAnchorKey,
-    prev_intent_anchor_raw: prev?.intent_anchor ?? null,
-    now_intent_anchor_raw: now?.intent_anchor ?? null,
+  console.log('[IROS/PHASE10_T3][enter]', {
+    // ✅ Phase10 は phase10* の語彙で固定（IT側の itx* と混ざらない）
+    phase10NowItxStep: now?.itx_step ?? null,
+    phase10NowAnchorWrite: now?.anchor_write ?? null,
+    phase10NowAnchorEvent: now?.anchor_event ?? null,
+    phase10NowIntentAnchorKey: nowAnchorKey,
+
+    phase10HasPrev: Boolean(prev),
+    phase10PrevItxStep: prev?.itx_step ?? null,
+    phase10PrevItxLastAt: prev?.itx_last_at ?? null,
+    phase10PrevIntentAnchorKey: prevAnchorKey,
+    phase10PrevIntentAnchorRaw: prev?.intent_anchor ?? null,
+    phase10NowIntentAnchorRaw: now?.intent_anchor ?? null,
   });
+
 
   // ---- 判定ロジック ----
   const nowWrite = now.anchor_write ?? null;

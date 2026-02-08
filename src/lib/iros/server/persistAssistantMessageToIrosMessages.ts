@@ -207,7 +207,36 @@ export async function persistAssistantMessageToIrosMessages(args: {
     finalMeta = safeMeta;
   }
 
-  const row = {
+  // ✅ inserted row の id を返す（route.ts 側で message_id として使う）
+  // - statement timeout が出る環境があるため：
+  //   1) まず通常insert（idを返す）
+  //   2) timeout なら meta を軽量化して 1回だけリトライ
+  //   3) それでもダメなら NG（エラーは出す）
+  const shrinkMetaForPersist = (meta: any) => {
+    const m: any = meta && typeof meta === 'object' ? { ...meta } : {};
+    // rootに同期している可能性がある重い要素を落とす
+    delete m.rephraseBlocks;
+    delete m.rephraseBlocksAttached;
+
+    // extra が巨大化しやすいので、重い要素を落とす
+    if (m.extra && typeof m.extra === 'object') {
+      const ex: any = { ...(m.extra as any) };
+      delete ex.rephraseBlocks;
+      delete ex.ctxPack;
+      delete ex.flowTape;
+      // headだけ残したい場合（空ならそのまま）
+      m.extra = ex;
+    }
+    return sanitizeForJsonb(m);
+  };
+
+  const isStatementTimeout = (e: any) => {
+    const code = String(e?.code ?? '').trim();
+    const msg = String(e?.message ?? '').toLowerCase();
+    return code === '57014' || msg.includes('statement timeout') || msg.includes('canceling statement');
+  };
+
+  const baseRow = {
     conversation_id: conversationId,
     role: 'assistant',
     content: content,
@@ -220,14 +249,66 @@ export async function persistAssistantMessageToIrosMessages(args: {
 
     // ✅ schema に列がある前提（無いなら削除）
     user_code: userCode,
-  };
+  } as const;
 
-  // ✅ inserted row の id を返す（route.ts 側で message_id として使う）
-  const { data, error } = await supabase
-    .from('iros_messages')
-    .insert([row])
-    .select('id')
-    .single();
+  // 1) 通常 insert（返却は要求しない）
+  let data: any = null;
+  let error: any = null;
+
+  {
+    const res = await supabase.from('iros_messages').insert([baseRow]);
+    data = (res as any).data ?? null;
+    error = (res as any).error ?? null;
+  }
+
+  // 2) statement timeout のときだけ、meta を軽量化して 1回リトライ
+  if (error && isStatementTimeout(error)) {
+    console.warn('[IROS/persistAssistantMessageToIrosMessages] retry with shrunk meta (statement timeout)', {
+      conversationId,
+      userCode,
+      code: error?.code ?? null,
+      message: error?.message ?? null,
+    });
+
+    const retryRow = {
+      ...baseRow,
+      meta: shrinkMetaForPersist(finalMeta),
+    };
+
+    const res2 = await supabase.from('iros_messages').insert([retryRow]);
+    data = (res2 as any).data ?? null;
+    error = (res2 as any).error ?? null;
+  }
+
+  // 3) それでも timeout なら、meta を“超軽量”にして もう1回だけリトライ（最後の手段）
+  if (error && isStatementTimeout(error)) {
+    const fm: any = finalMeta && typeof finalMeta === 'object' ? finalMeta : {};
+    const ex: any = fm.extra && typeof fm.extra === 'object' ? fm.extra : {};
+
+    const ultraMeta = sanitizeForJsonb({
+      // 参照されがちなキーだけ残す（列は q_code / depth_stage が本命なので meta は最小でよい）
+      itx_step: fm.itx_step ?? fm.itxStep ?? null,
+      itx_reason: fm.itx_reason ?? fm.itxReason ?? null,
+      intent_anchor_key: fm.intent_anchor_key ?? fm.intentAnchorKey ?? null,
+      extra: {
+        traceId: ex.traceId ?? null,
+        persistedByRoute: ex.persistedByRoute ?? true,
+        // ここに巨大化しやすいものは絶対入れない
+      },
+    });
+
+    console.warn('[IROS/persistAssistantMessageToIrosMessages] retry with ULTRA shrunk meta (statement timeout)', {
+      conversationId,
+      userCode,
+      code: error?.code ?? null,
+      message: error?.message ?? null,
+    });
+
+    const res3 = await supabase.from('iros_messages').insert([{ ...baseRow, meta: ultraMeta }]);
+    data = (res3 as any).data ?? null;
+    error = (res3 as any).error ?? null;
+  }
+
 
   if (error) {
     console.error('[IROS/persistAssistantMessageToIrosMessages] insert error', {

@@ -843,18 +843,11 @@ export async function persistMemoryStateIfAny(args: {
     const t3EvidenceLocal = (args as any).t3Evidence ?? (args as any).evidence ?? null;
     const phase10CfgLocal = (args as any).phase10Cfg ?? (args as any).cfg ?? undefined;
 
-    console.log('[IROS/Phase10] decideT3Upgrade enter', {
-      now_itx_step: nowForT3.itx_step ?? null,
-      now_anchor_write: nowForT3.anchor_write ?? null,
-      now_anchor_event: nowForT3.anchor_event ?? null,
-      now_intent_anchor_key: nowForT3.intent_anchor ?? null,
-      hasPrev: Boolean(prevForT3),
-      prev_itx_step: prevForT3?.itx_step ?? null,
-      prev_itx_last_at: prevForT3?.itx_last_at ?? null,
-      prev_intent_anchor_key: extractIntentAnchorKey(prevForT3?.intent_anchor) ?? null,
-      prev_intent_anchor_raw: prevForT3?.intent_anchor ?? null,
-      now_intent_anchor_raw: nowForT3.intent_anchor ?? null,
-    });
+    // NOTE: 再発防止（ログ誤読防止）
+    // Phase10 enter は phase10_t3Upgrade.ts 側で統一ログを出すため、ここでは二重発火を避ける。
+    // console.log('[IROS/PHASE10_T3][enter]', { ... }); // disabled (enter log lives in phase10_t3Upgrade.ts)
+
+
 
     const t3Decision = decideT3Upgrade({
       prev: prevForT3,
@@ -863,23 +856,36 @@ export async function persistMemoryStateIfAny(args: {
       cfg: phase10CfgLocal,
     });
 
-    console.log('[IROS/Phase10] decideT3Upgrade result', t3Decision);
+    if (
+      typeof process !== 'undefined' &&
+      process.env.DEBUG_IROS_IT === '1' &&
+      (!process.env.DEBUG_USER ||
+        process.env.DEBUG_USER === String(userCode ?? ''))
 
-    // ✅ 修正版：T3 upgrade を最優先（effectiveItx より上）
-    const itxForSave: EffectiveItx =
-      t3Decision.upgrade === true && t3Decision.nextItxStep === 'T3'
-        ? {
-            itx_step: 'T3',
-            itx_anchor_event_type:
-              anchorEventTypeResolved && anchorEventTypeResolved !== 'none'
-                ? anchorEventTypeResolved
-                : null,
-            itx_reason: 'T3_UPGRADE',
-            itx_last_at: nowIso(),
-          }
-        : effectiveItx
-          ? effectiveItx
-          : null;
+    ) {
+      console.log('[IROS/PHASE10_T3][result]', {
+        phase10Upgrade: t3Decision?.upgrade ?? null,
+        phase10NextItxStep: (t3Decision as any)?.nextItxStep ?? null,
+        phase10Reason: (t3Decision as any)?.reason ?? null,
+      });
+    }
+
+
+
+// ✅ 修正版：T3 upgrade の“発生時だけ” itx_* を書く（keep は触らない）
+const itxForSave: EffectiveItx =
+  t3Decision.upgrade === true &&
+  t3Decision.nextItxStep === 'T3' &&
+  anchorEventTypeResolved &&
+  anchorEventTypeResolved !== 'none'
+    ? {
+        itx_step: 'T3',
+        itx_anchor_event_type: anchorEventTypeResolved,
+        itx_reason: 'T3_UPGRADE',
+        itx_last_at: nowIso(),
+      }
+    : null;
+
 
 // =========================================================
 // ✅ upsert payload（“null は入れない” を徹底：keep を壊さない）

@@ -4,6 +4,11 @@
 // - 「言葉」ではなく「行動・選択・反復」の証拠が来た時だけ T3 を許可する
 // - Orchestrator の深度判断(Q/Depth/phase)とは分離する（責務分離）
 // - DBカラム追加なしで、itx_step / itx_anchor_event_type / intent_anchor(jsonb) に証拠を刻む
+//
+// ✅ 重要（仕様）
+// - T3 は「確定」ではない（方向確定/行動証拠ではない）
+// - ここでやるのは「T3へ入ってよい（密度を上げてよい）」という許可だけ
+// - “確定アンカー(commit)” は別条件（ユーザーの明示的な選択・宣言・反復）でのみ立てる
 
 export type AnchorEventType = 'choice' | 'action' | 'reconfirm' | 'none';
 
@@ -20,10 +25,13 @@ export type AnchorEntryInput = {
     itx_step?: string | null; // 'T2' など
     itx_last_at?: string | null;
     intent_anchor?: any | null; // jsonb (object想定)
-    // 参考：SUN固定などは呼び出し側で担保してもよいが、ここでも見られるように拡張可能
   };
 };
 
+// ✅ AnchorEntryDecision の定義を「T3許可」と「確定(commit)」で分離
+// - tEntryOk=true は “T3へ入ってよい” を表す
+// - anchorWrite は keep/commit の両方を許容（通常は keep）
+// - patch は「T3許可の刻印」として任意（ここでは付ける）
 export type AnchorEntryDecision =
   | {
       tEntryOk: false;
@@ -34,12 +42,12 @@ export type AnchorEntryDecision =
   | {
       tEntryOk: true;
       anchorEvent: Exclude<AnchorEventType, 'none'>; // choice/action/reconfirm
-      anchorWrite: 'commit';
+      anchorWrite: 'keep' | 'commit';
       reason: 'CHOICE' | 'ACTION' | 'RECONFIRM';
-      patch: {
-        itx_step: 'T3';
-        itx_anchor_event_type: Exclude<AnchorEventType, 'none'>;
-        intent_anchor: Record<string, any>;
+      patch?: {
+        itx_step?: 'T3';
+        itx_anchor_event_type?: Exclude<AnchorEventType, 'none'>;
+        intent_anchor?: Record<string, any>;
       };
     };
 
@@ -57,10 +65,12 @@ export function detectAnchorEntry(input: AnchorEntryInput): AnchorEntryDecision 
   const choiceId = s(input.choiceId);
   const actionId = s(input.actionId);
 
-  const itxStep = s(input.state?.itx_step);
-  const alreadyCommitted = itxStep === 'T3';
+  const prev = obj(input.state?.intent_anchor) ?? {};
+  const isFixed = Boolean((prev as any)?.fixed === true);
 
-  if (alreadyCommitted) {
+  // ✅ 確定済み（fixed）のときは開かない
+  // ※ 既存 union に合わせて reason は ALREADY_COMMITTED を流用
+  if (isFixed) {
     return {
       tEntryOk: false,
       anchorEvent: 'none',
@@ -69,7 +79,7 @@ export function detectAnchorEntry(input: AnchorEntryInput): AnchorEntryDecision 
     };
   }
 
-  // 証拠が何もないなら絶対に開かない（宣言反復はここに入らない）
+  // 証拠が何もないなら絶対に開かない
   if (!choiceId && !actionId) {
     return {
       tEntryOk: false,
@@ -79,51 +89,47 @@ export function detectAnchorEntry(input: AnchorEntryInput): AnchorEntryDecision 
     };
   }
 
-  // intent_anchor を “証拠ログ” として育てる（DBカラム追加なし）
-  const prev = obj(input.state?.intent_anchor) ?? {};
+  // ✅ intent_anchor を “ログ” として育てる（ここでは確定しない）
   const base = {
     ...prev,
-    committedAt: nowIso,
+    lastTouchedAt: nowIso,
   };
 
-  // 優先順位：action > choice（行動を最優先）
+  // 優先順位：action > choice（ただし commit はしない）
   if (actionId) {
     return {
       tEntryOk: true,
       anchorEvent: 'action',
-      anchorWrite: 'commit',
+      anchorWrite: 'keep',
       reason: 'ACTION',
       patch: {
         itx_step: 'T3',
         itx_anchor_event_type: 'action',
         intent_anchor: {
           ...base,
-          commitType: 'action',
-          actionId,
+          lastTouchType: 'action',
+          lastActionId: actionId,
         },
       },
     };
   }
 
-  // choice の場合：同一choiceの“再確認”も将来ここで扱えるようにしておく
-  // （現時点は「choiceが来た」だけでT3許可＝最小実装）
-  const prevChoice = s(prev?.choiceId);
+  const prevChoice = s((prev as any)?.choiceId || (prev as any)?.lastChoiceId);
   const isReconfirm = prevChoice && prevChoice === choiceId;
 
   if (isReconfirm) {
     return {
       tEntryOk: true,
       anchorEvent: 'reconfirm',
-      anchorWrite: 'commit',
+      anchorWrite: 'keep',
       reason: 'RECONFIRM',
       patch: {
         itx_step: 'T3',
         itx_anchor_event_type: 'reconfirm',
         intent_anchor: {
           ...base,
-          commitType: 'reconfirm',
-          choiceId,
-          prevChoiceId: prevChoice,
+          lastTouchType: 'reconfirm',
+          lastChoiceId: choiceId,
         },
       },
     };
@@ -132,15 +138,15 @@ export function detectAnchorEntry(input: AnchorEntryInput): AnchorEntryDecision 
   return {
     tEntryOk: true,
     anchorEvent: 'choice',
-    anchorWrite: 'commit',
+    anchorWrite: 'keep',
     reason: 'CHOICE',
     patch: {
       itx_step: 'T3',
       itx_anchor_event_type: 'choice',
       intent_anchor: {
         ...base,
-        commitType: 'choice',
-        choiceId,
+        lastTouchType: 'choice',
+        lastChoiceId: choiceId,
       },
     },
   };

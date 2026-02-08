@@ -320,6 +320,21 @@ function buildQuestion(
 // --------------------------------------------------
 
 function buildShiftIdeaBand(seedText: string) {
+  /**
+   * ==================================================
+   * IDEA_BAND 出力契約（仕様固定 / writer 迷い防止）
+   *
+   * IDEA_BAND = 「候補を並べる」以外をしない。
+   * ここは “禁止” ではなく「これを書く」という契約。
+   *
+   * ✅ 出力は 2〜4 行（= 候補数）
+   * ✅ 各行は「◯◯という選択肢」の形（1行=1候補）
+   * ✅ 行動指示・一手・具体化（ToDo/手順/時間/タイマー等）は書かない
+   * ✅ 断定 OK / 可能性語 OK（※語尾の最終規約は後段で揃える）
+   *
+   * ※ RE-MAKE / GROUND の “一手テンプレ” を混入させない。
+   * ==================================================
+   */
   const variants = [
     {
       // 候補生成（核なし）— 候補は「列挙OK」にする（no_checklist を解除）
@@ -361,6 +376,7 @@ function buildShiftIdeaBand(seedText: string) {
     seed_text: clamp(seedText, 240),
   });
 }
+
 
 // --- 置き換え 1) buildShiftTConcretize を関数まるごと置き換え ---
 function buildShiftTConcretize(seedText: string, focusLabel?: string) {
