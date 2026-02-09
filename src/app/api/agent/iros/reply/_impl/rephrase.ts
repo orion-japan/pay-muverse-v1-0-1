@@ -772,21 +772,36 @@ if (shouldSkipRephraseLLMForDiagnosisFinal) {
       (res as any)?.out?.rephraseBlocks ??
       null;
 
-
     const blocks: any[] | null = Array.isArray(blocksAny) ? blocksAny : null;
 
     if (!blocks || blocks.length === 0) {
-      // ✅ userText に逃げない。assistant側から拾えなければ SKIP
+      // ✅ まず「rephraseEngineの生テキスト」を拾う（ここを最優先にする）
+      const rawFromRes = String(
+        (res as any)?.raw ??
+          (res as any)?.text ??
+          (res as any)?.content ??
+          (res as any)?.meta?.raw ??
+          (res as any)?.meta?.text ??
+          (res as any)?.meta?.content ??
+          ''
+      ).trim();
+
+      if (rawFromRes) {
+        attachBlocksFromTextOrSkip(rawFromRes, 'REPHRASE_RAW_FALLBACK');
+        return;
+      }
+
+      // ✅ それでも無理なら assistant 側のどれか（userText には逃げない）
       const fallbackText = pickSafeAssistantText({
         candidates: [
-          (extraMerged as any)?.rephraseHead,
-          (meta as any)?.extra?.rephraseHead,
           (extraMerged as any)?.finalAssistantTextCandidate,
           (extraMerged as any)?.finalAssistantText,
           (extraMerged as any)?.assistantText,
           (extraMerged as any)?.resolvedText,
           (extraMerged as any)?.extractedTextFromModel,
           (extraMerged as any)?.rawTextFromModel,
+          (extraMerged as any)?.rephraseHead,
+          (meta as any)?.extra?.rephraseHead,
           (extraMerged as any)?.content,
           (extraMerged as any)?.text,
         ],

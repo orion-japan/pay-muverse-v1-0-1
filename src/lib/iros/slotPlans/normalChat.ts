@@ -16,6 +16,17 @@
 // - IDEA_BAND: R→I 候補生成（核なし）
 // - T_CONCRETIZE: I→C→T 具体化（核あり/宣言あり）
 // ※ normalChat は両方レーンを扱う（ただし“強度/テンプレ”はレーンで分ける）
+//
+// =========================================================
+// ✅ IDEA_BAND 出力契約（仕様固定 / writer 迷い防止）
+// 目的：IDEA_BAND は「候補列挙」以外を出さない（GROUND吸い込み事故を止める）
+//
+// ※契約の“正本”は buildShiftIdeaBand() 直上のコメントに置く（重複させない）
+// - ここ（ファイル冒頭）は概要のみ保持する
+// - 具体（行数/禁止事項/例示）は buildShiftIdeaBand() を参照
+// =========================================================
+
+
 
 import type { SlotPlanPolicy } from '../server/llmGate';
 import { observeFlow } from '../input/flowObserver';
@@ -302,17 +313,14 @@ function buildQuestion(
       key: 'SHIFT',
       role: 'assistant',
       style: 'neutral',
-      content: m('SHIFT', {
-        text: buildShiftTConcretize(seedText),
-      }),
 
+      // ✅ FIX: buildShiftTConcretize は「@SHIFT ...」を返すので、二重に m('SHIFT', ...) で包まない
+      content: buildShiftTConcretize(seedText),
     });
   }
 
   return mapped;
 }
-
-
 
 // --------------------------------------------------
 // Lane-specific SHIFT builders（自然文禁止）
@@ -324,48 +332,52 @@ function buildShiftIdeaBand(seedText: string) {
    * ==================================================
    * IDEA_BAND 出力契約（仕様固定 / writer 迷い防止）
    *
-   * IDEA_BAND = 「候補を並べる」以外をしない。
-   * ここは “禁止” ではなく「これを書く」という契約。
-   *
    * ✅ 出力は 2〜4 行（= 候補数）
-   * ✅ 各行は「◯◯という選択肢」の形（1行=1候補）
+   * ✅ 全行が「◯◯という選択肢」or「◯◯という案」or「◯◯という方向」など “候補行”
    * ✅ 行動指示・一手・具体化（ToDo/手順/時間/タイマー等）は書かない
-   * ✅ 断定 OK / 可能性語 OK（※語尾の最終規約は後段で揃える）
-   *
-   * ※ RE-MAKE / GROUND の “一手テンプレ” を混入させない。
+   * ✅ 質問は禁止（候補提示で進める）
+   * ✅ frame/close（前置き/締め）を混ぜない（候補行オンリー）
    * ==================================================
    */
+
   const variants = [
     {
-      // 候補生成（核なし）— 候補は「列挙OK」にする（no_checklist を解除）
       kind: 'idea_band',
       intent: 'propose_candidates',
       rules: {
         ...SHIFT_PRESET_C_SENSE_HINT.rules,
 
-        // ✅ IDEA_BAND では「候補を並べる」こと自体が目的なので、列挙禁止を解除
+        // IDEA_BANDは「候補を並べる」レーンなので列挙は禁止しない
         no_checklist: false,
 
         // 既定の方針
         no_decision: true,
         no_action_commit: true,
 
-        // 候補数
+        // 候補数（= 行数）
         candidates_min: 2,
         candidates_max: 4,
-
-        // 文章が1行に潰れないように上限も明示（writer契約）
         lines_max: 4,
 
-        // 質問で進めない（提示で進める）
-        questions_max: 1,
+        // ✅ 質問は入れない（shapeを壊すので 0 固定）
+        questions_max: 0,
+
+        // ✅ ここは “候補以外を書かない” 契約なので、講義/手順/未来指示を強く抑制
+        no_lecture: true,
+        no_future_instruction: true,
       },
+
       tone: SHIFT_PRESET_C_SENSE_HINT.tone ?? undefined,
-      allow: { ...(SHIFT_PRESET_C_SENSE_HINT.allow ?? {}), short_reply_ok: true },
+
+      // ✅ 1行返答を許さない（候補2行以上が契約）
+      allow: { ...(SHIFT_PRESET_C_SENSE_HINT.allow ?? {}), short_reply_ok: false },
+
+      // ✅ 候補行オンリー（frame/close を消す）
       format: {
-        // ✅ “候補行” を強制（箇条書きでもOKなスキーマ）
-        lines: 3,
-        schema: ['frame(one_line)', 'candidates(2-4_lines)', 'close(one_line_optional)'],
+        lines: 4, // 上限ヒント（実際は candidates_min/max に従う）
+        schema: ['candidates(2-4_lines_only)'],
+        line_contract: 'each_line_must_be_candidate',
+        candidate_line_examples: ['◯◯という選択肢', '◯◯という案', '◯◯という方向'],
       },
     },
   ];
@@ -523,10 +535,12 @@ export function buildNormalChatSlotPlan(args: {
   } else if (shouldUseQuestionSlots(userText)) {
     reason = 'questionSlots';
     slots = buildQuestion(userText, lastUserText ?? undefined, laneKey, flowDelta);
-  } else if (isClarify(userText)) {
+  } else if (isClarify(userText) && /[?？]/.test(userText)) {
+    // ✅ clarify は「質問文」のみに限定（宣言/独白は flowReply に落とす）
     reason = 'clarify';
     slots = buildClarify(userText, laneKey, flowDelta);
   } else if (isCompose(userText)) {
+
     reason = 'compose';
     slots = buildCompose(userText, laneKey, flowDelta);
   } else {

@@ -1970,30 +1970,60 @@ const lastTurnsSafe = (() => {
       ''
   );
 
-  const wantsTConcretize =
-    /"kind"\s*:\s*"t_concretize"/.test(shiftTextForMode) || /\bt_concretize\b/.test(shiftTextForMode);
+  // repeatSignal（topic/goal/repeat の拾い上げ結果）を優先して使う
+  const repeatSignalSame = repeatSignal === 'same_phrase';
 
-    const repeatSignalSame =
-    ((opts as any)?.userContext?.ctxPack?.repeatSignal ??
-      (opts as any)?.userContext?.repeatSignal ??
-      null) === 'same_phrase';
+  // --- lane detect (SHIFT欠落でも復元する) -----------------------------
+  // SHIFTが無いケースが実在する（dev.logで確認済み）ため、
+  // SHIFTだけに依存せず、meta/seed/ユーザー文も含めて laneKey / kind を拾う。
+  const laneHintText = [
+    String(shiftTextForMode ?? ''),
+    String(metaText ?? ''),
+    String(seedDraftHint ?? ''),
+    String(userText ?? ''),
+  ]
+    .filter(Boolean)
+    .join('\n')
+    .slice(0, 4000);
 
-  const wantsIdeaBand =
-    !repeatSignalSame &&
-    (/"kind"\s*:\s*"idea_band"/.test(shiftTextForMode) || /\bidea_band\b/.test(shiftTextForMode));
+  // ✅ raw hit（repeat判定の前に、レーン意図そのものを拾う）
+  const hitTConcretize =
+    /"laneKey"\s*:\s*"T_CONCRETIZE"/.test(laneHintText) ||
+    /"kind"\s*:\s*"t_concretize"/.test(laneHintText) ||
+    /\bT_CONCRETIZE\b/.test(laneHintText) ||
+    /\bt_concretize\b/.test(laneHintText);
 
+    const hitIdeaBand =
+    /"kind"\s*:\s*"idea_band"/.test(laneHintText) ||
+    /\bIDEA_BAND\b/.test(laneHintText) ||
+    /\bidea_band\b/.test(laneHintText) ||
+    /"kind"\s*:\s*"idea_band"/.test(shiftTextForMode) ||
+    /\bIDEA_BAND\b/.test(shiftTextForMode) ||
+    /\bidea_band\b/.test(shiftTextForMode);
+
+
+  // ✅ kill policy:
+  // - same_phrase でも IDEA_BAND は殺さない（候補は再提示が必要になることがある）
+  // - T_CONCRETIZE は従来どおり repeat を抑制（会話破壊を避ける）
+  const wantsTConcretize = !repeatSignalSame && hitTConcretize;
+  const wantsIdeaBand = hitIdeaBand;
 
   try {
     console.log('[IROS/rephraseEngine][LANE_DETECT]', {
+      killPolicyRev: 'phase1.5-ideaBandNoKill',
       wantsTConcretize,
       wantsIdeaBand,
       repeatSignalSame,
+      repeatSignalHead: String(((opts?.userContext as any)?.ctxPack?.repeatSignal ?? '')).slice(0, 120),
+
       shiftTextForModeHead: shiftTextForMode.slice(0, 120),
       shiftSlotType: typeof (shiftSlot as any),
       shiftSlotKeys:
         shiftSlot && typeof shiftSlot === 'object' ? Object.keys(shiftSlot as any).slice(0, 12) : null,
+      laneHintHead: laneHintText.slice(0, 160),
     });
   } catch {}
+
 
   // ✅ T_CONCRETIZE の“圧”を下げて会話を壊さない（復唱/抽象テンプレ逃げを抑制）
   const tConcretizeHeader = wantsTConcretize
@@ -2009,63 +2039,73 @@ const lastTurnsSafe = (() => {
       ].join('\n')
     : '';
 
-  // ✅ IDEA_BAND（候補生成）でも “薄い1行” に寄らないように契約を明示
+  // ✅ IDEA_BAND（候補生成）出力契約：Phase1をそのまま“強制”
   const ideaBandHeader = wantsIdeaBand
     ? [
-      '【IDEA_BAND（候補）】',
-      '- 本文は短め（2〜8行目安）。',
-      '- 冒頭でユーザー文をそのまま復唱しない（短く言い換えて言い切る）。',
-      '- 候補は2〜4個。各候補は短く（1行以内）でOK。',
-      '- 候補には“名前を付けてよい”（例：A:○○ / B:○○）。',
-      '- 未来の指示は「命令」ではなく“選択肢提示”で出す（例：次はA/B/Cのどれ）。',
-      '- 質問は最大1つまで（毎回は出さない）。',
-      '',
-
+        '【IDEA_BAND 出力契約（最優先）】',
+        '- 出力は2〜4行のみ（1行=1候補）。',
+        '- 各行は「◯◯という選択肢」または同等の“候補提示”だけを書く。',
+        '- 行動指示・一手・具体化（ToDo/手順/時間/タイマー/次は…）は禁止。',
+        '- 説明・一般論・比喩・鏡（言い換え）・構造化（Aしたい/でもB）も書かない。',
+        '- 質問は0（聞き返しで進めない）。',
+        '',
       ].join('\n')
     : '';
 
 
-  const systemPrompt =
-    tConcretizeHeader +
-    ideaBandHeader +
-    systemPromptForFullReply({
-      directTask: isDirectTask,
-      itOk,
-      band,
-      lockedILines,
+  // ✅ レーンが明示されている時は GROUND をやめる
+  //    （GROUND骨格が IDEA_BAND を潰すため）
+  const baseSystemPrompt = systemPromptForFullReply({
+    directTask: isDirectTask,
+    itOk,
+    band,
+    lockedILines,
 
-      // ✅ T_CONCRETIZE は “次の一歩を短く” であり、I許可(GUIDE_I)ではない
-      ...(wantsTConcretize ? { personaMode: 'DELIVER' as const } : {}),
-    }) +
-    mustIncludeRuleText;
+    // T_CONCRETIZE：GUIDE_I でOK（具体化・一手誘導）
+    ...(wantsTConcretize ? { personaMode: 'GUIDE_I' as const } : {}),
 
-    const internalPack = buildInternalPackText({
-      metaText,
-      historyText,
-      seedDraftHint,
-      lastTurnsCount: lastTurnsSafe.length,
-      itOk,
-      directTask: isDirectTask,
-      inputKind,
-      intentBand: band.intentBand,
-      tLayerHint: band.tLayerHint,
-      userText,
-      onePointText: null,
-      situationSummary: null,
-      depthStage: null,
-      phase: null,
-      qCode: null,
-      flowDigest,
-      flowTape,
+    // IDEA_BAND：候補提示だけが目的なので GUIDE_I は禁止
+    //（観測→一手が混入して崩れるため DELIVER）
+    ...(wantsIdeaBand ? { personaMode: 'GROUND' as const } : {}),
 
-      // ✅ 会話が流れるための3点（topic / goal / 反復）
-      topicDigest,
-      replyGoal,
-      repeatSignal,
-    });
+  });
 
 
-  const messages = buildFirstPassMessages({ systemPrompt, internalPack, turns: lastTurnsSafe });
+  // ✅ レーン契約は「最後」に置く（後段の詳細指示が勝つ）
+  const laneContractTail = (tConcretizeHeader || '') + (ideaBandHeader || '');
+
+  const systemPrompt = baseSystemPrompt + mustIncludeRuleText + laneContractTail;
+
+  const internalPack = buildInternalPackText({
+    metaText,
+    historyText,
+    seedDraftHint,
+    lastTurnsCount: lastTurnsSafe.length,
+    itOk,
+    directTask: isDirectTask,
+    inputKind,
+    intentBand: band.intentBand,
+    tLayerHint: band.tLayerHint,
+    userText,
+    onePointText: null,
+    situationSummary: null,
+    depthStage: null,
+    phase: null,
+    qCode: null,
+    flowDigest,
+    flowTape,
+
+    // ✅ 会話が流れるための3点（topic / goal / 反復）
+    topicDigest,
+    replyGoal,
+    repeatSignal,
+  });
+
+  const messages = buildFirstPassMessages({
+    systemPrompt,
+    internalPack,
+    turns: lastTurnsSafe,
+  });
 
 
 
@@ -2125,8 +2165,6 @@ const lastTurnsSafe = (() => {
   // ---------------------------------------------
   const validateOutput = (rawText: string): { ok: boolean; reason?: string } => {
     // ✅ ILINEマーカーは “露出禁止” なので、まず除去してから検証する
-    // - モデルが [[ILINE]]...[[/ILINE]] を出してしまう実例が dev.log で確認済み
-    // - ここで除去すれば INTERNAL_MARKER_LEAKED / ILINE_NOT_PRESERVED を同時に回避できる
     const stripILineMarkers = (s0: string) => {
       const s = String(s0 ?? '');
       return s.replace(/\[\[ILINE\]\]/g, '').replace(/\[\[\/ILINE\]\]/g, '');
@@ -2139,6 +2177,22 @@ const lastTurnsSafe = (() => {
 
     // slot系（@XXX_SLOT）が混ざってたら leak 扱いにする
     if (/@[A-Z_]+_SLOT\b/.test(raw)) return { ok: false, reason: 'INTERNAL_MARKER_LEAKED' };
+
+    // ✅ IDEA_BAND 形状チェック（厳しすぎると通常文を落とすので「最小制約」にする）
+    // - 2〜4行
+    // - 箇条書き（・/-/番号）に逃げたら落とす
+    // ※「選択肢」などの語彙必須はやめる（自然な候補文が通らないため）
+    if (wantsIdeaBand) {
+      const lines = raw
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      if (lines.length < 2 || lines.length > 4) return { ok: false, reason: 'IDEA_BAND_SHAPE_REJECT' };
+
+      const bulletLike = (line: string) => /^(?:・|-|•|\d+\.)\s*\S+/.test(line);
+      if (lines.some(bulletLike)) return { ok: false, reason: 'IDEA_BAND_SHAPE_REJECT' };
+    }
 
     const iLineOk = verifyLockedILinesPreserved(raw, lockedILines);
     if (!iLineOk) return { ok: false, reason: 'ILINE_NOT_PRESERVED' };
@@ -2163,7 +2217,6 @@ const lastTurnsSafe = (() => {
 
     return { ok: true };
   };
-
 
   // ---------------------------------------------
   // adopt helper（slot attach + meta）
@@ -2490,7 +2543,96 @@ const lastTurnsSafe = (() => {
 
   const shouldRejectWarnToSeed = shouldRejectWarnToSeedFactory({ inKeys, scaffoldActive });
 
+  // ---------------------------------------------
+  // run flagship
+  // ---------------------------------------------
   let v = runFlagship(candidate, slotsForGuard, scaffoldActive);
+
+  // ---------------------------------------------
+  // IDEA_BAND contract check（違反なら FATAL に落として retry へ）
+  // ---------------------------------------------
+  const ideaBandLines = String(candidate ?? '')
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  // IDEA_BAND は「候補行」以外を許可しない（詩的ナラティブのすり抜けを止める）
+  // - 基本契約：各行が「〜という選択肢」または「候補:」「選択肢:」等の候補行
+  // - 先頭の箇条書き記号は許可（- / ・ / • / ◯ など）
+  const ideaBandLineLooksLikeCandidate = (line: string) => {
+    const s = String(line ?? '').trim().replace(/^[-*•・◯]\s*/u, '').trim();
+    if (!s) return false;
+
+    // ✅ 最強の固定契約（normalChat.ts の契約に寄せる）
+    if (/という選択肢/u.test(s)) return true;
+
+    // ✅ ゆるい互換（将来テンプレが揺れても候補行として扱える）
+    if (/^(?:候補|選択肢)\s*[:：]/u.test(s)) return true;
+
+    return false;
+  };
+
+  const candidateShapeOk = ideaBandLines.length >= 2 && ideaBandLines.length <= 4 && ideaBandLines.every(ideaBandLineLooksLikeCandidate);
+
+  // IDEA_BAND は「候補生成」なので、"手順/実装/まず" 系の実行指示を避ける
+  // ※誤爆しやすい語は「単独語」ではなく「実行指示っぽい連接」を中心にする
+  const ideaBandForbidden =
+    /(?:次の\s*\d+|タイマー|分だけ|手順|ToDo|TODO|ステップ|まず\s*は|まず、|やってみ|進めて|実装|着手)/;
+
+  const tooFewLines = ideaBandLines.length < 2;
+  const tooManyLines = ideaBandLines.length > 4;
+  const hasQuestion = ideaBandLines.some((line) => /[?？]/.test(line));
+  const hasForbidden = ideaBandLines.some((line) => ideaBandForbidden.test(line));
+
+  const ideaBandOk = !wantsIdeaBand
+    ? true
+    : candidateShapeOk && !tooFewLines && !tooManyLines && !hasQuestion && !hasForbidden;
+
+  const ideaBandContractBroken = Boolean(wantsIdeaBand && !ideaBandOk);
+
+  console.warn('[IROS/IDEA_BAND][DEBUG_WANTS]', {
+    traceId: debug.traceId,
+    conversationId: debug.conversationId,
+    userCode: debug.userCode,
+    wantsIdeaBand,
+    lineCount: ideaBandLines.length,
+    head: safeHead(String(candidate ?? ''), 120),
+  });
+
+
+  if (ideaBandContractBroken) {
+    const reasons = [
+      tooFewLines ? 'IDEA_BAND_TOO_FEW_LINES' : null,
+      tooManyLines ? 'IDEA_BAND_TOO_MANY_LINES' : null,
+      hasQuestion ? 'IDEA_BAND_HAS_QUESTION' : null,
+      hasForbidden ? 'IDEA_BAND_HAS_FORBIDDEN' : null,
+    ].filter(Boolean);
+
+    console.warn('[IROS/IDEA_BAND][CONTRACT_BROKEN]', {
+      traceId: debug.traceId,
+      conversationId: debug.conversationId,
+      userCode: debug.userCode,
+      lineCount: ideaBandLines.length,
+      reasons,
+      head: safeHead(String(candidate ?? ''), 160),
+    });
+
+    // FATAL に落として下の retry 流れへ（v が未定義でも動くように最低限の形）
+    v = {
+      ...(v as any),
+      ok: false,
+      level: 'FATAL',
+      reasons: Array.from(
+        new Set([
+          ...(((v as any)?.reasons ?? []) as any[]),
+          'IDEA_BAND_CONTRACT_BROKEN',
+          ...reasons,
+        ]),
+      ),
+    } as any;
+  }
+
+
 
   if (forceIntervene) {
     console.warn('[IROS/FLAGSHIP][FORCE_INTERVENE]', {
@@ -2556,12 +2698,19 @@ const lastTurnsSafe = (() => {
     shiftKind === 't_concretize' ||
     /"kind"\s*:\s*"t_concretize"/.test(String(shiftSlot?.text ?? ''));
 
-  // ✅ MIN_OK_LEN（T_CONCRETIZE を chat より優先）
+  // ✅ IDEA_BAND 判定（候補生成：2〜4行契約なので len gate はかけない）
+  const isIdeaBand =
+    shiftKind === 'idea_band' ||
+    /"kind"\s*:\s*"idea_band"/.test(String(shiftSlot?.text ?? ''));
+
+  // ✅ MIN_OK_LEN（IDEA_BAND / T_CONCRETIZE を chat より優先）
   // - micro/greeting は短文許可（0）
+  // - IDEA_BAND は「2〜4行の候補」なので文字数で縛らない（0）
   // - T_CONCRETIZE は 24（短くても成立し得るが、薄さを抑える）
   // - それ以外: short_reply_ok 明示なら 0 / chat は 40 / default 80
   const MIN_OK_LEN =
     isMicroOrGreetingNow ? 0 :
+    isIdeaBand ? 0 :
     isTConcretize ? 24 :
     shortReplyOk ? 0 :
     inputKindNow === 'chat' ? 40 :
@@ -2574,16 +2723,20 @@ const lastTurnsSafe = (() => {
     MIN_OK_LEN,
     reason: isMicroOrGreetingNow
       ? 'micro_or_greeting'
-      : isTConcretize
-        ? 't_concretize_24'
-        : inputKindNow === 'chat'
-          ? (shortReplyOk ? 'chat_short_reply_ok' : 'chat_relaxed_40')
-          : (shortReplyOk ? 'short_reply_ok' : 'default_80'),
+      : isIdeaBand
+        ? 'idea_band_0'
+        : isTConcretize
+          ? 't_concretize_24'
+          : inputKindNow === 'chat'
+            ? (shortReplyOk ? 'chat_short_reply_ok' : 'chat_relaxed_40')
+            : (shortReplyOk ? 'short_reply_ok' : 'default_80'),
     shiftTextHead: shiftSlot?.text ? safeHead(String(shiftSlot.text), 140) : null,
     shiftObjHasAllow: Boolean(shiftObj?.allow),
     isTConcretize,
+    isIdeaBand,
     shiftKind: shiftKind || null,
   });
+
 
   // ✅ “前に進む気配” がある短文は retry を抑制
   const hasAdvanceHint = /NEXT|次の|一歩|やってみる|進める|試す|始め|着手|手を付け/.test(
@@ -2602,14 +2755,16 @@ const lastTurnsSafe = (() => {
 // - ここでは一切の自動追記をしない
 // （no-op）
 
-  const shouldOkTooShortToRetry =
-    !scaffoldActive &&
-    !isDirectTask &&
-    v?.ok &&
-    vLevelPre === 'OK' &&
-    candidateLen > 0 &&
-    candidateLen < MIN_OK_LEN &&
-    !hasAdvanceHint;
+const shouldOkTooShortToRetry =
+!scaffoldActive &&
+!isDirectTask &&
+v?.ok &&
+vLevelPre === 'OK' &&
+candidateLen > 0 &&
+candidateLen < MIN_OK_LEN &&
+!hasAdvanceHint &&
+!isIdeaBand;
+
 
   if (shouldOkTooShortToRetry) {
     console.warn('[IROS/FLAGSHIP][OK_TOO_SHORT_TO_RETRY]', {

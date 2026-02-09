@@ -303,6 +303,26 @@ function buildTextFromSlots(slotsObj: any | null): string | null {
     'ending',
   ];
 
+  const looksLikeInternalSeed = (t: string) => {
+    const s = String(t ?? '').trim();
+    if (!s) return false;
+    return (
+      s.startsWith('@OBS ') ||
+      s.startsWith('@SHIFT ') ||
+      s.startsWith('@NEXT_HINT') ||
+      s.startsWith('@ILINE') ||
+      s.startsWith('@SEED') ||
+      s.startsWith('{"laneKey":')
+    );
+  };
+
+  const pushIfOk = (parts: string[], text: string) => {
+    const s = normText(text);
+    if (!s) return;
+    if (looksLikeInternalSeed(s)) return; // ✅ 内部タグ混入は seed 候補から除外
+    parts.push(s);
+  };
+
   // (1) Array slots: [{ key, content }, ...]
   if (Array.isArray(slotsObj)) {
     const items = slotsObj
@@ -324,7 +344,10 @@ function buildTextFromSlots(slotsObj: any | null): string | null {
       return ia - ib;
     });
 
-    const out = items.map((x) => x.text).join('\n');
+    const parts: string[] = [];
+    for (const it of items) pushIfOk(parts, it.text);
+
+    const out = parts.join('\n');
     return out.length ? out : null;
   }
 
@@ -339,7 +362,7 @@ function buildTextFromSlots(slotsObj: any | null): string | null {
     const parts: string[] = [];
     for (const k of keys) {
       const s = pickSlotText((slotsObj as any)[k]);
-      if (s) parts.push(s);
+      if (s) pushIfOk(parts, s);
     }
 
     const out = parts.join('\n');
@@ -348,6 +371,7 @@ function buildTextFromSlots(slotsObj: any | null): string | null {
 
   return null;
 }
+
 
 // ---------------------------------------------------------------------
 // main
@@ -369,12 +393,32 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
   const textNowLen = textNow.length;
 
   const slotsObj = extractSlotsObj(input.meta ?? null);
-  const candidate = normText(buildTextFromSlots(slotsObj) ?? '');
+
+  // candidate は slots 連結だが、seed（@OBS 等の内部タグ）が混ざることがあるため、
+  // effective fallback に採用しないようガードする。
+  const rawCandidate = normText(buildTextFromSlots(slotsObj) ?? '');
+  const rawCandidateLen = rawCandidate.length;
+
+  const looksLikeInternalSeed = (t: string) => {
+    const s = String(t ?? '').trim();
+    if (!s) return false;
+    return (
+      s.startsWith('@OBS ') ||
+      s.startsWith('@SHIFT ') ||
+      s.startsWith('@NEXT_HINT') ||
+      s.startsWith('@ILINE') ||
+      s.startsWith('@SEED') ||
+      s.startsWith('{"laneKey":') // 念のため（OBS JSON だけが来る事故）
+    );
+  };
+
+  const candidate = looksLikeInternalSeed(rawCandidate) ? '' : rawCandidate;
   const candidateLen = candidate.length;
 
-  // ✅ 実質本文（raw seed source）：textNow 優先、なければ candidate
+  // ✅ 実質本文（raw seed source）：textNow 優先、なければ「安全な candidate」
   const effectiveText = textNowLen > 0 ? textNow : candidate;
   const effectiveLen = effectiveText.length;
+
 
   const slotsOk = slotsOkFromHints({ slotPlanLen, hasSlots });
 
@@ -402,8 +446,8 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
         llmEntry: decision.entry,
         llmSkipReason: decision.entry === 'CALL_LLM' ? null : decision.reason,
 
-        finalAssistantTextCandidateLen: candidateLen > 0 ? candidateLen : null,
-        finalAssistantTextCandidateHead: candidateLen > 0 ? head(candidate) : null,
+        finalAssistantTextCandidateLen: rawCandidateLen > 0 ? rawCandidateLen : null,
+        finalAssistantTextCandidateHead: rawCandidateLen > 0 ? head(rawCandidate) : null,
 
         resolvedTextLen: resolvedLen,
         rewriteSeedLen: seedLen,

@@ -1752,12 +1752,15 @@ if (slotsEmpty_ir) {
     }
 
     // 9) ✅ frame の正は framePlan.frame
+    // - upstream(Context) が組んだ framePlan を最優先で守る（F→C上書き事故を止める）
+    // - r 側は補助（meta に無い場合だけ採用）
     const frameFinal =
-      (r as any)?.framePlan?.frame ??
-      (r as any)?.frame ??
       (meta as any)?.framePlan?.frame ??
       (meta as any)?.frame ??
+      (r as any)?.framePlan?.frame ??
+      (r as any)?.frame ??
       null;
+
 
     // 10) ✅ framePlan は render-v2 が参照する唯一の正
     // - policy は FINAL/SCAFFOLD 以外を許さない
