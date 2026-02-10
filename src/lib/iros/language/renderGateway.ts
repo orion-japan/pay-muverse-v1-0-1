@@ -1137,8 +1137,12 @@ export function renderGatewayAsReply(args: {
         blocks = lines
           .map((t) => stripInternalLabels(t))
           .filter(Boolean)
+          // ✅ 追加：内部ディレクティブ/JSON塊は UI に出さない（rephraseBlocks と同等）
+          .filter((t: string) => !t.trimStart().startsWith('@NEXT_HINT'))
+          .filter((t: string) => !isBadBlock(t))
           .map((t) => ({ text: t }));
       }
+
     } else {
       // 通常ルート
       const lines = splitToLines(base);
@@ -1210,6 +1214,18 @@ pipe('after_renderV2', content);
 
   content = sanitizeVisibleText(content);
   pipe('after_sanitizeVisibleText', content);
+
+  // ✅ 追加：strip/sanitize の結果 “空に戻った” 場合の救済（UI空事故を塞ぐ）
+  if (String(content ?? '').trim() === '') {
+    const rescueBase = String(fallbackText || r0s || picked || '');
+    const rescue = sanitizeVisibleText(
+      stripILINETags(stripDirectiveLines(cutAfterIlineAndDropWriterNotes(rescueBase))),
+    );
+    content = rescue || '';
+    fallbackFrom = fallbackFrom || 'post_sanitize_empty';
+  }
+  pipe('after_post_sanitize_empty_rescue', content);
+
 
   // ✅ 最終防衛：directive を人間文に変換（LLM落ち・rephrase reject 含む）
   const hasDirectiveLeak =

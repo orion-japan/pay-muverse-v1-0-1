@@ -10,6 +10,9 @@ import { loadBaseMetaFromMemoryState } from './handleIrosReply.state';
 // ✅ FramePlan（器＋スロット）(Layer C/D)
 import { buildFramePlan, type InputKind, type IrosStateLite } from '@/lib/iros/language/frameSlots';
 
+// ✅ 外部conversationId(string) -> DB conversation_id(uuid) 変換
+import { ensureIrosConversationUuid } from './ensureIrosConversationUuid';
+
 function normOptString(v: unknown): string | undefined {
   const s = String(v ?? '').trim();
   return s.length > 0 ? s : undefined;
@@ -53,18 +56,28 @@ export type TurnContext = {
 
 async function resolveIsFirstTurn(
   supabase: SupabaseClient,
+  userCode: string,
   conversationId: string,
 ): Promise<boolean> {
   try {
+    // ✅ uuid列に外部キー文字列を突っ込まない
+    const conversationUuid = await ensureIrosConversationUuid({
+      supabase,
+      userCode,
+      conversationKey: String(conversationId ?? '').trim(),
+      agent: null,
+    });
+
     const { data, error } = await supabase
       .from('iros_messages')
       .select('id')
-      .eq('conversation_id', conversationId)
+      .eq('conversation_id', conversationUuid)
       .limit(1);
 
     if (error) {
       console.error('[IROS/Context] resolveIsFirstTurn select failed', {
         conversationId,
+        conversationUuid,
         error,
       });
       return false;
@@ -115,7 +128,6 @@ function detectInputKind(userText: string): InputKind {
   return 'chat';
 }
 
-
 export async function buildTurnContext(
   args: BuildTurnContextArgs,
 ): Promise<TurnContext> {
@@ -129,7 +141,8 @@ export async function buildTurnContext(
     text,
   } = args;
 
-  const isFirstTurn = await resolveIsFirstTurn(supabase, conversationId);
+  // ✅ ここだけ変更：uuid解決経由で firstTurn 判定
+  const isFirstTurn = await resolveIsFirstTurn(supabase, userCode, conversationId);
 
   const styleFromProfile =
     userProfile && typeof (userProfile as any).style === 'string'
@@ -185,8 +198,6 @@ export async function buildTurnContext(
       baseMetaForTurn.depthStage = depthStage.trim();
     }
   }
-
-
 
   const mergedBaseMeta = (loaded as any)?.mergedBaseMeta;
   const memoryState = (loaded as any)?.memoryState ?? (loaded as any)?.state ?? null;

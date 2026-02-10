@@ -4,6 +4,7 @@
 // handleIrosReply.ts を「配線（orchestrator）」に戻すための切り出し。
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { ensureIrosConversationUuid } from './ensureIrosConversationUuid';
 
 import { detectQFromText } from '@/lib/iros/q/detectQ';
 import { estimateSelfAcceptance } from '@/lib/iros/sa/meter';
@@ -283,19 +284,28 @@ export async function saveUnifiedAnalysisInline(
 export async function applyAnalysisToLastUserMessage(params: {
   supabase: SupabaseClient;
   conversationId: string;
+  userCode: string;
   analysis: UnifiedAnalysis;
 }) {
-  const { supabase, conversationId, analysis } = params;
+  const { supabase, conversationId, userCode, analysis } = params;
+
+  const conversationUuid = await ensureIrosConversationUuid({
+    supabase,
+    userCode,
+    conversationKey: String(conversationId ?? '').trim(),
+    agent: null,
+  });
 
   try {
     const { data: row, error: selectErr } = await supabase
       .from('iros_messages')
       .select('id')
-      .eq('conversation_id', conversationId)
+      .eq('conversation_id', conversationUuid)
       .eq('role', 'user')
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
+
 
     if (selectErr) {
       console.error(

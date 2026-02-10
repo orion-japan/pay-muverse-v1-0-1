@@ -999,8 +999,10 @@ if (allowLLM === false) {
     await applyAnalysisToLastUserMessage({
       supabase,
       conversationId,
+      userCode,
       analysis,
     });
+
   } catch (e) {
     console.error('[UnifiedAnalysis] save failed (non-fatal)', {
       userCode,

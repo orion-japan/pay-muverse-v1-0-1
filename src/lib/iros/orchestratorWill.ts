@@ -28,6 +28,9 @@ export type IrosGoalType = ReturnType<typeof deriveIrosGoal>;
 export type IrosPriorityType = ReturnType<typeof deriveIrosPriority>;
 
 export type ComputeGoalAndPriorityArgs = {
+  /** ✅ 追加：観測ログの追跡用（orchestrator から渡す） */
+  conversationId?: string | null;
+
   /** 今回のユーザ入力テキスト */
   text: string;
 
@@ -99,6 +102,8 @@ export function computeGoalAndPriority(
   args: ComputeGoalAndPriorityArgs,
 ): ComputeGoalAndPriorityResult {
   const {
+    conversationId, // ✅ 追加
+
     text,
     depth,
     qCode,
@@ -118,17 +123,22 @@ export function computeGoalAndPriority(
     descentGate,
   } = args;
 
+  // この関数内では “今ターンで扱う深度/Q” を null/undefined 混在させない
+  const depthNow: Depth | null = (typeof depth === 'string' ? (depth as Depth) : null) ?? null;
+  const qNow: QCode | null = (typeof qCode === 'string' ? (qCode as QCode) : null) ?? null;
+  const lastDepthNow: Depth | null = (typeof lastDepth === 'string' ? (lastDepth as Depth) : null) ?? null;
+  const lastQNow: QCode | null = (typeof lastQ === 'string' ? (lastQ as QCode) : null) ?? null;
+  const sa = typeof selfAcceptanceLine === 'number' ? selfAcceptanceLine : null;
+
   /* =========================================================
      0) Vent/Will 判定（Q continuity に lastQ を載せるか切るか）
-     - 意志より感情にのまれやすい：基本は「感情継続」（lastQ を渡す）
-     - ただし、強い前向き意志が明確（willTag）なら「操縦席に戻った」扱いで lastQ を切る
   ========================================================= */
   const vw = detectVentWill(text);
 
   // v1 ルール：
   // - willTag=true → Q continuity を遮断（lastQ を null）
   // - willTag=false → Q continuity を継続（lastQ を渡す）
-  const continuityLastQ: QCode | null = vw.willTag ? null : (lastQ ?? null);
+  const continuityLastQ: QCode | null = vw.willTag ? null : (lastQNow ?? null);
 
   if (process.env.DEBUG_IROS_WILL === '1') {
     // eslint-disable-next-line no-console
@@ -139,6 +149,7 @@ export function computeGoalAndPriority(
       ventHits: vw.reasons.ventHits,
       willHits: vw.reasons.willHits,
       continuityLastQ,
+      conversationId: conversationId ?? null,
     });
   }
 
@@ -147,10 +158,11 @@ export function computeGoalAndPriority(
   ========================================================= */
   let goal = deriveIrosGoal({
     userText: text,
-    lastDepth,
-    lastQ,
+    lastDepth: lastDepthNow ?? undefined,
+    lastQ: lastQNow ?? undefined,
     requestedDepth,
     requestedQCode,
+
     // ★ 三軸回転用
     lastGoalKind: lastGoalKind ?? undefined,
     uncoverStreak: previousUncoverStreak ?? 0,
@@ -160,9 +172,7 @@ export function computeGoalAndPriority(
   try {
     const anyGoal: any = goal;
     anyGoal.detail = {
-      ...(anyGoal.detail && typeof anyGoal.detail === 'object'
-        ? anyGoal.detail
-        : {}),
+      ...(anyGoal.detail && typeof anyGoal.detail === 'object' ? anyGoal.detail : {}),
       ventWill: {
         ventScore: vw.ventScore,
         willScore: vw.willScore,
@@ -183,7 +193,7 @@ export function computeGoalAndPriority(
   try {
     const riskFlags = soulNote?.risk_flags ?? null;
     const hasQ5Depress =
-      qCode === 'Q5' &&
+      qNow === 'Q5' &&
       Array.isArray(riskFlags) &&
       riskFlags.includes('q5_depress');
 
@@ -195,16 +205,10 @@ export function computeGoalAndPriority(
         anyGoal.reason =
           'SoulLayer が Q5_depress を検出したため、このターンは安定・保護を最優先する';
 
-        if (anyGoal.detail && typeof anyGoal.detail === 'object') {
-          anyGoal.detail = {
-            ...anyGoal.detail,
-            bySoulQ5Depress: true,
-          };
-        } else {
-          anyGoal.detail = {
-            bySoulQ5Depress: true,
-          };
-        }
+        anyGoal.detail = {
+          ...(anyGoal.detail && typeof anyGoal.detail === 'object' ? anyGoal.detail : {}),
+          bySoulQ5Depress: true,
+        };
       }
 
       goal = anyGoal as IrosGoalType;
@@ -217,51 +221,45 @@ export function computeGoalAndPriority(
   }
 
   // ✅ Q continuity を切ったターンは「このターンの qCode」を goal.targetQ に同期する
-  // - willTag=true などで continuityLastQ=null になった場合、
-  //   deriveIrosGoal が lastQ 起点で targetQ を埋めてしまうズレをここで潰す
-  if (continuityLastQ === null && qCode) {
+  if (continuityLastQ === null && qNow) {
     const anyGoal: any = goal;
     const prev = typeof anyGoal.targetQ === 'string' ? anyGoal.targetQ : null;
 
-    if (prev !== qCode) {
-      anyGoal.targetQ = qCode;
+    if (prev !== qNow) {
+      anyGoal.targetQ = qNow;
       anyGoal.detail = {
         ...(anyGoal.detail && typeof anyGoal.detail === 'object' ? anyGoal.detail : {}),
         targetQForcedToCurrent: true,
         targetQPrev: prev,
-        targetQNow: qCode,
+        targetQNow: qNow,
         targetQReason: 'continuityLastQ is null → prefer current decided qCode',
       };
       goal = anyGoal as IrosGoalType;
     }
   }
 
-
   /* =========================================================
      ② Continuity Engine：前回の意志を踏まえて補正（Goal 用）
      ※ ContinuityContext は「null運用」(undefined禁止) に統一
   ========================================================= */
   const continuity: ContinuityContext = {
-    lastDepth: lastDepth ?? null,
-    lastQ: continuityLastQ, // ✅ ここが肝：Vent/Will 判定で Q の継続/遮断
+    lastDepth: lastDepthNow ?? null,
+    lastQ: continuityLastQ,
     userText: text,
   };
 
   // ★ safety: goal.targetQ が空なら「このターンで決まった qCode」を入れておく
-  // （continuity が “lastQ に戻す” 系の補正をするなら、ここを起点に挙動が見える）
-  if (!goal.targetQ && qCode) {
-    (goal as any).targetQ = qCode;
+  if (!(goal as any).targetQ && qNow) {
+    (goal as any).targetQ = qNow;
   }
 
-  // ✅ 追加ログ：applyGoalContinuity の入出力を確定させる
-  // （ctx 未定義エラーを避けるため continuity を参照する）
   // eslint-disable-next-line no-console
   console.log('[IROS/GOAL_CONT] applyGoalContinuity', {
+    conversationId: conversationId ?? null,
     goal_in: goal,
     ctx: {
       lastQ: continuity.lastQ,
       lastDepth: continuity.lastDepth,
-      // 任意（型に無ければ null）
       qTrace: (continuity as any)?.qTrace ?? null,
       memoryQ: (continuity as any)?.memoryState?.qPrimary ?? null,
     },
@@ -270,7 +268,10 @@ export function computeGoalAndPriority(
   goal = applyGoalContinuity(goal, continuity);
 
   // eslint-disable-next-line no-console
-  console.log('[IROS/GOAL_CONT]  result', { goal_out: goal });
+  console.log('[IROS/GOAL_CONT]  result', {
+    conversationId: conversationId ?? null,
+    goal_out: goal,
+  });
 
   /* =========================================================
      ②.5 三軸回転：decideRotation で帯域回転 + gate/loop を更新
@@ -283,55 +284,70 @@ export function computeGoalAndPriority(
       (typeof anyGoal?.targetDepth === 'string'
         ? normalizeDepthStrictOrNull(anyGoal.targetDepth)
         : null) ??
-      (typeof depth === 'string' ? (depth as Depth) : null) ??
-      (typeof lastDepth === 'string' ? (lastDepth as Depth) : null) ??
+      depthNow ??
+      lastDepthNow ??
       null;
 
     const rotation = decideRotation({
-      lastDepth:
-        (typeof lastDepth === 'string' ? (lastDepth as Depth) : null) ?? null,
-      currentDepth: baseDepth,
-
-      // ★ undefined じゃなく null 統一
-      qCode: (typeof qCode === 'string' ? (qCode as QCode) : null) ?? null,
+      lastDepth: lastDepthNow ?? null,
+      currentDepth: baseDepth ?? null,
+      qCode: qNow ?? null,
 
       lastGoalKind: lastGoalKind ?? null,
-      uncoverStreak:
-        typeof previousUncoverStreak === 'number' ? previousUncoverStreak : 0,
+      uncoverStreak: typeof previousUncoverStreak === 'number' ? previousUncoverStreak : 0,
 
-      selfAcceptance: selfAcceptanceLine ?? null,
+      selfAcceptance: sa ?? null,
       riskFlags: soulNote?.risk_flags ?? null,
 
       stayRequested: false,
 
-      // ✅ 前回状態
-      lastSpinLoop: spinLoop ?? null,
-      lastDescentGate: descentGate ?? null,
+      lastSpinLoop: (spinLoop ?? null) as any,
+      lastDescentGate: (descentGate ?? null) as any,
 
-      // いま未配線なら null でOK（後で繋ぐ）
+      // 未配線（後で繋ぐ）
       actionSignal: null,
       delegateLevel: null,
       userAcceptedDescent: null,
     });
 
-    // ✅ 回転で depth を更新（回転しない場合も nextDepth は baseDepth を返す設計）
-    if (rotation.shouldRotate && rotation.nextDepth) {
-      anyGoal.targetDepth = rotation.nextDepth;
-      goal = anyGoal as IrosGoalType;
-    }
-
-    // ✅ 常に rotationState を残す（ログ reason が埋まる＝動いてる証拠）
+    // rotationState は必ず残す（観測可能性）
     anyGoal.rotationState = {
       spinLoop: rotation.nextSpinLoop,
       descentGate: rotation.nextDescentGate,
       depth: rotation.nextDepth,
       reason: rotation.reason,
     };
+
+    // apply: shouldRotate の時だけ goal.targetDepth を更新（単一決定者へ寄せる）
+    if (rotation.shouldRotate && rotation.nextDepth) {
+      anyGoal.targetDepth = rotation.nextDepth;
+    }
+
     goal = anyGoal as IrosGoalType;
+
+    // [IROS/DEPTH_WRITE] ROTATION（自然回転の確定ログ）
+    try {
+      // eslint-disable-next-line no-console
+      console.log('[IROS/DEPTH_WRITE]', {
+        route: 'ROTATION',
+        where: 'orchestratorWill',
+        conversationId: conversationId ?? null, // ✅ args から入ってくるようになった
+        baseDepth,
+        goalTargetDepth: (goal as any)?.targetDepth ?? null,
+        rotationDepth: rotation.nextDepth ?? null,
+        spinLoop: rotation.nextSpinLoop ?? null,
+        descentGate: rotation.nextDescentGate ?? null,
+        shouldRotate: rotation.shouldRotate ?? null,
+        reason: rotation.reason ?? null,
+      });
+    } catch {}
 
     if (process.env.DEBUG_IROS_WILL === '1') {
       // eslint-disable-next-line no-console
-      console.log('[IROS/Will] rotation decided', anyGoal.rotationState);
+      console.log('[IROS/Will] rotation decided', {
+        conversationId: conversationId ?? null,
+        rotationState: (goal as any)?.rotationState ?? null,
+      });
     }
   } catch (e) {
     if (process.env.DEBUG_IROS_WILL === '1') {
@@ -346,16 +362,12 @@ export function computeGoalAndPriority(
   const priorityBase = deriveIrosPriority({
     goal,
     mode,
-    depth,
-    qCode,
-    phase: phase ?? undefined, // ★ Phase を渡す（ここは engine 側が optional ならOK）
+    depth: depthNow ?? undefined,
+    qCode: qNow ?? undefined,
+    phase: phase ?? undefined,
   });
 
-  // ★ SelfAcceptance ラインを使って Priority を補正
-  const priority = adjustPriorityWithSelfAcceptance(
-    priorityBase,
-    selfAcceptanceLine,
-  );
+  const priority = adjustPriorityWithSelfAcceptance(priorityBase, sa);
 
   return {
     goal,

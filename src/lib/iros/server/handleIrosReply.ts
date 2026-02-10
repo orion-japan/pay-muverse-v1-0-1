@@ -241,19 +241,63 @@ function shouldDropFromAchievementSummary(s: unknown): boolean {
 
 async function loadConversationHistory(
   supabaseClient: any,
+  userCode: string,
   conversationId: string,
   limit = 30,
 ): Promise<unknown[]> {
+  const cidRaw = String(conversationId ?? '').trim();
+  const ucode = String(userCode ?? '').trim();
+  if (!cidRaw || !ucode) return [];
+
+  const isUuidLike = (v: string) =>
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+
   try {
+    // ✅ conversation_id(uuid) を確定する
+    // - cidRaw が uuid ならそのまま
+    // - uuid でなければ iros_conversations(user_code, conversation_key) から id(uuid) を引く
+    let conversationUuid = cidRaw;
+
+    if (!isUuidLike(cidRaw)) {
+      const { data: conv, error: convErr } = await supabaseClient
+        .from('iros_conversations')
+        .select('id')
+        .eq('user_code', ucode)
+        .eq('conversation_key', cidRaw)
+        .limit(1)
+        .maybeSingle();
+
+      if (convErr) {
+        console.error('[IROS/History] resolve conversation uuid failed', {
+          conversationId: cidRaw,
+          userCode: ucode,
+          error: convErr,
+        });
+        return [];
+      }
+
+      if (!conv?.id) {
+        // conversation がまだ無い（= messages も無い）なら空でOK
+        return [];
+      }
+
+      conversationUuid = String(conv.id);
+    }
+
+    // ✅ iros_messages は uuid で引く（ここで 22P02 を潰す）
     const { data, error } = await supabaseClient
       .from('iros_messages')
       .select('role, text, content, meta, created_at')
-      .eq('conversation_id', conversationId)
+      .eq('conversation_id', conversationUuid)
       .order('created_at', { ascending: false })
       .limit(limit);
 
     if (error) {
-      console.error('[IROS/History] load failed', { conversationId, error });
+      console.error('[IROS/History] load failed', {
+        conversationId: cidRaw,
+        conversationUuid,
+        error,
+      });
       return [];
     }
 
@@ -296,7 +340,8 @@ async function loadConversationHistory(
       .filter((x: any) => typeof x?.text === 'string' && x.text.trim().length > 0);
 
     console.log('[IROS/History] loaded', {
-      conversationId,
+      conversationId: cidRaw,
+      conversationUuid,
       limit,
       returned: history.length,
       metaSample: (history as any[]).find((x) => x?.meta)?.meta ? 'has_meta' : 'no_meta',
@@ -304,10 +349,11 @@ async function loadConversationHistory(
 
     return history;
   } catch (e) {
-    console.error('[IROS/History] unexpected', { conversationId, error: e });
+    console.error('[IROS/History] unexpected', { conversationId: cidRaw, error: e });
     return [];
   }
 }
+
 
 /**
  * ✅ this turn の history を 1回だけ組み立てる（この関数の返り値を全段に渡す）
@@ -372,7 +418,8 @@ async function buildHistoryForTurn(args: {
   // 1) base
   let turnHistory: unknown[] = Array.isArray(providedHistory)
     ? providedHistory
-    : await loadConversationHistory(supabaseClient, conversationId, baseLimit);
+    : await loadConversationHistory(supabaseClient, userCode, conversationId, baseLimit);
+
 
   // 2) cross-conversation
   if (includeCrossConversation) {
@@ -2209,17 +2256,27 @@ try {
   out.metaForSave.extra = out.metaForSave.extra ?? {};
   const ex: any = out.metaForSave.extra;
 
-  // ✅ seed の単一ソース：CALL_LLM は rewriteSeed、SKIP系などは resolvedText もあり得る
-  const seedFromGate = String((gate as any)?.rewriteSeed ?? (gate as any)?.resolvedText ?? '').trim();
+  // ✅ seed の単一ソース
+  // - CALL_LLM：rewriteSeed のみを seed として運ぶ（resolvedText は本文採用/seed専用の別物なので混ぜない）
+  // - SKIP系：本文採用（out.content）で完結するため seed 注入はしない
+  const rewriteSeedRaw = String((gate as any)?.rewriteSeed ?? '').trim();
+  const resolvedTextRaw = String((gate as any)?.resolvedText ?? '').trim();
 
   // ✅ CALL_LLM で seed があるなら、FINAL/SCAFFOLD問わず “必ず” 運ぶ
-  if (gate?.llmEntry === 'CALL_LLM' && seedFromGate.length > 0) {
+  if (gate?.llmEntry === 'CALL_LLM' && rewriteSeedRaw.length > 0) {
     if (ex.llmRewriteSeed == null || String(ex.llmRewriteSeed).trim().length === 0) {
-      ex.llmRewriteSeed = seedFromGate;
+      ex.llmRewriteSeed = rewriteSeedRaw;
       ex.llmRewriteSeedFrom = 'llmGate(rewriteSeed)';
       ex.llmRewriteSeedAt = new Date().toISOString();
     }
   }
+
+  // （任意：デバッグ用メタ。露出はしない前提。必要なければ削除OK）
+  if (gate?.llmEntry === 'CALL_LLM' && rewriteSeedRaw.length === 0 && resolvedTextRaw.length > 0) {
+    ex.llmGateResolvedTextLen = resolvedTextRaw.length;
+    ex.llmGateResolvedTextNote = 'CALL_LLM has resolvedText but rewriteSeed empty (not injected as seed)';
+  }
+
 }
 
 

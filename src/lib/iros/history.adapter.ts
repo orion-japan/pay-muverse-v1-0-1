@@ -1,32 +1,89 @@
 // src/lib/iros/history.adapter.ts
 // Iros — history I/O adapter（DB）
-// - loadHistoryDB(conversationId, limit)
-// - saveMessagesDB({ conversationId, userText, assistantText, mode, meta })
+//
+// ✅ 重要：iros_messages.conversation_id は uuid
+// - 外部から渡ってくる conversationId（文字列キー）を、そのまま conversation_id に使うと 22P02 になる
+// - 必ず ensureIrosConversationUuid で uuid に正規化してから使う
+//
+// - loadHistoryDB({ userCode, conversationId, limit })
+// - saveMessagesDB({ userCode, conversationId, userText, assistantText, mode, meta })
 //
 // 依存：adminClient()（service-role Supabase クライアント）
 
 import { adminClient } from '@/lib/credits/db';
+import { ensureIrosConversationUuid } from '@/lib/iros/server/ensureIrosConversationUuid';
 
 type Role = 'user' | 'assistant';
 
+function isUuidLike(v: string): boolean {
+  // 8-4-4-4-12
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+}
+
+async function resolveConversationUuid(args: {
+  supabase: ReturnType<typeof adminClient>;
+  userCode: string;
+  conversationId: string;
+}): Promise<string> {
+  const cid = String(args.conversationId ?? '').trim();
+  if (!cid) throw new Error('[history.adapter] empty conversationId');
+
+  // すでに uuid ならそのまま
+  if (isUuidLike(cid)) return cid;
+
+  // uuid でなければ、conversation_key として扱って uuid を確定
+  const conversationUuid = await ensureIrosConversationUuid({
+    supabase: args.supabase as any,
+    userCode: String(args.userCode ?? '').trim(),
+    conversationKey: cid,
+    agent: null,
+  });
+
+  return String(conversationUuid);
+}
+
 export async function loadHistoryDB(
-  conversationId: string,
-  limit = 10,
+  args: {
+    userCode: string;
+    conversationId: string;
+    limit?: number;
+  },
 ): Promise<Array<{ role: Role; text: string }>> {
-  const cid = String(conversationId ?? '').trim();
-  if (!cid) return [];
+  const userCode = String(args?.userCode ?? '').trim();
+  const conversationId = String(args?.conversationId ?? '').trim();
+  const limit = typeof args?.limit === 'number' ? args.limit : 10;
+
+  if (!userCode || !conversationId) return [];
 
   const supa = adminClient();
+
+  let conversationUuid: string;
+  try {
+    conversationUuid = await resolveConversationUuid({ supabase: supa, userCode, conversationId });
+  } catch (e) {
+    console.warn('[history.adapter] loadHistoryDB resolveConversationUuid failed', {
+      userCode,
+      conversationId,
+      error: e,
+    });
+    return [];
+  }
+
   const { data, error } = await supa
     .from('iros_messages')
     .select('role, text, content')
-    .eq('conversation_id', cid)
+    .eq('conversation_id', conversationUuid)
     .in('role', ['user', 'assistant'])
     .order('created_at', { ascending: true })
     .limit(Math.max(1, Math.min(50, limit)));
 
   if (error) {
-    console.warn('[history.adapter] loadHistoryDB error', error);
+    console.warn('[history.adapter] loadHistoryDB error', {
+      userCode,
+      conversationId,
+      conversationUuid,
+      error,
+    });
     return [];
   }
 
@@ -41,20 +98,35 @@ export async function loadHistoryDB(
 }
 
 export async function saveMessagesDB(args: {
+  userCode: string;
   conversationId: string;
   userText: string;
   assistantText: string;
   mode?: string;
   meta?: any;
 }): Promise<number> {
-  const cid = String(args?.conversationId ?? '').trim();
+  const userCode = String(args?.userCode ?? '').trim();
+  const conversationId = String(args?.conversationId ?? '').trim();
   const userText = String(args?.userText ?? '').trim();
   const assistantText = String(args?.assistantText ?? '').trim();
   const mode = String(args?.mode ?? 'diagnosis');
 
-  if (!cid || !userText || !assistantText) return 0;
+  if (!userCode || !conversationId || !userText || !assistantText) return 0;
 
   const supa = adminClient();
+
+  let conversationUuid: string;
+  try {
+    conversationUuid = await resolveConversationUuid({ supabase: supa, userCode, conversationId });
+  } catch (e) {
+    console.warn('[history.adapter] saveMessagesDB resolveConversationUuid failed', {
+      userCode,
+      conversationId,
+      error: e,
+    });
+    return 0;
+  }
+
   const nowIso = new Date().toISOString();
   const nowTs = Date.now();
 
@@ -68,7 +140,7 @@ export async function saveMessagesDB(args: {
 
   const { error } = await supa.from('iros_messages').insert([
     {
-      conversation_id: cid,
+      conversation_id: conversationUuid,
       role: 'user',
       text: userText,
       content: userText,
@@ -77,7 +149,7 @@ export async function saveMessagesDB(args: {
       ts: nowTs,
     },
     {
-      conversation_id: cid,
+      conversation_id: conversationUuid,
       role: 'assistant',
       text: assistantText,
       content: assistantText,
@@ -88,7 +160,12 @@ export async function saveMessagesDB(args: {
   ]);
 
   if (error) {
-    console.warn('[history.adapter] saveMessagesDB error', error);
+    console.warn('[history.adapter] saveMessagesDB error', {
+      userCode,
+      conversationId,
+      conversationUuid,
+      error,
+    });
     return 0;
   }
 

@@ -2005,8 +2005,13 @@ const lastTurnsSafe = (() => {
   // ✅ kill policy:
   // - same_phrase でも IDEA_BAND は殺さない（候補は再提示が必要になることがある）
   // - T_CONCRETIZE は従来どおり repeat を抑制（会話破壊を避ける）
+  //
+  // ✅ lane single source of truth:
+  // - wantsIdeaBand を固定で立てない（下流が常時 IDEA_BAND 化して壊れる）
+  // - 同時ヒット時は T_CONCRETIZE を優先（レーンは単一に収束させる）
   const wantsTConcretize = !repeatSignalSame && hitTConcretize;
-  const wantsIdeaBand = hitIdeaBand;
+  const wantsIdeaBand = !wantsTConcretize && hitIdeaBand;
+
 
   try {
     console.log('[IROS/rephraseEngine][LANE_DETECT]', {
@@ -2052,11 +2057,14 @@ const lastTurnsSafe = (() => {
       ].join('\n')
     : '';
 
+  // ✅ IDEA_BAND のときは directTask を強制で無効化する
+  //    （directTask があると “文章を仕上げる” 側に吸われて契約違反の初撃が出やすい）
+  const directTaskForPrompt = wantsIdeaBand ? false : isDirectTask;
 
   // ✅ レーンが明示されている時は GROUND をやめる
   //    （GROUND骨格が IDEA_BAND を潰すため）
   const baseSystemPrompt = systemPromptForFullReply({
-    directTask: isDirectTask,
+    directTask: directTaskForPrompt,
     itOk,
     band,
     lockedILines,
@@ -2064,12 +2072,9 @@ const lastTurnsSafe = (() => {
     // T_CONCRETIZE：GUIDE_I でOK（具体化・一手誘導）
     ...(wantsTConcretize ? { personaMode: 'GUIDE_I' as const } : {}),
 
-    // IDEA_BAND：候補提示だけが目的なので GUIDE_I は禁止
-    //（観測→一手が混入して崩れるため DELIVER）
-    ...(wantsIdeaBand ? { personaMode: 'GROUND' as const } : {}),
-
+    // IDEA_BAND：候補提示だけが目的なので DELIVER
+    ...(wantsIdeaBand ? { personaMode: 'DELIVER' as const } : {}),
   });
-
 
   // ✅ レーン契約は「最後」に置く（後段の詳細指示が勝つ）
   const laneContractTail = (tConcretizeHeader || '') + (ideaBandHeader || '');
@@ -2082,7 +2087,7 @@ const lastTurnsSafe = (() => {
     seedDraftHint,
     lastTurnsCount: lastTurnsSafe.length,
     itOk,
-    directTask: isDirectTask,
+    directTask: directTaskForPrompt,
     inputKind,
     intentBand: band.intentBand,
     tLayerHint: band.tLayerHint,
@@ -2107,8 +2112,6 @@ const lastTurnsSafe = (() => {
     turns: lastTurnsSafe,
   });
 
-
-
   // ログ確認
   console.log('[IROS/rephraseEngine][MSG_PACK]', {
     traceId: debug.traceId,
@@ -2132,15 +2135,14 @@ const lastTurnsSafe = (() => {
     intentBand: band.intentBand,
     tLayerHint: band.tLayerHint,
 
-    directTask: isDirectTask,
+    directTask: directTaskForPrompt,
+    directTask_raw: isDirectTask,
     inputKind,
     inputKindFromMeta,
     inputKindFromCtx,
 
     lockedILines: lockedILines.length,
   });
-
-
 
   // ---------------------------------------------
   // seedFromSlots（fallback用）
@@ -2601,38 +2603,103 @@ const lastTurnsSafe = (() => {
 
 
   if (ideaBandContractBroken) {
-    const reasons = [
-      tooFewLines ? 'IDEA_BAND_TOO_FEW_LINES' : null,
-      tooManyLines ? 'IDEA_BAND_TOO_MANY_LINES' : null,
-      hasQuestion ? 'IDEA_BAND_HAS_QUESTION' : null,
-      hasForbidden ? 'IDEA_BAND_HAS_FORBIDDEN' : null,
-    ].filter(Boolean);
+    // ✅ ここで FATAL に落として seed(@NEXT_HINT)へ逃げると、
+    // rephraseBlocks が内部ディレクティブだけになり UI が userText エコーへ戻る。
+    // なので「候補2〜4行」へ“その場で矯正”して契約に戻す。
 
-    console.warn('[IROS/IDEA_BAND][CONTRACT_BROKEN]', {
-      traceId: debug.traceId,
-      conversationId: debug.conversationId,
-      userCode: debug.userCode,
-      lineCount: ideaBandLines.length,
-      reasons,
-      head: safeHead(String(candidate ?? ''), 160),
-    });
+    const salvageIdeaBand = (() => {
+      // makeIdeaBandCandidates は adoptAsSlots 内の関数だが、ここでは既に使えない。
+      // なので同等の最小ロジックだけ再現する（憶測なし・決め打ち最小）。
+      const s = String(candidate ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+      if (!s) return '';
 
-    // FATAL に落として下の retry 流れへ（v が未定義でも動くように最低限の形）
-    v = {
-      ...(v as any),
-      ok: false,
-      level: 'FATAL',
-      reasons: Array.from(
-        new Set([
-          ...(((v as any)?.reasons ?? []) as any[]),
-          'IDEA_BAND_CONTRACT_BROKEN',
-          ...reasons,
-        ]),
-      ),
-    } as any;
+      // 1) まずは行ベース（既に改行があるケースはそれを尊重）
+      let lines = s
+        .split('\n')
+        .map((x) => x.trim())
+        .filter(Boolean);
+
+      // 2) 行が少なければ句点で分割（2〜4を狙う）
+      if (lines.length < 2) {
+        const sentences = s
+          .split(/。+/)
+          .map((x) => x.trim())
+          .filter(Boolean);
+        if (sentences.length >= 2) lines = sentences.slice(0, 4).map((x) => `${x}。`);
+      }
+
+      // 3) それでも足りなければ矯正不能
+      if (lines.length < 2) return '';
+
+      // 4) 各行を「候補行」に正規化（normalChat.ts の例に寄せる）
+      // - 末尾の句点を落として「という方向」を付ける（既に候補語尾があればそのまま）
+      const fixed = lines
+        .slice(0, 4)
+        .map((line) => {
+          const core = String(line ?? '')
+            .trim()
+            .replace(/^[-*•・◯]\s*/u, '') // 先頭マーカーは除去
+            .replace(/[。．.]+$/u, '') // 終端句点は除去
+            .trim();
+          if (!core) return '';
+          if (/という(?:選択肢|案|方向)$/u.test(core)) return core;
+          // 既に「候補:」「選択肢:」形式なら温存
+          if (/^(?:候補|選択肢)\s*[:：]/u.test(core)) return core;
+          return `${core}という方向`;
+        })
+        .filter(Boolean);
+
+      // 2〜4 行に満たないなら失敗扱い
+      if (fixed.length < 2) return '';
+      return fixed.join('\n').trim();
+    })();
+
+    if (salvageIdeaBand) {
+      candidate = salvageIdeaBand;
+
+      // ✅ 矯正後にもう一度 guard を通す（採用の整合）
+      v = runFlagship(candidate, slotsForGuard, scaffoldActive);
+
+      console.warn('[IROS/IDEA_BAND][SALVAGED]', {
+        traceId: debug.traceId,
+        conversationId: debug.conversationId,
+        userCode: debug.userCode,
+        lineCount: candidate.split('\n').filter(Boolean).length,
+        head: safeHead(String(candidate ?? ''), 160),
+      });
+    } else {
+      // ✅ 矯正できない時だけ従来通り FATAL → retry へ
+      const reasons = [
+        tooFewLines ? 'IDEA_BAND_TOO_FEW_LINES' : null,
+        tooManyLines ? 'IDEA_BAND_TOO_MANY_LINES' : null,
+        hasQuestion ? 'IDEA_BAND_HAS_QUESTION' : null,
+        hasForbidden ? 'IDEA_BAND_HAS_FORBIDDEN' : null,
+        'IDEA_BAND_SHAPE_REJECT',
+      ].filter(Boolean);
+
+      console.warn('[IROS/IDEA_BAND][CONTRACT_BROKEN]', {
+        traceId: debug.traceId,
+        conversationId: debug.conversationId,
+        userCode: debug.userCode,
+        lineCount: ideaBandLines.length,
+        reasons,
+        head: safeHead(String(candidate ?? ''), 160),
+      });
+
+      v = {
+        ...(v as any),
+        ok: false,
+        level: 'FATAL',
+        reasons: Array.from(
+          new Set([
+            ...(((v as any)?.reasons ?? []) as any[]),
+            'IDEA_BAND_CONTRACT_BROKEN',
+            ...reasons,
+          ]),
+        ),
+      } as any;
+    }
   }
-
-
 
   if (forceIntervene) {
     console.warn('[IROS/FLAGSHIP][FORCE_INTERVENE]', {

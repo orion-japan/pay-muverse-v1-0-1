@@ -365,7 +365,16 @@ export async function reply(params: {
   history?: HistoryMsg[]; // 任意（{role, content}）
   model?: string; // 任意
 }): Promise<any> {
-  const cid = params.conversationId ?? getCidFromLocation();
+  // ✅ URL の cid を最優先で拾う（リロード後に別CIDへ飛ばさない）
+  const cid =
+    params.conversationId ||
+    (() => {
+      if (typeof window === 'undefined') return '';
+      const sp = new URLSearchParams(window.location.search);
+      return sp.get('cid') || sp.get('conversationId') || sp.get('conversation_id') || '';
+    })() ||
+    getCidFromLocation();
+
   const text = (params.user_text ?? '').toString().trim();
   if (!cid) throw new Error('reply: conversationId is required (body or ?cid)');
   if (!text) throw new Error('reply: text is required');
@@ -383,6 +392,7 @@ export async function reply(params: {
 
   const payload: any = {
     conversationId: cid,
+    conversation_id: cid, // ✅ 互換用（どこかで conversation_id を見てても落ちない）
     text,
     modeHint: params.mode,
     extra: {
@@ -390,6 +400,17 @@ export async function reply(params: {
     },
     ...(history && history.length > 0 ? { history } : {}),
   };
+  const userCodeFromUrl =
+  typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search).get('user_code')
+    : null;
+
+const userCodeFromStorage =
+  typeof window !== 'undefined'
+    ? window.localStorage.getItem('user_code')
+    : null;
+
+const userCodeHeader = (userCodeFromUrl || userCodeFromStorage || '').trim() || null;
 
   // ✅ 送信内容のキーと historyLen を確実にログ（固定{}は禁止）
   console.log('[IROS][client] calling /api/agent/iros/reply', {
@@ -399,37 +420,65 @@ export async function reply(params: {
     historyLen: Array.isArray(payload.history) ? payload.history.length : 0,
   });
 
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  if (userCodeHeader) {
+    headers['x-user-code'] = userCodeHeader;
+  }
+
   const res = await authFetch('/api/agent/iros/reply', {
     method: 'POST',
+    headers,
     body: JSON.stringify(payload),
   });
+
 
   // ✅ サーバが付けた traceId をヘッダから回収
   const traceId = res.headers.get('x-trace-id') || null;
 
-  const json = await res.json().catch(() => ({}));
+  const json: any = await res.json().catch(() => ({}));
+
+  // ✅ サーバ返却が assistant/assistantText/content/text など揺れても、UIが必ず拾えるように正規化
+  const assistantText =
+    (typeof json?.assistant === 'string' && json.assistant) ||
+    (typeof json?.assistantText === 'string' && json.assistantText) ||
+    (typeof json?.content === 'string' && json.content) ||
+    (typeof json?.text === 'string' && json.text) ||
+    (typeof json?.reply === 'string' && json.reply) ||
+    (typeof json?.message === 'string' && json.message) ||
+    '';
+
+  // ✅ 互換キーを揃える（UI側がどれを見ても表示される）
+  json.assistant = typeof json.assistant === 'string' ? json.assistant : assistantText;
+  json.assistantText = typeof json.assistantText === 'string' ? json.assistantText : json.assistant;
+  json.content = typeof json.content === 'string' ? json.content : json.assistant;
+  json.text = typeof json.text === 'string' ? json.text : json.assistant;
 
   // ✅ デバッグ用：UIで追えるように返却オブジェクトへ混ぜる（破壊的変更は避ける）
   if (traceId && json && typeof json === 'object') {
-    (json as any).traceId = (json as any).traceId ?? traceId;
-    (json as any).meta = (json as any).meta ?? {};
-    (json as any).meta.extra = (json as any).meta.extra ?? {};
-    (json as any).meta.extra.traceId = (json as any).meta.extra.traceId ?? traceId;
+    json.traceId = json.traceId ?? traceId;
+    json.meta = json.meta ?? {};
+    json.meta.extra = json.meta.extra ?? {};
+    json.meta.extra.traceId = json.meta.extra.traceId ?? traceId;
   }
 
   console.log('[IROS][client] /reply response', {
     status: res.status,
     traceId,
     hasJson: !!json,
-    gate: (json as any)?.gate ?? (json as any)?.result?.gate ?? null,
-    microOnly: (json as any)?.meta?.microOnly ?? null,
-    mode: (json as any)?.mode ?? (json as any)?.meta?.mode ?? null,
-    finalTextPolicy: (json as any)?.meta?.extra?.finalTextPolicy ?? null,
+    gate: json?.gate ?? json?.result?.gate ?? null,
+    microOnly: json?.meta?.microOnly ?? null,
+    mode: json?.mode ?? json?.meta?.mode ?? null,
+    finalTextPolicy: json?.meta?.extra?.finalTextPolicy ?? null,
+    assistantLen: typeof json?.assistant === 'string' ? json.assistant.length : null,
+    assistantHead: typeof json?.assistant === 'string' ? json.assistant.slice(0, 40) : null,
   });
 
   return json;
-}
 
+}
 export async function replyAndStore(args: {
   conversationId: string;
   user_text: string;

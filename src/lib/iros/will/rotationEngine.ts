@@ -1,14 +1,14 @@
 // src/lib/iros/will/rotationEngine.ts
 // 三軸回転エンジン（SRI / TCF + descentGate）
-// - 回転＝状態遷移（LLMの文章生成とは切り離す）
+//
+// 憲法：
+// - 回転＝状態遷移（deterministic）。LLMの文章生成とは切り離す
 // - offered は「下降の扉」を置くだけ
 // - accepted で初めて TCF に入る
+// - LLM signals は「兆し」(boolean) として受け取るが、depth 直結は禁止（補助条件にのみ使う）
 
-import type { Depth, QCode } from '../system';
+import type { Depth, QCode, SpinLoop, LlmSignals } from '../system';
 import type { IrosGoalKind } from './goalEngine';
-
-/** 回転ループ */
-export type SpinLoop = 'SRI' | 'TCF';
 
 /** 下降ゲート（扉の状態） */
 export type DescentGate = 'closed' | 'offered' | 'accepted';
@@ -68,6 +68,13 @@ export type RotationContext = {
    * （UIがなくても、上位で検出できるなら使う）
    */
   userAcceptedDescent?: boolean | null;
+
+  /**
+   * LLM自然上昇の“兆しセンサー”
+   * - 決定権ゼロ（depth直結禁止）
+   * - 回転条件の補助（OR/加点）にのみ使う（実際の参照は decideRotation 内で後続実装）
+   */
+  llmSignals?: LlmSignals | null;
 };
 
 /**
@@ -108,6 +115,7 @@ export function decideRotation(ctx: RotationContext): RotationDecision {
     actionSignal,
     delegateLevel,
     userAcceptedDescent,
+    // llmSignals, // ← 受け口のみ。ロジック参照は次タスクで入れる（depth直結禁止のため）
   } = ctx;
 
   // baseDepth をまず確定（null の可能性をここで閉じる）
@@ -122,8 +130,7 @@ export function decideRotation(ctx: RotationContext): RotationDecision {
       nextDepth: fallbackDepth,
       nextSpinLoop: (lastSpinLoop ?? 'SRI') as SpinLoop,
       nextDescentGate: (lastDescentGate ?? 'closed') as DescentGate,
-      reason:
-        'baseDepth 未定義（配線バグ疑い）: 回転停止・fallbackDepth を返す',
+      reason: 'baseDepth 未定義（配線バグ疑い）: 回転停止・fallbackDepth を返す',
     };
   }
 
@@ -232,14 +239,13 @@ export function decideRotation(ctx: RotationContext): RotationDecision {
     };
   }
 
-  // 3) SRI ループ中：従来の上昇トリガ（必要なら後で条件を広げる）
+  // 3) SRI ループ中：従来の上昇トリガ（ここは後続で signals 補助を足せる）
   const depthHead = baseDepth[0]; // 'S' | 'R' | 'I' | 'T' | 'C' | 'F'
   const streak = uncoverStreak ?? 0;
 
   const isSBand = depthHead === 'S';
   const isQ3 = qCode === 'Q3';
-  const isUncoverLike =
-    lastGoalKind === 'uncover' || lastGoalKind === 'stabilize';
+  const isUncoverLike = lastGoalKind === 'uncover' || lastGoalKind === 'stabilize';
 
   const triggerSBand = isSBand && isQ3 && isUncoverLike && streak >= 2;
 
@@ -270,8 +276,7 @@ export function decideRotation(ctx: RotationContext): RotationDecision {
     nextDepth: sriNextDepth,
     nextSpinLoop: 'SRI',
     nextDescentGate: nextGate,
-    reason:
-      'SRI: S帯でQ3かつuncover連続(>=2)かつ安全条件クリアのため、上位帯域へ1ステップ回転',
+    reason: 'SRI: S帯でQ3かつuncover連続(>=2)かつ安全条件クリアのため、上位帯域へ1ステップ回転',
   };
 }
 
@@ -295,10 +300,9 @@ export function shouldRotateBand(ctx: RotationContext): {
 /**
  * 「帯域」単位で一段だけ上に回転させた Depth を返す（SRI用）
  *
- * S/F → R/C → I/T
- * - S帯(S1〜S3) → R帯の入口 = R1
- * - R/C帯(R1〜C3) → I帯の入口 = I1
- * - I/T帯(I1〜T3) / F帯(F1〜F3) → それ以上は回転させない
+ * S帯 → R帯入口（R1）
+ * R/C帯 → I帯入口（I1）
+ * I/T/F帯 → それ以上は回転させない
  */
 export function nextDepthForBand(current: Depth): Depth {
   const head = current[0]; // 'S' | 'R' | 'I' | 'T' | 'C' | 'F'
@@ -314,7 +318,7 @@ export function nextDepthForBand(current: Depth): Depth {
  * TCF 用：T → C → F を 1ステップ進める
  * - T帯(T1〜T3) → C1
  * - C帯(C1〜C3) → F1
- * - F帯(F1〜F3) → 進めない（完了判定は上位で）
+ * - F帯(F1) → 進めない（完了判定は上位で）
  */
 export function nextDepthForTCF(current: Depth): Depth {
   const head = current[0]; // 'S' | 'R' | 'C' | 'I' | 'T' | 'F'

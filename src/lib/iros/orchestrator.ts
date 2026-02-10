@@ -206,6 +206,7 @@ export async function runIrosTurn(
   args: IrosOrchestratorArgs,
 ): Promise<IrosOrchestratorResult> {
   const {
+    conversationId,
     text,
     sb,
     requestedMode,
@@ -518,6 +519,8 @@ export async function runIrosTurn(
   // 7. Will フェーズ：Goal / Priority の決定
   // ----------------------------------------------------------------
   let { goal, priority } = computeGoalAndPriority({
+    conversationId: conversationId ?? null, // ✅ 追加（DEPTH_WRITE に渡す）
+
     text,
     depth: meta.depth,
     qCode: meta.qCode,
@@ -534,6 +537,7 @@ export async function runIrosTurn(
     descentGate:
       (typeof lastDescentGate !== 'undefined' ? lastDescentGate : null) ?? null,
   });
+
 
   // targetQ が undefined に落ちるケースを補正
   {
@@ -1210,8 +1214,16 @@ const isSilence = speechAct === '無言アクト' || speechAllowLLM === false;
         goalKind === 'repair' ||
         goalKind === 'counsel';
 
-      const directTask =
-        /(文面|文章|手順|要点|まとめ|作って|書いて|整えて|テンプレ|仕様|設計)/.test(t);
+      // ✅ directTask は「完成物を作成して」系だけ true にする（誤爆防止）
+      // - "要点/まとめ/仕様/設計" は構造化要求なので wantsStructure 側で拾う
+      const directTaskTopic =
+        /(文面|文章|返信文|メール|案内文|紹介文|テンプレ|下書き|ドラフト|添削|推敲)/.test(t);
+
+      const directTaskVerb =
+        /(作って|書いて|作成|用意|整えて|仕上げ|起こして|リライト|直して)/.test(t);
+
+      const directTask = directTaskTopic && directTaskVerb;
+
 
       const wantsStructure =
         /(どれ|どっち|どう|どうしたら|どうすれば|何から|決められない|迷う|悩む|整理|要点|まとめ|結論|モヤ|引っかか|進まない|止まる)/.test(
@@ -1651,9 +1663,16 @@ const laneKeyNow =
         userText: text,
         hasHistory: true,
         questionAlreadyPlanned: false,
-        directTask: false,
+
+        // ✅ 直依頼（文面/手順/要点/まとめ/仕様/設計…）は directTask=true を渡す
+        // NOTE: shouldUseFlagReply() と同じ判定語彙をここにも持つ（fallback経路でのズレ防止）
+        directTask: /(文面|文章|手順|要点|まとめ|作って|書いて|整えて|テンプレ|仕様|設計)/.test(
+          String(text ?? '').trim(),
+        ),
+
         forceOnePoint: false,
       });
+
 
       slotsArr = Array.isArray(flagSlots) ? flagSlots : [];
       slotPlanPolicy = slotPlanPolicy || 'FINAL';

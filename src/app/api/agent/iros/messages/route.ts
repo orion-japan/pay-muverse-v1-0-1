@@ -78,6 +78,12 @@ function toIntOrNull(v: any): number | null {
   return null;
 }
 
+function isUuidLike(s: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    String(s || '').trim(),
+  );
+}
+
 /** JSON 用に Unicode をサニタイズする（壊れたサロゲートペアを削除） */
 function sanitizeJsonDeep(value: any): any {
   if (value == null) return value;
@@ -190,7 +196,7 @@ function stripDirectivesForApi(input: string): string {
 
 type OutMsg = {
   id: string;
-  conversation_id: string;
+  conversation_id: string; // 外部cidで返す
   role: 'user' | 'assistant';
   content: string;
   user_code?: string;
@@ -271,11 +277,11 @@ function normalizeIntentLayerFromDepth(depthStage: string | null): string | null
 
 async function computeUserStreakFromDb(args: {
   supabase: any;
-  conversationId: string;
+  conversationIdUuid: string; // uuid
   userCode: string;
   qCodeFinal: string | null;
 }): Promise<{ streak_q: string | null; streak_len: number | null; qtu_from: string | null }> {
-  const { supabase, conversationId, userCode, qCodeFinal } = args;
+  const { supabase, conversationIdUuid, userCode, qCodeFinal } = args;
 
   const qFinal = typeof qCodeFinal === 'string' ? qCodeFinal.trim() : '';
   if (!qFinal) return { streak_q: null, streak_len: null, qtu_from: null };
@@ -285,7 +291,7 @@ async function computeUserStreakFromDb(args: {
       const { data, error } = await supabase
         .from(table)
         .select('q_code, created_at')
-        .eq('conversation_id', conversationId)
+        .eq('conversation_id', conversationIdUuid)
         .eq('user_code', userCode)
         .eq('role', 'user')
         .order('created_at', { ascending: false })
@@ -310,6 +316,50 @@ async function computeUserStreakFromDb(args: {
   }
 
   return { streak_q: null, streak_len: null, qtu_from: null };
+}
+
+/* =========================
+ * Conversation resolve
+ * ========================= */
+
+async function resolveConversationRow(supabase: ReturnType<typeof sb>, cid: string) {
+  // (1) まず id.eq(cid) で試す（uuid/最小互換）
+  {
+    const conv = await trySelect<any>(
+      supabase,
+      CONV_TABLES,
+      { '*': '*' },
+      (q) => q.eq('id', cid).limit(1),
+    );
+    const row = conv.ok ? (conv as any).data?.[0] ?? null : null;
+    if (row) return row;
+  }
+
+  // (2) だめなら conversation_key も試す（外部ID対応）
+  try {
+    const conv2 = await trySelect<any>(
+      supabase,
+      CONV_TABLES,
+      { '*': '*' },
+      (q) => q.or(`id.eq.${cid},conversation_key.eq.${cid}`).limit(1),
+    );
+    const row = conv2.ok ? (conv2 as any).data?.[0] ?? null : null;
+    if (row) return row;
+  } catch {
+    // ignore
+  }
+
+  return null;
+}
+
+function resolveInternalUuid(cid: string, convRow: any): string | null {
+  return (
+    (isUuidLike(cid) ? String(cid).trim() : null) ||
+    (isUuidLike(String(convRow?.id ?? '')) ? String(convRow.id).trim() : null) ||
+    (isUuidLike(String(convRow?.uuid ?? '')) ? String(convRow.uuid).trim() : null) ||
+    (isUuidLike(String(convRow?.conversation_uuid ?? '')) ? String(convRow.conversation_uuid).trim() : null) ||
+    (isUuidLike(String(convRow?.internal_uuid ?? '')) ? String(convRow.internal_uuid).trim() : null)
+  );
 }
 
 /* =========================
@@ -352,19 +402,14 @@ export async function GET(req: NextRequest) {
 
     // (B) Params
     const cid =
-    req.nextUrl.searchParams.get('conversation_id') ||
-    req.nextUrl.searchParams.get('conversationId') ||
-    req.nextUrl.searchParams.get('id') ||
-    '';
+      req.nextUrl.searchParams.get('conversation_id') ||
+      req.nextUrl.searchParams.get('conversationId') ||
+      req.nextUrl.searchParams.get('id') ||
+      '';
 
-  if (!cid) {
-    return json({
-      ok: false,
-      error: 'missing_conversation_id',
-      error_code: 'missing_conversation_id',
-    }, 400);
-  }
-
+    if (!cid) {
+      return json({ ok: false, error: 'missing_conversation_id', error_code: 'missing_conversation_id' }, 400);
+    }
 
     const limitRaw = req.nextUrl.searchParams.get('limit');
     const limit = (() => {
@@ -380,31 +425,25 @@ export async function GET(req: NextRequest) {
 
     const supabase = sb();
 
-    // (C) Conversation owner check
-    const conv = await trySelect<{ id: string; user_code?: string | null }>(
-      supabase,
-      CONV_TABLES,
-      { '*': 'id,user_code' },
-      (q) => q.eq('id', cid).limit(1),
-    );
+    // (C) Conversation owner check (existence hidden)
+    const convRow = await resolveConversationRow(supabase, cid);
 
-    const convRow = conv.ok ? (conv as any).data?.[0] ?? null : null;
-
-    // ✅ conv が取れない場合：存在可否を隠す（空で返して messages select に進まない）
-    if (!conv.ok || !convRow) {
-      return json(
-        { ok: true, messages: [], llm_messages: [], note: !conv.ok ? 'conv_select_failed' : 'conversation_not_found' },
-        200,
-      );
+    if (!convRow) {
+      return json({ ok: true, messages: [], llm_messages: [], note: 'conversation_not_found' }, 200);
     }
 
-    // ✅ owner mismatch も存在可否を隠す
     const owner = String(convRow.user_code ?? '');
     if (owner && owner !== userCode) {
       return json({ ok: true, messages: [], llm_messages: [], note: 'forbidden_owner_mismatch' }, 200);
     }
 
-    // (D) Messages select
+    // (C2) Resolve internal uuid used by iros_messages.conversation_id
+    const convUuid = resolveInternalUuid(cid, convRow);
+    if (!convUuid) {
+      return json({ ok: true, messages: [], llm_messages: [], note: 'no_conversation_uuid_mapping' }, 200);
+    }
+
+    // (D) Messages select (use convUuid)
     const columnsForV = includeMeta
       ? [
           'message_id',
@@ -419,24 +458,18 @@ export async function GET(req: NextRequest) {
           'intent_layer',
           'meta',
         ].join(',')
-      : ['message_id', 'conversation_id', 'user_code', 'role', 'text', 'created_at', 'q_primary', 'color', 'depth_stage', 'intent_layer'].join(
-          ',',
-        );
+      : ['message_id', 'conversation_id', 'user_code', 'role', 'text', 'created_at', 'q_primary', 'color', 'depth_stage', 'intent_layer'].join(',');
 
     const columnsForUI = includeMeta
       ? ['id', 'conversation_id', 'user_code', 'role', 'text', 'created_at', 'q_code', 'color', 'depth_stage', 'intent_layer', 'meta'].join(',')
       : ['id', 'conversation_id', 'user_code', 'role', 'text', 'created_at', 'q_code', 'color', 'depth_stage', 'intent_layer'].join(',');
 
     const columnsForNormalized = includeMeta
-      ? ['id', 'conversation_id', 'user_code', 'role', 'content', 'created_at', 'q_code', 'color', 'depth_stage', 'intent_layer', 'meta'].join(
-          ',',
-        )
+      ? ['id', 'conversation_id', 'user_code', 'role', 'content', 'created_at', 'q_code', 'color', 'depth_stage', 'intent_layer', 'meta'].join(',')
       : ['id', 'conversation_id', 'user_code', 'role', 'content', 'created_at', 'q_code', 'color', 'depth_stage', 'intent_layer'].join(',');
 
     const columnsForTable = includeMeta
-      ? ['id', 'conversation_id', 'user_code', 'role', 'content', 'text', 'q_code', 'color', 'depth_stage', 'intent_layer', 'created_at', 'meta'].join(
-          ',',
-        )
+      ? ['id', 'conversation_id', 'user_code', 'role', 'content', 'text', 'q_code', 'color', 'depth_stage', 'intent_layer', 'created_at', 'meta'].join(',')
       : ['id', 'conversation_id', 'user_code', 'role', 'content', 'text', 'q_code', 'color', 'depth_stage', 'intent_layer', 'created_at'].join(',');
 
     const columnsByTable: Record<string, string> = {
@@ -449,7 +482,7 @@ export async function GET(req: NextRequest) {
     };
 
     const res = await trySelect<any>(supabase, MSG_TABLES, columnsByTable, (q) =>
-      q.eq('conversation_id', cid).order('created_at', { ascending: false }).limit(limit),
+      q.eq('conversation_id', convUuid).order('created_at', { ascending: false }).limit(limit),
     );
 
     if (!res.ok) {
@@ -477,7 +510,7 @@ export async function GET(req: NextRequest) {
 
       return {
         id: String(idVal),
-        conversation_id: String(m.conversation_id),
+        conversation_id: String(cid), // 外部cidで返す
         role: m.role === 'assistant' ? 'assistant' : 'user',
         content: contentVal,
         user_code: m.user_code ?? undefined,
@@ -502,10 +535,9 @@ export async function GET(req: NextRequest) {
 
     return json({ ok: true, messages, llm_messages, includeMeta, source: (res as any).table }, 200);
   } catch (e: any) {
-    const ms = msSince(t0);
     return json(
-      { ok: false, error: 'exception', error_code: 'exception', messages: [], llm_messages: [], detail: String(e?.message ?? e), ms },
-      200,
+      { ok: false, error: 'unhandled_error', error_code: 'unhandled_error', detail: String(e?.message ?? e), ms: msSince(t0) },
+      500,
     );
   }
 }
@@ -552,7 +584,10 @@ export async function POST(req: NextRequest) {
       (req.headers.get('x-request-id')?.trim() || '') ||
       crypto.randomUUID();
 
-    const conversation_id: string = String(body?.conversation_id || body?.conversationId || '').trim();
+    const cidExternal: string = String(body?.conversation_id || body?.conversationId || body?.id || '').trim();
+    if (!cidExternal) {
+      return json({ ok: false, error: 'missing_conversation_id', error_code: 'missing_conversation_id', reqId }, 400);
+    }
 
     const role: 'user' | 'assistant' =
       String(body?.role ?? '').toLowerCase() === 'assistant' ? 'assistant' : 'user';
@@ -570,21 +605,21 @@ export async function POST(req: NextRequest) {
 
     const supabase = sb();
 
-    // (C) Conversation owner check
-    const conv = await trySelect<{ id: string; user_code?: string | null }>(
-      supabase,
-      CONV_TABLES,
-      { '*': 'id,user_code' },
-      (q) => q.eq('id', conversation_id).limit(1),
-    );
+    // (C) Conversation owner check (existence hidden)
+    const convRow = await resolveConversationRow(supabase, cidExternal);
 
-    if (!conv.ok || !(conv as any).data?.[0]) {
-      return json({ ok: false, error: 'conversation_not_found', error_code: 'conversation_not_found', reqId }, 404);
+    if (!convRow) {
+      return json({ ok: true, messages: [], llm_messages: [], note: 'conversation_not_found', reqId }, 200);
     }
 
-    const owner = String((conv as any).data[0].user_code ?? '');
+    const owner = String(convRow.user_code ?? '');
     if (owner && owner !== userCode) {
-      return json({ ok: false, error: 'forbidden_owner_mismatch', error_code: 'forbidden_owner_mismatch', reqId }, 403);
+      return json({ ok: true, messages: [], llm_messages: [], note: 'forbidden_owner_mismatch', reqId }, 200);
+    }
+
+    const convUuid = resolveInternalUuid(cidExternal, convRow);
+    if (!convUuid) {
+      return json({ ok: true, messages: [], llm_messages: [], note: 'no_conversation_uuid_mapping', reqId }, 200);
     }
 
     // (D) NextStep + text normalize
@@ -750,11 +785,11 @@ export async function POST(req: NextRequest) {
     const depth_stage_final = depth_stage_from_body ?? depth_stage_from_meta ?? depth_from_state ?? null;
 
     const intent_layer_from_depth = normalizeIntentLayerFromDepth(depth_stage_final);
-    const intent_layer_final = intent_layer_from_depth ?? (intent_layer_from_body ?? intent_layer_from_meta ?? layer_from_state ?? null);
+    const intent_layer_final =
+      intent_layer_from_depth ?? (intent_layer_from_body ?? intent_layer_from_meta ?? layer_from_state ?? null);
 
     // (G) streak (metaFilled → state → db confirm)
     const qtu: any = (metaFilled as any)?.qTraceUpdated ?? (metaFilled as any)?.qTrace ?? null;
-
     const qTraceFromCounts = msRow ? extractQTraceFromQCounts(msRow.q_counts) : null;
 
     const streakQ_from_qtu =
@@ -789,7 +824,7 @@ export async function POST(req: NextRequest) {
     {
       const db = await computeUserStreakFromDb({
         supabase,
-        conversationId: conversation_id,
+        conversationIdUuid: convUuid,
         userCode,
         qCodeFinal: q_code_final,
       });
@@ -825,7 +860,7 @@ export async function POST(req: NextRequest) {
     const nowTs = Date.now();
 
     const row = {
-      conversation_id,
+      conversation_id: convUuid, // ✅ DBのuuid列に入れるのは常にuuid
       user_code: userCode,
       role,
       content: finalText,
@@ -869,7 +904,7 @@ export async function POST(req: NextRequest) {
       reqId,
       message: {
         id: String(inserted.id),
-        conversation_id,
+        conversation_id: cidExternal, // ✅ 外部cidで返す
         role,
         content: finalText,
         created_at: inserted.created_at,

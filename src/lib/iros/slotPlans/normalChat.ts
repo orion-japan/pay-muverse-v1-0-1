@@ -540,13 +540,30 @@ export function buildNormalChatSlotPlan(args: {
     reason = 'clarify';
     slots = buildClarify(userText, laneKey, flowDelta);
   } else if (isCompose(userText)) {
-
     reason = 'compose';
     slots = buildCompose(userText, laneKey, flowDelta);
   } else {
     const d = flow?.delta ? String(flow.delta) : 'FORWARD';
     reason = `flow:${d}`;
     slots = buildFlowReply({ userText, laneKey, flow, lastUserText, focusLabel: args.focusLabel });
+  }
+
+  // --------------------------------------------------
+  // 🚑 HARD GUARD: slots が 0 なら必ず前に進める材料を注入する
+  // - 実ログで slotPlan_len:0 が出ているため、ここで物理的に潰す
+  // - これが入ると RESULT_TEXT_NO_SLOTS に落ちず、writer が必ず動ける
+  // --------------------------------------------------
+  if (!Array.isArray(slots) || slots.length === 0) {
+    const d = flow?.delta ? String(flow.delta) : 'FORWARD';
+    reason = `guard:no_slots->flow:${d}`;
+    slots = buildFlowReply({ userText, laneKey, flow, lastUserText, focusLabel: args.focusLabel });
+  }
+
+  // normalize 後も 0 なら最後の最後の保険（NEXT_HINT だけでも残す）
+  const normalized = normalizeSlots(slots);
+  if (normalized.length === 0) {
+    reason = 'guard:no_slots_after_normalize';
+    slots = [buildNextHintSlot({ userText, laneKey, flowDelta: flowDelta ?? 'FORWARD' })];
   }
 
   return {

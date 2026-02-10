@@ -107,6 +107,20 @@ function IrosChatInner({ open }: Props) {
 
   // ==== Iros Context ====
   const chat = useIrosChat();
+// ✅ DEBUG: cid 追従確認（確証取り・後で消す）
+useEffect(() => {
+  try {
+    console.log('[IROS][Shell][CID_DEBUG]', {
+      urlCid,
+      open,
+      openTarget,
+      canUse,
+      didHandleOpen: didHandleOpenRef.current,
+      didSelectOnce: didSelectOnce.current,
+      activeConversationId: chat?.activeConversationId ?? null,
+    });
+  } catch {}
+}, [urlCid, open, canUse, chat, openTarget]);
 
   // Context 側の userInfo をローカル表示用に同期
   useEffect(() => {

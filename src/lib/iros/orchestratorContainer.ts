@@ -339,12 +339,17 @@ const nd = (() => {
 
   const slotKeys = toSlotKeys(built);
 
-  // meta には「キー配列」だけ入れる（下流の slotPlan_keys が復活する）
-  (meta as any).slotPlan = slotKeys;
+  // meta.slotPlan は orchestrator.ts が “slot objects配列” を入れる正規フィールド。
+  // ここで上書きすると downstream が型崩れするので、キー配列は別名に退避する。
+  (meta as any).slotPlan_keys = slotKeys; // snake
+  (meta as any).slotPlanKeys = slotKeys;  // camel（保険）
 
   return {
     meta,
     frame: frameSelected,
+
+    // container の戻り値としては “キー配列” を返してよい（meta.slotPlanとは別）
     slotPlan: { slots: slotKeys },
   };
+
 }

@@ -1,6 +1,8 @@
 // src/lib/iros/server/persistAssistantMessageToIrosMessages.ts
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 /**
  * Postgres jsonb が嫌う「壊れたUnicode（サロゲート片割れ）」を除去しつつ
  * meta を “確実にJSONとして成立” させる。
@@ -87,13 +89,13 @@ function sanitizeForJsonb(input: any): any {
 
 export async function persistAssistantMessageToIrosMessages(args: {
   supabase: SupabaseClient;
-  conversationId: string;
+  conversationId: string; // ✅ internal uuid（route.ts で解決済み）
   userCode: string;
   content: string;
   meta: any; // ★ route.ts が組んだ meta を必須にする（single-writer保証鍵）
 }) {
   const supabase = args.supabase;
-  const conversationId = String(args.conversationId ?? '').trim();
+  const conversationUuid = String(args.conversationId ?? '').trim();
   const userCode = String(args.userCode ?? '').trim();
   const content = String(args.content ?? '').trimEnd();
   const meta = args.meta ?? null;
@@ -107,15 +109,12 @@ export async function persistAssistantMessageToIrosMessages(args: {
     meta?.extra?.persistAssistantMessage === false;
 
   if (!persistedByRoute) {
-    console.error(
-      '[IROS/persistAssistantMessageToIrosMessages] BLOCKED (not route writer)',
-      {
-        conversationId,
-        userCode,
-        hasMeta: Boolean(meta),
-        metaExtraKeys: meta?.extra ? Object.keys(meta.extra) : [],
-      },
-    );
+    console.error('[IROS/persistAssistantMessageToIrosMessages] BLOCKED (not route writer)', {
+      conversationUuid,
+      userCode,
+      hasMeta: Boolean(meta),
+      metaExtraKeys: meta?.extra ? Object.keys(meta.extra) : [],
+    });
 
     return {
       ok: false,
@@ -125,8 +124,13 @@ export async function persistAssistantMessageToIrosMessages(args: {
     };
   }
 
-  if (!conversationId || !userCode) {
+  if (!conversationUuid || !userCode) {
     return { ok: false, inserted: false, blocked: false, reason: 'BAD_ARGS' };
+  }
+
+  // route.ts が internal uuid を渡す契約。ここで崩れてたら呼び元が悪い。
+  if (!UUID_RE.test(conversationUuid)) {
+    return { ok: false, inserted: false, blocked: false, reason: 'BAD_CONV_UUID' };
   }
 
   // 空本文は保存しない（SILENCE等）
@@ -141,7 +145,6 @@ export async function persistAssistantMessageToIrosMessages(args: {
   if (isEllipsisOnly(content)) {
     return { ok: true, inserted: false, blocked: false, reason: 'EMPTY_CONTENT' };
   }
-
 
   // =========================
   // ✅ jsonb(meta) の止血
@@ -163,7 +166,7 @@ export async function persistAssistantMessageToIrosMessages(args: {
     null;
 
   // =========================
-  // ✅ Phase3: 保存直前で meta の表記ゆれを完全同期（single source）
+  // ✅ 保存直前で meta の表記ゆれを完全同期（single source）
   // - “meta を再代入” しない。row.meta を更新するだけ。
   // - 最後に sanitize をもう一度通して jsonb 安全を確定させる。
   // =========================
@@ -171,10 +174,7 @@ export async function persistAssistantMessageToIrosMessages(args: {
   try {
     const m: any = finalMeta ?? {};
 
-    // =========================
     // ✅ rephrase系を root にも同期（DB集計/将来互換のため）
-    // - meta.extra にだけ入っている場合に root へ昇格
-    // =========================
     const ex: any = m.extra ?? null;
     if (ex && typeof ex === 'object') {
       if (m.rephraseBlocks == null && Array.isArray(ex.rephraseBlocks)) m.rephraseBlocks = ex.rephraseBlocks;
@@ -184,7 +184,6 @@ export async function persistAssistantMessageToIrosMessages(args: {
       if (m.rephraseBlocksAttached == null && typeof ex.rephraseBlocksAttached === 'boolean')
         m.rephraseBlocksAttached = ex.rephraseBlocksAttached;
     }
-
 
     if (typeof qCodeFinal === 'string' && qCodeFinal.trim()) {
       const q = qCodeFinal.trim();
@@ -200,31 +199,23 @@ export async function persistAssistantMessageToIrosMessages(args: {
       m.depthstage = d;
     }
 
-    // ✅ 最終確定（jsonb安全を再保証）
     finalMeta = sanitizeForJsonb(m);
   } catch (e) {
     console.warn('[IROS/persist] meta sync failed', e);
     finalMeta = safeMeta;
   }
 
-  // ✅ inserted row の id を返す（route.ts 側で message_id として使う）
-  // - statement timeout が出る環境があるため：
-  //   1) まず通常insert（idを返す）
-  //   2) timeout なら meta を軽量化して 1回だけリトライ
-  //   3) それでもダメなら NG（エラーは出す）
+  // timeout 対策：meta を軽量化してリトライ
   const shrinkMetaForPersist = (meta: any) => {
     const m: any = meta && typeof meta === 'object' ? { ...meta } : {};
-    // rootに同期している可能性がある重い要素を落とす
     delete m.rephraseBlocks;
     delete m.rephraseBlocksAttached;
 
-    // extra が巨大化しやすいので、重い要素を落とす
     if (m.extra && typeof m.extra === 'object') {
       const ex: any = { ...(m.extra as any) };
       delete ex.rephraseBlocks;
       delete ex.ctxPack;
       delete ex.flowTape;
-      // headだけ残したい場合（空ならそのまま）
       m.extra = ex;
     }
     return sanitizeForJsonb(m);
@@ -237,7 +228,7 @@ export async function persistAssistantMessageToIrosMessages(args: {
   };
 
   const baseRow = {
-    conversation_id: conversationId,
+    conversation_id: conversationUuid,
     role: 'assistant',
     content: content,
     text: content,
@@ -247,11 +238,10 @@ export async function persistAssistantMessageToIrosMessages(args: {
     q_code: qCodeFinal,
     depth_stage: depthStageFinal,
 
-    // ✅ schema に列がある前提（無いなら削除）
     user_code: userCode,
   } as const;
 
-  // 1) 通常 insert（返却は要求しない）
+  // 1) 通常 insert
   let data: any = null;
   let error: any = null;
 
@@ -261,10 +251,10 @@ export async function persistAssistantMessageToIrosMessages(args: {
     error = (res as any).error ?? null;
   }
 
-  // 2) statement timeout のときだけ、meta を軽量化して 1回リトライ
+  // 2) timeout のときだけ 1回リトライ（meta軽量化）
   if (error && isStatementTimeout(error)) {
     console.warn('[IROS/persistAssistantMessageToIrosMessages] retry with shrunk meta (statement timeout)', {
-      conversationId,
+      conversationUuid,
       userCode,
       code: error?.code ?? null,
       message: error?.message ?? null,
@@ -280,25 +270,23 @@ export async function persistAssistantMessageToIrosMessages(args: {
     error = (res2 as any).error ?? null;
   }
 
-  // 3) それでも timeout なら、meta を“超軽量”にして もう1回だけリトライ（最後の手段）
+  // 3) それでも timeout → ultra
   if (error && isStatementTimeout(error)) {
     const fm: any = finalMeta && typeof finalMeta === 'object' ? finalMeta : {};
     const ex: any = fm.extra && typeof fm.extra === 'object' ? fm.extra : {};
 
     const ultraMeta = sanitizeForJsonb({
-      // 参照されがちなキーだけ残す（列は q_code / depth_stage が本命なので meta は最小でよい）
       itx_step: fm.itx_step ?? fm.itxStep ?? null,
       itx_reason: fm.itx_reason ?? fm.itxReason ?? null,
       intent_anchor_key: fm.intent_anchor_key ?? fm.intentAnchorKey ?? null,
       extra: {
         traceId: ex.traceId ?? null,
         persistedByRoute: ex.persistedByRoute ?? true,
-        // ここに巨大化しやすいものは絶対入れない
       },
     });
 
     console.warn('[IROS/persistAssistantMessageToIrosMessages] retry with ULTRA shrunk meta (statement timeout)', {
-      conversationId,
+      conversationUuid,
       userCode,
       code: error?.code ?? null,
       message: error?.message ?? null,
@@ -309,10 +297,9 @@ export async function persistAssistantMessageToIrosMessages(args: {
     error = (res3 as any).error ?? null;
   }
 
-
   if (error) {
     console.error('[IROS/persistAssistantMessageToIrosMessages] insert error', {
-      conversationId,
+      conversationUuid,
       userCode,
       error,
     });

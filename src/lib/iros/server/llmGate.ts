@@ -602,8 +602,46 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
     });
   }
 
-  // (G) slots が無いが本文がある：そのまま返す（LLM不要）
+  // (G) slots が無いが本文がある：通常はそのまま返すが、FINALだけはオウム返しを防ぐため CALL_LLM に倒す
   if (effectiveLen > 0) {
+    // ✅ FINAL なのに slots が 0 の事故（slotPlan_len=0）を止血：LLM に書かせる
+    if (policy === 'FINAL') {
+      const userTextForSeed =
+        (input as any)?.meta?.userTextClean ??
+        (input as any)?.meta?.userText ??
+        '';
+
+      // ✅ seedText に user文を入れると “オウム” を誘発しやすいので空にする
+      // userText は rewriteSeed 内に入るので、LLMはそこから書ける
+      const rewriteSeedNoSlotsFinal = buildWriterRewriteSeed({
+        userText: userTextForSeed,
+        seedText: '',
+        meta: input.meta,
+      });
+
+      console.warn('[IROS/LLM_GATE][FINAL_CALL][NO_SLOTS]', {
+        conversationId,
+        userCode,
+        slotPlanPolicy: policy,
+        slotPlanLen,
+        hasSlots,
+        effectiveLen,
+        head: head(effectiveText, 80),
+      });
+
+      // ✅ NO_SLOTS は “強制CALL” 扱いにする（下流の省略/フォールバックでオウム化させない）
+      return mk(
+        {
+          entry: 'CALL_LLM',
+          reason: 'FINAL_POLICY but slots missing (avoid echo)',
+          resolvedText: null, // ✅ 本文採用禁止
+          rewriteSeed: rewriteSeedNoSlotsFinal,
+        },
+        { finalForceCall: true, finalForceCallReason: 'FINAL_NO_SLOTS' },
+      );
+    }
+
+    // FINAL 以外は従来通り（LLM不要）
     return mk({
       entry: 'SKIP_SLOTPLAN',
       reason: 'no slots but have non-empty text',
@@ -620,7 +658,6 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
     rewriteSeed: null,
   });
 }
-
 // ---------------------------------------------------------------------
 // meta write
 // ---------------------------------------------------------------------

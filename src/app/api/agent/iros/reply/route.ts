@@ -16,14 +16,16 @@ import type { RememberScopeKind } from '@/lib/iros/remember/resolveRememberBundl
 import { resolveModeHintFromText, resolveRememberScope } from './_mode';
 
 import { attachNextStepMeta, extractNextStepChoiceFromText, findNextStepOptionById } from '@/lib/iros/nextStepOptions';
-
+import { ensureIrosConversationUuid } from '@/lib/iros/server/ensureIrosConversationUuid';
 import { buildResonanceVector } from '@/lib/iros/language/resonanceVector';
 import { renderReply } from '@/lib/iros/language/renderReply';
 import { renderGatewayAsReply } from '@/lib/iros/language/renderGateway';
 
 import { applyRulebookCompat } from '@/lib/iros/policy/rulebook';
 import { persistAssistantMessageToIrosMessages } from '@/lib/iros/server/persistAssistantMessageToIrosMessages';
+import { persistUserMessageToIrosMessages } from '@/lib/iros/server/persistUserMessageToIrosMessages';
 import { runNormalBase } from '@/lib/iros/conversation/normalBase';
+
 import { loadIrosMemoryState } from '@/lib/iros/memoryState';
 import { maybeAttachRephraseForRenderV2 } from './_impl/rephrase';
 
@@ -166,8 +168,20 @@ export async function POST(req: NextRequest) {
   try {
     // 2) body
     const body = await req.json().catch(() => ({} as any));
-    const conversationId: string | undefined = body?.conversationId;
-    const text: string | undefined = body?.text;
+
+    // ✅ normalize early（空文字は undefined 扱い）
+    // - UIから来る conversationId は「外部キー」のことがある（uuidでないことがある）
+    const conversationKeyRaw =
+      typeof body?.conversationId === 'string'
+        ? body.conversationId
+        : typeof body?.conversation_id === 'string'
+          ? body.conversation_id
+          : undefined;
+
+    const conversationKey: string | undefined =
+      conversationKeyRaw && conversationKeyRaw.trim() ? conversationKeyRaw.trim() : undefined;
+
+    const text: string | undefined = typeof body?.text === 'string' ? body.text : body?.text;
     const hintText: string | undefined = body?.hintText ?? body?.modeHintText;
     const modeHintInput: string | undefined = body?.modeHint;
     const extraReq: Record<string, any> | undefined = body?.extra;
@@ -178,6 +192,11 @@ export async function POST(req: NextRequest) {
       const s = String(fromExtra ?? traceIdEarly ?? '').trim();
       return s || String(traceIdEarly);
     })();
+
+    // ✅ conversationId を「内部uuid」に解決するのは userCode 確定後に行う
+    //   ここではプレースホルダとして undefined のまま進める
+    let conversationId: string | undefined = undefined;
+
 
     // ✅ TRACE用（auth前なので header/body から暫定で出す）
     const userCodeHint =
@@ -238,14 +257,16 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!conversationId || !text) {
-      const headers: Record<string, string> = { ...CORS_HEADERS };
-      headers['x-trace-id'] = String(traceId);
-      return NextResponse.json(
-        { ok: false, error: 'bad_request', detail: 'conversationId and text are required' },
-        { status: 400, headers },
-      );
-    }
+// ✅ この時点では conversationId(uuid) はまだ解決していないのでチェックしない
+// - UI から来るのは外部キー(conversationKey)の可能性があるため
+if (!conversationKey || !text) {
+  const headers: Record<string, string> = { ...CORS_HEADERS };
+  headers['x-trace-id'] = String(traceId);
+  return NextResponse.json(
+    { ok: false, error: 'bad_request', detail: 'conversationId(conversationKey) and text are required' },
+    { status: 400, headers },
+  );
+}
 
     const tenantId: string =
       typeof body?.tenant_id === 'string' && body.tenant_id.trim().length > 0
@@ -269,6 +290,53 @@ export async function POST(req: NextRequest) {
 
     // ✅ dev-bypass のときだけ header/body フォールバックを許す（従来互換）
     const userCode = userCodeFromAuth ?? pickUserCode(req, auth);
+    // ✅ conversationKey（外部キー）→ conversationId（内部uuid）
+    // - uuid key の場合は「内部id直通」を先に試してチェーン増殖を防ぐ
+    // ✅ userCode が無いなら、ここで落とす（ensure の前）
+    if (!userCode) {
+      return NextResponse.json(
+        { ok: false, error: 'unauthorized_user_code_missing' },
+        { status: 401, headers: CORS_HEADERS },
+      );
+    }
+
+    // --- conversationKey -> internal conversationId (uuid) ---
+    // uuidっぽいkeyなら「内部id直通」を先に試す（チェーン増殖防止）
+    const UUID_RE =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+    if (conversationKey && UUID_RE.test(conversationKey)) {
+      const { data: hit, error: hitErr } = await supabase
+        .from('iros_conversations')
+        .select('id')
+        .eq('id', conversationKey)
+        .limit(1)
+        .maybeSingle();
+
+      if (!hitErr && hit?.id) {
+        conversationId = String(hit.id);
+      }
+    }
+
+    if (!conversationId && conversationKey) {
+      conversationId = await ensureIrosConversationUuid({
+        supabase,
+        userCode, // ここはもう string に確定してる
+        conversationKey,
+        agent: typeof body?.agent === 'string' ? body.agent : 'iros',
+      });
+    }
+    if (!conversationId) {
+      const headers: Record<string, string> = { ...CORS_HEADERS };
+      headers['x-trace-id'] = String(traceId);
+      return NextResponse.json(
+        { ok: false, error: 'bad_request', detail: 'failed to resolve internal conversationId(uuid)' },
+        { status: 400, headers },
+      );
+    }
+
+    // --- end ---
+
 
     if (!userCode) {
       return NextResponse.json(
@@ -307,6 +375,40 @@ export async function POST(req: NextRequest) {
       res.headers.set('x-trace-id', String(traceId));
       return res;
     }
+
+// ✅ persist USER message (DB) — assistantより先に保存する
+try {
+  const userMeta = {
+    inputKind: 'chat',
+    extra: {
+      traceId: String(traceId),
+      persistedByRoute: true,
+      persistedUserMessage: true,
+      // 重いものは入れない（timeout回避）
+    },
+  };
+
+  const ures = await persistUserMessageToIrosMessages({
+    supabase,
+    conversationId, // ✅ ここは既に内部uuid
+    userCode,
+    content: String(text),
+    meta: userMeta,
+  });
+
+  console.warn('[IROS/persistUserMessage] done', {
+    ok: ures.ok,
+    inserted: ures.inserted,
+    reason: (ures as any).reason ?? null,
+    traceId: String(traceId),
+  });
+} catch (e) {
+  console.warn('[IROS/persistUserMessage] failed (non-fatal)', {
+    traceId: String(traceId),
+    message: (e as any)?.message ?? String(e),
+  });
+}
+
 
     // 7) low balance warn
     let lowWarn: null | { code: 'low_balance'; balance: number; threshold: number } = null;
@@ -393,6 +495,38 @@ export async function POST(req: NextRequest) {
       persistedByRoute: true,
       persistAssistantMessage: false,
     };
+// =========================================================
+// ✅ persist USER message (single-writer)
+// - do this BEFORE handleIrosReply() so history fetch works on reload
+// - conversationId is already the internal uuid resolved earlier
+// =========================================================
+{
+  const userMeta = {
+    extra: {
+      traceId: String(traceId),
+      persistedByRoute: true,
+      persistPolicy: PERSIST_POLICY,
+      kind: 'user_message',
+    },
+  };
+
+  const ures = await persistUserMessageToIrosMessages({
+    supabase,
+    conversationId, // ✅ internal uuid
+    userCode,
+    content: String(userTextClean ?? ''),
+    meta: userMeta,
+  });
+
+  if (!ures?.ok && ures?.reason !== 'EMPTY_CONTENT') {
+    console.warn('[IROS/persistUserMessageToIrosMessages] failed', {
+      conversationId,
+      userCode,
+      reason: ures?.reason ?? null,
+    });
+  }
+}
+
 
     // 11) handle
     const irosResult: HandleIrosReplyOutput = await handleIrosReply({

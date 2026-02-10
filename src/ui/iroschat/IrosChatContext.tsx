@@ -22,43 +22,47 @@ type SendResult =
     }
   | null;
 
-type IrosChatContextType = {
-  loading: boolean;
-  messages: IrosMessage[];
-  conversations: IrosConversation[];
-  userInfo: IrosUserInfo | null;
+  type IrosChatContextType = {
+    loading: boolean;
+    messages: IrosMessage[];
+    conversations: IrosConversation[];
+    userInfo: IrosUserInfo | null;
 
-  activeConversationId: string | null;
+    /** UI表示用（state） */
+    activeConversationId: string | null;
 
-  /** 現在の Iros 口調スタイル（settings で選択されたもの） */
-  style: IrosStyle;
+    /** ✅ ロジック用（refを正とする） */
+    getActiveConversationId: () => string | null;
 
-  fetchMessages: (cid: string) => Promise<void>;
+    /** 現在の Iros 口調スタイル（settings で選択されたもの） */
+    style: IrosStyle;
 
-  // 通常のチャット送信
-  sendMessage: (text: string, mode?: string) => Promise<SendResult>;
+    fetchMessages: (cid: string) => Promise<void>;
 
-  // ★ ギア選択（nextStep ボタン）からの送信
-  sendNextStepChoice: (opt: {
-    key: string;
-    label: string;
-    gear?: string | null;
-  }) => Promise<SendResult>;
+    // 通常のチャット送信
+    sendMessage: (text: string, mode?: string) => Promise<SendResult>;
 
-  // ★ Future-Seed 用（T層デモ）
-  sendFutureSeed: () => Promise<SendResult>;
+    // ★ ギア選択（nextStep ボタン）からの送信
+    sendNextStepChoice: (opt: {
+      key: string;
+      label: string;
+      gear?: string | null;
+    }) => Promise<SendResult>;
 
-  // 既存
-  startConversation: () => Promise<string>;
-  renameConversation: (cid: string, title: string) => Promise<void>;
-  deleteConversation: (cid: string) => Promise<void>;
-  reloadConversations: () => Promise<void>;
-  reloadUserInfo: () => Promise<void>;
+    // ★ Future-Seed 用（T層デモ）
+    sendFutureSeed: () => Promise<SendResult>;
 
-  // 新しいチャット制御用（Shell / Header から呼ぶ想定）
-  newConversation: () => Promise<string>;
-  selectConversation: (cid: string) => Promise<void>;
-};
+    // 既存
+    startConversation: () => Promise<string>;
+    renameConversation: (cid: string, title: string) => Promise<void>;
+    deleteConversation: (cid: string) => Promise<void>;
+    reloadConversations: () => Promise<void>;
+    reloadUserInfo: () => Promise<void>;
+
+    // 新しいチャット制御用（Shell / Header から呼ぶ想定）
+    newConversation: () => Promise<string>;
+    selectConversation: (cid: string) => Promise<void>;
+  };
 
 const IrosChatContext = createContext<IrosChatContextType | null>(null);
 
@@ -664,6 +668,7 @@ const sendMessage = useCallback(
         conversations,
         userInfo,
         activeConversationId,
+        getActiveConversationId: () => activeConversationIdRef.current,
         style,
 
         fetchMessages,

@@ -103,10 +103,13 @@ export function buildQuestionSlots(
   const userText = norm(args.userText);
   const contextText = norm(args.contextText ?? '');
 
-  // 🚫 T_CONCRETIZE では QuestionSlots を使わない
-  if (args.laneKey === 'T_CONCRETIZE') {
+  // 🚫 IDEA_BAND / T_CONCRETIZE では QuestionSlots を使わない
+  // - IDEA_BAND は候補列挙（2〜4行）を最優先するため、
+  //   ここで howto_to_observation を入れると lane の出力契約を破壊する。
+  if (args.laneKey === 'IDEA_BAND' || args.laneKey === 'T_CONCRETIZE') {
     return [];
   }
+
 
   // ✅ topic は基本 contextText から取る（userText が問いだけの場合は採用しない）
   const topicCandidate =
