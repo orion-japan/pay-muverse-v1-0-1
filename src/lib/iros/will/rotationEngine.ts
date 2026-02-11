@@ -115,7 +115,7 @@ export function decideRotation(ctx: RotationContext): RotationDecision {
     actionSignal,
     delegateLevel,
     userAcceptedDescent,
-    // llmSignals, // ← 受け口のみ。ロジック参照は次タスクで入れる（depth直結禁止のため）
+    llmSignals, // ✅ 参照開始（depth直結は禁止：gate補助のみ）
   } = ctx;
 
   // baseDepth をまず確定（null の可能性をここで閉じる）
@@ -182,11 +182,18 @@ export function decideRotation(ctx: RotationContext): RotationDecision {
   const dLvl = (delegateLevel ?? 'none') as 'none' | 'soft' | 'hard';
   const acceptedByUser = !!userAcceptedDescent;
 
-  // offered候補：possible/soft が出たら（ただし安全条件は上でクリア済）
+  // ✅ LLM signals から「密度が上がる兆し」を合成（決定権ゼロ / gate補助のみ）
+  const llmLift =
+    !!llmSignals &&
+    (llmSignals.perspectiveExpanded || llmSignals.relationalFocus || llmSignals.causalLanguage);
+
+  // offered候補：
+  // - possible/soft が出たら（従来）
+  // - 追加：llmLift が立っているなら「扉だけ」置ける（ただし I/T 近辺のみ）
   const shouldOffer =
-    (aSig === 'possible' || dLvl === 'soft') &&
     gate === 'closed' &&
-    isInUpperBand(baseDepth); // I/T 近辺で扉を出すのが自然
+    isInUpperBand(baseDepth) &&
+    (aSig === 'possible' || dLvl === 'soft' || llmLift);
 
   // accepted候補：explicit/hard/合意確定
   const shouldAccept =
@@ -195,6 +202,7 @@ export function decideRotation(ctx: RotationContext): RotationDecision {
 
   // gate更新
   let nextGate: DescentGate = gate;
+
   if (shouldAccept) nextGate = 'accepted';
   else if (shouldOffer) nextGate = 'offered';
 

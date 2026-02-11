@@ -2048,7 +2048,7 @@ const lastTurnsSafe = (() => {
   const ideaBandHeader = wantsIdeaBand
     ? [
         '【IDEA_BAND 出力契約（最優先）】',
-        '- 出力は2〜4行のみ（1行=1候補）。',
+        '- 出力は2〜5行のみ（1行=1候補）。',
         '- 各行は「◯◯という選択肢」または同等の“候補提示”だけを書く。',
         '- 行動指示・一手・具体化（ToDo/手順/時間/タイマー/次は…）は禁止。',
         '- 説明・一般論・比喩・鏡（言い換え）・構造化（Aしたい/でもB）も書かない。',
@@ -2165,7 +2165,7 @@ const lastTurnsSafe = (() => {
   // ---------------------------------------------
   // shared validators
   // ---------------------------------------------
-  const validateOutput = (rawText: string): { ok: boolean; reason?: string } => {
+  const validateOutput = (rawText: string): RephraseResult => {
     // ✅ ILINEマーカーは “露出禁止” なので、まず除去してから検証する
     const stripILineMarkers = (s0: string) => {
       const s = String(s0 ?? '');
@@ -2173,51 +2173,62 @@ const lastTurnsSafe = (() => {
     };
 
     const raw = stripILineMarkers(String(rawText ?? ''));
+    const head = safeHead(raw, 80);
 
-    if (!raw.trim()) return { ok: false, reason: 'OUT_EMPTY' };
-    if (containsForbiddenLeakText(raw)) return { ok: false, reason: 'INTERNAL_MARKER_LEAKED' };
+    const mkFail = (reason: string): RephraseResult => ({
+      ok: false,
+      reason,
+      meta: {
+        inKeys,
+        rawLen: raw.length,
+        rawHead: head,
+      },
+    });
 
-    // slot系（@XXX_SLOT）が混ざってたら leak 扱いにする
-    if (/@[A-Z_]+_SLOT\b/.test(raw)) return { ok: false, reason: 'INTERNAL_MARKER_LEAKED' };
+    if (!raw.trim()) return mkFail('OUT_EMPTY');
+    if (containsForbiddenLeakText(raw)) return mkFail('INTERNAL_MARKER_LEAKED');
+    if (/@[A-Z_]+_SLOT\b/.test(raw)) return mkFail('INTERNAL_MARKER_LEAKED');
 
-    // ✅ IDEA_BAND 形状チェック（厳しすぎると通常文を落とすので「最小制約」にする）
-    // - 2〜4行
-    // - 箇条書き（・/-/番号）に逃げたら落とす
-    // ※「選択肢」などの語彙必須はやめる（自然な候補文が通らないため）
+    // ✅ IDEA_BAND 最小形状チェック
     if (wantsIdeaBand) {
       const lines = raw
         .split('\n')
         .map((s) => s.trim())
         .filter(Boolean);
 
-      if (lines.length < 2 || lines.length > 4) return { ok: false, reason: 'IDEA_BAND_SHAPE_REJECT' };
+      if (lines.length < 2 || lines.length > 4) return mkFail('IDEA_BAND_SHAPE_REJECT');
 
       const bulletLike = (line: string) => /^(?:・|-|•|\d+\.)\s*\S+/.test(line);
-      if (lines.some(bulletLike)) return { ok: false, reason: 'IDEA_BAND_SHAPE_REJECT' };
+      if (lines.some(bulletLike)) return mkFail('IDEA_BAND_SHAPE_REJECT');
     }
 
     const iLineOk = verifyLockedILinesPreserved(raw, lockedILines);
-    if (!iLineOk) return { ok: false, reason: 'ILINE_NOT_PRESERVED' };
+    if (!iLineOk) return mkFail('ILINE_NOT_PRESERVED');
 
     const recallCheck = recallGuardOk({
       slotKeys: inKeys,
       slotsForGuard: (extracted?.slots ?? null) as any,
       llmOut: raw,
     });
+    if (!recallCheck.ok) return mkFail('RECALL_GUARD_REJECT');
 
-    console.log('[IROS/REPHRASE][RECALL_GUARD]', {
-      traceId: debug.traceId,
-      conversationId: debug.conversationId,
-      userCode: debug.userCode,
-      enforced: shouldEnforceRecallGuard(inKeys),
-      ok: recallCheck.ok,
-      missing: recallCheck.missing,
-      needles: recallCheck.needles,
-    });
+    // ✅ OK: slots/meta を型どおり返す（attach は meta.extra.rephraseBlocks を拾える）
+    const outSlots = buildSlotsWithFirstText(inKeys, raw);
 
-    if (!recallCheck.ok) return { ok: false, reason: 'RECALL_GUARD_REJECT' };
-
-    return { ok: true };
+    return {
+      ok: true,
+      slots: outSlots,
+      meta: {
+        inKeys,
+        outKeys: inKeys,
+        rawLen: raw.length,
+        rawHead: head,
+        extra: {
+          rephraseBlocks: outSlots,
+          rephraseHead: head,
+        },
+      },
+    };
   };
 
   // ---------------------------------------------
@@ -2272,13 +2283,72 @@ const lastTurnsSafe = (() => {
       const s = String(s0 ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
       if (!s) return [];
 
+      const MAX = 5;
+
+      const stripListHead = (x: string) => {
+        let t = String(x ?? '').trim();
+        t = t.replace(/^\s*(?:[・•●\-\*\u2013\u2014])\s+/u, '');
+        t = t.replace(/^\s*\d+\s*(?:[.)。：:])\s*/u, '');
+        t = t.replace(/^\s*(?:候補|選択肢)\s*[:：]\s*/u, '');
+        return t.trim();
+      };
+
+      // ✅ “具体っぽさ”で最後（spotlight）を決める
+      const scoreSpecificity = (raw: string): number => {
+        const t = stripListHead(raw);
+
+        if (!t) return -999;
+        if (t.length < 6) return -2;
+        if (t.length > 60) return -1;
+
+        let score = 0;
+
+        // 刺さりやすい原因語
+        if (/(失敗|怖|不安|先延ばし|後回し|決め(たくない|ない)|避け|守って|止まって|動け)/u.test(t)) score += 3;
+
+        // 抽象単語だけは弱い
+        if (/^(?:静けさ|感覚|エネルギー|空気|雰囲気|流れ|状態|意識)$/u.test(t)) score -= 3;
+
+        // 対象/設計語があると強い
+        if (/(仕様|契約|レーン|ログ|条件|原因|入口|境界|判定|整合|ズレ|復元|矯正)/u.test(t)) score += 2;
+
+        // 動詞/方針語尾は候補らしい
+        if (/(?:する|してみる|試す|寄せる|置く|切る|選ぶ|見る|決める|保つ|戻す|捨てる|やめる|続ける|止める|揃える|整える|集中する|優先する|固定する|分離する|検証する|確認する|観測する|記録する)$/u.test(
+          t,
+        ))
+          score += 1;
+        if (/(?:案|方向|路線|方針|仮説|候補|選択肢|モード|レーン|パターン|形|軸)$/u.test(t)) score += 1;
+
+        return score;
+      };
+
+      const moveBestToLast = (arr: string[]): string[] => {
+        if (arr.length < 2) return arr;
+
+        let bestIdx = 0;
+        let bestScore = -Infinity;
+
+        for (let i = 0; i < arr.length; i++) {
+          const sc = scoreSpecificity(arr[i]);
+          if (sc > bestScore) {
+            bestScore = sc;
+            bestIdx = i;
+          }
+        }
+
+        const out = arr.slice();
+        const [best] = out.splice(bestIdx, 1);
+        out.push(best);
+        return out;
+      };
+
       // 1) まずは「空行区切り」で段落化（番号/箇条書きは付けない）
       let parts = s
         .split(/\n\s*\n+/)
         .map((x) => x.trim())
         .filter(Boolean);
 
-      // 2) 段落が少なすぎる時は、句点で“ゆるく”分割して 2〜4 を狙う（過剰分割しない）
+      // 2) 段落が少なすぎる時は、句点で“ゆるく”分割して 2〜5 を狙う（過剰分割しない）
       if (parts.length < 2) {
         const sentences = s
           .split(/。+/)
@@ -2286,14 +2356,19 @@ const lastTurnsSafe = (() => {
           .filter(Boolean);
 
         if (sentences.length >= 2) {
-          parts = sentences.slice(0, 4).map((x) => (x.endsWith('。') ? x : `${x}。`));
+          parts = sentences.slice(0, MAX).map((x) => (x.endsWith('。') ? x : `${x}。`));
         }
       }
 
-      // 3) 最終クランプ：2〜4（足りない時は“元のまま”に戻す）
+      // 3) 最終クランプ：2〜5（足りない時は []）
       if (parts.length < 2) return [];
-      return parts.slice(0, 4);
+
+      const trimmed = parts.slice(0, MAX);
+      const spotlighted = moveBestToLast(trimmed);
+
+      return spotlighted;
     };
+
 
     const isIdeaBand = detectIdeaBandPropose();
 
@@ -2304,18 +2379,47 @@ const lastTurnsSafe = (() => {
       blocksText = toRephraseBlocks(text);
     }
 
+    // --- LLM signals（密度など）を抽出して meta.extra に積む（depth直結禁止）
+    const clamp01 = (x: number): number => {
+      if (!Number.isFinite(x)) return 0;
+      return x < 0 ? 0 : x > 1 ? 1 : x;
+    };
+
+    const extractLlmSignals = (textRaw: string) => {
+      const s = String(textRaw ?? '');
+      const charLen = s.length;
+      const newlines = (s.match(/\n/g) ?? []).length;
+      const punct = (s.match(/[、。,.!?！？]/g) ?? []).length;
+      const kanji = (s.match(/[\u4E00-\u9FFF]/g) ?? []).length;
+
+      const punctRatio = charLen > 0 ? clamp01(punct / charLen) : 0;
+      const kanjiRatio = charLen > 0 ? clamp01(kanji / charLen) : 0;
+
+      // length / kanji / punctuation / newline を軽く合成した “density”
+      const lenScore = clamp01(charLen / 240);
+      const nlScore = clamp01(newlines / 4);
+      const density = clamp01(lenScore * 0.55 + kanjiRatio * 0.25 + punctRatio * 0.15 + nlScore * 0.05);
+
+      return { density, charLen, newlines, punctRatio, kanjiRatio };
+    };
 
     const blocks = blocksText.map((t) => ({ text: t, kind: 'p' }));
 
+    // ✅ 1回だけ代入（重複排除）
     metaExtra.rephraseBlocks = blocks;
 
-    metaExtra.rephraseBlocks = blocks;
+    // ✅ signals を付与（受け口）
+    try {
+      (metaExtra as any).llmSignals = extractLlmSignals(String(text ?? ''));
+    } catch {}
+
     metaExtra.rephraseHead =
       metaExtra.rephraseHead ??
       (blocks?.[0]?.text ? safeHead(String(blocks[0].text), 120) : null);
 
     try {
       (debug as any).rephraseBlocks = blocks;
+      (debug as any).llmSignals = (metaExtra as any).llmSignals ?? null;
     } catch {}
 
     logRephraseAfterAttach(debug, inKeys, outSlots[0]?.text ?? '', note ?? 'LLM');
@@ -2332,7 +2436,7 @@ const lastTurnsSafe = (() => {
         extra: metaExtra,
       },
     };
-  };
+  }
 
   const runFlagship = (text: string, slotsForGuard: any, scaffoldActive: boolean) => {
     const raw = String(text ?? '');
@@ -2551,44 +2655,75 @@ const lastTurnsSafe = (() => {
   let v = runFlagship(candidate, slotsForGuard, scaffoldActive);
 
   // ---------------------------------------------
-  // IDEA_BAND contract check（違反なら FATAL に落として retry へ）
+  // IDEA_BAND contract check（違反ならその場で候補化→最後にダメなら FATAL）
   // ---------------------------------------------
+  const normalizeIdeaBandLine = (line: string) =>
+    String(line ?? '')
+      .trim()
+      .replace(/^[-*•・◯]\s*/u, '')
+      .trim();
+
+  // ✅ IDEA_BAND の最大行数（ユーザーが 4/5 行と言ったら許容する）
+  const IDEA_BAND_MAX_LINES = 5;
+
+  // IDEA_BAND は「候補列挙（2〜N行）」以外を通さない
+  // - 1行 = “候補として読める形”であること（提案/方針/方向/案、または動詞系で終わる）
+  // - 詩/叙述の文章（句点つき）はNG（SALVAGEで候補化を試みる）
+  const ideaBandForbidden =
+    /(?:次の\s*\d+|タイマー|分だけ|手順|ToDo|TODO|ステップ|まず\s*は|まず、|やってみ|進めて|実装|着手)/;
+
+  const endsWithVerbLike = (s: string) =>
+    /(?:する|してみる|試す|寄せる|置く|切る|選ぶ|見る|決める|保つ|戻す|捨てる|やめる|続ける|止める|揃える|整える|集中する|優先する|固定する|分離する|検証する|確認する|観測する|記録する)$/u.test(
+      s,
+    );
+
+  const endsWithPlanNoun = (s: string) =>
+    /(?:案|方向|路線|方針|仮説|候補|選択肢|モード|レーン|パターン|形|軸)$/u.test(s);
+
+  const ideaBandLineLooksLikeCandidate = (line: string) => {
+    const core = normalizeIdeaBandLine(line);
+    if (!core) return false;
+
+    // 実行指示は IDEA_BAND では避ける（候補生成のレーン）
+    if (ideaBandForbidden.test(core)) return false;
+
+    // 明示フォーマット（互換）
+    if (/^(?:候補|選択肢)\s*[:：]/u.test(core)) return true;
+    if (/という選択肢/u.test(core)) return true;
+
+    // 句点や疑問符がある「文章」は候補ではない（SALVAGEへ）
+    if (/[。．.!！?？]/u.test(core)) return false;
+
+    // 候補として読める短い形（長すぎる語りを弾く）
+    if (core.length < 4 || core.length > 34) return false;
+
+    // “提案として読める”最低条件
+    if (endsWithVerbLike(core)) return true;
+    if (endsWithPlanNoun(core)) return true;
+
+    // ここまで来た「名詞だけっぽい短句」は候補性が薄いのでNG（SALVAGEへ）
+    return false;
+  };
+
   const ideaBandLines = String(candidate ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
     .split('\n')
     .map((s) => s.trim())
     .filter(Boolean);
 
-  // IDEA_BAND は「候補行」以外を許可しない（詩的ナラティブのすり抜けを止める）
-  // - 基本契約：各行が「〜という選択肢」または「候補:」「選択肢:」等の候補行
-  // - 先頭の箇条書き記号は許可（- / ・ / • / ◯ など）
-  const ideaBandLineLooksLikeCandidate = (line: string) => {
-    const s = String(line ?? '').trim().replace(/^[-*•・◯]\s*/u, '').trim();
-    if (!s) return false;
-
-    // ✅ 最強の固定契約（normalChat.ts の契約に寄せる）
-    if (/という選択肢/u.test(s)) return true;
-
-    // ✅ ゆるい互換（将来テンプレが揺れても候補行として扱える）
-    if (/^(?:候補|選択肢)\s*[:：]/u.test(s)) return true;
-
-    return false;
-  };
-
-  const candidateShapeOk = ideaBandLines.length >= 2 && ideaBandLines.length <= 4 && ideaBandLines.every(ideaBandLineLooksLikeCandidate);
-
-  // IDEA_BAND は「候補生成」なので、"手順/実装/まず" 系の実行指示を避ける
-  // ※誤爆しやすい語は「単独語」ではなく「実行指示っぽい連接」を中心にする
-  const ideaBandForbidden =
-    /(?:次の\s*\d+|タイマー|分だけ|手順|ToDo|TODO|ステップ|まず\s*は|まず、|やってみ|進めて|実装|着手)/;
-
   const tooFewLines = ideaBandLines.length < 2;
-  const tooManyLines = ideaBandLines.length > 4;
+  const tooManyLines = ideaBandLines.length > IDEA_BAND_MAX_LINES;
   const hasQuestion = ideaBandLines.some((line) => /[?？]/.test(line));
-  const hasForbidden = ideaBandLines.some((line) => ideaBandForbidden.test(line));
+  const hasForbidden = ideaBandLines.some((line) => ideaBandForbidden.test(normalizeIdeaBandLine(line)));
 
-  const ideaBandOk = !wantsIdeaBand
-    ? true
-    : candidateShapeOk && !tooFewLines && !tooManyLines && !hasQuestion && !hasForbidden;
+  const candidateShapeOk =
+    ideaBandLines.length >= 2 &&
+    ideaBandLines.length <= IDEA_BAND_MAX_LINES &&
+    ideaBandLines.every(ideaBandLineLooksLikeCandidate);
+
+  const ideaBandOk =
+    !wantsIdeaBand ? true : candidateShapeOk && !tooFewLines && !tooManyLines && !hasQuestion && !hasForbidden;
 
   const ideaBandContractBroken = Boolean(wantsIdeaBand && !ideaBandOk);
 
@@ -2601,57 +2736,268 @@ const lastTurnsSafe = (() => {
     head: safeHead(String(candidate ?? ''), 120),
   });
 
+  // ✅ IDEA_BAND は「常に」番号表記を 1) に正規化する（LLMの "1." や "・" を通さない）
+// ✅ さらに：最後の1行を “最も具体（spotlight）” に寄せる
+if (wantsIdeaBand && !ideaBandContractBroken) {
+  const stripListHead = (s: string) => {
+    let t = String(s ?? '').trim();
+    // bullets: ・ • ● - * – —
+    t = t.replace(/^\s*(?:[・•●\-\*\u2013\u2014])\s+/u, '');
+    // "1." "1)" "1："など
+    t = t.replace(/^\s*\d+\s*(?:[.)。：:])\s*/u, '');
+    // "候補:" "選択肢:" など
+    t = t.replace(/^\s*(?:候補|選択肢)\s*[:：]\s*/u, '');
+    return t.trim();
+  };
+
+  // ✅ “具体っぽさ”の簡易スコア（最後＝最有力に回す）
+  const scoreSpecificity = (line: string): number => {
+    const s = normalizeIdeaBandLine(line);
+
+    // 短すぎ/長すぎは候補として弱い（刺さりにくい）
+    if (s.length < 6) return -2;
+    if (s.length > 32) return -1;
+
+    let score = 0;
+
+    // 「失敗」「怖い」「先延ばし」「決めない」など“原因候補”語は強め
+    if (/(失敗|怖|不安|先延ばし|後回し|決め(たくない|ない)|避け|守って|止まって|動け)/u.test(s)) score += 3;
+
+    // 「抽象語だけ」っぽいと弱い（例: "静けさ", "感覚", "エネルギー"）
+    if (/^(?:静けさ|感覚|エネルギー|空気|雰囲気|流れ|状態|意識)$/u.test(s)) score -= 3;
+
+    // “具体化の手前”の名詞があると上げる（テーマ/対象の単語）
+    if (/(仕様|契約|レーン|ログ|条件|原因|入口|境界|判定|整合|ズレ|復元|矯正)/u.test(s)) score += 2;
+
+    // 動詞終わり・案/方針終わりは候補性が高い（すでにあなたの判定にも整合）
+    if (endsWithVerbLike(s)) score += 1;
+    if (endsWithPlanNoun(s)) score += 1;
+
+    return score;
+  };
+
+  const moveBestToLast = (lines: string[]): string[] => {
+    if (lines.length < 2) return lines;
+
+    let bestIdx = 0;
+    let bestScore = -Infinity;
+
+    for (let i = 0; i < lines.length; i++) {
+      const sc = scoreSpecificity(lines[i]);
+      if (sc > bestScore) {
+        bestScore = sc;
+        bestIdx = i;
+      }
+    }
+
+    // best を最後へ
+    const out = lines.slice();
+    const [best] = out.splice(bestIdx, 1);
+    out.push(best);
+    return out;
+  };
+
+  const rawLines = String(candidate ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map((x) => stripListHead(x))
+    .filter(Boolean)
+    .slice(0, 5);
+
+  if (rawLines.length >= 2) {
+    const spotlighted = moveBestToLast(rawLines);
+    candidate = spotlighted.map((t, i) => `${i + 1}) ${t}`).join('\n');
+  }
+}
+
 
   if (ideaBandContractBroken) {
-    // ✅ ここで FATAL に落として seed(@NEXT_HINT)へ逃げると、
-    // rephraseBlocks が内部ディレクティブだけになり UI が userText エコーへ戻る。
-    // なので「候補2〜4行」へ“その場で矯正”して契約に戻す。
+    // ✅ FATAL に落として seed(@NEXT_HINT)へ逃げると UI が userText エコーへ戻りやすい。
+    // なので「候補2〜N行」へ“その場で候補化”して契約に戻す。
+    const toCandidateLine = (raw: string): string => {
+      const dropTail = (s: string) =>
+        s
+          .replace(/(?:かもしれません|かも|ようです|みたいです|でしょう|ですね|です|ます|でした|ました)$/u, '')
+          .trim();
+
+      // ① 正規化
+      let s = normalizeIdeaBandLine(raw).replace(/[。．.!！?？]+$/u, '').trim();
+
+      // ✅ 先頭の箇条書き記号を剥がす（"・", "•", "●", "-" など）
+      // - "・ 心の声..." を消す
+      s = s.replace(/^\s*(?:[-*•●・]+)\s*/u, '');
+
+      // ✅ "1. ・ 心の声..." の「番号の後ろの・」も消す（ここが本丸）
+      s = s.replace(/^(\s*\d+\s*[.)]\s*)[-*•●・]+\s*/u, '$1');
+
+      s = dropTail(s);
+      if (!s) return '';
+      if (ideaBandForbidden.test(s)) return '';
+
+      // ② “状況語”を落として「候補の核」へ寄せる
+      s = s
+        .replace(/^(?:いま|今|その|この)?(?:段階|第一段階|次|直後|越えた今|越えた今、)?[、,]\s*/u, '')
+        .replace(/^(?:第一段階を越えた今|第一段階をクリアした後|第一段階をクリアした今)\s*/u, '')
+        .replace(/^(?:その)?静けさ(?:の中)?(?:に|で)?/u, '静けさ')
+        .trim();
+
+      // ③ 文っぽい時は「後半（行動・焦点）」を優先
+      const parts = s
+        .split(/[、,]/u)
+        .map((x) => dropTail(x.trim()))
+        .filter(Boolean);
+
+      const scorePart = (p: string) => {
+        let score = 0;
+        if (/(?:探|整|言葉|見つ|掘|ほど|切り分け|分け|置き換え|決め|選ぶ|書く|出す|並べ)/u.test(p)) score += 3;
+        if (/(?:鍵|道|道筋|潜む|隠れる|かもしれない)/u.test(p)) score -= 2;
+        if (p.length <= 28) score += 1;
+        return score;
+      };
+
+      if (parts.length >= 2) {
+        parts.sort((a, b) => scorePart(b) - scorePart(a));
+        s = parts[0];
+      } else {
+        s = parts[0] ?? s;
+      }
+
+      s = dropTail(s).replace(/[。．.!！?？]+$/u, '').trim();
+      if (!s) return '';
+      if (s.length > 28) s = s.slice(0, 28).trim();
+
+      // ④ 既に候補形式なら温存
+      if (/^(?:候補|選択肢)\s*[:：]/u.test(s)) return s;
+
+      // ⑤ 語尾を候補に合わせる
+      if (endsWithVerbLike(s) || endsWithPlanNoun(s)) return s;
+
+      if (/心の奥深く/u.test(s)) return '心の奥の“引っかかり”を言葉にする';
+      if (/静けさ/u.test(s)) return '静けさの正体を一言で切り分ける';
+      if (/鍵/u.test(s)) return '整理の“入口”を1つだけ決める';
+
+      return `${s}を試す`;
+    };
 
     const salvageIdeaBand = (() => {
-      // makeIdeaBandCandidates は adoptAsSlots 内の関数だが、ここでは既に使えない。
-      // なので同等の最小ロジックだけ再現する（憶測なし・決め打ち最小）。
       const s = String(candidate ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
       if (!s) return '';
 
-      // 1) まずは行ベース（既に改行があるケースはそれを尊重）
-      let lines = s
+// 0) 既に候補っぽい行が並んでいる場合も、最後に「1)」で番号を確定表示させる
+// ✅ さらに：最後の1行を “最も具体（spotlight）” に寄せる
+const asNumberedParenList = (lines: string[]): string => {
+  const stripListHead = (s: string) => {
+    let t = String(s ?? '').trim();
+
+    // 先頭の bullets / list markers を除去
+    // - "・" / "•" / "-" / "*" / "–" など
+    t = t.replace(/^\s*(?:[・•\-\*\u2013\u2014])\s+/u, '');
+
+    // 先頭の番号表記を除去（"1." / "1)" / "1："など）
+    t = t.replace(/^\s*\d+\s*(?:[.)。：:])\s*/u, '');
+
+    // 先頭の「候補:」「選択肢:」を除去（混在しても中身だけ採用）
+    t = t.replace(/^\s*(?:候補|選択肢)\s*[:：]\s*/u, '');
+
+    return t.trim();
+  };
+
+  // ✅ “具体っぽさ”の簡易スコア（最後＝最有力に回す）
+  const scoreSpecificity = (line: string): number => {
+    const s = normalizeIdeaBandLine(line);
+
+    if (s.length < 6) return -2;
+    if (s.length > 32) return -1;
+
+    let score = 0;
+
+    // “原因候補”語（刺さりやすい）
+    if (/(失敗|怖|不安|先延ばし|後回し|決め(たくない|ない)|避け|守って|止まって|動け)/u.test(s)) score += 3;
+
+    // 抽象単語だけは弱い
+    if (/^(?:静けさ|感覚|エネルギー|空気|雰囲気|流れ|状態|意識)$/u.test(s)) score -= 3;
+
+    // 対象語/設計語があると強い
+    if (/(仕様|契約|レーン|ログ|条件|原因|入口|境界|判定|整合|ズレ|復元|矯正)/u.test(s)) score += 2;
+
+    if (endsWithVerbLike(s)) score += 1;
+    if (endsWithPlanNoun(s)) score += 1;
+
+    return score;
+  };
+
+  const moveBestToLast = (arr: string[]): string[] => {
+    if (arr.length < 2) return arr;
+
+    let bestIdx = 0;
+    let bestScore = -Infinity;
+
+    for (let i = 0; i < arr.length; i++) {
+      const sc = scoreSpecificity(arr[i]);
+      if (sc > bestScore) {
+        bestScore = sc;
+        bestIdx = i;
+      }
+    }
+
+    const out = arr.slice();
+    const [best] = out.splice(bestIdx, 1);
+    out.push(best);
+    return out;
+  };
+
+  const clean = lines
+    .map((x) => stripListHead(x))
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .slice(0, 5); // ✅ 2〜5行へ
+
+  // 2行未満は契約に戻せない
+  if (clean.length < 2) return '';
+
+  const spotlighted = moveBestToLast(clean);
+
+  // ✅ ordered-list を避けるため "1)" 固定
+  return spotlighted
+    .map((t, i) => `${i + 1}) ${t}`)
+    .join('\n')
+    .trim();
+};
+
+
+      // 1) まずは行ベース
+      let parts = s
         .split('\n')
         .map((x) => x.trim())
         .filter(Boolean);
 
-      // 2) 行が少なければ句点で分割（2〜4を狙う）
-      if (lines.length < 2) {
-        const sentences = s
-          .split(/。+/)
+      // 2) 行が少なければ、句点/改行相当で分割（文章→候補化の素材を作る）
+      if (parts.length < 2) {
+        parts = s
+          .split(/[。．.!！\n]+/u)
           .map((x) => x.trim())
           .filter(Boolean);
-        if (sentences.length >= 2) lines = sentences.slice(0, 4).map((x) => `${x}。`);
       }
 
-      // 3) それでも足りなければ矯正不能
-      if (lines.length < 2) return '';
+      // 3) それでも素材が薄ければ、読点でも割る（最後の手段）
+      if (parts.length < 2) {
+        parts = s
+          .split(/[、,]+/u)
+          .map((x) => x.trim())
+          .filter(Boolean);
+      }
 
-      // 4) 各行を「候補行」に正規化（normalChat.ts の例に寄せる）
-      // - 末尾の句点を落として「という方向」を付ける（既に候補語尾があればそのまま）
-      const fixed = lines
-        .slice(0, 4)
-        .map((line) => {
-          const core = String(line ?? '')
-            .trim()
-            .replace(/^[-*•・◯]\s*/u, '') // 先頭マーカーは除去
-            .replace(/[。．.]+$/u, '') // 終端句点は除去
-            .trim();
-          if (!core) return '';
-          if (/という(?:選択肢|案|方向)$/u.test(core)) return core;
-          // 既に「候補:」「選択肢:」形式なら温存
-          if (/^(?:候補|選択肢)\s*[:：]/u.test(core)) return core;
-          return `${core}という方向`;
-        })
-        .filter(Boolean);
+      // 候補化
+      const fixed = parts
+        .map(toCandidateLine)
+        .filter(Boolean)
+        .filter((x, i, arr) => arr.indexOf(x) === i)
+        .slice(0, IDEA_BAND_MAX_LINES);
 
-      // 2〜4 行に満たないなら失敗扱い
       if (fixed.length < 2) return '';
-      return fixed.join('\n').trim();
+
+      return asNumberedParenList(fixed);
     })();
 
     if (salvageIdeaBand) {
@@ -2765,14 +3111,14 @@ const lastTurnsSafe = (() => {
     shiftKind === 't_concretize' ||
     /"kind"\s*:\s*"t_concretize"/.test(String(shiftSlot?.text ?? ''));
 
-  // ✅ IDEA_BAND 判定（候補生成：2〜4行契約なので len gate はかけない）
+  // ✅ IDEA_BAND 判定（候補生成：2〜5行契約なので len gate はかけない）
   const isIdeaBand =
     shiftKind === 'idea_band' ||
     /"kind"\s*:\s*"idea_band"/.test(String(shiftSlot?.text ?? ''));
 
   // ✅ MIN_OK_LEN（IDEA_BAND / T_CONCRETIZE を chat より優先）
   // - micro/greeting は短文許可（0）
-  // - IDEA_BAND は「2〜4行の候補」なので文字数で縛らない（0）
+  // - IDEA_BAND は「2〜5行の候補」なので文字数で縛らない（0）
   // - T_CONCRETIZE は 24（短くても成立し得るが、薄さを抑える）
   // - それ以外: short_reply_ok 明示なら 0 / chat は 40 / default 80
   const MIN_OK_LEN =

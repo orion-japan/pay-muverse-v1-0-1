@@ -206,3 +206,21 @@
     display: inline-block;
     margin-right: 6px;
   }
+/* === FIX: IDEA_BAND の 1. / 2. / 3. が「1. ・」になるのを止める ===
+   原因: .bubble .msgBody li::before などで「・」を強制付与しているため。
+   対策: ordered list (ol) 配下だけ ::before を無効化して数字を守る。
+*/
+.sof-msgs .msgBody ol {
+  list-style: decimal !important;
+  list-style-position: outside;
+  padding-left: 1.25em;
+  margin: 0.25em 0 0.6em;
+}
+
+.sof-msgs .msgBody ol > li::before {
+  content: none !important;
+}
+
+.sof-msgs .msgBody ol > li {
+  padding-left: 0 !important;
+}

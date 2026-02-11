@@ -230,6 +230,24 @@ function buildClarify(userText: string, laneKey?: LaneKey, flowDelta?: string | 
     ['first_line_is_core', 'then_action_in_10min', 'no_checklist', 'plain_words'],
   ];
 
+  // ✅ seed は一度だけ（IDEA_BAND / T / clarify で共有）
+  const seedText = clamp(norm(userText), 240);
+
+  // ✅ IDEA_BAND は clarify を通さず、候補契約を writer に直送する
+  if (laneKey === 'IDEA_BAND') {
+    return [
+      {
+        key: 'SHIFT',
+        role: 'assistant',
+        style: 'neutral',
+        content: buildShiftIdeaBand(seedText),
+      },
+
+      // ✅ Phase11 advance測定用の橋（clarifyでも必ず出す）
+      buildNextHintSlot({ userText, laneKey, flowDelta }),
+    ];
+  }
+
   const shiftPreset = isT ? SHIFT_PRESET_T_CONCRETIZE : null;
 
   return [
@@ -258,7 +276,7 @@ function buildClarify(userText: string, laneKey?: LaneKey, flowDelta?: string | 
         },
 
         // ✅ writer専用の“核”（@payload内なので露出しない）
-        seed_text: clamp(norm(userText), 240),
+        seed_text: seedText,
       }),
     },
 
@@ -266,6 +284,7 @@ function buildClarify(userText: string, laneKey?: LaneKey, flowDelta?: string | 
     buildNextHintSlot({ userText, laneKey, flowDelta }),
   ];
 }
+
 
 
 // ✅ HowTo/方法質問（QuestionSlots）を normalChat に合わせて「@行だけ」に正規化
@@ -330,15 +349,47 @@ function buildQuestion(
 function buildShiftIdeaBand(seedText: string) {
   /**
    * ==================================================
-   * IDEA_BAND 出力契約（仕様固定 / writer 迷い防止）
+   * IDEA_BAND（一点照射 / spotlight）
    *
-   * ✅ 出力は 2〜4 行（= 候補数）
-   * ✅ 全行が「◯◯という選択肢」or「◯◯という案」or「◯◯という方向」など “候補行”
-   * ✅ 行動指示・一手・具体化（ToDo/手順/時間/タイマー等）は書かない
-   * ✅ 質問は禁止（候補提示で進める）
-   * ✅ frame/close（前置き/締め）を混ぜない（候補行オンリー）
+   * - デフォルト 3行
+   * - ユーザーが「4つ」「5案」など明示したら従う（最大5行）
+   * - 最後の1行が “最有力（照射）”
+   * - 候補行オンリー（質問/講義/手順なし）
    * ==================================================
    */
+
+  // -----------------------------
+  // ユーザーが指定した個数を抽出
+  // -----------------------------
+  const detectRequestedCount = (text: string): number | null => {
+    const t0 = String(text ?? '');
+
+    // ✅ 全角数字 → 半角へ（２〜５ / ４ / ５ を確実に拾う）
+    const toHalfWidth = (s: string) =>
+      s.replace(/[０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0));
+
+    const t = toHalfWidth(t0);
+
+    // 例: "4つ" "5案" "4個" "5候補" "5行" "4パターン"
+    const m = t.match(/([2-5])\s*(?:つ|案|個|パターン|候補|行)\b/);
+    if (m) {
+      const n = Number(m[1]);
+      if (n >= 2 && n <= 5) return n;
+    }
+
+    // 漢数字（簡易）
+    if (/(?:二|２)\s*(?:つ|案|個|パターン|候補|行)/.test(t0)) return 2;
+    if (/(?:三|３)\s*(?:つ|案|個|パターン|候補|行)/.test(t0)) return 3;
+    if (/(?:四|４)\s*(?:つ|案|個|パターン|候補|行)/.test(t0)) return 4;
+    if (/(?:五|５)\s*(?:つ|案|個|パターン|候補|行)/.test(t0)) return 5;
+
+    return null;
+  };
+
+
+  const requested = detectRequestedCount(seedText);
+
+  const lineCount = requested ?? 3; // デフォルト3
 
   const variants = [
     {
@@ -347,48 +398,41 @@ function buildShiftIdeaBand(seedText: string) {
       rules: {
         ...SHIFT_PRESET_C_SENSE_HINT.rules,
 
-        // IDEA_BANDは「候補を並べる」レーンなので列挙は禁止しない
-        no_checklist: false,
+        candidates_min: lineCount,
+        candidates_max: lineCount,
+        lines_max: lineCount,
 
-        // 既定の方針
+        questions_max: 0,
         no_decision: true,
         no_action_commit: true,
-
-        // 候補数（= 行数）
-        candidates_min: 2,
-        candidates_max: 4,
-        lines_max: 4,
-
-        // ✅ 質問は入れない（shapeを壊すので 0 固定）
-        questions_max: 0,
-
-        // ✅ ここは “候補以外を書かない” 契約なので、講義/手順/未来指示を強く抑制
         no_lecture: true,
         no_future_instruction: true,
+        no_checklist: false,
+
+        mode: 'spotlight',
+        spotlight_last_line: true,
+        spotlight_style: 'most_specific_no_label',
       },
 
       tone: SHIFT_PRESET_C_SENSE_HINT.tone ?? undefined,
 
-      // ✅ 1行返答を許さない（候補2行以上が契約）
       allow: { ...(SHIFT_PRESET_C_SENSE_HINT.allow ?? {}), short_reply_ok: false },
 
-      // ✅ 候補行オンリー（frame/close を消す）
       format: {
-        lines: 4, // 上限ヒント（実際は candidates_min/max に従う）
-        schema: ['candidates(2-4_lines_only)'],
+        lines: lineCount,
+        schema: [`candidates(${lineCount}_lines_last_is_spotlight)`],
         line_contract: 'each_line_must_be_candidate',
-        candidate_line_examples: ['◯◯という選択肢', '◯◯という案', '◯◯という方向'],
       },
     },
   ];
 
   const picked = pickRandom(variants);
+
   return m('SHIFT', {
     ...picked,
     seed_text: clamp(seedText, 240),
   });
 }
-
 
 // --- 置き換え 1) buildShiftTConcretize を関数まるごと置き換え ---
 function buildShiftTConcretize(seedText: string, focusLabel?: string) {

@@ -1267,10 +1267,9 @@ function detectCounselCommand(raw: unknown): { forced: boolean; strippedText: st
 
       const inputKind = String(metaLike?.inputKind ?? '').toLowerCase();
 
-      const looksLikeJustNoun = t.length <= 6 && !/[？\?]/.test(t);
-
+      // ✅ レーン主導：uncover は「候補出し（IDEA_BAND）」で進めたいので counsel 条件から外す
+      // ※counsel を立てるのは「落ち着かせる/修復する/相談進行」が必要なときだけ
       const consultish =
-        goalKind === 'uncover' ||
         goalKind === 'stabilize' ||
         goalKind === 'repair' ||
         goalKind === 'counsel';
@@ -1281,128 +1280,149 @@ function detectCounselCommand(raw: unknown): { forced: boolean; strippedText: st
         inputKind === 'qa' ||
         inputKind === 'howto';
 
-      return (consultish && !factish) || looksLikeJustNoun;
+      // ✅ レーン主導：相談系のゴールで、かつ fact/howto/qa ではないときだけ counsel にする
+      return consultish && !factish;
     }
 
-// =========================================================
-// ✅ Flow Observation（入口エンジン）
-// - 意味を作らない
-// - 解釈しない
-// - 分岐に使わない
-// - meta に「流れ」だけを置く
-// =========================================================
+    // =========================================================
+    // ✅ Flow Observation（入口エンジン）
+    // - 意味を作らない
+    // - 解釈しない
+    // - 分岐に使わない
+    // - meta に「流れ」だけを置く
+    // =========================================================
 
-{
-  const historyArr = Array.isArray(history) ? (history as any[]) : [];
+    {
+      const historyArr = Array.isArray(history) ? (history as any[]) : [];
 
-  // 直前の user 発話のみ取得（assistant は見ない）
-  const lastUserText = (() => {
-    for (let i = historyArr.length - 1; i >= 0; i--) {
-      const m = historyArr[i];
-      if (String(m?.role ?? '').toLowerCase() === 'user') {
-        const v = m?.text ?? m?.content ?? null;
-        return typeof v === 'string' ? v : null;
+      // 直前の user 発話のみ取得（assistant は見ない）
+      const lastUserText = (() => {
+        for (let i = historyArr.length - 1; i >= 0; i--) {
+          const m = historyArr[i];
+          if (String(m?.role ?? '').toLowerCase() === 'user') {
+            const v = m?.text ?? m?.content ?? null;
+            return typeof v === 'string' ? v : null;
+          }
+        }
+        return null;
+      })();
+
+      if (typeof text === 'string' && text.trim().length > 0) {
+        const flow = observeFlow({
+          currentText: text,
+          lastUserText,
+        });
+
+        // 🔑 使わない。判断しない。meta に置くだけ。
+        (meta as any).flow = flow;
+
+        // 観測ログ（最初は必須）
+        console.log('[IROS/FLOW][observe]', {
+          delta: flow.delta,
+          confidence: flow.confidence,
+          hasLastUserText: Boolean(lastUserText),
+        });
       }
     }
-    return null;
-  })();
 
-  if (typeof text === 'string' && text.trim().length > 0) {
-    const flow = observeFlow({
-      currentText: text,
-      lastUserText,
-    });
+    // =========================================================
+    // ✅ counsel 配線：normalChat fallback の前に差し込む
+    // - mode名の揺れ：'counsel' / 'consult' を両方拾う
+    // - stage はまず OPEN 固定（永続化は次工程）
+    // - 相談モードでなくても、構造が counsel を要求するなら拾う
+    // - ✅ テスト用：/counsel コマンドで強制（本文は strip 後を使う）
+    // - ✅ 追加：GreetingGate 成立ターンは counsel に落とさない（新規チャット誤爆防止）
+    // - ✅ レーン主導：counsel は「上書き」ではなく「空のときだけ埋める」
+    // =========================================================
 
-    // 🔑 使わない。判断しない。meta に置くだけ。
-    (meta as any).flow = flow;
+    // ※このファイルでは meta ではなく mergedBaseMeta を使う（meta が無いスコープ対策）
+    const metaLike: any = (mergedBaseMeta ?? {}) as any;
 
-    // 観測ログ（最初は必須）
-    console.log('[IROS/FLOW][observe]', {
-      delta: flow.delta,
-      confidence: flow.confidence,
-      hasLastUserText: Boolean(lastUserText),
-    });
-  }
-}
+    const modeRaw = String(metaLike?.mode ?? '').toLowerCase();
+    const isCounselMode = modeRaw === 'counsel' || modeRaw === 'consult';
 
-// =========================================================
-// ✅ counsel 配線：normalChat fallback の前に差し込む
-// - mode名の揺れ：'counsel' / 'consult' を両方拾う
-// - stage はまず OPEN 固定（永続化は次工程）
-// - 相談モードでなくても、構造が counsel を要求するなら拾う
-// - ✅ テスト用：/counsel コマンドで強制（本文は strip 後を使う）
-// - ✅ 追加：GreetingGate 成立ターンは counsel に落とさない（新規チャット誤爆防止）
-// =========================================================
+    // ✅ /counsel（/consult）明示トリガー
+    const { forced: forcedCounsel, strippedText } = detectCounselCommand(text);
 
-// ※このファイルでは meta ではなく mergedBaseMeta を使う（meta が無いスコープ対策）
-const metaLike: any = (mergedBaseMeta ?? {}) as any;
+    // ✅ 以降の判定・slot生成に使う「本文」（/counsel は混ぜない）
+    const textForCounsel = forcedCounsel ? strippedText : text;
+    const hasTextForCounsel = String(textForCounsel ?? '').trim().length > 0;
 
-const modeRaw = String(metaLike?.mode ?? '').toLowerCase();
-const isCounselMode = modeRaw === 'counsel' || modeRaw === 'consult';
+    // ✅ GreetingGate 成立ターン判定（ここで counsel 誤爆を遮断）
+    const isGreetingTurn =
+      !!metaLike?.gatedGreeting?.ok ||
+      !!metaLike?.extra?.gatedGreeting?.ok ||
+      String(metaLike?.ctxPack?.shortSummary ?? '') === 'greeting' ||
+      String(metaLike?.extra?.ctxPack?.shortSummary ?? '') === 'greeting';
 
-// ✅ /counsel（/consult）明示トリガー
-const { forced: forcedCounsel, strippedText } = detectCounselCommand(text);
+    // ✅ この下（QuestionSlots / normalChat fallback）が参照するので outer scope に置く
+    let shouldUseCounsel = false;
 
-// ✅ 以降の判定・slot生成に使う「本文」（/counsel は混ぜない）
-const textForCounsel = forcedCounsel ? strippedText : text;
-const hasTextForCounsel = String(textForCounsel ?? '').trim().length > 0;
+    // ※重要：ir診断ターンは slotPlan を上書きしない（counsel/normalChat/flagReply を通さない）
+    const isIrDiagnosisTurn_here =
+      Boolean(metaLike?.isIrDiagnosisTurn) ||
+      String(metaLike?.presentationKind ?? '').toLowerCase() === 'diagnosis' ||
+      String(modeRaw ?? '').toLowerCase() === 'diagnosis';
 
-// ✅ GreetingGate 成立ターン判定（ここで counsel 誤爆を遮断）
-const isGreetingTurn =
-  !!metaLike?.gatedGreeting?.ok ||
-  !!metaLike?.extra?.gatedGreeting?.ok ||
-  String(metaLike?.ctxPack?.shortSummary ?? '') === 'greeting' ||
-  String(metaLike?.extra?.ctxPack?.shortSummary ?? '') === 'greeting';
+    if (!isIrDiagnosisTurn_here && !isGreetingTurn) {
+      // ✅ 構造として counsel が必要か
+      shouldUseCounsel =
+        !!forcedCounsel ||
+        isCounselMode ||
+        shouldUseCounselByStructure(metaLike, textForCounsel);
 
-// ✅ この下（QuestionSlots / normalChat fallback）が参照するので outer scope に置く
-let shouldUseCounsel = false;
+      // ✅ レーン主導：counsel は「空のときだけ」差し込む
+      // - 明示（/counsel or mode）だけは強制的に上書き可
+      const canOverrideSlots = !!forcedCounsel || isCounselMode;
+      const canFillWhenEmpty = slotsEmpty0 || policyEmpty0;
 
-// ※重要：ir診断ターンは slotPlan を上書きしない（counsel/normalChat/flagReply を通さない）
-const isIrDiagnosisTurn_here =
-  Boolean(metaLike?.isIrDiagnosisTurn) ||
-  String(metaLike?.presentationKind ?? '').toLowerCase() === 'diagnosis' ||
-  String(modeRaw ?? '').toLowerCase() === 'diagnosis';
+      if (
+        !isSilence &&
+        hasTextForCounsel &&
+        shouldUseCounsel &&
+        (canOverrideSlots || canFillWhenEmpty)
+      ) {
+        const lastSummary =
+          (ms as any)?.situation_summary ??
+          (ms as any)?.situationSummary ??
+          (memoryState as any)?.situation_summary ??
+          (memoryState as any)?.situationSummary ??
+          metaLike?.situation_summary ??
+          metaLike?.situationSummary ??
+          null;
 
-if (!isIrDiagnosisTurn_here && !isGreetingTurn) {
-  shouldUseCounsel =
-    !!forcedCounsel || isCounselMode || shouldUseCounselByStructure(metaLike, textForCounsel);
+        console.log('[IROS/ORCH][counsel-picked]', {
+          stage: 'OPEN',
+          modeRaw,
+          forcedCounsel,
+          shouldUseCounselByStructure: !forcedCounsel && !isCounselMode,
+          hasText: hasTextForCounsel,
+          isSilence,
+          strippedLen: forcedCounsel ? String(strippedText ?? '').length : null,
+          lastSummary_len:
+            typeof lastSummary === 'string' ? lastSummary.length : null,
+          isGreetingTurn,
+          canOverrideSlots,
+          canFillWhenEmpty,
+          slotsEmpty0,
+          policyEmpty0,
+        });
 
-  if (!isSilence && hasTextForCounsel && shouldUseCounsel) {
-    const lastSummary =
-      (ms as any)?.situation_summary ??
-      (ms as any)?.situationSummary ??
-      (memoryState as any)?.situation_summary ??
-      (memoryState as any)?.situationSummary ??
-      metaLike?.situation_summary ??
-      metaLike?.situationSummary ??
-      null;
+        const counsel = buildCounselSlotPlan({
+          userText: textForCounsel, // ✅ strip後
+          stage: 'OPEN',
+          lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
+        });
 
-    console.log('[IROS/ORCH][counsel-picked]', {
-      stage: 'OPEN',
-      modeRaw,
-      forcedCounsel,
-      shouldUseCounselByStructure: !forcedCounsel && !isCounselMode,
-      hasText: hasTextForCounsel,
-      isSilence,
-      strippedLen: forcedCounsel ? String(strippedText ?? '').length : null,
-      lastSummary_len: typeof lastSummary === 'string' ? lastSummary.length : null,
-      isGreetingTurn,
-    });
+        const cSlots = (counsel as any).slots;
+        const cPolicy = (counsel as any).slotPlanPolicy;
 
-    const counsel = buildCounselSlotPlan({
-      userText: textForCounsel, // ✅ strip後
-      stage: 'OPEN',
-      lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
-    });
-
-    const cSlots = (counsel as any).slots;
-    const cPolicy = (counsel as any).slotPlanPolicy;
-
-    // ✅ flagReply が既に入っている場合でも counsel を優先する（相談の進行を守る）
-    slotsArr = Array.isArray(cSlots) ? cSlots : [];
-    slotPlanPolicy =
-      typeof cPolicy === 'string' && cPolicy.trim() ? cPolicy.trim() : 'FINAL';
-
+        // ✅ レーン主導：ここで「上書き」はしない（明示強制の場合のみ許可）
+        slotsArr = Array.isArray(cSlots) ? cSlots : [];
+        slotPlanPolicy =
+          typeof cPolicy === 'string' && cPolicy.trim()
+            ? cPolicy.trim()
+            : 'FINAL';
     // 既存なら “上書き元” を残す
     (metaLike as any).slotPlanFallback =
       (metaLike as any).slotPlanFallback ?? 'counsel';

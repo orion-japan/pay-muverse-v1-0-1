@@ -917,59 +917,125 @@ if (sentimentLevelInput != null) upsertPayload.sentiment_level = sentimentLevelI
 // =========================================================
 // ✅ q_counts（外部優先 → core優先 → previousは“触らない”）
 // - 追加：qTraceEffective を qc.q_trace に合流（streakの巻き戻り防止）
+// - 修正：q_counts が null でも「書く根拠」があれば初期化して保存する
+//   （itTriggered / fa_pending / fa_lock が来たターンは必ず upsert）
 // =========================================================
 const qCountsPicked = qCounts ?? core?.q_counts ?? null;
 
-if (qCountsPicked != null) {
-  const qc = normalizeQCounts(qCountsPicked);
+  // ------------------------------------------------------------
+  // ✅ it_triggered / it_triggered_true は “undefined を false に丸めない”
+  // ------------------------------------------------------------
+  if (qCountsPicked != null) {
+    const qc = normalizeQCounts(qCountsPicked);
+
+    // ✅ it_triggered / it_triggered_true は “undefined を false に丸めない”
+    const itTriggeredResolvedBool: boolean | undefined =
+      typeof itTriggered === 'boolean'
+        ? itTriggered
+        : typeof (core as any)?.itTriggered === 'boolean'
+          ? (core as any).itTriggered
+          : typeof (metaForSave as any)?.itTriggered === 'boolean'
+            ? (metaForSave as any).itTriggered
+            : undefined;
+
+    qc.it_triggered_true = itTriggeredResolvedBool === true;
+    if (typeof itTriggeredResolvedBool === 'boolean') qc.it_triggered = itTriggeredResolvedBool;
+
+
+  } else if (typeof itTriggeredResolved === 'boolean') {
+
+  const qc = normalizeQCounts({ it_cooldown: 0 });
+  qc.it_triggered_true = itTriggered === true;
+  qc.it_triggered = itTriggered;
+  upsertPayload.q_counts = qc;
+
+  console.log('[IROS/PERSIST][q_counts][synth]', {
+    reason: 'qCountsPicked_null_but_itTriggered_present',
+    it_triggered: itTriggered,
+    it_triggered_true: qc.it_triggered_true,
+  });
+}
+
+// ------------------------------------------------------------
+// ✅ final anchor flags（B）
+// - あるときだけ載せる（undefinedは触らない）
+// - 入口は広く拾う（q_counts / extra / metaForSave のどこに居てもOK）
+// ------------------------------------------------------------
+const pickBool = (...vals: any[]): boolean | undefined => {
+  for (const v of vals) {
+    if (typeof v === 'boolean') return v;
+  }
+  return undefined;
+};
+
+const faPending = pickBool(
+  (qCountsPicked as any)?.fa_pending,
+  core?.q_counts?.fa_pending,
+  unified?.q_counts?.fa_pending,
+  extra?.fa_pending,
+  extra?.final_anchor?.fa_pending,
+  extra?.finalAnchor?.fa_pending,
+  (metaForSave as any)?.fa_pending,
+  (metaForSave as any)?.final_anchor?.fa_pending,
+  (metaForSave as any)?.finalAnchor?.fa_pending,
+);
+
+const faLock = pickBool(
+  (qCountsPicked as any)?.fa_lock,
+  core?.q_counts?.fa_lock,
+  unified?.q_counts?.fa_lock,
+  extra?.fa_lock,
+  extra?.final_anchor?.fa_lock,
+  extra?.finalAnchor?.fa_lock,
+  (metaForSave as any)?.fa_lock,
+  (metaForSave as any)?.final_anchor?.fa_lock,
+  (metaForSave as any)?.finalAnchor?.fa_lock,
+);
+
+// ------------------------------------------------------------
+// ✅ nullでも「保存すべき根拠」があれば q_counts を初期化して書く
+// ------------------------------------------------------------
+const shouldWriteQCounts =
+  qCountsPicked != null ||
+  typeof itTriggeredResolved === 'boolean' ||
+  typeof faPending === 'boolean' ||
+  typeof faLock === 'boolean';
+
+if (shouldWriteQCounts) {
+  // null の場合は空から初期化（it_cooldown=0 を確保）
+  const qc = normalizeQCounts(qCountsPicked ?? {});
+
+  qc.it_triggered_true = itTriggeredResolved === true;
+  if (typeof itTriggeredResolved === 'boolean') qc.it_triggered = itTriggeredResolved;
+
+  if (typeof faPending === 'boolean') (qc as any).fa_pending = faPending;
+  if (typeof faLock === 'boolean') (qc as any).fa_lock = faLock;
+
   console.log('[IROS/PERSIST][q_counts][pick]', {
     has_qCounts_arg: qCounts != null,
     has_core_q_counts: core?.q_counts != null,
     has_unified_q_counts: (unified as any)?.q_counts != null,
     picked_null: qCountsPicked == null,
     picked_type: qCountsPicked == null ? null : typeof qCountsPicked,
-    picked_keys: qCountsPicked && typeof qCountsPicked === 'object' ? Object.keys(qCountsPicked as any).slice(0, 12) : null,
+    picked_keys:
+      qCountsPicked && typeof qCountsPicked === 'object'
+        ? Object.keys(qCountsPicked as any).slice(0, 12)
+        : null,
+    it_triggered: typeof itTriggeredResolved === 'boolean' ? itTriggeredResolved : '(kept)',
+    it_triggered_true: qc.it_triggered_true,
+    fa_pending: typeof faPending === 'boolean' ? faPending : '(kept)',
+    fa_lock: typeof faLock === 'boolean' ? faLock : '(kept)',
+    wrote: true,
+    wrote_reason: {
+      qCountsPicked: qCountsPicked != null,
+      itTriggeredResolved: typeof itTriggeredResolved === 'boolean',
+      faPending: typeof faPending === 'boolean',
+      faLock: typeof faLock === 'boolean',
+    },
   });
 
-  // ★ IT観測
-  qc.it_triggered_true = itTriggeredResolved === true;
-  if (typeof itTriggeredResolved === 'boolean') qc.it_triggered = itTriggeredResolved;
-
-  // ★ qTrace 合流（streak の巻き戻り防止）
-  if (qTraceEffective && typeof qTraceEffective === 'object') {
-    const prevTrace =
-      (qc as any).q_trace && typeof (qc as any).q_trace === 'object' ? (qc as any).q_trace : null;
-
-    (qc as any).q_trace = {
-      ...(prevTrace ?? {}),
-      qNow: qTraceEffective.qNow ?? prevTrace?.qNow ?? null,
-      lastQ: qTraceEffective.lastQ ?? prevTrace?.lastQ ?? null,
-      streakQ: qTraceEffective.streakQ ?? prevTrace?.streakQ ?? null,
-      dominantQ: qTraceEffective.dominantQ ?? prevTrace?.dominantQ ?? null,
-      streakLength: qTraceEffective.streakLength ?? prevTrace?.streakLength ?? null,
-      from: qTraceEffective.from ?? prevTrace?.from ?? 'qTraceEffective',
-    };
-  }
-      // ★ IT観測
-      qc.it_triggered_true = itTriggeredResolved === true;
-      if (typeof itTriggeredResolved === 'boolean') qc.it_triggered = itTriggeredResolved;
-
-      // ★ qTrace 合流（あれば必ず勝たせる）
-      if (qTraceEffective && typeof qTraceEffective === 'object') {
-        const prevTrace = (qc as any).q_trace && typeof (qc as any).q_trace === 'object' ? (qc as any).q_trace : {};
-        (qc as any).q_trace = {
-          ...prevTrace,
-          qNow: qTraceEffective.qNow ?? prevTrace.qNow ?? null,
-          lastQ: qTraceEffective.lastQ ?? prevTrace.lastQ ?? null,
-          streakQ: qTraceEffective.streakQ ?? prevTrace.streakQ ?? null,
-          dominantQ: qTraceEffective.dominantQ ?? prevTrace.dominantQ ?? null,
-          streakLength: qTraceEffective.streakLength ?? prevTrace.streakLength ?? null,
-        };
-      }
-
-      upsertPayload.q_counts = qc;
-    }
-
+  upsertPayload.q_counts = qc;
+}
 
     // ✅ anchor_event / anchor_write（DB列がある環境だけで使う。無い場合は retry で落とす）
     // ✅ decisionFinal を参照（override が必ず効く）

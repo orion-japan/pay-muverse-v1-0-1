@@ -939,14 +939,57 @@ if (allowLLM === false) {
       return t === '…' || t === '...' || t === '……';
     };
 
-    const pickFromRephrase = () => {
+    const normLite = (t0: unknown) =>
+      String(t0 ?? '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const looksLikeEcho = (a: unknown, b: unknown) => {
+      const aa = normLite(a);
+      const bb = normLite(b);
+      if (!aa || !bb) return false;
+      if (aa === bb) return true;
+      // “先頭一致で貼り戻し”も拾う（UI/整形差の吸収）
+      return aa.length >= 8 && bb.length >= 8 && (aa.startsWith(bb) || bb.startsWith(aa));
+    };
+
+    // rephraseAttach のメタ（rawHead/rawLen 等）から “本文候補” を探す
+    // ※ attach の形が揺れても拾えるように浅い探索をする
+    const pickFromRephraseMeta = () => {
+      const directCandidates: string[] = [];
+
+      // よくある候補
+      if (typeof ex?.rephraseRawText === 'string') directCandidates.push(ex.rephraseRawText);
+      if (typeof ex?.rephraseText === 'string') directCandidates.push(ex.rephraseText);
+      if (typeof ex?.rawHead === 'string') directCandidates.push(ex.rawHead);
+
+      // object 内（例: ex.rephraseMeta.rawHead / ex.rephrase.meta.rawHead など）
+      const keys = Object.keys(ex ?? {});
+      for (const k of keys) {
+        const v: any = (ex as any)[k];
+        if (!v || typeof v !== 'object') continue;
+
+        if (typeof v?.rawText === 'string') directCandidates.push(v.rawText);
+        if (typeof v?.rawHead === 'string') directCandidates.push(v.rawHead);
+        if (typeof v?.text === 'string') directCandidates.push(v.text);
+      }
+
+      const picked = directCandidates
+        .map((s) => String(s ?? '').trim())
+        .filter((s) => s && !isDotsOnlyLocal(s))
+        // “本文っぽい” ものを優先（短いヘッドしか無いケースもあるので長さで前に寄せる）
+        .sort((a, b) => b.length - a.length)[0];
+
+      return picked || '';
+    };
+
+    const pickFromRephraseBlocks = () => {
       const head = String(ex?.rephraseHead ?? '').trim();
       if (head && !isDotsOnlyLocal(head)) return head;
 
       const blocks = ex?.rephraseBlocks;
       if (!Array.isArray(blocks) || blocks.length === 0) return '';
 
-      // blocks は UI で採用される可視本文候補。長すぎない範囲で結合。
       const joined = blocks
         .map((b: any) => String(b ?? '').trim())
         .filter((s: string) => s && !isDotsOnlyLocal(s))
@@ -957,13 +1000,24 @@ if (allowLLM === false) {
       return joined;
     };
 
-    // --- (A) finalAssistantText が点/空なら、rephraseBlocks/head から救済して “最終本文” を揃える
+    // --- (A) finalAssistantText が点/空なら救済
     const cur = String(finalAssistantText ?? '').trim();
     if (!cur || isDotsOnlyLocal(cur)) {
-      const rescued = pickFromRephrase();
+      const rescued = pickFromRephraseBlocks() || pickFromRephraseMeta();
       if (rescued) {
         finalAssistantText = rescued;
         ex.finalAssistantTextRescuedFromRephrase = true;
+      }
+    }
+
+    // --- (A2) ✅ “オウム救済”：最終が userText と同一なら、rephraseMeta の rawHead/rawText を優先
+    const userTextTrim = String(userText ?? '').trim();
+    const cur2 = String(finalAssistantText ?? '').trim();
+    if (userTextTrim && cur2 && looksLikeEcho(cur2, userTextTrim)) {
+      const rescued2 = pickFromRephraseMeta();
+      if (rescued2 && !looksLikeEcho(rescued2, userTextTrim)) {
+        finalAssistantText = rescued2;
+        ex.finalAssistantTextRescuedFromRephraseMeta = true;
       }
     }
 
@@ -978,6 +1032,7 @@ if (allowLLM === false) {
       ex.rawTextFromModel = finalText;
     }
   }
+
 
 
   // 7) UnifiedAnalysis 保存（失敗しても落とさない）

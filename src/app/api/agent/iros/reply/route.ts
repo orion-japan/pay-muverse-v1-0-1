@@ -703,17 +703,25 @@ try {
       }
     }
 
-    // 本文の同期（content/assistantText/text）
-    {
-      const r: any = result;
-      const final = pickText(r?.assistantText, r?.content, r?.text, assistantText);
-      assistantText = final;
-      if (r && typeof r === 'object') {
-        r.content = final;
-        r.assistantText = final;
-        r.text = final;
-      }
-    }
+// 本文の同期（content/assistantText/text）
+{
+  const r: any = result;
+
+  // ❌ r.text は「ユーザー文エコー」になり得るため、本文確定には使わない
+  // ✅ 本文は assistantText / content / assistantText(outer) のみに限定する
+  const final = pickText(r?.assistantText, r?.content, assistantText);
+
+  assistantText = final;
+
+  if (r && typeof r === 'object') {
+    r.content = final;
+    r.assistantText = final;
+
+    // r.text は内部互換のため残す（ただし本文には使わない）
+    // r.text = final;  // ←ここも同期したいなら “final” だけにして userText を拾わない
+  }
+}
+
 
     // ✅ render-v2 の fallback 材料は SoT extra を参照するため、最終本文を同期（SoTを満たす）
     {

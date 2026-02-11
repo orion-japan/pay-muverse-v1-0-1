@@ -1,17 +1,14 @@
 // src/lib/iros/orchestratorWill.ts
 // iros Orchestrator — Will パート集約
-// - Goal / Continuity / Priority / SA補正 をまとめて扱うヘルパー
+// - Goal / Continuity / Priority / SA補正 / Rotation をまとめて扱うヘルパー
 
-import type { Depth, QCode, IrosMode } from '@/lib/iros/system';
+import type { Depth, QCode, IrosMode, SpinLoop } from '@/lib/iros/system';
 import { DEPTH_VALUES } from '@/lib/iros/system';
 
 import { deriveIrosGoal } from './will/goalEngine';
 import type { IrosGoalKind } from './will/goalEngine';
 
-import {
-  applyGoalContinuity,
-  type ContinuityContext,
-} from './will/continuityEngine';
+import { applyGoalContinuity, type ContinuityContext } from './will/continuityEngine';
 
 import { deriveIrosPriority } from './will/priorityEngine';
 
@@ -19,6 +16,7 @@ import { adjustPriorityWithSelfAcceptance } from './orchestratorPierce';
 
 // ★ 置き換え：shouldRotateBand → decideRotation
 import { decideRotation } from './will/rotationEngine';
+import type { DescentGate } from './will/rotationEngine';
 
 // ✅ 追加：Vent/Will detector（continuity の Q 継続/遮断の判断材料）
 import { detectVentWill } from './will/detectVentWill';
@@ -65,9 +63,9 @@ export type ComputeGoalAndPriorityArgs = {
   /** ★ Phase（Inner / Outer）— Y軸トルク用。未解決なら null */
   phase?: 'Inner' | 'Outer' | null;
 
-  // ✅ 追加：MemoryState から渡す「前回の回転状態」
-  spinLoop?: 'SRI' | 'TCF' | null;
-  descentGate?: 'closed' | 'offered' | 'accepted' | null;
+  /** ✅ 追加：MemoryState から渡す「前回の回転状態」 */
+  spinLoop?: SpinLoop | null;
+  descentGate?: DescentGate | null;
 };
 
 export type ComputeGoalAndPriorityResult = {
@@ -95,14 +93,12 @@ function normalizeDepthStrictOrNull(v: unknown): Depth | null {
 }
 
 /**
- * Goal / Continuity / Priority / SA補正 をひとまとめにしたユーティリティ。
+ * Goal / Continuity / Priority / SA補正 / Rotation をひとまとめにしたユーティリティ。
  * runIrosTurn からはこの関数ひとつを呼べばよい。
  */
-export function computeGoalAndPriority(
-  args: ComputeGoalAndPriorityArgs,
-): ComputeGoalAndPriorityResult {
+export function computeGoalAndPriority(args: ComputeGoalAndPriorityArgs): ComputeGoalAndPriorityResult {
   const {
-    conversationId, // ✅ 追加
+    conversationId,
 
     text,
     depth,
@@ -118,7 +114,6 @@ export function computeGoalAndPriority(
     previousUncoverStreak,
     phase,
 
-    // ✅ 追加（前回回転状態）
     spinLoop,
     descentGate,
   } = args;
@@ -192,18 +187,14 @@ export function computeGoalAndPriority(
   ========================================================= */
   try {
     const riskFlags = soulNote?.risk_flags ?? null;
-    const hasQ5Depress =
-      qNow === 'Q5' &&
-      Array.isArray(riskFlags) &&
-      riskFlags.includes('q5_depress');
+    const hasQ5Depress = qNow === 'Q5' && Array.isArray(riskFlags) && riskFlags.includes('q5_depress');
 
     if (hasQ5Depress && goal) {
       const anyGoal: any = goal;
 
       if (typeof anyGoal.kind === 'string') {
         anyGoal.kind = 'stabilize';
-        anyGoal.reason =
-          'SoulLayer が Q5_depress を検出したため、このターンは安定・保護を最優先する';
+        anyGoal.reason = 'SoulLayer が Q5_depress を検出したため、このターンは安定・保護を最優先する';
 
         anyGoal.detail = {
           ...(anyGoal.detail && typeof anyGoal.detail === 'object' ? anyGoal.detail : {}),
@@ -275,15 +266,14 @@ export function computeGoalAndPriority(
 
   /* =========================================================
      ②.5 三軸回転：decideRotation で帯域回転 + gate/loop を更新
+     ※ ここでは “meta” は存在しない。入口は goal（orchestratorWill の責務範囲）
   ========================================================= */
   try {
     const anyGoal: any = goal;
 
     // targetDepth は string 混入があり得るので「Depth or null」へ正規化
     const baseDepth: Depth | null =
-      (typeof anyGoal?.targetDepth === 'string'
-        ? normalizeDepthStrictOrNull(anyGoal.targetDepth)
-        : null) ??
+      (typeof anyGoal?.targetDepth === 'string' ? normalizeDepthStrictOrNull(anyGoal.targetDepth) : null) ??
       depthNow ??
       lastDepthNow ??
       null;
@@ -301,8 +291,13 @@ export function computeGoalAndPriority(
 
       stayRequested: false,
 
-      lastSpinLoop: (spinLoop ?? null) as any,
-      lastDescentGate: (descentGate ?? null) as any,
+      lastSpinLoop: spinLoop ?? null,
+      lastDescentGate: descentGate ?? null,
+
+      // ✅ LLM signals（密度ヒント）
+      // - 生成元は rephraseEngine.full.ts の meta.extra.llmSignals（保存されるなら goal/extra に載る）
+      // - orchestratorWill は “meta” を参照しない（この関数の責務外）
+      llmSignals: (anyGoal as any)?.extra?.llmSignals ?? (anyGoal as any)?.llmSignals ?? null,
 
       // 未配線（後で繋ぐ）
       actionSignal: null,
@@ -331,7 +326,7 @@ export function computeGoalAndPriority(
       console.log('[IROS/DEPTH_WRITE]', {
         route: 'ROTATION',
         where: 'orchestratorWill',
-        conversationId: conversationId ?? null, // ✅ args から入ってくるようになった
+        conversationId: conversationId ?? null,
         baseDepth,
         goalTargetDepth: (goal as any)?.targetDepth ?? null,
         rotationDepth: rotation.nextDepth ?? null,
@@ -340,7 +335,9 @@ export function computeGoalAndPriority(
         shouldRotate: rotation.shouldRotate ?? null,
         reason: rotation.reason ?? null,
       });
-    } catch {}
+    } catch {
+      // no-op
+    }
 
     if (process.env.DEBUG_IROS_WILL === '1') {
       // eslint-disable-next-line no-console

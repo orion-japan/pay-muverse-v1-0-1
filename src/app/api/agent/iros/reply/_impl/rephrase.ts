@@ -776,6 +776,7 @@ if (shouldSkipRephraseLLMForDiagnosisFinal) {
 
     if (!blocks || blocks.length === 0) {
       // ✅ まず「rephraseEngineの生テキスト」を拾う（ここを最優先にする）
+      // 重要: rephraseEngine が本文を out に載せず、meta.rawHead/rawLen だけ返すケースがある
       const rawFromRes = String(
         (res as any)?.raw ??
           (res as any)?.text ??
@@ -783,8 +784,10 @@ if (shouldSkipRephraseLLMForDiagnosisFinal) {
           (res as any)?.meta?.raw ??
           (res as any)?.meta?.text ??
           (res as any)?.meta?.content ??
+          (res as any)?.meta?.rawHead ?? // ← ★これがないと「本文があるのに空扱い」になってオウムに落ちる
           ''
       ).trim();
+
 
       if (rawFromRes) {
         attachBlocksFromTextOrSkip(rawFromRes, 'REPHRASE_RAW_FALLBACK');

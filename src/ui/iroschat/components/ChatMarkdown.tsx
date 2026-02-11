@@ -117,12 +117,15 @@ function HeadingLine({
 // ✅ ここを置き換え（useMemo 部分）
 export default function ChatMarkdown({ text, className }: ChatMarkdownProps) {
   const normalized = useMemo(() => {
-    // 1) **内側の余白整理
+    console.log('[DEBUG/ChatMarkdown][RAW]', JSON.stringify(text).slice(0, 800));
+
     const t1 = normalizeBold(text);
-    // 2) 未閉じの ** を「最後の1個だけ」無効化（全部消さない）
     const t2 = fixUnmatchedBold(t1);
+
+    console.log('[DEBUG/ChatMarkdown][NORMALIZED]', JSON.stringify(t2).slice(0, 800));
     return t2;
   }, [text]);
+
 
   return (
     <div className={className}>
@@ -201,7 +204,9 @@ export default function ChatMarkdown({ text, className }: ChatMarkdownProps) {
             <ul
               {...props}
               style={{
-                paddingLeft: '1.2em',
+                listStyleType: 'disc',
+                listStylePosition: 'outside',
+                paddingLeft: '1.25em',
                 margin: '0.25em 0 0.6em',
               }}
             >
@@ -209,10 +214,26 @@ export default function ChatMarkdown({ text, className }: ChatMarkdownProps) {
             </ul>
           ),
 
+          // ✅ ordered list（番号）を必ず表示させる
+          ol: ({ children, ...props }) => (
+            <ol
+              {...props}
+              style={{
+                listStyleType: 'decimal',
+                listStylePosition: 'outside',
+                paddingLeft: '1.25em',
+                margin: '0.25em 0 0.6em',
+              }}
+            >
+              {children}
+            </ol>
+          ),
+
           li: ({ children, ...props }) => (
             <li
               {...props}
               style={{
+                display: 'list-item',
                 margin: '0.1em 0',
               }}
             >

@@ -174,32 +174,40 @@
   pointer-events: none;
 }
 
-/* ---- 吹き出し内の箇条書き（はみ出し防止） ---- */
+/* ---- 吹き出し内のリスト（はみ出し防止） ---- */
+
+/* 共通（余白だけ） */
 .bubble .msgBody ul,
 .bubble .msgBody ol {
-  list-style: none;
   margin: 0.25rem 0 0.5rem;
-  padding: 0;
+  padding-left: 1.25rem; /* マーカー分の左余白 */
+  list-style-position: outside;
 }
 
+/* unordered list は bullet */
+.bubble .msgBody ul {
+  list-style: disc;
+}
+
+/* ordered list は番号 */
+.bubble .msgBody ol {
+  list-style: decimal;
+}
+
+/* li の共通（はみ出し対策） */
 .bubble .msgBody li {
-  position: relative;
-  padding-left: 1.1rem;
   line-height: 1.6;
   word-break: break-word;
   overflow-wrap: anywhere;
+  padding-left: 0;      /* ← ここ重要：疑似要素で左paddingしない */
+  position: static;     /* ← marker を素直に使う */
 }
 
+/* 以前の bullet 強制を無効化 */
 .bubble .msgBody li::before {
-  content: '•';
-  position: absolute;
-  left: 0;
-  top: 0;
+  content: none !important;
 }
 
-.bubble {
-  overflow: hidden;
-}
 
 /* 注意:
    以前のこれが残っていると事故りやすいので、絶対に入れない：
