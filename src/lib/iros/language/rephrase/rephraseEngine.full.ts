@@ -220,6 +220,7 @@ function buildInternalPackText(args: {
 
   const flowDigest = String(args.flowDigest ?? '').trim();
   const flowTape = String(args.flowTape ?? '').trim();
+  const metaText = String(args.metaText ?? '').trim();
 
   return [
     'INTERNAL PACK (DO NOT OUTPUT):',
@@ -231,12 +232,14 @@ function buildInternalPackText(args: {
     `intentBand=${args.intentBand ?? '(null)'}`,
     `tLayerHint=${args.tLayerHint ?? '(null)'}`,
     '',
+    'META_HINT (DO NOT OUTPUT):',
+    metaText || '(none)',
+    '',
     'FLOW_HINT (DO NOT OUTPUT):',
     `flowDigest=${flowDigest || '(none)'}`,
     `topicDigest=${String(args.topicDigest ?? '').trim() || '(none)'}`,
     `replyGoal=${String(args.replyGoal ?? '').trim() || '(none)'}`,
     `repeatSignal=${String(args.repeatSignal ?? '').trim() || '(none)'}`,
-
     `flowTape=${flowTape || '(none)'}`,
     '',
     'HISTORY_HINT (DO NOT OUTPUT):',
@@ -247,6 +250,7 @@ function buildInternalPackText(args: {
     '',
     obsCard,
   ].join('\n');
+
 }
 
 // ---------------------------------------------
@@ -995,19 +999,23 @@ function readItOkFromContext(userContext: unknown): boolean {
   if (!userContext || typeof userContext !== 'object') return false;
   const uc: any = userContext as any;
 
-  const reason =
-    norm(
-      tryGet(uc, ['itxReason']) ??
-        tryGet(uc, ['itx_reason']) ??
-        tryGet(uc, ['meta', 'itxReason']) ??
-        tryGet(uc, ['meta', 'itx_reason']) ??
-        tryGet(uc, ['ctxPack', 'itxReason']) ??
-        tryGet(uc, ['ctxPack', 'itx_reason']) ??
-        tryGet(uc, ['ctx_pack', 'itxReason']) ??
-        tryGet(uc, ['ctx_pack', 'itx_reason']) ??
-        '',
-    ) || '';
+  // ✅ このターンの itOk は「このターンの扉」だけを見る
+  // - 過去の itx_reason(IT_TRIGGER_OK/IT_HOLD) で itOk を勝手に true にしない
+  // - itxStep(T1..T3) も “状態” なので itOk とは別（ここでは使わない）
+  const itTriggered =
+    Boolean(
+      tryGet(uc, ['itTriggered']) ??
+        tryGet(uc, ['it_triggered']) ??
+        tryGet(uc, ['meta', 'itTriggered']) ??
+        tryGet(uc, ['meta', 'it_triggered']) ??
+        tryGet(uc, ['ctxPack', 'itTriggered']) ??
+        tryGet(uc, ['ctxPack', 'it_triggered']) ??
+        tryGet(uc, ['ctx_pack', 'itTriggered']) ??
+        tryGet(uc, ['ctx_pack', 'it_triggered']) ??
+        false,
+    ) === true;
 
+  // Tレイヤー濃度モードは「許可」として扱う（= itOk の代替トグル）
   const tLayerModeActive =
     Boolean(
       tryGet(uc, ['tLayerModeActive']) ??
@@ -1017,34 +1025,9 @@ function readItOkFromContext(userContext: unknown): boolean {
         false,
     ) === true;
 
-  const itxStep =
-    norm(
-      tryGet(uc, ['itxStep']) ??
-        tryGet(uc, ['itx_step']) ??
-        tryGet(uc, ['meta', 'itxStep']) ??
-        tryGet(uc, ['meta', 'itx_step']) ??
-        tryGet(uc, ['ctxPack', 'itxStep']) ??
-        tryGet(uc, ['ctxPack', 'itx_step']) ??
-        tryGet(uc, ['ctx_pack', 'itxStep']) ??
-        tryGet(uc, ['ctx_pack', 'itx_step']) ??
-        tryGet(uc, ['memoryState', 'itxStep']) ??
-        tryGet(uc, ['memoryState', 'itx_step']) ??
-        tryGet(uc, ['orchestratorState', 'itxStep']) ??
-        tryGet(uc, ['orchestratorState', 'itx_step']) ??
-        tryGet(uc, ['last_state', 'itxStep']) ??
-        tryGet(uc, ['last_state', 'itx_step']) ??
-        '',
-    ) || '';
-
-  const itxOk = itxStep ? /^[T][123]$/u.test(itxStep) : false;
-
-  if (reason.includes('IT_TRIGGER_OK')) return true;
-  if (reason.includes('IT_HOLD')) return true;
-  if (tLayerModeActive) return true;
-  if (itxOk) return true;
-
-  return false;
+  return itTriggered || tLayerModeActive;
 }
+
 
 function extractIntentBandFromContext(userContext: unknown): {
   intentBand: string | null;
@@ -1416,7 +1399,14 @@ export async function rephraseSlotsFinal(extracted: ExtractedSlots, opts: Rephra
     traceId: (opts as any)?.traceId ?? (opts as any)?.debug?.traceId ?? null,
     conversationId: (opts as any)?.conversationId ?? (opts as any)?.debug?.conversationId ?? null,
     userCode: (opts as any)?.userCode ?? (opts as any)?.debug?.userCode ?? null,
+
+    // ✅ LLM audit 用：debug 経由で参照されるため、ここで落とさず伝播する
+    slotPlanPolicy:
+      (opts as any)?.slotPlanPolicy ??
+      (opts as any)?.debug?.slotPlanPolicy ??
+      null,
   } as any);
+
 
   if (!extracted) {
     logRephraseOk(debug, [], '', 'NO_SLOTS');
@@ -2009,7 +1999,8 @@ const lastTurnsSafe = (() => {
   // ✅ lane single source of truth:
   // - wantsIdeaBand を固定で立てない（下流が常時 IDEA_BAND 化して壊れる）
   // - 同時ヒット時は T_CONCRETIZE を優先（レーンは単一に収束させる）
-  const wantsTConcretize = !repeatSignalSame && hitTConcretize;
+  const wantsTConcretize = hitTConcretize;
+
   const wantsIdeaBand = !wantsTConcretize && hitIdeaBand;
 
 
@@ -2106,11 +2097,28 @@ const lastTurnsSafe = (() => {
     repeatSignal,
   });
 
-  const messages = buildFirstPassMessages({
+  let messages = buildFirstPassMessages({
     systemPrompt,
     internalPack,
     turns: lastTurnsSafe,
+    finalUserText: seedDraft || userText,
   });
+
+  // ✅ HistoryDigest v1（外から渡された場合のみ注入）
+  // - 生成はここではしない（生成元は本線側に固定）
+  // - 注入は systemPrompt の直後に入る（micro と同じ）
+  const digestMaybe =
+    (opts as any)?.historyDigestV1 ??
+    (opts as any)?.userContext?.historyDigestV1 ??
+    (opts as any)?.userContext?.ctxPack?.historyDigestV1 ??
+    null;
+
+  if (digestMaybe) {
+    const { injectHistoryDigestV1 } = await import('@/lib/iros/history/historyDigestV1');
+    const inj = injectHistoryDigestV1({ messages: messages as any, digest: digestMaybe });
+    messages = inj.messages as any;
+  }
+
 
   // ログ確認
   console.log('[IROS/rephraseEngine][MSG_PACK]', {
@@ -2526,6 +2534,22 @@ const lastTurnsSafe = (() => {
   let raw2 = '';
 
   // ✅ 1st pass
+  const slotPlanPolicyResolved =
+    (opts as any)?.slotPlanPolicy ??
+    (opts as any)?.userContext?.slotPlanPolicy ??
+    (opts as any)?.userContext?.ctxPack?.slotPlanPolicy ??
+    (debug as any)?.slotPlanPolicy ??
+    null;
+
+  // ✅ historyDigestV1（ログ用）: ctxPack から拾う（API送信はしない）
+  const historyDigestV1 =
+    (opts as any)?.historyDigestV1 ??
+    (opts as any)?.userContext?.historyDigestV1 ??
+    (opts as any)?.userContext?.ctxPack?.historyDigestV1 ??
+    null;
+
+
+
   raw = await callWriterLLM({
     model: opts.model ?? 'gpt-4o',
     temperature: opts.temperature ?? 0.7,
@@ -2533,6 +2557,16 @@ const lastTurnsSafe = (() => {
     traceId: debug.traceId ?? null,
     conversationId: debug.conversationId ?? null,
     userCode: debug.userCode ?? null,
+    audit: {
+      mode: 'rephrase',
+      slotPlanPolicy: slotPlanPolicyResolved,
+      qCode: (debug as any)?.qCode ?? null,
+      depthStage: (debug as any)?.depthStage ?? null,
+
+      // ✅ 追加（ログ専用）
+      hasDigest: Boolean(historyDigestV1),
+      historyDigestV1Head: historyDigestV1 ? safeHead(String(historyDigestV1), 140) : null,
+    },
   });
 
 
@@ -3274,22 +3308,29 @@ candidateLen < MIN_OK_LEN &&
     reason: v?.reasons,
   });
 
-  // ✅ retry (2nd pass)
-  const retryMessages = buildRetryMessages({
-    systemPrompt,
-    internalPack,
-    baseDraftForRepair,
-    userText,
-  });
+// ✅ retry (2nd pass)
+const retryMessages = buildRetryMessages({
+  systemPrompt,
+  internalPack,
+  baseDraftForRepair,
+  userText,
+});
 
-  raw2 = await callWriterLLM({
-    model: opts.model ?? 'gpt-4o',
-    temperature: opts.temperature ?? 0.7,
-    messages: retryMessages,
-    traceId: debug.traceId ?? null,
-    conversationId: debug.conversationId ?? null,
-    userCode: debug.userCode ?? null,
-  });
+raw2 = await callWriterLLM({
+  model: opts.model ?? 'gpt-4o',
+  temperature: opts.temperature ?? 0.7,
+  messages: retryMessages,
+  traceId: debug.traceId ?? null,
+  conversationId: debug.conversationId ?? null,
+  userCode: debug.userCode ?? null,
+  audit: {
+    mode: 'rephrase_retry',
+    // ✅ 1st pass と同じ決定ロジックを使う
+    slotPlanPolicy: slotPlanPolicyResolved,
+    qCode: (debug as any)?.qCode ?? null,
+    depthStage: (debug as any)?.depthStage ?? null,
+  },
+});
 
   // ログ（LLMの実出力で）
   logRephraseOk(debug, extracted.keys, raw2, 'RETRY_LLM');

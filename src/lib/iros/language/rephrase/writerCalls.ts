@@ -1,11 +1,14 @@
 // =============================================
 // file: src/lib/iros/language/rephrase/writerCalls.ts
 // ✅ buildFirstPassMessages を「最後 user で終わる」ように拡張
+// ✅ HistoryDigest v1 をここで注入できるようにする（唯一の choke point）
 // =============================================
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { chatComplete } from '../../../llm/chatComplete';
+import type { HistoryDigestV1 } from '../../history/historyDigestV1';
+import { injectHistoryDigestV1 } from '../../history/historyDigestV1';
 
 export type WriterMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 
@@ -111,13 +114,22 @@ export async function callWriterLLM(args: {
   userCode?: string | null;
   extraBody?: any;
   audit?: any;
+
+  // ✅ 追加：HistoryDigest v1（存在する時だけ注入）
+  historyDigestV1?: HistoryDigestV1 | null;
 }): Promise<string> {
+  // ✅ 注入（systemPrompt の次に system 2本目として差し込む）
+  // - ここが writer 本線の choke point
+  const digest = (args.historyDigestV1 ?? null) as HistoryDigestV1 | null;
+  const injected = digest ? injectHistoryDigestV1({ messages: args.messages, digest }) : null;
+  const messagesFinal = injected?.messages ?? args.messages;
+
   const out = await chatComplete({
-    purpose: 'reply',
+    purpose: 'writer',
     model: args.model,
     temperature: args.temperature,
     max_tokens: 700,
-    messages: args.messages,
+    messages: messagesFinal,
     extraBody: args.extraBody ?? {},
     traceId: args.traceId ?? null,
     conversationId: args.conversationId ?? null,
@@ -127,28 +139,12 @@ export async function callWriterLLM(args: {
       conversationId: args.conversationId ?? null,
       userCode: args.userCode ?? null,
     },
-    audit: args.audit ?? {},
+    audit: {
+      ...(args.audit ?? {}),
+      historyDigestV1: digest ? { injected: true, chars: injected?.digestChars ?? null } : { injected: false },
+    },
   } as any);
 
   return String(out ?? '');
 }
 
-
-// =============================================
-// file: src/lib/iros/language/rephrase/rephraseEngine.full.ts
-// ✅ buildFirstPassMessages 呼び出しに finalUserText を渡す
-// （該当1行だけ置き換え）
-// =============================================
-//
-// 変更前：
-// const messages = buildFirstPassMessages({ systemPrompt, internalPack, turns: lastTurnsSafe });
-//
-// 変更後：
-/*
-const messages = buildFirstPassMessages({
-  systemPrompt,
-  internalPack,
-  turns: lastTurnsSafe,
-  finalUserText: seedDraft || userText,
-});
-*/

@@ -20,9 +20,10 @@ import { ensureIrosConversationUuid } from '@/lib/iros/server/ensureIrosConversa
 import { buildResonanceVector } from '@/lib/iros/language/resonanceVector';
 import { renderReply } from '@/lib/iros/language/renderReply';
 import { renderGatewayAsReply } from '@/lib/iros/language/renderGateway';
+import { persistAssistantMessageToIrosMessages } from '@/lib/iros/server/persistAssistantMessageToIrosMessages';
 
 import { applyRulebookCompat } from '@/lib/iros/policy/rulebook';
-import { persistAssistantMessageToIrosMessages } from '@/lib/iros/server/persistAssistantMessageToIrosMessages';
+
 import { persistUserMessageToIrosMessages } from '@/lib/iros/server/persistUserMessageToIrosMessages';
 import { runNormalBase } from '@/lib/iros/conversation/normalBase';
 
@@ -376,40 +377,6 @@ if (!conversationKey || !text) {
       return res;
     }
 
-// ✅ persist USER message (DB) — assistantより先に保存する
-try {
-  const userMeta = {
-    inputKind: 'chat',
-    extra: {
-      traceId: String(traceId),
-      persistedByRoute: true,
-      persistedUserMessage: true,
-      // 重いものは入れない（timeout回避）
-    },
-  };
-
-  const ures = await persistUserMessageToIrosMessages({
-    supabase,
-    conversationId, // ✅ ここは既に内部uuid
-    userCode,
-    content: String(text),
-    meta: userMeta,
-  });
-
-  console.warn('[IROS/persistUserMessage] done', {
-    ok: ures.ok,
-    inserted: ures.inserted,
-    reason: (ures as any).reason ?? null,
-    traceId: String(traceId),
-  });
-} catch (e) {
-  console.warn('[IROS/persistUserMessage] failed (non-fatal)', {
-    traceId: String(traceId),
-    message: (e as any)?.message ?? String(e),
-  });
-}
-
-
     // 7) low balance warn
     let lowWarn: null | { code: 'low_balance'; balance: number; threshold: number } = null;
     if (Number.isFinite(LOW_BALANCE_THRESHOLD) && LOW_BALANCE_THRESHOLD > 0) {
@@ -509,23 +476,9 @@ try {
       kind: 'user_message',
     },
   };
-
-  const ures = await persistUserMessageToIrosMessages({
-    supabase,
-    conversationId, // ✅ internal uuid
-    userCode,
-    content: String(userTextClean ?? ''),
-    meta: userMeta,
-  });
-
-  if (!ures?.ok && ures?.reason !== 'EMPTY_CONTENT') {
-    console.warn('[IROS/persistUserMessageToIrosMessages] failed', {
-      conversationId,
-      userCode,
-      reason: ures?.reason ?? null,
-    });
-  }
 }
+// ✅ single-writer（user は /api/agent/iros/messages のみが永続化）
+// /api/agent/iros/reply は「生成 + assistant 永続化」だけを担当する
 
 
     // 11) handle

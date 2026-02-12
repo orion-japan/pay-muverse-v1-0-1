@@ -35,20 +35,51 @@ export async function persistUserMessageToIrosMessages(args: {
   }
 
   // 直近重複ガード（同一convで同一textが連続するのを防ぐ）
+  // ✅ “同文”ではなく、“同一リクエスト(traceId)の二重送信”だけ弾く
   {
+    const pickTraceId = (m: any): string => {
+      if (!m || typeof m !== 'object') return '';
+      const a = String(m?.traceId ?? '').trim();
+      if (a) return a;
+
+      const ex = m?.extra;
+      if (ex && typeof ex === 'object') {
+        const b = String(ex?.traceId ?? ex?.trace_id ?? '').trim();
+        if (b) return b;
+      }
+      return '';
+    };
+
+    const currentTraceId = pickTraceId(meta);
+
     const { data: lastRow, error: lastErr } = await supabase
       .from('iros_messages')
-      .select('id,text')
+      .select('id,text,created_at,meta')
       .eq('conversation_id', conversationUuid)
       .eq('role', 'user')
       .order('id', { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    if (!lastErr && lastRow?.text != null && String(lastRow.text) === content) {
+    const lastText = lastRow?.text != null ? String(lastRow.text) : '';
+    const lastTraceId = pickTraceId((lastRow as any)?.meta);
+
+    // ✅ 同文でも traceId が違うなら「別ターン」として保存する
+    if (!lastErr && lastText === content && currentTraceId && lastTraceId === currentTraceId) {
       return { ok: true, inserted: false, reason: 'DUPLICATE_SKIP' as const };
     }
+
+    // 保険：traceId が無い場合だけ、極短時間(500ms)の二重送信を弾く
+    if (!lastErr && lastText === content && !currentTraceId) {
+      const lastAt = Date.parse(String((lastRow as any)?.created_at ?? ''));
+      const now = Date.now();
+      if (Number.isFinite(lastAt) && now - lastAt < 500) {
+        return { ok: true, inserted: false, reason: 'DUPLICATE_SKIP' as const };
+      }
+    }
   }
+
+
 
   const row = {
     conversation_id: conversationUuid,

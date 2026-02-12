@@ -1166,18 +1166,49 @@ const speechAllowLLM =
 const isSilence = speechAct === '無言アクト' || speechAllowLLM === false;
 
 // ✅ framePlan 由来の slots/policy を fallback 判定の前に反映する
-// - slotPlan が未設定/空のときでも、framePlan があるなら fallback を誤発火させない
+// - ただし frameSlots の “schema({id,required,hint})” は slotPlan ではないので流さない
 {
+  const looksRenderableSlotPlan = (arr: any[]): boolean => {
+    for (const s of arr) {
+      if (s == null) continue;
+      if (typeof s === 'string' && s.trim()) return true;
+
+      const hasText = typeof (s as any)?.text === 'string' && String((s as any).text).trim().length > 0;
+      const hasContent =
+        typeof (s as any)?.content === 'string' && String((s as any).content).trim().length > 0;
+      const hasLines =
+        Array.isArray((s as any)?.lines) &&
+        (s as any).lines.some((l: any) => String(l ?? '').trim().length > 0);
+
+      // schema({id,required,hint}) しか無いものは false に落ちる
+      if (hasText || hasContent || hasLines) return true;
+    }
+    return false;
+  };
+
   const fpSlots = (meta as any)?.framePlan?.slots;
-  if ((!Array.isArray(slotsArr) || slotsArr.length === 0) && Array.isArray(fpSlots) && fpSlots.length > 0) {
+  const fpPolicy = (meta as any)?.framePlan?.slotPlanPolicy;
+
+  // slots: “render 可能っぽい” ときだけ seed する（schema は弾く）
+  if (
+    (!Array.isArray(slotsArr) || slotsArr.length === 0) &&
+    Array.isArray(fpSlots) &&
+    fpSlots.length > 0 &&
+    looksRenderableSlotPlan(fpSlots)
+  ) {
     slotsArr = fpSlots;
   }
 
-  const fpPolicy = (meta as any)?.framePlan?.slotPlanPolicy;
-  if ((!slotPlanPolicy || String(slotPlanPolicy).trim().length === 0) && typeof fpPolicy === 'string' && fpPolicy.trim()) {
+  // policy: これは seed してOK（ただし空のときだけ）
+  if (
+    (!slotPlanPolicy || String(slotPlanPolicy).trim().length === 0) &&
+    typeof fpPolicy === 'string' &&
+    fpPolicy.trim()
+  ) {
     slotPlanPolicy = fpPolicy.trim();
   }
 }
+
 
 
     // 4) 空判定
@@ -1574,8 +1605,18 @@ if (typeof process !== 'undefined' && process.env.DEBUG_IROS_FALLBACK_DIAG === '
     (meta as any)?.declarationOk ??
     false;
 
+  // ✅ IntentBridge が “選択” を拾うために直前assistant本文を取る
+  const historyArr = Array.isArray(history) ? (history as any[]) : [];
+  let lastAssistantTextForBridge = '';
+  for (let i = historyArr.length - 1; i >= 0; i--) {
+    const m = historyArr[i];
+    if (String(m?.role ?? '').toLowerCase() !== 'assistant') continue;
+    const v = m?.text ?? m?.content ?? '';
+    lastAssistantTextForBridge = typeof v === 'string' ? v : String(v ?? '');
+    if (lastAssistantTextForBridge.trim()) break;
+  }
 
-  // 入力を meta.extra.intentBridge に集約（laneKey は後で足す）
+  // 入力を meta.extra.intentBridge に集約（bridge結果もここへ）
   ex.intentBridge = {
     ...(ex.intentBridge ?? {}),
     deepenOk: typeof deepenOkNow === 'boolean' ? deepenOkNow : (ex.intentBridge as any)?.deepenOk,
@@ -1592,37 +1633,56 @@ if (typeof process !== 'undefined' && process.env.DEBUG_IROS_FALLBACK_DIAG === '
 
     hasCore: !!hasCoreNow,
     declarationOk: !!declarationOkNow,
+
+    // ✅ これが無いと focusLabel が永遠に立たない
+    lastAssistantText: lastAssistantTextForBridge,
   });
 
   if (bridge && typeof (bridge as any).laneKey === 'string') {
     ex.intentBridge = {
       ...(ex.intentBridge ?? {}),
-      laneKey: (ex.intentBridge as any)?.laneKey ?? (bridge as any).laneKey,
+      laneKey: (bridge as any).laneKey,
+      ...(typeof (bridge as any).focusLabel === 'string' ? { focusLabel: (bridge as any).focusLabel } : {}),
     };
   }
 }
 
-// ✅ IntentBridge laneKey を拾う（ここでは確実に meta.extra.intentBridge に入っている）
-const laneKeyNow =
+// ✅ IntentBridge laneKey を拾う（ここでは meta.extra.intentBridge を参照する）
+// - このスコープでは `bridge` が未宣言（別ブロック）なので参照しない
+const laneKeyNowRaw =
   (meta as any)?.extra?.intentBridge?.laneKey ??
-  (meta as any)?.intentBridge?.laneKey ?? // 念のため互換（あれば）
+  (meta as any)?.intentBridge?.laneKey ??
   null;
 
-  const fallback = buildNormalChatSlotPlan({
-    userText: textForCounsel,
-    laneKey: laneKeyNow === 'T_CONCRETIZE' ? 'T_CONCRETIZE' : 'IDEA_BAND',
+// ✅ テスト用：文頭に "tc:" があれば T_CONCRETIZE を強制（本番仕様には影響しない）
+const forceTConcretize =
+  typeof text === 'string' && /^\s*tc\s*:/i.test(text);
 
-    // 🔽 ここを差し替え
-    focusLabel:
-      laneKeyNow === 'T_CONCRETIZE'
-        ? '短文化の成立条件'
-        : undefined,
+const laneKeyNow = forceTConcretize ? 'T_CONCRETIZE' : laneKeyNowRaw;
 
-    context: {
-      lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
-    },
-  });
+console.log('[IROS/T_CONCRETIZE][FORCE_SWITCH_CHECK]', {
+  forceTConcretize,
+  laneKeyNowRaw,
+  laneKeyNow,
+  userHead: String(textForCounsel ?? '').slice(0, 40),
+});
 
+const focusLabelNow =
+  (meta as any)?.extra?.intentBridge?.focusLabel ??
+  (meta as any)?.intentBridge?.focusLabel ??
+  undefined;
+
+const fallback = buildNormalChatSlotPlan({
+  userText: textForCounsel,
+  laneKey: laneKeyNow === 'T_CONCRETIZE' ? 'T_CONCRETIZE' : 'IDEA_BAND',
+
+  // ✅ 固定文言はやめて、選択された “一点” を渡す
+  focusLabel: laneKeyNow === 'T_CONCRETIZE' ? focusLabelNow : undefined,
+
+  context: {
+    lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
+  },
+});
 
     const fbSlots = (fallback as any).slots;
     slotsArr = Array.isArray(fbSlots) ? fbSlots : [];
@@ -1971,26 +2031,22 @@ if (slotsEmpty_ir) {
   // ✅ Phase11：intent_anchor を最終metaにも必ず残す（camel + snake）
   // - 途中で meta.intent_anchor が落ちても、MemoryState(ms) を正として復元する
   {
-    const iaRaw =
-      (finalMeta as any).intent_anchor ??
-      (finalMeta as any).intentAnchor ??
-      (ms as any)?.intent_anchor ??
-      (ms as any)?.intentAnchor ??
-      (memoryState as any)?.intent_anchor ??
-      (mergedBaseMeta as any)?.intent_anchor ??
-      null;
+    const ia =
+    (finalMeta as any).intent_anchor ??
+    (finalMeta as any).intentAnchor ??
+    (ms as any)?.intent_anchor ??
+    (ms as any)?.intentAnchor ??
+    (memoryState as any)?.intent_anchor ??
+    (memoryState as any)?.intentAnchor ??
+    (mergedBaseMeta as any)?.intent_anchor ??
+    null;
 
-    const ia = normalizeIntentAnchor(iaRaw);
+  (finalMeta as any).intent_anchor = ia;
+  (finalMeta as any).intentAnchor = ia;
 
-    (finalMeta as any).intent_anchor = ia;
-    (finalMeta as any).intentAnchor = ia;
-
-    (finalMeta as any).intent_anchor_key =
-      ia && typeof ia.key === 'string' && ia.key.trim().length > 0
-        ? ia.key.trim()
-        : null;
+  (finalMeta as any).intent_anchor_key =
+    ia && typeof ia.key === 'string' && ia.key.trim().length > 0 ? ia.key.trim() : null;
   }
-
   // unified.depth.stage / unified.q.current 同期（S4除去済みの finalMeta に合わせる）
   if ((finalMeta as any).unified) {
     const unifiedAny = (finalMeta as any).unified || {};
@@ -2086,8 +2142,12 @@ false;
 //    （laneKey を downstream に必ず流す）
 // --------------------------------------------------
 (meta as any).extra = (meta as any).extra || {};
+
+const prevBridge = (meta as any).extra.intentBridge || {};
+
+// ✅ intentBridge 入力を meta.extra.intentBridge に集約（laneKey/focusLabel は落とさない）
 (meta as any).extra.intentBridge = {
-  ...(meta as any).extra.intentBridge,
+  ...prevBridge,
 
   // intentBridge が見る入力
   deepenOk: deepenOkNow,
@@ -2096,17 +2156,13 @@ false;
 };
 
 
-    const bridge = applyIntentBridge({
-      depthStage: typeof depthStageNow === 'string' ? depthStageNow : null,
-      phase: typeof phaseNow === 'string' ? phaseNow : null,
-      deepenOk: typeof deepenOkNow === 'boolean' ? deepenOkNow : undefined,
-      fixedNorthKey: typeof fixedNorthKeyNow === 'string' ? fixedNorthKeyNow : null,
-      userText: text, // orchestrator の入力テキスト（userTextをログに出さない方針は intentBridge 側が担保）
-
-      // ✅ Lane 判定の入力（渡せない場合でも false 扱いで保守）
-      hasCore: !!hasCoreNow,
-      declarationOk: !!declarationOkNow,
-    });
+// ❌ ここで applyIntentBridge を “もう一回” 呼ぶと、hasFocus=false 側のログが出て
+//    laneKey が IDEA_BAND に戻るケースが発生する（今回の現象）
+//
+// ✅ すでに上（2105〜2113）で meta.extra.intentBridge に入力を集約済みで、
+//    さらに earlier block（1596 側）で laneKey も付与されている前提なので、
+//    ここでは “読むだけ” にする。
+const bridge = (meta as any)?.extra?.intentBridge ?? null;
 
     // meta.extra / finalMeta.extra に載せる（上書きはしない）
     {

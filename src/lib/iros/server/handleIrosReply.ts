@@ -19,6 +19,18 @@ import { buildTurnContext } from './handleIrosReply.context';
 import { runOrchestratorTurn } from './handleIrosReply.orchestrator';
 import { postProcessReply } from './handleIrosReply.postprocess';
 import { extractSlotsForRephrase, rephraseSlotsFinal } from '@/lib/iros/language/rephraseEngine';
+import {
+  loadConversationHistory,
+  sanitizeHistoryForTurn,
+  buildHistoryForTurn,
+} from './handleIrosReply.history';
+import {
+  isMicroTurn,
+  shouldBypassMicroGate,
+  shouldBypassMicroGateByHistory,
+} from './handleIrosReply.micro';
+import { isGoalRecallQ, extractGoalFromHistory } from './handleIrosReply.goalRecall';
+
 
 import { runGenericRecallGate } from '@/lib/iros/server/gates/genericRecallGate';
 import { writeIT } from '@/lib/iros/language/itWriter';
@@ -61,6 +73,7 @@ import { loadLatestGoalByUserCode } from '@/lib/iros/server/loadLatestGoalByUser
 // - route.ts が叩く直前に FINAL を通すのが最終理想だが、
 //   handleIrosReply 側では「metaに入口3通りを刻む」までをやる
 import { probeLlmGate, writeLlmGateToMeta, logLlmGate } from './llmGate';
+
 
 /* =========================
    Types
@@ -233,533 +246,6 @@ function shouldDropFromAchievementSummary(s: unknown): boolean {
     return true;
 
   return false;
-}
-
-/* =========================
-   History loader (single source of truth)
-========================= */
-
-async function loadConversationHistory(
-  supabaseClient: any,
-  userCode: string,
-  conversationId: string,
-  limit = 30,
-): Promise<unknown[]> {
-  const cidRaw = String(conversationId ?? '').trim();
-  const ucode = String(userCode ?? '').trim();
-  if (!cidRaw || !ucode) return [];
-
-  const isUuidLike = (v: string) =>
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
-
-  try {
-    // ✅ conversation_id(uuid) を確定する
-    // - cidRaw が uuid ならそのまま
-    // - uuid でなければ iros_conversations(user_code, conversation_key) から id(uuid) を引く
-    let conversationUuid = cidRaw;
-
-    if (!isUuidLike(cidRaw)) {
-      const { data: conv, error: convErr } = await supabaseClient
-        .from('iros_conversations')
-        .select('id')
-        .eq('user_code', ucode)
-        .eq('conversation_key', cidRaw)
-        .limit(1)
-        .maybeSingle();
-
-      if (convErr) {
-        console.error('[IROS/History] resolve conversation uuid failed', {
-          conversationId: cidRaw,
-          userCode: ucode,
-          error: convErr,
-        });
-        return [];
-      }
-
-      if (!conv?.id) {
-        // conversation がまだ無い（= messages も無い）なら空でOK
-        return [];
-      }
-
-      conversationUuid = String(conv.id);
-    }
-
-    // ✅ iros_messages は uuid で引く（ここで 22P02 を潰す）
-    const { data, error } = await supabaseClient
-      .from('iros_messages')
-      .select('role, text, content, meta, created_at')
-      .eq('conversation_id', conversationUuid)
-      .order('created_at', { ascending: false })
-      .limit(limit);
-
-    if (error) {
-      console.error('[IROS/History] load failed', {
-        conversationId: cidRaw,
-        conversationUuid,
-        error,
-      });
-      return [];
-    }
-
-    const rows = (data ?? []).slice().reverse();
-
-    const pickTextFromRow = (m: any): string => {
-      // 1) content が文字列なら最優先
-      if (typeof m?.content === 'string' && m.content.trim().length > 0) return m.content.trim();
-
-      // 2) text が文字列なら採用
-      if (typeof m?.text === 'string' && m.text.trim().length > 0) return m.text.trim();
-
-      // 3) content が object の場合：安全に “中の文字列候補” だけ拾う（stringifyは禁止）
-      const c = m?.content;
-      if (c && typeof c === 'object') {
-        const cText =
-          (typeof (c as any)?.text === 'string' && (c as any).text.trim().length > 0
-            ? (c as any).text
-            : null) ??
-          (typeof (c as any)?.content === 'string' && (c as any).content.trim().length > 0
-            ? (c as any).content
-            : null) ??
-          null;
-
-        if (cText) return String(cText).trim();
-      }
-
-      return '';
-    };
-
-    const history = rows
-      .map((m: any) => {
-        const text = pickTextFromRow(m);
-        return {
-          role: m?.role,
-          text, // ✅ sanitizeHistoryForTurn が最優先で見る正本
-          meta: m?.meta && typeof m.meta === 'object' ? m.meta : undefined,
-        };
-      })
-      .filter((x: any) => typeof x?.text === 'string' && x.text.trim().length > 0);
-
-    console.log('[IROS/History] loaded', {
-      conversationId: cidRaw,
-      conversationUuid,
-      limit,
-      returned: history.length,
-      metaSample: (history as any[]).find((x) => x?.meta)?.meta ? 'has_meta' : 'no_meta',
-    });
-
-    return history;
-  } catch (e) {
-    console.error('[IROS/History] unexpected', { conversationId: cidRaw, error: e });
-    return [];
-  }
-}
-
-
-/**
- * ✅ this turn の history を 1回だけ組み立てる（この関数の返り値を全段に渡す）
- * - 返す前に sanitize して [object Object] 混入を根絶する
- */
-function sanitizeHistoryForTurn(history: unknown[], maxTotal: number): unknown[] {
-  if (!Array.isArray(history) || history.length === 0) return [];
-
-  const out: any[] = [];
-
-  for (const m of history) {
-    if (m == null || typeof m !== 'object') continue;
-
-    const roleRaw = (m as any)?.role;
-    const role = typeof roleRaw === 'string' ? roleRaw.toLowerCase().trim() : '';
-
-    // role が壊れてる行は落とす（orchestrator 側の filter を安定させる）
-    if (!role || (role !== 'user' && role !== 'assistant' && role !== 'system')) continue;
-
-    const v = (m as any)?.text ?? (m as any)?.content ?? null;
-
-    // ✅ 文字列以外は絶対に stringify しない（[object Object] を作らない）
-    if (typeof v !== 'string') continue;
-
-    const text = v.trim();
-    if (!text) continue;
-
-    // text を正に統一（content が object の可能性を潰す）
-    const mm: any = { ...(m as any), role, text };
-
-    // content が残っていても良いが、誤混入を防ぐなら消す
-    if (typeof mm.content !== 'string') delete mm.content;
-
-    out.push(mm);
-    if (out.length >= maxTotal) break;
-  }
-
-  return out;
-}
-
-async function buildHistoryForTurn(args: {
-  supabaseClient: any;
-  conversationId: string;
-  userCode: string;
-  providedHistory?: unknown[] | null;
-  includeCrossConversation?: boolean;
-  baseLimit?: number;
-  crossLimit?: number;
-  maxTotal?: number;
-}): Promise<unknown[]> {
-  const {
-    supabaseClient,
-    conversationId,
-    userCode,
-    providedHistory,
-    includeCrossConversation = true,
-    baseLimit = 30,
-    crossLimit = 60,
-    maxTotal = 80,
-  } = args;
-
-  // 1) base
-  let turnHistory: unknown[] = Array.isArray(providedHistory)
-    ? providedHistory
-    : await loadConversationHistory(supabaseClient, userCode, conversationId, baseLimit);
-
-
-  // 2) cross-conversation
-  if (includeCrossConversation) {
-    try {
-// ✅ Phase1: 同一conversation の直近を “まず流す”
-// - 旧設計では excludeConversationId を渡して同一conversationを除外していた
-// - いまは「会話が成立すること」が最優先なので、まず除外しない
-// - 汚染対策（crossConvUserOnly / silence / hidden / banned assistant）は HistoryX 側で維持される
-const dbHistory = await loadRecentHistoryAcrossConversations({
-  supabase: supabaseClient,
-  userCode,
-
-  limit: 120,
-
-  // ✅ 同一conversationの識別は渡す（ログ・将来拡張にも使える）
-  excludeConversationId: conversationId,
-
-  // ✅ 最速の違和感修正：同一conversationは混ぜない（重複を断つ）
-  includeSameConversation: true,
-
-
-  // sameConversationLimit は使われないが、残しても害はない
-  sameConversationLimit: 0,
-
-  crossConversationLimit: 60,
-});
-
-
-
-      turnHistory = mergeHistoryForTurn({
-        dbHistory,
-        turnHistory: turnHistory as any[],
-        maxTotal,
-      });
-
-      console.log('[IROS][HistoryX] merged', {
-        userCode,
-        dbCount: dbHistory.length,
-        mergedCount: Array.isArray(turnHistory) ? turnHistory.length : -1,
-      });
-    } catch (e) {
-      console.warn('[IROS][HistoryX] merge failed', e);
-    }
-  }
-
-  // ✅ 最後に sanitize（ここが本修正）
-  turnHistory = sanitizeHistoryForTurn(turnHistory, maxTotal);
-
-  return turnHistory;
-}
-
-/* =========================
-   Micro bypass / detect
-========================= */
-
-function shouldBypassMicroGate(userText: string): boolean {
-  const s = (userText ?? '').trim();
-  if (!s) return false;
-
-  const keywords = [
-    '覚えて',
-    '覚えてない',
-    'なんでしたっけ',
-    '何でしたっけ',
-    'さっき',
-    '先ほど',
-    '前に',
-    '目標',
-    'どれだっけ',
-    'どっちだっけ',
-    '言った',
-  ];
-
-  return keywords.some((k) => s.includes(k));
-}
-
-/**
- * 相づち系（そうですね/はい/うん等）が、
- * 直前の assistant 発話（質問・続き要求）に対する返答なら micro を避ける。
- */
-function shouldBypassMicroGateByHistory(args: {
-  userText: string;
-  history: any[] | null | undefined;
-}): boolean {
-  const s = (args.userText ?? '').trim();
-  if (!s) return false;
-
-  // ✅ 相づち（必要なら増やす）
-  const ack = new Set([
-    'そう',
-    'そうだね',
-    'そうですね',
-    'うん',
-    'うんうん',
-    'はい',
-    '了解',
-    'なるほど',
-    'たしかに',
-    'よし',
-    'ok',
-    'おーけー',
-  ]);
-
-  const core = normalizeTailPunct(s)
-    .replace(/[?？]/g, '')
-    .trim()
-    .toLowerCase();
-
-  if (!ack.has(core)) return false;
-
-  const h = Array.isArray(args.history) ? args.history : [];
-  if (h.length <= 0) return false;
-
-  const pickText = (v: any): string => {
-    if (typeof v === 'string') return v;
-    if (v == null) return '';
-    if (Array.isArray(v)) {
-      return v
-        .map((p) => {
-          if (typeof p === 'string') return p;
-          if (p?.type === 'text' && typeof p?.text === 'string') return p.text;
-          if (typeof p?.text === 'string') return p.text;
-          if (typeof p?.content === 'string') return p.content;
-          return '';
-        })
-        .filter(Boolean)
-        .join(' ');
-    }
-    if (typeof v === 'object') {
-      if (typeof v.text === 'string') return v.text;
-      if (typeof v.content === 'string') return v.content;
-      if (typeof v.message === 'string') return v.message;
-    }
-    return '';
-  };
-
-  // 直前の assistant 発話を拾う（content/text/message 全対応）
-  let lastA: string | null = null;
-  for (let i = h.length - 1; i >= 0; i--) {
-    const m = h[i];
-    const role = String(m?.role ?? '').toLowerCase();
-    if (role === 'assistant') {
-      const t = pickText(m?.content ?? m?.text ?? m?.message ?? null).trim();
-      if (t) lastA = t;
-      break;
-    }
-  }
-  if (!lastA) return false;
-
-  // ✅「続きが来る前提」なら bypass（質問/選択/続き要求）
-  if (/[?？]$/.test(lastA)) return true;
-  if (/(どれ|どこ|いつ|なに|何|どう|なぜ|どうして|教えて|選んで|どっち)/.test(lastA)) return true;
-  if (/(話して|聞かせて|続けて|もう少し|そのまま|どこからでも)/.test(lastA)) return true;
-
-  return false;
-}
-
-function normalizeTailPunct(s: string): string {
-  return (s ?? '').trim().replace(/[！!。．…]+$/g, '').trim();
-}
-
-function buildMicroCore(raw: string) {
-  const rawTrim = (raw ?? '').trim();
-  const hasQuestion = /[?？]$/.test(rawTrim);
-
-  const core = normalizeTailPunct(rawTrim)
-    .replace(/[?？]/g, '')
-    .replace(/\s+/g, '')
-    .trim();
-
-  return { rawTrim, hasQuestion, core, len: core.length };
-}
-
-function isMicroTurn(raw: string): boolean {
-  const { rawTrim, core, len } = buildMicroCore(raw);
-  if (!rawTrim) return false;
-
-  // ✅ 単語（1トークン）micro は「単語っぽい」ものだけに限定する
-  // - 無スペースでも「文」になっている入力（助詞/数字入り）は除外
-  // - 長い無スペース文の誤爆を止めるため len 上限も必須
-  const isSingleToken =
-    rawTrim.length > 0 &&
-    !/\s/.test(rawTrim) &&
-    /^[\p{L}\p{N}ー・]+$/u.test(rawTrim); // 日本語/英数/長音/中点（句読点などは除外）
-
-  const hasDigit = /[0-9０-９]/.test(rawTrim);
-
-  // 「文」になりやすい助詞/接続（最小セット）
-  const hasSentenceParticle = /[がをにへでとものは]|から|まで|より|ので|のに/.test(rawTrim);
-
-  if (isSingleToken && len >= 2 && len <= 10 && !hasDigit && !hasSentenceParticle) {
-    return true;
-  }
-
-  // 英数混じりは micro にしない（誤爆防止）
-  if (/[A-Za-z0-9]/.test(core)) return false;
-
-  // 疑問語は micro では扱わない（通常フローへ）
-  if (/(何|なに|どこ|いつ|だれ|誰|なぜ|どうして|どうやって|いくら|何色|色)/.test(core)) {
-    return false;
-  }
-
-  // 長すぎ/短すぎは micro では扱わない
-  if (len < 2 || len > 10) return false;
-
-  // 既存：短い「動詞系 micro」
-  return /^(どうする|やる|やっちゃう|いく|いける|どうしよ|どうしよう|行く|行ける)$/.test(core);
-}
-
-
-/* =========================
-   Goal recall helpers
-========================= */
-
-function isGoalRecallQ(text: string): boolean {
-  const s = String(text ?? '').trim();
-  return /^(?:今日の)?(?:目標|ゴール)\s*(?:覚えてる|覚えてる\?|覚えてる？|なんだっけ|なんだっけ\?|なんだっけ？|何だっけ|何だっけ\?|何だっけ？|って何|は何|教えて)/.test(
-    s,
-  );
-}
-
-const norm = (v: any): string => {
-  if (v == null) return '';
-
-  if (Array.isArray(v)) {
-    const parts = v
-      .map((p) => {
-        if (typeof p === 'string') return p;
-        if (!p) return '';
-        if (typeof p === 'object') {
-          if (typeof (p as any).text === 'string') return (p as any).text;
-          if (typeof (p as any).content === 'string') return (p as any).content;
-          if (typeof (p as any).value === 'string') return (p as any).value;
-        }
-        return '';
-      })
-      .filter(Boolean)
-      .join(' ');
-    return parts.replace(/\s+/g, ' ').trim();
-  }
-
-  if (typeof v === 'string') return v.replace(/\s+/g, ' ').trim();
-
-  if (typeof v === 'object') {
-    const t =
-      (typeof (v as any).text === 'string' && (v as any).text) ||
-      (typeof (v as any).content === 'string' && (v as any).content) ||
-      (typeof (v as any).message === 'string' && (v as any).message) ||
-      '';
-    return String(t).replace(/\s+/g, ' ').trim();
-  }
-
-  return String(v).replace(/\s+/g, ' ').trim();
-};
-
-function extractGoalFromHistory(history: any[]): string | null {
-  const arr = Array.isArray(history) ? history : [];
-
-  const normText = (v: unknown) => String(v ?? '').replace(/\s+/g, ' ').trim();
-
-  const toText = (v: any): string => {
-    if (typeof v === 'string') return v;
-    if (v == null) return '';
-    if (Array.isArray(v)) {
-      return v
-        .map((p) => {
-          if (typeof p === 'string') return p;
-          if (p?.type === 'text' && typeof p?.text === 'string') return p.text;
-          if (typeof p?.text === 'string') return p.text;
-          if (typeof p?.content === 'string') return p.content;
-          return '';
-        })
-        .filter(Boolean)
-        .join(' ');
-    }
-    if (typeof v === 'object') {
-      if (typeof v.text === 'string') return v.text;
-      if (typeof v.content === 'string') return v.content;
-    }
-    return '';
-  };
-
-  const getText = (m: any) =>
-    normText(toText(m?.content ?? m?.text ?? (m as any)?.message ?? ''));
-
-  const cleanup = (raw: unknown): string | null => {
-    let out = normText(raw);
-    if (!out) return null;
-
-    if (out === '[object Object]' || out.includes('[object Object]')) return null;
-
-    out = out.replace(/^今日の目標は[「『"]?/g, '');
-    out = out.replace(/[」』"]?です[。\.！!]?$/g, '');
-
-    out = out.replace(/^[\s「『"'\(\[\{、,，。．・:：\-—–]+/g, '');
-    out = out.replace(/[\s」』"'\)\]\}、,，。．・]+$/g, '');
-
-    out = out.trim();
-    if (!out) return null;
-    if (out.length <= 2) return null;
-    return out;
-  };
-
-  const isGoalRecallQuestion = (s: string) =>
-    /(今日の目標|目標|ゴール|goal).*(覚えてる|なんだっけ|何\?|何？|教えて)/i.test(s) ||
-    /^(今日の目標|目標|ゴール|goal)\s*(は|って|を)?\s*(\?|？)$/.test(s);
-
-  const isGoalStatement = (s: string) => {
-    if (isGoalRecallQuestion(s)) return false;
-    if (
-      /^(今日は|今日|本日)/.test(s) &&
-      /(する|やる|直す|実装|確認|整理|調査|再現|通す|分割|移行|追加|削除|テスト)/.test(s)
-    ) {
-      return true;
-    }
-    if (/(今日の目標|目標|ゴール|goal)\s*(は|:|：)/i.test(s)) return true;
-    return false;
-  };
-
-  const fallback: string[] = [];
-
-  for (let i = arr.length - 1; i >= 0; i--) {
-    const m = arr[i];
-    const role = String(m?.role ?? '').toLowerCase();
-    if (role !== 'user') continue;
-
-    const t = getText(m);
-    if (!t) continue;
-
-    const cleaned = cleanup(t);
-    if (!cleaned) continue;
-
-    if (isGoalRecallQuestion(cleaned)) continue;
-    if (/\?$|？$/.test(cleaned)) continue;
-
-    if (isGoalStatement(cleaned)) return cleaned;
-    fallback.push(cleaned);
-  }
-
-  return fallback.length ? fallback[0] : null;
 }
 
 /* =========================
@@ -989,12 +475,39 @@ const microGenerate: MicroWriterGenerate = async (args) => {
 `.trim();
 
     // 1st try
-    const messages1: ChatMessage[] = [
+    let messages1: ChatMessage[] = [
       { role: 'system', content: `${baseSystem}\n\n${microWriterConstraints}`.trim() },
       { role: 'user', content: userPrompt },
     ];
 
+    // ✅ HistoryDigest v1（外から渡された場合のみ注入）
+    // - micro はここで digest を生成しない（生成元は本線側に固定）
+    // - 注入は systemPrompt の直後（systemの2本目）に入る
+    const digestMaybe = (args as any).historyDigestV1 ?? null;
+    let digestChars: number | null = null;
+    let hasDigest = false;
+    let hasAnchor = false;
+
+    if (digestMaybe) {
+      const { injectHistoryDigestV1 } = await import('@/lib/iros/history/historyDigestV1');
+      const inj = injectHistoryDigestV1({ messages: messages1 as any, digest: digestMaybe });
+      messages1 = inj.messages as any;
+      digestChars = inj.digestChars;
+      hasDigest = true;
+      hasAnchor = !!digestMaybe?.anchor?.key;
+    }
+
     const callLLM = async (messages: ChatMessage[], temperature: number) => {
+      // ✅ microでも “注入されたか” をログで監査できるようにする
+      console.log('[IROS/LLM][CALL_MICRO]', {
+        writer: 'micro',
+        hasDigest,
+        hasAnchor,
+        digestChars,
+        msgCount: messages.length,
+      });
+
+
       const out = await chatComplete({
         purpose: 'writer',
         model: IROS_MODEL,
@@ -1007,6 +520,7 @@ const microGenerate: MicroWriterGenerate = async (args) => {
       });
       return String(out ?? '').trim();
     };
+
 
     const judgeMicro = async (text: string) => {
       const t = String(text ?? '').trim();
@@ -1409,13 +923,44 @@ if (gatedGreeting?.ok) {
 }
     // ok=false / gate不成立はそのまま下へ
 
-    const bypassMicro =
-    shouldBypassMicroGate(text) ||
-    shouldBypassMicroGateByHistory({ userText: text, history });
+    // ✅ micro は最優先（context recall などで bypass させない）
+    const isMicroNow = isMicroTurn(text);
 
+    const bypassMicroRaw =
+      shouldBypassMicroGate(text) ||
+      shouldBypassMicroGateByHistory({ userText: text, history });
+
+    const bypassMicro = isMicroNow ? false : bypassMicroRaw;
 
     // ✅ Micro（独立ルート）
-    if (!bypassMicro && isMicroTurn(text)) {
+    if (!bypassMicro && isMicroNow) {
+      // ====== まず “そのターンの座標” を作る（Digest生成のため） ======
+      // - microが先に走る構造なので、ここで history/context を先に確保する
+      const historyForTurn = await buildHistoryForTurn({
+        supabaseClient: supabase,
+        conversationId,
+        userCode,
+        providedHistory: history ?? null,
+        includeCrossConversation: false,
+        baseLimit: 30,
+      });
+
+      const tc0 = nowNs();
+      const ctx0 = await (buildTurnContext as any)({
+        supabase,
+        conversationId,
+        userCode,
+        text,
+        mode,
+        traceId,
+        userProfile,
+        requestedStyle: style ?? null,
+        history: historyForTurn,
+        extra: extraLocal ?? null,
+      });
+      t.context_ms = msSince(tc0);
+
+      // ====== micro入力整形（既存ロジック維持） ======
       const name = userProfile?.user_call_name || 'あなた';
       const seed = `${conversationId}|${userCode}|${traceId ?? ''}|${Date.now()}`;
 
@@ -1426,46 +971,67 @@ if (gatedGreeting?.ok) {
         /^[\p{L}\p{N}ー・]+$/u.test(s0); // 日本語/英数/長音/中点（句読点などは除外）
 
       // ✅ 新憲法：MicroWriter に「内部指示（演習・メニュー）」を混ぜない
-      // - LLMは表現担当。指示文を渡すと「連想/場面」テンプレを生成し始める
-      // - MicroWriter 側で入力を短文化/抽出するが、ここでも汚染を作らない
       const microUserText = isSingleToken ? s0 : text;
 
+      // ====== HistoryDigest v1 を生成して micro に渡す ======
+      const { buildHistoryDigestV1 } = await import('@/lib/iros/history/historyDigestV1');
 
-      const mw = await runMicroWriter(microGenerate, {
-        name,
-        userText: microUserText,
-        seed,
-        traceId,
-        conversationId,
-        userCode,
+      // repeatSignal はここでは最小扱い（ctx0側で持っているならそれを優先）
+      const repeatSignal =
+        !!(ctx0 as any)?.repeatSignalSame ||
+        !!(ctx0 as any)?.repeat_signal ||
+        false;
+
+      // continuity は最小版（historyForTurn から取れるならそれを優先）
+      const lastUserCore =
+        String((ctx0 as any)?.continuity?.last_user_core ?? (ctx0 as any)?.lastUserCore ?? '').trim() ||
+        '';
+      const lastAssistantCore =
+        String((ctx0 as any)?.continuity?.last_assistant_core ?? (ctx0 as any)?.lastAssistantCore ?? '').trim() ||
+        '';
+
+      const digestV1 = buildHistoryDigestV1({
+        fixedNorth: { key: 'SUN', phrase: '成長 / 進化 / 希望 / 歓喜' },
+        metaAnchorKey: String((ctx0 as any)?.baseMetaForTurn?.intent_anchor_key ?? '').trim() || null,
+        memoryAnchorKey: String((ctx0 as any)?.memoryState?.intentAnchor ?? (ctx0 as any)?.intentAnchor ?? '').trim() || null,
+
+        qPrimary: (ctx0 as any)?.memoryState?.qPrimary ?? (ctx0 as any)?.qPrimary ?? 'Q3',
+        depthStage: (ctx0 as any)?.memoryState?.depthStage ?? (ctx0 as any)?.depthStage ?? 'F1',
+        phase: (ctx0 as any)?.memoryState?.phase ?? (ctx0 as any)?.phase ?? 'Inner',
+
+        situationTopic: String((ctx0 as any)?.situationTopic ?? 'その他・ライフ全般'),
+        situationSummary: String((ctx0 as any)?.situationSummary ?? '').slice(0, 120),
+
+        lastUserCore: lastUserCore.slice(0, 120),
+        lastAssistantCore: lastAssistantCore.slice(0, 120),
+        repeatSignal,
       });
+
+      const mw = await runMicroWriter(
+        microGenerate,
+        {
+          name,
+          userText: microUserText,
+          seed,
+          traceId,
+          conversationId,
+          userCode,
+
+          // ✅ 追加：microGenerate 側で注入する
+          historyDigestV1: digestV1,
+        } as any,
+      );
 
 
       // ✅ micro 成功 → このブロック内で完結して return（t1/ts/metaForSave を漏らさない）
       if (mw.ok) {
-        const historyForTurn = await buildHistoryForTurn({
-          supabaseClient: supabase,
-          conversationId,
-          userCode,
-          providedHistory: history ?? null,
-          includeCrossConversation: false,
-          baseLimit: 30,
-        });
+        // ここから先で必要なので、上で作ったものを再利用
+        const historyForTurn2 = historyForTurn;
+        const ctx = ctx0;
 
-        const tc = nowNs();
-        const ctx = await (buildTurnContext as any)({
-          supabase,
-          conversationId,
-          userCode,
-          text,
-          mode,
-          traceId,
-          userProfile,
-          requestedStyle: style ?? null,
-          history: historyForTurn,
-          extra: extraLocal ?? null,
-        });
-        t.context_ms = msSince(tc);
+        const tc = nowNs(); // 計測だけは維持（差し替えの最小化）
+        // ctx は既に作ってあるので再生成しない
+        t.context_ms += msSince(tc); // 0〜数ms程度、形だけ残す
 
         let metaForSave: any = {
           ...(ctx?.baseMetaForTurn ?? {}),
@@ -1474,7 +1040,6 @@ if (gatedGreeting?.ok) {
             style ??
             (userProfile as any)?.style ??
             'friendly',
-
           mode: 'light',
           microOnly: true,
 
@@ -1566,7 +1131,6 @@ if (gatedGreeting?.ok) {
       providedHistory: history ?? null,
       includeCrossConversation: true,
       baseLimit: 30,
-      crossLimit: 60,
       maxTotal: 80,
     });
 
@@ -1706,6 +1270,43 @@ if (rememberScope) {
       }
     }
 
+// ✅ Generic Recall 用：安全な文字列抽出（stringify しない）
+function normForRecall(v: any): string {
+  if (v == null) return '';
+
+  if (Array.isArray(v)) {
+    const parts = v
+      .map((p) => {
+        if (typeof p === 'string') return p;
+        if (!p) return '';
+        if (typeof p === 'object') {
+          if (typeof (p as any).text === 'string') return (p as any).text;
+          if (typeof (p as any).content === 'string') return (p as any).content;
+          if (typeof (p as any).value === 'string') return (p as any).value;
+          if (typeof (p as any).message === 'string') return (p as any).message;
+        }
+        return '';
+      })
+      .filter(Boolean)
+      .join(' ');
+    return parts.replace(/\s+/g, ' ').trim();
+  }
+
+  if (typeof v === 'string') return v.replace(/\s+/g, ' ').trim();
+
+  if (typeof v === 'object') {
+    const t =
+      (typeof (v as any).text === 'string' && (v as any).text) ||
+      (typeof (v as any).content === 'string' && (v as any).content) ||
+      (typeof (v as any).message === 'string' && (v as any).message) ||
+      '';
+    return String(t).replace(/\s+/g, ' ').trim();
+  }
+
+  return String(v).replace(/\s+/g, ' ').trim();
+}
+
+
     /* ---------------------------
        1.3) Generic Recall Gate（会話の糊）
     ---------------------------- */
@@ -1716,7 +1317,7 @@ if (rememberScope) {
         history: (historyForTurn as any[])
           .filter((m) => String(m?.role ?? '').toLowerCase() === 'user')
           .filter((m) => {
-            const s = norm(m?.content ?? m?.text ?? (m as any)?.message ?? '');
+            const s = normForRecall(m?.content ?? m?.text ?? (m as any)?.message ?? '');
             if (!s) return false;
             if (/^たぶんこれのことかな：/.test(s)) return false;
             if (/^たぶんこれのことかな：「/.test(s)) return false;
@@ -2080,47 +1681,125 @@ try {
   const mf: any = (out as any)?.metaForSave;
   if (mf && typeof mf === 'object') {
     if (!mf.extra || typeof mf.extra !== 'object') mf.extra = {};
+
+    // 既存：flow
     (mf.extra as any).flowTape = tape ?? null;
     (mf.extra as any).flowDigest = exAny.flowDigest ?? null;
+
+    // ✅ 追加：historyDigestV1（無ければこの場で作って保存）
+    // - 生成ポイントを “ここ1箇所” に固定（重複生成しない）
+    // - 既に入ってるなら触らない
+    if (!(mf.extra as any).historyDigestV1) {
+      try {
+        const { buildHistoryDigestV1 } = await import('@/lib/iros/history/historyDigestV1');
+
+        const lastUserCore =
+          String((ctx as any)?.continuity?.last_user_core ?? (ctx as any)?.lastUserCore ?? '').trim();
+        const lastAssistantCore =
+          String((ctx as any)?.continuity?.last_assistant_core ?? (ctx as any)?.lastAssistantCore ?? '').trim();
+
+        const repeatSignal =
+          !!(ctx as any)?.repeatSignalSame ||
+          !!(ctx as any)?.repeat_signal ||
+          false;
+
+        (mf.extra as any).historyDigestV1 = buildHistoryDigestV1({
+          fixedNorth: { key: 'SUN', phrase: '成長 / 進化 / 希望 / 歓喜' },
+          metaAnchorKey: String((ctx as any)?.baseMetaForTurn?.intent_anchor_key ?? '').trim() || null,
+          memoryAnchorKey: String((ctx as any)?.memoryState?.intentAnchor ?? (ctx as any)?.intentAnchor ?? '').trim() || null,
+
+          qPrimary: (ctx as any)?.memoryState?.qPrimary ?? (ctx as any)?.qPrimary ?? 'Q3',
+          depthStage: (ctx as any)?.memoryState?.depthStage ?? (ctx as any)?.depthStage ?? 'F1',
+          phase: (ctx as any)?.memoryState?.phase ?? (ctx as any)?.phase ?? 'Inner',
+
+          situationTopic: String((ctx as any)?.situationTopic ?? 'その他・ライフ全般'),
+          situationSummary: String((ctx as any)?.situationSummary ?? '').slice(0, 120),
+
+          lastUserCore: String(lastUserCore ?? '').slice(0, 120),
+          lastAssistantCore: String(lastAssistantCore ?? '').slice(0, 120),
+          repeatSignal,
+        });
+      } catch (e) {
+        // digest は非必須：失敗しても会話を止めない
+      }
+    }
   }
 }
 
-// 4) ctxPack にも “読む側の入口” を作る（rephraseEngine 側が拾える）
-//    NOTE: exAny は metaForSave.extra だが、ctxPack が未初期化のケースがあるため必ず用意する
 
-// エラーハンドリングとログ出力を追加
-console.log("[DEBUG] Before initializing ctxPack:", exAny.ctxPack);
+    // ---- ctxPack.flow (minimal, with prev from history) ----
+    // 方針：
+    // - 依存/重い処理は増やさない
+    // - “前回の flow.at” だけ history から拾って prevAtIso / ageSec を埋める
+    // - sessionBreak はここでは決めない（false 固定。閾値設計は後で）
+    const nowIso2 = new Date().toISOString();
 
-if (!exAny.ctxPack || typeof exAny.ctxPack !== 'object') {
-  console.warn("[WARNING] Initializing exAny.ctxPack as an empty object...");
-  exAny.ctxPack = {};  // ctxPackの初期化処理
-}
+    // ✅ ctxPack を必ず用意（exAny という名前は使わない＝既存と衝突回避）
+    const mf2: any = (out as any)?.metaForSave ?? null;
+    if (!mf2 || typeof mf2 !== 'object') {
+      throw new Error('CTXPACK stamp: metaForSave missing');
+    }
+    if (!mf2.extra || typeof mf2.extra !== 'object') {
+      mf2.extra = {};
+    }
+    const extra2: any = mf2.extra;
+    if (!extra2.ctxPack || typeof extra2.ctxPack !== 'object') {
+      extra2.ctxPack = {};
+    }
 
-console.log("[DEBUG] After initializing ctxPack:", exAny.ctxPack);
+    // history から「直近の ctxPack.flow.at」を拾う
+    let prevAtIso: string | null = null;
+    const hft = Array.isArray(historyForTurn) ? (historyForTurn as any[]) : [];
+    for (let i = hft.length - 1; i >= 0; i--) {
+      const m = hft[i];
+      const flowAt =
+        (m as any)?.meta?.extra?.ctxPack?.flow?.at ??
+        (m as any)?.meta?.ctxPack?.flow?.at ??
+        null;
+      if (typeof flowAt === 'string' && flowAt.trim().length > 0) {
+        prevAtIso = flowAt.trim();
+        break;
+      }
+    }
 
-// ---- DEBUG: ctxPack / flow stamp ----
-console.log('[DEBUG] Before initializing ctxPack:', exAny.ctxPack);
+    let ageSec: number | null = null;
+    if (prevAtIso) {
+      const prevMs = Date.parse(prevAtIso);
+      const nowMs = Date.parse(nowIso2);
+      if (!Number.isNaN(prevMs) && !Number.isNaN(nowMs)) {
+        const d = Math.floor((nowMs - prevMs) / 1000);
+        ageSec = d >= 0 ? d : 0;
+      }
+    }
 
-exAny.ctxPack = exAny.ctxPack || {}; // 初期化（既にあればそのまま）
+    // ctxPack にも historyForWriter を同期しておく（stamp 時点で hfw_len が取れるように）
+    const hfw = Array.isArray((out.metaForSave as any)?.extra?.historyForWriter)
+      ? (out.metaForSave as any).extra.historyForWriter
+      : [];
 
-console.log('[DEBUG] After initializing ctxPack:', exAny.ctxPack);
+    if ((extra2.ctxPack as any).historyForWriter == null && hfw.length) {
+      (extra2.ctxPack as any).historyForWriter = hfw;
+    }
 
-// ※ここは ctxPack ではなく「ctxPack.flow」を見ている
-console.log('[DEBUG] Before assigning flow to ctxPack.flow:', exAny.ctxPack.flow);
+    (extra2.ctxPack as any).flow = {
+      at: nowIso2,
+      prevAtIso,
+      ageSec,
+      sessionBreak: false,
+      fresh: true,
+    };
 
-// （あなたの既存の prevFlow / prevAtIso / ageSec / sessionBreak 算出コードはこの直後にそのまま置く）
-
-// flow をセット（ここも既存コードのままでOK）
-exAny.ctxPack.flow = {
-  at: new Date().toISOString(),
-  prevAtIso: null,
-  ageSec: null,
-  sessionBreak: false,
-  fresh: true,
-};
-
-console.log('[DEBUG] After assigning flow to ctxPack.flow:', exAny.ctxPack.flow);
-
+    console.log('[IROS][CTXPACK] stamped', {
+      hasCtxPack: !!extra2.ctxPack,
+      prevAtIso,
+      ageSec,
+      flowAt: nowIso2,
+      ctxPackKeys: extra2.ctxPack ? Object.keys(extra2.ctxPack as any) : null,
+      hfw_len: Array.isArray((extra2.ctxPack as any)?.historyForWriter)
+        ? (extra2.ctxPack as any).historyForWriter.length
+        : null,
+      hfw_src_len: hfw.length,
+    });
 
   } catch (e) {
     // Flow は非必須：失敗しても会話を止めない
@@ -2530,13 +2209,6 @@ try {
         return true; // デフォルトは許可（false のときだけ止める）
       })();
 
-      // ✅ “空扱い” 判定：
-      // - bodyNow が空 / dots-only
-      // - または internalMarkersOnly（raw>0 かつ cleaned=0）
-      //
-      // ✅ 重要：seed があるのに本文が空なだけの状態は “緊急” ではない
-      // → seed-only（本文未生成）として writer を走らせ、流れ生成を優先する
-
       const hasSlotsLocal =
         Array.isArray((out.metaForSave as any)?.slotPlan) &&
         (out.metaForSave as any).slotPlan.length > 0;
@@ -2547,30 +2219,20 @@ try {
         slotTextRawLen > 0 &&
         slotTextCleanedLen === 0;
 
-      const hasSeedText =
-        Number.isFinite(slotTextCleanedLen) && slotTextCleanedLen > 0;
+      const hasSeedText = Number.isFinite(slotTextCleanedLen) && slotTextCleanedLen > 0;
 
-      // ✅ dots-only（'…' / '……' / '...'）も “本文未生成” 扱いに含める
-      // - これが無いと bodyNow='……' の瞬間に writer/blocks が走らず “……” が残る
       const bodyEmptyLike = !bodyNow || isDotsOnly(bodyNow) || internalMarkersOnly;
 
       // ✅ 緊急(emptyLike) と seed-only(本文未生成) を分離
-      // - seed があるなら emptyLikeNow にはしない（緊急計に渡さない）
       const seedOnlyNow = bodyEmptyLike && hasSeedText;
       const emptyLikeNow = bodyEmptyLike && !hasSeedText;
 
-      // ✅ 走らせる条件：
-      // - SCAFFOLD または FINAL
-      // - seed-only または emptyLike
-      // - blocks が無い（len>0 のときだけ “ある” 扱い）
-      // - allowLLM_final が false なら触らない
       const shouldRunWriter =
         (policy === 'SCAFFOLD' || policy === 'FINAL') &&
         (seedOnlyNow || emptyLikeNow) &&
         !alreadyHasBlocks &&
         allowLLM_final_local !== false;
 
-      // ✅ 追跡用（ENTER）
       if (seedOnlyNow || emptyLikeNow) {
         console.log('[IROS/rephraseBridge][ENTER]', {
           conversationId: _conversationId,
@@ -2589,7 +2251,6 @@ try {
         });
       }
 
-
       if (shouldRunWriter) {
         const extracted = extractSlotsForRephrase({
           meta: out.metaForSave,
@@ -2602,77 +2263,83 @@ try {
           orch: { framePlan: (out.metaForSave as any)?.framePlan ?? null },
         });
 
-        const model = String(
-          process.env.IROS_REPHRASE_FINAL_MODEL ??
-          process.env.IROS_MODEL ??
-          'gpt-4o'
-        ).trim();
+        const model = String(process.env.IROS_REPHRASE_FINAL_MODEL ?? process.env.IROS_MODEL ?? 'gpt-4o').trim();
 
-        const rr = await rephraseSlotsFinal(extracted, {
-          model,
-          temperature: 0.7,
-          maxLinesHint: 8,
-          userText: typeof text === 'string' ? text : null,
-          userContext: (() => {
-            const turns: Array<{ role: 'user' | 'assistant'; content: string }> = Array.isArray(
-              (out.metaForSave as any)?.extra?.historyForWriter,
-            )
-              ? (out.metaForSave as any).extra.historyForWriter
-                  .map((m: any) => ({
-                    role: m?.role,
-                    content: m?.content ?? m?.text ?? '',
-                  }))
-                  .filter(
-                    (m: any) =>
-                      (m?.role === 'user' || m?.role === 'assistant') &&
-                      String(m?.content ?? '').trim().length > 0,
-                  )
-              : [];
+        const slotPlanPolicy =
+          String((out.metaForSave as any)?.framePlan?.slotPlanPolicy ?? '').trim().toUpperCase() || null;
 
-            // ✅ turns/chat/messages/history/historyText を作らない（多重注入を止める）
-            return {
+          const rr = await rephraseSlotsFinal(extracted, {
+            model,
+            temperature: 0.7,
+            maxLinesHint: 8,
+            userText: typeof text === 'string' ? text : null,
+
+            // ✅ トップレベル：最低限（重複しない）
+            inputKind: (ctx as any)?.inputKind ?? null,
+
+            // ✅ debug は 1回だけ（ここでまとめる）
+            debug: {
+              traceId: (ctx as any)?.traceId ?? (out.metaForSave as any)?.traceId ?? null,
               conversationId: _conversationId ?? null,
               userCode: _userCode ?? null,
+              slotPlanPolicy,
+              renderEngine: true,
               inputKind: (ctx as any)?.inputKind ?? null,
+            } as any,
 
-              // ✅ writer側は historyForWriter を拾えば十分
-              historyForWriter: turns,
-              ctxPack: {
-                ...(((out.metaForSave as any)?.extra?.ctxPack ?? null) as any),
+            userContext: (() => {
+              const turns: Array<{ role: 'user' | 'assistant'; content: string }> = Array.isArray(
+                (out.metaForSave as any)?.extra?.historyForWriter,
+              )
+                ? (out.metaForSave as any).extra.historyForWriter
+                    .map((m: any) => ({
+                      role: m?.role,
+                      content: m?.content ?? m?.text ?? '',
+                    }))
+                    .filter(
+                      (m: any) =>
+                        (m?.role === 'user' || m?.role === 'assistant') &&
+                        String(m?.content ?? '').trim().length > 0,
+                    )
+                : [];
+
+              // ✅ metaの参照元を補強（out.metaForSave.meta.* に居るケースがある）
+              const metaRoot = (out.metaForSave as any)?.meta ?? null;
+
+              return {
+                conversationId: _conversationId ?? null,
+                userCode: _userCode ?? null,
+                traceId: (ctx as any)?.traceId ?? (out.metaForSave as any)?.traceId ?? null,
+                inputKind: (ctx as any)?.inputKind ?? null,
+
                 historyForWriter: turns,
-              },
+                ctxPack: {
+                  ...(((out.metaForSave as any)?.extra?.ctxPack ?? null) as any),
+                  historyForWriter: turns,
+                  slotPlanPolicy,
+                },
 
-              flowDigest: (out.metaForSave as any)?.extra?.flowDigest ?? null,
-              flowTape: (out.metaForSave as any)?.extra?.flowTape ?? null,
+                slotPlanPolicy,
 
-              meta: {
-                q: (out.metaForSave as any)?.q ?? null,
-                depth: (out.metaForSave as any)?.depth ?? null,
-                phase: (out.metaForSave as any)?.phase ?? null,
-                layer: (out.metaForSave as any)?.intentLayer ?? null,
-                renderMode: (out.metaForSave as any)?.renderMode ?? null,
-                slotPlanPolicy: String((out.metaForSave as any)?.framePlan?.slotPlanPolicy ?? '').toUpperCase(),
-              },
-            };
-          })(),
+                flowDigest: (out.metaForSave as any)?.extra?.flowDigest ?? null,
+                flowTape: (out.metaForSave as any)?.extra?.flowTape ?? null,
 
-          inputKind: (ctx as any)?.inputKind ?? null,
-          debug: {
-            traceId: (ctx as any)?.traceId ?? null,
-            conversationId: _conversationId ?? null,
-            userCode: _userCode ?? null,
-            renderEngine: true,
-            inputKind: (ctx as any)?.inputKind ?? null,
-          },
-        });
+                meta: {
+                  q: (out.metaForSave as any)?.q ?? metaRoot?.q ?? null,
+                  depth: (out.metaForSave as any)?.depth ?? metaRoot?.depth ?? null,
+                  phase: (out.metaForSave as any)?.phase ?? metaRoot?.phase ?? null,
+                  layer: (out.metaForSave as any)?.intentLayer ?? metaRoot?.intentLayer ?? null,
+                  renderMode: (out.metaForSave as any)?.renderMode ?? metaRoot?.renderMode ?? null,
+                  slotPlanPolicy,
+                },
+              };
+            })(),
+          });
 
         if (rr && rr.ok) {
           const mx = (rr as any)?.meta?.extra ?? {};
           const blocksCandidate =
-            (rr as any)?.rephraseBlocks ??
-            mx?.rephraseBlocks ??
-            mx?.rephrase?.blocks ??
-            null;
+            (rr as any)?.rephraseBlocks ?? mx?.rephraseBlocks ?? mx?.rephrase?.blocks ?? null;
 
           if (Array.isArray(blocksCandidate) && blocksCandidate.length > 0) {
             (out.metaForSave as any).extra.rephraseBlocks = blocksCandidate;
@@ -2681,8 +2348,7 @@ try {
           (out.metaForSave as any).extra.rephraseApplied = true;
           (out.metaForSave as any).extra.rephraseLLMApplied = true;
           (out.metaForSave as any).extra.rephraseReason =
-            (out.metaForSave as any).extra.rephraseReason ??
-            'rephraseSlotsFinal(emptyLike)';
+            (out.metaForSave as any).extra.rephraseReason ?? 'rephraseSlotsFinal(emptyLike)';
           (out.metaForSave as any).extra.rephraseAt = new Date().toISOString();
         }
       }
@@ -2710,7 +2376,6 @@ try {
     });
   }
 }
-
 
     // ✅ IT writer（COMMIT のときだけ）
     try {

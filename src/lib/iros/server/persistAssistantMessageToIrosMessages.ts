@@ -205,21 +205,45 @@ export async function persistAssistantMessageToIrosMessages(args: {
     finalMeta = safeMeta;
   }
 
-  // timeout 対策：meta を軽量化してリトライ
-  const shrinkMetaForPersist = (meta: any) => {
-    const m: any = meta && typeof meta === 'object' ? { ...meta } : {};
-    delete m.rephraseBlocks;
-    delete m.rephraseBlocksAttached;
+// timeout 対策：meta を軽量化してリトライ
+const shrinkMetaForPersist = (meta: any) => {
+  const m: any = meta && typeof meta === 'object' ? { ...meta } : {};
+  delete m.rephraseBlocks;
+  delete m.rephraseBlocksAttached;
 
-    if (m.extra && typeof m.extra === 'object') {
-      const ex: any = { ...(m.extra as any) };
-      delete ex.rephraseBlocks;
-      delete ex.ctxPack;
-      delete ex.flowTape;
-      m.extra = ex;
+  if (m.extra && typeof m.extra === 'object') {
+    const ex: any = { ...(m.extra as any) };
+    delete ex.rephraseBlocks;
+
+    // ✅ ctxPack は丸ごと消さない：flow だけ残す（継続判定用）
+    if (ex.ctxPack && typeof ex.ctxPack === 'object') {
+      const cp: any = ex.ctxPack as any;
+      const f: any = cp.flow && typeof cp.flow === 'object' ? cp.flow : null;
+
+      // flow を最小形に正規化（存在しない場合は入れない）
+      const flow =
+        f && (typeof f.at === 'string' || typeof f.prevAtIso === 'string' || typeof f.ageSec === 'number')
+          ? {
+              at: typeof f.at === 'string' ? f.at : null,
+              prevAtIso: typeof f.prevAtIso === 'string' ? f.prevAtIso : null,
+              ageSec: typeof f.ageSec === 'number' ? f.ageSec : null,
+              sessionBreak: typeof f.sessionBreak === 'boolean' ? f.sessionBreak : false,
+              fresh: typeof f.fresh === 'boolean' ? f.fresh : true,
+            }
+          : null;
+
+      ex.ctxPack = flow ? { flow } : undefined;
     }
-    return sanitizeForJsonb(m);
-  };
+
+    // flowTape は肥大化し得るので、timeout リトライ時は落とす
+    delete ex.flowTape;
+
+    m.extra = ex;
+  }
+
+  return sanitizeForJsonb(m);
+};
+
 
   const isStatementTimeout = (e: any) => {
     const code = String(e?.code ?? '').trim();

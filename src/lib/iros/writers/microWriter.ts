@@ -11,7 +11,11 @@ export type MicroWriterGenerate = (args: {
   traceId?: string | null;
   conversationId?: string | null;
   userCode?: string | null;
+
+  // ✅ HistoryDigest v1（任意：渡ってきたら microGenerate 側で注入する）
+  historyDigestV1?: unknown;
 }) => Promise<string>;
+
 
 export type MicroWriterInput = {
   /** 呼び名（UI表示名） */
@@ -25,7 +29,11 @@ export type MicroWriterInput = {
   traceId?: string | null;
   conversationId?: string | null;
   userCode?: string | null;
+
+  // ✅ HistoryDigest v1（任意：microGenerate に引き継ぐ）
+  historyDigestV1?: unknown;
 };
+
 
 export type MicroWriterOutput =
   | { ok: true; text: string } // 1〜2行の短い返し
@@ -246,15 +254,19 @@ export async function runMicroWriter(
   try {
     raw = await generate({
       system: systemPrompt,
-      prompt,
-      temperature: isTiredMicro ? 0.35 : 0.55,
-      maxTokens: 110,
+      prompt, // ✅ ここはこのファイルで作ってる prompt をそのまま渡す
+      temperature: isTiredMicro ? 0.2 : 0.6, // ✅ temp変数は無いので直接
+      maxTokens: 420,
 
-      // ✅ trace を generate に必ず引き継ぐ（ログで null になっていたのを防ぐ）
+      // ✅ 監査/追跡用（chatComplete に渡す）
       traceId,
       conversationId,
       userCode,
+
+      // ✅ HistoryDigest v1（任意：microGenerate 側で注入する）
+      historyDigestV1: (input as any).historyDigestV1 ?? null,
     });
+
   } catch (e: any) {
     return { ok: false, reason: 'generation_failed', detail: String(e?.message ?? e) };
   }

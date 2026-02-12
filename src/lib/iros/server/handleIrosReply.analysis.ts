@@ -289,12 +289,20 @@ export async function applyAnalysisToLastUserMessage(params: {
 }) {
   const { supabase, conversationId, userCode, analysis } = params;
 
-  const conversationUuid = await ensureIrosConversationUuid({
-    supabase,
-    userCode,
-    conversationKey: String(conversationId ?? '').trim(),
-    agent: null,
-  });
+  // ✅ conversationId が既に内部uuidなら、そのまま使う
+  //    uuidでない場合だけ conversationKey として uuid を解決する
+  const rawConv = String(conversationId ?? '').trim();
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+  const conversationUuid = UUID_RE.test(rawConv)
+    ? rawConv
+    : await ensureIrosConversationUuid({
+        supabase,
+        userCode,
+        conversationKey: rawConv,
+        agent: null,
+      });
+
 
   try {
     const { data: row, error: selectErr } = await supabase

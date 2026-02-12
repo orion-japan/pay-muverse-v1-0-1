@@ -192,7 +192,9 @@ function detectHasAnchorHints(messages: ChatMessage[]): boolean {
   try {
     return (
       messages.some((m) =>
-        /intent[_\s-]?anchor|fixedNorth|itx[_\s-]?step|itx[_\s-]?reason/i.test(m.content),
+        /intent[_\s-]?anchor|intentAnchor|fixedNorth|itx[_\s-]?(?:step|reason)|itx(?:Step|Reason)/i.test(
+          m.content,
+        ),
       ) ?? false
     );
   } catch {

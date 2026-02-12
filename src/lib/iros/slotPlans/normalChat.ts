@@ -434,48 +434,57 @@ function buildShiftIdeaBand(seedText: string) {
   });
 }
 
+
 // --- 置き換え 1) buildShiftTConcretize を関数まるごと置き換え ---
 function buildShiftTConcretize(seedText: string, focusLabel?: string) {
-  // ✅ t_concretize は「行動」ではなく「対象」に1点フォーカスする
-  // - 時間指定（<=10min）/ タイマー/ やり方指示は禁止
-  // - 1点の正体は "target label"（focusLabel）
-  const payload: any = {
+  // ✅ t_concretize は「行動の押し付け」ではなく「対象の一点固定 → 最後に“具体1つ”」に寄せる
+  // - ラベル（「次の一手：」「結論：」等）を禁止して、テンプレ臭を消す（B方針）
+  // - 最終行に “具体を1つだけ” を必須（チェックリスト禁止）
+  // - 10分/タイマー/姿勢など “時間・作法” は入れない（ユーザー方針）
+  // - ACK + 一般論だけで終わらない
+
+  const focus = typeof focusLabel === 'string' && focusLabel.trim() ? focusLabel.trim() : '';
+  const raw = String(seedText ?? '').trim();
+
+  // writer に渡す“内部seed”だけを濃くする（UIには露出しない想定）
+  const packedSeed = [
+    focus ? `対象：${focus}` : '',
+    raw ? `状況：${raw}` : '',
+    // ✅ ここがコア：出力フォーマットを固定（ラベル禁止 + 最終行は具体1つ）
+    '出力ルール：ACKで終わらない／一般論で終わらない／ラベル（次の一手：・結論：・ポイント：など）を使わない',
+    '形式：2〜3行。質問は最大1つまで。チェックリスト禁止。箇条書き禁止。',
+    '最終行：状況に合わせた“具体の一手”を自然文で1つだけ（複数案/列挙/手順化はしない）。',
+    '禁止：時間/タイマー/姿勢/習慣の指示。禁止語：選びました／視点を変えることで／次の一手：／結論：',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  // ✅ 実行経路確認用（一時ログ）
+  console.warn('[IROS/T_CONCRETIZE][SHIFT_BUILDER_USED]', {
+    hasFocus: !!focus,
+    seedHead: packedSeed.slice(0, 120),
+  });
+
+  const payload = {
     kind: 't_concretize',
     intent: 'implement_next_step',
-
-    // preset: T具体化の禁則はここに寄せる
     rules: {
       ...(SHIFT_PRESET_T_CONCRETIZE.rules ?? {}),
-      questions_max: 1,
       no_checklist: true,
-      keep_small: true,
-      repeatable: true,
-      // ✅ 時間・姿勢・手順テンプレは契約に含めない
+      no_lecture: true,
+      no_future_instruction: true, // 「〜しておくといい」系の未来講釈を抑制
+      questions_max: 1,
+      // 追加の“テンプレ抑制”は seed 側で強く縛る（ここは既存互換を維持）
     },
-
+    seed_text: packedSeed,
     tone: SHIFT_PRESET_T_CONCRETIZE.tone ?? undefined,
     allow: SHIFT_PRESET_T_CONCRETIZE.allow ?? { concrete_reply: true, short_reply_ok: true },
-
-    // ✅ writer契約：対象ラベル中心（行動・時間なし）
-    format: {
-      lines: 3,
-      schema: [
-        'focus_label(target_one_phrase_optional)',
-        'core(core_short_one_line)',
-        'close(one_line_optional)',
-      ],
-    },
-
-    seed_text: clamp(seedText, 240),
   };
 
-  // ✅ 上流が渡してきたときだけ採用（writerが推定しない）
-  if (typeof focusLabel === 'string' && focusLabel.trim().length > 0) {
-    payload.focusLabel = clamp(norm(focusLabel), 80);
-  }
-
-  return m('SHIFT', payload);
+  // ✅ ここは「@SHIFT ...」そのものを返す（二重ラップ禁止）
+  return `@SHIFT ${JSON.stringify(payload)}`;
 }
+
 
 // --- 置き換え 2) buildFlowReply を関数まるごと置き換え ---
 function buildFlowReply(args: {
