@@ -6,14 +6,19 @@ import { extractSlotsForRephrase, rephraseSlotsFinal } from '@/lib/iros/language
 
 type RenderBlock = { text: string | null | undefined; kind?: string };
 
-function normalizeHistoryMessages(
-  raw: unknown[] | string | null | undefined,
-): Array<{ role: 'user' | 'assistant'; content: string }> {
+type NormTurn = { role: 'user' | 'assistant'; content: string };
+
+const UPPER = (v: any) => String(v ?? '').trim().toUpperCase();
+const TRIM = (v: any) => String(v ?? '').trim();
+
+function normalizeHistoryMessages(raw: unknown[] | string | null | undefined): NormTurn[] {
   if (!raw) return [];
   if (typeof raw === 'string') return [];
   if (!Array.isArray(raw)) return [];
 
-  const out: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  const out: NormTurn[] = [];
+
+  // UI から来る history は形がブレるので “受け口” を広くしつつ、最後は規格化する
   for (const m of raw.slice(-24)) {
     if (!m || typeof m !== 'object') continue;
 
@@ -23,6 +28,7 @@ function normalizeHistoryMessages(
 
     const body = String((m as any)?.content ?? (m as any)?.text ?? (m as any)?.message ?? '')
       .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
       .trim();
 
     if (!body) continue;
@@ -31,15 +37,17 @@ function normalizeHistoryMessages(
       roleRaw === 'assistant' || roleRaw === 'bot' || roleRaw === 'system' || roleRaw.startsWith('a');
 
     out.push({
-      role: (isAssistant ? 'assistant' : 'user') as 'assistant' | 'user',
+      role: isAssistant ? 'assistant' : 'user',
       content: body,
     });
   }
+
+  // writer に渡すのは薄く（直近だけ）
   return out.slice(-12);
 }
 
 function buildFallbackRenderBlocksFromFinalText(finalText: string): RenderBlock[] {
-  const t = String(finalText ?? '').trim();
+  const t = TRIM(finalText);
   if (!t) return [];
 
   const splitToBlocks = (s: string): string[] => {
@@ -62,7 +70,7 @@ function buildFallbackRenderBlocksFromFinalText(finalText: string): RenderBlock[
 
   const blocksText: string[] = [];
 
-  // 1) [[ILINE]]...[[/ILINE]] が先頭にあるなら先頭ブロック固定
+  // 1) [[ILINE]]...[[/ILINE]] が先頭にあるなら、そこは先頭ブロックとして固定
   const start = t.indexOf('[[ILINE]]');
   const end = t.indexOf('[[/ILINE]]');
   let rest = t;
@@ -74,23 +82,22 @@ function buildFallbackRenderBlocksFromFinalText(finalText: string): RenderBlock[
   }
 
   // 2) 残りを段落/行でブロック化
-  const tailBlocks = splitToBlocks(rest);
-  for (const b of tailBlocks) blocksText.push(b);
+  for (const b of splitToBlocks(rest)) blocksText.push(b);
 
   return blocksText.map((text) => ({ text, kind: 'p' }));
 }
 
 /**
- * userText を「絶対に本文候補にしない」安全版 fallback picker
+ * userText を「絶対に本文候補にしない」安全版 picker
  * - EMPTY_LIKE（…… / ...）は捨てる
- * - @OBS/@SHIFT など内部マーカーは捨てる
+ * - @OBS/@SHIFT 等の内部マーカーは捨てる
  */
 function pickSafeAssistantText(args: {
   assistantText?: string | null;
   content?: string | null;
   text?: string | null;
   candidates?: any[];
-}) {
+}): string {
   const norm = (v: any) =>
     String(v ?? '')
       .replace(/\r\n/g, '\n')
@@ -100,7 +107,6 @@ function pickSafeAssistantText(args: {
   const isEmptyLike = (s0: string) => {
     const s = norm(s0);
     if (!s) return true;
-    // "……" / "..." / "・・・・" 的なやつ
     if (/^[.。・…]{2,}$/u.test(s)) return true;
     if (/^…+$/.test(s)) return true;
     return false;
@@ -109,7 +115,7 @@ function pickSafeAssistantText(args: {
   const isInternalLike = (s0: string) => {
     const s = norm(s0);
     if (!s) return false;
-    if (/^@(OBS|SHIFT)\b/m.test(s)) return true;
+    if (/(^|\n)\s*@(OBS|SHIFT|NEXT|SAFE|DRAFT|SEED_TEXT)\b/m.test(s)) return true;
     if (/^\s*\{.*"role"\s*:\s*"(user|assistant|system)"/m.test(s)) return true;
     return false;
   };
@@ -122,7 +128,6 @@ function pickSafeAssistantText(args: {
     return s;
   };
 
-  // candidates 優先（順序維持）
   if (Array.isArray(args.candidates) && args.candidates.length > 0) {
     for (const c of args.candidates) {
       const s = accept(c);
@@ -142,6 +147,20 @@ function pickSafeAssistantText(args: {
   return '';
 }
 
+function pickStr(...xs: any[]): string | null {
+  for (const x of xs) {
+    const s = TRIM(x);
+    if (s) return s;
+  }
+  return null;
+}
+
+function envBool(name: string, defaultOn = false) {
+  const raw = String(process.env[name] ?? '').trim().toLowerCase();
+  if (!raw) return defaultOn;
+  return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes' || raw === 'enabled';
+}
+
 export async function maybeAttachRephraseForRenderV2(args: {
   conversationId: string;
   userCode: string;
@@ -151,7 +170,7 @@ export async function maybeAttachRephraseForRenderV2(args: {
   historyMessages?: unknown[] | string | null;
   memoryStateForCtx?: any | null;
   traceId?: string | null;
-  effectiveMode?: string | null; // routeで確定した最終mode
+  effectiveMode?: string | null; // route で確定した最終 mode
 }) {
   const {
     conversationId,
@@ -164,8 +183,6 @@ export async function maybeAttachRephraseForRenderV2(args: {
     traceId,
     effectiveMode,
   } = args;
-
-  const upper = (v: any) => String(v ?? '').trim().toUpperCase();
 
   // ---------------------------------------------------------
   // SKIP 共通処理（理由を必ずログに残す）
@@ -195,7 +212,7 @@ export async function maybeAttachRephraseForRenderV2(args: {
           (typeof meta?.extra?.renderMode === 'string' && meta.extra.renderMode) ||
           (typeof meta?.extra?.renderedMode === 'string' && meta.extra.renderedMode) ||
           null,
-        speechAct: String(pickSpeechAct(meta) ?? '').toUpperCase() || null,
+        speechAct: UPPER(pickSpeechAct(meta) ?? '') || null,
         traceId: traceId ?? null,
         detail: payload,
       });
@@ -205,7 +222,7 @@ export async function maybeAttachRephraseForRenderV2(args: {
   };
 
   const attachBlocksFromTextOrSkip = (candidateText: string, attachReason: string) => {
-    // ✅ すでに rephraseBlocks / rephraseHead が存在するなら「上書きしない」
+    // ✅ すでに rephraseBlocks / rephraseHead が存在するなら上書きしない
     const existingBlocks =
       (extraMerged as any)?.rephraseBlocks ??
       (extraMerged as any)?.rephrase?.blocks ??
@@ -221,16 +238,14 @@ export async function maybeAttachRephraseForRenderV2(args: {
     }
 
     const existingHead =
-      String((extraMerged as any)?.rephraseHead ?? '').trim() ||
-      String((meta as any)?.extra?.rephraseHead ?? '').trim() ||
-      '';
+      TRIM((extraMerged as any)?.rephraseHead) || TRIM((meta as any)?.extra?.rephraseHead) || '';
 
     if (existingHead) {
       setSkip('ALREADY_HAS_REPHRASE_HEAD', { headLen: existingHead.length, attachReason });
       return false;
     }
 
-    const t = String(candidateText ?? '').trim();
+    const t = TRIM(candidateText);
     if (!t) {
       setSkip('NO_TEXT_FOR_FALLBACK_BLOCKS', { attachReason });
       return false;
@@ -272,10 +287,8 @@ export async function maybeAttachRephraseForRenderV2(args: {
       pickedLen: t.length,
     });
 
-
     return true;
   };
-
 
   // ---- 1) gate ----
   const enabled = String(process.env.IROS_REPHRASE_FINAL_ENABLED ?? '1').trim() !== '0';
@@ -290,10 +303,10 @@ export async function maybeAttachRephraseForRenderV2(args: {
     return;
   }
 
-  // ITでも attach を許可するスイッチ（デフォは止める）
-  const allowIT = String(process.env.IROS_REPHRASE_ALLOW_IT ?? '0').trim() === '1';
+  // IT でも attach を許可するスイッチ（デフォ OFF）
+  const allowIT = envBool('IROS_REPHRASE_ALLOW_IT', false);
 
-  if (!allowIT && upper(effectiveMode) === 'IT') {
+  if (!allowIT && UPPER(effectiveMode) === 'IT') {
     setSkip('SKIP_BY_EFFECTIVE_MODE_IT', { effectiveMode });
 
     // ✅ userText は絶対に採用しない（オウム返し事故防止）
@@ -322,7 +335,7 @@ export async function maybeAttachRephraseForRenderV2(args: {
     (typeof meta?.extra?.renderedMode === 'string' && meta.extra.renderedMode) ||
     '';
 
-  if (!allowIT && upper(hintedRenderMode) === 'IT') {
+  if (!allowIT && UPPER(hintedRenderMode) === 'IT') {
     setSkip('SKIP_BY_HINTED_RENDER_MODE_IT', { hintedRenderMode });
 
     const fallbackText = pickSafeAssistantText({
@@ -344,23 +357,27 @@ export async function maybeAttachRephraseForRenderV2(args: {
     return;
   }
 
-  const speechAct = upper(pickSpeechAct(meta));
+  // NOTE: route 側では SILENCE を廃止して FORWARD のみに寄せているが、
+  // 互換のためここでは SILENCE/FORWARD の両方を “attach skip” として扱う
+  const speechAct = UPPER(pickSpeechAct(meta));
   if (speechAct === 'SILENCE' || speechAct === 'FORWARD') {
     setSkip('SKIP_BY_SPEECH_ACT', { speechAct });
     return;
   }
 
   // ---- 2) idempotent ----
-  const existingBlocks =
-    (extraMerged as any)?.rephraseBlocks ??
-    (extraMerged as any)?.rephrase?.blocks ??
-    (meta as any)?.extra?.rephraseBlocks ??
-    (meta as any)?.extra?.rephrase?.blocks ??
-    null;
+  {
+    const existingBlocks =
+      (extraMerged as any)?.rephraseBlocks ??
+      (extraMerged as any)?.rephrase?.blocks ??
+      (meta as any)?.extra?.rephraseBlocks ??
+      (meta as any)?.extra?.rephrase?.blocks ??
+      null;
 
-  if (Array.isArray(existingBlocks) && existingBlocks.length > 0) {
-    setSkip('ALREADY_HAS_REPHRASE_BLOCKS', { blocksLen: existingBlocks.length });
-    return;
+    if (Array.isArray(existingBlocks) && existingBlocks.length > 0) {
+      setSkip('ALREADY_HAS_REPHRASE_BLOCKS', { blocksLen: existingBlocks.length });
+      return;
+    }
   }
 
   // ---- 3) slots ----
@@ -378,7 +395,7 @@ export async function maybeAttachRephraseForRenderV2(args: {
 
   const extracted = extractSlotsForRephrase(extraForRender);
 
-  // slots が無いなら LLM rephrase はしないが、UIブロックは「assistant側」からのみ付ける
+  // slots が無いなら LLM rephrase はしないが、UI ブロックは assistant 側テキストのみから付ける
   if (!extracted?.slots?.length) {
     const fallbackText = pickSafeAssistantText({
       candidates: [
@@ -419,17 +436,8 @@ export async function maybeAttachRephraseForRenderV2(args: {
   // ---- 4) minimal userContext（直近履歴 + last_state） ----
   const normalizedHistory = normalizeHistoryMessages(historyMessages ?? null);
 
-  const pickStr = (...xs: any[]) => {
-    for (const x of xs) {
-      const s = String(x ?? '').trim();
-      if (s) return s;
-    }
-    return null;
-  };
-
   const buildFlowDigest = () => {
-    // ✅ 1) “流れ”の要約（tape由来）を最優先で使う
-    // - route.ts が meta.extra.flowDigest に carry している想定
+    // 1) “流れ”の要約（tape/digest 由来）を最優先
     const metaAnyLocal: any = meta as any;
 
     const carriedFlowDigest = pickStr(
@@ -445,7 +453,7 @@ export async function maybeAttachRephraseForRenderV2(args: {
 
     if (carriedFlowDigest) return carriedFlowDigest;
 
-    // ✅ 2) フォールバック：状態ダイジェスト（現状維持）
+    // 2) fallback：状態ダイジェスト
     const ms = memoryStateForCtx ?? null;
 
     const depthStage = pickStr(
@@ -487,24 +495,13 @@ export async function maybeAttachRephraseForRenderV2(args: {
     return parts.join(' | ') || null;
   };
 
-
   const metaAny: any = meta as any;
 
-  // itx は MemoryState を最優先。無い場合は meta も見る（確実に rephraseEngine に届かせる）
-  const itxStepForCtx =
-    pickStr(memoryStateForCtx?.itxStep) ||
-    pickStr(metaAny?.itx_step) ||
-    pickStr(metaAny?.itxStep) ||
-    null;
-
-  const itxReasonForCtx =
-    pickStr(memoryStateForCtx?.itxReason) ||
-    pickStr(metaAny?.itx_reason) ||
-    pickStr(metaAny?.itxReason) ||
-    null;
+  // itx は MemoryState を最優先。無い場合は meta も見る（writer に確実に届かせる）
+  const itxStepForCtx = pickStr(memoryStateForCtx?.itxStep, metaAny?.itx_step, metaAny?.itxStep);
+  const itxReasonForCtx = pickStr(memoryStateForCtx?.itxReason, metaAny?.itx_reason, metaAny?.itxReason);
 
   // intentBand は depthStage ではなく「意図帯域」を最優先（例: I2）
-  // 無い場合だけ depthStage 等へフォールバック
   const intentBandForCtx =
     pickStr(metaAny?.intentLine?.intentBand) ||
     pickStr(metaAny?.intent_line?.intentBand) ||
@@ -519,79 +516,67 @@ export async function maybeAttachRephraseForRenderV2(args: {
 
   const tLayerModeActiveForCtx = Boolean(itxStepForCtx && /^T[123]$/u.test(String(itxStepForCtx)));
 
-  // ✅ 返信の目的（goalSteering）：結論ではなく「守るべき姿勢」
+  // 返信の目的（結論ではなく “守るべき姿勢”）
   const buildReplyGoal = () => {
-    // Tレイヤー（接触/成立）は濃度を上げる
     if (tLayerModeActiveForCtx) return 'permit_density';
 
-    // 反復/停滞っぽいときは散らかり抑制
-    // - history が薄い/取れない時は無理に判定しない（安全側）
+    // 反復（同じ文の言い直し）っぽいときは散らかり抑制
     const turns = normalizedHistory ?? [];
-    const lastUserTurns = turns.filter((m: any) => String(m?.role ?? '') === 'user');
-    const last2 = lastUserTurns
+    const userTurns = turns.filter((m: any) => String(m?.role ?? '') === 'user');
+    const last2 = userTurns
       .slice(-2)
       .map((m: any) => String(m?.content ?? '').trim())
       .filter(Boolean);
 
-    // 同一文に近い（雑にでOK）：同じ話を繰り返してる可能性
     if (last2.length === 2 && last2[0] === last2[1]) return 'reduce_scatter';
-
-    // ふつうは位置を映す
     return 'reflect_position';
   };
 
   const replyGoalForCtx = buildReplyGoal();
 
-  // ✅ 追加（会話を散らさない3点セット）
-  // - ここでは「配線を確実に通す」ため、まずは null で置く（ロジックは次ステップで実装）
+  // 3点セット（会話を散らさない）
   const topicDigestForCtx: string | null = null;
-  // repeatSignal：同趣旨反復の検出（writer の姿勢制御用）
+
   const repeatSignalForCtx: string | null = (() => {
     const turns = normalizedHistory ?? [];
     const userTurns = turns.filter((m) => m?.role === 'user');
-
     if (userTurns.length < 2) return null;
 
     const last = String(userTurns[userTurns.length - 1]?.content ?? '').trim();
     const prev = String(userTurns[userTurns.length - 2]?.content ?? '').trim();
-
     if (!last || !prev) return null;
 
-    // 完全一致（コピペ・言い直し）
     if (last === prev) return 'same_phrase';
 
-    // 軽い正規化（空白・句読点差）
-    const normalize = (s: string) =>
-      s.replace(/[、。,.!?！？\s]/g, '').toLowerCase();
-
+    const normalize = (s: string) => s.replace(/[、。,.!?！？\s]/g, '').toLowerCase();
     if (normalize(last) === normalize(prev)) return 'same_phrase';
 
     return null;
   })();
 
+  // slotPlanPolicy を確実に通す
+  const slotPlanPolicyForCtx =
+    String(
+      (extraMerged as any)?.slotPlanPolicy ??
+        (meta as any)?.framePlan?.slotPlanPolicy ??
+        (meta as any)?.slotPlanPolicy ??
+        '',
+    )
+      .toUpperCase()
+      .trim() || null;
 
-  // =========================================================
-  // slotPlanPolicy（FINAL 等）を userContext / ctxPack / rephraseSlotsFinal に確実に通す
-  // =========================================================
-  const slotPlanPolicyForCtx = String(
-    (extraMerged as any)?.slotPlanPolicy ??
-      (meta as any)?.framePlan?.slotPlanPolicy ??
-      (meta as any)?.slotPlanPolicy ??
-      '',
-  ).toUpperCase() || null;
-
-  const userContext = {
+  const userContext: any = {
     conversation_id: String(conversationId),
 
-    // ✅ 追加：policy を必ず通す（rephraseEngine.full.ts 側にも見せる）
+    // policy
     slotPlanPolicy: slotPlanPolicyForCtx,
 
-    // ✅ 追加（3点セット）
+    // 3点セット
     topicDigest: topicDigestForCtx,
     replyGoal: replyGoalForCtx,
     repeatSignal: repeatSignalForCtx,
 
-    // 互換（既存）
+    // 互換
     last_state: memoryStateForCtx ?? null,
     itxStep: itxStepForCtx,
     itxReason: itxReasonForCtx,
@@ -599,115 +584,111 @@ export async function maybeAttachRephraseForRenderV2(args: {
 
     flowDigest: buildFlowDigest(),
 
-    // ✅ rephraseHistory が最優先で拾う入口
     turns: normalizedHistory.length ? normalizedHistory : undefined,
 
-    // ✅ rephraseEngine.full.ts 側が読むのは ctxPack.*
     ctxPack: {
       turns: normalizedHistory.length ? normalizedHistory : undefined,
       historyForWriter: normalizedHistory.length ? normalizedHistory : undefined,
 
-      // ✅ 追加：policy を確実に通す
       slotPlanPolicy: slotPlanPolicyForCtx,
 
       itxStep: itxStepForCtx,
       itxReason: itxReasonForCtx,
 
-      // rephraseEngine の extractIntentBandFromContext が最優先で拾う
       intentBand: intentBandForCtx,
 
-      // tLayerHint / tLayerModeActive も明示（itOk/tLayerHint の確実化）
       tLayerHint: itxStepForCtx,
       tLayerModeActive: tLayerModeActiveForCtx,
 
-      // ✅ 追加（3点セット：writer が必ず拾える入口）
       topicDigest: topicDigestForCtx,
       replyGoal: replyGoalForCtx,
       repeatSignal: repeatSignalForCtx,
     },
 
-    // 互換のため残す
     historyMessages: normalizedHistory.length ? normalizedHistory : undefined,
   };
 
-// =========================================================
-// 診断 FINAL(IR) は LLM rephrase を呼ばない（崩れ防止）
-// ただしブロック化は「assistant側テキストのみ」から行う
-// =========================================================
-const modeNow = String(effectiveMode ?? '').toLowerCase();
-const presentationKindNow = String((extraMerged as any)?.presentationKind ?? '').toLowerCase();
+  // =========================================================
+  // 診断 FINAL(IR) は LLM rephrase を呼ばない（崩れ防止）
+  // ただしブロック化は assistant 側テキストのみから行う
+  // =========================================================
+  const modeNow = String(effectiveMode ?? '').toLowerCase();
+  const presentationKindNow = String((extraMerged as any)?.presentationKind ?? '').toLowerCase();
+  const slotPlanPolicyNow = slotPlanPolicyForCtx;
 
-// ✅ ここでは「再計算しない」
-// 上で確定させた policy を使う
-const slotPlanPolicyNow = slotPlanPolicyForCtx;
+  const isDiagnosisTurn =
+    modeNow === 'diagnosis' || presentationKindNow === 'diagnosis' || Boolean((extraMerged as any)?.isIrDiagnosisTurn);
 
-const isDiagnosisTurn =
-  modeNow === 'diagnosis' ||
-  presentationKindNow === 'diagnosis' ||
-  Boolean((extraMerged as any)?.isIrDiagnosisTurn);
+  const allowDiagnosisFinalRephrase = envBool('IROS_REPHRASE_ALLOW_DIAGNOSIS_FINAL', false);
 
-const allowDiagnosisFinalRephrase = (() => {
-  const v = String(process.env.IROS_REPHRASE_ALLOW_DIAGNOSIS_FINAL ?? '')
-    .trim()
-    .toLowerCase();
-  return v === '1' || v === 'true' || v === 'on' || v === 'yes' || v === 'enabled';
-})();
+  const shouldSkipRephraseLLMForDiagnosisFinal =
+    isDiagnosisTurn && slotPlanPolicyNow === 'FINAL' && !allowDiagnosisFinalRephrase;
 
-const shouldSkipRephraseLLMForDiagnosisFinal =
-  isDiagnosisTurn &&
-  slotPlanPolicyNow === 'FINAL' &&
-  !allowDiagnosisFinalRephrase;
+  if (shouldSkipRephraseLLMForDiagnosisFinal) {
+    const finalText = pickSafeAssistantText({
+      candidates: [
+        (extraMerged as any)?.finalAssistantTextCandidate,
+        (extraMerged as any)?.finalAssistantText,
+        (extraMerged as any)?.assistantText,
+        (extraMerged as any)?.resolvedText,
+        (extraMerged as any)?.extractedTextFromModel,
+        (extraMerged as any)?.rawTextFromModel,
+        (extraMerged as any)?.content,
+        (extraMerged as any)?.text,
+      ],
+    });
 
-if (shouldSkipRephraseLLMForDiagnosisFinal) {
-  const finalText = pickSafeAssistantText({
-    candidates: [
-      (extraMerged as any)?.finalAssistantTextCandidate,
-      (extraMerged as any)?.finalAssistantText,
-      (extraMerged as any)?.assistantText,
-      (extraMerged as any)?.resolvedText,
-      (extraMerged as any)?.extractedTextFromModel,
-      (extraMerged as any)?.rawTextFromModel,
-      (extraMerged as any)?.content,
-      (extraMerged as any)?.text,
-    ],
-  });
+    attachBlocksFromTextOrSkip(finalText, 'DIAGNOSIS_FINAL_SEED_ONLY');
 
-  attachBlocksFromTextOrSkip(finalText, 'DIAGNOSIS_FINAL_SEED_ONLY');
+    meta.extra = {
+      ...(meta.extra ?? {}),
+      rephraseAttachSkipped: true,
+      rephraseBlocksAttached: Boolean((extraMerged as any)?.rephraseBlocksAttached ?? false),
+      rephraseLLMApplied: false,
+      rephraseApplied: false,
+      rephraseReason: 'diagnosis_final_seed_only',
+    };
 
-  meta.extra = {
-    ...(meta.extra ?? {}),
-    rephraseAttachSkipped: true,
-    rephraseBlocksAttached: Boolean((extraMerged as any)?.rephraseBlocksAttached ?? false),
-    rephraseLLMApplied: false,
-    rephraseApplied: false,
-    rephraseReason: 'diagnosis_final_seed_only',
-  };
-
-  (extraMerged as any).rephraseAttachSkipped = true;
-  return;
-}
-
+    (extraMerged as any).rephraseAttachSkipped = true;
+    return;
+  }
 
   // ---- 5) call LLM ----
   const model = process.env.IROS_REPHRASE_MODEL ?? process.env.IROS_MODEL ?? 'gpt-4.1';
 
   const qCodeForLLM =
-    (typeof (meta as any)?.q_code === 'string' && String((meta as any).q_code).trim()) ||
-    (typeof (meta as any)?.qCode === 'string' && String((meta as any).qCode).trim()) ||
-    (typeof (meta as any)?.qPrimary === 'string' && String((meta as any).qPrimary).trim()) ||
-    (typeof (meta as any)?.unified?.q?.current === 'string' && String((meta as any).unified.q.current).trim()) ||
+    (typeof (meta as any)?.q_code === 'string' && TRIM((meta as any).q_code)) ||
+    (typeof (meta as any)?.qCode === 'string' && TRIM((meta as any).qCode)) ||
+    (typeof (meta as any)?.qPrimary === 'string' && TRIM((meta as any).qPrimary)) ||
+    (typeof (meta as any)?.unified?.q?.current === 'string' && TRIM((meta as any).unified.q.current)) ||
     null;
 
   const depthForLLM =
-    (typeof (meta as any)?.depth_stage === 'string' && String((meta as any).depth_stage).trim()) ||
-    (typeof (meta as any)?.depthStage === 'string' && String((meta as any).depthStage).trim()) ||
-    (typeof (meta as any)?.depth === 'string' && String((meta as any).depth).trim()) ||
-    (typeof (meta as any)?.unified?.depth?.stage === 'string' && String((meta as any).unified.depth.stage).trim()) ||
+    (typeof (meta as any)?.depth_stage === 'string' && TRIM((meta as any).depth_stage)) ||
+    (typeof (meta as any)?.depthStage === 'string' && TRIM((meta as any).depthStage)) ||
+    (typeof (meta as any)?.depth === 'string' && TRIM((meta as any).depth)) ||
+    (typeof (meta as any)?.unified?.depth?.stage === 'string' && TRIM((meta as any).unified.depth.stage)) ||
     null;
 
   const inputKindForLLM = String(
     (meta as any)?.framePlan?.inputKind ?? (meta as any)?.inputKind ?? (userContext as any)?.framePlan?.inputKind ?? '',
   ).toLowerCase();
+
+  // ctxPack.historyDigestV1 を “最終注入”（hasDigest を true にする）
+  try {
+    if (!userContext.ctxPack || typeof userContext.ctxPack !== 'object') userContext.ctxPack = {};
+    if (userContext.ctxPack.historyDigestV1 == null) {
+      const digestV1 =
+        (meta as any)?.extra?.historyDigestV1 ??
+        (meta as any)?.extra?.ctxPack?.historyDigestV1 ??
+        (extraMerged as any)?.historyDigestV1 ??
+        (extraMerged as any)?.ctxPack?.historyDigestV1 ??
+        buildFlowDigest?.() ??
+        null;
+      if (digestV1) userContext.ctxPack.historyDigestV1 = digestV1;
+    }
+  } catch {}
+
   console.log('[IROS/_impl/rephrase.ts][USERCTX_KEYS]', {
     hasTurns: Array.isArray((userContext as any)?.turns),
     turnsLen: Array.isArray((userContext as any)?.turns) ? (userContext as any).turns.length : 0,
@@ -717,9 +698,6 @@ if (shouldSkipRephraseLLMForDiagnosisFinal) {
     userCode,
   });
 
-  // =========================================================
-  // 通常: rephraseSlotsFinal を呼ぶ
-  // =========================================================
   try {
     const res = await rephraseSlotsFinal(extracted, {
       model,
@@ -731,7 +709,11 @@ if (shouldSkipRephraseLLMForDiagnosisFinal) {
       depthStage: depthForLLM,
       inputKind: inputKindForLLM,
       userContext,
+
+      // ✅ NEW: route.ts から来る forceRetry を rephraseEngine へ配線
+      forceRetry: !!((extraMerged as any)?.forceRetry ?? (meta as any)?.extra?.forceRetry),
     } as any);
+
 
     console.log('[IROS/rephraseAttach][RES_KEYS]', {
       resKeys: Object.keys(res ?? {}),
@@ -740,24 +722,20 @@ if (shouldSkipRephraseLLMForDiagnosisFinal) {
       metaOutKeys: Object.keys((res as any)?.meta?.out ?? {}),
     });
 
-    // ✅ rephraseSlotsFinal の正本は res.meta.extra（AFTER_ATTACH）側
-    const resExtra =
-      (res as any)?.meta?.extra ??
-      (res as any)?.metaForSave?.extra ??
-      (res as any)?.extra ??
-      null;
+    // 正本：res.meta.extra（AFTER_ATTACH）側
+    const resExtra = (res as any)?.meta?.extra ?? (res as any)?.metaForSave?.extra ?? (res as any)?.extra ?? null;
 
-    // ✅ blocks が空でも head だけは先に反映しておく（fallbackで user seed を拾わせない）
-    const resHead = String((resExtra as any)?.rephraseHead ?? '').trim();
+    // blocks が空でも head だけは先に反映（fallback で user seed を拾わせない）
+    const resHead = TRIM((resExtra as any)?.rephraseHead ?? '');
     if (resHead) {
-      (extraMerged as any).rephraseHead = String((extraMerged as any).rephraseHead ?? '').trim() || resHead;
+      (extraMerged as any).rephraseHead = TRIM((extraMerged as any).rephraseHead) || resHead;
       meta.extra = {
         ...(meta.extra ?? {}),
-        rephraseHead: String((meta as any)?.extra?.rephraseHead ?? '').trim() || resHead,
+        rephraseHead: TRIM((meta as any)?.extra?.rephraseHead) || resHead,
       };
     }
 
-    // ✅ blocks 探索：res.meta.extra（正本）→ meta/out 互換 → 直下互換
+    // blocks 探索：res.meta.extra（正本）→ 互換 → 直下互換
     const blocksAny =
       (resExtra as any)?.rephraseBlocks ??
       (resExtra as any)?.rephrase?.blocks ??
@@ -775,26 +753,24 @@ if (shouldSkipRephraseLLMForDiagnosisFinal) {
     const blocks: any[] | null = Array.isArray(blocksAny) ? blocksAny : null;
 
     if (!blocks || blocks.length === 0) {
-      // ✅ まず「rephraseEngineの生テキスト」を拾う（ここを最優先にする）
-      // 重要: rephraseEngine が本文を out に載せず、meta.rawHead/rawLen だけ返すケースがある
-      const rawFromRes = String(
+      // ★最優先：rephraseEngine が本文を out に載せず meta.rawHead/rawLen だけ返すケース
+      const rawFromRes = TRIM(
         (res as any)?.raw ??
           (res as any)?.text ??
           (res as any)?.content ??
           (res as any)?.meta?.raw ??
           (res as any)?.meta?.text ??
           (res as any)?.meta?.content ??
-          (res as any)?.meta?.rawHead ?? // ← ★これがないと「本文があるのに空扱い」になってオウムに落ちる
-          ''
-      ).trim();
-
+          (res as any)?.meta?.rawHead ??
+          '',
+      );
 
       if (rawFromRes) {
         attachBlocksFromTextOrSkip(rawFromRes, 'REPHRASE_RAW_FALLBACK');
         return;
       }
 
-      // ✅ それでも無理なら assistant 側のどれか（userText には逃げない）
+      // それでも無理なら assistant 側の候補だけ（userText には逃げない）
       const fallbackText = pickSafeAssistantText({
         candidates: [
           (extraMerged as any)?.finalAssistantTextCandidate,
@@ -814,14 +790,12 @@ if (shouldSkipRephraseLLMForDiagnosisFinal) {
       return;
     }
 
-
     (extraMerged as any).rephraseBlocks = blocks;
     (extraMerged as any).rephraseBlocksAttached = true;
     (extraMerged as any).rephraseLLMApplied = true;
     (extraMerged as any).rephraseApplied = true;
     (extraMerged as any).rephraseReason = (extraMerged as any).rephraseReason ?? 'rephrase_slots_final';
-    (extraMerged as any).rephraseHead =
-      (extraMerged as any).rephraseHead ?? String((blocks?.[0] as any)?.text ?? '').trim();
+    (extraMerged as any).rephraseHead = (extraMerged as any).rephraseHead ?? TRIM((blocks?.[0] as any)?.text ?? '');
 
     meta.extra = {
       ...(meta.extra ?? {}),
@@ -830,7 +804,7 @@ if (shouldSkipRephraseLLMForDiagnosisFinal) {
       rephraseLLMApplied: true,
       rephraseApplied: true,
       rephraseReason: (meta as any)?.extra?.rephraseReason ?? 'rephrase_slots_final',
-      rephraseHead: (meta as any)?.extra?.rephraseHead ?? String((blocks?.[0] as any)?.text ?? '').trim(),
+      rephraseHead: (meta as any)?.extra?.rephraseHead ?? TRIM((blocks?.[0] as any)?.text ?? ''),
     };
 
     console.log('[IROS/rephraseAttach][OK]', {

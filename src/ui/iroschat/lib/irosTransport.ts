@@ -341,21 +341,48 @@ export async function postMessage(args: {
   conversationId: string;
   text: string;
   role?: 'user' | 'assistant';
-  meta?: any; // ★ 追加
+  meta?: any; // ★ meta をそのまま渡す
+  traceId?: string | null; // ✅ 追加：同一リクエスト識別子
 }): Promise<{ ok: true }> {
+  // ✅ traceId を必ず用意（同一送信の二重POSTをサーバで弾けるように）
+  const clientTraceId =
+    (args.traceId && String(args.traceId).trim()) ||
+    (typeof crypto !== 'undefined' && typeof (crypto as any).randomUUID === 'function'
+      ? (crypto as any).randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
+
+  // ✅ meta.extra.traceId にも入れておく（サーバ側の取り方が揺れても拾える）
+  const meta = args.meta ?? null;
+  if (meta && typeof meta === 'object') {
+    meta.extra = meta.extra ?? {};
+    meta.extra.traceId = meta.extra.traceId ?? clientTraceId;
+  }
+
+  console.log('[IROS][client] POST /api/agent/iros/messages', {
+    conversationId: args.conversationId,
+    role: args.role ?? 'user',
+    textLen: String(args.text ?? '').length,
+    traceId: clientTraceId,
+    hasMeta: !!meta,
+  });
+
   const res = await authFetch('/api/agent/iros/messages', {
     method: 'POST',
     body: JSON.stringify({
       conversation_id: args.conversationId,
       text: args.text,
       role: args.role ?? 'user',
-      meta: args.meta ?? null, // ★ 追加：サーバに meta を渡す
+      meta, // ★ meta を渡す
+      traceId: clientTraceId, // ✅ 本命：サーバが traceId を直で拾えるように
+      trace_id: clientTraceId, // ✅ 互換：snake で見てる実装にも当たる
     }),
   });
+
   const j = await res.json();
   if (!j?.ok) throw new Error(j?.error || 'postMessage failed');
   return { ok: true };
 }
+
 
 /* ========= Reply (LLM) ========= */
 export async function reply(params: {
@@ -379,6 +406,12 @@ export async function reply(params: {
   if (!cid) throw new Error('reply: conversationId is required (body or ?cid)');
   if (!text) throw new Error('reply: text is required');
 
+  // ✅ client traceId を1回だけ確定（/reply でもサーバ生成に頼らない）
+  const clientTraceId =
+    (typeof crypto !== 'undefined' && typeof (crypto as any).randomUUID === 'function'
+      ? (crypto as any).randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
+
   // ✅ サーバが読むのは body.history（直下）
   const history = Array.isArray(params.history)
     ? params.history
@@ -392,30 +425,28 @@ export async function reply(params: {
 
   const payload: any = {
     conversationId: cid,
-    conversation_id: cid, // ✅ 互換用（どこかで conversation_id を見てても落ちない）
+    conversation_id: cid, // ✅ 互換用
     text,
     modeHint: params.mode,
     extra: {
       model: params.model ?? undefined,
+      traceId: clientTraceId, // ✅ ここが本命：/reply で traceId を揃える
     },
     ...(history && history.length > 0 ? { history } : {}),
   };
+
   const userCodeFromUrl =
-  typeof window !== 'undefined'
-    ? new URLSearchParams(window.location.search).get('user_code')
-    : null;
+    typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('user_code') : null;
 
-const userCodeFromStorage =
-  typeof window !== 'undefined'
-    ? window.localStorage.getItem('user_code')
-    : null;
+  const userCodeFromStorage =
+    typeof window !== 'undefined' ? window.localStorage.getItem('user_code') : null;
 
-const userCodeHeader = (userCodeFromUrl || userCodeFromStorage || '').trim() || null;
+  const userCodeHeader = (userCodeFromUrl || userCodeFromStorage || '').trim() || null;
 
-  // ✅ 送信内容のキーと historyLen を確実にログ（固定{}は禁止）
   console.log('[IROS][client] calling /api/agent/iros/reply', {
     from: 'irosClient.ts',
     conversationId: payload.conversationId,
+    clientTraceId,
     textLen: String(payload.text ?? '').length,
     historyLen: Array.isArray(payload.history) ? payload.history.length : 0,
   });
@@ -434,9 +465,9 @@ const userCodeHeader = (userCodeFromUrl || userCodeFromStorage || '').trim() || 
     body: JSON.stringify(payload),
   });
 
-
-  // ✅ サーバが付けた traceId をヘッダから回収
-  const traceId = res.headers.get('x-trace-id') || null;
+  // ✅ サーバが付けた traceId をヘッダから回収（あれば優先、なければ clientTraceId）
+  const traceIdFromHeader = res.headers.get('x-trace-id') || null;
+  const traceId = traceIdFromHeader || clientTraceId;
 
   const json: any = await res.json().catch(() => ({}));
 
@@ -450,14 +481,13 @@ const userCodeHeader = (userCodeFromUrl || userCodeFromStorage || '').trim() || 
     (typeof json?.message === 'string' && json.message) ||
     '';
 
-  // ✅ 互換キーを揃える（UI側がどれを見ても表示される）
   json.assistant = typeof json.assistant === 'string' ? json.assistant : assistantText;
   json.assistantText = typeof json.assistantText === 'string' ? json.assistantText : json.assistant;
   json.content = typeof json.content === 'string' ? json.content : json.assistant;
   json.text = typeof json.text === 'string' ? json.text : json.assistant;
 
   // ✅ デバッグ用：UIで追えるように返却オブジェクトへ混ぜる（破壊的変更は避ける）
-  if (traceId && json && typeof json === 'object') {
+  if (json && typeof json === 'object') {
     json.traceId = json.traceId ?? traceId;
     json.meta = json.meta ?? {};
     json.meta.extra = json.meta.extra ?? {};
@@ -466,6 +496,8 @@ const userCodeHeader = (userCodeFromUrl || userCodeFromStorage || '').trim() || 
 
   console.log('[IROS][client] /reply response', {
     status: res.status,
+    clientTraceId,
+    traceIdFromHeader,
     traceId,
     hasJson: !!json,
     gate: json?.gate ?? json?.result?.gate ?? null,
@@ -477,8 +509,8 @@ const userCodeHeader = (userCodeFromUrl || userCodeFromStorage || '').trim() || 
   });
 
   return json;
-
 }
+
 export async function replyAndStore(args: {
   conversationId: string;
   user_text: string;

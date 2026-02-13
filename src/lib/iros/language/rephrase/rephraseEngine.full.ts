@@ -41,6 +41,10 @@ import { extractHistoryTextFromContext, extractLastTurnsFromContext } from './hi
 import { readFlowDigest, readFlowTape } from './contextRead';
 import { buildFirstPassMessages, buildRetryMessages, callWriterLLM } from './writerCalls';
 import { systemPromptForFullReply } from './systemPrompt';
+import { detectIdeaBandProposeFromExtracted, makeIdeaBandCandidateBlocks } from './ideaBand';
+import { computeMinOkPolicy, computeOkTooShortToRetry, computeNaturalTextReady } from './minOkPolicy';
+import { runRetryPass } from './retryPass';
+import { validateOutputPure } from './validateOutput';
 
 import { flagshipGuard } from '../../quality/flagshipGuard';
 import {
@@ -2170,73 +2174,40 @@ const lastTurnsSafe = (() => {
 
   const seedFromSlots = seedFromSlotsRaw ? makeCandidate(seedFromSlotsRaw, maxLines, renderEngine) : '';
 
-  // ---------------------------------------------
-  // shared validators
-  // ---------------------------------------------
   const validateOutput = (rawText: string): RephraseResult => {
-    // ✅ ILINEマーカーは “露出禁止” なので、まず除去してから検証する
-    const stripILineMarkers = (s0: string) => {
-      const s = String(s0 ?? '');
-      return s.replace(/\[\[ILINE\]\]/g, '').replace(/\[\[\/ILINE\]\]/g, '');
-    };
+    const res = validateOutputPure({
+      rawText,
 
-    const raw = stripILineMarkers(String(rawText ?? ''));
-    const head = safeHead(raw, 80);
+      // context
+      inKeys,
+      wantsIdeaBand,
+      lockedILines,
 
-    const mkFail = (reason: string): RephraseResult => ({
-      ok: false,
-      reason,
-      meta: {
-        inKeys,
-        rawLen: raw.length,
-        rawHead: head,
-      },
+      // deps (injected)
+      safeHead,
+      containsForbiddenLeakText,
+      verifyLockedILinesPreserved,
+      recallGuardOk,
+      buildSlotsWithFirstText,
+
+      // for recall guard
+      extractedSlotsForRecall: (extracted?.slots ?? null) as any,
     });
 
-    if (!raw.trim()) return mkFail('OUT_EMPTY');
-    if (containsForbiddenLeakText(raw)) return mkFail('INTERNAL_MARKER_LEAKED');
-    if (/@[A-Z_]+_SLOT\b/.test(raw)) return mkFail('INTERNAL_MARKER_LEAKED');
-
-    // ✅ IDEA_BAND 最小形状チェック
-    if (wantsIdeaBand) {
-      const lines = raw
-        .split('\n')
-        .map((s) => s.trim())
-        .filter(Boolean);
-
-      if (lines.length < 2 || lines.length > 4) return mkFail('IDEA_BAND_SHAPE_REJECT');
-
-      const bulletLike = (line: string) => /^(?:・|-|•|\d+\.)\s*\S+/.test(line);
-      if (lines.some(bulletLike)) return mkFail('IDEA_BAND_SHAPE_REJECT');
+    // ✅ 既存の呼び出し側は RephraseResult を期待しているので互換で返す
+    if (!res.ok) {
+      return {
+        ok: false,
+        reason: res.reason || 'VALIDATION_FAILED',
+        meta: res.meta ?? { inKeys, rawLen: String(rawText ?? '').length, rawHead: safeHead(String(rawText ?? ''), 80) },
+      } as any;
     }
-
-    const iLineOk = verifyLockedILinesPreserved(raw, lockedILines);
-    if (!iLineOk) return mkFail('ILINE_NOT_PRESERVED');
-
-    const recallCheck = recallGuardOk({
-      slotKeys: inKeys,
-      slotsForGuard: (extracted?.slots ?? null) as any,
-      llmOut: raw,
-    });
-    if (!recallCheck.ok) return mkFail('RECALL_GUARD_REJECT');
-
-    // ✅ OK: slots/meta を型どおり返す（attach は meta.extra.rephraseBlocks を拾える）
-    const outSlots = buildSlotsWithFirstText(inKeys, raw);
 
     return {
       ok: true,
-      slots: outSlots,
-      meta: {
-        inKeys,
-        outKeys: inKeys,
-        rawLen: raw.length,
-        rawHead: head,
-        extra: {
-          rephraseBlocks: outSlots,
-          rephraseHead: head,
-        },
-      },
-    };
+      slots: res.slots as any,
+      meta: res.meta as any,
+    } as any;
   };
 
   // ---------------------------------------------
@@ -2272,120 +2243,15 @@ const lastTurnsSafe = (() => {
       }
     };
 
-    const detectIdeaBandPropose = (): boolean => {
-      const slots = (extracted as any)?.slots;
-      if (!Array.isArray(slots)) return false;
-
-      const shift = slots.find((x: any) => String(x?.key ?? '').toUpperCase().includes('SHIFT'));
-      const shiftText = String(shift?.text ?? shift?.value ?? '').trim();
-      if (!shiftText.startsWith('@SHIFT')) return false;
-
-      const jsonPart = shiftText.replace(/^@SHIFT\b/, '').trim();
-      const obj = safeParseJson(jsonPart);
-      const kind = String(obj?.kind ?? '').toLowerCase();
-      const intent = String(obj?.intent ?? '').toLowerCase();
-      return kind === 'idea_band' && intent === 'propose_candidates';
-    };
-
-    const makeIdeaBandCandidates = (s0: string): string[] => {
-      const s = String(s0 ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
-      if (!s) return [];
-
-      const MAX = 5;
-
-      const stripListHead = (x: string) => {
-        let t = String(x ?? '').trim();
-        t = t.replace(/^\s*(?:[・•●\-\*\u2013\u2014])\s+/u, '');
-        t = t.replace(/^\s*\d+\s*(?:[.)。：:])\s*/u, '');
-        t = t.replace(/^\s*(?:候補|選択肢)\s*[:：]\s*/u, '');
-        return t.trim();
-      };
-
-      // ✅ “具体っぽさ”で最後（spotlight）を決める
-      const scoreSpecificity = (raw: string): number => {
-        const t = stripListHead(raw);
-
-        if (!t) return -999;
-        if (t.length < 6) return -2;
-        if (t.length > 60) return -1;
-
-        let score = 0;
-
-        // 刺さりやすい原因語
-        if (/(失敗|怖|不安|先延ばし|後回し|決め(たくない|ない)|避け|守って|止まって|動け)/u.test(t)) score += 3;
-
-        // 抽象単語だけは弱い
-        if (/^(?:静けさ|感覚|エネルギー|空気|雰囲気|流れ|状態|意識)$/u.test(t)) score -= 3;
-
-        // 対象/設計語があると強い
-        if (/(仕様|契約|レーン|ログ|条件|原因|入口|境界|判定|整合|ズレ|復元|矯正)/u.test(t)) score += 2;
-
-        // 動詞/方針語尾は候補らしい
-        if (/(?:する|してみる|試す|寄せる|置く|切る|選ぶ|見る|決める|保つ|戻す|捨てる|やめる|続ける|止める|揃える|整える|集中する|優先する|固定する|分離する|検証する|確認する|観測する|記録する)$/u.test(
-          t,
-        ))
-          score += 1;
-        if (/(?:案|方向|路線|方針|仮説|候補|選択肢|モード|レーン|パターン|形|軸)$/u.test(t)) score += 1;
-
-        return score;
-      };
-
-      const moveBestToLast = (arr: string[]): string[] => {
-        if (arr.length < 2) return arr;
-
-        let bestIdx = 0;
-        let bestScore = -Infinity;
-
-        for (let i = 0; i < arr.length; i++) {
-          const sc = scoreSpecificity(arr[i]);
-          if (sc > bestScore) {
-            bestScore = sc;
-            bestIdx = i;
-          }
-        }
-
-        const out = arr.slice();
-        const [best] = out.splice(bestIdx, 1);
-        out.push(best);
-        return out;
-      };
-
-      // 1) まずは「空行区切り」で段落化（番号/箇条書きは付けない）
-      let parts = s
-        .split(/\n\s*\n+/)
-        .map((x) => x.trim())
-        .filter(Boolean);
-
-      // 2) 段落が少なすぎる時は、句点で“ゆるく”分割して 2〜5 を狙う（過剰分割しない）
-      if (parts.length < 2) {
-        const sentences = s
-          .split(/。+/)
-          .map((x) => x.trim())
-          .filter(Boolean);
-
-        if (sentences.length >= 2) {
-          parts = sentences.slice(0, MAX).map((x) => (x.endsWith('。') ? x : `${x}。`));
-        }
-      }
-
-      // 3) 最終クランプ：2〜5（足りない時は []）
-      if (parts.length < 2) return [];
-
-      const trimmed = parts.slice(0, MAX);
-      const spotlighted = moveBestToLast(trimmed);
-
-      return spotlighted;
-    };
-
-
-    const isIdeaBand = detectIdeaBandPropose();
+    const isIdeaBand = detectIdeaBandProposeFromExtracted(extracted);
 
     // idea_band は「2ブロック以上」が取れないと [] になることがある。
     // その場合は通常の段落/改行分割にフォールバックして、最低でも 1 block を作る。
-    let blocksText = isIdeaBand ? makeIdeaBandCandidates(text) : toRephraseBlocks(text);
+    let blocksText = isIdeaBand ? makeIdeaBandCandidateBlocks(text) : toRephraseBlocks(text);
     if (!Array.isArray(blocksText) || blocksText.length === 0) {
       blocksText = toRephraseBlocks(text);
     }
+
 
     // --- LLM signals（密度など）を抽出して meta.extra に積む（depth直結禁止）
     const clamp01 = (x: number): number => {
@@ -2697,390 +2563,6 @@ const lastTurnsSafe = (() => {
       .replace(/^[-*•・◯]\s*/u, '')
       .trim();
 
-  // ✅ IDEA_BAND の最大行数（ユーザーが 4/5 行と言ったら許容する）
-  const IDEA_BAND_MAX_LINES = 5;
-
-  // IDEA_BAND は「候補列挙（2〜N行）」以外を通さない
-  // - 1行 = “候補として読める形”であること（提案/方針/方向/案、または動詞系で終わる）
-  // - 詩/叙述の文章（句点つき）はNG（SALVAGEで候補化を試みる）
-  const ideaBandForbidden =
-    /(?:次の\s*\d+|タイマー|分だけ|手順|ToDo|TODO|ステップ|まず\s*は|まず、|やってみ|進めて|実装|着手)/;
-
-  const endsWithVerbLike = (s: string) =>
-    /(?:する|してみる|試す|寄せる|置く|切る|選ぶ|見る|決める|保つ|戻す|捨てる|やめる|続ける|止める|揃える|整える|集中する|優先する|固定する|分離する|検証する|確認する|観測する|記録する)$/u.test(
-      s,
-    );
-
-  const endsWithPlanNoun = (s: string) =>
-    /(?:案|方向|路線|方針|仮説|候補|選択肢|モード|レーン|パターン|形|軸)$/u.test(s);
-
-  const ideaBandLineLooksLikeCandidate = (line: string) => {
-    const core = normalizeIdeaBandLine(line);
-    if (!core) return false;
-
-    // 実行指示は IDEA_BAND では避ける（候補生成のレーン）
-    if (ideaBandForbidden.test(core)) return false;
-
-    // 明示フォーマット（互換）
-    if (/^(?:候補|選択肢)\s*[:：]/u.test(core)) return true;
-    if (/という選択肢/u.test(core)) return true;
-
-    // 句点や疑問符がある「文章」は候補ではない（SALVAGEへ）
-    if (/[。．.!！?？]/u.test(core)) return false;
-
-    // 候補として読める短い形（長すぎる語りを弾く）
-    if (core.length < 4 || core.length > 34) return false;
-
-    // “提案として読める”最低条件
-    if (endsWithVerbLike(core)) return true;
-    if (endsWithPlanNoun(core)) return true;
-
-    // ここまで来た「名詞だけっぽい短句」は候補性が薄いのでNG（SALVAGEへ）
-    return false;
-  };
-
-  const ideaBandLines = String(candidate ?? '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  const tooFewLines = ideaBandLines.length < 2;
-  const tooManyLines = ideaBandLines.length > IDEA_BAND_MAX_LINES;
-  const hasQuestion = ideaBandLines.some((line) => /[?？]/.test(line));
-  const hasForbidden = ideaBandLines.some((line) => ideaBandForbidden.test(normalizeIdeaBandLine(line)));
-
-  const candidateShapeOk =
-    ideaBandLines.length >= 2 &&
-    ideaBandLines.length <= IDEA_BAND_MAX_LINES &&
-    ideaBandLines.every(ideaBandLineLooksLikeCandidate);
-
-  const ideaBandOk =
-    !wantsIdeaBand ? true : candidateShapeOk && !tooFewLines && !tooManyLines && !hasQuestion && !hasForbidden;
-
-  const ideaBandContractBroken = Boolean(wantsIdeaBand && !ideaBandOk);
-
-  console.warn('[IROS/IDEA_BAND][DEBUG_WANTS]', {
-    traceId: debug.traceId,
-    conversationId: debug.conversationId,
-    userCode: debug.userCode,
-    wantsIdeaBand,
-    lineCount: ideaBandLines.length,
-    head: safeHead(String(candidate ?? ''), 120),
-  });
-
-  // ✅ IDEA_BAND は「常に」番号表記を 1) に正規化する（LLMの "1." や "・" を通さない）
-// ✅ さらに：最後の1行を “最も具体（spotlight）” に寄せる
-if (wantsIdeaBand && !ideaBandContractBroken) {
-  const stripListHead = (s: string) => {
-    let t = String(s ?? '').trim();
-    // bullets: ・ • ● - * – —
-    t = t.replace(/^\s*(?:[・•●\-\*\u2013\u2014])\s+/u, '');
-    // "1." "1)" "1："など
-    t = t.replace(/^\s*\d+\s*(?:[.)。：:])\s*/u, '');
-    // "候補:" "選択肢:" など
-    t = t.replace(/^\s*(?:候補|選択肢)\s*[:：]\s*/u, '');
-    return t.trim();
-  };
-
-  // ✅ “具体っぽさ”の簡易スコア（最後＝最有力に回す）
-  const scoreSpecificity = (line: string): number => {
-    const s = normalizeIdeaBandLine(line);
-
-    // 短すぎ/長すぎは候補として弱い（刺さりにくい）
-    if (s.length < 6) return -2;
-    if (s.length > 32) return -1;
-
-    let score = 0;
-
-    // 「失敗」「怖い」「先延ばし」「決めない」など“原因候補”語は強め
-    if (/(失敗|怖|不安|先延ばし|後回し|決め(たくない|ない)|避け|守って|止まって|動け)/u.test(s)) score += 3;
-
-    // 「抽象語だけ」っぽいと弱い（例: "静けさ", "感覚", "エネルギー"）
-    if (/^(?:静けさ|感覚|エネルギー|空気|雰囲気|流れ|状態|意識)$/u.test(s)) score -= 3;
-
-    // “具体化の手前”の名詞があると上げる（テーマ/対象の単語）
-    if (/(仕様|契約|レーン|ログ|条件|原因|入口|境界|判定|整合|ズレ|復元|矯正)/u.test(s)) score += 2;
-
-    // 動詞終わり・案/方針終わりは候補性が高い（すでにあなたの判定にも整合）
-    if (endsWithVerbLike(s)) score += 1;
-    if (endsWithPlanNoun(s)) score += 1;
-
-    return score;
-  };
-
-  const moveBestToLast = (lines: string[]): string[] => {
-    if (lines.length < 2) return lines;
-
-    let bestIdx = 0;
-    let bestScore = -Infinity;
-
-    for (let i = 0; i < lines.length; i++) {
-      const sc = scoreSpecificity(lines[i]);
-      if (sc > bestScore) {
-        bestScore = sc;
-        bestIdx = i;
-      }
-    }
-
-    // best を最後へ
-    const out = lines.slice();
-    const [best] = out.splice(bestIdx, 1);
-    out.push(best);
-    return out;
-  };
-
-  const rawLines = String(candidate ?? '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .split('\n')
-    .map((x) => stripListHead(x))
-    .filter(Boolean)
-    .slice(0, 5);
-
-  if (rawLines.length >= 2) {
-    const spotlighted = moveBestToLast(rawLines);
-    candidate = spotlighted.map((t, i) => `${i + 1}) ${t}`).join('\n');
-  }
-}
-
-
-  if (ideaBandContractBroken) {
-    // ✅ FATAL に落として seed(@NEXT_HINT)へ逃げると UI が userText エコーへ戻りやすい。
-    // なので「候補2〜N行」へ“その場で候補化”して契約に戻す。
-    const toCandidateLine = (raw: string): string => {
-      const dropTail = (s: string) =>
-        s
-          .replace(/(?:かもしれません|かも|ようです|みたいです|でしょう|ですね|です|ます|でした|ました)$/u, '')
-          .trim();
-
-      // ① 正規化
-      let s = normalizeIdeaBandLine(raw).replace(/[。．.!！?？]+$/u, '').trim();
-
-      // ✅ 先頭の箇条書き記号を剥がす（"・", "•", "●", "-" など）
-      // - "・ 心の声..." を消す
-      s = s.replace(/^\s*(?:[-*•●・]+)\s*/u, '');
-
-      // ✅ "1. ・ 心の声..." の「番号の後ろの・」も消す（ここが本丸）
-      s = s.replace(/^(\s*\d+\s*[.)]\s*)[-*•●・]+\s*/u, '$1');
-
-      s = dropTail(s);
-      if (!s) return '';
-      if (ideaBandForbidden.test(s)) return '';
-
-      // ② “状況語”を落として「候補の核」へ寄せる
-      s = s
-        .replace(/^(?:いま|今|その|この)?(?:段階|第一段階|次|直後|越えた今|越えた今、)?[、,]\s*/u, '')
-        .replace(/^(?:第一段階を越えた今|第一段階をクリアした後|第一段階をクリアした今)\s*/u, '')
-        .replace(/^(?:その)?静けさ(?:の中)?(?:に|で)?/u, '静けさ')
-        .trim();
-
-      // ③ 文っぽい時は「後半（行動・焦点）」を優先
-      const parts = s
-        .split(/[、,]/u)
-        .map((x) => dropTail(x.trim()))
-        .filter(Boolean);
-
-      const scorePart = (p: string) => {
-        let score = 0;
-        if (/(?:探|整|言葉|見つ|掘|ほど|切り分け|分け|置き換え|決め|選ぶ|書く|出す|並べ)/u.test(p)) score += 3;
-        if (/(?:鍵|道|道筋|潜む|隠れる|かもしれない)/u.test(p)) score -= 2;
-        if (p.length <= 28) score += 1;
-        return score;
-      };
-
-      if (parts.length >= 2) {
-        parts.sort((a, b) => scorePart(b) - scorePart(a));
-        s = parts[0];
-      } else {
-        s = parts[0] ?? s;
-      }
-
-      s = dropTail(s).replace(/[。．.!！?？]+$/u, '').trim();
-      if (!s) return '';
-      if (s.length > 28) s = s.slice(0, 28).trim();
-
-      // ④ 既に候補形式なら温存
-      if (/^(?:候補|選択肢)\s*[:：]/u.test(s)) return s;
-
-      // ⑤ 語尾を候補に合わせる
-      if (endsWithVerbLike(s) || endsWithPlanNoun(s)) return s;
-
-      if (/心の奥深く/u.test(s)) return '心の奥の“引っかかり”を言葉にする';
-      if (/静けさ/u.test(s)) return '静けさの正体を一言で切り分ける';
-      if (/鍵/u.test(s)) return '整理の“入口”を1つだけ決める';
-
-      return `${s}を試す`;
-    };
-
-    const salvageIdeaBand = (() => {
-      const s = String(candidate ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
-      if (!s) return '';
-
-// 0) 既に候補っぽい行が並んでいる場合も、最後に「1)」で番号を確定表示させる
-// ✅ さらに：最後の1行を “最も具体（spotlight）” に寄せる
-const asNumberedParenList = (lines: string[]): string => {
-  const stripListHead = (s: string) => {
-    let t = String(s ?? '').trim();
-
-    // 先頭の bullets / list markers を除去
-    // - "・" / "•" / "-" / "*" / "–" など
-    t = t.replace(/^\s*(?:[・•\-\*\u2013\u2014])\s+/u, '');
-
-    // 先頭の番号表記を除去（"1." / "1)" / "1："など）
-    t = t.replace(/^\s*\d+\s*(?:[.)。：:])\s*/u, '');
-
-    // 先頭の「候補:」「選択肢:」を除去（混在しても中身だけ採用）
-    t = t.replace(/^\s*(?:候補|選択肢)\s*[:：]\s*/u, '');
-
-    return t.trim();
-  };
-
-  // ✅ “具体っぽさ”の簡易スコア（最後＝最有力に回す）
-  const scoreSpecificity = (line: string): number => {
-    const s = normalizeIdeaBandLine(line);
-
-    if (s.length < 6) return -2;
-    if (s.length > 32) return -1;
-
-    let score = 0;
-
-    // “原因候補”語（刺さりやすい）
-    if (/(失敗|怖|不安|先延ばし|後回し|決め(たくない|ない)|避け|守って|止まって|動け)/u.test(s)) score += 3;
-
-    // 抽象単語だけは弱い
-    if (/^(?:静けさ|感覚|エネルギー|空気|雰囲気|流れ|状態|意識)$/u.test(s)) score -= 3;
-
-    // 対象語/設計語があると強い
-    if (/(仕様|契約|レーン|ログ|条件|原因|入口|境界|判定|整合|ズレ|復元|矯正)/u.test(s)) score += 2;
-
-    if (endsWithVerbLike(s)) score += 1;
-    if (endsWithPlanNoun(s)) score += 1;
-
-    return score;
-  };
-
-  const moveBestToLast = (arr: string[]): string[] => {
-    if (arr.length < 2) return arr;
-
-    let bestIdx = 0;
-    let bestScore = -Infinity;
-
-    for (let i = 0; i < arr.length; i++) {
-      const sc = scoreSpecificity(arr[i]);
-      if (sc > bestScore) {
-        bestScore = sc;
-        bestIdx = i;
-      }
-    }
-
-    const out = arr.slice();
-    const [best] = out.splice(bestIdx, 1);
-    out.push(best);
-    return out;
-  };
-
-  const clean = lines
-    .map((x) => stripListHead(x))
-    .map((x) => x.trim())
-    .filter(Boolean)
-    .slice(0, 5); // ✅ 2〜5行へ
-
-  // 2行未満は契約に戻せない
-  if (clean.length < 2) return '';
-
-  const spotlighted = moveBestToLast(clean);
-
-  // ✅ ordered-list を避けるため "1)" 固定
-  return spotlighted
-    .map((t, i) => `${i + 1}) ${t}`)
-    .join('\n')
-    .trim();
-};
-
-
-      // 1) まずは行ベース
-      let parts = s
-        .split('\n')
-        .map((x) => x.trim())
-        .filter(Boolean);
-
-      // 2) 行が少なければ、句点/改行相当で分割（文章→候補化の素材を作る）
-      if (parts.length < 2) {
-        parts = s
-          .split(/[。．.!！\n]+/u)
-          .map((x) => x.trim())
-          .filter(Boolean);
-      }
-
-      // 3) それでも素材が薄ければ、読点でも割る（最後の手段）
-      if (parts.length < 2) {
-        parts = s
-          .split(/[、,]+/u)
-          .map((x) => x.trim())
-          .filter(Boolean);
-      }
-
-      // 候補化
-      const fixed = parts
-        .map(toCandidateLine)
-        .filter(Boolean)
-        .filter((x, i, arr) => arr.indexOf(x) === i)
-        .slice(0, IDEA_BAND_MAX_LINES);
-
-      if (fixed.length < 2) return '';
-
-      return asNumberedParenList(fixed);
-    })();
-
-    if (salvageIdeaBand) {
-      candidate = salvageIdeaBand;
-
-      // ✅ 矯正後にもう一度 guard を通す（採用の整合）
-      v = runFlagship(candidate, slotsForGuard, scaffoldActive);
-
-      console.warn('[IROS/IDEA_BAND][SALVAGED]', {
-        traceId: debug.traceId,
-        conversationId: debug.conversationId,
-        userCode: debug.userCode,
-        lineCount: candidate.split('\n').filter(Boolean).length,
-        head: safeHead(String(candidate ?? ''), 160),
-      });
-    } else {
-      // ✅ 矯正できない時だけ従来通り FATAL → retry へ
-      const reasons = [
-        tooFewLines ? 'IDEA_BAND_TOO_FEW_LINES' : null,
-        tooManyLines ? 'IDEA_BAND_TOO_MANY_LINES' : null,
-        hasQuestion ? 'IDEA_BAND_HAS_QUESTION' : null,
-        hasForbidden ? 'IDEA_BAND_HAS_FORBIDDEN' : null,
-        'IDEA_BAND_SHAPE_REJECT',
-      ].filter(Boolean);
-
-      console.warn('[IROS/IDEA_BAND][CONTRACT_BROKEN]', {
-        traceId: debug.traceId,
-        conversationId: debug.conversationId,
-        userCode: debug.userCode,
-        lineCount: ideaBandLines.length,
-        reasons,
-        head: safeHead(String(candidate ?? ''), 160),
-      });
-
-      v = {
-        ...(v as any),
-        ok: false,
-        level: 'FATAL',
-        reasons: Array.from(
-          new Set([
-            ...(((v as any)?.reasons ?? []) as any[]),
-            'IDEA_BAND_CONTRACT_BROKEN',
-            ...reasons,
-          ]),
-        ),
-      } as any;
-    }
-  }
-
   if (forceIntervene) {
     console.warn('[IROS/FLAGSHIP][FORCE_INTERVENE]', {
       traceId: debug.traceId,
@@ -3118,65 +2600,38 @@ const asNumberedParenList = (lines: string[]): string => {
     return adoptAsSlots(seedFromSlots, 'FLAGSHIP_WARN_REJECT_TO_SEED', { scaffoldActive });
   }
 
-  // ------------------------------------------------------------
-  // ✅ MIN_OK_LEN 制御（shift allow.short_reply_ok 対応）
-  // ------------------------------------------------------------
   const vLevelPre = String((v as any)?.level ?? '').toUpperCase();
   let candidateLen = (candidate ?? '').trim().length;
 
-  const inputKindNow = String(inputKind ?? inputKindFromMeta ?? inputKindFromCtx ?? 'chat')
-    .trim()
-    .toLowerCase();
-
-  const isMicroOrGreetingNow = inputKindNow === 'micro' || inputKindNow === 'greeting';
-
   const shiftObj = parseShiftJson(shiftSlot?.text);
 
-  // ✅ short_reply_ok は「存在するなら false も尊重」する（Boolean OR は禁止）
-  const shortReplyOkRaw =
-    (shiftObj?.allow?.short_reply_ok ?? shiftObj?.allow?.shortReplyOk ?? null) ??
-    ((opts as any)?.allow?.short_reply_ok ?? (opts as any)?.allow?.shortReplyOk ?? null);
+  const pol = computeMinOkPolicy({
+    inputKind,
+    inputKindFromMeta,
+    inputKindFromCtx,
+    shiftSlotText: shiftSlot?.text,
+    shiftObj,
+    optsAllow: (opts as any)?.allow,
+  });
 
-  const shortReplyOk = shortReplyOkRaw === null ? false : Boolean(shortReplyOkRaw);
+  const inputKindNow = pol.inputKindNow;
+  const isMicroOrGreetingNow = pol.isMicroOrGreetingNow;
 
-  // ✅ T_CONCRETIZE 判定（shift kind / 生テキストのどちらでも拾う）
-  const shiftKind = String((shiftObj as any)?.kind ?? '').trim().toLowerCase();
-  const isTConcretize =
-    shiftKind === 't_concretize' ||
-    /"kind"\s*:\s*"t_concretize"/.test(String(shiftSlot?.text ?? ''));
+  const shortReplyOkRaw = pol.shortReplyOkRaw;
+  const shortReplyOk = pol.shortReplyOk;
 
-  // ✅ IDEA_BAND 判定（候補生成：2〜5行契約なので len gate はかけない）
-  const isIdeaBand =
-    shiftKind === 'idea_band' ||
-    /"kind"\s*:\s*"idea_band"/.test(String(shiftSlot?.text ?? ''));
+  const shiftKind = pol.shiftKind;
+  const isTConcretize = pol.isTConcretize;
+  const isIdeaBand = pol.isIdeaBand;
 
-  // ✅ MIN_OK_LEN（IDEA_BAND / T_CONCRETIZE を chat より優先）
-  // - micro/greeting は短文許可（0）
-  // - IDEA_BAND は「2〜5行の候補」なので文字数で縛らない（0）
-  // - T_CONCRETIZE は 24（短くても成立し得るが、薄さを抑える）
-  // - それ以外: short_reply_ok 明示なら 0 / chat は 40 / default 80
-  const MIN_OK_LEN =
-    isMicroOrGreetingNow ? 0 :
-    isIdeaBand ? 0 :
-    isTConcretize ? 24 :
-    shortReplyOk ? 0 :
-    inputKindNow === 'chat' ? 40 :
-    80;
+  const MIN_OK_LEN = pol.MIN_OK_LEN;
 
   console.log('[IROS/rephraseEngine][MIN_OK_KIND]', {
     inputKindNow,
     isMicroOrGreetingNow,
     shortReplyOk,
     MIN_OK_LEN,
-    reason: isMicroOrGreetingNow
-      ? 'micro_or_greeting'
-      : isIdeaBand
-        ? 'idea_band_0'
-        : isTConcretize
-          ? 't_concretize_24'
-          : inputKindNow === 'chat'
-            ? (shortReplyOk ? 'chat_short_reply_ok' : 'chat_relaxed_40')
-            : (shortReplyOk ? 'short_reply_ok' : 'default_80'),
+    reason: pol.reason, // ✅ 変換しない（そのまま）
     shiftTextHead: shiftSlot?.text ? safeHead(String(shiftSlot.text), 140) : null,
     shiftObjHasAllow: Boolean(shiftObj?.allow),
     isTConcretize,
@@ -3185,32 +2640,19 @@ const asNumberedParenList = (lines: string[]): string => {
   });
 
 
-  // ✅ “前に進む気配” がある短文は retry を抑制
-  const hasAdvanceHint = /NEXT|次の|一歩|やってみる|進める|試す|始め|着手|手を付け/.test(
-    String(candidate ?? '')
-  );
+  const tooShortPol = computeOkTooShortToRetry({
+    candidate,
+    scaffoldActive,
+    isDirectTask,
+    vOk: Boolean(v?.ok),
+    vLevelPre,
+    candidateLen,
+    MIN_OK_LEN,
+    isIdeaBand,
+  });
 
-/* =========================================================
- * 置換1：rephraseEngine.full.ts の 2496〜2508 行を丸ごと置換
- * 目的：T_CONCRETIZE の「2行目テンプレ自動添付」を完全停止
- * ========================================================= */
-
-// ✅ T_CONCRETIZE で 1行だけなら、2行目に“具体の次の一手”を自動添付（そっけなさ止血）
-// ↑ このポリシーはテンプレ固定文が全返信に混入しやすいので廃止。
-// - 短文は短文のまま成立させる
-// - 伸ばす必要がある場合は「seed側を厚くする」か「別のロジック（品質/ガード）」で行う
-// - ここでは一切の自動追記をしない
-// （no-op）
-
-const shouldOkTooShortToRetry =
-!scaffoldActive &&
-!isDirectTask &&
-v?.ok &&
-vLevelPre === 'OK' &&
-candidateLen > 0 &&
-candidateLen < MIN_OK_LEN &&
-!hasAdvanceHint &&
-!isIdeaBand;
+  const hasAdvanceHint = tooShortPol.hasAdvanceHint;
+  const shouldOkTooShortToRetry = tooShortPol.shouldOkTooShortToRetry;
 
 
   if (shouldOkTooShortToRetry) {
@@ -3242,17 +2684,37 @@ candidateLen < MIN_OK_LEN &&
     } as any;
   }
 
+  // ✅ DEV: 強制的に retry を踏む（E2E確認用）
+  // - userText 埋め込み（[[FORCE_RETRY]]）は本番経路を汚染して収束しないので廃止
+  // - 代わりに opts.forceRetry を “DEV限定” で受け取る
+  const devForceRetry =
+    process.env.NODE_ENV !== 'production' && Boolean((opts as any)?.forceRetry);
+
+  if (devForceRetry) {
+    console.warn('[IROS/FLAGSHIP][FORCE_RETRY]', {
+      traceId: debug.traceId,
+      conversationId: debug.conversationId,
+      userCode: debug.userCode,
+      via: 'opts.forceRetry',
+    });
+
+    v = {
+      ...(v as any),
+      ok: false,
+      level: 'FATAL',
+      reasons: Array.from(new Set([ ...(((v as any)?.reasons ?? []) as any[]), 'FORCE_RETRY' ])),
+    } as any;
+  }
+
   const vLevel = String((v as any)?.level ?? '').toUpperCase();
 
-  const naturalTextReady =
-    !scaffoldActive &&
-    !isDirectTask &&
-    candidateLen >= MIN_OK_LEN &&
-    (/\n{2,}/.test(candidate) || candidate.split('\n').filter(Boolean).length >= 3);
-
-  if (v?.ok && vLevel === 'OK') {
-    return adoptAsSlots(candidate, 'FLAGSHIP_OK', { scaffoldActive });
-  }
+  const naturalTextReady = computeNaturalTextReady({
+    candidate,
+    candidateLen,
+    MIN_OK_LEN,
+    scaffoldActive,
+    isDirectTask,
+  });
 
   if (vLevel === 'WARN' && naturalTextReady) {
     return adoptAsSlots(candidate, 'FLAGSHIP_ACCEPT_AS_FINAL', {
@@ -3279,10 +2741,15 @@ candidateLen < MIN_OK_LEN &&
     } as any;
   }
 
-
   // ---------------------------------------------
   // FATAL → 1回だけ再生成（2ndは“編集/復元+整形”）
   // ---------------------------------------------
+
+  // ✅ OK は retry しない（ここで確定して返す）
+  if ((v as any)?.ok === true) {
+    return adoptAsSlots(candidate, 'FLAGSHIP_OK_NO_RETRY', { scaffoldActive });
+  }
+
   const baseDraftForRepair: string = (() => {
     const a = seedFromSlots && seedFromSlots.trim() ? seedFromSlots.trim() : '';
     const b = candidate && candidate.trim() ? candidate.trim() : '';
@@ -3299,250 +2766,48 @@ candidateLen < MIN_OK_LEN &&
     return b || a || c || '';
   })();
 
+  return await runRetryPass({
+    debug,
+    opts,
+    slotPlanPolicyResolved,
 
+    systemPrompt,
+    internalPack,
+    baseDraftForRepair,
+    userText,
 
-  console.log('[IROS/FLAGSHIP][RETRY]', {
-    traceId: debug.traceId,
-    conversationId: debug.conversationId,
-    userCode: debug.userCode,
-    reason: v?.reasons,
-  });
-
-// ✅ retry (2nd pass)
-const retryMessages = buildRetryMessages({
-  systemPrompt,
-  internalPack,
-  baseDraftForRepair,
-  userText,
-});
-
-raw2 = await callWriterLLM({
-  model: opts.model ?? 'gpt-4o',
-  temperature: opts.temperature ?? 0.7,
-  messages: retryMessages,
-  traceId: debug.traceId ?? null,
-  conversationId: debug.conversationId ?? null,
-  userCode: debug.userCode ?? null,
-  audit: {
-    mode: 'rephrase_retry',
-    // ✅ 1st pass と同じ決定ロジックを使う
-    slotPlanPolicy: slotPlanPolicyResolved,
-    qCode: (debug as any)?.qCode ?? null,
-    depthStage: (debug as any)?.depthStage ?? null,
-  },
-});
-
-  // ログ（LLMの実出力で）
-  logRephraseOk(debug, extracted.keys, raw2, 'RETRY_LLM');
-
-  // retry raw validation（最低限の安全）
-  {
-    const v2 = validateOutput(raw2);
-    if (!v2.ok) {
-      if (seedFromSlots) return adoptAsSlots(seedFromSlots, `RETRY_${v2.reason}_TO_SEED`, { scaffoldActive });
-      return adoptAsSlots(candidate, `RETRY_${v2.reason}_USE_CANDIDATE`, { scaffoldActive });
-    }
-
-    const retryLen0 = String(raw2 ?? '').trim().length;
-
-    // ✅ QCOUNT_TOO_MANY で落ちた retry は「短い」だけでは捨てない
-    //    （疑問推定の誤爆対策：短く自然な返答が最適解になり得る）
-    const fatalReasons = new Set((((v as any)?.reasons ?? []) as any[]).map((x) => String(x)));
-    const relaxTooShortOnQCount = fatalReasons.has('QCOUNT_TOO_MANY');
-
-    if (!isDirectTask && !isMicroOrGreetingNow && retryLen0 > 0 && retryLen0 < MIN_OK_LEN) {
-      if (!relaxTooShortOnQCount) {
-        // ✅ retry後も短いなら「seed強制」ではなく「OK本文」を採用する
-        // - seedFromSlots は @NEXT_HINT を拾って renderGateway 側で事故る
-        // - ここでは raw2（= retryText）を優先し、空なら baseDraft/candidate に落とす
-        const chosenText =
-          String(raw2 ?? '').trim() ||
-          String(baseDraftForRepair ?? '').trim() ||
-          String(candidate ?? '').trim();
-
-        return adoptAsSlots(chosenText, 'OK_TOO_SHORT_ACCEPT', { scaffoldActive });
-      }
-
-      console.warn('[IROS/FLAGSHIP][RETRY_TOO_SHORT_BUT_ACCEPTED_DUE_TO_QCOUNT]', {
-        traceId: debug.traceId,
-        conversationId: debug.conversationId,
-        userCode: debug.userCode,
-        retryLen: retryLen0,
-        min: MIN_OK_LEN,
-        reasons: Array.from(fatalReasons),
-        head: safeHead(String(raw2 ?? ''), 160),
-      });
-      // fallthrough: accept raw2 as-is
-    }
-
-  }
-
-  // scaffold復元（retryでも同様）
-  let raw2Guarded = raw2;
-  if (scaffoldActive) {
-    const onePointFix2 = ensureOnePointInOutput({ slotsForGuard, llmOut: raw2Guarded });
-    if (onePointFix2.ok) raw2Guarded = onePointFix2.out;
-
-    const mh0 = scaffoldMustHaveOk({ slotKeys: inKeys, slotsForGuard, llmOut: raw2Guarded });
-    if (!mh0.ok) {
-      raw2Guarded = restoreScaffoldMustHaveInOutput({
-        llmOut: raw2Guarded,
-        slotsForGuard,
-        missing: mh0.missing,
-      });
-    }
-  }
-
-  let retryCandidate = makeCandidate(raw2Guarded, maxLines, renderEngine);
-
-/* =========================================================
- * 置換2：rephraseEngine.full.ts の 2694〜2708 行を丸ごと置換
- * 目的：retry でも「強制2行＋10分テンプレ」を完全停止
- * ========================================================= */
-
-// ✅ T_CONCRETIZE: 1行で終わる“そっけなさ”を禁止（決定的に2行へ補う）
-// ↑ ここも固定テンプレが混入する主因なので廃止。
-// - retryCandidate はそのまま採用（短くてもOK）
-// - 伸ばす必要がある場合は上流（seed/slots）で材料を足す
-// （no-op）
-
-  // ✅ 2nd PASS が短い場合も seed には逃げない（retryCandidate をそのまま採用）
-  {
-    const retryLenNow = String(retryCandidate ?? '').trim().length;
-    if (retryLenNow > 0 && retryLenNow < MIN_OK_LEN) {
-      console.warn('[IROS/FLAGSHIP][RETRY_STILL_TOO_SHORT]', {
-        traceId: debug.traceId,
-        conversationId: debug.conversationId,
-        userCode: debug.userCode,
-        retryLen: retryLenNow,
-        min: MIN_OK_LEN,
-        head: safeHead(retryCandidate, 160),
-        hasSeed: !!seedFromSlots,
-      });
-
-      return adoptAsSlots(String(retryCandidate ?? '').trim(), 'FLAGSHIP_RETRY_STILL_TOO_SHORT_ACCEPT', {
-        scaffoldActive,
-      });
-    }
-  }
-
-  if (scaffoldActive && retryCandidate) {
-    const mhAfterClamp = scaffoldMustHaveOk({ slotKeys: inKeys, slotsForGuard, llmOut: retryCandidate });
-    if (!mhAfterClamp.ok) {
-      const restored = restoreScaffoldMustHaveInOutput({
-        llmOut: retryCandidate,
-        slotsForGuard,
-        missing: mhAfterClamp.missing,
-      });
-      retryCandidate = makeCandidate(restored, maxLines, renderEngine);
-
-      if (!retryCandidate || !retryCandidate.trim()) {
-        console.warn('[IROS/FLAGSHIP][RETRY_EMPTY_AFTER_RESTORE_CLAMP]', {
-          traceId: debug.traceId,
-          conversationId: debug.conversationId,
-          userCode: debug.userCode,
-        });
-
-        const fallback = baseDraftForRepair && baseDraftForRepair.trim() ? baseDraftForRepair : candidate;
-        return adoptAsSlots(fallback, 'FLAGSHIP_RETRY_EMPTY_AFTER_RESTORE_USE_BASE_DRAFT', { scaffoldActive });
-      }
-    }
-  }
-
-  const vRetry = runFlagship(retryCandidate, slotsForGuard, scaffoldActive);
-
-  console.log('[IROS/FLAGSHIP][RETRY_VERDICT]', {
-    traceId: debug.traceId,
-    conversationId: debug.conversationId,
-    userCode: debug.userCode,
-    level: vRetry?.level,
-    reasons: vRetry?.reasons,
-    head: safeHead(retryCandidate, 160),
-  });
-
-  {
-    const retryText = String(retryCandidate ?? '').trim();
-    const retryLen = retryText.length;
-    const retryLevel = String((vRetry as any)?.level ?? '').toUpperCase();
-    const retryReasons = Array.from(
-      new Set((((vRetry as any)?.reasons ?? []) as any[]).map((x) => String(x))),
-    );
-
-    const acceptRetry =
-      !!vRetry?.ok &&
-      retryLevel === 'OK' &&
-      retryLen >= MIN_OK_LEN &&
-      !retryReasons.includes('NORMAL_SHORT_GENERIC_NO_QUESTION');
-
-    if (acceptRetry) {
-      return adoptAsSlots(retryText, 'FLAGSHIP_RETRY_OK', { scaffoldActive });
-    }
-
-    if (vRetry && retryLevel === 'WARN' && seedFromSlots) {
-      const mustSeed = shouldRejectWarnToSeed(vRetry) || retryLen < MIN_OK_LEN || retryReasons.includes('NORMAL_SHORT_GENERIC_NO_QUESTION');
-      if (mustSeed) {
-        return adoptAsSlots(seedFromSlots, 'FLAGSHIP_RETRY_WARN_TO_SEED', { scaffoldActive });
-      }
-    }
-  }
-
-  const reasonsArr = (((vRetry as any)?.reasons ?? (v as any)?.reasons ?? []) as any[]).map((x) => String(x));
-  const fatalReasons = new Set(Array.from(new Set(reasonsArr)));
-
-  // ✅ soft-fatal（危険ではなく “文章品質” で落ちた）なら seed 退避をしない
-  // ✅ さらに seedFromSlots が directive-only（@TASK/@DRAFT だけ）なら採用すると UI が空になるので必ず避ける
-  const softFatalReasons = new Set(['QCOUNT_TOO_MANY', 'HEDGE_PRESENT', 'GENERIC_PRESENT']);
-  const isSoftFatalOnly = fatalReasons.size > 0 && Array.from(fatalReasons).every((r) => softFatalReasons.has(String(r)));
-  // ✅ このブロック内だけで使う：directive-only 判定（外部依存なし）
-  const isDirectiveOnly = (s0: any): boolean => {
-    const lines = String(s0 ?? '')
-      .replace(/\r\n/g, '\n')
-      .replace(/\r/g, '\n')
-      .split('\n')
-      .map((x) => String(x ?? '').trim())
-      .filter(Boolean);
-
-    if (lines.length === 0) return true;
-    return lines.every((t) =>
-      /^@(?:CONSTRAINTS|OBS|TASK|SHIFT|NEXT(?:_HINT)?|SAFE|ACK|RESTORE|Q|DRAFT)\b/.test(t),
-    );
-  }
-  const seedDirectiveOnly = seedFromSlots ? isDirectiveOnly(seedFromSlots) : false;
-
-  // 既存の prefer 条件に、soft-fatal と directive-only seed 回避を追加
-  const shouldPreferCandidateOnFatal =
-    seedDirectiveOnly ||
-    isSoftFatalOnly ||
-    fatalReasons.has('OK_TOO_SHORT_TO_RETRY') ||
-    fatalReasons.has('WARN_TO_RETRY');
-
-  if (shouldPreferCandidateOnFatal) {
-    const fallback =
-      String(retryCandidate ?? '').trim() ||
-      String(candidate ?? '').trim() ||
-      // seed が directive-only の場合は絶対に使わない（空になる）
-      (!seedDirectiveOnly ? String(seedFromSlots ?? '').trim() : '');
-
-    return adoptAsSlots(fallback, 'FLAGSHIP_RETRY_FATAL_PREFER_CANDIDATE', {
-      scaffoldActive,
-      flagshipFatal: true,
-      flagshipLevel: (vRetry as any)?.level ?? 'FATAL',
-      flagshipReasons: Array.isArray((vRetry as any)?.reasons) ? (vRetry as any).reasons : [],
-    });
-  }
-
-  // ✅ seedFromSlots を採用するのは「directive-only ではない」場合だけ
-  if (seedFromSlots && !seedDirectiveOnly) {
-    return adoptAsSlots(seedFromSlots, 'FLAGSHIP_RETRY_FATAL_TO_SEED', { scaffoldActive });
-  }
-
-  // seed が使えない（directive-only 等）ときは通常のフォールバックへ
-  const fallbackText = String(retryCandidate ?? '').trim() || String(candidate ?? '').trim();
-  return adoptAsSlots(fallbackText, 'FLAGSHIP_RETRY_FATAL_ACCEPT', {
+    candidate,
     scaffoldActive,
-    flagshipFatal: true,
-    flagshipLevel: (vRetry as any)?.level ?? 'FATAL',
-    flagshipReasons: Array.isArray((vRetry as any)?.reasons) ? (vRetry as any).reasons : [],
+    seedFromSlots,
+    inKeys,
+    maxLines,
+    renderEngine,
+
+    isDirectTask,
+    isMicroOrGreetingNow,
+    MIN_OK_LEN,
+    historyDigestV1: digestMaybe ?? null,
+
+    firstFatalReasons: Array.isArray((v as any)?.reasons) ? ((v as any).reasons as any[]).map((x) => String(x)) : [],
+
+    buildRetryMessages,
+    callWriterLLM,
+    logRephraseOk,
+    validateOutput,
+
+    ensureOnePointInOutput,
+    scaffoldMustHaveOk,
+    restoreScaffoldMustHaveInOutput,
+
+    makeCandidate,
+
+    runFlagship,
+    shouldRejectWarnToSeed,
+
+    safeHead,
+    adoptAsSlots,
+
+    extractedKeys: extracted.keys,
+    slotsForGuard,
   });
 }
-

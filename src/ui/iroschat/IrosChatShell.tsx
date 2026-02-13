@@ -107,20 +107,19 @@ function IrosChatInner({ open }: Props) {
 
   // ==== Iros Context ====
   const chat = useIrosChat();
-// ✅ DEBUG: cid 追従確認（確証取り・後で消す）
-useEffect(() => {
-  try {
-    console.log('[IROS][Shell][CID_DEBUG]', {
-      urlCid,
-      open,
-      openTarget,
-      canUse,
-      didHandleOpen: didHandleOpenRef.current,
-      didSelectOnce: didSelectOnce.current,
-      activeConversationId: chat?.activeConversationId ?? null,
-    });
-  } catch {}
-}, [urlCid, open, canUse, chat, openTarget]);
+  // ✅ DEBUG: cid 追従確認（確証取り・後で消す）
+  useEffect(() => {
+    try {
+      console.log('[IROS][Shell][CID_DEBUG]', {
+        urlCid,
+        open,
+        openTarget,
+        canUse,
+        didInitialFetch: didInitialFetchRef.current,
+        activeConversationId: chat?.activeConversationId ?? null,
+      });
+    } catch {}
+  }, [urlCid, open, canUse, chat, openTarget]);
 
   // Context 側の userInfo をローカル表示用に同期
   useEffect(() => {
@@ -166,31 +165,30 @@ useEffect(() => {
     };
   }, [chat, userCode, authLoading]);
 
-  // openパラメータ（menu/new/cid）の一回処理（ループ防止）
-  const didHandleOpenRef = useRef(false);
+  // 初回オープン/初期選択（フェッチは必ず1回だけ）
+  const didInitialFetchRef = useRef(false);
+
   useEffect(() => {
-    if (didHandleOpenRef.current) return;
     if (!canUse) return;
+    if (didInitialFetchRef.current) return;
 
-    // menu で来ても自動ではサイドバーを開かない
+    const convs = Array.isArray(chat.conversations) ? chat.conversations : [];
 
+    // ====== 1) openTarget: new ======
     if (openTarget.type === 'new') {
+      didInitialFetchRef.current = true; // ✅ 先に立てる（競合防止）
       try {
         if (typeof window !== 'undefined') {
           window.localStorage.removeItem(lastConvKey(agentK));
         }
       } catch {}
-      // 新しい会話を開始
-      chat
-        .startConversation()
-        .catch(() => {})
-        .finally(() => {
-          didHandleOpenRef.current = true;
-        });
+      chat.startConversation().catch(() => {});
       return;
     }
 
+    // ====== 2) openTarget: cid/uuid ======
     if ((openTarget.type === 'cid' || openTarget.type === 'uuid') && openTarget.cid) {
+      didInitialFetchRef.current = true; // ✅ 先に立てる（競合防止）
       chat
         .fetchMessages(openTarget.cid)
         .catch(() => {})
@@ -200,31 +198,19 @@ useEffect(() => {
               window.localStorage.setItem(lastConvKey(agentK), openTarget.cid!);
             }
           } catch {}
-          didHandleOpenRef.current = true;
         });
       return;
     }
-  }, [canUse, chat, openTarget, agentK]);
 
-  // 初期選択（open 指定が無い通常遷移時）
-  const didSelectOnce = useRef(false);
-  useEffect(() => {
-    if (!canUse) return;
-    if (didSelectOnce.current) return;
-
-    const convs = Array.isArray(chat.conversations) ? chat.conversations : [];
-    if (!convs.length) return;
+    // ====== 3) open指定が無い通常遷移（conversations が揃ってから決める） ======
+    if (!convs.length) return; // convs が無いと決められないので待つ
 
     // URL の cid が優先
     if (urlCid) {
       const exists = convs.some((c) => c.id === urlCid);
       if (exists) {
-        chat
-          .fetchMessages(urlCid)
-          .catch(() => {})
-          .finally(() => {
-            didSelectOnce.current = true;
-          });
+        didInitialFetchRef.current = true; // ✅ 先に立てる（競合防止）
+        chat.fetchMessages(urlCid).catch(() => {});
         return;
       }
     }
@@ -240,12 +226,8 @@ useEffect(() => {
     if (lastId) {
       const exists = convs.some((c) => c.id === lastId);
       if (exists) {
-        chat
-          .fetchMessages(lastId)
-          .catch(() => {})
-          .finally(() => {
-            didSelectOnce.current = true;
-          });
+        didInitialFetchRef.current = true; // ✅ 先に立てる（競合防止）
+        chat.fetchMessages(lastId).catch(() => {});
         return;
       }
     }
@@ -253,14 +235,12 @@ useEffect(() => {
     // それでも決まらなければ、最新の会話
     const latest = convs[0];
     if (latest?.id) {
-      chat
-        .fetchMessages(latest.id)
-        .catch(() => {})
-        .finally(() => {
-          didSelectOnce.current = true;
-        });
+      didInitialFetchRef.current = true; // ✅ 先に立てる（競合防止）
+      chat.fetchMessages(latest.id).catch(() => {});
+      return;
     }
-  }, [canUse, chat, chat.conversations, urlCid, agentK]);
+  }, [canUse, chat, chat.conversations, openTarget, urlCid, agentK]);
+
 
   const handleDelete = async () => {
     const cid = chat.activeConversationId;

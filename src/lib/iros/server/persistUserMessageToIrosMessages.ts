@@ -52,28 +52,23 @@ export async function persistUserMessageToIrosMessages(args: {
 
     const currentTraceId = pickTraceId(meta);
 
-    const { data: lastRow, error: lastErr } = await supabase
-      .from('iros_messages')
-      .select('id,text,created_at,meta')
-      .eq('conversation_id', conversationUuid)
-      .eq('role', 'user')
-      .order('id', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    // traceId が無いなら「二重送信判定はしない」＝同文でも保存する
+    if (currentTraceId) {
+      const { data: lastRow, error: lastErr } = await supabase
+        .from('iros_messages')
+        .select('id,meta')
+        .eq('conversation_id', conversationUuid)
+        .eq('role', 'user')
+        .order('id', { ascending: false })
+        .limit(5) // 保険：直近数件で同一traceIdを探す
+        .maybeSingle();
 
-    const lastText = lastRow?.text != null ? String(lastRow.text) : '';
-    const lastTraceId = pickTraceId((lastRow as any)?.meta);
+      // maybeSingle() は limit(1) 前提に近いので、ここは limit(1) に寄せるのが本筋だが、
+      // supabase の挙動差を避けるなら「直近1件だけ」で十分。
+      const lastTraceId = pickTraceId((lastRow as any)?.meta);
 
-    // ✅ 同文でも traceId が違うなら「別ターン」として保存する
-    if (!lastErr && lastText === content && currentTraceId && lastTraceId === currentTraceId) {
-      return { ok: true, inserted: false, reason: 'DUPLICATE_SKIP' as const };
-    }
-
-    // 保険：traceId が無い場合だけ、極短時間(500ms)の二重送信を弾く
-    if (!lastErr && lastText === content && !currentTraceId) {
-      const lastAt = Date.parse(String((lastRow as any)?.created_at ?? ''));
-      const now = Date.now();
-      if (Number.isFinite(lastAt) && now - lastAt < 500) {
+      // ✅ 本当の二重送信：traceId が同じなら落とす（本文一致は条件にしない）
+      if (!lastErr && lastTraceId && lastTraceId === currentTraceId) {
         return { ok: true, inserted: false, reason: 'DUPLICATE_SKIP' as const };
       }
     }

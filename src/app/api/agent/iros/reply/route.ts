@@ -17,38 +17,20 @@ import { resolveModeHintFromText, resolveRememberScope } from './_mode';
 
 import { attachNextStepMeta, extractNextStepChoiceFromText, findNextStepOptionById } from '@/lib/iros/nextStepOptions';
 import { ensureIrosConversationUuid } from '@/lib/iros/server/ensureIrosConversationUuid';
-import { buildResonanceVector } from '@/lib/iros/language/resonanceVector';
-import { renderReply } from '@/lib/iros/language/renderReply';
-import { renderGatewayAsReply } from '@/lib/iros/language/renderGateway';
 import { persistAssistantMessageToIrosMessages } from '@/lib/iros/server/persistAssistantMessageToIrosMessages';
-
-import { applyRulebookCompat } from '@/lib/iros/policy/rulebook';
-
-import { persistUserMessageToIrosMessages } from '@/lib/iros/server/persistUserMessageToIrosMessages';
 import { runNormalBase } from '@/lib/iros/conversation/normalBase';
 
 import { loadIrosMemoryState } from '@/lib/iros/memoryState';
-import { maybeAttachRephraseForRenderV2 } from './_impl/rephrase';
+import { applyRenderEngineIfEnabled } from './_impl/applyRenderEngineIfEnabled';
 
 import {
   pickUserCode,
-  pickSilenceReason,
-  pickSpeechAct,
   isEffectivelyEmptyText,
-  inferUIMode,
-  inferUIModeReason,
   sanitizeFinalContent,
   normalizeMetaLevels,
 } from './_helpers';
-import type { ReplyUIMode } from './_helpers';
 
-import {
-  pickText,
-  pickFallbackAssistantText,
-  normalizeHistoryMessages,
-  buildFallbackRenderBlocksFromFinalText,
-  type RenderBlock,
-} from './_impl/utils';
+import { pickText } from './_impl/utils';
 
 // =========================================================
 // CORS
@@ -56,8 +38,12 @@ import {
 const CORS_HEADERS = {
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'GET, POST, OPTIONS',
-  'access-control-allow-headers': 'Content-Type, Authorization, x-user-code, x-credit-cost',
+  'access-control-allow-headers': 'Content-Type, Authorization, x-user-code, x-credit-cost, x-trace-id',
 } as const;
+
+// =========================================================
+// Credit defaults
+// =========================================================
 
 // 既定：1往復 = 5pt（ENVで上書き可）
 const CHAT_CREDIT_AMOUNT = Number(process.env.IROS_CHAT_CREDIT_AMOUNT ?? 5);
@@ -65,18 +51,22 @@ const CHAT_CREDIT_AMOUNT = Number(process.env.IROS_CHAT_CREDIT_AMOUNT ?? 5);
 // 残高しきい値（ENVで上書き可）
 const LOW_BALANCE_THRESHOLD = Number(process.env.IROS_LOW_BALANCE_THRESHOLD ?? 10);
 
+// =========================================================
+// Persist policy（single-writer）
+// =========================================================
+
+// ✅ single-writer policy（このrouteは assistant 保存だけを担当）
 const PERSIST_POLICY = 'REPLY_SINGLE_WRITER' as const;
 
-// service-role supabase（残高チェック + 訓練用保存 + assistant保存）
+// =========================================================
+// Supabase (service-role)
+// =========================================================
+
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!SUPABASE_URL) {
-  throw new Error('NEXT_PUBLIC_SUPABASE_URL is missing');
-}
-if (!SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error('SUPABASE_SERVICE_ROLE_KEY is missing (service-role required)');
-}
+if (!SUPABASE_URL) throw new Error('NEXT_PUBLIC_SUPABASE_URL is missing');
+if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error('SUPABASE_SERVICE_ROLE_KEY is missing (service-role required)');
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   global: {
@@ -88,16 +78,13 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       // - env で上書き可: SUPABASE_FETCH_TIMEOUT_MS
       const timeoutMs = Math.max(
         5_000,
-        Number(process.env.SUPABASE_FETCH_TIMEOUT_MS ?? '60000') || 60_000
+        Number(process.env.SUPABASE_FETCH_TIMEOUT_MS ?? '60000') || 60_000,
       );
 
       const t = setTimeout(() => controller.abort(), timeoutMs);
 
       try {
-        const res = await fetch(input, {
-          ...(init ?? {}),
-          signal: controller.signal,
-        });
+        const res = await fetch(input, { ...(init ?? {}), signal: controller.signal });
 
         const status = res.status;
         const ct = String(res.headers.get('content-type') ?? '').toLowerCase();
@@ -119,15 +106,15 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
             '';
 
           throw new Error(
-            `[SUPABASE_UPSTREAM_BAD] status=${status} ct=${ct || '(none)'} cfRay=${cfRay || '(none)'} head=${head || '(empty)'}`
+            `[SUPABASE_UPSTREAM_BAD] status=${status} ct=${ct || '(none)'} cfRay=${cfRay || '(none)'} head=${
+              head || '(empty)'
+            }`,
           );
         }
 
         return res;
       } catch (e: any) {
-        if (e?.name === 'AbortError') {
-          throw new Error(`[SUPABASE_FETCH_TIMEOUT] ${timeoutMs}ms`);
-        }
+        if (e?.name === 'AbortError') throw new Error(`[SUPABASE_FETCH_TIMEOUT] ${timeoutMs}ms`);
         throw e;
       } finally {
         clearTimeout(t);
@@ -136,13 +123,100 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   },
 });
 
-
-
 // =========================================================
 // OPTIONS
 // =========================================================
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+}
+
+// =========================================================
+// Local helpers
+// =========================================================
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+type IrosReplyBody = {
+  conversationId?: unknown;
+  conversation_id?: unknown;
+
+  text?: unknown;
+
+  hintText?: unknown;
+  modeHintText?: unknown;
+  modeHint?: unknown;
+
+  style?: unknown;
+  styleHint?: unknown;
+
+  tenant_id?: unknown;
+  tenantId?: unknown;
+
+  userCode?: unknown;
+  agent?: unknown;
+
+  history?: unknown;
+
+  cost?: unknown;
+  extra?: unknown;
+};
+
+function withTrace(headers: Record<string, string>, traceId: string) {
+  return { ...headers, 'x-trace-id': String(traceId) };
+}
+
+function makeEarlyTraceId(req: NextRequest) {
+  const fromHeader = String(req.headers.get('x-trace-id') ?? '').trim();
+  if (fromHeader) return fromHeader;
+
+  try {
+    const g = (globalThis as any)?.crypto;
+    if (g?.randomUUID) return String(g.randomUUID());
+  } catch {}
+
+  return `trace_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function makeTraceId(req: NextRequest, extraReq: any | null, fallbackEarly: string) {
+  const fromHeader = String(req.headers.get('x-trace-id') ?? '').trim();
+  if (fromHeader) return fromHeader;
+
+  const fromExtra = String(extraReq?.traceId ?? extraReq?.trace_id ?? '').trim();
+  if (fromExtra) return fromExtra;
+
+  return fallbackEarly;
+}
+
+function stripInternalLines(s0: string) {
+  const s = String(s0 ?? '');
+  const lines = s.split('\n').filter((ln) => {
+    const t = ln.trim();
+    if (!t) return false;
+
+    if (t.startsWith('@OBS')) return false;
+    if (t.startsWith('@SHIFT')) return false;
+    if (t.startsWith('@NEXT')) return false;
+    if (t.startsWith('@SAFE')) return false;
+    if (t.startsWith('@DRAFT')) return false;
+    if (t.startsWith('@SEED_TEXT')) return false;
+    if (t.startsWith('INTERNAL PACK')) return false;
+
+    return true;
+  });
+
+  return lines.join('\n').trim();
+}
+
+function blocksToText(bs: any[]) {
+  const parts = bs
+    .map((b) => {
+      if (typeof b === 'string') return b.trimEnd();
+      return String(b?.text ?? b?.content ?? b?.value ?? b?.body ?? '').trimEnd();
+    })
+    .filter((s) => String(s).trim().length > 0);
+
+  return parts.join('\n\n').trimEnd();
 }
 
 // =========================================================
@@ -153,25 +227,14 @@ export async function POST(req: NextRequest) {
   let auth: any = null;
 
   // ✅ 早期returnでも必ず traceId を返す（body未読でも使える）
-  const traceIdEarly = (() => {
-    const fromHeader = req.headers.get('x-trace-id');
-    const s = String(fromHeader ?? '').trim();
-    if (s) return s;
-
-    try {
-      const g = (globalThis as any)?.crypto;
-      if (g?.randomUUID) return String(g.randomUUID());
-    } catch {}
-
-    return `trace_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  })();
+  const traceIdEarly = makeEarlyTraceId(req);
 
   try {
-    // 2) body
-    const body = await req.json().catch(() => ({} as any));
+    // -------------------------------------------------------
+    // 1) body
+    // -------------------------------------------------------
+    const body = (await req.json().catch(() => ({} as any))) as IrosReplyBody;
 
-    // ✅ normalize early（空文字は undefined 扱い）
-    // - UIから来る conversationId は「外部キー」のことがある（uuidでないことがある）
     const conversationKeyRaw =
       typeof body?.conversationId === 'string'
         ? body.conversationId
@@ -179,62 +242,54 @@ export async function POST(req: NextRequest) {
           ? body.conversation_id
           : undefined;
 
-    const conversationKey: string | undefined =
-      conversationKeyRaw && conversationKeyRaw.trim() ? conversationKeyRaw.trim() : undefined;
+    const conversationKey =
+      conversationKeyRaw && String(conversationKeyRaw).trim() ? String(conversationKeyRaw).trim() : undefined;
 
-    const text: string | undefined = typeof body?.text === 'string' ? body.text : body?.text;
-    const hintText: string | undefined = body?.hintText ?? body?.modeHintText;
-    const modeHintInput: string | undefined = body?.modeHint;
-    const extraReq: Record<string, any> | undefined = body?.extra;
+    const text = typeof body?.text === 'string' ? body.text : (body?.text as any);
+    const hintText: string | undefined = (body as any)?.hintText ?? (body as any)?.modeHintText;
+    const modeHintInput: string | undefined = (body as any)?.modeHint;
 
-    // ✅ body側の traceId があれば優先し、無ければ early を使う（ここで確定）
-    const traceId = (() => {
-      const fromExtra = extraReq?.traceId ?? extraReq?.trace_id ?? null;
-      const s = String(fromExtra ?? traceIdEarly ?? '').trim();
-      return s || String(traceIdEarly);
-    })();
+    const extraReq: Record<string, any> | undefined =
+      (body as any)?.extra && typeof (body as any).extra === 'object' ? ((body as any).extra as Record<string, any>) : undefined;
 
-    // ✅ conversationId を「内部uuid」に解決するのは userCode 確定後に行う
-    //   ここではプレースホルダとして undefined のまま進める
-    let conversationId: string | undefined = undefined;
+    const traceId = makeTraceId(req, extraReq ?? null, traceIdEarly);
 
-
-    // ✅ TRACE用（auth前なので header/body から暫定で出す）
     const userCodeHint =
-      (req.headers.get('x-user-code')?.trim() ||
-        (typeof body?.userCode === 'string' ? body.userCode.trim() : '') ||
-        '');
+      String(req.headers.get('x-user-code') ?? '').trim() ||
+      (typeof (body as any)?.userCode === 'string' ? (body as any).userCode.trim() : '') ||
+      '';
 
-    // ✅ 追跡用：このリクエストの traceId を必ずログに残す（調査の基点）
     console.info('[IROS/pipe][TRACE]', {
       traceId,
-      conversationId: String(conversationId ?? ''),
+      conversationKey: conversationKey ?? null,
+      conversationId: null, // auth前・uuid未解決なので常に null
       userCode: userCodeHint || null,
       modeHint: modeHintInput ?? null,
       hasHeaderUserCode: !!req.headers.get('x-user-code'),
       devBypass: process.env.IROS_DEV_BYPASS_AUTH === '1',
     });
 
-    const chatHistory: unknown[] | undefined = Array.isArray(body?.history) ? (body.history as unknown[]) : undefined;
+    const chatHistory: unknown[] | undefined = Array.isArray((body as any)?.history)
+      ? ((body as any).history as unknown[])
+      : undefined;
 
     const styleInput: string | undefined =
-      typeof body?.style === 'string'
-        ? body.style
-        : typeof body?.styleHint === 'string'
-          ? body.styleHint
+      typeof (body as any)?.style === 'string'
+        ? (body as any).style
+        : typeof (body as any)?.styleHint === 'string'
+          ? (body as any).styleHint
           : undefined;
 
-    // 1) auth
+    // -------------------------------------------------------
+    // 2) auth
+    // -------------------------------------------------------
     const DEV_BYPASS = process.env.IROS_DEV_BYPASS_AUTH === '1';
 
     // ✅ header優先（従来どおり）
-    const hUserCode = req.headers.get('x-user-code');
-    const bypassUserCodeFromHeader = hUserCode && hUserCode.trim().length > 0 ? hUserCode.trim() : null;
+    const hUserCode = String(req.headers.get('x-user-code') ?? '').trim();
+    const bypassUserCodeFromHeader = hUserCode.length > 0 ? hUserCode : null;
 
     // ✅ 開発だけ：headerが無い場合のフォールバック
-    // - body.userCode が来ていればそれを使う
-    // - それも無ければ IROS_DEV_BYPASS_USER_CODE（無ければ 669933）
-    // ※ production では絶対に動かさない
     const allowDevFallback = DEV_BYPASS && process.env.NODE_ENV !== 'production';
 
     if (DEV_BYPASS && bypassUserCodeFromHeader) {
@@ -245,68 +300,70 @@ export async function POST(req: NextRequest) {
         typeof bodyAny?.userCode === 'string' && bodyAny.userCode.trim().length > 0 ? bodyAny.userCode.trim() : null;
 
       const fallbackUserCode = String(process.env.IROS_DEV_BYPASS_USER_CODE ?? '669933').trim();
-
       const chosen = bypassUserCodeFromBody ?? fallbackUserCode;
       auth = { ok: true, userCode: chosen, uid: 'dev-bypass' };
     } else {
       auth = await verifyFirebaseAndAuthorize(req);
       if (!auth?.ok) {
-        const headers: Record<string, string> = { ...CORS_HEADERS };
-        // ✅ body.traceId が来ていればそれを返す（調査の基点を揃える）
-        headers['x-trace-id'] = String(traceId);
-        return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401, headers });
+        return NextResponse.json(
+          { ok: false, error: 'unauthorized' },
+          { status: 401, headers: withTrace(CORS_HEADERS, traceId) },
+        );
       }
     }
 
-// ✅ この時点では conversationId(uuid) はまだ解決していないのでチェックしない
-// - UI から来るのは外部キー(conversationKey)の可能性があるため
-if (!conversationKey || !text) {
-  const headers: Record<string, string> = { ...CORS_HEADERS };
-  headers['x-trace-id'] = String(traceId);
-  return NextResponse.json(
-    { ok: false, error: 'bad_request', detail: 'conversationId(conversationKey) and text are required' },
-    { status: 400, headers },
-  );
-}
+    // ✅ この時点では conversationId(uuid) はまだ解決していないので uuid check しない
+    if (!conversationKey || !text) {
+      return NextResponse.json(
+        { ok: false, error: 'bad_request', detail: 'conversationId(conversationKey) and text are required' },
+        { status: 400, headers: withTrace(CORS_HEADERS, traceId) },
+      );
+    }
 
-    const tenantId: string =
-      typeof body?.tenant_id === 'string' && body.tenant_id.trim().length > 0
-        ? body.tenant_id.trim()
-        : typeof body?.tenantId === 'string' && body.tenantId.trim().length > 0
-          ? body.tenantId.trim()
-          : 'default';
-
-    // 3) mode
-    const mode = resolveModeHintFromText({ modeHint: modeHintInput, hintText, text });
-    const rememberScope: RememberScopeKind | null = resolveRememberScope({ modeHint: modeHintInput, hintText, text });
-
-    // ...（この続きは元のまま）
-
-    // 4) ids
-    // ✅ Bearer 認証で userCode が確定している場合は、それを絶対採用する（x-user-code で上書きさせない）
+    // -------------------------------------------------------
+    // 3) ids（auth優先）
+    // -------------------------------------------------------
     const userCodeFromAuth =
       typeof (auth as any)?.userCode === 'string' && String((auth as any).userCode).trim().length > 0
         ? String((auth as any).userCode).trim()
         : null;
 
-    // ✅ dev-bypass のときだけ header/body フォールバックを許す（従来互換）
     const userCode = userCodeFromAuth ?? pickUserCode(req, auth);
-    // ✅ conversationKey（外部キー）→ conversationId（内部uuid）
-    // - uuid key の場合は「内部id直通」を先に試してチェーン増殖を防ぐ
-    // ✅ userCode が無いなら、ここで落とす（ensure の前）
+
     if (!userCode) {
       return NextResponse.json(
         { ok: false, error: 'unauthorized_user_code_missing' },
-        { status: 401, headers: CORS_HEADERS },
+        { status: 401, headers: withTrace(CORS_HEADERS, traceId) },
       );
     }
 
-    // --- conversationKey -> internal conversationId (uuid) ---
-    // uuidっぽいkeyなら「内部id直通」を先に試す（チェーン増殖防止）
-    const UUID_RE =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const tenantId: string =
+      typeof (body as any)?.tenant_id === 'string' && (body as any).tenant_id.trim().length > 0
+        ? (body as any).tenant_id.trim()
+        : typeof (body as any)?.tenantId === 'string' && (body as any).tenantId.trim().length > 0
+          ? (body as any).tenantId.trim()
+          : 'default';
 
-    if (conversationKey && UUID_RE.test(conversationKey)) {
+    // -------------------------------------------------------
+    // 4) mode / rememberScope
+    // -------------------------------------------------------
+    const mode = resolveModeHintFromText({ modeHint: modeHintInput, hintText, text: String(text ?? '') });
+    const rememberScope: RememberScopeKind | null = resolveRememberScope({
+      modeHint: modeHintInput,
+      hintText,
+      text: String(text ?? ''),
+    });
+
+    // -------------------------------------------------------
+    // 5) conversationKey（外部キー）→ conversationId（内部uuid）
+    // -------------------------------------------------------
+    //
+    // ✅ uuid形式の key は「内部idとしてのみ扱う」
+    // - 存在しない uuid を conversation_key として ensure して “別会話” を作るのを禁止する
+    //
+    let conversationId: string | undefined;
+
+    if (UUID_RE.test(conversationKey)) {
       const { data: hit, error: hitErr } = await supabase
         .from('iros_conversations')
         .select('id')
@@ -314,41 +371,54 @@ if (!conversationKey || !text) {
         .limit(1)
         .maybeSingle();
 
-      if (!hitErr && hit?.id) {
-        conversationId = String(hit.id);
+      if (hitErr) {
+        return NextResponse.json(
+          { ok: false, error: 'db_error', detail: 'failed to lookup conversation by uuid' },
+          { status: 500, headers: withTrace(CORS_HEADERS, traceId) },
+        );
       }
-    }
 
-    if (!conversationId && conversationKey) {
+      if (!hit?.id) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: 'conversation_not_found',
+            detail: 'uuid conversationId not found (refuse to ensure by uuid-looking key)',
+          },
+          { status: 404, headers: withTrace(CORS_HEADERS, traceId) },
+        );
+      }
+
+      conversationId = String(hit.id);
+    } else {
       conversationId = await ensureIrosConversationUuid({
         supabase,
-        userCode, // ここはもう string に確定してる
+        userCode,
         conversationKey,
-        agent: typeof body?.agent === 'string' ? body.agent : 'iros',
+        agent: typeof (body as any)?.agent === 'string' ? (body as any).agent : 'iros',
       });
     }
+
     if (!conversationId) {
-      const headers: Record<string, string> = { ...CORS_HEADERS };
-      headers['x-trace-id'] = String(traceId);
       return NextResponse.json(
         { ok: false, error: 'bad_request', detail: 'failed to resolve internal conversationId(uuid)' },
-        { status: 400, headers },
+        { status: 400, headers: withTrace(CORS_HEADERS, traceId) },
       );
     }
 
-    // --- end ---
+    console.info('[IROS/pipe][TRACE_RESOLVED]', {
+      traceId,
+      conversationKey,
+      conversationId,
+      userCode,
+    });
 
-
-    if (!userCode) {
-      return NextResponse.json(
-        { ok: false, error: 'unauthorized_user_code_missing' },
-        { status: 401, headers: CORS_HEADERS },
-      );
-    }
-
-    // 5) credit amount（body.cost → header → default）
+    // -------------------------------------------------------
+    // 6) credit amount（body.cost → header → default）
+    // -------------------------------------------------------
     const headerCost = req.headers.get('x-credit-cost');
-    const bodyCost = body?.cost;
+    const bodyCost = (body as any)?.cost;
+
     const parsed =
       typeof bodyCost === 'number'
         ? bodyCost
@@ -361,24 +431,32 @@ if (!conversationKey || !text) {
     const CREDIT_AMOUNT = Number.isFinite(parsed) && parsed > 0 ? Number(parsed) : CHAT_CREDIT_AMOUNT;
     const creditRef = makeIrosRef(conversationId, startedAt);
 
-    // 6) authorize
+    // -------------------------------------------------------
+    // 7) authorize
+    // -------------------------------------------------------
     const authRes = await authorizeChat(req, userCode, CREDIT_AMOUNT, creditRef, conversationId);
+
     if (!authRes.ok) {
       const errCode = (authRes as any).error ?? 'credit_authorize_failed';
+
       const res = NextResponse.json(
         { ok: false, error: errCode, credit: { ref: creditRef, amount: CREDIT_AMOUNT, authorize: authRes } },
-        { status: 402, headers: CORS_HEADERS },
+        { status: 402, headers: withTrace(CORS_HEADERS, traceId) },
       );
+
       res.headers.set('x-reason', String(errCode));
       res.headers.set('x-user-code', userCode);
       res.headers.set('x-credit-ref', creditRef);
       res.headers.set('x-credit-amount', String(CREDIT_AMOUNT));
-      res.headers.set('x-trace-id', String(traceId));
+
       return res;
     }
 
-    // 7) low balance warn
+    // -------------------------------------------------------
+    // 8) low balance warn（best-effort）
+    // -------------------------------------------------------
     let lowWarn: null | { code: 'low_balance'; balance: number; threshold: number } = null;
+
     if (Number.isFinite(LOW_BALANCE_THRESHOLD) && LOW_BALANCE_THRESHOLD > 0) {
       const { data: balRow, error: balErr } = await supabase
         .from('users')
@@ -386,23 +464,28 @@ if (!conversationKey || !text) {
         .eq('user_code', userCode)
         .maybeSingle();
 
-      if (!balErr && balRow && balRow.sofia_credit != null) {
-        const balance = Number(balRow.sofia_credit) || 0;
+      if (!balErr && balRow && (balRow as any).sofia_credit != null) {
+        const balance = Number((balRow as any).sofia_credit) || 0;
         if (balance < LOW_BALANCE_THRESHOLD) {
           lowWarn = { code: 'low_balance', balance, threshold: LOW_BALANCE_THRESHOLD };
         }
       }
     }
 
-    // 8) user profile（best-effort）
+    // -------------------------------------------------------
+    // 9) user profile（best-effort）
+    // -------------------------------------------------------
     let userProfile: any | null = null;
+
     try {
       userProfile = await loadIrosUserProfile(supabase, userCode);
     } catch {
       userProfile = null;
     }
 
-    // 9) NextStep tag strip
+    // -------------------------------------------------------
+    // 10) NextStep tag strip
+    // -------------------------------------------------------
     const rawText = String(text ?? '');
     const extracted = extractNextStepChoiceFromText(rawText);
 
@@ -419,12 +502,14 @@ if (!conversationKey || !text) {
 
     const userTextClean = cleanText.length ? cleanText : rawText;
 
-    if (effectiveChoiceId) {
-      findNextStepOptionById(effectiveChoiceId);
-    }
+    if (effectiveChoiceId) findNextStepOptionById(effectiveChoiceId);
 
-    // 10) extra sanitize（route.tsでIT強制は扱わない）
-    const rawExtra: Record<string, any> = (extraReq ?? {}) as any;
+    // -------------------------------------------------------
+    // 11) extra sanitize（route.tsでIT強制は扱わない）
+    // -------------------------------------------------------
+    const rawExtra: Record<string, any> =
+      extraReq && typeof extraReq === 'object' ? (extraReq as Record<string, any>) : {};
+
     const sanitizedExtra: Record<string, any> = { ...rawExtra };
 
     delete (sanitizedExtra as any).forceIT;
@@ -434,12 +519,12 @@ if (!conversationKey || !text) {
     delete (sanitizedExtra as any).tLayerModeActive;
     delete (sanitizedExtra as any).tLayerHint;
 
-    // ✅ route.ts の SoT extra（この変数だけを “正” とする）
+    // ✅ route.ts SoT extra
     let extraSoT: Record<string, any> = {
       ...sanitizedExtra,
       choiceId: effectiveChoiceId,
       extractedChoiceId,
-      traceId, // route.ts が source-of-truth の traceId
+      traceId,
     };
 
     const reqOrigin = req.headers.get('origin') ?? req.headers.get('x-forwarded-origin') ?? req.nextUrl?.origin ?? '';
@@ -460,28 +545,18 @@ if (!conversationKey || !text) {
     extraSoT = {
       ...extraSoT,
       persistedByRoute: true,
+      persistPolicy: PERSIST_POLICY,
       persistAssistantMessage: false,
     };
-// =========================================================
-// ✅ persist USER message (single-writer)
-// - do this BEFORE handleIrosReply() so history fetch works on reload
-// - conversationId is already the internal uuid resolved earlier
-// =========================================================
-{
-  const userMeta = {
-    extra: {
-      traceId: String(traceId),
-      persistedByRoute: true,
-      persistPolicy: PERSIST_POLICY,
-      kind: 'user_message',
-    },
-  };
-}
-// ✅ single-writer（user は /api/agent/iros/messages のみが永続化）
-// /api/agent/iros/reply は「生成 + assistant 永続化」だけを担当する
 
+    // ✅ IMPORTANT:
+    // - user message の永続化は /api/agent/iros/messages が single-writer
+    // - この /reply は user message を保存しない（重複防止）
+    // - assistant message はこのrouteが single-writer（1回だけ）
 
-    // 11) handle
+    // -------------------------------------------------------
+    // 12) handle
+    // -------------------------------------------------------
     const irosResult: HandleIrosReplyOutput = await handleIrosReply({
       conversationId,
       text: userTextClean,
@@ -499,18 +574,23 @@ if (!conversationKey || !text) {
       extra: extraSoT,
     });
 
-    // 11.5) NORMAL BASE fallback（非SILENCE/FORWARDで本文が空に近い場合）
+    // -------------------------------------------------------
+    // 12.5) NORMAL BASE fallback（非FORWARDで本文が空に近い場合）
+    // -------------------------------------------------------
     if (irosResult.ok) {
       const r: any = irosResult as any;
+
       const metaAny = r?.metaForSave ?? r?.meta ?? {};
       const extraAny = metaAny?.extra ?? {};
+
       const speechAct = String(extraAny?.speechAct ?? metaAny?.speechAct ?? '').toUpperCase();
       const allowLLM = extraAny?.speechAllowLLM ?? metaAny?.speechAllowLLM ?? true;
 
-      const slotPlanPolicy = String((metaAny?.framePlan as any)?.slotPlanPolicy ?? '').trim().toUpperCase();
       const finalTextPolicy = String(extraAny?.finalTextPolicy ?? '').trim().toUpperCase();
+      const slotPlanPolicy = String((metaAny?.framePlan as any)?.slotPlanPolicy ?? '').trim().toUpperCase();
 
-      const treatAsScaffoldSeed = finalTextPolicy.includes('TREAT_AS_SCAFFOLD_SEED') || finalTextPolicy.includes('SCAFFOLD_SEED');
+      const treatAsScaffoldSeed =
+        finalTextPolicy.includes('TREAT_AS_SCAFFOLD_SEED') || finalTextPolicy.includes('SCAFFOLD_SEED');
 
       const isPdfScaffoldNoCommit =
         extraAny?.pdfScaffoldNoCommit === true ||
@@ -518,25 +598,23 @@ if (!conversationKey || !text) {
         slotPlanPolicy === 'SCAFFOLD' ||
         treatAsScaffoldSeed;
 
-      const llmRewriteSeedLen = String(extraAny?.llmRewriteSeed ?? '').trim().length;
-
-      // ✅ SKIPは「診断で明示されたseed運用」のときだけ
       const isDiagnosisFinalSeed = finalTextPolicy === 'DIAGNOSIS_FINAL__SEED_FOR_LLM';
 
       const candidateText = pickText(r?.assistantText, r?.content);
-      const isSilenceOrForward = speechAct === 'FORWARD'; // SILENCE廃止
+      const isForward = speechAct === 'FORWARD';
       const isEmptyLike = isEffectivelyEmptyText(candidateText);
 
-      const isNonSilenceButEmpty =
-        !isSilenceOrForward &&
+      const isNonForwardButEmpty =
+        !isForward &&
         allowLLM !== false &&
         String(userTextClean ?? '').trim().length > 0 &&
         isEmptyLike &&
         !isPdfScaffoldNoCommit &&
         !isDiagnosisFinalSeed;
 
-      if (isNonSilenceButEmpty) {
+      if (isNonForwardButEmpty) {
         const normal = await runNormalBase({ userText: userTextClean });
+
         r.assistantText = normal.text;
         r.content = normal.text;
         r.text = normal.text;
@@ -548,77 +626,36 @@ if (!conversationKey || !text) {
           normalBaseSource: normal.meta.source,
           normalBaseReason: 'EMPTY_LIKE_TEXT',
         };
-      } else if (isPdfScaffoldNoCommit && isEmptyLike) {
-        console.log('[IROS/NormalBase][SKIP] scaffold no-commit (expected empty body)', {
-          conversationId,
-          userCode,
-          speechAct,
-          slotPlanPolicy: slotPlanPolicy || null,
-          finalTextPolicy: finalTextPolicy || null,
-          pdfScaffoldNoCommit: extraAny?.pdfScaffoldNoCommit ?? null,
-        });
-      } else if (isDiagnosisFinalSeed && isEmptyLike) {
-        console.log('[IROS/NormalBase][SKIP] diagnosis final seed (expected empty body)', {
-          conversationId,
-          userCode,
-          speechAct,
-          slotPlanPolicy: slotPlanPolicy || null,
-          finalTextPolicy: finalTextPolicy || null,
-          llmRewriteSeedLen,
-        });
       }
     }
 
     if (!irosResult.ok) {
-      const headers: Record<string, string> = {
-        ...CORS_HEADERS,
-        'x-credit-ref': creditRef,
-        'x-credit-amount': String(CREDIT_AMOUNT),
-        'x-trace-id': String(traceId),
-      };
-
       return NextResponse.json(
-        { ok: false, error: (irosResult as any).error, detail: (irosResult as any).detail, credit: { ref: creditRef, amount: CREDIT_AMOUNT, authorize: authRes } },
-        { status: 500, headers },
+        {
+          ok: false,
+          error: (irosResult as any).error,
+          detail: (irosResult as any).detail,
+          credit: { ref: creditRef, amount: CREDIT_AMOUNT, authorize: authRes },
+        },
+        { status: 500, headers: withTrace(CORS_HEADERS, traceId) },
       );
     }
 
-    // ✅ ここで必ず取り出す（以降は finalMode/assistantText を参照しても安全）
+    // ✅ ここで必ず取り出す
     let { result, finalMode, metaForSave, assistantText } = irosResult as any;
 
-    // =========================================================
-    // ✅ Meta/Extra: SpeechPolicy early-return + render-v2 gate clamp
-    // =========================================================
+    // -------------------------------------------------------
+    // SpeechPolicy: FORWARD early-return
+    // -------------------------------------------------------
     {
       const metaAny: any = metaForSave ?? (result as any)?.meta ?? {};
       const extraAny: any = metaAny?.extra ?? {};
 
-      const env = String(process.env.IROS_RENDER_EXPAND_ENABLED ?? 'true').toLowerCase().trim();
-      const EXPAND_ENABLED = ['1', 'true', 'on', 'yes', 'enabled'].includes(env);
-
       const speechAct0 = String(extraAny?.speechAct ?? metaAny?.speechAct ?? '').toUpperCase();
-      const isSilenceOrForward0 = speechAct0 === 'FORWARD'; // SILENCE廃止
-
-      const mode0 = String(finalMode ?? metaAny?.mode ?? '').toLowerCase();
-      const isIR0 = mode0.includes('ir');
-
-      const expandAllowed = EXPAND_ENABLED && !isSilenceOrForward0 && !isIR0;
-
-      extraAny.expandAllowed = expandAllowed;
-
-      if (expandAllowed) {
-        const expandedMax = 16;
-        extraAny.maxLinesHint =
-          typeof extraAny?.maxLinesHint === 'number'
-            ? Math.max(extraAny.maxLinesHint, expandedMax)
-            : expandedMax;
-      }
+      const shouldEarlyReturn = speechAct0 === 'FORWARD';
 
       metaAny.extra = { ...(metaAny.extra ?? {}), ...extraAny };
       metaForSave = metaAny;
-
-      const speechAct = String(extraAny?.speechAct ?? metaAny?.speechAct ?? '').toUpperCase();
-      const shouldEarlyReturn = speechAct === 'FORWARD'; // SILENCE廃止
 
       if (shouldEarlyReturn) {
         const finalText = pickText((result as any)?.content, assistantText);
@@ -626,14 +663,16 @@ if (!conversationKey || !text) {
 
         const capRes = await captureChat(req, userCode, CREDIT_AMOUNT, creditRef);
 
-        const headers: Record<string, string> = {
-          ...CORS_HEADERS,
-          'x-handler': 'app/api/agent/iros/reply',
-          'x-credit-ref': creditRef,
-          'x-credit-amount': String(CREDIT_AMOUNT),
-          ...(lowWarn ? { 'x-warning': 'low_balance' } : {}),
-          'x-trace-id': String(traceId),
-        };
+        const headers: Record<string, string> = withTrace(
+          {
+            ...CORS_HEADERS,
+            'x-handler': 'app/api/agent/iros/reply',
+            'x-credit-ref': creditRef,
+            'x-credit-amount': String(CREDIT_AMOUNT),
+            ...(lowWarn ? { 'x-warning': 'low_balance' } : {}),
+          },
+          traceId,
+        );
 
         return NextResponse.json(
           {
@@ -656,38 +695,27 @@ if (!conversationKey || !text) {
       }
     }
 
-// 本文の同期（content/assistantText/text）
-{
-  const r: any = result;
+    // -------------------------------------------------------
+    // 本文の同期（content/assistantText）
+    // -------------------------------------------------------
+    {
+      const r: any = result;
 
-  // ❌ r.text は「ユーザー文エコー」になり得るため、本文確定には使わない
-  // ✅ 本文は assistantText / content / assistantText(outer) のみに限定する
-  const final = pickText(r?.assistantText, r?.content, assistantText);
+      const final = pickText(r?.assistantText, r?.content, assistantText);
+      assistantText = final;
 
-  assistantText = final;
+      if (r && typeof r === 'object') {
+        r.content = final;
+        r.assistantText = final;
+      }
+    }
 
-  if (r && typeof r === 'object') {
-    r.content = final;
-    r.assistantText = final;
-
-    // r.text は内部互換のため残す（ただし本文には使わない）
-    // r.text = final;  // ←ここも同期したいなら “final” だけにして userText を拾わない
-  }
-}
-
-
-    // ✅ render-v2 の fallback 材料は SoT extra を参照するため、最終本文を同期（SoTを満たす）
+    // ✅ render-v2 の fallback 材料 SoT 同期
     {
       const final = String(assistantText ?? '').trim();
 
       (extraSoT as any).finalAssistantText = final;
       (extraSoT as any).finalAssistantTextCandidate = (extraSoT as any).finalAssistantTextCandidate ?? final;
-
-      (extraSoT as any).assistantText = (extraSoT as any).assistantText ?? final;
-      (extraSoT as any).resolvedText = (extraSoT as any).resolvedText ?? final;
-
-      (extraSoT as any).rawTextFromModel = (extraSoT as any).rawTextFromModel ?? final;
-      (extraSoT as any).extractedTextFromModel = (extraSoT as any).extractedTextFromModel ?? final;
 
       if (metaForSave && typeof metaForSave === 'object') {
         metaForSave.extra = {
@@ -701,27 +729,29 @@ if (!conversationKey || !text) {
       }
     }
 
-    // capture
+    // -------------------------------------------------------
+    // capture（先にここで行う：エラーでも ref を残す）
+    // -------------------------------------------------------
     const capRes = await captureChat(req, userCode, CREDIT_AMOUNT, creditRef);
 
-    // headers
-    const headers: Record<string, string> = {
-      ...CORS_HEADERS,
-      'x-handler': 'app/api/agent/iros/reply',
-      'x-credit-ref': creditRef,
-      'x-credit-amount': String(CREDIT_AMOUNT),
-      ...(lowWarn ? { 'x-warning': 'low_balance' } : {}),
-      'x-trace-id': String(traceId),
-    };
+    // headers（共通）
+    const headers: Record<string, string> = withTrace(
+      {
+        ...CORS_HEADERS,
+        'x-handler': 'app/api/agent/iros/reply',
+        'x-credit-ref': creditRef,
+        'x-credit-amount': String(CREDIT_AMOUNT),
+        ...(lowWarn ? { 'x-warning': 'low_balance' } : {}),
+      },
+      traceId,
+    );
 
     // effectiveMode（metaForSave.renderMode優先）
     const effectiveMode =
       (typeof metaForSave?.renderMode === 'string' && metaForSave.renderMode) ||
       (typeof metaForSave?.extra?.renderedMode === 'string' && metaForSave.extra.renderedMode) ||
       finalMode ||
-      (result && typeof result === 'object' && typeof (result as any).mode === 'string'
-        ? (result as any).mode
-        : mode);
+      (result && typeof result === 'object' && typeof (result as any).mode === 'string' ? (result as any).mode : mode);
 
     const basePayload = {
       ok: true,
@@ -740,27 +770,24 @@ if (!conversationKey || !text) {
     // result が object のとき
     // =========================================================
     if (result && typeof result === 'object') {
-      // meta 組み立て（✅ metaForSave優先：result.meta → metaForSave の順で上書き）
+      // meta 組み立て（metaForSave優先）
       let meta: any = {
         ...(((result as any).meta) ?? {}),
         ...(metaForSave ?? {}),
-        userProfile: (metaForSave as any)?.userProfile ?? (result as any)?.meta?.userProfile ?? userProfile ?? null,
+        userProfile: (metaForSave as any)?.userProfile ?? (result as any)?.meta?.userProfile ?? null,
         extra: {
           ...(((result as any).meta?.extra) ?? {}),
           ...(((metaForSave as any)?.extra) ?? {}),
-
           userCode: userCode ?? null,
           hintText: hintText ?? null,
           traceId: traceId ?? null,
           historyLen: Array.isArray(chatHistory) ? chatHistory.length : 0,
           choiceId: extraSoT?.choiceId ?? null,
           extractedChoiceId: extraSoT?.extractedChoiceId ?? null,
-
-          // ✅ routeで確定した gate を meta にも同期（判定ブレ防止）
           renderEngineGate: extraSoT?.renderEngineGate === true,
           renderEngine: extraSoT?.renderEngine === true,
-
           persistedByRoute: true,
+          persistPolicy: PERSIST_POLICY,
           persistAssistantMessage: false,
         },
       };
@@ -781,10 +808,10 @@ if (!conversationKey || !text) {
         selfAcceptance:
           typeof meta.selfAcceptance === 'number'
             ? meta.selfAcceptance
-            : typeof meta.self_acceptance === 'number'
-              ? meta.self_acceptance
-              : typeof meta.unified?.self_acceptance === 'number'
-                ? meta.unified.self_acceptance
+            : typeof (meta as any).self_acceptance === 'number'
+              ? (meta as any).self_acceptance
+              : typeof (meta as any).unified?.self_acceptance === 'number'
+                ? (meta as any).unified.self_acceptance
                 : null,
         hasQ5DepressRisk: false,
         userText: userTextClean,
@@ -793,7 +820,7 @@ if (!conversationKey || !text) {
       // y/h 整数化
       meta = normalizeMetaLevels(meta);
 
-      // rephrase 前に memoryState を読む（last_state）
+      // memoryState（best-effort）
       let memoryStateForCtx: any | null = null;
       try {
         memoryStateForCtx = await loadIrosMemoryState(supabase as any, userCode);
@@ -801,11 +828,9 @@ if (!conversationKey || !text) {
         memoryStateForCtx = null;
       }
 
-      // ✅ handleIrosReply 側で付いた meta.extra / extra を SoT に吸収（SoT優先で壊さない）
-      // - ただし “SoTの上書き” はしない：SoTを最後にマージする
+      // meta extra merge（handle側→SoTへ寄せる）
       try {
         const metaAny = (irosResult as any)?.metaForSave ?? (irosResult as any)?.meta ?? null;
-
         const metaExtraA = (metaAny as any)?.extra ?? null;
         const metaExtraB = (irosResult as any)?.extraForHandle ?? null;
         const metaExtraC = (irosResult as any)?.extra ?? null;
@@ -814,7 +839,7 @@ if (!conversationKey || !text) {
         const hasObj = (x: any) => x && typeof x === 'object';
 
         const mergedFromMeta =
-          (hasObj(metaExtraA) || hasObj(metaExtraB) || hasObj(metaExtraC) || hasObj(metaExtraD))
+          hasObj(metaExtraA) || hasObj(metaExtraB) || hasObj(metaExtraC) || hasObj(metaExtraD)
             ? {
                 ...(hasObj(metaExtraA) ? metaExtraA : {}),
                 ...(hasObj(metaExtraB) ? metaExtraB : {}),
@@ -824,161 +849,53 @@ if (!conversationKey || !text) {
               }
             : null;
 
-        if (mergedFromMeta) {
-          extraSoT = mergedFromMeta;
-
-          const blocks =
-            (metaExtraB as any)?.rephraseBlocks ??
-            (metaExtraB as any)?.rephrase?.blocks ??
-            (metaExtraB as any)?.rephrase?.rephraseBlocks ??
-            (metaExtraA as any)?.rephraseBlocks ??
-            (metaExtraA as any)?.rephrase?.blocks ??
-            (metaExtraA as any)?.rephrase?.rephraseBlocks ??
-            (metaExtraC as any)?.rephraseBlocks ??
-            (metaExtraC as any)?.rephrase?.blocks ??
-            (metaExtraC as any)?.rephrase?.rephraseBlocks ??
-            (metaExtraD as any)?.rephraseBlocks ??
-            (metaExtraD as any)?.rephrase?.blocks ??
-            (metaExtraD as any)?.rephrase?.rephraseBlocks ??
-            null;
-
-          if (!Array.isArray((extraSoT as any).rephraseBlocks) && Array.isArray(blocks) && blocks.length > 0) {
-            (extraSoT as any).rephraseBlocks = blocks;
-          }
-
-          const head =
-            (metaExtraB as any)?.rephraseHead ??
-            (metaExtraB as any)?.rephrase?.head ??
-            (metaExtraA as any)?.rephraseHead ??
-            (metaExtraA as any)?.rephrase?.head ??
-            (metaExtraC as any)?.rephraseHead ??
-            (metaExtraC as any)?.rephrase?.head ??
-            (metaExtraD as any)?.rephraseHead ??
-            (metaExtraD as any)?.rephrase?.head ??
-            null;
-
-          if (!(extraSoT as any).rephraseHead && head) (extraSoT as any).rephraseHead = head;
-
-          console.info('[IROS/pipe][META_EXTRA_MERGED]', {
-            metaSource: (irosResult as any)?.metaForSave ? 'metaForSave' : ((irosResult as any)?.meta ? 'meta' : 'none'),
-            metaExtraSources: {
-              meta_extra: hasObj(metaExtraA),
-              extraForHandle: hasObj(metaExtraB),
-              result_extra: hasObj(metaExtraC),
-              metaExtra: hasObj(metaExtraD),
-            },
-            mergedExtraHasBlocks: Array.isArray((extraSoT as any).rephraseBlocks),
-            mergedExtraBlocksLen: (extraSoT as any).rephraseBlocks?.length ?? null,
-            mergedHead: (extraSoT as any).rephraseHead ? String((extraSoT as any).rephraseHead).slice(0, 80) : null,
-          });
-        } else {
-          console.info('[IROS/pipe][META_EXTRA_MERGED][NO_META_EXTRA]', {
-            hasMeta: Boolean(metaAny),
-            metaKeys: metaAny ? Object.keys(metaAny) : [],
-          });
-        }
+        if (mergedFromMeta) extraSoT = mergedFromMeta;
       } catch (e) {
         console.warn('[IROS/pipe][META_EXTRA_MERGED][ERROR]', e);
       }
 
-      // ✅ enable判定は SoT をソースにする（metaの欠落でOFFにならない）
+// ✅ DEV用：header で強制 retry を有効化（本番は無効）
+{
+  const h = String(req.headers.get('x-iros-force-retry') ?? '').trim().toLowerCase();
+  const forceRetry =
+    process.env.NODE_ENV !== 'production' && (h === '1' || h === 'true' || h === 'yes' || h === 'on');
+
+  if (forceRetry) {
+    extraSoT = { ...(extraSoT ?? {}), forceRetry: true };
+    meta.extra = { ...(meta.extra ?? {}), forceRetry: true };
+
+    console.warn('[IROS/pipe][FORCE_RETRY_HEADER_ENABLED]', {
+      traceId,
+      conversationId,
+      userCode,
+      header: h,
+    });
+  }
+}
+
+
       // render engine apply（single entry）
       {
         const upperMode = String(effectiveMode ?? '').toUpperCase();
         const enableRenderEngine = extraSoT?.renderEngine === true || extraSoT?.renderEngineGate === true;
-
         const isIT = upperMode === 'IT' || Boolean((meta as any)?.extra?.renderReplyForcedIT);
 
-// ✅ 3) 呼び出し側：chatHistory をそのまま渡す
-const applied = await applyRenderEngineIfEnabled({
-  enableRenderEngine,
-  isIT,
-  conversationId,
-  userCode,
-  userText: userTextClean,
-  extraForHandle: extraSoT ?? null,
-  meta,
-  resultObj: result as any,
+        const applied = await applyRenderEngineIfEnabled({
+          enableRenderEngine,
+          isIT,
+          conversationId,
+          userCode,
+          userText: userTextClean,
+          extraForHandle: extraSoT ?? null,
+          meta,
+          resultObj: result as any,
+          historyMessages: Array.isArray(chatHistory) ? chatHistory : null,
+        });
 
-  // ✅ 追加
-  historyMessages: Array.isArray(chatHistory) ? chatHistory : null,
-});
-
-meta = applied.meta;
-// ✅ SoT の参照を維持しつつ、返ってきた extra を SoT に差し替える
-extraSoT = applied.extraForHandle ?? extraSoT;
-
-// ✅ 保存側(metaForSave.extra)にも最小同期（null/空で潰さない）
-try {
-  const ex: any = extraSoT as any;
-
-  const mergedBlocks2 =
-    Array.isArray(ex?.rephraseBlocks) && ex.rephraseBlocks.length > 0 ? ex.rephraseBlocks : null;
-
-  const mergedHead2 = String(ex?.rephraseHead ?? '').trim() || null;
-
-  const mergedCtx2 = ex?.ctxPack && typeof ex.ctxPack === 'object' ? ex.ctxPack : null;
-
-  // ✅ flowDigest / flowTape を carry（空で潰さない）
-  const mergedFlowDigest2 = String(ex?.flowDigest ?? ex?.ctxPack?.flow?.digest ?? '').trim() || null;
-  const mergedFlowTape2 = typeof ex?.flowTape === 'string' ? String(ex.flowTape).trim() || null : null;
-
-  // ✅ goalText を carry（空で潰さない）
-  const mergedGoalText2 =
-    String(ex?.goalText ?? ex?.goal ?? ex?.ctxPack?.goalText ?? ex?.ctxPack?.goal ?? '').trim() || null;
-
-  // metaForSave.extra に反映（既存があるなら尊重）
-  (metaForSave as any).extra = (metaForSave as any).extra ?? {};
-
-  if (mergedBlocks2 && !Array.isArray((metaForSave as any).extra?.rephraseBlocks)) {
-    (metaForSave as any).extra.rephraseBlocks = mergedBlocks2;
-  }
-  if (mergedHead2 && !String((metaForSave as any).extra?.rephraseHead ?? '').trim()) {
-    (metaForSave as any).extra.rephraseHead = mergedHead2;
-  }
-  if (mergedCtx2 && !(metaForSave as any).extra?.ctxPack) {
-    (metaForSave as any).extra.ctxPack = mergedCtx2;
-  }
-  if (mergedFlowDigest2 && !String((metaForSave as any).extra?.flowDigest ?? '').trim()) {
-    (metaForSave as any).extra.flowDigest = mergedFlowDigest2;
-  }
-  if (mergedFlowTape2 && !String((metaForSave as any).extra?.flowTape ?? '').trim()) {
-    (metaForSave as any).extra.flowTape = mergedFlowTape2;
-  }
-  if (mergedGoalText2 && !String((metaForSave as any).extra?.goalText ?? '').trim()) {
-    (metaForSave as any).extra.goalText = mergedGoalText2;
-  }
-
-  // meta.extra にも最小同期（render 側が拾うケース）
-  (meta as any).extra = (meta as any).extra ?? {};
-
-  if (
-    !Array.isArray((meta as any).extra?.rephraseBlocks) &&
-    Array.isArray(ex?.rephraseBlocks) &&
-    ex.rephraseBlocks.length > 0
-  ) {
-    (meta as any).extra.rephraseBlocks = ex.rephraseBlocks;
-    (meta as any).extra.rephraseBlocksAttached = true;
-  }
-  if (!String((meta as any).extra?.rephraseHead ?? '').trim() && mergedHead2) {
-    (meta as any).extra.rephraseHead = mergedHead2;
-  }
-  if (!(meta as any).extra?.ctxPack && mergedCtx2) {
-    (meta as any).extra.ctxPack = mergedCtx2;
-  }
-  if (!String((meta as any).extra?.flowDigest ?? '').trim() && mergedFlowDigest2) {
-    (meta as any).extra.flowDigest = mergedFlowDigest2;
-  }
-  if (!String((meta as any).extra?.flowTape ?? '').trim() && mergedFlowTape2) {
-    (meta as any).extra.flowTape = mergedFlowTape2;
-  }
-  if (!String((meta as any).extra?.goalText ?? '').trim() && mergedGoalText2) {
-    (meta as any).extra.goalText = mergedGoalText2;
-  }
-} catch (e) {
-  console.warn('[IROS/route] extra minimal sync failed', e);
-}
+        meta = applied.meta;
+        extraSoT = applied.extraForHandle ?? extraSoT;
       }
+
       // sanitize header
       {
         const before = String((result as any)?.content ?? '');
@@ -987,356 +904,204 @@ try {
         meta.extra = { ...(meta.extra ?? {}), finalHeaderStripped: sanitized.removed.length ? sanitized.removed : null };
       }
 
-// FINAL本文の確定（ここでは “生成しない”／あくまで strip + recover（既存資材から）だけ）
-{
-  const curRaw = String((result as any)?.content ?? '');
-  const curTrim = curRaw.trim();
+      // FINAL本文の確定（生成しない：strip + recoverだけ）
+      {
+        const curRaw = String((result as any)?.content ?? '');
+        const curTrim = curRaw.trim();
 
-  const emptyLike = isEffectivelyEmptyText(curTrim);
+        const emptyLike = isEffectivelyEmptyText(curTrim);
+        const hasSlotDirectives = /(^|\n)\s*@(OBS|SHIFT|NEXT|SAFE|DRAFT|SEED_TEXT)\b/.test(curRaw);
 
-  // ✅ スロット指示が本文に漏れているか（@OBS/@SHIFT/...）
-  const hasSlotDirectives = /(^|\n)\s*@(OBS|SHIFT|NEXT|SAFE|DRAFT|SEED_TEXT)\b/.test(curRaw);
+        const exMeta: any = (metaForSave as any)?.extra ?? {};
+        const exMeta2: any = (meta as any)?.extra ?? {};
+        const exSoT: any = (extraSoT as any) ?? {};
 
-  // ✅ recover材料（metaForSave / meta / SoT の順で拾う）
-  const exMeta: any = (metaForSave as any)?.extra ?? {};
-  const exMeta2: any = (meta as any)?.extra ?? {};
-  const exSoT: any = (extraSoT as any) ?? {};
+        const head = String(exMeta?.rephraseHead ?? exMeta2?.rephraseHead ?? exSoT?.rephraseHead ?? '').trim();
 
-  // 旧ログ参照用（ex?.rephraseBlocks など）を壊さない
-  const ex: any = exSoT;
+        const blocks: any[] = Array.isArray(exMeta?.rephraseBlocks)
+          ? exMeta.rephraseBlocks
+          : Array.isArray(exMeta2?.rephraseBlocks)
+            ? exMeta2.rephraseBlocks
+            : Array.isArray(exSoT?.rephraseBlocks)
+              ? exSoT.rephraseBlocks
+              : [];
 
-  // head / blocks は「metaForSave → meta → SoT」の順で拾う
-  const head = String(exMeta?.rephraseHead ?? exMeta2?.rephraseHead ?? exSoT?.rephraseHead ?? '').trim();
+        const recoveredFromBlocks = blocks.length > 0 ? blocksToText(blocks) : '';
+        const recoveredText = head || recoveredFromBlocks;
 
-  const blocks: any[] = Array.isArray(exMeta?.rephraseBlocks)
-    ? exMeta.rephraseBlocks
-    : Array.isArray(exMeta2?.rephraseBlocks)
-      ? exMeta2.rephraseBlocks
-      : Array.isArray(exSoT?.rephraseBlocks)
-        ? exSoT.rephraseBlocks
-        : [];
+        const needRecover = emptyLike || hasSlotDirectives;
 
-  const blocksToText = (bs: any[]) => {
-    const lines = bs
-      .map((b) => {
-        if (typeof b === 'string') return b.trimEnd();
-        return String(b?.text ?? b?.content ?? b?.value ?? b?.body ?? '').trimEnd();
-      })
-      .filter((s) => s.trim().length > 0);
-    return lines.join('\n\n').trimEnd();
-  };
+        const stripSlotDirectives = (s: string) => {
+          const raw = String(s ?? '');
+          if (!raw) return raw;
+          return raw
+            .replace(/(^|\n)\s*@(OBS|SHIFT|NEXT|SAFE|DRAFT|SEED_TEXT)\b[^\n]*\n?/g, '$1')
+            .replace(/\n{3,}/g, '\n\n')
+            .trimEnd();
+        };
 
-  const recoveredFromBlocks = blocks.length > 0 ? blocksToText(blocks) : '';
-  const recoveredText = head || recoveredFromBlocks;
+        const curNoSlots = hasSlotDirectives ? stripSlotDirectives(curRaw) : curRaw.trimEnd();
+        const curNoSlotsTrim = curNoSlots.trim();
 
-  // ✅ (空っぽ or スロット漏れ) の場合、既存資材から復元できるなら置換
-  // ✅ SILENCE は廃止：常に通常の本文確定へ寄せる
-  const needRecover = emptyLike || hasSlotDirectives;
+        const finalText = needRecover
+          ? recoveredText
+            ? recoveredText
+            : hasSlotDirectives && curNoSlotsTrim.length > 0
+              ? curNoSlots
+              : curRaw.trimEnd()
+          : curRaw.trimEnd();
 
-  const stripSlotDirectives = (s: string) => {
-    const raw = String(s ?? '');
-    if (!raw) return raw;
-    const out = raw
-      .replace(/(^|\n)\s*@(OBS|SHIFT|NEXT|SAFE|DRAFT|SEED_TEXT)\b[^\n]*\n?/g, '$1')
-      .replace(/\n{3,}/g, '\n\n')
-      .trimEnd();
-    return out;
-  };
+        (result as any).content = finalText;
+        (result as any).text = finalText;
+        (result as any).assistantText = finalText;
 
-  const curNoSlots = hasSlotDirectives ? stripSlotDirectives(curRaw) : curRaw.trimEnd();
-  const curNoSlotsTrim = curNoSlots.trim();
+        meta.extra = {
+          ...(meta.extra ?? {}),
+          finalAssistantTextSynced: true,
+          finalAssistantTextLen: finalText.length,
+          finalTextRecoveredFromSoT: needRecover && Boolean(recoveredText) ? true : undefined,
+          finalTextRecoveredSource:
+            needRecover && Boolean(recoveredText) ? (head ? 'rephraseHead' : 'rephraseBlocks') : undefined,
+          finalTextHadSlotDirectives: hasSlotDirectives ? true : undefined,
+        };
+      }
 
-  const finalText = needRecover
-    ? recoveredText
-      ? recoveredText
-      : hasSlotDirectives && curNoSlotsTrim.length > 0
-        ? curNoSlots
-        : curRaw.trimEnd()
-    : curRaw.trimEnd();
+      // UI MODE確定（IR以外は NORMAL）
+      {
+        const hint = String(mode ?? '').toUpperCase();
+        const eff = String(effectiveMode ?? '').toUpperCase();
+        const uiMode: 'NORMAL' | 'IR' = hint.includes('IR') || eff.includes('IR') ? 'IR' : 'NORMAL';
 
-  if (String(process.env.IROS_DEBUG_SILENCE_PIPE ?? '0').trim() === '1') {
-    console.info('[IROS/pipe][FINAL_TEXT]', {
-      conversationId,
-      userCode,
-      curRawLen: curRaw.length,
-      curTrimLen: curTrim.length,
-      emptyLike,
-      hasSlotDirectives,
-      sotHasBlocks: Array.isArray(ex?.rephraseBlocks),
-      sotBlocksLen: Array.isArray(ex?.rephraseBlocks) ? ex.rephraseBlocks.length : null,
-      sotHeadLen: head ? head.length : 0,
-      recoveredFromBlocksLen: recoveredFromBlocks.length,
-      finalTextLen: finalText.length,
-      finalTextPolicyCandidate: needRecover
-        ? recoveredText
-          ? 'RECOVERED_FROM_SOT'
-          : hasSlotDirectives && curNoSlotsTrim.length > 0
-            ? 'STRIPPED_SLOT_DIRECTIVES'
-            : 'NEED_RECOVER_BUT_FALLBACK_CURRAW'
-        : 'NORMAL_BODY',
-    });
-  }
+        meta.mode = uiMode;
+        meta.persistPolicy = PERSIST_POLICY;
 
-  (result as any).content = finalText;
-  (result as any).text = finalText;
-  (result as any).assistantText = finalText;
-  assistantText = finalText;
+        meta.extra = {
+          ...(meta.extra ?? {}),
+          uiMode,
+          persistPolicy: PERSIST_POLICY,
+          uiFinalTextLen: String((result as any)?.content ?? '').trim().length,
+        };
+      }
 
-  meta.extra = {
-    ...(meta.extra ?? {}),
-    finalAssistantTextSynced: true,
-    finalAssistantTextLen: finalText.length,
-    finalTextRecoveredFromSoT: needRecover && Boolean(recoveredText) ? true : undefined,
-    finalTextRecoveredSource: needRecover && Boolean(recoveredText) ? (head ? 'rephraseHead' : 'rephraseBlocks') : undefined,
-    finalTextHadSlotDirectives: hasSlotDirectives ? true : undefined,
-    finalTextStrippedSlotDirectives:
-      needRecover && !recoveredText && hasSlotDirectives && curNoSlotsTrim.length > 0 ? true : undefined,
-    finalTextPolicy: meta?.extra?.finalTextPolicy ?? (finalText.length > 0 ? 'NORMAL_BODY' : 'NORMAL_EMPTY_PASS'),
-    emptyFinalPatched: finalText.length === 0 ? true : undefined,
-    emptyFinalPatchedReason:
-      finalText.length === 0
-        ? needRecover
-          ? 'NEED_RECOVER_BUT_EMPTY'
-          : 'EMPTY_CONTENT'
-        : undefined,
-  };
-}
+      // =========================================================
+      // ✅ assistant 保存（single-writer / 1回だけ）
+      // - “UIに返す本文(result.content)”を正本にする
+      // =========================================================
+      const resultObjFinalRaw =
+        String((result as any)?.content ?? '').trim() ||
+        String((result as any)?.assistantText ?? '').trim() ||
+        String((result as any)?.text ?? '').trim() ||
+        '';
 
-// UI MODE確定（SILENCE廃止：IR以外は常にNORMAL）
-{
-  const hint = String(mode ?? '').toUpperCase();
-  const eff = String(effectiveMode ?? '').toUpperCase();
+      const metaExtraAny: any = (meta as any)?.extra ?? {};
 
-  const uiMode: 'NORMAL' | 'IR' = hint.includes('IR') || eff.includes('IR') ? 'IR' : 'NORMAL';
-  const uiReason =
-    uiMode === 'IR'
-      ? (hint.includes('IR') ? `MODE_HINT:${String(mode ?? '').trim()}` : `EFFECTIVE_MODE:${String(effectiveMode ?? '').trim()}`)
-      : null;
+      const displayPreferredRaw =
+        String(metaExtraAny?.resolvedText ?? '').trim() ||
+        String(metaExtraAny?.assistantText ?? '').trim() ||
+        String(metaExtraAny?.finalAssistantText ?? '').trim() ||
+        '';
 
-  meta.mode = uiMode;
-  meta.modeReason = uiReason;
-  meta.persistPolicy = PERSIST_POLICY;
+      const blocksAny: unknown =
+        (Array.isArray((extraSoT as any)?.rephraseBlocks) && (extraSoT as any).rephraseBlocks.length > 0
+          ? (extraSoT as any).rephraseBlocks
+          : metaExtraAny?.rephraseBlocks ?? metaExtraAny?.rephrase?.blocks ?? metaExtraAny?.rephrase?.rephraseBlocks) ?? null;
 
-  meta.extra = {
-    ...(meta.extra ?? {}),
-    uiMode,
-    uiModeReason: uiReason,
-    persistPolicy: PERSIST_POLICY,
-    uiFinalTextLen: String((result as any)?.content ?? '').trim().length,
-  };
-}
+      const blocksJoined = Array.isArray(blocksAny) ? blocksToText(blocksAny as any[]) : '';
+      const blocksJoinedCleaned = stripInternalLines(blocksJoined);
 
+      const contentForPersist = (() => {
+        const fromResultObj = stripInternalLines(resultObjFinalRaw);
+        if (!isEffectivelyEmptyText(fromResultObj) && fromResultObj.length > 0) return fromResultObj;
 
-// ✅ DB保存は「最終的に UI に返す本文（resultObj.content）」を正本にする
-// - renderGateway 後の out.content を resultObj.content に反映しているため、これが “表示に採用される本文”
-// - ここで persist することで、DBに '……' が残る事故を止める
-const stripInternalLines = (s0: string) => {
-  const s = String(s0 ?? '');
-  const lines = s.split('\n').filter((ln) => {
-    const t = ln.trim();
-    if (!t) return false;
-    if (t.startsWith('@OBS')) return false;
-    if (t.startsWith('@SHIFT')) return false;
-    if (t.startsWith('@NEXT')) return false;
-    if (t.startsWith('@SAFE')) return false;
-    if (t.startsWith('@DRAFT')) return false;
-    if (t.startsWith('@SEED_TEXT')) return false;
-    if (t.startsWith('INTERNAL PACK')) return false;
-    return true;
-  });
-  return lines.join('\n').trim();
-};
+        if (blocksJoinedCleaned.length > 0) return blocksJoinedCleaned;
 
-// --- blocks を “本文” に戻す (string/object対応) ---
-// ✅ fallback 候補としてだけ使う（正本は resultObj.content）
-const extraAny: any = (meta as any)?.extra ?? {};
-const sotAny: any = extraSoT as any;
+        const fromMeta = stripInternalLines(displayPreferredRaw);
+        if (!isEffectivelyEmptyText(fromMeta) && fromMeta.length > 0) return fromMeta;
 
-const blocksAny: unknown =
-  (Array.isArray(sotAny?.rephraseBlocks) && sotAny.rephraseBlocks.length > 0
-    ? sotAny.rephraseBlocks
-    : extraAny?.rephraseBlocks ??
-      extraAny?.rephrase?.blocks ??
-      extraAny?.rephrase?.rephraseBlocks ??
-      extraAny?.rephrase?.rephraseBlocks) ?? null;
+        const userEcho = String(userTextClean ?? '').trim();
+        if (userEcho.length > 0) return userEcho;
 
-const blocksToText = (bs: any[]) => {
-  const parts = bs
-    .map((b) => {
-      if (typeof b === 'string') return b.trimEnd();
-      return String(b?.text ?? b?.content ?? b?.value ?? b?.body ?? '').trimEnd();
-    })
-    .filter((s) => s.trim().length > 0);
-  return parts.join('\n\n').trimEnd();
-};
+        return '……';
+      })();
 
-const blocksJoined = Array.isArray(blocksAny) ? blocksToText(blocksAny as any[]) : '';
+      console.info('[IROS/PERSIST_PICK]', {
+        conversationId,
+        userCode,
+        pickedLen: contentForPersist.length,
+        pickedHead: String(contentForPersist).slice(0, 40),
+        fromResultObjLen: stripInternalLines(resultObjFinalRaw).length,
+        blocksJoinedCleanedLen: blocksJoinedCleaned.length,
+        fromMetaLen: stripInternalLines(displayPreferredRaw).length,
+        isPickedDots: contentForPersist === '……',
+      });
 
-/// --- ✅ 最終本文を確定（renderGateway反映後の resultObj を正本として保存） ---
-const metaExtraAny: any = (meta as any)?.extra ?? {};
+      const persistStrict =
+        String(process.env.IROS_PERSIST_STRICT ?? '').trim() === '1' ||
+        String(process.env.NODE_ENV ?? '').trim() === 'production';
 
-const resultObjFinalRaw =
-  String((result as any)?.content ?? '').trim() ||
-  String((result as any)?.text ?? '').trim() ||
-  String((result as any)?.assistantText ?? '').trim() ||
-  '';
+      let saved: any = null;
+      try {
+        saved = await persistAssistantMessageToIrosMessages({
+          supabase,
+          conversationId,
+          userCode,
+          content: contentForPersist,
+          meta: metaForSave,
+        });
+      } catch (e) {
+        saved = { ok: false, error: e };
+      }
 
-  const displayPreferredRaw =
-  String(metaExtraAny?.resolvedText ?? '').trim() ||
-  String(metaExtraAny?.assistantText ?? '').trim() ||
-  String(metaExtraAny?.finalAssistantText ?? '').trim() ||
-  '';
+      if (!saved || saved.ok !== true) {
+        const err: any = (saved as any)?.error ?? saved ?? null;
 
-const blocksJoinedCleaned = stripInternalLines(blocksJoined);
+        console.error('[IROS/persistAssistantMessageToIrosMessages] insert error', {
+          conversationId,
+          userCode,
+          persistStrict,
+          error: err,
+        });
 
+        meta.extra = {
+          ...(meta.extra ?? {}),
+          persist_failed: true,
+          persist_failed_strict: persistStrict,
+          persist_failed_message: String(err?.message ?? '')?.slice(0, 240) || 'persist_failed',
+        };
 
-let contentForPersist = (() => {
-  // ✅ 正本：resultObj.content（＝返す本文）
-  const fromResultObj = stripInternalLines(resultObjFinalRaw);
-  if (!isEffectivelyEmptyText(fromResultObj) && fromResultObj.length > 0) return fromResultObj;
+        if (persistStrict) {
+          const msg = String(err?.message ?? '') || String((saved as any)?.reason ?? '') || 'persist_failed';
+          throw new Error(msg);
+        }
+      }
 
-  // ✅ rephraseBlocks(clean) があるなら採用（表示側に寄せる）
-  if (blocksJoinedCleaned.length > 0) return blocksJoinedCleaned;
+      const messageId = (saved as any)?.messageId ?? null;
 
-  const fromMeta = stripInternalLines(displayPreferredRaw);
-  if (!isEffectivelyEmptyText(fromMeta) && fromMeta.length > 0) return fromMeta;
+      meta.extra = {
+        ...(meta.extra ?? {}),
+        persistedAssistantMessage: {
+          ok: Boolean(saved?.ok),
+          inserted: Boolean(saved?.inserted),
+          blocked: Boolean(saved?.blocked),
+          reason: String(saved?.reason ?? ''),
+          len: contentForPersist.length,
+          pickedFrom:
+            contentForPersist === '……'
+              ? 'fallbackDots'
+              : blocksJoinedCleaned.length > 0 && contentForPersist === blocksJoinedCleaned
+                ? 'rephraseBlocks(clean)'
+                : 'resultObjOrMetaPreferred',
+        },
+      };
 
-  // ✅ 最終fallback：ユーザー入力があるなら “……” ではなくそれを保存（沈黙化防止）
-  const userEcho = String(userTextClean ?? '').trim();
-  if (userEcho.length > 0) return userEcho;
-
-  return '……';
-})();
-console.info('[IROS/PERSIST_PICK]', {
-  pickedLen: contentForPersist.length,
-  pickedHead: String(contentForPersist).slice(0, 40),
-  fromResultObjLen: stripInternalLines(resultObjFinalRaw).length,
-  blocksJoinedCleanedLen: blocksJoinedCleaned.length,
-  fromMetaLen: stripInternalLines(displayPreferredRaw).length,
-  isPickedDots: contentForPersist === '……',
-});
-
-
-// ✅ DB保存（最終確定本文）
-const persistStrict =
-  String(process.env.IROS_PERSIST_STRICT ?? '').trim() === '1' ||
-  String(process.env.NODE_ENV ?? '').trim() === 'production';
-
-let saved: any = null;
-
-try {
-  saved = await persistAssistantMessageToIrosMessages({
-    supabase,
-    conversationId,
-    userCode,
-    content: contentForPersist,
-    meta: metaForSave,
-  });
-} catch (e) {
-  saved = { ok: false, error: e };
-}
-
-// ✅ 失敗時の扱い：prod は 500（strict）/ dev は 200（non-fatal）で継続
-if (!saved || saved.ok !== true) {
-  const err: any = (saved as any)?.error ?? saved ?? null;
-
-  console.error('[IROS/persistAssistantMessageToIrosMessages] insert error', {
-    conversationId,
-    userCode,
-    persistStrict,
-    error: err,
-  });
-
-  // ✅ UI/後追い調査用フラグ（保存に失敗したことは明示する）
-  meta.extra = {
-    ...(meta.extra ?? {}),
-    persist_failed: true,
-    persist_failed_strict: persistStrict,
-    persist_failed_message: String(err?.message ?? '')?.slice(0, 240) || 'persist_failed',
-  };
-
-  if (persistStrict) {
-    const msg =
-      String(err?.message ?? '') ||
-      String((saved as any)?.reason ?? '') ||
-      'persist_failed';
-    throw new Error(msg);
-  }
-}
-
-// messageId が必要ならここで使う（null の可能性は既存仕様に合わせる）
-const messageId = (saved as any).messageId ?? null;
-
-
-// ✅ 保存ログ（OK/NGを短く。env か request header で有効化）
-const debugPersist =
-  String(process.env.IROS_DEBUG_PERSIST ?? '0').trim() === '1' ||
-  String(req.headers.get('x-iros-debug-persist') ?? '').trim() === '1';
-
-if (debugPersist) {
-  console.info('[IROS/PERSIST][ASSISTANT]', {
-    conversationId,
-    userCode,
-    ok: saved?.ok ?? null,
-    inserted: saved?.inserted ?? null,
-    blocked: saved?.blocked ?? null,
-    reason: saved?.reason ?? null,
-    len: contentForPersist.length,
-    head: contentForPersist.slice(0, 40),
-    pickedFrom:
-      !isEffectivelyEmptyText(stripInternalLines(String((result as any)?.content ?? '').trimEnd())) &&
-      stripInternalLines(String((result as any)?.content ?? '').trimEnd()).length > 0
-        ? 'resultObj.content(final)'
-        : !isEffectivelyEmptyText(stripInternalLines(displayPreferredRaw)) && stripInternalLines(displayPreferredRaw).length > 0
-          ? 'meta.extra(finalAssistantText/resolvedText)'
-          : blocksJoinedCleaned.length > 0
-            ? 'rephraseBlocks(clean)'
-            : 'fallbackDots',
-  });
-}
-
-
-// ✅ 保存が失敗/blocked のときだけ短いログ（長くならない）
-if (!saved?.ok || saved?.blocked || !saved?.inserted) {
-  console.error('[IROS/PERSIST][ASSISTANT][NG]', {
-    conversationId,
-    userCode,
-    ok: saved?.ok ?? null,
-    inserted: saved?.inserted ?? null,
-    blocked: saved?.blocked ?? null,
-    reason: saved?.reason ?? null,
-    len: contentForPersist.length,
-    head: contentForPersist.slice(0, 40),
-  });
-}
-
-// ✅ “捏造” をやめて saved をそのまま反映（SoT）
-meta.extra = {
-  ...(meta.extra ?? {}),
-  persistedAssistantMessage: {
-    ok: Boolean(saved?.ok),
-    inserted: Boolean(saved?.inserted),
-    blocked: Boolean(saved?.blocked),
-    reason: String(saved?.reason ?? ''),
-    len: contentForPersist.length,
-    pickedFrom:
-      contentForPersist === '……'
-        ? 'fallbackDots'
-        : blocksJoinedCleaned.length > 0 && contentForPersist === blocksJoinedCleaned
-          ? 'rephraseBlocks(clean)'
-          : 'resultObjOrMetaPreferred',
-  },
-};
-
-      // training sample
+      // training sample（skip flags）
       const skipTraining =
         meta?.skipTraining === true ||
-        meta?.skip_training === true ||
+        (meta as any)?.skip_training === true ||
         meta?.recallOnly === true ||
-        meta?.recall_only === true;
+        (meta as any)?.recall_only === true;
 
       if (!skipTraining) {
-        // ✅ 学習サンプルも “確定本文” を使う（result.content が '……' のまま残る事故を避ける）
         const replyText = contentForPersist;
 
         await saveIrosTrainingSample({
@@ -1344,7 +1109,7 @@ meta.extra = {
           userCode,
           tenantId,
           conversationId,
-          messageId: saved?.messageId ?? null,
+          messageId,
           inputText: userTextClean,
           replyText,
           meta,
@@ -1355,7 +1120,7 @@ meta.extra = {
           ...(meta.extra ?? {}),
           trainingSkipped: true,
           trainingSkipReason:
-            meta?.skipTraining === true || meta?.skip_training === true ? 'skipTraining' : 'recallOnly',
+            meta?.skipTraining === true || (meta as any)?.skip_training === true ? 'skipTraining' : 'recallOnly',
         };
       }
 
@@ -1366,13 +1131,18 @@ meta.extra = {
       delete (resultObj as any).ok;
       delete (resultObj as any).credit;
 
-      return NextResponse.json({ ...resultObj, ...basePayload, mode: effectiveMode, meta }, { status: 200, headers });
+      return NextResponse.json(
+        { ...resultObj, ...basePayload, mode: effectiveMode, meta },
+        { status: 200, headers },
+      );
     }
 
     // =========================================================
     // result が string等
     // =========================================================
     {
+      const finalText = String(result ?? '').trim();
+
       const metaString: any = {
         userProfile: userProfile ?? null,
         extra: {
@@ -1381,422 +1151,22 @@ meta.extra = {
           traceId,
           historyLen: Array.isArray(chatHistory) ? chatHistory.length : 0,
           persistedByRoute: true,
+          persistPolicy: PERSIST_POLICY,
           persistAssistantMessage: false,
           renderEngineGate: extraSoT?.renderEngineGate === true,
           renderEngine: extraSoT?.renderEngine === true,
         },
       };
 
-      const finalText = String(result ?? '').trim();
-      const uiMode = inferUIMode({ modeHint: mode, effectiveMode, meta: metaString, finalText });
-      const uiReason = inferUIModeReason({ modeHint: mode, effectiveMode, meta: metaString, finalText });
-
-      metaString.mode = uiMode;
-      metaString.modeReason = uiReason;
-      metaString.persistPolicy = PERSIST_POLICY;
-      metaString.extra = {
-        ...(metaString.extra ?? {}),
-        uiMode,
-        uiModeReason: uiReason,
-        persistPolicy: PERSIST_POLICY,
-      };
-
-      return NextResponse.json({ ...basePayload, content: finalText, meta: metaString }, { status: 200, headers });
+      return NextResponse.json(
+        { ...basePayload, content: finalText, meta: metaString },
+        { status: 200, headers },
+      );
     }
   } catch (err: any) {
-    const headers: Record<string, string> = { ...CORS_HEADERS };
-    headers['x-trace-id'] = String(traceIdEarly);
     return NextResponse.json(
       { ok: false, error: 'internal_error', detail: String(err?.message ?? err) },
-      { status: 500, headers },
+      { status: 500, headers: withTrace(CORS_HEADERS, traceIdEarly) },
     );
-  }
-}
-
-// =========================================================
-// ✅ RenderEngine 適用（single entry）
-// - enableRenderEngine=true の場合は render-v2 (renderGatewayAsReply)
-// - IT の場合のみ renderReply（従来）を維持
-// - 返り値は必ず { meta, extraForHandle } に統一
-// - rephraseBlocks の生成（fallback）は “ここだけ” で行う
-// =========================================================
-// ✅ 1) 型に historyMessages を追加
-async function applyRenderEngineIfEnabled(params: {
-  enableRenderEngine: boolean;
-  isIT: boolean;
-  meta: any;
-  extraForHandle: any;
-  resultObj: any;
-  conversationId: string;
-  userCode: string;
-  userText: string;
-
-  // ✅ 追加：route.ts 側で持ってる履歴を渡す
-  historyMessages?: unknown[] | null;
-}): Promise<{ meta: any; extraForHandle: any }> {
-  // ✅ 2) destructuring に historyMessages を追加
-  let {
-    enableRenderEngine,
-    isIT,
-    meta,
-    extraForHandle,
-    resultObj,
-    conversationId,
-    userCode,
-    userText,
-    historyMessages,
-  } = params;
-
-
-
-  // =========================
-  // IT は従来render（renderReply）
-  // =========================
-  if (isIT) {
-    try {
-      const contentBefore = String(resultObj?.content ?? '').trim();
-
-      const fallbackFacts =
-        contentBefore.length > 0
-          ? contentBefore
-          : String(
-              (meta as any)?.situationSummary ??
-                (meta as any)?.situation_summary ??
-                meta?.unified?.situation?.summary ??
-                '',
-            ).trim() ||
-            String(userText ?? '').trim() ||
-            '';
-
-      const vector = buildResonanceVector({
-        qCode: (meta as any)?.qCode ?? (meta as any)?.q_code ?? meta?.unified?.q?.current ?? null,
-        depth: (meta as any)?.depth ?? (meta as any)?.depth_stage ?? meta?.unified?.depth?.stage ?? null,
-        phase: (meta as any)?.phase ?? meta?.unified?.phase ?? null,
-        selfAcceptance:
-          (meta as any)?.selfAcceptance ??
-          (meta as any)?.self_acceptance ??
-          meta?.unified?.selfAcceptance ??
-          meta?.unified?.self_acceptance ??
-          null,
-        yLevel: (meta as any)?.yLevel ?? (meta as any)?.y_level ?? meta?.unified?.yLevel ?? meta?.unified?.y_level ?? null,
-        hLevel: (meta as any)?.hLevel ?? (meta as any)?.h_level ?? meta?.unified?.hLevel ?? meta?.unified?.h_level ?? null,
-        polarityScore:
-          (meta as any)?.polarityScore ??
-          (meta as any)?.polarity_score ??
-          meta?.unified?.polarityScore ??
-          meta?.unified?.polarity_score ??
-          null,
-        polarityBand:
-          (meta as any)?.polarityBand ??
-          (meta as any)?.polarity_band ??
-          meta?.unified?.polarityBand ??
-          meta?.unified?.polarity_band ??
-          null,
-        stabilityBand:
-          (meta as any)?.stabilityBand ??
-          (meta as any)?.stability_band ??
-          meta?.unified?.stabilityBand ??
-          meta?.unified?.stability_band ??
-          null,
-        situationSummary:
-          (meta as any)?.situationSummary ?? (meta as any)?.situation_summary ?? meta?.unified?.situation?.summary ?? null,
-        situationTopic:
-          (meta as any)?.situationTopic ?? (meta as any)?.situation_topic ?? meta?.unified?.situation?.topic ?? null,
-        intentLayer:
-          (meta as any)?.intentLayer ??
-          (meta as any)?.intent_layer ??
-          (meta as any)?.intentLine?.focusLayer ??
-          (meta as any)?.intent_line?.focusLayer ??
-          meta?.unified?.intentLayer ??
-          null,
-        intentConfidence:
-          (meta as any)?.intentConfidence ??
-          (meta as any)?.intent_confidence ??
-          (meta as any)?.intentLine?.confidence ??
-          (meta as any)?.intent_line?.confidence ??
-          null,
-      });
-
-      const baseInput = {
-        facts: fallbackFacts,
-        insight: null,
-        nextStep: null,
-        userWantsEssence: false,
-        highDefensiveness: false,
-        seed: String(conversationId ?? ''),
-        userText: String(userText ?? ''),
-      } as const;
-
-      const baseOpts = {
-        minimalEmoji: false,
-        renderMode: 'IT',
-        itDensity:
-          (meta as any)?.itDensity ??
-          (meta as any)?.density ??
-          (meta as any)?.extra?.itDensity ??
-          (meta as any)?.extra?.density ??
-          undefined,
-      } as any;
-
-      const patched = applyRulebookCompat({
-        vector,
-        input: baseInput,
-        opts: baseOpts,
-        meta,
-        extraForHandle,
-      });
-
-      const rendered = renderReply((patched.vector ?? vector) as any, (patched.input ?? baseInput) as any, (patched.opts ?? baseOpts) as any);
-
-      const renderedText =
-        typeof rendered === 'string'
-          ? rendered
-          : (rendered as any)?.text
-            ? String((rendered as any).text)
-            : String(rendered ?? '');
-
-      const sanitized = sanitizeFinalContent(renderedText);
-
-      const speechActUpper = String((patched.meta as any)?.extra?.speechAct ?? (patched.meta as any)?.speechAct ?? '').toUpperCase();
-      const isSilence = false; // SILENCE廃止
-
-      const nextContent = isSilence
-        ? sanitized.text.trimEnd()
-        : sanitized.text.trim().length > 0
-          ? sanitized.text.trimEnd()
-          : contentBefore.length > 0
-            ? contentBefore
-            : String(fallbackFacts ?? '').trim();
-
-      resultObj.content = nextContent;
-      (resultObj as any).assistantText = nextContent;
-      (resultObj as any).text = nextContent;
-
-      const metaAfter = (patched.meta ?? meta) as any;
-      metaAfter.extra = {
-        ...(metaAfter.extra ?? {}),
-        renderEngineApplied: true,
-        renderEngineKind: 'IT',
-        headerStripped: sanitized.removed.length ? sanitized.removed : null,
-      };
-
-      return { meta: metaAfter, extraForHandle: (patched.extraForHandle ?? extraForHandle) as any };
-    } catch (e) {
-      meta.extra = {
-        ...(meta?.extra ?? {}),
-        renderEngineApplied: false,
-        renderEngineKind: 'IT',
-        renderEngineError: String((e as any)?.message ?? e),
-      };
-      return { meta, extraForHandle };
-    }
-  }
-
-  // render無効なら何もしない
-  if (!enableRenderEngine) {
-    meta.extra = { ...(meta?.extra ?? {}), renderEngineApplied: false, renderEngineKind: 'OFF' };
-    return { meta, extraForHandle };
-  }
-
-  // =========================
-  // render-v2（renderGatewayAsReply）
-  // =========================
-  try {
-    // ✅ render入力は “読み取り専用合成” にし、SoT(extraForHandle)を書き換えない
-    const extraForRender: any = {
-      ...(meta?.extra ?? {}),
-      ...(extraForHandle ?? {}),
-      slotPlanPolicy:
-        (meta as any)?.framePlan?.slotPlanPolicy ??
-        (meta as any)?.slotPlanPolicy ??
-        (meta as any)?.extra?.slotPlanPolicy ??
-        null,
-      framePlan: (meta as any)?.framePlan ?? null,
-      slotPlan: (meta as any)?.slotPlan ?? null,
-
-      // evidence最小
-      conversationId,
-      userCode,
-      userText: typeof userText === 'string' ? userText : null,
-    };
-
-    const maxLines =
-      Number.isFinite(Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)) && Number(process.env.IROS_RENDER_DEFAULT_MAXLINES) > 0
-        ? Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)
-        : 8;
-
-    const baseText = String((resultObj as any)?.assistantText ?? (resultObj as any)?.content ?? (resultObj as any)?.text ?? '').trimEnd();
-
-    // ✅ SoT（この関数が返す extraForHandle）：
-    // - ここでは “必要なら埋める” が、なるべく最小にする
-    let extraSoT: any = extraForHandle ?? {};
-
-    // ✅ rephraseBlocks の生成/付与は _impl/rephrase.ts に一本化
-    // - extraSoT（SoT）と meta.extra をそこで更新する
-    // - ここでは “fallback生成” をしない
-    const attachRes: any = await maybeAttachRephraseForRenderV2({
-      conversationId,
-      userCode,
-      userText: typeof userText === 'string' ? userText : String(userText ?? ''),
-      meta,
-      extraMerged: extraSoT,
-
-      // ✅ ここは params から渡されたものを使う（chatHistory は参照しない）
-      historyMessages: Array.isArray(historyMessages) ? historyMessages : undefined,
-
-      traceId: String((meta as any)?.extra?.traceId ?? (meta as any)?.traceId ?? '').trim() || null,
-      effectiveMode: (extraSoT as any)?.effectiveMode ?? (meta as any)?.extra?.effectiveMode ?? null,
-    });
-
-
-    // ✅ 返り値がある実装にも対応（voidでもOK）
-    if (attachRes && typeof attachRes === 'object') {
-      if (attachRes.meta && typeof attachRes.meta === 'object') meta = attachRes.meta;
-
-      const ex =
-        attachRes.extraMerged ??
-        attachRes.extraSoT ??
-        attachRes.extraForHandle ??
-        attachRes.extra ??
-        null;
-
-      if (ex && typeof ex === 'object') extraSoT = ex;
-    }
-
-
-// ↑↑↑ ここまでを 1290〜1328 の代わりに貼る ↑↑↑
-
-    // ✅ SoTの blocks/head を render input に同期（render input は読み取り専用）
-    if (Array.isArray(extraSoT?.rephraseBlocks) && extraSoT.rephraseBlocks.length > 0 && !Array.isArray(extraForRender?.rephraseBlocks)) {
-      extraForRender.rephraseBlocks = extraSoT.rephraseBlocks;
-    }
-    {
-      const mergedHead = String(extraSoT?.rephraseHead ?? '').trim();
-      if (mergedHead && !String(extraForRender?.rephraseHead ?? '').trim()) extraForRender.rephraseHead = mergedHead;
-    }
-
-// ✅ IRの基準本文（短文化ガード用）を renderGateway に渡す
-{
-  const mergedFinal =
-    String(extraSoT?.finalAssistantText ?? '').trim() ||
-    String(extraSoT?.finalAssistantTextCandidate ?? '').trim() ||
-    '';
-  if (mergedFinal && !String(extraForRender?.finalAssistantText ?? '').trim()) {
-    extraForRender.finalAssistantText = mergedFinal;
-  }
-
-  const mergedResolved = String(extraSoT?.resolvedText ?? '').trim();
-  if (mergedResolved && !String(extraForRender?.resolvedText ?? '').trim()) {
-    extraForRender.resolvedText = mergedResolved;
-  }
-}
-
-const keysToCarry = ['rephraseBlocksAttached', 'rephraseAttachSkipped', 'rephraseLLMApplied', 'rephraseApplied', 'rephraseReason'] as const;
-for (const k of keysToCarry) {
-  if ((extraForRender as any)[k] == null && (extraSoT as any)?.[k] != null) (extraForRender as any)[k] = (extraSoT as any)[k];
-}
-
-// ✅ “……” で止まらないための注釈付きログ
-{
-  const hasRephraseBlocks = Array.isArray((extraForRender as any)?.rephraseBlocks) && (extraForRender as any).rephraseBlocks.length > 0;
-  const baseTextLen = typeof baseText === 'string' ? baseText.length : null;
-  const baseTextHeadRaw = typeof baseText === 'string' ? baseText.slice(0, 80) : null;
-
-  console.info('[DEBUG/RENDERGW_CALL]', {
-    baseTextLen: typeof baseText === 'string' ? baseText.length : null,
-    baseTextHead:
-    typeof baseText === 'string'
-      ? (Array.isArray((extraForRender as any)?.rephraseBlocks) && (extraForRender as any).rephraseBlocks.length > 0
-          ? '(base omitted: rephraseBlocks present)'
-          : baseText.slice(0, 80))
-      : null,
-
-
-    // ✅ “……” が見えても rephraseBlocks があれば正常（本文は blocks から復元される）
-    baseLooksEmptyLike:
-      typeof baseText === 'string'
-        ? (() => {
-            const t = baseText.trim();
-            return t === '' || t === '…' || t === '……' || t === '...' || t === '..' || t.length <= 2;
-          })()
-        : null,
-
-    renderEngine: (extraForRender as any)?.renderEngine ?? null,
-
-    hasRephraseBlocks: Array.isArray((extraForRender as any)?.rephraseBlocks),
-    rephraseBlocksLen: Array.isArray((extraForRender as any)?.rephraseBlocks) ? (extraForRender as any).rephraseBlocks.length : null,
-    rephraseBlocksHead:
-      Array.isArray((extraForRender as any)?.rephraseBlocks) && (extraForRender as any).rephraseBlocks[0]
-        ? String((extraForRender as any).rephraseBlocks[0]?.text ?? '').slice(0, 120)
-        : null,
-
-    // ✅ 注釈：これが true なら “……” は問題ない
-    note_okEvenIfBaseIsDots:
-      Array.isArray((extraForRender as any)?.rephraseBlocks) && (extraForRender as any).rephraseBlocks.length > 0
-        ? true
-        : false,
-
-    hasRephraseObj: !!(extraForRender as any)?.rephrase,
-    rephraseObjKeys: (extraForRender as any)?.rephrase ? Object.keys((extraForRender as any).rephrase) : null,
-  });
-
-}
-
-const out = renderGatewayAsReply({ text: baseText, extra: extraForRender, maxLines }) as any;
-
-// ✅ “……はfallbackで、rephraseBlocks採用なら正常” をログに明示
-{
-  const pickedFrom = String(out?.meta?.pickedFrom ?? out?.pickedFrom ?? '');
-  const outContent = typeof out?.content === 'string' ? out.content : null;
-  const baseTextHeadRaw = typeof baseText === 'string' ? baseText.slice(0, 2) : '';
-  const baseWasDots = baseTextHeadRaw === '……' || baseTextHeadRaw === '...';
-  const okByRephrase = pickedFrom === 'rephraseBlocks';
-
-  console.info('[DEBUG/RENDERGW_OUT]', {
-    outType: typeof out,
-    outKeys: out && typeof out === 'object' ? Object.keys(out) : null,
-    contentType: typeof out?.content,
-    contentLen: outContent ? outContent.length : null,
-    contentHead: outContent ? outContent.slice(0, 120) : null,
-
-    // ✅ meta全部は重い＆“……”論争の火種になるので要点だけ
-    pickedFrom: pickedFrom || null,
-    baseTextWasFallbackDots: Boolean(baseWasDots),
-    note: okByRephrase ? 'OK: baseText is fallback; output picked from rephraseBlocks' : null,
-  });
-}
-
-const outText = String((typeof out === 'string' ? out : out?.text ?? out?.content ?? out?.assistantText ?? baseText) ?? '').trimEnd();
-const sanitized = sanitizeFinalContent(outText);
-
-resultObj.content = sanitized.text.trimEnd();
-(resultObj as any).assistantText = sanitized.text.trimEnd();
-(resultObj as any).text = sanitized.text.trimEnd();
-
-meta.extra = {
-  ...(meta?.extra ?? {}),
-  renderEngineApplied: true,
-  renderEngineKind: 'V2',
-  headerStripped: sanitized.removed.length ? sanitized.removed : null,
-  renderV2PickedFrom: out?.pickedFrom ?? out?.meta?.pickedFrom ?? null,
-  renderV2OutLen: sanitized.text.length,
-
-  // ✅ ここが今回の“注釈”（UI/解析側で見ても「問題なし」が分かる）
-  renderV2FallbackWasDots: typeof baseText === 'string' && baseText.trim() === '……',
-  renderV2OkByRephrase: String(out?.meta?.pickedFrom ?? out?.pickedFrom ?? '') === 'rephraseBlocks',
-};
-
-
-    // ✅ SoTを返す（render input は返さない）
-    return { meta, extraForHandle: extraSoT };
-  } catch (e) {
-    console.error('[IROS/render-v2][EXCEPTION]', e);
-    meta.extra = {
-      ...(meta?.extra ?? {}),
-      renderEngineApplied: false,
-      renderEngineKind: 'V2',
-      renderEngineError: String((e as any)?.message ?? e),
-    };
-    return { meta, extraForHandle };
   }
 }

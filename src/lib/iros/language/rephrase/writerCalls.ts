@@ -72,6 +72,11 @@ export function buildFirstPassMessages(args: {
  * - internalPack を system にしない（system 増殖を止める）
  * - “編集タスク” は user で渡す
  */
+/**
+ * ✅ retry/repair: system + turns + (single user message)
+ * - user の連投を避ける（品質低下・同文返しの要因）
+ * - internalPack / 編集対象 / userText を 1つの user メッセージに統合
+ */
 export function buildRetryMessages(args: {
   systemPrompt: string;
   internalPack: string;
@@ -80,30 +85,36 @@ export function buildRetryMessages(args: {
   userText: string;
 }): WriterMessage[] {
   const systemPrompt = String(args.systemPrompt ?? '');
-  const internalPack = String(args.internalPack ?? '');
+  const internalPack = norm(args.internalPack ?? '');
   const baseDraft = norm(args.baseDraftForRepair) || '(empty)';
   const userText = norm(args.userText) || '（空）';
+
+  const mergedUser = [
+    internalPack ? `【internal】\n${internalPack}` : '',
+    [
+      '【編集対象（この本文をベースに、壊さずに整える。露出禁止）】',
+      '---BEGIN_DRAFT---',
+      baseDraft,
+      '---END_DRAFT---',
+      '',
+      '【出力ルール】',
+      '- 出力は「整えた完成文のみ」。BEGIN/END や見出し、内部情報は出さない。',
+      '- 下書きの構造を保持する（削り過ぎない）。',
+      '',
+      '【ユーザー入力（文脈）】',
+      userText,
+    ].join('\n'),
+  ]
+    .filter((x) => String(x).trim().length > 0)
+    .join('\n\n');
 
   return [
     { role: 'system', content: systemPrompt },
     ...turnsToMessages(args.turns),
-    { role: 'user', content: internalPack },
-    {
-      role: 'user',
-      content: [
-        '【編集対象（この本文をベースに、壊さずに整える。露出禁止）】',
-        '---BEGIN_DRAFT---',
-        baseDraft,
-        '---END_DRAFT---',
-        '',
-        '【出力ルール】',
-        '- 出力は「整えた完成文のみ」。BEGIN/END や見出し、内部情報は出さない。',
-        '- 下書きの構造を保持する（削り過ぎない）。',
-      ].join('\n'),
-    },
-    { role: 'user', content: userText },
+    { role: 'user', content: mergedUser },
   ];
 }
+
 
 export async function callWriterLLM(args: {
   model: string;
@@ -147,4 +158,3 @@ export async function callWriterLLM(args: {
 
   return String(out ?? '');
 }
-

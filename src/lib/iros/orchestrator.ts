@@ -61,7 +61,7 @@ import { detectIMode } from './iMode';
 import { extractAnchorEvidence } from '@/lib/iros/anchor/extractAnchorEvidence';
 import { detectAnchorEntry } from '@/lib/iros/anchor/AnchorEntryDetector';
 import { observeFlow } from '@/lib/iros/input/flowObserver';
-
+import { computeStallSignal } from '@/lib/iros/conversation/stallProbe';
 import { shouldUseQuestionSlots } from './slotPlans/QuestionSlots';
 
 // Person Intent Memory（ir診断）
@@ -1597,92 +1597,94 @@ if (typeof process !== 'undefined' && process.env.DEBUG_IROS_FALLBACK_DIAG === '
     (meta as any)?.hasCore ??
     false;
 
-  const declarationOkNow =
-    (meta as any)?.itTrigger?.flags?.declarationOk ??
-    (meta as any)?.it?.flags?.declarationOk ??
-    (meta as any)?.itx?.flags?.declarationOk ??
-    (meta as any)?.flags?.declarationOk ??
-    (meta as any)?.declarationOk ??
-    false;
+    const laneKeyNowRaw =
+    (meta as any)?.extra?.intentBridge?.laneKey ??
+    (meta as any)?.intentBridge?.laneKey ??
+    null;
 
-  // ✅ IntentBridge が “選択” を拾うために直前assistant本文を取る
-  const historyArr = Array.isArray(history) ? (history as any[]) : [];
-  let lastAssistantTextForBridge = '';
-  for (let i = historyArr.length - 1; i >= 0; i--) {
-    const m = historyArr[i];
-    if (String(m?.role ?? '').toLowerCase() !== 'assistant') continue;
-    const v = m?.text ?? m?.content ?? '';
-    lastAssistantTextForBridge = typeof v === 'string' ? v : String(v ?? '');
-    if (lastAssistantTextForBridge.trim()) break;
-  }
+  // ✅ テスト用：文頭に "tc:" があれば T_CONCRETIZE を強制（本番仕様には影響しない）
+  const forceTConcretize =
+    typeof text === 'string' && /^\s*tc\s*:/i.test(text);
 
-  // 入力を meta.extra.intentBridge に集約（bridge結果もここへ）
-  ex.intentBridge = {
-    ...(ex.intentBridge ?? {}),
-    deepenOk: typeof deepenOkNow === 'boolean' ? deepenOkNow : (ex.intentBridge as any)?.deepenOk,
-    hasCore: !!hasCoreNow,
-    declarationOk: !!declarationOkNow,
-  };
+  // ---- ✅ stall probe（メタ優先＋入力補助）
+  // hard のときだけ T_CONCRETIZE を禁止して IDEA_BAND に倒す（会話の流れ復旧を優先）
+  const stallMeta = (() => {
+    // repeatSignal は rephrase 側（ctxPack）で先に見えていることがあるので、ここで拾ってメタに同期する
+    const ctxPack =
+      (meta as any)?.ctxPack ??
+      (meta as any)?.extra?.ctxPack ??
+      null;
 
-  const bridge = applyIntentBridge({
-    depthStage: typeof depthStageNow === 'string' ? depthStageNow : null,
-    phase: typeof phaseNow === 'string' ? phaseNow : null,
-    deepenOk: typeof deepenOkNow === 'boolean' ? deepenOkNow : undefined,
-    fixedNorthKey: typeof fixedNorthKeyNow === 'string' ? fixedNorthKeyNow : null,
-    userText: text,
+    const rs =
+      (meta as any)?.repeatSignal ??
+      (meta as any)?.extra?.repeatSignal ??
+      ctxPack?.repeatSignal ??
+      null;
 
-    hasCore: !!hasCoreNow,
-    declarationOk: !!declarationOkNow,
+    // computeStallSignal は meta.ctxPack / meta.extra.ctxPack を見に行くので、両方に寄せる
+    const ex =
+      meta && typeof meta === 'object' && (meta as any).extra && typeof (meta as any).extra === 'object'
+        ? (meta as any).extra
+        : ((meta as any).extra = {});
 
-    // ✅ これが無いと focusLabel が永遠に立たない
-    lastAssistantText: lastAssistantTextForBridge,
+    if (ctxPack && !(meta as any).ctxPack) (meta as any).ctxPack = ctxPack;
+    if (ctxPack && !ex.ctxPack) ex.ctxPack = ctxPack;
+    if (typeof rs === 'string' && rs.trim()) {
+      if (!(meta as any).repeatSignal) (meta as any).repeatSignal = rs;
+      if (!ex.repeatSignal) ex.repeatSignal = rs;
+    }
+
+    return meta;
+  })();
+
+  const stall = computeStallSignal({
+    userText: String(textForCounsel ?? ''),
+    history,
+    meta: stallMeta,
   });
 
-  if (bridge && typeof (bridge as any).laneKey === 'string') {
-    ex.intentBridge = {
-      ...(ex.intentBridge ?? {}),
-      laneKey: (bridge as any).laneKey,
-      ...(typeof (bridge as any).focusLabel === 'string' ? { focusLabel: (bridge as any).focusLabel } : {}),
-    };
-  }
-}
 
-// ✅ IntentBridge laneKey を拾う（ここでは meta.extra.intentBridge を参照する）
-// - このスコープでは `bridge` が未宣言（別ブロック）なので参照しない
-const laneKeyNowRaw =
-  (meta as any)?.extra?.intentBridge?.laneKey ??
-  (meta as any)?.intentBridge?.laneKey ??
-  null;
+  const laneKeyNowBase = forceTConcretize ? 'T_CONCRETIZE' : laneKeyNowRaw;
 
-// ✅ テスト用：文頭に "tc:" があれば T_CONCRETIZE を強制（本番仕様には影響しない）
-const forceTConcretize =
-  typeof text === 'string' && /^\s*tc\s*:/i.test(text);
+  // hard のときだけ強制で IDEA_BAND（深度や他ロジックは触らない）
+  const laneKeyNow =
+    stall.severity === 'hard' ? 'IDEA_BAND' : laneKeyNowBase;
 
-const laneKeyNow = forceTConcretize ? 'T_CONCRETIZE' : laneKeyNowRaw;
+  console.log('[IROS/T_CONCRETIZE][FORCE_SWITCH_CHECK]', {
+    forceTConcretize,
+    laneKeyNowRaw,
+    laneKeyNowBase,
+    laneKeyNow,
+    stall,
+    userHead: String(textForCounsel ?? '').slice(0, 40),
+  });
 
-console.log('[IROS/T_CONCRETIZE][FORCE_SWITCH_CHECK]', {
-  forceTConcretize,
-  laneKeyNowRaw,
-  laneKeyNow,
-  userHead: String(textForCounsel ?? '').slice(0, 40),
-});
+  const focusLabelNow =
+    (meta as any)?.extra?.intentBridge?.focusLabel ??
+    (meta as any)?.intentBridge?.focusLabel ??
+    undefined;
 
-const focusLabelNow =
-  (meta as any)?.extra?.intentBridge?.focusLabel ??
-  (meta as any)?.intentBridge?.focusLabel ??
-  undefined;
+  const fallback = buildNormalChatSlotPlan({
+    userText: textForCounsel,
+    laneKey: laneKeyNow === 'T_CONCRETIZE' ? 'T_CONCRETIZE' : 'IDEA_BAND',
 
-const fallback = buildNormalChatSlotPlan({
-  userText: textForCounsel,
-  laneKey: laneKeyNow === 'T_CONCRETIZE' ? 'T_CONCRETIZE' : 'IDEA_BAND',
+    // ✅ 固定文言はやめて、選択された “一点” を渡す
+    focusLabel: laneKeyNow === 'T_CONCRETIZE' ? focusLabelNow : undefined,
 
-  // ✅ 固定文言はやめて、選択された “一点” を渡す
-  focusLabel: laneKeyNow === 'T_CONCRETIZE' ? focusLabelNow : undefined,
+    context: {
+      lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
+    },
+  });
 
-  context: {
-    lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
-  },
-});
+  if (shouldFallbackNormalChat) {
+    const fallback = buildNormalChatSlotPlan({
+      userText: textForCounsel,
+      laneKey: laneKeyNow === 'T_CONCRETIZE' ? 'T_CONCRETIZE' : 'IDEA_BAND',
+      focusLabel: laneKeyNow === 'T_CONCRETIZE' ? focusLabelNow : undefined,
+      context: {
+        lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
+      },
+    });
 
     const fbSlots = (fallback as any).slots;
     slotsArr = Array.isArray(fbSlots) ? fbSlots : [];
@@ -1696,7 +1698,8 @@ const fallback = buildNormalChatSlotPlan({
       delete (meta as any).slotPlanFallback;
     }
   }
-
+}
+  }
   // =========================================================
   // ✅ A) normalChat → flagReply 自動切替（仮置き一点の安全装置）
   // =========================================================

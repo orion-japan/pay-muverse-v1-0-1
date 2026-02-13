@@ -1727,79 +1727,117 @@ try {
 }
 
 
-    // ---- ctxPack.flow (minimal, with prev from history) ----
-    // 方針：
-    // - 依存/重い処理は増やさない
-    // - “前回の flow.at” だけ history から拾って prevAtIso / ageSec を埋める
-    // - sessionBreak はここでは決めない（false 固定。閾値設計は後で）
-    const nowIso2 = new Date().toISOString();
+// ---- ctxPack.flow (minimal, with prev from history) ----
+// 方針：
+// - 依存/重い処理は増やさない
+// - “前回の flow.at” だけ history から拾って prevAtIso / ageSec を埋める
+// - sessionBreak はここでは決めない（false 固定。閾値設計は後で）
+const nowIso2 = new Date().toISOString();
 
-    // ✅ ctxPack を必ず用意（exAny という名前は使わない＝既存と衝突回避）
-    const mf2: any = (out as any)?.metaForSave ?? null;
-    if (!mf2 || typeof mf2 !== 'object') {
-      throw new Error('CTXPACK stamp: metaForSave missing');
-    }
-    if (!mf2.extra || typeof mf2.extra !== 'object') {
-      mf2.extra = {};
-    }
-    const extra2: any = mf2.extra;
-    if (!extra2.ctxPack || typeof extra2.ctxPack !== 'object') {
-      extra2.ctxPack = {};
-    }
+// ✅ ctxPack を必ず用意（exAny という名前は使わない＝既存と衝突回避）
+const mf2: any = (out as any)?.metaForSave ?? null;
+if (!mf2 || typeof mf2 !== 'object') {
+  throw new Error('CTXPACK stamp: metaForSave missing');
+}
+if (!mf2.extra || typeof mf2.extra !== 'object') {
+  mf2.extra = {};
+}
+const extra2: any = mf2.extra;
+if (!extra2.ctxPack || typeof extra2.ctxPack !== 'object') {
+  extra2.ctxPack = {};
+}
 
-    // history から「直近の ctxPack.flow.at」を拾う
-    let prevAtIso: string | null = null;
-    const hft = Array.isArray(historyForTurn) ? (historyForTurn as any[]) : [];
-    for (let i = hft.length - 1; i >= 0; i--) {
-      const m = hft[i];
-      const flowAt =
-        (m as any)?.meta?.extra?.ctxPack?.flow?.at ??
-        (m as any)?.meta?.ctxPack?.flow?.at ??
-        null;
-      if (typeof flowAt === 'string' && flowAt.trim().length > 0) {
-        prevAtIso = flowAt.trim();
-        break;
-      }
-    }
+// history から「直近の ctxPack.flow.at」を拾う
+let prevAtIso: string | null = null;
+const hft = Array.isArray(historyForTurn) ? (historyForTurn as any[]) : [];
+for (let i = hft.length - 1; i >= 0; i--) {
+  const m = hft[i];
+  const flowAt =
+    (m as any)?.meta?.extra?.ctxPack?.flow?.at ??
+    (m as any)?.meta?.ctxPack?.flow?.at ??
+    null;
+  if (typeof flowAt === 'string' && flowAt.trim().length > 0) {
+    prevAtIso = flowAt.trim();
+    break;
+  }
+}
 
-    let ageSec: number | null = null;
-    if (prevAtIso) {
-      const prevMs = Date.parse(prevAtIso);
-      const nowMs = Date.parse(nowIso2);
-      if (!Number.isNaN(prevMs) && !Number.isNaN(nowMs)) {
-        const d = Math.floor((nowMs - prevMs) / 1000);
-        ageSec = d >= 0 ? d : 0;
-      }
-    }
+let ageSec: number | null = null;
+if (prevAtIso) {
+  const prevMs = Date.parse(prevAtIso);
+  const nowMs = Date.parse(nowIso2);
+  if (!Number.isNaN(prevMs) && !Number.isNaN(nowMs)) {
+    const d = Math.floor((nowMs - prevMs) / 1000);
+    ageSec = d >= 0 ? d : 0;
+  }
+}
 
-    // ctxPack にも historyForWriter を同期しておく（stamp 時点で hfw_len が取れるように）
-    const hfw = Array.isArray((out.metaForSave as any)?.extra?.historyForWriter)
-      ? (out.metaForSave as any).extra.historyForWriter
-      : [];
+// ctxPack にも historyForWriter を同期しておく（stamp 時点で hfw_len が取れるように）
+// ⚠️ 注意：参照のまま入れると meta 内の ctxPack 参照で循環参照（[Circular]）になり得る
+const hfw = Array.isArray((out.metaForSave as any)?.extra?.historyForWriter)
+  ? (out.metaForSave as any).extra.historyForWriter
+  : [];
 
-    if ((extra2.ctxPack as any).historyForWriter == null && hfw.length) {
-      (extra2.ctxPack as any).historyForWriter = hfw;
-    }
+if ((extra2.ctxPack as any).historyForWriter == null && hfw.length) {
+  // meta を落として “循環しない最小形” にして入れる
+  (extra2.ctxPack as any).historyForWriter = (hfw as any[]).map((m) => ({
+    role: m?.role ?? null,
+    content: m?.content ?? '',
+  }));
+}
 
-    (extra2.ctxPack as any).flow = {
-      at: nowIso2,
-      prevAtIso,
-      ageSec,
-      sessionBreak: false,
-      fresh: true,
-    };
 
-    console.log('[IROS][CTXPACK] stamped', {
-      hasCtxPack: !!extra2.ctxPack,
-      prevAtIso,
-      ageSec,
-      flowAt: nowIso2,
-      ctxPackKeys: extra2.ctxPack ? Object.keys(extra2.ctxPack as any) : null,
-      hfw_len: Array.isArray((extra2.ctxPack as any)?.historyForWriter)
-        ? (extra2.ctxPack as any).historyForWriter.length
-        : null,
-      hfw_src_len: hfw.length,
-    });
+// ✅ 追加：HistoryDigest v1 を ctxPack に同期（rephraseEngine がここを見に行く）
+// - 既にある場合は上書きしない（single-writer/単一入口の思想）
+const digestV1 = (mf2.extra as any)?.historyDigestV1 ?? null;
+if ((extra2.ctxPack as any).historyDigestV1 == null && digestV1) {
+  (extra2.ctxPack as any).historyDigestV1 = digestV1;
+}
+
+// ✅ traceId を ctxPack.flow と stamped log の両方に混ぜる（1ターン1本で追えるようにする）
+(extra2.ctxPack as any).flow = {
+  at: nowIso2,
+  prevAtIso,
+  ageSec,
+  sessionBreak: false,
+  fresh: true,
+  traceId: traceId ?? null,
+};
+
+// digestChars は “注入対象の文字数” を見るため（JSON stringify）
+let digestChars: number | null = null;
+try {
+  const d = (extra2.ctxPack as any)?.historyDigestV1 ?? null;
+  digestChars = d ? JSON.stringify(d).length : null;
+} catch {
+  digestChars = null;
+}
+
+console.log('[IROS][CTXPACK] stamped', {
+  traceId: traceId ?? null,
+  conversationId,
+  userCode,
+
+  hasCtxPack: !!extra2.ctxPack,
+  prevAtIso: prevAtIso ?? null,
+  ageSec: ageSec ?? null,
+  flowAt: (extra2.ctxPack as any)?.flow?.at ?? null,
+  ctxPackKeys: extra2.ctxPack ? Object.keys(extra2.ctxPack as any) : null,
+
+  hfw_len: Array.isArray((extra2.ctxPack as any)?.historyForWriter)
+    ? (extra2.ctxPack as any).historyForWriter.length
+    : null,
+
+  // ✅ 追加：digest 注入が可能な状態か（ここが true なら rephrase 側で inject できる）
+  hasDigestV1: Boolean((extra2.ctxPack as any)?.historyDigestV1),
+  digestChars,
+
+  hfw_src_len: Array.isArray((out.metaForSave as any)?.extra?.historyForWriter)
+    ? (out.metaForSave as any).extra.historyForWriter.length
+    : null,
+});
+
+
 
   } catch (e) {
     // Flow は非必須：失敗しても会話を止めない

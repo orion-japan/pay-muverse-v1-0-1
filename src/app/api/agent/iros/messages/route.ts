@@ -882,11 +882,28 @@ export async function POST(req: NextRequest) {
 
     for (const table of ['iros_messages', 'public.iros_messages'] as const) {
       try {
-        const { data, error } = await (supabase as any).from(table).insert([row]).select('id,created_at').single();
-        if (!error && data) {
-          inserted = { id: (data as any).id, created_at: (data as any).created_at ?? nowIso };
-          break;
+        // ✅ まず insert 成功を優先（returning が取れなくても落とさない）
+        const ins = await (supabase as any).from(table).insert([row]);
+        if (ins?.error) continue;
+
+        // ✅ returning を“取れたらラッキー”で試す（0行でもOK）
+        const sel = await (supabase as any)
+          .from(table)
+          .select('id,created_at')
+          .eq('conversation_id', convUuid)
+          .eq('user_code', userCode)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (!sel?.error && sel?.data) {
+          inserted = { id: (sel.data as any).id, created_at: (sel.data as any).created_at ?? nowIso };
+        } else {
+          // ✅ select が取れない環境でも insert は成功しているので最低限返す
+          inserted = { id: String(nowTs), created_at: nowIso };
         }
+
+        break;
       } catch {
         // ignore
       }
@@ -920,6 +937,7 @@ export async function POST(req: NextRequest) {
         meta: metaFilled,
       },
     });
+
   } catch (e: any) {
     return json(
       { ok: false, error: 'unhandled_error', error_code: 'unhandled_error', detail: String(e?.message ?? e), ms: msSince(t0) },
