@@ -1027,13 +1027,72 @@ export async function POST(req: NextRequest) {
       console.info('[IROS/PERSIST_PICK]', {
         conversationId,
         userCode,
+        pickedFrom:
+          !isEffectivelyEmptyText(stripInternalLines(resultObjFinalRaw)) && stripInternalLines(resultObjFinalRaw).length > 0
+            ? 'resultObjFinalRaw'
+            : blocksJoinedCleaned.length > 0
+              ? 'rephraseBlocks'
+              : !isEffectivelyEmptyText(stripInternalLines(displayPreferredRaw)) && stripInternalLines(displayPreferredRaw).length > 0
+                ? 'metaDisplayPreferred'
+                : String(userTextClean ?? '').trim().length > 0
+                  ? 'userEcho'
+                  : 'dots',
         pickedLen: contentForPersist.length,
         pickedHead: String(contentForPersist).slice(0, 40),
         fromResultObjLen: stripInternalLines(resultObjFinalRaw).length,
         blocksJoinedCleanedLen: blocksJoinedCleaned.length,
         fromMetaLen: stripInternalLines(displayPreferredRaw).length,
+        userEchoLen: String(userTextClean ?? '').trim().length,
         isPickedDots: contentForPersist === '……',
       });
+
+
+
+      // ✅ FINAL 確定 echo 監査（persist 直前の “最終保存本文” で判定）
+      try {
+        const normalizeEcho = (s: string) =>
+          String(s ?? '')
+            .replace(/\r\n/g, '\n')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        const userEchoTrim = normalizeEcho(String(userTextClean ?? ''));
+        const finalTrim = normalizeEcho(String(contentForPersist ?? ''));
+
+        // pickedFrom の推定（監査に必要）
+        const fromResultObj = stripInternalLines(resultObjFinalRaw);
+        const displayPreferred = stripInternalLines(displayPreferredRaw);
+        const pickedFrom =
+          !isEffectivelyEmptyText(fromResultObj) && fromResultObj.length > 0
+            ? 'resultObj'
+            : blocksJoinedCleaned.length > 0
+              ? 'rephraseBlocks'
+              : !isEffectivelyEmptyText(displayPreferred) && displayPreferred.length > 0
+                ? 'meta'
+                : userEchoTrim.length > 0
+                  ? 'userEcho'
+                  : 'dots';
+
+        const isEchoExact = Boolean(userEchoTrim && finalTrim && userEchoTrim === finalTrim);
+        const finalTextPolicy = String((metaForSave as any)?.extra?.finalTextPolicy ?? '');
+        const rescuedFromRephraseMeta = Boolean((metaForSave as any)?.extra?.finalAssistantTextRescuedFromRephraseMeta);
+        const rescuedFromRephrase = Boolean((metaForSave as any)?.extra?.finalAssistantTextRescuedFromRephrase);
+
+        if (isEchoExact) {
+          console.warn('[IROS/PERSIST_PICK][ECHO_DETECTED_FINAL]', {
+            conversationId,
+            userCode,
+            pickedFrom,
+            finalTextPolicy,
+            userLen: userEchoTrim.length,
+            finalLen: finalTrim.length,
+            userHead: userEchoTrim.slice(0, 80),
+            finalHead: finalTrim.slice(0, 80),
+            rescuedFromRephraseMeta,
+            rescuedFromRephrase,
+          });
+        }
+      } catch {}
 
       const persistStrict =
         String(process.env.IROS_PERSIST_STRICT ?? '').trim() === '1' ||

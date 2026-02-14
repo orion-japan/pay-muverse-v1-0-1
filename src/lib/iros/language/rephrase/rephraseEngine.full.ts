@@ -1511,15 +1511,11 @@ export async function rephraseSlotsFinal(extracted: ExtractedSlots, opts: Rephra
   // - @Q_SLOT などの @*_SLOT を必ず落とす（seed 混入防止）
   const INTERNAL_LINE_MARKER = /^@(OBS|SHIFT|SH|RESTORE|Q|Q_SLOT|SAFE|NEXT|END|TASK|SEED_TEXT)\b/;
 
-
-
 // ✅ ILINE抽出用：内部マーカー行は「捨てる」のではなく、必要な本文だけ抽出して残す
-// - 基本は @SEED_TEXT の text を優先して seed を作る
-// - それ以外の内部行は、[[ILINE]] を含む場合だけ “本文候補” として残す（重複/ノイズ防止）
-// ✅ ILINE抽出用：内部マーカー行は “捨てる” のではなく “本文だけ抜く”
-// - @OBS/@SEED_TEXT などの JSON から text/user/seed_text/content/message を拾う
-// - ユーザーの @mention 等は落とさない（INTERNAL_LINE_MARKER にだけ反応）
-// ✅ ILINE抽出用：内部マーカー行は「捨てずに」JSONから本文候補だけ抜く（ILINEタグは保持される）
+// - 非内部行（ユーザー本文など）はそのまま残す
+// - @NEXT_HINT は LOCK 材料にしない（必ず除外）
+// - 内部行は JSON から本文候補のみ拾う（原則 user は拾わない）
+// - ただし ILINE タグがある場合は救済的に拾う
 const stripInternalMarkersForLock = (s: string) => {
   const lines = String(s ?? '')
     .split('\n')
@@ -1533,31 +1529,22 @@ const stripInternalMarkersForLock = (s: string) => {
   };
 
   // JSONから拾う候補キー（LOCK用：本文系のみ）
-  const PICK_KEYS = [
-    'text',
-    'user',
-    'seed_text',
-    'seedText',
-    'content',
-    'message',
-    'body',
-    'value',
-  ];
+  // NOTE: user は原則拾わない（@OBS の user が userText と同一になりやすい）
+  const PICK_KEYS = ['text', 'seed_text', 'seedText', 'content', 'message', 'body', 'value'];
 
   for (const line of lines) {
     const t0 = String(line ?? '');
     const t = t0.trim();
     if (!t) continue;
 
+    // ✅ 先に落とす（INTERNAL_LINE_MARKER に含まれてなくても混入させない）
+    if (/^@NEXT_HINT\b/.test(t)) continue;
+
     // 非内部行（= ユーザーが素で書いた本文等）はそのまま残す
     if (!INTERNAL_LINE_MARKER.test(t)) {
       pushUnique(t0.trim());
       continue;
     }
-
-    // ✅ NEXT_HINT は LOCK の材料にしない（本文ではなく内部ヒント）
-    // ここで確実に落とすことで、LOCK_SOURCE への混入を止める
-    if (/^@NEXT_HINT\b/.test(t)) continue;
 
     // 内部行：JSON部分を抽出
     const i0 = t.indexOf('{');
@@ -1573,17 +1560,15 @@ const stripInternalMarkersForLock = (s: string) => {
     }
     if (!obj || typeof obj !== 'object') continue;
 
-    // ✅ ILINEタグが含まれる場合だけ、本文候補として優先的に保持
     const dump = JSON.stringify(obj);
     const hasILineTag = /\[\[ILINE\]\]/.test(dump) || /\[\[\/ILINE\]\]/.test(dump);
 
-    // 本文候補を拾う（LOCK用途なので「ヒント系」は拾わない）
     let pickedAny = false;
 
+    // 本文候補を拾う
     for (const k of PICK_KEYS) {
       const v = (obj as any)?.[k];
       if (typeof v === 'string' && v.trim()) {
-        // ILINEタグがあるならそのまま。無い場合は本文っぽいキーのみ採用。
         pushUnique(v.trim());
         pickedAny = true;
       }
@@ -1591,7 +1576,7 @@ const stripInternalMarkersForLock = (s: string) => {
 
     // ILINEタグがあるのに上で拾えてない場合は、文字列っぽい値を浅く探索して救済
     if (hasILineTag && !pickedAny) {
-      for (const [k, v] of Object.entries(obj)) {
+      for (const v of Object.values(obj)) {
         if (typeof v === 'string' && v.trim()) {
           if (/\[\[ILINE\]\]/.test(v) || /\[\[\/ILINE\]\]/.test(v)) {
             pushUnique(v.trim());
@@ -1601,11 +1586,16 @@ const stripInternalMarkersForLock = (s: string) => {
       }
     }
 
-    // それでも拾えない内部行は無視（LOCKに不要）
+    // ✅ 例外：ILINEタグ付きの場合だけ user も拾う（必要なら）
+    if (hasILineTag) {
+      const u = (obj as any)?.user;
+      if (typeof u === 'string' && u.trim()) pushUnique(u.trim());
+    }
   }
 
   return out.join('\n').trim();
 };
+
 
   // ✅ blocks 生成（renderGateway が block 意図で拾える形）
   // NOTE: ここは "string[]" を返す。{text,kind} 化は adoptAsSlots 側で 1 回だけ行う。
@@ -1805,6 +1795,7 @@ const stripInternalMarkersForLock = (s: string) => {
   const { cleanedForModel: seedDraft0 } = extractLockedILines(seedForLock);
   const lockedILines = Array.from(new Set(lockedFromAll));
 
+
   console.info('[IROS/ILINE][LOCK_EXTRACT]', {
     lockedFromAllLen: Array.isArray(lockedFromAll) ? lockedFromAll.length : null,
     lockedUniqueLen: lockedILines.length,
@@ -1987,14 +1978,21 @@ const lastTurnsSafe = (() => {
     /\bT_CONCRETIZE\b/.test(laneHintText) ||
     /\bt_concretize\b/.test(laneHintText);
 
-    const hitIdeaBand =
-    /"kind"\s*:\s*"idea_band"/.test(laneHintText) ||
-    /\bIDEA_BAND\b/.test(laneHintText) ||
-    /\bidea_band\b/.test(laneHintText) ||
-    /"kind"\s*:\s*"idea_band"/.test(shiftTextForMode) ||
-    /\bIDEA_BAND\b/.test(shiftTextForMode) ||
-    /\bidea_band\b/.test(shiftTextForMode);
+  // =========================================================
+  // ✅ IDEA_BAND の「今回だけ強制終了」暫定ポリシー
+  // - 汚染源（shift/meta/seed）由来の IDEA_BAND 痕跡では発火させない
+  // - ユーザーが“候補/リスト要求”したターンだけ IDEA_BAND を許可する
+  // =========================================================
+  const userTextForIdeaBand = String(userText ?? '').trim();
 
+  // 候補要求（ざっくり判定：今は安全側＝要求が明示された時だけ）
+  const wantsCandidatesByUserText =
+    /候補|案|選択肢|リスト|一覧|いくつ|何個|どれがいい|おすすめ|オプション|パターン|候補出し|並べて|列挙/.test(
+      userTextForIdeaBand,
+    );
+
+  // IDEA_BAND のヒットは userText 由来だけで見る（＝“1回出したら次ターンで落ちる”）
+  const hitIdeaBand = wantsCandidatesByUserText;
 
   // ✅ kill policy:
   // - same_phrase でも IDEA_BAND は殺さない（候補は再提示が必要になることがある）
@@ -2003,9 +2001,11 @@ const lastTurnsSafe = (() => {
   // ✅ lane single source of truth:
   // - wantsIdeaBand を固定で立てない（下流が常時 IDEA_BAND 化して壊れる）
   // - 同時ヒット時は T_CONCRETIZE を優先（レーンは単一に収束させる）
-  const wantsTConcretize = hitTConcretize;
+// - wantsIdeaBand を固定で立てない（下流が常時 IDEA_BAND 化して壊れる）
+// ✅ repeatSignalSame（同句反復）が立っている時は lane を立てず、counsel/normal 側へ逃がす
+const wantsTConcretize = hitTConcretize && !repeatSignalSame;
+const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
 
-  const wantsIdeaBand = !wantsTConcretize && hitIdeaBand;
 
 
   try {
@@ -2064,9 +2064,6 @@ const lastTurnsSafe = (() => {
     band,
     lockedILines,
 
-    // T_CONCRETIZE：GUIDE_I でOK（具体化・一手誘導）
-    ...(wantsTConcretize ? { personaMode: 'GUIDE_I' as const } : {}),
-
     // IDEA_BAND：候補提示だけが目的なので DELIVER
     ...(wantsIdeaBand ? { personaMode: 'DELIVER' as const } : {}),
   });
@@ -2075,6 +2072,26 @@ const lastTurnsSafe = (() => {
   const laneContractTail = (tConcretizeHeader || '') + (ideaBandHeader || '');
 
   const systemPrompt = baseSystemPrompt + mustIncludeRuleText + laneContractTail;
+
+  // ✅ q/depth/phase を “確証つきで” internalPack に入れる（STATE_SNAPSHOTの土台）
+  // 優先順位：opts直指定 → userContext直指定 → ctxPack → null
+  const pickedDepthStage =
+    (opts as any)?.depthStage ??
+    (opts as any)?.userContext?.depthStage ??
+    (opts as any)?.userContext?.ctxPack?.depthStage ??
+    null;
+
+  const pickedPhase =
+    (opts as any)?.phase ??
+    (opts as any)?.userContext?.phase ??
+    (opts as any)?.userContext?.ctxPack?.phase ??
+    null;
+
+  const pickedQCode =
+    (opts as any)?.qCode ??
+    (opts as any)?.userContext?.qCode ??
+    (opts as any)?.userContext?.ctxPack?.qCode ??
+    null;
 
   const internalPack = buildInternalPackText({
     metaText,
@@ -2088,10 +2105,13 @@ const lastTurnsSafe = (() => {
     tLayerHint: band.tLayerHint,
     userText,
     onePointText: null,
+
+    // まずは “入れる” を優先（要件：確証つきで通す）
     situationSummary: null,
-    depthStage: null,
-    phase: null,
-    qCode: null,
+    depthStage: pickedDepthStage,
+    phase: pickedPhase,
+    qCode: pickedQCode,
+
     flowDigest,
     flowTape,
 
@@ -2100,6 +2120,18 @@ const lastTurnsSafe = (() => {
     replyGoal,
     repeatSignal,
   });
+
+  // ✅ 観測（確証を取る）
+  console.log('[IROS/rephraseEngine][STATE_SNAPSHOT_PICKED]', {
+    traceId: debug.traceId,
+    conversationId: debug.conversationId,
+    userCode: debug.userCode,
+    pickedDepthStage,
+    pickedPhase,
+    pickedQCode,
+    internalPackHead: safeHead(String(internalPack ?? ''), 220),
+  });
+
 
   let messages = buildFirstPassMessages({
     systemPrompt,
@@ -2407,14 +2439,17 @@ const lastTurnsSafe = (() => {
     (debug as any)?.slotPlanPolicy ??
     null;
 
-  // ✅ historyDigestV1（ログ用）: ctxPack から拾う（API送信はしない）
+  // ✅ historyDigestV1: ctxPack / userContext から拾う（存在する時だけ “実際に注入” する）
   const historyDigestV1 =
     (opts as any)?.historyDigestV1 ??
     (opts as any)?.userContext?.historyDigestV1 ??
     (opts as any)?.userContext?.ctxPack?.historyDigestV1 ??
     null;
 
-
+  // ⚠️ 注意：
+  // pickedQCode / pickedDepthStage / pickedPhase は
+  // すでに上（internalPackの直前あたり）で定義されている前提で “再定義しない”
+  // ここでは参照だけする。
 
   raw = await callWriterLLM({
     model: opts.model ?? 'gpt-4o',
@@ -2423,13 +2458,20 @@ const lastTurnsSafe = (() => {
     traceId: debug.traceId ?? null,
     conversationId: debug.conversationId ?? null,
     userCode: debug.userCode ?? null,
+
+    // ✅ 重要：拾ってるだけだった digest を “実際に渡す”
+    historyDigestV1,
+
     audit: {
       mode: 'rephrase',
       slotPlanPolicy: slotPlanPolicyResolved,
-      qCode: (debug as any)?.qCode ?? null,
-      depthStage: (debug as any)?.depthStage ?? null,
 
-      // ✅ 追加（ログ専用）
+      // ✅ “確証つき” の値をそのまま使う（再定義しない）
+      qCode: (typeof pickedQCode !== 'undefined' ? pickedQCode : null) as any,
+      depthStage: (typeof pickedDepthStage !== 'undefined' ? pickedDepthStage : null) as any,
+      phase: (typeof pickedPhase !== 'undefined' ? pickedPhase : null) as any,
+
+      // ✅ ログ
       hasDigest: Boolean(historyDigestV1),
       historyDigestV1Head: historyDigestV1 ? safeHead(String(historyDigestV1), 140) : null,
     },
@@ -2555,38 +2597,71 @@ const lastTurnsSafe = (() => {
   let v = runFlagship(candidate, slotsForGuard, scaffoldActive);
 
   // ---------------------------------------------
-  // IDEA_BAND contract check（違反ならその場で候補化→最後にダメなら FATAL）
+  // IDEA_BAND contract check（IDEA_BAND時は“候補形”のみ許可）
+  // - 違反したら FATAL に落として retry を誘発（語り文のまま通さない）
   // ---------------------------------------------
   const normalizeIdeaBandLine = (line: string) =>
     String(line ?? '')
       .trim()
-      .replace(/^[-*•・◯]\s*/u, '')
+      // 先頭の番号/記号を落とす（1) / 1. / ① / - / • など）
+      .replace(/^(?:\(?\d+\)?[.)]\s*|[①-⑳]\s*|[-*•・◯]\s*)/u, '')
       .trim();
 
-  if (forceIntervene) {
-    console.warn('[IROS/FLAGSHIP][FORCE_INTERVENE]', {
-      traceId: debug.traceId,
-      conversationId: debug.conversationId,
-      userCode: debug.userCode,
-      reason: raise.reason,
-      verdictLevel: v.level,
-      verdictReasons: v.reasons,
-      head: safeHead(candidate, 160),
-    });
+  const isIdeaBandHint =
+    /"kind"\s*:\s*"idea_band"/.test(String(shiftSlot?.text ?? '')) ||
+    /\bIDEA_BAND\b/.test(String(shiftSlot?.text ?? '')) ||
+    /\bidea_band\b/.test(String(shiftSlot?.text ?? ''));
 
-    const reasonText = String(raise.reason ?? '');
-    const isStallOrDrift = /STALL|POSITION_DRIFT/i.test(reasonText);
+  const isIdeaBandCandidateShapeOk = (text: string) => {
+    const lines = String(text ?? '')
+      .replace(/\r\n/g, '\n')
+      .split('\n')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
 
-    if (isStallOrDrift && seedFromSlots) {
-      return adoptAsSlots(seedFromSlots, 'FLAGSHIP_RAISE_TO_SEED', { scaffoldActive });
+    // IDEA_BAND は「2〜maxLines」の“候補行”が必須
+    if (lines.length < 2) return false;
+    if (typeof maxLines === 'number' && maxLines > 0 && lines.length > maxLines) return false;
+
+    // 各行：箇条書き/質問/長文語り を弾く（最低限）
+    for (const rawLine of lines) {
+      // 箇条書きっぽい先頭
+      if (/^[-*•・◯]\s+/u.test(rawLine)) return false;
+
+      const line = normalizeIdeaBandLine(rawLine);
+
+      // 空行化は弾く
+      if (!line) return false;
+
+      // 質問は禁止（IDEA_BANDは候補提示のみ）
+      if (/[?？]/u.test(line)) return false;
+
+      // 句点が2つ以上＝語り文になりがち（保守的に弾く）
+      const dotCount = (line.match(/[。]/g) ?? []).length;
+      if (dotCount >= 2) return false;
     }
 
-    v = {
-      ...v,
-      ok: false,
-      level: 'FATAL',
-      reasons: Array.from(new Set([...(v.reasons ?? []), 'FORCE_INTERVENE'])),
-    } as any;
+    return true;
+  };
+
+  if (isIdeaBandHint) {
+    const okShape = isIdeaBandCandidateShapeOk(candidate ?? '');
+    if (!okShape) {
+      console.warn('[IROS/IDEA_BAND][CONTRACT_VIOLATION]', {
+        traceId: debug.traceId,
+        conversationId: debug.conversationId,
+        userCode: debug.userCode,
+        head: safeHead(candidate, 160),
+      });
+
+      // IDEA_BAND なのに形が崩れた → ここでFATALに落として retry を確実に発生させる
+      v = {
+        ...(v as any),
+        ok: false,
+        level: 'FATAL',
+        reasons: Array.from(new Set([...(v?.reasons ?? []), 'IDEA_BAND_CONTRACT'])),
+      } as any;
+    }
   }
 
   if (v && String(v.level ?? '').toUpperCase() === 'WARN' && shouldRejectWarnToSeed(v) && seedFromSlots) {
@@ -2623,6 +2698,67 @@ const lastTurnsSafe = (() => {
   const shiftKind = pol.shiftKind;
   const isTConcretize = pol.isTConcretize;
   const isIdeaBand = pol.isIdeaBand;
+  // ---------------------------------------------
+  // IDEA_BAND contract enforcement（pol.isIdeaBand 確定後に強制）
+  // - 候補形でなければ FATAL に落として retry を誘発する
+  // ---------------------------------------------
+  if (isIdeaBand) {
+    const lines = String(candidate ?? '')
+      .replace(/\r\n/g, '\n')
+      .split('\n')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+
+    const normalizeLine = (line: string) =>
+      String(line ?? '')
+        .trim()
+        .replace(/^(?:\(?\d+\)?[.)]\s*|[①-⑳]\s*|[-*•・◯]\s*)/u, '')
+        .trim();
+
+    let okShape = true;
+
+    // 2〜maxLines（maxLines が未定義なら 5 扱い）
+    const maxLinesLocal = typeof (maxLines as any) === 'number' && (maxLines as any) > 0 ? (maxLines as any) : 5;
+    if (lines.length < 2) okShape = false;
+    if (okShape && lines.length > maxLinesLocal) okShape = false;
+
+    if (okShape) {
+      for (const raw of lines) {
+        // 箇条書きは禁止（候補は番号を後段で付ける）
+        if (/^[-*•・◯]\s+/u.test(raw)) { okShape = false; break; }
+
+        const line = normalizeLine(raw);
+        if (!line) { okShape = false; break; }
+
+        // 質問は禁止
+        if (/[?？]/u.test(line)) { okShape = false; break; }
+
+        // ★最重要：候補行に「。」は出さない（説明文を即死させる）
+        if (/[。]/u.test(line)) { okShape = false; break; }
+
+        // 1行が長すぎるのも候補ではない（安全側）
+        if (line.length > 36) { okShape = false; break; }
+      }
+    }
+
+    if (!okShape) {
+      console.warn('[IROS/IDEA_BAND][CONTRACT_VIOLATION]', {
+        traceId: debug.traceId,
+        conversationId: debug.conversationId,
+        userCode: debug.userCode,
+        head: safeHead(candidate, 160),
+        lines: lines.length,
+      });
+
+      v = {
+        ...(v as any),
+        ok: false,
+        level: 'FATAL',
+        reasons: Array.from(new Set([...(v?.reasons ?? []), 'IDEA_BAND_CONTRACT'])),
+      } as any;
+    }
+  }
+
 
   const MIN_OK_LEN = pol.MIN_OK_LEN;
 

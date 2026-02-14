@@ -501,18 +501,21 @@ export async function maybeAttachRephraseForRenderV2(args: {
   const itxStepForCtx = pickStr(memoryStateForCtx?.itxStep, metaAny?.itx_step, metaAny?.itxStep);
   const itxReasonForCtx = pickStr(memoryStateForCtx?.itxReason, metaAny?.itx_reason, metaAny?.itxReason);
 
-  // intentBand は depthStage ではなく「意図帯域」を最優先（例: I2）
-  const intentBandForCtx =
-    pickStr(metaAny?.intentLine?.intentBand) ||
-    pickStr(metaAny?.intent_line?.intentBand) ||
-    pickStr(metaAny?.intentBand) ||
-    pickStr(metaAny?.intent_band) ||
-    pickStr(memoryStateForCtx?.intentBand) ||
-    pickStr(memoryStateForCtx?.intent_band) ||
-    pickStr(memoryStateForCtx?.depthStage) ||
-    pickStr(metaAny?.depth_stage) ||
-    pickStr(metaAny?.depthStage) ||
-    null;
+// intentBand は「会話の今フレーム（depthStage）」を最優先。
+// meta.intentLine.intentBand は補助（CフレームでI帯に引っ張られる事故を防ぐ）
+const intentBandForCtx =
+  pickStr(memoryStateForCtx?.depthStage) ||
+  pickStr(metaAny?.depth_stage) ||
+  pickStr(metaAny?.depthStage) ||
+  pickStr(metaAny?.unified?.depth?.stage) ||
+  pickStr(metaAny?.intentLine?.intentBand) ||
+  pickStr(metaAny?.intent_line?.intentBand) ||
+  pickStr(metaAny?.intentBand) ||
+  pickStr(metaAny?.intent_band) ||
+  pickStr(memoryStateForCtx?.intentBand) ||
+  pickStr(memoryStateForCtx?.intent_band) ||
+  null;
+
 
   const tLayerModeActiveForCtx = Boolean(itxStepForCtx && /^T[123]$/u.test(String(itxStepForCtx)));
 
@@ -538,21 +541,47 @@ export async function maybeAttachRephraseForRenderV2(args: {
   const topicDigestForCtx: string | null = null;
 
   const repeatSignalForCtx: string | null = (() => {
+    const now = String(userText ?? '').trim();
+    if (!now) return null;
+
     const turns = normalizedHistory ?? [];
     const userTurns = turns.filter((m) => m?.role === 'user');
-    if (userTurns.length < 2) return null;
 
-    const last = String(userTurns[userTurns.length - 1]?.content ?? '').trim();
-    const prev = String(userTurns[userTurns.length - 2]?.content ?? '').trim();
-    if (!last || !prev) return null;
+    if (userTurns.length === 0) return null;
 
-    if (last === prev) return 'same_phrase';
+    // ✅ history 側に「今回 userText が既に入っている」重複を強制的に無視して prev を探す
+    // - 末尾が now と同じならスキップ
+    // - さらに「同じ文が連続してる」場合もスキップして、実質の前回 user を拾う
+    let prev: string | null = null;
+    let lastSeen: string | null = null;
 
+    for (let i = userTurns.length - 1; i >= 0; i--) {
+      const t = String(userTurns[i]?.content ?? '').trim();
+      if (!t) continue;
+
+      // 連続重複の圧縮（…A, A, A みたいなのを1つとして扱う）
+      if (lastSeen != null && t === lastSeen) continue;
+      lastSeen = t;
+
+      // 「今回 now が history に混入している」ケースを除外
+      if (t === now) continue;
+
+      prev = t;
+      break;
+    }
+
+    if (!prev) return null;
+
+    // 完全一致（正規化前）
+    if (now === prev) return 'same_phrase';
+
+    // 正規化一致（句読点・空白・大小などを落とす）
     const normalize = (s: string) => s.replace(/[、。,.!?！？\s]/g, '').toLowerCase();
-    if (normalize(last) === normalize(prev)) return 'same_phrase';
+    if (normalize(now) === normalize(prev)) return 'same_phrase';
 
     return null;
   })();
+
 
   // slotPlanPolicy を確実に通す
   const slotPlanPolicyForCtx =

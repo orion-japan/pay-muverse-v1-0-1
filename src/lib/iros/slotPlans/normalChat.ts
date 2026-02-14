@@ -99,14 +99,18 @@ function pickRandom<T>(arr: T[]): T {
 }
 
 function safeLaneKey(v: unknown): LaneKey {
-  return v === 'T_CONCRETIZE' ? 'T_CONCRETIZE' : 'IDEA_BAND';
+  // ✅ laneKey が未指定(null/undefined/未知)なら IDEA_BAND に落とさない
+  // - IDEA_BAND は「上流が明示で渡した場合のみ」発火させる前提
+  // - 未指定時は保守的に T_CONCRETIZE（=具体へ寄せるSHIFT）へ
+  return v === 'IDEA_BAND' ? 'IDEA_BAND' : 'T_CONCRETIZE';
 }
+
 
 // ✅ Phase11: advance判定のための “橋” を必ず出す
 // - evidenceLog.ts は key==='NEXT' または content.startsWith('@NEXT_HINT') を検出し、
 //   さらに mode==='advance_hint' を拾えれば advance=1 になる。
 function buildNextHintSlot(args: { userText: string; laneKey?: LaneKey; flowDelta?: string | null }): NormalChatSlot {
-  const laneKey = safeLaneKey(args.laneKey);
+  const laneKey = safeLaneKey(args.laneKey); // LaneKey | null
   const delta = args.flowDelta ? String(args.flowDelta) : null;
 
   // ⚠️ advance 判定専用：
@@ -115,7 +119,9 @@ function buildNextHintSlot(args: { userText: string; laneKey?: LaneKey; flowDelt
   const hint =
     laneKey === 'T_CONCRETIZE'
       ? '次の一手を1つに絞って実行'
-      : '候補を2〜3に並べて選びやすくする';
+      : laneKey === 'IDEA_BAND'
+        ? '候補を2〜3に並べて選びやすくする'
+        : '流れを保ったまま前に進める';
 
   return {
     key: 'NEXT',
@@ -123,14 +129,13 @@ function buildNextHintSlot(args: { userText: string; laneKey?: LaneKey; flowDelt
     style: 'neutral',
     content: `@NEXT_HINT ${JSON.stringify({
       mode: 'advance_hint',
-      laneKey,
+      laneKey, // null も許容（未指定なら null のまま）
       delta,
       hint: clamp(hint, 80),
       // seed_text intentionally omitted
     })}`,
   };
 }
-
 
 // --------------------------------------------------
 // minimal detectors（意味判定はしない）
@@ -210,13 +215,16 @@ function buildCompose(userText: string, laneKey?: LaneKey, flowDelta?: string | 
     },
 
     // ✅ Phase11 advance測定用の橋
-    buildNextHintSlot({ userText, laneKey, flowDelta }),
+    buildNextHintSlot({ userText, laneKey: laneKey ?? undefined, flowDelta })
+
   ];
 }
 
 // ✅ clarify：テンプレ自然文を出さない。LLMに “意味に答える” を許可するだけ。
+// ✅ FIX: IDEA_BAND のときも OBS を必ず出す（3点セット固定）
 function buildClarify(userText: string, laneKey?: LaneKey, flowDelta?: string | null): NormalChatSlot[] {
-  const isT = laneKey === 'T_CONCRETIZE';
+  const lane = safeLaneKey(laneKey);
+  const isT = lane === 'T_CONCRETIZE';
 
   const contractsClarify = [
     ['first_line_must_answer_question_directly', 'no_question_back_as_first_line', 'plain_words', 'no_flow_lecture'],
@@ -224,33 +232,44 @@ function buildClarify(userText: string, laneKey?: LaneKey, flowDelta?: string | 
     ['first_line_is_yes_no_or_core', 'then_short_reason', 'no_boilerplate', 'plain_words'],
   ];
 
-  // ✅ T_CONCRETIZE 用：契約は「コア→10分→反復条件」を強制する寄せ方にする
   const contractsT = [
     ['first_line_is_core', 'no_user_echo', 'one_next_step', 'no_lecture', 'plain_words'],
     ['first_line_is_core', 'then_action_in_10min', 'no_checklist', 'plain_words'],
   ];
 
-  // ✅ seed は一度だけ（IDEA_BAND / T / clarify で共有）
   const seedText = clamp(norm(userText), 240);
+  const delta = flowDelta ? String(flowDelta) : null;
 
-  // ✅ IDEA_BAND は clarify を通さず、候補契約を writer に直送する
-  if (laneKey === 'IDEA_BAND') {
+  // ✅ どの経路でも OBS を固定で出す（seed露出防止：@行のみ）
+  const obs: NormalChatSlot = {
+    key: 'OBS',
+    role: 'assistant',
+    style: 'soft',
+    content: m('OBS', {
+      laneKey: lane,
+      user: seedText,
+      flow: { delta },
+    }),
+  };
+
+  // ✅ IDEA_BAND: clarify でも候補契約へ（質問返し/講義/手順を抑える）
+  if (lane === 'IDEA_BAND') {
     return [
+      obs,
       {
         key: 'SHIFT',
         role: 'assistant',
         style: 'neutral',
         content: buildShiftIdeaBand(seedText),
       },
-
-      // ✅ Phase11 advance測定用の橋（clarifyでも必ず出す）
-      buildNextHintSlot({ userText, laneKey, flowDelta }),
+      buildNextHintSlot({ userText, laneKey: lane, flowDelta: delta }),
     ];
   }
 
   const shiftPreset = isT ? SHIFT_PRESET_T_CONCRETIZE : null;
 
   return [
+    obs,
     {
       key: 'SHIFT',
       role: 'assistant',
@@ -259,29 +278,21 @@ function buildClarify(userText: string, laneKey?: LaneKey, flowDelta?: string | 
         kind: isT ? 't_concretize' : 'clarify',
         intent: isT ? 'implement_next_step' : 'answer_the_question',
         contract: pickRandom(isT ? contractsT : contractsClarify),
-
-        // ✅ ここが肝：Tのとき preset.rules を丸ごと渡す（focus/10min/repeat を writer に伝える）
         rules: {
           ...(shiftPreset?.rules ?? {}),
           answer_user_meaning: true,
           keep_it_simple: true,
           questions_max: isT ? 0 : 1,
         },
-
-        // ✅ ここも肝：Tのとき preset.allow を優先（short_reply_ok=false を確実に反映）
         allow: {
           ...(shiftPreset?.allow ?? {}),
           concrete_reply: true,
           short_reply_ok: isT ? false : true,
         },
-
-        // ✅ writer専用の“核”（@payload内なので露出しない）
         seed_text: seedText,
       }),
     },
-
-    // ✅ Phase11 advance測定用の橋（clarifyでも必ず出す）
-    buildNextHintSlot({ userText, laneKey, flowDelta }),
+    buildNextHintSlot({ userText, laneKey: lane, flowDelta: delta }),
   ];
 }
 
@@ -459,11 +470,12 @@ function buildShiftTConcretize(seedText: string, focusLabel?: string) {
     .filter(Boolean)
     .join('\n');
 
-  // ✅ 実行経路確認用（一時ログ）
-  console.warn('[IROS/T_CONCRETIZE][SHIFT_BUILDER_USED]', {
-    hasFocus: !!focus,
-    seedHead: packedSeed.slice(0, 120),
-  });
+    console.warn('[IROS/T_CONCRETIZE][SHIFT_BUILDER_USED]', {
+      hasFocus: !!focus,
+      seedHead: packedSeed.slice(0, 120),
+      stack: new Error('SHIFT_BUILDER_USED').stack,
+    });
+
 
   const payload = {
     kind: 't_concretize',
@@ -486,10 +498,10 @@ function buildShiftTConcretize(seedText: string, focusLabel?: string) {
 }
 
 
-// --- 置き換え 2) buildFlowReply を関数まるごと置き換え ---
+// --- 置き換え：buildFlowReply を関数まるごと置き換え ---
 function buildFlowReply(args: {
   userText: string;
-  laneKey: LaneKey;
+  laneKey: LaneKey | null | undefined;
   flow: { delta: string; confidence?: number } | null;
   lastUserText?: string | null;
 
@@ -497,17 +509,48 @@ function buildFlowReply(args: {
   focusLabel?: string;
 }): NormalChatSlot[] {
   const t = norm(args.userText);
-  const laneKey = safeLaneKey(args.laneKey);
+  const seedText = clamp(t, 240);
 
+  // ✅ TSエラー原因：delta/conf が未宣言だったので復活
   const delta = args.flow?.delta ? String(args.flow.delta) : 'FORWARD';
   const conf = typeof args.flow?.confidence === 'number' ? args.flow!.confidence : undefined;
 
-  const seedText = clamp(t, 240);
+  // ✅ laneKey は「明示されたときだけ」使う。null/不明は通常扱い（IDEA_BANDにも落とさない）
+  const laneKeyRaw = args.laneKey;
+  const laneKeyKnown: LaneKey | null =
+    laneKeyRaw === 'T_CONCRETIZE' || laneKeyRaw === 'IDEA_BAND' ? laneKeyRaw : null;
+
+  // ✅ IDEA_BAND は「選択宣言（＠）」があるときだけ（要件通り）
+  const hasAtDecl = /[@＠]/.test(t);
+  const useIdeaBand = laneKeyKnown === 'IDEA_BAND' && hasAtDecl;
+
+  // ✅ T_CONCRETIZE も「明示されたときだけ」
+  const useTConcretize = laneKeyKnown === 'T_CONCRETIZE';
+
+  // OBSに載せるlaneKeyも同じ基準（nullのままOK）
+  const laneKeyForObs: LaneKey | null = useTConcretize ? 'T_CONCRETIZE' : useIdeaBand ? 'IDEA_BAND' : null;
 
   const shift =
-    laneKey === 'T_CONCRETIZE'
+    useTConcretize
       ? buildShiftTConcretize(seedText, args.focusLabel)
-      : buildShiftIdeaBand(seedText);
+      : useIdeaBand
+        ? buildShiftIdeaBand(seedText)
+        : m('SHIFT', {
+            kind: 'c_sense_hint',
+            intent: 'continue_flow',
+            rules: {
+              ...(SHIFT_PRESET_C_SENSE_HINT.rules ?? {}),
+              questions_max: 1,
+              no_checklist: true,
+              no_future_instruction: true,
+              no_lecture: true,
+              no_decision: true,
+              no_action_commit: true,
+            },
+            tone: SHIFT_PRESET_C_SENSE_HINT.tone ?? undefined,
+            allow: { ...(SHIFT_PRESET_C_SENSE_HINT.allow ?? {}), short_reply_ok: false },
+            seed_text: seedText,
+          });
 
   return [
     {
@@ -515,9 +558,9 @@ function buildFlowReply(args: {
       role: 'assistant',
       style: 'soft',
       content: m('OBS', {
-        laneKey,
-        user: clamp(t, 240),
-        flow: { delta, confidence: conf },
+        laneKey: laneKeyForObs,
+        user: seedText,
+        flow: conf === undefined ? { delta } : { delta, confidence: conf },
         lastUserText: args.lastUserText ? clamp(norm(args.lastUserText), 140) : null,
       }),
     },
@@ -529,7 +572,8 @@ function buildFlowReply(args: {
     },
 
     // ✅ Phase11 advance測定用の橋（通常フローでも必ず出す）
-    buildNextHintSlot({ userText: t, laneKey, flowDelta: delta }),
+    // laneKeyはnullでも落ちないように（型が厳しい場合があるのでas anyで通す）
+    buildNextHintSlot({ userText: t, laneKey: laneKeyForObs as any, flowDelta: delta }),
   ];
 }
 
@@ -601,23 +645,16 @@ export function buildNormalChatSlotPlan(args: {
     slots = buildFlowReply({ userText, laneKey, flow, lastUserText, focusLabel: args.focusLabel });
   }
 
-  // --------------------------------------------------
-  // 🚑 HARD GUARD: slots が 0 なら必ず前に進める材料を注入する
-  // - 実ログで slotPlan_len:0 が出ているため、ここで物理的に潰す
-  // - これが入ると RESULT_TEXT_NO_SLOTS に落ちず、writer が必ず動ける
-  // --------------------------------------------------
-  if (!Array.isArray(slots) || slots.length === 0) {
-    const d = flow?.delta ? String(flow.delta) : 'FORWARD';
-    reason = `guard:no_slots->flow:${d}`;
-    slots = buildFlowReply({ userText, laneKey, flow, lastUserText, focusLabel: args.focusLabel });
-  }
-
   // normalize 後も 0 なら最後の最後の保険（NEXT_HINT だけでも残す）
   const normalized = normalizeSlots(slots);
   if (normalized.length === 0) {
     reason = 'guard:no_slots_after_normalize';
     slots = [buildNextHintSlot({ userText, laneKey, flowDelta: flowDelta ?? 'FORWARD' })];
+  } else {
+    // ✅ 正規化済みを採用（slot順/欠損を確定）
+    slots = normalized;
   }
+
 
   return {
     kind: 'normal-chat',
@@ -628,6 +665,6 @@ export function buildNormalChatSlotPlan(args: {
     // ✅ それ以外は FINAL（LLMで本文を作る）
     slotPlanPolicy: reason === 'empty' ? 'UNKNOWN' : 'FINAL',
 
-    slots: normalizeSlots(slots),
+    slots,
   };
 }

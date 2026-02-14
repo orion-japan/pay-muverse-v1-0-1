@@ -225,51 +225,195 @@ export async function runRetryPass(params: {
 
   let retryCandidate = makeCandidate(raw2Guarded, maxLines, renderEngine);
 
-  // ✅ T_CONCRETIZE: 1行で終わる“そっけなさ”を禁止（決定的に2行へ補う）
-  // ↑ ここも固定テンプレが混入する主因なので廃止。
-  // - retryCandidate はそのまま採用（短くてもOK）
-  // - 伸ばす必要がある場合は上流（seed/slots）で材料を足す
-  // （no-op）
-
-  // ✅ 2nd PASS が短い場合も seed には逃げない（retryCandidate をそのまま採用）
+  // ---------------------------------------------------------
+  // ✅ IDEA_BAND contract enforcement (RETRY)
+  // - 1st pass が IDEA_BAND_CONTRACT で落ちた場合、
+  //   retryCandidate を deterministic に「候補形」へ矯正する。
+  // - LLM が語り文を返してもここで必ず候補へ落とす（再retry不要）。
+  // ---------------------------------------------------------
   {
-    const retryLenNow = String(retryCandidate ?? '').trim().length;
-    if (retryLenNow > 0 && retryLenNow < MIN_OK_LEN) {
-      console.warn('[IROS/FLAGSHIP][RETRY_STILL_TOO_SHORT]', {
-        traceId: debug?.traceId,
-        conversationId: debug?.conversationId,
-        userCode: debug?.userCode,
-        retryLen: retryLenNow,
-        min: MIN_OK_LEN,
-        head: safeHead(retryCandidate, 160),
-        hasSeed: !!seedFromSlots,
-      });
+    const fatalReasons0 = new Set((firstFatalReasons ?? []).map((x) => String(x)));
+    const needsIdeaBandRepair = fatalReasons0.has('IDEA_BAND_CONTRACT');
 
-      return adoptAsSlots(String(retryCandidate ?? '').trim(), 'FLAGSHIP_RETRY_STILL_TOO_SHORT_ACCEPT', {
-        scaffoldActive,
-      });
-    }
-  }
+    const normalizeIdeaBandLine = (line: string) =>
+      String(line ?? '')
+        .trim()
+        // 先頭の番号/記号を落とす（1) / 1. / ① / - / • など）
+        .replace(/^(?:\(?\d+\)?[.)]\s*|[①-⑳]\s*|[-*•・◯]\s*)/u, '')
+        .trim();
 
-  if (scaffoldActive && retryCandidate) {
-    const mhAfterClamp = scaffoldMustHaveOk({ slotKeys: inKeys, slotsForGuard, llmOut: retryCandidate });
-    if (!mhAfterClamp.ok) {
-      const restored = restoreScaffoldMustHaveInOutput({
-        llmOut: retryCandidate,
-        slotsForGuard,
-        missing: mhAfterClamp.missing,
-      });
-      retryCandidate = makeCandidate(restored, maxLines, renderEngine);
+    const clampLen = (s: string, n: number) => {
+      const t = String(s ?? '').trim();
+      if (t.length <= n) return t;
+      return t.slice(0, n).trim();
+    };
 
-      if (!retryCandidate || !retryCandidate.trim()) {
-        console.warn('[IROS/FLAGSHIP][RETRY_EMPTY_AFTER_RESTORE_CLAMP]', {
+    const splitToIdeaLines = (text: string) => {
+      const s = String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+      // まず改行で割る → 句点でも割る（語り文を候補に崩す）
+      const parts = s
+        .split('\n')
+        .flatMap((x) => String(x ?? '').split('。'))
+        .map((x) => String(x ?? '').trim())
+        .filter(Boolean);
+
+      return parts;
+    };
+
+    const isIdeaBandCandidateShapeOk = (text: string, maxLinesLocal: number) => {
+      const lines = String(text ?? '')
+        .replace(/\r\n/g, '\n')
+        .split('\n')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+
+      if (lines.length < 2) return false;
+      if (lines.length > maxLinesLocal) return false;
+
+      for (const raw of lines) {
+        // 箇条書きは禁止（候補は番号を後段で付ける）
+        if (/^[-*•・◯]\s+/u.test(raw)) return false;
+
+        const line = normalizeIdeaBandLine(raw);
+        if (!line) return false;
+
+        // 質問/句点は禁止（候補提示のみ）
+        if (/[?？]/u.test(line)) return false;
+        if (/[。]/u.test(line)) return false;
+
+        // 長すぎる行は候補ではない（安全側）
+        if (line.length > 36) return false;
+      }
+      return true;
+    };
+
+    if (needsIdeaBandRepair && retryCandidate) {
+      const maxLinesLocal =
+        typeof (maxLines as any) === 'number' && (maxLines as any) > 0 ? (maxLines as any) : 5;
+
+      // すでに候補形なら何もしない
+      const ok0 = isIdeaBandCandidateShapeOk(retryCandidate, maxLinesLocal);
+      if (!ok0) {
+        // deterministic repair
+        let lines = splitToIdeaLines(retryCandidate)
+          .flatMap((x) => {
+            const t = String(x ?? '').trim();
+            // 長い語りは「、」でも割って候補断片を作る（短すぎる断片は後で捨てる）
+            if (t.length >= 24 && /[、]/u.test(t)) return t.split('、');
+            return [t];
+          })
+          .map((x) => normalizeIdeaBandLine(x))
+          .map((x) => {
+            let t = String(x ?? '')
+              .replace(/[。]/g, '')
+              .replace(/[?？]/g, '')
+              .trim();
+
+            // 語り語尾を削って「候補」に寄せる
+            t = t.replace(
+              /(?:こともあります|ことがあります|こともある|でしょう|かもしれません|と思います|ようです|だったりします|かもしれない)$/u,
+              ''
+            );
+
+            // 行末の読点/カンマを落とす
+            t = t.replace(/[、,]+$/u, '').trim();
+
+            return clampLen(t, 36);
+          })
+          // 候補として短すぎる断片は捨てる（ノイズ除去）
+          .filter((t) => String(t ?? '').trim().length >= 6);
+
+        // 2行未満なら userText からも補う（最小限の救済）
+        if (lines.length < 2) {
+          const uLines = splitToIdeaLines(userText)
+            .map((x) => normalizeIdeaBandLine(x))
+            .map((x) => x.replace(/[。]/g, '').replace(/[?？]/g, '').trim())
+            .filter(Boolean)
+            .map((x) => clampLen(x, 36));
+          lines = Array.from(new Set([...lines, ...uLines]));
+        }
+
+        // それでも足りなければ baseDraft/candidate を分解して補う
+        if (lines.length < 2) {
+          const bLines = splitToIdeaLines(baseDraftForRepair || candidate)
+            .map((x) => normalizeIdeaBandLine(x))
+            .map((x) => x.replace(/[。]/g, '').replace(/[?？]/g, '').trim())
+            .filter(Boolean)
+            .map((x) => clampLen(x, 36));
+          lines = Array.from(new Set([...lines, ...bLines]));
+        }
+
+        // 最終クランプ：2〜maxLines に落とす
+        lines = lines.filter(Boolean).slice(0, maxLinesLocal);
+
+        // まだ2行未満なら、最後の手段として2行を捏造（空でUIが死ぬのを避ける）
+        if (lines.length < 2) {
+          const head = clampLen(
+            normalizeIdeaBandLine(String(userText ?? '').replace(/[。?？]/g, '')),
+            36
+          );
+          const tail = clampLen(
+            normalizeIdeaBandLine(String(candidate ?? '').replace(/[。?？]/g, '')),
+            36
+          );
+          const a = head || 'いまの状態をそのまま置く';
+          const b = tail && tail !== a ? tail : '少しだけ視点を変えてみる';
+          lines = [a, b].slice(0, maxLinesLocal);
+        }
+
+        // ✅ NEW: repair後の各行を「候補形（体言止め寄り）」に寄せる（落としすぎ注意）
+        lines = lines.map((x) => {
+          let t = String(x ?? '').trim();
+
+          // 丁寧語尾・推量・説明語尾を落とす（保守的）
+          t = t
+            .replace(/(?:です|ます|でした|ました)$/u, '')
+            .replace(/(?:でしょう|かもしれません|かもしれない)$/u, '')
+            .replace(/(?:と思います|と思う|ようです|ようだ)$/u, '')
+            .replace(/(?:だったりします)$/u, '')
+            .trim();
+
+          // 終端の「の」「こと」「もの」を候補寄りに圧縮（意味を壊しにくい）
+          t = t
+            .replace(/(?:のです|のだ)$/u, '')
+            .replace(/(?:の)$/u, '')
+            .replace(/(?:こと)$/u, '')
+            .replace(/(?:もの)$/u, '')
+            .trim();
+
+          // 行末の読点/カンマを落とす（最後にもう一回）
+          t = t.replace(/[、,]+$/u, '').trim();
+
+          return clampLen(t, 36);
+        });
+
+        // もう一度ノイズ除去
+        lines = lines.filter((t) => String(t ?? '').trim().length >= 6).slice(0, maxLinesLocal);
+
+
+        // filterで短くなって消えた場合に備えて、ここでもう一度ノイズ除去
+        lines = lines.filter((t) => String(t ?? '').trim().length >= 6).slice(0, maxLinesLocal);
+
+        // ここで空になったらUI死回避の最終保険
+        if (lines.length < 2) {
+          const a = clampLen(normalizeIdeaBandLine(String(userText ?? '').replace(/[。?？]/g, '')), 36) || 'いまの状態をそのまま置く';
+          const b = clampLen(normalizeIdeaBandLine(String(candidate ?? '').replace(/[。?？]/g, '')), 36) || '少しだけ視点を変えてみる';
+          lines = [a, b].slice(0, maxLinesLocal);
+        }
+
+        const repaired = lines.join('\n').trim();
+
+        console.warn('[IROS/IDEA_BAND][RETRY_REPAIR_APPLIED]', {
           traceId: debug?.traceId,
           conversationId: debug?.conversationId,
           userCode: debug?.userCode,
+          beforeHead: safeHead(retryCandidate, 160),
+          afterHead: safeHead(repaired, 160),
+          lines: lines.length,
         });
 
-        const fallback = baseDraftForRepair && baseDraftForRepair.trim() ? baseDraftForRepair : candidate;
-        return adoptAsSlots(fallback, 'FLAGSHIP_RETRY_EMPTY_AFTER_RESTORE_USE_BASE_DRAFT', { scaffoldActive });
+        retryCandidate = repaired;
       }
     }
   }
@@ -284,6 +428,7 @@ export async function runRetryPass(params: {
     reasons: vRetry?.reasons,
     head: safeHead(retryCandidate, 160),
   });
+
 
   {
     const retryText = String(retryCandidate ?? '').trim();

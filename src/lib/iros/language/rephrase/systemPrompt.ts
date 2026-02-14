@@ -33,8 +33,20 @@ export function systemPromptForFullReply(args?: {
   const isIRequested = Boolean(h && h.startsWith('I'));
   const allowIStyle = itOk && isIRequested;
 
-  const personaMode: 'GROUND' | 'DELIVER' | 'GUIDE_I' | 'ASSESS' =
-    args?.personaMode ?? (directTask ? 'DELIVER' : allowIStyle ? 'GUIDE_I' : 'GROUND');
+  // ✅ clamp: 上流が personaMode を渡してきても、不正な GUIDE_I は無効化する
+  const requestedPersona = args?.personaMode ?? null;
+
+  const personaMode: 'GROUND' | 'DELIVER' | 'GUIDE_I' | 'ASSESS' = (() => {
+    if (directTask) return 'DELIVER';
+
+    // 上流指定がある場合でも、GUIDE_I だけは allowIStyle を満たさないと拒否
+    if (requestedPersona) {
+      if (requestedPersona === 'GUIDE_I' && !allowIStyle) return 'GROUND';
+      return requestedPersona;
+    }
+
+    return allowIStyle ? 'GUIDE_I' : 'GROUND';
+  })();
 
   // =========================================================
   // 実行確認ログ（systemPrompt が「実際に呼ばれた」証拠）

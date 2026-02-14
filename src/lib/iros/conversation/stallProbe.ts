@@ -6,13 +6,19 @@ export type StallSeverity = 'none' | 'soft' | 'hard';
 
 export type StallSignal = {
   severity: StallSeverity;
-  reason: string;
+  reason: 'STALL_HARD' | 'STALL_SOFT' | 'NONE';
   detail: {
-    streakSameUser: number;          // 直近の user 反復回数（current含む）
-    repeatSignal: string | null;     // ctxPack.repeatSignal（例：same_phrase）
-    flowDelta: string | null;        // meta.flow.delta（例：RETURN）
-    anchorReason: string | null;     // meta.anchorEntry.decision.reason（例：NO_EVIDENCE）
-    convReason: string | null;       // meta.convEvidence.reason（例：A!:no_advance_hint）
+    streakSameUser: number;
+    repeatSignal: string | null;
+
+    // ✅ ctxPack.flow.flowDelta を正本（無ければ旧経路にfallback）
+    flowDelta: string | null;
+
+    // ✅ ctxPack.flow.returnStreak（RETURN連続回数）
+    returnStreak: number | null;
+
+    anchorReason: string | null;
+    convReason: string | null;
   };
 };
 
@@ -30,6 +36,17 @@ function pickRole(m: any): string {
   return String(m?.role ?? '').toLowerCase();
 }
 
+function parseFiniteNumber(v: any): number | null {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'string') {
+    const t = v.trim();
+    if (!t) return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
 export function computeStallSignal(args: {
   userText: string;
   history?: unknown[] | null;
@@ -39,7 +56,6 @@ export function computeStallSignal(args: {
   const historyArr = Array.isArray(args.history) ? (args.history as any[]) : [];
 
   const userNow = normText(args.userText);
-  const userNowHead = userNow.slice(0, 60);
 
   // --- streakSameUser（current含む）: 「直近で同じ userText が何回続いたか」
   // NOTE:
@@ -53,8 +69,10 @@ export function computeStallSignal(args: {
     while (startIdx >= 0) {
       const m = historyArr[startIdx];
       if (pickRole(m) !== 'user') break;
+
       const t = pickUserTextFromMsg(m);
       if (!t) break;
+
       if (t === userNow) startIdx--; // ✅ 連続分を全部落とす
       else break;
     }
@@ -74,8 +92,6 @@ export function computeStallSignal(args: {
     }
   }
 
-
-
   // --- repeatSignal（メタ優先）
   const repeatSignalRaw =
     (meta as any)?.repeatSignal ??
@@ -85,12 +101,33 @@ export function computeStallSignal(args: {
     null;
   const repeatSignal = typeof repeatSignalRaw === 'string' ? repeatSignalRaw.trim() : null;
 
-  // --- flow.delta
+  // --- flowDelta（✅ ctxPack.flow を正本にする）
+  // 優先順：
+  // 1) meta.extra.ctxPack.flow.flowDelta
+  // 2) meta.ctxPack.flow.flowDelta
+  // 3) 旧: meta.flow.delta
+  // 4) 旧: meta.extra.flow.delta
   const flowDeltaRaw =
+    (meta as any)?.extra?.ctxPack?.flow?.flowDelta ??
+    (meta as any)?.ctxPack?.flow?.flowDelta ??
     (meta as any)?.flow?.delta ??
     (meta as any)?.extra?.flow?.delta ??
     null;
   const flowDelta = typeof flowDeltaRaw === 'string' ? flowDeltaRaw.trim() : null;
+
+  // --- returnStreak（✅ ctxPack.flow 正本）
+  // ただし FORCE_SWITCH_CHECK は ctxPack stamp 前に走ることがあるため、
+  // 入口の正本(meta.extra.flow.returnStreak / meta.flow.returnStreak)にも fallback する
+  const returnStreakRaw =
+    (meta as any)?.extra?.ctxPack?.flow?.returnStreak ??
+    (meta as any)?.ctxPack?.flow?.returnStreak ??
+
+    // ✅ 入口正本 fallback
+    (meta as any)?.extra?.flow?.returnStreak ??
+    (meta as any)?.flow?.returnStreak ??
+    null;
+
+  const returnStreak = parseFiniteNumber(returnStreakRaw);
 
   // --- anchorEntry decision reason（NO_EVIDENCE）
   const anchorReasonRaw =
@@ -119,21 +156,17 @@ export function computeStallSignal(args: {
   const noCtxSummary = /U!:no_ctx_summary/.test(String(convReason ?? ''));
 
   // hard: 反復 + (証拠なし or RETURN or 前進なし)
-  const hard =
-    samePhrase &&
-    (noEvidence || isReturn || noAdvanceHint);
+  const hard = samePhrase && (noEvidence || isReturn || noAdvanceHint);
 
   // soft: 反復気味 + 兆し
   const soft =
     !hard &&
-    ((streakSameUser >= 2 && (isReturn || noEvidence)) || (samePhraseByMeta && (noCtxSummary || isReturn)));
+    ((streakSameUser >= 2 && (isReturn || noEvidence)) ||
+      (samePhraseByMeta && (noCtxSummary || isReturn)));
 
   const severity: StallSeverity = hard ? 'hard' : soft ? 'soft' : 'none';
 
-  const reason =
-    hard ? 'STALL_HARD' :
-    soft ? 'STALL_SOFT' :
-    'NONE';
+  const reason: StallSignal['reason'] = hard ? 'STALL_HARD' : soft ? 'STALL_SOFT' : 'NONE';
 
   return {
     severity,
@@ -142,6 +175,7 @@ export function computeStallSignal(args: {
       streakSameUser,
       repeatSignal,
       flowDelta,
+      returnStreak,
       anchorReason,
       convReason,
     },

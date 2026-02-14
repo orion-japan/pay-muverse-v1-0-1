@@ -341,6 +341,7 @@ const sendMessage = useCallback(
         conversationId: cid,
         text: norm.text,
         role: 'user',
+        meta: {}, // ✅ traceId を meta.extra に確実に入れるため
       });
       console.log('[UI/sendMessage] AFTER postMessage', { cid });
 
@@ -454,6 +455,7 @@ const sendMessage = useCallback(
           conversationId: cid,
           text: rawText,
           role: 'user',
+          meta: {}, // ✅ traceId を meta.extra に確実に入れるため
         });
 
         // ✅ LLM に渡す history（引用はUI演出なので、LLMには“選択肢だけ”を積む）

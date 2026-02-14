@@ -215,12 +215,12 @@ const shrinkMetaForPersist = (meta: any) => {
     const ex: any = { ...(m.extra as any) };
     delete ex.rephraseBlocks;
 
-    // ✅ ctxPack は丸ごと消さない：flow だけ残す（継続判定用）
+    // ✅ ctxPack は丸ごと消さない：必要最小だけ残す（flow + phase/depth/q + digest）
     if (ex.ctxPack && typeof ex.ctxPack === 'object') {
       const cp: any = ex.ctxPack as any;
-      const f: any = cp.flow && typeof cp.flow === 'object' ? cp.flow : null;
 
       // flow を最小形に正規化（存在しない場合は入れない）
+      const f: any = cp.flow && typeof cp.flow === 'object' ? cp.flow : null;
       const flow =
         f && (typeof f.at === 'string' || typeof f.prevAtIso === 'string' || typeof f.ageSec === 'number')
           ? {
@@ -232,8 +232,26 @@ const shrinkMetaForPersist = (meta: any) => {
             }
           : null;
 
-      ex.ctxPack = flow ? { flow } : undefined;
+      // ✅ ctxPack を「flowだけ」にせず、rephraseEngine が拾うキーも残す
+      const nextCp: any = {};
+
+      if (flow) nextCp.flow = flow;
+
+      const phase = cp.phase;
+      if (phase === 'Inner' || phase === 'Outer') nextCp.phase = phase;
+
+      const depthStage = cp.depthStage;
+      if (typeof depthStage === 'string' && depthStage) nextCp.depthStage = depthStage;
+
+      const qCode = cp.qCode;
+      if (typeof qCode === 'string' && qCode) nextCp.qCode = qCode;
+
+      const historyDigestV1 = cp.historyDigestV1;
+      if (historyDigestV1) nextCp.historyDigestV1 = historyDigestV1;
+
+      ex.ctxPack = Object.keys(nextCp).length ? nextCp : undefined;
     }
+
 
     // flowTape は肥大化し得るので、timeout リトライ時は落とす
     delete ex.flowTape;

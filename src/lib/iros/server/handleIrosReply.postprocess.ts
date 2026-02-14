@@ -19,6 +19,7 @@ import type { IrosStyle } from '@/lib/iros/system';
 import { isMetaAnchorText } from '@/lib/iros/intentAnchor';
 
 import { preparePastStateNoteForTurn } from '@/lib/iros/memoryRecall';
+import { decideExpressionLane } from '@/lib/iros/expression/decideExpressionLane';
 
 import {
   buildUnifiedAnalysis,
@@ -325,10 +326,17 @@ function pickSlotPlanLenAndPresence(metaForSave: any): { slotPlanLen: number | n
   const fp = metaForSave?.framePlan;
   if (fp && typeof fp === 'object' && Object.prototype.hasOwnProperty.call(fp, 'slots')) {
     const slots = (fp as any).slots;
-    if (Array.isArray(slots)) return { slotPlanLen: slots.length, hasSlots: true };
+    if (Array.isArray(slots)) {
+      const len = slots.length;
+      // ✅ hasSlots は「存在」ではなく「中身あり（len>0）」で判定する（空配列で期待扱いにしない）
+      return { slotPlanLen: len, hasSlots: len > 0 };
+    }
+    // slots が配列じゃないなら、期待扱いにしない
+    return { slotPlanLen: null, hasSlots: false };
   }
   return { slotPlanLen: null, hasSlots: false };
 }
+
 
 function pickSlotPlanArray(metaForSave: any): any[] {
   const fp = metaForSave?.framePlan;
@@ -342,23 +350,70 @@ function renderSlotPlanText(slotPlan: any[]): string {
   for (const s of slotPlan ?? []) {
     if (s == null) continue;
 
+    // string slot
     if (typeof s === 'string') {
       const t = s.trim();
       if (t) lines.push(t);
       continue;
     }
 
-    const content = typeof (s as any).content === 'string' ? (s as any).content.trim() : '';
-    const text = typeof (s as any).text === 'string' ? (s as any).text.trim() : '';
-    const lns = Array.isArray((s as any).lines) ? (s as any).lines : null;
+    const obj: any = s;
 
-    if (content) lines.push(content);
-    else if (text) lines.push(text);
-    else if (lns) {
+    // 1) まずは “本文” 系（従来互換）
+    const content = typeof obj.content === 'string' ? obj.content.trim() : '';
+    const text = typeof obj.text === 'string' ? obj.text.trim() : '';
+    const lns = Array.isArray(obj.lines) ? obj.lines : null;
+
+    if (content) {
+      lines.push(content);
+      continue;
+    }
+    if (text) {
+      lines.push(text);
+      continue;
+    }
+    if (lns) {
       for (const l of lns) {
         const tt = String(l ?? '').trim();
         if (tt) lines.push(tt);
       }
+      if (lines.length > 0) continue;
+    }
+
+    // 2) ✅ slotPlanの本体が “hint” 側にあるケースを拾う（NEXT などがここに入る）
+    const hint =
+      typeof obj.hint === 'string'
+        ? obj.hint.trim()
+        : typeof obj.prompt === 'string'
+          ? obj.prompt.trim()
+          : typeof obj.message === 'string'
+            ? obj.message.trim()
+            : '';
+
+    if (hint) {
+      const id = String(obj.id ?? obj.slotId ?? obj.kind ?? '').trim().toUpperCase();
+      // NEXT は sanitizeLlmRewriteSeed が拾えるように @NEXT_HINT として刻む
+      if (id === 'NEXT') {
+        lines.push(`@NEXT_HINT ${JSON.stringify({ content: hint })}`);
+      } else {
+        lines.push(hint);
+      }
+      continue;
+    }
+
+    // 3) 保険：seed_text / seedText / contentText 系も拾う（壊れにくく）
+    const seedLike =
+      typeof obj.seed_text === 'string'
+        ? obj.seed_text.trim()
+        : typeof obj.seedText === 'string'
+          ? obj.seedText.trim()
+          : typeof obj.contentText === 'string'
+            ? obj.contentText.trim()
+            : '';
+
+    if (seedLike) {
+      lines.push(seedLike);
+      continue;
     }
   }
 
@@ -551,7 +606,8 @@ export async function postProcessReply(
       hasSlots = info.hasSlots;
     }
 
-    slotPlanExpected = hasSlots || (typeof slotPlanLen === 'number' && slotPlanLen > 0);
+    slotPlanExpected = typeof slotPlanLen === 'number' && slotPlanLen > 0;
+
 
     // ✅ 非無言アクトの空本文 stopgap
     // - 無言アクト/FORWARD は silencePolicy 側で扱う（ここでは触らない）
@@ -619,17 +675,21 @@ export async function postProcessReply(
           coreLine_len: coreLine.length,
         });
 
-// ✅ 本文を確定（空を許さない）
-// bodyText は const の可能性があるため再代入しない。
-// ここで deterministic に抜けて、後段の "……" 化チェーンを断つ。
-const commitText = coreLine.length > 0 ? coreLine : '（受信しました）';
+        // ✅ 本文を確定（空を許さない）
+        // ※ 途中return禁止：後段（writerHints/同期/UnifiedAnalysis）を必ず通す
+        const commitText = coreLine.length > 0 ? coreLine : '（受信しました）';
+        finalAssistantText = commitText;
 
-return {
-  assistantText: commitText,
-  metaForSave,
-};
-
+        // 監査：この分岐で確定したことを明示
+        metaForSave.extra = {
+          ...(metaForSave.extra ?? {}),
+          slotPlanCommitted: true,
+          slotPlanCommittedLen: commitText.length,
+          // allowLLM が true でも「slotTextが空」は writer に渡す材料がないので deterministic で止血
+          finalTextPolicy: 'SLOTPLAN_EXPECTED__SLOT_TEXT_EMPTY__COMMIT_CORELINE',
+        };
       } else {
+
 
         // ✅ slotText の浄化（内部マーカー @OBS/@SHIFT 等を落とす）
         // 目的：
@@ -641,42 +701,221 @@ return {
         const coreLine = String(userText ?? '').replace(/\s+/g, ' ').trim();
 
 
-// ✅ seed（writerへ）:
-// - 目的：clean後が極小（例: 13文字）になる状態を避ける
-// - 方針：核（coreLine）は「生行」では混ぜない。@SEED_TEXT として混ぜて “cleaned=0” を維持する
+// ✅ Expression Lane（preface 1行）
+// - 進行(Depth/Phase/Lane)は変えない
+// - writer前に 1行だけ seed 先頭へ混ぜる（なければ何もしない）
+// - framePlan.slots は書き換えない（副作用を避ける）
+const exprDecision = (() => {
+  try {
+    const laneKey =
+      String(
+        (metaForSave as any)?.extra?.intentBridge?.laneKey ??
+          (metaForSave as any)?.laneKey ??
+          '',
+      ).trim() || 'IDEA_BAND';
+
+    const phase = ((metaForSave as any)?.phase ?? (metaForSave as any)?.framePlan?.phase ?? null) as any;
+
+    const depth = ((metaForSave as any)?.depth ?? (metaForSave as any)?.depthStage ?? null) as any;
+
+    const allow = ((metaForSave as any)?.allow ?? (metaForSave as any)?.extra?.allow ?? null) as any;
+
+    // meta.flow.delta / ctxPack.flow.delta などに散らばっている前提で “拾えるだけ拾う”
+    const flowDelta =
+      (metaForSave as any)?.flow?.delta ??
+      (metaForSave as any)?.extra?.ctxPack?.flow?.delta ??
+      (metaForSave as any)?.extra?.flow?.delta ??
+      null;
+
+    const returnStreak =
+      (metaForSave as any)?.extra?.ctxPack?.flow?.returnStreak ??
+      (metaForSave as any)?.extra?.flow?.returnStreak ??
+      null;
+
+    const flow = {
+      flowDelta: flowDelta ?? null,
+      returnStreak: returnStreak ?? null,
+      ageSec: (metaForSave as any)?.extra?.ctxPack?.flow?.ageSec ?? null,
+      fresh: (metaForSave as any)?.extra?.ctxPack?.flow?.fresh ?? null,
+      sessionBreak: (metaForSave as any)?.extra?.ctxPack?.flow?.sessionBreak ?? null,
+    };
+
+    // 今は “作れるものだけ” 入れる（未配線の signals は空でもOK）
+    const signals = ((metaForSave as any)?.extra?.exprSignals ?? null) as any;
+
+    const flags = (() => {
+      const ex: any = (metaForSave as any)?.extra ?? {};
+      const sev =
+        ex?.stall?.severity ??
+        ex?.stallProbe?.severity ??
+        ex?.tConcretize?.stall?.severity ??
+        ex?.t_concretize?.stall?.severity ??
+        ex?.forceSwitch?.stall?.severity ??
+        ex?.ctxPack?.stall?.severity ??
+        null;
+
+      return {
+        enabled: ex?.exprEnabled ?? true,
+        // ✅ まずは「明示フラグ」優先、なければ severity から推定（hard のみ）
+        stallHard: Boolean(ex?.stallHard ?? (sev === 'hard')),
+      };
+    })();
+
+
+    const d = decideExpressionLane({
+      laneKey,
+      phase,
+      depth,
+      allow,
+      flow,
+      signals,
+      flags,
+      traceId: (metaForSave as any)?.traceId ?? null,
+    } as any);
+
+    // ✅ metaPatch を適用（“追記のみ”）
+    if (d?.metaPatch && typeof d.metaPatch === 'object') {
+      metaForSave.extra = {
+        ...(metaForSave.extra ?? {}),
+        ...d.metaPatch,
+      };
+    }
+
+    // ✅ 監査用の最小サマリ（ログ検索しやすくする / 保存される）
+    metaForSave.extra = {
+      ...(metaForSave.extra ?? {}),
+      exprDecision: {
+        fired: !!d?.fired,
+        lane: String(d?.lane ?? 'OFF'),
+        reason: String(d?.reason ?? 'DEFAULT'),
+        blockedBy: (d?.blockedBy ?? null) as any,
+        hasPreface: !!String(d?.prefaceLine ?? '').trim(),
+      },
+    };
+
+    // ✅ 観測ログ（必要なら後で落とす）
+    console.log('[IROS/EXPR][decision]', {
+      conversationId,
+      userCode,
+      fired: !!d?.fired,
+      lane: String(d?.lane ?? 'OFF'),
+      reason: String(d?.reason ?? 'DEFAULT'),
+      blockedBy: d?.blockedBy ?? null,
+      prefaceHead: String(d?.prefaceLine ?? '').slice(0, 64),
+    });
+
+    return d;
+  } catch (e) {
+    const d = {
+      fired: false,
+      lane: 'OFF',
+      reason: 'DEFAULT',
+      blockedBy: 'DISABLED',
+      prefaceLine: null,
+      shouldPolish: false,
+      metaPatch: { expr: { fired: false, blockedBy: 'DISABLED', at: Date.now(), error: String(e ?? '') } },
+    } as any;
+
+    // ✅ エラー時も meta へ追記（追跡できるように）
+    if (d?.metaPatch && typeof d.metaPatch === 'object') {
+      metaForSave.extra = {
+        ...(metaForSave.extra ?? {}),
+        ...d.metaPatch,
+      };
+    }
+
+    metaForSave.extra = {
+      ...(metaForSave.extra ?? {}),
+      exprDecision: {
+        fired: false,
+        lane: 'OFF',
+        reason: 'DEFAULT',
+        blockedBy: 'DISABLED',
+        hasPreface: false,
+      },
+    };
+
+    console.log('[IROS/EXPR][decision]', {
+      conversationId,
+      userCode,
+      fired: false,
+      lane: 'OFF',
+      reason: 'DEFAULT',
+      blockedBy: 'DISABLED',
+      prefaceHead: '',
+      error: String(e ?? ''),
+    });
+
+    return d;
+  }
+})();
+
+// ✅ seed（writerへ）: preface はここで “1回だけ” 混ぜる（framePlan は書き換えない）
 const seedForWriter = (() => {
-  const base = String(slotTextStr ?? '');
+  const base0 = String(slotTextStr ?? '');
+
+  const preface = String(exprDecision?.prefaceLine ?? '').trim();
+  const shouldInjectPreface = exprDecision?.fired === true && preface.length > 0 && !base0.startsWith(preface);
+  const base = shouldInjectPreface ? `${preface}\n${base0}` : base0;
 
   const core = String(coreLine ?? '').trim();
-  if (!core) return base;
+  if (!core) {
+    // 監査用：実際に混ぜたか
+    (metaForSave as any).extra = (metaForSave as any).extra ?? {};
+    (metaForSave as any).extra.expr = {
+      ...(((metaForSave as any).extra as any)?.expr ?? {}),
+      injectedPreface: shouldInjectPreface,
+      prefaceLine: preface || null,
+      at: Date.now(),
+    };
+    return base;
+  }
 
-  const rawLines0 = base.split('\n');
-  const cleanedLines0 = rawLines0
+  const cleaned0 = base
+    .split('\n')
     .map((l) => String(l ?? '').trim())
-    .filter((l) => l.length > 0 && !l.startsWith('@'));
-  const cleaned0 = cleanedLines0.join('\n').trim();
+    .filter((l) => l.length > 0 && !l.startsWith('@'))
+    .join('\n')
+    .trim();
 
-  // ✅ 閾値：cleaned が短いと writer seed が薄くなる（今回: 13）
   const CLEAN_MIN = 48;
 
-  // 既に coreLine 相当が含まれているなら二重に入れない
-  // ※ 生行としては混ぜないので、@SEED_TEXT の JSON に入った core を検出する
   const coreEscapedForJson = core.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  const alreadyHasCore =
-    base.includes(`"text":"${coreEscapedForJson}"`) || cleaned0.includes(core);
+  const alreadyHasCore = base.includes(`"text":"${coreEscapedForJson}"`) || cleaned0.includes(core);
+
+  // 監査用：実際に混ぜたか
+  (metaForSave as any).extra = (metaForSave as any).extra ?? {};
+  (metaForSave as any).extra.expr = {
+    ...(((metaForSave as any).extra as any)?.expr ?? {}),
+    injectedPreface: shouldInjectPreface,
+    prefaceLine: preface || null,
+    at: Date.now(),
+  };
 
   if (alreadyHasCore) return base;
 
   if (cleaned0.length < CLEAN_MIN) {
-    // core は「露出OKの生行」を1行だけ混ぜる（@ではない）
-    // 目的：cleanedSlotText を >0 にして emptyLikeNow を回避する
     const seedLine = `@SEED_TEXT ${JSON.stringify({ text: core })}`;
     return `${base}\n${core}\n${seedLine}`.trim();
   }
 
-
   return base;
 })();
+
+// ✅ expr を meta.extra に追記（上書きしない）
+metaForSave.extra = {
+  ...(metaForSave.extra ?? {}),
+  expr: {
+    ...((metaForSave.extra as any)?.expr ?? {}),
+    ...((exprDecision as any)?.metaPatch?.expr ?? {}),
+    prefaceLine: (exprDecision as any)?.prefaceLine ?? null,
+    shouldPolish: (exprDecision as any)?.shouldPolish ?? false,
+    blockedBy: (exprDecision as any)?.blockedBy ?? null,
+    reason: (exprDecision as any)?.reason ?? 'DEFAULT',
+  },
+};
+
+
 
 const rawLines = String(seedForWriter ?? '').split('\n');
 const cleanedLines = rawLines
@@ -701,108 +940,152 @@ const cleanedApplied = hadInternalMarkers && cleanedSlotText.length !== seedForW
 }
 
 
-        // ✅ LLMへ渡す seed を保存（writerへ）
-        // - @Q_SLOT / @OBS などの内部ラッパが混入すると writer の seedDraftHead に出てしまうため
-        //   ここで “本文seed” に正規化して保存する
-        function sanitizeLlmRewriteSeed(seedRaw: unknown): string {
-          const s = String(seedRaw ?? '').trim();
-          if (!s) return '';
+// ✅ LLMへ渡す seed を保存（writerへ）
+// - @Q_SLOT / @OBS などの内部ラッパが混入すると writer の seedDraftHead に出てしまうため
+//   ここで “本文seed” に正規化して保存する
+function sanitizeLlmRewriteSeed(seedRaw: unknown): string {
+  const s = String(seedRaw ?? '').trim();
+  if (!s) return '';
 
-          const parts: string[] = [];
+  const parts: string[] = [];
 
-          // 0) 行ベースで拾う（正規表現より安全：JSON内に } が入っても壊れにくい）
-          const lines = s.split('\n');
+  // 0) 行ベースで拾う（正規表現より安全：JSON内に } が入っても壊れにくい）
+  const lines = s.split('\n');
 
-          for (const line0 of lines) {
-            const line = String(line0 ?? '').trim();
-            if (!line) continue;
+  for (const line0 of lines) {
+    const line = String(line0 ?? '').trim();
+    if (!line) continue;
 
-            // ✅ @SEED_TEXT {"text":"..."} を拾う（coreLine）
-            if (line.startsWith('@SEED_TEXT ')) {
-              const json = line.slice('@SEED_TEXT '.length).trim();
-              try {
-                const obj = JSON.parse(json);
-                const t = String(obj?.text ?? obj?.content ?? '').trim();
-                if (t) parts.push(t);
-              } catch {
-                // ignore
-              }
-              continue;
-            }
+    // ✅ @SEED_TEXT {"text":"..."} を拾う（coreLine）
+    if (line.startsWith('@SEED_TEXT ')) {
+      const json = line.slice('@SEED_TEXT '.length).trim();
+      try {
+        const obj = JSON.parse(json);
+        const t = String(obj?.text ?? obj?.content ?? '').trim();
+        if (t) parts.push(t);
+      } catch {
+        // ignore
+      }
+      continue;
+    }
 
-            // 1) @Q_SLOT {...} を拾って seed_text / content を抜く
-            if (line.startsWith('@Q_SLOT ')) {
-              const json = line.slice('@Q_SLOT '.length).trim();
-              try {
-                const obj = JSON.parse(json);
-                const t = String(obj?.seed_text ?? obj?.seedText ?? obj?.content ?? obj?.text ?? '').trim();
-                if (t) parts.push(t);
-              } catch {
-                // ignore
-              }
-              continue;
-            }
-          }
+    // ✅ @Q_SLOT {...} を拾って seed_text / content を抜く
+    if (line.startsWith('@Q_SLOT ')) {
+      const json = line.slice('@Q_SLOT '.length).trim();
+      try {
+        const obj = JSON.parse(json);
+        const t = String(obj?.seed_text ?? obj?.seedText ?? obj?.content ?? obj?.text ?? '').trim();
+        if (t) parts.push(t);
+      } catch {
+        // ignore
+      }
+      continue;
+    }
 
-          // 取れたら重複を軽く落として返す
-          if (parts.length > 0) {
-            const uniq: string[] = [];
-            const seen = new Set<string>();
-            for (const p of parts) {
-              const t = String(p ?? '').trim();
-              if (!t) continue;
-              if (seen.has(t)) continue;
-              seen.add(t);
-              uniq.push(t);
-            }
-            return uniq.join('\n').trim();
-          }
+    // ✅ NEW: @NEXT_HINT {...} を拾う（advance判定に必要な “橋” を seed に残す）
+    // - 生成側は { content: hint } を出しているため、content/hint の両方を拾う
+    // - @で始まる行を最終段で落とすので、ここで “プレーンな1行” に変換して残す
+    if (line.startsWith('@NEXT_HINT ')) {
+      const json = line.slice('@NEXT_HINT '.length).trim();
+      try {
+        const obj = JSON.parse(json);
 
-          // 2) @OBS {...} なら user を抜く（単体行のケース）
-          const mObs = s.match(/^@OBS\s+(\{.*\})\s*$/s);
-          if (mObs) {
-            try {
-              const obj = JSON.parse(mObs[1]);
-              const t = String(obj?.user ?? obj?.text ?? '').trim();
-              if (t) return t;
-            } catch {
-              // ignore
-            }
-          }
+        // ✅ content/hint 両対応（ここが修正点）
+        const hintText = String(obj?.content ?? obj?.hint ?? '').trim();
 
-          // 3) 最後の保険：@で始まる行（内部マーカー）を落としてプレーン化
-          const plain = s
-            .split('\n')
-            .map((x) => String(x ?? '').trimEnd())
-            .filter((line) => line.trim().length > 0 && !line.trim().startsWith('@'))
-            .join('\n')
-            .trim();
+        const laneKey = String(obj?.laneKey ?? '').trim();
+        const delta = obj?.delta != null ? String(obj.delta).trim() : '';
 
-          return plain;
-        }
+        // writer に余計なラベルを見せないため短く（ただし @ では始めない）
+        const t = hintText
+          ? (laneKey || delta
+              ? `hint(${[laneKey, delta].filter(Boolean).join('/')}) ${hintText}`
+              : `hint ${hintText}`)
+          : '';
 
-        const seedForWriterRaw = seedForWriter;
-        const seedForWriterSanitized = sanitizeLlmRewriteSeed(seedForWriterRaw);
+        if (t) parts.push(t);
+      } catch {
+        // ignore
+      }
+      continue;
+    }
 
-        metaForSave.extra = {
-          ...(metaForSave.extra ?? {}),
-          slotPlanPolicy_detected: det.policy,
-          slotPlanPolicy_from: det.from,
-          slotPlanLen_detected: slotPlanLen,
-          hasSlots_detected: hasSlots,
+  }
 
-          slotTextHadInternalMarkers: hadInternalMarkers,
-          slotTextCleanedApplied: cleanedApplied,
-          slotTextRawLen: seedForWriter.length,
-          slotTextCleanedLen: cleanedSlotText.length,
-          slotTextDroppedLines: Math.max(0, rawLines.length - cleanedLines.length),
+  // 取れたら重複を軽く落として返す
+  if (parts.length > 0) {
+    const uniq: string[] = [];
+    const seen = new Set<string>();
+    for (const p of parts) {
+      const t = String(p ?? '').trim();
+      if (!t) continue;
+      if (seen.has(t)) continue;
+      seen.add(t);
+      uniq.push(t);
+    }
+    return uniq.join('\n').trim();
+  }
 
-          // ✅ seed 保存（writerへ）
-          llmRewriteSeed: seedForWriterSanitized,
-          llmRewriteSeedRaw: seedForWriterRaw, // デバッグ用（必要なら後で消す）
-          llmRewriteSeedFrom: 'postprocess(slotPlan->writer-seed)',
-          llmRewriteSeedAt: new Date().toISOString(),
-        };
+  // 2) @OBS {...} なら user を抜く（単体行のケース）
+  const mObs = s.match(/^@OBS\s+(\{.*\})\s*$/s);
+  if (mObs) {
+    try {
+      const obj = JSON.parse(mObs[1]);
+      const t = String(obj?.user ?? obj?.text ?? '').trim();
+      if (t) return t;
+    } catch {
+      // ignore
+    }
+  }
+
+  // 3) 最後の保険：@で始まる行（内部マーカー）を落としてプレーン化
+  const plain = s
+    .split('\n')
+    .map((x) => String(x ?? '').trimEnd())
+    .filter((line) => line.trim().length > 0 && !line.trim().startsWith('@'))
+    .join('\n')
+    .trim();
+
+  return plain;
+}
+
+const seedForWriterRaw = seedForWriter;
+const seedForWriterSanitized = sanitizeLlmRewriteSeed(seedForWriterRaw);
+
+// ✅ meta肥大対策
+// - raw は dev だけ（本番は保存しない）
+// - devでも長さ上限で切る（巨大ログ/DB肥大を防ぐ）
+const isDev = process.env.NODE_ENV !== 'production';
+const RAW_LIMIT = 8192; // 8KB（必要なら調整）
+const rawSafe =
+  isDev && typeof seedForWriterRaw === 'string'
+    ? seedForWriterRaw.slice(0, RAW_LIMIT)
+    : null;
+
+metaForSave.extra = {
+  ...(metaForSave.extra ?? {}),
+  slotPlanPolicy_detected: det.policy,
+  slotPlanPolicy_from: det.from,
+  slotPlanLen_detected: slotPlanLen,
+  hasSlots_detected: hasSlots,
+
+  slotTextHadInternalMarkers: hadInternalMarkers,
+  slotTextCleanedApplied: cleanedApplied,
+  slotTextRawLen: seedForWriter.length,
+  slotTextCleanedLen: cleanedSlotText.length,
+  slotTextDroppedLines: Math.max(0, rawLines.length - cleanedLines.length),
+
+  // ✅ seed 保存（writerへ）
+  llmRewriteSeed: seedForWriterSanitized,
+  // ✅ raw は dev 限定 + 長さ制限（本番は null）
+  llmRewriteSeedRaw: rawSafe,
+  llmRewriteSeedRawTruncated: isDev ? (typeof seedForWriterRaw === 'string' && seedForWriterRaw.length > RAW_LIMIT) : undefined,
+  llmRewriteSeedRawLen: isDev ? (typeof seedForWriterRaw === 'string' ? seedForWriterRaw.length : 0) : undefined,
+
+  llmRewriteSeedFrom: 'postprocess(slotPlan->writer-seed)',
+  llmRewriteSeedAt: new Date().toISOString(),
+};
+
 
 // ✅ allowLLM=false のときだけ deterministic commit（会話停止を防ぐ）
 // - それ以外は本文をここで作らず、writerへ回す（憲法の「航海士」）
@@ -836,12 +1119,13 @@ if (allowLLM === false) {
   });
 
 } else {
-  // ✅ writer に本文生成させる（FINAL__LLM_COMMIT）: ただし base は空にしない
-  // - base が空だと下流で "……"(len=2) に落ちるため、最低1行だけ可視テキストを残す
-  // - seed / policy は維持し、writer は通常通り走る
+  // ✅ writer に本文生成させる（FINAL__LLM_COMMIT）
+  // - userText(coreLine) を最優先にしない（オウム設計を排除）
+  // - まずは slotPlan 由来の可視テキスト、次に seed抽出本文、最後の最後だけ coreLine
   const baseVisible =
-    String(coreLine ?? '').trim() ||
     String(cleanedSlotText ?? '').trim() ||
+    String(seedForWriterSanitized ?? '').trim() ||
+    String(coreLine ?? '').trim() ||
     '';
 
   finalAssistantText = baseVisible;
@@ -852,7 +1136,16 @@ if (allowLLM === false) {
     slotPlanCommitted: false,
     baseVisibleLen: baseVisible.length,
     baseVisibleHead: baseVisible.slice(0, 64),
+    baseVisibleSource:
+      String(cleanedSlotText ?? '').trim()
+        ? 'cleanedSlotText'
+        : String(seedForWriterSanitized ?? '').trim()
+          ? 'seedForWriterSanitized'
+          : String(coreLine ?? '').trim()
+            ? 'coreLine(lastResort)'
+            : 'empty',
   };
+
 
   console.log('[IROS/PostProcess] SLOTPLAN_SEED_TO_WRITER (base visible)', {
     conversationId,
@@ -1013,7 +1306,11 @@ if (allowLLM === false) {
     // --- (A2) ✅ “オウム救済”：最終が userText と同一なら、rephraseMeta の rawHead/rawText を優先
     const userTextTrim = String(userText ?? '').trim();
     const cur2 = String(finalAssistantText ?? '').trim();
-    if (userTextTrim && cur2 && looksLikeEcho(cur2, userTextTrim)) {
+
+    // まず現状の echo 判定を取っておく（後で監査に使う）
+    const echoBeforeRescue = userTextTrim && cur2 ? looksLikeEcho(cur2, userTextTrim) : false;
+
+    if (echoBeforeRescue) {
       const rescued2 = pickFromRephraseMeta();
       if (rescued2 && !looksLikeEcho(rescued2, userTextTrim)) {
         finalAssistantText = rescued2;
@@ -1021,11 +1318,46 @@ if (allowLLM === false) {
       }
     }
 
-    // --- (B) 同期（ここから先は “最終本文” を使う）
+    // --- (B) 同期（ここから先は “最終本文(暫定)” を使う）
+    // NOTE:
+    // - この finalText は「現時点での最終」だが、後段の PERSIST_PICK で上書きされる可能性がある。
+    // - そのため、ここでの echo 検出ログは「暫定（pre-persist）」として扱い、確定ログは PERSIST_PICK 後で出す。
     const finalText = String(finalAssistantText ?? '').trim();
     const prevRaw = String(ex?.rawTextFromModel ?? '').trim();
 
     ex.extractedTextFromModel = finalText;
+
+    // ✅ echo監査（暫定）：救済後の結果で判定は取るが、確定ログにはしない
+    const echoAfterRescue = userTextTrim && finalText ? looksLikeEcho(finalText, userTextTrim) : false;
+
+    ex.echoDetected = echoAfterRescue; // (pre-persist)
+    ex.echoDetectedBeforeRescue = echoBeforeRescue;
+    ex.echoUserLen = userTextTrim ? userTextTrim.length : 0;
+    ex.echoFinalLen = finalText ? finalText.length : 0;
+
+    // ⚠️ ここは PERSIST_PICK 前。
+    // 誤誘導が強いので、デフォルトではログを出さない（必要なときだけ env で有効化する）
+    const logEchoPrePersist = process.env.IROS_LOG_ECHO_PRE_PERSIST === '1';
+
+    if (logEchoPrePersist && echoAfterRescue) {
+      try {
+        console.info('[IROS/PostProcess][ECHO_PRE_PERSIST]', {
+          conversationId,
+          userCode,
+          stage: 'finalText(sync)',
+          finalTextPolicy: String((metaForSave as any)?.extra?.finalTextPolicy ?? ''),
+          userLen: userTextTrim.length,
+          finalLen: finalText.length,
+          finalHead: finalText.slice(0, 80),
+          userHead: userTextTrim.slice(0, 80),
+          rescuedFromRephraseMeta: !!ex.finalAssistantTextRescuedFromRephraseMeta,
+          rescuedFromRephrase: !!ex.finalAssistantTextRescuedFromRephrase,
+          note: 'pre-persist only (may change after PERSIST_PICK)',
+        });
+      } catch {}
+    }
+
+
 
     // rawTextFromModel は「空で上書き禁止」：空なら入れない。prev が空で final が非空なら救済で入れる
     if (!prevRaw && finalText) {

@@ -96,8 +96,16 @@ export type IrosAPI = {
 };
 
 // ====== フォールバックを含む irosClient ラッパー ======
-const _raw = ((irosClientModule as any).default ??
-  irosClientModule) as Record<string, any>;
+//
+// irosTransport.ts は `export default api;` を持つため、
+// `.default ?? module` だと default を掴んでしまい、named exports（postMessage等）を見失うことがある。
+// → ここでは "default" と "named exports" を合成して、常に必要な関数を拾えるようにする。
+const _mod = irosClientModule as any;
+const _raw = {
+  ...(typeof _mod === 'object' && _mod ? _mod : {}),
+  ...(typeof _mod?.default === 'object' && _mod.default ? _mod.default : {}),
+} as Record<string, any>;
+
 
 /**
  * Firebase Auth の currentUser が有効になるまで待つ。

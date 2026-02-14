@@ -1730,8 +1730,9 @@ try {
 // ---- ctxPack.flow (minimal, with prev from history) ----
 // 方針：
 // - 依存/重い処理は増やさない
-// - “前回の flow.at” だけ history から拾って prevAtIso / ageSec を埋める
+// - “前回の flow.at” と “前回の returnStreak” だけ history から拾って prevAtIso / ageSec / prevRs を埋める
 // - sessionBreak はここでは決めない（false 固定。閾値設計は後で）
+// - ✅ flowDelta / returnStreak を ctxPack.flow の正本として毎ターン stamp する
 const nowIso2 = new Date().toISOString();
 
 // ✅ ctxPack を必ず用意（exAny という名前は使わない＝既存と衝突回避）
@@ -1747,19 +1748,34 @@ if (!extra2.ctxPack || typeof extra2.ctxPack !== 'object') {
   extra2.ctxPack = {};
 }
 
-// history から「直近の ctxPack.flow.at」を拾う
+// history から「直近の ctxPack.flow.at / returnStreak」を拾う
 let prevAtIso: string | null = null;
+let prevReturnStreak: number | null = null;
+
 const hft = Array.isArray(historyForTurn) ? (historyForTurn as any[]) : [];
 for (let i = hft.length - 1; i >= 0; i--) {
   const m = hft[i];
-  const flowAt =
-    (m as any)?.meta?.extra?.ctxPack?.flow?.at ??
-    (m as any)?.meta?.ctxPack?.flow?.at ??
+
+  const flowObj =
+    (m as any)?.meta?.extra?.ctxPack?.flow ??
+    (m as any)?.meta?.ctxPack?.flow ??
     null;
-  if (typeof flowAt === 'string' && flowAt.trim().length > 0) {
+
+  const flowAt = flowObj?.at ?? null;
+  if (!prevAtIso && typeof flowAt === 'string' && flowAt.trim().length > 0) {
     prevAtIso = flowAt.trim();
-    break;
   }
+
+  const rsRaw = flowObj?.returnStreak ?? null;
+  if (prevReturnStreak == null) {
+    if (typeof rsRaw === 'number' && Number.isFinite(rsRaw)) {
+      prevReturnStreak = rsRaw;
+    } else if (typeof rsRaw === 'string' && rsRaw.trim() && Number.isFinite(Number(rsRaw))) {
+      prevReturnStreak = Number(rsRaw);
+    }
+  }
+
+  if (prevAtIso && prevReturnStreak != null) break;
 }
 
 let ageSec: number | null = null;
@@ -1772,35 +1788,144 @@ if (prevAtIso) {
   }
 }
 
-// ctxPack にも historyForWriter を同期しておく（stamp 時点で hfw_len が取れるように）
-// ⚠️ 注意：参照のまま入れると meta 内の ctxPack 参照で循環参照（[Circular]）になり得る
+  // ✅ flowDelta をこの場で算出
+  // 方針：
+  // 1) すでに out/metaForSave 側に flow があるなら「それを正本」として採用（上書きしない）
+  // 2) 無い場合だけ observeFlow で算出
+  const userObs2 = String(text ?? '').trim();
+
+  // lastUserTextForFlow は「直前の user」を拾う（同文でもOK）
+  // - 同一文が末尾に重複しているケースで「別文を探す」方式だと lastUserText を失い、flow がズレるため
+  let lastUserTextForFlow: string | null = null;
+  for (let i = hft.length - 1; i >= 0; i--) {
+    const m = hft[i];
+    const role = String((m as any)?.role ?? '').toLowerCase();
+    if (role !== 'user') continue;
+
+    const c = String((m as any)?.content ?? (m as any)?.text ?? '').trim();
+    if (!c) continue;
+
+    lastUserTextForFlow = c;
+    break;
+  }
+
+  let flowDelta: string | null = null;
+  let flowConfidence: number | null = null;
+
+  // ✅ まず「既に計算済みの flow」を探す（上書き防止）
+  // - ここはプロジェクト内で散らばっている可能性があるので “拾えるだけ拾う”
+  const preDeltaRaw =
+    (mf2 as any)?.flow?.delta ??
+    (mf2 as any)?.extra?.flow?.delta ??
+    (mf2 as any)?.extra?.ctxPack?.flow?.flowDelta ??
+    (mf2 as any)?.ctxPack?.flow?.flowDelta ??
+    null;
+
+  const preConfRaw =
+    (mf2 as any)?.flow?.confidence ??
+    (mf2 as any)?.extra?.flow?.confidence ??
+    (mf2 as any)?.extra?.ctxPack?.flow?.flowConfidence ??
+    (mf2 as any)?.ctxPack?.flow?.flowConfidence ??
+    null;
+
+  if (typeof preDeltaRaw === 'string' && preDeltaRaw.trim().length > 0) {
+    flowDelta = preDeltaRaw.trim();
+    flowConfidence = typeof preConfRaw === 'number' && Number.isFinite(preConfRaw) ? preConfRaw : null;
+  } else {
+    try {
+      // import 衝突回避のため動的 import
+      const { observeFlow } = await import('../input/flowObserver');
+      const flow = observeFlow({
+        currentText: userObs2,
+        lastUserText: lastUserTextForFlow ?? undefined,
+      }) as any;
+
+      const d = flow?.delta ? String(flow.delta) : null;
+      flowDelta = d && d.trim().length > 0 ? d.trim() : null;
+
+      const conf = typeof flow?.confidence === 'number' ? flow.confidence : null;
+      flowConfidence = conf;
+    } catch {
+      flowDelta = null;
+      flowConfidence = null;
+    }
+  }
+
+// ✅ returnStreak は ctxPack.flow を正本にする（RETURN なら +1 / それ以外は 0）
+const prevRs =
+  typeof prevReturnStreak === 'number' && Number.isFinite(prevReturnStreak) ? prevReturnStreak : 0;
+const returnStreak = flowDelta === 'RETURN' ? prevRs + 1 : 0;
+
+// ctxPack にも historyForWriter を同期（循環参照を避ける最小形）
 const hfw = Array.isArray((out.metaForSave as any)?.extra?.historyForWriter)
   ? (out.metaForSave as any).extra.historyForWriter
   : [];
 
 if ((extra2.ctxPack as any).historyForWriter == null && hfw.length) {
-  // meta を落として “循環しない最小形” にして入れる
   (extra2.ctxPack as any).historyForWriter = (hfw as any[]).map((m) => ({
     role: m?.role ?? null,
-    content: m?.content ?? '',
+    content: typeof m?.content === 'string' ? m.content : String(m?.content ?? ''),
   }));
 }
 
+// ✅ ctxPack にも historyDigestV1 を同期（存在しているものだけ）
+const digestV1Raw =
+  (out.metaForSave as any)?.extra?.historyDigestV1 ??
+  (extra2 as any)?.historyDigestV1 ??
+  null;
 
-// ✅ 追加：HistoryDigest v1 を ctxPack に同期（rephraseEngine がここを見に行く）
-// - 既にある場合は上書きしない（single-writer/単一入口の思想）
-const digestV1 = (mf2.extra as any)?.historyDigestV1 ?? null;
-if ((extra2.ctxPack as any).historyDigestV1 == null && digestV1) {
-  (extra2.ctxPack as any).historyDigestV1 = digestV1;
+if ((extra2.ctxPack as any).historyDigestV1 == null && digestV1Raw) {
+  (extra2.ctxPack as any).historyDigestV1 = digestV1Raw;
 }
 
-// ✅ traceId を ctxPack.flow と stamped log の両方に混ぜる（1ターン1本で追えるようにする）
+// ✅ ctxPack に phase / depthStage / qCode も同期（rephraseEngine が拾う）
+// 優先：metaForSave → unified（あれば）→ null
+{
+  const m = (out.metaForSave as any) ?? {};
+  const u = (m.unified as any) ?? {};
+
+  // phase
+  const phaseRaw = m.phase ?? u.phase ?? null;
+  if (
+    (extra2.ctxPack as any).phase == null &&
+    (phaseRaw === 'Inner' || phaseRaw === 'Outer')
+  ) {
+    (extra2.ctxPack as any).phase = phaseRaw;
+  }
+
+  // depthStage
+  const depthRaw = m.depthStage ?? u.depthStage ?? m.depth ?? u?.depth?.stage ?? null;
+  if ((extra2.ctxPack as any).depthStage == null && typeof depthRaw === 'string' && depthRaw) {
+    (extra2.ctxPack as any).depthStage = depthRaw;
+  }
+
+  // qCode
+  const qRaw = m.qCode ?? u.qCode ?? m.q ?? u?.q?.current ?? null;
+  if ((extra2.ctxPack as any).qCode == null && typeof qRaw === 'string' && qRaw) {
+    (extra2.ctxPack as any).qCode = qRaw;
+  }
+}
+
+// flow 同期（正本）は後段（nowIso2/prevAtIso/ageSec/returnStreak を使う方）で行うため、ここでは書かない。
+// ※ 二重定義を避ける（flow / digest / phase-depth-q の重複防止）
+
+
+// 既存の flow 同期はそのまま
 (extra2.ctxPack as any).flow = {
+
   at: nowIso2,
   prevAtIso,
   ageSec,
+
+  // ✅ Downshift 観測用（正本）
+  flowDelta: flowDelta ?? null,
+  flowConfidence: typeof flowConfidence === 'number' ? flowConfidence : null,
+  returnStreak,
+
+  // minimal: ここでは固定
   sessionBreak: false,
   fresh: true,
+
   traceId: traceId ?? null,
 };
 
@@ -1822,13 +1947,17 @@ console.log('[IROS][CTXPACK] stamped', {
   prevAtIso: prevAtIso ?? null,
   ageSec: ageSec ?? null,
   flowAt: (extra2.ctxPack as any)?.flow?.at ?? null,
+
+  // ✅ Downshift観測点
+  flowDelta: (extra2.ctxPack as any)?.flow?.flowDelta ?? null,
+  returnStreak: (extra2.ctxPack as any)?.flow?.returnStreak ?? null,
+
   ctxPackKeys: extra2.ctxPack ? Object.keys(extra2.ctxPack as any) : null,
 
   hfw_len: Array.isArray((extra2.ctxPack as any)?.historyForWriter)
     ? (extra2.ctxPack as any).historyForWriter.length
     : null,
 
-  // ✅ 追加：digest 注入が可能な状態か（ここが true なら rephrase 側で inject できる）
   hasDigestV1: Boolean((extra2.ctxPack as any)?.historyDigestV1),
   digestChars,
 
@@ -1836,7 +1965,6 @@ console.log('[IROS][CTXPACK] stamped', {
     ? (out.metaForSave as any).extra.historyForWriter.length
     : null,
 });
-
 
 
   } catch (e) {

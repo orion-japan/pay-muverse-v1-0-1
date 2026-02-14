@@ -1,0 +1,1136 @@
+
+> sofia_register_flow_v1@0.1.0 dev /home/orimoto/projects/pay-muverse-v1-0-1
+> next dev --turbopack
+
+▲ Next.js 16.1.4 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.2.109:3000
+- Environments: .env.local
+- Experiments (use with caution):
+  · serverActions
+
+✓ Starting...
+✓ Ready in 913ms
+[firebase] DEBUG_LOCAL=1 → Firebase SDK log level set to "debug"
+ GET /iros-ai 200 in 2.1s (compile: 1799ms, render: 350ms)
+ POST /api/telemetry 204 in 237ms (compile: 224ms, render: 13ms)
+[firebase-admin] initialized with ServiceAccount
+[authz] b77210c3-aa57-40eb-90f1-a395e43a0e35 start { path: 'http://localhost:3000/api/agent/iros/userinfo' }
+[authz][debug] header { authzLen: 935, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] 3aabd44a-ade7-4c01-bc52-221ef4cbb0b2 start { path: 'http://localhost:3000/api/q/unified?user_code=U-CKxc5NQQ' }
+[authz][debug] header { authzLen: 935, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+ POST /api/register-push 200 in 116ms (compile: 1628µs, render: 115ms)
+ POST /api/register-push 200 in 473ms (compile: 219ms, render: 254ms)
+[authz] 3aabd44a-ade7-4c01-bc52-221ef4cbb0b2 verify firebase: 394.763ms
+[authz] b77210c3-aa57-40eb-90f1-a395e43a0e35 verify firebase: 461.648ms
+[authz] 3aabd44a-ade7-4c01-bc52-221ef4cbb0b2 fetch user: 60.484ms
+[authz] 3aabd44a-ade7-4c01-bc52-221ef4cbb0b2 ok { user: 'U-CKxc5NQQ', role: 'other', provider: 'password', ms: 462 }
+[authz] b77210c3-aa57-40eb-90f1-a395e43a0e35 fetch user: 55.572ms
+[authz] b77210c3-aa57-40eb-90f1-a395e43a0e35 ok { user: 'U-CKxc5NQQ', role: 'other', provider: 'password', ms: 521 }
+[IROS/UserInfo] authz = {
+  ok: true,
+  allowed: true,
+  status: 200,
+  pgJwt: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJVLUNLeGM1TlFRIiwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJ1c2VyX2NvZGUiOiJVLUNLeGM1TlFRIiwiZmlyZWJhc2VfdWlkIjoiTjMwQVNrMjBUM2R6TUhuY253aGozbFBWcnVJMiIsImV4cCI6MTc3MTA3NzMxMCwiaWF0IjoxNzcxMDc2NDEwfQ.KzQqsDWMpuk6WChM9wVe7WEKCrdlwQ9QTawA9vA0cyY',
+  userCode: 'U-CKxc5NQQ',
+  role: 'other',
+  user: { uid: 'N30ASk20T3dzMHncnwhj3lPVruI2', user_code: 'U-CKxc5NQQ' },
+  uid: 'N30ASk20T3dzMHncnwhj3lPVruI2'
+}
+ GET /api/agent/iros/userinfo 200 in 947ms (compile: 371ms, render: 576ms)
+[authz] a13e2f0e-119e-46e0-a1f5-c06ad8a93436 start { path: 'http://localhost:3000/api/agent/iros/conversations' }
+[authz][debug] header { authzLen: 935, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] a13e2f0e-119e-46e0-a1f5-c06ad8a93436 verify firebase: 252.581ms
+[authz] a13e2f0e-119e-46e0-a1f5-c06ad8a93436 fetch user: 51.338ms
+[authz] a13e2f0e-119e-46e0-a1f5-c06ad8a93436 ok { user: 'U-CKxc5NQQ', role: 'other', provider: 'password', ms: 309 }
+ GET /api/agent/iros/conversations 200 in 581ms (compile: 223ms, render: 358ms)
+ GET /api/q/unified?user_code=U-CKxc5NQQ 200 in 1255ms (compile: 121ms, render: 1134ms)
+[authz] e4ad452d-2da8-4567-99e5-c57a764372e7 start {
+  path: 'http://localhost:3000/api/agent/iros/messages?conversation_id=e8f6697a-ae46-4e2c-a5db-3640fb7c2d33'
+}
+[authz][debug] header { authzLen: 935, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] e4ad452d-2da8-4567-99e5-c57a764372e7 verify firebase: 246.857ms
+[authz] e4ad452d-2da8-4567-99e5-c57a764372e7 fetch user: 50.089ms
+[authz] e4ad452d-2da8-4567-99e5-c57a764372e7 ok { user: 'U-CKxc5NQQ', role: 'other', provider: 'password', ms: 305 }
+ GET /api/agent/iros/messages?conversation_id=e8f6697a-ae46-4e2c-a5db-3640fb7c2d33 200 in 775ms (compile: 155ms, render: 619ms)
+[authz] e1610a2c-f32e-4ab5-a5f7-5149ca70db6d start { path: 'http://localhost:3000/api/agent/iros/messages' }
+[authz][debug] header { authzLen: 935, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] e1610a2c-f32e-4ab5-a5f7-5149ca70db6d verify firebase: 311.064ms
+[authz] e1610a2c-f32e-4ab5-a5f7-5149ca70db6d fetch user: 111.437ms
+[authz] e1610a2c-f32e-4ab5-a5f7-5149ca70db6d ok { user: 'U-CKxc5NQQ', role: 'other', provider: 'password', ms: 432 }
+ POST /api/agent/iros/messages 200 in 749ms (compile: 3ms, render: 747ms)
+[IROS/FLAGSHIP_GUARD][MODULE_LOADED] { rev: 'guard-rev-2026-01-28-b', at: '2026-02-14T13:40:47.012Z' }
+[IROS/FLAGS_ENV_HEAD] {
+  IROS_RETRY_FINAL_FORCE_CALL: '0',
+  IROS_FLAGSHIP_REWRITE: '1',
+  IROS_LOG_FLAGS: 'true'
+}
+[IROS/FLAGS] {
+  retryFinalForceCall: false,
+  flagshipRewrite: true,
+  guardEnabled: true,
+  guardSkipShort: false,
+  guardShortMaxLen: 80,
+  logFlags: true
+}
+[IROS/renderGateway][MODULE_LOADED] { rev: 'phase11-open-close-v2-LOADED', at: '2026-02-14T13:40:47.033Z' }
+[IROS/pipe][TRACE] {
+  traceId: '28ec3c08-70d9-46cc-aa46-087a7c469e4a',
+  conversationKey: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  conversationId: null,
+  userCode: 'U-CKxc5NQQ',
+  modeHint: 'auto',
+  hasHeaderUserCode: true,
+  devBypass: false
+}
+[authz] 9ff3ddf5-af9c-433b-ab94-09ae7952c30f start { path: 'http://localhost:3000/api/agent/iros/reply' }
+[authz][debug] header { authzLen: 935, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] 9ff3ddf5-af9c-433b-ab94-09ae7952c30f verify firebase: 248.105ms
+[authz] 9ff3ddf5-af9c-433b-ab94-09ae7952c30f fetch user: 39.383ms
+[authz] 9ff3ddf5-af9c-433b-ab94-09ae7952c30f ok { user: 'U-CKxc5NQQ', role: 'other', provider: 'password', ms: 294 }
+[IROS/pipe][TRACE_RESOLVED] {
+  traceId: '28ec3c08-70d9-46cc-aa46-087a7c469e4a',
+  conversationKey: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  conversationId: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  userCode: 'U-CKxc5NQQ'
+}
+ POST /api/credits/authorize 200 in 285ms (compile: 234ms, render: 52ms)
+[IROS/UserProfile] load ok {
+  userCode: 'U-CKxc5NQQ',
+  hasIrosRow: false,
+  sofia_credit: 77,
+  style: null,
+  user_call_name: null,
+  plan_status: null
+}
+[IROS/Reply] handleIrosReply start {
+  conversationId: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  userCode: 'U-CKxc5NQQ',
+  mode: 'auto',
+  tenantId: 'default',
+  rememberScope: null,
+  traceId: '28ec3c08-70d9-46cc-aa46-087a7c469e4a',
+  style: null,
+  history_len: 12,
+  persistAssistantAllowed: true
+}
+[IROS][user:U-CKxc5NQQ][STATE] loaded MemoryState {
+  userCode: 'U-CKxc5NQQ',
+  hasMemory: true,
+  intentAnchor: 'SUN',
+  depthStage: 'C1',
+  qPrimary: 'Q2',
+  selfAcceptance: 0.518,
+  phase: 'Inner',
+  intentLayer: null,
+  yLevel: 3,
+  hLevel: 1,
+  spinLoop: 'SRI',
+  spinStep: 0,
+  descentGate: 'closed',
+  itxStep: null,
+  itxAnchorEventType: 'confirm',
+  itxReason: 'IT_TRIGGER_OK',
+  itxLastAt: '2026-01-09T08:06:57.946+00:00',
+  sentimentLevel: null,
+  situationSummary: 'このまま何もしないのも違う気がして、少し焦ります。',
+  situationTopic: 'その他・ライフ全般',
+  qCounts: { it_cooldown: 0, it_triggered: true, it_triggered_true: true }
+}
+[IROS][user:U-CKxc5NQQ][STATE] loaded MemoryState (orchestratorState) {
+  userCode: 'U-CKxc5NQQ',
+  hasMemory: true,
+  intentAnchor: 'SUN',
+  depthStage: 'C1',
+  qPrimary: 'Q2',
+  selfAcceptance: 0.518,
+  phase: 'Inner',
+  intentLayer: null,
+  yLevel: 3,
+  hLevel: 1,
+  spinLoop: 'SRI',
+  spinStep: 0,
+  descentGate: 'closed'
+}
+[IROS/Context] framePlan built {
+  userCode: 'U-CKxc5NQQ',
+  inputKind: 'question',
+  frame: 'C',
+  hasSlots: true,
+  spinLoop: 'SRI',
+  descentGate: 'closed',
+  depthStage: 'C1',
+  phase: 'Inner',
+  requestedDepth: null,
+  requestedQCode: null
+}
+[IROS][DepthGate] R->I check {
+  prevDepthStage: 'C1',
+  requestedDepth_in: null,
+  requestedDepth_out: null
+}
+[IROS/Orchestrator] input meta snapshot {
+  hasRotationState: true,
+  spinLoop: 'SRI',
+  descentGate: 'closed',
+  depth: 'C1',
+  frame: 'C',
+  slotPlanLen: 4,
+  slotPlanPolicy: null,
+  historyLen: 12,
+  hasIntentAnchor: true,
+  intentAnchorKey: 'SUN',
+  isIrDiagnosisTurn: null,
+  mode: null
+}
+[IROS][user:U-CKxc5NQQ][STATE] loaded MemoryState {
+  userCode: 'U-CKxc5NQQ',
+  hasMemory: true,
+  intentAnchor: 'SUN',
+  depthStage: 'C1',
+  qPrimary: 'Q2',
+  selfAcceptance: 0.518,
+  phase: 'Inner',
+  intentLayer: null,
+  yLevel: 3,
+  hLevel: 1,
+  spinLoop: 'SRI',
+  spinStep: 0,
+  descentGate: 'closed',
+  itxStep: null,
+  itxAnchorEventType: 'confirm',
+  itxReason: 'IT_TRIGGER_OK',
+  itxLastAt: '2026-01-09T08:06:57.946+00:00',
+  sentimentLevel: null,
+  situationSummary: 'このまま何もしないのも違う気がして、少し焦ります。',
+  situationTopic: 'その他・ライフ全般',
+  qCounts: { it_cooldown: 0, it_triggered: true, it_triggered_true: true }
+}
+[IROS][user:U-CKxc5NQQ][STATE] loaded MemoryState (orchestratorState) {
+  userCode: 'U-CKxc5NQQ',
+  hasMemory: true,
+  intentAnchor: 'SUN',
+  depthStage: 'C1',
+  qPrimary: 'Q2',
+  selfAcceptance: 0.518,
+  phase: 'Inner',
+  intentLayer: null,
+  yLevel: 3,
+  hLevel: 1,
+  spinLoop: 'SRI',
+  spinStep: 0,
+  descentGate: 'closed'
+}
+[IROS/SA] estimateSelfAcceptance v2 (line) {
+  input: {
+    qCode: null,
+    depthStage: 'C1',
+    phase: 'Inner',
+    hasHistoryDigest: false,
+    lastSelfAcceptance: 0.518
+  },
+  result: { base: 0.518, deltaFromWords: 0, value: 0.518 },
+  notes: [
+    'base = lastSelfAcceptance（ライン） → 0.518',
+    'C層 intensity=1.15',
+    'deltaTextRaw=0.000, intensity=1.15, deltaWithIntensity=0.000',
+    'deltaWithIntensity=0 → effectiveDelta=0',
+    'value=0.518 (raw=0.518)'
+  ]
+}
+[IROS/SpinControl] {
+  rank: 'mid',
+  direction: 'forward',
+  promptStyle: 'one-step',
+  promptStyle_raw: 'two-choice',
+  phase: 'Inner',
+  anchorEventType: 'none',
+  hysteresis: false
+}
+[IROS/GOAL_CONT] applyGoalContinuity {
+  conversationId: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  goal_in: {
+    kind: 'uncover',
+    targetDepth: 'C1',
+    targetQ: 'Q2',
+    reason: '明確な方向性はまだ決めず、まずは背景をやわらかく掘り起こす',
+    detail: { ventWill: [Object] }
+  },
+  ctx: { lastQ: 'Q2', lastDepth: 'C1', qTrace: null, memoryQ: null }
+}
+[IROS/CONT continuity] { lastDepth: 'C1', lastQ: 'Q2', finalDepth: 'C1', finalQ: 'Q2' }
+[IROS/GOAL_CONT]  result {
+  conversationId: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  goal_out: {
+    kind: 'uncover',
+    targetDepth: 'C1',
+    targetQ: 'Q2',
+    reason: '明確な方向性はまだ決めず、まずは背景をやわらかく掘り起こす',
+    detail: { ventWill: [Object] }
+  }
+}
+[IROS/DEPTH_WRITE] {
+  route: 'ROTATION',
+  where: 'orchestratorWill',
+  conversationId: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  baseDepth: 'C1',
+  goalTargetDepth: 'C1',
+  rotationDepth: 'C1',
+  spinLoop: 'SRI',
+  descentGate: 'closed',
+  shouldRotate: false,
+  reason: 'SRI: S帯でQ3かつuncover連続(>=2)の条件を満たしていないため回転しない（gateは更新のみ）'
+}
+[IROS/WILL priority] {
+  goalKind: 'uncover',
+  depth: 'C1',
+  phase: 'Inner',
+  targetDepth: 'C1',
+  qCode: 'Q2',
+  targetQ: 'Q2',
+  weights: {
+    mirror: 0.9680000000000002,
+    insight: 0.5,
+    forward: 0.20124999999999998,
+    question: 0.34
+  }
+}
+[IROS/IT][probe] before {
+  textHead: '今の自分が、どこに立っているのか分からなくなってきました。',
+  historyLen: 12,
+  historyLen_norm: 11,
+  historyUserLen: 6,
+  last3User: [
+    'でも、始めたら中途半端になりそうで、それも嫌で。',
+    'このまま何もしないのも違う気がして、少し焦ります。',
+    '今の自分が、どこに立っているのか分からなくなってきました。'
+  ],
+  depth: 'C1',
+  intentLine: {
+    nowLabel: '',
+    coreNeed: null,
+    intentBand: 'I1',
+    direction: 'expand',
+    focusLayer: 'C',
+    riskHint: null,
+    guidanceHint: '',
+    tLayerHint: null,
+    hasFutureMemory: false
+  },
+  fixedNorth: { key: 'SUN', text: '太陽SUN', phrase: '成長 / 進化 / 希望 / 歓喜' },
+  intent_anchor: { key: 'SUN', text: null, phrase: null }
+}
+[IROS/IT][probe][fixedNorth] {
+  hasMeta: true,
+  fixedNorth_meta: 'SUN',
+  fixedNorth_ms: null,
+  hasNorth: true,
+  prevIt_fromMemoryState: {
+    active: false,
+    step: null,
+    reason: 'IT_TRIGGER_OK',
+    lastAt: 2026-01-09T08:06:57.946Z
+  },
+  prevIt_fromMeta: {
+    active: false,
+    step: null,
+    reason: 'IT_TRIGGER_OK',
+    lastAt: 2026-01-09T08:06:57.946Z
+  },
+  prevIt_fromHistory: false
+}
+[IROS/IT][result] {
+  ok: false,
+  reason: 'NO_CORE|NO_SUN_OR_BLOCK|NO_DECLARATION',
+  flags: {
+    hasCore: false,
+    coreRepeated: false,
+    sunOk: false,
+    declarationOk: false,
+    deepenOk: false
+  },
+  tLayerModeActive: false,
+  tLayerHint: null,
+  tVector: null
+}
+[IROS/IT_TRIGGER] {
+  ok: false,
+  itxWriteMode: 'keep',
+  itxPersistReason: 'IT_TRIGGER_OK',
+  itxDecisionReason: 'NO_CORE|NO_SUN_OR_BLOCK|NO_DECLARATION',
+  flags: {
+    hasCore: false,
+    coreRepeated: false,
+    sunOk: false,
+    declarationOk: false,
+    deepenOk: false
+  },
+  iLexemeForce: true,
+  tLayerModeActive: false,
+  tLayerHint: null,
+  tVector: null,
+  isCommittedT3: false,
+  committedStep: null,
+  itx_probe_reason: null
+}
+[IROS/ANCHOR_DEBUG][before-detect] {
+  ms_intent_anchor_raw: 'SUN',
+  ms_intent_anchor_fixed_true: false,
+  itx_step_ms: null,
+  evidence_choiceId: null,
+  evidence_actionId: null,
+  evidence_source: 'none'
+}
+[IROS/ANCHOR_ENTRY] {"evidence":{"choiceId":null,"actionId":null,"source":"none"},"decision":{"tEntryOk":false,"anchorEvent":"none","anchorWrite":"keep","reason":"NO_EVIDENCE"},"fixedNorthKey":"SUN","itActive":true,"hasAnchorAlready":true}
+[IROS/FLOW][observe] {
+  delta: 'RETURN',
+  confidence: 0.7,
+  hasLastUserText: true,
+  returnStreak: 1
+}
+[IROS/T_CONCRETIZE][FORCE_SWITCH_CHECK] {
+  forceTConcretize: false,
+  laneKeyNowRaw: null,
+  laneKeyNowBase: null,
+  laneKeyNow: null,
+  stall: {
+    severity: 'none',
+    reason: 'NONE',
+    detail: {
+      streakSameUser: 1,
+      repeatSignal: null,
+      flowDelta: 'RETURN',
+      returnStreak: 1,
+      anchorReason: 'NO_EVIDENCE',
+      convReason: null
+    }
+  },
+  hasFocusLabelNow: false,
+  focusLabelHead: null,
+  userHead: '今の自分が、どこに立っているのか分からなくなってきました。'
+}
+[IROS/T_CONCRETIZE][SHIFT_BUILDER_USED] {
+  hasFocus: false,
+  seedHead: '状況：今の自分が、どこに立っているのか分からなくなってきました。\n' +
+    '出力ルール：ACKで終わらない／一般論で終わらない／ラベル（次の一手：・結論：・ポイント：など）を使わない\n' +
+    '形式：2〜3行。質問は最大1つまで。チェックリスト禁止。箇条書き禁',
+  stack: 'Error: SHIFT_BUILDER_USED\n' +
+    '    at buildShiftTConcretize (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_iros_41b31a98._.js:2553:16)\n' +
+    '    at buildFlowReply (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_iros_41b31a98._.js:2592:36)\n' +
+    '    at buildNormalChatSlotPlan (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_iros_41b31a98._.js:2685:17)\n' +
+    '    at runIrosTurn (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_iros_41b31a98._.js:9961:213)\n' +
+    '    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)\n' +
+    '    at async Module.runOrchestratorTurn (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_iros_server_52349ce2._.js:1589:20)\n' +
+    '    at async handleIrosReply (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_iros_server_52349ce2._.js:6191:22)\n' +
+    '    at async POST (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_app_api_agent_iros_reply_5e0f7b63._.js:1637:28)\n' +
+    '    at async AppRouteRouteModule.do (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/compiled/next-server/app-route-turbo.runtime.dev.js:5:37866)\n' +
+    '    at async AppRouteRouteModule.handle (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/compiled/next-server/app-route-turbo.runtime.dev.js:5:45156)\n' +
+    '    at async responseGenerator (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/881de_next_a124796b._.js:14849:38)\n' +
+    '    at async AppRouteRouteModule.handleResponse (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/compiled/next-server/app-route-turbo.runtime.dev.js:1:187713)\n' +
+    '    at async handleResponse (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/881de_next_a124796b._.js:14912:32)\n' +
+    '    at async Module.handler (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/881de_next_a124796b._.js:14965:13)\n' +
+    '    at async DevServer.renderToResponseWithComponentsImpl (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/base-server.js:1422:9)\n' +
+    '    at async DevServer.renderPageComponent (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/base-server.js:1474:24)\n' +
+    '    at async DevServer.renderToResponseImpl (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/base-server.js:1524:32)\n' +
+    '    at async DevServer.pipeImpl (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/base-server.js:1018:25)\n' +
+    '    at async NextNodeServer.handleCatchallRenderRequest (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/next-server.js:395:17)\n' +
+    '    at async DevServer.handleRequestImpl (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/base-server.js:909:17)\n' +
+    '    at async /home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/dev/next-dev-server.js:387:20\n' +
+    '    at async Span.traceAsyncFn (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/trace/trace.js:157:20)\n' +
+    '    at async DevServer.handleRequest (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/dev/next-dev-server.js:383:24)\n' +
+    '    at async invokeRender (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/lib/router-server.js:248:21)\n' +
+    '    at async handleRequest (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/lib/router-server.js:447:24)\n' +
+    '    at async requestHandlerImpl (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/lib/router-server.js:496:13)\n' +
+    '    at async Server.requestListener (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/lib/start-server.js:226:13)'
+}
+[IROS/T_CONCRETIZE][SHIFT_BUILDER_USED] {
+  hasFocus: false,
+  seedHead: '状況：今の自分が、どこに立っているのか分からなくなってきました。\n' +
+    '出力ルール：ACKで終わらない／一般論で終わらない／ラベル（次の一手：・結論：・ポイント：など）を使わない\n' +
+    '形式：2〜3行。質問は最大1つまで。チェックリスト禁止。箇条書き禁',
+  stack: 'Error: SHIFT_BUILDER_USED\n' +
+    '    at buildShiftTConcretize (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_iros_41b31a98._.js:2553:16)\n' +
+    '    at buildFlowReply (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_iros_41b31a98._.js:2592:36)\n' +
+    '    at buildNormalChatSlotPlan (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_iros_41b31a98._.js:2685:17)\n' +
+    '    at runIrosTurn (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_iros_41b31a98._.js:9971:217)\n' +
+    '    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)\n' +
+    '    at async Module.runOrchestratorTurn (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_iros_server_52349ce2._.js:1589:20)\n' +
+    '    at async handleIrosReply (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_iros_server_52349ce2._.js:6191:22)\n' +
+    '    at async POST (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_app_api_agent_iros_reply_5e0f7b63._.js:1637:28)\n' +
+    '    at async AppRouteRouteModule.do (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/compiled/next-server/app-route-turbo.runtime.dev.js:5:37866)\n' +
+    '    at async AppRouteRouteModule.handle (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/compiled/next-server/app-route-turbo.runtime.dev.js:5:45156)\n' +
+    '    at async responseGenerator (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/881de_next_a124796b._.js:14849:38)\n' +
+    '    at async AppRouteRouteModule.handleResponse (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/compiled/next-server/app-route-turbo.runtime.dev.js:1:187713)\n' +
+    '    at async handleResponse (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/881de_next_a124796b._.js:14912:32)\n' +
+    '    at async Module.handler (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/881de_next_a124796b._.js:14965:13)\n' +
+    '    at async DevServer.renderToResponseWithComponentsImpl (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/base-server.js:1422:9)\n' +
+    '    at async DevServer.renderPageComponent (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/base-server.js:1474:24)\n' +
+    '    at async DevServer.renderToResponseImpl (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/base-server.js:1524:32)\n' +
+    '    at async DevServer.pipeImpl (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/base-server.js:1018:25)\n' +
+    '    at async NextNodeServer.handleCatchallRenderRequest (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/next-server.js:395:17)\n' +
+    '    at async DevServer.handleRequestImpl (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/base-server.js:909:17)\n' +
+    '    at async /home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/dev/next-dev-server.js:387:20\n' +
+    '    at async Span.traceAsyncFn (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/trace/trace.js:157:20)\n' +
+    '    at async DevServer.handleRequest (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/dev/next-dev-server.js:383:24)\n' +
+    '    at async invokeRender (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/lib/router-server.js:248:21)\n' +
+    '    at async handleRequest (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/lib/router-server.js:447:24)\n' +
+    '    at async requestHandlerImpl (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/lib/router-server.js:496:13)\n' +
+    '    at async Server.requestListener (/home/orimoto/projects/pay-muverse-v1-0-1/node_modules/.pnpm/next@16.1.4_@babel+core@7.28.6_@opentelemetry+api@1.9.0_react-dom@19.2.3_react@19.2.3__react@19.2.3/node_modules/next/dist/server/lib/start-server.js:226:13)'
+}
+[IROS/ORCH][after-container] {
+  frame: 'C',
+  framePlan_frame: 'C',
+  descentGate: 'closed',
+  framePlan_kind: null,
+  framePlan_stamp: null,
+  intentBridge_laneKey: null,
+  intentBridge_inputs: { deepenOk: null, hasCore: null, declarationOk: null },
+  framePlan_slots_isArray: true,
+  framePlan_slots_len: 3,
+  slotPlan_isArray: true,
+  slotPlan_len: 3,
+  framePlan_policy: 'FINAL',
+  slotPlanPolicy: 'FINAL',
+  sameRef_framePlan_slotPlan: false,
+  slotPlanFallback: 'normalChat',
+  hasIntentAnchor: true,
+  intentAnchorKey: 'SUN',
+  has_intent_anchor_obj: true,
+  has_intentAnchor_obj: true,
+  has_intent_anchor_key: true,
+  has_intentAnchorKey: true
+}
+[IROS/META][final-sync][meta] {
+  meta_q: 'Q2',
+  unified_q: 'Q2',
+  meta_depth: 'C1',
+  unified_depth: 'C1',
+  intent_anchor: { key: 'SUN', text: null, phrase: null },
+  intent_anchor_key: 'SUN',
+  anchorEntry: {
+    evidence: { choiceId: null, actionId: null, source: 'none' },
+    decision: {
+      tEntryOk: false,
+      anchorEvent: 'none',
+      anchorWrite: 'keep',
+      reason: 'NO_EVIDENCE'
+    }
+  }
+}
+[IROS/META][final-sync][finalMeta] {
+  meta_q: 'Q2',
+  unified_q: 'Q2',
+  meta_depth: 'C1',
+  unified_depth: 'C1',
+  intent_anchor: { key: 'SUN', text: null, phrase: null },
+  intent_anchor_key: 'SUN',
+  anchorEntry: {
+    evidence: { choiceId: null, actionId: null, source: 'none' },
+    decision: {
+      tEntryOk: false,
+      anchorEvent: 'none',
+      anchorWrite: 'keep',
+      reason: 'NO_EVIDENCE'
+    }
+  }
+}
+[IROS/PostProcess][SLOTPLAN_POLICY] {
+  conversationId: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  userCode: 'U-CKxc5NQQ',
+  slotPlanPolicy_detected: 'FINAL',
+  slotPlanPolicy_from: 'metaForSave.framePlan.slotPlanPolicy',
+  slotPlanPolicy_raw: 'FINAL',
+  slotPlanLen: 3,
+  hasSlots: true
+}
+[IROS/EXPR][decision] {
+  conversationId: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  userCode: 'U-CKxc5NQQ',
+  fired: false,
+  lane: 'OFF',
+  reason: 'DEFAULT',
+  blockedBy: null,
+  prefaceHead: ''
+}
+[IROS/PostProcess][SEED_CORE] {
+  coreLineLen: 29,
+  seedHasCore: true,
+  seedLen: 1029,
+  cleanedLen: 29,
+  cleanedApplied: true,
+  hadInternalMarkers: true
+}
+[IROS/PostProcess] SLOTPLAN_SEED_TO_WRITER (base visible) {
+  conversationId: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  userCode: 'U-CKxc5NQQ',
+  slotPlanPolicy: 'FINAL',
+  slotPlanPolicy_from: 'metaForSave.framePlan.slotPlanPolicy',
+  slotPlanLen: 3,
+  hasSlots: true,
+  baseVisibleLen: 29,
+  baseVisibleHead: '今の自分が、どこに立っているのか分からなくなってきました。',
+  seedLen: 947,
+  seedHead: '@OBS {"laneKey":"T_CONCRETIZE","user":"今の自分が、どこに'
+}
+[IROS][ResonanceState] upsert ok {
+  userCode: 'U-CKxc5NQQ',
+  tenantId: 'default',
+  qCode: 'Q2',
+  depthStage: 'C1',
+  phase: 'Inner'
+}
+[UnifiedAnalysis] user message q_code/depth_stage updated {
+  conversationId: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  messageId: 15039,
+  q_code: 'Q2',
+  depth_stage: 'C1'
+}
+[IROS][CTXPACK] stamped {
+  traceId: '28ec3c08-70d9-46cc-aa46-087a7c469e4a',
+  conversationId: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  userCode: 'U-CKxc5NQQ',
+  hasCtxPack: true,
+  prevAtIso: null,
+  ageSec: null,
+  flowAt: '2026-02-14T13:40:48.285Z',
+  flowDelta: 'RETURN',
+  returnStreak: 1,
+  ctxPackKeys: [
+    'historyForWriter',
+    'historyDigestV1',
+    'phase',
+    'depthStage',
+    'qCode',
+    'flow'
+  ],
+  hfw_len: 12,
+  hasDigestV1: true,
+  digestChars: 244,
+  hfw_src_len: 12
+}
+[IROS/LLM_GATE][FINAL_CALL][NO_FORCE] {
+  conversationId: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  userCode: 'U-CKxc5NQQ',
+  slotPlanPolicy: 'FINAL',
+  slotPlanLen: 3,
+  hasSlots: true,
+  effectiveLen: 29,
+  head: '今の自分が、どこに立っているのか分からなくなってきました。'
+}
+[IROS/LLM_GATE][PROBE] {
+  conversationId: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  userCode: 'U-CKxc5NQQ',
+  llmEntry: 'CALL_LLM',
+  llmSkipReason: null,
+  allowLLM_final: true,
+  brakeReason: null,
+  speechAct: null,
+  slotPlanLen: 3,
+  hasSlots: true,
+  slotPlanPolicy: 'FINAL',
+  finalAssistantTextLen: 29,
+  finalAssistantTextHead: '今の自分が、どこに立っているのか分からなくなってきました。',
+  finalAssistantTextCandidateLen: null,
+  finalAssistantTextCandidateHead: null,
+  finalForceCall: false,
+  finalForceCallReason: 'FINAL_CALL_NO_FORCE',
+  resolvedTextLen: null,
+  rewriteSeedLen: 427,
+  decisionResolvedLen: null,
+  decisionRewriteSeedLen: 427
+}
+[IROS/Reply] rotation bridge { spinLoop: 'SRI', descentGate: 'closed', depth: 'C1' }
+[IROS/STATE][anchor-root] { userTextHead: '今の自分が、どこに立っているのか分からなくなってきました。' }
+[IROS/STATE][fixed-by-meta] {
+  intent_anchor_obj: { key: 'SUN', text: null, phrase: null },
+  intent_anchor_key: 'SUN',
+  itx_step: null,
+  itx_reason: 'IT_TRIGGER_OK',
+  itx_last_at: '2026-01-09T08:06:57.946+00:00'
+}
+[IROS/STATE] persistMemoryStateIfAny start {"userCode":"U-CKxc5NQQ","userText":"今の自分が、どこに立っているのか分からなくなってきました。","depthInput":"C1","qCodeInput":"Q2","phaseInput":"Inner","yLevelInt":2,"hLevelInt":1,"finalSpinLoop":"SRI","finalSpinStep":0,"finalDescentGate":"closed","itTriggered":null,"clearItxExplicit":false,"shouldClearItx":false,"itx_step":"(keep)","itx_anchor_event_type":"(keep)","itx_reason":"(keep)","itx_last_at":"(keep)","anchor_event_db":"none","anchor_write_db":"keep","anchorEntry_decision":{"tEntryOk":false,"anchorEvent":"none","anchorWrite":"keep","reason":"NO_EVIDENCE"},"intent_anchor_key_candidate":"SUN","anchor_action":"keep","qTracePickedFrom":"qTraceEffective","qTrace_keys":["lastQ","dominantQ","streakQ","streakLength","volatility"],"qTrace_qNow":null,"qTrace_q_now":null,"qTrace_currentQ":null,"qTrace_snapshot_currentQ":null,"qTrace_streakQ":"Q2","qTrace_streakLength":1}
+[IROS/PHASE10_T3][enter] {
+  phase10NowItxStep: null,
+  phase10NowAnchorWrite: 'keep',
+  phase10NowAnchorEvent: 'none',
+  phase10NowIntentAnchorKey: 'SUN',
+  phase10HasPrev: true,
+  phase10PrevItxStep: null,
+  phase10PrevItxLastAt: '2026-01-09T08:06:57.946+00:00',
+  phase10PrevIntentAnchorKey: 'SUN',
+  phase10PrevIntentAnchorRaw: { key: 'SUN' },
+  phase10NowIntentAnchorRaw: 'SUN'
+}
+[IROS/PHASE10_T3][result] {
+  phase10Upgrade: false,
+  phase10NextItxStep: null,
+  phase10Reason: 'NO_COMMIT'
+}
+[IROS/STATE] upsert payload (intent_anchor check) {
+  userCode: 'U-CKxc5NQQ',
+  anchor_action: 'keep',
+  intent_anchor_will_set: '(no-touch)',
+  anchorKeyCandidate: 'SUN',
+  fixedByMeta_intent_anchor_key: 'SUN',
+  anchorEntry_decision: {
+    tEntryOk: false,
+    anchorEvent: 'none',
+    anchorWrite: 'keep',
+    reason: 'NO_EVIDENCE'
+  }
+}
+[IROS/PERSIST][anchorEntry][before-upsert] {
+  hasAnchorEntry: true,
+  ae_hasDecision: true,
+  ae_anchorWrite: 'keep',
+  ae_anchorEvent: 'none',
+  ae_reason: 'NO_EVIDENCE',
+  ae_evidence_source: 'none',
+  decisionFinal: {
+    tEntryOk: false,
+    anchorEvent: 'none',
+    anchorWrite: 'keep',
+    reason: 'NO_EVIDENCE'
+  },
+  payload_has_anchor_event: true,
+  payload_has_anchor_write: true,
+  payload_anchor_event: 'none',
+  payload_anchor_write: 'keep',
+  payload_has_itx_step: false,
+  payload_itx_step: null,
+  payload_itx_reason: null,
+  payload_itx_last_at: null,
+  payload_itx_anchor_event_type: null,
+  payload_has_intent_anchor: false,
+  payload_intent_anchor: '(no-touch)',
+  meta_intent_anchor_key: 'SUN',
+  anchorKeyCandidate: 'SUN',
+  anchor_action: 'keep'
+}
+[IROS/STATE] persistMemoryStateIfAny ok {
+  userCode: 'U-CKxc5NQQ',
+  saved: [
+    'user_code',       'updated_at',
+    'depth_stage',     'q_primary',
+    'phase',           'self_acceptance',
+    'y_level',         'h_level',
+    'spin_loop',       'spin_step',
+    'descent_gate',    'situation_summary',
+    'situation_topic', 'anchor_event',
+    'anchor_write'
+  ],
+  depthStage: 'C1',
+  qPrimary: 'Q2',
+  spinLoop: 'SRI',
+  spinStep: 0,
+  descentGate: 'closed',
+  qCounts: '(kept)',
+  itx_step: '(kept/none)',
+  itx_last_at: '(kept/none)',
+  anchor_action: 'keep',
+  anchor_event: 'none',
+  anchor_write: 'keep',
+  intent_anchor: '(no-touch)'
+}
+ POST /api/credits/capture 200 in 292ms (compile: 248ms, render: 44ms)
+[IROS][user:U-CKxc5NQQ][STATE] loaded MemoryState {
+  userCode: 'U-CKxc5NQQ',
+  hasMemory: true,
+  intentAnchor: 'SUN',
+  depthStage: 'C1',
+  qPrimary: 'Q2',
+  selfAcceptance: 0.518,
+  phase: 'Inner',
+  intentLayer: null,
+  yLevel: 2,
+  hLevel: 1,
+  spinLoop: 'SRI',
+  spinStep: 0,
+  descentGate: 'closed',
+  itxStep: null,
+  itxAnchorEventType: 'confirm',
+  itxReason: 'IT_TRIGGER_OK',
+  itxLastAt: '2026-01-09T08:06:57.946+00:00',
+  sentimentLevel: null,
+  situationSummary: '今の自分が、どこに立っているのか分からなくなってきました。',
+  situationTopic: 'その他・ライフ全般',
+  qCounts: { it_cooldown: 0, it_triggered: true, it_triggered_true: true }
+}
+[IROS/_impl/rephrase.ts][USERCTX_KEYS] {
+  hasTurns: true,
+  turnsLen: 12,
+  hasCtxPack: true,
+  ctxPackKeys: [
+    'turns',
+    'historyForWriter',
+    'slotPlanPolicy',
+    'itxStep',
+    'itxReason',
+    'intentBand',
+    'tLayerHint',
+    'tLayerModeActive',
+    'topicDigest',
+    'replyGoal',
+    'repeatSignal',
+    'historyDigestV1'
+  ],
+  conversationId: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  userCode: 'U-CKxc5NQQ'
+}
+[IROS/REPHRASE_FLAG] { raw: 'true', enabled: true }
+[IROS/rephraseEngine][SHIFT_SLOT_HEAD] {
+  hasShiftSlot: true,
+  shiftSlotKey: 'SHIFT',
+  shiftSlotKind: '',
+  shiftSlotLen: 711,
+  shiftSlotHead: '@SHIFT {"kind":"t_concretize","intent":"implement_next_step","rules":{"no_definition":false,"no_naming":false,"no_conclusion":false,"no_future_instruction":true,"no_lecture":true,"questions_max":1,"no_checklist":true,"li',
+  slotsKeysSample: [
+    { key: 'OBS', kind: '' },
+    { key: 'SHIFT', kind: '' },
+    { key: 'NEXT', kind: '' }
+  ]
+}
+[IROS/rephraseHistory][LAST_TURNS_PICK] {
+  pickedFrom: 'turns',
+  maxMsgs: 6,
+  rawTurnsLen: 12,
+  rawHistoryForWriterLen: 12,
+  normalizedLen: 12,
+  pickedLen: 6,
+  roles: [ 'assistant', 'user', 'assistant', 'user', 'assistant', 'user' ],
+  tailHeads: [
+    'このまま何もしないのも違う気がして、少し焦ります。',
+    '何もしないままではいられない、そんな焦りが胸に響いていますね。\nまずは、目の前の一つのことに集中し、手を動かしてみてくだ',
+    '今の自分が、どこに立っているのか分からなくなってきました。'
+  ]
+}
+[IROS/ILINE][LOCK_PARTS] {
+  seedLen: 217,
+  userLen: 29,
+  seedEqUser: false,
+  seedHasUser: true,
+  lockPartsLen: 1,
+  lockHasNewline: true,
+  lockLen: 217,
+  lockHead120: '状況：今の自分が、どこに立っているのか分からなくなってきました。\n' +
+    '出力ルール：ACKで終わらない／一般論で終わらない／ラベル（次の一手：・結論：・ポイント：など）を使わない\n' +
+    '形式：2〜3行。質問は最大1つまで。チェックリスト禁止。箇条書き禁'
+}
+[IROS/ILINE][LOCK_SOURCE] {
+  hasSeed: true,
+  hasUser: true,
+  seedLen: 217,
+  userLen: 29,
+  hasILINE_seed: false,
+  hasILINE_user: false,
+  hasILINE_any: false,
+  hasILINE_END_any: false,
+  head200: '状況：今の自分が、どこに立っているのか分からなくなってきました。\n' +
+    '出力ルール：ACKで終わらない／一般論で終わらない／ラベル（次の一手：・結論：・ポイント：など）を使わない\n' +
+    '形式：2〜3行。質問は最大1つまで。チェックリスト禁止。箇条書き禁止。\n' +
+    '最終行：状況に合わせた“具体の一手”を自然文で1つだけ（複数案/列挙/手順化はしない）。\n' +
+    '禁止：時間/タイマー/姿勢/習慣の指示。禁止語：選びました／視点',
+  tail200: 'のか分からなくなってきました。\n' +
+    '出力ルール：ACKで終わらない／一般論で終わらない／ラベル（次の一手：・結論：・ポイント：など）を使わない\n' +
+    '形式：2〜3行。質問は最大1つまで。チェックリスト禁止。箇条書き禁止。\n' +
+    '最終行：状況に合わせた“具体の一手”を自然文で1つだけ（複数案/列挙/手順化はしない）。\n' +
+    '禁止：時間/タイマー/姿勢/習慣の指示。禁止語：選びました／視点を変えることで／次の一手：／結論：'
+}
+[IROS/ILINE][LOCK_EXTRACT] { lockedFromAllLen: 0, lockedUniqueLen: 0, lockedUniqueHead200: '' }
+[IROS/rephraseEngine][LANE_DETECT] {
+  killPolicyRev: 'phase1.5-ideaBandNoKill',
+  wantsTConcretize: true,
+  wantsIdeaBand: false,
+  repeatSignalSame: false,
+  repeatSignalHead: '',
+  shiftTextForModeHead: '@SHIFT {"kind":"t_concretize","intent":"implement_next_step","rules":{"no_definition":false,"no_naming":false,"no_conclu',
+  shiftSlotType: 'object',
+  shiftSlotKeys: [ 'key', 'text' ],
+  laneHintHead: '@SHIFT {"kind":"t_concretize","intent":"implement_next_step","rules":{"no_definition":false,"no_naming":false,"no_conclusion":false,"no_future_instruction":true'
+}
+[IROS/systemPrompt][CALLED] {
+  __file: '/ROOT/src/lib/iros/language/rephrase/systemPrompt.ts',
+  directTask: false,
+  itOk: false,
+  personaMode: 'GROUND',
+  intentBand: 'C1',
+  tLayerHint: null,
+  lockedILinesLen: 0
+}
+[IROS/rephraseEngine][STATE_SNAPSHOT_PICKED] {
+  traceId: '28ec3c08-70d9-46cc-aa46-087a7c469e4a',
+  conversationId: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  userCode: 'U-CKxc5NQQ',
+  pickedDepthStage: 'C1',
+  pickedPhase: null,
+  pickedQCode: 'Q2',
+  internalPackHead: 'INTERNAL PACK (DO NOT OUTPUT):\n' +
+    '\n' +
+    'lastTurnsCount=4\n' +
+    'directTask=false\n' +
+    'inputKind=question\n' +
+    'itOk=false\n' +
+    'intentBand=C1\n' +
+    'tLayerHint=(null)\n' +
+    '\n' +
+    'META_HINT (DO NOT OUTPUT):\n' +
+    '{"conversation_id":"e8f6697a-ae46-4e2c-a5db-3640fb7c2d33","slotP'
+}
+[IROS/rephraseEngine][MSG_PACK] {
+  traceId: '28ec3c08-70d9-46cc-aa46-087a7c469e4a',
+  conversationId: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  userCode: 'U-CKxc5NQQ',
+  lastTurns: 4,
+  hasHistoryText: true,
+  historyTextLen: 620,
+  msgCount: 7,
+  roles: [
+    'system',
+    'system',
+    'user',
+    'assistant',
+    'user',
+    'assistant',
+    'user'
+  ],
+  internalPackLen: 3834,
+  internalPackHasHistoryHint: true,
+  seedDraftLen: 217,
+  seedDraftHead: '状況：今の自分が、どこに立っているのか分からなくなってきました。\n' +
+    '出力ルール：ACKで終わらない／一般論で終わらない／ラベル（次の一手：・結論：・ポイント：など）を使わない\n' +
+    '形式：2〜3行。質問は最大1つまで。チェックリスト禁止。箇条書き禁',
+  itOk: false,
+  intentBand: 'C1',
+  tLayerHint: null,
+  directTask: false,
+  directTask_raw: false,
+  inputKind: 'question',
+  inputKindFromMeta: null,
+  inputKindFromCtx: null,
+  lockedILines: 0
+}
+[IROS/LLM][CALL] {
+  callId: '4c4e31e351eb',
+  purpose: 'writer',
+  model: 'gpt-4o',
+  temperature: 0.7,
+  responseFormat: 'text',
+  endpoint: 'https://api.openai.com/v1/chat/completions',
+  traceId: '28ec3c08-70d9-46cc-aa46-087a7c469e4a',
+  conversationId: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  userCode: 'U-CKxc5NQQ',
+  slotPlanPolicy: 'FINAL',
+  mode: 'rephrase',
+  qCode: 'Q2',
+  depthStage: 'C1',
+  msgCount: 7,
+  firstRole: 'system',
+  lastRole: 'user',
+  firstHead: '【上位人格定義：Sofia（DO NOT OUTPUT / 露出禁止）】 あなたは「Sofia」――存在の奥深くと響き合…',
+  lastTail: '…/手順化はしない）。 禁止：時間/タイマー/姿勢/習慣の指示。禁止語：選びました／視点を変えることで／次の一手：／結論：',
+  lastUserHead: '状況：今の自分が、どこに立っているのか分からなくなってきました。 出力ルール：ACKで終わらない／一般論で終わらない／ラベル（次の一手：・結論：・ポイント：など…',
+  hasDigest: true,
+  hasAnchor: true,
+  roles: [
+    'system',
+    'system',
+    'user',
+    'assistant',
+    'user',
+    'assistant',
+    'user'
+  ],
+  caller: 'at callWriterLLM (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_iros_language_b3ae611b._.js:1109:175)',
+  bodyKeys: [ 'max_tokens', 'messages', 'model', 'temperature' ],
+  extraBodyKeys: [],
+  extraBodyRawKeys: [],
+  hasInternalKeys: false
+}
+[IROS/LLM][OK] {
+  callId: '4c4e31e351eb',
+  purpose: 'writer',
+  model: 'gpt-4o',
+  ms: 1587,
+  ok: true,
+  usage: {
+    prompt_tokens: 4290,
+    completion_tokens: 51,
+    total_tokens: 4341,
+    prompt_tokens_details: { cached_tokens: 1024, audio_tokens: 0 },
+    completion_tokens_details: {
+      reasoning_tokens: 0,
+      audio_tokens: 0,
+      accepted_prediction_tokens: 0,
+      rejected_prediction_tokens: 0
+    }
+  },
+  traceId: '28ec3c08-70d9-46cc-aa46-087a7c469e4a',
+  conversationId: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  userCode: 'U-CKxc5NQQ',
+  outLen: 64,
+  outHead: '今の自分がどこに立っているのか、見えなくなっているようです。\nその不安を紙に書き出し、心の中の地図を少しずつ描いてみてください。'
+}
+[IROS/rephraseEngine][OK] {
+  traceId: '28ec3c08-70d9-46cc-aa46-087a7c469e4a',
+  conversationId: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  userCode: 'U-CKxc5NQQ',
+  mode: 'LLM',
+  keys: [ 'OBS', 'SHIFT', 'NEXT' ],
+  rawLen: 64,
+  rawHead: '今の自分がどこに立っているのか、見えなくなっているようです。\nその不安を紙に書き出し、心の中の地図を少しずつ描いてみてください。'
+}
+[IROS/FLAGSHIP_GUARD][DEBUG_IN] {
+  rev: 'guard-rev-2026-01-28-b',
+  inputLen: 64,
+  inputHead: '今の自分がどこに立っているのか、見えなくなっているようです。\nその不安を紙に書き出し、心の中の地図を少しずつ描いてみてください。',
+  slotKeys: [ 'OBS', 'SHIFT', 'NEXT' ]
+}
+[IROS/FLAGSHIP_GUARD][DEBUG_SCORE] {
+  rev: 'guard-rev-2026-01-28-b',
+  normalLite: true,
+  scaffoldLike: false,
+  len: 64,
+  qCount: 0,
+  qCountMark: 0,
+  cheer: 1,
+  hedge: 0,
+  generic: 0,
+  blandPressure: 1,
+  bulletLike: 0,
+  hasFlagshipSign: false
+}
+[IROS/FLAGSHIP][VERDICT] {
+  traceId: '28ec3c08-70d9-46cc-aa46-087a7c469e4a',
+  conversationId: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  userCode: 'U-CKxc5NQQ',
+  level: 'OK',
+  ok: true,
+  qCount: 0,
+  score: {
+    fatal: 0,
+    warn: 0,
+    qCount: 0,
+    bulletLike: 0,
+    hedge: 0,
+    cheer: 1,
+    generic: 0,
+    runaway: 0,
+    exaggeration: 0,
+    mismatch: 0,
+    retrySame: 0
+  },
+  reasons: [],
+  head: '今の自分がどこに立っているのか、見えなくなっているようです。\nその不安を紙に書き出し、心の中の地図を少しずつ描いてみてください。'
+}
+[IROS/rephraseEngine][MIN_OK_KIND] {
+  inputKindNow: 'question',
+  isMicroOrGreetingNow: false,
+  shortReplyOk: false,
+  MIN_OK_LEN: 24,
+  reason: 't_concretize_24',
+  shiftTextHead: '@SHIFT {"kind":"t_concretize","intent":"implement_next_step","rules":{"no_definition":false,"no_naming":false,"no_conclusion":false,"no_futu',
+  shiftObjHasAllow: true,
+  isTConcretize: true,
+  isIdeaBand: false,
+  shiftKind: 't_concretize'
+}
+[IROS/rephraseEngine][AFTER_ATTACH] {
+  traceId: '28ec3c08-70d9-46cc-aa46-087a7c469e4a',
+  conversationId: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  userCode: 'U-CKxc5NQQ',
+  mode: 'FLAGSHIP_OK_NO_RETRY',
+  renderEngine: true,
+  outKeysLen: 3,
+  rephraseBlocksLen: 2,
+  rephraseHead: '今の自分がどこに立っているのか、見えなくなっているようです。\nその不安を紙に書き出し、心の中の地図を少しずつ描いてみてください。'
+}
+[IROS/rephraseAttach][RES_KEYS] {
+  resKeys: [ 'ok', 'slots', 'meta' ],
+  metaKeys: [ 'inKeys', 'outKeys', 'rawLen', 'rawHead', 'note', 'extra' ],
+  outKeys: [],
+  metaOutKeys: []
+}
+[IROS/rephraseAttach][OK] {
+  conversationId: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  userCode: 'U-CKxc5NQQ',
+  blocksLen: 2,
+  head: '今の自分がどこに立っているのか、見えなくなっているようです。'
+}
+[IROS/CONV_EVIDENCE] {
+  conversationId: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  userCode: 'U-CKxc5NQQ',
+  understand: 0,
+  repair: 0,
+  advance: 1,
+  proof: 1,
+  reason: 'U!:no_ctx_summary | R!:no_repair | A:shift:t_concretize',
+  head: '今の自分が、どこに立っているのか分からなくなってきました。',
+  detail: {
+    branch: null,
+    topicHint: null,
+    q: null,
+    depth: null,
+    phase: null,
+    slotsLen: 3
+  }
+}
+[IROS/renderGW][META_PICKED_FIX] {
+  rev: 'phase11-open-close-v2-LOADED',
+  pickedFrom: 'rephraseBlocks',
+  pickedLen_raw: 29,
+  pickedHead_raw: '今の自分が、どこに立っているのか分からなくなってきました。',
+  pickedLen_meta: 64,
+  pickedHead_meta: '今の自分がどこに立っているのか、見えなくなっているようです。 その不安を紙に書き…',
+  outLen: 64,
+  outHead: '今の自分がどこに立っているのか、見えなくなっているようです。 その不安を紙に書き…'
+}
+[IROS/renderGateway][LEN_TRACE] {
+  rev: 'phase11-open-close-v2-LOADED',
+  len_before: 64,
+  head_before: '今の自分がどこに立っているのか、見えなくなっているようです。 その不安を紙に書き…'
+}
+[IROS/renderGateway][HAS_REPHRASE_BLOCKS] {
+  rev: 'phase11-open-close-v2-LOADED',
+  rephraseBlocksLen: 2,
+  outLen: 64
+}
+[IROS/renderGateway][OK] {"rev":"phase11-open-close-v2-LOADED","outLen":64,"pickedFrom":"rephraseBlocks","slotPlanPolicy":"FINAL","usedSlots":false,"scaffoldApplied":false,"expandAllowed":true}
+[IROS/renderGateway][REV] {"rev":"phase11-open-close-v2-LOADED"}
+[IROS/PERSIST_PICK] {
+  conversationId: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  userCode: 'U-CKxc5NQQ',
+  pickedFrom: 'resultObjFinalRaw',
+  pickedLen: 64,
+  pickedHead: '今の自分がどこに立っているのか、見えなくなっているようです。\nその不安を紙に書き',
+  fromResultObjLen: 64,
+  blocksJoinedCleanedLen: 64,
+  fromMetaLen: 29,
+  userEchoLen: 29,
+  isPickedDots: false
+}
+[IROS][Training] computed targetKind = uncover
+[IROS][Training] insert sample {
+  user_code: 'U-CKxc5NQQ',
+  conversation_id: 'e8f6697a-ae46-4e2c-a5db-3640fb7c2d33',
+  message_id: null,
+  input_text: '今の自分が、どこに立っているのか分からなくなってきました。',
+  analysis_text: 'Q:Q2 / D:C1 / P:Inner / K:uncover / T:その他・ライフ全般',
+  q_code: 'Q2',
+  depth_stage: 'C1',
+  phase: 'Inner',
+  self_acceptance: 0.518,
+  situation_summary: '今の自分が、どこに立っているのか分からなくなってきました。',
+  situation_topic: 'その他・ライフ全般',
+  target_kind: 'uncover',
+  target_label: null,
+  y_level: 2,
+  h_level: 1
+}
+[IROS][Training] insert ok
+ POST /api/agent/iros/reply 200 in 4.1s (compile: 383ms, render: 3.7s)
+[authz] b6027e24-f325-418d-a5e0-1d1ebf5f5a79 start { path: 'http://localhost:3000/api/agent/iros/conversations' }
+[authz][debug] header { authzLen: 935, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] b6027e24-f325-418d-a5e0-1d1ebf5f5a79 verify firebase: 251.01ms
+[authz] b6027e24-f325-418d-a5e0-1d1ebf5f5a79 fetch user: 29.326ms
+[authz] b6027e24-f325-418d-a5e0-1d1ebf5f5a79 ok { user: 'U-CKxc5NQQ', role: 'other', provider: 'password', ms: 286 }
+ GET /api/agent/iros/conversations 200 in 346ms (compile: 6ms, render: 340ms)

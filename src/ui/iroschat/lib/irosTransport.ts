@@ -393,12 +393,15 @@ export async function reply(params: {
   model?: string; // 任意
 }): Promise<any> {
   // ✅ URL の cid を最優先で拾う（リロード後に別CIDへ飛ばさない）
+  // - ここで拾うのは「uuid(=conversationId)」のみ
+  // - conversation_id は “互換入力名” としてサーバ側で読むことはあっても、
+  //   URLやUIでは使わない（外部キー/uuid の混線を防ぐ）
   const cid =
     params.conversationId ||
     (() => {
       if (typeof window === 'undefined') return '';
       const sp = new URLSearchParams(window.location.search);
-      return sp.get('cid') || sp.get('conversationId') || sp.get('conversation_id') || '';
+      return sp.get('cid') || sp.get('conversationId') || '';
     })() ||
     getCidFromLocation();
 
@@ -424,8 +427,7 @@ export async function reply(params: {
     : undefined;
 
   const payload: any = {
-    conversationId: cid,
-    conversation_id: cid, // ✅ 互換用
+    conversationId: cid, // ✅ UIはこれだけ送る（uuid）
     text,
     modeHint: params.mode,
     extra: {
@@ -434,6 +436,7 @@ export async function reply(params: {
     },
     ...(history && history.length > 0 ? { history } : {}),
   };
+
 
   const userCodeFromUrl =
     typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('user_code') : null;

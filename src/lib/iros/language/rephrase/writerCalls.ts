@@ -57,15 +57,24 @@ export function buildFirstPassMessages(args: {
   // 直近ターン（会話の流れ）
   out.push(...turns);
 
-  // ✅ 最後を user で終わらせる
+  // ✅ 最後を user で終わらせる（ただし user,user 連投は絶対に作らない）
   if (finalUserText) {
     const last = out[out.length - 1];
-    const sameAsLastUser = last?.role === 'user' && norm(last?.content) === finalUserText;
-    if (!sameAsLastUser) out.push({ role: 'user', content: finalUserText });
+
+    // 末尾が user なら “追加(push)” ではなく “置き換え” にする
+    if (last?.role === 'user') {
+      const lastNorm = norm(last?.content);
+      if (lastNorm !== finalUserText) {
+        (out[out.length - 1] as WriterMessage).content = finalUserText;
+      }
+    } else {
+      out.push({ role: 'user', content: finalUserText });
+    }
   }
 
   return out;
 }
+
 
 /**
  * ✅ retry/repair: system + turns + (internalPack as user) + repair-instruction + userText

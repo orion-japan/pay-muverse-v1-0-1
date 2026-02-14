@@ -15,7 +15,7 @@ import { updateQTrace, type QTrace } from './orchestratorCore';
 import { computeYH } from './analysis/computeYH';
 import { applyDepthContinuity, applyQContinuity } from './depthContinuity';
 
-// ★ 追加：Polarity & Stability 計算
+// ★ Polarity & Stability
 import {
   computePolarityAndStability,
   type PolarityBand,
@@ -38,7 +38,7 @@ export type OrchestratorAnalysisResult = {
   depth: Depth | undefined;
   qCode: QCode | undefined;
 
-  // ✅ 追加：Phase（Inner/Outer）を返す
+  // ✅ Phase（Inner/Outer）
   phase: 'Inner' | 'Outer' | null;
 
   unified: UnifiedLikeAnalysis;
@@ -58,7 +58,7 @@ export type OrchestratorAnalysisResult = {
   hasFutureMemory: boolean | null;
   tLayerModeActive: boolean;
 
-  // ✅ 追加：I層に入った理由（デバッグ用）
+  // ✅ I層に入った理由（デバッグ用）
   iEnterReasons: string[] | null;
   iEnterEvidence: {
     from: Depth | null;
@@ -129,7 +129,7 @@ export async function runOrchestratorAnalysis(args: {
   if (unifiedPhaseRaw === 'Inner' || unifiedPhaseRaw === 'Outer') {
     phase = unifiedPhaseRaw;
   } else {
-    // ✅ 追加：そのターンのテキストから推定（推定できないときだけ fallback）
+    // テキストから推定 → memory → baseMeta の順
     const inferred = inferPhaseFromText(text);
     if (inferred) {
       phase = inferred;
@@ -224,7 +224,6 @@ export async function runOrchestratorAnalysis(args: {
 
   // ✅ 明示Qがある場合：continuityは通さず、そのまま最終確定
   // ✅ 明示Qがない場合：continuityで「戻し/維持」を決める
-  //    scanQには「候補」を渡す（ここが “前回に張り付く” を緩和する本線）
   const qFinal: QCode | null = explicitQ
     ? explicitQ
     : (applyQContinuity({
@@ -301,13 +300,11 @@ export async function runOrchestratorAnalysis(args: {
 
   /* =========================================================
      Intent Anchor（意図アンカー）の暫定導出
-     - ここは「覚えてる？」の直接修正ではない
-     - ただし、会話の “軸” を meta / state に残すための材料を作る
   ========================================================= */
   let intentAnchor:
     | {
         text: string;
-        fixed?: boolean; // ✅ container が見るので保持する
+        fixed?: boolean;
         strength?: number | null;
         y_level?: number | null;
         h_level?: number | null;
@@ -327,7 +324,7 @@ export async function runOrchestratorAnalysis(args: {
   ) {
     intentAnchor = {
       text: baseAnchor.text.trim(),
-      fixed: (baseAnchor as any).fixed === true, // ✅ ここが重要
+      fixed: (baseAnchor as any).fixed === true,
       strength:
         typeof baseAnchor.strength === 'number'
           ? baseAnchor.strength
@@ -347,7 +344,7 @@ export async function runOrchestratorAnalysis(args: {
       if (anchorText.length > 0) {
         intentAnchor = {
           text: anchorText,
-          fixed: false, // ✅ 暫定導出は固定しない
+          fixed: false,
           strength: selfAcceptanceLine,
           y_level: yLevel,
           h_level: hLevel,
@@ -412,108 +409,96 @@ export async function runOrchestratorAnalysis(args: {
   });
 
   if (futureDirectionActive) {
-    if (!tLayerHint) {
-      tLayerHint = 'T2';
-    }
-    if (hasFutureMemory === null) {
-      hasFutureMemory = true;
-    }
+    if (!tLayerHint) tLayerHint = 'T2';
+    if (hasFutureMemory === null) hasFutureMemory = true;
   }
 
-// =========================================================
-// ✅ I層への遷移ゲート（候補判定：intentLine は “strong” のみ採用）
-// =========================================================
+  // =========================================================
+  // ✅ I層への遷移ゲート（候補判定：intentLine は “strong” のみ採用）
+  // =========================================================
+  const hasIntentLineStrong =
+    !!intentLine &&
+    (
+      (intentLine as any).hasFutureMemory === true ||
+      !!(intentLine as any).tLayerHint ||
+      !!(intentLine as any).coreNeed ||
+      (typeof (intentLine as any).nowLabel === 'string' &&
+        String((intentLine as any).nowLabel).trim().length > 0)
+    );
 
-// intentLine が “空っぽオブジェクト” でも true にならないようにする
-const hasIntentLineStrong =
-  !!intentLine &&
-  (
-    // 未来メモリ/ヒントがある
-    (intentLine as any).hasFutureMemory === true ||
-    !!(intentLine as any).tLayerHint ||
-    // coreNeed が立っている（ITの前提に寄せる）
-    !!(intentLine as any).coreNeed ||
-    // nowLabel が空文字ではない
-    (typeof (intentLine as any).nowLabel === 'string' &&
-      String((intentLine as any).nowLabel).trim().length > 0)
-  );
+  const shouldEnterI =
+    !(depth && String(depth).startsWith('I')) &&
+    (irTriggered ||
+      hasIntentLineStrong ||
+      futureDirectionActive === true ||
+      !!tLayerHint ||
+      hasFutureMemory === true);
 
-const shouldEnterI =
-  !(depth && String(depth).startsWith('I')) &&
-  (irTriggered ||
-    hasIntentLineStrong ||
-    futureDirectionActive === true ||
-    !!tLayerHint ||
-    hasFutureMemory === true);
+  // ✅ analysis は depth を書き換えない（候補だけ）
+  const iCandidateDepth: Depth | null = shouldEnterI ? 'I1' : null;
+  const finalDepth: Depth | undefined = depth;
 
-// ✅ analysis は depth を書き換えない（候補だけ）
-const iCandidateDepth: Depth | null = shouldEnterI ? 'I1' : null;
-const finalDepth: Depth | undefined = depth;
+  // =========================================================
+  // ✅ I層に入った理由（デバッグ用）
+  // =========================================================
+  const iEnterReasons: string[] | null = shouldEnterI ? [] : null;
 
-// =========================================================
-// ✅ I層に入った理由（デバッグ用）※ここで1回だけ作る
-// =========================================================
-const iEnterReasons: string[] | null = shouldEnterI ? [] : null;
+  if (iEnterReasons) {
+    if (irTriggered) iEnterReasons.push('irTriggered');
+    if (hasIntentLineStrong) iEnterReasons.push('intentLineStrong');
+    if (futureDirectionActive === true) iEnterReasons.push('futureDirectionActive');
+    if (!!tLayerHint) iEnterReasons.push('tLayerHint');
+    if (hasFutureMemory === true) iEnterReasons.push('hasFutureMemory');
+    if (iEnterReasons.length === 0) iEnterReasons.push('unknown');
+  }
 
-if (iEnterReasons) {
-  if (irTriggered) iEnterReasons.push('irTriggered');
-  if (hasIntentLineStrong) iEnterReasons.push('intentLineStrong');
-  if (futureDirectionActive === true) iEnterReasons.push('futureDirectionActive');
-  if (!!tLayerHint) iEnterReasons.push('tLayerHint');
-  if (hasFutureMemory === true) iEnterReasons.push('hasFutureMemory');
-  if (iEnterReasons.length === 0) iEnterReasons.push('unknown');
-}
+  const iEnterEvidence = shouldEnterI
+    ? {
+        from: depth ?? null,
+        to: iCandidateDepth,
+        phase,
+        irTriggered,
+        futureDirectionActive,
+        tLayerHint,
+        hasFutureMemory,
+        hasIntentLine: hasIntentLineStrong,
+      }
+    : null;
 
-const iEnterEvidence = shouldEnterI
-  ? {
+  if (iCandidateDepth) {
+    console.log('[IROS][I-GATE][candidate]', {
       from: depth ?? null,
-      to: iCandidateDepth, // ✅ 候補
+      to: iCandidateDepth,
       phase,
       irTriggered,
       futureDirectionActive,
       tLayerHint,
       hasFutureMemory,
-      hasIntentLine: hasIntentLineStrong, // ✅ strong に差し替え
-    }
-  : null;
+      hasIntentLine: hasIntentLineStrong,
+    });
+  }
 
-if (iCandidateDepth) {
-  console.log('[IROS][I-GATE][candidate]', {
-    from: depth ?? null,
-    to: iCandidateDepth,
+  return {
+    depth: finalDepth,
+    qCode,
     phase,
+    unified: fixedUnified,
+    selfAcceptanceLine,
+    qTrace,
+    yLevel,
+    hLevel,
+    polarityScore,
+    polarityBand,
+    stabilityBand,
     irTriggered,
-    futureDirectionActive,
+    pierceDecision,
+    intentLine,
     tLayerHint,
     hasFutureMemory,
-    hasIntentLine: hasIntentLineStrong,
-  });
-}
-
-
-return {
-  depth: finalDepth,
-  qCode,
-  phase,
-  unified: fixedUnified,
-  selfAcceptanceLine,
-  qTrace,
-  yLevel,
-  hLevel,
-  polarityScore,
-  polarityBand,
-  stabilityBand,
-  irTriggered,
-  pierceDecision,
-  intentLine,
-  tLayerHint,
-  hasFutureMemory,
-  tLayerModeActive: futureDirectionActive,
-
-  // ✅ 追加した2つ（ここで返す）
-  iEnterReasons,
-  iEnterEvidence,
-};
+    tLayerModeActive: futureDirectionActive,
+    iEnterReasons,
+    iEnterEvidence,
+  };
 }
 
 /* ========= ローカルヘルパー ========= */
@@ -538,22 +523,11 @@ function normalizeQCode(qCode?: unknown): QCode | null {
 
 /**
  * ユーザーが先頭/文中で「Q1〜Q5」を“状態宣言”として明示した場合に拾う
- * 例:
- * - "Q3 心配です"
- * - "今Q1っぽい"
- * - "（Q2）"
- * - "Q5状態で…"
- * - "これはQ3の状態だ"
- *
- * ✅ 方針：
- * - 「設計・説明文脈」は explicit 扱いしない（例: "RならQ2でいい", "Q1に倒したい"）
- * - “宣言っぽい形”だけ拾う（今/現在/状態/っぽい/です/だ/（Q2）など）
  */
 function pickExplicitQCode(text: string): QCode | null {
   const s = String(text || '');
   if (!s) return null;
 
-  // 正規化（全角Q/数字→半角、連続空白→単一化）
   const normalized = s
     .replace(/[Ｑ]/g, 'Q')
     .replace(/[０-９]/g, (d) => String('０１２３４５６７８９'.indexOf(d)))
@@ -562,7 +536,6 @@ function pickExplicitQCode(text: string): QCode | null {
 
   const compact = normalized.replace(/\s+/g, '');
 
-  // ❌ 先に“設計・説明”っぽい文脈を除外（ここに引っかかったら explicit としては扱わない）
   if (
     /ならQ[1-5]/.test(compact) ||
     /Q[1-5]で(?:いい|OK|よい)/.test(compact) ||
@@ -578,8 +551,7 @@ function pickExplicitQCode(text: string): QCode | null {
 
   if (!m) return null;
 
-  const q = `Q${m[1]}` as QCode;
-  return q;
+  return `Q${m[1]}` as QCode;
 }
 
 /**
@@ -612,50 +584,41 @@ function proposeQFromSignals(args: {
     requestedQCode,
   } = args;
 
-  // 0) 初回のみ：明示指定があれば採用（以後は固定化原因になるので使わない）
   if (isFirstTurn && requestedQCode) return requestedQCode;
 
-  // 0.5) unified でQが明確なら “候補” として採用（最終決定は stabilize/continuity）
   if (unifiedQ && unifiedQ !== lastQ) return unifiedQ;
 
-  // 1) SA変化（落差/上昇）は “軸変換の圧” として強い
   const deltaSA =
     typeof selfAcceptance === 'number' && typeof lastSelfAcceptance === 'number'
       ? selfAcceptance - lastSelfAcceptance
       : 0;
 
-  // 2) 揺れ（Y）
   const y = typeof yLevel === 'number' ? yLevel : 0;
 
-  // 3) I層/ir
   const isI = depth === 'I1' || depth === 'I2' || depth === 'I3';
   if (irTriggered || isI) {
     if (deltaSA <= -0.03 || y >= 2) return 'Q3';
     return 'Q1';
   }
 
-  // 4) C寄り
   const isC = depth === 'C1' || depth === 'C2' || depth === 'C3';
   if (isC) {
     if (deltaSA >= 0.03) return 'Q5';
     return 'Q2';
   }
 
-  // 5) R寄り
   const isR = depth === 'R1' || depth === 'R2' || depth === 'R3';
   if (isR) {
     if (y >= 2) return 'Q3';
     return 'Q2';
   }
 
-  // 6) S寄り
   const isS = depth === 'S1' || depth === 'S2' || depth === 'S3';
   if (isS) {
     if (y >= 2 || deltaSA <= -0.03) return 'Q3';
     return 'Q1';
   }
 
-  // 7) phaseしか材料がない場合
   if (phase === 'Inner') {
     if (y >= 2 || deltaSA <= -0.03) return 'Q3';
     return 'Q1';
@@ -665,7 +628,6 @@ function proposeQFromSignals(args: {
     return lastQ ?? null;
   }
 
-  // 8) 何も決め手がない：前回を維持
   return lastQ ?? null;
 }
 
@@ -695,7 +657,7 @@ function stabilizeQ(args: {
 
   const strength = Math.max(Math.min(1, deltaSA * 10), Math.min(1, y / 3));
 
-  if (strength >= 0.40) return candidate;
+  if (strength >= 0.4) return candidate;
   return lastQ;
 }
 
@@ -734,9 +696,7 @@ function detectFutureDirectionMode(args: {
     return true;
   }
 
-  if (irTriggered) {
-    return true;
-  }
+  if (irTriggered) return true;
 
   return false;
 }

@@ -27,7 +27,6 @@ export function applyIntentBridge(args: {
   hasCore?: boolean;
   declarationOk?: boolean;
 }): IntentBridgeResult {
-
   const text = normalizeJapanese(args.userText);
   const hasCore = args.hasCore === true;
   const declarationOk = args.declarationOk === true;
@@ -37,6 +36,7 @@ export function applyIntentBridge(args: {
   // ------------------------------------------------
   const laneKeyBase: LaneKey = decideLaneKey({
     userText: text,
+    lastAssistantText: safeStr(args.lastAssistantText),
     hasCore,
     declarationOk,
   });
@@ -56,9 +56,7 @@ export function applyIntentBridge(args: {
     laneKey: hasFocus ? 'T_CONCRETIZE' : laneKeyBase,
   };
 
-  if (hasFocus) {
-    out.focusLabel = focusLabel;
-  }
+  if (hasFocus) out.focusLabel = focusLabel;
 
   if (shouldDebug()) {
     console.log('[IROS/IntentBridge]', {
@@ -66,7 +64,6 @@ export function applyIntentBridge(args: {
       hasFocus,
     });
   }
-
 
   return out;
 }
@@ -77,12 +74,32 @@ export function applyIntentBridge(args: {
 
 export function decideLaneKey(args: {
   userText: string;
+  lastAssistantText?: string;
   hasCore: boolean;
   declarationOk: boolean;
 }): LaneKey {
   const t = normalizeJapanese(args.userText);
+  const last = normalizeJapanese(args.lastAssistantText ?? '');
 
-  // ✅ ここだけIDEA_BAND（=候補列挙契約を当てたい要求）
+  // ------------------------------------------------
+  // ✅ A) 直前に「候補を出しますか？」と聞かれていて、ユーザーが肯定した
+  // → “候補要求を明示した” と同義に扱って IDEA_BAND
+  // ------------------------------------------------
+  const lastAskedCandidates =
+    /(候補|選択肢|オプション|案).*(出|並|挙)/.test(last) &&
+    /(出しますか|出せますか|出そうか|出しましょうか|候補を出しますか|候補出しますか)/.test(last);
+
+  const userAccepted =
+    /^(はい|うん|ok|ＯＫ|お願いします|お願い|それで|じゃそれ|出して|出して下さい|出してください|候補出して|案出して)$/i.test(
+      t,
+    ) ||
+    /(候補|案|選択肢).*(出して|ください|お願い)/.test(t);
+
+  if (lastAskedCandidates && userAccepted) return 'IDEA_BAND';
+
+  // ------------------------------------------------
+  // ✅ B) 明示的な候補要求だけ IDEA_BAND
+  // ------------------------------------------------
   // 「候補を4つ」「選択肢」「どれがいい？」「案を出して」「一行ずつ」など
   const wantsCandidates =
     /(候補|選択肢|オプション|案を|案が|並べて|一覧|リスト|一行ずつ|1行ずつ|どれ|どっち|どちら|どの|何を(優先|先|すべき)|優先するべき|おすすめ)/.test(
@@ -92,8 +109,9 @@ export function decideLaneKey(args: {
 
   if (wantsCandidates) return 'IDEA_BAND';
 
-  // ✅ それ以外は T_CONCRETIZE に倒す（IDEA_BAND契約の誤爆を避ける）
-  // hasCore / declarationOk が立ってるならなおさら T へ寄せる
+  // ------------------------------------------------
+  // ✅ C) それ以外は T_CONCRETIZE（IDEA_BAND誤爆を避ける）
+  // ------------------------------------------------
   if (args.hasCore || args.declarationOk) return 'T_CONCRETIZE';
 
   return 'T_CONCRETIZE';
@@ -107,7 +125,6 @@ function pickFocusLabelFromSelection(args: {
   userText: string;
   lastAssistantText: string;
 }): string | undefined {
-
   const t = normalizeJapanese(args.userText);
   if (!t) return undefined;
 
@@ -120,7 +137,6 @@ function pickFocusLabelFromSelection(args: {
     );
 
   const num = extractSelectionNumber(t);
-
   const candidates = parseCandidatesFromAssistant(args.lastAssistantText);
 
   if (candidates.length === 0) {
@@ -150,7 +166,6 @@ function pickFocusLabelFromSelection(args: {
 ----------------------------- */
 
 function extractSelectionNumber(t: string): number | undefined {
-
   const circled: Record<string, number> = {
     '①': 1, '②': 2, '③': 3, '④': 4, '⑤': 5,
     '⑥': 6, '⑦': 7, '⑧': 8, '⑨': 9,
@@ -158,11 +173,11 @@ function extractSelectionNumber(t: string): number | undefined {
   if (t in circled) return circled[t];
 
   const z2h: Record<string, string> = {
-    '１':'1','２':'2','３':'3','４':'4','５':'5',
-    '６':'6','７':'7','８':'8','９':'9',
+    '１': '1', '２': '2', '３': '3', '４': '4', '５': '5',
+    '６': '6', '７': '7', '８': '8', '９': '9',
   };
 
-  const tt = t.replace(/[１２３４５６７８９]/g, m => z2h[m] ?? m);
+  const tt = t.replace(/[１２３４５６７８９]/g, (m) => z2h[m] ?? m);
 
   const m1 = tt.match(/([1-9])\s*(?:つ目|番目|番|つ)/);
   if (m1) return Number(m1[1]);
@@ -180,13 +195,12 @@ function extractSelectionNumber(t: string): number | undefined {
 ----------------------------- */
 
 function parseCandidatesFromAssistant(lastAssistantText: string): string[] {
-
   const raw = normalizeJapanese(lastAssistantText);
   if (!raw) return [];
 
   const lines = raw
     .split('\n')
-    .map(x => x.trim())
+    .map((x) => x.trim())
     .filter(Boolean);
 
   const stripIndex = (s: string) =>
@@ -194,7 +208,7 @@ function parseCandidatesFromAssistant(lastAssistantText: string): string[] {
 
   const cand = lines
     .map(stripIndex)
-    .filter(x => x.length > 0 && x.length <= 120);
+    .filter((x) => x.length > 0 && x.length <= 120);
 
   if (cand.length < 2) return [];
 

@@ -1250,6 +1250,80 @@ pipe('after_renderV2', content);
   content = String(content ?? '').replace(/(\n\s*)+$/g, '').trim();
   pipe('after_trim', content);
 
+    // ✅ NO-ECHO 止血：
+  // - rephraseBlocks がある（= 何か出そうとしている）
+  // - しかし表示可能な本文が無く（NEXT_HINT しかない等）
+  // - その結果 pickedFrom='text' で userText がそのまま本文になってしまう
+  // → このケースは「空ではない」ので RESCUED_EMPTY が動かず、オウムになる。ここで止血する。
+  try {
+    const userText0 =
+      norm(
+        extra?.userText ??
+          extra?.meta?.userText ??
+          extra?.extra?.userText ??
+          extra?.orch?.userText ??
+          '',
+      ) || '';
+
+    const pickedFrom0 = String(pickedFrom ?? '');
+    const content0 = norm(content ?? '');
+
+    const rephraseBlocks0 = (extra as any)?.rephraseBlocks ?? null;
+
+    const hasBlocks = Array.isArray(rephraseBlocks0) && rephraseBlocks0.length > 0;
+
+    // blocks から “見える本文” を作る（NEXT_HINT/内部指示は落とす）
+    let visibleFromBlocks = '';
+    if (hasBlocks) {
+      const joined = rephraseBlocks0
+        .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim())
+        .filter(Boolean)
+        .join('\n');
+
+      visibleFromBlocks = joined;
+      visibleFromBlocks = stripDirectiveLines(visibleFromBlocks);
+      visibleFromBlocks = visibleFromBlocks
+        .split('\n')
+        .map((t: string) => String(t ?? '').trim())
+        .filter((t: string) => t && !t.trimStart().startsWith('@NEXT_HINT'))
+        .join('\n');
+      visibleFromBlocks = sanitizeVisibleText(visibleFromBlocks);
+      visibleFromBlocks = stripLampEverywhere(visibleFromBlocks);
+      visibleFromBlocks = String(visibleFromBlocks ?? '').trim();
+    }
+
+    const looksLikeEcho =
+      pickedFrom0 === 'text' &&
+      userText0.length > 0 &&
+      content0.length > 0 &&
+      content0 === userText0 &&
+      hasBlocks &&
+      visibleFromBlocks === '';
+
+    if (looksLikeEcho) {
+      // userText に倒さず、slotPlanFallback → fallbackText → ACK の順で救出
+      const rescueCandidate =
+        norm(sf0s) ||
+        norm(fallbackText) ||
+        norm(r0s) ||
+        'うん、届きました。';
+
+      content = String(rescueCandidate ?? '').trim();
+      // meta 整合のため、picked/pickedFrom も同期する
+      picked = content;
+      pickedFrom = norm(sf0s) ? 'slotPlanFallback' : norm(fallbackText) ? 'fallbackText' : 'ack';
+
+      console.warn('[IROS/renderGateway][NO_ECHO_FIX]', {
+        rev: IROS_RENDER_GATEWAY_REV,
+        pickedFrom_before: pickedFrom0,
+        userLen: userText0.length,
+        outLen: String(content ?? '').length,
+        outHead: head(String(content ?? '')),
+        blocksLen: hasBlocks ? rephraseBlocks0.length : 0,
+      });
+    }
+  } catch {}
+
 
   // ✅ meta は「実際に採用された見える本文」に合わせる
   // - pickedFrom='rephraseBlocks' のとき、picked/baseText が省略文字や短いダミーになることがある

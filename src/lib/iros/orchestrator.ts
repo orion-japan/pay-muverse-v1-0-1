@@ -698,7 +698,25 @@ const prevActive =
   {
     const historyArr = Array.isArray(history) ? (history as any[]) : [];
 
-    const userHistory = historyArr.filter((m) => {
+    const normHistoryArr: any[] = [];
+    for (const m of historyArr) {
+      const role = String(m?.role ?? '').toLowerCase();
+      const raw = m?.text ?? m?.content ?? null;
+      const txt = typeof raw === 'string' ? raw.replace(/\r\n/g, '\n').trim() : null;
+
+      const last = normHistoryArr.length > 0 ? normHistoryArr[normHistoryArr.length - 1] : null;
+      const lastRole = String(last?.role ?? '').toLowerCase();
+      const lastTextRaw = last?.text ?? last?.content ?? null;
+      const lastTxt =
+        typeof lastTextRaw === 'string' ? lastTextRaw.replace(/\r\n/g, '\n').trim() : null;
+
+      if (role === 'user' && lastRole === 'user' && txt && lastTxt && txt === lastTxt) {
+        continue;
+      }
+
+      normHistoryArr.push(m);
+    }
+    const userHistory = normHistoryArr.filter((m) => {
       const role = String(m?.role ?? '').toLowerCase();
       return role === 'user';
     });
@@ -715,10 +733,10 @@ const prevActive =
         process.env.DEBUG_USER ===
           String((meta as any)?.userCode ?? (meta as any)?.user_code ?? ''))
     ) {
-
       console.log('[IROS/IT][probe] before', {
         textHead: (text || '').slice(0, 80),
         historyLen: historyArr.length,
+        historyLen_norm: normHistoryArr.length, // ✅ 追加：正規化後の長さ
         historyUserLen: userHistory.length,
         last3User,
         depth: meta.depth ?? null,
@@ -728,17 +746,11 @@ const prevActive =
       });
     }
 
-    // =========================================================
-    // ✅ computeITTrigger 呼び出し（既存の const it は 1個だけ）
-    // - meta は「縮めない」：fixedNorth / intentLine / intent_anchor をそのまま渡す
-    // - prevIt は MemoryState が主ソースなので “metaへ詰め直し” はしない
-    // - computeITTrigger 側で camel/snake を吸う（入力側で二重定義しない）
-    // =========================================================
     const it = computeITTrigger({
       text,
-      history: historyArr, // ✅ full（assistant含む）
-      meta, // ✅ そのまま渡す（縮めない）
-      memoryState: (memoryState ?? null) as any, // ✅ 主ソース
+      history: normHistoryArr, // ✅ ここ重要：正規化した history を渡す
+      meta,
+      memoryState: (memoryState ?? null) as any,
     });
 
     console.log('[IROS/IT][result]', {
@@ -1315,145 +1327,212 @@ function detectCounselCommand(raw: unknown): { forced: boolean; strippedText: st
       return consultish && !factish;
     }
 
-    // =========================================================
-    // ✅ Flow Observation（入口エンジン）
-    // - 意味を作らない
-    // - 解釈しない
-    // - 分岐に使わない
-    // - meta に「流れ」だけを置く
-    // =========================================================
+// =========================================================
+// ✅ Flow Observation（入口エンジン）
+// - 意味を作らない
+// - 解釈しない
+// - 分岐に使わない
+// - meta に「流れ」だけを置く
+// =========================================================
 
-    {
-      const historyArr = Array.isArray(history) ? (history as any[]) : [];
+{
+  const historyArr = Array.isArray(history) ? (history as any[]) : [];
 
-      // 直前の user 発話のみ取得（assistant は見ない）
-      const lastUserText = (() => {
-        for (let i = historyArr.length - 1; i >= 0; i--) {
-          const m = historyArr[i];
-          if (String(m?.role ?? '').toLowerCase() === 'user') {
-            const v = m?.text ?? m?.content ?? null;
-            return typeof v === 'string' ? v : null;
-          }
-        }
-        return null;
-      })();
+  // 直前の user 発話のみ取得（assistant は見ない）
+  const lastUserText = (() => {
+    for (let i = historyArr.length - 1; i >= 0; i--) {
+      const m = historyArr[i];
+      if (String(m?.role ?? '').toLowerCase() === 'user') {
+        const v = m?.text ?? m?.content ?? null;
+        return typeof v === 'string' ? v : null;
+      }
+    }
+    return null;
+  })();
 
-      if (typeof text === 'string' && text.trim().length > 0) {
-        const flow = observeFlow({
-          currentText: text,
-          lastUserText,
-        });
+  if (typeof text === 'string' && text.trim().length > 0) {
+    const flow = observeFlow({
+      currentText: text,
+      lastUserText,
+    });
 
-        // 🔑 使わない。判断しない。meta に置くだけ。
-        (meta as any).flow = flow;
+    const deltaNow =
+      typeof flow?.delta === 'string' && flow.delta.trim().length > 0
+        ? flow.delta.trim()
+        : null;
 
-        // 観測ログ（最初は必須）
-        console.log('[IROS/FLOW][observe]', {
-          delta: flow.delta,
-          confidence: flow.confidence,
-          hasLastUserText: Boolean(lastUserText),
-        });
+    const confidenceNow =
+      typeof flow?.confidence === 'number' ? flow.confidence : null;
+
+    // -------------------------------------------------------
+    // 🔁 RETURN連続回数をここで確定（CTXPACK前の正本）
+    // -------------------------------------------------------
+    let prevReturnStreak = 0;
+
+    for (let i = historyArr.length - 1; i >= 0; i--) {
+      const m = historyArr[i];
+
+      const rsRaw =
+        (m as any)?.meta?.extra?.ctxPack?.flow?.returnStreak ??
+        (m as any)?.meta?.ctxPack?.flow?.returnStreak ??
+        (m as any)?.meta?.extra?.flow?.returnStreak ??
+        (m as any)?.meta?.flow?.returnStreak ??
+        null;
+
+      if (typeof rsRaw === 'number' && Number.isFinite(rsRaw)) {
+        prevReturnStreak = rsRaw;
+        break;
+      }
+
+      if (
+        typeof rsRaw === 'string' &&
+        rsRaw.trim().length > 0 &&
+        Number.isFinite(Number(rsRaw))
+      ) {
+        prevReturnStreak = Number(rsRaw);
+        break;
       }
     }
 
-    // =========================================================
-    // ✅ counsel 配線：normalChat fallback の前に差し込む
-    // - mode名の揺れ：'counsel' / 'consult' を両方拾う
-    // - stage はまず OPEN 固定（永続化は次工程）
-    // - 相談モードでなくても、構造が counsel を要求するなら拾う
-    // - ✅ テスト用：/counsel コマンドで強制（本文は strip 後を使う）
-    // - ✅ 追加：GreetingGate 成立ターンは counsel に落とさない（新規チャット誤爆防止）
-    // - ✅ レーン主導：counsel は「上書き」ではなく「空のときだけ埋める」
-    // =========================================================
+    const returnStreakNow =
+      deltaNow === 'RETURN' ? prevReturnStreak + 1 : 0;
 
-    // ※このファイルでは meta ではなく mergedBaseMeta を使う（meta が無いスコープ対策）
-    const metaLike: any = (mergedBaseMeta ?? {}) as any;
+    // -------------------------------------------------------
+    // 🔑 正本として meta.extra.flow に確定保存
+    // -------------------------------------------------------
+    (meta as any).extra =
+      (meta as any).extra && typeof (meta as any).extra === 'object'
+        ? (meta as any).extra
+        : {};
 
-    const modeRaw = String(metaLike?.mode ?? '').toLowerCase();
-    const isCounselMode = modeRaw === 'counsel' || modeRaw === 'consult';
+    (meta as any).extra.flow = {
+      delta: deltaNow,
+      confidence: confidenceNow,
+      returnStreak: returnStreakNow,
+    };
 
-    // ✅ /counsel（/consult）明示トリガー
-    const { forced: forcedCounsel, strippedText } = detectCounselCommand(text);
+    // 既存互換（必要なら残す）
+    (meta as any).flow = flow;
 
-    // ✅ 以降の判定・slot生成に使う「本文」（/counsel は混ぜない）
-    const textForCounsel = forcedCounsel ? strippedText : text;
-    const hasTextForCounsel = String(textForCounsel ?? '').trim().length > 0;
+    // 観測ログ
+    console.log('[IROS/FLOW][observe]', {
+      delta: deltaNow,
+      confidence: confidenceNow,
+      hasLastUserText: Boolean(lastUserText),
+      returnStreak: returnStreakNow, // ← 追加
+    });
+  }
+}
 
-    // ✅ GreetingGate 成立ターン判定（ここで counsel 誤爆を遮断）
-    const isGreetingTurn =
-      !!metaLike?.gatedGreeting?.ok ||
-      !!metaLike?.extra?.gatedGreeting?.ok ||
-      String(metaLike?.ctxPack?.shortSummary ?? '') === 'greeting' ||
-      String(metaLike?.extra?.ctxPack?.shortSummary ?? '') === 'greeting';
 
-    // ✅ この下（QuestionSlots / normalChat fallback）が参照するので outer scope に置く
-    let shouldUseCounsel = false;
+// =========================================================
+// ✅ counsel 配線：normalChat fallback の前に差し込む
+// - mode名の揺れ：'counsel' / 'consult' を両方拾う
+// - stage はまず OPEN 固定（永続化は次工程）
+// - 相談モードでなくても、構造が counsel を要求するなら拾う
+// - ✅ テスト用：/counsel コマンドで強制（本文は strip 後を使う）
+// - ✅ 追加：GreetingGate 成立ターンは counsel に落とさない（新規チャット誤爆防止）
+// - ✅ レーン主導：counsel は「上書き」ではなく「空のときだけ埋める」
+// =========================================================
 
-    // ※重要：ir診断ターンは slotPlan を上書きしない（counsel/normalChat/flagReply を通さない）
-    const isIrDiagnosisTurn_here =
-      Boolean(metaLike?.isIrDiagnosisTurn) ||
-      String(metaLike?.presentationKind ?? '').toLowerCase() === 'diagnosis' ||
-      String(modeRaw ?? '').toLowerCase() === 'diagnosis';
+// ※このファイルでは meta ではなく mergedBaseMeta を使う（meta が無いスコープ対策）
+const metaLike: any = (mergedBaseMeta ?? {}) as any;
 
-    if (!isIrDiagnosisTurn_here && !isGreetingTurn) {
-      // ✅ 構造として counsel が必要か
-      shouldUseCounsel =
-        !!forcedCounsel ||
-        isCounselMode ||
-        shouldUseCounselByStructure(metaLike, textForCounsel);
+const modeRaw = String(metaLike?.mode ?? '').toLowerCase();
+const isCounselMode = modeRaw === 'counsel' || modeRaw === 'consult';
 
-      // ✅ レーン主導：counsel は「空のときだけ」差し込む
-      // - 明示（/counsel or mode）だけは強制的に上書き可
-      const canOverrideSlots = !!forcedCounsel || isCounselMode;
-      const canFillWhenEmpty = slotsEmpty0 || policyEmpty0;
+// ✅ /counsel（/consult）明示トリガー
+const { forced: forcedCounsel, strippedText } = detectCounselCommand(text);
 
-      if (
-        !isSilence &&
-        hasTextForCounsel &&
-        shouldUseCounsel &&
-        (canOverrideSlots || canFillWhenEmpty)
-      ) {
-        const lastSummary =
-          (ms as any)?.situation_summary ??
-          (ms as any)?.situationSummary ??
-          (memoryState as any)?.situation_summary ??
-          (memoryState as any)?.situationSummary ??
-          metaLike?.situation_summary ??
-          metaLike?.situationSummary ??
-          null;
+// ✅ 以降の判定・slot生成に使う「本文」（/counsel は混ぜない）
+const textForCounsel = forcedCounsel ? strippedText : text;
+const hasTextForCounsel = String(textForCounsel ?? '').trim().length > 0;
 
-        console.log('[IROS/ORCH][counsel-picked]', {
-          stage: 'OPEN',
-          modeRaw,
-          forcedCounsel,
-          shouldUseCounselByStructure: !forcedCounsel && !isCounselMode,
-          hasText: hasTextForCounsel,
-          isSilence,
-          strippedLen: forcedCounsel ? String(strippedText ?? '').length : null,
-          lastSummary_len:
-            typeof lastSummary === 'string' ? lastSummary.length : null,
-          isGreetingTurn,
-          canOverrideSlots,
-          canFillWhenEmpty,
-          slotsEmpty0,
-          policyEmpty0,
-        });
+// ✅ GreetingGate 成立ターン判定（ここで counsel 誤爆を遮断）
+const isGreetingTurn =
+  !!metaLike?.gatedGreeting?.ok ||
+  !!metaLike?.extra?.gatedGreeting?.ok ||
+  String(metaLike?.ctxPack?.shortSummary ?? '') === 'greeting' ||
+  String(metaLike?.extra?.ctxPack?.shortSummary ?? '') === 'greeting';
 
-        const counsel = buildCounselSlotPlan({
-          userText: textForCounsel, // ✅ strip後
-          stage: 'OPEN',
-          lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
-        });
+// ✅ この下（QuestionSlots / normalChat fallback）が参照するので outer scope に置く
+let shouldUseCounsel = false;
 
-        const cSlots = (counsel as any).slots;
-        const cPolicy = (counsel as any).slotPlanPolicy;
+// ※重要：ir診断ターンは slotPlan を上書きしない（counsel/normalChat/flagReply を通さない）
+const isIrDiagnosisTurn_here =
+  Boolean(metaLike?.isIrDiagnosisTurn) ||
+  String(metaLike?.presentationKind ?? '').toLowerCase() === 'diagnosis' ||
+  String(modeRaw ?? '').toLowerCase() === 'diagnosis';
 
-        // ✅ レーン主導：ここで「上書き」はしない（明示強制の場合のみ許可）
-        slotsArr = Array.isArray(cSlots) ? cSlots : [];
-        slotPlanPolicy =
-          typeof cPolicy === 'string' && cPolicy.trim()
-            ? cPolicy.trim()
-            : 'FINAL';
+if (!isIrDiagnosisTurn_here && !isGreetingTurn) {
+  // ✅ stallHardNow（迷い/同語反復）は「counsel優先」のシグナルとして扱う
+  // - stallProbe 側で meta.extra.stall.hardNow を残している前提
+  const stallHardNow =
+    !!(metaLike as any)?.extra?.stall?.hardNow ||
+    !!(metaLike as any)?.stall?.hardNow ||
+    false;
+
+  // ✅ 構造として counsel が必要か
+  // - 明示(/counsel, mode) は最優先
+  // - stallHardNow は counsel 優先（IDEA_BANDへ倒さない）
+  shouldUseCounsel =
+    !!forcedCounsel ||
+    isCounselMode ||
+    stallHardNow ||
+    shouldUseCounselByStructure(metaLike, textForCounsel);
+
+  // ✅ レーン主導：counsel は「空のときだけ」差し込む
+  // - 明示（/counsel or mode）だけは強制的に上書き可
+  const canOverrideSlots = !!forcedCounsel || isCounselMode;
+  const canFillWhenEmpty = slotsEmpty0 || policyEmpty0;
+
+  if (
+    !isSilence &&
+    hasTextForCounsel &&
+    shouldUseCounsel &&
+    (canOverrideSlots || canFillWhenEmpty)
+  ) {
+    const lastSummary =
+      (ms as any)?.situation_summary ??
+      (ms as any)?.situationSummary ??
+      (memoryState as any)?.situation_summary ??
+      (memoryState as any)?.situationSummary ??
+      metaLike?.situation_summary ??
+      metaLike?.situationSummary ??
+      null;
+
+    console.log('[IROS/ORCH][counsel-picked]', {
+      stage: 'OPEN',
+      modeRaw,
+      forcedCounsel,
+      shouldUseCounselByStructure: !forcedCounsel && !isCounselMode,
+      hasText: hasTextForCounsel,
+      isSilence,
+      strippedLen: forcedCounsel ? String(strippedText ?? '').length : null,
+      lastSummary_len: typeof lastSummary === 'string' ? lastSummary.length : null,
+      isGreetingTurn,
+      canOverrideSlots,
+      canFillWhenEmpty,
+      slotsEmpty0,
+      policyEmpty0,
+    });
+
+    const counsel = buildCounselSlotPlan({
+      userText: textForCounsel, // ✅ strip後
+      stage: 'OPEN',
+      lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
+    });
+
+    const cSlots = (counsel as any).slots;
+    const cPolicy = (counsel as any).slotPlanPolicy;
+
+    // ✅ レーン主導：ここで「上書き」はしない（明示強制の場合のみ許可）
+    slotsArr = Array.isArray(cSlots) ? cSlots : [];
+    slotPlanPolicy =
+      typeof cPolicy === 'string' && cPolicy.trim()
+        ? cPolicy.trim()
+        : 'FINAL';
+
     // 既存なら “上書き元” を残す
     (metaLike as any).slotPlanFallback =
       (metaLike as any).slotPlanFallback ?? 'counsel';
@@ -1464,7 +1543,6 @@ function detectCounselCommand(raw: unknown): { forced: boolean; strippedText: st
       policy: slotPlanPolicy,
     });
   }
-
 
   // 5) fallback（normalChat）
   // - slots が空 or policy が空 のときだけ
@@ -1646,60 +1724,95 @@ if (typeof process !== 'undefined' && process.env.DEBUG_IROS_FALLBACK_DIAG === '
 
   const laneKeyNowBase = forceTConcretize ? 'T_CONCRETIZE' : laneKeyNowRaw;
 
-  // hard のときだけ強制で IDEA_BAND（深度や他ロジックは触らない）
-  const laneKeyNow =
-    stall.severity === 'hard' ? 'IDEA_BAND' : laneKeyNowBase;
-
-  console.log('[IROS/T_CONCRETIZE][FORCE_SWITCH_CHECK]', {
-    forceTConcretize,
-    laneKeyNowRaw,
-    laneKeyNowBase,
-    laneKeyNow,
-    stall,
-    userHead: String(textForCounsel ?? '').slice(0, 40),
-  });
-
   const focusLabelNow =
     (meta as any)?.extra?.intentBridge?.focusLabel ??
     (meta as any)?.intentBridge?.focusLabel ??
     undefined;
 
+    const hasFocusLabelNow =
+    typeof focusLabelNow === 'string' && focusLabelNow.trim().length > 0;
+
+// ✅ stall は lane を変えない（lane は IntentBridge の責務）
+// - 迷い/同語反復は「counsel 優先」のシグナルとして扱う（別の分岐で吸う）
+const stallHardNow = stall.severity === 'hard' && !hasFocusLabelNow;
+
+// ✅ postprocess(ExpressionLane) が参照する場所に同期しておく
+// - handleIrosReply.postprocess.ts は metaForSave.extra.stallHard を見ている
+// - ここで立てておけば「候補を出しますか？」等の preface 注入が動く
+try {
+  const ex =
+    meta && typeof meta === 'object' && (meta as any).extra && typeof (meta as any).extra === 'object'
+      ? (meta as any).extra
+      : ((meta as any).extra = {});
+  ex.stallHard = stallHardNow;
+
+  // 既存の監査情報（stall）も残す
+  ex.stall = {
+    ...(ex.stall ?? {}),
+    ...(stall ?? {}),
+    hardNow: stallHardNow,
+    at: Date.now(),
+  };
+} catch {}
+
+const laneKeyNow = laneKeyNowBase;
+
+console.log('[IROS/T_CONCRETIZE][FORCE_SWITCH_CHECK]', {
+  forceTConcretize,
+  laneKeyNowRaw,
+  laneKeyNowBase,
+  laneKeyNow,
+  stall,
+  hasFocusLabelNow,
+  focusLabelHead: hasFocusLabelNow ? String(focusLabelNow).slice(0, 40) : null,
+  userHead: String(textForCounsel ?? '').slice(0, 40),
+});
+
+// ✅ intentBridge を single source of truth にする
+// - null のときは laneKey を渡さない（IDEA_BAND に落とさない）
+// - T/IDEA が明示されている時だけ渡す
+const resolvedLaneKeyForNormalChat =
+  laneKeyNow === 'T_CONCRETIZE'
+    ? 'T_CONCRETIZE'
+    : laneKeyNow === 'IDEA_BAND'
+      ? 'IDEA_BAND'
+      : undefined;
+
+const fallback = buildNormalChatSlotPlan({
+  userText: textForCounsel,
+  laneKey: resolvedLaneKeyForNormalChat,
+
+  // ✅ 固定文言はやめて、選択された “一点” を渡す
+  focusLabel: laneKeyNow === 'T_CONCRETIZE' ? focusLabelNow : undefined,
+
+  context: {
+    lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
+  },
+});
+
+if (shouldFallbackNormalChat) {
   const fallback = buildNormalChatSlotPlan({
     userText: textForCounsel,
-    laneKey: laneKeyNow === 'T_CONCRETIZE' ? 'T_CONCRETIZE' : 'IDEA_BAND',
-
-    // ✅ 固定文言はやめて、選択された “一点” を渡す
+    laneKey: resolvedLaneKeyForNormalChat,
     focusLabel: laneKeyNow === 'T_CONCRETIZE' ? focusLabelNow : undefined,
-
     context: {
       lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
     },
   });
 
-  if (shouldFallbackNormalChat) {
-    const fallback = buildNormalChatSlotPlan({
-      userText: textForCounsel,
-      laneKey: laneKeyNow === 'T_CONCRETIZE' ? 'T_CONCRETIZE' : 'IDEA_BAND',
-      focusLabel: laneKeyNow === 'T_CONCRETIZE' ? focusLabelNow : undefined,
-      context: {
-        lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
-      },
-    });
+  const fbSlots = (fallback as any).slots;
+  slotsArr = Array.isArray(fbSlots) ? fbSlots : [];
 
-    const fbSlots = (fallback as any).slots;
-    slotsArr = Array.isArray(fbSlots) ? fbSlots : [];
+  const fp = (fallback as any).slotPlanPolicy;
+  slotPlanPolicy = typeof fp === 'string' && fp.trim() ? fp.trim() : 'FINAL';
 
-    const fp = (fallback as any).slotPlanPolicy;
-    slotPlanPolicy = typeof fp === 'string' && fp.trim() ? fp.trim() : 'FINAL';
-
-    (meta as any).slotPlanFallback = 'normalChat';
-  } else {
-    if ((meta as any).slotPlanFallback === 'normalChat') {
-      delete (meta as any).slotPlanFallback;
-    }
+  (meta as any).slotPlanFallback = 'normalChat';
+} else {
+  if ((meta as any).slotPlanFallback === 'normalChat') {
+    delete (meta as any).slotPlanFallback;
   }
 }
-  }
+}}
   // =========================================================
   // ✅ A) normalChat → flagReply 自動切替（仮置き一点の安全装置）
   // =========================================================
