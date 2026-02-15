@@ -32,18 +32,19 @@ export function containsForbiddenLeakText(
 export function extractDirectTask(userText: string, inputKind: string | null): boolean {
   const t = String(userText ?? '');
 
+  // ✅ “完成物を作る/整える” 明示だけを directTask として扱う
+  // （技術会話=task は directTask にしない）
   const isDirectTaskByPhrase =
-    /(本文だけ|文面|短文|そのまま使える|作って|出して|まとめて|要約|要約して|整理して|箇条書き|要点|ポイント|結論)/.test(
-      t,
-    );
+    /(本文だけ|文面|短文|そのまま使える|作って|出して|まとめて|要約|要約して|整理して|箇条書き|要点|ポイント|結論)/.test(t);
 
+  // ✅ HowTo/指南（ただし「具体的/提案」単体では立てない）
   const isHowtoLike =
-    /(教えて|教えてください|アドバイス|具体的|提案|やり方|方法|手順|どうやって|どうしたら|進め方|コツ|秘技|tips|howto|おすすめ|選び方|例を|例:|サンプル)/i.test(
+    /(教えて|教えてください|アドバイス|やり方|方法|手順|どうやって|どうしたら|進め方|コツ|秘技|tips|howto|おすすめ|選び方|例を|例:|サンプル)/i.test(
       t,
     );
 
-  const isDirectTaskByKind =
-    inputKind === 'howto' || inputKind === 'task' || inputKind === 'request' || inputKind === 'qa';
+  // ✅ kind で立てるのは howto/request/qa のみ（task は除外）
+  const isDirectTaskByKind = inputKind === 'howto' || inputKind === 'request' || inputKind === 'qa';
 
   return Boolean(isDirectTaskByPhrase || isDirectTaskByKind || isHowtoLike);
 }

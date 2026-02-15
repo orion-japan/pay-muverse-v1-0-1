@@ -98,24 +98,17 @@ function pickRandom<T>(arr: T[]): T {
   return arr[idx]!;
 }
 
-function safeLaneKey(v: unknown): LaneKey {
-  // ✅ laneKey が未指定(null/undefined/未知)なら IDEA_BAND に落とさない
-  // - IDEA_BAND は「上流が明示で渡した場合のみ」発火させる前提
-  // - 未指定時は保守的に T_CONCRETIZE（=具体へ寄せるSHIFT）へ
-  return v === 'IDEA_BAND' ? 'IDEA_BAND' : 'T_CONCRETIZE';
+function normalizeLaneKeyOrNull(v: unknown): LaneKey | null {
+  return v === 'IDEA_BAND' || v === 'T_CONCRETIZE' ? v : null;
 }
-
 
 // ✅ Phase11: advance判定のための “橋” を必ず出す
 // - evidenceLog.ts は key==='NEXT' または content.startsWith('@NEXT_HINT') を検出し、
 //   さらに mode==='advance_hint' を拾えれば advance=1 になる。
-function buildNextHintSlot(args: { userText: string; laneKey?: LaneKey; flowDelta?: string | null }): NormalChatSlot {
+function buildNextHintSlot(args: { userText: string; laneKey?: LaneKey | null; flowDelta?: string | null }): NormalChatSlot {
   const laneKey = safeLaneKey(args.laneKey); // LaneKey | null
   const delta = args.flowDelta ? String(args.flowDelta) : null;
 
-  // ⚠️ advance 判定専用：
-  // - userText は seed に入れない（重複注入＝同文エコー防止）
-  // - 意味生成は SHIFT / TASK / Q_SLOT 側の seed_text に一任する
   const hint =
     laneKey === 'T_CONCRETIZE'
       ? '次の一手を1つに絞って実行'
@@ -129,13 +122,13 @@ function buildNextHintSlot(args: { userText: string; laneKey?: LaneKey; flowDelt
     style: 'neutral',
     content: `@NEXT_HINT ${JSON.stringify({
       mode: 'advance_hint',
-      laneKey, // null も許容（未指定なら null のまま）
+      laneKey: laneKey ?? null,
       delta,
       hint: clamp(hint, 80),
-      // seed_text intentionally omitted
     })}`,
   };
 }
+
 
 // --------------------------------------------------
 // minimal detectors（意味判定はしない）
@@ -221,9 +214,9 @@ function buildCompose(userText: string, laneKey?: LaneKey, flowDelta?: string | 
 }
 
 // ✅ clarify：テンプレ自然文を出さない。LLMに “意味に答える” を許可するだけ。
-// ✅ FIX: IDEA_BAND のときも OBS を必ず出す（3点セット固定）
+// ✅ FIX: laneKey 未指定(null/undefined)を勝手に T_CONCRETIZE にしない（t_concretize seed支配の原因）
 function buildClarify(userText: string, laneKey?: LaneKey, flowDelta?: string | null): NormalChatSlot[] {
-  const lane = safeLaneKey(laneKey);
+  const lane = laneKey; // ここで補完しない（未指定なら undefined のまま）
   const isT = lane === 'T_CONCRETIZE';
 
   const contractsClarify = [
@@ -246,7 +239,7 @@ function buildClarify(userText: string, laneKey?: LaneKey, flowDelta?: string | 
     role: 'assistant',
     style: 'soft',
     content: m('OBS', {
-      laneKey: lane,
+      laneKey: lane ?? null, // 未指定は null のまま出す
       user: seedText,
       flow: { delta },
     }),
@@ -295,6 +288,7 @@ function buildClarify(userText: string, laneKey?: LaneKey, flowDelta?: string | 
     buildNextHintSlot({ userText, laneKey: lane, flowDelta: delta }),
   ];
 }
+
 
 
 
@@ -575,33 +569,33 @@ function buildFlowReply(args: {
     // laneKeyはnullでも落ちないように（型が厳しい場合があるのでas anyで通す）
     buildNextHintSlot({ userText: t, laneKey: laneKeyForObs as any, flowDelta: delta }),
   ];
+
+// ✅ 置き換え：src/lib/iros/slotPlans/normalChat.ts
+}
+// ✅ 置き換え 1) safeLaneKey を関数まるごと置き換え
+function safeLaneKey(v: unknown): LaneKey | null {
+  return v === 'IDEA_BAND' || v === 'T_CONCRETIZE' ? v : null;
 }
 
-// --- 置き換え 3) buildNormalChatSlotPlan の args 型だけ差し替え ---
-// 既存の export function buildNormalChatSlotPlan(args: { ... }) の「引数型」に、focusLabel を追加してください。
-// （関数本体はそのまま）
+// ✅ 置き換え 2) buildNextHintSlot の JSON.stringify 内「laneKey」行だけ置き換え
+// 変更前: laneKey,
+// 変更後:
+
+
+// ✅ 置き換え 3) buildNormalChatSlotPlan を関数まるごと差し替え
 export function buildNormalChatSlotPlan(args: {
   userText: string;
-
-  // ✅ 上流（orchestrator/postprocess）が決めたレーンを受け取る
-  // 未指定でも壊れない（保守的に IDEA_BAND）
   laneKey?: LaneKey;
-
-  // ✅ A案：上流が「対象ラベル（いま触る1点）」を渡せる
-  // - 例: "MIN_OK_LEN 周り" / "OK_TOO_SHORT_TO_RETRY の条件" など
   focusLabel?: string;
-
   context?: {
     recentUserTexts?: string[];
-    lastSummary?: string | null; // orchestrator互換（ここでは使わない）
+    lastSummary?: string | null;
   };
 }): NormalChatSlotPlan {
-  // （この下の既存の関数本体は変更しない）
-  // ...
-
   const laneKey = safeLaneKey(args.laneKey);
+  const laneKeyArg: LaneKey | undefined = laneKey ?? undefined;
 
-  const stamp = `normalChat@lane:${laneKey}@no-seed-text+random-hints+questionSlots+nextHint`;
+  const stamp = `normalChat@lane:${laneKey ?? 'none'}@no-seed-text+random-hints+questionSlots+nextHint`;
   const userText = norm(args.userText);
 
   const recentRaw = Array.isArray(args.context?.recentUserTexts) ? args.context!.recentUserTexts! : [];
@@ -631,40 +625,32 @@ export function buildNormalChatSlotPlan(args: {
     slots = buildEnd();
   } else if (shouldUseQuestionSlots(userText)) {
     reason = 'questionSlots';
-    slots = buildQuestion(userText, lastUserText ?? undefined, laneKey, flowDelta);
+    slots = buildQuestion(userText, lastUserText ?? undefined, laneKeyArg, flowDelta);
   } else if (isClarify(userText) && /[?？]/.test(userText)) {
-    // ✅ clarify は「質問文」のみに限定（宣言/独白は flowReply に落とす）
     reason = 'clarify';
-    slots = buildClarify(userText, laneKey, flowDelta);
+    slots = buildClarify(userText, laneKeyArg, flowDelta);
   } else if (isCompose(userText)) {
     reason = 'compose';
-    slots = buildCompose(userText, laneKey, flowDelta);
+    slots = buildCompose(userText, laneKeyArg, flowDelta);
   } else {
     const d = flow?.delta ? String(flow.delta) : 'FORWARD';
     reason = `flow:${d}`;
     slots = buildFlowReply({ userText, laneKey, flow, lastUserText, focusLabel: args.focusLabel });
   }
 
-  // normalize 後も 0 なら最後の最後の保険（NEXT_HINT だけでも残す）
   const normalized = normalizeSlots(slots);
   if (normalized.length === 0) {
     reason = 'guard:no_slots_after_normalize';
-    slots = [buildNextHintSlot({ userText, laneKey, flowDelta: flowDelta ?? 'FORWARD' })];
+    slots = [buildNextHintSlot({ userText, laneKey: laneKeyArg, flowDelta: flowDelta ?? 'FORWARD' })];
   } else {
-    // ✅ 正規化済みを採用（slot順/欠損を確定）
     slots = normalized;
   }
-
 
   return {
     kind: 'normal-chat',
     stamp,
     reason,
-
-    // ✅ empty だけ UNKNOWN（何も返さない/出せないを許す）
-    // ✅ それ以外は FINAL（LLMで本文を作る）
     slotPlanPolicy: reason === 'empty' ? 'UNKNOWN' : 'FINAL',
-
     slots,
   };
 }

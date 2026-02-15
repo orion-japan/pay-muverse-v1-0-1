@@ -46,16 +46,35 @@ export function buildFirstPassMessages(args: {
 }): WriterMessage[] {
   const systemPrompt = String(args.systemPrompt ?? '');
   const internalPack = norm(args.internalPack ?? '');
-  const turns = turnsToMessages(args.turns);
+  let turns = turnsToMessages(args.turns);
   const finalUserText = norm(args.finalUserText ?? '');
 
   const out: WriterMessage[] = [{ role: 'system', content: systemPrompt }];
 
-  // internalPack は system の直後に置く（最後にしない）
-  if (internalPack) out.push({ role: 'user', content: internalPack });
+  // ✅ internalPack は system の直後に置きたいが、
+  // turns が user で始まると user,user が起きるため “合体” する
+  if (internalPack) {
+    const first = turns[0];
+    if (first?.role === 'user') {
+      const merged = [internalPack, norm(first.content)].filter((x) => x.trim().length > 0).join('\n\n');
+      turns = [{ role: 'user', content: merged }, ...turns.slice(1)];
+    } else {
+      out.push({ role: 'user', content: internalPack });
+    }
+  }
 
   // 直近ターン（会話の流れ）
-  out.push(...turns);
+  // - ✅ user,user / assistant,assistant の連続を作らない（品質低下と同文返しの要因）
+  for (const m of turns) {
+    const last = out[out.length - 1];
+    if (last && last.role === m.role) {
+      // “後勝ちで圧縮” ではなく、文脈を落とさないためにマージ
+      last.content = `${last.content}\n\n${m.content}`.trim();
+    } else {
+      out.push(m);
+    }
+  }
+
 
   // ✅ 最後を user で終わらせる（ただし user,user 連投は絶対に作らない）
   if (finalUserText) {

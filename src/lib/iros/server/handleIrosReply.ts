@@ -859,9 +859,11 @@ console.log('[IROS/Reply] handleIrosReply start', {
   traceId,
   style,
   history_len: Array.isArray(history) ? history.length : null,
-  // ✅ assistant も保存する（single-writer は route.ts 側の責務）
-  persistAssistantAllowed: true,
+
+  // ✅ single-writer: assistant 保存は /api/agent/iros/reply/route.ts 側のみ（handleIrosReply は保存しない）
+  persistAssistantAllowed: false,
 });
+
 
 
   if (process.env.IROS_DEBUG_EXTRA === '1') {

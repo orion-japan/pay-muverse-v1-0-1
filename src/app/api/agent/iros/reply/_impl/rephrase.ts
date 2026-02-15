@@ -517,6 +517,7 @@ const intentBandForCtx =
   null;
 
 
+  const tLayerHintForCtx = itxStepForCtx; // ctxPack へ渡す T層ヒント（互換）
   const tLayerModeActiveForCtx = Boolean(itxStepForCtx && /^T[123]$/u.test(String(itxStepForCtx)));
 
   // 返信の目的（結論ではなく “守るべき姿勢”）
@@ -594,6 +595,79 @@ const intentBandForCtx =
       .toUpperCase()
       .trim() || null;
 
+  // =========================================================
+  // [置換 1] userContext / ctxPack を “上書き生成” しない
+  // - handleIrosReply 側で stamp 済みの ctxPack を最優先で継承
+  // - 欠けているキーだけを補完する（phase/depth/q/flow/digest を落とさない）
+  // =========================================================
+
+  const phaseForCtx =
+    (memoryStateForCtx as any)?.phase ??
+    (meta as any)?.phase ??
+    (meta as any)?.extra?.phase ??
+    null;
+
+  const qCodeForCtx =
+    (typeof (meta as any)?.q_code === 'string' && TRIM((meta as any).q_code)) ||
+    (typeof (meta as any)?.qCode === 'string' && TRIM((meta as any).qCode)) ||
+    (typeof (meta as any)?.qPrimary === 'string' && TRIM((meta as any).qPrimary)) ||
+    (typeof (meta as any)?.unified?.q?.current === 'string' && TRIM((meta as any).unified.q.current)) ||
+    null;
+
+  const depthForCtx =
+    (typeof (meta as any)?.depth_stage === 'string' && TRIM((meta as any).depth_stage)) ||
+    (typeof (meta as any)?.depthStage === 'string' && TRIM((meta as any).depthStage)) ||
+    (typeof (meta as any)?.depth === 'string' && TRIM((meta as any).depth)) ||
+    (typeof (meta as any)?.unified?.depth?.stage === 'string' && TRIM((meta as any).unified.depth.stage)) ||
+    null;
+
+    const ctxPackFromUpstream =
+    // 1) route.ts / renderEngine 側で extraMerged に載せてきたもの（最優先）
+    (extraMerged as any)?.ctxPack ??
+    (extraMerged as any)?.extra?.ctxPack ??
+
+    // 2) meta.extra に stamp 済み
+    (meta as any)?.extra?.ctxPack ??
+
+    // 3) meta 直下や framePlan 経由（handleIrosReply/orchestrator 側で載る可能性）
+    (meta as any)?.ctxPack ??
+    (meta as any)?.framePlan?.ctxPack ??
+    (meta as any)?.framePlan?.extra?.ctxPack ??
+
+    // 4) 互換（ctx_pack / ctxPack under extra）
+    (meta as any)?.extra?.ctx_pack ??
+    (meta as any)?.ctx_pack ??
+    null;
+
+  const ctxPack: any =
+    ctxPackFromUpstream && typeof ctxPackFromUpstream === 'object'
+      ? { ...(ctxPackFromUpstream as any) }
+      : {};
+
+  // upstream を尊重しつつ、不足分だけ補完
+  if (ctxPack.turns == null) ctxPack.turns = normalizedHistory.length ? normalizedHistory : undefined;
+  if (ctxPack.historyForWriter == null) ctxPack.historyForWriter = normalizedHistory.length ? normalizedHistory : undefined;
+  if (ctxPack.slotPlanPolicy == null) ctxPack.slotPlanPolicy = slotPlanPolicyForCtx;
+
+  if (ctxPack.itxStep == null) ctxPack.itxStep = itxStepForCtx;
+  if (ctxPack.itxReason == null) ctxPack.itxReason = itxReasonForCtx;
+  if (ctxPack.intentBand == null) ctxPack.intentBand = intentBandForCtx;
+
+  if (ctxPack.tLayerHint == null) ctxPack.tLayerHint = tLayerHintForCtx ?? null;
+  if (ctxPack.tLayerModeActive == null) ctxPack.tLayerModeActive = tLayerModeActiveForCtx;
+
+  if (ctxPack.topicDigest == null) ctxPack.topicDigest = topicDigestForCtx;
+  if (ctxPack.replyGoal == null) ctxPack.replyGoal = replyGoalForCtx;
+  if (ctxPack.repeatSignal == null) ctxPack.repeatSignal = repeatSignalForCtx;
+
+  // ★ここが本丸：rephraseEngine が拾う “3点セット” を ctxPack にも載せる
+  if (ctxPack.phase == null) ctxPack.phase = phaseForCtx;
+  if (ctxPack.depthStage == null) ctxPack.depthStage = depthForCtx;
+  if (ctxPack.qCode == null) ctxPack.qCode = qCodeForCtx;
+
+  // flowDigest は既存 util を使う（upstream の flow があれば触らない）
+  if (ctxPack.flowDigest == null) ctxPack.flowDigest = buildFlowDigest();
+
   const userContext: any = {
     conversation_id: String(conversationId),
 
@@ -615,24 +689,8 @@ const intentBandForCtx =
 
     turns: normalizedHistory.length ? normalizedHistory : undefined,
 
-    ctxPack: {
-      turns: normalizedHistory.length ? normalizedHistory : undefined,
-      historyForWriter: normalizedHistory.length ? normalizedHistory : undefined,
-
-      slotPlanPolicy: slotPlanPolicyForCtx,
-
-      itxStep: itxStepForCtx,
-      itxReason: itxReasonForCtx,
-
-      intentBand: intentBandForCtx,
-
-      tLayerHint: itxStepForCtx,
-      tLayerModeActive: tLayerModeActiveForCtx,
-
-      topicDigest: topicDigestForCtx,
-      replyGoal: replyGoalForCtx,
-      repeatSignal: repeatSignalForCtx,
-    },
+    // ✅ 継承＋補完済みの ctxPack を使う（上書き生成しない）
+    ctxPack,
 
     historyMessages: normalizedHistory.length ? normalizedHistory : undefined,
   };
