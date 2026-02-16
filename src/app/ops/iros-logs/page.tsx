@@ -26,6 +26,20 @@ type Turn = {
   meta?: any;
   used_credits: number | null;
   created_at: string | null;
+
+  // ✅ trace 可視化用（/api/iros-logs が返す）
+  trace_id?: string | null;
+};
+
+
+type RawLog = {
+  id: number | string;
+  conversation_id: string;
+  user_code: string | null;
+  trace_id: string | null;
+  source: string | null;
+  raw_text: string | null;
+  created_at: string | null;
 };
 
 // 共通 API 呼び出しヘルパ
@@ -81,7 +95,6 @@ function stripLegacyMetaHeader(raw: string | null | undefined): string {
   return raw;
 }
 
-
 /**
  * Y/H をアイコン付きで表示するヘルパ
  * （ログ CSV には生の数値をそのまま出す）
@@ -110,6 +123,11 @@ function formatHDisplay(hLevel: any): string {
   return `${icon} ${fmt(value)}`;
 }
 
+function clip(s: string, n: number) {
+  const t = String(s ?? '');
+  return t.length > n ? t.slice(0, n) + '…' : t;
+}
+
 export default function IrosLogsPage() {
   useEffect(() => {
     document.body.classList.add('mu-logs-desktop');
@@ -120,12 +138,29 @@ export default function IrosLogsPage() {
   const [userOptions, setUserOptions] = useState<string[] | null>(null);
   const [userListLoading, setUserListLoading] = useState(false);
 
-  const [conversations, setConversations] = useState<Conversation[] | null>(
-    null,
-  );
+  const [conversations, setConversations] = useState<Conversation[] | null>(null);
   const [convId, setConvId] = useState('');
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
   const [turns, setTurns] = useState<Turn[] | null>(null);
+
+  const [rawLogs, setRawLogs] = useState<RawLog[] | null>(null);
+  const [selectedTrace, setSelectedTrace] = useState<string | null>(null);
+
+  const toggleTrace = (traceId?: string | null) => {
+    const t = String(traceId ?? '').trim();
+    if (!t) return;
+    setSelectedTrace((prev) => (prev === t ? null : t));
+  };
+
+  const filteredRawLogs = useMemo(() => {
+    if (!rawLogs) return rawLogs;
+    if (!selectedTrace) return rawLogs;
+    return rawLogs.filter((r) => r.trace_id === selectedTrace);
+  }, [rawLogs, selectedTrace]);
+
+  const [includeRaw, setIncludeRaw] = useState(true);
+  const [rawLimit, setRawLimit] = useState(5);
+
   const [loading, setLoading] = useState(false);
   const [listLoading, setListLoading] = useState(false);
 
@@ -157,9 +192,7 @@ export default function IrosLogsPage() {
     debounceRef.current = setTimeout(async () => {
       setListLoading(true);
       try {
-        const params = new URLSearchParams({
-          user_code: userCode,
-        });
+        const params = new URLSearchParams({ user_code: userCode });
         const data = await callApi(`/api/iros-logs?${params.toString()}`);
         const list: Conversation[] = data.conversations ?? [];
         setConversations(list);
@@ -182,23 +215,30 @@ export default function IrosLogsPage() {
       if (!convId) {
         setDetail(null);
         setTurns(null);
+        setRawLogs(null);
         return;
       }
       setLoading(true);
       try {
         const params = new URLSearchParams({ conv_id: convId });
+        if (includeRaw) {
+          params.set('include_raw', '1');
+          params.set('raw_limit', String(rawLimit));
+        }
         const data = await callApi(`/api/iros-logs?${params.toString()}`);
         setDetail(data.conversation ?? null);
         setTurns(data.turns ?? []);
+        setRawLogs(Array.isArray(data.raw_logs) ? data.raw_logs : []);
       } catch (e: any) {
         alert(e?.message || '会話詳細の取得に失敗しました');
         setDetail(null);
         setTurns(null);
+        setRawLogs(null);
       } finally {
         setLoading(false);
       }
     })();
-  }, [convId]);
+  }, [convId, includeRaw, rawLimit]);
 
   // CSV（Iros 用：q_code / depth_stage / self_acceptance を含める）
   const csvForTurns = useMemo(() => {
@@ -209,6 +249,7 @@ export default function IrosLogsPage() {
       'turn_id',
       'created_at',
       'role',
+      'trace_id',
       'q_code',
       'depth_stage',
       'self_acceptance',
@@ -232,30 +273,24 @@ export default function IrosLogsPage() {
       const hLevel = meta?.hLevel ?? meta?.h_level ?? '';
       const mirrorMode = meta?.mirrorMode ?? meta?.mirror_mode ?? '';
       const intentLayer = meta?.intentLayer ?? meta?.intent_layer ?? '';
-      const intentLine =
-        typeof meta?.intentLine === 'string' ? meta.intentLine : '';
+      const intentLine = typeof meta?.intentLine === 'string' ? meta.intentLine : '';
 
-      const polarityScore =
-        meta?.polarityScore ?? meta?.polarity_score ?? '';
-      const polarityBand =
-        meta?.polarityBand ?? meta?.polarity_band ?? '';
-      const stabilityBand =
-        meta?.stabilityBand ?? meta?.stability_band ?? '';
+      const polarityScore = meta?.polarityScore ?? meta?.polarity_score ?? '';
+      const polarityBand = meta?.polarityBand ?? meta?.polarity_band ?? '';
+      const stabilityBand = meta?.stabilityBand ?? meta?.stability_band ?? '';
 
       const unified = meta?.unified ?? null;
       const situation = unified?.situation ?? null;
-      const situationTopic =
-        typeof situation?.topic === 'string' ? situation.topic : '';
+      const situationTopic = typeof situation?.topic === 'string' ? situation.topic : '';
       const unifiedSummary =
-        typeof unified?.intentSummary === 'string'
-          ? unified.intentSummary
-          : '';
+        typeof unified?.intentSummary === 'string' ? unified.intentSummary : '';
 
       const row = [
         t.conv_id,
         t.id,
         t.created_at ?? '',
         t.role,
+        t.trace_id ?? '',
         t.q_code || '',
         t.depth_stage || '',
         t.self_acceptance ?? '',
@@ -279,9 +314,7 @@ export default function IrosLogsPage() {
 
   const downloadCSV = () => {
     if (!csvForTurns) return;
-    const blob = new Blob([csvForTurns], {
-      type: 'text/csv;charset=utf-8;',
-    });
+    const blob = new Blob([csvForTurns], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -296,6 +329,7 @@ export default function IrosLogsPage() {
     setConversations(null);
     setDetail(null);
     setTurns(null);
+    setRawLogs(null);
   };
 
   return (
@@ -308,14 +342,9 @@ export default function IrosLogsPage() {
           <section className="muLogs__search muLogs__search--3col">
             <div className="field">
               <label>User Code</label>
-              <select
-                value={userCode}
-                onChange={(e) => setUserCode(e.target.value)}
-              >
+              <select value={userCode} onChange={(e) => setUserCode(e.target.value)}>
                 <option value="">
-                  {userListLoading
-                    ? 'ユーザー一覧を読み込み中…'
-                    : 'ユーザーを選択…'}
+                  {userListLoading ? 'ユーザー一覧を読み込み中…' : 'ユーザーを選択…'}
                 </option>
                 {userOptions?.map((code) => (
                   <option key={code} value={code}>
@@ -345,9 +374,7 @@ export default function IrosLogsPage() {
                   <option key={c.id} value={c.id}>
                     {c.id}
                     {c.last_turn_at ? `（${c.last_turn_at}）` : ''}
-                    {typeof c.turns_count === 'number'
-                      ? `｜${c.turns_count} turns`
-                      : ''}
+                    {typeof c.turns_count === 'number' ? `｜${c.turns_count} turns` : ''}
                   </option>
                 ))}
               </select>
@@ -363,9 +390,7 @@ export default function IrosLogsPage() {
           {/* 会話一覧 */}
           {conversations && (
             <section>
-              <h2 className="muLogs__h2">
-                会話一覧（Iros / {conversations.length}）
-              </h2>
+              <h2 className="muLogs__h2">会話一覧（Iros / {conversations.length}）</h2>
               <table className="muLogs__table">
                 <thead>
                   <tr>
@@ -383,9 +408,7 @@ export default function IrosLogsPage() {
                       <td className="mono">{c.id}</td>
                       <td className="mono">{c.user_code || ''}</td>
                       <td className="mono">
-                        {typeof c.turns_count === 'number'
-                          ? c.turns_count
-                          : ''}
+                        {typeof c.turns_count === 'number' ? c.turns_count : ''}
                       </td>
                       <td className="mono">{c.last_turn_at || ''}</td>
                       <td className="mono">{c.created_at || ''}</td>
@@ -409,74 +432,207 @@ export default function IrosLogsPage() {
                   <b>conv_id:</b> <span className="mono">{detail.id}</span>
                 </div>
                 <div>
-                  <b>user_code:</b>{' '}
-                  <span className="mono">{detail.user_code || ''}</span>
+                  <b>user_code:</b> <span className="mono">{detail.user_code || ''}</span>
                 </div>
                 <div>
                   <b>turns_count:</b>{' '}
-                  <span className="mono">
-                    {typeof detail.turns_count === 'number'
-                      ? detail.turns_count
-                      : ''}
-                  </span>
+                  <span className="mono">{typeof detail.turns_count === 'number' ? detail.turns_count : ''}</span>
                 </div>
                 <div>
-                  <b>last_turn_at:</b>{' '}
-                  <span className="mono">{detail.last_turn_at || ''}</span>
+                  <b>last_turn_at:</b> <span className="mono">{detail.last_turn_at || ''}</span>
                 </div>
                 <div>
-                  <b>created_at:</b>{' '}
-                  <span className="mono">{detail.created_at || ''}</span>
+                  <b>created_at:</b> <span className="mono">{detail.created_at || ''}</span>
                 </div>
                 <div>
-                  <b>updated_at:</b>{' '}
-                  <span className="mono">{detail.updated_at || ''}</span>
+                  <b>updated_at:</b> <span className="mono">{detail.updated_at || ''}</span>
                 </div>
               </div>
 
-              <div className="actions right">
+              <div className="actions" style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                  <input
+                    type="checkbox"
+                    checked={includeRaw}
+                    onChange={(e) => setIncludeRaw(e.target.checked)}
+                  />
+                  raw_logs も読む
+                </label>
+
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                  raw_limit
+                  <input
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={rawLimit}
+                    onChange={(e) => setRawLimit(num(e.target.value, 5))}
+                    style={{ width: 80 }}
+                    disabled={!includeRaw}
+                  />
+                </label>
+
                 <button onClick={downloadCSV} disabled={!turns?.length}>
                   CSVエクスポート（Iros）
                 </button>
               </div>
 
-              <table className="muLogs__table muLogs__turns">
+              {/* ✅ Raw Logs */}
+              <details style={{ marginTop: 10 }}>
+                <summary style={{ cursor: 'pointer', userSelect: 'none' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+  <div style={{ fontWeight: 700 }}>
+    Raw Logs（{filteredRawLogs?.length ?? 0}
+    {selectedTrace ? ` / all:${rawLogs?.length ?? 0}` : ''}）
+  </div>
+
+  {selectedTrace ? (
+    <div
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '2px 8px',
+        border: '1px solid #ddd',
+        borderRadius: 999,
+        fontFamily: 'monospace',
+        fontSize: 12,
+        whiteSpace: 'nowrap',
+      }}
+      title={selectedTrace}
+    >
+      <span>trace:</span>
+      <span>{selectedTrace.slice(0, 8)}</span>
+      <button
+        type="button"
+        onClick={() => setSelectedTrace(null)}
+        style={{
+          border: '1px solid #ccc',
+          borderRadius: 6,
+          padding: '0 6px',
+          cursor: 'pointer',
+          background: 'transparent',
+        }}
+      >
+        clear
+      </button>
+    </div>
+  ) : null}
+</div>
+
+
+                </summary>
+
+                <div style={{ marginTop: 8 }}>
+                {!filteredRawLogs || filteredRawLogs.length === 0 ? (
+
+                    <p style={{ margin: '6px 0', fontSize: 12, opacity: 0.75 }}>
+                      raw_logs はありません（include_raw=1 の場合でも 0 のときは DB 側に未保存です）
+                    </p>
+                  ) : (
+<table
+  className="muLogs__table"
+  style={{ marginTop: 6, tableLayout: 'fixed', width: '100%' }}
+>
+  <thead>
+    <tr>
+      <th style={{ width: 200, whiteSpace: 'nowrap' }}>time</th>
+      <th style={{ width: 140, whiteSpace: 'nowrap' }}>source</th>
+      <th style={{ width: 240, whiteSpace: 'nowrap' }}>trace_id</th>
+      <th style={{ whiteSpace: 'nowrap' }}>raw</th>
+    </tr>
+  </thead>
+  <tbody>
+  {filteredRawLogs.map((r) => {
+      const raw = r.raw_text ?? '';
+      return (
+        <tr key={String(r.id)}>
+          <td className="mono" style={{ whiteSpace: 'nowrap' }}>
+            {r.created_at || ''}
+          </td>
+          <td className="mono" style={{ whiteSpace: 'nowrap' }}>
+            {r.source || ''}
+          </td>
+          <td
+  className="mono"
+  title={r.trace_id || ''}
+  onClick={() => toggleTrace(r.trace_id)}
+  style={{
+    whiteSpace: 'nowrap',
+    fontFamily: 'monospace',
+    cursor: r.trace_id ? 'pointer' : 'default',
+    textDecoration: r.trace_id ? 'underline' : 'none',
+    fontWeight: selectedTrace && r.trace_id === selectedTrace ? 700 : 400,
+  }}
+>
+  {r.trace_id ? r.trace_id.slice(0, 8) : ''}
+</td>
+
+
+
+          <td className="content">
+            <div
+              style={{
+                maxHeight: '14em',
+                overflowY: 'auto',
+                whiteSpace: 'pre-wrap',
+                fontFamily:
+                  'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                fontSize: 12,
+                padding: '8px 10px',
+                border: '1px solid rgba(0,0,0,0.08)',
+                borderRadius: 8,
+                background: 'rgba(0,0,0,0.02)',
+              }}
+            >
+              {raw}
+            </div>
+          </td>
+        </tr>
+      );
+    })}
+  </tbody>
+</table>
+
+                  )}
+                </div>
+              </details>
+
+              <table className="muLogs__table muLogs__turns" style={{ marginTop: 10 }}>
                 <thead>
-                  <tr>
-                    <th>time</th>
-                    <th>role</th>
-                    <th>q</th>
-                    <th>depth</th>
-                    <th>SA</th>
-                    <th
-                      title="揺らぎ（Y）：感情や思考の揺れの大きさ。高いほど迷いや葛藤が強い状態です。"
-                    >
-                      Y
-                    </th>
-                    <th
-                      title="余白（H）：心の余裕・選択の余白。高いほど自由度が高く、低いほど追い込まれた状態です。"
-                    >
-                      H
-                    </th>
-                    <th title="心の向き（ネガ〜ニュートラル〜ポジ）">
-                      Pol
-                    </th>
-                    <th title="安定度（揺れの安定／不安定）">Stab</th>
-                    <th
-                      title="mirror：Iros がどの立ち位置で応答したか（相談寄り / 構造整理 / 意図寄り など）"
-                    >
-                      mirror
-                    </th>
-                    <th title="I-layer：意図レイヤー（S/R/C/I/T のどこで動いているか）">
-                      I-layer
-                    </th>
-                    <th title="intent：いまの章タイトルや奥で守ろうとしている願い（短いラベル）">
-                      intent
-                    </th>
-                    <th title="topic：相談内容のテーマ（仕事・恋愛などの分類）">
-                      topic
-                    </th>
-                  </tr>
+                <tr>
+  <th>time</th>
+  <th>role</th>
+  <th>q</th>
+  <th>depth</th>
+  <th>SA</th>
+  <th
+    title="揺らぎ（Y）：感情や思考の揺れの大きさ。高いほど迷いや葛藤が強い状態です。"
+  >
+    Y
+  </th>
+  <th
+    title="余白（H）：心の余裕・選択の余白。高いほど自由度が高く、低いほど追い込まれた状態です。"
+  >
+    H
+  </th>
+  <th title="心の向き（ネガ〜ニュートラル〜ポジ）">Pol</th>
+  <th title="安定度（揺れの安定／不安定）">Stab</th>
+  <th
+    title="mirror：Iros がどの立ち位置で応答したか（相談寄り / 構造整理 / 意図寄り など）"
+  >
+    mirror
+  </th>
+  <th title="I-layer：意図レイヤー（S/R/C/I/T のどこで動いているか）">
+    I-layer
+  </th>
+  <th title="trace：同一リクエストの追跡ID（重複送信/経路追跡）">trace</th>
+  <th title="intent：いまの章タイトルや奥で守ろうとしている願い（短いラベル）">
+    intent
+  </th>
+  <th title="topic：相談内容のテーマ（仕事・恋愛などの分類）">topic</th>
+</tr>
+
                 </thead>
                 <tbody>
                   {turns?.map((t) => {
@@ -517,7 +673,6 @@ export default function IrosLogsPage() {
                       '';
 
                     // intent（表示用の短いラベル）
-                    // string が無ければ intentLine object を1行に圧縮して出す
                     const intentLineObj = meta?.intentLine;
                     const intentLine =
                       typeof meta?.intentLine === 'string'
@@ -526,32 +681,21 @@ export default function IrosLogsPage() {
                         ? [
                             intentLineObj.nowLabel,
                             intentLineObj.coreNeed,
-                            intentLineObj.direction
-                              ? `dir:${intentLineObj.direction}`
-                              : null,
-                            intentLineObj.focusLayer
-                              ? `focus:${intentLineObj.focusLayer}`
-                              : null,
+                            intentLineObj.direction ? `dir:${intentLineObj.direction}` : null,
+                            intentLineObj.focusLayer ? `focus:${intentLineObj.focusLayer}` : null,
                           ]
                             .filter(Boolean)
                             .join(' / ')
                         : '';
 
                     const situation = unified?.situation ?? null;
-                    const topic =
-                      typeof situation?.topic === 'string'
-                        ? situation.topic
-                        : '';
+                    const topic = typeof situation?.topic === 'string' ? situation.topic : '';
 
                     const unifiedSummary =
-                      typeof unified?.intentSummary === 'string'
-                        ? unified.intentSummary
-                        : '';
+                      typeof unified?.intentSummary === 'string' ? unified.intentSummary : '';
 
                     const intentLinePreview =
-                      intentLine.length > 40
-                        ? intentLine.slice(0, 40) + '…'
-                        : intentLine;
+                      intentLine.length > 40 ? intentLine.slice(0, 40) + '…' : intentLine;
 
                     const yDisplay = formatYDisplay(yLevel);
                     const hDisplay = formatHDisplay(hLevel);
@@ -559,82 +703,110 @@ export default function IrosLogsPage() {
 
                     return (
                       <React.Fragment key={t.id}>
-                        {/* メタ情報行 */}
                         <tr>
                           <td className="mono">{t.created_at || ''}</td>
-                          <td className={`role role--${t.role}`}>{t.role}</td>
-                          <td className="mono">{t.q_code || ''}</td>
-                          <td className="mono">{t.depth_stage || ''}</td>
+
+                          <td className={`role role--${t.role}`}>
+                            {t.role}
+                          </td>
+
+                          <td className="mono">
+                            {t.q_code || ''}
+                          </td>
+
+                          <td className="mono">
+                            {t.depth_stage || ''}
+                          </td>
+
                           <td className="mono">
                             {t.self_acceptance !== null &&
-                            t.self_acceptance !== undefined
+                             t.self_acceptance !== undefined
                               ? fmt(num(t.self_acceptance, 0))
                               : ''}
                           </td>
-                          <td className="mono">{yDisplay}</td>
-                          <td className="mono">{hDisplay}</td>
+
+                          <td className="mono">
+                            {yDisplay}
+                          </td>
+
+                          <td className="mono">
+                            {hDisplay}
+                          </td>
+
                           <td className="mono">
                             {polarityBand ? String(polarityBand) : ''}
                           </td>
+
                           <td className="mono">
                             {stabilityBand ? String(stabilityBand) : ''}
                           </td>
+
                           <td className="mono">
                             {mirrorMode ? String(mirrorMode) : ''}
                           </td>
+
                           <td className="mono">
                             {intentLayer ? String(intentLayer) : ''}
                           </td>
-                          <td className="content" title={intentLine}>
+
+                          {/* trace_id 列 */}
+                          <td
+                            className="mono"
+                            title={t.trace_id || ''}
+                            style={{
+                              whiteSpace: 'nowrap',
+                              width: 90,
+                              maxWidth: 90,
+                            }}
+                          >
+                            {t.trace_id
+                              ? t.trace_id.slice(0, 8)
+                              : ''}
+                          </td>
+
+                          <td
+                            className="content"
+                            title={intentLine}
+                          >
                             {intentLinePreview}
                           </td>
-                          <td className="content">{topic}</td>
+
+                          <td className="content">
+                            {topic}
+                          </td>
                         </tr>
 
-                        {/* content 行（横幅いっぱいを1セルで／中でスクロール） */}
                         <tr className="muLogs__turnContentRow">
-                          <td className="content" colSpan={13}>
+                          <td
+                            className="content"
+                            colSpan={15}
+                          >
                             <div
                               style={{
-                                maxHeight: '8em', // ここが「縦に伸びすぎたらスクロール」の高さ
+                                maxHeight: '8em',
                                 overflowY: 'auto',
                                 padding: '4px 2px',
                                 whiteSpace: 'pre-wrap',
                               }}
                             >
-                              {topic || unifiedSummary ? (
-                                <div
-                                  style={{
-                                    fontSize: '0.85em',
-                                    marginBottom: 4,
-                                    opacity: 0.8,
-                                  }}
-                                >
-                                  {topic && <strong>[{topic}]</strong>}
-                                  {topic && unifiedSummary && '：'}
-                                  {unifiedSummary}
-                                </div>
-                              ) : null}
-                              {cleanedContent || ''}
+                              {t.content || ''}
                             </div>
                           </td>
                         </tr>
                       </React.Fragment>
                     );
+
                   })}
                 </tbody>
               </table>
 
-              {/* Toyota 向けの凡例 */}
               <p style={{ marginTop: 8, fontSize: 12, color: '#555' }}>
                 🧊/🌱/🔥：揺らぎ（Y）の大きさ ／ ⚠️/🙂/🌈：心の余白（H）の広さを示します。
               </p>
             </section>
           )}
 
-          {(loading || listLoading) && (
-            <p style={{ marginTop: 8 }}>読み込み中…</p>
-          )}
+          {(loading || listLoading) && <p style={{ marginTop: 8 }}>読み込み中…</p>}
         </div>
       </div>
     </div>

@@ -25,10 +25,7 @@ const DEEP_TRIGGER = [
   'T3',
 ];
 
-export function applyGoalContinuity(
-  goal: IrosGoal,
-  ctx: ContinuityContext,
-): IrosGoal {
+export function applyGoalContinuity(goal: IrosGoal, ctx: ContinuityContext): IrosGoal {
   const { lastDepth, lastQ, userText } = ctx;
 
   let adjusted: IrosGoal = { ...goal };
@@ -68,21 +65,7 @@ export function applyGoalContinuity(
 
 /* ========= 内部：Depthジャンプのなだらか化 ========= */
 
-const DEPTH_SEQUENCE: Depth[] = [
-  'S1',
-  'S2',
-  'S3',
-  'S4',
-  'R1',
-  'R2',
-  'R3',
-  'C1',
-  'C2',
-  'C3',
-  'I1',
-  'I2',
-  'I3',
-];
+const DEPTH_SEQUENCE: Depth[] = ['S1', 'S2', 'S3', 'S4', 'R1', 'R2', 'R3', 'C1', 'C2', 'C3', 'I1', 'I2', 'I3'];
 
 function softenDepthJump(last: Depth, target: Depth): Depth {
   if (last === target) return target;

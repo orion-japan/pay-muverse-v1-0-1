@@ -230,33 +230,48 @@ export async function applyRenderEngineIfEnabled(params: {
       (resultObj as any)?.assistantText ?? (resultObj as any)?.content ?? (resultObj as any)?.text ?? '',
     ).trimEnd();
 
-    // SoT
-    let extraSoT: any = extraForHandle ?? {};
+// SoT
+let extraSoT: any = extraForHandle ?? {};
 
-    // ✅ rephraseBlocks 付与はここだけ（一本化）
-    const attachRes: any = await maybeAttachRephraseForRenderV2({
-      conversationId,
-      userCode,
-      userText: typeof userText === 'string' ? userText : String(userText ?? ''),
-      meta,
-      extraMerged: extraSoT,
-      historyMessages: Array.isArray(historyMessages) ? historyMessages : undefined,
-      traceId: String((meta as any)?.extra?.traceId ?? (meta as any)?.traceId ?? '').trim() || null,
-      effectiveMode: (extraSoT as any)?.effectiveMode ?? (meta as any)?.extra?.effectiveMode ?? null,
-    });
+// ✅ IMPORTANT: extractSlotsForRephrase の fallback が「hint」ではなく「本文」を拾えるようにする
+// - framePlan.slots が “定義だけ” で本文が取れない時、rephraseEngine は extra.* から疑似OBSを作る
+// - ここに入れないと seedDraft が 'hint 次の一歩…' に吸われてテンプレ復旧できない
+if (baseText && typeof baseText === 'string' && baseText.trim().length > 0) {
+  extraSoT = {
+    ...extraSoT,
+    assistantText: baseText,
+    content: baseText,
+    text: baseText,
+    finalAssistantText: baseText,
+    finalAssistantTextCandidate: baseText,
+  };
+}
 
-    if (attachRes && typeof attachRes === 'object') {
-      if (attachRes.meta && typeof attachRes.meta === 'object') meta = attachRes.meta;
+// ✅ rephraseBlocks 付与はここだけ（一本化）
+const attachRes: any = await maybeAttachRephraseForRenderV2({
+  conversationId,
+  userCode,
+  userText: typeof userText === 'string' ? userText : String(userText ?? ''),
+  meta,
+  extraMerged: extraSoT,
+  historyMessages: Array.isArray(historyMessages) ? historyMessages : undefined,
+  traceId: String((meta as any)?.extra?.traceId ?? (meta as any)?.traceId ?? '').trim() || null,
+  effectiveMode: (extraSoT as any)?.effectiveMode ?? (meta as any)?.extra?.effectiveMode ?? null,
+});
 
-      const ex =
-        attachRes.extraMerged ??
-        attachRes.extraSoT ??
-        attachRes.extraForHandle ??
-        attachRes.extra ??
-        null;
+if (attachRes && typeof attachRes === 'object') {
+  if (attachRes.meta && typeof attachRes.meta === 'object') meta = attachRes.meta;
 
-      if (ex && typeof ex === 'object') extraSoT = ex;
-    }
+  const ex =
+    attachRes.extraMerged ??
+    attachRes.extraSoT ??
+    attachRes.extraForHandle ??
+    attachRes.extra ??
+    null;
+
+  if (ex && typeof ex === 'object') extraSoT = ex;
+}
+
 
     // SoT -> render input
     if (

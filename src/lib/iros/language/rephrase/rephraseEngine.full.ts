@@ -54,6 +54,78 @@ import {
   ILINE_OPEN,
   ILINE_CLOSE,
 } from './ilineLock';
+
+// ==============================
+// PATCH: 2-line format enforce (single retry)
+// ==============================
+
+function detectTwoLineFormatRequest(userText: string): boolean {
+  const t = (userText || '').trim();
+  if (!t) return false;
+  return (
+    t.includes('出力は2行だけ') ||
+    (t.includes('1行目=') && t.includes('2行目=')) ||
+    t.includes('2行だけ') ||
+    t.includes('二行だけ')
+  );
+}
+
+function stripOuterQuotes(s: string): string {
+  const t = s.trim();
+  if ((t.startsWith('「') && t.endsWith('」')) || (t.startsWith('"') && t.endsWith('"'))) {
+    return t.slice(1, -1).trim();
+  }
+  return t;
+}
+
+function hasEmojiLike(s: string): boolean {
+  return /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(s);
+}
+
+function validateTwoLineOutput(outText: string): { ok: true } | { ok: false; reason: string } {
+  const raw = (outText || '').replace(/\r\n/g, '\n').trim();
+  const lines = raw.split('\n').filter((l) => l.trim().length > 0);
+
+  if (lines.length !== 2) return { ok: false, reason: `lines!=2 (${lines.length})` };
+
+  const l1 = lines[0].trim();
+  const l2 = stripOuterQuotes(lines[1]);
+
+  if (l1.length < 20 || l1.length > 30) return { ok: false, reason: `line1_len=${l1.length}` };
+  if (!l2) return { ok: false, reason: 'line2_empty' };
+  if (hasEmojiLike(l1) || hasEmojiLike(l2)) return { ok: false, reason: 'emoji_detected' };
+  if (l2.endsWith('？') || l2.endsWith('?')) return { ok: false, reason: 'line2_is_question' };
+
+  return { ok: true };
+}
+
+async function enforceTwoLineIfRequested(params: {
+  userText: string;
+  rawOutText: string;
+  callWriter: (override?: { temperature?: number; extraSystem?: string }) => Promise<string>;
+}): Promise<{ text: string; enforced: boolean; reason?: string }> {
+  const needs = detectTwoLineFormatRequest(params.userText);
+  if (!needs) return { text: params.rawOutText, enforced: false };
+
+  const v1 = validateTwoLineOutput(params.rawOutText);
+  if (v1.ok) return { text: params.rawOutText, enforced: false };
+
+  const extraSystem =
+    '出力は必ず2行。\n' +
+    '1行目=いまの状態の要約（20〜30文字）。\n' +
+    '2行目=ユーザーが次に入力する“具体的な1文”（引用符なし・質問形なし）。\n' +
+    '余計な説明・絵文字は禁止。';
+
+  const retryText = await params.callWriter({ temperature: 0.2, extraSystem });
+
+  const v2 = validateTwoLineOutput(retryText);
+  if (v2.ok) return { text: retryText, enforced: true };
+
+  return { text: params.rawOutText, enforced: false, reason: `retry_failed:${v2.reason}` };
+}
+
+
+
 // ---------------------------------------------
 // types
 // ---------------------------------------------
@@ -392,12 +464,10 @@ export function extractSlotsForRephrase(extra: any): ExtractedSlots {
   // ✅ ILINE 等の制御マーカーはここで壊さない（lock抽出の素材なので保持）
   const normPreserveControl = (v: any): string => {
     const s = String(v ?? '');
-    // 改行だけ正規化。余計な加工はしない（[[ILINE]] を残す）
     return s.replace(/\r\n/g, '\n').trim();
   };
 
-  // ✅ slotsが無いケースを救う：contentから疑似slotを作る
-  if (!slotsRaw) {
+  const buildFallbackObs = (): ExtractedSlots | null => {
     const fallbackText = normPreserveControl(
       extra?.assistantText ??
         extra?.content ??
@@ -414,37 +484,36 @@ export function extractSlotsForRephrase(extra: any): ExtractedSlots {
       keys: ['OBS'],
       source: 'fallback:content',
     };
-  }
+  };
+
+  // ✅ slots が無いケース：contentから疑似slotを作る
+  if (!slotsRaw) return buildFallbackObs();
 
   const out: Slot[] = [];
 
   if (Array.isArray(slotsRaw)) {
     for (const s of slotsRaw) {
       const key = String(s?.key ?? s?.id ?? s?.slotId ?? s?.name ?? '').trim();
-
-      // ここが要点：norm() は使わない（ILINE を壊す可能性があるため）
       const text = normPreserveControl(s?.text ?? s?.value ?? s?.content ?? s?.message ?? s?.out ?? '');
       if (!key || !text) continue;
-
       out.push({ key, text });
     }
   } else if (typeof slotsRaw === 'object' && slotsRaw) {
     const keys = stableOrderKeys(Object.keys(slotsRaw));
     for (const k of keys) {
       const v = (slotsRaw as any)[k];
-
       const text = normPreserveControl(
         typeof v === 'string'
           ? v
           : v?.text ?? v?.content ?? v?.value ?? v?.message ?? v?.out ?? '',
       );
       if (!text) continue;
-
       out.push({ key: String(k), text });
     }
   }
 
-  if (out.length === 0) return null;
+  // ✅ slotsRaw はあるが “本文が1つも取れない” ケースを救う（ここが今回の本丸）
+  if (out.length === 0) return buildFallbackObs();
 
   return {
     slots: out,
@@ -2155,6 +2224,138 @@ const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
     messages = inj.messages as any;
   }
 
+  // ✅ 表現メタ（exprMeta/allow）を system 2本目として必ず注入する
+  // - 判断メタ（q/depth/phase 等）は別。ここは「表現の許可」だけ。
+  // - “会話が流れる”ための自由度はここで解放する（メタの檻の中）。
+
+  // ---------------------------------------------
+  // allow（進行圧）: 推進/断定/抽象削減/具体化の「許可」
+  // - lane を上書きしない（lane=何をするか / allow=どれくらい強くやるか）
+  // - まだ配線が無い前提なので、この場で決めて system で渡す（pure）
+  // ---------------------------------------------
+  const laneKeyForAllow =
+    (opts as any)?.laneKey ??
+    (opts as any)?.userContext?.laneKey ??
+    (opts as any)?.userContext?.ctxPack?.laneKey ??
+    // wants* がこのスコープに居れば拾う
+    ((typeof wantsTConcretize !== 'undefined' && wantsTConcretize) ? 'T_CONCRETIZE' : null) ??
+    ((typeof wantsIdeaBand !== 'undefined' && wantsIdeaBand) ? 'IDEA_BAND' : null) ??
+    null;
+
+  let allowText: string | null = null;
+  let allowObj: any = null;
+
+  try {
+    const { buildAllow, formatAllowSystemText } = await import('@/lib/iros/allow/buildAllow');
+
+    // ※ pickedDepthStage / pickedQCode / repeatSignal / itOk はこの直前で確保済みの前提
+    allowObj = buildAllow({
+      depthStage: pickedDepthStage ?? null,
+      laneKey: laneKeyForAllow,
+      repeatSignal: Boolean(repeatSignal),
+      qPrimary: pickedQCode ?? null,
+      itOk: Boolean(itOk),
+    } as any);
+
+    allowText = formatAllowSystemText(allowObj as any);
+
+    console.log('[IROS/rephraseEngine][ALLOW]', {
+      traceId: debug.traceId,
+      conversationId: debug.conversationId,
+      userCode: debug.userCode,
+      depthStage: pickedDepthStage ?? null,
+      qCode: pickedQCode ?? null,
+      phase: pickedPhase ?? null,
+      laneKeyForAllow,
+      repeatSignal: Boolean(repeatSignal),
+      itOk: Boolean(itOk),
+      allow: allowObj,
+    });
+  } catch (e) {
+    console.log('[IROS/rephraseEngine][ALLOW][ERR]', {
+      traceId: debug.traceId,
+      conversationId: debug.conversationId,
+      userCode: debug.userCode,
+      error: String(e ?? ''),
+    });
+    allowText = null;
+    allowObj = null;
+  }
+
+  // ---------------------------------------------
+  // exprMeta（表現の質）: 語彙/比喩/余白の「許可」
+  // ---------------------------------------------
+  const exprMetaFromCtx =
+    (opts as any)?.exprMeta ??
+    (opts as any)?.userContext?.exprMeta ??
+    (opts as any)?.userContext?.ctxPack?.exprMeta ??
+    null;
+
+  // 最小の既定（まずは効かせる）
+  // - lane契約（IDEA_BAND/T_CONCRETIZE）は systemPrompt 側に既にある前提。
+  // - ここは「言い方の自由」を与えるだけ（形式は壊さない）。
+  const exprMetaDefault = {
+    tone: 'med', // low|med|high
+    density: 'rich', // thin|normal|rich
+    metaphor: 'lite', // off|lite|on
+    ambiguity: 'deny', // deny|allow
+    brevity: 'normal', // short|normal|long
+    rhythm: 'breathe', // flat|breathe
+    forbidden: ['結論：', '次の一手：', '箇条書き', 'チェックリスト'],
+  };
+
+  const exprMeta = (exprMetaFromCtx && typeof exprMetaFromCtx === 'object')
+    ? { ...exprMetaDefault, ...(exprMetaFromCtx as any) }
+    : exprMetaDefault;
+
+  const exprMetaText =
+    [
+      '【EXPR_META（露出禁止）】',
+      '- ここは “表現の許可” だけ。判断（depth/q/回転/結論の中身）は変えない。',
+      '- 形式契約（行数/レーン契約/禁止形式）は守ったまま、語彙・比喩・余白だけ自由に使ってよい。',
+      `- tone: ${String((exprMeta as any).tone)}`,
+      `- density: ${String((exprMeta as any).density)}`,
+      `- metaphor: ${String((exprMeta as any).metaphor)}`,
+      `- ambiguity: ${String((exprMeta as any).ambiguity)}`,
+      `- brevity: ${String((exprMeta as any).brevity)}`,
+      `- rhythm: ${String((exprMeta as any).rhythm)}`,
+      `- forbidden: ${(Array.isArray((exprMeta as any).forbidden) ? (exprMeta as any).forbidden : []).join(', ')}`,
+    ].join('\n');
+
+  // ✅ 注入順
+  // systemPrompt（先頭system） → allow（system2） → exprMeta（system3）
+  // ※ HistoryDigest v1 を system2 に入れてる場合は “その後ろ” になるが、ここは同一処理内では優先順位固定でOK
+  if (Array.isArray(messages) && messages.length >= 1 && messages[0]?.role === 'system') {
+    const injected: any[] = [messages[0]];
+
+    // allow（あれば）
+    if (allowText && String(allowText).trim().length > 0) {
+      injected.push({ role: 'system', content: allowText });
+    }
+
+    // exprMeta（常に）
+    injected.push({ role: 'system', content: exprMetaText });
+
+    messages = [...injected, ...messages.slice(1)] as any;
+  } else {
+    const head: any[] = [];
+    if (allowText && String(allowText).trim().length > 0) head.push({ role: 'system', content: allowText });
+    head.push({ role: 'system', content: exprMetaText });
+    messages = [...head, ...(messages as any)] as any;
+  }
+
+  console.log('[IROS/rephraseEngine][EXPR_META]', {
+    traceId: debug.traceId,
+    conversationId: debug.conversationId,
+    userCode: debug.userCode,
+    injected: true,
+    tone: (exprMeta as any).tone,
+    density: (exprMeta as any).density,
+    metaphor: (exprMeta as any).metaphor,
+    ambiguity: (exprMeta as any).ambiguity,
+    brevity: (exprMeta as any).brevity,
+    rhythm: (exprMeta as any).rhythm,
+  });
 
   // ログ確認
   console.log('[IROS/rephraseEngine][MSG_PACK]', {

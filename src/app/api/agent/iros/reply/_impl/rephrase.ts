@@ -384,14 +384,34 @@ export async function maybeAttachRephraseForRenderV2(args: {
   const extraForRender = {
     ...(meta?.extra ?? {}),
     ...(extraMerged ?? {}),
+
+    // ✅ postprocess で検出した policy を拾う（framePlan が欠けるケースの救済）
     slotPlanPolicy:
       (meta as any)?.framePlan?.slotPlanPolicy ??
       (meta as any)?.slotPlanPolicy ??
       (meta as any)?.extra?.slotPlanPolicy ??
+      (meta as any)?.extra?.slotPlanPolicy_detected ??
       null,
+
     framePlan: (meta as any)?.framePlan ?? null,
     slotPlan: (meta as any)?.slotPlan ?? null,
+
+    // ✅ seed の互換注入：extractSlotsForRephrase が slotPlanSeed/slotSeed を見ても落ちないようにする
+    slotPlanSeed:
+      TRIM((meta as any)?.extra?.slotPlanSeed) ||
+      TRIM((extraMerged as any)?.slotPlanSeed) ||
+      TRIM((meta as any)?.extra?.llmRewriteSeed) ||
+      TRIM((extraMerged as any)?.llmRewriteSeed) ||
+      null,
+
+    slotSeed:
+      TRIM((meta as any)?.extra?.slotSeed) ||
+      TRIM((extraMerged as any)?.slotSeed) ||
+      TRIM((meta as any)?.extra?.llmRewriteSeed) ||
+      TRIM((extraMerged as any)?.llmRewriteSeed) ||
+      null,
   };
+
 
   const extracted = extractSlotsForRephrase(extraForRender);
 

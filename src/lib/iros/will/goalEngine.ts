@@ -160,14 +160,39 @@ export function deriveIrosGoal(args: {
     };
   }
 
-  // 6) fallback → uncover
-  const fallbackDepth = lastDepth ?? 'S2';
-  return {
-    kind: 'uncover',
-    targetDepth: fallbackDepth,
-    targetQ: lastQ,
-    reason: '明確な方向性はまだ決めず、まずは背景をやわらかく掘り起こす',
-  };
+  // 5.2) 雑談（smalltalk） → stabilize（ライト）
+  // - uncover の落ち先にしない
+  if (isSmallTalk(text)) {
+    const targetDepth = chooseStabilizeDepth(lastDepth);
+    return {
+      kind: 'stabilize',
+      targetDepth,
+      targetQ: lastQ ?? 'Q2',
+      reason: '雑談（天気/食事/挨拶/近況）と判断したため、軽く整える（uncoverには落とさない）',
+    };
+  }
+
+  // 5.5) 明示的に「掘る」宣言がある場合のみ uncover
+  if (containsUncoverWords(text)) {
+    const fallbackDepth = lastDepth ?? 'S2';
+    return {
+      kind: 'uncover',
+      targetDepth: fallbackDepth,
+      targetQ: lastQ,
+      reason: 'ユーザーが深掘り意図（掘る/原因/根本/未消化等）を明示したため',
+    };
+  }
+
+  // 6) fallback（デフォルトは stabilize）
+  {
+    const targetDepth = chooseStabilizeDepth(lastDepth);
+    return {
+      kind: 'stabilize',
+      targetDepth,
+      targetQ: lastQ ?? 'Q2',
+      reason: '明示トリガーが無いため、まずは整えて流れを保つ（uncoverはデフォルトにしない）',
+    };
+  }
 }
 
 /* ========= helpers ========= */
@@ -177,6 +202,105 @@ function normalize(s: string): string {
     .toLowerCase()
     .replace(/[ \t　]+/g, ' ')
     .trim();
+}
+
+// ---- A: smalltalk detector ----
+// 目的：雑談を uncover に落とさない（fallback を stabilize に寄せる）
+//
+// 方針：
+// - 短文 + 挨拶/天気/食事/近況/雑談宣言 などを拾う
+// - ただし「掘る/原因/根本…」が入っていたら smalltalk 扱いしない
+function isSmallTalk(text: string): boolean {
+  if (!text) return false;
+
+  // 「掘る」系が入ってるなら smalltalk にしない
+  if (containsUncoverWords(text)) return false;
+
+  const t = text;
+
+  const hasSmallTalkSignals = [
+    // 雑談宣言
+    '雑談',
+    'おしゃべり',
+    '話そう',
+    '話します',
+    '話したい',
+    // 挨拶
+    'こんにちは',
+    'こんばんは',
+    'おはよう',
+    'はじめまして',
+    'よろしく',
+    'ありがとう',
+    'おつかれ',
+    'お疲れ',
+    // 天気
+    '天気',
+    '晴れ',
+    '雨',
+    '曇',
+    '雪',
+    '寒い',
+    '暑い',
+    '涼しい',
+    // 食事
+    '夕食',
+    '昼食',
+    '朝食',
+    'ごはん',
+    'ご飯',
+    '食べ',
+    '飲み',
+    // 近況
+    '今日',
+    'いま',
+    '最近',
+    '近況',
+    '元気',
+  ].some((w) => t.includes(w));
+
+  // かなり短い文は雑談寄りに扱う（例：「今日はいい天気」等）
+  const shortLen = t.length <= 28;
+
+  // 質問であっても雑談系（例：「今日の夕食なにがいい？」）は smalltalk に入れてよい
+  return hasSmallTalkSignals && (shortLen || true);
+}
+
+function containsUncoverWords(text: string): boolean {
+  const words = [
+    // 掘る宣言
+    '掘る',
+    '深掘',
+    '深ぼ',
+    '深く見',
+    '深くみ',
+    // 原因探索
+    '原因',
+    '理由',
+    '根本',
+    '本質',
+    '正体',
+    '裏側',
+    '背景',
+    '構造',
+    // 未消化・引っかかり
+    '未消化',
+    '引っかか',
+    '引っ掛か',
+    'モヤモヤ',
+    'もやもや',
+    '違和感',
+    // トラウマ/過去
+    'トラウマ',
+    '過去',
+    '昔の',
+    '幼少',
+    // 解除/癒し系（深掘り意図の合図として扱う）
+    '手放し',
+    '浄化',
+    '解放',
+  ];
+  return words.some((w) => text.includes(w));
 }
 
 function containsStuckLoopWords(text: string): boolean {

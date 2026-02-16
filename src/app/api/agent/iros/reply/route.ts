@@ -19,6 +19,7 @@ import { attachNextStepMeta, extractNextStepChoiceFromText, findNextStepOptionBy
 import { ensureIrosConversationUuid } from '@/lib/iros/server/ensureIrosConversationUuid';
 import { persistAssistantMessageToIrosMessages } from '@/lib/iros/server/persistAssistantMessageToIrosMessages';
 import { runNormalBase } from '@/lib/iros/conversation/normalBase';
+import { decideExpressionLane } from '@/lib/iros/expression/decideExpressionLane';
 
 import { loadIrosMemoryState } from '@/lib/iros/memoryState';
 import { applyRenderEngineIfEnabled } from './_impl/applyRenderEngineIfEnabled';
@@ -600,33 +601,39 @@ export async function POST(req: NextRequest) {
 
       const isDiagnosisFinalSeed = finalTextPolicy === 'DIAGNOSIS_FINAL__SEED_FOR_LLM';
 
-      const candidateText = pickText(r?.assistantText, r?.content);
-      const isForward = speechAct === 'FORWARD';
-      const isEmptyLike = isEffectivelyEmptyText(candidateText);
+// -------------------------------------------------------
+// NORMAL BASE fallback（非FORWARDで本文が空に近い場合）
+// -------------------------------------------------------
 
-      const isNonForwardButEmpty =
-        !isForward &&
-        allowLLM !== false &&
-        String(userTextClean ?? '').trim().length > 0 &&
-        isEmptyLike &&
-        !isPdfScaffoldNoCommit &&
-        !isDiagnosisFinalSeed;
+const candidateText = pickText(r?.content, r?.assistantText); // ← content優先
+const isForward = speechAct === 'FORWARD';
+const isEmptyLike = isEffectivelyEmptyText(candidateText);
 
-      if (isNonForwardButEmpty) {
-        const normal = await runNormalBase({ userText: userTextClean });
+const isNonForwardButEmpty =
+  !isForward &&
+  allowLLM !== false &&
+  String(userTextClean ?? '').trim().length > 0 &&
+  isEmptyLike &&
+  !isPdfScaffoldNoCommit &&
+  !isDiagnosisFinalSeed;
 
-        r.assistantText = normal.text;
-        r.content = normal.text;
-        r.text = normal.text;
+if (isNonForwardButEmpty) {
+  const normal = await runNormalBase({ userText: userTextClean });
 
-        r.metaForSave = r.metaForSave ?? {};
-        r.metaForSave.extra = {
-          ...(r.metaForSave.extra ?? {}),
-          normalBaseApplied: true,
-          normalBaseSource: normal.meta.source,
-          normalBaseReason: 'EMPTY_LIKE_TEXT',
-        };
-      }
+  // ✅ content を正本にする
+  r.content = normal.text;
+  r.assistantText = normal.text; // 互換維持
+  r.text = normal.text;
+
+  r.metaForSave = r.metaForSave ?? {};
+  r.metaForSave.extra = {
+    ...(r.metaForSave.extra ?? {}),
+    normalBaseApplied: true,
+    normalBaseSource: normal.meta.source,
+    normalBaseReason: 'EMPTY_LIKE_TEXT',
+  };
+}
+
     }
 
     if (!irosResult.ok) {
@@ -695,20 +702,27 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // -------------------------------------------------------
-    // 本文の同期（content/assistantText）
-    // -------------------------------------------------------
-    {
-      const r: any = result;
+// -------------------------------------------------------
+// 本文の同期（content/assistantText）
+// - 正本: result.content
+// -------------------------------------------------------
+{
+  const r: any = result;
 
-      const final = pickText(r?.assistantText, r?.content, assistantText);
-      assistantText = final;
+  // ✅ content優先で確定
+  const final = pickText(r?.content, assistantText);
+  assistantText = final;
 
-      if (r && typeof r === 'object') {
-        r.content = final;
-        r.assistantText = final;
-      }
+  if (r && typeof r === 'object') {
+    // contentが空のときだけ補完（上書き事故防止）
+    if (isEffectivelyEmptyText(String(r.content ?? ''))) {
+      r.content = final;
     }
+
+    r.assistantText = final; // 表示互換
+  }
+}
+
 
     // ✅ render-v2 の fallback 材料 SoT 同期
     {
@@ -943,7 +957,7 @@ export async function POST(req: NextRequest) {
         const curNoSlots = hasSlotDirectives ? stripSlotDirectives(curRaw) : curRaw.trimEnd();
         const curNoSlotsTrim = curNoSlots.trim();
 
-        const finalText = needRecover
+        let finalText = needRecover
           ? recoveredText
             ? recoveredText
             : hasSlotDirectives && curNoSlotsTrim.length > 0
@@ -951,9 +965,126 @@ export async function POST(req: NextRequest) {
               : curRaw.trimEnd()
           : curRaw.trimEnd();
 
+        // =========================================================
+        // ✅ Expression Lane（最後に適用）
+        // - ここは「本文の正本(finalText)」が確定した“後”に、1行だけ前置きできる
+        // - Depth/Phase/Lane の進行は変えない（表現だけ）
+        // =========================================================
+        try {
+          const metaAny: any = meta as any;
+          const extraAny: any = metaAny?.extra ?? {};
+
+          const laneKey =
+            String(extraAny?.intentBridge?.laneKey ?? metaAny?.laneKey ?? '').trim() || 'IDEA_BAND';
+
+          const phase = (metaAny?.phase ?? metaAny?.framePlan?.phase ?? null) as any;
+          const depth = (metaAny?.depth ?? metaAny?.depthStage ?? null) as any;
+          const allow = (metaAny?.allow ?? extraAny?.allow ?? null) as any;
+
+          const flowDelta =
+            metaAny?.flow?.delta ?? extraAny?.ctxPack?.flow?.delta ?? extraAny?.flow?.delta ?? null;
+
+          const returnStreak = extraAny?.ctxPack?.flow?.returnStreak ?? extraAny?.flow?.returnStreak ?? null;
+
+          const flow = {
+            flowDelta: flowDelta ?? null,
+            returnStreak: returnStreak ?? null,
+            ageSec: extraAny?.ctxPack?.flow?.ageSec ?? null,
+            fresh: extraAny?.ctxPack?.flow?.fresh ?? null,
+            sessionBreak: extraAny?.ctxPack?.flow?.sessionBreak ?? null,
+          };
+
+          const signals = (extraAny?.exprSignals ?? null) as any;
+
+          const flags = (() => {
+            const sev =
+              extraAny?.stall?.severity ??
+              extraAny?.stallProbe?.severity ??
+              extraAny?.tConcretize?.stall?.severity ??
+              extraAny?.t_concretize?.stall?.severity ??
+              extraAny?.forceSwitch?.stall?.severity ??
+              extraAny?.ctxPack?.stall?.severity ??
+              null;
+            return {
+              enabled: extraAny?.exprEnabled ?? true,
+              stallHard: Boolean(extraAny?.stallHard ?? (sev === 'hard')),
+            };
+          })();
+
+          const d = decideExpressionLane({
+            laneKey,
+            phase,
+            depth,
+            allow,
+            flow,
+            signals,
+            flags,
+            traceId: (metaAny?.traceId ?? null) as any,
+          } as any);
+
+          const preface = String(d?.prefaceLine ?? '').trim();
+          const shouldInject = d?.fired === true && preface.length > 0 && !finalText.startsWith(preface);
+
+          if (shouldInject) {
+            finalText = `${preface}\n${finalText}`.trimEnd();
+          }
+
+          metaAny.extra = {
+            ...(metaAny.extra ?? {}),
+            exprDecision: {
+              fired: !!d?.fired,
+              lane: String(d?.lane ?? 'OFF'),
+              reason: String(d?.reason ?? 'DEFAULT'),
+              blockedBy: (d?.blockedBy ?? null) as any,
+              hasPreface: preface.length > 0,
+              injectedPreface: shouldInject,
+            },
+          };
+        } catch (e) {
+          (meta as any).extra = {
+            ...(((meta as any).extra ?? {}) as any),
+            exprDecision: {
+              fired: false,
+              lane: 'OFF',
+              reason: 'DEFAULT',
+              blockedBy: 'ERROR',
+              hasPreface: false,
+              injectedPreface: false,
+              error: String(e ?? ''),
+            },
+          };
+        }
+
         (result as any).content = finalText;
         (result as any).text = finalText;
         (result as any).assistantText = finalText;
+
+        // ✅ metaForSave 側にも「最終本文」を同期（再発防止：meta参照経路を潰す）
+try {
+  const mfs: any = metaForSave as any;
+  const mfsExtra: any = (mfs?.extra ?? {}) as any;
+
+  mfs.extra = {
+    ...mfsExtra,
+    // UI/DBの正本と同一にする
+    resolvedText: finalText,
+    finalAssistantText: finalText,
+    finalAssistantTextLen: finalText.length,
+
+    // 監査用（どこを正本にしたか）
+    finalTextPolicy: 'FINAL_TEXT_SYNCED',
+    finalTextPolicyPickedFrom: 'uiResultContent',
+  };
+
+  // meta 側にも明示で同期（参照の揺れを潰す）
+  const metaAny: any = meta as any;
+  metaAny.extra = {
+    ...(metaAny.extra ?? {}),
+    resolvedText: finalText,
+    finalAssistantText: finalText,
+  };
+} catch {}
+
 
         meta.extra = {
           ...(meta.extra ?? {}),
@@ -964,6 +1095,7 @@ export async function POST(req: NextRequest) {
             needRecover && Boolean(recoveredText) ? (head ? 'rephraseHead' : 'rephraseBlocks') : undefined,
           finalTextHadSlotDirectives: hasSlotDirectives ? true : undefined,
         };
+
       }
 
       // UI MODE確定（IR以外は NORMAL）
@@ -984,115 +1116,127 @@ export async function POST(req: NextRequest) {
       }
 
       // =========================================================
-      // ✅ assistant 保存（single-writer / 1回だけ）
+      // ✅ assistant 保存の“正本”決定
       // - “UIに返す本文(result.content)”を正本にする
+      // - meta 参照経路は混線の温床なので、救済でも見ない（metaForSaveのみ最小限）
       // =========================================================
-      const resultObjFinalRaw =
-        String((result as any)?.content ?? '').trim() ||
+
+      const metaForSaveExtraAny: any = (metaForSave as any)?.extra ?? {};
+
+      // ✅ UI返却の最終本文（renderGateway の最終結果がここに入る前提）
+      const resultContentRaw = String((result as any)?.content ?? '').trim();
+
+      // ✅ meta救済は「同期済み」のものだけ許可（= UI正本と同一のはずのテキストだけ）
+      const resolvedUiTextRaw = (() => {
+        const policy = String(metaForSaveExtraAny?.finalTextPolicy ?? '').trim();
+        if (policy !== 'FINAL_TEXT_SYNCED') return '';
+        return (
+          String(metaForSaveExtraAny?.resolvedText ?? '').trim() ||
+          String(metaForSaveExtraAny?.finalAssistantText ?? '').trim() ||
+          ''
+        );
+      })();
+
+      // 従来互換：assistantText/text は “混入” が起きやすいので最終手段に落とす（ただし persist では原則使わない）
+      const resultAssistantOrTextRaw =
         String((result as any)?.assistantText ?? '').trim() ||
         String((result as any)?.text ?? '').trim() ||
         '';
 
-      const metaExtraAny: any = (meta as any)?.extra ?? {};
+      const resultObjFinalRaw = resultContentRaw || resultAssistantOrTextRaw || '';
 
-      const displayPreferredRaw =
-        String(metaExtraAny?.resolvedText ?? '').trim() ||
-        String(metaExtraAny?.assistantText ?? '').trim() ||
-        String(metaExtraAny?.finalAssistantText ?? '').trim() ||
-        '';
-
+      // ✅ blocks（SoT/rephrase）救済：正本が空のときだけ
       const blocksAny: unknown =
         (Array.isArray((extraSoT as any)?.rephraseBlocks) && (extraSoT as any).rephraseBlocks.length > 0
           ? (extraSoT as any).rephraseBlocks
-          : metaExtraAny?.rephraseBlocks ?? metaExtraAny?.rephrase?.blocks ?? metaExtraAny?.rephrase?.rephraseBlocks) ?? null;
+          : metaForSaveExtraAny?.rephraseBlocks ??
+            metaForSaveExtraAny?.rephrase?.blocks ??
+            metaForSaveExtraAny?.rephrase?.rephraseBlocks) ?? null;
 
       const blocksJoined = Array.isArray(blocksAny) ? blocksToText(blocksAny as any[]) : '';
       const blocksJoinedCleaned = stripInternalLines(blocksJoined);
 
-      const contentForPersist = (() => {
-        const fromResultObj = stripInternalLines(resultObjFinalRaw);
-        if (!isEffectivelyEmptyText(fromResultObj) && fromResultObj.length > 0) return fromResultObj;
 
-        if (blocksJoinedCleaned.length > 0) return blocksJoinedCleaned;
+// ✅ persist は「UIに返した本文(result.content)」を“正本”として保存する
+// - UI表示本文 = DB保存本文 を保証する
+// - それ以外（rephraseBlocks / meta）は “正本が空のときだけ” の救済
+const uiReturnText = stripInternalLines(resultContentRaw); // ✅ 最優先（UI返却本文）
+const uiResolvedText = stripInternalLines(resolvedUiTextRaw); // ✅ 監査/救済（meta同期済の最終本文）
+const fromBlocks = stripInternalLines(blocksJoinedCleaned);
+const fromResultObj = stripInternalLines(resultObjFinalRaw);
 
-        const fromMeta = stripInternalLines(displayPreferredRaw);
-        if (!isEffectivelyEmptyText(fromMeta) && fromMeta.length > 0) return fromMeta;
+const contentForPersist = (() => {
+  if (!isEffectivelyEmptyText(uiReturnText) && uiReturnText.length > 0) return uiReturnText;
+  if (!isEffectivelyEmptyText(uiResolvedText) && uiResolvedText.length > 0) return uiResolvedText;
 
-        const userEcho = String(userTextClean ?? '').trim();
-        if (userEcho.length > 0) return userEcho;
+  // 以下は “正本が空” の救済（原則ここに落ちない）
+  if (!isEffectivelyEmptyText(fromBlocks) && fromBlocks.length > 0) return fromBlocks;
+  if (!isEffectivelyEmptyText(fromResultObj) && fromResultObj.length > 0) return fromResultObj;
 
-        return '……';
-      })();
+  // ❌ userEcho には落とさない（オウム再発防止）
+  return '……';
+})();
 
-      console.info('[IROS/PERSIST_PICK]', {
-        conversationId,
-        userCode,
-        pickedFrom:
-          !isEffectivelyEmptyText(stripInternalLines(resultObjFinalRaw)) && stripInternalLines(resultObjFinalRaw).length > 0
-            ? 'resultObjFinalRaw'
-            : blocksJoinedCleaned.length > 0
-              ? 'rephraseBlocks'
-              : !isEffectivelyEmptyText(stripInternalLines(displayPreferredRaw)) && stripInternalLines(displayPreferredRaw).length > 0
-                ? 'metaDisplayPreferred'
-                : String(userTextClean ?? '').trim().length > 0
-                  ? 'userEcho'
-                  : 'dots',
-        pickedLen: contentForPersist.length,
-        pickedHead: String(contentForPersist).slice(0, 40),
-        fromResultObjLen: stripInternalLines(resultObjFinalRaw).length,
-        blocksJoinedCleanedLen: blocksJoinedCleaned.length,
-        fromMetaLen: stripInternalLines(displayPreferredRaw).length,
-        userEchoLen: String(userTextClean ?? '').trim().length,
-        isPickedDots: contentForPersist === '……',
-      });
+const pickedFromForLog = (() => {
+  if (!isEffectivelyEmptyText(uiReturnText) && uiReturnText.length > 0) return 'uiResultContent';
+  if (!isEffectivelyEmptyText(uiResolvedText) && uiResolvedText.length > 0) return 'metaResolvedUiText';
+
+  if (!isEffectivelyEmptyText(fromBlocks) && fromBlocks.length > 0) return 'rephraseBlocks';
+  if (!isEffectivelyEmptyText(fromResultObj) && fromResultObj.length > 0) return 'resultObjFinalRaw';
+
+  return 'dots';
+})();
+
+console.info('[IROS/PERSIST_PICK]', {
+  conversationId,
+  userCode,
+  pickedFrom: pickedFromForLog,
+  pickedLen: contentForPersist.length,
+  pickedHead: String(contentForPersist).slice(0, 40),
+
+  // 参照候補の長さ（監査）
+  fromResultObjLen: stripInternalLines(resultObjFinalRaw).length,
+  blocksJoinedCleanedLen: blocksJoinedCleaned.length,
+  resolvedUiTextLen: stripInternalLines(resolvedUiTextRaw).length,
+
+  userEchoLen: String(userTextClean ?? '').trim().length,
+  isPickedDots: contentForPersist === '……',
+});
 
 
+          // ✅ FINAL 確定 echo 監査（persist 直前の “最終保存本文” で判定）
+          try {
+            const normalizeEcho = (s: string) =>
+              String(s ?? '')
+                .replace(/\r\n/g, '\n')
+                .replace(/\s+/g, ' ')
+                .trim();
 
-      // ✅ FINAL 確定 echo 監査（persist 直前の “最終保存本文” で判定）
-      try {
-        const normalizeEcho = (s: string) =>
-          String(s ?? '')
-            .replace(/\r\n/g, '\n')
-            .replace(/\s+/g, ' ')
-            .trim();
+            const userEchoTrim = normalizeEcho(String(userTextClean ?? ''));
+            const finalTrim = normalizeEcho(String(contentForPersist ?? ''));
 
-        const userEchoTrim = normalizeEcho(String(userTextClean ?? ''));
-        const finalTrim = normalizeEcho(String(contentForPersist ?? ''));
+            const isEchoExact = Boolean(userEchoTrim && finalTrim && userEchoTrim === finalTrim);
 
-        // pickedFrom の推定（監査に必要）
-        const fromResultObj = stripInternalLines(resultObjFinalRaw);
-        const displayPreferred = stripInternalLines(displayPreferredRaw);
-        const pickedFrom =
-          !isEffectivelyEmptyText(fromResultObj) && fromResultObj.length > 0
-            ? 'resultObj'
-            : blocksJoinedCleaned.length > 0
-              ? 'rephraseBlocks'
-              : !isEffectivelyEmptyText(displayPreferred) && displayPreferred.length > 0
-                ? 'meta'
-                : userEchoTrim.length > 0
-                  ? 'userEcho'
-                  : 'dots';
+            const finalTextPolicy = String((metaForSave as any)?.extra?.finalTextPolicy ?? '');
+            const rescuedFromRephraseMeta = Boolean((metaForSave as any)?.extra?.finalAssistantTextRescuedFromRephraseMeta);
+            const rescuedFromRephrase = Boolean((metaForSave as any)?.extra?.finalAssistantTextRescuedFromRephrase);
 
-        const isEchoExact = Boolean(userEchoTrim && finalTrim && userEchoTrim === finalTrim);
-        const finalTextPolicy = String((metaForSave as any)?.extra?.finalTextPolicy ?? '');
-        const rescuedFromRephraseMeta = Boolean((metaForSave as any)?.extra?.finalAssistantTextRescuedFromRephraseMeta);
-        const rescuedFromRephrase = Boolean((metaForSave as any)?.extra?.finalAssistantTextRescuedFromRephrase);
+            if (isEchoExact) {
+              console.warn('[IROS/PERSIST_PICK][ECHO_DETECTED_FINAL]', {
+                conversationId,
+                userCode,
+                pickedFrom: pickedFromForLog,
+                finalTextPolicy,
+                userLen: userEchoTrim.length,
+                finalLen: finalTrim.length,
+                userHead: userEchoTrim.slice(0, 80),
+                finalHead: finalTrim.slice(0, 80),
+                rescuedFromRephraseMeta,
+                rescuedFromRephrase,
+              });
+            }
+          } catch {}
 
-        if (isEchoExact) {
-          console.warn('[IROS/PERSIST_PICK][ECHO_DETECTED_FINAL]', {
-            conversationId,
-            userCode,
-            pickedFrom,
-            finalTextPolicy,
-            userLen: userEchoTrim.length,
-            finalLen: finalTrim.length,
-            userHead: userEchoTrim.slice(0, 80),
-            finalHead: finalTrim.slice(0, 80),
-            rescuedFromRephraseMeta,
-            rescuedFromRephrase,
-          });
-        }
-      } catch {}
 
       const persistStrict =
         String(process.env.IROS_PERSIST_STRICT ?? '').trim() === '1' ||

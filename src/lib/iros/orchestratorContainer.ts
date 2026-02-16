@@ -238,42 +238,46 @@ const fixedNorthKey =
 
   (meta as any).frame = frameSelected;
 
-// dump（1回だけ）
-// console.log('[IROS/frame-debug][dump] containerDecision', {
-//   inputKind,
-//   rawTargetKind,
-//   targetKindNorm,
-//   dg,
-//   itActive,          // T候補
-//   tEntryOk,          // ✅ T確定
-//   hasFixedNorthSUN,  // 北極星（SUN）
-//   hasCommittedAnchor,// 確定アンカー（commit）
-//   hasFixedAnchor,    // = hasCommittedAnchor（互換）
-//   fixedNorthKey,
-//   forceS,
-//   wantsIReturn,
-//   frameSelected,
-//   meta_frame_after: (meta as any).frame,
-// });
+  // ✅ container は「仮の frame 判定（hint）」だけを持つ
+  // - 真実の frame は orchestrator 側の meta.framePlan.frame に一本化する
+  // - meta.frame をここで触ると after-container で frame 混線が起きる
+  (meta as any).frameSelected = frameSelected;
 
-(meta as any).frameDebug_containerDecision = {
-  inputKind,
-  rawTargetKind,
-  targetKindNorm,
-  dg,
-  itActive, // T候補
-  // tEntryOk は “ANCHOR_ENTRY 確定後” に最終決定したいので、ここでは参考値扱いにする
-  tEntryOk_pre: tEntryOk,
-  hasFixedNorthSUN,
-  hasCommittedAnchor,
-  hasFixedAnchor,
-  fixedNorthKey,
-  forceS,
-  wantsIReturn,
-  frameSelected,
-  meta_frame_after: (meta as any).frame,
-};
+  // dump（1回だけ）
+  // console.log('[IROS/frame-debug][dump] containerDecision', {
+  //   inputKind,
+  //   rawTargetKind,
+  //   targetKindNorm,
+  //   dg,
+  //   itActive,          // T候補
+  //   tEntryOk,          // ✅ T確定
+  //   hasFixedNorthSUN,  // 北極星（SUN）
+  //   hasCommittedAnchor,// 確定アンカー（commit）
+  //   hasFixedAnchor,    // = hasCommittedAnchor（互換）
+  //   fixedNorthKey,
+  //   forceS,
+  //   wantsIReturn,
+  //   frameSelected,
+  //   meta_frame_after: (meta as any).frameSelected,
+  // });
 
+  (meta as any).frameDebug_containerDecision = {
+    inputKind,
+    rawTargetKind,
+    targetKindNorm,
+    dg,
+    itActive, // T候補
+    // tEntryOk は “ANCHOR_ENTRY 確定後” に最終決定したいので、ここでは参考値扱いにする
+    tEntryOk_pre: tEntryOk,
+    hasFixedNorthSUN,
+    hasCommittedAnchor,
+    hasFixedAnchor,
+    fixedNorthKey,
+    forceS,
+    wantsIReturn,
+    frameSelected,
+    meta_frame_after: (meta as any).frameSelected,
+  };
 
 
 

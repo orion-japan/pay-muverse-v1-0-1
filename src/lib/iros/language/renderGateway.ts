@@ -1114,7 +1114,7 @@ export function renderGatewayAsReply(args: {
     } else if (Array.isArray(rephraseBlocks) && rephraseBlocks.length > 0) {
 
       // ✅ 一本化：rephraseBlocks があれば常に blocks 経由で本文を組む（pickedFrom に依存しない）
-      const cleanedBlocks = rephraseBlocks
+      const cleanedBlocksRaw = rephraseBlocks
         .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim())
         // ✅ 追加：advance計測用の内部ブロックは UI に出さない
         .filter((t: string) => !t.trimStart().startsWith('@NEXT_HINT'))
@@ -1123,27 +1123,76 @@ export function renderGatewayAsReply(args: {
         .filter(Boolean)
         // ✅ 追加：renderV2 に渡す前に ILINE 末尾の writer 注釈を除去して “末尾切り事故” を防ぐ
         .map((t: string) => cutAfterIlineAndDropWriterNotes(t))
-        .filter(Boolean)
-        .map((t: string) => ({ text: t as string }));
+        .filter(Boolean);
 
+// ✅ 表現レーン preface を “rephraseBlocks 採用時” にも 1行だけ先頭付与する
+// - base(resultObjFinalRaw) には preface が残るが、UI は rephraseBlocks を採用するため消える
+{
+  // 1行に潰す（ローカル定義：この関数内だけで完結させる）
+  const clampOneLineLocal = (s: string) =>
+    String(s ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
 
-      if (cleanedBlocks.length > 0) {
-        blocks = cleanedBlocks;
-        pickedFrom = 'rephraseBlocks';
-      } else {
-        // ✅ blocks が全部ダメなら通常ルート（最後尾の保険として r0s）
-        const base2 = base || fallbackText || r0s || '';
-        const lines = splitToLines(base2);
-        blocks = lines
-          .map((t) => stripInternalLabels(t))
-          .filter(Boolean)
-          // ✅ 追加：内部ディレクティブ/JSON塊は UI に出さない（rephraseBlocks と同等）
-          .filter((t: string) => !t.trimStart().startsWith('@NEXT_HINT'))
-          .filter((t: string) => !isBadBlock(t))
-          .map((t) => ({ text: t }));
-      }
+  const exprPrefaceRaw = clampOneLineLocal(
+    String((extraAny as any)?.expr?.prefaceLine ?? (extraAny as any)?.expr?.prefaceHead ?? ''),
+  );
+  const exprPreface = exprPrefaceRaw;
+
+  const shouldPrependPrefaceToBlocks = (preface: string, head: string, exAny: any) => {
+    if (!preface) return false;
+    if (!head) return true;
+    if (head === preface) return false;
+    if (head.startsWith(preface)) return false;
+    return true;
+  };
+
+  const cleanedBlocksWithPreface = (cleanedBlocksRaw: string[]) => {
+    if (!exprPreface) return cleanedBlocksRaw;
+    const head = String(cleanedBlocksRaw?.[0] ?? '').trim();
+    if (shouldPrependPrefaceToBlocks(exprPreface, head, extraAny)) {
+      (extraAny as any).exprPrefaceApplied = true;
+      return [exprPreface, ...cleanedBlocksRaw];
+    }
+    // 既に入っている場合も “適用済み扱い” にして二重適用事故を根絶
+    (extraAny as any).exprPrefaceApplied = true;
+    return cleanedBlocksRaw;
+  };
+
+  // ✅ まず「テキスト配列」を作る（cleanedBlocksText をここで定義する）
+  const cleanedBlocksText = rephraseBlocks
+    .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim())
+    // advance計測用の内部ブロックは UI に出さない
+    .filter((t: string) => !t.trimStart().startsWith('@NEXT_HINT'))
+    .filter((t: string) => !isBadBlock(t))
+    .map((t: string) => stripInternalLabels(t))
+    .filter(Boolean)
+    // ILINE 末尾の writer 注釈を除去して “末尾切り事故” を防ぐ
+    .map((t: string) => cutAfterIlineAndDropWriterNotes(t))
+    .filter(Boolean);
+
+  // ✅ preface を足した後に blocks へ変換（cleanedBlocks という “blocks配列” はここで1回だけ定義）
+  const cleanedBlocksText2 = cleanedBlocksWithPreface(cleanedBlocksText);
+  const cleanedBlocks = cleanedBlocksText2.map((t: string) => ({ text: t as string }));
+
+  if (cleanedBlocks.length > 0) {
+    blocks = cleanedBlocks;
+    pickedFrom = 'rephraseBlocks';
+  } else {
+    const base2 = base || fallbackText || r0s || '';
+    const lines = splitToLines(base2);
+    blocks = lines
+      .map((t) => stripInternalLabels(t))
+      .filter(Boolean)
+      .filter((t: string) => !t.trimStart().startsWith('@NEXT_HINT'))
+      .filter((t: string) => !isBadBlock(t))
+      .map((t) => ({ text: t }));
+  }
+}
+
 
     } else {
+
       // 通常ルート
       const lines = splitToLines(base);
       blocks = lines
@@ -1336,20 +1385,24 @@ pipe('after_renderV2', content);
       ? contentRaw
       : pickedRaw;
 
-  const meta = {
-    blocksCount: blocks.length,
-    maxLines: maxLinesFinal,
-    enable: true,
-    pickedFrom,
-    pickedLen: norm(pickedForMeta).length,
-    pickedHead: head(pickedForMeta),
-    fallbackFrom,
-    fallbackLen: norm(fallbackText).length,
-    fallbackHead: head(fallbackText),
-    outLen: norm(contentRaw).length,
-    outHead: head(contentRaw),
-    rev: IROS_RENDER_GATEWAY_REV,
-  };
+      const meta = {
+        blocksCount: blocks.length,
+        maxLines: maxLinesFinal,
+        enable: true,
+        pickedFrom,
+        pickedLen: norm(pickedForMeta).length,
+        pickedHead: head(pickedForMeta),
+        fallbackFrom,
+        fallbackLen: norm(fallbackText).length,
+        fallbackHead: head(fallbackText),
+
+        // ✅ outLen は “最終表示” の生文字数で統一（enable=false と同じ定義）
+        outLen: String(contentRaw).length,
+
+        outHead: head(contentRaw),
+        rev: IROS_RENDER_GATEWAY_REV,
+      };
+
 
   // ✅ meta 拡張（破壊せず・型衝突させず）
   (meta as any).slotPlanPolicy =

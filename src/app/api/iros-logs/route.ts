@@ -15,6 +15,17 @@ type IrosMessageRow = {
   created_at: string;
 };
 
+// raw log row
+type IrosRawLogRow = {
+  id: number;
+  conversation_id: string;
+  user_code: string | null;
+  trace_id: string | null;
+  source: string | null;
+  raw_text: string;
+  created_at: string;
+};
+
 // 会話一覧用サマリ
 type IrosConversationSummary = {
   id: string; // conversation_id
@@ -96,7 +107,14 @@ function normalizeMetaForViewer(meta: unknown): any {
   return m;
 }
 
-
+function pickText(...vals: any[]): string {
+  for (const v of vals) {
+    const s = typeof v === 'string' ? v : String(v ?? '');
+    const t = s.replace(/\r\n/g, '\n').trim();
+    if (t.length > 0) return t;
+  }
+  return '';
+}
 
 export async function GET(req: NextRequest) {
   // Sofia-logs と同じく URL / KEY を渡す
@@ -110,6 +128,13 @@ export async function GET(req: NextRequest) {
   const convId = searchParams.get('conv_id');
   const wantUserList = searchParams.get('user_list') === '1';
 
+  // raw logs fetch options
+  const includeRaw = searchParams.get('include_raw') === '1'; // conv detail 時に同梱
+  const rawLimit = Math.max(
+    1,
+    Math.min(200, Number(searchParams.get('raw_limit') ?? '50') || 50),
+  );
+
   // --- user_list=1 → ユーザー一覧モード ---
   if (wantUserList) {
     const { data, error } = await supabase
@@ -120,16 +145,12 @@ export async function GET(req: NextRequest) {
 
     if (error) {
       console.error('[IROS-LOGS][USER_LIST] Supabase error:', error);
-      return NextResponse.json(
-        { error: 'Failed to fetch user list.' },
-        { status: 500 },
-      );
+      return NextResponse.json({ error: 'Failed to fetch user list.' }, { status: 500 });
     }
 
-    const users = Array.from(
-      new Set((data || []).map((r: any) => String(r.user_code))),
-    );
-    return NextResponse.json({ users });
+    const users = Array.from(new Set((data || []).map((r: any) => String(r.user_code))));
+    return NextResponse.json({ ok: true, users });
+
   }
 
   // user_code も conv_id も無い場合はエラー
@@ -151,15 +172,13 @@ export async function GET(req: NextRequest) {
 
     if (error) {
       console.error('[IROS-LOGS][LIST] Supabase error:', error);
-      return NextResponse.json(
-        { error: 'Failed to fetch iros_messages.' },
-        { status: 500 },
-      );
+      return NextResponse.json({ error: 'Failed to fetch iros_messages.' }, { status: 500 });
     }
 
     if (!data || data.length === 0) {
       const empty: IrosConversationSummary[] = [];
-      return NextResponse.json({ conversations: empty });
+      return NextResponse.json({ ok: true, conversations: empty });
+
     }
 
     const convMap = new Map<string, IrosConversationSummary>();
@@ -177,16 +196,10 @@ export async function GET(req: NextRequest) {
         });
       } else {
         // created_at は「最古」、last_turn_at は「最新」になるように調整
-        if (
-          !existing.created_at ||
-          Date.parse(row.created_at) < Date.parse(existing.created_at)
-        ) {
+        if (!existing.created_at || Date.parse(row.created_at) < Date.parse(existing.created_at)) {
           existing.created_at = row.created_at;
         }
-        if (
-          !existing.last_turn_at ||
-          Date.parse(row.created_at) > Date.parse(existing.last_turn_at)
-        ) {
+        if (!existing.last_turn_at || Date.parse(row.created_at) > Date.parse(existing.last_turn_at)) {
           existing.last_turn_at = row.created_at;
         }
         existing.turns_count += 1;
@@ -199,24 +212,21 @@ export async function GET(req: NextRequest) {
       return tb - ta; // 最終発話が新しい会話が上に来る
     });
 
-    return NextResponse.json({ conversations });
-  }
+    return NextResponse.json({ ok: true, conversations });
 
+  }
 
   // --- 会話詳細モード（conv_id 指定） ---
   if (!convId) {
     return NextResponse.json(
       { error: 'conv_id is required for conversation detail.' },
-      { status: 400 },
+      { status: 400 }
     );
   }
 
   const { data: rows, error: detailError } = await supabase
     .from('iros_messages')
-    .select(
-      // ★ self_acceptance カラムは読まない
-      'id, conversation_id, user_code, role, text, q_code, depth_stage, meta, created_at',
-    )
+    .select('id, conversation_id, user_code, role, text, q_code, depth_stage, meta, created_at, trace_id')
     .eq('conversation_id', convId)
     .order('created_at', { ascending: true });
 
@@ -224,15 +234,37 @@ export async function GET(req: NextRequest) {
     console.error('[IROS-LOGS][DETAIL] Supabase error:', detailError);
     return NextResponse.json(
       { error: 'Failed to fetch conversation detail.' },
-      { status: 500 },
+      { status: 500 }
     );
+  }
+
+  // raw logs（同梱は opt-in） ※先に宣言しておく（returnより前）
+  let raw_logs: IrosRawLogRow[] = [];
+
+  if (includeRaw) {
+    const { data: rawRows, error: rawErr } = await supabase
+      .from('iros_raw_logs')
+      .select('id, conversation_id, user_code, trace_id, source, raw_text, created_at')
+      .eq('conversation_id', convId)
+      .order('created_at', { ascending: false })
+      .limit(rawLimit);
+
+    if (rawErr) {
+      console.error('[IROS-LOGS][RAW][DETAIL] Supabase error:', rawErr);
+      raw_logs = [];
+    } else {
+      raw_logs = (rawRows ?? []) as IrosRawLogRow[];
+    }
   }
 
   if (!rows || rows.length === 0) {
     return NextResponse.json({
+      ok: true,
       conversation: null,
       turns: [] as IrosTurn[],
       turns_count: 0,
+      raw_logs, // ← includeRaw=true ならここも返せる
+      error: null,
     });
   }
 
@@ -247,17 +279,26 @@ export async function GET(req: NextRequest) {
     const metaNorm = normalizeMetaForViewer(row.meta);
     const sa = extractSelfAcceptance(metaNorm);
 
+    // ✅ trace_id は DB列が空のことが多いので meta 側も拾う
+    const traceFromMeta =
+      (metaNorm as any)?.traceId ??
+      (metaNorm as any)?.trace_id ??
+      (metaNorm as any)?.extra?.traceId ??
+      (metaNorm as any)?.extra?.trace_id ??
+      null;
+
     return {
-      id: row.id,
-      conv_id: row.conversation_id,
+      id: String(row.id),
+      conv_id: String(row.conversation_id),
       role: normalizedRole,
-      content: row.text,
-      q_code: row.q_code,
-      depth_stage: row.depth_stage,
-      self_acceptance: sa,
-      meta: metaNorm, // ★ここ
+      content: row.text ?? null,
+      q_code: row.q_code ?? null,
+      depth_stage: row.depth_stage ?? null,
+      self_acceptance: sa ?? null,
+      meta: metaNorm,
       used_credits: null,
-      created_at: row.created_at,
+      created_at: row.created_at ?? null,
+      trace_id: (row as any).trace_id ?? traceFromMeta, // ← ここが肝
     };
   });
 
@@ -267,15 +308,86 @@ export async function GET(req: NextRequest) {
 
   const conversation = {
     id: convId,
-    user_code: first.user_code,
-    created_at: first.created_at,
-    last_turn_at: last.created_at,
-    updated_at: last.created_at,
+    user_code: first.user_code ?? null,
+    created_at: first.created_at ?? null,
+    last_turn_at: last.created_at ?? null,
+    updated_at: last.created_at ?? null,
   };
 
   return NextResponse.json({
+    ok: true,
     conversation,
     turns,
     turns_count: turns.length,
+    raw_logs,
+    error: null,
   });
+}
+
+export async function POST(req: NextRequest) {
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL as string,
+    process.env.SUPABASE_SERVICE_ROLE_KEY as string,
+  );
+
+  let body: any = null;
+  try {
+    body = await req.json();
+  } catch {
+    body = null;
+  }
+
+  const conversation_id = pickText(body?.conversation_id);
+  const raw_text = pickText(body?.raw_text, body?.text);
+  const user_code = pickText(body?.user_code) || null;
+// ✅ trace_id は入力の揺れが多いので広く拾う（snake / camel / meta / header）
+const trace_id =
+  pickText(
+    body?.trace_id,
+    body?.traceId,
+    body?.meta?.trace_id,
+    body?.meta?.traceId,
+    body?.meta?.extra?.trace_id,
+    body?.meta?.extra?.traceId,
+  ) ||
+  pickText(req.headers.get('x-trace-id')) ||
+  null;
+
+  const source = pickText(body?.source) || null;
+
+  if (!conversation_id) {
+    return NextResponse.json({ ok: false, error: 'conversation_id is required.' }, { status: 400 });
+  }
+  if (!raw_text) {
+    return NextResponse.json({ ok: false, error: 'raw_text is required.' }, { status: 400 });
+  }
+
+  // 1回の貼り付けの上限（事故防止）：200k chars
+  if (raw_text.length > 200_000) {
+    return NextResponse.json(
+      { ok: false, error: `raw_text too large (${raw_text.length}). Max is 200000 chars.` },
+      { status: 413 },
+    );
+  }
+
+  const { data, error } = await supabase
+    .from('iros_raw_logs')
+    .insert([
+      {
+        conversation_id,
+        user_code,
+        trace_id,
+        source,
+        raw_text,
+      },
+    ])
+    .select('id, conversation_id, user_code, trace_id, source, raw_text, created_at')
+    .single();
+
+  if (error) {
+    console.error('[IROS-LOGS][RAW][INSERT] Supabase error:', error);
+    return NextResponse.json({ ok: false, error: 'Failed to insert raw log.' }, { status: 500 });
+  }
+
+  return NextResponse.json({ ok: true, row: data as IrosRawLogRow });
 }

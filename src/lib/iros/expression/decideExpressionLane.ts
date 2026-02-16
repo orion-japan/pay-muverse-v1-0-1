@@ -134,8 +134,24 @@ const TECHNIQUES: Technique[] = [
     // ✅ signals が未配線でも、Outer×C帯域なら “外側→内側” の入口として preface を許可する
     matches: (ctx) =>
       !!ctx.signals?.looksOuterGuchi ||
-      (String(ctx.phase ?? '') === 'Outer' && /^C\d+/.test(String(ctx.depth ?? '')) && String(ctx.laneKey ?? '') === 'IDEA_BAND'),
+      (String(ctx.phase ?? '') === 'Outer' &&
+        /^C\d+/.test(String(ctx.depth ?? '')) &&
+        String(ctx.laneKey ?? '') === 'IDEA_BAND'),
     composePreface: () => '外側の出来事を一度ほどいて、内側で何が揺れたのかだけ拾い直します。',
+  },
+
+  // ✅ NEW: RETURN(1回目)でも、Inner×IDEA_BAND なら “流れをつなぐ1行” を許可
+  // - 乱発防止：Outerは対象外 / T_CONCRETIZEは decideBlock で既にブロック
+  // - 目的：いまの「変わらない」問題（returnStreak=1でtech不発）を解消
+  {
+    id: 'return_first_connect',
+    reason: 'AFTER_DOWNSHIFT',
+    matches: (ctx) =>
+      (ctx.flow?.flowDelta === 'RETURN') &&
+      ((ctx.flow?.returnStreak ?? 0) >= 1) &&
+      (String(ctx.phase ?? '') === 'Inner') &&
+      (String(ctx.laneKey ?? '') === 'IDEA_BAND'),
+    composePreface: () => 'いまは結論を急がず、流れだけつなぎ直します。',
   },
 
   {
@@ -165,6 +181,7 @@ const TECHNIQUES: Technique[] = [
     composePreface: () => '比喩で一度だけ置き換えて、刺さる輪郭を先に出します。',
   },
 ];
+
 
 function clampOneLine(s: string): string {
   const t = String(s ?? '').replace(/\r\n/g, '\n').trim();

@@ -1996,12 +1996,11 @@ if (slotsEmpty_ir) {
     const slotPlanPolicyFinal: 'FINAL' | 'SCAFFOLD' | null =
       policyNorm0 ?? (slotsLen > 0 ? 'FINAL' : null);
 
-    // 11) ✅ framePlan は render-v2 が参照する唯一の正
-    (meta as any).framePlan = {
-      frame: frameFinal,
-      slots: slotsArr,
-      slotPlanPolicy: slotPlanPolicyFinal,
-    };
+    // ✅ frame の単一ソース化：meta.frame は互換キーとして framePlan.frame と常に同値にする
+    // - after-container で frame がズレると「C帯扱い」の誤誘導が起きるため、ここで必ず同期
+    (meta as any).frame = frameFinal;
+
+
 
     // 12) ✅ ORCHログ用 “互換キー” を同期（必ず framePlan と同値）
     (meta as any).slotPlanPolicy = slotPlanPolicyFinal;
@@ -2015,6 +2014,18 @@ if (slotsEmpty_ir) {
     // =========================================================
     const fpSlots = (meta as any).framePlan?.slots;
     const spSlots = (meta as any).slotPlan;
+
+
+
+// ✅ slotPlanPolicy の正本を “framePlan 側” にも必ず同期（null残りを根絶）
+if ((meta as any).framePlan && typeof (meta as any).framePlan === 'object') {
+  (meta as any).framePlan.slotPlanPolicy = slotPlanPolicyFinal;
+  // もし framePlan.slotPlan がある設計ならそこも同期（念のため）
+  if ((meta as any).framePlan.slotPlan && typeof (meta as any).framePlan.slotPlan === 'object') {
+    (meta as any).framePlan.slotPlan.slotPlanPolicy = slotPlanPolicyFinal;
+  }
+}
+
 
     // ✅ Phase11観測：key を “直取り” で確定（normalizeに依存しない）
     const iaKey =

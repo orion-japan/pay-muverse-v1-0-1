@@ -2504,21 +2504,52 @@ try {
             })(),
           });
 
-        if (rr && rr.ok) {
-          const mx = (rr as any)?.meta?.extra ?? {};
-          const blocksCandidate =
-            (rr as any)?.rephraseBlocks ?? mx?.rephraseBlocks ?? mx?.rephrase?.blocks ?? null;
+          if (rr && rr.ok) {
+            const mx = (rr as any)?.meta?.extra ?? {};
+            const blocksCandidate =
+              (rr as any)?.rephraseBlocks ?? mx?.rephraseBlocks ?? mx?.rephrase?.blocks ?? null;
 
-          if (Array.isArray(blocksCandidate) && blocksCandidate.length > 0) {
-            (out.metaForSave as any).extra.rephraseBlocks = blocksCandidate;
+            // ✅ Expression preface を rephraseBlocks にも反映して、UI/保存のズレを消す
+            const pickPreface = (): string => {
+              const raw =
+                (ex as any)?.expr?.prefaceLine ??
+                (ex as any)?.expr?.prefaceHead ??
+                (ex as any)?.expression?.prefaceLine ??
+                (ex as any)?.expressionDecision?.prefaceLine ??
+                (ex as any)?.exprPrefaceLine ??
+                null;
+
+              const s = String(raw ?? '').replace(/\r\n/g, '\n').trim();
+              if (!s) return '';
+              // 1行化（rephraseBlocks は block 意図を持つが、preface は必ず1行にする）
+              return s.split('\n').map((x) => x.trim()).filter(Boolean).join(' ');
+            };
+
+            const preface = pickPreface();
+
+            if (Array.isArray(blocksCandidate) && blocksCandidate.length > 0) {
+              // 先頭ブロックと同文なら二重付与しない
+              const firstText = String((blocksCandidate[0] as any)?.text ?? '').replace(/\r\n/g, '\n').trim();
+              const sameAsFirst = preface && firstText && firstText === preface;
+
+              const mergedBlocks =
+                preface && !sameAsFirst
+                  ? [{ text: preface, kind: 'p' }, ...blocksCandidate]
+                  : blocksCandidate;
+
+              (out.metaForSave as any).extra.rephraseBlocks = mergedBlocks;
+            } else if (preface) {
+              // blocks が空でも preface だけは渡せる（安全側）
+              (out.metaForSave as any).extra.rephraseBlocks = [{ text: preface, kind: 'p' }];
+            }
+
+            (out.metaForSave as any).extra.rephraseApplied = true;
+            (out.metaForSave as any).extra.rephraseLLMApplied = true;
+            (out.metaForSave as any).extra.rephraseReason =
+              (out.metaForSave as any).extra.rephraseReason ?? 'rephraseSlotsFinal(emptyLike)';
+            (out.metaForSave as any).extra.rephraseAt = new Date().toISOString();
           }
 
-          (out.metaForSave as any).extra.rephraseApplied = true;
-          (out.metaForSave as any).extra.rephraseLLMApplied = true;
-          (out.metaForSave as any).extra.rephraseReason =
-            (out.metaForSave as any).extra.rephraseReason ?? 'rephraseSlotsFinal(emptyLike)';
-          (out.metaForSave as any).extra.rephraseAt = new Date().toISOString();
-        }
       }
     }
   } catch (e) {

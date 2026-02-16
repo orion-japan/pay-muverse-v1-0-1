@@ -151,12 +151,11 @@ export async function runRetryPass(params: {
     conversationId: debug?.conversationId ?? null,
     userCode: debug?.userCode ?? null,
 
-    // ✅ NEW: retry でも digest を注入
+    // ✅ NEW: retry でも digest を注入（存在しない時は null）
     historyDigestV1: historyDigestV1 ?? null,
 
     audit: {
       mode: 'rephrase_retry',
-      // ✅ 1st pass と同じ決定ロジックを使う
       slotPlanPolicy: slotPlanPolicyResolved,
       qCode: debug?.qCode ?? null,
       depthStage: debug?.depthStage ?? null,

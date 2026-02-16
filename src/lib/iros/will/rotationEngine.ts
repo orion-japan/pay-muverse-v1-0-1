@@ -187,18 +187,29 @@ export function decideRotation(ctx: RotationContext): RotationDecision {
     !!llmSignals &&
     (llmSignals.perspectiveExpanded || llmSignals.relationalFocus || llmSignals.causalLanguage);
 
+  // ✅ Q2 × C2 は “前進衝動×改善運用” で空回りしやすいので、
+  // - offered までは作ってよい
+  // - accepted は「ユーザーの明示コミット(acceptedByUser)」のみで開く
+  const isQ2C2 = qCode === 'Q2' && baseDepth === ('C2' as any);
+
   // offered候補：
   // - possible/soft が出たら（従来）
   // - 追加：llmLift が立っているなら「扉だけ」置ける（ただし I/T 近辺のみ）
   const shouldOffer =
     gate === 'closed' &&
-    isInUpperBand(baseDepth) &&
-    (aSig === 'possible' || dLvl === 'soft' || llmLift);
+    isInOfferBand(baseDepth) &&
+    (aSig === 'possible' || dLvl === 'soft' || (llmLift && isInLiftBand(baseDepth)));
+
 
   // accepted候補：explicit/hard/合意確定
-  const shouldAccept =
+  // ✅ ただし Q2×C2 では “explicit/hard” だけで accepted にしない（コミット専用）
+  const shouldAcceptRaw =
     (aSig === 'explicit' || dLvl === 'hard' || acceptedByUser) &&
     (gate === 'offered' || gate === 'closed'); // offeredを経由できないケースも救う
+
+  const shouldAccept = isQ2C2
+    ? acceptedByUser && (gate === 'offered' || gate === 'closed')
+    : shouldAcceptRaw;
 
   // gate更新
   let nextGate: DescentGate = gate;
@@ -253,20 +264,30 @@ export function decideRotation(ctx: RotationContext): RotationDecision {
 
   const isSBand = depthHead === 'S';
   const isQ3 = qCode === 'Q3';
-  const isUncoverLike = lastGoalKind === 'uncover' || lastGoalKind === 'stabilize';
+
+  // NOTE:
+  // - 「S帯/Q3/uncover連続」トリガなので、stabilize を含めると説明が混線しやすい。
+  // - stabilize 継続は goalEngine 側で扱い、ここは uncover のみを対象にする。
+  const isUncoverLike = lastGoalKind === 'uncover';
 
   const triggerSBand = isSBand && isQ3 && isUncoverLike && streak >= 2;
 
   if (!triggerSBand) {
+    const why: string[] = [];
+    if (!isSBand) why.push(`depthHead=${depthHead}（S帯ではない）`);
+    if (!isQ3) why.push(`qCode=${qCode ?? 'null'}（Q3ではない）`);
+    if (!isUncoverLike) why.push(`lastGoalKind=${lastGoalKind ?? 'null'}（uncoverではない）`);
+    if (streak < 2) why.push(`uncoverStreak=${streak}（<2）`);
+
     return {
       shouldRotate: false,
       nextDepth: baseDepth,
       nextSpinLoop: 'SRI',
       nextDescentGate: nextGate,
-      reason:
-        'SRI: S帯でQ3かつuncover連続(>=2)の条件を満たしていないため回転しない（gateは更新のみ）',
+      reason: `SRI: 上昇トリガ未成立: ${why.join(' / ')}（gateは更新のみ）`,
     };
   }
+
 
   const sriNextDepth = nextDepthForBand(baseDepth);
   if (sriNextDepth === baseDepth) {
@@ -338,8 +359,15 @@ export function nextDepthForTCF(current: Depth): Depth {
   return current;
 }
 
-/** I/T帯に近いか（下降の扉を出しやすい領域） */
-function isInUpperBand(depth: Depth): boolean {
+/** offered を出してよい領域（下降の扉を置ける領域） */
+function isInOfferBand(depth: Depth): boolean {
+  const head = depth[0];
+  return head === 'R' || head === 'C' || head === 'I' || head === 'T';
+}
+
+/** llmLift で offered を出してよい領域（I/T 近辺のみ） */
+function isInLiftBand(depth: Depth): boolean {
   const head = depth[0];
   return head === 'I' || head === 'T';
 }
+
