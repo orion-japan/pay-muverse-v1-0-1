@@ -297,6 +297,15 @@ mode: (safeBaseMeta as any).mode ?? null,
     style: effectiveStyle as any,
   } as any);
 
+  console.log('[IROS/Orchestrator] output meta snapshot', {
+    frame: (result as any)?.meta?.framePlan?.frame ?? null,
+    slotPlanPolicy: (result as any)?.meta?.framePlan?.slotPlanPolicy ?? null,
+    slotPlanLen: Array.isArray((result as any)?.meta?.framePlan?.slots)
+      ? (result as any).meta.framePlan.slots.length
+      : null,
+  });
+
+
   // =========================================================
   // ✅ 出力側も最小の安全策（intentAnchor だけ落とす）
   // ※ output meta を信じない運用でも、混入事故をゼロにするため残す

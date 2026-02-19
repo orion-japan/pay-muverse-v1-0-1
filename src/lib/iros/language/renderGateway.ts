@@ -1,6 +1,14 @@
 // src/lib/iros/language/renderGateway.ts
 import { renderV2, type RenderBlock } from './renderV2';
 import { logConvEvidence } from '../conversation/evidenceLog';
+import {
+  stripInternalLabels,
+  sanitizeVisibleText,
+  stripDirectiveLines,
+  stripILINETags,
+} from './renderGateway.sanitize';
+import { normalizeBlocksForRender } from './renderGateway.normalize';
+
 // ---------------------------------------------
 // IMPORTANT — DESIGN GUARD (DO NOT REDEFINE)
 //
@@ -46,67 +54,6 @@ function head(s: string, n = 40) {
 
 function norm(s: unknown) {
   return String(s ?? '').replace(/\r\n/g, '\n').trim();
-}
-
-/** =========================================================
- * ✅ 内部ラベル除去（最終責任）
- * - system/protocol/hint 由来のタグや、メタ説明行を本文から消す
- * - “意味を壊さず短く” を優先
- * ========================================================= */
-function stripInternalLabels(line: string): string {
-  let s = norm(line).trim();
-  if (!s) return '';
-
-  // 0幅文字（UIで「空行に見える」やつ）を先に除去
-  s = s.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
-  if (!s) return '';
-
-  // 1) 角括弧ラベル（例：【WRITER_PROTOCOL】など）
-  s = s.replace(/【[^】]{1,24}】/g, '').trim();
-
-  // 2) writer hint / meta説明
-  s = s.replace(/^writer hint[:：]\s*/i, '').trim();
-
-  // 2.5) 先頭の「… / ...」はノイズ
-  s = s.replace(/^(\.{3,}|…{1,})\s*/g, '').trim();
-  if (s === '...' || s === '…' || /^\.{3,}$/.test(s) || /^…+$/.test(s)) return '';
-
-  // 3) FRAME / SLOTS 系のメタ行（記号だけ/文末なしは捨てる）
-  if (/^FRAME\s*=\s*.*$/i.test(s) && !/[。！？!?]/.test(s)) return '';
-  if (/^SLOTS\s*=\s*.*$/i.test(s) && !/[。！？!?]/.test(s)) return '';
-  s = s.replace(/^FRAME\s*=\s*\S+\s*/i, '').trim();
-  s = s.replace(/^SLOTS\s*=\s*\S+\s*/i, '').trim();
-
-  // 4) known meta labels（文末なしは捨てる）
-  if (
-    /^(OBS_META|ROTATION_META|IT_HINT|ANCHOR_CONFIRM|TURN_MODE|SUBMODE)\s*[:：].*$/i.test(s) &&
-    !/[。！？!?]/.test(s)
-  ) {
-    return '';
-  }
-  s = s
-    .replace(/^(OBS_META|ROTATION_META|IT_HINT|ANCHOR_CONFIRM|TURN_MODE|SUBMODE)\s*[:：]\s*/i, '')
-    .trim();
-
-  // 5) =/: を含む内部キーっぽい行は捨てる（本文に残す価値が薄い）
-  if (
-    /(phase\s*=|depth\s*=|q\s*=|spinloop\s*=|spinstep\s*=|descentgate\s*=|tLayerHint\s*=|itx_|slotPlanPolicy|slotSeed|llmRewriteSeed)/i.test(
-      s,
-    )
-  ) {
-    if (s.includes('=') || s.includes(':') || s.includes('：')) return '';
-  }
-
-  // 6) [sa ...] などのタグ単体行
-  s = s.replace(/^[〔\[]sa[\w.\s-]+[〕\]]$/i, '').trim();
-
-  // 7) 空白正規化
-  s = s.replace(/\s{2,}/g, ' ').trim();
-
-  // ✅ 句読点/記号だけの“残骸行”は捨てる（「。」だけ等）
-  if (/^[\u3000\s]*[。．\.、,・:：;；!！\?？…]+[\u3000\s]*$/.test(s)) return '';
-
-  return s;
 }
 
 function looksLikeSilence(text: string, extra: any) {
@@ -298,34 +245,71 @@ function extractSlotsForEvidence(extra: any): Array<{ key: string; content: stri
     extra?.orch?.framePlan ??
     null;
 
+  // 優先順位：
+  // 1) slotPlan（配列）… @NEXT_HINT 等が入っていて「前進」判定に効く
+  // 2) slotPlan.slots（将来の形）
+  // 3) framePlan.slots（hint を拾う）
   const slotsRaw =
-    framePlan?.slots ??
+    extra?.slotPlan ??
+    extra?.meta?.slotPlan ??
     framePlan?.slotPlan?.slots ??
     extra?.slotPlan?.slots ??
     extra?.meta?.slotPlan?.slots ??
+    framePlan?.slots ??
     null;
 
   if (!slotsRaw) return null;
 
   const out: Array<{ key: string; content: string }> = [];
 
+  // slot が文字列で来るケースも拾う
+  const pushSlot = (key0: any, content0: any) => {
+    const key = String(key0 ?? '').trim() || 'slot';
+    const content = norm(content0 ?? '');
+    if (!content) return;
+    out.push({ key, content });
+  };
+
   if (Array.isArray(slotsRaw)) {
     for (const s of slotsRaw) {
+      // 文字列（@NEXT_HINT ...）そのまま
+      if (typeof s === 'string') {
+        pushSlot('slot', s);
+        continue;
+      }
+
+      // object slot
       const key = String(s?.key ?? s?.id ?? s?.slotId ?? s?.name ?? '').trim() || 'slot';
-      const content = norm(s?.text ?? s?.value ?? s?.content ?? s?.message ?? s?.out ?? '');
+
+      // content 候補：slotPlan は text/value/content が多い / framePlan は hint
+      const rawContent =
+        s?.content ??
+        s?.text ??
+        s?.value ??
+        s?.message ??
+        s?.out ??
+        s?.hint ?? // framePlan 対応
+        '';
+
+      // content が object の場合は最低限 stringify（ログ用）
+      const content =
+        rawContent && typeof rawContent === 'object' ? norm(JSON.stringify(rawContent)) : norm(rawContent);
+
       if (!content) continue;
       out.push({ key, content });
     }
   } else if (typeof slotsRaw === 'object') {
+    // object map 形式（{OBS: "...", NEXT: "..."} など）
     for (const k of Object.keys(slotsRaw)) {
-      const content = norm((slotsRaw as any)[k]);
-      if (!content) continue;
-      out.push({ key: String(k), content });
+      pushSlot(k, (slotsRaw as any)[k]);
     }
   }
 
   return out.length ? out : null;
 }
+
+
+
 
 // ✅ renderEngine=true では 🪔 を絶対に出さない（本文混入も含めて落とす）
 function stripLampEverywhere(text: string): string {
@@ -564,89 +548,6 @@ function pickSlotPlanFallbackText(extra: any): string {
   return '';
 }
 
-/**
- * ✅ 表示用サニタイズ
- * - enable=true/false どちらでも「人が読む文」に寄せるために使う
- * - 末尾🪔付与は「互換モード(renderEngine=false)」のときだけ opts.appendLamp=true で行う
- * - 重要：本文中の🪔は必ず除去し、付けるなら末尾だけ
- */
-function sanitizeVisibleText(raw: string, opts?: { appendLamp?: boolean }): string {
-  let s = String(raw ?? '');
-
-  // 1) 改行統一
-  s = s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-
-  // ✅ 重要：本文中の🪔は必ず除去（付けるなら末尾だけ）
-  s = s.replace(/🪔/g, '');
-
-  // 2) Markdown見出し（### 等）を落とす：UIの見出し化を止める
-  s = s.replace(/^\s{0,3}#{1,6}\s+/gm, '');
-
-  // 3) 「**見出しだけ**」の行も “強調だけ” に落とす（UIで見出し扱いされるのを避ける）
-  s = s.replace(/^\s*\*\*(.+?)\*\*\s*$/gm, '$1');
-
-// ✅ iros の内部指示（slot directives）を UI に漏らさない最終ガード
-// - 行内に @... が出た行は丸ごと落とす
-function stripIrosDirectives(s0: string): string {
-  const lines = String(s0 ?? '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .split('\n');
-
-  const kept: string[] = [];
-  for (const line0 of lines) {
-    const line = String(line0 ?? '');
-    // ✅ renderEngine=false 側でも漏れないように ACK/RESTORE/Q まで含める
-    if (/@(?:OBS|CONSTRAINTS|SHIFT|NEXT|SAFE|ACK|RESTORE|Q)\b/.test(line)) continue;
-    kept.push(line);
-  }
-  return kept.join('\n');
-}
-
-
-  // 3.5) iros 内部指示を落とす（UIに漏らさない）
-  s = stripIrosDirectives(s);
-
-  // 4) 行単位で整形：段落（空行）は残すが、連続空行は1個に潰す
-  const isPunctOnly = (line: string) => {
-    const t = line.trim();
-    if (!t) return false;
-    return /^[\p{P}\p{S}]+$/u.test(t);
-  };
-
-  const inLines = s.split('\n').map((line) => line.trimEnd());
-  const outLines: string[] = [];
-
-  for (const line of inLines) {
-    const t = line.trim();
-
-    if (isPunctOnly(line)) continue;
-
-    if (!t) {
-      if (outLines.length > 0 && outLines[outLines.length - 1] !== '') outLines.push('');
-      continue;
-    }
-
-    outLines.push(line);
-  }
-
-  while (outLines.length > 0 && outLines[0] === '') outLines.shift();
-  while (outLines.length > 0 && outLines[outLines.length - 1] === '') outLines.pop();
-
-  s = outLines.join('\n');
-
-  // 5) 改行暴れ防止（保険：3連以上は2連に）
-  s = s.replace(/\n{3,}/g, '\n\n').trimEnd();
-
-  // 6) 互換モードだけ末尾に 🪔 を付ける（末尾のみ）
-  if (opts?.appendLamp) {
-    if (s.length > 0 && !s.endsWith('\n')) s += '\n';
-    s += '🪔';
-  }
-
-  return s;
-}
-
 /** =========================================================
  * ✅ renderEngine=true 側の最終整形を “1本化” する
  * - 先に [[/ILINE]] 以降を切る（writer注釈が後ろに付く前提を生かす）
@@ -675,42 +576,6 @@ function cutAfterIlineAndDropWriterNotes(text: string): string {
   return kept.join('\n');
 }
 
-function stripDirectiveLines(text: string): string {
-  const s = String(text ?? '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n');
-
-  // ✅ “行ごと”落とす（先頭だけ消えてJSON尻尾が残る事故を防ぐ）
-  // - @TASK/@DRAFT などの directive 行は丸ごと削除
-  // - INTERNAL PACK 行も丸ごと削除
-  return s
-    .split('\n')
-    .filter((line) => {
-      const t = String(line ?? '').trim();
-      if (!t) return true;
-
-      // ✅ directive line: drop whole line
-      if (/^@(?:CONSTRAINTS|OBS|TASK|SHIFT|NEXT|SAFE|ACK|RESTORE|Q|DRAFT)\b/.test(t)) return false;
-
-      // ✅ internal pack: drop whole line
-      if (/^INTERNAL PACK\b/i.test(t)) return false;
-
-      return true;
-    })
-    .join('\n')
-    .trim();
-}
-
-
-
-function stripILINETags(text: string): string {
-  return String(text ?? '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .replace(/\[\[ILINE\]\]\s*\n?/g, '')
-    .replace(/\n?\s*\[\[\/ILINE\]\]/g, '')
-    .trim();
-}
 
 export function renderGatewayAsReply(args: {
   extra?: any | null;
@@ -751,23 +616,90 @@ export function renderGatewayAsReply(args: {
 
   // ✅ debug pipe（任意ログ）
   // - デフォルトOFF（環境変数でON）
-  // - content の「長さ」と「先頭(head)」だけを出す（本文を丸ごと出さない）
+  // - 本文は出さず「長さ」と「先頭(head)」だけ出す
+  // - 追加：段ごとのlenを貯めて、最後に LEN_FLOW を1回だけ吐く（重複防止）
   const PIPE_ENABLED =
     process.env.IROS_RENDER_GATEWAY_PIPE === '1' ||
     process.env.IROS_RENDER_GATEWAY_PIPE === 'true' ||
     process.env.IROS_RENDER_GATEWAY_PIPE === 'on';
 
-  const pipe = (label: string, s0: string) => {
-    if (!PIPE_ENABLED) return;
+  const STAGE_ENABLED =
+    PIPE_ENABLED || // ✅ PIPE をONにしたら STAGE も自動ON（取りこぼし防止）
+    process.env.IROS_RENDER_GATEWAY_STAGELOG === '1' ||
+    process.env.IROS_RENDER_GATEWAY_STAGELOG === 'true' ||
+    process.env.IROS_RENDER_GATEWAY_STAGELOG === 'on';
+
+  const normLen = (s: string) => String(s ?? '').replace(/\s+/g, ' ').trim().length;
+
+  // ✅ このターン内の「どこで縮んだか」を追う（本文は保存しない）
+  const lenFlowSteps: Array<{ label: string; len: number; lenNorm: number; head: string }> = [];
+  let lenFlowFlushed = false;
+
+  const pipe = (label: string, s0: unknown, extra?: Record<string, any>) => {
+    if (!PIPE_ENABLED && !STAGE_ENABLED) return;
+
     const s = String(s0 ?? '');
-    console.info('[IROS/renderGateway][PIPE]', {
+    const row = {
       label,
       len: s.length,
+      lenNorm: normLen(s),
       head: head(s),
-    });
+    };
+
+    // 段ごとのlen/headを保存（LEN_FLOWで使う）
+    if (!lenFlowFlushed) lenFlowSteps.push(row);
+
+    // 既存互換：PIPEは従来どおり
+    if (PIPE_ENABLED) {
+      console.info('[IROS/renderGateway][PIPE]', {
+        rev: IROS_RENDER_GATEWAY_REV,
+        ...row,
+        ...(extra ?? {}),
+      });
+    }
+
+    // STAGE（任意）
+    if (STAGE_ENABLED) {
+      console.info('[IROS/renderGateway][STAGE]', {
+        rev: IROS_RENDER_GATEWAY_REV,
+        ...row,
+        ...(extra ?? {}),
+      });
+    }
   };
 
+  const flushLenFlow = (flushLabel: string, extra?: Record<string, any>) => {
+    if (lenFlowFlushed) return; // ✅ 重複防止（ここがポイント）
+    if (!PIPE_ENABLED && !STAGE_ENABLED) return;
+    if (!lenFlowSteps.length) return;
 
+    const steps = lenFlowSteps.map((r, i) => {
+      const prev = i > 0 ? lenFlowSteps[i - 1] : null;
+      return {
+        label: r.label,
+        len: r.len,
+        lenNorm: r.lenNorm,
+        head: r.head,
+        delta: prev ? r.len - prev.len : 0,
+        deltaNorm: prev ? r.lenNorm - prev.lenNorm : 0,
+      };
+    });
+
+    const flow = steps.reduce<Record<string, { len: number; lenNorm: number; head: string }>>((acc, s) => {
+      acc[s.label] = { len: s.len, lenNorm: s.lenNorm, head: s.head };
+      return acc;
+    }, {});
+
+    console.info('[IROS/renderGateway][LEN_TRACE]', {
+      rev: IROS_RENDER_GATEWAY_REV,
+      flushLabel,
+      steps,
+      flow,
+      ...(extra ?? {}),
+    });
+
+    lenFlowFlushed = true;
+  };
 
   // ✅ rephrase があるなら、それを最優先（slotplan由来のテンプレを上書き）
   // ✅ rephraseText(r0) は「本文入力」ではなく “最終保険のfallback” として扱う
@@ -898,49 +830,81 @@ export function renderGatewayAsReply(args: {
       extra?.orch?.convBranch ??
       null;
 
-    const evSlots = extractSlotsForEvidence(extra);
+      const evSlots = extractSlotsForEvidence(extra);
 
-    const evMeta = {
-      qCode: extra?.qCode ?? extra?.meta?.qCode ?? extra?.extra?.qCode ?? null,
-      depthStage: extra?.depthStage ?? extra?.meta?.depthStage ?? extra?.extra?.depthStage ?? null,
-      phase: extra?.phase ?? extra?.meta?.phase ?? extra?.extra?.phase ?? null,
-    };
+      // ✅ meta は extra だけでなく ctxPack からも拾う（ここが null になってた）
+      const rawCtx = evCtx as any;
 
-    // ✅ ctx.shortSummary を「確実に」埋める（evidenceLog.ts の判定を満たす）
-    const rawCtx = evCtx as any;
+      const evMeta = {
+        qCode:
+          extra?.qCode ??
+          extra?.meta?.qCode ??
+          extra?.extra?.qCode ??
+          rawCtx?.qCode ??
+          rawCtx?.meta?.qCode ??
+          null,
+        depthStage:
+          extra?.depthStage ??
+          extra?.meta?.depthStage ??
+          extra?.extra?.depthStage ??
+          rawCtx?.depthStage ??
+          rawCtx?.meta?.depthStage ??
+          null,
+        phase:
+          extra?.phase ??
+          extra?.meta?.phase ??
+          extra?.extra?.phase ??
+          rawCtx?.phase ??
+          rawCtx?.meta?.phase ??
+          null,
+      };
 
-    const ms: any =
-      (extra as any)?.memoryState ??
-      (extra as any)?.meta?.memoryState ??
-      (extra as any)?.orch?.memoryState ??
-      (extra as any)?.extra?.memoryState ??
-      null;
+      // ✅ ctx.shortSummary を「確実に」埋める（evidenceLog.ts の判定を満たす）
+      const ms: any =
+        (extra as any)?.memoryState ??
+        (extra as any)?.meta?.memoryState ??
+        (extra as any)?.orch?.memoryState ??
+        (extra as any)?.extra?.memoryState ??
+        null;
 
-    const situationSummaryText =
-      (extra as any)?.situationSummary ??
-      (extra as any)?.meta?.situationSummary ??
-      (extra as any)?.orch?.situationSummary ??
-      ms?.situation_summary ??
-      ms?.situationSummary ??
-      null;
+      const situationSummaryText =
+        (extra as any)?.situationSummary ??
+        (extra as any)?.meta?.situationSummary ??
+        (extra as any)?.orch?.situationSummary ??
+        ms?.situation_summary ??
+        ms?.situationSummary ??
+        null;
 
-    const summaryText =
-      (extra as any)?.summary ??
-      (extra as any)?.meta?.summary ??
-      (extra as any)?.orch?.summary ??
-      ms?.summary ??
-      null;
+      const summaryText =
+        (extra as any)?.summary ??
+        (extra as any)?.meta?.summary ??
+        (extra as any)?.orch?.summary ??
+        ms?.summary ??
+        null;
 
-    const derivedShortSummary =
-      (typeof situationSummaryText === 'string' && situationSummaryText.trim()) ||
-      (typeof summaryText === 'string' && summaryText.trim()) ||
-      '';
+      // ✅ ctxPack.historyDigestV1 を fallback に使う（ログ上 hasDigestV1 が true）
+      const digestText =
+        (rawCtx?.historyDigestV1 && typeof rawCtx.historyDigestV1 === 'object'
+          ? (rawCtx.historyDigestV1.shortSummary ??
+             rawCtx.historyDigestV1.summary ??
+             rawCtx.historyDigestV1.digest ??
+             null)
+          : null) ?? null;
 
-    const evCtxFixed = {
-      ...(rawCtx && typeof rawCtx === 'object' ? rawCtx : {}),
-      shortSummary:
-        rawCtx?.shortSummary && String(rawCtx.shortSummary).trim() ? rawCtx.shortSummary : derivedShortSummary || null,
-    };
+      const derivedShortSummary =
+        (typeof situationSummaryText === 'string' && situationSummaryText.trim()) ||
+        (typeof summaryText === 'string' && summaryText.trim()) ||
+        (typeof digestText === 'string' && digestText.trim()) ||
+        '';
+
+      const evCtxFixed = {
+        ...(rawCtx && typeof rawCtx === 'object' ? rawCtx : {}),
+        shortSummary:
+          rawCtx?.shortSummary && String(rawCtx.shortSummary).trim()
+            ? rawCtx.shortSummary
+            : derivedShortSummary || null,
+      };
+
 
     logConvEvidence({
       conversationId: evConversationId,
@@ -970,20 +934,57 @@ export function renderGatewayAsReply(args: {
     ? 'rephrase'
     : 'none';
 
-    const isIR = looksLikeIR(fallbackText, extra);
-    const isSilence = looksLikeSilence(fallbackText, extra);
+  // ✅ rephraseBlocks があるなら “実際の本文候補” を fallbackText にも反映
+  // - IR判定/沈黙判定/短文例外の判定が、dotsや短いpickedに引っ張られるのを防ぐ
+  try {
+    const extraAny = extra as any;
+    const rephraseBlocks =
+      extraAny?.rephraseBlocks ??
+      extraAny?.rephrase?.blocks ??
+      extraAny?.rephrase?.rephraseBlocks ??
+      null;
 
-    const shortException = isSilence || isMicro || q1Suppress;
+    if (Array.isArray(rephraseBlocks) && rephraseBlocks.length > 0) {
+      const joined = rephraseBlocks
+        .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim())
+        .filter(Boolean)
+        .join('\n');
 
-    // ✅ ir診断は「本文を切らない」方針（render-v2 の maxLines で80字付近に落ちるのを防ぐ）
-    // - profile/args が 16以上を指定していればそれを尊重
-    // - 指定が無ければ最低16行は許可（DEFAULT_MAX_LINES=8 を上書き）
-    const baseMaxLines = Math.floor(profileMaxLines ?? argMaxLines ?? DEFAULT_MAX_LINES);
-    const maxLinesFinal = isIR
-      ? Math.max(16, Number.isFinite(baseMaxLines) && baseMaxLines > 0 ? baseMaxLines : 16)
-      : shortException
-      ? 3
-      : Math.max(1, Number.isFinite(baseMaxLines) && baseMaxLines > 0 ? baseMaxLines : DEFAULT_MAX_LINES);
+      // joined が取れたら優先（fallbackの意味を保つため、空のときは触らない）
+      if (joined.trim().length > 0) {
+        fallbackText = joined;
+        fallbackFrom = 'rephraseBlocks';
+      }
+    }
+  } catch {}
+
+  const isIR = looksLikeIR(fallbackText, extra);
+  const isSilence = looksLikeSilence(fallbackText, extra);
+
+  const shortException = isSilence || isMicro || q1Suppress;
+
+
+// ✅ maxLinesFinal（表示制約）
+// - 通常は profile/args/default を尊重
+// - ただし multi7（6ブロック: ENTRY..NEXT_MIN）など “ブロック数が多い” ときだけ最低行数を底上げして切断事故を防ぐ
+const baseMaxLines0 = Math.floor(profileMaxLines ?? argMaxLines ?? DEFAULT_MAX_LINES);
+
+// blockPlan / rephraseBlocks から「段構成の量」を推定（判断はしない。表示枠だけを確保する）
+const rbLen = Array.isArray((extra as any)?.rephraseBlocks) ? (extra as any).rephraseBlocks.length : 0;
+const bpMode = String((extra as any)?.blockPlan?.mode ?? (extra as any)?.blockPlanMode ?? '');
+const isMulti7 = bpMode === 'multi7';
+
+const baseMaxLines =
+  !isIR && !shortException && (isMulti7 || rbLen >= 8)
+    // ✅ multi7 は 6ブロック + 空行が入るので 14 だと「受容」で切れやすい。最低 28 行を確保する。
+    ? Math.max(baseMaxLines0, 28)
+    : baseMaxLines0;
+
+const maxLinesFinal = isIR
+  ? Math.max(16, Number.isFinite(baseMaxLines) && baseMaxLines > 0 ? baseMaxLines : 16)
+  : shortException
+  ? 3
+  : Math.max(1, Number.isFinite(baseMaxLines) && baseMaxLines > 0 ? baseMaxLines : DEFAULT_MAX_LINES);
 
 
     // ✅ ir診断(seed-only) は LLM を呼ばない設計なので、
@@ -1160,10 +1161,17 @@ export function renderGatewayAsReply(args: {
   };
 
   // ✅ まず「テキスト配列」を作る（cleanedBlocksText をここで定義する）
-  const cleanedBlocksText = rephraseBlocks
-    .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim())
+  const rbTexts = rephraseBlocks
+    .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim());
+
+  const rbTotal = rbTexts.length;
+  const rbEmpty = rbTexts.filter((t) => !t).length;
+  const rbNextHint = rbTexts.filter((t) => t.trimStart().startsWith('@NEXT_HINT')).length;
+  const rbBad = rbTexts.filter((t) => t && isBadBlock(t)).length;
+
+  const cleanedBlocksText = rbTexts
     // advance計測用の内部ブロックは UI に出さない
-    .filter((t: string) => !t.trimStart().startsWith('@NEXT_HINT'))
+    .filter((t: string) => t && !t.trimStart().startsWith('@NEXT_HINT'))
     .filter((t: string) => !isBadBlock(t))
     .map((t: string) => stripInternalLabels(t))
     .filter(Boolean)
@@ -1171,23 +1179,23 @@ export function renderGatewayAsReply(args: {
     .map((t: string) => cutAfterIlineAndDropWriterNotes(t))
     .filter(Boolean);
 
-  // ✅ preface を足した後に blocks へ変換（cleanedBlocks という “blocks配列” はここで1回だけ定義）
-  const cleanedBlocksText2 = cleanedBlocksWithPreface(cleanedBlocksText);
-  const cleanedBlocks = cleanedBlocksText2.map((t: string) => ({ text: t as string }));
+  const rbKept = cleanedBlocksText.length;
+  const rbKeptJoinedLen = norm(cleanedBlocksText.join('\n')).length;
 
-  if (cleanedBlocks.length > 0) {
-    blocks = cleanedBlocks;
-    pickedFrom = 'rephraseBlocks';
-  } else {
-    const base2 = base || fallbackText || r0s || '';
-    const lines = splitToLines(base2);
-    blocks = lines
-      .map((t) => stripInternalLabels(t))
-      .filter(Boolean)
-      .filter((t: string) => !t.trimStart().startsWith('@NEXT_HINT'))
-      .filter((t: string) => !isBadBlock(t))
-      .map((t) => ({ text: t }));
-  }
+  // ✅ 後段ログで参照できるように meta.extra に“診断情報”を保持（表示には使わない）
+  try {
+    (extraAny as any).renderMeta = {
+      ...((extraAny as any).renderMeta ?? {}),
+      rbDiag: {
+        rbTotal,
+        rbEmpty,
+        rbNextHint,
+        rbBad,
+        rbKept,
+        rbKeptJoinedLen,
+      },
+    };
+  } catch {}
 }
 
 
@@ -1216,34 +1224,660 @@ export function renderGatewayAsReply(args: {
 // - 行数・長さの判断は slotPlan / orchestrator の単一正に集約する
 // - 下流（render）は一切判断しないことで、LLMが迷わない状態を保証する
 
+  // ✅ FIX: rephraseBlocks があるのに blocks が空のときは、fallbackText に落とさず blocks として採用する
+  // - 今回の SHORT_OUT_DIAG: blocksCount=0 / rephraseBlocksLen>0 / pickedFrom=text が発生していた
+  // - fallbackText 経由だと改行が潰れて短文化しやすいので、blocks を優先する
+  let blocksForRender = blocks;
+  let fallbackTextForRender: string | null = fallbackText ?? null;
+  let pickedFromForRender = pickedFrom;
+
+  // ✅ @NEXT_HINT は UI に出さないが、「最小の一手」の本文補完に使えるので保持する
+  // - rb（rephraseBlocks）ではなく “slotPlan 側” に入っているので、まず slotPlan から拾う
+  let nextHintFromSlotPlan: string | null = null;
+
+  const tryPickNextHintFromSlots = (exAny: any): string | null => {
+    try {
+      const slots = extractSlotsForEvidence(exAny);
+      if (!Array.isArray(slots) || slots.length === 0) return null;
+
+      // slotPlan 配列の中に "@NEXT_HINT {...json...}" がそのまま入ってくる
+      const raw = slots
+        .map((s) => String((s as any)?.content ?? '').trim())
+        .find((t) => t.trimStart().startsWith('@NEXT_HINT'));
+
+      if (!raw) return null;
+
+      const jsonPart = String(raw).replace(/^@NEXT_HINT\s*/i, '').trim();
+      const obj = JSON.parse(jsonPart);
+      const h = String(obj?.hint ?? '').trim();
+      return h ? h : null;
+    } catch {
+      return null;
+    }
+  };
+
+  // まず slotPlan から拾う（ここが正）
+  nextHintFromSlotPlan = tryPickNextHintFromSlots(extraAny);
+
+  // （互換用）rb から拾える場合もあるかもしれないので一応残すが、基本は slotPlan 優先
+  let nextHintFromRb: string | null = null;
+
+  try {
+    const prevPickedFrom = pickedFrom;
+    const rb = Array.isArray((extraAny as any)?.rephraseBlocks) ? (extraAny as any).rephraseBlocks : null;
+    const rbLen2 = rb ? rb.length : 0;
+
+    if (!isIR && !isSilence && rbLen2 > 0 && (!blocksForRender || blocksForRender.length === 0)) {
+      // まず raw text を全部取り出す
+      const rbAllTexts = rb
+        .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').replace(/\r\n/g, '\n').trim())
+        .filter(Boolean);
+
+      // rb 由来は “あったら拾う” 程度（無ければ slotPlan の hint を使う）
+      if (!nextHintFromSlotPlan) {
+        const nextHintRaw = rbAllTexts.find((t: string) => t.trimStart().startsWith('@NEXT_HINT'));
+        if (nextHintRaw) {
+          const jsonPart = String(nextHintRaw).replace(/^@NEXT_HINT\s*/i, '').trim();
+          try {
+            const obj = JSON.parse(jsonPart);
+            const h = String(obj?.hint ?? '').trim();
+            if (h) nextHintFromRb = h;
+          } catch {
+            // JSON じゃない形で来たときは本文として扱わない（無理に入れない）
+          }
+        }
+      }
+
+      const rbTexts = rbAllTexts
+        // @NEXT_HINT は UI に出さない（存在しても本文に混ぜない）
+        .filter((t: string) => !String(t ?? '').trimStart().startsWith('@NEXT_HINT'))
+        // 末尾切り事故防止のガードはここで継続
+        .map((t: string) => cutAfterIlineAndDropWriterNotes(stripInternalLabels(t)))
+        .filter(Boolean) as string[];
+
+      if (rbTexts.length > 0) {
+        // ✅ rephraseBlocks-forced の場合：
+        // - rbTexts が「1要素=巨大ブロック（中に ### 見出しが複数）」で来ることがある（AUTO_PATCH: NEXT_MIN_ONLY 等）
+        // - そのまま blocks 化すると「見出しだけで本文ゼロ」判定になって blocks=0 になる事故が出る
+        // → ここで rbTexts を “行トークン” に展開してから同じ畳み込みロジックで処理する
+
+        const headingForKey = (k: string | null): string | null => {
+          const key = String(k ?? '').trim().toUpperCase();
+          if (!key) return null;
+          if (key === 'ENTRY') return '入口';
+          if (key === 'SITUATION') return '状況';
+          if (key === 'DUAL') return '二項';
+          if (key === 'FOCUS_SHIFT') return '焦点移動';
+          if (key === 'ACCEPT') return '受容';
+          if (key === 'INTEGRATE') return '統合';
+          if (key === 'CHOICE') return '選択';
+          if (key === 'NEXT_MIN') return '最小の一手';
+          return null;
+        };
+
+        const isHeaderish = (t: string) => {
+          const s = String(t ?? '').trim();
+          return (
+            /^#{1,6}\s+\S+/.test(s) || // ### 見出し
+            /^(入口|状況|二項|焦点移動|受容|統合|選択|最小の一手)$/.test(s) // 文字見出し
+          );
+        };
+
+        // ====== 置き換え：extractHeadingTitle と pickDynamicTitle ======
+
+        // ✅ 同一ターン内の「見出し語」使い回し防止
+        const usedTitleHints = new Set<string>();
+
+        const extractHeadingTitle = (t: string): string | null => {
+          const s = String(t ?? '').trim();
+          if (!s) return null;
+
+          // ### 見出し
+          const m = s.match(/^#{1,6}\s+(.+)\s*$/);
+          const titleRaw = m && m[1] ? String(m[1]).trim() : null;
+
+          // 文字見出し
+          if (
+            !titleRaw &&
+            /^(入口|状況|二項|焦点移動|受容|統合|選択|最小の一手)$/.test(s)
+          )
+            return s;
+          if (!titleRaw) return null;
+
+          // ✅ 「入口：月食」みたいな“固定：可変”が来たら、
+          //   「入口/状況/…」側を落として「月食」だけ返す（= 一行可変見出し）
+          const mm = titleRaw.match(
+            /^(入口|状況|二項|焦点移動|受容|統合|選択)\s*：\s*(.+)$/
+          );
+          if (mm && mm[2]) return String(mm[2]).trim();
+
+          return titleRaw;
+        };
+
+        const pickDynamicTitle = (base: string | null, bodyText: string): string | null => {
+          const b = String(base ?? '').trim();
+          if (!b) return null;
+
+          // ✅ 「最小の一手」だけは固定（既存ガード整合）
+          if (b.includes('最小の一手')) return '最小の一手';
+
+          const s = String(bodyText ?? '')
+            .replace(/\r\n/g, '\n')
+            .replace(/\r/g, '\n')
+            .trim();
+
+          // ---- 本文から「見出し候補」を複数抽出して、未使用のものを採用する ----
+          const stop = new Set([
+            'こと',
+            'もの',
+            'これ',
+            'それ',
+            'ため',
+            '感じ',
+            '瞬間',
+            '現象',
+            '私たち',
+            'あなた',
+            '今日',
+            'ここ',
+            'そこ',
+            '月',
+            '太陽',
+            '地球', // 天体連打しやすいので弱ストップ（必要なら外してOK）
+          ]);
+
+          const push = (arr: string[], v: string | undefined | null) => {
+            const x = String(v ?? '').trim();
+            if (!x) return;
+            if (x.length < 2) return;
+            if (x.length > 12) return;
+
+            // ✅ 見出し候補は「漢字 or カタカナ」に限定（断片見出しを防ぐ）
+            // 例: "中で新しい理解が待っ"（ひらがな混じり）を弾く
+            if (!/^[一-龥ァ-ヶー]{2,12}$/.test(x)) return;
+
+            if (stop.has(x)) return;
+            if (/^(入口|状況|二項|焦点移動|受容|統合|選択)$/.test(x)) return;
+            arr.push(x);
+          };
+
+          const pickTopicHints = (text: string): string[] => {
+            const out: string[] = [];
+            const t = String(text ?? '').trim();
+            if (!t) return out;
+
+            // ① 既知ワード（強いイベント語など）
+            const knownAll = t.match(
+              /(月食|日食|新月|満月|地震|台風|仕事|会議|上司|恋愛|結婚|別れ|不安|恐れ|怒り|静寂|調和|再生|影|秩序)/g
+            );
+            if (knownAll) knownAll.forEach((x) => push(out, x));
+
+            // ② 「XのY」→ Y を拾う（“宇宙の秩序”→“秩序” など）
+            const reNo = /([一-龥ぁ-んァ-ヶ]{2,10})の([一-龥ぁ-んァ-ヶ]{2,10})/g;
+            let m: RegExpExecArray | null;
+            while ((m = reNo.exec(t))) push(out, m[2]);
+
+            // ③ 漢字名詞っぽい塊（2〜8）
+            const reKanji = /([一-龥]{2,8})/g;
+            while ((m = reKanji.exec(t))) push(out, m[1]);
+
+            // ④ カタカナ名詞
+            const reKata = /([ァ-ヶー]{3,12})/g;
+            while ((m = reKata.exec(t))) push(out, m[1]);
+
+            // 重複排除（順序保持）
+            return Array.from(new Set(out));
+          };
+
+          const candidates = s ? pickTopicHints(s) : [];
+
+          // ✅ “一行可変” を強くする：未使用の候補を選ぶ（同語連打を止める）
+          const picked = candidates.find((x) => !usedTitleHints.has(x)) ?? null;
+          if (picked) {
+            usedTitleHints.add(picked);
+            return picked; // ← 「topicだけ」を返す（入口/状況…は出さない）
+          }
+
+          // すでに使い切った/候補が取れない：保険で base を返す（入口/状況…など）
+          return b;
+        };
+
+        // ✅ rb（生配列）も参照して key が取れるなら最優先（互換用：ただし index ずれがあるので今回は “見出し無し本文” の fallback にだけ使う）
+        const rbRaw = Array.isArray((extraAny as any)?.rephraseBlocks)
+          ? ((extraAny as any).rephraseBlocks as any[])
+          : null;
+
+        // ✅ key が無い場合：multi8 の順番（＝枠は固定、見出しは可変にしてOK）
+        const fallbackOrder = [
+          '入口',
+          '状況',
+          '二項',
+          '焦点移動',
+          '受容',
+          '統合',
+          '選択',
+          '最小の一手',
+        ] as const;
+
+        // ✅ 重要：rbTexts（ブロック）→ 行トークンへ展開（AUTO_PATCHの巨大ブロック対策）
+        const rbTokens: string[] = [];
+        for (const raw of rbTexts) {
+          const t = String(raw ?? '')
+            .replace(/\r\n/g, '\n')
+            .replace(/\r/g, '\n')
+            .trim();
+          if (!t) continue;
+
+          for (const line of t.split('\n')) {
+            const x = String(line ?? '').trim();
+            if (!x) continue;
+            // 念のため：ここでも @NEXT_HINT は排除（混入ケース対策）
+            if (x.trimStart().startsWith('@NEXT_HINT')) continue;
+            rbTokens.push(x);
+          }
+        }
+
+        const blocks: Array<{ text: string }> = [];
+        let sectionIndex = 0;
+
+        for (let i = 0; i < rbTokens.length; i++) {
+          const cur = String(rbTokens[i] ?? '').trim();
+          if (!cur) continue;
+
+          // ✅ 見出し → 次の本文（次の見出しまで）をまとめて 1 ブロック化
+          if (isHeaderish(cur)) {
+            const bodies: string[] = [];
+            let j = i + 1;
+            while (j < rbTokens.length) {
+              const nxt = String(rbTokens[j] ?? '').trim();
+              if (!nxt) {
+                j++;
+                continue;
+              }
+              if (isHeaderish(nxt)) break;
+              bodies.push(nxt);
+              j++;
+            }
+
+            const baseTitle =
+              extractHeadingTitle(cur) ??
+              (sectionIndex < fallbackOrder.length ? fallbackOrder[sectionIndex] : null);
+
+            const title = pickDynamicTitle(baseTitle, bodies.join('\n'));
+
+            // ✅ 見出しだけ残る事故を防ぐ：本文が無ければ出さない
+            if (title && bodies.length > 0) {
+              blocks.push({ text: `### ${title}\n\n${bodies.join('\n\n')}` });
+              sectionIndex++;
+            } else if (!title && bodies.length > 0) {
+              // タイトル不明だが本文がある：壊さず本文だけ出す
+              blocks.push({ text: bodies.join('\n\n') });
+              sectionIndex++;
+            }
+
+            i = j - 1; // まとめた分だけ進める
+            continue;
+          }
+
+          // ✅ 見出しが無い本文だけが来た場合：fallback で 1 ブロック化
+          // rbRaw は index がズレることがあるので “あくまで補助”
+          const keyFromRb =
+            rbRaw && Array.isArray(rbRaw) && rbRaw[sectionIndex] && typeof rbRaw[sectionIndex] === 'object'
+              ? (rbRaw[sectionIndex] as any)?.key ?? (rbRaw[sectionIndex] as any)?.id ?? null
+              : null;
+
+          const h1 = headingForKey(keyFromRb);
+          const h2 = !h1 && sectionIndex < fallbackOrder.length ? fallbackOrder[sectionIndex] : null;
+          const baseHeading = h1 ?? h2;
+
+          const heading = baseHeading ? pickDynamicTitle(baseHeading, cur) : null;
+
+          if (heading) {
+            blocks.push({ text: `### ${heading}\n\n${cur}` });
+          } else {
+            blocks.push({ text: cur });
+          }
+          sectionIndex++;
+        }
+
+        blocksForRender = blocks;
+
+        // null を入れると型で落ちることがあるので空文字にする（fallbackは「無効化」）
+        fallbackTextForRender = '';
+
+        // pickedFrom（診断・ログ・後段）も“強制側”に合わせる
+        pickedFromForRender = 'rephraseBlocks-forced';
+        pickedFrom = pickedFromForRender;
+
+        console.warn('[IROS/renderGateway][FORCE_BLOCKS_FROM_REPHRASE]', {
+          rev: IROS_RENDER_GATEWAY_REV,
+          rbLen: rbLen2,
+          forcedBlocks: blocksForRender.length,
+          prevPickedFrom: prevPickedFrom,
+          nextHintFromRb: nextHintFromRb,
+          nextHintFromSlotPlan: nextHintFromSlotPlan,
+        });
+      }
+
+
+    }
+  } catch {}
+
+
+// ====== 置き換え②：最小の一手の補完で使う hint ソース ======
+//
+// 対象（現状）
+// 1574: const hint = String(nextHintFromRb ?? '').trim();
+//
+// を、以下に置き換え
+//
+
+  // slotPlan 優先（正）、無ければ rb（互換）を使う
+  const hint = String(nextHintFromSlotPlan ?? nextHintFromRb ?? '').trim();
+
+
+// ✅ DIAG: rephraseBlocks の実体確認（multi7が最後まで入っているか）
+try {
+  const rb = Array.isArray((extraAny as any)?.rephraseBlocks) ? (extraAny as any).rephraseBlocks : null;
+  const rbTexts = Array.isArray(rb)
+    ? rb
+        .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim())
+        .filter(Boolean)
+    : [];
+
+  console.warn('[IROS/renderGateway][RB_CONTENT_DIAG]', {
+    rev: IROS_RENDER_GATEWAY_REV,
+    rbLen: rbTexts.length,
+    joinedLen: rbTexts.join('\n').length,
+    head1: rbTexts[0]?.slice(0, 80) ?? null,
+    head2: rbTexts[1]?.slice(0, 80) ?? null,
+    tail2: rbTexts.length >= 2 ? rbTexts[rbTexts.length - 2]?.slice(0, 80) : null,
+    tail1: rbTexts.length >= 1 ? rbTexts[rbTexts.length - 1]?.slice(0, 80) : null,
+  });
+} catch {}
+
 // ✅ renderV2 は「整形のみ」
 // - blocks に含まれる内容を、そのまま安全に整形して返す
 // - 勝手な短文化・行数制限・意味判断は一切行わない
 // - 長文（将来の Sofia 10ブロック構成）にもそのまま対応できる
+
+// ✅ FIX: rephraseBlocks を強制した場合、multi 構成が maxLinesFinal(例:14) で切れやすい。
+// ここは「内容判断」ではなく「整形上の行数上限」なので、十分な上限を確保する。
+const maxLinesForRender =
+  pickedFromForRender === 'rephraseBlocks-forced'
+    ? Math.max(Number(maxLinesFinal ?? 0) || 0, 80)
+    : maxLinesFinal;
+
+// ✅ DROP_EMPTY_NEXT_MIN:
+// 「最小の一手」の見出しだけが残る事故（本文欠落）を UI から隠す。
+// ただし「見出し＋本文が同一ブロック内」に入っている場合は削除しない。
+try {
+  const isNextMinHeaderLine = (s: string) => {
+    const t = String(s ?? '').trim();
+    const tt = t
+      .replace(/^#{1,6}\s*/u, '')
+      .replace(/^[✨⭐️🌟🔸🔹・•\-–—]+\s*/u, '')
+      .trim();
+    return /^最小の一手/.test(tt);
+  };
+
+  const isHeaderLine = (s: string) => /^###\s+/.test(String(s ?? '').trim());
+
+  const blockHasBodyInside = (blockText: string) => {
+    const lines = String(blockText ?? '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .split('\n')
+      .map((x) => String(x ?? '').trim())
+      .filter(Boolean);
+
+    // 先頭が「最小の一手」見出しで、2行目以降に本文がある（=同一ブロック内に本文がある）
+    if (lines.length >= 2 && isNextMinHeaderLine(lines[0])) {
+      // 2行目が別見出しなら本文なし扱い
+      return !isHeaderLine(lines[1]);
+    }
+    return false;
+  };
+
+  if (Array.isArray(blocksForRender) && blocksForRender.length > 0) {
+    const idx = blocksForRender.findIndex((b: any) => {
+      const text = String(b?.text ?? '');
+      const firstLine = text
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .split('\n')[0] ?? '';
+      return isNextMinHeaderLine(firstLine);
+    });
+
+    if (idx >= 0) {
+      const curText = String((blocksForRender[idx] as any)?.text ?? '');
+
+      // ✅ 同一ブロック内に本文があるなら、削除しない
+      if (!blockHasBodyInside(curText)) {
+        // 次のブロックに本文があるか判定（従来ロジック）
+        let j = idx + 1;
+        while (
+          j < blocksForRender.length &&
+          String((blocksForRender[j] as any)?.text ?? '').trim() === ''
+        ) {
+          j++;
+        }
+
+        const nextText =
+          j < blocksForRender.length ? String((blocksForRender[j] as any)?.text ?? '') : '';
+        const missingBody = j >= blocksForRender.length || isHeaderLine(nextText);
+
+        if (missingBody) {
+          blocksForRender = blocksForRender
+            .slice(0, idx)
+            .concat(blocksForRender.slice(idx + 1));
+        }
+      }
+    }
+  }
+} catch {}
+
+
 let content = renderV2({
-  blocks,
-  maxLines: maxLinesFinal,
-  fallbackText,
+  blocks: blocksForRender,
+  maxLines: maxLinesForRender,
+  fallbackText: fallbackTextForRender,
 });
 
 pipe('after_renderV2', content);
 
+function trimTo60(s: string): string {
+  const t = String(s ?? '').replace(/\s+/g, ' ').trim();
+  if (t.length <= 60) return t;
+  return t.slice(0, 60) + '…';
+}
 
+// ✅ FIX: 「最小の一手」セクションが無い/本文が無い場合、@NEXT_HINT を一文化して補完する（ラベル可変）
+try {
+  const hint = String(nextHintFromSlotPlan ?? nextHintFromRb ?? '').trim();
 
-  // ✅ renderV2 が空文字を返すケースを救済（blocks があるのに outLen=0 になる事故防止）
-  if (String(content ?? '').trim() === '') {
-    const blocksJoined = Array.isArray(blocks)
-      ? blocks
-          .map((b) => String((b as any)?.text ?? ''))
-          .filter(Boolean)
-          .join('\n')
-      : '';
+  const lines = String(content ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n');
 
-    const base = blocksJoined || fallbackText || r0s || picked || '';
-    content = base;
-    fallbackFrom = 'renderV2-empty';
+  // ✅ ラベル可変（UI側の見出し名）
+  // この地点では meta 変数は未定義になりやすいので、args.meta を直接見る
+  const metaArg = (args as any)?.meta ?? null;
+
+  // ✅ extra は “未定義変数” を踏むと即死するので、metaArg から安全に取る
+  const extraArg = (metaArg as any)?.extra ?? null;
+
+  const goalKind = String(
+    extraArg?.goalKind ??
+      extraArg?.replyGoal?.kind ??
+      extraArg?.replyGoalKind ??
+      metaArg?.framePlan?.goalKind ??
+      metaArg?.goalKind ??
+      ''
+  ).trim();
+
+  const decideNextLabel = (k: string) => {
+    const kk = String(k ?? '').trim();
+    switch (kk) {
+      case 'uncover':
+        return '次の一手';
+      case 'stabilize':
+      case 'reframeIntention':
+      default:
+        return 'ここから';
+    }
+  };
+
+  const nextLabel = decideNextLabel(goalKind);
+
+  // ✅ “同義” 扱いする既存ラベル（入力側の揺れ吸収）
+  const NEXT_LABELS = ['最小の一手', '次の一手', 'ここから', 'NEXT', 'NEXT_MIN', 'NEXT_HINT'];
+
+  const isNextHeader = (s: string) => {
+    const t = String(s ?? '').trim();
+    if (/^###\s*/.test(t)) {
+      const head = t.replace(/^###\s*/, '').trim();
+      return NEXT_LABELS.some((x) => head === x);
+    }
+    if (/^✨\s*/.test(t)) {
+      const head = t.replace(/^✨\s*/, '').trim();
+      return NEXT_LABELS.some((x) => head === x);
+    }
+    return NEXT_LABELS.some((x) => t === x);
+  };
+
+  const isHeaderLine = (s: string) => {
+    const t = String(s ?? '').trim();
+    return /^###\s+/.test(t) || /^✨\s+/.test(t);
+  };
+
+  const idx = lines.findIndex(isNextHeader);
+
+  // ✅ NEXT を表示するか（このスコープで必ず定義する）
+  const flowDelta = String(extraArg?.flow?.flowDelta ?? '').trim();
+  const returnStreak = Number(extraArg?.flow?.returnStreak ?? 0);
+
+  // RETURN 直後は「ここから」を見せたいので NEXT を出す（好みで調整可）
+  const shouldShowNext = flowDelta === 'RETURN' ? true : returnStreak >= 2;
+
+  const hintFinal = hint && shouldShowNext ? String(hint) : '';
+
+  const trimTo60 = (s: string): string => {
+    const t = String(s ?? '').replace(/\s+/g, ' ').trim();
+    if (t.length <= 60) return t;
+    return t.slice(0, 60) + '…';
+  };
+
+  if (!hintFinal) {
+    // ✅ hint を出さない場合でも、既存セクションがあればラベルだけ統一する
+    if (idx >= 0) {
+      const headLine = String(lines[idx] ?? '').trim();
+      if (/^###\s*/.test(headLine)) lines[idx] = `### ${nextLabel}`;
+      else if (/^✨\s*/.test(headLine)) lines[idx] = `✨ ${nextLabel}`;
+      else lines[idx] = nextLabel;
+
+      // 見出しだけ（本文なし）のときだけ削除
+      let end = idx + 1;
+      while (end < lines.length && !isHeaderLine(lines[end])) end++;
+
+      const hasBody = lines
+        .slice(idx + 1, end)
+        .some((s) => {
+          const t = String(s ?? '').trim();
+          return t.length > 0 && !isHeaderLine(t);
+        });
+
+      if (!hasBody) {
+        lines.splice(idx, end - idx);
+      }
+      content = lines.join('\n').trim();
+    }
+  } else {
+    const sentence = trimTo60(hintFinal);
+
+    // 見出しが無い → 末尾にセクション追加（可変ラベル）
+    if (idx < 0) {
+      while (lines.length > 0 && String(lines[lines.length - 1]).trim() === '') lines.pop();
+      lines.push('', `### ${nextLabel}`, '', sentence);
+      content = lines.join('\n').trim();
+    } else {
+      // ✅ 既存見出しは UI ラベルに統一
+      const headLine = String(lines[idx] ?? '').trim();
+      if (/^###\s*/.test(headLine)) lines[idx] = `### ${nextLabel}`;
+      else if (/^✨\s*/.test(headLine)) lines[idx] = `✨ ${nextLabel}`;
+      else lines[idx] = nextLabel;
+
+      // 本文が無い → 直下に挿入
+      let j = idx + 1;
+      while (j < lines.length && String(lines[j]).trim() === '') j++;
+
+      const missingBody = j >= lines.length || isHeaderLine(lines[j]);
+      if (missingBody) {
+        lines.splice(idx + 1, 0, '', sentence);
+      }
+      content = lines.join('\n').trim();
+    }
   }
-  pipe('after_renderV2_empty_rescue', content);
+} catch (e) {
+  console.warn('[IROS/renderGateway][NEXT_LABEL_PATCH_FAILED]', { error: e });
+}
+
+
+
+  // ✅ blocks を「表示前に」軽く正規化（重複/見出し/空行だけ整える）
+  try {
+    const blocksIn = Array.isArray(blocksForRender)
+      ? blocksForRender.map((b: any) => String(b?.text ?? '').trim()).filter(Boolean)
+      : [];
+
+    if (blocksIn.length > 0) {
+      const normRes = normalizeBlocksForRender(blocksIn, {
+        titleScanMaxLines: 3,
+        dedupeConsecutiveTitles: true,
+        maxBlankRun: 1,
+        dedupeExactBlocks: true,
+      });
+
+      if (Array.isArray(normRes?.blocks) && normRes.blocks.length > 0) {
+        blocksForRender = normRes.blocks.map((t) => ({ text: t }));
+      }
+
+      // ✅ 変化があった時だけ必ずログ（STAGE_ENABLED OFFでも追える）
+      const m = normRes?.meta ?? null;
+      const changed =
+        !!m &&
+        ((m.removedExactDups ?? 0) > 0 ||
+          (m.removedTitleDups ?? 0) > 0 ||
+          (m.trimmedBlankRuns ?? 0) > 0 ||
+          (m.inBlocks ?? 0) !== (m.outBlocks ?? 0));
+
+      if (changed || STAGE_ENABLED) {
+        console.warn('[IROS/renderGateway][NORMALIZE_DIAG]', {
+          rev: IROS_RENDER_GATEWAY_REV,
+          meta: m,
+          inBlocks: blocksIn.length,
+          outBlocks: Array.isArray(normRes?.blocks) ? normRes.blocks.length : 0,
+        });
+      }
+    }
+  } catch {}
+
+
+// ✅ renderV2 が空文字を返すケースを救済（blocks があるのに outLen=0 になる事故防止）
+if (String(content ?? '').trim() === '') {
+  const blocksJoinedForRescue = Array.isArray(blocksForRender)
+    ? blocksForRender
+        .map((b) => String((b as any)?.text ?? ''))
+        .filter(Boolean)
+        .join('\n')
+    : '';
+
+  const base = blocksJoinedForRescue || fallbackTextForRender || r0s || picked || '';
+  content = base;
+  fallbackFrom = 'renderV2-empty';
+}
+pipe('after_renderV2_empty_rescue', content);
 
   // =========================================================
   // ✅ 最終表示の整形（重複排除版）
@@ -1261,8 +1895,31 @@ pipe('after_renderV2', content);
   content = stripILINETags(content);
   pipe('after_stripILINETags', content);
 
-  content = sanitizeVisibleText(content);
+  // ✅ 最終 sanitize
+  // - rephraseBlocks 採用時は「多段の改行」を潰さない（ENTRY/DUAL/...の構造を保持）
+  const pickedFromFinal =
+    String((extra as any)?.renderMeta?.pickedFrom ?? (extra as any)?.pickedFrom ?? (extra as any)?.meta?.pickedFrom ?? '');
+
+  const preserveNewlines =
+    pickedFromFinal === 'rephraseBlocks' ||
+    Array.isArray((extra as any)?.rephraseBlocks) ||
+    Array.isArray((extra as any)?.rephrase?.blocks) ||
+    Array.isArray((extra as any)?.rephrase?.rephraseBlocks);
+
+  if (preserveNewlines) {
+    // 改行は維持しつつ、危険要素だけ落とす（ゼロ幅・directive・ILINEなどは前段で処理済み）
+    content = String(content ?? '')
+      .replace(/\u200B|\u200C|\u200D|\uFEFF/g, '') // zero-width
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .replace(/[ \t]+\n/g, '\n') // 行末の空白だけ除去
+      .replace(/\n{4,}/g, '\n\n\n') // 改行暴れだけ抑える（2〜3段は残す）
+      .trim();
+  } else {
+    content = sanitizeVisibleText(content);
+  }
   pipe('after_sanitizeVisibleText', content);
+
 
   // ✅ 追加：strip/sanitize の結果 “空に戻った” 場合の救済（UI空事故を塞ぐ）
   if (String(content ?? '').trim() === '') {
@@ -1377,6 +2034,9 @@ pipe('after_renderV2', content);
   // ✅ meta は「実際に採用された見える本文」に合わせる
   // - pickedFrom='rephraseBlocks' のとき、picked/baseText が省略文字や短いダミーになることがある
   // - その場合 meta の pickedHead/pickedLen がズレて解析が誤読するので、常に content 優先で補正する
+  // ✅ meta は「実際に採用された見える本文」に合わせる
+  // - pickedFrom='rephraseBlocks' のとき、picked/baseText が省略文字や短いダミーになることがある
+  // - その場合 meta の pickedHead/pickedLen がズレて解析が誤読するので、常に content 優先で補正する
   const pickedRaw = String(picked ?? '');
   const contentRaw = String(content ?? '');
 
@@ -1385,8 +2045,11 @@ pipe('after_renderV2', content);
       ? contentRaw
       : pickedRaw;
 
+  // ✅ blocksCount は「最終的に render に渡す blocks（= blocksForRender）」で数える
+      const blocksCountForMeta = Array.isArray(blocksForRender) ? blocksForRender.length : 0;
+
       const meta = {
-        blocksCount: blocks.length,
+        blocksCount: Array.isArray(blocksForRender) ? blocksForRender.length : 0,
         maxLines: maxLinesFinal,
         enable: true,
         pickedFrom,
@@ -1398,10 +2061,49 @@ pipe('after_renderV2', content);
 
         // ✅ outLen は “最終表示” の生文字数で統一（enable=false と同じ定義）
         outLen: String(contentRaw).length,
-
         outHead: head(contentRaw),
         rev: IROS_RENDER_GATEWAY_REV,
       };
+
+
+  // ✅ 短文化の“確定ログ”：render側が切ったのか、blocks側が短いのかを一発で判定する
+  try {
+    const rbDiag = (meta as any)?.extra?.renderMeta?.rbDiag ?? null;
+
+    const pickedFromStr = String(pickedFrom ?? '');
+
+    // ✅ rephraseBlocks 強制ターンは “短文化事故” ではないことが多いので除外
+    const isForcedBlocks =
+      pickedFromStr === 'rephraseBlocks-forced' || pickedFromStr.startsWith('rephraseBlocks');
+
+    // IR / shortException は対象外（意図的に短い場合がある）
+    const isShortOut =
+      !isIR &&
+      !shortException &&
+      !isForcedBlocks &&
+      Number.isFinite(meta.outLen) &&
+      meta.outLen > 0 &&
+      meta.outLen < 160;
+
+    if (isShortOut) {
+      console.warn('[IROS/renderGateway][SHORT_OUT_DIAG]', {
+        rev: IROS_RENDER_GATEWAY_REV,
+        slotPlanPolicy,
+        pickedFrom,
+        fallbackFrom,
+        maxLinesFinal,
+        blocksCount: blocksCountForMeta,
+        outLen: meta.outLen,
+        outHead: meta.outHead,
+        rbDiag,
+        // 追加で「最終採用品質」も一緒に見る
+        pickedLen: meta.pickedLen,
+        pickedHead: meta.pickedHead,
+        fallbackLen: meta.fallbackLen,
+        fallbackHead: meta.fallbackHead,
+      });
+    }
+  } catch {}
 
 
   // ✅ meta 拡張（破壊せず・型衝突させず）
@@ -1441,7 +2143,7 @@ pipe('after_renderV2', content);
     }
   }
 
-  console.info('[IROS/renderGateway][LEN_TRACE]', {
+  console.info('[IROS/renderGateway][LEN_SNAPSHOT]', {
     rev: IROS_RENDER_GATEWAY_REV,
     len_before: String(contentRaw).length,
     head_before: head(String(contentRaw)),
@@ -1516,6 +2218,59 @@ if (String(content ?? '').trim() === '') {
       });
     }
   } catch {}
+
+  if (STAGE_ENABLED) {
+    try {
+// ✅ LEN_FLOW も「最終的に render に渡す blocks（= blocksForRender）」を参照する
+const blocksJoined = Array.isArray(blocksForRender)
+  ? blocksForRender
+      .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim())
+      .filter(Boolean)
+      .join('\n')
+  : '';
+
+const blocksCountForLog = Array.isArray(blocksForRender) ? blocksForRender.length : 0;
+
+
+
+      console.info('[IROS/renderGateway][LEN_FLOW]', {
+        rev: IROS_RENDER_GATEWAY_REV,
+        slotPlanPolicy,
+        pickedFrom,
+        fallbackFrom,
+        maxLinesFinal,
+        blocksCount: blocksCountForLog,
+        isIR,
+        isSilence,
+        shortException,
+
+        // ✅ raw（素材）: ここは “指示文/slotPlan由来の拾い物” が入る
+        pickedRawLen: norm(picked).length,
+        pickedRawHead: head(String(picked ?? '')),
+
+        // ✅ blocks（renderV2の材料）: blocksForRender を join したもの
+        blocksJoinedLen: blocksJoined.length,
+        blocksJoinedHead: head(blocksJoined),
+
+
+
+        // ✅ final（確定本文）: renderV2 → strip/sanitize → trim 後の content
+        finalLen: norm(String(content ?? '')).length,
+        finalHead: head(String(content ?? '')),
+
+        // ✅ fallbackText（保険）
+        fallbackLen: norm(fallbackText).length,
+        fallbackHead: head(String(fallbackText ?? '')),
+
+        // ✅ サマリ辞書（詳細steps/deltaは LEN_TRACE 側）
+        flow: Object.fromEntries(
+          lenFlowSteps.map((s) => [s.label, { len: s.len, lenNorm: s.lenNorm, head: s.head }]),
+        ),
+      });
+    } catch (e) {
+      console.warn('[IROS/renderGateway][LEN_FLOW][FAILED]', { error: e });
+    }
+  }
 
   console.warn(
     '[IROS/renderGateway][OK]',

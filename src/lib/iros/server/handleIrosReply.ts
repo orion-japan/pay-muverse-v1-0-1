@@ -53,6 +53,11 @@ import {
 } from '@/lib/iros/server/achievementSummaryGate';
 
 import {
+  canonicalizeIrosMeta,
+  applyCanonicalToMetaForSave,
+} from './handleIrosReply.meta';
+
+import {
   loadRecentHistoryAcrossConversations,
   mergeHistoryForTurn,
 } from '@/lib/iros/server/historyX';
@@ -1425,10 +1430,17 @@ function normForRecall(v: any): string {
       requestedDepthFinal = 'I1';
     }
 
-    console.log('[IROS][DepthGate] R->I check', {
+    const gateApplied =
+      prevDepthStage?.startsWith('R') &&
+      typeof requestedDepthFinal === 'string' &&
+      requestedDepthFinal.startsWith('I') &&
+      (ctx.requestedDepth ?? '').trim().length > 0;
+
+    console.log('[IROS][DepthGate] check', {
       prevDepthStage,
       requestedDepth_in: ctx.requestedDepth ?? null,
       requestedDepth_out: requestedDepthFinal ?? null,
+      gateApplied,
     });
 
     // ✅ Orchestrator（V2: 判断のみ。本文生成はしない）
@@ -1907,9 +1919,55 @@ if ((extra2.ctxPack as any).historyDigestV1 == null && digestV1Raw) {
     (extra2.ctxPack as any).qCode = qRaw;
   }
 }
+// ✅ ctxPack に slotPlanPolicy / slots も同期（rephraseEngine / convEvidence が拾う）
+// - 正本は framePlan（推定しない）
+// - slots は “slotPlan” があればそれを優先（@OBS/@SHIFT/@NEXT... の実体）
+// - 無ければ framePlan.slotPlan を拾う（最低限）
+{
+  const m = (out.metaForSave as any) ?? {};
+  const fp = (m.framePlan as any) ?? {};
 
-// flow 同期（正本）は後段（nowIso2/prevAtIso/ageSec/returnStreak を使う方）で行うため、ここでは書かない。
-// ※ 二重定義を避ける（flow / digest / phase-depth-q の重複防止）
+  // slotPlanPolicy（正本：framePlan）
+  const policyRaw = fp.slotPlanPolicy ?? m.slotPlanPolicy ?? null;
+  if ((extra2.ctxPack as any).slotPlanPolicy == null && typeof policyRaw === 'string' && policyRaw.trim()) {
+    (extra2.ctxPack as any).slotPlanPolicy = policyRaw.trim();
+  }
+
+  // ✅ goalKind（BLOCK_PLAN の stabilize 縮退が効くように ctxPack に同期）
+  // 注意：ctxPack.replyGoal は「文字列（permit_density 等）」として既に使うので触らない
+  const goalKindRaw =
+    m.targetKind ??
+    m.target_kind ??
+    m.goalKind ??
+    null;
+
+  if ((extra2.ctxPack as any).goalKind == null && typeof goalKindRaw === 'string' && goalKindRaw.trim()) {
+    (extra2.ctxPack as any).goalKind = goalKindRaw.trim();
+  }
+
+  // slots（正本：framePlan.slotPlan / slotPlan）
+  const slotsRaw =
+    (fp.slotPlan && Array.isArray(fp.slotPlan) ? fp.slotPlan : null) ??
+    (m.slotPlan && Array.isArray(m.slotPlan) ? m.slotPlan : null) ??
+    null;
+
+  // ctxPack 側のキー名は “slotPlan” に揃える
+  if ((extra2.ctxPack as any).slotPlan == null && Array.isArray(slotsRaw) && slotsRaw.length) {
+    (extra2.ctxPack as any).slotPlan = slotsRaw;
+  }
+
+  // ✅ exprMeta も ctxPack に同期（正本：metaForSave.extra.ctxPack.exprMeta）
+  const exprMetaRaw =
+    (m.extra as any)?.ctxPack?.exprMeta ??
+    (m.extra as any)?.exprMeta ??
+    null;
+
+  if ((extra2.ctxPack as any).exprMeta == null && exprMetaRaw && typeof exprMetaRaw === 'object') {
+    (extra2.ctxPack as any).exprMeta = exprMetaRaw;
+  }
+}
+
+
 
 
 // 既存の flow 同期はそのまま
@@ -1930,6 +1988,8 @@ if ((extra2.ctxPack as any).historyDigestV1 == null && digestV1Raw) {
 
   traceId: traceId ?? null,
 };
+
+(extra2.ctxPack as any).exprMeta = (out.metaForSave as any)?.extra?.exprMeta ?? null;
 
 // digestChars は “注入対象の文字数” を見るため（JSON stringify）
 let digestChars: number | null = null;
@@ -2310,6 +2370,33 @@ try {
     // ✅ meta fill（IT writer 前に null 禁止を担保）
     out.metaForSave = ensureMetaFilled({ meta: out.metaForSave, ctx, orch });
 
+// ✅ canonical stamp（MIRROR_FLOW / downstream が q_code を確実に拾えるようにする）
+try {
+  const userTextForCanon =
+    (typeof (ctx as any)?.userText === 'string' ? (ctx as any).userText : null) ??
+    (typeof (ctx as any)?.inputText === 'string' ? (ctx as any).inputText : null) ??
+    null;
+
+  const canonical = canonicalizeIrosMeta({
+    metaForSave: out.metaForSave,
+    userText: userTextForCanon,
+  });
+
+  out.metaForSave = applyCanonicalToMetaForSave(out.metaForSave, canonical);
+
+  // 監査ログ（必要なら消してOK）
+  console.log('[IROS/CANON][STAMP]', {
+    conversationId: (ctx as any)?.conversationId ?? null,
+    userCode: (ctx as any)?.userCode ?? null,
+    q_code: (out.metaForSave as any)?.q_code ?? null,
+    depth_stage: (out.metaForSave as any)?.depth_stage ?? null,
+    phase: (out.metaForSave as any)?.phase ?? null,
+  });
+} catch (e) {
+  console.warn('[IROS/CANON][STAMP] failed', e);
+}
+
+
 // ========= handleIrosReply.ts 変更点 =========
 //
 // 1) import 追加（ファイル先頭の import 群に追加）
@@ -2419,90 +2506,240 @@ try {
         });
       }
 
-      if (shouldRunWriter) {
-        const extracted = extractSlotsForRephrase({
-          meta: out.metaForSave,
-          framePlan: (out.metaForSave as any)?.framePlan ?? null,
-          slotPlan: (out.metaForSave as any)?.slotPlan ?? null,
-          assistantText: out.assistantText ?? null,
-          content: (out as any)?.content ?? null,
-          text: (out as any)?.text ?? null,
-          extra: out.metaForSave.extra,
-          orch: { framePlan: (out.metaForSave as any)?.framePlan ?? null },
+// --- DEBUG: slot sources snapshot (TEMP) ---
+try {
+  const sp = (out.metaForSave as any)?.slotPlan;
+  const fp = (out.metaForSave as any)?.framePlan;
+  console.log('[IROS/rephraseBridge][SLOT_SOURCES]', {
+    slotPlan_type: Array.isArray(sp) ? 'array' : typeof sp,
+    slotPlan_keys: sp && typeof sp === 'object' ? Object.keys(sp).slice(0, 12) : null,
+    slotPlan_head: typeof sp === 'string' ? sp.slice(0, 160) : null,
+    framePlan_has_slots: !!fp?.slots,
+    framePlan_slots_sample: Array.isArray(fp?.slots)
+      ? fp.slots.slice(0, 3).map((x: any) => Object.keys(x ?? {}).slice(0, 8))
+      : fp?.slots && typeof fp.slots === 'object'
+        ? Object.keys(fp.slots).slice(0, 12)
+        : null,
+    extra_keys: (out.metaForSave as any)?.extra ? Object.keys((out.metaForSave as any).extra).slice(0, 16) : null,
+  });
+} catch {}
+// --- /DEBUG ---
+
+
+if (shouldRunWriter) {
+  // ✅ extra が無いと extractSlotsForRephrase が落ちるので保険
+  out.metaForSave = out.metaForSave ?? ({} as any);
+  out.metaForSave.extra = out.metaForSave.extra ?? ({} as any);
+
+  const fp0 = (out.metaForSave as any)?.framePlan ?? null;
+  const sp0 = (out.metaForSave as any)?.slotPlan ?? null;
+
+  // --- FIX: slotPlan を framePlan.slots（枠）に合わせて補完する（SAFE欠け対策） ---
+  // framePlan.slots: [{id, hint, ...}, ...]
+  // slotPlan: [{key, text}, ...] を想定。型が違う場合は触らない。
+  let slotPlanNormalized: any = sp0;
+
+  try {
+    const fpSlots: any[] = Array.isArray(fp0?.slots) ? fp0.slots : [];
+    const wantIds = fpSlots
+      .map((s: any) => String(s?.id ?? '').trim())
+      .filter(Boolean);
+
+    const spArr: any[] = Array.isArray(sp0) ? sp0 : [];
+    const looksLikeKeyText =
+      spArr.length === 0 ||
+      spArr.every((x: any) => x && typeof x === 'object' && 'key' in x && 'text' in x);
+
+    if (wantIds.length > 0 && Array.isArray(sp0) && looksLikeKeyText) {
+      const byKey = new Map<string, any>();
+      for (const x of spArr) {
+        const k = String(x?.key ?? '').trim();
+        if (k) byKey.set(k, x);
+      }
+
+      const normalized: any[] = [];
+      const missing: string[] = [];
+
+      for (const id of wantIds) {
+        const hit = byKey.get(id);
+        if (hit) {
+          normalized.push(hit);
+          continue;
+        }
+
+        // 欠けスロット（特に SAFE）を最小プレースホルダで補完
+        const hint =
+          fpSlots.find((s: any) => String(s?.id ?? '').trim() === id)?.hint ?? null;
+
+        missing.push(id);
+        normalized.push({
+          key: id,
+          text: `@${id} ${JSON.stringify(
+            { kind: 'auto_fill', hint: hint ? String(hint) : null },
+            null,
+            0,
+          )}`,
         });
+      }
 
-        const model = String(process.env.IROS_REPHRASE_FINAL_MODEL ?? process.env.IROS_MODEL ?? 'gpt-4o').trim();
+      slotPlanNormalized = normalized;
 
-        const slotPlanPolicy =
-          String((out.metaForSave as any)?.framePlan?.slotPlanPolicy ?? '').trim().toUpperCase() || null;
+      console.log('[IROS/rephraseBridge][SLOT_NORM]', {
+        wantIds,
+        had: spArr.map((x: any) => String(x?.key ?? '').trim()).filter(Boolean),
+        missing,
+        len_before: spArr.length,
+        len_after: normalized.length,
+      });
 
-          const rr = await rephraseSlotsFinal(extracted, {
-            model,
-            temperature: 0.7,
-            maxLinesHint: 8,
-            userText: typeof text === 'string' ? text : null,
 
-            // ✅ トップレベル：最低限（重複しない）
-            inputKind: (ctx as any)?.inputKind ?? null,
+      // debug用に extra へ残す（後で消してOK）
+      (out.metaForSave as any).extra.slotPlan_norm = {
+        from: 'framePlan.slots',
+        want: wantIds,
+        had: spArr.map((x: any) => String(x?.key ?? '').trim()).filter(Boolean),
+        missing,
+        len_before: spArr.length,
+        len_after: normalized.length,
+      };
+    }
+  } catch {}
+  // --- /FIX ---
 
-            // ✅ debug は 1回だけ（ここでまとめる）
-            debug: {
-              traceId: (ctx as any)?.traceId ?? (out.metaForSave as any)?.traceId ?? null,
-              conversationId: _conversationId ?? null,
-              userCode: _userCode ?? null,
-              slotPlanPolicy,
-              renderEngine: true,
-              inputKind: (ctx as any)?.inputKind ?? null,
-            } as any,
+  const extracted = extractSlotsForRephrase({
+    meta: out.metaForSave,
+    framePlan: fp0,
+    slotPlan: slotPlanNormalized,
+    assistantText: out.assistantText ?? null,
+    content: (out as any)?.content ?? null,
+    text: (out as any)?.text ?? null,
+    extra: out.metaForSave.extra,
+    orch: { framePlan: fp0 },
+  });
 
-            userContext: (() => {
-              const turns: Array<{ role: 'user' | 'assistant'; content: string }> = Array.isArray(
-                (out.metaForSave as any)?.extra?.historyForWriter,
+  const model = String(
+    process.env.IROS_REPHRASE_FINAL_MODEL ?? process.env.IROS_MODEL ?? 'gpt-4o',
+  ).trim();
+
+  const slotPlanPolicy =
+    String((out.metaForSave as any)?.framePlan?.slotPlanPolicy ?? '')
+      .trim()
+      .toUpperCase() || null;
+
+  // ✅ exprMeta（正本）は metaForSave.extra.exprMeta
+  // - postprocess で決めるのが理想だが、ここでは「渡す」だけ（進行は変えない）
+  const exprMetaCanon =
+    ((out.metaForSave as any)?.extra?.exprMeta &&
+      typeof (out.metaForSave as any).extra.exprMeta === 'object')
+      ? (out.metaForSave as any).extra.exprMeta
+      : null;
+
+  // 検索しやすいログ（供給側）
+  console.log('[IROS/EXPR_META][chosen]', {
+    source: 'rephraseBridge',
+    traceId: (ctx as any)?.traceId ?? (out.metaForSave as any)?.traceId ?? null,
+    conversationId: _conversationId ?? null,
+    userCode: _userCode ?? null,
+    hasExprMeta: Boolean(exprMetaCanon),
+    metaphor: exprMetaCanon ? String((exprMetaCanon as any).metaphor ?? '') : null,
+  });
+
+  const rr = await rephraseSlotsFinal(
+    extracted,
+    {
+      model,
+      temperature: 0.7,
+
+      // ✅ maxLinesHint を “固定8” から “ブロック数×8行” へ
+      // - 目的：段（block）が多いとき、rephraseEngine 側の clampLines で先に潰れないようにする
+      // - 優先順位：blockPlan.blocks > rephraseBlocksLen > slot数
+      maxLinesHint: (() => {
+        const exAny = (out.metaForSave as any)?.extra ?? {};
+        const bpBlocks = Array.isArray(exAny?.blockPlan?.blocks) ? exAny.blockPlan.blocks : null;
+        const bpLen = bpBlocks ? bpBlocks.length : 0;
+
+        const rbLen = Array.isArray(exAny?.rephraseBlocks) ? exAny.rephraseBlocks.length : 0;
+
+        // extracted.keys は OBS/SHIFT/NEXT などの “スロット数”
+        const slotLen = Array.isArray(extracted?.keys) ? extracted.keys.length : 0;
+
+        const basis = bpLen > 0 ? bpLen : rbLen > 0 ? rbLen : slotLen > 0 ? slotLen : 4;
+
+        // あなたの案：8行×ブロック数
+        // 下限：12（短文事故防止） / 上限：80（プロンプト肥大防止）
+        const budget = Math.max(12, basis * 8);
+        return Math.min(80, budget);
+      })(),
+
+      userText: typeof text === 'string' ? text : null,
+
+      // ✅ debug は 1回だけ（ここでまとめる）
+      debug: {
+        traceId: (ctx as any)?.traceId ?? (out.metaForSave as any)?.traceId ?? null,
+        conversationId: _conversationId ?? null,
+        userCode: _userCode ?? null,
+        slotPlanPolicy,
+        renderEngine: true,
+        inputKind: (ctx as any)?.inputKind ?? null,
+      } as any,
+
+
+      userContext: (() => {
+        const turns: Array<{ role: 'user' | 'assistant'; content: string }> = Array.isArray(
+          (out.metaForSave as any)?.extra?.historyForWriter,
+        )
+          ? (out.metaForSave as any).extra.historyForWriter
+              .map((m: any) => ({
+                role: m?.role,
+                content: m?.content ?? m?.text ?? '',
+              }))
+              .filter(
+                (m: any) =>
+                  (m?.role === 'user' || m?.role === 'assistant') &&
+                  String(m?.content ?? '').trim().length > 0,
               )
-                ? (out.metaForSave as any).extra.historyForWriter
-                    .map((m: any) => ({
-                      role: m?.role,
-                      content: m?.content ?? m?.text ?? '',
-                    }))
-                    .filter(
-                      (m: any) =>
-                        (m?.role === 'user' || m?.role === 'assistant') &&
-                        String(m?.content ?? '').trim().length > 0,
-                    )
-                : [];
+          : [];
 
-              // ✅ metaの参照元を補強（out.metaForSave.meta.* に居るケースがある）
-              const metaRoot = (out.metaForSave as any)?.meta ?? null;
+        // ✅ metaの参照元を補強（out.metaForSave.meta.* に居るケースがある）
+        const metaRoot = (out.metaForSave as any)?.meta ?? null;
 
-              return {
-                conversationId: _conversationId ?? null,
-                userCode: _userCode ?? null,
-                traceId: (ctx as any)?.traceId ?? (out.metaForSave as any)?.traceId ?? null,
-                inputKind: (ctx as any)?.inputKind ?? null,
+        return {
+          conversationId: _conversationId ?? null,
+          userCode: _userCode ?? null,
+          traceId: (ctx as any)?.traceId ?? (out.metaForSave as any)?.traceId ?? null,
+          inputKind: (ctx as any)?.inputKind ?? null,
 
-                historyForWriter: turns,
-                ctxPack: {
-                  ...(((out.metaForSave as any)?.extra?.ctxPack ?? null) as any),
-                  historyForWriter: turns,
-                  slotPlanPolicy,
-                },
+          // ✅ exprMeta（正本の鏡）— rephraseEngine.full.ts がここを見に行く
+          exprMeta: exprMetaCanon,
 
-                slotPlanPolicy,
+          historyForWriter: turns,
+          ctxPack: {
+            ...(((out.metaForSave as any)?.extra?.ctxPack ?? null) as any),
+            historyForWriter: turns,
+            slotPlanPolicy,
 
-                flowDigest: (out.metaForSave as any)?.extra?.flowDigest ?? null,
-                flowTape: (out.metaForSave as any)?.extra?.flowTape ?? null,
+            // ✅ exprMeta（正本の鏡）— ctxPack 経由でも読めるように
+            exprMeta: exprMetaCanon,
+          },
 
-                meta: {
-                  q: (out.metaForSave as any)?.q ?? metaRoot?.q ?? null,
-                  depth: (out.metaForSave as any)?.depth ?? metaRoot?.depth ?? null,
-                  phase: (out.metaForSave as any)?.phase ?? metaRoot?.phase ?? null,
-                  layer: (out.metaForSave as any)?.intentLayer ?? metaRoot?.intentLayer ?? null,
-                  renderMode: (out.metaForSave as any)?.renderMode ?? metaRoot?.renderMode ?? null,
-                  slotPlanPolicy,
-                },
-              };
-            })(),
-          });
+          slotPlanPolicy,
+
+          flowDigest: (out.metaForSave as any)?.extra?.flowDigest ?? null,
+          flowTape: (out.metaForSave as any)?.extra?.flowTape ?? null,
+
+          meta: {
+            q: (out.metaForSave as any)?.q ?? metaRoot?.q ?? null,
+            depth: (out.metaForSave as any)?.depth ?? metaRoot?.depth ?? null,
+            phase: (out.metaForSave as any)?.phase ?? metaRoot?.phase ?? null,
+            layer: (out.metaForSave as any)?.intentLayer ?? metaRoot?.intentLayer ?? null,
+            renderMode: (out.metaForSave as any)?.renderMode ?? metaRoot?.renderMode ?? null,
+            slotPlanPolicy,
+          },
+        };
+      })(),
+    } as any, // ✅ options型ズレのコンパイルエラーをここで止血
+  );
+
 
           if (rr && rr.ok) {
             const mx = (rr as any)?.meta?.extra ?? {};

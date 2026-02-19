@@ -23,6 +23,10 @@ export type BuildAllowArgs = {
   repeatSignal?: boolean | null;
   qPrimary?: string | null; // e.g. "Q2"
   itOk?: boolean | null; // IT確定/コミット状態（true の時だけ commit_hint を許可）
+
+  // ✅ 明示的に「具体的な一手/最小行動」を要求された場合の救済フラグ
+  // - lane を上書きせず、allow.concretize を“そのターンだけ”許可するために使う
+  explicitConcretize?: boolean | null;
 };
 
 export const ALLOW_DEFAULT: Allow = {
@@ -107,6 +111,11 @@ export function buildAllow(args: BuildAllowArgs): Allow {
   // Q補正
   const strengthAfterQ = clampStrength((strengthAfterRepeat as number) + qStrengthDelta(args.qPrimary ?? null));
 
+  // ✅ 明示的な「最小の一手/具体化」要求がある場合は、押しを1だけ戻す（最低限の推進圧）
+  // - Q3 で strength=0 に落ちても、ここで 1 に戻せる
+  const explicitConcretize = args.explicitConcretize === true;
+  const strengthFinal = clampStrength((strengthAfterQ as number) + (explicitConcretize ? 1 : 0));
+
   // IT ok の時だけ commit_hint を許可
   const itOk = args.itOk === true;
 
@@ -114,15 +123,17 @@ export function buildAllow(args: BuildAllowArgs): Allow {
   const head = String(args.depthStage ?? '').trim().toUpperCase().slice(0, 1);
   const commitHint = head === 'T' && itOk;
 
+  // ✅ concretize は
+  // - T帯 + IT確定（commit_hint）なら強制 true
+  // - それ以外でも explicitConcretize が true なら “そのターンだけ” true
+  const concretizeFinal = commitHint ? true : explicitConcretize ? true : base1.concretize;
+
   return {
     ...base1,
-    strength: strengthAfterQ,
+    strength: strengthFinal,
     commit_hint: commitHint,
-
-    // ✅ commit_hint が true の時だけ concretize を強制（T帯のみで自然）
-    concretize: commitHint ? true : base1.concretize,
+    concretize: concretizeFinal,
   };
-
 }
 
 export function formatAllowSystemText(allow: Allow): string {

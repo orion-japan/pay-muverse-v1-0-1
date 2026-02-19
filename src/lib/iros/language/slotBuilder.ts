@@ -136,7 +136,6 @@ function isRepeat(sig: string, recent: string[]): boolean {
 /* -------------------------
  * plan rules
  * ------------------------- */
-
 function basePlan(args: {
   frame: FrameKind;
   goalKind: GoalKind;
@@ -156,8 +155,10 @@ function basePlan(args: {
   // INSIGHT は I/T で入れる（ただし anti-repeat で抜くことがある）
   if (isIorT(String(depthStage))) plan.push('INSIGHT');
 
-  // SAFE は riskHint がある時だけ（常駐禁止）
-  if (hasText(facts?.riskHint)) plan.push('SAFE');
+  // ✅ SAFE は常駐（静かな保険）
+  // - ログ上 riskHint が null のケースが多く、SAFE が欠けて slotPlan=3 になっていたため
+  // - slotPlan=4（OBS/SHIFT/NEXT/SAFE）を安定させる目的で常駐化する
+  plan.push('SAFE');
 
   // NEXT は cooldown 以外は基本入れる（最小の一手）
   if (String(goalKind) !== 'cooldown') plan.push('NEXT');
@@ -175,6 +176,7 @@ function basePlan(args: {
   // dedupe (order kept)
   return plan.filter((s, i) => plan.indexOf(s) === i);
 }
+
 
 /**
  * anti-repeat:

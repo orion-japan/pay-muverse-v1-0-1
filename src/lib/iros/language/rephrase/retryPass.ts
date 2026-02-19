@@ -18,6 +18,9 @@ export async function runRetryPass(params: {
   baseDraftForRepair: string;
   userText: string;
 
+  // ✅ NEW: retry でも会話turnsを渡す（文脈保持）
+  turns?: any[] | null;
+
   // --- current state from 1st pass ---
   candidate: string; // first-pass candidate (for fallback)
   scaffoldActive: boolean;
@@ -41,6 +44,7 @@ export async function runRetryPass(params: {
   buildRetryMessages: (args: {
     systemPrompt: string;
     internalPack: any;
+    turns?: any[] | null; // ✅ NEW
     baseDraftForRepair: string;
     userText: string;
   }) => any[];
@@ -83,6 +87,7 @@ export async function runRetryPass(params: {
   extractedKeys: string[]; // extracted.keys（logRephraseOk用）
   slotsForGuard: any;
 }): Promise<any> {
+
   const {
     debug,
     opts,
@@ -136,14 +141,41 @@ export async function runRetryPass(params: {
   });
 
   // ✅ retry (2nd pass)
-  const retryMessages = buildRetryMessages({
+  // - BLOCK_PLAN（multi7）の契約違反で retry に落ちた時、2nd pass が「見出し抜け」を起こさないように
+  // - 特に ACCEPT（= 受容）が抜けやすいので、ここで明示的に“必須”を刻む
+  const retryMessages0 = buildRetryMessages({
     systemPrompt,
     internalPack,
+    turns: params.turns ?? null,
     baseDraftForRepair,
     userText,
   });
 
-  const raw2 = await callWriterLLM({
+  // ✅ 2nd pass 用：段構成の契約（multi7）を守らせる“追い打ち”
+  // - rephraseEngine 側の contract は「見出し行が単独で存在する」ことを前提にチェックしている
+  // - ACCEPT だけは alias で「受容」を許している（rephraseEngine.full.ts を参照）
+  const contractNudge = [
+    '【重要】段構成（見出し）を必ず守ってください。見出しは“行頭に単独”で出してください。',
+    '必須の見出し（この順序で）：',
+    '入口',
+    '二項',
+    '焦点移動',
+    '受容',
+    '統合',
+    '最小の一手',
+    '',
+    'ルール：各段は 1〜3行で短く。削りすぎず、下書きの流れを保持。',
+    '最後は「最小の一手」の段で 1行だけ、具体的な一歩で終える。',
+  ].join('\n');
+
+  // retryMessages の先頭に system で追記（既存の systemPrompt を壊さない）
+  const retryMessages: any[] = Array.isArray(retryMessages0) ? [...retryMessages0] : [];
+  retryMessages.unshift({ role: 'system', content: contractNudge });
+
+
+
+
+  let raw2 = await callWriterLLM({
     model: opts?.model ?? 'gpt-4o',
     temperature: opts?.temperature ?? 0.7,
     messages: retryMessages,
@@ -161,6 +193,51 @@ export async function runRetryPass(params: {
       depthStage: debug?.depthStage ?? null,
     },
   });
+
+
+  // ✅ BLOCK_PLAN_CONTRACT（multi7）の「欠け見出し」をここで補修して確実に通す
+  // - 現状: retry でも「受容」だけ抜けるケースが多い
+  // - かつ block plan の契約チェックは 1st pass にしか掛からないため、
+  //   retry 側の出力は欠けたまま通って UI に出てしまう
+  {
+    const fatalReasons = new Set((firstFatalReasons ?? []).map((x) => String(x)));
+    const shouldRepairBlockPlan = fatalReasons.has('BLOCK_PLAN_CONTRACT');
+
+    if (shouldRepairBlockPlan) {
+      const lines = String(raw2 ?? '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .split('\n')
+        .map((s) => String(s ?? '').trim())
+        .filter(Boolean);
+
+      const hasHead = (h: string) => lines.some((x) => x === h);
+
+      // 受容だけ抜けやすいのでまずそれを確実に補う（契約上 ACCEPT の alias）
+      if (!hasHead('受容') && !hasHead('ACCEPT')) {
+        // 挿入位置：焦点移動 -> 受容 -> 統合 が理想
+        const idxFocus = lines.findIndex((x) => x === '焦点移動' || x === 'FOCUS_SHIFT');
+        const idxIntegrate = lines.findIndex((x) => x === '統合' || x === 'INTEGRATE');
+
+        const insertAt =
+          idxFocus >= 0 && idxIntegrate > idxFocus
+            ? idxIntegrate // 統合の直前に差し込む
+            : idxIntegrate >= 0
+              ? idxIntegrate
+              : Math.max(0, lines.length - 1);
+
+        const acceptBlock = [
+          '受容',
+          'いまこの感覚を、良い悪いで裁かずに、そのまま置いてみます。',
+          '',
+        ];
+
+        lines.splice(insertAt, 0, ...acceptBlock);
+        raw2 = lines.join('\n').trim() + '\n';
+      }
+    }
+  }
+
 
   // ログ（LLMの実出力で）
   logRephraseOk(debug, extractedKeys, raw2, 'RETRY_LLM');

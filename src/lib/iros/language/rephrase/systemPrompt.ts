@@ -14,6 +14,11 @@ export function systemPromptForFullReply(args?: {
   band?: { intentBand: string | null; tLayerHint: string | null } | null;
   lockedILines?: string[] | null;
 
+  // ✅ ExpressionLane（発火結果）: personaModeを変えず、GROUND内スタイル補助だけに使う
+  // - ここは「表現だけ変える」ための入力口
+  // - 深度/Q/slotPlanPolicy 等の構造決定には使わない（上流でやる）
+  exprLane?: { fired?: boolean; lane?: string | null; reason?: string | null } | null;
+
   // ✅ 構造人格モード（最優先）
   // - 'GROUND'：入口（観測＋一手）
   // - 'DELIVER'：直依頼（完成文）
@@ -27,6 +32,11 @@ export function systemPromptForFullReply(args?: {
 
   const b = band?.intentBand ?? null;
   const h = band?.tLayerHint ?? null;
+
+  // ExpressionLane（表現補助用・構造は動かさない）
+  const exprLane = args?.exprLane ?? null;
+  const exprFired = Boolean(exprLane?.fired);
+  const exprLaneKey = (exprLane?.lane ?? null) as string | null;
 
   // NOTE: intentBand(I1/I2/I3) は “要求” ではなく “帯域” なので、GUIDE_I 判定には使わない。
   // Iスタイル許可は tLayerHint（I系/T系）など “要求” 側の信号に限定する。
@@ -59,6 +69,8 @@ export function systemPromptForFullReply(args?: {
       personaMode,
       intentBand: b,
       tLayerHint: h,
+      exprFired,
+      exprLaneKey,
       lockedILinesLen: Array.isArray(args?.lockedILines) ? args!.lockedILines!.length : 0,
     });
   } catch {}
@@ -114,10 +126,14 @@ export function systemPromptForFullReply(args?: {
     '- 質問で進める必要はない。',
     '- 観測は一文でよい（助言・判断・一般論にしない）。',
     '',
-    '【出力】',
-    '- 形式より会話としての自然さを優先する。',
-    '- 原則はプレーンテキスト（短文＋改行）。',
-    '- 見出し/箇条書き/番号は、ユーザーが求めた場合のみ。制約がある場合は従う。',
+'【出力】',
+'- 形式より会話としての自然さを優先する。',
+//'- Markdown 記法を使用してよい（### 見出し / 箇条書き / 番号 / 強調 など）。',
+//'- 見出しは「行頭に単独」で出す（例：### 受容）。',
+//'- ブロック契約がある場合（ENTRY/DUAL/FOCUS_SHIFT/ACCEPT/INTEGRATE/NEXT_MIN 等）は、必ず行頭単独で出す。',
+//'- 見出しの後は空行を1行入れる。',
+'- 通常会話では過度に装飾しない（GROUND時は多用しない）。',
+
   ].join('\n');
 
   // =========================================================
@@ -167,10 +183,24 @@ export function systemPromptForFullReply(args?: {
       ].join('\n');
     }
 
+    const styleAssist =
+      exprFired && exprLaneKey === 'sofia_light'
+        ? [
+            '',
+            '【表現補助（構造を変えない／露出禁止）】',
+            '- personaMode は変えない（GROUNDのまま）。',
+            '- 2〜3行改行を強め、余白を増やす（長文化しない）。',
+            '- 断定は弱める（決め打ちしない）。ただし曖昧語で締めない。',
+            '- 比喩は薄く、最大1つまで（地面＝具体語を最優先）。',
+            '- 内面反射型：ユーザーの具体語を1つ残して、静かに返す。',
+            '- I層/深度/メタを本文で匂わせない（“わかってる風”説明は禁止）。',
+          ].join('\n')
+        : '';
+
     return [
       '',
       '【構造人格（最優先）】personaMode=GROUND',
-      '- 入口は“地面”。比喩で包まない。抽象語を増やさない。',
+      '- 入口は“地面”。抽象語を増やさない。',
       '- ※ただし shift.kind=remake / intent=remake のときは「次の一手」を出さず、REMAKE 出力骨格を最優先する。',
       '- 1行目：ユーザーの最後の文を、短く言い換えて鏡にする（同じ話題・同じ粒度）。',
       '- 2行目：いまの詰まりを「Aしたい/でもBが嫌」の1文で構造化する（断定形）。',
@@ -180,8 +210,10 @@ export function systemPromptForFullReply(args?: {
       '- 聞き返しで進めない（質問は0、最大でも1）。',
       '- 一般論・選択肢列挙に逃げない。',
       '- 「どんな情報が必要ですか？」は禁止。',
-    ].join('\n');
-
+      styleAssist,
+    ]
+      .filter(Boolean)
+      .join('\n');
   })();
 
   // =========================================================

@@ -128,6 +128,21 @@ function buildNextHintSlot(args: { userText: string; laneKey?: LaneKey | null; f
     })}`,
   };
 }
+function buildSafeSlot(args: { reason?: string | null; laneKey?: LaneKey | null; flowDelta?: string | null }): NormalChatSlot {
+  const laneKey = safeLaneKey(args.laneKey);
+  const delta = args.flowDelta ? String(args.flowDelta) : null;
+
+  return {
+    key: 'SAFE',
+    role: 'assistant',
+    style: 'soft',
+    content: m('SAFE', {
+      laneKey: laneKey ?? null,
+      delta,
+      reason: args.reason ? clamp(norm(args.reason), 120) : null,
+    }),
+  };
+}
 
 
 // --------------------------------------------------
@@ -546,29 +561,41 @@ function buildFlowReply(args: {
             seed_text: seedText,
           });
 
-  return [
-    {
-      key: 'OBS',
-      role: 'assistant',
-      style: 'soft',
-      content: m('OBS', {
-        laneKey: laneKeyForObs,
-        user: seedText,
-        flow: conf === undefined ? { delta } : { delta, confidence: conf },
-        lastUserText: args.lastUserText ? clamp(norm(args.lastUserText), 140) : null,
-      }),
-    },
-    {
-      key: 'SHIFT',
-      role: 'assistant',
-      style: 'neutral',
-      content: shift,
-    },
+          return [
+            {
+              key: 'OBS',
+              role: 'assistant',
+              style: 'soft',
+              content: m('OBS', {
+                laneKey: laneKeyForObs,
+                user: seedText,
+                flow: conf === undefined ? { delta } : { delta, confidence: conf },
+                lastUserText: args.lastUserText ? clamp(norm(args.lastUserText), 140) : null,
+              }),
+            },
+            {
+              key: 'SHIFT',
+              role: 'assistant',
+              style: 'neutral',
+              content: shift,
+            },
 
-    // ✅ Phase11 advance測定用の橋（通常フローでも必ず出す）
-    // laneKeyはnullでも落ちないように（型が厳しい場合があるのでas anyで通す）
-    buildNextHintSlot({ userText: t, laneKey: laneKeyForObs as any, flowDelta: delta }),
-  ];
+            // ✅ SAFE を常駐（slotPlan=4を安定させる）
+            {
+              key: 'SAFE',
+              role: 'assistant',
+              style: 'soft',
+              content: m('SAFE', {
+                laneKey: laneKeyForObs,
+                flow: conf === undefined ? { delta } : { delta, confidence: conf },
+              }),
+            },
+
+            // ✅ Phase11 advance測定用の橋（通常フローでも必ず出す）
+            // laneKeyはnullでも落ちないように（型が厳しい場合があるのでas anyで通す）
+            buildNextHintSlot({ userText: t, laneKey: laneKeyForObs as any, flowDelta: delta }),
+          ];
+
 
 // ✅ 置き換え：src/lib/iros/slotPlans/normalChat.ts
 }

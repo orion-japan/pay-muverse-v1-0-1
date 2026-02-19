@@ -77,23 +77,36 @@ export function buildFirstPassMessages(args: {
 
 
   // ✅ 最後を user で終わらせる（ただし user,user 連投は絶対に作らない）
+  // - 末尾が user の場合は “追記マージ” or “置換” を状況で切り替える
   if (finalUserText) {
     const last = out[out.length - 1];
 
-    // 末尾が user なら “追加(push)” ではなく “置き換え” にする
     if (last?.role === 'user') {
       const lastNorm = norm(last?.content);
-      if (lastNorm !== finalUserText) {
+
+      // ✅ すでに同一なら何もしない
+      if (lastNorm === finalUserText) {
+        // noop
+      } else if (
+        // ✅ finalUserText が末尾 userText を内包しているなら「置換」して重複を防ぐ
+        // 例: lastNorm = "今日は...24"
+        //     finalUserText = "今日は...24\n流れを保ったまま前に進める"
+        finalUserText.includes(lastNorm)
+      ) {
         (out[out.length - 1] as WriterMessage).content = finalUserText;
+      } else {
+        // 従来通り：文脈を落とさないために追記
+        if (!lastNorm.includes(finalUserText)) {
+          (out[out.length - 1] as WriterMessage).content =
+            `${lastNorm}\n\n${finalUserText}`.trim();
+        }
       }
     } else {
       out.push({ role: 'user', content: finalUserText });
     }
   }
-
   return out;
 }
-
 
 /**
  * ✅ retry/repair: system + turns + (internalPack as user) + repair-instruction + userText
@@ -136,11 +149,20 @@ export function buildRetryMessages(args: {
     .filter((x) => String(x).trim().length > 0)
     .join('\n\n');
 
-  return [
-    { role: 'system', content: systemPrompt },
-    ...turnsToMessages(args.turns),
-    { role: 'user', content: mergedUser },
-  ];
+    const base: WriterMessage[] = [
+      { role: 'system', content: systemPrompt },
+      ...turnsToMessages(args.turns),
+    ];
+
+    // ✅ 末尾が user なら「追い user」を作らず、最後の user に結合する
+    const last = base[base.length - 1];
+    if (last && last.role === 'user') {
+      last.content = `${String(last.content ?? '').trim()}\n\n${mergedUser}`.trim();
+      return base;
+    }
+
+    return [...base, { role: 'user', content: mergedUser }];
+
 }
 
 

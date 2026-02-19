@@ -45,6 +45,7 @@ import { detectIdeaBandProposeFromExtracted, makeIdeaBandCandidateBlocks } from 
 import { computeMinOkPolicy, computeOkTooShortToRetry, computeNaturalTextReady } from './minOkPolicy';
 import { runRetryPass } from './retryPass';
 import { validateOutputPure } from './validateOutput';
+import { buildBlockPlan, detectExplicitBlockPlanTrigger, renderBlockPlanSystem4 } from '../../blockPlan/blockPlanEngine';
 
 import { flagshipGuard } from '../../quality/flagshipGuard';
 import {
@@ -454,11 +455,19 @@ export function extractSlotsForRephrase(extra: any): ExtractedSlots {
     extra?.orch?.framePlan ??
     null;
 
+  // ✅ slotsの取り元を拡張（"slotPlan（本文）" を最優先）
+  // - framePlan.slots は「箱の定義（schema）」の可能性が高いので最後に回す
   const slotsRaw =
-    framePlan?.slots ??
-    framePlan?.slotPlan?.slots ??
+    // 1) slotPlan（本文）を最優先
     extra?.slotPlan?.slots ??
+    extra?.slotPlan ??
     extra?.meta?.slotPlan?.slots ??
+    extra?.meta?.slotPlan ??
+    // 2) framePlan.slotPlan（本文を持つ実装もある）
+    framePlan?.slotPlan?.slots ??
+    framePlan?.slotPlan ??
+    // 3) 最後に framePlan.slots（schemaの可能性が高い）
+    framePlan?.slots ??
     null;
 
   // ✅ ILINE 等の制御マーカーはここで壊さない（lock抽出の素材なので保持）
@@ -466,6 +475,62 @@ export function extractSlotsForRephrase(extra: any): ExtractedSlots {
     const s = String(v ?? '');
     return s.replace(/\r\n/g, '\n').trim();
   };
+
+// ✅ slot本文を「深めに」拾う（contentがネストしてるケースを救う）
+const pickTextDeep = (v: any): string => {
+  if (v == null) return '';
+
+  // ✅ schemaっぽい slot 定義JSON（文字列）を本文扱いしない
+  const isSchemaJsonString = (s: string): boolean => {
+    const t = String(s ?? '').trim();
+    if (!t.startsWith('{') || !t.endsWith('}')) return false;
+    // OBS/SHIFT/NEXT/SAFE の id + hint がある「定義」を弾く
+    return /"id"\s*:\s*"(OBS|SHIFT|NEXT|SAFE)"/.test(t) && /"hint"\s*:/.test(t);
+  };
+
+  if (typeof v === 'string') {
+    return isSchemaJsonString(v) ? '' : v;
+  }
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+
+  // 配列は join（ただし空要素は落とす）
+  if (Array.isArray(v)) {
+    const parts = v
+      .map((x) => pickTextDeep(x))
+      .map((s) => String(s ?? '').trim())
+      .filter((s) => s.length > 0);
+    return parts.join('\n');
+  }
+
+  if (typeof v === 'object') {
+    // よくあるキーを順に深掘り
+    const CANDS = ['text', 'value', 'content', 'message', 'out', 'body', 'seed_text', 'seedText'];
+
+    for (const k of CANDS) {
+      const got = pickTextDeep((v as any)?.[k]);
+      if (String(got ?? '').trim().length > 0) return got;
+    }
+
+    // ✅ schemaっぽい slot 定義（id/required/hint だけ）を本文扱いしない
+    const keys = Object.keys(v as any);
+    const schemaOnly =
+      keys.length > 0 &&
+      keys.every((k) => k === 'id' || k === 'key' || k === 'required' || k === 'hint');
+
+    if (schemaOnly) return '';
+
+    // 最後の保険：知らない形でも落としきらない（ただし schemaOnly は除外済み）
+    try {
+      const j = JSON.stringify(v);
+      return typeof j === 'string' && !isSchemaJsonString(j) ? j : '';
+    } catch {
+      return '';
+    }
+  }
+
+  return '';
+};
+
 
   const buildFallbackObs = (): ExtractedSlots | null => {
     const fallbackText = normPreserveControl(
@@ -491,34 +556,73 @@ export function extractSlotsForRephrase(extra: any): ExtractedSlots {
 
   const out: Slot[] = [];
 
+  const pushIfValid = (keyLike: any, textLike: any) => {
+    const key = String(keyLike ?? '').trim();
+    const text0 = pickTextDeep(textLike);
+    const text = normPreserveControl(text0);
+    if (!key || !text) return;
+    out.push({ key, text });
+  };
+
   if (Array.isArray(slotsRaw)) {
     for (const s of slotsRaw) {
-      const key = String(s?.key ?? s?.id ?? s?.slotId ?? s?.name ?? '').trim();
-      const text = normPreserveControl(s?.text ?? s?.value ?? s?.content ?? s?.message ?? s?.out ?? '');
-      if (!key || !text) continue;
-      out.push({ key, text });
+      // slot定義(schema)の形（id/required/hintのみ）を弾く
+      if (s && typeof s === 'object') {
+        const ks = Object.keys(s);
+        const schemaOnly =
+          ks.length > 0 && ks.every((k) => k === 'id' || k === 'key' || k === 'required' || k === 'hint');
+        if (schemaOnly) continue;
+      }
+
+      const key = (s as any)?.key ?? (s as any)?.id ?? (s as any)?.slotId ?? (s as any)?.name ?? '';
+      const text =
+        (s as any)?.text ??
+        (s as any)?.value ??
+        (s as any)?.content ??
+        (s as any)?.message ??
+        (s as any)?.out ??
+        (s as any)?.body ??
+        (s as any)?.seed_text ??
+        (s as any)?.seedText ??
+        '';
+      pushIfValid(key, text);
     }
   } else if (typeof slotsRaw === 'object' && slotsRaw) {
     const keys = stableOrderKeys(Object.keys(slotsRaw));
     for (const k of keys) {
       const v = (slotsRaw as any)[k];
-      const text = normPreserveControl(
+
+      // slot定義(schema)の形（id/required/hintのみ）を弾く
+      if (v && typeof v === 'object') {
+        const ks = Object.keys(v);
+        const schemaOnly =
+          ks.length > 0 && ks.every((kk) => kk === 'id' || kk === 'key' || kk === 'required' || kk === 'hint');
+        if (schemaOnly) continue;
+      }
+
+      const text =
         typeof v === 'string'
           ? v
-          : v?.text ?? v?.content ?? v?.value ?? v?.message ?? v?.out ?? '',
-      );
-      if (!text) continue;
-      out.push({ key: String(k), text });
+          : (v as any)?.text ??
+            (v as any)?.content ??
+            (v as any)?.value ??
+            (v as any)?.message ??
+            (v as any)?.out ??
+            (v as any)?.body ??
+            (v as any)?.seed_text ??
+            (v as any)?.seedText ??
+            v;
+      pushIfValid(String(k), text);
     }
   }
 
-  // ✅ slotsRaw はあるが “本文が1つも取れない” ケースを救う（ここが今回の本丸）
+  // ✅ slotsRaw はあるが “本文が1つも取れない” ケースを救う（ここが本丸）
   if (out.length === 0) return buildFallbackObs();
 
   return {
     slots: out,
     keys: out.map((x) => x.key),
-    source: 'framePlan.slots',
+    source: 'slotPlan.slots',
   };
 }
 
@@ -1393,7 +1497,12 @@ function adaptSeedDraftHintForWriter(seedDraft: string, directTask: boolean): st
 // ---------------------------------------------
 // logs
 // ---------------------------------------------
-function logRephraseOk(debug: DebugFinal | null | undefined, outKeys: string[], raw: string, mode?: string) {
+function logRephraseOk(
+  debug: DebugFinal | null | undefined,
+  outKeys: string[],
+  raw: string,
+  mode?: string,
+) {
   console.log('[IROS/rephraseEngine][OK]', {
     traceId: debug?.traceId ?? null,
     conversationId: debug?.conversationId ?? null,
@@ -1406,24 +1515,34 @@ function logRephraseOk(debug: DebugFinal | null | undefined, outKeys: string[], 
 }
 
 function logRephraseAfterAttach(
-  debug: DebugFinal | null | undefined,
+  debug: any,
   outKeys: string[],
-  firstText: string,
-  mode?: string,
+  head: string,
+  note: string,
+  attachExtra?: any
 ) {
-  const blocksLen =
-    Array.isArray((debug as any)?.rephraseBlocks) ? (debug as any).rephraseBlocks.length : null;
+  try {
+    const extra =
+      attachExtra ??
+      (debug as any)?.meta?.extra ??
+      (debug as any)?.extra ??
+      null;
 
-  console.log('[IROS/rephraseEngine][AFTER_ATTACH]', {
-    traceId: debug?.traceId ?? null,
-    conversationId: debug?.conversationId ?? null,
-    userCode: debug?.userCode ?? null,
-    mode: mode ?? null,
-    renderEngine: debug?.renderEngine ?? true,
-    outKeysLen: outKeys.length,
-    rephraseBlocksLen: blocksLen,
-    rephraseHead: safeHead(String(firstText ?? ''), 120),
-  });
+    const hasExtra = !!(extra && typeof extra === 'object' && Object.keys(extra).length > 0);
+
+    console.log('[IROS/rephraseEngine][AFTER_ATTACH][EXTRA_TRACE]', {
+      traceId: (debug as any)?.traceId ?? null,
+      conversationId: (debug as any)?.conversationId ?? null,
+      hasExtra,
+      blockPlanMode: extra?.blockPlanMode ?? null,
+      blockPlanBlocksLen: Array.isArray(extra?.blockPlan?.blocks) ? extra.blockPlan.blocks.length : 0,
+      hasRephraseBlocks: Array.isArray(extra?.rephraseBlocks) ? true : false,
+      rephraseBlocksLen: Array.isArray(extra?.rephraseBlocks) ? extra.rephraseBlocks.length : 0,
+      outKeysLen: Array.isArray(outKeys) ? outKeys.length : 0,
+      note: note ?? null,
+      head: safeHead(String(head ?? ''), 80),
+    });
+  } catch {}
 }
 
 // ---------------------------------------------
@@ -1496,7 +1615,7 @@ export async function rephraseSlotsFinal(extracted: ExtractedSlots, opts: Rephra
 
   const mode = String(process.env.IROS_REPHRASE_FINAL_MODE ?? 'LLM').trim().toUpperCase();
 
-  const maxLines =
+  let maxLines =
     Number(process.env.IROS_REPHRASE_FINAL_MAXLINES) > 0
       ? Math.floor(Number(process.env.IROS_REPHRASE_FINAL_MAXLINES))
       : Math.max(4, Math.min(12, Math.floor(opts.maxLinesHint ?? 8)));
@@ -1578,8 +1697,8 @@ export async function rephraseSlotsFinal(extracted: ExtractedSlots, opts: Rephra
   // NOTE:
   // - writer に渡す seedDraft から internal directive を確実に除去するためのマーカー
   // - @Q_SLOT などの @*_SLOT を必ず落とす（seed 混入防止）
-  const INTERNAL_LINE_MARKER = /^@(OBS|SHIFT|SH|RESTORE|Q|Q_SLOT|SAFE|NEXT|END|TASK|SEED_TEXT)\b/;
-
+  const INTERNAL_LINE_MARKER =
+  /^@(OBS|SHIFT|SH|RESTORE|Q|Q_SLOT|SAFE|NEXT|NEXT_HINT|END|TASK|SEED_TEXT)\b/;
 // ✅ ILINE抽出用：内部マーカー行は「捨てる」のではなく、必要な本文だけ抽出して残す
 // - 非内部行（ユーザー本文など）はそのまま残す
 // - @NEXT_HINT は LOCK 材料にしない（必ず除外）
@@ -1609,11 +1728,21 @@ const stripInternalMarkersForLock = (s: string) => {
     // ✅ 先に落とす（INTERNAL_LINE_MARKER に含まれてなくても混入させない）
     if (/^@NEXT_HINT\b/.test(t)) continue;
 
-    // 非内部行（= ユーザーが素で書いた本文等）はそのまま残す
+    // 非内部行（= ユーザーが素で書いた本文等）は基本そのまま残す
+    // ただし「hint ...」は表示ノイズになりやすいので、本文だけを残す（LOCK用の整形）
     if (!INTERNAL_LINE_MARKER.test(t)) {
-      pushUnique(t0.trim());
+      const rawLine = t0.trim();
+
+      // "hint ..." / "hint(... ) ..." を本文だけにする
+      const m = rawLine.match(/^hint(?:\([^)]+\))?\s+(.+)$/);
+      if (m && m[1]) {
+        pushUnique(String(m[1]).trim());
+      } else {
+        pushUnique(rawLine);
+      }
       continue;
     }
+
 
     // 内部行：JSON部分を抽出
     const i0 = t.indexOf('{');
@@ -1666,43 +1795,49 @@ const stripInternalMarkersForLock = (s: string) => {
 };
 
 
-  // ✅ blocks 生成（renderGateway が block 意図で拾える形）
-  // NOTE: ここは "string[]" を返す。{text,kind} 化は adoptAsSlots 側で 1 回だけ行う。
-  const toRephraseBlocks = (s: string): string[] => {
-    const raw = String(s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
-    if (!raw) return [];
+// ✅ blocks 生成（renderGateway が block 意図で拾える形）
+// NOTE: ここは "string[]" を返す。{text,kind} 化は adoptAsSlots 側で 1 回だけ行う。
+const toRephraseBlocks = (s: string): string[] => {
+  const raw = String(s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  if (!raw) return [];
 
-    // 1) 空行で段落ブロック化
-    let parts = raw
-      .split(/\n{2,}/g)
-      .map((b) => b.trim())
+  // 1) 空行で段落ブロック化
+  let parts = raw
+    .split(/\n{2,}/g)
+    .map((b) => b.trim())
+    .filter(Boolean);
+
+  // 2) 1ブロックしか取れないなら、単改行でブロック化（2行でもOK）
+  if (parts.length <= 1) {
+    const lines = raw
+      .split('\n')
+      .map((x) => String(x ?? '').trim())
       .filter(Boolean);
+    if (lines.length >= 2) parts = lines;
+  }
 
-    // 2) 1ブロックしか取れないなら、単改行でブロック化（2行でもOK）
-    if (parts.length <= 1) {
-      const lines = raw
-        .split('\n')
-        .map((x) => String(x ?? '').trim())
-        .filter(Boolean);
-      if (lines.length >= 2) parts = lines;
-    }
+  // ✅ 重要：8固定だと multi7（見出し+本文）で後半が落ちる
+  // - 見出し+本文 で 6段を作る場合、最大 12 まで必要になり得る
+  // - ここは “保険” なので少し広めに取る（renderGateway側で表示はクランプされる）
+  const MAX_REPHRASE_BLOCKS = 16;
 
-    return parts.slice(0, 8);
-  };
+  return parts.slice(0, MAX_REPHRASE_BLOCKS);
+};
+
 
   // (A) FIXED
   if (mode === 'FIXED') {
     const fixedTexts = buildFixedBoxTexts(inKeys.length);
     const out: Slot[] = inKeys.map((k, i) => ({ key: k, text: fixedTexts[i] ?? 'ここで止める。' }));
 
-    logRephraseOk(debug, out.map((x) => x.key), out[0]?.text ?? '', 'FIXED');
-    logRephraseAfterAttach(debug, out.map((x) => x.key), out[0]?.text ?? '', 'FIXED');
-
     const text0 = String(out[0]?.text ?? '').trim();
     const metaExtra: any = {
       rephraseBlocks: text0 ? [{ text: text0, kind: 'p' }] : [],
       rephraseHead: text0 ? safeHead(text0, 120) : null,
     };
+
+    logRephraseOk(debug, out.map((x) => x.key), out[0]?.text ?? '', 'FIXED');
+    logRephraseAfterAttach(debug, out.map((x) => x.key), out[0]?.text ?? '', 'FIXED', metaExtra);
 
     return {
       ok: true,
@@ -1716,6 +1851,7 @@ const stripInternalMarkersForLock = (s: string) => {
       },
     };
   }
+
 
   // (B) LLM
   const userText = norm(opts?.userText ?? '');
@@ -1742,9 +1878,14 @@ const stripInternalMarkersForLock = (s: string) => {
   // slot由来の下書き（露出禁止）
   const seedDraftRawAll = extracted.slots.map((s) => s.text).filter(Boolean).join('\n');
 
-  const seedDraftRaw = extracted.slots
+  // ✅ slotキーは key だけでなく id も見る（framePlan 由来で id しか無いケースを救う）
+  const getSlotKey = (s: any) => {
+    return String(s?.key ?? s?.id ?? s?.slotKey ?? s?.slot_id ?? '').trim();
+  };
+
+  const seedDraftRawPicked = extracted.slots
     .filter((s) => {
-      const k = String((s as any)?.key ?? '');
+      const k = getSlotKey(s);
 
       const ut = String(userText ?? '').trim();
       const isVeryShort = ut.length > 0 && ut.length <= 10;
@@ -1759,7 +1900,7 @@ const stripInternalMarkersForLock = (s: string) => {
 
       const isAckLike = isAckWord || (isVeryShort && !isGreeting);
 
-      const hasOBS = extracted.slots.some((x) => String((x as any)?.key ?? '') === 'OBS');
+      const hasOBS = extracted.slots.some((x) => getSlotKey(x) === 'OBS');
 
       if (isAckLike) {
         if (hasOBS) return k === 'OBS';
@@ -1778,7 +1919,6 @@ const stripInternalMarkersForLock = (s: string) => {
       if (k === 'END') return true;
       if (k === 'ONE_POINT') return true;
 
-
       if (k.startsWith('FLAG_')) return true;
 
       return false;
@@ -1786,6 +1926,23 @@ const stripInternalMarkersForLock = (s: string) => {
     .map((s) => s.text)
     .filter(Boolean)
     .join('\n');
+
+  // ✅ 保険：拾えた seed が userText 相当だけになったら rawAll に戻す
+  const seedDraftRaw = (() => {
+    const all = String(seedDraftRawAll ?? '').trim();
+    const picked = String(seedDraftRawPicked ?? '').trim();
+    const ut = String(userText ?? '').trim();
+
+    // all 側に @SHIFT などの directive があるのに、picked が userText だけなら事故
+    const allHasDirective = /@(OBS|SHIFT|SH|RESTORE|Q|Q_SLOT|SAFE|NEXT|END|TASK|SEED_TEXT)\b/m.test(all);
+    const pickedLooksLikeUserOnly =
+      !!ut &&
+      (!!picked && (picked === ut || (picked.length <= ut.length + 2 && picked.includes(ut))));
+
+    if (allHasDirective && pickedLooksLikeUserOnly) return all;
+    return picked || all;
+  })();
+
 
   const recallMust = extractRecallMustIncludeFromSeed(seedDraftRawAll);
   const mustIncludeRuleText = buildMustIncludeRuleText(recallMust);
@@ -1819,12 +1976,17 @@ const stripInternalMarkersForLock = (s: string) => {
   const userFlat = normForDupFlat(userStr);
 
   const seedHasUser =
-    (!!seedNorm && !!userNorm && (seedNorm === userNorm || seedNorm.includes(userNorm))) ||
-    (!!seedFlat && !!userFlat && (seedFlat === userFlat || seedFlat.includes(userFlat)));
+    (!!seedNorm && !!userNorm && (seedNorm === userNorm || (userNorm.length >= 12 && seedNorm.includes(userNorm)))) ||
+    (!!seedFlat && !!userFlat && (seedFlat === userFlat || (userFlat.length >= 12 && seedFlat.includes(userFlat))));
 
+  // ✅ userText は「ILINEタグがある時だけ」 lockSource に入れる（将来の誤固定を防止）
+  const userHasILINE = /\[\[ILINE\]\]/.test(userStr) || /\[\[\/ILINE\]\]/.test(userStr);
 
-  // ✅ userText が seed に入っているなら、lockSource は seed のみ（重複防止）
-  const lockParts = seedHasUser ? [seedStr] : [seedStr, userStr]
+  // ✅ LOCK素材は基本 seed のみ。user に ILINE がある場合だけ追加（ただし重複は追加しない）
+  const lockParts = [
+    seedStr,
+    userHasILINE && !seedHasUser ? userStr : '',
+  ]
     .filter((x): x is string => Boolean(String(x ?? '').trim()))
     .map((x) => String(x));
 
@@ -1860,10 +2022,10 @@ const stripInternalMarkersForLock = (s: string) => {
 
   const { locked: lockedFromAll } = extractLockedILines(lockSourceRaw);
 
-  // ✅ LLMに渡す素材は slot 由来のみ（重複防止）
-  const { cleanedForModel: seedDraft0 } = extractLockedILines(seedForLock);
+  // ✅ LLMに渡す素材は「slot由来」を使う（LOCK用seedForLockは使わない）
+  // - seedForLock は ILINE抽出のための整形であり、LLM seed にすると指示素材が消えやすい
+  const { cleanedForModel: seedDraft0 } = extractLockedILines(seedDraftRaw);
   const lockedILines = Array.from(new Set(lockedFromAll));
-
 
   console.info('[IROS/ILINE][LOCK_EXTRACT]', {
     lockedFromAllLen: Array.isArray(lockedFromAll) ? lockedFromAll.length : null,
@@ -1890,8 +2052,21 @@ const stripInternalMarkersForLock = (s: string) => {
   const chooseSeedForLLM = (seed: string, userText: string) => {
     const s = String(seed ?? '').trim();
     const u = String(userText ?? '').trim();
+
+    // ✅ 方針：@NEXT_HINT は evidence 用に slotPlan 側へ残すが、
+    // ✅ writer の seed（seedFinal/seedDraft）には絶対に混ぜない（自然文混入を防ぐ）
+
     if (!u) return s;
     if (!s) return u;
+
+    // ✅ directives seed（@SHIFT 等）は “素材そのもの” なので userText で潰さない
+    const hasDirectives =
+      /@(OBS|SHIFT|SH|RESTORE|Q|SAFE|NEXT|END|TASK)\b/m.test(s);
+
+    if (hasDirectives) {
+      // directives seed を保つ（NEXT_HINT は混ぜない）
+      return s;
+    }
 
     // ✅ 短文（同意/感想/短い呼びかけ）では userText 退避しない
     // - seed を捨てると、writer が材料不足で抽象テンプレに寄りやすい
@@ -1905,16 +2080,22 @@ const stripInternalMarkersForLock = (s: string) => {
 
     if (isVeryShort || isAckLike) return s;
 
-    const tokens = Array.from(new Set(u.split(/[^\p{L}\p{N}一-龥ぁ-んァ-ヶー]+/u).filter(Boolean)));
+    // ここから下は「plain seed」のときだけ userText 優先の可能性を検討
+    const tokens = Array.from(
+      new Set(u.split(/[^\p{L}\p{N}一-龥ぁ-んァ-ヶー]+/u).filter(Boolean)),
+    );
     const keyTokens = tokens.filter((t) => t.length >= 2).slice(0, 8);
     const hit = keyTokens.some((t) => s.includes(t));
 
     const abstractish = /見失わなければ|ここからは|整えなくていい|進む|動いてる|止まった/u.test(s);
 
-    // ✅ userText を優先するのは「長文かつseedが噛み合わない」時だけ
-    if (!hit || abstractish) return u;
+    // ✅ userText を優先するのは「seedが噛み合わない AND seedが抽象」くらいに絞る
+    if (!hit && abstractish) return u;
+
+    // 噛み合っていないが抽象でもない → seed を残す（材料優先）
     return s;
   };
+
 
 
   const seedDraftSanitized = sanitizeSeedDraftForLLM(seedDraft0);
@@ -2128,14 +2309,18 @@ const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
   // ✅ レーンが明示されている時は GROUND をやめる
   //    （GROUND骨格が IDEA_BAND を潰すため）
   const baseSystemPrompt = systemPromptForFullReply({
-    directTask: directTaskForPrompt,
-    itOk,
-    band,
-    lockedILines,
+    ...(opts as any)?.systemPromptArgs,
 
-    // IDEA_BAND：候補提示だけが目的なので DELIVER
-    ...(wantsIdeaBand ? { personaMode: 'DELIVER' as const } : {}),
+    // ✅ exprLane は「string」ではなく「{ fired, lane }」のオブジェクトを渡す
+    // - CTXPACK に exprMeta が載っている前提（あなたのログで確定済み）
+    // - systemPrompt.ts は exprLane?.fired / exprLane?.lane を読むため
+    exprLane:
+      (opts as any)?.userContext?.ctxPack?.exprMeta ??
+      (opts as any)?.userContext?.exprMeta ??
+      (opts as any)?.exprMeta ??
+      null,
   });
+
 
   // ✅ レーン契約は「最後」に置く（後段の詳細指示が勝つ）
   const laneContractTail = (tConcretizeHeader || '') + (ideaBandHeader || '');
@@ -2143,24 +2328,25 @@ const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
   const systemPrompt = baseSystemPrompt + mustIncludeRuleText + laneContractTail;
 
   // ✅ q/depth/phase を “確証つきで” internalPack に入れる（STATE_SNAPSHOTの土台）
-  // 優先順位：opts直指定 → userContext直指定 → ctxPack → null
+  // 優先順位：opts直指定 → ctxPack（最終スタンプ） → userContext直指定 → null
   const pickedDepthStage =
     (opts as any)?.depthStage ??
-    (opts as any)?.userContext?.depthStage ??
     (opts as any)?.userContext?.ctxPack?.depthStage ??
+    (opts as any)?.userContext?.depthStage ??
     null;
 
   const pickedPhase =
     (opts as any)?.phase ??
-    (opts as any)?.userContext?.phase ??
     (opts as any)?.userContext?.ctxPack?.phase ??
+    (opts as any)?.userContext?.phase ??
     null;
 
   const pickedQCode =
     (opts as any)?.qCode ??
-    (opts as any)?.userContext?.qCode ??
     (opts as any)?.userContext?.ctxPack?.qCode ??
+    (opts as any)?.userContext?.qCode ??
     null;
+
 
   const internalPack = buildInternalPackText({
     metaText,
@@ -2206,8 +2392,13 @@ const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
     systemPrompt,
     internalPack,
     turns: lastTurnsSafe,
-    finalUserText: seedDraft || userText,
+
+    // ✅ last user は “このターンの seedFinal” にする
+    // - @NEXT_HINT があれば hint（最小前進）へ寄る
+    // - 無ければ従来通り userText 相当（chooseSeedForLLM の設計）
+    finalUserText: seedFinal,
   });
+
 
   // ✅ HistoryDigest v1（外から渡された場合のみ注入）
   // - 生成はここではしない（生成元は本線側に固定）
@@ -2245,6 +2436,89 @@ const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
   let allowText: string | null = null;
   let allowObj: any = null;
 
+  // ✅ vector（方向）: allow確定直後に算出（seed本文には混ぜない）
+  const VECTOR_PASS_ENABLED =
+    String(process.env.IROS_VECTOR_PASS ?? '').toLowerCase() === '1' ||
+    String(process.env.IROS_VECTOR_PASS ?? '').toLowerCase() === 'true';
+
+  type VectorMode = 'advance' | 'deepen' | 'stabilize' | 'mirror' | 'reframe';
+  type IrosVector = { mode: VectorMode; weight: 0 | 1 | 2 | 3; reason: string };
+
+  let vectorPicked: IrosVector | null = null;
+
+  function clampW(n: any): 0 | 1 | 2 | 3 {
+    const x = Number(n);
+    if (!Number.isFinite(x)) return 0;
+    if (x <= 0) return 0;
+    if (x >= 3) return 3;
+    return (Math.round(x) as any) as 0 | 1 | 2 | 3;
+  }
+
+  function pickVectorAfterAllow(args2: {
+    allow: any;
+    replyGoal: string | null;
+    flowDigest: string | null;
+    repeatSignal: boolean;
+    itOk: boolean;
+    depthStage: string | null;
+  }): IrosVector | null {
+    const allow = args2.allow;
+    if (!allow || typeof allow !== 'object') return null;
+
+    const strength = clampW((allow as any).strength);
+
+    // --- candidates（優先順） ---
+    const goal = String(args2.replyGoal ?? '').toLowerCase();
+    const flow = String(args2.flowDigest ?? '').toLowerCase();
+    const isReturn = flow.includes('return');
+    const isI = String(args2.depthStage ?? '').startsWith('I');
+
+    const candidates: IrosVector[] = [];
+
+    // reframe（意図/意味づけの再構成がテーマ）
+    if (goal.includes('reframe')) {
+      candidates.push({ mode: 'reframe', weight: strength, reason: 'goal=reframe' });
+    }
+
+    // RETURN / 反復気味 → mirror寄り（ただし narrow はしない）
+    if (args2.repeatSignal || isReturn) {
+      candidates.push({ mode: 'mirror', weight: strength, reason: args2.repeatSignal ? 'repeatSignal' : 'flow=RETURN' });
+    }
+
+    // I帯 & itOk → deepen（問いを深く）
+    if (isI && args2.itOk) {
+      candidates.push({ mode: 'deepen', weight: strength, reason: 'I+itOk' });
+    }
+
+    // 既定：advance（前へ）
+    candidates.push({ mode: 'advance', weight: strength, reason: 'default' });
+
+    // --- clip by allow（衝突防止の核） ---
+    const clipped = candidates.filter((v) => {
+      // propose禁止なら advance を出さない
+      if (v.mode === 'advance' && (allow as any).propose === false) return false;
+
+      // assert=false は「断定禁止」。advance 自体は禁止しない（提案として書ける）
+      // if (v.mode === 'advance' && (allow as any).assert === false) return false;
+
+      return true;
+    });
+
+
+    if (clipped.length === 0) return null;
+
+    // concretize禁止なら advance のweightを落とす（方向は残すが推進圧を弱める）
+    const picked = { ...clipped[0] };
+    if (picked.mode === 'advance' && (allow as any).concretize === false) {
+      picked.weight = (picked.weight >= 2 ? 1 : picked.weight) as 0 | 1 | 2 | 3;
+      picked.reason = `${picked.reason}+clip:concretize=false`;
+    }
+
+    // weight=0 なら無し扱い
+    if (picked.weight === 0) return null;
+    return picked;
+  }
+
   try {
     const { buildAllow, formatAllowSystemText } = await import('@/lib/iros/allow/buildAllow');
 
@@ -2271,6 +2545,34 @@ const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
       itOk: Boolean(itOk),
       allow: allowObj,
     });
+
+    // ✅ vector算出（まだ“渡さない”。まずログ検証のみ）
+    if (VECTOR_PASS_ENABLED) {
+      vectorPicked = pickVectorAfterAllow({
+        allow: allowObj,
+        replyGoal: String(replyGoal ?? '').trim() || null,
+        flowDigest: String(flowDigest ?? '').trim() || null,
+        repeatSignal: Boolean(repeatSignal),
+        itOk: Boolean(itOk),
+        depthStage: pickedDepthStage ?? null,
+      });
+
+      console.log('[IROS/VECTOR][PICK]', {
+        traceId: debug.traceId,
+        conversationId: debug.conversationId,
+        userCode: debug.userCode,
+        enabled: true,
+        vector: vectorPicked,
+      });
+    } else {
+      console.log('[IROS/VECTOR][PICK]', {
+        traceId: debug.traceId,
+        conversationId: debug.conversationId,
+        userCode: debug.userCode,
+        enabled: false,
+        vector: null,
+      });
+    }
   } catch (e) {
     console.log('[IROS/rephraseEngine][ALLOW][ERR]', {
       traceId: debug.traceId,
@@ -2280,7 +2582,20 @@ const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
     });
     allowText = null;
     allowObj = null;
+
+    // allowが無いならvectorも無し（空ならmetaにも出さない方針に一致）
+    if (VECTOR_PASS_ENABLED) {
+      console.log('[IROS/VECTOR][PICK]', {
+        traceId: debug.traceId,
+        conversationId: debug.conversationId,
+        userCode: debug.userCode,
+        enabled: true,
+        vector: null,
+        reason: 'allow_missing',
+      });
+    }
   }
+
 
   // ---------------------------------------------
   // exprMeta（表現の質）: 語彙/比喩/余白の「許可」
@@ -2322,27 +2637,106 @@ const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
       `- forbidden: ${(Array.isArray((exprMeta as any).forbidden) ? (exprMeta as any).forbidden : []).join(', ')}`,
     ].join('\n');
 
-  // ✅ 注入順
-  // systemPrompt（先頭system） → allow（system2） → exprMeta（system3）
-  // ※ HistoryDigest v1 を system2 に入れてる場合は “その後ろ” になるが、ここは同一処理内では優先順位固定でOK
-  if (Array.isArray(messages) && messages.length >= 1 && messages[0]?.role === 'system') {
-    const injected: any[] = [messages[0]];
+// systemPrompt（先頭system） → allow（system2） → exprMeta（system3） → BLOCK_PLAN（system4）
+// ※ HistoryDigest v1 を system2 に入れてる場合は “その後ろ” になるが、ここは同一処理内では優先順位固定でOK
+// --- BLOCK_PLAN（system4）生成（設計図のみ） ---
+const goalKind =
+  (opts as any)?.userContext?.ctxPack?.replyGoal?.kind ??   // ✅ 追加：ctxPackの正本
+  (opts as any)?.userContext?.ctxPack?.goalKind ??
+  (opts as any)?.userContext?.goalKind ??
+  (opts as any)?.goalKind ??
+  null;
 
-    // allow（あれば）
-    if (allowText && String(allowText).trim().length > 0) {
-      injected.push({ role: 'system', content: allowText });
-    }
 
-    // exprMeta（常に）
-    injected.push({ role: 'system', content: exprMetaText });
+  // ✅ explicitTrigger は「最後の user 発話」だけから判定する（末尾message role不問を禁止）
+  const rawUserTextFromOpts = String((opts as any)?.userText ?? '').trim();
 
-    messages = [...injected, ...messages.slice(1)] as any;
+  const rawUserTextFromMessages = (() => {
+    try {
+      // messages を後ろから走査して「role:user」の最後を拾う
+      for (let i = (messages as any[])?.length - 1; i >= 0; i--) {
+        const m: any = (messages as any[])[i];
+        if (m?.role === 'user') return String(m?.content ?? '').trim();
+      }
+    } catch {}
+    return '';
+  })();
+
+  const userTextForTrigger =
+    rawUserTextFromOpts.length > 0 ? rawUserTextFromOpts : rawUserTextFromMessages;
+
+  const explicitTrigger = detectExplicitBlockPlanTrigger(userTextForTrigger);
+
+  const blockPlan = buildBlockPlan({
+    userText: userTextForTrigger,
+    goalKind,
+    exprLane: (exprMeta as any)?.lane ?? null,
+    explicitTrigger,
+  });
+
+
+  const blockPlanText = blockPlan ? renderBlockPlanSystem4(blockPlan) : '';
+
+  // ✅ 観測点：blockPlan が「生成されてるか/空か」を確定する
+  try {
+    console.log('[IROS/rephraseEngine][BLOCK_PLAN]', {
+      traceId: (debug as any)?.traceId ?? null,
+      conversationId: (debug as any)?.conversationId ?? null,
+      userCode: (debug as any)?.userCode ?? null,
+      enabled: Boolean(process.env.IROS_BLOCK_PLAN_ENABLED ?? ''),
+      goalKind,
+      exprLane: (exprMeta as any)?.lane ?? null,
+      explicitTrigger,
+      mode: (blockPlan as any)?.mode ?? null,
+      blocksLen: Array.isArray((blockPlan as any)?.blocks) ? (blockPlan as any).blocks.length : 0,
+      sysLen: String(blockPlanText ?? '').trim().length,
+    });
+  } catch {}
+
+
+// ✅ BLOCK_PLAN が入る時だけ、行数クランプを緩める（後半ブロックの切断を防ぐ）
+if (blockPlanText && String(blockPlanText).trim().length > 0) {
+  const modeStr = String((blockPlan as any)?.mode ?? '').trim();
+  const min = modeStr === 'multi7' ? 24 : 16;
+
+  if (typeof (maxLines as any) === 'number' && (maxLines as any) > 0) {
+    maxLines = Math.max(maxLines, min);
   } else {
-    const head: any[] = [];
-    if (allowText && String(allowText).trim().length > 0) head.push({ role: 'system', content: allowText });
-    head.push({ role: 'system', content: exprMetaText });
-    messages = [...head, ...(messages as any)] as any;
+    maxLines = min;
   }
+}
+
+if (messages.length > 0 && (messages as any)[0]?.role === 'system') {
+  const injected: any[] = [messages[0]];
+
+  // allow（任意）
+  if (allowText && String(allowText).trim().length > 0) {
+    injected.push({ role: 'system', content: allowText });
+  }
+
+  // exprMeta（常に）
+  injected.push({ role: 'system', content: exprMetaText });
+
+  // BLOCK_PLAN（条件付き：planがある時だけ）
+  if (blockPlanText && String(blockPlanText).trim().length > 0) {
+    injected.push({ role: 'system', content: blockPlanText });
+  }
+
+  messages = [...injected, ...messages.slice(1)] as any;
+} else {
+  const head: any[] = [];
+  if (allowText && String(allowText).trim().length > 0) {
+    head.push({ role: 'system', content: allowText });
+  }
+  head.push({ role: 'system', content: exprMetaText });
+
+  if (blockPlanText && String(blockPlanText).trim().length > 0) {
+    head.push({ role: 'system', content: blockPlanText });
+  }
+
+  messages = [...head, ...(messages as any)] as any;
+}
+
 
   console.log('[IROS/rephraseEngine][EXPR_META]', {
     traceId: debug.traceId,
@@ -2387,6 +2781,13 @@ const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
     inputKindFromCtx,
 
     lockedILines: lockedILines.length,
+  });
+  console.log('[IROS/BLOCK_PLAN][inject]', {
+    enabled: Boolean(blockPlanText && String(blockPlanText).trim().length > 0),
+    mode: blockPlan?.mode ?? null,
+    blocks: blockPlan?.blocks ?? null,
+    explicitTrigger,
+    goalKind,
   });
 
   // ---------------------------------------------
@@ -2520,6 +2921,17 @@ const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
       (metaExtra as any).llmSignals = extractLlmSignals(String(text ?? ''));
     } catch {}
 
+    // ✅ BLOCK_PLAN を meta.extra にも運ぶ（renderGateway/handleIrosReply が拾える受け口）
+    try {
+      if (blockPlan && typeof blockPlan === 'object') {
+        const mode = (blockPlan as any).mode ?? null;
+        const blocks = Array.isArray((blockPlan as any).blocks) ? (blockPlan as any).blocks : null;
+
+        if (mode) (metaExtra as any).blockPlanMode = mode;
+        if (mode || blocks) (metaExtra as any).blockPlan = { mode: mode ?? null, blocks: blocks ?? null };
+      }
+    } catch {}
+
     metaExtra.rephraseHead =
       metaExtra.rephraseHead ??
       (blocks?.[0]?.text ? safeHead(String(blocks[0].text), 120) : null);
@@ -2529,7 +2941,7 @@ const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
       (debug as any).llmSignals = (metaExtra as any).llmSignals ?? null;
     } catch {}
 
-    logRephraseAfterAttach(debug, inKeys, outSlots[0]?.text ?? '', note ?? 'LLM');
+    logRephraseAfterAttach(debug, inKeys, outSlots[0]?.text ?? '', note ?? 'LLM', metaExtra);
 
     return {
       ok: true,
@@ -2543,7 +2955,8 @@ const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
         extra: metaExtra,
       },
     };
-  }
+  };
+
 
   const runFlagship = (text: string, slotsForGuard: any, scaffoldActive: boolean) => {
     const raw = String(text ?? '');
@@ -2798,9 +3211,185 @@ const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
   let v = runFlagship(candidate, slotsForGuard, scaffoldActive);
 
   // ---------------------------------------------
+  // BLOCK_PLAN contract enforcement
+  // - 必須見出しが「順番通りに」「全部」出ていない場合は FATAL に落として retry を誘発する
+  // - 切断/短文化ではなく「完走させる」ための契約
+  // ---------------------------------------------
+  const isBlockPlanEnabled = Boolean(blockPlanText && String(blockPlanText).trim().length > 0);
+
+  const blockHeadFromKind = (k: any): string => {
+    switch (String(k)) {
+      case 'ENTRY':
+        return '入口';
+      case 'DUAL':
+        return '二項';
+      case 'FOCUS_SHIFT':
+        return '焦点移動';
+      case 'ACCEPT':
+        return 'ACCEPT';
+      case 'INTEGRATE':
+        return '統合';
+      case 'NEXT_MIN':
+        return '最小の一手';
+      default:
+        return String(k);
+    }
+  };
+
+  const normalizeHead = (s: string) => {
+    let t = String(s ?? '').trim();
+
+    // ✅ Markdown 見出し（### など）を剥がす：契約判定は「見出し語」だけで一致させる
+    t = t.replace(/^#{1,6}\s*/u, '');
+
+    // 先頭の装飾・番号・箇条書きっぽいものを剥がす
+    t = t.replace(
+      /^(?:[✨⭐️🌟🔸🔹・•\-–—]\s*|\(?\d+\)?[.)]\s*|[①-⑳]\s*)/u,
+      ''
+    );
+
+    return t.trim();
+  };
+
+
+
+
+  const splitLines = (t: string) =>
+    String(t ?? '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .split('\n')
+      .map((x) => String(x ?? '').trim())
+      .filter((x) => x.length > 0);
+
+  const checkBlockPlanContract = (text: string) => {
+    if (!isBlockPlanEnabled || !blockPlan?.blocks?.length) {
+      return { ok: true as const, missing: [] as string[] };
+    }
+
+    const required = blockPlan.blocks.map(blockHeadFromKind).map(normalizeHead);
+    const lines = splitLines(text).map(normalizeHead);
+
+    // 見出しは「行頭に単独」前提なので “行一致” で拾う（緩めすぎない）
+    const idxs: number[] = [];
+    let searchFrom = 0;
+
+    for (const head of required) {
+      let found = -1;
+
+      // ✅ 表記ゆれを相互に許容（required がどっちでも拾う）
+      const headAliases =
+        head === '受容' || head === 'ACCEPT'
+          ? new Set(['受容', 'ACCEPT'])
+          : head === '状況' || head === 'SITUATION'
+            ? new Set(['状況', 'SITUATION'])
+            : head === '選択' || head === '選択肢' || head === 'CHOICE'
+              ? new Set(['選択', '選択肢', 'CHOICE'])
+              : new Set([head]);
+
+      // ✅ 1回だけ走査する（for の入れ子を消す）
+      for (let i = searchFrom; i < lines.length; i++) {
+        const line = lines[i];
+
+        // ✅ 完全一致 or 先頭一致（末尾の句点/絵文字/装飾は無視してカウント）
+        for (const a of headAliases) {
+          if (line === a || line.startsWith(a)) {
+            found = i;
+            break;
+          }
+        }
+        if (found >= 0) break;
+      }
+
+      if (found < 0) {
+        return { ok: false as const, missing: [head] };
+      }
+      idxs.push(found);
+      searchFrom = found + 1;
+    }
+
+    // 念のため：順序が崩れていたらNG（上の探索で基本担保されるが保険）
+    for (let i = 1; i < idxs.length; i++) {
+      if (idxs[i] <= idxs[i - 1]) {
+        return { ok: false as const, missing: required };
+      }
+    }
+
+    return { ok: true as const, missing: [] as string[] };
+  };
+
+
+  if (isBlockPlanEnabled) {
+    const r0 = checkBlockPlanContract(candidate ?? '');
+
+    if (!r0.ok) {
+      const missing = Array.isArray(r0.missing) ? r0.missing : [];
+      const miss0 = normalizeHead(String(missing[0] ?? ''));
+      const isOnlyNextMin =
+        missing.length === 1 && (miss0 === '最小の一手' || miss0 === 'NEXT_MIN' || miss0 === 'NEXT');
+
+      // ✅ 末尾が「見出し開始だけ」で途切れている（例: "\n### " / "###" で終わる）なら、
+      // これは後半欠落の可能性が高いので従来どおり FATAL → retry を許可する（安全弁）。
+      const candTrimEnd = String(candidate ?? '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .trimEnd();
+
+      const lastLine = candTrimEnd.split('\n').slice(-1)[0] ?? '';
+      const isTailTruncatedHeading =
+        /^\s*###/.test(lastLine) && lastLine.trim().length <= 6; // "###" / "### " / "### ?" 程度
+
+      // ⚠️ 仕様変更（仕様書と差分あり）
+      // 仕様書では「最小の一手（NEXT_MIN）」は必須ブロックだが、実運用では毎回出すと過剰になりやすい。
+      // そのため missing が「最小の一手」だけの場合は、補完（AUTO_PATCH）も retry 促進もせず、そのまま通す。
+      // ※ただし末尾途切れ（見出し開始だけで切断）は安全弁として従来通り retry を許可する。
+      if (!isTailTruncatedHeading && isOnlyNextMin) {
+        v = {
+          ...(v as any),
+          ok: true,
+          level: 'OK',
+          reasons: Array.from(new Set([...(v?.reasons ?? []), 'NEXT_MIN_OPTIONAL_SKIPPED'])),
+        } as any;
+      } else {
+        // ✅ それ以外の契約違反はログは残す
+        console.warn('[IROS/BLOCK_PLAN][CONTRACT_VIOLATION]', {
+          traceId: debug.traceId,
+          conversationId: debug.conversationId,
+          userCode: debug.userCode,
+          mode: blockPlan?.mode ?? null,
+          blocks: blockPlan?.blocks ?? null,
+          missing: r0.missing,
+          head: safeHead(candidate, 220),
+          soft: !isTailTruncatedHeading,
+          tailTruncated: isTailTruncatedHeading,
+        });
+
+        if (isTailTruncatedHeading) {
+          // ✅ 安全弁：本当に欠落っぽいときだけ従来どおり retry
+          v = {
+            ...(v as any),
+            ok: false,
+            level: 'FATAL',
+            reasons: Array.from(new Set([...(v?.reasons ?? []), 'BLOCK_PLAN_CONTRACT'])),
+          } as any;
+        } else {
+          // ✅ soft：retryしない（renderGateway補完へ）
+          v = {
+            ...(v as any),
+            ok: true,
+            level: 'OK',
+            reasons: Array.from(new Set([...(v?.reasons ?? []), 'BLOCK_PLAN_CONTRACT_SOFT'])),
+          } as any;
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------
   // IDEA_BAND contract check（IDEA_BAND時は“候補形”のみ許可）
   // - 違反したら FATAL に落として retry を誘発（語り文のまま通さない）
   // ---------------------------------------------
+
   const normalizeIdeaBandLine = (line: string) =>
     String(line ?? '')
       .trim()
@@ -3011,8 +3600,27 @@ const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
       MIN_OK_LEN,
       isTConcretize,
       hasAdvanceHint,
+      isIdeaBand,
     });
 
+    // ✅ “短いだけ” で FATAL → retry に落とさない（表現レーン実験で副作用が大きい）
+    // - scaffold / directTask / IdeaBand / TConcretize は従来どおり（短さが破綻要因になりやすい）
+    const allowShortAccept =
+      Boolean(v?.ok) &&
+      !scaffoldActive &&
+      !isDirectTask &&
+      !isIdeaBand &&
+      !isTConcretize;
+
+    if (allowShortAccept) {
+      return adoptAsSlots(candidate, 'FLAGSHIP_OK_TOO_SHORT_ACCEPT', {
+        scaffoldActive,
+        flagshipLevel: String((v as any)?.level ?? 'OK'),
+        retrySuppressed: true,
+      });
+    }
+
+    // ✅ それ以外は従来どおり retry へ（安全側）
     v = {
       ...(v as any),
       ok: false,
@@ -3020,6 +3628,7 @@ const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
       reasons: Array.from(new Set([...(v.reasons ?? []), 'OK_TOO_SHORT_TO_RETRY'])),
     } as any;
   }
+
 
   // ✅ DEV: 強制的に retry を踏む（E2E確認用）
   // - userText 埋め込み（[[FORCE_RETRY]]）は本番経路を汚染して収束しないので廃止
@@ -3110,6 +3719,7 @@ const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
 
     systemPrompt,
     internalPack,
+    turns: lastTurnsSafe,
     baseDraftForRepair,
     userText,
 

@@ -1768,50 +1768,66 @@ console.log('[IROS/T_CONCRETIZE][FORCE_SWITCH_CHECK]', {
   userHead: String(textForCounsel ?? '').slice(0, 40),
 });
 
-// ✅ intentBridge を single source of truth にする
-// - null のときは laneKey を渡さない（IDEA_BAND に落とさない）
-// - T/IDEA が明示されている時だけ渡す
-const resolvedLaneKeyForNormalChat =
-  laneKeyNow === 'T_CONCRETIZE'
-    ? 'T_CONCRETIZE'
-    : laneKeyNow === 'IDEA_BAND'
-      ? 'IDEA_BAND'
-      : undefined;
+  // ✅ intentBridge を single source of truth にする
+  // - null のときは laneKey を渡さない（IDEA_BAND に落とさない）
+  // - T/IDEA が明示されている時だけ渡す
+  const resolvedLaneKeyForNormalChat =
+    laneKeyNow === 'T_CONCRETIZE'
+      ? 'T_CONCRETIZE'
+      : laneKeyNow === 'IDEA_BAND'
+        ? 'IDEA_BAND'
+        : undefined;
 
-const fallback = buildNormalChatSlotPlan({
-  userText: textForCounsel,
-  laneKey: resolvedLaneKeyForNormalChat,
+  // ✅ normalChat に「直近ユーザー発話」を渡す（observeFlow の lastUserText を正しく効かせる）
+  // - history は message 配列（role/text|content を持つ）なので、userだけ抽出して末尾だけ渡す
+  const historyArrForNormalChat = Array.isArray(history) ? (history as any[]) : [];
+  const recentUserTextsForNormalChat = historyArrForNormalChat
+    .filter((m) => String(m?.role ?? '').toLowerCase() === 'user')
+    .map((m) => {
+      const v = m?.text ?? m?.content ?? null;
+      return typeof v === 'string' ? v : '';
+    })
+    .map((s) => String(s).replace(/\r\n/g, '\n').trim())
+    .filter(Boolean)
+    .slice(-6);
 
-  // ✅ 固定文言はやめて、選択された “一点” を渡す
-  focusLabel: laneKeyNow === 'T_CONCRETIZE' ? focusLabelNow : undefined,
-
-  context: {
-    lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
-  },
-});
-
-if (shouldFallbackNormalChat) {
   const fallback = buildNormalChatSlotPlan({
     userText: textForCounsel,
     laneKey: resolvedLaneKeyForNormalChat,
+
+    // ✅ 固定文言はやめて、選択された “一点” を渡す
     focusLabel: laneKeyNow === 'T_CONCRETIZE' ? focusLabelNow : undefined,
+
     context: {
       lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
+      recentUserTexts: recentUserTextsForNormalChat,
     },
   });
 
-  const fbSlots = (fallback as any).slots;
-  slotsArr = Array.isArray(fbSlots) ? fbSlots : [];
+  if (shouldFallbackNormalChat) {
+    const fallback = buildNormalChatSlotPlan({
+      userText: textForCounsel,
+      laneKey: resolvedLaneKeyForNormalChat,
+      focusLabel: laneKeyNow === 'T_CONCRETIZE' ? focusLabelNow : undefined,
+      context: {
+        lastSummary: typeof lastSummary === 'string' ? lastSummary : null,
+        recentUserTexts: recentUserTextsForNormalChat,
+      },
+    });
 
-  const fp = (fallback as any).slotPlanPolicy;
-  slotPlanPolicy = typeof fp === 'string' && fp.trim() ? fp.trim() : 'FINAL';
+    const fbSlots = (fallback as any).slots;
+    slotsArr = Array.isArray(fbSlots) ? fbSlots : [];
 
-  (meta as any).slotPlanFallback = 'normalChat';
-} else {
-  if ((meta as any).slotPlanFallback === 'normalChat') {
-    delete (meta as any).slotPlanFallback;
+    const fp = (fallback as any).slotPlanPolicy;
+    slotPlanPolicy = typeof fp === 'string' && fp.trim() ? fp.trim() : 'FINAL';
+
+    (meta as any).slotPlanFallback = 'normalChat';
+  } else {
+    if ((meta as any).slotPlanFallback === 'normalChat') {
+      delete (meta as any).slotPlanFallback;
+    }
   }
-}
+
 }}
   // =========================================================
   // ✅ A) normalChat → flagReply 自動切替（仮置き一点の安全装置）
@@ -2067,20 +2083,55 @@ if ((meta as any).framePlan && typeof (meta as any).framePlan === 'object') {
       framePlan_kind: (meta as any).framePlan?.kind ?? null,
       framePlan_stamp: (meta as any).framePlan?.stamp ?? null,
 
-      // ✅ IntentBridge 観測
-      intentBridge_laneKey:
+      // ✅ IntentBridge 観測（extra / base を分離して最後に resolved）
+      intentBridge_laneKey_extra: (meta as any)?.extra?.intentBridge?.laneKey ?? null,
+      intentBridge_laneKey_base: (meta as any)?.intentBridge?.laneKey ?? null,
+      intentBridge_laneKey_resolved:
         (meta as any)?.extra?.intentBridge?.laneKey ??
         (meta as any)?.intentBridge?.laneKey ??
         null,
 
-      intentBridge_inputs: {
-        deepenOk:
-          (meta as any)?.extra?.intentBridge?.deepenOk ?? null,
-        hasCore:
-          (meta as any)?.extra?.intentBridge?.hasCore ?? null,
-        declarationOk:
-          (meta as any)?.extra?.intentBridge?.declarationOk ?? null,
+      intentBridge_inputs_extra: {
+        deepenOk: (meta as any)?.extra?.intentBridge?.deepenOk ?? null,
+        hasCore: (meta as any)?.extra?.intentBridge?.hasCore ?? null,
+        declarationOk: (meta as any)?.extra?.intentBridge?.declarationOk ?? null,
       },
+      intentBridge_inputs_base: {
+        deepenOk: (meta as any)?.intentBridge?.deepenOk ?? null,
+        hasCore: (meta as any)?.intentBridge?.hasCore ?? null,
+        declarationOk: (meta as any)?.intentBridge?.declarationOk ?? null,
+      },
+
+      // ✅ framePlan.slots の“生のキー”を強制観測（shape特定用）
+      framePlan_slots_keys0: Array.isArray((meta as any).framePlan?.slots)
+        ? Object.keys(((meta as any).framePlan.slots[0] ?? {}) as any)
+        : null,
+
+      framePlan_slots_raw0: Array.isArray((meta as any).framePlan?.slots)
+        ? (meta as any).framePlan.slots[0]
+        : null,
+
+
+// ✅ slots 中身の先頭（どこで hint が混ざったか切り分け）
+framePlan_slots_heads: Array.isArray((meta as any).framePlan?.slots)
+  ? (meta as any).framePlan.slots.map((s: any) => ({
+      key: s?.id ?? s?.key ?? null,
+      head: String(s?.hint ?? s?.content ?? '')
+        .replace(/\s+/g, ' ')
+        .slice(0, 120),
+    }))
+  : null,
+
+
+      slotPlan_slots_heads: Array.isArray((meta as any).slotPlan)
+        ? (meta as any).slotPlan.map((s: any) => ({
+            key: s?.key ?? null,
+            head: String(s?.content ?? '')
+              .replace(/\s+/g, ' ')
+              .slice(0, 120),
+          }))
+        : null,
+
 
       framePlan_slots_isArray: Array.isArray(fpSlots),
       framePlan_slots_len: Array.isArray(fpSlots) ? fpSlots.length : null,

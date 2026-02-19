@@ -314,17 +314,62 @@ export async function buildTurnContext(
     baseMetaForTurn.framePlan = framePlan;
 
     console.log('[IROS/Context] framePlan built', {
-      userCode,
+      userCode: (stateLite as any)?.userCode ?? null,
       inputKind,
       frame: (framePlan as any)?.frame ?? null,
-      hasSlots: Boolean((framePlan as any)?.slots),
-      spinLoop: spinLoop ?? null, // ✅ stateLite.spinLoop は使わない
-      descentGate: descentGate ?? null,
+
+      hasSlots: Array.isArray((framePlan as any)?.slots) && (framePlan as any).slots.length > 0,
+
+      spinLoop: (stateLite as any)?.spinLoop ?? null,
+      descentGate: (stateLite as any)?.descentGate ?? null,
       depthStage: (stateLite as any)?.depthStage ?? null,
       phase: (stateLite as any)?.phase ?? null,
-      requestedDepth: requestedDepth ?? null,
-      requestedQCode: requestedQCode ?? null,
+
+      requestedDepth: (baseMetaForTurn as any)?.requestedDepth ?? null,
+      requestedQCode: (baseMetaForTurn as any)?.requestedQCode ?? null,
+
+      // ✅ slots の“形”を確定させる観測
+      slots_isArray: Array.isArray((framePlan as any)?.slots),
+      slots_len: Array.isArray((framePlan as any)?.slots) ? (framePlan as any).slots.length : null,
+
+      // ✅ 先頭数件の「スロットの実体」を見る（キー名違い検出）
+      slots_samples: Array.isArray((framePlan as any)?.slots)
+        ? (framePlan as any).slots.slice(0, 4).map((s: any, i: number) => ({
+            i,
+            type: typeof s,
+            isNull: s === null,
+            isObj: !!s && typeof s === 'object',
+            keys: s && typeof s === 'object' ? Object.keys(s) : null,
+
+            key: s?.key ?? s?.slotKey ?? s?.k ?? null,
+            kind: s?.kind ?? s?.type ?? null,
+
+            contentHead: String(s?.content ?? '').replace(/\s+/g, ' ').slice(0, 140),
+            textHead: String(s?.text ?? '').replace(/\s+/g, ' ').slice(0, 140),
+            promptHead: String(s?.prompt ?? '').replace(/\s+/g, ' ').slice(0, 140),
+
+            jsonHead: (() => {
+              try {
+                const j = JSON.stringify(s);
+                return j ? j.slice(0, 300) : '';
+              } catch {
+                return '(jsonify_failed)';
+              }
+            })(),
+          }))
+        : null,
+
+      // ✅ key/head 一覧（content/text/prompt のどれで来てるか判定）
+      slots_heads: Array.isArray((framePlan as any)?.slots)
+        ? (framePlan as any).slots.map((s: any) => ({
+            key: s?.key ?? s?.slotKey ?? s?.k ?? null,
+            head: String(s?.content ?? s?.text ?? s?.prompt ?? '')
+              .replace(/\s+/g, ' ')
+              .slice(0, 160),
+          }))
+        : null,
     });
+
   } catch (e) {
     console.warn('[IROS/Context] framePlan build failed', e);
   }

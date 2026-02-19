@@ -194,11 +194,44 @@ function stripNextStepTagsForDisplay(raw: string): string {
 function transformIrTemplateToMarkdown(input: string): string {
   if (!input.trim()) return input;
 
-  // 新 ir診断フォーマットはそのまま表示する
+  // ① multi7（ENTRY/DUAL/FOCUS_SHIFT/ACCEPT/INTEGRATE/NEXT_MIN）の素テキストを Markdown 見出し化
+  // 例: 「入口」単独行 → 「### 入口」
+  {
+    const STEP_TITLES = new Set([
+      '入口',
+      '二項',
+      '焦点移動',
+      '受容',
+      '統合',
+      '最小の一手',
+    ]);
+
+    const lines = input.split(/\r?\n/);
+    let hit = 0;
+
+    const out: string[] = [];
+    for (const raw of lines) {
+      const t = raw.trim();
+
+      if (STEP_TITLES.has(t)) {
+        hit++;
+        out.push(`### ${t}`, ''); // 見出し + 空行
+        continue;
+      }
+
+      out.push(raw);
+    }
+
+    // 2個以上ヒットしたら「multi7本文」とみなして変換を採用
+    if (hit >= 2) return out.join('\n');
+  }
+
+  // ② 新 ir診断フォーマットはそのまま表示する
   if (/🧿\s*観測対象[:：]/.test(input) && /I\/T層の刺さる一句/.test(input)) {
     return input;
   }
 
+  // ③ 旧 I層テンプレ → Markdown（既存ロジック）
   const rawLines = input.split(/\r?\n/);
 
   type Section = 'none' | 'state' | 'message';
@@ -318,23 +351,6 @@ function transformIrTemplateToMarkdown(input: string): string {
   return out.join('\n');
 }
 
-/**
- * 太字まわりのゆらぎを正規化する
- * - "** 〜 **" → "**〜**"（先頭/末尾の空白を削る）
- * - **「〜」** / **『〜』** → 「**〜**」 / 『**〜**』
- */
-function normalizeBoldMarks(input: string): string {
-  if (!input) return input;
-
-  // "** テキスト **" → "**テキスト**"
-  let out = input.replace(/\*\*\s+([^*][^*]*?)\s*\*\*/g, '**$1**');
-
-  // カギカッコごと太字 → 中身だけ太字
-  out = out.replace(/\*\*「([^」]+)」\*\*/g, '「**$1**」');
-  out = out.replace(/\*\*『([^』]+)』\*\*/g, '『**$1**』');
-
-  return out;
-}
 
 export default function MessageList() {
   const { messages, loading, error, sendNextStepChoice } =
@@ -421,12 +437,13 @@ export default function MessageList() {
         const isUser = m.role === 'user';
         const iconSrc = isUser ? resolveUserAvatar(m) : '/ir.png';
 
-        // ★ メタを本文から隠す：toSafeString → stripIrosMetaHeader → stripNextStepTags → transform → normalize
-        const rawText = stripIrosMetaHeader(toSafeString(m.text));
-        const displayText = stripNextStepTagsForDisplay(rawText);
-        const safeText = normalizeBoldMarks(
-          transformIrTemplateToMarkdown(displayText),
-        );
+// ★ メタを本文から隠す：toSafeString → stripIrosMetaHeader → stripNextStepTags → transform
+const rawText = stripIrosMetaHeader(toSafeString(m.text));
+const displayText = stripNextStepTagsForDisplay(rawText);
+
+// ✅ Markdown は “潰さない” で ChatMarkdown に渡す（整形は ChatMarkdown 側でやる）
+const safeText = transformIrTemplateToMarkdown(displayText);
+
 
         // ✅ UIモード（SILENCE判定）: serverの meta.extra.uiMode を最優先で拾う
         const uiMode =

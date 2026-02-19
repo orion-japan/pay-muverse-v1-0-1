@@ -539,11 +539,23 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
         conversationId,
         userCode,
         slotPlanPolicy: policy,
+
+        // ✅ ここで “枠(4) / 抽出(3)” を分離して可視化する
+        framePlanSlotsLen: Array.isArray((input as any)?.meta?.framePlan?.slots)
+          ? (input as any).meta.framePlan.slots.length
+          : null,
+        metaSlotPlanLen: Array.isArray((input as any)?.meta?.slotPlan)
+          ? (input as any).meta.slotPlan.length
+          : null,
+
+        // ✅ 既存：何を数えてるか不明なので残して照合用にする
         slotPlanLen,
+
         hasSlots,
         effectiveLen,
         head: head(effectiveText, 80),
       });
+
 
       return mk(
         {
@@ -623,11 +635,23 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
         conversationId,
         userCode,
         slotPlanPolicy: policy,
+
+        // ✅ ここで “枠(4) / 抽出(3)” を分離して可視化する
+        framePlanSlotsLen: Array.isArray((input as any)?.meta?.framePlan?.slots)
+          ? (input as any).meta.framePlan.slots.length
+          : null,
+        metaSlotPlanLen: Array.isArray((input as any)?.meta?.slotPlan)
+          ? (input as any).meta.slotPlan.length
+          : null,
+
+        // ✅ 既存：何を数えてるか不明なので残して照合用にする
         slotPlanLen,
+
         hasSlots,
         effectiveLen,
         head: head(effectiveText, 80),
       });
+
 
       // ✅ NO_SLOTS は “強制CALL” 扱いにする（下流の省略/フォールバックでオウム化させない）
       return mk(
