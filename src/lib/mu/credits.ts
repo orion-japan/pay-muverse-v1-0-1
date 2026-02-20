@@ -41,8 +41,8 @@ export function getMuTextCredit(model?: string): number {
 
   // 例: 軽量モデルは1、標準〜高性能は2〜3 など
   if (m.includes('mini')) return 1;
-  if (m.includes('gpt-4o')) return 2;
-  if (m.includes('gpt-4.1')) return 2;
+  if (m.includes('gpt-5')) return 2;
+  if (m.includes('gpt-5')) return 2;
   // 不明ならデフォルト1
   return 1;
 }

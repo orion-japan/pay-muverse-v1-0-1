@@ -162,7 +162,7 @@ export async function POST(req: NextRequest) {
     const conversation_id: string = String(body?.conversation_id || body?.conversationId || '').trim();
     const user_text: string = String(body?.user_text ?? '').trim();
     const mode: Mode = (String(body?.mode || 'Light') as Mode);
-    const model = String(body?.model || 'gpt-4o');
+    const model = String(body?.model || 'gpt-5');
 
     if (!conversation_id) return json({ ok: false, error: 'missing_conversation_id' }, 400);
     if (!user_text) return json({ ok: false, error: 'user_text_empty' }, 400);

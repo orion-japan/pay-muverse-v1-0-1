@@ -19,6 +19,15 @@ export type IrosMetaBadgeProps = {
     | 'auto'
     | string
     | null;
+
+  // ✅ 追加メタ（UIで軽く見える化したいもの）
+  laneKey?: string | null; // IDEA_BAND / T_CONCRETIZE etc
+  flowDelta?: string | null; // RETURN / FORWARD etc（表示は短く）
+  returnStreak?: number | null; // RETURN連続回数
+  slotPlanPolicy?: string | null; // FINAL / SCAFFOLD etc
+  exprLane?: string | null; // sofia_light / off etc
+  itTriggered?: boolean | null; // IT_TRIGGER
+
   compact?: boolean; // ヘッダー右上用の小さな表示
 };
 
@@ -60,14 +69,101 @@ function modeToLabel(mode?: IrosMetaBadgeProps['mode']): string {
   return String(mode);
 }
 
+function normStr(v: unknown): string | null {
+  const s = typeof v === 'string' ? v.trim() : '';
+  return s ? s : null;
+}
+
+function normPolicy(v: unknown): string | null {
+  const s = normStr(v);
+  return s ? s.toUpperCase() : null;
+}
+
+function shortDelta(delta?: string | null): string | null {
+  const d = normStr(delta);
+  if (!d) return null;
+  const u = d.toUpperCase();
+  if (u === 'RETURN') return 'RET';
+  if (u === 'FORWARD') return 'FWD';
+  return u.slice(0, 6);
+}
+
+function Chip({
+  label,
+  title,
+  compact,
+}: {
+  label: string;
+  title?: string;
+  compact?: boolean;
+}) {
+  return (
+    <span
+      title={title}
+      style={{
+        padding: compact ? '1px 4px' : '2px 6px',
+        borderRadius: 999,
+        background: 'rgba(56, 189, 248, 0.12)',
+        fontWeight: 500,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function Sep({ compact }: { compact?: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        width: 1,
+        height: compact ? 16 : 18,
+        background: 'rgba(148, 163, 184, 0.6)',
+      }}
+    />
+  );
+}
+
 export default function IrosMetaBadge(props: IrosMetaBadgeProps) {
-  const { qCode, depth, mode, compact } = props;
+  const {
+    qCode,
+    depth,
+    mode,
+    laneKey,
+    flowDelta,
+    returnStreak,
+    slotPlanPolicy,
+    exprLane,
+    itTriggered,
+    compact,
+  } = props;
 
   const qInfo = qCode ? Q_META[qCode] : null;
+
   const depthLabel = depthToLabel(depth);
   const modeLabel = modeToLabel(mode);
 
-  const hasAny = qInfo || depthLabel || modeLabel;
+  const laneKeySafe = normStr(laneKey);
+  const deltaShort = shortDelta(flowDelta);
+  const rsSafe =
+    typeof returnStreak === 'number' && Number.isFinite(returnStreak) ? returnStreak : null;
+
+  const policySafe = normPolicy(slotPlanPolicy);
+  const exprSafe = normStr(exprLane);
+  const itSafe = typeof itTriggered === 'boolean' ? itTriggered : null;
+
+  const hasAny =
+    Boolean(qInfo) ||
+    Boolean(depthLabel) ||
+    Boolean(modeLabel) ||
+    Boolean(laneKeySafe) ||
+    Boolean(deltaShort) ||
+    rsSafe !== null ||
+    Boolean(policySafe) ||
+    Boolean(exprSafe) ||
+    itSafe !== null;
 
   // 何も meta が無いとき
   if (!hasAny) {
@@ -99,6 +195,16 @@ export default function IrosMetaBadge(props: IrosMetaBadgeProps) {
       </div>
     );
   }
+
+  // セクションが“ある”かどうか（区切り線を綺麗に出すため）
+  const hasMain = Boolean(qInfo) || Boolean(depthLabel) || Boolean(modeLabel);
+  const hasExtra =
+    Boolean(laneKeySafe) ||
+    Boolean(deltaShort) ||
+    rsSafe !== null ||
+    Boolean(policySafe) ||
+    Boolean(exprSafe) ||
+    itSafe !== null;
 
   return (
     <div
@@ -141,17 +247,8 @@ export default function IrosMetaBadge(props: IrosMetaBadgeProps) {
         </div>
       )}
 
-      {/* 区切り線 */}
-      {qInfo && (depthLabel || modeLabel) && (
-        <span
-          aria-hidden="true"
-          style={{
-            width: 1,
-            height: compact ? 16 : 18,
-            background: 'rgba(148, 163, 184, 0.6)',
-          }}
-        />
-      )}
+      {/* 区切り線（Main内） */}
+      {qInfo && (depthLabel || modeLabel) && <Sep compact={compact} />}
 
       {/* 深度 */}
       {depthLabel && (
@@ -173,11 +270,12 @@ export default function IrosMetaBadge(props: IrosMetaBadgeProps) {
           >
             {depth}
           </span>
-          {!compact && (
-            <span style={{ opacity: 0.7 }}>{depthLabel}</span>
-          )}
+          {!compact && <span style={{ opacity: 0.7 }}>{depthLabel}</span>}
         </div>
       )}
+
+      {/* 区切り線（Main内） */}
+      {depthLabel && modeLabel && <Sep compact={compact} />}
 
       {/* モード */}
       {modeLabel && (
@@ -199,10 +297,45 @@ export default function IrosMetaBadge(props: IrosMetaBadgeProps) {
           >
             {String(mode).toUpperCase()}
           </span>
-          {!compact && (
-            <span style={{ opacity: 0.7 }}>{modeLabel}</span>
-          )}
+          {!compact && <span style={{ opacity: 0.7 }}>{modeLabel}</span>}
         </div>
+      )}
+
+      {/* Main と Extra の区切り */}
+      {hasMain && hasExtra && <Sep compact={compact} />}
+
+      {/* ===== Extra meta ===== */}
+      {laneKeySafe && (
+        <Chip label={`LK:${laneKeySafe}`} title={`laneKey: ${laneKeySafe}`} compact={compact} />
+      )}
+      {laneKeySafe && (deltaShort || rsSafe !== null || policySafe || exprSafe || itSafe !== null) && (
+        <Sep compact={compact} />
+      )}
+
+      {deltaShort && (
+        <Chip
+          label={`Δ:${deltaShort}`}
+          title={`flowDelta: ${flowDelta ?? ''}`}
+          compact={compact}
+        />
+      )}
+      {deltaShort && (rsSafe !== null || policySafe || exprSafe || itSafe !== null) && (
+        <Sep compact={compact} />
+      )}
+
+      {rsSafe !== null && <Chip label={`RS:${rsSafe}`} title={`returnStreak: ${rsSafe}`} compact={compact} />}
+      {rsSafe !== null && (policySafe || exprSafe || itSafe !== null) && <Sep compact={compact} />}
+
+      {policySafe && (
+        <Chip label={`P:${policySafe}`} title={`slotPlanPolicy: ${policySafe}`} compact={compact} />
+      )}
+      {policySafe && (exprSafe || itSafe !== null) && <Sep compact={compact} />}
+
+      {exprSafe && <Chip label={`EX:${exprSafe}`} title={`exprLane: ${exprSafe}`} compact={compact} />}
+      {exprSafe && itSafe !== null && <Sep compact={compact} />}
+
+      {itSafe !== null && (
+        <Chip label={itSafe ? 'IT:ON' : 'IT:OFF'} title={`itTriggered: ${String(itSafe)}`} compact={compact} />
       )}
     </div>
   );

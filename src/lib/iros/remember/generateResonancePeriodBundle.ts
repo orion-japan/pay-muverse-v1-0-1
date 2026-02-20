@@ -232,7 +232,7 @@ export async function generateResonancePeriodBundle(
       args.model ||
       process.env.IROS_REMEMBER_MODEL ||
       process.env.OPENAI_MODEL ||
-      'gpt-4.1-mini';
+      'gpt-5-mini';
 
     let raw = '';
     try {

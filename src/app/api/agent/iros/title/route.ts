@@ -30,7 +30,7 @@ export async function OPTIONS() {
  * POST /api/agent/iros/title
  * 本文: {
  *   conversation_id: string,
- *   model?: string,           // 既定: 'gpt-4o'
+ *   model?: string,           // 既定: 'gpt-5'
  *   lookback?: number         // 直近N件のメッセージから命名（既定: 20, 4..120）
  * }
  * 動作:
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     }
 
     const conversation_id: string = String(body?.conversation_id || body?.conversationId || '').trim();
-    const model = String(body?.model || 'gpt-4o');
+    const model = String(body?.model || 'gpt-5');
     const lookback = Math.max(4, Math.min(120, Number(body?.lookback ?? 20)));
 
     if (!conversation_id) return json({ ok: false, error: 'missing_conversation_id' }, 400);

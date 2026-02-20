@@ -213,7 +213,7 @@ export async function generateMuReply(message: string, ctx: MuContext) {
 
     const reply = buildImageStyleAsk();
     const meta: any = buildMuMeta({
-      model: envStr('gpt-4o-mini', 'MU_MODEL'),
+      model: envStr('gpt-5-mini', 'MU_MODEL'),
       temperature: envNumAny(0.6, 'MU_TEMPERATURE'),
       top_p: envNumAny(1, 'MU_TOP_P'),
       frequency_penalty: envNumAny(0, 'MU_FREQ_PENALTY'),
@@ -281,7 +281,7 @@ export async function generateMuReply(message: string, ctx: MuContext) {
 
     const reply = await runImageGeneration({ prompt: message, style: ctx.image_style });
     const meta: any = buildMuMeta({
-      model: envStr('gpt-4o-mini', 'MU_MODEL'),
+      model: envStr('gpt-5-mini', 'MU_MODEL'),
       temperature: envNumAny(0.6, 'MU_TEMPERATURE'),
       top_p: envNumAny(1, 'MU_TOP_P'),
       frequency_penalty: envNumAny(0, 'MU_FREQ_PENALTY'),
@@ -378,7 +378,7 @@ export async function generateMuReply(message: string, ctx: MuContext) {
   });
 
   const system = buildMuSystemPrompt({});
-  const model = (MU_AGENT as any)?.model ?? envStr('gpt-4o-mini', 'MU_MODEL');
+  const model = (MU_AGENT as any)?.model ?? envStr('gpt-5-mini', 'MU_MODEL');
   const baseTemp = (MU_AGENT as any)?.temperature ?? envNumAny(0.6, 'MU_TEMPERATURE');
   const temperature = Math.max(
     0.1,

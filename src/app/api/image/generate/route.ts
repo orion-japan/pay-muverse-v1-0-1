@@ -14,7 +14,7 @@ const openai = new OpenAI();
 // 設定
 const CONFIG = {
   mu: {
-    model: 'gpt-image-1', // gpt-4o-mini は非対応なので gpt-image-1 に統一
+    model: 'gpt-image-1', // gpt-5-mini は非対応なので gpt-image-1 に統一
     size: '1024x1024',
     cost: Number(process.env.MU_IMAGE_CREDIT_COST || 3),
     reason: 'mu_image_generate',

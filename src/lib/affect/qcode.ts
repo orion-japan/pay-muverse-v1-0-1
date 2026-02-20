@@ -85,7 +85,7 @@ export async function inferQCode(text: string): Promise<QResult> {
 出力例: {"code":"Q3","confidence":0.65,"hint":"不安・安定","color_hex":"#FFD54F"}
 `.trim();
     const r = await client.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-5-mini',
       temperature: 0,
       messages: [
         { role: 'system', content: 'Reply JSON only.' },

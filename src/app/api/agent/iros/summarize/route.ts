@@ -27,7 +27,7 @@ const json = (data: any, status = 200) =>
   });
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const MODEL_DEFAULT = 'gpt-4o';
+const MODEL_DEFAULT = 'gpt-5';
 
 type Role = 'user' | 'assistant' | 'system';
 

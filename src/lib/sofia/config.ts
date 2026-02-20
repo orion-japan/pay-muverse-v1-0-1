@@ -213,7 +213,7 @@ export type SofiaAgentCompat = {
 };
 
 export const SOFIA_AGENT: SofiaAgentCompat = {
-  model: envStr('gpt-4o', 'SOFIA_MODEL'),
+  model: envStr('gpt-5', 'SOFIA_MODEL'),
   temperature: envNum(0.6, 'SOFIA_TEMPERATURE'),
   price_in: envNum(0, 'SOFIA_PRICE_IN'),
   price_out: envNum(0, 'SOFIA_PRICE_OUT'),

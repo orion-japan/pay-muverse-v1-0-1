@@ -40,7 +40,7 @@ export async function POST(req: Request) {
 
     /* ---- OpenAI呼び出し ---- */
     const OPENAI_API_KEY = must('OPENAI_API_KEY');
-    const OPENAI_MODEL = (process.env.OPENAI_MODEL || 'gpt-4o-mini').trim();
+    const OPENAI_MODEL = (process.env.OPENAI_MODEL || 'gpt-5-mini').trim();
     const CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 
     const messages = [

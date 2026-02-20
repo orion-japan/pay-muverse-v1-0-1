@@ -168,7 +168,7 @@ export async function POST(req: NextRequest) {
             ? meta.relation.confidence
             : undefined,
         hint: meta.analysis?.keyword ?? null,
-        source: { type: 'mirra', model: meta.charge?.model ?? 'gpt-4o', version: '1' },
+        source: { type: 'mirra', model: meta.charge?.model ?? 'gpt-5', version: '1' },
         conversation_id,
         message_id: null,
       };

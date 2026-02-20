@@ -19,7 +19,7 @@ type GuardSlot = { key?: string; text?: string; content?: string; value?: string
 export type FlagshipSafeWriteArgs = {
   seedText: string;
   ctx?: FlagshipGuardContext | null;
-  model?: string; // default: gpt-4o
+  model?: string; // default: gpt-5
   maxRetries?: number; // default: 2
   trace?: { traceId?: string | null; conversationId?: string | null; userCode?: string | null };
 };
@@ -212,7 +212,7 @@ export async function writeFlagshipSafeReply(
   };
 
 
-  const model = args.model ?? 'gpt-4o';
+  const model = args.model ?? 'gpt-5';
   const maxRetries = Math.max(0, Math.min(4, Number(args.maxRetries ?? 2)));
 
   const mustHaveNeedles = pickMustHaveNeedles(ctx);

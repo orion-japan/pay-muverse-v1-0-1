@@ -137,7 +137,7 @@ export type HandleIrosReplyOutput =
   | HandleIrosReplyError;
 
 const supabase = getIrosSupabaseAdmin();
-const IROS_MODEL = process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-4o';
+const IROS_MODEL = process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-5';
 
 /**
  * ✅ Goal recall を完全に止めるフラグ
@@ -2618,7 +2618,7 @@ if (shouldRunWriter) {
   });
 
   const model = String(
-    process.env.IROS_REPHRASE_FINAL_MODEL ?? process.env.IROS_MODEL ?? 'gpt-4o',
+    process.env.IROS_REPHRASE_FINAL_MODEL ?? process.env.IROS_MODEL ?? 'gpt-5',
   ).trim();
 
   const slotPlanPolicy =

@@ -89,7 +89,7 @@ function pickDefaultModel() {
     process.env.IROS_MODEL ||
     process.env.OPENAI_MODEL ||
     process.env.OPENAI_DEFAULT_MODEL ||
-    'gpt-4o'
+    'gpt-5'
   );
 }
 
@@ -233,19 +233,36 @@ function stripInternalExtraBody(input: Record<string, any>): Record<string, any>
 
 export async function chatComplete(args: ChatArgs): Promise<string> {
   const purpose = args.purpose;
-  const model = args.model ?? pickDefaultModel();
+
+  // ✅ model: gpt-5 は gpt-5.2 に寄せる（writer 事故を避ける）
+  const modelRaw = args.model ?? pickDefaultModel();
+  const model = modelRaw === 'gpt-5' ? 'gpt-5.2' : modelRaw;
+
   const apiKey = args.apiKey ?? process.env.OPENAI_API_KEY ?? '';
+
+  // ✅ gpt-5系は temperature を送らない（サーバ側の互換制約に当たるのを防ぐ）
+  const isGpt5Family = typeof model === 'string' && model.startsWith('gpt-5');
+
+  // temperature は「gpt-5系では送らない」（互換事故を避ける）
   const temperature =
     typeof args.temperature === 'number' ? args.temperature : defaultTempByPurpose(purpose);
-  const max_tokens = typeof args.max_tokens === 'number' ? args.max_tokens : 512;
+
+  // ✅ tokens: gpt-5系は max_completion_tokens、それ以外は max_tokens
+  const maxTokensFallback =
+    typeof (args as any).max_completion_tokens === 'number'
+      ? (args as any).max_completion_tokens
+      : typeof args.max_tokens === 'number'
+        ? args.max_tokens
+        : 512;
 
   if (process.env.IROS_DEBUG_LLM_MAXTOKENS === '1') {
     console.info('[LLM][MAXTOKENS_TRACE]', {
       purpose: args.purpose,
       model,
-      max_tokens,
+      maxTokensFallback,
       temperature,
       msgCount: Array.isArray(args.messages) ? args.messages.length : null,
+      tokenParam: isGpt5Family ? 'max_completion_tokens' : 'max_tokens',
     });
   }
 
@@ -294,8 +311,9 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
   const body: Record<string, any> = {
     model,
     messages,
-    temperature,
-    max_tokens,
+    ...(isGpt5Family
+      ? { max_completion_tokens: maxTokensFallback }
+      : { max_tokens: maxTokensFallback, temperature }),
     ...extraBody,
   };
 
@@ -355,7 +373,6 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
       hasInternalKeys,
     });
   } catch {}
-
   let res: Response | null = null;
   let elapsed = 0;
 

@@ -6,7 +6,7 @@ export async function runSoulPlanner(args: {
   history: unknown[];
   vector: any;
 }) {
-  const model = process.env.IROS_MODEL ?? 'gpt-4o';
+  const model = process.env.IROS_MODEL ?? 'gpt-5';
 
   const payload = {
     task: 'decide thinking plan',

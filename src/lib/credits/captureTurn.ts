@@ -13,7 +13,7 @@ export async function captureTurnViaRPC(opts: {
   amount: number;                  // 例: 1
   idempotencyKey: string;          // 例: sub_id や `${convId}:${ts}`
   reason: string;                  // 例: 'mu_chat_turn'
-  meta?: Record<string, any>;      // { agent:'mu', model:'gpt-4o-mini' } 等
+  meta?: Record<string, any>;      // { agent:'mu', model:'gpt-5-mini' } 等
   refConversationId?: string;      // 会話コード/ID
 }) {
   const sb = sbService();

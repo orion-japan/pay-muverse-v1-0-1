@@ -146,7 +146,7 @@ export async function inferQCode(userText: string): Promise<QResult> {
 `.trim();
 
     const r = await client.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-5-mini',
       temperature: 0,
       messages: [
         { role: 'system', content: 'You are a concise classifier. Reply JSON only.' },

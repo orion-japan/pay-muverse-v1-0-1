@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
       purpose: 'digest',
 
       apiKey: process.env.OPENAI_API_KEY!,
-      model: process.env.IROS_SUMMARY_MODEL || 'gpt-4o-mini',
+      model: process.env.IROS_SUMMARY_MODEL || 'gpt-5-mini',
       temperature: 0.3,
       max_tokens: 380,
       messages: [

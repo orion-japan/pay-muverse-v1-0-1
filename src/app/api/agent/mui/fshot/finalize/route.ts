@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
               ocrText || '（OCRで内容が抽出できませんでした。状況に応じてヒアリングして下さい。）',
           },
         ],
-        model: 'gpt-4o',
+        model: 'gpt-5',
         mode: 'diagnosis',
         use_kb: true,
         kb_limit: 4,

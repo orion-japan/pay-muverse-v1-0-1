@@ -95,7 +95,7 @@ async function llmClassifyQPhaseDepth(text: string) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'gpt-4.1-mini',
+      model: 'gpt-5-mini',
       messages: [
         { role: 'system', content: sys },
         { role: 'user', content: user },
@@ -133,7 +133,7 @@ async function llmMakeReport(agent: Agent, text: string, q: string, phase: strin
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: agent === 'mirra' ? 'gpt-4.1-mini' : 'gpt-4o-mini',
+      model: agent === 'mirra' ? 'gpt-5-mini' : 'gpt-5-mini',
       messages: [
         { role: 'system', content: sys },
         { role: 'user', content: user },

@@ -379,17 +379,18 @@ function pickSlotPlanArrayPreferContent(metaForSave: any): any[] {
 function renderSlotPlanText(slotPlan: any[]): string {
   const lines: string[] = [];
 
-  const isInternalMarkerLine = (t: string): boolean => {
-    const s = String(t ?? '').trim();
-    return s.startsWith('@'); // @OBS/@SHIFT/@SEED_TEXT/@NEXT_HINT などは本文ではない
+  const push = (v: unknown) => {
+    const t = String(v ?? '').trim();
+    if (!t) return;
+    lines.push(t);
   };
 
   for (const s of slotPlan ?? []) {
     if (s == null) continue;
 
+    // ✅ writer seed 用：@OBS/@SHIFT/@SAFE/@NEXT_HINT など “内部行も保持”
     if (typeof s === 'string') {
-      const t = s.trim();
-      if (t && !isInternalMarkerLine(t)) lines.push(t);
+      push(s);
       continue;
     }
 
@@ -399,22 +400,17 @@ function renderSlotPlanText(slotPlan: any[]): string {
     const text = typeof obj.text === 'string' ? obj.text.trim() : '';
     const lns = Array.isArray(obj.lines) ? obj.lines : null;
 
-    // content/text が内部マーカーなら「本文として」は採用しない（下の候補へ流す）
-    if (content && !isInternalMarkerLine(content)) {
-      lines.push(content);
+    if (content) {
+      push(content);
       continue;
     }
-    if (text && !isInternalMarkerLine(text)) {
-      lines.push(text);
+    if (text) {
+      push(text);
       continue;
     }
 
-    // lines も内部マーカー行は除外
     if (lns) {
-      for (const l of lns) {
-        const tt = String(l ?? '').trim();
-        if (tt && !isInternalMarkerLine(tt)) lines.push(tt);
-      }
+      for (const l of lns) push(l);
       if (lines.length > 0) continue;
     }
 
@@ -435,18 +431,9 @@ function renderSlotPlanText(slotPlan: any[]): string {
       !text &&
       !lns;
 
+    // framePlan の “スロット定義” は混ぜない
     if (hint && !looksLikeFramePlanSlotDef) {
-      // hint が内部マーカーなら落とす（露出防止）
-      if (!isInternalMarkerLine(hint)) {
-        const id = String(obj.id ?? obj.slotId ?? obj.kind ?? '').trim().toUpperCase();
-        if (id === 'NEXT') {
-          // NEXT は writer seed の「本文」として使いたいので、内部マーカーにせず plain text にする
-          lines.push(hint);
-        } else {
-          lines.push(hint);
-        }
-
-      }
+      push(hint);
       continue;
     }
 
@@ -459,8 +446,8 @@ function renderSlotPlanText(slotPlan: any[]): string {
             ? obj.contentText.trim()
             : '';
 
-    if (seedLike && !isInternalMarkerLine(seedLike)) {
-      lines.push(seedLike);
+    if (seedLike) {
+      push(seedLike);
       continue;
     }
   }
@@ -513,6 +500,114 @@ function ensureWriterHints(metaForSave: any, args: { conversationId: string; use
       writerHints: next,
     });
   } catch {}
+}
+
+// ✅ UI cue (LLM本文に依存しない、UIが読むための確定トリガー)
+function ensureUiCue(metaForSave: any): void {
+  if (!metaForSave || typeof metaForSave !== 'object') return;
+
+  const ex: any = (metaForSave as any).extra ?? ((metaForSave as any).extra = {});
+  const ctx = (ex.ctxPack && typeof ex.ctxPack === 'object') ? ex.ctxPack : null;
+
+  // 1) FLOW
+  const flowDelta =
+    (metaForSave as any)?.flow?.delta ??
+    ctx?.flow?.delta ??
+    ex?.flow?.delta ??
+    null;
+
+  const returnStreak =
+    ctx?.flow?.returnStreak ??
+    ex?.flow?.returnStreak ??
+    null;
+
+  // 2) STALL
+  const stallSeverity =
+    ex?.stallHard?.severity ??
+    ex?.stall?.severity ??
+    null;
+
+  const stallReason =
+    ex?.stallHard?.reason ??
+    ex?.stall?.reason ??
+    null;
+
+  // 3) IT / T-layer
+  const itTriggered =
+    (metaForSave as any)?.itTriggered ??
+    (metaForSave as any)?.it_triggered ??
+    (metaForSave as any)?.itTrigger?.ok ??
+    (metaForSave as any)?.it_trigger?.ok ??
+    null;
+
+  const itxStep =
+    (metaForSave as any)?.itxStep ??
+    (metaForSave as any)?.itx_step ??
+    null;
+
+  const tLayerHint =
+    (metaForSave as any)?.tLayerHint ??
+    (metaForSave as any)?.t_layer_hint ??
+    ctx?.tLayerHint ??
+    null;
+
+  // 4) ANCHOR
+  const intentAnchorKey =
+    (metaForSave as any)?.intentAnchorKey ??
+    (metaForSave as any)?.intent_anchor_key ??
+    (metaForSave as any)?.intent_anchor?.key ??
+    ctx?.intentAnchorKey ??
+    null;
+
+  // 5) EXPRESSION（表現レーンが発火したか）
+  const exprLane =
+    ex?.exprDecision?.lane ??
+    ex?.expr?.lane ??
+    ctx?.exprMeta?.lane ??
+    null;
+
+  const exprFired =
+    ex?.exprDecision?.fired ??
+    ex?.expr?.fired ??
+    null;
+
+  // 6) UI MODE（現状 NORMAL/IR だけでも良い）
+  const uiMode =
+    (metaForSave as any)?.mode === 'IR' ? 'IR' : 'NORMAL';
+
+  // ✅ ここだけをUIが読む（LLM本文を読まない）
+  ex.uiCue = {
+    rev: 'uiCue@v1',
+    uiMode,
+    flowDelta,
+    returnStreak,
+    stallSeverity,
+    stallReason,
+    itTriggered,
+    itxStep,
+    tLayerHint,
+    intentAnchorKey,
+    exprFired,
+    exprLane,
+    // 便利な「現在値」も同梱（UI側の変換コスト削減）
+    qCode:
+      (metaForSave as any)?.qCode ??
+      (metaForSave as any)?.q_code ??
+      (metaForSave as any)?.qPrimary ??
+      null,
+    depthStage:
+      (metaForSave as any)?.depthStage ??
+      (metaForSave as any)?.depth_stage ??
+      (metaForSave as any)?.depth ??
+      null,
+    phase:
+      (metaForSave as any)?.phase ??
+      null,
+    slotPlanPolicy:
+      (metaForSave as any)?.framePlan?.slotPlanPolicy ??
+      (metaForSave as any)?.slotPlanPolicy ??
+      null,
+  };
 }
 
 /* =========================
@@ -1132,7 +1227,8 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
   } catch (e) {
     console.warn('[IROS/PostProcess] ensureWriterHints failed (non-fatal)', e);
   }
-
+    // ✅ UIが読む確定cue（LLM本文から分離）
+    ensureUiCue(metaForSave);
   // =========================================================
   // extractedTextFromModel / rawTextFromModel 同期（最後に1回だけ）
   // =========================================================

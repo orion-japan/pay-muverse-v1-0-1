@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
     const user = `フォーム内容:\n${JSON.stringify(form, null, 2)}`;
 
     const raw = await chatComplete({
-      model: 'gpt-4o-mini',
+      model: 'gpt-5-mini',
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user },

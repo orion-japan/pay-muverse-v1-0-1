@@ -290,7 +290,7 @@ export async function generateSofiaReply(
 
   // ===== 設定の柔軟取得（新: SOFIA_AGENT / 旧: 個別定数） =====
   const sofiaAgent = (CFG as any).SOFIA_AGENT ?? {};
-  const MODEL = sofiaAgent.model ?? (CFG as any).SOFIA_MODEL ?? 'gpt-4o';
+  const MODEL = sofiaAgent.model ?? (CFG as any).SOFIA_MODEL ?? 'gpt-5';
   const TEMP = Number(sofiaAgent.temperature ?? (CFG as any).SOFIA_TEMPERATURE ?? 0.6);
   const PRICE_IN = Number(sofiaAgent.price_in ?? (CFG as any).SOFIA_PRICE_IN ?? 0);
   const PRICE_OUT = Number(sofiaAgent.price_out ?? (CFG as any).SOFIA_PRICE_OUT ?? 0);

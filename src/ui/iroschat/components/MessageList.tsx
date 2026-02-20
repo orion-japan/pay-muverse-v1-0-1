@@ -8,6 +8,7 @@ import '../IrosChat.css';
 
 import ChatMarkdown from './ChatMarkdown';
 import IrosButton, { IrosNextStepGear } from './IrosButton';
+import IrosMetaBadge from './IrosMetaBadge';
 
 // メッセージ型
 type IrosMessage = {
@@ -474,13 +475,21 @@ const safeText = transformIrTemplateToMarkdown(displayText);
 
         // ✅ 表示用Qコードは「現在Q」を優先して拾う（targetQ / goalTargetQ は表示に使わない）
         const qToShowRaw =
+          // いま最優先：トップレベル（UIに直置きされてる場合）
           (m.meta?.qCode as any) ??
           (m.meta?.q as any) ??
+
+          // よくある：extra.ctxPack に入ってる場合（postprocess / ctxPack系）
+          (m.meta?.extra?.ctxPack?.qCode as any) ??
+          (m.meta?.extra?.ctxPack?.qPrimary as any) ?? // 念のため
+
+          // unified がある場合
           (m.meta?.unified?.q?.current as any) ??
+
+          // 旧/フラットなpayload（DB/CSV系）
           ((m as any)?.q_code as any) ??
           ((m as any)?.q as any) ??
           null;
-
         // 安全弁：Q1〜Q5 以外は出さない
         const qToShowSafe =
           typeof qToShowRaw === 'string' && /^Q[1-5]$/.test(qToShowRaw)
@@ -492,7 +501,32 @@ const safeText = transformIrTemplateToMarkdown(displayText);
         const nextStepOptions = (nextStep?.options ?? []).filter(
           (x) => x && typeof x.id === 'string' && x.id.trim().length > 0,
         );
+// ✅ 表示用 depth（S/R/C/I/T）候補を拾う（確定キーはログで当てる）
+const depthToShowRaw =
+  (m.meta?.depth as any) ??
+  ((m.meta as any)?.depthStage as any) ??
+  (m.meta?.unified?.depth?.current as any) ??
+  ((m as any)?.depth_stage as any) ??
+  ((m as any)?.depth as any) ??
+  null;
 
+const depthToShowSafe =
+  typeof depthToShowRaw === 'string' && /^[SRCIT]\d+$/.test(depthToShowRaw)
+    ? depthToShowRaw
+    : null;
+
+// ✅ 表示用 mode 候補を拾う（uiMode=SILENCEとは別枠）
+const modeToShowRaw =
+  (m.meta?.mode as any) ??
+  (m.meta?.extra?.mode as any) ??
+  (m.meta?.unified?.mode?.current as any) ??
+  ((m as any)?.mode as any) ??
+  null;
+
+const modeToShowSafe =
+  typeof modeToShowRaw === 'string' && modeToShowRaw.trim().length > 0
+    ? modeToShowRaw
+    : null;
         return (
           <div
             key={m.id}
@@ -537,21 +571,15 @@ const safeText = transformIrTemplateToMarkdown(displayText);
                 />
               </div>
 
-              {/* Qバッジ：Iros（assistant）のときだけ */}
-              {!isUser && qToShowSafe && (
-                <div className="q-badge" style={qBadgeStyle}>
-                  <span
-                    style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: 999,
-                      background: m.color || 'rgba(129,140,248,0.85)',
-                      display: 'inline-block',
-                    }}
-                  />
-                  {qToShowSafe}
-                </div>
-              )}
+{/* Metaバッジ：Iros（assistant）のときだけ */}
+{!isUser && (
+  <IrosMetaBadge
+    qCode={qToShowSafe ?? undefined}
+    depth={depthToShowSafe}
+    mode={modeToShowSafe}
+    compact
+  />
+)}
             </div>
 
             {/* 吹き出し */}

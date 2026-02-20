@@ -1,4 +1,21 @@
-// src/lib/iros/blockPlan/blockPlanEngine.ts
+// file: src/lib/iros/blockPlan/blockPlanEngine.ts
+//
+// iros BlockPlan Engine v2 (自然化 / 例外演出ゲート)
+//
+// 役割：
+// - 「BlockPlan を出す / 出さない」を決めるだけ。
+// - 段落の密度・温度・問いの頻度など “体験の質” は Expression Layer 側で制御する。
+// - ここは構造（Depth/Q/Phase/slotPlan）を“壊さない”ための安全弁に徹する。
+//
+// 基本方針：
+// - BlockPlan は常用しない（例外演出のみ）。
+// - 明示要求（ユーザーが「見出しで」「段で」「ブロックで」等）を最優先。
+// - 自動判定は最小（I層以上 + IT_TRIGGER のみ）。それ以外は出さない。
+// - 仕様説明（やり方/手順/仕組み/とは）は BlockPlan 禁止（演出で誤魔化さない）。
+//
+// ✅ 重要：
+// - 「次の一手 / 最小の一手（NEXT_MIN）」は廃止（BlockPlan では出さない）。
+//   ※ “次の一手” は slotPlan(NEXT) の世界で扱う。BlockPlan は段落の整理だけ。
 
 export type BlockKind =
   | 'ENTRY'
@@ -7,257 +24,212 @@ export type BlockKind =
   | 'FOCUS_SHIFT'
   | 'ACCEPT'
   | 'INTEGRATE'
-  | 'CHOICE'
-  | 'NEXT_MIN';
+  | 'CHOICE';
 
-export type BlockPlanMode =
-  | 'short3'
-  | 'short4'
-  | 'short5'
-  | 'multi7'
-  | 'multi8';
+export type BlockPlanMode = 'multi6' | 'multi7';
 
 export interface BlockPlan {
   mode: BlockPlanMode;
   blocks: BlockKind[];
 }
 
-interface BuildBlockPlanParams {
+export interface BuildBlockPlanParams {
   userText: string;
+
+  // meta（最低限）
+  depthStage?: string | null; // 例: 'R3', 'I1', 'T2'
+  itTriggered?: boolean | null;
+
+  // 互換（将来拡張用：現状は使わないが署名だけ残す）
   goalKind?: string | null;
   exprLane?: string | null;
+
+  // 明示トリガー（外部から与える場合だけ）
   explicitTrigger?: boolean;
 }
 
+/* =========================================================
+ * トリガー検出
+ * ========================================================= */
+
 /**
- * 明示トリガー：
- * - ユーザーが「段で」「ブロックで」「構造で」「多段で」などを明確に要求している
- * - 初期は安全に “明示のみ” を拾う（誤爆させない）
+ * 明示トリガー：ユーザーが「段取り/構造化/見出し」などを要求した時だけ true。
+ * - ここで拾えなければ BlockPlan は入らない（＝見出し直らない）。
+ * - “出せるものは出す（後で削る）”方針なので、語彙はやや広めに拾う。
  */
 export function detectExplicitBlockPlanTrigger(userText: string): boolean {
   const t = String(userText ?? '').trim();
   if (!t) return false;
 
-  return /(多段|深掘り|ブロック|段で|レイアウト|構造で|段落で|見出しで)/i.test(t);
-}
-
-/**
- * directTask（説明依頼）を検出：
- * - 「仕組み/やり方/方法/手順/説明/とは/教えて」など
- * - 仕様：directTask は BlockPlan を出さない（多段Markdown禁止）を基本にする
- *   ※ただし “明示トリガー” があればユーザー指定を優先して BlockPlan を許可する
- */
-function detectDirectTask(userText: string): boolean {
-  const t = String(userText ?? '').trim();
-  if (!t) return false;
-  return /(仕組み|やり方|方法|手順|説明|教えて|とは|どうすれば|どうやって)/i.test(t);
-}
-
-/**
- * “長め/深め” を示す語彙（multi8に寄せる）
- */
-function detectWantsDeeper(userText: string): boolean {
-  const t = String(userText ?? '').trim();
-  if (!t) return false;
-  return /(詳しく|丁寧に|ちゃんと|しっかり|長め|深め|深掘り|背景|理由|根拠|本質|説得力)/i.test(
-    t
+  // 日本語 + 軽い英語
+  // NOTE: 「見出し」を必ず拾う
+  return /(多段|段で|段落で|ブロック|レイアウト|構造で(?:書いて)?|深めて|深掘り|見出し|セクション|heading|section)/i.test(
+    t,
   );
 }
 
 /**
- * “短く/ざっくり” を示す語彙（short3に寄せる）
+ * directTask（仕様説明/手順/やり方系）：
+ * - ここで BlockPlan を出すと “説明依頼” が演出で歪むので禁止。
+ * - ただし過検出すると窮屈になるので、語彙は最小〜中くらいに。
  */
-function detectWantsShort(userText: string): boolean {
+function detectDirectTask(userText: string): boolean {
   const t = String(userText ?? '').trim();
   if (!t) return false;
-  return /(短く|ざっくり|要点|一言|結論だけ|端的に|サクッと)/i.test(t);
+
+  // 「とは/仕組み/手順/やり方/方法/実装/どうやって」など
+  // ※「教えて」は雑談でも入るので単体では拾わない
+  return /(仕組み|手順|やり方|方法|実装|設計|仕様|どうやって|とは)/i.test(t);
 }
+
+/**
+ * “深め/長め” ニュアンス：
+ * - 明示トリガーがある時に multi7 を選びやすくする。
+ */
+function detectWantsDeeper(userText: string): boolean {
+  const t = String(userText ?? '').trim();
+  if (!t) return false;
+
+  return /(詳しく|丁寧に|ちゃんと|しっかり|長め|深め|深掘り|背景|理由|本質)/i.test(t);
+}
+
+/* =========================================================
+ * depthStage ユーティリティ（S/F/R/C/I/T + 数字 → rank）
+ * ========================================================= */
+
+function depthRank(depthStage?: string | null): number {
+  const s = String(depthStage ?? '').trim().toUpperCase();
+  if (!s) return 0;
+
+  // 例: S1, F2, R3, C1, I2, T3
+  const m = s.match(/^([SFRCIT])\s*([0-9]+)/);
+  if (!m) return 0;
+
+  const letter = m[1];
+  const n = Math.max(0, Math.min(9, parseInt(m[2], 10) || 0));
+
+  const base =
+    letter === 'S'
+      ? 10
+      : letter === 'F'
+        ? 20
+        : letter === 'R'
+          ? 30
+          : letter === 'C'
+            ? 40
+            : letter === 'I'
+              ? 50
+              : letter === 'T'
+                ? 60
+                : 0;
+
+  return base + n;
+}
+
+function isDepthAtLeastI1(depthStage?: string | null): boolean {
+  // I1 = 51
+  return depthRank(depthStage) >= 51;
+}
+
+/* =========================================================
+ * BlockPlan 生成（ゲート）
+ * ========================================================= */
 
 export function buildBlockPlan(params: BuildBlockPlanParams): BlockPlan | null {
   const userText = String(params.userText ?? '').trim();
-  const goalKind = String(params.goalKind ?? '').trim().toLowerCase() || null;
-  const exprLane = String(params.exprLane ?? '').trim().toLowerCase() || null;
+  if (!userText) return null;
 
-  // ✅ 明示トリガーは goalKind / directTask より強い（ユーザー指定を最優先）
+  const depthStage = params.depthStage ?? null;
+  const itTriggered = typeof params.itTriggered === 'boolean' ? params.itTriggered : false;
+
+  // 1) 説明依頼は BlockPlan 禁止（演出で誤魔化さない）
+  if (detectDirectTask(userText)) return null;
+
+  // 2) 明示トリガー（ユーザー指定）を最優先
   const explicit =
-    params.explicitTrigger ?? detectExplicitBlockPlanTrigger(userText);
+    typeof params.explicitTrigger === 'boolean'
+      ? params.explicitTrigger
+      : detectExplicitBlockPlanTrigger(userText);
 
-  // ✅ 止血：directTask は BlockPlan を一切出さない（多段Markdown禁止）
-  // ただし explicit 指定がある場合はユーザー要求を優先して許可する
-  if (!explicit && detectDirectTask(userText)) {
-    return null;
-  }
+  // 3) 自動トリガー（最小）
+  // - I層以上が確定していて、かつ IT_TRIGGER が立っている時だけ許可
+  const autoDeepen = isDepthAtLeastI1(depthStage) && Boolean(itTriggered);
+
+  // 4) どちらも無いなら絶対に出さない
+  if (!explicit && !autoDeepen) return null;
 
   // ---------------------------------------------
-  // 1) 明示トリガー：multi7 / multi8（可変）
+  // 明示指定：
+  // - wantsDeeper=true なら multi7（CHOICE まで入れて段を少し増やす）
+  // - wantsDeeper=false なら multi6（軽量）
+  //
+  // 自動判定：
+  // - 過剰演出を避けるため multi6 固定
   // ---------------------------------------------
   if (explicit) {
     const wantsDeeper = detectWantsDeeper(userText);
 
-    // multi8：入口 → 状況 → 二項 → 焦点移動 → 受容 → 統合 → 選択 → 最小の一手
     if (wantsDeeper) {
       return {
-        mode: 'multi8',
-        blocks: [
-          'ENTRY',
-          'SITUATION',
-          'DUAL',
-          'FOCUS_SHIFT',
-          'ACCEPT',
-          'INTEGRATE',
-          'CHOICE',
-          'NEXT_MIN',
-        ],
+        mode: 'multi7',
+        blocks: ['ENTRY', 'SITUATION', 'DUAL', 'FOCUS_SHIFT', 'ACCEPT', 'INTEGRATE', 'CHOICE'],
       };
     }
 
-    // multi7：入口 → 二項 → 焦点移動 → 受容 → 統合 → 選択 → 最小の一手
-    // ※“説得力”のため CHOICE を入れて 7 ブロックを満たす
     return {
-      mode: 'multi7',
-      blocks: [
-        'ENTRY',
-        'DUAL',
-        'FOCUS_SHIFT',
-        'ACCEPT',
-        'INTEGRATE',
-        'CHOICE',
-        'NEXT_MIN',
-      ],
+      mode: 'multi6',
+      blocks: ['ENTRY', 'SITUATION', 'DUAL', 'FOCUS_SHIFT', 'ACCEPT', 'INTEGRATE'],
     };
   }
 
-  // ---------------------------------------------
-  // 2) stabilize：short3 / short4 / short5（可変）
-  // ---------------------------------------------
-  // 方針：
-  // - short3：軽く整える（入口→焦点移動→最小の一手）
-  // - short4：整えつつ押し付けない（入口→二項→焦点移動→最小の一手）
-  // - short5：含みがある/場を整える（入口→二項→焦点移動→統合→最小の一手）
-  if (goalKind === 'stabilize') {
-    const wantsShort = detectWantsShort(userText);
-
-    // exprLane が “sofia_light” 等で「短め寄せ」にしたい場合も short4/3 に寄せる
-    const exprSuggestsShort =
-      exprLane === 'sofia_light' ||
-      exprLane === 'light' ||
-      exprLane === 'lite';
-
-    if (wantsShort) {
-      return {
-        mode: 'short3',
-        blocks: ['ENTRY', 'FOCUS_SHIFT', 'NEXT_MIN'],
-      };
-    }
-
-    if (exprSuggestsShort) {
-      return {
-        mode: 'short4',
-        blocks: ['ENTRY', 'DUAL', 'FOCUS_SHIFT', 'NEXT_MIN'],
-      };
-    }
-
-    // デフォルトは short5（安定）
-    return {
-      mode: 'short5',
-      blocks: ['ENTRY', 'DUAL', 'FOCUS_SHIFT', 'INTEGRATE', 'NEXT_MIN'],
-    };
-  }
-
-  // ---------------------------------------------
-  // 3) それ以外：まずは出さない（安全）
-  // ※必要になったら uncover/reframeIntention 等で short4/multi7 を追加する
-  // ---------------------------------------------
-  return null;
+  // autoDeepen（I層以上 + IT_TRIGGER） → multi6（軽め）
+  return {
+    mode: 'multi6',
+    blocks: ['ENTRY', 'SITUATION', 'DUAL', 'FOCUS_SHIFT', 'ACCEPT', 'INTEGRATE'],
+  };
 }
 
+/* =========================================================
+ * system4（例外演出用）: 短い契約
+ * ========================================================= */
+
+/**
+ * renderBlockPlanSystem4
+ * - system 注入専用（ユーザーに見せない）
+ * - “段取り” だけを与え、内容や構造の推定・上書きを禁止する
+ *
+ * 見出しについて：
+ * - UI の見出し化事故を避けるため、見出しは「## 見出し」だけ許可に寄せる。
+ * - sanitize 側で # は落ちるので、ユーザー表示では「見出し文字」だけ残る（狙い通り）。
+ *
+ * 質問について：
+ * - たまにならOK。毎回は不要。必要な時だけ 0〜1。
+ */
 export function renderBlockPlanSystem4(plan: BlockPlan): string {
-  // Writer に渡すのは「設計図のみ」：文章を作らせるための骨格
-  // ルール：slotPlan/Depth/Q/phase/personaMode を変えない
+  const requiredOrder = plan.blocks.join(' -> ');
 
-  const requiredHeads = plan.blocks.map((b) => {
-    switch (b) {
-      case 'ENTRY':
-        return '入口';
-      case 'SITUATION':
-        return '状況';
-      case 'DUAL':
-        return '二項';
-      case 'FOCUS_SHIFT':
-        return '焦点移動';
-      case 'ACCEPT':
-        return '受容';
-      case 'INTEGRATE':
-        return '統合';
-      case 'CHOICE':
-        return '選択';
-      case 'NEXT_MIN':
-        return '最小の一手';
-      default:
-        // BlockKind を拡張した時に落ちないための保険（通常ここには来ない）
-        return String(b);
-    }
-  });
-
-  // ✅ 余白は mode で可変（short系は短め、multi系は長め）
-  const blankLines =
-    plan.mode === 'multi8' || plan.mode === 'multi7'
-      ? 15
-      : plan.mode === 'short5'
-        ? 6
-        : plan.mode === 'short4'
-          ? 4
-          : 3;
-
-  const blankN = '\n'.repeat(blankLines + 1); // 空行N行 = 改行N+1回
-
-  const lines: string[] = [
-    'BLOCK_PLAN (system4):',
-    '',
-    '目的：構造（Depth/Q/phase/slotPlan）を壊さず、表現だけを段構造にする。',
-    '禁止：Depth/Q/phase の変更、slotPlan の変更、Orchestrator/PostProcess の推定や上書き。',
-    '前提：personaMode=GROUND を維持（本systemは“文章の段構造”のみを指示する）。',
+  return [
+    '【内部指示】以下はシステム制約。返信本文に一切含めない。引用/要約/言い換えもしない。',
     '',
     `mode: ${plan.mode}`,
-    `blocks: ${plan.blocks.join(' -> ')}`,
+    `order: ${requiredOrder}`,
     '',
-    '【重要：このモードでは Markdown を必須にする】',
-    '- 各ブロックは必ず Markdown 見出しで開始する：`### 見出し`（見出し行は単独行）',
-    `- 見出しはこの順番で「全部」出す：${requiredHeads.join(' → ')}`,
-    '- 見出し名は上の指定どおりにする（省略・改名・順序入替は禁止）',
+    '目的：例外的に「段取り」だけ与える。Depth/Q/Phase/slotPlan は絶対に変えない。',
+    '禁止：Depth/Q/Phase/slotPlan の変更・推定・上書き、診断ラベルの露出。',
     '',
-    '【重要：ブロック間の余白（省略禁止）】',
-    `- 各ブロックの本文の後に、次の見出しの前まで「空行を${blankLines}行」入れる。`,
-    `- 実装イメージ：本文の末尾に ${JSON.stringify(blankN)} を挟む感じ（※本文には出さない説明）`,
+    '出力ルール：',
+    '- 見出しは「## 見出し」形式のみ（### や記号だらけの装飾は禁止）。',
+    '- 内部ブロック名（ENTRY/SITUATION/DUAL/FOCUS_SHIFT/ACCEPT/INTEGRATE/CHOICE）や「二項/焦点移動/受容」等の語を本文に出さない。',
+    '- 境界は空行で表現。箇条書き・番号・チェックリストで埋めない。',
+    '- 一般論で薄めず、各段落にユーザー文の具体語を最低1つ入れる。',
+    '- 質問は 0〜1。毎回は付けない（必要な時だけ末尾に添える）。',
     '',
-    '【本文の密度】',
-    '- short系（short3/4/5）：各ブロック 3〜7行目安（短くても“段”は崩さない）。',
-    '- multi系（multi7/8）：各ブロック 5〜12行目安（説得力は“観測→理由→次”の3点で作る）。',
-    '- 箇条書き・番号・チェックリストで埋めない（段落で書く）。',
-    '- 一般論で埋めない。ユーザー発話に接続する具体語を各ブロックに最低1つ入れる。',
+    '密度：',
+    '- 1段落は 2〜4文までOK（ただし1段落が長文化しすぎないよう改行で分ける）。',
+    '- multi6：全体で 6〜12 段落（完走優先）',
+    '- multi7：全体で 8〜16 段落（完走優先）',
     '',
-    '【ブロックの役割】',
-    '- 入口：相手の言葉を短く鏡にする（同じ粒度）。',
-    '- 状況：いま何が起きているかを1〜2段落で整理（判断や助言にしない）。',
-    '- 二項：いまの詰まりを「Aしたい/でもBが嫌」で1文に固定する（断定形）。',
-    '- 焦点移動：視点の置き場を1つだけずらす（説得しない）。',
-    '- 受容：否定せず、そのまま置く（肯定で盛らない）。',
-    '- 統合：1〜2段落で結び直す（“まとめの宣言”で終わらせない）。',
-    '- 選択：2択 or 3択を“軽く”提示（押し付けない）。',
-    '- 最小の一手：具体行動を1つだけ（最小単位）。',
-    '',
-    '【出力例（必ずこの形）】',
-  ];
-
-  // 出力例を blocks に合わせて組み立て（固定例だとズレるので）
-  for (const head of requiredHeads) {
-    lines.push(`### ${head}`);
-    lines.push('本文…');
-    lines.push(blankN);
-  }
-
-  lines.push('');
-  lines.push('出力は“詩”ではなく“段構造”。余韻よりも完走を優先する。');
-
-  return lines.join('\n').trim();
+    '重要：',
+    '- 「次の一手 / 最小の一手 / NEXT_MIN」系の段落は作らない（BlockPlanの責務外）。',
+  ].join('\n').trim();
 }

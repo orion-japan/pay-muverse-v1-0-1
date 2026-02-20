@@ -179,11 +179,32 @@ export async function callWriterLLM(args: {
   // ✅ 追加：HistoryDigest v1（存在する時だけ注入）
   historyDigestV1?: HistoryDigestV1 | null;
 }): Promise<string> {
-  // ✅ 注入（systemPrompt の次に system 2本目として差し込む）
-  // - ここが writer 本線の choke point
+  // ✅ HistoryDigest v1 を注入（ただし system は “1枚に畳む”）
+  // - rephraseEngine 側で allow/exprMeta/blockPlan が system 追加されても、ここで最終的に 1枚化する
   const digest = (args.historyDigestV1 ?? null) as HistoryDigestV1 | null;
   const injected = digest ? injectHistoryDigestV1({ messages: args.messages, digest }) : null;
-  const messagesFinal = injected?.messages ?? args.messages;
+
+  let messagesFinal: WriterMessage[] = (injected?.messages ?? args.messages) as WriterMessage[];
+
+  // ✅ 先頭に連続する system を 1枚に畳む（system,system,... を禁止）
+  if (messagesFinal.length > 1 && messagesFinal[0]?.role === 'system') {
+    const head = { ...messagesFinal[0] } as WriterMessage;
+    let i = 1;
+
+    while (i < messagesFinal.length && messagesFinal[i]?.role === 'system') {
+      const add = String((messagesFinal[i] as any)?.content ?? '').trim();
+      if (add) {
+        head.content = `${String(head.content ?? '').trim()}\n\n${add}`.trim();
+      }
+      i++;
+    }
+
+    if (i > 1) {
+      messagesFinal = [head, ...messagesFinal.slice(i)];
+    } else {
+      messagesFinal[0] = head;
+    }
+  }
 
   const out = await chatComplete({
     purpose: 'writer',
@@ -203,6 +224,12 @@ export async function callWriterLLM(args: {
     audit: {
       ...(args.audit ?? {}),
       historyDigestV1: digest ? { injected: true, chars: injected?.digestChars ?? null } : { injected: false },
+      systemCollapsed: true,
+      systemHeadCountBefore:
+        Array.isArray((injected?.messages ?? args.messages))
+          ? (injected?.messages ?? args.messages).filter((m: any, idx: number) => idx < 12 && m?.role === 'system').length
+          : null,
+      systemHeadCountAfter: messagesFinal.slice(0, 12).filter((m) => m?.role === 'system').length,
     },
   } as any);
 

@@ -2311,16 +2311,23 @@ const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
   const baseSystemPrompt = systemPromptForFullReply({
     ...(opts as any)?.systemPromptArgs,
 
-    // ✅ exprLane は「string」ではなく「{ fired, lane }」のオブジェクトを渡す
-    // - CTXPACK に exprMeta が載っている前提（あなたのログで確定済み）
-    // - systemPrompt.ts は exprLane?.fired / exprLane?.lane を読むため
+    // ✅ directTask は wantsIdeaBand を考慮した版を渡す
+    directTask: directTaskForPrompt,
+
+    // ✅ IT成立（証拠）を systemPrompt に届ける
+    itOk,
+
+    // ✅ intentBand / tLayerHint を systemPrompt に届ける（GUIDE_I 判定の材料）
+    band,
+
+    // ✅ exprLane は「string」ではなく「{ fired, lane, reason }」想定。
+    //    postprocess 側で ctxPack.exprMeta に合流している前提。
     exprLane:
       (opts as any)?.userContext?.ctxPack?.exprMeta ??
       (opts as any)?.userContext?.exprMeta ??
       (opts as any)?.exprMeta ??
       null,
   });
-
 
   // ✅ レーン契約は「最後」に置く（後段の詳細指示が勝つ）
   const laneContractTail = (tConcretizeHeader || '') + (ideaBandHeader || '');
@@ -2639,66 +2646,87 @@ const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
 
 // systemPrompt（先頭system） → allow（system2） → exprMeta（system3） → BLOCK_PLAN（system4）
 // ※ HistoryDigest v1 を system2 に入れてる場合は “その後ろ” になるが、ここは同一処理内では優先順位固定でOK
-// --- BLOCK_PLAN（system4）生成（設計図のみ） ---
+// --- BLOCK_PLAN（system4）生成（設計図のみ / 例外演出のみ） ---
+const ctxPack = (opts as any)?.userContext?.ctxPack ?? null;
+
 const goalKind =
-  (opts as any)?.userContext?.ctxPack?.replyGoal?.kind ??   // ✅ 追加：ctxPackの正本
-  (opts as any)?.userContext?.ctxPack?.goalKind ??
+  ctxPack?.replyGoal?.kind ?? // ✅ ctxPack 正本
+  ctxPack?.goalKind ??
   (opts as any)?.userContext?.goalKind ??
   (opts as any)?.goalKind ??
   null;
 
+// ✅ depth / IT は “構造メタ” から拾う（BlockPlan 自動条件に必要）
+const depthStage =
+  ctxPack?.depthStage ??
+  ctxPack?.unified?.depthStage ??
+  (opts as any)?.userContext?.depthStage ??
+  null;
 
-  // ✅ explicitTrigger は「最後の user 発話」だけから判定する（末尾message role不問を禁止）
-  const rawUserTextFromOpts = String((opts as any)?.userText ?? '').trim();
+// IT_TRIGGER（true/false）を最小で拾う（存在しない場合は false）
+const itTriggered = Boolean(
+  ctxPack?.itTriggered ??
+    ctxPack?.it_triggered ??
+    ctxPack?.qCounts?.it_triggered_true ??
+    ctxPack?.qCounts?.it_triggered ??
+    false
+);
 
-  const rawUserTextFromMessages = (() => {
-    try {
-      // messages を後ろから走査して「role:user」の最後を拾う
-      for (let i = (messages as any[])?.length - 1; i >= 0; i--) {
-        const m: any = (messages as any[])[i];
-        if (m?.role === 'user') return String(m?.content ?? '').trim();
-      }
-    } catch {}
-    return '';
-  })();
+// ✅ explicitTrigger は「最後の user 発話」だけから判定する（末尾message role不問を禁止）
+const rawUserTextFromOpts = String((opts as any)?.userText ?? '').trim();
 
-  const userTextForTrigger =
-    rawUserTextFromOpts.length > 0 ? rawUserTextFromOpts : rawUserTextFromMessages;
+const rawUserTextFromMessages = (() => {
+  try {
+    // messages を後ろから走査して「role:user」の最後を拾う
+    for (let i = (messages as any[])?.length - 1; i >= 0; i--) {
+      const m: any = (messages as any[])[i];
+      if (m?.role === 'user') return String(m?.content ?? '').trim();
+    }
+  } catch {}
+  return '';
+})();
 
-  const explicitTrigger = detectExplicitBlockPlanTrigger(userTextForTrigger);
+const userTextForTrigger =
+  rawUserTextFromOpts.length > 0 ? rawUserTextFromOpts : rawUserTextFromMessages;
 
-  const blockPlan = buildBlockPlan({
-    userText: userTextForTrigger,
+const explicitTrigger = detectExplicitBlockPlanTrigger(userTextForTrigger);
+
+// ✅ v1方針：BlockPlan は “例外演出” のみ（通常会話は null）
+const blockPlan = buildBlockPlan({
+  userText: userTextForTrigger,
+  goalKind,
+  exprLane: (exprMeta as any)?.lane ?? null,
+  explicitTrigger,
+
+  // ✅ 追加：自動判定の最小版に必要
+  depthStage,
+  itTriggered,
+});
+
+const blockPlanText = blockPlan ? renderBlockPlanSystem4(blockPlan) : '';
+
+// ✅ 観測点：blockPlan が「生成されてるか/空か」を確定する
+try {
+  console.log('[IROS/rephraseEngine][BLOCK_PLAN]', {
+    traceId: (debug as any)?.traceId ?? null,
+    conversationId: (debug as any)?.conversationId ?? null,
+    userCode: (debug as any)?.userCode ?? null,
+enabled: Boolean(blockPlanText && String(blockPlanText).trim().length > 0),
     goalKind,
     exprLane: (exprMeta as any)?.lane ?? null,
     explicitTrigger,
+    depthStage,
+    itTriggered,
+    mode: (blockPlan as any)?.mode ?? null,
+    blocksLen: Array.isArray((blockPlan as any)?.blocks) ? (blockPlan as any).blocks.length : 0,
+    sysLen: String(blockPlanText ?? '').trim().length,
   });
+} catch {}
 
-
-  const blockPlanText = blockPlan ? renderBlockPlanSystem4(blockPlan) : '';
-
-  // ✅ 観測点：blockPlan が「生成されてるか/空か」を確定する
-  try {
-    console.log('[IROS/rephraseEngine][BLOCK_PLAN]', {
-      traceId: (debug as any)?.traceId ?? null,
-      conversationId: (debug as any)?.conversationId ?? null,
-      userCode: (debug as any)?.userCode ?? null,
-      enabled: Boolean(process.env.IROS_BLOCK_PLAN_ENABLED ?? ''),
-      goalKind,
-      exprLane: (exprMeta as any)?.lane ?? null,
-      explicitTrigger,
-      mode: (blockPlan as any)?.mode ?? null,
-      blocksLen: Array.isArray((blockPlan as any)?.blocks) ? (blockPlan as any).blocks.length : 0,
-      sysLen: String(blockPlanText ?? '').trim().length,
-    });
-  } catch {}
-
-
-// ✅ BLOCK_PLAN が入る時だけ、行数クランプを緩める（後半ブロックの切断を防ぐ）
+// ✅ BLOCK_PLAN が入る時だけ、行数クランプを緩める（完走優先）
 if (blockPlanText && String(blockPlanText).trim().length > 0) {
   const modeStr = String((blockPlan as any)?.mode ?? '').trim();
-  const min = modeStr === 'multi7' ? 24 : 16;
-
+  const min = modeStr === 'multi8' ? 40 : 32; // multi7:32 / multi8:40（例外演出は長くてよい）
   if (typeof (maxLines as any) === 'number' && (maxLines as any) > 0) {
     maxLines = Math.max(maxLines, min);
   } else {
@@ -2707,36 +2735,56 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
 }
 
 if (messages.length > 0 && (messages as any)[0]?.role === 'system') {
-  const injected: any[] = [messages[0]];
+  const base = String((messages as any)[0]?.content ?? '');
+
+  const extraSystemParts: string[] = [];
 
   // allow（任意）
   if (allowText && String(allowText).trim().length > 0) {
-    injected.push({ role: 'system', content: allowText });
+    extraSystemParts.push(String(allowText));
   }
 
   // exprMeta（常に）
-  injected.push({ role: 'system', content: exprMetaText });
+  if (exprMetaText && String(exprMetaText).trim().length > 0) {
+    extraSystemParts.push(String(exprMetaText));
+  }
 
-  // BLOCK_PLAN（条件付き：planがある時だけ）
+  // BLOCK_PLAN（条件付き）
   if (blockPlanText && String(blockPlanText).trim().length > 0) {
-    injected.push({ role: 'system', content: blockPlanText });
+    extraSystemParts.push(String(blockPlanText));
   }
 
-  messages = [...injected, ...messages.slice(1)] as any;
-} else {
-  const head: any[] = [];
-  if (allowText && String(allowText).trim().length > 0) {
-    head.push({ role: 'system', content: allowText });
-  }
-  head.push({ role: 'system', content: exprMetaText });
+  const merged = [base, ...extraSystemParts].filter(Boolean).join('\n\n');
 
-  if (blockPlanText && String(blockPlanText).trim().length > 0) {
-    head.push({ role: 'system', content: blockPlanText });
-  }
-
-  messages = [...head, ...(messages as any)] as any;
+  messages = [
+    { role: 'system', content: merged } as any,
+    ...messages.slice(1),
+  ] as any;
 }
 
+// ✅ system は必ず1枚に正規化（先頭に複数あれば結合して潰す）
+if (Array.isArray(messages) && messages.length >= 2) {
+  const head = messages[0];
+  if (head?.role === 'system') {
+    let i = 1;
+    const extraSystems: any[] = [];
+    while (i < messages.length && messages[i]?.role === 'system') {
+      extraSystems.push(messages[i]);
+      i++;
+    }
+
+    if (extraSystems.length > 0) {
+      const merged = [
+        String(head?.content ?? ''),
+        ...extraSystems.map((m) => String(m?.content ?? '')),
+      ]
+        .filter((s) => String(s).trim().length > 0)
+        .join('\n\n');
+
+      messages = [{ role: 'system', content: merged } as any, ...messages.slice(i)] as any;
+    }
+  }
+}
 
   console.log('[IROS/rephraseEngine][EXPR_META]', {
     traceId: debug.traceId,
@@ -2767,8 +2815,18 @@ if (messages.length > 0 && (messages as any)[0]?.role === 'system') {
     internalPackLen: String(internalPack ?? '').length,
     internalPackHasHistoryHint: /HISTORY_HINT\s*\(DO NOT OUTPUT\)/i.test(String(internalPack ?? '')),
 
+    // ✅ seedDraft 実体の監査（発生源特定用）
     seedDraftLen: seedDraft.length,
     seedDraftHead: safeHead(seedDraft, 120),
+    seedDraftRawAllHead: safeHead(seedDraftRawAll, 200),
+    seedDraftRawPickedHead: safeHead(seedDraftRawPicked, 200),
+
+    // ✅ slots の中身を “頭だけ” 監査（自然文混入の犯人探し）
+    slotsHead: (extracted?.slots ?? []).map((s: any, i: number) => ({
+      i,
+      key: String(s?.key ?? ''),
+      head: safeHead(String(s?.text ?? ''), 80),
+    })),
 
     itOk,
     intentBand: band.intentBand,
@@ -3066,7 +3124,7 @@ if (messages.length > 0 && (messages as any)[0]?.role === 'system') {
   // ここでは参照だけする。
 
   raw = await callWriterLLM({
-    model: opts.model ?? 'gpt-4o',
+    model: opts.model ?? 'gpt-5',
     temperature: opts.temperature ?? 0.7,
     messages,
     traceId: debug.traceId ?? null,

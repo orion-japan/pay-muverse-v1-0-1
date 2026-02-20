@@ -8,6 +8,7 @@ import {
   stripILINETags,
 } from './renderGateway.sanitize';
 import { normalizeBlocksForRender } from './renderGateway.normalize';
+import { shouldForceRephraseBlocks } from './renderGateway.rephrasePolicy';
 
 // ---------------------------------------------
 // IMPORTANT — DESIGN GUARD (DO NOT REDEFINE)
@@ -1113,7 +1114,10 @@ const maxLinesFinal = isIR
         joinedHead: blocksJoinedForIRCheck.slice(0, 140),
       });
     } else if (Array.isArray(rephraseBlocks) && rephraseBlocks.length > 0) {
-
+      // ✅ rephraseBlocks 経由でも UI に「ブロック扱い」を伝える
+      usedSlots = true;
+      pickedFrom = 'rephraseBlocks';
+      scaffoldApplied = isScaffoldLike;
       // ✅ 一本化：rephraseBlocks があれば常に blocks 経由で本文を組む（pickedFrom に依存しない）
       const cleanedBlocksRaw = rephraseBlocks
         .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim())
@@ -1267,7 +1271,15 @@ const maxLinesFinal = isIR
     const rb = Array.isArray((extraAny as any)?.rephraseBlocks) ? (extraAny as any).rephraseBlocks : null;
     const rbLen2 = rb ? rb.length : 0;
 
-    if (!isIR && !isSilence && rbLen2 > 0 && (!blocksForRender || blocksForRender.length === 0)) {
+    if (
+      shouldForceRephraseBlocks({
+        isIR,
+        isSilence,
+        rephraseBlocksLen: rbLen2,
+        hasBlocks: !!(blocksForRender && blocksForRender.length > 0),
+        extra: extraAny,
+      })
+    ) {
       // まず raw text を全部取り出す
       const rbAllTexts = rb
         .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').replace(/\r\n/g, '\n').trim())
@@ -1505,39 +1517,53 @@ const maxLinesFinal = isIR
 
             const title = pickDynamicTitle(baseTitle, bodies.join('\n'));
 
-            // ✅ 見出しだけ残る事故を防ぐ：本文が無ければ出さない
-            if (title && bodies.length > 0) {
-              blocks.push({ text: `### ${title}\n\n${bodies.join('\n\n')}` });
-              sectionIndex++;
-            } else if (!title && bodies.length > 0) {
-              // タイトル不明だが本文がある：壊さず本文だけ出す
-              blocks.push({ text: bodies.join('\n\n') });
-              sectionIndex++;
-            }
+// ✅ 見出しだけ残る事故を防ぐ：本文が無ければ出さない
+if (title && bodies.length > 0) {
+  // ✅ rephraseBlocks-forced: 見出し（###）は付けない。
+  // ✅ ただし「✨」等の装飾は render で固定しない（writer/expr側へ委譲）
+  {
+    const body = bodies.join('\n\n').trim();
+    if (body) {
+      blocks.push({ text: body }); // ✅ FIX: emoji/prefix を注入しない
+    }
+  }
+  sectionIndex++;
+} else if (!title && bodies.length > 0) {
+  // タイトル不明だが本文がある：壊さず本文だけ出す
+  blocks.push({ text: bodies.join('\n\n') });
+  sectionIndex++;
 
-            i = j - 1; // まとめた分だけ進める
-            continue;
-          }
+}
+i = j - 1; // まとめた分だけ進める
+continue;
+}
 
-          // ✅ 見出しが無い本文だけが来た場合：fallback で 1 ブロック化
-          // rbRaw は index がズレることがあるので “あくまで補助”
-          const keyFromRb =
-            rbRaw && Array.isArray(rbRaw) && rbRaw[sectionIndex] && typeof rbRaw[sectionIndex] === 'object'
-              ? (rbRaw[sectionIndex] as any)?.key ?? (rbRaw[sectionIndex] as any)?.id ?? null
-              : null;
+// ✅ 見出しが無い本文だけが来た場合：fallback で 1 ブロック化
+// rbRaw は index がズレることがあるので “あくまで補助”
+const keyFromRb =
+  rbRaw && Array.isArray(rbRaw) && rbRaw[sectionIndex] && typeof rbRaw[sectionIndex] === 'object'
+    ? (rbRaw[sectionIndex] as any)?.key ?? (rbRaw[sectionIndex] as any)?.id ?? null
+    : null;
 
-          const h1 = headingForKey(keyFromRb);
-          const h2 = !h1 && sectionIndex < fallbackOrder.length ? fallbackOrder[sectionIndex] : null;
-          const baseHeading = h1 ?? h2;
+const h1 = headingForKey(keyFromRb);
+const h2 = !h1 && sectionIndex < fallbackOrder.length ? fallbackOrder[sectionIndex] : null;
+const baseHeading = h1 ?? h2;
 
-          const heading = baseHeading ? pickDynamicTitle(baseHeading, cur) : null;
+const heading = baseHeading ? pickDynamicTitle(baseHeading, cur) : null;
 
-          if (heading) {
-            blocks.push({ text: `### ${heading}\n\n${cur}` });
-          } else {
-            blocks.push({ text: cur });
-          }
-          sectionIndex++;
+if (heading) {
+  // ✅ rephraseBlocks-forced: 見出し（###）は付けない。
+  // ✅ ただし「✨」等の装飾は render で固定しない（writer/expr側へ委譲）
+  {
+    const body = String(cur ?? '').trim();
+    if (body) {
+      blocks.push({ text: body }); // ✅ FIX: emoji/prefix を注入しない
+    }
+  }
+} else {
+  blocks.push({ text: cur });
+}
+sectionIndex++;
         }
 
         blocksForRender = blocks;

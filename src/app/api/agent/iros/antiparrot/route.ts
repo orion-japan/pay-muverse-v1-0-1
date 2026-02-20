@@ -38,7 +38,7 @@ export async function OPTIONS() {
  *   user_text: string,             // 直近のユーザー発話（必須）
  *   draft?: string,                // 生成済みの下書き応答（任意）
  *   mode?: 'Light'|'Deep'|'Transcend', // 既定: 'Light'
- *   model?: string,                // 既定: 'gpt-4o'
+ *   model?: string,                // 既定: 'gpt-5'
  *   threshold?: number             // 類似度しきい値(0..1) 既定: 0.58
  * }
  *
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
     const user_text: string = String(body?.user_text ?? '').trim();
     const draft: string = String(body?.draft ?? '').trim();
     const mode: Mode = (String(body?.mode || 'Light') as Mode);
-    const model = String(body?.model || 'gpt-4o');
+    const model = String(body?.model || 'gpt-5');
     const threshold = Math.max(0.3, Math.min(0.9, Number(body?.threshold ?? 0.58)));
 
     if (!conversation_id) return json({ ok: false, error: 'missing_conversation_id' }, 400);

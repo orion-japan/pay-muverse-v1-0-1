@@ -74,7 +74,7 @@ const client = new OpenAI({
   apiKey: openaiApiKey,
 });
 
-const SOFIA_IMAGE_MODEL = process.env.SOFIA_IMAGE_MODEL || 'gpt-4.1-mini';
+const SOFIA_IMAGE_MODEL = process.env.SOFIA_IMAGE_MODEL || 'gpt-5-mini';
 
 // ===== System Prompt =====
 //

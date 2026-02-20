@@ -56,7 +56,7 @@ spiral, vortex, hard radial, sunburst, flame, water, leaf, cloud
 
     // ===== Sofia に依頼 =====
     const raw = await chatComplete({
-      model: 'gpt-4o-mini',
+      model: 'gpt-5-mini',
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user },

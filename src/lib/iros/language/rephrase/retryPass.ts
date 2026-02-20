@@ -176,7 +176,7 @@ export async function runRetryPass(params: {
 
 
   let raw2 = await callWriterLLM({
-    model: opts?.model ?? 'gpt-4o',
+    model: opts?.model ?? 'gpt-5',
     temperature: opts?.temperature ?? 0.7,
     messages: retryMessages,
     traceId: debug?.traceId ?? null,

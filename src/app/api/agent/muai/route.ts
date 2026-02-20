@@ -209,7 +209,7 @@ export async function POST(req: NextRequest) {
         p_amount: Number(COST_PER_TURN),
         p_idempotency_key: String(server_sub_id), // UUIDで冪等化
         p_reason: 'mu_chat_turn',
-        p_meta: { agent: 'muai', model: 'gpt-4.1-mini' },
+        p_meta: { agent: 'muai', model: 'gpt-5-mini' },
         p_ref_conversation_id: String(master_id),
       });
       if (capRes.error) {
@@ -256,7 +256,7 @@ export async function POST(req: NextRequest) {
         conv_id: master_id,
         role: 'assistant',
         content: replyText,
-        meta: { model: 'gpt-4.1-mini', client_sub_id: client_sub_id },
+        meta: { model: 'gpt-5-mini', client_sub_id: client_sub_id },
         used_credits: COST_PER_TURN,
         source_app: 'mu',
         sub_id: server_sub_id, // DBはUUID
@@ -310,7 +310,7 @@ export async function POST(req: NextRequest) {
         phase: mu_phase,
         selfAcceptance: mu_self,
         relation: mu_relation,
-        charge: { amount: COST_PER_TURN, aiId: 'mu', model: 'gpt-4.1-mini' },
+        charge: { amount: COST_PER_TURN, aiId: 'mu', model: 'gpt-5-mini' },
         source_type: source_type ?? 'chat',
         thread_id: thread_id ?? null,
         board_id: board_id ?? null,
@@ -332,7 +332,7 @@ export async function POST(req: NextRequest) {
         phase: mu_phase,
         selfAcceptance: mu_self,
         relation: mu_relation,
-        charge: { amount: COST_PER_TURN, aiId: 'mu', model: 'gpt-4.1-mini' },
+        charge: { amount: COST_PER_TURN, aiId: 'mu', model: 'gpt-5-mini' },
         master_id,
         sub_id: client_sub_id, // ← 従来IDを返す
         thread_id: thread_id ?? null,
@@ -345,7 +345,7 @@ export async function POST(req: NextRequest) {
         color: q_color ? { base: q_color.base, mix: q_color.mix, hex: q_color.hex } : null,
       },
       credit_balance,
-      charge: { amount: COST_PER_TURN, aiId: 'mu', model: 'gpt-4.1-mini' },
+      charge: { amount: COST_PER_TURN, aiId: 'mu', model: 'gpt-5-mini' },
       master_id,
       sub_id: client_sub_id,
       conversation_id: master_id,

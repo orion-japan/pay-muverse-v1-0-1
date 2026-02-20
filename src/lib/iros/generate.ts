@@ -73,7 +73,7 @@ export type GenerateResult = {
   [k: string]: any;
 };
 
-const IROS_MODEL = process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-4o';
+const IROS_MODEL = process.env.IROS_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-5';
 
 /* =========================================================
    Helpers (non-empty guarantee)
@@ -952,17 +952,33 @@ export async function generateIrosReply(args: GenerateArgs): Promise<GenerateRes
   // ✅ mode は return でも使うので、この時点で確定しておく
   const mode: IrosMode = ((meta as any)?.mode ?? 'mirror') as IrosMode;
 
-  // ✅ system は messages で使うので、ここで確定しておく
-  let system = '';
-  try {
-    system = String((getSystemPrompt as any)(meta, mode) ?? '');
-  } catch {
-    system = '';
-  }
-  if (!system) system = String((getSystemPrompt as any)() ?? '');
+  // ✅ Writer protocol（自然化 v1: “例外時だけ” 入れる）
+  // - 通常会話で毎回 protocol を積むと「system4が常駐」みたいな圧になる
+  // - short / IT / SAFE など “制御が必要な時だけ” protocol を hint として渡す
+  const directTaskLike =
+    (meta as any)?.directTask === true ||
+    String((meta as any)?.inputKind ?? '').toLowerCase() === 'directtask';
 
-  // ✅ Writer protocol
-  const protocol = buildWriterProtocol(meta as any, userText);
+  const safeTagNow = pickSafeTagFromMeta(meta as any);
+  const needProtocol =
+    !directTaskLike &&
+    (Boolean((meta as any)?.extra?.forceProtocol) ||
+      isShortTurn(userText) ||
+      isTLayerActive(meta as any) ||
+      Boolean(safeTagNow));
+
+  const protocol = needProtocol ? buildWriterProtocol(meta as any, userText) : '';
+
+  try {
+    console.log('[IROS/GEN][PROTOCOL_GATE]', {
+      needProtocol,
+      directTaskLike,
+      shortTurn: isShortTurn(userText),
+      itActive: isTLayerActive(meta as any),
+      safeTag: safeTagNow ?? null,
+      protocolLen: protocol ? String(protocol).length : 0,
+    });
+  } catch {}
 
   // ---------------------------------
   // ✅ SpeechAct: LLM前に確定 → 適用（単一ソース）
@@ -1160,7 +1176,14 @@ const speechHintMessage: ChatMessage | null = (speechApplied as any).llmSystem
     : null;
 
   const whisperHintMessage: ChatMessage = { role: 'user', content: whisperPayload };
-
+  // ✅ system は messages の前に必ず作る（ts2304: system not found を潰す）
+  let system = '';
+  try {
+    system = String((getSystemPrompt as any)(meta, mode) ?? '');
+  } catch {
+    system = '';
+  }
+  if (!system) system = String((getSystemPrompt as any)() ?? '');
   const messages: ChatMessage[] = [
     // ✅ system は 1枚だけ
     { role: 'system', content: system },

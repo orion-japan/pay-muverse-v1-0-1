@@ -455,7 +455,7 @@ ${DEFAULT_Q_HINT[qCode]}`;
     const llmRes = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'gpt-4o-mini', messages: history, temperature: 0.5 }),
+      body: JSON.stringify({ model: 'gpt-5-mini', messages: history, temperature: 0.5 }),
     });
     dlog(`[muai.reply][${reqId}] LLM status=${llmRes.status} in ${Date.now() - p0}ms`);
     if (!llmRes.ok) {
@@ -522,7 +522,7 @@ ${DEFAULT_Q_HINT[qCode]}`;
         content: reply,
         meta: {
           provider: 'openai',
-          model: 'gpt-4o-mini',
+          model: 'gpt-5-mini',
           source: 'muai',
           mode,
           reuse_key: effectiveReuseKey ?? null,
@@ -539,7 +539,7 @@ ${DEFAULT_Q_HINT[qCode]}`;
       /* --- Mu形式のレスポンス --- */
       const masterId = convId;
       const subId = aId;
-      const charge = { amount: 0.5, aiId: 'mu', model: 'gpt-4o-mini' };
+      const charge = { amount: 0.5, aiId: 'mu', model: 'gpt-5-mini' };
 
       const out = {
         agent: 'Mu',
@@ -579,7 +579,7 @@ ${DEFAULT_Q_HINT[qCode]}`;
       dlog(`[muai.reply][${reqId}] persist thrown`, e);
       const masterId = convId;
       const subId = rid();
-      const charge = { amount: 0.5, aiId: 'mu', model: 'gpt-4o-mini' };
+      const charge = { amount: 0.5, aiId: 'mu', model: 'gpt-5-mini' };
       return NextResponse.json(
         {
           agent: 'Mu',

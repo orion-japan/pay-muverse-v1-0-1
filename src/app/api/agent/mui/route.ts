@@ -22,7 +22,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 
 // ===== Config =====
-const MODEL = (process.env.OPENAI_MODEL || 'gpt-4o').trim();
+const MODEL = (process.env.OPENAI_MODEL || 'gpt-5').trim();
 const TEMP = Number(process.env.MIRRA_TEMPERATURE ?? process.env.IROS_TEMPERATURE ?? 0.8);
 const TOP_P = Number(process.env.MIRRA_TOP_P ?? process.env.IROS_TOP_P ?? 0.95);
 const FREQ = Number(process.env.MIRRA_FREQ_PENALTY ?? process.env.IROS_FREQ_PENALTY ?? 0.2);

@@ -10,8 +10,8 @@
 import type { QCode } from '../system';
 import { chatComplete, type ChatMessage } from '@/lib/llm/chatComplete';
 
-// Q判定用モデル（なければ IROS_MODEL → gpt-4o）
-const Q_MODEL = process.env.IROS_Q_MODEL ?? process.env.IROS_MODEL ?? 'gpt-4o';
+// Q判定用モデル（なければ IROS_MODEL → gpt-5）
+const Q_MODEL = process.env.IROS_Q_MODEL ?? process.env.IROS_MODEL ?? 'gpt-5';
 
 export type QTDetectResult = {
   q: QCode | null;

@@ -48,10 +48,8 @@ type AICatalogItem = {
   id: string; label: string; model: string; costPerTurn: number; maxTokens?: number; notes?: string;
 };
 const AI_CATALOG: ReadonlyArray<AICatalogItem> = [
-  { id: 'gpt-4o',       label: 'GPT-4o',       model: 'gpt-4o',       costPerTurn: 1,   maxTokens: 4096, notes: '多機能・高品質' },
-  { id: 'gpt-4o-mini',  label: 'GPT-4o mini',  model: 'gpt-4o-mini',  costPerTurn: 0.5, maxTokens: 4096, notes: '軽量・低コスト' },
-  { id: 'gpt-4.1',      label: 'GPT-4.1',      model: 'gpt-4.1',      costPerTurn: 1,   maxTokens: 8192, notes: '高精度' },
-  { id: 'gpt-4.1-mini', label: 'GPT-4.1 mini', model: 'gpt-4.1-mini', costPerTurn: 0.5, maxTokens: 8192, notes: '4.1の軽量版' },
+  { id: 'gpt-5',      label: 'GPT-5',      model: 'gpt-5',      costPerTurn: 1,   maxTokens: 8192, notes: '標準' },
+  { id: 'gpt-5-mini', label: 'GPT-5 mini', model: 'gpt-5-mini', costPerTurn: 0.5, maxTokens: 8192, notes: '軽量' },
 ];
 
 // ★ 追加: retrieveKnowledge のゆるい返却型
@@ -66,7 +64,7 @@ type KBItem = {
 function resolveAIByModel(modelIn?: string) {
   const m = (modelIn || '').trim();
   const hit = AI_CATALOG.find(x => x.model === m || x.id === m);
-  return hit ?? { id: m || 'gpt-4o', label: m || 'GPT-4o', model: m || 'gpt-4o', costPerTurn: 1 };
+  return hit ?? { id: m || 'gpt-5', label: m || 'GPT-4o', model: m || 'gpt-5', costPerTurn: 1 };
 }
 const newConvCode = () => `Q${Date.now()}`;
 
@@ -109,7 +107,7 @@ function ensureArray<T = any>(v: any): T[] { return Array.isArray(v) ? v : []; }
 
 function sanitizeBody(raw: any) {
   const allowModels = new Set(AI_CATALOG.map(x => x.model).concat(AI_CATALOG.map(x => x.id)));
-  const modelRaw = typeof raw?.model === 'string' ? raw.model : 'gpt-4o';
+  const modelRaw = typeof raw?.model === 'string' ? raw.model : 'gpt-5';
 
   return {
     conversation_code: typeof raw?.conversation_code === 'string' ? raw.conversation_code : '',
@@ -127,7 +125,7 @@ function sanitizeBody(raw: any) {
     vars: typeof raw?.vars === 'object' && raw?.vars ? raw.vars : {},
     messages: ensureArray<Msg>(raw?.messages).slice(-50),
 
-    model: allowModels.has(modelRaw) ? modelRaw : 'gpt-4o',
+    model: allowModels.has(modelRaw) ? modelRaw : 'gpt-5',
     temperature: typeof raw?.temperature === 'number' ? Math.min(Math.max(raw.temperature, 0), 1) : DEFAULT_TEMP,
     max_tokens: typeof raw?.max_tokens === 'number' ? raw.max_tokens : DEFAULT_MAXTOKENS,
     top_p: typeof raw?.top_p === 'number' ? raw.top_p : undefined,
@@ -261,7 +259,7 @@ export async function GET(req: NextRequest) {
   }
 
   if (!qUser) {
-    return json({ ok: true, service: 'Sofia API (iros)', time: new Date().toISOString(), model_hint: 'gpt-4o' });
+    return json({ ok: true, service: 'Sofia API (iros)', time: new Date().toISOString(), model_hint: 'gpt-5' });
   }
 
   const z = await verifyFirebaseAndAuthorize(req);

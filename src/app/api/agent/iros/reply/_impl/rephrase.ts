@@ -761,7 +761,7 @@ const intentBandForCtx =
   }
 
   // ---- 5) call LLM ----
-  const model = process.env.IROS_REPHRASE_MODEL ?? process.env.IROS_MODEL ?? 'gpt-4.1';
+  const model = process.env.IROS_REPHRASE_MODEL ?? process.env.IROS_MODEL ?? 'gpt-5';
 
   const qCodeForLLM =
     (typeof (meta as any)?.q_code === 'string' && TRIM((meta as any).q_code)) ||

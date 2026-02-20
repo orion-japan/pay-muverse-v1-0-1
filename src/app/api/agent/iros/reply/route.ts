@@ -889,6 +889,7 @@ if (isNonForwardButEmpty) {
 
 
       // render engine apply（single entry）
+      // render engine apply（single entry）
       {
         const upperMode = String(effectiveMode ?? '').toUpperCase();
         const enableRenderEngine = extraSoT?.renderEngine === true || extraSoT?.renderEngineGate === true;
@@ -908,6 +909,46 @@ if (isNonForwardButEmpty) {
 
         meta = applied.meta;
         extraSoT = applied.extraForHandle ?? extraSoT;
+
+        // =========================================================
+        // ✅ FIX: render-v2 が付与した rephraseBlocks/head を metaForSave 側へ同期
+        // - UI本文(result.content)は既に正本化済みだが、
+        //   viewer/監査(/api/iros-logs)が metaForSave.meta を読む経路で rb=0 になり得るため
+        // - “存在するものだけ”を同期し、空は上書きしない
+        // =========================================================
+        try {
+          const mfs: any = metaForSave as any;
+          const mfsExtra: any = (mfs?.extra ?? {}) as any;
+
+          const metaAny: any = meta as any;
+          const metaExtra: any = (metaAny?.extra ?? {}) as any;
+
+          const sotAny: any = (extraSoT ?? {}) as any;
+
+          const rbFromMeta =
+            Array.isArray(metaExtra?.rephraseBlocks) && metaExtra.rephraseBlocks.length > 0 ? metaExtra.rephraseBlocks : null;
+
+          const rbFromSoT =
+            Array.isArray(sotAny?.rephraseBlocks) && sotAny.rephraseBlocks.length > 0 ? sotAny.rephraseBlocks : null;
+
+          const rbFinal = rbFromMeta ?? rbFromSoT ?? null;
+
+          const headFromMeta = String(metaExtra?.rephraseHead ?? '').trim();
+          const headFromSoT = String(sotAny?.rephraseHead ?? '').trim();
+          const headFinal = headFromMeta || headFromSoT || '';
+
+          const nextExtra: any = { ...mfsExtra };
+
+          if (rbFinal) nextExtra.rephraseBlocks = rbFinal;
+          if (headFinal) nextExtra.rephraseHead = headFinal;
+
+          // traceId もあれば寄せる（API側が meta から拾う経路の揺れを減らす）
+          const traceIdFinal =
+            String(metaExtra?.traceId ?? metaExtra?.trace_id ?? sotAny?.traceId ?? sotAny?.trace_id ?? '').trim() || '';
+          if (traceIdFinal && !nextExtra.traceId && !nextExtra.trace_id) nextExtra.traceId = traceIdFinal;
+
+          mfs.extra = nextExtra;
+        } catch {}
       }
 
       // sanitize header

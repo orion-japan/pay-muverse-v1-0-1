@@ -224,3 +224,22 @@
 .sof-msgs .msgBody ol > li {
   padding-left: 0 !important;
 }
+/* --- override: heading pseudo icon (kill legacy ::before ✨) --- */
+.sof-msgs .msgBody h1::before,
+.sof-msgs .msgBody h2::before,
+.sof-msgs .msgBody h3::before,
+.sof-msgs .msgBody h4::before,
+.sof-msgs .msgBody.vision-theme h1::before,
+.sof-msgs .msgBody.vision-theme h2::before,
+.sof-msgs .msgBody.vision-theme h3::before,
+.sof-msgs .msgBody.vision-theme h4::before {
+  content: none !important;
+  display: none !important;
+}
+
+/* もし HeadingLine が className="iros-section-heading" を付けてる場合の保険 */
+.irox-section-heading::before,
+.iros-section-heading::before {
+  content: none !important;
+  display: none !important;
+}

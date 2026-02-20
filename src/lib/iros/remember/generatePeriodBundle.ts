@@ -232,9 +232,9 @@ ${JSON.stringify(logSummaries, null, 2)}
     { role: 'user', content: userPrompt },
   ];
 
-  // ★ mini系は使わず、env が無ければ gpt-4.1 をデフォルトにする
+  // ★ mini系は使わず、env が無ければ gpt-5 をデフォルトにする
   const rawText = await chatComplete({
-    model: process.env.OPENAI_API_MODEL || 'gpt-4.1',
+    model: process.env.OPENAI_API_MODEL || 'gpt-5',
     messages,
     purpose: 'digest',
   });

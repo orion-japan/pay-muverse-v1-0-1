@@ -283,12 +283,14 @@ const shrinkMetaForPersist = (meta: any) => {
     user_code: userCode,
   } as const;
 
-  // 1) 通常 insert
+  // 1) 通常 insert（✅ meta は “正本=finalMeta” を保存する）
   let data: any = null;
   let error: any = null;
 
   {
-    const res = await supabase.from('iros_messages').insert([baseRow]);
+    const res = await supabase
+      .from('iros_messages')
+      .insert([{ ...baseRow, meta: finalMeta }]); // ✅ override
     data = (res as any).data ?? null;
     error = (res as any).error ?? null;
   }
@@ -304,7 +306,7 @@ const shrinkMetaForPersist = (meta: any) => {
 
     const retryRow = {
       ...baseRow,
-      meta: shrinkMetaForPersist(finalMeta),
+      meta: shrinkMetaForPersist(finalMeta), // ✅ timeout時だけ落とす
     };
 
     const res2 = await supabase.from('iros_messages').insert([retryRow]);

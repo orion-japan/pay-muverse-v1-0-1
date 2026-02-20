@@ -1,4 +1,4 @@
-export const MIRRA_MODEL = process.env.MIRRA_MODEL || 'gpt-4o';
+export const MIRRA_MODEL = process.env.MIRRA_MODEL || 'gpt-5';
 export const MIRRA_TEMPERATURE = Number(process.env.MIRRA_TEMPERATURE ?? 0.7);
 export const MIRRA_TOP_P = Number(process.env.MIRRA_TOP_P ?? 0.95);
 export const MIRRA_FREQ_PENALTY = Number(process.env.MIRRA_FREQ_PENALTY ?? 0.6);

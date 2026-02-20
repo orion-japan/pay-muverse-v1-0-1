@@ -14,7 +14,7 @@ export type ChatMessage = { role: ChatRole; content: string };
 
 type ChatArgs = {
   apiKey?: string; // 省略時は process.env.OPENAI_API_KEY
-  model: string; // 例: 'gpt-4o-mini'
+  model: string; // 例: 'gpt-5-mini'
   system?: string; // 先頭に挿入する system
   history?: ChatMessage[]; // 既存履歴（system を含めないことを推奨）
   user_text: string; // 今回のユーザー発話
