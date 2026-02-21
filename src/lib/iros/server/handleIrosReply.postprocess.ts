@@ -1148,7 +1148,7 @@ if (d?.metaPatch && typeof d.metaPatch === 'object') {
     }
 
     const base = directiveV1.split('\n').filter(Boolean);
-    directiveV1 = [...base, ...extraLines].slice(0, 8).join('\n').trim();
+    directiveV1 = [...extraLines, ...base].slice(0, 8).join('\n').trim();
   }
 }
 // ====== 追記ここまで ======
