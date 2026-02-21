@@ -12,29 +12,32 @@ export type ShiftPreset = {
  * - C層の「手触り/観測」だけを返すためのレーン
  * - （条件m）禁止6つを解除し、会話が止まらないようにする
  */
+// src/lib/iros/language/shiftPresets.ts
+
 export const SHIFT_PRESET_C_SENSE_HINT: ShiftPreset = {
   kind: 'sense_hint',
 
   rules: {
-    // ✅（条件m）解禁
-    no_definition: false,
-    no_naming: false,
+    // ✅ “命名/定義” を抑える（内側/外側 等のラベリングが出にくくなる）
+    no_definition: true,
+    no_naming: true,
+
+    // ✅ 結論は急がない（ここは運用次第だが、sense_hint は締めに寄せない方が安定）
     no_conclusion: false,
 
-    // ✅（条件m）“選択肢提示”を許可するため解禁
-    // - ここは「命令」まで許す/許さないは writer 側の語りで抑える前提
-    no_future_instruction: false,
+    // ✅ 未来指示は抑える（質問 or 小さい次へ、に寄せる）
+    no_future_instruction: true,
 
-    // ✅（条件m）解禁
-    no_lecture: false,
+    // ✅ 講義は禁止（説明口調が出やすいので止める）
+    no_lecture: true,
 
-    // ✅（条件m）質問は1個まで可（毎回は☓：運用は writer 側）
+    // ✅ 質問は1個まで
     questions_max: 1,
 
-    // （現状維持）チェックリスト抑制は残す
+    // ✅ チェックリスト抑制
     no_checklist: true,
 
-    // ✅ 形式：短くてよい（薄い一言でもOKなレーン）
+    // ✅ 形式：短くてよい
     lines_max: 3,
   },
 

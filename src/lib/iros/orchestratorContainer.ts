@@ -112,8 +112,16 @@ export function applyContainerDecision(
     typeof existingRaw === 'string' ? existingRaw.trim().toLowerCase() : '';
 
   // ✅ ここで「この関数内で使う inputKind」を確定させる（後続で参照される）
+  // 方針：
+  // - meta.inputKind を尊重するのは「chat の sticky 化」を避けるため限定する
+  // - classified が chat 以外なら、常に classified を優先（? などを正しく question にする）
+  // - classified が chat のときだけ、既存があれば尊重（＝上流の意図を壊さない）
   const inputKind: any =
-    existing && existing !== 'unknown' ? existingRaw : classified;
+    classified !== 'chat'
+      ? classified
+      : existing && existing !== 'unknown'
+        ? existingRaw
+        : classified;
 
   // デバッグ用：container側の分類は別名で保持（比較できる）
   (meta as any).inputKind_classified = classified;

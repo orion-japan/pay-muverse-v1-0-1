@@ -7,7 +7,7 @@ import { useAuth } from '@/context/AuthContext';
 import '../IrosChat.css';
 
 import ChatMarkdown from './ChatMarkdown';
-import IrosButton, { IrosNextStepGear } from './IrosButton';
+
 import IrosMetaBadge from './IrosMetaBadge';
 
 // メッセージ型
@@ -496,11 +496,7 @@ const safeText = transformIrTemplateToMarkdown(displayText);
             ? (qToShowRaw as 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5')
             : null;
 
-        const nextStep = m.meta?.nextStep;
-        const nextStepGear = (nextStep?.gear as IrosNextStepGear) ?? 'safety';
-        const nextStepOptions = (nextStep?.options ?? []).filter(
-          (x) => x && typeof x.id === 'string' && x.id.trim().length > 0,
-        );
+
 // ✅ 表示用 depth（S/R/C/I/T）候補を拾う（確定キーはログで当てる）
 const depthToShowRaw =
   (m.meta?.depth as any) ??
@@ -614,29 +610,8 @@ const modeToShowSafe =
                 )}
               </div>
 
-              {/* NextStep ボタン（必要なら表示） */}
-              {!isUser &&
-                !isSilence &&
-                nextStepOptions.length > 0 &&
-                typeof sendNextStepChoice === 'function' && (
-                  <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    {nextStepOptions.map((opt) => (
-                      <IrosButton
-                        key={opt.id}
-                        gear={nextStepGear}
-                        option={opt}
-                        onClick={(picked) => {
-                          // ✅ sendNextStepChoice は choiceId を key に載せて送る（hook側の既存仕様に合わせる）
-                          void sendNextStepChoice({
-                            key: picked.id,
-                            label: picked.label,
-                            gear: nextStepGear ?? null,
-                          });
-                        }}
-                      />
-                    ))}
-                  </div>
-                )}
+
+
             </div>
           </div>
         );

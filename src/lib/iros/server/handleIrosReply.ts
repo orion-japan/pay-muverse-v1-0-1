@@ -887,7 +887,10 @@ console.log('[IROS/Reply] handleIrosReply start', {
 /* =========================================
  * [置換 1] src/lib/iros/server/handleIrosReply.ts
  * 範囲: 1318〜1360 を丸ごと置き換え
- * 目的: extraLocal 二重宣言（シャドーイング）を除去し、GreetingGate の extra を注入
+ * 目的:
+ * - extraLocal 二重宣言（シャドーイング）を除去
+ * - GreetingGate の metaForSave.extra を extraLocal に注入
+ * - Micro を独立ルートとして先行処理（ただし bypass 可）
  * ========================================= */
 const tg = nowNs();
 
@@ -902,7 +905,7 @@ const gatedGreeting = await runGreetingGate({
 });
 
 if (gatedGreeting?.ok) {
-  // ✅ gate の metaForSave は「rootメタ」だが、ここでは extraLocal に注入するのは metaForSave.extra のみ
+  // ✅ gate の metaForSave は root メタ。ここでは extraLocal には metaForSave.extra のみ注入する
   const gateExtra =
     gatedGreeting?.metaForSave &&
     typeof gatedGreeting.metaForSave === 'object' &&
@@ -916,214 +919,239 @@ if (gatedGreeting?.ok) {
     extraLocal = { ...prev, ...gateExtra };
   }
 
-  // 保険：後段のデバッグ用（無くてもOK）
-  const prev2 = extraLocal && typeof extraLocal === 'object' ? extraLocal : {};
-  extraLocal = {
-    ...prev2,
-    gatedGreeting: {
-      ok: true,
-      result: gatedGreeting.result ?? null,
-    },
-  };
+  // 保険：後段デバッグ用（無くてもOK）
+  {
+    const prev2 = extraLocal && typeof extraLocal === 'object' ? extraLocal : {};
+    extraLocal = {
+      ...prev2,
+      gatedGreeting: {
+        ok: true,
+        result: gatedGreeting.result ?? null,
+      },
+    };
+  }
 
-  // ✅ ここで return しない。下へ続行させる。
+  // ✅ ここで return しない（下へ続行）
 }
-    // ok=false / gate不成立はそのまま下へ
+// ok=false / gate不成立はそのまま下へ
 
-    // ✅ micro は最優先（context recall などで bypass させない）
-    const isMicroNow = isMicroTurn(text);
+// ✅ Micro は最優先（ただし context recall 系は bypass 可）
+const isMicroNow = isMicroTurn(text);
 
-    const bypassMicroRaw =
-      shouldBypassMicroGate(text) ||
-      shouldBypassMicroGateByHistory({ userText: text, history });
+// micro bypass は helper に一本化（履歴相づち / 想起系）
+// ※ isMicroNow だからといって false で潰さない（別ルート化の前提）
+const bypassMicroRaw =
+  shouldBypassMicroGate(String(text ?? '')) ||
+  shouldBypassMicroGateByHistory({
+    userText: String(text ?? ''),
+    history: Array.isArray(history) ? (history as any[]) : null,
+  });
 
-    const bypassMicro = isMicroNow ? false : bypassMicroRaw;
+const bypassMicro = bypassMicroRaw;
 
-    // ✅ Micro（独立ルート）
-    if (!bypassMicro && isMicroNow) {
-      // ====== まず “そのターンの座標” を作る（Digest生成のため） ======
-      // - microが先に走る構造なので、ここで history/context を先に確保する
-      const historyForTurn = await buildHistoryForTurn({
-        supabaseClient: supabase,
-        conversationId,
-        userCode,
-        providedHistory: history ?? null,
-        includeCrossConversation: false,
-        baseLimit: 30,
-      });
+// ✅ Micro（独立ルート）
+if (!bypassMicro && isMicroNow) {
+  // ====== まず “そのターンの座標” を作る（Digest生成のため） ======
+  // - micro が先に走る構造なので、ここで history/context を先に確保する
+  const historyForTurn = await buildHistoryForTurn({
+    supabaseClient: supabase,
+    conversationId,
+    userCode,
+    providedHistory: history ?? null,
+    includeCrossConversation: false,
+    baseLimit: 30,
+  });
 
-      const tc0 = nowNs();
-      const ctx0 = await (buildTurnContext as any)({
-        supabase,
-        conversationId,
-        userCode,
-        text,
-        mode,
-        traceId,
-        userProfile,
-        requestedStyle: style ?? null,
-        history: historyForTurn,
-        extra: extraLocal ?? null,
-      });
-      t.context_ms = msSince(tc0);
+  const tc0 = nowNs();
+  const ctx0 = await (buildTurnContext as any)({
+    supabase,
+    conversationId,
+    userCode,
+    text,
+    mode,
+    traceId,
+    userProfile,
+    requestedStyle: style ?? null,
+    history: historyForTurn,
+    extra: extraLocal ?? null,
+  });
+  t.context_ms = msSince(tc0);
 
-      // ====== micro入力整形（既存ロジック維持） ======
-      const name = userProfile?.user_call_name || 'あなた';
-      const seed = `${conversationId}|${userCode}|${traceId ?? ''}|${Date.now()}`;
+  // ====== micro 入力整形（既存ロジック維持） ======
+  const name = userProfile?.user_call_name || 'あなた';
+  const seed = `${conversationId}|${userCode}|${traceId ?? ''}|${Date.now()}`;
 
-      const s0 = String(text ?? '').trim();
-      const isSingleToken =
-        s0.length > 0 &&
-        !/\s/.test(s0) &&
-        /^[\p{L}\p{N}ー・]+$/u.test(s0); // 日本語/英数/長音/中点（句読点などは除外）
+  const s0 = String(text ?? '').trim();
+  const isSingleToken =
+    s0.length > 0 &&
+    !/\s/.test(s0) &&
+    /^[\p{L}\p{N}ー・]+$/u.test(s0); // 日本語/英数/長音/中点（句読点などは除外）
 
-      // ✅ 新憲法：MicroWriter に「内部指示（演習・メニュー）」を混ぜない
-      const microUserText = isSingleToken ? s0 : text;
+  // ✅ 新憲法：MicroWriter に「内部指示（演習・メニュー）」を混ぜない
+  const microUserText = isSingleToken ? s0 : text;
 
-      // ====== HistoryDigest v1 を生成して micro に渡す ======
-      const { buildHistoryDigestV1 } = await import('@/lib/iros/history/historyDigestV1');
+  // ====== HistoryDigest v1 を生成して micro に渡す ======
+  const { buildHistoryDigestV1 } = await import('@/lib/iros/history/historyDigestV1');
 
-      // repeatSignal はここでは最小扱い（ctx0側で持っているならそれを優先）
-      const repeatSignal =
-        !!(ctx0 as any)?.repeatSignalSame ||
-        !!(ctx0 as any)?.repeat_signal ||
-        false;
+  // repeatSignal はここでは最小扱い（ctx0 側で持っているならそれを優先）
+  const repeatSignal =
+    !!(ctx0 as any)?.repeatSignalSame ||
+    !!(ctx0 as any)?.repeat_signal ||
+    false;
 
-      // continuity は最小版（historyForTurn から取れるならそれを優先）
-      const lastUserCore =
-        String((ctx0 as any)?.continuity?.last_user_core ?? (ctx0 as any)?.lastUserCore ?? '').trim() ||
-        '';
-      const lastAssistantCore =
-        String((ctx0 as any)?.continuity?.last_assistant_core ?? (ctx0 as any)?.lastAssistantCore ?? '').trim() ||
-        '';
+  // continuity は最小版（historyForTurn から取れるならそれを優先）
+  const lastUserCore =
+    String(
+      (ctx0 as any)?.continuity?.last_user_core ??
+        (ctx0 as any)?.lastUserCore ??
+        '',
+    ).trim() || '';
 
-      const digestV1 = buildHistoryDigestV1({
-        fixedNorth: { key: 'SUN', phrase: '成長 / 進化 / 希望 / 歓喜' },
-        metaAnchorKey: String((ctx0 as any)?.baseMetaForTurn?.intent_anchor_key ?? '').trim() || null,
-        memoryAnchorKey: String((ctx0 as any)?.memoryState?.intentAnchor ?? (ctx0 as any)?.intentAnchor ?? '').trim() || null,
+  const lastAssistantCore =
+    String(
+      (ctx0 as any)?.continuity?.last_assistant_core ??
+        (ctx0 as any)?.lastAssistantCore ??
+        '',
+    ).trim() || '';
 
-        qPrimary: (ctx0 as any)?.memoryState?.qPrimary ?? (ctx0 as any)?.qPrimary ?? 'Q3',
-        depthStage: (ctx0 as any)?.memoryState?.depthStage ?? (ctx0 as any)?.depthStage ?? 'F1',
-        phase: (ctx0 as any)?.memoryState?.phase ?? (ctx0 as any)?.phase ?? 'Inner',
+  const digestV1 = buildHistoryDigestV1({
+    fixedNorth: { key: 'SUN', phrase: '成長 / 進化 / 希望 / 歓喜' },
+    metaAnchorKey:
+      String((ctx0 as any)?.baseMetaForTurn?.intent_anchor_key ?? '').trim() ||
+      null,
+    memoryAnchorKey:
+      String(
+        (ctx0 as any)?.memoryState?.intentAnchor ??
+          (ctx0 as any)?.intentAnchor ??
+          '',
+      ).trim() || null,
 
-        situationTopic: String((ctx0 as any)?.situationTopic ?? 'その他・ライフ全般'),
-        situationSummary: String((ctx0 as any)?.situationSummary ?? '').slice(0, 120),
+    qPrimary: (ctx0 as any)?.memoryState?.qPrimary ?? (ctx0 as any)?.qPrimary ?? 'Q3',
+    depthStage:
+      (ctx0 as any)?.memoryState?.depthStage ?? (ctx0 as any)?.depthStage ?? 'F1',
+    phase: (ctx0 as any)?.memoryState?.phase ?? (ctx0 as any)?.phase ?? 'Inner',
 
-        lastUserCore: lastUserCore.slice(0, 120),
-        lastAssistantCore: lastAssistantCore.slice(0, 120),
-        repeatSignal,
-      });
+    situationTopic: String((ctx0 as any)?.situationTopic ?? 'その他・ライフ全般'),
+    situationSummary: String((ctx0 as any)?.situationSummary ?? '').slice(0, 120),
 
-      const mw = await runMicroWriter(
-        microGenerate,
-        {
-          name,
-          userText: microUserText,
-          seed,
-          traceId,
-          conversationId,
-          userCode,
+    lastUserCore: lastUserCore.slice(0, 120),
+    lastAssistantCore: lastAssistantCore.slice(0, 120),
+    repeatSignal,
+  });
 
-          // ✅ 追加：microGenerate 側で注入する
-          historyDigestV1: digestV1,
-        } as any,
-      );
+  const mw = await runMicroWriter(
+    microGenerate,
+    {
+      name,
+      userText: microUserText,
+      seed,
+      traceId,
+      conversationId,
+      userCode,
 
+      // ✅ microGenerate 側で注入する
+      historyDigestV1: digestV1,
+    } as any,
+  );
 
-      // ✅ micro 成功 → このブロック内で完結して return（t1/ts/metaForSave を漏らさない）
-      if (mw.ok) {
-        // ここから先で必要なので、上で作ったものを再利用
-        const historyForTurn2 = historyForTurn;
-        const ctx = ctx0;
+  // ✅ micro 成功 → このブロック内で完結して return（t / metaForSave を漏らさない）
+  if (mw.ok) {
+    // 上で作ったものを再利用
+    const ctx = ctx0;
 
-        const tc = nowNs(); // 計測だけは維持（差し替えの最小化）
-        // ctx は既に作ってあるので再生成しない
-        t.context_ms += msSince(tc); // 0〜数ms程度、形だけ残す
+    const tc = nowNs(); // 計測だけ維持（差し替え最小化）
+    // ctx は既に作成済みなので再生成しない
+    t.context_ms += msSince(tc); // 0〜数ms程度、形だけ残す
 
-        let metaForSave: any = {
-          ...(ctx?.baseMetaForTurn ?? {}),
-          style:
-            ctx?.effectiveStyle ??
-            style ??
-            (userProfile as any)?.style ??
-            'friendly',
-          mode: 'light',
-          microOnly: true,
+    let metaForSave: any = {
+      ...(ctx?.baseMetaForTurn ?? {}),
+      style: ctx?.effectiveStyle ?? style ?? (userProfile as any)?.style ?? 'friendly',
+      mode: 'light',
+      microOnly: true,
 
-          // micro は独立。memory/training を触らない
-          skipMemory: true,
-          skipTraining: true,
+      // micro は独立。memory / training を触らない（静止）
+      skipMemory: true,
+      skipTraining: true,
 
-          nextStep: null,
-          next_step: null,
-          timing: t,
-        };
+      nextStep: null,
+      next_step: null,
+      timing: t,
+    };
 
-        metaForSave = stampSingleWriter(mergeExtra(metaForSave, extraLocal ?? null));
+    metaForSave = stampSingleWriter(mergeExtra(metaForSave, extraLocal ?? null));
 
-        // SUN固定保護（念のため）
-        try {
-          metaForSave = sanitizeIntentAnchorMeta(metaForSave);
-        } catch {}
+    // SUN 固定保護（念のため）
+    try {
+      metaForSave = sanitizeIntentAnchorMeta(metaForSave);
+    } catch {}
 
-        // persist（最低限：assistant保存はしない）
-        const ts = nowNs();
+    // persist（最低限：assistant保存はしない）
+    const ts = nowNs();
 
-        const t1 = nowNs();
-        await persistQCodeSnapshotIfAny({
-          userCode,
-          conversationId,
-          requestedMode: ctx?.requestedMode ?? mode,
-          metaForSave,
-        });
-        t.persist_ms.q_snapshot_ms = msSince(t1);
+    const t1 = nowNs();
+    await persistQCodeSnapshotIfAny({
+      userCode,
+      conversationId,
+      requestedMode: ctx?.requestedMode ?? mode,
+      metaForSave,
+    });
+    t.persist_ms.q_snapshot_ms = msSince(t1);
 
-        t.persist_ms.total_ms = msSince(ts);
-        t.gate_ms = msSince(tg);
-        t.finished_at = nowIso();
-        t.total_ms = msSince(t0);
+    t.persist_ms.total_ms = msSince(ts);
+    t.gate_ms = msSince(tg);
+    t.finished_at = nowIso();
+    t.total_ms = msSince(t0);
 
-        // ✅ micro成功でも slots を必ず返す（downstream が NO_SLOTS で落ちない）
-        const slots = [
-          {
-            key: 'OBS',
-            role: 'assistant',
-            style: 'soft',
-            content: String(text ?? '').trim() || '（短文）',
-          },
-          { key: 'TASK', role: 'assistant', style: 'soft', content: 'micro_reply_only' },
-          {
-            key: 'CONSTRAINTS',
-            role: 'assistant',
-            style: 'soft',
-            content: 'micro:1-2lines;no_menu;no_analysis;emoji:🪔(<=1)',
-          },
-          { key: 'DRAFT', role: 'assistant', style: 'soft', content: mw.text },
-        ];
+    // ✅ micro 成功でも slots を必ず返す（downstream が NO_SLOTS で落ちない）
+    const slots = [
+      {
+        key: 'OBS',
+        role: 'assistant',
+        style: 'soft',
+        content: String(text ?? '').trim() || '（短文）',
+      },
+      {
+        key: 'TASK',
+        role: 'assistant',
+        style: 'soft',
+        content: 'micro_reply_only',
+      },
+      {
+        key: 'CONSTRAINTS',
+        role: 'assistant',
+        style: 'soft',
+        content: 'micro:1-2lines;no_menu;no_analysis;emoji:🪔(<=1)',
+      },
+      {
+        key: 'DRAFT',
+        role: 'assistant',
+        style: 'soft',
+        content: mw.text,
+      },
+    ];
 
-        return {
-          ok: true,
-          result: { gate: 'micro_writer' },
-          assistantText: mw.text,
-          metaForSave,
-          finalMode: 'light',
-          slots,
-          meta: metaForSave,
-        };
-      }
+    return {
+      ok: true,
+      result: { gate: 'micro_writer' },
+      assistantText: mw.text,
+      metaForSave,
+      finalMode: 'light',
+      slots,
+      meta: metaForSave,
+    };
+  }
 
-      console.warn('[IROS/MicroWriter] failed -> fallback to normal', {
-        reason: mw.reason,
-        detail: mw.detail,
-      });
-    } else if (bypassMicro) {
-      console.log('[IROS/Gate] bypass micro gate (context recall)', {
-        conversationId,
-        userCode,
-        text,
-      });
-    }
-
+  console.warn('[IROS/MicroWriter] failed -> fallback to normal', {
+    reason: mw.reason,
+    detail: mw.detail,
+  });
+} else if (bypassMicro) {
+  console.log('[IROS/Gate] bypass micro gate (context recall)', {
+    conversationId,
+    userCode,
+    text,
+  });
+}
 
     t.gate_ms = msSince(tg);
 
@@ -2812,7 +2840,66 @@ if (shouldRunWriter) {
     });
   }
 }
+  // ✅ route.ts から渡される extra（SoT）を metaForSave に反映（IT/renderMode系）
+  // - 既存を不用意に上書きしない（未設定のみ埋める）
+  // - root(renderMode) と extra.renderMode のズレを最終的に揃える
+  try {
+    const exIn: any =
+      (typeof (extra as any) === 'object' && extra) ||
+      ((ctx as any)?.extra && typeof (ctx as any).extra === 'object' ? (ctx as any).extra : null);
 
+    if (exIn) {
+      out.metaForSave = out.metaForSave ?? {};
+      (out.metaForSave as any).extra = (out.metaForSave as any).extra ?? {};
+
+      const dst: any = (out.metaForSave as any).extra;
+
+      // 1) extra の IT系ヒント（未設定のみ埋める）
+      const copyIfUnset = (k: string) => {
+        if (dst[k] == null && exIn[k] != null) dst[k] = exIn[k];
+      };
+
+      copyIfUnset('forceIT');
+      copyIfUnset('itDensity');
+      copyIfUnset('itNaturalReason');
+      copyIfUnset('itNaturalNotes');
+      copyIfUnset('itReason');
+      copyIfUnset('itEvidence');
+
+      // renderMode は root と extra の両方に存在しうるので両面で扱う
+      if (dst.renderMode == null && typeof exIn.renderMode === 'string') dst.renderMode = exIn.renderMode;
+      if ((out.metaForSave as any).renderMode == null && typeof exIn.renderMode === 'string') {
+        (out.metaForSave as any).renderMode = exIn.renderMode;
+      }
+
+      // 2) 最終整合：root(renderMode) と extra.renderMode を揃える
+      const rootRM = (out.metaForSave as any).renderMode;
+      const exRM = dst.renderMode;
+
+      // root が無いが extra にある → root へ
+      if (rootRM == null && typeof exRM === 'string') {
+        (out.metaForSave as any).renderMode = exRM;
+      }
+
+      // extra が無いが root にある → extra へ
+      if (dst.renderMode == null && typeof (out.metaForSave as any).renderMode === 'string') {
+        dst.renderMode = (out.metaForSave as any).renderMode;
+      }
+
+      // 3) デバッグログ（必要最低限）
+      if (exIn.renderMode != null || exIn.forceIT != null) {
+        console.log('[IROS/Reply][IT_META_MERGE]', {
+          in_renderMode: exIn.renderMode ?? null,
+          in_forceIT: exIn.forceIT ?? null,
+          out_renderMode: (out.metaForSave as any).renderMode ?? null,
+          out_extra_renderMode: dst.renderMode ?? null,
+          out_forceIT: dst.forceIT ?? null,
+        });
+      }
+    }
+  } catch (e) {
+    console.warn('[IROS/Reply][IT_META_MERGE][ERROR]', e);
+  }
     // ✅ IT writer（COMMIT のときだけ）
     try {
       const decidedAct =

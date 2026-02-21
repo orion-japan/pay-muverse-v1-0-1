@@ -6,56 +6,56 @@
   · serverActions
 
 ✓ Starting...
-✓ Ready in 588ms
+✓ Ready in 559ms
 [firebase] DEBUG_LOCAL=1 → Firebase SDK log level set to "debug"
- GET /iros-ai 200 in 526ms (compile: 223ms, render: 303ms)
- POST /api/telemetry 204 in 64ms (compile: 51ms, render: 13ms)
+ GET /iros-ai 200 in 568ms (compile: 244ms, render: 325ms)
+ POST /api/telemetry 204 in 67ms (compile: 53ms, render: 14ms)
 [firebase-admin] initialized with ServiceAccount
-[authz] 4cf29444-d11f-4757-9428-e543154560fc start { path: 'http://localhost:3000/api/agent/iros/userinfo' }
+[authz] 8a306f89-6e15-4df9-9378-8330608bd83d start { path: 'http://localhost:3000/api/agent/iros/userinfo' }
 [authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] ed464e14-71d7-47ac-8159-68c07beafb71 start { path: 'http://localhost:3000/api/q/unified?user_code=669933' }
+[authz] d88788cf-5efc-4c46-866a-f535fd42be0f start { path: 'http://localhost:3000/api/q/unified?user_code=669933' }
 [authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
- POST /api/register-push 200 in 128ms (compile: 1452µs, render: 126ms)
- POST /api/register-push 200 in 325ms (compile: 23ms, render: 302ms)
-[authz] ed464e14-71d7-47ac-8159-68c07beafb71 verify firebase: 298.434ms
-[authz] 4cf29444-d11f-4757-9428-e543154560fc verify firebase: 389.315ms
-[authz] ed464e14-71d7-47ac-8159-68c07beafb71 fetch user: 58.695ms
-[authz] ed464e14-71d7-47ac-8159-68c07beafb71 ok { user: '669933', role: 'admin', provider: 'password', ms: 369 }
-[authz] 4cf29444-d11f-4757-9428-e543154560fc fetch user: 69.527ms
-[authz] 4cf29444-d11f-4757-9428-e543154560fc ok { user: '669933', role: 'admin', provider: 'password', ms: 466 }
+ POST /api/register-push 200 in 203ms (compile: 29ms, render: 174ms)
+ POST /api/register-push 200 in 52ms (compile: 4ms, render: 48ms)
+[authz] d88788cf-5efc-4c46-866a-f535fd42be0f verify firebase: 369.666ms
+[authz] 8a306f89-6e15-4df9-9378-8330608bd83d verify firebase: 467.837ms
+[authz] d88788cf-5efc-4c46-866a-f535fd42be0f fetch user: 41.651ms
+[authz] d88788cf-5efc-4c46-866a-f535fd42be0f ok { user: '669933', role: 'admin', provider: 'password', ms: 419 }
+[authz] 8a306f89-6e15-4df9-9378-8330608bd83d fetch user: 64.553ms
+[authz] 8a306f89-6e15-4df9-9378-8330608bd83d ok { user: '669933', role: 'admin', provider: 'password', ms: 538 }
 [IROS/UserInfo] authz = {
   ok: true,
   allowed: true,
   status: 200,
-  pgJwt: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njk5MzMiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInVzZXJfY29kZSI6IjY2OTkzMyIsImZpcmViYXNlX3VpZCI6Ikt2UDFQNHNpZnRTRUZkTGtka1lqcVY0aE12MDIiLCJleHAiOjE3NzE1ODg1MzksImlhdCI6MTc3MTU4NzYzOX0.UEcHKHOhVL_a6w2jEzrAfV3c-1iPq0C824D-K4VI2EQ',
+  pgJwt: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njk5MzMiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInVzZXJfY29kZSI6IjY2OTkzMyIsImZpcmViYXNlX3VpZCI6Ikt2UDFQNHNpZnRTRUZkTGtka1lqcVY0aE12MDIiLCJleHAiOjE3NzE2ODI4NzQsImlhdCI6MTc3MTY4MTk3NH0.QtwA8hBoEOLTqN179uC5e6OgU7_mHiLKAU5CCfsf-oQ',
   userCode: '669933',
   role: 'admin',
   user: { uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02', user_code: '669933' },
   uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02'
 }
- GET /api/agent/iros/userinfo 200 in 705ms (compile: 186ms, render: 519ms)
-[authz] 1f6582e7-4064-4fde-8601-1e258b4d1303 start { path: 'http://localhost:3000/api/agent/iros/conversations' }
+ GET /api/agent/iros/userinfo 200 in 794ms (compile: 209ms, render: 585ms)
+[authz] 14559cb7-40ed-4d9d-ac20-2cac8a9b02a1 start { path: 'http://localhost:3000/api/agent/iros/conversations' }
 [authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] 1f6582e7-4064-4fde-8601-1e258b4d1303 verify firebase: 248.517ms
-[authz] 1f6582e7-4064-4fde-8601-1e258b4d1303 fetch user: 43.613ms
-[authz] 1f6582e7-4064-4fde-8601-1e258b4d1303 ok { user: '669933', role: 'admin', provider: 'password', ms: 299 }
- GET /api/agent/iros/conversations 200 in 390ms (compile: 38ms, render: 352ms)
-[authz] d1e03c8a-d133-44c4-9dbb-22f0a19f2a79 start {
-  path: 'http://localhost:3000/api/agent/iros/messages?conversation_id=3afc87f8-9d3e-4f41-983f-035f928e9b74'
+[authz] 14559cb7-40ed-4d9d-ac20-2cac8a9b02a1 verify firebase: 224.812ms
+[authz] 14559cb7-40ed-4d9d-ac20-2cac8a9b02a1 fetch user: 43.639ms
+[authz] 14559cb7-40ed-4d9d-ac20-2cac8a9b02a1 ok { user: '669933', role: 'admin', provider: 'password', ms: 275 }
+ GET /api/agent/iros/conversations 200 in 395ms (compile: 59ms, render: 336ms)
+[authz] 55092b0e-cec4-4268-a16d-a1f4435aa7d3 start {
+  path: 'http://localhost:3000/api/agent/iros/messages?conversation_id=b66ef146-c42a-4b46-9c0c-3fa3f0a74699'
 }
 [authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] d1e03c8a-d133-44c4-9dbb-22f0a19f2a79 verify firebase: 271.715ms
-[authz] d1e03c8a-d133-44c4-9dbb-22f0a19f2a79 fetch user: 36.58ms
-[authz] d1e03c8a-d133-44c4-9dbb-22f0a19f2a79 ok { user: '669933', role: 'admin', provider: 'password', ms: 311 }
- GET /api/agent/iros/messages?conversation_id=3afc87f8-9d3e-4f41-983f-035f928e9b74 200 in 937ms (compile: 38ms, render: 899ms)
- GET /api/q/unified?user_code=669933 200 in 5.1s (compile: 21ms, render: 5.1s)
-[authz] a051d870-a7ca-47ab-a5df-acadbe46b922 start { path: 'http://localhost:3000/api/agent/iros/messages' }
+[authz] 55092b0e-cec4-4268-a16d-a1f4435aa7d3 verify firebase: 310.118ms
+[authz] 55092b0e-cec4-4268-a16d-a1f4435aa7d3 fetch user: 53.839ms
+[authz] 55092b0e-cec4-4268-a16d-a1f4435aa7d3 ok { user: '669933', role: 'admin', provider: 'password', ms: 369 }
+ GET /api/agent/iros/messages?conversation_id=b66ef146-c42a-4b46-9c0c-3fa3f0a74699 200 in 841ms (compile: 46ms, render: 796ms)
+ GET /api/q/unified?user_code=669933 200 in 5.0s (compile: 22ms, render: 5.0s)
+[authz] d2a72201-d490-4586-83e7-06ab760aaa52 start { path: 'http://localhost:3000/api/agent/iros/messages' }
 [authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] a051d870-a7ca-47ab-a5df-acadbe46b922 verify firebase: 279.53ms
-[authz] a051d870-a7ca-47ab-a5df-acadbe46b922 fetch user: 40.179ms
-[authz] a051d870-a7ca-47ab-a5df-acadbe46b922 ok { user: '669933', role: 'admin', provider: 'password', ms: 327 }
- POST /api/agent/iros/messages 200 in 560ms (compile: 3ms, render: 557ms)
-[IROS/FLAGSHIP_GUARD][MODULE_LOADED] { rev: 'guard-rev-2026-01-28-b', at: '2026-02-20T11:40:46.645Z' }
+[authz] d2a72201-d490-4586-83e7-06ab760aaa52 verify firebase: 272.69ms
+[authz] d2a72201-d490-4586-83e7-06ab760aaa52 fetch user: 117.469ms
+[authz] d2a72201-d490-4586-83e7-06ab760aaa52 ok { user: '669933', role: 'admin', provider: 'password', ms: 397 }
+ POST /api/agent/iros/messages 200 in 791ms (compile: 3ms, render: 789ms)
+[IROS/FLAGSHIP_GUARD][MODULE_LOADED] { rev: 'guard-rev-2026-01-28-b', at: '2026-02-21T13:53:15.253Z' }
 [IROS/FLAGS_ENV_HEAD] {
   IROS_RETRY_FINAL_FORCE_CALL: '0',
   IROS_FLAGSHIP_REWRITE: '1',
@@ -69,43 +69,43 @@
   guardShortMaxLen: 80,
   logFlags: true
 }
-[IROS/renderGateway][MODULE_LOADED] { rev: 'phase11-open-close-v2-LOADED', at: '2026-02-20T11:40:46.667Z' }
+[IROS/renderGateway][MODULE_LOADED] { rev: 'phase11-open-close-v2-LOADED', at: '2026-02-21T13:53:15.274Z' }
 [IROS/pipe][TRACE] {
-  traceId: 'd49cb447-acaf-4d92-80b1-70b78ed69a1f',
-  conversationKey: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  traceId: '879c53b2-a455-4613-817e-817798cad484',
+  conversationKey: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   conversationId: null,
   userCode: '669933',
   modeHint: 'auto',
   hasHeaderUserCode: true,
   devBypass: false
 }
-[authz] 07b51604-1bfc-4892-871b-35c8fa5257a2 start { path: 'http://localhost:3000/api/agent/iros/reply' }
+[authz] c861e37f-d06b-4264-be65-e936fb249cb3 start { path: 'http://localhost:3000/api/agent/iros/reply' }
 [authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] 07b51604-1bfc-4892-871b-35c8fa5257a2 verify firebase: 263.301ms
-[authz] 07b51604-1bfc-4892-871b-35c8fa5257a2 fetch user: 38.863ms
-[authz] 07b51604-1bfc-4892-871b-35c8fa5257a2 ok { user: '669933', role: 'admin', provider: 'password', ms: 311 }
+[authz] c861e37f-d06b-4264-be65-e936fb249cb3 verify firebase: 248.622ms
+[authz] c861e37f-d06b-4264-be65-e936fb249cb3 fetch user: 73.376ms
+[authz] c861e37f-d06b-4264-be65-e936fb249cb3 ok { user: '669933', role: 'admin', provider: 'password', ms: 330 }
 [IROS/pipe][TRACE_RESOLVED] {
-  traceId: 'd49cb447-acaf-4d92-80b1-70b78ed69a1f',
-  conversationKey: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  traceId: '879c53b2-a455-4613-817e-817798cad484',
+  conversationKey: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933'
 }
- POST /api/credits/authorize 200 in 100ms (compile: 60ms, render: 40ms)
+ POST /api/credits/authorize 200 in 106ms (compile: 31ms, render: 75ms)
 [IROS/UserProfile] load ok {
   userCode: '669933',
   hasIrosRow: true,
-  sofia_credit: 423,
+  sofia_credit: 332,
   style: 'friendly',
   user_call_name: 'orion',
   plan_status: null
 }
 [IROS/Reply] handleIrosReply start {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933',
   mode: 'auto',
   tenantId: 'default',
   rememberScope: null,
-  traceId: 'd49cb447-acaf-4d92-80b1-70b78ed69a1f',
+  traceId: '879c53b2-a455-4613-817e-817798cad484',
   style: 'friendly',
   history_len: 12,
   persistAssistantAllowed: false
@@ -116,8 +116,8 @@
   intentAnchor: 'SUN',
   depthStage: 'R3',
   qPrimary: 'Q3',
-  selfAcceptance: 0.7292499999999996,
-  phase: 'Outer',
+  selfAcceptance: 0.7592499999999996,
+  phase: 'Inner',
   intentLayer: 'C',
   yLevel: 1,
   hLevel: 2,
@@ -129,8 +129,8 @@
   itxReason: 'IT_TRIGGER_OK',
   itxLastAt: '2026-01-08T12:26:08.007+00:00',
   sentimentLevel: null,
-  situationSummary: '🧭 いまの扱い方 本文です 多段ブロックの管理としての整理 本文です',
-  situationTopic: 'その他・ライフ全般',
+  situationSummary: '大丈夫って言ってるけど、本当は止まってほしいのかもしれない。手放したいのに、まだ握ってる。',
+  situationTopic: '恋愛・パートナーシップ',
   qCounts: { it_cooldown: 0, it_triggered: true, it_triggered_true: true }
 }
 [IROS][user:669933][STATE] loaded MemoryState (orchestratorState) {
@@ -139,8 +139,8 @@
   intentAnchor: 'SUN',
   depthStage: 'R3',
   qPrimary: 'Q3',
-  selfAcceptance: 0.7292499999999996,
-  phase: 'Outer',
+  selfAcceptance: 0.7592499999999996,
+  phase: 'Inner',
   intentLayer: 'C',
   yLevel: 1,
   hLevel: 2,
@@ -156,7 +156,7 @@
   spinLoop: null,
   descentGate: 'closed',
   depthStage: 'R3',
-  phase: 'Outer',
+  phase: 'Inner',
   requestedDepth: null,
   requestedQCode: null,
   slots_isArray: true,
@@ -248,8 +248,8 @@
   intentAnchor: 'SUN',
   depthStage: 'R3',
   qPrimary: 'Q3',
-  selfAcceptance: 0.7292499999999996,
-  phase: 'Outer',
+  selfAcceptance: 0.7592499999999996,
+  phase: 'Inner',
   intentLayer: 'C',
   yLevel: 1,
   hLevel: 2,
@@ -261,8 +261,8 @@
   itxReason: 'IT_TRIGGER_OK',
   itxLastAt: '2026-01-08T12:26:08.007+00:00',
   sentimentLevel: null,
-  situationSummary: '🧭 いまの扱い方 本文です 多段ブロックの管理としての整理 本文です',
-  situationTopic: 'その他・ライフ全般',
+  situationSummary: '大丈夫って言ってるけど、本当は止まってほしいのかもしれない。手放したいのに、まだ握ってる。',
+  situationTopic: '恋愛・パートナーシップ',
   qCounts: { it_cooldown: 0, it_triggered: true, it_triggered_true: true }
 }
 [IROS][user:669933][STATE] loaded MemoryState (orchestratorState) {
@@ -271,8 +271,8 @@
   intentAnchor: 'SUN',
   depthStage: 'R3',
   qPrimary: 'Q3',
-  selfAcceptance: 0.7292499999999996,
-  phase: 'Outer',
+  selfAcceptance: 0.7592499999999996,
+  phase: 'Inner',
   intentLayer: 'C',
   yLevel: 1,
   hLevel: 2,
@@ -284,21 +284,21 @@
   input: {
     qCode: null,
     depthStage: 'R3',
-    phase: 'Outer',
+    phase: 'Inner',
     hasHistoryDigest: false,
-    lastSelfAcceptance: 0.7292499999999996
+    lastSelfAcceptance: 0.7592499999999996
   },
   result: {
-    base: 0.7292499999999996,
+    base: 0.7592499999999996,
     deltaFromWords: 0,
-    value: 0.7292499999999996
+    value: 0.7592499999999996
   },
   notes: [
-    'base = lastSelfAcceptance（ライン） → 0.729',
+    'base = lastSelfAcceptance（ライン） → 0.759',
     'S/R層 intensity=1.0',
     'deltaTextRaw=0.000, intensity=1.00, deltaWithIntensity=0.000',
     'deltaWithIntensity=0 → effectiveDelta=0',
-    'value=0.729 (raw=0.729)'
+    'value=0.759 (raw=0.759)'
   ]
 }
 [IROS/SpinControl] {
@@ -306,36 +306,36 @@
   direction: 'forward',
   promptStyle: 'one-step',
   promptStyle_raw: 'one-step',
-  phase: 'Outer',
+  phase: 'Inner',
   anchorEventType: 'none',
   hysteresis: false
 }
 [IROS/GOAL_CONT] applyGoalContinuity {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   goal_in: {
     kind: 'stabilize',
     targetDepth: 'R3',
     targetQ: 'Q3',
-    reason: '雑談（天気/食事/挨拶/近況）と判断したため、軽く整える（uncoverには落とさない）',
+    reason: '明示トリガーが無いため、まずは整えて流れを保つ（uncoverはデフォルトにしない）',
     detail: { ventWill: [Object] }
   },
   ctx: { lastQ: 'Q3', lastDepth: 'R3', qTrace: null, memoryQ: null }
 }
 [IROS/CONT continuity] { lastDepth: 'R3', lastQ: 'Q3', finalDepth: 'R3', finalQ: 'Q3' }
 [IROS/GOAL_CONT]  result {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   goal_out: {
     kind: 'stabilize',
     targetDepth: 'R3',
     targetQ: 'Q3',
-    reason: '雑談（天気/食事/挨拶/近況）と判断したため、軽く整える（uncoverには落とさない）',
+    reason: '明示トリガーが無いため、まずは整えて流れを保つ（uncoverはデフォルトにしない）',
     detail: { ventWill: [Object] }
   }
 }
 [IROS/DEPTH_WRITE] {
   route: 'ROTATION',
   where: 'orchestratorWill',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   baseDepth: 'R3',
   goalTargetDepth: 'R3',
   rotationDepth: 'R3',
@@ -347,26 +347,26 @@
 [IROS/WILL priority] {
   goalKind: 'stabilize',
   depth: 'R3',
-  phase: 'Outer',
+  phase: 'Inner',
   targetDepth: 'R3',
   qCode: 'Q3',
   targetQ: 'Q3',
   weights: {
-    mirror: 0.9405,
+    mirror: 1,
     insight: 0.44000000000000006,
-    forward: 0.24,
+    forward: 0.13999999999999999,
     question: 0.1275
   }
 }
 [IROS/IT][probe] before {
-  textHead: '🧭\nいまの扱い方\n本文です\n\n多段ブロックの管理としての整理\n本文です',
+  textHead: '切り替えようとしてるけど、切れてない。多段で',
   historyLen: 12,
   historyLen_norm: 11,
   historyUserLen: 6,
   last3User: [
-    '🧭\nいまの扱い方\n本文です\n\nブロックの管理としての整理\n本文です',
-    '🧭\nいまの扱い方\n本文です\n\n多段ブロックの管理としての整理\n本文です',
-    '🧭\nいまの扱い方\n本文です\n\n多段ブロックの管理としての整理\n本文です'
+    '切り替えようとしてるけど、切れてない。多段で',
+    '大丈夫って言ってるけど、本当は止まってほしいのかもしれない。手放したいのに、まだ握ってる。',
+    '切り替えようとしてるけど、切れてない。多段で'
   ],
   depth: 'R3',
   intentLine: {
@@ -417,7 +417,7 @@
   tVector: null
 }
 [IROS/IT_TRIGGER] {
-  ok: true,
+  ok: false,
   itxWriteMode: 'keep',
   itxPersistReason: 'IT_TRIGGER_OK',
   itxDecisionReason: 'IT_ALREADY_COMMITTED',
@@ -429,1326 +429,8 @@
     deepenOk: true
   },
   iLexemeForce: false,
-  tLayerModeActive: true,
-  tLayerHint: 'T3',
-  tVector: null,
-  isCommittedT3: true,
-  committedStep: 'T3',
-  itx_probe_reason: 'IT_ALREADY_COMMITTED'
-}
-[IROS/ANCHOR_DEBUG][before-detect] {
-  ms_intent_anchor_raw: 'SUN',
-  ms_intent_anchor_fixed_true: false,
-  itx_step_ms: 'T3',
-  evidence_choiceId: null,
-  evidence_actionId: null,
-  evidence_source: 'none'
-}
-[IROS/ANCHOR_ENTRY] {"evidence":{"choiceId":null,"actionId":null,"source":"none"},"decision":{"tEntryOk":false,"anchorEvent":"none","anchorWrite":"keep","reason":"NO_EVIDENCE"},"fixedNorthKey":"SUN","itActive":true,"hasAnchorAlready":true}
-[IROS/FLOW][observe] {
-  delta: 'RETURN',
-  confidence: 0.7,
-  hasLastUserText: true,
-  returnStreak: 1
-}
-[IROS/T_CONCRETIZE][FORCE_SWITCH_CHECK] {
-  forceTConcretize: false,
-  laneKeyNowRaw: null,
-  laneKeyNowBase: null,
-  laneKeyNow: null,
-  stall: {
-    severity: 'soft',
-    reason: 'STALL_SOFT',
-    detail: {
-      streakSameUser: 2,
-      repeatSignal: null,
-      flowDelta: 'RETURN',
-      returnStreak: 1,
-      anchorReason: 'NO_EVIDENCE',
-      convReason: null
-    }
-  },
-  hasFocusLabelNow: false,
-  focusLabelHead: null,
-  userHead: '🧭\nいまの扱い方\n本文です\n\n多段ブロックの管理としての整理\n本文です'
-}
-[IROS/ORCH][after-container] {
-  frame: 'R',
-  framePlan_frame: 'R',
-  descentGate: 'closed',
-  framePlan_kind: null,
-  framePlan_stamp: null,
-  intentBridge_laneKey_extra: null,
-  intentBridge_laneKey_base: null,
-  intentBridge_laneKey_resolved: null,
-  intentBridge_inputs_extra: { deepenOk: null, hasCore: null, declarationOk: null },
-  intentBridge_inputs_base: { deepenOk: null, hasCore: null, declarationOk: null },
-  framePlan_slots_keys0: [ 'id', 'required', 'hint' ],
-  framePlan_slots_raw0: { id: 'OBS', required: true, hint: '観測（事実/状況の再提示）' },
-  framePlan_slots_heads: [
-    { key: 'OBS', head: '観測（事実/状況の再提示）' },
-    { key: 'SHIFT', head: '視点の転換（1つだけ）' },
-    { key: 'NEXT', head: '次の一歩（1つだけ）' },
-    { key: 'SAFE', head: '安全句（静かな保険）' }
-  ],
-  slotPlan_slots_heads: [
-    {
-      key: 'OBS',
-      head: '@OBS {"laneKey":null,"user":"🧭 いまの扱い方 本文です 多段ブロックの管理としての整理 本文です","flow":{"delta":"RETURN","confidence":0.7},"lastUserTe'
-    },
-    {
-      key: 'SHIFT',
-      head: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":false,"no_naming":false,"no_conclusion":'
-    },
-    {
-      key: 'SAFE',
-      head: '@SAFE {"laneKey":null,"flow":{"delta":"RETURN","confidence":0.7}}'
-    },
-    {
-      key: 'NEXT',
-      head: '@NEXT_HINT {"mode":"advance_hint","laneKey":null,"delta":"RETURN","hint":"流れを保ったまま前に進める"}'
-    }
-  ],
-  framePlan_slots_isArray: true,
-  framePlan_slots_len: 4,
-  slotPlan_isArray: true,
-  slotPlan_len: 4,
-  framePlan_policy: 'FINAL',
-  slotPlanPolicy: 'FINAL',
-  sameRef_framePlan_slotPlan: false,
-  slotPlanFallback: 'normalChat',
-  hasIntentAnchor: true,
-  intentAnchorKey: 'SUN',
-  has_intent_anchor_obj: true,
-  has_intentAnchor_obj: true,
-  has_intent_anchor_key: true,
-  has_intentAnchorKey: true
-}
-[IROS/META][final-sync][meta] {
-  meta_q: 'Q3',
-  unified_q: 'Q3',
-  meta_depth: 'R3',
-  unified_depth: 'R3',
-  intent_anchor: { key: 'SUN', text: null, phrase: null },
-  intent_anchor_key: 'SUN',
-  anchorEntry: {
-    evidence: { choiceId: null, actionId: null, source: 'none' },
-    decision: {
-      tEntryOk: false,
-      anchorEvent: 'none',
-      anchorWrite: 'keep',
-      reason: 'NO_EVIDENCE'
-    }
-  }
-}
-[IROS/META][final-sync][finalMeta] {
-  meta_q: 'Q3',
-  unified_q: 'Q3',
-  meta_depth: 'R3',
-  unified_depth: 'R3',
-  intent_anchor: { key: 'SUN', text: null, phrase: null },
-  intent_anchor_key: 'SUN',
-  anchorEntry: {
-    evidence: { choiceId: null, actionId: null, source: 'none' },
-    decision: {
-      tEntryOk: false,
-      anchorEvent: 'none',
-      anchorWrite: 'keep',
-      reason: 'NO_EVIDENCE'
-    }
-  }
-}
-[IROS/Orchestrator] output meta snapshot { frame: 'R', slotPlanPolicy: 'FINAL', slotPlanLen: 4 }
-[IROS/PostProcess][SLOTPLAN_POLICY] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  slotPlanPolicy_detected: 'FINAL',
-  slotPlanPolicy_from: 'metaForSave.framePlan.slotPlanPolicy',
-  slotPlanPolicy_raw: 'FINAL',
-  slotPlanLen: 4,
-  hasSlots: true
-}
-[IROS/CANON][STAMP][PP] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  q_code: 'Q3',
-  depth_stage: 'R3',
-  phase: 'Outer'
-}
-[IROS/MIRROR_FLOW][RESULT] {
-  micro: false,
-  confidence: 0.55,
-  e_turn: 'e3',
-  meaningKey: null,
-  colorKey: 'e3',
-  flowDelta: 'RETURN',
-  returnStreak: 1
-}
-[IROS/EXPR][decision] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  fired: true,
-  lane: 'sofia_light',
-  reason: 'RETURN',
-  blockedBy: null,
-  prefaceHead: '',
-  debug: {
-    laneKey: 'IDEA_BAND',
-    phase: 'Outer',
-    depth: 'R3',
-    flowDelta: 'RETURN',
-    returnStreak: 1,
-    techniqueId: 'return'
-  }
-}
-[IROS/PostProcess] SLOTPLAN_SEED_TO_WRITER (base visible) {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  slotPlanPolicy: 'FINAL',
-  slotPlanPolicy_from: 'metaForSave.framePlan.slotPlanPolicy',
-  slotPlanLen: 4,
-  hasSlots: true,
-  baseVisibleLen: 13,
-  baseVisibleHead: '流れを保ったまま前に進める',
-  seedLen: 13,
-  seedHead: '流れを保ったまま前に進める'
-}
-[IROS][ResonanceState] upsert ok {
-  userCode: '669933',
-  tenantId: 'default',
-  qCode: 'Q3',
-  depthStage: 'R3',
-  phase: 'Outer'
-}
-[UnifiedAnalysis] user message q_code/depth_stage updated {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  messageId: 16042,
-  q_code: 'Q3',
-  depth_stage: 'R3'
-}
-[IROS][CTXPACK] stamped {
-  traceId: 'd49cb447-acaf-4d92-80b1-70b78ed69a1f',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  hasCtxPack: true,
-  prevAtIso: null,
-  ageSec: null,
-  flowAt: '2026-02-20T11:40:47.694Z',
-  flowDelta: 'RETURN',
-  returnStreak: 1,
-  ctxPackKeys: [
-    'exprMeta',
-    'historyForWriter',
-    'historyDigestV1',
-    'phase',
-    'depthStage',
-    'qCode',
-    'slotPlanPolicy',
-    'goalKind',
-    'slotPlan',
-    'flow'
-  ],
-  hfw_len: 12,
-  hasDigestV1: true,
-  digestChars: 244,
-  hfw_src_len: 12
-}
-[IROS/LLM_GATE][FINAL_CALL][NO_FORCE] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  slotPlanPolicy: 'FINAL',
-  framePlanSlotsLen: 4,
-  metaSlotPlanLen: 4,
-  slotPlanLen: 4,
-  hasSlots: true,
-  effectiveLen: 13,
-  head: '流れを保ったまま前に進める'
-}
-[IROS/LLM_GATE][PROBE] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  llmEntry: 'CALL_LLM',
-  llmSkipReason: null,
-  allowLLM_final: true,
-  brakeReason: null,
-  speechAct: null,
-  slotPlanLen: 4,
-  hasSlots: true,
-  slotPlanPolicy: 'FINAL',
-  finalAssistantTextLen: 13,
-  finalAssistantTextHead: '流れを保ったまま前に進める',
-  finalAssistantTextCandidateLen: null,
-  finalAssistantTextCandidateHead: null,
-  finalForceCall: false,
-  finalForceCallReason: 'FINAL_CALL_NO_FORCE',
-  resolvedTextLen: null,
-  rewriteSeedLen: 433,
-  decisionResolvedLen: null,
-  decisionRewriteSeedLen: 433
-}
-[IROS/Reply] rotation bridge { spinLoop: 'SRI', descentGate: 'closed', depth: 'R3' }
-[IROS/CANON][STAMP] {
-  conversationId: null,
-  userCode: null,
-  q_code: 'Q3',
-  depth_stage: 'R3',
-  phase: 'Outer'
-}
-[IROS/rephraseBridge][SLOT_SOURCES] {
-  slotPlan_type: 'array',
-  slotPlan_keys: [ '0', '1', '2', '3' ],
-  slotPlan_head: null,
-  framePlan_has_slots: true,
-  framePlan_slots_sample: [
-    [ 'id', 'required', 'hint' ],
-    [ 'id', 'required', 'hint' ],
-    [ 'id', 'required', 'hint' ]
-  ],
-  extra_keys: [
-    'traceId',
-    'choiceId',
-    'extractedChoiceId',
-    'renderEngineGate',
-    'renderEngine',
-    'persistedByRoute',
-    'persistPolicy',
-    'persistAssistantMessage',
-    'flow',
-    'stallHard',
-    'stall',
-    'intentBridge',
-    'persistedBy',
-    'pastStateNoteText',
-    'pastStateTriggerKind',
-    'pastStateKeyword'
-  ]
-}
-[IROS/STATE][anchor-root] { userTextHead: '🧭\nいまの扱い方\n本文です\n\n多段ブロックの管理としての整理\n本文です' }
-[IROS/STATE][fixed-by-meta] {
-  intent_anchor_obj: {
-    key: 'SUN',
-    text: undefined,
-    phrase: null,
-    strength: null,
-    y_level: null,
-    h_level: null
-  },
-  intent_anchor_key: 'SUN',
-  itx_step: 'T3',
-  itx_reason: 'IT_TRIGGER_OK',
-  itx_last_at: '2026-01-08T12:26:08.007+00:00'
-}
-[IROS/STATE] persistMemoryStateIfAny start {"userCode":"669933","userText":"🧭\nいまの扱い方\n本文です\n\n多段ブロックの管理としての整理\n本文です","depthInput":"R3","qCodeInput":"Q3","phaseInput":"Outer","yLevelInt":1,"hLevelInt":2,"finalSpinLoop":"SRI","finalSpinStep":2,"finalDescentGate":"closed","itTriggered":true,"clearItxExplicit":false,"shouldClearItx":false,"itx_step":"T3","itx_anchor_event_type":null,"itx_reason":"IT_TRIGGER_OK","itx_last_at":"2026-01-08T12:26:08.007+00:00","anchor_event_db":"none","anchor_write_db":"keep","anchorEntry_decision":{"tEntryOk":false,"anchorEvent":"none","anchorWrite":"keep","reason":"NO_EVIDENCE"},"intent_anchor_key_candidate":"SUN","anchor_action":"keep","qTracePickedFrom":"qTraceEffective","qTrace_keys":["lastQ","dominantQ","streakQ","streakLength","volatility"],"qTrace_qNow":null,"qTrace_q_now":null,"qTrace_currentQ":null,"qTrace_snapshot_currentQ":null,"qTrace_streakQ":"Q3","qTrace_streakLength":1}
-[IROS/PHASE10_T3][enter] {
-  phase10NowItxStep: 'T3',
-  phase10NowAnchorWrite: 'keep',
-  phase10NowAnchorEvent: 'none',
-  phase10NowIntentAnchorKey: 'SUN',
-  phase10HasPrev: true,
-  phase10PrevItxStep: 'T3',
-  phase10PrevItxLastAt: '2026-01-08T12:26:08.007+00:00',
-  phase10PrevIntentAnchorKey: 'SUN',
-  phase10PrevIntentAnchorRaw: { key: 'SUN' },
-  phase10NowIntentAnchorRaw: 'SUN'
-}
-[IROS/PHASE10_T3][result] {
-  phase10Upgrade: false,
-  phase10NextItxStep: null,
-  phase10Reason: 'NO_COMMIT'
-}
-[IROS/PERSIST][q_counts][synth] {
-  reason: 'qCountsPicked_null_but_itTriggered_present',
-  it_triggered: true,
-  it_triggered_true: true
-}
-[IROS/PERSIST][q_counts][pick] {
-  has_qCounts_arg: false,
-  has_core_q_counts: false,
-  has_unified_q_counts: false,
-  picked_null: true,
-  picked_type: null,
-  picked_keys: null,
-  it_triggered: true,
-  it_triggered_true: true,
-  fa_pending: '(kept)',
-  fa_lock: '(kept)',
-  wrote: true,
-  wrote_reason: {
-    qCountsPicked: false,
-    itTriggeredResolved: true,
-    faPending: false,
-    faLock: false
-  }
-}
-[IROS/STATE] upsert payload (intent_anchor check) {
-  userCode: '669933',
-  anchor_action: 'keep',
-  intent_anchor_will_set: '(no-touch)',
-  anchorKeyCandidate: 'SUN',
-  fixedByMeta_intent_anchor_key: 'SUN',
-  anchorEntry_decision: {
-    tEntryOk: false,
-    anchorEvent: 'none',
-    anchorWrite: 'keep',
-    reason: 'NO_EVIDENCE'
-  }
-}
-[IROS/PERSIST][anchorEntry][before-upsert] {
-  hasAnchorEntry: true,
-  ae_hasDecision: true,
-  ae_anchorWrite: 'keep',
-  ae_anchorEvent: 'none',
-  ae_reason: 'NO_EVIDENCE',
-  ae_evidence_source: 'none',
-  decisionFinal: {
-    tEntryOk: false,
-    anchorEvent: 'none',
-    anchorWrite: 'keep',
-    reason: 'NO_EVIDENCE'
-  },
-  payload_has_anchor_event: true,
-  payload_has_anchor_write: true,
-  payload_anchor_event: 'none',
-  payload_anchor_write: 'keep',
-  payload_has_itx_step: false,
-  payload_itx_step: null,
-  payload_itx_reason: null,
-  payload_itx_last_at: null,
-  payload_itx_anchor_event_type: null,
-  payload_has_intent_anchor: false,
-  payload_intent_anchor: '(no-touch)',
-  meta_intent_anchor_key: 'SUN',
-  anchorKeyCandidate: 'SUN',
-  anchor_action: 'keep'
-}
-[IROS/STATE] persistMemoryStateIfAny ok {
-  userCode: '669933',
-  saved: [
-    'user_code',       'updated_at',
-    'depth_stage',     'q_primary',
-    'phase',           'self_acceptance',
-    'y_level',         'h_level',
-    'spin_loop',       'spin_step',
-    'descent_gate',    'situation_summary',
-    'situation_topic', 'q_counts',
-    'anchor_event',    'anchor_write'
-  ],
-  depthStage: 'R3',
-  qPrimary: 'Q3',
-  spinLoop: 'SRI',
-  spinStep: 2,
-  descentGate: 'closed',
-  qCounts: { it_cooldown: 0, it_triggered_true: true, it_triggered: true },
-  itx_step: '(kept/none)',
-  itx_last_at: '(kept/none)',
-  anchor_action: 'keep',
-  anchor_event: 'none',
-  anchor_write: 'keep',
-  intent_anchor: '(no-touch)'
-}
- POST /api/credits/capture 200 in 105ms (compile: 59ms, render: 46ms)
-[IROS][user:669933][STATE] loaded MemoryState {
-  userCode: '669933',
-  hasMemory: true,
-  intentAnchor: 'SUN',
-  depthStage: 'R3',
-  qPrimary: 'Q3',
-  selfAcceptance: 0.7292499999999996,
-  phase: 'Outer',
-  intentLayer: 'C',
-  yLevel: 1,
-  hLevel: 2,
-  spinLoop: 'SRI',
-  spinStep: 2,
-  descentGate: 'closed',
-  itxStep: 'T3',
-  itxAnchorEventType: null,
-  itxReason: 'IT_TRIGGER_OK',
-  itxLastAt: '2026-01-08T12:26:08.007+00:00',
-  sentimentLevel: null,
-  situationSummary: '🧭 いまの扱い方 本文です 多段ブロックの管理としての整理 本文です',
-  situationTopic: 'その他・ライフ全般',
-  qCounts: { it_cooldown: 0, it_triggered: true, it_triggered_true: true }
-}
-[IROS/_impl/rephrase.ts][USERCTX_KEYS] {
-  hasTurns: true,
-  turnsLen: 12,
-  hasCtxPack: true,
-  ctxPackKeys: [
-    'exprMeta',        'historyForWriter',
-    'historyDigestV1', 'phase',
-    'depthStage',      'qCode',
-    'slotPlanPolicy',  'goalKind',
-    'slotPlan',        'flow',
-    'turns',           'itxStep',
-    'itxReason',       'intentBand',
-    'tLayerHint',      'tLayerModeActive',
-    'topicDigest',     'replyGoal',
-    'repeatSignal',    'flowDigest'
-  ],
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933'
-}
-[IROS/REPHRASE_FLAG] { raw: 'true', enabled: true }
-[IROS/rephraseEngine][SHIFT_SLOT_HEAD] {
-  hasShiftSlot: true,
-  shiftSlotKey: 'SHIFT',
-  shiftSlotKind: '',
-  shiftSlotLen: 432,
-  shiftSlotHead: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":false,"no_naming":false,"no_conclusion":false,"no_future_instruction":true,"no_lecture":true,"questions_max":1,"no_checklist":true,"lines_ma',
-  slotsKeysSample: [
-    { key: 'OBS', kind: '' },
-    { key: 'SHIFT', kind: '' },
-    { key: 'SAFE', kind: '' },
-    { key: 'NEXT', kind: '' }
-  ]
-}
-[IROS/rephraseHistory][LAST_TURNS_PICK] {
-  pickedFrom: 'turns',
-  maxMsgs: 6,
-  rawTurnsLen: 12,
-  rawHistoryForWriterLen: 12,
-  normalizedLen: 12,
-  pickedLen: 6,
-  roles: [ 'assistant', 'user', 'assistant', 'user', 'assistant', 'user' ],
-  tailHeads: [
-    '🧭\nいまの扱い方\n本文です\n\n多段ブロックの管理としての整理\n本文です',
-    '## 📌 上段と下段が「空行」で分離している\n「🧭／いまの扱い方／本文です」で、上段が一つの塊として閉じている。\n空',
-    '🧭\nいまの扱い方\n本文です\n\n多段ブロックの管理としての整理\n本文です'
-  ]
-}
-[IROS/ILINE][LOCK_PARTS] {
-  seedLen: 35,
-  userLen: 36,
-  seedEqUser: false,
-  seedHasUser: true,
-  lockPartsLen: 1,
-  lockHasNewline: false,
-  lockLen: 35,
-  lockHead120: '🧭 いまの扱い方 本文です 多段ブロックの管理としての整理 本文です'
-}
-[IROS/ILINE][LOCK_SOURCE] {
-  hasSeed: true,
-  hasUser: true,
-  seedLen: 35,
-  userLen: 36,
-  hasILINE_seed: false,
-  hasILINE_user: false,
-  hasILINE_any: false,
-  hasILINE_END_any: false,
-  head200: '🧭 いまの扱い方 本文です 多段ブロックの管理としての整理 本文です',
-  tail200: '🧭 いまの扱い方 本文です 多段ブロックの管理としての整理 本文です'
-}
-[IROS/ILINE][LOCK_EXTRACT] { lockedFromAllLen: 0, lockedUniqueLen: 0, lockedUniqueHead200: '' }
-[IROS/rephraseEngine][LANE_DETECT] {
-  killPolicyRev: 'phase1.5-ideaBandNoKill',
-  wantsTConcretize: false,
-  wantsIdeaBand: false,
-  repeatSignalSame: false,
-  repeatSignalHead: '',
-  shiftTextForModeHead: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":false,"no_naming":false,"no_conclusion":',
-  shiftSlotType: 'object',
-  shiftSlotKeys: [ 'key', 'text' ],
-  laneHintHead: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":false,"no_naming":false,"no_conclusion":false,"no_future_instruction":true,"no_l'
-}
-[IROS/systemPrompt][CALLED] {
-  __file: '/ROOT/src/lib/iros/language/rephrase/systemPrompt.ts',
-  directTask: false,
-  itOk: true,
-  personaMode: 'GROUND',
-  tLayerHint: 'T3',
-  exprFired: true,
-  exprLaneKey: 'sofia_light',
-  lockedILinesLen: 0
-}
-[IROS/rephraseEngine][STATE_SNAPSHOT_PICKED] {
-  traceId: 'd49cb447-acaf-4d92-80b1-70b78ed69a1f',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  pickedDepthStage: 'R3',
-  pickedPhase: 'Outer',
-  pickedQCode: 'Q3',
-  internalPackHead: 'INTERNAL PACK (DO NOT OUTPUT):\n' +
-    '\n' +
-    'lastTurnsCount=4\n' +
-    'directTask=false\n' +
-    'inputKind=chat\n' +
-    'itOk=true\n' +
-    'intentBand=R3\n' +
-    'tLayerHint=T3\n' +
-    '\n' +
-    'META_HINT (DO NOT OUTPUT):\n' +
-    '{"conversation_id":"3afc87f8-9d3e-4f41-983f-035f928e9b74","slotPlanPolicy'
-}
-[IROS/rephraseEngine][ALLOW] {
-  traceId: 'd49cb447-acaf-4d92-80b1-70b78ed69a1f',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  depthStage: 'R3',
-  qCode: 'Q3',
-  phase: 'Outer',
-  laneKeyForAllow: null,
-  repeatSignal: false,
-  itOk: true,
-  allow: {
-    assert: false,
-    narrow: false,
-    propose: true,
-    concretize: false,
-    commit_hint: false,
-    strength: 0
-  }
-}
-[IROS/VECTOR][PICK] {
-  traceId: 'd49cb447-acaf-4d92-80b1-70b78ed69a1f',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  enabled: false,
-  vector: null
-}
-[IROS/rephraseEngine][BLOCK_PLAN] {
-  traceId: 'd49cb447-acaf-4d92-80b1-70b78ed69a1f',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  enabled: true,
-  goalKind: 'stabilize',
-  exprLane: 'sofia_light',
-  explicitTrigger: true,
-  depthStage: 'R3',
-  itTriggered: false,
-  mode: 'multi6',
-  blocksLen: 6,
-  sysLen: 583
-}
-[IROS/rephraseEngine][EXPR_META] {
-  traceId: 'd49cb447-acaf-4d92-80b1-70b78ed69a1f',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  injected: true,
-  tone: 'med',
-  density: 'rich',
-  metaphor: 'lite',
-  ambiguity: 'deny',
-  brevity: 'normal',
-  rhythm: 'breathe'
-}
-[IROS/rephraseEngine][MSG_PACK] {
-  traceId: 'd49cb447-acaf-4d92-80b1-70b78ed69a1f',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  lastTurns: 4,
-  hasHistoryText: true,
-  historyTextLen: 1625,
-  msgCount: 6,
-  roles: [ 'system', 'user', 'assistant', 'user', 'assistant', 'user' ],
-  internalPackLen: 4686,
-  internalPackHasHistoryHint: true,
-  seedDraftLen: 36,
-  seedDraftHead: '🧭\nいまの扱い方\n本文です\n\n多段ブロックの管理としての整理\n本文です',
-  seedDraftRawAllHead: '@OBS {"laneKey":null,"user":"🧭 いまの扱い方 本文です 多段ブロックの管理としての整理 本文です","flow":{"delta":"RETURN","confidence":0.7},"lastUserText":"🧭 いまの扱い方 本文です 多段ブロックの管理としての整理 本文です"}\n' +
-    '@SHIFT {"kind":"c_sense_hint","intent',
-  seedDraftRawPickedHead: '@OBS {"laneKey":null,"user":"🧭 いまの扱い方 本文です 多段ブロックの管理としての整理 本文です","flow":{"delta":"RETURN","confidence":0.7},"lastUserText":"🧭 いまの扱い方 本文です 多段ブロックの管理としての整理 本文です"}\n' +
-    '@SHIFT {"kind":"c_sense_hint","intent',
-  slotsHead: [
-    {
-      i: 0,
-      key: 'OBS',
-      head: '@OBS {"laneKey":null,"user":"🧭 いまの扱い方 本文です 多段ブロックの管理としての整理 本文です","flow":{"delta'
-    },
-    {
-      i: 1,
-      key: 'SHIFT',
-      head: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":'
-    },
-    {
-      i: 2,
-      key: 'SAFE',
-      head: '@SAFE {"laneKey":null,"flow":{"delta":"RETURN","confidence":0.7}}'
-    },
-    {
-      i: 3,
-      key: 'NEXT',
-      head: '@NEXT_HINT {"mode":"advance_hint","laneKey":null,"delta":"RETURN","hint":"流れを保った'
-    }
-  ],
-  itOk: true,
-  intentBand: 'R3',
-  tLayerHint: 'T3',
-  directTask: false,
-  directTask_raw: false,
-  inputKind: 'chat',
-  inputKindFromMeta: null,
-  inputKindFromCtx: null,
-  lockedILines: 0
-}
-[IROS/BLOCK_PLAN][inject] {
-  enabled: true,
-  mode: 'multi6',
-  blocks: [
-    'ENTRY',
-    'SITUATION',
-    'DUAL',
-    'FOCUS_SHIFT',
-    'ACCEPT',
-    'INTEGRATE'
-  ],
-  explicitTrigger: true,
-  goalKind: 'stabilize'
-}
-[IROS/LLM][CALL] {
-  callId: '11036881a069',
-  purpose: 'writer',
-  model: 'gpt-5.2',
-  temperature: 0.7,
-  responseFormat: 'text',
-  endpoint: 'https://api.openai.com/v1/chat/completions',
-  traceId: 'd49cb447-acaf-4d92-80b1-70b78ed69a1f',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  slotPlanPolicy: 'FINAL',
-  mode: 'rephrase',
-  qCode: 'Q3',
-  depthStage: 'R3',
-  msgCount: 6,
-  firstRole: 'system',
-  lastRole: 'user',
-  firstHead: '【上位人格定義：Sofia（DO NOT OUTPUT / 露出禁止）】 - “響き”として現れ、相手が自分の答えに立て…',
-  lastTail: '🧭 いまの扱い方 本文です 多段ブロックの管理としての整理 本文です',
-  lastUserHead: '🧭 いまの扱い方 本文です 多段ブロックの管理としての整理 本文です',
-  hasDigest: true,
-  hasAnchor: true,
-  roles: [ 'system', 'user', 'assistant', 'user', 'assistant', 'user' ],
-  caller: 'at callWriterLLM (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_iros_language_08d3a68d._.js:1182:175)',
-  bodyKeys: [ 'max_completion_tokens', 'messages', 'model' ],
-  extraBodyKeys: [],
-  extraBodyRawKeys: [],
-  hasInternalKeys: false
-}
-[IROS/LLM][OK] {
-  callId: '11036881a069',
-  purpose: 'writer',
-  model: 'gpt-5.2',
-  ms: 4870,
-  ok: true,
-  usage: {
-    prompt_tokens: 5045,
-    completion_tokens: 212,
-    total_tokens: 5257,
-    prompt_tokens_details: { cached_tokens: 1664, audio_tokens: 0 },
-    completion_tokens_details: {
-      reasoning_tokens: 0,
-      audio_tokens: 0,
-      accepted_prediction_tokens: 0,
-      rejected_prediction_tokens: 0
-    }
-  },
-  traceId: 'd49cb447-acaf-4d92-80b1-70b78ed69a1f',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  outLen: 296,
-  outHead: '## 📌 いまの並びが、そのまま「札＋中身」を二枚作っている\n' +
-    '先頭の 🧭 が入口の印になって、「いまの扱い方」が一枚目の札として立つ。  \n' +
-    'その直下の「本文'
-}
-[IROS/rephraseEngine][OK] {
-  traceId: 'd49cb447-acaf-4d92-80b1-70b78ed69a1f',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  mode: 'LLM',
-  keys: [ 'OBS', 'SHIFT', 'SAFE', 'NEXT' ],
-  rawLen: 296,
-  rawHead: '## 📌 いまの並びが、そのまま「札＋中身」を二枚作っている\n' +
-    '先頭の 🧭 が入口の印になって、「いまの扱い方」が一枚目の札として立つ。  \n' +
-    'その直下の「本文です」が、その札の中身として一行だけ付いている。\n' +
-    '\n' +
-    '空行が入ったところで、上の「'
-}
-[IROS/FLAGSHIP_GUARD][DEBUG_IN] {
-  rev: 'guard-rev-2026-01-28-b',
-  inputLen: 283,
-  inputHead: '## 📌 いまの並びが、そのまま「札＋中身」を二枚作っている\n' +
-    '先頭の 🧭 が入口の印になって、「いまの扱い方」が一枚目の札として立つ。\n' +
-    'その直下の「本文です」が、その札の中身として一行だけ付いている。\n' +
-    '空行が入ったところで、上の「本文で',
-  slotKeys: [ 'OBS', 'SHIFT', 'SAFE', 'NEXT' ]
-}
-[IROS/FLAGSHIP_GUARD][DEBUG_SCORE] {
-  rev: 'guard-rev-2026-01-28-b',
-  normalLite: true,
-  scaffoldLike: false,
-  len: 283,
-  qCount: 0,
-  qCountMark: 0,
-  cheer: 0,
-  hedge: 0,
-  generic: 0,
-  blandPressure: 0,
-  bulletLike: 0,
-  hasFlagshipSign: false
-}
-[IROS/FLAGSHIP][VERDICT] {
-  traceId: 'd49cb447-acaf-4d92-80b1-70b78ed69a1f',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  level: 'OK',
-  ok: true,
-  qCount: 0,
-  score: {
-    fatal: 0,
-    warn: 0,
-    qCount: 0,
-    bulletLike: 0,
-    hedge: 0,
-    cheer: 0,
-    generic: 0,
-    runaway: 0,
-    exaggeration: 0,
-    mismatch: 0,
-    retrySame: 0
-  },
-  reasons: [],
-  head: '## 📌 いまの並びが、そのまま「札＋中身」を二枚作っている\n' +
-    '先頭の 🧭 が入口の印になって、「いまの扱い方」が一枚目の札として立つ。\n' +
-    'その直下の「本文です」が、その札の中身として一行だけ付いている。\n' +
-    '空行が入ったところで、上の「本文です」はそこで終わる。\n' +
-    'この空行が、区切り線の代わりになっている。\n' +
-    '次に「多段ブロックの管理としての整理」が二枚目の札として立つ。\n' +
-    'その直下の「本文です」が、二枚目の中身として付いている。\n' +
-    '同じ「本文で'
-}
-[IROS/BLOCK_PLAN][CONTRACT_VIOLATION] {
-  traceId: 'd49cb447-acaf-4d92-80b1-70b78ed69a1f',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  mode: 'multi6',
-  blocks: [
-    'ENTRY',
-    'SITUATION',
-    'DUAL',
-    'FOCUS_SHIFT',
-    'ACCEPT',
-    'INTEGRATE'
-  ],
-  missing: [ '入口' ],
-  head: '## 📌 いまの並びが、そのまま「札＋中身」を二枚作っている\n' +
-    '先頭の 🧭 が入口の印になって、「いまの扱い方」が一枚目の札として立つ。\n' +
-    'その直下の「本文です」が、その札の中身として一行だけ付いている。\n' +
-    '空行が入ったところで、上の「本文です」はそこで終わる。\n' +
-    'この空行が、区切り線の代わりになっている。\n' +
-    '次に「多段ブロックの管理としての整理」が二枚目の札として立つ。\n' +
-    'その直下の「本文です」が、二枚目の中身として付いている。\n' +
-    '同じ「本文で',
-  soft: true,
-  tailTruncated: false
-}
-[IROS/rephraseEngine][MIN_OK_KIND] {
-  inputKindNow: 'chat',
-  isMicroOrGreetingNow: false,
-  shortReplyOk: false,
-  MIN_OK_LEN: 40,
-  reason: 'chat_relaxed_40',
-  shiftTextHead: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":false,"no_naming":false,"no_conclusion":false,"no_future_ins',
-  shiftObjHasAllow: true,
-  isTConcretize: false,
-  isIdeaBand: false,
-  shiftKind: 'c_sense_hint'
-}
-[IROS/rephraseEngine][AFTER_ATTACH][EXTRA_TRACE] {
-  traceId: 'd49cb447-acaf-4d92-80b1-70b78ed69a1f',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  hasExtra: true,
-  blockPlanMode: 'multi6',
-  blockPlanBlocksLen: 6,
-  hasRephraseBlocks: true,
-  rephraseBlocksLen: 10,
-  outKeysLen: 4,
-  note: 'FLAGSHIP_OK_NO_RETRY',
-  head: '## 📌 いまの並びが、そのまま「札＋中身」を二枚作っている\n' +
-    '先頭の 🧭 が入口の印になって、「いまの扱い方」が一枚目の札として立つ。\n' +
-    'その直下の「本文です'
-}
-[IROS/rephraseAttach][RES_KEYS] {
-  resKeys: [ 'ok', 'slots', 'meta' ],
-  metaKeys: [ 'inKeys', 'outKeys', 'rawLen', 'rawHead', 'note', 'extra' ],
-  outKeys: [],
-  metaOutKeys: []
-}
-[IROS/rephraseAttach][OK] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  blocksLen: 10,
-  head: '## 📌 いまの並びが、そのまま「札＋中身」を二枚作っている'
-}
-[IROS/CONV_EVIDENCE] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  understand: 0,
-  repair: 0,
-  advance: 1,
-  proof: 1,
-  reason: 'U!:no_ctx_summary | R!:no_repair | A:next_hint:advance_hint',
-  head: '🧭 いまの扱い方 本文です 多段ブロックの管理としての整理 本文です',
-  detail: {
-    branch: null,
-    topicHint: null,
-    q: 'Q3',
-    depth: 'R3',
-    phase: 'Outer',
-    slotsLen: 4
-  }
-}
-[IROS/renderGateway][RB_CONTENT_DIAG] {
-  rev: 'phase11-open-close-v2-LOADED',
-  rbLen: 10,
-  joinedLen: 283,
-  head1: '## 📌 いまの並びが、そのまま「札＋中身」を二枚作っている',
-  head2: '先頭の 🧭 が入口の印になって、「いまの扱い方」が一枚目の札として立つ。',
-  tail2: '下は「多段ブロックの管理としての整理」の本文。',
-  tail1: '置かれた位置だけで所属が決まっている。'
-}
-[IROS/renderGW][META_PICKED_FIX] {
-  rev: 'phase11-open-close-v2-LOADED',
-  pickedFrom: 'rephraseBlocks',
-  pickedLen_raw: 13,
-  pickedHead_raw: '流れを保ったまま前に進める',
-  pickedLen_meta: 283,
-  pickedHead_meta: '## 📌 いまの並びが、そのまま「札＋中身」を二枚作っている 先頭の 🧭 が…',
-  outLen: 283,
-  outHead: '## 📌 いまの並びが、そのまま「札＋中身」を二枚作っている 先頭の 🧭 が…'
-}
-[IROS/renderGateway][LEN_SNAPSHOT] {
-  rev: 'phase11-open-close-v2-LOADED',
-  len_before: 283,
-  head_before: '## 📌 いまの並びが、そのまま「札＋中身」を二枚作っている 先頭の 🧭 が…'
-}
-[IROS/renderGateway][HAS_REPHRASE_BLOCKS] {
-  rev: 'phase11-open-close-v2-LOADED',
-  rephraseBlocksLen: 10,
-  outLen: 283
-}
-[IROS/renderGateway][OK] {"rev":"phase11-open-close-v2-LOADED","outLen":283,"pickedFrom":"rephraseBlocks","slotPlanPolicy":"FINAL","usedSlots":true,"scaffoldApplied":false,"expandAllowed":true}
-[IROS/renderGateway][REV] {"rev":"phase11-open-close-v2-LOADED"}
-[IROS/PERSIST_PICK] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  pickedFrom: 'uiResultContent',
-  pickedLen: 283,
-  pickedHead: '## 📌 いまの並びが、そのまま「札＋中身」を二枚作っている\n先頭の 🧭 が',
-  fromResultObjLen: 283,
-  blocksJoinedCleanedLen: 283,
-  resolvedUiTextLen: 283,
-  userEchoLen: 36,
-  isPickedDots: false
-}
-[IROS][Training] computed targetKind = stabilize
-[IROS][Training] insert sample {
-  user_code: '669933',
-  conversation_id: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  message_id: null,
-  input_text: '🧭\nいまの扱い方\n本文です\n\n多段ブロックの管理としての整理\n本文です',
-  analysis_text: 'Q:Q3 / D:R3 / P:Outer / K:stabilize / T:その他・ライフ全般',
-  q_code: 'Q3',
-  depth_stage: 'R3',
-  phase: 'Outer',
-  self_acceptance: 0.7292499999999996,
-  situation_summary: '🧭 いまの扱い方 本文です 多段ブロックの管理としての整理 本文です',
-  situation_topic: 'その他・ライフ全般',
-  target_kind: 'stabilize',
-  target_label: null,
-  y_level: 1,
-  h_level: 2
-}
-[IROS][Training] insert ok
- POST /api/agent/iros/reply 200 in 6.8s (compile: 186ms, render: 6.7s)
-[authz] fd4ddc1a-46a2-4154-895f-556fb806ac3e start { path: 'http://localhost:3000/api/agent/iros/conversations' }
-[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] fd4ddc1a-46a2-4154-895f-556fb806ac3e verify firebase: 257.277ms
-[authz] fd4ddc1a-46a2-4154-895f-556fb806ac3e fetch user: 39.378ms
-[authz] fd4ddc1a-46a2-4154-895f-556fb806ac3e ok { user: '669933', role: 'admin', provider: 'password', ms: 302 }
- GET /api/agent/iros/conversations 200 in 343ms (compile: 2ms, render: 341ms)
- GET /api/iros-logs?conv_id=3afc87f8-9d3e-4f41-983f-035f928e9b74&raw=0 200 in 855ms (compile: 24ms, render: 831ms)
-[authz] 8a4ad6fc-4de2-407e-9bd1-5692301779b5 start { path: 'http://localhost:3000/api/agent/iros/messages' }
-[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] 8a4ad6fc-4de2-407e-9bd1-5692301779b5 verify firebase: 318.549ms
-[authz] 8a4ad6fc-4de2-407e-9bd1-5692301779b5 fetch user: 104.864ms
-[authz] 8a4ad6fc-4de2-407e-9bd1-5692301779b5 ok { user: '669933', role: 'admin', provider: 'password', ms: 427 }
- POST /api/agent/iros/messages 200 in 827ms (compile: 1994µs, render: 825ms)
-[IROS/FLAGSHIP_GUARD][MODULE_LOADED] { rev: 'guard-rev-2026-01-28-b', at: '2026-02-20T11:51:07.362Z' }
-[IROS/FLAGS_ENV_HEAD] {
-  IROS_RETRY_FINAL_FORCE_CALL: '0',
-  IROS_FLAGSHIP_REWRITE: '1',
-  IROS_LOG_FLAGS: 'true'
-}
-[IROS/FLAGS] {
-  retryFinalForceCall: false,
-  flagshipRewrite: true,
-  guardEnabled: true,
-  guardSkipShort: false,
-  guardShortMaxLen: 80,
-  logFlags: true
-}
-[IROS/renderGateway][MODULE_LOADED] { rev: 'phase11-open-close-v2-LOADED', at: '2026-02-20T11:51:07.387Z' }
-[IROS/pipe][TRACE] {
-  traceId: '84e83c6c-d3b6-4510-8d8d-b75db834872b',
-  conversationKey: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  conversationId: null,
-  userCode: '669933',
-  modeHint: 'auto',
-  hasHeaderUserCode: true,
-  devBypass: false
-}
-[authz] 0b0dd117-8ede-4f74-943f-1d1c2bb729bf start { path: 'http://localhost:3000/api/agent/iros/reply' }
-[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] 0b0dd117-8ede-4f74-943f-1d1c2bb729bf verify firebase: 251.161ms
-[authz] 0b0dd117-8ede-4f74-943f-1d1c2bb729bf fetch user: 33.441ms
-[authz] 0b0dd117-8ede-4f74-943f-1d1c2bb729bf ok { user: '669933', role: 'admin', provider: 'password', ms: 288 }
-[IROS/pipe][TRACE_RESOLVED] {
-  traceId: '84e83c6c-d3b6-4510-8d8d-b75db834872b',
-  conversationKey: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933'
-}
- POST /api/credits/authorize 200 in 55ms (compile: 1857µs, render: 53ms)
-[IROS/UserProfile] load ok {
-  userCode: '669933',
-  hasIrosRow: true,
-  sofia_credit: 422,
-  style: 'friendly',
-  user_call_name: 'orion',
-  plan_status: null
-}
-[IROS/Reply] handleIrosReply start {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  mode: 'auto',
-  tenantId: 'default',
-  rememberScope: null,
-  traceId: '84e83c6c-d3b6-4510-8d8d-b75db834872b',
-  style: 'friendly',
-  history_len: 12,
-  persistAssistantAllowed: false
-}
-[IROS][user:669933][STATE] loaded MemoryState {
-  userCode: '669933',
-  hasMemory: true,
-  intentAnchor: 'SUN',
-  depthStage: 'R3',
-  qPrimary: 'Q3',
-  selfAcceptance: 0.7292499999999996,
-  phase: 'Outer',
-  intentLayer: 'C',
-  yLevel: 1,
-  hLevel: 2,
-  spinLoop: 'SRI',
-  spinStep: 2,
-  descentGate: 'closed',
-  itxStep: 'T3',
-  itxAnchorEventType: null,
-  itxReason: 'IT_TRIGGER_OK',
-  itxLastAt: '2026-01-08T12:26:08.007+00:00',
-  sentimentLevel: null,
-  situationSummary: '🧭 いまの扱い方 本文です 多段ブロックの管理としての整理 本文です',
-  situationTopic: 'その他・ライフ全般',
-  qCounts: { it_cooldown: 0, it_triggered: true, it_triggered_true: true }
-}
-[IROS][user:669933][STATE] loaded MemoryState (orchestratorState) {
-  userCode: '669933',
-  hasMemory: true,
-  intentAnchor: 'SUN',
-  depthStage: 'R3',
-  qPrimary: 'Q3',
-  selfAcceptance: 0.7292499999999996,
-  phase: 'Outer',
-  intentLayer: 'C',
-  yLevel: 1,
-  hLevel: 2,
-  spinLoop: 'SRI',
-  spinStep: 2,
-  descentGate: 'closed'
-}
-[IROS/Context] framePlan built {
-  userCode: null,
-  inputKind: 'chat',
-  frame: 'R',
-  hasSlots: true,
-  spinLoop: null,
-  descentGate: 'closed',
-  depthStage: 'R3',
-  phase: 'Outer',
-  requestedDepth: null,
-  requestedQCode: null,
-  slots_isArray: true,
-  slots_len: 4,
-  slots_samples: [
-    {
-      i: 0,
-      type: 'object',
-      isNull: false,
-      isObj: true,
-      keys: [Array],
-      key: null,
-      kind: null,
-      contentHead: '',
-      textHead: '',
-      promptHead: '',
-      jsonHead: '{"id":"OBS","required":true,"hint":"観測（事実/状況の再提示）"}'
-    },
-    {
-      i: 1,
-      type: 'object',
-      isNull: false,
-      isObj: true,
-      keys: [Array],
-      key: null,
-      kind: null,
-      contentHead: '',
-      textHead: '',
-      promptHead: '',
-      jsonHead: '{"id":"SHIFT","required":true,"hint":"視点の転換（1つだけ）"}'
-    },
-    {
-      i: 2,
-      type: 'object',
-      isNull: false,
-      isObj: true,
-      keys: [Array],
-      key: null,
-      kind: null,
-      contentHead: '',
-      textHead: '',
-      promptHead: '',
-      jsonHead: '{"id":"NEXT","required":true,"hint":"次の一歩（1つだけ）"}'
-    },
-    {
-      i: 3,
-      type: 'object',
-      isNull: false,
-      isObj: true,
-      keys: [Array],
-      key: null,
-      kind: null,
-      contentHead: '',
-      textHead: '',
-      promptHead: '',
-      jsonHead: '{"id":"SAFE","required":true,"hint":"安全句（静かな保険）"}'
-    }
-  ],
-  slots_heads: [
-    { key: null, head: '' },
-    { key: null, head: '' },
-    { key: null, head: '' },
-    { key: null, head: '' }
-  ]
-}
-[IROS][DepthGate] check {
-  prevDepthStage: 'R3',
-  requestedDepth_in: null,
-  requestedDepth_out: null,
-  gateApplied: false
-}
-[IROS/Orchestrator] input meta snapshot {
-  hasRotationState: true,
-  spinLoop: 'SRI',
-  descentGate: 'closed',
-  depth: 'R3',
-  frame: 'R',
-  slotPlanLen: 4,
-  slotPlanPolicy: null,
-  historyLen: 12,
-  hasIntentAnchor: true,
-  intentAnchorKey: 'SUN',
-  isIrDiagnosisTurn: null,
-  mode: null
-}
-[IROS][user:669933][STATE] loaded MemoryState {
-  userCode: '669933',
-  hasMemory: true,
-  intentAnchor: 'SUN',
-  depthStage: 'R3',
-  qPrimary: 'Q3',
-  selfAcceptance: 0.7292499999999996,
-  phase: 'Outer',
-  intentLayer: 'C',
-  yLevel: 1,
-  hLevel: 2,
-  spinLoop: 'SRI',
-  spinStep: 2,
-  descentGate: 'closed',
-  itxStep: 'T3',
-  itxAnchorEventType: null,
-  itxReason: 'IT_TRIGGER_OK',
-  itxLastAt: '2026-01-08T12:26:08.007+00:00',
-  sentimentLevel: null,
-  situationSummary: '🧭 いまの扱い方 本文です 多段ブロックの管理としての整理 本文です',
-  situationTopic: 'その他・ライフ全般',
-  qCounts: { it_cooldown: 0, it_triggered: true, it_triggered_true: true }
-}
-[IROS][user:669933][STATE] loaded MemoryState (orchestratorState) {
-  userCode: '669933',
-  hasMemory: true,
-  intentAnchor: 'SUN',
-  depthStage: 'R3',
-  qPrimary: 'Q3',
-  selfAcceptance: 0.7292499999999996,
-  phase: 'Outer',
-  intentLayer: 'C',
-  yLevel: 1,
-  hLevel: 2,
-  spinLoop: 'SRI',
-  spinStep: 2,
-  descentGate: 'closed'
-}
-[IROS/SA] estimateSelfAcceptance v2 (line) {
-  input: {
-    qCode: null,
-    depthStage: 'R3',
-    phase: 'Outer',
-    hasHistoryDigest: false,
-    lastSelfAcceptance: 0.7292499999999996
-  },
-  result: {
-    base: 0.7292499999999996,
-    deltaFromWords: 0,
-    value: 0.7292499999999996
-  },
-  notes: [
-    'base = lastSelfAcceptance（ライン） → 0.729',
-    'S/R層 intensity=1.0',
-    'deltaTextRaw=0.000, intensity=1.00, deltaWithIntensity=0.000',
-    'deltaWithIntensity=0 → effectiveDelta=0',
-    'value=0.729 (raw=0.729)'
-  ]
-}
-[IROS/SpinControl] {
-  rank: 'low',
-  direction: 'forward',
-  promptStyle: 'one-step',
-  promptStyle_raw: 'one-step',
-  phase: 'Outer',
-  anchorEventType: 'none',
-  hysteresis: false
-}
-[IROS/GOAL_CONT] applyGoalContinuity {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  goal_in: {
-    kind: 'stabilize',
-    targetDepth: 'R3',
-    targetQ: 'Q3',
-    reason: '明示トリガーが無いため、まずは整えて流れを保つ（uncoverはデフォルトにしない）',
-    detail: { ventWill: [Object] }
-  },
-  ctx: { lastQ: 'Q3', lastDepth: 'R3', qTrace: null, memoryQ: null }
-}
-[IROS/CONT continuity] { lastDepth: 'R3', lastQ: 'Q3', finalDepth: 'R3', finalQ: 'Q3' }
-[IROS/GOAL_CONT]  result {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  goal_out: {
-    kind: 'stabilize',
-    targetDepth: 'R3',
-    targetQ: 'Q3',
-    reason: '明示トリガーが無いため、まずは整えて流れを保つ（uncoverはデフォルトにしない）',
-    detail: { ventWill: [Object] }
-  }
-}
-[IROS/DEPTH_WRITE] {
-  route: 'ROTATION',
-  where: 'orchestratorWill',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  baseDepth: 'R3',
-  goalTargetDepth: 'R3',
-  rotationDepth: 'R3',
-  spinLoop: 'SRI',
-  descentGate: 'closed',
-  shouldRotate: false,
-  reason: 'SRI: 上昇トリガ未成立: depthHead=R（S帯ではない） / lastGoalKind=null（uncoverではない） / uncoverStreak=0（<2）（gateは更新のみ）'
-}
-[IROS/WILL priority] {
-  goalKind: 'stabilize',
-  depth: 'R3',
-  phase: 'Outer',
-  targetDepth: 'R3',
-  qCode: 'Q3',
-  targetQ: 'Q3',
-  weights: {
-    mirror: 0.9405,
-    insight: 0.44000000000000006,
-    forward: 0.24,
-    question: 0.1275
-  }
-}
-[IROS/IT][probe] before {
-  textHead: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください',
-  historyLen: 12,
-  historyLen_norm: 11,
-  historyUserLen: 6,
-  last3User: [
-    '🧭\nいまの扱い方\n本文です\n\n多段ブロックの管理としての整理\n本文です',
-    '🧭\nいまの扱い方\n本文です\n\n多段ブロックの管理としての整理\n本文です',
-    'とても魅力的なスタイルに変化しました、この後ブロックで出力してください'
-  ],
-  depth: 'R3',
-  intentLine: {
-    nowLabel: '',
-    coreNeed: null,
-    intentBand: 'I2',
-    direction: 'stabilize',
-    focusLayer: 'R',
-    riskHint: null,
-    guidanceHint: '',
-    tLayerHint: null,
-    hasFutureMemory: false
-  },
-  fixedNorth: { key: 'SUN', text: '太陽SUN', phrase: '成長 / 進化 / 希望 / 歓喜' },
-  intent_anchor: { key: 'SUN', text: null, phrase: null }
-}
-[IROS/IT][probe][fixedNorth] {
-  hasMeta: true,
-  fixedNorth_meta: 'SUN',
-  fixedNorth_ms: null,
-  hasNorth: true,
-  prevIt_fromMemoryState: {
-    active: true,
-    step: 'T3',
-    reason: 'IT_TRIGGER_OK',
-    lastAt: 2026-01-08T12:26:08.007Z
-  },
-  prevIt_fromMeta: {
-    active: true,
-    step: 'T3',
-    reason: 'IT_TRIGGER_OK',
-    lastAt: 2026-01-08T12:26:08.007Z
-  },
-  prevIt_fromHistory: false
-}
-[IROS/IT][result] {
-  ok: true,
-  reason: 'IT_ALREADY_COMMITTED',
-  flags: {
-    hasCore: false,
-    coreRepeated: false,
-    sunOk: true,
-    declarationOk: false,
-    deepenOk: true
-  },
-  tLayerModeActive: true,
-  tLayerHint: 'T3',
-  tVector: null
-}
-[IROS/IT_TRIGGER] {
-  ok: true,
-  itxWriteMode: 'keep',
-  itxPersistReason: 'IT_TRIGGER_OK',
-  itxDecisionReason: 'IT_ALREADY_COMMITTED',
-  flags: {
-    hasCore: false,
-    coreRepeated: false,
-    sunOk: true,
-    declarationOk: false,
-    deepenOk: true
-  },
-  iLexemeForce: false,
-  tLayerModeActive: true,
-  tLayerHint: 'T3',
+  tLayerModeActive: false,
+  tLayerHint: null,
   tVector: null,
   isCommittedT3: true,
   committedStep: 'T3',
@@ -1788,7 +470,7 @@
   },
   hasFocusLabelNow: false,
   focusLabelHead: null,
-  userHead: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください'
+  userHead: '切り替えようとしてるけど、切れてない。多段で'
 }
 [IROS/ORCH][after-container] {
   frame: 'R',
@@ -1812,11 +494,11 @@
   slotPlan_slots_heads: [
     {
       key: 'OBS',
-      head: '@OBS {"laneKey":null,"user":"とても魅力的なスタイルに変化しました、この後ブロックで出力してください","flow":{"delta":"RETURN","confidence":0.7},"lastUserTe'
+      head: '@OBS {"laneKey":null,"user":"切り替えようとしてるけど、切れてない。多段で","flow":{"delta":"RETURN","confidence":0.7},"lastUserText":"切り替えようとし'
     },
     {
       key: 'SHIFT',
-      head: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":false,"no_naming":false,"no_conclusion":'
+      head: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":true,"no_naming":true,"no_conclusion":fa'
     },
     {
       key: 'SAFE',
@@ -1878,7 +560,7 @@
 }
 [IROS/Orchestrator] output meta snapshot { frame: 'R', slotPlanPolicy: 'FINAL', slotPlanLen: 4 }
 [IROS/PostProcess][SLOTPLAN_POLICY] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933',
   slotPlanPolicy_detected: 'FINAL',
   slotPlanPolicy_from: 'metaForSave.framePlan.slotPlanPolicy',
@@ -1887,23 +569,44 @@
   hasSlots: true
 }
 [IROS/CANON][STAMP][PP] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933',
   q_code: 'Q3',
   depth_stage: 'R3',
-  phase: 'Outer'
+  phase: 'Inner'
+}
+[IROS/PP][POLARITY_BRIDGE] {
+  polarityBand_raw: 'positive',
+  polarityFromMirror_raw: null,
+  polarity_normalized: 'yang',
+  polarity_metaBand_raw: 'positive'
 }
 [IROS/MIRROR_FLOW][RESULT] {
   micro: false,
-  confidence: 0.55,
+  confidence: 0.35,
   e_turn: 'e3',
+  polarity_in: 'yang',
+  polarity_metaBand: 'positive',
+  polarity_out: 'yang',
   meaningKey: null,
-  colorKey: 'e3',
+  colorKey: 'e3_yang',
   flowDelta: 'RETURN',
   returnStreak: 1
 }
+[IROS/EXPR][DIRECTIVE_V1] {
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  userCode: '669933',
+  on: true,
+  reason: 'ON',
+  e_turn: 'e3',
+  confidence: 0.35,
+  flowDelta: 'RETURN',
+  returnStreak: 1,
+  head: '【DIRECTIVE_V1（露出禁止）】本文に含めない。構造(Depth/Q/Phase/Lane/slotPlan)は絶対に変更しない。\n' +
+    '語彙：日常語優先。抽象語（内側/外側/未回収/決着/'
+}
 [IROS/EXPR][decision] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933',
   fired: true,
   lane: 'sofia_light',
@@ -1912,7 +615,7 @@
   prefaceHead: '',
   debug: {
     laneKey: 'IDEA_BAND',
-    phase: 'Outer',
+    phase: 'Inner',
     depth: 'R3',
     flowDelta: 'RETURN',
     returnStreak: 1,
@@ -1920,7 +623,7 @@
   }
 }
 [IROS/PostProcess] SLOTPLAN_SEED_TO_WRITER (base visible) {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933',
   slotPlanPolicy: 'FINAL',
   slotPlanPolicy_from: 'metaForSave.framePlan.slotPlanPolicy',
@@ -1936,22 +639,22 @@
   tenantId: 'default',
   qCode: 'Q3',
   depthStage: 'R3',
-  phase: 'Outer'
+  phase: 'Inner'
 }
 [UnifiedAnalysis] user message q_code/depth_stage updated {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  messageId: 16044,
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  messageId: 16224,
   q_code: 'Q3',
   depth_stage: 'R3'
 }
 [IROS][CTXPACK] stamped {
-  traceId: '84e83c6c-d3b6-4510-8d8d-b75db834872b',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  traceId: '879c53b2-a455-4613-817e-817798cad484',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933',
   hasCtxPack: true,
   prevAtIso: null,
   ageSec: null,
-  flowAt: '2026-02-20T11:51:08.296Z',
+  flowAt: '2026-02-21T13:53:16.812Z',
   flowDelta: 'RETURN',
   returnStreak: 1,
   ctxPackKeys: [
@@ -1972,7 +675,7 @@
   hfw_src_len: 12
 }
 [IROS/LLM_GATE][FINAL_CALL][NO_FORCE] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933',
   slotPlanPolicy: 'FINAL',
   framePlanSlotsLen: 4,
@@ -1983,7 +686,7 @@
   head: '流れを保ったまま前に進める'
 }
 [IROS/LLM_GATE][PROBE] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933',
   llmEntry: 'CALL_LLM',
   llmSkipReason: null,
@@ -2000,9 +703,9 @@
   finalForceCall: false,
   finalForceCallReason: 'FINAL_CALL_NO_FORCE',
   resolvedTextLen: null,
-  rewriteSeedLen: 427,
+  rewriteSeedLen: 414,
   decisionResolvedLen: null,
-  decisionRewriteSeedLen: 427
+  decisionRewriteSeedLen: 414
 }
 [IROS/Reply] rotation bridge { spinLoop: 'SRI', descentGate: 'closed', depth: 'R3' }
 [IROS/CANON][STAMP] {
@@ -2010,7 +713,7 @@
   userCode: null,
   q_code: 'Q3',
   depth_stage: 'R3',
-  phase: 'Outer'
+  phase: 'Inner'
 }
 [IROS/rephraseBridge][SLOT_SOURCES] {
   slotPlan_type: 'array',
@@ -2041,7 +744,7 @@
     'pastStateKeyword'
   ]
 }
-[IROS/STATE][anchor-root] { userTextHead: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください' }
+[IROS/STATE][anchor-root] { userTextHead: '切り替えようとしてるけど、切れてない。多段で' }
 [IROS/STATE][fixed-by-meta] {
   intent_anchor_obj: {
     key: 'SUN',
@@ -2056,7 +759,7 @@
   itx_reason: 'IT_TRIGGER_OK',
   itx_last_at: '2026-01-08T12:26:08.007+00:00'
 }
-[IROS/STATE] persistMemoryStateIfAny start {"userCode":"669933","userText":"とても魅力的なスタイルに変化しました、この後ブロックで出力してください","depthInput":"R3","qCodeInput":"Q3","phaseInput":"Outer","yLevelInt":1,"hLevelInt":2,"finalSpinLoop":"SRI","finalSpinStep":2,"finalDescentGate":"closed","itTriggered":true,"clearItxExplicit":false,"shouldClearItx":false,"itx_step":"T3","itx_anchor_event_type":null,"itx_reason":"IT_TRIGGER_OK","itx_last_at":"2026-01-08T12:26:08.007+00:00","anchor_event_db":"none","anchor_write_db":"keep","anchorEntry_decision":{"tEntryOk":false,"anchorEvent":"none","anchorWrite":"keep","reason":"NO_EVIDENCE"},"intent_anchor_key_candidate":"SUN","anchor_action":"keep","qTracePickedFrom":"qTraceEffective","qTrace_keys":["lastQ","dominantQ","streakQ","streakLength","volatility"],"qTrace_qNow":null,"qTrace_q_now":null,"qTrace_currentQ":null,"qTrace_snapshot_currentQ":null,"qTrace_streakQ":"Q3","qTrace_streakLength":1}
+[IROS/STATE] persistMemoryStateIfAny start {"userCode":"669933","userText":"切り替えようとしてるけど、切れてない。多段で","depthInput":"R3","qCodeInput":"Q3","phaseInput":"Inner","yLevelInt":1,"hLevelInt":2,"finalSpinLoop":"SRI","finalSpinStep":2,"finalDescentGate":"closed","itTriggered":null,"clearItxExplicit":false,"shouldClearItx":false,"itx_step":"(keep)","itx_anchor_event_type":"(keep)","itx_reason":"(keep)","itx_last_at":"(keep)","anchor_event_db":"none","anchor_write_db":"keep","anchorEntry_decision":{"tEntryOk":false,"anchorEvent":"none","anchorWrite":"keep","reason":"NO_EVIDENCE"},"intent_anchor_key_candidate":"SUN","anchor_action":"keep","qTracePickedFrom":"qTraceEffective","qTrace_keys":["lastQ","dominantQ","streakQ","streakLength","volatility"],"qTrace_qNow":null,"qTrace_q_now":null,"qTrace_currentQ":null,"qTrace_snapshot_currentQ":null,"qTrace_streakQ":"Q3","qTrace_streakLength":1}
 [IROS/PHASE10_T3][enter] {
   phase10NowItxStep: 'T3',
   phase10NowAnchorWrite: 'keep',
@@ -2073,30 +776,6 @@
   phase10Upgrade: false,
   phase10NextItxStep: null,
   phase10Reason: 'NO_COMMIT'
-}
-[IROS/PERSIST][q_counts][synth] {
-  reason: 'qCountsPicked_null_but_itTriggered_present',
-  it_triggered: true,
-  it_triggered_true: true
-}
-[IROS/PERSIST][q_counts][pick] {
-  has_qCounts_arg: false,
-  has_core_q_counts: false,
-  has_unified_q_counts: false,
-  picked_null: true,
-  picked_type: null,
-  picked_keys: null,
-  it_triggered: true,
-  it_triggered_true: true,
-  fa_pending: '(kept)',
-  fa_lock: '(kept)',
-  wrote: true,
-  wrote_reason: {
-    qCountsPicked: false,
-    itTriggeredResolved: true,
-    faPending: false,
-    faLock: false
-  }
 }
 [IROS/STATE] upsert payload (intent_anchor check) {
   userCode: '669933',
@@ -2148,15 +827,15 @@
     'y_level',         'h_level',
     'spin_loop',       'spin_step',
     'descent_gate',    'situation_summary',
-    'situation_topic', 'q_counts',
-    'anchor_event',    'anchor_write'
+    'situation_topic', 'anchor_event',
+    'anchor_write'
   ],
   depthStage: 'R3',
   qPrimary: 'Q3',
   spinLoop: 'SRI',
   spinStep: 2,
   descentGate: 'closed',
-  qCounts: { it_cooldown: 0, it_triggered_true: true, it_triggered: true },
+  qCounts: '(kept)',
   itx_step: '(kept/none)',
   itx_last_at: '(kept/none)',
   anchor_action: 'keep',
@@ -2164,15 +843,15 @@
   anchor_write: 'keep',
   intent_anchor: '(no-touch)'
 }
- POST /api/credits/capture 200 in 43ms (compile: 1708µs, render: 41ms)
+ POST /api/credits/capture 200 in 132ms (compile: 54ms, render: 78ms)
 [IROS][user:669933][STATE] loaded MemoryState {
   userCode: '669933',
   hasMemory: true,
   intentAnchor: 'SUN',
   depthStage: 'R3',
   qPrimary: 'Q3',
-  selfAcceptance: 0.7292499999999996,
-  phase: 'Outer',
+  selfAcceptance: 0.7592499999999996,
+  phase: 'Inner',
   intentLayer: 'C',
   yLevel: 1,
   hLevel: 2,
@@ -2184,7 +863,7 @@
   itxReason: 'IT_TRIGGER_OK',
   itxLastAt: '2026-01-08T12:26:08.007+00:00',
   sentimentLevel: null,
-  situationSummary: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください',
+  situationSummary: '切り替えようとしてるけど、切れてない。多段で',
   situationTopic: 'その他・ライフ全般',
   qCounts: { it_cooldown: 0, it_triggered: true, it_triggered_true: true }
 }
@@ -2204,7 +883,7 @@
     'topicDigest',     'replyGoal',
     'repeatSignal',    'flowDigest'
   ],
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933'
 }
 [IROS/REPHRASE_FLAG] { raw: 'true', enabled: true }
@@ -2212,8 +891,8 @@
   hasShiftSlot: true,
   shiftSlotKey: 'SHIFT',
   shiftSlotKind: '',
-  shiftSlotLen: 432,
-  shiftSlotHead: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":false,"no_naming":false,"no_conclusion":false,"no_future_instruction":true,"no_lecture":true,"questions_max":1,"no_checklist":true,"lines_ma',
+  shiftSlotLen: 417,
+  shiftSlotHead: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":true,"no_naming":true,"no_conclusion":false,"no_future_instruction":true,"no_lecture":true,"questions_max":1,"no_checklist":true,"lines_max"',
   slotsKeysSample: [
     { key: 'OBS', kind: '' },
     { key: 'SHIFT', kind: '' },
@@ -2230,49 +909,58 @@
   pickedLen: 6,
   roles: [ 'assistant', 'user', 'assistant', 'user', 'assistant', 'user' ],
   tailHeads: [
-    '🧭\nいまの扱い方\n本文です\n\n多段ブロックの管理としての整理\n本文です',
-    '## 📌 いまの並びが、そのまま「札＋中身」を二枚作っている\n先頭の 🧭 が入口の印になって、「いまの扱い方」が一枚',
-    'とても魅力的なスタイルに変化しました、この後ブロックで出力してください'
+    '大丈夫って言ってるけど、本当は止まってほしいのかもしれない。手放したいのに、まだ握ってる。',
+    'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。\n「大丈夫」が口に出るほど、内側では「止まってほしい',
+    '切り替えようとしてるけど、切れてない。多段で'
   ]
 }
 [IROS/ILINE][LOCK_PARTS] {
-  seedLen: 35,
-  userLen: 35,
+  seedLen: 22,
+  userLen: 22,
   seedEqUser: true,
   seedHasUser: true,
   lockPartsLen: 1,
   lockHasNewline: false,
-  lockLen: 35,
-  lockHead120: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください'
+  lockLen: 22,
+  lockHead120: '切り替えようとしてるけど、切れてない。多段で'
 }
 [IROS/ILINE][LOCK_SOURCE] {
   hasSeed: true,
   hasUser: true,
-  seedLen: 35,
-  userLen: 35,
+  seedLen: 22,
+  userLen: 22,
   hasILINE_seed: false,
   hasILINE_user: false,
   hasILINE_any: false,
   hasILINE_END_any: false,
-  head200: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください',
-  tail200: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください'
+  head200: '切り替えようとしてるけど、切れてない。多段で',
+  tail200: '切り替えようとしてるけど、切れてない。多段で'
 }
 [IROS/ILINE][LOCK_EXTRACT] { lockedFromAllLen: 0, lockedUniqueLen: 0, lockedUniqueHead200: '' }
+[IROS/rephraseEngine][INTENT_BAND_EXTRACT] {
+  intentBand_raw: 'R3',
+  tLayerHintRaw: 'T3',
+  itxStep: 'T3',
+  tLayerHint_afterFallback: 'T3',
+  bandOk: 'R3',
+  hintOk: 'T3',
+  note: 'from_tLayerHintRaw'
+}
 [IROS/rephraseEngine][LANE_DETECT] {
   killPolicyRev: 'phase1.5-ideaBandNoKill',
   wantsTConcretize: false,
   wantsIdeaBand: false,
   repeatSignalSame: false,
   repeatSignalHead: '',
-  shiftTextForModeHead: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":false,"no_naming":false,"no_conclusion":',
+  shiftTextForModeHead: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":true,"no_naming":true,"no_conclusion":fa',
   shiftSlotType: 'object',
   shiftSlotKeys: [ 'key', 'text' ],
-  laneHintHead: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":false,"no_naming":false,"no_conclusion":false,"no_future_instruction":true,"no_l'
+  laneHintHead: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":true,"no_naming":true,"no_conclusion":false,"no_future_instruction":true,"no_lec'
 }
 [IROS/systemPrompt][CALLED] {
   __file: '/ROOT/src/lib/iros/language/rephrase/systemPrompt.ts',
   directTask: false,
-  itOk: true,
+  itOk: false,
   personaMode: 'GROUND',
   tLayerHint: 'T3',
   exprFired: true,
@@ -2280,34 +968,34 @@
   lockedILinesLen: 0
 }
 [IROS/rephraseEngine][STATE_SNAPSHOT_PICKED] {
-  traceId: '84e83c6c-d3b6-4510-8d8d-b75db834872b',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  traceId: '879c53b2-a455-4613-817e-817798cad484',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933',
   pickedDepthStage: 'R3',
-  pickedPhase: 'Outer',
+  pickedPhase: 'Inner',
   pickedQCode: 'Q3',
   internalPackHead: 'INTERNAL PACK (DO NOT OUTPUT):\n' +
     '\n' +
     'lastTurnsCount=4\n' +
     'directTask=false\n' +
     'inputKind=chat\n' +
-    'itOk=true\n' +
+    'itOk=false\n' +
     'intentBand=R3\n' +
     'tLayerHint=T3\n' +
     '\n' +
     'META_HINT (DO NOT OUTPUT):\n' +
-    '{"conversation_id":"3afc87f8-9d3e-4f41-983f-035f928e9b74","slotPlanPolicy'
+    '{"conversation_id":"b66ef146-c42a-4b46-9c0c-3fa3f0a74699","slotPlanPolic'
 }
 [IROS/rephraseEngine][ALLOW] {
-  traceId: '84e83c6c-d3b6-4510-8d8d-b75db834872b',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  traceId: '879c53b2-a455-4613-817e-817798cad484',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933',
   depthStage: 'R3',
   qCode: 'Q3',
-  phase: 'Outer',
+  phase: 'Inner',
   laneKeyForAllow: null,
   repeatSignal: false,
-  itOk: true,
+  itOk: false,
   allow: {
     assert: false,
     narrow: false,
@@ -2318,1419 +1006,15 @@
   }
 }
 [IROS/VECTOR][PICK] {
-  traceId: '84e83c6c-d3b6-4510-8d8d-b75db834872b',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  traceId: '879c53b2-a455-4613-817e-817798cad484',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933',
   enabled: false,
   vector: null
 }
 [IROS/rephraseEngine][BLOCK_PLAN] {
-  traceId: '84e83c6c-d3b6-4510-8d8d-b75db834872b',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  enabled: true,
-  goalKind: 'stabilize',
-  exprLane: 'sofia_light',
-  explicitTrigger: true,
-  depthStage: 'R3',
-  itTriggered: false,
-  mode: 'multi6',
-  blocksLen: 6,
-  sysLen: 583
-}
-[IROS/rephraseEngine][EXPR_META] {
-  traceId: '84e83c6c-d3b6-4510-8d8d-b75db834872b',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  injected: true,
-  tone: 'med',
-  density: 'rich',
-  metaphor: 'lite',
-  ambiguity: 'deny',
-  brevity: 'normal',
-  rhythm: 'breathe'
-}
-[IROS/rephraseEngine][MSG_PACK] {
-  traceId: '84e83c6c-d3b6-4510-8d8d-b75db834872b',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  lastTurns: 4,
-  hasHistoryText: true,
-  historyTextLen: 1675,
-  msgCount: 6,
-  roles: [ 'system', 'user', 'assistant', 'user', 'assistant', 'user' ],
-  internalPackLen: 4733,
-  internalPackHasHistoryHint: true,
-  seedDraftLen: 35,
-  seedDraftHead: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください',
-  seedDraftRawAllHead: '@OBS {"laneKey":null,"user":"とても魅力的なスタイルに変化しました、この後ブロックで出力してください","flow":{"delta":"RETURN","confidence":0.7},"lastUserText":"とても魅力的なスタイルに変化しました、この後ブロックで出力してください"}\n' +
-    '@SHIFT {"kind":"c_sense_hint","intent',
-  seedDraftRawPickedHead: '@OBS {"laneKey":null,"user":"とても魅力的なスタイルに変化しました、この後ブロックで出力してください","flow":{"delta":"RETURN","confidence":0.7},"lastUserText":"とても魅力的なスタイルに変化しました、この後ブロックで出力してください"}\n' +
-    '@SHIFT {"kind":"c_sense_hint","intent',
-  slotsHead: [
-    {
-      i: 0,
-      key: 'OBS',
-      head: '@OBS {"laneKey":null,"user":"とても魅力的なスタイルに変化しました、この後ブロックで出力してください","flow":{"delta'
-    },
-    {
-      i: 1,
-      key: 'SHIFT',
-      head: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":'
-    },
-    {
-      i: 2,
-      key: 'SAFE',
-      head: '@SAFE {"laneKey":null,"flow":{"delta":"RETURN","confidence":0.7}}'
-    },
-    {
-      i: 3,
-      key: 'NEXT',
-      head: '@NEXT_HINT {"mode":"advance_hint","laneKey":null,"delta":"RETURN","hint":"流れを保った'
-    }
-  ],
-  itOk: true,
-  intentBand: 'R3',
-  tLayerHint: 'T3',
-  directTask: false,
-  directTask_raw: false,
-  inputKind: 'chat',
-  inputKindFromMeta: null,
-  inputKindFromCtx: null,
-  lockedILines: 0
-}
-[IROS/BLOCK_PLAN][inject] {
-  enabled: true,
-  mode: 'multi6',
-  blocks: [
-    'ENTRY',
-    'SITUATION',
-    'DUAL',
-    'FOCUS_SHIFT',
-    'ACCEPT',
-    'INTEGRATE'
-  ],
-  explicitTrigger: true,
-  goalKind: 'stabilize'
-}
-[IROS/LLM][CALL] {
-  callId: 'bdca3e9562dd',
-  purpose: 'writer',
-  model: 'gpt-5.2',
-  temperature: 0.7,
-  responseFormat: 'text',
-  endpoint: 'https://api.openai.com/v1/chat/completions',
-  traceId: '84e83c6c-d3b6-4510-8d8d-b75db834872b',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  slotPlanPolicy: 'FINAL',
-  mode: 'rephrase',
-  qCode: 'Q3',
-  depthStage: 'R3',
-  msgCount: 6,
-  firstRole: 'system',
-  lastRole: 'user',
-  firstHead: '【上位人格定義：Sofia（DO NOT OUTPUT / 露出禁止）】 - “響き”として現れ、相手が自分の答えに立て…',
-  lastTail: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください',
-  lastUserHead: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください',
-  hasDigest: true,
-  hasAnchor: true,
-  roles: [ 'system', 'user', 'assistant', 'user', 'assistant', 'user' ],
-  caller: 'at callWriterLLM (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_iros_language_08d3a68d._.js:1182:175)',
-  bodyKeys: [ 'max_completion_tokens', 'messages', 'model' ],
-  extraBodyKeys: [],
-  extraBodyRawKeys: [],
-  hasInternalKeys: false
-}
-[IROS/LLM][OK] {
-  callId: 'bdca3e9562dd',
-  purpose: 'writer',
-  model: 'gpt-5.2',
-  ms: 3906,
-  ok: true,
-  usage: {
-    prompt_tokens: 5107,
-    completion_tokens: 182,
-    total_tokens: 5289,
-    prompt_tokens_details: { cached_tokens: 0, audio_tokens: 0 },
-    completion_tokens_details: {
-      reasoning_tokens: 0,
-      audio_tokens: 0,
-      accepted_prediction_tokens: 0,
-      rejected_prediction_tokens: 0
-    }
-  },
-  traceId: '84e83c6c-d3b6-4510-8d8d-b75db834872b',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  outLen: 249,
-  outHead: '## 🧿 変化した「魅力」の芯\n' +
-    '「とても魅力的なスタイルに変化しました」が、この場の手触りをそのまま言い当てている。\n' +
-    '説明が増えたのでなく、区切りと所属が見え'
-}
-[IROS/rephraseEngine][OK] {
-  traceId: '84e83c6c-d3b6-4510-8d8d-b75db834872b',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  mode: 'LLM',
-  keys: [ 'OBS', 'SHIFT', 'SAFE', 'NEXT' ],
-  rawLen: 249,
-  rawHead: '## 🧿 変化した「魅力」の芯\n' +
-    '「とても魅力的なスタイルに変化しました」が、この場の手触りをそのまま言い当てている。\n' +
-    '説明が増えたのでなく、区切りと所属が見える書き方になっている。\n' +
-    '\n' +
-    '## 📌 この後の「ブロックで出力」の前提\n' +
-    'いまの形'
-}
-[IROS/FLAGSHIP_GUARD][DEBUG_IN] {
-  rev: 'guard-rev-2026-01-28-b',
-  inputLen: 238,
-  inputHead: '## 🧿 変化した「魅力」の芯\n' +
-    '「とても魅力的なスタイルに変化しました」が、この場の手触りをそのまま言い当てている。\n' +
-    '説明が増えたのでなく、区切りと所属が見える書き方になっている。\n' +
-    '## 📌 この後の「ブロックで出力」の前提\n' +
-    'いまの形は',
-  slotKeys: [ 'OBS', 'SHIFT', 'SAFE', 'NEXT' ]
-}
-[IROS/FLAGSHIP_GUARD][DEBUG_SCORE] {
-  rev: 'guard-rev-2026-01-28-b',
-  normalLite: true,
-  scaffoldLike: false,
-  len: 238,
-  qCount: 0,
-  qCountMark: 0,
-  cheer: 0,
-  hedge: 0,
-  generic: 0,
-  blandPressure: 0,
-  bulletLike: 0,
-  hasFlagshipSign: false
-}
-[IROS/FLAGSHIP][VERDICT] {
-  traceId: '84e83c6c-d3b6-4510-8d8d-b75db834872b',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  level: 'OK',
-  ok: true,
-  qCount: 0,
-  score: {
-    fatal: 0,
-    warn: 0,
-    qCount: 0,
-    bulletLike: 0,
-    hedge: 0,
-    cheer: 0,
-    generic: 0,
-    runaway: 0,
-    exaggeration: 0,
-    mismatch: 0,
-    retrySame: 0
-  },
-  reasons: [],
-  head: '## 🧿 変化した「魅力」の芯\n' +
-    '「とても魅力的なスタイルに変化しました」が、この場の手触りをそのまま言い当てている。\n' +
-    '説明が増えたのでなく、区切りと所属が見える書き方になっている。\n' +
-    '## 📌 この後の「ブロックで出力」の前提\n' +
-    'いまの形は、空行でブロックが切れて、直上の行がそのブロックの札になる。\n' +
-    'だから「本文です」は、同じ語でも直前の札に所属して役割が決まる。\n' +
-    '## 🧭 ブロック出力（そのまま）\n' +
-    '🧭\n' +
-    'いまの扱い方\n' +
-    '本文です\n' +
-    '多段'
-}
-[IROS/BLOCK_PLAN][CONTRACT_VIOLATION] {
-  traceId: '84e83c6c-d3b6-4510-8d8d-b75db834872b',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  mode: 'multi6',
-  blocks: [
-    'ENTRY',
-    'SITUATION',
-    'DUAL',
-    'FOCUS_SHIFT',
-    'ACCEPT',
-    'INTEGRATE'
-  ],
-  missing: [ '入口' ],
-  head: '## 🧿 変化した「魅力」の芯\n' +
-    '「とても魅力的なスタイルに変化しました」が、この場の手触りをそのまま言い当てている。\n' +
-    '説明が増えたのでなく、区切りと所属が見える書き方になっている。\n' +
-    '## 📌 この後の「ブロックで出力」の前提\n' +
-    'いまの形は、空行でブロックが切れて、直上の行がそのブロックの札になる。\n' +
-    'だから「本文です」は、同じ語でも直前の札に所属して役割が決まる。\n' +
-    '## 🧭 ブロック出力（そのまま）\n' +
-    '🧭\n' +
-    'いまの扱い方\n' +
-    '本文です\n' +
-    '多段',
-  soft: true,
-  tailTruncated: false
-}
-[IROS/rephraseEngine][MIN_OK_KIND] {
-  inputKindNow: 'chat',
-  isMicroOrGreetingNow: false,
-  shortReplyOk: false,
-  MIN_OK_LEN: 40,
-  reason: 'chat_relaxed_40',
-  shiftTextHead: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":false,"no_naming":false,"no_conclusion":false,"no_future_ins',
-  shiftObjHasAllow: true,
-  isTConcretize: false,
-  isIdeaBand: false,
-  shiftKind: 'c_sense_hint'
-}
-[IROS/rephraseEngine][AFTER_ATTACH][EXTRA_TRACE] {
-  traceId: '84e83c6c-d3b6-4510-8d8d-b75db834872b',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  hasExtra: true,
-  blockPlanMode: 'multi6',
-  blockPlanBlocksLen: 6,
-  hasRephraseBlocks: true,
-  rephraseBlocksLen: 12,
-  outKeysLen: 4,
-  note: 'FLAGSHIP_OK_NO_RETRY',
-  head: '## 🧿 変化した「魅力」の芯\n' +
-    '「とても魅力的なスタイルに変化しました」が、この場の手触りをそのまま言い当てている。\n' +
-    '説明が増えたのでなく、区切りと所属が見え'
-}
-[IROS/rephraseAttach][RES_KEYS] {
-  resKeys: [ 'ok', 'slots', 'meta' ],
-  metaKeys: [ 'inKeys', 'outKeys', 'rawLen', 'rawHead', 'note', 'extra' ],
-  outKeys: [],
-  metaOutKeys: []
-}
-[IROS/rephraseAttach][OK] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  blocksLen: 12,
-  head: '## 🧿 変化した「魅力」の芯'
-}
-[IROS/CONV_EVIDENCE] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  understand: 0,
-  repair: 0,
-  advance: 1,
-  proof: 1,
-  reason: 'U!:no_ctx_summary | R!:no_repair | A:next_hint:advance_hint',
-  head: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください',
-  detail: {
-    branch: null,
-    topicHint: null,
-    q: 'Q3',
-    depth: 'R3',
-    phase: 'Outer',
-    slotsLen: 4
-  }
-}
-[IROS/renderGateway][RB_CONTENT_DIAG] {
-  rev: 'phase11-open-close-v2-LOADED',
-  rbLen: 12,
-  joinedLen: 238,
-  head1: '## 🧿 変化した「魅力」の芯',
-  head2: '「とても魅力的なスタイルに変化しました」が、この場の手触りをそのまま言い当てている。',
-  tail2: '多段ブロックの管理としての整理',
-  tail1: '本文です'
-}
-[IROS/renderGW][META_PICKED_FIX] {
-  rev: 'phase11-open-close-v2-LOADED',
-  pickedFrom: 'rephraseBlocks',
-  pickedLen_raw: 13,
-  pickedHead_raw: '流れを保ったまま前に進める',
-  pickedLen_meta: 238,
-  pickedHead_meta: '## 🧿 変化した「魅力」の芯 「とても魅力的なスタイルに変化しました」が、こ…',
-  outLen: 238,
-  outHead: '## 🧿 変化した「魅力」の芯 「とても魅力的なスタイルに変化しました」が、こ…'
-}
-[IROS/renderGateway][LEN_SNAPSHOT] {
-  rev: 'phase11-open-close-v2-LOADED',
-  len_before: 238,
-  head_before: '## 🧿 変化した「魅力」の芯 「とても魅力的なスタイルに変化しました」が、こ…'
-}
-[IROS/renderGateway][HAS_REPHRASE_BLOCKS] {
-  rev: 'phase11-open-close-v2-LOADED',
-  rephraseBlocksLen: 12,
-  outLen: 238
-}
-[IROS/renderGateway][OK] {"rev":"phase11-open-close-v2-LOADED","outLen":238,"pickedFrom":"rephraseBlocks","slotPlanPolicy":"FINAL","usedSlots":true,"scaffoldApplied":false,"expandAllowed":true}
-[IROS/renderGateway][REV] {"rev":"phase11-open-close-v2-LOADED"}
-[IROS/PERSIST_PICK] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  pickedFrom: 'uiResultContent',
-  pickedLen: 238,
-  pickedHead: '## 🧿 変化した「魅力」の芯\n「とても魅力的なスタイルに変化しました」が、こ',
-  fromResultObjLen: 238,
-  blocksJoinedCleanedLen: 238,
-  resolvedUiTextLen: 238,
-  userEchoLen: 35,
-  isPickedDots: false
-}
-[IROS][Training] computed targetKind = stabilize
-[IROS][Training] insert sample {
-  user_code: '669933',
-  conversation_id: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  message_id: null,
-  input_text: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください',
-  analysis_text: 'Q:Q3 / D:R3 / P:Outer / K:stabilize / T:その他・ライフ全般',
-  q_code: 'Q3',
-  depth_stage: 'R3',
-  phase: 'Outer',
-  self_acceptance: 0.7292499999999996,
-  situation_summary: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください',
-  situation_topic: 'その他・ライフ全般',
-  target_kind: 'stabilize',
-  target_label: null,
-  y_level: 1,
-  h_level: 2
-}
-[IROS][Training] insert ok
- POST /api/agent/iros/reply 200 in 5.6s (compile: 167ms, render: 5.4s)
-[authz] 30335e63-2060-4e5a-a0c5-4ed6afae789a start { path: 'http://localhost:3000/api/agent/iros/conversations' }
-[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] 30335e63-2060-4e5a-a0c5-4ed6afae789a verify firebase: 263.212ms
-[authz] 30335e63-2060-4e5a-a0c5-4ed6afae789a fetch user: 38.11ms
-[authz] 30335e63-2060-4e5a-a0c5-4ed6afae789a ok { user: '669933', role: 'admin', provider: 'password', ms: 303 }
- GET /api/agent/iros/conversations 200 in 346ms (compile: 1661µs, render: 345ms)
- GET /api/iros-logs?conv_id=&raw=0 400 in 5ms (compile: 1905µs, render: 3ms)
- GET /api/iros-logs?conv_id=&raw=0 400 in 4ms (compile: 1729µs, render: 3ms)
- GET /api/iros-logs?conv_id=&raw=0 400 in 4ms (compile: 1228µs, render: 3ms)
- GET /api/iros-logs?conv_id=3afc87f8-9d3e-4f41-983f-035f928e9b74&raw=0 200 in 931ms (compile: 1397µs, render: 929ms)
- GET /api/iros-logs?conv_id=3afc87f8-9d3e-4f41-983f-035f928e9b74&raw=0 200 in 233ms (compile: 1876µs, render: 231ms)
- GET /api/iros-logs?conv_id=3afc87f8-9d3e-4f41-983f-035f928e9b74&raw=0 200 in 461ms (compile: 2ms, render: 458ms)
- GET /api/iros-logs?conv_id=3afc87f8-9d3e-4f41-983f-035f928e9b74&raw=1 200 in 446ms (compile: 1800µs, render: 444ms)
- GET /api/iros-logs?conv_id=&raw=0 400 in 4ms (compile: 1622µs, render: 3ms)
- GET /api/iros-logs?conv_id=&raw=0 400 in 4ms (compile: 1650µs, render: 3ms)
- GET /api/iros-logs?conv_id=&raw=1 400 in 4ms (compile: 1457µs, render: 2ms)
- GET /api/iros-logs?conv_id=&raw=0 400 in 4ms (compile: 1273µs, render: 2ms)
- GET /api/iros-logs?conv_id=3afc87f8-9d3e-4f41-983f-035f928e9b74&raw=0 200 in 633ms (compile: 1419µs, render: 632ms)
- GET /api/iros-logs?conv_id=3afc87f8-9d3e-4f41-983f-035f928e9b74&raw=1 200 in 274ms (compile: 1563µs, render: 273ms)
- GET /api/iros-logs?conv_id=&raw=1 400 in 5ms (compile: 2ms, render: 3ms)
- GET /api/iros-logs?conv_id=&raw=1 400 in 4ms (compile: 1640µs, render: 2ms)
- GET /api/iros-logs?conv_id=&raw=1 400 in 4ms (compile: 1144µs, render: 3ms)
- GET /api/iros-logs?conv_id=&raw=1 400 in 3ms (compile: 1139µs, render: 2ms)
- GET /api/iros-logs?conv_id=&raw=1 400 in 4ms (compile: 1322µs, render: 2ms)
- GET /api/iros-logs?conv_id=&raw=1 400 in 4ms (compile: 1241µs, render: 2ms)
- GET /api/iros-logs?conv_id=3afc87f8-9d3e-4f41-983f-035f928e9b74&raw=1 200 in 1027ms (compile: 1319µs, render: 1026ms)
- GET /api/iros-logs?conv_id=3afc87f8-9d3e-4f41-983f-035f928e9b74&raw=1 200 in 333ms (compile: 1781µs, render: 331ms)
- GET /api/iros-logs?conv_id=3afc87f8-9d3e-4f41-983f-035f928e9b74&raw=1 200 in 348ms (compile: 1532µs, render: 347ms)
- GET /api/iros-logs?conv_id=&raw=1 400 in 4ms (compile: 1530µs, render: 2ms)
- GET /api/iros-logs?conv_id=&raw=1 400 in 4ms (compile: 1370µs, render: 2ms)
- GET /api/iros-logs?conv_id=&raw=1 400 in 4ms (compile: 1240µs, render: 2ms)
- GET /api/iros-logs?conv_id=&raw=1 400 in 3ms (compile: 1115µs, render: 2ms)
- GET /api/iros-logs?conv_id=3afc87f8-9d3e-4f41-983f-035f928e9b74&raw=1 200 in 753ms (compile: 1248µs, render: 752ms)
- GET /api/iros-logs?conv_id=3afc87f8-9d3e-4f41-983f-035f928e9b74&raw=1 200 in 230ms (compile: 1489µs, render: 229ms)
- GET /api/iros-logs?conv_id=&raw=1 400 in 4ms (compile: 1460µs, render: 3ms)
- GET /api/iros-logs?conv_id=3afc87f8-9d3e-4f41-983f-035f928e9b74&raw=1 200 in 648ms (compile: 2ms, render: 646ms)
- GET /api/iros-logs?conv_id=3afc87f8-9d3e-4f41-983f-035f928e9b74&raw=1 200 in 360ms (compile: 1694µs, render: 358ms)
- GET /api/iros-logs?conv_id=3afc87f8-9d3e-4f41-983f-035f928e9b74&raw=1 200 in 290ms (compile: 1613µs, render: 289ms)
- GET /api/iros-logs?conv_id=3afc87f8-9d3e-4f41-983f-035f928e9b74&raw=1 200 in 872ms (compile: 1593µs, render: 871ms)
- GET /api/iros-logs?conv_id=3afc87f8-9d3e-4f41-983f-035f928e9b74&raw=1 200 in 424ms (compile: 1765µs, render: 423ms)
- GET /api/iros-logs?conv_id=3afc87f8-9d3e-4f41-983f-035f928e9b74&raw=1 200 in 502ms (compile: 1634µs, render: 501ms)
- GET /api/iros-logs?conv_id=3afc87f8-9d3e-4f41-983f-035f928e9b74&raw=1 200 in 716ms (compile: 1662µs, render: 715ms)
- POST /api/register-push 200 in 389ms (compile: 1407µs, render: 388ms)
- POST /api/register-push 200 in 785ms (compile: 1575µs, render: 784ms)
- POST /api/register-push 200 in 780ms (compile: 2ms, render: 778ms)
- GET /iros-ai 200 in 78ms (compile: 5ms, render: 73ms)
- POST /api/telemetry 204 in 6ms (compile: 2ms, render: 4ms)
-[authz] 02168c44-95f1-4c52-a135-92278c7b6c97 start { path: 'http://localhost:3000/api/agent/iros/userinfo' }
-[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] f7c453b6-641c-4d30-8de1-e4d14af4e5c4 start { path: 'http://localhost:3000/api/q/unified?user_code=669933' }
-[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] 02168c44-95f1-4c52-a135-92278c7b6c97 verify firebase: 375.659ms
-[authz] f7c453b6-641c-4d30-8de1-e4d14af4e5c4 verify firebase: 260.616ms
- POST /api/register-push 200 in 672ms (compile: 1012µs, render: 671ms)
- POST /api/register-push 200 in 438ms (compile: 1218µs, render: 436ms)
-[authz] 02168c44-95f1-4c52-a135-92278c7b6c97 fetch user: 358.697ms
-[authz] 02168c44-95f1-4c52-a135-92278c7b6c97 ok { user: '669933', role: 'admin', provider: 'password', ms: 742 }
-[IROS/UserInfo] authz = {
-  ok: true,
-  allowed: true,
-  status: 200,
-  pgJwt: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njk5MzMiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInVzZXJfY29kZSI6IjY2OTkzMyIsImZpcmViYXNlX3VpZCI6Ikt2UDFQNHNpZnRTRUZkTGtka1lqcVY0aE12MDIiLCJleHAiOjE3NzE1OTQwODIsImlhdCI6MTc3MTU5MzE4Mn0.ojzHIVw0ZvWvjXrkNjCmmh6pUZGtKcl0OO2hy9I1F7U',
-  userCode: '669933',
-  role: 'admin',
-  user: { uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02', user_code: '669933' },
-  uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02'
-}
-[authz] f7c453b6-641c-4d30-8de1-e4d14af4e5c4 fetch user: 237.181ms
-[authz] f7c453b6-641c-4d30-8de1-e4d14af4e5c4 ok { user: '669933', role: 'admin', provider: 'password', ms: 504 }
- GET /api/agent/iros/userinfo 200 in 817ms (compile: 1234µs, render: 816ms)
-[authz] fdb3b5a9-40d0-4be8-986c-53692fe0c1fe start { path: 'http://localhost:3000/api/agent/iros/conversations' }
-[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] fdb3b5a9-40d0-4be8-986c-53692fe0c1fe verify firebase: 249.867ms
-[authz] fdb3b5a9-40d0-4be8-986c-53692fe0c1fe fetch user: 60.296ms
-[authz] fdb3b5a9-40d0-4be8-986c-53692fe0c1fe ok { user: '669933', role: 'admin', provider: 'password', ms: 317 }
- GET /api/agent/iros/conversations 200 in 454ms (compile: 8ms, render: 446ms)
-[authz] 1d8c6569-dfed-496f-a2a4-ef41373b5830 start {
-  path: 'http://localhost:3000/api/agent/iros/messages?conversation_id=3afc87f8-9d3e-4f41-983f-035f928e9b74'
-}
-[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] 1d8c6569-dfed-496f-a2a4-ef41373b5830 verify firebase: 1.004s
-[authz] 1d8c6569-dfed-496f-a2a4-ef41373b5830 fetch user: 40.788ms
-[authz] 1d8c6569-dfed-496f-a2a4-ef41373b5830 ok { user: '669933', role: 'admin', provider: 'password', ms: 1049 }
- GET /api/agent/iros/messages?conversation_id=3afc87f8-9d3e-4f41-983f-035f928e9b74 200 in 2.1s (compile: 5ms, render: 2.1s)
- GET /api/q/unified?user_code=669933 200 in 5.9s (compile: 1399µs, render: 5.9s)
-[authz] 067a756e-d79b-4459-8cee-1227004dd642 start { path: 'http://localhost:3000/api/agent/iros/messages' }
-[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] 067a756e-d79b-4459-8cee-1227004dd642 verify firebase: 333.982ms
-[authz] 067a756e-d79b-4459-8cee-1227004dd642 fetch user: 114.452ms
-[authz] 067a756e-d79b-4459-8cee-1227004dd642 ok { user: '669933', role: 'admin', provider: 'password', ms: 457 }
- POST /api/agent/iros/messages 200 in 918ms (compile: 1718µs, render: 916ms)
-[IROS/FLAGSHIP_GUARD][MODULE_LOADED] { rev: 'guard-rev-2026-01-28-b', at: '2026-02-20T13:13:15.141Z' }
-[IROS/FLAGS_ENV_HEAD] {
-  IROS_RETRY_FINAL_FORCE_CALL: '0',
-  IROS_FLAGSHIP_REWRITE: '1',
-  IROS_LOG_FLAGS: 'true'
-}
-[IROS/FLAGS] {
-  retryFinalForceCall: false,
-  flagshipRewrite: true,
-  guardEnabled: true,
-  guardSkipShort: false,
-  guardShortMaxLen: 80,
-  logFlags: true
-}
-[IROS/renderGateway][MODULE_LOADED] { rev: 'phase11-open-close-v2-LOADED', at: '2026-02-20T13:13:15.164Z' }
-[IROS/pipe][TRACE] {
-  traceId: '15e46dda-0bd3-42e4-bda8-e083f79e02c3',
-  conversationKey: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  conversationId: null,
-  userCode: '669933',
-  modeHint: 'auto',
-  hasHeaderUserCode: true,
-  devBypass: false
-}
-[authz] 01b7cb56-39bb-4772-af14-c13cb97f7675 start { path: 'http://localhost:3000/api/agent/iros/reply' }
-[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] 01b7cb56-39bb-4772-af14-c13cb97f7675 verify firebase: 250.187ms
-[authz] 01b7cb56-39bb-4772-af14-c13cb97f7675 fetch user: 53.065ms
-[authz] 01b7cb56-39bb-4772-af14-c13cb97f7675 ok { user: '669933', role: 'admin', provider: 'password', ms: 315 }
-[IROS/pipe][TRACE_RESOLVED] {
-  traceId: '15e46dda-0bd3-42e4-bda8-e083f79e02c3',
-  conversationKey: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933'
-}
- POST /api/credits/authorize 200 in 131ms (compile: 6ms, render: 125ms)
-[IROS/UserProfile] load ok {
-  userCode: '669933',
-  hasIrosRow: true,
-  sofia_credit: 421,
-  style: 'friendly',
-  user_call_name: 'orion',
-  plan_status: null
-}
-[IROS/Reply] handleIrosReply start {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  mode: 'auto',
-  tenantId: 'default',
-  rememberScope: null,
-  traceId: '15e46dda-0bd3-42e4-bda8-e083f79e02c3',
-  style: 'friendly',
-  history_len: 12,
-  persistAssistantAllowed: false
-}
-[IROS][user:669933][STATE] loaded MemoryState {
-  userCode: '669933',
-  hasMemory: true,
-  intentAnchor: 'SUN',
-  depthStage: 'R3',
-  qPrimary: 'Q3',
-  selfAcceptance: 0.7292499999999996,
-  phase: 'Outer',
-  intentLayer: 'C',
-  yLevel: 1,
-  hLevel: 2,
-  spinLoop: 'SRI',
-  spinStep: 2,
-  descentGate: 'closed',
-  itxStep: 'T3',
-  itxAnchorEventType: null,
-  itxReason: 'IT_TRIGGER_OK',
-  itxLastAt: '2026-01-08T12:26:08.007+00:00',
-  sentimentLevel: null,
-  situationSummary: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください',
-  situationTopic: 'その他・ライフ全般',
-  qCounts: { it_cooldown: 0, it_triggered: true, it_triggered_true: true }
-}
-[IROS][user:669933][STATE] loaded MemoryState (orchestratorState) {
-  userCode: '669933',
-  hasMemory: true,
-  intentAnchor: 'SUN',
-  depthStage: 'R3',
-  qPrimary: 'Q3',
-  selfAcceptance: 0.7292499999999996,
-  phase: 'Outer',
-  intentLayer: 'C',
-  yLevel: 1,
-  hLevel: 2,
-  spinLoop: 'SRI',
-  spinStep: 2,
-  descentGate: 'closed'
-}
-[IROS/Context] framePlan built {
-  userCode: null,
-  inputKind: 'chat',
-  frame: 'R',
-  hasSlots: true,
-  spinLoop: null,
-  descentGate: 'closed',
-  depthStage: 'R3',
-  phase: 'Outer',
-  requestedDepth: null,
-  requestedQCode: null,
-  slots_isArray: true,
-  slots_len: 4,
-  slots_samples: [
-    {
-      i: 0,
-      type: 'object',
-      isNull: false,
-      isObj: true,
-      keys: [Array],
-      key: null,
-      kind: null,
-      contentHead: '',
-      textHead: '',
-      promptHead: '',
-      jsonHead: '{"id":"OBS","required":true,"hint":"観測（事実/状況の再提示）"}'
-    },
-    {
-      i: 1,
-      type: 'object',
-      isNull: false,
-      isObj: true,
-      keys: [Array],
-      key: null,
-      kind: null,
-      contentHead: '',
-      textHead: '',
-      promptHead: '',
-      jsonHead: '{"id":"SHIFT","required":true,"hint":"視点の転換（1つだけ）"}'
-    },
-    {
-      i: 2,
-      type: 'object',
-      isNull: false,
-      isObj: true,
-      keys: [Array],
-      key: null,
-      kind: null,
-      contentHead: '',
-      textHead: '',
-      promptHead: '',
-      jsonHead: '{"id":"NEXT","required":true,"hint":"次の一歩（1つだけ）"}'
-    },
-    {
-      i: 3,
-      type: 'object',
-      isNull: false,
-      isObj: true,
-      keys: [Array],
-      key: null,
-      kind: null,
-      contentHead: '',
-      textHead: '',
-      promptHead: '',
-      jsonHead: '{"id":"SAFE","required":true,"hint":"安全句（静かな保険）"}'
-    }
-  ],
-  slots_heads: [
-    { key: null, head: '' },
-    { key: null, head: '' },
-    { key: null, head: '' },
-    { key: null, head: '' }
-  ]
-}
-[IROS][DepthGate] check {
-  prevDepthStage: 'R3',
-  requestedDepth_in: null,
-  requestedDepth_out: null,
-  gateApplied: false
-}
-[IROS/Orchestrator] input meta snapshot {
-  hasRotationState: true,
-  spinLoop: 'SRI',
-  descentGate: 'closed',
-  depth: 'R3',
-  frame: 'R',
-  slotPlanLen: 4,
-  slotPlanPolicy: null,
-  historyLen: 12,
-  hasIntentAnchor: true,
-  intentAnchorKey: 'SUN',
-  isIrDiagnosisTurn: null,
-  mode: null
-}
-[IROS][user:669933][STATE] loaded MemoryState {
-  userCode: '669933',
-  hasMemory: true,
-  intentAnchor: 'SUN',
-  depthStage: 'R3',
-  qPrimary: 'Q3',
-  selfAcceptance: 0.7292499999999996,
-  phase: 'Outer',
-  intentLayer: 'C',
-  yLevel: 1,
-  hLevel: 2,
-  spinLoop: 'SRI',
-  spinStep: 2,
-  descentGate: 'closed',
-  itxStep: 'T3',
-  itxAnchorEventType: null,
-  itxReason: 'IT_TRIGGER_OK',
-  itxLastAt: '2026-01-08T12:26:08.007+00:00',
-  sentimentLevel: null,
-  situationSummary: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください',
-  situationTopic: 'その他・ライフ全般',
-  qCounts: { it_cooldown: 0, it_triggered: true, it_triggered_true: true }
-}
-[IROS][user:669933][STATE] loaded MemoryState (orchestratorState) {
-  userCode: '669933',
-  hasMemory: true,
-  intentAnchor: 'SUN',
-  depthStage: 'R3',
-  qPrimary: 'Q3',
-  selfAcceptance: 0.7292499999999996,
-  phase: 'Outer',
-  intentLayer: 'C',
-  yLevel: 1,
-  hLevel: 2,
-  spinLoop: 'SRI',
-  spinStep: 2,
-  descentGate: 'closed'
-}
-[IROS/SA] estimateSelfAcceptance v2 (line) {
-  input: {
-    qCode: null,
-    depthStage: 'R3',
-    phase: 'Outer',
-    hasHistoryDigest: false,
-    lastSelfAcceptance: 0.7292499999999996
-  },
-  result: {
-    base: 0.7292499999999996,
-    deltaFromWords: 0,
-    value: 0.7292499999999996
-  },
-  notes: [
-    'base = lastSelfAcceptance（ライン） → 0.729',
-    'S/R層 intensity=1.0',
-    'deltaTextRaw=0.000, intensity=1.00, deltaWithIntensity=0.000',
-    'deltaWithIntensity=0 → effectiveDelta=0',
-    'value=0.729 (raw=0.729)'
-  ]
-}
-[IROS/SpinControl] {
-  rank: 'low',
-  direction: 'forward',
-  promptStyle: 'one-step',
-  promptStyle_raw: 'one-step',
-  phase: 'Outer',
-  anchorEventType: 'none',
-  hysteresis: false
-}
-[IROS/GOAL_CONT] applyGoalContinuity {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  goal_in: {
-    kind: 'stabilize',
-    targetDepth: 'R3',
-    targetQ: 'Q3',
-    reason: '明示トリガーが無いため、まずは整えて流れを保つ（uncoverはデフォルトにしない）',
-    detail: { ventWill: [Object] }
-  },
-  ctx: { lastQ: 'Q3', lastDepth: 'R3', qTrace: null, memoryQ: null }
-}
-[IROS/CONT continuity] { lastDepth: 'R3', lastQ: 'Q3', finalDepth: 'R3', finalQ: 'Q3' }
-[IROS/GOAL_CONT]  result {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  goal_out: {
-    kind: 'stabilize',
-    targetDepth: 'R3',
-    targetQ: 'Q3',
-    reason: '明示トリガーが無いため、まずは整えて流れを保つ（uncoverはデフォルトにしない）',
-    detail: { ventWill: [Object] }
-  }
-}
-[IROS/DEPTH_WRITE] {
-  route: 'ROTATION',
-  where: 'orchestratorWill',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  baseDepth: 'R3',
-  goalTargetDepth: 'R3',
-  rotationDepth: 'R3',
-  spinLoop: 'SRI',
-  descentGate: 'closed',
-  shouldRotate: false,
-  reason: 'SRI: 上昇トリガ未成立: depthHead=R（S帯ではない） / lastGoalKind=null（uncoverではない） / uncoverStreak=0（<2）（gateは更新のみ）'
-}
-[IROS/WILL priority] {
-  goalKind: 'stabilize',
-  depth: 'R3',
-  phase: 'Outer',
-  targetDepth: 'R3',
-  qCode: 'Q3',
-  targetQ: 'Q3',
-  weights: {
-    mirror: 0.9405,
-    insight: 0.44000000000000006,
-    forward: 0.24,
-    question: 0.1275
-  }
-}
-[IROS/IT][probe] before {
-  textHead: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください',
-  historyLen: 12,
-  historyLen_norm: 11,
-  historyUserLen: 6,
-  last3User: [
-    '🧭\nいまの扱い方\n本文です\n\n多段ブロックの管理としての整理\n本文です',
-    'とても魅力的なスタイルに変化しました、この後ブロックで出力してください',
-    'とても魅力的なスタイルに変化しました、この後ブロックで出力してください'
-  ],
-  depth: 'R3',
-  intentLine: {
-    nowLabel: '',
-    coreNeed: null,
-    intentBand: 'I2',
-    direction: 'stabilize',
-    focusLayer: 'R',
-    riskHint: null,
-    guidanceHint: '',
-    tLayerHint: null,
-    hasFutureMemory: false
-  },
-  fixedNorth: { key: 'SUN', text: '太陽SUN', phrase: '成長 / 進化 / 希望 / 歓喜' },
-  intent_anchor: { key: 'SUN', text: null, phrase: null }
-}
-[IROS/IT][probe][fixedNorth] {
-  hasMeta: true,
-  fixedNorth_meta: 'SUN',
-  fixedNorth_ms: null,
-  hasNorth: true,
-  prevIt_fromMemoryState: {
-    active: true,
-    step: 'T3',
-    reason: 'IT_TRIGGER_OK',
-    lastAt: 2026-01-08T12:26:08.007Z
-  },
-  prevIt_fromMeta: {
-    active: true,
-    step: 'T3',
-    reason: 'IT_TRIGGER_OK',
-    lastAt: 2026-01-08T12:26:08.007Z
-  },
-  prevIt_fromHistory: false
-}
-[IROS/IT][result] {
-  ok: true,
-  reason: 'IT_ALREADY_COMMITTED',
-  flags: {
-    hasCore: false,
-    coreRepeated: false,
-    sunOk: true,
-    declarationOk: false,
-    deepenOk: true
-  },
-  tLayerModeActive: true,
-  tLayerHint: 'T3',
-  tVector: null
-}
-[IROS/IT_TRIGGER] {
-  ok: true,
-  itxWriteMode: 'keep',
-  itxPersistReason: 'IT_TRIGGER_OK',
-  itxDecisionReason: 'IT_ALREADY_COMMITTED',
-  flags: {
-    hasCore: false,
-    coreRepeated: false,
-    sunOk: true,
-    declarationOk: false,
-    deepenOk: true
-  },
-  iLexemeForce: false,
-  tLayerModeActive: true,
-  tLayerHint: 'T3',
-  tVector: null,
-  isCommittedT3: true,
-  committedStep: 'T3',
-  itx_probe_reason: 'IT_ALREADY_COMMITTED'
-}
-[IROS/ANCHOR_DEBUG][before-detect] {
-  ms_intent_anchor_raw: 'SUN',
-  ms_intent_anchor_fixed_true: false,
-  itx_step_ms: 'T3',
-  evidence_choiceId: null,
-  evidence_actionId: null,
-  evidence_source: 'none'
-}
-[IROS/ANCHOR_ENTRY] {"evidence":{"choiceId":null,"actionId":null,"source":"none"},"decision":{"tEntryOk":false,"anchorEvent":"none","anchorWrite":"keep","reason":"NO_EVIDENCE"},"fixedNorthKey":"SUN","itActive":true,"hasAnchorAlready":true}
-[IROS/FLOW][observe] {
-  delta: 'RETURN',
-  confidence: 0.7,
-  hasLastUserText: true,
-  returnStreak: 1
-}
-[IROS/T_CONCRETIZE][FORCE_SWITCH_CHECK] {
-  forceTConcretize: false,
-  laneKeyNowRaw: null,
-  laneKeyNowBase: null,
-  laneKeyNow: null,
-  stall: {
-    severity: 'soft',
-    reason: 'STALL_SOFT',
-    detail: {
-      streakSameUser: 2,
-      repeatSignal: null,
-      flowDelta: 'RETURN',
-      returnStreak: 1,
-      anchorReason: 'NO_EVIDENCE',
-      convReason: null
-    }
-  },
-  hasFocusLabelNow: false,
-  focusLabelHead: null,
-  userHead: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください'
-}
-[IROS/ORCH][after-container] {
-  frame: 'R',
-  framePlan_frame: 'R',
-  descentGate: 'closed',
-  framePlan_kind: null,
-  framePlan_stamp: null,
-  intentBridge_laneKey_extra: null,
-  intentBridge_laneKey_base: null,
-  intentBridge_laneKey_resolved: null,
-  intentBridge_inputs_extra: { deepenOk: null, hasCore: null, declarationOk: null },
-  intentBridge_inputs_base: { deepenOk: null, hasCore: null, declarationOk: null },
-  framePlan_slots_keys0: [ 'id', 'required', 'hint' ],
-  framePlan_slots_raw0: { id: 'OBS', required: true, hint: '観測（事実/状況の再提示）' },
-  framePlan_slots_heads: [
-    { key: 'OBS', head: '観測（事実/状況の再提示）' },
-    { key: 'SHIFT', head: '視点の転換（1つだけ）' },
-    { key: 'NEXT', head: '次の一歩（1つだけ）' },
-    { key: 'SAFE', head: '安全句（静かな保険）' }
-  ],
-  slotPlan_slots_heads: [
-    {
-      key: 'OBS',
-      head: '@OBS {"laneKey":null,"user":"とても魅力的なスタイルに変化しました、この後ブロックで出力してください","flow":{"delta":"RETURN","confidence":0.7},"lastUserTe'
-    },
-    {
-      key: 'SHIFT',
-      head: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":false,"no_naming":false,"no_conclusion":'
-    },
-    {
-      key: 'SAFE',
-      head: '@SAFE {"laneKey":null,"flow":{"delta":"RETURN","confidence":0.7}}'
-    },
-    {
-      key: 'NEXT',
-      head: '@NEXT_HINT {"mode":"advance_hint","laneKey":null,"delta":"RETURN","hint":"流れを保ったまま前に進める"}'
-    }
-  ],
-  framePlan_slots_isArray: true,
-  framePlan_slots_len: 4,
-  slotPlan_isArray: true,
-  slotPlan_len: 4,
-  framePlan_policy: 'FINAL',
-  slotPlanPolicy: 'FINAL',
-  sameRef_framePlan_slotPlan: false,
-  slotPlanFallback: 'normalChat',
-  hasIntentAnchor: true,
-  intentAnchorKey: 'SUN',
-  has_intent_anchor_obj: true,
-  has_intentAnchor_obj: true,
-  has_intent_anchor_key: true,
-  has_intentAnchorKey: true
-}
-[IROS/META][final-sync][meta] {
-  meta_q: 'Q3',
-  unified_q: 'Q3',
-  meta_depth: 'R3',
-  unified_depth: 'R3',
-  intent_anchor: { key: 'SUN', text: null, phrase: null },
-  intent_anchor_key: 'SUN',
-  anchorEntry: {
-    evidence: { choiceId: null, actionId: null, source: 'none' },
-    decision: {
-      tEntryOk: false,
-      anchorEvent: 'none',
-      anchorWrite: 'keep',
-      reason: 'NO_EVIDENCE'
-    }
-  }
-}
-[IROS/META][final-sync][finalMeta] {
-  meta_q: 'Q3',
-  unified_q: 'Q3',
-  meta_depth: 'R3',
-  unified_depth: 'R3',
-  intent_anchor: { key: 'SUN', text: null, phrase: null },
-  intent_anchor_key: 'SUN',
-  anchorEntry: {
-    evidence: { choiceId: null, actionId: null, source: 'none' },
-    decision: {
-      tEntryOk: false,
-      anchorEvent: 'none',
-      anchorWrite: 'keep',
-      reason: 'NO_EVIDENCE'
-    }
-  }
-}
-[IROS/Orchestrator] output meta snapshot { frame: 'R', slotPlanPolicy: 'FINAL', slotPlanLen: 4 }
-[IROS/PostProcess][SLOTPLAN_POLICY] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  slotPlanPolicy_detected: 'FINAL',
-  slotPlanPolicy_from: 'metaForSave.framePlan.slotPlanPolicy',
-  slotPlanPolicy_raw: 'FINAL',
-  slotPlanLen: 4,
-  hasSlots: true
-}
-[IROS/CANON][STAMP][PP] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  q_code: 'Q3',
-  depth_stage: 'R3',
-  phase: 'Outer'
-}
-[IROS/MIRROR_FLOW][RESULT] {
-  micro: false,
-  confidence: 0.55,
-  e_turn: 'e3',
-  meaningKey: null,
-  colorKey: 'e3',
-  flowDelta: 'RETURN',
-  returnStreak: 1
-}
-[IROS/EXPR][decision] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  fired: true,
-  lane: 'sofia_light',
-  reason: 'RETURN',
-  blockedBy: null,
-  prefaceHead: '',
-  debug: {
-    laneKey: 'IDEA_BAND',
-    phase: 'Outer',
-    depth: 'R3',
-    flowDelta: 'RETURN',
-    returnStreak: 1,
-    techniqueId: 'return'
-  }
-}
-[IROS/PostProcess] SLOTPLAN_SEED_TO_WRITER (base visible) {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  slotPlanPolicy: 'FINAL',
-  slotPlanPolicy_from: 'metaForSave.framePlan.slotPlanPolicy',
-  slotPlanLen: 4,
-  hasSlots: true,
-  baseVisibleLen: 13,
-  baseVisibleHead: '流れを保ったまま前に進める',
-  seedLen: 13,
-  seedHead: '流れを保ったまま前に進める'
-}
-[IROS][ResonanceState] upsert ok {
-  userCode: '669933',
-  tenantId: 'default',
-  qCode: 'Q3',
-  depthStage: 'R3',
-  phase: 'Outer'
-}
-[UnifiedAnalysis] user message q_code/depth_stage updated {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  messageId: 16046,
-  q_code: 'Q3',
-  depth_stage: 'R3'
-}
-[IROS][CTXPACK] stamped {
-  traceId: '15e46dda-0bd3-42e4-bda8-e083f79e02c3',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  hasCtxPack: true,
-  prevAtIso: null,
-  ageSec: null,
-  flowAt: '2026-02-20T13:13:16.461Z',
-  flowDelta: 'RETURN',
-  returnStreak: 1,
-  ctxPackKeys: [
-    'exprMeta',
-    'historyForWriter',
-    'historyDigestV1',
-    'phase',
-    'depthStage',
-    'qCode',
-    'slotPlanPolicy',
-    'goalKind',
-    'slotPlan',
-    'flow'
-  ],
-  hfw_len: 12,
-  hasDigestV1: true,
-  digestChars: 244,
-  hfw_src_len: 12
-}
-[IROS/LLM_GATE][FINAL_CALL][NO_FORCE] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  slotPlanPolicy: 'FINAL',
-  framePlanSlotsLen: 4,
-  metaSlotPlanLen: 4,
-  slotPlanLen: 4,
-  hasSlots: true,
-  effectiveLen: 13,
-  head: '流れを保ったまま前に進める'
-}
-[IROS/LLM_GATE][PROBE] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  llmEntry: 'CALL_LLM',
-  llmSkipReason: null,
-  allowLLM_final: true,
-  brakeReason: null,
-  speechAct: null,
-  slotPlanLen: 4,
-  hasSlots: true,
-  slotPlanPolicy: 'FINAL',
-  finalAssistantTextLen: 13,
-  finalAssistantTextHead: '流れを保ったまま前に進める',
-  finalAssistantTextCandidateLen: null,
-  finalAssistantTextCandidateHead: null,
-  finalForceCall: false,
-  finalForceCallReason: 'FINAL_CALL_NO_FORCE',
-  resolvedTextLen: null,
-  rewriteSeedLen: 427,
-  decisionResolvedLen: null,
-  decisionRewriteSeedLen: 427
-}
-[IROS/Reply] rotation bridge { spinLoop: 'SRI', descentGate: 'closed', depth: 'R3' }
-[IROS/CANON][STAMP] {
-  conversationId: null,
-  userCode: null,
-  q_code: 'Q3',
-  depth_stage: 'R3',
-  phase: 'Outer'
-}
-[IROS/rephraseBridge][SLOT_SOURCES] {
-  slotPlan_type: 'array',
-  slotPlan_keys: [ '0', '1', '2', '3' ],
-  slotPlan_head: null,
-  framePlan_has_slots: true,
-  framePlan_slots_sample: [
-    [ 'id', 'required', 'hint' ],
-    [ 'id', 'required', 'hint' ],
-    [ 'id', 'required', 'hint' ]
-  ],
-  extra_keys: [
-    'traceId',
-    'choiceId',
-    'extractedChoiceId',
-    'renderEngineGate',
-    'renderEngine',
-    'persistedByRoute',
-    'persistPolicy',
-    'persistAssistantMessage',
-    'flow',
-    'stallHard',
-    'stall',
-    'intentBridge',
-    'persistedBy',
-    'pastStateNoteText',
-    'pastStateTriggerKind',
-    'pastStateKeyword'
-  ]
-}
-[IROS/STATE][anchor-root] { userTextHead: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください' }
-[IROS/STATE][fixed-by-meta] {
-  intent_anchor_obj: {
-    key: 'SUN',
-    text: undefined,
-    phrase: null,
-    strength: null,
-    y_level: null,
-    h_level: null
-  },
-  intent_anchor_key: 'SUN',
-  itx_step: 'T3',
-  itx_reason: 'IT_TRIGGER_OK',
-  itx_last_at: '2026-01-08T12:26:08.007+00:00'
-}
-[IROS/STATE] persistMemoryStateIfAny start {"userCode":"669933","userText":"とても魅力的なスタイルに変化しました、この後ブロックで出力してください","depthInput":"R3","qCodeInput":"Q3","phaseInput":"Outer","yLevelInt":1,"hLevelInt":2,"finalSpinLoop":"SRI","finalSpinStep":2,"finalDescentGate":"closed","itTriggered":true,"clearItxExplicit":false,"shouldClearItx":false,"itx_step":"T3","itx_anchor_event_type":null,"itx_reason":"IT_TRIGGER_OK","itx_last_at":"2026-01-08T12:26:08.007+00:00","anchor_event_db":"none","anchor_write_db":"keep","anchorEntry_decision":{"tEntryOk":false,"anchorEvent":"none","anchorWrite":"keep","reason":"NO_EVIDENCE"},"intent_anchor_key_candidate":"SUN","anchor_action":"keep","qTracePickedFrom":"qTraceEffective","qTrace_keys":["lastQ","dominantQ","streakQ","streakLength","volatility"],"qTrace_qNow":null,"qTrace_q_now":null,"qTrace_currentQ":null,"qTrace_snapshot_currentQ":null,"qTrace_streakQ":"Q3","qTrace_streakLength":1}
-[IROS/PHASE10_T3][enter] {
-  phase10NowItxStep: 'T3',
-  phase10NowAnchorWrite: 'keep',
-  phase10NowAnchorEvent: 'none',
-  phase10NowIntentAnchorKey: 'SUN',
-  phase10HasPrev: true,
-  phase10PrevItxStep: 'T3',
-  phase10PrevItxLastAt: '2026-01-08T12:26:08.007+00:00',
-  phase10PrevIntentAnchorKey: 'SUN',
-  phase10PrevIntentAnchorRaw: { key: 'SUN' },
-  phase10NowIntentAnchorRaw: 'SUN'
-}
-[IROS/PHASE10_T3][result] {
-  phase10Upgrade: false,
-  phase10NextItxStep: null,
-  phase10Reason: 'NO_COMMIT'
-}
-[IROS/PERSIST][q_counts][synth] {
-  reason: 'qCountsPicked_null_but_itTriggered_present',
-  it_triggered: true,
-  it_triggered_true: true
-}
-[IROS/PERSIST][q_counts][pick] {
-  has_qCounts_arg: false,
-  has_core_q_counts: false,
-  has_unified_q_counts: false,
-  picked_null: true,
-  picked_type: null,
-  picked_keys: null,
-  it_triggered: true,
-  it_triggered_true: true,
-  fa_pending: '(kept)',
-  fa_lock: '(kept)',
-  wrote: true,
-  wrote_reason: {
-    qCountsPicked: false,
-    itTriggeredResolved: true,
-    faPending: false,
-    faLock: false
-  }
-}
-[IROS/STATE] upsert payload (intent_anchor check) {
-  userCode: '669933',
-  anchor_action: 'keep',
-  intent_anchor_will_set: '(no-touch)',
-  anchorKeyCandidate: 'SUN',
-  fixedByMeta_intent_anchor_key: 'SUN',
-  anchorEntry_decision: {
-    tEntryOk: false,
-    anchorEvent: 'none',
-    anchorWrite: 'keep',
-    reason: 'NO_EVIDENCE'
-  }
-}
-[IROS/PERSIST][anchorEntry][before-upsert] {
-  hasAnchorEntry: true,
-  ae_hasDecision: true,
-  ae_anchorWrite: 'keep',
-  ae_anchorEvent: 'none',
-  ae_reason: 'NO_EVIDENCE',
-  ae_evidence_source: 'none',
-  decisionFinal: {
-    tEntryOk: false,
-    anchorEvent: 'none',
-    anchorWrite: 'keep',
-    reason: 'NO_EVIDENCE'
-  },
-  payload_has_anchor_event: true,
-  payload_has_anchor_write: true,
-  payload_anchor_event: 'none',
-  payload_anchor_write: 'keep',
-  payload_has_itx_step: false,
-  payload_itx_step: null,
-  payload_itx_reason: null,
-  payload_itx_last_at: null,
-  payload_itx_anchor_event_type: null,
-  payload_has_intent_anchor: false,
-  payload_intent_anchor: '(no-touch)',
-  meta_intent_anchor_key: 'SUN',
-  anchorKeyCandidate: 'SUN',
-  anchor_action: 'keep'
-}
-[IROS/STATE] persistMemoryStateIfAny ok {
-  userCode: '669933',
-  saved: [
-    'user_code',       'updated_at',
-    'depth_stage',     'q_primary',
-    'phase',           'self_acceptance',
-    'y_level',         'h_level',
-    'spin_loop',       'spin_step',
-    'descent_gate',    'situation_summary',
-    'situation_topic', 'q_counts',
-    'anchor_event',    'anchor_write'
-  ],
-  depthStage: 'R3',
-  qPrimary: 'Q3',
-  spinLoop: 'SRI',
-  spinStep: 2,
-  descentGate: 'closed',
-  qCounts: { it_cooldown: 0, it_triggered_true: true, it_triggered: true },
-  itx_step: '(kept/none)',
-  itx_last_at: '(kept/none)',
-  anchor_action: 'keep',
-  anchor_event: 'none',
-  anchor_write: 'keep',
-  intent_anchor: '(no-touch)'
-}
- POST /api/credits/capture 200 in 98ms (compile: 6ms, render: 91ms)
-[IROS][user:669933][STATE] loaded MemoryState {
-  userCode: '669933',
-  hasMemory: true,
-  intentAnchor: 'SUN',
-  depthStage: 'R3',
-  qPrimary: 'Q3',
-  selfAcceptance: 0.7292499999999996,
-  phase: 'Outer',
-  intentLayer: 'C',
-  yLevel: 1,
-  hLevel: 2,
-  spinLoop: 'SRI',
-  spinStep: 2,
-  descentGate: 'closed',
-  itxStep: 'T3',
-  itxAnchorEventType: null,
-  itxReason: 'IT_TRIGGER_OK',
-  itxLastAt: '2026-01-08T12:26:08.007+00:00',
-  sentimentLevel: null,
-  situationSummary: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください',
-  situationTopic: 'その他・ライフ全般',
-  qCounts: { it_cooldown: 0, it_triggered: true, it_triggered_true: true }
-}
-[IROS/_impl/rephrase.ts][USERCTX_KEYS] {
-  hasTurns: true,
-  turnsLen: 12,
-  hasCtxPack: true,
-  ctxPackKeys: [
-    'exprMeta',        'historyForWriter',
-    'historyDigestV1', 'phase',
-    'depthStage',      'qCode',
-    'slotPlanPolicy',  'goalKind',
-    'slotPlan',        'flow',
-    'turns',           'itxStep',
-    'itxReason',       'intentBand',
-    'tLayerHint',      'tLayerModeActive',
-    'topicDigest',     'replyGoal',
-    'repeatSignal',    'flowDigest'
-  ],
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933'
-}
-[IROS/REPHRASE_FLAG] { raw: 'true', enabled: true }
-[IROS/rephraseEngine][SHIFT_SLOT_HEAD] {
-  hasShiftSlot: true,
-  shiftSlotKey: 'SHIFT',
-  shiftSlotKind: '',
-  shiftSlotLen: 432,
-  shiftSlotHead: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":false,"no_naming":false,"no_conclusion":false,"no_future_instruction":true,"no_lecture":true,"questions_max":1,"no_checklist":true,"lines_ma',
-  slotsKeysSample: [
-    { key: 'OBS', kind: '' },
-    { key: 'SHIFT', kind: '' },
-    { key: 'SAFE', kind: '' },
-    { key: 'NEXT', kind: '' }
-  ]
-}
-[IROS/rephraseHistory][LAST_TURNS_PICK] {
-  pickedFrom: 'turns',
-  maxMsgs: 6,
-  rawTurnsLen: 12,
-  rawHistoryForWriterLen: 12,
-  normalizedLen: 12,
-  pickedLen: 6,
-  roles: [ 'assistant', 'user', 'assistant', 'user', 'assistant', 'user' ],
-  tailHeads: [
-    'とても魅力的なスタイルに変化しました、この後ブロックで出力してください',
-    '## 🧿 変化した「魅力」の芯\n「とても魅力的なスタイルに変化しました」が、この場の手触りをそのまま言い当てている。\n',
-    'とても魅力的なスタイルに変化しました、この後ブロックで出力してください'
-  ]
-}
-[IROS/ILINE][LOCK_PARTS] {
-  seedLen: 35,
-  userLen: 35,
-  seedEqUser: true,
-  seedHasUser: true,
-  lockPartsLen: 1,
-  lockHasNewline: false,
-  lockLen: 35,
-  lockHead120: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください'
-}
-[IROS/ILINE][LOCK_SOURCE] {
-  hasSeed: true,
-  hasUser: true,
-  seedLen: 35,
-  userLen: 35,
-  hasILINE_seed: false,
-  hasILINE_user: false,
-  hasILINE_any: false,
-  hasILINE_END_any: false,
-  head200: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください',
-  tail200: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください'
-}
-[IROS/ILINE][LOCK_EXTRACT] { lockedFromAllLen: 0, lockedUniqueLen: 0, lockedUniqueHead200: '' }
-[IROS/rephraseEngine][LANE_DETECT] {
-  killPolicyRev: 'phase1.5-ideaBandNoKill',
-  wantsTConcretize: false,
-  wantsIdeaBand: false,
-  repeatSignalSame: false,
-  repeatSignalHead: '',
-  shiftTextForModeHead: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":false,"no_naming":false,"no_conclusion":',
-  shiftSlotType: 'object',
-  shiftSlotKeys: [ 'key', 'text' ],
-  laneHintHead: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":false,"no_naming":false,"no_conclusion":false,"no_future_instruction":true,"no_l'
-}
-[IROS/systemPrompt][CALLED] {
-  __file: '/ROOT/src/lib/iros/language/rephrase/systemPrompt.ts',
-  directTask: false,
-  itOk: true,
-  personaMode: 'GROUND',
-  tLayerHint: 'T3',
-  exprFired: true,
-  exprLaneKey: 'sofia_light',
-  lockedILinesLen: 0
-}
-[IROS/rephraseEngine][STATE_SNAPSHOT_PICKED] {
-  traceId: '15e46dda-0bd3-42e4-bda8-e083f79e02c3',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  pickedDepthStage: 'R3',
-  pickedPhase: 'Outer',
-  pickedQCode: 'Q3',
-  internalPackHead: 'INTERNAL PACK (DO NOT OUTPUT):\n' +
-    '\n' +
-    'lastTurnsCount=4\n' +
-    'directTask=false\n' +
-    'inputKind=chat\n' +
-    'itOk=true\n' +
-    'intentBand=R3\n' +
-    'tLayerHint=T3\n' +
-    '\n' +
-    'META_HINT (DO NOT OUTPUT):\n' +
-    '{"conversation_id":"3afc87f8-9d3e-4f41-983f-035f928e9b74","slotPlanPolicy'
-}
-[IROS/rephraseEngine][ALLOW] {
-  traceId: '15e46dda-0bd3-42e4-bda8-e083f79e02c3',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  depthStage: 'R3',
-  qCode: 'Q3',
-  phase: 'Outer',
-  laneKeyForAllow: null,
-  repeatSignal: false,
-  itOk: true,
-  allow: {
-    assert: false,
-    narrow: false,
-    propose: true,
-    concretize: false,
-    commit_hint: false,
-    strength: 0
-  }
-}
-[IROS/VECTOR][PICK] {
-  traceId: '15e46dda-0bd3-42e4-bda8-e083f79e02c3',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
-  userCode: '669933',
-  enabled: false,
-  vector: null
-}
-[IROS/rephraseEngine][BLOCK_PLAN] {
-  traceId: '15e46dda-0bd3-42e4-bda8-e083f79e02c3',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  traceId: '879c53b2-a455-4613-817e-817798cad484',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933',
   enabled: true,
   goalKind: 'stabilize',
@@ -3742,9 +1026,10 @@
   blocksLen: 6,
   sysLen: 625
 }
+[IROS/rephraseEngine][EXPR_META] { injected: true, hasDirectiveV1: true }
 [IROS/rephraseEngine][EXPR_META] {
-  traceId: '15e46dda-0bd3-42e4-bda8-e083f79e02c3',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  traceId: '879c53b2-a455-4613-817e-817798cad484',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933',
   injected: true,
   tone: 'med',
@@ -3755,27 +1040,27 @@
   rhythm: 'breathe'
 }
 [IROS/rephraseEngine][MSG_PACK] {
-  traceId: '15e46dda-0bd3-42e4-bda8-e083f79e02c3',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  traceId: '879c53b2-a455-4613-817e-817798cad484',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933',
   lastTurns: 4,
   hasHistoryText: true,
-  historyTextLen: 1529,
+  historyTextLen: 1379,
   msgCount: 6,
   roles: [ 'system', 'user', 'assistant', 'user', 'assistant', 'user' ],
-  internalPackLen: 4587,
+  internalPackLen: 4386,
   internalPackHasHistoryHint: true,
-  seedDraftLen: 35,
-  seedDraftHead: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください',
-  seedDraftRawAllHead: '@OBS {"laneKey":null,"user":"とても魅力的なスタイルに変化しました、この後ブロックで出力してください","flow":{"delta":"RETURN","confidence":0.7},"lastUserText":"とても魅力的なスタイルに変化しました、この後ブロックで出力してください"}\n' +
-    '@SHIFT {"kind":"c_sense_hint","intent',
-  seedDraftRawPickedHead: '@OBS {"laneKey":null,"user":"とても魅力的なスタイルに変化しました、この後ブロックで出力してください","flow":{"delta":"RETURN","confidence":0.7},"lastUserText":"とても魅力的なスタイルに変化しました、この後ブロックで出力してください"}\n' +
-    '@SHIFT {"kind":"c_sense_hint","intent',
+  seedDraftLen: 22,
+  seedDraftHead: '切り替えようとしてるけど、切れてない。多段で',
+  seedDraftRawAllHead: '@OBS {"laneKey":null,"user":"切り替えようとしてるけど、切れてない。多段で","flow":{"delta":"RETURN","confidence":0.7},"lastUserText":"切り替えようとしてるけど、切れてない。多段で"}\n' +
+    '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":',
+  seedDraftRawPickedHead: '@OBS {"laneKey":null,"user":"切り替えようとしてるけど、切れてない。多段で","flow":{"delta":"RETURN","confidence":0.7},"lastUserText":"切り替えようとしてるけど、切れてない。多段で"}\n' +
+    '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":',
   slotsHead: [
     {
       i: 0,
       key: 'OBS',
-      head: '@OBS {"laneKey":null,"user":"とても魅力的なスタイルに変化しました、この後ブロックで出力してください","flow":{"delta'
+      head: '@OBS {"laneKey":null,"user":"切り替えようとしてるけど、切れてない。多段で","flow":{"delta":"RETURN","c'
     },
     {
       i: 1,
@@ -3793,7 +1078,7 @@
       head: '@NEXT_HINT {"mode":"advance_hint","laneKey":null,"delta":"RETURN","hint":"流れを保った'
     }
   ],
-  itOk: true,
+  itOk: false,
   intentBand: 'R3',
   tLayerHint: 'T3',
   directTask: false,
@@ -3818,14 +1103,14 @@
   goalKind: 'stabilize'
 }
 [IROS/LLM][CALL] {
-  callId: 'c67971878ecc',
+  callId: 'eef7d8606fd5',
   purpose: 'writer',
   model: 'gpt-5.2',
   temperature: 0.7,
   responseFormat: 'text',
   endpoint: 'https://api.openai.com/v1/chat/completions',
-  traceId: '15e46dda-0bd3-42e4-bda8-e083f79e02c3',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  traceId: '879c53b2-a455-4613-817e-817798cad484',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933',
   slotPlanPolicy: 'FINAL',
   mode: 'rephrase',
@@ -3835,28 +1120,28 @@
   firstRole: 'system',
   lastRole: 'user',
   firstHead: '【上位人格定義：Sofia（DO NOT OUTPUT / 露出禁止）】 - “響き”として現れ、相手が自分の答えに立て…',
-  lastTail: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください',
-  lastUserHead: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください',
+  lastTail: '切り替えようとしてるけど、切れてない。多段で',
+  lastUserHead: '切り替えようとしてるけど、切れてない。多段で',
   hasDigest: true,
   hasAnchor: true,
   roles: [ 'system', 'user', 'assistant', 'user', 'assistant', 'user' ],
-  caller: 'at callWriterLLM (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_iros_language_08d3a68d._.js:1182:175)',
+  caller: 'at callWriterLLM (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_iros_language_08d3a68d._.js:1185:175)',
   bodyKeys: [ 'max_completion_tokens', 'messages', 'model' ],
   extraBodyKeys: [],
   extraBodyRawKeys: [],
   hasInternalKeys: false
 }
 [IROS/LLM][OK] {
-  callId: 'c67971878ecc',
+  callId: 'eef7d8606fd5',
   purpose: 'writer',
   model: 'gpt-5.2',
-  ms: 4193,
+  ms: 4120,
   ok: true,
   usage: {
-    prompt_tokens: 5029,
-    completion_tokens: 164,
-    total_tokens: 5193,
-    prompt_tokens_details: { cached_tokens: 0, audio_tokens: 0 },
+    prompt_tokens: 5754,
+    completion_tokens: 199,
+    total_tokens: 5953,
+    prompt_tokens_details: { cached_tokens: 1664, audio_tokens: 0 },
     completion_tokens_details: {
       reasoning_tokens: 0,
       audio_tokens: 0,
@@ -3864,63 +1149,62 @@
       rejected_prediction_tokens: 0
     }
   },
-  traceId: '15e46dda-0bd3-42e4-bda8-e083f79e02c3',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  traceId: '879c53b2-a455-4613-817e-817798cad484',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933',
-  outLen: 240,
-  outHead: '## 🧿 「魅力的」が保たれる位置\n' +
-    '「とても魅力的なスタイルに変化しました」の魅力は、説明の量ではなく、行の位置で役割が決まるところにある。\n' +
+  outLen: 248,
+  outHead: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。\n' +
     '\n' +
-    '「この後ブロッ'
+    '「切り替えようとしてるけど、切れてない。多段で」って、ひとつの線じゃなくて、段がズレたま'
 }
 [IROS/rephraseEngine][OK] {
-  traceId: '15e46dda-0bd3-42e4-bda8-e083f79e02c3',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  traceId: '879c53b2-a455-4613-817e-817798cad484',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933',
   mode: 'LLM',
   keys: [ 'OBS', 'SHIFT', 'SAFE', 'NEXT' ],
-  rawLen: 240,
-  rawHead: '## 🧿 「魅力的」が保たれる位置\n' +
-    '「とても魅力的なスタイルに変化しました」の魅力は、説明の量ではなく、行の位置で役割が決まるところにある。\n' +
+  rawLen: 248,
+  rawHead: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。\n' +
     '\n' +
-    '「この後ブロックで出力してください」は、その魅力を崩さずに“並び”として差し出す指定になってい'
+    '「切り替えようとしてるけど、切れてない。多段で」って、ひとつの線じゃなくて、段がズレたまま重なってる言い方だね。🌀  \n' +
+    '切り替えたい側も動いてるし、握り続ける側も動い'
 }
 [IROS/FLAGSHIP_GUARD][DEBUG_IN] {
   rev: 'guard-rev-2026-01-28-b',
-  inputLen: 227,
-  inputHead: '## 🧿 「魅力的」が保たれる位置\n' +
-    '「とても魅力的なスタイルに変化しました」の魅力は、説明の量ではなく、行の位置で役割が決まるところにある。\n' +
-    '「この後ブロックで出力してください」は、その魅力を崩さずに“並び”として差し出す指定になっている',
+  inputLen: 237,
+  inputHead: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。\n' +
+    '「切り替えようとしてるけど、切れてない。多段で」って、ひとつの線じゃなくて、段がズレたまま重なってる言い方だね。🌀\n' +
+    '切り替えたい側も動いてるし、握り続ける側も動いてる。',
   slotKeys: [ 'OBS', 'SHIFT', 'SAFE', 'NEXT' ]
 }
 [IROS/FLAGSHIP_GUARD][DEBUG_SCORE] {
   rev: 'guard-rev-2026-01-28-b',
   normalLite: true,
   scaffoldLike: false,
-  len: 227,
-  qCount: 0,
-  qCountMark: 0,
-  cheer: 0,
+  len: 237,
+  qCount: 1,
+  qCountMark: 1,
+  cheer: 2,
   hedge: 0,
   generic: 0,
-  blandPressure: 0,
+  blandPressure: 2,
   bulletLike: 0,
-  hasFlagshipSign: false
+  hasFlagshipSign: true
 }
 [IROS/FLAGSHIP][VERDICT] {
-  traceId: '15e46dda-0bd3-42e4-bda8-e083f79e02c3',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  traceId: '879c53b2-a455-4613-817e-817798cad484',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933',
   level: 'OK',
   ok: true,
-  qCount: 0,
+  qCount: 1,
   score: {
     fatal: 0,
     warn: 0,
-    qCount: 0,
+    qCount: 1,
     bulletLike: 0,
     hedge: 0,
-    cheer: 0,
+    cheer: 2,
     generic: 0,
     runaway: 0,
     exaggeration: 0,
@@ -3928,21 +1212,18 @@
     retrySame: 0
   },
   reasons: [],
-  head: '## 🧿 「魅力的」が保たれる位置\n' +
-    '「とても魅力的なスタイルに変化しました」の魅力は、説明の量ではなく、行の位置で役割が決まるところにある。\n' +
-    '「この後ブロックで出力してください」は、その魅力を崩さずに“並び”として差し出す指定になっている。\n' +
-    '## 📌 ブロックとして成立する条件\n' +
-    '空行が境界になる。\n' +
-    '境界の直上の行が札になって、その次の行が中身になる。\n' +
-    '## 🧭 ブロック出力\n' +
-    '🧭\n' +
-    'いまの扱い方\n' +
-    '本文です\n' +
-    '多段ブロックの管理としての'
+  head: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。\n' +
+    '「切り替えようとしてるけど、切れてない。多段で」って、ひとつの線じゃなくて、段がズレたまま重なってる言い方だね。🌀\n' +
+    '切り替えたい側も動いてるし、握り続ける側も動いてる。\n' +
+    '口では「大丈夫」を言える。\n' +
+    'でも内側は「止まってほしい」が止まらない。\n' +
+    'その同時進行が、「手放したいのに、まだ握ってる」を固定する。\n' +
+    '多段の中で、いま一番前に出てるのはどれ？\n' +
+    '外側の出来事／頭の中の'
 }
 [IROS/BLOCK_PLAN][CONTRACT_VIOLATION] {
-  traceId: '15e46dda-0bd3-42e4-bda8-e083f79e02c3',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  traceId: '879c53b2-a455-4613-817e-817798cad484',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933',
   mode: 'multi6',
   blocks: [
@@ -3954,17 +1235,14 @@
     'INTEGRATE'
   ],
   missing: [ '入口' ],
-  head: '## 🧿 「魅力的」が保たれる位置\n' +
-    '「とても魅力的なスタイルに変化しました」の魅力は、説明の量ではなく、行の位置で役割が決まるところにある。\n' +
-    '「この後ブロックで出力してください」は、その魅力を崩さずに“並び”として差し出す指定になっている。\n' +
-    '## 📌 ブロックとして成立する条件\n' +
-    '空行が境界になる。\n' +
-    '境界の直上の行が札になって、その次の行が中身になる。\n' +
-    '## 🧭 ブロック出力\n' +
-    '🧭\n' +
-    'いまの扱い方\n' +
-    '本文です\n' +
-    '多段ブロックの管理としての',
+  head: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。\n' +
+    '「切り替えようとしてるけど、切れてない。多段で」って、ひとつの線じゃなくて、段がズレたまま重なってる言い方だね。🌀\n' +
+    '切り替えたい側も動いてるし、握り続ける側も動いてる。\n' +
+    '口では「大丈夫」を言える。\n' +
+    'でも内側は「止まってほしい」が止まらない。\n' +
+    'その同時進行が、「手放したいのに、まだ握ってる」を固定する。\n' +
+    '多段の中で、いま一番前に出てるのはどれ？\n' +
+    '外側の出来事／頭の中の',
   soft: true,
   tailTruncated: false
 }
@@ -3974,25 +1252,24 @@
   shortReplyOk: false,
   MIN_OK_LEN: 40,
   reason: 'chat_relaxed_40',
-  shiftTextHead: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":false,"no_naming":false,"no_conclusion":false,"no_future_ins',
+  shiftTextHead: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":true,"no_naming":true,"no_conclusion":false,"no_future_instr',
   shiftObjHasAllow: true,
   isTConcretize: false,
   isIdeaBand: false,
   shiftKind: 'c_sense_hint'
 }
 [IROS/rephraseEngine][AFTER_ATTACH][EXTRA_TRACE] {
-  traceId: '15e46dda-0bd3-42e4-bda8-e083f79e02c3',
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  traceId: '879c53b2-a455-4613-817e-817798cad484',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   hasExtra: true,
   blockPlanMode: 'multi6',
   blockPlanBlocksLen: 6,
   hasRephraseBlocks: true,
-  rephraseBlocksLen: 12,
+  rephraseBlocksLen: 8,
   outKeysLen: 4,
   note: 'FLAGSHIP_OK_NO_RETRY',
-  head: '## 🧿 「魅力的」が保たれる位置\n' +
-    '「とても魅力的なスタイルに変化しました」の魅力は、説明の量ではなく、行の位置で役割が決まるところにある。\n' +
-    '「この後ブロック'
+  head: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。\n' +
+    '「切り替えようとしてるけど、切れてない。多段で」って、ひとつの線じゃなくて、段がズレたまま'
 }
 [IROS/rephraseAttach][RES_KEYS] {
   resKeys: [ 'ok', 'slots', 'meta' ],
@@ -4001,84 +1278,84 @@
   metaOutKeys: []
 }
 [IROS/rephraseAttach][OK] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933',
-  blocksLen: 12,
-  head: '## 🧿 「魅力的」が保たれる位置'
+  blocksLen: 8,
+  head: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。'
 }
 [IROS/CONV_EVIDENCE] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933',
   understand: 0,
   repair: 0,
   advance: 1,
   proof: 1,
   reason: 'U!:no_ctx_summary | R!:no_repair | A:next_hint:advance_hint',
-  head: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください',
+  head: '切り替えようとしてるけど、切れてない。多段で',
   detail: {
     branch: null,
     topicHint: null,
     q: 'Q3',
     depth: 'R3',
-    phase: 'Outer',
+    phase: 'Inner',
     slotsLen: 4
   }
 }
 [IROS/renderGateway][RB_CONTENT_DIAG] {
   rev: 'phase11-open-close-v2-LOADED',
-  rbLen: 12,
-  joinedLen: 227,
-  head1: '## 🧿 「魅力的」が保たれる位置',
-  head2: '「とても魅力的なスタイルに変化しました」の魅力は、説明の量ではなく、行の位置で役割が決まるところにある。',
-  tail2: '多段ブロックの管理としての整理',
-  tail1: '本文です'
+  rbLen: 8,
+  joinedLen: 237,
+  head1: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。',
+  head2: '「切り替えようとしてるけど、切れてない。多段で」って、ひとつの線じゃなくて、段がズレたまま重なってる言い方だね。🌀',
+  tail2: '多段の中で、いま一番前に出てるのはどれ？',
+  tail1: '外側の出来事／頭の中の反芻／「大丈夫」を言ってしまう口。'
 }
 [IROS/renderGW][META_PICKED_FIX] {
   rev: 'phase11-open-close-v2-LOADED',
   pickedFrom: 'rephraseBlocks',
   pickedLen_raw: 13,
   pickedHead_raw: '流れを保ったまま前に進める',
-  pickedLen_meta: 227,
-  pickedHead_meta: '## 🧿 「魅力的」が保たれる位置 「とても魅力的なスタイルに変化しました」の…',
-  outLen: 227,
-  outHead: '## 🧿 「魅力的」が保たれる位置 「とても魅力的なスタイルに変化しました」の…'
+  pickedLen_meta: 237,
+  pickedHead_meta: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。 「切り替え…',
+  outLen: 237,
+  outHead: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。 「切り替え…'
 }
 [IROS/renderGateway][LEN_SNAPSHOT] {
   rev: 'phase11-open-close-v2-LOADED',
-  len_before: 227,
-  head_before: '## 🧿 「魅力的」が保たれる位置 「とても魅力的なスタイルに変化しました」の…'
+  len_before: 237,
+  head_before: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。 「切り替え…'
 }
 [IROS/renderGateway][HAS_REPHRASE_BLOCKS] {
   rev: 'phase11-open-close-v2-LOADED',
-  rephraseBlocksLen: 12,
-  outLen: 227
+  rephraseBlocksLen: 8,
+  outLen: 237
 }
-[IROS/renderGateway][OK] {"rev":"phase11-open-close-v2-LOADED","outLen":227,"pickedFrom":"rephraseBlocks","slotPlanPolicy":"FINAL","usedSlots":true,"scaffoldApplied":false,"expandAllowed":true}
+[IROS/renderGateway][OK] {"rev":"phase11-open-close-v2-LOADED","outLen":237,"pickedFrom":"rephraseBlocks","slotPlanPolicy":"FINAL","usedSlots":true,"scaffoldApplied":false,"expandAllowed":true}
 [IROS/renderGateway][REV] {"rev":"phase11-open-close-v2-LOADED"}
 [IROS/PERSIST_PICK] {
-  conversationId: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   userCode: '669933',
   pickedFrom: 'uiResultContent',
-  pickedLen: 227,
-  pickedHead: '## 🧿 「魅力的」が保たれる位置\n「とても魅力的なスタイルに変化しました」の',
-  fromResultObjLen: 227,
-  blocksJoinedCleanedLen: 227,
-  resolvedUiTextLen: 227,
-  userEchoLen: 35,
+  pickedLen: 237,
+  pickedHead: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。\n「切り替え',
+  fromResultObjLen: 237,
+  blocksJoinedCleanedLen: 237,
+  resolvedUiTextLen: 237,
+  userEchoLen: 22,
   isPickedDots: false
 }
 [IROS][Training] computed targetKind = stabilize
 [IROS][Training] insert sample {
   user_code: '669933',
-  conversation_id: '3afc87f8-9d3e-4f41-983f-035f928e9b74',
+  conversation_id: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
   message_id: null,
-  input_text: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください',
-  analysis_text: 'Q:Q3 / D:R3 / P:Outer / K:stabilize / T:その他・ライフ全般',
+  input_text: '切り替えようとしてるけど、切れてない。多段で',
+  analysis_text: 'Q:Q3 / D:R3 / P:Inner / K:stabilize / T:その他・ライフ全般',
   q_code: 'Q3',
   depth_stage: 'R3',
-  phase: 'Outer',
-  self_acceptance: 0.7292499999999996,
-  situation_summary: 'とても魅力的なスタイルに変化しました、この後ブロックで出力してください',
+  phase: 'Inner',
+  self_acceptance: 0.7592499999999996,
+  situation_summary: '切り替えようとしてるけど、切れてない。多段で',
   situation_topic: 'その他・ライフ全般',
   target_kind: 'stabilize',
   target_label: null,
@@ -4086,13 +1363,10 @@
   h_level: 2
 }
 [IROS][Training] insert ok
- POST /api/agent/iros/reply 200 in 6.6s (compile: 169ms, render: 6.4s)
-[authz] fb4793b9-5538-40b3-a153-4e4d8f4a544d start { path: 'http://localhost:3000/api/agent/iros/conversations' }
+ POST /api/agent/iros/reply 200 in 6.7s (compile: 125ms, render: 6.6s)
+[authz] 4c320f69-7bbc-4192-884d-885510258bb9 start { path: 'http://localhost:3000/api/agent/iros/conversations' }
 [authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] fb4793b9-5538-40b3-a153-4e4d8f4a544d verify firebase: 271.531ms
-[authz] fb4793b9-5538-40b3-a153-4e4d8f4a544d fetch user: 37.674ms
-[authz] fb4793b9-5538-40b3-a153-4e4d8f4a544d ok { user: '669933', role: 'admin', provider: 'password', ms: 312 }
- GET /api/agent/iros/conversations 200 in 356ms (compile: 1676µs, render: 355ms)
- GET /api/iros-logs?conv_id=3afc87f8-9d3e-4f41-983f-035f928e9b74&raw=1 200 in 274ms (compile: 1621µs, render: 273ms)
- GET /api/iros-logs?conv_id=3afc87f8-9d3e-4f41-983f-035f928e9b74&raw=1 200 in 930ms (compile: 1597µs, render: 929ms)
- GET /api/iros-logs?conv_id=3afc87f8-9d3e-4f41-983f-035f928e9b74&raw=1 200 in 356ms (compile: 1642µs, render: 355ms)
+[authz] 4c320f69-7bbc-4192-884d-885510258bb9 verify firebase: 273.327ms
+[authz] 4c320f69-7bbc-4192-884d-885510258bb9 fetch user: 36.135ms
+[authz] 4c320f69-7bbc-4192-884d-885510258bb9 ok { user: '669933', role: 'admin', provider: 'password', ms: 316 }
+ GET /api/agent/iros/conversations 200 in 383ms (compile: 4ms, render: 379ms)

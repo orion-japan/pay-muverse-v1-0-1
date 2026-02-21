@@ -765,10 +765,12 @@ const prevActive =
     // =========================================================
     // ✅ Single source：IT結果を “camel + snake” に同時反映（矛盾ゼロ）
     // =========================================================
-    const itOk = it.ok === true;
+    // ✅ 今ターンの「扉(itOk)」は reason で決める
+    // - IT_ALREADY_COMMITTED は「状態はT3だが、今ターンの扉は開いていない」
+    const itOk = it.ok === true && it.reason === 'IT_TRIGGER_OK';
     const itReason = it.reason ?? null;
 
-        // ✅ IT flags を meta に露出（IntentBridge の lane 判定入力に使う）
+    // ✅ IT flags を meta に露出（IntentBridge の lane 判定入力に使う）
     // - ここが無いと hasCore/deepenOk が downstream で常に false/null になる
     {
       const flagsNow = (it as any)?.flags ?? null;
@@ -786,9 +788,8 @@ const prevActive =
       itTriggerObjSnake.flags = flagsNow;
     }
 
-
     // ✅ IntentBridge が拾う入力（meta.itTrigger.flags）をここで必ず供給する
-    // - これが無いと IntentBridge 側で hasCore/deepenOk が常に false 扱いになる（断線）
+    // - ok は「今ターンの扉(itOk)」
     (meta as any).itTrigger = {
       ok: itOk,
       reason: itReason,
@@ -798,7 +799,8 @@ const prevActive =
       tVector: (it as any).tVector ?? null,
     };
 
-    // ✅ T3確定（commit済み）なら：itTriggered / itx_reason を probe で上書きしない
+    // ✅ T3確定（commit済み）なら：probe で確定領域は上書きしない
+    // ただし「今ターンの扉」は開かない（itTriggered/tLayerHint を立てない）
     const committedStep =
       (meta as any)?.itx_step ??
       (meta as any)?.itxStep ??
@@ -806,10 +808,8 @@ const prevActive =
       (ms as any)?.itxStep ??
       null;
 
-
     const isCommittedT3 = committedStep === 'T3';
 
-    // ok/reason：camel + snake
     if (isCommittedT3) {
       // ✅ 再発防止ログ用：そのターンの判定理由（確定状態は維持）
       (meta as any).itxDecisionReason = itReason;
@@ -818,13 +818,13 @@ const prevActive =
       // 既存キー（互換）：probe理由として退避
       (meta as any).itx_probe_reason = itReason;
 
-      // ✅ 再発防止ログ用：このターンの itx 扱い（確定済みT3なので keep）
+      // ✅ 確定済みT3なので keep（確定領域に触らない）
       (meta as any).itxWriteMode = 'keep';
       (meta as any).itx_write_mode = 'keep';
 
-      // 確定状態は維持（false に戻さない）
-      (meta as any).itTriggered = true;
-      (meta as any).it_triggered = true;
+      // ✅ 今ターンの扉は開かない（ここが重要）
+      (meta as any).itTriggered = false;
+      (meta as any).it_triggered = false;
 
       // itxReason / itx_reason は「確定値」を維持（ここでは代入しない）
     } else {
@@ -832,7 +832,7 @@ const prevActive =
       (meta as any).itxDecisionReason = itReason;
       (meta as any).itx_decision_reason = itReason;
 
-      // ✅ 再発防止ログ用：このターンの itx 扱い
+      // ✅ このターンの itx 扱い
       // - itOk が true のときだけ commit（扉が開いた）
       // - itOk が false のときは keep（確定領域に触らない）
       const writeMode = itOk ? 'commit' : 'keep';
@@ -849,7 +849,6 @@ const prevActive =
       }
     }
 
-
     // iLexemeForce：sticky true（camel + snake）
     const iLexemeForceNext =
       (meta as any).iLexemeForce === true || (it as any).iLexemeForce === true;
@@ -857,6 +856,7 @@ const prevActive =
     (meta as any).i_lexeme_force = iLexemeForceNext;
 
     // Tレーン：sticky禁止（毎ターン決定）
+    // ✅ Tレイヤーは「今ターンの扉(itOk)」が開いたときだけ有効
     const tActive = itOk && it.tLayerModeActive === true;
     const tHint = tActive ? (it.tLayerHint ?? 'T2') : null;
     const tVector = tActive ? (it.tVector ?? null) : null;
@@ -2188,7 +2188,14 @@ framePlan_slots_heads: Array.isArray((meta as any).framePlan?.slots)
     ...meta,
     depth: (resolvedDepth ?? fallbackDepth) ?? undefined,
   };
-
+  // ✅ polarityBand を最終meta直下に昇格（MirrorFlow への橋渡し）
+  // - 計算はしない（既にどこかで算出された値を拾うだけ）
+  // - 優先順：meta直下 → meta.unified → finalMeta.unified
+  (finalMeta as any).polarityBand =
+    (meta as any)?.polarityBand ??
+    (meta as any)?.unified?.polarityBand ??
+    (finalMeta as any)?.unified?.polarityBand ??
+    null;
   // 7.5で確定した “安全/器/枠” を finalMeta に確実に引き継ぐ
   (finalMeta as any).descentGate =
     (meta as any).descentGate ?? (finalMeta as any).descentGate ?? null;

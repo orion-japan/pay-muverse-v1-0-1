@@ -1118,91 +1118,98 @@ const maxLinesFinal = isIR
       usedSlots = true;
       pickedFrom = 'rephraseBlocks';
       scaffoldApplied = isScaffoldLike;
-      // ✅ 一本化：rephraseBlocks があれば常に blocks 経由で本文を組む（pickedFrom に依存しない）
-      const cleanedBlocksRaw = rephraseBlocks
-        .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim())
-        // ✅ 追加：advance計測用の内部ブロックは UI に出さない
-        .filter((t: string) => !t.trimStart().startsWith('@NEXT_HINT'))
+
+      // 1行に潰す
+      const clampOneLineLocal = (s: string) =>
+        String(s ?? '')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+      // ✅ preface の取得元を “揺れ” 吸収（extra/meta/exprMeta/expr 全部見る）
+      const pickPreface = () => {
+        const a: any = extraAny ?? {};
+        const m: any = (args as any)?.meta?.extra ?? {};
+        const x: any = (args as any)?.extra ?? {};
+
+        const cands = [
+          a?.expr?.prefaceLine,
+          a?.expr?.prefaceHead,
+          a?.exprMeta?.prefaceLine,
+          a?.exprMeta?.prefaceHead,
+
+          m?.expr?.prefaceLine,
+          m?.expr?.prefaceHead,
+          m?.exprMeta?.prefaceLine,
+          m?.exprMeta?.prefaceHead,
+
+          x?.expr?.prefaceLine,
+          x?.expr?.prefaceHead,
+          x?.exprMeta?.prefaceLine,
+          x?.exprMeta?.prefaceHead,
+        ];
+
+        const s = cands.find((v) => typeof v === 'string' && String(v).trim().length > 0);
+        return s ? clampOneLineLocal(String(s)) : '';
+      };
+
+      const exprPreface = pickPreface();
+
+      // ✅ raw texts
+      const rbTexts = rephraseBlocks.map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim());
+
+      const rbTotal = rbTexts.length;
+      const rbEmpty = rbTexts.filter((t) => !t).length;
+      const rbNextHint = rbTexts.filter((t) => t.trimStart().startsWith('@NEXT_HINT')).length;
+      const rbBad = rbTexts.filter((t) => t && isBadBlock(t)).length;
+
+      // ✅ cleaned texts
+      let cleanedBlocksText = rbTexts
+        // advance計測用の内部ブロックは UI に出さない
+        .filter((t: string) => t && !t.trimStart().startsWith('@NEXT_HINT'))
         .filter((t: string) => !isBadBlock(t))
         .map((t: string) => stripInternalLabels(t))
         .filter(Boolean)
-        // ✅ 追加：renderV2 に渡す前に ILINE 末尾の writer 注釈を除去して “末尾切り事故” を防ぐ
+        // ILINE 末尾の writer 注釈を除去して “末尾切り事故” を防ぐ
         .map((t: string) => cutAfterIlineAndDropWriterNotes(t))
         .filter(Boolean);
 
-// ✅ 表現レーン preface を “rephraseBlocks 採用時” にも 1行だけ先頭付与する
-// - base(resultObjFinalRaw) には preface が残るが、UI は rephraseBlocks を採用するため消える
-{
-  // 1行に潰す（ローカル定義：この関数内だけで完結させる）
-  const clampOneLineLocal = (s: string) =>
-    String(s ?? '')
-      .replace(/\s+/g, ' ')
-      .trim();
+      // ✅ preface を 1行だけ先頭付与（重複は避ける）
+      if (exprPreface) {
+        const head = String(cleanedBlocksText?.[0] ?? '').trim();
+        const shouldPrepend =
+          !head || (head !== exprPreface && !head.startsWith(exprPreface));
 
-  const exprPrefaceRaw = clampOneLineLocal(
-    String((extraAny as any)?.expr?.prefaceLine ?? (extraAny as any)?.expr?.prefaceHead ?? ''),
-  );
-  const exprPreface = exprPrefaceRaw;
+        if (shouldPrepend) {
+          (extraAny as any).exprPrefaceApplied = true;
+          cleanedBlocksText = [exprPreface, ...cleanedBlocksText];
+        } else {
+          // 既に入っている場合も “適用済み扱い” にして二重適用事故を根絶
+          (extraAny as any).exprPrefaceApplied = true;
+        }
+      }
 
-  const shouldPrependPrefaceToBlocks = (preface: string, head: string, exAny: any) => {
-    if (!preface) return false;
-    if (!head) return true;
-    if (head === preface) return false;
-    if (head.startsWith(preface)) return false;
-    return true;
-  };
+      const rbKept = cleanedBlocksText.length;
+      const rbKeptJoinedLen = norm(cleanedBlocksText.join('\n')).length;
 
-  const cleanedBlocksWithPreface = (cleanedBlocksRaw: string[]) => {
-    if (!exprPreface) return cleanedBlocksRaw;
-    const head = String(cleanedBlocksRaw?.[0] ?? '').trim();
-    if (shouldPrependPrefaceToBlocks(exprPreface, head, extraAny)) {
-      (extraAny as any).exprPrefaceApplied = true;
-      return [exprPreface, ...cleanedBlocksRaw];
-    }
-    // 既に入っている場合も “適用済み扱い” にして二重適用事故を根絶
-    (extraAny as any).exprPrefaceApplied = true;
-    return cleanedBlocksRaw;
-  };
+      // ✅ blocks 化（ここが今まで抜けてた）
+      blocks = cleanedBlocksText.map((t: string) => ({ text: t }));
 
-  // ✅ まず「テキスト配列」を作る（cleanedBlocksText をここで定義する）
-  const rbTexts = rephraseBlocks
-    .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim());
-
-  const rbTotal = rbTexts.length;
-  const rbEmpty = rbTexts.filter((t) => !t).length;
-  const rbNextHint = rbTexts.filter((t) => t.trimStart().startsWith('@NEXT_HINT')).length;
-  const rbBad = rbTexts.filter((t) => t && isBadBlock(t)).length;
-
-  const cleanedBlocksText = rbTexts
-    // advance計測用の内部ブロックは UI に出さない
-    .filter((t: string) => t && !t.trimStart().startsWith('@NEXT_HINT'))
-    .filter((t: string) => !isBadBlock(t))
-    .map((t: string) => stripInternalLabels(t))
-    .filter(Boolean)
-    // ILINE 末尾の writer 注釈を除去して “末尾切り事故” を防ぐ
-    .map((t: string) => cutAfterIlineAndDropWriterNotes(t))
-    .filter(Boolean);
-
-  const rbKept = cleanedBlocksText.length;
-  const rbKeptJoinedLen = norm(cleanedBlocksText.join('\n')).length;
-
-  // ✅ 後段ログで参照できるように meta.extra に“診断情報”を保持（表示には使わない）
-  try {
-    (extraAny as any).renderMeta = {
-      ...((extraAny as any).renderMeta ?? {}),
-      rbDiag: {
-        rbTotal,
-        rbEmpty,
-        rbNextHint,
-        rbBad,
-        rbKept,
-        rbKeptJoinedLen,
-      },
-    };
-  } catch {}
-}
-
-
+      // ✅ 後段ログで参照できるように meta.extra に“診断情報”を保持（表示には使わない）
+      try {
+        (extraAny as any).renderMeta = {
+          ...((extraAny as any).renderMeta ?? {}),
+          rbDiag: {
+            rbTotal,
+            rbEmpty,
+            rbNextHint,
+            rbBad,
+            rbKept,
+            rbKeptJoinedLen,
+            hasExprPreface: !!exprPreface,
+            exprPrefaceHead: exprPreface ? exprPreface.slice(0, 60) : null,
+          },
+        };
+      } catch {}
     } else {
 
       // 通常ルート
@@ -1268,10 +1275,13 @@ const maxLinesFinal = isIR
 
   try {
     const prevPickedFrom = pickedFrom;
-    const rb = Array.isArray((extraAny as any)?.rephraseBlocks) ? (extraAny as any).rephraseBlocks : null;
+    const rb = Array.isArray((extraAny as any)?.rephraseBlocks)
+      ? (extraAny as any).rephraseBlocks
+      : null;
     const rbLen2 = rb ? rb.length : 0;
 
     if (
+      rb &&
       shouldForceRephraseBlocks({
         isIR,
         isSilence,
@@ -1335,8 +1345,6 @@ const maxLinesFinal = isIR
           );
         };
 
-        // ====== 置き換え：extractHeadingTitle と pickDynamicTitle ======
-
         // ✅ 同一ターン内の「見出し語」使い回し防止
         const usedTitleHints = new Set<string>();
 
@@ -1349,18 +1357,11 @@ const maxLinesFinal = isIR
           const titleRaw = m && m[1] ? String(m[1]).trim() : null;
 
           // 文字見出し
-          if (
-            !titleRaw &&
-            /^(入口|状況|二項|焦点移動|受容|統合|選択|最小の一手)$/.test(s)
-          )
-            return s;
+          if (!titleRaw && /^(入口|状況|二項|焦点移動|受容|統合|選択|最小の一手)$/.test(s)) return s;
           if (!titleRaw) return null;
 
-          // ✅ 「入口：月食」みたいな“固定：可変”が来たら、
-          //   「入口/状況/…」側を落として「月食」だけ返す（= 一行可変見出し）
-          const mm = titleRaw.match(
-            /^(入口|状況|二項|焦点移動|受容|統合|選択)\s*：\s*(.+)$/
-          );
+          // 「入口：月食」→「月食」だけ
+          const mm = titleRaw.match(/^(入口|状況|二項|焦点移動|受容|統合|選択)\s*：\s*(.+)$/);
           if (mm && mm[2]) return String(mm[2]).trim();
 
           return titleRaw;
@@ -1370,15 +1371,10 @@ const maxLinesFinal = isIR
           const b = String(base ?? '').trim();
           if (!b) return null;
 
-          // ✅ 「最小の一手」だけは固定（既存ガード整合）
           if (b.includes('最小の一手')) return '最小の一手';
 
-          const s = String(bodyText ?? '')
-            .replace(/\r\n/g, '\n')
-            .replace(/\r/g, '\n')
-            .trim();
+          const s = String(bodyText ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
 
-          // ---- 本文から「見出し候補」を複数抽出して、未使用のものを採用する ----
           const stop = new Set([
             'こと',
             'もの',
@@ -1395,7 +1391,7 @@ const maxLinesFinal = isIR
             'そこ',
             '月',
             '太陽',
-            '地球', // 天体連打しやすいので弱ストップ（必要なら外してOK）
+            '地球',
           ]);
 
           const push = (arr: string[], v: string | undefined | null) => {
@@ -1403,11 +1399,7 @@ const maxLinesFinal = isIR
             if (!x) return;
             if (x.length < 2) return;
             if (x.length > 12) return;
-
-            // ✅ 見出し候補は「漢字 or カタカナ」に限定（断片見出しを防ぐ）
-            // 例: "中で新しい理解が待っ"（ひらがな混じり）を弾く
             if (!/^[一-龥ァ-ヶー]{2,12}$/.test(x)) return;
-
             if (stop.has(x)) return;
             if (/^(入口|状況|二項|焦点移動|受容|統合|選択)$/.test(x)) return;
             arr.push(x);
@@ -1418,72 +1410,48 @@ const maxLinesFinal = isIR
             const t = String(text ?? '').trim();
             if (!t) return out;
 
-            // ① 既知ワード（強いイベント語など）
             const knownAll = t.match(
-              /(月食|日食|新月|満月|地震|台風|仕事|会議|上司|恋愛|結婚|別れ|不安|恐れ|怒り|静寂|調和|再生|影|秩序)/g
+              /(月食|日食|新月|満月|地震|台風|仕事|会議|上司|恋愛|結婚|別れ|不安|恐れ|怒り|静寂|調和|再生|影|秩序)/g,
             );
             if (knownAll) knownAll.forEach((x) => push(out, x));
 
-            // ② 「XのY」→ Y を拾う（“宇宙の秩序”→“秩序” など）
             const reNo = /([一-龥ぁ-んァ-ヶ]{2,10})の([一-龥ぁ-んァ-ヶ]{2,10})/g;
             let m: RegExpExecArray | null;
             while ((m = reNo.exec(t))) push(out, m[2]);
 
-            // ③ 漢字名詞っぽい塊（2〜8）
             const reKanji = /([一-龥]{2,8})/g;
             while ((m = reKanji.exec(t))) push(out, m[1]);
 
-            // ④ カタカナ名詞
             const reKata = /([ァ-ヶー]{3,12})/g;
             while ((m = reKata.exec(t))) push(out, m[1]);
 
-            // 重複排除（順序保持）
             return Array.from(new Set(out));
           };
 
           const candidates = s ? pickTopicHints(s) : [];
-
-          // ✅ “一行可変” を強くする：未使用の候補を選ぶ（同語連打を止める）
           const picked = candidates.find((x) => !usedTitleHints.has(x)) ?? null;
           if (picked) {
             usedTitleHints.add(picked);
-            return picked; // ← 「topicだけ」を返す（入口/状況…は出さない）
+            return picked;
           }
 
-          // すでに使い切った/候補が取れない：保険で base を返す（入口/状況…など）
           return b;
         };
 
-        // ✅ rb（生配列）も参照して key が取れるなら最優先（互換用：ただし index ずれがあるので今回は “見出し無し本文” の fallback にだけ使う）
         const rbRaw = Array.isArray((extraAny as any)?.rephraseBlocks)
           ? ((extraAny as any).rephraseBlocks as any[])
           : null;
 
-        // ✅ key が無い場合：multi8 の順番（＝枠は固定、見出しは可変にしてOK）
-        const fallbackOrder = [
-          '入口',
-          '状況',
-          '二項',
-          '焦点移動',
-          '受容',
-          '統合',
-          '選択',
-          '最小の一手',
-        ] as const;
+        const fallbackOrder = ['入口', '状況', '二項', '焦点移動', '受容', '統合', '選択', '最小の一手'] as const;
 
-        // ✅ 重要：rbTexts（ブロック）→ 行トークンへ展開（AUTO_PATCHの巨大ブロック対策）
+        // ✅ rbTexts（ブロック）→ 行トークンへ展開
         const rbTokens: string[] = [];
         for (const raw of rbTexts) {
-          const t = String(raw ?? '')
-            .replace(/\r\n/g, '\n')
-            .replace(/\r/g, '\n')
-            .trim();
+          const t = String(raw ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
           if (!t) continue;
-
           for (const line of t.split('\n')) {
             const x = String(line ?? '').trim();
             if (!x) continue;
-            // 念のため：ここでも @NEXT_HINT は排除（混入ケース対策）
             if (x.trimStart().startsWith('@NEXT_HINT')) continue;
             rbTokens.push(x);
           }
@@ -1496,10 +1464,10 @@ const maxLinesFinal = isIR
           const cur = String(rbTokens[i] ?? '').trim();
           if (!cur) continue;
 
-          // ✅ 見出し → 次の本文（次の見出しまで）をまとめて 1 ブロック化
           if (isHeaderish(cur)) {
             const bodies: string[] = [];
             let j = i + 1;
+
             while (j < rbTokens.length) {
               const nxt = String(rbTokens[j] ?? '').trim();
               if (!nxt) {
@@ -1517,61 +1485,42 @@ const maxLinesFinal = isIR
 
             const title = pickDynamicTitle(baseTitle, bodies.join('\n'));
 
-// ✅ 見出しだけ残る事故を防ぐ：本文が無ければ出さない
-if (title && bodies.length > 0) {
-  // ✅ rephraseBlocks-forced: 見出し（###）は付けない。
-  // ✅ ただし「✨」等の装飾は render で固定しない（writer/expr側へ委譲）
-  {
-    const body = bodies.join('\n\n').trim();
-    if (body) {
-      blocks.push({ text: body }); // ✅ FIX: emoji/prefix を注入しない
-    }
-  }
-  sectionIndex++;
-} else if (!title && bodies.length > 0) {
-  // タイトル不明だが本文がある：壊さず本文だけ出す
-  blocks.push({ text: bodies.join('\n\n') });
-  sectionIndex++;
+            if (title && bodies.length > 0) {
+              const body = bodies.join('\n\n').trim();
+              if (body) blocks.push({ text: body });
+              sectionIndex++;
+            } else if (!title && bodies.length > 0) {
+              blocks.push({ text: bodies.join('\n\n') });
+              sectionIndex++;
+            }
 
-}
-i = j - 1; // まとめた分だけ進める
-continue;
-}
+            i = j - 1;
+            continue;
+          }
 
-// ✅ 見出しが無い本文だけが来た場合：fallback で 1 ブロック化
-// rbRaw は index がズレることがあるので “あくまで補助”
-const keyFromRb =
-  rbRaw && Array.isArray(rbRaw) && rbRaw[sectionIndex] && typeof rbRaw[sectionIndex] === 'object'
-    ? (rbRaw[sectionIndex] as any)?.key ?? (rbRaw[sectionIndex] as any)?.id ?? null
-    : null;
+          const keyFromRb =
+            rbRaw && Array.isArray(rbRaw) && rbRaw[sectionIndex] && typeof rbRaw[sectionIndex] === 'object'
+              ? (rbRaw[sectionIndex] as any)?.key ?? (rbRaw[sectionIndex] as any)?.id ?? null
+              : null;
 
-const h1 = headingForKey(keyFromRb);
-const h2 = !h1 && sectionIndex < fallbackOrder.length ? fallbackOrder[sectionIndex] : null;
-const baseHeading = h1 ?? h2;
+          const h1 = headingForKey(keyFromRb);
+          const h2 = !h1 && sectionIndex < fallbackOrder.length ? fallbackOrder[sectionIndex] : null;
+          const baseHeading = h1 ?? h2;
 
-const heading = baseHeading ? pickDynamicTitle(baseHeading, cur) : null;
+          const heading = baseHeading ? pickDynamicTitle(baseHeading, cur) : null;
 
-if (heading) {
-  // ✅ rephraseBlocks-forced: 見出し（###）は付けない。
-  // ✅ ただし「✨」等の装飾は render で固定しない（writer/expr側へ委譲）
-  {
-    const body = String(cur ?? '').trim();
-    if (body) {
-      blocks.push({ text: body }); // ✅ FIX: emoji/prefix を注入しない
-    }
-  }
-} else {
-  blocks.push({ text: cur });
-}
-sectionIndex++;
+          const body = String(cur ?? '').trim();
+          if (body) blocks.push({ text: body });
+
+          sectionIndex++;
         }
 
+        // ✅ forced blocks ルートでは meta本文先頭行（preface）を注入しない
+        // - seed/preface は PostProcess 側（SLOTPLAN_SEED_TO_WRITER）で管理する
+        // - ここで混ぜると RB と seed が二重化しやすい
+
         blocksForRender = blocks;
-
-        // null を入れると型で落ちることがあるので空文字にする（fallbackは「無効化」）
         fallbackTextForRender = '';
-
-        // pickedFrom（診断・ログ・後段）も“強制側”に合わせる
         pickedFromForRender = 'rephraseBlocks-forced';
         pickedFrom = pickedFromForRender;
 
@@ -1579,13 +1528,11 @@ sectionIndex++;
           rev: IROS_RENDER_GATEWAY_REV,
           rbLen: rbLen2,
           forcedBlocks: blocksForRender.length,
-          prevPickedFrom: prevPickedFrom,
-          nextHintFromRb: nextHintFromRb,
-          nextHintFromSlotPlan: nextHintFromSlotPlan,
+          prevPickedFrom,
+          nextHintFromRb,
+          nextHintFromSlotPlan,
         });
       }
-
-
     }
   } catch {}
 
@@ -2098,9 +2045,9 @@ pipe('after_renderV2_empty_rescue', content);
 
     const pickedFromStr = String(pickedFrom ?? '');
 
-    // ✅ rephraseBlocks 強制ターンは “短文化事故” ではないことが多いので除外
-    const isForcedBlocks =
-      pickedFromStr === 'rephraseBlocks-forced' || pickedFromStr.startsWith('rephraseBlocks');
+    // ✅ rephraseBlocks “forced” のときだけ SHORT_OUT_DIAG を除外したい
+    // - 通常の pickedFrom='rephraseBlocks' は診断対象に含める（短文化事故を拾うため）
+    const isForcedBlocks = pickedFromStr === 'rephraseBlocks-forced';
 
     // IR / shortException は対象外（意図的に短い場合がある）
     const isShortOut =

@@ -14,6 +14,9 @@ export function systemPromptForFullReply(args?: {
   band?: { intentBand: string | null; tLayerHint: string | null } | null;
   lockedILines?: string[] | null;
 
+  // ✅ inputKind（micro/greeting 判定用）
+  inputKind?: string | null;
+
   // ExpressionLane（発火結果）: personaModeを変えず、本文の“言い方”補助だけに使う
   exprLane?: { fired?: boolean; lane?: string | null; reason?: string | null } | null;
 
@@ -26,18 +29,27 @@ export function systemPromptForFullReply(args?: {
 
   const h = band?.tLayerHint ?? null;
 
+  // ✅ inputKind（micro/greeting のときは「表現を締める」ための信号）
+  const inputKindNow = String(args?.inputKind ?? '').trim().toLowerCase();
+  const isMicroOrGreetingNow = inputKindNow === 'micro' || inputKindNow === 'greeting';
+
   // ExpressionLane（表現補助用・構造は動かさない）
   const exprLane = args?.exprLane ?? null;
   const exprFired = Boolean(exprLane?.fired);
   const exprLaneKey = (exprLane?.lane ?? null) as string | null;
 
-  // NOTE: Iスタイル許可は“要求”側の信号（tLayerHint）に限定（帯域では発火しない）
-  const isIRequested = Boolean(h && h.startsWith('I'));
-  const allowIStyle = itOk && isIRequested;
+  // NOTE:
+  // - GUIDE_I（Iっぽい語り）は「要求(I*/T*)」かつ itOk のときだけ許可（ITトリガー条件と整合）
+  // - itOk=false の時は、たとえ T* が来ていても GUIDE_I にはしない（“Iっぽさ”の漏れを止める）
+  const isIOrTRequested = Boolean(h && (h.startsWith('I') || h.startsWith('T')));
+  const allowIStyle = Boolean(itOk && isIOrTRequested);
 
   // clamp: GUIDE_I は allowIStyle を満たさないと無効化
   const requestedPersona = args?.personaMode ?? null;
   const personaMode: 'GROUND' | 'DELIVER' | 'GUIDE_I' | 'ASSESS' = (() => {
+    // ✅ 最優先：micro/greeting は “会話の接続” だけ。I語り・二択誘導を出さない
+    if (isMicroOrGreetingNow) return 'GROUND';
+
     if (directTask) return 'DELIVER';
     if (requestedPersona) {
       if (requestedPersona === 'GUIDE_I' && !allowIStyle) return 'GROUND';
@@ -100,6 +112,26 @@ export function systemPromptForFullReply(args?: {
     '- slot/shift/lock などの出力制約がある場合は、それを最優先する。',
     '- この system は“矛盾しない下地”のみ。制約に逆らって自由にしない。',
     '',
+
+    '【Markdown表現（許可／拡張）】',
+    '- 読みやすさのための装飾は許可（装飾が主役にならないこと）。',
+    '- 段落は「空行（\\n\\n）」で区切る（余白は段落で作る）。',
+    '- 1段落は2〜4行を目安。段落間は必ず空行を1つ入れる。',
+    '- 太字は **強調** のみ。** は必ずペアで閉じる（閉じ忘れ禁止）。',
+    '- 記号は使用OK（ただし1文に多用しない）。使用可：→ ⇄ ／ ・ — … 「」 “”。',
+    '- 箇条書きは原則しない。使うなら最大3行まで（連打しない）。',
+    '- 2〜3行ごとに余白を作ってよい。',
+    '- 単独の一文行を使ってリズムを作ってよい。',
+    '- 絵文字は文脈に合う場合は0〜5個まで自然に使ってよい。',
+    '- 絵文字は文意に合わせて選ぶ。強制テンプレ化しない。🫧は使わない。',
+    '',
+
+'【構造美（Sofia寄せ）】',
+'- 列挙する場合でも数を宣言しない（「3つあります」などは禁止）。',
+'- 数ではなく、段差や余白で構造を見せる。',
+'- 講義調にしない。説明よりも“配置”で伝える。',
+'- 複数の選択肢は、番号ではなく連続する短い宣言文として出す。',
+'',
 
     '【見出しアイコン規約】',
     '- 見出しは markdown の "## " を使う（# や ### は使わない）。',

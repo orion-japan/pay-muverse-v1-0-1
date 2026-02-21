@@ -1177,34 +1177,21 @@ function readItOkFromContext(userContext: unknown): boolean {
   const uc: any = userContext as any;
 
   // ✅ このターンの itOk は「このターンの扉」だけを見る
-  // - 過去の itx_reason(IT_TRIGGER_OK/IT_HOLD) で itOk を勝手に true にしない
-  // - itxStep(T1..T3) も “状態” なので itOk とは別（ここでは使わない）
-  const itTriggered =
-    Boolean(
-      tryGet(uc, ['itTriggered']) ??
-        tryGet(uc, ['it_triggered']) ??
-        tryGet(uc, ['meta', 'itTriggered']) ??
-        tryGet(uc, ['meta', 'it_triggered']) ??
-        tryGet(uc, ['ctxPack', 'itTriggered']) ??
-        tryGet(uc, ['ctxPack', 'it_triggered']) ??
-        tryGet(uc, ['ctx_pack', 'itTriggered']) ??
-        tryGet(uc, ['ctx_pack', 'it_triggered']) ??
-        false,
-    ) === true;
+  // - itTriggered（過去の状態）や tLayerModeActive（濃度モード）は itOk の代替にしない
+  // - orchestrator が meta.itTrigger.ok（camel/snake）を供給している前提
+  const ok =
+    tryGet(uc, ['itTrigger', 'ok']) ??
+    tryGet(uc, ['it_trigger', 'ok']) ??
+    tryGet(uc, ['meta', 'itTrigger', 'ok']) ??
+    tryGet(uc, ['meta', 'it_trigger', 'ok']) ??
+    tryGet(uc, ['ctxPack', 'itTrigger', 'ok']) ??
+    tryGet(uc, ['ctxPack', 'it_trigger', 'ok']) ??
+    tryGet(uc, ['ctx_pack', 'itTrigger', 'ok']) ??
+    tryGet(uc, ['ctx_pack', 'it_trigger', 'ok']) ??
+    null;
 
-  // Tレイヤー濃度モードは「許可」として扱う（= itOk の代替トグル）
-  const tLayerModeActive =
-    Boolean(
-      tryGet(uc, ['tLayerModeActive']) ??
-        tryGet(uc, ['meta', 'tLayerModeActive']) ??
-        tryGet(uc, ['ctxPack', 'tLayerModeActive']) ??
-        tryGet(uc, ['ctx_pack', 'tLayerModeActive']) ??
-        false,
-    ) === true;
-
-  return itTriggered || tLayerModeActive;
+  return ok === true;
 }
-
 
 function extractIntentBandFromContext(userContext: unknown): {
   intentBand: string | null;
@@ -1262,14 +1249,30 @@ function extractIntentBandFromContext(userContext: unknown): {
         '',
     ) || '';
 
-  const tLayerHint = tLayerHintRaw || (itxStep ? itxStep : null);
+    const tLayerHint = tLayerHintRaw || (itxStep ? itxStep : null);
 
-  const bandOk = intentBand && /^[SRICT][123]$/u.test(intentBand) ? intentBand : null;
-  const hintOk = tLayerHint && /^(?:[SRICT][123]|T[123])$/u.test(tLayerHint) ? tLayerHint : null;
+    const bandOk = intentBand && /^[SRICT][123]$/u.test(intentBand) ? intentBand : null;
+    const hintOk = tLayerHint && /^(?:[SRICT][123]|T[123])$/u.test(tLayerHint) ? tLayerHint : null;
 
-  return { intentBand: bandOk, tLayerHint: hintOk };
+    try {
+      console.log('[IROS/rephraseEngine][INTENT_BAND_EXTRACT]', {
+        intentBand_raw: intentBand,
+        tLayerHintRaw,
+        itxStep,
+        tLayerHint_afterFallback: tLayerHint,
+        bandOk,
+        hintOk,
+        note:
+          tLayerHintRaw
+            ? 'from_tLayerHintRaw'
+            : itxStep
+              ? 'from_itxStep_fallback'
+              : 'no_hint',
+      });
+    } catch {}
+
+    return { intentBand: bandOk, tLayerHint: hintOk };
 }
-
 function readShouldRaiseFlagFromContext(userContext: unknown): { on: boolean; reason: string | null } {
   if (!userContext || typeof userContext !== 'object') return { on: false, reason: null };
   const uc: any = userContext as any;
@@ -2320,6 +2323,12 @@ const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
     // ✅ intentBand / tLayerHint を systemPrompt に届ける（GUIDE_I 判定の材料）
     band,
 
+    // ✅ micro/greeting は GUIDE_I を止める（“接続だけ”の短文で I/T 誘導が出るのを防ぐ）
+    personaMode:
+      inputKind === 'micro' || inputKind === 'greeting'
+        ? 'GROUND'
+        : (undefined as any),
+
     // ✅ exprLane は「string」ではなく「{ fired, lane, reason }」想定。
     //    postprocess 側で ctxPack.exprMeta に合流している前提。
     exprLane:
@@ -2744,10 +2753,26 @@ if (messages.length > 0 && (messages as any)[0]?.role === 'system') {
     extraSystemParts.push(String(allowText));
   }
 
-  // exprMeta（常に）
-  if (exprMetaText && String(exprMetaText).trim().length > 0) {
-    extraSystemParts.push(String(exprMetaText));
-  }
+// ✅ EXPR_META を system に混入（directiveV1 が ON のときだけ追記）
+if (exprMetaText && String(exprMetaText).trim().length > 0) {
+  const em: any = exprMeta && typeof exprMeta === 'object' ? exprMeta : {};
+
+  const directiveV1_on = Boolean(em.directiveV1_on);
+  const directiveV1 = String(em.directiveV1 ?? '').trim();
+  const hasDirectiveV1 = !!(directiveV1_on && directiveV1.length > 0);
+
+  const injectedText = hasDirectiveV1
+    ? `${String(exprMetaText)}\n${directiveV1}`
+    : String(exprMetaText);
+
+  extraSystemParts.push(injectedText);
+
+  // 追跡用（既存ログは後で統合してOK。まず「混入できたか」を確実に見える化）
+  console.log('[IROS/rephraseEngine][EXPR_META]', {
+    injected: true,
+    hasDirectiveV1,
+  });
+}
 
   // BLOCK_PLAN（条件付き）
   if (blockPlanText && String(blockPlanText).trim().length > 0) {
@@ -3661,24 +3686,7 @@ if (Array.isArray(messages) && messages.length >= 2) {
       isIdeaBand,
     });
 
-    // ✅ “短いだけ” で FATAL → retry に落とさない（表現レーン実験で副作用が大きい）
-    // - scaffold / directTask / IdeaBand / TConcretize は従来どおり（短さが破綻要因になりやすい）
-    const allowShortAccept =
-      Boolean(v?.ok) &&
-      !scaffoldActive &&
-      !isDirectTask &&
-      !isIdeaBand &&
-      !isTConcretize;
-
-    if (allowShortAccept) {
-      return adoptAsSlots(candidate, 'FLAGSHIP_OK_TOO_SHORT_ACCEPT', {
-        scaffoldActive,
-        flagshipLevel: String((v as any)?.level ?? 'OK'),
-        retrySuppressed: true,
-      });
-    }
-
-    // ✅ それ以外は従来どおり retry へ（安全側）
+    // ✅ “短いだけ” でも chat では 1回だけ retry に落とす
     v = {
       ...(v as any),
       ok: false,
@@ -3686,7 +3694,6 @@ if (Array.isArray(messages) && messages.length >= 2) {
       reasons: Array.from(new Set([...(v.reasons ?? []), 'OK_TOO_SHORT_TO_RETRY'])),
     } as any;
   }
-
 
   // ✅ DEV: 強制的に retry を踏む（E2E確認用）
   // - userText 埋め込み（[[FORCE_RETRY]]）は本番経路を汚染して収束しないので廃止

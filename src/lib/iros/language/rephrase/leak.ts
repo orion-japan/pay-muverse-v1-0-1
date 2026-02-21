@@ -25,26 +25,32 @@ export function containsForbiddenLeakText(
   return false;
 }
 
+// src/lib/iros/language/rephrase/leak.ts
+
 /**
  * ✅ 直接タスク判定
- * - 「まとめて/要約/整理して」も “直接タスク” として扱う（要約吸い込みを防ぐ）
+ * - 「まとめて/要約/整理して」など “完成物を作る/整える” は directTask
+ * - ただの知識質問（理由/仕組み/とは/何）まで directTask にしない
  */
 export function extractDirectTask(userText: string, inputKind: string | null): boolean {
-  const t = String(userText ?? '');
+  const t = String(userText ?? '').trim();
 
   // ✅ “完成物を作る/整える” 明示だけを directTask として扱う
   // （技術会話=task は directTask にしない）
   const isDirectTaskByPhrase =
     /(本文だけ|文面|短文|そのまま使える|作って|出して|まとめて|要約|要約して|整理して|箇条書き|要点|ポイント|結論)/.test(t);
 
-  // ✅ HowTo/指南（ただし「具体的/提案」単体では立てない）
+  // ✅ HowTo/指南ワード（※「教えてください」は広すぎるので入れない）
   const isHowtoLike =
-    /(教えて|教えてください|アドバイス|やり方|方法|手順|どうやって|どうしたら|進め方|コツ|秘技|tips|howto|おすすめ|選び方|例を|例:|サンプル)/i.test(
-      t,
-    );
+    /(やり方|方法|手順|どうやって|どうしたら|進め方|コツ|tips|おすすめ|選び方|例を|例:|サンプル)/i.test(t);
+
+  // ✅ 典型的な“知識質問”っぽさ（ここに引っかかるものは directTask にしない）
+  const looksLikeInfoQuestion =
+    /(とは|仕組み|理由|意味|なぜ|何|どんな|いつ|どこ|誰|ですか|か\?|？)/.test(t);
 
   // ✅ kind で立てるのは howto/request/qa のみ（task は除外）
+  // ただし「知識質問っぽい」ものは directTask に倒さない
   const isDirectTaskByKind = inputKind === 'howto' || inputKind === 'request' || inputKind === 'qa';
 
-  return Boolean(isDirectTaskByPhrase || isDirectTaskByKind || isHowtoLike);
+  return Boolean(isDirectTaskByPhrase || isHowtoLike || (isDirectTaskByKind && !looksLikeInfoQuestion));
 }

@@ -622,44 +622,13 @@ export async function POST(req: NextRequest) {
       return json({ ok: true, messages: [], llm_messages: [], note: 'no_conversation_uuid_mapping', reqId }, 200);
     }
 
-    // (D) NextStep + text normalize
+    // (D) NextStep + text normalize（choiceIdは使用しない）
     const extracted = extractNextStepChoiceFromText(rawText);
 
-    const choiceIdFromBody: string | null = (() => {
-      const b0 =
-        body?.choiceId ??
-        body?.extractedChoiceId ??
-        body?.nextStepChoiceId ??
-        body?.nextStepChoiceID ??
-        null;
-      if (typeof b0 === 'string' && b0.trim()) return b0.trim();
-
-      const m = body?.meta;
-      if (m && typeof m === 'object' && !Array.isArray(m)) {
-        const m0 =
-          (m as any).choiceId ??
-          (m as any).extractedChoiceId ??
-          (m as any).nextStepChoiceId ??
-          (m as any).nextStepChoiceID ??
-          null;
-        if (typeof m0 === 'string' && m0.trim()) return m0.trim();
-
-        const ex = (m as any).extra;
-        if (ex && typeof ex === 'object' && !Array.isArray(ex)) {
-          const ex0 =
-            (ex as any).nextStepChoiceId ??
-            (ex as any).nextStepChoiceID ??
-            (ex as any).choiceId ??
-            (ex as any).extractedChoiceId ??
-            null;
-          if (typeof ex0 === 'string' && ex0.trim()) return ex0.trim();
-        }
-      }
-
-      return null;
-    })();
-
-    const choiceId: string | null = choiceIdFromBody ?? extracted.choiceId ?? null;
+    // NextStep廃止方針：
+    // - body/meta/extra 由来の choiceId はすべて無視
+    // - tag strip（cleanText）のみ適用
+    const choiceId: string | null = null;
 
     const cleanTextAfterTagStrip = normalizeGhostWhitespace(extracted.cleanText);
     const rawTextNorm = normalizeGhostWhitespace(rawText);
@@ -668,9 +637,7 @@ export async function POST(req: NextRequest) {
     if (isEllipsisOnly(finalText)) finalText = '';
     if (!finalText) return json({ ok: false, error: 'text_empty', error_code: 'text_empty', reqId }, 400);
 
-    // (E) meta build + sanitize (+ memory fill)
-    const picked = choiceId ? findNextStepOptionById(choiceId) : null;
-
+    // (E) meta build + sanitize（NextStep関連は付与しない）
     const metaRaw = body?.meta ?? null;
     const baseMetaRaw = metaRaw && typeof metaRaw === 'object' && !Array.isArray(metaRaw) ? metaRaw : {};
     const baseExtraRaw =
@@ -678,26 +645,16 @@ export async function POST(req: NextRequest) {
         ? baseMetaRaw.extra
         : {};
 
-    const pickedSnapshot =
-      picked && typeof picked === 'object'
-        ? {
-            id: (picked as any).id ?? choiceId ?? null,
-            label: (picked as any).label ?? (picked as any).title ?? (picked as any).name ?? null,
-          }
-        : null;
-
-    const pickedMeta = picked && typeof picked === 'object' ? (picked as any).meta ?? null : null;
-
     const metaAugRaw = {
       ...baseMetaRaw,
       extra: {
         ...baseExtraRaw,
-        nextStepChoiceId: choiceId ?? null,
-        nextStepPicked: pickedSnapshot,
-        nextStepPickedMeta: pickedMeta,
+        // NextStep関連は常にnull
+        nextStepChoiceId: null,
+        nextStepPicked: null,
+        nextStepPickedMeta: null,
       },
     };
-
     const metaSanitized = sanitizeJsonDeep(metaAugRaw);
     const metaBase =
       metaSanitized && typeof metaSanitized === 'object' && !Array.isArray(metaSanitized) ? metaSanitized : {};

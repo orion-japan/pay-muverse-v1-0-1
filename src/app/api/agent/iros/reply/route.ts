@@ -485,25 +485,21 @@ export async function POST(req: NextRequest) {
     }
 
     // -------------------------------------------------------
-    // 10) NextStep tag strip
+    // 10) NextStep tag strip（tagは除去するが choiceId は使わない）
     // -------------------------------------------------------
     const rawText = String(text ?? '');
     const extracted = extractNextStepChoiceFromText(rawText);
 
-    const choiceIdFromExtra =
-      extraReq && typeof (extraReq as any).choiceId === 'string' ? String((extraReq as any).choiceId).trim() : null;
-
-    const extractedChoiceId =
-      extracted?.choiceId && String(extracted.choiceId).trim().length > 0 ? String(extracted.choiceId).trim() : null;
-
-    const effectiveChoiceId = choiceIdFromExtra || extractedChoiceId || null;
+    // NextStep廃止方針：
+    // - extra/body/text 由来の choiceId は現行動作に寄与しないため無視する
+    // - tag strip（cleanText）は残す（ユーザー本文の純化だけ行う）
+    const extractedChoiceId: string | null = null;
+    const effectiveChoiceId: string | null = null;
 
     const cleanText =
       extracted?.cleanText && String(extracted.cleanText).trim().length > 0 ? String(extracted.cleanText).trim() : '';
 
-    const userTextClean = cleanText.length ? cleanText : rawText;
-
-    if (effectiveChoiceId) findNextStepOptionById(effectiveChoiceId);
+    const userTextClean = (cleanText.length ? cleanText : rawText).trim();
 
     // -------------------------------------------------------
     // 11) extra sanitize（route.tsでIT強制は扱わない）
@@ -523,8 +519,11 @@ export async function POST(req: NextRequest) {
     // ✅ route.ts SoT extra
     let extraSoT: Record<string, any> = {
       ...sanitizedExtra,
-      choiceId: effectiveChoiceId,
-      extractedChoiceId,
+
+      // NextStep系は SoT へも載せない（常に null）
+      choiceId: null,
+      extractedChoiceId: null,
+
       traceId,
     };
 

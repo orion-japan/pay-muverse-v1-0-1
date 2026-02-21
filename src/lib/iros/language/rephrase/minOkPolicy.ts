@@ -68,12 +68,14 @@ export function computeMinOkPolicy(params: {
   const isIdeaBand = shiftKind === 'idea_band' || /"kind"\s*:\s*"idea_band"/.test(shiftText);
 
   // ✅ MIN_OK_LEN（IDEA_BAND / T_CONCRETIZE を chat より優先）
-  // - micro/greeting は短文許可（0）
+  // - micro/greeting は “短文入力” だが、品質ゲートを無効化しない（0は禁止）
   // - IDEA_BAND は「2〜5行の候補」なので文字数で縛らない（0）
   // - T_CONCRETIZE は 24（短くても成立し得るが、薄さを抑える）
   // - それ以外: short_reply_ok 明示なら 0 / chat は 40 / default 80
+  const MICRO_MIN_OK_LEN = 24;
+
   const MIN_OK_LEN = isMicroOrGreetingNow
-    ? 0
+    ? MICRO_MIN_OK_LEN
     : isIdeaBand
       ? 0
       : isTConcretize
@@ -83,7 +85,6 @@ export function computeMinOkPolicy(params: {
           : inputKindNow === 'chat'
             ? 40
             : 80;
-
   const reason: MinOkPolicyResult['reason'] = isMicroOrGreetingNow
     ? 'micro_or_greeting'
     : isIdeaBand

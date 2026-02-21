@@ -13,7 +13,12 @@ type DecideCtx = {
   phase?: string | null;
   depth?: string | null;
 
-  flow?: { flowDelta?: string | null; returnStreak?: number | null } | null;
+// 置換：DecideCtx の flow 型（micro を追加）
+flow?: {
+  flowDelta?: string | null;
+  returnStreak?: number | null;
+  micro?: boolean | null;
+} | null;
 
   // ここは「上流が明示的に渡す」ための入力口（未配線でもOK）
   exprMeta?: {
@@ -69,9 +74,41 @@ export type ExpressionDecision = {
  * - 実際の語り（Sofia構造語り等）は「表現レイヤー側」で実行する
  */
 export function decideExpressionLane(ctx: DecideCtx): ExpressionDecision {
+  // ✅ flow は先に解決（後段でも使うのでここで宣言しておく）
   const flowDelta = ctx.flow?.flowDelta ?? null;
   const returnStreak = ctx.flow?.returnStreak ?? 0;
 
+  // ✅ micro抑制：短文/挨拶/了解などは preface を出さない（ExpressionLane自体を止血）
+  const microNow = Boolean(ctx.flow?.micro);
+  if (microNow) {
+    return {
+      fired: false,
+      lane: 'off',
+      reason: 'MICRO',
+      blockedBy: 'MICRO',
+      prefaceLine: '',
+
+      shouldPolish: false,
+      metaPatch: {
+        expr: {
+          fired: false,
+          lane: 'off',
+          techniqueId: 'micro',
+          reason: 'MICRO',
+          at: Date.now(),
+        },
+      },
+
+      debug: {
+        laneKey: (ctx as any).laneKey ?? null,
+        phase: (ctx as any).phase ?? null,
+        depth: (ctx as any).depth ?? null,
+        flowDelta,
+        returnStreak,
+        techniqueId: 'micro',
+      },
+    };
+  }
   // ✅ 明示指定が最優先
   const explicitLane = (ctx.exprMeta?.lane ?? null) as ExpressionLaneKey | null;
 

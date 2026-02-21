@@ -20,8 +20,8 @@ import { isMetaAnchorText } from '@/lib/iros/intentAnchor';
 
 import { preparePastStateNoteForTurn } from '@/lib/iros/memoryRecall';
 import { decideExpressionLane } from '@/lib/iros/expression/decideExpressionLane';
-import { buildMirrorFlowV1 } from '@/lib/iros/mirrorFlow/mirrorFlow.v1';
-
+import { buildMirrorFlowV1, type PolarityV1 } from '@/lib/iros/mirrorFlow/mirrorFlow.v1';
+import { buildExprDirectiveV1 } from '@/lib/iros/expression/exprDirectiveV1';
 import {
   buildUnifiedAnalysis,
   saveUnifiedAnalysisInline,
@@ -851,62 +851,136 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
         console.warn('[IROS/CANON][STAMP][PP] failed', e);
       }
 
-      // MIRROR_FLOW v1（観測→追記のみ）
-      try {
-        const stage = (metaForSave as any)?.coord?.stage ?? (metaForSave as any)?.extra?.coord?.stage ?? null;
-        const band = (metaForSave as any)?.coord?.band ?? (metaForSave as any)?.extra?.coord?.band ?? null;
+// MIRROR_FLOW v1（観測→追記のみ）
+try {
+  const stage = (metaForSave as any)?.coord?.stage ?? (metaForSave as any)?.extra?.coord?.stage ?? null;
+  const band = (metaForSave as any)?.coord?.band ?? (metaForSave as any)?.extra?.coord?.band ?? null;
 
-        const polarity =
-          (metaForSave as any)?.mirror?.polarity ?? (metaForSave as any)?.extra?.mirror?.polarity ?? null;
+  // ✅ polarity の入力元を増やす（meta直下の polarityBand を mirrorFlow に橋渡し）
+  const polarityBand =
+    (metaForSave as any)?.polarityBand ??
+    (metaForSave as any)?.extra?.polarityBand ??
+    (metaForSave as any)?.extra?.ctxPack?.polarityBand ??
+    null;
 
-        const flowDelta =
-          (metaForSave as any)?.flow?.delta ??
-          (metaForSave as any)?.extra?.ctxPack?.flow?.delta ??
-          (metaForSave as any)?.extra?.flow?.delta ??
-          null;
+  const polarityFromMirrorRaw =
+    (metaForSave as any)?.mirror?.polarity ??
+    (metaForSave as any)?.extra?.mirror?.polarity ??
+    null;
 
-        const returnStreak =
-          (metaForSave as any)?.extra?.ctxPack?.flow?.returnStreak ??
-          (metaForSave as any)?.extra?.flow?.returnStreak ??
-          null;
+  // MirrorFlowInputV1.polarity は PolarityV1('yin'|'yang') を要求するので、
+  // 'positive'/'negative' や object 形状もここで正規化して渡す
+  const normalizePolarity = (raw: any): PolarityV1 | null => {
+    if (raw == null) return null;
 
-        const sessionBreak = (metaForSave as any)?.extra?.ctxPack?.flow?.sessionBreak ?? null;
+    // string: 'yin' | 'yang' | 'positive' | 'negative'
+    if (typeof raw === 'string') {
+      const s = raw.trim();
+      if (!s) return null;
+      if (s === 'yin' || s === 'yang') return s;
+      if (s === 'positive') return 'yang';
+      if (s === 'negative') return 'yin';
+      return null;
+    }
 
-        const mf = buildMirrorFlowV1({
-          userText: String(userText ?? ''),
-          stage,
-          band,
-          polarity,
-          flow: {
-            delta: (flowDelta ?? null) as any,
-            returnStreak: (returnStreak ?? null) as any,
-            sessionBreak: (sessionBreak ?? null) as any,
-          },
-        });
+    // object: { in, out } or { polarityBand } など
+    if (typeof raw === 'object') {
+      const vIn = normalizePolarity((raw as any).in);
+      if (vIn) return vIn;
 
-        metaForSave.extra = {
-          ...(metaForSave.extra ?? {}),
-          mirrorFlowV1: mf,
-          mirror: (metaForSave as any)?.extra?.mirror ?? mf.mirror,
-          flowMirror: (metaForSave as any)?.extra?.flowMirror ?? mf.flow,
+      const vOut = normalizePolarity((raw as any).out);
+      if (vOut) return vOut;
+
+      const vBand = normalizePolarity((raw as any).polarityBand);
+      if (vBand) return vBand;
+    }
+
+    return null;
+  };
+
+  const polarityFromMirror = normalizePolarity(polarityFromMirrorRaw);
+  const polarityFromBand = normalizePolarity(polarityBand);
+
+  // ✅ canonical yin/yang（キー用）
+  const polarityCanon: PolarityV1 | null = polarityFromMirror ?? polarityFromBand ?? null;
+
+// ✅ metaBand（表示・診断用）：raw帯域を保持（positive/negative）
+const polarityMetaBand: string | null =
+  (typeof (polarityFromMirrorRaw as any)?.metaBand === 'string' &&
+  (polarityFromMirrorRaw as any).metaBand.trim()
+    ? (polarityFromMirrorRaw as any).metaBand.trim()
+    : null) ??
+  (typeof (polarityFromMirrorRaw as any)?.polarityBand === 'string' &&
+  (polarityFromMirrorRaw as any).polarityBand.trim()
+    ? (polarityFromMirrorRaw as any).polarityBand.trim()
+    : null) ??
+  (typeof polarityBand === 'string' && polarityBand.trim() ? polarityBand.trim() : null);
+  // ✅ MirrorFlow へは object で渡す（stringにすると metaBand が 'yang' になってしまう）
+  const polarity: any =
+    polarityCanon == null
+      ? null
+      : {
+          in: polarityCanon,
+          out: polarityCanon,
+          metaBand: polarityMetaBand,
         };
 
-        if ((metaForSave as any).mirror == null) {
-          (metaForSave as any).mirror = mf.mirror;
-        }
+  console.info('[IROS/PP][POLARITY_BRIDGE]', {
+    polarityBand_raw: polarityBand ?? null,
+    polarityFromMirror_raw: polarityFromMirrorRaw ?? null,
+    polarity_normalized: polarityCanon,
+    polarity_metaBand_raw: polarityMetaBand,
+  });
+  const flowDelta_mf =
+    (metaForSave as any)?.flow?.delta ??
+    (metaForSave as any)?.extra?.ctxPack?.flow?.delta ??
+    (metaForSave as any)?.extra?.flow?.delta ??
+    null;
 
-        console.log('[IROS/MIRROR_FLOW][RESULT]', {
-          micro: mf.flow.micro,
-          confidence: mf.mirror.confidence,
-          e_turn: mf.mirror.e_turn ?? null,
-          meaningKey: mf.mirror.meaningKey,
-          colorKey: mf.mirror.field?.colorKey ?? null,
-          flowDelta: mf.flow.delta,
-          returnStreak: mf.flow.returnStreak,
-        });
-      } catch (e) {
-        console.warn('[IROS/MIRROR_FLOW][ERR]', { err: String(e) });
-      }
+  const returnStreak_mf =
+    (metaForSave as any)?.extra?.ctxPack?.flow?.returnStreak ??
+    (metaForSave as any)?.extra?.flow?.returnStreak ??
+    null;
+
+  const sessionBreak_mf = (metaForSave as any)?.extra?.ctxPack?.flow?.sessionBreak ?? null;
+  const mf = buildMirrorFlowV1({
+    userText: String(userText ?? ''),
+    stage,
+    band,
+    polarity,
+    flow: {
+      delta: (flowDelta_mf ?? null) as any,
+      returnStreak: (returnStreak_mf ?? null) as any,
+      sessionBreak: (sessionBreak_mf ?? null) as any,
+    },
+  });
+
+  metaForSave.extra = {
+    ...(metaForSave.extra ?? {}),
+    mirrorFlowV1: mf,
+    mirror: (metaForSave as any)?.extra?.mirror ?? mf.mirror,
+    flowMirror: (metaForSave as any)?.extra?.flowMirror ?? mf.flow,
+  };
+
+  if ((metaForSave as any).mirror == null) {
+    (metaForSave as any).mirror = mf.mirror;
+  }
+
+  console.log('[IROS/MIRROR_FLOW][RESULT]', {
+    micro: mf.flow.micro,
+    confidence: mf.mirror.confidence,
+    e_turn: mf.mirror.e_turn ?? null,
+    polarity_in: (mf.mirror as any)?.polarity?.in ?? null,
+    polarity_metaBand: (mf.mirror as any)?.polarity?.metaBand ?? null,
+    polarity_out: (mf.mirror as any)?.polarity?.out ?? null,
+    meaningKey: mf.mirror.meaningKey,
+    colorKey: mf.mirror.field?.colorKey ?? null,
+    flowDelta: mf.flow.delta,
+    returnStreak: mf.flow.returnStreak,
+  });
+} catch (e) {
+  console.warn('[IROS/MIRROR_FLOW][ERR]', { err: String(e) });
+}
 
       // Expression Lane（preface 1行）
       const exprDecision = (() => {
@@ -920,17 +994,17 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
           const allow = ((metaForSave as any)?.allow ?? (metaForSave as any)?.extra?.allow ?? null) as any;
 
           const flowDelta =
-            (metaForSave as any)?.flow?.delta ??
-            (metaForSave as any)?.extra?.ctxPack?.flow?.delta ??
-            (metaForSave as any)?.extra?.flow?.delta ??
-            null;
+          (metaForSave as any)?.flow?.delta ??
+          (metaForSave as any)?.extra?.ctxPack?.flow?.delta ??
+          (metaForSave as any)?.extra?.flow?.delta ??
+          null;
 
-          const returnStreak =
-            (metaForSave as any)?.extra?.ctxPack?.flow?.returnStreak ??
-            (metaForSave as any)?.extra?.flow?.returnStreak ??
-            null;
+        const returnStreak =
+          (metaForSave as any)?.extra?.ctxPack?.flow?.returnStreak ??
+          (metaForSave as any)?.extra?.flow?.returnStreak ??
+          null;
 
-          const signals = ((metaForSave as any)?.extra?.exprSignals ?? null) as any;
+        const sessionBreak = (metaForSave as any)?.extra?.ctxPack?.flow?.sessionBreak ?? null;
 
           const flags = (() => {
             const ex: any = (metaForSave as any)?.extra ?? {};
@@ -950,68 +1024,204 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
           })();
 
           const exprAllow = (metaForSave as any)?.extra?.exprAllow ?? (metaForSave as any)?.exprAllow ?? null;
+          const signals =
+          (metaForSave as any)?.extra?.signals ??
+          (metaForSave as any)?.signals ??
+          null;
 
-          const d = decideExpressionLane({
-            laneKey,
-            phase,
-            depth,
-            allow,
-            exprAllow,
-            flow: { flowDelta: flowDelta ?? null, returnStreak: returnStreak ?? null },
-            signals,
-            flags,
-            traceId: (metaForSave as any)?.traceId ?? null,
-          } as any);
 
-          if (d?.metaPatch && typeof d.metaPatch === 'object') {
-            metaForSave.extra = { ...(metaForSave.extra ?? {}), ...d.metaPatch };
-          }
+        const d = decideExpressionLane({
+          laneKey,
+          phase,
+          depth,
+          allow,
+          exprAllow,
+          flow: { flowDelta: flowDelta ?? null, returnStreak: returnStreak ?? null },
+          signals,
+          flags,
+          traceId: (metaForSave as any)?.traceId ?? null,
+        } as any);
 
-          // ✅ exprDecision は従来どおり保存しつつ、
-          // ✅ ctxPack.exprMeta（正本）に fired/lane/reason を合流して systemPrompt へ届ける
-          {
-            const fired = !!d?.fired;
-            const lane = String(d?.lane ?? 'OFF');
-            const reason = String(d?.reason ?? 'DEFAULT');
 
-            const prevExtra: any = (metaForSave as any)?.extra ?? {};
-            const prevCtxPack: any = prevExtra?.ctxPack ?? {};
-            const prevExprMeta: any = prevCtxPack?.exprMeta ?? prevExtra?.exprMeta ?? {};
+// metaPatch は 1回だけ merge
+if (d?.metaPatch && typeof d.metaPatch === 'object') {
+  metaForSave.extra = { ...(metaForSave.extra ?? {}), ...d.metaPatch };
+}
+// ✅ exprDecision は従来どおり保存しつつ、
+// ✅ ctxPack.exprMeta（正本）に fired/lane/reason を合流して systemPrompt へ届ける
+{
+  // ✅ 既存extraを安全に回収
+  const prevExtra: any =
+    (metaForSave as any)?.extra && typeof (metaForSave as any).extra === 'object'
+      ? (metaForSave as any).extra
+      : (((metaForSave as any).extra = {}) as any);
 
-            metaForSave.extra = {
-              ...prevExtra,
+  const prevCtxPack: any =
+    prevExtra?.ctxPack && typeof prevExtra.ctxPack === 'object' ? prevExtra.ctxPack : {};
 
-              // （任意の鏡）styleメタが既に入っているなら保持しつつ、fired/lane を足す
-              exprMeta: {
-                ...(prevExtra?.exprMeta ?? {}),
-                ...prevExprMeta,
-                fired,
-                lane,
-                reason,
-              },
+  // 既存の exprMeta がどこかに入ってたら拾う（ctxPack優先 → extra）
+  const prevExprMeta: any =
+    (prevCtxPack?.exprMeta && typeof prevCtxPack.exprMeta === 'object' ? prevCtxPack.exprMeta : null) ??
+    (prevExtra?.exprMeta && typeof prevExtra.exprMeta === 'object' ? prevExtra.exprMeta : null) ??
+    {};
 
-              // ✅ 正本：handleIrosReply.ts がここから同期する
-              ctxPack: {
-                ...prevCtxPack,
-                exprMeta: {
-                  ...prevExprMeta,
-                  fired,
-                  lane,
-                  reason,
-                },
-              },
+  const fired = Boolean((d as any)?.fired);
+  const lane = String((d as any)?.lane ?? 'OFF');
+  const reason = String((d as any)?.reason ?? 'DEFAULT');
 
-              // 従来の保存（ログ/診断用）
-              exprDecision: {
-                fired,
-                lane,
-                reason,
-                blockedBy: (d?.blockedBy ?? null) as any,
-                hasPreface: !!String(d?.prefaceLine ?? '').trim(),
-              },
-            };
-          }
+  const prefaceLine = String((d as any)?.prefaceLine ?? '').trim() || null;
 
+  // --- ✅ ExprDirectiveV1（e_turn → 構成/リメイク/I層返し優先）を条件付きで生成 ---
+  const mirrorObj: any = (metaForSave as any)?.mirror ?? (metaForSave as any)?.extra?.mirror ?? null;
+
+  const e_turn: any = (mirrorObj as any)?.e_turn ?? null;
+  const confidence: number = Number((mirrorObj as any)?.confidence ?? 0) || 0;
+  const polarity: any = (mirrorObj as any)?.polarity_out ?? (mirrorObj as any)?.polarity ?? null;
+
+  const flowDeltaNorm = String(flowDelta ?? '').toUpperCase();
+  const returnStreakNum = Math.max(0, Number(returnStreak ?? 0) || 0);
+
+  // OFF: micro / directTask
+  // micro はこの地点で確実に参照できる mf.flow.micro を使う
+  const microNow = Boolean((metaForSave as any)?.extra?.mirrorFlowV1?.flow?.micro);
+
+  // 要件（microを壊さない/常時発火させない）を守りつつ「現状挙動を変えない」= 常に false で固定する。
+  // ※後で directTask を配線したくなったら、postProcessReply(args) の引数から明示的に渡すのが正道。
+  const directTaskNow = false;
+
+  // ON条件：RETURN && streak>=1 OR lane=sofia_light
+  const onByFlow = flowDeltaNorm === 'RETURN' && returnStreakNum >= 1;
+  const onByLane = lane === 'sofia_light';
+  const onBase = onByFlow || onByLane;
+
+  // confidence閾値（hard局面は緩和）
+  const hardNow =
+    Boolean((d as any)?.debug?.stallHard ?? false) ||
+    String((d as any)?.debug?.techniqueId ?? '') === 'stall_hard';
+
+  // sofia_light は “表現の整形だけ” なので、mirror信頼度を緩める
+  const th = (hardNow || lane === 'sofia_light') ? 0.15 : 0.55;
+  const onByConf = confidence >= th;
+
+  // e_turn が無いなら directive は出さない（安全）
+  const directiveV1_on = !!(onBase && onByConf && !directTaskNow && e_turn);
+
+  const directiveV1_reason = directiveV1_on
+    ? (microNow ? 'ON_MICRO_ALLOWED' : 'ON')
+    : (directTaskNow ? 'OFF_DIRECT_TASK' : (onBase ? 'OFF_LOW_CONF' : 'OFF_NOT_TARGET'));
+
+  // ✅ 本文は変えず「言い方だけ」を Writer に伝える（短い内部指示）
+  let directiveV1 = directiveV1_on
+    ? (buildExprDirectiveV1({
+        e_turn: (e_turn ?? null) as any,
+        flowDelta: (flowDelta ?? null) as any,
+        returnStreak: returnStreakNum,
+        confidence,
+        // polarity はここでは未配線でもOK（型は optional）
+      }) || '')
+    : '';
+
+// ====== directiveV1 追記（let directiveV1 = ... の直後に置く） ======
+{
+  const mirrorObj: any = (metaForSave as any)?.mirror ?? (metaForSave as any)?.extra?.mirror ?? null;
+
+  const et = String(mirrorObj?.e_turn ?? '').trim(); // e1..e5
+  const pol = String(mirrorObj?.polarity_out ?? mirrorObj?.polarity ?? '').trim(); // yin/yang など
+
+  const userTextNow =
+    String((metaForSave as any)?.userText ?? '').trim() ||
+    String((metaForSave as any)?.text ?? '').trim() ||
+    '';
+
+  if (typeof directiveV1 === 'string' && directiveV1.trim()) {
+    const extraLines: string[] = [
+      'prefaceLine：本文の先頭に「いまは〜段階です。」の1文を必ず置く（1行・1文・改行なし）。',
+      'prefaceLine：この1文は毎ターン生成する。固定テンプレの使い回しは禁止。',
+      et
+        ? `prefaceLine：材料はユーザー発話と e_turn（${et}）${pol ? ` と polarity（${pol}）` : ''}。ただし e_turn/polarity のラベルは本文に出さない。`
+        : 'prefaceLine：材料はユーザー発話。内部ラベルは本文に出さない。',
+      'prefaceLine：状況説明や共感の羅列は禁止。焦点（何が削られているか／何が残っているか）だけを一点に絞る。',
+    ];
+
+    if (userTextNow) {
+      extraLines.push(`prefaceLine：ユーザー発話="${userTextNow.slice(0, 80)}" を参照して具体化する。`);
+    }
+
+    const base = directiveV1.split('\n').filter(Boolean);
+    directiveV1 = [...base, ...extraLines].slice(0, 8).join('\n').trim();
+  }
+}
+// ====== 追記ここまで ======
+
+  // micro（短文）でも 1行だけ許可したい時は、8行制限を超えない範囲で追記
+  if (directiveV1 && microNow) {
+    const ls = directiveV1.split('\n').filter(Boolean);
+    if (ls.length < 8) ls.push('micro：短文でも、1行の前置き/整形は許可。');
+    directiveV1 = ls.slice(0, 8).join('\n').trim();
+  }
+
+  console.log('[IROS/EXPR][DIRECTIVE_V1]', {
+    conversationId,
+    userCode,
+    on: directiveV1_on,
+    reason: directiveV1_reason,
+    e_turn: e_turn ?? null,
+    confidence,
+    flowDelta: (flowDelta ?? null),
+    returnStreak: returnStreakNum,
+    head: String(directiveV1 ?? '').slice(0, 96),
+  });
+
+  // ✅ meta.extra を一度で確定（IIFEは禁止）
+  metaForSave.extra = {
+    ...prevExtra,
+
+    // ✅ renderGateway が拾う “prefaceLine” の正本
+    expr: {
+      ...(prevExtra?.expr ?? {}),
+      prefaceLine,
+      prefaceHead: prefaceLine ? prefaceLine.slice(0, 64) : null,
+    },
+
+    // meta.extra.exprMeta（renderGateway/systemPrompt が見る）
+    exprMeta: {
+      ...prevExprMeta,
+      fired,
+      lane,
+      reason,
+
+      // ✅ NEW: directiveV1
+      directiveV1,
+      directiveV1_on,
+      directiveV1_reason,
+    },
+
+    // ✅ 正本：handleIrosReply.ts がここから同期する
+    ctxPack: {
+      ...prevCtxPack,
+      exprMeta: {
+        ...prevExprMeta,
+        fired,
+        lane,
+        reason,
+
+        // ✅ NEW: directiveV1（正本に同値反映）
+        directiveV1,
+        directiveV1_on,
+        directiveV1_reason,
+      },
+    },
+
+    // 従来の保存（ログ/診断用）
+    exprDecision: {
+      fired,
+      lane,
+      reason,
+      blockedBy: ((d as any)?.blockedBy ?? null) as any,
+      hasPreface: !!String((d as any)?.prefaceLine ?? '').trim(),
+    },
+  };
+}
 
           console.log('[IROS/EXPR][decision]', {
             conversationId,
@@ -1063,8 +1273,14 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
       // seed を作る（preface 1回だけ）
       const slotTextStr = String(slotText ?? '').trim();
       const preface = String((exprDecision as any)?.prefaceLine ?? '').trim();
+      const mfNow =
+      (metaForSave as any)?.extra?.mirrorFlow ?? (metaForSave as any)?.mirrorFlow ?? (metaForSave as any)?.mirror_flow ?? null;
+    const microNow = Boolean(mfNow?.flow?.micro);
       const shouldInjectPreface =
-        (exprDecision as any)?.fired === true && preface.length > 0 && !slotTextStr.startsWith(preface);
+        (exprDecision as any)?.fired === true &&
+        preface.length > 0 &&
+        !slotTextStr.startsWith(preface) &&
+        !microNow;
 
       let seedForWriterRaw = shouldInjectPreface ? `${preface}\n${slotTextStr}` : slotTextStr;
 
@@ -1087,10 +1303,16 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
       })();
 
       // 既存の seedForWriterRaw（この行は元からあるはず）を再宣言しない
-      if (nextHintLine && typeof seedForWriterRaw === 'string' && !seedForWriterRaw.includes(nextHintLine)) {
-        seedForWriterRaw = `${seedForWriterRaw}\n${nextHintLine}`.trim();
-      }
-      // ===== /C案追加ここまで =====
+      //
+      // ✅ FIX: NEXT_HINT を「自然文1行」で seed に混ぜない
+      // - ここで混ぜると seedForWriterSanitized が hint 単体に収束し、
+      //   allowLLM=true でも finalAssistantText（baseVisible）が hint 固定になる事故が起きる。
+      // - NEXT_HINT は slotPlan 内の "@NEXT_HINT {...}" として保持し、
+      //   UI補完（renderGateway側）や evidence 用にのみ使う。
+      //
+      // if (nextHintLine && typeof seedForWriterRaw === 'string' && !seedForWriterRaw.includes(nextHintLine)) {
+      //   seedForWriterRaw = `${seedForWriterRaw}\n${nextHintLine}`.trim();
+      // }
 
 
       // 露出OKの核1行を混ぜる（短すぎる時だけ）

@@ -325,14 +325,73 @@ export function buildMirrorFlowV1(input: MirrorFlowInputV1): MirrorFlowResultV1 
 
   const stage = input.stage ?? null;
   const band = input.band ?? null;
-  const polarity = input.polarity ?? null;
 
   // e_turn: turn-only (instant)
   const e_turn = detectETurnV1(userText, micro);
 
-  const meaningKey = makeMirrorMeaningKeyV1({ stage, band, e_turn, polarity, confidence });
-  const colorKey = e_turn ? (polarity ? `${e_turn}_${polarity}` : `${e_turn}`) : null;
+  // ---- polarity normalization (for key stability) ----
+  // NOTE:
+  // - upstream から polarity が object で来ても、colorKey/meaningKey は必ず string 化して作る
+  // - MirrorFlow の mirror.polarity は {in,out,metaBand} 形で返して、PP 側の polarity_in/out 抽出と整合させる
+  const normPol = (raw: any): 'yin' | 'yang' | null => {
+    if (raw == null) return null;
 
+    if (typeof raw === 'string') {
+      const s = raw.trim().toLowerCase();
+      if (!s) return null;
+
+      // accept canonical
+      if (s === 'yin' || s === '陰') return 'yin';
+      if (s === 'yang' || s === '陽') return 'yang';
+
+      // accept meta-band style
+      if (s === 'positive' || s === 'pos' || s === '+' || s === 'plus') return 'yang';
+      if (s === 'negative' || s === 'neg' || s === '-' || s === 'minus') return 'yin';
+
+      return null;
+    }
+
+    // object: try common fields
+    return (
+      normPol((raw as any).in) ||
+      normPol((raw as any).out) ||
+      normPol((raw as any).metaBand) ||
+      normPol((raw as any).band) ||
+      null
+    );
+  };
+
+  const polarityRaw: any = (input as any).polarity ?? null;
+
+  // metaBand (keep as-is string if present)
+  const polarity_metaBand: string | null =
+    typeof polarityRaw === 'string'
+      ? (polarityRaw.trim() ? polarityRaw.trim() : null)
+      : (typeof (polarityRaw as any)?.metaBand === 'string' && (polarityRaw as any).metaBand.trim()
+          ? (polarityRaw as any).metaBand.trim()
+          : null);
+
+  // in/out (canonical yin/yang)
+  const polarity_in = normPol(polarityRaw);
+  const polarity_out =
+    normPol((polarityRaw as any)?.out) ||
+    normPol((polarityRaw as any)?.in) ||
+    polarity_in;
+
+  // for keys: prefer polarity_in (canonical yin/yang)
+  const polarityForKey = polarity_in;
+
+  const meaningKey = makeMirrorMeaningKeyV1({
+    stage,
+    band,
+    e_turn,
+    polarity: polarityForKey as any,
+    confidence,
+  });
+
+  const colorKey = e_turn
+    ? (polarityForKey ? `${e_turn}_${polarityForKey}` : `${e_turn}`)
+    : null;
 
   const flowDelta = input.flow?.delta ?? null;
   const returnStreak =
@@ -347,7 +406,12 @@ export function buildMirrorFlowV1(input: MirrorFlowInputV1): MirrorFlowResultV1 
   return {
     mirror: {
       e_turn,
-      polarity,
+      // keep structured polarity for downstream extraction in PP
+      polarity: {
+        in: polarity_in,
+        out: polarity_out,
+        metaBand: polarity_metaBand,
+      } as any,
       confidence,
       meaningKey,
       field: {

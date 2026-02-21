@@ -472,26 +472,15 @@ const sendMessage = useCallback(
 
         // ③ reply はタグ無しテキスト + nextStepChoice
         // NOTE: irosApiClient の型定義に extra/nextStepChoice が無い場合があるので、payload を any に落として渡す
-        const payload: any = {
-          conversationId: cid,
-          user_text: choiceText, // ✅ LLMには「選択肢だけ」
-          mode: 'nextStep',
-          style,
-
-          // ✅ route.ts が extra.choiceId を拾う
-          extra: {
-            choiceId: opt.key,
-          },
-
-          // （残してOK）UIのための付加情報。サーバ側が無視しても害はない
-          nextStepChoice: {
-            key: opt.key,
-            label: opt.label,
-            gear: opt.gear ?? null,
-          },
-
-          history,
-        };
+// ③ reply はタグ無しテキスト（choiceText）だけ送る
+// NOTE: irosApiClient の型定義に extra が無い場合があるので、payload を any に落として渡す
+const payload: any = {
+  conversationId: cid,
+  user_text: choiceText, // ✅ LLMには「選択肢だけ」
+  mode: 'auto',          // ✅ nextStep を名乗らない（廃止なら auto に戻す）
+  style,
+  history,
+};
 
         const r: any = await irosClient.replyAndStore(payload);
 
