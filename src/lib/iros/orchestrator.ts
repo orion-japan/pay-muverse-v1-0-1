@@ -1398,7 +1398,36 @@ function detectCounselCommand(raw: unknown): { forced: boolean; strippedText: st
       deltaNow === 'RETURN' ? prevReturnStreak + 1 : 0;
 
     // -------------------------------------------------------
-    // 🔑 正本として meta.extra.flow に確定保存
+    // 👁 ViewShift: 前回スナップショット回収（判定は後段）
+    // - まず baseMeta（=前回meta継承）から拾う
+    // - 無ければ history から探す（互換保険）
+    // -------------------------------------------------------
+    let prevViewShiftSnap: any =
+      (baseMeta as any)?.extra?.ctxPack?.viewShiftSnapshot ??
+      (baseMeta as any)?.ctxPack?.viewShiftSnapshot ??
+      (baseMeta as any)?.extra?.viewShiftSnapshot ??
+      (baseMeta as any)?.viewShiftSnapshot ??
+      null;
+
+    if (!prevViewShiftSnap) {
+      for (let i = historyArr.length - 1; i >= 0; i--) {
+        const m = historyArr[i];
+
+        const snap =
+          (m as any)?.meta?.extra?.ctxPack?.viewShiftSnapshot ??
+          (m as any)?.meta?.ctxPack?.viewShiftSnapshot ??
+          (m as any)?.meta?.extra?.viewShiftSnapshot ??
+          (m as any)?.meta?.viewShiftSnapshot ??
+          null;
+
+        if (snap && typeof snap === 'object') {
+          prevViewShiftSnap = snap;
+          break;
+        }
+      }
+    }
+    // -------------------------------------------------------
+    // 🔑 正本として meta.extra.flow / viewShiftPrev に確定保存
     // -------------------------------------------------------
     (meta as any).extra =
       (meta as any).extra && typeof (meta as any).extra === 'object'
@@ -1411,6 +1440,25 @@ function detectCounselCommand(raw: unknown): { forced: boolean; strippedText: st
       returnStreak: returnStreakNow,
     };
 
+    // ✅ ViewShift の前回スナップ（postprocess が拾う入口）
+    // - prevViewShiftSnap が取れた時だけ上書きする
+    // - null で既存（inject 済み）を潰さない
+    const existingPrev =
+      (meta as any)?.extra?.viewShiftPrev &&
+      typeof (meta as any).extra.viewShiftPrev === 'object'
+        ? (meta as any).extra.viewShiftPrev
+        : null;
+
+    if (prevViewShiftSnap && typeof prevViewShiftSnap === 'object') {
+      (meta as any).extra.viewShiftPrev = prevViewShiftSnap;
+    } else if (existingPrev) {
+      // keep
+      (meta as any).extra.viewShiftPrev = existingPrev;
+    } else {
+      // 明示的に null を書かない（未設定のまま）
+      delete (meta as any).extra.viewShiftPrev;
+    }
+
     // 既存互換（必要なら残す）
     (meta as any).flow = flow;
 
@@ -1419,25 +1467,27 @@ function detectCounselCommand(raw: unknown): { forced: boolean; strippedText: st
       delta: deltaNow,
       confidence: confidenceNow,
       hasLastUserText: Boolean(lastUserText),
-      returnStreak: returnStreakNow, // ← 追加
+      returnStreak: returnStreakNow,
+    });
+
+    console.log('[IROS/VIEWSHIFT][prevSnap]', {
+      hasPrev: Boolean(prevViewShiftSnap),
+      keptInjected: Boolean(!prevViewShiftSnap && existingPrev),
     });
   }
-}
 
+  // =========================================================
+  // ✅ counsel 配線：normalChat fallback の前に差し込む
+  // - mode名の揺れ：'counsel' / 'consult' を両方拾う
+  // - stage はまず OPEN 固定（永続化は次工程）
+  // - 相談モードでなくても、構造が counsel を要求するなら拾う
+  // - ✅ テスト用：/counsel コマンドで強制（本文は strip 後を使う）
+  // - ✅ 追加：GreetingGate 成立ターンは counsel に落とさない（新規チャット誤爆防止）
+  // - ✅ レーン主導：counsel は「上書き」ではなく「空のときだけ埋める」
+  // =========================================================
 
-// =========================================================
-// ✅ counsel 配線：normalChat fallback の前に差し込む
-// - mode名の揺れ：'counsel' / 'consult' を両方拾う
-// - stage はまず OPEN 固定（永続化は次工程）
-// - 相談モードでなくても、構造が counsel を要求するなら拾う
-// - ✅ テスト用：/counsel コマンドで強制（本文は strip 後を使う）
-// - ✅ 追加：GreetingGate 成立ターンは counsel に落とさない（新規チャット誤爆防止）
-// - ✅ レーン主導：counsel は「上書き」ではなく「空のときだけ埋める」
-// =========================================================
-
-// ※このファイルでは meta ではなく mergedBaseMeta を使う（meta が無いスコープ対策）
-const metaLike: any = (mergedBaseMeta ?? {}) as any;
-
+  // ※このファイルでは meta ではなく mergedBaseMeta を使う（meta が無いスコープ対策）
+  const metaLike: any = (mergedBaseMeta ?? {}) as any;
 const modeRaw = String(metaLike?.mode ?? '').toLowerCase();
 const isCounselMode = modeRaw === 'counsel' || modeRaw === 'consult';
 
@@ -2554,12 +2604,12 @@ if (userCode && finalMeta) {
     }
   }
 }
-
-  // ----------------------------------------------------------------
-  // 12. Orchestrator 結果として返却（V2：contentは空）
-  // ----------------------------------------------------------------
-  return {
-    content,
-    meta: finalMeta,
-  };
+  }
+// ----------------------------------------------------------------
+// 12. Orchestrator 結果として返却（V2：contentは空）
+// ----------------------------------------------------------------
+return {
+  content: '',
+  meta,
+};
 }

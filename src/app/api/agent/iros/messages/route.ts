@@ -198,7 +198,13 @@ type OutMsg = {
   id: string;
   conversation_id: string; // 外部cidで返す
   role: 'user' | 'assistant';
+
+  // ✅ 互換: 旧クライアント / jq が .text を見ることがある
+  text: string;
+
+  // ✅ 現行: 正本
   content: string;
+
   user_code?: string;
   created_at: string | null;
   q?: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
@@ -404,9 +410,10 @@ export async function GET(req: NextRequest) {
     const cid =
       req.nextUrl.searchParams.get('conversation_id') ||
       req.nextUrl.searchParams.get('conversationId') ||
+      req.nextUrl.searchParams.get('conv_id') ||   // ✅ alias (curl/legacy)
+      req.nextUrl.searchParams.get('convId') ||    // ✅ alias
       req.nextUrl.searchParams.get('id') ||
       '';
-
     if (!cid) {
       return json({ ok: false, error: 'missing_conversation_id', error_code: 'missing_conversation_id' }, 400);
     }
@@ -421,7 +428,9 @@ export async function GET(req: NextRequest) {
 
     const includeMetaParam =
       req.nextUrl.searchParams.get('include_meta') ?? req.nextUrl.searchParams.get('includeMeta');
-    const includeMeta = includeMetaParam != null ? asBool(includeMetaParam) : auth.role === 'admin';
+
+    // ✅ デフォルトは「常に meta なし」：必要なときだけ include_meta=1 を明示
+    const includeMeta = includeMetaParam != null ? asBool(includeMetaParam) : false;
 
     const supabase = sb();
 
@@ -512,7 +521,13 @@ export async function GET(req: NextRequest) {
         id: String(idVal),
         conversation_id: String(cid), // 外部cidで返す
         role: m.role === 'assistant' ? 'assistant' : 'user',
+
+        // ✅ 互換: 旧クライアント / jq が .text を見る
+        text: contentVal,
+
+        // ✅ 正本
         content: contentVal,
+
         user_code: m.user_code ?? undefined,
         created_at: m.created_at ?? null,
         q: qAny ?? undefined,
@@ -531,7 +546,9 @@ export async function GET(req: NextRequest) {
       return Math.min(n, 100);
     })();
 
-    const llm_messages: LlmMsg[] = messages.slice(-llmLimit).map((m) => ({ role: m.role, content: m.content }));
+    const llm_messages: LlmMsg[] = messages
+      .slice(-llmLimit)
+      .map((m) => ({ role: m.role, content: m.content }));
 
     return json({ ok: true, messages, llm_messages, includeMeta, source: (res as any).table }, 200);
   } catch (e: any) {

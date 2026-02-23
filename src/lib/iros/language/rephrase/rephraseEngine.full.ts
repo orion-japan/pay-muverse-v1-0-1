@@ -3120,7 +3120,7 @@ if (Array.isArray(messages) && messages.length >= 2) {
     return v;
   };
 
-  const guardEnabled = envFlagEnabled(process.env.IROS_FLAGSHIP_GUARD_ENABLED, true);
+  const guardEnabled = envFlagEnabled(process.env.IROS_FLAGSHIP_GUARD_ENABLED, false);
 
   // ---------------------------------------------
   // LLM call (1st)
@@ -3147,6 +3147,50 @@ if (Array.isArray(messages) && messages.length >= 2) {
   // pickedQCode / pickedDepthStage / pickedPhase は
   // すでに上（internalPackの直前あたり）で定義されている前提で “再定義しない”
   // ここでは参照だけする。
+
+// ✅ micro-like は rephrase LLM を呼ばずに即 return（コスト/遅延を消す）
+{
+  const seedDraftTrim = String(seedDraft ?? '').trim();
+  const userLenTiny = String(userText ?? '').trim().length <= 2;
+  const seedLenTiny = seedDraftTrim.length > 0 && seedDraftTrim.length <= 40;
+
+  // inputKind が 'micro' / 'greeting' を持っている場合もここで吸収
+  const microLikeEarly =
+    inputKind === 'micro' ||
+    inputKind === 'greeting' ||
+    (userLenTiny && seedLenTiny);
+
+  if (microLikeEarly) {
+    // この関数の引数 `extracted` をそのまま slots として扱う（slots 変数に依存しない）
+    const fixed: any = { ...(extracted as any) };
+
+    // seedDraft を OBS に採用（短文で前に進む）
+    fixed.OBS = {
+      ...(fixed.OBS ?? {}),
+      key: 'OBS',
+      content: seedDraftTrim,
+      head: seedDraftTrim,
+    };
+
+    // scaffoldActive はこの時点では未確定なので、ここでは false 固定でOK（あとで必要なら再設計）
+    return {
+      ok: true,
+      slots: fixed,
+      meta: {
+        inKeys: Object.keys((extracted as any) ?? {}),
+        outKeys: ['OBS'],
+        rawLen: seedDraftTrim.length,
+        rawHead: seedDraftTrim.slice(0, 200),
+        note: 'MICRO_LIKE_SKIP_REPHRASE',
+        extra: {
+          scaffoldActive: false,
+          // ✅ renderGateway が期待してるのは「文字列ブロック配列」
+          rephraseBlocks: [seedDraftTrim],
+        },
+      },
+    } as any;
+  }
+}
 
   raw = await callWriterLLM({
     model: opts.model ?? 'gpt-5',
@@ -3565,6 +3609,22 @@ if (Array.isArray(messages) && messages.length >= 2) {
   const inputKindNow = pol.inputKindNow;
   const isMicroOrGreetingNow = pol.isMicroOrGreetingNow;
 
+// - Micro Writer が先に走って microDraft（短文の最終候補）ができている状態で、ここで rephrase writer を呼ぶと「二重LLM」になる。
+//   二重LLM = microGenerate と writer/rephraseGenerate の両方が同一ターンで実行されること。
+//   micro が ok のときは（原則）microDraft を採用し、rephrase writer は呼ばない（例外は明示する）。
+  const userLenTiny = String(userText ?? '').trim().length <= 2;
+  const seedDraftTrim = String(seedDraft ?? '').trim();
+  const seedLenTiny = seedDraftTrim.length > 0 && seedDraftTrim.length <= 40;
+
+  const microLikeNow = Boolean(isMicroOrGreetingNow || (userLenTiny && seedLenTiny));
+
+  if (microLikeNow) {
+    const fixed = seedDraftTrim || String(candidate ?? '').trim() || '';
+    if (fixed.length > 0) {
+      return adoptAsSlots(fixed, 'MICRO_LIKE_SKIP_REPHRASE', { scaffoldActive });
+    }
+  }
+
   const shortReplyOkRaw = pol.shortReplyOkRaw;
   const shortReplyOk = pol.shortReplyOk;
 
@@ -3759,6 +3819,22 @@ if (Array.isArray(messages) && messages.length >= 2) {
   // ✅ OK は retry しない（ここで確定して返す）
   if ((v as any)?.ok === true) {
     return adoptAsSlots(candidate, 'FLAGSHIP_OK_NO_RETRY', { scaffoldActive });
+  }
+
+  // ✅ micro/greeting は “体験優先” で retry しない：1st出力をそのまま確定して返す
+  // - micro を seedDraft として repair/rephrase に流すと「microのつもりが通常writerが走る」事故になる
+  // - ここでは flagship のOK判定に落ちなくても、microなら確定を優先する
+  if (isMicroOrGreetingNow) {
+    const microText =
+      String(candidate ?? '').trim() ||
+      String(seedFromSlots ?? '').trim() ||
+      String(seedDraft ?? '').trim() ||
+      '';
+
+    if (microText.length > 0) {
+      return adoptAsSlots(microText, 'MICRO_ONLY_NO_RETRY', { scaffoldActive });
+    }
+    // 空なら既存の retry/repair へ（保険）
   }
 
   const baseDraftForRepair: string = (() => {

@@ -208,58 +208,90 @@ export async function persistAssistantMessageToIrosMessages(args: {
 // timeout 対策：meta を軽量化してリトライ
 const shrinkMetaForPersist = (meta: any) => {
   const m: any = meta && typeof meta === 'object' ? { ...meta } : {};
+
+  // root 側の重いものは優先的に落とす
   delete m.rephraseBlocks;
   delete m.rephraseBlocksAttached;
 
   if (m.extra && typeof m.extra === 'object') {
     const ex: any = { ...(m.extra as any) };
-    delete ex.rephraseBlocks;
 
-    // ✅ ctxPack は丸ごと消さない：必要最小だけ残す（flow + phase/depth/q + digest）
-    if (ex.ctxPack && typeof ex.ctxPack === 'object') {
-      const cp: any = ex.ctxPack as any;
+    // extra 側の重いものも落とす
+/* =========================================
+ * [置換 1] src/lib/iros/server/persistAssistantMessageToIrosMessages.ts
+ * 目的:
+ *  1) 通常 insert でも必ず shrinkMetaForPersist を通す（巨大 meta をDBへ入れない）
+ *  2) shrinkMetaForPersist で extra.historyForWriter を確実に削除する
+ * 範囲:
+ *  - shrinkMetaForPersist 内の 220〜274
+ *  - 通常 insert の 282〜307
+ * ========================================= */
 
-      // flow を最小形に正規化（存在しない場合は入れない）
-      const f: any = cp.flow && typeof cp.flow === 'object' ? cp.flow : null;
-      const flow =
-        f && (typeof f.at === 'string' || typeof f.prevAtIso === 'string' || typeof f.ageSec === 'number')
-          ? {
-              at: typeof f.at === 'string' ? f.at : null,
-              prevAtIso: typeof f.prevAtIso === 'string' ? f.prevAtIso : null,
-              ageSec: typeof f.ageSec === 'number' ? f.ageSec : null,
-              sessionBreak: typeof f.sessionBreak === 'boolean' ? f.sessionBreak : false,
-              fresh: typeof f.fresh === 'boolean' ? f.fresh : true,
-            }
-          : null;
+// （中略：shrinkMetaForPersist の定義は既存のまま）
+// ↓↓↓ ここから（220行目付近の delete 群〜 sanitizeForJsonb まで）を置換 ↓↓↓
 
-      // ✅ ctxPack を「flowだけ」にせず、rephraseEngine が拾うキーも残す
-      const nextCp: any = {};
+delete ex.rephraseBlocks;
+delete ex.flowTape;
 
-      if (flow) nextCp.flow = flow;
+// ✅ 追加：root extra の巨大キーも確実に落とす
+delete (ex as any).historyForWriter;
+delete (ex as any).historyForWriterAt; // ←残したければこの行は消してOK（軽い）
 
-      const phase = cp.phase;
-      if (phase === 'Inner' || phase === 'Outer') nextCp.phase = phase;
+// ✅ 互換・派生キーも念のため落とす（拾い系history.ts対策）
+delete (ex as any).historyMessages;
+delete (ex as any).turns;
 
-      const depthStage = cp.depthStage;
-      if (typeof depthStage === 'string' && depthStage) nextCp.depthStage = depthStage;
+// ✅ ctxPack は「最小限」だけ残す（肥大キーは即落とす）
+if (ex.ctxPack && typeof ex.ctxPack === 'object') {
+  const cp: any = ex.ctxPack as any;
 
-      const qCode = cp.qCode;
-      if (typeof qCode === 'string' && qCode) nextCp.qCode = qCode;
+  // flow を最小形に正規化
+  const f: any = cp.flow && typeof cp.flow === 'object' ? cp.flow : null;
+  const flow =
+    f
+      ? {
+          at: typeof f.at === 'string' ? f.at : null,
+          prevAtIso: typeof f.prevAtIso === 'string' ? f.prevAtIso : null,
+          ageSec: typeof f.ageSec === 'number' ? f.ageSec : null,
+          sessionBreak: typeof f.sessionBreak === 'boolean' ? f.sessionBreak : false,
+          fresh: typeof f.fresh === 'boolean' ? f.fresh : true,
+        }
+      : null;
 
-      const historyDigestV1 = cp.historyDigestV1;
-      if (historyDigestV1) nextCp.historyDigestV1 = historyDigestV1;
+  const nextCp: any = {};
 
-      ex.ctxPack = Object.keys(nextCp).length ? nextCp : undefined;
-    }
+  if (flow) nextCp.flow = flow;
 
+  const phase = cp.phase;
+  if (phase === 'Inner' || phase === 'Outer') nextCp.phase = phase;
 
-    // flowTape は肥大化し得るので、timeout リトライ時は落とす
-    delete ex.flowTape;
+  const depthStage = cp.depthStage;
+  if (typeof depthStage === 'string' && depthStage) nextCp.depthStage = depthStage;
 
-    m.extra = ex;
+  const qCode = cp.qCode;
+  if (typeof qCode === 'string' && qCode) nextCp.qCode = qCode;
+
+  // digest は軽いなら残す（重ければ落とす）
+  const d = cp.historyDigestV1;
+  if (d && typeof d === 'object') {
+    // 文字数が大きい場合に備えて、chars 等があればそれだけ残す
+    const dd: any = {};
+    if (typeof (d as any).chars === 'number') dd.chars = (d as any).chars;
+    if (typeof (d as any).head === 'string') dd.head = (d as any).head.slice(0, 140);
+    if (Object.keys(dd).length) nextCp.historyDigestV1 = dd;
   }
 
-  return sanitizeForJsonb(m);
+  // ✅ turns/historyForWriter 等、巨大化しやすいキーは絶対に残さない
+  // （上で nextCp を構築しているので、cp の残骸は持ち込まれない）
+
+  ex.ctxPack = Object.keys(nextCp).length ? nextCp : undefined;
+}
+
+m.extra = ex;
+}
+
+// 最後に jsonb 安全化
+return sanitizeForJsonb(m);
 };
 
 
@@ -283,17 +315,21 @@ const shrinkMetaForPersist = (meta: any) => {
     user_code: userCode,
   } as const;
 
-  // 1) 通常 insert（✅ meta は “正本=finalMeta” を保存する）
+  // ✅ 通常保存でも「軽量化メタ」を保存する（巨大キー混入の再発を防ぐ）
+  const metaForInsert = shrinkMetaForPersist(finalMeta);
+
+  // 1) 通常 insert（✅ meta は “軽量化(metaForInsert)” を保存する）
   let data: any = null;
   let error: any = null;
 
   {
     const res = await supabase
       .from('iros_messages')
-      .insert([{ ...baseRow, meta: finalMeta }]); // ✅ override
+      .insert([{ ...baseRow, meta: metaForInsert }], { returning: 'minimal' }); // ✅ 返却を最小化
     data = (res as any).data ?? null;
     error = (res as any).error ?? null;
   }
+
 
   // 2) timeout のときだけ 1回リトライ（meta軽量化）
   if (error && isStatementTimeout(error)) {
@@ -309,7 +345,9 @@ const shrinkMetaForPersist = (meta: any) => {
       meta: shrinkMetaForPersist(finalMeta), // ✅ timeout時だけ落とす
     };
 
-    const res2 = await supabase.from('iros_messages').insert([retryRow]);
+    const res2 = await supabase
+      .from('iros_messages')
+      .insert([retryRow], { returning: 'minimal' }); // ✅ 返却を最小化
     data = (res2 as any).data ?? null;
     error = (res2 as any).error ?? null;
   }
@@ -336,7 +374,9 @@ const shrinkMetaForPersist = (meta: any) => {
       message: error?.message ?? null,
     });
 
-    const res3 = await supabase.from('iros_messages').insert([{ ...baseRow, meta: ultraMeta }]);
+    const res3 = await supabase
+      .from('iros_messages')
+      .insert([{ ...baseRow, meta: ultraMeta }], { returning: 'minimal' }); // ✅ 返却を最小化
     data = (res3 as any).data ?? null;
     error = (res3 as any).error ?? null;
   }

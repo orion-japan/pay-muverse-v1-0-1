@@ -32,6 +32,10 @@ import {
   canonicalizeIrosMeta,
   applyCanonicalToMetaForSave,
 } from '@/lib/iros/server/handleIrosReply.meta';
+import {
+  computeViewShiftV1,
+  buildViewShiftSnapshot,
+} from '../viewShift/viewShift.v1';
 
 export type PostProcessReplyArgs = {
   supabase: SupabaseClient;
@@ -966,6 +970,87 @@ const polarityMetaBand: string | null =
     (metaForSave as any).mirror = mf.mirror;
   }
 
+  {
+    // 前回スナップ（orchestrator が meta.extra.viewShiftPrev に入れたもの）
+    const prevSnap: any =
+      (metaForSave as any)?.extra?.viewShiftPrev ??
+      (metaForSave as any)?.viewShiftPrev ??
+      null;
+
+    // depth は “見えている正本” を優先（ゆれ吸収）
+    const depthNow: string | null = (() => {
+      const d =
+        (metaForSave as any)?.depth ??
+        (metaForSave as any)?.depthStage ??
+        (metaForSave as any)?.framePlan?.depth ??
+        (metaForSave as any)?.framePlan?.depthStage ??
+        null;
+      const s = typeof d === 'string' ? d.trim() : '';
+      return s ? s : null;
+    })();
+
+    // e_turn は MIRROR_FLOW が入れた mirror から拾う
+    const mirrorObj: any =
+      (metaForSave as any)?.mirror ??
+      (metaForSave as any)?.extra?.mirror ??
+      (metaForSave as any)?.extra?.mirrorFlowV1?.mirror ??
+      null;
+
+    const e_turn: any = mirrorObj?.e_turn ?? null;
+
+    // sessionBreak は ctxPack.flow（正本）優先 → extra.flow 互換
+    const sessionBreakNow: any =
+      (metaForSave as any)?.extra?.ctxPack?.flow?.sessionBreak ??
+      (metaForSave as any)?.extra?.flow?.sessionBreak ??
+      null;
+
+    // ViewShift 判定（pure）
+    const vs = computeViewShiftV1({
+      userText: String(userText ?? ''),
+      depth: depthNow,
+      e_turn: e_turn ?? null,
+      sessionBreak: sessionBreakNow ?? null,
+      prev: prevSnap && typeof prevSnap === 'object' ? prevSnap : null,
+    } as any);
+
+    console.log('[IROS/VIEW_SHIFT]', {
+      ok: (vs as any)?.ok ?? null,
+      score: (vs as any)?.score ?? null,
+      variant: (vs as any)?.variant ?? null,
+      confirmLine: (vs as any)?.confirmLine ?? null,
+      sessionBreak: sessionBreakNow ?? null,
+    });
+
+    // 次ターン用スナップショット（常に保存：ただし sessionBreak=true のときも “prev更新” はしてOK）
+    const snap = buildViewShiftSnapshot({
+      userText: String(userText ?? ''),
+      depth: depthNow,
+      e_turn: e_turn ?? null,
+    } as any);
+
+    // ctxPack へ保存（orchestrator が次回拾う正本）
+    (metaForSave as any).extra =
+      (metaForSave as any).extra && typeof (metaForSave as any).extra === 'object'
+        ? (metaForSave as any).extra
+        : {};
+
+    (metaForSave as any).extra.ctxPack =
+      (metaForSave as any).extra.ctxPack &&
+      typeof (metaForSave as any).extra.ctxPack === 'object'
+        ? (metaForSave as any).extra.ctxPack
+        : {};
+
+    (metaForSave as any).extra.ctxPack.viewShift = vs;
+    (metaForSave as any).extra.ctxPack.viewShiftSnapshot = snap;
+
+    console.log('[IROS/VIEWSHIFT][DECISION]', {
+      ok: vs?.ok ?? false,
+      score: vs?.score ?? 0,
+      variant: vs?.variant ?? null,
+      sessionBreak: sessionBreakNow ?? null,
+    });
+  }
+
   console.log('[IROS/MIRROR_FLOW][RESULT]', {
     micro: mf.flow.micro,
     confidence: mf.mirror.confidence,
@@ -1030,13 +1115,16 @@ const polarityMetaBand: string | null =
           null;
 
 
+        // ✅ micro は ExpressionLane 決定より前に確定して渡す（micro抑制を効かせる）
+        const microNowExpr = Boolean((metaForSave as any)?.extra?.mirrorFlowV1?.flow?.micro);
+
         const d = decideExpressionLane({
           laneKey,
           phase,
           depth,
           allow,
           exprAllow,
-          flow: { flowDelta: flowDelta ?? null, returnStreak: returnStreak ?? null },
+          flow: { flowDelta: flowDelta ?? null, returnStreak: returnStreak ?? null, micro: microNowExpr },
           signals,
           flags,
           traceId: (metaForSave as any)?.traceId ?? null,
@@ -1069,7 +1157,19 @@ if (d?.metaPatch && typeof d.metaPatch === 'object') {
   const lane = String((d as any)?.lane ?? 'OFF');
   const reason = String((d as any)?.reason ?? 'DEFAULT');
 
-  const prefaceLine = String((d as any)?.prefaceLine ?? '').trim() || null;
+  let prefaceLine = String((d as any)?.prefaceLine ?? '').trim() || null;
+
+  // ViewShift confirmLine（1行）を “空のときだけ” 差し込む
+  if (!prefaceLine) {
+    const vsConfirm: string | null =
+      (metaForSave as any)?.extra?.ctxPack?.viewShift?.confirmLine ??
+      (metaForSave as any)?.extra?.viewShift?.confirmLine ??
+      null;
+
+    if (typeof vsConfirm === 'string' && vsConfirm.trim().length > 0) {
+      prefaceLine = vsConfirm.trim();
+    }
+  }
 
   // --- ✅ ExprDirectiveV1（e_turn → 構成/リメイク/I層返し優先）を条件付きで生成 ---
   const mirrorObj: any = (metaForSave as any)?.mirror ?? (metaForSave as any)?.extra?.mirror ?? null;
@@ -1126,7 +1226,8 @@ if (d?.metaPatch && typeof d.metaPatch === 'object') {
   const mirrorObj: any = (metaForSave as any)?.mirror ?? (metaForSave as any)?.extra?.mirror ?? null;
 
   const et = String(mirrorObj?.e_turn ?? '').trim(); // e1..e5
-  const pol = String(mirrorObj?.polarity_out ?? mirrorObj?.polarity ?? '').trim(); // yin/yang など
+  const polRaw = mirrorObj?.polarity_out ?? mirrorObj?.polarity ?? null;
+  const pol = (typeof polRaw === 'string' ? polRaw : '').trim(); // yin/yang など（objectは捨てる）
 
   const userTextNow =
     String((metaForSave as any)?.userText ?? '').trim() ||
@@ -1135,12 +1236,15 @@ if (d?.metaPatch && typeof d.metaPatch === 'object') {
 
   if (typeof directiveV1 === 'string' && directiveV1.trim()) {
     const extraLines: string[] = [
-      'prefaceLine：本文の先頭に「いまは〜段階です。」の1文を必ず置く（1行・1文・改行なし）。',
-      'prefaceLine：この1文は毎ターン生成する。固定テンプレの使い回しは禁止。',
+      // ✅ ViewShift の目的に合わせる：prefaceLine を「毎回強制」しない
+      // - prefaceLine は postprocess 側で確定（ViewShift.confirmLine を拾う）
+      // - Writer は prefaceLine を“追加生成しない”
+      'prefaceLine：meta.extra.ctxPack.expr.prefaceLine が null でない場合のみ、その1行を本文の先頭に置く（1行・1文・改行なし）。',
+      'prefaceLine：null の場合は、prefaceLine を新規生成しない（毎回生成の強制は禁止）。',
       et
-        ? `prefaceLine：材料はユーザー発話と e_turn（${et}）${pol ? ` と polarity（${pol}）` : ''}。ただし e_turn/polarity のラベルは本文に出さない。`
-        : 'prefaceLine：材料はユーザー発話。内部ラベルは本文に出さない。',
-      'prefaceLine：状況説明や共感の羅列は禁止。焦点（何が削られているか／何が残っているか）だけを一点に絞る。',
+        ? `材料：ユーザー発話と e_turn（${et}）${pol ? ` と polarity（${pol}）` : ''}。ただし e_turn/polarity のラベルは本文に出さない。`
+        : '材料：ユーザー発話。内部ラベルは本文に出さない。',
+      '禁止：状況説明や共感の羅列。焦点（何が削られているか／何が残っているか）だけを一点に絞る。',
     ];
 
     if (userTextNow) {
@@ -1196,14 +1300,33 @@ if (d?.metaPatch && typeof d.metaPatch === 'object') {
       directiveV1_reason,
     },
 
+/* =========================================
+ * [置換] src/lib/iros/server/handleIrosReply.postprocess.ts
+ * 範囲: 1296〜1310 を丸ごと置き換え
+ * 目的:
+ * - prefaceLine/prefaceHead を「正本 ctxPack」に必ず載せる
+ * - renderGateway / systemPrompt どちらの拾い方でも落ちないようにする
+ * ========================================= */
     // ✅ 正本：handleIrosReply.ts がここから同期する
     ctxPack: {
       ...prevCtxPack,
+
+      // ✅ NEW: ctxPack.expr にも正本として保持（renderGateway の拾い先を増やす）
+      expr: {
+        ...(prevCtxPack?.expr ?? {}),
+        prefaceLine,
+        prefaceHead: prefaceLine ? prefaceLine.slice(0, 64) : null,
+      },
+
       exprMeta: {
         ...prevExprMeta,
         fired,
         lane,
         reason,
+
+        // ✅ NEW: preface も exprMeta 側へ（拾い方の互換用）
+        prefaceLine,
+        prefaceHead: prefaceLine ? prefaceLine.slice(0, 64) : null,
 
         // ✅ NEW: directiveV1（正本に同値反映）
         directiveV1,
@@ -1270,20 +1393,26 @@ if (d?.metaPatch && typeof d.metaPatch === 'object') {
         }
       })();
 
-      // seed を作る（preface 1回だけ）
-      const slotTextStr = String(slotText ?? '').trim();
-      const preface = String((exprDecision as any)?.prefaceLine ?? '').trim();
-      const mfNow =
-      (metaForSave as any)?.extra?.mirrorFlow ?? (metaForSave as any)?.mirrorFlow ?? (metaForSave as any)?.mirror_flow ?? null;
-    const microNow = Boolean(mfNow?.flow?.micro);
-      const shouldInjectPreface =
-        (exprDecision as any)?.fired === true &&
-        preface.length > 0 &&
-        !slotTextStr.startsWith(preface) &&
-        !microNow;
+// seed を作る（preface 1回だけ）
+const slotTextStr = String(slotText ?? '').trim();
 
-      let seedForWriterRaw = shouldInjectPreface ? `${preface}\n${slotTextStr}` : slotTextStr;
+// ✅ preface は exprDecision ではなく「正本：exprMeta」から拾う
+const preface = String((metaForSave as any)?.extra?.exprMeta?.prefaceLine ?? '').trim();
 
+const mfNow =
+  (metaForSave as any)?.extra?.mirrorFlow ??
+  (metaForSave as any)?.mirrorFlow ??
+  (metaForSave as any)?.mirror_flow ??
+  null;
+
+const microNow = Boolean(mfNow?.flow?.micro);
+
+const shouldInjectPreface =
+  preface.length > 0 &&
+  !slotTextStr.startsWith(preface) &&
+  !microNow;
+
+let seedForWriterRaw = shouldInjectPreface ? `${preface}\n${slotTextStr}` : slotTextStr;
       // ===== C案: NEXT_HINT を writer seed に「自然文1行」で混ぜる（vector不要）=====
       const nextHintLine = (() => {
         const lines = String(slotTextStr ?? '').split('\n');

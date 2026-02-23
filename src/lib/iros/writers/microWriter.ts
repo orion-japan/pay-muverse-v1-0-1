@@ -205,27 +205,32 @@ export async function runMicroWriter(
   const conversationId = input?.conversationId ?? null;
   const userCode = input?.userCode ?? null;
 
-  // ✅ ここが最重要：内部指示混入を除去して“生文”だけを使う
+// ✅ ここが最重要：内部指示（例：@NEXT_HINT / @I_LINE など）が userText に混入しても、Micro Writer の入力は“生文”のみになるように除去する。
   const userText = extractUserUtterance(input?.userText ?? '');
 
   if (!userText) {
     return { ok: false, reason: 'empty_input' };
   }
 
-  // ざっくり分類（疲労系だけは“整える”寄せ）
-  const core = userText.replace(/[?？]/g, '').replace(/\s+/g, '').trim();
-  const isTiredMicro = /^(疲れた|休みたい|しんどい|つらい|無理|眠い)$/.test(core);
+// ざっくり分類：疲労系は「ブレを減らす」ために温度を下げる（文体の“整える”を別ロジックで強制しているわけではない）
+const core = userText.replace(/[?？]/g, '').replace(/\s+/g, '').trim();
+const isTiredMicro = /^(疲れた|休みたい|しんどい|つらい|無理|眠い)$/.test(core);
 
-  const systemPrompt: string = `
+// ✅ ACK系だけ「最後に1問」を許す（それ以外は質問0固定）
+const allowOneQuestion =
+  /^(うん|うんうん|はい|そう|なるほど|ok|おけ|了解)$/.test(core.toLowerCase());
+
+const systemPrompt: string = `
 あなたは iros の「Micro Writer」。
-目的：短い入力に対して、“会話が前に進む短文”を1〜2行で返す。
+// NOTE: micro の「前に進む」は“軽い促し”までを含む。質問は原則0、入れても最大1つ（最後に短く）という制約で事故を防ぐ。
+目的：短い入力に対して、“会話が前に進む短文”を1〜2行で返す。（問いは原則0。許す場合も最大1つで最後に短く）
 判断・分析・説教・テンプレ応援をしない。余白を残す。
 
 【出力ルール（厳守）】
 - 出力は1〜2行のみ（3行以上は禁止）
 - 選択肢（①②③/A/B/C/箇条書き/メニュー）を出さない
 - ラベル（「連想:」「場面:」などの項目出し）をしない
-- 質問は原則0（入れるなら最大1つ。最後に短く）
+- 質問は${allowOneQuestion ? '最大1つ（最後に短く）' : '0（禁止）'}
 - 絵文字は 🪔 のみ可（最大1個）
 
 【テンプレ禁止（厳守）】
@@ -242,7 +247,7 @@ export async function runMicroWriter(
 - seed=${seed} は言い回しの軽い揺らぎに使う（毎回同じ言い方に固定しない）
 `.trim();
 
-  const prompt: string = `
+const prompt: string = `
 入力: ${userText}
 呼び名: ${name || 'user'}
 疲労系: ${isTiredMicro ? 'yes' : 'no'}

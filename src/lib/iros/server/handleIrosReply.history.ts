@@ -97,17 +97,38 @@ export async function loadConversationHistory(
       return '';
     };
 
+    const parseMeta = (m: any): any | undefined => {
+      const v = m?.meta;
+      if (!v) return undefined;
+
+      // jsonb で返るなら object
+      if (typeof v === 'object') return v;
+
+      // text で返るなら string → JSON.parse を試す
+      if (typeof v === 'string') {
+        const s = v.trim();
+        if (!s) return undefined;
+        try {
+          const o = JSON.parse(s);
+          return o && typeof o === 'object' ? o : undefined;
+        } catch {
+          return undefined;
+        }
+      }
+
+      return undefined;
+    };
+
     const history = rows
       .map((m: any) => {
         const text = pickTextFromRow(m);
         return {
           role: m?.role,
           text, // ✅ sanitizeHistoryForTurn が最優先で見る正本
-          meta: m?.meta && typeof m.meta === 'object' ? m.meta : undefined,
+          meta: parseMeta(m),
         };
       })
       .filter((x: any) => typeof x?.text === 'string' && x.text.trim().length > 0);
-
     console.log('[IROS/History] loaded', {
       conversationId: cidRaw,
       conversationUuid,
@@ -183,18 +204,54 @@ export async function buildHistoryForTurn(args: {
     maxTotal = 80,
   } = args;
 
-  // 1) base
-  let turnHistory: unknown[] = Array.isArray(providedHistory)
-    ? providedHistory
-    : await loadConversationHistory(supabaseClient, userCode, conversationId, baseLimit);
-
   // 2) cross-conversation はこのモジュールでは扱わない（責務を狭める）
-  //    includeCrossConversation が true で来ても “ここでは何もしない”
-  //    ※呼び出し側で HistoryX と mergeHistoryForTurn を実施してから sanitize に渡す
   void includeCrossConversation;
 
-  // ✅ 最後に sanitize（正本）
-  turnHistory = sanitizeHistoryForTurn(turnHistory, maxTotal);
+  const hasViewShiftSnapshotInMeta = (arr: unknown[]): boolean => {
+    if (!Array.isArray(arr) || arr.length === 0) return false;
+    for (let i = arr.length - 1; i >= 0; i--) {
+      const m: any = (arr as any[])[i];
+      const snap =
+        m?.meta?.extra?.ctxPack?.viewShiftSnapshot ??
+        m?.meta?.ctxPack?.viewShiftSnapshot ??
+        m?.meta?.extra?.viewShiftSnapshot ??
+        m?.meta?.viewShiftSnapshot ??
+        null;
+      if (snap && typeof snap === 'object') return true;
+    }
+    return false;
+  };
 
-  return turnHistory;
+  // 1) base
+  // - providedHistory が渡ってきても、meta(viewShiftSnapshot等) が無いなら DB ロードを優先する
+  let turnHistory: unknown[] | null = Array.isArray(providedHistory) ? providedHistory : null;
+
+  const shouldPreferDb =
+    !turnHistory ||
+    turnHistory.length === 0 ||
+    !hasViewShiftSnapshotInMeta(turnHistory);
+
+  if (shouldPreferDb) {
+    turnHistory = await loadConversationHistory(
+      supabaseClient,
+      String(userCode ?? ''),
+      String(conversationId ?? ''),
+      baseLimit,
+    );
+  }
+
+  // ✅ 最後に sanitize（正本）
+  const sanitized = sanitizeHistoryForTurn(Array.isArray(turnHistory) ? turnHistory : [], maxTotal);
+
+  // デバッグ：DBロードが動いたか確認できるように残す
+  console.log('[IROS/HistoryForTurn] decide', {
+    conversationId: String(conversationId ?? ''),
+    userCode: String(userCode ?? ''),
+    provided_len: Array.isArray(providedHistory) ? providedHistory.length : 0,
+    used: shouldPreferDb ? 'db' : 'provided',
+    out_len: sanitized.length,
+    has_viewShiftSnapshot: hasViewShiftSnapshotInMeta(sanitized),
+  });
+
+  return sanitized;
 }

@@ -6,109 +6,140 @@
   · serverActions
 
 ✓ Starting...
-✓ Ready in 559ms
+✓ Ready in 588ms
 [firebase] DEBUG_LOCAL=1 → Firebase SDK log level set to "debug"
- GET /iros-ai 200 in 568ms (compile: 244ms, render: 325ms)
- POST /api/telemetry 204 in 67ms (compile: 53ms, render: 14ms)
+ GET /iros-ai 200 in 549ms (compile: 238ms, render: 311ms)
+ POST /api/telemetry 204 in 71ms (compile: 58ms, render: 13ms)
 [firebase-admin] initialized with ServiceAccount
-[authz] 8a306f89-6e15-4df9-9378-8330608bd83d start { path: 'http://localhost:3000/api/agent/iros/userinfo' }
+[authz] b5287391-db55-4d97-8eb7-e567fb45ec38 start { path: 'http://localhost:3000/api/q/unified?user_code=669933' }
 [authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] d88788cf-5efc-4c46-866a-f535fd42be0f start { path: 'http://localhost:3000/api/q/unified?user_code=669933' }
+ POST /api/register-push 200 in 652ms (compile: 54ms, render: 597ms)
+ POST /api/register-push 200 in 231ms (compile: 4ms, render: 228ms)
+[authz] b5287391-db55-4d97-8eb7-e567fb45ec38 verify firebase: 380.428ms
+[authz] b5287391-db55-4d97-8eb7-e567fb45ec38 fetch user: 73.477ms
+[authz] b5287391-db55-4d97-8eb7-e567fb45ec38 ok { user: '669933', role: 'admin', provider: 'password', ms: 465 }
+ GET /api/q/unified?user_code=669933 200 in 5.5s (compile: 173ms, render: 5.3s)
+ GET /iros-ai 200 in 83ms (compile: 4ms, render: 79ms)
+ POST /api/telemetry 204 in 7ms (compile: 3ms, render: 5ms)
+[authz] a50d89a5-f9d8-48c7-966e-2acc8f2d96df start { path: 'http://localhost:3000/api/agent/iros/userinfo' }
 [authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
- POST /api/register-push 200 in 203ms (compile: 29ms, render: 174ms)
- POST /api/register-push 200 in 52ms (compile: 4ms, render: 48ms)
-[authz] d88788cf-5efc-4c46-866a-f535fd42be0f verify firebase: 369.666ms
-[authz] 8a306f89-6e15-4df9-9378-8330608bd83d verify firebase: 467.837ms
-[authz] d88788cf-5efc-4c46-866a-f535fd42be0f fetch user: 41.651ms
-[authz] d88788cf-5efc-4c46-866a-f535fd42be0f ok { user: '669933', role: 'admin', provider: 'password', ms: 419 }
-[authz] 8a306f89-6e15-4df9-9378-8330608bd83d fetch user: 64.553ms
-[authz] 8a306f89-6e15-4df9-9378-8330608bd83d ok { user: '669933', role: 'admin', provider: 'password', ms: 538 }
+ POST /api/register-push 200 in 141ms (compile: 5ms, render: 136ms)
+[authz] 69f0014c-c33b-44b0-b254-09a78827f18f start { path: 'http://localhost:3000/api/q/unified?user_code=669933' }
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] a50d89a5-f9d8-48c7-966e-2acc8f2d96df verify firebase: 609.897ms
+[authz] 69f0014c-c33b-44b0-b254-09a78827f18f verify firebase: 293.378ms
+[authz] a50d89a5-f9d8-48c7-966e-2acc8f2d96df fetch user: 176.606ms
+[authz] a50d89a5-f9d8-48c7-966e-2acc8f2d96df ok { user: '669933', role: 'admin', provider: 'password', ms: 795 }
 [IROS/UserInfo] authz = {
   ok: true,
   allowed: true,
   status: 200,
-  pgJwt: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njk5MzMiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInVzZXJfY29kZSI6IjY2OTkzMyIsImZpcmViYXNlX3VpZCI6Ikt2UDFQNHNpZnRTRUZkTGtka1lqcVY0aE12MDIiLCJleHAiOjE3NzE2ODI4NzQsImlhdCI6MTc3MTY4MTk3NH0.QtwA8hBoEOLTqN179uC5e6OgU7_mHiLKAU5CCfsf-oQ',
+  pgJwt: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njk5MzMiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInVzZXJfY29kZSI6IjY2OTkzMyIsImZpcmViYXNlX3VpZCI6Ikt2UDFQNHNpZnRTRUZkTGtka1lqcVY0aE12MDIiLCJleHAiOjE3NzE4NTE4MjcsImlhdCI6MTc3MTg1MDkyN30.iufbukxF1uMavm0Q5hipk2BxgndYlVm-TQggwshh3XU',
   userCode: '669933',
   role: 'admin',
   user: { uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02', user_code: '669933' },
   uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02'
 }
- GET /api/agent/iros/userinfo 200 in 794ms (compile: 209ms, render: 585ms)
-[authz] 14559cb7-40ed-4d9d-ac20-2cac8a9b02a1 start { path: 'http://localhost:3000/api/agent/iros/conversations' }
+ POST /api/register-push 200 in 342ms (compile: 2ms, render: 340ms)
+ GET /api/agent/iros/userinfo 200 in 904ms (compile: 37ms, render: 867ms)
+[authz] 517e39b0-e4b9-43ac-8751-68edd3894f5e start { path: 'http://localhost:3000/api/agent/iros/conversations' }
 [authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] 14559cb7-40ed-4d9d-ac20-2cac8a9b02a1 verify firebase: 224.812ms
-[authz] 14559cb7-40ed-4d9d-ac20-2cac8a9b02a1 fetch user: 43.639ms
-[authz] 14559cb7-40ed-4d9d-ac20-2cac8a9b02a1 ok { user: '669933', role: 'admin', provider: 'password', ms: 275 }
- GET /api/agent/iros/conversations 200 in 395ms (compile: 59ms, render: 336ms)
-[authz] 55092b0e-cec4-4268-a16d-a1f4435aa7d3 start {
-  path: 'http://localhost:3000/api/agent/iros/messages?conversation_id=b66ef146-c42a-4b46-9c0c-3fa3f0a74699'
+[authz] 69f0014c-c33b-44b0-b254-09a78827f18f fetch user: 149.547ms
+[authz] 69f0014c-c33b-44b0-b254-09a78827f18f ok { user: '669933', role: 'admin', provider: 'password', ms: 448 }
+[authz] 517e39b0-e4b9-43ac-8751-68edd3894f5e verify firebase: 248.574ms
+[authz] 517e39b0-e4b9-43ac-8751-68edd3894f5e fetch user: 65.111ms
+[authz] 517e39b0-e4b9-43ac-8751-68edd3894f5e ok { user: '669933', role: 'admin', provider: 'password', ms: 318 }
+ GET /api/agent/iros/conversations 200 in 416ms (compile: 38ms, render: 378ms)
+[authz] 03b5fa5d-ee1f-4ea3-8d20-8b8276c72b96 start {
+  path: 'http://localhost:3000/api/agent/iros/messages?conversation_id=9686255e-c9a4-4195-91e2-82f37ed8b2a6'
 }
 [authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] 55092b0e-cec4-4268-a16d-a1f4435aa7d3 verify firebase: 310.118ms
-[authz] 55092b0e-cec4-4268-a16d-a1f4435aa7d3 fetch user: 53.839ms
-[authz] 55092b0e-cec4-4268-a16d-a1f4435aa7d3 ok { user: '669933', role: 'admin', provider: 'password', ms: 369 }
- GET /api/agent/iros/messages?conversation_id=b66ef146-c42a-4b46-9c0c-3fa3f0a74699 200 in 841ms (compile: 46ms, render: 796ms)
- GET /api/q/unified?user_code=669933 200 in 5.0s (compile: 22ms, render: 5.0s)
-[authz] d2a72201-d490-4586-83e7-06ab760aaa52 start { path: 'http://localhost:3000/api/agent/iros/messages' }
+[authz] 03b5fa5d-ee1f-4ea3-8d20-8b8276c72b96 verify firebase: 246.454ms
+[authz] 03b5fa5d-ee1f-4ea3-8d20-8b8276c72b96 fetch user: 52.93ms
+[authz] 03b5fa5d-ee1f-4ea3-8d20-8b8276c72b96 ok { user: '669933', role: 'admin', provider: 'password', ms: 306 }
+ GET /api/agent/iros/messages?conversation_id=9686255e-c9a4-4195-91e2-82f37ed8b2a6 200 in 715ms (compile: 23ms, render: 691ms)
+ GET /api/q/unified?user_code=669933 200 in 5.4s (compile: 1760µs, render: 5.4s)
+[authz] e951fefc-1ff7-48ef-9653-bf35024ccfb1 start { path: 'http://localhost:3000/api/agent/iros/messages' }
 [authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] d2a72201-d490-4586-83e7-06ab760aaa52 verify firebase: 272.69ms
-[authz] d2a72201-d490-4586-83e7-06ab760aaa52 fetch user: 117.469ms
-[authz] d2a72201-d490-4586-83e7-06ab760aaa52 ok { user: '669933', role: 'admin', provider: 'password', ms: 397 }
- POST /api/agent/iros/messages 200 in 791ms (compile: 3ms, render: 789ms)
-[IROS/FLAGSHIP_GUARD][MODULE_LOADED] { rev: 'guard-rev-2026-01-28-b', at: '2026-02-21T13:53:15.253Z' }
+[authz] e951fefc-1ff7-48ef-9653-bf35024ccfb1 verify firebase: 277.592ms
+[authz] e951fefc-1ff7-48ef-9653-bf35024ccfb1 fetch user: 78.36ms
+[authz] e951fefc-1ff7-48ef-9653-bf35024ccfb1 ok { user: '669933', role: 'admin', provider: 'password', ms: 362 }
+ POST /api/agent/iros/messages 200 in 700ms (compile: 3ms, render: 697ms)
+[IROS/FLAGSHIP_GUARD][MODULE_LOADED] {
+  rev: 'guard-rev-2026-02-23-a',
+  enabled: false,
+  at: '2026-02-23T12:49:11.280Z'
+}
 [IROS/FLAGS_ENV_HEAD] {
   IROS_RETRY_FINAL_FORCE_CALL: '0',
-  IROS_FLAGSHIP_REWRITE: '1',
-  IROS_LOG_FLAGS: 'true'
+  IROS_FLAGSHIP_REWRITE: '0',
+  IROS_LOG_FLAGS: 'true',
+  IROS_FLAGSHIP_GUARD_ENABLED: '0',
+  IROS_FLAGSHIP_GUARD_ENABLED_PARSED: false
 }
 [IROS/FLAGS] {
   retryFinalForceCall: false,
-  flagshipRewrite: true,
-  guardEnabled: true,
+  flagshipRewrite: false,
+  guardEnabled: false,
   guardSkipShort: false,
   guardShortMaxLen: 80,
   logFlags: true
 }
-[IROS/renderGateway][MODULE_LOADED] { rev: 'phase11-open-close-v2-LOADED', at: '2026-02-21T13:53:15.274Z' }
+[IROS/renderGateway][MODULE_LOADED] { rev: 'phase11-open-close-v2-LOADED', at: '2026-02-23T12:49:11.303Z' }
 [IROS/pipe][TRACE] {
-  traceId: '879c53b2-a455-4613-817e-817798cad484',
-  conversationKey: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  traceId: '2298ebfb-91be-46fd-94a6-3aac82754f31',
+  conversationKey: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   conversationId: null,
   userCode: '669933',
   modeHint: 'auto',
   hasHeaderUserCode: true,
   devBypass: false
 }
-[authz] c861e37f-d06b-4264-be65-e936fb249cb3 start { path: 'http://localhost:3000/api/agent/iros/reply' }
+[authz] ef99c589-4816-4f16-a194-6ceda5db8e9f start { path: 'http://localhost:3000/api/agent/iros/reply' }
 [authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] c861e37f-d06b-4264-be65-e936fb249cb3 verify firebase: 248.622ms
-[authz] c861e37f-d06b-4264-be65-e936fb249cb3 fetch user: 73.376ms
-[authz] c861e37f-d06b-4264-be65-e936fb249cb3 ok { user: '669933', role: 'admin', provider: 'password', ms: 330 }
+[authz] ef99c589-4816-4f16-a194-6ceda5db8e9f verify firebase: 268.786ms
+[authz] ef99c589-4816-4f16-a194-6ceda5db8e9f fetch user: 29.489ms
+[authz] ef99c589-4816-4f16-a194-6ceda5db8e9f ok { user: '669933', role: 'admin', provider: 'password', ms: 301 }
 [IROS/pipe][TRACE_RESOLVED] {
-  traceId: '879c53b2-a455-4613-817e-817798cad484',
-  conversationKey: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  traceId: '2298ebfb-91be-46fd-94a6-3aac82754f31',
+  conversationKey: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   userCode: '669933'
 }
- POST /api/credits/authorize 200 in 106ms (compile: 31ms, render: 75ms)
+ POST /api/credits/authorize 200 in 84ms (compile: 23ms, render: 61ms)
 [IROS/UserProfile] load ok {
   userCode: '669933',
   hasIrosRow: true,
-  sofia_credit: 332,
+  sofia_credit: 245,
   style: 'friendly',
   user_call_name: 'orion',
   plan_status: null
 }
 [IROS/Reply] handleIrosReply start {
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   userCode: '669933',
   mode: 'auto',
   tenantId: 'default',
   rememberScope: null,
-  traceId: '879c53b2-a455-4613-817e-817798cad484',
+  traceId: '2298ebfb-91be-46fd-94a6-3aac82754f31',
   style: 'friendly',
   history_len: 12,
   persistAssistantAllowed: false
+}
+[IROS/History] loaded {
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
+  conversationUuid: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
+  limit: 30,
+  returned: 30,
+  metaSample: 'has_meta'
+}
+[IROS/HistoryForTurn] decide {
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
+  userCode: '669933',
+  provided_len: 12,
+  used: 'db',
+  out_len: 30,
+  has_viewShiftSnapshot: true
 }
 [IROS][user:669933][STATE] loaded MemoryState {
   userCode: '669933',
@@ -129,8 +160,8 @@
   itxReason: 'IT_TRIGGER_OK',
   itxLastAt: '2026-01-08T12:26:08.007+00:00',
   sentimentLevel: null,
-  situationSummary: '大丈夫って言ってるけど、本当は止まってほしいのかもしれない。手放したいのに、まだ握ってる。',
-  situationTopic: '恋愛・パートナーシップ',
+  situationSummary: 'やっと直ったかな？巨大なメタが済んでいたみたいです',
+  situationTopic: 'その他・ライフ全般',
   qCounts: { it_cooldown: 0, it_triggered: true, it_triggered_true: true }
 }
 [IROS][user:669933][STATE] loaded MemoryState (orchestratorState) {
@@ -228,6 +259,10 @@
   requestedDepth_out: null,
   gateApplied: false
 }
+[IROS/VIEWSHIFT][pre-orch][inject] {
+  hasSnap: true,
+  snapKeys: [ 'depth', 'e_turn', 'abstractRate', 'topicClusterKey' ]
+}
 [IROS/Orchestrator] input meta snapshot {
   hasRotationState: true,
   spinLoop: 'SRI',
@@ -236,7 +271,7 @@
   frame: 'R',
   slotPlanLen: 4,
   slotPlanPolicy: null,
-  historyLen: 12,
+  historyLen: 30,
   hasIntentAnchor: true,
   intentAnchorKey: 'SUN',
   isIrDiagnosisTurn: null,
@@ -261,8 +296,8 @@
   itxReason: 'IT_TRIGGER_OK',
   itxLastAt: '2026-01-08T12:26:08.007+00:00',
   sentimentLevel: null,
-  situationSummary: '大丈夫って言ってるけど、本当は止まってほしいのかもしれない。手放したいのに、まだ握ってる。',
-  situationTopic: '恋愛・パートナーシップ',
+  situationSummary: 'やっと直ったかな？巨大なメタが済んでいたみたいです',
+  situationTopic: 'その他・ライフ全般',
   qCounts: { it_cooldown: 0, it_triggered: true, it_triggered_true: true }
 }
 [IROS][user:669933][STATE] loaded MemoryState (orchestratorState) {
@@ -290,15 +325,16 @@
   },
   result: {
     base: 0.7592499999999996,
-    deltaFromWords: 0,
-    value: 0.7592499999999996
+    deltaFromWords: 0.010000000000000002,
+    value: 0.7692499999999997
   },
   notes: [
     'base = lastSelfAcceptance（ライン） → 0.759',
+    '感謝ワード検出: raw delta +0.10',
     'S/R層 intensity=1.0',
-    'deltaTextRaw=0.000, intensity=1.00, deltaWithIntensity=0.000',
-    'deltaWithIntensity=0 → effectiveDelta=0',
-    'value=0.759 (raw=0.759)'
+    'deltaTextRaw=0.100, intensity=1.00, deltaWithIntensity=0.100',
+    'positive delta scaled (scale=0.10) → effectiveDelta=0.010',
+    'value=0.769 (raw=0.769)'
   ]
 }
 [IROS/SpinControl] {
@@ -311,31 +347,31 @@
   hysteresis: false
 }
 [IROS/GOAL_CONT] applyGoalContinuity {
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   goal_in: {
     kind: 'stabilize',
     targetDepth: 'R3',
     targetQ: 'Q3',
-    reason: '明示トリガーが無いため、まずは整えて流れを保つ（uncoverはデフォルトにしない）',
+    reason: '雑談（天気/食事/挨拶/近況）と判断したため、軽く整える（uncoverには落とさない）',
     detail: { ventWill: [Object] }
   },
   ctx: { lastQ: 'Q3', lastDepth: 'R3', qTrace: null, memoryQ: null }
 }
 [IROS/CONT continuity] { lastDepth: 'R3', lastQ: 'Q3', finalDepth: 'R3', finalQ: 'Q3' }
 [IROS/GOAL_CONT]  result {
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   goal_out: {
     kind: 'stabilize',
     targetDepth: 'R3',
     targetQ: 'Q3',
-    reason: '明示トリガーが無いため、まずは整えて流れを保つ（uncoverはデフォルトにしない）',
+    reason: '雑談（天気/食事/挨拶/近況）と判断したため、軽く整える（uncoverには落とさない）',
     detail: { ventWill: [Object] }
   }
 }
 [IROS/DEPTH_WRITE] {
   route: 'ROTATION',
   where: 'orchestratorWill',
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   baseDepth: 'R3',
   goalTargetDepth: 'R3',
   rotationDepth: 'R3',
@@ -359,15 +395,11 @@
   }
 }
 [IROS/IT][probe] before {
-  textHead: '切り替えようとしてるけど、切れてない。多段で',
-  historyLen: 12,
-  historyLen_norm: 11,
-  historyUserLen: 6,
-  last3User: [
-    '切り替えようとしてるけど、切れてない。多段で',
-    '大丈夫って言ってるけど、本当は止まってほしいのかもしれない。手放したいのに、まだ握ってる。',
-    '切り替えようとしてるけど、切れてない。多段で'
-  ],
+  textHead: 'バッチシ、驟雨正出来ました、ありがとうございます',
+  historyLen: 30,
+  historyLen_norm: 27,
+  historyUserLen: 14,
+  last3User: [ 'わーい', 'やっと直ったかな？巨大なメタが済んでいたみたいです', 'バッチシ、驟雨正出来ました、ありがとうございます' ],
   depth: 'R3',
   intentLine: {
     nowLabel: '',
@@ -400,14 +432,14 @@
     reason: 'IT_TRIGGER_OK',
     lastAt: 2026-01-08T12:26:08.007Z
   },
-  prevIt_fromHistory: false
+  prevIt_fromHistory: true
 }
 [IROS/IT][result] {
   ok: true,
   reason: 'IT_ALREADY_COMMITTED',
   flags: {
-    hasCore: false,
-    coreRepeated: false,
+    hasCore: true,
+    coreRepeated: true,
     sunOk: true,
     declarationOk: false,
     deepenOk: true
@@ -422,8 +454,8 @@
   itxPersistReason: 'IT_TRIGGER_OK',
   itxDecisionReason: 'IT_ALREADY_COMMITTED',
   flags: {
-    hasCore: false,
-    coreRepeated: false,
+    hasCore: true,
+    coreRepeated: true,
     sunOk: true,
     declarationOk: false,
     deepenOk: true
@@ -449,8 +481,9 @@
   delta: 'RETURN',
   confidence: 0.7,
   hasLastUserText: true,
-  returnStreak: 1
+  returnStreak: 14
 }
+[IROS/VIEWSHIFT][prevSnap] { hasPrev: true, keptInjected: false }
 [IROS/T_CONCRETIZE][FORCE_SWITCH_CHECK] {
   forceTConcretize: false,
   laneKeyNowRaw: null,
@@ -463,14 +496,14 @@
       streakSameUser: 1,
       repeatSignal: null,
       flowDelta: 'RETURN',
-      returnStreak: 1,
+      returnStreak: 14,
       anchorReason: 'NO_EVIDENCE',
       convReason: null
     }
   },
   hasFocusLabelNow: false,
   focusLabelHead: null,
-  userHead: '切り替えようとしてるけど、切れてない。多段で'
+  userHead: 'バッチシ、驟雨正出来ました、ありがとうございます'
 }
 [IROS/ORCH][after-container] {
   frame: 'R',
@@ -494,7 +527,7 @@
   slotPlan_slots_heads: [
     {
       key: 'OBS',
-      head: '@OBS {"laneKey":null,"user":"切り替えようとしてるけど、切れてない。多段で","flow":{"delta":"RETURN","confidence":0.7},"lastUserText":"切り替えようとし'
+      head: '@OBS {"laneKey":null,"user":"バッチシ、驟雨正出来ました、ありがとうございます","flow":{"delta":"RETURN","confidence":0.7},"lastUserText":"バッチシ、驟'
     },
     {
       key: 'SHIFT',
@@ -560,7 +593,7 @@
 }
 [IROS/Orchestrator] output meta snapshot { frame: 'R', slotPlanPolicy: 'FINAL', slotPlanLen: 4 }
 [IROS/PostProcess][SLOTPLAN_POLICY] {
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   userCode: '669933',
   slotPlanPolicy_detected: 'FINAL',
   slotPlanPolicy_from: 'metaForSave.framePlan.slotPlanPolicy',
@@ -569,48 +602,56 @@
   hasSlots: true
 }
 [IROS/CANON][STAMP][PP] {
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   userCode: '669933',
   q_code: 'Q3',
   depth_stage: 'R3',
   phase: 'Inner'
 }
 [IROS/PP][POLARITY_BRIDGE] {
-  polarityBand_raw: 'positive',
+  polarityBand_raw: null,
   polarityFromMirror_raw: null,
-  polarity_normalized: 'yang',
-  polarity_metaBand_raw: 'positive'
+  polarity_normalized: null,
+  polarity_metaBand_raw: null
 }
+[IROS/VIEW_SHIFT] {
+  ok: false,
+  score: 1,
+  variant: null,
+  confirmLine: null,
+  sessionBreak: null
+}
+[IROS/VIEWSHIFT][DECISION] { ok: false, score: 1, variant: null, sessionBreak: null }
 [IROS/MIRROR_FLOW][RESULT] {
   micro: false,
   confidence: 0.35,
   e_turn: 'e3',
-  polarity_in: 'yang',
-  polarity_metaBand: 'positive',
-  polarity_out: 'yang',
+  polarity_in: null,
+  polarity_metaBand: null,
+  polarity_out: null,
   meaningKey: null,
-  colorKey: 'e3_yang',
+  colorKey: 'e3',
   flowDelta: 'RETURN',
-  returnStreak: 1
+  returnStreak: 14
 }
 [IROS/EXPR][DIRECTIVE_V1] {
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   userCode: '669933',
   on: true,
   reason: 'ON',
   e_turn: 'e3',
   confidence: 0.35,
   flowDelta: 'RETURN',
-  returnStreak: 1,
-  head: '【DIRECTIVE_V1（露出禁止）】本文に含めない。構造(Depth/Q/Phase/Lane/slotPlan)は絶対に変更しない。\n' +
-    '語彙：日常語優先。抽象語（内側/外側/未回収/決着/'
+  returnStreak: 14,
+  head: 'prefaceLine：meta.extra.ctxPack.expr.prefaceLine が null でない場合のみ、その1行を本文の先頭に置く（1行・1文・改行なし）。\n' +
+    'prefac'
 }
 [IROS/EXPR][decision] {
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   userCode: '669933',
   fired: true,
   lane: 'sofia_light',
-  reason: 'RETURN',
+  reason: 'RETURN_STREAK',
   blockedBy: null,
   prefaceHead: '',
   debug: {
@@ -618,12 +659,12 @@
     phase: 'Inner',
     depth: 'R3',
     flowDelta: 'RETURN',
-    returnStreak: 1,
-    techniqueId: 'return'
+    returnStreak: 14,
+    techniqueId: 'return_streak'
   }
 }
 [IROS/PostProcess] SLOTPLAN_SEED_TO_WRITER (base visible) {
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   userCode: '669933',
   slotPlanPolicy: 'FINAL',
   slotPlanPolicy_from: 'metaForSave.framePlan.slotPlanPolicy',
@@ -642,22 +683,25 @@
   phase: 'Inner'
 }
 [UnifiedAnalysis] user message q_code/depth_stage updated {
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
-  messageId: 16224,
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
+  messageId: 16650,
   q_code: 'Q3',
   depth_stage: 'R3'
 }
 [IROS][CTXPACK] stamped {
-  traceId: '879c53b2-a455-4613-817e-817798cad484',
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  traceId: '2298ebfb-91be-46fd-94a6-3aac82754f31',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   userCode: '669933',
   hasCtxPack: true,
-  prevAtIso: null,
-  ageSec: null,
-  flowAt: '2026-02-21T13:53:16.812Z',
+  prevAtIso: '2026-02-23T12:42:56.738Z',
+  ageSec: 375,
+  flowAt: '2026-02-23T12:49:12.495Z',
   flowDelta: 'RETURN',
-  returnStreak: 1,
+  returnStreak: 14,
   ctxPackKeys: [
+    'viewShiftSnapshot',
+    'viewShift',
+    'expr',
     'exprMeta',
     'historyForWriter',
     'historyDigestV1',
@@ -669,13 +713,13 @@
     'slotPlan',
     'flow'
   ],
-  hfw_len: 12,
+  hfw_len: 30,
   hasDigestV1: true,
   digestChars: 244,
-  hfw_src_len: 12
+  hfw_src_len: 30
 }
 [IROS/LLM_GATE][FINAL_CALL][NO_FORCE] {
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   userCode: '669933',
   slotPlanPolicy: 'FINAL',
   framePlanSlotsLen: 4,
@@ -686,7 +730,7 @@
   head: '流れを保ったまま前に進める'
 }
 [IROS/LLM_GATE][PROBE] {
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   userCode: '669933',
   llmEntry: 'CALL_LLM',
   llmSkipReason: null,
@@ -703,9 +747,9 @@
   finalForceCall: false,
   finalForceCallReason: 'FINAL_CALL_NO_FORCE',
   resolvedTextLen: null,
-  rewriteSeedLen: 414,
+  rewriteSeedLen: 416,
   decisionResolvedLen: null,
-  decisionRewriteSeedLen: 414
+  decisionRewriteSeedLen: 416
 }
 [IROS/Reply] rotation bridge { spinLoop: 'SRI', descentGate: 'closed', depth: 'R3' }
 [IROS/CANON][STAMP] {
@@ -734,17 +778,17 @@
     'persistedByRoute',
     'persistPolicy',
     'persistAssistantMessage',
+    'ctxPack',
     'flow',
+    'viewShiftPrev',
     'stallHard',
     'stall',
     'intentBridge',
     'persistedBy',
-    'pastStateNoteText',
-    'pastStateTriggerKind',
-    'pastStateKeyword'
+    'pastStateNoteText'
   ]
 }
-[IROS/STATE][anchor-root] { userTextHead: '切り替えようとしてるけど、切れてない。多段で' }
+[IROS/STATE][anchor-root] { userTextHead: 'バッチシ、驟雨正出来ました、ありがとうございます' }
 [IROS/STATE][fixed-by-meta] {
   intent_anchor_obj: {
     key: 'SUN',
@@ -759,7 +803,7 @@
   itx_reason: 'IT_TRIGGER_OK',
   itx_last_at: '2026-01-08T12:26:08.007+00:00'
 }
-[IROS/STATE] persistMemoryStateIfAny start {"userCode":"669933","userText":"切り替えようとしてるけど、切れてない。多段で","depthInput":"R3","qCodeInput":"Q3","phaseInput":"Inner","yLevelInt":1,"hLevelInt":2,"finalSpinLoop":"SRI","finalSpinStep":2,"finalDescentGate":"closed","itTriggered":null,"clearItxExplicit":false,"shouldClearItx":false,"itx_step":"(keep)","itx_anchor_event_type":"(keep)","itx_reason":"(keep)","itx_last_at":"(keep)","anchor_event_db":"none","anchor_write_db":"keep","anchorEntry_decision":{"tEntryOk":false,"anchorEvent":"none","anchorWrite":"keep","reason":"NO_EVIDENCE"},"intent_anchor_key_candidate":"SUN","anchor_action":"keep","qTracePickedFrom":"qTraceEffective","qTrace_keys":["lastQ","dominantQ","streakQ","streakLength","volatility"],"qTrace_qNow":null,"qTrace_q_now":null,"qTrace_currentQ":null,"qTrace_snapshot_currentQ":null,"qTrace_streakQ":"Q3","qTrace_streakLength":1}
+[IROS/STATE] persistMemoryStateIfAny start {"userCode":"669933","userText":"バッチシ、驟雨正出来ました、ありがとうございます","depthInput":"R3","qCodeInput":"Q3","phaseInput":"Inner","yLevelInt":1,"hLevelInt":2,"finalSpinLoop":"SRI","finalSpinStep":2,"finalDescentGate":"closed","itTriggered":null,"clearItxExplicit":false,"shouldClearItx":false,"itx_step":"(keep)","itx_anchor_event_type":"(keep)","itx_reason":"(keep)","itx_last_at":"(keep)","anchor_event_db":"none","anchor_write_db":"keep","anchorEntry_decision":{"tEntryOk":false,"anchorEvent":"none","anchorWrite":"keep","reason":"NO_EVIDENCE"},"intent_anchor_key_candidate":"SUN","anchor_action":"keep","qTracePickedFrom":"qTraceEffective","qTrace_keys":["lastQ","dominantQ","streakQ","streakLength","volatility"],"qTrace_qNow":null,"qTrace_q_now":null,"qTrace_currentQ":null,"qTrace_snapshot_currentQ":null,"qTrace_streakQ":"Q3","qTrace_streakLength":1}
 [IROS/PHASE10_T3][enter] {
   phase10NowItxStep: 'T3',
   phase10NowAnchorWrite: 'keep',
@@ -843,14 +887,14 @@
   anchor_write: 'keep',
   intent_anchor: '(no-touch)'
 }
- POST /api/credits/capture 200 in 132ms (compile: 54ms, render: 78ms)
+ POST /api/credits/capture 200 in 111ms (compile: 55ms, render: 56ms)
 [IROS][user:669933][STATE] loaded MemoryState {
   userCode: '669933',
   hasMemory: true,
   intentAnchor: 'SUN',
   depthStage: 'R3',
   qPrimary: 'Q3',
-  selfAcceptance: 0.7592499999999996,
+  selfAcceptance: 0.7692499999999997,
   phase: 'Inner',
   intentLayer: 'C',
   yLevel: 1,
@@ -863,7 +907,7 @@
   itxReason: 'IT_TRIGGER_OK',
   itxLastAt: '2026-01-08T12:26:08.007+00:00',
   sentimentLevel: null,
-  situationSummary: '切り替えようとしてるけど、切れてない。多段で',
+  situationSummary: 'バッチシ、驟雨正出来ました、ありがとうございます',
   situationTopic: 'その他・ライフ全般',
   qCounts: { it_cooldown: 0, it_triggered: true, it_triggered_true: true }
 }
@@ -872,18 +916,20 @@
   turnsLen: 12,
   hasCtxPack: true,
   ctxPackKeys: [
-    'exprMeta',        'historyForWriter',
-    'historyDigestV1', 'phase',
-    'depthStage',      'qCode',
-    'slotPlanPolicy',  'goalKind',
-    'slotPlan',        'flow',
-    'turns',           'itxStep',
-    'itxReason',       'intentBand',
-    'tLayerHint',      'tLayerModeActive',
-    'topicDigest',     'replyGoal',
-    'repeatSignal',    'flowDigest'
+    'viewShiftSnapshot', 'viewShift',
+    'expr',              'exprMeta',
+    'historyForWriter',  'historyDigestV1',
+    'phase',             'depthStage',
+    'qCode',             'slotPlanPolicy',
+    'goalKind',          'slotPlan',
+    'flow',              'turns',
+    'itxStep',           'itxReason',
+    'intentBand',        'tLayerHint',
+    'tLayerModeActive',  'topicDigest',
+    'replyGoal',         'repeatSignal',
+    'flowDigest'
   ],
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   userCode: '669933'
 }
 [IROS/REPHRASE_FLAG] { raw: 'true', enabled: true }
@@ -891,7 +937,7 @@
   hasShiftSlot: true,
   shiftSlotKey: 'SHIFT',
   shiftSlotKind: '',
-  shiftSlotLen: 417,
+  shiftSlotLen: 419,
   shiftSlotHead: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":true,"no_naming":true,"no_conclusion":false,"no_future_instruction":true,"no_lecture":true,"questions_max":1,"no_checklist":true,"lines_max"',
   slotsKeysSample: [
     { key: 'OBS', kind: '' },
@@ -904,37 +950,37 @@
   pickedFrom: 'turns',
   maxMsgs: 6,
   rawTurnsLen: 12,
-  rawHistoryForWriterLen: 12,
+  rawHistoryForWriterLen: 30,
   normalizedLen: 12,
   pickedLen: 6,
   roles: [ 'assistant', 'user', 'assistant', 'user', 'assistant', 'user' ],
   tailHeads: [
-    '大丈夫って言ってるけど、本当は止まってほしいのかもしれない。手放したいのに、まだ握ってる。',
-    'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。\n「大丈夫」が口に出るほど、内側では「止まってほしい',
-    '切り替えようとしてるけど、切れてない。多段で'
+    'やっと直ったかな？巨大なメタが済んでいたみたいです',
+    '「やっと直った」「巨大なメタが済んでいた」──そこが、いま残ってる手触りだね。\nここで一語だけ揃える。\nその「巨大なメタ',
+    'バッチシ、驟雨正出来ました、ありがとうございます'
   ]
 }
 [IROS/ILINE][LOCK_PARTS] {
-  seedLen: 22,
-  userLen: 22,
+  seedLen: 24,
+  userLen: 24,
   seedEqUser: true,
   seedHasUser: true,
   lockPartsLen: 1,
   lockHasNewline: false,
-  lockLen: 22,
-  lockHead120: '切り替えようとしてるけど、切れてない。多段で'
+  lockLen: 24,
+  lockHead120: 'バッチシ、驟雨正出来ました、ありがとうございます'
 }
 [IROS/ILINE][LOCK_SOURCE] {
   hasSeed: true,
   hasUser: true,
-  seedLen: 22,
-  userLen: 22,
+  seedLen: 24,
+  userLen: 24,
   hasILINE_seed: false,
   hasILINE_user: false,
   hasILINE_any: false,
   hasILINE_END_any: false,
-  head200: '切り替えようとしてるけど、切れてない。多段で',
-  tail200: '切り替えようとしてるけど、切れてない。多段で'
+  head200: 'バッチシ、驟雨正出来ました、ありがとうございます',
+  tail200: 'バッチシ、驟雨正出来ました、ありがとうございます'
 }
 [IROS/ILINE][LOCK_EXTRACT] { lockedFromAllLen: 0, lockedUniqueLen: 0, lockedUniqueHead200: '' }
 [IROS/rephraseEngine][INTENT_BAND_EXTRACT] {
@@ -968,8 +1014,8 @@
   lockedILinesLen: 0
 }
 [IROS/rephraseEngine][STATE_SNAPSHOT_PICKED] {
-  traceId: '879c53b2-a455-4613-817e-817798cad484',
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  traceId: '2298ebfb-91be-46fd-94a6-3aac82754f31',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   userCode: '669933',
   pickedDepthStage: 'R3',
   pickedPhase: 'Inner',
@@ -984,11 +1030,11 @@
     'tLayerHint=T3\n' +
     '\n' +
     'META_HINT (DO NOT OUTPUT):\n' +
-    '{"conversation_id":"b66ef146-c42a-4b46-9c0c-3fa3f0a74699","slotPlanPolic'
+    '{"conversation_id":"9686255e-c9a4-4195-91e2-82f37ed8b2a6","slotPlanPolic'
 }
 [IROS/rephraseEngine][ALLOW] {
-  traceId: '879c53b2-a455-4613-817e-817798cad484',
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  traceId: '2298ebfb-91be-46fd-94a6-3aac82754f31',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   userCode: '669933',
   depthStage: 'R3',
   qCode: 'Q3',
@@ -1006,30 +1052,30 @@
   }
 }
 [IROS/VECTOR][PICK] {
-  traceId: '879c53b2-a455-4613-817e-817798cad484',
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  traceId: '2298ebfb-91be-46fd-94a6-3aac82754f31',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   userCode: '669933',
   enabled: false,
   vector: null
 }
 [IROS/rephraseEngine][BLOCK_PLAN] {
-  traceId: '879c53b2-a455-4613-817e-817798cad484',
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  traceId: '2298ebfb-91be-46fd-94a6-3aac82754f31',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   userCode: '669933',
-  enabled: true,
+  enabled: false,
   goalKind: 'stabilize',
   exprLane: 'sofia_light',
-  explicitTrigger: true,
+  explicitTrigger: false,
   depthStage: 'R3',
   itTriggered: false,
-  mode: 'multi6',
-  blocksLen: 6,
-  sysLen: 625
+  mode: null,
+  blocksLen: 0,
+  sysLen: 0
 }
 [IROS/rephraseEngine][EXPR_META] { injected: true, hasDirectiveV1: true }
 [IROS/rephraseEngine][EXPR_META] {
-  traceId: '879c53b2-a455-4613-817e-817798cad484',
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  traceId: '2298ebfb-91be-46fd-94a6-3aac82754f31',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   userCode: '669933',
   injected: true,
   tone: 'med',
@@ -1040,27 +1086,27 @@
   rhythm: 'breathe'
 }
 [IROS/rephraseEngine][MSG_PACK] {
-  traceId: '879c53b2-a455-4613-817e-817798cad484',
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  traceId: '2298ebfb-91be-46fd-94a6-3aac82754f31',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   userCode: '669933',
   lastTurns: 4,
   hasHistoryText: true,
-  historyTextLen: 1379,
+  historyTextLen: 576,
   msgCount: 6,
   roles: [ 'system', 'user', 'assistant', 'user', 'assistant', 'user' ],
-  internalPackLen: 4386,
+  internalPackLen: 3591,
   internalPackHasHistoryHint: true,
-  seedDraftLen: 22,
-  seedDraftHead: '切り替えようとしてるけど、切れてない。多段で',
-  seedDraftRawAllHead: '@OBS {"laneKey":null,"user":"切り替えようとしてるけど、切れてない。多段で","flow":{"delta":"RETURN","confidence":0.7},"lastUserText":"切り替えようとしてるけど、切れてない。多段で"}\n' +
-    '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":',
-  seedDraftRawPickedHead: '@OBS {"laneKey":null,"user":"切り替えようとしてるけど、切れてない。多段で","flow":{"delta":"RETURN","confidence":0.7},"lastUserText":"切り替えようとしてるけど、切れてない。多段で"}\n' +
-    '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":',
+  seedDraftLen: 24,
+  seedDraftHead: 'バッチシ、驟雨正出来ました、ありがとうございます',
+  seedDraftRawAllHead: '@OBS {"laneKey":null,"user":"バッチシ、驟雨正出来ました、ありがとうございます","flow":{"delta":"RETURN","confidence":0.7},"lastUserText":"バッチシ、驟雨正出来ました、ありがとうございます"}\n' +
+    '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rul',
+  seedDraftRawPickedHead: '@OBS {"laneKey":null,"user":"バッチシ、驟雨正出来ました、ありがとうございます","flow":{"delta":"RETURN","confidence":0.7},"lastUserText":"バッチシ、驟雨正出来ました、ありがとうございます"}\n' +
+    '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rul',
   slotsHead: [
     {
       i: 0,
       key: 'OBS',
-      head: '@OBS {"laneKey":null,"user":"切り替えようとしてるけど、切れてない。多段で","flow":{"delta":"RETURN","c'
+      head: '@OBS {"laneKey":null,"user":"バッチシ、驟雨正出来ました、ありがとうございます","flow":{"delta":"RETURN",'
     },
     {
       i: 1,
@@ -1089,28 +1135,21 @@
   lockedILines: 0
 }
 [IROS/BLOCK_PLAN][inject] {
-  enabled: true,
-  mode: 'multi6',
-  blocks: [
-    'ENTRY',
-    'SITUATION',
-    'DUAL',
-    'FOCUS_SHIFT',
-    'ACCEPT',
-    'INTEGRATE'
-  ],
-  explicitTrigger: true,
+  enabled: false,
+  mode: null,
+  blocks: null,
+  explicitTrigger: false,
   goalKind: 'stabilize'
 }
 [IROS/LLM][CALL] {
-  callId: 'eef7d8606fd5',
+  callId: '655ba465f38d',
   purpose: 'writer',
   model: 'gpt-5.2',
   temperature: 0.7,
   responseFormat: 'text',
   endpoint: 'https://api.openai.com/v1/chat/completions',
-  traceId: '879c53b2-a455-4613-817e-817798cad484',
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  traceId: '2298ebfb-91be-46fd-94a6-3aac82754f31',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   userCode: '669933',
   slotPlanPolicy: 'FINAL',
   mode: 'rephrase',
@@ -1120,8 +1159,8 @@
   firstRole: 'system',
   lastRole: 'user',
   firstHead: '【上位人格定義：Sofia（DO NOT OUTPUT / 露出禁止）】 - “響き”として現れ、相手が自分の答えに立て…',
-  lastTail: '切り替えようとしてるけど、切れてない。多段で',
-  lastUserHead: '切り替えようとしてるけど、切れてない。多段で',
+  lastTail: 'バッチシ、驟雨正出来ました、ありがとうございます',
+  lastUserHead: 'バッチシ、驟雨正出来ました、ありがとうございます',
   hasDigest: true,
   hasAnchor: true,
   roles: [ 'system', 'user', 'assistant', 'user', 'assistant', 'user' ],
@@ -1132,15 +1171,15 @@
   hasInternalKeys: false
 }
 [IROS/LLM][OK] {
-  callId: 'eef7d8606fd5',
+  callId: '655ba465f38d',
   purpose: 'writer',
   model: 'gpt-5.2',
-  ms: 4120,
+  ms: 2508,
   ok: true,
   usage: {
-    prompt_tokens: 5754,
-    completion_tokens: 199,
-    total_tokens: 5953,
+    prompt_tokens: 4052,
+    completion_tokens: 58,
+    total_tokens: 4110,
     prompt_tokens_details: { cached_tokens: 1664, audio_tokens: 0 },
     completion_tokens_details: {
       reasoning_tokens: 0,
@@ -1149,127 +1188,32 @@
       rejected_prediction_tokens: 0
     }
   },
-  traceId: '879c53b2-a455-4613-817e-817798cad484',
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  traceId: '2298ebfb-91be-46fd-94a6-3aac82754f31',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   userCode: '669933',
-  outLen: 248,
-  outHead: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。\n' +
-    '\n' +
-    '「切り替えようとしてるけど、切れてない。多段で」って、ひとつの線じゃなくて、段がズレたま'
+  outLen: 67,
+  outHead: '「バッチシ」「驟雨正出来ました」って、着地の音がはっきり鳴ったね。\n\nその「驟雨正」って、いまは“何が正しくできた”の意味で使ってる？'
 }
 [IROS/rephraseEngine][OK] {
-  traceId: '879c53b2-a455-4613-817e-817798cad484',
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  traceId: '2298ebfb-91be-46fd-94a6-3aac82754f31',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   userCode: '669933',
   mode: 'LLM',
   keys: [ 'OBS', 'SHIFT', 'SAFE', 'NEXT' ],
-  rawLen: 248,
-  rawHead: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。\n' +
-    '\n' +
-    '「切り替えようとしてるけど、切れてない。多段で」って、ひとつの線じゃなくて、段がズレたまま重なってる言い方だね。🌀  \n' +
-    '切り替えたい側も動いてるし、握り続ける側も動い'
-}
-[IROS/FLAGSHIP_GUARD][DEBUG_IN] {
-  rev: 'guard-rev-2026-01-28-b',
-  inputLen: 237,
-  inputHead: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。\n' +
-    '「切り替えようとしてるけど、切れてない。多段で」って、ひとつの線じゃなくて、段がズレたまま重なってる言い方だね。🌀\n' +
-    '切り替えたい側も動いてるし、握り続ける側も動いてる。',
-  slotKeys: [ 'OBS', 'SHIFT', 'SAFE', 'NEXT' ]
-}
-[IROS/FLAGSHIP_GUARD][DEBUG_SCORE] {
-  rev: 'guard-rev-2026-01-28-b',
-  normalLite: true,
-  scaffoldLike: false,
-  len: 237,
-  qCount: 1,
-  qCountMark: 1,
-  cheer: 2,
-  hedge: 0,
-  generic: 0,
-  blandPressure: 2,
-  bulletLike: 0,
-  hasFlagshipSign: true
-}
-[IROS/FLAGSHIP][VERDICT] {
-  traceId: '879c53b2-a455-4613-817e-817798cad484',
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
-  userCode: '669933',
-  level: 'OK',
-  ok: true,
-  qCount: 1,
-  score: {
-    fatal: 0,
-    warn: 0,
-    qCount: 1,
-    bulletLike: 0,
-    hedge: 0,
-    cheer: 2,
-    generic: 0,
-    runaway: 0,
-    exaggeration: 0,
-    mismatch: 0,
-    retrySame: 0
-  },
-  reasons: [],
-  head: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。\n' +
-    '「切り替えようとしてるけど、切れてない。多段で」って、ひとつの線じゃなくて、段がズレたまま重なってる言い方だね。🌀\n' +
-    '切り替えたい側も動いてるし、握り続ける側も動いてる。\n' +
-    '口では「大丈夫」を言える。\n' +
-    'でも内側は「止まってほしい」が止まらない。\n' +
-    'その同時進行が、「手放したいのに、まだ握ってる」を固定する。\n' +
-    '多段の中で、いま一番前に出てるのはどれ？\n' +
-    '外側の出来事／頭の中の'
-}
-[IROS/BLOCK_PLAN][CONTRACT_VIOLATION] {
-  traceId: '879c53b2-a455-4613-817e-817798cad484',
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
-  userCode: '669933',
-  mode: 'multi6',
-  blocks: [
-    'ENTRY',
-    'SITUATION',
-    'DUAL',
-    'FOCUS_SHIFT',
-    'ACCEPT',
-    'INTEGRATE'
-  ],
-  missing: [ '入口' ],
-  head: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。\n' +
-    '「切り替えようとしてるけど、切れてない。多段で」って、ひとつの線じゃなくて、段がズレたまま重なってる言い方だね。🌀\n' +
-    '切り替えたい側も動いてるし、握り続ける側も動いてる。\n' +
-    '口では「大丈夫」を言える。\n' +
-    'でも内側は「止まってほしい」が止まらない。\n' +
-    'その同時進行が、「手放したいのに、まだ握ってる」を固定する。\n' +
-    '多段の中で、いま一番前に出てるのはどれ？\n' +
-    '外側の出来事／頭の中の',
-  soft: true,
-  tailTruncated: false
-}
-[IROS/rephraseEngine][MIN_OK_KIND] {
-  inputKindNow: 'chat',
-  isMicroOrGreetingNow: false,
-  shortReplyOk: false,
-  MIN_OK_LEN: 40,
-  reason: 'chat_relaxed_40',
-  shiftTextHead: '@SHIFT {"kind":"c_sense_hint","intent":"continue_flow","rules":{"no_definition":true,"no_naming":true,"no_conclusion":false,"no_future_instr',
-  shiftObjHasAllow: true,
-  isTConcretize: false,
-  isIdeaBand: false,
-  shiftKind: 'c_sense_hint'
+  rawLen: 67,
+  rawHead: '「バッチシ」「驟雨正出来ました」って、着地の音がはっきり鳴ったね。\n\nその「驟雨正」って、いまは“何が正しくできた”の意味で使ってる？'
 }
 [IROS/rephraseEngine][AFTER_ATTACH][EXTRA_TRACE] {
-  traceId: '879c53b2-a455-4613-817e-817798cad484',
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  traceId: '2298ebfb-91be-46fd-94a6-3aac82754f31',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   hasExtra: true,
-  blockPlanMode: 'multi6',
-  blockPlanBlocksLen: 6,
+  blockPlanMode: null,
+  blockPlanBlocksLen: 0,
   hasRephraseBlocks: true,
-  rephraseBlocksLen: 8,
+  rephraseBlocksLen: 2,
   outKeysLen: 4,
-  note: 'FLAGSHIP_OK_NO_RETRY',
-  head: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。\n' +
-    '「切り替えようとしてるけど、切れてない。多段で」って、ひとつの線じゃなくて、段がズレたまま'
+  note: 'FLAGSHIP_DISABLED',
+  head: '「バッチシ」「驟雨正出来ました」って、着地の音がはっきり鳴ったね。\nその「驟雨正」って、いまは“何が正しくできた”の意味で使ってる？'
 }
 [IROS/rephraseAttach][RES_KEYS] {
   resKeys: [ 'ok', 'slots', 'meta' ],
@@ -1278,20 +1222,20 @@
   metaOutKeys: []
 }
 [IROS/rephraseAttach][OK] {
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   userCode: '669933',
-  blocksLen: 8,
-  head: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。'
+  blocksLen: 2,
+  head: '「バッチシ」「驟雨正出来ました」って、着地の音がはっきり鳴ったね。'
 }
 [IROS/CONV_EVIDENCE] {
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   userCode: '669933',
   understand: 0,
   repair: 0,
   advance: 1,
   proof: 1,
   reason: 'U!:no_ctx_summary | R!:no_repair | A:next_hint:advance_hint',
-  head: '切り替えようとしてるけど、切れてない。多段で',
+  head: 'バッチシ、驟雨正出来ました、ありがとうございます',
   detail: {
     branch: null,
     topicHint: null,
@@ -1303,70 +1247,94 @@
 }
 [IROS/renderGateway][RB_CONTENT_DIAG] {
   rev: 'phase11-open-close-v2-LOADED',
-  rbLen: 8,
-  joinedLen: 237,
-  head1: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。',
-  head2: '「切り替えようとしてるけど、切れてない。多段で」って、ひとつの線じゃなくて、段がズレたまま重なってる言い方だね。🌀',
-  tail2: '多段の中で、いま一番前に出てるのはどれ？',
-  tail1: '外側の出来事／頭の中の反芻／「大丈夫」を言ってしまう口。'
+  rbLen: 2,
+  joinedLen: 66,
+  head1: '「バッチシ」「驟雨正出来ました」って、着地の音がはっきり鳴ったね。',
+  head2: 'その「驟雨正」って、いまは“何が正しくできた”の意味で使ってる？',
+  tail2: '「バッチシ」「驟雨正出来ました」って、着地の音がはっきり鳴ったね。',
+  tail1: 'その「驟雨正」って、いまは“何が正しくできた”の意味で使ってる？'
+}
+[IROS/renderGateway][SHORT_OUT_DIAG] {
+  rev: 'phase11-open-close-v2-LOADED',
+  slotPlanPolicy: 'FINAL',
+  pickedFrom: 'rephraseBlocks',
+  fallbackFrom: 'rephraseBlocks',
+  maxLinesFinal: 8,
+  blocksCount: 2,
+  outLen: 66,
+  outHead: '「バッチシ」「驟雨正出来ました」って、着地の音がはっきり鳴ったね。 その「驟雨正…',
+  rbDiag: null,
+  pickedLen: 66,
+  pickedHead: '「バッチシ」「驟雨正出来ました」って、着地の音がはっきり鳴ったね。 その「驟雨正…',
+  fallbackLen: 66,
+  fallbackHead: '「バッチシ」「驟雨正出来ました」って、着地の音がはっきり鳴ったね。 その「驟雨正…'
 }
 [IROS/renderGW][META_PICKED_FIX] {
   rev: 'phase11-open-close-v2-LOADED',
   pickedFrom: 'rephraseBlocks',
   pickedLen_raw: 13,
   pickedHead_raw: '流れを保ったまま前に進める',
-  pickedLen_meta: 237,
-  pickedHead_meta: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。 「切り替え…',
-  outLen: 237,
-  outHead: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。 「切り替え…'
+  pickedLen_meta: 66,
+  pickedHead_meta: '「バッチシ」「驟雨正出来ました」って、着地の音がはっきり鳴ったね。 その「驟雨正…',
+  outLen: 66,
+  outHead: '「バッチシ」「驟雨正出来ました」って、着地の音がはっきり鳴ったね。 その「驟雨正…'
 }
 [IROS/renderGateway][LEN_SNAPSHOT] {
   rev: 'phase11-open-close-v2-LOADED',
-  len_before: 237,
-  head_before: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。 「切り替え…'
+  len_before: 66,
+  head_before: '「バッチシ」「驟雨正出来ました」って、着地の音がはっきり鳴ったね。 その「驟雨正…'
 }
 [IROS/renderGateway][HAS_REPHRASE_BLOCKS] {
   rev: 'phase11-open-close-v2-LOADED',
-  rephraseBlocksLen: 8,
-  outLen: 237
+  rephraseBlocksLen: 2,
+  outLen: 66
 }
-[IROS/renderGateway][OK] {"rev":"phase11-open-close-v2-LOADED","outLen":237,"pickedFrom":"rephraseBlocks","slotPlanPolicy":"FINAL","usedSlots":true,"scaffoldApplied":false,"expandAllowed":true}
+[IROS/renderGateway][OK] {"rev":"phase11-open-close-v2-LOADED","outLen":66,"pickedFrom":"rephraseBlocks","slotPlanPolicy":"FINAL","usedSlots":true,"scaffoldApplied":false,"expandAllowed":true}
 [IROS/renderGateway][REV] {"rev":"phase11-open-close-v2-LOADED"}
 [IROS/PERSIST_PICK] {
-  conversationId: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   userCode: '669933',
   pickedFrom: 'uiResultContent',
-  pickedLen: 237,
-  pickedHead: 'いまは状況より先に、焦点（何が削られているか）を一点に置く段階です。\n「切り替え',
-  fromResultObjLen: 237,
-  blocksJoinedCleanedLen: 237,
-  resolvedUiTextLen: 237,
-  userEchoLen: 22,
+  pickedLen: 66,
+  pickedHead: '「バッチシ」「驟雨正出来ました」って、着地の音がはっきり鳴ったね。\nその「驟雨正',
+  fromResultObjLen: 66,
+  blocksJoinedCleanedLen: 66,
+  resolvedUiTextLen: 66,
+  userEchoLen: 24,
   isPickedDots: false
+}
+[IROS/persistAssistant] done {
+  conversationId: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
+  userCode: '669933',
+  ms: 66,
+  ok: true,
+  inserted: true,
+  blocked: false,
+  reason: null
 }
 [IROS][Training] computed targetKind = stabilize
 [IROS][Training] insert sample {
   user_code: '669933',
-  conversation_id: 'b66ef146-c42a-4b46-9c0c-3fa3f0a74699',
+  conversation_id: '9686255e-c9a4-4195-91e2-82f37ed8b2a6',
   message_id: null,
-  input_text: '切り替えようとしてるけど、切れてない。多段で',
+  input_text: 'バッチシ、驟雨正出来ました、ありがとうございます',
   analysis_text: 'Q:Q3 / D:R3 / P:Inner / K:stabilize / T:その他・ライフ全般',
   q_code: 'Q3',
   depth_stage: 'R3',
   phase: 'Inner',
-  self_acceptance: 0.7592499999999996,
-  situation_summary: '切り替えようとしてるけど、切れてない。多段で',
+  self_acceptance: 0.7692499999999997,
+  situation_summary: 'バッチシ、驟雨正出来ました、ありがとうございます',
   situation_topic: 'その他・ライフ全般',
   target_kind: 'stabilize',
   target_label: null,
   y_level: 1,
   h_level: 2
 }
-[IROS][Training] insert ok
- POST /api/agent/iros/reply 200 in 6.7s (compile: 125ms, render: 6.6s)
-[authz] 4c320f69-7bbc-4192-884d-885510258bb9 start { path: 'http://localhost:3000/api/agent/iros/conversations' }
+ POST /api/agent/iros/reply 200 in 4.5s (compile: 112ms, render: 4.4s)
+[authz] 7dfd55a5-f545-44a3-bbec-6f6ccf4b5bd9 start { path: 'http://localhost:3000/api/agent/iros/conversations' }
 [authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] 4c320f69-7bbc-4192-884d-885510258bb9 verify firebase: 273.327ms
-[authz] 4c320f69-7bbc-4192-884d-885510258bb9 fetch user: 36.135ms
-[authz] 4c320f69-7bbc-4192-884d-885510258bb9 ok { user: '669933', role: 'admin', provider: 'password', ms: 316 }
- GET /api/agent/iros/conversations 200 in 383ms (compile: 4ms, render: 379ms)
+[IROS][Training] insert ok
+[authz] 7dfd55a5-f545-44a3-bbec-6f6ccf4b5bd9 verify firebase: 236.529ms
+[authz] 7dfd55a5-f545-44a3-bbec-6f6ccf4b5bd9 fetch user: 30.287ms
+[authz] 7dfd55a5-f545-44a3-bbec-6f6ccf4b5bd9 ok { user: '669933', role: 'admin', provider: 'password', ms: 269 }
+ GET /api/agent/iros/conversations 200 in 312ms (compile: 2ms, render: 310ms)

@@ -232,7 +232,22 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
     activeConversationIdRef.current = cid;
     setActiveConversationId(cid);
 
-    const rowsRaw = await irosClient.fetchMessages(cid);
+    let rowsRaw: any;
+    try {
+      rowsRaw = await irosClient.fetchMessages(cid);
+    } catch (e) {
+      // ✅ 取得失敗時に messages を空にしない（リロードで消える問題の止血）
+      console.warn('[IROS][client] fetchMessages failed (keep prev messages)', {
+        cid,
+        prevCid,
+        error: String((e as any)?.message ?? e),
+      });
+
+      // 会話切り替え直後に落ちても「空表示」にしない
+      setMessages((prev) => prev || []);
+      return;
+    }
+
     const rows = normalizeMessages(rowsRaw);
 
     setMessages((prev) => {
@@ -263,9 +278,7 @@ export const IrosChatProvider = ({ children }: { children: React.ReactNode }) =>
 
       return seedOnly.length ? [...rows, ...seedOnly] : rows;
     });
-
   }, []);
-
 // ✅ IrosChatContext.tsx（IrosChatProvider 内）
 // fetchMessages の下あたりに追加（同一ファイル内ならどこでもOK）
 

@@ -114,7 +114,14 @@ async function getIdTokenSafe(timeoutMs = 5000): Promise<string> {
  * - AbortController でタイムアウトを明示
  * - 401/timeout を区別してログしやすくする
  */
-const AUTH_FETCH_TIMEOUT_MS = 60_000; // ★ 必要なら延長（例: 90_000）
+const AUTH_FETCH_TIMEOUT_MS = 60_000; // default
+const AUTH_FETCH_TIMEOUT_MS_REPLY = 120_000; // /reply は重いので別枠
+
+function getAuthFetchTimeoutMs(input: RequestInfo | URL): number {
+  const s = typeof input === 'string' ? input : String((input as any)?.url ?? input);
+  if (s.includes('/api/agent/iros/reply')) return AUTH_FETCH_TIMEOUT_MS_REPLY;
+  return AUTH_FETCH_TIMEOUT_MS;
+}
 
 async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   // ✅ TDZ/循環importの影響を避けるため、__DEV__ を参照しない
@@ -138,7 +145,7 @@ async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
 
   // ---- timeout ----
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), AUTH_FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), getAuthFetchTimeoutMs(input));
 
   try {
     const res = await fetch(input, {
@@ -163,12 +170,28 @@ async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
 
     return res;
   } catch (e: any) {
-    // AbortError を明示的に timeout 扱い
-    if (e?.name === 'AbortError') {
-      const msg = `HTTP 408 client_timeout: exceeded ${AUTH_FETCH_TIMEOUT_MS}ms`;
-      if (DEV) console.warn('[IROS/API] authFetch abort', { input: String(input), msg });
-      throw new Error(msg);
-    }
+// AbortError を明示的に timeout 扱い
+if (e?.name === 'AbortError') {
+  const exceededMs = getAuthFetchTimeoutMs(input);
+  const inputStr = typeof input === 'string' ? input : String((input as any)?.url ?? input);
+
+  const msg = `HTTP 408 client_timeout: exceeded ${exceededMs}ms [input=${inputStr}]`;
+
+  // console が見えない環境でも後で参照できるように保持
+  try {
+    (window as any).__IROS_LAST_AUTHFETCH_ABORT__ = {
+      at: new Date().toISOString(),
+      input: inputStr,
+      exceededMs,
+      msg,
+    };
+  } catch {}
+
+  // warn が埋もれることがあるので error にする
+  if (DEV) console.error('[IROS/API] authFetch abort', { input: inputStr, exceededMs, msg });
+
+  throw new Error(msg);
+}
     throw e;
   } finally {
     clearTimeout(timer);

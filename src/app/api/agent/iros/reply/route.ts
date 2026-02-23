@@ -234,6 +234,27 @@ export async function POST(req: NextRequest) {
     // -------------------------------------------------------
     // 1) body
     // -------------------------------------------------------
+
+   // =========================================================
+// PERF timers（dev only）
+// =========================================================
+const PERF_ON =
+process.env.NODE_ENV !== 'production' &&
+String(process.env.IROS_PERF_LOG ?? '').trim() !== '0';
+
+const t0 = Date.now();
+const laps: Array<{ k: string; ms: number }> = [];
+const lap = (k: string) => {
+if (!PERF_ON) return;
+const ms = Date.now() - t0;
+laps.push({ k, ms });
+};
+const lapWarn = (k: string, msCost: number, extra?: any) => {
+if (!PERF_ON) return;
+if (msCost >= 1000) console.warn('[IROS/PERF][SLOW]', { k, ms: msCost, ...(extra ?? {}) });
+else console.info('[IROS/PERF]', { k, ms: msCost, ...(extra ?? {}) });
+};
+
     const body = (await req.json().catch(() => ({} as any))) as IrosReplyBody;
 
     const conversationKeyRaw =
@@ -1278,76 +1299,170 @@ console.info('[IROS/PERSIST_PICK]', {
           } catch {}
 
 
-      const persistStrict =
-        String(process.env.IROS_PERSIST_STRICT ?? '').trim() === '1' ||
-        String(process.env.NODE_ENV ?? '').trim() === 'production';
+          const persistStrict =
+          String(process.env.IROS_PERSIST_STRICT ?? '').trim() === '1' ||
+          String(process.env.NODE_ENV ?? '').trim() === 'production';
 
-      let saved: any = null;
-      try {
-        saved = await persistAssistantMessageToIrosMessages({
-          supabase,
-          conversationId,
-          userCode,
-          content: contentForPersist,
-          meta: metaForSave,
-        });
-      } catch (e) {
-        saved = { ok: false, error: e };
-      }
+        // ✅ single-writer guard の鍵を “persist直前” に metaForSave へ必ず注入（microでもrephraseでも共通）
+        try {
+          const mfs: any = metaForSave as any;
+          if (!mfs || typeof mfs !== 'object') {
+            // metaForSave が壊れてても落とさず進める（ただし insert 側で弾かれる可能性は残る）
+          } else {
+            mfs.extra = {
+              ...(mfs.extra ?? {}),
+              persistedByRoute: true,
+              persistAssistantMessage: false,
+            };
+          }
+        } catch {}
 
-      if (!saved || saved.ok !== true) {
-        const err: any = (saved as any)?.error ?? saved ?? null;
+/* =========================================
+ * [置換] src/app/api/agent/iros/reply/route.ts
+ * 範囲: 1320〜1404 を丸ごと置き換え
+ * 目的:
+ * - /reply の返却を DB 保存/Training の遅延から切り離す
+ * - persist は短い timeout で best-effort
+ * - training は fire-and-forget（timeout + catch）
+ * ========================================= */
 
-        console.error('[IROS/persistAssistantMessageToIrosMessages] insert error', {
-          conversationId,
-          userCode,
-          persistStrict,
-          error: err,
-        });
+const withTimeout = async <T,>(
+  p: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<{ ok: true; value: T } | { ok: false; timeout: true; error: Error }> => {
+  let timer: NodeJS.Timeout | null = null;
+  try {
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`[TIMEOUT] ${label} ${ms}ms`));
+      }, ms);
+      // Node環境であればプロセス終了を妨げない
+      (timer as any)?.unref?.();
+    });
 
-        meta.extra = {
-          ...(meta.extra ?? {}),
-          persist_failed: true,
-          persist_failed_strict: persistStrict,
-          persist_failed_message: String(err?.message ?? '')?.slice(0, 240) || 'persist_failed',
-        };
+    const value = await Promise.race([p, timeout]);
+    return { ok: true, value: value as T };
+  } catch (e: any) {
+    const msg = String(e?.message ?? e ?? '');
+    // timeout とみなす条件（メッセージで判定）
+    if (msg.includes('[TIMEOUT]')) {
+      return { ok: false, timeout: true, error: e instanceof Error ? e : new Error(msg) };
+    }
+    return { ok: false, timeout: false as any, error: e instanceof Error ? e : new Error(msg) };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
 
-        if (persistStrict) {
-          const msg = String(err?.message ?? '') || String((saved as any)?.reason ?? '') || 'persist_failed';
-          throw new Error(msg);
-        }
-      }
+// ---- persist（best-effort / “timeoutで切らない”）
+// src/app/api/agent/iros/reply/route.ts
+// 範囲: 1359 行目の「const PERSIST_TIMEOUT_MS = ...」〜 下の persist エラーハンドリング末尾までを丸ごと置き換え
+// 目的:
+// - persistAssistantMessageToIrosMessages は内部に statement_timeout(57014) の shrink/ULTRA リトライがある
+// - 外側 withTimeout で切ると「裏でinsertが走り続ける」＝二重実行/誤エラー化の温床になる
+// - なので assistant persist は “最後まで待つ” を正とする（/reply は止めない）
 
-      const messageId = (saved as any)?.messageId ?? null;
+const PERSIST_TIMEOUT_MS = (() => {
+  // ※ 互換のため残す（ログ・表示用途）。assistant persist では withTimeout を使わない。
+  const raw = String(process.env.IROS_PERSIST_TIMEOUT_MS ?? '15000').trim();
+  const n = Number(raw);
+  const ms = Number.isFinite(n) ? n : 15000;
+  return Math.max(2500, Math.min(60000, Math.floor(ms)));
+})();
 
-      meta.extra = {
-        ...(meta.extra ?? {}),
-        persistedAssistantMessage: {
-          ok: Boolean(saved?.ok),
-          inserted: Boolean(saved?.inserted),
-          blocked: Boolean(saved?.blocked),
-          reason: String(saved?.reason ?? ''),
-          len: contentForPersist.length,
-          pickedFrom:
-            contentForPersist === '……'
-              ? 'fallbackDots'
-              : blocksJoinedCleaned.length > 0 && contentForPersist === blocksJoinedCleaned
-                ? 'rephraseBlocks(clean)'
-                : 'resultObjOrMetaPreferred',
-        },
-      };
+const TRAINING_TIMEOUT_MS = Number(process.env.IROS_TRAINING_TIMEOUT_MS ?? '2500'); // training 側
 
-      // training sample（skip flags）
-      const skipTraining =
-        meta?.skipTraining === true ||
-        (meta as any)?.skip_training === true ||
-        meta?.recallOnly === true ||
-        (meta as any)?.recall_only === true;
+let saved: any = null;
 
-      if (!skipTraining) {
-        const replyText = contentForPersist;
+{
+  const tsPersistAssistant = Date.now();
 
-        await saveIrosTrainingSample({
+  try {
+    // ✅ persist は “最後まで待つ”（外側 withTimeout で切らない）
+    const r = await persistAssistantMessageToIrosMessages({
+      supabase,
+      conversationId,
+      userCode,
+      content: contentForPersist,
+      meta: metaForSave,
+    } as any);
+
+    saved = r; // { ok, inserted, ... }
+  } catch (e) {
+    saved = { ok: false, error: e };
+  } finally {
+    const ms = Date.now() - tsPersistAssistant;
+    console.log('[IROS/persistAssistant] done', {
+      conversationId,
+      userCode,
+      ms,
+      ok: saved?.ok ?? null,
+      inserted: saved?.inserted ?? null,
+      blocked: saved?.blocked ?? null,
+      reason: saved?.reason ?? null,
+    });
+  }
+}
+
+if (!saved || saved.ok !== true) {
+  const err: any = (saved as any)?.error ?? saved ?? null;
+
+  console.error('[IROS/persistAssistantMessageToIrosMessages] insert error', {
+    conversationId,
+    userCode,
+    persistStrict,
+    // withTimeout を外したので、ここは “タイムアウト扱い” にしない（DB側57014は persist 本体のログに出る）
+    timeoutMs: null,
+    isTimeout: false,
+    error: err,
+  });
+
+  meta.extra = {
+    ...(meta.extra ?? {}),
+    persist_failed: true,
+    persist_failed_strict: persistStrict,
+    persist_failed_is_timeout: false,
+    persist_failed_message: String(err?.message ?? '')?.slice(0, 240) || 'persist_failed',
+  };
+
+  // ✅ 重要：/reply を止めない（strict でも “timeout で 500” にしない）
+  // persistStrict の場合でも、ここでは throw しない（返却優先）
+}
+
+const messageId = (saved as any)?.messageId ?? null;
+
+meta.extra = {
+  ...(meta.extra ?? {}),
+  persistedAssistantMessage: {
+    ok: Boolean(saved?.ok),
+    inserted: Boolean(saved?.inserted),
+    blocked: Boolean(saved?.blocked),
+    reason: String(saved?.reason ?? ''),
+    len: contentForPersist.length,
+    pickedFrom:
+      contentForPersist === '……'
+        ? 'fallbackDots'
+        : blocksJoinedCleaned.length > 0 && contentForPersist === blocksJoinedCleaned
+          ? 'rephraseBlocks(clean)'
+          : 'resultObjOrMetaPreferred',
+  },
+};
+// training sample（skip flags）
+const skipTraining =
+  meta?.skipTraining === true ||
+  (meta as any)?.skip_training === true ||
+  meta?.recallOnly === true ||
+  (meta as any)?.recall_only === true;
+
+if (!skipTraining) {
+  const replyText = contentForPersist;
+
+  // ✅ 返却をブロックしない：fire-and-forget（timeout + catch）
+  void (async () => {
+    try {
+      const r = await withTimeout(
+        saveIrosTrainingSample({
           supabase,
           userCode,
           tenantId,
@@ -1357,16 +1472,36 @@ console.info('[IROS/PERSIST_PICK]', {
           replyText,
           meta,
           tags: ['iros', 'auto'],
-        });
-      } else {
-        meta.extra = {
-          ...(meta.extra ?? {}),
-          trainingSkipped: true,
-          trainingSkipReason:
-            meta?.skipTraining === true || (meta as any)?.skip_training === true ? 'skipTraining' : 'recallOnly',
-        };
-      }
+        }),
+        TRAINING_TIMEOUT_MS,
+        'saveIrosTrainingSample',
+      );
 
+      if (!r.ok) {
+        console.error('[IROS][Training] insert error (non-blocking)', {
+          conversationId,
+          userCode,
+          timeoutMs: TRAINING_TIMEOUT_MS,
+          isTimeout: Boolean((r as any).timeout),
+          error: (r as any).error,
+        });
+      }
+    } catch (e) {
+      console.error('[IROS][Training] insert error (non-blocking)', {
+        conversationId,
+        userCode,
+        error: e,
+      });
+    }
+  })();
+} else {
+  meta.extra = {
+    ...(meta.extra ?? {}),
+    trainingSkipped: true,
+    trainingSkipReason:
+      meta?.skipTraining === true || (meta as any)?.skip_training === true ? 'skipTraining' : 'recallOnly',
+  };
+}
       // result 側の衝突キー除去
       const resultObj = { ...(result as any) };
       delete (resultObj as any).mode;

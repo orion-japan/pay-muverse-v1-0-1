@@ -760,74 +760,83 @@ const intentBandForCtx =
     return;
   }
 
-  // ---- 5) call LLM ----
-  const model = process.env.IROS_REPHRASE_MODEL ?? process.env.IROS_MODEL ?? 'gpt-5';
+// ---- 5) call LLM ----
+const model = process.env.IROS_REPHRASE_MODEL ?? process.env.IROS_MODEL ?? 'gpt-5';
 
-  const qCodeForLLM =
-    (typeof (meta as any)?.q_code === 'string' && TRIM((meta as any).q_code)) ||
-    (typeof (meta as any)?.qCode === 'string' && TRIM((meta as any).qCode)) ||
-    (typeof (meta as any)?.qPrimary === 'string' && TRIM((meta as any).qPrimary)) ||
-    (typeof (meta as any)?.unified?.q?.current === 'string' && TRIM((meta as any).unified.q.current)) ||
-    null;
+function TRIM(v: any): string | null {
+  if (typeof v !== 'string') return null;
+  const s = v.trim();
+  return s ? s : null;
+}
 
-  const depthForLLM =
-    (typeof (meta as any)?.depth_stage === 'string' && TRIM((meta as any).depth_stage)) ||
-    (typeof (meta as any)?.depthStage === 'string' && TRIM((meta as any).depthStage)) ||
-    (typeof (meta as any)?.depth === 'string' && TRIM((meta as any).depth)) ||
-    (typeof (meta as any)?.unified?.depth?.stage === 'string' && TRIM((meta as any).unified.depth.stage)) ||
-    null;
+const qCodeForLLM =
+  (typeof (meta as any)?.q_code === 'string' && TRIM((meta as any).q_code)) ||
+  (typeof (meta as any)?.qCode === 'string' && TRIM((meta as any).qCode)) ||
+  (typeof (meta as any)?.qPrimary === 'string' && TRIM((meta as any).qPrimary)) ||
+  (typeof (meta as any)?.unified?.q?.current === 'string' && TRIM((meta as any).unified.q.current)) ||
+  null;
 
-  const inputKindForLLM = String(
-    (meta as any)?.framePlan?.inputKind ?? (meta as any)?.inputKind ?? (userContext as any)?.framePlan?.inputKind ?? '',
-  ).toLowerCase();
+const depthForLLM =
+  (typeof (meta as any)?.depth_stage === 'string' && TRIM((meta as any).depth_stage)) ||
+  (typeof (meta as any)?.depthStage === 'string' && TRIM((meta as any).depthStage)) ||
+  (typeof (meta as any)?.depth === 'string' && TRIM((meta as any).depth)) ||
+  (typeof (meta as any)?.unified?.depth?.stage === 'string' && TRIM((meta as any).unified.depth.stage)) ||
+  null;
 
-  // ctxPack.historyDigestV1 を “最終注入”（hasDigest を true にする）
-  try {
-    if (!userContext.ctxPack || typeof userContext.ctxPack !== 'object') userContext.ctxPack = {};
-    if (userContext.ctxPack.historyDigestV1 == null) {
-      const digestV1 =
-        (meta as any)?.extra?.historyDigestV1 ??
-        (meta as any)?.extra?.ctxPack?.historyDigestV1 ??
-        (extraMerged as any)?.historyDigestV1 ??
-        (extraMerged as any)?.ctxPack?.historyDigestV1 ??
-        buildFlowDigest?.() ??
-        null;
-      if (digestV1) userContext.ctxPack.historyDigestV1 = digestV1;
-    }
-  } catch {}
+const inputKindForLLM = String(
+  (meta as any)?.framePlan?.inputKind ??
+    (meta as any)?.inputKind ??
+    (userContext as any)?.framePlan?.inputKind ??
+    '',
+).toLowerCase();
 
-  console.log('[IROS/_impl/rephrase.ts][USERCTX_KEYS]', {
-    hasTurns: Array.isArray((userContext as any)?.turns),
-    turnsLen: Array.isArray((userContext as any)?.turns) ? (userContext as any).turns.length : 0,
-    hasCtxPack: !!(userContext as any)?.ctxPack,
-    ctxPackKeys: (userContext as any)?.ctxPack ? Object.keys((userContext as any).ctxPack) : [],
+// ctxPack.historyDigestV1 を “最終注入”（hasDigest を true にする）
+try {
+  if (!userContext.ctxPack || typeof userContext.ctxPack !== 'object') userContext.ctxPack = {};
+  if ((userContext.ctxPack as any).historyDigestV1 == null) {
+    const digestV1 =
+      (meta as any)?.extra?.historyDigestV1 ??
+      (meta as any)?.extra?.ctxPack?.historyDigestV1 ??
+      (extraMerged as any)?.historyDigestV1 ??
+      (extraMerged as any)?.ctxPack?.historyDigestV1 ??
+      (typeof buildFlowDigest === 'function' ? buildFlowDigest() : null) ??
+      null;
+
+    if (digestV1) (userContext.ctxPack as any).historyDigestV1 = digestV1;
+  }
+} catch {}
+
+console.log('[IROS/_impl/rephrase.ts][USERCTX_KEYS]', {
+  hasTurns: Array.isArray((userContext as any)?.turns),
+  turnsLen: Array.isArray((userContext as any)?.turns) ? (userContext as any).turns.length : 0,
+  hasCtxPack: !!(userContext as any)?.ctxPack,
+  ctxPackKeys: (userContext as any)?.ctxPack ? Object.keys((userContext as any).ctxPack) : [],
+  conversationId,
+  userCode,
+});
+
+try {
+  const res = await rephraseSlotsFinal(extracted, {
+    model,
     conversationId,
     userCode,
+    traceId,
+    userText,
+    qCode: qCodeForLLM,
+    depthStage: depthForLLM,
+    inputKind: inputKindForLLM,
+    userContext,
+
+    // ✅ NEW: route.ts から来る forceRetry を rephraseEngine へ配線
+    forceRetry: !!((extraMerged as any)?.forceRetry ?? (meta as any)?.extra?.forceRetry),
+  } as any);
+
+  console.log('[IROS/rephraseAttach][RES_KEYS]', {
+    resKeys: Object.keys(res ?? {}),
+    metaKeys: Object.keys((res as any)?.meta ?? {}),
+    outKeys: Object.keys((res as any)?.out ?? {}),
+    metaOutKeys: Object.keys((res as any)?.meta?.out ?? {}),
   });
-
-  try {
-    const res = await rephraseSlotsFinal(extracted, {
-      model,
-      conversationId,
-      userCode,
-      traceId,
-      userText,
-      qCode: qCodeForLLM,
-      depthStage: depthForLLM,
-      inputKind: inputKindForLLM,
-      userContext,
-
-      // ✅ NEW: route.ts から来る forceRetry を rephraseEngine へ配線
-      forceRetry: !!((extraMerged as any)?.forceRetry ?? (meta as any)?.extra?.forceRetry),
-    } as any);
-
-
-    console.log('[IROS/rephraseAttach][RES_KEYS]', {
-      resKeys: Object.keys(res ?? {}),
-      metaKeys: Object.keys((res as any)?.meta ?? {}),
-      outKeys: Object.keys((res as any)?.out ?? {}),
-      metaOutKeys: Object.keys((res as any)?.meta?.out ?? {}),
-    });
 
     // 正本：res.meta.extra（AFTER_ATTACH）側
     const resExtra = (res as any)?.meta?.extra ?? (res as any)?.metaForSave?.extra ?? (res as any)?.extra ?? null;

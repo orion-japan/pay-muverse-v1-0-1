@@ -504,14 +504,21 @@ const microGenerate: MicroWriterGenerate = async (args) => {
 
     const callLLM = async (messages: ChatMessage[], temperature: number) => {
       // ✅ microでも “注入されたか” をログで監査できるようにする
+      const traceId0 = (args as any).traceId ?? null;
+      const conversationId0 = (args as any).conversationId ?? null;
+      const userCode0 = (args as any).userCode ?? null;
+
       console.log('[IROS/LLM][CALL_MICRO]', {
         writer: 'micro',
+        traceId: traceId0,
+        conversationId: conversationId0,
+        userCode: userCode0,
+
         hasDigest,
         hasAnchor,
         digestChars,
         msgCount: messages.length,
       });
-
 
       const out = await chatComplete({
         purpose: 'writer',
@@ -519,9 +526,9 @@ const microGenerate: MicroWriterGenerate = async (args) => {
         messages,
         temperature,
         max_tokens: typeof (args as any).maxTokens === 'number' ? (args as any).maxTokens : 420,
-        traceId: (args as any).traceId ?? null,
-        conversationId: (args as any).conversationId ?? null,
-        userCode: (args as any).userCode ?? null,
+        traceId: traceId0,
+        conversationId: conversationId0,
+        userCode: userCode0,
       });
       return String(out ?? '').trim();
     };
@@ -935,11 +942,9 @@ if (gatedGreeting?.ok) {
 }
 // ok=false / gate不成立はそのまま下へ
 
-// ✅ Micro は最優先（ただし context recall 系は bypass 可）
 const isMicroNow = isMicroTurn(text);
 
 // micro bypass は helper に一本化（履歴相づち / 想起系）
-// ※ isMicroNow だからといって false で潰さない（別ルート化の前提）
 const bypassMicroRaw =
   shouldBypassMicroGate(String(text ?? '')) ||
   shouldBypassMicroGateByHistory({
@@ -947,8 +952,17 @@ const bypassMicroRaw =
     history: Array.isArray(history) ? (history as any[]) : null,
   });
 
-const bypassMicro = bypassMicroRaw;
+// ✅ microOnlyの契約：相づち短文（はい/よし等）で bypass しない
+// - ここで bypass すると通常ルートに落ちて rephrase/LLM が走り、重くなる & 質問が付く
+const s0 = String(text ?? '').trim();
+const isAckLike =
+  s0.length > 0 &&
+  s0.length <= 4 && // 「はい」「よし」「OK」などを想定
+  /^(はい|うん|うむ|よし|了解|りょ|OK|ok|O K|👍|👌|🙆|🙆‍♂️|🙆‍♀️)$/u.test(s0);
 
+const bypassMicro = isMicroNow && isAckLike ? false : bypassMicroRaw;
+
+// ✅ Micro（独立ルート）
 // ✅ Micro（独立ルート）
 if (!bypassMicro && isMicroNow) {
   // ====== まず “そのターンの座標” を作る（Digest生成のため） ======
@@ -962,6 +976,87 @@ if (!bypassMicro && isMicroNow) {
     baseLimit: 30,
   });
 
+  // ✅ microでも「前回snap」を履歴から拾って extra に注入する
+  // - Orchestrator/PostProcess を通らないため、ここでやらないと prevSnap が “無い扱い” になる
+  const prevSnapFromHistory = (() => {
+    try {
+      const hs = Array.isArray(historyForTurn) ? (historyForTurn as any[]) : [];
+      for (let i = hs.length - 1; i >= 0; i--) {
+        const h = hs[i];
+        const meta = h?.meta && typeof h.meta === 'object' ? h.meta : null;
+        const extra = meta?.extra && typeof meta.extra === 'object' ? meta.extra : null;
+        if (!extra) continue;
+
+        // 候補キーを広めに拾う（どれか1つでも入っていれば採用）
+        // 候補キーを広めに拾う（どれか1つでも入っていれば採用）
+        // ✅ buildHistoryForTurn 側の検知ロジック（ctxPack 経由）と揃える
+        const snap =
+          (extra as any)?.ctxPack?.viewShiftSnapshot ??
+          (meta as any)?.ctxPack?.viewShiftSnapshot ??
+          (extra as any).viewShiftSnapshot ??
+          (extra as any).viewShiftSnap ??
+          (extra as any).snap ??
+          (meta as any).viewShiftSnapshot ??
+          (meta as any)?.viewShift?.snapshot ??
+          (extra as any)?.viewShift?.snapshot ??
+          null;
+
+        if (snap) {
+          return {
+            snap,
+            from: {
+              id: h?.id ?? null,
+              role: h?.role ?? null,
+              created_at: h?.created_at ?? null,
+              idx: i,
+            },
+          };
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  })();
+
+  if (prevSnapFromHistory) {
+    const prev = extraLocal && typeof extraLocal === 'object' ? extraLocal : {};
+
+    // 互換: 旧 viewShift があれば引き継ぐ（任意）
+    const vsLegacy =
+      (prev as any).viewShift && typeof (prev as any).viewShift === 'object'
+        ? (prev as any).viewShift
+        : {};
+
+    // ✅ 正本: viewShiftPrev（prevSnap の注入専用）
+    const vsPrev = {
+      prevSnap: prevSnapFromHistory.snap,
+      prevSnapFrom: prevSnapFromHistory.from,
+    };
+
+    extraLocal = {
+      ...prev,
+
+      // ✅ 正本（今後はこちらを見る）
+      viewShiftPrev: vsPrev,
+
+      // ✅ 互換（既存の参照が残ってても壊さない）
+      viewShift: {
+        ...vsLegacy,
+        ...vsPrev,
+      },
+    };
+
+    console.log('[IROS/VIEWSHIFT][micro][inject-prevSnap]', {
+      hasPrev: true,
+      from: prevSnapFromHistory.from,
+    });
+  } else {
+    console.log('[IROS/VIEWSHIFT][micro][inject-prevSnap]', {
+      hasPrev: false,
+    });
+  }
+
   const tc0 = nowNs();
   const ctx0 = await (buildTurnContext as any)({
     supabase,
@@ -973,7 +1068,7 @@ if (!bypassMicro && isMicroNow) {
     userProfile,
     requestedStyle: style ?? null,
     history: historyForTurn,
-    extra: extraLocal ?? null,
+    extra: extraLocal ?? null, // ✅ prevSnap を載せた extraLocal を渡す
   });
   t.context_ms = msSince(tc0);
 
@@ -1054,97 +1149,237 @@ if (!bypassMicro && isMicroNow) {
     } as any,
   );
 
-  // ✅ micro 成功 → このブロック内で完結して return（t / metaForSave を漏らさない）
-  if (mw.ok) {
-    // 上で作ったものを再利用
-    const ctx = ctx0;
+// ✅ micro 成功 → このブロック内で完結して return（t / metaForSave を漏らさない）
+if (mw.ok) {
+  // 上で作ったものを再利用
+  const ctx = ctx0;
 
-    const tc = nowNs(); // 計測だけ維持（差し替え最小化）
-    // ctx は既に作成済みなので再生成しない
-    t.context_ms += msSince(tc); // 0〜数ms程度、形だけ残す
+  const tc = nowNs(); // 計測だけ維持（差し替え最小化）
+  t.context_ms += msSince(tc); // 0〜数ms程度、形だけ残す
 
-    let metaForSave: any = {
-      ...(ctx?.baseMetaForTurn ?? {}),
-      style: ctx?.effectiveStyle ?? style ?? (userProfile as any)?.style ?? 'friendly',
-      mode: 'light',
-      microOnly: true,
+  // ✅ meta は「座標は固定」しつつ、persist が重くならないよう extra を最小化する
+  let metaForSaveMicro: any = {
+    ...(ctx?.baseMetaForTurn ?? {}),
+    style: ctx?.effectiveStyle ?? style ?? (userProfile as any)?.style ?? 'friendly',
+    mode: 'light',
+    microOnly: true,
 
-      // micro は独立。memory / training を触らない（静止）
-      skipMemory: true,
-      skipTraining: true,
+    // micro は独立。memory / training を触らない（静止）
+    skipMemory: true,
+    skipTraining: true,
 
-      nextStep: null,
-      next_step: null,
-      timing: t,
-    };
+    nextStep: null,
+    next_step: null,
+    timing: t,
+  };
 
-    metaForSave = stampSingleWriter(mergeExtra(metaForSave, extraLocal ?? null));
+  // ✅ micro 成功でも single-writer の印を必ず付ける（通常/ fallback と同じ土俵に揃える）
+  metaForSaveMicro = stampSingleWriter(mergeExtra(metaForSaveMicro, extraLocal ?? null));
 
-    // SUN 固定保護（念のため）
-    try {
-      metaForSave = sanitizeIntentAnchorMeta(metaForSave);
-    } catch {}
+  // ✅ microOnly: renderGW / persist を重くする “長文元” を必ず掃除
+  {
+    const ex =
+      metaForSaveMicro?.extra && typeof metaForSaveMicro.extra === 'object'
+        ? metaForSaveMicro.extra
+        : (metaForSaveMicro.extra = {});
 
-    // persist（最低限：assistant保存はしない）
-    const ts = nowNs();
+    // renderGateway が拾う“長文の元”を消す
+    delete (ex as any).rephraseBlocks;
+    delete (ex as any).rephrase_blocks;
+    delete (ex as any).blockPlan;
+    delete (ex as any).block_plan;
+    delete (ex as any).slots;
+    delete (ex as any).slotPlanPolicy;
+    delete (ex as any).slot_plan_policy;
 
-    const t1 = nowNs();
-    await persistQCodeSnapshotIfAny({
-      userCode,
-      conversationId,
-      requestedMode: ctx?.requestedMode ?? mode,
-      metaForSave,
-    });
-    t.persist_ms.q_snapshot_ms = msSince(t1);
+    // ✅ ここが重いと 60s/statement timeout の誘因になるので切る（座標は root 側に残る）
+    delete (ex as any).ctxPack;
+    delete (ex as any).historyForWriter;
+    delete (ex as any).historyDigestV1;
+    delete (ex as any).turns;
+    delete (ex as any).flow;
+    delete (ex as any).viewShift;
+    delete (ex as any).viewShiftPrev;
+    delete (ex as any).viewShiftSnapshot;
+    delete (ex as any).topicDigest;
+    delete (ex as any).flowDigest;
 
-    t.persist_ms.total_ms = msSince(ts);
-    t.gate_ms = msSince(tg);
-    t.finished_at = nowIso();
-    t.total_ms = msSince(t0);
-
-    // ✅ micro 成功でも slots を必ず返す（downstream が NO_SLOTS で落ちない）
-    const slots = [
-      {
-        key: 'OBS',
-        role: 'assistant',
-        style: 'soft',
-        content: String(text ?? '').trim() || '（短文）',
-      },
-      {
-        key: 'TASK',
-        role: 'assistant',
-        style: 'soft',
-        content: 'micro_reply_only',
-      },
-      {
-        key: 'CONSTRAINTS',
-        role: 'assistant',
-        style: 'soft',
-        content: 'micro:1-2lines;no_menu;no_analysis;emoji:🪔(<=1)',
-      },
-      {
-        key: 'DRAFT',
-        role: 'assistant',
-        style: 'soft',
-        content: mw.text,
-      },
-    ];
-
-    return {
-      ok: true,
-      result: { gate: 'micro_writer' },
-      assistantText: mw.text,
-      metaForSave,
-      finalMode: 'light',
-      slots,
-      meta: metaForSave,
-    };
+    // これが “正” だと明示（診断用）— 最後に勝たせる
+    (ex as any).finalAssistantText = mw.text;
+    (ex as any).finalTextPolicy = 'MICRO';
+    (ex as any).finalTextPolicyPickedFrom = 'micro';
   }
+  // SUN 固定保護（念のため）
+  try {
+    metaForSaveMicro = sanitizeIntentAnchorMeta(metaForSaveMicro);
+  } catch {}
 
-  console.warn('[IROS/MicroWriter] failed -> fallback to normal', {
-    reason: mw.reason,
-    detail: mw.detail,
+  // ✅ micro 成功でも slots を必ず返す（downstream が NO_SLOTS で落ちない）
+  const microSlots = [
+    {
+      key: 'OBS',
+      role: 'assistant',
+      style: 'soft',
+      content: mw.text,
+    },
+  ];
+
+  // ✅ このターン内で “確定” して返す（以降の通常ルートへ落とさない）
+  const microResult = {
+    ok: true as const,
+    result: { gate: 'micro_writer' as const },
+
+    // ✅ UIの正本（route.ts の persist が最優先で見る）
+    content: mw.text,
+    text: mw.text,
+    assistantText: mw.text,
+
+    metaForSave: metaForSaveMicro,
+    finalMode: 'light' as const,
+    slots: microSlots,
+    meta: metaForSaveMicro,
+  };
+
+  return microResult;
+}
+
+  // ✅ micro 失敗でも「このターンは micro で完結」させる（Hard Return fallback）
+  // - 通常ルートに落とすと rephraseEngine / LLM Gate が走り、micro出力の混入事故が起きる
+  const fallbackText = buildForwardFallbackText(
+    String((ctx0 as any)?.seedText ?? ''),
+    String(microUserText ?? ''),
+  );
+
+  // mw は union 型なので、reason/detail は安全に読む
+  const mwReason = (mw as any)?.reason ?? null;
+  const mwDetail = (mw as any)?.detail ?? null;
+
+  console.warn('[IROS/MicroWriter] failed -> hard return fallback', {
+    reason: mwReason,
+    detail: mwDetail,
   });
+
+  // ctx は既に作成済み
+  let metaForSaveMicroFallback: any = {
+    ...(ctx0?.baseMetaForTurn ?? {}),
+    style: ctx0?.effectiveStyle ?? style ?? (userProfile as any)?.style ?? 'friendly',
+    mode: 'light',
+    microOnly: true,
+    microFallback: true,
+
+    // micro は独立。memory / training を触らない（静止）
+    skipMemory: true,
+    skipTraining: true,
+
+    nextStep: null,
+    next_step: null,
+    timing: t,
+  };
+
+// src/lib/iros/server/handleIrosReply.ts
+// 範囲: 1279〜1322 を丸ごと置き換え
+// 目的:
+// - micro fallback で「軽量化した meta を直後に重く戻す」二重 merge を撤去
+// - mergeExtra は1回だけにして、その後に必ず軽量化を適用した状態で確定させる（statement timeout 回避）
+
+metaForSaveMicroFallback = stampSingleWriter(
+  mergeExtra(metaForSaveMicroFallback, extraLocal ?? null),
+);
+
+// ✅ micro fallback も persist が重くならないよう extra を最小化する
+{
+  const ex =
+    metaForSaveMicroFallback?.extra && typeof metaForSaveMicroFallback.extra === 'object'
+      ? metaForSaveMicroFallback.extra
+      : (metaForSaveMicroFallback.extra = {});
+
+  // renderGateway / persist が拾う“長文の元”を消す
+  delete (ex as any).rephraseBlocks;
+  delete (ex as any).rephrase_blocks;
+  delete (ex as any).blockPlan;
+  delete (ex as any).block_plan;
+  delete (ex as any).slots;
+  delete (ex as any).slotPlanPolicy;
+  delete (ex as any).slot_plan_policy;
+
+  // ctxPack 系（特に重い）
+  delete (ex as any).ctxPack;
+  delete (ex as any).historyForWriter;
+  delete (ex as any).historyDigestV1;
+  delete (ex as any).turns;
+  delete (ex as any).flow;
+  delete (ex as any).viewShift;
+  delete (ex as any).viewShiftPrev;
+  delete (ex as any).viewShiftSnapshot;
+  delete (ex as any).topicDigest;
+  delete (ex as any).flowDigest;
+
+  // ✅ “正” を明示（診断用）
+  (ex as any).finalAssistantText = fallbackText;
+  (ex as any).finalTextPolicy = 'MICRO_FALLBACK';
+  (ex as any).finalTextPolicyPickedFrom = 'micro_fallback';
+}
+
+// ✅ ここで「二重 mergeExtra」をしない（軽量化を確定させる）
+// metaForSaveMicroFallback = stampSingleWriter(mergeExtra(...)) ← これが重さを戻す原因だったので撤去
+  // SUN 固定保護（念のため）
+  try {
+    metaForSaveMicroFallback = sanitizeIntentAnchorMeta(metaForSaveMicroFallback);
+  } catch {}
+
+  const tsPersist2 = nowNs();
+
+  const tQsnap2 = nowNs();
+  await persistQCodeSnapshotIfAny({
+    userCode,
+    conversationId,
+    requestedMode: ctx0?.requestedMode ?? mode,
+    metaForSave: metaForSaveMicroFallback,
+  });
+  t.persist_ms.q_snapshot_ms = msSince(tQsnap2);
+
+  t.persist_ms.total_ms = msSince(tsPersist2);
+  t.gate_ms = msSince(tg);
+  t.finished_at = nowIso();
+  t.total_ms = msSince(t0);
+
+  const microFallbackSlots = [
+    {
+      key: 'OBS',
+      role: 'assistant',
+      style: 'soft',
+      content: String(text ?? '').trim() || '（短文）',
+    },
+    {
+      key: 'TASK',
+      role: 'assistant',
+      style: 'soft',
+      content: 'micro_reply_fallback',
+    },
+    {
+      key: 'CONSTRAINTS',
+      role: 'assistant',
+      style: 'soft',
+      content: 'micro:fallback;no_menu;no_analysis;emoji:🪔(<=1)',
+    },
+    {
+      key: 'DRAFT',
+      role: 'assistant',
+      style: 'soft',
+      content: fallbackText,
+    },
+  ];
+
+  return {
+    ok: true,
+    result: { gate: 'micro_writer_fallback', reason: mwReason, detail: mwDetail },
+    assistantText: fallbackText,
+    metaForSave: metaForSaveMicroFallback,
+    finalMode: 'light',
+    slots: microFallbackSlots,
+    meta: metaForSaveMicroFallback,
+  };
+
 } else if (bypassMicro) {
   console.log('[IROS/Gate] bypass micro gate (context recall)', {
     conversationId,
@@ -1470,7 +1705,61 @@ function normForRecall(v: any): string {
       requestedDepth_out: requestedDepthFinal ?? null,
       gateApplied,
     });
+    // ---------------------------------------------------------
+    // ✅ ViewShift: 前回スナップを baseMetaMergedForTurn に注入
+    // - orchestrator.ts は baseMeta/history から prevSnap を拾う
+    // - historyForTurn に meta が載っている環境でも確実に拾えるように、入口で集約する
+    // ---------------------------------------------------------
+    try {
+      const pickSnapFromMsg = (m: any) =>
+        m?.meta?.extra?.ctxPack?.viewShiftSnapshot ??
+        m?.meta?.ctxPack?.viewShiftSnapshot ??
+        m?.meta?.extra?.viewShiftSnapshot ??
+        m?.meta?.viewShiftSnapshot ??
+        null;
 
+      let snap: any =
+        (baseMetaMergedForTurn as any)?.extra?.ctxPack?.viewShiftSnapshot ??
+        (baseMetaMergedForTurn as any)?.ctxPack?.viewShiftSnapshot ??
+        (baseMetaMergedForTurn as any)?.extra?.viewShiftSnapshot ??
+        (baseMetaMergedForTurn as any)?.viewShiftSnapshot ??
+        null;
+
+      if (!snap && Array.isArray(historyForTurn)) {
+        for (let i = historyForTurn.length - 1; i >= 0; i--) {
+          const found = pickSnapFromMsg(historyForTurn[i]);
+          if (found && typeof found === 'object') {
+            snap = found;
+            break;
+          }
+        }
+      }
+
+      if (snap && typeof snap === 'object') {
+        (baseMetaMergedForTurn as any).extra =
+          (baseMetaMergedForTurn as any).extra &&
+          typeof (baseMetaMergedForTurn as any).extra === 'object'
+            ? (baseMetaMergedForTurn as any).extra
+            : {};
+
+        (baseMetaMergedForTurn as any).extra.ctxPack =
+          (baseMetaMergedForTurn as any).extra.ctxPack &&
+          typeof (baseMetaMergedForTurn as any).extra.ctxPack === 'object'
+            ? (baseMetaMergedForTurn as any).extra.ctxPack
+            : {};
+
+        (baseMetaMergedForTurn as any).extra.ctxPack.viewShiftSnapshot = snap;
+      }
+
+      console.log('[IROS/VIEWSHIFT][pre-orch][inject]', {
+        hasSnap: Boolean(snap),
+        snapKeys: snap && typeof snap === 'object' ? Object.keys(snap).slice(0, 20) : null,
+      });
+    } catch (e) {
+      console.log('[IROS/VIEWSHIFT][pre-orch][inject][ERR]', { err: String(e ?? '') });
+    }
+
+    // ✅ Orchestrator（V2: 判断のみ。本文生成はしない）
     // ✅ Orchestrator（V2: 判断のみ。本文生成はしない）
     const to = nowNs();
     const orch = await (runOrchestratorTurn as any)({
