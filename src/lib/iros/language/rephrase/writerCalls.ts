@@ -2,6 +2,9 @@
 // file: src/lib/iros/language/rephrase/writerCalls.ts
 // ✅ buildFirstPassMessages を「最後 user で終わる」ように拡張
 // ✅ HistoryDigest v1 をここで注入できるようにする（唯一の choke point）
+//
+// 🚫 重要: userText（ユーザー発話の生文）は LLM に絶対に渡さない
+// - finalUserText / userText など “生文が混入し得る入口” は、この層で強制遮断する
 // =============================================
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -31,104 +34,80 @@ function turnsToMessages(turns?: TurnMsg[] | null): WriterMessage[] {
 }
 
 /**
- * ✅ 1st pass: system + (internalPack as user) + turns + (finalUserText as user)
- * - internalPack は常に user（system にしない）
- * - internalPack を最後に置かない（user,user 連投や会話崩れを防ぐ）
- * - ✅ 最後は必ず user で終わらせる（ChatCompletions の基本形を保証）
+ * ✅ 1st pass: system + (internalPack as user) + turns
+ *
+ * 🚫 userText 禁止:
+ * - finalUserText は “userText or seedDraft” の混入経路になり得るため、ここでは一切採用しない
+ * - 「最後は user で終わる」要件は、internalPack / turns の整形で満たす（必要なら turns 側に入る）
  */
 export function buildFirstPassMessages(args: {
   systemPrompt: string;
   internalPack: string;
   turns?: TurnMsg[] | null;
 
-  // ✅ 追加：最後に user として置く本文（通常は userText or seedDraft）
+  // ✅ “最後の user” を保証するための安全seed（userText生文ではない）
+  seedDraft?: string | null;
+
+  // 互換のため残すが、この層では絶対に採用しない（LLMへ流さない）
   finalUserText?: string | null;
 }): WriterMessage[] {
-  const systemPrompt = String(args.systemPrompt ?? '');
+  const systemPrompt = String(args.systemPrompt ?? '').trim();
   const internalPack = norm(args.internalPack ?? '');
-  let turns = turnsToMessages(args.turns);
-  const finalUserText = norm(args.finalUserText ?? '');
+  const seedDraft = norm(args.seedDraft ?? '');
 
-  const out: WriterMessage[] = [{ role: 'system', content: systemPrompt }];
+  const turns = turnsToMessages(args.turns);
 
-  // ✅ internalPack は system の直後に置きたいが、
-  // turns が user で始まると user,user が起きるため “合体” する
-  if (internalPack) {
-    const first = turns[0];
-    if (first?.role === 'user') {
-      const merged = [internalPack, norm(first.content)].filter((x) => x.trim().length > 0).join('\n\n');
-      turns = [{ role: 'user', content: merged }, ...turns.slice(1)];
-    } else {
-      out.push({ role: 'user', content: internalPack });
-    }
-  }
+  // ✅ internalPack は “system に畳む” （user にしない）
+  const systemOne = [systemPrompt, internalPack].filter((x) => x.trim().length > 0).join('\n\n');
 
-  // 直近ターン（会話の流れ）
-  // - ✅ user,user / assistant,assistant の連続を作らない（品質低下と同文返しの要因）
+  const out: WriterMessage[] = [{ role: 'system', content: systemOne }];
+
+  // ✅ 直近ターン（会話の流れ）を追加（role連続はマージ）
   for (const m of turns) {
     const last = out[out.length - 1];
     if (last && last.role === m.role) {
-      // “後勝ちで圧縮” ではなく、文脈を落とさないためにマージ
       last.content = `${last.content}\n\n${m.content}`.trim();
     } else {
       out.push(m);
     }
   }
 
-
-  // ✅ 最後を user で終わらせる（ただし user,user 連投は絶対に作らない）
-  // - 末尾が user の場合は “追記マージ” or “置換” を状況で切り替える
-  if (finalUserText) {
+  // ✅ 最後を user で終わらせたいなら “seedDraft” を末尾に置く
+  // - userText 生文は入れない（禁止ルール保持）
+  if (seedDraft) {
     const last = out[out.length - 1];
-
-    if (last?.role === 'user') {
-      const lastNorm = norm(last?.content);
-
-      // ✅ すでに同一なら何もしない
-      if (lastNorm === finalUserText) {
-        // noop
-      } else if (
-        // ✅ finalUserText が末尾 userText を内包しているなら「置換」して重複を防ぐ
-        // 例: lastNorm = "今日は...24"
-        //     finalUserText = "今日は...24\n流れを保ったまま前に進める"
-        finalUserText.includes(lastNorm)
-      ) {
-        (out[out.length - 1] as WriterMessage).content = finalUserText;
-      } else {
-        // 従来通り：文脈を落とさないために追記
-        if (!lastNorm.includes(finalUserText)) {
-          (out[out.length - 1] as WriterMessage).content =
-            `${lastNorm}\n\n${finalUserText}`.trim();
-        }
-      }
+    if (last && last.role === 'user') {
+      last.content = `${last.content}\n\n${seedDraft}`.trim();
     } else {
-      out.push({ role: 'user', content: finalUserText });
+      out.push({ role: 'user', content: seedDraft });
     }
   }
+
   return out;
 }
 
 /**
- * ✅ retry/repair: system + turns + (internalPack as user) + repair-instruction + userText
- * - internalPack を system にしない（system 増殖を止める）
- * - “編集タスク” は user で渡す
- */
-/**
  * ✅ retry/repair: system + turns + (single user message)
- * - user の連投を避ける（品質低下・同文返しの要因）
- * - internalPack / 編集対象 / userText を 1つの user メッセージに統合
+ *
+ * 🚫 userText 禁止:
+ * - userText は「具体語の強制」になり、テンプレ固定やリークの原因になるためここでは絶対に渡さない
+ * - internalPack / 編集対象（baseDraft）のみで repair を行う
  */
 export function buildRetryMessages(args: {
   systemPrompt: string;
   internalPack: string;
   turns?: TurnMsg[] | null;
   baseDraftForRepair: string;
+
+  // 互換のため残すが、この層では絶対に採用しない（LLMへ流さない）
   userText: string;
 }): WriterMessage[] {
   const systemPrompt = String(args.systemPrompt ?? '');
   const internalPack = norm(args.internalPack ?? '');
   const baseDraft = norm(args.baseDraftForRepair) || '(empty)';
-  const userText = norm(args.userText) || '（空）';
+
+  // 🚫 強制遮断
+  // const userText = norm(args.userText) || '（空）';
 
   const mergedUser = [
     internalPack ? `【internal】\n${internalPack}` : '',
@@ -142,29 +121,28 @@ export function buildRetryMessages(args: {
       '- 出力は「整えた完成文のみ」。BEGIN/END や見出し、内部情報は出さない。',
       '- 下書きの構造を保持する（削り過ぎない）。',
       '',
-      '【ユーザー入力（文脈）】',
-      userText,
+      // 🚫 ユーザー入力（文脈）は入れない
+      // '【ユーザー入力（文脈）】',
+      // userText,
     ].join('\n'),
   ]
     .filter((x) => String(x).trim().length > 0)
     .join('\n\n');
 
-    const base: WriterMessage[] = [
-      { role: 'system', content: systemPrompt },
-      ...turnsToMessages(args.turns),
-    ];
+  const base: WriterMessage[] = [
+    { role: 'system', content: systemPrompt },
+    ...turnsToMessages(args.turns),
+  ];
 
-    // ✅ 末尾が user なら「追い user」を作らず、最後の user に結合する
-    const last = base[base.length - 1];
-    if (last && last.role === 'user') {
-      last.content = `${String(last.content ?? '').trim()}\n\n${mergedUser}`.trim();
-      return base;
-    }
+  // ✅ 末尾が user なら「追い user」を作らず、最後の user に結合する
+  const last = base[base.length - 1];
+  if (last && last.role === 'user') {
+    last.content = `${String(last.content ?? '').trim()}\n\n${mergedUser}`.trim();
+    return base;
+  }
 
-    return [...base, { role: 'user', content: mergedUser }];
-
+  return [...base, { role: 'user', content: mergedUser }];
 }
-
 
 export async function callWriterLLM(args: {
   model: string;
@@ -216,22 +194,16 @@ export async function callWriterLLM(args: {
     traceId: args.traceId ?? null,
     conversationId: args.conversationId ?? null,
     userCode: args.userCode ?? null,
+
+    // ✅ audit は top-level に置く（ChatArgs 準拠）
+    audit: args.audit ?? null,
+
     trace: {
       traceId: args.traceId ?? null,
       conversationId: args.conversationId ?? null,
       userCode: args.userCode ?? null,
     },
-    audit: {
-      ...(args.audit ?? {}),
-      historyDigestV1: digest ? { injected: true, chars: injected?.digestChars ?? null } : { injected: false },
-      systemCollapsed: true,
-      systemHeadCountBefore:
-        Array.isArray((injected?.messages ?? args.messages))
-          ? (injected?.messages ?? args.messages).filter((m: any, idx: number) => idx < 12 && m?.role === 'system').length
-          : null,
-      systemHeadCountAfter: messagesFinal.slice(0, 12).filter((m) => m?.role === 'system').length,
-    },
-  } as any);
+  });
 
-  return String(out ?? '');
+  return String(out ?? '').trim();
 }

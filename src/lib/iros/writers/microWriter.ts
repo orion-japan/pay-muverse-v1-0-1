@@ -12,10 +12,13 @@ export type MicroWriterGenerate = (args: {
   conversationId?: string | null;
   userCode?: string | null;
 
+  // ✅ Policy: allowLLM（microGenerate 側の SKIP_POLICY に渡す）
+  // - “存在する boolean だけ” を尊重するため、null/undefined を許可
+  allowLLM_final?: boolean | null;
+
   // ✅ HistoryDigest v1（任意：渡ってきたら microGenerate 側で注入する）
   historyDigestV1?: unknown;
 }) => Promise<string>;
-
 
 export type MicroWriterInput = {
   /** 呼び名（UI表示名） */
@@ -30,10 +33,12 @@ export type MicroWriterInput = {
   conversationId?: string | null;
   userCode?: string | null;
 
+  // ✅ Policy: allowLLM（上流で確定した boolean をそのまま流す）
+  allowLLM_final?: boolean | null;
+
   // ✅ HistoryDigest v1（任意：microGenerate に引き継ぐ）
   historyDigestV1?: unknown;
 };
-
 
 export type MicroWriterOutput =
   | { ok: true; text: string } // 1〜2行の短い返し
@@ -180,9 +185,7 @@ function coerceToTwoLines(raw: string): string | null {
   const first2 = lines.slice(0, 2);
 
   // “メニュー/選択肢”っぽい行頭を弾く
-  const looksLikeMenu = first2.some((l) =>
-    /^(①|②|③|A[\s　]|B[\s　]|C[\s　]|・|-|\*|\d+\.)/.test(l),
-  );
+  const looksLikeMenu = first2.some((l) => /^(①|②|③|A[\s　]|B[\s　]|C[\s　]|・|-|\*|\d+\.)/.test(l));
   if (looksLikeMenu) return null;
 
   const joined = first2.join('\n');
@@ -205,22 +208,25 @@ export async function runMicroWriter(
   const conversationId = input?.conversationId ?? null;
   const userCode = input?.userCode ?? null;
 
-// ✅ ここが最重要：内部指示（例：@NEXT_HINT / @I_LINE など）が userText に混入しても、Micro Writer の入力は“生文”のみになるように除去する。
+  // ✅ allowLLM_final を “そのまま” 流す（存在する boolean だけが意味を持つ）
+  const allowLLM_final =
+    typeof (input as any)?.allowLLM_final === 'boolean' ? ((input as any).allowLLM_final as boolean) : null;
+
+  // ✅ ここが最重要：内部指示（例：@NEXT_HINT / @I_LINE など）が userText に混入しても、Micro Writer の入力は“生文”のみになるように除去する。
   const userText = extractUserUtterance(input?.userText ?? '');
 
   if (!userText) {
     return { ok: false, reason: 'empty_input' };
   }
 
-// ざっくり分類：疲労系は「ブレを減らす」ために温度を下げる（文体の“整える”を別ロジックで強制しているわけではない）
-const core = userText.replace(/[?？]/g, '').replace(/\s+/g, '').trim();
-const isTiredMicro = /^(疲れた|休みたい|しんどい|つらい|無理|眠い)$/.test(core);
+  // ざっくり分類：疲労系は「ブレを減らす」ために温度を下げる（文体の“整える”を別ロジックで強制しているわけではない）
+  const core = userText.replace(/[?？]/g, '').replace(/\s+/g, '').trim();
+  const isTiredMicro = /^(疲れた|休みたい|しんどい|つらい|無理|眠い)$/.test(core);
 
-// ✅ ACK系だけ「最後に1問」を許す（それ以外は質問0固定）
-const allowOneQuestion =
-  /^(うん|うんうん|はい|そう|なるほど|ok|おけ|了解)$/.test(core.toLowerCase());
+  // ✅ ACK系だけ「最後に1問」を許す（それ以外は質問0固定）
+  const allowOneQuestion = /^(うん|うんうん|はい|そう|なるほど|ok|おけ|了解)$/.test(core.toLowerCase());
 
-const systemPrompt: string = `
+  const systemPrompt: string = `
 あなたは iros の「Micro Writer」。
 // NOTE: micro の「前に進む」は“軽い促し”までを含む。質問は原則0、入れても最大1つ（最後に短く）という制約で事故を防ぐ。
 目的：短い入力に対して、“会話が前に進む短文”を1〜2行で返す。（問いは原則0。許す場合も最大1つで最後に短く）
@@ -247,7 +253,7 @@ const systemPrompt: string = `
 - seed=${seed} は言い回しの軽い揺らぎに使う（毎回同じ言い方に固定しない）
 `.trim();
 
-const prompt: string = `
+  const prompt: string = `
 入力: ${userText}
 呼び名: ${name || 'user'}
 疲労系: ${isTiredMicro ? 'yes' : 'no'}
@@ -268,10 +274,12 @@ const prompt: string = `
       conversationId,
       userCode,
 
+      // ✅ allowLLM（microGenerate 側で SKIP_POLICY を効かせる）
+      allowLLM_final,
+
       // ✅ HistoryDigest v1（任意：microGenerate 側で注入する）
       historyDigestV1: (input as any).historyDigestV1 ?? null,
     });
-
   } catch (e: any) {
     return { ok: false, reason: 'generation_failed', detail: String(e?.message ?? e) };
   }

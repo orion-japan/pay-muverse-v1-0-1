@@ -1,5 +1,5 @@
 // src/components/SofiaChat/useMuSend.ts
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 
 export type AgentResponse = {
   reply: string;
@@ -11,41 +11,67 @@ export type AgentResponse = {
   meta?: any;
   warning?: 'LOW_BALANCE' | 'NO_BALANCE' | null;
   error_message?: string;
-  // 互換: master_id が返る場合もある
   master_id?: string;
 };
 
-// 1) 一度作ったIDを永続化
-function getOrCreateConvId(seed?: string) {
-  const k = 'mu.convId';
+/**
+ * mode別にCIDを永続化
+ */
+function getStorageKey(mode: 'mu' | 'iros') {
+  return mode === 'iros' ? 'iros.convId' : 'mu.convId';
+}
+
+function getOrCreateConvId(mode: 'mu' | 'iros', seed?: string) {
+  const k = getStorageKey(mode);
   let v = seed || localStorage.getItem(k) || '';
+
   if (!v) {
-    v = `MU-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    v = `${mode.toUpperCase()}-${Date.now().toString(36)}-${Math.random()
+      .toString(36)
+      .slice(2, 7)}`;
     localStorage.setItem(k, v);
   }
+
   return v;
 }
 
 export function useMuSend(initialCid?: string) {
-  // 2) 初期化時に localStorage を見る
   const initRef = useRef(false);
   const [conversationId, setCid] = useState<string | undefined>(initialCid);
   const [sending, setSending] = useState(false);
 
+  /**
+   * 初期マウント時に localStorage を読む（mu用）
+   * ※ Composer側でmodeを切り替えるため、
+   *   ここではmuの既存会話だけ復元（irosは送信時に確定）
+   */
+  useEffect(() => {
+    if (initRef.current) return;
+    initRef.current = true;
+
+    if (!initialCid) {
+      const saved = localStorage.getItem('mu.convId');
+      if (saved) setCid(saved);
+    }
+  }, [initialCid]);
+
   const send = useCallback(
     async (text: string, mode: 'mu' | 'iros' = 'mu'): Promise<AgentResponse> => {
       setSending(true);
+
       try {
-        // 3) 送信前にIDを必ず確定（初回のみ生成→永続化）
-        const cid = getOrCreateConvId(conversationId);
-        if (!conversationId) setCid(cid);
+        // mode別にCIDを確定
+        const cid = getOrCreateConvId(mode, conversationId);
+
+        if (!conversationId || conversationId !== cid) {
+          setCid(cid);
+        }
 
         const res = await fetch('/api/agent/muai', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             message: text,
-            // 4) 互換のため両方送る
             master_id: cid,
             conversation_id: cid,
             mode,
@@ -54,18 +80,19 @@ export function useMuSend(initialCid?: string) {
 
         const json: AgentResponse = await res.json();
 
-        // 5) サーバー側で付け替えたIDがあればそれを採用し、永続化
+        // サーバーがCIDを付け替えた場合はそれを採用
         const resolved =
           (json.master_id && String(json.master_id)) ||
           (json.conversation_id && String(json.conversation_id)) ||
           cid;
 
-        if (resolved && resolved !== cid) {
-          localStorage.setItem('mu.convId', resolved);
-          setCid(resolved);
-        } else {
-          // 念のため保存
-          localStorage.setItem('mu.convId', cid);
+        if (resolved) {
+          const k = getStorageKey(mode);
+          localStorage.setItem(k, resolved);
+
+          if (resolved !== conversationId) {
+            setCid(resolved);
+          }
         }
 
         return json;

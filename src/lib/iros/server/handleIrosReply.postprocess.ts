@@ -22,6 +22,8 @@ import { preparePastStateNoteForTurn } from '@/lib/iros/memoryRecall';
 import { decideExpressionLane } from '@/lib/iros/expression/decideExpressionLane';
 import { buildMirrorFlowV1, type PolarityV1 } from '@/lib/iros/mirrorFlow/mirrorFlow.v1';
 import { buildExprDirectiveV1 } from '@/lib/iros/expression/exprDirectiveV1';
+import { normalizeIrosStyleFinal } from '../language/normalizeIrosStyleFinal';
+
 import {
   buildUnifiedAnalysis,
   saveUnifiedAnalysisInline,
@@ -60,7 +62,95 @@ export type PostProcessReplyOutput = {
   assistantText: string;
   metaForSave: any;
 };
+function buildResonanceSeedText(state: any): string {
+  const parts: string[] = [];
 
+  const et = typeof state?.instant?.e_turn === 'string' ? state.instant.e_turn.trim() : '';
+  const flowDelta =
+    typeof state?.instant?.flow?.delta === 'string'
+      ? state.instant.flow.delta.trim()
+      : '';
+
+  const returnStreak =
+    typeof state?.instant?.flow?.returnStreak === 'number'
+      ? state.instant.flow.returnStreak
+      : 0;
+
+  if (et) {
+    parts.push(`反応:${et}`);
+  }
+
+  if (flowDelta || returnStreak) {
+    parts.push(`流れ:${flowDelta || '—'} / 戻り:${returnStreak}`);
+  }
+
+  return parts.join('\n').trim();
+}
+function buildResonanceState(args: { metaForSave: any; userText: string }): any {
+  const { metaForSave } = args;
+
+  const ex: any = (metaForSave as any)?.extra ?? {};
+  const ctx: any = ex?.ctxPack && typeof ex.ctxPack === 'object' ? ex.ctxPack : {};
+
+  const mirrorObj: any =
+    (metaForSave as any)?.mirror ??
+    ex?.mirror ??
+    ex?.mirrorFlowV1?.mirror ??
+    ctx?.mirror ??
+    null;
+
+  // ✅ flow は「ctxPack.flow（正本）→ extra.flow（互換）→ meta.flow」の順で拾う
+  const flowResolved: any =
+    (ctx?.flow && typeof ctx.flow === 'object'
+      ? ctx.flow
+      : ex?.flow && typeof ex.flow === 'object'
+        ? ex.flow
+        : (metaForSave as any)?.flow && typeof (metaForSave as any).flow === 'object'
+          ? (metaForSave as any).flow
+          : null) ?? null;
+
+  const vs: any = ctx?.viewShift ?? ex?.viewShift ?? null;
+
+  const saDecision = getSaDecision(metaForSave) ?? null;
+  const yuragi = ex?.yuragi ?? ctx?.yuragi ?? ex?.exprMeta?.yuragi ?? ctx?.exprMeta?.yuragi ?? null;
+  const yohaku = ex?.yohaku ?? ctx?.yohaku ?? ex?.exprMeta?.yohaku ?? ctx?.exprMeta?.yohaku ?? null;
+
+  const cards = ex?.cards ?? ctx?.cards ?? null;
+  const fixedNorth = ex?.fixedNorth ?? ctx?.fixedNorth ?? null;
+
+  const state: any = {
+    v: 1,
+    instant: {
+      e_turn: mirrorObj?.e_turn ?? null,
+      confidence: mirrorObj?.confidence ?? null,
+      polarity: mirrorObj?.polarity ?? mirrorObj?.polarity_out ?? null,
+      flow: {
+        delta: flowResolved?.delta ?? null,
+        returnStreak: flowResolved?.returnStreak ?? null,
+        micro: flowResolved?.micro ?? null,
+        sessionBreak: flowResolved?.sessionBreak ?? null,
+      },
+      viewShift: vs ?? null,
+    },
+    reading: { saDecision, yuragi, yohaku },
+    cards: cards ?? null,
+    structure: {
+      qCode: (metaForSave as any)?.qCode ?? (metaForSave as any)?.q ?? null,
+      depth: (metaForSave as any)?.depth ?? (metaForSave as any)?.depthStage ?? null,
+      phase: (metaForSave as any)?.phase ?? null,
+      intentBand: ex?.intentBridge?.intentBand ?? (metaForSave as any)?.intentBand ?? null,
+      tLayerHint: (metaForSave as any)?.tLayerHint ?? ctx?.tLayerHint ?? null,
+      fixedNorth: fixedNorth ?? null,
+    },
+    seed: {
+      seed_text: null,
+      at: new Date().toISOString(),
+    },
+  };
+
+  state.seed.seed_text = buildResonanceSeedText(state);
+  return state;
+}
 /* =========================
  * Small helpers
  * ========================= */
@@ -1043,6 +1133,275 @@ const polarityMetaBand: string | null =
     (metaForSave as any).extra.ctxPack.viewShift = vs;
     (metaForSave as any).extra.ctxPack.viewShiftSnapshot = snap;
 
+/* =========================================
+ * [追加] resonanceState 正本 + seed_text 生成（postProcessReply 内）
+ * 置き場所: ctxPack.viewShift / viewShiftSnapshot の直後
+ * ========================================= */
+{
+  const state = buildResonanceState({
+    metaForSave,
+    userText: String(userText ?? ''),
+  });
+
+  // ✅ JSON セーフな snapshot 化（循環参照を断つ）
+  const toJsonSafe = (input: any) => {
+    const seen = new WeakSet<object>();
+    try {
+      return JSON.parse(
+        JSON.stringify(input, (_k, v) => {
+          if (typeof v === 'bigint') return String(v);
+          if (typeof v === 'function') return undefined;
+          if (v && typeof v === 'object') {
+            if (seen.has(v)) return '[Circular]';
+            seen.add(v);
+          }
+          return v;
+        })
+      );
+    } catch (_e) {
+      return null;
+    }
+  };
+
+// ✅ 保存用の最小スナップショット（循環しない primitives のみ）
+// ※ q/depth/phase は state ではなく “確定済み canon” を正本にする（null回避）
+const stateSnap = {
+  rev: 'rs_snap_v1',
+
+  qCode:
+    (metaForSave as any)?.q_code ??
+    (metaForSave as any)?.extra?.q_code ??
+    (metaForSave as any)?.canon?.q_code ??
+    (state as any)?.qCode ??
+    (state as any)?.canon?.q_code ??
+    null,
+
+  depthStage:
+    (metaForSave as any)?.depth_stage ??
+    (metaForSave as any)?.extra?.depth_stage ??
+    (metaForSave as any)?.canon?.depth_stage ??
+    (state as any)?.depthStage ??
+    (state as any)?.canon?.depth_stage ??
+    null,
+
+  phase:
+    (metaForSave as any)?.phase ??
+    (metaForSave as any)?.extra?.phase ??
+    (state as any)?.phase ??
+    null,
+
+  seed_text:
+    typeof (state as any)?.seed?.seed_text === 'string'
+      ? (state as any).seed.seed_text.trim()
+      : null,
+
+  // instant（このターンの反応）
+  e_turn: (state as any)?.instant?.mirror?.e_turn ?? (state as any)?.instant?.e_turn ?? null,
+  mirror_confidence: (state as any)?.instant?.mirror?.confidence ?? null,
+
+  flow_delta: (state as any)?.instant?.flow?.delta ?? null,
+  flow_returnStreak: (state as any)?.instant?.flow?.returnStreak ?? null,
+
+  // cards（あれば）
+  currentCard: {
+    cardId: (state as any)?.cards?.current?.cardId ?? null,
+    meaningKey: (state as any)?.cards?.current?.meaningKey ?? null,
+    shortText: (state as any)?.cards?.current?.shortText ?? null,
+  },
+  futureCard: {
+    cardId: (state as any)?.cards?.future?.cardId ?? null,
+    meaningKey: (state as any)?.cards?.future?.meaningKey ?? null,
+    shortText: (state as any)?.cards?.future?.shortText ?? null,
+    source: (state as any)?.cards?.future?.source ?? null,
+  },
+};
+
+// ----------------------------------------
+// meta へ保存（循環防止） + 互換 seed_text
+// ----------------------------------------
+(metaForSave as any).extra = (metaForSave as any).extra ?? {};
+
+// ✅ 正本：snapshot を保存
+(metaForSave as any).extra.resonanceState = stateSnap;
+
+// ✅ 互換：seed_text（RESONANCE_STATE 判定 & 旧キー拾いのため）
+if ((metaForSave as any).extra.seed_text == null && typeof stateSnap.seed_text === 'string' && stateSnap.seed_text.trim()) {
+  (metaForSave as any).extra.seed_text = stateSnap.seed_text.trim();
+}
+
+// ✅ 次ターン用：ctxPack には別参照 clone
+(metaForSave as any).extra.ctxPack = (metaForSave as any).extra.ctxPack ?? {};
+(metaForSave as any).extra.ctxPack.resonanceState = cloneSnap(stateSnap);
+
+// ✅ ctxPack 側にも seed_text（rephraseEngine の拾い口を太くする）
+if ((metaForSave as any).extra.ctxPack.seed_text == null && typeof stateSnap.seed_text === 'string' && stateSnap.seed_text.trim()) {
+  (metaForSave as any).extra.ctxPack.seed_text = stateSnap.seed_text.trim();
+}
+
+// =============================
+// meta へ保存（循環防止）
+// =============================
+
+(metaForSave as any).extra = (metaForSave as any).extra ?? {};
+
+// 正本（保存用）
+(metaForSave as any).extra.resonanceState = stateSnap;
+
+// 次ターン用は “別参照” にする（同一参照NG）
+(metaForSave as any).extra.ctxPack =
+  (metaForSave as any).extra.ctxPack ?? {};
+
+  function cloneSnap(v: any) {
+    if (v == null) return null;
+    try {
+      return typeof (globalThis as any).structuredClone === 'function'
+        ? (globalThis as any).structuredClone(v)
+        : JSON.parse(JSON.stringify(v));
+    } catch {
+      return null;
+    }
+  }
+
+(metaForSave as any).extra.ctxPack.resonanceState =
+  cloneSnap(stateSnap);
+
+// =============================
+// デバッグログ（SEED材料確認用）
+// =============================
+
+console.log('[IROS/PP][RS_SNAPSHOT]', {
+  qCode: stateSnap.qCode,
+  depthStage: stateSnap.depthStage,
+  phase: stateSnap.phase,
+  e_turn: stateSnap.e_turn,
+  mirror_confidence: stateSnap.mirror_confidence,
+  flow_delta: stateSnap.flow_delta,
+  flow_returnStreak: stateSnap.flow_returnStreak,
+  seedLen: typeof stateSnap.seed_text === 'string' ? stateSnap.seed_text.length : 0,
+  seedHead: String(stateSnap.seed_text ?? '').slice(0, 96),
+  futureCard: stateSnap.futureCard?.cardId ?? null,
+});
+/* =========================================
+ * [置換] resonanceState 保存（snapshot / 別参照 clone）
+ * 目的: extra.resonanceState と extra.ctxPack.resonanceState を同一参照にしない
+ *       → persist の seen 判定で "[Circular]" にならない
+ * ========================================= */
+
+(metaForSave as any).extra = (metaForSave as any).extra ?? {};
+
+// ✅ 正本：meta.extra に置く（snapshot だけ）
+(metaForSave as any).extra.resonanceState = stateSnap;
+
+// ✅ 次ターン用：ctxPack には “別参照” を置く（同一参照だと "[Circular]" になる）
+(metaForSave as any).extra.ctxPack = (metaForSave as any).extra.ctxPack ?? {};
+// ✅ 正本：ctxPack.flow を必ず埋める（snapshot 優先）
+// - DB の has_flowdelta/has_returnstreak が assistant 側で落ちる原因は
+//   ctxPack.flow が未保存 & meta.flow の dd/rr が null になるケースがあるため。
+{
+  const flowDeltaSnap =
+    (stateSnap as any)?.flow_delta ??
+    (state as any)?.instant?.flow?.delta ??
+    null;
+
+  const returnStreakSnap =
+    (stateSnap as any)?.flow_returnStreak ??
+    (state as any)?.instant?.flow?.returnStreak ??
+    null;
+
+  // sessionBreak/ageSec は既に他所で解決されている前提だが、
+  // ctxPack.flow にも寄せて “正本” を太くしておく
+  const sessionBreakSnap =
+    (metaForSave as any)?.extra?.ctxPack?.flow?.sessionBreak ??
+    (metaForSave as any)?.extra?.flow?.sessionBreak ??
+    (state as any)?.instant?.flow?.sessionBreak ??
+    null;
+
+  const ageSecSnap =
+    (metaForSave as any)?.extra?.ctxPack?.flow?.ageSec ??
+    (metaForSave as any)?.extra?.flow?.ageSec ??
+    (state as any)?.instant?.flow?.ageSec ??
+    null;
+
+  (metaForSave as any).extra.ctxPack = (metaForSave as any).extra.ctxPack ?? {};
+  (metaForSave as any).extra.ctxPack.flow = (metaForSave as any).extra.ctxPack.flow ?? {};
+
+  // delta は “delta” 名で保持（既存コードの参照形に合わせる）
+  if ((metaForSave as any).extra.ctxPack.flow.delta == null && flowDeltaSnap != null) {
+    (metaForSave as any).extra.ctxPack.flow.delta = flowDeltaSnap;
+  }
+  if ((metaForSave as any).extra.ctxPack.flow.returnStreak == null && returnStreakSnap != null) {
+    (metaForSave as any).extra.ctxPack.flow.returnStreak = returnStreakSnap;
+  }
+  if ((metaForSave as any).extra.ctxPack.flow.sessionBreak == null && sessionBreakSnap != null) {
+    (metaForSave as any).extra.ctxPack.flow.sessionBreak = sessionBreakSnap;
+  }
+  if ((metaForSave as any).extra.ctxPack.flow.ageSec == null && ageSecSnap != null) {
+    (metaForSave as any).extra.ctxPack.flow.ageSec = ageSecSnap;
+  }
+}
+(metaForSave as any).extra.ctxPack.resonanceState = cloneSnap(stateSnap);
+  // ✅ 互換：meta.flow にも returnStreak を併記してズレ再発を防ぐ（正本は ctxPack.flow）
+  // 優先順：ctxPack.flow（正本）→ extra.flow（互換）→ state.instant.flow（最後の保険）
+  {
+    const ctxFlow =
+      (metaForSave as any)?.extra?.ctxPack?.flow &&
+      typeof (metaForSave as any).extra.ctxPack.flow === 'object'
+        ? (metaForSave as any).extra.ctxPack.flow
+        : null;
+
+    const exFlow =
+      (metaForSave as any)?.extra?.flow && typeof (metaForSave as any).extra.flow === 'object'
+        ? (metaForSave as any).extra.flow
+        : null;
+
+    const rr =
+      ctxFlow?.returnStreak ??
+      exFlow?.returnStreak ??
+      (state as any)?.instant?.flow?.returnStreak ??
+      null;
+
+    const dd =
+      ctxFlow?.delta ??
+      exFlow?.delta ??
+      (state as any)?.instant?.flow?.delta ??
+      null;
+
+    if (rr != null || dd != null) {
+      (metaForSave as any).flow = (metaForSave as any).flow ?? {};
+      if ((metaForSave as any).flow.delta == null && dd != null) (metaForSave as any).flow.delta = dd;
+      if ((metaForSave as any).flow.returnStreak == null && rr != null) (metaForSave as any).flow.returnStreak = rr;
+    }
+  }
+
+
+      console.log('[IROS/PP][RESONANCE_STATE]', {
+        traceId:
+        (metaForSave as any)?.extra?.traceId ??
+        (metaForSave as any)?.extra?.ctxPack?.traceId ??
+        null,
+        conversationId,
+        userCode,
+        hasSeed: Boolean((metaForSave as any)?.extra?.seed_text),
+        seedHead: String((metaForSave as any)?.extra?.seed_text ?? '').slice(0, 96),
+
+        // --- flow source probes (確証用) ---
+        flowDelta_state: state?.instant?.flow?.delta ?? null,
+        returnStreak_state: state?.instant?.flow?.returnStreak ?? null,
+
+        flowDelta_metaExtraCtx: (metaForSave as any)?.extra?.ctxPack?.flow?.delta ?? null,
+        returnStreak_metaExtraCtx: (metaForSave as any)?.extra?.ctxPack?.flow?.returnStreak ?? null,
+
+        flowDelta_metaFlow: (metaForSave as any)?.flow?.delta ?? null,
+        returnStreak_metaFlow: (metaForSave as any)?.flow?.returnStreak ?? null,
+
+        flowDelta_extraFlow: (metaForSave as any)?.extra?.flow?.delta ?? null,
+        returnStreak_extraFlow: (metaForSave as any)?.extra?.flow?.returnStreak ?? null,
+
+        // mirror_flow（参考）
+        e_turn: state?.instant?.e_turn ?? null,
+      });
+    }
+
     console.log('[IROS/VIEWSHIFT][DECISION]', {
       ok: vs?.ok ?? false,
       score: vs?.score ?? 0,
@@ -1136,7 +1495,7 @@ if (d?.metaPatch && typeof d.metaPatch === 'object') {
   metaForSave.extra = { ...(metaForSave.extra ?? {}), ...d.metaPatch };
 }
 // ✅ exprDecision は従来どおり保存しつつ、
-// ✅ ctxPack.exprMeta（正本）に fired/lane/reason を合流して systemPrompt へ届ける
+// ✅ ctxPack.expr / ctxPack.exprMeta（正本）に fired/lane/reason/prefaceLine を合流して systemPrompt へ届ける
 {
   // ✅ 既存extraを安全に回収
   const prevExtra: any =
@@ -1153,11 +1512,17 @@ if (d?.metaPatch && typeof d.metaPatch === 'object') {
     (prevExtra?.exprMeta && typeof prevExtra.exprMeta === 'object' ? prevExtra.exprMeta : null) ??
     {};
 
+  // 既存の expr（prefaceLine 等）も拾う（DIRECTIVE は ctxPack.expr を参照する）
+  const prevExpr: any =
+    (prevCtxPack?.expr && typeof prevCtxPack.expr === 'object' ? prevCtxPack.expr : null) ??
+    (prevExtra?.expr && typeof prevExtra.expr === 'object' ? prevExtra.expr : null) ??
+    {};
+
   const fired = Boolean((d as any)?.fired);
-  const lane = String((d as any)?.lane ?? 'OFF');
+  const lane = String((d as any)?.lane ?? 'off');
   const reason = String((d as any)?.reason ?? 'DEFAULT');
 
-  let prefaceLine = String((d as any)?.prefaceLine ?? '').trim() || null;
+  let prefaceLine = String((d as any)?.prefaceLine ?? '').trim();
 
   // ViewShift confirmLine（1行）を “空のときだけ” 差し込む
   if (!prefaceLine) {
@@ -1170,6 +1535,36 @@ if (d?.metaPatch && typeof d.metaPatch === 'object') {
       prefaceLine = vsConfirm.trim();
     }
   }
+
+  // ✅ null に正規化（空文字は持たない）
+  const prefaceLineOrNull = prefaceLine ? prefaceLine : null;
+
+  // ✅ ctxPack 正本に合流（expr / exprMeta を両方揃える）
+  const nextCtxPack = {
+    ...(prevCtxPack ?? {}),
+    expr: {
+      ...(prevExpr ?? {}),
+      fired,
+      lane,
+      reason,
+      prefaceLine: prefaceLineOrNull,
+    },
+    exprMeta: {
+      ...(prevExprMeta ?? {}),
+      fired,
+      lane,
+      reason,
+      prefaceLine: prefaceLineOrNull,
+    },
+  };
+
+  prevExtra.ctxPack = nextCtxPack;
+
+  // ✅ 互換：古い extra.expr / extra.exprMeta を残す（必要なら）
+  // ただし「正本は ctxPack」とする
+  prevExtra.expr = nextCtxPack.expr;
+  prevExtra.exprMeta = nextCtxPack.exprMeta;
+
 
   // --- ✅ ExprDirectiveV1（e_turn → 構成/リメイク/I層返し優先）を条件付きで生成 ---
   const mirrorObj: any = (metaForSave as any)?.mirror ?? (metaForSave as any)?.extra?.mirror ?? null;
@@ -1239,8 +1634,7 @@ if (d?.metaPatch && typeof d.metaPatch === 'object') {
       // ✅ ViewShift の目的に合わせる：prefaceLine を「毎回強制」しない
       // - prefaceLine は postprocess 側で確定（ViewShift.confirmLine を拾う）
       // - Writer は prefaceLine を“追加生成しない”
-      'prefaceLine：meta.extra.ctxPack.expr.prefaceLine が null でない場合のみ、その1行を本文の先頭に置く（1行・1文・改行なし）。',
-      'prefaceLine：null の場合は、prefaceLine を新規生成しない（毎回生成の強制は禁止）。',
+
       et
         ? `材料：ユーザー発話と e_turn（${et}）${pol ? ` と polarity（${pol}）` : ''}。ただし e_turn/polarity のラベルは本文に出さない。`
         : '材料：ユーザー発話。内部ラベルは本文に出さない。',
@@ -1280,13 +1674,6 @@ if (d?.metaPatch && typeof d.metaPatch === 'object') {
   metaForSave.extra = {
     ...prevExtra,
 
-    // ✅ renderGateway が拾う “prefaceLine” の正本
-    expr: {
-      ...(prevExtra?.expr ?? {}),
-      prefaceLine,
-      prefaceHead: prefaceLine ? prefaceLine.slice(0, 64) : null,
-    },
-
     // meta.extra.exprMeta（renderGateway/systemPrompt が見る）
     exprMeta: {
       ...prevExprMeta,
@@ -1308,32 +1695,15 @@ if (d?.metaPatch && typeof d.metaPatch === 'object') {
  * - renderGateway / systemPrompt どちらの拾い方でも落ちないようにする
  * ========================================= */
     // ✅ 正本：handleIrosReply.ts がここから同期する
-    ctxPack: {
-      ...prevCtxPack,
+      // ✅ NEW: Mirror（e_turn/polarity/confidence）を ctxPack 正本へ
+      // rephraseEngine 側は ctxPack.mirror を優先的に読む
+      mirror: (mirrorObj && typeof mirrorObj === 'object') ? mirrorObj : (prevCtxPack as any)?.mirror ?? null,
 
-      // ✅ NEW: ctxPack.expr にも正本として保持（renderGateway の拾い先を増やす）
-      expr: {
-        ...(prevCtxPack?.expr ?? {}),
-        prefaceLine,
-        prefaceHead: prefaceLine ? prefaceLine.slice(0, 64) : null,
-      },
-
-      exprMeta: {
-        ...prevExprMeta,
-        fired,
-        lane,
-        reason,
-
-        // ✅ NEW: preface も exprMeta 側へ（拾い方の互換用）
-        prefaceLine,
-        prefaceHead: prefaceLine ? prefaceLine.slice(0, 64) : null,
-
-        // ✅ NEW: directiveV1（正本に同値反映）
-        directiveV1,
-        directiveV1_on,
-        directiveV1_reason,
-      },
-    },
+      // ✅ NEW: 互換（将来カードseed側が top-level を読む場合に備える）
+      e_turn: (mirrorObj as any)?.e_turn ?? (prevCtxPack as any)?.e_turn ?? null,
+      polarity: (mirrorObj as any)?.polarity ?? (prevCtxPack as any)?.polarity ?? null,
+      mirrorConfidence:
+        (mirrorObj as any)?.confidence ?? (mirrorObj as any)?.polarity_confidence ?? (prevCtxPack as any)?.mirrorConfidence ?? null,
 
     // 従来の保存（ログ/診断用）
     exprDecision: {
@@ -1506,26 +1876,38 @@ let seedForWriterRaw = shouldInjectPreface ? `${preface}\n${slotTextStr}` : slot
           head: commitText.slice(0, 64),
         });
       } else {
-        // writer に委ねる（baseVisible は seedSanitized 優先）
+        // writer に委ねる（UI本文は空に固定し、seedは meta にだけ持つ）
         let baseVisible =
           String(seedForWriterSanitized ?? '').trim() || String(coreLine ?? '').trim() || '';
 
+        // FINAL で "hint " から始まるものは UI 露出禁止（空にする）
         if (det?.policy === 'FINAL' && baseVisible.trim().startsWith('hint ')) {
           baseVisible = '';
         }
 
-        finalAssistantText = baseVisible;
+        // ✅ 重要：ここで本文に入れない（seed-only）
+        finalAssistantText = '';
 
         metaForSave.extra = {
           ...(metaForSave.extra ?? {}),
-          finalTextPolicy: 'FINAL__LLM_COMMIT',
+          // FINAL だが “本文はwriterが作る” ので commit ではなく defer にする
+          finalTextPolicy: 'FINAL__LLM_DEFER',
           slotPlanCommitted: false,
+
+          // ✅ seed-only: writer に渡す seed を meta に載せる（UI本文にはしない）
+          slotPlanSeed: baseVisible, // ← runLlmGate の seedFallback が拾う
+          slotPlanSeedLen: baseVisible.length,
+          slotPlanSeedHead: baseVisible.slice(0, 64),
+
+          // 観測用：seed は meta に残す（UI本文にはしない）
           baseVisibleLen: baseVisible.length,
           baseVisibleHead: baseVisible.slice(0, 64),
-          baseVisibleSource: String(seedForWriterSanitized ?? '').trim() ? 'seedForWriterSanitized' : 'coreLine(lastResort)',
+          baseVisibleSource: String(seedForWriterSanitized ?? '').trim()
+            ? 'seedForWriterSanitized'
+            : 'coreLine(lastResort)',
         };
 
-        console.log('[IROS/PostProcess] SLOTPLAN_SEED_TO_WRITER (base visible)', {
+        console.log('[IROS/PostProcess] SLOTPLAN_SEED_TO_WRITER (seed only; no commit)', {
           conversationId,
           userCode,
           slotPlanPolicy: det.policy,
@@ -1586,7 +1968,28 @@ let seedForWriterRaw = shouldInjectPreface ? `${preface}\n${slotTextStr}` : slot
   if (metaForSave && typeof metaForSave === 'object') {
     metaForSave.extra = (metaForSave as any).extra ?? {};
     const ex: any = (metaForSave as any).extra;
+// ✅ Iros 文体 正規化フィルタ（final統合点）
+// - レーン/スロット/Q帯に依存せず、最終文体だけを自然化する
+{
+  const seed =
+    String((metaForSave as any)?.extra?.traceId ?? '') ||
+    String((metaForSave as any)?.extra?.ctxPack?.traceId ?? '') ||
+    String(conversationId ?? '');
 
+  const n = normalizeIrosStyleFinal(finalAssistantText, {
+    seed,
+    emojiKeepRate: 0.3,
+    maxReplacements: 5,
+  });
+
+  finalAssistantText = n.text;
+
+  // 任意：デバッグ用（必要なら残す。重いなら消してOK）
+  (metaForSave.extra as any) = {
+    ...(metaForSave.extra ?? {}),
+    styleNormFinal: n.meta,
+  };
+}
     const finalText = String(finalAssistantText ?? '').trim();
     const prevRaw = String(ex?.rawTextFromModel ?? '').trim();
 

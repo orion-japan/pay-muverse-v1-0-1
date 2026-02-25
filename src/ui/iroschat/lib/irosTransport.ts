@@ -438,16 +438,8 @@ export async function reply(params: {
       ? (crypto as any).randomUUID()
       : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
 
-  // ✅ サーバが読むのは body.history（直下）
-  const history = Array.isArray(params.history)
-    ? params.history
-        .filter((m) => m && (m.role === 'user' || m.role === 'assistant'))
-        .slice(-12)
-        .map((m) => ({
-          role: m.role,
-          content: typeof m.content === 'string' ? m.content : String(m.content ?? ''),
-        }))
-    : undefined;
+  // ✅ 方針：history はUIから送らない（経路自体を遮断）
+  const history = undefined;
 
   const payload: any = {
     conversationId: cid, // ✅ UIはこれだけ送る（uuid）
@@ -457,7 +449,6 @@ export async function reply(params: {
       model: params.model ?? undefined,
       traceId: clientTraceId, // ✅ ここが本命：/reply で traceId を揃える
     },
-    ...(history && history.length > 0 ? { history } : {}),
   };
 
 

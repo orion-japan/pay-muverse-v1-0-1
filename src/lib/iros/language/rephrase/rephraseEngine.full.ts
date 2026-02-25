@@ -235,71 +235,131 @@ function buildInternalPackText(args: {
   replyGoal?: string | null;
   repeatSignal?: string | null;
 }): string {
-  const obsUser = String(args.userText ?? '').trim();
+  // 🚫 userText は LLM 入力に混入させない（internalPack へ露出しない）
+  // - userText は「観測の唯一ソース」として使う設計が以前あったが、
+  //   現在は「LLMに生文を渡さない」方針のため、ここでは参照しない。
+  // - 代わりに onePoint / summary / topic / goal / repeat を “核” として渡す。
+
   const obsOnePoint = String(args.onePointText ?? '').trim();
   const obsSummary = String(args.situationSummary ?? '').trim();
   const obsTopic = String(args.topicDigest ?? '').trim();
   const obsGoal = String(args.replyGoal ?? '').trim();
   const obsRepeat = String(args.repeatSignal ?? '').trim();
 
-
-  // ✅ 観測は “このターンの userText” が最優先
-  // - onePoint/summary は補助（ただし過去文が混ざり得るので最後）
+  // ✅ 観測核（NOW_CORE）は userText を使わずに作る
+  // - onePoint があれば最優先
+  // - 次に summary
   const obsPick =
-    obsUser.length >= 6
-      ? obsUser
-      : obsOnePoint.length >= 6
-        ? obsOnePoint
-        : obsSummary.length >= 6
-          ? obsSummary
-          : '';
+    obsOnePoint.length >= 6
+      ? obsOnePoint
+      : obsSummary.length >= 6
+        ? obsSummary
+        : '';
 
-  // ✅ internalPack に userText を“全文で入れる”と復唱/一般化逃げを誘発する
-  // → 露出は短い head のみに制限して、素材としては保持する
+  // ✅ 露出は短い head のみに制限（ただし userText は露出しない）
   const head = (s: string, n = 80) => {
     const t = String(s ?? '').replace(/\r\n/g, '\n').trim();
     return t.length <= n ? t : t.slice(0, n) + '…';
   };
 
+  // ✅ obsCard（ミニ版）
+  // - userText は含めない
+  // - “拾うべき核（obsPick）” と会話を流す3点だけを渡す
   const obsCard = [
-    '【観測の扱い方（ガイド）】',
-    '- obsPick は、基本的に「このターンの userText（=いまの発話）」から拾える観測を使う。',
-    '- seedDraft や過去文は、必要があれば背景理解として参照してよいが、そのまま本文に再掲する必要はない。',
-    '- 長期履歴・Q遷移・深度・IT/T・Anchor などの内部情報は、説明として前面に出さず、文章の自然さを優先する。',
-    '',
-    `obsUserHead=${obsUser ? head(obsUser, 120) : '(none)'}`,
+    'OBS_SOURCES (DO NOT OUTPUT):',
     `obsOnePointHead=${obsOnePoint ? head(obsOnePoint, 120) : '(none)'}`,
     `obsSummaryHead=${obsSummary ? head(obsSummary, 120) : '(none)'}`,
     `obsPickHead=${obsPick ? head(obsPick, 120) : '(none)'}`,
-
-    // ✅ 会話が流れるための3点（あれば必ず優先して吸収）
+    '',
+    // ✅ 会話が流れるための3点（あれば優先）
     `TOPIC_DIGEST: ${obsTopic ? head(obsTopic, 220) : '(none)'}`,
     `REPLY_GOAL: ${obsGoal ? head(obsGoal, 220) : '(none)'}`,
     `REPEAT_SIGNAL: ${obsRepeat ? head(obsRepeat, 220) : '(none)'}`,
-
     '',
-    '【obsPick の使い方】',
-    '- 出力本文の冒頭〜中盤に、obsPick に含まれる語彙やニュアンスを自然に織り込む。',
-    '- 見出しやタグを付ける必要はなく、会話文として自然な1文で十分。',
-    '- 説明しすぎず、「今そう見えている」というトーンで言い切ってよい。',
-    '',
-    '【文体の目安】',
-    '- 推量表現は使ってもよいが、連続させず、主文はなるべく断定寄りにする。',
-    '- 一般論や励ましテンプレは控えめにし、具体的な語感・場面感を優先する。',
-    '',
-    '【観測が弱い／無い場合】',
-    '- 逃げの比喩や「かもしれません」連発に寄せず、短くても“言い切り”を1つ置く。',
-    '- 定義・命名・結論はOK（ただし断定が外れる可能性がある時は、言い切り＋但し書き1つまで）。',
-    '- 未来の指示は禁止しないが、「命令」ではなく“選択肢提示（2〜3個）”で出す。',
-    '- 質問は最大1つまで（毎回は出さない）。',
-
+    // ✅ 最小ルール（短く）
+    'USE_RULE (DO NOT OUTPUT):',
+    '- obsPick は「核」として参照してよいが、原文引用や言い直しはしない。',
+    '- 説明で埋めず、会話として短く返す。',
+    '- 箇条書き・番号列挙・チェックリストで出力しない（必要なら1〜2文に畳む）。',
+    '- 質問は最大1つまで。',
   ].join('\n');
 
   const flowDigest = String(args.flowDigest ?? '').trim();
   const flowTape = String(args.flowTape ?? '').trim();
-  const metaText = String(args.metaText ?? '').trim();
 
-  return [
+  // ✅ META_HINT は「JSON断片の要約」ではなく「選抜キー言語化」に統一する
+  // - JSON.parse をしない（keys=(json_parse_failed) を根絶）
+  // - args.metaText（stringify由来）は LLM向けに使わない（デバッグ用途に限定）
+  const metaTextRaw = String(args.metaText ?? '').trim(); // 互換保持（ただし LLM用には使わない）
+
+  const metaText = (() => {
+    const ctx: any = (args as any) ?? {};
+    const ctxPack: any = ctx.ctxPack ?? ctx.ctx_pack ?? null;
+
+    const pick = (...cands: any[]) => {
+      for (const v of cands) {
+        if (v === undefined || v === null) continue;
+        const s = String(v).trim();
+        if (!s) continue;
+        return s;
+      }
+      return null;
+    };
+
+    // ✅ 構造メタ（柱）
+    const inputKind = pick(ctx.inputKind, ctxPack?.inputKind);
+    const depthStage = pick(ctx.depthStage, ctxPack?.depthStage, ctxPack?.unified?.depthStage);
+    const phase = pick(ctx.phase, ctxPack?.phase);
+    const qCode = pick(ctx.qCode, ctxPack?.qCode);
+
+    const intentBand = pick(ctx.intentBand, ctxPack?.intentBand);
+    const tLayerHint = pick(ctx.tLayerHint, ctxPack?.tLayerHint);
+
+    const flowDelta = pick(ctxPack?.flow?.delta, ctxPack?.flowDelta);
+    const returnStreak = pick(ctxPack?.flow?.returnStreak, ctxPack?.returnStreak);
+
+    const itOk = pick(ctx.itOk, ctxPack?.itTriggered, ctxPack?.it_triggered);
+    const goalKind = pick(ctxPack?.replyGoal?.kind, ctxPack?.goalKind, ctx.replyGoal);
+    const slotPlanPolicy = pick(ctxPack?.slotPlanPolicy, ctx.slotPlanPolicy);
+
+    // ✅ 瞬間反応（カード材料）
+    const e_turn = pick(ctx.e_turn, ctxPack?.mirror?.e_turn, ctxPack?.e_turn);
+    const polarity = pick(ctx.polarity, ctxPack?.mirror?.polarity, ctxPack?.polarity);
+
+    // ✅ self acceptance（補正）
+    const sa = pick(ctx.sa, ctxPack?.sa, ctxPack?.selfAcceptance, ctxPack?.self_acceptance);
+
+    // ✅ 任意（必要時のみ）
+    const fixedNorth = pick(ctxPack?.fixedNorth?.key, ctxPack?.fixedNorth_meta, ctxPack?.fixedNorthKey);
+
+    const lines: string[] = [];
+
+    if (inputKind) lines.push(`inputKind=${inputKind}`);
+    if (depthStage) lines.push(`depthStage=${depthStage}`);
+    if (phase) lines.push(`phase=${phase}`);
+    if (qCode) lines.push(`qCode=${qCode}`);
+
+    if (intentBand) lines.push(`intentBand=${intentBand}`);
+    if (tLayerHint) lines.push(`tLayerHint=${tLayerHint}`);
+
+    if (flowDelta) lines.push(`flowDelta=${flowDelta}`);
+    if (returnStreak) lines.push(`returnStreak=${returnStreak}`);
+
+    if (itOk != null) lines.push(`itOk=${itOk}`);
+    if (goalKind) lines.push(`goalKind=${goalKind}`);
+    if (slotPlanPolicy) lines.push(`slotPlanPolicy=${slotPlanPolicy}`);
+
+    if (e_turn) lines.push(`e_turn=${e_turn}`);
+    if (polarity) lines.push(`polarity=${polarity}`);
+    if (sa) lines.push(`sa=${sa}`);
+
+    if (fixedNorth) lines.push(`fixedNorth=${fixedNorth}`);
+
+    // 無いなら空
+    return lines.length ? lines.join('\n') : '';
+  })();
+
+  const parts: string[] = [
     'INTERNAL PACK (DO NOT OUTPUT):',
     '',
     `lastTurnsCount=${args.lastTurnsCount ?? 0}`,
@@ -318,16 +378,21 @@ function buildInternalPackText(args: {
     `replyGoal=${String(args.replyGoal ?? '').trim() || '(none)'}`,
     `repeatSignal=${String(args.repeatSignal ?? '').trim() || '(none)'}`,
     `flowTape=${flowTape || '(none)'}`,
-    '',
-    'HISTORY_HINT (DO NOT OUTPUT):',
-    args.historyText || '(none)',
-    '',
-    'SEED DRAFT HINT (DO NOT OUTPUT):',
-    args.seedDraftHint || '(none)',
-    '',
-    obsCard,
-  ].join('\n');
+  ];
 
+  const historyTrim = String(args.historyText ?? '').trim();
+  if (historyTrim) {
+    parts.push('', 'HISTORY_HINT (DO NOT OUTPUT):', historyTrim);
+  }
+
+  const seedTrim = String(args.seedDraftHint ?? '').trim();
+  if (seedTrim) {
+    parts.push('', 'SEED DRAFT HINT (DO NOT OUTPUT):', seedTrim);
+  }
+
+  parts.push('', obsCard);
+
+  return parts.join('\n');
 }
 
 // ---------------------------------------------
@@ -401,8 +466,24 @@ function ensureDebugFinal(debug?: RephraseOptions['debug'] | null): DebugFinal {
       ? { ...(debug as Record<string, any>) }
       : ({} as Record<string, any>);
 
-  const traceIdRaw = String(base.traceId ?? '').trim();
-  const traceId = traceIdRaw || crypto.randomUUID(); // ✅ ここで必ず確定
+      const traceIdRaw = String(base.traceId ?? '').trim();
+
+      // ✅ traceId は「上流で渡される」のが正。
+      // ここで randomUUID を出すのは最終保険だが、発生したら必ずログに残す。
+      let traceId = traceIdRaw;
+
+      if (!traceId) {
+        traceId = crypto.randomUUID();
+
+        console.warn('[IROS/rephraseEngine][TRACE_FALLBACK_UUID]', {
+          traceId,
+          reason: 'EMPTY_BASE_TRACEID',
+          baseTraceId: (base as any)?.traceId ?? null,
+          debugTraceId: (debug as any)?.traceId ?? null,
+          conversationId: (debug as any)?.conversationId ?? null,
+          userCode: (debug as any)?.userCode ?? null,
+        });
+      }
 
   return {
     ...base, // ✅ 追加キーを落とさない
@@ -1875,11 +1956,93 @@ const toRephraseBlocks = (s: string): string[] => {
 
   const isDirectTask = extractDirectTask(userText, inputKind);
 
-  const historyText = extractHistoryTextFromContext(opts?.userContext ?? null);
+  // ✅ 方針（改）：生の全文履歴は渡さず、「直近の要点だけ」を historyText として渡す
+  // - “続けてください”でも対象がわかる最低限の文脈を入れる
+  // - userText混入（@OBS.user など）とは別経路なので、ここは安全に整形して使う
   const lastTurns = extractLastTurnsFromContext(opts?.userContext ?? null);
 
-  // slot由来の下書き（露出禁止）
-  const seedDraftRawAll = extracted.slots.map((s) => s.text).filter(Boolean).join('\n');
+  const buildHistoryTextLite = (turns: any[]): string => {
+    if (!Array.isArray(turns) || turns.length === 0) return '';
+
+    const clean = (s: any) =>
+      String(s ?? '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .trim();
+
+    // 内部マーカーや露出禁止行っぽいものは落とす
+    const dropInternal = (s: string) => {
+      const t = clean(s);
+      if (!t) return '';
+      if (/DO NOT OUTPUT/i.test(t)) return '';
+      if (/^\s*@(?:OBS|SHIFT|SAFE|NEXT|END|TASK|Q|Q_SLOT)\b/m.test(t)) return '';
+      if (/INTERNAL PACK/i.test(t)) return '';
+      if (/HISTORY_HINT\s*\(DO NOT OUTPUT\)/i.test(t)) return '';
+      return t;
+    };
+
+    const pickText = (t: any) => {
+      const role = String(t?.role ?? '').trim();
+      const raw = t?.text ?? t?.content ?? t?.message ?? '';
+      const v = dropInternal(String(raw ?? ''));
+      if (!v) return null;
+
+      // user は短く、assistant は少し長めに（オウム化/肥大化を抑える）
+      const max = role === 'assistant' ? 180 : 90;
+      const head = v.length > max ? v.slice(0, max) + '…' : v;
+      return { role: role || 'unknown', head };
+    };
+
+    // 直近6ターンだけ（多すぎるとノイズ）
+    const picked = turns.slice(-6).map(pickText).filter(Boolean) as any[];
+    if (picked.length === 0) return '';
+
+    const lines = [
+      'HISTORY_LITE (DO NOT OUTPUT):',
+      ...picked.map((x) => `${x.role}: ${x.head}`),
+    ];
+
+    // 最終クランプ（プロンプト肥大防止）
+    const joined = lines.join('\n');
+    return joined.length > 900 ? joined.slice(0, 900) + '…' : joined;
+  };
+
+  const historyText = buildHistoryTextLite(lastTurns);
+// slot由来の下書き（露出禁止）
+// - @OBS 内の user/lastUserText を writer に渡さない（userText混入の経路を遮断）
+const sanitizeSlotTextForWriter = (s: string) => {
+  const t = String(s ?? '').trim();
+  if (!t) return '';
+
+  // @OBS {"...": "..."} の JSON 部分だけを安全に編集する
+  if (/^@OBS\b/.test(t)) {
+    const i0 = t.indexOf('{');
+    const i1 = t.lastIndexOf('}');
+    if (i0 >= 0 && i1 > i0) {
+      const head = t.slice(0, i0).trimEnd();
+      const jsonText = t.slice(i0, i1 + 1);
+      try {
+        const obj = JSON.parse(jsonText);
+        if (obj && typeof obj === 'object') {
+          // ✅ userText混入キーを落とす
+          delete (obj as any).user;
+          delete (obj as any).lastUserText;
+        }
+        return `${head} ${JSON.stringify(obj)}`.trim();
+      } catch {
+        // パースできない場合はそのまま（壊さない）
+        return t;
+      }
+    }
+  }
+
+  return t;
+};
+
+const seedDraftRawAll = extracted.slots
+  .map((s) => sanitizeSlotTextForWriter(s.text))
+  .filter(Boolean)
+  .join('\n');
 
   // ✅ slotキーは key だけでなく id も見る（framePlan 由来で id しか無いケースを救う）
   const getSlotKey = (s: any) => {
@@ -2102,7 +2265,11 @@ const toRephraseBlocks = (s: string): string[] => {
 
 
   const seedDraftSanitized = sanitizeSeedDraftForLLM(seedDraft0);
-  const seedFinal = chooseSeedForLLM(seedDraftSanitized, userText);
+
+  // ✅ 方針：writer へ userText を絶対に渡さない
+  // - chooseSeedForLLM の userText 経路を遮断
+  // - seed が空になる場合は固定の安全フレーズにフォールバック
+  const seedFinal = chooseSeedForLLM(seedDraftSanitized, '') || '続けてください';
 
   function humanizeDirectivesForSeed(seedDraft0: string, userText: string): string {
     const raw = String(seedDraft0 ?? '').trim();
@@ -2363,36 +2530,180 @@ const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
     (opts as any)?.userContext?.qCode ??
     null;
 
+  // ✅ NEW: カードseed材料（e_turn / polarity / sa）を“確証つきで”拾う
+  // 優先順位：opts直指定 → ctxPack（最終スタンプ） → userContext直指定 → null
+  // ※ e_turn は instant（保存しない）/ qCode は state（保存）で混同しない
+  const pickedETurn =
+    (opts as any)?.e_turn ??
+    (opts as any)?.userContext?.ctxPack?.mirror?.e_turn ??
+    (opts as any)?.userContext?.e_turn ??
+    null;
 
-  const internalPack = buildInternalPackText({
-    metaText,
-    historyText,
-    seedDraftHint,
-    lastTurnsCount: lastTurnsSafe.length,
-    itOk,
-    directTask: directTaskForPrompt,
-    inputKind,
-    intentBand: band.intentBand,
-    tLayerHint: band.tLayerHint,
-    userText,
-    onePointText: null,
+  const pickedPolarity =
+    (opts as any)?.polarity ??
+    (opts as any)?.userContext?.ctxPack?.mirror?.polarity ??
+    (opts as any)?.userContext?.polarity ??
+    null;
 
-    // まずは “入れる” を優先（要件：確証つきで通す）
-    situationSummary: null,
-    depthStage: pickedDepthStage,
-    phase: pickedPhase,
-    qCode: pickedQCode,
+  const pickedSa =
+    (opts as any)?.sa ??
+    (opts as any)?.userContext?.ctxPack?.sa ??
+    (opts as any)?.userContext?.sa ??
+    null;
 
-    flowDigest,
-    flowTape,
 
-    // ✅ 会話が流れるための3点（topic / goal / 反復）
-    topicDigest,
-    replyGoal,
-    repeatSignal,
+  const exprDirectiveV1ForPack = String(
+    (opts as any)?.userContext?.ctxPack?.exprMeta?.directiveV1 ??
+    (opts as any)?.userContext?.exprMeta?.directiveV1 ??
+    ''
+  ).trim();
+
+    // ✅ internalPack 本体
+    let internalPack = buildInternalPackText({
+      metaText,
+
+
+
+      // ✅ internalPack に history を二重投入しない（messages 側で lastTurns を渡している）
+      historyText: '',
+
+      seedDraftHint,
+      lastTurnsCount: lastTurnsSafe.length,
+      itOk,
+      directTask: directTaskForPrompt,
+      inputKind,
+      intentBand: band.intentBand,
+      tLayerHint: band.tLayerHint,
+      userText,
+      onePointText: null,
+
+      // まずは “入れる” を優先（要件：確証つきで通す）
+      situationSummary: null,
+      depthStage: pickedDepthStage,
+      phase: pickedPhase,
+      qCode: pickedQCode,
+
+      flowDigest,
+      flowTape,
+
+      // ✅ 会話が流れるための3点（topic / goal / 反復）
+      topicDigest,
+      replyGoal,
+      repeatSignal,
+
+      // ✅ NEW: Writer向け短い再指示（INTERNAL PACKへ）
+      exprDirectiveV1: exprDirectiveV1ForPack,
+    } as any);
+
+// ✅ NEW: RESONANCE_STATE seedin（状態→seed_text を LLM 内部材料として渡す）
+// - 見出しを必ず付ける（WRITER_IN_PACK_HEAD が検出する）
+// - 行数は短く固定（長文化防止）
+// - 2重挿入はしない（この関数内で “必ず1回” にする）
+try {
+  const ctxPack: any = (opts as any)?.userContext?.ctxPack ?? null;
+
+  const rs: any =
+    ctxPack?.resonanceState ??
+    (opts as any)?.userContext?.resonanceState ??
+    (opts as any)?.resonanceState ??
+    null;
+
+  // ✅ 最優先：resonanceState.seed.seed_text（postprocess 正本）
+  const seedTextRaw: any =
+    (rs?.seed?.seed_text ?? null) ||
+    (rs?.seed_text ?? null) ||
+    // ✅ 互換：旧キー meta.extra.seed_text 相当
+    (ctxPack?.seed_text ?? null) ||
+    ((opts as any)?.userContext?.seed_text ?? null) ||
+    ((opts as any)?.seed_text ?? null) ||
+    null;
+
+  const seedTrim = typeof seedTextRaw === 'string' ? seedTextRaw.trim() : '';
+  const block = seedTrim ? clampLines(seedTrim, 6).trim() : '';
+
+  // ✅ すでに入ってたら追記しない（多重注入の止血）
+  const already = /RESONANCE_STATE_SEED\s*\(DO NOT OUTPUT\)/.test(String(internalPack ?? ''));
+
+  const appended = Boolean(block && !already);
+
+  if (appended) {
+    internalPack = [
+      String(internalPack ?? '').trim(),
+      `RESONANCE_STATE_SEED (DO NOT OUTPUT):\n${block}`,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+  }
+
+  console.log('[IROS/rephraseEngine][RESONANCE_SEEDIN]', {
+    traceId: debug.traceId,
+    conversationId: debug.conversationId,
+    userCode: debug.userCode,
+    hasSeed: Boolean(block),
+    seedLen: block.length,
+    seedHead: block.slice(0, 96),
+    appended,
+    already,
   });
+} catch (e) {
+  console.warn('[IROS/rephraseEngine][RESONANCE_SEEDIN] skipped', e);
+}
+// =========================================================
+// ✅ NEW: CARD seedin（B：seed を LLM に渡す）
+// - current: 観測できれば S1..T3（検出不能は null 許容）
+// - future: 完全ランダム（S1..I3, e1..e5, yin/yang 全ランダム）
+// - LLM へ渡すのは「カード2枚＋短いルール」だけ（10〜15行に強制）
+// =========================================================
+try {
+  const { buildDualCardPacket, formatDualCardPacketForLLM } = await import('@/lib/iros/cards/card180');
+
+  const ctxPack: any = (opts as any)?.userContext?.ctxPack ?? null;
+
+  const packet = buildDualCardPacket(
+    {
+      current: {
+        // stage は “柱” を優先（S1..T3 が来る想定）
+        stage: pickedDepthStage ?? null,
+
+        // e_turn / polarity は mirrorFlow の instant を正本として拾う（無ければ null → 現状カードnull）
+        e_turn: (ctxPack?.mirror?.e_turn ?? ctxPack?.e_turn ?? null) as any,
+        polarity: (ctxPack?.mirror?.polarity ?? ctxPack?.polarity ?? null) as any,
+
+        // sa はあれば補正材料として渡す（無ければ null）
+        sa: (ctxPack?.sa ?? null) as any,
+
+        // basedOn は短い根拠（user head）でOK（長文禁止）
+        basedOn: String(userText ?? '').trim().slice(0, 80) || null,
+        confidence: (ctxPack?.mirror?.confidence ?? ctxPack?.confidence ?? null) as any,
+      },
+      previous: null,
+      randomSeed: null,
+    },
+    {
+      // 仕様どおり
+      currentUndetectablePolicy: 'null',
+    },
+  );
+
+  // ✅ card180 側で「カード2枚＋ルール」を生成
+  const raw = String(formatDualCardPacketForLLM(packet) ?? '').trim();
+
+  // ✅ 要件：LLMへ渡すのは 10〜15行
+  // - card180 側が将来伸びても、ここで必ず短く固定する
+  const cardSeedText = clampLines(raw, 15).trim();
+
+  // internalPack の末尾に “短い塊” として追記（空は足さない）
+  if (cardSeedText) {
+    internalPack = [String(internalPack ?? '').trim(), cardSeedText].filter(Boolean).join('\n\n');
+  }
+} catch (e) {
+  console.warn('[IROS/rephraseEngine][CARD_SEEDIN] skipped', e);
+}
 
   // ✅ 観測（確証を取る）
+  const __ip = String(internalPack ?? '');
+  const __tailN = 260;
+
   console.log('[IROS/rephraseEngine][STATE_SNAPSHOT_PICKED]', {
     traceId: debug.traceId,
     conversationId: debug.conversationId,
@@ -2400,21 +2711,23 @@ const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
     pickedDepthStage,
     pickedPhase,
     pickedQCode,
-    internalPackHead: safeHead(String(internalPack ?? ''), 220),
+    internalPackHead: safeHead(__ip, 220),
+    internalPackTail: __ip.length <= __tailN ? __ip : __ip.slice(-__tailN),
   });
 
 
+  // ✅ 方針：writer へ userText を一切渡さない（turns/history/finalUserText から除外）
+  // - turns を渡すと「過去assistant文に混入した userText」を再引用してしまうため、ここでは完全遮断する
+  const turnsForWriter: any[] = [];
+
+  // ✅ buildFirstPassMessages は finalUserText を採用しない（強制遮断）ため、
+  // ✅ 「最後を user で終わらせる」保証は seedDraft で行う（固定文のみ）
   let messages = buildFirstPassMessages({
     systemPrompt,
     internalPack,
-    turns: lastTurnsSafe,
-
-    // ✅ last user は “このターンの seedFinal” にする
-    // - @NEXT_HINT があれば hint（最小前進）へ寄る
-    // - 無ければ従来通り userText 相当（chooseSeedForLLM の設計）
-    finalUserText: seedFinal,
+    turns: turnsForWriter,
+    seedDraft: '続けてください', // ✅ 固定文のみ（userTextは禁止）
   });
-
 
   // ✅ HistoryDigest v1（外から渡された場合のみ注入）
   // - 生成はここではしない（生成元は本線側に固定）
@@ -2754,6 +3067,30 @@ if (messages.length > 0 && (messages as any)[0]?.role === 'system') {
   }
 
 // ✅ EXPR_META を system に混入（directiveV1 が ON のときだけ追記）
+// ✅ ここで「LLMに送る最終 system 全体」に、軽いランタイム方針を足す（systemPrompt.ts は触らない）
+if (Array.isArray(messages) && messages.length > 0 && messages[0]?.role === 'system') {
+  const base = String((messages[0] as any)?.content ?? '');
+  const extraSystemParts: string[] = [];
+
+  // -------------------------------------------------
+  // runtime policy（軽量・可変にしない）
+  // - 段/行数/見出し採用は LLM 判断に任せる
+  // - ただし「内部信号の露出禁止」「具体語アンカー」「見出し形式」だけは system で押さえる
+  // -------------------------------------------------
+  const runtimeWriterPolicyText = [
+    '【WRITER RUNTIME POLICY（DO NOT OUTPUT）】',
+    '- 内部信号（obs/flow/e_turn/polarity/intent/depth など）は使ってよいが、ラベル名や内部語を本文に出さない。',
+    '- 抽象だけでまとめず、ユーザー発話の具体語を最低1つ残す。',
+    '- 段・行数・見出しの有無は内容に合わせて決めてよい（無理に構造化しない）。',
+    '- 見出しを使う場合のみ、形式は「## 絵文字1つ + 半角スペース + 見出し本文」にする。',
+    '- 絵文字や見た目は文脈優先。固定テンプレ化しない（🫧は使わない）。',
+  ].join('\n');
+
+  if (runtimeWriterPolicyText.trim()) {
+    extraSystemParts.push(runtimeWriterPolicyText);
+  }
+
+// ✅ EXPR_META を system に混入（directiveV1 は system に混入しない）
 if (exprMetaText && String(exprMetaText).trim().length > 0) {
   const em: any = exprMeta && typeof exprMeta === 'object' ? exprMeta : {};
 
@@ -2761,16 +3098,14 @@ if (exprMetaText && String(exprMetaText).trim().length > 0) {
   const directiveV1 = String(em.directiveV1 ?? '').trim();
   const hasDirectiveV1 = !!(directiveV1_on && directiveV1.length > 0);
 
-  const injectedText = hasDirectiveV1
-    ? `${String(exprMetaText)}\n${directiveV1}`
-    : String(exprMetaText);
+  // ✅ system には exprMetaText のみ入れる（directiveV1 は入れない）
+  extraSystemParts.push(String(exprMetaText));
 
-  extraSystemParts.push(injectedText);
-
-  // 追跡用（既存ログは後で統合してOK。まず「混入できたか」を確実に見える化）
+  // 追跡用（directive が存在している事実だけ見える化）
   console.log('[IROS/rephraseEngine][EXPR_META]', {
     injected: true,
     hasDirectiveV1,
+    directiveInSystem: false,
   });
 }
 
@@ -2779,13 +3114,15 @@ if (exprMetaText && String(exprMetaText).trim().length > 0) {
     extraSystemParts.push(String(blockPlanText));
   }
 
-  const merged = [base, ...extraSystemParts].filter(Boolean).join('\n\n');
+  const merged = [base, ...extraSystemParts]
+    .filter((s) => String(s).trim().length > 0)
+    .join('\n\n');
 
   messages = [
     { role: 'system', content: merged } as any,
     ...messages.slice(1),
   ] as any;
-}
+}}
 
 // ✅ system は必ず1枚に正規化（先頭に複数あれば結合して潰す）
 if (Array.isArray(messages) && messages.length >= 2) {
@@ -2825,26 +3162,53 @@ if (Array.isArray(messages) && messages.length >= 2) {
   });
 
   // ログ確認
-  console.log('[IROS/rephraseEngine][MSG_PACK]', {
-    traceId: debug.traceId,
-    conversationId: debug.conversationId,
-    userCode: debug.userCode,
+/* =========================================
+ * [置換] src/lib/iros/language/rephrase/rephraseEngine.full.ts
+ * 範囲: 2856〜2864 を丸ごと置き換え
+ * 目的: historyText の「中身の見え方」と「空判定」を MSG_PACK に追加
+ * ========================================= */
+console.log('[IROS/rephraseEngine][MSG_PACK]', {
+  traceId: debug.traceId,
+  conversationId: debug.conversationId,
+  userCode: debug.userCode,
 
-    lastTurns: lastTurnsSafe.length,
-    hasHistoryText: Boolean(historyText),
-    historyTextLen: String(historyText ?? '').length,
+  lastTurns: lastTurnsSafe.length,
+  hasHistoryText: Boolean(historyText),
+  historyTextLen: String(historyText ?? '').length,
+  historyTextIsEmpty: !String(historyText ?? '').trim(),
+  historyTextHead: safeHead(String(historyText ?? ''), 180),
 
-    msgCount: messages.length,
-    roles: messages.map((m) => m.role),
+  msgCount: messages.length,
+  roles: messages.map((m: any) => m.role),
 
-    internalPackLen: String(internalPack ?? '').length,
-    internalPackHasHistoryHint: /HISTORY_HINT\s*\(DO NOT OUTPUT\)/i.test(String(internalPack ?? '')),
+  // ✅ 実際に LLM に送る「結合後 system」の長さ（systemポートの太さの確証）
+  systemLen:
+    Array.isArray(messages) && messages[0]?.role === 'system'
+      ? String((messages[0] as any)?.content ?? '').length
+      : 0,
 
-    // ✅ seedDraft 実体の監査（発生源特定用）
-    seedDraftLen: seedDraft.length,
-    seedDraftHead: safeHead(seedDraft, 120),
-    seedDraftRawAllHead: safeHead(seedDraftRawAll, 200),
-    seedDraftRawPickedHead: safeHead(seedDraftRawPicked, 200),
+  // ✅ 各メッセージのサイズ内訳（誰がprompt_tokensを太らせているか確定）
+  msgLens: (Array.isArray(messages) ? messages : []).map((m: any, idx: number) => ({
+    i: idx,
+    role: String(m?.role ?? ''),
+    len: String(m?.content ?? '').length,
+    head: safeHead(String(m?.content ?? ''), 120),
+  })),
+
+  internalPackLen: String(internalPack ?? '').length,
+  internalPackHasHistoryHint: /HISTORY_HINT\s*\(DO NOT OUTPUT\)/i.test(String(internalPack ?? '')),
+
+  // ✅ merged system の内訳（このスコープで参照できる範囲だけ）
+  mergedSystemPartsLen: {
+    systemPrompt: String(systemPrompt ?? '').length,
+    exprMetaText: String(exprMetaText ?? '').length,
+    blockPlanText: String(blockPlanText ?? '').length,
+  },
+
+  // ✅ seedDraft 実体の監査（発生源特定用）
+  seedDraftLen: seedDraft.length,
+  seedDraftHead: safeHead(seedDraft, 120),
+  seedDraftRawAllHead: safeHead(seedDraftRawAll, 200),
 
     // ✅ slots の中身を “頭だけ” 監査（自然文混入の犯人探し）
     slotsHead: (extracted?.slots ?? []).map((s: any, i: number) => ({
@@ -3191,7 +3555,38 @@ if (Array.isArray(messages) && messages.length >= 2) {
     } as any;
   }
 }
+/* =========================================
+ * [置換 1] src/lib/iros/language/rephrase/rephraseEngine.full.ts
+ * 範囲: 3585〜3592 を丸ごと置換
+ * 目的: resonance seed の「存在」だけでなく「位置（index）と周辺（前後スニペット）」を出す
+ * ========================================= */
+{
+  const pack = String(internalPack ?? '');
 
+  // marker は揺れるので広めに拾う（RESONANCE_STATE_SEED / RESONANCE_STATE / seedin）
+  const seedIdx = pack.search(/RESONANCE_STATE_SEED\s*\(DO NOT OUTPUT\)|RESONANCE_STATE\b|seedin/i);
+  const near =
+    seedIdx >= 0
+      ? pack.slice(Math.max(0, seedIdx - 140), Math.min(pack.length, seedIdx + 240))
+      : null;
+
+  // 先頭/末尾の確認も残す（head/tail は従来どおり）
+  console.log('[IROS/LLM][WRITER_IN_PACK_HEAD]', {
+    traceId: debug.traceId,
+    conversationId: debug.conversationId,
+    userCode: debug.userCode,
+
+    packLen: pack.length,
+    packLines: pack ? pack.split('\n').length : 0,
+
+    hasResonanceSeed: seedIdx >= 0,
+    seedIdx,
+    seedNear: near,
+
+    head: pack.slice(0, 260),
+    tail: pack.slice(-260),
+  });
+}
   raw = await callWriterLLM({
     model: opts.model ?? 'gpt-5',
     temperature: opts.temperature ?? 0.7,

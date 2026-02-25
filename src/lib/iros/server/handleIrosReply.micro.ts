@@ -91,7 +91,10 @@ export function shouldBypassMicroGate(userText: string): boolean {
   const s = (userText ?? '').trim();
   if (!s) return false;
 
+  // ✅ micro に吸わせない入力（正規ルートへ落とす）
+  // - 続き要求 / 進行要求 / 想起・参照要求は、seed/history/ctxPack が必要になりやすい
   const keywords = [
+    // ---- 想起・参照系（既存） ----
     '覚えて',
     '覚えてない',
     'なんでしたっけ',
@@ -103,6 +106,18 @@ export function shouldBypassMicroGate(userText: string): boolean {
     'どれだっけ',
     'どっちだっけ',
     '言った',
+
+    // ---- 進行要求（追加：今回の本丸）----
+    '続けて',
+    '続き',
+    'つづき',
+    'もう少し',
+    'もうちょっと',
+    'そのまま',
+    '進めて',
+    '進もう',
+    '先へ',
+    '次',
   ];
 
   return keywords.some((k) => s.includes(k));

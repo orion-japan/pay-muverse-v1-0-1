@@ -141,7 +141,7 @@ function slotsOkFromHints(args: { slotPlanLen: number | null; hasSlots: boolean 
 // ✅ 目的：LLMが迷わない seed を固定で作る（本文採用とは分離）
 // - @SHIFT: 出力契約（semantic_answer）
 // - @CTX  : メタの短い要約（JSONは渡さず短文化）
-// - @OBS  : ユーザー生文（必須）
+// - @OBS  : 観測の核（NOW_CORE）。ユーザー生文は入れない。
 // - SEED_TEXT: slots 由来の本文（あれば）
 function buildWriterRewriteSeed(args: {
   userText: string;
@@ -225,7 +225,10 @@ function buildWriterRewriteSeed(args: {
   ].join('\n');
 
 
-  const obs = user ? `@OBS {"user":${JSON.stringify(user)}}` : '';
+// ✅ userText を LLM 入力へ混入させない（internalPack / system へ渡さない）
+// - @OBS {"user": ...} は復唱・素材化・漏れの直結ルートになるため無効化する。
+// - 代替の NOW_CORE 等は後段で導入する（まずは止血）。
+const obs = '';
   const ctx = ctxLine ? `@CTX ${JSON.stringify(ctxLine)}` : '';
 
   // ✅ seedText は「最後」に置く（契約→背景→入力→素材の順）
@@ -415,8 +418,15 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
   const candidate = looksLikeInternalSeed(rawCandidate) ? '' : rawCandidate;
   const candidateLen = candidate.length;
 
-  // ✅ 実質本文（raw seed source）：textNow 優先、なければ「安全な candidate」
-  const effectiveText = textNowLen > 0 ? textNow : candidate;
+  // =========================================================
+  // effectiveText / effectiveLen
+  // - FINAL__LLM_DEFER のときは「本文は空扱い」→ writer を走らせる
+  //   （seed は meta.extra.llmRewriteSeed に保持されている前提）
+  // =========================================================
+  const finalTextPolicy = String((input as any)?.meta?.extra?.finalTextPolicy ?? '').trim();
+  const shouldDeferFinal = finalTextPolicy === 'FINAL__LLM_DEFER';
+
+  const effectiveText = shouldDeferFinal ? '' : String((input as any)?.finalAssistantText ?? '').trim();
   const effectiveLen = effectiveText.length;
 
 

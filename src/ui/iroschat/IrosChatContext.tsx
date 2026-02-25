@@ -121,21 +121,23 @@ function buildHistoryForLLM(
   msgs: IrosMessage[],
   limitPairs: number = 10,
 ): { role: 'user' | 'assistant'; content: string }[] {
+  // ✅ UI方針：history には assistant の本文だけ入れる（userText は絶対入れない）
   const cleaned = (msgs || [])
     .map((m) => {
       const roleRaw = (m as any)?.role;
-      if (roleRaw !== 'user' && roleRaw !== 'assistant') return null;
+      if (roleRaw !== 'assistant') return null;
 
       const content = normalizeText((m as any)?.content ?? (m as any)?.text).trim();
       if (!content) return null;
 
-      return { role: roleRaw as 'user' | 'assistant', content };
+      return { role: 'assistant' as const, content };
     })
     .filter(
-      (x): x is { role: 'user' | 'assistant'; content: string } =>
+      (x): x is { role: 'assistant'; content: string } =>
         !!x && x.content.trim().length > 0,
     );
 
+  // limitPairs は互換のため維持（実質 “assistant turns” の上限として効く）
   const max = Math.max(2, limitPairs * 2);
   return cleaned.slice(-max);
 }

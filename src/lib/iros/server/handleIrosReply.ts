@@ -508,6 +508,33 @@ const microGenerate: MicroWriterGenerate = async (args) => {
       const conversationId0 = (args as any).conversationId ?? null;
       const userCode0 = (args as any).userCode ?? null;
 
+      // ✅ C対応：allowLLM が false なら micro は絶対に LLM を呼ばない
+      // - 上流が out.metaForSave.speechAllowLLM を確定して渡す想定
+      // - 無ければ allowLLM / speechAllowLLM を互換で見る（推測せず「存在する boolean」だけ採用）
+      const allowLLM_micro =
+        typeof (args as any).allowLLM_final === 'boolean'
+          ? (args as any).allowLLM_final
+          : typeof (args as any).allowLLM === 'boolean'
+            ? (args as any).allowLLM
+            : typeof (args as any).speechAllowLLM === 'boolean'
+              ? (args as any).speechAllowLLM
+              : true;
+
+      if (!allowLLM_micro) {
+        console.log('[IROS/LLM][CALL_MICRO][SKIP_POLICY]', {
+          writer: 'micro',
+          traceId: traceId0,
+          conversationId: conversationId0,
+          userCode: userCode0,
+          reason: 'allowLLM_micro=false',
+          hasDigest,
+          hasAnchor,
+          digestChars,
+          msgCount: messages.length,
+        });
+        return '';
+      }
+
       console.log('[IROS/LLM][CALL_MICRO]', {
         writer: 'micro',
         traceId: traceId0,
@@ -530,9 +557,9 @@ const microGenerate: MicroWriterGenerate = async (args) => {
         conversationId: conversationId0,
         userCode: userCode0,
       });
+
       return String(out ?? '').trim();
     };
-
 
     const judgeMicro = async (text: string) => {
       const t = String(text ?? '').trim();
@@ -705,8 +732,28 @@ function runLlmGate(args: {
   try {
     const allowLLM_final0 = typeof allowLLM_final === 'boolean' ? allowLLM_final : true;
 
-    const metaForProbe = metaForCandidate ?? metaForSave ?? null;
+    const metaCandidate = metaForCandidate ?? null;
+    const metaSaved = metaForSave ?? null;
 
+    const candEx: any = metaCandidate?.extra ?? null;
+    const saveEx: any = metaSaved?.extra ?? null;
+
+    // ✅ seed が載ってる meta を優先（postprocess 後の metaForSave を拾えるようにする）
+    const candidateHasSeed =
+      Boolean(candEx?.slotPlanSeed) ||
+      Boolean(candEx?.llmRewriteSeed) ||
+      Boolean((metaCandidate as any)?.seed_text) ||
+      Boolean(candEx?.ctxPack?.seed_text);
+
+    const savedHasSeed =
+      Boolean(saveEx?.slotPlanSeed) ||
+      Boolean(saveEx?.llmRewriteSeed) ||
+      Boolean((metaSaved as any)?.seed_text) ||
+      Boolean(saveEx?.ctxPack?.seed_text);
+
+    const metaForProbe =
+      (savedHasSeed && !candidateHasSeed) ? metaSaved :
+      (metaCandidate ?? metaSaved ?? null);
     const hasSlots =
       Boolean(metaForProbe?.framePlan?.slots) ||
       Boolean(metaForProbe?.framePlan?.framePlan?.slots) ||
@@ -731,24 +778,35 @@ function runLlmGate(args: {
       metaForSave?.extra?.slotPlanPolicy ??
       null;
 
-    const exProbe: any = metaForProbe?.extra ?? null;
-    const exSave: any = metaForSave?.extra ?? null;
+      const exProbe: any = metaForProbe?.extra ?? null;
+      const exSave: any = metaForSave?.extra ?? null;
 
-    const seedFallbackRaw =
-      exProbe?.slotPlanSeed ??
-      exProbe?.llmRewriteSeed ??
-      exSave?.slotPlanSeed ??
-      exSave?.llmRewriteSeed ??
-      null;
+// 置換範囲: 764〜769（seedFallbackRaw の定義ブロック）
 
-    const seedFallback =
-      seedFallbackRaw != null && String(seedFallbackRaw).trim().length > 0
-        ? String(seedFallbackRaw).trim()
-        : '';
+const seedFallbackRaw =
+  // 既存の seed 系（優先）
+  exProbe?.slotPlanSeed ??
+  exProbe?.llmRewriteSeed ??
+  exSave?.slotPlanSeed ??
+  exSave?.llmRewriteSeed ??
 
-    const textNowRaw = String(assistantTextNow ?? '').trim();
-    const textNow = textNowRaw.length > 0 ? textNowRaw : seedFallback;
+  // ✅ 追加：seed_text（ctxPack / PP が持ってる “seed only”）
+  (metaForProbe as any)?.seed_text ??
+  (metaForSave as any)?.seed_text ??
 
+  // ✅ 追加：ctxPack 内に入ってる場合も拾う（PPで stamp 済みの正本）
+  (exSave as any)?.ctxPack?.seed_text ??
+  (exProbe as any)?.ctxPack?.seed_text ??
+
+  null;
+
+      const seedFallback =
+        seedFallbackRaw != null && String(seedFallbackRaw).trim().length > 0
+          ? String(seedFallbackRaw).trim()
+          : '';
+
+      const textNowRaw = String(assistantTextNow ?? '').trim();
+      const textNow = textNowRaw.length > 0 ? textNowRaw : seedFallback;
     // slotPlanLen 推定（既存ロジックを保持）
     if (slotPlanLen == null) {
       const slotsObj =
@@ -796,12 +854,19 @@ function runLlmGate(args: {
         ? String(resolvedTextRaw).trim()
         : null;
 
-    // ✅ 追加：CALL_LLM の “本命” は rewriteSeed
+    // ✅ CALL_LLM の “本命” は rewriteSeed
+    // - probe.decision.rewriteSeed が空でも、seedFallback があればそれを採用して運ぶ
+    const llmEntryNow = (probe.patch as any)?.llmEntry ?? null;
+
     const rewriteSeedRaw = (probe.decision as any)?.rewriteSeed;
-    const rewriteSeed =
+    const rewriteSeedFromDecision =
       rewriteSeedRaw != null && String(rewriteSeedRaw).trim().length > 0
         ? String(rewriteSeedRaw).trim()
         : null;
+
+    const rewriteSeed =
+      rewriteSeedFromDecision ??
+      (llmEntryNow === 'CALL_LLM' && seedFallback.length > 0 ? seedFallback : null);
 
     return {
       llmEntry: (probe.patch as any)?.llmEntry ?? null,
@@ -1143,6 +1208,12 @@ if (!bypassMicro && isMicroNow) {
       traceId,
       conversationId,
       userCode,
+
+      // ✅ 上流で確定した allowLLM をそのまま渡す（推測しない）
+      allowLLM_final:
+        typeof (ctx0 as any)?.baseMetaForTurn?.speechAllowLLM === 'boolean'
+          ? (ctx0 as any).baseMetaForTurn.speechAllowLLM
+          : null,
 
       // ✅ microGenerate 側で注入する
       historyDigestV1: digestV1,
@@ -2090,6 +2161,9 @@ for (let i = hft.length - 1; i >= 0; i--) {
   const flowObj =
     (m as any)?.meta?.extra?.ctxPack?.flow ??
     (m as any)?.meta?.ctxPack?.flow ??
+    // ✅ 互換: 旧/別経路（extra.flow / meta.flow）も拾う
+    (m as any)?.meta?.extra?.flow ??
+    (m as any)?.meta?.flow ??
     null;
 
   const flowAt = flowObj?.at ?? null;
@@ -2097,6 +2171,7 @@ for (let i = hft.length - 1; i >= 0; i--) {
     prevAtIso = flowAt.trim();
   }
 
+  // ✅ returnStreak も同じ flowObj から拾えるようにする
   const rsRaw = flowObj?.returnStreak ?? null;
   if (prevReturnStreak == null) {
     if (typeof rsRaw === 'number' && Number.isFinite(rsRaw)) {
@@ -2105,7 +2180,6 @@ for (let i = hft.length - 1; i >= 0; i--) {
       prevReturnStreak = Number(rsRaw);
     }
   }
-
   if (prevAtIso && prevReturnStreak != null) break;
 }
 
@@ -2119,73 +2193,115 @@ if (prevAtIso) {
   }
 }
 
-  // ✅ flowDelta をこの場で算出
-  // 方針：
-  // 1) すでに out/metaForSave 側に flow があるなら「それを正本」として採用（上書きしない）
-  // 2) 無い場合だけ observeFlow で算出
-  const userObs2 = String(text ?? '').trim();
+// ✅ flowDelta をこの場で算出
+// 方針：
+// 1) すでに out/metaForSave 側に flow があるなら「それを正本」として採用（上書きしない）
+// 2) 無い場合だけ observeFlow で算出
+const userObs2 = String(text ?? '').trim();
 
-  // lastUserTextForFlow は「直前の user」を拾う（同文でもOK）
-  // - 同一文が末尾に重複しているケースで「別文を探す」方式だと lastUserText を失い、flow がズレるため
-  let lastUserTextForFlow: string | null = null;
-  for (let i = hft.length - 1; i >= 0; i--) {
-    const m = hft[i];
-    const role = String((m as any)?.role ?? '').toLowerCase();
-    if (role !== 'user') continue;
+// lastUserTextForFlow は「直前の user」を拾う（同文でもOK）
+// - 同一文が末尾に重複しているケースで「別文を探す」方式だと lastUserText を失い、flow がズレるため
+let lastUserTextForFlow: string | null = null;
+for (let i = hft.length - 1; i >= 0; i--) {
+  const m = hft[i];
+  const role = String((m as any)?.role ?? '').toLowerCase();
+  if (role !== 'user') continue;
 
-    const c = String((m as any)?.content ?? (m as any)?.text ?? '').trim();
-    if (!c) continue;
+  const c = String((m as any)?.content ?? (m as any)?.text ?? '').trim();
+  if (!c) continue;
 
-    lastUserTextForFlow = c;
-    break;
+  lastUserTextForFlow = c;
+  break;
+}
+
+let flowDelta: string | null = null;
+let flowConfidence: number | null = null;
+
+// ✅ まず「既に計算済みの flow」を探す（上書き防止）
+// - ここはプロジェクト内で散らばっている可能性があるので “拾えるだけ拾う”
+const preDeltaRaw =
+  (mf2 as any)?.flow?.delta ??
+  (mf2 as any)?.extra?.flow?.delta ??
+  (mf2 as any)?.extra?.ctxPack?.flow?.delta ??
+  (mf2 as any)?.ctxPack?.flow?.delta ??
+  (mf2 as any)?.extra?.ctxPack?.flow?.flowDelta ??
+  (mf2 as any)?.ctxPack?.flow?.flowDelta ??
+  null;
+
+const preConfRaw =
+  (mf2 as any)?.flow?.confidence ??
+  (mf2 as any)?.extra?.flow?.confidence ??
+  (mf2 as any)?.extra?.ctxPack?.flow?.confidence ??
+  (mf2 as any)?.ctxPack?.flow?.confidence ??
+  (mf2 as any)?.extra?.ctxPack?.flow?.flowConfidence ??
+  (mf2 as any)?.ctxPack?.flow?.flowConfidence ??
+  null;
+
+if (typeof preDeltaRaw === 'string' && preDeltaRaw.trim().length > 0) {
+  flowDelta = preDeltaRaw.trim();
+  flowConfidence = typeof preConfRaw === 'number' && Number.isFinite(preConfRaw) ? preConfRaw : null;
+} else {
+  try {
+    // import 衝突回避のため動的 import
+    const { observeFlow } = await import('../input/flowObserver');
+    const flow = observeFlow({
+      currentText: userObs2,
+      lastUserText: lastUserTextForFlow ?? undefined,
+    }) as any;
+
+    const d = flow?.delta ? String(flow.delta) : null;
+    flowDelta = d && d.trim().length > 0 ? d.trim() : null;
+
+    const conf = typeof flow?.confidence === 'number' ? flow.confidence : null;
+    flowConfidence = typeof conf === 'number' && Number.isFinite(conf) ? conf : null;
+  } catch {
+    flowDelta = null;
+    flowConfidence = null;
   }
+}
 
-  let flowDelta: string | null = null;
-  let flowConfidence: number | null = null;
+// 正規化（比較と stamp を揃える）
+const flowDeltaNorm = flowDelta ? String(flowDelta).toUpperCase().trim() : null;
 
-  // ✅ まず「既に計算済みの flow」を探す（上書き防止）
-  // - ここはプロジェクト内で散らばっている可能性があるので “拾えるだけ拾う”
-  const preDeltaRaw =
-    (mf2 as any)?.flow?.delta ??
-    (mf2 as any)?.extra?.flow?.delta ??
-    (mf2 as any)?.extra?.ctxPack?.flow?.flowDelta ??
-    (mf2 as any)?.ctxPack?.flow?.flowDelta ??
-    null;
+// ✅ returnStreak は「既に計算済みがあればそれを正本」として採用し、無い時だけ prev+delta で算出
+const preReturnStreakRaw =
+  (mf2 as any)?.flow?.returnStreak ??
+  (mf2 as any)?.extra?.flow?.returnStreak ??
+  (mf2 as any)?.extra?.ctxPack?.flow?.returnStreak ??
+  (mf2 as any)?.ctxPack?.flow?.returnStreak ??
+  null;
 
-  const preConfRaw =
-    (mf2 as any)?.flow?.confidence ??
-    (mf2 as any)?.extra?.flow?.confidence ??
-    (mf2 as any)?.extra?.ctxPack?.flow?.flowConfidence ??
-    (mf2 as any)?.ctxPack?.flow?.flowConfidence ??
-    null;
+let returnStreak: number = 0;
 
-  if (typeof preDeltaRaw === 'string' && preDeltaRaw.trim().length > 0) {
-    flowDelta = preDeltaRaw.trim();
-    flowConfidence = typeof preConfRaw === 'number' && Number.isFinite(preConfRaw) ? preConfRaw : null;
-  } else {
-    try {
-      // import 衝突回避のため動的 import
-      const { observeFlow } = await import('../input/flowObserver');
-      const flow = observeFlow({
-        currentText: userObs2,
-        lastUserText: lastUserTextForFlow ?? undefined,
-      }) as any;
+if (typeof preReturnStreakRaw === 'number' && Number.isFinite(preReturnStreakRaw)) {
+  returnStreak = preReturnStreakRaw;
+} else if (typeof preReturnStreakRaw === 'string' && preReturnStreakRaw.trim() && Number.isFinite(Number(preReturnStreakRaw))) {
+  returnStreak = Number(preReturnStreakRaw);
+} else {
+  const prevRs =
+    typeof prevReturnStreak === 'number' && Number.isFinite(prevReturnStreak) ? prevReturnStreak : 0;
+  returnStreak = flowDelta === 'RETURN' ? prevRs + 1 : 0;
+}
 
-      const d = flow?.delta ? String(flow.delta) : null;
-      flowDelta = d && d.trim().length > 0 ? d.trim() : null;
+// ✅ ctxPack.flow を毎ターン stamp（正本）
+(extra2.ctxPack as any).flow = {
+  at: nowIso2,
+  ageSec: ageSec ?? null,
+  // delta を正本に（互換で flowDelta も併記）
+  delta: flowDeltaNorm ?? null,
+  flowDelta: flowDeltaNorm ?? null,
+  confidence: flowConfidence ?? null,
+  flowConfidence: flowConfidence ?? null,
+  returnStreak,
+  sessionBreak: false,
+};
 
-      const conf = typeof flow?.confidence === 'number' ? flow.confidence : null;
-      flowConfidence = conf;
-    } catch {
-      flowDelta = null;
-      flowConfidence = null;
-    }
-  }
-
-// ✅ returnStreak は ctxPack.flow を正本にする（RETURN なら +1 / それ以外は 0）
-const prevRs =
-  typeof prevReturnStreak === 'number' && Number.isFinite(prevReturnStreak) ? prevReturnStreak : 0;
-const returnStreak = flowDelta === 'RETURN' ? prevRs + 1 : 0;
+// 互換：extra.flow にも薄く置く（既存が参照している可能性があるため）
+if (!extra2.flow || typeof extra2.flow !== 'object') extra2.flow = {};
+(extra2.flow as any).delta = (extra2.flow as any).delta ?? flowDeltaNorm ?? null;
+(extra2.flow as any).confidence = (extra2.flow as any).confidence ?? flowConfidence ?? null;
+(extra2.flow as any).returnStreak = (extra2.flow as any).returnStreak ?? returnStreak;
+(extra2.flow as any).sessionBreak = (extra2.flow as any).sessionBreak ?? false;
 
 // ctxPack にも historyForWriter を同期（循環参照を避ける最小形）
 const hfw = Array.isArray((out.metaForSave as any)?.extra?.historyForWriter)
@@ -2287,17 +2403,36 @@ if ((extra2.ctxPack as any).historyDigestV1 == null && digestV1Raw) {
 
 
 
-// 既存の flow 同期はそのまま
-(extra2.ctxPack as any).flow = {
+// 既存の flow 同期はそのまま（ただし returnStreak/flowDelta は meta.extra.flow を正本にする）
+const flowFromMeta: any =
+  (out.metaForSave as any)?.extra?.ctxPack?.flow ??
+  (out.metaForSave as any)?.extra?.flow ??
+  null;
 
+const flowDelta_forCtx =
+  (flowFromMeta && typeof flowFromMeta.flowDelta === 'string' && flowFromMeta.flowDelta.trim())
+    ? flowFromMeta.flowDelta.trim()
+    : (flowDelta ?? null);
+
+const returnStreak_forCtx =
+  (flowFromMeta && typeof flowFromMeta.returnStreak === 'number')
+    ? flowFromMeta.returnStreak
+    : (typeof returnStreak === 'number' ? returnStreak : null);
+
+const flowConfidence_forCtx =
+  (flowFromMeta && typeof flowFromMeta.flowConfidence === 'number')
+    ? flowFromMeta.flowConfidence
+    : (typeof flowConfidence === 'number' ? flowConfidence : null);
+
+(extra2.ctxPack as any).flow = {
   at: nowIso2,
   prevAtIso,
   ageSec,
 
-  // ✅ Downshift 観測用（正本）
-  flowDelta: flowDelta ?? null,
-  flowConfidence: typeof flowConfidence === 'number' ? flowConfidence : null,
-  returnStreak,
+  // ✅ 正本優先
+  flowDelta: flowDelta_forCtx,
+  flowConfidence: flowConfidence_forCtx,
+  returnStreak: returnStreak_forCtx,
 
   // minimal: ここでは固定
   sessionBreak: false,
@@ -2307,6 +2442,30 @@ if ((extra2.ctxPack as any).historyDigestV1 == null && digestV1Raw) {
 };
 
 (extra2.ctxPack as any).exprMeta = (out.metaForSave as any)?.extra?.exprMeta ?? null;
+
+// ✅ RESONANCE_STATE / seed_text を ctxPack 正本へ同期（rephraseEngine が拾う入口）
+{
+  const exOut: any = (out.metaForSave as any)?.extra ?? {};
+  const rs: any =
+    exOut?.resonanceState ??
+    exOut?.ctxPack?.resonanceState ??
+    null;
+
+  if ((extra2.ctxPack as any).resonanceState == null && rs && typeof rs === 'object') {
+    (extra2.ctxPack as any).resonanceState = rs;
+  }
+
+  // 互換：seed_text（rephraseEngine が旧キーでも拾える）
+  const seedText: any =
+    exOut?.seed_text ??
+    (typeof rs?.seed?.seed_text === 'string' ? rs.seed.seed_text : null) ??
+    (typeof rs?.seed_text === 'string' ? rs.seed_text : null) ??
+    null;
+
+  if ((extra2.ctxPack as any).seed_text == null && typeof seedText === 'string' && seedText.trim()) {
+    (extra2.ctxPack as any).seed_text = seedText.trim();
+  }
+}
 
 // digestChars は “注入対象の文字数” を見るため（JSON stringify）
 let digestChars: number | null = null;
@@ -2370,26 +2529,130 @@ try {
       ? out.metaForSave.speechAllowLLM
       : true;
 
-  const metaForCandidate =
-    (orch as any)?.result?.meta ??
-    (orch as any)?.meta ??
-    null;
+      const metaForCandidate =
+      (orch as any)?.result?.meta ??
+      (orch as any)?.meta ??
+      null;
 
-  if ((out.metaForSave as any)?.slotPlanLen == null) {
-    const n = inferSlotPlanLen(metaForCandidate ?? out.metaForSave);
-    if (typeof n === 'number') (out.metaForSave as any).slotPlanLen = n;
-  }
+    // --- FIX: slotPlan を framePlan.slots（枠）に合わせて補完する（SAFE欠け対策） ---
+    // ✅ ここで out.metaForSave.slotPlan を正規化して「LLM_GATE が見る meta」に反映させる
+    try {
+      const fp0 = (out.metaForSave as any)?.framePlan ?? null;
+      const sp0 = (out.metaForSave as any)?.slotPlan ?? null;
 
-  const gate = runLlmGate({
-    tag: 'PROBE',
-    conversationId,
-    userCode,
-    metaForSave: out.metaForSave,
-    metaForCandidate,
-    allowLLM_final,
-    assistantTextNow, // ✅ assistantText/content のみ
-  });
+      // framePlan.slots: [{id, hint, ...}, ...]
+      const fpSlots: any[] = Array.isArray(fp0?.slots) ? fp0.slots : [];
+      const wantIds = fpSlots.map((s: any) => String(s?.id ?? '').trim()).filter(Boolean);
 
+      const spArrRaw: any[] = Array.isArray(sp0) ? sp0 : [];
+
+      // 1) 想定している slotPlan 形（{key,text}）
+      const looksLikeKeyText =
+        spArrRaw.length === 0 ||
+        spArrRaw.every((x: any) => x && typeof x === 'object' && 'key' in x && 'text' in x);
+
+      // 2) “間違って入ってきがち” な形：framePlan のスロット定義配列（{id,required,hint}）
+      const looksLikeFrameDefs =
+        spArrRaw.length > 0 &&
+        spArrRaw.every(
+          (x: any) =>
+            x &&
+            typeof x === 'object' &&
+            'id' in x &&
+            'required' in x &&
+            'hint' in x &&
+            !('key' in x) &&
+            !('text' in x),
+        );
+
+      // frameDefs の場合は “本文スロットは無い” とみなす
+      const spArr: any[] = looksLikeFrameDefs ? [] : spArrRaw;
+
+      let slotPlanNormalized: any = sp0;
+
+      if (wantIds.length > 0 && Array.isArray(sp0) && (looksLikeKeyText || looksLikeFrameDefs)) {
+        const byKey = new Map<string, any>();
+        for (const x of spArr) {
+          const k = String(x?.key ?? '').trim();
+          if (k) byKey.set(k, x);
+        }
+
+        const normalized: any[] = [];
+        const missing: string[] = [];
+
+        for (const id of wantIds) {
+          const hit = byKey.get(id);
+          if (hit) {
+            normalized.push(hit);
+            continue;
+          }
+
+          // 欠けスロット（特に SAFE）を最小プレースホルダで補完
+          const hint = fpSlots.find((s: any) => String(s?.id ?? '').trim() === id)?.hint ?? null;
+
+          missing.push(id);
+          normalized.push({
+            key: id,
+            text: `@${id} ${JSON.stringify(
+              { kind: 'auto_fill', hint: hint ? String(hint) : null },
+              null,
+              0,
+            )}`,
+          });
+        }
+
+        slotPlanNormalized = normalized;
+
+        console.log('[IROS/rephraseBridge][SLOT_NORM]', {
+          wantIds,
+          had: spArr.map((x: any) => String(x?.key ?? '').trim()).filter(Boolean),
+          missing,
+          len_before: spArrRaw.length,
+          len_after: normalized.length,
+          fromFrameDefs: looksLikeFrameDefs,
+        });
+
+        // debug用に extra へ残す（後で消してOK）
+        out.metaForSave = out.metaForSave ?? ({} as any);
+        out.metaForSave.extra = out.metaForSave.extra ?? ({} as any);
+        (out.metaForSave as any).extra.slotPlan_norm = {
+          from: looksLikeFrameDefs ? 'framePlan.slots(frameDefs->autofill)' : 'framePlan.slots',
+          want: wantIds,
+          had: spArr.map((x: any) => String(x?.key ?? '').trim()).filter(Boolean),
+          missing,
+          len_before: spArrRaw.length,
+          len_after: normalized.length,
+          fromFrameDefs: looksLikeFrameDefs,
+        };
+      }
+
+      // ✅ ここが最重要：LLM_GATE が見る metaForSave.slotPlan に反映
+      if (slotPlanNormalized != null) {
+        (out.metaForSave as any).slotPlan = slotPlanNormalized;
+
+        // ✅ slotPlanLen も同時に更新（LLM_GATE ログが 3 のままになるのを防ぐ）
+        (out.metaForSave as any).slotPlanLen = Array.isArray(slotPlanNormalized)
+          ? slotPlanNormalized.length
+          : null;
+      }
+    } catch {}
+    // --- /FIX ---
+
+    // slotPlanLen が未設定のときだけ infer（上で確定していればここはスキップされる）
+    if ((out.metaForSave as any)?.slotPlanLen == null) {
+      const n = inferSlotPlanLen(metaForCandidate ?? out.metaForSave);
+      if (typeof n === 'number') (out.metaForSave as any).slotPlanLen = n;
+    }
+
+    const gate = runLlmGate({
+      tag: 'PROBE',
+      conversationId,
+      userCode,
+      metaForSave: out.metaForSave,
+      metaForCandidate,
+      allowLLM_final,
+      assistantTextNow, // ✅ assistantText/content のみ
+    });
   // ✅ resolvedText を本文に採用するのは SKIP 系のときだけ
   const isSkip =
     gate?.llmEntry === 'SKIP_POLICY' ||
@@ -2762,49 +3025,94 @@ try {
       const slotTextCleanedLen = Number((ex as any)?.slotTextCleanedLen ?? NaN);
       const slotTextRawLen = Number((ex as any)?.slotTextRawLen ?? NaN);
 
-      // 現時点の本文（最終的に '……' になっているケースがあるので、これだけに依存しない）
-      const bodyNow = String(out.assistantText ?? (out as any)?.content ?? '').trim();
+// 現時点の本文（最終的に '……' になっているケースがあるので、これだけに依存しない）
+const bodyNow = String(out.assistantText ?? (out as any)?.content ?? '').trim();
 
-      const alreadyHasBlocks = Array.isArray(ex?.rephraseBlocks) && ex.rephraseBlocks.length > 0;
+// ✅ traceId をこの場で一回だけ正規化（alreadyHasBlocks 判定にも使う）
+const traceIdNow: string | null = (() => {
+  const v =
+    (ctx as any)?.traceId ??
+    (out.metaForSave as any)?.extra?.traceId ??
+    (out.metaForSave as any)?.extra?.ctxPack?.traceId ??
+    (out.metaForSave as any)?.traceId ??
+    null;
 
-      // ✅ allowLLM_final のローカル確定（このブロック内で必ず定義する）
-      const allowLLM_final_local: boolean = (() => {
-        const v =
-          (ctx as any)?.allowLLM_final ??
-          (ctx as any)?.allowLLMFinal ??
-          (out.metaForSave as any)?.allowLLM_final ??
-          (out.metaForSave as any)?.allowLLMFinal ??
-          (out.metaForSave as any)?.extra?.allowLLM_final ??
-          null;
+  const s = typeof v === 'string' ? v.trim() : '';
+  return s ? s : null;
+})();
 
-        if (typeof v === 'boolean') return v;
-        return true; // デフォルトは許可（false のときだけ止める）
-      })();
+// ✅ 既存 blocks の trace（無ければ “古い残り” と見なす）
+const existingBlocksTraceId: string | null = (() => {
+  const v = (ex as any)?.rephraseBlocksTraceId ?? (ex as any)?.rephraseTraceId ?? null;
+  const s = typeof v === 'string' ? v.trim() : '';
+  return s ? s : null;
+})();
 
-      const hasSlotsLocal =
-        Array.isArray((out.metaForSave as any)?.slotPlan) &&
-        (out.metaForSave as any).slotPlan.length > 0;
+// ✅ blocks が残っていても「同一 traceId のときだけ」already 扱い
+const hasBlocksNow = Array.isArray((ex as any)?.rephraseBlocks) && (ex as any).rephraseBlocks.length > 0;
+const blocksTraceMatch =
+  !!traceIdNow && !!existingBlocksTraceId && traceIdNow === existingBlocksTraceId;
 
-      const internalMarkersOnly =
-        Number.isFinite(slotTextCleanedLen) &&
-        Number.isFinite(slotTextRawLen) &&
-        slotTextRawLen > 0 &&
-        slotTextCleanedLen === 0;
+let alreadyHasBlocks = hasBlocksNow && blocksTraceMatch;
 
-      const hasSeedText = Number.isFinite(slotTextCleanedLen) && slotTextCleanedLen > 0;
+// ✅ allowLLM_final のローカル確定（このブロック内で必ず定義する）
+const allowLLM_final_local: boolean = (() => {
+  const v =
+    (ctx as any)?.allowLLM_final ??
+    (ctx as any)?.allowLLMFinal ??
+    (out.metaForSave as any)?.allowLLM_final ??
+    (out.metaForSave as any)?.allowLLMFinal ??
+    (out.metaForSave as any)?.extra?.allowLLM_final ??
+    null;
 
-      const bodyEmptyLike = !bodyNow || isDotsOnly(bodyNow) || internalMarkersOnly;
+  if (typeof v === 'boolean') return v;
+  return true; // デフォルトは許可（false のときだけ止める）
+})();
 
-      // ✅ 緊急(emptyLike) と seed-only(本文未生成) を分離
-      const seedOnlyNow = bodyEmptyLike && hasSeedText;
-      const emptyLikeNow = bodyEmptyLike && !hasSeedText;
+const hasSlotsLocal =
+  Array.isArray((out.metaForSave as any)?.slotPlan) &&
+  (out.metaForSave as any).slotPlan.length > 0;
 
-      const shouldRunWriter =
-        (policy === 'SCAFFOLD' || policy === 'FINAL') &&
-        (seedOnlyNow || emptyLikeNow) &&
-        !alreadyHasBlocks &&
-        allowLLM_final_local !== false;
+const internalMarkersOnly =
+  Number.isFinite(slotTextCleanedLen) &&
+  Number.isFinite(slotTextRawLen) &&
+  slotTextRawLen > 0 &&
+  slotTextCleanedLen === 0;
 
+const hasSeedText = Number.isFinite(slotTextCleanedLen) && slotTextCleanedLen > 0;
+
+const bodyEmptyLike = !bodyNow || isDotsOnly(bodyNow) || internalMarkersOnly;
+
+// ✅ 緊急(emptyLike) と seed-only(本文未生成) を分離
+const seedOnlyNow = bodyEmptyLike && hasSeedText;
+const emptyLikeNow = bodyEmptyLike && !hasSeedText;
+
+// ✅ ここが止血の本丸：空っぽ系のときに “古い blocks” が残ってたら消す（trace 不一致 or trace無し）
+if ((policy === 'SCAFFOLD' || policy === 'FINAL') && (seedOnlyNow || emptyLikeNow) && hasBlocksNow && !blocksTraceMatch) {
+  console.warn('[IROS/rephraseBridge][STALE_BLOCKS_CLEARED]', {
+    conversationId: _conversationId,
+    userCode: _userCode,
+    policy,
+    traceIdNow,
+    existingBlocksTraceId,
+    rbLen: Array.isArray((ex as any)?.rephraseBlocks) ? (ex as any).rephraseBlocks.length : 0,
+  });
+
+  // renderGateway の復旧素材にもならないように “実体” を落とす
+  delete (ex as any).rephraseBlocks;
+  delete (ex as any).rephraseBlocksTraceId;
+  (ex as any).rephraseBlocksCleared = true;
+  (ex as any).rephraseBlocksClearedReason = 'trace_mismatch_or_missing';
+  (ex as any).rephraseBlocksClearedAt = new Date().toISOString();
+
+  alreadyHasBlocks = false;
+}
+
+const shouldRunWriter =
+  (policy === 'SCAFFOLD' || policy === 'FINAL') &&
+  (seedOnlyNow || emptyLikeNow) &&
+  !alreadyHasBlocks &&
+  allowLLM_final_local !== false;
       if (seedOnlyNow || emptyLikeNow) {
         console.log('[IROS/rephraseBridge][ENTER]', {
           conversationId: _conversationId,
@@ -2827,21 +3135,33 @@ try {
 try {
   const sp = (out.metaForSave as any)?.slotPlan;
   const fp = (out.metaForSave as any)?.framePlan;
+
+  const sp0 = Array.isArray(sp) ? sp[0] : null;
+  const sp0Type = sp0 == null ? 'null' : Array.isArray(sp0) ? 'array' : typeof sp0;
+
+  const fpSlots: any[] = Array.isArray(fp?.slots) ? fp.slots : [];
+  const wantIds = fpSlots.map((s: any) => String(s?.id ?? '').trim()).filter(Boolean);
+
   console.log('[IROS/rephraseBridge][SLOT_SOURCES]', {
     slotPlan_type: Array.isArray(sp) ? 'array' : typeof sp,
-    slotPlan_keys: sp && typeof sp === 'object' ? Object.keys(sp).slice(0, 12) : null,
-    slotPlan_head: typeof sp === 'string' ? sp.slice(0, 160) : null,
+    slotPlan_len: Array.isArray(sp) ? sp.length : null,
+    slotPlan_item0_type: sp0Type,
+    slotPlan_item0_keys: sp0 && typeof sp0 === 'object' ? Object.keys(sp0).slice(0, 12) : null,
+    slotPlan_item0_head:
+      typeof sp0 === 'string'
+        ? sp0.slice(0, 120)
+        : sp0 && typeof sp0 === 'object'
+          ? String((sp0 as any).text ?? (sp0 as any).content ?? (sp0 as any).hint ?? '').slice(0, 120) || null
+          : null,
+
     framePlan_has_slots: !!fp?.slots,
-    framePlan_slots_sample: Array.isArray(fp?.slots)
-      ? fp.slots.slice(0, 3).map((x: any) => Object.keys(x ?? {}).slice(0, 8))
-      : fp?.slots && typeof fp.slots === 'object'
-        ? Object.keys(fp.slots).slice(0, 12)
-        : null,
+    framePlan_slots_len: fpSlots.length,
+    framePlan_wantIds: wantIds,
+
     extra_keys: (out.metaForSave as any)?.extra ? Object.keys((out.metaForSave as any).extra).slice(0, 16) : null,
   });
 } catch {}
 // --- /DEBUG ---
-
 
 if (shouldRunWriter) {
   // ✅ extra が無いと extractSlotsForRephrase が落ちるので保険
@@ -2851,82 +3171,13 @@ if (shouldRunWriter) {
   const fp0 = (out.metaForSave as any)?.framePlan ?? null;
   const sp0 = (out.metaForSave as any)?.slotPlan ?? null;
 
-  // --- FIX: slotPlan を framePlan.slots（枠）に合わせて補完する（SAFE欠け対策） ---
-  // framePlan.slots: [{id, hint, ...}, ...]
-  // slotPlan: [{key, text}, ...] を想定。型が違う場合は触らない。
-  let slotPlanNormalized: any = sp0;
 
-  try {
-    const fpSlots: any[] = Array.isArray(fp0?.slots) ? fp0.slots : [];
-    const wantIds = fpSlots
-      .map((s: any) => String(s?.id ?? '').trim())
-      .filter(Boolean);
-
-    const spArr: any[] = Array.isArray(sp0) ? sp0 : [];
-    const looksLikeKeyText =
-      spArr.length === 0 ||
-      spArr.every((x: any) => x && typeof x === 'object' && 'key' in x && 'text' in x);
-
-    if (wantIds.length > 0 && Array.isArray(sp0) && looksLikeKeyText) {
-      const byKey = new Map<string, any>();
-      for (const x of spArr) {
-        const k = String(x?.key ?? '').trim();
-        if (k) byKey.set(k, x);
-      }
-
-      const normalized: any[] = [];
-      const missing: string[] = [];
-
-      for (const id of wantIds) {
-        const hit = byKey.get(id);
-        if (hit) {
-          normalized.push(hit);
-          continue;
-        }
-
-        // 欠けスロット（特に SAFE）を最小プレースホルダで補完
-        const hint =
-          fpSlots.find((s: any) => String(s?.id ?? '').trim() === id)?.hint ?? null;
-
-        missing.push(id);
-        normalized.push({
-          key: id,
-          text: `@${id} ${JSON.stringify(
-            { kind: 'auto_fill', hint: hint ? String(hint) : null },
-            null,
-            0,
-          )}`,
-        });
-      }
-
-      slotPlanNormalized = normalized;
-
-      console.log('[IROS/rephraseBridge][SLOT_NORM]', {
-        wantIds,
-        had: spArr.map((x: any) => String(x?.key ?? '').trim()).filter(Boolean),
-        missing,
-        len_before: spArr.length,
-        len_after: normalized.length,
-      });
-
-
-      // debug用に extra へ残す（後で消してOK）
-      (out.metaForSave as any).extra.slotPlan_norm = {
-        from: 'framePlan.slots',
-        want: wantIds,
-        had: spArr.map((x: any) => String(x?.key ?? '').trim()).filter(Boolean),
-        missing,
-        len_before: spArr.length,
-        len_after: normalized.length,
-      };
-    }
-  } catch {}
-  // --- /FIX ---
+// --- /FIX ---
 
   const extracted = extractSlotsForRephrase({
     meta: out.metaForSave,
     framePlan: fp0,
-    slotPlan: slotPlanNormalized,
+    slotPlan: sp0,
     assistantText: out.assistantText ?? null,
     content: (out as any)?.content ?? null,
     text: (out as any)?.text ?? null,
@@ -2961,15 +3212,25 @@ if (shouldRunWriter) {
     metaphor: exprMetaCanon ? String((exprMetaCanon as any).metaphor ?? '') : null,
   });
 
+  // ✅ traceId をこの場で一回だけ正規化（以降はこれのみ使う）
+  const traceIdCanon: string | null = (() => {
+    const v =
+      (ctx as any)?.traceId ??
+      (out.metaForSave as any)?.extra?.traceId ??
+      (out.metaForSave as any)?.extra?.ctxPack?.traceId ??
+      (out.metaForSave as any)?.traceId ??
+      null;
+
+    const s = typeof v === 'string' ? v.trim() : '';
+    return s ? s : null;
+  })();
+
   const rr = await rephraseSlotsFinal(
     extracted,
     {
       model,
       temperature: 0.7,
 
-      // ✅ maxLinesHint を “固定8” から “ブロック数×8行” へ
-      // - 目的：段（block）が多いとき、rephraseEngine 側の clampLines で先に潰れないようにする
-      // - 優先順位：blockPlan.blocks > rephraseBlocksLen > slot数
       maxLinesHint: (() => {
         const exAny = (out.metaForSave as any)?.extra ?? {};
         const bpBlocks = Array.isArray(exAny?.blockPlan?.blocks) ? exAny.blockPlan.blocks : null;
@@ -2977,29 +3238,24 @@ if (shouldRunWriter) {
 
         const rbLen = Array.isArray(exAny?.rephraseBlocks) ? exAny.rephraseBlocks.length : 0;
 
-        // extracted.keys は OBS/SHIFT/NEXT などの “スロット数”
-        const slotLen = Array.isArray(extracted?.keys) ? extracted.keys.length : 0;
+        const slotLen = Array.isArray((extracted as any)?.keys) ? (extracted as any).keys.length : 0;
 
         const basis = bpLen > 0 ? bpLen : rbLen > 0 ? rbLen : slotLen > 0 ? slotLen : 4;
 
-        // あなたの案：8行×ブロック数
-        // 下限：12（短文事故防止） / 上限：80（プロンプト肥大防止）
         const budget = Math.max(12, basis * 8);
         return Math.min(80, budget);
       })(),
 
       userText: typeof text === 'string' ? text : null,
 
-      // ✅ debug は 1回だけ（ここでまとめる）
       debug: {
-        traceId: (ctx as any)?.traceId ?? (out.metaForSave as any)?.traceId ?? null,
+        traceId: traceIdCanon,
         conversationId: _conversationId ?? null,
         userCode: _userCode ?? null,
         slotPlanPolicy,
         renderEngine: true,
         inputKind: (ctx as any)?.inputKind ?? null,
       } as any,
-
 
       userContext: (() => {
         const turns: Array<{ role: 'user' | 'assistant'; content: string }> = Array.isArray(
@@ -3017,25 +3273,22 @@ if (shouldRunWriter) {
               )
           : [];
 
-        // ✅ metaの参照元を補強（out.metaForSave.meta.* に居るケースがある）
         const metaRoot = (out.metaForSave as any)?.meta ?? null;
 
         return {
           conversationId: _conversationId ?? null,
           userCode: _userCode ?? null,
-          traceId: (ctx as any)?.traceId ?? (out.metaForSave as any)?.traceId ?? null,
+          traceId: traceIdCanon,
           inputKind: (ctx as any)?.inputKind ?? null,
 
-          // ✅ exprMeta（正本の鏡）— rephraseEngine.full.ts がここを見に行く
           exprMeta: exprMetaCanon,
 
           historyForWriter: turns,
           ctxPack: {
             ...(((out.metaForSave as any)?.extra?.ctxPack ?? null) as any),
+            traceId: traceIdCanon, // ✅ ここも固定
             historyForWriter: turns,
             slotPlanPolicy,
-
-            // ✅ exprMeta（正本の鏡）— ctxPack 経由でも読めるように
             exprMeta: exprMetaCanon,
           },
 
@@ -3048,16 +3301,16 @@ if (shouldRunWriter) {
             q: (out.metaForSave as any)?.q ?? metaRoot?.q ?? null,
             depth: (out.metaForSave as any)?.depth ?? metaRoot?.depth ?? null,
             phase: (out.metaForSave as any)?.phase ?? metaRoot?.phase ?? null,
-            layer: (out.metaForSave as any)?.intentLayer ?? metaRoot?.intentLayer ?? null,
-            renderMode: (out.metaForSave as any)?.renderMode ?? metaRoot?.renderMode ?? null,
+            layer:
+              (out.metaForSave as any)?.intentLayer ?? metaRoot?.intentLayer ?? null,
+            renderMode:
+              (out.metaForSave as any)?.renderMode ?? metaRoot?.renderMode ?? null,
             slotPlanPolicy,
           },
         };
       })(),
-    } as any, // ✅ options型ズレのコンパイルエラーをここで止血
+    } as any,
   );
-
-
           if (rr && rr.ok) {
             const mx = (rr as any)?.meta?.extra ?? {};
             const blocksCandidate =
@@ -3083,7 +3336,9 @@ if (shouldRunWriter) {
 
             if (Array.isArray(blocksCandidate) && blocksCandidate.length > 0) {
               // 先頭ブロックと同文なら二重付与しない
-              const firstText = String((blocksCandidate[0] as any)?.text ?? '').replace(/\r\n/g, '\n').trim();
+              const firstText = String((blocksCandidate[0] as any)?.text ?? '')
+                .replace(/\r\n/g, '\n')
+                .trim();
               const sameAsFirst = preface && firstText && firstText === preface;
 
               const mergedBlocks =
@@ -3092,9 +3347,13 @@ if (shouldRunWriter) {
                   : blocksCandidate;
 
               (out.metaForSave as any).extra.rephraseBlocks = mergedBlocks;
+              // ✅ traceId を刻む（次ターンで stale 判定に使う）
+              (out.metaForSave as any).extra.rephraseBlocksTraceId = traceIdCanon;
             } else if (preface) {
               // blocks が空でも preface だけは渡せる（安全側）
               (out.metaForSave as any).extra.rephraseBlocks = [{ text: preface, kind: 'p' }];
+              // ✅ traceId を刻む（次ターンで stale 判定に使う）
+              (out.metaForSave as any).extra.rephraseBlocksTraceId = traceIdCanon;
             }
 
             (out.metaForSave as any).extra.rephraseApplied = true;
@@ -3103,9 +3362,8 @@ if (shouldRunWriter) {
               (out.metaForSave as any).extra.rephraseReason ?? 'rephraseSlotsFinal(emptyLike)';
             (out.metaForSave as any).extra.rephraseAt = new Date().toISOString();
           }
-
       }
-    }
+}
   } catch (e) {
     const errText = String((e as any)?.message ?? e);
 

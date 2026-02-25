@@ -20,6 +20,7 @@ import { ensureIrosConversationUuid } from '@/lib/iros/server/ensureIrosConversa
 import { persistAssistantMessageToIrosMessages } from '@/lib/iros/server/persistAssistantMessageToIrosMessages';
 import { runNormalBase } from '@/lib/iros/conversation/normalBase';
 import { decideExpressionLane } from '@/lib/iros/expression/decideExpressionLane';
+import { normalizeIrosStyleFinal } from '@/lib/iros/language/normalizeIrosStyleFinal';
 
 import { loadIrosMemoryState } from '@/lib/iros/memoryState';
 import { applyRenderEngineIfEnabled } from './_impl/applyRenderEngineIfEnabled';
@@ -127,8 +128,9 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 // =========================================================
 // OPTIONS
 // =========================================================
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+export async function OPTIONS(req: NextRequest) {
+  const traceId = makeEarlyTraceId(req);
+  return new NextResponse(null, { status: 204, headers: withTrace(CORS_HEADERS, traceId) });
 }
 
 // =========================================================
@@ -162,20 +164,14 @@ type IrosReplyBody = {
   cost?: unknown;
   extra?: unknown;
 };
-
 function withTrace(headers: Record<string, string>, traceId: string) {
   return { ...headers, 'x-trace-id': String(traceId) };
 }
-
 function makeEarlyTraceId(req: NextRequest) {
   const fromHeader = String(req.headers.get('x-trace-id') ?? '').trim();
   if (fromHeader) return fromHeader;
 
-  try {
-    const g = (globalThis as any)?.crypto;
-    if (g?.randomUUID) return String(g.randomUUID());
-  } catch {}
-
+  // ✅ fallback（環境差を消すため randomUUID は使わない）
   return `trace_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
@@ -183,6 +179,7 @@ function makeTraceId(req: NextRequest, extraReq: any | null, fallbackEarly: stri
   const fromHeader = String(req.headers.get('x-trace-id') ?? '').trim();
   if (fromHeader) return fromHeader;
 
+  // extraReq は body.extra を想定（互換で trace_id も見る）
   const fromExtra = String(extraReq?.traceId ?? extraReq?.trace_id ?? '').trim();
   if (fromExtra) return fromExtra;
 
@@ -231,76 +228,109 @@ export async function POST(req: NextRequest) {
   const traceIdEarly = makeEarlyTraceId(req);
 
   try {
-    // -------------------------------------------------------
-    // 1) body
-    // -------------------------------------------------------
-
-   // =========================================================
+// =========================================================
 // PERF timers（dev only）
 // =========================================================
 const PERF_ON =
-process.env.NODE_ENV !== 'production' &&
-String(process.env.IROS_PERF_LOG ?? '').trim() !== '0';
+  process.env.NODE_ENV !== 'production' &&
+  String(process.env.IROS_PERF_LOG ?? '').trim() !== '0';
 
 const t0 = Date.now();
 const laps: Array<{ k: string; ms: number }> = [];
 const lap = (k: string) => {
-if (!PERF_ON) return;
-const ms = Date.now() - t0;
-laps.push({ k, ms });
+  if (!PERF_ON) return;
+  const ms = Date.now() - t0;
+  laps.push({ k, ms });
 };
 const lapWarn = (k: string, msCost: number, extra?: any) => {
-if (!PERF_ON) return;
-if (msCost >= 1000) console.warn('[IROS/PERF][SLOW]', { k, ms: msCost, ...(extra ?? {}) });
-else console.info('[IROS/PERF]', { k, ms: msCost, ...(extra ?? {}) });
+  if (!PERF_ON) return;
+  if (msCost >= 1000) console.warn('[IROS/PERF][SLOW]', { k, ms: msCost, ...(extra ?? {}) });
+  else console.info('[IROS/PERF]', { k, ms: msCost, ...(extra ?? {}) });
 };
 
-    const body = (await req.json().catch(() => ({} as any))) as IrosReplyBody;
+// -------------------------------------------------------
+// 1) body
+// -------------------------------------------------------
+const body = (await req.json().catch(() => ({} as any))) as IrosReplyBody;
 
-    const conversationKeyRaw =
-      typeof body?.conversationId === 'string'
-        ? body.conversationId
-        : typeof body?.conversation_id === 'string'
-          ? body.conversation_id
-          : undefined;
+// ------------------------------
+// Request meta passthrough (debug-safe)
+// - 入力 meta.extra を後段の正規化/上書きから守るために退避
+// ------------------------------
+const reqMetaRaw: any = (body as any)?.meta ?? null;
 
-    const conversationKey =
-      conversationKeyRaw && String(conversationKeyRaw).trim() ? String(conversationKeyRaw).trim() : undefined;
+const reqSpeechActRaw =
+  (reqMetaRaw as any)?.extra?.speechAct ??
+  (reqMetaRaw as any)?.speechAct ??
+  null;
 
-    const text = typeof body?.text === 'string' ? body.text : (body?.text as any);
-    const hintText: string | undefined = (body as any)?.hintText ?? (body as any)?.modeHintText;
-    const modeHintInput: string | undefined = (body as any)?.modeHint;
+// ✅ ここで先に extraReq / traceId を確定（REQ_META と TRACE を一致させる）
+const extraReq: Record<string, any> | undefined =
+  (body as any)?.extra && typeof (body as any).extra === 'object'
+    ? ((body as any).extra as Record<string, any>)
+    : undefined;
 
-    const extraReq: Record<string, any> | undefined =
-      (body as any)?.extra && typeof (body as any).extra === 'object' ? ((body as any).extra as Record<string, any>) : undefined;
+// traceIdEarly は try の前で makeEarlyTraceId(req) されている前提
+const traceId = makeTraceId(req, extraReq ?? null, traceIdEarly);
 
-    const traceId = makeTraceId(req, extraReq ?? null, traceIdEarly);
+console.info('[IROS/SPEECH_EARLY_RETURN][REQ_META]', {
+  // ✅ 正本（TRACE と同じ）
+  traceId_used: String(traceId ?? ''),
+  // 参考：body直下の traceId（古いクライアント/直指定の検出用）
+  traceId_req: String((body as any)?.traceId ?? ''),
+  // 参考：meta 側（もし載っていれば）
+  traceId_meta:
+    String((reqMetaRaw as any)?.traceId ?? '') ||
+    String((reqMetaRaw as any)?.extra?.traceId ?? '') ||
+    '',
+  conversationId: String((body as any)?.conversationId ?? ''),
+  hasReqMeta: !!reqMetaRaw,
+  reqSpeechAct: reqSpeechActRaw ?? null,
+  reqExtraKeys: (reqMetaRaw as any)?.extra ? Object.keys((reqMetaRaw as any).extra).slice(0, 30) : [],
+});
 
-    const userCodeHint =
-      String(req.headers.get('x-user-code') ?? '').trim() ||
-      (typeof (body as any)?.userCode === 'string' ? (body as any).userCode.trim() : '') ||
-      '';
-
-    console.info('[IROS/pipe][TRACE]', {
-      traceId,
-      conversationKey: conversationKey ?? null,
-      conversationId: null, // auth前・uuid未解決なので常に null
-      userCode: userCodeHint || null,
-      modeHint: modeHintInput ?? null,
-      hasHeaderUserCode: !!req.headers.get('x-user-code'),
-      devBypass: process.env.IROS_DEV_BYPASS_AUTH === '1',
-    });
-
-    const chatHistory: unknown[] | undefined = Array.isArray((body as any)?.history)
-      ? ((body as any).history as unknown[])
+const conversationKeyRaw =
+  typeof body?.conversationId === 'string'
+    ? body.conversationId
+    : typeof body?.conversation_id === 'string'
+      ? body.conversation_id
       : undefined;
 
-    const styleInput: string | undefined =
-      typeof (body as any)?.style === 'string'
-        ? (body as any).style
-        : typeof (body as any)?.styleHint === 'string'
-          ? (body as any).styleHint
-          : undefined;
+const conversationKey =
+  conversationKeyRaw && String(conversationKeyRaw).trim()
+    ? String(conversationKeyRaw).trim()
+    : undefined;
+
+const text = typeof body?.text === 'string' ? body.text : (body?.text as any);
+const hintText: string | undefined = (body as any)?.hintText ?? (body as any)?.modeHintText;
+const modeHintInput: string | undefined = (body as any)?.modeHint;
+
+// ✅ userCodeHint は TRACE ログより前で必ず定義
+const userCodeHint =
+  String(req.headers.get('x-user-code') ?? '').trim() ||
+  (typeof (body as any)?.userCode === 'string' ? (body as any).userCode.trim() : '') ||
+  '';
+
+console.info('[IROS/pipe][TRACE]', {
+  traceId,
+  conversationKey: conversationKey ?? null,
+  conversationId: null, // auth前・uuid未解決なので常に null
+  userCode: userCodeHint || null,
+  modeHint: modeHintInput ?? null,
+  hasHeaderUserCode: !!req.headers.get('x-user-code'),
+  devBypass: process.env.IROS_DEV_BYPASS_AUTH === '1',
+});
+
+const chatHistory: unknown[] | undefined = Array.isArray((body as any)?.history)
+  ? ((body as any).history as unknown[])
+  : undefined;
+
+const styleInput: string | undefined =
+  typeof (body as any)?.style === 'string'
+    ? (body as any).style
+    : typeof (body as any)?.styleHint === 'string'
+      ? (body as any).styleHint
+      : undefined;
 
     // -------------------------------------------------------
     // 2) auth
@@ -504,7 +534,40 @@ else console.info('[IROS/PERF]', { k, ms: msCost, ...(extra ?? {}) });
     } catch {
       userProfile = null;
     }
+// ------------------------------
+// meta merge for handleIrosReply
+// - req.meta を最優先で渡す（特に meta.extra.speechAct）
+// - 既存 meta がある場合は shallow+extra をマージ
+// ------------------------------
+const metaForIros: any = (() => {
+  // 既に route 内で meta を組んでる場合に備えて拾う（無ければ null）
+  const routeMetaAny: any =
+    (typeof (globalThis as any).__routeMeta !== 'undefined' ? (globalThis as any).__routeMeta : null) ?? null;
 
+  const a: any = reqMetaRaw ?? {};
+  const b: any = routeMetaAny ?? {};
+
+  const merged: any = {
+    ...a,
+    ...b,
+    extra: {
+      ...(a?.extra ?? {}),
+      ...(b?.extra ?? {}),
+    },
+  };
+
+  // ✅ req で speechAct 指定が来てるなら絶対に保持（null化させない）
+  if (reqSpeechActRaw != null && String(reqSpeechActRaw).trim() !== '') {
+    merged.extra = {
+      ...(merged.extra ?? {}),
+      speechAct: reqSpeechActRaw,
+      speechActReason: (merged.extra?.speechActReason ?? 'from_request'),
+      speechActConfidence: (merged.extra?.speechActConfidence ?? 1),
+    };
+  }
+
+  return merged;
+})();
     // -------------------------------------------------------
     // 10) NextStep tag strip（tagは除去するが choiceId は使わない）
     // -------------------------------------------------------
@@ -522,32 +585,50 @@ else console.info('[IROS/PERF]', { k, ms: msCost, ...(extra ?? {}) });
 
     const userTextClean = (cleanText.length ? cleanText : rawText).trim();
 
-    // -------------------------------------------------------
-    // 11) extra sanitize（route.tsでIT強制は扱わない）
-    // -------------------------------------------------------
-    const rawExtra: Record<string, any> =
-      extraReq && typeof extraReq === 'object' ? (extraReq as Record<string, any>) : {};
+// -------------------------------------------------------
+// 11) extra sanitize（route.tsでIT強制は扱わない）
+// -------------------------------------------------------
+const rawExtra: Record<string, any> =
+  extraReq && typeof extraReq === 'object' ? (extraReq as Record<string, any>) : {};
 
-    const sanitizedExtra: Record<string, any> = { ...rawExtra };
+const sanitizedExtra: Record<string, any> = { ...rawExtra };
 
-    delete (sanitizedExtra as any).forceIT;
-    delete (sanitizedExtra as any).renderMode;
-    delete (sanitizedExtra as any).spinLoop;
-    delete (sanitizedExtra as any).descentGate;
-    delete (sanitizedExtra as any).tLayerModeActive;
-    delete (sanitizedExtra as any).tLayerHint;
+delete (sanitizedExtra as any).forceIT;
+delete (sanitizedExtra as any).renderMode;
+delete (sanitizedExtra as any).spinLoop;
+delete (sanitizedExtra as any).descentGate;
+delete (sanitizedExtra as any).tLayerModeActive;
+delete (sanitizedExtra as any).tLayerHint;
 
-    // ✅ route.ts SoT extra
-    let extraSoT: Record<string, any> = {
-      ...sanitizedExtra,
+// ✅ req.meta 由来の speechAct は、上で作った reqSpeechActRaw を正本として使う
+// （ここで再宣言しない）
+const reqMeta: any = (body as any)?.meta ?? null;
+const reqExtraFromMeta: any = reqMeta?.extra ?? null;
 
-      // NextStep系は SoT へも載せない（常に null）
-      choiceId: null,
-      extractedChoiceId: null,
+// ※ reqSpeechActRaw は上の「Request meta passthrough」ブロックで確定済み
 
-      traceId,
-    };
+// ✅ route.ts SoT extra
+let extraSoT: Record<string, any> = {
+  ...sanitizedExtra,
 
+  // ✅ speechAct は req.meta 由来でも必ず SoT に刻む（下流は extra が正本）
+  speechAct:
+    reqSpeechActRaw != null && String(reqSpeechActRaw).trim() !== ''
+      ? String(reqSpeechActRaw).trim()
+      : (sanitizedExtra as any)?.speechAct ?? null,
+  speechActReason:
+    (sanitizedExtra as any)?.speechActReason ??
+    (reqSpeechActRaw != null && String(reqSpeechActRaw).trim() !== '' ? 'from_request' : null),
+  speechActConfidence:
+    (sanitizedExtra as any)?.speechActConfidence ??
+    (reqSpeechActRaw != null && String(reqSpeechActRaw).trim() !== '' ? 1 : null),
+
+  // NextStep系は SoT へも載せない（常に null）
+  choiceId: null,
+  extractedChoiceId: null,
+
+  traceId,
+};
     const reqOrigin = req.headers.get('origin') ?? req.headers.get('x-forwarded-origin') ?? req.nextUrl?.origin ?? '';
 
     // ✅ RenderEngine gate（PREで1回だけ確定し、以降はSoTに同期）
@@ -671,57 +752,140 @@ if (isNonForwardButEmpty) {
     // ✅ ここで必ず取り出す
     let { result, finalMode, metaForSave, assistantText } = irosResult as any;
 
-    // -------------------------------------------------------
-    // SpeechPolicy: FORWARD early-return
-    // -------------------------------------------------------
-    {
-      const metaAny: any = metaForSave ?? (result as any)?.meta ?? {};
-      const extraAny: any = metaAny?.extra ?? {};
+// -------------------------------------------------------
+// SpeechPolicy: FORWARD early-return
+// -------------------------------------------------------
+{
+  // req 由来（最優先で見る）
+  const reqMeta: any = (body as any)?.meta ?? null;
+  const reqExtra: any = reqMeta?.extra ?? null;
 
-      const speechAct0 = String(extraAny?.speechAct ?? metaAny?.speechAct ?? '').toUpperCase();
-      const shouldEarlyReturn = speechAct0 === 'FORWARD';
+  const speechActReqRaw =
+    reqExtra?.speechAct ??
+    reqMeta?.speechAct ??
+    (body as any)?.speechAct ??
+    null;
 
-      metaAny.extra = { ...(metaAny.extra ?? {}), ...extraAny };
-      metaForSave = metaAny;
+  // iros 結果由来（従来どおり）
+  const metaAny: any = metaForSave ?? (result as any)?.meta ?? {};
+  const extraAny: any = metaAny?.extra ?? {};
 
-      if (shouldEarlyReturn) {
-        const finalText = pickText((result as any)?.content, assistantText);
-        metaAny.extra = { ...(metaAny.extra ?? {}), speechEarlyReturned: true };
+  const speechActExtraRaw = extraAny?.speechAct;
+  const speechActMetaRaw = metaAny?.speechAct;
 
-        const capRes = await captureChat(req, userCode, CREDIT_AMOUNT, creditRef);
+  const speechAct0 = String(
+    speechActReqRaw ?? speechActExtraRaw ?? speechActMetaRaw ?? '',
+  ).toUpperCase();
 
-        const headers: Record<string, string> = withTrace(
-          {
-            ...CORS_HEADERS,
-            'x-handler': 'app/api/agent/iros/reply',
-            'x-credit-ref': creditRef,
-            'x-credit-amount': String(CREDIT_AMOUNT),
-            ...(lowWarn ? { 'x-warning': 'low_balance' } : {}),
-          },
-          traceId,
-        );
+  const shouldEarlyReturn = speechAct0 === 'FORWARD';
 
-        return NextResponse.json(
-          {
-            ok: true,
-            mode: finalMode ?? 'auto',
-            content: finalText,
-            assistantText: finalText,
-            credit: {
-              ref: creditRef,
-              amount: CREDIT_AMOUNT,
-              authorize: authRes,
-              capture: capRes,
-              ...(lowWarn ? { warning: lowWarn } : {}),
-            },
-            ...(lowWarn ? { warning: lowWarn } : {}),
-            meta: metaAny,
-          },
-          { status: 200, headers },
-        );
-      }
-    }
+  console.info('[IROS/SPEECH_EARLY_RETURN][CHECK]', {
+    traceId_used: String(traceId ?? ''),
+    traceId_req: String((body as any)?.traceId ?? ''),
+    conversationId: String(conversationId ?? ''),
+    userCode: String(userCode ?? ''),
+    speechAct_req: speechActReqRaw ?? null,
+    speechAct_extra: speechActExtraRaw ?? null,
+    speechAct_meta: speechActMetaRaw ?? null,
+    speechAct0,
+    shouldEarlyReturn,
+  });
 
+  // meta 合流（req 由来を含めて “正本 extra” を確定）
+  {
+    const prevExtra: any = (metaAny as any)?.extra ?? {};
+    const reqExtra2: any = reqExtra ?? {};
+
+    // ✅ reqExtra を最後に勝たせる（UI→API の指示を優先）
+    const mergedExtra: any = {
+      ...prevExtra,
+      ...reqExtra2,
+    };
+
+    // ✅ speechAct0（最終判定）も extra に固定しておく（監査・保存の揺れ防止）
+    if (speechAct0) mergedExtra.speechAct = speechAct0;
+
+    metaAny.extra = mergedExtra;
+    metaForSave = metaAny; // ✅ 以後は metaForSave を正本として扱う
+  }
+
+  if (shouldEarlyReturn) {
+    console.info('[IROS/SPEECH_EARLY_RETURN][HIT]', {
+      traceId_used: String(traceId ?? ''),
+      traceId_req: String((body as any)?.traceId ?? ''),
+      conversationId: String(conversationId ?? ''),
+      userCode: String(userCode ?? ''),
+      speechAct0,
+    });
+
+    let finalText = pickText((result as any)?.content, assistantText);
+    metaAny.extra = { ...(metaAny.extra ?? {}), speechEarlyReturned: true };
+
+    // ✅ FORWARD early-return でも STYLE_NORM_FINAL を適用（UI返却の穴埋め）
+    try {
+      const seed =
+        String((metaAny as any)?.traceId ?? '') ||
+        String((metaAny as any)?.extra?.traceId ?? '') ||
+        String(traceId ?? '') ||
+        String(conversationId ?? '');
+
+      const n = normalizeIrosStyleFinal(finalText, {
+        seed,
+        emojiKeepRate: 0.3,
+        maxReplacements: 5,
+      });
+
+      const outText = typeof (n as any)?.text === 'string' ? (n as any).text : finalText;
+
+      console.info('[IROS/STYLE_NORM_FINAL]', {
+        applied: true,
+        meta: (n as any)?.meta,
+        len_in: String(finalText ?? '').length,
+        len_out: String(outText ?? '').length,
+        route: 'speechEarlyReturn',
+      });
+
+      finalText = outText;
+
+      metaAny.extra = {
+        ...(metaAny.extra ?? {}),
+        styleNormFinal: (n as any)?.meta,
+      };
+    } catch {}
+
+    const capRes = await captureChat(req, userCode, CREDIT_AMOUNT, creditRef);
+
+    const headers: Record<string, string> = withTrace(
+      {
+        ...CORS_HEADERS,
+        'x-handler': 'app/api/agent/iros/reply',
+        'x-credit-ref': creditRef,
+        'x-credit-amount': String(CREDIT_AMOUNT),
+        ...(lowWarn ? { 'x-warning': 'low_balance' } : {}),
+      },
+      traceId,
+    );
+
+    return NextResponse.json(
+      {
+        ok: true,
+        mode: finalMode ?? 'auto',
+        content: finalText,
+        assistantText: finalText,
+        credit: {
+          ref: creditRef,
+          amount: CREDIT_AMOUNT,
+          authorize: authRes,
+          capture: capRes,
+          ...(lowWarn ? { warning: lowWarn } : {}),
+        },
+        ...(lowWarn ? { warning: lowWarn } : {}),
+        meta: metaAny,
+      },
+      { status: 200, headers },
+    );
+  }
+}
 // -------------------------------------------------------
 // 本文の同期（content/assistantText）
 // - 正本: result.content
@@ -1116,12 +1280,58 @@ if (isNonForwardButEmpty) {
           };
         }
 
+        // =========================================================
+        // ✅ UI正本（result.content）を先に確定
+        // =========================================================
         (result as any).content = finalText;
         (result as any).text = finalText;
         (result as any).assistantText = finalText;
 
-        // ✅ metaForSave 側にも「最終本文」を同期（再発防止：meta参照経路を潰す）
-try {
+        // =========================================================
+        // ✅ Iros 文体 正規化フィルタ（route: UI正本の確定点）
+        // - ここで finalText を整えると、UI返却・DB保存の両方に確実に効く
+        // - 重要: 正規化「後」に UI正本(result.*) を必ず再同期する
+        // =========================================================
+        try {
+          const seed =
+            String((meta as any)?.traceId ?? '') ||
+            String((meta as any)?.extra?.traceId ?? '') ||
+            String((metaForSave as any)?.extra?.traceId ?? '') ||
+            String(conversationId ?? '');
+
+          const n = normalizeIrosStyleFinal(finalText, {
+            seed,
+            emojiKeepRate: 0.3,
+            maxReplacements: 5,
+          });
+
+          const outText = typeof (n as any)?.text === 'string' ? (n as any).text : finalText;
+
+          console.info('[IROS/STYLE_NORM_FINAL]', {
+            applied: true,
+            meta: (n as any)?.meta,
+            len_in: String(finalText ?? '').length,
+            len_out: String(outText ?? '').length,
+          });
+
+          // ✅ 正規化結果を finalText 正本へ
+          finalText = outText;
+
+          // ✅ 監査用
+          const metaAny2: any = meta as any;
+          metaAny2.extra = {
+            ...(metaAny2.extra ?? {}),
+            styleNormFinal: (n as any)?.meta,
+          };
+        } catch {}
+
+        // ✅ 正規化「後」の本文を UI正本へ反映（ここがないと persist が旧本文を拾う）
+        (result as any).content = finalText;
+        (result as any).text = finalText;
+        (result as any).assistantText = finalText;
+
+ // ✅ metaForSave 側にも「最終本文」を同期（再発防止：meta参照経路を潰す）
+ try {
   const mfs: any = metaForSave as any;
   const mfsExtra: any = (mfs?.extra ?? {}) as any;
 
@@ -1145,6 +1355,7 @@ try {
     finalAssistantText: finalText,
   };
 } catch {}
+
 
 
         meta.extra = {

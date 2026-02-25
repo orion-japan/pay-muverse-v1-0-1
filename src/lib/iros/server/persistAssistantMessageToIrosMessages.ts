@@ -364,6 +364,11 @@ return sanitizeForJsonb(m);
       extra: {
         traceId: ex.traceId ?? null,
         persistedByRoute: ex.persistedByRoute ?? true,
+
+        // ✅ NEW: seed を ultra でも落とさない（新仕様）
+        // - seed は短いテキスト塊のみ想定（CARD_PACKET 10〜15行）
+        // - sanitizeForJsonb を通すので jsonb 安全
+        seed: (ex as any)?.seed ?? null,
       },
     });
 
