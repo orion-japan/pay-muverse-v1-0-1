@@ -1783,6 +1783,32 @@ const shouldInjectPreface =
   !microNow;
 
 let seedForWriterRaw = shouldInjectPreface ? `${preface}\n${slotTextStr}` : slotTextStr;
+
+// ✅ NEW: Concept Lock (RECALL) を seed の先頭に強制注入（PPが llmRewriteSeed を上書きしても残る）
+try {
+  const cr: any = (metaForSave as any)?.extra?.conceptRecall ?? null;
+  const items: string[] =
+    cr && typeof cr === 'object' && cr.active === true && Array.isArray(cr.items)
+      ? cr.items.map((s: any) => String(s ?? '').trim()).filter(Boolean)
+      : [];
+
+  const userTextNow = String(userText ?? '').trim();
+  const wantsRecall =
+    !!userTextNow &&
+    /(３つ|三つ|3つ|その3つ|この3つ|それ|それは|あれ|あれは|って何|とは|何ですか|なんですか)/.test(userTextNow);
+
+  if (!microNow && wantsRecall && items.length >= 3) {
+    const head3 = items.slice(0, 3);
+    const lockLine = `概念固定：この会話の「3つ」は ${head3.join(' / ')}。否認せず、まず3つを先に出してから説明する。`;
+    if (!seedForWriterRaw.includes(lockLine)) {
+      seedForWriterRaw = `${lockLine}\n${seedForWriterRaw}`.trim();
+    }
+    const seedLine = `@SEED_TEXT ${JSON.stringify({ text: lockLine })}`;
+    if (!seedForWriterRaw.includes(seedLine)) {
+      seedForWriterRaw = `${seedForWriterRaw}\n${seedLine}`.trim();
+    }
+  }
+} catch {}
       // ===== C案: NEXT_HINT を writer seed に「自然文1行」で混ぜる（vector不要）=====
       const nextHintLine = (() => {
         const lines = String(slotTextStr ?? '').split('\n');
@@ -1976,9 +2002,37 @@ let seedForWriterRaw = shouldInjectPreface ? `${preface}\n${slotTextStr}` : slot
     String((metaForSave as any)?.extra?.ctxPack?.traceId ?? '') ||
     String(conversationId ?? '');
 
+  // --- lane（sofia_light 等）を拾う：ctxPack.exprMeta を正本として見る ---
+  const exprLane: string | null =
+    (metaForSave as any)?.extra?.ctxPack?.exprMeta?.lane ??
+    (metaForSave as any)?.extra?.ctxPack?.expr?.lane ??
+    (metaForSave as any)?.extra?.exprMeta?.lane ??
+    (metaForSave as any)?.extra?.exprDecision?.lane ??
+    null;
+
+  // --- 「3段以上」判定（空行区切り優先、なければ改行を段として数える）---
+  const raw = String(finalAssistantText ?? '');
+  const parasByBlank = raw
+    .split(/\n{2,}/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const paraCount =
+    parasByBlank.length > 0
+      ? parasByBlank.length
+      : raw
+          .split(/\n+/)
+          .map((s) => s.trim())
+          .filter(Boolean).length;
+
+  // --- 絵文字の扱い（LLMの装飾を殺さない）---
+  // sofia_light: 剥がさない / 3段以上: 剥がさない
+  // それ以外: “少しだけ整える”ために 0.6（= だいぶ残す）
+  const emojiKeepRate =
+    exprLane === 'sofia_light' || paraCount >= 3 ? 1.0 : 0.6;
+
   const n = normalizeIrosStyleFinal(finalAssistantText, {
     seed,
-    emojiKeepRate: 0.3,
+    emojiKeepRate,
     maxReplacements: 5,
   });
 
@@ -1987,7 +2041,12 @@ let seedForWriterRaw = shouldInjectPreface ? `${preface}\n${slotTextStr}` : slot
   // 任意：デバッグ用（必要なら残す。重いなら消してOK）
   (metaForSave.extra as any) = {
     ...(metaForSave.extra ?? {}),
-    styleNormFinal: n.meta,
+    styleNormFinal: {
+      ...(n.meta ?? {}),
+      pickedEmojiKeepRate: emojiKeepRate,
+      pickedExprLane: exprLane,
+      pickedParaCount: paraCount,
+    },
   };
 }
     const finalText = String(finalAssistantText ?? '').trim();

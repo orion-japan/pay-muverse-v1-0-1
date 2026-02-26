@@ -36,21 +36,24 @@ export async function persistUserMessageToIrosMessages(args: {
 
   // 直近重複ガード（同一convで同一textが連続するのを防ぐ）
   // ✅ “同文”ではなく、“同一リクエスト(traceId)の二重送信”だけ弾く
+  const pickTraceId = (m: any): string => {
+    if (!m || typeof m !== 'object') return '';
+    const a = String(m?.traceId ?? '').trim();
+    if (a) return a;
+
+    const ex = m?.extra;
+    if (ex && typeof ex === 'object') {
+      const b = String(ex?.traceId ?? ex?.trace_id ?? '').trim();
+      if (b) return b;
+    }
+    return '';
+  };
+
+  // ✅ この user message に紐づく traceId（DB列 trace_id にも入れる正本）
+  const traceIdCanon = pickTraceId(meta) || null;
+
   {
-    const pickTraceId = (m: any): string => {
-      if (!m || typeof m !== 'object') return '';
-      const a = String(m?.traceId ?? '').trim();
-      if (a) return a;
-
-      const ex = m?.extra;
-      if (ex && typeof ex === 'object') {
-        const b = String(ex?.traceId ?? ex?.trace_id ?? '').trim();
-        if (b) return b;
-      }
-      return '';
-    };
-
-    const currentTraceId = pickTraceId(meta);
+    const currentTraceId = traceIdCanon ? String(traceIdCanon) : '';
 
     // traceId が無いなら「二重送信判定はしない」＝同文でも保存する
     if (currentTraceId) {
@@ -74,7 +77,22 @@ export async function persistUserMessageToIrosMessages(args: {
     }
   }
 
+  // ✅ 列 trace_id にも入れる（meta.extra.traceId と同期）
+  const traceIdForRow = (() => {
+    const pickTraceId = (m: any): string => {
+      if (!m || typeof m !== 'object') return '';
+      const a = String(m?.traceId ?? '').trim();
+      if (a) return a;
 
+      const ex = m?.extra;
+      if (ex && typeof ex === 'object') {
+        const b = String(ex?.traceId ?? ex?.trace_id ?? '').trim();
+        if (b) return b;
+      }
+      return '';
+    };
+    return pickTraceId(meta) || null;
+  })();
 
   const row = {
     conversation_id: conversationUuid,
@@ -84,11 +102,13 @@ export async function persistUserMessageToIrosMessages(args: {
     meta,
     user_code: userCode,
 
+    // ✅ NEW: DB列（あるなら埋める）
+    trace_id: traceIdForRow,
+
     // user投稿では未確定でOK（列が NOT NULL なら null を消して）
     q_code: null,
     depth_stage: null,
   } as const;
-
   const { error } = await supabase.from('iros_messages').insert([row]);
 
   if (error) {

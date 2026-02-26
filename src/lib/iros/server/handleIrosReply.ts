@@ -3233,15 +3233,26 @@ if (shouldRunWriter) {
 
       maxLinesHint: (() => {
         const exAny = (out.metaForSave as any)?.extra ?? {};
-        const bpBlocks = Array.isArray(exAny?.blockPlan?.blocks) ? exAny.blockPlan.blocks : null;
-        const bpLen = bpBlocks ? bpBlocks.length : 0;
 
-        const rbLen = Array.isArray(exAny?.rephraseBlocks) ? exAny.rephraseBlocks.length : 0;
+        // ✅ BlockPlan は“system注入専用”で保存・継続しない（残留は揺れの原因）
+        // - ここで必ず消す（enabled=false の残留封じ）
+        try {
+          if (exAny && typeof exAny === 'object') {
+            delete (exAny as any).blockPlan;
+            delete (exAny as any).blockPlanText;
+            delete (exAny as any).blockPlanEnabled;
+            delete (exAny as any).blockPlanMeta;
+          }
+        } catch {}
+
+        // ✅ 行数予算は UI/保存の“可視ブロック”に寄せる（BlockPlanは不可視なので basis にしない）
+        const rbLen = Array.isArray((exAny as any)?.rephraseBlocks)
+          ? (exAny as any).rephraseBlocks.length
+          : 0;
 
         const slotLen = Array.isArray((extracted as any)?.keys) ? (extracted as any).keys.length : 0;
 
-        const basis = bpLen > 0 ? bpLen : rbLen > 0 ? rbLen : slotLen > 0 ? slotLen : 4;
-
+        const basis = rbLen > 0 ? rbLen : slotLen > 0 ? slotLen : 4;
         const budget = Math.max(12, basis * 8);
         return Math.min(80, budget);
       })(),
@@ -3275,6 +3286,20 @@ if (shouldRunWriter) {
 
         const metaRoot = (out.metaForSave as any)?.meta ?? null;
 
+        // ✅ ctxPack の継続値を受けるが、BlockPlan 系は“絶対に継続しない”
+        const ctxPackPrevRaw: any = ((out.metaForSave as any)?.extra?.ctxPack ?? null) as any;
+        const ctxPackPrev: any =
+          ctxPackPrevRaw && typeof ctxPackPrevRaw === 'object' ? { ...ctxPackPrevRaw } : {};
+
+        try {
+          delete ctxPackPrev.blockPlan;
+          delete ctxPackPrev.blockPlanText;
+          delete ctxPackPrev.blockPlanEnabled;
+          delete ctxPackPrev.blockPlanMeta;
+          delete ctxPackPrev.blockPlanTrigger;
+          delete ctxPackPrev.blockPlanTriggerText;
+        } catch {}
+
         return {
           conversationId: _conversationId ?? null,
           userCode: _userCode ?? null,
@@ -3284,8 +3309,9 @@ if (shouldRunWriter) {
           exprMeta: exprMetaCanon,
 
           historyForWriter: turns,
+
           ctxPack: {
-            ...(((out.metaForSave as any)?.extra?.ctxPack ?? null) as any),
+            ...ctxPackPrev,
             traceId: traceIdCanon, // ✅ ここも固定
             historyForWriter: turns,
             slotPlanPolicy,
@@ -3301,10 +3327,8 @@ if (shouldRunWriter) {
             q: (out.metaForSave as any)?.q ?? metaRoot?.q ?? null,
             depth: (out.metaForSave as any)?.depth ?? metaRoot?.depth ?? null,
             phase: (out.metaForSave as any)?.phase ?? metaRoot?.phase ?? null,
-            layer:
-              (out.metaForSave as any)?.intentLayer ?? metaRoot?.intentLayer ?? null,
-            renderMode:
-              (out.metaForSave as any)?.renderMode ?? metaRoot?.renderMode ?? null,
+            layer: (out.metaForSave as any)?.intentLayer ?? metaRoot?.intentLayer ?? null,
+            renderMode: (out.metaForSave as any)?.renderMode ?? metaRoot?.renderMode ?? null,
             slotPlanPolicy,
           },
         };

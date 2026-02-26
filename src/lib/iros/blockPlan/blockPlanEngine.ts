@@ -13,6 +13,10 @@
 // - 自動判定は最小（I層以上 + IT_TRIGGER のみ）。それ以外は出さない。
 // - 仕様説明（やり方/手順/仕組み/とは）は BlockPlan 禁止（演出で誤魔化さない）。
 //
+// ✅ 追加（2026-02-26）
+// - 相談ゴール（stabilize/repair/counsel）で「言葉の違和感/反発」が出た場合だけ、R帯でも multi6 を許可。
+//   目的：リメイク入口（裂け目）を“段構成”で支える。ただし過剰演出はしない（multi6固定 / 条件限定）。
+//
 // ✅ 重要：
 // - 「次の一手 / 最小の一手（NEXT_MIN）」は廃止（BlockPlan では出さない）。
 //   ※ “次の一手” は slotPlan(NEXT) の世界で扱う。BlockPlan は段落の整理だけ。
@@ -70,16 +74,27 @@ export function detectExplicitBlockPlanTrigger(userText: string): boolean {
 
 /**
  * directTask（仕様説明/手順/やり方系）：
- * - ここで BlockPlan を出すと “説明依頼” が演出で歪むので禁止。
- * - ただし過検出すると窮屈になるので、語彙は最小〜中くらいに。
+ * - hard: 絶対禁止（explicitTrigger があっても止める）
+ * - soft: 抑制（ただし explicitTrigger=true なら許可）
+ *
+ * 安定化ルール：
+ * - hardDirectTask=true なら必ず BlockPlan なし
+ * - explicitTrigger=true なら softDirectTask は無視（= explicit を勝たせる）
  */
-function detectDirectTask(userText: string): boolean {
+function detectDirectTaskHard(userText: string): boolean {
   const t = String(userText ?? '').trim();
   if (!t) return false;
 
-  // 「とは/仕組み/手順/やり方/方法/実装/どうやって」など
-  // ※「教えて」は雑談でも入るので単体では拾わない
-  return /(仕組み|手順|やり方|方法|実装|設計|仕様|どうやって|とは)/i.test(t);
+  // 絶対禁止（PDFの核）
+  return /(手順書|仕様書|実装|SQL|コード|設計|どうやって|とは|仕組み|手順|やり方|方法)/i.test(t);
+}
+
+function detectDirectTaskSoft(userText: string): boolean {
+  const t = String(userText ?? '').trim();
+  if (!t) return false;
+
+  // 単体だと雑談でも出るので “抑制” 扱い
+  return /(教えて|説明して|解説して)/i.test(t);
 }
 
 /**
@@ -91,6 +106,20 @@ function detectWantsDeeper(userText: string): boolean {
   if (!t) return false;
 
   return /(詳しく|丁寧に|ちゃんと|しっかり|長め|深め|深掘り|背景|理由|本質)/i.test(t);
+}
+
+/**
+ * “裂け目（言葉の違和感/反発）” ニュアンス：
+ * - R帯でも「リメイク入口」が出た時だけ multi6 を許可するための最小検出。
+ * - “説明依頼” は directTask で落ちるので、ここは会話寄りの違和感だけ拾う。
+ */
+function detectCrackWords(userText: string): boolean {
+  const t = String(userText ?? '').trim();
+  if (!t) return false;
+
+  return /(不自然|うっとおしい|違和感|ズレ|変だ|なんか違う|合ってない|しっくりこない|やっぱり)/i.test(
+    t,
+  );
 }
 
 /* =========================================================
@@ -142,21 +171,39 @@ export function buildBlockPlan(params: BuildBlockPlanParams): BlockPlan | null {
   const depthStage = params.depthStage ?? null;
   const itTriggered = typeof params.itTriggered === 'boolean' ? params.itTriggered : false;
 
-  // 1) 説明依頼は BlockPlan 禁止（演出で誤魔化さない）
-  if (detectDirectTask(userText)) return null;
+  // 互換 goalKind（署名は昔からあるが、今はここで最小限だけ使う）
+  const goalKind = String(params.goalKind ?? '').trim().toLowerCase();
 
-  // 2) 明示トリガー（ユーザー指定）を最優先
+  // 1) 明示トリガー（ユーザー指定）を最優先で確定（soft 判定より先に取る）
   const explicit =
     typeof params.explicitTrigger === 'boolean'
       ? params.explicitTrigger
       : detectExplicitBlockPlanTrigger(userText);
 
-  // 3) 自動トリガー（最小）
+  // 2) directTask 判定（hard/soft）
+  const hardDirectTask = detectDirectTaskHard(userText);
+  const softDirectTask = detectDirectTaskSoft(userText);
+
+  // hard は常に禁止（explicit があっても止める）
+  if (hardDirectTask) return null;
+
+  // soft は explicit が無いときだけ禁止（explicit を勝たせる）
+  if (!explicit && softDirectTask) return null;
+
+  // 3) 自動トリガー（最小・従来）
   // - I層以上が確定していて、かつ IT_TRIGGER が立っている時だけ許可
   const autoDeepen = isDepthAtLeastI1(depthStage) && Boolean(itTriggered);
 
-  // 4) どちらも無いなら絶対に出さない
-  if (!explicit && !autoDeepen) return null;
+  // 4) 自動トリガー（追加・裂け目）
+  // - stabilize/repair/counsel の相談ゴールで、言葉の違和感/反発が出た時だけ許可
+  // - 過剰演出を避けるため multi6 固定（multi7 にはしない）
+  const consultishGoal =
+    goalKind === 'stabilize' || goalKind === 'repair' || goalKind === 'counsel';
+
+  const autoCrack = consultishGoal && detectCrackWords(userText);
+
+  // 5) どれも無いなら出さない
+  if (!explicit && !autoDeepen && !autoCrack) return null;
 
   // ---------------------------------------------
   // 明示指定：
@@ -182,7 +229,7 @@ export function buildBlockPlan(params: BuildBlockPlanParams): BlockPlan | null {
     };
   }
 
-  // autoDeepen（I層以上 + IT_TRIGGER） → multi6（軽め）
+  // autoDeepen / autoCrack → multi6（軽め）
   return {
     mode: 'multi6',
     blocks: ['ENTRY', 'SITUATION', 'DUAL', 'FOCUS_SHIFT', 'ACCEPT', 'INTEGRATE'],

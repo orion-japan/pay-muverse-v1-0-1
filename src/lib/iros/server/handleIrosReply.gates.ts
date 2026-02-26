@@ -546,9 +546,7 @@ export async function runGreetingGate(args: any): Promise<{
 
       // ✅ understand判定（no_ctx_summary）を潰す：初手greetingでも shortSummary を必ず持たせる
       // - UIには出さない（ログ用）
-      ctxPack: {
-        shortSummary: 'greeting',
-      },
+      // ✅ ctxPack 正本は extra.ctxPack に統一（metaForSave.ctxPack は持たない）
 
       // ✅ rephraseAttach / conv evidence / postprocess が拾う “濃いmeta”
       framePlan,

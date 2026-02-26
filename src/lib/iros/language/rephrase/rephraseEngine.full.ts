@@ -2264,51 +2264,27 @@ const seedDraftRawAll = extracted.slots
 
 
 
-  const seedDraftSanitized = sanitizeSeedDraftForLLM(seedDraft0);
+// replace: src/lib/iros/language/rephrase/rephraseEngine.full.ts
+// from: 2267
+// to:   2311 手前（= const itOk 行の直前まで）
+//
+// 目的：seedDraftを「seedFinal一本」にし、userText混入の地雷を消す。
 
-  // ✅ 方針：writer へ userText を絶対に渡さない
-  // - chooseSeedForLLM の userText 経路を遮断
-  // - seed が空になる場合は固定の安全フレーズにフォールバック
-  const seedFinal = chooseSeedForLLM(seedDraftSanitized, '') || '続けてください';
+const seedDraftSanitized = sanitizeSeedDraftForLLM(seedDraft0);
 
-  function humanizeDirectivesForSeed(seedDraft0: string, userText: string): string {
-    const raw = String(seedDraft0 ?? '').trim();
-    if (!raw) return '';
+// ✅ 方針：writer へ userText を絶対に渡さない
+// - chooseSeedForLLM の userText 経路を遮断
+// - seed が空になる場合は固定の安全フレーズにフォールバック
+const seedFinal = chooseSeedForLLM(seedDraftSanitized, '') || '続けてください';
 
-    const hasOBS = /@OBS\b/.test(raw);
-    const hasSHIFT = /@SHIFT\b/.test(raw) || /@SH\b/.test(raw);
-    const hasRESTORE = /@RESTORE\b/.test(raw);
-    const hasQ = /@Q\b/.test(raw);
+// ✅ seedDraft は seedFinal を正本とする（userText遮断の一貫性）
+// - humanizeDirectivesForSeed は userText を混ぜうるため削除（地雷化する）
+const seedDraft = seedFinal;
 
-    const lines: string[] = [];
-
-    const ut = String(userText ?? '').trim();
-    if (ut) lines.push(ut);
-
-    const tags: string[] = [];
-    if (hasOBS) tags.push('観測');
-    if (hasSHIFT) tags.push('ずれ/方向');
-    if (hasRESTORE) tags.push('焦点');
-    if (hasQ) tags.push('問い');
-
-    if (tags.length > 0) {
-      lines.push('');
-      lines.push(`（手がかり: ${tags.join(' / ')}）`);
-    }
-
-    return lines.join('\n').trim();
-  }
-
-  const seedDraft =
-    seedFinal ||
-    (/@(OBS|SHIFT|SH|RESTORE|Q|SAFE|NEXT|END|TASK)\b/m.test(String(seedDraft0 ?? ''))
-      ? humanizeDirectivesForSeed(String(seedDraft0 ?? ''), userText)
-      : '');
-
-  const seedDraftHint = adaptSeedDraftHintForWriter(seedDraft, isDirectTask);
-  const itOk = readItOkFromContext(opts?.userContext ?? null);
-  const band = extractIntentBandFromContext(opts?.userContext ?? null);
-
+// writer向けの軽いヒント（※ここも userText を足さない前提）
+const seedDraftHint = adaptSeedDraftHintForWriter(seedDraft, isDirectTask);
+const itOk = readItOkFromContext(opts?.userContext ?? null);
+const band = extractIntentBandFromContext(opts?.userContext ?? null);
 
 // 既存の `lastTurns` をそのまま使い、会話が「assistant始まり」になるように整える
 const lastTurnsSafe = (() => {
@@ -2716,6 +2692,8 @@ try {
   });
 
 
+// 目的：buildFirstPassMessages に渡す seedDraft を固定文字列から seedDraft に差し替え。
+
   // ✅ 方針：writer へ userText を一切渡さない（turns/history/finalUserText から除外）
   // - turns を渡すと「過去assistant文に混入した userText」を再引用してしまうため、ここでは完全遮断する
   const turnsForWriter: any[] = [];
@@ -2726,7 +2704,7 @@ try {
     systemPrompt,
     internalPack,
     turns: turnsForWriter,
-    seedDraft: '続けてください', // ✅ 固定文のみ（userTextは禁止）
+    seedDraft, // ✅ ここで上で確定した seedFinal（userText遮断済み）を渡す
   });
 
   // ✅ HistoryDigest v1（外から渡された場合のみ注入）
@@ -2994,24 +2972,49 @@ const itTriggered = Boolean(
     false
 );
 
-// ✅ explicitTrigger は「最後の user 発話」だけから判定する（末尾message role不問を禁止）
-const rawUserTextFromOpts = String((opts as any)?.userText ?? '').trim();
+  // ✅ explicitTrigger は「今回の入力（opts.userText）」を正本にする
+  // - messages は、history/bridgeの都合で “別ターンの短文” が最後の user に紛れることがある
+  // - その場合「続けてください」等が trigger 判定を汚染するので、opts を優先し fallback としてのみ messages を使う
+  const resolveUserTextForTrigger = (): { text: string; pickedFrom: 'opts' | 'messages' | 'empty' } => {
+    const rawUserTextFromOpts = String((opts as any)?.userText ?? '').trim();
 
-const rawUserTextFromMessages = (() => {
+    const rawUserTextFromMessages = (() => {
+      try {
+        // messages を後ろから走査して「role:user」の最後を拾う
+        for (let i = (messages as any[])?.length - 1; i >= 0; i--) {
+          const m: any = (messages as any[])[i];
+          if (m?.role === 'user') return String(m?.content ?? '').trim();
+        }
+      } catch {}
+      return '';
+    })();
+
+    // ✅ 正本: opts（今回入力）
+    if (rawUserTextFromOpts.length > 0) return { text: rawUserTextFromOpts, pickedFrom: 'opts' };
+
+    // ✅ fallback: messages（今回入力が空のときだけ）
+    if (rawUserTextFromMessages.length > 0) return { text: rawUserTextFromMessages, pickedFrom: 'messages' };
+
+    return { text: '', pickedFrom: 'empty' };
+  };
+
+  const resolvedTrigger = resolveUserTextForTrigger();
+  const userTextForTrigger = resolvedTrigger.text;
+
+  const explicitTrigger = detectExplicitBlockPlanTrigger(userTextForTrigger);
+
+  // ✅ 観測点：トリガ元テキストの採用元を固定ログ化
   try {
-    // messages を後ろから走査して「role:user」の最後を拾う
-    for (let i = (messages as any[])?.length - 1; i >= 0; i--) {
-      const m: any = (messages as any[])[i];
-      if (m?.role === 'user') return String(m?.content ?? '').trim();
-    }
+    console.log('[IROS/rephraseEngine][BLOCK_PLAN_TRIGGER_TEXT]', {
+      traceId: (debug as any)?.traceId ?? null,
+      conversationId: (debug as any)?.conversationId ?? null,
+      userCode: (debug as any)?.userCode ?? null,
+      pickedFrom: resolvedTrigger.pickedFrom,
+      optsLen: String((opts as any)?.userText ?? '').trim().length,
+      msgLen: userTextForTrigger.length,
+      head: userTextForTrigger.slice(0, 80),
+    });
   } catch {}
-  return '';
-})();
-
-const userTextForTrigger =
-  rawUserTextFromOpts.length > 0 ? rawUserTextFromOpts : rawUserTextFromMessages;
-
-const explicitTrigger = detectExplicitBlockPlanTrigger(userTextForTrigger);
 
 // ✅ v1方針：BlockPlan は “例外演出” のみ（通常会話は null）
 const blockPlan = buildBlockPlan({
@@ -3033,14 +3036,25 @@ try {
     traceId: (debug as any)?.traceId ?? null,
     conversationId: (debug as any)?.conversationId ?? null,
     userCode: (debug as any)?.userCode ?? null,
-enabled: Boolean(blockPlanText && String(blockPlanText).trim().length > 0),
+
+    enabled: Boolean(blockPlanText && String(blockPlanText).trim().length > 0),
+
     goalKind,
     exprLane: (exprMeta as any)?.lane ?? null,
     explicitTrigger,
+
+    // ✅ trigger観測をここに統合（到達保証ログ）
+    triggerPickedFrom: (resolvedTrigger as any)?.pickedFrom ?? null,
+    triggerHead: String(userTextForTrigger ?? '').slice(0, 80),
+
     depthStage,
     itTriggered,
+
     mode: (blockPlan as any)?.mode ?? null,
-    blocksLen: Array.isArray((blockPlan as any)?.blocks) ? (blockPlan as any).blocks.length : 0,
+    blocksLen: Array.isArray((blockPlan as any)?.blocks)
+      ? (blockPlan as any).blocks.length
+      : 0,
+
     sysLen: String(blockPlanText ?? '').trim().length,
   });
 } catch {}
@@ -3048,7 +3062,7 @@ enabled: Boolean(blockPlanText && String(blockPlanText).trim().length > 0),
 // ✅ BLOCK_PLAN が入る時だけ、行数クランプを緩める（完走優先）
 if (blockPlanText && String(blockPlanText).trim().length > 0) {
   const modeStr = String((blockPlan as any)?.mode ?? '').trim();
-  const min = modeStr === 'multi8' ? 40 : 32; // multi7:32 / multi8:40（例外演出は長くてよい）
+  const min = modeStr === 'multi7' ? 40 : 32; // multi7:40 / multi6:32（例外演出は長くてよい）
   if (typeof (maxLines as any) === 'number' && (maxLines as any) > 0) {
     maxLines = Math.max(maxLines, min);
   } else {
@@ -3056,98 +3070,103 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
   }
 }
 
-if (messages.length > 0 && (messages as any)[0]?.role === 'system') {
-  const base = String((messages as any)[0]?.content ?? '');
+  // ✅ system を1枚に統合（systemPrompt → allow → runtimePolicy → exprMeta → BLOCK_PLAN）
+  if (Array.isArray(messages) && messages.length > 0 && (messages as any)[0]?.role === 'system') {
+    const base = String((messages as any)[0]?.content ?? '');
+    const extraSystemParts: string[] = [];
 
-  const extraSystemParts: string[] = [];
-
-  // allow（任意）
-  if (allowText && String(allowText).trim().length > 0) {
-    extraSystemParts.push(String(allowText));
-  }
-
-// ✅ EXPR_META を system に混入（directiveV1 が ON のときだけ追記）
-// ✅ ここで「LLMに送る最終 system 全体」に、軽いランタイム方針を足す（systemPrompt.ts は触らない）
-if (Array.isArray(messages) && messages.length > 0 && messages[0]?.role === 'system') {
-  const base = String((messages[0] as any)?.content ?? '');
-  const extraSystemParts: string[] = [];
-
-  // -------------------------------------------------
-  // runtime policy（軽量・可変にしない）
-  // - 段/行数/見出し採用は LLM 判断に任せる
-  // - ただし「内部信号の露出禁止」「具体語アンカー」「見出し形式」だけは system で押さえる
-  // -------------------------------------------------
-  const runtimeWriterPolicyText = [
-    '【WRITER RUNTIME POLICY（DO NOT OUTPUT）】',
-    '- 内部信号（obs/flow/e_turn/polarity/intent/depth など）は使ってよいが、ラベル名や内部語を本文に出さない。',
-    '- 抽象だけでまとめず、ユーザー発話の具体語を最低1つ残す。',
-    '- 段・行数・見出しの有無は内容に合わせて決めてよい（無理に構造化しない）。',
-    '- 見出しを使う場合のみ、形式は「## 絵文字1つ + 半角スペース + 見出し本文」にする。',
-    '- 絵文字や見た目は文脈優先。固定テンプレ化しない（🫧は使わない）。',
-  ].join('\n');
-
-  if (runtimeWriterPolicyText.trim()) {
-    extraSystemParts.push(runtimeWriterPolicyText);
-  }
-
-// ✅ EXPR_META を system に混入（directiveV1 は system に混入しない）
-if (exprMetaText && String(exprMetaText).trim().length > 0) {
-  const em: any = exprMeta && typeof exprMeta === 'object' ? exprMeta : {};
-
-  const directiveV1_on = Boolean(em.directiveV1_on);
-  const directiveV1 = String(em.directiveV1 ?? '').trim();
-  const hasDirectiveV1 = !!(directiveV1_on && directiveV1.length > 0);
-
-  // ✅ system には exprMetaText のみ入れる（directiveV1 は入れない）
-  extraSystemParts.push(String(exprMetaText));
-
-  // 追跡用（directive が存在している事実だけ見える化）
-  console.log('[IROS/rephraseEngine][EXPR_META]', {
-    injected: true,
-    hasDirectiveV1,
-    directiveInSystem: false,
-  });
-}
-
-  // BLOCK_PLAN（条件付き）
-  if (blockPlanText && String(blockPlanText).trim().length > 0) {
-    extraSystemParts.push(String(blockPlanText));
-  }
-
-  const merged = [base, ...extraSystemParts]
-    .filter((s) => String(s).trim().length > 0)
-    .join('\n\n');
-
-  messages = [
-    { role: 'system', content: merged } as any,
-    ...messages.slice(1),
-  ] as any;
-}}
-
-// ✅ system は必ず1枚に正規化（先頭に複数あれば結合して潰す）
-if (Array.isArray(messages) && messages.length >= 2) {
-  const head = messages[0];
-  if (head?.role === 'system') {
-    let i = 1;
-    const extraSystems: any[] = [];
-    while (i < messages.length && messages[i]?.role === 'system') {
-      extraSystems.push(messages[i]);
-      i++;
+    // allow（任意）
+    if (allowText && String(allowText).trim().length > 0) {
+      extraSystemParts.push(String(allowText));
     }
 
-    if (extraSystems.length > 0) {
-      const merged = [
-        String(head?.content ?? ''),
-        ...extraSystems.map((m) => String(m?.content ?? '')),
-      ]
-        .filter((s) => String(s).trim().length > 0)
-        .join('\n\n');
+    // -------------------------------------------------
+    // runtime policy（軽量・可変にしない）
+    // - 段/行数/見出し採用は LLM 判断に任せる
+    // - ただし「内部信号の露出禁止」「具体語アンカー」「見出し形式」だけは system で押さえる
+    // -------------------------------------------------
+    const runtimeWriterPolicyText = [
+      '【WRITER RUNTIME POLICY（DO NOT OUTPUT）】',
+      '- 内部信号（obs/flow/e_turn/polarity/intent/depth など）は使ってよいが、ラベル名や内部語を本文に出さない。',
+      '- 抽象だけでまとめず、ユーザー発話の具体語を最低1つ残す。',
+      '- 段・行数・見出しの有無は内容に合わせて決めてよい（無理に構造化しない）。',
+      '- 見出しを使う場合のみ、形式は「## 絵文字1つ + 半角スペース + 見出し本文」にする。',
+      '- 絵文字や見た目は文脈優先。固定テンプレ化しない（🫧は使わない）。',
+    ].join('\n');
 
-      messages = [{ role: 'system', content: merged } as any, ...messages.slice(i)] as any;
+    if (runtimeWriterPolicyText.trim()) {
+      extraSystemParts.push(runtimeWriterPolicyText);
+    }
+
+    // ✅ EXPR_META を system に混入（directiveV1 は system に混入しない）
+    if (exprMetaText && String(exprMetaText).trim().length > 0) {
+      const em: any = exprMeta && typeof exprMeta === 'object' ? exprMeta : {};
+      const directiveV1_on = Boolean(em.directiveV1_on);
+      const directiveV1 = String(em.directiveV1 ?? '').trim();
+      const hasDirectiveV1 = !!(directiveV1_on && directiveV1.length > 0);
+
+      // ✅ system には exprMetaText のみ入れる（directiveV1 は入れない）
+      extraSystemParts.push(String(exprMetaText));
+
+      // 追跡用（directive が存在している事実だけ見える化）
+      try {
+        console.log('[IROS/rephraseEngine][EXPR_META]', {
+          injected: true,
+          hasDirectiveV1,
+          directiveInSystem: false,
+        });
+      } catch {}
+    }
+
+    // BLOCK_PLAN（条件付き）
+    if (blockPlanText && String(blockPlanText).trim().length > 0) {
+      extraSystemParts.push(String(blockPlanText));
+    }
+
+    const merged = [base, ...extraSystemParts]
+      .filter((s) => String(s).trim().length > 0)
+      .join('\n\n');
+
+    messages = [{ role: 'system', content: merged } as any, ...messages.slice(1)] as any;
+  }
+
+  // ✅ system は必ず1枚に正規化（先頭に複数あれば結合して潰す）
+  if (Array.isArray(messages) && messages.length >= 2) {
+    const head = messages[0];
+    if (head?.role === 'system') {
+      let i = 1;
+      const extraSystems: any[] = [];
+      while (i < messages.length && messages[i]?.role === 'system') {
+        extraSystems.push(messages[i]);
+        i++;
+      }
+
+      if (extraSystems.length > 0) {
+        const merged = [
+          String(head?.content ?? ''),
+          ...extraSystems.map((m) => String(m?.content ?? '')),
+        ]
+          .filter((s) => String(s).trim().length > 0)
+          .join('\n\n');
+
+        messages = [{ role: 'system', content: merged } as any, ...messages.slice(i)] as any;
+      }
     }
   }
-}
-
+  // ✅ HOTFIX: LLM に渡す末尾 user は「今回入力(opts.userText)」を正本に固定する
+  // - 履歴の都合で「続けてください」等が末尾 user に紛れると、seedDraft/lastUser が汚染される
+  try {
+    const cur = String((opts as any)?.userText ?? '').trim();
+    if (cur) {
+      for (let i = (messages as any[])?.length - 1; i >= 0; i--) {
+        const m: any = (messages as any[])[i];
+        if (m?.role === 'user') {
+          (messages as any[])[i] = { ...m, content: cur };
+          break;
+        }
+      }
+    }
+  } catch {}
   console.log('[IROS/rephraseEngine][EXPR_META]', {
     traceId: debug.traceId,
     conversationId: debug.conversationId,

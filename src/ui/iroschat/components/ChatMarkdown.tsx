@@ -163,126 +163,91 @@ function plainTextFromChildren(children: React.ReactNode): string {
 
   return parts.join('');
 }
-// ✅ 見出しアイコンを“必ず”付ける（表示直前の最終整形）
-function enforceHeadingIcons(input: string): string {
-  const src = String(input ?? '').replace(/\r\n/g, '\n');
-  const lines = src.split('\n');
 
-  const isEmojiOnlyLine = (s: string) => {
-    const t = s.trim();
-    if (!t) return false;
-    return /^[\p{Extended_Pictographic}\uFE0F\s]+$/u.test(t);
-  };
-
-  const hasLeadingEmoji = (s: string) => {
-    const t = s.trimStart();
-    return /^\p{Extended_Pictographic}/u.test(t);
-  };
-
-  const pickEmojiForHeading = (title: string) => {
-    const t = title.trim();
-    if (/(入口|先頭|固定|合図|サイン)/.test(t)) return '📌';
-    if (/(本文|枠|構造|管理|整理|合図)/.test(t)) return '🗂️';
-    if (/(境界|配置|混ざ|分離|区切)/.test(t)) return '📍';
-    return '🧿'; // デフォルト（必ず付く）
-  };
-
-  const out: string[] = [];
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-
-    // (A) 「絵文字だけの行」→ 次の非空行を見出しに吸収（本文に残さない）
-    if (isEmojiOnlyLine(line)) {
-      const emoji = line.trim();
-
-      let j = i + 1;
-      while (j < lines.length && !lines[j].trim()) j++;
-
-      if (j < lines.length) {
-        const next = lines[j].trim();
-
-        // 次が見出しなら絵文字を付与
-        if (/^#{1,6}\s+/.test(lines[j])) {
-          const title = lines[j].replace(/^#{1,6}\s+/, '');
-          if (!hasLeadingEmoji(title)) {
-            lines[j] = lines[j].replace(/^(\#{1,6}\s+)/, `$1${emoji} `);
-          }
-        } else {
-          // 見出しでなければ見出し化
-          lines[j] = `## ${emoji} ${next}`;
-        }
-
-        continue; // 絵文字単独行は捨てる
-      }
-    }
-
-    // (B) Markdown見出し（## 等）に絵文字が無ければ付与
-    if (/^#{1,6}\s+/.test(line)) {
-      const m = line.match(/^(\#{1,6}\s+)(.*)$/);
-      if (m) {
-        const prefix = m[1];
-        const title = (m[2] ?? '').trim();
-        if (title && !hasLeadingEmoji(title)) {
-          out.push(`${prefix}${pickEmojiForHeading(title)} ${title}`);
-          continue;
-        }
-      }
-    }
-
-    out.push(line);
-  }
-
-  return out.join('\n');
+// ✅ 段落数（空行区切り）をざっくり数える：装飾の“発火条件”に使う
+function countParagraphs(src: string): number {
+  const s = String(src ?? '').replace(/\r\n/g, '\n').trim();
+  if (!s) return 0;
+  // 2個以上の改行で区切られる塊を段落とみなす
+  return s.split(/\n{2,}/).map((x) => x.trim()).filter(Boolean).length;
 }
-// ✅ ここを置き換え（useMemo 部分）
+
+// ✅ Markdown見出しの本数（#）を数える：見出しがあるなら段落装飾は控えめに
+function countMarkdownHeadings(src: string): number {
+  const s = String(src ?? '').replace(/\r\n/g, '\n');
+  const m = s.match(/^\#{1,6}\s+/gm);
+  return m?.length ?? 0;
+}
+
+// ✅ 先頭に絵文字があるか（段落装飾の二重付与防止）
+function hasLeadingEmoji(s: string): boolean {
+  const t = String(s ?? '').trimStart();
+  return /^\p{Extended_Pictographic}/u.test(t);
+}
+
 export default function ChatMarkdown({ text, className }: ChatMarkdownProps) {
   const normalized = useMemo(() => {
-    console.log('[DEBUG/ChatMarkdown][RAW]', JSON.stringify(text).slice(0, 800));
+    // ⚠️ これは「ブラウザの console」に出ます（dev.live.log には基本出ません）
+    // console.log('[DEBUG/ChatMarkdown][RAW]', JSON.stringify(text).slice(0, 800));
 
     const t1 = normalizeBold(text);
     const t2 = fixUnmatchedBold(t1);
 
-    console.log('[DEBUG/ChatMarkdown][NORMALIZED]', JSON.stringify(t2).slice(0, 800));
+    // console.log('[DEBUG/ChatMarkdown][NORMALIZED]', JSON.stringify(t2).slice(0, 800));
     return t2;
   }, [text]);
+
+  // ✅ “3段以上”のときだけ、段落にも軽い装飾を乗せる（見出しが無い文章向け）
+  const paraCount = useMemo(() => countParagraphs(normalized), [normalized]);
+  const headingCount = useMemo(() => countMarkdownHeadings(normalized), [normalized]);
+
+  // ルール：
+  // - 段落>=3 かつ 見出しが少ない（<=1）ときだけ、最初の1〜3段落に薄いアイコンを付ける
+  const enableParaDecor = paraCount >= 3 && headingCount <= 1;
+
+  // 段落インデックス（render中だけ使う）
+  let pIndex = 0;
 
   return (
     <div className={className}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          p: ({ ...props }) => (
-            <p
-              {...props}
-              style={{
-                margin: '0 0 0.8em',
-                lineHeight: 1.9,
-                whiteSpace: 'pre-wrap',
-              }}
-            />
-          ),
+          p: ({ children, ...props }) => {
+            const raw = plainTextFromChildren(children);
+            const idx = pIndex++;
+            const shouldDecorate = enableParaDecor && idx <= 2 && raw.trim() && !hasLeadingEmoji(raw);
 
-          // ✅ ここが重要：String(children) をやめる
-          h1: ({ children }) => (
-            <HeadingLine title={plainTextFromChildren(children)} level={1} />
-          ),
-          h2: ({ children }) => (
-            <HeadingLine title={plainTextFromChildren(children)} level={2} />
-          ),
-          h3: ({ children }) => (
-            <HeadingLine title={plainTextFromChildren(children)} level={3} />
-          ),
-          h4: ({ children }) => (
-            <HeadingLine title={plainTextFromChildren(children)} level={4} />
-          ),
+            // 先頭3段落だけ：🧿 → 🌀 → 🌱（強すぎない）
+            const icon = idx === 0 ? '🧿' : idx === 1 ? '🌀' : '🌱';
 
-          // ✅ strong も同じ（children が element になることがある）
+            return (
+              <p
+                {...props}
+                style={{
+                  margin: '0 0 0.8em',
+                  lineHeight: 1.9,
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                {shouldDecorate && (
+                  <span style={{ marginRight: '0.45em', fontSize: '1.05rem' }}>{icon}</span>
+                )}
+                {children}
+              </p>
+            );
+          },
+
+          // ✅ 見出し：children を plainText で
+          h1: ({ children }) => <HeadingLine title={plainTextFromChildren(children)} level={1} />,
+          h2: ({ children }) => <HeadingLine title={plainTextFromChildren(children)} level={2} />,
+          h3: ({ children }) => <HeadingLine title={plainTextFromChildren(children)} level={3} />,
+          h4: ({ children }) => <HeadingLine title={plainTextFromChildren(children)} level={4} />,
+
           strong: ({ children, ...props }) => {
             const raw0 = plainTextFromChildren(children).trim();
 
             // ✅ 先頭の絵文字を拾う（あれば見出しアイコンとして優先）
-            // Extended_Pictographic で拾う（🧿/🌀/🌱/📌/🗂️ などをまとめて扱える）
             const m = raw0.match(/^([\p{Extended_Pictographic}\uFE0F]+)\s*/u);
             const leadingEmoji = m?.[1] ?? null;
 
@@ -291,8 +256,6 @@ export default function ChatMarkdown({ text, className }: ChatMarkdownProps) {
             const norm = normalizeHeadingTitle(raw);
 
             if (isStrongHeading(raw)) {
-              // ✅ アイコン決定：先頭絵文字 > 推定 > デフォルト
-              // （※ここを2回宣言するとTSエラーになるので“1回だけ”）
               const icon = leadingEmoji ?? pickHeadingIcon(raw) ?? '🧿';
 
               return (

@@ -272,6 +272,53 @@ export async function buildTurnContext(
   try {
     const inputKind = detectInputKind(text);
 
+    // =========================
+    // ✅ NEW: Concept Lock (RECALL hint)
+    // - 直前までに保存された conceptLock があり、
+    //   ユーザーが「3つ/それ」参照で来た場合は、否認防止の seed を meta.extra に置く
+    // - 既存の llmRewriteSeed があれば上書きしない
+    // =========================
+    const userTextNow = String(text ?? '').trim();
+    const ex0: any = (baseMetaForTurn as any)?.extra && typeof (baseMetaForTurn as any).extra === 'object'
+      ? (baseMetaForTurn as any).extra
+      : null;
+
+    const cl0: any = ex0?.conceptLock ?? null;
+    const clItems: string[] | null =
+      cl0 && typeof cl0 === 'object' && cl0.active === true && Array.isArray(cl0.items)
+        ? cl0.items.filter(Boolean).map((s: any) => String(s ?? '').trim()).filter(Boolean)
+        : null;
+
+    const wantsRecall =
+      !!userTextNow &&
+      /(３つ|三つ|3つ|その3つ|この3つ|それ|それは|あれ|あれは|何ですか|なんですか|って何)/.test(userTextNow);
+
+    if (wantsRecall && clItems && clItems.length >= 3) {
+      // baseMetaForTurn.extra を確実に object 化
+      if (!(baseMetaForTurn as any).extra || typeof (baseMetaForTurn as any).extra !== 'object') {
+        (baseMetaForTurn as any).extra = {};
+      }
+      const ex: any = (baseMetaForTurn as any).extra;
+
+      // 観測用（上書きしない）
+      if (ex.conceptRecall == null) {
+        ex.conceptRecall = { active: true, items: clItems.slice(0, 3), at: Date.now(), reason: 'USER_REF' };
+      }
+
+      // ✅ LLM seed（上書き禁止）
+      if (typeof ex.llmRewriteSeed !== 'string' || !ex.llmRewriteSeed.trim()) {
+        ex.llmRewriteSeed =
+          `概念固定：「3つ」は ${clItems.slice(0, 3).join(' / ')}。この3つを否認せず、先に定義を明示してから説明する。`;
+      }
+
+      console.log('[IROS/CONCEPT_LOCK][RECALL_HINT]', {
+        inputKind,
+        items: clItems.slice(0, 3),
+        userHead: userTextNow.slice(0, 80),
+        hasSeed: typeof ex.llmRewriteSeed === 'string' && !!ex.llmRewriteSeed.trim(),
+      });
+    }
+
     // IrosStateLite は型が変動しやすいので、ここは “必要最小” を寄せて any で通す
     const stateLite: IrosStateLite = {
       depthStage:
@@ -312,7 +359,6 @@ export async function buildTurnContext(
 
     baseMetaForTurn.inputKind = inputKind;
     baseMetaForTurn.framePlan = framePlan;
-
     console.log('[IROS/Context] framePlan built', {
       userCode: (stateLite as any)?.userCode ?? null,
       inputKind,

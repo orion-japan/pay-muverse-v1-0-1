@@ -199,6 +199,82 @@ export async function persistAssistantMessageToIrosMessages(args: {
       m.depthstage = d;
     }
 
+    // =========================
+    // ✅ NEW: Concept Lock (CREATE)
+    // - assistant本文(content)から「3点列挙」を抽出して meta.extra に保存
+    // - 既に存在する場合は上書きしない
+    // =========================
+    const extractConceptLockItems = (text: string): string[] | null => {
+      const s = String(text ?? '').trim();
+      if (!s) return null;
+
+      const norm = s.replace(/\s+/g, ' ').trim();
+
+      // 1) 「...」「...」「...」が3つ以上あるなら最優先
+      const quoted = Array.from(norm.matchAll(/「([^」]{1,24})」/g))
+        .map((m) => String(m[1] ?? '').trim())
+        .filter(Boolean);
+
+      const uniqQuoted: string[] = [];
+      for (const w of quoted) {
+        if (!uniqQuoted.includes(w)) uniqQuoted.push(w);
+        if (uniqQuoted.length >= 3) break;
+      }
+      if (uniqQuoted.length >= 3) return uniqQuoted.slice(0, 3);
+
+      // 2) AとBとC（短め）を拾う
+      // - 記号や長文を避けるため、各パーツは最大24文字
+      const m1 = norm.match(/([^、。\n]{1,24})と([^、。\n]{1,24})と([^、。\n]{1,24})/);
+      if (m1) {
+        const items = [m1[1], m1[2], m1[3]]
+          .map((x) => String(x ?? '').trim().replace(/[「」"'”’\(\)\[\]{}<>]/g, ''))
+          .map((x) => x.replace(/^(うん、|はい、|つまり、)\s*/g, '').trim())
+          .filter(Boolean);
+        const uniq: string[] = [];
+        for (const w of items) {
+          if (!uniq.includes(w)) uniq.push(w);
+        }
+        if (uniq.length >= 3) return uniq.slice(0, 3);
+      }
+
+      // 3) A、B、C（読点/カンマ）系（短め）を拾う
+      const split3 = norm
+        .split(/[、,]/)
+        .map((x) => x.trim())
+        .filter(Boolean);
+      if (split3.length >= 3) {
+        const head3 = split3.slice(0, 3).map((x) => x.replace(/[「」"'”’]/g, '').trim());
+        const uniq: string[] = [];
+        for (const w of head3) {
+          if (w && !uniq.includes(w)) uniq.push(w);
+        }
+        if (uniq.length >= 3) return uniq.slice(0, 3);
+      }
+
+      return null;
+    };
+
+    // 既存 conceptLock が無いときだけ作る
+    if (!m.extra || typeof m.extra !== 'object' || Array.isArray(m.extra)) m.extra = {};
+    const ex2: any = m.extra;
+
+    if (ex2.conceptLock == null) {
+      const items = extractConceptLockItems(String(content ?? ''));
+      if (items && items.length === 3) {
+        ex2.conceptLock = {
+          active: true,
+          items,
+          createdAt: Date.now(),
+          source: 'assistant_text',
+        };
+        console.log('[IROS/CONCEPT_LOCK][CREATE]', {
+          conversationId: conversationUuid,
+          userCode,
+          items,
+        });
+      }
+    }
+
     finalMeta = sanitizeForJsonb(m);
   } catch (e) {
     console.warn('[IROS/persist] meta sync failed', e);

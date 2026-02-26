@@ -138,22 +138,48 @@ export async function saveMessagesDB(args: {
     mode,
   };
 
+  // ✅ traceId を「ここで」正規化（列 trace_id と meta.extra.traceId を同期）
+  const traceIdForRow = (() => {
+    const a = String((args as any)?.traceId ?? '').trim();
+    if (a) return a;
+
+    const m = (args as any)?.meta;
+    if (m && typeof m === 'object') {
+      const b = String((m as any)?.traceId ?? '').trim();
+      if (b) return b;
+
+      const ex = (m as any)?.extra;
+      if (ex && typeof ex === 'object') {
+        const c = String((ex as any)?.traceId ?? (ex as any)?.trace_id ?? '').trim();
+        if (c) return c;
+      }
+    }
+    return null;
+  })();
+
+  // ✅ user 側も meta.extra.traceId を持たせる（ops/iros-logs が meta から拾う経路とも整合）
+  const metaUser = traceIdForRow ? { extra: { traceId: traceIdForRow }, mode } : { mode };
+
   const { error } = await supa.from('iros_messages').insert([
     {
       conversation_id: conversationUuid,
       role: 'user',
+      user_code: userCode,
       text: userText,
       content: userText,
-      meta: null,
+      meta: metaUser,
+      trace_id: traceIdForRow,
       created_at: nowIso,
       ts: nowTs,
     },
     {
       conversation_id: conversationUuid,
       role: 'assistant',
+      user_code: userCode,
       text: assistantText,
       content: assistantText,
       meta: metaAssistant,
+      trace_id: traceIdForRow,
       created_at: nowIso,
       ts: nowTs,
     },

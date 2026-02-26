@@ -775,11 +775,15 @@ if (isNonForwardButEmpty) {
 
   const speechAct0 = String(
     speechActReqRaw ?? speechActExtraRaw ?? speechActMetaRaw ?? '',
-  ).toUpperCase();
+  )
+    .trim()
+    .toUpperCase();
 
   const shouldEarlyReturn = speechAct0 === 'FORWARD';
 
   console.info('[IROS/SPEECH_EARLY_RETURN][CHECK]', {
+    body_has_meta: Boolean((body as any)?.meta),
+    body_meta_extra_keys: Object.keys(((body as any)?.meta?.extra ?? {}) as any),
     traceId_used: String(traceId ?? ''),
     traceId_req: String((body as any)?.traceId ?? ''),
     conversationId: String(conversationId ?? ''),
@@ -810,80 +814,99 @@ if (isNonForwardButEmpty) {
   }
 
   if (shouldEarlyReturn) {
-    console.info('[IROS/SPEECH_EARLY_RETURN][HIT]', {
-      traceId_used: String(traceId ?? ''),
-      traceId_req: String((body as any)?.traceId ?? ''),
-      conversationId: String(conversationId ?? ''),
-      userCode: String(userCode ?? ''),
-      speechAct0,
-    });
-
+    // ✅ 返却候補（content優先 / assistantTextフォールバック）
     let finalText = pickText((result as any)?.content, assistantText);
-    metaAny.extra = { ...(metaAny.extra ?? {}), speechEarlyReturned: true };
+    finalText = String(finalText ?? '').trim();
 
-    // ✅ FORWARD early-return でも STYLE_NORM_FINAL を適用（UI返却の穴埋め）
-    try {
-      const seed =
-        String((metaAny as any)?.traceId ?? '') ||
-        String((metaAny as any)?.extra?.traceId ?? '') ||
-        String(traceId ?? '') ||
-        String(conversationId ?? '');
-
-      const n = normalizeIrosStyleFinal(finalText, {
-        seed,
-        emojiKeepRate: 0.3,
-        maxReplacements: 5,
+    // ✅ “空なら早期returnしない”
+    // 空のまま return すると 200 + 空本文 になり得るため、通常ルートへ落として救済（本文同期/NORMAL BASE等）に任せる
+    if (!finalText) {
+      console.warn('[IROS/SPEECH_EARLY_RETURN][SKIP_EMPTY]', {
+        traceId_used: String(traceId ?? ''),
+        traceId_req: String((body as any)?.traceId ?? ''),
+        conversationId: String(conversationId ?? ''),
+        userCode: String(userCode ?? ''),
+        speechAct0,
+        contentLen: String((result as any)?.content ?? '').trim().length,
+        assistantTextLen: String(assistantText ?? '').trim().length,
+      });
+      // ✅ return しない（＝通常ルートへ）
+    } else {
+      console.info('[IROS/SPEECH_EARLY_RETURN][HIT]', {
+        traceId_used: String(traceId ?? ''),
+        traceId_req: String((body as any)?.traceId ?? ''),
+        conversationId: String(conversationId ?? ''),
+        userCode: String(userCode ?? ''),
+        speechAct0,
+        finalLen: finalText.length,
       });
 
-      const outText = typeof (n as any)?.text === 'string' ? (n as any).text : finalText;
+      metaAny.extra = { ...(metaAny.extra ?? {}), speechEarlyReturned: true };
 
-      console.info('[IROS/STYLE_NORM_FINAL]', {
-        applied: true,
-        meta: (n as any)?.meta,
-        len_in: String(finalText ?? '').length,
-        len_out: String(outText ?? '').length,
-        route: 'speechEarlyReturn',
-      });
+      // ✅ FORWARD early-return でも STYLE_NORM_FINAL を適用（UI返却の穴埋め）
+      try {
+        const seed =
+          String((metaAny as any)?.traceId ?? '') ||
+          String((metaAny as any)?.extra?.traceId ?? '') ||
+          String(traceId ?? '') ||
+          String(conversationId ?? '');
 
-      finalText = outText;
+        const n = normalizeIrosStyleFinal(finalText, {
+          seed,
+          emojiKeepRate: 0.1,
+          maxReplacements: 0,
+        });
 
-      metaAny.extra = {
-        ...(metaAny.extra ?? {}),
-        styleNormFinal: (n as any)?.meta,
-      };
-    } catch {}
+        const outText = typeof (n as any)?.text === 'string' ? (n as any).text : finalText;
 
-    const capRes = await captureChat(req, userCode, CREDIT_AMOUNT, creditRef);
+        console.info('[IROS/STYLE_NORM_FINAL]', {
+          applied: true,
+          meta: (n as any)?.meta,
+          len_in: String(finalText ?? '').length,
+          len_out: String(outText ?? '').length,
+          route: 'speechEarlyReturn',
+        });
 
-    const headers: Record<string, string> = withTrace(
-      {
-        ...CORS_HEADERS,
-        'x-handler': 'app/api/agent/iros/reply',
-        'x-credit-ref': creditRef,
-        'x-credit-amount': String(CREDIT_AMOUNT),
-        ...(lowWarn ? { 'x-warning': 'low_balance' } : {}),
-      },
-      traceId,
-    );
+        finalText = outText;
 
-    return NextResponse.json(
-      {
-        ok: true,
-        mode: finalMode ?? 'auto',
-        content: finalText,
-        assistantText: finalText,
-        credit: {
-          ref: creditRef,
-          amount: CREDIT_AMOUNT,
-          authorize: authRes,
-          capture: capRes,
-          ...(lowWarn ? { warning: lowWarn } : {}),
+        metaAny.extra = {
+          ...(metaAny.extra ?? {}),
+          styleNormFinal: (n as any)?.meta,
+        };
+      } catch {}
+
+      const capRes = await captureChat(req, userCode, CREDIT_AMOUNT, creditRef);
+
+      const headers: Record<string, string> = withTrace(
+        {
+          ...CORS_HEADERS,
+          'x-handler': 'app/api/agent/iros/reply',
+          'x-credit-ref': creditRef,
+          'x-credit-amount': String(CREDIT_AMOUNT),
+          ...(lowWarn ? { 'x-warning': 'low_balance' } : {}),
         },
-        ...(lowWarn ? { warning: lowWarn } : {}),
-        meta: metaAny,
-      },
-      { status: 200, headers },
-    );
+        traceId,
+      );
+
+      return NextResponse.json(
+        {
+          ok: true,
+          mode: finalMode ?? 'auto',
+          content: finalText,
+          assistantText: finalText,
+          credit: {
+            ref: creditRef,
+            amount: CREDIT_AMOUNT,
+            authorize: authRes,
+            capture: capRes,
+            ...(lowWarn ? { warning: lowWarn } : {}),
+          },
+          ...(lowWarn ? { warning: lowWarn } : {}),
+          meta: metaAny,
+        },
+        { status: 200, headers },
+      );
+    }
   }
 }
 // -------------------------------------------------------
@@ -1280,14 +1303,7 @@ if (isNonForwardButEmpty) {
           };
         }
 
-        // =========================================================
-        // ✅ UI正本（result.content）を先に確定
-        // =========================================================
-        (result as any).content = finalText;
-        (result as any).text = finalText;
-        (result as any).assistantText = finalText;
-
-        // =========================================================
+       // =========================================================
         // ✅ Iros 文体 正規化フィルタ（route: UI正本の確定点）
         // - ここで finalText を整えると、UI返却・DB保存の両方に確実に効く
         // - 重要: 正規化「後」に UI正本(result.*) を必ず再同期する
@@ -1299,10 +1315,11 @@ if (isNonForwardButEmpty) {
             String((metaForSave as any)?.extra?.traceId ?? '') ||
             String(conversationId ?? '');
 
+          // ✅ 戻り値を受け取る（n が未定義で落ちていたのを修正）
           const n = normalizeIrosStyleFinal(finalText, {
             seed,
-            emojiKeepRate: 0.3,
-            maxReplacements: 5,
+            emojiKeepRate: 0.1, // 0でもいい
+            maxReplacements: 0, // ✅ 置換ゼロ（長文化の主因を止める）
           });
 
           const outText = typeof (n as any)?.text === 'string' ? (n as any).text : finalText;
@@ -1323,7 +1340,11 @@ if (isNonForwardButEmpty) {
             ...(metaAny2.extra ?? {}),
             styleNormFinal: (n as any)?.meta,
           };
-        } catch {}
+        } catch (e) {
+          console.warn('[IROS/STYLE_NORM_FINAL][ERROR]', {
+            error: String(e ?? ''),
+          });
+        }
 
         // ✅ 正規化「後」の本文を UI正本へ反映（ここがないと persist が旧本文を拾う）
         (result as any).content = finalText;

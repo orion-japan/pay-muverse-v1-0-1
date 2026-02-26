@@ -117,7 +117,19 @@ export function systemPromptForFullReply(args?: {
     '- ユーザーの最後の文に直接返す（同じ話題・同じ粒度）。',
     '- 具体語を最低1つ残す（抽象語で上書きしない）。',
     '- 一般論・定型励ましで締めない。曖昧語で締めない。',
+    '',
+
+    // ✅ ここから追加（DO NOT OUTPUT のまま。本文の“整形”だけを安定させる）
+    '【本文フォーマット（DO NOT OUTPUT / 露出禁止）】',
+    '- 出力は「文章」だけ。カード/箇条書き/番号列挙/チェックリストは禁止。',
+    '- 段落は必ず作る：最低2段落、最大4段落。各段落は1〜2文。',
+    '- 段落の間は必ず空行を1つ入れる（読みやすい余白）。',
+    '- **太字は必ず1回だけ使う**（短い核語句だけ。文章全体を太字にしない）。',
+    '- 絵文字は最大2個まで（段落頭か文末に置く）。🫧は使わない。',
+    '- 見出しは「3段以上」になった時だけ許可：最初の段落の前に1つだけ `## 🧿 タイトル` を付けてよい（毎回は付けない）。',
+    '- 1問だけ許可（質問は最大1つ）。',
   ].join('\n');
+
   // =========================================================
   // ILINE ロックルール（既存実装を尊重）
   // =========================================================
@@ -166,6 +178,7 @@ export function systemPromptForFullReply(args?: {
       .filter(Boolean)
       .join('\n');
   })();
+
   try {
     console.log('[IROS/systemPrompt][LEN]', {
       sofiaPersona: sofiaPersona.length,
@@ -179,5 +192,6 @@ export function systemPromptForFullReply(args?: {
       exprLaneKey,
     });
   } catch {}
+
   return [sofiaPersona, base, lockRule, personaStyle].filter(Boolean).join('\n');
 }
