@@ -183,6 +183,8 @@ export type WriterGuardRules = {
   no_bullets?: boolean; // DRAFT.rules.no_bullets を尊重
 };
 
+// src/lib/iros/language/rephrase/guards.ts
+
 export function checkWriterGuardsMinimal(args: {
   text: string;
   rules?: WriterGuardRules | null;
@@ -196,14 +198,51 @@ export function checkWriterGuardsMinimal(args: {
   const noBullets = rules?.no_bullets !== false; // デフォ true 扱い
   const qMax = typeof rules?.questions_max === 'number' ? rules?.questions_max : null;
 
+  // -----------------------------------------
   // 1) questions_max
+  // - 旧: ?/？ のみ
+  // - 新: 日本語の疑問（ですか/どちら/何/なぜ/どう 等）も数える
+  // -----------------------------------------
+  const countQuestionsLike = (s: string): number => {
+    const t = String(s ?? '');
+
+    // (A) 明示の疑問符
+    let count = (t.match(/[?？]/g) ?? []).length;
+
+    // (B) 行末の疑問終止（疑問符なしでも “質問” とみなす）
+    // 例: 「〜ですか」「〜ますか」「〜でしょうか」「〜かな」「〜だろうか」
+    // NOTE: “〜です” などは含めない（誤検知を減らす）
+    const lines = t.split('\n').map((l) => l.trim()).filter(Boolean);
+    const endQuestionRe =
+      /(ですか|ますか|でしょうか|でしたか|ましたか|ませんか|だろうか|かな|かもね|かね)([。．…]*\s*)$/;
+
+    for (const line of lines) {
+      if (endQuestionRe.test(line)) count += 1;
+    }
+
+    // (C) 疑問詞（何/どれ/どちら/いつ/どこ/だれ/なぜ/どう/いくつ）
+    // - これも「質問っぽさ」の主因なので加点する
+    // - ただし過剰検知を避けるため、1行につき最大1加点
+    const whRe =
+      /(何|なに|どれ|どちら|いつ|どこ|だれ|誰|なぜ|何故|どう|どの|いくつ|幾つ|どんな|どこで|どこに|どこから|どこまで)\b/;
+
+    for (const line of lines) {
+      // 疑問符や疑問終止で既に質問扱いなら二重加点しない
+      if (/[?？]/.test(line) || endQuestionRe.test(line)) continue;
+      if (whRe.test(line)) count += 1;
+    }
+
+    return count;
+  };
+
   if (qMax != null) {
-    const qCount = (text.match(/[?？]/g) ?? []).length;
+    const qCount = countQuestionsLike(text);
     if (qCount > qMax) return { ok: false, reason: 'WG:Q_OVER', detail: { qCount, qMax } };
   }
 
+  // -----------------------------------------
   // 2) output_only
-  // 「本文だけ」を要求しているのに、箇条書き・見出し・解説っぽい前置きが混ざる事故を止める
+  // -----------------------------------------
   if (outputOnly) {
     // bullets
     if (noBullets) {
