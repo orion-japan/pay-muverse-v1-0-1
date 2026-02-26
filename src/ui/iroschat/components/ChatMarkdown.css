@@ -109,107 +109,93 @@
 }
 
 /* =======================================
-   strong 見出し用：絵文字アイコン
+   Headings / icons responsibility
+   - Icons are rendered ONLY by React (ChatMarkdown.tsx)
+   - CSS must NOT inject icons via ::before
    ======================================= */
 
-/* 見出し（ReactMarkdown の strong）に余白を足す */
-.sof-msgs .msgBody strong {
-  position: relative;
-  padding-left: 1.6em; /* 左にアイコン分のスペース */
+/* --- HeadingLine (React) --- */
+.sof-msgs .msgBody .iros-heading-line {
+  display: flex;
+  align-items: center;
+  gap: 0.2em;
+  font-weight: 700;
+  font-size: 1.05rem;
+  letter-spacing: 0.02em;
+  margin: 1.15em 0 0.45em;
+  line-height: 1.35;
 }
 
-/* デフォルトのアイコン：きらめき */
-.sof-msgs .msgBody strong::before {
-  content: '✨';
-  position: absolute;
-  left: 0;
-  top: 0.1em;
-  font-size: 0.9em;
-  opacity: 0.9;
+/* ✅ 見出しの右に薄い線（呼吸） */
+.sof-msgs .msgBody .iros-heading-line::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  margin-left: 0.7em;
+  opacity: 0.16;
+  background: currentColor;
 }
 
-/* Vision モードのときだけ、アイコンを変える */
-.sof-msgs .msgBody.vision-theme strong::before {
-  content: '🌌';
+/* ✅ 「二つの見方」などサブ見出し扱い（React側で iros-heading-sub を付ける） */
+.sof-msgs .msgBody .iros-heading-line.iros-heading-sub {
+  font-size: 0.96rem;
+  font-weight: 650;
+  margin-top: 0.75em;
+  margin-bottom: 0.35em;
+  opacity: 0.92;
 }
-/* =======================================
-   見出しアイコン（✨ / 🌌）
-   strong と h1〜h4 どちらでも効くようにする
-   ======================================= */
 
-   .sof-msgs .msgBody h1,
-   .sof-msgs .msgBody h2,
-   .sof-msgs .msgBody h3,
-   .sof-msgs .msgBody h4,
-   .sof-msgs .msgBody strong {
-     position: relative;
-     display: inline-flex;
-     align-items: center;
-     padding-left: 1.6em; /* 左にアイコンぶんスペース */
-   }
+/* --- Keep regular markdown heading layout minimal (avoid double margins) --- */
+.sof-msgs .msgBody h1,
+.sof-msgs .msgBody h2,
+.sof-msgs .msgBody h3,
+.sof-msgs .msgBody h4 {
+  margin: 0.2em 0; /* ← HeadingLine の margin に一本化するため抑える */
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
 
-   /* デフォルト：✨ */
-   .sof-msgs .msgBody h1::before,
-   .sof-msgs .msgBody h2::before,
-   .sof-msgs .msgBody h3::before,
-   .sof-msgs .msgBody h4::before,
-   .sof-msgs .msgBody strong::before {
-     content: '✨';
-     position: absolute;
-     left: 0;
-     top: 0.05em;
-     font-size: 0.9em;
-     opacity: 0.9;
-   }
+/* --- Legacy section heading class (if used elsewhere): style only, NO icon --- */
+.sof-msgs .msgBody .iros-section-heading,
+.msgBody .iros-section-heading {
+  display: block;
+  margin: 1.2em 0 0.4em;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
 
-   /* Vision モードのときはアイコンを 🌌 に変更 */
-   .sof-msgs .msgBody.vision-theme h1::before,
-   .sof-msgs .msgBody.vision-theme h2::before,
-   .sof-msgs .msgBody.vision-theme h3::before,
-   .sof-msgs .msgBody.vision-theme h4::before,
-   .sof-msgs .msgBody.vision-theme strong::before {
-     content: '🌌';
-   }
-/* =======================================
-   セクション見出し（🧿 / 🌀 / 🌅 など）
-   ======================================= */
+/* Optional: if you render an explicit icon span in markup */
+.sof-msgs .msgBody .iros-section-heading-icon,
+.msgBody .iros-section-heading-icon {
+  display: inline-block;
+  margin-right: 6px;
+}
 
-   .msgBody .iros-section-heading {
-    display: block;
-    margin: 1.2em 0 0.4em;
-    font-size: 1.05rem;
-    font-weight: 700;
-    letter-spacing: 0.02em;
-  }
+/* =========================================================
+   HARD STOP: kill ALL pseudo-icon injection (duplicated legacy)
+   ========================================================= */
+.sof-msgs .msgBody h1::before,
+.sof-msgs .msgBody h2::before,
+.sof-msgs .msgBody h3::before,
+.sof-msgs .msgBody h4::before,
+.sof-msgs .msgBody strong::before,
+.sof-msgs .msgBody.vision-theme h1::before,
+.sof-msgs .msgBody.vision-theme h2::before,
+.sof-msgs .msgBody.vision-theme h3::before,
+.sof-msgs .msgBody.vision-theme h4::before,
+.sof-msgs .msgBody.vision-theme strong::before,
+.msgBody .iros-section-heading::before,
+.msgBody.vision-theme .iros-section-heading::before,
+.iros-section-heading::before,
+.irox-section-heading::before {
+  content: none !important;
+  display: none !important;
+}
 
-  /* ▼ デフォルトのアイコン（通常モード） */
-  .msgBody .iros-section-heading::before {
-    content: '✨';
-    display: inline-block;
-    margin-right: 6px;
-  }
-
-  /* ▼ Vision テーマ時のアイコン切り替え */
-  .msgBody.vision-theme .iros-section-heading::before {
-    content: '🌅';
-  }
-  .msgBody .iros-section-heading {
-    display: block;
-    margin: 1.2em 0 0.4em;
-    font-size: 1.05rem;
-    font-weight: 700;
-    letter-spacing: 0.02em;
-  }
-
-  /* ← これ新しく追加 */
-  .msgBody .iros-section-heading-icon {
-    display: inline-block;
-    margin-right: 6px;
-  }
-/* === FIX: IDEA_BAND の 1. / 2. / 3. が「1. ・」になるのを止める ===
-   原因: .bubble .msgBody li::before などで「・」を強制付与しているため。
-   対策: ordered list (ol) 配下だけ ::before を無効化して数字を守る。
-*/
+/* =========================================================
+   FIX: ordered list numbering (keep as-is)
+   ========================================================= */
 .sof-msgs .msgBody ol {
   list-style: decimal !important;
   list-style-position: outside;
@@ -224,22 +210,245 @@
 .sof-msgs .msgBody ol > li {
   padding-left: 0 !important;
 }
-/* --- override: heading pseudo icon (kill legacy ::before ✨) --- */
-.sof-msgs .msgBody h1::before,
-.sof-msgs .msgBody h2::before,
-.sof-msgs .msgBody h3::before,
-.sof-msgs .msgBody h4::before,
-.sof-msgs .msgBody.vision-theme h1::before,
-.sof-msgs .msgBody.vision-theme h2::before,
-.sof-msgs .msgBody.vision-theme h3::before,
-.sof-msgs .msgBody.vision-theme h4::before {
-  content: none !important;
-  display: none !important;
+
+/* =========================
+   iros typography (unified)
+   ========================= */
+
+/* 段落：行間と余白をここで一本化 */
+.sof-msgs .msgBody .iros-p {
+  margin: 0 0 0.9em;
+  line-height: 1.95;
+  white-space: pre-wrap;
 }
 
-/* もし HeadingLine が className="iros-section-heading" を付けてる場合の保険 */
-.irox-section-heading::before,
-.iros-section-heading::before {
-  content: none !important;
-  display: none !important;
+/* 段落アイコン（3段以上時だけ付くやつ） */
+.sof-msgs .msgBody .iros-picon {
+  display: inline-block;
+  margin-right: 0.45em;
+  font-size: 1.05rem;
+  vertical-align: baseline;
+  opacity: 0.9;
+}
+
+/* 罫線（--- や ***）の見た目 */
+.sof-msgs .msgBody hr {
+  border: 0;
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
+  margin: 1.05em 0;
+}
+
+/* “枠/区切り” を入れたい場合：Markdownの引用（> ）を箱として使う */
+.sof-msgs .msgBody blockquote {
+  margin: 0.9em 0;
+  padding: 0.75em 0.9em;
+  border-left: 3px solid rgba(87, 56, 255, 0.28);
+  background: rgba(87, 56, 255, 0.06);
+  border-radius: 10px;
+}
+
+.sof-msgs .msgBody blockquote p {
+  margin: 0.45em 0;
+}
+
+/* =========================
+   iros typography (fallback: .msgBody direct)
+   ========================= */
+
+.msgBody .iros-p {
+  margin: 0 0 0.9em;
+  line-height: 1.95;
+  white-space: pre-wrap;
+}
+
+.msgBody .iros-picon {
+  display: inline-block;
+  margin-right: 0.45em;
+  font-size: 1.05rem;
+  vertical-align: baseline;
+  opacity: 0.9;
+}
+
+.msgBody .iros-heading-line {
+  display: flex;
+  align-items: center;
+  gap: 0.2em;
+  font-weight: 700;
+  font-size: 1.05rem;
+  letter-spacing: 0.02em;
+  margin: 1.15em 0 0.45em;
+  line-height: 1.35;
+}
+
+.msgBody .iros-heading-line::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  margin-left: 0.7em;
+  opacity: 0.16;
+  background: currentColor;
+}
+
+.msgBody .iros-heading-line.iros-heading-sub {
+  font-size: 0.96rem;
+  font-weight: 650;
+  margin-top: 0.75em;
+  margin-bottom: 0.35em;
+  opacity: 0.92;
+}
+
+/* h1-h4 の余白は抑える（HeadingLine優先） */
+.msgBody h1,
+.msgBody h2,
+.msgBody h3,
+.msgBody h4 {
+  margin: 0.2em 0;
+}
+
+.msgBody hr {
+  border: 0;
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
+  margin: 1.05em 0;
+}
+
+.msgBody blockquote {
+  margin: 0.9em 0;
+  padding: 0.75em 0.9em;
+  border-left: 3px solid rgba(87, 56, 255, 0.28);
+  background: rgba(87, 56, 255, 0.06);
+  border-radius: 10px;
+}
+
+.msgBody blockquote p {
+  margin: 0.45em 0;
+}
+
+/* 太字が「見た目で弱い」場合の保険 */
+.msgBody strong {
+  font-weight: 700;
+}
+
+/* =========================
+   段落の呼吸を強める
+   ========================= */
+
+   .sof-msgs .msgBody p,
+   .msgBody p {
+     margin: 0 0 1.2em;   /* ← ここが段落間余白 */
+     line-height: 2.05;   /* ← 少しだけ広げる */
+   }
+
+   /* =========================
+      見出しの上下の呼吸
+      ========================= */
+
+   .sof-msgs .msgBody .iros-heading-line,
+   .msgBody .iros-heading-line {
+     margin-top: 1.6em;    /* 上を広げる */
+     margin-bottom: 0.6em; /* 下も少し広げる */
+   }
+
+   /* =========================
+      セクション間の空気
+      ========================= */
+
+   .sof-msgs .msgBody .iros-p + .iros-heading-line {
+     margin-top: 1.8em;
+   }
+   .bubble {
+    padding: 18px 20px; /* 今より少し広く */
+  }
+/* Markdown本文の基本 */
+.sof-msgs .msgBody,
+.msgBody {
+  letter-spacing: 0.02em;
+}
+
+/* 段落：行間と余白 */
+.sof-msgs .msgBody .iros-p,
+.msgBody .iros-p {
+  margin: 0 0 1.2em;
+  line-height: 2.05;
+  white-space: pre-wrap;
+}
+
+/* 見出し（HeadingLine） */
+.sof-msgs .msgBody .iros-heading-line,
+.msgBody .iros-heading-line {
+  margin: 1.6em 0 0.6em;
+  line-height: 1.35;
+  font-weight: 700;
+}
+
+/* 太字の“刺さり” */
+.sof-msgs .msgBody .iros-emphasis,
+.msgBody .iros-emphasis {
+  font-weight: 700;
+}
+
+/* 罫線 / 引用も “場” を作る */
+.sof-msgs .msgBody hr,
+.msgBody hr {
+  border: 0;
+  border-top: 1px solid rgba(0,0,0,0.12);
+  margin: 1.1em 0;
+}
+
+.sof-msgs .msgBody blockquote,
+.msgBody blockquote {
+  margin: 1.0em 0;
+  padding: 0.8em 1.0em;
+  border-left: 3px solid rgba(87, 56, 255, 0.28);
+  background: rgba(87, 56, 255, 0.06);
+  border-radius: 10px;
+}
+
+/* =========================================================
+   FORCE: paragraph spacing for ChatMarkdown
+   - defeats msgBody inline line-height + IrosChat.css rules
+   ========================================================= */
+   .sof-msgs .msgBody p.iros-p,
+   .msgBody p.iros-p {
+     line-height: 2.05 !important;
+     margin: 0 0 1.2em !important;
+   }
+
+   /* 段落が連続する場合は少しだけ詰めたいなら（任意）
+   .sof-msgs .msgBody p.iros-p + p.iros-p,
+   .msgBody p.iros-p + p.iros-p {
+     margin-top: 0 !important;
+   }
+   */
+
+
+/* 改行（<br>）にも余白を与える：1改行でも見た目が開く */
+.sof-msgs .msgBody .iros-p br,
+.msgBody .iros-p br {
+  display: block;
+  content: "";
+  margin-top: 0.65em;
+}
+/* =========================================
+   ブロック単位の余白（見出し＋本文）
+   ========================================= */
+.sof-msgs .msgBody[style]{
+  line-height: 2.3 !important;
+}
+/* --- Sofia breathing paragraphs --- */
+.sof-msgs .msgBody {
+  line-height: 2.05;            /* 行の呼吸（好みで 1.9〜2.2） */
+  letter-spacing: 0.02em;
+}
+
+/* 段落の余白＝呼吸 */
+.sof-msgs .msgBody p,
+.sof-msgs .msgBody .iros-p {
+  margin: 0;                    /* まずリセット */
+  margin-block: 0 1.15em;       /* 下だけ余白（好みで 0.9〜1.4em） */
+}
+
+/* 最後の段落だけ余白が残るのが嫌なら消す */
+.sof-msgs .msgBody p:last-child,
+.sof-msgs .msgBody .iros-p:last-child {
+  margin-bottom: 0;
 }

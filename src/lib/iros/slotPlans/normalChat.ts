@@ -230,7 +230,12 @@ function buildCompose(userText: string, laneKey?: LaneKey, flowDelta?: string | 
 
 // ✅ clarify：テンプレ自然文を出さない。LLMに “意味に答える” を許可するだけ。
 // ✅ FIX: laneKey 未指定(null/undefined)を勝手に T_CONCRETIZE にしない（t_concretize seed支配の原因）
-function buildClarify(userText: string, laneKey?: LaneKey, flowDelta?: string | null): NormalChatSlot[] {
+function buildClarify(
+  userText: string,
+  laneKey?: LaneKey,
+  flowDelta?: string | null,
+  flow?: { delta?: string; confidence?: number; returnStreak?: number } | null
+): NormalChatSlot[] {
   const lane = laneKey; // ここで補完しない（未指定なら undefined のまま）
   const isT = lane === 'T_CONCRETIZE';
 
@@ -276,6 +281,13 @@ function buildClarify(userText: string, laneKey?: LaneKey, flowDelta?: string | 
 
   const shiftPreset = isT ? SHIFT_PRESET_T_CONCRETIZE : null;
 
+  // deepReadBoost: RETURN が続く “確認モード” 局面だけ、定義（構造説明）を少し許可
+  // - 命名（no_naming）は絶対に緩めない
+  // - no_definition だけを false に落とす（RETURN streak>=2 のときだけ）
+  const deepReadBoost =
+    String(flow?.delta ?? flowDelta ?? '').toUpperCase() === 'RETURN' &&
+    Number((flow as any)?.returnStreak ?? 0) >= 2;
+
   return [
     obs,
     {
@@ -291,6 +303,9 @@ function buildClarify(userText: string, laneKey?: LaneKey, flowDelta?: string | 
           answer_user_meaning: true,
           keep_it_simple: true,
           questions_max: isT ? 0 : 1,
+
+          // ✅ RETURN streak>=2 の時だけ「定義/構造説明」を許可
+          ...(deepReadBoost ? { no_definition: false } : {}),
         },
         allow: {
           ...(shiftPreset?.allow ?? {}),
@@ -629,14 +644,42 @@ export function buildNormalChatSlotPlan(args: {
   const recent = recentRaw.map((x) => norm(x)).filter(Boolean);
   const lastUserText = recent.length > 0 ? recent[recent.length - 1] : null;
 
-  let flow: { delta: string; confidence?: number } | null = null;
+  // ✅ prevReturnStreak を recentUserTexts の末尾から復元（状態は持たない）
+  // - 直前ターンの「RETURN連続回数」を推定して observeFlow に渡す
+  const prevReturnStreak = (() => {
+    if (recent.length < 2) return 0;
+
+    const isReturnPair = (cur: string, prev: string) => {
+      const c = norm(cur);
+      const p = norm(prev);
+      if (!p) return false;
+
+      const sameHead = c.slice(0, 12) === p.slice(0, 12);
+      const overlap =
+        c.length && p.length
+          ? c.split(' ').filter((w) => p.includes(w)).length / Math.max(1, c.split(' ').length)
+          : 0;
+
+      return sameHead || overlap > 0.6;
+    };
+
+    let streak = 0;
+    for (let i = recent.length - 1; i >= 1; i--) {
+      if (isReturnPair(recent[i]!, recent[i - 1]!)) streak++;
+      else break;
+    }
+    return streak;
+  })();
+
+  let flow: { delta: string; confidence?: number; returnStreak?: number } | null = null;
   try {
     flow = observeFlow({
       currentText: userText,
       lastUserText: lastUserText ?? undefined,
+      prevReturnStreak,
     }) as any;
   } catch {
-    flow = { delta: 'FORWARD' };
+    flow = { delta: 'FORWARD', returnStreak: 0 };
   }
 
   const flowDelta = flow?.delta ? String(flow.delta) : null;
@@ -655,7 +698,7 @@ export function buildNormalChatSlotPlan(args: {
     slots = buildQuestion(userText, lastUserText ?? undefined, laneKeyArg, flowDelta);
   } else if (isClarify(userText) && /[?？]/.test(userText)) {
     reason = 'clarify';
-    slots = buildClarify(userText, laneKeyArg, flowDelta);
+    slots = buildClarify(userText, laneKeyArg, flowDelta, flow as any);
   } else if (isCompose(userText)) {
     reason = 'compose';
     slots = buildCompose(userText, laneKeyArg, flowDelta);

@@ -45,8 +45,12 @@ import { detectIdeaBandProposeFromExtracted, makeIdeaBandCandidateBlocks } from 
 import { computeMinOkPolicy, computeOkTooShortToRetry, computeNaturalTextReady } from './minOkPolicy';
 import { runRetryPass } from './retryPass';
 import { validateOutputPure } from './validateOutput';
-import { buildBlockPlan, detectExplicitBlockPlanTrigger, renderBlockPlanSystem4 } from '../../blockPlan/blockPlanEngine';
-
+import {
+  buildBlockPlan,
+  buildBlockPlanWithDiag,
+  detectExplicitBlockPlanTrigger,
+  renderBlockPlanSystem4,
+} from '../../blockPlan/blockPlanEngine';
 import { flagshipGuard } from '../../quality/flagshipGuard';
 import {
   extractLockedILines,
@@ -1961,51 +1965,32 @@ const toRephraseBlocks = (s: string): string[] => {
   // - userText混入（@OBS.user など）とは別経路なので、ここは安全に整形して使う
   const lastTurns = extractLastTurnsFromContext(opts?.userContext ?? null);
 
-  const buildHistoryTextLite = (turns: any[]): string => {
-    if (!Array.isArray(turns) || turns.length === 0) return '';
+// src/lib/iros/language/rephrase/rephraseEngine.full.ts
+// buildHistoryTextLite を “user生文ゼロ” にする（HISTORY_LITE 漏れ止血）
 
-    const clean = (s: any) =>
-      String(s ?? '')
-        .replace(/\r\n/g, '\n')
-        .replace(/\r/g, '\n')
-        .trim();
+const buildHistoryTextLite = (turns: any[]): string => {
+  const lines: string[] = ['HISTORY_LITE (DO NOT OUTPUT):'];
 
-    // 内部マーカーや露出禁止行っぽいものは落とす
-    const dropInternal = (s: string) => {
-      const t = clean(s);
-      if (!t) return '';
-      if (/DO NOT OUTPUT/i.test(t)) return '';
-      if (/^\s*@(?:OBS|SHIFT|SAFE|NEXT|END|TASK|Q|Q_SLOT)\b/m.test(t)) return '';
-      if (/INTERNAL PACK/i.test(t)) return '';
-      if (/HISTORY_HINT\s*\(DO NOT OUTPUT\)/i.test(t)) return '';
-      return t;
-    };
+  for (const t of Array.isArray(turns) ? turns : []) {
+    const role = t?.role === 'assistant' ? 'assistant' : t?.role === 'user' ? 'user' : null;
+    if (!role) continue;
 
-    const pickText = (t: any) => {
-      const role = String(t?.role ?? '').trim();
-      const raw = t?.text ?? t?.content ?? t?.message ?? '';
-      const v = dropInternal(String(raw ?? ''));
-      if (!v) return null;
+    // 🚫 user 生文は禁止：HISTORY_LITE には “[USER]” だけ残す
+    if (role === 'user') {
+      lines.push('user: [USER]');
+      continue;
+    }
 
-      // user は短く、assistant は少し長めに（オウム化/肥大化を抑える）
-      const max = role === 'assistant' ? 180 : 90;
-      const head = v.length > max ? v.slice(0, max) + '…' : v;
-      return { role: role || 'unknown', head };
-    };
+    // assistant は短く整形（長文化しない）
+    const raw = String(t?.content ?? t?.text ?? '').replace(/\r\n/g, '\n').trim();
+    if (!raw) continue;
 
-    // 直近6ターンだけ（多すぎるとノイズ）
-    const picked = turns.slice(-6).map(pickText).filter(Boolean) as any[];
-    if (picked.length === 0) return '';
+    const one = raw.length > 260 ? `${raw.slice(0, 260)}…` : raw;
+    lines.push(`assistant: ${one}`);
+  }
 
-    const lines = [
-      'HISTORY_LITE (DO NOT OUTPUT):',
-      ...picked.map((x) => `${x.role}: ${x.head}`),
-    ];
-
-    // 最終クランプ（プロンプト肥大防止）
-    const joined = lines.join('\n');
-    return joined.length > 900 ? joined.slice(0, 900) + '…' : joined;
-  };
+  return lines.join('\n');
+};
 
   const historyText = buildHistoryTextLite(lastTurns);
 // slot由来の下書き（露出禁止）
@@ -2695,8 +2680,40 @@ try {
 // 目的：buildFirstPassMessages に渡す seedDraft を固定文字列から seedDraft に差し替え。
 
   // ✅ 方針：writer へ userText を一切渡さない（turns/history/finalUserText から除外）
-  // - turns を渡すと「過去assistant文に混入した userText」を再引用してしまうため、ここでは完全遮断する
-  const turnsForWriter: any[] = [];
+  // - ただし「assistant側の過去ターン」は渡してよい（user生文は渡さない）
+  // - 目的：writer messages に assistant ターンが載らず roles=[system,user] になっていた問題を解消する
+// ✅ 方針：writer へ userText を一切渡さない（turns/history/finalUserText から除外）
+// - ただし「会話の役割列（assistant/user）」は保つ（user本文は伏せる）
+// - 目的：roles=[system,user] を回避し、会話の文脈だけを維持する
+// ✅ 方針：writer へ userText を一切渡さない（turns/history/finalUserText から除外）
+// - ただし「会話の役割列（assistant/user）」は保つ（user本文は伏せる）
+// - 目的：roles=[system,user] を回避し、会話の文脈だけを維持する
+const rawTurnsForWriter =
+  (opts as any)?.turnsForWriter ??
+  (opts as any)?.userContext?.turnsForWriter ??
+  (opts as any)?.userContext?.ctxPack?.historyForWriter ??
+  (opts as any)?.userContext?.historyForWriter ??
+  [];
+
+// ✅ 末尾だけ使う（LAST_TURNS_PICK と整合させる）
+const MAX_TURNS_FOR_WRITER = 6;
+const rawTail = Array.isArray(rawTurnsForWriter)
+  ? rawTurnsForWriter.slice(-MAX_TURNS_FOR_WRITER)
+  : [];
+
+const turnsForWriter: any[] = rawTail
+  .map((t: any) => {
+    const role = t?.role === 'assistant' ? 'assistant' : t?.role === 'user' ? 'user' : null;
+    if (!role) return null;
+
+    // 🚫 user は生文禁止：内容は必ず伏せる（役割だけ残す）
+    if (role === 'user') return { role: 'user', content: '[USER]' };
+
+    const content = String(t?.content ?? '').trim();
+    if (!content) return null;
+    return { role: 'assistant', content };
+  })
+  .filter(Boolean);
 
   // ✅ buildFirstPassMessages は finalUserText を採用しない（強制遮断）ため、
   // ✅ 「最後を user で終わらせる」保証は seedDraft で行う（固定文のみ）
@@ -2837,6 +2854,34 @@ try {
       qPrimary: pickedQCode ?? null,
       itOk: Boolean(itOk),
     } as any);
+
+    // -------------------------------------------------------
+    // deepReadBoost（RETURN streak>=2 のときだけ “1段だけ” 許可を上げる）
+    // - 目的：命名ではなく「構造説明」を少し増やす余地を作る
+    // - 実装：allow.strength を +1（上限3）にするだけ（他は触らない）
+    // -------------------------------------------------------
+    const flowDeltaNow =
+      String(flowDigest ?? '').toLowerCase().includes('return') ? 'RETURN' : null;
+
+    // seed_text（例: '流れ:RETURN / 戻り:2'）から戻り回数を読む。無ければ 0。
+    const returnStreakNow = (() => {
+      // ctxPack はこの位置ではまだ宣言されていないので、opts から直接取る
+      const src = String(
+        ((opts as any)?.userContext?.ctxPack?.seed_text ?? '') ||
+          (flowDigest ?? '')
+      );
+      const m = src.match(/戻り:\s*(\d+)/);
+      const n = m ? Number(m[1]) : 0;
+      return Number.isFinite(n) ? n : 0;
+    })();
+    if (allowObj && typeof allowObj === 'object') {
+      if (flowDeltaNow === 'RETURN' && returnStreakNow >= 2) {
+        const cur = Number((allowObj as any).strength ?? 2);
+        const next = Number.isFinite(cur) ? cur + 1 : 3;
+        (allowObj as any).strength = Math.min(next, 3);
+        (allowObj as any).__deepReadBoost = { flowDeltaNow, returnStreakNow }; // ログ確認用（露出しない）
+      }
+    }
 
     allowText = formatAllowSystemText(allowObj as any);
 
@@ -3016,48 +3061,92 @@ const itTriggered = Boolean(
     });
   } catch {}
 
-// ✅ v1方針：BlockPlan は “例外演出” のみ（通常会話は null）
-const blockPlan = buildBlockPlan({
-  userText: userTextForTrigger,
-  goalKind,
-  exprLane: (exprMeta as any)?.lane ?? null,
-  explicitTrigger,
-
-  // ✅ 追加：自動判定の最小版に必要
-  depthStage,
-  itTriggered,
-});
-
-const blockPlanText = blockPlan ? renderBlockPlanSystem4(blockPlan) : '';
-
-// ✅ 観測点：blockPlan が「生成されてるか/空か」を確定する
-try {
-  console.log('[IROS/rephraseEngine][BLOCK_PLAN]', {
-    traceId: (debug as any)?.traceId ?? null,
-    conversationId: (debug as any)?.conversationId ?? null,
-    userCode: (debug as any)?.userCode ?? null,
-
-    enabled: Boolean(blockPlanText && String(blockPlanText).trim().length > 0),
-
+  // ✅ v2方針：BlockPlan + 診断（why）を同時取得
+  const { plan: blockPlan, diag: blockPlanDiag } = buildBlockPlanWithDiag({
+    userText: userTextForTrigger,
     goalKind,
     exprLane: (exprMeta as any)?.lane ?? null,
     explicitTrigger,
 
-    // ✅ trigger観測をここに統合（到達保証ログ）
-    triggerPickedFrom: (resolvedTrigger as any)?.pickedFrom ?? null,
-    triggerHead: String(userTextForTrigger ?? '').slice(0, 80),
-
+    // ✅ 自動判定の最小版に必要
     depthStage,
     itTriggered,
-
-    mode: (blockPlan as any)?.mode ?? null,
-    blocksLen: Array.isArray((blockPlan as any)?.blocks)
-      ? (blockPlan as any).blocks.length
-      : 0,
-
-    sysLen: String(blockPlanText ?? '').trim().length,
   });
-} catch {}
+
+  const blockPlanText = blockPlan ? renderBlockPlanSystem4(blockPlan) : '';
+
+  // ---- ✅ DIAG を必ずログ化（why/flags を 1ターン確証として固定）----
+  try {
+    const d: any = blockPlanDiag && typeof blockPlanDiag === 'object' ? blockPlanDiag : null;
+
+    console.log('[IROS/rephraseEngine][BLOCK_PLAN_DIAG]', {
+      traceId: (debug as any)?.traceId ?? null,
+      conversationId: (debug as any)?.conversationId ?? null,
+      userCode: (debug as any)?.userCode ?? null,
+
+      // ✅ 最重要：確証（why）
+      why: d?.why ?? null,
+
+      // ✅ 判定の内訳（存在しないキーは null）
+      explicit: d?.explicit ?? null,
+      wantsDeeper: d?.wantsDeeper ?? null,
+      autoDeepen: d?.autoDeepen ?? null,
+      autoCrack: d?.autoCrack ?? null,
+
+      // ✅ turn context（後段の gate で突合できるように）
+      goalKind,
+      depthStage,
+      itTriggered,
+
+      // ✅ 生トリガ観測（同一turnで突合）
+      explicitTrigger,
+      triggerPickedFrom: (resolvedTrigger as any)?.pickedFrom ?? null,
+      triggerHead: String(userTextForTrigger ?? '').slice(0, 80),
+
+      // ✅ 生成結果の最小
+      mode: (blockPlan as any)?.mode ?? null,
+      blocksLen: Array.isArray((blockPlan as any)?.blocks) ? (blockPlan as any).blocks.length : 0,
+      sysLen: String(blockPlanText ?? '').trim().length,
+      enabled: Boolean(blockPlanText && String(blockPlanText).trim().length > 0),
+    });
+  } catch {}
+
+  // ✅ 観測点：blockPlan が「生成されてるか/空か」を確定する
+  try {
+    const d: any = blockPlanDiag && typeof blockPlanDiag === 'object' ? blockPlanDiag : null;
+
+    console.log('[IROS/rephraseEngine][BLOCK_PLAN]', {
+      traceId: (debug as any)?.traceId ?? null,
+      conversationId: (debug as any)?.conversationId ?? null,
+      userCode: (debug as any)?.userCode ?? null,
+
+      enabled: Boolean(blockPlanText && String(blockPlanText).trim().length > 0),
+
+      goalKind,
+      exprLane: (exprMeta as any)?.lane ?? null,
+      explicitTrigger,
+
+      // ✅ 最重要：why をここにも載せて検索1発に寄せる
+      why: d?.why ?? null,
+
+      // ✅ 旗（同一turnで拾えるように）
+      wantsDeeper: d?.wantsDeeper ?? null,
+      autoDeepen: d?.autoDeepen ?? null,
+      autoCrack: d?.autoCrack ?? null,
+
+      // ✅ trigger観測をここに統合（到達保証ログ）
+      triggerPickedFrom: (resolvedTrigger as any)?.pickedFrom ?? null,
+      triggerHead: String(userTextForTrigger ?? '').slice(0, 80),
+
+      depthStage,
+      itTriggered,
+
+      mode: (blockPlan as any)?.mode ?? null,
+      blocksLen: Array.isArray((blockPlan as any)?.blocks) ? (blockPlan as any).blocks.length : 0,
+
+      sysLen: String(blockPlanText ?? '').trim().length,
+    });
+  } catch {}
 
 // ✅ BLOCK_PLAN が入る時だけ、行数クランプを緩める（完走優先）
 if (blockPlanText && String(blockPlanText).trim().length > 0) {
@@ -3333,6 +3422,40 @@ console.log('[IROS/rephraseEngine][MSG_PACK]', {
     } else {
       metaExtra.flagshipVerdict = { level: null, ok: null, reasons: [] as string[], score: null };
     }
+
+    // ✅ BLOCK_PLAN を meta.extra に刻む（renderGateway / handleIrosReply が拾う正本）
+    // - 旧キー互換：extra.blockPlan.explicitTrigger を必ず用意
+    // - ctxPack には入れない（継続禁止：このターン確定だけ meta.extra へ）
+    try {
+      const d: any = blockPlanDiag && typeof blockPlanDiag === 'object' ? blockPlanDiag : null;
+      const enabled = Boolean(blockPlanText && String(blockPlanText).trim().length > 0);
+
+      if (!metaExtra.blockPlan || typeof metaExtra.blockPlan !== 'object') metaExtra.blockPlan = {};
+
+      // 旧キー互換（下流が参照している）
+      metaExtra.blockPlan.explicitTrigger = explicitTrigger === true;
+
+      // 確証（why）
+      metaExtra.blockPlan.why = d?.why ?? null;
+
+      // 採用フラグ（inject/LLM_GATE 側で突合）
+      metaExtra.blockPlan.enabled = enabled;
+
+      // 内訳（診断の根拠）
+      metaExtra.blockPlan.explicit = d?.explicit ?? null;
+      metaExtra.blockPlan.wantsDeeper = d?.wantsDeeper ?? null;
+      metaExtra.blockPlan.autoDeepen = d?.autoDeepen ?? null;
+      metaExtra.blockPlan.autoCrack = d?.autoCrack ?? null;
+
+      // turn context（デバッグ突合用）
+      metaExtra.blockPlan.goalKind = goalKind ?? null;
+      metaExtra.blockPlan.depthStage = depthStage ?? null;
+      metaExtra.blockPlan.itTriggered = itTriggered ?? null;
+
+      // trigger source（同一turnの確証）
+      metaExtra.blockPlan.triggerPickedFrom = (resolvedTrigger as any)?.pickedFrom ?? null;
+      metaExtra.blockPlan.triggerHead = String(userTextForTrigger ?? '').slice(0, 80);
+    } catch {}
 
     // --- blocks (default: paragraph-ish) ---
     const safeParseJson = (s0: any): any | null => {

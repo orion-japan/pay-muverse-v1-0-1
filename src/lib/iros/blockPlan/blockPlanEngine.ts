@@ -37,6 +37,43 @@ export interface BlockPlan {
   blocks: BlockKind[];
 }
 
+/**
+ * ✅ why（運用ログの核）
+ * - 「enabled:true/false」だけでは残留・誤判定・自動判定が切れないため、
+ *   1ターンで確証を取るための “理由コード” を返す。
+ */
+export type BlockPlanWhy =
+  | 'EXPLICIT'
+  | 'AUTO_DEEPEN'
+  | 'AUTO_CRACK'
+  | 'DIRECT_HARD'
+  | 'DIRECT_SOFT'
+  | 'NONE';
+
+export interface BlockPlanDiag {
+  enabled: boolean;
+
+  // 判定根拠（最小）
+  why: BlockPlanWhy;
+  explicit: boolean;
+  hardDirectTask: boolean;
+  softDirectTask: boolean;
+  wantsDeeper: boolean;
+
+  // 自動判定の根拠
+  depthStage: string | null;
+  itTriggered: boolean;
+  autoDeepen: boolean;
+
+  goalKind: string | null;
+  consultishGoal: boolean;
+  autoCrack: boolean;
+
+  // 結果
+  mode: BlockPlanMode | null;
+  blocksLen: number;
+}
+
 export interface BuildBlockPlanParams {
   userText: string;
 
@@ -67,7 +104,9 @@ export function detectExplicitBlockPlanTrigger(userText: string): boolean {
 
   // 日本語 + 軽い英語
   // NOTE: 「見出し」を必ず拾う
-  return /(多段|段で|段落で|ブロック|レイアウト|構造で(?:書いて)?|深めて|深掘り|見出し|セクション|heading|section)/i.test(
+  // ✅ 強化：整理/まとめ/アウトライン/テンプレ/型/フレーム等も拾い、explicit を立てやすくする
+  // ✅ 明示トリガー語彙を強化し、出過ぎない程度に広げる
+  return /(多段|段で|段落で|段取り|ステップ|step|steps|ブロック|レイアウト|構造化|構造で(?:書いて)?|整理して|まとめて|フレーム|枠組み|アウトライン|見出し|セクション|heading|section|テンプレ|型で|章立て|項目で|構成で|段組み|テンプレート)/i.test(
     t,
   );
 }
@@ -93,8 +132,9 @@ function detectDirectTaskSoft(userText: string): boolean {
   const t = String(userText ?? '').trim();
   if (!t) return false;
 
-  // 単体だと雑談でも出るので “抑制” 扱い
-  return /(教えて|説明して|解説して)/i.test(t);
+  // ✅ 緩める：ただし「教えて」単体は雑談でも出やすいので除外し、説明依頼寄りだけ拾う
+  // ※ hardDirectTask は別で必ず落ちる。ここは “抑制” の軽いフラグ。
+  return /(説明して|解説して|紹介して|整理して|まとめて)/i.test(t);
 }
 
 /**
@@ -160,80 +200,259 @@ function isDepthAtLeastI1(depthStage?: string | null): boolean {
   return depthRank(depthStage) >= 51;
 }
 
+function isDepthAtLeastR1(depthStage?: string | null): boolean {
+  // R1 = 31
+  return depthRank(depthStage) >= 31;
+}
+
 /* =========================================================
  * BlockPlan 生成（ゲート）
  * ========================================================= */
 
-export function buildBlockPlan(params: BuildBlockPlanParams): BlockPlan | null {
+export function buildBlockPlanWithDiag(
+  params: BuildBlockPlanParams,
+): { plan: BlockPlan | null; diag: BlockPlanDiag } {
   const userText = String(params.userText ?? '').trim();
-  if (!userText) return null;
 
+  // inputs（空でも diag は返す）
   const depthStage = params.depthStage ?? null;
   const itTriggered = typeof params.itTriggered === 'boolean' ? params.itTriggered : false;
 
-  // 互換 goalKind（署名は昔からあるが、今はここで最小限だけ使う）
-  const goalKind = String(params.goalKind ?? '').trim().toLowerCase();
+  const goalKindNorm = String(params.goalKind ?? '').trim().toLowerCase();
+  const goalKind = goalKindNorm ? goalKindNorm : null;
 
-  // 1) 明示トリガー（ユーザー指定）を最優先で確定（soft 判定より先に取る）
+  // autoCrack（相談ゴール + 裂け目）に使うので先に確定
+  const consultishGoal =
+    goalKind === 'stabilize' || goalKind === 'repair' || goalKind === 'counsel';
+
+  // explicit（外部指定があればそれを優先）
   const explicit =
     typeof params.explicitTrigger === 'boolean'
       ? params.explicitTrigger
       : detectExplicitBlockPlanTrigger(userText);
 
-  // 2) directTask 判定（hard/soft）
-  const hardDirectTask = detectDirectTaskHard(userText);
-  const softDirectTask = detectDirectTaskSoft(userText);
+  // directTask
+  const hardDirectTask = userText ? detectDirectTaskHard(userText) : false;
+  const softDirectTask = userText ? detectDirectTaskSoft(userText) : false;
 
-  // hard は常に禁止（explicit があっても止める）
-  if (hardDirectTask) return null;
+  // wantsDeeper（explicit 前提）
+  const wantsDeeper = explicit && userText ? detectWantsDeeper(userText) : false;
 
-  // soft は explicit が無いときだけ禁止（explicit を勝たせる）
-  if (!explicit && softDirectTask) return null;
+  // ✅ autoDeepen（強化版）
+  // - 従来: I1+ & IT_TRIGGER のみ
+  // - 強化: R1+ でも、IT_TRIGGER が来ていて「相談ゴール」 or 「深め語彙」があるなら許可
+  const autoDeepen =
+    (isDepthAtLeastI1(depthStage) && Boolean(itTriggered)) ||
+    (isDepthAtLeastR1(depthStage) &&
+      Boolean(itTriggered) &&
+      (consultishGoal || (userText ? detectWantsDeeper(userText) : false)));
 
-  // 3) 自動トリガー（最小・従来）
-  // - I層以上が確定していて、かつ IT_TRIGGER が立っている時だけ許可
-  const autoDeepen = isDepthAtLeastI1(depthStage) && Boolean(itTriggered);
+  // autoCrack（相談ゴール + 裂け目）
+  const autoCrack = consultishGoal && userText ? detectCrackWords(userText) : false;
 
-  // 4) 自動トリガー（追加・裂け目）
-  // - stabilize/repair/counsel の相談ゴールで、言葉の違和感/反発が出た時だけ許可
-  // - 過剰演出を避けるため multi6 固定（multi7 にはしない）
-  const consultishGoal =
-    goalKind === 'stabilize' || goalKind === 'repair' || goalKind === 'counsel';
+  // =========================================================
+  // gate decision
+  // =========================================================
 
-  const autoCrack = consultishGoal && detectCrackWords(userText);
-
-  // 5) どれも無いなら出さない
-  if (!explicit && !autoDeepen && !autoCrack) return null;
-
-  // ---------------------------------------------
-  // 明示指定：
-  // - wantsDeeper=true なら multi7（CHOICE まで入れて段を少し増やす）
-  // - wantsDeeper=false なら multi6（軽量）
-  //
-  // 自動判定：
-  // - 過剰演出を避けるため multi6 固定
-  // ---------------------------------------------
-  if (explicit) {
-    const wantsDeeper = detectWantsDeeper(userText);
-
-    if (wantsDeeper) {
-      return {
-        mode: 'multi7',
-        blocks: ['ENTRY', 'SITUATION', 'DUAL', 'FOCUS_SHIFT', 'ACCEPT', 'INTEGRATE', 'CHOICE'],
-      };
-    }
-
+  // 1) userText が空 → NONE
+  if (!userText) {
     return {
-      mode: 'multi6',
-      blocks: ['ENTRY', 'SITUATION', 'DUAL', 'FOCUS_SHIFT', 'ACCEPT', 'INTEGRATE'],
+      plan: null,
+      diag: {
+        enabled: false,
+        why: 'NONE',
+        explicit: false,
+        hardDirectTask: false,
+        softDirectTask: false,
+        wantsDeeper: false,
+
+        depthStage,
+        itTriggered,
+        autoDeepen: false,
+
+        goalKind,
+        consultishGoal,
+        autoCrack: false,
+
+        mode: null,
+        blocksLen: 0,
+      },
     };
   }
 
-  // autoDeepen / autoCrack → multi6（軽め）
-  return {
+  // 2) hardDirectTask は常に禁止（explicit でも止める）
+  if (hardDirectTask) {
+    return {
+      plan: null,
+      diag: {
+        enabled: false,
+        why: 'DIRECT_HARD',
+        explicit,
+        hardDirectTask: true,
+        softDirectTask,
+        wantsDeeper,
+
+        depthStage,
+        itTriggered,
+        autoDeepen,
+
+        goalKind,
+        consultishGoal,
+        autoCrack,
+
+        mode: null,
+        blocksLen: 0,
+      },
+    };
+  }
+
+  // 3) softDirectTask は “抑制” だが、autoDeepen/autoCrack が立っているなら通す
+  //    （= 明示が無くても出る方向に寄せる。ただし hardDirectTask は別で必ず落ちる）
+  if (!explicit && softDirectTask && !autoDeepen && !autoCrack) {
+    return {
+      plan: null,
+      diag: {
+        enabled: false,
+        why: 'DIRECT_SOFT',
+        explicit: false,
+        hardDirectTask: false,
+        softDirectTask: true,
+        wantsDeeper: false,
+
+        depthStage,
+        itTriggered,
+        autoDeepen,
+
+        goalKind,
+        consultishGoal,
+        autoCrack,
+
+        mode: null,
+        blocksLen: 0,
+      },
+    };
+  }
+
+  // 4) explicit/autoDeepen/autoCrack どれも無い → NONE
+  if (!explicit && !autoDeepen && !autoCrack) {
+    return {
+      plan: null,
+      diag: {
+        enabled: false,
+        why: 'NONE',
+        explicit: false,
+        hardDirectTask: false,
+        softDirectTask,
+        wantsDeeper: false,
+
+        depthStage,
+        itTriggered,
+        autoDeepen,
+
+        goalKind,
+        consultishGoal,
+        autoCrack,
+
+        mode: null,
+        blocksLen: 0,
+      },
+    };
+  }
+
+  // 5) explicit → multi7 or multi6
+  if (explicit) {
+    if (wantsDeeper) {
+      const plan: BlockPlan = {
+        mode: 'multi7',
+        blocks: ['ENTRY', 'SITUATION', 'DUAL', 'FOCUS_SHIFT', 'ACCEPT', 'INTEGRATE', 'CHOICE'],
+      };
+      return {
+        plan,
+        diag: {
+          enabled: true,
+          why: 'EXPLICIT',
+          explicit: true,
+          hardDirectTask: false,
+          softDirectTask,
+          wantsDeeper: true,
+
+          depthStage,
+          itTriggered,
+          autoDeepen,
+
+          goalKind,
+          consultishGoal,
+          autoCrack,
+
+          mode: plan.mode,
+          blocksLen: plan.blocks.length,
+        },
+      };
+    }
+
+    const plan: BlockPlan = {
+      mode: 'multi6',
+      blocks: ['ENTRY', 'SITUATION', 'DUAL', 'FOCUS_SHIFT', 'ACCEPT', 'INTEGRATE'],
+    };
+    return {
+      plan,
+      diag: {
+        enabled: true,
+        why: 'EXPLICIT',
+        explicit: true,
+        hardDirectTask: false,
+        softDirectTask,
+        wantsDeeper: false,
+
+        depthStage,
+        itTriggered,
+        autoDeepen,
+
+        goalKind,
+        consultishGoal,
+        autoCrack,
+
+        mode: plan.mode,
+        blocksLen: plan.blocks.length,
+      },
+    };
+  }
+
+  // 6) autoDeepen / autoCrack → multi6
+  const plan: BlockPlan = {
     mode: 'multi6',
     blocks: ['ENTRY', 'SITUATION', 'DUAL', 'FOCUS_SHIFT', 'ACCEPT', 'INTEGRATE'],
   };
+
+  const why: BlockPlanWhy = autoDeepen ? 'AUTO_DEEPEN' : 'AUTO_CRACK';
+
+  return {
+    plan,
+    diag: {
+      enabled: true,
+      why,
+      explicit: false,
+      hardDirectTask: false,
+      softDirectTask,
+      wantsDeeper: false,
+
+      depthStage,
+      itTriggered,
+      autoDeepen,
+
+      goalKind,
+      consultishGoal,
+      autoCrack,
+
+      mode: plan.mode,
+      blocksLen: plan.blocks.length,
+    },
+  };
+}
+
+// 既存互換：従来の buildBlockPlan API は温存（呼び出し側を壊さない）
+export function buildBlockPlan(params: BuildBlockPlanParams): BlockPlan | null {
+  return buildBlockPlanWithDiag(params).plan;
 }
 
 /* =========================================================
@@ -254,29 +473,64 @@ export function buildBlockPlan(params: BuildBlockPlanParams): BlockPlan | null {
  */
 export function renderBlockPlanSystem4(plan: BlockPlan): string {
   const requiredOrder = plan.blocks.join(' -> ');
+  const mode = plan.mode;
+
+  // multi6 / multi7 は「常時 見出し付き」を強制
+  const forceHeads = mode === 'multi6' || mode === 'multi7';
+
+  const heads6 = [
+    '今ここを揃える',
+    'いま見ているもの',
+    '二つの見方',
+    '焦点を一つだけ移す',
+    'いったん受け止める',
+    '一枚に戻す',
+  ];
+  const heads = mode === 'multi7' ? [...heads6, 'ここで一つ選ぶ'] : heads6;
+
+  const emojis = heads.map((_h, i) => {
+    if (i === 0) return '🌀';
+    if (i === 1) return '🔍';
+    if (i === 2) return '↔️';
+    if (i === 3) return '🎯';
+    if (i === 4) return '🪷';
+    if (i === 5) return '🧩';
+    return '✅';
+  });
+
+  const headRules = forceHeads
+    ? [
+        `【${mode} 見出しルール（強制）】`,
+        `- ${mode} の場合、各ブロックは必ず Markdown 見出しで区切る（必須・例外なし）。`,
+        `- 見出し行は必ず「## 」で始める（2つの # + 半角スペース）。`,
+        `- 見出しの文言は固定。言い換え・短縮・並び替え禁止。順番も固定。`,
+        `- 見出しは必ず「## 絵文字1つ + 半角スペース + 見出し本文」。`,
+        `- 見出し以外の本文では、ENTRY/SITUATION/DUAL/FOCUS_SHIFT/ACCEPT/INTEGRATE/CHOICE などラベル名は一切出さない。`,
+        ``,
+        `【固定見出し（この順番・この文言のまま）】`,
+        ...heads.map((h, i) => `- ${i + 1}) ## ${emojis[i]} ${h}`),
+        ``,
+        `【自己検査（必須）】`,
+        `- 返信の先頭が「## 」で始まっていない場合は失敗。本文を書き直してから出力する。`,
+        `- 見出しが ${heads.length} 個そろっていない場合も失敗。書き直す。`,
+        ``,
+      ].join('\n')
+    : '';
 
   return [
     '【内部指示】以下はシステム制約。返信本文に一切含めない。引用/要約/言い換えもしない。',
     '',
-    `mode: ${plan.mode}`,
-    `order: ${requiredOrder}`,
+    '【BLOCK_PLAN（DO NOT OUTPUT）】',
+    '- これは “段取り” だけ。内容・結論・構造メタ（depth/q/phase/flow 等）を新規に推定したり上書きしない。',
+    '- 本文は自然文。見出し以外ではラベル名（ENTRY 等）を出さない。',
     '',
-    '目的：例外的に「段取り」だけ与える。Depth/Q/Phase/slotPlan は絶対に変えない。',
-    '禁止：Depth/Q/Phase/slotPlan の変更・推定・上書き、診断ラベルの露出。',
-    '',
-    '出力ルール：',
-    '- 見出しは「## 見出し」形式のみ（### や記号だらけの装飾は禁止）。',
-    '- 内部ブロック名（ENTRY/SITUATION/DUAL/FOCUS_SHIFT/ACCEPT/INTEGRATE/CHOICE）や「二項/焦点移動/受容」等の語を本文に出さない。',
-    '- 境界は空行で表現。箇条書き・番号・チェックリストで埋めない。',
-    '- 一般論で薄めず、各段落にユーザー文の具体語を最低1つ入れる。',
-    '- 質問は 0〜1。毎回は付けない（必要な時だけ末尾に添える）。',
-    '',
-    '密度：',
-    '- 1段落は 2〜4文までOK（ただし1段落が長文化しすぎないよう改行で分ける）。',
-    '- multi6：全体で 6〜12 段落（完走優先）',
-    '- multi7：全体で 8〜16 段落（完走優先）',
-    '',
-    '重要：',
-    '- 「次の一手 / 最小の一手 / NEXT_MIN」系の段落は作らない（BlockPlanの責務外）。',
-  ].join('\n').trim();
+    `- mode: ${mode}`,
+    `- requiredOrder: ${requiredOrder}`,
+    headRules
+      ? headRules
+      : '- 見出しを使う場合のみ、形式は「## 絵文字1つ + 半角スペース + 見出し本文」にする。',
+    '- 質問は必要なときだけ 0〜1（毎回は不要）。',
+  ]
+    .filter(Boolean)
+    .join('\n');
 }

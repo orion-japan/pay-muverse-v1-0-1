@@ -418,17 +418,42 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
   const candidate = looksLikeInternalSeed(rawCandidate) ? '' : rawCandidate;
   const candidateLen = candidate.length;
 
-  // =========================================================
-  // effectiveText / effectiveLen
-  // - FINAL__LLM_DEFER のときは「本文は空扱い」→ writer を走らせる
-  //   （seed は meta.extra.llmRewriteSeed に保持されている前提）
-  // =========================================================
-  const finalTextPolicy = String((input as any)?.meta?.extra?.finalTextPolicy ?? '').trim();
-  const shouldDeferFinal = finalTextPolicy === 'FINAL__LLM_DEFER';
+// =========================================================
+// effectiveText / effectiveLen
+// - FINAL__LLM_DEFER のときは「本文は空扱い」→ writer を走らせる
+//   （seed は meta.extra.llmRewriteSeed に保持されている前提）
+// =========================================================
+const finalTextPolicy = String((input as any)?.meta?.extra?.finalTextPolicy ?? '').trim();
+const shouldDeferFinal = finalTextPolicy === 'FINAL__LLM_DEFER';
 
-  const effectiveText = shouldDeferFinal ? '' : String((input as any)?.finalAssistantText ?? '').trim();
-  const effectiveLen = effectiveText.length;
+// ✅ 互換：finalAssistantText が無い配線でも、finalAssistantTextNow を effective に使う
+const effectiveSource: any =
+  (input as any)?.finalAssistantText ??
+  (input as any)?.finalAssistantTextNow ??
+  '';
 
+// effectiveText は “今の本文候補” を見る
+// - FINAL__LLM_DEFER のときは空扱いにして writer を走らせる
+const effectiveText = shouldDeferFinal ? '' : normText(String(effectiveSource ?? ''));
+const effectiveLen = effectiveText.length;
+
+// ✅ rewriteSeed fallback（LLM未実行でも PP が仕込んだ seed を観測できるように）
+// 優先順：llmRewriteSeed（PPの正本）→ slotPlanSeed → ctxPack.seed_text → seed_text
+const exProbe: any =
+  (input as any)?.meta?.extra && typeof (input as any).meta.extra === 'object'
+    ? (input as any).meta.extra
+    : {};
+
+const rewriteSeedFallbackRaw = String(
+  exProbe?.llmRewriteSeed ??
+    exProbe?.slotPlanSeed ??
+    exProbe?.ctxPack?.seed_text ??
+    exProbe?.seed_text ??
+    '',
+).trim();
+
+const rewriteSeedFallback = rewriteSeedFallbackRaw ? rewriteSeedFallbackRaw : null;
+const rewriteSeedFallbackLen = rewriteSeedFallback ? rewriteSeedFallback.length : 0;
 
   const slotsOk = slotsOkFromHints({ slotPlanLen, hasSlots });
 
@@ -438,7 +463,9 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
   ): LlmGateProbeOutput => {
     const resolvedLen =
       decision.entry === 'CALL_LLM' ? null : decision.resolvedText ? String(decision.resolvedText).length : null;
-    const seedLen = decision.rewriteSeed ? String(decision.rewriteSeed).length : null;
+
+    const seedRaw = String(decision.rewriteSeed ?? '').trim() || rewriteSeedFallbackRaw;
+    const seedLen = seedRaw ? seedRaw.length : null;
 
     return {
       decision,
@@ -532,74 +559,95 @@ export function probeLlmGate(input: LlmGateProbeInput): LlmGateProbeOutput {
       (input as any)?.meta?.userText ??
       '';
 
-    const rewriteSeedFinal = effectiveLen
+    // ✅ FIX: effectiveText が空でも、PP が仕込んだ seed（llmRewriteSeed/slotPlanSeed/ctxPack.seed_text 等）を使って writer に渡す
+    const seedTextForFinalRaw = effectiveLen ? effectiveText : rewriteSeedFallbackRaw;
+    const seedTextForFinal = String(seedTextForFinalRaw ?? '').trim();
+
+    const rewriteSeedFinal = seedTextForFinal
       ? buildWriterRewriteSeed({
           userText: userTextForSeed,
-          seedText: effectiveText,
+          seedText: seedTextForFinal,
           meta: input.meta,
         })
       : null;
 
-    // --- ここがスイッチ ---
-    // retryFinalForceCall=false のとき：
-    // - “FINAL_FORCE_CALL” 扱い（finalForceCall:true）をやめる
-    // - ただし CALL_LLM は維持して会話停止を増やさない
-    if (!retryFinalForceCall) {
-      console.warn('[IROS/LLM_GATE][FINAL_CALL][NO_FORCE]', {
-        conversationId,
-        userCode,
-        slotPlanPolicy: policy,
+  // --- ここがスイッチ ---
+  // retryFinalForceCall=false のとき：
+  // - “FINAL_FORCE_CALL” 扱い（finalForceCall:true）をやめる
+  // - ただし CALL_LLM は維持して会話停止を増やさない
+  const traceIdForLog =
+    (input as any)?.meta?.extra?.traceId ??
+    (input as any)?.traceId ??
+    (input as any)?.meta?.traceId ??
+    null;
 
-        // ✅ ここで “枠(4) / 抽出(3)” を分離して可視化する
-        framePlanSlotsLen: Array.isArray((input as any)?.meta?.framePlan?.slots)
-          ? (input as any).meta.framePlan.slots.length
-          : null,
-        metaSlotPlanLen: Array.isArray((input as any)?.meta?.slotPlan)
-          ? (input as any).meta.slotPlan.length
-          : null,
-
-        // ✅ 既存：何を数えてるか不明なので残して照合用にする
-        slotPlanLen,
-
-        hasSlots,
-        effectiveLen,
-        head: head(effectiveText, 80),
-      });
-
-
-      return mk(
-        {
-          entry: 'CALL_LLM',
-          reason: 'FINAL_CALL (force disabled by IROS_RETRY_FINAL_FORCE_CALL=false)',
-          resolvedText: null, // ✅ 新憲法：CALL_LLM は本文採用禁止
-          rewriteSeed: rewriteSeedFinal,
-        },
-        { finalForceCall: false, finalForceCallReason: 'FINAL_CALL_NO_FORCE' },
-      );
-    }
-
-    // ✅ 既存挙動：FINAL_FORCE_CALL（従来通り）
-    console.warn('[IROS/LLM_GATE][FINAL_FORCE_CALL]', {
+  if (!retryFinalForceCall) {
+    console.warn('[IROS/LLM_GATE][FINAL_CALL][NO_FORCE]', {
+      traceId: traceIdForLog,
       conversationId,
       userCode,
       slotPlanPolicy: policy,
+
+      // ✅ “枠(4) / meta抽出(4)” を分離
+      framePlanSlotsLen: Array.isArray((input as any)?.meta?.framePlan?.slots)
+        ? (input as any).meta.framePlan.slots.length
+        : null,
+      metaSlotPlanLen: Array.isArray((input as any)?.meta?.slotPlan)
+        ? (input as any).meta.slotPlan.length
+        : null,
+
+      // ✅ 既存：照合用（残す）
       slotPlanLen,
       hasSlots,
-      effectiveLen,
-      head: head(effectiveText, 80),
+
+      // ✅ ここが誤解の根：effectiveLen/head は “writer前の本文候補” であり、最終出力ではない
+      preWriterBodyLen: effectiveLen,
+      preWriterBodyHead: head(effectiveText, 80),
+
+      // ✅ FINALでは本文が空でもOK：seed fallback から writer 用 seed を作って渡す
+      seedFallbackLen: seedTextForFinal.length,
+      seedFallbackHead: head(seedTextForFinal, 80),
+
+      // ✅ writer に渡す rewriteSeed（= ルール + seed + ctx）
+      rewriteSeedFinalLen: rewriteSeedFinal ? String(rewriteSeedFinal).length : 0,
+      rewriteSeedFinalHead: rewriteSeedFinal ? head(String(rewriteSeedFinal), 80) : '',
+
+      note: 'preWriterBodyLen is NOT final output; FINAL uses seedFallback -> rewriteSeedFinal -> writer',
     });
 
     return mk(
       {
         entry: 'CALL_LLM',
-        reason: 'FINAL_FORCE_CALL (avoid template lock)',
+        reason: 'FINAL_CALL (force disabled by IROS_RETRY_FINAL_FORCE_CALL=false)',
         resolvedText: null, // ✅ 新憲法：CALL_LLM は本文採用禁止
         rewriteSeed: rewriteSeedFinal,
       },
-      { finalForceCall: true, finalForceCallReason: 'FINAL_FORCE_CALL' },
+      { finalForceCall: false, finalForceCallReason: 'FINAL_CALL_NO_FORCE' },
     );
   }
 
+  // ✅ 既存挙動：FINAL_FORCE_CALL（従来通り）
+  console.warn('[IROS/LLM_GATE][FINAL_FORCE_CALL]', {
+    traceId: traceIdForLog,
+    conversationId,
+    userCode,
+    slotPlanPolicy: policy,
+    slotPlanLen,
+    hasSlots,
+    effectiveLen,
+    head: head(effectiveText, 80),
+  });
+
+  return mk(
+    {
+      entry: 'CALL_LLM',
+      reason: 'FINAL_FORCE_CALL (avoid template lock)',
+      resolvedText: null, // ✅ 新憲法：CALL_LLM は本文採用禁止
+      rewriteSeed: rewriteSeedFinal,
+    },
+    { finalForceCall: true, finalForceCallReason: 'FINAL_FORCE_CALL' },
+  );
+  }
 
   // (F) slots があるが policy が UNKNOWN：守りで CALL_LLM（seed を渡す）
   if (slotsOk) {

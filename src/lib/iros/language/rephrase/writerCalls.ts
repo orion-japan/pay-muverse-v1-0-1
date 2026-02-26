@@ -23,12 +23,21 @@ function norm(s: unknown) {
 
 function turnsToMessages(turns?: TurnMsg[] | null): WriterMessage[] {
   if (!Array.isArray(turns) || turns.length === 0) return [];
+
   return turns
     .map((t) => {
       const role = t?.role === 'assistant' ? 'assistant' : t?.role === 'user' ? 'user' : null;
+      if (!role) return null;
+
+      // ✅ choke point：user の生文は絶対に LLM に渡さない（常にマスク）
+      if (role === 'user') {
+        return { role: 'user', content: '[USER]' } as WriterMessage;
+      }
+
+      // assistant は内容を許可（空は捨てる）
       const content = norm((t as any)?.content);
-      if (!role || !content) return null;
-      return { role, content } as WriterMessage;
+      if (!content) return null;
+      return { role: 'assistant', content } as WriterMessage;
     })
     .filter(Boolean) as WriterMessage[];
 }
@@ -40,33 +49,29 @@ function turnsToMessages(turns?: TurnMsg[] | null): WriterMessage[] {
  * - finalUserText は “userText or seedDraft” の混入経路になり得るため、ここでは一切採用しない
  * - 「最後は user で終わる」要件は、internalPack / turns の整形で満たす（必要なら turns 側に入る）
  */
-export function buildFirstPassMessages(args: {
-  systemPrompt: string;
-  internalPack: string;
-  turns?: TurnMsg[] | null;
-
-  // ✅ “最後の user” を保証するための安全seed（userText生文ではない）
-  seedDraft?: string | null;
-
-  // 互換のため残すが、この層では絶対に採用しない（LLMへ流さない）
-  finalUserText?: string | null;
-}): WriterMessage[] {
+export function buildFirstPassMessages(args: any) {
   const systemPrompt = String(args.systemPrompt ?? '').trim();
   const internalPack = norm(args.internalPack ?? '');
   const seedDraft = norm(args.seedDraft ?? '');
-
   const turns = turnsToMessages(args.turns);
 
   // ✅ internalPack は “system に畳む” （user にしない）
-  const systemOne = [systemPrompt, internalPack].filter((x) => x.trim().length > 0).join('\n\n');
+  const systemOne = [systemPrompt, internalPack]
+    .filter((x) => String(x).trim().length > 0)
+    .join('\n\n');
 
-  const out: WriterMessage[] = [{ role: 'system', content: systemOne }];
+  const out: any[] = [
+    {
+      role: 'system',
+      content: systemOne,
+    },
+  ];
 
   // ✅ 直近ターン（会話の流れ）を追加（role連続はマージ）
   for (const m of turns) {
     const last = out[out.length - 1];
     if (last && last.role === m.role) {
-      last.content = `${last.content}\n\n${m.content}`.trim();
+      last.content = `${String(last.content ?? '').trim()}\n\n${String(m.content ?? '').trim()}`.trim();
     } else {
       out.push(m);
     }
@@ -77,10 +82,19 @@ export function buildFirstPassMessages(args: {
   if (seedDraft) {
     const last = out[out.length - 1];
     if (last && last.role === 'user') {
-      last.content = `${last.content}\n\n${seedDraft}`.trim();
+      last.content = `${String(last.content ?? '').trim()}\n\n${seedDraft}`.trim();
     } else {
       out.push({ role: 'user', content: seedDraft });
     }
+  }
+
+  // ✅ ここが本丸：turns も seedDraft も空だと roles=[system] になる
+  // => 生文を入れずに「最小の user」を保証して writer を成立させる
+  if (out.length === 1) {
+    out.push({
+      role: 'user',
+      content: '続けてください',
+    });
   }
 
   return out;

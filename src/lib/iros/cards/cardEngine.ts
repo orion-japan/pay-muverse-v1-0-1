@@ -307,7 +307,14 @@ export function buildCardEngineResult(input: BuildCardEngineInput): CardEngineRe
     };
   }
 
-  // ---- future (always random) ----
+  // ---- future (stabilized) ----
+  // 目的:
+  // - 未来カードの「候補」概念は残す
+  // - ただし INTERNAL PACK を毎回揺らさない（検証不能になるため）
+  // 方針:
+  // - currentCard が取れているなら future は current を踏襲（揺れゼロ）
+  // - currentCard が無い/欠けている場合だけ pool から pick（従来互換）
+
   const stagePool =
     Array.isArray(input.futureStagePool) && input.futureStagePool.length > 0
       ? input.futureStagePool
@@ -323,13 +330,14 @@ export function buildCardEngineResult(input: BuildCardEngineInput): CardEngineRe
       ? input.futurePolarityPool
       : [...POLARITIES];
 
-  const fe = pickOne(ePool, rng);
-  const fs = pickOne(stagePool, rng);
-  const fp = pickOne(pPool, rng);
+  const fe = currentCard?.e_turn ?? pickOne(ePool, rng);
+  const fs = currentCard?.depthStage ?? pickOne(stagePool, rng);
+  const fp = currentCard?.polarity ?? pickOne(pPool, rng);
 
   const futureLooked = input.lookupText({ depthStage: fs, e_turn: fe, polarity: fp, sa });
   const futureCard: CardPick = {
-    source: 'random',
+    // NOTE: 型互換のため source は既存値を維持（ただし中身は current 踏襲で安定）
+    source: currentCard ? 'random' : 'random',
     id: futureLooked.id,
     depthStage: fs,
     e_turn: fe,
@@ -337,7 +345,7 @@ export function buildCardEngineResult(input: BuildCardEngineInput): CardEngineRe
     text: futureLooked.text,
     fromDict: futureLooked.fromDict,
     confidence,
-    basedOn: 'random_future_candidate',
+    basedOn: currentCard ? 'future_from_current' : 'future_pool_pick',
   };
 
   const context = {

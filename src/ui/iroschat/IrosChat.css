@@ -1,9 +1,10 @@
+/* src/ui/iroschat/IrosChat.css */
 /* Iros専用（中身はSofiaChat.cssと同等に） */
 @charset "utf-8";
 
-/* =========================
+/* =========================================================
    固定ヘッダー／トップ余白
-   ========================= */
+   ========================================================= */
 .sof-header-fixed {
   position: fixed !important;
   top: 0;
@@ -15,9 +16,9 @@
   -webkit-backdrop-filter: none !important;
 }
 
-/* =========================
+/* =========================================================
    入力欄の「台座」(下部固定)
-   ========================= */
+   ========================================================= */
 .sof-compose-dock {
   position: sticky;
   bottom: env(safe-area-inset-bottom, 0);
@@ -26,9 +27,9 @@
   box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.06);
 }
 
-/* =========================
+/* =========================================================
    メタ領域・パネル
-   ========================= */
+   ========================================================= */
 .sof-meta-dock {
   position: relative;
   z-index: 0;
@@ -39,16 +40,20 @@
   margin-bottom: calc(var(--sof-compose-h, 96px) + 12px);
 }
 
-/* =========================
-   メッセージエリア
-   ========================= */
+/* =========================================================
+   メッセージエリア（入力欄に隠れない余白）
+   - ここは “レイアウト専用”
+   - 行間/段落余白/見出し等のタイポは ChatMarkdown.css に集約する
+   ========================================================= */
 .sof-msgs {
-  padding-bottom: calc(var(--sof-compose-h, 100px) + 24px);
+  padding-bottom: max(40vh, calc(var(--sof-compose-h, 100px) + 24px));
+  padding-left: 4px;
+  padding-right: 4px;
 }
 
-/* =========================
+/* =========================================================
    画面の器（必要なら定義）
-   ========================= */
+   ========================================================= */
 /* 画面の器：PCでも横幅制限をしない */
 .sofia-container {
   max-width: none !important;
@@ -57,21 +62,18 @@
   padding: 0 12px;
 }
 
-
-/* =========================
-   オーバーレイ系は初期無効化
-   （覆って固まる事故を防ぐ）
-   ========================= */
+/* =========================================================
+   オーバーレイ系は初期無効化（覆って固まる事故を防ぐ）
+   ========================================================= */
 .sof-underlay,
 .sof-dim {
   pointer-events: none;
   opacity: 0;
 }
 
-/* =========================
+/* =========================================================
    ルート変数（共通トークン）
-   ========================= */
-/* src/ui/iroschat/IrosChat.css */
+   ========================================================= */
 :root {
   --footer-safe-pad: 56px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -82,44 +84,30 @@
   --sofia-a-lh: 1.85;
   --sofia-a-radius: 16px;
   --sofia-a-border: 1px solid #e6eaf2;
-  --sofia-a-shadow: 0 1px 3px rgba(16, 24, 40, 0.06), 0 8px 24px rgba(2, 6, 23, 0.05);
+  --sofia-a-shadow: 0 1px 3px rgba(16, 24, 40, 0.06),
+    0 8px 24px rgba(2, 6, 23, 0.05);
   --sofia-a-bg-grad: linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
 
   /* ユーザー吹き出し（既定） */
   --sofia-u-border: 1px solid #cfe0ff;
   --sofia-u-bg-grad: linear-gradient(180deg, #ffffff 0%, #eef5ff 100%);
-  --sofia-u-shadow: 0 1px 3px rgba(16, 24, 40, 0.06), 0 8px 24px rgba(30, 64, 175, 0.06);
+  --sofia-u-shadow: 0 1px 3px rgba(16, 24, 40, 0.06),
+    0 8px 24px rgba(30, 64, 175, 0.06);
 
   /* バブル最大幅（MessageList用） */
   --bubble-max-w: 720px;
-}
 
-/* index.module.css の :root から必要な変数をここへ集約して貼り付けてください
-:root{
-  --your-index-var-1: ...;
-  --your-index-var-2: ...;
-}
-*/
-
-/* IrosSidebarMobile.module.css の :root から必要な変数も集約してください */
-:root {
+  /* drawer（必要なら） */
   --drawer-z: 1200;
   --drawer-width: min(90vw, 360px);
-  /* 例：
-  --drawer-dim-bg: rgba(0,0,0,.4);
-  --drawer-bg: #fff;
-  */
 }
 
-/* =========================
+/* =========================================================
    追加の安全ガード（任意）
-   ========================= */
-/* iOS/Safari の下端セーフエリア確保に寄与（必要なら利用） */
+   ========================================================= */
 .sof-footer-spacer {
   height: calc(var(--safe-bottom, 0px) + 8px);
 }
-
-/* 背景ガード（IrosChatShell 内の .iro-chat-main と併用想定） */
 .iro-chat-bg {
   pointer-events: none;
 }
@@ -129,15 +117,15 @@
   max-width: min(var(--bubble-max-w, 780px), 86%);
 }
 
-/* 吹き出し同士の間 */
+/* =========================================================
+   Message layout（行間・余白などタイポは触らない）
+   ========================================================= */
 .message {
   display: flex;
   flex-direction: column;
   gap: 8px;
   margin-bottom: 10px;
 }
-
-/* ユーザーとAIの間を明確に */
 .message.is-user {
   align-items: flex-end;
 }
@@ -145,7 +133,7 @@
   align-items: flex-start;
 }
 
-/* 吹き出し（デフォルト。ユーザー側に主に適用） */
+/* 吹き出し（ベース） */
 .bubble {
   border-radius: 16px;
   padding: 12px 14px;
@@ -155,60 +143,15 @@
   color: #0f172a;
 }
 
-/* 行間・段落間の設定（共通の初期値） */
-.msgBody p {
-  margin: 0;
-  line-height: 1.9;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-/* 段落と段落の間 */
-.msgBody p + p {
-  margin-top: 0.9em;
-}
-
-/* リストや引用の間 */
-.msgBody ul,
-.msgBody ol,
-.msgBody blockquote,
-.msgBody pre {
-  margin: 0.8em 0;
-}
-
-/* 吹き出し間をもう少し自然に */
+/* 吹き出し間を自然に */
 .message + .message {
   margin-top: 12px;
 }
 
-/* モバイルで広めに */
-@media (max-width: 600px) {
-  .msgBody p {
-    line-height: 2.0;
-  }
-  .message {
-    margin-bottom: 28px;
-  }
-}
-
-/* index.module.css または IrosChat.css に追加 */
-.sof-msg {
-  margin-bottom: 18px; /* 吹き出し間のスペース */
-}
-
-.sof-msg p {
-  line-height: 1.9; /* 文章内の行間をさらにゆったり */
-  letter-spacing: 0.02em;
-}
-
-/* ===========================================
-   Iros assistant text: GPT風・読みやすさ最終版
-   - バブル無し
-   - 行間ゆったり
-   - フォントサイズ 14px
-=========================================== */
-
-/* AIメッセージのバブル要素を消し、フラットにする */
+/* =========================================================
+   Assistant（バブル無し：フラット表示）
+   - タイポは ChatMarkdown.css の .iros-p / .iros-heading-line に任せる
+   ========================================================= */
 .sof-msgs .message.is-assistant .bubble {
   background: none !important;
   border: none !important;
@@ -217,155 +160,64 @@
   max-width: 100% !important;
 }
 
-/* 行の左右にすこしだけ余白を付ける */
+/* 行の左右にすこしだけ余白（レイアウトだけ） */
 .sof-msgs .message.is-assistant {
   width: 100% !important;
   padding: 0 10px 0 6px !important;
 }
 
-/* 本文ブロック全体：上下の余白と最大幅 */
+/* msgBody は “器” だけ（本文の line-height / margin は入れない） */
 .sof-msgs .message.is-assistant .msgBody {
-  max-width: 720px;
-  padding-top: 4px !important;
-  padding-bottom: 18px !important;
+  max-width: var(--bubble-max-w, 720px);
+  font-size: var(--sofia-a-fs, 15px);
+  color: #222;
 }
-
-/* 行間と段落の「呼吸」：ここが一番大事 */
-.sof-msgs .message.is-assistant .msgBody p {
-  margin: 0 0 1.3rem 0 !important;  /* 段落間の余白 */
-  line-height: 2.0 !important;      /* やわらかい行間 */
-  letter-spacing: 0.02em !important;
-  font-size: 15px !important;       /* ご指定のサイズ */
-  color: #222 !important;
-  word-break: break-word !important;
-}
-
-/* 最後の段落だけは下の余白を詰める */
-.sof-msgs .message.is-assistant .msgBody p:last-child {
-  margin-bottom: 0 !important;
-}
-/* ============================
-   ユーザー吹き出し ultra-light MUVERSE
-   ============================ */
-
-   .message.is-user .bubble {
-    background: linear-gradient(
-      180deg,
-      rgba(230, 230, 255, 0.40),  /* うっすら淡紫 */
-      rgba(245, 245, 255, 0.25)   /* さらに透明寄り */
-    ) !important;
-
-    border: 1px solid rgba(170, 150, 255, 0.28) !important;
-    box-shadow: 0 4px 16px rgba(120, 100, 255, 0.10) !important;
-
-    color: #333 !important;
-    padding: 14px 16px !important;
-
-    backdrop-filter: blur(6px) !important;
-    -webkit-backdrop-filter: blur(6px) !important;
-  }
-
-
-  /* === 下の入力欄にメッセージが隠れないようにする === */
-.sof-msgs {
-  padding-bottom: calc(100px) !important;
-  /* ↑ 120〜200px の間で調整。まず180pxでOK */
-}
-
-
-/* -- メッセージ全体の器（背景と内容の間に余白をつける） -- */
-.sof-msgs {
-  padding-left: 4px !important;
-  padding-right: 4px !important;
-}
-
-
-
-/* ===========================================
-   Iros assistant text: タイポだけ調整（枠なし）
-   - レイアウトはいじらない
-   - 行間と段落、太字と hr だけ整える
-   ========================================== */
-
-/* AIメッセージのバブルはフラットに（構図そのまま） */
-.sof-msgs .message.is-assistant .bubble {
-  background: none !important;
-  border: none !important;
-  box-shadow: none !important;
-  padding: 0 !important;
-  max-width: 100% !important;
-}
-
-/* 本文ブロックの幅と上下の余白だけ少し整える */
-.sof-msgs .message.is-assistant .msgBody {
-  max-width: 720px;
-  padding-top: 4px;
-  padding-bottom: 14px;
-}
-
-/* 段落：行間をゆったり、段落間に1行ぶんの息継ぎ */
-.sof-msgs .message.is-assistant .msgBody p {
-  margin: 0 0 1.0rem 0 !important;
-  line-height: 1.95 !important;
-  letter-spacing: 0.02em !important;
-  font-size: 15px !important;
-  color: #222 !important;
-  word-break: break-word !important;
-}
-
-/* 最後の段落だけは下の余白を詰める */
-.sof-msgs .message.is-assistant .msgBody p:last-child {
-  margin-bottom: 0 !important;
-}
-
-/* 太字：少しだけ大きくして、小見出しっぽく */
-.sof-msgs .message.is-assistant .msgBody strong {
-  display: inline-block;
-  margin: 0.3rem 0 0.2rem;
-  font-weight: 700;
-  font-size: 15.5px;
-  color: #111827;
-}
-
-/* 区切り線：テキストの中の「場面転換」だけ淡く見せる */
-.sof-msgs .message.is-assistant .msgBody hr {
-  border: none;
-  border-top: 1px solid rgba(148, 163, 184, 0.45);
-  margin: 0.8rem 0 0.9rem !important;
-}
-
-/* 箇条書き：インデント控えめでテキストとなじませる */
-.sof-msgs .message.is-assistant .msgBody ul {
-  padding-left: 1.1em !important;
-  margin: 0.3rem 0 0.9rem !important;
-}
-.sof-msgs .message.is-assistant .msgBody li {
-  margin: 0.12rem 0 !important;
-}
-
-
 
 /* Iros：Qバッジの縦位置を少し下げる */
 .sof-msgs .message.is-assistant .q-badge {
-  margin-top: 6px !important;      /* 3〜8pxくらいで好みに調整 */
-  transform: translateY(2px);      /* もっと下げたければ 3〜4px に */
+  margin-top: 6px !important;
+  transform: translateY(2px);
 }
 
+/* =========================================================
+   User bubble（ultra-light MUVERSE）
+   ========================================================= */
+.message.is-user .bubble {
+  background: linear-gradient(
+    180deg,
+    rgba(230, 230, 255, 0.4),
+    rgba(245, 245, 255, 0.25)
+  ) !important;
 
-/* ここが今 120px !important になっているはず */
-.sof-msgs {
-  /* 下側に“たっぷり余白”を作って、最後のメッセージを上に浮かせる */
-  padding-bottom: max(40vh, 120px);
-  padding-right: 4px;
+  border: 1px solid rgba(170, 150, 255, 0.28) !important;
+  box-shadow: 0 4px 16px rgba(120, 100, 255, 0.1) !important;
+
+  color: #333 !important;
+  padding: 14px 16px !important;
+
+  backdrop-filter: blur(6px) !important;
+  -webkit-backdrop-filter: blur(6px) !important;
 }
 
+/* =========================================================
+   IMPORTANT: 本文タイポの上書き禁止
+   - Markdown の段落/見出し/リスト/引用/HR は ChatMarkdown.css に集約
+   - ここでは “p の行間/余白” を書かない（競合を作らない）
+   ========================================================= */
 
-.message.is-assistant .bubble {
-  background: none;
-  border: none;
-  box-shadow: none;
-  padding: 0;
+/* ただし、壊れ防止の最低限だけ必要ならこれだけ残す（行間は触らない） */
+.msgBody p {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
 }
-.message.is-assistant .msgBody {
-  max-width: 720px;
+
+/* =========================================================
+   Mobile adjustments（レイアウトだけ）
+   ========================================================= */
+@media (max-width: 600px) {
+  .message {
+    margin-bottom: 28px;
+  }
+  /* モバイル時に msgBody 側で line-height を上げない（本文側に任せる） */
 }

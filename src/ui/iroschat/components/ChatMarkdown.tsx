@@ -1,6 +1,6 @@
 // src/ui/iroschat/components/ChatMarkdown.tsx
 'use client';
-
+import './ChatMarkdown.css';
 import React, { useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -17,6 +17,7 @@ const HEADING_ICONS: Record<string, string> = {
   '必要な要素をリストアップ': '🧩',
   '計画を立てる': '🛠️',
   'コミュニケーション': '🫂',
+  '二つの見方': '🔍',
 
   // 既存分も残す
   'いまの揺らぎ': '🌀',
@@ -47,31 +48,42 @@ function normalizeHeadingTitle(raw: string): string {
   return t;
 }
 
-// ✅ タイトルからアイコンを推定（辞書 → キーワード推定 → 何も出さない）
+// ChatMarkdown.tsx
+// ✅ 見出しタイトルから “意味アイコン” を推定（日本語優先）
+// - 先頭絵文字が残っていればそれが最優先（leadingEmoji）
+// - 先頭絵文字が剥がれても、タイトル語彙でアイコンが変わるようにする
 function pickHeadingIcon(titleRaw: string): string | null {
-  const title = normalizeHeadingTitle(titleRaw);
+  const t = normalizeHeadingTitle(titleRaw);
+  if (!t) return null;
 
-  // 1) 完全一致（辞書が最優先）
-  if (HEADING_ICONS[title]) return HEADING_ICONS[title];
+  // ✅ 1) 辞書が最優先（確実に出したい見出しはここで固定）
+  if (HEADING_ICONS[t]) return HEADING_ICONS[t];
 
-  // 2) IRっぽいプレフィクス
-  if (titleRaw.trim().startsWith('🧿')) return '🧿';
-  if (titleRaw.trim().startsWith('🌀')) return '🌀';
-  if (titleRaw.trim().startsWith('🌱')) return '🌱';
+  // helper: どれか含む
+  const has = (...words: string[]) => words.some((w) => t.includes(w));
 
-  // 3) キーワード推定（ここが「可変」に効く）
-  const t = title;
+  // ✅ 2) “意味ベース” の分岐（辞書に無いときだけ）
+  // 揃える/整える/今ここ
+  if (has('今ここ', '揃える', '整える', '整列', 'リセット', '仕切り直し', '土台', '軸')) return '🌀';
 
-  if (/(合図|サイン|シグナル|今の合図|いまの合図)/.test(t)) return '📌';
-  if (/(置き方|置く場所|場所|配置|置く)/.test(t)) return '📍';
-  if (/(扱い方|使い方|運用|ルール)/.test(t)) return '🧭';
-  if (/(管理|整理|構造|枠|ブロック)/.test(t)) return '🗂️';
-  if (/(役|役割|担う|機能)/.test(t)) return '🧩';
-  if (/(意味|意義|理由)/.test(t)) return '📘';
-  if (/(魅力|ポイント|効く|効いてる)/.test(t)) return '✨'; // ← ここは「魅力」のときだけ許可
-  if (/(最小|残る|残す|ミニマム)/.test(t)) return '🪶';
+  // 観測/見る/確認/前提（※「見方」も拾う）
+  if (has('観測', '見る', '見て', '確認', '前提', '状況', 'いま', '現状', '整理', '見方')) return '🔍';
 
-  // 4) どうしても決まらない → “アイコン無し”
+  // 焦点/一点/絞る/要点
+  if (has('焦点', '一点', '絞', '要点', 'ポイント', '核', '中心')) return '🎯';
+
+  // 受け止め/安心/安全/保険
+  if (has('受け止め', '受けとめ', '安心', '安全', '保険', '守る', '落ち着く')) return '🪔';
+
+  // 統合/つなぐ/まとめ
+  if (has('統合', 'つなぐ', '繋ぐ', 'まとめ', '合流', '一つに', '収束')) return '🧩';
+
+  // 選ぶ/決める/結論/ここで一つ
+  if (has('選ぶ', '決める', '結論', 'ここで一つ', '最終', 'どれ')) return '✅';
+
+  // 次の一歩/進める/行動
+  if (has('次', '一歩', '進める', 'やる', '試す', '実行', '今日')) return '👣';
+
   return null;
 }
 
@@ -101,33 +113,10 @@ function normalizeBold(text: string): string {
   return tightened.replace(/^\s*-\s*$/gm, '');
 }
 
-/**
- * strong を「見出し扱い」にするか判定
- * - 旧テンプレで "**見出し**" を使っている互換のためのルール
- * - 本文の強調は strong のまま（見出しにしない）
- */
-function isStrongHeading(raw: string): boolean {
-  const t = String(raw ?? '').trim();
-  if (!t) return false;
-
-  const tNorm = normalizeHeadingTitle(t);
-
-  // 典型：IR/テンプレの見出し候補は短い
-  if (tNorm.length >= 2 && tNorm.length <= 18 && HEADING_ICONS[tNorm]) return true;
-
-  // 「〜：」で終わる短い行は見出しになりがち
-  if (tNorm.length <= 24 && /[：:]$/.test(t)) return true;
-
-  // 先頭が絵文字＋空白なら見出しっぽい
-  if (/^\p{Extended_Pictographic}\s+/u.test(t) && tNorm.length <= 24) return true;
-
-  return false;
-}
 
 function HeadingLine({ title, level }: { title: string; level: 1 | 2 | 3 | 4 }) {
   const Tag = (`h${level}` as any) as React.ElementType;
 
-  // ✅ 先頭の絵文字（例: 📌/🗂️/📍/🧭 など）を「見出しアイコン」として回収
   const raw = String(title ?? '').trim();
 
   // 先頭の絵文字(1個) + 空白 を拾う
@@ -137,11 +126,22 @@ function HeadingLine({ title, level }: { title: string; level: 1 | 2 | 3 | 4 }) 
 
   const normTitle = normalizeHeadingTitle(restTitle);
 
-  // ✅ アイコン決定：先頭絵文字があればそれを優先。無ければ既存ロジック。最後は必ずデフォルト。
-  const icon = leadingEmoji ?? pickHeadingIcon(normTitle) ?? '🧿';
+  // ✅ ここがポイント：
+  // 1) 先頭絵文字
+  // 2) HEADING_ICONS（タイトル完全一致）
+  // 3) 意味ベース推定
+  // 4) デフォルト
+  const icon =
+    leadingEmoji ??
+    HEADING_ICONS[normTitle] ??
+    pickHeadingIcon(normTitle) ??
+    '🧿';
+
+  // ✅ 「二つの見方」だけ “サブ見出し扱い” のクラスを付ける
+  const isSub = normTitle === '二つの見方';
 
   return (
-    <Tag className="iros-heading-line">
+    <Tag className={`iros-heading-line${isSub ? ' iros-heading-sub' : ''}`}>
       <span style={{ marginRight: '0.4em', fontSize: '1.1rem' }}>{icon}</span>
       <span>{normTitle}</span>
     </Tag>
@@ -222,16 +222,11 @@ export default function ChatMarkdown({ text, className }: ChatMarkdownProps) {
             const icon = idx === 0 ? '🧿' : idx === 1 ? '🌀' : '🌱';
 
             return (
-              <p
-                {...props}
-                style={{
-                  margin: '0 0 0.8em',
-                  lineHeight: 1.9,
-                  whiteSpace: 'pre-wrap',
-                }}
-              >
+              <p {...props} className="iros-p">
                 {shouldDecorate && (
-                  <span style={{ marginRight: '0.45em', fontSize: '1.05rem' }}>{icon}</span>
+                  <span className="iros-picon" aria-hidden="true">
+                    {icon}
+                  </span>
                 )}
                 {children}
               </p>
@@ -245,44 +240,8 @@ export default function ChatMarkdown({ text, className }: ChatMarkdownProps) {
           h4: ({ children }) => <HeadingLine title={plainTextFromChildren(children)} level={4} />,
 
           strong: ({ children, ...props }) => {
-            const raw0 = plainTextFromChildren(children).trim();
-
-            // ✅ 先頭の絵文字を拾う（あれば見出しアイコンとして優先）
-            const m = raw0.match(/^([\p{Extended_Pictographic}\uFE0F]+)\s*/u);
-            const leadingEmoji = m?.[1] ?? null;
-
-            // ✅ 見出し判定/正規化は「絵文字を除いた本文」でやる
-            const raw = leadingEmoji ? raw0.replace(m?.[0] ?? '', '').trim() : raw0;
-            const norm = normalizeHeadingTitle(raw);
-
-            if (isStrongHeading(raw)) {
-              const icon = leadingEmoji ?? pickHeadingIcon(raw) ?? '🧿';
-
-              return (
-                <span
-                  {...props}
-                  className="iros-section-heading"
-                  style={{
-                    display: 'block',
-                    margin: '1em 0 0.3em',
-                    fontWeight: 700,
-                    fontSize: '1.04rem',
-                    letterSpacing: '0.02em',
-                    whiteSpace: 'pre-wrap',
-                  }}
-                >
-                  <span style={{ marginRight: '0.4em', fontSize: '1.1rem' }}>{icon}</span>
-                  {norm}
-                </span>
-              );
-            }
-
             return (
-              <strong
-                {...props}
-                className="iros-emphasis iros-emphasis-normal"
-                style={{ fontWeight: 700 }}
-              >
+              <strong {...props} className="iros-emphasis">
                 {children}
               </strong>
             );

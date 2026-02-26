@@ -760,13 +760,27 @@ function runLlmGate(args: {
       Boolean(metaForProbe?.slotPlan?.slots) ||
       Boolean(metaForProbe?.slots);
 
-    let slotPlanLen: number | null =
+      let slotPlanLen: number | null =
       metaForProbe?.framePlan?.slotPlanLen ??
       metaForProbe?.framePlan?.framePlan?.slotPlanLen ??
       metaForProbe?.slotPlan?.slotPlanLen ??
       metaForProbe?.slotPlanLen ??
       metaForSave?.slotPlanLen ??
       null;
+
+    // ✅ fallback: 実体から推定（slotPlan / framePlan.slots の長さ）
+    if (!Number.isFinite(slotPlanLen as any) || (slotPlanLen as any) <= 0) {
+      slotPlanLen =
+        inferSlotPlanLen(metaForProbe) ??
+        inferSlotPlanLen(metaForSave) ??
+        null;
+    }
+
+    // ✅ さらに強い正本: framePlan.slots が配列ならそれを優先
+    try {
+      const fpSlots = metaForProbe?.framePlan?.slots;
+      if (Array.isArray(fpSlots) && fpSlots.length > 0) slotPlanLen = fpSlots.length;
+    } catch {}
 
     const slotPlanPolicy: any =
       metaForProbe?.framePlan?.slotPlanPolicy ??
@@ -777,9 +791,143 @@ function runLlmGate(args: {
       metaForSave?.framePlan?.slotPlanPolicy ??
       metaForSave?.extra?.slotPlanPolicy ??
       null;
+// ✅ runLlmGate() の中（metaForProbe / slotPlanPolicy を決めた直後あたり）に追加
+// --- BLOCK_PLAN (why) を meta.extra に stamp（LLM_GATE / inject が同一turnで見れるようにする）---
+try {
+  // lazy import（server側で依存増を避ける）
+  const { buildBlockPlanWithDiag } = require('@/lib/iros/blockPlan/blockPlanEngine');
 
-      const exProbe: any = metaForProbe?.extra ?? null;
-      const exSave: any = metaForSave?.extra ?? null;
+  const stampOne = (metaAny: any, from: string) => {
+    if (!metaAny || typeof metaAny !== 'object') return;
+
+    // extra を必ず object 化
+    const ex: any =
+      metaAny.extra && typeof metaAny.extra === 'object'
+        ? metaAny.extra
+        : (metaAny.extra = {});
+
+    // 既に入っているなら上書きしない（※必要ならここを “常に上書き” に変えられる）
+    if (ex.blockPlan && typeof ex.blockPlan === 'object' && typeof ex.blockPlan.why === 'string') return;
+
+    const cp: any = ex.ctxPack && typeof ex.ctxPack === 'object' ? ex.ctxPack : null;
+
+    const goalKind =
+      String(cp?.goalKind ?? metaAny.goalKind ?? 'stabilize').trim() || 'stabilize';
+
+    const depthStage =
+      typeof (cp?.depthStage ?? metaAny.depthStage) === 'string'
+        ? String(cp?.depthStage ?? metaAny.depthStage)
+        : null;
+
+    const itTriggered =
+      Boolean(cp?.itTriggered ?? metaAny.itTriggered ?? false);
+
+    // EXPLICIT を本当に判定したい場合は “上流で計算した explicitTrigger” をここへ運ぶ必要がある。
+    // まずは運搬の可観測性を優先して、存在していれば拾う（無ければ false 扱い）
+    const explicitTrigger = ex?.blockPlan?.explicitTrigger === true;
+
+    const exprLane =
+      cp?.exprMeta?.lane ??
+      ex?.exprMeta?.lane ??
+      null;
+
+    // userText はここでは渡せない（生文禁止の方針に従う）
+    const { plan, diag } = buildBlockPlanWithDiag({
+      userText: '',
+      goalKind,
+      exprLane,
+      explicitTrigger,
+      depthStage,
+      itTriggered,
+    });
+
+    ex.blockPlan = {
+      // gate/inject が最小で見る項目
+      enabled: Boolean(plan),
+      mode: plan?.mode ?? null,
+      blocksLen: Array.isArray(plan?.blocks) ? plan.blocks.length : 0,
+      explicitTrigger,
+
+      // ✅ 最優先：why（確証）
+      why: diag?.why ?? 'NONE',
+      explicit: Boolean(diag?.explicit ?? false),
+      wantsDeeper: Boolean(diag?.wantsDeeper ?? false),
+      autoDeepen: Boolean(diag?.autoDeepen ?? false),
+      autoCrack: Boolean(diag?.autoCrack ?? false),
+
+      // 状態の根
+      goalKind,
+      depthStage,
+      itTriggered,
+
+      // 追跡
+      stampedBy: from,
+      stampedAt: new Date().toISOString(),
+    };
+  };
+
+  // metaForProbe がどれを指しても “その実体” に stamp しておく
+  stampOne(metaForProbe, 'handleIrosReply.runLlmGate.metaForProbe');
+  stampOne(metaForSave, 'handleIrosReply.runLlmGate.metaForSave');
+  stampOne(metaForCandidate, 'handleIrosReply.runLlmGate.metaForCandidate');
+} catch (e) {
+  // stamp失敗で処理は止めない（可観測性の補助なので）
+  try {
+    console.warn('[IROS/BLOCK_PLAN][stamp][FAILED]', {
+      conversationId,
+      userCode,
+      error: String((e as any)?.stack ?? (e as any)?.message ?? e),
+    });
+  } catch {}
+}
+
+const exProbe: any = metaForProbe?.extra ?? null;
+const exSave: any = metaForSave?.extra ?? null;
+
+// --- DIAG: LLM_GATE に渡す meta.extra の実態を確定 ---
+try {
+  const keysProbe = exProbe && typeof exProbe === 'object' ? Object.keys(exProbe) : [];
+  const keysSave = exSave && typeof exSave === 'object' ? Object.keys(exSave) : [];
+
+  const pick = (v: any) => (typeof v === 'string' ? v.trim() : v);
+
+  const diag = {
+    conversationId,
+    userCode,
+    slotPlanPolicy_pre: String(
+      metaForProbe?.framePlan?.slotPlanPolicy ??
+        metaForSave?.framePlan?.slotPlanPolicy ??
+        metaForProbe?.slotPlanPolicy ??
+        metaForSave?.slotPlanPolicy ??
+        '',
+    ),
+    exProbe_keys: keysProbe,
+    exSave_keys: keysSave,
+
+    // seed候補が “あるはず” のキー達
+    probe_slotPlanSeedLen: typeof exProbe?.slotPlanSeed === 'string' ? exProbe.slotPlanSeed.trim().length : null,
+    probe_llmRewriteSeedLen: typeof exProbe?.llmRewriteSeed === 'string' ? exProbe.llmRewriteSeed.trim().length : null,
+    probe_seed_textLen: typeof exProbe?.seed_text === 'string' ? exProbe.seed_text.trim().length : null,
+    probe_ctx_seed_textLen:
+      typeof exProbe?.ctxPack?.seed_text === 'string' ? exProbe.ctxPack.seed_text.trim().length : null,
+
+    save_slotPlanSeedLen: typeof exSave?.slotPlanSeed === 'string' ? exSave.slotPlanSeed.trim().length : null,
+    save_llmRewriteSeedLen: typeof exSave?.llmRewriteSeed === 'string' ? exSave.llmRewriteSeed.trim().length : null,
+    save_seed_textLen: typeof exSave?.seed_text === 'string' ? exSave.seed_text.trim().length : null,
+    save_ctx_seed_textLen:
+      typeof exSave?.ctxPack?.seed_text === 'string' ? exSave.ctxPack.seed_text.trim().length : null,
+
+    // headだけ（漏れ防止のため短く）
+    save_llmRewriteSeedHead: String(pick(exSave?.llmRewriteSeed ?? '')).slice(0, 64),
+    save_slotPlanSeedHead: String(pick(exSave?.slotPlanSeed ?? '')).slice(0, 64),
+    save_seed_textHead: String(pick(exSave?.seed_text ?? '')).slice(0, 64),
+    save_ctx_seed_textHead: String(pick(exSave?.ctxPack?.seed_text ?? '')).slice(0, 64),
+  };
+
+  console.log('[IROS/LLM_GATE][INPUT_META_EXTRA_DIAG]', diag);
+} catch (e) {
+  console.warn('[IROS/LLM_GATE][INPUT_META_EXTRA_DIAG][FAILED]', { error: e });
+}
 
 // 置換範囲: 764〜769（seedFallbackRaw の定義ブロック）
 
@@ -1263,8 +1411,41 @@ if (mw.ok) {
     delete (ex as any).slotPlanPolicy;
     delete (ex as any).slot_plan_policy;
 
-    // ✅ ここが重いと 60s/statement timeout の誘因になるので切る（座標は root 側に残る）
-    delete (ex as any).ctxPack;
+// ctxPack 系（特に重い）
+// ❗️LLM_GATE / rephraseEngine が seed_text/resonanceState を拾えなくなる事故を防ぐため、
+// delete ではなく「必要最小限」に剪定する。
+if ((ex as any).ctxPack && typeof (ex as any).ctxPack === 'object') {
+  const cp: any = (ex as any).ctxPack;
+  const keep: any = {};
+
+  // --- 必須（LLM 入力/検証に必要）---
+  if (cp.flow) keep.flow = cp.flow;
+
+  if (cp.resonanceState) keep.resonanceState = cp.resonanceState;
+
+  if (typeof cp.seed_text === 'string' && cp.seed_text.trim()) {
+    keep.seed_text = cp.seed_text.trim();
+  }
+
+  // --- writer / rephrase の入口として残す ---
+  if (cp.historyForWriter) keep.historyForWriter = cp.historyForWriter;
+  if (cp.historyDigestV1) keep.historyDigestV1 = cp.historyDigestV1;
+
+  // --- 構造メタ（軽いので残す）---
+  if (cp.phase) keep.phase = cp.phase;
+  if (cp.depthStage) keep.depthStage = cp.depthStage;
+  if (cp.qCode) keep.qCode = cp.qCode;
+  if (cp.slotPlanPolicy) keep.slotPlanPolicy = cp.slotPlanPolicy;
+  if (cp.goalKind) keep.goalKind = cp.goalKind;
+  if (cp.slotPlan) keep.slotPlan = cp.slotPlan;
+  if (cp.exprMeta) keep.exprMeta = cp.exprMeta;
+  if (cp.framePlan) keep.framePlan = cp.framePlan;
+  if (cp.traceId) keep.traceId = cp.traceId;
+
+  (ex as any).ctxPack = keep;
+} else {
+  delete (ex as any).ctxPack;
+}
     delete (ex as any).historyForWriter;
     delete (ex as any).historyDigestV1;
     delete (ex as any).turns;
@@ -1373,8 +1554,41 @@ metaForSaveMicroFallback = stampSingleWriter(
   delete (ex as any).slotPlanPolicy;
   delete (ex as any).slot_plan_policy;
 
-  // ctxPack 系（特に重い）
+// ctxPack 系（特に重い）
+// ❗️LLM_GATE / rephraseEngine が seed_text/resonanceState を拾えなくなる事故を防ぐため、
+// delete ではなく「必要最小限」に剪定する。
+if ((ex as any).ctxPack && typeof (ex as any).ctxPack === 'object') {
+  const cp: any = (ex as any).ctxPack;
+  const keep: any = {};
+
+  // --- 必須（LLM 入力/検証に必要）---
+  if (cp.flow) keep.flow = cp.flow;
+
+  if (cp.resonanceState) keep.resonanceState = cp.resonanceState;
+
+  if (typeof cp.seed_text === 'string' && cp.seed_text.trim()) {
+    keep.seed_text = cp.seed_text.trim();
+  }
+
+  // --- writer / rephrase の入口として残す ---
+  if (cp.historyForWriter) keep.historyForWriter = cp.historyForWriter;
+  if (cp.historyDigestV1) keep.historyDigestV1 = cp.historyDigestV1;
+
+  // --- 構造メタ（軽いので残す）---
+  if (cp.phase) keep.phase = cp.phase;
+  if (cp.depthStage) keep.depthStage = cp.depthStage;
+  if (cp.qCode) keep.qCode = cp.qCode;
+  if (cp.slotPlanPolicy) keep.slotPlanPolicy = cp.slotPlanPolicy;
+  if (cp.goalKind) keep.goalKind = cp.goalKind;
+  if (cp.slotPlan) keep.slotPlan = cp.slotPlan;
+  if (cp.exprMeta) keep.exprMeta = cp.exprMeta;
+  if (cp.framePlan) keep.framePlan = cp.framePlan;
+  if (cp.traceId) keep.traceId = cp.traceId;
+
+  (ex as any).ctxPack = keep;
+} else {
   delete (ex as any).ctxPack;
+}
   delete (ex as any).historyForWriter;
   delete (ex as any).historyDigestV1;
   delete (ex as any).turns;
@@ -2308,10 +2522,14 @@ const hfw = Array.isArray((out.metaForSave as any)?.extra?.historyForWriter)
   ? (out.metaForSave as any).extra.historyForWriter
   : [];
 
-if ((extra2.ctxPack as any).historyForWriter == null && hfw.length) {
+// ✅ 重要：null だけでなく「空配列」も“未同期”として扱い、hfw があれば上書き同期する
+const curHfw = (extra2.ctxPack as any)?.historyForWriter;
+const curLen = Array.isArray(curHfw) ? curHfw.length : 0;
+
+if (hfw.length && (!Array.isArray(curHfw) || curLen === 0)) {
   (extra2.ctxPack as any).historyForWriter = (hfw as any[]).map((m) => ({
-    role: m?.role ?? null,
-    content: typeof m?.content === 'string' ? m.content : String(m?.content ?? ''),
+    role: m?.role === 'assistant' ? 'assistant' : 'user',
+    content: String((m as any)?.content ?? '').trim(),
   }));
 }
 
@@ -2352,35 +2570,43 @@ if ((extra2.ctxPack as any).historyDigestV1 == null && digestV1Raw) {
     (extra2.ctxPack as any).qCode = qRaw;
   }
 }
-// ✅ ctxPack に slotPlanPolicy / slots も同期（rephraseEngine / convEvidence が拾う）
+// ✅ ctxPack に slotPlanPolicy / slots / framePlan も同期（rephraseEngine / convEvidence が拾う）
 // - 正本は framePlan（推定しない）
-// - slots は “slotPlan” があればそれを優先（@OBS/@SHIFT/@NEXT... の実体）
-// - 無ければ framePlan.slotPlan を拾う（最低限）
+// - slotPlanPolicy は framePlan.slotPlanPolicy を最優先
+// - slotPlan（本文スロット実体）は framePlan.slotPlan → meta.slotPlan の順で拾う
 {
   const m = (out.metaForSave as any) ?? {};
-  const fp = (m.framePlan as any) ?? {};
+  const fp = (m.framePlan as any) ?? null;
+
+  // ✅ framePlan 自体を ctxPack に同期（SHIFT枠が無いと extractSlots が崩れる）
+  if ((extra2.ctxPack as any).framePlan == null && fp && typeof fp === 'object') {
+    (extra2.ctxPack as any).framePlan = fp;
+  }
 
   // slotPlanPolicy（正本：framePlan）
-  const policyRaw = fp.slotPlanPolicy ?? m.slotPlanPolicy ?? null;
-  if ((extra2.ctxPack as any).slotPlanPolicy == null && typeof policyRaw === 'string' && policyRaw.trim()) {
+  const policyRaw = (fp as any)?.slotPlanPolicy ?? m.slotPlanPolicy ?? null;
+  if (
+    (extra2.ctxPack as any).slotPlanPolicy == null &&
+    typeof policyRaw === 'string' &&
+    policyRaw.trim()
+  ) {
     (extra2.ctxPack as any).slotPlanPolicy = policyRaw.trim();
   }
 
   // ✅ goalKind（BLOCK_PLAN の stabilize 縮退が効くように ctxPack に同期）
   // 注意：ctxPack.replyGoal は「文字列（permit_density 等）」として既に使うので触らない
-  const goalKindRaw =
-    m.targetKind ??
-    m.target_kind ??
-    m.goalKind ??
-    null;
-
-  if ((extra2.ctxPack as any).goalKind == null && typeof goalKindRaw === 'string' && goalKindRaw.trim()) {
+  const goalKindRaw = m.targetKind ?? m.target_kind ?? m.goalKind ?? null;
+  if (
+    (extra2.ctxPack as any).goalKind == null &&
+    typeof goalKindRaw === 'string' &&
+    goalKindRaw.trim()
+  ) {
     (extra2.ctxPack as any).goalKind = goalKindRaw.trim();
   }
 
-  // slots（正本：framePlan.slotPlan / slotPlan）
+  // slotPlan（本文スロット実体）
   const slotsRaw =
-    (fp.slotPlan && Array.isArray(fp.slotPlan) ? fp.slotPlan : null) ??
+    ((fp as any)?.slotPlan && Array.isArray((fp as any).slotPlan) ? (fp as any).slotPlan : null) ??
     (m.slotPlan && Array.isArray(m.slotPlan) ? m.slotPlan : null) ??
     null;
 
@@ -2390,16 +2616,11 @@ if ((extra2.ctxPack as any).historyDigestV1 == null && digestV1Raw) {
   }
 
   // ✅ exprMeta も ctxPack に同期（正本：metaForSave.extra.ctxPack.exprMeta）
-  const exprMetaRaw =
-    (m.extra as any)?.ctxPack?.exprMeta ??
-    (m.extra as any)?.exprMeta ??
-    null;
-
+  const exprMetaRaw = (m.extra as any)?.ctxPack?.exprMeta ?? (m.extra as any)?.exprMeta ?? null;
   if ((extra2.ctxPack as any).exprMeta == null && exprMetaRaw && typeof exprMetaRaw === 'object') {
     (extra2.ctxPack as any).exprMeta = exprMetaRaw;
   }
 }
-
 
 
 
@@ -2534,108 +2755,122 @@ try {
       (orch as any)?.meta ??
       null;
 
-    // --- FIX: slotPlan を framePlan.slots（枠）に合わせて補完する（SAFE欠け対策） ---
-    // ✅ ここで out.metaForSave.slotPlan を正規化して「LLM_GATE が見る meta」に反映させる
-    try {
-      const fp0 = (out.metaForSave as any)?.framePlan ?? null;
-      const sp0 = (out.metaForSave as any)?.slotPlan ?? null;
+// --- FIX: slotPlan を framePlan.slots（枠）に合わせて補完する（SAFE欠け対策） ---
+// ✅ ここで out.metaForSave.slotPlan を正規化して「LLM_GATE が見る meta」に反映させる
+try {
+  const fp0 = (out.metaForSave as any)?.framePlan ?? null;
+  const sp0 = (out.metaForSave as any)?.slotPlan ?? null;
 
-      // framePlan.slots: [{id, hint, ...}, ...]
-      const fpSlots: any[] = Array.isArray(fp0?.slots) ? fp0.slots : [];
-      const wantIds = fpSlots.map((s: any) => String(s?.id ?? '').trim()).filter(Boolean);
+  // framePlan.slots: [{id, hint, ...}, ...]
+  const fpSlots: any[] = Array.isArray(fp0?.slots) ? fp0.slots : [];
+  const wantIds = fpSlots.map((s: any) => String(s?.id ?? '').trim()).filter(Boolean);
 
-      const spArrRaw: any[] = Array.isArray(sp0) ? sp0 : [];
+  const spArrRaw: any[] = Array.isArray(sp0) ? sp0 : [];
 
-      // 1) 想定している slotPlan 形（{key,text}）
-      const looksLikeKeyText =
-        spArrRaw.length === 0 ||
-        spArrRaw.every((x: any) => x && typeof x === 'object' && 'key' in x && 'text' in x);
+  // ------------------------------------------------------------
+  // ✅ slotPlan の実体を { key, text } に寄せる
+  // - legacy: {key,text}
+  // - new:    {key,content,slotId,role,style} → text = content を採用
+  // ------------------------------------------------------------
+  const normalizeItemToKeyText = (x: any) => {
+    if (!x || typeof x !== 'object') return null;
 
-      // 2) “間違って入ってきがち” な形：framePlan のスロット定義配列（{id,required,hint}）
-      const looksLikeFrameDefs =
-        spArrRaw.length > 0 &&
-        spArrRaw.every(
-          (x: any) =>
-            x &&
-            typeof x === 'object' &&
-            'id' in x &&
-            'required' in x &&
-            'hint' in x &&
-            !('key' in x) &&
-            !('text' in x),
-        );
+    const k =
+      String(x?.key ?? '').trim() ||
+      String(x?.slotId ?? '').trim() ||
+      null;
 
-      // frameDefs の場合は “本文スロットは無い” とみなす
-      const spArr: any[] = looksLikeFrameDefs ? [] : spArrRaw;
+    const t =
+      (typeof x?.text === 'string' ? x.text : null) ??
+      (typeof x?.content === 'string' ? x.content : null) ??
+      null;
 
-      let slotPlanNormalized: any = sp0;
+    if (!k || !t) return null;
+    return { key: k, text: String(t) };
+  };
 
-      if (wantIds.length > 0 && Array.isArray(sp0) && (looksLikeKeyText || looksLikeFrameDefs)) {
-        const byKey = new Map<string, any>();
-        for (const x of spArr) {
-          const k = String(x?.key ?? '').trim();
-          if (k) byKey.set(k, x);
-        }
+  // spArrKeyText: 変換できたものだけ
+  const spArrKeyText: any[] = spArrRaw.map(normalizeItemToKeyText).filter(Boolean);
 
-        const normalized: any[] = [];
-        const missing: string[] = [];
+  // 1) 想定している slotPlan 形（{key,text} or {key,content}）
+  const looksLikeKeyText =
+    spArrRaw.length === 0 ||
+    spArrRaw.every(
+      (x: any) =>
+        x &&
+        typeof x === 'object' &&
+        ('key' in x || 'slotId' in x) &&
+        ('text' in x || 'content' in x),
+    );
 
-        for (const id of wantIds) {
-          const hit = byKey.get(id);
-          if (hit) {
-            normalized.push(hit);
-            continue;
-          }
+  // 2) “間違って入ってきがち” な形：framePlan のスロット定義配列（{id,required,hint}）
+  const looksLikeFrameDefs =
+    spArrRaw.length > 0 &&
+    spArrRaw.every(
+      (x: any) =>
+        x &&
+        typeof x === 'object' &&
+        'id' in x &&
+        'required' in x &&
+        'hint' in x &&
+        !('key' in x) &&
+        !('text' in x) &&
+        !('content' in x),
+    );
 
-          // 欠けスロット（特に SAFE）を最小プレースホルダで補完
-          const hint = fpSlots.find((s: any) => String(s?.id ?? '').trim() === id)?.hint ?? null;
+  // frameDefs の場合は “本文スロットは無い” とみなす
+  const spArrUse: any[] = looksLikeFrameDefs ? [] : spArrKeyText;
 
-          missing.push(id);
-          normalized.push({
-            key: id,
-            text: `@${id} ${JSON.stringify(
-              { kind: 'auto_fill', hint: hint ? String(hint) : null },
-              null,
-              0,
-            )}`,
-          });
-        }
+  let slotPlanNormalized: any = sp0;
 
-        slotPlanNormalized = normalized;
+  if (wantIds.length > 0 && Array.isArray(sp0) && (looksLikeKeyText || looksLikeFrameDefs)) {
+    const byKey = new Map<string, any>();
+    for (const x of spArrUse) {
+      const k = String(x?.key ?? '').trim();
+      if (k) byKey.set(k, x);
+    }
 
-        console.log('[IROS/rephraseBridge][SLOT_NORM]', {
-          wantIds,
-          had: spArr.map((x: any) => String(x?.key ?? '').trim()).filter(Boolean),
-          missing,
-          len_before: spArrRaw.length,
-          len_after: normalized.length,
-          fromFrameDefs: looksLikeFrameDefs,
-        });
+    const normalized: any[] = [];
+    const missing: string[] = [];
 
-        // debug用に extra へ残す（後で消してOK）
-        out.metaForSave = out.metaForSave ?? ({} as any);
-        out.metaForSave.extra = out.metaForSave.extra ?? ({} as any);
-        (out.metaForSave as any).extra.slotPlan_norm = {
-          from: looksLikeFrameDefs ? 'framePlan.slots(frameDefs->autofill)' : 'framePlan.slots',
-          want: wantIds,
-          had: spArr.map((x: any) => String(x?.key ?? '').trim()).filter(Boolean),
-          missing,
-          len_before: spArrRaw.length,
-          len_after: normalized.length,
-          fromFrameDefs: looksLikeFrameDefs,
-        };
+    for (const id of wantIds) {
+      const hit = byKey.get(id);
+      if (hit) {
+        normalized.push(hit);
+        continue;
       }
 
-      // ✅ ここが最重要：LLM_GATE が見る metaForSave.slotPlan に反映
-      if (slotPlanNormalized != null) {
-        (out.metaForSave as any).slotPlan = slotPlanNormalized;
+      // 欠けスロット（特に SAFE）を最小プレースホルダで補完
+      const hint = fpSlots.find((s: any) => String(s?.id ?? '').trim() === id)?.hint ?? null;
 
-        // ✅ slotPlanLen も同時に更新（LLM_GATE ログが 3 のままになるのを防ぐ）
-        (out.metaForSave as any).slotPlanLen = Array.isArray(slotPlanNormalized)
-          ? slotPlanNormalized.length
-          : null;
-      }
-    } catch {}
+      missing.push(id);
+      normalized.push({
+        key: id,
+        text: `@${id} ${JSON.stringify(
+          { kind: 'auto_fill', hint: hint ? String(hint) : null },
+          null,
+          0,
+        )}`,
+      });
+    }
+
+    slotPlanNormalized = normalized;
+
+    console.log('[IROS/rephraseBridge][SLOT_NORM]', {
+      wantIds,
+      had: spArrUse.map((x: any) => String(x?.key ?? '').trim()).filter(Boolean),
+      missing,
+      len_before: spArrRaw.length,
+      len_after: normalized.length,
+      fromFrameDefs: looksLikeFrameDefs,
+    });
+  }
+
+  // ✅ ここが最重要：LLM_GATE が見る metaForSave.slotPlan を {key,text} に統一
+  (out.metaForSave as any).slotPlan = Array.isArray(slotPlanNormalized) ? slotPlanNormalized : spArrUse;
+} catch (e) {
+  console.warn('[IROS/rephraseBridge][SLOT_NORM] failed (non-fatal)', e);
+}
     // --- /FIX ---
 
     // slotPlanLen が未設定のときだけ infer（上で確定していればここはスキップされる）
@@ -3141,25 +3376,38 @@ try {
 
   const fpSlots: any[] = Array.isArray(fp?.slots) ? fp.slots : [];
   const wantIds = fpSlots.map((s: any) => String(s?.id ?? '').trim()).filter(Boolean);
+// ✅ slotPlan の JSON 内 "user":"..." は LLM へ渡さない（生文遮断）
+function sanitizeSlotTextUser(s: string): string {
+  const text = String(s ?? '');
+  const a = text.replace(/"user"\s*:\s*"(?:\\.|[^"\\])*"/g, '"user":"[USER]"');
+  const b = a.replace(/"(lastUserText|basedOn)"\s*:\s*"(?:\\.|[^"\\])*"/g, (_m, k) => `"${k}":"[USER]"`);
+  return b;
+}
 
-  console.log('[IROS/rephraseBridge][SLOT_SOURCES]', {
-    slotPlan_type: Array.isArray(sp) ? 'array' : typeof sp,
-    slotPlan_len: Array.isArray(sp) ? sp.length : null,
-    slotPlan_item0_type: sp0Type,
-    slotPlan_item0_keys: sp0 && typeof sp0 === 'object' ? Object.keys(sp0).slice(0, 12) : null,
-    slotPlan_item0_head:
-      typeof sp0 === 'string'
-        ? sp0.slice(0, 120)
-        : sp0 && typeof sp0 === 'object'
-          ? String((sp0 as any).text ?? (sp0 as any).content ?? (sp0 as any).hint ?? '').slice(0, 120) || null
-          : null,
+console.log('[IROS/rephraseBridge][SLOT_SOURCES]', {
+  slotPlan_type: Array.isArray(sp) ? 'array' : typeof sp,
+  slotPlan_len: Array.isArray(sp) ? sp.length : null,
+  slotPlan_item0_type: sp0Type,
+  slotPlan_item0_keys: sp0 && typeof sp0 === 'object' ? Object.keys(sp0).slice(0, 12) : null,
+  slotPlan_item0_head:
+    typeof sp0 === 'string'
+      ? sanitizeSlotTextUser(sp0).slice(0, 120)
+      : sp0 && typeof sp0 === 'object'
+        ? (
+            sanitizeSlotTextUser(
+              String((sp0 as any).text ?? (sp0 as any).content ?? (sp0 as any).hint ?? '')
+            ).slice(0, 120) || null
+          )
+        : null,
 
-    framePlan_has_slots: !!fp?.slots,
-    framePlan_slots_len: fpSlots.length,
-    framePlan_wantIds: wantIds,
+  framePlan_has_slots: !!fp?.slots,
+  framePlan_slots_len: fpSlots.length,
+  framePlan_wantIds: wantIds,
 
-    extra_keys: (out.metaForSave as any)?.extra ? Object.keys((out.metaForSave as any).extra).slice(0, 16) : null,
-  });
+  extra_keys: (out.metaForSave as any)?.extra
+    ? Object.keys((out.metaForSave as any).extra).slice(0, 16)
+    : null,
+});
 } catch {}
 // --- /DEBUG ---
 

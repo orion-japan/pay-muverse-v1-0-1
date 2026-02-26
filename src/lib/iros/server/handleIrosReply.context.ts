@@ -359,6 +359,67 @@ export async function buildTurnContext(
 
     baseMetaForTurn.inputKind = inputKind;
     baseMetaForTurn.framePlan = framePlan;
+    // =========================
+// ✅ NEW: FINAL pre-seed（writer前に seed を必ず用意）
+// - raw userText は入れない（[USER] のまま）
+// - 既に llmRewriteSeed がある場合は上書きしない
+// - 目的：LLM_GATE の decision.rewriteSeed が空でも、handleIrosReply の seedFallback が拾えるようにする
+// =========================
+try {
+  if (!(baseMetaForTurn as any).extra || typeof (baseMetaForTurn as any).extra !== 'object') {
+    (baseMetaForTurn as any).extra = {};
+  }
+  const ex: any = (baseMetaForTurn as any).extra;
+
+  const policyNow: string =
+    String(
+      (baseMetaForTurn as any)?.framePlan?.slotPlanPolicy ??
+        (baseMetaForTurn as any)?.slotPlanPolicy ??
+        '',
+    )
+      .trim()
+      .toUpperCase();
+
+  if (policyNow === 'FINAL' && (typeof ex.llmRewriteSeed !== 'string' || !ex.llmRewriteSeed.trim())) {
+    const depthNow =
+      (baseMetaForTurn as any)?.depthStage ??
+      (baseMetaForTurn as any)?.depth_stage ??
+      (baseMetaForTurn as any)?.depth ??
+      null;
+
+    const qNow =
+      (baseMetaForTurn as any)?.qPrimary ??
+      (baseMetaForTurn as any)?.q_primary ??
+      (baseMetaForTurn as any)?.q_code ??
+      (baseMetaForTurn as any)?.qCode ??
+      null;
+
+    // raw user を渡せないので「構造だけ」seedを置く（[USER]はそのまま）
+    ex.llmRewriteSeed =
+      [
+        'FINAL_SEED_V0 (DO NOT OUTPUT)',
+        `inputKind=${String((baseMetaForTurn as any)?.inputKind ?? inputKind ?? '').trim() || 'unknown'}`,
+        `depth=${depthNow ?? 'null'} q=${qNow ?? 'null'}`,
+        '観測: [USER]',
+        '視点: 1つだけ（解釈を増やしすぎない）',
+        '次: 1つだけ（小さく）',
+        '安全句: 1行（押しつけない）',
+      ].join('\n');
+
+    ex.llmRewriteSeedFrom = ex.llmRewriteSeedFrom ?? 'context(FINAL_preseed)';
+    ex.llmRewriteSeedAt = ex.llmRewriteSeedAt ?? new Date().toISOString();
+
+    console.log('[IROS/CONTEXT][FINAL_PRESEED]', {
+      inputKind,
+      policyNow,
+      hasSeed: true,
+      seedLen: ex.llmRewriteSeed.length,
+      seedHead: String(ex.llmRewriteSeed).slice(0, 96),
+    });
+  }
+} catch (e) {
+  console.warn('[IROS/CONTEXT][FINAL_PRESEED][FAILED]', { error: e });
+}
     console.log('[IROS/Context] framePlan built', {
       userCode: (stateLite as any)?.userCode ?? null,
       inputKind,

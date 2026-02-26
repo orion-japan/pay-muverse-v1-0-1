@@ -791,8 +791,11 @@ const inputKindForLLM = String(
 ).toLowerCase();
 
 // ctxPack.historyDigestV1 を “最終注入”（hasDigest を true にする）
+// + historyForWriter が空なら ctxPack.turns から救済して turnsForWriter を作る（user生文は伏せる）
 try {
   if (!userContext.ctxPack || typeof userContext.ctxPack !== 'object') userContext.ctxPack = {};
+
+  // ---- digestV1 ----
   if ((userContext.ctxPack as any).historyDigestV1 == null) {
     const digestV1 =
       (meta as any)?.extra?.historyDigestV1 ??
@@ -804,13 +807,83 @@ try {
 
     if (digestV1) (userContext.ctxPack as any).historyDigestV1 = digestV1;
   }
+
+  // ---- historyForWriter -> turnsForWriter（userは伏せる）----
+  // 1) まず “正本候補” を拾う
+  const hfwRaw =
+    (meta as any)?.extra?.historyForWriter ??
+    (meta as any)?.extra?.ctxPack?.historyForWriter ??
+    (extraMerged as any)?.historyForWriter ??
+    (extraMerged as any)?.ctxPack?.historyForWriter ??
+    (userContext as any)?.historyForWriter ??
+    (userContext as any)?.ctxPack?.historyForWriter ??
+    null;
+
+  const curHfw = (userContext.ctxPack as any).historyForWriter;
+  const curLen = Array.isArray(curHfw) ? curHfw.length : 0;
+
+  // 2) もし historyForWriter が空なら ctxPack.turns から “互換形” を作る
+  //    - assistant は本文OK / user は伏せる（役割だけ残す）
+  const turnsRaw =
+    (userContext as any)?.ctxPack?.turns ??
+    (meta as any)?.extra?.ctxPack?.turns ??
+    (extraMerged as any)?.ctxPack?.turns ??
+    null;
+
+  let hfwFromTurns: any[] | null = null;
+  if ((!Array.isArray(hfwRaw) || hfwRaw.length === 0) && Array.isArray(turnsRaw) && turnsRaw.length > 0) {
+    hfwFromTurns = turnsRaw
+      .map((t: any) => {
+        const role = t?.role === 'assistant' ? 'assistant' : t?.role === 'user' ? 'user' : null;
+        if (!role) return null;
+
+        if (role === 'user') return { role: 'user', content: '[USER]' };
+
+        const content = String(t?.content ?? t?.text ?? '').trim();
+        if (!content) return null;
+        return { role: 'assistant', content };
+      })
+      .filter(Boolean);
+  }
+
+  const hfwEffective =
+    (Array.isArray(hfwRaw) && hfwRaw.length > 0 ? hfwRaw : null) ??
+    (Array.isArray(hfwFromTurns) && hfwFromTurns.length > 0 ? hfwFromTurns : null);
+
+  // 3) 「配列でない」または「空配列」を未設定扱いとして救済（ctxPackに同期）
+  if (Array.isArray(hfwEffective) && hfwEffective.length > 0 && (!Array.isArray(curHfw) || curLen === 0)) {
+    (userContext.ctxPack as any).historyForWriter = hfwEffective;
+
+    // rephraseEngine 優先口：turnsForWriter をここで必ず作る（user生文は禁止）
+    (userContext as any).turnsForWriter = hfwEffective
+      .map((t: any) => {
+        const role = t?.role === 'assistant' ? 'assistant' : t?.role === 'user' ? 'user' : null;
+        if (!role) return null;
+
+        if (role === 'user') return { role: 'user', content: '[USER]' };
+
+        const content = String(t?.content ?? '').trim();
+        if (!content) return null;
+        return { role: 'assistant', content };
+      })
+      .filter(Boolean);
+  }
 } catch {}
+
+const __hfw = (userContext as any)?.ctxPack?.historyForWriter;
+const __hfwLen = Array.isArray(__hfw) ? __hfw.length : 0;
+const __t4w = (userContext as any)?.turnsForWriter;
+const __t4wLen = Array.isArray(__t4w) ? __t4w.length : 0;
 
 console.log('[IROS/_impl/rephrase.ts][USERCTX_KEYS]', {
   hasTurns: Array.isArray((userContext as any)?.turns),
   turnsLen: Array.isArray((userContext as any)?.turns) ? (userContext as any).turns.length : 0,
   hasCtxPack: !!(userContext as any)?.ctxPack,
   ctxPackKeys: (userContext as any)?.ctxPack ? Object.keys((userContext as any).ctxPack) : [],
+  hasHistoryForWriter: Array.isArray(__hfw),
+  historyForWriterLen: __hfwLen,
+  hasTurnsForWriter: Array.isArray(__t4w),
+  turnsForWriterLen: __t4wLen,
   conversationId,
   userCode,
 });

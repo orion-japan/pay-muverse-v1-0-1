@@ -73,7 +73,10 @@ export function stripInternalLabels(line: string): string {
  * - 末尾🪔付与は「互換モード(renderEngine=false)」のときだけ opts.appendLamp=true で行う
  * - 重要：本文中の🪔は必ず除去し、付けるなら末尾だけ
  */
-export function sanitizeVisibleText(raw: string, opts?: { appendLamp?: boolean }): string {
+export function sanitizeVisibleText(
+  raw: string,
+  opts?: { appendLamp?: boolean; keepMarkdown?: boolean },
+): string {
   let s = String(raw ?? '');
 
   // 1) 改行統一
@@ -82,11 +85,19 @@ export function sanitizeVisibleText(raw: string, opts?: { appendLamp?: boolean }
   // ✅ 重要：本文中の🪔は必ず除去（付けるなら末尾だけ）
   s = s.replace(/🪔/g, '');
 
-  // 2) Markdown見出し（### 等）を落とす：UIの見出し化を止める
-  s = s.replace(/^\s{0,3}#{1,6}\s+/gm, '');
+  const keepMd = !!opts?.keepMarkdown;
 
-  // 3) 「**見出しだけ**」の行も “強調だけ” に落とす（UIで見出し扱いされるのを避ける）
-  s = s.replace(/^\s*\*\*(.+?)\*\*\s*$/gm, '$1');
+  // 2) Markdown見出しを落とす（従来挙動）
+  // - ✅ keepMarkdown=true のときは落とさない
+  if (!keepMd) {
+    s = s.replace(/^\s{0,3}#{1,6}\s+/gm, '');
+  }
+
+  // 3) 「**見出しだけ**」行の強調を落とす（従来挙動）
+  // - ✅ keepMarkdown=true のときは落とさない
+  if (!keepMd) {
+    s = s.replace(/^\s*\*\*(.+?)\*\*\s*$/gm, '$1');
+  }
 
   // ✅ iros の内部指示（slot directives）を UI に漏らさない最終ガード
   // - 行内に @... が出た行は丸ごと落とす
@@ -99,7 +110,6 @@ export function sanitizeVisibleText(raw: string, opts?: { appendLamp?: boolean }
     const kept: string[] = [];
     for (const line0 of lines) {
       const line = String(line0 ?? '');
-      // ✅ renderEngine=false 側でも漏れないように ACK/RESTORE/Q まで含める
       if (/@(?:OBS|CONSTRAINTS|SHIFT|NEXT|SAFE|ACK|RESTORE|Q)\b/.test(line)) continue;
       kept.push(line);
     }
@@ -110,13 +120,22 @@ export function sanitizeVisibleText(raw: string, opts?: { appendLamp?: boolean }
   s = stripIrosDirectives(s);
 
   // 4) 行単位で整形：段落（空行）は残すが、連続空行は1個に潰す
+  // - ✅ keepMarkdown=true の時は、Markdown水平線(---/***/___)は残す
+  // - ✅ keepMarkdown=true の時は、行末2スペース（ハード改行）を潰さない
+  const isMarkdownHr = (t: string) => /^(\-\-\-+|\*\*\*+|___+)\s*$/.test(t);
+
   const isPunctOnly = (line: string) => {
     const t = line.trim();
     if (!t) return false;
+    if (keepMd && isMarkdownHr(t)) return false; // HRは落とさない
     return /^[\p{P}\p{S}]+$/u.test(t);
   };
 
-  const inLines = s.split('\n').map((line) => line.trimEnd());
+  const inLines = s.split('\n').map((line) => {
+    // 従来は trimEnd していたが、Markdownの "  " を壊すので keepMarkdown=true では保持
+    return keepMd ? String(line ?? '') : String(line ?? '').trimEnd();
+  });
+
   const outLines: string[] = [];
 
   for (const line of inLines) {

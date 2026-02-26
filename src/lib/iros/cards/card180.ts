@@ -311,6 +311,10 @@ function resolveFutureRandomCard(args: {
 }): CardResolved {
   const n = normalizeSignal(args.baseInput);
 
+  // 現状カードが「検出できる入力だったか」で basedOn を切り替える
+  // （e_turn + stage + polarity が揃っていれば “currentCard 相当” とみなす）
+  const hasCurrentCore = n.e_turn != null && n.stage != null && n.polarity != null;
+
   // 未来カードはランダム重視（ここが大事）
   const e_turn = pickRandom(args.opt.futureETurnPool, args.rng);
   const stage = pickRandom(args.opt.futureStagePool, args.rng);
@@ -321,7 +325,7 @@ function resolveFutureRandomCard(args: {
     e_turn,
     stage,
     polarity,
-    basedOn: 'random_future_candidate',
+    basedOn: hasCurrentCore ? 'future_from_current' : 'future_pool_pick',
     confidence: n.confidence ?? null,
     sa: n.sa ?? null,
     fluctuation: n.fluctuation ?? null,
@@ -329,7 +333,6 @@ function resolveFutureRandomCard(args: {
     allowGenericFallbackMeaning: args.opt.allowGenericFallbackMeaning,
   });
 }
-
 /* =========================================================
    Card builder
    ========================================================= */

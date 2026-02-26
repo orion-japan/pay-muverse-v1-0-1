@@ -465,9 +465,85 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
     throw err;
   }
 
-  const raw = data?.choices?.[0]?.message?.content;
+  // ─────────────────────────────────────────────
+  // ✅ content 抽出（互換強化）
+  // - choices[0].message.content: string | array
+  // - choices[0].text (旧互換)
+  // - message.refusal がある場合はそれを返す（空よりマシ）
+  function extractTextFromChatCompletions(payload: any): {
+    text: string | null;
+    contentType: string;
+    finishReason: any;
+    hasRefusal: boolean;
+  } {
+    const choice0 = payload?.choices?.[0] ?? null;
+    const msg = choice0?.message ?? null;
 
-  if (typeof raw !== 'string') {
+    const finishReason = choice0?.finish_reason ?? null;
+    const refusal = msg?.refusal ?? null;
+    const hasRefusal = typeof refusal === 'string' && refusal.trim().length > 0;
+
+    const content = msg?.content ?? choice0?.text ?? null;
+
+    // 1) 文字列
+    if (typeof content === 'string') {
+      return {
+        text: safeTrimEnd(content),
+        contentType: 'string',
+        finishReason,
+        hasRefusal,
+      };
+    }
+
+    // 2) 配列（将来/互換）：[{type:'text', text:'...'}] / [{text:'...'}] / ['...']
+    if (Array.isArray(content)) {
+      const parts: string[] = [];
+      for (const p of content) {
+        if (typeof p === 'string') {
+          const t = safeTrimEnd(p);
+          if (t) parts.push(t);
+          continue;
+        }
+        const t1 = (p && typeof p === 'object' && typeof (p as any).text === 'string')
+          ? safeTrimEnd((p as any).text)
+          : '';
+        const t2 = (p && typeof p === 'object' && (p as any).type === 'text' && typeof (p as any).text === 'string')
+          ? safeTrimEnd((p as any).text)
+          : '';
+        const t = t2 || t1;
+        if (t) parts.push(t);
+      }
+
+      const joined = parts.join('\n').trimEnd();
+      return {
+        text: joined,
+        contentType: 'array',
+        finishReason,
+        hasRefusal,
+      };
+    }
+
+    // 3) refusal があるなら採用（content が null のケースを救う）
+    if (hasRefusal) {
+      return {
+        text: safeTrimEnd(refusal),
+        contentType: 'refusal',
+        finishReason,
+        hasRefusal,
+      };
+    }
+
+    return {
+      text: null,
+      contentType: typeof content,
+      finishReason,
+      hasRefusal,
+    };
+  }
+
+  const picked = extractTextFromChatCompletions(data);
+
+  if (typeof picked.text !== 'string') {
     const err = new Error(`LLM returned non-string content (${purpose})`);
     try {
       console.error('[IROS/LLM][ERR]', {
@@ -479,13 +555,17 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
         conversationId: traceFinal.conversationId,
         userCode: traceFinal.userCode,
         stage: 'content',
-        contentType: typeof raw,
+        contentType: picked.contentType,
+        finishReason: picked.finishReason ?? null,
+        hasRefusal: picked.hasRefusal ?? false,
+        // 解析の足し（重すぎない範囲で）
+        choiceKeys: Object.keys((data?.choices?.[0] ?? {}) as any).slice(0, 40),
       });
     } catch {}
     throw err;
   }
 
-  let out = safeTrimEnd(raw);
+  let out = safeTrimEnd(picked.text);
 
   // ✅ 空許可が無いのに空はエラー（出口層の安全）
   if (!allowEmpty && out.trim().length === 0) {
@@ -500,6 +580,8 @@ export async function chatComplete(args: ChatArgs): Promise<string> {
         conversationId: traceFinal.conversationId,
         userCode: traceFinal.userCode,
         stage: 'empty',
+        finishReason: picked.finishReason ?? null,
+        contentType: picked.contentType ?? null,
       });
     } catch {}
     throw err;

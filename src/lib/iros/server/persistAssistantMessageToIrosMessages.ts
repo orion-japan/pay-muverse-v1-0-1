@@ -200,55 +200,80 @@ export async function persistAssistantMessageToIrosMessages(args: {
     }
 
     // =========================
-    // ✅ NEW: Concept Lock (CREATE)
+    // ✅ NEW: Concept Lock (CREATE)  [FIX-1]
     // - assistant本文(content)から「3点列挙」を抽出して meta.extra に保存
+    // - ただし「列挙が明示されている場合」に限る（本文の分割で items 化しない）
     // - 既に存在する場合は上書きしない
     // =========================
     const extractConceptLockItems = (text: string): string[] | null => {
-      const s = String(text ?? '').trim();
+      const raw = String(text ?? '');
+      const s = raw.trim();
       if (!s) return null;
 
-      const norm = s.replace(/\s+/g, ' ').trim();
+      // 目的：本文の自然文から拾わない。列挙っぽい形だけを許可する。
+      // - 箇条書き（・/-/*/1.）の先頭3つ
+      // - もしくは「A / B / C」「A・B・C」「A, B, C」「A、B、C」のような“列挙そのもの”が短文で単独
+      const MAX_ITEM = 24;
 
-      // 1) 「...」「...」「...」が3つ以上あるなら最優先
-      const quoted = Array.from(norm.matchAll(/「([^」]{1,24})」/g))
-        .map((m) => String(m[1] ?? '').trim())
-        .filter(Boolean);
+      const cleanItem = (x: string) =>
+        String(x ?? '')
+          .trim()
+          .replace(/[「」"'”’\(\)\[\]{}<>]/g, '')
+          .replace(/^(うん、|はい、|つまり、)\s*/g, '')
+          .trim();
 
-      const uniqQuoted: string[] = [];
-      for (const w of quoted) {
-        if (!uniqQuoted.includes(w)) uniqQuoted.push(w);
-        if (uniqQuoted.length >= 3) break;
-      }
-      if (uniqQuoted.length >= 3) return uniqQuoted.slice(0, 3);
-
-      // 2) AとBとC（短め）を拾う
-      // - 記号や長文を避けるため、各パーツは最大24文字
-      const m1 = norm.match(/([^、。\n]{1,24})と([^、。\n]{1,24})と([^、。\n]{1,24})/);
-      if (m1) {
-        const items = [m1[1], m1[2], m1[3]]
-          .map((x) => String(x ?? '').trim().replace(/[「」"'”’\(\)\[\]{}<>]/g, ''))
-          .map((x) => x.replace(/^(うん、|はい、|つまり、)\s*/g, '').trim())
-          .filter(Boolean);
+      const uniq3 = (arr: string[]) => {
         const uniq: string[] = [];
-        for (const w of items) {
+        for (const w0 of arr) {
+          const w = cleanItem(w0);
+          if (!w) continue;
+          if (w.length > MAX_ITEM) continue;
           if (!uniq.includes(w)) uniq.push(w);
+          if (uniq.length >= 3) break;
         }
-        if (uniq.length >= 3) return uniq.slice(0, 3);
+        return uniq.length >= 3 ? uniq.slice(0, 3) : null;
+      };
+
+      // -------------------------------------------------
+      // 1) 箇条書き（明示的な列挙）から先頭3つ
+      // -------------------------------------------------
+      const lines = s.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      const bullets: string[] = [];
+
+      for (const line of lines) {
+        // 例: "・A" "- A" "* A" "1. A" "1) A"
+        const m =
+          line.match(/^(?:[・\-\*]\s*|\d{1,2}[.)]\s*)(.{1,80})$/) ||
+          null;
+        if (!m) continue;
+
+        const item = cleanItem(m[1]);
+        if (item && item.length <= MAX_ITEM) bullets.push(item);
+        if (bullets.length >= 3) break;
       }
 
-      // 3) A、B、C（読点/カンマ）系（短め）を拾う
-      const split3 = norm
-        .split(/[、,]/)
-        .map((x) => x.trim())
-        .filter(Boolean);
-      if (split3.length >= 3) {
-        const head3 = split3.slice(0, 3).map((x) => x.replace(/[「」"'”’]/g, '').trim());
-        const uniq: string[] = [];
-        for (const w of head3) {
-          if (w && !uniq.includes(w)) uniq.push(w);
-        }
-        if (uniq.length >= 3) return uniq.slice(0, 3);
+      const b3 = uniq3(bullets);
+      if (b3) return b3;
+
+      // -------------------------------------------------
+      // 2) “列挙そのもの”が短文で単独（本文分解は禁止）
+      //   - 文中に埋まってるカンマ区切り等は拾わない
+      // -------------------------------------------------
+      const short = s.replace(/\s+/g, ' ').trim();
+      if (short.length > 120) return null;
+
+      // AとBとC（全文がほぼこれ）
+      const mABC = short.match(/^(.{1,24})と(.{1,24})と(.{1,24})$/);
+      if (mABC) {
+        const a3 = uniq3([mABC[1], mABC[2], mABC[3]]);
+        if (a3) return a3;
+      }
+
+      // A / B / C など（全文がほぼこれ）
+      const mSep = short.match(/^(.{1,24})\s*(?:\/|・|,|、)\s*(.{1,24})\s*(?:\/|・|,|、)\s*(.{1,24})$/);
+      if (mSep) {
+        const s3 = uniq3([mSep[1], mSep[2], mSep[3]]);
+        if (s3) return s3;
       }
 
       return null;
@@ -265,7 +290,7 @@ export async function persistAssistantMessageToIrosMessages(args: {
           active: true,
           items,
           createdAt: Date.now(),
-          source: 'assistant_text',
+          source: 'assistant_enumeration',
         };
         console.log('[IROS/CONCEPT_LOCK][CREATE]', {
           conversationId: conversationUuid,
