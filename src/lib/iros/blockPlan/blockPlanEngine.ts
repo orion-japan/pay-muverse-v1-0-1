@@ -30,8 +30,7 @@ export type BlockKind =
   | 'INTEGRATE'
   | 'CHOICE';
 
-export type BlockPlanMode = 'multi6' | 'multi7';
-
+  export type BlockPlanMode = 'multi6' | 'multi7' | 'mini3';
 export interface BlockPlan {
   mode: BlockPlanMode;
   blocks: BlockKind[];
@@ -46,6 +45,7 @@ export type BlockPlanWhy =
   | 'EXPLICIT'
   | 'AUTO_DEEPEN'
   | 'AUTO_CRACK'
+  | 'AUTO_MINI'
   | 'DIRECT_HARD'
   | 'DIRECT_SOFT'
   | 'NONE';
@@ -162,6 +162,34 @@ function detectCrackWords(userText: string): boolean {
   );
 }
 
+/**
+ * “ミニ再配置（相談の節目）” トリガー：
+ * - 相談ゴール（stabilize/repair/counsel）で、
+ *   迷い/不安/決められなさ/どうしたら 等が出ているときにだけ true
+ * - multi6/multi7 ほど強くせず、3ブロックで軽く整えるための最小検出
+ */
+function detectMiniReframeTrigger(userText: string): boolean {
+  const t = String(userText ?? '').trim();
+  if (!t) return false;
+
+  // 相談の「迷い」強め
+  const core =
+    /(迷う|迷い|決められない|選べない|わからない|よくわからない|どうしたら|どうすれば|悩む|モヤ|引っかか)/i.test(
+      t,
+    );
+
+  // 不安の列挙（「不安」が複数回 / 「〜も不安」が続く）
+  const anxious =
+    /(不安|怖い|心配)/.test(t) ||
+    /も不安/.test(t) ||
+    ((t.match(/不安/g) ?? []).length >= 2);
+
+  // どっち問題（分岐で止まってる）
+  const either = /(どっちも|どちらも|どれも|両方)/.test(t);
+
+  return core || anxious || either;
+}
+
 /* =========================================================
  * depthStage ユーティリティ（S/F/R/C/I/T + 数字 → rank）
  * ========================================================= */
@@ -250,6 +278,10 @@ export function buildBlockPlanWithDiag(
   // autoCrack（相談ゴール + 裂け目）
   const autoCrack = consultishGoal && userText ? detectCrackWords(userText) : false;
 
+  // ✅ autoMini（相談ゴール + 迷い/不安/決められなさ）→ mini3
+  // - multi6 の “裂け目” ほど強くないが、相談の節目で再配置したいときに出す
+  const autoMini = consultishGoal && userText ? detectMiniReframeTrigger(userText) : false;
+
   // =========================================================
   // gate decision
   // =========================================================
@@ -306,9 +338,8 @@ export function buildBlockPlanWithDiag(
     };
   }
 
-  // 3) softDirectTask は “抑制” だが、autoDeepen/autoCrack が立っているなら通す
-  //    （= 明示が無くても出る方向に寄せる。ただし hardDirectTask は別で必ず落ちる）
-  if (!explicit && softDirectTask && !autoDeepen && !autoCrack) {
+  // 3) softDirectTask は “抑制” だが、autoDeepen/autoCrack/autoMini が立っているなら通す
+  if (!explicit && softDirectTask && !autoDeepen && !autoCrack && !autoMini) {
     return {
       plan: null,
       diag: {
@@ -333,8 +364,8 @@ export function buildBlockPlanWithDiag(
     };
   }
 
-  // 4) explicit/autoDeepen/autoCrack どれも無い → NONE
-  if (!explicit && !autoDeepen && !autoCrack) {
+  // 4) explicit/autoDeepen/autoCrack/autoMini どれも無い → NONE
+  if (!explicit && !autoDeepen && !autoCrack && !autoMini) {
     return {
       plan: null,
       diag: {
@@ -418,19 +449,54 @@ export function buildBlockPlanWithDiag(
     };
   }
 
-  // 6) autoDeepen / autoCrack → multi6
-  const plan: BlockPlan = {
-    mode: 'multi6',
-    blocks: ['ENTRY', 'SITUATION', 'DUAL', 'FOCUS_SHIFT', 'ACCEPT', 'INTEGRATE'],
-  };
+  // 6) autoDeepen / autoCrack → multi6（優先）
+  if (autoDeepen || autoCrack) {
+    const plan: BlockPlan = {
+      mode: 'multi6',
+      blocks: ['ENTRY', 'SITUATION', 'DUAL', 'FOCUS_SHIFT', 'ACCEPT', 'INTEGRATE'],
+    };
 
-  const why: BlockPlanWhy = autoDeepen ? 'AUTO_DEEPEN' : 'AUTO_CRACK';
+    const why: BlockPlanWhy = autoDeepen ? 'AUTO_DEEPEN' : 'AUTO_CRACK';
+
+    return {
+      plan,
+      diag: {
+        enabled: true,
+        why,
+        explicit: false,
+        hardDirectTask: false,
+        softDirectTask,
+        wantsDeeper: false,
+
+        depthStage,
+        itTriggered,
+        autoDeepen,
+
+        goalKind,
+        consultishGoal,
+        autoCrack,
+
+        mode: plan.mode,
+        blocksLen: plan.blocks.length,
+      },
+    };
+  }
+
+  // 7) autoMini → mini3（相談の節目の“軽い再配置”）
+  const plan: BlockPlan = {
+    mode: 'mini3',
+    // OBS/SHIFT/NEXT に相当（BlockKindは既存セットを再利用）
+    // - SITUATION: 観測（事実/状況の再提示）
+    // - FOCUS_SHIFT: 視点の転換（リメイク語）
+    // - INTEGRATE: 次の一歩（1つだけ）
+    blocks: ['SITUATION', 'FOCUS_SHIFT', 'INTEGRATE'],
+  };
 
   return {
     plan,
     diag: {
       enabled: true,
-      why,
+      why: 'AUTO_MINI',
       explicit: false,
       hardDirectTask: false,
       softDirectTask,
@@ -449,7 +515,6 @@ export function buildBlockPlanWithDiag(
     },
   };
 }
-
 // 既存互換：従来の buildBlockPlan API は温存（呼び出し側を壊さない）
 export function buildBlockPlan(params: BuildBlockPlanParams): BlockPlan | null {
   return buildBlockPlanWithDiag(params).plan;
@@ -475,9 +540,8 @@ export function renderBlockPlanSystem4(plan: BlockPlan): string {
   const requiredOrder = plan.blocks.join(' -> ');
   const mode = plan.mode;
 
-  // multi6 / multi7 は「常時 見出し付き」を強制
-  const forceHeads = mode === 'multi6' || mode === 'multi7';
-
+  // multi6 / multi7 / mini3 は「常時 見出し付き」を強制
+  const forceHeads = mode === 'multi6' || mode === 'multi7' || mode === 'mini3';
   const heads6 = [
     '今ここを揃える',
     'いま見ているもの',
@@ -486,9 +550,24 @@ export function renderBlockPlanSystem4(plan: BlockPlan): string {
     'いったん受け止める',
     '一枚に戻す',
   ];
-  const heads = mode === 'multi7' ? [...heads6, 'ここで一つ選ぶ'] : heads6;
+
+  const headsMini3 = ['いま見ているもの', '焦点を一つだけ移す', '次の一歩（1つだけ）'];
+
+  const heads =
+    mode === 'multi7'
+      ? [...heads6, 'ここで一つ選ぶ']
+      : mode === 'mini3'
+        ? headsMini3
+        : heads6;
 
   const emojis = heads.map((_h, i) => {
+    // mini3 のときは 3つ固定
+    if (mode === 'mini3') {
+      if (i === 0) return '🔍';
+      if (i === 1) return '🎯';
+      return '🌱';
+    }
+
     if (i === 0) return '🌀';
     if (i === 1) return '🔍';
     if (i === 2) return '↔️';

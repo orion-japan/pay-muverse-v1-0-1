@@ -269,24 +269,50 @@ function buildInternalPackText(args: {
   // ✅ obsCard（ミニ版）
   // - userText は含めない
   // - “拾うべき核（obsPick）” と会話を流す3点だけを渡す
-  const obsCard = [
-    'OBS_SOURCES (DO NOT OUTPUT):',
-    `obsOnePointHead=${obsOnePoint ? head(obsOnePoint, 120) : '(none)'}`,
-    `obsSummaryHead=${obsSummary ? head(obsSummary, 120) : '(none)'}`,
-    `obsPickHead=${obsPick ? head(obsPick, 120) : '(none)'}`,
-    '',
-    // ✅ 会話が流れるための3点（あれば優先）
-    `TOPIC_DIGEST: ${obsTopic ? head(obsTopic, 220) : '(none)'}`,
-    `REPLY_GOAL: ${obsGoal ? head(obsGoal, 220) : '(none)'}`,
-    `REPEAT_SIGNAL: ${obsRepeat ? head(obsRepeat, 220) : '(none)'}`,
-    '',
-    // ✅ 最小ルール（短く）
-    'USE_RULE (DO NOT OUTPUT):',
-    '- obsPick は「核」として参照してよいが、原文引用や言い直しはしない。',
-    '- 説明で埋めず、会話として短く返す。',
-    '- 箇条書き・番号列挙・チェックリストで出力しない（必要なら1〜2文に畳む）。',
-    '- 質問は最大1つまで。',
-  ].join('\n');
+  const obsCard = (() => {
+    // rules の取り元は、呼び出し側の都合で揺れるので候補を広めに拾う
+    const rules: any =
+      (args as any)?.shiftRules ??
+      (args as any)?.rules ??
+      (args as any)?.shift?.rules ??
+      null;
+
+    const qMaxRaw = rules?.questions_max;
+    const qMax = typeof qMaxRaw === 'number' ? qMaxRaw : null;
+
+    const forbidQM = !!rules?.forbid_question_marks;
+    const forbidInter = !!rules?.forbid_interrogatives;
+
+    // mini3 / stabilize は「質問ゼロ」に倒す（今回の要望）
+    const blockPlanMode = String((args as any)?.blockPlanMode ?? (args as any)?.block_plan_mode ?? '').trim();
+    const goalKind = String((args as any)?.replyGoal?.kind ?? (args as any)?.goalKind ?? '').trim();
+    const forceNoQuestions = forbidQM || forbidInter || blockPlanMode === 'mini3' || goalKind === 'stabilize' || qMax === 0;
+
+    const questionRuleLine = forceNoQuestions
+      ? '- 質問はしない。'
+      : typeof qMax === 'number'
+        ? `- 質問は最大${qMax}つまで。`
+        : '- 質問は最大1つまで。';
+
+    return [
+      'OBS_SOURCES (DO NOT OUTPUT):',
+      `obsOnePointHead=${obsOnePoint ? head(obsOnePoint, 120) : '(none)'}`,
+      `obsSummaryHead=${obsSummary ? head(obsSummary, 120) : '(none)'}`,
+      `obsPickHead=${obsPick ? head(obsPick, 120) : '(none)'}`,
+      '',
+      // ✅ 会話が流れるための3点（あれば優先）
+      `TOPIC_DIGEST: ${obsTopic ? head(obsTopic, 220) : '(none)'}`,
+      `REPLY_GOAL: ${obsGoal ? head(obsGoal, 220) : '(none)'}`,
+      `REPEAT_SIGNAL: ${obsRepeat ? head(obsRepeat, 220) : '(none)'}`,
+      '',
+      // ✅ 最小ルール（短く）
+      'USE_RULE (DO NOT OUTPUT):',
+      '- obsPick は「核」として参照してよいが、原文引用や言い直しはしない。',
+      '- 説明で埋めず、会話として短く返す。',
+      '- 箇条書き・番号列挙・チェックリストで出力しない（必要なら1〜2文に畳む）。',
+      questionRuleLine,
+    ].join('\n');
+  })();
 
   const flowDigest = String(args.flowDigest ?? '').trim();
   const flowTape = String(args.flowTape ?? '').trim();
