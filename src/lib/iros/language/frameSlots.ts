@@ -23,6 +23,7 @@ export type InputKind =
   | 'task' // 実務依頼・実装依頼・作業依頼
   | 'review' // 振り返り・達成サマリ等
   | 'question' // 明確な質問
+  | 'card' // ✅ カード閲覧/カードで見てほしい
   | 'unknown';
 
 export type IrosStateLite = {
@@ -66,6 +67,7 @@ function safeInputKind(v: unknown): InputKind {
     s === 'task' ||
     s === 'review' ||
     s === 'question' ||
+    s === 'card' ||
     s === 'unknown'
   ) {
     return s as InputKind;

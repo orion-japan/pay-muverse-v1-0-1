@@ -1083,157 +1083,202 @@ const maxLinesFinal = isIR
     const irBaseLen = norm(irBaseText).length;
     const irJoinedLen = norm(blocksJoinedForIRCheck).length;
 
-    // ✅ IR時の rephraseBlocks 採用条件：
-    // 1) attachSkipped なら無条件でOK（route側の安全なfallback想定）
-    // 2) それ以外は looksLikeIR を満たし、かつ「短文化していない」こと
-    //    - 基準：base本文の 90% 以上（かつ最低120文字）
-    const allowRephraseBlocksInIR =
-      (Boolean((extraAny as any)?.rephraseAttachSkipped) &&
-        Array.isArray(rephraseBlocks) &&
-        rephraseBlocks.length > 0) ||
-      (Array.isArray(rephraseBlocks) &&
-        rephraseBlocks.length > 0 &&
-        looksLikeIR(blocksJoinedForIRCheck, extra) &&
-        irJoinedLen >= Math.max(120, Math.floor(irBaseLen * 0.9)));
+// ✅ IR時の rephraseBlocks 採用条件：
+// 1) attachSkipped なら無条件でOK（route側の安全なfallback想定）
+// 2) それ以外は looksLikeIR を満たし、かつ「短文化していない」こと
+//    - 基準：base本文の 90% 以上（かつ最低120文字）
+const allowRephraseBlocksInIR =
+  (Boolean((extraAny as any)?.rephraseAttachSkipped) &&
+    Array.isArray(rephraseBlocks) &&
+    rephraseBlocks.length > 0) ||
+  (Array.isArray(rephraseBlocks) &&
+    rephraseBlocks.length > 0 &&
+    looksLikeIR(blocksJoinedForIRCheck, extra) &&
+    irJoinedLen >= Math.max(120, Math.floor(irBaseLen * 0.9)));
 
-    if (isIR && !allowRephraseBlocksInIR) {
-      const lines = splitToLines(irBaseText);
-      blocks = lines
-        .map((t) => stripInternalLabels(t))
-        .filter(Boolean)
-        .map((t) => ({ text: t }));
+if (isIR && !allowRephraseBlocksInIR) {
+  const lines = splitToLines(irBaseText);
+  blocks = lines
+    .map((t) => stripInternalLabels(t))
+    .filter(Boolean)
+    .map((t) => ({ text: t }));
 
-      console.warn('[DEBUG/IR_BLOCK_PICK]', {
-        isIR,
-        rephraseAttachSkipped: Boolean((extraAny as any)?.rephraseAttachSkipped),
-        rephraseBlocksLen: Array.isArray(rephraseBlocks) ? rephraseBlocks.length : 0,
-        allowRephraseBlocksInIR,
-        irBaseLen,
-        irJoinedLen,
-        baseHead: irBaseText.slice(0, 140),
-        joinedHead: blocksJoinedForIRCheck.slice(0, 140),
-      });
-    } else if (Array.isArray(rephraseBlocks) && rephraseBlocks.length > 0) {
-      // ✅ rephraseBlocks 経由でも UI に「ブロック扱い」を伝える
-      usedSlots = true;
-      pickedFrom = 'rephraseBlocks';
-      scaffoldApplied = isScaffoldLike;
+  console.warn('[DEBUG/IR_BLOCK_PICK]', {
+    isIR,
+    rephraseAttachSkipped: Boolean((extraAny as any)?.rephraseAttachSkipped),
+    rephraseBlocksLen: Array.isArray(rephraseBlocks) ? rephraseBlocks.length : 0,
+    allowRephraseBlocksInIR,
+    irBaseLen,
+    irJoinedLen,
+    baseHead: irBaseText.slice(0, 140),
+    joinedHead: blocksJoinedForIRCheck.slice(0, 140),
+  });
+} else if (Array.isArray(rephraseBlocks) && rephraseBlocks.length > 0) {
+  // ✅ rephraseBlocks 経由でも UI に「ブロック扱い」を伝える
+  usedSlots = true;
+  pickedFrom = 'rephraseBlocks';
+  scaffoldApplied = isScaffoldLike;
 
-      // 1行に潰す
-      const clampOneLineLocal = (s: string) =>
-        String(s ?? '')
-          .replace(/\s+/g, ' ')
-          .trim();
+  // 1行に潰す
+  const clampOneLineLocal = (s: string) =>
+    String(s ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
 
-      // ✅ preface の取得元を “揺れ” 吸収（extra/meta/exprMeta/expr 全部見る）
-      const pickPreface = () => {
-        const a: any = extraAny ?? {};
-        const m: any = (args as any)?.meta?.extra ?? {};
-        const x: any = (args as any)?.extra ?? {};
+  // ✅ preface の取得元を “揺れ” 吸収（extra/meta/exprMeta/expr 全部見る）
+  const pickPreface = () => {
+    const a: any = extraAny ?? {};
+    const m: any = (args as any)?.meta?.extra ?? {};
+    const x: any = (args as any)?.extra ?? {};
 
-        const cands = [
-          a?.expr?.prefaceLine,
-          a?.expr?.prefaceHead,
-          a?.exprMeta?.prefaceLine,
-          a?.exprMeta?.prefaceHead,
+    const cands = [
+      a?.expr?.prefaceLine,
+      a?.expr?.prefaceHead,
+      a?.exprMeta?.prefaceLine,
+      a?.exprMeta?.prefaceHead,
 
-          m?.expr?.prefaceLine,
-          m?.expr?.prefaceHead,
-          m?.exprMeta?.prefaceLine,
-          m?.exprMeta?.prefaceHead,
+      m?.expr?.prefaceLine,
+      m?.expr?.prefaceHead,
+      m?.exprMeta?.prefaceLine,
+      m?.exprMeta?.prefaceHead,
 
-          x?.expr?.prefaceLine,
-          x?.expr?.prefaceHead,
-          x?.exprMeta?.prefaceLine,
-          x?.exprMeta?.prefaceHead,
-        ];
+      x?.expr?.prefaceLine,
+      x?.expr?.prefaceHead,
+      x?.exprMeta?.prefaceLine,
+      x?.exprMeta?.prefaceHead,
+    ];
 
-        const s = cands.find((v) => typeof v === 'string' && String(v).trim().length > 0);
-        return s ? clampOneLineLocal(String(s)) : '';
-      };
+    const s = cands.find((v) => typeof v === 'string' && String(v).trim().length > 0);
+    return s ? clampOneLineLocal(String(s)) : '';
+  };
 
-      const exprPreface = pickPreface();
+  const exprPreface = pickPreface();
 
-      // ✅ raw texts
-      const rbTexts = rephraseBlocks.map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim());
+  // ✅ raw texts
+  const rbTexts = rephraseBlocks.map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim());
 
-      const rbTotal = rbTexts.length;
-      const rbEmpty = rbTexts.filter((t) => !t).length;
-      const rbNextHint = rbTexts.filter((t) => t.trimStart().startsWith('@NEXT_HINT')).length;
-      const rbBad = rbTexts.filter((t) => t && isBadBlock(t)).length;
+  const rbTotal = rbTexts.length;
+  const rbEmpty = rbTexts.filter((t) => !t).length;
+  const rbNextHint = rbTexts.filter((t) => t.trimStart().startsWith('@NEXT_HINT')).length;
+  const rbBad = rbTexts.filter((t) => t && isBadBlock(t)).length;
 
-      // ✅ cleaned texts
-      let cleanedBlocksText = rbTexts
-        // advance計測用の内部ブロックは UI に出さない
-        .filter((t: string) => t && !t.trimStart().startsWith('@NEXT_HINT'))
-        .filter((t: string) => !isBadBlock(t))
-        .map((t: string) => stripInternalLabels(t))
-        .filter(Boolean)
-        // ILINE 末尾の writer 注釈を除去して “末尾切り事故” を防ぐ
-        .map((t: string) => cutAfterIlineAndDropWriterNotes(t))
-        .filter(Boolean);
+  const isMicroOnlyText = (t: string) => {
+    const s = String(t ?? '').trim();
+    if (!s) return true;
 
-      // ✅ preface を 1行だけ先頭付与（重複は避ける）
-      if (exprPreface) {
-        const head = String(cleanedBlocksText?.[0] ?? '').trim();
-        const shouldPrepend =
-          !head || (head !== exprPreface && !head.startsWith(exprPreface));
+    // 典型：継続要求 / 省略 / ドット / 単語だけ
+    if (/^(続けてください|つづけてください|続けて|つづけて)$/u.test(s)) return true;
+    if (/^[.…・。]+$/u.test(s)) return true; // …… / … / 。/ ・ 等のみ
+    if (/^(ok|okay|はい|うん|了解|りょうかい)$/iu.test(s)) return true;
 
-        if (shouldPrepend) {
-          (extraAny as any).exprPrefaceApplied = true;
-          cleanedBlocksText = [exprPreface, ...cleanedBlocksText];
-        } else {
-          // 既に入っている場合も “適用済み扱い” にして二重適用事故を根絶
-          (extraAny as any).exprPrefaceApplied = true;
-        }
-      }
+    // 「短すぎる」単発（例: 7〜15文字程度の断片）を micro とみなす
+    if (s.length < 24) return true;
 
-      const rbKept = cleanedBlocksText.length;
-      const rbKeptJoinedLen = norm(cleanedBlocksText.join('\n')).length;
+    return false;
+  };
 
-      // ✅ blocks 化（ここが今まで抜けてた）
-      blocks = cleanedBlocksText.map((t: string) => ({ text: t }));
+  // ✅ cleaned texts
+  let cleanedBlocksText = rbTexts
+    // advance計測用の内部ブロックは UI に出さない
+    .filter((t: string) => t && !t.trimStart().startsWith('@NEXT_HINT'))
+    .filter((t: string) => !isBadBlock(t))
+    .map((t: string) => stripInternalLabels(t))
+    .filter(Boolean)
+    // ILINE 末尾の writer 注釈を除去して “末尾切り事故” を防ぐ
+    .map((t: string) => cutAfterIlineAndDropWriterNotes(t))
+    .filter(Boolean);
 
-      // ✅ 後段ログで参照できるように meta.extra に“診断情報”を保持（表示には使わない）
-      try {
-        (extraAny as any).renderMeta = {
-          ...((extraAny as any).renderMeta ?? {}),
-          rbDiag: {
-            rbTotal,
-            rbEmpty,
-            rbNextHint,
-            rbBad,
-            rbKept,
-            rbKeptJoinedLen,
-            hasExprPreface: !!exprPreface,
-            exprPrefaceHead: exprPreface ? exprPreface.slice(0, 60) : null,
-          },
-        };
-      } catch {}
+  // ✅ preface を 1行だけ先頭付与（重複は避ける）
+  if (exprPreface) {
+    const head = String(cleanedBlocksText?.[0] ?? '').trim();
+    const shouldPrepend = !head || (head !== exprPreface && !head.startsWith(exprPreface));
+
+    if (shouldPrepend) {
+      (extraAny as any).exprPrefaceApplied = true;
+      cleanedBlocksText = [exprPreface, ...cleanedBlocksText];
     } else {
-
-      // 通常ルート
-      const lines = splitToLines(base);
-      blocks = lines
-        .map((t) => stripInternalLabels(t))
-        .filter(Boolean)
-        .map((t) => ({ text: t }));
+      // 既に入っている場合も “適用済み扱い” にして二重適用事故を根絶
+      (extraAny as any).exprPrefaceApplied = true;
     }
-
-    // ✅ SCAFFOLD は“定型句を足さない”。渡された本文を短く整形するだけ
-    if (isScaffoldLike && blocks.length === 0) {
-      blocks = minimalScaffold(base);
-      scaffoldApplied = true;
-    }
-
   }
 
-  const expandAllowed = EXPAND_ENABLED && !isSilence && !isIR;
-  void expandAllowed; //（現状はログ用途のみ。将来分岐で使う）
+  const rbKept = cleanedBlocksText.length;
+  const rbKeptJoinedLen = norm(cleanedBlocksText.join('\n')).length;
 
-// ❌ 以前はここで「短くしてよいか」を判断していたが、これは renderGateway の責務ではない
-// - 行数・長さの判断は slotPlan / orchestrator の単一正に集約する
-// - 下流（render）は一切判断しないことで、LLMが迷わない状態を保証する
+  // ✅ “micro 1本だけ” 事故を防ぐ：attachSkipped でない限り、微小rbは採用しない
+  const attachSkipped = Boolean((extraAny as any)?.rephraseAttachSkipped);
+  const microLike =
+    rbKept === 0 ||
+    (rbKept === 1 && isMicroOnlyText(String(cleanedBlocksText[0] ?? ''))) ||
+    rbKeptJoinedLen < 40;
+
+  const acceptRb = attachSkipped || !microLike;
+
+  if (acceptRb) {
+    // ✅ blocks 化
+    blocks = cleanedBlocksText.map((t: string) => ({ text: t }));
+  } else {
+    // ✅ rb は “存在しても” UI採用しない（writer/base側へフォールバック）
+    const lines = splitToLines(base);
+    blocks = lines
+      .map((t) => stripInternalLabels(t))
+      .filter(Boolean)
+      .map((t) => ({ text: t }));
+
+    usedSlots = false;
+    pickedFrom = 'text';
+    scaffoldApplied = false;
+
+    console.warn('[IROS/renderGateway][RB_REJECTED_MICRO]', {
+      attachSkipped,
+      rbTotal,
+      rbEmpty,
+      rbNextHint,
+      rbBad,
+      rbKept,
+      rbKeptJoinedLen,
+      head: String(cleanedBlocksText?.[0] ?? '').slice(0, 80),
+      baseHead: String(base ?? '').slice(0, 80),
+    });
+  }
+
+  // ✅ 後段ログで参照できるように meta.extra に“診断情報”を保持（表示には使わない）
+  try {
+    (extraAny as any).renderMeta = {
+      ...((extraAny as any).renderMeta ?? {}),
+      rbDiag: {
+        rbTotal,
+        rbEmpty,
+        rbNextHint,
+        rbBad,
+        rbKept,
+        rbKeptJoinedLen,
+        hasExprPreface: !!exprPreface,
+        exprPrefaceHead: exprPreface ? exprPreface.slice(0, 60) : null,
+        rbAttachSkipped: attachSkipped,
+        rbMicroRejected: !acceptRb,
+      },
+    };
+  } catch {}
+} else {
+  // 通常ルート
+  const lines = splitToLines(base);
+  blocks = lines
+    .map((t) => stripInternalLabels(t))
+    .filter(Boolean)
+    .map((t) => ({ text: t }));
+}
+
+// ✅ SCAFFOLD は“定型句を足さない”。渡された本文を短く整形するだけ
+if (isScaffoldLike && blocks.length === 0) {
+  blocks = minimalScaffold(base);
+  scaffoldApplied = true;
+}
+
+}
+
+const expandAllowed = EXPAND_ENABLED && !isSilence && !isIR;
+void expandAllowed; //（現状はログ用途のみ。将来分岐で使う）
 
   // ✅ FIX: rephraseBlocks があるのに blocks が空のときは、fallbackText に落とさず blocks として採用する
   // - 今回の SHORT_OUT_DIAG: blocksCount=0 / rephraseBlocksLen>0 / pickedFrom=text が発生していた
@@ -1241,6 +1286,18 @@ const maxLinesFinal = isIR
   let blocksForRender = blocks;
   let fallbackTextForRender: string | null = fallbackText ?? null;
   let pickedFromForRender = pickedFrom;
+
+  // ✅ RB_REJECTED_MICRO のとき、fallbackText が rb を拾って復活する事故を止める
+  // - 今回: pickedFrom=text なのに fallbackFrom=rephraseBlocks で「続けてください」が復活していた
+  try {
+    const rbMicroRejected =
+      Boolean((extraAny as any)?.renderMeta?.rbDiag?.rbMicroRejected) ||
+      Boolean((extraAny as any)?.renderMeta?.rbMicroRejected);
+
+    if (rbMicroRejected) {
+      fallbackTextForRender = null; // ← rb 由来 fallback を完全遮断
+    }
+  } catch {}
 
   // ✅ @NEXT_HINT は UI に出さないが、「最小の一手」の本文補完に使えるので保持する
   // - rb（rephraseBlocks）ではなく “slotPlan 側” に入っているので、まず slotPlan から拾う
@@ -1266,6 +1323,34 @@ const maxLinesFinal = isIR
       return null;
     }
   };
+
+  // ✅ ここで nextHint を拾う（slotPlan/meta/extra などの実装に合わせて exAny を渡す）
+  // ※ exAny は「extractSlotsForEvidence が読めるオブジェクト」を渡すこと
+  try {
+    nextHintFromSlotPlan = tryPickNextHintFromSlots(extraAny);
+  } catch {}
+
+  // （ここに既存の “nextHint を blocksForRender に反映する処理” がある想定）
+  // 例：
+  // if (!isIR && !isSilence && nextHintFromSlotPlan && blocksForRender.length === 0) {
+  //   blocksForRender = [{ text: nextHintFromSlotPlan }];
+  //   pickedFromForRender = pickedFromForRender || 'nextHint';
+  // }
+
+  // ✅ CRITICAL: render の正本を blocksForRender に揃える（UIとpersistのズレを根絶）
+  blocks = Array.isArray(blocksForRender) ? blocksForRender : [];
+  pickedFrom = pickedFromForRender;
+  // まず slotPlan から拾う（ここが正）
+  nextHintFromSlotPlan = tryPickNextHintFromSlots(extraAny);
+
+  // ✅ blocks が空（…みたいにフィルタで消えた）なら、slotPlanの hint を本文として採用して落下を止める
+  // - 今回: base='……' → splitToLines→filterで blocks=0 → fallbackがrbに落ちて「続けてください」が出た
+  if ((!blocksForRender || blocksForRender.length === 0) && nextHintFromSlotPlan) {
+    blocksForRender = [{ text: nextHintFromSlotPlan }];
+    pickedFromForRender = 'nextHint';
+    // fallbackTextForRender はこの時点で使わない（明示的に本文があるため）
+    fallbackTextForRender = null;
+  }
 
   // まず slotPlan から拾う（ここが正）
   nextHintFromSlotPlan = tryPickNextHintFromSlots(extraAny);

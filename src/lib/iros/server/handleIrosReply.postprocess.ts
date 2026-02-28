@@ -2025,10 +2025,10 @@ try {
           .filter(Boolean).length;
 
   // --- 絵文字の扱い（LLMの装飾を殺さない）---
-  // sofia_light: 剥がさない / 3段以上: 剥がさない
-  // それ以外: “少しだけ整える”ために 0.6（= だいぶ残す）
-  const emojiKeepRate =
-    exprLane === 'sofia_light' || paraCount >= 3 ? 1.0 : 0.6;
+  // ✅ iros の共鳴UIでは「絵文字は剥がさない」を正とする
+  // - sofia_light: 当然剥がさない
+  // - それ以外も、剥がすと体験が壊れるため keep=1.0 に固定
+  const emojiKeepRate = 1.0;
 
   const n = normalizeIrosStyleFinal(finalAssistantText, {
     seed,

@@ -14,7 +14,6 @@ import type { HistoryDigestV1 } from '../../history/historyDigestV1';
 import { injectHistoryDigestV1 } from '../../history/historyDigestV1';
 
 export type WriterMessage = { role: 'system' | 'user' | 'assistant'; content: string };
-
 type TurnMsg = { role: 'user' | 'assistant'; content: string };
 
 function norm(s: unknown) {
@@ -42,62 +41,101 @@ function turnsToMessages(turns?: TurnMsg[] | null): WriterMessage[] {
     .filter(Boolean) as WriterMessage[];
 }
 
+function mergeConsecutiveSameRole(messages: WriterMessage[]): WriterMessage[] {
+  const out: WriterMessage[] = [];
+  for (const m of messages) {
+    const lastMsg = out[out.length - 1];
+    if (lastMsg && lastMsg.role === m.role) {
+      lastMsg.content = `${norm(lastMsg.content)}\n\n${norm(m.content)}`.trim();
+    } else {
+      out.push({ role: m.role, content: norm(m.content) });
+    }
+  }
+  return out.filter((m) => m.content.length > 0 || m.role !== 'assistant'); // assistant 空は弾く（念のため）
+}
+
+function ensureEndsWithUser(messages: WriterMessage[]): WriterMessage[] {
+  const lastMsg = messages[messages.length - 1];
+  if (!lastMsg || lastMsg.role !== 'user') {
+    return [...messages, { role: 'user', content: '（入力なし）' }];
+  }
+  return messages;
+}
+
+function foldLeadingSystemToOne(messages: WriterMessage[]): WriterMessage[] {
+  if (messages.length <= 1) return messages;
+  if (messages[0]?.role !== 'system') return messages;
+
+  const head = { ...messages[0], content: norm(messages[0].content) } as WriterMessage;
+  let i = 1;
+
+  while (i < messages.length && messages[i]?.role === 'system') {
+    const add = norm((messages[i] as any)?.content);
+    if (add) head.content = `${head.content}\n\n${add}`.trim();
+    i++;
+  }
+
+  if (i > 1) return [head, ...messages.slice(i)];
+  return [head, ...messages.slice(1)];
+}
+
 /**
- * ✅ 1st pass: system + (internalPack as user) + turns
+ * ✅ 1st pass: system + turns
  *
  * 🚫 userText 禁止:
  * - finalUserText は “userText or seedDraft” の混入経路になり得るため、ここでは一切採用しない
- * - 「最後は user で終わる」要件は、internalPack / turns の整形で満たす（必要なら turns 側に入る）
+ * - 「最後は user で終わる」要件は turns の整形 + 末尾プレースホルダで満たす
  */
-export function buildFirstPassMessages(args: any) {
-  const systemPrompt = String(args.systemPrompt ?? '').trim();
-  const internalPack = norm(args.internalPack ?? '');
-  const seedDraft = norm(args.seedDraft ?? '');
-  const turns = turnsToMessages(args.turns);
+export function buildFirstPassMessages(args: any): WriterMessage[] {
+  const systemPrompt = norm(args.systemPrompt ?? '');
 
-  // ✅ internalPack は “system に畳む” （user にしない）
-  const systemOne = [systemPrompt, internalPack]
-    .filter((x) => String(x).trim().length > 0)
+  // ✅ 会話の線（topicDigest / conversationLine）を拾う（短く system 側に固定）
+  const topicDigest = norm(args.topicDigest ?? '');
+  const conversationLine = norm(args.conversationLine ?? '');
+  const internalPackRaw = norm(args.internalPack ?? '');
+
+  const conversationLineBlock = [topicDigest, conversationLine]
+    .map((x) => norm(x))
+    .filter((x) => x.length > 0)
+    .join('\n');
+
+  const systemOne = [
+    systemPrompt,
+    conversationLineBlock ? `CONVERSATION_LINE (DO NOT OUTPUT):\n${conversationLineBlock}` : '',
+    internalPackRaw,
+  ]
+    .map((x) => norm(x))
+    .filter((x) => x.length > 0)
     .join('\n\n');
 
-  const out: any[] = [
-    {
-      role: 'system',
-      content: systemOne,
-    },
-  ];
+  // ✅ turns は user をマスクしたうえで追加
+  const turns = turnsToMessages(args.turns);
 
-  // ✅ 直近ターン（会話の流れ）を追加（role連続はマージ）
-  for (const m of turns) {
-    const last = out[out.length - 1];
-    if (last && last.role === m.role) {
-      last.content = `${String(last.content ?? '').trim()}\n\n${String(m.content ?? '').trim()}`.trim();
-    } else {
-      out.push(m);
+  let messages: WriterMessage[] = [{ role: 'system', content: systemOne }, ...turns];
+
+  // ✅ role 連続をマージ
+  messages = mergeConsecutiveSameRole(messages);
+
+  // ✅ 末尾 user を保証（seedDraft は一切使わない）
+  messages = ensureEndsWithUser(messages);
+
+  // ✅ HistoryDigest v1 をここで注入（ある時だけ）
+  const digest = (args.historyDigestV1 ?? null) as HistoryDigestV1 | null;
+  if (digest) {
+    const injected = injectHistoryDigestV1({ messages, digest }) as any;
+    const injectedMsgs = (injected?.messages ?? null) as WriterMessage[] | null;
+    if (Array.isArray(injectedMsgs) && injectedMsgs.length > 0) {
+      messages = injectedMsgs;
     }
   }
 
-  // ✅ 最後を user で終わらせたいなら “seedDraft” を末尾に置く
-  // - userText 生文は入れない（禁止ルール保持）
-  if (seedDraft) {
-    const last = out[out.length - 1];
-    if (last && last.role === 'user') {
-      last.content = `${String(last.content ?? '').trim()}\n\n${seedDraft}`.trim();
-    } else {
-      out.push({ role: 'user', content: seedDraft });
-    }
-  }
+  // ✅ 先頭の system は 1枚に畳む
+  messages = foldLeadingSystemToOne(messages);
 
-  // ✅ ここが本丸：turns も seedDraft も空だと roles=[system] になる
-  // => 生文を入れずに「最小の user」を保証して writer を成立させる
-  if (out.length === 1) {
-    out.push({
-      role: 'user',
-      content: '続けてください',
-    });
-  }
+  // ✅ 最終的に末尾 user を再保証（注入で崩れた場合の保険）
+  messages = ensureEndsWithUser(messages);
 
-  return out;
+  return messages;
 }
 
 /**
@@ -116,12 +154,9 @@ export function buildRetryMessages(args: {
   // 互換のため残すが、この層では絶対に採用しない（LLMへ流さない）
   userText: string;
 }): WriterMessage[] {
-  const systemPrompt = String(args.systemPrompt ?? '');
+  const systemPrompt = norm(args.systemPrompt ?? '');
   const internalPack = norm(args.internalPack ?? '');
   const baseDraft = norm(args.baseDraftForRepair) || '(empty)';
-
-  // 🚫 強制遮断
-  // const userText = norm(args.userText) || '（空）';
 
   const mergedUser = [
     internalPack ? `【internal】\n${internalPack}` : '',
@@ -136,26 +171,25 @@ export function buildRetryMessages(args: {
       '- 下書きの構造を保持する（削り過ぎない）。',
       '',
       // 🚫 ユーザー入力（文脈）は入れない
-      // '【ユーザー入力（文脈）】',
-      // userText,
     ].join('\n'),
   ]
-    .filter((x) => String(x).trim().length > 0)
+    .map((x) => norm(x))
+    .filter((x) => x.length > 0)
     .join('\n\n');
 
-  const base: WriterMessage[] = [
-    { role: 'system', content: systemPrompt },
-    ...turnsToMessages(args.turns),
-  ];
+  let base: WriterMessage[] = [{ role: 'system', content: systemPrompt }, ...turnsToMessages(args.turns)];
+  base = mergeConsecutiveSameRole(base);
 
-  // ✅ 末尾が user なら「追い user」を作らず、最後の user に結合する
-  const last = base[base.length - 1];
-  if (last && last.role === 'user') {
-    last.content = `${String(last.content ?? '').trim()}\n\n${mergedUser}`.trim();
-    return base;
+  const lastMsg = base[base.length - 1];
+  if (lastMsg && lastMsg.role === 'user') {
+    lastMsg.content = `${norm(lastMsg.content)}\n\n${mergedUser}`.trim();
+    base = foldLeadingSystemToOne(base);
+    return ensureEndsWithUser(base);
   }
 
-  return [...base, { role: 'user', content: mergedUser }];
+  base = [...base, { role: 'user', content: mergedUser }];
+  base = foldLeadingSystemToOne(base);
+  return ensureEndsWithUser(base);
 }
 
 export async function callWriterLLM(args: {
@@ -171,32 +205,17 @@ export async function callWriterLLM(args: {
   // ✅ 追加：HistoryDigest v1（存在する時だけ注入）
   historyDigestV1?: HistoryDigestV1 | null;
 }): Promise<string> {
-  // ✅ HistoryDigest v1 を注入（ただし system は “1枚に畳む”）
-  // - rephraseEngine 側で allow/exprMeta/blockPlan が system 追加されても、ここで最終的に 1枚化する
+  // ✅ HistoryDigest v1 を注入（ある時だけ）
   const digest = (args.historyDigestV1 ?? null) as HistoryDigestV1 | null;
-  const injected = digest ? injectHistoryDigestV1({ messages: args.messages, digest }) : null;
+  const injected = digest ? (injectHistoryDigestV1({ messages: args.messages, digest }) as any) : null;
 
   let messagesFinal: WriterMessage[] = (injected?.messages ?? args.messages) as WriterMessage[];
 
-  // ✅ 先頭に連続する system を 1枚に畳む（system,system,... を禁止）
-  if (messagesFinal.length > 1 && messagesFinal[0]?.role === 'system') {
-    const head = { ...messagesFinal[0] } as WriterMessage;
-    let i = 1;
+  // ✅ 先頭 system は 1枚に畳む
+  messagesFinal = foldLeadingSystemToOne(messagesFinal);
 
-    while (i < messagesFinal.length && messagesFinal[i]?.role === 'system') {
-      const add = String((messagesFinal[i] as any)?.content ?? '').trim();
-      if (add) {
-        head.content = `${String(head.content ?? '').trim()}\n\n${add}`.trim();
-      }
-      i++;
-    }
-
-    if (i > 1) {
-      messagesFinal = [head, ...messagesFinal.slice(i)];
-    } else {
-      messagesFinal[0] = head;
-    }
-  }
+  // ✅ 末尾 user を保証（念のため）
+  messagesFinal = ensureEndsWithUser(messagesFinal);
 
   const out = await chatComplete({
     purpose: 'writer',
@@ -219,5 +238,5 @@ export async function callWriterLLM(args: {
     },
   });
 
-  return String(out ?? '').trim();
+  return norm(out ?? '');
 }

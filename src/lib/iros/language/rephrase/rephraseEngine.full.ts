@@ -221,7 +221,7 @@ function buildInternalPackText(args: {
   intentBand?: string | null;
   tLayerHint?: string | null;
 
-  // ✅ 追加：このターンの userText（観測の唯一ソース）
+  // ✅ 観測ソース（ただし生文は渡さない方針のため、ここでは参照しない）
   userText?: string | null;
 
   onePointText?: string | null;
@@ -230,29 +230,143 @@ function buildInternalPackText(args: {
   phase?: string | null;
   qCode?: string | null;
 
-  // ✅ 追加：flowDigest / flowTape（会話の“流れ”の短い要約とテープ）
+  // ✅ flow
   flowDigest?: string | null;
   flowTape?: string | null;
 
-  // ✅ 追加：会話が流れるための3点セット（topic / goal / 反復）
+  // ✅ 会話が流れるための3点セット（topic / goal / repeat）
   topicDigest?: string | null;
-  replyGoal?: string | null;
+  replyGoal?: any; // string or object({kind,...}) が混在し得る
   repeatSignal?: string | null;
+
+  // ✅ フォールバック用（呼び出し側が渡せるならここに入れる）
+  ctxPack?: {
+    topicDigest?: string | null;
+    conversationLine?: string | null;
+    replyGoal?: any;
+    repeatSignal?: string | null;
+    goalKind?: string | null;
+    slotPlanPolicy?: string | null;
+    inputKind?: string | null;
+    depthStage?: string | null;
+    phase?: string | null;
+    qCode?: string | null;
+    intentBand?: string | null;
+    tLayerHint?: string | null;
+    flow?: { delta?: string | null; returnStreak?: any } | null;
+    returnStreak?: any;
+    itTriggered?: any;
+    it_triggered?: any;
+    mirror?: { e_turn?: string | null; polarity?: string | null } | null;
+    e_turn?: string | null;
+    polarity?: string | null;
+    sa?: any;
+    selfAcceptance?: any;
+    self_acceptance?: any;
+    fixedNorth?: { key?: string | null } | null;
+    fixedNorth_meta?: string | null;
+    fixedNorthKey?: string | null;
+    unified?: { depthStage?: string | null } | null;
+    input_kind?: string | null;
+  } | null;
+
+  // ✅ 揺れ吸収（呼び出し側で直接渡せる場合）
+  goalKind?: string | null;
+
+  // ✅ rules / shift / blockPlanMode
+  rules?: any;
+  shiftRules?: any;
+  shift?: any;
+  blockPlanMode?: string | null;
+  block_plan_mode?: string | null;
+
+  // ✅ 瞬間反応
+  e_turn?: string | null;
+  polarity?: string | null;
+
+  // ✅ self acceptance
+  sa?: any;
 }): string {
-  // 🚫 userText は LLM 入力に混入させない（internalPack へ露出しない）
-  // - userText は「観測の唯一ソース」として使う設計が以前あったが、
-  //   現在は「LLMに生文を渡さない」方針のため、ここでは参照しない。
-  // - 代わりに onePoint / summary / topic / goal / repeat を “核” として渡す。
+  // --- small utils ---
+  const asTrim = (v: any) => (typeof v === 'string' ? v.trim() : '');
+  const asNorm = (v: any) => asTrim(v).replace(/\r\n/g, '\n');
+  const safeHead = (s: string, n = 220) => {
+    const t = asNorm(s);
+    return t.length <= n ? t : t.slice(0, n) + '…';
+  };
+  const head = (s: string, n = 80) => safeHead(s, n);
 
-  const obsOnePoint = String(args.onePointText ?? '').trim();
-  const obsSummary = String(args.situationSummary ?? '').trim();
-  const obsTopic = String(args.topicDigest ?? '').trim();
-  const obsGoal = String(args.replyGoal ?? '').trim();
-  const obsRepeat = String(args.repeatSignal ?? '').trim();
+  const ctxPack: any = (args as any)?.ctxPack ?? null;
 
+  // --- OBS sources (NO userText) ---
+  const obsOnePoint = asNorm(args.onePointText ?? '');
+  const obsSummary = asNorm(args.situationSummary ?? '');
+
+  // --- topic / goal / repeat (for internal pack labels) ---
+  // ✅ 目的：rephrase.ts が埋めた ctxPack.topicDigest / replyGoal / repeatSignal を
+  //          obsCard（STATE_SNAPSHOT_PICKED）の表示に確実に反映する。
+  const obsTopic = asNorm(
+    // 1) upstream が直に渡した topicDigest
+    (args as any)?.topicDigest ??
+      (args as any)?.topic_digest ??
+      // 2) ctxPack（rephrase.ts が補完している）
+      (ctxPack as any)?.topicDigest ??
+      // 3) 最後の保険：conversationLine（「会話の線」）
+      (ctxPack as any)?.conversationLine ??
+      ''
+  );
+
+  const obsGoal = (() => {
+    // goal は文字列化して観測ラベルに出す（kind/object でも落ちないように）
+    const raw: any =
+      (args as any)?.replyGoal ??
+      (args as any)?.reply_goal ??
+      (args as any)?.goalKind ??
+      (args as any)?.goal_kind ??
+      (ctxPack as any)?.goalKind ??
+      (ctxPack as any)?.replyGoal ??
+      null;
+
+    if (raw === null || raw === undefined) return '';
+
+    if (typeof raw === 'string') return raw.trim();
+
+    // replyGoal が { kind: 'reflect_position', ... } などの形でも拾う
+    const kind = (raw as any)?.kind;
+    if (typeof kind === 'string' && kind.trim()) return kind.trim();
+
+    // それ以外は表示用に短く JSON 文字列化（null/空は弾く）
+    try {
+      const s = JSON.stringify(raw);
+      return typeof s === 'string' ? s.trim() : '';
+    } catch {
+      return String(raw).trim();
+    }
+  })();
+
+  const obsRepeat = (() => {
+    const raw: any =
+      (args as any)?.repeatSignal ??
+      (args as any)?.repeat_signal ??
+      (ctxPack as any)?.repeatSignal ??
+      null;
+
+    // repeat は boolean が混ざるので、表示ラベルとして正規化する
+    if (raw === null || raw === undefined) return '';
+
+    if (typeof raw === 'string') return raw.trim();
+
+    if (typeof raw === 'boolean') return raw ? 'SAME' : 'NONE';
+
+    // オブジェクト等は stringify して短く出す
+    try {
+      const s = JSON.stringify(raw);
+      return typeof s === 'string' ? s.trim() : '';
+    } catch {
+      return String(raw).trim();
+    }
+  })();
   // ✅ 観測核（NOW_CORE）は userText を使わずに作る
-  // - onePoint があれば最優先
-  // - 次に summary
   const obsPick =
     obsOnePoint.length >= 6
       ? obsOnePoint
@@ -260,73 +374,103 @@ function buildInternalPackText(args: {
         ? obsSummary
         : '';
 
-  // ✅ 露出は短い head のみに制限（ただし userText は露出しない）
-  const head = (s: string, n = 80) => {
-    const t = String(s ?? '').replace(/\r\n/g, '\n').trim();
-    return t.length <= n ? t : t.slice(0, n) + '…';
-  };
+// --- obsCard ---
+const obsCard = (() => {
+  const rules: any =
+    (args as any)?.shiftRules ??
+    (args as any)?.rules ??
+    (args as any)?.shift?.rules ??
+    null;
 
-  // ✅ obsCard（ミニ版）
-  // - userText は含めない
-  // - “拾うべき核（obsPick）” と会話を流す3点だけを渡す
-  const obsCard = (() => {
-    // rules の取り元は、呼び出し側の都合で揺れるので候補を広めに拾う
-    const rules: any =
-      (args as any)?.shiftRules ??
-      (args as any)?.rules ??
-      (args as any)?.shift?.rules ??
-      null;
+  // rules（上流指定）を尊重しつつ、デフォルトは「質問0」寄りにする
+  const qMaxRaw = rules?.questions_max;
 
-    const qMaxRaw = rules?.questions_max;
-    const qMax = typeof qMaxRaw === 'number' ? qMaxRaw : null;
+  const blockPlanMode = asTrim((args as any)?.blockPlanMode ?? (args as any)?.block_plan_mode ?? '');
+  const goalKind = asTrim((args as any)?.goalKind ?? ctxPack?.goalKind ?? ctxPack?.replyGoal?.kind ?? '');
+  const replyGoalNow = asTrim((args as any)?.replyGoal ?? (ctxPack as any)?.replyGoal ?? '');
 
-    const forbidQM = !!rules?.forbid_question_marks;
-    const forbidInter = !!rules?.forbid_interrogatives;
+  // flow/inputKind は “ctxPack 正本” から拾う（rephrase.ts が埋めている前提）
+  const inputKindNow = asTrim((args as any)?.inputKind ?? (ctxPack as any)?.inputKind ?? '');
+  const flowDeltaNow = asTrim(
+    (ctxPack as any)?.flow?.delta ??
+      (ctxPack as any)?.flow?.flowDelta ??
+      ''
+  ).toUpperCase();
 
-    // mini3 / stabilize は「質問ゼロ」に倒す（今回の要望）
-    const blockPlanMode = String((args as any)?.blockPlanMode ?? (args as any)?.block_plan_mode ?? '').trim();
-    const goalKind = String((args as any)?.replyGoal?.kind ?? (args as any)?.goalKind ?? '').trim();
-    const forceNoQuestions = forbidQM || forbidInter || blockPlanMode === 'mini3' || goalKind === 'stabilize' || qMax === 0;
+  // ✅ 質問を抑える条件（ここが効く）
+  // - 接続ターン（micro/greeting）
+  // - RETURN（戻り）
+  // - reflect_position（位置の反射）
+  // - stabilize / mini3
+  const suppressQuestions =
+    inputKindNow === 'micro' ||
+    inputKindNow === 'greeting' ||
+    flowDeltaNow === 'RETURN' ||
+    String(replyGoalNow).toLowerCase() === 'reflect_position' ||
+    goalKind === 'stabilize' ||
+    blockPlanMode === 'mini3';
 
-    const questionRuleLine = forceNoQuestions
-      ? '- 質問はしない。'
-      : typeof qMax === 'number'
-        ? `- 質問は最大${qMax}つまで。`
-        : '- 質問は最大1つまで。';
+  // 上流の forbid 指定
+  const forbidQMUp = !!rules?.forbid_question_marks;
+  const forbidInterUp = !!rules?.forbid_interrogatives;
 
-    return [
-      'OBS_SOURCES (DO NOT OUTPUT):',
-      `obsOnePointHead=${obsOnePoint ? head(obsOnePoint, 120) : '(none)'}`,
-      `obsSummaryHead=${obsSummary ? head(obsSummary, 120) : '(none)'}`,
-      `obsPickHead=${obsPick ? head(obsPick, 120) : '(none)'}`,
-      '',
-      // ✅ 会話が流れるための3点（あれば優先）
-      `TOPIC_DIGEST: ${obsTopic ? head(obsTopic, 220) : '(none)'}`,
-      `REPLY_GOAL: ${obsGoal ? head(obsGoal, 220) : '(none)'}`,
-      `REPEAT_SIGNAL: ${obsRepeat ? head(obsRepeat, 220) : '(none)'}`,
-      '',
-      // ✅ 最小ルール（短く）
-      'USE_RULE (DO NOT OUTPUT):',
-      '- obsPick は「核」として参照してよいが、原文引用や言い直しはしない。',
-      '- 説明で埋めず、会話として短く返す。',
-      '- 箇条書き・番号列挙・チェックリストで出力しない（必要なら1〜2文に畳む）。',
-      questionRuleLine,
-    ].join('\n');
-  })();
+  // ✅ 抑制条件では forbid を強制ON（“?”や尋問形を避ける）
+  const forbidQM = suppressQuestions ? true : forbidQMUp;
+  const forbidInter = suppressQuestions ? true : forbidInterUp;
 
-  const flowDigest = String(args.flowDigest ?? '').trim();
-  const flowTape = String(args.flowTape ?? '').trim();
+  // ✅ qMax：抑制条件では 0 を優先。そうでなければ上流指定、なければ 1
+  const qMax =
+    suppressQuestions
+      ? 0
+      : (typeof qMaxRaw === 'number' ? qMaxRaw : 1);
 
-  // ✅ META_HINT は「JSON断片の要約」ではなく「選抜キー言語化」に統一する
-  // - JSON.parse をしない（keys=(json_parse_failed) を根絶）
-  // - args.metaText（stringify由来）は LLM向けに使わない（デバッグ用途に限定）
-  const metaTextRaw = String(args.metaText ?? '').trim(); // 互換保持（ただし LLM用には使わない）
+  const forceNoQuestions = forbidQM || forbidInter || qMax === 0;
 
+  const questionRuleLine = forceNoQuestions
+    ? '- 質問は原則しない（0）。'
+    : typeof qMax === 'number'
+      ? `- 質問は最大${qMax}つまで。`
+      : '- 質問は最大1つまで。';
+
+  // ✅ オウム返し抑制（明文化して強制）
+  const echoRuleLine =
+    '- 冒頭でユーザー文をそのまま復唱しない（同語反復・引用・括弧引用をしない）。短く要約して言い切る。';
+
+  // ✅ forbid の時は、文末 ? や尋問形を避ける指示も追加
+  const forbidLines: string[] = [];
+  if (forbidQM) forbidLines.push('- 文末を「?」で終えない。');
+  if (forbidInter) forbidLines.push('- 「どれ？/どっち？/何？」などの尋問形を使わない。');
+
+  return [
+    'OBS_SOURCES (DO NOT OUTPUT):',
+    `obsOnePointHead=${obsOnePoint ? head(obsOnePoint, 120) : '(none)'}`,
+    `obsSummaryHead=${obsSummary ? head(obsSummary, 120) : '(none)'}`,
+    `obsPickHead=${obsPick ? head(obsPick, 120) : '(none)'}`,
+    '',
+    `TOPIC_DIGEST: ${obsTopic ? head(obsTopic, 220) : '(none)'}`,
+    `REPLY_GOAL: ${obsGoal ? head(obsGoal, 220) : '(none)'}`,
+    `REPEAT_SIGNAL: ${obsRepeat ? head(obsRepeat, 220) : '(none)'}`,
+    '',
+    'USE_RULE (DO NOT OUTPUT):',
+    '- obsPick は「核」として参照してよいが、原文引用や言い直しはしない。',
+    echoRuleLine,
+    '- 説明で埋めず、会話として短く返す。',
+    '- 箇条書き・番号列挙・チェックリストで出力しない（必要なら1〜2文に畳む）。',
+    ...forbidLines,
+    questionRuleLine,
+  ].join('\n');
+})();
+
+  // --- flow ---
+  const flowDigest = asNorm(args.flowDigest ?? '');
+  const flowTape = asNorm(args.flowTape ?? '');
+
+  // --- meta hint (pick keys, no JSON.parse) ---
   const metaText = (() => {
     const ctx: any = (args as any) ?? {};
-    const ctxPack: any = ctx.ctxPack ?? ctx.ctx_pack ?? null;
+    const cp: any = ctxPack ?? null;
 
-    const pick = (...cands: any[]) => {
+    const pickStr = (...cands: any[]) => {
       for (const v of cands) {
         if (v === undefined || v === null) continue;
         const s = String(v).trim();
@@ -335,35 +479,37 @@ function buildInternalPackText(args: {
       }
       return null;
     };
+    const pickAny = (...cands: any[]) => {
+      for (const v of cands) {
+        if (v === undefined || v === null) continue;
+        if (typeof v === 'string' && !v.trim()) continue;
+        return v;
+      }
+      return null;
+    };
 
-    // ✅ 構造メタ（柱）
-    const inputKind = pick(ctx.inputKind, ctxPack?.inputKind);
-    const depthStage = pick(ctx.depthStage, ctxPack?.depthStage, ctxPack?.unified?.depthStage);
-    const phase = pick(ctx.phase, ctxPack?.phase);
-    const qCode = pick(ctx.qCode, ctxPack?.qCode);
+    const inputKind = pickStr(ctx.inputKind, cp?.inputKind, cp?.input_kind);
+    const depthStage = pickStr(ctx.depthStage, cp?.depthStage, cp?.unified?.depthStage);
+    const phase = pickStr(ctx.phase, cp?.phase);
+    const qCode = pickStr(ctx.qCode, cp?.qCode);
 
-    const intentBand = pick(ctx.intentBand, ctxPack?.intentBand);
-    const tLayerHint = pick(ctx.tLayerHint, ctxPack?.tLayerHint);
+    const intentBand = pickStr(ctx.intentBand, cp?.intentBand);
+    const tLayerHint = pickStr(ctx.tLayerHint, cp?.tLayerHint);
 
-    const flowDelta = pick(ctxPack?.flow?.delta, ctxPack?.flowDelta);
-    const returnStreak = pick(ctxPack?.flow?.returnStreak, ctxPack?.returnStreak);
+    const flowDelta = pickStr(cp?.flow?.delta, cp?.flowDelta);
+    const returnStreak = pickAny(cp?.flow?.returnStreak, cp?.returnStreak);
 
-    const itOk = pick(ctx.itOk, ctxPack?.itTriggered, ctxPack?.it_triggered);
-    const goalKind = pick(ctxPack?.replyGoal?.kind, ctxPack?.goalKind, ctx.replyGoal);
-    const slotPlanPolicy = pick(ctxPack?.slotPlanPolicy, ctx.slotPlanPolicy);
+    const itOk = pickAny(ctx.itOk, cp?.itTriggered, cp?.it_triggered);
+    const goalKind = pickStr(ctx.goalKind, cp?.goalKind, cp?.replyGoal?.kind);
+    const slotPlanPolicy = pickStr(cp?.slotPlanPolicy, ctx.slotPlanPolicy);
 
-    // ✅ 瞬間反応（カード材料）
-    const e_turn = pick(ctx.e_turn, ctxPack?.mirror?.e_turn, ctxPack?.e_turn);
-    const polarity = pick(ctx.polarity, ctxPack?.mirror?.polarity, ctxPack?.polarity);
+    const e_turn = pickStr(ctx.e_turn, cp?.mirror?.e_turn, cp?.e_turn);
+    const polarity = pickStr(ctx.polarity, cp?.mirror?.polarity, cp?.polarity);
 
-    // ✅ self acceptance（補正）
-    const sa = pick(ctx.sa, ctxPack?.sa, ctxPack?.selfAcceptance, ctxPack?.self_acceptance);
-
-    // ✅ 任意（必要時のみ）
-    const fixedNorth = pick(ctxPack?.fixedNorth?.key, ctxPack?.fixedNorth_meta, ctxPack?.fixedNorthKey);
+    const sa = pickAny(ctx.sa, cp?.sa, cp?.selfAcceptance, cp?.self_acceptance);
+    const fixedNorth = pickStr(cp?.fixedNorth?.key, cp?.fixedNorth_meta, cp?.fixedNorthKey);
 
     const lines: string[] = [];
-
     if (inputKind) lines.push(`inputKind=${inputKind}`);
     if (depthStage) lines.push(`depthStage=${depthStage}`);
     if (phase) lines.push(`phase=${phase}`);
@@ -373,22 +519,22 @@ function buildInternalPackText(args: {
     if (tLayerHint) lines.push(`tLayerHint=${tLayerHint}`);
 
     if (flowDelta) lines.push(`flowDelta=${flowDelta}`);
-    if (returnStreak) lines.push(`returnStreak=${returnStreak}`);
+    if (returnStreak !== null) lines.push(`returnStreak=${String(returnStreak)}`);
 
-    if (itOk != null) lines.push(`itOk=${itOk}`);
+    if (itOk !== null) lines.push(`itOk=${String(itOk)}`);
     if (goalKind) lines.push(`goalKind=${goalKind}`);
     if (slotPlanPolicy) lines.push(`slotPlanPolicy=${slotPlanPolicy}`);
 
     if (e_turn) lines.push(`e_turn=${e_turn}`);
     if (polarity) lines.push(`polarity=${polarity}`);
-    if (sa) lines.push(`sa=${sa}`);
+    if (sa !== null) lines.push(`sa=${String(sa)}`);
 
     if (fixedNorth) lines.push(`fixedNorth=${fixedNorth}`);
 
-    // 無いなら空
     return lines.length ? lines.join('\n') : '';
   })();
 
+  // --- assemble ---
   const parts: string[] = [
     'INTERNAL PACK (DO NOT OUTPUT):',
     '',
@@ -404,21 +550,14 @@ function buildInternalPackText(args: {
     '',
     'FLOW_HINT (DO NOT OUTPUT):',
     `flowDigest=${flowDigest || '(none)'}`,
-    `topicDigest=${String(args.topicDigest ?? '').trim() || '(none)'}`,
-    `replyGoal=${String(args.replyGoal ?? '').trim() || '(none)'}`,
-    `repeatSignal=${String(args.repeatSignal ?? '').trim() || '(none)'}`,
-    `flowTape=${flowTape || '(none)'}`,
+    `flowTapeHead=${flowTape ? safeHead(flowTape, 220) : '(none)'}`,
   ];
 
-  const historyTrim = String(args.historyText ?? '').trim();
-  if (historyTrim) {
-    parts.push('', 'HISTORY_HINT (DO NOT OUTPUT):', historyTrim);
-  }
+  const historyTrim = asNorm(args.historyText ?? '');
+  if (historyTrim) parts.push('', 'HISTORY_HINT (DO NOT OUTPUT):', historyTrim);
 
-  const seedTrim = String(args.seedDraftHint ?? '').trim();
-  if (seedTrim) {
-    parts.push('', 'SEED DRAFT HINT (DO NOT OUTPUT):', seedTrim);
-  }
+  const seedTrim = asNorm(args.seedDraftHint ?? '');
+  if (seedTrim) parts.push('', 'SEED DRAFT HINT (DO NOT OUTPUT):', seedTrim);
 
   parts.push('', obsCard);
 
@@ -2050,80 +2189,79 @@ const sanitizeSlotTextForWriter = (s: string) => {
   return t;
 };
 
-const seedDraftRawAll = extracted.slots
+const slotsTextRawAll = extracted.slots
   .map((s) => sanitizeSlotTextForWriter(s.text))
   .filter(Boolean)
   .join('\n');
 
-  // ✅ slotキーは key だけでなく id も見る（framePlan 由来で id しか無いケースを救う）
-  const getSlotKey = (s: any) => {
-    return String(s?.key ?? s?.id ?? s?.slotKey ?? s?.slot_id ?? '').trim();
-  };
+// ✅ slotキーは key だけでなく id も見る（framePlan 由来で id しか無いケースを救う）
+const getSlotKey = (s: any) => {
+  return String(s?.key ?? s?.id ?? s?.slotKey ?? s?.slot_id ?? '').trim();
+};
 
-  const seedDraftRawPicked = extracted.slots
-    .filter((s) => {
-      const k = getSlotKey(s);
+const seedDraftRawPicked = extracted.slots
+  .filter((s) => {
+    const k = getSlotKey(s);
 
-      const ut = String(userText ?? '').trim();
-      const isVeryShort = ut.length > 0 && ut.length <= 10;
-
-      const isGreeting =
-        /^(こんにちは|こんばんは|おはよう|もしもし|やあ|ハロー|hello|hi|hey|おつかれ|お疲れ)\b/i.test(ut);
-
-      const isAckWord =
-        /^(ありがとう|ありがとうございます|どうも|感謝|了解|りょうかい|わかった|分かった|OK|ok|おけ|オケ|承知|了解です|了解しました|お願いします|よろしく|宜しく)\b/.test(
-          ut,
-        );
-
-      const isAckLike = isAckWord || (isVeryShort && !isGreeting);
-
-      const hasOBS = extracted.slots.some((x) => getSlotKey(x) === 'OBS');
-
-      if (isAckLike) {
-        if (hasOBS) return k === 'OBS';
-        return k === 'SEED_TEXT' || k === 'DRAFT' || k === 'OBS';
-      }
-
-      if (k === 'OBS') return true;
-      if (k === 'DRAFT') return true;
-      if (k === 'SEED_TEXT') return true;
-
-      if (k === 'SHIFT') return true;
-
-      // 🚫 NEXT は「内部ヒント」なので writer 素材に混ぜない
-      // if (k === 'NEXT') return true;
-
-      if (k === 'END') return true;
-      if (k === 'ONE_POINT') return true;
-
-      if (k.startsWith('FLAG_')) return true;
-
-      return false;
-    })
-    .map((s) => s.text)
-    .filter(Boolean)
-    .join('\n');
-
-  // ✅ 保険：拾えた seed が userText 相当だけになったら rawAll に戻す
-  const seedDraftRaw = (() => {
-    const all = String(seedDraftRawAll ?? '').trim();
-    const picked = String(seedDraftRawPicked ?? '').trim();
     const ut = String(userText ?? '').trim();
+    const isVeryShort = ut.length > 0 && ut.length <= 10;
 
-    // all 側に @SHIFT などの directive があるのに、picked が userText だけなら事故
-    const allHasDirective = /@(OBS|SHIFT|SH|RESTORE|Q|Q_SLOT|SAFE|NEXT|END|TASK|SEED_TEXT)\b/m.test(all);
-    const pickedLooksLikeUserOnly =
-      !!ut &&
-      (!!picked && (picked === ut || (picked.length <= ut.length + 2 && picked.includes(ut))));
+    const isGreeting =
+      /^(こんにちは|こんばんは|おはよう|もしもし|やあ|ハロー|hello|hi|hey|おつかれ|お疲れ)\b/i.test(ut);
 
-    if (allHasDirective && pickedLooksLikeUserOnly) return all;
-    return picked || all;
-  })();
+    const isAckWord =
+      /^(ありがとう|ありがとうございます|どうも|感謝|了解|りょうかい|わかった|分かった|OK|ok|おけ|オケ|承知|了解です|了解しました|お願いします|よろしく|宜しく)\b/.test(
+        ut,
+      );
 
+    const isAckLike = isAckWord || (isVeryShort && !isGreeting);
 
-  const recallMust = extractRecallMustIncludeFromSeed(seedDraftRawAll);
-  const mustIncludeRuleText = buildMustIncludeRuleText(recallMust);
+    const hasOBS = extracted.slots.some((x) => getSlotKey(x) === 'OBS');
 
+    if (isAckLike) {
+      if (hasOBS) return k === 'OBS';
+      return k === 'SEED_TEXT' || k === 'DRAFT' || k === 'OBS';
+    }
+
+    if (k === 'OBS') return true;
+    if (k === 'DRAFT') return true;
+    if (k === 'SEED_TEXT') return true;
+
+    if (k === 'SHIFT') return true;
+
+    // 🚫 NEXT は「内部ヒント」なので writer 素材に混ぜない
+    // if (k === 'NEXT') return true;
+
+    if (k === 'END') return true;
+    if (k === 'ONE_POINT') return true;
+
+    if (k.startsWith('FLAG_')) return true;
+
+    return false;
+  })
+  // ✅ picked も sanitize を通す（OBS の user 混入を落とす）
+  .map((s) => sanitizeSlotTextForWriter(s.text))
+  .filter(Boolean)
+  .join('\n');
+
+// ✅ 保険：拾えた seed が userText 相当だけになったら rawAll（slotsTextRawAll）に戻す
+const seedDraftRaw = (() => {
+  const all = String(slotsTextRawAll ?? '').trim();
+  const picked = String(seedDraftRawPicked ?? '').trim();
+  const ut = String(userText ?? '').trim();
+
+  const allHasDirective = /@(OBS|SHIFT|SH|RESTORE|Q|Q_SLOT|SAFE|NEXT|END|TASK|SEED_TEXT)\b/m.test(all);
+  const pickedLooksLikeUserOnly =
+    !!ut &&
+    (!!picked && (picked === ut || (picked.length <= ut.length + 2 && picked.includes(ut))));
+
+  if (allHasDirective && pickedLooksLikeUserOnly) return all;
+  return picked || all;
+})();
+
+// ✅ must-include は「slots全文」ではなく「実際に使う seed」から抽出する
+const recallMust = extractRecallMustIncludeFromSeed(seedDraftRaw);
+const mustIncludeRuleText = buildMustIncludeRuleText(recallMust);
   // ILINE抽出：slot + userText 両方から拾う（seed 側は内部マーカー除外）
   const seedForLock = stripInternalMarkersForLock(seedDraftRaw);
 
@@ -2329,26 +2467,36 @@ const lastTurnsSafe = (() => {
   const flowTape = readFlowTape(opts?.userContext ?? null);
 
   // topic / goal / repeat（存在すれば拾う・なければ null）
-  const topicDigest = String(
-    (opts?.userContext as any)?.topicDigest ??
-      (opts?.userContext as any)?.meta?.topicDigest ??
-      (opts?.userContext as any)?.extra?.topicDigest ??
-      (opts?.userContext as any)?.ctxPack?.topicDigest ??
-      (opts?.userContext as any)?.orch?.topicDigest ??
-      ''
-  ).trim() || null;
+  // NOTE: `??` は ''（空文字）で止まるので、trim後に空なら次候補へ進める
+  const pickNonEmpty = (...cands: any[]) => {
+    for (const v of cands) {
+      if (v === undefined || v === null) continue;
+      const s = String(v).trim();
+      if (!s) continue;
+      return s;
+    }
+    return '';
+  };
 
-  const replyGoal = String(
-    (opts?.userContext as any)?.replyGoal ??
-      (opts?.userContext as any)?.ctxPack?.replyGoal ??
-      ''
-  ).trim() || null;
+  const topicDigest = pickNonEmpty(
+    (opts?.userContext as any)?.topicDigest,
+    (opts?.userContext as any)?.meta?.topicDigest,
+    (opts?.userContext as any)?.extra?.topicDigest,
+    (opts?.userContext as any)?.ctxPack?.topicDigest,
+    // ✅ conversationLine を topicDigest のフォールバックとして採用
+    (opts?.userContext as any)?.ctxPack?.conversationLine,
+    (opts?.userContext as any)?.orch?.topicDigest
+  );
 
-  const repeatSignal = String(
-    (opts?.userContext as any)?.repeatSignal ??
-      (opts?.userContext as any)?.ctxPack?.repeatSignal ??
-      ''
-  ).trim() || null;
+  const replyGoal = pickNonEmpty(
+    (opts?.userContext as any)?.replyGoal,
+    (opts?.userContext as any)?.ctxPack?.replyGoal
+  ) || null;
+
+  const repeatSignal = pickNonEmpty(
+    (opts?.userContext as any)?.repeatSignal,
+    (opts?.userContext as any)?.ctxPack?.repeatSignal
+  ) || null;
 
   // =========================================================
   // Shift slot text（既存）
@@ -2368,6 +2516,9 @@ const lastTurnsSafe = (() => {
   // --- lane detect (SHIFT欠落でも復元する) -----------------------------
   // SHIFTが無いケースが実在する（dev.logで確認済み）ため、
   // SHIFTだけに依存せず、meta/seed/ユーザー文も含めて laneKey / kind を拾う。
+  //
+  // ⚠️ ただし T_CONCRETIZE は「汚染（meta/seed/userText）」で過剰発火しやすいので、
+  //     判定ソースを SHIFT 系（shiftSlot/shiftText）に限定して安定化する。
   const laneHintText = [
     String(shiftTextForMode ?? ''),
     String(metaText ?? ''),
@@ -2378,12 +2529,21 @@ const lastTurnsSafe = (() => {
     .join('\n')
     .slice(0, 4000);
 
+  // ✅ T_CONCRETIZE 判定は SHIFT 系だけを見る（汚染で立ち続けるのを防ぐ）
+  const laneHintTextForLane = String(shiftTextForMode ?? '').slice(0, 4000);
+
+  const shiftLaneKey =
+  shiftSlot && typeof shiftSlot === 'object' ? String((shiftSlot as any)?.laneKey ?? '') : '';
+const shiftKindForLane =
+  shiftSlot && typeof shiftSlot === 'object' ? String((shiftSlot as any)?.kind ?? '') : '';
   // ✅ raw hit（repeat判定の前に、レーン意図そのものを拾う）
   const hitTConcretize =
-    /"laneKey"\s*:\s*"T_CONCRETIZE"/.test(laneHintText) ||
-    /"kind"\s*:\s*"t_concretize"/.test(laneHintText) ||
-    /\bT_CONCRETIZE\b/.test(laneHintText) ||
-    /\bt_concretize\b/.test(laneHintText);
+    shiftLaneKey === 'T_CONCRETIZE' ||
+    shiftKindForLane === 't_concretize' ||
+    /"laneKey"\s*:\s*"T_CONCRETIZE"/.test(laneHintTextForLane) ||
+    /"kind"\s*:\s*"t_concretize"/.test(laneHintTextForLane) ||
+    /\bT_CONCRETIZE\b/.test(laneHintTextForLane) ||
+    /\bt_concretize\b/.test(laneHintTextForLane);
 
   // =========================================================
   // ✅ IDEA_BAND の「今回だけ強制終了」暫定ポリシー
@@ -2408,11 +2568,11 @@ const lastTurnsSafe = (() => {
   // ✅ lane single source of truth:
   // - wantsIdeaBand を固定で立てない（下流が常時 IDEA_BAND 化して壊れる）
   // - 同時ヒット時は T_CONCRETIZE を優先（レーンは単一に収束させる）
-// - wantsIdeaBand を固定で立てない（下流が常時 IDEA_BAND 化して壊れる）
-// ✅ repeatSignalSame（同句反復）が立っている時は lane を立てず、counsel/normal 側へ逃がす
-const wantsTConcretize = hitTConcretize && !repeatSignalSame;
-const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
+  // ✅ repeatSignalSame（同句反復）が立っている時は T_CONCRETIZE を立てず、counsel/normal 側へ逃がす
+  const wantsTConcretize = hitTConcretize && !repeatSignalSame;
 
+  // ✅ IDEA_BAND は same_phrase でも殺さない（コメントどおり）
+  const wantsIdeaBand = !wantsTConcretize && hitIdeaBand;
 
 
   try {
@@ -2467,6 +2627,9 @@ const wantsIdeaBand = !wantsTConcretize && hitIdeaBand && !repeatSignalSame;
   //    （GROUND骨格が IDEA_BAND を潰すため）
   const baseSystemPrompt = systemPromptForFullReply({
     ...(opts as any)?.systemPromptArgs,
+
+    // ✅ inputKind を systemPrompt に渡す（micro/greeting 判定・ログ整合）
+    inputKind,
 
     // ✅ directTask は wantsIdeaBand を考慮した版を渡す
     directTask: directTaskForPrompt,
@@ -2595,16 +2758,21 @@ try {
     (opts as any)?.resonanceState ??
     null;
 
-  // ✅ 最優先：resonanceState.seed.seed_text（postprocess 正本）
+  // ✅ 最後の保険：このターンで確定した seedDraft / seedDraftRaw
+  //    ※ slotsTextRawAll（slot全文）は seed として絶対に使わない（directive 汚染防止）
   const seedTextRaw: any =
     (rs?.seed?.seed_text ?? null) ||
     (rs?.seed_text ?? null) ||
-    // ✅ 互換：旧キー meta.extra.seed_text 相当
     (ctxPack?.seed_text ?? null) ||
     ((opts as any)?.userContext?.seed_text ?? null) ||
     ((opts as any)?.seed_text ?? null) ||
+    // ✅ まずは seedFinal（短文でも安全）
+    (typeof seedDraft === 'string' && seedDraft.trim() ? seedDraft : null) ||
+    // ✅ 次に directive を剥いだ seedDraftRaw（slot全文そのままは入れない）
+    (typeof seedDraftRaw === 'string' && seedDraftRaw.trim()
+      ? stripInternalMarkersForLock(seedDraftRaw)
+      : null) ||
     null;
-
   const seedTrim = typeof seedTextRaw === 'string' ? seedTextRaw.trim() : '';
   const block = seedTrim ? clampLines(seedTrim, 6).trim() : '';
 
@@ -2637,56 +2805,152 @@ try {
 }
 // =========================================================
 // ✅ NEW: CARD seedin（B：seed を LLM に渡す）
-// - current: 観測できれば S1..T3（検出不能は null 許容）
-// - future: 完全ランダム（S1..I3, e1..e5, yin/yang 全ランダム）
-// - LLM へ渡すのは「カード2枚＋短いルール」だけ（10〜15行に強制）
+// - inputKind === 'card' のときだけ通す
+// - env(IROS_DISABLE_CARD_SEEDIN=1) は最優先停止
+// - ただし「カード要求があるのに seed が作れない」場合は
+//   “未観測メッセージ” を固定で返すためのルールを注入する
 // =========================================================
-try {
-  const { buildDualCardPacket, formatDualCardPacketForLLM } = await import('@/lib/iros/cards/card180');
 
-  const ctxPack: any = (opts as any)?.userContext?.ctxPack ?? null;
+const disableCardSeedin =
+  String(process.env.IROS_DISABLE_CARD_SEEDIN ?? '').trim() === '1';
 
-  const packet = buildDualCardPacket(
-    {
-      current: {
-        // stage は “柱” を優先（S1..T3 が来る想定）
-        stage: pickedDepthStage ?? null,
+const inputKindForSeed: string =
+  String((opts as any)?.inputKind ?? '').toLowerCase();
 
-        // e_turn / polarity は mirrorFlow の instant を正本として拾う（無ければ null → 現状カードnull）
-        e_turn: (ctxPack?.mirror?.e_turn ?? ctxPack?.e_turn ?? null) as any,
-        polarity: (ctxPack?.mirror?.polarity ?? ctxPack?.polarity ?? null) as any,
+// ✅ “カード要求” をここでも判定（inputKind がズレても拾えるように）
+// - できるだけ緩めに（「カード」「引いて/引く/引き直して」等）
+const wantsCardByText = (() => {
+  const t = String(userText ?? '').trim();
+  if (!t) return false;
 
-        // sa はあれば補正材料として渡す（無ければ null）
-        sa: (ctxPack?.sa ?? null) as any,
+  const hasCardWord = /カード|card|タロット/i.test(t);
+  if (!hasCardWord) return false;
 
-        // basedOn は短い根拠（user head）でOK（長文禁止）
-        basedOn: String(userText ?? '').trim().slice(0, 80) || null,
-        confidence: (ctxPack?.mirror?.confidence ?? ctxPack?.confidence ?? null) as any,
+  const hasDrawWord =
+    /引(?:い|き|く|け)|ひ(?:い|き|く|け)|引き直|引きなお|引き直し|引きなおし|引き直して|引きなおして/.test(t);
+  if (!hasDrawWord) return false;
+
+  return true;
+})();
+
+// =========================================================
+// ✅ “カード未観測” の固定メッセージ（エラーにせず、適当返答もしない）
+// - ここでは一切の追加文を許可しない
+// =========================================================
+
+const CARD_UNDETECTABLE_TEXT =
+  '今は場が乱れているので観測できませんでした。';
+
+// ✅ LLM に強制するためのルール注入（internalPack に入れる）
+// - 固定文を完全一致で1回だけ出力させる
+// - 補足・質問・改行・装飾を禁止する
+const injectCardUndetectableRule = (reason: string) => {
+  try {
+    const ip = String(internalPack ?? '');
+
+    // 既に入ってたら重ねない
+    if (/CARD_UNDETECTABLE_RULE\s*\(DO NOT OUTPUT\)/.test(ip)) return;
+
+    internalPack = [
+      ip.trim(),
+      [
+        'CARD_UNDETECTABLE_RULE (DO NOT OUTPUT):',
+        `- reason=${reason}`,
+        '- ユーザーは「カード」を要求しているが、カードseedを用意できなかった。',
+        '- あなたの出力は次の固定文を**完全一致で1回のみ**出力すること。',
+        '- 追加の文、質問、提案、絵文字、装飾（**太字等**）、改行は禁止。',
+        `OUTPUT_EXACT: ${CARD_UNDETECTABLE_TEXT}`,
+      ].join('\n'),
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+  } catch {}
+};
+
+if (disableCardSeedin) {
+  try {
+    console.log('[IROS/rephraseEngine][CARD_SEEDIN] disabled_by_env', {
+      traceId: debug.traceId,
+      conversationId: debug.conversationId,
+      userCode: debug.userCode,
+      wantsCardByText,
+    });
+  } catch {}
+
+  // ✅ カード要求があるのに env で止まっている → 未観測に落とす
+  if (wantsCardByText) injectCardUndetectableRule('disabled_by_env');
+} else if (inputKindForSeed !== 'card') {
+  try {
+    console.log('[IROS/rephraseEngine][CARD_SEEDIN] skipped_by_inputKind', {
+      traceId: debug.traceId,
+      conversationId: debug.conversationId,
+      userCode: debug.userCode,
+      inputKind: inputKindForSeed,
+      wantsCardByText,
+    });
+  } catch {}
+
+  // ✅ カード要求があるのに inputKind が card になっていない → 未観測に落とす
+  if (wantsCardByText) injectCardUndetectableRule('skipped_by_inputKind');
+} else {
+  try {
+    const { buildDualCardPacket, formatDualCardPacketForLLM } =
+      await import('@/lib/iros/cards/card180');
+
+    const ctxPack: any = (opts as any)?.userContext?.ctxPack ?? null;
+
+    const packet = buildDualCardPacket(
+      {
+        current: {
+          stage: pickedDepthStage ?? null,
+          e_turn: (ctxPack?.mirror?.e_turn ?? ctxPack?.e_turn ?? null) as any,
+          polarity: (ctxPack?.mirror?.polarity ?? ctxPack?.polarity ?? null) as any,
+          sa: (ctxPack?.sa ?? null) as any,
+          basedOn: String(userText ?? '').trim().slice(0, 80) || null,
+          confidence: (ctxPack?.mirror?.confidence ?? ctxPack?.confidence ?? null) as any,
+        },
+        previous: null,
+        randomSeed: null,
       },
-      previous: null,
-      randomSeed: null,
-    },
-    {
-      // 仕様どおり
-      currentUndetectablePolicy: 'null',
-    },
-  );
+      {
+        currentUndetectablePolicy: 'null',
+      }
+    );
 
-  // ✅ card180 側で「カード2枚＋ルール」を生成
-  const raw = String(formatDualCardPacketForLLM(packet) ?? '').trim();
+    const raw = String(formatDualCardPacketForLLM(packet) ?? '').trim();
+    const cardSeedText = clampLines(raw, 15).trim();
 
-  // ✅ 要件：LLMへ渡すのは 10〜15行
-  // - card180 側が将来伸びても、ここで必ず短く固定する
-  const cardSeedText = clampLines(raw, 15).trim();
+    if (cardSeedText) {
+      internalPack = [
+        String(internalPack ?? '').trim(),
+        cardSeedText,
+      ]
+        .filter(Boolean)
+        .join('\n\n');
 
-  // internalPack の末尾に “短い塊” として追記（空は足さない）
-  if (cardSeedText) {
-    internalPack = [String(internalPack ?? '').trim(), cardSeedText].filter(Boolean).join('\n\n');
+      console.log('[IROS/rephraseEngine][CARD_SEEDIN] appended', {
+        traceId: debug.traceId,
+        conversationId: debug.conversationId,
+        userCode: debug.userCode,
+        len: cardSeedText.length,
+      });
+    } else {
+      // ✅ card なのに seed が空 → 未観測に落とす（適当返答防止）
+      try {
+        console.warn('[IROS/rephraseEngine][CARD_SEEDIN] empty_seed', {
+          traceId: debug.traceId,
+          conversationId: debug.conversationId,
+          userCode: debug.userCode,
+        });
+      } catch {}
+      injectCardUndetectableRule('empty_seed');
+    }
+  } catch (e) {
+    console.warn('[IROS/rephraseEngine][CARD_SEEDIN] error', e);
+    // ✅ 例外 → 未観測に落とす（エラーで落とさない）
+    injectCardUndetectableRule('error');
   }
-} catch (e) {
-  console.warn('[IROS/rephraseEngine][CARD_SEEDIN] skipped', e);
 }
-
   // ✅ 観測（確証を取る）
   const __ip = String(internalPack ?? '');
   const __tailN = 260;
@@ -2703,25 +2967,40 @@ try {
   });
 
 
-// 目的：buildFirstPassMessages に渡す seedDraft を固定文字列から seedDraft に差し替え。
+// - 目的：roles=[system,user] を回避し、会話の文脈だけを維持する
+// ✅ 方針：writer へ userText を一切渡さない（turns/history/finalUserText から除外）
+// - ただし「会話の役割列（assistant/user）」は保つ（user本文は伏せる）
+const topicDigestForWriter =
+  String(
+    (opts as any)?.topicDigest ??
+    (opts as any)?.userContext?.topicDigest ??
+    (opts as any)?.userContext?.ctxPack?.topicDigest ??
+    ''
+  ).trim();
 
-  // ✅ 方針：writer へ userText を一切渡さない（turns/history/finalUserText から除外）
-  // - ただし「assistant側の過去ターン」は渡してよい（user生文は渡さない）
-  // - 目的：writer messages に assistant ターンが載らず roles=[system,user] になっていた問題を解消する
-// ✅ 方針：writer へ userText を一切渡さない（turns/history/finalUserText から除外）
-// - ただし「会話の役割列（assistant/user）」は保つ（user本文は伏せる）
-// - 目的：roles=[system,user] を回避し、会話の文脈だけを維持する
-// ✅ 方針：writer へ userText を一切渡さない（turns/history/finalUserText から除外）
-// - ただし「会話の役割列（assistant/user）」は保つ（user本文は伏せる）
-// - 目的：roles=[system,user] を回避し、会話の文脈だけを維持する
+const conversationLineForWriter =
+  String(
+    (opts as any)?.conversationLine ??
+    (opts as any)?.userContext?.conversationLine ??
+    (opts as any)?.userContext?.ctxPack?.conversationLine ??
+    ''
+  ).trim();
+
+// ✅ まず turnsForWriter を優先
+// ✅ 無ければ ctxPack.turns を使う（今回のログでここに実体がある）
+// ✅ それも無ければ historyForWriter / lastTurnsSafe にフォールバック
 const rawTurnsForWriter =
   (opts as any)?.turnsForWriter ??
   (opts as any)?.userContext?.turnsForWriter ??
+  (opts as any)?.userContext?.ctxPack?.turnsForWriter ??
+  (opts as any)?.userContext?.ctxPack?.turns ??
+  (opts as any)?.userContext?.turns ??
   (opts as any)?.userContext?.ctxPack?.historyForWriter ??
   (opts as any)?.userContext?.historyForWriter ??
+  lastTurnsSafe ??
   [];
 
-// ✅ 末尾だけ使う（LAST_TURNS_PICK と整合させる）
+// ✅ 末尾だけ使う（LAST_TURNS_PICK と整合）
 const MAX_TURNS_FOR_WRITER = 6;
 const rawTail = Array.isArray(rawTurnsForWriter)
   ? rawTurnsForWriter.slice(-MAX_TURNS_FOR_WRITER)
@@ -2729,10 +3008,15 @@ const rawTail = Array.isArray(rawTurnsForWriter)
 
 const turnsForWriter: any[] = rawTail
   .map((t: any) => {
-    const role = t?.role === 'assistant' ? 'assistant' : t?.role === 'user' ? 'user' : null;
+    const role =
+      t?.role === 'assistant'
+        ? 'assistant'
+        : t?.role === 'user'
+          ? 'user'
+          : null;
     if (!role) return null;
 
-    // 🚫 user は生文禁止：内容は必ず伏せる（役割だけ残す）
+    // 🚫 user は生文禁止：役割だけ残す
     if (role === 'user') return { role: 'user', content: '[USER]' };
 
     const content = String(t?.content ?? '').trim();
@@ -2741,14 +3025,15 @@ const turnsForWriter: any[] = rawTail
   })
   .filter(Boolean);
 
-  // ✅ buildFirstPassMessages は finalUserText を採用しない（強制遮断）ため、
-  // ✅ 「最後を user で終わらせる」保証は seedDraft で行う（固定文のみ）
-  let messages = buildFirstPassMessages({
-    systemPrompt,
-    internalPack,
-    turns: turnsForWriter,
-    seedDraft, // ✅ ここで上で確定した seedFinal（userText遮断済み）を渡す
-  });
+// ✅ buildFirstPassMessages が持っている “会話線” をちゃんと渡す
+let messages = buildFirstPassMessages({
+  systemPrompt,
+  internalPack,
+  turns: turnsForWriter,
+  seedDraft,
+  topicDigest: topicDigestForWriter,
+  conversationLine: conversationLineForWriter,
+});
 
   // ✅ HistoryDigest v1（外から渡された場合のみ注入）
   // - 生成はここではしない（生成元は本線側に固定）
@@ -3342,13 +3627,13 @@ console.log('[IROS/rephraseEngine][MSG_PACK]', {
   // ✅ seedDraft 実体の監査（発生源特定用）
   seedDraftLen: seedDraft.length,
   seedDraftHead: safeHead(seedDraft, 120),
-  seedDraftRawAllHead: safeHead(seedDraftRawAll, 200),
+  seedDraftRawAllHead: safeHead(slotsTextRawAll, 200),
 
     // ✅ slots の中身を “頭だけ” 監査（自然文混入の犯人探し）
     slotsHead: (extracted?.slots ?? []).map((s: any, i: number) => ({
       i,
       key: String(s?.key ?? ''),
-      head: safeHead(String(s?.text ?? ''), 80),
+      head: safeHead(sanitizeSlotTextForWriter(String(s?.text ?? '')), 80),
     })),
 
     itOk,
@@ -3848,9 +4133,33 @@ console.log('[IROS/rephraseEngine][MSG_PACK]', {
     });
   }
 
-  // ---------------------------------------------
-  // candidate 生成（clamp + lamp）
-  // ---------------------------------------------
+  const sanitizeNoQuestions = (text: string) => {
+    const t = String(text ?? '').trim();
+    if (!t) return t;
+
+    const goalKindNow = String((opts?.userContext as any)?.ctxPack?.goalKind ?? '').trim();
+    const forceNoQuestionsByGoal = goalKindNow === 'stabilize';
+
+    const forceNoQuestionsByPack =
+      typeof internalPack === 'string' &&
+      (internalPack.includes('質問は原則しない（0）') ||
+        internalPack.includes('質問はしない。') ||
+        internalPack.includes('文末を「?」で終えない。'));
+
+    const noQuestions = forceNoQuestionsByGoal || forceNoQuestionsByPack || inputKind === 'question';
+    if (!noQuestions) return t;
+
+    // ✅ 行は落とさない。末尾の ?/？ だけ句点化して “質問っぽさ” を消す。
+    const lines = t.split('\n');
+
+    const normalizeLine = (ln: string) => {
+      const s = ln.replace(/\s+$/g, '');
+      return s.replace(/[?？]\s*$/g, '。');
+    };
+
+    const out = lines.map(normalizeLine).join('\n').trim();
+    return out;
+  };
   let candidate = makeCandidate(rawGuarded, maxLines, renderEngine);
 
   if (!candidate) {
@@ -3869,6 +4178,9 @@ console.log('[IROS/rephraseEngine][MSG_PACK]', {
       candidate = makeCandidate(restoredAfterClamp, maxLines, renderEngine);
     }
   }
+
+  // ✅ 最終確定直前：問いを物理的に落とす（inputKind=question のときだけ）
+  candidate = sanitizeNoQuestions(candidate);
 
   if (scaffoldActive && scaffoldMissingAfterRestore.length > 0 && seedFromSlots) {
     console.warn('[IROS/REPHRASE][SCAFFOLD_MUST_HAVE_TO_SEED]', {

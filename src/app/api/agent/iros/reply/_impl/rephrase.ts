@@ -222,7 +222,53 @@ export async function maybeAttachRephraseForRenderV2(args: {
   };
 
   const attachBlocksFromTextOrSkip = (candidateText: string, attachReason: string) => {
+    // ✅ existing blocks/head が「ゴミ」なら温存せず破棄して作り直す（短文ループ回避）
+    const isGarbageText = (s: any) => {
+      const t = TRIM(String(s ?? ''));
+      if (!t) return true;
+
+      // 短すぎはゴミ扱い（例：「続けてください」「……」）
+      if (t.length <= 12) return true;
+
+      // 記号・点々だけ
+      if (/^[\s…。．.、,!！?？]+$/.test(t)) return true;
+
+      // 典型の短文ループ
+      if (/^(続けて(ください)?|続けよう|続けてね)[\s。．.!！?？]*$/.test(t)) return true;
+
+      return false;
+    };
+
+    const clearExistingRephrase = (why: string, detail?: any) => {
+      try {
+        // extraMerged 側
+        delete (extraMerged as any).rephraseBlocks;
+        delete (extraMerged as any).rephraseHead;
+        delete (extraMerged as any).rephrase;
+        delete (extraMerged as any).rephraseBlocksAttached;
+
+        // meta.extra 側（存在するなら）
+        if (meta?.extra && typeof meta.extra === 'object') {
+          delete (meta.extra as any).rephraseBlocks;
+          delete (meta.extra as any).rephraseHead;
+          delete (meta.extra as any).rephrase;
+          delete (meta.extra as any).rephraseBlocksAttached;
+        }
+
+        console.warn('[IROS/rephraseAttach][OVERRIDE]', {
+          conversationId,
+          userCode,
+          why,
+          attachReason,
+          ...(detail ?? {}),
+        });
+      } catch (e) {
+        console.error('[IROS/rephraseAttach][OVERRIDE][ERROR]', e);
+      }
+    };
+
     // ✅ すでに rephraseBlocks / rephraseHead が存在するなら上書きしない
+    //    ただし「ゴミ」なら破棄して作り直す
     const existingBlocks =
       (extraMerged as any)?.rephraseBlocks ??
       (extraMerged as any)?.rephrase?.blocks ??
@@ -233,16 +279,45 @@ export async function maybeAttachRephraseForRenderV2(args: {
       null;
 
     if (Array.isArray(existingBlocks) && existingBlocks.length > 0) {
-      setSkip('ALREADY_HAS_REPHRASE_BLOCKS', { blocksLen: existingBlocks.length, attachReason });
-      return false;
+      const headText =
+        TRIM(
+          String(
+            (typeof existingBlocks[0] === 'string'
+              ? existingBlocks[0]
+              : (existingBlocks[0] as any)?.text) ?? ''
+          )
+        ) || '';
+
+      const garbage = existingBlocks.length === 1 && isGarbageText(headText);
+
+      if (!garbage) {
+        setSkip('ALREADY_HAS_REPHRASE_BLOCKS', { blocksLen: existingBlocks.length, attachReason });
+        return false;
+      }
+
+      // ✅ ゴミなら捨てて、通常フローで fallback blocks を作り直す
+      clearExistingRephrase('GARBAGE_EXISTING_BLOCKS', {
+        blocksLen: existingBlocks.length,
+        head: headText.slice(0, 80),
+      });
     }
 
     const existingHead =
       TRIM((extraMerged as any)?.rephraseHead) || TRIM((meta as any)?.extra?.rephraseHead) || '';
 
     if (existingHead) {
-      setSkip('ALREADY_HAS_REPHRASE_HEAD', { headLen: existingHead.length, attachReason });
-      return false;
+      const garbage = isGarbageText(existingHead);
+
+      if (!garbage) {
+        setSkip('ALREADY_HAS_REPHRASE_HEAD', { headLen: existingHead.length, attachReason });
+        return false;
+      }
+
+      // ✅ ゴミなら捨てて作り直す
+      clearExistingRephrase('GARBAGE_EXISTING_HEAD', {
+        head: String(existingHead).slice(0, 80),
+        headLen: existingHead.length,
+      });
     }
 
     const t = TRIM(candidateText);
@@ -275,7 +350,8 @@ export async function maybeAttachRephraseForRenderV2(args: {
     (extraMerged as any).rephraseApplied = false;
     (extraMerged as any).rephraseAttachSkipped = false;
     (extraMerged as any).rephraseAttachReason = attachReason;
-    (extraMerged as any).rephraseReason = (extraMerged as any).rephraseReason ?? 'fallback_blocks_from_text';
+    (extraMerged as any).rephraseReason =
+      (extraMerged as any).rephraseReason ?? 'fallback_blocks_from_text';
     (extraMerged as any).rephraseHead = (extraMerged as any).rephraseHead ?? t;
 
     console.log('[IROS/rephraseAttach][FALLBACK]', {
@@ -557,91 +633,136 @@ const intentBandForCtx =
   };
 
   const replyGoalForCtx = buildReplyGoal();
-
-  // 3点セット（会話を散らさない）
-  const topicDigestForCtx: string | null = null;
-
+  // repeatSignal（反復シグナル）は upstream があれば拾う。無ければ null のまま。
   const repeatSignalForCtx: string | null = (() => {
-    const now = String(userText ?? '').trim();
-    if (!now) return null;
+    const pick = (...cands: any[]) => {
+      for (const v of cands) {
+        if (v === undefined || v === null) continue;
+        const s = String(v).trim();
+        if (!s) continue;
+        return s;
+      }
+      return null;
+    };
 
-    const turns = normalizedHistory ?? [];
-    const userTurns = turns.filter((m) => m?.role === 'user');
+    return pick(
+      (extraMerged as any)?.repeatSignal,
+      (extraMerged as any)?.extra?.repeatSignal,
+      (extraMerged as any)?.ctxPack?.repeatSignal,
+      (extraMerged as any)?.extra?.ctxPack?.repeatSignal,
+      (meta as any)?.extra?.repeatSignal,
+      (meta as any)?.extra?.ctxPack?.repeatSignal,
+      (meta as any)?.ctxPack?.repeatSignal,
+      (meta as any)?.framePlan?.ctxPack?.repeatSignal,
+      (meta as any)?.framePlan?.extra?.ctxPack?.repeatSignal
+    );
+  })();
+  // 3点セット（会話を散らさない）
+  const topicDigestForCtx: string | null = (() => {
+    const pick = (...cands: any[]) => {
+      for (const v of cands) {
+        if (v === undefined || v === null) continue;
+        const s = String(v).trim();
+        if (!s) continue;
+        return s;
+      }
+      return null;
+    };
 
-    if (userTurns.length === 0) return null;
+    // 1) まずは upstream にある “正本” を最優先で拾う
+    const upstream = pick(
+      (extraMerged as any)?.topicDigest,
+      (extraMerged as any)?.extra?.topicDigest,
 
-    // ✅ history 側に「今回 userText が既に入っている」重複を強制的に無視して prev を探す
-    // - 末尾が now と同じならスキップ
-    // - さらに「同じ文が連続してる」場合もスキップして、実質の前回 user を拾う
-    let prev: string | null = null;
-    let lastSeen: string | null = null;
+      (extraMerged as any)?.ctxPack?.topicDigest,
+      (extraMerged as any)?.ctxPack?.conversationLine,
+      (extraMerged as any)?.extra?.ctxPack?.topicDigest,
+      (extraMerged as any)?.extra?.ctxPack?.conversationLine,
 
-    for (let i = userTurns.length - 1; i >= 0; i--) {
-      const t = String(userTurns[i]?.content ?? '').trim();
-      if (!t) continue;
+      (meta as any)?.extra?.topicDigest,
+      (meta as any)?.extra?.ctxPack?.topicDigest,
+      (meta as any)?.extra?.ctxPack?.conversationLine,
+      (meta as any)?.ctxPack?.topicDigest,
+      (meta as any)?.ctxPack?.conversationLine,
 
-      // 連続重複の圧縮（…A, A, A みたいなのを1つとして扱う）
-      if (lastSeen != null && t === lastSeen) continue;
-      lastSeen = t;
+      (meta as any)?.framePlan?.ctxPack?.topicDigest,
+      (meta as any)?.framePlan?.ctxPack?.conversationLine,
+      (meta as any)?.framePlan?.extra?.ctxPack?.topicDigest,
+      (meta as any)?.framePlan?.extra?.ctxPack?.conversationLine
+    );
+    if (upstream) return upstream;
 
-      // 「今回 now が history に混入している」ケースを除外
-      if (t === now) continue;
+    // 2) 無ければ MemoryState の situationSummary を拾う（userText ではない安全な救済）
+    const msSummary = pick((memoryStateForCtx as any)?.situationSummary);
+    if (msSummary) return msSummary;
 
-      prev = t;
-      break;
-    }
+    // 3) それでも無ければ history から“軽い1行”を救済生成する
+    const hist: any[] = Array.isArray(normalizedHistory) ? normalizedHistory : [];
+    const lastUsers = hist
+      .filter((m: any) => m && m.role === 'user')
+      .map((m: any) => String(m.content ?? '').trim())
+      .filter((s: string) => s.length > 0)
+      .slice(-3);
 
-    if (!prev) return null;
+    if (lastUsers.length === 0) return null;
 
-    // 完全一致（正規化前）
-    if (now === prev) return 'same_phrase';
+    const cleaned = lastUsers.map((s) =>
+      s
+        .replace(/\s+/g, ' ')
+        .replace(/[。.!！?？]+$/g, '')
+        .trim()
+    );
 
-    // 正規化一致（句読点・空白・大小などを落とす）
-    const normalize = (s: string) => s.replace(/[、。,.!?！？\s]/g, '').toLowerCase();
-    if (normalize(now) === normalize(prev)) return 'same_phrase';
+    // 同文連投は畳む
+    const uniq = cleaned.filter((s, i, arr) => i === 0 || s !== arr[i - 1]);
 
-    return null;
+    // 直近3件を短く連結（長すぎる時は切る）
+    const joined = uniq.join('・').trim();
+    return joined ? joined.slice(0, 40) : null;
   })();
 
+  // conversationLine を “確実に” 用意する（rephraseEngine 側フォールバックを効かせる）
+  const conversationLineForCtx: string | null = (() => {
+    const pick = (...cands: any[]) => {
+      for (const v of cands) {
+        if (v === undefined || v === null) continue;
+        const s = String(v).trim();
+        if (!s) continue;
+        return s;
+      }
+      return null;
+    };
+    return pick(
+      (extraMerged as any)?.ctxPack?.conversationLine,
+      (extraMerged as any)?.extra?.ctxPack?.conversationLine,
+      (meta as any)?.extra?.ctxPack?.conversationLine,
+      (meta as any)?.ctxPack?.conversationLine,
+      (meta as any)?.framePlan?.ctxPack?.conversationLine,
+      topicDigestForCtx
+    );
+  })();
+  // =========================================================
+  // ctxPack / slotPlanPolicy を “確実に” 定義（不足分だけ補完する前提）
+  // - upstream を最優先で継承
+  // - 無ければ空オブジェクトから開始
+  // =========================================================
 
   // slotPlanPolicy を確実に通す
   const slotPlanPolicyForCtx =
     String(
       (extraMerged as any)?.slotPlanPolicy ??
+        (extraMerged as any)?.extra?.slotPlanPolicy ??
+        (extraMerged as any)?.ctxPack?.slotPlanPolicy ??
+        (extraMerged as any)?.extra?.ctxPack?.slotPlanPolicy ??
         (meta as any)?.framePlan?.slotPlanPolicy ??
         (meta as any)?.slotPlanPolicy ??
-        '',
+        ''
     )
       .toUpperCase()
       .trim() || null;
 
-  // =========================================================
-  // [置換 1] userContext / ctxPack を “上書き生成” しない
-  // - handleIrosReply 側で stamp 済みの ctxPack を最優先で継承
-  // - 欠けているキーだけを補完する（phase/depth/q/flow/digest を落とさない）
-  // =========================================================
-
-  const phaseForCtx =
-    (memoryStateForCtx as any)?.phase ??
-    (meta as any)?.phase ??
-    (meta as any)?.extra?.phase ??
-    null;
-
-  const qCodeForCtx =
-    (typeof (meta as any)?.q_code === 'string' && TRIM((meta as any).q_code)) ||
-    (typeof (meta as any)?.qCode === 'string' && TRIM((meta as any).qCode)) ||
-    (typeof (meta as any)?.qPrimary === 'string' && TRIM((meta as any).qPrimary)) ||
-    (typeof (meta as any)?.unified?.q?.current === 'string' && TRIM((meta as any).unified.q.current)) ||
-    null;
-
-  const depthForCtx =
-    (typeof (meta as any)?.depth_stage === 'string' && TRIM((meta as any).depth_stage)) ||
-    (typeof (meta as any)?.depthStage === 'string' && TRIM((meta as any).depthStage)) ||
-    (typeof (meta as any)?.depth === 'string' && TRIM((meta as any).depth)) ||
-    (typeof (meta as any)?.unified?.depth?.stage === 'string' && TRIM((meta as any).unified.depth.stage)) ||
-    null;
-
-    const ctxPackFromUpstream =
+  // handleIrosReply / renderEngine 側で stamp 済みの ctxPack を最優先で継承
+  const ctxPackFromUpstream =
     // 1) route.ts / renderEngine 側で extraMerged に載せてきたもの（最優先）
     (extraMerged as any)?.ctxPack ??
     (extraMerged as any)?.extra?.ctxPack ??
@@ -664,26 +785,62 @@ const intentBandForCtx =
       ? { ...(ctxPackFromUpstream as any) }
       : {};
 
+  // ✅ blank 判定（null/undefined/空文字/空白文字/ kind:'' を “空” とみなす）
+  const isBlankLike = (v: any) => {
+    if (v === null || v === undefined) return true;
+    if (typeof v === 'string') return v.trim().length === 0;
+    if (typeof v === 'object') {
+      const k = (v as any)?.kind;
+      if (typeof k === 'string' && k.trim().length === 0) return true;
+    }
+    return false;
+  };
+
+  if (isBlankLike((ctxPack as any).replyGoal)) (ctxPack as any).replyGoal = replyGoalForCtx;
+
   // upstream を尊重しつつ、不足分だけ補完
   if (ctxPack.turns == null) ctxPack.turns = normalizedHistory.length ? normalizedHistory : undefined;
   if (ctxPack.historyForWriter == null) ctxPack.historyForWriter = normalizedHistory.length ? normalizedHistory : undefined;
-  if (ctxPack.slotPlanPolicy == null) ctxPack.slotPlanPolicy = slotPlanPolicyForCtx;
+  if (isBlankLike(ctxPack.slotPlanPolicy)) ctxPack.slotPlanPolicy = slotPlanPolicyForCtx;
 
-  if (ctxPack.itxStep == null) ctxPack.itxStep = itxStepForCtx;
-  if (ctxPack.itxReason == null) ctxPack.itxReason = itxReasonForCtx;
-  if (ctxPack.intentBand == null) ctxPack.intentBand = intentBandForCtx;
+  if (isBlankLike(ctxPack.itxStep)) ctxPack.itxStep = itxStepForCtx;
+  if (isBlankLike(ctxPack.itxReason)) ctxPack.itxReason = itxReasonForCtx;
+  if (isBlankLike(ctxPack.intentBand)) ctxPack.intentBand = intentBandForCtx;
 
   if (ctxPack.tLayerHint == null) ctxPack.tLayerHint = tLayerHintForCtx ?? null;
   if (ctxPack.tLayerModeActive == null) ctxPack.tLayerModeActive = tLayerModeActiveForCtx;
 
-  if (ctxPack.topicDigest == null) ctxPack.topicDigest = topicDigestForCtx;
-  if (ctxPack.replyGoal == null) ctxPack.replyGoal = replyGoalForCtx;
-  if (ctxPack.repeatSignal == null) ctxPack.repeatSignal = repeatSignalForCtx;
+  // ★3点セット（空文字でも補完する）
+  if (isBlankLike(ctxPack.topicDigest)) ctxPack.topicDigest = topicDigestForCtx;
+  if (isBlankLike(ctxPack.conversationLine)) ctxPack.conversationLine = conversationLineForCtx; // ✅ 追加
+  if (isBlankLike(ctxPack.replyGoal)) ctxPack.replyGoal = replyGoalForCtx;
+  if (isBlankLike(ctxPack.repeatSignal)) ctxPack.repeatSignal = repeatSignalForCtx;
+
+  // phase / depthStage / qCode を ctxPack にも載せるための “確証つき” 値
+  const phaseForCtx =
+    (memoryStateForCtx as any)?.phase ??
+    (meta as any)?.phase ??
+    (meta as any)?.extra?.phase ??
+    null;
+
+  const qCodeForCtx =
+    (typeof (meta as any)?.q_code === 'string' && TRIM((meta as any).q_code)) ||
+    (typeof (meta as any)?.qCode === 'string' && TRIM((meta as any).qCode)) ||
+    (typeof (meta as any)?.qPrimary === 'string' && TRIM((meta as any).qPrimary)) ||
+    (typeof (meta as any)?.unified?.q?.current === 'string' && TRIM((meta as any).unified.q.current)) ||
+    null;
+
+  const depthForCtx =
+    (typeof (meta as any)?.depth_stage === 'string' && TRIM((meta as any).depth_stage)) ||
+    (typeof (meta as any)?.depthStage === 'string' && TRIM((meta as any).depthStage)) ||
+    (typeof (meta as any)?.depth === 'string' && TRIM((meta as any).depth)) ||
+    (typeof (meta as any)?.unified?.depth?.stage === 'string' && TRIM((meta as any).unified.depth.stage)) ||
+    null;
 
   // ★ここが本丸：rephraseEngine が拾う “3点セット” を ctxPack にも載せる
-  if (ctxPack.phase == null) ctxPack.phase = phaseForCtx;
-  if (ctxPack.depthStage == null) ctxPack.depthStage = depthForCtx;
-  if (ctxPack.qCode == null) ctxPack.qCode = qCodeForCtx;
+  if (isBlankLike(ctxPack.phase)) ctxPack.phase = phaseForCtx;
+  if (isBlankLike(ctxPack.depthStage)) ctxPack.depthStage = depthForCtx;
+  if (isBlankLike(ctxPack.qCode)) ctxPack.qCode = qCodeForCtx;
 
   // flowDigest は既存 util を使う（upstream の flow があれば触らない）
   if (ctxPack.flowDigest == null) ctxPack.flowDigest = buildFlowDigest();
@@ -714,7 +871,6 @@ const intentBandForCtx =
 
     historyMessages: normalizedHistory.length ? normalizedHistory : undefined,
   };
-
   // =========================================================
   // 診断 FINAL(IR) は LLM rephrase を呼ばない（崩れ防止）
   // ただしブロック化は assistant 側テキストのみから行う
@@ -783,12 +939,90 @@ const depthForLLM =
   (typeof (meta as any)?.unified?.depth?.stage === 'string' && TRIM((meta as any).unified.depth.stage)) ||
   null;
 
-const inputKindForLLM = String(
-  (meta as any)?.framePlan?.inputKind ??
+  // inputKind
+  // - 明示スタンプ（meta / framePlan / userContext）をまず拾う
+  // - ただし stamped='chat' は “デフォルト” 扱いにして、カード要求があれば card を優先する
+  const inputKindStampedRaw =
+    (meta as any)?.framePlan?.inputKind ??
     (meta as any)?.inputKind ??
     (userContext as any)?.framePlan?.inputKind ??
-    '',
-).toLowerCase();
+    '';
+
+  const inputKindStamped = String(inputKindStampedRaw).trim().toLowerCase();
+
+// ✅ 厳しめ：カード要求（「カード」+「引く/引いて/ひく/引き直す」系）が同時にある時だけ
+// const wantsCardByText = (() => { ... })();
+
+  // ✅ カード要求判定
+  // - 初回は「カード|card」必須
+  // - 追加は「引く/引いて」だけでもOKだが、直近にカード文脈がある場合に限定
+  const wantsCardByText = (() => {
+    const t = String(userText ?? '').trim();
+    if (!t) return false;
+
+    const hasDrawWord =
+      /引(?:い|き|く|け)|ひ(?:い|き|く|け)|引き直|引きなお|引き直し|引きなおし|引き直して|引きなおして/.test(t);
+    if (!hasDrawWord) return false;
+
+    const hasCardWord = /カード|card/i.test(t);
+    if (hasCardWord) return true; // ✅ 初回起動OK
+
+    // ✅ ここから先は「追加」判定：カード文脈が直近にある時だけ許可
+    const lastAssistantText = (() => {
+      try {
+        const hfw: any[] =
+          (userContext as any)?.ctxPack?.historyForWriter ??
+          (userContext as any)?.historyForWriter ??
+          (userContext as any)?.turnsForWriter ??
+          [];
+        if (!Array.isArray(hfw) || hfw.length === 0) return '';
+        for (let i = hfw.length - 1; i >= 0; i--) {
+          if (hfw[i]?.role === 'assistant') return String(hfw[i]?.content ?? '').trim();
+        }
+        return '';
+      } catch {
+        return '';
+      }
+    })();
+
+    const hasCardContext =
+      /カード|card/i.test(lastAssistantText) ||
+      /引くね|引いてみる|引いてみよう|引いてみて|カードを引/i.test(lastAssistantText);
+
+    return hasCardContext;
+  })();
+
+  // stamped が空/不明 → 推定へ
+  // stamped が 'chat' はデフォルト扱いで wantsCardByText があれば card を優先
+  // stamped が 'micro'/'greeting' も “デフォルト扱い” にして、カード要求があれば card に上書き（ここが重要）
+  // stamped が 'card' 等 → そのまま尊重（明示指定）
+  const inputKindForLLM = (() => {
+    if (!inputKindStamped) return wantsCardByText ? 'card' : '';
+
+    if (inputKindStamped === 'chat') return wantsCardByText ? 'card' : 'chat';
+
+    if (inputKindStamped === 'micro' || inputKindStamped === 'greeting') {
+      return wantsCardByText ? 'card' : inputKindStamped;
+    }
+
+    return inputKindStamped;
+  })();
+
+  console.log('[IROS/_impl/rephrase.ts][INPUT_KIND_DIAG]', {
+    inputKindStampedRaw,
+    inputKindStamped,
+    wantsCardByText,
+    inputKindForLLM,
+    userTextHead: String(userText ?? '').slice(0, 40),
+  });
+
+  console.log('[IROS/_impl/rephrase.ts][INPUT_KIND_DIAG]', {
+    inputKindStampedRaw,
+    inputKindStamped,
+    wantsCardByText,
+    inputKindForLLM,
+    userTextHead: String(userText ?? '').slice(0, 40),
+  });
 
 // ctxPack.historyDigestV1 を “最終注入”（hasDigest を true にする）
 // + historyForWriter が空なら ctxPack.turns から救済して turnsForWriter を作る（user生文は伏せる）
@@ -889,6 +1123,12 @@ console.log('[IROS/_impl/rephrase.ts][USERCTX_KEYS]', {
 });
 
 try {
+  const slotPlanPolicyForRephrase =
+  (userContext as any)?.ctxPack?.slotPlanPolicy ??
+  (meta as any)?.framePlan?.slotPlanPolicy ??
+  (meta as any)?.slotPlanPolicy ??
+  null;
+
   const res = await rephraseSlotsFinal(extracted, {
     model,
     conversationId,
@@ -900,15 +1140,37 @@ try {
     inputKind: inputKindForLLM,
     userContext,
 
+    // ✅ audit/分岐のために明示的に渡す
+    slotPlanPolicy: slotPlanPolicyForRephrase,
+
     // ✅ NEW: route.ts から来る forceRetry を rephraseEngine へ配線
     forceRetry: !!((extraMerged as any)?.forceRetry ?? (meta as any)?.extra?.forceRetry),
-  } as any);
 
+    // ✅ 本丸：rephraseEngine が必ず拾える top-level 配線（ctxPackが薄くなっても死なない）
+    topicDigest: topicDigestForCtx,
+    conversationLine: conversationLineForCtx,
+    replyGoal: replyGoalForCtx,
+    repeatSignal: repeatSignalForCtx,
+  } as any);
   console.log('[IROS/rephraseAttach][RES_KEYS]', {
     resKeys: Object.keys(res ?? {}),
     metaKeys: Object.keys((res as any)?.meta ?? {}),
-    outKeys: Object.keys((res as any)?.out ?? {}),
-    metaOutKeys: Object.keys((res as any)?.meta?.out ?? {}),
+    // NOTE: rephraseSlotsFinal は out を返さない設計のため、outKeys は原則空になる
+    hasOut: (res as any)?.out != null,
+    outType: typeof (res as any)?.out,
+    metaHasOut: (res as any)?.meta?.out != null,
+    metaOutType: typeof (res as any)?.meta?.out,
+
+    // 本命：meta.extra を見る
+    metaExtraKeys: Object.keys((res as any)?.meta?.extra ?? {}),
+    metaExtra_hasRephraseHead: !!(res as any)?.meta?.extra?.rephraseHead,
+    metaExtra_blocksLen: Array.isArray((res as any)?.meta?.extra?.rephraseBlocks)
+      ? (res as any).meta.extra.rephraseBlocks.length
+      : 0,
+
+    // raw 系の観測（fallback が効くか）
+    rawLen: Number((res as any)?.meta?.rawLen ?? 0),
+    rawHead: (res as any)?.meta?.rawHead ?? '',
   });
 
     // 正本：res.meta.extra（AFTER_ATTACH）側

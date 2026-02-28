@@ -202,9 +202,7 @@ function buildCompose(userText: string, laneKey?: LaneKey, flowDelta?: string | 
       style: 'neutral',
       content: m('TASK', {
         kind: 'compose',
-        user: clamp(t, 240),
-
-        // ✅ writer専用の“核”をpayloadに埋める（自然文は混ぜない＝commit露出しない）
+        // 🚫 user キー禁止（生文混入の温床）
         seed_text: clamp(t, 240),
       }),
     },
@@ -253,15 +251,17 @@ function buildClarify(
   const seedText = clamp(norm(userText), 240);
   const delta = flowDelta ? String(flowDelta) : null;
 
-  // ✅ どの経路でも OBS を固定で出す（seed露出防止：@行のみ）
+  // ✅ どの経路でも OBS を固定で出す（生文は入れない：構造だけ）
   const obs: NormalChatSlot = {
     key: 'OBS',
     role: 'assistant',
     style: 'soft',
     content: m('OBS', {
       laneKey: lane ?? null, // 未指定は null のまま出す
-      user: seedText,
       flow: { delta },
+      // 🚫 生文遮断：user / lastUserText を slot に入れない
+      user: null,
+      lastUserText: null,
     }),
   };
 
@@ -583,9 +583,8 @@ function buildFlowReply(args: {
               style: 'soft',
               content: m('OBS', {
                 laneKey: laneKeyForObs,
-                user: seedText,
                 flow: conf === undefined ? { delta } : { delta, confidence: conf },
-                lastUserText: args.lastUserText ? clamp(norm(args.lastUserText), 140) : null,
+                // 🚫 生文は入れない（user / lastUserText は slot から完全排除）
               }),
             },
             {

@@ -2364,6 +2364,45 @@ if (!extra2.ctxPack || typeof extra2.ctxPack !== 'object') {
   extra2.ctxPack = {};
 }
 
+// ---- ctxPack restore (minimal; from history) ----
+// 目的：前ターン assistant.meta.extra.ctxPack を「今回の ctxPack 初期値」として復元する。
+// 注意：重いキーや演出系は継続禁止。最小キーだけ戻す。
+const restoreCtxPackFromHistory = (historyForTurn: any[]): any | null => {
+  const hft = Array.isArray(historyForTurn) ? (historyForTurn as any[]) : [];
+  for (let i = hft.length - 1; i >= 0; i--) {
+    const m = hft[i];
+    if ((m as any)?.role !== 'assistant') continue;
+
+    const ctx =
+      (m as any)?.meta?.extra?.ctxPack ??
+      (m as any)?.meta?.ctxPack ??
+      null;
+
+    if (!ctx || typeof ctx !== 'object') continue;
+
+    const restored: any = {
+      qCode: typeof ctx.qCode === 'string' ? ctx.qCode : null,
+      depthStage: typeof ctx.depthStage === 'string' ? ctx.depthStage : null,
+      phase: typeof ctx.phase === 'string' ? ctx.phase : null,
+      conversationLine: typeof ctx.conversationLine === 'string' ? ctx.conversationLine : null,
+    };
+
+    if (restored.qCode || restored.depthStage || restored.phase || restored.conversationLine) {
+      return restored;
+    }
+  }
+  return null;
+};
+
+// ✅ 復元→合流（現ターン優先）
+const restored = restoreCtxPackFromHistory(historyForTurn);
+if (restored) {
+  extra2.ctxPack = {
+    ...restored,
+    ...(extra2.ctxPack as any),
+  };
+}
+
 // history から「直近の ctxPack.flow.at / returnStreak」を拾う
 let prevAtIso: string | null = null;
 let prevReturnStreak: number | null = null;
@@ -2372,28 +2411,43 @@ const hft = Array.isArray(historyForTurn) ? (historyForTurn as any[]) : [];
 for (let i = hft.length - 1; i >= 0; i--) {
   const m = hft[i];
 
+  // まず “flow object” 候補を拾う（複数経路に対応）
   const flowObj =
     (m as any)?.meta?.extra?.ctxPack?.flow ??
     (m as any)?.meta?.ctxPack?.flow ??
-    // ✅ 互換: 旧/別経路（extra.flow / meta.flow）も拾う
     (m as any)?.meta?.extra?.flow ??
     (m as any)?.meta?.flow ??
     null;
 
+  // at
   const flowAt = flowObj?.at ?? null;
   if (!prevAtIso && typeof flowAt === 'string' && flowAt.trim().length > 0) {
     prevAtIso = flowAt.trim();
   }
 
-  // ✅ returnStreak も同じ flowObj から拾えるようにする
-  const rsRaw = flowObj?.returnStreak ?? null;
+  // returnStreak（flowObj に無いケースがあるので候補を増やす）
+  const rsCandidates = [
+    flowObj?.returnStreak,
+    flowObj?.return_streak,
+    (m as any)?.meta?.extra?.ctxPack?.returnStreak,
+    (m as any)?.meta?.ctxPack?.returnStreak,
+    (m as any)?.meta?.extra?.returnStreak,
+    (m as any)?.meta?.returnStreak,
+  ];
+
   if (prevReturnStreak == null) {
-    if (typeof rsRaw === 'number' && Number.isFinite(rsRaw)) {
-      prevReturnStreak = rsRaw;
-    } else if (typeof rsRaw === 'string' && rsRaw.trim() && Number.isFinite(Number(rsRaw))) {
-      prevReturnStreak = Number(rsRaw);
+    for (const rsRaw of rsCandidates) {
+      if (typeof rsRaw === 'number' && Number.isFinite(rsRaw)) {
+        prevReturnStreak = rsRaw;
+        break;
+      }
+      if (typeof rsRaw === 'string' && rsRaw.trim() && Number.isFinite(Number(rsRaw))) {
+        prevReturnStreak = Number(rsRaw);
+        break;
+      }
     }
   }
+
   if (prevAtIso && prevReturnStreak != null) break;
 }
 
@@ -2404,6 +2458,121 @@ if (prevAtIso) {
   if (!Number.isNaN(prevMs) && !Number.isNaN(nowMs)) {
     const d = Math.floor((nowMs - prevMs) / 1000);
     ageSec = d >= 0 ? d : 0;
+  }
+}
+
+// ✅ ここで「今回の returnStreak」を確定させる（拾えた prev を必ず継承）
+{
+  const deltaNow =
+    (out as any)?.metaForSave?.extra?.flow?.delta ??
+    (out as any)?.metaForSave?.extra?.flow?.flowDelta ??
+    (extra2.ctxPack as any)?.flow?.delta ??
+    (extra2.ctxPack as any)?.flow?.flowDelta ??
+    null;
+
+  const prevRs =
+    typeof prevReturnStreak === 'number' && Number.isFinite(prevReturnStreak)
+      ? prevReturnStreak
+      : 0;
+
+  // RETURN なら prev+1、RETURN 以外は 0（※ここは設計に合わせて変更可）
+  const rsNow = String(deltaNow || '').toUpperCase() === 'RETURN' ? prevRs + 1 : 0;
+
+  // ctxPack.flow は「正本」なので、ここで stamp
+  (extra2.ctxPack as any).flow = {
+    ...((extra2.ctxPack as any).flow ?? {}),
+    at: nowIso2,
+    prevAt: prevAtIso,
+    ageSec,
+    delta: deltaNow ?? null,
+    flowDelta: deltaNow ?? null, // 互換
+    returnStreak: rsNow,
+    sessionBreak: false,
+
+  };
+}
+
+// ---- conversationLine v1 ----
+// 目的：戻す（復帰）に必要な「話題1行」を ctxPack に保存する（重い処理なし）。
+// ルール：
+// - 既存が「Q/D/Pだけのデバッグ行」なら上書きしてよい（話題1行が永遠に入らないのを防ぐ）
+// - 直近ユーザー3発話（+ 今回入力）から共通語彙を抽出して短く圧縮する
+{
+  const current = String(text ?? '').trim();
+
+  const existing = String((extra2.ctxPack as any).conversationLine ?? '').trim();
+  const looksLikeDebugLine =
+    !!existing &&
+    (/^Q:/.test(existing) || existing.includes('Q:') || existing.includes('D:') || existing.includes('P:') || existing.includes('流れ:') || existing.includes('戻り:'));
+
+  if (!existing || looksLikeDebugLine) {
+    // --- last3 user turns from history + current ---
+    const lastUsers: string[] = [];
+    for (let i = hft.length - 1; i >= 0; i--) {
+      const m = hft[i];
+      const role = String((m as any)?.role ?? '').toLowerCase();
+      if (role !== 'user') continue;
+      const c = String((m as any)?.content ?? (m as any)?.text ?? '').trim();
+      if (!c) continue;
+      lastUsers.push(c);
+      if (lastUsers.length >= 3) break;
+    }
+    const turns = [...lastUsers.reverse(), current].filter(Boolean);
+
+    const STOP = new Set([
+      'これ', 'それ', 'あれ', 'ここ', 'そこ', 'どこ', '何', 'なん', 'だっけ',
+      'こと', 'もの', '感じ', 'いま', '今', 'その', 'この', 'あの',
+      'です', 'ます', 'する', 'した', 'して', 'いる', 'なる', 'ため',
+      'あと', 'だけ', 'ちょっと', 'やっぱり', 'まだ',
+    ]);
+
+    const pickKeywords = (s: string) => {
+      const t = s
+        .replace(/[　\s]+/g, ' ')
+        .replace(/[。、，．・\(\)（）「」『』【】\[\]{}<>＜＞"“”'’!?！？:：;；]/g, ' ')
+        .trim();
+
+      const words: string[] = [];
+
+      // 漢字・カタカナ・英数の“塊”だけ拾う（日本語分かち書き無しでも最低限動く）
+      const re = /[一-龥]{2,}|[ァ-ヶー]{2,}|[A-Za-z0-9]{3,}/g;
+      const ms = t.match(re) ?? [];
+      for (const w0 of ms) {
+        const w = w0.trim();
+        if (!w) continue;
+        if (STOP.has(w)) continue;
+        words.push(w);
+      }
+      return words;
+    };
+
+    const freq = new Map<string, number>();
+    for (const s of turns) {
+      for (const w of pickKeywords(s)) {
+        freq.set(w, (freq.get(w) ?? 0) + 1);
+      }
+    }
+
+    const ranked = [...freq.entries()]
+      .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)
+      .map(([w]) => w);
+
+    // できるだけ短く：上位2〜3語
+    const picked = ranked.slice(0, 3);
+    let line = picked.join('・').trim();
+
+    // どうしても拾えないときは、今回入力を短く使う
+    if (!line) {
+      line = current.length > 18 ? current.slice(0, 18) + '…' : current;
+    }
+
+    // 最終ガード（長すぎ防止）
+    if (line.length > 28) line = line.slice(0, 28) + '…';
+
+    (extra2.ctxPack as any).conversationLine = line || null;
+
+    // rephraseEngine が拾えるように topicDigest も同期（TOPIC_DIGEST: (none) を消す）
+    (extra2.ctxPack as any).topicDigest = line || null;
   }
 }
 
@@ -2603,7 +2772,35 @@ if ((extra2.ctxPack as any).historyDigestV1 == null && digestV1Raw) {
   ) {
     (extra2.ctxPack as any).goalKind = goalKindRaw.trim();
   }
+  // ✅ replyGoal / repeatSignal を ctxPack に同期（writer の OBS_CARD で (none) を出さない）
+  // - replyGoal: 'permit_density' | 'reduce_scatter' | 'reflect_position'
+  // - repeatSignal: 'same_phrase' | null
+  const itxStepRaw = String(
+    (extra2.ctxPack as any)?.itxStep ??
+      (extra2.ctxPack as any)?.tLayerHint ??
+      (extra2.ctxPack as any)?.itx_step ??
+      ''
+  ).trim();
 
+  const tLayerModeActive = /^T[123]$/u.test(itxStepRaw);
+
+  // repeat は upstream の boolean シグナル（repeatSignalSame）を最優先で拾う
+  const repeatSame =
+    Boolean((extra2 as any)?.repeatSignalSame) ||
+    Boolean((extra2.ctxPack as any)?.repeatSignalSame) ||
+    false;
+
+  if ((extra2.ctxPack as any).repeatSignal == null) {
+    (extra2.ctxPack as any).repeatSignal = repeatSame ? 'same_phrase' : null;
+  }
+
+  if ((extra2.ctxPack as any).replyGoal == null) {
+    (extra2.ctxPack as any).replyGoal = tLayerModeActive
+      ? 'permit_density'
+      : repeatSame
+        ? 'reduce_scatter'
+        : 'reflect_position';
+  }
   // slotPlan（本文スロット実体）
   const slotsRaw =
     ((fp as any)?.slotPlan && Array.isArray((fp as any).slotPlan) ? (fp as any).slotPlan : null) ??
@@ -3419,7 +3616,46 @@ if (shouldRunWriter) {
   const fp0 = (out.metaForSave as any)?.framePlan ?? null;
   const sp0 = (out.metaForSave as any)?.slotPlan ?? null;
 
+  // ------------------------------------------------------------
+  // ctxPack bridge (handleIrosReply → rephrase)
+  // 目的：
+  // - rephrase の opts.userContext.ctxPack へ確実に渡す
+  // - TOPIC_DIGEST が (none) にならないよう最低限埋める
+  // ------------------------------------------------------------
+  {
+    const exAny = (out.metaForSave as any).extra;
 
+    // ctxPack の器を保証
+    if (!exAny.ctxPack || typeof exAny.ctxPack !== 'object') exAny.ctxPack = {};
+    const ctxPack = exAny.ctxPack as any;
+
+    // ✅ topicDigest を最低限確保（重い処理なし）
+    // - conversationLine があるなら topicDigest にも入れる
+    if (!ctxPack.topicDigest && ctxPack.conversationLine) {
+      ctxPack.topicDigest = String(ctxPack.conversationLine);
+    }
+
+    // ✅ rephraseEngine.full.ts が拾いやすい経路にも置く
+    if (!exAny.topicDigest && (ctxPack.topicDigest || ctxPack.conversationLine)) {
+      exAny.topicDigest = String(ctxPack.topicDigest ?? ctxPack.conversationLine);
+    }
+  }
+  // --- TOPIC DIGEST TRACE (temporary) ---
+  try {
+    const exAny = (out.metaForSave as any)?.extra ?? {};
+    const ctxp = exAny?.ctxPack ?? null;
+
+    console.log('[IROS/TOPIC_TRACE][before_rephrase]', {
+      conversationId: _conversationId ?? null,
+      userCode: _userCode ?? null,
+      hasExtra: !!exAny,
+      ctxPackKeys: ctxp && typeof ctxp === 'object' ? Object.keys(ctxp).slice(0, 30) : null,
+      conversationLine: typeof ctxp?.conversationLine === 'string' ? ctxp.conversationLine : null,
+      topicDigest_extra: typeof exAny?.topicDigest === 'string' ? exAny.topicDigest : null,
+      topicDigest_ctxPack: typeof ctxp?.topicDigest === 'string' ? ctxp.topicDigest : null,
+    });
+  } catch {}
+  // --- /TOPIC DIGEST TRACE ---
 // --- /FIX ---
 
   const extracted = extractSlotsForRephrase({
@@ -3473,11 +3709,37 @@ if (shouldRunWriter) {
     return s ? s : null;
   })();
 
+  // ✅ inputKind をこの場で一回だけ正規化（rephraseEngine.full.ts の CARD_SEEDIN 判定は opts.inputKind を見る）
+  const inputKindCanon: string | null = (() => {
+    const raw =
+      // まず “カード/診断系” の手掛かりになり得るものを優先
+      (out.metaForSave as any)?.inputKind_classified ??
+      (out.metaForSave as any)?.framePlan?.inputKind ??
+      (out.metaForSave as any)?.extra?.ctxPack?.inputKind ??
+      (out.metaForSave as any)?.extra?.inputKind ??
+      null;
+
+    const s0 = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+    if (s0) return s0;
+
+    // ctx.inputKind が "chat" しかない場合は、カードseedinのためには役に立たないので採用しない
+    const ctxKind = typeof (ctx as any)?.inputKind === 'string' ? (ctx as any).inputKind.trim().toLowerCase() : '';
+    if (ctxKind && ctxKind !== 'chat') return ctxKind;
+
+    // 最後の確定：ユーザーが「カード」を明示している場合のみ card 扱い
+    const ut = typeof text === 'string' ? text : '';
+    if (ut.includes('カード')) return 'card';
+
+    return ctxKind || null;
+  })();
   const rr = await rephraseSlotsFinal(
     extracted,
     {
       model,
       temperature: 0.7,
+
+      // ✅ ここが本丸：rephraseEngine.full.ts の CARD_SEEDIN 判定は opts.inputKind を参照する
+      inputKind: inputKindCanon,
 
       maxLinesHint: (() => {
         const exAny = (out.metaForSave as any)?.extra ?? {};
@@ -3495,10 +3757,10 @@ if (shouldRunWriter) {
 
         // ✅ 行数予算は UI/保存の“可視ブロック”に寄せる（BlockPlanは不可視なので basis にしない）
         const rbLen = Array.isArray((exAny as any)?.rephraseBlocks)
-          ? (exAny as any).rephraseBlocks.length
+          ? (exAny as any)?.rephraseBlocks.length
           : 0;
 
-        const slotLen = Array.isArray((extracted as any)?.keys) ? (extracted as any).keys.length : 0;
+        const slotLen = Array.isArray((extracted as any)?.keys) ? (extracted as any)?.keys.length : 0;
 
         const basis = rbLen > 0 ? rbLen : slotLen > 0 ? slotLen : 4;
         const budget = Math.max(12, basis * 8);
@@ -3513,7 +3775,7 @@ if (shouldRunWriter) {
         userCode: _userCode ?? null,
         slotPlanPolicy,
         renderEngine: true,
-        inputKind: (ctx as any)?.inputKind ?? null,
+        inputKind: inputKindCanon, // ✅ debug も統一
       } as any,
 
       userContext: (() => {
@@ -3552,7 +3814,7 @@ if (shouldRunWriter) {
           conversationId: _conversationId ?? null,
           userCode: _userCode ?? null,
           traceId: traceIdCanon,
-          inputKind: (ctx as any)?.inputKind ?? null,
+          inputKind: inputKindCanon, // ✅ userContext も統一
 
           exprMeta: exprMetaCanon,
 
@@ -3561,6 +3823,7 @@ if (shouldRunWriter) {
           ctxPack: {
             ...ctxPackPrev,
             traceId: traceIdCanon, // ✅ ここも固定
+            inputKind: inputKindCanon, // ✅ ctxPack にも入れておく（観測しやすくする）
             historyForWriter: turns,
             slotPlanPolicy,
             exprMeta: exprMetaCanon,

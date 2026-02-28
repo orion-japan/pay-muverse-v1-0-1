@@ -14,6 +14,7 @@ export type InputKind =
   | 'request'
   | 'question'
   | 'micro'
+  | 'card'
   | 'chat';
 
 /**
@@ -108,6 +109,9 @@ export function selectFrame(
 
   // 3) 実装依頼 / 作業依頼は C（整理された器）
   if (inputKind === 'request') return 'C';
+
+  // 3.5) カード要求は R（観測・反映の器）
+  if (inputKind === 'card') return 'R';
 
   // 4) 挨拶は NONE（軽く）
   if (inputKind === 'greeting') return 'NONE';
