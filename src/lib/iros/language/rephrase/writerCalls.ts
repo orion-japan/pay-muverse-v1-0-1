@@ -77,7 +77,8 @@ function turnsToMessages(
   const raw: any[] = Array.isArray(turns) ? turns : [];
 
   const allowRawLastUser = opts?.allowRawLastUser === true;
-  const MAX_LAST_USER_LEN = typeof opts?.maxLastUserLen === 'number' ? opts!.maxLastUserLen! : 800;
+  const MAX_LAST_USER_LEN =
+    typeof opts?.maxLastUserLen === 'number' ? opts!.maxLastUserLen! : 800;
 
   // ✅ 最後の user の index を探す（無ければ -1）
   let lastUserIdx = -1;
@@ -90,34 +91,29 @@ function turnsToMessages(
 
   const out: WriterMessage[] = [];
 
-  // ✅ task以外でも「短い最後user」は生で通す（質問を見失わないため）
-  // - 過去userは引き続き [USER]
-  // - 長文は引き続きマスク（安全）
-  const MAX_LAST_USER_LEN_NON_TASK = 220;
-
   for (let i = 0; i < raw.length; i++) {
     const t = raw[i];
 
     const role =
-      t?.role === 'assistant' ? 'assistant' :
-      t?.role === 'user' ? 'user' :
-      null;
+      t?.role === 'assistant'
+        ? 'assistant'
+        : t?.role === 'user'
+          ? 'user'
+          : null;
 
     if (!role) continue;
 
     if (role === 'user') {
       const isLast = i === lastUserIdx;
 
-      if (isLast) {
+      // ✅ 生文は “allowRawLastUser=true の最後userだけ” 許可
+      if (isLast && allowRawLastUser) {
         const s0 = String(t?.content ?? '').trim();
-        const limit = allowRawLastUser ? MAX_LAST_USER_LEN : MAX_LAST_USER_LEN_NON_TASK;
-        const s1 = s0.length > limit ? s0.slice(0, limit) : s0;
-
-        // last user は（短文化した上で）常に渡す。空なら placeholder。
+        const s1 = s0.length > MAX_LAST_USER_LEN ? s0.slice(0, MAX_LAST_USER_LEN) : s0;
         out.push({ role: 'user', content: norm(s1) || '（入力なし）' });
       } else {
-        // 過去userは伏せる
-        out.push({ role: 'user', content: '[USER]' });
+        // ✅ 最後user含めて常にマスク（生文遮断）
+        out.push({ role: 'user', content: isLast ? '（入力なし）' : '[USER]' });
       }
       continue;
     }
