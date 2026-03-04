@@ -205,33 +205,74 @@ export async function applyRenderEngineIfEnabled(params: {
   // render-v2（renderGatewayAsReply）
   // =========================
   try {
-    const extraForRender: any = {
-      ...(meta?.extra ?? {}),
-      ...(extraForHandle ?? {}),
-      slotPlanPolicy:
-        (meta as any)?.framePlan?.slotPlanPolicy ??
-        (meta as any)?.slotPlanPolicy ??
-        (meta as any)?.extra?.slotPlanPolicy ??
-        null,
-      framePlan: (meta as any)?.framePlan ?? null,
-      slotPlan: (meta as any)?.slotPlan ?? null,
-      conversationId,
-      userCode,
-      userText: typeof userText === 'string' ? userText : null,
-    };
+// --- strip rephrase-only keys (rephraseBlocks/head は “毎ターン一時データ” なので carry しない)
+const stripRephrase = (o: any) => {
+  const x: any = { ...(o ?? {}) };
+  delete x.rephraseBlocks;
+  delete x.rephraseHead;
+  delete x.rephrase;
+  delete x.rephraseBlocksAttached;
+  delete x.rephraseApplied;
+  delete x.rephraseLLMApplied;
+  delete x.rephraseAttachSkipped;
+  delete x.rephraseAttachReason;
+  delete x.rephraseReason;
+  return x;
+};
 
-    const maxLines =
-      Number.isFinite(Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)) &&
-      Number(process.env.IROS_RENDER_DEFAULT_MAXLINES) > 0
-        ? Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)
-        : 8;
+const extraForRender: any = {
+  ...stripRephrase(meta?.extra ?? {}),
+  ...stripRephrase(extraForHandle ?? {}),
+  slotPlanPolicy:
+    (meta as any)?.framePlan?.slotPlanPolicy ??
+    (meta as any)?.slotPlanPolicy ??
+    (meta as any)?.extra?.slotPlanPolicy ??
+    null,
+  framePlan: (meta as any)?.framePlan ?? null,
+  slotPlan: (meta as any)?.slotPlan ?? null,
+  conversationId,
+  userCode,
+  userText: typeof userText === 'string' ? userText : null,
+};
 
-    const baseText = String(
-      (resultObj as any)?.assistantText ?? (resultObj as any)?.content ?? (resultObj as any)?.text ?? '',
-    ).trimEnd();
+const maxLines =
+  Number.isFinite(Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)) &&
+  Number(process.env.IROS_RENDER_DEFAULT_MAXLINES) > 0
+    ? Number(process.env.IROS_RENDER_DEFAULT_MAXLINES)
+    : 8;
+
+const baseText = String(
+  (resultObj as any)?.assistantText ?? (resultObj as any)?.content ?? (resultObj as any)?.text ?? '',
+).trimEnd();
 
 // SoT
-let extraSoT: any = extraForHandle ?? {};
+// - renderGateway に渡す “このターンの rephraseBlocks” を必ず拾う
+// - stripRephrase は rephraseBlocks を落とす可能性があるので、最後に復元する
+
+const mergedExtraForSoT: any = {
+  ...((meta as any)?.extra ?? {}),
+  ...(extraForHandle ?? {}),
+};
+
+// まず strip（過去carry由来のrephrase系を落とす）
+let extraSoT: any = stripRephrase(mergedExtraForSoT);
+
+// ✅ このターンの rephraseBlocks を復元（優先: extraForHandle → meta.extra）
+const rbFromHandle = (extraForHandle as any)?.rephraseBlocks;
+const rbFromMeta = ((meta as any)?.extra as any)?.rephraseBlocks;
+
+const rephraseBlocksNow = Array.isArray(rbFromHandle)
+  ? rbFromHandle
+  : Array.isArray(rbFromMeta)
+    ? rbFromMeta
+    : null;
+
+if (rephraseBlocksNow) {
+  extraSoT = {
+    ...extraSoT,
+    rephraseBlocks: rephraseBlocksNow,
+  };
+}
 
 // ✅ IMPORTANT: extractSlotsForRephrase の fallback が「hint」ではなく「本文」を拾えるようにする
 // - framePlan.slots が “定義だけ” で本文が取れない時、rephraseEngine は extra.* から疑似OBSを作る
@@ -299,7 +340,14 @@ if (attachRes && typeof attachRes === 'object') {
         extraForRender.resolvedText = mergedResolved;
       }
     }
-
+    console.warn('[IROS/renderV2][BEFORE_RENDERGW]', {
+      traceId: String((meta as any)?.extra?.traceId ?? (meta as any)?.traceId ?? '').trim() || null,
+      baseTextLen: String(baseText ?? '').length,
+      sot_rbLen: Array.isArray(extraSoT?.rephraseBlocks) ? extraSoT.rephraseBlocks.length : 0,
+      render_rbLen: Array.isArray(extraForRender?.rephraseBlocks) ? extraForRender.rephraseBlocks.length : 0,
+      sot_head: String((extraSoT?.rephraseBlocks?.[0] as any)?.text ?? '').slice(0, 60),
+      render_head: String((extraForRender?.rephraseBlocks?.[0] as any)?.text ?? '').slice(0, 60),
+    });
     const out = renderGatewayAsReply({ text: baseText, extra: extraForRender, maxLines }) as any;
 
     const outText = String(

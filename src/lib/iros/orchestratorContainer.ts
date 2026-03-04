@@ -306,8 +306,7 @@ const nd = (() => {
     );
 
   const isVeryShort = t.length <= 8;
-  const isShortLoopContext = inputKind === 'chat' || inputKind === 'question';
-
+  const isShortLoopContext = inputKind === 'chat';
   const looksStoppedByReason =
     rotationReason.length > 0 &&
     (rotationReason.includes('回転') ||

@@ -551,17 +551,22 @@ export async function persistMemoryStateIfAny(args: {
       unified?.q_counts?.q_trace ??
       null;
 
-    const qCodeInput: any =
+      const qCodeInput: any =
       unified?.q?.current ??
       unified?.qCode ??
       core?.qPrimary ??
       core?.q_now ??
       core?.q_code ??
       core?.qCode ??
+      // ---- qTrace variations (absorb schema differences) ----
       qTraceEffective?.qNow ??
       qTraceEffective?.q_now ??
+      qTraceEffective?.currentQ ??
+      qTraceEffective?.snapshot?.currentQ ??
+      qTraceEffective?.lastQ ??
+      qTraceEffective?.streakQ ??
+      qTraceEffective?.dominantQ ??
       null;
-
     const depthInput: any =
       unified?.depth?.stage ??
       unified?.depthStage ??
@@ -620,8 +625,59 @@ export async function persistMemoryStateIfAny(args: {
     // =========================================================
     // 基本入力（core/unified）
     // =========================================================
-    const phaseRawInput = core?.phase ?? unified?.phase ?? null;
-    const phaseInput = normalizePhase(phaseRawInput);
+// =========================================================
+// 基本入力（core/unified） + PhaseのEWMA（0.7/0.3）
+// - outer_now: 0..1（暫定：phaseInput由来）
+// - outer_smoothed を q_counts に保存して「毎回計測」を成立させる
+// - phase は outer_smoothed からヒステリシス付きで決める（パカパカ防止）
+// =========================================================
+const phaseRawInput = core?.phase ?? unified?.phase ?? null;
+const phaseInputRaw = normalizePhase(phaseRawInput); // 'Inner' | 'Outer' | null
+
+// now（暫定）：Inner=0 / Outer=1（※将来スコア源が来たらここを差し替える）
+const outerNow: number | null =
+  phaseInputRaw === 'Outer' ? 1 : phaseInputRaw === 'Inner' ? 0 : null;
+
+// prev（優先）：q_counts.phase_outer_smoothed → 無ければ previous.phase から 0/1
+const prevOuterSmoothed: number | null = (() => {
+  const prevQc = (previous as any)?.q_counts;
+  const v = prevQc?.phase_outer_smoothed;
+  if (typeof v === 'number' && Number.isFinite(v)) {
+    const clamped = Math.max(0, Math.min(1, v));
+    return clamped;
+  }
+
+  const prevPhase = normalizePhase((previous as any)?.phase ?? null);
+  if (prevPhase === 'Outer') return 1;
+  if (prevPhase === 'Inner') return 0;
+  return null;
+})();
+
+// EWMA（0.7/0.3）
+const outerSmoothed: number | null = (() => {
+  if (outerNow == null && prevOuterSmoothed == null) return null;
+  if (prevOuterSmoothed == null) return outerNow; // 初回
+  if (outerNow == null) return prevOuterSmoothed; // 今回観測不能なら維持
+  const v = 0.7 * prevOuterSmoothed + 0.3 * outerNow;
+  return Math.max(0, Math.min(1, v));
+})();
+
+// ヒステリシスで phase を確定（0.55/0.45帯の中は維持）
+const phaseInput: Phase | null = (() => {
+  const prevPhase = normalizePhase((previous as any)?.phase ?? null);
+
+  if (outerSmoothed == null) {
+    // スコアが作れないなら従来通り
+    return phaseInputRaw ?? prevPhase ?? null;
+  }
+
+  if (outerSmoothed >= 0.55) return 'Outer';
+  if (outerSmoothed <= 0.45) return 'Inner';
+
+  // 中間帯は維持
+  return prevPhase ?? phaseInputRaw ?? null;
+})();
+
 
     const selfAcceptanceInput =
       core?.selfAcceptance ?? unified?.selfAcceptance ?? unified?.self_acceptance ?? null;
@@ -671,9 +727,15 @@ export async function persistMemoryStateIfAny(args: {
     // - false は作らず、null = keep とする
     // =========================================================
 
-    // --- IT発火（renderModeから推定しない）---
-    const itTriggeredResolved: true | null =
-      itTriggered === true || core?.itTriggered === true || extra?.itTriggered === true ? true : null;
+// ✅ itTriggered は “true のときだけ” 意味を持つ（それ以外は「不明」として扱う）
+// - null に落とさない（undefined にして payload/ログから消える）
+// - “不明を false に丸めない” を守る
+const itTriggeredResolved: true | undefined =
+  itTriggered === true ||
+  core?.itTriggered === true ||
+  extra?.itTriggered === true
+    ? true
+    : undefined;
 
     // ✅ 明示クリア（将来用）。存在しなければ絶対にクリアしない。
     const clearItxExplicit: boolean =
@@ -896,7 +958,219 @@ const upsertPayload: Record<string, any> = {
 };
 
 if (depthInput != null) upsertPayload.depth_stage = depthInput;
-if (qCodeInput != null) upsertPayload.q_primary = qCodeInput;
+
+// ============================================================
+// Depth trend（S/R/C/I/T）EWMA更新（0.7 / 0.3）→ 正規化 → dominantBand
+// 保存先：iros_memory_state.depth_trend（jsonb / UI用）
+// ============================================================
+
+if (typeof depthInput === 'string' && depthInput.trim()) {
+  // depthInput 例: S1..S3 / R1..R3 / C1..C3 / I1..I3 / T1..T3
+  const depthStageNow = depthInput.trim().toUpperCase();
+
+  const bandNow =
+    /^[SRCIT][123]$/.test(depthStageNow) ? (depthStageNow[0] as 'S' | 'R' | 'C' | 'I' | 'T') : null;
+
+  // 既存 depth_trend を取得（なければ初期化）
+  const prevTrendRaw = (previous as any)?.depth_trend ?? null;
+  const prevBandScoresRaw = prevTrendRaw?.band_scores ?? null;
+
+  const keys: Array<'S' | 'R' | 'C' | 'I' | 'T'> = ['S', 'R', 'C', 'I', 'T'];
+
+  // prevBandScores を 0..1 に正規化（過去に 0..100 が入ってた互換も吸収）
+  const prevBandScores: Record<'S' | 'R' | 'C' | 'I' | 'T', number> = {
+    S: 0,
+    R: 0,
+    C: 0,
+    I: 0,
+    T: 0,
+  };
+
+  {
+    const rawVals = keys.map((k) => {
+      const v = (prevBandScoresRaw as any)?.[k];
+      return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+    });
+
+    const max = Math.max(...rawVals);
+    const scale = max > 1.00001 ? 100 : 1; // 0..100っぽければ 100で割る
+
+    for (const k of keys) {
+      const v = (prevBandScoresRaw as any)?.[k];
+      const n = typeof v === 'number' && Number.isFinite(v) ? v / scale : 0;
+      prevBandScores[k] = Math.max(0, Math.min(1, n));
+    }
+
+    const sumPrev = Object.values(prevBandScores).reduce((a, b) => a + b, 0);
+    if (sumPrev > 0) {
+      for (const k of keys) prevBandScores[k] = prevBandScores[k] / sumPrev;
+    }
+  }
+
+  // EWMA更新（bandNow が取れない時は “前回を保持”）
+  const newBandScores: Record<'S' | 'R' | 'C' | 'I' | 'T', number> = {
+    S: 0,
+    R: 0,
+    C: 0,
+    I: 0,
+    T: 0,
+  };
+
+  for (const k of keys) {
+    const prev = prevBandScores[k] ?? 0;
+    const base = 0.7 * prev;
+    const add = bandNow === k ? 0.3 : 0;
+    newBandScores[k] = base + add;
+  }
+
+  // 正規化（合計1）
+  const sum = Object.values(newBandScores).reduce((a, b) => a + b, 0);
+  if (sum > 0) {
+    for (const k of keys) newBandScores[k] = newBandScores[k] / sum;
+  }
+
+  // dominantBand 決定
+  let dominantBand: 'S' | 'R' | 'C' | 'I' | 'T' | null = null;
+  let maxScore = -1;
+  for (const k of keys) {
+    const v = typeof newBandScores[k] === 'number' ? newBandScores[k] : 0;
+    if (v > maxScore) {
+      maxScore = v;
+      dominantBand = k;
+    }
+  }
+
+  // depth_trend に保存（jsonb）
+  upsertPayload.depth_trend = {
+    ...(prevTrendRaw && typeof prevTrendRaw === 'object' ? prevTrendRaw : {}),
+    band_scores: newBandScores,
+    dominant_band: dominantBand,
+    depth_stage_now: depthStageNow,
+    band_now: bandNow,
+    ewma: { prev: 0.7, now: 0.3 },
+    updated_at: nowIso(),
+  };
+}
+// ============================================================
+// ✅ V3: Qコード EWMA更新（0.7 / 0.3）→ 正規化 → dominantQ決定
+// - 入力は「e_turn（観測）」を最優先にする
+// - e_turn が取れないターンだけ qCodeInput（meta由来Q）へフォールバック
+// 保存先：q_counts.q_scores（UI用）
+// ============================================================
+
+// ---- 1) e_turn（観測）を拾う：meta.extra（=正本）→ 互換キー ----
+const eTurnRaw: any =
+  extra?.e_turn ??
+  extra?.mirror?.e_turn ??
+  core?.e_turn ??
+  core?.mirror?.e_turn ??
+  unified?.e_turn ??
+  unified?.mirror?.e_turn ??
+  null;
+
+const eTurnNow: string | null =
+  typeof eTurnRaw === 'string' && /^(e1|e2|e3|e4|e5)$/i.test(eTurnRaw.trim())
+    ? eTurnRaw.trim().toLowerCase()
+    : null;
+
+// ---- 2) e_turn → Q への写像（V3本命）----
+const qNowFromETurn: string | null =
+  eTurnNow === 'e1'
+    ? 'Q1'
+    : eTurnNow === 'e2'
+      ? 'Q2'
+      : eTurnNow === 'e3'
+        ? 'Q3'
+        : eTurnNow === 'e4'
+          ? 'Q4'
+          : eTurnNow === 'e5'
+            ? 'Q5'
+            : null;
+
+// ---- 3) 互換：meta由来Q（暫定フォールバック）----
+const qNowRaw = qCodeInput ?? null;
+const qNowFromMeta: string | null =
+  typeof qNowRaw === 'string' && /^(Q1|Q2|Q3|Q4|Q5)$/i.test(qNowRaw.trim())
+    ? qNowRaw.trim().toUpperCase()
+    : null;
+
+// ✅ EWMAの “now” は e_turn を最優先
+const qNow: string | null = qNowFromETurn ?? qNowFromMeta ?? null;
+
+// 既存q_counts取得（なければ初期化）
+const prevQc = (previous as any)?.q_counts ?? {};
+const prevScoresRaw = prevQc?.q_scores ?? {
+  Q1: 0,
+  Q2: 0,
+  Q3: 0,
+  Q4: 0,
+  Q5: 0,
+};
+
+// prevScores を 0..1 に正規化（過去に 0..100 が入ってた互換も吸収）
+const prevScores: Record<string, number> = { Q1: 0, Q2: 0, Q3: 0, Q4: 0, Q5: 0 };
+{
+  const keys = ['Q1', 'Q2', 'Q3', 'Q4', 'Q5'];
+  const rawVals = keys.map((k) => {
+    const v = (prevScoresRaw as any)?.[k];
+    return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+  });
+  const sumRaw = rawVals.reduce((a, b) => a + b, 0);
+  const scale = sumRaw > 1.00001 ? 100 : 1;
+  for (const k of keys) {
+    const v = typeof (prevScoresRaw as any)?.[k] === 'number' ? (prevScoresRaw as any)[k] : 0;
+    prevScores[k] = Math.max(0, Math.min(1, v / scale));
+  }
+  const sumPrev = Object.values(prevScores).reduce((a, b) => a + b, 0);
+  if (sumPrev > 0) {
+    for (const k of keys) prevScores[k] = prevScores[k] / sumPrev;
+  }
+}
+
+const newScores: Record<string, number> = { Q1: 0, Q2: 0, Q3: 0, Q4: 0, Q5: 0 };
+
+// EWMA更新（qNow が無い時は “前回を保持”）
+for (const q of Object.keys(newScores)) {
+  const prev = typeof prevScores[q] === 'number' ? prevScores[q] : 0;
+  const base = 0.7 * prev;
+  const add = qNow === q ? 0.3 : 0;
+  newScores[q] = base + add;
+}
+
+// 正規化（合計1）
+const sum = Object.values(newScores).reduce((a, b) => a + b, 0);
+if (sum > 0) {
+  for (const q of Object.keys(newScores)) newScores[q] = newScores[q] / sum;
+}
+
+// dominantQ決定
+let dominantQ: string | null = null;
+let maxScore = -1;
+for (const q of Object.keys(newScores)) {
+  const v = typeof newScores[q] === 'number' ? newScores[q] : 0;
+  if (v > maxScore) {
+    maxScore = v;
+    dominantQ = q;
+  }
+}
+
+// q_counts に保存（UI用）
+const qcBase = normalizeQCounts(qCounts ?? prevQc ?? null);
+(qcBase as any).q_scores = newScores;
+(qcBase as any).q_updated_at = nowIso();
+
+// ✅ 観測の内訳（デバッグ用）
+(qcBase as any).q_now_src = qNowFromETurn ? 'e_turn' : qNowFromMeta ? 'meta_q' : 'none';
+(qcBase as any).e_turn_now = eTurnNow ?? null;
+
+upsertPayload.q_counts = qcBase;
+
+// ✅ 主Q更新は “e_turn 観測が取れた時だけ” に限定（meta由来Qで勝手に更新しない）
+// - qNowFromETurn は string|null なので boolean を明示しておく
+if (dominantQ && qNowFromETurn != null) {
+  upsertPayload.q_primary = dominantQ;
+}
+
 if (phaseInput != null) upsertPayload.phase = phaseInput;
 
 if (typeof selfAcceptanceInput === 'number' && Number.isFinite(selfAcceptanceInput)) {
@@ -956,6 +1230,83 @@ const qCountsPicked = qCounts ?? core?.q_counts ?? null;
   });
 }
 
+// ============================================================
+// 暫定深度 EWMA（S/R/C/I/T）更新（0.7 / 0.3）→ 正規化 → dominant決定
+// 保存先：q_counts.depth_scores（UI用） + q_counts.depth_dominant
+// ============================================================
+
+// depthNow を安全に正規化（S/R/C/I/T 以外は無視）
+const depthNowRaw = depthInput ?? null;
+
+// 例: "R3" -> "R"
+const depthNow =
+  typeof depthNowRaw === 'string' && /^[SRCIT]/i.test(depthNowRaw.trim())
+    ? depthNowRaw.trim().toUpperCase().slice(0, 1)
+    : null;
+
+const prevDepthScoresRaw = (prevQc as any)?.depth_scores ?? {
+  S: 0,
+  R: 0,
+  C: 0,
+  I: 0,
+  T: 0,
+};
+
+// prevDepthScores を 0..1 に正規化（互換: 0..100 の可能性も吸収）
+const prevDepthScores: Record<string, number> = { S: 0, R: 0, C: 0, I: 0, T: 0 };
+{
+  const keys = ['S', 'R', 'C', 'I', 'T'];
+  const rawVals = keys.map((k) =>
+    typeof (prevDepthScoresRaw as any)?.[k] === 'number' ? (prevDepthScoresRaw as any)[k] : 0,
+  );
+  const max = Math.max(...rawVals);
+  const scale = max > 1.00001 ? 100 : 1;
+
+  for (const k of keys) {
+    const v = typeof (prevDepthScoresRaw as any)?.[k] === 'number' ? (prevDepthScoresRaw as any)[k] : 0;
+    prevDepthScores[k] = Math.max(0, Math.min(1, v / scale));
+  }
+
+  const sumPrev = Object.values(prevDepthScores).reduce((a, b) => a + b, 0);
+  if (sumPrev > 0) {
+    for (const k of keys) prevDepthScores[k] = prevDepthScores[k] / sumPrev;
+  }
+}
+
+const newDepthScores: Record<string, number> = { S: 0, R: 0, C: 0, I: 0, T: 0 };
+
+// EWMA更新（depthNow が無い時は “前回を保持”）
+for (const k of Object.keys(newDepthScores)) {
+  const prev = typeof prevDepthScores[k] === 'number' ? prevDepthScores[k] : 0;
+  const base = 0.7 * prev;
+  const add = depthNow === k ? 0.3 : 0;
+  newDepthScores[k] = base + add;
+}
+
+// 正規化（合計1）
+{
+  const sum = Object.values(newDepthScores).reduce((a, b) => a + b, 0);
+  if (sum > 0) {
+    for (const k of Object.keys(newDepthScores)) newDepthScores[k] = newDepthScores[k] / sum;
+  }
+}
+
+// dominantDepth決定
+let dominantDepth: string | null = null;
+let maxV = -1;
+for (const k of Object.keys(newDepthScores)) {
+  const v = typeof newDepthScores[k] === 'number' ? newDepthScores[k] : 0;
+  if (v > maxV) {
+    maxV = v;
+    dominantDepth = k;
+  }
+}
+
+// q_countsに保存（UI用）
+(qcBase as any).depth_scores = newDepthScores;
+(qcBase as any).depth_dominant = dominantDepth;
+(qcBase as any).depth_updated_at = nowIso();
+
 // ------------------------------------------------------------
 // ✅ final anchor flags（B）
 // - あるときだけ載せる（undefinedは触らない）
@@ -993,48 +1344,37 @@ const faLock = pickBool(
 );
 
 // ------------------------------------------------------------
-// ✅ nullでも「保存すべき根拠」があれば q_counts を初期化して書く
+// ✅ it_triggered / it_triggered_true は “undefined を false に丸めない”
+// ✅ 追加：phase_outer_smoothed を q_counts に保存（毎回計測の継続）
+// ✅ FIX: 既に作った q_scores 等を “上書きで消さない”（merge）
 // ------------------------------------------------------------
-const shouldWriteQCounts =
-  qCountsPicked != null ||
-  typeof itTriggeredResolved === 'boolean' ||
-  typeof faPending === 'boolean' ||
-  typeof faLock === 'boolean';
+const shouldWriteQCountsBecausePhase = outerSmoothed != null;
 
-if (shouldWriteQCounts) {
-  // null の場合は空から初期化（it_cooldown=0 を確保）
-  const qc = normalizeQCounts(qCountsPicked ?? {});
+if (qCountsPicked != null || shouldWriteQCountsBecausePhase) {
+  // まず「既にpayloadに積んだq_counts」を正本として拾う（q_scores保持のため）
+  const baseForQc = (upsertPayload as any)?.q_counts ?? qCountsPicked ?? null;
+  const qc = normalizeQCounts(baseForQc);
 
-  qc.it_triggered_true = itTriggeredResolved === true;
-  if (typeof itTriggeredResolved === 'boolean') qc.it_triggered = itTriggeredResolved;
+  // ✅ it_triggered / it_triggered_true は “undefined を false に丸めない”
+  const itTriggeredResolvedBool: boolean | undefined =
+    typeof itTriggered === 'boolean'
+      ? itTriggered
+      : typeof (core as any)?.itTriggered === 'boolean'
+        ? (core as any).itTriggered
+        : typeof (metaForSave as any)?.itTriggered === 'boolean'
+          ? (metaForSave as any).itTriggered
+          : undefined;
 
-  if (typeof faPending === 'boolean') (qc as any).fa_pending = faPending;
-  if (typeof faLock === 'boolean') (qc as any).fa_lock = faLock;
+  // 既存のit_triggered代入がこの下に続く前提なら、それはそのまま生かしてOK
+  // ここでは phase の数値を “追加で” 合流するだけ
+  if (outerSmoothed != null) {
+    (qc as any).phase_outer_smoothed = outerSmoothed; // 0..1
+    (qc as any).phase_outer_now = outerNow; // 0/1/null（暫定）
+    (qc as any).phase_outer_updated_at = nowIso();
+  }
 
-  console.log('[IROS/PERSIST][q_counts][pick]', {
-    has_qCounts_arg: qCounts != null,
-    has_core_q_counts: core?.q_counts != null,
-    has_unified_q_counts: (unified as any)?.q_counts != null,
-    picked_null: qCountsPicked == null,
-    picked_type: qCountsPicked == null ? null : typeof qCountsPicked,
-    picked_keys:
-      qCountsPicked && typeof qCountsPicked === 'object'
-        ? Object.keys(qCountsPicked as any).slice(0, 12)
-        : null,
-    it_triggered: typeof itTriggeredResolved === 'boolean' ? itTriggeredResolved : '(kept)',
-    it_triggered_true: qc.it_triggered_true,
-    fa_pending: typeof faPending === 'boolean' ? faPending : '(kept)',
-    fa_lock: typeof faLock === 'boolean' ? faLock : '(kept)',
-    wrote: true,
-    wrote_reason: {
-      qCountsPicked: qCountsPicked != null,
-      itTriggeredResolved: typeof itTriggeredResolved === 'boolean',
-      faPending: typeof faPending === 'boolean',
-      faLock: typeof faLock === 'boolean',
-    },
-  });
-
-  upsertPayload.q_counts = qc;
+  // ✅ 最後にmergeして確定（q_scores などを保持）
+  upsertPayload.q_counts = { ...(upsertPayload as any)?.q_counts, ...(qc as any) };
 }
 
     // ✅ anchor_event / anchor_write（DB列がある環境だけで使う。無い場合は retry で落とす）

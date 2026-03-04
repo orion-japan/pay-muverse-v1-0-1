@@ -833,6 +833,67 @@ export async function POST(req: NextRequest) {
     const nowIso = new Date().toISOString();
     const nowTs = Date.now();
 
+    // ✅ NEW: role=user のときだけ e_turn を turn-only 推定して列に直載せ
+    let eTurnForRow: string | null = null;
+    if (role === 'user') {
+      try {
+        const mod: any = await import('@/lib/iros/mirrorFlow/mirrorFlow.v1');
+        const mf: any = (mod?.buildMirrorFlowV1 as any)?.({ userText: finalText, stage: null, band: null });
+        const eTurn = String(mf?.mirror?.e_turn ?? mf?.e_turn ?? '').trim();
+        const ok = eTurn === 'e1' || eTurn === 'e2' || eTurn === 'e3' || eTurn === 'e4' || eTurn === 'e5';
+        if (ok) eTurnForRow = eTurn;
+      } catch {
+        // ignore（e_turn 無しでも保存は続行）
+      }
+    }
+
+    // ✅ NEW: user行の meta.extra を最低限そろえる（追跡性）
+    // - 既存 extra を壊さずに追記する
+    // - ★ ctxPack を「必ず存在」させる（B）
+    // - ★ mode も null のままにしない（観測を安定）
+    if (role === 'user') {
+      try {
+        // metaFilled が object のときだけ in-place で追記（const再代入はしない）
+        if (metaFilled && typeof metaFilled === 'object') {
+          const m: any = metaFilled;
+          const ex: any = m.extra && typeof m.extra === 'object' ? m.extra : {};
+
+          // persistedBy / policy hint は user でも残す（運用上の目印）
+          ex.persistedBy = ex.persistedBy ?? 'messages_route';
+          ex.persistPolicyHint = ex.persistPolicyHint ?? 'USER_MESSAGE';
+
+          // e_turn も meta に入れておく（列と一致確認が楽）
+          if (eTurnForRow) ex.e_turn = ex.e_turn ?? eTurnForRow;
+
+          // traceId は既存優先（無ければ何もしない）
+          const traceId =
+            (typeof ex.traceId === 'string' && ex.traceId.trim() ? ex.traceId.trim() : '') ||
+            (typeof ex.trace_id === 'string' && ex.trace_id.trim() ? ex.trace_id.trim() : '') ||
+            '';
+
+          // ★ B: ctxPack を「無ければ作る」
+          // - 本物のctxPack生成はここでは不要（存在保証が目的）
+          if (ex.ctxPack == null) {
+            ex.ctxPack = {
+              type: 'user_message',
+              source: 'messages_route',
+              at: nowIso,
+              traceId: traceId || null,
+              conversationId: cidExternal,
+              conversationUuid: convUuid,
+              userCode,
+            };
+          }
+
+          // ★ mode も安定化（meta_mode:null を潰す）
+          m.mode = m.mode ?? 'messages_route';
+          m.extra = ex;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     const row = {
       conversation_id: convUuid, // ✅ DBのuuid列に入れるのは常にuuid
       user_code: userCode,
@@ -850,8 +911,10 @@ export async function POST(req: NextRequest) {
       streak_len: streakLenNum != null ? String(streakLenNum) : null, // text
       qtu_from: qtuFrom,
       meta: metaFilled,
-    };
 
+      // ✅ DB列（存在している前提）
+      e_turn: eTurnForRow,
+    };
     let inserted: { id: string | number; created_at: string | null } | null = null;
 
     for (const table of ['iros_messages', 'public.iros_messages'] as const) {

@@ -157,8 +157,23 @@ export async function saveMessagesDB(args: {
     return null;
   })();
 
-  // ✅ user 側も meta.extra.traceId を持たせる（ops/iros-logs が meta から拾う経路とも整合）
-  const metaUser = traceIdForRow ? { extra: { traceId: traceIdForRow }, mode } : { mode };
+  // ✅ ctxPack は assistant 側 meta.extra に乗ってくることが多いので、ここで拾って user 側にも stamp する
+  const ctxPackForUser = (() => {
+    const m = metaAssistant as any;
+    const cp = m?.extra?.ctxPack ?? null;
+    return cp && typeof cp === 'object' ? cp : null;
+  })();
+
+  // ✅ user 側も meta.extra を持たせる（traceId + ctxPack）
+  // - traceId が無い場合でも ctxPack があるなら extra を残す
+  const metaUser = (() => {
+    const extra: any = {};
+    if (traceIdForRow) extra.traceId = traceIdForRow;
+    if (ctxPackForUser) extra.ctxPack = ctxPackForUser;
+
+    const hasExtra = Object.keys(extra).length > 0;
+    return hasExtra ? { extra, mode } : { mode };
+  })();
 
   const { error } = await supa.from('iros_messages').insert([
     {

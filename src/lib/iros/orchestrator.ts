@@ -20,6 +20,7 @@ import { buildNormalChatSlotPlan } from './slotPlans/normalChat';
 import { buildCounselSlotPlan } from './slotPlans/counsel';
 import { buildFlagReplySlots } from './slotPlans/flagReply';
 import { buildIrDiagnosisSlotPlan } from './slotPlans/irDiagnosis';
+import { normalizeIrosMode } from '@/lib/iros/memory/mode';
 
 // 解析フェーズ（Unified / depth / Q / SA / YH / IntentLine / T層）
 import {
@@ -1243,8 +1244,7 @@ const isSilence = speechAct === '無言アクト' || speechAllowLLM === false;
         inputKind === 'fact' ||
         inputKind === 'lookup' ||
         inputKind === 'qa' ||
-        inputKind === 'howto' ||
-        inputKind === 'question';
+        inputKind === 'howto';
 
 
       const goalKind = String(
@@ -1488,31 +1488,38 @@ function detectCounselCommand(raw: unknown): { forced: boolean; strippedText: st
 
   // ※このファイルでは meta ではなく mergedBaseMeta を使う（meta が無いスコープ対策）
   const metaLike: any = (mergedBaseMeta ?? {}) as any;
-const modeRaw = String(metaLike?.mode ?? '').toLowerCase();
-const isCounselMode = modeRaw === 'counsel' || modeRaw === 'consult';
 
-// ✅ /counsel（/consult）明示トリガー
-const { forced: forcedCounsel, strippedText } = detectCounselCommand(text);
+  // ✅ mode を canonical に正規化（揺れ吸収はここだけ）
+  const modeNorm = normalizeIrosMode(metaLike?.mode);
+  const isCounselMode = modeNorm === 'counsel';
 
-// ✅ 以降の判定・slot生成に使う「本文」（/counsel は混ぜない）
-const textForCounsel = forcedCounsel ? strippedText : text;
-const hasTextForCounsel = String(textForCounsel ?? '').trim().length > 0;
+  // ✅ /counsel（/consult）明示トリガー
+  const { forced: forcedCounsel, strippedText } = detectCounselCommand(text);
 
-// ✅ GreetingGate 成立ターン判定（ここで counsel 誤爆を遮断）
-const isGreetingTurn =
-  !!metaLike?.gatedGreeting?.ok ||
-  !!metaLike?.extra?.gatedGreeting?.ok ||
-  String(metaLike?.ctxPack?.shortSummary ?? '') === 'greeting' ||
-  String(metaLike?.extra?.ctxPack?.shortSummary ?? '') === 'greeting';
+  // ✅ 明示トリガーがある場合は mode を canonical で確定（以降の判定がブレない）
+  if (forcedCounsel) {
+    metaLike.mode = 'counsel';
+  }
 
-// ✅ この下（QuestionSlots / normalChat fallback）が参照するので outer scope に置く
-let shouldUseCounsel = false;
+  // ✅ 以降の判定・slot生成に使う「本文」（/counsel は混ぜない）
+  const textForCounsel = forcedCounsel ? strippedText : text;
+  const hasTextForCounsel = String(textForCounsel ?? '').trim().length > 0;
 
-// ※重要：ir診断ターンは slotPlan を上書きしない（counsel/normalChat/flagReply を通さない）
-const isIrDiagnosisTurn_here =
-  Boolean(metaLike?.isIrDiagnosisTurn) ||
-  String(metaLike?.presentationKind ?? '').toLowerCase() === 'diagnosis' ||
-  String(modeRaw ?? '').toLowerCase() === 'diagnosis';
+  // ✅ GreetingGate 成立ターン判定（ここで counsel 誤爆を遮断）
+  const isGreetingTurn =
+    !!metaLike?.gatedGreeting?.ok ||
+    !!metaLike?.extra?.gatedGreeting?.ok ||
+    String(metaLike?.ctxPack?.shortSummary ?? '') === 'greeting' ||
+    String(metaLike?.extra?.ctxPack?.shortSummary ?? '') === 'greeting';
+
+  // ✅ この下（QuestionSlots / normalChat fallback）が参照するので outer scope に置く
+  let shouldUseCounsel = false;
+
+  // ※重要：ir診断ターンは slotPlan を上書きしない（counsel/normalChat/flagReply を通さない）
+  const isIrDiagnosisTurn_here =
+    Boolean(metaLike?.isIrDiagnosisTurn) ||
+    String(metaLike?.presentationKind ?? '').toLowerCase() === 'diagnosis' ||
+    normalizeIrosMode(metaLike?.mode) === 'diagnosis';
 
 if (!isIrDiagnosisTurn_here && !isGreetingTurn) {
   // ✅ stallHardNow（迷い/同語反復）は「counsel優先」のシグナルとして扱う
@@ -1553,7 +1560,7 @@ if (!isIrDiagnosisTurn_here && !isGreetingTurn) {
 
     console.log('[IROS/ORCH][counsel-picked]', {
       stage: 'OPEN',
-      modeRaw,
+      modeRaw: String(metaLike?.mode ?? '').toLowerCase(),
       forcedCounsel,
       shouldUseCounselByStructure: !forcedCounsel && !isCounselMode,
       hasText: hasTextForCounsel,

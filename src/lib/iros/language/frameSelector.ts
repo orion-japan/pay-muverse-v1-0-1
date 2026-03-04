@@ -15,7 +15,9 @@ export type InputKind =
   | 'question'
   | 'micro'
   | 'card'
-  | 'chat';
+  | 'chat'
+  | 'review'
+  | 'task';
 
 /**
  * フレーム（器）
@@ -137,7 +139,6 @@ export function selectFrame(
   if (depthHead === 'S') return 'S';
 
   // 7) question / chat のデフォルト
-  if (inputKind === 'question') return 'R';
 
   return 'NONE';
 }

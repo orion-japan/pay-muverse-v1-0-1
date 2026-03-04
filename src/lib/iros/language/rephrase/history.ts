@@ -292,7 +292,7 @@ export function extractLastTurnsFromContext(userContext: unknown): TurnMsg[] {
   const ctx: any = userContext as any;
 
   const maxMsgsRaw = Number(process.env.IROS_REPHRASE_LAST_TURNS_MAX);
-  const maxMsgs = maxMsgsRaw > 0 ? Math.floor(maxMsgsRaw) : 6;
+  const maxMsgs = maxMsgsRaw > 0 ? Math.floor(maxMsgsRaw) : 4;
 
   const rawTurns =
     pickArray(ctx?.turns) ||

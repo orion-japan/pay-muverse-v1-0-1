@@ -265,10 +265,28 @@ const reqSpeechActRaw =
   null;
 
 // ✅ ここで先に extraReq / traceId を確定（REQ_META と TRACE を一致させる）
-const extraReq: Record<string, any> | undefined =
+const extraReq0: Record<string, any> | undefined =
   (body as any)?.extra && typeof (body as any).extra === 'object'
     ? ((body as any).extra as Record<string, any>)
     : undefined;
+
+// 互換：body直下 traceId / trace_id も吸収
+const traceIdFromBody = String((body as any)?.traceId ?? (body as any)?.trace_id ?? '').trim();
+
+// 互換：meta 側 traceId も吸収（meta が載るクライアント用）
+const traceIdFromMeta = String(
+  (reqMetaRaw as any)?.traceId ??
+    (reqMetaRaw as any)?.extra?.traceId ??
+    (reqMetaRaw as any)?.extra?.trace_id ??
+    '',
+).trim();
+
+// makeTraceId は extraReq.traceId/trace_id を見るので、ここで寄せる
+const extraReq: Record<string, any> | undefined = {
+  ...(extraReq0 ?? {}),
+  ...(traceIdFromBody ? { traceId: traceIdFromBody } : null),
+  ...(!traceIdFromBody && traceIdFromMeta ? { traceId: traceIdFromMeta } : null),
+};
 
 // traceIdEarly は try の前で makeEarlyTraceId(req) されている前提
 const traceId = makeTraceId(req, extraReq ?? null, traceIdEarly);
@@ -706,15 +724,27 @@ let extraSoT: Record<string, any> = {
 // NORMAL BASE fallback（非FORWARDで本文が空に近い場合）
 // -------------------------------------------------------
 
+// -------------------------------------------------------
+// NORMAL BASE fallback（非FORWARDで本文が空に近い場合）
+// - ✅ 非常用：LLM を呼べない（allowLLM=false）場合だけ
+// - ✅ rephraseBlocks があるなら normalBase は使わない（blocks救済が正）
+// -------------------------------------------------------
+
 const candidateText = pickText(r?.content, r?.assistantText); // ← content優先
 const isForward = speechAct === 'FORWARD';
 const isEmptyLike = isEffectivelyEmptyText(candidateText);
 
+// blocks があるなら「空」ではない扱い（normalBase に落とさない）
+const hasRephraseBlocks =
+  Array.isArray(extraAny?.rephraseBlocks) && extraAny.rephraseBlocks.length > 0;
+
+// ✅ 非FORWARDで本文が空に近い：ただし “LLMを呼べない” ときだけ落とす
 const isNonForwardButEmpty =
   !isForward &&
-  allowLLM !== false &&
+  allowLLM === false && // ★ここが重要：!== false ではなく === false
   String(userTextClean ?? '').trim().length > 0 &&
   isEmptyLike &&
+  !hasRephraseBlocks &&
   !isPdfScaffoldNoCommit &&
   !isDiagnosisFinalSeed;
 
@@ -731,10 +761,9 @@ if (isNonForwardButEmpty) {
     ...(r.metaForSave.extra ?? {}),
     normalBaseApplied: true,
     normalBaseSource: normal.meta.source,
-    normalBaseReason: 'EMPTY_LIKE_TEXT',
+    normalBaseReason: 'EMPTY_LIKE_TEXT_ALLOW_LLM_FALSE',
   };
 }
-
     }
 
     if (!irosResult.ok) {
@@ -1607,33 +1636,57 @@ const TRAINING_TIMEOUT_MS = Number(process.env.IROS_TRAINING_TIMEOUT_MS ?? '2500
 
 let saved: any = null;
 
+// ✅ gate: persistAssistantAllowed を尊重する（未配線なら true 扱い）
+// - handleIrosReply 側が result.persistAssistantAllowed を返すようになったら、そのまま効く
+const persistAssistantAllowed =
+  (result as any)?.persistAssistantAllowed === false ? false : true;
+
 {
   const tsPersistAssistant = Date.now();
 
-  try {
-    // ✅ persist は “最後まで待つ”（外側 withTimeout で切らない）
-    const r = await persistAssistantMessageToIrosMessages({
-      supabase,
-      conversationId,
-      userCode,
-      content: contentForPersist,
-      meta: metaForSave,
-    } as any);
+  // ❌ 許可されてないなら persist しない
+  if (!persistAssistantAllowed) {
+    saved = {
+      ok: true,
+      inserted: false,
+      blocked: true,
+      reason: 'persistAssistantAllowed=false',
+      messageId: null,
+    };
 
-    saved = r; // { ok, inserted, ... }
-  } catch (e) {
-    saved = { ok: false, error: e };
-  } finally {
     const ms = Date.now() - tsPersistAssistant;
-    console.log('[IROS/persistAssistant] done', {
+    console.log('[IROS/persistAssistant] skipped', {
       conversationId,
       userCode,
       ms,
-      ok: saved?.ok ?? null,
-      inserted: saved?.inserted ?? null,
-      blocked: saved?.blocked ?? null,
       reason: saved?.reason ?? null,
     });
+  } else {
+    try {
+      // ✅ persist は “最後まで待つ”（外側 withTimeout で切らない）
+      const r = await persistAssistantMessageToIrosMessages({
+        supabase,
+        conversationId,
+        userCode,
+        content: contentForPersist,
+        meta: metaForSave,
+      } as any);
+
+      saved = r; // { ok, inserted, ... }
+    } catch (e) {
+      saved = { ok: false, error: e };
+    } finally {
+      const ms = Date.now() - tsPersistAssistant;
+      console.log('[IROS/persistAssistant] done', {
+        conversationId,
+        userCode,
+        ms,
+        ok: saved?.ok ?? null,
+        inserted: saved?.inserted ?? null,
+        blocked: saved?.blocked ?? null,
+        reason: saved?.reason ?? null,
+      });
+    }
   }
 }
 
@@ -1658,8 +1711,7 @@ if (!saved || saved.ok !== true) {
     persist_failed_message: String(err?.message ?? '')?.slice(0, 240) || 'persist_failed',
   };
 
-  // ✅ 重要：/reply を止めない（strict でも “timeout で 500” にしない）
-  // persistStrict の場合でも、ここでは throw しない（返却優先）
+  // ✅ 重要：/reply を止めない（strict でも throw しない）
 }
 
 const messageId = (saved as any)?.messageId ?? null;

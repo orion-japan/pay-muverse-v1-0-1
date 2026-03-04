@@ -4,6 +4,9 @@
 // - IrosState と inputKind だけで「器」と「必須スロット」を決める
 // - どの層から呼ばれても落ちない（undefined/null耐性を強める）
 
+import type { InputKind } from './frameSelector';
+export type { InputKind } from './frameSelector';
+
 export const FRAME = {
   S: 'S',
   F: 'F', // 定着・習慣（下降/自己否定時の支え）
@@ -17,15 +20,6 @@ export const FRAME = {
 
 export type FrameKind = (typeof FRAME)[keyof typeof FRAME];
 
-export type InputKind =
-  | 'micro' // 短文（「やっちゃう？」「どうする？」など）
-  | 'chat' // 通常会話
-  | 'task' // 実務依頼・実装依頼・作業依頼
-  | 'review' // 振り返り・達成サマリ等
-  | 'question' // 明確な質問
-  | 'card' // ✅ カード閲覧/カードで見てほしい
-  | 'unknown';
-
 export type IrosStateLite = {
   // できるだけ薄く（どの層でも渡せる）
   depthStage?: string | null; // 'S1'..'T3' など
@@ -37,7 +31,7 @@ export type IrosStateLite = {
 
   // ✅ 下降（自己否定など）を検知したときの状態
   // 既存実装との互換のため幅を持たせる（boolean / open|closed など）
-  descentGate?: boolean | 'open' | 'closed' | string | null;
+  descentGate?: boolean | 'open' | 'closed' | 'offered' | 'accepted' | string | null;
 };
 
 export type SlotId = 'OBS' | 'SHIFT' | 'NEXT' | 'SAFE';
@@ -61,17 +55,25 @@ export type FramePlan = {
 function safeInputKind(v: unknown): InputKind {
   if (typeof v !== 'string') return 'unknown';
   const s = v.trim().toLowerCase();
+
+  // ✅ 正本（frameSelector.ts）に揃える
   if (
-    s === 'micro' ||
-    s === 'chat' ||
-    s === 'task' ||
-    s === 'review' ||
+    s === 'unknown' ||
+    s === 'greeting' ||
+    s === 'debug' ||
+    s === 'request' ||
     s === 'question' ||
+    s === 'micro' ||
     s === 'card' ||
-    s === 'unknown'
+    s === 'chat'
   ) {
     return s as InputKind;
   }
+
+  // ✅ 互換吸収（旧呼称を正本に寄せる）
+  if (s === 'task') return 'request';
+  if (s === 'review') return 'chat';
+
   return 'unknown';
 }
 
@@ -86,16 +88,15 @@ function isDescentOpen(v: unknown): boolean {
   if (typeof v === 'string') {
     const s = v.trim().toLowerCase();
 
-    // 互換：open/true/1 だけを「立ってる」と扱う
+    // 互換：open/true/1 を立っている扱い
     if (s === 'open' || s === 'true' || s === '1') return true;
 
-    // ✅ iros の union を open 扱いに寄せる（重要）
+    // 新union
     if (s === 'offered' || s === 'accepted') return true;
   }
 
   return false;
 }
-
 
 function depthLetter(
   depthStage?: string | null
@@ -126,16 +127,12 @@ export function selectFrame(args: {
   if (inputKind === 'micro') return FRAME.MICRO;
 
   // 2) 実務依頼は Creation（作業/実装/設計）
-  if (inputKind === 'task') return FRAME.C;
+  if (inputKind === 'request') return FRAME.C;
 
-  // 3) 振り返り/レビュー系は NONE（専用ゲートがある前提）or C（整形）
-  if (inputKind === 'review') return FRAME.NONE;
-
-  // 4) 下降ゲートが立っているなら、まず F（定着）で支える
-  // - I/T に上げると反発が出やすいので、F → S → R の順が安定
+  // 3) 下降ゲートが立っているなら、まず F（定着）で支える
   if (isDescentOpen(state.descentGate)) return FRAME.F;
 
-  // 5) 深度が取れるならそれを優先
+  // 4) 深度が取れるならそれを優先
   const dl = depthLetter(state.depthStage);
   if (dl === 'S') return FRAME.S;
   if (dl === 'F') return FRAME.F;
@@ -144,7 +141,7 @@ export function selectFrame(args: {
   if (dl === 'I') return FRAME.I;
   if (dl === 'T') return FRAME.T;
 
-  // 6) それ以外は素（後段で調整）
+  // 5) それ以外は素（後段で調整）
   return FRAME.NONE;
 }
 
@@ -181,7 +178,7 @@ export function buildSlots(args: {
     });
   }
 
-  // 下降時（F選択になりやすい）は hint だけ “支える意味” に寄せる（IDは増やさない）
+  // 下降時は hint を“支える意味”に寄せる（IDは増やさない）
   if (isDescentOpen(state.descentGate) || frame === FRAME.F) {
     return base.map((s) => {
       if (s.id === 'OBS') return { ...s, hint: '観測（ストーリー化せず、事実だけ）' };

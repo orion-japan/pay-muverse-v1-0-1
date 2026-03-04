@@ -55,24 +55,35 @@ export function buildHistoryDigestV1(args: BuildHistoryDigestV1Args): HistoryDig
   };
 }
 
+// [置換] src/lib/iros/history/historyDigestV1.ts
+// 対象: injectHistoryDigestV1 関数（58〜78行あたり）を丸ごと置換
+
 export function injectHistoryDigestV1(params: {
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   digest: HistoryDigestV1;
 }) {
   const digestText = '[HISTORY_DIGEST_V1]\n' + JSON.stringify(params.digest);
 
-  // systemPrompt の次に差し込む（role:system の2本目）
-  // 既に入っている場合は二重注入しない
+  // 既に入っている場合は二重注入しない（system内に含まれているケースも検知）
   const hasAlready = params.messages.some(
-    (m) => m.role === 'system' && m.content.startsWith('[HISTORY_DIGEST_V1]'),
+    (m) =>
+      m.role === 'system' &&
+      String(m.content ?? '').includes('[HISTORY_DIGEST_V1]\n'),
   );
   if (hasAlready) return { messages: params.messages, digestChars: digestText.length, injected: false };
 
   const out = [...params.messages];
-  // 先頭が systemPrompt 前提。安全に「最初のsystemの直後」へ。
-  const firstSystemIdx = out.findIndex((m) => m.role === 'system');
-  const insertAt = firstSystemIdx >= 0 ? firstSystemIdx + 1 : 0;
-  out.splice(insertAt, 0, { role: 'system', content: digestText });
 
+  // ✅ 「2本目のsystem」を作らず、最初のsystemに追記して “systemは常に1枚” を保証する
+  const firstSystemIdx = out.findIndex((m) => m.role === 'system');
+  if (firstSystemIdx >= 0) {
+    const prev = String(out[firstSystemIdx]?.content ?? '');
+    const merged = [prev, digestText].filter((s) => String(s).trim().length > 0).join('\n\n');
+    out[firstSystemIdx] = { role: 'system', content: merged };
+    return { messages: out, digestChars: digestText.length, injected: true };
+  }
+
+  // 万一 system が無い場合だけ先頭に挿入（fallback）
+  out.unshift({ role: 'system', content: digestText });
   return { messages: out, digestChars: digestText.length, injected: true };
 }

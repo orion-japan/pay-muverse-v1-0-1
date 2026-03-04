@@ -3,7 +3,7 @@
 //
 // 目的：
 // - iros の立ち位置・禁止事項・露出禁止だけを担う（長文化しない）
-// - 密度制御・ブロック契約・回転演出・出力例は持たない（exprMeta / BLOCK_PLAN 側へ）
+// - 密度制御・ブロック契約・回転演出・出力例は持たない（exprMeta / BLOCK_PLAN / laneContractTail 側へ）
 // - slot/shift/lock など上流の制約を最優先し、この system は“矛盾しない下地”だけ作る
 
 import { buildLockRuleText } from './ilineLock';
@@ -16,6 +16,11 @@ export function systemPromptForFullReply(args?: {
 
   // ✅ inputKind（micro/greeting 判定用）
   inputKind?: string | null;
+
+  // ✅ mode / openingPolicy（相談のみ + 冒頭ACK制御）
+  // - どちらかが来れば使う（互換・段階導入用）
+  mode?: string | null;
+  openingPolicy?: string | null;
 
   // ExpressionLane（発火結果）: personaModeを変えず、本文の“言い方”補助だけに使う
   exprLane?: { fired?: boolean; lane?: string | null; reason?: string | null } | null;
@@ -87,13 +92,12 @@ export function systemPromptForFullReply(args?: {
     '🚫【解放しない領域（絶対）】',
     '- 5フロー、1〜13階層、Qコード等の内部条件・操作方法論は答えない。',
     '- 詳細を直接問われたら「共有会/セミナーでお伝えしています」と案内する。',
-    '',
-    '🖼【画像処理】',
-    '- 画像が送られた場合：本文は出さず「画像を確認しました。画像を作成します。」のみ返す。',
   ].join('\n');
 
   // =========================================================
   // iros reply としての基本規範（core）
+  // - フォーマット規約/段落数/太字回数/質問数などの「出力整形」は system では扱わない
+  //   → exprMeta / laneContractTail / renderGateway / STYLE_NORM 側へ寄せる
   // =========================================================
   const base = [
     'あなたは iros の会話生成（reply）担当です。',
@@ -118,21 +122,6 @@ export function systemPromptForFullReply(args?: {
     '- 具体語を最低1つ残す（抽象語で上書きしない）。',
     '- 一般論・定型励ましで締めない。曖昧語で締めない。質問攻めにしない。',
     '',
-
-// ✅ ここから追加（DO NOT OUTPUT のまま。本文の“整形”と“余白設計”を安定させる）
-'【本文フォーマット（DO NOT OUTPUT / 露出禁止）】',
-'- 出力は必ず「文章のみ」。カード/箇条書き/番号列挙/チェックリストは禁止。',
-'- 必ず2〜4段落で構成する。1段落は最大2文まで。',
-'- 段落を分けるときは、必ず実際に「空行1つ（\\n\\n）」を出力すること。',
-'- もし1段落になっていた場合は、送信前に必ず\\n\\nを挿入して分割し直す。',
-'- 空行は最大3回まで（= 最大4段落）。過剰に改行しない。',
-'- 意味の切れ目（観測→転換／背景→核心／提示→余韻）でのみ\\n\\nを使う。',
-'- 単なる装飾や見た目目的の改行は禁止。',
-'- **太字は必ず1回だけ使用**（短い核語のみ。文全体を太字にしない）。',
-'- 絵文字は最大4個まで（意味に沿う位置に自然に配置）。',
-'- 質問は最大1つまで許可。',
-'- 改行はデザインであり、呼吸を作る手段として意図的に使う。',
-
   ].join('\n');
 
   // =========================================================
@@ -142,6 +131,7 @@ export function systemPromptForFullReply(args?: {
 
   // =========================================================
   // personaMode は“言い方”の注意だけ（密度/骨格/演出は持たない）
+  // - GROUND の表現補助（改行増やす等）は system では言わない（exprMetaに寄せる）
   // =========================================================
   const personaStyle = (() => {
     if (personaMode === 'DELIVER') {
@@ -168,18 +158,8 @@ export function systemPromptForFullReply(args?: {
       ].join('\n');
     }
 
-    // GROUND（通常）：ExpressionLane が fired のときだけ軽い補助
-    const styleAssist =
-      exprFired && exprLaneKey === 'sofia_light'
-        ? [
-            '',
-            '【表現補助（露出禁止／構造は動かさない）】',
-            '- 改行を少し増やすが長文化しない。',
-            '- 比喩は最大1つまで。具体語を優先する。',
-          ].join('\n')
-        : '';
-
-    return ['', '【スタイル注意：GROUND（露出禁止）】', '- 通常は自然に。過度に装飾しない。', styleAssist]
+    // GROUND（通常）
+    return ['', '【スタイル注意：GROUND（露出禁止）】', '- 通常は自然に。過度に装飾しない。']
       .filter(Boolean)
       .join('\n');
   })();

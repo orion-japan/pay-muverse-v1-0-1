@@ -232,16 +232,12 @@ export function canonicalizeIrosMeta(args: {
   };
 }
 
-/**
- * canonical を metaForSave に “上書き反映” したい場合に使う。
- * 以降の処理が metaForSave を参照する構造でも、見通しをよくするための補助。
- *
- * 注意: 既存の metaForSave を破壊しうるので、呼び出し側で判断すること。
- */
 export function applyCanonicalToMetaForSave(metaForSave: any, canonical: CanonicalMeta): any {
   const m = isObj(metaForSave) ? metaForSave : {};
 
   // 3軸
+  // ✅ legacy /互換：q も必ず埋める（rephrase/bridge が out.metaForSave.q を参照しているため）
+  m.q = canonical.qCode;
   m.qCode = canonical.qCode;
   m.q_code = canonical.qCode;
 

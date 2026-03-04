@@ -616,16 +616,18 @@ function ensureUiCue(metaForSave: any): void {
     null;
 
   // 2) STALL
+  // - orchestrator は ex.stallHard に boolean を入れる
+  // - 詳細は ex.stall（object）に入るので、まずはそちらを優先する
+  const stallHardBool =
+    Boolean(ex?.stallHard) || Boolean(ex?.stall?.hardNow) || false;
+
   const stallSeverity =
-    ex?.stallHard?.severity ??
     ex?.stall?.severity ??
-    null;
+    (stallHardBool ? 'hard' : null);
 
   const stallReason =
-    ex?.stallHard?.reason ??
     ex?.stall?.reason ??
     null;
-
   // 3) IT / T-layer
   const itTriggered =
     (metaForSave as any)?.itTriggered ??
@@ -856,7 +858,331 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
       metaForSave.extra.pastStateKeyword = null;
     }
   }
+  // =========================================================
+  // 5.9) MIRROR_FLOW / viewShift / cards を常時ルートで生成（stopgap外）
+  // - stopgap（6-B）の if に入らない通常ターンでも ctxPack.cards を持たせる
+  // - 二重生成を避けるため、既にある場合は上書きしない
+  // =========================================================
+  try {
+    // extra / ctxPack を必ず用意
+    (metaForSave as any).extra =
+      (metaForSave as any).extra && typeof (metaForSave as any).extra === 'object'
+        ? (metaForSave as any).extra
+        : {};
+    (metaForSave as any).extra.ctxPack =
+      (metaForSave as any).extra.ctxPack && typeof (metaForSave as any).extra.ctxPack === 'object'
+        ? (metaForSave as any).extra.ctxPack
+        : {};
 
+    // 既に mirrorFlowV1 があるなら再生成しない（stopgap側で作られた場合に備える）
+    const hasMirrorFlowAlready = !!(metaForSave as any)?.extra?.mirrorFlowV1;
+
+    if (!hasMirrorFlowAlready) {
+      // ✅ MirrorFlowV1 は後段（POLARITY_BRIDGE後）の1回生成に統一する。
+      // - ここ（前段）で作ると二重生成になり、RESULTログも2回出る。
+      // - polarityMetaBand などの補正も後段が正本。
+      // - 互換のため、もし既に mirrorFlowV1 がどこかで入っている場合はそれを尊重する。
+    }
+
+    // viewShift / snapshot（既にあれば上書きしない）
+    const hasViewShift = !!(metaForSave as any)?.extra?.ctxPack?.viewShift;
+    const hasViewShiftSnap = !!(metaForSave as any)?.extra?.ctxPack?.viewShiftSnapshot;
+
+      const polarityBand =
+        (metaForSave as any)?.polarityBand ??
+        (metaForSave as any)?.extra?.polarityBand ??
+        (metaForSave as any)?.extra?.ctxPack?.polarityBand ??
+        null;
+
+      const polarityFromMirrorRaw =
+        (metaForSave as any)?.mirror?.polarity ??
+        (metaForSave as any)?.extra?.mirror?.polarity ??
+        null;
+
+      const normalizePolarity = (raw: any): PolarityV1 | null => {
+        if (raw == null) return null;
+
+        if (typeof raw === 'string') {
+          const s = raw.trim();
+          if (!s) return null;
+          if (s === 'yin' || s === 'yang') return s;
+          if (s === 'positive') return 'yang';
+          if (s === 'negative') return 'yin';
+          return null;
+        }
+
+        if (typeof raw === 'object') {
+          const vIn = normalizePolarity((raw as any).in);
+          if (vIn) return vIn;
+
+          const vOut = normalizePolarity((raw as any).out);
+          if (vOut) return vOut;
+
+          const vBand = normalizePolarity((raw as any).polarityBand);
+          if (vBand) return vBand;
+        }
+
+        return null;
+      };
+
+      const polarityFromMirror = normalizePolarity(polarityFromMirrorRaw);
+      const polarityFromBand = normalizePolarity(polarityBand);
+      const polarityCanon: PolarityV1 | null = polarityFromMirror ?? polarityFromBand ?? null;
+
+      const polarityMetaBand: string | null =
+        (typeof (polarityFromMirrorRaw as any)?.metaBand === 'string' &&
+        (polarityFromMirrorRaw as any).metaBand.trim()
+          ? (polarityFromMirrorRaw as any).metaBand.trim()
+          : null) ??
+        (typeof (polarityFromMirrorRaw as any)?.polarityBand === 'string' &&
+        (polarityFromMirrorRaw as any).polarityBand.trim()
+          ? (polarityFromMirrorRaw as any).polarityBand.trim()
+          : null) ??
+        (typeof polarityBand === 'string' && polarityBand.trim() ? polarityBand.trim() : null);
+
+      const polarity: any =
+        polarityCanon == null
+          ? null
+          : {
+              in: polarityCanon,
+              out: polarityCanon,
+              metaBand: polarityMetaBand,
+            };
+
+      const flowDelta_mf =
+        (metaForSave as any)?.flow?.delta ??
+        (metaForSave as any)?.extra?.ctxPack?.flow?.delta ??
+        (metaForSave as any)?.extra?.flow?.delta ??
+        null;
+
+      const returnStreak_mf =
+        (metaForSave as any)?.extra?.ctxPack?.flow?.returnStreak ??
+        (metaForSave as any)?.extra?.flow?.returnStreak ??
+        null;
+
+      const sessionBreak_mf = (metaForSave as any)?.extra?.ctxPack?.flow?.sessionBreak ?? null;
+
+// ✅ MirrorFlowV1 は後段（POLARITY_BRIDGE後）の1回生成に統一する。
+// - ここ（前段）で作ると二重生成になり、RESULTログも2回出る。
+// - polarityMetaBand などの補正も後段が正本。
+// - 互換のため、もし既に mirrorFlowV1 がどこかで入っている場合はそれを尊重する。
+
+
+    if (!hasViewShift || !hasViewShiftSnap) {
+      const prevSnap: any =
+        (metaForSave as any)?.extra?.viewShiftPrev ??
+        (metaForSave as any)?.viewShiftPrev ??
+        null;
+
+      const depthNow: string | null = (() => {
+        const d =
+          (metaForSave as any)?.depth ??
+          (metaForSave as any)?.depthStage ??
+          (metaForSave as any)?.framePlan?.depth ??
+          (metaForSave as any)?.framePlan?.depthStage ??
+          null;
+        const s = typeof d === 'string' ? d.trim() : '';
+        return s ? s : null;
+      })();
+
+      const mirrorObj: any =
+        (metaForSave as any)?.mirror ??
+        (metaForSave as any)?.extra?.mirror ??
+        (metaForSave as any)?.extra?.mirrorFlowV1?.mirror ??
+        null;
+
+      const e_turn: any = mirrorObj?.e_turn ?? null;
+
+      const sessionBreakNow: any =
+        (metaForSave as any)?.extra?.ctxPack?.flow?.sessionBreak ??
+        (metaForSave as any)?.extra?.flow?.sessionBreak ??
+        null;
+
+      if (!hasViewShift) {
+        const vs = computeViewShiftV1({
+          userText: String(userText ?? ''),
+          depth: depthNow,
+          e_turn: e_turn ?? null,
+          sessionBreak: sessionBreakNow ?? null,
+          prev: prevSnap && typeof prevSnap === 'object' ? prevSnap : null,
+        } as any);
+
+        (metaForSave as any).extra.ctxPack.viewShift = vs;
+
+        console.log('[IROS/VIEW_SHIFT][ALWAYS]', {
+          ok: (vs as any)?.ok ?? null,
+          score: (vs as any)?.score ?? null,
+          variant: (vs as any)?.variant ?? null,
+          confirmLine: (vs as any)?.confirmLine ?? null,
+          sessionBreak: sessionBreakNow ?? null,
+        });
+      }
+
+      if (!hasViewShiftSnap) {
+        const snap = buildViewShiftSnapshot({
+          userText: String(userText ?? ''),
+          depth: depthNow,
+          e_turn: e_turn ?? null,
+        } as any);
+
+        (metaForSave as any).extra.ctxPack.viewShiftSnapshot = snap;
+      }
+    }
+
+// =========================================================
+// 5.x) cards-lite 生成（ctxPack.cards）
+// =========================================================
+try {
+
+  // cards（既にあれば上書きしない）
+  const hasCards = !!(metaForSave as any)?.extra?.ctxPack?.cards;
+
+  if (!hasCards) {
+
+    const qCountsAny: any =
+      (metaForSave as any)?.qCounts ??
+      (metaForSave as any)?.extra?.qCounts ??
+      (metaForSave as any)?.extra?.ctxPack?.qCounts ??
+      (metaForSave as any)?.extra?.ctxPack?.q_counts ??
+      null;
+
+    const mirrorObjAny: any =
+      (metaForSave as any)?.mirror ??
+      (metaForSave as any)?.extra?.mirror ??
+      (metaForSave as any)?.extra?.mirrorFlowV1?.mirror ??
+      null;
+
+    const rawETurn: any =
+      qCountsAny?.e_turn_now ??
+      qCountsAny?.eTurnNow ??
+      mirrorObjAny?.e_turn ??
+      null;
+
+    const normalizeETurnKey = (v: any): string | null => {
+
+      if (v == null) return null;
+
+      if (typeof v === 'string') {
+        const s = v.trim();
+        return s ? s : null;
+      }
+
+      if (typeof v === 'object') {
+        const c =
+          (typeof v.key === 'string' && v.key.trim()) ||
+          (typeof v.code === 'string' && v.code.trim()) ||
+          (typeof v.e_turn === 'string' && v.e_turn.trim()) ||
+          null;
+
+        return c ? String(c).trim() : null;
+      }
+
+      return null;
+    };
+
+    const eKey = normalizeETurnKey(rawETurn);
+
+    const depthNow =
+      (metaForSave as any)?.depth ??
+      (metaForSave as any)?.depthStage ??
+      (metaForSave as any)?.framePlan?.depth ??
+      (metaForSave as any)?.framePlan?.depthStage ??
+      null;
+
+    const phaseNow =
+      (metaForSave as any)?.phase ??
+      (metaForSave as any)?.framePlan?.phase ??
+      null;
+
+    const stageNow =
+      (metaForSave as any)?.coord?.stage ??
+      (metaForSave as any)?.extra?.coord?.stage ??
+      null;
+
+    const bandNow =
+      (metaForSave as any)?.coord?.band ??
+      (metaForSave as any)?.extra?.coord?.band ??
+      null;
+
+    const makeLabels = (k: string) => {
+
+      const currentMap: Record<string, string> = {
+        e1: 'いま整え直す',
+        e2: 'いま伸ばし切る',
+        e3: 'いま支え直す',
+        e4: 'いま解き放つ',
+        e5: 'いま灯し直す',
+      };
+
+      const futureMap: Record<string, string> = {
+        e1: '次は安定が来る',
+        e2: '次は成長が来る',
+        e3: '次は定着が来る',
+        e4: '次は浄化が来る',
+        e5: '次は熱が戻る',
+      };
+
+      return {
+        current: currentMap[k] ?? 'いま整え直す',
+        future: futureMap[k] ?? '次は安定が来る',
+      };
+    };
+
+    const makeScore = (k: string) => {
+
+      if (k === 'e5') return 90;
+      if (k === 'e4') return 78;
+      if (k === 'e3') return 66;
+      if (k === 'e2') return 54;
+      if (k === 'e1') return 42;
+
+      return 50;
+    };
+
+    if (eKey) {
+
+      const labels = makeLabels(eKey);
+      const stingScore = makeScore(eKey);
+
+      (metaForSave as any).extra = (metaForSave as any).extra ?? {};
+      (metaForSave as any).extra.ctxPack = (metaForSave as any).extra.ctxPack ?? {};
+
+      (metaForSave as any).extra.ctxPack.cards = {
+
+        current: {
+          label: labels.current,
+          e_turn: eKey,
+          depth: depthNow,
+          phase: phaseNow,
+        },
+
+        future: {
+          label: labels.future,
+          e_turn: eKey,
+          depth: depthNow,
+          phase: phaseNow,
+        },
+
+        stingScore,
+
+        hint: {
+          stage: stageNow,
+          band: bandNow,
+        }
+
+      };
+    }
+
+  }
+
+} catch (e) {
+
+  console.warn(
+    '[IROS/PP][ALWAYS_MIRROR_VS_CARDS][ERR]',
+    { err: String(e) }
+  );
+
+}
   // =========================================================
   // 6) Q1_SUPPRESS沈黙止血 + 空本文stopgap
   // =========================================================
@@ -1046,6 +1372,7 @@ const polarityMetaBand: string | null =
       delta: (flowDelta_mf ?? null) as any,
       returnStreak: (returnStreak_mf ?? null) as any,
       sessionBreak: (sessionBreak_mf ?? null) as any,
+
     },
   });
 
@@ -1132,6 +1459,155 @@ const polarityMetaBand: string | null =
 
     (metaForSave as any).extra.ctxPack.viewShift = vs;
     (metaForSave as any).extra.ctxPack.viewShiftSnapshot = snap;
+
+    // =========================================
+    // [Phase 1] resonance cards（current/future）生成 → ctxPack.cards に保存
+    // - e_turn + 現在の座標（depth/phase/stage/band）から “刺さり候補語” を作る
+    // - 正本は extra.ctxPack（writer/rephrase 側が拾える）
+    // =========================================
+    try {
+      const exAny: any = (metaForSave as any).extra ?? {};
+      exAny.ctxPack = exAny.ctxPack && typeof exAny.ctxPack === 'object' ? exAny.ctxPack : {};
+      (metaForSave as any).extra = exAny;
+
+      // e_turn は MIRROR_FLOW の mirror から拾う（上で mirrorObj を作っている）
+      const mirrorObjAny: any =
+        (metaForSave as any)?.mirror ??
+        (metaForSave as any)?.extra?.mirror ??
+        (metaForSave as any)?.extra?.mirrorFlowV1?.mirror ??
+        null;
+
+      const rawETurn: any = mirrorObjAny?.e_turn ?? null;
+
+      const normalizeETurnKey = (v: any): string | null => {
+        if (v == null) return null;
+        if (typeof v === 'string') {
+          const s = v.trim();
+          return s ? s : null;
+        }
+        if (typeof v === 'object') {
+          // { key:'e2' } / { code:'e2' } / { e_turn:'e2' } などに耐える
+          const c =
+            (typeof (v as any).key === 'string' && (v as any).key.trim()) ||
+            (typeof (v as any).code === 'string' && (v as any).code.trim()) ||
+            (typeof (v as any).e_turn === 'string' && (v as any).e_turn.trim()) ||
+            null;
+          return c ? String(c).trim() : null;
+        }
+        return null;
+      };
+
+      const eKey = normalizeETurnKey(rawETurn); // 例: 'e1'〜'e5'
+      const depthNow: string | null = (() => {
+        const d =
+          (metaForSave as any)?.depth ??
+          (metaForSave as any)?.depthStage ??
+          (metaForSave as any)?.framePlan?.depth ??
+          (metaForSave as any)?.framePlan?.depthStage ??
+          null;
+        const s = typeof d === 'string' ? d.trim() : '';
+        return s ? s : null;
+      })();
+
+      const phaseNow: string | null = (() => {
+        const p =
+          (metaForSave as any)?.phase ??
+          (metaForSave as any)?.framePlan?.phase ??
+          null;
+        const s = typeof p === 'string' ? p.trim() : '';
+        return s ? s : null;
+      })();
+
+      const stageNow: string | null =
+        (metaForSave as any)?.coord?.stage ??
+        (metaForSave as any)?.extra?.coord?.stage ??
+        null;
+
+      const bandNow: string | null =
+        (metaForSave as any)?.coord?.band ??
+        (metaForSave as any)?.extra?.coord?.band ??
+        null;
+
+      // --- label 生成（短く・固定・憶測しない）
+      // e_turn が無い場合は “生成しない” （ここは無理に捏造しない）
+      const makeLabels = (k: string) => {
+        // 8〜12文字“目安”の短文（日本語は字数計測が曖昧なので「短く固定」を優先）
+        const currentMap: Record<string, string> = {
+          e1: 'いま整え直す',
+          e2: 'いま伸ばし切る',
+          e3: 'いま支え直す',
+          e4: 'いま解き放つ',
+          e5: 'いま灯し直す',
+        };
+        const futureMap: Record<string, string> = {
+          e1: '次は安定が来る',
+          e2: '次は成長が来る',
+          e3: '次は定着が来る',
+          e4: '次は浄化が来る',
+          e5: '次は熱が戻る',
+        };
+        return {
+          current: currentMap[k] ?? 'いま整え直す',
+          future: futureMap[k] ?? '次は安定が来る',
+        };
+      };
+
+      const makeScore = (k: string): number => {
+        // 決め打ち（憶測を広げない）：eの強さとして単調増加
+        if (k === 'e5') return 90;
+        if (k === 'e4') return 78;
+        if (k === 'e3') return 66;
+        if (k === 'e2') return 54;
+        if (k === 'e1') return 42;
+        return 50;
+      };
+
+      if (eKey) {
+        const labels = makeLabels(eKey);
+        const stingScore = makeScore(eKey);
+
+        (metaForSave as any).extra.ctxPack.cards = {
+          current: {
+            label: labels.current,
+            // “材料”として残す（writer が回収するため）
+            e_turn: eKey,
+            depth: depthNow,
+            phase: phaseNow,
+          },
+          future: {
+            label: labels.future,
+            e_turn: eKey,
+            depth: depthNow,
+            phase: phaseNow,
+          },
+          stingScore,
+          // 追加メモ（writer が必要なら拾える）
+          hint: {
+            stage: stageNow,
+            band: bandNow,
+          },
+        };
+
+        console.log('[IROS/CARDS][GEN]', {
+          ok: true,
+          e_turn: eKey,
+          stingScore,
+          current: labels.current,
+          future: labels.future,
+          stage: stageNow,
+          band: bandNow,
+          depth: depthNow,
+          phase: phaseNow,
+        });
+      } else {
+        console.log('[IROS/CARDS][GEN]', {
+          ok: false,
+          reason: 'NO_E_TURN',
+        });
+      }
+    } catch (e) {
+      console.warn('[IROS/CARDS][GEN][ERR]', { err: String(e) });
+    }
 
 /* =========================================
  * [追加] resonanceState 正本 + seed_text 生成（postProcessReply 内）
@@ -2058,11 +2534,18 @@ try {
       ex.rawTextFromModel = finalText;
     }
   }
+} catch (e) {
+  console.warn('[IROS/PostProcess] extractedTextFromModel patch failed (non-fatal)', {
+    userCode,
+    conversationId,
+    err: String(e),
+  });
+}
 
-  // =========================================================
-  // 7) UnifiedAnalysis 保存（失敗しても落とさない）
-  // =========================================================
-  try {
+// =========================================================
+// 7) UnifiedAnalysis 保存（失敗しても落とさない）
+// =========================================================
+try {
     const tenantId = typeof args.tenantId === 'string' ? args.tenantId : 'default';
 
     const analysis = await buildUnifiedAnalysis({

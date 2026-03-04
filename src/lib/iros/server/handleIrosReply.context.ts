@@ -121,8 +121,10 @@ function detectInputKind(userText: string): InputKind {
     return 'task';
   }
 
+  // question という InputKind は廃止（PDF: 4分類へ収束）
+  // - 末尾「?」や疑問語は “chat内の性質” として slot/contract で扱う
   if (/[?？]$/.test(s) || /(なに|何|どこ|いつ|だれ|誰|なぜ|どうして|どうやって)/.test(s)) {
-    return 'question';
+    return 'chat';
   }
 
   return 'chat';

@@ -560,20 +560,8 @@ function buildFlowReply(args: {
       : useIdeaBand
         ? buildShiftIdeaBand(seedText)
         : m('SHIFT', {
-            kind: 'c_sense_hint',
-            intent: 'continue_flow',
-            rules: {
-              ...(SHIFT_PRESET_C_SENSE_HINT.rules ?? {}),
-              questions_max: 1,
-              no_checklist: true,
-              no_future_instruction: true,
-              no_lecture: true,
-              no_decision: true,
-              no_action_commit: true,
-            },
-            tone: SHIFT_PRESET_C_SENSE_HINT.tone ?? undefined,
-            allow: { ...(SHIFT_PRESET_C_SENSE_HINT.allow ?? {}), short_reply_ok: false },
-            seed_text: seedText,
+            kind: 'auto_fill',
+            hint: 'flow_continue_minimal',
           });
 
           return [
@@ -644,7 +632,6 @@ export function buildNormalChatSlotPlan(args: {
   const lastUserText = recent.length > 0 ? recent[recent.length - 1] : null;
 
   // ✅ prevReturnStreak を recentUserTexts の末尾から復元（状態は持たない）
-  // - 直前ターンの「RETURN連続回数」を推定して observeFlow に渡す
   const prevReturnStreak = (() => {
     if (recent.length < 2) return 0;
 
@@ -686,6 +673,10 @@ export function buildNormalChatSlotPlan(args: {
   let reason = 'flow';
   let slots: NormalChatSlot[] = [];
 
+  // ✅ 分岐フラグ（@Q を入れる条件の確証に使う）
+  let usedQuestionSlots = false;
+  let usedClarify = false;
+
   if (!userText) {
     reason = 'empty';
     slots = buildEmpty();
@@ -694,9 +685,11 @@ export function buildNormalChatSlotPlan(args: {
     slots = buildEnd();
   } else if (shouldUseQuestionSlots(userText)) {
     reason = 'questionSlots';
+    usedQuestionSlots = true;
     slots = buildQuestion(userText, lastUserText ?? undefined, laneKeyArg, flowDelta);
   } else if (isClarify(userText) && /[?？]/.test(userText)) {
     reason = 'clarify';
+    usedClarify = true;
     slots = buildClarify(userText, laneKeyArg, flowDelta, flow as any);
   } else if (isCompose(userText)) {
     reason = 'compose';
@@ -713,6 +706,41 @@ export function buildNormalChatSlotPlan(args: {
     slots = [buildNextHintSlot({ userText, laneKey: laneKeyArg, flowDelta: flowDelta ?? 'FORWARD' })];
   } else {
     slots = normalized;
+  }
+
+  // --------------------------------------------------
+  // ✅ recall-must-include の差し込み（slot数は増やさない）
+  // - rephraseEngine は SHIFT を seed に混ぜるので、ここに @RESTORE/@Q を追加すると拾える
+  // --------------------------------------------------
+  const buildRecallAppend = (): string => {
+    const lines: string[] = [];
+
+    // (A) RESTORE：復元したい“前の一文”が context.lastSummary に入ってる場合だけ
+    //  トリガーは最低限（戻して/復元/もう一回/さっき/前の）
+    const lastSummary = norm(String(args.context?.lastSummary ?? ''));
+    const wantsRestore = /戻(して|す)|復元|もう一回|さっき|前の/.test(userText);
+    if (wantsRestore && lastSummary) {
+      lines.push(`@RESTORE ${JSON.stringify({ last: clamp(lastSummary, 220) })}`);
+    }
+
+    // (B) Q：質問系（QuestionSlots or Clarify or "？/?"）のときだけ
+    const wantsQ = usedQuestionSlots || usedClarify || /[?？]/.test(userText);
+    if (wantsQ) {
+      lines.push(`@Q ${JSON.stringify({ ask: clamp(userText, 220) })}`);
+    }
+
+    return lines.length ? `\n${lines.join('\n')}` : '';
+  };
+
+  const recallAppend = buildRecallAppend();
+  if (recallAppend) {
+    slots = slots.map((s) => {
+      if (s?.key !== 'SHIFT') return s;
+      const c = String(s.content ?? '');
+      // 念のため二重付与しない
+      if (c.includes('@RESTORE') || c.includes('@Q ')) return s;
+      return { ...s, content: c + recallAppend };
+    });
   }
 
   return {

@@ -137,12 +137,12 @@ function slotsOkFromHints(args: { slotPlanLen: number | null; hasSlots: boolean 
   return hasSlots === true;
 }
 
-// --- ADD: rewriteSeed builder (SHIFT + CTX + OBS + SEED_TEXT) ---
-// ✅ 目的：LLMが迷わない seed を固定で作る（本文採用とは分離）
-// - @SHIFT: 出力契約（semantic_answer）
-// - @CTX  : メタの短い要約（JSONは渡さず短文化）
-// - @OBS  : 観測の核（NOW_CORE）。ユーザー生文は入れない。
-// - SEED_TEXT: slots 由来の本文（あれば）
+// --- ADD: rewriteSeed builder (V3 minimal: GOAL + CONTRACT + STATE + SEED) ---
+// ✅ 目的：LLMが迷わない最小seedを固定で作る（本文採用とは分離）
+// - @GOAL    : STABILIZE|ADVANCE|CLARIFY|SAFE（目的タグ）
+// - @CONTRACT: lines_max / questions_max（制限だけ）
+// - @STATE   : q/depth/phase/summary（短い背景）
+// - SEED_TEXT: slots由来の重心（あれば）
 function buildWriterRewriteSeed(args: {
   userText: string;
   seedText: string;
@@ -154,11 +154,11 @@ function buildWriterRewriteSeed(args: {
       .replace(/\r/g, '\n')
       .trim();
 
-  const user = n(args.userText);
+  // NOTE: userText は「混入させない」方針のまま保持（将来の診断/ログ用途のため引数は残す）
   const seed = n(args.seedText);
   const meta = args.meta ?? {};
 
-  // ✅ “メタは背景”として短く（LLMが迷わない程度）
+  // --- pick state (short) ---
   const q =
     meta?.qCode ??
     meta?.q_primary ??
@@ -179,13 +179,6 @@ function buildWriterRewriteSeed(args: {
     meta?.memoryState?.phase ??
     null;
 
-  const layer =
-    meta?.intentLayer ??
-    meta?.intent_layer ??
-    meta?.memoryState?.intentLayer ??
-    meta?.memoryState?.intent_layer ??
-    null;
-
   const summary =
     meta?.situationSummary ??
     meta?.situation_summary ??
@@ -195,52 +188,144 @@ function buildWriterRewriteSeed(args: {
     meta?.memoryState?.summary ??
     null;
 
-  const ctxParts: string[] = [];
-  if (q) ctxParts.push(`Q=${String(q)}`);
-  if (depth) ctxParts.push(`Depth=${String(depth)}`);
-  if (phase) ctxParts.push(`Phase=${String(phase)}`);
-  if (layer) ctxParts.push(`Layer=${String(layer)}`);
-  if (summary && String(summary).trim()) ctxParts.push(`Summary=${String(summary).trim()}`);
+  // --- GOAL (SHIFT -> GOAL) ---
+  // 受け口は複数（goalKind/replyGoal/shiftKindなど）を吸収して最終的に4択へ正規化
+  const rawGoal =
+    meta?.goalKind ??
+    meta?.replyGoal ??
+    meta?.goal ??
+    meta?.shiftKind ??
+    meta?.shift ??
+    null;
 
-  const ctxLine = ctxParts.length ? ctxParts.join(' / ') : '';
+  const normGoal = (v: any): 'STABILIZE' | 'ADVANCE' | 'CLARIFY' | 'SAFE' => {
+    const s = String(v ?? '').trim().toLowerCase();
+    if (s === 'advance' || s === 'adv' || s === 'go' || s === 'forward') return 'ADVANCE';
+    if (s === 'clarify' || s === 'deep' || s === 'explain') return 'CLARIFY';
+    if (s === 'safe' || s === 'safety' || s === 'crisis') return 'SAFE';
+    // default
+    return 'STABILIZE';
+  };
 
-  // ✅ SHIFT（出力契約）— あなたの指定を固定で入れる
-  const shift = [
-    '@SHIFT {',
-    '  "kind":"semantic_answer",',
-    '  "output_contract":[',
-    '    "1行目：Yes/No か核心",',
-    '    "2行目：短い理由",',
-    '    "3行目：次の一歩（1点だけ。計測/確認/選択など具体動作）"',
-    '  ],',
-    '  "rules":[',
-    '    "テンプレ/ボイラープレート禁止",',
-    '    "平易な言葉",',
-    '    "次の一歩は必ず1点だけ",',
-    '    "質問で逃げない（最大1個まで）"',
-    '  ],',
-    '  "forbid":["diagnosis","preach","hard_guidance","forced_task"],',
-    '  "questions_max":1',
-    '}',
-  ].join('\n');
+  const goal = normGoal(rawGoal);
 
+  // --- CONTRACT (resolver) ---
+  // llmGate は “上書き” ではなく “解決(Resolver)” を担当する
+  // 優先：明示contract/rules -> slotPlan/framePlan -> goal default -> global default
 
-// ✅ userText を LLM 入力へ混入させない（internalPack / system へ渡さない）
-// - @OBS {"user": ...} は復唱・素材化・漏れの直結ルートになるため無効化する。
-// - 代替の NOW_CORE 等は後段で導入する（まずは止血）。
-const obs = '';
-  const ctx = ctxLine ? `@CTX ${JSON.stringify(ctxLine)}` : '';
+  type ContractV1 = {
+    lines_max?: number;
+    questions_max?: number;
 
-  // ✅ seedText は「最後」に置く（契約→背景→入力→素材の順）
+    // optional (writer側が未対応でも害はない)
+    ask_style?: 'single' | 'choice' | 'none';
+    propose_style?: 'direct' | 'choice' | 'mix';
+  };
+
+  const pickNumber = (v: any): number | null =>
+    typeof v === 'number' && Number.isFinite(v) ? v : null;
+
+  const pickContract = (m: any): ContractV1 | null => {
+    if (!m || typeof m !== 'object') return null;
+
+    // “あり得る場所”を列挙（既存の extractSlotsObj と同じ思想）
+    const cands: any[] = [
+      m?.contract,
+      m?.rules,
+      m?.slotPlan?.contract,
+      m?.slotPlan?.rules,
+      m?.framePlan?.contract,
+      m?.framePlan?.rules,
+      m?.framePlan?.slotPlan?.contract,
+      m?.framePlan?.slotPlan?.rules,
+      m?.framePlan?.framePlan?.contract,
+      m?.framePlan?.framePlan?.rules,
+    ].filter(Boolean);
+
+    for (const c of cands) {
+      if (!c || typeof c !== 'object') continue;
+
+      const lines = pickNumber((c as any).lines_max);
+      const qmax = pickNumber((c as any).questions_max);
+
+      const ask_style =
+        (c as any).ask_style === 'single' ||
+        (c as any).ask_style === 'choice' ||
+        (c as any).ask_style === 'none'
+          ? (c as any).ask_style
+          : undefined;
+
+      const propose_style =
+        (c as any).propose_style === 'direct' ||
+        (c as any).propose_style === 'choice' ||
+        (c as any).propose_style === 'mix'
+          ? (c as any).propose_style
+          : undefined;
+
+      // 何か1つでも取れたら採用
+      if (lines !== null || qmax !== null || ask_style || propose_style) {
+        return {
+          ...(lines !== null ? { lines_max: lines } : {}),
+          ...(qmax !== null ? { questions_max: qmax } : {}),
+          ...(ask_style ? { ask_style } : {}),
+          ...(propose_style ? { propose_style } : {}),
+        };
+      }
+    }
+    return null;
+  };
+
+  const resolved = pickContract(meta);
+
+  // goal default（安全弁）
+  const defaultQuestionsMax = goal === 'STABILIZE' || goal === 'SAFE' ? 0 : 1;
+  const defaultLinesMax = goal === 'SAFE' ? 4 : 8;
+
+  // ここが “補完” の本体（上流を尊重して欠けた分だけ埋める）
+  const questions_max = pickNumber(resolved?.questions_max) ?? defaultQuestionsMax;
+  const lines_max = pickNumber(resolved?.lines_max) ?? pickNumber(meta?.lines_max) ?? defaultLinesMax;
+
+  // ask/propose style は “任意” で付与（writer が未対応でも壊れない）
+  const contractObj: ContractV1 = {
+    lines_max,
+    questions_max,
+    ...(resolved?.ask_style ? { ask_style: resolved.ask_style } : {}),
+    ...(resolved?.propose_style ? { propose_style: resolved.propose_style } : {}),
+  };
+
+  console.log('[IROS/LLM_GATE][CONTRACT_RESOLVED]', {
+    traceId: (meta as any)?.extra?.traceId ?? (meta as any)?.traceId ?? null,
+    conversationId: (meta as any)?.conversationId ?? null,
+    userCode: (meta as any)?.userCode ?? null,
+    goal,
+    defaultLinesMax,
+    defaultQuestionsMax,
+    meta_lines_max: (meta as any)?.lines_max ?? null,
+    resolved,
+    contractObj,
+  });
+
+  // --- build blocks ---
+  const goalLine = `@GOAL ${JSON.stringify({ kind: goal })}`;
+  const contractLine = `@CONTRACT ${JSON.stringify(contractObj)}`;
+
+  const stateObj: Record<string, any> = {};
+  if (q) stateObj.qCode = String(q);
+  if (depth) stateObj.depth = String(depth);
+  if (phase) stateObj.phase = String(phase);
+  if (summary && String(summary).trim()) stateObj.summary = String(summary).trim();
+
+  const stateLine = Object.keys(stateObj).length ? `@STATE ${JSON.stringify(stateObj)}` : '';
+
+  // --- output ---
   const out: string[] = [];
-  out.push(shift);
-  if (ctx) out.push(ctx);
-  if (obs) out.push(obs);
+  out.push(goalLine);
+  out.push(contractLine);
+  if (stateLine) out.push(stateLine);
   if (seed) out.push(seed);
 
   return out.filter(Boolean).join('\n\n').trim();
 }
-
 
 
 // ---------------------------------------------------------------------

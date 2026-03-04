@@ -14,6 +14,11 @@
 // IMPORTANT (boundary):
 // - e_turn は instant（非保存・非継続・構造決定に不関与）
 // - e_turn から Q_code を再推定/上書きしない（ここでは扱わない）
+//
+// v1.1 change:
+// - confidence（観測安定度）と intensity（感情エネルギー）を分離する
+//   - confidence: 情報量/手がかりに基づく “安定度” 0..1
+//   - intensity: そのターンの “熱/圧” 0..1（短文でも強く出る）
 
 export type PolarityV1 = 'yin' | 'yang';
 export type FlowDeltaV1 = 'FORWARD' | 'RETURN';
@@ -25,12 +30,19 @@ export type ETurnV1 = 'e1' | 'e2' | 'e3' | 'e4' | 'e5';
 export type MirrorMetaV1 = {
   e_turn: ETurnV1 | null;
   polarity: PolarityV1 | null;
+
+  // confidence: stability of observation (info-based)
   confidence: number; // 0..1
+
+  // intensity: energy of emotion on this turn (signal-based)
+  intensity: number; // 0..1
+
   meaningKey: string | null; // e.g. "C12_e3_yin"
   field: {
     colorKey: string | null; // e.g. "e3_yin"
     alpha: number; // 0..1 (usually = confidence)
-    size: number; // 0..1 (energy proxy)
+    size: number; // 0..1 (energy proxy, length-ish)
+    intensity: number; // 0..1 (usually = mirror.intensity)
   };
 };
 
@@ -137,22 +149,37 @@ export function detectMirrorMicroV1(userText: string): boolean {
   const t = stripSpaces(t0);
   const len = Array.from(t).length;
 
-  // A) length
-  if (len <= 10) return true;
+  if (!t) return true;
 
-  // B) micro dictionary
+  // strong signal: short but meaningful -> NOT micro
+  const strongSignal =
+    /(?:無理|怖|こわ|恐|パニック|詰ん|怒|ムカ|イラ|腹立|許せ|最悪|不安|心配|悩|迷|自信ない|虚無|空虚|意味ない|つらい|辛い|しんどい|きつい)/.test(
+      t
+    ) || /[!！]{2,}/.test(t);
+
+  // micro dictionary
   if (MICRO_WORDS.has(t.toLowerCase())) return true;
 
-  // B-2) only emoji/punct/symbol
+  // only emoji/punct/symbol
   if (/^[\p{Extended_Pictographic}\p{P}\p{S}]+$/u.test(t)) return true;
 
-  // C) mostly symbols
+  // 1..3 chars: micro unless strong signal
+  if (len <= 3) return !strongSignal;
+
+  // 4..10 chars: decide by symbol ratio unless strong signal
+  if (len <= 10) {
+    if (strongSignal) return false;
+    if (nonWordRatio(t) >= 0.7) return true;
+    return false;
+  }
+
+  // mostly symbols
   if (nonWordRatio(t) >= 0.6) return true;
 
   return false;
 }
 
-// ---- v1 confidence ----
+// ---- v1 confidence (stability) ----
 
 function infoScoreByLen(lenTrim: number): number {
   if (lenTrim <= 10) return 0.20;
@@ -199,6 +226,7 @@ export function calcMirrorConfidenceV1(userText: string, micro: boolean): number
   let c = info + clue - pen;
 
   if (micro) {
+    // micro is low-stability by definition
     c = Math.min(0.45, c);
     c = clamp(c, 0.05, 0.45);
   } else {
@@ -207,7 +235,7 @@ export function calcMirrorConfidenceV1(userText: string, micro: boolean): number
   return c;
 }
 
-// ---- v1 energy size ----
+// ---- v1 energy size (proxy, mostly length) ----
 
 export function calcMirrorEnergySizeV1(userText: string): number {
   const t = stripSpaces(normText(userText));
@@ -230,49 +258,43 @@ export function detectETurnV1(userText: string, micro: boolean): ETurnV1 | null 
 
   if (!t) return null;
 
-  // micro は「判定を立てない」寄り（誤爆防止）
-  if (micro) return null;
-
-  // quick signals
   const hasExcl = /[!！]/.test(t);
   const hasQuest = /[?？]/.test(t);
 
-  // keyword buckets
   const p1 = [
     /我慢/, /抑え/, /抑圧/, /耐え/, /義務/, /べき/, /ちゃんと/, /正しく/, /ルール/, /秩序/,
-    /我慢し/, /耐える/, /守ら/,
+    /仕様/, /規約/, /制約/, /守ら/, /固定/, /憲法/, /禁止/, /許可/,
   ];
   const p2 = [
     /怒/, /ムカ/, /イラ/, /腹立/, /許せ/, /対立/, /反発/, /喧嘩/, /キレ/, /最悪/,
-    /ふざけ/, /舐め/, /ぶち/,
+    /ふざけ/, /舐め/, /ぶち/, /ダメダメ/, /何やってきた/, /できてないじゃん/,
   ];
   const p3 = [
     /不安/, /心配/, /迷/, /わから/, /どうし/, /大丈夫/, /確認/, /恐らく/, /たぶん/, /微妙/,
-    /悩/, /もや/, /モヤ/, /自信ない/,
+    /悩/, /もや/, /モヤ/, /自信ない/, /確証/, /根拠/, /本当に/, /これでok/,
   ];
   const p4 = [
     /怖/, /こわ/, /恐/, /無理/, /無理だ/, /無理かも/, /萎縮/, /逃げ/, /避け/, /震え/, /緊張/,
-    /焦り/, /パニック/, /詰ん/,
+    /焦り/, /パニック/, /詰ん/, /無理ゲー/,
   ];
   const p5 = [
     /虚無/, /空虚/, /空っぽ/, /意味ない/, /無意味/, /どうでも/, /燃え/, /やる気ない/, /飽き/,
-    /しんどい/, /つらい/, /落ち込/,
+    /しんどい/, /つらい/, /辛い/, /落ち込/,
   ];
 
-  // “弱い揺れ” は e3 に倒す（instantの揺れ検出用）
   const softUncertain = [
     /…+/, /\.{2,}/, /うーん/, /んー/, /えー/, /えっと/, /なんか/, /微妙/, /よくわからない/, /たぶん/,
   ];
 
   const s1 = countHits(t, p1);
-  const s2 = countHits(t, p2) + (hasExcl ? 1 : 0);
-  const s3 = countHits(t, p3) + (hasQuest ? 1 : 0);
+  const s2 = countHits(t, p2) + (/[!！]{2,}/.test(t) ? 2 : (hasExcl ? 1 : 0));
+  const s3 = countHits(t, p3) + (/[?？]{2,}/.test(t) ? 2 : (hasQuest ? 1 : 0));
   const s4 = countHits(t, p4);
   const s5 = countHits(t, p5);
 
   const soft = countHits(t, softUncertain);
 
-  // まず “弱い揺れ” があれば e3（迷い/確認）に倒す
+  // “弱い揺れ” は e3 に倒す（micro でも反応する）
   if (soft >= 1) return 'e3';
 
   const scores: Array<[ETurnV1, number]> = [
@@ -282,23 +304,94 @@ export function detectETurnV1(userText: string, micro: boolean): ETurnV1 | null 
     ['e4', s4],
     ['e5', s5],
   ];
-
   scores.sort((a, b) => b[1] - a[1]);
   const [best, bestScore] = scores[0];
 
-  // ここが変更点：全ゼロなら “無理に断定しない” ではなく、e3 に倒して必ず出す
-  if (!bestScore || bestScore <= 0) return 'e3';
+  // 全ゼロでも “そのターンの値として必ず反応” → e3 に倒す（安全デフォルト）
+  if (!bestScore || bestScore <= 0) {
+    if (/[!！]{2,}/.test(t)) return 'e2';
+    if (/[?？]{2,}/.test(t)) return 'e3';
+    if (hasExcl) return 'e2';
+    if (hasQuest) return 'e3';
+    return 'e3';
+  }
 
-  // tie-break: prefer e3 on ambiguity (safer), then e1
+  // tie-break: micro は安全側（e3）に寄せる
   const top = scores.filter(([, v]) => v === bestScore).map(([k]) => k);
   if (top.length >= 2) {
     if (top.includes('e3')) return 'e3';
+    if (micro) return 'e3';
     if (top.includes('e1')) return 'e1';
   }
+
+  // micro の場合：単発一致は誤爆しやすいので e3 へ
+  if (micro && bestScore <= 1) return 'e3';
 
   return best;
 }
 
+// ---- v1 intensity (energy on this turn; signal-based) ----
+// NOTE:
+// - confidence と違い、短文でも強信号なら上がる
+// - micro でも上がり得る（ただし上限は抑えめ）
+export function calcMirrorIntensityV1(args: {
+  userText: string;
+  micro: boolean;
+  e_turn: ETurnV1 | null;
+}): number {
+  const t0 = normText(args.userText);
+  const t = stripSpaces(t0).toLowerCase();
+  if (!t) return 0;
+
+  const micro = args.micro;
+  const e = args.e_turn;
+
+  const excl2 = /[!！]{2,}/.test(t);
+  const quest2 = /[?？]{2,}/.test(t);
+  const hasExcl = /[!！]/.test(t);
+  const hasQuest = /[?？]/.test(t);
+
+  // strong phrase set (fixed, reproducible)
+  const strongWords = [
+    /無理/, /怖|こわ|恐/, /パニック/, /詰ん/,
+    /最悪/, /許せ/, /キレ/, /ふざけ/,
+    /不安/, /心配/, /悩|迷/, /確証|根拠/,
+    /虚無|空虚|無意味|意味ない/,
+    /つらい|辛い|しんどい|きつい/,
+  ];
+  const strongHits = countHits(t, strongWords);
+
+  // base by e_turn kind (turn energy bias)
+  // e2/e4/e5 tends to feel higher pressure than e1/e3 in moment
+  const baseByKind: Record<ETurnV1, number> = {
+    e1: 0.35,
+    e2: 0.60,
+    e3: 0.45,
+    e4: 0.65,
+    e5: 0.55,
+  };
+
+  let x = 0.10;
+
+  if (e) x += baseByKind[e];
+  x += Math.min(0.25, strongHits * 0.12);
+
+  // punctuation pressure
+  if (excl2) x += 0.20;
+  else if (hasExcl) x += 0.10;
+
+  if (quest2) x += 0.10;
+  else if (hasQuest) x += 0.05;
+
+  // length gives a tiny support but not dominant (intensity ≠ info)
+  const len = Array.from(t).length;
+  x += clamp(len / 200, 0, 0.10);
+
+  // micro cap (still can be strong, but not max)
+  if (micro) x = Math.min(x, 0.75);
+
+  return clamp(x, 0, 1);
+}
 
 // ---- meaningKey ----
 
@@ -320,7 +413,11 @@ export function makeMirrorMeaningKeyV1(args: {
 export function buildMirrorFlowV1(input: MirrorFlowInputV1): MirrorFlowResultV1 {
   const userText = input.userText ?? '';
   const micro = detectMirrorMicroV1(userText);
+
+  // confidence = stability (info-based)
   const confidence = calcMirrorConfidenceV1(userText, micro);
+
+  // size = energy proxy (length-ish)
   const size = calcMirrorEnergySizeV1(userText);
 
   const stage = input.stage ?? null;
@@ -329,10 +426,10 @@ export function buildMirrorFlowV1(input: MirrorFlowInputV1): MirrorFlowResultV1 
   // e_turn: turn-only (instant)
   const e_turn = detectETurnV1(userText, micro);
 
+  // intensity: energy (signal-based)
+  const intensity = calcMirrorIntensityV1({ userText, micro, e_turn });
+
   // ---- polarity normalization (for key stability) ----
-  // NOTE:
-  // - upstream から polarity が object で来ても、colorKey/meaningKey は必ず string 化して作る
-  // - MirrorFlow の mirror.polarity は {in,out,metaBand} 形で返して、PP 側の polarity_in/out 抽出と整合させる
   const normPol = (raw: any): 'yin' | 'yang' | null => {
     if (raw == null) return null;
 
@@ -340,18 +437,15 @@ export function buildMirrorFlowV1(input: MirrorFlowInputV1): MirrorFlowResultV1 
       const s = raw.trim().toLowerCase();
       if (!s) return null;
 
-      // accept canonical
       if (s === 'yin' || s === '陰') return 'yin';
       if (s === 'yang' || s === '陽') return 'yang';
 
-      // accept meta-band style
       if (s === 'positive' || s === 'pos' || s === '+' || s === 'plus') return 'yang';
       if (s === 'negative' || s === 'neg' || s === '-' || s === 'minus') return 'yin';
 
       return null;
     }
 
-    // object: try common fields
     return (
       normPol((raw as any).in) ||
       normPol((raw as any).out) ||
@@ -363,7 +457,6 @@ export function buildMirrorFlowV1(input: MirrorFlowInputV1): MirrorFlowResultV1 
 
   const polarityRaw: any = (input as any).polarity ?? null;
 
-  // metaBand (keep as-is string if present)
   const polarity_metaBand: string | null =
     typeof polarityRaw === 'string'
       ? (polarityRaw.trim() ? polarityRaw.trim() : null)
@@ -371,14 +464,12 @@ export function buildMirrorFlowV1(input: MirrorFlowInputV1): MirrorFlowResultV1 
           ? (polarityRaw as any).metaBand.trim()
           : null);
 
-  // in/out (canonical yin/yang)
   const polarity_in = normPol(polarityRaw);
   const polarity_out =
     normPol((polarityRaw as any)?.out) ||
     normPol((polarityRaw as any)?.in) ||
     polarity_in;
 
-  // for keys: prefer polarity_in (canonical yin/yang)
   const polarityForKey = polarity_in;
 
   const meaningKey = makeMirrorMeaningKeyV1({
@@ -406,18 +497,19 @@ export function buildMirrorFlowV1(input: MirrorFlowInputV1): MirrorFlowResultV1 
   return {
     mirror: {
       e_turn,
-      // keep structured polarity for downstream extraction in PP
       polarity: {
         in: polarity_in,
         out: polarity_out,
         metaBand: polarity_metaBand,
       } as any,
       confidence,
+      intensity,
       meaningKey,
       field: {
         colorKey,
         alpha: confidence,
         size,
+        intensity,
       },
     },
     flow: {

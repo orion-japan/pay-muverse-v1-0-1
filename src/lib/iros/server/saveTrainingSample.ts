@@ -448,12 +448,24 @@ export async function saveIrosTrainingSample(params: SaveIrosTrainingSampleParam
     h_level: payload.h_level,
   });
 
-  const { error } = await supabase.from('iros_training_samples').insert(payload);
+  // ✅ Training insert は reply のクリティカルパスに乗せない
+  const t0 = Date.now();
 
-  if (error) {
-    console.error('[IROS][Training] insert error', error);
-    throw error;
-  }
+  void supabase
+    .from('iros_training_samples')
+    .insert(payload)
+    .then(({ error }) => {
+      const ms = Date.now() - t0;
 
-  console.log('[IROS][Training] insert ok');
+      if (error) {
+        console.error('[IROS][Training] insert error (non-blocking)', { ms, error });
+        return;
+      }
+
+      console.log('[IROS][Training] insert ok (non-blocking)', { ms });
+    })
+    .catch((e) => {
+      const ms = Date.now() - t0;
+      console.error('[IROS][Training] insert failed (non-blocking)', { ms, error: e });
+    });
 }

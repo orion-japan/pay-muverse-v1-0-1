@@ -49,8 +49,15 @@ function envFlagEnabled(raw: unknown, defaultEnabled = true) {
 }
 
 function head(s: string, n = 40) {
-  const t = String(s ?? '').replace(/\s+/g, ' ').trim();
-  return t.length > n ? t.slice(0, n) + '…' : t;
+  // ログ用：改行は潰さず「\n」として可視化する
+  const raw = String(s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const compact = raw
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+    .join('\\n')
+    .trim();
+
+  return compact.length > n ? compact.slice(0, n) + '…' : compact;
 }
 
 function norm(s: unknown) {
@@ -906,17 +913,64 @@ export function renderGatewayAsReply(args: {
             : derivedShortSummary || null,
       };
 
+      console.log('[IROS/CONV_EVIDENCE][ENTER]', {
+        conversationId: evConversationId ?? null,
+        userCode: evUserCode ?? null,
+      });
+      const ev = logConvEvidence({
+        conversationId: evConversationId,
+        userCode: evUserCode,
+        userText: typeof evUserText === 'string' ? evUserText : null,
+        signals: evSignals,
+        ctx: evCtxFixed,
+        branch: evBranch,
+        slots: evSlots,
+        meta: evMeta,
+      });
 
-    logConvEvidence({
-      conversationId: evConversationId,
-      userCode: evUserCode,
-      userText: typeof evUserText === 'string' ? evUserText : null,
-      signals: evSignals,
-      ctx: evCtxFixed,
-      branch: evBranch,
-      slots: evSlots,
-      meta: evMeta,
-    });
+// ✅ 次ターンの stallProbe/orchestrator が拾えるように meta に載せる
+try {
+  if (evMeta && typeof evMeta === 'object') {
+    (evMeta as any).convEvidence = ev;
+
+    // meta.extra が無いケースを救済して必ず入れる
+    const ex = (evMeta as any).extra;
+    if (!ex || typeof ex !== 'object') {
+      (evMeta as any).extra = {};
+    }
+    (evMeta as any).extra.convEvidence = ev;
+  }
+} catch {}
+
+// ✅ ctxPack にも同期（ctxPackKeys に convEvidence を出す）
+try {
+  const extraAny = extra as any;
+  if (extraAny && typeof extraAny === 'object') {
+    extraAny.convEvidence = ev;
+
+    const cp = extraAny.ctxPack;
+    if (cp && typeof cp === 'object') {
+      extraAny.ctxPack = { ...(cp as any), convEvidence: ev };
+    }
+  }
+} catch {}
+
+      console.log('[IROS/CONV_EVIDENCE][ATTACH]', {
+        conversationId: evConversationId ?? null,
+        userCode: evUserCode ?? null,
+        meta_has: !!(evMeta && typeof evMeta === 'object' && (evMeta as any).convEvidence),
+        meta_extra_has: !!(
+          evMeta &&
+          typeof evMeta === 'object' &&
+          (evMeta as any).extra &&
+          (evMeta as any).extra.convEvidence
+        ),
+        ctxPack_has: !!(
+          (extra as any)?.ctxPack &&
+          typeof (extra as any).ctxPack === 'object' &&
+          (extra as any).ctxPack.convEvidence
+        ),
+      });
   } catch (e) {
     console.warn('[IROS/CONV_EVIDENCE][FAILED]', { error: e });
   }
@@ -1205,15 +1259,21 @@ if (isIR && !allowRephraseBlocksInIR) {
   const rbKept = cleanedBlocksText.length;
   const rbKeptJoinedLen = norm(cleanedBlocksText.join('\n')).length;
 
-  // ✅ “micro 1本だけ” 事故を防ぐ：attachSkipped でない限り、微小rbは採用しない
+  // ✅ “micro 1本だけ” 事故を防ぐ：attachSkipped でない限り、micro-only rb は採用しない
   const attachSkipped = Boolean((extraAny as any)?.rephraseAttachSkipped);
+
+  const rbHead0 = String(cleanedBlocksText?.[0] ?? '');
+  const rbAllMicroOnly =
+    cleanedBlocksText.length === 0 ||
+    cleanedBlocksText.every((t) => isMicroOnlyText(String(t ?? '')));
+
+  // 「短い」だけでは弾かない。弾くのは “短い かつ micro-only” のときだけ。
   const microLike =
     rbKept === 0 ||
-    (rbKept === 1 && isMicroOnlyText(String(cleanedBlocksText[0] ?? ''))) ||
-    rbKeptJoinedLen < 40;
+    (rbKept === 1 && isMicroOnlyText(rbHead0)) ||
+    (rbKeptJoinedLen < 40 && rbAllMicroOnly);
 
   const acceptRb = attachSkipped || !microLike;
-
   if (acceptRb) {
     // ✅ blocks 化
     blocks = cleanedBlocksText.map((t: string) => ({ text: t }));
@@ -2089,23 +2149,20 @@ pipe('after_renderV2_empty_rescue', content);
   } catch {}
 
 
-  // ✅ meta は「実際に採用された見える本文」に合わせる
-  // - pickedFrom='rephraseBlocks' のとき、picked/baseText が省略文字や短いダミーになることがある
-  // - その場合 meta の pickedHead/pickedLen がズレて解析が誤読するので、常に content 優先で補正する
-  // ✅ meta は「実際に採用された見える本文」に合わせる
-  // - pickedFrom='rephraseBlocks' のとき、picked/baseText が省略文字や短いダミーになることがある
-  // - その場合 meta の pickedHead/pickedLen がズレて解析が誤読するので、常に content 優先で補正する
-  const pickedRaw = String(picked ?? '');
+  // ✅ picked/pickedFrom と meta の整合を “根治” する
+  // - pickedFrom='rephraseBlocks' のとき picked が "……" 等の短いダミーになることがある
+  // - meta だけ補正すると解析ログがズレ続けるので、picked 自体を content に同期する
   const contentRaw = String(content ?? '');
+  const pickedFromStr = String(pickedFrom ?? '');
+
+  if (pickedFromStr === 'rephraseBlocks' && norm(contentRaw).length > 0) {
+    picked = contentRaw;
+  }
+
+  const pickedRaw = String(picked ?? '');
 
   const pickedForMeta =
-    String(pickedFrom ?? '') === 'rephraseBlocks' && norm(contentRaw).length > 0
-      ? contentRaw
-      : pickedRaw;
-
-  // ✅ blocksCount は「最終的に render に渡す blocks（= blocksForRender）」で数える
-      const blocksCountForMeta = Array.isArray(blocksForRender) ? blocksForRender.length : 0;
-
+    pickedFromStr === 'rephraseBlocks' && norm(contentRaw).length > 0 ? contentRaw : pickedRaw;
       const meta = {
         blocksCount: Array.isArray(blocksForRender) ? blocksForRender.length : 0,
         maxLines: maxLinesFinal,
@@ -2123,7 +2180,51 @@ pipe('after_renderV2_empty_rescue', content);
         rev: IROS_RENDER_GATEWAY_REV,
       };
 
+  // ✅ 止血：pickedFrom='text' が "……" などのプレースホルダのとき、
+  // rephraseBlocks が存在するなら必ずそれを本文として採用する（seedFallback に負けない）
+  const isDotsPlaceholder = (s: string) => {
+    const t = (s ?? '').trim();
+    if (!t) return true;
+    const compact = t.replace(/\s+/g, '');
+    return /^[.…⋯・_]+$/.test(compact);
+  };
 
+// src/lib/iros/language/renderGateway.ts
+
+// 【置き換え①】行 2138〜2163 付近の try { ... } catch {} を、丸ごとこれに置き換え
+try {
+  const pickedNow = String(picked ?? '').trim();
+
+  const shouldForceFromRephraseBlocks =
+    pickedFrom === 'text' && isDotsPlaceholder(pickedNow);
+
+  if (shouldForceFromRephraseBlocks) {
+    // ✅ “meta.extra” に無くても、render に渡す blocks（blocksForRender）を正本として救う
+    const rbAny: any =
+      (Array.isArray(blocksForRender) && blocksForRender.length > 0
+        ? blocksForRender
+        : (meta as any)?.extra?.rephraseBlocks) ?? null;
+
+    if (Array.isArray(rbAny) && rbAny.length > 0) {
+      const joined = rbAny
+        .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim())
+        .filter(Boolean)
+        .join('\n')
+        .trim();
+
+      if (joined.length > 0) {
+        picked = joined;
+        pickedFrom = 'rephraseBlocks-forced';
+        fallbackFrom = 'rephraseBlocks';
+      }
+    }
+  }
+} catch {}
+
+
+// 【置き換え②】行 2301 付近のこの1行だけ置き換え（underscore → hyphen）
+// 置換前：pickedFrom = pickedFrom === 'text' ? 'rephraseBlocks-forced' : pickedFrom;
+pickedFrom = pickedFrom === 'text' ? 'rephraseBlocks-forced' : pickedFrom;
   // ✅ 短文化の“確定ログ”：render側が切ったのか、blocks側が短いのかを一発で判定する
   try {
     const rbDiag = (meta as any)?.extra?.renderMeta?.rbDiag ?? null;
@@ -2133,6 +2234,9 @@ pipe('after_renderV2_empty_rescue', content);
     // ✅ rephraseBlocks “forced” のときだけ SHORT_OUT_DIAG を除外したい
     // - 通常の pickedFrom='rephraseBlocks' は診断対象に含める（短文化事故を拾うため）
     const isForcedBlocks = pickedFromStr === 'rephraseBlocks-forced';
+
+    // ✅ blocksCount は「最終的に render に渡す blocks（= blocksForRender）」で数える
+    const blocksCountForMeta = Array.isArray(blocksForRender) ? blocksForRender.length : 0;
 
     // IR / shortException は対象外（意図的に短い場合がある）
     const isShortOut =
@@ -2162,7 +2266,6 @@ pipe('after_renderV2_empty_rescue', content);
       });
     }
   } catch {}
-
 
   // ✅ meta 拡張（破壊せず・型衝突させず）
   (meta as any).slotPlanPolicy =
@@ -2213,9 +2316,38 @@ if (String(content ?? '').trim() === '') {
   // まずは従来の救出素材
   let rescueBase = picked || fallbackText || r0 || c1 || c2 || c3 || '';
 
-  // ✅ 追加：rephraseBlocks があるのに “pickedFrom:'text' で空” を救えないケースの止血
+  // ✅ 追加：rephraseBlocks があるのに “pickedFrom:'text' で空/プレースホルダ/誤採用” を救えないケースの止血
   // - ただし @OBS/@SHIFT 等の内部ディレクティブは UI に出さない（stripDirectiveLines で落とす）
-  if (String(rescueBase ?? '').trim() === '') {
+  // - 症状：
+  //   - pickedFrom='text' になり、fallbackFrom='rephraseBlocks' が見えているのに、最終が seedFallback に戻る
+  // - 対策：
+  //   - rescueBase が空でなくても「textがプレースホルダ」 or 「fallbackFrom が rephraseBlocks」なら rephraseBlocks を優先採用
+  const isDotsPlaceholder = (s: string) => {
+    const t = (s ?? '').trim();
+    if (!t) return true;
+    const compact = t.replace(/\s+/g, '');
+    return (
+      /^[.…⋯・_]+$/.test(compact) ||
+      /^(\.{2,}|…+|⋯+)$/.test(compact) ||
+      compact === '…' ||
+      compact === '……' ||
+      compact === '⋯' ||
+      compact === '⋯⋯'
+    );
+  };
+
+  const rescueBaseTrim = String(rescueBase ?? '').trim();
+
+  // ✅ rescue を走らせる条件を「空」だけに限定しない
+  // - 1) rescueBase が空
+  // - 2) rescueBase がプレースホルダ（……等）
+  // - 3) pickedFrom='text' なのに fallbackFrom='rephraseBlocks'（今回のログの確証パターン）
+  const shouldTryRescueFromRephraseBlocks =
+    rescueBaseTrim === '' ||
+    isDotsPlaceholder(rescueBaseTrim) ||
+    (pickedFrom === 'text' && fallbackFrom === 'rephraseBlocks');
+
+  if (shouldTryRescueFromRephraseBlocks) {
     try {
       const extraAny2 = (meta as any)?.extra as any;
       const rephraseBlocks = extraAny2?.rephraseBlocks ?? null;
@@ -2224,9 +2356,16 @@ if (String(content ?? '').trim() === '') {
         const joined = rephraseBlocks
           .map((b: any) => String(b?.text ?? b?.content ?? b ?? '').trim())
           .filter(Boolean)
-          .join('\n');
+          .join('\n')
+          .trim();
 
-        rescueBase = joined || rescueBase;
+        // joined が取れたら、それを優先して rescueBase に採用
+        if (joined.length > 0) {
+          rescueBase = joined;
+          // ログ上も「救済が働いた」ことが分かるように残す（既存の pickedFrom/fallbackFrom と整合）
+          pickedFrom = pickedFrom === 'text' ? 'rephraseBlocks-forced' : pickedFrom;
+          fallbackFrom = fallbackFrom || 'rephraseBlocks';
+        }
       }
     } catch {}
   }
@@ -2247,15 +2386,24 @@ if (String(content ?? '').trim() === '') {
     content = 'うん、届きました。🪔';
   }
 
+  // ✅ 重要：content を救済したら meta 側も同期する（OKログ/outLen不整合を止血）
+  try {
+    (meta as any).pickedFrom = pickedFrom;
+    (meta as any).fallbackFrom = fallbackFrom;
+
+    (meta as any).outLen = norm(String(content ?? '')).length;
+    (meta as any).outHead = head(String(content ?? ''));
+  } catch {}
+
   console.warn('[IROS/renderGateway][RESCUED_EMPTY]', {
     rev: IROS_RENDER_GATEWAY_REV,
     rescueLen: content.length,
     rescueHead: head(content),
+    pickedFrom,
+    fallbackFrom,
+    outLen: (meta as any)?.outLen,
   });
 }
-
-
-
   // ✅ render-v2 通電ランプ：rephraseBlocks が入っているか毎回見える化（スコープ/型安全版）
   try {
     const extraAny2 = (meta as any)?.extra;

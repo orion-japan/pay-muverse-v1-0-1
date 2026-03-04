@@ -330,9 +330,30 @@ export async function analyzeUnifiedTurn(params: {
 }): Promise<UnifiedLikeAnalysis> {
   const { text, requestedDepth } = params;
 
-  const autoDepth = detectDepthFromText(text);
+  // 1) まずは軽量判定（既存）
+  const autoDepthLight = detectDepthFromText(text);
 
-  const rawDepth: Depth | undefined = autoDepth ?? requestedDepth ?? undefined;
+  // 2) 取れないときだけ deepScan を使う（既存資産を活かす）
+  let autoDepthDeep: Depth | null = null;
+  if (!autoDepthLight) {
+    try {
+      const mod = await import('@/lib/iros/deepScan');
+      if (typeof mod.deepScan === 'function') {
+        const ds = mod.deepScan(text);
+        autoDepthDeep = (ds?.depth ?? null) as Depth | null;
+      }
+    } catch {
+      // deepScan が読めなくても挙動は従来通りに落とす（安全）
+      autoDepthDeep = null;
+    }
+  }
+
+  const autoDepth = autoDepthLight ?? autoDepthDeep ?? null;
+
+  const rawDepth: Depth | undefined = (autoDepth ?? requestedDepth ?? undefined) as
+    | Depth
+    | undefined;
+
   const depth = normalizeDepth(rawDepth) ?? null;
 
   // ✅ 明示Q（最優先）

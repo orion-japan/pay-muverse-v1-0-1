@@ -394,14 +394,17 @@ function ensureMetaFilled(args: { meta: any; ctx: any; orch: any }): any {
   if (!m.qPrimary) m.qPrimary = qFinal;
   if (!m.q_code) m.q_code = qFinal;
 
-  // ==== Phase（Inner/Outer を必ず埋める）====
+  // ==== Phase（Inner/Outer：不明なら埋めない）====
   const phaseFromMeta = normalizePhaseIO(m.phase) ?? normalizePhaseIO(m.phaseIO);
   const phaseFromCtx =
     normalizePhaseIO(ctx?.baseMetaForTurn?.phase) ??
     normalizePhaseIO(ctx?.baseMetaForTurn?.phaseIO);
 
-  const phaseFinal: PhaseIO = phaseFromMeta ?? phaseFromCtx ?? 'Inner';
-  if (!m.phase) m.phase = phaseFinal;
+  // ❗️デフォルト Inner は禁止（不明なら null のまま）
+  const phaseFinal: PhaseIO | null = phaseFromMeta ?? phaseFromCtx ?? null;
+
+  // phase が取れた時だけ埋める（不明を捏造しない）
+  if (!m.phase && phaseFinal) m.phase = phaseFinal;
 
   // ==== Depth（null禁止：文字列を必ず入れる）====
   const depthFromMeta = pickFirstString(m.depth, m.depthStage, m.depthstage);
@@ -791,10 +794,12 @@ function runLlmGate(args: {
       metaForSave?.framePlan?.slotPlanPolicy ??
       metaForSave?.extra?.slotPlanPolicy ??
       null;
+
 // ✅ runLlmGate() の中（metaForProbe / slotPlanPolicy を決めた直後あたり）に追加
-// --- BLOCK_PLAN (why) を meta.extra に stamp（LLM_GATE / inject が同一turnで見れるようにする）---
+// --- BLOCK_PLAN を meta.extra に stamp（LLM_GATE / inject が同一turnで見れるようにする）---
 try {
   // lazy import（server側で依存増を避ける）
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { buildBlockPlanWithDiag } = require('@/lib/iros/blockPlan/blockPlanEngine');
 
   const stampOne = (metaAny: any, from: string) => {
@@ -806,30 +811,33 @@ try {
         ? metaAny.extra
         : (metaAny.extra = {});
 
-    // 既に入っているなら上書きしない（※必要ならここを “常に上書き” に変えられる）
-    if (ex.blockPlan && typeof ex.blockPlan === 'object' && typeof ex.blockPlan.why === 'string') return;
-
+    // ctxPack を拾う（あるなら正本寄り）
     const cp: any = ex.ctxPack && typeof ex.ctxPack === 'object' ? ex.ctxPack : null;
 
-    const goalKind =
-      String(cp?.goalKind ?? metaAny.goalKind ?? 'stabilize').trim() || 'stabilize';
+    // 既に why があるなら “追跡 stamp だけ” 付ける（内容は維持）
+    if (ex.blockPlan && typeof ex.blockPlan === 'object' && typeof ex.blockPlan.why === 'string') {
+      ex.blockPlan = {
+        ...ex.blockPlan,
+        stampedBy: from,
+        stampedAt: new Date().toISOString(),
+      };
+      return;
+    }
+
+    const goalKind = String(cp?.goalKind ?? metaAny.goalKind ?? 'stabilize').trim() || 'stabilize';
 
     const depthStage =
       typeof (cp?.depthStage ?? metaAny.depthStage) === 'string'
         ? String(cp?.depthStage ?? metaAny.depthStage)
         : null;
 
-    const itTriggered =
-      Boolean(cp?.itTriggered ?? metaAny.itTriggered ?? false);
+    const itTriggered = Boolean(cp?.itTriggered ?? metaAny.itTriggered ?? false);
 
     // EXPLICIT を本当に判定したい場合は “上流で計算した explicitTrigger” をここへ運ぶ必要がある。
     // まずは運搬の可観測性を優先して、存在していれば拾う（無ければ false 扱い）
     const explicitTrigger = ex?.blockPlan?.explicitTrigger === true;
 
-    const exprLane =
-      cp?.exprMeta?.lane ??
-      ex?.exprMeta?.lane ??
-      null;
+    const exprLane = cp?.exprMeta?.lane ?? ex?.exprMeta?.lane ?? null;
 
     // userText はここでは渡せない（生文禁止の方針に従う）
     const { plan, diag } = buildBlockPlanWithDiag({
@@ -870,6 +878,9 @@ try {
   stampOne(metaForProbe, 'handleIrosReply.runLlmGate.metaForProbe');
   stampOne(metaForSave, 'handleIrosReply.runLlmGate.metaForSave');
   stampOne(metaForCandidate, 'handleIrosReply.runLlmGate.metaForCandidate');
+
+  // ✅ 観測性（必要なら有効化）
+  // console.log('[IROS/BLOCK_PLAN][stamp]', { conversationId, userCode });
 } catch (e) {
   // stamp失敗で処理は止めない（可観測性の補助なので）
   try {
@@ -930,7 +941,6 @@ try {
 }
 
 // 置換範囲: 764〜769（seedFallbackRaw の定義ブロック）
-
 const seedFallbackRaw =
   // 既存の seed 系（優先）
   exProbe?.slotPlanSeed ??
@@ -948,85 +958,85 @@ const seedFallbackRaw =
 
   null;
 
-      const seedFallback =
-        seedFallbackRaw != null && String(seedFallbackRaw).trim().length > 0
-          ? String(seedFallbackRaw).trim()
-          : '';
+const seedFallback =
+  seedFallbackRaw != null && String(seedFallbackRaw).trim().length > 0
+    ? String(seedFallbackRaw).trim()
+    : '';
 
-      const textNowRaw = String(assistantTextNow ?? '').trim();
-      const textNow = textNowRaw.length > 0 ? textNowRaw : seedFallback;
-    // slotPlanLen 推定（既存ロジックを保持）
-    if (slotPlanLen == null) {
-      const slotsObj =
-        metaForProbe?.framePlan?.slots ??
-        metaForProbe?.framePlan?.framePlan?.slots ??
-        metaForProbe?.framePlan?.slotPlan?.slots ??
-        metaForProbe?.slotPlan?.slots ??
-        metaForProbe?.slots ??
-        metaForProbe?.extra?.framePlan?.slots ??
-        null;
+const textNowRaw = String(assistantTextNow ?? '').trim();
+const textNow = textNowRaw.length > 0 ? textNowRaw : seedFallback;
 
-      if (Array.isArray(slotsObj)) {
-        if (slotsObj.length > 0) slotPlanLen = slotsObj.length;
-      } else if (slotsObj && typeof slotsObj === 'object') {
-        const n = Object.keys(slotsObj).length;
-        if (n > 0) slotPlanLen = n;
-      }
-    }
+// slotPlanLen 推定（既存ロジックを保持）
+if (slotPlanLen == null) {
+  const slotsObj =
+    metaForProbe?.framePlan?.slots ??
+    metaForProbe?.framePlan?.framePlan?.slots ??
+    metaForProbe?.framePlan?.slotPlan?.slots ??
+    metaForProbe?.slotPlan?.slots ??
+    metaForProbe?.slots ??
+    metaForProbe?.extra?.framePlan?.slots ??
+    null;
 
-    const probe = probeLlmGate({
-      conversationId,
-      userCode,
-      allowLLM_final: allowLLM_final0,
-      brakeReason: (metaForProbe as any)?.speechBrakeReason ?? null,
-      speechAct: (metaForProbe as any)?.speechAct ?? null,
-      finalAssistantTextNow: textNow,
-      slotPlanLen,
-      hasSlots,
-      slotPlanPolicy,
-      meta: metaForProbe,
-    } as any);
-
-    writeLlmGateToMeta(metaForSave, probe.patch);
-
-    logLlmGate(tag, {
-      conversationId,
-      userCode,
-      patch: probe.patch,
-      decision: probe.decision,
-    });
-
-    const resolvedTextRaw = (probe.decision as any)?.resolvedText;
-    const resolvedText =
-      resolvedTextRaw != null && String(resolvedTextRaw).trim().length > 0
-        ? String(resolvedTextRaw).trim()
-        : null;
-
-    // ✅ CALL_LLM の “本命” は rewriteSeed
-    // - probe.decision.rewriteSeed が空でも、seedFallback があればそれを採用して運ぶ
-    const llmEntryNow = (probe.patch as any)?.llmEntry ?? null;
-
-    const rewriteSeedRaw = (probe.decision as any)?.rewriteSeed;
-    const rewriteSeedFromDecision =
-      rewriteSeedRaw != null && String(rewriteSeedRaw).trim().length > 0
-        ? String(rewriteSeedRaw).trim()
-        : null;
-
-    const rewriteSeed =
-      rewriteSeedFromDecision ??
-      (llmEntryNow === 'CALL_LLM' && seedFallback.length > 0 ? seedFallback : null);
-
-    return {
-      llmEntry: (probe.patch as any)?.llmEntry ?? null,
-      resolvedText,
-      rewriteSeed,
-    };
-  } catch (e) {
-    console.warn('[IROS/LLM_GATE][FAILED]', { tag, conversationId, userCode, error: e });
-    return { llmEntry: null, resolvedText: null, rewriteSeed: null };
+  if (Array.isArray(slotsObj)) {
+    if (slotsObj.length > 0) slotPlanLen = slotsObj.length;
+  } else if (slotsObj && typeof slotsObj === 'object') {
+    const n = Object.keys(slotsObj).length;
+    if (n > 0) slotPlanLen = n;
   }
 }
 
+const probe = probeLlmGate({
+  conversationId,
+  userCode,
+  allowLLM_final: allowLLM_final0,
+  brakeReason: (metaForProbe as any)?.speechBrakeReason ?? null,
+  speechAct: (metaForProbe as any)?.speechAct ?? null,
+  finalAssistantTextNow: textNow,
+  slotPlanLen,
+  hasSlots,
+  slotPlanPolicy,
+  meta: metaForProbe,
+} as any);
+
+writeLlmGateToMeta(metaForSave, probe.patch);
+
+logLlmGate(tag, {
+  conversationId,
+  userCode,
+  patch: probe.patch,
+  decision: probe.decision,
+});
+
+const resolvedTextRaw = (probe.decision as any)?.resolvedText;
+const resolvedText =
+  resolvedTextRaw != null && String(resolvedTextRaw).trim().length > 0
+    ? String(resolvedTextRaw).trim()
+    : null;
+
+// ✅ CALL_LLM の “本命” は rewriteSeed
+// - probe.decision.rewriteSeed が空でも、seedFallback があればそれを採用して運ぶ
+const llmEntryNow = (probe.patch as any)?.llmEntry ?? null;
+
+const rewriteSeedRaw = (probe.decision as any)?.rewriteSeed;
+const rewriteSeedFromDecision =
+  rewriteSeedRaw != null && String(rewriteSeedRaw).trim().length > 0
+    ? String(rewriteSeedRaw).trim()
+    : null;
+
+const rewriteSeed =
+  rewriteSeedFromDecision ??
+  (llmEntryNow === 'CALL_LLM' && seedFallback.length > 0 ? seedFallback : null);
+
+return {
+  llmEntry: (probe.patch as any)?.llmEntry ?? null,
+  resolvedText,
+  rewriteSeed,
+};
+} catch (e) {
+  console.warn('[IROS/LLM_GATE][FAILED]', { tag, conversationId, userCode, error: e });
+  return { llmEntry: null, resolvedText: null, rewriteSeed: null };
+}
+}
 
 /* =========================================================
    main
@@ -1075,6 +1085,9 @@ export async function handleIrosReply(
 // ✅ extra は const のままなので、ローカルで更新して回す（関数スコープで宣言）
 let extraLocal: any = extra ?? null;
 
+// src/lib/iros/server/handleIrosReply.ts
+// 置換範囲: 1088〜1100（console.log('[IROS/Reply] handleIrosReply start', ...) のブロック）
+
 console.log('[IROS/Reply] handleIrosReply start', {
   conversationId,
   userCode,
@@ -1085,10 +1098,9 @@ console.log('[IROS/Reply] handleIrosReply start', {
   style,
   history_len: Array.isArray(history) ? history.length : null,
 
-  // ✅ single-writer: assistant 保存は /api/agent/iros/reply/route.ts 側のみ（handleIrosReply は保存しない）
-  persistAssistantAllowed: false,
+  // single-writer 方針メモ：assistant 保存は route.ts 側でのみ行う
+  persist_policy: 'route_only',
 });
-
 
 
   if (process.env.IROS_DEBUG_EXTRA === '1') {
@@ -1301,27 +1313,49 @@ if (!bypassMicro && isMicroNow) {
   // ====== HistoryDigest v1 を生成して micro に渡す ======
   const { buildHistoryDigestV1 } = await import('@/lib/iros/history/historyDigestV1');
 
-  // repeatSignal はここでは最小扱い（ctx0 側で持っているならそれを優先）
-  const repeatSignal =
-    !!(ctx0 as any)?.repeatSignalSame ||
-    !!(ctx0 as any)?.repeat_signal ||
-    false;
+// repeatSignal はここでは最小扱い（ctx0 側で持っているならそれを優先）
+const repeatSignal =
+  !!(ctx0 as any)?.repeatSignalSame || !!(ctx0 as any)?.repeat_signal || false;
 
-  // continuity は最小版（historyForTurn から取れるならそれを優先）
-  const lastUserCore =
-    String(
-      (ctx0 as any)?.continuity?.last_user_core ??
-        (ctx0 as any)?.lastUserCore ??
-        '',
-    ).trim() || '';
+// continuity は最小版（historyForTurn から取れるならそれを優先）
+const lastUserCore =
+  String(
+    (ctx0 as any)?.continuity?.last_user_core ??
+      (ctx0 as any)?.lastUserCore ??
+      '',
+  ).trim() || '';
 
-  const lastAssistantCore =
-    String(
-      (ctx0 as any)?.continuity?.last_assistant_core ??
-        (ctx0 as any)?.lastAssistantCore ??
-        '',
-    ).trim() || '';
+const lastAssistantCore =
+  String(
+    (ctx0 as any)?.continuity?.last_assistant_core ??
+      (ctx0 as any)?.lastAssistantCore ??
+      '',
+  ).trim() || '';
 
+// ✅ micro は “micro入力専用” ：chat では絶対に走らせない
+const inputKindNow = String(
+  (ctx0 as any)?.framePlan?.inputKind ??
+    (ctx0 as any)?.baseMetaForTurn?.inputKind ??
+    (ctx0 as any)?.inputKind ??
+    '',
+).trim();
+
+const forceMicro =
+  !!(ctx0 as any)?.baseMetaForTurn?.extra?.forceMicro ||
+  !!(ctx0 as any)?.baseMetaForTurn?.forceMicro ||
+  false;
+
+const wantsMicroNow = inputKindNow === 'micro' || forceMicro;
+
+// chat 等なら micro を完全スキップ（この後の micro 呼び出しを止める）
+if (!wantsMicroNow) {
+  console.log('[IROS/Gate] skip micro gate (not micro inputKind)', {
+    conversationId,
+    userCode,
+    inputKindNow,
+    forceMicro,
+  });
+} else {
   const digestV1 = buildHistoryDigestV1({
     fixedNorth: { key: 'SUN', phrase: '成長 / 進化 / 希望 / 歓喜' },
     metaAnchorKey:
@@ -1368,150 +1402,138 @@ if (!bypassMicro && isMicroNow) {
     } as any,
   );
 
-// ✅ micro 成功 → このブロック内で完結して return（t / metaForSave を漏らさない）
-if (mw.ok) {
-  // 上で作ったものを再利用
-  const ctx = ctx0;
+  // ✅ ここで必ず同一スコープに確保（以降どこでも参照OK）
+  const mwReason = (mw as any)?.reason ?? null;
+  const mwDetail = (mw as any)?.detail ?? null;
 
-  const tc = nowNs(); // 計測だけ維持（差し替え最小化）
-  t.context_ms += msSince(tc); // 0〜数ms程度、形だけ残す
+  // ✅ micro 成功 → このブロック内で完結して return（t / metaForSave を漏らさない）
+  if (mw.ok) {
+    const ctx = ctx0;
 
-  // ✅ meta は「座標は固定」しつつ、persist が重くならないよう extra を最小化する
-  let metaForSaveMicro: any = {
-    ...(ctx?.baseMetaForTurn ?? {}),
-    style: ctx?.effectiveStyle ?? style ?? (userProfile as any)?.style ?? 'friendly',
-    mode: 'light',
-    microOnly: true,
+    const tc = nowNs(); // 計測だけ維持（差し替え最小化）
+    t.context_ms += msSince(tc);
 
-    // micro は独立。memory / training を触らない（静止）
-    skipMemory: true,
-    skipTraining: true,
+    // ✅ meta は「座標は固定」しつつ、persist が重くならないよう extra を最小化する
+    let metaForSaveMicro: any = {
+      ...(ctx?.baseMetaForTurn ?? {}),
+      style: ctx?.effectiveStyle ?? style ?? (userProfile as any)?.style ?? 'friendly',
+      mode: 'light',
+      microOnly: true,
 
-    nextStep: null,
-    next_step: null,
-    timing: t,
-  };
+      // micro は独立。memory / training を触らない（静止）
+      skipMemory: true,
+      skipTraining: true,
 
-  // ✅ micro 成功でも single-writer の印を必ず付ける（通常/ fallback と同じ土俵に揃える）
-  metaForSaveMicro = stampSingleWriter(mergeExtra(metaForSaveMicro, extraLocal ?? null));
+      nextStep: null,
+      next_step: null,
+      timing: t,
+    };
 
-  // ✅ microOnly: renderGW / persist を重くする “長文元” を必ず掃除
-  {
-    const ex =
-      metaForSaveMicro?.extra && typeof metaForSaveMicro.extra === 'object'
-        ? metaForSaveMicro.extra
-        : (metaForSaveMicro.extra = {});
+    // ✅ micro 成功でも single-writer の印を必ず付ける（通常/ fallback と同じ土俵に揃える）
+    metaForSaveMicro = stampSingleWriter(mergeExtra(metaForSaveMicro, extraLocal ?? null));
 
-    // renderGateway が拾う“長文の元”を消す
-    delete (ex as any).rephraseBlocks;
-    delete (ex as any).rephrase_blocks;
-    delete (ex as any).blockPlan;
-    delete (ex as any).block_plan;
-    delete (ex as any).slots;
-    delete (ex as any).slotPlanPolicy;
-    delete (ex as any).slot_plan_policy;
-
-// ctxPack 系（特に重い）
-// ❗️LLM_GATE / rephraseEngine が seed_text/resonanceState を拾えなくなる事故を防ぐため、
-// delete ではなく「必要最小限」に剪定する。
-if ((ex as any).ctxPack && typeof (ex as any).ctxPack === 'object') {
-  const cp: any = (ex as any).ctxPack;
-  const keep: any = {};
-
-  // --- 必須（LLM 入力/検証に必要）---
-  if (cp.flow) keep.flow = cp.flow;
-
-  if (cp.resonanceState) keep.resonanceState = cp.resonanceState;
-
-  if (typeof cp.seed_text === 'string' && cp.seed_text.trim()) {
-    keep.seed_text = cp.seed_text.trim();
-  }
-
-  // --- writer / rephrase の入口として残す ---
-  if (cp.historyForWriter) keep.historyForWriter = cp.historyForWriter;
-  if (cp.historyDigestV1) keep.historyDigestV1 = cp.historyDigestV1;
-
-  // --- 構造メタ（軽いので残す）---
-  if (cp.phase) keep.phase = cp.phase;
-  if (cp.depthStage) keep.depthStage = cp.depthStage;
-  if (cp.qCode) keep.qCode = cp.qCode;
-  if (cp.slotPlanPolicy) keep.slotPlanPolicy = cp.slotPlanPolicy;
-  if (cp.goalKind) keep.goalKind = cp.goalKind;
-  if (cp.slotPlan) keep.slotPlan = cp.slotPlan;
-  if (cp.exprMeta) keep.exprMeta = cp.exprMeta;
-  if (cp.framePlan) keep.framePlan = cp.framePlan;
-  if (cp.traceId) keep.traceId = cp.traceId;
-
-  (ex as any).ctxPack = keep;
-} else {
-  delete (ex as any).ctxPack;
-}
-    delete (ex as any).historyForWriter;
-    delete (ex as any).historyDigestV1;
-    delete (ex as any).turns;
-    delete (ex as any).flow;
-    delete (ex as any).viewShift;
-    delete (ex as any).viewShiftPrev;
-    delete (ex as any).viewShiftSnapshot;
-    delete (ex as any).topicDigest;
-    delete (ex as any).flowDigest;
-
-    // これが “正” だと明示（診断用）— 最後に勝たせる
-    (ex as any).finalAssistantText = mw.text;
-    (ex as any).finalTextPolicy = 'MICRO';
-    (ex as any).finalTextPolicyPickedFrom = 'micro';
-  }
-  // SUN 固定保護（念のため）
-  try {
-    metaForSaveMicro = sanitizeIntentAnchorMeta(metaForSaveMicro);
-  } catch {}
-
-  // ✅ micro 成功でも slots を必ず返す（downstream が NO_SLOTS で落ちない）
-  const microSlots = [
+    // ✅ microOnly: renderGW / persist を重くする “長文元” を必ず掃除
     {
-      key: 'OBS',
-      role: 'assistant',
-      style: 'soft',
-      content: mw.text,
-    },
-  ];
+      const ex =
+        metaForSaveMicro?.extra && typeof metaForSaveMicro.extra === 'object'
+          ? metaForSaveMicro.extra
+          : (metaForSaveMicro.extra = {});
 
-  // ✅ このターン内で “確定” して返す（以降の通常ルートへ落とさない）
-  const microResult = {
-    ok: true as const,
-    result: { gate: 'micro_writer' as const },
+      // renderGateway が拾う“長文の元”を消す
+      delete (ex as any).rephraseBlocks;
+      delete (ex as any).rephrase_blocks;
+      delete (ex as any).blockPlan;
+      delete (ex as any).block_plan;
+      delete (ex as any).slots;
+      delete (ex as any).slotPlanPolicy;
+      delete (ex as any).slot_plan_policy;
 
-    // ✅ UIの正本（route.ts の persist が最優先で見る）
-    content: mw.text,
-    text: mw.text,
-    assistantText: mw.text,
+      // ctxPack 系（特に重い）
+      // ❗️delete ではなく「必要最小限」に剪定する
+      if ((ex as any).ctxPack && typeof (ex as any).ctxPack === 'object') {
+        const cp: any = (ex as any).ctxPack;
+        const keep: any = {};
 
-    metaForSave: metaForSaveMicro,
-    finalMode: 'light' as const,
-    slots: microSlots,
-    meta: metaForSaveMicro,
-  };
+        // --- 必須（LLM 入力/検証に必要）---
+        if (cp.flow) keep.flow = cp.flow;
+        if (cp.resonanceState) keep.resonanceState = cp.resonanceState;
+        if (typeof cp.seed_text === 'string' && cp.seed_text.trim()) {
+          keep.seed_text = cp.seed_text.trim();
+        }
 
-  return microResult;
-}
+        // --- writer / rephrase の入口として残す ---
+        if (cp.historyForWriter) keep.historyForWriter = cp.historyForWriter;
+        if (cp.historyDigestV1) keep.historyDigestV1 = cp.historyDigestV1;
+
+        // --- 構造メタ（軽いので残す）---
+        if (cp.phase) keep.phase = cp.phase;
+        if (cp.depthStage) keep.depthStage = cp.depthStage;
+        if (cp.qCode) keep.qCode = cp.qCode;
+        if (cp.slotPlanPolicy) keep.slotPlanPolicy = cp.slotPlanPolicy;
+        if (cp.goalKind) keep.goalKind = cp.goalKind;
+        if (cp.slotPlan) keep.slotPlan = cp.slotPlan;
+        if (cp.exprMeta) keep.exprMeta = cp.exprMeta;
+        if (cp.framePlan) keep.framePlan = cp.framePlan;
+        if (cp.traceId) keep.traceId = cp.traceId;
+
+        (ex as any).ctxPack = keep;
+      } else {
+        delete (ex as any).ctxPack;
+      }
+
+      delete (ex as any).historyForWriter;
+      delete (ex as any).historyDigestV1;
+      delete (ex as any).turns;
+      delete (ex as any).flow;
+      delete (ex as any).viewShift;
+      delete (ex as any).viewShiftPrev;
+      delete (ex as any).viewShiftSnapshot;
+      delete (ex as any).topicDigest;
+      delete (ex as any).flowDigest;
+
+      // これが “正” だと明示（診断用）— 最後に勝たせる
+      (ex as any).finalAssistantText = mw.text;
+      (ex as any).finalTextPolicy = 'MICRO';
+      (ex as any).finalTextPolicyPickedFrom = 'micro';
+    }
+
+    // SUN 固定保護（念のため）
+    try {
+      metaForSaveMicro = sanitizeIntentAnchorMeta(metaForSaveMicro);
+    } catch {}
+
+    // ✅ micro 成功でも slots を必ず返す
+    const microSlots = [
+      {
+        key: 'OBS',
+        role: 'assistant',
+        style: 'soft',
+        content: mw.text,
+      },
+    ];
+
+    return {
+      ok: true as const,
+      result: { gate: 'micro_writer' as const },
+      assistantText: mw.text,
+      metaForSave: metaForSaveMicro,
+      finalMode: 'light' as const,
+      slots: microSlots,
+      meta: metaForSaveMicro,
+    };
+  }
 
   // ✅ micro 失敗でも「このターンは micro で完結」させる（Hard Return fallback）
-  // - 通常ルートに落とすと rephraseEngine / LLM Gate が走り、micro出力の混入事故が起きる
   const fallbackText = buildForwardFallbackText(
     String((ctx0 as any)?.seedText ?? ''),
     String(microUserText ?? ''),
   );
-
-  // mw は union 型なので、reason/detail は安全に読む
-  const mwReason = (mw as any)?.reason ?? null;
-  const mwDetail = (mw as any)?.detail ?? null;
 
   console.warn('[IROS/MicroWriter] failed -> hard return fallback', {
     reason: mwReason,
     detail: mwDetail,
   });
 
-  // ctx は既に作成済み
   let metaForSaveMicroFallback: any = {
     ...(ctx0?.baseMetaForTurn ?? {}),
     style: ctx0?.effectiveStyle ?? style ?? (userProfile as any)?.style ?? 'friendly',
@@ -1528,86 +1550,69 @@ if ((ex as any).ctxPack && typeof (ex as any).ctxPack === 'object') {
     timing: t,
   };
 
-// src/lib/iros/server/handleIrosReply.ts
-// 範囲: 1279〜1322 を丸ごと置き換え
-// 目的:
-// - micro fallback で「軽量化した meta を直後に重く戻す」二重 merge を撤去
-// - mergeExtra は1回だけにして、その後に必ず軽量化を適用した状態で確定させる（statement timeout 回避）
+  metaForSaveMicroFallback = stampSingleWriter(
+    mergeExtra(metaForSaveMicroFallback, extraLocal ?? null),
+  );
 
-metaForSaveMicroFallback = stampSingleWriter(
-  mergeExtra(metaForSaveMicroFallback, extraLocal ?? null),
-);
+  // ✅ micro fallback も persist が重くならないよう extra を最小化する
+  {
+    const ex =
+      metaForSaveMicroFallback?.extra &&
+      typeof metaForSaveMicroFallback.extra === 'object'
+        ? metaForSaveMicroFallback.extra
+        : (metaForSaveMicroFallback.extra = {});
 
-// ✅ micro fallback も persist が重くならないよう extra を最小化する
-{
-  const ex =
-    metaForSaveMicroFallback?.extra && typeof metaForSaveMicroFallback.extra === 'object'
-      ? metaForSaveMicroFallback.extra
-      : (metaForSaveMicroFallback.extra = {});
+    delete (ex as any).rephraseBlocks;
+    delete (ex as any).rephrase_blocks;
+    delete (ex as any).blockPlan;
+    delete (ex as any).block_plan;
+    delete (ex as any).slots;
+    delete (ex as any).slotPlanPolicy;
+    delete (ex as any).slot_plan_policy;
 
-  // renderGateway / persist が拾う“長文の元”を消す
-  delete (ex as any).rephraseBlocks;
-  delete (ex as any).rephrase_blocks;
-  delete (ex as any).blockPlan;
-  delete (ex as any).block_plan;
-  delete (ex as any).slots;
-  delete (ex as any).slotPlanPolicy;
-  delete (ex as any).slot_plan_policy;
+    if ((ex as any).ctxPack && typeof (ex as any).ctxPack === 'object') {
+      const cp: any = (ex as any).ctxPack;
+      const keep: any = {};
 
-// ctxPack 系（特に重い）
-// ❗️LLM_GATE / rephraseEngine が seed_text/resonanceState を拾えなくなる事故を防ぐため、
-// delete ではなく「必要最小限」に剪定する。
-if ((ex as any).ctxPack && typeof (ex as any).ctxPack === 'object') {
-  const cp: any = (ex as any).ctxPack;
-  const keep: any = {};
+      if (cp.flow) keep.flow = cp.flow;
+      if (cp.resonanceState) keep.resonanceState = cp.resonanceState;
+      if (typeof cp.seed_text === 'string' && cp.seed_text.trim()) {
+        keep.seed_text = cp.seed_text.trim();
+      }
 
-  // --- 必須（LLM 入力/検証に必要）---
-  if (cp.flow) keep.flow = cp.flow;
+      if (cp.historyForWriter) keep.historyForWriter = cp.historyForWriter;
+      if (cp.historyDigestV1) keep.historyDigestV1 = cp.historyDigestV1;
 
-  if (cp.resonanceState) keep.resonanceState = cp.resonanceState;
+      if (cp.phase) keep.phase = cp.phase;
+      if (cp.depthStage) keep.depthStage = cp.depthStage;
+      if (cp.qCode) keep.qCode = cp.qCode;
+      if (cp.slotPlanPolicy) keep.slotPlanPolicy = cp.slotPlanPolicy;
+      if (cp.goalKind) keep.goalKind = cp.goalKind;
+      if (cp.slotPlan) keep.slotPlan = cp.slotPlan;
+      if (cp.exprMeta) keep.exprMeta = cp.exprMeta;
+      if (cp.framePlan) keep.framePlan = cp.framePlan;
+      if (cp.traceId) keep.traceId = cp.traceId;
 
-  if (typeof cp.seed_text === 'string' && cp.seed_text.trim()) {
-    keep.seed_text = cp.seed_text.trim();
+      (ex as any).ctxPack = keep;
+    } else {
+      delete (ex as any).ctxPack;
+    }
+
+    delete (ex as any).historyForWriter;
+    delete (ex as any).historyDigestV1;
+    delete (ex as any).turns;
+    delete (ex as any).flow;
+    delete (ex as any).viewShift;
+    delete (ex as any).viewShiftPrev;
+    delete (ex as any).viewShiftSnapshot;
+    delete (ex as any).topicDigest;
+    delete (ex as any).flowDigest;
+
+    (ex as any).finalAssistantText = fallbackText;
+    (ex as any).finalTextPolicy = 'MICRO_FALLBACK';
+    (ex as any).finalTextPolicyPickedFrom = 'micro_fallback';
   }
 
-  // --- writer / rephrase の入口として残す ---
-  if (cp.historyForWriter) keep.historyForWriter = cp.historyForWriter;
-  if (cp.historyDigestV1) keep.historyDigestV1 = cp.historyDigestV1;
-
-  // --- 構造メタ（軽いので残す）---
-  if (cp.phase) keep.phase = cp.phase;
-  if (cp.depthStage) keep.depthStage = cp.depthStage;
-  if (cp.qCode) keep.qCode = cp.qCode;
-  if (cp.slotPlanPolicy) keep.slotPlanPolicy = cp.slotPlanPolicy;
-  if (cp.goalKind) keep.goalKind = cp.goalKind;
-  if (cp.slotPlan) keep.slotPlan = cp.slotPlan;
-  if (cp.exprMeta) keep.exprMeta = cp.exprMeta;
-  if (cp.framePlan) keep.framePlan = cp.framePlan;
-  if (cp.traceId) keep.traceId = cp.traceId;
-
-  (ex as any).ctxPack = keep;
-} else {
-  delete (ex as any).ctxPack;
-}
-  delete (ex as any).historyForWriter;
-  delete (ex as any).historyDigestV1;
-  delete (ex as any).turns;
-  delete (ex as any).flow;
-  delete (ex as any).viewShift;
-  delete (ex as any).viewShiftPrev;
-  delete (ex as any).viewShiftSnapshot;
-  delete (ex as any).topicDigest;
-  delete (ex as any).flowDigest;
-
-  // ✅ “正” を明示（診断用）
-  (ex as any).finalAssistantText = fallbackText;
-  (ex as any).finalTextPolicy = 'MICRO_FALLBACK';
-  (ex as any).finalTextPolicyPickedFrom = 'micro_fallback';
-}
-
-// ✅ ここで「二重 mergeExtra」をしない（軽量化を確定させる）
-// metaForSaveMicroFallback = stampSingleWriter(mergeExtra(...)) ← これが重さを戻す原因だったので撤去
-  // SUN 固定保護（念のため）
   try {
     metaForSaveMicroFallback = sanitizeIntentAnchorMeta(metaForSaveMicroFallback);
   } catch {}
@@ -1664,7 +1669,7 @@ if ((ex as any).ctxPack && typeof (ex as any).ctxPack === 'object') {
     slots: microFallbackSlots,
     meta: metaForSaveMicroFallback,
   };
-
+}
 } else if (bypassMicro) {
   console.log('[IROS/Gate] bypass micro gate (context recall)', {
     conversationId,
@@ -2093,17 +2098,27 @@ function normForRecall(v: any): string {
     out.metaForSave = out.metaForSave ?? {};
     out.metaForSave.timing = t;
 
-    // ✅ extra を “最後に” 再注入（undefined / null は上書きしない）
-    out.metaForSave.extra = out.metaForSave.extra ?? {};
-    if (extra && typeof extra === 'object') {
-      const prev = out.metaForSave.extra ?? {};
-      const next: any = { ...prev };
-      for (const [k, v] of Object.entries(extra as any)) {
-        // ✅ null も「値なし」とみなし、postprocess側の確定値を潰さない
-        if (v !== undefined && v !== null) next[k] = v;
-      }
-      out.metaForSave.extra = next;
-    }
+// ✅ extra を “最後に” 再注入（undefined / null は上書きしない）
+// - postprocess が確定した値（uiCue/ctxPack 等）を潰さない
+out.metaForSave.extra = out.metaForSave.extra ?? {};
+if (extra && typeof extra === 'object') {
+  const prev = out.metaForSave.extra ?? {};
+  const next: any = { ...prev };
+
+  for (const [k, v] of Object.entries(extra as any)) {
+    // ✅ null/undefined は無視（既存を守る）
+    if (v === undefined || v === null) continue;
+
+    // ✅ postprocess が作る確定値は絶対に上書きしない
+    if (k === 'uiCue') continue;
+
+    // ✅ 既に値があるなら、extra では潰さない（postprocess優先）
+    if (next[k] !== undefined && next[k] !== null) continue;
+
+    next[k] = v;
+  }
+  out.metaForSave.extra = next;
+}
 
 
     // ✅ single-writer stamp（最後に確定）
@@ -3397,9 +3412,21 @@ try {
   out.metaForSave = applyCanonicalToMetaForSave(out.metaForSave, canonical);
 
   // 監査ログ（必要なら消してOK）
+  const conversationIdForLog =
+    (ctx as any)?.conversationIdUuid ??
+    (ctx as any)?.conversationId ??
+    (ctx as any)?.conversation_id ??
+    null;
+
+  const userCodeForLog =
+    (ctx as any)?.userCode ??
+    (ctx as any)?.user_code ??
+    (ctx as any)?.user?.code ??
+    null;
+
   console.log('[IROS/CANON][STAMP]', {
-    conversationId: (ctx as any)?.conversationId ?? null,
-    userCode: (ctx as any)?.userCode ?? null,
+    conversationId: conversationIdForLog,
+    userCode: userCodeForLog,
     q_code: (out.metaForSave as any)?.q_code ?? null,
     depth_stage: (out.metaForSave as any)?.depth_stage ?? null,
     phase: (out.metaForSave as any)?.phase ?? null,
@@ -3407,7 +3434,6 @@ try {
 } catch (e) {
   console.warn('[IROS/CANON][STAMP] failed', e);
 }
-
 
 // ========= handleIrosReply.ts 変更点 =========
 //
@@ -3621,6 +3647,7 @@ if (shouldRunWriter) {
   // 目的：
   // - rephrase の opts.userContext.ctxPack へ確実に渡す
   // - TOPIC_DIGEST が (none) にならないよう最低限埋める
+  // - ✅ q/depth/phase を “正本” として ctxPack に stamp（pickedPhase のブレ止め）
   // ------------------------------------------------------------
   {
     const exAny = (out.metaForSave as any).extra;
@@ -3628,6 +3655,48 @@ if (shouldRunWriter) {
     // ctxPack の器を保証
     if (!exAny.ctxPack || typeof exAny.ctxPack !== 'object') exAny.ctxPack = {};
     const ctxPack = exAny.ctxPack as any;
+    try {
+      const exAny0 = (out.metaForSave as any)?.extra ?? {};
+      const ctxp0 = exAny0?.ctxPack ?? null;
+
+      // ✅ traceIdCanon はこの時点では未定義なので、その場で安全に作る
+      const traceIdTmp: string | null = (() => {
+        const v =
+          (ctx as any)?.traceId ??
+          (out.metaForSave as any)?.extra?.traceId ??
+          (out.metaForSave as any)?.extra?.ctxPack?.traceId ??
+          (out.metaForSave as any)?.traceId ??
+          null;
+
+        const s = typeof v === 'string' ? v.trim() : '';
+        return s ? s : null;
+      })();
+
+      console.log('[IROS/REPHRASE_OPTS_PHASE_TRACE]', {
+        traceId: traceIdTmp,
+
+        // opts 直指定（最優先で拾われる）
+        // ※ここは「渡してない」なら常に null のままでOK
+        willPass_opts_phase: null,
+
+        // userContext 側（ctxPack）
+        ctxPack_phase: ctxp0?.phase ?? null,
+
+        // metaForSave 側（正本）
+        meta_phase: (out.metaForSave as any)?.phase ?? null,
+      });
+    } catch {}
+    // ✅ 重要：rephraseEngine.full.ts が最優先で拾う経路（opts.userContext.ctxPack.*）に
+    // q/depth/phase を毎回 stamp して「Inner 混入」を止める
+    try {
+      const qCanon = (out.metaForSave as any)?.q ?? null;
+      const depthCanon = (out.metaForSave as any)?.depth ?? null;
+      const phaseCanon = (out.metaForSave as any)?.phase ?? null;
+
+      ctxPack.qCode = qCanon ?? ctxPack.qCode ?? null;
+      ctxPack.depthStage = depthCanon ?? ctxPack.depthStage ?? null;
+      ctxPack.phase = phaseCanon ?? ctxPack.phase ?? null;
+    } catch {}
 
     // ✅ topicDigest を最低限確保（重い処理なし）
     // - conversationLine があるなら topicDigest にも入れる
@@ -3653,6 +3722,10 @@ if (shouldRunWriter) {
       conversationLine: typeof ctxp?.conversationLine === 'string' ? ctxp.conversationLine : null,
       topicDigest_extra: typeof exAny?.topicDigest === 'string' ? exAny.topicDigest : null,
       topicDigest_ctxPack: typeof ctxp?.topicDigest === 'string' ? ctxp.topicDigest : null,
+
+      // ✅ 追加：phase ブレの観測（pickedPhase の原因特定）
+      phase_ctxPack: typeof (ctxp as any)?.phase === 'string' ? (ctxp as any).phase : null,
+      phase_metaForSave: (out.metaForSave as any)?.phase ?? null,
     });
   } catch {}
   // --- /TOPIC DIGEST TRACE ---
@@ -3723,12 +3796,25 @@ if (shouldRunWriter) {
     if (s0) return s0;
 
     // ctx.inputKind が "chat" しかない場合は、カードseedinのためには役に立たないので採用しない
-    const ctxKind = typeof (ctx as any)?.inputKind === 'string' ? (ctx as any).inputKind.trim().toLowerCase() : '';
+    const ctxKind =
+      typeof (ctx as any)?.inputKind === 'string' ? (ctx as any).inputKind.trim().toLowerCase() : '';
     if (ctxKind && ctxKind !== 'chat') return ctxKind;
 
-    // 最後の確定：ユーザーが「カード」を明示している場合のみ card 扱い
-    const ut = typeof text === 'string' ? text : '';
-    if (ut.includes('カード')) return 'card';
+    // ✅ 最後の確定：カード要求（日本語/英語）＋引く系を拾う
+    const ut = typeof text === 'string' ? text.trim() : '';
+    if (ut) {
+      const hasCardWord = /カード|card/i.test(ut);
+      const hasDrawWord =
+        /引(?:い|き|く|け)|ひ(?:い|き|く|け)|引き直|引きなお|引き直し|引きなおし|引き直して|引きなおして/.test(
+          ut,
+        );
+
+      // 初回：カード語があれば card
+      if (hasCardWord) return 'card';
+
+      // 継続：引く系だけでも card（ここで落とすと継続が死ぬ）
+      if (hasDrawWord) return 'card';
+    }
 
     return ctxKind || null;
   })();
@@ -3822,6 +3908,12 @@ if (shouldRunWriter) {
 
           ctxPack: {
             ...ctxPackPrev,
+
+            // ✅ 正本（CANON/PP後の metaForSave）で毎ターン stamp してズレを殺す
+            qCode: (out.metaForSave as any)?.q ?? (ctxPackPrev as any)?.qCode ?? null,
+            depthStage: (out.metaForSave as any)?.depth ?? (ctxPackPrev as any)?.depthStage ?? null,
+            phase: (out.metaForSave as any)?.phase ?? (ctxPackPrev as any)?.phase ?? null,
+
             traceId: traceIdCanon, // ✅ ここも固定
             inputKind: inputKindCanon, // ✅ ctxPack にも入れておく（観測しやすくする）
             historyForWriter: turns,
@@ -4077,26 +4169,36 @@ await persistQCodeSnapshotIfAny({
 t.persist_ms.q_snapshot_ms = msSince(t1);
 
 const t2 = nowNs();
+
+// ✅ ここ以降の persist は “CANON後の meta” を正本として使う
+// - いまの症状（CANONはS2なのに persist がS1になる）は、
+//   persist に古い metaForSave を渡しているのが原因
+const metaForSaveFinal: any = (out as any)?.metaForSave ?? metaForSave;
+
 await persistIntentAnchorIfAny({
   supabase,
   userCode,
-  metaForSave,
+  metaForSave: metaForSaveFinal,
 });
 t.persist_ms.intent_anchor_ms = msSince(t2);
 
 // =========================================================
 // ✅ itTriggered は「boolean のときだけ渡す」
 // - 不明(undefined/null)を false に丸めない
-// - これで q_counts.it_triggered / it_triggered_true を壊さない
+// - さらに「null混入」をここで確実に除去する
 // =========================================================
+const itTriggeredForPersistRaw: unknown =
+  (out as any)?.metaForSave?.itTriggered ??
+  (out as any)?.metaForSave?.it_triggered ??
+  (metaForSave as any)?.itTriggered ??
+  (metaForSave as any)?.it_triggered ??
+  (orch as any)?.meta?.itTriggered ??
+  (orch as any)?.meta?.it_triggered ??
+  undefined;
+
+// ✅ “boolean 以外” は全部 undefined（=不明）にする。null も落ちる。
 const itTriggeredForPersist: boolean | undefined =
-  typeof (out as any)?.metaForSave?.itTriggered === 'boolean'
-    ? (out as any).metaForSave.itTriggered
-    : typeof (metaForSave as any)?.itTriggered === 'boolean'
-      ? (metaForSave as any).itTriggered
-      : typeof (orch as any)?.meta?.itTriggered === 'boolean'
-        ? (orch as any).meta.itTriggered
-        : undefined;
+  typeof itTriggeredForPersistRaw === 'boolean' ? itTriggeredForPersistRaw : undefined;
 
 // ✅ 任意：q_counts も “あるときだけ” 渡す（persist側で最終mergeされる）
 const qCountsForPersist: unknown | undefined =
@@ -4107,8 +4209,6 @@ const qCountsForPersist: unknown | undefined =
 
 // =========================================================
 // ✅ anchorEntry decision を metaForSave から拾って persist に渡す
-// - このスコープには `meta` / `anchorDecision` は無いので使わない
-// - metaForSave に載っている anchorEntry / anchorEntry_decision を優先
 // =========================================================
 const metaAny = metaForSave as any;
 
@@ -4128,13 +4228,11 @@ await persistMemoryStateIfAny({
   supabase,
   userCode,
   userText: text,
-  metaForSave,
+  metaForSave: metaForSaveFinal,
   qCounts: qCountsForPersist,
   itTriggered: itTriggeredForPersist, // ✅ ここが本命
-
-  // ✅ 型エラー回避：persist 側で受ける前提の拡張キー
   anchorEntry_decision: anchorEntryDecisionForPersist,
-} as any); // ← ★ここだけ
+} as any);
 t.persist_ms.memory_state_ms = msSince(t3);
 
 const t4 = nowNs();
@@ -4144,7 +4242,7 @@ await persistUnifiedAnalysisIfAny({
   tenantId,
   userText: text,
   assistantText: out.assistantText,
-  metaForSave,
+  metaForSave: metaForSaveFinal,
   conversationId,
 });
 t.persist_ms.unified_analysis_ms = msSince(t4);

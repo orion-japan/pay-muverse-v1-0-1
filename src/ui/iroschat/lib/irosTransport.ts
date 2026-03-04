@@ -470,6 +470,8 @@ export async function reply(params: {
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    // ✅ traceId をヘッダでも送る（サーバ側の正本にする）
+    'x-trace-id': clientTraceId,
   };
 
   if (userCodeHeader) {

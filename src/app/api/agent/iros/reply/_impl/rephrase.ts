@@ -267,8 +267,9 @@ export async function maybeAttachRephraseForRenderV2(args: {
       }
     };
 
-    // ✅ すでに rephraseBlocks / rephraseHead が存在するなら上書きしない
-    //    ただし「ゴミ」なら破棄して作り直す
+    // ✅ A案：毎turn「最新座標」で作り直す
+    // - 既存 rephraseBlocks / rephraseHead があっても、基本は再生成したい
+    // - ただし「ゴミ」判定は維持しつつ、ゴミでなくても clear して続行する
     const existingBlocks =
       (extraMerged as any)?.rephraseBlocks ??
       (extraMerged as any)?.rephrase?.blocks ??
@@ -290,15 +291,11 @@ export async function maybeAttachRephraseForRenderV2(args: {
 
       const garbage = existingBlocks.length === 1 && isGarbageText(headText);
 
-      if (!garbage) {
-        setSkip('ALREADY_HAS_REPHRASE_BLOCKS', { blocksLen: existingBlocks.length, attachReason });
-        return false;
-      }
-
-      // ✅ ゴミなら捨てて、通常フローで fallback blocks を作り直す
-      clearExistingRephrase('GARBAGE_EXISTING_BLOCKS', {
+      // ✅ ゴミでなくても「毎turn再生成」したいので一旦クリアして続行する
+      clearExistingRephrase(garbage ? 'GARBAGE_EXISTING_BLOCKS' : 'FORCE_REBUILD_EXISTING_BLOCKS', {
         blocksLen: existingBlocks.length,
         head: headText.slice(0, 80),
+        attachReason,
       });
     }
 
@@ -308,15 +305,11 @@ export async function maybeAttachRephraseForRenderV2(args: {
     if (existingHead) {
       const garbage = isGarbageText(existingHead);
 
-      if (!garbage) {
-        setSkip('ALREADY_HAS_REPHRASE_HEAD', { headLen: existingHead.length, attachReason });
-        return false;
-      }
-
-      // ✅ ゴミなら捨てて作り直す
-      clearExistingRephrase('GARBAGE_EXISTING_HEAD', {
+      // ✅ ゴミでなくても「毎turn再生成」したいので一旦クリアして続行する
+      clearExistingRephrase(garbage ? 'GARBAGE_EXISTING_HEAD' : 'FORCE_REBUILD_EXISTING_HEAD', {
         head: String(existingHead).slice(0, 80),
         headLen: existingHead.length,
+        attachReason,
       });
     }
 
@@ -439,21 +432,6 @@ export async function maybeAttachRephraseForRenderV2(args: {
   if (speechAct === 'SILENCE' || speechAct === 'FORWARD') {
     setSkip('SKIP_BY_SPEECH_ACT', { speechAct });
     return;
-  }
-
-  // ---- 2) idempotent ----
-  {
-    const existingBlocks =
-      (extraMerged as any)?.rephraseBlocks ??
-      (extraMerged as any)?.rephrase?.blocks ??
-      (meta as any)?.extra?.rephraseBlocks ??
-      (meta as any)?.extra?.rephrase?.blocks ??
-      null;
-
-    if (Array.isArray(existingBlocks) && existingBlocks.length > 0) {
-      setSkip('ALREADY_HAS_REPHRASE_BLOCKS', { blocksLen: existingBlocks.length });
-      return;
-    }
   }
 
   // ---- 3) slots ----
@@ -919,24 +897,25 @@ const intentBandForCtx =
 // ---- 5) call LLM ----
 const model = process.env.IROS_REPHRASE_MODEL ?? process.env.IROS_MODEL ?? 'gpt-5';
 
-function TRIM(v: any): string | null {
+// ✅ ここでは “別名” のトリムを使う（ファイル先頭の const TRIM と衝突させない）
+const TRIM_S = (v: any): string | null => {
   if (typeof v !== 'string') return null;
   const s = v.trim();
   return s ? s : null;
-}
+};
 
 const qCodeForLLM =
-  (typeof (meta as any)?.q_code === 'string' && TRIM((meta as any).q_code)) ||
-  (typeof (meta as any)?.qCode === 'string' && TRIM((meta as any).qCode)) ||
-  (typeof (meta as any)?.qPrimary === 'string' && TRIM((meta as any).qPrimary)) ||
-  (typeof (meta as any)?.unified?.q?.current === 'string' && TRIM((meta as any).unified.q.current)) ||
+  (typeof (meta as any)?.q_code === 'string' && TRIM_S((meta as any).q_code)) ||
+  (typeof (meta as any)?.qCode === 'string' && TRIM_S((meta as any).qCode)) ||
+  (typeof (meta as any)?.qPrimary === 'string' && TRIM_S((meta as any).qPrimary)) ||
+  (typeof (meta as any)?.unified?.q?.current === 'string' && TRIM_S((meta as any).unified.q.current)) ||
   null;
 
 const depthForLLM =
-  (typeof (meta as any)?.depth_stage === 'string' && TRIM((meta as any).depth_stage)) ||
-  (typeof (meta as any)?.depthStage === 'string' && TRIM((meta as any).depthStage)) ||
-  (typeof (meta as any)?.depth === 'string' && TRIM((meta as any).depth)) ||
-  (typeof (meta as any)?.unified?.depth?.stage === 'string' && TRIM((meta as any).unified.depth.stage)) ||
+  (typeof (meta as any)?.depth_stage === 'string' && TRIM_S((meta as any).depth_stage)) ||
+  (typeof (meta as any)?.depthStage === 'string' && TRIM_S((meta as any).depthStage)) ||
+  (typeof (meta as any)?.depth === 'string' && TRIM_S((meta as any).depth)) ||
+  (typeof (meta as any)?.unified?.depth?.stage === 'string' && TRIM_S((meta as any).unified.depth.stage)) ||
   null;
 
   // inputKind

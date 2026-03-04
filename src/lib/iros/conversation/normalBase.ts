@@ -32,10 +32,7 @@ function normalizeOutput(text: string): string {
     .map((l) => l.trim())
     .filter(Boolean);
 
-  // 行数制限（最大4行）
   const sliced = lines.slice(0, 4);
-
-  // 全体文字数制限（保険）
   const joined = sliced.join('\n');
   return joined.length > 240 ? joined.slice(0, 240) : joined;
 }
@@ -45,8 +42,9 @@ function pickEmergencyLine(userText: string): string {
   const t = String(userText ?? '').trim();
 
   // 1) ほぼ空/短すぎ/記号のみ（上位で落ちてくる想定）
+  // ⚠️ “……” は返さない：dots-only は render で空扱いにされやすい
   if (!t || t.length < 2 || /^[\s\W_]+$/u.test(t)) {
-    return '……';
+    return '受け取った。';
   }
 
   // 2) 疲労/沈黙っぽい
@@ -73,22 +71,19 @@ function pickEmergencyLine(userText: string): string {
 export async function runNormalBase(args: { userText: string }): Promise<NormalBaseResult> {
   const userText = String(args.userText ?? '').trim();
 
-  // ここでは「空入力」は扱わない（SpeechPolicyの責務）
-  // ただし非常用として最小の返しは持つ
+  // 非常用：空でも “……” は返さない
   if (!userText) {
     return {
-      text: '……',
+      text: '受け取った。',
       meta: { source: 'normal_base' },
     };
   }
 
-  // ✅ 新憲法：Normal Base は LLM を呼ばない（旧人格へ戻る事故を断つ）
   const raw = pickEmergencyLine(userText);
   const text = normalizeOutput(raw);
 
-  // 最終保険：それでも空なら固定文
   const finalText =
-    text.trim().length > 0 ? text : '受け取りました。\n言葉は、ここにあります。';
+    text.trim().length > 0 ? text : '受け取った。\n言葉は、ここにある。';
 
   return {
     text: finalText,
