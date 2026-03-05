@@ -36,6 +36,7 @@ import { runGenericRecallGate } from '@/lib/iros/server/gates/genericRecallGate'
 import { writeIT } from '@/lib/iros/language/itWriter';
 import { resolveRememberBundle } from '@/lib/iros/remember/resolveRememberBundle';
 import { logConvEvidence } from '@/lib/iros/conversation/evidenceLog';
+import { buildHistoryDigestV1 } from '@/lib/iros/history/historyDigestV1';
 
 import {
   // ✅ assistant保存はしない
@@ -1310,18 +1311,35 @@ if (!bypassMicro && isMicroNow) {
   // ✅ 新憲法：MicroWriter に「内部指示（演習・メニュー）」を混ぜない
   const microUserText = isSingleToken ? s0 : text;
 
-  // ====== HistoryDigest v1 を生成して micro に渡す ======
-  const { buildHistoryDigestV1 } = await import('@/lib/iros/history/historyDigestV1');
+// ====== HistoryDigest v1 を生成して micro に渡す ======
+// buildHistoryDigestV1 はファイル先頭の static import を使う（重複importしない）
 
 // repeatSignal はここでは最小扱い（ctx0 側で持っているならそれを優先）
 const repeatSignal =
   !!(ctx0 as any)?.repeatSignalSame || !!(ctx0 as any)?.repeat_signal || false;
 
-// continuity は最小版（historyForTurn から取れるならそれを優先）
+// continuity は “必ず” 取る：ctx0 が空なら historyForTurn から拾う
+const pickLastCoreFromHistory = (
+  history: any[] | null | undefined,
+  role: 'user' | 'assistant',
+) => {
+  const hs = Array.isArray(history) ? history : [];
+  for (let i = hs.length - 1; i >= 0; i--) {
+    const h = hs[i] as any;
+    const r = String(h?.role ?? h?.speaker ?? '').toLowerCase();
+    if (r !== role) continue;
+
+    const raw = String(h?.content ?? h?.text ?? h?.message ?? '').trim();
+    if (raw) return raw;
+  }
+  return '';
+};
+
 const lastUserCore =
   String(
     (ctx0 as any)?.continuity?.last_user_core ??
       (ctx0 as any)?.lastUserCore ??
+      pickLastCoreFromHistory(historyForTurn as any, 'user') ??
       '',
   ).trim() || '';
 
@@ -1329,6 +1347,7 @@ const lastAssistantCore =
   String(
     (ctx0 as any)?.continuity?.last_assistant_core ??
       (ctx0 as any)?.lastAssistantCore ??
+      pickLastCoreFromHistory(historyForTurn as any, 'assistant') ??
       '',
   ).trim() || '';
 
@@ -2125,7 +2144,7 @@ if (extra && typeof extra === 'object') {
     out.metaForSave = stampSingleWriter(out.metaForSave);
 
     if (process.env.IROS_DEBUG_EXTRA === '1') {
-      console.log('[IROS/Reply][extra-merged]', out.metaForSave.extra);
+      console.log('[IROS/Reply][extra-merged]', (out.metaForSave as any)?.extra);
     }
 
     // =========================================================
@@ -2133,8 +2152,8 @@ if (extra && typeof extra === 'object') {
     // =========================================================
     try {
       out.metaForSave = out.metaForSave ?? {};
-      out.metaForSave.extra = out.metaForSave.extra ?? {};
-      const ex: any = out.metaForSave.extra;
+      (out.metaForSave as any).extra = (out.metaForSave as any).extra ?? {};
+      const ex: any = (out.metaForSave as any).extra;
 
       const ctxAny: any = ctx as any;
       const orchAny: any = orch as any;
@@ -2215,7 +2234,7 @@ if (extra && typeof extra === 'object') {
 
       // rawTextFromModel が無ければ “現時点の本文” を入れておく（空は禁止）
       if (ex.rawTextFromModel === undefined || ex.rawTextFromModel === null) {
-        const cur = String(out.assistantText ?? out.content ?? '').trim();
+        const cur = String(out.assistantText ?? (out as any).content ?? '').trim();
         ex.rawTextFromModel = cur.length ? cur : '…';
       }
 
@@ -2224,6 +2243,33 @@ if (extra && typeof extra === 'object') {
       console.warn('[IROS/Reply] SpeechAct stamp failed', e);
     }
 
+    // ✅ writer入力用の “このターン確定データ” を meta.extra に刻む（route.ts が拾う）
+    try {
+      out.metaForSave = out.metaForSave ?? {};
+      (out.metaForSave as any).extra = (out.metaForSave as any).extra ?? {};
+      const exAny: any = (out.metaForSave as any).extra;
+
+  // history は巨大化し得るので “必要最小限” の形にして渡す
+  // ✅ 必ず末尾だけに trim（デフォルト6）
+  const maxMsgsRaw = Number(process.env.IROS_REPHRASE_LAST_TURNS_MAX);
+  const maxMsgs = maxMsgsRaw > 0 ? Math.floor(maxMsgsRaw) : 6;
+
+  const hs = Array.isArray(historyForTurn) ? (historyForTurn as any[]) : [];
+  const tail = hs.slice(-Math.max(2, maxMsgs));
+
+  exAny.historyForWriter = tail.map((m) => ({
+    role: m?.role,
+    content: m?.content ?? m?.text ?? '',
+  }));
+
+  exAny.rememberTextForIros = typeof rememberTextForIros === 'string' ? rememberTextForIros : null;
+  exAny.historyForWriterAt = new Date().toISOString();
+
+// =========================================================
+// ✅ FlowTape / FlowDigest（LLM-facing tiny continuity）
+// - “禁止/縛り” は入れない（ログとして素直に刻むだけ）
+// - metaForSave.extra に正本一本化（route.ts が拾える）
+// =========================================================
 // ✅ writer入力用の “このターン確定データ” を meta.extra に刻む（route.ts が拾う）
 try {
   out.metaForSave = out.metaForSave ?? {};
@@ -2231,19 +2277,75 @@ try {
 
   const exAny: any = out.metaForSave.extra;
 
-  // history は巨大化し得るので “必要最小限” の形にして渡す
-  // （role/content/meta のみ）
-  exAny.historyForWriter = Array.isArray(historyForTurn)
-    ? (historyForTurn as any[]).map((m) => ({
-        role: m?.role,
-        content: m?.content ?? m?.text ?? '',
-        meta: m?.meta,
-      }))
-    : [];
+  // ---------------------------------------------------------
+  // ✅ historyForWriter は「最後の数件」だけに制限する（token削減の要）
+  // - DBの baseLimit=30 は保持してOK（state復元等のため）
+  // - writer に渡す履歴だけを “短くする”
+  // ---------------------------------------------------------
+  const maxMsgsRaw =
+    Number(process.env.IROS_REPHRASE_LAST_TURNS_MAX) ||
+    Number(process.env.IROS_WRITER_HISTORY_MAX) ||
+    6; // デフォルトは6（= 2〜3往復）
+
+  const maxMsgs = maxMsgsRaw > 0 ? Math.floor(maxMsgsRaw) : 6;
+
+  // roleバランスを崩さず末尾から取る（user/assistantが片寄らないように）
+  const takeTailWithBalanceLocal = (arr: any[], n: number) => {
+    const out: any[] = [];
+    let need = Math.max(1, n);
+
+    let hasU = 0;
+    let hasA = 0;
+
+    for (let i = arr.length - 1; i >= 0 && out.length < need; i--) {
+      const m = arr[i];
+      const role = m?.role === 'assistant' ? 'assistant' : m?.role === 'user' ? 'user' : null;
+      const content = typeof (m?.text ?? m?.content) === 'string' ? String(m.text ?? m.content).trim() : '';
+      if (!role || !content) continue;
+
+      // できるだけ user/assistant の両方を拾う
+      if (out.length < need - 1) {
+        out.push({ role, content });
+        if (role === 'user') hasU++;
+        if (role === 'assistant') hasA++;
+        continue;
+      }
+
+      // 最後の1枠は「欠けてる側」を優先して埋める
+      if (hasU === 0 && role === 'user') {
+        out.push({ role, content });
+        hasU++;
+      } else if (hasA === 0 && role === 'assistant') {
+        out.push({ role, content });
+        hasA++;
+      } else if (out.length < need) {
+        out.push({ role, content });
+      }
+    }
+
+    return out.reverse();
+  };
+
+  const hs = Array.isArray(historyForTurn) ? (historyForTurn as any[]) : [];
+  const tail = takeTailWithBalanceLocal(hs, maxMsgs);
+
+  // ✅ 最小形（role/content のみ）で保存：metaは持たない（太るので）
+  exAny.historyForWriter = tail;
 
   exAny.rememberTextForIros = typeof rememberTextForIros === 'string' ? rememberTextForIros : null;
   exAny.historyForWriterAt = new Date().toISOString();
 
+  // デバッグ（必要なら）
+  if (process.env.IROS_DEBUG_EXTRA === '1') {
+    console.log('[IROS/HistoryForWriter] trimmed', {
+      maxMsgs,
+      src_len: hs.length,
+      out_len: Array.isArray(exAny.historyForWriter) ? exAny.historyForWriter.length : 0,
+    });
+  }
+} catch (e) {
+  console.warn('[IROS/Reply] historyForWriter stamp failed', e);
+}
   // =========================================================
   // ✅ FlowTape / FlowDigest（LLM-facing tiny continuity）
   // - “禁止/縛り” は入れない（ログとして素直に刻むだけ）
@@ -2317,43 +2419,40 @@ try {
     (mf.extra as any).flowTape = tape ?? null;
     (mf.extra as any).flowDigest = exAny.flowDigest ?? null;
 
-    // ✅ 追加：historyDigestV1（無ければこの場で作って保存）
-    // - 生成ポイントを “ここ1箇所” に固定（重複生成しない）
-    // - 既に入ってるなら触らない
-    if (!(mf.extra as any).historyDigestV1) {
-      try {
-        const { buildHistoryDigestV1 } = await import('@/lib/iros/history/historyDigestV1');
+// ✅ 追加：historyDigestV1（無ければこの場で作って保存）
+// - 生成ポイントを “ここ1箇所” に固定（重複生成しない）
+// - 既に入ってるなら触らない
+if (!(mf.extra as any).historyDigestV1) {
+  try {
+// const { buildHistoryDigestV1 } = await import('@/lib/iros/history/historyDigestV1');
 
-        const lastUserCore =
-          String((ctx as any)?.continuity?.last_user_core ?? (ctx as any)?.lastUserCore ?? '').trim();
-        const lastAssistantCore =
-          String((ctx as any)?.continuity?.last_assistant_core ?? (ctx as any)?.lastAssistantCore ?? '').trim();
+    const lastUserCore =
+      String((ctx as any)?.continuity?.last_user_core ?? (ctx as any)?.lastUserCore ?? '').trim() || '';
+    const lastAssistantCore =
+      String((ctx as any)?.continuity?.last_assistant_core ?? (ctx as any)?.lastAssistantCore ?? '').trim() || '';
 
-        const repeatSignal =
-          !!(ctx as any)?.repeatSignalSame ||
-          !!(ctx as any)?.repeat_signal ||
-          false;
+    const repeatSignal = !!(ctx as any)?.repeatSignalSame || !!(ctx as any)?.repeat_signal || false;
 
-        (mf.extra as any).historyDigestV1 = buildHistoryDigestV1({
-          fixedNorth: { key: 'SUN', phrase: '成長 / 進化 / 希望 / 歓喜' },
-          metaAnchorKey: String((ctx as any)?.baseMetaForTurn?.intent_anchor_key ?? '').trim() || null,
-          memoryAnchorKey: String((ctx as any)?.memoryState?.intentAnchor ?? (ctx as any)?.intentAnchor ?? '').trim() || null,
+    (mf.extra as any).historyDigestV1 = buildHistoryDigestV1({
+      fixedNorth: { key: 'SUN', phrase: '成長 / 進化 / 希望 / 歓喜' },
+      metaAnchorKey: String((ctx as any)?.baseMetaForTurn?.intent_anchor_key ?? '').trim() || null,
+      memoryAnchorKey: String((ctx as any)?.memoryState?.intentAnchor ?? (ctx as any)?.intentAnchor ?? '').trim() || null,
 
-          qPrimary: (ctx as any)?.memoryState?.qPrimary ?? (ctx as any)?.qPrimary ?? 'Q3',
-          depthStage: (ctx as any)?.memoryState?.depthStage ?? (ctx as any)?.depthStage ?? 'F1',
-          phase: (ctx as any)?.memoryState?.phase ?? (ctx as any)?.phase ?? 'Inner',
+      qPrimary: (ctx as any)?.memoryState?.qPrimary ?? (ctx as any)?.qPrimary ?? 'Q3',
+      depthStage: (ctx as any)?.memoryState?.depthStage ?? (ctx as any)?.depthStage ?? 'F1',
+      phase: (ctx as any)?.memoryState?.phase ?? (ctx as any)?.phase ?? 'Inner',
 
-          situationTopic: String((ctx as any)?.situationTopic ?? 'その他・ライフ全般'),
-          situationSummary: String((ctx as any)?.situationSummary ?? '').slice(0, 120),
+      situationTopic: String((ctx as any)?.situationTopic ?? 'その他・ライフ全般'),
+      situationSummary: String((ctx as any)?.situationSummary ?? '').slice(0, 120),
 
-          lastUserCore: String(lastUserCore ?? '').slice(0, 120),
-          lastAssistantCore: String(lastAssistantCore ?? '').slice(0, 120),
-          repeatSignal,
-        });
-      } catch (e) {
-        // digest は非必須：失敗しても会話を止めない
-      }
-    }
+      lastUserCore: lastUserCore.slice(0, 120),
+      lastAssistantCore: lastAssistantCore.slice(0, 120),
+      repeatSignal,
+    });
+  } catch {
+    // keep silent
+  }
+}
   }
 }
 
@@ -2706,11 +2805,13 @@ const hfw = Array.isArray((out.metaForSave as any)?.extra?.historyForWriter)
   ? (out.metaForSave as any).extra.historyForWriter
   : [];
 
-// ✅ 重要：null だけでなく「空配列」も“未同期”として扱い、hfw があれば上書き同期する
+// ✅ 重要：
+// - 既存が空のときだけでなく、既存が「より長い」場合も上書きして “縮める”
+// - これをやらないと、一度30で入ったら永久に30のままになる
 const curHfw = (extra2.ctxPack as any)?.historyForWriter;
 const curLen = Array.isArray(curHfw) ? curHfw.length : 0;
 
-if (hfw.length && (!Array.isArray(curHfw) || curLen === 0)) {
+if (hfw.length && (!Array.isArray(curHfw) || curLen === 0 || curLen > hfw.length)) {
   (extra2.ctxPack as any).historyForWriter = (hfw as any[]).map((m) => ({
     role: m?.role === 'assistant' ? 'assistant' : 'user',
     content: String((m as any)?.content ?? '').trim(),

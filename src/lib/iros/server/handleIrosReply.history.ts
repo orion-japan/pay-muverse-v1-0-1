@@ -200,12 +200,36 @@ export async function buildHistoryForTurn(args: {
     userCode,
     providedHistory,
     includeCrossConversation = false, // ここでは false が安全。必要なら呼び出し側で merge して渡す
-    baseLimit = 30,
-    maxTotal = 80,
+    baseLimit: baseLimitArg,
+    maxTotal: maxTotalArg,
   } = args;
 
   // 2) cross-conversation はこのモジュールでは扱わない（責務を狭める）
   void includeCrossConversation;
+
+  // ✅ default を小さくする（tokens削減の正本）
+  // - env で上書き可能
+  // - baseLimit: DBから取る件数（古いほど効くのでまずここを絞る）
+  // - maxTotal: sanitize後に最終的に残す最大（baseLimitより大きくてもOKだが通常は近い値で良い）
+  const envBase = Number(process.env.IROS_HISTORY_BASE_LIMIT);
+  const envMax = Number(process.env.IROS_HISTORY_MAX_TOTAL);
+
+  const clampInt = (n: number, min: number, max: number) => {
+    const x = Number.isFinite(n) ? Math.floor(n) : min;
+    return Math.max(min, Math.min(max, x));
+  };
+
+  const baseLimit = clampInt(
+    typeof baseLimitArg === 'number' ? baseLimitArg : (Number.isFinite(envBase) ? envBase : 8),
+    2,
+    40,
+  );
+
+  const maxTotal = clampInt(
+    typeof maxTotalArg === 'number' ? maxTotalArg : (Number.isFinite(envMax) ? envMax : 24),
+    4,
+    120,
+  );
 
   const hasViewShiftSnapshotInMeta = (arr: unknown[]): boolean => {
     if (!Array.isArray(arr) || arr.length === 0) return false;
@@ -249,6 +273,8 @@ export async function buildHistoryForTurn(args: {
     userCode: String(userCode ?? ''),
     provided_len: Array.isArray(providedHistory) ? providedHistory.length : 0,
     used: shouldPreferDb ? 'db' : 'provided',
+    baseLimit,
+    maxTotal,
     out_len: sanitized.length,
     has_viewShiftSnapshot: hasViewShiftSnapshotInMeta(sanitized),
   });

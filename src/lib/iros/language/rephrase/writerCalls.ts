@@ -177,26 +177,23 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
   const systemPrompt = norm(args.systemPrompt ?? '');
 
   // ✅ 会話の線（topicDigest / conversationLine）を拾う（短く system 側に固定）
-  const topicDigest = norm(args.topicDigest ?? '');
-  const conversationLine = norm(args.conversationLine ?? '');
+  // - ここが太ると prompt_tokens が跳ねるので、強制クランプする
+  const topicDigest = clampStr(norm(args.topicDigest ?? ''), 260);
+  const conversationLine = clampStr(norm(args.conversationLine ?? ''), 260);
   const internalPackRaw = norm(args.internalPack ?? '');
-
-  // ✅ ここで args の形を確証（長すぎる場合に備えてキーのみ）
-  try {
-    const keys = Object.keys(args ?? {}).sort();
-    console.log('[IROS/writerCalls][ARGS_KEYS]', { keys });
-  } catch {}
 
   const conversationLineBlock = [topicDigest, conversationLine]
     .map((x) => norm(x))
     .filter((x) => x.length > 0)
     .join('\n');
 
+  const conversationLineBlockClamped = clampStr(conversationLineBlock, 360);
+
   // ✅ system は「軽量」に固定（PDFの上限設計に合わせる）
   // - internalPack は system に混ぜない（systemLen が肥大化するため）
   const systemOne = [
     systemPrompt,
-    conversationLineBlock ? `CONVERSATION_LINE (DO NOT OUTPUT):\n${conversationLineBlock}` : '',
+    conversationLineBlockClamped ? `CONVERSATION_LINE (DO NOT OUTPUT):\n${conversationLineBlockClamped}` : '',
   ]
     .map((x) => norm(x))
     .filter((x) => x.length > 0)
@@ -329,54 +326,24 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
   );
 
   const coordLines: string[] = [];
-  if (
-    qCode ||
-    depthStage ||
-    phase ||
-    polarity ||
-    eTurn ||
-    saRhythm ||
-    saTone ||
-    saBrevity ||
-    intentAnchor ||
-    intentDir ||
-    itxStep ||
-    itxReason ||
-    futureHint
-  ) {
+  if (qCode || depthStage || phase || eTurn || futureHint) {
     coordLines.push('COORD (DO NOT OUTPUT):');
+
+    // ✅ 必須だけ残す（tokens削減）
     if (eTurn) coordLines.push(`e_turn=${eTurn}`);
     if (depthStage) coordLines.push(`depthStage=${depthStage}`);
     if (qCode) coordLines.push(`qCode=${qCode}`);
-    if (polarity) coordLines.push(`polarity=${polarity}`);
-    if (polN.metaBand) coordLines.push(`polarity_metaBand=${polN.metaBand}`);
     if (phase) coordLines.push(`phase=${phase}`);
 
-    const saParts = [
-      saTone && `tone=${saTone}`,
-      saBrevity && `brevity=${saBrevity}`,
-      saRhythm && `rhythm=${saRhythm}`,
-    ]
-      .filter(Boolean)
-      .join(' ');
-    if (saParts) coordLines.push(`sa=${saParts}`);
-
-    const intentParts = [
-      intentAnchor && `anchor=${intentAnchor}`,
-      intentDir && `direction=${intentDir}`,
-      itxStep && `itx_step=${itxStep}`,
-      itxReason && `itx_reason=${itxReason}`,
-    ]
-      .filter(Boolean)
-      .join(' ');
-    if (intentParts) coordLines.push(`intent=${intentParts}`);
-
+    // ✅ flow は delta / returnStreak だけ（必要最小）
     const flowDelta = pick(flow?.delta, flow?.flowDelta);
     const returnStreak = pick(flow?.returnStreak, flow?.return_streak);
     const flowParts = [flowDelta && `delta=${flowDelta}`, returnStreak && `returnStreak=${returnStreak}`]
       .filter(Boolean)
       .join(' ');
     if (flowParts) coordLines.push(`flow=${flowParts}`);
+
+    // ✅ future は短いヒントだけ
     if (futureHint) coordLines.push(`future=${futureHint}`);
   }
 
@@ -589,7 +556,24 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
 
   const stateCueSeed = clampLinesByLen(stateCueLines0, 30, 980).join('\n');
 
-  const injectedHead = [coordLines.join('\n'), stateCueSeed].filter((x) => norm(x)).join('\n\n');
+  // ✅ injectedHead を最小化：COORD は最重要6点だけ（重複・枝葉は注入しない）
+  // - tokens削減の本丸（injectedPackLen を落とす）
+  // - STATE_CUES_V3 があるため、COORD は「座標の骨」だけに絞る
+  const coordMinimal: string[] = [];
+  coordMinimal.push('COORD (DO NOT OUTPUT):');
+  if (eTurn) coordMinimal.push(`e_turn=${eTurn}`);
+  if (depthStage) coordMinimal.push(`depthStage=${depthStage}`);
+  if (qCode) coordMinimal.push(`qCode=${qCode}`);
+  if (phase) coordMinimal.push(`phase=${phase}`);
+  if (polarity) coordMinimal.push(`polarity=${polarity}`);
+
+  // 何も無い時は COORD 自体を出さない
+  const coordMinimalBlock =
+    coordMinimal.length > 1 ? coordMinimal.join('\n') : '';
+
+  const injectedHead = [coordMinimalBlock, stateCueSeed]
+    .filter((x) => norm(x))
+    .join('\n\n');
 
   const internalPackFixed = [injectedHead, internalPackRaw].filter((x) => norm(x)).join('\n\n').trim();
   try {
@@ -627,15 +611,21 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
   messages = ensureEndsWithUser(messages);
 
   // ✅ HistoryDigest v1 をここで注入（ある時だけ）
-  const digest = (args.historyDigestV1 ?? null) as HistoryDigestV1 | null;
+  let digest = (args.historyDigestV1 ?? null) as HistoryDigestV1 | null;
   if (digest) {
     const injected = injectHistoryDigestV1({ messages, digest }) as any;
+
     const injectedMsgs = (injected?.messages ?? null) as WriterMessage[] | null;
     if (Array.isArray(injectedMsgs) && injectedMsgs.length > 0) {
       messages = injectedMsgs;
     }
-  }
 
+    // ✅ NEW: inject側で補完された digest を採用（STATE_CUES の continuity を埋める）
+    const injectedDigest = (injected?.digest ?? null) as HistoryDigestV1 | null;
+    if (injectedDigest) {
+      digest = injectedDigest;
+    }
+  }
   // ✅ 先頭の system は 1枚に畳む
   messages = foldLeadingSystemToOne(messages);
 

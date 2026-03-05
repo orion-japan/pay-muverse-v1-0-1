@@ -52,6 +52,7 @@ import {
   renderBlockPlanSystem4,
 } from '../../blockPlan/blockPlanEngine';
 import { flagshipGuard } from '../../quality/flagshipGuard';
+import { buildTopicLineV1, extractKeywordsV1 } from '@/lib/iros/history/historyDigestV1';
 import {
   extractLockedILines,
   verifyLockedILinesPreserved,
@@ -4247,82 +4248,235 @@ console.log('[IROS/rephraseEngine][MSG_PACK]', {
         )
       : null;
 
-// 先頭/末尾の確認も残す（head/tail は従来どおり）
-console.log('[IROS/LLM][WRITER_IN_PACK_HEAD]', {
-  traceId: debug.traceId,
-  conversationId: debug.conversationId,
-  userCode: debug.userCode,
+// ✅ writer input pack debug (LEN)
+// - 現在の正本は messages（callWriterLLM に渡す実体）
+// - writerArgs(pack) 系は legacy として補助表示（0でも異常ではない）
+{
+  const traceId = (opts as any)?.traceId ?? (opts as any)?.extra?.traceId ?? null;
 
-  // --- internalPack ---
-  packLen: pack.length,
-  packLines: pack ? pack.split('\n').length : 0,
+  // ---- messages-based (source of truth) ----
+  const msgs = Array.isArray(messages) ? (messages as any[]) : [];
+  const sys = msgs.filter((m) => m?.role === 'system').map((m) => String(m?.content ?? '')).join('\n');
+  const usr = msgs.filter((m) => m?.role === 'user').map((m) => String(m?.content ?? '')).join('\n');
+  const ast = msgs.filter((m) => m?.role === 'assistant').map((m) => String(m?.content ?? '')).join('\n');
 
-  hasResonanceSeed: seedIdx >= 0,
-  seedIdx,
-  seedNear,
+  const msg_total_chars = JSON.stringify(msgs).length;
+  const msg_total_tokens_approx = Math.ceil(msg_total_chars / 4);
 
-  hasTextSeed: textSeedIdx >= 0,
-  textSeedIdx,
-  textSeedNear,
+  // ---- legacy pack-based (may be empty depending on call path) ----
+  const wa: any = (opts as any)?.writerArgs ?? (opts as any)?.extra?.writerArgs ?? {};
+  const systemPrompt = String(wa?.systemPrompt ?? '');
+  const internalPack = String(wa?.internalPack ?? '');
+  const topicDigest = String(wa?.topicDigest ?? '');
+  const conversationLine = String(wa?.conversationLine ?? '');
+  const turns = Array.isArray(wa?.turns) ? wa.turns : [];
+  const turns_json_len = JSON.stringify(turns).length;
 
-  hasCardsLite_internal: cardsIdxInternal >= 0,
-  cardsIdxInternal,
-  cardsNearInternal,
+  const legacy_pack_total_chars =
+    systemPrompt.length +
+    topicDigest.length +
+    conversationLine.length +
+    internalPack.length +
+    turns_json_len;
 
-  head: pack.slice(0, 260),
-  tail: pack.slice(-260),
+  console.log('[IROS/LLM][WRITER_IN_PACK_LEN]', {
+    traceId,
+    conversationId: (opts as any)?.conversationId ?? null,
+    userCode: (opts as any)?.userCode ?? null,
 
-  // --- injectedPack (messages assistant0) ---
-  injectedAssistantCount: (messages as any[])?.filter((m) => m?.role === 'assistant')?.length ?? 0,
-  injectedPackLen: injectedPack.length,
+    // ✅ source-of-truth
+    messages_len: msgs.length,
+    msg_total_chars,
+    msg_total_tokens_approx,
+    system_len_from_messages: sys.length,
+    user_total_len: usr.length,
+    assistant_total_len: ast.length,
 
-  hasTextSeed_inMessages: injectedTextSeedIdx >= 0,
-  textSeedIdx_inMessages: injectedTextSeedIdx,
-  textSeedNear_inMessages: injectedTextSeedNear,
+    // 🧩 legacy (補助・0でもOK)
+    legacy_system_len: systemPrompt.length,
+    legacy_topicDigest_len: topicDigest.length,
+    legacy_conversationLine_len: conversationLine.length,
+    legacy_internalPack_len: internalPack.length,
+    legacy_turns_json_len: turns_json_len,
+    legacy_pack_total_chars,
+    legacy_pack_total_tokens_approx: Math.ceil(legacy_pack_total_chars / 4),
+  });
+}
+}
 
-  hasCardsLite_inMessages: injectedCardsLiteIdx >= 0,
-  cardsLiteIdx_inMessages: injectedCardsLiteIdx,
-  cardsLiteNear_inMessages: injectedCardsLiteNear,
-});}
+raw = await (async () => {
+  // ✅ V3 fix: messages が正本なので、ここで STATE_CUES を “internal assistant message” として注入する
+  // - writerArgs(topicDigest/conversationLine/internalPack) が空でも、毎ターン必ず効く
+  // - topic復元は historyDigestV1 を TOPIC として messages に入れることで担保する
 
-raw = await callWriterLLM({
-  model: opts.model ?? 'gpt-5',
-  temperature: opts.temperature ?? 0.7,
-  messages,
+  const baseMsgs = Array.isArray(messages) ? (messages as any[]) : [];
 
-  // ✅ 追加：冒頭オウム返しガード用（messagesには入れない。比較専用）
-  echoGuardUserText: String((opts as any)?.userText ?? ''),
+  // 既に注入済みなら二重に入れない（安全策）
+  const alreadyHasStateCues = baseMsgs.some((m) => {
+    const roleOk = String(m?.role ?? '') === 'assistant';
+    const c = String(m?.content ?? '');
+    return roleOk && c.includes('STATE_CUES (DO NOT OUTPUT)');
+  });
 
-  traceId: debug.traceId ?? null,
-  conversationId: debug.conversationId ?? null,
-  userCode: debug.userCode ?? null,
+  const stateCuesText = (() => {
+    // CORE（確証つき値）
+    const coreBits = [
+      `depthStage=${typeof pickedDepthStage !== 'undefined' ? String(pickedDepthStage) : 'null'}`,
+      `phase=${typeof pickedPhase !== 'undefined' ? String(pickedPhase) : 'null'}`,
+      `qCode=${typeof pickedQCode !== 'undefined' ? String(pickedQCode) : 'null'}`,
+    ].join(' / ');
 
-  // ✅ 重要：拾ってるだけだった digest を “実際に渡す”
-  historyDigestV1,
+    // CARDS（messages正本から CARDS_LITE_SEED を拾う：無ければ null）
+    const cardsBits = (() => {
+      const assistantTexts = baseMsgs
+        .filter((m) => String(m?.role ?? '') === 'assistant')
+        .map((m) => String(m?.content ?? ''));
 
-  // ✅ task のときだけ raw user を許可（writerCalls.ts 側で判定に使う）
-  // - directTask が true なら許可
-  // - inputKind が task なら許可
-  allowRawUserText: Boolean(isDirectTask || String(inputKind ?? '').toLowerCase() === 'task'),
+      const hit = assistantTexts.find((c) => /CARDS_LITE_SEED\s*\(DO NOT OUTPUT\)\s*:/i.test(c));
+      if (!hit) return null;
 
-  audit: {
-    mode: 'rephrase',
-    slotPlanPolicy: slotPlanPolicyResolved,
+      const idx = hit.search(/CARDS_LITE_SEED\s*\(DO NOT OUTPUT\)\s*:/i);
+      if (idx < 0) return safeHead(hit, 420);
 
-    // ✅ “確証つき” の値をそのまま使う
-    qCode: (typeof pickedQCode !== 'undefined' ? pickedQCode : null) as any,
-    depthStage: (typeof pickedDepthStage !== 'undefined' ? pickedDepthStage : null) as any,
-    phase: (typeof pickedPhase !== 'undefined' ? pickedPhase : null) as any,
+      const near = hit.slice(Math.max(0, idx - 140), Math.min(hit.length, idx + 300));
+      return safeHead(near, 420);
+    })();
 
-    // ✅ NEW: writerCalls.ts の inputKind 判定の正本
-    inputKind: (inputKind ?? null) as any,
-    directTask: Boolean(isDirectTask),
+    // TOPIC_LINE / KEYWORDS（historyDigestV1.ts に集約した生成器を使う）
+    // ※ ここで import しない（あなたの現在のスコープに合わせて "上で import 済み" 前提にしないため）
+    // → ファイル上の先頭 or 近くで一度だけ import してください（下に指示あり）
+    const topicLine = (() => {
+      try {
+        return buildTopicLineV1((historyDigestV1 ?? null) as any);
+      } catch {
+        return null;
+      }
+    })();
 
-    // ✅ ログ
-    hasDigest: Boolean(historyDigestV1),
-    historyDigestV1Head: historyDigestV1 ? safeHead(String(historyDigestV1), 140) : null,
-  },
-});
+    const keywords = (() => {
+      try {
+        const ks = extractKeywordsV1((historyDigestV1 ?? null) as any, 2);
+        return Array.isArray(ks) ? ks.slice(0, 2).filter(Boolean) : [];
+      } catch {
+        return [];
+      }
+    })();
+
+    // TOPIC_RAW（今の JSON head も残す：補助）
+    const topicRaw = (() => {
+      if (!historyDigestV1) return null;
+
+      if (typeof historyDigestV1 === 'string') return safeHead(historyDigestV1, 360);
+
+      try {
+        return safeHead(JSON.stringify(historyDigestV1), 360);
+      } catch {
+        return safeHead(String(historyDigestV1), 360);
+      }
+    })();
+
+    const lines: string[] = [];
+    lines.push('【STATE_CUES (DO NOT OUTPUT)】');
+    lines.push(`CORE: ${coreBits}`);
+
+    if (topicLine) lines.push(`TOPIC_LINE: ${safeHead(String(topicLine), 200)}`);
+    if (keywords.length > 0) lines.push(`KEYWORDS: ${keywords.map((k) => String(k)).join(', ')}`);
+    if (topicRaw) lines.push(`TOPIC_RAW: ${topicRaw}`);
+
+    if (cardsBits) lines.push(`CARDS: ${cardsBits}`);
+
+    return lines.join('\n');
+  })();
+
+  const stateCuesMsg =
+    alreadyHasStateCues
+      ? null
+      : ({
+          role: 'assistant',
+          content: stateCuesText,
+        } as any);
+
+  // 注入位置：system の直後（system が複数あるなら最後の system の直後）
+  const sysLastIdx = (() => {
+    let last = -1;
+    for (let i = 0; i < baseMsgs.length; i++) {
+      if (String(baseMsgs[i]?.role ?? '') === 'system') last = i;
+    }
+    return last;
+  })();
+
+  const messagesForWriter =
+    stateCuesMsg
+      ? (() => {
+          if (sysLastIdx >= 0) {
+            return [...baseMsgs.slice(0, sysLastIdx + 1), stateCuesMsg, ...baseMsgs.slice(sysLastIdx + 1)];
+          }
+          // system が無いパスでも落とさない（先頭に入れる）
+          return [stateCuesMsg, ...baseMsgs];
+        })()
+      : baseMsgs;
+      console.log('[IROS/STATE_CUES][inject]', {
+        traceId: debug.traceId ?? null,
+        baseLen: baseMsgs.length,
+        finalLen: messagesForWriter.length,
+        injected: !alreadyHasStateCues,
+        hasStateCues: messagesForWriter.some((m) => String(m?.content ?? '').includes('STATE_CUES (DO NOT OUTPUT)')),
+        stateCuesHead: safeHead(
+          String(
+            (messagesForWriter.find((m) => String(m?.content ?? '').includes('STATE_CUES (DO NOT OUTPUT)')) as any)?.content ?? ''
+          ),
+          220
+        ),
+
+        // ✅ NEW: digest中身（continuity）をログで可視化（話題核の強さ判定）
+        digest_has: Boolean(historyDigestV1),
+        digest_kind: typeof historyDigestV1,
+        digest_topic: safeHead(String((historyDigestV1 as any)?.topic?.situationTopic ?? ''), 120),
+        digest_summary: safeHead(String((historyDigestV1 as any)?.topic?.situationSummary ?? ''), 160),
+        digest_last_user_core: safeHead(String((historyDigestV1 as any)?.continuity?.last_user_core ?? ''), 200),
+        digest_last_assistant_core: safeHead(String((historyDigestV1 as any)?.continuity?.last_assistant_core ?? ''), 200),
+        digest_repeat_signal: (historyDigestV1 as any)?.continuity?.repeat_signal ?? null,
+      });
+
+  return await callWriterLLM({
+    model: opts.model ?? 'gpt-5',
+    temperature: opts.temperature ?? 0.7,
+    messages: messagesForWriter,
+
+    // ✅ 追加：冒頭オウム返しガード用（messagesには入れない。比較専用）
+    echoGuardUserText: String((opts as any)?.userText ?? ''),
+
+    traceId: debug.traceId ?? null,
+    conversationId: debug.conversationId ?? null,
+    userCode: debug.userCode ?? null,
+
+    // ✅ 重要：拾ってるだけだった digest を “実際に渡す”
+    historyDigestV1,
+
+    // ✅ task のときだけ raw user を許可（writerCalls.ts 側で判定に使う）
+    // - directTask が true なら許可
+    // - inputKind が task なら許可
+    allowRawUserText: Boolean(isDirectTask || String(inputKind ?? '').toLowerCase() === 'task'),
+
+    audit: {
+      mode: 'rephrase',
+      slotPlanPolicy: slotPlanPolicyResolved,
+
+      // ✅ “確証つき” の値をそのまま使う
+      qCode: (typeof pickedQCode !== 'undefined' ? pickedQCode : null) as any,
+      depthStage: (typeof pickedDepthStage !== 'undefined' ? pickedDepthStage : null) as any,
+      phase: (typeof pickedPhase !== 'undefined' ? pickedPhase : null) as any,
+
+      // ✅ NEW: writerCalls.ts の inputKind 判定の正本
+      inputKind: (inputKind ?? null) as any,
+      directTask: Boolean(isDirectTask),
+
+      // ✅ ログ
+      hasDigest: Boolean(historyDigestV1),
+      historyDigestV1Head: historyDigestV1 ? safeHead(String(historyDigestV1), 140) : null,
+    },
+  });
+})();
 
   // ---------------------------------------------
   // ✅ ONE_POINT scaffold: “復元込み” で raw を整える
