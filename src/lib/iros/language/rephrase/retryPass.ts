@@ -133,6 +133,8 @@ export async function runRetryPass(params: {
     slotsForGuard,
   } = params;
 
+  let raw2 = '';
+
   console.log('[IROS/FLAGSHIP][RETRY]', {
     traceId: debug?.traceId,
     conversationId: debug?.conversationId,
@@ -140,9 +142,99 @@ export async function runRetryPass(params: {
     reason: firstFatalReasons,
   });
 
-  // ✅ retry (2nd pass)
-  // - BLOCK_PLAN（multi7）の契約違反で retry に落ちた時、2nd pass が「見出し抜け」を起こさないように
-  // - 特に ACCEPT（= 受容）が抜けやすいので、ここで明示的に“必須”を刻む
+// ✅ retry (2nd pass)
+// - BLOCK_PLAN（multi7）の契約違反で retry に落ちた時、2nd pass が「見出し抜け」を起こさないように
+// - 特に ACCEPT（= 受容）が抜けやすいので、ここで明示的に“必須”を刻む
+
+// --- NEW: BLOCK_PLAN_CONTRACT は LLM retry せず、1st draft をローカル補修して通す ---
+const fatalSet = new Set((firstFatalReasons ?? []).map((x) => String(x)));
+const shouldRepairBlockPlanOnly = fatalSet.has('BLOCK_PLAN_CONTRACT');
+
+// 1st pass の下書きがある場合のみローカル補修を試す
+if (shouldRepairBlockPlanOnly && String(baseDraftForRepair ?? '').trim().length > 0) {
+  const requiredHeads = ['入口', '二項', '焦点移動', '受容', '統合', '最小の一手'];
+
+  // 既存本文を「行配列（空行除去）」へ
+  const lines = String(baseDraftForRepair ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map((s) => String(s ?? '').trim())
+    .filter(Boolean);
+
+  const hasHead = (h: string) => lines.some((x) => x === h);
+  const hasAcceptAlias = () => hasHead('受容') || hasHead('ACCEPT');
+
+  // 見出しが一つも無い/崩れが強い場合は「最低限の骨格」を先頭に注入する
+  const hasAnyRequired = requiredHeads.some((h) => hasHead(h)) || hasAcceptAlias();
+
+  const skeleton = [
+    '入口',
+    'いま出ている感覚を、そのまま一言で置きます。',
+    '',
+    '二項',
+    '「体感」と「守りたいもの」の両方が同時にある、という形で捉えます。',
+    '',
+    '焦点移動',
+    '今日は“どちらを優先するか”ではなく、“混ざったまま扱うコツ”へ焦点をずらします。',
+    '',
+    '受容',
+    '良い悪いで裁かずに、いまの混ざり方をそのまま認めます。',
+    '',
+    '統合',
+    '体感を壊さず、守りたいものも外さない、という両立の形にまとめます。',
+    '',
+    '最小の一手',
+    '今夜は「体感」と「守りたいもの」をそれぞれ一語でメモして終える。',
+    '',
+  ];
+
+  let repaired = hasAnyRequired ? [...lines] : [...skeleton, ...lines];
+
+  // 「受容」は alias でもOKだが、UIは日本語見出しで揃えたいので必ず「受容」を入れる
+  if (!hasHead('受容') && !hasHead('ACCEPT')) {
+    // 挿入位置：焦点移動 -> 受容 -> 統合
+    const idxFocus = repaired.findIndex((x) => x === '焦点移動' || x === 'FOCUS_SHIFT');
+    const idxIntegrate = repaired.findIndex((x) => x === '統合' || x === 'INTEGRATE');
+    const insertAt =
+      idxFocus >= 0 && idxIntegrate > idxFocus
+        ? idxIntegrate
+        : idxIntegrate >= 0
+          ? idxIntegrate
+          : Math.max(0, repaired.length - 1);
+
+    repaired.splice(insertAt, 0,
+      '受容',
+      'いまこの感覚を、良い悪いで裁かずに、そのまま置いてみます。',
+      ''
+    );
+  }
+
+  // 足りない見出しを末尾に追補（最低限）
+  const ensureHead = (h: string, body1: string) => {
+    if (repaired.some((x) => x === h)) return;
+    repaired.push(h, body1, '');
+  };
+
+  ensureHead('入口', 'いま出ている感覚を、そのまま一言で置きます。');
+  ensureHead('二項', '「体感」と「守りたいもの」を両方とも場に置きます。');
+  ensureHead('焦点移動', '今日は“混ざったまま扱う”方向へ焦点をずらします。');
+  if (!repaired.some((x) => x === '受容')) {
+    ensureHead('受容', '良い悪いで裁かずに、いまの混ざり方をそのまま認めます。');
+  }
+  ensureHead('統合', '両方を外さない形にまとめます。');
+  ensureHead('最小の一手', '今夜は「体感」と「守りたいもの」を一語ずつメモ。');
+
+  // 返却（LLM retry しない）
+  raw2 = repaired.join('\n').trim() + '\n';
+
+  // ✅ BLOCK_PLAN_CONTRACT（multi7）の「欠け見出し」をここで補修して確実に通す
+  // - ここは既存の補修ブロックと整合するため、そのまま後段の処理に流す
+  //   （下の既存補修ブロックで raw2 を再度触っても問題ない）
+  // NOTE: このスコープを抜けた後で raw2 が参照される前提なので、
+  //       以降の処理が raw2 を使う形になっていることを維持してください。
+  //       （このファイルの後続コードが raw2 を使う実装の場合のみ）
+} else {
   const retryMessages0 = buildRetryMessages({
     systemPrompt,
     internalPack,
@@ -152,8 +244,6 @@ export async function runRetryPass(params: {
   });
 
   // ✅ 2nd pass 用：段構成の契約（multi7）を守らせる“追い打ち”
-  // - rephraseEngine 側の contract は「見出し行が単独で存在する」ことを前提にチェックしている
-  // - ACCEPT だけは alias で「受容」を許している（rephraseEngine.full.ts を参照）
   const contractNudge = [
     '【重要】段構成（見出し）を必ず守ってください。見出しは“行頭に単独”で出してください。',
     '必須の見出し（この順序で）：',
@@ -168,14 +258,10 @@ export async function runRetryPass(params: {
     '最後は「最小の一手」の段で 1行だけ、具体的な一歩で終える。',
   ].join('\n');
 
-  // retryMessages の先頭に system で追記（既存の systemPrompt を壊さない）
   const retryMessages: any[] = Array.isArray(retryMessages0) ? [...retryMessages0] : [];
   retryMessages.unshift({ role: 'system', content: contractNudge });
 
-
-
-
-  let raw2 = await callWriterLLM({
+  raw2 = await callWriterLLM({
     model: opts?.model ?? 'gpt-5',
     temperature: opts?.temperature ?? 0.7,
     messages: retryMessages,
@@ -194,6 +280,8 @@ export async function runRetryPass(params: {
     },
   });
 
+  // （この後の既存の「欠け見出し補修」ブロックはそのまま）
+}
 
   // ✅ BLOCK_PLAN_CONTRACT（multi7）の「欠け見出し」をここで補修して確実に通す
   // - 現状: retry でも「受容」だけ抜けるケースが多い

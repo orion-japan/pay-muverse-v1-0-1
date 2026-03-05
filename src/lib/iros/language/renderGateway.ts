@@ -1225,9 +1225,7 @@ if (isIR && !allowRephraseBlocksInIR) {
     if (/^[.…・。]+$/u.test(s)) return true; // …… / … / 。/ ・ 等のみ
     if (/^(ok|okay|はい|うん|了解|りょうかい)$/iu.test(s)) return true;
 
-    // 「短すぎる」単発（例: 7〜15文字程度の断片）を micro とみなす
-    if (s.length < 24) return true;
-
+    // ✅ NOTE: 文字数だけで micro 扱いしない（短い普通文を誤爆するため）
     return false;
   };
 

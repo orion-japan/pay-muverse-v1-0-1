@@ -2876,7 +2876,7 @@ const flowConfidence_forCtx =
 
 (extra2.ctxPack as any).exprMeta = (out.metaForSave as any)?.extra?.exprMeta ?? null;
 
-// ✅ RESONANCE_STATE / seed_text を ctxPack 正本へ同期（rephraseEngine が拾う入口）
+// ✅ RESONANCE_STATE を ctxPack 正本へ同期（rephraseEngine が拾う入口）
 {
   const exOut: any = (out.metaForSave as any)?.extra ?? {};
   const rs: any =
@@ -2888,16 +2888,10 @@ const flowConfidence_forCtx =
     (extra2.ctxPack as any).resonanceState = rs;
   }
 
-  // 互換：seed_text（rephraseEngine が旧キーでも拾える）
-  const seedText: any =
-    exOut?.seed_text ??
-    (typeof rs?.seed?.seed_text === 'string' ? rs.seed.seed_text : null) ??
-    (typeof rs?.seed_text === 'string' ? rs.seed_text : null) ??
-    null;
-
-  if ((extra2.ctxPack as any).seed_text == null && typeof seedText === 'string' && seedText.trim()) {
-    (extra2.ctxPack as any).seed_text = seedText.trim();
-  }
+  // NOTE(vNext):
+  // - 互換 seed_text の ctxPack 同期は廃止する。
+  // - seed_text は「保存/互換」用途で meta.extra 側に残り得るが、
+  //   ctxPack に入れると rephraseEngine / llmGate の拾い口が生き続けるため。
 }
 
 // digestChars は “注入対象の文字数” を見るため（JSON stringify）
@@ -3566,72 +3560,50 @@ if ((policy === 'SCAFFOLD' || policy === 'FINAL') && (seedOnlyNow || emptyLikeNo
   alreadyHasBlocks = false;
 }
 
+// ✅ /reply では RenderEngine 側（src/app/api/agent/iros/reply/_impl/rephrase.ts）に writer を一本化する
+// - handleIrosReply 側の rephraseBridge が LLM を叩くと「二重呼び」になるため、ここで抑止
+const disableRephraseBridgeWriter =
+  (out.metaForSave as any)?.extra?.renderEngineGate === true ||
+  (out.metaForSave as any)?.extra?.renderEngine === true ||
+  (out.metaForSave as any)?.extra?.persistedByRoute === true ||
+  (out.metaForSave as any)?.extra?.persistAssistantMessage === false;
+
 const shouldRunWriter =
   (policy === 'SCAFFOLD' || policy === 'FINAL') &&
   (seedOnlyNow || emptyLikeNow) &&
   !alreadyHasBlocks &&
-  allowLLM_final_local !== false;
-      if (seedOnlyNow || emptyLikeNow) {
-        console.log('[IROS/rephraseBridge][ENTER]', {
-          conversationId: _conversationId,
-          userCode: _userCode,
-          policy,
-          seedOnlyNow,
-          emptyLikeNow,
-          allowLLM_final: allowLLM_final_local,
-          alreadyHasBlocks,
-          slotTextCleanedLen: Number((out.metaForSave as any)?.extra?.slotTextCleanedLen ?? null),
-          slotTextRawLen: Number((out.metaForSave as any)?.extra?.slotTextRawLen ?? null),
-          bodyNowLen: bodyNow.length,
-          bodyNowHead: bodyNow.slice(0, 40),
-          shouldRunWriter,
-          hasSlotsLocal,
-        });
-      }
+  allowLLM_final_local !== false &&
+  !disableRephraseBridgeWriter;
 
-// --- DEBUG: slot sources snapshot (TEMP) ---
-try {
-  const sp = (out.metaForSave as any)?.slotPlan;
-  const fp = (out.metaForSave as any)?.framePlan;
+if (seedOnlyNow || emptyLikeNow) {
+  console.log('[IROS/rephraseBridge][ENTER]', {
+    conversationId: _conversationId,
+    userCode: _userCode,
+    policy,
+    seedOnlyNow,
+    emptyLikeNow,
+    allowLLM_final: allowLLM_final_local,
+    alreadyHasBlocks,
+    slotTextCleanedLen: Number((out.metaForSave as any)?.extra?.slotTextCleanedLen ?? null),
+    slotTextRawLen: Number((out.metaForSave as any)?.extra?.slotTextRawLen ?? null),
+    bodyNowLen: bodyNow.length,
+    bodyNowHead: bodyNow.slice(0, 40),
+    shouldRunWriter,
+    hasSlotsLocal,
+    disableRephraseBridgeWriter,
+  });
 
-  const sp0 = Array.isArray(sp) ? sp[0] : null;
-  const sp0Type = sp0 == null ? 'null' : Array.isArray(sp0) ? 'array' : typeof sp0;
-
-  const fpSlots: any[] = Array.isArray(fp?.slots) ? fp.slots : [];
-  const wantIds = fpSlots.map((s: any) => String(s?.id ?? '').trim()).filter(Boolean);
-// ✅ slotPlan の JSON 内 "user":"..." は LLM へ渡さない（生文遮断）
-function sanitizeSlotTextUser(s: string): string {
-  const text = String(s ?? '');
-  const a = text.replace(/"user"\s*:\s*"(?:\\.|[^"\\])*"/g, '"user":"[USER]"');
-  const b = a.replace(/"(lastUserText|basedOn)"\s*:\s*"(?:\\.|[^"\\])*"/g, (_m, k) => `"${k}":"[USER]"`);
-  return b;
+  // ✅ writer を抑止したことを meta に刻む（後でログ追跡しやすい）
+  if (!alreadyHasBlocks && disableRephraseBridgeWriter) {
+    try {
+      (out.metaForSave as any).extra.rephraseBridgeSkipped = true;
+      (out.metaForSave as any).extra.rephraseBridgeSkipReason =
+        (out.metaForSave as any).extra.rephraseBridgeSkipReason ??
+        'DISABLED_BY_RENDER_ENGINE_SINGLE_WRITER';
+      (out.metaForSave as any).extra.rephraseBridgeSkipAt = new Date().toISOString();
+    } catch {}
+  }
 }
-
-console.log('[IROS/rephraseBridge][SLOT_SOURCES]', {
-  slotPlan_type: Array.isArray(sp) ? 'array' : typeof sp,
-  slotPlan_len: Array.isArray(sp) ? sp.length : null,
-  slotPlan_item0_type: sp0Type,
-  slotPlan_item0_keys: sp0 && typeof sp0 === 'object' ? Object.keys(sp0).slice(0, 12) : null,
-  slotPlan_item0_head:
-    typeof sp0 === 'string'
-      ? sanitizeSlotTextUser(sp0).slice(0, 120)
-      : sp0 && typeof sp0 === 'object'
-        ? (
-            sanitizeSlotTextUser(
-              String((sp0 as any).text ?? (sp0 as any).content ?? (sp0 as any).hint ?? '')
-            ).slice(0, 120) || null
-          )
-        : null,
-
-  framePlan_has_slots: !!fp?.slots,
-  framePlan_slots_len: fpSlots.length,
-  framePlan_wantIds: wantIds,
-
-  extra_keys: (out.metaForSave as any)?.extra
-    ? Object.keys((out.metaForSave as any).extra).slice(0, 16)
-    : null,
-});
-} catch {}
 // --- /DEBUG ---
 
 if (shouldRunWriter) {

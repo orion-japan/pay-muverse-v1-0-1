@@ -1030,15 +1030,13 @@ export async function postProcessReply(args: PostProcessReplyArgs): Promise<Post
     }
 
 // =========================================================
-// 5.x) cards-lite 生成（ctxPack.cards）
+// 5.x) cards-lite 生成（ctxPack.cards） + card180 seed 生成（ログ可視化）
 // =========================================================
 try {
-
   // cards（既にあれば上書きしない）
   const hasCards = !!(metaForSave as any)?.extra?.ctxPack?.cards;
 
   if (!hasCards) {
-
     const qCountsAny: any =
       (metaForSave as any)?.qCounts ??
       (metaForSave as any)?.extra?.qCounts ??
@@ -1059,7 +1057,6 @@ try {
       null;
 
     const normalizeETurnKey = (v: any): string | null => {
-
       if (v == null) return null;
 
       if (typeof v === 'string') {
@@ -1104,8 +1101,13 @@ try {
       (metaForSave as any)?.extra?.coord?.band ??
       null;
 
-    const makeLabels = (k: string) => {
+    // polarity は card180 seed に必要（yin/yang）
+    const polRaw: any = mirrorObjAny?.polarity ?? null;
+    const polKey: 'yin' | 'yang' | null =
+      polRaw === 'yin' || polRaw === 'yang' ? polRaw : null;
 
+    // 既存lite互換（UI互換のため温存）
+    const makeLabels = (k: string) => {
       const currentMap: Record<string, string> = {
         e1: 'いま整え直す',
         e2: 'いま伸ばし切る',
@@ -1129,59 +1131,106 @@ try {
     };
 
     const makeScore = (k: string) => {
-
       if (k === 'e5') return 90;
       if (k === 'e4') return 78;
       if (k === 'e3') return 66;
       if (k === 'e2') return 54;
       if (k === 'e1') return 42;
-
       return 50;
     };
 
     if (eKey) {
-
       const labels = makeLabels(eKey);
       const stingScore = makeScore(eKey);
 
       (metaForSave as any).extra = (metaForSave as any).extra ?? {};
       (metaForSave as any).extra.ctxPack = (metaForSave as any).extra.ctxPack ?? {};
 
+      // --- まず lite は従来通り入れる（互換維持）
       (metaForSave as any).extra.ctxPack.cards = {
-
         current: {
           label: labels.current,
           e_turn: eKey,
           depth: depthNow,
           phase: phaseNow,
         },
-
         future: {
           label: labels.future,
           e_turn: eKey,
           depth: depthNow,
           phase: phaseNow,
         },
-
         stingScore,
-
         hint: {
           stage: stageNow,
           band: bandNow,
-        }
-
+        },
       };
+
+      // --- 追加: card180 由来 seedText を生成して保存（ログで見える化）
+      // ※ depthNow / polKey が揃っている時だけ（憶測で補完しない）
+      if (depthNow && polKey) {
+        try {
+          const { buildDualCardPacket, formatDualCardPacketForLLM } =
+            await import('@/lib/iros/cards/card180');
+
+          const packet = buildDualCardPacket(
+            {
+              current: {
+                stage: depthNow ?? null,
+                e_turn: eKey as any,
+                polarity: polKey as any,
+                sa: (metaForSave as any)?.sa ?? null,
+                basedOn: String(userText ?? '').trim().slice(0, 80) || null,
+                confidence: (mirrorObjAny?.confidence ?? (metaForSave as any)?.confidence ?? null) as any,
+              },
+              previous: null,
+              randomSeed: null,
+            },
+            { currentUndetectablePolicy: 'null' }
+          );
+
+          const raw = String(formatDualCardPacketForLLM(packet) ?? '').trim();
+
+          // 長すぎると seed に毒なので、まずは安全に「先頭15行」だけ保存
+          const seedText = raw ? raw.split('\n').slice(0, 15).join('\n').trim() : '';
+
+          if (seedText) {
+            (metaForSave as any).extra.ctxPack.cards.seedText = seedText;
+            (metaForSave as any).extra.ctxPack.cards.seedTextLen = seedText.length;
+            (metaForSave as any).extra.ctxPack.cards.seedTextHead = seedText.slice(0, 160);
+
+            console.log('[IROS/CARDS][SEED_FROM_CARD180][OK]', {
+              traceId: (metaForSave as any)?.extra?.traceId ?? (metaForSave as any)?.traceId ?? null,
+              conversationId: (metaForSave as any)?.conversationId ?? null,
+              userCode: (metaForSave as any)?.userCode ?? null,
+              e_turn: eKey,
+              depthStage: depthNow,
+              polarity: polKey,
+              seedLen: seedText.length,
+              seedHead: seedText.slice(0, 160),
+            });
+          } else {
+            console.warn('[IROS/CARDS][SEED_FROM_CARD180][EMPTY]', {
+              e_turn: eKey,
+              depthStage: depthNow,
+              polarity: polKey,
+            });
+          }
+        } catch (e) {
+          console.warn('[IROS/CARDS][SEED_FROM_CARD180][ERR]', { err: String(e) });
+        }
+      } else {
+        console.log('[IROS/CARDS][SEED_FROM_CARD180][SKIP_MISSING]', {
+          e_turn: eKey,
+          depthStage: depthNow ?? null,
+          polarity: polKey ?? null,
+        });
+      }
     }
-
   }
-
 } catch (e) {
-
-  console.warn(
-    '[IROS/PP][ALWAYS_MIRROR_VS_CARDS][ERR]',
-    { err: String(e) }
-  );
-
+  console.warn('[IROS/PP][ALWAYS_MIRROR_VS_CARDS][ERR]', { err: String(e) });
 }
   // =========================================================
   // 6) Q1_SUPPRESS沈黙止血 + 空本文stopgap
@@ -1641,6 +1690,17 @@ const polarityMetaBand: string | null =
 
 // ✅ 保存用の最小スナップショット（循環しない primitives のみ）
 // ※ q/depth/phase は state ではなく “確定済み canon” を正本にする（null回避）
+function cloneSnap(v: any) {
+  if (v == null) return null;
+  try {
+    return typeof (globalThis as any).structuredClone === 'function'
+      ? (globalThis as any).structuredClone(v)
+      : JSON.parse(JSON.stringify(v));
+  } catch {
+    return null;
+  }
+}
+
 const stateSnap = {
   rev: 'rs_snap_v1',
 
@@ -1694,57 +1754,39 @@ const stateSnap = {
 
 // ----------------------------------------
 // meta へ保存（循環防止） + 互換 seed_text
+// - extra.resonanceState は “正本”
+// - extra.ctxPack.resonanceState は “別参照 clone”（同一参照だと seen 判定で "[Circular]" になりうる）
 // ----------------------------------------
 (metaForSave as any).extra = (metaForSave as any).extra ?? {};
+(metaForSave as any).extra.ctxPack = (metaForSave as any).extra.ctxPack ?? {};
 
 // ✅ 正本：snapshot を保存
 (metaForSave as any).extra.resonanceState = stateSnap;
 
 // ✅ 互換：seed_text（RESONANCE_STATE 判定 & 旧キー拾いのため）
-if ((metaForSave as any).extra.seed_text == null && typeof stateSnap.seed_text === 'string' && stateSnap.seed_text.trim()) {
+if (
+  (metaForSave as any).extra.seed_text == null &&
+  typeof stateSnap.seed_text === 'string' &&
+  stateSnap.seed_text.trim()
+) {
   (metaForSave as any).extra.seed_text = stateSnap.seed_text.trim();
 }
 
 // ✅ 次ターン用：ctxPack には別参照 clone
-(metaForSave as any).extra.ctxPack = (metaForSave as any).extra.ctxPack ?? {};
 (metaForSave as any).extra.ctxPack.resonanceState = cloneSnap(stateSnap);
 
 // ✅ ctxPack 側にも seed_text（rephraseEngine の拾い口を太くする）
-if ((metaForSave as any).extra.ctxPack.seed_text == null && typeof stateSnap.seed_text === 'string' && stateSnap.seed_text.trim()) {
+if (
+  (metaForSave as any).extra.ctxPack.seed_text == null &&
+  typeof stateSnap.seed_text === 'string' &&
+  stateSnap.seed_text.trim()
+) {
   (metaForSave as any).extra.ctxPack.seed_text = stateSnap.seed_text.trim();
 }
 
 // =============================
-// meta へ保存（循環防止）
-// =============================
-
-(metaForSave as any).extra = (metaForSave as any).extra ?? {};
-
-// 正本（保存用）
-(metaForSave as any).extra.resonanceState = stateSnap;
-
-// 次ターン用は “別参照” にする（同一参照NG）
-(metaForSave as any).extra.ctxPack =
-  (metaForSave as any).extra.ctxPack ?? {};
-
-  function cloneSnap(v: any) {
-    if (v == null) return null;
-    try {
-      return typeof (globalThis as any).structuredClone === 'function'
-        ? (globalThis as any).structuredClone(v)
-        : JSON.parse(JSON.stringify(v));
-    } catch {
-      return null;
-    }
-  }
-
-(metaForSave as any).extra.ctxPack.resonanceState =
-  cloneSnap(stateSnap);
-
-// =============================
 // デバッグログ（SEED材料確認用）
 // =============================
-
 console.log('[IROS/PP][RS_SNAPSHOT]', {
   qCode: stateSnap.qCode,
   depthStage: stateSnap.depthStage,

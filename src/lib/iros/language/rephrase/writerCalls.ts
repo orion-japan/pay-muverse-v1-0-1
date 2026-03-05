@@ -3,8 +3,15 @@
 // ✅ buildFirstPassMessages を「最後 user で終わる」ように拡張
 // ✅ HistoryDigest v1 をここで注入できるようにする（唯一の choke point）
 //
-// 🚫 重要: userText（ユーザー発話の生文）は LLM に絶対に渡さない
-// - finalUserText / userText など “生文が混入し得る入口” は、この層で強制遮断する
+// ✅ 方針（今回の書き換え）:
+// - user生文は「伏せない」：turns / historyForWriter 由来の user content を LLM に渡す
+// - ただし安全のため、長さ上限と “内部マーカー” の除去だけはこの層で行う
+//   （DO NOT OUTPUT 系や JSON 制御片が user 側に混入した場合の事故防止）
+//
+// ✅ 2026-03-05 change:
+// - callWriterLLM の “[USER] マスク互換” を完全撤去
+// - allowRawUserText は互換フィールドとして残すが、ここでは参照しない
+// - 「全部 user を生で渡す（ただし strip/clamp は維持）」に統一
 // =============================================
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -19,17 +26,32 @@ type TurnMsg = { role: 'user' | 'assistant'; content: string };
 function norm(s: unknown) {
   return String(s ?? '').replace(/\r\n/g, '\n').trim();
 }
-// writerCalls.ts に追加（ensureEndsWithUser より上）
 
-// [置換] src/lib/iros/language/rephrase/writerCalls.ts
-// 置換対象: function mergeConsecutiveSameRole(messages: WriterMessage[]): WriterMessage[] { ... } を丸ごと
+function clampStr(s: string, max: number) {
+  const t = norm(s);
+  return t.length > max ? `${t.slice(0, max)}…` : t;
+}
 
+// user 側に “内部パック/制御マーカー” が混入した場合の事故防止（最低限）
+function stripInternalMarkersFromUserText(s: string): string {
+  let t = String(s ?? '');
+  // 露出禁止ヘッダっぽい行を落とす（丸ごと隠すのではなく「制御片」だけ避ける）
+  t = t.replace(
+    /^(?:COORD|STATE_CUES_V3|CARDS_LITE_SEED|CARDS|INTERNAL PACK)\s*\(DO NOT OUTPUT\)\s*:?\s*$/gim,
+    '',
+  );
+  // タグ行や明らかな制御行を軽く除去（過剰に消さない）
+  t = t.replace(/^@(?:OBS|SHIFT|NEXT_HINT|SAFE)\b.*$/gim, '');
+  return norm(t);
+}
+
+// mergeConsecutiveSameRole（内部パック境界を壊さない）
 function mergeConsecutiveSameRole(messages: WriterMessage[]): WriterMessage[] {
   const out: WriterMessage[] = [];
   const normS = (s: any) => norm(String(s ?? ''));
 
   const isInternalPackLike = (s: string) =>
-    /COORD\s*\(DO NOT OUTPUT\)|TEXT_SEED\s*\(DO NOT OUTPUT\)|CARDS_LITE_SEED\s*\(DO NOT OUTPUT\)|INTERNAL PACK\s*\(DO NOT OUTPUT\)/i.test(
+    /COORD\s*\(DO NOT OUTPUT\)|STATE_CUES_V3\s*\(DO NOT OUTPUT\)|CARDS_LITE_SEED\s*\(DO NOT OUTPUT\)|INTERNAL PACK\s*\(DO NOT OUTPUT\)|CARDS\s*\(DO NOT OUTPUT\)/i.test(
       s,
     );
 
@@ -37,7 +59,6 @@ function mergeConsecutiveSameRole(messages: WriterMessage[]): WriterMessage[] {
     if (!m) continue;
     const role = (m as any).role as WriterMessage['role'];
     const content = normS((m as any).content);
-
     if (!role) continue;
 
     // 空assistantは捨てる（念のため）
@@ -45,7 +66,7 @@ function mergeConsecutiveSameRole(messages: WriterMessage[]): WriterMessage[] {
 
     const last = out[out.length - 1];
 
-    // 同じroleが連続 → 結合（ただし内部パックっぽいassistantは境界として扱い、絶対に結合しない）
+    // 同じroleが連続 → 結合（ただし内部パックっぽいassistantは境界として扱い、結合しない）
     if (last && last.role === role) {
       if (
         role === 'assistant' &&
@@ -64,36 +85,46 @@ function mergeConsecutiveSameRole(messages: WriterMessage[]): WriterMessage[] {
   // assistant 空は弾く（念のため）
   return out.filter((m) => m.role !== 'assistant' || (m.content?.length ?? 0) > 0);
 }
+function ensureEndsWithUser(messages: WriterMessage[], finalUserText?: string): WriterMessage[] {
+  const out = Array.isArray(messages) ? [...messages] : [];
+
+  const normFinal = typeof finalUserText === 'string' ? norm(finalUserText) : '';
+  const last = out[out.length - 1];
+
+  // ✅ user で終わっていない場合は追加
+  if (!last || last.role !== 'user') {
+    out.push({ role: 'user', content: normFinal || '（入力なし）' });
+    return out;
+  }
+
+  // placeholder上書き（finalUserText が渡った時だけ）
+  if (normFinal) {
+    const prev = norm(String(last.content ?? ''));
+    if (prev === '（入力なし）' || prev.length === 0) {
+      out[out.length - 1] = { role: 'user', content: normFinal };
+    }
+  }
+
+  return out;
+}
 
 function turnsToMessages(
   turns: any,
   opts?: {
-    // ✅ task のときだけ “最後の user” を生で渡す（それ以外は必ず [USER]）
-    allowRawLastUser?: boolean;
-    // 安全上限（task時のみ効く）
-    maxLastUserLen?: number;
+    maxTurnLen?: number;
+    maxUserTurnLen?: number;
   },
 ): WriterMessage[] {
   const raw: any[] = Array.isArray(turns) ? turns : [];
 
-  const allowRawLastUser = opts?.allowRawLastUser === true;
-  const MAX_LAST_USER_LEN =
-    typeof opts?.maxLastUserLen === 'number' ? opts!.maxLastUserLen! : 800;
-
-  // ✅ 最後の user の index を探す（無ければ -1）
-  let lastUserIdx = -1;
-  for (let i = raw.length - 1; i >= 0; i--) {
-    if (raw[i]?.role === 'user') {
-      lastUserIdx = i;
-      break;
-    }
-  }
+  const MAX_TURN_LEN =
+    typeof opts?.maxTurnLen === 'number' ? Math.max(50, opts!.maxTurnLen!) : 900;
+  const MAX_USER_LEN =
+    typeof opts?.maxUserTurnLen === 'number' ? Math.max(50, opts!.maxUserTurnLen!) : 900;
 
   const out: WriterMessage[] = [];
 
-  for (let i = 0; i < raw.length; i++) {
-    const t = raw[i];
-
+  for (const t of raw) {
     const role =
       t?.role === 'assistant'
         ? 'assistant'
@@ -103,54 +134,22 @@ function turnsToMessages(
 
     if (!role) continue;
 
-    if (role === 'user') {
-      const isLast = i === lastUserIdx;
+    const content0 = String(t?.content ?? t?.text ?? '').trim();
+    if (!content0) continue;
 
-      // ✅ 生文は “allowRawLastUser=true の最後userだけ” 許可
-      if (isLast && allowRawLastUser) {
-        const s0 = String(t?.content ?? '').trim();
-        const s1 = s0.length > MAX_LAST_USER_LEN ? s0.slice(0, MAX_LAST_USER_LEN) : s0;
-        out.push({ role: 'user', content: norm(s1) || '（入力なし）' });
-      } else {
-        // ✅ 最後user含めて常にマスク（生文遮断）
-        out.push({ role: 'user', content: isLast ? '（入力なし）' : '[USER]' });
-      }
+    if (role === 'user') {
+      const s0 = stripInternalMarkersFromUserText(content0);
+      const s1 = clampStr(s0, MAX_USER_LEN);
+      out.push({ role: 'user', content: s1 || '（入力なし）' });
       continue;
     }
 
-    // assistant はそのまま
-    const content = String(t?.content ?? '').trim();
-    if (!content) continue;
-    out.push({ role: 'assistant', content: norm(content) });
+    const a1 = clampStr(content0, MAX_TURN_LEN);
+    if (!a1) continue;
+    out.push({ role: 'assistant', content: norm(a1) });
   }
 
-  // ✅ 最後は user で終わらせる（要件維持）
   return ensureEndsWithUser(mergeConsecutiveSameRole(out));
-}
-
-function ensureEndsWithUser(messages: WriterMessage[], finalUserText?: string): WriterMessage[] {
-  const out = Array.isArray(messages) ? [...messages] : [];
-
-  const normFinal = typeof finalUserText === 'string' ? norm(finalUserText) : '';
-  const last = out[out.length - 1];
-
-  // ✅ user で終わっていない場合は追加
-  // - 正本：task以外は常に [USER]
-  // - taskで raw を入れたい場合は finalUserText を渡す側が責務を持つ
-  if (!last || last.role !== 'user') {
-    out.push({ role: 'user', content: normFinal || '[USER]' });
-    return out;
-  }
-
-  // ✅ user で終わっている場合、placeholderなら上書き（taskなどで finalUserText が渡った時だけ）
-  if (normFinal) {
-    const prev = norm(String(last.content ?? ''));
-    if (prev === '[USER]' || prev === '（入力なし）' || prev.length === 0) {
-      out[out.length - 1] = { role: 'user', content: normFinal };
-    }
-  }
-
-  return out;
 }
 
 function foldLeadingSystemToOne(messages: WriterMessage[]): WriterMessage[] {
@@ -171,11 +170,8 @@ function foldLeadingSystemToOne(messages: WriterMessage[]): WriterMessage[] {
 }
 
 /**
- * ✅ 1st pass: system + turns
- *
- * 🚫 userText 禁止:
- * - finalUserText は “userText or seedDraft” の混入経路になり得るため、ここでは一切採用しない
- * - 「最後は user で終わる」要件は turns の整形 + 末尾プレースホルダで満たす
+ * ✅ 1st pass: system + internalPack(as assistant) + turns
+ * - 「最後は user で終わる」要件は turns の整形 + ensureEndsWithUser で満たす
  */
 export function buildFirstPassMessages(args: any): WriterMessage[] {
   const systemPrompt = norm(args.systemPrompt ?? '');
@@ -207,16 +203,15 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     .join('\n\n');
 
   // ------------------------------------------------------------
-  // ✅ COORD / CARDS を internalPack の先頭に固定注入（露出禁止）
-  // - args に来ている情報だけを使う（無ければ空）
-  // - まずは「必ず同じ場所に入る」ことを優先（次のターンでソースを確定して強化）
+  // ✅ COORD / CARDS / TEXT_SEED を internalPack の先頭に固定注入（露出禁止）
   // ------------------------------------------------------------
 
   const pick = (...vals: any[]) => {
     for (const v of vals) {
-      // ✅ COORD用：object を誤って拾わない（"[object Object]"事故を防ぐ）
       const s0 =
-        typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' ? String(v) : '';
+        typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
+          ? String(v)
+          : '';
       const s = norm(s0);
       if (s) return s;
     }
@@ -228,30 +223,32 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     return null;
   };
 
-  const normPolarity = (
-    raw: any,
-  ): { pol: 'yin' | 'yang' | ''; metaBand: string } => {
-    // raw can be:
-    // - "yin"/"yang"/"陰"/"陽"/"positive"/"negative"
-    // - { in, out, metaBand } or { polarityBand } etc.
+  const normPolarity = (raw: any): { pol: 'yin' | 'yang' | ''; metaBand: string } => {
     let metaBand = '';
 
     const normOne = (x: any): 'yin' | 'yang' | '' => {
       const s = norm(
-        typeof x === 'string' || typeof x === 'number' || typeof x === 'boolean' ? String(x) : '',
+        typeof x === 'string' || typeof x === 'number' || typeof x === 'boolean'
+          ? String(x)
+          : '',
       ).toLowerCase();
 
       if (!s) return '';
-      if (s === 'yin' || s === '陰' || s === 'neg' || s === 'negative' || s === '-' || s === 'minus') return 'yin';
-      if (s === 'yang' || s === '陽' || s === 'pos' || s === 'positive' || s === '+' || s === 'plus') return 'yang';
+      if (s === 'yin' || s === '陰' || s === 'neg' || s === 'negative' || s === '-' || s === 'minus')
+        return 'yin';
+      if (s === 'yang' || s === '陽' || s === 'pos' || s === 'positive' || s === '+' || s === 'plus')
+        return 'yang';
       return '';
     };
 
     if (raw && typeof raw === 'object') {
-      // metaBand / polarityBand などは「表示用の帯」として保持（yin/yang とは別）
       const mb = pick(raw.metaBand, raw.polarityBand);
       metaBand = mb || '';
-      const pol = normOne(raw.in) || normOne(raw.out) || normOne(raw.polarity) || normOne(raw.polarityBand);
+      const pol =
+        normOne(raw.in) ||
+        normOne(raw.out) ||
+        normOne(raw.polarity) ||
+        normOne(raw.polarityBand);
       return { pol, metaBand };
     }
 
@@ -261,9 +258,9 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
 
   const normFutureHint = (raw: any): string => {
     if (raw == null) return '';
-    if (typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean') return norm(String(raw));
+    if (typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean')
+      return norm(String(raw));
     if (typeof raw === 'object') {
-      // label/hint/next/text を優先して 1行化
       const s = pick(raw.hint, raw.label, raw.next, raw.text, raw.future, raw.value);
       return norm(s);
     }
@@ -272,16 +269,15 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
 
   const normCardText = (raw: any): string => {
     if (raw == null) return '';
-    if (typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean') return norm(String(raw));
+    if (typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean')
+      return norm(String(raw));
     if (typeof raw === 'object') {
-      // cardId/shortText/text あたりを優先して短文化
       const s = pick(raw.shortText, raw.text, raw.cardId, raw.id, raw.meaningKey);
       return norm(s);
     }
     return '';
   };
 
-  // 候補: 直接 / ctxPack / meta / memoryState 的な入れ物を広く拾う（存在しない場合は空）
   const ctxPack = (args?.ctxPack ?? args?.ctx_pack ?? args?.meta?.extra?.ctxPack ?? null) as any;
   const extra = (args?.extra ?? args?.meta?.extra ?? null) as any;
   const flow = (args?.flow ?? ctxPack?.flow ?? extra?.flow ?? null) as any;
@@ -296,25 +292,19 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     extra?.depth_stage,
   );
 
-  // phase(Inner/Outer) は既にある前提。
   const phase = pick(args?.phase, ctxPack?.phase, extra?.phase);
-
-  // e_turn（instant）は optional
   const eTurn = pick(args?.e_turn, args?.eTurn, ctxPack?.e_turn, ctxPack?.eTurn, extra?.e_turn, extra?.eTurn);
 
-  // sa / exprMeta（表現の間合い）: あるものだけ短く投影
   const exprMeta = (args?.exprMeta ?? ctxPack?.exprMeta ?? extra?.exprMeta ?? null) as any;
   const saRhythm = pick(exprMeta?.rhythm, args?.sa?.rhythm, ctxPack?.sa?.rhythm);
   const saTone = pick(exprMeta?.tone, args?.sa?.tone, ctxPack?.sa?.tone);
   const saBrevity = pick(exprMeta?.brevity, args?.sa?.brevity, ctxPack?.sa?.brevity);
 
-  // ✅ polarity は object が来るので “専用正規化” で必ず yin/yang に落とす
   const mirror = firstNonNull<any>(ctxPack?.mirror, extra?.mirror, (extra as any)?.ctxPack?.mirror, null);
   const polRaw = firstNonNull<any>(args?.polarity, mirror?.polarity, ctxPack?.polarity, extra?.polarity, null);
   const polN = normPolarity(polRaw);
-  const polarity = polN.pol; // 'yin' | 'yang' | ''
+  const polarity = polN.pol;
 
-  // intent（SUN + direction / itx）
   const intent = (args?.intent ?? ctxPack?.intent ?? extra?.intent ?? null) as any;
   const intentAnchor = pick(
     intent?.anchor,
@@ -325,25 +315,20 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
   );
   const intentDir = pick(intent?.direction, args?.intentDirection, ctxPack?.intentDirection, extra?.intentDirection);
   const itxStep = pick(args?.itx_step, ctxPack?.itx_step, extra?.itx_step, args?.itxStep, ctxPack?.itxStep);
-  const itxReason = pick(
-    args?.itx_reason,
-    ctxPack?.itx_reason,
-    extra?.itx_reason,
-    args?.itxReason,
-    ctxPack?.itxReason,
-  );
+  const itxReason = pick(args?.itx_reason, ctxPack?.itx_reason, extra?.itx_reason, args?.itxReason, ctxPack?.itxReason);
 
-  // ✅ 未来観測（objectも吸収して1行化）
   const future = firstNonNull<any>(args?.future, ctxPack?.future, extra?.future, null);
   const futureHint = normFutureHint(firstNonNull<any>(future, args?.futureHint, ctxPack?.futureHint, null));
 
-  // カード（現在/未来）: objectも吸収して短文化
   const cards = (args?.cards ?? ctxPack?.cards ?? extra?.cards ?? null) as any;
-  const cardNow = normCardText(firstNonNull<any>(cards?.now, cards?.card_now, cards?.CARD_NOW, args?.cardNow, ctxPack?.cardNow, null));
-  const cardNext = normCardText(firstNonNull<any>(cards?.next, cards?.card_next, cards?.CARD_NEXT, args?.cardNext, ctxPack?.cardNext, null));
+  const cardNow = normCardText(
+    firstNonNull<any>(cards?.now, cards?.card_now, cards?.CARD_NOW, args?.cardNow, ctxPack?.cardNow, null),
+  );
+  const cardNext = normCardText(
+    firstNonNull<any>(cards?.next, cards?.card_next, cards?.CARD_NEXT, args?.cardNext, ctxPack?.cardNext, null),
+  );
 
   const coordLines: string[] = [];
-  // 露出禁止の宣言ブロック
   if (
     qCode ||
     depthStage ||
@@ -367,13 +352,15 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     if (polN.metaBand) coordLines.push(`polarity_metaBand=${polN.metaBand}`);
     if (phase) coordLines.push(`phase=${phase}`);
 
-    // sa を短く（空配列事故を避ける）
-    const saParts = [saTone && `tone=${saTone}`, saBrevity && `brevity=${saBrevity}`, saRhythm && `rhythm=${saRhythm}`]
+    const saParts = [
+      saTone && `tone=${saTone}`,
+      saBrevity && `brevity=${saBrevity}`,
+      saRhythm && `rhythm=${saRhythm}`,
+    ]
       .filter(Boolean)
       .join(' ');
     if (saParts) coordLines.push(`sa=${saParts}`);
 
-    // intent
     const intentParts = [
       intentAnchor && `anchor=${intentAnchor}`,
       intentDir && `direction=${intentDir}`,
@@ -384,7 +371,6 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
       .join(' ');
     if (intentParts) coordLines.push(`intent=${intentParts}`);
 
-    // flow / future
     const flowDelta = pick(flow?.delta, flow?.flowDelta);
     const returnStreak = pick(flow?.returnStreak, flow?.return_streak);
     const flowParts = [flowDelta && `delta=${flowDelta}`, returnStreak && `returnStreak=${returnStreak}`]
@@ -394,20 +380,13 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     if (futureHint) coordLines.push(`future=${futureHint}`);
   }
 
+  // NOTE: vNext — seed内で「CARDS/CARD_*」という語を使わない（占い感を避ける）
+  // - current/next は STATE_CUES_V3 側で渡す
   const cardLines: string[] = [];
-  if (cardNow || cardNext) {
-    cardLines.push('CARDS (DO NOT OUTPUT):');
-    if (cardNow) cardLines.push(`CARD_NOW: ${cardNow}`);
-    if (cardNext) cardLines.push(`CARD_NEXT: ${cardNext}`);
-  }
 
-  // =========================
-  // ✅ TEXT_SEED v1（DO NOT OUTPUT）
-  // - user生文は渡さない前提で、LLMが“今回の意味”を掴むための最小seed
-  // - 3〜6行 / 最大320文字
-  // =========================
   const inputKindNow = String(
-    pick(args?.inputKind, ctxPack?.inputKind, ctxPack?.input_kind, extra?.inputKind, extra?.input_kind) ?? '',
+    pick(args?.inputKind, ctxPack?.inputKind, (ctxPack as any)?.input_kind, (extra as any)?.inputKind, (extra as any)?.input_kind) ??
+      '',
   )
     .trim()
     .toLowerCase();
@@ -416,10 +395,10 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
     pick(
       (args as any)?.seed_text,
       (args as any)?.seedText,
-      ctxPack?.seed_text,
-      ctxPack?.seedText,
-      extra?.seed_text,
-      extra?.seedText,
+      (ctxPack as any)?.seed_text,
+      (ctxPack as any)?.seedText,
+      (extra as any)?.seed_text,
+      (extra as any)?.seedText,
       '',
     ) ?? '',
   ).trim();
@@ -431,71 +410,188 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
       const line = norm(line0);
       if (!line) continue;
       if (out.length >= maxLines) break;
-      const add = (out.length ? 1 : 0) + line.length; // +1 = '\n'
+      const add = (out.length ? 1 : 0) + line.length;
       if (len + add > maxLen) break;
       out.push(line);
       len += add;
     }
-    // 最低3行は欲しい（足りない場合は埋める）
     while (out.length < 3) out.push('note=(none)');
     return out;
   };
 
-  // ✅ flow はここで一回だけ正規化（重複排除）
-  const flowDelta2 = String(pick(flow?.delta, flow?.flowDelta) ?? '').trim();
-  const returnStreak2 = String(pick(flow?.returnStreak, flow?.return_streak) ?? '').trim();
+  const flowDelta2 = String(pick(flow?.delta, (flow as any)?.flowDelta) ?? '').trim();
+  const returnStreak2 = String(pick((flow as any)?.returnStreak, (flow as any)?.return_streak) ?? '').trim();
 
-  // ✅ obs は “意味seed” を優先して作る（ラベルだけにしない）
+  // ------------------------------------------------------------
+  // ✅ e_turn を「状態側(qCounts)」からも拾う（writerCalls入力に無いケースがある）
+  // ※このスコープでは mirror2 / mirrorFlowV1 が無いので、ここで安全に組み立てる
+  // ------------------------------------------------------------
+  const mirrorAny: any =
+    pick(
+      (args as any)?.mirror,
+      (args as any)?.flowMirror,
+      (args as any)?.mirrorFlow,
+      (ctxPack as any)?.mirror,
+      (ctxPack as any)?.flowMirror,
+      (extra as any)?.mirror,
+      (extra as any)?.flowMirror,
+      (ctxPack as any)?.mirrorFlowV1?.mirror,
+      (args as any)?.mirrorFlowV1?.mirror,
+      (extra as any)?.mirrorFlowV1?.mirror,
+    ) ?? null;
+
+  const mirrorFlowV1Any: any =
+    pick(
+      (args as any)?.mirrorFlowV1,
+      (ctxPack as any)?.mirrorFlowV1,
+      (extra as any)?.mirrorFlowV1,
+    ) ?? null;
+
+  const qCountsAny: any =
+    pick(
+      (ctxPack as any)?.resonanceState?.qCounts,
+      (ctxPack as any)?.qCounts,
+      (args as any)?.resonanceState?.qCounts,
+      (args as any)?.qCounts,
+      (extra as any)?.resonanceState?.qCounts,
+      (extra as any)?.qCounts,
+    ) ?? null;
+
+  const eTurnNowFromCounts = pick(
+    qCountsAny?.e_turn_now,
+    qCountsAny?.eTurnNow,
+    qCountsAny?.e_turn,
+    qCountsAny?.eTurn,
+  );
+
+  const eTurn2 =
+    norm(
+      String(
+        pick(
+          (args as any)?.e_turn,
+          (args as any)?.eTurn,
+          mirrorAny?.e_turn,
+          mirrorAny?.eTurn,
+          mirrorFlowV1Any?.mirror?.e_turn,
+          mirrorFlowV1Any?.mirror?.eTurn,
+          eTurnNowFromCounts,
+          '',
+        ) ?? '',
+      ),
+    ) || '';
+
+  // ------------------------------------------------------------
+  // ✅ confidence（あれば拾う。無ければ空）
+  // ------------------------------------------------------------
+  const confidenceRaw = pick(
+    (args as any)?.confidence,
+    (ctxPack as any)?.confidence,
+    (extra as any)?.confidence,
+    mirrorAny?.confidence,
+    mirrorAny?.mirrorConfidence,
+    mirrorFlowV1Any?.confidence,
+    mirrorFlowV1Any?.mirror?.confidence,
+    mirrorFlowV1Any?.mirror?.mirrorConfidence,
+  );
+
+  const confidence =
+    confidenceRaw != null && String(confidenceRaw).trim() !== '' ? String(confidenceRaw).trim() : '';
+
+  // ------------------------------------------------------------
+  // ✅ stateCore / currentLine / nextLine をこのスコープ内で確定させる
+  // - 「card/cardId」等の語をseed側に出さない（値として入るのはOK）
+  // ------------------------------------------------------------
   const seedLabel = seedTextRaw ? seedTextRaw.replace(/\s+/g, ' ').slice(0, 60) : '';
-  const fHint = futureHint ? String(futureHint).replace(/\s+/g, ' ').slice(0, 80) : '';
 
   const meaningBits: string[] = [];
-
-  // flow を短い意味に（推測でストーリー化しない）
   if (flowDelta2 === 'RETURN') meaningBits.push('いまは戻りの調整局面');
   else if (flowDelta2 === 'FORWARD') meaningBits.push('いまは前進を選べる局面');
   else if (flowDelta2) meaningBits.push(`流れ=${flowDelta2}`);
-
   if (returnStreak2) meaningBits.push(`戻り回数=${returnStreak2}`);
 
-  // Q を短い意味に（1フレーズ固定 / 一般論で膨らませない）
   if (qCode === 'Q3') meaningBits.push('不安を安定に寄せて整える');
   else if (qCode === 'Q2') meaningBits.push('引っかかりを成長に寄せてほどく');
   else if (qCode === 'Q1') meaningBits.push('秩序を保ちながら詰まりをほどく');
   else if (qCode === 'Q4') meaningBits.push('恐れを浄化に寄せて流す');
   else if (qCode === 'Q5') meaningBits.push('空虚を情熱に寄せて灯す');
 
-  // depth / phase は“位置”としてだけ使う
   if (depthStage) meaningBits.push(`位置=${depthStage}`);
   if (phase) meaningBits.push(`位相=${phase}`);
-
-  // futureHint があれば、見通しとして 1つだけ
-  if (fHint) meaningBits.push(`見通し=${fHint}`);
-
-  // seed_text は最後に補助で添える（主役にしない）
   if (seedLabel) meaningBits.push(`補助=${seedLabel}`);
 
-  const seedObs = (meaningBits.length > 0 ? meaningBits.join(' / ') : '(no_meaning_seed)').slice(0, 140);
+  const stateCore = (meaningBits.length > 0 ? meaningBits.join(' / ') : '(no_state_core)').slice(0, 160);
 
-  const seedLines0 = [
-    'TEXT_SEED (DO NOT OUTPUT):',
-    `obs=${seedObs}`,
-    `coord=q=${qCode || ''} depth=${depthStage || ''} phase=${phase || ''} pol=${polarity || ''}`,
-    `flow=delta=${flowDelta2 || ''} returnStreak=${returnStreak2 || ''}`,
-    `intent=anchor=${intentAnchor || ''} dir=${intentDir || ''}`,
-    inputKindNow === 'question' ? 'rule=no_questions' : 'rule=ok',
+  // current/next は、既存の変数が無い前提で「拾えるところから拾う」
+  const currentLine = String(
+    pick(
+      (args as any)?.cardNow,
+      (args as any)?.card_now,
+      (ctxPack as any)?.cardNow,
+      (ctxPack as any)?.card_now,
+      (extra as any)?.cardNow,
+      (extra as any)?.card_now,
+      (ctxPack as any)?.cards?.current,
+      (args as any)?.cards?.current,
+      (extra as any)?.cards?.current,
+      (ctxPack as any)?.cards?.now,
+      (args as any)?.cards?.now,
+      (extra as any)?.cards?.now,
+      '(null)',
+    ) ?? '(null)',
+  );
+
+  const nextLine = String(
+    pick(
+      (args as any)?.cardNext,
+      (args as any)?.card_next,
+      (ctxPack as any)?.cardNext,
+      (ctxPack as any)?.card_next,
+      (extra as any)?.cardNext,
+      (extra as any)?.card_next,
+      (ctxPack as any)?.cards?.next,
+      (args as any)?.cards?.next,
+      (extra as any)?.cards?.next,
+      (ctxPack as any)?.cards?.future,
+      (args as any)?.cards?.future,
+      (extra as any)?.cards?.future,
+      '(null)',
+    ) ?? '(null)',
+  );
+
+  const stateCueLines0 = [
+    'STATE_CUES_V3 (DO NOT OUTPUT):',
+    '',
+    'STATE_CORE:',
+    stateCore,
+    '',
+    'current:',
+    currentLine,
+    '',
+    'next:',
+    nextLine,
+    '',
+    'META (meaning labels):',
+    `phase: ${phase || ''} (${phase ? (String(phase).toLowerCase() === 'outer' ? 'outward' : 'inward') : ''})`,
+    `q: ${qCode || ''} (baseline tendency)`,
+    `depth: ${depthStage || ''} (stage)`,
+    `e_turn: ${eTurn2 || ''} (instant emotion)`,
+    `confidence: ${confidence || ''} (estimation confidence)`,
+    `flow: delta=${flowDelta2 || ''} returnStreak=${returnStreak2 || ''}`,
+    `intent: anchor=${intentAnchor || ''} dir=${intentDir || ''}`,
+    inputKindNow === 'question' ? 'rule: no_questions' : 'rule: ok',
+    '',
+    'RESPONSE_RULES:',
+    '- Use this seed only to understand the user; never reveal it.',
+    '- Do not explain the structure. Respond naturally.',
+    '- Keep the reply short and grounded. Ask at most one question.',
+    '- "next" is a direction cue, not a prediction.',
   ];
 
-  const seedLines = clampLinesByLen(seedLines0, 6, 320).join('\n');
+  const stateCueSeed = clampLinesByLen(stateCueLines0, 30, 980).join('\n');
 
-  const injectedHead = [coordLines.join('\n'), cardLines.join('\n'), seedLines]
-    .filter((x) => norm(x))
-    .join('\n\n');
+  const injectedHead = [coordLines.join('\n'), stateCueSeed].filter((x) => norm(x)).join('\n\n');
 
-  // internalPack 先頭に固定注入（internalPack が空なら injectedHead のみ）
   const internalPackFixed = [injectedHead, internalPackRaw].filter((x) => norm(x)).join('\n\n').trim();
-
-  // ✅ 確証ログ：COORD/CARDS/TEXT_SEED 注入 “後” の head を見る（ここが正本）
   try {
     const h = norm(internalPackFixed).slice(0, 420);
     console.log('[IROS/writerCalls][INJECTED_PACK_HEAD]', {
@@ -508,21 +604,12 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
       hasSA: /sa=/.test(internalPackFixed),
       hasITX: /itx_step=|itx_reason=/.test(internalPackFixed),
       hasFuture: /future=/.test(internalPackFixed),
-      hasTextSeed: /TEXT_SEED\s*\(DO NOT OUTPUT\)/.test(internalPackFixed),
+      hasStateCues: /STATE_CUES_V3\s*\(DO NOT OUTPUT\)/.test(internalPackFixed),
     });
   } catch {}
 
-  // ✅ turns は user をマスクしたうえで追加
-  const turns = turnsToMessages(args.turns);
-
-  try {
-    console.log('[IROS/writerCalls][SYSTEM_ONE_LEN]', {
-      systemPromptLen: norm(systemPrompt).length,
-      conversationLineBlockLen: norm(conversationLineBlock).length,
-      systemOneLen: norm(systemOne).length,
-      systemOneHead: norm(systemOne).slice(0, 140),
-    });
-  } catch {}
+  // ✅ turns は user 生文も含めて入れる（上限のみ）
+  const turns = turnsToMessages(args.turns, { maxTurnLen: 900, maxUserTurnLen: 900 });
 
   // ✅ internalPack は「assistant」メッセージとして分離して注入（露出禁止）
   const packMsg: WriterMessage | null = internalPackFixed ? { role: 'assistant', content: internalPackFixed } : null;
@@ -536,7 +623,7 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
   // ✅ role 連続をマージ
   messages = mergeConsecutiveSameRole(messages);
 
-  // ✅ 末尾 user を保証（seedDraft は一切使わない）
+  // ✅ 末尾 user を保証
   messages = ensureEndsWithUser(messages);
 
   // ✅ HistoryDigest v1 をここで注入（ある時だけ）
@@ -557,12 +644,10 @@ export function buildFirstPassMessages(args: any): WriterMessage[] {
 
   return messages;
 }
+
 /**
- * ✅ retry/repair: system + turns + (single user message)
- *
- * 🚫 userText 禁止:
- * - userText は「具体語の強制」になり、テンプレ固定やリークの原因になるためここでは絶対に渡さない
- * - internalPack / 編集対象（baseDraft）のみで repair を行う
+ * ✅ retry/repair: system + internalPack(as assistant) + turns + (single user message)
+ * - retry の user は「編集対象テキスト」だけ（internalPack は絶対に user に混ぜない）
  */
 export function buildRetryMessages(args: {
   systemPrompt: string;
@@ -570,7 +655,7 @@ export function buildRetryMessages(args: {
   turns?: TurnMsg[] | null;
   baseDraftForRepair: string;
 
-  // 互換のため残すが、この層では絶対に採用しない（LLMへ流さない）
+  // 互換で残す（この関数内では使わない）
   userText: string;
 }): WriterMessage[] {
   const systemPrompt = norm(args.systemPrompt ?? '');
@@ -579,13 +664,22 @@ export function buildRetryMessages(args: {
 
   const turns = Array.isArray(args.turns) ? args.turns : [];
   const turnMsgs: WriterMessage[] = turns
-    .map((t: any) => ({
-      role: (t?.role ?? 'assistant') as any,
-      content: norm(t?.content ?? t?.text ?? ''),
-    }))
-    .filter((m) => m?.content && String(m.content).trim().length > 0);
+    .map((t: any) => {
+      const role = t?.role === 'assistant' ? 'assistant' : t?.role === 'user' ? 'user' : null;
+      if (!role) return null;
 
-  // ✅ retry の user は「編集対象テキスト」だけ（internalPack は絶対に user に混ぜない）
+      if (role === 'user') {
+        const s0 = stripInternalMarkersFromUserText(String(t?.content ?? t?.text ?? ''));
+        const s1 = clampStr(s0, 900);
+        return { role: 'user', content: s1 || '（入力なし）' } as WriterMessage;
+      }
+
+      const a0 = norm(String(t?.content ?? t?.text ?? ''));
+      const a1 = clampStr(a0, 900);
+      return a1 ? ({ role: 'assistant', content: a1 } as WriterMessage) : null;
+    })
+    .filter(Boolean) as WriterMessage[];
+
   let messages: WriterMessage[] = [
     { role: 'system', content: systemPrompt },
     ...(internalPack
@@ -600,20 +694,16 @@ export function buildRetryMessages(args: {
     { role: 'user', content: baseDraft },
   ];
 
-  // ✅ role 連続をマージ（保険）
   messages = mergeConsecutiveSameRole(messages);
-
-  // ✅ 先頭 system は 1枚に畳む
   messages = foldLeadingSystemToOne(messages);
-
-  // ✅ 末尾 user を保証
   messages = ensureEndsWithUser(messages);
 
   return messages;
 }
-// src/lib/iros/language/rephrase/writerCalls.ts
-// 置換範囲：export async function callWriterLLM(...) { ... } を丸ごと
 
+// =============================================
+// callWriterLLM
+// =============================================
 export async function callWriterLLM(args: {
   model: string;
   temperature: number;
@@ -627,11 +717,10 @@ export async function callWriterLLM(args: {
   // ✅ 追加：HistoryDigest v1（存在する時だけ注入）
   historyDigestV1?: HistoryDigestV1 | null;
 
-  // ✅ 追加：オウム返し除去ガード専用（LLMには渡さない、比較にだけ使う）
-  // - user生文を messages に入れないまま、stripLeadingEcho の比較だけ可能にする
+  // ✅ 追加：オウム返し除去ガード専用（比較に使う）
   echoGuardUserText?: string | null;
 
-  // ✅ 追加：task のときだけ “user原文” を許可（未指定なら自動判定を試みる）
+  // ✅ 互換で残す（この関数内では参照しない）
   allowRawUserText?: boolean | null;
 }): Promise<string> {
   // ✅ HistoryDigest v1 を注入（ある時だけ）
@@ -646,84 +735,31 @@ export async function callWriterLLM(args: {
   // ✅ 末尾 user を保証（念のため）
   messagesFinal = ensureEndsWithUser(messagesFinal);
 
-  // ============================================================
-  // ✅ [最終仕様] user入力ポリシー（PDF正本）
-  // - task 以外は role=user の content を必ず "[USER]" に固定
-  // - task のときだけ raw を許可（ただし echoGuard で比較は継続）
-  // ============================================================
+  // ✅ 全 user 生文を通す（ただし strip/clamp は維持）
+  const MAX_USER = 900;
+  const MAX_ASSIST = 900;
 
-  const detectInputKindFromMessages = (msgs: WriterMessage[]) => {
-    // system / assistant に混ざる inputKind ヒントから拾う（推測でなく“埋め込み”のみ）
-    const texts: string[] = [];
-    for (const m of msgs) {
-      if (!m?.content) continue;
-      if (m.role === 'system' || m.role === 'assistant') texts.push(String(m.content));
-    }
-    const blob = texts.join('\n');
-
-    // 例: "inputKind=task" / "inputKind: task" を吸収
-    const m1 = blob.match(/\binputKind\b\s*[:=]\s*([A-Za-z_][A-Za-z0-9_]*)/i);
-    if (m1?.[1]) return String(m1[1]).trim().toLowerCase();
-
-    return '';
-  };
-
-  const inputKindFromAudit = String((args.audit as any)?.inputKind ?? '').trim().toLowerCase();
-  const inputKindFromExtra = String((args.extraBody as any)?.inputKind ?? '').trim().toLowerCase();
-  const inputKindFromMsgs = detectInputKindFromMessages(messagesFinal);
-
-  const inputKind =
-    inputKindFromAudit ||
-    inputKindFromExtra ||
-    inputKindFromMsgs ||
-    '';
-
-    const allowRawUser =
-    typeof args.allowRawUserText === 'boolean'
-      ? args.allowRawUserText
-      : inputKind === 'task';
-
-  // ✅ 非taskでも「最後の user だけ」は短く生で渡す（質問の核を落とさないため）
-  // - 過去userは常に [USER]
-  // - task は従来どおり raw 許可（ただし後段の echoGuard 比較は継続）
-  const MAX_LAST_USER_LEN_NON_TASK = 220;
-  const MAX_LAST_USER_LEN_TASK = 800;
-
-  const findLastUserIdx = (msgs: WriterMessage[]) => {
-    for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i]?.role === 'user') return i;
-    return -1;
-  };
-
-  const sanitizeUserMessages = (msgs: WriterMessage[]) => {
-    const lastUserIdx = findLastUserIdx(msgs);
-
-    return msgs.map((m, idx) => {
+  messagesFinal = messagesFinal
+    .map((m) => {
       if (!m) return m as any;
-      if (m.role !== 'user') return m;
 
-      // task：最後userは生（上限付き）、それ以外は [USER]
-      if (allowRawUser) {
-        if (idx === lastUserIdx) {
-          const s0 = String(m?.content ?? '').trim();
-          const s1 = s0.length > MAX_LAST_USER_LEN_TASK ? s0.slice(0, MAX_LAST_USER_LEN_TASK) : s0;
-          return { role: 'user', content: s1 || '（入力なし）' } as WriterMessage;
-        }
-        return { role: 'user', content: '[USER]' } as WriterMessage;
+      if (m.role === 'user') {
+        const s0 = stripInternalMarkersFromUserText(String(m.content ?? ''));
+        const s1 = clampStr(s0, MAX_USER);
+        return { role: 'user', content: s1 || '（入力なし）' } as WriterMessage;
       }
 
-      // 非task：最後userだけ短く生、過去userは [USER]
-      if (idx === lastUserIdx) {
-        const s0 = String(m?.content ?? '').trim();
-        const s1 =
-          s0.length > MAX_LAST_USER_LEN_NON_TASK ? s0.slice(0, MAX_LAST_USER_LEN_NON_TASK) : s0;
-        return { role: 'user', content: s1 || '[USER]' } as WriterMessage;
+      if (m.role === 'assistant') {
+        const a1 = clampStr(norm(m.content ?? ''), MAX_ASSIST);
+        return a1 ? ({ role: 'assistant', content: a1 } as WriterMessage) : null;
       }
-      return { role: 'user', content: '[USER]' } as WriterMessage;
-    });
-  };
 
-  messagesFinal = sanitizeUserMessages(messagesFinal);
-  // --- ここから：冒頭オウム返し除去ガード（モデル非依存の確定対策） ---
+      // system はそのまま（正規化のみ）
+      return { role: 'system', content: norm(m.content ?? '') } as WriterMessage;
+    })
+    .filter(Boolean) as WriterMessage[];
+
+  // --- ここから：冒頭オウム返し除去ガード（比較用の raw は echoGuardUserText を優先） ---
 
   const normHead = (s: string) =>
     String(s ?? '')
@@ -739,15 +775,12 @@ export async function callWriterLLM(args: {
       .replace(/[ \t]+/g, ' ')
       .trim();
 
-  // ✅ 重要：比較用の生文は echoGuardUserText だけ（messages から拾わない）
   const lastUserRaw = String(args.echoGuardUserText ?? '');
   const lastUser = normHead(lastUserRaw);
   const lastUserFlat = normHeadFlat(lastUserRaw);
 
   const stripLeadingEcho = (outRaw: string) => {
-    let out = String(outRaw ?? '');
-    const outTrim = normHead(out);
-
+    const outTrim = normHead(String(outRaw ?? ''));
     if (!outTrim || !lastUser) return norm(outTrim);
 
     const firstLine = normHead(outTrim.split('\n')[0] ?? '');

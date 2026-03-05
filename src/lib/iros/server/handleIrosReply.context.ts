@@ -101,7 +101,6 @@ function detectInputKind(userText: string): InputKind {
   if (!s) return 'unknown';
 
   // ✅ recall-check（会話を覚えてる？系）: 質問扱いにすると frame=R でテンプレ化しやすいので chat 扱いに落とす
-  // 例: 「会社の話し覚えてる？」「前の話覚えてる？」「さっきの話覚えてる？」「覚えてますか？」
   if (
     /(覚えて(る|ます)|覚えてますか|覚えてる\?|覚えてる？)/.test(s) &&
     /(話|こと|件|それ|この件|前|さっき|昨日|先週|会社)/.test(s)
@@ -178,8 +177,6 @@ export async function buildTurnContext(
   if (effectiveStyle) baseMetaForTurn.style = effectiveStyle;
 
   // ✅ MemoryState を読み、baseMeta に合成（depth / qCode / selfAcceptance / y/h / spin）
-  // ★ 注意：loadBaseMetaFromMemoryState は sb 必須
-  // ★ ここで memoryState も受け取れる実装になっている場合があるので any で拾う
   const loaded = await loadBaseMetaFromMemoryState({
     sb: supabase,
     userCode,
@@ -187,8 +184,6 @@ export async function buildTurnContext(
   } as any);
 
   // ★ depthStage を camelCase に寄せる（下流の取りこぼし防止）
-  // - ここで baseMetaForTurn.depthStage を確定させておく
-  // - snake_case への複製は「保存直前」でやる（Phase3方針）
   {
     const depthStage =
       baseMetaForTurn?.depthStage ??
@@ -208,9 +203,6 @@ export async function buildTurnContext(
 
   // =========================================================
   // ✅ depth_stage を “必ず” baseMetaForTurn のトップに同期する
-  // - DBでは memory_state に depth_stage があるのに、SCAFFOLD/CALL_LLM で meta.depth_stage が null になっていた
-  // - persistAssistantMessageToIrosMessages は meta.depth_stage / meta.depthStage を見て列 depth_stage を確定する
-  // - ここを single source にして、snake/camel を両方埋める
   // =========================================================
   {
     const depthStageFromMemory =
@@ -228,7 +220,6 @@ export async function buildTurnContext(
     if (depthStageTop) {
       baseMetaForTurn.depth_stage = depthStageTop;
       baseMetaForTurn.depthStage = depthStageTop;
-      // 保険：canonical 互換
       if (!baseMetaForTurn.depth) baseMetaForTurn.depth = depthStageTop;
     }
   }
@@ -275,15 +266,13 @@ export async function buildTurnContext(
     const inputKind = detectInputKind(text);
 
     // =========================
-    // ✅ NEW: Concept Lock (RECALL hint)
-    // - 直前までに保存された conceptLock があり、
-    //   ユーザーが「3つ/それ」参照で来た場合は、否認防止の seed を meta.extra に置く
-    // - 既存の llmRewriteSeed があれば上書きしない
+    // ✅ Concept Lock (RECALL hint)
     // =========================
     const userTextNow = String(text ?? '').trim();
-    const ex0: any = (baseMetaForTurn as any)?.extra && typeof (baseMetaForTurn as any).extra === 'object'
-      ? (baseMetaForTurn as any).extra
-      : null;
+    const ex0: any =
+      (baseMetaForTurn as any)?.extra && typeof (baseMetaForTurn as any).extra === 'object'
+        ? (baseMetaForTurn as any).extra
+        : null;
 
     const cl0: any = ex0?.conceptLock ?? null;
     const clItems: string[] | null =
@@ -296,15 +285,18 @@ export async function buildTurnContext(
       /(３つ|三つ|3つ|その3つ|この3つ|それ|それは|あれ|あれは|何ですか|なんですか|って何)/.test(userTextNow);
 
     if (wantsRecall && clItems && clItems.length >= 3) {
-      // baseMetaForTurn.extra を確実に object 化
       if (!(baseMetaForTurn as any).extra || typeof (baseMetaForTurn as any).extra !== 'object') {
         (baseMetaForTurn as any).extra = {};
       }
       const ex: any = (baseMetaForTurn as any).extra;
 
-      // 観測用（上書きしない）
       if (ex.conceptRecall == null) {
-        ex.conceptRecall = { active: true, items: clItems.slice(0, 3), at: Date.now(), reason: 'USER_REF' };
+        ex.conceptRecall = {
+          active: true,
+          items: clItems.slice(0, 3),
+          at: Date.now(),
+          reason: 'USER_REF',
+        };
       }
 
       // ✅ LLM seed（上書き禁止）
@@ -321,7 +313,7 @@ export async function buildTurnContext(
       });
     }
 
-    // IrosStateLite は型が変動しやすいので、ここは “必要最小” を寄せて any で通す
+    // IrosStateLite は型が変動しやすいので “必要最小” を寄せて any で通す
     const stateLite: IrosStateLite = {
       depthStage:
         baseMetaForTurn?.depthStage ??
@@ -345,83 +337,81 @@ export async function buildTurnContext(
 
       phase: baseMetaForTurn?.phase ?? null,
 
-      // intent layer（未確定でもOK）
       intentLayer:
         baseMetaForTurn?.intentLayer ??
         baseMetaForTurn?.intent_layer ??
         null,
 
-      // rotation（必要なら使う）
       spinStep: typeof spinStep === 'number' ? spinStep : null,
       descentGate: descentGate ?? null,
     } as any;
 
-    // ✅ buildFramePlan のシグネチャ差を吸収（TS引数数チェック回避）
     const framePlan = buildFramePlan({ state: stateLite, inputKind });
 
     baseMetaForTurn.inputKind = inputKind;
     baseMetaForTurn.framePlan = framePlan;
+
     // =========================
-// ✅ NEW: FINAL pre-seed（writer前に seed を必ず用意）
-// - raw userText は入れない（[USER] のまま）
-// - 既に llmRewriteSeed がある場合は上書きしない
-// - 目的：LLM_GATE の decision.rewriteSeed が空でも、handleIrosReply の seedFallback が拾えるようにする
-// =========================
-try {
-  if (!(baseMetaForTurn as any).extra || typeof (baseMetaForTurn as any).extra !== 'object') {
-    (baseMetaForTurn as any).extra = {};
-  }
-  const ex: any = (baseMetaForTurn as any).extra;
+    // ✅ FINAL pre-seed（writer前に seed を必ず用意）
+    // - raw userText は入れない
+    // - 既に llmRewriteSeed がある場合は上書きしない
+    // - “観測: [USER]” のような「入力なし誤解」ワードは一切入れない（地雷除去）
+    // =========================
+    try {
+      if (!(baseMetaForTurn as any).extra || typeof (baseMetaForTurn as any).extra !== 'object') {
+        (baseMetaForTurn as any).extra = {};
+      }
+      const ex: any = (baseMetaForTurn as any).extra;
 
-  const policyNow: string =
-    String(
-      (baseMetaForTurn as any)?.framePlan?.slotPlanPolicy ??
-        (baseMetaForTurn as any)?.slotPlanPolicy ??
-        '',
-    )
-      .trim()
-      .toUpperCase();
+      const policyNow: string =
+        String(
+          (baseMetaForTurn as any)?.framePlan?.slotPlanPolicy ??
+            (baseMetaForTurn as any)?.slotPlanPolicy ??
+            '',
+        )
+          .trim()
+          .toUpperCase();
 
-  if (policyNow === 'FINAL' && (typeof ex.llmRewriteSeed !== 'string' || !ex.llmRewriteSeed.trim())) {
-    const depthNow =
-      (baseMetaForTurn as any)?.depthStage ??
-      (baseMetaForTurn as any)?.depth_stage ??
-      (baseMetaForTurn as any)?.depth ??
-      null;
+      if (policyNow === 'FINAL' && (typeof ex.llmRewriteSeed !== 'string' || !ex.llmRewriteSeed.trim())) {
+        const depthNow =
+          (baseMetaForTurn as any)?.depthStage ??
+          (baseMetaForTurn as any)?.depth_stage ??
+          (baseMetaForTurn as any)?.depth ??
+          null;
 
-    const qNow =
-      (baseMetaForTurn as any)?.qPrimary ??
-      (baseMetaForTurn as any)?.q_primary ??
-      (baseMetaForTurn as any)?.q_code ??
-      (baseMetaForTurn as any)?.qCode ??
-      null;
+        const qNow =
+          (baseMetaForTurn as any)?.qPrimary ??
+          (baseMetaForTurn as any)?.q_primary ??
+          (baseMetaForTurn as any)?.q_code ??
+          (baseMetaForTurn as any)?.qCode ??
+          null;
 
-    // raw user を渡せないので「構造だけ」seedを置く（[USER]はそのまま）
-    ex.llmRewriteSeed =
-      [
-        'FINAL_SEED_V0 (DO NOT OUTPUT)',
-        `inputKind=${String((baseMetaForTurn as any)?.inputKind ?? inputKind ?? '').trim() || 'unknown'}`,
-        `depth=${depthNow ?? 'null'} q=${qNow ?? 'null'}`,
-        '観測: [USER]',
-        '視点: 1つだけ（解釈を増やしすぎない）',
-        '次: 1つだけ（小さく）',
-        '安全句: 1行（押しつけない）',
-      ].join('\n');
+        // ✅ “userMasked=true” は「入力があるが伏字」を示す構造フラグ（誤解防止）
+        ex.llmRewriteSeed = [
+          'FINAL_SEED_V0 (DO NOT OUTPUT)',
+          `inputKind=${String((baseMetaForTurn as any)?.inputKind ?? inputKind ?? '').trim() || 'unknown'}`,
+          `coord=depth:${depthNow ?? 'null'} q:${qNow ?? 'null'}`,
+          'userMasked=true',
+          'view=1つだけ（解釈を増やしすぎない）',
+          'next=1つだけ（小さく）',
+          'safe=1行（押しつけない）',
+        ].join('\n');
 
-    ex.llmRewriteSeedFrom = ex.llmRewriteSeedFrom ?? 'context(FINAL_preseed)';
-    ex.llmRewriteSeedAt = ex.llmRewriteSeedAt ?? new Date().toISOString();
+        ex.llmRewriteSeedFrom = ex.llmRewriteSeedFrom ?? 'context(FINAL_preseed)';
+        ex.llmRewriteSeedAt = ex.llmRewriteSeedAt ?? new Date().toISOString();
 
-    console.log('[IROS/CONTEXT][FINAL_PRESEED]', {
-      inputKind,
-      policyNow,
-      hasSeed: true,
-      seedLen: ex.llmRewriteSeed.length,
-      seedHead: String(ex.llmRewriteSeed).slice(0, 96),
-    });
-  }
-} catch (e) {
-  console.warn('[IROS/CONTEXT][FINAL_PRESEED][FAILED]', { error: e });
-}
+        console.log('[IROS/CONTEXT][FINAL_PRESEED]', {
+          inputKind,
+          policyNow,
+          hasSeed: true,
+          seedLen: ex.llmRewriteSeed.length,
+          seedHead: String(ex.llmRewriteSeed).slice(0, 96),
+        });
+      }
+    } catch (e) {
+      console.warn('[IROS/CONTEXT][FINAL_PRESEED][FAILED]', { error: e });
+    }
+
     console.log('[IROS/Context] framePlan built', {
       userCode: (stateLite as any)?.userCode ?? null,
       inputKind,
@@ -437,11 +427,9 @@ try {
       requestedDepth: (baseMetaForTurn as any)?.requestedDepth ?? null,
       requestedQCode: (baseMetaForTurn as any)?.requestedQCode ?? null,
 
-      // ✅ slots の“形”を確定させる観測
       slots_isArray: Array.isArray((framePlan as any)?.slots),
       slots_len: Array.isArray((framePlan as any)?.slots) ? (framePlan as any).slots.length : null,
 
-      // ✅ 先頭数件の「スロットの実体」を見る（キー名違い検出）
       slots_samples: Array.isArray((framePlan as any)?.slots)
         ? (framePlan as any).slots.slice(0, 4).map((s: any, i: number) => ({
             i,
@@ -468,7 +456,6 @@ try {
           }))
         : null,
 
-      // ✅ key/head 一覧（content/text/prompt のどれで来てるか判定）
       slots_heads: Array.isArray((framePlan as any)?.slots)
         ? (framePlan as any).slots.map((s: any) => ({
             key: s?.key ?? s?.slotKey ?? s?.k ?? null,
@@ -478,7 +465,6 @@ try {
           }))
         : null,
     });
-
   } catch (e) {
     console.warn('[IROS/Context] framePlan build failed', e);
   }

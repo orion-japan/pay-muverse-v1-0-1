@@ -2184,24 +2184,60 @@ const toRephraseBlocks = (s: string): string[] => {
 // src/lib/iros/language/rephrase/rephraseEngine.full.ts
 // buildHistoryTextLite を “user生文ゼロ” にする（HISTORY_LITE 漏れ止血）
 
+// buildHistoryTextLite を “user生文ゼロ” にする（HISTORY_LITE 漏れ止血）
+// + assistant の「入力の有無確認」系を履歴から除去（増殖防止）
 const buildHistoryTextLite = (turns: any[]): string => {
   const lines: string[] = ['HISTORY_LITE (DO NOT OUTPUT):'];
+
+  // 「入力はありますか？」系が history 経由で増殖するのを止血
+  const BANNED_ASSISTANT_PATTERNS: RegExp[] = [
+    /入力はありますか/u,
+    /この意味伝わりますか/u,
+    /何か言ってください/u,
+    /ひとこと.*(でも|だけでも).*いい/u,
+    /短くていいから.*一行/u,
+    /\b\[USER\]\b/u, // 変な混入があれば落とす
+  ];
+
+  const sanitizeAssistantForHistory = (raw: string): string => {
+    let t = String(raw ?? '').replace(/\r\n/g, '\n').trim();
+    if (!t) return '';
+
+    // まず禁止フレーズを含む場合は “丸ごと捨てる”
+    if (BANNED_ASSISTANT_PATTERNS.some((re) => re.test(t))) return '';
+
+    // 行単位でもう一段フィルタ（文の途中混入を落とす）
+    const kept = t
+      .split('\n')
+      .map((x) => x.trim())
+      .filter((x) => x.length > 0)
+      .filter((x) => !BANNED_ASSISTANT_PATTERNS.some((re) => re.test(x)));
+
+    t = kept.join('\n').trim();
+    if (!t) return '';
+
+    // 長文化防止
+    return t.length > 260 ? `${t.slice(0, 260)}…` : t;
+  };
 
   for (const t of Array.isArray(turns) ? turns : []) {
     const role = t?.role === 'assistant' ? 'assistant' : t?.role === 'user' ? 'user' : null;
     if (!role) continue;
 
-    // 🚫 user 生文は禁止：HISTORY_LITE には “[USER]” だけ残す
     if (role === 'user') {
-      lines.push('user: [USER]');
+      const raw = String(t?.content ?? t?.text ?? '').replace(/\r\n/g, '\n').trim();
+      if (!raw) continue;
+
+      const one = raw.length > 260 ? `${raw.slice(0, 260)}…` : raw;
+      lines.push(`user: ${one}`);
       continue;
     }
 
-    // assistant は短く整形（長文化しない）
+    // assistant は短く整形しつつ、禁止フレーズは落とす
     const raw = String(t?.content ?? t?.text ?? '').replace(/\r\n/g, '\n').trim();
-    if (!raw) continue;
+    const one = sanitizeAssistantForHistory(raw);
+    if (!one) continue;
 
-    const one = raw.length > 260 ? `${raw.slice(0, 260)}…` : raw;
     lines.push(`assistant: ${one}`);
   }
 
@@ -2347,17 +2383,21 @@ const mustIncludeRuleText = buildMustIncludeRuleText(
     (!!seedNorm && !!userNorm && (seedNorm === userNorm || (userNorm.length >= 12 && seedNorm.includes(userNorm)))) ||
     (!!seedFlat && !!userFlat && (seedFlat === userFlat || (userFlat.length >= 12 && seedFlat.includes(userFlat))));
 
+  // ✅ seed/user のどちらに ILINE が含まれているかを判定
+  const seedHasILINE = /\[\[ILINE\]\]/.test(seedStr) || /\[\[\/ILINE\]\]/.test(seedStr);
+
   // ✅ userText は「ILINEタグがある時だけ」 lockSource に入れる（将来の誤固定を防止）
   const userHasILINE = /\[\[ILINE\]\]/.test(userStr) || /\[\[\/ILINE\]\]/.test(userStr);
 
-  // ✅ LOCK素材は基本 seed のみ。user に ILINE がある場合だけ追加（ただし重複は追加しない）
+  // ✅ LOCK素材は「ILINEが含まれるテキスト」だけに限定する
+  // - ILINE が無い seed/user を lockSource に入れると、seedEqUser のとき誤って “全文ロック素材” っぽく見える
+  // - extractLockedILines は ILINE が無いと何も抽出しないため、ここで素材側を絞るのが正しい
   const lockParts = [
-    seedStr,
+    seedHasILINE ? seedStr : '',
     userHasILINE && !seedHasUser ? userStr : '',
   ]
     .filter((x): x is string => Boolean(String(x ?? '').trim()))
     .map((x) => String(x));
-
   const lockSourceRaw = lockParts.join('\n');
 
   console.info('[IROS/ILINE][LOCK_PARTS]', {
@@ -2476,11 +2516,12 @@ const seedDraftSanitized = sanitizeSeedDraftForLLM(seedDraft0);
 
 // ✅ 方針：writer へ userText を絶対に渡さない
 // - chooseSeedForLLM の userText 経路を遮断
-// - seed が空になる場合は固定の安全フレーズにフォールバック
-const seedFinal = chooseSeedForLLM(seedDraftSanitized, '') || '続けてください';
+// - seed が空になる場合は「落ちても意味が通る」安全seedにフォールバック
+const FALLBACK_SEED = 'ユーザーの最後の発話に、結論を先にして短く直接答えてください。必要なら要点→補足の順で。';
+
+const seedFinal = chooseSeedForLLM(seedDraftSanitized, '') || FALLBACK_SEED;
 
 // ✅ seedDraft は seedFinal を正本とする（userText遮断の一貫性）
-// - humanizeDirectivesForSeed は userText を混ぜうるため削除（地雷化する）
 const seedDraft = seedFinal;
 
 // writer向けの軽いヒント（※ここも userText を足さない前提）
@@ -2868,52 +2909,125 @@ const injectCardUndetectableRule = (reason: string) => {
   } catch {}
 };
 
-  // ✅ chat/card でも ctxPack.cards があるなら “軽く” seed に入れる（card180 は回さない）
-  // - env の有無に依存させない（常時 lite が基本）
-  // - wantsCardByText でも “未観測固定” は注入しない（まずは seed 優先）
+  // ✅ chat/card でも ctxPack.cards があるなら seed に入れる
+  // - ここで「短いラベル」ではなく、card180 の packet（本文）を作ってそのまま internalPack に注入する
+  // - task/micro など “実務系” には混ぜない（副作用を避ける）
+  // - env(IROS_DISABLE_CARD_SEEDIN=1) は chat 側も含めて尊重する
   try {
-    const ctxPack0: any = (opts as any)?.userContext?.ctxPack ?? null;
-    const c = ctxPack0?.cards?.current ?? null;
-    const f = ctxPack0?.cards?.future ?? null;
-    const stingScore = ctxPack0?.cards?.stingScore ?? null;
+    if (disableCardSeedin) {
+      // ここで止める（chat 側も止める）
+      try {
+        console.log('[IROS/rephraseEngine][CARD_SEEDIN] disabled_by_env(chat_guard)', {
+          traceId: debug.traceId,
+          conversationId: debug.conversationId,
+          userCode: debug.userCode,
+          inputKind: inputKindForSeed,
+          wantsCardByText,
+        });
+      } catch {}
+    } else {
+      const ctxPack0: any = (opts as any)?.userContext?.ctxPack ?? null;
 
-    const hasLightCards = !!(c || f);
+      const c = ctxPack0?.cards?.current ?? null;
+      const f = ctxPack0?.cards?.future ?? null;
 
-    // ✅ task/micro など “実務系” には混ぜない（seed注入の副作用を避ける）
-    const liteOk =
-      inputKindForSeed === 'chat' || inputKindForSeed === 'card' || inputKindForSeed === '';
+      // cards-lite があるか（現状の“ラベル生成”でも true になる）
+      const hasLightCards = !!(c || f);
 
-    if (liteOk && hasLightCards) {
-      const ip = String(internalPack ?? '');
+      // ✅ task/micro など “実務系” には混ぜない
+      const liteOk =
+        inputKindForSeed === 'chat' || inputKindForSeed === 'card' || inputKindForSeed === '';
 
-      // 既に入ってたら重ねない
-      if (!/CARDS_LITE_SEED\s*\(DO NOT OUTPUT\)/.test(ip)) {
-        // shortText があるならそれを最優先、無ければ label
-        const curText = String(c?.shortText ?? c?.label ?? '').trim();
-        const futText = String(f?.shortText ?? f?.label ?? '').trim();
+      if (liteOk && hasLightCards) {
+        const ip = String(internalPack ?? '');
 
-        internalPack = [
-          ip.trim(),
-          [
-            'CARDS_LITE_SEED (DO NOT OUTPUT):',
-            `- current=${curText || '(null)'}`,
-            `- future=${futText || '(null)'}`,
-            `- e_turn=${String(c?.e_turn ?? f?.e_turn ?? '') || '(null)'}`,
-            `- stingScore=${stingScore ?? '(null)'}`,
-          ].join('\n'),
-        ]
-          .filter(Boolean)
-          .join('\n\n');
+        // 既に入ってたら重ねない（重複注入防止）
+        if (!/CARD180_SEED\s*\(DO NOT OUTPUT\)/.test(ip)) {
+          const { buildDualCardPacket, formatDualCardPacketForLLM } =
+            await import('@/lib/iros/cards/card180');
+
+          // card180 に渡す “今の入力値” を ctxPack / pickedDepthStage から組む
+          const basedOn = String(userText ?? '').trim().slice(0, 80) || null;
+
+          const e_turn =
+            (ctxPack0?.mirror?.e_turn ?? ctxPack0?.e_turn ?? null) as any;
+
+          const polarity =
+            (ctxPack0?.mirror?.polarity ?? ctxPack0?.polarity ?? null) as any;
+
+          const sa = (ctxPack0?.sa ?? null) as any;
+          const confidence =
+            (ctxPack0?.mirror?.confidence ?? ctxPack0?.confidence ?? null) as any;
+
+          const packet = buildDualCardPacket(
+            {
+              current: {
+                stage: (pickedDepthStage ?? null) as any,
+                e_turn,
+                polarity,
+                sa,
+                basedOn,
+                confidence,
+              },
+              previous: null,
+              randomSeed: null,
+            },
+            {
+              // chat では “未観測固定文” は使わない（seed優先）
+              currentUndetectablePolicy: 'null',
+            }
+          );
+
+          const raw = String(formatDualCardPacketForLLM(packet) ?? '').trim();
+
+          // 長すぎる場合の暴れを防ぐ：行数上限
+          const cardSeedText = clampLines(raw, 18).trim();
+
+          if (cardSeedText) {
+            internalPack = [
+              ip.trim(),
+              ['CARD180_SEED (DO NOT OUTPUT):', cardSeedText].join('\n'),
+            ]
+              .filter(Boolean)
+              .join('\n\n');
+
+            // ✅ “結果が見える化” ログ（head も出す）
+            console.log('[IROS/rephraseEngine][CARD_SEEDIN] card180_seed_appended', {
+              traceId: debug.traceId,
+              conversationId: debug.conversationId,
+              userCode: debug.userCode,
+              inputKind: inputKindForSeed,
+              len: cardSeedText.length,
+              head: cardSeedText.slice(0, 220),
+              pickedDepthStage: pickedDepthStage ?? null,
+              e_turn: e_turn ?? null,
+              polarity: polarity ?? null,
+              sa: sa ?? null,
+              confidence: confidence ?? null,
+            });
+          } else {
+            console.warn('[IROS/rephraseEngine][CARD_SEEDIN] card180_seed_empty(chat)', {
+              traceId: debug.traceId,
+              conversationId: debug.conversationId,
+              userCode: debug.userCode,
+              inputKind: inputKindForSeed,
+              pickedDepthStage: pickedDepthStage ?? null,
+              e_turn: e_turn ?? null,
+              polarity: polarity ?? null,
+            });
+          }
+        }
       }
-
-      console.log('[IROS/rephraseEngine][CARD_SEEDIN] lite_appended', {
-        traceId: debug.traceId,
-        conversationId: debug.conversationId,
-        userCode: debug.userCode,
-        inputKind: inputKindForSeed,
-      });
     }
-  } catch {}
+  } catch (e) {
+    console.warn('[IROS/rephraseEngine][CARD_SEEDIN] card180_seed_error(chat)', {
+      traceId: debug.traceId,
+      conversationId: debug.conversationId,
+      userCode: debug.userCode,
+      inputKind: inputKindForSeed,
+      err: String(e),
+    });
+  }
 
   if (disableCardSeedin) {
     // env で full card seed（card180）を止めている（lite は止めない）
@@ -3562,8 +3676,8 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
       '- 抽象だけでまとめず、ユーザー発話の具体語を最低1つ残す。',
       '- 段・行数・見出しの有無は内容に合わせて決めてよい（無理に構造化しない）。',
       '- 見出しを使う場合のみ、形式は「## 絵文字1つ + 半角スペース + 見出し本文」にする。',
-      '- 絵文字や見た目は文脈優先。固定テンプレ化しない（🫧は使わない）。',
-      '- 選択肢提示（A）B）C）/「次のどれかを選んで」等）は使わない。',
+      '- 絵文字や見出しは乱発禁止。固定テンプレ化しない。強いときだけ。',
+      '- 選択肢提示（A）B）C）「次のどれかを選んで」等）は使わない。',
       '- 問いかけをする場合は「最大1つ」まで。不要なら問いを置かずに進めてよい。',
     ].join('\n');
 
@@ -3628,9 +3742,9 @@ if (blockPlanText && String(blockPlanText).trim().length > 0) {
     }
   }
 
-// ✅ userマスクは rephraseEngine 側では行わない（writerCalls.ts 側に集約）
-// - ここで末尾userを潰すと、writerCalls.ts の「最後userだけ生」が成立しない
-// - MSG_TRACE の user が全部 [USER] になる原因
+// ✅ user マスクは rephraseEngine 側では行わない（writerCalls.ts 側に集約）
+// - rephraseEngine で末尾 user を潰すと、writerCalls.ts の「最後 user だけ生」が成立しない
+// - MSG_TRACE が「全 user が伏字」になってしまう主因になる
 
   console.log('[IROS/rephraseEngine][EXPR_META]', {
     traceId: debug.traceId,
@@ -4494,12 +4608,16 @@ raw = await callWriterLLM({
         });
 
         if (isTailTruncatedHeading) {
-          // ✅ 安全弁：本当に欠落っぽいときだけ従来どおり retry
+          // ✅ 末尾が見出し開始だけで途切れていても「FATALにはしない」方針に変更
+          // - retry を禁止して、renderGateway 側の open/close（補完）に任せる
+          // - ここで落とすと LLM がもう1周してコストも遅延も増えるため
           v = {
             ...(v as any),
-            ok: false,
-            level: 'FATAL',
-            reasons: Array.from(new Set([...(v?.reasons ?? []), 'BLOCK_PLAN_CONTRACT'])),
+            ok: true,
+            level: 'OK',
+            reasons: Array.from(
+              new Set([...(v?.reasons ?? []), 'BLOCK_PLAN_TAIL_TRUNCATED_SOFT']),
+            ),
           } as any;
         } else {
           // ✅ soft：retryしない（renderGateway補完へ）

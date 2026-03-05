@@ -523,7 +523,9 @@ const effectiveText = shouldDeferFinal ? '' : normText(String(effectiveSource ??
 const effectiveLen = effectiveText.length;
 
 // ✅ rewriteSeed fallback（LLM未実行でも PP が仕込んだ seed を観測できるように）
-// 優先順：llmRewriteSeed（PPの正本）→ slotPlanSeed → ctxPack.seed_text → seed_text
+// NOTE(vNext):
+// - ctxPack.seed_text / seed_text の拾い口は廃止。
+// - 優先順：llmRewriteSeed（PPの正本）→ slotPlanSeed のみ
 const exProbe: any =
   (input as any)?.meta?.extra && typeof (input as any).meta.extra === 'object'
     ? (input as any).meta.extra
@@ -532,8 +534,6 @@ const exProbe: any =
 const rewriteSeedFallbackRaw = String(
   exProbe?.llmRewriteSeed ??
     exProbe?.slotPlanSeed ??
-    exProbe?.ctxPack?.seed_text ??
-    exProbe?.seed_text ??
     '',
 ).trim();
 

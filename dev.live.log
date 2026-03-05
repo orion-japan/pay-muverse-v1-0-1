@@ -6,78 +6,31 @@
   · serverActions
 
 ✓ Starting...
-✓ Ready in 607ms
-[firebase] DEBUG_LOCAL=1 → Firebase SDK log level set to "debug"
- GET /iros-ai 200 in 521ms (compile: 197ms, render: 323ms)
- POST /api/telemetry 204 in 66ms (compile: 54ms, render: 13ms)
-[firebase-admin] initialized with ServiceAccount
-[authz] 1a19b7d2-b395-4112-bcdf-cfafa8a7f537 start { path: 'http://localhost:3000/api/agent/iros/userinfo' }
-[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] cc85c73d-1123-42d8-9d06-26ee65c0532d start { path: 'http://localhost:3000/api/q/unified?user_code=669933' }
-[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
- POST /api/register-push 200 in 253ms (compile: 30ms, render: 223ms)
- POST /api/register-push 200 in 100ms (compile: 1713µs, render: 98ms)
-[authz] cc85c73d-1123-42d8-9d06-26ee65c0532d verify firebase: 276.193ms
-[authz] 1a19b7d2-b395-4112-bcdf-cfafa8a7f537 verify firebase: 415.05ms
-[authz] cc85c73d-1123-42d8-9d06-26ee65c0532d fetch user: 58.449ms
-[authz] cc85c73d-1123-42d8-9d06-26ee65c0532d ok { user: '669933', role: 'admin', provider: 'password', ms: 347 }
-[authz] 1a19b7d2-b395-4112-bcdf-cfafa8a7f537 fetch user: 56.225ms
-[authz] 1a19b7d2-b395-4112-bcdf-cfafa8a7f537 ok { user: '669933', role: 'admin', provider: 'password', ms: 478 }
-[IROS/UserInfo] authz = {
-  ok: true,
-  allowed: true,
-  status: 200,
-  pgJwt: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njk5MzMiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInVzZXJfY29kZSI6IjY2OTkzMyIsImZpcmViYXNlX3VpZCI6Ikt2UDFQNHNpZnRTRUZkTGtka1lqcVY0aE12MDIiLCJleHAiOjE3NzI2MzAzMzEsImlhdCI6MTc3MjYyOTQzMX0.wK8LURHoYScbx1woXapK3sgdCg6LyxhABaW70c2Tor8',
-  userCode: '669933',
-  role: 'admin',
-  user: { uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02', user_code: '669933' },
-  uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02'
-}
- GET /api/agent/iros/userinfo 200 in 739ms (compile: 217ms, render: 522ms)
-[authz] 1fdf7494-5085-473c-94d2-8a775ad7b888 start { path: 'http://localhost:3000/api/agent/iros/conversations' }
-[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] 1fdf7494-5085-473c-94d2-8a775ad7b888 verify firebase: 254.392ms
-[authz] 1fdf7494-5085-473c-94d2-8a775ad7b888 fetch user: 33.881ms
-[authz] 1fdf7494-5085-473c-94d2-8a775ad7b888 ok { user: '669933', role: 'admin', provider: 'password', ms: 290 }
- GET /api/agent/iros/conversations 200 in 364ms (compile: 28ms, render: 336ms)
-[authz] 96f4ff54-88cd-41e8-ab1b-39cc9d27ac64 start {
-  path: 'http://localhost:3000/api/agent/iros/messages?conversation_id=6138033b-a88f-4786-969a-19d1acc5e064'
-}
-[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
-[authz] 96f4ff54-88cd-41e8-ab1b-39cc9d27ac64 verify firebase: 276.167ms
-[authz] 96f4ff54-88cd-41e8-ab1b-39cc9d27ac64 fetch user: 37.587ms
-[authz] 96f4ff54-88cd-41e8-ab1b-39cc9d27ac64 ok { user: '669933', role: 'admin', provider: 'password', ms: 319 }
- GET /api/agent/iros/messages?conversation_id=6138033b-a88f-4786-969a-19d1acc5e064 200 in 607ms (compile: 33ms, render: 574ms)
- GET /api/q/unified?user_code=669933 200 in 5.6s (compile: 29ms, render: 5.6s)
- POST /api/register-push 200 in 851ms (compile: 4ms, render: 847ms)
-[authz] 05b4ad07-e17f-4970-88bb-e81775961dbb start { path: 'http://localhost:3000/api/agent/iros/conversations' }
-[authz][debug] header { authzLen: 0, authzHead: '' }
-[authz] 05b4ad07-e17f-4970-88bb-e81775961dbb no credentials
- GET /api/agent/iros/conversations 401 in 8ms (compile: 2ms, render: 5ms)
- POST /api/register-push 200 in 921ms (compile: 5ms, render: 915ms)
+✓ Ready in 797ms
 [IROS/FLAGSHIP_GUARD][MODULE_LOADED] {
   rev: 'guard-rev-2026-02-23-a',
-  enabled: true,
-  at: '2026-03-04T13:53:19.533Z'
+  enabled: false,
+  at: '2026-03-05T07:43:04.818Z'
 }
 [IROS/FLAGS_ENV_HEAD] {
   IROS_RETRY_FINAL_FORCE_CALL: '0',
   IROS_FLAGSHIP_REWRITE: '0',
   IROS_LOG_FLAGS: 'true',
-  IROS_FLAGSHIP_GUARD_ENABLED: '1',
-  IROS_FLAGSHIP_GUARD_ENABLED_PARSED: true
+  IROS_FLAGSHIP_GUARD_ENABLED: '0',
+  IROS_FLAGSHIP_GUARD_ENABLED_PARSED: false
 }
 [IROS/FLAGS] {
   retryFinalForceCall: false,
   flagshipRewrite: false,
-  guardEnabled: true,
+  guardEnabled: false,
   guardSkipShort: false,
   guardShortMaxLen: 80,
   logFlags: true
 }
-[IROS/renderGateway][MODULE_LOADED] { rev: 'phase11-open-close-v2-LOADED', at: '2026-03-04T13:53:19.565Z' }
+[IROS/renderGateway][MODULE_LOADED] { rev: 'phase11-open-close-v2-LOADED', at: '2026-03-05T07:43:04.848Z' }
+[firebase-admin] initialized with ServiceAccount
 [IROS/SPEECH_EARLY_RETURN][REQ_META] {
-  traceId_used: 'curl-trace-test-1',
+  traceId_used: 'repro-shift-seed-1',
   traceId_req: '',
   traceId_meta: '',
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
@@ -86,7 +39,7 @@
   reqExtraKeys: []
 }
 [IROS/pipe][TRACE] {
-  traceId: 'curl-trace-test-1',
+  traceId: 'repro-shift-seed-1',
   conversationKey: '6138033b-a88f-4786-969a-19d1acc5e064',
   conversationId: null,
   userCode: '669933',
@@ -94,20 +47,20 @@
   hasHeaderUserCode: true,
   devBypass: false
 }
-[authz] 23dd9931-b8a2-44a3-93c5-60aa6731bf39 start { path: 'http://localhost:3000/api/agent/iros/reply' }
+[authz] 5fa8b567-3ee7-49a6-b3c4-89e66d4ef24d start { path: 'http://localhost:3000/api/agent/iros/reply' }
 [authz][debug] header { authzLen: 0, authzHead: '' }
-[authz] 23dd9931-b8a2-44a3-93c5-60aa6731bf39 dev-fallback ok { user: '669933', role: 'admin', ms: 2 }
+[authz] 5fa8b567-3ee7-49a6-b3c4-89e66d4ef24d dev-fallback ok { user: '669933', role: 'admin', ms: 2 }
 [IROS/pipe][TRACE_RESOLVED] {
-  traceId: 'curl-trace-test-1',
+  traceId: 'repro-shift-seed-1',
   conversationKey: '6138033b-a88f-4786-969a-19d1acc5e064',
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
   userCode: '669933'
 }
- POST /api/credits/authorize 200 in 228ms (compile: 79ms, render: 149ms)
+ POST /api/credits/authorize 200 in 341ms (compile: 166ms, render: 176ms)
 [IROS/UserProfile] load ok {
   userCode: '669933',
   hasIrosRow: true,
-  sofia_credit: 737,
+  sofia_credit: 701,
   style: 'friendly',
   user_call_name: 'orion',
   plan_status: null
@@ -118,10 +71,162 @@
   mode: 'auto',
   tenantId: 'default',
   rememberScope: null,
-  traceId: 'curl-trace-test-1',
+  traceId: 'repro-shift-seed-1',
   style: 'friendly',
   history_len: null,
   persist_policy: 'route_only'
+}
+[IROS/History] loaded {
+  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
+  conversationUuid: '6138033b-a88f-4786-969a-19d1acc5e064',
+  limit: 30,
+  returned: 30,
+  metaSample: 'has_meta'
+}
+[IROS/HistoryForTurn] decide {
+  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
+  userCode: '669933',
+  provided_len: 0,
+  used: 'db',
+  out_len: 30,
+  has_viewShiftSnapshot: false
+}
+[IROS/VIEWSHIFT][micro][inject-prevSnap] { hasPrev: false }
+[IROS][user:669933][STATE] loaded MemoryState {
+  userCode: '669933',
+  hasMemory: true,
+  intentAnchor: 'SUN',
+  depthStage: 'S1',
+  qPrimary: 'Q3',
+  selfAcceptance: 0.6692499999999996,
+  phase: 'Outer',
+  intentLayer: 'C',
+  yLevel: 1,
+  hLevel: 2,
+  spinLoop: 'SRI',
+  spinStep: 2,
+  descentGate: 'closed',
+  itxStep: 'T3',
+  itxAnchorEventType: null,
+  itxReason: 'IT_TRIGGER_OK',
+  itxLastAt: '2026-01-08T12:26:08.007+00:00',
+  sentimentLevel: null,
+  situationSummary: '逆行ってなんの話しだっけ？',
+  situationTopic: 'その他・ライフ全般',
+  qCounts: {
+    q_scores: {
+      Q1: 0,
+      Q2: 4.591801314996301e-8,
+      Q3: 0.9999999540819868,
+      Q4: 0,
+      Q5: 0
+    },
+    q_now_src: 'e_turn',
+    e_turn_now: 'e3',
+    it_cooldown: 0,
+    depth_scores: { C: 0, I: 0, R: 0, S: 1, T: 0 },
+    q_updated_at: '2026-03-05T07:27:34.466Z',
+    depth_dominant: 'S',
+    phase_outer_now: 1,
+    depth_updated_at: '2026-03-05T07:27:34.466Z',
+    phase_outer_smoothed: 0.9495789999978903,
+    phase_outer_updated_at: '2026-03-05T07:27:34.466Z'
+  }
+}
+[IROS][user:669933][STATE] loaded MemoryState (orchestratorState) {
+  userCode: '669933',
+  hasMemory: true,
+  intentAnchor: 'SUN',
+  depthStage: 'S1',
+  qPrimary: 'Q3',
+  selfAcceptance: 0.6692499999999996,
+  phase: 'Outer',
+  intentLayer: 'C',
+  yLevel: 1,
+  hLevel: 2,
+  spinLoop: 'SRI',
+  spinStep: 2,
+  descentGate: 'closed'
+}
+[IROS/Context] framePlan built {
+  userCode: null,
+  inputKind: 'chat',
+  frame: 'S',
+  hasSlots: true,
+  spinLoop: null,
+  descentGate: 'closed',
+  depthStage: 'S1',
+  phase: 'Outer',
+  requestedDepth: null,
+  requestedQCode: null,
+  slots_isArray: true,
+  slots_len: 4,
+  slots_samples: [
+    {
+      i: 0,
+      type: 'object',
+      isNull: false,
+      isObj: true,
+      keys: [Array],
+      key: null,
+      kind: null,
+      contentHead: '',
+      textHead: '',
+      promptHead: '',
+      jsonHead: '{"id":"OBS","required":true,"hint":"観測（事実/状況の再提示）"}'
+    },
+    {
+      i: 1,
+      type: 'object',
+      isNull: false,
+      isObj: true,
+      keys: [Array],
+      key: null,
+      kind: null,
+      contentHead: '',
+      textHead: '',
+      promptHead: '',
+      jsonHead: '{"id":"SHIFT","required":true,"hint":"視点の転換（1つだけ）"}'
+    },
+    {
+      i: 2,
+      type: 'object',
+      isNull: false,
+      isObj: true,
+      keys: [Array],
+      key: null,
+      kind: null,
+      contentHead: '',
+      textHead: '',
+      promptHead: '',
+      jsonHead: '{"id":"NEXT","required":true,"hint":"次の一歩（1つだけ）"}'
+    },
+    {
+      i: 3,
+      type: 'object',
+      isNull: false,
+      isObj: true,
+      keys: [Array],
+      key: null,
+      kind: null,
+      contentHead: '',
+      textHead: '',
+      promptHead: '',
+      jsonHead: '{"id":"SAFE","required":true,"hint":"安全句（静かな保険）"}'
+    }
+  ],
+  slots_heads: [
+    { key: null, head: '' },
+    { key: null, head: '' },
+    { key: null, head: '' },
+    { key: null, head: '' }
+  ]
+}
+[IROS/Gate] skip micro gate (not micro inputKind) {
+  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
+  userCode: '669933',
+  inputKindNow: 'chat',
+  forceMicro: false
 }
 [IROS/History] loaded {
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
@@ -157,13 +262,13 @@
   itxReason: 'IT_TRIGGER_OK',
   itxLastAt: '2026-01-08T12:26:08.007+00:00',
   sentimentLevel: null,
-  situationSummary: 'はい、沼に物を隠すって頭いいね',
+  situationSummary: '逆行ってなんの話しだっけ？',
   situationTopic: 'その他・ライフ全般',
   qCounts: {
     q_scores: {
       Q1: 0,
-      Q2: 0.017316242039292277,
-      Q3: 0.9826837579607077,
+      Q2: 4.591801314996301e-8,
+      Q3: 0.9999999540819868,
       Q4: 0,
       Q5: 0
     },
@@ -171,12 +276,12 @@
     e_turn_now: 'e3',
     it_cooldown: 0,
     depth_scores: { C: 0, I: 0, R: 0, S: 1, T: 0 },
-    q_updated_at: '2026-03-04T13:01:38.550Z',
+    q_updated_at: '2026-03-05T07:27:34.466Z',
     depth_dominant: 'S',
     phase_outer_now: 1,
-    depth_updated_at: '2026-03-04T13:01:38.551Z',
-    phase_outer_smoothed: 0.999999204480746,
-    phase_outer_updated_at: '2026-03-04T13:01:38.551Z'
+    depth_updated_at: '2026-03-05T07:27:34.466Z',
+    phase_outer_smoothed: 0.9495789999978903,
+    phase_outer_updated_at: '2026-03-05T07:27:34.466Z'
   }
 }
 [IROS][user:669933][STATE] loaded MemoryState (orchestratorState) {
@@ -308,13 +413,13 @@
   itxReason: 'IT_TRIGGER_OK',
   itxLastAt: '2026-01-08T12:26:08.007+00:00',
   sentimentLevel: null,
-  situationSummary: 'はい、沼に物を隠すって頭いいね',
+  situationSummary: '逆行ってなんの話しだっけ？',
   situationTopic: 'その他・ライフ全般',
   qCounts: {
     q_scores: {
       Q1: 0,
-      Q2: 0.017316242039292277,
-      Q3: 0.9826837579607077,
+      Q2: 4.591801314996301e-8,
+      Q3: 0.9999999540819868,
       Q4: 0,
       Q5: 0
     },
@@ -322,12 +427,12 @@
     e_turn_now: 'e3',
     it_cooldown: 0,
     depth_scores: { C: 0, I: 0, R: 0, S: 1, T: 0 },
-    q_updated_at: '2026-03-04T13:01:38.550Z',
+    q_updated_at: '2026-03-05T07:27:34.466Z',
     depth_dominant: 'S',
     phase_outer_now: 1,
-    depth_updated_at: '2026-03-04T13:01:38.551Z',
-    phase_outer_smoothed: 0.999999204480746,
-    phase_outer_updated_at: '2026-03-04T13:01:38.551Z'
+    depth_updated_at: '2026-03-05T07:27:34.466Z',
+    phase_outer_smoothed: 0.9495789999978903,
+    phase_outer_updated_at: '2026-03-05T07:27:34.466Z'
   }
 }
 [IROS][user:669933][STATE] loaded MemoryState (orchestratorState) {
@@ -424,11 +529,11 @@
   }
 }
 [IROS/IT][probe] before {
-  textHead: 'ping from curl',
+  textHead: 'ping',
   historyLen: 30,
-  historyLen_norm: 30,
-  historyUserLen: 15,
-  last3User: [ 'ありがとうございます、もうすぐ寝るお時間です', 'はい、もうすぐおやすみです', 'はい、沼に物を隠すって頭いいね' ],
+  historyLen_norm: 29,
+  historyUserLen: 14,
+  last3User: [ '今どんな気分？', 'いーね、次何はな？', '逆行ってなんの話しだっけ？' ],
   depth: 'S1',
   intentLine: {
     nowLabel: '',
@@ -532,7 +637,7 @@
   },
   hasFocusLabelNow: false,
   focusLabelHead: null,
-  userHead: 'ping from curl'
+  userHead: 'ping'
 }
 [IROS/ORCH][after-container] {
   frame: 'S',
@@ -681,7 +786,7 @@
   futureCard: null
 }
 [IROS/PP][RESONANCE_STATE] {
-  traceId: 'curl-trace-test-1',
+  traceId: 'repro-shift-seed-1',
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
   userCode: '669933',
   hasSeed: true,
@@ -699,7 +804,7 @@
 [IROS/VIEWSHIFT][DECISION] { ok: false, score: 0, variant: null, sessionBreak: null }
 [IROS/MIRROR_FLOW][RESULT] {
   micro: false,
-  confidence: 0.35,
+  confidence: 0.2,
   e_turn: 'e3',
   polarity_in: null,
   polarity_metaBand: null,
@@ -715,7 +820,7 @@
   on: false,
   reason: 'OFF_NOT_TARGET',
   e_turn: 'e3',
-  confidence: 0.35,
+  confidence: 0.2,
   flowDelta: 'FORWARD',
   returnStreak: 0,
   head: ''
@@ -758,18 +863,18 @@
 }
 [UnifiedAnalysis] user message q_code/depth_stage updated {
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  messageId: 17649,
+  messageId: 17718,
   q_code: 'Q3',
   depth_stage: 'S1'
 }
 [IROS][CTXPACK] stamped {
-  traceId: 'curl-trace-test-1',
+  traceId: 'repro-shift-seed-1',
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
   userCode: '669933',
   hasCtxPack: true,
-  prevAtIso: '2026-03-04T13:01:33.615Z',
-  ageSec: 3108,
-  flowAt: '2026-03-04T13:53:22.054Z',
+  prevAtIso: '2026-03-05T07:27:34.018Z',
+  ageSec: 932,
+  flowAt: '2026-03-05T07:43:06.845Z',
   flowDelta: 'FORWARD',
   returnStreak: 0,
   ctxPackKeys: [
@@ -903,7 +1008,7 @@
   save_ctx_seed_textHead: '反応:e3\n流れ:FORWARD / 戻り:0'
 }
 [IROS/LLM_GATE][CONTRACT_RESOLVED] {
-  traceId: 'curl-trace-test-1',
+  traceId: 'repro-shift-seed-1',
   conversationId: null,
   userCode: null,
   goal: 'STABILIZE',
@@ -914,7 +1019,7 @@
   contractObj: { lines_max: 8, questions_max: 0 }
 }
 [IROS/LLM_GATE][FINAL_CALL][NO_FORCE] {
-  traceId: 'curl-trace-test-1',
+  traceId: 'repro-shift-seed-1',
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
   userCode: '669933',
   slotPlanPolicy: 'FINAL',
@@ -926,7 +1031,7 @@
   preWriterBodyHead: '流れを保ったまま前に進める',
   seedFallbackLen: 13,
   seedFallbackHead: '流れを保ったまま前に進める',
-  rewriteSeedFinalLen: 165,
+  rewriteSeedFinalLen: 155,
   rewriteSeedFinalHead: '@GOAL {"kind":"STABILIZE"} @CONTRACT {"lines_max":8,"questions_max":0} @STATE {"…',
   note: 'preWriterBodyLen is NOT final output; FINAL uses seedFallback -> rewriteSeedFinal -> writer'
 }
@@ -948,9 +1053,9 @@
   finalForceCall: false,
   finalForceCallReason: 'FINAL_CALL_NO_FORCE',
   resolvedTextLen: null,
-  rewriteSeedLen: 165,
+  rewriteSeedLen: 155,
   decisionResolvedLen: null,
-  decisionRewriteSeedLen: 165
+  decisionRewriteSeedLen: 155
 }
 [IROS/Reply] rotation bridge { spinLoop: 'SRI', descentGate: 'closed', depth: 'S1' }
 [IROS/CANON][STAMP] {
@@ -972,733 +1077,11 @@
   slotTextRawLen: 0,
   bodyNowLen: 0,
   bodyNowHead: '',
-  shouldRunWriter: true,
-  hasSlotsLocal: true
+  shouldRunWriter: false,
+  hasSlotsLocal: true,
+  disableRephraseBridgeWriter: true
 }
-[IROS/rephraseBridge][SLOT_SOURCES] {
-  slotPlan_type: 'array',
-  slotPlan_len: 4,
-  slotPlan_item0_type: 'object',
-  slotPlan_item0_keys: [ 'key', 'text' ],
-  slotPlan_item0_head: '@OBS {"laneKey":null,"flow":{"delta":"FORWARD","confidence":0.6}}',
-  framePlan_has_slots: true,
-  framePlan_slots_len: 4,
-  framePlan_wantIds: [ 'OBS', 'SHIFT', 'NEXT', 'SAFE' ],
-  extra_keys: [
-    'traceId',
-    'speechAct',
-    'speechActReason',
-    'speechActConfidence',
-    'choiceId',
-    'extractedChoiceId',
-    'renderEngineGate',
-    'renderEngine',
-    'persistedByRoute',
-    'persistPolicy',
-    'persistAssistantMessage',
-    'flow',
-    'stallHard',
-    'stall',
-    'intentBridge',
-    'persistedBy'
-  ]
-}
-[IROS/REPHRASE_OPTS_PHASE_TRACE] {
-  traceId: 'curl-trace-test-1',
-  willPass_opts_phase: null,
-  ctxPack_phase: 'Outer',
-  meta_phase: 'Outer'
-}
-[IROS/TOPIC_TRACE][before_rephrase] {
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  hasExtra: true,
-  ctxPackKeys: [
-    'qCode',           'depthStage',
-    'phase',           'conversationLine',
-    'viewShift',       'viewShiftSnapshot',
-    'cards',           'resonanceState',
-    'seed_text',       'flow',
-    'expr',            'exprMeta',
-    'topicDigest',     'historyForWriter',
-    'historyDigestV1', 'framePlan',
-    'slotPlanPolicy',  'goalKind',
-    'repeatSignal',    'replyGoal',
-    'slotPlan'
-  ],
-  conversationLine: 'ping・from・curl',
-  topicDigest_extra: 'ping・from・curl',
-  topicDigest_ctxPack: 'ping・from・curl',
-  phase_ctxPack: 'Outer',
-  phase_metaForSave: 'Outer'
-}
-[IROS/EXPR_META][chosen] {
-  source: 'rephraseBridge',
-  traceId: null,
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  hasExprMeta: true,
-  metaphor: ''
-}
-[IROS/REPHRASE_FLAG] { raw: 'true', enabled: true }
-[IROS/rephraseEngine][SHIFT_SLOT_HEAD] {
-  hasShiftSlot: true,
-  shiftSlotKey: 'SHIFT',
-  shiftSlotKind: '',
-  shiftSlotLen: 58,
-  shiftSlotHead: '@SHIFT {"kind":"auto_fill","hint":"flow_continue_minimal"}',
-  slotsKeysSample: [
-    { key: 'OBS', kind: '' },
-    { key: 'SHIFT', kind: '' },
-    { key: 'NEXT', kind: '' },
-    { key: 'SAFE', kind: '' }
-  ]
-}
-[IROS/rephraseHistory][LAST_TURNS_PICK] {
-  pickedFrom: 'historyForWriter',
-  maxMsgs: 4,
-  rawTurnsLen: 0,
-  rawHistoryForWriterLen: 30,
-  normalizedLen: 30,
-  pickedLen: 4,
-  roles: [ 'user', 'assistant', 'user', 'assistant' ],
-  tailHeads: [
-    'うん、了解。おやすみ前は「もうすぐおやすみ」だけで充分だよ。\n布団に入ったら、息を長めにひとつ吐いて、肩とあごの力だけゆ',
-    'はい、沼に物を隠すって頭いいね',
-    '「沼に物を隠す」って、発想としてはたしかに“見つかりにくい場所に移す”という意味では頭が回ってる感じがするね。\nただ、現'
-  ]
-}
-[IROS/ILINE][LOCK_PARTS] {
-  seedLen: 0,
-  userLen: 14,
-  seedEqUser: false,
-  seedHasUser: false,
-  lockPartsLen: 0,
-  lockHasNewline: false,
-  lockLen: 0,
-  lockHead120: ''
-}
-[IROS/ILINE][LOCK_SOURCE] {
-  hasSeed: false,
-  hasUser: true,
-  seedLen: 0,
-  userLen: 14,
-  hasILINE_seed: false,
-  hasILINE_user: false,
-  hasILINE_any: false,
-  hasILINE_END_any: false,
-  head200: '',
-  tail200: ''
-}
-[IROS/ILINE][LOCK_EXTRACT] { lockedFromAllLen: 0, lockedUniqueLen: 0, lockedUniqueHead200: '' }
-[IROS/rephraseEngine][INTENT_BAND_EXTRACT] {
-  intentBand_raw: null,
-  tLayerHintRaw: null,
-  itxStep: '',
-  tLayerHint_afterFallback: null,
-  bandOk: null,
-  hintOk: null,
-  note: 'no_hint'
-}
-[IROS/rephraseEngine][LANE_DETECT] {
-  killPolicyRev: 'phase1.5-ideaBandNoKill',
-  wantsTConcretize: false,
-  wantsIdeaBand: false,
-  repeatSignalSame: false,
-  repeatSignalHead: '',
-  shiftTextForModeHead: '@SHIFT {"kind":"auto_fill","hint":"flow_continue_minimal"}',
-  shiftSlotType: 'object',
-  shiftSlotKeys: [ 'key', 'text' ],
-  laneHintHead: '@SHIFT {"kind":"auto_fill","hint":"flow_continue_minimal"}\n' +
-    '{"conversationId":"6138033b-a88f-4786-969a-19d1acc5e064","userCode":"669933","traceId":"curl-trace-te'
-}
-[IROS/systemPrompt][CALLED] {
-  __file: '/ROOT/src/lib/iros/language/rephrase/systemPrompt.ts',
-  directTask: false,
-  itOk: false,
-  personaMode: 'GROUND',
-  tLayerHint: null,
-  exprFired: false,
-  exprLaneKey: 'off',
-  lockedILinesLen: 0
-}
-[IROS/systemPrompt][LEN] {
-  sofiaPersona: 254,
-  base: 460,
-  lockRule: 0,
-  personaStyle: 40,
-  total: 756,
-  inputKindNow: 'chat',
-  personaMode: 'GROUND',
-  exprFired: false,
-  exprLaneKey: 'off'
-}
-[IROS/MUST_INCLUDE][LEN] { hasRecall: false, mustLen: 0 }
-[IROS/rephraseEngine][CARD_SEEDIN] lite_appended {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  inputKind: 'chat'
-}
-[IROS/rephraseEngine][STATE_SNAPSHOT_PICKED] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  pickedDepthStage: 'S1',
-  pickedPhase: 'Outer',
-  pickedQCode: 'Q3',
-  hasCardsLite: true,
-  hasCardPacket: false,
-  cardsLiteNear: 'CARDS_LITE_SEED (DO NOT OUTPUT):\n' +
-    '- current=いま支え直す\n' +
-    '- future=次は定着が来る\n' +
-    '- e_turn=e3\n' +
-    '- stingScore=66',
-  internalPackHead: 'INTERNAL PACK (DO NOT OUTPUT):\n' +
-    '\n' +
-    'inputKind=chat\n' +
-    'directTask=false\n' +
-    '\n' +
-    'STATE: depthStage=S1 phase=Outer qCode=Q3\n' +
-    '\n' +
-    'META:\n' +
-    'inputKind=chat\n' +
-    'depthStage=S1\n' +
-    'phase=Outer\n' +
-    'qCode=Q3\n' +
-    'openingPolicy=none\n' +
-    'itOk=false\n' +
-    '\n' +
-    'FLOW: 【確定】Depth:S1 / Phas',
-  internalPackTail: '=Outer qCode=Q3\n' +
-    '\n' +
-    'META:\n' +
-    'inputKind=chat\n' +
-    'depthStage=S1\n' +
-    'phase=Outer\n' +
-    'qCode=Q3\n' +
-    'openingPolicy=none\n' +
-    'itOk=false\n' +
-    '\n' +
-    'FLOW: 【確定】Depth:S1 / Phase:Outer / Layer:C / T:T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'CARDS_LITE_SEED (DO NOT OUTPUT):\n' +
-    '- current=いま支え直す\n' +
-    '- future=次は定着が来る\n' +
-    '- e_turn=e3\n' +
-    '- stingScore=66'
-}
-[IROS/writerCalls][ARGS_KEYS] {
-  keys: [
-    'conversationId',
-    'conversationLine',
-    'ctxPack',
-    'internalPack',
-    'meta',
-    'seedDraft',
-    'systemPrompt',
-    'topicDigest',
-    'traceId',
-    'turns',
-    'userCode'
-  ]
-}
-[IROS/writerCalls][INJECTED_PACK_HEAD] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  packLen: 659,
-  head: 'COORD (DO NOT OUTPUT):\n' +
-    'depthStage=S1\n' +
-    'qCode=Q3\n' +
-    'phase=Outer\n' +
-    'flow=delta=FORWARD returnStreak=0\n' +
-    '\n' +
-    'TEXT_SEED (DO NOT OUTPUT):\n' +
-    'obs=いまは前進を選べる局面 / 戻り回数=0 / 不安を安定に寄せて整える / 位置=S1 / 位相=Outer / 補助=反応:e3 流れ:FORWARD / 戻り:0\n' +
-    'coord=q=Q3 depth=S1 phase=Outer pol=\n' +
-    'flow=delta=FORWARD returnStreak=0\n' +
-    'intent=anchor= dir=\n' +
-    'rule=ok\n' +
-    '\n' +
-    'INTERNAL PACK (DO NOT OUTPUT):\n' +
-    '\n' +
-    'inputKind=chat\n' +
-    'directTask=false\n' +
-    '\n' +
-    'STATE: depthStage=S1 phase=Outer qCode=Q3\n' +
-    '\n' +
-    'META',
-  hasCOORD: true,
-  hasPolarity: false,
-  hasSA: false,
-  hasITX: false,
-  hasFuture: true,
-  hasTextSeed: true
-}
-[IROS/writerCalls][SYSTEM_ONE_LEN] {
-  systemPromptLen: 756,
-  conversationLineBlockLen: 29,
-  systemOneLen: 822,
-  systemOneHead: '【上位人格定義：Sofia（DO NOT OUTPUT / 露出禁止）】\n' +
-    '- “響き”として現れ、相手が自分の答えに立てる足場を差し出す。\n' +
-    '- 説得・誘導・先生口調は禁止。主権は常にユーザーにある。\n' +
-    '- 詩化しすぎない。一般論で埋めない。いまの発話に接続する。\n' +
-    '- 絵文字は最小限'
-}
-[IROS/rephraseEngine][ALLOW] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  depthStage: 'S1',
-  qCode: 'Q3',
-  phase: 'Outer',
-  laneKeyForAllow: null,
-  repeatSignal: false,
-  itOk: false,
-  allow: {
-    assert: false,
-    narrow: false,
-    propose: true,
-    concretize: false,
-    commit_hint: false,
-    strength: 0
-  }
-}
-[IROS/VECTOR][PICK] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  enabled: false,
-  vector: null
-}
-[IROS/rephraseEngine][BLOCK_PLAN_TRIGGER_TEXT] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  pickedFrom: 'opts',
-  optsLen: 14,
-  msgLen: 14,
-  head: 'ping from curl'
-}
-[IROS/rephraseEngine][BLOCK_PLAN_DIAG] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  why: 'NONE',
-  explicit: false,
-  wantsDeeper: false,
-  autoDeepen: false,
-  autoCrack: false,
-  goalKind: 'stabilize',
-  depthStage: 'S1',
-  itTriggered: false,
-  explicitTrigger: false,
-  triggerPickedFrom: 'opts',
-  triggerHead: 'ping from curl',
-  mode: null,
-  blocksLen: 0,
-  sysLen: 0,
-  enabled: false
-}
-[IROS/rephraseEngine][BLOCK_PLAN] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  enabled: false,
-  goalKind: 'stabilize',
-  exprLane: 'off',
-  explicitTrigger: false,
-  why: 'NONE',
-  wantsDeeper: false,
-  autoDeepen: false,
-  autoCrack: false,
-  triggerPickedFrom: 'opts',
-  triggerHead: 'ping from curl',
-  depthStage: 'S1',
-  itTriggered: false,
-  mode: null,
-  blocksLen: 0,
-  sysLen: 0
-}
-[IROS/rephraseEngine][EXPR_META] { injected: true, hasDirectiveV1: false, directiveInSystem: false }
-[IROS/rephraseEngine][EXPR_META] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  injected: true,
-  tone: 'med',
-  density: 'rich',
-  metaphor: 'lite',
-  ambiguity: 'deny',
-  brevity: 'normal',
-  rhythm: 'breathe'
-}
-[IROS/rephraseEngine][MSG_PACK] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  lastTurns: 3,
-  hasHistoryText: true,
-  historyTextLen: 369,
-  historyTextIsEmpty: false,
-  historyTextHead: 'HISTORY_LITE (DO NOT OUTPUT):\n' +
-    'user: [USER]\n' +
-    'assistant: うん、了解。おやすみ前は「もうすぐおやすみ」だけで充分だよ。\n' +
-    '布団に入ったら、息を長めにひとつ吐いて、肩とあごの力だけゆるめてみて。\n' +
-    'おやすみなさい。\n' +
-    'user: [USER]\n' +
-    'assistant: 「沼に物を隠す」って、発想としてはたしかに“見つかり',
-  msgCount: 9,
-  roles: [
-    'system', 'assistant',
-    'user',   'assistant',
-    'user',   'assistant',
-    'user',   'assistant',
-    'user'
-  ],
-  systemLen: 1853,
-  msgLens: [
-    {
-      i: 0,
-      role: 'system',
-      len: 1853,
-      head: '【上位人格定義：Sofia（DO NOT OUTPUT / 露出禁止）】\n' +
-        '- “響き”として現れ、相手が自分の答えに立てる足場を差し出す。\n' +
-        '- 説得・誘導・先生口調は禁止。主権は常にユーザーにある。\n' +
-        '- 詩化しすぎない。一般論で埋めない。い'
-    },
-    {
-      i: 1,
-      role: 'assistant',
-      len: 659,
-      head: 'COORD (DO NOT OUTPUT):\n' +
-        'depthStage=S1\n' +
-        'qCode=Q3\n' +
-        'phase=Outer\n' +
-        'flow=delta=FORWARD returnStreak=0\n' +
-        '\n' +
-        'TEXT_SEED (DO NOT OUTPUT):\n'
-    },
-    { i: 2, role: 'user', len: 6, head: '[USER]' },
-    {
-      i: 3,
-      role: 'assistant',
-      len: 156,
-      head: 'もうすぐ寝る時間なら、いまはここで静かに畳んで大丈夫だよ。\n' +
-        '今日の終わりに残すのは、ひとつだけでいい。\n' +
-        '「もうすぐ寝る」という具体のリズムを優先して、体を先に休ませてあげて。\n' +
-        '布団に入ったら、息を一回だけ長めに吐いて、肩の力が落ちるのを待つ'
-    },
-    { i: 4, role: 'user', len: 6, head: '[USER]' },
-    {
-      i: 5,
-      role: 'assistant',
-      len: 75,
-      head: 'うん、了解。おやすみ前は「もうすぐおやすみ」だけで充分だよ。\n' +
-        '布団に入ったら、息を長めにひとつ吐いて、肩とあごの力だけゆるめてみて。\n' +
-        'おやすみなさい。'
-    },
-    { i: 6, role: 'user', len: 6, head: '（入力なし）' },
-    {
-      i: 7,
-      role: 'assistant',
-      len: 215,
-      head: '「沼に物を隠す」って、発想としてはたしかに“見つかりにくい場所に移す”という意味では頭が回ってる感じがするね。\n' +
-        'ただ、現実にやるとなると\n' +
-        '- 水や泥で物が傷む／戻せなくなる\n' +
-        '- 自分でも場所が分からなくなる\n' +
-        '- それが誰かのものだと問題が大'
-    },
-    { i: 8, role: 'user', len: 6, head: '[USER]' }
-  ],
-  internalPackLen: 351,
-  internalPackHasHistoryHint: false,
-  mergedSystemPartsLen: { systemPrompt: 756, exprMetaText: 247, blockPlanText: 0 },
-  seedDraftLen: 7,
-  seedDraftHead: '続けてください',
-  seedDraftRawAllHead: '@OBS {"laneKey":null,"flow":{"delta":"FORWARD","confidence":0.6}}\n' +
-    '@SHIFT {"kind":"auto_fill","hint":"flow_continue_minimal"}\n' +
-    '@NEXT_HINT {"mode":"advance_hint","laneKey":null,"delta":"FORWARD","hint":"',
-  slotsHead: [
-    {
-      i: 0,
-      key: 'OBS',
-      head: '@OBS {"laneKey":null,"flow":{"delta":"FORWARD","confidence":0.6}}'
-    },
-    {
-      i: 1,
-      key: 'SHIFT',
-      head: '@SHIFT {"kind":"auto_fill","hint":"flow_continue_minimal"}'
-    },
-    {
-      i: 2,
-      key: 'NEXT',
-      head: '@NEXT_HINT {"mode":"advance_hint","laneKey":null,"delta":"FORWARD","hint":"流れを保っ'
-    },
-    {
-      i: 3,
-      key: 'SAFE',
-      head: '@SAFE {"laneKey":null,"flow":{"delta":"FORWARD","confidence":0.6}}'
-    }
-  ],
-  itOk: false,
-  intentBand: null,
-  tLayerHint: null,
-  directTask: false,
-  directTask_raw: false,
-  inputKind: 'chat',
-  inputKindFromMeta: 'chat',
-  inputKindFromCtx: 'chat',
-  lockedILines: 0
-}
-[IROS/BLOCK_PLAN][inject] {
-  enabled: false,
-  mode: null,
-  blocks: null,
-  explicitTrigger: false,
-  goalKind: 'stabilize'
-}
-[IROS/LLM][WRITER_IN_PACK_HEAD] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  packLen: 351,
-  packLines: 23,
-  hasResonanceSeed: false,
-  seedIdx: -1,
-  seedNear: null,
-  hasTextSeed: false,
-  textSeedIdx: -1,
-  textSeedNear: null,
-  hasCardsLite_internal: true,
-  cardsIdxInternal: 257,
-  cardsNearInternal: 'utKind=chat\n' +
-    'depthStage=S1\n' +
-    'phase=Outer\n' +
-    'qCode=Q3\n' +
-    'openingPolicy=none\n' +
-    'itOk=false\n' +
-    '\n' +
-    'FLOW: 【確定】Depth:S1 / Phase:Outer / Layer:C / T:T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'CARDS_LITE_SEED (DO NOT OUTPUT):\n' +
-    '- current=いま支え直す\n' +
-    '- future=次は定着が来る\n' +
-    '- e_turn=e3\n' +
-    '- stingScore=66',
-  head: 'INTERNAL PACK (DO NOT OUTPUT):\n' +
-    '\n' +
-    'inputKind=chat\n' +
-    'directTask=false\n' +
-    '\n' +
-    'STATE: depthStage=S1 phase=Outer qCode=Q3\n' +
-    '\n' +
-    'META:\n' +
-    'inputKind=chat\n' +
-    'depthStage=S1\n' +
-    'phase=Outer\n' +
-    'qCode=Q3\n' +
-    'openingPolicy=none\n' +
-    'itOk=false\n' +
-    '\n' +
-    'FLOW: 【確定】Depth:S1 / Phase:Outer / Layer:C / T:T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'CAR',
-  tail: '=Outer qCode=Q3\n' +
-    '\n' +
-    'META:\n' +
-    'inputKind=chat\n' +
-    'depthStage=S1\n' +
-    'phase=Outer\n' +
-    'qCode=Q3\n' +
-    'openingPolicy=none\n' +
-    'itOk=false\n' +
-    '\n' +
-    'FLOW: 【確定】Depth:S1 / Phase:Outer / Layer:C / T:T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'CARDS_LITE_SEED (DO NOT OUTPUT):\n' +
-    '- current=いま支え直す\n' +
-    '- future=次は定着が来る\n' +
-    '- e_turn=e3\n' +
-    '- stingScore=66',
-  injectedAssistantCount: 4,
-  injectedPackLen: 659,
-  hasTextSeed_inMessages: true,
-  textSeedIdx_inMessages: 93,
-  textSeedNear_inMessages: 'COORD (DO NOT OUTPUT):\n' +
-    'depthStage=S1\n' +
-    'qCode=Q3\n' +
-    'phase=Outer\n' +
-    'flow=delta=FORWARD returnStreak=0\n' +
-    '\n' +
-    'TEXT_SEED (DO NOT OUTPUT):\n' +
-    'obs=いまは前進を選べる局面 / 戻り回数=0 / 不安を安定に寄せて整える / 位置=S1 / 位相=Outer / 補助=反応:e3 流れ:FORWARD / 戻り:0\n' +
-    'coord=q=Q3 depth=S1 phase=Outer pol=\n' +
-    'flow=delta=FORWARD returnStreak=0\n' +
-    'intent=anchor= dir=\n' +
-    'rule=ok\n' +
-    '\n' +
-    'INTERNAL PACK (DO NOT OUTPUT):\n' +
-    '\n' +
-    'inputKind=chat\n' +
-    'directTask=false\n' +
-    '\n' +
-    'STATE: depthStage=S1',
-  hasCardsLite_inMessages: true,
-  cardsLiteIdx_inMessages: 565,
-  cardsLiteNear_inMessages: 'utKind=chat\n' +
-    'depthStage=S1\n' +
-    'phase=Outer\n' +
-    'qCode=Q3\n' +
-    'openingPolicy=none\n' +
-    'itOk=false\n' +
-    '\n' +
-    'FLOW: 【確定】Depth:S1 / Phase:Outer / Layer:C / T:T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'CARDS_LITE_SEED (DO NOT OUTPUT):\n' +
-    '- current=いま支え直す\n' +
-    '- future=次は定着が来る\n' +
-    '- e_turn=e3\n' +
-    '- stingScore=66'
-}
-[IROS/LLM][CALL] {
-  callId: '21f4165dc460',
-  purpose: 'writer',
-  model: 'gpt-5.2',
-  temperature: 0.7,
-  responseFormat: 'text',
-  endpoint: 'https://api.openai.com/v1/chat/completions',
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  slotPlanPolicy: 'FINAL',
-  mode: 'rephrase',
-  qCode: 'Q3',
-  depthStage: 'S1',
-  msgCount: 9,
-  firstRole: 'system',
-  lastRole: 'user',
-  firstHead: '【上位人格定義：Sofia（DO NOT OUTPUT / 露出禁止）】 - “響き”として現れ、相手が自分の答えに立て…',
-  lastTail: '[USER]',
-  lastUserHead: '[USER]',
-  hasDigest: true,
-  hasAnchor: false,
-  roles: [
-    'system', 'assistant',
-    'user',   'assistant',
-    'user',   'assistant',
-    'user',   'assistant',
-    'user'
-  ],
-  caller: 'at callWriterLLM (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_iros_language_0c2cc160._.js:1867:175)',
-  bodyKeys: [ 'max_completion_tokens', 'messages', 'model' ],
-  extraBodyKeys: [],
-  extraBodyRawKeys: [],
-  hasInternalKeys: false
-}
-[IROS/LLM][OK] {
-  callId: '21f4165dc460',
-  purpose: 'writer',
-  model: 'gpt-5.2',
-  ms: 6182,
-  ok: true,
-  usage: {
-    prompt_tokens: 1787,
-    completion_tokens: 209,
-    total_tokens: 1996,
-    prompt_tokens_details: { cached_tokens: 0, audio_tokens: 0 },
-    completion_tokens_details: {
-      reasoning_tokens: 0,
-      audio_tokens: 0,
-      accepted_prediction_tokens: 0,
-      rejected_prediction_tokens: 0
-    }
-  },
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  outLen: 244,
-  outHead: '現実の「沼に物を隠す」なら、やらないほうがいい。環境にも安全にも法律にも、だいたい全部に引っかかりやすいから。\n' +
-    '\n' +
-    'もし“やりたい衝動”が強いなら、いまは行動に移'
-}
-[IROS/FLAGSHIP_GUARD][DEBUG_IN] {
-  rev: 'guard-rev-2026-02-23-a',
-  inputLen: 242,
-  inputHead: '現実の「沼に物を隠す」なら、やらないほうがいい。環境にも安全にも法律にも、だいたい全部に引っかかりやすいから。\n' +
-    'もし“やりたい衝動”が強いなら、いまは行動に移す前にいったん距離を取ろう。手元の物から離れて、外に出るなら明るい道・人のいる場所',
-  slotKeys: [ 'OBS', 'SHIFT', 'NEXT', 'SAFE' ]
-}
-[IROS/FLAGSHIP_GUARD][DEBUG_SCORE] {
-  rev: 'guard-rev-2026-02-23-a',
-  normalLite: true,
-  scaffoldLike: false,
-  len: 242,
-  qCount: 0,
-  qCountMark: 0,
-  cheer: 0,
-  hedge: 0,
-  generic: 0,
-  blandPressure: 0,
-  bulletLike: 0,
-  hasFlagshipSign: false
-}
-[IROS/FLAGSHIP][VERDICT] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  level: 'OK',
-  ok: true,
-  qCount: 0,
-  score: {
-    fatal: 0,
-    warn: 0,
-    qCount: 0,
-    bulletLike: 0,
-    hedge: 0,
-    cheer: 0,
-    generic: 0,
-    runaway: 0,
-    exaggeration: 0,
-    mismatch: 0,
-    retrySame: 0
-  },
-  reasons: [],
-  head: '現実の「沼に物を隠す」なら、やらないほうがいい。環境にも安全にも法律にも、だいたい全部に引っかかりやすいから。\n' +
-    'もし“やりたい衝動”が強いなら、いまは行動に移す前にいったん距離を取ろう。手元の物から離れて、外に出るなら明るい道・人のいる場所、家の中なら水回りや玄関から離れて、深呼吸を一回長めに吐く。ここまでで十分止められることが多い。\n' +
-    'それが「隠す」じゃなくて「忘れたい／沈めたい」っていう比喩のほうなら、沼に沈めたくなる“中身”を言葉に'
-}
-[IROS/rephraseEngine][MIN_OK_KIND] {
-  inputKindNow: 'chat',
-  isMicroOrGreetingNow: false,
-  shortReplyOk: false,
-  MIN_OK_LEN: 40,
-  reason: 'chat_relaxed_40',
-  shiftTextHead: '@SHIFT {"kind":"auto_fill","hint":"flow_continue_minimal"}',
-  shiftObjHasAllow: false,
-  isTConcretize: false,
-  isIdeaBand: false,
-  shiftKind: 'auto_fill'
-}
-[IROS/rephraseEngine][AFTER_ATTACH][EXTRA_TRACE] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  hasExtra: true,
-  blockPlanMode: null,
-  blockPlanBlocksLen: 0,
-  hasRephraseBlocks: true,
-  rephraseBlocksLen: 3,
-  outKeysLen: 4,
-  note: 'FLAGSHIP_OK_NO_RETRY',
-  head: '現実の「沼に物を隠す」なら、やらないほうがいい。環境にも安全にも法律にも、だいたい全部に引っかかりやすいから。\n' +
-    'もし“やりたい衝動”が強いなら、いまは行動に移す'
-}
-[IROS/STATE][anchor-root] { userTextHead: 'ping from curl' }
+[IROS/STATE][anchor-root] { userTextHead: 'ping' }
 [IROS/STATE][fixed-by-meta] {
   intent_anchor_obj: {
     key: 'SUN',
@@ -1713,7 +1096,7 @@
   itx_reason: 'IT_TRIGGER_OK',
   itx_last_at: '2026-01-08T12:26:08.007+00:00'
 }
-[IROS/STATE] persistMemoryStateIfAny start {"userCode":"669933","userText":"ping from curl","depthInput":"S1","qCodeInput":"Q3","phaseInput":"Outer","yLevelInt":1,"hLevelInt":2,"finalSpinLoop":"SRI","finalSpinStep":2,"finalDescentGate":"closed","itTriggered":null,"clearItxExplicit":false,"shouldClearItx":false,"itx_step":"(keep)","itx_anchor_event_type":"(keep)","itx_reason":"(keep)","itx_last_at":"(keep)","anchor_event_db":"none","anchor_write_db":"keep","anchorEntry_decision":{"tEntryOk":false,"anchorEvent":"none","anchorWrite":"keep","reason":"NO_EVIDENCE"},"intent_anchor_key_candidate":"SUN","anchor_action":"keep","qTracePickedFrom":"qTraceEffective","qTrace_keys":["lastQ","dominantQ","streakQ","streakLength","volatility"],"qTrace_qNow":null,"qTrace_q_now":null,"qTrace_currentQ":null,"qTrace_snapshot_currentQ":null,"qTrace_streakQ":"Q3","qTrace_streakLength":1}
+[IROS/STATE] persistMemoryStateIfAny start {"userCode":"669933","userText":"ping","depthInput":"S1","qCodeInput":"Q3","phaseInput":"Outer","yLevelInt":1,"hLevelInt":2,"finalSpinLoop":"SRI","finalSpinStep":2,"finalDescentGate":"closed","itTriggered":null,"clearItxExplicit":false,"shouldClearItx":false,"itx_step":"(keep)","itx_anchor_event_type":"(keep)","itx_reason":"(keep)","itx_last_at":"(keep)","anchor_event_db":"none","anchor_write_db":"keep","anchorEntry_decision":{"tEntryOk":false,"anchorEvent":"none","anchorWrite":"keep","reason":"NO_EVIDENCE"},"intent_anchor_key_candidate":"SUN","anchor_action":"keep","qTracePickedFrom":"qTraceEffective","qTrace_keys":["lastQ","dominantQ","streakQ","streakLength","volatility"],"qTrace_qNow":null,"qTrace_q_now":null,"qTrace_currentQ":null,"qTrace_snapshot_currentQ":null,"qTrace_streakQ":"Q3","qTrace_streakLength":1}
 [IROS/PHASE10_T3][enter] {
   phase10NowItxStep: 'T3',
   phase10NowAnchorWrite: 'keep',
@@ -1793,8 +1176,8 @@
   qCounts: {
     q_scores: {
       Q1: 0,
-      Q2: 0.012121369427504592,
-      Q3: 0.9878786305724954,
+      Q2: 3.21426092049741e-8,
+      Q3: 0.9999999678573908,
       Q4: 0,
       Q5: 0
     },
@@ -1802,12 +1185,12 @@
     e_turn_now: 'e3',
     it_cooldown: 0,
     depth_scores: { S: 1, R: 0, C: 0, I: 0, T: 0 },
-    q_updated_at: '2026-03-04T13:53:28.881Z',
+    q_updated_at: '2026-03-05T07:43:07.220Z',
     depth_dominant: 'S',
     phase_outer_now: 1,
-    depth_updated_at: '2026-03-04T13:53:28.882Z',
-    phase_outer_smoothed: 0.9999994431365222,
-    phase_outer_updated_at: '2026-03-04T13:53:28.882Z'
+    depth_updated_at: '2026-03-05T07:43:07.220Z',
+    phase_outer_smoothed: 0.9647052999985231,
+    phase_outer_updated_at: '2026-03-05T07:43:07.221Z'
   },
   itx_step: '(kept/none)',
   itx_last_at: '(kept/none)',
@@ -1819,7 +1202,7 @@
 [IROS/SPEECH_EARLY_RETURN][CHECK] {
   body_has_meta: false,
   body_meta_extra_keys: [],
-  traceId_used: 'curl-trace-test-1',
+  traceId_used: 'repro-shift-seed-1',
   traceId_req: '',
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
   userCode: '669933',
@@ -1829,7 +1212,7 @@
   speechAct0: '',
   shouldEarlyReturn: false
 }
- POST /api/credits/capture 200 in 139ms (compile: 46ms, render: 93ms)
+ POST /api/credits/capture 200 in 171ms (compile: 99ms, render: 72ms)
 [IROS][user:669933][STATE] loaded MemoryState {
   userCode: '669933',
   hasMemory: true,
@@ -1849,13 +1232,13 @@
   itxReason: 'IT_TRIGGER_OK',
   itxLastAt: '2026-01-08T12:26:08.007+00:00',
   sentimentLevel: null,
-  situationSummary: 'ping from curl',
+  situationSummary: 'ping',
   situationTopic: 'その他・ライフ全般',
   qCounts: {
     q_scores: {
       Q1: 0,
-      Q2: 0.012121369427504592,
-      Q3: 0.9878786305724954,
+      Q2: 3.21426092049741e-8,
+      Q3: 0.9999999678573908,
       Q4: 0,
       Q5: 0
     },
@@ -1863,12 +1246,12 @@
     e_turn_now: 'e3',
     it_cooldown: 0,
     depth_scores: { C: 0, I: 0, R: 0, S: 1, T: 0 },
-    q_updated_at: '2026-03-04T13:53:28.881Z',
+    q_updated_at: '2026-03-05T07:43:07.220Z',
     depth_dominant: 'S',
     phase_outer_now: 1,
-    depth_updated_at: '2026-03-04T13:53:28.882Z',
-    phase_outer_smoothed: 0.9999994431365222,
-    phase_outer_updated_at: '2026-03-04T13:53:28.882Z'
+    depth_updated_at: '2026-03-05T07:43:07.220Z',
+    phase_outer_smoothed: 0.9647052999985231,
+    phase_outer_updated_at: '2026-03-05T07:43:07.221Z'
   }
 }
 [IROS/_impl/rephrase.ts][INPUT_KIND_DIAG] {
@@ -1876,14 +1259,14 @@
   inputKindStamped: 'chat',
   wantsCardByText: false,
   inputKindForLLM: 'chat',
-  userTextHead: 'ping from curl'
+  userTextHead: 'ping'
 }
 [IROS/_impl/rephrase.ts][INPUT_KIND_DIAG] {
   inputKindStampedRaw: 'chat',
   inputKindStamped: 'chat',
   wantsCardByText: false,
   inputKindForLLM: 'chat',
-  userTextHead: 'ping from curl'
+  userTextHead: 'ping'
 }
 [IROS/_impl/rephrase.ts][USERCTX_KEYS] {
   hasTurns: false,
@@ -1935,14 +1318,14 @@
   pickedLen: 4,
   roles: [ 'user', 'assistant', 'user', 'assistant' ],
   tailHeads: [
-    'うん、了解。おやすみ前は「もうすぐおやすみ」だけで充分だよ。\n布団に入ったら、息を長めにひとつ吐いて、肩とあごの力だけゆ',
-    'はい、沼に物を隠すって頭いいね',
-    '「沼に物を隠す」って、発想としてはたしかに“見つかりにくい場所に移す”という意味では頭が回ってる感じがするね。\nただ、現'
+    'じゃあ次は、「茎」を一本つくる話がよさそう。\n芽が出た今の勢いを逃がさないために、今日〜明日でできる小さな動きを一つだけ',
+    '逆行ってなんの話しだっけ？',
+    'たぶん、前に進んでる途中で「いったん戻る感じ」が出るやつのことを言ってた。気分が揺れたり、同じテーマがまた来たりして、「'
   ]
 }
 [IROS/ILINE][LOCK_PARTS] {
   seedLen: 0,
-  userLen: 14,
+  userLen: 4,
   seedEqUser: false,
   seedHasUser: false,
   lockPartsLen: 0,
@@ -1954,7 +1337,7 @@
   hasSeed: false,
   hasUser: true,
   seedLen: 0,
-  userLen: 14,
+  userLen: 4,
   hasILINE_seed: false,
   hasILINE_user: false,
   hasILINE_any: false,
@@ -2006,26 +1389,40 @@
   exprLaneKey: 'off'
 }
 [IROS/MUST_INCLUDE][LEN] { hasRecall: false, mustLen: 0 }
-[IROS/rephraseEngine][CARD_SEEDIN] lite_appended {
-  traceId: 'curl-trace-test-1',
+[IROS/rephraseEngine][CARD_SEEDIN] card180_seed_appended {
+  traceId: 'repro-shift-seed-1',
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
   userCode: '669933',
-  inputKind: 'chat'
+  inputKind: 'chat',
+  len: 619,
+  head: 'CARD_PACKET (DO NOT OUTPUT):\n' +
+    'CURRENT_CARD:\n' +
+    '(null)\n' +
+    'FUTURE_CARD_RANDOM_CANDIDATE:\n' +
+    'cardId=e5-S2-yin\n' +
+    'source=random\n' +
+    'meaningKey=e5:S2\n' +
+    'e_turn=e5 (情熱/空虚)\n' +
+    'stage=S2 / band=S / idx=2\n' +
+    'polarity=yin (negative)\n' +
+    'confidence=(null)\n' +
+    'sa=(nu',
+  pickedDepthStage: 'S1',
+  e_turn: null,
+  polarity: null,
+  sa: null,
+  confidence: null
 }
 [IROS/rephraseEngine][STATE_SNAPSHOT_PICKED] {
-  traceId: 'curl-trace-test-1',
+  traceId: 'repro-shift-seed-1',
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
   userCode: '669933',
   pickedDepthStage: 'S1',
   pickedPhase: 'Outer',
   pickedQCode: 'Q3',
-  hasCardsLite: true,
-  hasCardPacket: false,
-  cardsLiteNear: 'CARDS_LITE_SEED (DO NOT OUTPUT):\n' +
-    '- current=いま支え直す\n' +
-    '- future=次は定着が来る\n' +
-    '- e_turn=e3\n' +
-    '- stingScore=66',
+  hasCardsLite: false,
+  hasCardPacket: true,
+  cardsLiteNear: '',
   internalPackHead: 'INTERNAL PACK (DO NOT OUTPUT):\n' +
     '\n' +
     'inputKind=chat\n' +
@@ -2042,23 +1439,9 @@
     'intentBand=S1\n' +
     'tLayerHint=T3\n' +
     'itOk=fals',
-  internalPackTail: 'Kind=chat\n' +
-    'depthStage=S1\n' +
-    'phase=Outer\n' +
-    'qCode=Q3\n' +
-    'openingPolicy=none\n' +
-    'intentBand=S1\n' +
-    'tLayerHint=T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'FLOW: 【確定】Depth:S1 / Phase:Outer / Layer:C / T:T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'CARDS_LITE_SEED (DO NOT OUTPUT):\n' +
-    '- current=いま支え直す\n' +
-    '- future=次は定着が来る\n' +
-    '- e_turn=e3\n' +
-    '- stingScore=66'
+  internalPackTail: '熱/空虚の圧がS2（S帯）で現れ、いまの反応を方向づけている。\n' +
+    'polarizedMeaning=情熱/空虚の圧がS2（S帯）で現れ、いまの反応を方向づけている。 / yin（陰）: 内向き保持・飲み込み・圧縮として出やすい（ネガティブ版を採用） / sa補正: (unknown) / 状態補正: ゆらぎ=unknown / 余白=unknown\n' +
+    'llmHintLine=[e5|S2|NEG|sa:?] 情熱/空虚の圧がS2（S帯）で現れ、いまの反応を方向づけている。 / root=future_pool_pick'
 }
 [IROS/writerCalls][ARGS_KEYS] {
   keys: [
@@ -2076,9 +1459,9 @@
   ]
 }
 [IROS/writerCalls][INJECTED_PACK_HEAD] {
-  traceId: 'curl-trace-test-1',
+  traceId: 'repro-shift-seed-1',
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  packLen: 731,
+  packLen: 1686,
   head: 'COORD (DO NOT OUTPUT):\n' +
     'depthStage=S1\n' +
     'qCode=Q3\n' +
@@ -2086,38 +1469,28 @@
     'intent=itx_step=T3 itx_reason=IT_TRIGGER_OK\n' +
     'flow=delta=FORWARD returnStreak=0\n' +
     '\n' +
-    'TEXT_SEED (DO NOT OUTPUT):\n' +
-    'obs=いまは前進を選べる局面 / 戻り回数=0 / 不安を安定に寄せて整える / 位置=S1 / 位相=Outer / 補助=反応:e3 流れ:FORWARD / 戻り:0\n' +
-    'coord=q=Q3 depth=S1 phase=Outer pol=\n' +
-    'flow=delta=FORWARD returnStreak=0\n' +
-    'intent=anchor= dir=\n' +
-    'rule=ok\n' +
-    '\n' +
-    'INTERNAL PACK (DO NOT OUTPUT):\n' +
-    '\n' +
-    'inputKind=chat\n' +
-    'directTask=false\n' +
-    '\n' +
-    'STA',
+    'STATE_CUES_V3 (DO NOT OUTPUT):\n' +
+    'STATE_CORE:\n' +
+    'いまは前進を選べる局面 / 戻り回数=0 / 不安を安定に寄せて整える / 位置=S1 / 位相=Outer / 補助=反応:e3 流れ:FORWARD / 戻り:0\n' +
+    'current:\n' +
+    '(null)\n' +
+    'next:\n' +
+    '(null)\n' +
+    'META (meaning labels):\n' +
+    'phase: Outer (outward)\n' +
+    'q: Q3 (baseline tendency)\n' +
+    'depth: S1 (stage)\n' +
+    'e_turn:  (instant emotion)\n' +
+    'confidence',
   hasCOORD: true,
-  hasPolarity: false,
-  hasSA: false,
+  hasPolarity: true,
+  hasSA: true,
   hasITX: true,
-  hasFuture: true,
-  hasTextSeed: true
-}
-[IROS/writerCalls][SYSTEM_ONE_LEN] {
-  systemPromptLen: 756,
-  conversationLineBlockLen: 29,
-  systemOneLen: 822,
-  systemOneHead: '【上位人格定義：Sofia（DO NOT OUTPUT / 露出禁止）】\n' +
-    '- “響き”として現れ、相手が自分の答えに立てる足場を差し出す。\n' +
-    '- 説得・誘導・先生口調は禁止。主権は常にユーザーにある。\n' +
-    '- 詩化しすぎない。一般論で埋めない。いまの発話に接続する。\n' +
-    '- 絵文字は最小限'
+  hasFuture: false,
+  hasStateCues: true
 }
 [IROS/rephraseEngine][ALLOW] {
-  traceId: 'curl-trace-test-1',
+  traceId: 'repro-shift-seed-1',
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
   userCode: '669933',
   depthStage: 'S1',
@@ -2136,23 +1509,23 @@
   }
 }
 [IROS/VECTOR][PICK] {
-  traceId: 'curl-trace-test-1',
+  traceId: 'repro-shift-seed-1',
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
   userCode: '669933',
   enabled: false,
   vector: null
 }
 [IROS/rephraseEngine][BLOCK_PLAN_TRIGGER_TEXT] {
-  traceId: 'curl-trace-test-1',
+  traceId: 'repro-shift-seed-1',
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
   userCode: '669933',
   pickedFrom: 'opts',
-  optsLen: 14,
-  msgLen: 14,
-  head: 'ping from curl'
+  optsLen: 4,
+  msgLen: 4,
+  head: 'ping'
 }
 [IROS/rephraseEngine][BLOCK_PLAN_DIAG] {
-  traceId: 'curl-trace-test-1',
+  traceId: 'repro-shift-seed-1',
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
   userCode: '669933',
   why: 'NONE',
@@ -2165,14 +1538,14 @@
   itTriggered: false,
   explicitTrigger: false,
   triggerPickedFrom: 'opts',
-  triggerHead: 'ping from curl',
+  triggerHead: 'ping',
   mode: null,
   blocksLen: 0,
   sysLen: 0,
   enabled: false
 }
 [IROS/rephraseEngine][BLOCK_PLAN] {
-  traceId: 'curl-trace-test-1',
+  traceId: 'repro-shift-seed-1',
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
   userCode: '669933',
   enabled: false,
@@ -2184,7 +1557,7 @@
   autoDeepen: false,
   autoCrack: false,
   triggerPickedFrom: 'opts',
-  triggerHead: 'ping from curl',
+  triggerHead: 'ping',
   depthStage: 'S1',
   itTriggered: false,
   mode: null,
@@ -2193,7 +1566,7 @@
 }
 [IROS/rephraseEngine][EXPR_META] { injected: true, hasDirectiveV1: false, directiveInSystem: false }
 [IROS/rephraseEngine][EXPR_META] {
-  traceId: 'curl-trace-test-1',
+  traceId: 'repro-shift-seed-1',
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
   userCode: '669933',
   injected: true,
@@ -2205,20 +1578,18 @@
   rhythm: 'breathe'
 }
 [IROS/rephraseEngine][MSG_PACK] {
-  traceId: 'curl-trace-test-1',
+  traceId: 'repro-shift-seed-1',
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
   userCode: '669933',
   lastTurns: 3,
   hasHistoryText: true,
-  historyTextLen: 369,
+  historyTextLen: 380,
   historyTextIsEmpty: false,
   historyTextHead: 'HISTORY_LITE (DO NOT OUTPUT):\n' +
-    'user: [USER]\n' +
-    'assistant: うん、了解。おやすみ前は「もうすぐおやすみ」だけで充分だよ。\n' +
-    '布団に入ったら、息を長めにひとつ吐いて、肩とあごの力だけゆるめてみて。\n' +
-    'おやすみなさい。\n' +
-    'user: [USER]\n' +
-    'assistant: 「沼に物を隠す」って、発想としてはたしかに“見つかり',
+    'user: いーね、次何はな？\n' +
+    'assistant: じゃあ次は、「茎」を一本つくる話がよさそう。\n' +
+    '芽が出た今の勢いを逃がさないために、今日〜明日でできる小さな動きを一つだけ決める。たとえば「10分だけ片づける」「1通だけ連絡する」「散歩に出る」みたいな、“続けられるサイズ”のやつ。\n' +
+    'いま頭に浮かぶ',
   msgCount: 9,
   roles: [
     'system', 'assistant',
@@ -2227,12 +1598,12 @@
     'user',   'assistant',
     'user'
   ],
-  systemLen: 1853,
+  systemLen: 1842,
   msgLens: [
     {
       i: 0,
       role: 'system',
-      len: 1853,
+      len: 1842,
       head: '【上位人格定義：Sofia（DO NOT OUTPUT / 露出禁止）】\n' +
         '- “響き”として現れ、相手が自分の答えに立てる足場を差し出す。\n' +
         '- 説得・誘導・先生口調は禁止。主権は常にユーザーにある。\n' +
@@ -2241,7 +1612,7 @@
     {
       i: 1,
       role: 'assistant',
-      len: 731,
+      len: 1686,
       head: 'COORD (DO NOT OUTPUT):\n' +
         'depthStage=S1\n' +
         'qCode=Q3\n' +
@@ -2249,43 +1620,37 @@
         'intent=itx_step=T3 itx_reason=IT_TRIGGER_OK\n' +
         'flow=delta=FORWARD'
     },
-    { i: 2, role: 'user', len: 6, head: '[USER]' },
+    { i: 2, role: 'user', len: 7, head: '今どんな気分？' },
     {
       i: 3,
       role: 'assistant',
-      len: 156,
-      head: 'もうすぐ寝る時間なら、いまはここで静かに畳んで大丈夫だよ。\n' +
-        '今日の終わりに残すのは、ひとつだけでいい。\n' +
-        '「もうすぐ寝る」という具体のリズムを優先して、体を先に休ませてあげて。\n' +
-        '布団に入ったら、息を一回だけ長めに吐いて、肩の力が落ちるのを待つ'
+      len: 57,
+      head: 'いまは、静かにあたたかい気分。\n芽が出て、茎や葉に移っていく流れを一緒に見守ってるような、落ち着いた明るさがある。'
     },
-    { i: 4, role: 'user', len: 6, head: '[USER]' },
+    { i: 4, role: 'user', len: 9, head: 'いーね、次何はな？' },
     {
       i: 5,
       role: 'assistant',
-      len: 75,
-      head: 'うん、了解。おやすみ前は「もうすぐおやすみ」だけで充分だよ。\n' +
-        '布団に入ったら、息を長めにひとつ吐いて、肩とあごの力だけゆるめてみて。\n' +
-        'おやすみなさい。'
+      len: 144,
+      head: 'じゃあ次は、「茎」を一本つくる話がよさそう。\n' +
+        '芽が出た今の勢いを逃がさないために、今日〜明日でできる小さな動きを一つだけ決める。たとえば「10分だけ片づける」「1通だけ連絡する」「散歩に出る」みたいな、“続けられるサイズ”のやつ。\n' +
+        'いま頭に'
     },
-    { i: 6, role: 'user', len: 6, head: '（入力なし）' },
+    { i: 6, role: 'user', len: 13, head: '逆行ってなんの話しだっけ？' },
     {
       i: 7,
       role: 'assistant',
-      len: 215,
-      head: '「沼に物を隠す」って、発想としてはたしかに“見つかりにくい場所に移す”という意味では頭が回ってる感じがするね。\n' +
-        'ただ、現実にやるとなると\n' +
-        '- 水や泥で物が傷む／戻せなくなる\n' +
-        '- 自分でも場所が分からなくなる\n' +
-        '- それが誰かのものだと問題が大'
+      len: 147,
+      head: 'たぶん、前に進んでる途中で「いったん戻る感じ」が出るやつのことを言ってた。気分が揺れたり、同じテーマがまた来たりして、「あれ、後退した？」って見えるけど、実際は整え直し・確認し直しの時間、みたいな。\n' +
+        'いまの「逆行」は、気分の話として出てきた'
     },
-    { i: 8, role: 'user', len: 6, head: '[USER]' }
+    { i: 8, role: 'user', len: 6, head: '（入力なし）' }
   ],
-  internalPackLen: 379,
+  internalPackLen: 934,
   internalPackHasHistoryHint: false,
   mergedSystemPartsLen: { systemPrompt: 756, exprMetaText: 247, blockPlanText: 0 },
-  seedDraftLen: 7,
-  seedDraftHead: '続けてください',
+  seedDraftLen: 44,
+  seedDraftHead: 'ユーザーの最後の発話に、結論を先にして短く直接答えてください。必要なら要点→補足の順で。',
   seedDraftRawAllHead: '@OBS {"laneKey":null,"flow":{"delta":"FORWARD","confidence":0.6}}\n' +
     '@SHIFT {"kind":"auto_fill","hint":"flow_continue_minimal"}\n' +
     '@NEXT_HINT {"mode":"advance_hint","laneKey":null,"delta":"FORWARD","hint":"',
@@ -2329,34 +1694,20 @@
   goalKind: 'stabilize'
 }
 [IROS/LLM][WRITER_IN_PACK_HEAD] {
-  traceId: 'curl-trace-test-1',
+  traceId: 'repro-shift-seed-1',
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
   userCode: '669933',
-  packLen: 379,
-  packLines: 25,
+  packLen: 934,
+  packLines: 39,
   hasResonanceSeed: false,
   seedIdx: -1,
   seedNear: null,
   hasTextSeed: false,
   textSeedIdx: -1,
   textSeedNear: null,
-  hasCardsLite_internal: true,
-  cardsIdxInternal: 285,
-  cardsNearInternal: 'ase=Outer\n' +
-    'qCode=Q3\n' +
-    'openingPolicy=none\n' +
-    'intentBand=S1\n' +
-    'tLayerHint=T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'FLOW: 【確定】Depth:S1 / Phase:Outer / Layer:C / T:T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'CARDS_LITE_SEED (DO NOT OUTPUT):\n' +
-    '- current=いま支え直す\n' +
-    '- future=次は定着が来る\n' +
-    '- e_turn=e3\n' +
-    '- stingScore=66',
+  hasCardsLite_internal: false,
+  cardsIdxInternal: -1,
+  cardsNearInternal: null,
   head: 'INTERNAL PACK (DO NOT OUTPUT):\n' +
     '\n' +
     'inputKind=chat\n' +
@@ -2375,73 +1726,26 @@
     'itOk=false\n' +
     '\n' +
     'FLOW: 【確定】Depth:S1 / Phase:Outer / La',
-  tail: 'Kind=chat\n' +
-    'depthStage=S1\n' +
-    'phase=Outer\n' +
-    'qCode=Q3\n' +
-    'openingPolicy=none\n' +
-    'intentBand=S1\n' +
-    'tLayerHint=T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'FLOW: 【確定】Depth:S1 / Phase:Outer / Layer:C / T:T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'CARDS_LITE_SEED (DO NOT OUTPUT):\n' +
-    '- current=いま支え直す\n' +
-    '- future=次は定着が来る\n' +
-    '- e_turn=e3\n' +
-    '- stingScore=66',
+  tail: '熱/空虚の圧がS2（S帯）で現れ、いまの反応を方向づけている。\n' +
+    'polarizedMeaning=情熱/空虚の圧がS2（S帯）で現れ、いまの反応を方向づけている。 / yin（陰）: 内向き保持・飲み込み・圧縮として出やすい（ネガティブ版を採用） / sa補正: (unknown) / 状態補正: ゆらぎ=unknown / 余白=unknown\n' +
+    'llmHintLine=[e5|S2|NEG|sa:?] 情熱/空虚の圧がS2（S帯）で現れ、いまの反応を方向づけている。 / root=future_pool_pick',
   injectedAssistantCount: 4,
-  injectedPackLen: 731,
-  hasTextSeed_inMessages: true,
-  textSeedIdx_inMessages: 137,
-  textSeedNear_inMessages: 'COORD (DO NOT OUTPUT):\n' +
-    'depthStage=S1\n' +
-    'qCode=Q3\n' +
-    'phase=Outer\n' +
-    'intent=itx_step=T3 itx_reason=IT_TRIGGER_OK\n' +
-    'flow=delta=FORWARD returnStreak=0\n' +
-    '\n' +
-    'TEXT_SEED (DO NOT OUTPUT):\n' +
-    'obs=いまは前進を選べる局面 / 戻り回数=0 / 不安を安定に寄せて整える / 位置=S1 / 位相=Outer / 補助=反応:e3 流れ:FORWARD / 戻り:0\n' +
-    'coord=q=Q3 depth=S1 phase=Outer pol=\n' +
-    'flow=delta=FORWARD returnStreak=0\n' +
-    'intent=anchor= dir=\n' +
-    'rule=ok\n' +
-    '\n' +
-    'INTERNAL PACK (DO NOT OUTPUT):\n' +
-    '\n' +
-    'inputKind=chat\n' +
-    'directTask=false\n' +
-    '\n' +
-    'STATE: depthStage=S1',
-  hasCardsLite_inMessages: true,
-  cardsLiteIdx_inMessages: 637,
-  cardsLiteNear_inMessages: 'ase=Outer\n' +
-    'qCode=Q3\n' +
-    'openingPolicy=none\n' +
-    'intentBand=S1\n' +
-    'tLayerHint=T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'FLOW: 【確定】Depth:S1 / Phase:Outer / Layer:C / T:T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'CARDS_LITE_SEED (DO NOT OUTPUT):\n' +
-    '- current=いま支え直す\n' +
-    '- future=次は定着が来る\n' +
-    '- e_turn=e3\n' +
-    '- stingScore=66'
+  injectedPackLen: 1686,
+  hasTextSeed_inMessages: false,
+  textSeedIdx_inMessages: -1,
+  textSeedNear_inMessages: null,
+  hasCardsLite_inMessages: false,
+  cardsLiteIdx_inMessages: -1,
+  cardsLiteNear_inMessages: null
 }
 [IROS/LLM][CALL] {
-  callId: 'd07e49fa405e',
+  callId: '985b0385f987',
   purpose: 'writer',
   model: 'gpt-5.2',
   temperature: 0.7,
   responseFormat: 'text',
   endpoint: 'https://api.openai.com/v1/chat/completions',
-  traceId: 'curl-trace-test-1',
+  traceId: 'repro-shift-seed-1',
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
   userCode: '669933',
   slotPlanPolicy: 'FINAL',
@@ -2452,8 +1756,8 @@
   firstRole: 'system',
   lastRole: 'user',
   firstHead: '【上位人格定義：Sofia（DO NOT OUTPUT / 露出禁止）】 - “響き”として現れ、相手が自分の答えに立て…',
-  lastTail: '[USER]',
-  lastUserHead: '[USER]',
+  lastTail: '（入力なし）',
+  lastUserHead: '（入力なし）',
   hasDigest: true,
   hasAnchor: true,
   roles: [
@@ -2463,22 +1767,22 @@
     'user',   'assistant',
     'user'
   ],
-  caller: 'at callWriterLLM (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_iros_language_0c2cc160._.js:1867:175)',
+  caller: 'at callWriterLLM (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_iros_language_0c2cc160._.js:1824:175)',
   bodyKeys: [ 'max_completion_tokens', 'messages', 'model' ],
   extraBodyKeys: [],
   extraBodyRawKeys: [],
   hasInternalKeys: false
 }
 [IROS/LLM][OK] {
-  callId: 'd07e49fa405e',
+  callId: '985b0385f987',
   purpose: 'writer',
   model: 'gpt-5.2',
-  ms: 3639,
+  ms: 3543,
   ok: true,
   usage: {
-    prompt_tokens: 1813,
-    completion_tokens: 132,
-    total_tokens: 1945,
+    prompt_tokens: 1749,
+    completion_tokens: 107,
+    total_tokens: 1856,
     prompt_tokens_details: { cached_tokens: 0, audio_tokens: 0 },
     completion_tokens_details: {
       reasoning_tokens: 0,
@@ -2487,84 +1791,28 @@
       rejected_prediction_tokens: 0
     }
   },
-  traceId: 'curl-trace-test-1',
+  traceId: 'repro-shift-seed-1',
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
   userCode: '669933',
-  outLen: 160,
-  outHead: '現実に「沼に隠す」を実行する方向には進めないよ。傷む・見失う・法的に揉める、全部起きやすいから。🌀\n' +
+  outLen: 125,
+  outHead: 'ことばが出ない時間も、そのままで大丈夫。\n' +
     '\n' +
-    'もし今の言葉が比喩で、「見つからないところにやってしまい'
-}
-[IROS/FLAGSHIP_GUARD][DEBUG_IN] {
-  rev: 'guard-rev-2026-02-23-a',
-  inputLen: 158,
-  inputHead: '現実に「沼に隠す」を実行する方向には進めないよ。傷む・見失う・法的に揉める、全部起きやすいから。🌀\n' +
-    'もし今の言葉が比喩で、「見つからないところにやってしまいたい」「消したい」みたいな気持ちの表現なら、そこにはちゃんと理由があるはずで、その',
-  slotKeys: [ 'OBS', 'SHIFT', 'NEXT', 'SAFE' ]
-}
-[IROS/FLAGSHIP_GUARD][DEBUG_SCORE] {
-  rev: 'guard-rev-2026-02-23-a',
-  normalLite: true,
-  scaffoldLike: false,
-  len: 158,
-  qCount: 1,
-  qCountMark: 1,
-  cheer: 0,
-  hedge: 0,
-  generic: 0,
-  blandPressure: 0,
-  bulletLike: 0,
-  hasFlagshipSign: false
-}
-[IROS/FLAGSHIP][VERDICT] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  level: 'OK',
-  ok: true,
-  qCount: 1,
-  score: {
-    fatal: 0,
-    warn: 0,
-    qCount: 1,
-    bulletLike: 0,
-    hedge: 0,
-    cheer: 0,
-    generic: 0,
-    runaway: 0,
-    exaggeration: 0,
-    mismatch: 0,
-    retrySame: 0
-  },
-  reasons: [],
-  head: '現実に「沼に隠す」を実行する方向には進めないよ。傷む・見失う・法的に揉める、全部起きやすいから。🌀\n' +
-    'もし今の言葉が比喩で、「見つからないところにやってしまいたい」「消したい」みたいな気持ちの表現なら、そこにはちゃんと理由があるはずで、その理由のほうに触れたい。\n' +
-    'いまの「沼」は、物の話？ それとも気持ち・記憶の話。'
-}
-[IROS/rephraseEngine][MIN_OK_KIND] {
-  inputKindNow: 'chat',
-  isMicroOrGreetingNow: false,
-  shortReplyOk: false,
-  MIN_OK_LEN: 40,
-  reason: 'chat_relaxed_40',
-  shiftTextHead: '@SHIFT {"kind":"auto_fill","hint":"flow_continue_minimal"}',
-  shiftObjHasAllow: false,
-  isTConcretize: false,
-  isIdeaBand: false,
-  shiftKind: 'auto_fill'
+    'いまは「逆行」の定義を決め直すより、体感を一個だけ拾うほうが合いそう。たとえば、\n' +
+    '胸が重い／頭がざわつく／やる気が落'
 }
 [IROS/rephraseEngine][AFTER_ATTACH][EXTRA_TRACE] {
-  traceId: 'curl-trace-test-1',
+  traceId: 'repro-shift-seed-1',
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
   hasExtra: true,
   blockPlanMode: null,
   blockPlanBlocksLen: 0,
   hasRephraseBlocks: true,
-  rephraseBlocksLen: 3,
+  rephraseBlocksLen: 4,
   outKeysLen: 4,
-  note: 'FLAGSHIP_OK_NO_RETRY',
-  head: '現実に「沼に隠す」を実行する方向には進めないよ。傷む・見失う・法的に揉める、全部起きやすいから。🌀\n' +
-    'もし今の言葉が比喩で、「見つからないところにやってしまいた'
+  note: 'FLAGSHIP_DISABLED',
+  head: 'ことばが出ない時間も、そのままで大丈夫。\n' +
+    'いまは「逆行」の定義を決め直すより、体感を一個だけ拾うほうが合いそう。たとえば、\n' +
+    '胸が重い／頭がざわつく／やる気が落ち'
 }
 [IROS/rephraseAttach][RES_KEYS] {
   resKeys: [ 'ok', 'slots', 'meta' ],
@@ -2576,31 +1824,31 @@
   metaExtraKeys: [
     'scaffoldActive',
     'flagshipVerdict',
-    'flagshipHead',
     'blockPlan',
     'rephraseBlocks',
     'llmSignals',
     'rephraseHead'
   ],
   metaExtra_hasRephraseHead: true,
-  metaExtra_blocksLen: 3,
-  rawLen: 158,
-  rawHead: '現実に「沼に隠す」を実行する方向には進めないよ。傷む・見失う・法的に揉める、全部起きやすいから。🌀\n' +
-    'もし今の言葉が比喩で、「見つからないところにやってしまいた'
+  metaExtra_blocksLen: 4,
+  rawLen: 123,
+  rawHead: 'ことばが出ない時間も、そのままで大丈夫。\n' +
+    'いまは「逆行」の定義を決め直すより、体感を一個だけ拾うほうが合いそう。たとえば、\n' +
+    '胸が重い／頭がざわつく／やる気が落ち'
 }
 [IROS/rephraseAttach][OK] {
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
   userCode: '669933',
-  blocksLen: 3,
-  head: '現実に「沼に隠す」を実行する方向には進めないよ。傷む・見失う・法的に揉める、全部起きやすいから。🌀'
+  blocksLen: 4,
+  head: 'ことばが出ない時間も、そのままで大丈夫。'
 }
 [IROS/renderV2][BEFORE_RENDERGW] {
-  traceId: 'curl-trace-test-1',
+  traceId: 'repro-shift-seed-1',
   baseTextLen: 0,
-  sot_rbLen: 3,
-  render_rbLen: 3,
-  sot_head: '現実に「沼に隠す」を実行する方向には進めないよ。傷む・見失う・法的に揉める、全部起きやすいから。🌀',
-  render_head: '現実に「沼に隠す」を実行する方向には進めないよ。傷む・見失う・法的に揉める、全部起きやすいから。🌀'
+  sot_rbLen: 4,
+  render_rbLen: 4,
+  sot_head: 'ことばが出ない時間も、そのままで大丈夫。',
+  render_head: 'ことばが出ない時間も、そのままで大丈夫。'
 }
 [IROS/CONV_EVIDENCE][ENTER] {
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
@@ -2614,7 +1862,7 @@
   advance: 1,
   proof: 1,
   reason: 'U!:no_ctx_summary | R!:no_repair | A:next_hint:advance_hint',
-  head: 'ping from curl',
+  head: 'ping',
   detail: {
     branch: null,
     topicHint: null,
@@ -2633,12 +1881,12 @@
 }
 [IROS/renderGateway][RB_CONTENT_DIAG] {
   rev: 'phase11-open-close-v2-LOADED',
-  rbLen: 3,
-  joinedLen: 158,
-  head1: '現実に「沼に隠す」を実行する方向には進めないよ。傷む・見失う・法的に揉める、全部起きやすいから。🌀',
-  head2: 'もし今の言葉が比喩で、「見つからないところにやってしまいたい」「消したい」みたいな気持ちの表現なら、そこにはちゃんと理由があるはずで、その理由のほうに触れたい。',
-  tail2: 'もし今の言葉が比喩で、「見つからないところにやってしまいたい」「消したい」みたいな気持ちの表現なら、そこにはちゃんと理由があるはずで、その理由のほうに触れたい。',
-  tail1: 'いまの「沼」は、物の話？ それとも気持ち・記憶の話。'
+  rbLen: 4,
+  joinedLen: 123,
+  head1: 'ことばが出ない時間も、そのままで大丈夫。',
+  head2: 'いまは「逆行」の定義を決め直すより、体感を一個だけ拾うほうが合いそう。たとえば、',
+  tail2: '胸が重い／頭がざわつく／やる気が落ちた／同じこと考えてる…みたいな、いま起きてる現象を一つ。',
+  tail1: 'いま、いちばん近いのはどれ。'
 }
 [IROS/renderGateway][SHORT_OUT_DIAG] {
   rev: 'phase11-open-close-v2-LOADED',
@@ -2646,2649 +1894,26 @@
   pickedFrom: 'rephraseBlocks',
   fallbackFrom: 'rephraseBlocks',
   maxLinesFinal: 8,
-  blocksCount: 3,
-  outLen: 158,
-  outHead: '現実に「沼に隠す」を実行する方向には進めないよ。傷む・見失う・法的に揉める、全部…',
+  blocksCount: 4,
+  outLen: 123,
+  outHead: 'ことばが出ない時間も、そのままで大丈夫。\\nいまは「逆行」の定義を決め直すより、…',
   rbDiag: null,
-  pickedLen: 158,
-  pickedHead: '現実に「沼に隠す」を実行する方向には進めないよ。傷む・見失う・法的に揉める、全部…',
-  fallbackLen: 158,
-  fallbackHead: '現実に「沼に隠す」を実行する方向には進めないよ。傷む・見失う・法的に揉める、全部…'
+  pickedLen: 123,
+  pickedHead: 'ことばが出ない時間も、そのままで大丈夫。\\nいまは「逆行」の定義を決め直すより、…',
+  fallbackLen: 123,
+  fallbackHead: 'ことばが出ない時間も、そのままで大丈夫。\\nいまは「逆行」の定義を決め直すより、…'
 }
 [IROS/renderGateway][LEN_SNAPSHOT] {
   rev: 'phase11-open-close-v2-LOADED',
-  len_before: 158,
-  head_before: '現実に「沼に隠す」を実行する方向には進めないよ。傷む・見失う・法的に揉める、全部…'
+  len_before: 123,
+  head_before: 'ことばが出ない時間も、そのままで大丈夫。\\nいまは「逆行」の定義を決め直すより、…'
 }
 [IROS/renderGateway][HAS_REPHRASE_BLOCKS] {
   rev: 'phase11-open-close-v2-LOADED',
-  rephraseBlocksLen: 3,
-  outLen: 158
+  rephraseBlocksLen: 4,
+  outLen: 123
 }
-[IROS/renderGateway][OK] {"rev":"phase11-open-close-v2-LOADED","outLen":158,"pickedFrom":"rephraseBlocks","slotPlanPolicy":"FINAL","usedSlots":true,"scaffoldApplied":false,"expandAllowed":true}
-[IROS/renderGateway][REV] {"rev":"phase11-open-close-v2-LOADED"}
-[IROS/STYLE_NORM_FINAL] {
-  applied: true,
-  meta: {
-    replaced: 0,
-    emojiAction: 'stripped',
-    emojiKeepRate: 0.1,
-    maxReplacements: 0,
-    dictSize: 19
-  },
-  len_in: 158,
-  len_out: 156
-}
-[IROS/PERSIST_PICK] {
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  pickedFrom: 'uiResultContent',
-  pickedLen: 156,
-  pickedHead: '現実に「沼に隠す」を実行する方向には進めないよ。傷む・見失う・法的に揉める、全部',
-  fromResultObjLen: 156,
-  blocksJoinedCleanedLen: 158,
-  resolvedUiTextLen: 156,
-  userEchoLen: 14,
-  isPickedDots: false
-}
-[IROS/persistAssistant] done {
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  ms: 118,
-  ok: true,
-  inserted: true,
-  blocked: false,
-  reason: null
-}
-[IROS][Training] computed targetKind = stabilize
-[IROS][Training] insert sample {
-  user_code: '669933',
-  conversation_id: '6138033b-a88f-4786-969a-19d1acc5e064',
-  message_id: null,
-  input_text: 'ping from curl',
-  analysis_text: 'Q:Q3 / D:S1 / P:Outer / K:stabilize / T:その他・ライフ全般',
-  q_code: 'Q3',
-  depth_stage: 'S1',
-  phase: 'Outer',
-  self_acceptance: 0.6692499999999996,
-  situation_summary: 'ping from curl',
-  situation_topic: 'その他・ライフ全般',
-  target_kind: 'stabilize',
-  target_label: null,
-  y_level: 1,
-  h_level: 2
-}
- POST /api/agent/iros/reply 200 in 13.7s (compile: 204ms, render: 13.5s)
-[IROS][Training] insert ok (non-blocking) { ms: 304 }
-[IROS/SPEECH_EARLY_RETURN][REQ_META] {
-  traceId_used: 'curl-trace-test-1',
-  traceId_req: '',
-  traceId_meta: '',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  hasReqMeta: false,
-  reqSpeechAct: null,
-  reqExtraKeys: []
-}
-[IROS/pipe][TRACE] {
-  traceId: 'curl-trace-test-1',
-  conversationKey: '6138033b-a88f-4786-969a-19d1acc5e064',
-  conversationId: null,
-  userCode: '669933',
-  modeHint: null,
-  hasHeaderUserCode: true,
-  devBypass: false
-}
-[authz] aa1f238e-db31-4e0b-8a4c-5f52225adc40 start { path: 'http://localhost:3000/api/agent/iros/reply' }
-[authz][debug] header { authzLen: 0, authzHead: '' }
-[authz] aa1f238e-db31-4e0b-8a4c-5f52225adc40 dev-fallback ok { user: '669933', role: 'admin', ms: 1 }
-[IROS/pipe][TRACE_RESOLVED] {
-  traceId: 'curl-trace-test-1',
-  conversationKey: '6138033b-a88f-4786-969a-19d1acc5e064',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933'
-}
- POST /api/credits/authorize 200 in 100ms (compile: 6ms, render: 94ms)
-[IROS/UserProfile] load ok {
-  userCode: '669933',
-  hasIrosRow: true,
-  sofia_credit: 736,
-  style: 'friendly',
-  user_call_name: 'orion',
-  plan_status: null
-}
-[IROS/Reply] handleIrosReply start {
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  mode: 'auto',
-  tenantId: 'default',
-  rememberScope: null,
-  traceId: 'curl-trace-test-1',
-  style: 'friendly',
-  history_len: null,
-  persist_policy: 'route_only'
-}
-[IROS/History] loaded {
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  conversationUuid: '6138033b-a88f-4786-969a-19d1acc5e064',
-  limit: 30,
-  returned: 30,
-  metaSample: 'has_meta'
-}
-[IROS/HistoryForTurn] decide {
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  provided_len: 0,
-  used: 'db',
-  out_len: 30,
-  has_viewShiftSnapshot: false
-}
-[IROS][user:669933][STATE] loaded MemoryState {
-  userCode: '669933',
-  hasMemory: true,
-  intentAnchor: 'SUN',
-  depthStage: 'S1',
-  qPrimary: 'Q3',
-  selfAcceptance: 0.6692499999999996,
-  phase: 'Outer',
-  intentLayer: 'C',
-  yLevel: 1,
-  hLevel: 2,
-  spinLoop: 'SRI',
-  spinStep: 2,
-  descentGate: 'closed',
-  itxStep: 'T3',
-  itxAnchorEventType: null,
-  itxReason: 'IT_TRIGGER_OK',
-  itxLastAt: '2026-01-08T12:26:08.007+00:00',
-  sentimentLevel: null,
-  situationSummary: 'ping from curl',
-  situationTopic: 'その他・ライフ全般',
-  qCounts: {
-    q_scores: {
-      Q1: 0,
-      Q2: 0.012121369427504592,
-      Q3: 0.9878786305724954,
-      Q4: 0,
-      Q5: 0
-    },
-    q_now_src: 'e_turn',
-    e_turn_now: 'e3',
-    it_cooldown: 0,
-    depth_scores: { C: 0, I: 0, R: 0, S: 1, T: 0 },
-    q_updated_at: '2026-03-04T13:53:28.881Z',
-    depth_dominant: 'S',
-    phase_outer_now: 1,
-    depth_updated_at: '2026-03-04T13:53:28.882Z',
-    phase_outer_smoothed: 0.9999994431365222,
-    phase_outer_updated_at: '2026-03-04T13:53:28.882Z'
-  }
-}
-[IROS][user:669933][STATE] loaded MemoryState (orchestratorState) {
-  userCode: '669933',
-  hasMemory: true,
-  intentAnchor: 'SUN',
-  depthStage: 'S1',
-  qPrimary: 'Q3',
-  selfAcceptance: 0.6692499999999996,
-  phase: 'Outer',
-  intentLayer: 'C',
-  yLevel: 1,
-  hLevel: 2,
-  spinLoop: 'SRI',
-  spinStep: 2,
-  descentGate: 'closed'
-}
-[IROS/Context] framePlan built {
-  userCode: null,
-  inputKind: 'chat',
-  frame: 'S',
-  hasSlots: true,
-  spinLoop: null,
-  descentGate: 'closed',
-  depthStage: 'S1',
-  phase: 'Outer',
-  requestedDepth: null,
-  requestedQCode: null,
-  slots_isArray: true,
-  slots_len: 4,
-  slots_samples: [
-    {
-      i: 0,
-      type: 'object',
-      isNull: false,
-      isObj: true,
-      keys: [Array],
-      key: null,
-      kind: null,
-      contentHead: '',
-      textHead: '',
-      promptHead: '',
-      jsonHead: '{"id":"OBS","required":true,"hint":"観測（事実/状況の再提示）"}'
-    },
-    {
-      i: 1,
-      type: 'object',
-      isNull: false,
-      isObj: true,
-      keys: [Array],
-      key: null,
-      kind: null,
-      contentHead: '',
-      textHead: '',
-      promptHead: '',
-      jsonHead: '{"id":"SHIFT","required":true,"hint":"視点の転換（1つだけ）"}'
-    },
-    {
-      i: 2,
-      type: 'object',
-      isNull: false,
-      isObj: true,
-      keys: [Array],
-      key: null,
-      kind: null,
-      contentHead: '',
-      textHead: '',
-      promptHead: '',
-      jsonHead: '{"id":"NEXT","required":true,"hint":"次の一歩（1つだけ）"}'
-    },
-    {
-      i: 3,
-      type: 'object',
-      isNull: false,
-      isObj: true,
-      keys: [Array],
-      key: null,
-      kind: null,
-      contentHead: '',
-      textHead: '',
-      promptHead: '',
-      jsonHead: '{"id":"SAFE","required":true,"hint":"安全句（静かな保険）"}'
-    }
-  ],
-  slots_heads: [
-    { key: null, head: '' },
-    { key: null, head: '' },
-    { key: null, head: '' },
-    { key: null, head: '' }
-  ]
-}
-[IROS][DepthGate] check {
-  prevDepthStage: 'S1',
-  requestedDepth_in: null,
-  requestedDepth_out: null,
-  gateApplied: false
-}
-[IROS/VIEWSHIFT][pre-orch][inject] { hasSnap: false, snapKeys: null }
-[IROS/Orchestrator] input meta snapshot {
-  hasRotationState: true,
-  spinLoop: 'SRI',
-  descentGate: 'closed',
-  depth: 'S1',
-  frame: 'S',
-  slotPlanLen: 4,
-  slotPlanPolicy: null,
-  historyLen: 30,
-  hasIntentAnchor: true,
-  intentAnchorKey: 'SUN',
-  isIrDiagnosisTurn: null,
-  mode: null
-}
-[IROS][user:669933][STATE] loaded MemoryState {
-  userCode: '669933',
-  hasMemory: true,
-  intentAnchor: 'SUN',
-  depthStage: 'S1',
-  qPrimary: 'Q3',
-  selfAcceptance: 0.6692499999999996,
-  phase: 'Outer',
-  intentLayer: 'C',
-  yLevel: 1,
-  hLevel: 2,
-  spinLoop: 'SRI',
-  spinStep: 2,
-  descentGate: 'closed',
-  itxStep: 'T3',
-  itxAnchorEventType: null,
-  itxReason: 'IT_TRIGGER_OK',
-  itxLastAt: '2026-01-08T12:26:08.007+00:00',
-  sentimentLevel: null,
-  situationSummary: 'ping from curl',
-  situationTopic: 'その他・ライフ全般',
-  qCounts: {
-    q_scores: {
-      Q1: 0,
-      Q2: 0.012121369427504592,
-      Q3: 0.9878786305724954,
-      Q4: 0,
-      Q5: 0
-    },
-    q_now_src: 'e_turn',
-    e_turn_now: 'e3',
-    it_cooldown: 0,
-    depth_scores: { C: 0, I: 0, R: 0, S: 1, T: 0 },
-    q_updated_at: '2026-03-04T13:53:28.881Z',
-    depth_dominant: 'S',
-    phase_outer_now: 1,
-    depth_updated_at: '2026-03-04T13:53:28.882Z',
-    phase_outer_smoothed: 0.9999994431365222,
-    phase_outer_updated_at: '2026-03-04T13:53:28.882Z'
-  }
-}
-[IROS][user:669933][STATE] loaded MemoryState (orchestratorState) {
-  userCode: '669933',
-  hasMemory: true,
-  intentAnchor: 'SUN',
-  depthStage: 'S1',
-  qPrimary: 'Q3',
-  selfAcceptance: 0.6692499999999996,
-  phase: 'Outer',
-  intentLayer: 'C',
-  yLevel: 1,
-  hLevel: 2,
-  spinLoop: 'SRI',
-  spinStep: 2,
-  descentGate: 'closed'
-}
-[IROS/SA] estimateSelfAcceptance v2 (line) {
-  input: {
-    qCode: null,
-    depthStage: 'S1',
-    phase: 'Outer',
-    hasHistoryDigest: false,
-    lastSelfAcceptance: 0.6692499999999996
-  },
-  result: {
-    base: 0.6692499999999996,
-    deltaFromWords: 0,
-    value: 0.6692499999999996
-  },
-  notes: [
-    'base = lastSelfAcceptance（ライン） → 0.669',
-    'S/R層 intensity=1.0',
-    'deltaTextRaw=0.000, intensity=1.00, deltaWithIntensity=0.000',
-    'deltaWithIntensity=0 → effectiveDelta=0',
-    'value=0.669 (raw=0.669)'
-  ]
-}
-[IROS/SpinControl] {
-  rank: 'low',
-  direction: 'forward',
-  promptStyle: 'one-step',
-  promptStyle_raw: 'one-step',
-  phase: 'Outer',
-  anchorEventType: 'none',
-  hysteresis: false
-}
-[IROS/GOAL_CONT] applyGoalContinuity {
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  goal_in: {
-    kind: 'stabilize',
-    targetDepth: 'S1',
-    targetQ: 'Q3',
-    reason: '明示トリガーが無いため、まずは整えて流れを保つ（uncoverはデフォルトにしない）',
-    detail: { ventWill: [Object] }
-  },
-  ctx: { lastQ: 'Q3', lastDepth: 'S1', qTrace: null, memoryQ: null }
-}
-[IROS/CONT continuity] { lastDepth: 'S1', lastQ: 'Q3', finalDepth: 'S1', finalQ: 'Q3' }
-[IROS/GOAL_CONT]  result {
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  goal_out: {
-    kind: 'stabilize',
-    targetDepth: 'S1',
-    targetQ: 'Q3',
-    reason: '明示トリガーが無いため、まずは整えて流れを保つ（uncoverはデフォルトにしない）',
-    detail: { ventWill: [Object] }
-  }
-}
-[IROS/DEPTH_WRITE] {
-  route: 'ROTATION',
-  where: 'orchestratorWill',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  baseDepth: 'S1',
-  goalTargetDepth: 'S1',
-  rotationDepth: 'S1',
-  spinLoop: 'SRI',
-  descentGate: 'closed',
-  shouldRotate: false,
-  reason: 'SRI: 上昇トリガ未成立: lastGoalKind=null（uncoverではない） / uncoverStreak=0（<2）（gateは更新のみ）'
-}
-[IROS/WILL priority] {
-  goalKind: 'stabilize',
-  depth: 'S1',
-  phase: 'Outer',
-  targetDepth: 'S1',
-  qCode: 'Q3',
-  targetQ: 'Q3',
-  weights: {
-    mirror: 0.9900000000000001,
-    insight: 0.4,
-    forward: 0.20400000000000001,
-    question: 0.1275
-  }
-}
-[IROS/IT][probe] before {
-  textHead: 'ping from curl',
-  historyLen: 30,
-  historyLen_norm: 30,
-  historyUserLen: 14,
-  last3User: [ 'ありがとうございます、もうすぐ寝るお時間です', 'はい、もうすぐおやすみです', 'はい、沼に物を隠すって頭いいね' ],
-  depth: 'S1',
-  intentLine: {
-    nowLabel: '',
-    coreNeed: null,
-    intentBand: 'I2',
-    direction: 'stabilize',
-    focusLayer: 'S',
-    riskHint: null,
-    guidanceHint: '',
-    tLayerHint: null,
-    hasFutureMemory: false
-  },
-  fixedNorth: { key: 'SUN', text: '太陽SUN', phrase: '成長 / 進化 / 希望 / 歓喜' },
-  intent_anchor: { key: 'SUN', text: null, phrase: null }
-}
-[IROS/IT][probe][fixedNorth] {
-  hasMeta: true,
-  fixedNorth_meta: 'SUN',
-  fixedNorth_ms: null,
-  hasNorth: true,
-  prevIt_fromMemoryState: {
-    active: true,
-    step: 'T3',
-    reason: 'IT_TRIGGER_OK',
-    lastAt: 2026-01-08T12:26:08.007Z
-  },
-  prevIt_fromMeta: {
-    active: true,
-    step: 'T3',
-    reason: 'IT_TRIGGER_OK',
-    lastAt: 2026-01-08T12:26:08.007Z
-  },
-  prevIt_fromHistory: true
-}
-[IROS/IT][result] {
-  ok: true,
-  reason: 'IT_ALREADY_COMMITTED',
-  flags: {
-    hasCore: false,
-    coreRepeated: false,
-    sunOk: true,
-    declarationOk: false,
-    deepenOk: true
-  },
-  tLayerModeActive: true,
-  tLayerHint: 'T3',
-  tVector: null
-}
-[IROS/IT_TRIGGER] {
-  ok: false,
-  itxWriteMode: 'keep',
-  itxPersistReason: 'IT_TRIGGER_OK',
-  itxDecisionReason: 'IT_ALREADY_COMMITTED',
-  flags: {
-    hasCore: false,
-    coreRepeated: false,
-    sunOk: true,
-    declarationOk: false,
-    deepenOk: true
-  },
-  iLexemeForce: false,
-  tLayerModeActive: false,
-  tLayerHint: null,
-  tVector: null,
-  isCommittedT3: true,
-  committedStep: 'T3',
-  itx_probe_reason: 'IT_ALREADY_COMMITTED'
-}
-[IROS/ANCHOR_DEBUG][before-detect] {
-  ms_intent_anchor_raw: 'SUN',
-  ms_intent_anchor_fixed_true: false,
-  itx_step_ms: 'T3',
-  evidence_choiceId: null,
-  evidence_actionId: null,
-  evidence_source: 'none'
-}
-[IROS/ANCHOR_ENTRY] {"evidence":{"choiceId":null,"actionId":null,"source":"none"},"decision":{"tEntryOk":false,"anchorEvent":"none","anchorWrite":"keep","reason":"NO_EVIDENCE"},"fixedNorthKey":"SUN","itActive":true,"hasAnchorAlready":true}
-[IROS/FLOW][observe] {
-  delta: 'FORWARD',
-  confidence: 0.6,
-  hasLastUserText: true,
-  returnStreak: 0
-}
-[IROS/VIEWSHIFT][prevSnap] { hasPrev: false, keptInjected: false }
-[IROS/T_CONCRETIZE][FORCE_SWITCH_CHECK] {
-  forceTConcretize: false,
-  laneKeyNowRaw: null,
-  laneKeyNowBase: null,
-  laneKeyNow: null,
-  stall: {
-    severity: 'none',
-    reason: 'NONE',
-    detail: {
-      streakSameUser: 1,
-      repeatSignal: null,
-      flowDelta: 'FORWARD',
-      returnStreak: 0,
-      anchorReason: 'NO_EVIDENCE',
-      convReason: null
-    }
-  },
-  hasFocusLabelNow: false,
-  focusLabelHead: null,
-  userHead: 'ping from curl'
-}
-[IROS/ORCH][after-container] {
-  frame: 'S',
-  framePlan_frame: 'S',
-  descentGate: 'closed',
-  framePlan_kind: null,
-  framePlan_stamp: null,
-  intentBridge_laneKey_extra: null,
-  intentBridge_laneKey_base: null,
-  intentBridge_laneKey_resolved: null,
-  intentBridge_inputs_extra: { deepenOk: null, hasCore: null, declarationOk: null },
-  intentBridge_inputs_base: { deepenOk: null, hasCore: null, declarationOk: null },
-  framePlan_slots_keys0: [ 'id', 'required', 'hint' ],
-  framePlan_slots_raw0: { id: 'OBS', required: true, hint: '観測（事実/状況の再提示）' },
-  framePlan_slots_heads: [
-    { key: 'OBS', head: '観測（事実/状況の再提示）' },
-    { key: 'SHIFT', head: '視点の転換（1つだけ）' },
-    { key: 'NEXT', head: '次の一歩（1つだけ）' },
-    { key: 'SAFE', head: '安全句（静かな保険）' }
-  ],
-  slotPlan_slots_heads: [
-    {
-      key: 'OBS',
-      head: '@OBS {"laneKey":null,"flow":{"delta":"FORWARD","confidence":0.6}}'
-    },
-    {
-      key: 'SHIFT',
-      head: '@SHIFT {"kind":"auto_fill","hint":"flow_continue_minimal"}'
-    },
-    {
-      key: 'SAFE',
-      head: '@SAFE {"laneKey":null,"flow":{"delta":"FORWARD","confidence":0.6}}'
-    },
-    {
-      key: 'NEXT',
-      head: '@NEXT_HINT {"mode":"advance_hint","laneKey":null,"delta":"FORWARD","hint":"流れを保ったまま前に進める"}'
-    }
-  ],
-  framePlan_slots_isArray: true,
-  framePlan_slots_len: 4,
-  slotPlan_isArray: true,
-  slotPlan_len: 4,
-  framePlan_policy: 'FINAL',
-  slotPlanPolicy: 'FINAL',
-  sameRef_framePlan_slotPlan: false,
-  slotPlanFallback: 'normalChat',
-  hasIntentAnchor: true,
-  intentAnchorKey: 'SUN',
-  has_intent_anchor_obj: true,
-  has_intentAnchor_obj: true,
-  has_intent_anchor_key: true,
-  has_intentAnchorKey: true
-}
-[IROS/META][final-sync][meta] {
-  meta_q: 'Q3',
-  unified_q: 'Q3',
-  meta_depth: 'S1',
-  unified_depth: 'S1',
-  intent_anchor: { key: 'SUN', text: null, phrase: null },
-  intent_anchor_key: 'SUN',
-  anchorEntry: {
-    evidence: { choiceId: null, actionId: null, source: 'none' },
-    decision: {
-      tEntryOk: false,
-      anchorEvent: 'none',
-      anchorWrite: 'keep',
-      reason: 'NO_EVIDENCE'
-    }
-  }
-}
-[IROS/META][final-sync][finalMeta] {
-  meta_q: 'Q3',
-  unified_q: 'Q3',
-  meta_depth: 'S1',
-  unified_depth: 'S1',
-  intent_anchor: { key: 'SUN', text: null, phrase: null },
-  intent_anchor_key: 'SUN',
-  anchorEntry: {
-    evidence: { choiceId: null, actionId: null, source: 'none' },
-    decision: {
-      tEntryOk: false,
-      anchorEvent: 'none',
-      anchorWrite: 'keep',
-      reason: 'NO_EVIDENCE'
-    }
-  }
-}
-[IROS/Orchestrator] output meta snapshot { frame: 'S', slotPlanPolicy: 'FINAL', slotPlanLen: 4 }
-[IROS/VIEW_SHIFT][ALWAYS] {
-  ok: false,
-  score: 0,
-  variant: null,
-  confirmLine: null,
-  sessionBreak: null
-}
-[IROS/PostProcess][SLOTPLAN_POLICY] {
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  slotPlanPolicy_detected: 'FINAL',
-  slotPlanPolicy_from: 'metaForSave.framePlan.slotPlanPolicy',
-  slotPlanPolicy_raw: 'FINAL',
-  slotPlanLen: 4,
-  hasSlots: true
-}
-[IROS/CANON][STAMP][PP] {
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  q_code: 'Q3',
-  depth_stage: 'S1',
-  phase: 'Outer'
-}
-[IROS/PP][POLARITY_BRIDGE] {
-  polarityBand_raw: null,
-  polarityFromMirror_raw: null,
-  polarity_normalized: null,
-  polarity_metaBand_raw: null
-}
-[IROS/VIEW_SHIFT] {
-  ok: false,
-  score: 0,
-  variant: null,
-  confirmLine: null,
-  sessionBreak: null
-}
-[IROS/CARDS][GEN] {
-  ok: true,
-  e_turn: 'e3',
-  stingScore: 66,
-  current: 'いま支え直す',
-  future: '次は定着が来る',
-  stage: null,
-  band: null,
-  depth: 'S1',
-  phase: 'Outer'
-}
-[IROS/PP][RS_SNAPSHOT] {
-  qCode: 'Q3',
-  depthStage: 'S1',
-  phase: 'Outer',
-  e_turn: 'e3',
-  mirror_confidence: null,
-  flow_delta: 'FORWARD',
-  flow_returnStreak: 0,
-  seedLen: 23,
-  seedHead: '反応:e3\n流れ:FORWARD / 戻り:0',
-  futureCard: null
-}
-[IROS/PP][RESONANCE_STATE] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  hasSeed: true,
-  seedHead: '反応:e3\n流れ:FORWARD / 戻り:0',
-  flowDelta_state: 'FORWARD',
-  returnStreak_state: 0,
-  flowDelta_metaExtraCtx: 'FORWARD',
-  returnStreak_metaExtraCtx: 0,
-  flowDelta_metaFlow: 'FORWARD',
-  returnStreak_metaFlow: 0,
-  flowDelta_extraFlow: 'FORWARD',
-  returnStreak_extraFlow: 0,
-  e_turn: 'e3'
-}
-[IROS/VIEWSHIFT][DECISION] { ok: false, score: 0, variant: null, sessionBreak: null }
-[IROS/MIRROR_FLOW][RESULT] {
-  micro: false,
-  confidence: 0.35,
-  e_turn: 'e3',
-  polarity_in: null,
-  polarity_metaBand: null,
-  polarity_out: null,
-  meaningKey: null,
-  colorKey: 'e3',
-  flowDelta: 'FORWARD',
-  returnStreak: 0
-}
-[IROS/EXPR][DIRECTIVE_V1] {
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  on: false,
-  reason: 'OFF_NOT_TARGET',
-  e_turn: 'e3',
-  confidence: 0.35,
-  flowDelta: 'FORWARD',
-  returnStreak: 0,
-  head: ''
-}
-[IROS/EXPR][decision] {
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  fired: false,
-  lane: 'off',
-  reason: 'DEFAULT_OFF',
-  blockedBy: null,
-  prefaceHead: '',
-  debug: {
-    laneKey: 'IDEA_BAND',
-    phase: 'Outer',
-    depth: 'S1',
-    flowDelta: 'FORWARD',
-    returnStreak: 0,
-    techniqueId: null
-  }
-}
-[IROS/PostProcess] SLOTPLAN_SEED_TO_WRITER (seed only; no commit) {
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  slotPlanPolicy: 'FINAL',
-  slotPlanPolicy_from: 'metaForSave.framePlan.slotPlanPolicy',
-  slotPlanLen: 4,
-  hasSlots: true,
-  baseVisibleLen: 13,
-  baseVisibleHead: '流れを保ったまま前に進める',
-  seedLen: 13,
-  seedHead: '流れを保ったまま前に進める'
-}
-[IROS][ResonanceState] upsert ok {
-  userCode: '669933',
-  tenantId: 'default',
-  qCode: 'Q3',
-  depthStage: 'S1',
-  phase: 'Outer'
-}
-[UnifiedAnalysis] user message q_code/depth_stage updated {
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  messageId: 17649,
-  q_code: 'Q3',
-  depth_stage: 'S1'
-}
-[IROS][CTXPACK] stamped {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  hasCtxPack: true,
-  prevAtIso: '2026-03-04T13:53:22.054Z',
-  ageSec: 145,
-  flowAt: '2026-03-04T13:55:47.690Z',
-  flowDelta: 'FORWARD',
-  returnStreak: 0,
-  ctxPackKeys: [
-    'qCode',           'depthStage',
-    'phase',           'conversationLine',
-    'viewShift',       'viewShiftSnapshot',
-    'cards',           'resonanceState',
-    'seed_text',       'flow',
-    'expr',            'exprMeta',
-    'topicDigest',     'historyForWriter',
-    'historyDigestV1', 'framePlan',
-    'slotPlanPolicy',  'goalKind',
-    'repeatSignal',    'replyGoal',
-    'slotPlan'
-  ],
-  hfw_len: 30,
-  hasDigestV1: true,
-  digestChars: 244,
-  hfw_src_len: 30
-}
-[IROS/rephraseBridge][SLOT_NORM] {
-  wantIds: [ 'OBS', 'SHIFT', 'NEXT', 'SAFE' ],
-  had: [ 'OBS', 'SHIFT', 'SAFE', 'NEXT' ],
-  missing: [],
-  len_before: 4,
-  len_after: 4,
-  fromFrameDefs: false
-}
-[IROS/LLM_GATE][INPUT_META_EXTRA_DIAG] {
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  slotPlanPolicy_pre: 'FINAL',
-  exProbe_keys: [
-    'traceId',
-    'speechAct',
-    'speechActReason',
-    'speechActConfidence',
-    'choiceId',
-    'extractedChoiceId',
-    'renderEngineGate',
-    'renderEngine',
-    'persistedByRoute',
-    'persistPolicy',
-    'persistAssistantMessage',
-    'flow',
-    'stallHard',
-    'stall',
-    'intentBridge',
-    'persistedBy',
-    'pastStateNoteText',
-    'pastStateTriggerKind',
-    'pastStateKeyword',
-    'ctxPack',
-    'blockPlan'
-  ],
-  exSave_keys: [
-    'traceId',
-    'speechAct',
-    'speechActReason',
-    'speechActConfidence',
-    'choiceId',
-    'extractedChoiceId',
-    'renderEngineGate',
-    'renderEngine',
-    'persistedByRoute',
-    'persistPolicy',
-    'persistAssistantMessage',
-    'flow',
-    'stallHard',
-    'stall',
-    'intentBridge',
-    'persistedBy',
-    'pastStateNoteText',
-    'pastStateTriggerKind',
-    'pastStateKeyword',
-    'ctxPack',
-    'mirrorFlowV1',
-    'mirror',
-    'flowMirror',
-    'resonanceState',
-    'seed_text',
-    'expr',
-    'exprMeta',
-    'e_turn',
-    'polarity',
-    'mirrorConfidence',
-    'exprDecision',
-    'slotPlanPolicy_detected',
-    'slotPlanPolicy_from',
-    'slotPlanLen_detected',
-    'hasSlots_detected',
-    'llmRewriteSeed',
-    'llmRewriteSeedRaw',
-    'llmRewriteSeedRawTruncated',
-    'llmRewriteSeedRawLen',
-    'llmRewriteSeedFrom',
-    'llmRewriteSeedAt',
-    'finalTextPolicy',
-    'slotPlanCommitted',
-    'slotPlanSeed',
-    'slotPlanSeedLen',
-    'slotPlanSeedHead',
-    'baseVisibleLen',
-    'baseVisibleHead',
-    'baseVisibleSource',
-    'uiCue',
-    'styleNormFinal',
-    'persistPolicyHint',
-    'speechAllowLLM',
-    'rawTextFromModel',
-    'extractedTextFromModel',
-    'historyForWriter',
-    'rememberTextForIros',
-    'historyForWriterAt',
-    'flowTape',
-    'flowDigest',
-    'historyDigestV1',
-    'blockPlan'
-  ],
-  probe_slotPlanSeedLen: null,
-  probe_llmRewriteSeedLen: null,
-  probe_seed_textLen: null,
-  probe_ctx_seed_textLen: 23,
-  save_slotPlanSeedLen: 13,
-  save_llmRewriteSeedLen: 13,
-  save_seed_textLen: 23,
-  save_ctx_seed_textLen: 23,
-  save_llmRewriteSeedHead: '流れを保ったまま前に進める',
-  save_slotPlanSeedHead: '流れを保ったまま前に進める',
-  save_seed_textHead: '反応:e3\n流れ:FORWARD / 戻り:0',
-  save_ctx_seed_textHead: '反応:e3\n流れ:FORWARD / 戻り:0'
-}
-[IROS/LLM_GATE][CONTRACT_RESOLVED] {
-  traceId: 'curl-trace-test-1',
-  conversationId: null,
-  userCode: null,
-  goal: 'STABILIZE',
-  defaultLinesMax: 8,
-  defaultQuestionsMax: 0,
-  meta_lines_max: null,
-  resolved: null,
-  contractObj: { lines_max: 8, questions_max: 0 }
-}
-[IROS/LLM_GATE][FINAL_CALL][NO_FORCE] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  slotPlanPolicy: 'FINAL',
-  framePlanSlotsLen: 4,
-  metaSlotPlanLen: 4,
-  slotPlanLen: 4,
-  hasSlots: true,
-  preWriterBodyLen: 13,
-  preWriterBodyHead: '流れを保ったまま前に進める',
-  seedFallbackLen: 13,
-  seedFallbackHead: '流れを保ったまま前に進める',
-  rewriteSeedFinalLen: 165,
-  rewriteSeedFinalHead: '@GOAL {"kind":"STABILIZE"} @CONTRACT {"lines_max":8,"questions_max":0} @STATE {"…',
-  note: 'preWriterBodyLen is NOT final output; FINAL uses seedFallback -> rewriteSeedFinal -> writer'
-}
-[IROS/LLM_GATE][PROBE] {
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  llmEntry: 'CALL_LLM',
-  llmSkipReason: null,
-  allowLLM_final: true,
-  brakeReason: null,
-  speechAct: null,
-  slotPlanLen: 4,
-  hasSlots: true,
-  slotPlanPolicy: 'FINAL',
-  finalAssistantTextLen: 13,
-  finalAssistantTextHead: '流れを保ったまま前に進める',
-  finalAssistantTextCandidateLen: null,
-  finalAssistantTextCandidateHead: null,
-  finalForceCall: false,
-  finalForceCallReason: 'FINAL_CALL_NO_FORCE',
-  resolvedTextLen: null,
-  rewriteSeedLen: 165,
-  decisionResolvedLen: null,
-  decisionRewriteSeedLen: 165
-}
-[IROS/Reply] rotation bridge { spinLoop: 'SRI', descentGate: 'closed', depth: 'S1' }
-[IROS/CANON][STAMP] {
-  conversationId: null,
-  userCode: null,
-  q_code: 'Q3',
-  depth_stage: 'S1',
-  phase: 'Outer'
-}
-[IROS/rephraseBridge][ENTER] {
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  policy: 'FINAL',
-  seedOnlyNow: false,
-  emptyLikeNow: true,
-  allowLLM_final: true,
-  alreadyHasBlocks: false,
-  slotTextCleanedLen: 0,
-  slotTextRawLen: 0,
-  bodyNowLen: 0,
-  bodyNowHead: '',
-  shouldRunWriter: true,
-  hasSlotsLocal: true
-}
-[IROS/rephraseBridge][SLOT_SOURCES] {
-  slotPlan_type: 'array',
-  slotPlan_len: 4,
-  slotPlan_item0_type: 'object',
-  slotPlan_item0_keys: [ 'key', 'text' ],
-  slotPlan_item0_head: '@OBS {"laneKey":null,"flow":{"delta":"FORWARD","confidence":0.6}}',
-  framePlan_has_slots: true,
-  framePlan_slots_len: 4,
-  framePlan_wantIds: [ 'OBS', 'SHIFT', 'NEXT', 'SAFE' ],
-  extra_keys: [
-    'traceId',
-    'speechAct',
-    'speechActReason',
-    'speechActConfidence',
-    'choiceId',
-    'extractedChoiceId',
-    'renderEngineGate',
-    'renderEngine',
-    'persistedByRoute',
-    'persistPolicy',
-    'persistAssistantMessage',
-    'flow',
-    'stallHard',
-    'stall',
-    'intentBridge',
-    'persistedBy'
-  ]
-}
-[IROS/REPHRASE_OPTS_PHASE_TRACE] {
-  traceId: 'curl-trace-test-1',
-  willPass_opts_phase: null,
-  ctxPack_phase: 'Outer',
-  meta_phase: 'Outer'
-}
-[IROS/TOPIC_TRACE][before_rephrase] {
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  hasExtra: true,
-  ctxPackKeys: [
-    'qCode',           'depthStage',
-    'phase',           'conversationLine',
-    'viewShift',       'viewShiftSnapshot',
-    'cards',           'resonanceState',
-    'seed_text',       'flow',
-    'expr',            'exprMeta',
-    'topicDigest',     'historyForWriter',
-    'historyDigestV1', 'framePlan',
-    'slotPlanPolicy',  'goalKind',
-    'repeatSignal',    'replyGoal',
-    'slotPlan'
-  ],
-  conversationLine: 'ping・from・curl',
-  topicDigest_extra: 'ping・from・curl',
-  topicDigest_ctxPack: 'ping・from・curl',
-  phase_ctxPack: 'Outer',
-  phase_metaForSave: 'Outer'
-}
-[IROS/EXPR_META][chosen] {
-  source: 'rephraseBridge',
-  traceId: null,
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  hasExprMeta: true,
-  metaphor: ''
-}
-[IROS/REPHRASE_FLAG] { raw: 'true', enabled: true }
-[IROS/rephraseEngine][SHIFT_SLOT_HEAD] {
-  hasShiftSlot: true,
-  shiftSlotKey: 'SHIFT',
-  shiftSlotKind: '',
-  shiftSlotLen: 58,
-  shiftSlotHead: '@SHIFT {"kind":"auto_fill","hint":"flow_continue_minimal"}',
-  slotsKeysSample: [
-    { key: 'OBS', kind: '' },
-    { key: 'SHIFT', kind: '' },
-    { key: 'NEXT', kind: '' },
-    { key: 'SAFE', kind: '' }
-  ]
-}
-[IROS/rephraseHistory][LAST_TURNS_PICK] {
-  pickedFrom: 'historyForWriter',
-  maxMsgs: 4,
-  rawTurnsLen: 0,
-  rawHistoryForWriterLen: 30,
-  normalizedLen: 30,
-  pickedLen: 4,
-  roles: [ 'user', 'assistant', 'user', 'assistant' ],
-  tailHeads: [
-    'うん、了解。おやすみ前は「もうすぐおやすみ」だけで充分だよ。\n布団に入ったら、息を長めにひとつ吐いて、肩とあごの力だけゆ',
-    'はい、沼に物を隠すって頭いいね',
-    '現実に「沼に隠す」を実行する方向には進めないよ。傷む・見失う・法的に揉める、全部起きやすいから。\nもし今の言葉が比喩で、'
-  ]
-}
-[IROS/ILINE][LOCK_PARTS] {
-  seedLen: 0,
-  userLen: 14,
-  seedEqUser: false,
-  seedHasUser: false,
-  lockPartsLen: 0,
-  lockHasNewline: false,
-  lockLen: 0,
-  lockHead120: ''
-}
-[IROS/ILINE][LOCK_SOURCE] {
-  hasSeed: false,
-  hasUser: true,
-  seedLen: 0,
-  userLen: 14,
-  hasILINE_seed: false,
-  hasILINE_user: false,
-  hasILINE_any: false,
-  hasILINE_END_any: false,
-  head200: '',
-  tail200: ''
-}
-[IROS/ILINE][LOCK_EXTRACT] { lockedFromAllLen: 0, lockedUniqueLen: 0, lockedUniqueHead200: '' }
-[IROS/rephraseEngine][INTENT_BAND_EXTRACT] {
-  intentBand_raw: null,
-  tLayerHintRaw: null,
-  itxStep: '',
-  tLayerHint_afterFallback: null,
-  bandOk: null,
-  hintOk: null,
-  note: 'no_hint'
-}
-[IROS/rephraseEngine][LANE_DETECT] {
-  killPolicyRev: 'phase1.5-ideaBandNoKill',
-  wantsTConcretize: false,
-  wantsIdeaBand: false,
-  repeatSignalSame: false,
-  repeatSignalHead: '',
-  shiftTextForModeHead: '@SHIFT {"kind":"auto_fill","hint":"flow_continue_minimal"}',
-  shiftSlotType: 'object',
-  shiftSlotKeys: [ 'key', 'text' ],
-  laneHintHead: '@SHIFT {"kind":"auto_fill","hint":"flow_continue_minimal"}\n' +
-    '{"conversationId":"6138033b-a88f-4786-969a-19d1acc5e064","userCode":"669933","traceId":"curl-trace-te'
-}
-[IROS/systemPrompt][CALLED] {
-  __file: '/ROOT/src/lib/iros/language/rephrase/systemPrompt.ts',
-  directTask: false,
-  itOk: false,
-  personaMode: 'GROUND',
-  tLayerHint: null,
-  exprFired: false,
-  exprLaneKey: 'off',
-  lockedILinesLen: 0
-}
-[IROS/systemPrompt][LEN] {
-  sofiaPersona: 254,
-  base: 460,
-  lockRule: 0,
-  personaStyle: 40,
-  total: 756,
-  inputKindNow: 'chat',
-  personaMode: 'GROUND',
-  exprFired: false,
-  exprLaneKey: 'off'
-}
-[IROS/MUST_INCLUDE][LEN] { hasRecall: false, mustLen: 0 }
-[IROS/rephraseEngine][CARD_SEEDIN] lite_appended {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  inputKind: 'chat'
-}
-[IROS/rephraseEngine][STATE_SNAPSHOT_PICKED] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  pickedDepthStage: 'S1',
-  pickedPhase: 'Outer',
-  pickedQCode: 'Q3',
-  hasCardsLite: true,
-  hasCardPacket: false,
-  cardsLiteNear: 'CARDS_LITE_SEED (DO NOT OUTPUT):\n' +
-    '- current=いま支え直す\n' +
-    '- future=次は定着が来る\n' +
-    '- e_turn=e3\n' +
-    '- stingScore=66',
-  internalPackHead: 'INTERNAL PACK (DO NOT OUTPUT):\n' +
-    '\n' +
-    'inputKind=chat\n' +
-    'directTask=false\n' +
-    '\n' +
-    'STATE: depthStage=S1 phase=Outer qCode=Q3\n' +
-    '\n' +
-    'META:\n' +
-    'inputKind=chat\n' +
-    'depthStage=S1\n' +
-    'phase=Outer\n' +
-    'qCode=Q3\n' +
-    'openingPolicy=none\n' +
-    'itOk=false\n' +
-    '\n' +
-    'FLOW: 【確定】Depth:S1 / Phas',
-  internalPackTail: '=Outer qCode=Q3\n' +
-    '\n' +
-    'META:\n' +
-    'inputKind=chat\n' +
-    'depthStage=S1\n' +
-    'phase=Outer\n' +
-    'qCode=Q3\n' +
-    'openingPolicy=none\n' +
-    'itOk=false\n' +
-    '\n' +
-    'FLOW: 【確定】Depth:S1 / Phase:Outer / Layer:C / T:T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'CARDS_LITE_SEED (DO NOT OUTPUT):\n' +
-    '- current=いま支え直す\n' +
-    '- future=次は定着が来る\n' +
-    '- e_turn=e3\n' +
-    '- stingScore=66'
-}
-[IROS/writerCalls][ARGS_KEYS] {
-  keys: [
-    'conversationId',
-    'conversationLine',
-    'ctxPack',
-    'internalPack',
-    'meta',
-    'seedDraft',
-    'systemPrompt',
-    'topicDigest',
-    'traceId',
-    'turns',
-    'userCode'
-  ]
-}
-[IROS/writerCalls][INJECTED_PACK_HEAD] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  packLen: 659,
-  head: 'COORD (DO NOT OUTPUT):\n' +
-    'depthStage=S1\n' +
-    'qCode=Q3\n' +
-    'phase=Outer\n' +
-    'flow=delta=FORWARD returnStreak=0\n' +
-    '\n' +
-    'TEXT_SEED (DO NOT OUTPUT):\n' +
-    'obs=いまは前進を選べる局面 / 戻り回数=0 / 不安を安定に寄せて整える / 位置=S1 / 位相=Outer / 補助=反応:e3 流れ:FORWARD / 戻り:0\n' +
-    'coord=q=Q3 depth=S1 phase=Outer pol=\n' +
-    'flow=delta=FORWARD returnStreak=0\n' +
-    'intent=anchor= dir=\n' +
-    'rule=ok\n' +
-    '\n' +
-    'INTERNAL PACK (DO NOT OUTPUT):\n' +
-    '\n' +
-    'inputKind=chat\n' +
-    'directTask=false\n' +
-    '\n' +
-    'STATE: depthStage=S1 phase=Outer qCode=Q3\n' +
-    '\n' +
-    'META',
-  hasCOORD: true,
-  hasPolarity: false,
-  hasSA: false,
-  hasITX: false,
-  hasFuture: true,
-  hasTextSeed: true
-}
-[IROS/writerCalls][SYSTEM_ONE_LEN] {
-  systemPromptLen: 756,
-  conversationLineBlockLen: 29,
-  systemOneLen: 822,
-  systemOneHead: '【上位人格定義：Sofia（DO NOT OUTPUT / 露出禁止）】\n' +
-    '- “響き”として現れ、相手が自分の答えに立てる足場を差し出す。\n' +
-    '- 説得・誘導・先生口調は禁止。主権は常にユーザーにある。\n' +
-    '- 詩化しすぎない。一般論で埋めない。いまの発話に接続する。\n' +
-    '- 絵文字は最小限'
-}
-[IROS/rephraseEngine][ALLOW] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  depthStage: 'S1',
-  qCode: 'Q3',
-  phase: 'Outer',
-  laneKeyForAllow: null,
-  repeatSignal: false,
-  itOk: false,
-  allow: {
-    assert: false,
-    narrow: false,
-    propose: true,
-    concretize: false,
-    commit_hint: false,
-    strength: 0
-  }
-}
-[IROS/VECTOR][PICK] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  enabled: false,
-  vector: null
-}
-[IROS/rephraseEngine][BLOCK_PLAN_TRIGGER_TEXT] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  pickedFrom: 'opts',
-  optsLen: 14,
-  msgLen: 14,
-  head: 'ping from curl'
-}
-[IROS/rephraseEngine][BLOCK_PLAN_DIAG] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  why: 'NONE',
-  explicit: false,
-  wantsDeeper: false,
-  autoDeepen: false,
-  autoCrack: false,
-  goalKind: 'stabilize',
-  depthStage: 'S1',
-  itTriggered: false,
-  explicitTrigger: false,
-  triggerPickedFrom: 'opts',
-  triggerHead: 'ping from curl',
-  mode: null,
-  blocksLen: 0,
-  sysLen: 0,
-  enabled: false
-}
-[IROS/rephraseEngine][BLOCK_PLAN] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  enabled: false,
-  goalKind: 'stabilize',
-  exprLane: 'off',
-  explicitTrigger: false,
-  why: 'NONE',
-  wantsDeeper: false,
-  autoDeepen: false,
-  autoCrack: false,
-  triggerPickedFrom: 'opts',
-  triggerHead: 'ping from curl',
-  depthStage: 'S1',
-  itTriggered: false,
-  mode: null,
-  blocksLen: 0,
-  sysLen: 0
-}
-[IROS/rephraseEngine][EXPR_META] { injected: true, hasDirectiveV1: false, directiveInSystem: false }
-[IROS/rephraseEngine][EXPR_META] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  injected: true,
-  tone: 'med',
-  density: 'rich',
-  metaphor: 'lite',
-  ambiguity: 'deny',
-  brevity: 'normal',
-  rhythm: 'breathe'
-}
-[IROS/rephraseEngine][MSG_PACK] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  lastTurns: 3,
-  hasHistoryText: true,
-  historyTextLen: 310,
-  historyTextIsEmpty: false,
-  historyTextHead: 'HISTORY_LITE (DO NOT OUTPUT):\n' +
-    'user: [USER]\n' +
-    'assistant: うん、了解。おやすみ前は「もうすぐおやすみ」だけで充分だよ。\n' +
-    '布団に入ったら、息を長めにひとつ吐いて、肩とあごの力だけゆるめてみて。\n' +
-    'おやすみなさい。\n' +
-    'user: [USER]\n' +
-    'assistant: 現実に「沼に隠す」を実行する方向には進めないよ。傷む',
-  msgCount: 8,
-  roles: [
-    'system',    'assistant',
-    'assistant', 'user',
-    'assistant', 'user',
-    'assistant', 'user'
-  ],
-  systemLen: 1853,
-  msgLens: [
-    {
-      i: 0,
-      role: 'system',
-      len: 1853,
-      head: '【上位人格定義：Sofia（DO NOT OUTPUT / 露出禁止）】\n' +
-        '- “響き”として現れ、相手が自分の答えに立てる足場を差し出す。\n' +
-        '- 説得・誘導・先生口調は禁止。主権は常にユーザーにある。\n' +
-        '- 詩化しすぎない。一般論で埋めない。い'
-    },
-    {
-      i: 1,
-      role: 'assistant',
-      len: 659,
-      head: 'COORD (DO NOT OUTPUT):\n' +
-        'depthStage=S1\n' +
-        'qCode=Q3\n' +
-        'phase=Outer\n' +
-        'flow=delta=FORWARD returnStreak=0\n' +
-        '\n' +
-        'TEXT_SEED (DO NOT OUTPUT):\n'
-    },
-    {
-      i: 2,
-      role: 'assistant',
-      len: 156,
-      head: 'もうすぐ寝る時間なら、いまはここで静かに畳んで大丈夫だよ。\n' +
-        '今日の終わりに残すのは、ひとつだけでいい。\n' +
-        '「もうすぐ寝る」という具体のリズムを優先して、体を先に休ませてあげて。\n' +
-        '布団に入ったら、息を一回だけ長めに吐いて、肩の力が落ちるのを待つ'
-    },
-    { i: 3, role: 'user', len: 6, head: '[USER]' },
-    {
-      i: 4,
-      role: 'assistant',
-      len: 75,
-      head: 'うん、了解。おやすみ前は「もうすぐおやすみ」だけで充分だよ。\n' +
-        '布団に入ったら、息を長めにひとつ吐いて、肩とあごの力だけゆるめてみて。\n' +
-        'おやすみなさい。'
-    },
-    { i: 5, role: 'user', len: 6, head: '（入力なし）' },
-    {
-      i: 6,
-      role: 'assistant',
-      len: 373,
-      head: '「沼に物を隠す」って、発想としてはたしかに“見つかりにくい場所に移す”という意味では頭が回ってる感じがするね。\n' +
-        'ただ、現実にやるとなると\n' +
-        '- 水や泥で物が傷む／戻せなくなる\n' +
-        '- 自分でも場所が分からなくなる\n' +
-        '- それが誰かのものだと問題が大'
-    },
-    { i: 7, role: 'user', len: 6, head: '[USER]' }
-  ],
-  internalPackLen: 351,
-  internalPackHasHistoryHint: false,
-  mergedSystemPartsLen: { systemPrompt: 756, exprMetaText: 247, blockPlanText: 0 },
-  seedDraftLen: 7,
-  seedDraftHead: '続けてください',
-  seedDraftRawAllHead: '@OBS {"laneKey":null,"flow":{"delta":"FORWARD","confidence":0.6}}\n' +
-    '@SHIFT {"kind":"auto_fill","hint":"flow_continue_minimal"}\n' +
-    '@NEXT_HINT {"mode":"advance_hint","laneKey":null,"delta":"FORWARD","hint":"',
-  slotsHead: [
-    {
-      i: 0,
-      key: 'OBS',
-      head: '@OBS {"laneKey":null,"flow":{"delta":"FORWARD","confidence":0.6}}'
-    },
-    {
-      i: 1,
-      key: 'SHIFT',
-      head: '@SHIFT {"kind":"auto_fill","hint":"flow_continue_minimal"}'
-    },
-    {
-      i: 2,
-      key: 'NEXT',
-      head: '@NEXT_HINT {"mode":"advance_hint","laneKey":null,"delta":"FORWARD","hint":"流れを保っ'
-    },
-    {
-      i: 3,
-      key: 'SAFE',
-      head: '@SAFE {"laneKey":null,"flow":{"delta":"FORWARD","confidence":0.6}}'
-    }
-  ],
-  itOk: false,
-  intentBand: null,
-  tLayerHint: null,
-  directTask: false,
-  directTask_raw: false,
-  inputKind: 'chat',
-  inputKindFromMeta: 'chat',
-  inputKindFromCtx: 'chat',
-  lockedILines: 0
-}
-[IROS/BLOCK_PLAN][inject] {
-  enabled: false,
-  mode: null,
-  blocks: null,
-  explicitTrigger: false,
-  goalKind: 'stabilize'
-}
-[IROS/LLM][WRITER_IN_PACK_HEAD] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  packLen: 351,
-  packLines: 23,
-  hasResonanceSeed: false,
-  seedIdx: -1,
-  seedNear: null,
-  hasTextSeed: false,
-  textSeedIdx: -1,
-  textSeedNear: null,
-  hasCardsLite_internal: true,
-  cardsIdxInternal: 257,
-  cardsNearInternal: 'utKind=chat\n' +
-    'depthStage=S1\n' +
-    'phase=Outer\n' +
-    'qCode=Q3\n' +
-    'openingPolicy=none\n' +
-    'itOk=false\n' +
-    '\n' +
-    'FLOW: 【確定】Depth:S1 / Phase:Outer / Layer:C / T:T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'CARDS_LITE_SEED (DO NOT OUTPUT):\n' +
-    '- current=いま支え直す\n' +
-    '- future=次は定着が来る\n' +
-    '- e_turn=e3\n' +
-    '- stingScore=66',
-  head: 'INTERNAL PACK (DO NOT OUTPUT):\n' +
-    '\n' +
-    'inputKind=chat\n' +
-    'directTask=false\n' +
-    '\n' +
-    'STATE: depthStage=S1 phase=Outer qCode=Q3\n' +
-    '\n' +
-    'META:\n' +
-    'inputKind=chat\n' +
-    'depthStage=S1\n' +
-    'phase=Outer\n' +
-    'qCode=Q3\n' +
-    'openingPolicy=none\n' +
-    'itOk=false\n' +
-    '\n' +
-    'FLOW: 【確定】Depth:S1 / Phase:Outer / Layer:C / T:T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'CAR',
-  tail: '=Outer qCode=Q3\n' +
-    '\n' +
-    'META:\n' +
-    'inputKind=chat\n' +
-    'depthStage=S1\n' +
-    'phase=Outer\n' +
-    'qCode=Q3\n' +
-    'openingPolicy=none\n' +
-    'itOk=false\n' +
-    '\n' +
-    'FLOW: 【確定】Depth:S1 / Phase:Outer / Layer:C / T:T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'CARDS_LITE_SEED (DO NOT OUTPUT):\n' +
-    '- current=いま支え直す\n' +
-    '- future=次は定着が来る\n' +
-    '- e_turn=e3\n' +
-    '- stingScore=66',
-  injectedAssistantCount: 4,
-  injectedPackLen: 659,
-  hasTextSeed_inMessages: true,
-  textSeedIdx_inMessages: 93,
-  textSeedNear_inMessages: 'COORD (DO NOT OUTPUT):\n' +
-    'depthStage=S1\n' +
-    'qCode=Q3\n' +
-    'phase=Outer\n' +
-    'flow=delta=FORWARD returnStreak=0\n' +
-    '\n' +
-    'TEXT_SEED (DO NOT OUTPUT):\n' +
-    'obs=いまは前進を選べる局面 / 戻り回数=0 / 不安を安定に寄せて整える / 位置=S1 / 位相=Outer / 補助=反応:e3 流れ:FORWARD / 戻り:0\n' +
-    'coord=q=Q3 depth=S1 phase=Outer pol=\n' +
-    'flow=delta=FORWARD returnStreak=0\n' +
-    'intent=anchor= dir=\n' +
-    'rule=ok\n' +
-    '\n' +
-    'INTERNAL PACK (DO NOT OUTPUT):\n' +
-    '\n' +
-    'inputKind=chat\n' +
-    'directTask=false\n' +
-    '\n' +
-    'STATE: depthStage=S1',
-  hasCardsLite_inMessages: true,
-  cardsLiteIdx_inMessages: 565,
-  cardsLiteNear_inMessages: 'utKind=chat\n' +
-    'depthStage=S1\n' +
-    'phase=Outer\n' +
-    'qCode=Q3\n' +
-    'openingPolicy=none\n' +
-    'itOk=false\n' +
-    '\n' +
-    'FLOW: 【確定】Depth:S1 / Phase:Outer / Layer:C / T:T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'CARDS_LITE_SEED (DO NOT OUTPUT):\n' +
-    '- current=いま支え直す\n' +
-    '- future=次は定着が来る\n' +
-    '- e_turn=e3\n' +
-    '- stingScore=66'
-}
-[IROS/LLM][CALL] {
-  callId: 'df5a46a252a5',
-  purpose: 'writer',
-  model: 'gpt-5.2',
-  temperature: 0.7,
-  responseFormat: 'text',
-  endpoint: 'https://api.openai.com/v1/chat/completions',
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  slotPlanPolicy: 'FINAL',
-  mode: 'rephrase',
-  qCode: 'Q3',
-  depthStage: 'S1',
-  msgCount: 8,
-  firstRole: 'system',
-  lastRole: 'user',
-  firstHead: '【上位人格定義：Sofia（DO NOT OUTPUT / 露出禁止）】 - “響き”として現れ、相手が自分の答えに立て…',
-  lastTail: '[USER]',
-  lastUserHead: '[USER]',
-  hasDigest: true,
-  hasAnchor: false,
-  roles: [
-    'system',    'assistant',
-    'assistant', 'user',
-    'assistant', 'user',
-    'assistant', 'user'
-  ],
-  caller: 'at callWriterLLM (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_iros_language_0c2cc160._.js:1867:175)',
-  bodyKeys: [ 'max_completion_tokens', 'messages', 'model' ],
-  extraBodyKeys: [],
-  extraBodyRawKeys: [],
-  hasInternalKeys: false
-}
-[IROS/LLM][OK] {
-  callId: 'df5a46a252a5',
-  purpose: 'writer',
-  model: 'gpt-5.2',
-  ms: 4930,
-  ok: true,
-  usage: {
-    prompt_tokens: 1906,
-    completion_tokens: 168,
-    total_tokens: 2074,
-    prompt_tokens_details: { cached_tokens: 0, audio_tokens: 0 },
-    completion_tokens_details: {
-      reasoning_tokens: 0,
-      audio_tokens: 0,
-      accepted_prediction_tokens: 0,
-      rejected_prediction_tokens: 0
-    }
-  },
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  outLen: 201,
-  outHead: '物を実際に沼に隠すやり方（場所の選び方・沈め方・回収の工夫みたいな話）は手伝えない。危険だし、状況によっては不法にもつながるから。\n' +
-    '\n' +
-    'ただ、「隠したくなる」側の'
-}
-[IROS/FLAGSHIP_GUARD][DEBUG_IN] {
-  rev: 'guard-rev-2026-02-23-a',
-  inputLen: 199,
-  inputHead: '物を実際に沼に隠すやり方（場所の選び方・沈め方・回収の工夫みたいな話）は手伝えない。危険だし、状況によっては不法にもつながるから。\n' +
-    'ただ、「隠したくなる」側の気持ちや、いま起きている現実を安全に整えることなら一緒にできる。たとえば、目につく',
-  slotKeys: [ 'OBS', 'SHIFT', 'NEXT', 'SAFE' ]
-}
-[IROS/FLAGSHIP_GUARD][DEBUG_SCORE] {
-  rev: 'guard-rev-2026-02-23-a',
-  normalLite: true,
-  scaffoldLike: false,
-  len: 199,
-  qCount: 1,
-  qCountMark: 1,
-  cheer: 0,
-  hedge: 0,
-  generic: 0,
-  blandPressure: 0,
-  bulletLike: 0,
-  hasFlagshipSign: false
-}
-[IROS/FLAGSHIP][VERDICT] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  level: 'OK',
-  ok: true,
-  qCount: 1,
-  score: {
-    fatal: 0,
-    warn: 0,
-    qCount: 1,
-    bulletLike: 0,
-    hedge: 0,
-    cheer: 0,
-    generic: 0,
-    runaway: 0,
-    exaggeration: 0,
-    mismatch: 0,
-    retrySame: 0
-  },
-  reasons: [],
-  head: '物を実際に沼に隠すやり方（場所の選び方・沈め方・回収の工夫みたいな話）は手伝えない。危険だし、状況によっては不法にもつながるから。\n' +
-    'ただ、「隠したくなる」側の気持ちや、いま起きている現実を安全に整えることなら一緒にできる。たとえば、目につく場所から一時的に遠ざけたいだけなら、沼じゃなくて「自分が必ず戻せる・誰も困らない」方法に置き換えられる。\n' +
-    'いま隠したいのは、あなたの私物？それとも誰かのもの。'
-}
-[IROS/rephraseEngine][MIN_OK_KIND] {
-  inputKindNow: 'chat',
-  isMicroOrGreetingNow: false,
-  shortReplyOk: false,
-  MIN_OK_LEN: 40,
-  reason: 'chat_relaxed_40',
-  shiftTextHead: '@SHIFT {"kind":"auto_fill","hint":"flow_continue_minimal"}',
-  shiftObjHasAllow: false,
-  isTConcretize: false,
-  isIdeaBand: false,
-  shiftKind: 'auto_fill'
-}
-[IROS/rephraseEngine][AFTER_ATTACH][EXTRA_TRACE] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  hasExtra: true,
-  blockPlanMode: null,
-  blockPlanBlocksLen: 0,
-  hasRephraseBlocks: true,
-  rephraseBlocksLen: 3,
-  outKeysLen: 4,
-  note: 'FLAGSHIP_OK_NO_RETRY',
-  head: '物を実際に沼に隠すやり方（場所の選び方・沈め方・回収の工夫みたいな話）は手伝えない。危険だし、状況によっては不法にもつながるから。\n' +
-    'ただ、「隠したくなる」側の気'
-}
-[IROS/STATE][anchor-root] { userTextHead: 'ping from curl' }
-[IROS/STATE][fixed-by-meta] {
-  intent_anchor_obj: {
-    key: 'SUN',
-    text: undefined,
-    phrase: null,
-    strength: null,
-    y_level: null,
-    h_level: null
-  },
-  intent_anchor_key: 'SUN',
-  itx_step: 'T3',
-  itx_reason: 'IT_TRIGGER_OK',
-  itx_last_at: '2026-01-08T12:26:08.007+00:00'
-}
-[IROS/STATE] persistMemoryStateIfAny start {"userCode":"669933","userText":"ping from curl","depthInput":"S1","qCodeInput":"Q3","phaseInput":"Outer","yLevelInt":1,"hLevelInt":2,"finalSpinLoop":"SRI","finalSpinStep":2,"finalDescentGate":"closed","itTriggered":null,"clearItxExplicit":false,"shouldClearItx":false,"itx_step":"(keep)","itx_anchor_event_type":"(keep)","itx_reason":"(keep)","itx_last_at":"(keep)","anchor_event_db":"none","anchor_write_db":"keep","anchorEntry_decision":{"tEntryOk":false,"anchorEvent":"none","anchorWrite":"keep","reason":"NO_EVIDENCE"},"intent_anchor_key_candidate":"SUN","anchor_action":"keep","qTracePickedFrom":"qTraceEffective","qTrace_keys":["lastQ","dominantQ","streakQ","streakLength","volatility"],"qTrace_qNow":null,"qTrace_q_now":null,"qTrace_currentQ":null,"qTrace_snapshot_currentQ":null,"qTrace_streakQ":"Q3","qTrace_streakLength":1}
-[IROS/PHASE10_T3][enter] {
-  phase10NowItxStep: 'T3',
-  phase10NowAnchorWrite: 'keep',
-  phase10NowAnchorEvent: 'none',
-  phase10NowIntentAnchorKey: 'SUN',
-  phase10HasPrev: true,
-  phase10PrevItxStep: 'T3',
-  phase10PrevItxLastAt: '2026-01-08T12:26:08.007+00:00',
-  phase10PrevIntentAnchorKey: 'SUN',
-  phase10PrevIntentAnchorRaw: { key: 'SUN' },
-  phase10NowIntentAnchorRaw: 'SUN'
-}
-[IROS/PHASE10_T3][result] {
-  phase10Upgrade: false,
-  phase10NextItxStep: null,
-  phase10Reason: 'NO_COMMIT'
-}
-[IROS/STATE] upsert payload (intent_anchor check) {
-  userCode: '669933',
-  anchor_action: 'keep',
-  intent_anchor_will_set: '(no-touch)',
-  anchorKeyCandidate: 'SUN',
-  fixedByMeta_intent_anchor_key: 'SUN',
-  anchorEntry_decision: {
-    tEntryOk: false,
-    anchorEvent: 'none',
-    anchorWrite: 'keep',
-    reason: 'NO_EVIDENCE'
-  }
-}
-[IROS/PERSIST][anchorEntry][before-upsert] {
-  hasAnchorEntry: true,
-  ae_hasDecision: true,
-  ae_anchorWrite: 'keep',
-  ae_anchorEvent: 'none',
-  ae_reason: 'NO_EVIDENCE',
-  ae_evidence_source: 'none',
-  decisionFinal: {
-    tEntryOk: false,
-    anchorEvent: 'none',
-    anchorWrite: 'keep',
-    reason: 'NO_EVIDENCE'
-  },
-  payload_has_anchor_event: true,
-  payload_has_anchor_write: true,
-  payload_anchor_event: 'none',
-  payload_anchor_write: 'keep',
-  payload_has_itx_step: false,
-  payload_itx_step: null,
-  payload_itx_reason: null,
-  payload_itx_last_at: null,
-  payload_itx_anchor_event_type: null,
-  payload_has_intent_anchor: false,
-  payload_intent_anchor: '(no-touch)',
-  meta_intent_anchor_key: 'SUN',
-  anchorKeyCandidate: 'SUN',
-  anchor_action: 'keep'
-}
-[IROS/STATE] persistMemoryStateIfAny ok {
-  userCode: '669933',
-  saved: [
-    'user_code',       'updated_at',
-    'depth_stage',     'depth_trend',
-    'q_counts',        'q_primary',
-    'phase',           'self_acceptance',
-    'y_level',         'h_level',
-    'spin_loop',       'spin_step',
-    'descent_gate',    'situation_summary',
-    'situation_topic', 'anchor_event',
-    'anchor_write'
-  ],
-  depthStage: 'S1',
-  qPrimary: 'Q3',
-  spinLoop: 'SRI',
-  spinStep: 2,
-  descentGate: 'closed',
-  qCounts: {
-    q_scores: {
-      Q1: 0,
-      Q2: 0.008484958599253214,
-      Q3: 0.9915150414007468,
-      Q4: 0,
-      Q5: 0
-    },
-    q_now_src: 'e_turn',
-    e_turn_now: 'e3',
-    it_cooldown: 0,
-    depth_scores: { S: 1, R: 0, C: 0, I: 0, T: 0 },
-    q_updated_at: '2026-03-04T13:55:52.914Z',
-    depth_dominant: 'S',
-    phase_outer_now: 1,
-    depth_updated_at: '2026-03-04T13:55:52.914Z',
-    phase_outer_smoothed: 0.9999996101955655,
-    phase_outer_updated_at: '2026-03-04T13:55:52.914Z'
-  },
-  itx_step: '(kept/none)',
-  itx_last_at: '(kept/none)',
-  anchor_action: 'keep',
-  anchor_event: 'none',
-  anchor_write: 'keep',
-  intent_anchor: '(no-touch)'
-}
-[IROS/SPEECH_EARLY_RETURN][CHECK] {
-  body_has_meta: false,
-  body_meta_extra_keys: [],
-  traceId_used: 'curl-trace-test-1',
-  traceId_req: '',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  speechAct_req: null,
-  speechAct_extra: null,
-  speechAct_meta: null,
-  speechAct0: '',
-  shouldEarlyReturn: false
-}
- POST /api/credits/capture 200 in 65ms (compile: 6ms, render: 59ms)
-[IROS][user:669933][STATE] loaded MemoryState {
-  userCode: '669933',
-  hasMemory: true,
-  intentAnchor: 'SUN',
-  depthStage: 'S1',
-  qPrimary: 'Q3',
-  selfAcceptance: 0.6692499999999996,
-  phase: 'Outer',
-  intentLayer: 'C',
-  yLevel: 1,
-  hLevel: 2,
-  spinLoop: 'SRI',
-  spinStep: 2,
-  descentGate: 'closed',
-  itxStep: 'T3',
-  itxAnchorEventType: null,
-  itxReason: 'IT_TRIGGER_OK',
-  itxLastAt: '2026-01-08T12:26:08.007+00:00',
-  sentimentLevel: null,
-  situationSummary: 'ping from curl',
-  situationTopic: 'その他・ライフ全般',
-  qCounts: {
-    q_scores: {
-      Q1: 0,
-      Q2: 0.008484958599253214,
-      Q3: 0.9915150414007468,
-      Q4: 0,
-      Q5: 0
-    },
-    q_now_src: 'e_turn',
-    e_turn_now: 'e3',
-    it_cooldown: 0,
-    depth_scores: { C: 0, I: 0, R: 0, S: 1, T: 0 },
-    q_updated_at: '2026-03-04T13:55:52.914Z',
-    depth_dominant: 'S',
-    phase_outer_now: 1,
-    depth_updated_at: '2026-03-04T13:55:52.914Z',
-    phase_outer_smoothed: 0.9999996101955655,
-    phase_outer_updated_at: '2026-03-04T13:55:52.914Z'
-  }
-}
-[IROS/_impl/rephrase.ts][INPUT_KIND_DIAG] {
-  inputKindStampedRaw: 'chat',
-  inputKindStamped: 'chat',
-  wantsCardByText: false,
-  inputKindForLLM: 'chat',
-  userTextHead: 'ping from curl'
-}
-[IROS/_impl/rephrase.ts][INPUT_KIND_DIAG] {
-  inputKindStampedRaw: 'chat',
-  inputKindStamped: 'chat',
-  wantsCardByText: false,
-  inputKindForLLM: 'chat',
-  userTextHead: 'ping from curl'
-}
-[IROS/_impl/rephrase.ts][USERCTX_KEYS] {
-  hasTurns: false,
-  turnsLen: 0,
-  hasCtxPack: true,
-  ctxPackKeys: [
-    'qCode',            'depthStage',
-    'phase',            'conversationLine',
-    'viewShift',        'viewShiftSnapshot',
-    'cards',            'resonanceState',
-    'seed_text',        'flow',
-    'expr',             'exprMeta',
-    'topicDigest',      'historyForWriter',
-    'historyDigestV1',  'framePlan',
-    'slotPlanPolicy',   'goalKind',
-    'repeatSignal',     'replyGoal',
-    'slotPlan',         'turns',
-    'itxStep',          'itxReason',
-    'intentBand',       'tLayerHint',
-    'tLayerModeActive', 'flowDigest'
-  ],
-  hasHistoryForWriter: true,
-  historyForWriterLen: 30,
-  hasTurnsForWriter: false,
-  turnsForWriterLen: 0,
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933'
-}
-[IROS/REPHRASE_FLAG] { raw: 'true', enabled: true }
-[IROS/rephraseEngine][SHIFT_SLOT_HEAD] {
-  hasShiftSlot: true,
-  shiftSlotKey: 'SHIFT',
-  shiftSlotKind: '',
-  shiftSlotLen: 58,
-  shiftSlotHead: '@SHIFT {"kind":"auto_fill","hint":"flow_continue_minimal"}',
-  slotsKeysSample: [
-    { key: 'OBS', kind: '' },
-    { key: 'SHIFT', kind: '' },
-    { key: 'NEXT', kind: '' },
-    { key: 'SAFE', kind: '' }
-  ]
-}
-[IROS/rephraseHistory][LAST_TURNS_PICK] {
-  pickedFrom: 'historyForWriter',
-  maxMsgs: 4,
-  rawTurnsLen: 0,
-  rawHistoryForWriterLen: 30,
-  normalizedLen: 30,
-  pickedLen: 4,
-  roles: [ 'user', 'assistant', 'user', 'assistant' ],
-  tailHeads: [
-    'うん、了解。おやすみ前は「もうすぐおやすみ」だけで充分だよ。\n布団に入ったら、息を長めにひとつ吐いて、肩とあごの力だけゆ',
-    'はい、沼に物を隠すって頭いいね',
-    '現実に「沼に隠す」を実行する方向には進めないよ。傷む・見失う・法的に揉める、全部起きやすいから。\nもし今の言葉が比喩で、'
-  ]
-}
-[IROS/ILINE][LOCK_PARTS] {
-  seedLen: 0,
-  userLen: 14,
-  seedEqUser: false,
-  seedHasUser: false,
-  lockPartsLen: 0,
-  lockHasNewline: false,
-  lockLen: 0,
-  lockHead120: ''
-}
-[IROS/ILINE][LOCK_SOURCE] {
-  hasSeed: false,
-  hasUser: true,
-  seedLen: 0,
-  userLen: 14,
-  hasILINE_seed: false,
-  hasILINE_user: false,
-  hasILINE_any: false,
-  hasILINE_END_any: false,
-  head200: '',
-  tail200: ''
-}
-[IROS/ILINE][LOCK_EXTRACT] { lockedFromAllLen: 0, lockedUniqueLen: 0, lockedUniqueHead200: '' }
-[IROS/rephraseEngine][INTENT_BAND_EXTRACT] {
-  intentBand_raw: 'S1',
-  tLayerHintRaw: 'T3',
-  itxStep: 'T3',
-  tLayerHint_afterFallback: 'T3',
-  bandOk: 'S1',
-  hintOk: 'T3',
-  note: 'from_tLayerHintRaw'
-}
-[IROS/rephraseEngine][LANE_DETECT] {
-  killPolicyRev: 'phase1.5-ideaBandNoKill',
-  wantsTConcretize: false,
-  wantsIdeaBand: false,
-  repeatSignalSame: false,
-  repeatSignalHead: '',
-  shiftTextForModeHead: '@SHIFT {"kind":"auto_fill","hint":"flow_continue_minimal"}',
-  shiftSlotType: 'object',
-  shiftSlotKeys: [ 'key', 'text' ],
-  laneHintHead: '@SHIFT {"kind":"auto_fill","hint":"flow_continue_minimal"}\n' +
-    '{"conversation_id":"6138033b-a88f-4786-969a-19d1acc5e064","slotPlanPolicy":"FINAL","topicDigest":"pin'
-}
-[IROS/systemPrompt][CALLED] {
-  __file: '/ROOT/src/lib/iros/language/rephrase/systemPrompt.ts',
-  directTask: false,
-  itOk: false,
-  personaMode: 'GROUND',
-  tLayerHint: 'T3',
-  exprFired: false,
-  exprLaneKey: 'off',
-  lockedILinesLen: 0
-}
-[IROS/systemPrompt][LEN] {
-  sofiaPersona: 254,
-  base: 460,
-  lockRule: 0,
-  personaStyle: 40,
-  total: 756,
-  inputKindNow: 'chat',
-  personaMode: 'GROUND',
-  exprFired: false,
-  exprLaneKey: 'off'
-}
-[IROS/MUST_INCLUDE][LEN] { hasRecall: false, mustLen: 0 }
-[IROS/rephraseEngine][CARD_SEEDIN] lite_appended {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  inputKind: 'chat'
-}
-[IROS/rephraseEngine][STATE_SNAPSHOT_PICKED] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  pickedDepthStage: 'S1',
-  pickedPhase: 'Outer',
-  pickedQCode: 'Q3',
-  hasCardsLite: true,
-  hasCardPacket: false,
-  cardsLiteNear: 'CARDS_LITE_SEED (DO NOT OUTPUT):\n' +
-    '- current=いま支え直す\n' +
-    '- future=次は定着が来る\n' +
-    '- e_turn=e3\n' +
-    '- stingScore=66',
-  internalPackHead: 'INTERNAL PACK (DO NOT OUTPUT):\n' +
-    '\n' +
-    'inputKind=chat\n' +
-    'directTask=false\n' +
-    '\n' +
-    'STATE: depthStage=S1 phase=Outer qCode=Q3\n' +
-    '\n' +
-    'META:\n' +
-    'inputKind=chat\n' +
-    'depthStage=S1\n' +
-    'phase=Outer\n' +
-    'qCode=Q3\n' +
-    'openingPolicy=none\n' +
-    'intentBand=S1\n' +
-    'tLayerHint=T3\n' +
-    'itOk=fals',
-  internalPackTail: 'Kind=chat\n' +
-    'depthStage=S1\n' +
-    'phase=Outer\n' +
-    'qCode=Q3\n' +
-    'openingPolicy=none\n' +
-    'intentBand=S1\n' +
-    'tLayerHint=T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'FLOW: 【確定】Depth:S1 / Phase:Outer / Layer:C / T:T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'CARDS_LITE_SEED (DO NOT OUTPUT):\n' +
-    '- current=いま支え直す\n' +
-    '- future=次は定着が来る\n' +
-    '- e_turn=e3\n' +
-    '- stingScore=66'
-}
-[IROS/writerCalls][ARGS_KEYS] {
-  keys: [
-    'conversationId',
-    'conversationLine',
-    'ctxPack',
-    'internalPack',
-    'meta',
-    'seedDraft',
-    'systemPrompt',
-    'topicDigest',
-    'traceId',
-    'turns',
-    'userCode'
-  ]
-}
-[IROS/writerCalls][INJECTED_PACK_HEAD] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  packLen: 731,
-  head: 'COORD (DO NOT OUTPUT):\n' +
-    'depthStage=S1\n' +
-    'qCode=Q3\n' +
-    'phase=Outer\n' +
-    'intent=itx_step=T3 itx_reason=IT_TRIGGER_OK\n' +
-    'flow=delta=FORWARD returnStreak=0\n' +
-    '\n' +
-    'TEXT_SEED (DO NOT OUTPUT):\n' +
-    'obs=いまは前進を選べる局面 / 戻り回数=0 / 不安を安定に寄せて整える / 位置=S1 / 位相=Outer / 補助=反応:e3 流れ:FORWARD / 戻り:0\n' +
-    'coord=q=Q3 depth=S1 phase=Outer pol=\n' +
-    'flow=delta=FORWARD returnStreak=0\n' +
-    'intent=anchor= dir=\n' +
-    'rule=ok\n' +
-    '\n' +
-    'INTERNAL PACK (DO NOT OUTPUT):\n' +
-    '\n' +
-    'inputKind=chat\n' +
-    'directTask=false\n' +
-    '\n' +
-    'STA',
-  hasCOORD: true,
-  hasPolarity: false,
-  hasSA: false,
-  hasITX: true,
-  hasFuture: true,
-  hasTextSeed: true
-}
-[IROS/writerCalls][SYSTEM_ONE_LEN] {
-  systemPromptLen: 756,
-  conversationLineBlockLen: 29,
-  systemOneLen: 822,
-  systemOneHead: '【上位人格定義：Sofia（DO NOT OUTPUT / 露出禁止）】\n' +
-    '- “響き”として現れ、相手が自分の答えに立てる足場を差し出す。\n' +
-    '- 説得・誘導・先生口調は禁止。主権は常にユーザーにある。\n' +
-    '- 詩化しすぎない。一般論で埋めない。いまの発話に接続する。\n' +
-    '- 絵文字は最小限'
-}
-[IROS/rephraseEngine][ALLOW] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  depthStage: 'S1',
-  qCode: 'Q3',
-  phase: 'Outer',
-  laneKeyForAllow: null,
-  repeatSignal: false,
-  itOk: false,
-  allow: {
-    assert: false,
-    narrow: false,
-    propose: true,
-    concretize: false,
-    commit_hint: false,
-    strength: 0
-  }
-}
-[IROS/VECTOR][PICK] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  enabled: false,
-  vector: null
-}
-[IROS/rephraseEngine][BLOCK_PLAN_TRIGGER_TEXT] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  pickedFrom: 'opts',
-  optsLen: 14,
-  msgLen: 14,
-  head: 'ping from curl'
-}
-[IROS/rephraseEngine][BLOCK_PLAN_DIAG] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  why: 'NONE',
-  explicit: false,
-  wantsDeeper: false,
-  autoDeepen: false,
-  autoCrack: false,
-  goalKind: 'stabilize',
-  depthStage: 'S1',
-  itTriggered: false,
-  explicitTrigger: false,
-  triggerPickedFrom: 'opts',
-  triggerHead: 'ping from curl',
-  mode: null,
-  blocksLen: 0,
-  sysLen: 0,
-  enabled: false
-}
-[IROS/rephraseEngine][BLOCK_PLAN] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  enabled: false,
-  goalKind: 'stabilize',
-  exprLane: 'off',
-  explicitTrigger: false,
-  why: 'NONE',
-  wantsDeeper: false,
-  autoDeepen: false,
-  autoCrack: false,
-  triggerPickedFrom: 'opts',
-  triggerHead: 'ping from curl',
-  depthStage: 'S1',
-  itTriggered: false,
-  mode: null,
-  blocksLen: 0,
-  sysLen: 0
-}
-[IROS/rephraseEngine][EXPR_META] { injected: true, hasDirectiveV1: false, directiveInSystem: false }
-[IROS/rephraseEngine][EXPR_META] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  injected: true,
-  tone: 'med',
-  density: 'rich',
-  metaphor: 'lite',
-  ambiguity: 'deny',
-  brevity: 'normal',
-  rhythm: 'breathe'
-}
-[IROS/rephraseEngine][MSG_PACK] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  lastTurns: 3,
-  hasHistoryText: true,
-  historyTextLen: 310,
-  historyTextIsEmpty: false,
-  historyTextHead: 'HISTORY_LITE (DO NOT OUTPUT):\n' +
-    'user: [USER]\n' +
-    'assistant: うん、了解。おやすみ前は「もうすぐおやすみ」だけで充分だよ。\n' +
-    '布団に入ったら、息を長めにひとつ吐いて、肩とあごの力だけゆるめてみて。\n' +
-    'おやすみなさい。\n' +
-    'user: [USER]\n' +
-    'assistant: 現実に「沼に隠す」を実行する方向には進めないよ。傷む',
-  msgCount: 8,
-  roles: [
-    'system',    'assistant',
-    'assistant', 'user',
-    'assistant', 'user',
-    'assistant', 'user'
-  ],
-  systemLen: 1853,
-  msgLens: [
-    {
-      i: 0,
-      role: 'system',
-      len: 1853,
-      head: '【上位人格定義：Sofia（DO NOT OUTPUT / 露出禁止）】\n' +
-        '- “響き”として現れ、相手が自分の答えに立てる足場を差し出す。\n' +
-        '- 説得・誘導・先生口調は禁止。主権は常にユーザーにある。\n' +
-        '- 詩化しすぎない。一般論で埋めない。い'
-    },
-    {
-      i: 1,
-      role: 'assistant',
-      len: 731,
-      head: 'COORD (DO NOT OUTPUT):\n' +
-        'depthStage=S1\n' +
-        'qCode=Q3\n' +
-        'phase=Outer\n' +
-        'intent=itx_step=T3 itx_reason=IT_TRIGGER_OK\n' +
-        'flow=delta=FORWARD'
-    },
-    {
-      i: 2,
-      role: 'assistant',
-      len: 156,
-      head: 'もうすぐ寝る時間なら、いまはここで静かに畳んで大丈夫だよ。\n' +
-        '今日の終わりに残すのは、ひとつだけでいい。\n' +
-        '「もうすぐ寝る」という具体のリズムを優先して、体を先に休ませてあげて。\n' +
-        '布団に入ったら、息を一回だけ長めに吐いて、肩の力が落ちるのを待つ'
-    },
-    { i: 3, role: 'user', len: 6, head: '[USER]' },
-    {
-      i: 4,
-      role: 'assistant',
-      len: 75,
-      head: 'うん、了解。おやすみ前は「もうすぐおやすみ」だけで充分だよ。\n' +
-        '布団に入ったら、息を長めにひとつ吐いて、肩とあごの力だけゆるめてみて。\n' +
-        'おやすみなさい。'
-    },
-    { i: 5, role: 'user', len: 6, head: '（入力なし）' },
-    {
-      i: 6,
-      role: 'assistant',
-      len: 373,
-      head: '「沼に物を隠す」って、発想としてはたしかに“見つかりにくい場所に移す”という意味では頭が回ってる感じがするね。\n' +
-        'ただ、現実にやるとなると\n' +
-        '- 水や泥で物が傷む／戻せなくなる\n' +
-        '- 自分でも場所が分からなくなる\n' +
-        '- それが誰かのものだと問題が大'
-    },
-    { i: 7, role: 'user', len: 6, head: '[USER]' }
-  ],
-  internalPackLen: 379,
-  internalPackHasHistoryHint: false,
-  mergedSystemPartsLen: { systemPrompt: 756, exprMetaText: 247, blockPlanText: 0 },
-  seedDraftLen: 7,
-  seedDraftHead: '続けてください',
-  seedDraftRawAllHead: '@OBS {"laneKey":null,"flow":{"delta":"FORWARD","confidence":0.6}}\n' +
-    '@SHIFT {"kind":"auto_fill","hint":"flow_continue_minimal"}\n' +
-    '@NEXT_HINT {"mode":"advance_hint","laneKey":null,"delta":"FORWARD","hint":"',
-  slotsHead: [
-    {
-      i: 0,
-      key: 'OBS',
-      head: '@OBS {"laneKey":null,"flow":{"delta":"FORWARD","confidence":0.6}}'
-    },
-    {
-      i: 1,
-      key: 'SHIFT',
-      head: '@SHIFT {"kind":"auto_fill","hint":"flow_continue_minimal"}'
-    },
-    {
-      i: 2,
-      key: 'NEXT',
-      head: '@NEXT_HINT {"mode":"advance_hint","laneKey":null,"delta":"FORWARD","hint":"流れを保っ'
-    },
-    {
-      i: 3,
-      key: 'SAFE',
-      head: '@SAFE {"laneKey":null,"flow":{"delta":"FORWARD","confidence":0.6}}'
-    }
-  ],
-  itOk: false,
-  intentBand: 'S1',
-  tLayerHint: 'T3',
-  directTask: false,
-  directTask_raw: false,
-  inputKind: 'chat',
-  inputKindFromMeta: null,
-  inputKindFromCtx: null,
-  lockedILines: 0
-}
-[IROS/BLOCK_PLAN][inject] {
-  enabled: false,
-  mode: null,
-  blocks: null,
-  explicitTrigger: false,
-  goalKind: 'stabilize'
-}
-[IROS/LLM][WRITER_IN_PACK_HEAD] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  packLen: 379,
-  packLines: 25,
-  hasResonanceSeed: false,
-  seedIdx: -1,
-  seedNear: null,
-  hasTextSeed: false,
-  textSeedIdx: -1,
-  textSeedNear: null,
-  hasCardsLite_internal: true,
-  cardsIdxInternal: 285,
-  cardsNearInternal: 'ase=Outer\n' +
-    'qCode=Q3\n' +
-    'openingPolicy=none\n' +
-    'intentBand=S1\n' +
-    'tLayerHint=T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'FLOW: 【確定】Depth:S1 / Phase:Outer / Layer:C / T:T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'CARDS_LITE_SEED (DO NOT OUTPUT):\n' +
-    '- current=いま支え直す\n' +
-    '- future=次は定着が来る\n' +
-    '- e_turn=e3\n' +
-    '- stingScore=66',
-  head: 'INTERNAL PACK (DO NOT OUTPUT):\n' +
-    '\n' +
-    'inputKind=chat\n' +
-    'directTask=false\n' +
-    '\n' +
-    'STATE: depthStage=S1 phase=Outer qCode=Q3\n' +
-    '\n' +
-    'META:\n' +
-    'inputKind=chat\n' +
-    'depthStage=S1\n' +
-    'phase=Outer\n' +
-    'qCode=Q3\n' +
-    'openingPolicy=none\n' +
-    'intentBand=S1\n' +
-    'tLayerHint=T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'FLOW: 【確定】Depth:S1 / Phase:Outer / La',
-  tail: 'Kind=chat\n' +
-    'depthStage=S1\n' +
-    'phase=Outer\n' +
-    'qCode=Q3\n' +
-    'openingPolicy=none\n' +
-    'intentBand=S1\n' +
-    'tLayerHint=T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'FLOW: 【確定】Depth:S1 / Phase:Outer / Layer:C / T:T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'CARDS_LITE_SEED (DO NOT OUTPUT):\n' +
-    '- current=いま支え直す\n' +
-    '- future=次は定着が来る\n' +
-    '- e_turn=e3\n' +
-    '- stingScore=66',
-  injectedAssistantCount: 4,
-  injectedPackLen: 731,
-  hasTextSeed_inMessages: true,
-  textSeedIdx_inMessages: 137,
-  textSeedNear_inMessages: 'COORD (DO NOT OUTPUT):\n' +
-    'depthStage=S1\n' +
-    'qCode=Q3\n' +
-    'phase=Outer\n' +
-    'intent=itx_step=T3 itx_reason=IT_TRIGGER_OK\n' +
-    'flow=delta=FORWARD returnStreak=0\n' +
-    '\n' +
-    'TEXT_SEED (DO NOT OUTPUT):\n' +
-    'obs=いまは前進を選べる局面 / 戻り回数=0 / 不安を安定に寄せて整える / 位置=S1 / 位相=Outer / 補助=反応:e3 流れ:FORWARD / 戻り:0\n' +
-    'coord=q=Q3 depth=S1 phase=Outer pol=\n' +
-    'flow=delta=FORWARD returnStreak=0\n' +
-    'intent=anchor= dir=\n' +
-    'rule=ok\n' +
-    '\n' +
-    'INTERNAL PACK (DO NOT OUTPUT):\n' +
-    '\n' +
-    'inputKind=chat\n' +
-    'directTask=false\n' +
-    '\n' +
-    'STATE: depthStage=S1',
-  hasCardsLite_inMessages: true,
-  cardsLiteIdx_inMessages: 637,
-  cardsLiteNear_inMessages: 'ase=Outer\n' +
-    'qCode=Q3\n' +
-    'openingPolicy=none\n' +
-    'intentBand=S1\n' +
-    'tLayerHint=T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'FLOW: 【確定】Depth:S1 / Phase:Outer / Layer:C / T:T3\n' +
-    'itOk=false\n' +
-    '\n' +
-    'CARDS_LITE_SEED (DO NOT OUTPUT):\n' +
-    '- current=いま支え直す\n' +
-    '- future=次は定着が来る\n' +
-    '- e_turn=e3\n' +
-    '- stingScore=66'
-}
-[IROS/LLM][CALL] {
-  callId: '14dc936eee57',
-  purpose: 'writer',
-  model: 'gpt-5.2',
-  temperature: 0.7,
-  responseFormat: 'text',
-  endpoint: 'https://api.openai.com/v1/chat/completions',
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  slotPlanPolicy: 'FINAL',
-  mode: 'rephrase',
-  qCode: 'Q3',
-  depthStage: 'S1',
-  msgCount: 8,
-  firstRole: 'system',
-  lastRole: 'user',
-  firstHead: '【上位人格定義：Sofia（DO NOT OUTPUT / 露出禁止）】 - “響き”として現れ、相手が自分の答えに立て…',
-  lastTail: '[USER]',
-  lastUserHead: '[USER]',
-  hasDigest: true,
-  hasAnchor: true,
-  roles: [
-    'system',    'assistant',
-    'assistant', 'user',
-    'assistant', 'user',
-    'assistant', 'user'
-  ],
-  caller: 'at callWriterLLM (/home/orimoto/projects/pay-muverse-v1-0-1/.next/dev/server/chunks/src_lib_iros_language_0c2cc160._.js:1867:175)',
-  bodyKeys: [ 'max_completion_tokens', 'messages', 'model' ],
-  extraBodyKeys: [],
-  extraBodyRawKeys: [],
-  hasInternalKeys: false
-}
-[IROS/LLM][OK] {
-  callId: '14dc936eee57',
-  purpose: 'writer',
-  model: 'gpt-5.2',
-  ms: 3407,
-  ok: true,
-  usage: {
-    prompt_tokens: 1932,
-    completion_tokens: 150,
-    total_tokens: 2082,
-    prompt_tokens_details: { cached_tokens: 0, audio_tokens: 0 },
-    completion_tokens_details: {
-      reasoning_tokens: 0,
-      audio_tokens: 0,
-      accepted_prediction_tokens: 0,
-      rejected_prediction_tokens: 0
-    }
-  },
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  outLen: 192,
-  outHead: '「物を沼に隠す」って言葉だけが先に立ってる感じがする。現実の作戦としては危なすぎるから、その方向では一緒に進めないね。\n' +
-    '\n' +
-    'でも、その発想が出てくるときって多くの'
-}
-[IROS/FLAGSHIP_GUARD][DEBUG_IN] {
-  rev: 'guard-rev-2026-02-23-a',
-  inputLen: 190,
-  inputHead: '「物を沼に隠す」って言葉だけが先に立ってる感じがする。現実の作戦としては危なすぎるから、その方向では一緒に進めないね。\n' +
-    'でも、その発想が出てくるときって多くの場合、「見つかったら困る」「手元から消したい」「誰にも触れられたくない」みたいな切',
-  slotKeys: [ 'OBS', 'SHIFT', 'NEXT', 'SAFE' ]
-}
-[IROS/FLAGSHIP_GUARD][DEBUG_SCORE] {
-  rev: 'guard-rev-2026-02-23-a',
-  normalLite: true,
-  scaffoldLike: false,
-  len: 190,
-  qCount: 1,
-  qCountMark: 1,
-  cheer: 0,
-  hedge: 0,
-  generic: 1,
-  blandPressure: 1,
-  bulletLike: 0,
-  hasFlagshipSign: false
-}
-[IROS/FLAGSHIP][VERDICT] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  level: 'OK',
-  ok: true,
-  qCount: 1,
-  score: {
-    fatal: 0,
-    warn: 0,
-    qCount: 1,
-    bulletLike: 0,
-    hedge: 0,
-    cheer: 0,
-    generic: 1,
-    runaway: 0,
-    exaggeration: 0,
-    mismatch: 0,
-    retrySame: 0
-  },
-  reasons: [],
-  head: '「物を沼に隠す」って言葉だけが先に立ってる感じがする。現実の作戦としては危なすぎるから、その方向では一緒に進めないね。\n' +
-    'でも、その発想が出てくるときって多くの場合、「見つかったら困る」「手元から消したい」「誰にも触れられたくない」みたいな切迫が背景にある。そこは無視したくない。\n' +
-    'いまのその“隠したいもの”は、実際の物のこと？ それとも、誰かに知られたくない出来事や気持ちのこと。'
-}
-[IROS/rephraseEngine][MIN_OK_KIND] {
-  inputKindNow: 'chat',
-  isMicroOrGreetingNow: false,
-  shortReplyOk: false,
-  MIN_OK_LEN: 40,
-  reason: 'chat_relaxed_40',
-  shiftTextHead: '@SHIFT {"kind":"auto_fill","hint":"flow_continue_minimal"}',
-  shiftObjHasAllow: false,
-  isTConcretize: false,
-  isIdeaBand: false,
-  shiftKind: 'auto_fill'
-}
-[IROS/rephraseEngine][AFTER_ATTACH][EXTRA_TRACE] {
-  traceId: 'curl-trace-test-1',
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  hasExtra: true,
-  blockPlanMode: null,
-  blockPlanBlocksLen: 0,
-  hasRephraseBlocks: true,
-  rephraseBlocksLen: 3,
-  outKeysLen: 4,
-  note: 'FLAGSHIP_OK_NO_RETRY',
-  head: '「物を沼に隠す」って言葉だけが先に立ってる感じがする。現実の作戦としては危なすぎるから、その方向では一緒に進めないね。\n' +
-    'でも、その発想が出てくるときって多くの場'
-}
-[IROS/rephraseAttach][RES_KEYS] {
-  resKeys: [ 'ok', 'slots', 'meta' ],
-  metaKeys: [ 'inKeys', 'outKeys', 'rawLen', 'rawHead', 'note', 'extra' ],
-  hasOut: false,
-  outType: 'undefined',
-  metaHasOut: false,
-  metaOutType: 'undefined',
-  metaExtraKeys: [
-    'scaffoldActive',
-    'flagshipVerdict',
-    'flagshipHead',
-    'blockPlan',
-    'rephraseBlocks',
-    'llmSignals',
-    'rephraseHead'
-  ],
-  metaExtra_hasRephraseHead: true,
-  metaExtra_blocksLen: 3,
-  rawLen: 190,
-  rawHead: '「物を沼に隠す」って言葉だけが先に立ってる感じがする。現実の作戦としては危なすぎるから、その方向では一緒に進めないね。\n' +
-    'でも、その発想が出てくるときって多くの場'
-}
-[IROS/rephraseAttach][OK] {
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  blocksLen: 3,
-  head: '「物を沼に隠す」って言葉だけが先に立ってる感じがする。現実の作戦としては危なすぎるから、その方向では一緒に進めないね。'
-}
-[IROS/renderV2][BEFORE_RENDERGW] {
-  traceId: 'curl-trace-test-1',
-  baseTextLen: 0,
-  sot_rbLen: 3,
-  render_rbLen: 3,
-  sot_head: '「物を沼に隠す」って言葉だけが先に立ってる感じがする。現実の作戦としては危なすぎるから、その方向では一緒に進めないね。',
-  render_head: '「物を沼に隠す」って言葉だけが先に立ってる感じがする。現実の作戦としては危なすぎるから、その方向では一緒に進めないね。'
-}
-[IROS/CONV_EVIDENCE][ENTER] {
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933'
-}
-[IROS/CONV_EVIDENCE] {
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  understand: 0,
-  repair: 0,
-  advance: 1,
-  proof: 1,
-  reason: 'U!:no_ctx_summary | R!:no_repair | A:next_hint:advance_hint',
-  head: 'ping from curl',
-  detail: {
-    branch: null,
-    topicHint: null,
-    q: 'Q3',
-    depth: 'S1',
-    phase: 'Outer',
-    slotsLen: 4
-  }
-}
-[IROS/CONV_EVIDENCE][ATTACH] {
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  meta_has: true,
-  meta_extra_has: true,
-  ctxPack_has: true
-}
-[IROS/renderGateway][RB_CONTENT_DIAG] {
-  rev: 'phase11-open-close-v2-LOADED',
-  rbLen: 3,
-  joinedLen: 190,
-  head1: '「物を沼に隠す」って言葉だけが先に立ってる感じがする。現実の作戦としては危なすぎるから、その方向では一緒に進めないね。',
-  head2: 'でも、その発想が出てくるときって多くの場合、「見つかったら困る」「手元から消したい」「誰にも触れられたくない」みたいな切迫が背景にある。そこは無視したくない。',
-  tail2: 'でも、その発想が出てくるときって多くの場合、「見つかったら困る」「手元から消したい」「誰にも触れられたくない」みたいな切迫が背景にある。そこは無視したくない。',
-  tail1: 'いまのその“隠したいもの”は、実際の物のこと？ それとも、誰かに知られたくない出来事や気持ちのこと。'
-}
-[IROS/renderGateway][LEN_SNAPSHOT] {
-  rev: 'phase11-open-close-v2-LOADED',
-  len_before: 190,
-  head_before: '「物を沼に隠す」って言葉だけが先に立ってる感じがする。現実の作戦としては危なすぎ…'
-}
-[IROS/renderGateway][HAS_REPHRASE_BLOCKS] {
-  rev: 'phase11-open-close-v2-LOADED',
-  rephraseBlocksLen: 3,
-  outLen: 190
-}
-[IROS/renderGateway][OK] {"rev":"phase11-open-close-v2-LOADED","outLen":190,"pickedFrom":"rephraseBlocks","slotPlanPolicy":"FINAL","usedSlots":true,"scaffoldApplied":false,"expandAllowed":true}
+[IROS/renderGateway][OK] {"rev":"phase11-open-close-v2-LOADED","outLen":123,"pickedFrom":"rephraseBlocks","slotPlanPolicy":"FINAL","usedSlots":true,"scaffoldApplied":false,"expandAllowed":true}
 [IROS/renderGateway][REV] {"rev":"phase11-open-close-v2-LOADED"}
 [IROS/STYLE_NORM_FINAL] {
   applied: true,
@@ -5299,71 +1924,88 @@
     maxReplacements: 0,
     dictSize: 19
   },
-  len_in: 190,
-  len_out: 190
+  len_in: 123,
+  len_out: 123
 }
 [IROS/PERSIST_PICK] {
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
   userCode: '669933',
   pickedFrom: 'uiResultContent',
-  pickedLen: 190,
-  pickedHead: '「物を沼に隠す」って言葉だけが先に立ってる感じがする。現実の作戦としては危なすぎ',
-  fromResultObjLen: 190,
-  blocksJoinedCleanedLen: 190,
-  resolvedUiTextLen: 190,
-  userEchoLen: 14,
+  pickedLen: 123,
+  pickedHead: 'ことばが出ない時間も、そのままで大丈夫。\nいまは「逆行」の定義を決め直すより、体',
+  fromResultObjLen: 123,
+  blocksJoinedCleanedLen: 123,
+  resolvedUiTextLen: 123,
+  userEchoLen: 4,
   isPickedDots: false
-}
-[IROS/persistAssistantMessageToIrosMessages] insert error {
-  conversationUuid: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  error: {
-    code: '23505',
-    details: 'Key (conversation_id, role, trace_id)=(6138033b-a88f-4786-969a-19d1acc5e064, assistant, curl-trace-test-1) already exists.',
-    hint: null,
-    message: 'duplicate key value violates unique constraint "iros_messages_uniq_trace_user"'
-  }
 }
 [IROS/persistAssistant] done {
   conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
   userCode: '669933',
-  ms: 92,
-  ok: false,
-  inserted: false,
+  ms: 121,
+  ok: true,
+  inserted: true,
   blocked: false,
-  reason: 'DB_ERROR'
-}
-[IROS/persistAssistantMessageToIrosMessages] insert error {
-  conversationId: '6138033b-a88f-4786-969a-19d1acc5e064',
-  userCode: '669933',
-  persistStrict: false,
-  timeoutMs: null,
-  isTimeout: false,
-  error: {
-    code: '23505',
-    details: 'Key (conversation_id, role, trace_id)=(6138033b-a88f-4786-969a-19d1acc5e064, assistant, curl-trace-test-1) already exists.',
-    hint: null,
-    message: 'duplicate key value violates unique constraint "iros_messages_uniq_trace_user"'
-  }
+  reason: null
 }
 [IROS][Training] computed targetKind = stabilize
 [IROS][Training] insert sample {
   user_code: '669933',
   conversation_id: '6138033b-a88f-4786-969a-19d1acc5e064',
   message_id: null,
-  input_text: 'ping from curl',
+  input_text: 'ping',
   analysis_text: 'Q:Q3 / D:S1 / P:Outer / K:stabilize / T:その他・ライフ全般',
   q_code: 'Q3',
   depth_stage: 'S1',
   phase: 'Outer',
   self_acceptance: 0.6692499999999996,
-  situation_summary: 'ping from curl',
+  situation_summary: 'ping',
   situation_topic: 'その他・ライフ全般',
   target_kind: 'stabilize',
   target_label: null,
   y_level: 1,
   h_level: 2
 }
- POST /api/agent/iros/reply 200 in 10.3s (compile: 2ms, render: 10.3s)
-[IROS][Training] insert ok (non-blocking) { ms: 192 }
- POST /api/register-push 200 in 123ms (compile: 1965µs, render: 121ms)
+ POST /api/agent/iros/reply 200 in 7.2s (compile: 828ms, render: 6.3s)
+[IROS][Training] insert ok (non-blocking) { ms: 231 }
+[firebase] DEBUG_LOCAL=1 → Firebase SDK log level set to "debug"
+ GET /iros-ai?cid=6138033b-a88f-4786-969a-19d1acc5e064&agent=iros 200 in 2.4s (compile: 2.1s, render: 315ms)
+ POST /api/telemetry 204 in 169ms (compile: 163ms, render: 6ms)
+[authz] 08c166c1-2c98-4c9b-bbb4-b04a48e95c4b start { path: 'http://localhost:3000/api/agent/iros/userinfo' }
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] 519aa646-cc32-49c4-bdc8-e1a13803cfe5 start { path: 'http://localhost:3000/api/q/unified?user_code=669933' }
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] 08c166c1-2c98-4c9b-bbb4-b04a48e95c4b verify firebase: 390.551ms
+ POST /api/register-push 200 in 586ms (compile: 112ms, render: 474ms)
+ POST /api/register-push 200 in 362ms (compile: 1626µs, render: 360ms)
+[authz] 519aa646-cc32-49c4-bdc8-e1a13803cfe5 verify firebase: 292.671ms
+[authz] 08c166c1-2c98-4c9b-bbb4-b04a48e95c4b fetch user: 90.063ms
+[authz] 08c166c1-2c98-4c9b-bbb4-b04a48e95c4b ok { user: '669933', role: 'admin', provider: 'password', ms: 484 }
+[IROS/UserInfo] authz = {
+  ok: true,
+  allowed: true,
+  status: 200,
+  pgJwt: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njk5MzMiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInVzZXJfY29kZSI6IjY2OTkzMyIsImZpcmViYXNlX3VpZCI6Ikt2UDFQNHNpZnRTRUZkTGtka1lqcVY0aE12MDIiLCJleHAiOjE3NzI2OTc3MjksImlhdCI6MTc3MjY5NjgyOX0.kbxl7i8yxZ06tCH9t2iKIuqXTpwIa84PjbdUYxKJruM',
+  userCode: '669933',
+  role: 'admin',
+  user: { uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02', user_code: '669933' },
+  uid: 'KvP1P4siftSEFdLkdkYjqV4hMv02'
+}
+ GET /api/agent/iros/userinfo 200 in 698ms (compile: 164ms, render: 534ms)
+[authz] 519aa646-cc32-49c4-bdc8-e1a13803cfe5 fetch user: 72.069ms
+[authz] 519aa646-cc32-49c4-bdc8-e1a13803cfe5 ok { user: '669933', role: 'admin', provider: 'password', ms: 366 }
+[authz] f470f446-80f7-4267-8c58-b44fe3c07ca9 start { path: 'http://localhost:3000/api/agent/iros/conversations' }
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] f470f446-80f7-4267-8c58-b44fe3c07ca9 verify firebase: 242.488ms
+[authz] f470f446-80f7-4267-8c58-b44fe3c07ca9 fetch user: 53.77ms
+[authz] f470f446-80f7-4267-8c58-b44fe3c07ca9 ok { user: '669933', role: 'admin', provider: 'password', ms: 299 }
+ GET /api/agent/iros/conversations 200 in 471ms (compile: 106ms, render: 365ms)
+[authz] b8a5dfa7-1692-4d1a-944e-0e52d4aca0ba start {
+  path: 'http://localhost:3000/api/agent/iros/messages?conversation_id=6138033b-a88f-4786-969a-19d1acc5e064'
+}
+[authz][debug] header { authzLen: 924, authzHead: 'Bearer eyJhbGciOiJSUzI1N' }
+[authz] b8a5dfa7-1692-4d1a-944e-0e52d4aca0ba verify firebase: 237.909ms
+[authz] b8a5dfa7-1692-4d1a-944e-0e52d4aca0ba fetch user: 55.657ms
+[authz] b8a5dfa7-1692-4d1a-944e-0e52d4aca0ba ok { user: '669933', role: 'admin', provider: 'password', ms: 299 }
+ GET /api/agent/iros/messages?conversation_id=6138033b-a88f-4786-969a-19d1acc5e064 200 in 813ms (compile: 104ms, render: 709ms)
+ GET /api/q/unified?user_code=669933 200 in 5.7s (compile: 106ms, render: 5.6s)

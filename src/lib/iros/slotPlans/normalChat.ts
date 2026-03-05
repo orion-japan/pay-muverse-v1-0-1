@@ -296,8 +296,13 @@ function buildClarify(
       style: 'neutral',
       content: m('SHIFT', {
         kind: isT ? 't_concretize' : 'clarify',
-        intent: isT ? 'implement_next_step' : 'answer_the_question',
-        contract: pickRandom(isT ? contractsT : contractsClarify),
+
+        // ✅ clarify は「質問に答える」より「意味に答える」を優先
+        intent: isT ? 'implement_next_step' : 'answer_user_meaning',
+
+        // ✅ contract を弱める：clarify の “硬い先頭候補” を外す
+        contract: pickRandom(isT ? contractsT : contractsClarify.slice(1)),
+
         rules: {
           ...(shiftPreset?.rules ?? {}),
           answer_user_meaning: true,

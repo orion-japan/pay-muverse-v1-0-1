@@ -224,28 +224,50 @@ function buildSeedText(args: {
   ].filter(Boolean);
 
   const lines: string[] = [];
+
   lines.push('CARD_SEED_V1 (DO NOT OUTPUT)');
+
+  // --- legend（タグの意味は短く・一回でOK）---
+  lines.push('LEGEND:');
+  lines.push('- phase: 内向き/外向きの重心（Inner/Outer）');
+  lines.push('- sa/yuragi/yohaku: 語調の補助。値自体を説明しない（トーン調整のみ）。');
+  lines.push('- CURRENT は「いま起きている状態」。FUTURE は「次の角度」（予言禁止）。');
+
   if (ctxParts.length) lines.push(`META: ${ctxParts.join(' / ')}`);
 
+  // --- HUMAN_STATE（ここが“なんでわかるの？”の核）---
+  lines.push('');
+  lines.push('HUMAN_STATE (DO NOT OUTPUT):');
+  if (args.currentCard) {
+    // “指示”じゃなく “配慮文”
+    lines.push('- この人はいま、次の状態にいる。まずここに接続して返すこと。');
+    lines.push(`- ${args.currentCard.text}`);
+  } else {
+    lines.push('- この人はいまの状態が未観測（カード条件不足）。推測で断定しない。');
+    lines.push(`- missing=${args.missing.join(',') || 'none'}`);
+  }
+
+  // --- CARD（機械タグも残す：デバッグ＆再現性）---
   lines.push('');
   lines.push('CURRENT_CARD:');
   if (args.currentCard) {
     lines.push(`- id=${args.currentCard.id} / src=${args.currentCard.source}`);
-    lines.push(`- ${args.currentCard.text}`);
   } else {
     lines.push(`- (null) missing=${args.missing.join(',') || 'none'}`);
   }
 
   lines.push('');
-  lines.push('FUTURE_CARD_RANDOM_CANDIDATE:');
+  lines.push('FUTURE_CARD_CANDIDATE:');
   lines.push(`- id=${args.futureCard.id} / src=random`);
   lines.push(`- ${args.futureCard.text}`);
 
+  // --- RESPONSE_GUIDE（雑談なら強めに効かせる）---
   lines.push('');
-  lines.push('RULES:');
-  lines.push('- future は確定ではない（ランダム候補）。予測として扱わない。');
-  lines.push('- 応答は現状（CURRENT）優先。future は“次の角度”として添えるだけ。');
-  lines.push('- カードIDや辞書本文を改変せず、短く自然な言葉で返す。');
+  lines.push('RESPONSE_GUIDE (DO NOT OUTPUT):');
+  lines.push('- 返答は「現状（HUMAN_STATE）」優先。まず安心の足場を1〜2文。');
+  lines.push('- 次に、短い“次の角度”を1文だけ添える（FUTUREは断定しない）。');
+  lines.push('- 雑談寄り（chat）のときは HUMAN_STATE を強めに反映してよい。');
+  lines.push('- ただしカード本文の言い換えはOK。意味の改変・予言化は禁止。');
 
   return lines.join('\n').trim();
 }
@@ -307,18 +329,16 @@ export function buildCardEngineResult(input: BuildCardEngineInput): CardEngineRe
     };
   }
 
-  // ---- future (stabilized) ----
+  // ---- future (random: “ランダムが最強”) ----
   // 目的:
-  // - 未来カードの「候補」概念は残す
-  // - ただし INTERNAL PACK を毎回揺らさない（検証不能になるため）
-  // 方針:
-  // - currentCard が取れているなら future は current を踏襲（揺れゼロ）
-  // - currentCard が無い/欠けている場合だけ pool から pick（従来互換）
+  // - 未来カードは「常にランダム」（現在に寄せない）
+  // - 2枚目は “予言” ではなく「次の角度」を開くカード
+  // - 再現性が必要な場合は rng を注入して固定できる
 
   const stagePool =
     Array.isArray(input.futureStagePool) && input.futureStagePool.length > 0
       ? input.futureStagePool
-      : [...STAGES_FUTURE_DEFAULT];
+      : [...STAGES_FUTURE_DEFAULT]; // S1..I3（T除外）
 
   const ePool =
     Array.isArray(input.futureETurnPool) && input.futureETurnPool.length > 0
@@ -330,14 +350,15 @@ export function buildCardEngineResult(input: BuildCardEngineInput): CardEngineRe
       ? input.futurePolarityPool
       : [...POLARITIES];
 
-  const fe = currentCard?.e_turn ?? pickOne(ePool, rng);
-  const fs = currentCard?.depthStage ?? pickOne(stagePool, rng);
-  const fp = currentCard?.polarity ?? pickOne(pPool, rng);
+  // ✅ 常にランダム（currentCard を考慮しない）
+  const fe = pickOne(ePool, rng);
+  const fs = pickOne(stagePool, rng);
+  const fp = pickOne(pPool, rng);
 
   const futureLooked = input.lookupText({ depthStage: fs, e_turn: fe, polarity: fp, sa });
+
   const futureCard: CardPick = {
-    // NOTE: 型互換のため source は既存値を維持（ただし中身は current 踏襲で安定）
-    source: currentCard ? 'random' : 'random',
+    source: 'random',
     id: futureLooked.id,
     depthStage: fs,
     e_turn: fe,
@@ -345,9 +366,8 @@ export function buildCardEngineResult(input: BuildCardEngineInput): CardEngineRe
     text: futureLooked.text,
     fromDict: futureLooked.fromDict,
     confidence,
-    basedOn: currentCard ? 'future_from_current' : 'future_pool_pick',
+    basedOn: 'future_pool_pick',
   };
-
   const context = {
     phase: current.phase ?? null,
     sa,

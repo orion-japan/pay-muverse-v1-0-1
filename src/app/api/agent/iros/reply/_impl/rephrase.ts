@@ -1036,12 +1036,15 @@ try {
   const curLen = Array.isArray(curHfw) ? curHfw.length : 0;
 
   // 2) もし historyForWriter が空なら ctxPack.turns から “互換形” を作る
-  //    - assistant は本文OK / user は伏せる（役割だけ残す）
+  //    - assistant / user ともに本文を通す（長文化はトリムで抑える）
   const turnsRaw =
     (userContext as any)?.ctxPack?.turns ??
     (meta as any)?.extra?.ctxPack?.turns ??
     (extraMerged as any)?.ctxPack?.turns ??
     null;
+
+  const normText = (s: any) => String(s ?? '').replace(/\r\n/g, '\n').trim();
+  const trimLite = (s: string, max = 260) => (s.length > max ? `${s.slice(0, max)}…` : s);
 
   let hfwFromTurns: any[] | null = null;
   if ((!Array.isArray(hfwRaw) || hfwRaw.length === 0) && Array.isArray(turnsRaw) && turnsRaw.length > 0) {
@@ -1050,11 +1053,12 @@ try {
         const role = t?.role === 'assistant' ? 'assistant' : t?.role === 'user' ? 'user' : null;
         if (!role) return null;
 
-        if (role === 'user') return { role: 'user', content: '[USER]' };
+        const raw = normText(t?.content ?? t?.text ?? '');
+        if (!raw) return null;
 
-        const content = String(t?.content ?? t?.text ?? '').trim();
-        if (!content) return null;
-        return { role: 'assistant', content };
+        // ✅ user も伏せない（ただし長文化は防ぐ）
+        const content = trimLite(raw, 260);
+        return { role, content };
       })
       .filter(Boolean);
   }
@@ -1067,17 +1071,17 @@ try {
   if (Array.isArray(hfwEffective) && hfwEffective.length > 0 && (!Array.isArray(curHfw) || curLen === 0)) {
     (userContext.ctxPack as any).historyForWriter = hfwEffective;
 
-    // rephraseEngine 優先口：turnsForWriter をここで必ず作る（user生文は禁止）
+    // rephraseEngine 優先口：turnsForWriter をここで必ず作る（user生文も通す）
     (userContext as any).turnsForWriter = hfwEffective
       .map((t: any) => {
         const role = t?.role === 'assistant' ? 'assistant' : t?.role === 'user' ? 'user' : null;
         if (!role) return null;
 
-        if (role === 'user') return { role: 'user', content: '[USER]' };
+        const raw = normText(t?.content ?? t?.text ?? '');
+        if (!raw) return null;
 
-        const content = String(t?.content ?? '').trim();
-        if (!content) return null;
-        return { role: 'assistant', content };
+        const content = trimLite(raw, 260);
+        return { role, content };
       })
       .filter(Boolean);
   }
